@@ -52,7 +52,8 @@
 // setter 注入（imagePopup 的 setImagePopupContext 形态；syncController
 // mount 注入、dispose 清空）。
 import type { ImageResultPayload } from './imageResource'
-import { RefContentInstance, refLoadedContentOfResult, type RefContentMount, type RefLoadedContent } from './refContentInstance'
+import { RefContentInstance, refLoadedContentOfResult, type RefContentMount, type RefLoadedContent, type RefLoadedTextContent } from './refContentInstance'
+import { classifyLocalRefContentKind } from '../shared/refContent'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
@@ -183,6 +184,26 @@ export function hoverPopupSpecOfAnchor(anchor: HTMLElement): HoverPopupTargetSpe
   }
 }
 
+/**
+ * #340（P3-08）text 悬停目标预判：按目标原文的扩展名本地分类（直接目标
+ * 按 fsPath）。无扩展名（含空 path 本文件锚点）按补 .md 意图预判
+ * markdown。仅用于浮层形态选择（chrome 显隐/内容视图），不作为读取与
+ * 授权的类型依据——权威类型是宿主回包 contentKind。
+ */
+function isTextHoverTarget(spec: HoverPopupTargetSpec): boolean {
+  const raw = spec.directFsPath ?? spec.linkHref ?? spec.target
+  if (raw === '') {
+    return false
+  }
+  const pathPart = raw.split('#')[0].split('?')[0]
+  const dot = pathPart.lastIndexOf('.')
+  const slash = Math.max(pathPart.lastIndexOf('/'), pathPart.lastIndexOf('\\'))
+  if (dot <= slash) {
+    return false // 无扩展名：补 .md 意图（markdown）
+  }
+  return classifyLocalRefContentKind(pathPart) === 'text'
+}
+
 /** 出站上下文（syncController mount 注入；dispose 清空） */
 export interface HoverPreviewContext {
   /** 会话身份（init 前为 undefined——此时不开浮层） */
@@ -201,7 +222,7 @@ export interface HoverPreviewContext {
   /** #245 复用正文卡片管理器升级浮层内子引用，不创建第二个浮窗。 */
   mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent): void
   unmountEmbedChild?(block: HTMLElement): void
-  admitRootContent?(instanceId: string, target: RefLoadedContent, bytes: number): boolean
+  admitRootContent?(instanceId: string, target: RefLoadedContent | RefLoadedTextContent, bytes: number): boolean
   clearRootContent?(instanceId: string): void
   releaseRootContent?(instanceId: string): void
   /** P2-06（#283）浮窗根引用的内部 Live 宿主（EmbedCardManager 挂载）：
@@ -696,11 +717,17 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
       ctx.mountEmbedChild?.(embedParentIdentity, block, target),
     onEmbedBlockUnmounted: (block: HTMLElement) => ctx.unmountEmbedChild?.(block),
   }
+  // #340（P3-08）text 目标预判（扩展名本地分类）：非权威——权威类型由
+  // 回包 contentKind 决定，预判只决定「浮层是否接内部 Live 根会话」：
+  // text 为只读内容（无内部 Live 编辑端口、不获得写端口），保持纯
+  // Reading 形态。无扩展名目标按补 .md 意图预判 markdown（宿主候选探测
+  // 不含其他扩展名，预判与权威分类一致）
+  const textTarget = isTextHoverTarget(spec)
   // P2-06 浮窗根引用宿主接入：entry 按引用位置语义键驻留管理器状态库
   // （跨开合记忆模式/选区/滚动/fm）；Reading 挂载经 entry.content（同一
   // RefContentInstance）。上下文未提供（纯 Reading 形态）时回落自建实例
   const rootKey = hoverRootKey(spec)
-  const mounted = ctx.mountPopupRoot?.({
+  const mounted = textTarget ? null : ctx.mountPopupRoot?.({
     key: rootKey,
     inner: spec.target,
     sourceStart: spec.sourceStart,
@@ -1108,7 +1135,7 @@ export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
  *  #333（P3-01）：loaded 由 refLoadedContentOfResult 类型化转换产出
  *  （contentKind 分派——markdown 通道；非 markdown 载荷在转换处被拒，
  *  不进入本应用路径，refEdit 写端口结构上不可达）。 */
-function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreviewResult, { ok: true }>, loaded: RefLoadedContent): void {
+function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreviewResult, { ok: true }>, loaded: RefLoadedContent | RefLoadedTextContent): void {
   const keepScroll = state.scrollEl.scrollTop // #224 刷新前保存（首载为 0）
   state.scope = message.scope.kind
   state.targetFsPath = message.target.fsPath
@@ -1240,10 +1267,44 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
     applyHoverContent(popup, message, loaded)
   } else {
     // #221 目标原文取 state（三入口同源——面板条目/Live 装饰无 href 属性）
-    applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor))
+    applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor, message.anchorDetail))
   }
   position(popup)
   return true
+}
+
+/**
+ * #340（P3-08）文本 token 分层推送路由（syncController handleHostMessage
+ * 转发）：作用于在场浮层的内容挂载（instanceId 配对 + 版本仲裁在
+ * applyTextTokens——迟到/过期 token 不覆盖新正文）。不匹配在场浮层返回
+ * false（消息非本浮层消费）。
+ */
+export function notifyHoverTokens(message: {
+  instanceId: string
+  reqId: number
+  ok: boolean
+  layer?: 'textmate' | 'semantic'
+  version?: number
+  colors?: string[]
+  tokens?: number[]
+}): boolean {
+  if (!popup || message.instanceId !== popup.watchInstanceId) {
+    return false
+  }
+  return popup.content.applyTextTokens(message)
+}
+
+/**
+ * #340（P3-08）外观代次广播路由（appearance.changed——主题/颜色自定义/
+ * 语言字体设置/扩展清单变化）：在场浮层为 text 内容时静默重载（正文载荷
+ * 含语言级字体、token 随 render 重取；generation 单调，仅观测）。Markdown
+ * 浮层忽略（CSS 变量自带跟随）。
+ */
+export function notifyAppearanceChanged(): void {
+  if (!popup || popup.display !== 'content' || popup.content.isTextContent !== true) {
+    return
+  }
+  requestReload(popup, true)
 }
 
 /** 订阅容量／来源校验失败时，立即撤掉不能再获得失效推送的正文。

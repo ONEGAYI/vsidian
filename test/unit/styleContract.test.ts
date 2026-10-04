@@ -384,7 +384,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'context-menu': 1,
   backlinks: 4,
   outlinks: 2,
-  'hover-preview': 2,
+  'hover-preview': 3,
   'find-panel': 6,
   loading: 3,
   tooltip: 11,
