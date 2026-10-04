@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import * as path from 'node:path'
 import {
+  PDF_HOVER_MAX_BYTES,
   flattenHoverReadOutcome,
   readHoverDocTarget,
   readHoverDirectTarget,
@@ -860,6 +861,23 @@ describe('#337 PDF 分派：双链 #page 解析与文件资源载荷', () => {
     ]))
     expect(await readRefContentTarget({ target: '资料.pdf' }, broken.ctx, broken.ports))
       .toEqual({ ok: false, reason: 'read-failed' })
+  })
+
+  it('大小门（review 修复）：stat 字节超 PDF_HOVER_MAX_BYTES → file-too-large；未超限放行', async () => {
+    // 悬停浮层与嵌入卡同经 readPdfContent 读取点，一并受门（预期行为）；
+    // 复用既有 file-too-large 分态与文案，不新增 i18n 键
+    const huge = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'ok', uri: 'https://vscode-cdn.net/资料.pdf?v=3', version: 3, bytes: PDF_HOVER_MAX_BYTES + 1 }],
+    ]))
+    expect(await readRefContentTarget({ target: '资料.pdf' }, huge.ctx, huge.ports))
+      .toEqual({ ok: false, reason: 'file-too-large' })
+
+    // 边界值（恰好上限）放行：判定为严格大于
+    const boundary = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'ok', uri: 'https://vscode-cdn.net/资料.pdf?v=3', version: 3, bytes: PDF_HOVER_MAX_BYTES }],
+    ]))
+    const out = await readRefContentTarget({ target: '资料.pdf' }, boundary.ctx, boundary.ports)
+    expect(out.ok).toBe(true)
   })
 
   it('旧扁平入口对 pdf 载荷的兼容适配：flatten 收敛为 non-markdown（Markdown 消费端不接收 PDF）', async () => {

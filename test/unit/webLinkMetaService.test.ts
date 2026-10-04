@@ -76,6 +76,15 @@ beforeAll(async () => {
     } else if (url === '/redirect-private') {
       res.writeHead(302, { location: 'http://192.168.13.37/inner' })
       res.end()
+    } else if (url === '/redirect-badloc') {
+      // 畸形 Location（URL 构造同步抛 TypeError 的形态）
+      res.writeHead(302, { location: 'http://[' })
+      res.end()
+    } else if (url === '/partial-hang') {
+      // 响应头 + 部分正文后挂起：aborted 分态样本（超时中止发生在流式中）
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.write('<html><head><title>part')
+      // 不 end：等待客户端超时中止
     } else if (url === '/redirect-creds') {
       res.writeHead(302, { location: `http://user:pw@127.0.0.1:${(res.socket as { localPort: number }).localPort}/html` })
       res.end()
@@ -215,6 +224,22 @@ describe('WebLinkMetaService 网络边界', () => {
     const service = makeService({ timeoutMs: 200 })
     const outcome = await service.fetch(url('/hang?t=1'))
     expect(outcome).toEqual({ ok: false, reason: 'web-timeout' })
+  })
+
+  it('流式中止的分态：响应头已到、正文挂起超时按 web-timeout（aborted 不误标 web-too-large）', async () => {
+    // review 修复：aborted 处理器曾无条件 finish web-too-large——正文
+    // 流式期间超时中止的响应不再被误标为超限
+    const service = makeService({ timeoutMs: 200 })
+    const outcome = await service.fetch(url('/partial-hang'))
+    expect(outcome).toEqual({ ok: false, reason: 'web-timeout' })
+  })
+
+  it('畸形重定向 Location（http://[）按 web-redirects 失败（不悬置至超时）', async () => {
+    // review 修复：new URL(location, url) 曾在响应回调内裸调，畸形值同步
+    // 抛 TypeError 逸出为进程级异常，该次抓取悬置至 8s 超时误报 web-timeout
+    const service = makeService({ timeoutMs: 8_000 })
+    const outcome = await service.fetch(url('/redirect-badloc'))
+    expect(outcome).toEqual({ ok: false, reason: 'web-redirects' })
   })
 
   it('非 HTML：text/plain 按 web-not-html 失败', async () => {

@@ -1245,6 +1245,11 @@ export class DocumentSession {
               range: { start: 0, end: 0 },
               scope: { kind: 'full' },
             })
+            // web 无租约、无内容挂载，webview 侧 web 浮层也不 watch——
+            // 失败分支与 unwatch/source.release 的释放路径全部不可达，
+            // 出站即就地释放读取预留（review 修复：防重复外链悬停后面板
+            // 实例预算耗尽，64 次开-关后新悬停一律 budget 拒绝）
+            if (occurrenceId !== undefined) panel.expansionBudget.release(occurrenceId)
             return
           }
           // 窄化：web 已出站返回，此后成功结果为 markdown / image / pdf /

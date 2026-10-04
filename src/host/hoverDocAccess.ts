@@ -403,6 +403,12 @@ async function resolveHoverTargetForm(
   return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfWikilink(parsed), formKind: 'wikilink' }
 }
 
+/** PDF 悬停/嵌入读取的运行保护上限（review 修复）：PDF 载荷按源文件
+ *  字节全量进 webview（webview 按需 fetch 渲染），数百 MB 尖峰会整文件
+ *  灌入内存——stat 得字节后超限就地拒绝（file-too-large，复用既有文案）。
+ *  防御性运行保护而非产品参数，量级可按用户意见调整 */
+export const PDF_HOVER_MAX_BYTES = 64 * 1024 * 1024
+
 /**
  * 读取 PDF 目标的文件资源与导航选择器（类型分派的 pdf 通道——调用前
  * 类型已判定为 pdf，#337 / P3-05）：**锚点语法双链限定**——
@@ -443,6 +449,11 @@ async function readPdfContent(
   if (resource.kind === 'inaccessible') {
     // 权限/断连等不可访问：不冒充文件删除
     return { ok: false, reason: 'read-failed' }
+  }
+  // 大小门（review 修复）：悬停浮层与嵌入卡同经此读取点，一并受门——
+  // stat 字节超上限不进入载荷（file-too-large 就地分态，不新增文案）
+  if (resource.bytes > PDF_HOVER_MAX_BYTES) {
+    return { ok: false, reason: 'file-too-large' }
   }
   return {
     ok: true,

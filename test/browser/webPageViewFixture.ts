@@ -8,7 +8,7 @@ import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/sync
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { isHostToWebview } from '../../src/shared/protocol'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
-import { isUntrustedMessageSource } from '../../src/webview/untrustedFrame'
+import { isTrustedHostMessageSource } from '../../src/webview/untrustedFrame'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
@@ -30,10 +30,11 @@ const bridge: VsCodeBridge = {
 const controller = new WebviewSyncController(bridge)
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
 
-// main.ts 同款守卫：来源为在场原网页 iframe 的 message 一律丢弃（恶意
-// 子页 postMessage 注入伪造宿主消息的隔离防线——与生产入口逐字同构）
+// main.ts 同款守卫：允许清单——来源非真宿主桥（fixture 顶层页
+// parent === window）的 message 一律丢弃（恶意子页 postMessage 注入
+// 伪造宿主消息的隔离防线——与生产入口同构）
 window.addEventListener('message', (event) => {
-  if (isUntrustedMessageSource(event.source)) {
+  if (!isTrustedHostMessageSource(event.source, event.origin)) {
     window.__webPageHostileDropped = (window.__webPageHostileDropped ?? 0) + 1
     return
   }

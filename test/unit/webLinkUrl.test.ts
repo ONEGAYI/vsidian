@@ -110,6 +110,28 @@ describe('checkWebLinkUrl（宿主侧准入）', () => {
     expect(isAllowedInetAddress('2606:4700::1111')).toBe(true)
   })
 
+  it('IPv4 映射 IPv6 合法公网形态放行（review 修复：v4OfLow 字节序）', () => {
+    // 旧实现还原为 "0.8.8.8"，全部映射形态被 a===0 误拒
+    expect(isAllowedInetAddress('::ffff:8.8.8.8')).toBe(true)
+    expect(isAllowedInetAddress('::ffff:1.1.1.1')).toBe(true)
+  })
+
+  it.each([
+    '::ffff:192.168.1.1', '::ffff:127.0.0.1', '::ffff:10.0.0.1',
+  ])('IPv4 映射私网形态 %s 仍拒绝', (ip) => {
+    expect(isAllowedInetAddress(ip)).toBe(false)
+  })
+
+  it('NAT64 前缀覆盖（review 修复）：64:ff9b 内嵌 v4 按 v4 矩阵判', () => {
+    // 内嵌 8.8.8.8 放行（v4OfLow 修复后不再错位为 0.8.8.8 误拒）
+    expect(isAllowedInetAddress('64:ff9b::808:808')).toBe(true)
+    // 内嵌 127.0.0.1 拒绝（NAT64 网关可能翻译为私网目标）
+    expect(isAllowedInetAddress('64:ff9b::7f00:1')).toBe(false)
+    // 64:ff9b:1::/48 本地网络前缀整段拒绝（低 32 位即便内嵌公网形态也拒）
+    expect(isAllowedInetAddress('64:ff9b:1::1')).toBe(false)
+    expect(isAllowedInetAddress('64:ff9b:1::808:808')).toBe(false)
+  })
+
   it('非 IP 字符串按非法处理（防御）', () => {
     expect(isAllowedInetAddress('example.com')).toBe(false)
     expect(isAllowedInetAddress('')).toBe(false)

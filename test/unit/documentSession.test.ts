@@ -481,6 +481,43 @@ describe('#244 宿主直接父来源与当前路径', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(out.find((m) => m.kind === 'hover.result' && m.reqId === 2)).toMatchObject({ ok: true })
   })
+
+  it('#342 web 成功出站就地释放 occurrence 预留（重复外链悬停不耗尽面板实例预算）', async () => {
+    // review 修复：web 成功分支出站后提前 return，曾跳过租约/attachContent/
+    // unwatch 等全部释放路径——每次外链悬停滞留一个面板实例预留，64 次
+    // 开-关后新悬停一律 budget 拒绝。出站即 release 后，独立 occurrence
+    // 反复悬停不占用面板实例预算
+    const session = new DocumentSession(new FakeDoc('![[B]]'),
+      { docUri: DOC_URI, rootFsPath: 'D:\\notes\\a.md', isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        report({
+          ok: true,
+          fsPath: '',
+          relPath: '',
+          content: {
+            kind: 'web',
+            url: 'https://example.com/a',
+            domain: 'example.com',
+            title: 'A',
+            description: 'd',
+          },
+        })
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    // 面板实例上限 64：80 次独立 occurrence 全部成功 = 无预留滞留
+    //（修复前第 65 次起 budget 拒绝）
+    for (let i = 1; i <= 80; i++) {
+      await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+        reqId: i, instanceId: `hover-${i}`, occurrenceId: `web-occ-${i}`,
+        sourceStart: 0, sourceEnd: 6, target: 'https://example.com/a' }, id)
+      expect(out.at(-1), `第 ${i} 次外链悬停不应被预算拒绝`)
+        .toMatchObject({ kind: 'hover.result', ok: true, contentKind: 'web' })
+    }
+  })
 })
 
 describe('ready 即语言校准（#96 R1：每次 ready 幂等补发 locale.changed）', () => {

@@ -187,7 +187,8 @@ function isAllowedIpv4(ip: string): boolean {
 }
 
 /** IPv6 展开（BigInt 前缀比较）：回环/未指定/ULA/链路本地/组播拒绝，
- *  ::ffff:0:0/96 映射地址展开内嵌 IPv4 后按 v4 矩阵判 */
+ *  ::ffff:0:0/96 映射地址展开内嵌 IPv4 后按 v4 矩阵判；NAT64 前缀
+ *  （64:ff9b::）内嵌 IPv4 同走 v4 矩阵、64:ff9b:1::/48 本地段整段拒绝 */
 function isAllowedIpv6(ip: string): boolean {
   const expanded = expandIpv6(ip)
   if (expanded === null) {
@@ -202,6 +203,13 @@ function isAllowedIpv6(ip: string): boolean {
     // ::ffff:a.b.c.d 映射：内嵌 IPv4 走 v4 矩阵（映射本身不是合法连接目标）
     return isAllowedIpv4(v4OfLow(lo))
   }
+  // NAT64（review 修复）：64:ff9b:1::/48 本地网络前缀整段拒绝；其余
+  // 64:ff9b::/32（含 Well-Known /96）低 32 位按内嵌 IPv4 走 v4 矩阵——
+  // NAT64 网关可能把内嵌地址翻译为私网目标，不能按普通公网单播放行。
+  // /48 判定必须先于 /32：64:ff9b:1::8.8.8.8 的低 32 位是合法公网形态，
+  // 若先走 v4 矩阵会被误放行
+  if ((hi >> 16n) === 0x0064ff9b0001n) return false
+  if ((hi >> 32n) === 0x0064ff9bn) return isAllowedIpv4(v4OfLow(lo))
   if (top16 >= 0xfc00n && top16 <= 0xfdffn) return false // fc00::/7（ULA）
   if (top16 >= 0xfe80n && top16 <= 0xfebfn) return false // fe80::/10 链路本地
   if (top16 >= 0xff00n) return false // ff00::/8 组播
@@ -266,11 +274,11 @@ function expandIpv6(ip: string): bigint | null {
   return value
 }
 
-/** ::ffff:a.b.c.d 低 64 位还原 IPv4 文本 */
+/** ::ffff:a.b.c.d（或 NAT64 内嵌）低 32 位还原 IPv4 文本：低 32 位按
+ *  网络序四次移位取八位组（review 修复：旧实现 third 取首八位组后再
+ *  >>8 恒 0，::ffff:8.8.8.8 曾被还原为 "0.8.8.8" 而遭 a===0 误拒） */
 function v4OfLow(lo: bigint): string {
-  const third = Number((lo >> 24n) & 0xffn)
-  const fourth = Number(lo & 0xffffffn)
-  return `${third >> 8}.${third & 0xff}.${fourth >> 16}.${fourth & 0xff}`
+  return `${(lo >> 24n) & 0xffn}.${(lo >> 16n) & 0xffn}.${(lo >> 8n) & 0xffn}.${lo & 0xffn}`
 }
 
 /** 宿主侧 URL 准入结果：ok 携带归一 URL（缓存键与连接地址同源）；拒绝

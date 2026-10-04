@@ -1328,8 +1328,8 @@ export function closeHoverPopup(): void {
   if (state.display === 'loading') {
     sendHoverCancel(state)
   }
-  // #343（P3-11）原网页视图销毁：iframe 移除即中止在途装载并退出消息
-  // 来源否定判定（untrustedFrame 按在场元素比对，无独立注册）
+  // #343（P3-11）原网页视图销毁：iframe 移除即中止在途装载（消息来源
+  // 准入是允许清单，不依赖在场元素，移除不改变判定）
   teardownWebView(state)
   if (state.root) {
     state.root.close()
@@ -1501,8 +1501,8 @@ function armJointDomainRecheck(state: HoverPopupState): void {
   state.cleanups.push(cleanup)
 }
 
-/** #343（P3-11）原网页视图销毁（幂等）：移除 DOM 即中止在途装载并使
- *  iframe 退出消息来源否定判定（untrustedFrame 按在场元素比对） */
+/** #343（P3-11）原网页视图销毁（幂等）：移除 DOM 即中止在途装载（消息
+ *  来源准入为允许清单形态，见 untrustedFrame——iframe 移除无需注销） */
 function teardownWebView(state: HoverPopupState): void {
   state.webView?.dispose()
   state.webView = null

@@ -2091,6 +2091,8 @@ export function createTextEditorProvider(
       ): void => {
         void (async (): Promise<void> => {
           let outcome: RefReadOutcome
+          // 在途抓取登记键（try 外声明：finally 清理与 try 内注册共用）
+          const webFetchKey = `${document.uri.toString()}#${payload.instanceId}:${payload.reqId}`
           try {
             let sourceDoc = document
             if (payload.source !== undefined) {
@@ -2110,7 +2112,6 @@ export function createTextEditorProvider(
             // 请求；在途抓取登记取消句柄（hover.cancel → documentSession
             // 路由 → abort——同 URL 合并的最后消费者离开即断开底层连接）
             const webEnabled = externalHoverEnabled()
-            const webFetchKey = `${document.uri.toString()}#${payload.instanceId}:${payload.reqId}`
             const webAbort = webEnabled ? new AbortController() : undefined
             if (webAbort !== undefined) {
               pendingWebFetches.set(webFetchKey, webAbort)
@@ -2241,9 +2242,13 @@ export function createTextEditorProvider(
                 ...(webAbort !== undefined ? { web: { enabled: true } } : {}),
               },
             )
-            pendingWebFetches.delete(webFetchKey)
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
+          } finally {
+            // review 修复：登记的取消句柄在 finally 清理——读取抛异常时
+            // Map 条目不再残留（残留会滞留已死的 AbortController，阻碍同
+            // 键后续抓取的取消注册）
+            pendingWebFetches.delete(webFetchKey)
           }
           report(outcome)
         })()

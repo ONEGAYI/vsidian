@@ -307,7 +307,17 @@ export class WebLinkMetaService {
             resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-redirects' } })
             return
           }
-          resolve({ kind: 'redirect', location: new URL(location, url).toString() })
+          // 畸形 Location（如 `http://[`）按重定向失败分态收敛——new URL
+          // 在响应回调内同步抛 TypeError 会逸出为进程级异常（review 修复），
+          // 该次抓取悬置至总预算超时误报 web-timeout
+          let redirectTarget: URL
+          try {
+            redirectTarget = new URL(location, url)
+          } catch {
+            resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-redirects' } })
+            return
+          }
+          resolve({ kind: 'redirect', location: redirectTarget.toString() })
           return
         }
         if (status < 200 || status >= 300) {
@@ -337,7 +347,7 @@ export class WebLinkMetaService {
             contentSecurityPolicy: res.headers['content-security-policy'],
           })
           : undefined
-        this.readBody(url, req, res, resolve, frame)
+        this.readBody(url, req, res, resolve, frame, causeOf)
       })
       req.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === BLOCK_ADDR_CODE) {
@@ -366,7 +376,8 @@ export class WebLinkMetaService {
     req: http.ClientRequest,
     res: Readable & { statusCode?: number },
     resolve: (value: { kind: 'redirect'; location: string } | { kind: 'outcome'; outcome: WebLinkMetaOutcome }) => void,
-    frame?: WebFramePrecheck,
+    frame: WebFramePrecheck | undefined,
+    causeOf: () => 'timeout' | 'consumer' | null,
   ): void {
     const chunks: Buffer[] = []
     let total = 0
@@ -407,7 +418,16 @@ export class WebLinkMetaService {
       finish({ ok: false, reason: 'web-unreachable' })
     })
     res.on('aborted', () => {
-      finish({ ok: false, reason: 'web-too-large' })
+      // 分态收敛（review 修复）：aborted 不再一律误标 web-too-large——
+      // 与 req error 的 causeOf 分态对齐，超时按 web-timeout、消费者取消
+      // 按 web-unreachable；仅自身截断场景（流式超限 destroy，此处通常已
+      // 由 data 处理器先行结算）保留 web-too-large
+      const cause = causeOf()
+      finish(cause === 'timeout'
+        ? { ok: false, reason: 'web-timeout' }
+        : cause === 'consumer'
+          ? { ok: false, reason: 'web-unreachable' }
+          : { ok: false, reason: 'web-too-large' })
     })
   }
 
