@@ -279,6 +279,147 @@ describe('WebLinkMetaService DNS 换址防护（生产矩阵，无放行注入�
   })
 })
 
+// ---- #343（P3-11）page 形态抓取附带 iframe 嵌入预检 ----
+// 已知拒绝头（X-Frame-Options / CSP frame-ancestors）与 HTTP 混合内容的
+// 判定需要 https 最终地址才能真实走到 denied 分支——自签名受控 TLS 服务器
+// 提供 DENY/SAMEORIGIN/frame-ancestors 样本矩阵（纯判定矩阵在
+// webFrameEmbed.test.ts；此处钉「抓取层从真实响应头组装 meta.frame」）。
+// NODE_TLS_REJECT_UNAUTHORIZED 仅本测试文件（vitest 独立 worker）放行
+// 自签名证书；生产代码不带任何测试 CA。
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+
+import * as https from 'node:https'
+import { readFileSync } from 'node:fs'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures')
+
+let tls: CountingServer & { tlsUrl: (p: string) => string }
+
+beforeAll(async () => {
+  const key = readFileSync(path.join(fixturesDir, 'webframe-test-key.pem'))
+  const cert = readFileSync(path.join(fixturesDir, 'webframe-test-cert.pem'))
+  const hits: string[] = []
+  const server = https.createServer({ key, cert }, (req, res) => {
+    const u = req.url ?? ''
+    hits.push(u)
+    if (u === '/ok' || u === '/fa-wild') {
+      const headers: Record<string, string> = { 'content-type': 'text/html; charset=utf-8' }
+      if (u === '/fa-wild') {
+        headers['content-security-policy'] = "default-src 'self'; frame-ancestors *"
+      }
+      res.writeHead(200, headers)
+      res.end(PAGE)
+    } else if (u === '/xfo-deny') {
+      res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' })
+      res.end(PAGE)
+    } else if (u === '/xfo-sameorigin') {
+      res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'SAMEORIGIN' })
+      res.end(PAGE)
+    } else if (u === '/fa-none') {
+      res.writeHead(200, { 'content-type': 'text/html', 'content-security-policy': "frame-ancestors 'none'" })
+      res.end(PAGE)
+    } else if (u === '/redirect-ok' || u === '/redirect-xfo') {
+      res.writeHead(302, { location: u === '/redirect-ok' ? '/ok' : '/xfo-deny' })
+      res.end()
+    } else if (u.startsWith('/hang')) {
+      // 挂起不响应（page 形态超时样本）
+    } else {
+      res.writeHead(404)
+      res.end()
+    }
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const entry: CountingServer = {
+    server,
+    port: (server.address() as { port: number }).port,
+    hits,
+    close: () => new Promise<void>((resolve) => {
+      server.close(() => resolve())
+      server.closeAllConnections()
+    }),
+  }
+  openServers.push(entry)
+  tls = Object.assign(entry, { tlsUrl: (p: string) => `https://127.0.0.1:${entry.port}${p}` })
+})
+
+describe('WebLinkMetaService page 形态嵌入预检（#343）', () => {
+  it('无拒绝头的 https 页面 → embeddable=true（已知头未拒绝）', async () => {
+    const service = makeService()
+    const outcome = await service.fetch(tls.tlsUrl('/ok'), undefined, 'page')
+    expect(outcome).toEqual({
+      ok: true,
+      meta: {
+        url: tls.tlsUrl('/ok'), domain: '127.0.0.1', title: '示例站点',
+        description: '一个用于契约测试的页面摘要',
+        frame: { embeddable: true },
+      },
+    })
+  })
+
+  it('X-Frame-Options: DENY → 退回原因 denied', async () => {
+    const service = makeService()
+    const outcome = await service.fetch(tls.tlsUrl('/xfo-deny'), undefined, 'page')
+    expect(outcome.ok && outcome.meta.frame).toEqual({ embeddable: false, reason: 'denied' })
+  })
+
+  it('X-Frame-Options: SAMEORIGIN → 退回原因 denied', async () => {
+    const service = makeService()
+    const outcome = await service.fetch(tls.tlsUrl('/xfo-sameorigin'), undefined, 'page')
+    expect(outcome.ok && outcome.meta.frame).toEqual({ embeddable: false, reason: 'denied' })
+  })
+
+  it("CSP frame-ancestors 'none' → 退回原因 denied", async () => {
+    const service = makeService()
+    const outcome = await service.fetch(tls.tlsUrl('/fa-none'), undefined, 'page')
+    expect(outcome.ok && outcome.meta.frame).toEqual({ embeddable: false, reason: 'denied' })
+  })
+
+  it('CSP frame-ancestors * → embeddable=true', async () => {
+    const service = makeService()
+    const outcome = await service.fetch(tls.tlsUrl('/fa-wild'), undefined, 'page')
+    expect(outcome.ok && outcome.meta.frame).toEqual({ embeddable: true })
+  })
+
+  it('HTTP 最终地址（http 受控服务器）→ 退回原因 http（混合内容）', async () => {
+    const service = makeService()
+    const outcome = await service.fetch(url('/html'), undefined, 'page')
+    expect(outcome.ok && outcome.meta.frame).toEqual({ embeddable: false, reason: 'http' })
+  })
+
+  it('重定向链：预检取最终响应头（跳到 DENY 样本 → denied）', async () => {
+    const service = makeService()
+    const outcome = await service.fetch(tls.tlsUrl('/redirect-xfo'), undefined, 'page')
+    expect(outcome.ok && outcome.meta.frame).toEqual({ embeddable: false, reason: 'denied' })
+    expect(outcome.ok && outcome.meta.url).toBe(tls.tlsUrl('/xfo-deny'))
+  })
+
+  it('card 形态抓取不带 frame（同 URL 两形态缓存键分离）', async () => {
+    const service = makeService()
+    const card = await service.fetch(tls.tlsUrl('/ok'), undefined, 'card')
+    expect(card.ok && card.meta.frame).toBeUndefined()
+    const page = await service.fetch(tls.tlsUrl('/ok'), undefined, 'page')
+    expect(page.ok && page.meta.frame).toEqual({ embeddable: true })
+  })
+
+  it('page 形态缓存命中复用 frame（两次抓取一次网络）', async () => {
+    const before = tls.hits.length
+    const service = makeService()
+    const a = await service.fetch(tls.tlsUrl('/xfo-deny'), undefined, 'page')
+    const b = await service.fetch(tls.tlsUrl('/xfo-deny'), undefined, 'page')
+    expect(a.ok && a.meta.frame).toEqual({ embeddable: false, reason: 'denied' })
+    expect(b).toEqual(a)
+    expect(tls.hits.length - before).toBe(1)
+  })
+
+  it('page 形态超时仍按 web-timeout 失败（预检不豁免网络边界）', async () => {
+    const service = makeService({ timeoutMs: 200 })
+    const outcome = await service.fetch(tls.tlsUrl('/hang?page=1'), undefined, 'page')
+    expect(outcome).toEqual({ ok: false, reason: 'web-timeout' })
+  })
+})
+
 describe('WebLinkMetaService 合并与取消', () => {
   it('同 URL 并发请求合并为一次网络请求', async () => {
     const before = ctx.hits.length

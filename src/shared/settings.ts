@@ -332,11 +332,13 @@ export const HOVER_EXTERNAL_ENABLED_KEY = 'hover.externalEnabled'
 export const HOVER_EXTERNAL_ENABLED_DEFAULT = false
 
 /**
- * #342（P3-10）「外链预览形态」：card = 标题摘要域名卡片（本票实现）；
- * page = 原网页浮层（#343/P3-11 预留设置位——本票阶段选择 page 时呈现
- * 仍回落卡片，原网页 iframe 落地后按同一键生效，不迁移设置）。形态
- * 参与宿主抓取缓存键（规范 URL + 形态）。键与消费方（textEditorProvider
- * 的 web 通道 shape 装配）成对导出。
+ * #342（P3-10）「外链预览形态」：card = 标题摘要域名卡片；page = 原网页
+ * 浮层（#343/P3-11 起真实生效——宿主抓取附带 X-Frame-Options /
+ * frame-ancestors 嵌入预检，已知拒绝或 HTTP 混合内容自动退回卡片并给
+ * 真实原因；客户端 webview 以跨源沙箱 iframe 尽力显示，与宿主元信息
+ * 抓取是两条独立网络路径——设置描述如实区分）。形态参与宿主抓取缓存
+ * 键（规范 URL + 形态）。键与消费方（textEditorProvider 的 web 通道
+ * shape 装配、webview 侧 notifyHoverExternalSettings 联动销毁）成对导出。
  */
 export const HOVER_EXTERNAL_SHAPE_KEY = 'hover.externalShape'
 export const HOVER_EXTERNAL_SHAPE_MODES = ['card', 'page'] as const

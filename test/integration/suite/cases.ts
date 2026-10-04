@@ -5,6 +5,9 @@ import * as vscode from 'vscode'
 import { liveEmbedReady, mixedEmbedReady, readingEmbedCard, readingEmbedHeightReady } from './embedReadiness'
 import { probe278Cases } from './probe278'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import * as nodeHttps from 'node:https'
+import * as nodePath from 'node:path'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
@@ -993,6 +996,21 @@ interface ViewState {
     liveDirty?: boolean
     liveSuspended?: boolean
     closeDialogOpen?: boolean
+    /** #343 请求配对身份（注入回包用；旧 webview 缺省） */
+    instanceId?: string
+    reqId?: number
+    /** #343 外链视图观测（null/缺省 = 非 web 形态；旧 webview 缺省） */
+    web?: {
+      shape: 'card' | 'page'
+      frameMounted: boolean
+      sandbox: string
+      referrerPolicy: string
+      src: string
+      frameWidth: number
+      frameHeight: number
+      fallbackButton: boolean
+      note: string
+    } | null
   }
   /** #299 跳转目标提示观测：在场与路径文本 */
   targetTip?: {
@@ -15851,6 +15869,184 @@ export const cases: Array<[string, () => Promise<void>]> = [
       for (const file of ['hint-a.md', 'hint-b.md', 'hint-c.md']) {
         await Promise.resolve(vscode.workspace.fs.delete(wsUri(file), { useTrash: false })).catch(() => undefined)
       }
+    }
+  }],
+
+  // ---- #343（P3-11）外链原网页形态 ----
+  // 真实宿主 webview 内验证 page 形态：跨源沙箱 iframe 的装配属性（sandbox
+  // 仅 allow-scripts / referrer no-referrer / src 为宿主归一 URL）与绘制
+  // 尺寸、受控 https 样本的真实导航（服务端收到 webview 发起的 GET——
+  // CSP frame-src 放行与真实装载的直接证据）、恶意子页 postMessage 注入
+  // 不被消息桥消费、DENY/HTTP 混合内容自动退回卡片与真实原因、开关关闭
+  // 联动销毁与关闭释放。宿主回包经 postToPanel 注入（先等待真实宿主对
+  // 回环地址的准入拒绝落地——同时钉住「私网地址零网络请求」的宿主侧
+  // 防线，再以同配对身份注入受控载荷，无竞态）；预检判定与抓取边界在
+  // 单元/浏览器层钉住。
+  ['悬停预览：外链原网页形态——真宿主 iframe 沙箱、退回矩阵与释放（#343）', async () => {
+    // 受控 https 服务器（自签证书，仓库 test/fixtures——仅供测试）：可嵌
+    // 入样本页装载即向父窗口注入伪造宿主消息（守卫失效时伪造
+    // settings.snapshot 会联动销毁 iframe——在场性即隔离证据）
+    const samplePage = [
+      '<!doctype html><html><head><meta charset="utf-8"><title>受控样本页</title></head>',
+      '<body style="margin:0"><div id="marker" style="padding:12px">受控样本页顶部标记</div>',
+      '<div style="height:4000px"></div>',
+      '<script>',
+      "  window.parent.postMessage({ kind: 'view.mode.set', mode: 'reading' }, '*')",
+      "  window.parent.postMessage({ kind: 'settings.snapshot', values: { 'hover.externalShape': 'card' } }, '*')",
+      '</script>',
+      '</body></html>',
+    ].join('')
+    // 证据口径（与 #130「HTTPS 导入放行」同源）：真宿主 webview 对自签证书
+    // 做真实校验（测试无法注入信任）——iframe 内容字节是否送达不可证；
+    // 可证的是 **网络层差分**：CSP frame-src https: 放行的导航会发起出网
+    // （socket 连接到达服务端，证书校验在其后才失败），CSP 若拦截则零
+    // 连接。iframe 内容元素的真实可见与滚轮滚动由浏览器套件
+    // webPageView（受控证书校验跳过）以绘制层断言覆盖。
+    const tlsSeen = { connections: 0 }
+    const fixturesDir = nodePath.resolve(__dirname, '..', '..', '..', '..', 'test', 'fixtures')
+    const tlsServer = nodeHttps.createServer({
+      key: readFileSync(nodePath.join(fixturesDir, 'webframe-test-key.pem')),
+      cert: readFileSync(nodePath.join(fixturesDir, 'webframe-test-cert.pem')),
+    }, (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(samplePage)
+    })
+    tlsServer.on('connection', () => {
+      tlsSeen.connections += 1
+    })
+    await new Promise<void>((resolve) => tlsServer.listen(0, '127.0.0.1', resolve))
+    const embedUrl = `https://127.0.0.1:${(tlsServer.address() as { port: number }).port}/embed`
+    // 父文档：外链指向回环地址（宿主准入文本层拒绝——零网络请求；回包
+    // 由用例注入受控载荷，行为面不受影响）
+    const docFile = '外链预览343.md'
+    const messages = editorMessages()
+    try {
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': true, 'hover.externalShape': 'page' })
+      await writeFile(nodePath.join(wsDir, docFile),
+        '# 外链预览样例\n\n外链 [样本](https://127.0.0.1:9/emb)。\n', 'utf8')
+      await openWithEditor(docFile)
+      await waitSessionReady(docFile)
+      const uri = wsUri(docFile).toString()
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+      await waitViewState(docFile, (v) => v.viewMode === 'reading')
+
+      /** 悬停外链 → 等真实宿主的准入拒绝落地（web-invalid-address）→
+       *  以同配对身份注入受控 web 载荷 → 返回注入后的观测 */
+      const hoverAndInject = async (web: Record<string, unknown>): Promise<ViewState> => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri,
+          { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'md' })
+        const errored = await waitViewState(docFile, (v) =>
+          v.hoverPreview?.open === true && v.hoverPreview.state === 'error' &&
+          v.hoverPreview.note === messages['hover.errorWebInvalidAddress'])
+        assert(errored.hoverPreview?.instanceId && errored.hoverPreview.reqId,
+          `准入拒绝态应暴露请求配对身份（实际 ${JSON.stringify(errored.hoverPreview)}）`)
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'hover.result',
+          reqId: errored.hoverPreview.reqId,
+          instanceId: errored.hoverPreview.instanceId!,
+          ok: true,
+          contentKind: 'web',
+          web,
+          target: { fsPath: '', relPath: '' },
+          version: 0,
+          text: '',
+          range: { start: 0, end: 0 },
+          scope: { kind: 'full' },
+        })
+        return waitViewState(docFile, (v) => v.hoverPreview?.open === true && v.hoverPreview.state === 'content')
+      }
+      const leaveAndClose = async (): Promise<void> => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri,
+          { kind: 'hover.test.pointer', action: 'leave', index: 0, link: 'md' })
+        await waitViewState(docFile, (v) => v.hoverPreview?.open === false)
+      }
+
+      // —— page 形态：沙箱 iframe 真实装配与受控样本导航 ——
+      const mounted = await hoverAndInject({
+        url: embedUrl, domain: '127.0.0.1', title: '受控样本页', description: '',
+        frame: { embeddable: true },
+      })
+      const webMounted = mounted.hoverPreview?.web
+      assert(webMounted?.shape === 'page', `应为 page 形态（实际 ${JSON.stringify(webMounted)}）`)
+      assert(webMounted.frameMounted === true, 'iframe 已装配')
+      assert(webMounted.sandbox === 'allow-scripts', `sandbox 仅 allow-scripts（实际 ${webMounted.sandbox}）`)
+      assert(webMounted.referrerPolicy === 'no-referrer', `referrer 不泄露（实际 ${webMounted.referrerPolicy}）`)
+      assert(webMounted.src === embedUrl, `iframe src 为宿主归一 URL（实际 ${webMounted.src}）`)
+      assert(webMounted.frameWidth > 300 && webMounted.frameHeight >= 300,
+        `iframe 有实际绘制尺寸（实际 ${webMounted.frameWidth}x${webMounted.frameHeight}）`)
+      assert(webMounted.fallbackButton === true, '退回卡片按钮在场')
+      // 网络层差分：webview 内 iframe 对受控 https 服务器发起出网连接
+      // （CSP frame-src https: 放行导航——被 CSP 拦截则零连接；自签证书的
+      // 校验失败发生在 socket 到达之后，属测试环境不可注入信任的既知边界）
+      await poll('受控服务器收到 iframe 出网连接', async () =>
+        tlsSeen.connections > 0 ? tlsSeen : undefined, 10000)
+      // 恶意子页消息隔离（真宿主侧的结构性断言）：自签证书下样本页脚本
+      // 不会执行（内容未送达），此处钉「iframe 挂载态不因任何到达的窗口
+      // 消息被联动销毁」；子页脚本真实执行时的注入丢弃由浏览器套件
+      // webPageView 场景 3 以真实装载覆盖
+      await new Promise((r) => setTimeout(r, 900))
+      const afterHostile = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+      assert(afterHostile.hoverPreview?.web?.frameMounted === true,
+        `iframe 挂载态保持（无消息可联动销毁，实际 ${JSON.stringify(afterHostile.hoverPreview?.web)}）`)
+      console.log('[#343] 真宿主 iframe 沙箱装配与出网连接 ✓')
+
+      // —— 开关关闭：在场 iframe 销毁、就地退回卡片 ——
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'hover.externalEnabled': false })
+      const flipped = await waitViewState(docFile, (v) => v.hoverPreview?.web?.shape === 'card')
+      assert(flipped.hoverPreview?.web?.frameMounted === false, '开关关闭后 iframe 销毁')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': true, 'hover.externalShape': 'page' })
+      await leaveAndClose()
+      console.log('[#343] 开关关闭联动销毁 ✓')
+
+      // —— DENY 样本：自动退回卡片 + 真实原因（X-Frame-Options 字样为
+      // 两种语言包共有的判据标记） ——
+      const denied = await hoverAndInject({
+        url: 'https://deny.example.com/page', domain: 'deny.example.com', title: '拒绝内嵌站点', description: '',
+        frame: { embeddable: false, reason: 'denied' },
+      })
+      const webDenied = denied.hoverPreview?.web
+      assert(webDenied?.shape === 'card', 'DENY 退回卡片形态')
+      assert(webDenied?.frameMounted === false, 'DENY 不挂 iframe')
+      assert(webDenied?.note.includes('X-Frame-Options'),
+        `DENY 退回原因含真实判据（实际 ${JSON.stringify(webDenied?.note)}）`)
+      await leaveAndClose()
+      console.log('[#343] DENY 自动退回与真实原因 ✓')
+
+      // —— HTTP 混合内容样本：卡片 + 原因 ——
+      const httpCase = await hoverAndInject({
+        url: 'http://plain.example.com/page', domain: 'plain.example.com', title: '', description: '',
+        frame: { embeddable: false, reason: 'http' },
+      })
+      const webHttp = httpCase.hoverPreview?.web
+      assert(webHttp?.shape === 'card' && webHttp?.frameMounted === false, 'HTTP 样本退回卡片')
+      assert(/http/i.test(webHttp?.note ?? ''),
+        `HTTP 退回原因在场（实际 ${JSON.stringify(webHttp?.note)}）`)
+      await leaveAndClose()
+      console.log('[#343] HTTP 混合内容退回 ✓')
+
+      // —— 关闭释放：浮层关闭后 iframe 随之销毁 ——
+      const releaseProbe = await hoverAndInject({
+        url: embedUrl, domain: '127.0.0.1', title: '', description: '',
+        frame: { embeddable: true },
+      })
+      assert(releaseProbe.hoverPreview?.web?.frameMounted === true, '关闭释放用例的 iframe 在场')
+      await leaveAndClose()
+      const closed = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+      assert(closed.hoverPreview?.open === false, '浮层已关闭')
+      assert(closed.hoverPreview?.web === null || closed.hoverPreview?.web === undefined,
+        '关闭后 web 视图观测随之清空')
+      console.log('[#343] 关闭释放 ✓')
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': false, 'hover.externalShape': 'card' }))
+        .catch(() => undefined)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri(docFile), { useTrash: false })).catch(() => undefined)
+      await new Promise<void>((resolve) => {
+        tlsServer.close(() => resolve())
+        tlsServer.closeAllConnections()
+      })
     }
   }],
 ]

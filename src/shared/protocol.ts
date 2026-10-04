@@ -634,12 +634,17 @@ export type HostToWebview =
        *  Markdown 载荷互斥）：宿主受限抓取提取的元信息——url 为最终归一
        *  地址（重定向后）、domain/title/description 为展示面（title/
        *  description 缺席为空串，webview 以域名兜底显示）。显示内容仅
-       *  文字与显式安全链接，不携带也不触发任何子资源 */
+       *  文字与显式安全链接，不携带也不触发任何子资源。
+       *  #343（P3-11）：frame 为 page 形态抓取附带的 iframe 嵌入预检
+       *  （card 形态缺席）——embeddable=false 携带真实退回原因（denied =
+       *  站点以 X-Frame-Options/frame-ancestors 明确拒绝；http = 最终
+       *  地址非 https 无法安全内嵌），消费端不挂 iframe 就地退回卡片 */
       web?: {
         url: string
         domain: string
         title: string
         description: string
+        frame?: { embeddable: boolean; reason?: 'denied' | 'http' }
       }
       target: HoverPreviewTargetIdentity
       version: number
@@ -2407,7 +2412,16 @@ function isWebLinkMetaPayload(v: unknown): boolean {
     isString(v.url) &&
     isString(v.domain) &&
     isString(v.title) &&
-    isString(v.description)
+    isString(v.description) &&
+    // #343（P3-11）frame 嵌入预检：缺席（card 形态）或形态合法——
+    // embeddable=false 必带已知退回原因；embeddable=true 不携带原因
+    // （语义矛盾形态整体拒绝，防伪造「可内嵌」以外的歧义状态）
+    (v.frame === undefined ||
+      (isObject(v.frame) &&
+        typeof v.frame.embeddable === 'boolean' &&
+        (v.frame.embeddable
+          ? v.frame.reason === undefined
+          : v.frame.reason === 'denied' || v.frame.reason === 'http')))
   )
 }
 

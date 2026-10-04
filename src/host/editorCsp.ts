@@ -27,11 +27,20 @@
 //   WebAssembly 编译/实例化，不放行 JS eval，也不改变脚本装载的 nonce
 //   门控；官方 webview 指南允许按需为 wasm 放开此源表达式。
 //
+// #343 变更（外链原网页 iframe）：
+// - frame-src 追加 `https:`——悬停浮层 page 形态以跨源沙箱 iframe 装载
+//   远程站点（sandbox 只给 allow-scripts，见 src/webview/webPage.ts 模块
+//   头的隔离边界）。只放行 https 源表达式：HTTP 最终地址在宿主预检层已
+//   判 reason=http 退回卡片（安全上下文中的混合内容无法安全内嵌），
+//   生产路径不会也不得挂 http iframe。iframe 子文档自身的资源装载由
+//   目标站点响应自带的 CSP 管辖（父文档 CSP 不作用于子文档），故本指令
+//   只约束「iframe 能导航到哪」，不扩大父文档的 script/connect 面。
+//
 // 不放宽的面（验收红线）：
 // - script-src 维持 nonce 门控——不因字体/样式需求扩大脚本权限，不放
 //   https:/unsafe-inline/unsafe-eval（'wasm-unsafe-eval' 是 #239 jieba
 //   wasm 实例化的最小必要放行，仅覆盖 WebAssembly，见文件头）；
-// - 明文 `http:` 源不放行（样式与字体都只认 https）；
+// - 明文 `http:` 源不放行（样式与字体都只认 https；frame-src 同口径）；
 // - connect-src 仅 cspSource（自有资源域）——除 jieba wasm 的装载外，
 //   webview JS 不经 fetch/XHR 拉取任何远程资源，其余远程装载走浏览器
 //   原生管线，CSP 逐源把关。
@@ -51,5 +60,7 @@ export function buildEditorCsp(cspSource: string, nonce: string): string {
     `font-src ${cspSource} https:`,
     // #239 jieba wasm：init(url) 的 fetch 只指向 cspSource 资源域
     `connect-src ${cspSource}`,
+    // #343 外链原网页 iframe：只放行 https 源（见文件头 #343 变更说明）
+    `frame-src https:`,
   ].join('; ')
 }

@@ -22,6 +22,113 @@ export type WebLinkFailReason = Extract<
   'web-disabled' | 'web-invalid-address' | 'web-timeout' | 'web-too-large' | 'web-not-html' | 'web-redirects' | 'web-unreachable'
 >
 
+// ---- #343（P3-11）原网页形态 iframe 嵌入预检（纯逻辑，宿主抓取层消费） ----
+
+/** 预检拒绝原因：denied = 站点以 X-Frame-Options / frame-ancestors 明确
+ *  拒绝内嵌；http = 最终地址非 https（安全上下文中的混合内容，无法安全
+ *  内嵌）。不可观察的失败（登录墙/脚本崩溃）不在此枚举——webview 侧只
+ *  呈现「无法确认」，不编造检测结果 */
+export type WebFrameDenyReason = 'denied' | 'http'
+
+/** 预检结果：embeddable=true 仅代表「已知头未拒绝」，不是内容可见的
+ *  承诺（跨源 iframe 的 load 事件不证明加载成功——MDN iframe 事件边界） */
+export interface WebFramePrecheck {
+  embeddable: boolean
+  reason?: WebFrameDenyReason
+}
+
+/** 预检输入（Node 响应头访问形态：单值、数组或缺席） */
+export interface WebFrameHeadersInput {
+  /** 最终 URL（重定向链走完后）的协议，如 'https:' */
+  protocol: string
+  /** X-Frame-Options 响应头（可多条/逗号拼接——归一为 token 集合判） */
+  xFrameOptions?: string | string[]
+  /** Content-Security-Policy 响应头（仅强制策略；report-only 不传入） */
+  contentSecurityPolicy?: string | string[]
+}
+
+/** 桌面 webview 父源 scheme（Electron 的 vscode-webview:// 协议）：
+ *  站点以 scheme 源显式放行该协议时按允许判（对站点是显式声明，非猜测） */
+const WEBVIEW_PARENT_SCHEME = 'vscode-webview:'
+
+function headerValues(value: string | string[] | undefined): string[] {
+  if (value === undefined) {
+    return []
+  }
+  return Array.isArray(value) ? value : [value]
+}
+
+/** X-Frame-Options 判定：DENY / SAMEORIGIN 为已知拒绝（大小写与空白/
+ *  逗号拼接归一后比对）；ALLOW-FROM 为 Chromium 未实现的废弃形态、未知
+ *  token 无语义——均不构成已知拒绝（误判方向只允许「放行后尽力显示」） */
+function isKnownXfoDeny(values: string[]): boolean {
+  for (const raw of values) {
+    for (const token of raw.split(',')) {
+      const normalized = token.trim().toLowerCase()
+      if (normalized === 'deny' || normalized === 'sameorigin') {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/** 单条 CSP 策略内首个 frame-ancestors 指令的源列表；同一策略重复出现
+ *  该指令时按 CSP 规范整个策略作废（返回 null = 本策略不产出约束） */
+function frameAncestorsSourceList(policy: string): string[] | null {
+  const directives = policy.split(';')
+  let found: string[] | null = null
+  for (const directive of directives) {
+    const trimmed = directive.trim()
+    if (trimmed === '') {
+      continue
+    }
+    const name = trimmed.split(/[ \t]+/)[0]?.toLowerCase() ?? ''
+    if (name !== 'frame-ancestors') {
+      continue
+    }
+    if (found !== null) {
+      return null // 重复指令：策略作废
+    }
+    found = trimmed.slice(name.length).trim().split(/[ \t]+/).filter((s) => s !== '')
+  }
+  return found
+}
+
+/** 源列表是否放行本扩展的 webview 父源：通配 * 或显式 vscode-webview:
+ *  scheme 源。'self'/主机源/https: scheme 源均不可能匹配桌面 webview 父源 */
+function sourceListAllowsWebviewParent(sources: string[]): boolean {
+  return sources.some((source) => source === '*' || source.toLowerCase() === WEBVIEW_PARENT_SCHEME)
+}
+
+/**
+ * #343（P3-11）已知嵌入拒绝头预检：page 形态抓取的最终响应头判定——
+ * HTTP 混合内容 > X-Frame-Options > CSP frame-ancestors（多条 CSP 头取
+ * 交集：任一条不含放行源即拒绝）。只回答「已知头是否明确拒绝」，不预测
+ * 实际渲染结果；不可判定的头形态一律放行（退回必须基于站点明确声明）。
+ */
+export function assessWebFrameEmbeddability(input: WebFrameHeadersInput): WebFramePrecheck {
+  if (input.protocol !== 'https:') {
+    return { embeddable: false, reason: 'http' }
+  }
+  if (isKnownXfoDeny(headerValues(input.xFrameOptions))) {
+    return { embeddable: false, reason: 'denied' }
+  }
+  const policies = headerValues(input.contentSecurityPolicy)
+  for (const policy of policies) {
+    const sources = frameAncestorsSourceList(policy)
+    if (sources === null) {
+      continue // 本策略作废或无该指令：不产出约束
+    }
+    if (!sourceListAllowsWebviewParent(sources)) {
+      return { embeddable: false, reason: 'denied' }
+    }
+  }
+  // 无任何有效 frame-ancestors 指令 = 站点未以内嵌策略拒绝（多条 CSP 头
+  // 交集语义：各产出约束的策略均须放行，任一不含放行源已在循环内拒绝）
+  return { embeddable: true }
+}
+
 /** webview 预滤同款判定：href 是否 http(s) 绝对地址（协议相对 `//host`
  *  不放行——归宿主分类拦截，与 isHoverableMdLinkHref 的外部 scheme 排除
  *  共存：后者拦一切外部形态，本判定在总开关开启的调用点补放行 http(s)） */

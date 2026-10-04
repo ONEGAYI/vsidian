@@ -58,8 +58,11 @@ import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
 // #342（P3-10）外链卡片内容视图与 http(s) 预滤判定（与 shared/webLink 同源）
 import { buildWebCardEl, WEB_CARD_CLASS_NAMES } from './webCard'
+// #343（P3-11）外链原网页视图（page 形态 iframe + 退回）与设置联动键
+import { appendWebCardFallbackReason, buildWebPageView, type WebPageView } from './webPage'
 import { isHttpLinkHref } from '../shared/webLink'
 import type { RefWebContent } from '../shared/refContent'
+import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type SettingsPayload } from '../shared/settings'
 // #299 跳转目标提示联动：浮层打开路径收起提示（「浮层开则提示关」，
 // 含悬停中补按 Ctrl 的立即消失——不进互斥锁的行为面表达）
 import { closeTargetTip } from './targetTip'
@@ -251,8 +254,14 @@ interface HoverPopupState {
   note: string
   /** #342（P3-10）外链卡片元信息（contentKind=web 成功回包送达；null =
    *  非 web 形态——卡片内容视图与 Reading 装载互斥，web 卡片不进
-   *  RefContentInstance/watch/租约链路） */
+   *  RefContentInstance/watch/租约链路）。#343（P3-11）：frame 预检
+   *  embeddable 时 webView 在场（原网页 iframe 视图；退回后置 null） */
   webMeta: RefWebContent | null
+  /** #343（P3-11）原网页视图（page 形态装配；null = 卡片/错误/装载中） */
+  webView: WebPageView | null
+  /** #343（P3-11）page 形态抑制（装载中发生开关关闭/形态切回后置位——
+   *  迟到的 page 载荷就地退卡片，不挂 iframe） */
+  webPageSuppressed: boolean
   /** #221 目标原文（错误分态文案取材；三入口同源——不再读锚点 href） */
   target: string
   /** #224 打开时的目标规格（订阅刷新重发 hover.request 的载荷来源） */
@@ -348,6 +357,9 @@ export function isHoverPopupOpen(): boolean {
  *  引用内部 Live 观测（生效模式/端口绑定/dirty/暂停） */
 export function hoverPopupProbe(): {
   open: boolean
+  /** #343 集成观测：当前请求配对身份（注入回包用；loading 态即最新请求） */
+  instanceId: string
+  reqId: number
   state: 'loading' | 'content' | 'error'
   note: string
   blocks: number
@@ -367,6 +379,20 @@ export function hoverPopupProbe(): {
   liveSuspended: boolean
   /** P2-06/P2-05 三项关闭确认模态在场 */
   closeDialogOpen: boolean
+  /** #343（P3-11）外链视图观测（null = 非 web 形态）：shape=page 时
+   *  frameMounted 连同沙箱/src 与退回按钮在场性（集成层可见性证据的
+   *  webview 侧观测面）；shape=card 为卡片呈现（frameMounted=false） */
+  web: {
+    shape: 'card' | 'page'
+    frameMounted: boolean
+    sandbox: string
+    referrerPolicy: string
+    src: string
+    frameWidth: number
+    frameHeight: number
+    fallbackButton: boolean
+    note: string
+  } | null
 } {
   const liveProbe = () => {
     const st = popup?.root?.liveState()
@@ -379,11 +405,44 @@ export function hoverPopupProbe(): {
       closeDialogOpen: popup?.root?.isCloseDialogOpen() ?? false,
     }
   }
+  // #343 web 视图观测（DOM 实测：iframe 属性与退回按钮在场性）
+  const webProbe = () => {
+    if (!popup || popup.webMeta === null) {
+      return null
+    }
+    if (popup.webView !== null) {
+      const frame = popup.webView.iframe
+      const rect = frame.getBoundingClientRect()
+      return {
+        shape: 'page' as const,
+        frameMounted: frame.isConnected,
+        sandbox: frame.getAttribute('sandbox') ?? '',
+        referrerPolicy: frame.getAttribute('referrerpolicy') ?? '',
+        src: frame.getAttribute('src') ?? '',
+        frameWidth: rect.width,
+        frameHeight: rect.height,
+        fallbackButton: popup.webView.el.querySelector('button.vsidian-hover-web-fallback') !== null,
+        note: popup.webView.el.querySelector('.vsidian-hover-web-note')?.textContent ?? '',
+      }
+    }
+    return {
+      shape: 'card' as const,
+      frameMounted: false,
+      sandbox: '',
+      referrerPolicy: '',
+      src: '',
+      frameWidth: 0,
+      frameHeight: 0,
+      fallbackButton: false,
+      note: popup.scrollEl.querySelector('.vsidian-hover-web-reason')?.textContent ?? '',
+    }
+  }
   if (!popup || popup.display !== 'content') {
     return {
-      open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0,
+      open: popup !== null, instanceId: popup?.instanceId ?? '', reqId: popup?.reqId ?? 0,
+      state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0,
       scope: popup?.scope ?? '', fm: 'none', imageSrcs: [], viewStats: null,
-      ...liveProbe(),
+      ...liveProbe(), web: webProbe(),
     }
   }
   const fmSection = popup.contentEl.querySelector(`.${REF_FM_CLASS_NAMES.section}`)
@@ -402,6 +461,8 @@ export function hoverPopupProbe(): {
     : fmToggle?.getAttribute('aria-expanded') === 'true'
   return {
     open: true,
+    instanceId: popup.instanceId,
+    reqId: popup.reqId,
     state: popup.display,
     note: popup.note,
     blocks: popup.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
@@ -410,6 +471,7 @@ export function hoverPopupProbe(): {
     imageSrcs,
     viewStats: popup.content.getStats(),
     ...liveProbe(),
+    web: webProbe(),
   }
 }
 
@@ -779,6 +841,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     display: 'loading',
     note: '',
     webMeta: null,
+    webView: null,
+    webPageSuppressed: false,
     target: spec.target,
     spec,
     scope: '',
@@ -1134,6 +1198,9 @@ export function closeHoverPopup(): void {
   if (state.display === 'loading') {
     sendHoverCancel(state)
   }
+  // #343（P3-11）原网页视图销毁：iframe 移除即中止在途装载并退出消息
+  // 来源否定判定（untrustedFrame 按在场元素比对，无独立注册）
+  teardownWebView(state)
   if (state.root) {
     state.root.close()
   } else {
@@ -1211,10 +1278,13 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
   state.root?.contentLoaded(loaded)
 }
 
-/** #342（P3-10）web 卡片内容应用：纯文字 + 域名安全链接（本地 DOM 构建，
- *  非远程内容渲染——不执行 HTML、不加载子资源）。无 B 身份（targetFsPath
- *  置空：卡片内链接点击走 link.activate 无来源通道）、不进 watch/租约
- *  链路（网页无宿主文档版本可订阅）；note 为域名（状态行隐藏，供观测） */
+/** #342（P3-10）web 卡片内容应用 + #343（P3-11）page 形态分派：宿主
+ *  预检（meta.frame）判定呈现形态——embeddable 且最终地址 https 时挂
+ *  跨源沙箱 iframe 尽力显示网站（webView），否则卡片（embeddable=false
+ *  附真实退回原因行；card 形态抓取无 frame 字段为普通卡片）。
+ *  无 B 身份（targetFsPath 置空：卡片内链接点击走 link.activate 无来源
+ *  通道）、不进 watch/租约链路（网页无宿主文档版本可订阅）；note 为
+ *  域名（状态行隐藏，供观测） */
 function applyHoverWebContent(state: HoverPopupState, meta: RefWebContent): void {
   state.webMeta = meta
   state.targetFsPath = ''
@@ -1223,9 +1293,101 @@ function applyHoverWebContent(state: HoverPopupState, meta: RefWebContent): void
   applyDisplay(state, 'content', meta.domain)
   // 卡片挂 scrollEl（与 contentEl/liveEl 平级）：contentEl 是虚拟 Reading
   // 视图的管辖地盘（updateNow 的块渲染会重建其子树——手动挂载的节点
-  // 会被冲掉），web 卡片无块语义，挂滚动区直下；容器销毁（浮层关闭）
-  // 随 DOM 树整体移除，无独立清理路径
-  state.scrollEl.appendChild(buildWebCardEl(meta))
+  // 会被冲掉），web 卡片/页面视图无块语义，挂滚动区直下；容器销毁
+  //（浮层关闭）经 teardownWebView 收敛释放，DOM 随树整体移除
+  if (meta.frame?.embeddable === true && !state.webPageSuppressed) {
+    const view = buildWebPageView(meta, () => fallbackToWebCard(state))
+    if (view !== null) {
+      state.webView = view
+      state.scrollEl.appendChild(view.el)
+      position(state)
+      return
+    }
+    // 防御兜底：embeddable 但 URL 非 https（宿主预检已保证，协议层失守
+    // 时仍不挂 http iframe——HTTP 页面无法在安全上下文中嵌入显示）
+  }
+  mountWebCard(state, meta.frame?.embeddable === false ? meta.frame.reason : undefined)
+}
+
+/** web 卡片装配（首开、自动退回与手动退回共用；reason 在场 = 自动退回
+ *  的真实原因行；手动退回不带原因——用户自己的选择无需解释） */
+function mountWebCard(state: HoverPopupState, reason?: 'denied' | 'http'): void {
+  const meta = state.webMeta
+  if (meta === null) {
+    return
+  }
+  const card = buildWebCardEl(meta)
+  if (reason !== undefined) {
+    appendWebCardFallbackReason(card, reason)
+  }
+  state.scrollEl.appendChild(card)
+}
+
+/** #343（P3-11）手动退回卡片：销毁 iframe 视图换卡片呈现。只动当前
+ *  浮层的就地呈现——不发任何设置写出站（自动/手动退回都不偷偷改用户
+ *  的形态设置），零新请求（元信息已在手） */
+function fallbackToWebCard(state: HoverPopupState): void {
+  teardownWebView(state)
+  mountWebCard(state)
+  position(state)
+  armJointDomainRecheck(state)
+}
+
+/** #343（P3-11）移出边界自愈：就地退回销毁 iframe 视图时，悬停中的
+ *  元素（退回按钮）随容器移除会让 Chromium 清空 hover 链——此后直移
+ *  浮层外部的 mousemove 不再对容器派发 mouseleave，浮层滞留不关。
+ *  退回路径挂一次性 document 捕获 mousemove：首次移动若已出联合域，
+ *  按 mouseleave 语义收尾（保活判定沿用 scheduleClose 既有链路）；若
+ *  仍在域内则 hover 链随本次移动重建，恢复常规 enter/leave 边界事件，
+ *  监听自行退出（幂等，随浮层关闭一并清理） */
+function armJointDomainRecheck(state: HoverPopupState): void {
+  const cleanup = (): void => {
+    document.removeEventListener('mousemove', onMove, true)
+  }
+  const onMove = (event: MouseEvent): void => {
+    if (popup !== state) {
+      cleanup()
+      return
+    }
+    const target = event.target
+    if (target instanceof Node && insideJointDomain(state, target)) {
+      cleanup() // 域内首移：hover 链已重建，交还常规边界事件
+      return
+    }
+    cleanup()
+    state.pointerInside = false
+    scheduleClose()
+  }
+  document.addEventListener('mousemove', onMove, true)
+  state.cleanups.push(cleanup)
+}
+
+/** #343（P3-11）原网页视图销毁（幂等）：移除 DOM 即中止在途装载并使
+ *  iframe 退出消息来源否定判定（untrustedFrame 按在场元素比对） */
+function teardownWebView(state: HoverPopupState): void {
+  state.webView?.dispose()
+  state.webView = null
+}
+
+/** #343（P3-11）外链设置变更联动（syncController 的 settings.snapshot/
+ *  changed 到达时转发）：总开关关闭或形态切回 card 时销毁在场 iframe、
+ *  就地退回卡片（不关闭浮层、不改写设置）；其余变更与卡片形态不动。
+ *  快照与变更广播共用同一入口（缺键 = 无关变更，不动作） */
+export function notifyHoverExternalSettings(values: SettingsPayload): void {
+  const state = popup
+  if (!state) {
+    return
+  }
+  const enabledOff = values[HOVER_EXTERNAL_ENABLED_KEY] === false
+  const shapeToCard = values[HOVER_EXTERNAL_SHAPE_KEY] === 'card'
+  if (enabledOff || shapeToCard) {
+    // 装载中（webView 尚未装配）同样置抑制——迟到的 page 形态载荷就地
+    // 退卡片，不在设置已变更后挂出 iframe
+    state.webPageSuppressed = true
+    if (state.webView !== null) {
+      fallbackToWebCard(state)
+    }
+  }
 }
 
 /** P2-06/#224 重发读取请求（刷新与 Live 切回的静默重载共用）：新 reqId

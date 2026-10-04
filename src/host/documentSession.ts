@@ -1166,6 +1166,8 @@ export class DocumentSession {
                 domain: result.content.domain,
                 title: result.content.title,
                 description: result.content.description,
+                // #343（P3-11）page 形态嵌入预检透传（card 形态缺席）
+                ...(result.content.frame !== undefined ? { frame: result.content.frame } : {}),
               },
               target: { fsPath: '', relPath: '' },
               version: 0,

@@ -22,7 +22,14 @@ import * as dns from 'node:dns'
 import * as http from 'node:http'
 import * as https from 'node:https'
 import type { Readable } from 'node:stream'
-import { checkWebLinkUrl, isAllowedInetAddress, type WebLinkFailReason, type WebLinkUrlCheck } from '../shared/webLink'
+import {
+  assessWebFrameEmbeddability,
+  checkWebLinkUrl,
+  isAllowedInetAddress,
+  type WebFramePrecheck,
+  type WebLinkFailReason,
+  type WebLinkUrlCheck,
+} from '../shared/webLink'
 import { parseWebMetaFromHtml } from './webMetaExtract'
 
 /** 抓取与缓存界限（默认值的依据见 #342 报告参数表；契约测试钉住） */
@@ -67,6 +74,10 @@ export interface WebLinkMeta {
   domain: string
   title: string
   description: string
+  /** #343（P3-11）page 形态抓取附带的 iframe 嵌入预检（card 形态缺席）：
+   *  最终响应的 X-Frame-Options / frame-ancestors / 最终协议判定——
+   *  embeddable=true 仅代表已知头未拒绝，不是内容可见的承诺 */
+  frame?: WebFramePrecheck
 }
 
 export type WebLinkMetaOutcome =
@@ -124,10 +135,11 @@ export class WebLinkMetaService {
   /**
    * 抓取外链元信息（消费者视角）：signal 中止即以 AbortError 拒绝——
    * 同 URL 的其他消费者不受影响，最后一人离开才中止底层连接。取消后
-   * 同 URL 的新 fetch 重新发起（在途条目已清除）。shape 仅参与缓存键
-   * 区分（#343 原网页形态预留；本票恒 'card'）。
+   * 同 URL 的新 fetch 重新发起（在途条目已清除）。shape 参与缓存键区分
+   * （card 卡片 / #343 page 原网页——page 形态额外捕获最终响应的嵌入
+   * 拒绝头组装 meta.frame，见 assessWebFrameEmbeddability）。
    */
-  fetch(url: string, signal?: AbortSignal, shape = 'card'): Promise<WebLinkMetaOutcome> {
+  fetch(url: string, signal?: AbortSignal, shape: 'card' | 'page' = 'card'): Promise<WebLinkMetaOutcome> {
     const check = this.checkUrl(url)
     if (!check.ok) {
       return Promise.resolve({ ok: false, reason: check.reason })
@@ -143,7 +155,7 @@ export class WebLinkMetaService {
       const pending: InFlightEntry = { consumers: 0, controller, task: Promise.resolve({ ok: false, reason: 'web-unreachable' }) }
       // 任务收敛（成功写缓存之后）即移除在途条目——迟到的同 URL 请求走
       // 缓存命中而非合并到已完成的任务
-      pending.task = this.runFetch(check.url, pending).finally(() => {
+      pending.task = this.runFetch(check.url, pending, shape).finally(() => {
         this.inflight.delete(key)
       })
       this.inflight.set(key, pending)
@@ -205,7 +217,7 @@ export class WebLinkMetaService {
 
   // ---- 底层任务（永不 reject：取消/超时/失败一律收敛为 outcome） ----
 
-  private async runFetch(startUrl: string, entry: InFlightEntry): Promise<WebLinkMetaOutcome> {
+  private async runFetch(startUrl: string, entry: InFlightEntry, shape: 'card' | 'page'): Promise<WebLinkMetaOutcome> {
     const release = await this.acquireSlot()
     let cause: 'timeout' | 'consumer' | null = null
     entry.controller.signal.addEventListener('abort', () => {
@@ -225,7 +237,7 @@ export class WebLinkMetaService {
         if (!check.ok) {
           return { ok: false, reason: check.reason }
         }
-        const step = await this.requestOnce(check.url, entry.controller.signal, () => cause)
+        const step = await this.requestOnce(check.url, entry.controller.signal, () => cause, shape)
         if (step.kind === 'redirect') {
           redirects++
           if (redirects > this.limits.maxRedirects) {
@@ -262,11 +274,15 @@ export class WebLinkMetaService {
     }
   }
 
-  /** 单次请求（含响应头边界与响应体读取）：redirect / fail / meta 三态 */
+  /** 单次请求（含响应头边界与响应体读取）：redirect / fail / meta 三态。
+   *  #343：page 形态在 2xx 最终响应上捕获嵌入拒绝头（X-Frame-Options /
+   *  Content-Security-Policy——report-only 不参与强制判定故不读取）与最终
+   *  协议，预检结果随 meta 下发 */
   private requestOnce(
     url: string,
     signal: AbortSignal,
     causeOf: () => 'timeout' | 'consumer' | null,
+    shape: 'card' | 'page',
   ): Promise<
     | { kind: 'redirect'; location: string }
     | { kind: 'outcome'; outcome: WebLinkMetaOutcome }
@@ -314,7 +330,14 @@ export class WebLinkMetaService {
           resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-too-large' } })
           return
         }
-        this.readBody(url, req, res, resolve)
+        const frame = shape === 'page'
+          ? assessWebFrameEmbeddability({
+            protocol: parsed.protocol,
+            xFrameOptions: res.headers['x-frame-options'],
+            contentSecurityPolicy: res.headers['content-security-policy'],
+          })
+          : undefined
+        this.readBody(url, req, res, resolve, frame)
       })
       req.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === BLOCK_ADDR_CODE) {
@@ -336,12 +359,14 @@ export class WebLinkMetaService {
     })
   }
 
-  /** 流式读取响应体：累计超限即中断（web-too-large）；完成即解析元信息 */
+  /** 流式读取响应体：累计超限即中断（web-too-large）；完成即解析元信息
+   *  （#343：page 形态的 frame 预检随最终响应组装进 meta 与缓存） */
   private readBody(
     url: string,
     req: http.ClientRequest,
     res: Readable & { statusCode?: number },
     resolve: (value: { kind: 'redirect'; location: string } | { kind: 'outcome'; outcome: WebLinkMetaOutcome }) => void,
+    frame?: WebFramePrecheck,
   ): void {
     const chunks: Buffer[] = []
     let total = 0
@@ -373,9 +398,10 @@ export class WebLinkMetaService {
           domain: finalUrl.hostname.toLowerCase(),
           title,
           description,
+          ...(frame !== undefined ? { frame } : {}),
         },
       })
-      this.cacheMeta(url, title, description)
+      this.cacheMeta(url, title, description, frame)
     })
     res.on('error', () => {
       finish({ ok: false, reason: 'web-unreachable' })
@@ -409,7 +435,7 @@ export class WebLinkMetaService {
 
   // ---- 内存缓存（键 = 形态 + 归一 URL；LRU + TTL + 双上限） ----
 
-  private cacheMeta(url: string, title: string, description: string): void {
+  private cacheMeta(url: string, title: string, description: string, frame?: WebFramePrecheck): void {
     const check = this.checkUrl(url)
     if (!check.ok) {
       return
@@ -420,12 +446,13 @@ export class WebLinkMetaService {
       domain: finalUrl.hostname.toLowerCase(),
       title,
       description,
+      ...(frame !== undefined ? { frame } : {}),
     }
     const bytes = entryBytesOf(meta)
     if (bytes > this.limits.cacheMaxBytes) {
       return // 单条超限不入缓存（仍可当场返回）
     }
-    const key = `card\n${meta.url}`
+    const key = `${frame !== undefined ? 'page' : 'card'}\n${meta.url}`
     const existing = this.cache.get(key)
     if (existing !== undefined) {
       this.cache.delete(key)

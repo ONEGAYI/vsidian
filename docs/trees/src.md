@@ -214,7 +214,9 @@ vsidian/
         ├── tooltipCard.css             # 悬停提示共享样式
         ├── tooltipCard.ts              # 悬停提示委托控制器
         ├── tooltipGeometry.ts          # 悬停提示定位几何纯函数
+        ├── untrustedFrame.ts           # 不可信子页消息来源判定
         ├── webCard.ts                  # 外链卡片内容视图（web 通道）
+        ├── webPage.ts                  # 外链原网页视图（iframe+退回）
         ├── wordMotion.ts               # 词级移动命令与引擎配置
         └── wordSegmentSettings.ts      # 设置页中文分词分页
 <!-- file-tree:tree^id=src:end -->
