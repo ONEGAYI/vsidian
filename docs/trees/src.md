@@ -67,6 +67,7 @@ vsidian/
     │   ├── findOptions.ts        # 查找选项三开关单一事实源
     │   ├── formatOperations.ts   # 格式操作注册清单
     │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
+    │   ├── globLiteral.ts        # watcher 文件名 glob 转义
     │   ├── hoverRefresh.ts       # 引用视图同步参数与订阅注册表
     │   ├── i18n.ts               # t() 取词与语言包装配状态模块
     │   ├── imageRefresh.ts       # 图片刷新共享常量与核验决策
