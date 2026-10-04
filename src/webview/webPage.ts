@@ -19,8 +19,9 @@
 // 真实说明与可操作退路（退回卡片 / 标题条浏览器打开入口）。
 //
 // 生命周期：dispose 由容器（hoverPopup）在关闭/换目标/手动退回/设置联动
-// 销毁时调用——移除 DOM 即同时中止 iframe 在途网络装载并使其退出消息
-// 来源否定判定（untrustedFrame 按在场元素比对，无独立注册需释放）。
+// 销毁时调用——移除 DOM 即同时中止 iframe 在途网络装载（消息桥为允许
+// 清单制：仅放行宿主来源，一切子帧消息无条件拒绝，无按 iframe 登记的
+// 状态需释放）。
 import { t } from '../shared/i18n'
 import type { RefWebContent } from '../shared/refContent'
 import type { WebFrameDenyReason } from '../shared/webLink'

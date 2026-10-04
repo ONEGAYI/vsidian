@@ -3692,7 +3692,7 @@
         "live",
         "reading"
       ],
-      "states": "交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下；#221 键盘命令打开时焦点进入浮层，:focus-visible 轮廓指示，焦点在内不因鼠标离开销毁；P2-06 起目标 dirty 的内部 Live 抵抗普通关闭条件——移出/外点/失焦不销毁，dirty 清零后恢复常规关闭）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview / hoverEntry / hoverLive 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。P2-06 内部模式两态：内部 Reading（缺省内容视图，无写端口；圆点与保存/关闭入口不在场）/ 内部 Live（编辑器容器在场、隐藏内容视图；目标 dirty 时圆点与保存入口可见；编辑暂停态状态行就地提示）。#343（P3-11）web 双形态：card（#342 卡片）/ page（预检未拒绝的 https 地址挂跨源沙箱 iframe——sandbox 仅 allow-scripts、referrer no-referrer，固定视口高 320px 内容自滚；工具行退回卡片按钮常驻、下方无法确认诚实说明行；已知拒绝（X-Frame-Options/frame-ancestors）或 HTTP 混合内容自动退回卡片并显示主题错误色原因行；手动/自动退回与关闭/换目标/开关关闭/形态切换均销毁 iframe（移除元素即中止装载并退出消息来源否定判定），不改写用户形态设置）。",
+      "states": "交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下；#221 键盘命令打开时焦点进入浮层，:focus-visible 轮廓指示，焦点在内不因鼠标离开销毁；P2-06 起目标 dirty 的内部 Live 抵抗普通关闭条件——移出/外点/失焦不销毁，dirty 清零后恢复常规关闭）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview / hoverEntry / hoverLive 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。P2-06 内部模式两态：内部 Reading（缺省内容视图，无写端口；圆点与保存/关闭入口不在场）/ 内部 Live（编辑器容器在场、隐藏内容视图；目标 dirty 时圆点与保存入口可见；编辑暂停态状态行就地提示）。#343（P3-11）web 双形态：card（#342 卡片）/ page（预检未拒绝的 https 地址挂跨源沙箱 iframe——sandbox 仅 allow-scripts、referrer no-referrer，固定视口高 320px 内容自滚；工具行退回卡片按钮常驻、下方无法确认诚实说明行；已知拒绝（X-Frame-Options/frame-ancestors）或 HTTP 混合内容自动退回卡片并显示主题错误色原因行；手动/自动退回与关闭/换目标/开关关闭/形态切换均销毁 iframe（移除元素即中止装载；消息桥为允许清单制——仅放行宿主来源，子帧消息无条件拒绝，无登记状态需退出），不改写用户形态设置）。",
       "dom": "#220 起直挂 #app 内（此前挂 body；fixed 定位不受 #app 布局影响）——#app 的主题变量与 `#app .vsidian-view-reading …` 正文样式、已启用 CSS 片段（容器类含 .markdown-preview-view 别名桥）随之天然命中，不为浮层复制第二套主题环境。内部 Reading 容器挂 .vsidian-view-reading。P2-06：动作组三按钮为真实 <button type=\"button\">（aria-label 与悬停词经 i18n 词条 embed.saveTarget / embed.modeToLive / embed.modeToReading / embed.closeEditor，悬停词走 data-tooltip；内联 SVG 图标 aria-hidden、16 网格 stroke currentColor），圆点为 <span>（aria-label embed.dirtyDot），与嵌入卡片头部同款规则并列（浮层选择器置首）。",
       "example": ".vsidian-hover-popup {\n  width: 480px;\n  max-height: 400px;\n}\n\n/* 标题条与跳转入口（嵌入卡片同款规则并列，浮层选择器置首） */\n#app > .vsidian-hover-popup .vsidian-hover-popup-header,\n#app .vsidian-embed-card .vsidian-embed-card-header {\n  display: flex;\n  justify-content: space-between;\n  padding: 4px 10px;\n}\n\n/* P2-06 头部未保存圆点（嵌入卡片 P2-04 同款并列） */\n#app > .vsidian-hover-popup .vsidian-hover-popup-dirty {\n  font-weight: 700;\n  color: var(--vscode-editorWarning-foreground, #cca700);\n}",
       "obsidian": {
@@ -3710,7 +3710,7 @@
         "浏览器 webLinkCard（#342）：真实指针驱动外链卡片——标题/摘要/域名实际文字内容断言、开关关闭零请求、失败分态与打开入口",
         "单元 hoverPopupCssContract（#343）：原网页视图五规则（容器纵向/退回按钮链接色边框与 hover/iframe 视口尺寸背景边框/说明行描述色/原因行错误色）",
         "单元 hoverPopup（#343）：page 形态 iframe 沙箱属性（allow-scripts/no-referrer/src）、退回矩阵（denied/http/防御 http）、手动退回零设置写、关闭/重开/设置联动销毁与不可信窗口计数归零",
-        "单元 untrustedFrame + webFrameEmbed（#343）：消息来源否定判定与嵌入预检纯逻辑矩阵",
+        "单元 untrustedFrame + webFrameEmbed（#343）：消息来源允许清单判定与嵌入预检纯逻辑矩阵",
         "浏览器 webPageView（#343）：真实 iframe 内容可见与滚轮滚动（受控可嵌入站点）、样本矩阵退回原因、恶意子页消息注入被丢弃、设置联动销毁"
       ],
       "introduced": "#218（2026-09-30）"
