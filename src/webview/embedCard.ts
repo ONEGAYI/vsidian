@@ -495,6 +495,13 @@ function relocatedInterval(
     if (found !== null) {
       return
     }
+    if (scans >= RELOCATION_SCAN_LIMITS.hitScans) {
+      // 命中扫描预算已被先前变更耗尽（miss 扫描同样入账——多枚变更形态
+      // 如列移动每行一枚，前方各行先各耗 1 次）：本枚**确实未被检视**，
+      // 源文是否存活无法判定——升为超限，不得返回 null 冒充真删除
+      overBudget = true
+      return
+    }
     const text = inserted.toString()
     if (text.length > RELOCATION_SCAN_LIMITS.insertTextLength) {
       // 放弃该枚逐字检索：源文可能在其中（存活无法判定）。后续短枚变更
