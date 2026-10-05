@@ -2215,6 +2215,22 @@ describe('#372 离开编辑后的整表高度优化（调度层）', () => {
     expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBe(0)
   })
 
+  it('视图销毁：待执行任务与计时器回收，销毁后零搜索零崩溃', async () => {
+    const before = getTableOptimizeStats()
+    const state = EditorState.create({
+      doc: OPT_TABLE,
+      extensions: [livePreviewDecorations],
+      selection: EditorSelection.single(OPT_TABLE.indexOf(cjk(44)) + 1),
+    }).update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state
+    const view = new EditorView({ parent: document.createElement('div'), state })
+    // 表内（活动）→ 离开（入队 0ms 冲量）→ 立即销毁（计时器/缓存随 destroy 回收）
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    view.destroy()
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+    expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
+  })
+
   it('迟到结果按身份/版本/列数/度量签名验证：过期载荷全部拒绝（纯状态层）', () => {
     const state = EditorState.create({ doc: OPT_TABLE, extensions: [livePreviewDecorations] })
       .update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state
