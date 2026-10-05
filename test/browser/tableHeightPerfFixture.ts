@@ -9,7 +9,7 @@
 // - perfStats()：调度层统计（searches/publishes/cellEvals/candidates）
 // - perfMetrics()：度量就绪探针（availablePx 等）
 import { WebviewSyncController } from '../../src/webview/syncController'
-import { EditorView, keymap } from '@codemirror/view'
+import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { optimizeTableHeight } from '../../src/webview/tableHeightPlan'
 import { getTableOptimizeStats } from '../../src/webview/tableHeightPlan'
@@ -57,7 +57,7 @@ Object.assign(window, {
     return {
       rowCount: rows.length,
       height: last.bottom - first.top,
-      plan: rows[0].style.getPropertyValue('--vsidian-table-col-widths'),
+      plan: (rows[0] as HTMLElement).style.getPropertyValue('--vsidian-table-col-widths'),
       tracksSum: tracks.reduce((s, v) => s + v, 0),
       rowArea: rows[0].getBoundingClientRect().width,
       gridCells: document.querySelectorAll('.vsidian-table-grid-cell').length,
@@ -93,7 +93,7 @@ Object.assign(window, {
       const dt = performance.now() - t0
       if (i === 0) cold = dt
       else times.push(dt)
-      if (i === 0) cacheSize = cache.size
+      if (i === 0) cacheSize = cache?.size ?? 0
     }
     times.sort((a, b) => a - b)
     const median = times.length ? times[Math.floor(times.length / 2)]! : cold
