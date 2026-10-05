@@ -169,6 +169,16 @@ describe('resolveProxyConfig 决策矩阵（VSCode http.proxy 族语义）', () 
     }
   })
 
+  it('userinfo 含非法 percent 编码不抛异常：按 invalid 回退直连（review-loops #346 增量轮）', () => {
+    // WHATWG URL 保留字面 % 序列于 username，decodeURIComponent 抛 URIError
+    // ——派生 Basic 头须有防护，异常不得从 resolveProxyConfig 冒出悬挂抓取链
+    const decision = resolveProxyConfig({ proxy: 'http://us%er:pw@127.0.0.1:8080' }, noEnv, 'https:')
+    expect(decision.mode).toBe('invalid')
+    if (decision.mode === 'invalid') {
+      expect(decision.source).toBe('http://us%er:pw@127.0.0.1:8080')
+    }
+  })
+
   it('proxyAuthorization 设置在场时优先于 userinfo 派生值', () => {
     const decision = resolveProxyConfig(
       { proxy: `http://u:p@127.0.0.1:${proxyPort}`, proxyAuthorization: 'Bearer corp-token' },

@@ -101,10 +101,21 @@ export function resolveProxyConfig(
   if (url.protocol !== 'http:' || url.port !== '' && !Number.isFinite(Number(url.port))) {
     return { mode: 'invalid', source }
   }
-  const authorization = nonEmptyString(input.proxyAuthorization)
-    ?? ((url.username !== '' || url.password !== '')
-      ? `Basic ${Buffer.from(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`).toString('base64')}`
-      : undefined)
+  // userinfo 派生 Basic 头的解码防护（review-loops #346 增量轮）：WHATWG URL
+  // 保留字面 % 序列于 username/password，decodeURIComponent 对其抛 URIError
+  // ——异常不得从本函数冒出（getProxy 同步调用方无 catch，会悬挂抓取链），
+  // 按「解析失败 → invalid 回退直连」的模块语义归一
+  let derivedAuthorization: string | undefined
+  if (url.username !== '' || url.password !== '') {
+    try {
+      derivedAuthorization = `Basic ${Buffer
+        .from(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`)
+        .toString('base64')}`
+    } catch {
+      return { mode: 'invalid', source }
+    }
+  }
+  const authorization = nonEmptyString(input.proxyAuthorization) ?? derivedAuthorization
   return {
     mode: 'proxy',
     target: {

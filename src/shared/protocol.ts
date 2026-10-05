@@ -2642,7 +2642,11 @@ function isObject(v: unknown): v is Record<string, unknown> {
 /** 会话内恢复的 state 载荷（settings.uiState / settings.focusSection 透传，
  *  PR #346）：宿主不解释内容——分页内输入态的内部形态由捕获方（分页的
  *  captureState）自负，协议层只拦 postMessage 不可序列化的值（函数等），
- *  嵌套内部同样由捕获方保证可序列化 */
+ *  嵌套内部同样由捕获方保证可序列化。已知边界（review-loops #346 增量轮
+ *  落档）：本校验只查顶层形态，循环引用/嵌套 Map 等不可序列化纯对象会
+ *  通过——若此类载荷进入宿主记忆（lastUiState），此后每次重开面板的
+ *  恢复补发在宿主侧序列化失败、中断该次恢复链（不崩宿主）；当前两个
+ *  捕获方均为纯标量对象，新增分页钩子时捕获方须自守 */
 function isOpaqueStatePayload(v: unknown): boolean {
   return v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
     || Array.isArray(v) || isObject(v)

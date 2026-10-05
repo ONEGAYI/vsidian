@@ -1532,6 +1532,10 @@ function applyHoverWebContent(state: HoverPopupState, meta: RefWebContent): void
   // 会被冲掉），web 卡片/页面视图无块语义，挂滚动区直下；容器销毁
   //（浮层关闭）经 teardownWebView 收敛释放，DOM 随树整体移除
   if (meta.frame?.embeddable === true && !state.webPageSuppressed) {
+    // 装配前先收敛可能存在的旧视图（幂等；review-loops #346 增量轮防御
+    // 缺口：当前调用点受 instanceId+reqId 守卫无二次路径，未来为 web 形态
+    // 增加刷新/重试时不留双 iframe 与在途装载）
+    teardownWebView(state)
     // 退回按钮在标题条（2026-10-05 改版）——视图装配即显示
     const view = buildWebPageView(meta)
     if (view !== null) {

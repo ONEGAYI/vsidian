@@ -783,6 +783,24 @@ describe('WebLinkMetaService 代理接入（#346）', () => {
     }
   })
 
+  it('invalid 回退 warn 对含凭据的配置串脱敏（review-loops #346 增量轮）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const service = makeProxiedService(() => ({
+        mode: 'invalid', source: 'https://user:secret-pass@proxy.corp:8443',
+      }))
+      expect((await service.fetch(url('/html'))).ok).toBe(true)
+      const messages = warn.mock.calls.map((c) => String(c[0]))
+      expect(messages.length).toBe(1)
+      const logged = messages[0]!
+      expect(logged).not.toContain('secret-pass')
+      expect(logged).not.toContain('user:secret-pass@')
+      expect(logged).toContain('proxy.corp:8443') // 主机端口保留（定位线索）
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('http 目标走绝对形态代理请求（请求行绝对 URL、Host 为目标权威）', async () => {
     // 用独立观测服务器作代理：绝对形态请求落在普通 handler，目标服务器零直连
     const observed: Array<{ url: string; host?: string; authorization?: string }> = []

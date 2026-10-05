@@ -44,6 +44,14 @@ import {
 import { connectThroughProxy, proxyPortOf, PROXY_TUNNEL_ERROR_CODE, type ProxyDecision, type ProxyTarget } from './proxyAgent'
 import { parseWebMetaFromHtml } from './webMetaExtract'
 
+/** 代理配置串的 userinfo 脱敏（review-loops #346 增量轮）：剥「scheme://
+ *  user:pass@」中的凭据段再进日志。按形态正则剥除——对合法与无法解析的
+ *  原串同样适用（invalid 的常见成因恰是 https/socks 代理形态携带凭据）；
+ *  主机与端口保留（定位配置问题所需），去抖键不受影响（用原始值） */
+export function redactProxyCredentials(source: string): string {
+  return source.replace(/(^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^@/:?#]+(?::[^@/?#]*)?)@/, '$1[redacted]@')
+}
+
 /** 抓取与缓存界限（默认值的依据见 #342 报告参数表；契约测试钉住） */
 export interface WebLinkLimits {
   /** 总预算超时（毫秒，含全部重定向跳；排队等待不占预算） */
@@ -345,13 +353,15 @@ export class WebLinkMetaService {
   }
 
   /** #346：每跳请求前解析代理决策（接线侧每调用读一次 VSCode 配置——配置
-   *  变更无需重启生效）；非法代理值归一为直连并按原始值去抖告警一次 */
+   *  变更无需重启生效）；非法代理值归一为直连并按原始值去抖告警一次
+   *  （告警文案脱敏 userinfo——原始值常含 https/socks 形态代理的用户名
+   *  密码，明文进日志属凭据泄漏；去抖键仍用原始值保持会话内一次） */
   private resolveProxyDecision(protocol: string): ProxyDecision {
     const decision = this.getProxy(protocol)
     if (decision.mode === 'invalid') {
       if (!this.warnedInvalidProxy.has(decision.source)) {
         this.warnedInvalidProxy.add(decision.source)
-        console.warn(`[vsidian] 外链抓取代理配置无法应用，已回退直连：${decision.source}`)
+        console.warn(`[vsidian] 外链抓取代理配置无法应用，已回退直连：${redactProxyCredentials(decision.source)}`)
       }
       return { mode: 'direct' }
     }

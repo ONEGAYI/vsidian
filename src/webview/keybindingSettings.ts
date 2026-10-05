@@ -138,10 +138,12 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     }
   }
 
-  /** 应用恢复的输入态（selectSection 在 mount 前调用）。形态不符整条忽略
-   *  （旧端/损坏载荷安全降级）；text 模式强制清空键位查询——keyQuery 只
-   *  在 key 模式有意义，与 setKeyMode 的既有清理行为同源（capture 自洽
-   *  载荷不受影响） */
+  /** 应用恢复的输入态（selectSection 在 mount 前调用）。整体形态不符
+   *  （非纯对象/数组/空）整条忽略（旧端/损坏载荷安全降级）；对象内
+   *  **逐项守卫**——单项形态不符跳过该项、其余照常恢复（review-loops
+   *  #346 增量轮勘正：实现自始为逐项，非整条）；text 模式强制清空键位
+   *  查询——keyQuery 只在 key 模式有意义，与 setKeyMode 的既有清理行为
+   *  同源（capture 自洽载荷不受影响） */
   restoreState(state: unknown): void {
     if (typeof state !== 'object' || state === null || Array.isArray(state)) return
     const record = state as Record<string, unknown>
