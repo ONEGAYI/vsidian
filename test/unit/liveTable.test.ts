@@ -2053,6 +2053,62 @@ describe('#372 离开编辑后的整表高度优化（调度层）', () => {
     expect(templateOf(view)).toBe(optimized)
   })
 
+  it('纯滚动（viewportChanged、doc 不变）的可见扫描 flush 复用指纹不重扫；doc 变化后重扫', async () => {
+    // 直连 body 的视图（setupLinked 的宿主挂在 detached div，CM6 无法测量，
+    // viewport 恒全覆盖、scrollIntoView 恒 no-op——无法触达滚动路径）；长文
+    // 档垫前后文使表居于中部，scrollIntoView 才有真实视口位移（jsdom 探针
+    // 实证：连接态下 scrollIntoView 产生 viewportChanged=true 的 update）
+    const pad = (n: number, tag: string): string =>
+      Array.from({ length: n }, (_, i) => `${tag}垫行${i}`).join('\n')
+    const text = `${pad(150, '前')}\n${OPT_TABLE}\n${pad(150, '后')}\n`
+    const host = document.body.appendChild(document.createElement('div'))
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({ doc: text, extensions: [livePreviewDecorations] }),
+    })
+    try {
+      const tablePos = text.indexOf('| 功能') + 2
+      // 就绪链路（同 setupActive）：先进表（活动态）再注入度量——挂载/度量
+      // 扫描不提前优化该表
+      view.dispatch({ selection: EditorSelection.single(tablePos) })
+      view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+      await settle()
+      const before = getTableOptimizeStats()
+      // 离开表：一次完整优化 = 一次全表指纹扫描
+      view.dispatch({ selection: EditorSelection.single(0) })
+      await settle()
+      const left = getTableOptimizeStats()
+      expect(left.searches - before.searches).toBe(1)
+      expect(left.signatureScans - before.signatureScans).toBe(1)
+      // 纯滚动（滚到表 → 滚离 → 再滚回；viewportChanged、doc 不变）：
+      // 可见扫描 flush 复用缓存指纹，零重扫、零重复搜索、零重复发布
+      view.dispatch({ effects: EditorView.scrollIntoView(tablePos, { y: 'start' }) })
+      await settle()
+      view.dispatch({ effects: EditorView.scrollIntoView(0, { y: 'start' }) })
+      await settle()
+      view.dispatch({ effects: EditorView.scrollIntoView(tablePos, { y: 'center' }) })
+      await settle()
+      const scrolled = getTableOptimizeStats()
+      expect(scrolled.signatureScans - left.signatureScans).toBe(0)
+      expect(scrolled.searches - left.searches).toBe(0)
+      expect(scrolled.publishes - left.publishes).toBe(0)
+      // doc 变化（表后正文键入，表身份不变而 doc 引用变化）：滚回表后指纹
+      // 缓存失效重扫；表内容指纹未变 → tracked 同签名不重复搜索
+      const tail = view.state.doc.line(view.state.doc.lines - 1)
+      view.dispatch({ changes: { from: tail.from, insert: '增' }, selection: EditorSelection.single(tail.from + 1) })
+      view.dispatch({ effects: EditorView.scrollIntoView(0, { y: 'start' }) })
+      await settle()
+      view.dispatch({ effects: EditorView.scrollIntoView(tablePos, { y: 'center' }) })
+      await settle()
+      const edited = getTableOptimizeStats()
+      expect(edited.signatureScans - scrolled.signatureScans).toBe(1)
+      expect(edited.searches - scrolled.searches).toBe(0)
+    } finally {
+      view.destroy()
+      host.remove()
+    }
+  })
+
   it('待执行期间重新入表取消：同版本不触发搜索', async () => {
     const { view } = await setupActive()
     const before = getTableOptimizeStats()

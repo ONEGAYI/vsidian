@@ -88,8 +88,9 @@ export function defaultCellWidthMeasurer(text: string): number {
   return width
 }
 
-/** 东亚宽字符判定（简化范围表：CJK 统一表意、全角形式、假名、谚文等） */
-function isWideChar(cp: number): boolean {
+/** 东亚宽字符判定（简化范围表：CJK 统一表意、全角形式、假名、谚文等；
+ *  #372 高度规划同源消费——列宽采样与折行估算共用同一范围口径） */
+export function isWideChar(cp: number): boolean {
   return (cp >= 0x1100 && cp <= 0x115f) ||
     (cp >= 0x2e80 && cp <= 0x303e) ||
     (cp >= 0x3041 && cp <= 0x33ff) ||
@@ -145,13 +146,8 @@ export function cellVisibleLines(content: string): TableVisiblePiece[][] {
       return
     }
     if (!VISIBLE_TRANSFORM_CHARS.test(content.slice(from, to))) {
-      let display = ''
-      for (let i = from; i < to; i++) {
-        if (!escaped.has(i)) {
-          display += content[i]
-        }
-      }
-      lines.push([{ kind: 'text', text: display }])
+      // 快路径：段内无结构/标记语法字符——displaySlice 剔转义反斜杠（segBase=0：段坐标即整格坐标）
+      lines.push([{ kind: 'text', text: displaySlice(content, from, to, 0, escaped) }])
       return
     }
     lines.push(visiblePiecesOfSegment(content.slice(from, to), from, escaped))
@@ -214,14 +210,8 @@ function measureWidestSegment(content: string, measure: CellWidthMeasurer): numb
       return
     }
     if (!VISIBLE_TRANSFORM_CHARS.test(content.slice(from, to))) {
-      // 快路径：段内无结构/标记语法字符，维持 #142 拼接口径（剔转义反斜杠）
-      let display = ''
-      for (let i = from; i < to; i++) {
-        if (!escaped.has(i)) {
-          display += content[i]
-        }
-      }
-      const width = measure(display)
+      // 快路径：段内无结构/标记语法字符，维持 #142 拼接口径（displaySlice 剔转义反斜杠，segBase=0）
+      const width = measure(displaySlice(content, from, to, 0, escaped))
       if (width > widest) {
         widest = width
       }
@@ -498,8 +488,9 @@ export function tableGridTemplate(
   return planColumnTracks(samples, options).join(' ')
 }
 
-/** 数值规整输出：去多余小数尾零（504.000 → 504、4.123 → 4.123） */
-function formatNumber(value: number): string {
+/** 数值规整输出：去多余小数尾零（504.000 → 504、4.123 → 4.123）；
+ *  #372 高度规划同源消费——轨道串的数值精度两侧一致 */
+export function formatNumber(value: number): string {
   const fixed = value.toFixed(3).replace(/(\.\d*?)0+$/, '$1')
   return fixed.endsWith('.') ? fixed.slice(0, -1) : fixed
 }

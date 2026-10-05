@@ -33,6 +33,8 @@ import {
   cellVisibleLines,
   defaultCellWidthMeasurer,
   effectiveColumnFloorPx,
+  formatNumber,
+  isWideChar,
   tableGridTemplate,
   type CellWidthMeasurer,
   type TableReadabilityInput,
@@ -114,7 +116,7 @@ function tokenizeText(text: string, measure: CellWidthMeasurer, out: WrapToken[]
       continue
     }
     const cp = ch.codePointAt(0) ?? 0
-    if (isWideCodePoint(cp)) {
+    if (isWideChar(cp)) {
       // CJK 单字是独立可断原子：先落前词
       flush()
       out.push({ units: measure(ch), trailingUnits: 0 })
@@ -128,22 +130,6 @@ function tokenizeText(text: string, measure: CellWidthMeasurer, out: WrapToken[]
     wordUnits += measure(ch)
   }
   flush()
-}
-
-/** 东亚宽字符判定（与 tableColumnWidth 的启发式同口径，模块内复用避免循环导出） */
-function isWideCodePoint(cp: number): boolean {
-  return (cp >= 0x1100 && cp <= 0x115f) ||
-    (cp >= 0x2e80 && cp <= 0x303e) ||
-    (cp >= 0x3041 && cp <= 0x33ff) ||
-    (cp >= 0x3400 && cp <= 0x4dbf) ||
-    (cp >= 0x4e00 && cp <= 0x9fff) ||
-    (cp >= 0xa000 && cp <= 0xa4cf) ||
-    (cp >= 0xac00 && cp <= 0xd7a3) ||
-    (cp >= 0xf900 && cp <= 0xfaff) ||
-    (cp >= 0xfe30 && cp <= 0xfe4f) ||
-    (cp >= 0xff00 && cp <= 0xff60) ||
-    (cp >= 0xffe0 && cp <= 0xffe6) ||
-    (cp >= 0x20000 && cp <= 0x3fffd)
 }
 
 /** 单元格折行指标：可见分片（cellVisibleLines 同源）→ 逐行 token + 自然宽 */
@@ -470,12 +456,6 @@ export interface TableHeightOptimizeOptions {
   measure?: CellWidthMeasurer
   /** 逐格折行指标缓存（调度层持有；容量 TABLE_OPT_CACHE_ROWS 由写入侧约束） */
   tokenCache?: Map<string, CellWrapProfile>
-}
-
-/** 数值规整输出：去多余小数尾零（与 tableColumnWidth 的 formatNumber 同精度） */
-function formatNumber(value: number): string {
-  const fixed = value.toFixed(3).replace(/(\.\d*?)0+$/, '$1')
-  return fixed.endsWith('.') ? fixed.slice(0, -1) : fixed
 }
 
 /**
@@ -962,8 +942,10 @@ export function optimizeTableHeight(
 // ---- 观测口（千行表预算契约同族：差分断言，不提供重置） ----
 
 /** #372 调度层统计：searches=完整搜索次数；publishes=实际应用次数（效果
- *  验证通过）；discards=迟到/无效载荷丢弃；cellEvals/candidates=预算记账 */
-const optimizeStats = { searches: 0, publishes: 0, discards: 0, cellEvals: 0, candidates: 0 }
+ *  验证通过）；discards=迟到/无效载荷丢弃；cellEvals/candidates=预算记账；
+ *  signatureScans=#373 调度层逐行构造内容指纹的全表扫描次数（doc 未变的
+ *  纯滚动 flush 复用缓存指纹，不计入——观测滚动路径零重扫） */
+const optimizeStats = { searches: 0, publishes: 0, discards: 0, cellEvals: 0, candidates: 0, signatureScans: 0 }
 
 export function getTableOptimizeStats(): Readonly<typeof optimizeStats> {
   return { ...optimizeStats }
@@ -984,6 +966,11 @@ export function noteTableOptimizePublish(): void {
 /** 载荷丢弃记账（验证失败路径上报） */
 export function noteTableOptimizeDiscard(): void {
   optimizeStats.discards += 1
+}
+
+/** 内容指纹全行扫描记账（调度层每次逐行构造指纹时上报；缓存复用不计） */
+export function noteTableSignatureScan(): void {
+  optimizeStats.signatureScans += 1
 }
 
 /**

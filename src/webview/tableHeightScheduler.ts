@@ -12,14 +12,15 @@
 //   菜单/格内嵌入卡而源选区未离表不触发；主编辑器失焦不等同离开。
 // - 触发：最后一个表内光标/选区离开后对有变化的表一次完整优化（同版本
 //   去重：内容指纹 + 度量签名 + 列数 + 表格身份）。初次挂载的非活动可见
-//   表允许一次；离屏表延至可见且非活动（viewportChanged 扫描）。回表、
+//   表允许一次；离屏表延至可见且非活动（viewportChanged 扫描）——纯滚动
+//   的连发扫描复用上次指纹（doc 未变即不重扫全表）。回表、
 //   删表/区间迁移（docChanged）、模式切换（视图隐藏）、实例销毁取消待执行
 //   任务；迟到结果按载荷四元组在字段 update 复核丢弃。
 // - IME 组合期搜索与发布均为零（组合结束监听重排待执行任务）；格内引用
 //   编辑期间父表暂停（嵌入子编辑器持焦不算父表离开信号）。
 // - 缓存随视图释放：逐格折行指标缓存（TABLE_OPT_CACHE_ROWS 上限清空）与
 //   已优化签名登记（TABLE_OPT_TRACKED_TABLES 上限清空），无持久存储。
-import { type EditorState, type Extension, type StateEffect } from '@codemirror/state'
+import { type EditorState, type Extension, type StateEffect, type Text } from '@codemirror/state'
 import { EditorView, ViewPlugin } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import {
@@ -38,6 +39,7 @@ import {
   applyTableHeightPlan,
   noteTableOptimizeDiscard,
   noteTableOptimizeSearch,
+  noteTableSignatureScan,
   optimizeTableHeight,
   tableMetricsSig,
   type CellWrapProfile,
@@ -49,14 +51,19 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
   class {
     /** 上一事务的活动表集合（Table 节点 from；docChanged 时随变更映射） */
     private prevActive = new Set<number>()
-    /** 离开触发的待执行任务：tableFrom → 调度时文档引用（0ms 冲量消费） */
-    private pendingLeave = new Map<number, unknown>()
+    /** 离开触发的待执行任务（表格身份集合；0ms 冲量消费） */
+    private pendingLeave = new Set<number>()
     /** 待执行刷新定时器（0ms；组合期/嵌入编辑期挂起） */
     private flushTimer: ReturnType<typeof setTimeout> | null = null
     /** 可见扫描请求（挂载/度量变化/viewport 非 doc 变更时置位） */
     private scanQueued = false
     /** 已优化签名登记：表格身份 → 仲裁键（内容指纹+列数+度量签名） */
     private tracked = new Map<number, { sig: string }>()
+    /** 内容指纹缓存：表格身份 → 上次仲裁键及其文档引用与度量签名——
+     *  doc 未变（Text 引用相等）且度量签名相同时复用上次指纹直接比对
+     *  tracked，跳过全行重扫（纯滚动的 viewportChanged 连发不重复构造
+     *  千行指纹；doc 变化/度量变化/容量上限自然或显式失效） */
+    private fingerCache = new Map<number, { doc: Text; metricsSig: string; sig: string }>()
     /** 逐格折行指标缓存（行文本 → profile；随视图释放） */
     private profileCache = new Map<string, CellWrapProfile>()
     private destroyed = false
@@ -74,6 +81,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       this.disarmFlush()
       this.pendingLeave.clear()
       this.tracked.clear()
+      this.fingerCache.clear()
       this.profileCache.clear()
       this.view.contentDOM.removeEventListener('compositionend', this.onCompositionEnd)
     }
@@ -92,6 +100,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       // （活动表由离开事件处理——「活动表轻量适配、非活动可见表合并重算」）
       if (u.startState.facet(tableMetricsFacet) !== u.state.facet(tableMetricsFacet)) {
         this.tracked.clear()
+        this.fingerCache.clear()
         this.queueScan()
       }
       if (u.docChanged) {
@@ -186,7 +195,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       if (!node || node.from !== tableFrom) {
         return
       }
-      this.pendingLeave.set(tableFrom, state.doc)
+      this.pendingLeave.add(tableFrom)
       this.armFlush()
     }
 
@@ -237,7 +246,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       const metrics = state.facet(tableMetricsFacet)
       const active = this.activeTables(state)
       const effects: Array<StateEffect<TableHeightPlanPayload>> = []
-      for (const from of [...this.pendingLeave.keys()]) {
+      for (const from of [...this.pendingLeave]) {
         this.pendingLeave.delete(from)
         if (active.has(from)) {
           continue // 回表：取消
@@ -340,8 +349,20 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       if (!info) {
         return null
       }
+      // 指纹缓存命中：doc 未变（Text 引用相等，与发布载荷的文档复核同机制）
+      // 且度量签名相同 → 上次仲裁键仍有效，tracked 同签名即零行重扫（纯滚动
+      // 的 viewportChanged 连发不再重复构造千行指纹）。tracked 未命中/不同
+      // （容量清空等）则照常全扫，行为与无缓存一致
+      const metricsSig = tableMetricsSig(metrics)
+      const cached = this.fingerCache.get(table.from)
+      if (cached && cached.doc === state.doc && cached.metricsSig === metricsSig) {
+        if (this.tracked.get(table.from)?.sig === cached.sig) {
+          return null
+        }
+      }
       // 行数据与内容指纹（任一行内容/换行分布变化都改变指纹——不能仅凭
       // 逐列最大样本判缓存有效）
+      noteTableSignatureScan()
       const rows: HeightRowInput[] = []
       const samples = new Array<number>(info.columns).fill(0)
       const fingerParts: string[] = []
@@ -362,7 +383,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         }
       }
       // 仲裁键 = 列数 + 度量签名 + 内容指纹（表格身份 = Map 键）
-      const sig = `${info.columns}|${tableMetricsSig(metrics)}|${fingerParts.join('\u0001')}`
+      const sig = `${info.columns}|${metricsSig}|${fingerParts.join('\u0001')}`
       if (this.tracked.get(table.from)?.sig === sig) {
         return null // 同版本去重：未变内容再次进出不重复搜索
       }
@@ -370,6 +391,10 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         this.tracked.clear()
       }
       this.tracked.set(table.from, { sig })
+      if (this.fingerCache.size >= TABLE_OPT_TRACKED_TABLES) {
+        this.fingerCache.clear()
+      }
+      this.fingerCache.set(table.from, { doc: state.doc, metricsSig, sig })
       if (this.profileCache.size >= TABLE_OPT_CACHE_ROWS) {
         this.profileCache.clear()
       }
@@ -388,7 +413,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         tableFrom: table.from,
         doc: state.doc,
         columns: info.columns,
-        metricsSig: tableMetricsSig(metrics),
+        metricsSig,
         template: result.template,
       }
     }
