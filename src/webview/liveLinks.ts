@@ -920,12 +920,13 @@ export function createLinkInteractions(opts: {
           // 按下无修饰、抬起带 Alt（或反之）的混合手势误触发跳转
           if (event.altKey) return false
           const target = event.target instanceof Element ? event.target : null
-          // #42 网格中的普通单击先进入对应单元格源码；显式 Ctrl/Cmd
-          // 仍按上方分支跳转，避免整格都是链接时失去点击编辑入口。
-          if (target?.closest('.vsidian-table-grid-row')) return false
           const rendered = target?.closest('[data-vsidian-rendered-wikilink="true"]')
             ? 'wikilink'
             : target?.closest('[data-vsidian-rendered-link="true"]') ? 'link' : null
+          // 表格网格（#42）单击分工（2026-10-05 用户裁决改版）：链接命中
+          // 区单击即跳转（与正文渲染态同语义），格内空白（未命中链接）
+          // 单击进入单元格源码编辑；显式 Ctrl/Cmd 分支保留为冗余入口。
+          // 无链接命中且不在网格内：正文默认行为（返回 false 不处理）。
           if (!rendered) return false
           const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
           if (pos !== null) pendingClick = { target: rendered, pos, x: event.clientX, y: event.clientY }

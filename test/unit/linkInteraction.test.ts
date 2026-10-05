@@ -174,27 +174,35 @@ describe('实时预览：渲染态单击跳转，源码态普通单击编辑', (
     }
   })
 
-  it('表格网格中的链接普通单击进入单元格编辑，Ctrl+单击仍跳转', () => {
+  it('表格网格中的链接单击即跳转，格内空白单击进入单元格编辑（Ctrl+单击仍跳）', () => {
     const h = makeBridge()
     const text = '前文\n\n| [目标](./目标.md) | 数量 |\n| --- | --- |\n| 甲 | 1 |\n'
     const c = mount(h, text)
     const view = c.getView()!
     const hit = vi.spyOn(view, 'posAtCoords').mockReturnValue(text.indexOf('目标'))
     try {
+      // 链接命中区普通单击即跳（2026-10-05 用户裁决改版：链接文字区单击
+      // 即跳、格内空白才进编辑；Ctrl/Cmd+单击语义保留为冗余入口）
       const rendered = host.querySelector<HTMLElement>('.vsidian-table-grid-row .vsidian-link')!
       expect(rendered).not.toBeNull()
       rendered.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       view.contentDOM.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
-      expect(sentOf(h, 'link.activate')).toHaveLength(0)
-      // #150 后格内 widget 嵌套在 cell span 内：普通单击经网格选区样式把
-      // 光标定位进格，链接随即显示源码——Ctrl+单击须在当前 DOM 元素上
-      // 触发（旧引用已随渲染态替换而分离，真实用户点击的也是当前元素）
+      expect(sentOf(h, 'link.activate')).toHaveLength(1)
+      // Ctrl+单击仍跳（旧显式入口保留）
+      h.sent.length = 0
       const current = host.querySelector<HTMLElement>('.vsidian-table-grid-row .vsidian-link')!
       current.dispatchEvent(new MouseEvent('mousedown', { ctrlKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       expect(sentOf(h, 'link.activate')).toHaveLength(1)
-      view.dispatch({ selection: { anchor: text.indexOf('目标') } })
-      expect(host.querySelectorAll('.vsidian-table-grid-row')).toHaveLength(2)
-      expect(host.querySelector('.vsidian-table-grid-row .vsidian-link')).not.toBeNull()
+      // 格内空白（非链接命中）单击：不激活链接，仍进入单元格编辑路径
+      h.sent.length = 0
+      const blankCell = host.querySelector<HTMLElement>('.vsidian-table-grid-row .vsidian-table-grid-cell')!
+      expect(blankCell).not.toBeNull()
+      blankCell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }))
+      view.contentDOM.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }))
+      expect(sentOf(h, 'link.activate')).toHaveLength(0)
+      const anchor = view.state.selection.main.anchor
+      expect(anchor).toBeGreaterThanOrEqual(text.indexOf('| [目标]'))
+      expect(anchor).toBeLessThanOrEqual(text.indexOf('| 甲 |') + 5)
     } finally {
       hit.mockRestore()
       c.dispose()
