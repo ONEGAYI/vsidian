@@ -6,7 +6,9 @@ export function keyStep(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' 
   const aliases: Record<string, string> = {
     ' ': 'space', Escape: 'escape', ArrowUp: 'up', ArrowDown: 'down',
     ArrowLeft: 'left', ArrowRight: 'right', PageUp: 'pageup', PageDown: 'pagedown',
-    '+': 'equal', '-': 'minus', ',': 'comma', '.': 'period', '/': 'slash',
+    '+': 'equal', '=': 'equal', Add: 'equal',
+    '-': 'minus', Subtract: 'minus',
+    ',': 'comma', '.': 'period', '/': 'slash',
     '\\': 'backslash', ';': 'semicolon', "'": 'quote', '[': 'bracketleft', ']': 'bracketright',
   }
   const key = aliases[event.key] ?? event.key.toLowerCase()
