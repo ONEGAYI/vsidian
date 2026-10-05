@@ -2849,8 +2849,11 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 
 /* 每个单元格 span 对应原始文档区间；点击后光标留在该格，网格不撤下。
    #142 列宽内容比例分配：行装饰内联 --vsidian-table-col-widths（逐
-   minmax(min(48px, 等分份额), 内容占比 fr)，由纯函数按表共享产出），
+   minmax(min(下限px, 等分份额), 内容占比 fr)，由纯函数按表共享产出），
    本规则消费之；缺省（源码降级等无计划形态）回退列数等分。
+   #371 起下限为字号感知可读下限（约三汉字内容宽 + 格盒占位，视图层
+   tableMetrics 探针实测注入；缺省回落 48px），min() 内等分份额仍是
+   「保底合计不超容器」的 CSS 双保险。
    #296 渲染断裂修复：不再声明 padding: 0 / box-shadow: none 抹平引用
    行类——引用/列表内表格行须保留 .vsidian-quote-line 的竖条与内容
    缩进（组合规则见下）；顶层表格行本无行内边距与阴影，行为不变。 */
@@ -2858,6 +2861,19 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   display: grid;
   grid-template-columns: var(--vsidian-table-col-widths, repeat(var(--vsidian-table-columns), minmax(0, 1fr)));
   width: min(100%, 880px);
+}
+
+/* #371 表格可读度量探针（tableMetrics.ts）：测量「约三汉字内容宽」的
+   隐藏 span——挂 .cm-scroller 内继承正文字号、叠 vsidian-table-line 拿
+   表格行字体族；absolute 脱离文档流、visibility 隐藏、无命中面，不参与
+   布局与网格放置。内部实现类，非公开样式契约入口。 */
+#app .cm-editor .cm-scroller .vsidian-table-metrics-probe {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+  top: 0;
+  left: 0;
 }
 
 /* #296 引用内表格行：与普通引用行同观感（竖条与网格并存）——

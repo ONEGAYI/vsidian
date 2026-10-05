@@ -1010,7 +1010,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row、--vsidian-table-columns 列数与 --vsidian-table-col-widths 列宽计划）",
-    "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(48px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。片段按类规则覆写 grid-template-columns 仍优先生效。#296 渲染断裂修复：通用网格行规则不再声明 padding/box-shadow 抹平引用行类——引用内表格行与 .vsidian-quote-line 组合恢复竖条与内容缩进（同普通引用行观感）；格位外行级残留（管道/测量缓冲/前缀/replace 空占位）一律排除出 grid 放置。",
+    "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(下限px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。#371 起下限为字号感知可读下限（约三汉字内容宽 + 格盒占位，tableMetrics 探针实测注入、缺省回落 48px），min() 内等分份额仍是「保底合计不超容器」的 CSS 双保险。片段按类规则覆写 grid-template-columns 仍优先生效。#296 渲染断裂修复：通用网格行规则不再声明 padding/box-shadow 抹平引用行类——引用内表格行与 .vsidian-quote-line 组合恢复竖条与内容缩进（同普通引用行观感）；格位外行级残留（管道/测量缓冲/前缀/replace 空占位）一律排除出 grid 放置。",
     "views": [
       "live"
     ],
@@ -1022,7 +1022,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "semantic"
     },
     "verification": [
-      "单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则（防等分回潮）；tableColumnWidth：列宽计划契约"
+      "单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则（防等分回潮）；tableColumnWidth：列宽计划契约（#371 起含可读下限与可见文字采样）"
     ],
     "introduced": "#42（2026-09-24）；#142（2026-09-27）起内容比例列宽"
   },
@@ -5232,7 +5232,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-table-grid-row": {
-    "purpose": "The CSS grid row of safe tables; the active cell keeps the grid in place, and cells still map to their source ranges (not an independent table data model). Since #142 column widths are distributed by content proportion: the line decoration inlines a per-table column width plan (per column minmax(min(48px, equal share), content-proportion fr); all rows of a table share the same plan) which the grid rules consume, falling back to equal columns by count when the plan is missing. Snippet overrides of grid-template-columns through class rules still take precedence. #296 render-breakage fix: the generic grid row rule no longer declares padding/box-shadow that flatten quote line classes — table rows inside quotes restore the accent bar and content indent via the .vsidian-quote-line combination (matching plain quote lines); line-level leftovers outside cells (pipes, measurement buffers, prefixes, replace empty placeholders) are all excluded from grid placement.",
+    "purpose": "The CSS grid row of safe tables; the active cell keeps the grid in place, and cells still map to their source ranges (not an independent table data model). Since #142 column widths are distributed by content proportion: the line decoration inlines a per-table column width plan (per column minmax(min(floor px, equal share), content-proportion fr); all rows of a table share the same plan) which the grid rules consume, falling back to equal columns by count when the plan is missing. Since #371 the floor is a font-size-aware readability minimum (about three CJK glyphs of content width plus the cell box allowance, measured by the tableMetrics probe and injected, falling back to 48px by default), while the equal share inside min() remains the CSS double guard keeping the summed floors within the container. Snippet overrides of grid-template-columns through class rules still take precedence. #296 render-breakage fix: the generic grid row rule no longer declares padding/box-shadow that flatten quote line classes — table rows inside quotes restore the accent bar and content indent via the .vsidian-quote-line combination (matching plain quote lines); line-level leftovers outside cells (pipes, measurement buffers, prefixes, replace empty placeholders) are all excluded from grid placement.",
     "dom": "The grid row container inside table rows (CSS grid layout).",
     "states": "Table rows inside quotes/lists stack container line classes on top (accent bar, indent, bullet); the selected-row outline is covered separately by the row-selected rules.",
     "obsidian": {

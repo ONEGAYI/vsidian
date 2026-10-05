@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 import {
   TABLE_MIN_COLUMN_PX,
   TABLE_WEIGHT_PADDING_UNITS,
+  TABLE_WIDGET_FALLBACK_UNITS,
   collectColumnSamples,
   defaultCellWidthMeasurer,
   planColumnTracks,
@@ -28,9 +29,9 @@ function weightOf(track: string): number {
   return Number(m[1])
 }
 
-/** 从轨道串解析保底（min(48px, X%) 形态） */
+/** 从轨道串解析保底（min(48px, X%) 形态；#371 起 px 可为小数） */
 function minOf(track: string): { px: number; share: number } {
-  const m = /minmax\(min\((\d+)px,\s*([\d.]+)%\),/.exec(track)
+  const m = /minmax\(min\(([\d.]+)px,\s*([\d.]+)%\),/.exec(track)
   if (!m) throw new Error(`轨道无 minmax 保底: ${track}`)
   return { px: Number(m[1]), share: Number(m[2]) }
 }
@@ -92,9 +93,11 @@ describe('列样本采集（collectColumnSamples）', () => {
     expect(samples).toEqual([0, 2])
   })
 
-  it('行内代码内的管道不切分（GFM 语义，tableCells 同源）', () => {
+  it('行内代码内的管道不切分（GFM 语义，tableCells 同源），反引号按隐藏计（#371 对齐 CodeMark 隐藏呈现）', () => {
+    // 管道仍在代码 span 内不切列；Live 呈现上 CodeMark 反引号隐藏
+    // （liveDecorations CodeMark case），可见文字是 `a|b` → 3 而非 5
     const samples = collectColumnSamples(['| `a|b` | c |'], 2)
-    expect(samples).toEqual([5, 1])
+    expect(samples).toEqual([3, 1])
   })
 })
 
@@ -167,5 +170,190 @@ describe('轨道计划（planColumnTracks / tableGridTemplate）', () => {
     for (const track of tracks) {
       expect(track.trim()).toMatch(/^minmax\(min\(\d+px,\s*[\d.]+%\),\s*[\d.]+fr\)$/)
     }
+  })
+})
+
+// ---- #371 短列可读下限与字号适配（docs/specs 载票契约） ----
+// 可读下限 = 视图层实测的「约三汉字内容宽 + 格左右 padding/border」随字号
+// 变化；下限之和放不下时按比例收缩；采样口径对齐可见文字（隐藏链接目标
+// 与格式标记不计入，widget 有界回退）。
+
+describe('#371 可读下限（readability 输入）', () => {
+  it('缺省 readability 保持 #142 静态 48px 下限现状（行为不变式）', () => {
+    const tracks = planColumnTracks([5, 5])
+    for (const track of tracks) {
+      expect(minOf(track).px).toBe(TABLE_MIN_COLUMN_PX)
+    }
+    // 同输入与显式 minColumnPx 逐字节一致（缺省回落）
+    expect(tableGridTemplate([5, 5])).toBe(tableGridTemplate([5, 5], { minColumnPx: 48 }))
+  })
+
+  it('下限 = 三汉字内容宽 + 格盒占位：min(contentPx + cellBoxPx, 等分份额%)', () => {
+    const tracks = planColumnTracks([5, 5], { readability: { contentPx: 42, cellBoxPx: 22 } })
+    expect(tracks).toHaveLength(2)
+    for (const track of tracks) {
+      expect(minOf(track).px).toBe(64) // 42 + 22
+      expect(minOf(track).share).toBe(50)
+    }
+  })
+
+  it('字号变大下限变大（contentPx 单调递增 → px 下限单调递增）——本票立身之本', () => {
+    const sizes = [12, 18, 24, 32]
+    let prevPx = 0
+    for (const contentPx of sizes) {
+      const track = planColumnTracks([10, 10], { readability: { contentPx, cellBoxPx: 22 } })[0]!
+      const px = minOf(track).px
+      expect(px).toBe(contentPx + 22)
+      expect(px).toBeGreaterThan(prevPx)
+      prevPx = px
+    }
+    // 大字号下限不再被静态 48px 钳制
+    expect(prevPx).toBeGreaterThan(TABLE_MIN_COLUMN_PX)
+  })
+
+  it('availablePx 充足时不收缩：下限保持常规可读值', () => {
+    const tracks = planColumnTracks([5, 5], {
+      readability: { contentPx: 42, cellBoxPx: 22, availablePx: 880 },
+    })
+    expect(minOf(tracks[0]!).px).toBe(64)
+    expect(minOf(tracks[1]!).px).toBe(64)
+  })
+
+  it('availablePx 放不下时按比例收缩：每列下限 = 常规下限 × (可用宽/下限总和)，保持非负', () => {
+    // 2 列 × 64px = 128 > 100 → scale = 100/128 → 每列 50px
+    const tracks = planColumnTracks([5, 5], {
+      readability: { contentPx: 42, cellBoxPx: 22, availablePx: 100 },
+    })
+    for (const track of tracks) {
+      expect(minOf(track).px).toBeCloseTo(50, 2)
+      expect(minOf(track).px).toBeGreaterThanOrEqual(0)
+    }
+    // 收缩后下限之和不超可用宽（浮点按 3 位小数规整的容差）
+    const sum = tracks.reduce((acc, t) => acc + minOf(t).px, 0)
+    expect(sum).toBeLessThanOrEqual(100 + 0.01)
+  })
+
+  it('容器恢复宽后恢复常规下限：同函数同输入确定性（收缩不是单向棘轮）', () => {
+    const opts = (availablePx?: number) => ({ readability: { contentPx: 42, cellBoxPx: 22, availablePx } })
+    const narrow = tableGridTemplate([5, 5], opts(100))
+    const narrowAgain = tableGridTemplate([5, 5], opts(100))
+    const wide = tableGridTemplate([5, 5], opts(880))
+    const wideAgain = tableGridTemplate([5, 5], opts(880))
+    expect(narrow).toBe(narrowAgain)
+    expect(wide).toBe(wideAgain)
+    expect(minOf(wide.split(/(?=minmax\()/)[0]!).px).toBe(64)
+    expect(minOf(narrow.split(/(?=minmax\()/)[0]!).px).toBeLessThan(64)
+  })
+
+  it('availablePx 缺省时轨道仍写 min(px, share%)：CSS 双保险承接「保底合计不超容器」', () => {
+    // 6 列窄面板：每列份额 16.666% < 常规下限——min() 使 CSS 按份额兜底
+    const tracks = planColumnTracks(Array.from({ length: 6 }, () => 5),
+      { readability: { contentPx: 42, cellBoxPx: 22 } })
+    let shareSum = 0
+    for (const track of tracks) {
+      const min = minOf(track)
+      expect(min.px).toBe(64)
+      shareSum += min.share
+    }
+    expect(shareSum).toBeLessThanOrEqual(100 + 1e-9)
+  })
+
+  it('确定性：含 readability 与收缩的输出逐字节相同；fr 权重不受下限影响', () => {
+    const samples = [3, 40]
+    const a = tableGridTemplate(samples, { readability: { contentPx: 40, cellBoxPx: 22, availablePx: 90 } })
+    const b = tableGridTemplate([...samples], { readability: { contentPx: 40, cellBoxPx: 22, availablePx: 90 } })
+    expect(a).toBe(b)
+    // fr 权重 = 样本 + 保底加成，与 #142 口径一致（下限只影响 min 部分）
+    for (const [i, track] of planColumnTracks(samples).entries()) {
+      expect(weightOf(track)).toBeCloseTo(samples[i]! + TABLE_WEIGHT_PADDING_UNITS, 5)
+    }
+  })
+})
+
+describe('#371 可见文字采样（隐藏链接目标与格式标记不计入）', () => {
+  it('双链别名：[[长目标路径|别名]] 只计别名宽度（隐藏目标不撑宽短列）', () => {
+    // 别名「跳转」4 单位；字面 `[[目录/笔记#锚点|跳转]]` 是 2 倍以上
+    const samples = collectColumnSamples(['| [[目录/笔记文件#锚点\\|跳转]] | x |'], 2)
+    expect(samples[0]).toBe(4)
+    // 字面宽度确实更大（口径确实剔除了隐藏部分）
+    const literal = collectColumnSamples(['| [[目录/笔记文件#锚点]] | x |'], 2)
+    expect(literal[0]).toBeGreaterThan(samples[0]!)
+  })
+
+  it('双链无别名：[[笔记#标题]] 计显示文字（路径 + 锚点）', () => {
+    // display = `笔记#标题` → 8 单位（4 汉字宽 8 + # 1 + 标题 4……按字符计）
+    const samples = collectColumnSamples(['| [[笔记#标题]] | x |'], 2)
+    expect(samples[0]).toBe(defaultCellWidthMeasurer('笔记#标题'))
+  })
+
+  it('markdown 链接：[文字](url) 只计文字，长 url 不撑宽短列', () => {
+    const samples = collectColumnSamples(['| [说明文字](https://example.com/a/very/long/path) | x |'], 2)
+    expect(samples[0]).toBe(defaultCellWidthMeasurer('说明文字'))
+  })
+
+  it('未闭合链接形态按字面计（与渲染语义一致——markdown-it 不产链接）', () => {
+    const text = 'a[b](unclosed'
+    const samples = collectColumnSamples([`| ${text} | x |`], 2)
+    expect(samples[0]).toBe(defaultCellWidthMeasurer(text))
+  })
+
+  it('格式标记剥离：**粗体** / *斜体* / ==高亮== / ~~删除~~ 计纯文字', () => {
+    const samples = collectColumnSamples(['| **粗体文字** | x |'], 2)
+    expect(samples[0]).toBe(8) // 粗体文字 = 4 汉字 = 8 单位
+    expect(collectColumnSamples(['| *斜* | x |'], 2)[0]).toBe(2)
+    expect(collectColumnSamples(['| ==高亮== | x |'], 2)[0]).toBe(4)
+    expect(collectColumnSamples(['| ~~删除~~ | x |'], 2)[0]).toBe(4)
+  })
+
+  it('snake_case 名字不剥下划线（词内下划线不是斜体标记）', () => {
+    const samples = collectColumnSamples(['| snake_case_name | x |'], 2)
+    expect(samples[0]).toBe(defaultCellWidthMeasurer('snake_case_name'))
+  })
+
+  it('嵌入 ![[…]] 按有界回退计，不随目标长度增长（#248 格内卡不主导父列宽）', () => {
+    const short = collectColumnSamples(['| ![[笔记]] | x |'], 2)
+    const long = collectColumnSamples(['| ![[目录/超长目标文件名/更长路径#深锚点\\|还有别名]] | x |'], 2)
+    expect(short[0]).toBe(TABLE_WIDGET_FALLBACK_UNITS)
+    expect(long[0]).toBe(TABLE_WIDGET_FALLBACK_UNITS)
+  })
+
+  it('图片 ![alt](url) 与行内公式 $…$ 同按有界回退计（呈现宽不可估）', () => {
+    expect(collectColumnSamples(['| ![替代文字](https://host/a/b/c.png) | x |'], 2)[0])
+      .toBe(TABLE_WIDGET_FALLBACK_UNITS)
+    expect(collectColumnSamples(['| $x^2 + \\\\frac{a}{b}$ | x |'], 2)[0])
+      .toBe(TABLE_WIDGET_FALLBACK_UNITS)
+  })
+
+  it('结构替换产物不再剥格式标记（Live 别名按字面呈现，口径对齐）', () => {
+    // Live 双链别名 widget 以 textContent 字面呈现 → `**加粗**` 六字符可见
+    const samples = collectColumnSamples(['| [[目标\\|**加粗**]] | x |'], 2)
+    expect(samples[0]).toBe(defaultCellWidthMeasurer('**加粗**'))
+  })
+
+  it('链接文字域内格式标记仍剥离（域内呈现走行内装饰，标记隐藏）', () => {
+    const samples = collectColumnSamples(['| [**粗体**](https://example.com) | x |'], 2)
+    expect(samples[0]).toBe(4) // 粗体 = 4 单位
+  })
+
+  it('混排：结构替换与普通文本宽度累加（同一视觉行水平排列）', () => {
+    // 前缀「见」2 + 双链 display `笔记` 4 + 尾注「条目」4 = 10
+    const samples = collectColumnSamples(['| 见[[笔记]]条目 | x |'], 2)
+    expect(samples[0]).toBe(10)
+  })
+
+  it('格内换行分段的可见文字按最宽段计（br 分段与可见化叠加）', () => {
+    // 段 1：`[[长目标|短名]]` → 4；段 2：`很长的普通文本行` → 16 → 最宽 16
+    const samples = collectColumnSamples(['| [[很长很长的目标\\|短名]]<br>很长的普通文本行 | x |'], 2)
+    expect(samples[0]).toBe(16)
+  })
+
+  it('纯文本无结构字符时走现状口径（零变化不变式）', () => {
+    const samples = collectColumnSamples(['| 普通文本内容 | abc |'], 2)
+    expect(samples).toEqual([12, 3])
+  })
+
+  it('转义管道反斜杠仍剔除（与 #142 采样口径叠加不回退）', () => {
+    const samples = collectColumnSamples(['| a\\|b | x |'], 2)
+    expect(samples[0]).toBe(3)
   })
 })

@@ -34,4 +34,11 @@ Object.assign(window, { initTable(text: string) {
     if (typeof value.spec['class'] === 'string' && value.spec['class'].includes('vsidian-table-prefix')) count += 1
   })
   return count
+}, touchEditor() {
+  // #371 字号变化驱动重测：空事务触发 tableMetrics ViewPlugin 的字体签名
+  // 比较（探针 refresh 为宏任务，测试侧随后轮询行内联计划的变化）
+  const view = controller.getView()
+  if (!view) return false
+  view.dispatch({})
+  return true
 }, controller })

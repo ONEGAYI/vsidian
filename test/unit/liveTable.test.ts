@@ -31,6 +31,7 @@ import {
   livePreviewDecorations,
   tableContainerRenderFacet,
 } from '../../src/webview/liveDecorations'
+import { metricsCompartment, tableMetricsFacet } from '../../src/webview/tableMetrics'
 import { blankRowInputPlan, tableEditing, tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { splitTableRowCells, tableRowCellsForColumns } from '../../src/shared/tableCells'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -267,10 +268,11 @@ describe('live 表格装饰', () => {
     expect(rows[1]?.dataset['vsidianTableRow']).toBe('row')
     expect(rows[0]?.style.getPropertyValue('--vsidian-table-columns')).toBe('2')
     // #142 列宽计划：同表各行内联同一 grid-template-columns（行是独立 grid，
-    // 计划必须逐字节一致）；内容比例——「名字/苹果/`x|y`」列样本 5、「数量」
-    // 列样本 4，权重 = 样本 + 保底加成 4（9fr vs 8fr），保底 = min(48px, 等分 50%)
+    // 计划必须逐字节一致）；内容比例——「名字/苹果」列样本 4（#371 起 `x|y`
+    // 反引号按隐藏计，样本 5→3 不再主导）、「数量」列样本 4，权重 = 样本 +
+    // 保底加成 4（8fr vs 8fr），保底 = min(48px, 等分 50%)
     const template0 = rows[0]?.style.getPropertyValue('--vsidian-table-col-widths')
-    expect(template0).toBe('minmax(min(48px, 50%), 9fr) minmax(min(48px, 50%), 8fr)')
+    expect(template0).toBe('minmax(min(48px, 50%), 8fr) minmax(min(48px, 50%), 8fr)')
     for (const row of rows) {
       expect(row?.style.getPropertyValue('--vsidian-table-col-widths')).toBe(template0)
     }
@@ -623,6 +625,96 @@ describe('引用块内表格网格化（#296）', () => {
     const off = state.update({ effects: compartment.reconfigure(tableContainerRenderFacet.of(false)) }).state
     expect(collect(off.field(liveDecorationsField).decos).some((i) =>
       i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow))).toBe(false)
+  })
+
+  // ---- #371 可读度量注入（字号感知下限） ----
+
+  /** 从 liveDecorationsField.gridPlans 取首个网格计划（同表各行共享） */
+  function tableGridPlanOf(state: EditorState): { template: string } {
+    const plan = [...state.field(liveDecorationsField).gridPlans.values()].find(Boolean) as
+      { template: string } | undefined
+    if (!plan) throw new Error('文档应产出网格计划')
+    return plan
+  }
+
+  it('#371 可读度量注入改变列宽计划下限：缺省 48px → 注入后 contentPx+cellBoxPx（Facet 热重配全量重建）', () => {
+    const doc = '| 功能 | 说明 |\n| --- | --- |\n| 悬停文档预览 | 悬停链接预览目标：笔记显示全文与章节 |\n'
+    const state = EditorState.create({ doc, extensions: [livePreviewDecorations] })
+    const before = tableGridPlanOf(state)
+    expect(before.template).toMatch(/minmax\(min\(48px,/)
+    const injected = state.update({
+      effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 60, cellBoxPx: 22 })),
+    }).state
+    const after = tableGridPlanOf(injected)
+    // 60 + 22 = 82：下限随注入度量变化（字号感知）
+    expect(after.template).toMatch(/minmax\(min\(82px,/)
+    expect(after.template).not.toBe(before.template)
+    // fr 权重不随下限变化（同表样本不变，占比分配与 #142 口径一致）
+    const frOf = (t: string) => {
+      const m = /, ([\d.]+fr)\)$/.exec(t.trim())
+      if (!m) throw new Error(`段无 fr 权重: ${JSON.stringify(t)} / 模板: ${JSON.stringify(after.template)}`)
+      return m[1]
+    }
+    expect(after.template.split(/(?=minmax\()/).map(frOf))
+      .toEqual(before.template.split(/(?=minmax\()/).map(frOf))
+  })
+
+  it('#371 度量二次变化再次重建：更大字号 → 更大下限（单调）', () => {
+    const doc = '| 功能 | 说明 |\n| --- | --- |\n| 跳转目标提示 | 长 |\n'
+    const state = EditorState.create({ doc, extensions: [livePreviewDecorations] })
+    const mid = state.update({
+      effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 24, cellBoxPx: 22 })),
+    }).state
+    const big = mid.update({
+      effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 48, cellBoxPx: 22 })),
+    }).state
+    expect(tableGridPlanOf(mid).template).toMatch(/minmax\(min\(46px,/)
+    expect(tableGridPlanOf(big).template).toMatch(/minmax\(min\(70px,/)
+  })
+
+  it('#371 IME 组合期间列宽计划保持冻结（compositionPreview 只平移不重算）', async () => {
+    const source = 'a|b|c\n---|---|---\n | | \n'
+    const linked = await setupLinked(source)
+    const view = linked.controller.getView()!
+    view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 30, cellBoxPx: 22 })) })
+    await settle()
+    const before = view.state.field(liveDecorationsField).gridPlans
+    const pos = source.indexOf(' | | ') + 5
+    view.dispatch({ selection: EditorSelection.single(pos) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: pos, insert: '汉汉汉' }, userEvent: 'input.type.compose' })
+    // 组合进行中：gridPlans 沿用旧计划（平移后的同键或原键），template 不变
+    const during = view.state.field(liveDecorationsField).gridPlans
+    const beforeTemplates = [...before.values()].map((p) => p?.template ?? '')
+    const duringTemplates = [...during.values()].map((p) => p?.template ?? '')
+    expect(duringTemplates).toEqual(beforeTemplates)
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    expect(linked.doc.getText()).toBe(view.state.doc.toString())
+  })
+
+  it('#371 IME 定稿折叠计划与全量重建逐字节一致（含注入度量，两处同源）', async () => {
+    const source = '功能|说明\n---|---\n悬停文档预览|目标 |\n'
+    const linked = await setupLinked(source)
+    const view = linked.controller.getView()!
+    const metrics = tableMetricsFacet.of({ contentPx: 36, cellBoxPx: 22 })
+    view.dispatch({ effects: metricsCompartment.reconfigure(metrics) })
+    await settle()
+    const pos = source.indexOf('目标 ') + 2
+    view.dispatch({ selection: EditorSelection.single(pos) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: pos, to: pos + 2, insert: '编辑' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    // settled 折叠路径产出的计划 === 同 doc 同 facet 全量重建的计划
+    const settledPlan = [...view.state.field(liveDecorationsField).gridPlans.values()].find(Boolean)
+    expect(settledPlan).toBeTruthy()
+    const full = EditorState.create({
+      doc: view.state.doc.toString(),
+      extensions: [livePreviewDecorations],
+    }).update({ effects: metricsCompartment.reconfigure(metrics) }).state
+    const fullPlan = tableGridPlanOf(full)
+    expect(settledPlan!.template).toBe(fullPlan.template)
   })
 
   it('引用表格行保留 HyperMD-quote 别名（别名桥不因网格行丢失）', () => {

@@ -313,6 +313,133 @@ try {
       console.error(`[引用表格绘制][FAIL] ${name}: ${error.message}`)
     } finally { await page.close() }
   }
-} finally { await browser.close() }
+} catch { /* 逐页失败已收集到 failures，汇总统一抛出 */ }
+
+// ---- #371 短列可读下限与字号适配（README「引用与反链」两列表冻结为 fixture）----
+// 断言全部落在用户可见物：标签列实际内容宽、行折行数、横向溢出与文字
+// 命中——不是 DOM 存在性或轨道串文本。字号变化经 --vsidian-content-font-size
+// 注入后由 tableMetrics 探针重测驱动（touchEditor 空事务触发签名比较）。
+{
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: bundle })
+    // README「引用与反链」表的冻结形态：两列，功能列为六字短标签
+    const source = [
+      '前文', '',
+      '| 功能 | 说明 |',
+      '| --- | --- |',
+      '| 悬停文档预览 | Ctrl+悬停链接预览目标：笔记显示全文、章节或块引用，浮窗内可直接编辑保存；代码等文本文件按 VSCode 原生着色只读显示；PDF 分页浏览、文字可复制可缩放。 |',
+      '| 跳转目标提示 | 悬停链接不弹预览浮层时，短暂停留显示目标路径与锚点的小浮标，双模式与链接面板均可用，可在设置关闭。 |',
+      '| 引用自动更新 | 在 VSCode 内重命名或移动文件、文件夹与多文件时，指向它们的双链、链接与图片按新位置自动重算，一步撤销。 |',
+      '', '后文',
+    ].join('\n')
+    await page.evaluate((text) => window.initTable(text), source)
+    await page.evaluate(() => window.touchEditor())
+    // 探针注入：下限从静态 48px 变为实测可读下限（三汉字内容宽 + 盒占位）
+    await page.waitForFunction(() => {
+      const row = document.querySelector('.cm-content .vsidian-table-grid-row')
+      if (!row) return false
+      const m = /min\(([\d.]+)px/.exec(row.style.getPropertyValue('--vsidian-table-col-widths') || '')
+      return !!m && Number(m[1]) > 48
+    }, undefined, { timeout: 5000 })
+    const read = () => page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
+      const probe = document.querySelector('.vsidian-table-metrics-probe')
+      const plan = rows[0]?.style.getPropertyValue('--vsidian-table-col-widths') || ''
+      const minPx = Number(/min\(([\d.]+)px/.exec(plan)?.[1] ?? 0)
+      const fontSize = parseFloat(getComputedStyle(rows[0]).fontSize)
+      const firstCellOf = (r) => r.querySelector(':scope > .vsidian-table-grid-cell')
+      const cellStyle = getComputedStyle(firstCellOf(rows[1]))
+      const cellPad = parseFloat(cellStyle.paddingLeft) + parseFloat(cellStyle.paddingRight) +
+        parseFloat(cellStyle.borderLeftWidth) + parseFloat(cellStyle.borderRightWidth)
+      const lineHeightRaw = getComputedStyle(rows[1]).lineHeight
+      const singleLineH = lineHeightRaw === 'normal' ? fontSize * 1.5 : parseFloat(lineHeightRaw)
+      // 格高会被 grid stretch 拉到行高（说明列更高时）——折行数观测用
+      // 文字 Range 的实际渲染高度（用户看到的文字块）
+      const labelRange = document.createRange()
+      labelRange.selectNodeContents(firstCellOf(rows[1]))
+      const labelTextH = labelRange.getBoundingClientRect().height
+      return {
+        plan, minPx, fontSize, rowCount: rows.length,
+        probeHidden: probe ? getComputedStyle(probe).visibility === 'hidden' : false,
+        headerHeight: firstCellOf(rows[0]).getBoundingClientRect().height,
+        labelBox: firstCellOf(rows[1]).getBoundingClientRect().toJSON(),
+        labelTextH, cellPad, singleLineH,
+      }
+    })
+    // 1) 默认字号：探针隐藏；六字标签列内容宽 ≥ 约三汉字；折两行而非逐字竖排
+    const base = await read()
+    assert(base.rowCount >= 4, `#371 应有表头与数据行网格: ${base.rowCount}`)
+    assert(base.probeHidden, '#371 度量探针必须隐藏（不参与可见呈现）')
+    assert(base.minPx > 48, `#371 探针注入后下限应大于 48px 静态值: ${base.minPx}`)
+    const baseContent = base.labelBox.width - base.cellPad
+    assert(baseContent >= base.fontSize * 2.6,
+      `#371 六字标签列内容宽应≥约三汉字: ${baseContent.toFixed(1)}px vs 字号 ${base.fontSize}px`)
+    assert(base.labelTextH < base.singleLineH * 3,
+      `#371 六字标签应折两行而非逐字竖排: 文字高 ${base.labelTextH.toFixed(1)} vs 单行 ${base.singleLineH.toFixed(1)}`)
+    assert(base.headerHeight < base.singleLineH * 1.8, '#371 表头「功能」应保持单行')
+    // 2) 字号增大（24px）：探针重测驱动下限变大，标签仍不竖排
+    await page.evaluate(() => document.getElementById('app').style.setProperty('--vsidian-content-font-size', '24px'))
+    await page.evaluate(() => window.touchEditor())
+    await page.waitForFunction((prevMin) => {
+      const row = document.querySelector('.cm-content .vsidian-table-grid-row')
+      if (!row) return false
+      const m = /min\(([\d.]+)px/.exec(row.style.getPropertyValue('--vsidian-table-col-widths') || '')
+      return !!m && Number(m[1]) > prevMin
+    }, base.minPx, { timeout: 5000 })
+    const big = await read()
+    assert(big.fontSize >= 23, `#371 24px 注入应生效: ${big.fontSize}`)
+    assert(big.minPx > base.minPx, `#371 字号变大下限应变大: ${big.minPx} vs ${base.minPx}`)
+    const bigContent = big.labelBox.width - big.cellPad
+    assert(bigContent >= big.fontSize * 2.6,
+      `#371 大字号下标签列内容宽仍≥约三汉字: ${bigContent.toFixed(1)}px`)
+    assert(big.labelTextH < big.singleLineH * 3,
+      `#371 大字号下标签仍折两行非竖排: 文字高 ${big.labelTextH.toFixed(1)} vs ${big.singleLineH.toFixed(1)}`)
+    // 3) 窄容器（下限放不下）：列宽总和不超网格；恢复宽后可读下限重新生效
+    await page.setViewportSize({ width: 360, height: 800 })
+    await page.evaluate(() => new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const narrow = await page.evaluate(() => {
+      const row = document.querySelector('.cm-content .vsidian-table-grid-row')
+      return { scroll: row.scrollWidth, client: row.clientWidth }
+    })
+    assert(narrow.scroll <= narrow.client + 1,
+      `#371 窄容器列宽总和不超网格: scroll ${narrow.scroll} vs client ${narrow.client}`)
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.evaluate(() => window.touchEditor())
+    await page.waitForFunction((expectMin) => {
+      const row = document.querySelector('.cm-content .vsidian-table-grid-row')
+      if (!row) return false
+      const m = /min\(([\d.]+)px/.exec(row.style.getPropertyValue('--vsidian-table-col-widths') || '')
+      return !!m && Number(m[1]) >= expectMin
+    }, big.minPx, { timeout: 5000 })
+    const restored = await read()
+    const restoredContent = restored.labelBox.width - restored.cellPad
+    assert(restoredContent >= restored.fontSize * 2.6,
+      `#371 容器恢复宽后可读下限重新生效: ${restoredContent.toFixed(1)}px`)
+    // 可见文字不裁切：elementFromPoint 命中标签文字
+    const hit = await page.evaluate(() => {
+      const cell = document.querySelectorAll('.cm-content .vsidian-table-grid-row')[1]
+        .querySelector(':scope > .vsidian-table-grid-cell')
+      const box = cell.getBoundingClientRect()
+      const el = document.elementFromPoint(box.x + 6, box.y + box.height / 2)
+      return el?.textContent.trim() ?? ''
+    })
+    assert(hit.includes('悬停'), `#371 标签文字必须可见命中: ${hit.slice(0, 20)}`)
+    assert.deepEqual(errors, [], `#371 页面异常: ${JSON.stringify(errors)}`)
+    await page.screenshot({ path: artifactPath(root, 'bq-paint-371-readability.png'), fullPage: true })
+    passed++
+    console.log('[引用表格绘制][PASS] #371 短列可读下限与字号适配（README 引用与反链 fixture）')
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] #371 短列可读下限与字号适配: ${error.message}`)
+  } finally { await page.close() }
+}
+
+await browser.close()
 if (failures.length) throw new AggregateError(failures, '引用块内表格绘制回归失败')
-console.log(`[引用表格绘制] ${passed}/${scenarios.length} 场景通过`)
+console.log(`[引用表格绘制] ${passed}/${scenarios.length + 1} 场景通过`)

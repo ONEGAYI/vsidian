@@ -215,6 +215,7 @@ vsidian/
         ├── tableControls.ts            # 表格可见行控件与拖动
         ├── tableCreate.ts              # 光标处建表规划纯函数
         ├── tableEditing.ts             # 表格输入钩子（#12）
+        ├── tableMetrics.ts             # 表格可读度量探针与注入通道
         ├── tableRegion.ts              # 表格矩形选区与结构规划
         ├── tableRegionField.ts         # 表格格区选区状态单一事实源
         ├── tableRegionSelection.ts     # 表格格区拖选指针交互

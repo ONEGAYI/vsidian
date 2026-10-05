@@ -60,9 +60,10 @@ import { resolveTaskToggleAtMarker } from './taskToggle'
 import { t } from '../shared/i18n'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { hitRevealContextOf, hitRevealField, hitRevealTouchesLine, type HitRevealContext } from './hitReveal'
-import { collectColumnSamples, tableGridTemplate } from './tableColumnWidth'
+import { collectColumnSamples, tableGridTemplate, type TableReadabilityInput } from './tableColumnWidth'
 import { sameTableRegion, tableRegionField } from './tableRegionField'
 import type { TableRegion } from './tableRegion'
+import { tableMetricsExtension, tableMetricsFacet } from './tableMetrics'
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
 import { buildFrontmatterCardPlan, fmFoldField } from './frontmatterDecorations'
 import {
@@ -425,7 +426,12 @@ export const tableContainerRenderFacet = Facet.define<boolean, boolean>({
   combine: (values) => (values.length > 0 ? values[values.length - 1]! : true),
 })
 
-function tableGridPlan(doc: Text, table: SyntaxNode, containerRender = true): TableGridPlan | null {
+function tableGridPlan(
+  doc: Text,
+  table: SyntaxNode,
+  containerRender = true,
+  metrics: TableReadabilityInput | null = null,
+): TableGridPlan | null {
   tableGridStats.planCalls += 1
   const rows = new Map<number, GridRowEntry>()
   const rowSamples = new Map<number, number[]>()
@@ -497,8 +503,10 @@ function tableGridPlan(doc: Text, table: SyntaxNode, containerRender = true): Ta
       }
     }
   }
-  // #142 列宽计划：表头与数据行的内容宽度样本（分隔行的对齐标记不参与）
-  const template = tableGridTemplate(samples)
+  // #142 列宽计划：表头与数据行的内容宽度样本（分隔行的对齐标记不参与）；
+  // #371 可读度量注入时下限随字号/盒模型变化（tableMetricsFacet，缺省回落
+  // 静态 48px——两态行为都由 tableColumnWidth 契约测试钉住）
+  const template = tableGridTemplate(samples, metrics ? { readability: metrics } : undefined)
   return { columns, rows, delimiterLine, template, rowSamples }
 }
 
@@ -756,6 +764,7 @@ function emitForRange(
   hitReveal: HitRevealContext | null = null,
   fmFolded = false,
   containerRender = true,
+  metrics: TableReadabilityInput | null = null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -863,7 +872,7 @@ function emitForRange(
         eachNodeLine(doc, node, fromLine, toLine, (n) => addLineCls(n, LIVE_CLASS_NAMES.tableLine))
         let plan = gridPlans.get(node.from)
         if (plan === undefined && !gridPlans.has(node.from)) {
-          plan = tableGridPlan(doc, node, containerRender)
+          plan = tableGridPlan(doc, node, containerRender, metrics)
           gridPlans.set(node.from, plan)
         }
         if (plan) {
@@ -1279,13 +1288,13 @@ function headText(doc: Text): string {
 /** 全量构建（create / 全文替换 / 探针对拍） */
 export function buildLivePreviewDecorations(doc: Text, selection: EditorSelection,
   region: TableRegion | null = null, hitReveal: HitRevealContext | null = null, fmFolded = false,
-  containerRender = true): DecorationSet {
+  containerRender = true, metrics: TableReadabilityInput | null = null): DecorationSet {
   const tree = parseTree(doc)
   const fm = frontmatterOf(doc)
   stats.fullBuildLines = doc.lines
   return RangeSet.of(
     emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region, hitReveal, fmFolded,
-      containerRender),
+      containerRender, metrics),
     true,
   )
 }
@@ -1623,7 +1632,7 @@ function buildLiveDecoState(state: EditorState): LiveDecoState {
   const decos = RangeSet.of(
     emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
       state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
-      state.facet(tableContainerRenderFacet)), true)
+      state.facet(tableContainerRenderFacet), state.facet(tableMetricsFacet)), true)
   return {
     decos,
     tree,
@@ -1641,8 +1650,11 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
   update(value, tr) {
     // #296 三轮「块内表格渲染」热重配：facet 变化（Compartment reconfigure
     // 的纯事务，无文档/选区变化）走与 create 同构的全量重建——增量路径不
-    // 感知 facet，且 gridPlans 缓存的容器行 plan 需按新开关重算
-    if (tr.startState.facet(tableContainerRenderFacet) !== tr.state.facet(tableContainerRenderFacet)) {
+    // 感知 facet，且 gridPlans 缓存的容器行 plan 需按新开关重算。
+    // #371 可读度量注入（tableMetricsFacet）同款通道：字号/盒模型度量变化
+    // 时全量重算列宽计划（下限随度量变化，行装饰内联值随之更新）
+    if (tr.startState.facet(tableContainerRenderFacet) !== tr.state.facet(tableContainerRenderFacet) ||
+        tr.startState.facet(tableMetricsFacet) !== tr.state.facet(tableMetricsFacet)) {
       return buildLiveDecoState(tr.state)
     }
     // #251 命中显形：hitRevealField 值变化（命中集增删/停驻种入收缩）也
@@ -1671,7 +1683,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, 1, fmLast, value.gridPlans,
             value.fmModel, tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), fmFolded,
-            tr.state.facet(tableContainerRenderFacet)),
+            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
           sort: true,
         })
         return {
@@ -1702,7 +1714,10 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             // 计划——计划未变（取消或宽度无影响的净结果）保持「仅恢复当前行」
             // 快路径（千行表组合取消不全表扫描的性能契约）；计划变化才落整表
             // 重发射（同表各行内联的 grid 计划必须一致，成本与一次常规键入的
-            // 表格重建同阶）。折叠是纯数值归并，不重扫行文本。
+            // 表格重建同阶）。折叠是纯数值归并，不重扫行文本。#371：折叠与
+            // 全量两处同源消费同一 facet 度量（tableGridTemplate 的 options
+            // 一致，否则快路径与全量对拍漂移）
+            const settledMetrics = tr.state.facet(tableMetricsFacet)
             const freshRow = collectColumnSamples([settledText], oldPlan.columns)
             const merged = new Array<number>(oldPlan.columns).fill(0)
             for (const [rowNo, widths] of oldPlan.rowSamples) {
@@ -1713,14 +1728,14 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 }
               }
             }
-            if (tableGridTemplate(merged) === oldPlan.template) {
+            if (tableGridTemplate(merged, settledMetrics ? { readability: settledMetrics } : undefined) === oldPlan.template) {
               const decos = value.decos.update({
                 filterFrom: currentLine.from,
                 filterTo: currentLine.to,
                 filter: () => false,
                 add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel,
                   tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
-                  tr.state.facet(tableContainerRenderFacet)),
+                  tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
                 sort: true,
               })
               return {
@@ -1746,7 +1761,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             filter: () => false,
             add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
               tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
-              tr.state.facet(tableContainerRenderFacet)),
+              tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
             sort: true,
           })
           return {
@@ -1775,7 +1790,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
             tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
-            tr.state.facet(tableContainerRenderFacet)),
+            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -1838,7 +1853,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         filter: () => false,
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
           tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
-          tr.state.facet(tableContainerRenderFacet)),
+          tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1
@@ -2140,4 +2155,7 @@ export const livePreviewDecorations: Extension = [
   liveDecorationsField,
   gridCellMouseSelection,
   viewportLivePlugin,
+  // #371 可读度量注入通道（探针测量 + Facet 热重配；缺省 null 保持
+  // #142 静态下限行为）
+  tableMetricsExtension,
 ]
