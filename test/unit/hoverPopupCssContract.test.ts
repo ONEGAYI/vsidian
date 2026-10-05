@@ -88,6 +88,11 @@ describe('悬停预览浮层 CSS 契约（#218）', () => {
     expect(content).toMatch(/padding:\s*10px 14px/)
   })
 
+  it('内部 Reading 容器不自持滚动（滚动承载归浮层 scrollEl——横滚上移的前提，2026-10-05 验收 5b 改版）', () => {
+    const content = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading')
+    expect(content).toMatch(/overflow:\s*visible/)
+  })
+
   it('任务禁写呈现：浮层内 checkbox 不响应指针（只读契约的样式侧）', () => {
     const box = rule('.vsidian-hover-popup input\[type="checkbox"\]')
     expect(box).toMatch(/pointer-events:\s*none/)

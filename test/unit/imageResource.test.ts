@@ -608,3 +608,100 @@ describe('失效提示文字（error 胶囊内可见）', () => {
     expect(el.getAttribute('alt')).toBeNull()
   })
 })
+
+// ==== review-loops #346 增量轮 A 组补丁（26295f25 两处缺口 + 用例补齐）====
+
+describe('失效提示文字（A 组轮补丁）', () => {
+  it('live 槽位初次装载即失效（无 img）：提示文案写入槽位文本（A 组发现 1）', () => {
+    const { manager, posted } = makeManager()
+    const slot = document.createElement('span')
+    slot.textContent = '' // ![](missing.png) 形态：alt 为空
+    manager.attach(slot, './missing.png', (s, src) => {
+      s.textContent = ''
+      const image = document.createElement('img')
+      image.src = src
+      s.appendChild(image)
+      return image
+    })
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(state(slot)).toBe('error')
+    expect(slot.textContent).toBe(t('decor.imageNotFound'))
+  })
+
+  it('live 初次失效 → 重试成功：render 重建清空提示文字并回建 img（A 组发现 1 恢复链）', () => {
+    const { manager, posted } = makeManager()
+    const slot = document.createElement('span')
+    slot.textContent = ''
+    manager.attach(slot, './a.png', (s, src) => {
+      s.textContent = ''
+      const image = document.createElement('img')
+      image.src = src
+      s.appendChild(image)
+      return image
+    })
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(slot.textContent).toBe(t('decor.imageNotFound'))
+    slot.click() // 重试
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: true, src: 'vscode-webview://res/a.png' })
+    const inner = slot.querySelector('img')
+    expect(inner).not.toBeNull()
+    expect(slot.textContent.includes('找不到')).toBe(false) // 提示文字被 render 重建清空
+    inner!.dispatchEvent(new Event('load'))
+    expect(state(slot)).toBe('loaded')
+  })
+
+  it('invalidateAll 重挂复用槽位：alt 记忆不丢，恢复后回写用户原值（A 组发现 2）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    el.setAttribute('alt', '用户说明')
+    manager.attach(el, './b.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(el.getAttribute('alt')).toBe(t('decor.imageNotFound'))
+    manager.invalidateAll() // detach（丢 record）→ attach（新 record）
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: true, src: 'vscode-webview://res/b.png' })
+    el.dispatchEvent(new Event('load'))
+    expect(state(el)).toBe('loaded')
+    expect(el.getAttribute('alt')).toBe('用户说明')
+  })
+
+  it('刷新后二次失效不把提示文案记忆为原值（A 组发现 2 记忆污染链）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    el.setAttribute('alt', '原始说明')
+    manager.attach(el, './c.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    manager.invalidateAll()
+    // 重挂后再次失效（同 DOM：alt 此时不应残留提示文案）
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: false, reason: 'not-found' })
+    expect(el.getAttribute('alt')).toBe(t('decor.imageNotFound'))
+    el.click()
+    manager.handleResult({ reqId: posted[2]!.reqId, ok: true, src: 'vscode-webview://res/c.png' })
+    el.dispatchEvent(new Event('load'))
+    expect(el.getAttribute('alt')).toBe('原始说明')
+  })
+
+  it('live 槽位 error → 重试 → render 重建：新 img 回建用户 alt（A 组发现 4 用例补齐）', () => {
+    const { manager, posted } = makeManager()
+    const slot = document.createElement('span')
+    slot.textContent = '用户alt'
+    manager.attach(slot, './d.png', (s, src) => {
+      s.textContent = ''
+      const image = document.createElement('img')
+      image.alt = '用户alt' // 生产 render（liveLinks）自带 alt 回建
+      image.src = src
+      s.appendChild(image)
+      return image
+    })
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/d.png' })
+    let inner = slot.querySelector('img')!
+    inner.dispatchEvent(new Event('error'))
+    expect(inner.getAttribute('alt')).toBe(t('decor.imageError', { reason: t('decor.unknownReason') }))
+    slot.click()
+    // ok 路径重试：applyToSlot 重新应用同一 src（render 回调重建 img，不发新请求）
+    const rebuilt = slot.querySelector('img')!
+    expect(rebuilt).not.toBe(inner)
+    rebuilt.dispatchEvent(new Event('load'))
+    expect(state(slot)).toBe('loaded')
+    expect(inner.getAttribute('alt')).toBe('用户alt')
+  })
+})

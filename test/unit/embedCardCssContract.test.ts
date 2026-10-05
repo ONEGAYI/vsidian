@@ -64,6 +64,11 @@ describe('嵌入卡片 CSS 契约（#222；#223 起卡片壳规则并列 Live �
     expect(nested).toMatch(/padding:/)
   })
 
+  it('内容滚动区内 Reading 容器不自持滚动（滚动承载归卡内滚动区——text 视图横滚上移的前提，2026-10-05 验收 5b 改版）', () => {
+    const nested = rule('#app .vsidian-embed-card .vsidian-embed-card-scroll .vsidian-view-reading')
+    expect(nested).toMatch(/overflow:\s*visible/)
+  })
+
   it('右上角打开入口：图标按钮尺寸与 hover/focus 可见反馈', () => {
     const open = rule('#app .vsidian-embed-card .vsidian-embed-card-open')
     expect(open).toMatch(/cursor:\s*pointer/)
