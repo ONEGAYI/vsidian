@@ -6,6 +6,8 @@ import { WebviewSyncController } from '../../src/webview/syncController'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
+import { getTableOptimizeStats } from '../../src/webview/tableHeightPlan'
+import { tableMetricsFacet } from '../../src/webview/tableMetrics'
 import '../../src/webview/main.css'
 
 const controller = new WebviewSyncController({
@@ -40,5 +42,20 @@ Object.assign(window, { initTable(text: string) {
   const view = controller.getView()
   if (!view) return false
   view.dispatch({})
+  return true
+},
+// #372 高度优化观测口（统计 + 度量就绪 + 光标移动）
+tableOptimizeStats() {
+  return getTableOptimizeStats()
+},
+tableMetricsReady() {
+  const view = controller.getView()
+  const metrics = view?.state.facet(tableMetricsFacet)
+  return { availablePx: metrics?.availablePx ?? 0, contentPx: metrics?.contentPx ?? 0 }
+},
+moveCaret(pos: number) {
+  const view = controller.getView()
+  if (!view) return false
+  view.dispatch({ selection: { anchor: pos } })
   return true
 }, controller })

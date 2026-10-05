@@ -440,6 +440,94 @@ try {
   } finally { await page.close() }
 }
 
+// ---- #372 离开编辑后的整表高度优化（README「引用与反链」冻结样例） ----
+// 断言落在用户可见物：引用内两列表退出编辑后可见总高度（首末网格行 bbox
+// 高差）低于轻量基线；短列内容宽不破 T01 下限；轨道总宽不超行区净宽
+// （引用缩进扣除后的可用宽口径）。
+{
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: bundle })
+    const source = [
+      '前文', '',
+      '| 功能 | 说明 |',
+      '| --- | --- |',
+      '| 悬停文档预览 | Ctrl+悬停链接预览目标：笔记显示全文与章节或块引用，浮窗内可直接编辑保存；代码等文本文件按 VSCode 原生着色只读显示；PDF 分页浏览、文字可复制可缩放。 |',
+      '| 跳转目标提示 | 悬停链接不弹预览浮层时，短暂停留显示目标路径与锚点的小浮标，双模式与链接面板均可用，可在设置关闭。 |',
+      '| 引用自动更新 | 在 VSCode 内重命名或移动文件、文件夹与多文件时，指向它们的双链、链接与图片按新位置自动重算，一步撤销。 |',
+      '', '后文',
+    ].join('\n')
+    await page.evaluate((text) => window.initTable(text), source)
+    await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0, undefined, { timeout: 5000 })
+    // 进表（活动态）+ 净零编辑：列宽回到轻量基线，作为对照高度
+    const cellPos = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
+      return rows.length ? window.readEditor().text.indexOf('悬停文档预览') + 2 : -1
+    })
+    await page.evaluate((pos) => window.moveCaret(pos), cellPos)
+    // 净非零编辑：内容指纹区别于挂载扫描（否则同版本去重会拦截退出触发）
+    await page.evaluate(() => {
+      const view = window.controller.getView()
+      const pos = view.state.selection.main.head
+      view.dispatch({ changes: { from: pos, insert: 'x' }, selection: { anchor: pos + 1 } })
+    })
+    await page.waitForTimeout(60)
+    const read = () => page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
+      const first = rows[0].getBoundingClientRect()
+      const last = rows[rows.length - 1].getBoundingClientRect()
+      const labelBox = rows[1].querySelector(':scope > .vsidian-table-grid-cell').getBoundingClientRect()
+      const tracks = getComputedStyle(rows[0]).gridTemplateColumns.split(' ').map(Number.parseFloat)
+      const rowArea = rows[0].getBoundingClientRect().width - parseFloat(getComputedStyle(rows[0]).paddingLeft)
+      return {
+        height: last.bottom - first.top,
+        rowCount: rows.length,
+        plan: rows[0].style.getPropertyValue('--vsidian-table-col-widths'),
+        labelWidth: labelBox.width,
+        tracksSum: tracks.reduce((s, v) => s + v, 0),
+        rowArea,
+      }
+    })
+    const stats0 = await page.evaluate(() => window.tableOptimizeStats())
+    const h0 = await read()
+    assert(h0.rowCount >= 4, `#372 引用样例应有表头与数据行网格: ${h0.rowCount}`)
+    // 退出整表：光标移到表前正文——恰好一次完整优化并发布
+    await page.evaluate(() => window.moveCaret(0))
+    await page.waitForFunction((n) => window.tableOptimizeStats().searches === n, stats0.searches + 1,
+      { timeout: 5000 })
+    const after = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+      text: window.readEditor().text }))
+    assert.equal(after.publishes - stats0.publishes, 1, '#372 退出后恰好一次发布')
+    const mutated = source.slice(0, cellPos) + 'x' + source.slice(cellPos)
+    assert.equal(after.text, mutated, '#372 布局变更不得改源文（仅保留表内净编辑）')
+    const h1 = await read()
+    assert(h1.height < h0.height - 1,
+      `#372 优化后可见总高度低于轻量基线: ${h1.height.toFixed(1)} vs ${h0.height.toFixed(1)}`)
+    assert(h1.plan !== h0.plan, '#372 发布的列宽计划应与轻量基线不同')
+    assert(h1.labelWidth >= h0.labelWidth - 8,
+      `#372 短标签列宽不得显著低于轻量基线（T01 下限约束）: ${h1.labelWidth.toFixed(1)} vs ${h0.labelWidth.toFixed(1)}`)
+    assert(h1.tracksSum <= h1.rowArea + 1,
+      `#372 轨道总宽不超行区净宽（引用缩进扣除）: ${h1.tracksSum.toFixed(1)} vs ${h1.rowArea.toFixed(1)}`)
+    // 同版本去重：再进出一次不重复搜索
+    await page.evaluate((pos) => window.moveCaret(pos), cellPos)
+    await page.evaluate(() => window.moveCaret(0))
+    await page.waitForTimeout(80)
+    const dedup = await page.evaluate(() => window.tableOptimizeStats())
+    assert.equal(dedup.searches, stats0.searches + 1, '#372 同版本再次进出不得重复搜索')
+    assert.deepEqual(errors, [], `#372 页面异常: ${JSON.stringify(errors)}`)
+    await page.screenshot({ path: artifactPath(root, 'bq-paint-372-height-optimize.png'), fullPage: true })
+    passed++
+    console.log('[引用表格绘制][PASS] #372 离开编辑后的整表高度优化（README 冻结样例）')
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] #372 整表高度优化: ${error.message}`)
+  } finally { await page.close() }
+}
+
 await browser.close()
 if (failures.length) throw new AggregateError(failures, '引用块内表格绘制回归失败')
-console.log(`[引用表格绘制] ${passed}/${scenarios.length + 1} 场景通过`)
+console.log(`[引用表格绘制] ${passed}/${scenarios.length + 2} 场景通过`)

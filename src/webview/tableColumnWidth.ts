@@ -119,6 +119,52 @@ export interface TableColumnWidthOptions {
 type VisiblePiece = { kind: 'text'; text: string } | { kind: 'widget' }
 
 /**
+ * 单元格可见分片（#372 导出）：段的可见替换件序列——文本片按度量计宽、
+ * widget 按回退常量计。类型随 #372 折行估算导出（tableHeightPlan 消费，
+ * 与列宽采样同源同一形态学）。
+ */
+export type TableVisiblePiece = VisiblePiece
+
+/**
+ * 单元格的显式可见行（#372）：裸 `<br>` 分段后的每行可见分片序列，**空段
+ * 也占一 entries**（连续 br 间的空行）；内容为空返回空数组（调用方按
+ * 「占一行」处理）。与 measureWidestSegment 同一形态学（br 判定 / 转义
+ * 反斜杠剔除 / 结构替换），区别在保留空段与逐段完整输出而非只取最宽。
+ */
+export function cellVisibleLines(content: string): TableVisiblePiece[][] {
+  if (!content) {
+    return []
+  }
+  const breaks = tableCellBreaks(content)
+  const escaped = new Set(escapedPipeBackslashes(content))
+  const lines: TableVisiblePiece[][] = []
+  let segStart = 0
+  const push = (from: number, to: number): void => {
+    if (to <= from) {
+      lines.push([])
+      return
+    }
+    if (!VISIBLE_TRANSFORM_CHARS.test(content.slice(from, to))) {
+      let display = ''
+      for (let i = from; i < to; i++) {
+        if (!escaped.has(i)) {
+          display += content[i]
+        }
+      }
+      lines.push([{ kind: 'text', text: display }])
+      return
+    }
+    lines.push(visiblePiecesOfSegment(content.slice(from, to), from, escaped))
+  }
+  for (const br of breaks) {
+    push(segStart, br.from)
+    segStart = br.to
+  }
+  push(segStart, content.length)
+  return lines
+}
+
+/**
  * 逐列采集内容宽度样本：输入为表头与数据行文本（**不含分隔行**——GFM 对齐
  * 标记不参与列宽），按 GFM 语义切格（tableCells 同源：转义/代码内管道不切
  * 分），每格按最宽视觉段计（裸 `<br>` 换行分段、`\|` 按显示形态 `|` 计），
@@ -389,6 +435,32 @@ function stripInlineMarks(text: string): string {
 }
 
 /**
+ * 有效列下限 px（#372 导出，planColumnTracks 与高度优化两处同源）：#371
+ * readability 注入时 = 三汉字内容宽 + 格盒占位，各列下限之和超 availablePx
+ * 时按比例收缩（保持非负、总宽不超网格；恢复宽容器后同输入回常规下限，
+ * 收缩不是单向棘轮）；缺省回落 #142 静态 minColumnPx。
+ */
+export function effectiveColumnFloorPx(
+  columns: number,
+  readability?: TableReadabilityInput,
+  minColumnPx?: number,
+): number {
+  const valid = readability &&
+      Number.isFinite(readability.contentPx) && Number.isFinite(readability.cellBoxPx) &&
+      readability.contentPx > 0 && readability.cellBoxPx >= 0
+  const minPx = valid
+    ? Math.max(0, readability!.contentPx + readability!.cellBoxPx)
+    : minColumnPx ?? TABLE_MIN_COLUMN_PX
+  if (valid && Number.isFinite(readability!.availablePx) && readability!.availablePx! > 0) {
+    const total = minPx * columns
+    if (total > readability!.availablePx!) {
+      return (minPx * readability!.availablePx!) / total
+    }
+  }
+  return minPx
+}
+
+/**
  * 产出 grid 轨道计划：每列 `minmax(min(<下限>px, <等分份额>%), <占比>fr)`。
  * - 占比：fr 权重 = 内容样本 + 固定加成（比例保留，浮点按 3 位小数规整）；
  * - 下限：#371 readability 注入时 = 三汉字内容宽 + 格盒占位（随字号变化），
@@ -407,23 +479,7 @@ export function planColumnTracks(
     return []
   }
   // #371 可读下限：注入时替代静态下限；有效值须为正（非有限/非正视为缺省）
-  const readability = options.readability
-  const readableMin = readability &&
-      Number.isFinite(readability.contentPx) && Number.isFinite(readability.cellBoxPx) &&
-      readability.contentPx > 0 && readability.cellBoxPx >= 0
-    ? Math.max(0, readability.contentPx + readability.cellBoxPx)
-    : null
-  const minPx = readableMin ?? options.minColumnPx ?? TABLE_MIN_COLUMN_PX
-  // availablePx 收缩（#371）：各列下限之和放不下时等比缩——同下限场景即
-  // 等分，与 CSS min(px, share%) 的份额兜底语义一致（份额 % 相对容器宽
-  // 解析）；恢复宽容器后同输入回到常规下限（收缩不是单向棘轮）
-  let floorPx = minPx
-  if (readability && Number.isFinite(readability.availablePx) && readability.availablePx! > 0) {
-    const total = minPx * n
-    if (total > readability.availablePx!) {
-      floorPx = (minPx * readability.availablePx!) / total
-    }
-  }
+  const floorPx = effectiveColumnFloorPx(n, options.readability, options.minColumnPx)
   const padding = options.weightPaddingUnits ?? TABLE_WEIGHT_PADDING_UNITS
   // 等分保底份额：floor 到 3 位小数（与 formatNumber 的输出精度一致，
   // 16.666…% × 6 列经格式化也不越过 100%——保底合计恒不超容器宽）

@@ -64,6 +64,14 @@ import { collectColumnSamples, tableGridTemplate, type TableReadabilityInput } f
 import { sameTableRegion, tableRegionField } from './tableRegionField'
 import type { TableRegion } from './tableRegion'
 import { tableMetricsExtension, tableMetricsFacet } from './tableMetrics'
+import { tableHeightScheduler } from './tableHeightScheduler'
+import {
+  applyTableHeightPlan,
+  noteTableOptimizeDiscard,
+  noteTableOptimizePublish,
+  tableMetricsSig,
+  type TableHeightPlanPayload,
+} from './tableHeightPlan'
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
 import { buildFrontmatterCardPlan, fmFoldField } from './frontmatterDecorations'
 import {
@@ -426,20 +434,34 @@ export const tableContainerRenderFacet = Facet.define<boolean, boolean>({
   combine: (values) => (values.length > 0 ? values[values.length - 1]! : true),
 })
 
-function tableGridPlan(
+/** #372 表格行身份（tableGridPlan 与高度调度层同源消费的结构判定产物） */
+export interface GridRowIdentity {
+  lineNo: number
+  header: boolean
+  prefixLen: number
+}
+export interface TableGridRowsInfo {
+  columns: number
+  delimiterLine: number
+  rows: GridRowIdentity[]
+}
+
+/**
+ * 表格结构判定（单一事实源）：Table 直接子节点形态（QuoteMark 跳过、未知
+ * 直接子节点整体降级）、恰一表头、可解析分隔行、非空数据行、#296 引用
+ * 层级一致性与块内渲染设置短路、逐行列数可切分（tableRowCellsForColumns
+ * 同源——不可切分的行整表降级）。不可网格化返回 null。
+ */
+export function tableGridRowsInfo(
   doc: Text,
   table: SyntaxNode,
   containerRender = true,
-  metrics: TableReadabilityInput | null = null,
-): TableGridPlan | null {
-  tableGridStats.planCalls += 1
-  const rows = new Map<number, GridRowEntry>()
-  const rowSamples = new Map<number, number[]>()
+): TableGridRowsInfo | null {
+  const rows: GridRowIdentity[] = []
   let delimiterLine = 0
   let columns = 0
   let headers = 0
   for (let c = table.firstChild; c; c = c.nextSibling) {
-    tableGridStats.rowsScanned += 1
     // 引用块的 `>` 行前缀在 Lezer 树中挂为 Table 直接子节点（#296），
     // 跳过后继续；其余未知直接子节点仍整体降级（不放宽既有安全边界）
     if (c.name === 'QuoteMark') {
@@ -464,12 +486,13 @@ function tableGridPlan(
       delimiterLine = line.number
       columns = aligns.length
     } else {
-      const kind: GridRowKind = c.name === 'TableHeader' ? 'header' : 'row'
-      if (kind === 'header') headers += 1
-      rows.set(line.number, { kind, prefixLen })
+      if (c.name === 'TableHeader') {
+        headers += 1
+      }
+      rows.push({ lineNo: line.number, header: c.name === 'TableHeader', prefixLen })
     }
   }
-  if (headers !== 1 || delimiterLine === 0 || columns === 0 || rows.size === 0) {
+  if (headers !== 1 || delimiterLine === 0 || columns === 0 || rows.length === 0) {
     return null
   }
   // #296 二轮：引用前缀一致性——表头与各数据行的引用层级须一致（分隔行
@@ -478,26 +501,45 @@ function tableGridPlan(
   // 受影响部分整表回退源码行（真机反馈「整表回退」）。顶层表层级恒 0
   // 不受影响；Lezer 已把残缺行拆出表外的形态（表内无从判定）不在此列
   let headerDepth = -1
-  for (const [lineNo, entry] of rows) {
-    const depth = quoteDepthOfLine(doc.line(lineNo).text)
-    if (entry.kind === 'header') {
+  for (const row of rows) {
+    const depth = quoteDepthOfLine(doc.line(row.lineNo).text)
+    if (row.header) {
       headerDepth = depth
     } else if (depth !== headerDepth) {
       return null
     }
   }
-  const samples = new Array<number>(columns).fill(0)
-  for (const [lineNo, entry] of rows) {
+  for (const row of rows) {
+    if (!tableRowCellsForColumns(doc.line(row.lineNo).text, 0, columns, row.prefixLen)) {
+      return null
+    }
+  }
+  return { columns, delimiterLine, rows }
+}
+
+function tableGridPlan(
+  doc: Text,
+  table: SyntaxNode,
+  containerRender = true,
+  metrics: TableReadabilityInput | null = null,
+): TableGridPlan | null {
+  tableGridStats.planCalls += 1
+  const info = tableGridRowsInfo(doc, table, containerRender)
+  if (!info) {
+    return null
+  }
+  const rows = new Map<number, GridRowEntry>()
+  const rowSamples = new Map<number, number[]>()
+  const samples = new Array<number>(info.columns).fill(0)
+  for (const row of info.rows) {
     tableGridStats.rowsScanned += 1
     // 前缀感知拆分（#296 审查轮：内建 blank + 首格 clamp）：列宽样本仍用
     // blank 形态（collectColumnSamples 取 contentFrom/To，不受 clamp 影响）
-    const text = doc.line(lineNo).text
-    if (!tableRowCellsForColumns(text, 0, columns, entry.prefixLen)) {
-      return null
-    }
-    const widths = collectColumnSamples([blankContainerPrefix(text, entry.prefixLen)], columns)
-    rowSamples.set(lineNo, widths)
-    for (let col = 0; col < columns; col++) {
+    rows.set(row.lineNo, { kind: row.header ? 'header' : 'row', prefixLen: row.prefixLen })
+    const text = doc.line(row.lineNo).text
+    const widths = collectColumnSamples([blankContainerPrefix(text, row.prefixLen)], info.columns)
+    rowSamples.set(row.lineNo, widths)
+    for (let col = 0; col < info.columns; col++) {
       if (widths[col]! > samples[col]!) {
         samples[col] = widths[col]!
       }
@@ -507,7 +549,7 @@ function tableGridPlan(
   // #371 可读度量注入时下限随字号/盒模型变化（tableMetricsFacet，缺省回落
   // 静态 48px——两态行为都由 tableColumnWidth 契约测试钉住）
   const template = tableGridTemplate(samples, metrics ? { readability: metrics } : undefined)
-  return { columns, rows, delimiterLine, template, rowSamples }
+  return { columns: info.columns, rows, delimiterLine: info.delimiterLine, template, rowSamples }
 }
 
 const gridLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
@@ -568,6 +610,16 @@ function tableAncestor(path: SyntaxNode[]): SyntaxNode | null {
     }
   }
   return null
+}
+
+/** 自 pos 沿解析树向上找 Table 祖先（#372 高度调度层与效果验证共用；
+ *  Table 不可嵌套，命中即唯一；side 决定 pos 恰在边界时取内侧还是外侧） */
+export function tableNodeClosest(tree: Tree, pos: number, side: 1 | -1 = 1): SyntaxNode | null {
+  let node: SyntaxNode | null = tree.resolveInner(pos, side)
+  while (node && node.name !== 'Table') {
+    node = node.parent
+  }
+  return node
 }
 
 /** 表格的列对齐：解析 Table 直接子 TableDelimiter 中覆盖整行的那一个（分隔行） */
@@ -1621,6 +1673,76 @@ function changedCovers(changed: readonly ChangedRange4[], from: number, to: numb
 
 // ---- StateField ----
 
+/**
+ * #372 高度计划发布（纯效果事务）：逐载荷复核表格身份（Table 节点 from）、
+ * 文档引用（区间迁移即过期）、列数与度量签名，验证通过才把优化模板套进
+ * 同表共享计划并整表重发射（模板变化 → 行装饰键变 → CM6 重绘；不写回
+ * 源文本、不新增宿主消息与撤销记录）。过期载荷记账丢弃。
+ */
+function applyHeightPlans(
+  value: LiveDecoState,
+  tr: Transaction,
+  payloads: readonly TableHeightPlanPayload[],
+): LiveDecoState {
+  // 组合期零发布（调度层已守；此处防御深度——组合冻结态不接受列宽重排）
+  if (value.compositionPreview) {
+    for (let i = 0; i < payloads.length; i++) {
+      noteTableOptimizeDiscard()
+    }
+    return value
+  }
+  const state = tr.state
+  const doc = state.doc
+  const metrics = state.facet(tableMetricsFacet)
+  let next = value
+  for (const payload of payloads) {
+    if (!metrics || payload.doc !== doc || payload.metricsSig !== tableMetricsSig(metrics)) {
+      noteTableOptimizeDiscard()
+      continue
+    }
+    const node = tableNodeClosest(next.tree, payload.tableFrom, 1)
+    if (!node || node.from !== payload.tableFrom) {
+      noteTableOptimizeDiscard()
+      continue
+    }
+    const cached = next.gridPlans.get(node.from)
+    const plan = cached === undefined
+      // 局部重建缓存口径：doc 未变但 gridPlans 可缺该表（表外编辑产生的新
+      // Map）——按当前度量重算轻量计划再套用优化模板（列数/形态复核同源）
+      ? tableGridPlan(doc, node, state.facet(tableContainerRenderFacet), metrics)
+      : cached
+    if (!plan || plan.columns !== payload.columns || plan.template === payload.template) {
+      noteTableOptimizeDiscard()
+      continue
+    }
+    let first = plan.delimiterLine
+    let last = plan.delimiterLine
+    for (const rowNo of plan.rows.keys()) {
+      first = Math.min(first, rowNo)
+      last = Math.max(last, rowNo)
+    }
+    const gridPlans = new Map(next.gridPlans).set(node.from, { ...plan, template: payload.template })
+    const decos = next.decos.update({
+      filterFrom: doc.line(first).from,
+      filterTo: doc.line(last).to,
+      filter: () => false,
+      add: emitForRange(next.tree, doc, state.selection, next.fm, first, last, gridPlans, next.fmModel,
+        state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
+        state.facet(tableContainerRenderFacet), metrics),
+      sort: true,
+    })
+    next = {
+      ...next,
+      decos,
+      gridPlans,
+      gridSegments: updateGridSegments(next.gridSegments, tr.changes,
+        [{ from: doc.line(first).from, to: doc.line(last).to }], decos, doc),
+    }
+    noteTableOptimizePublish()
+  }
+  return next
+}
+
 /** 全量构建（create 与设置热重配共用）：树/头区/网格计划从头解析，
  *  gridPlans 新 Map（容器行 plan 按 facet 当前值重算） */
 function buildLiveDecoState(state: EditorState): LiveDecoState {
@@ -1648,6 +1770,18 @@ function buildLiveDecoState(state: EditorState): LiveDecoState {
 export const liveDecorationsField = StateField.define<LiveDecoState>({
   create: buildLiveDecoState,
   update(value, tr) {
+    // #372 高度计划发布：调度层经纯效果事务一次发布（只认纯效果事务——
+    // 与 doc/选区混排的事务按过期丢弃，防止坐标竞态）
+    const heightPlans = tr.effects.filter((e) => e.is(applyTableHeightPlan))
+    if (heightPlans.length > 0) {
+      if (tr.docChanged || tr.selection !== undefined) {
+        for (let i = 0; i < heightPlans.length; i++) {
+          noteTableOptimizeDiscard()
+        }
+        return value
+      }
+      return applyHeightPlans(value, tr, heightPlans.map((e) => e.value))
+    }
     // #296 三轮「块内表格渲染」热重配：facet 变化（Compartment reconfigure
     // 的纯事务，无文档/选区变化）走与 create 同构的全量重建——增量路径不
     // 感知 facet，且 gridPlans 缓存的容器行 plan 需按新开关重算。
@@ -1729,11 +1863,19 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
               }
             }
             if (tableGridTemplate(merged, settledMetrics ? { readability: settledMetrics } : undefined) === oldPlan.template) {
+              // #372：快路径同样回写定稿行样本——某行内容变化但逐列最大值
+              // 未变时轻量模板不变（快路径成立），但逐行数据缓存不得滞留旧
+              // 宽度（后续折叠与高度优化的行数据都以当前内容为准）
+              const updatedPlans = new Map(value.gridPlans)
+              updatedPlans.set(oldKey, {
+                ...oldPlan,
+                rowSamples: new Map(oldPlan.rowSamples).set(lineNo, freshRow),
+              })
               const decos = value.decos.update({
                 filterFrom: currentLine.from,
                 filterTo: currentLine.to,
                 filter: () => false,
-                add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel,
+                add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, updatedPlans, value.fmModel,
                   tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
                   tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
                 sort: true,
@@ -1741,6 +1883,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
               return {
                 ...value,
                 decos,
+                gridPlans: updatedPlans,
                 gridSegments: updateGridSegments(value.gridSegments, tr.changes,
                   [{ from: currentLine.from, to: currentLine.to }], decos, doc),
                 compositionPreview: false,
@@ -2158,4 +2301,6 @@ export const livePreviewDecorations: Extension = [
   // #371 可读度量注入通道（探针测量 + Facet 热重配；缺省 null 保持
   // #142 静态下限行为）
   tableMetricsExtension,
+  // #372 离开编辑后的整表高度优化调度（两列；活动期零搜索，离开一次发布）
+  tableHeightScheduler,
 ]

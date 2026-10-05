@@ -15,9 +15,13 @@
 // - IME 组合期（compositionstart/end 自持标志）不 dispatch：置 pending
 //   于组合结束后补测——组合期零重算零发布红线（#153/#371）。
 //
-// availablePx 暂不注入：轨道内 min(px, share%) 的 CSS 双保险已承接「各列
-// 下限放不下按比例收缩、容器恢复即回常规下限」（份额 % 相对容器宽解析，
-// 等下限收缩即等分）；T02/T03 高度评分需要确定性像素轨道时在此实测注入。
+// availablePx（#372）：实测首个网格行的轨道区净宽（行盒宽 − 左右
+// padding/border——引用行缩进随行盒 padding 扣除，与「容器净宽」口径一
+// 致）注入；缺省（无表格行/jsdom 无布局）不注入——轨道内 min(px, share%)
+// 的 CSS 双保险继续承接「各列下限放不下按比例收缩」，#372 高度优化在
+// availablePx 就绪前保持轻量计划不搜索。容器宽变化经几何变化（非文档
+// 变更的 viewport/geometry 更新）补测：值未变不 dispatch（不因滚动/连续
+// resize 重复重建），变化即全量重算 + 高度优化签名失效（调度层消费）。
 //
 // jsdom（单元测试）探针无布局（宽度 0）：不注入，保持 #142 缺省行为——
 // 单测的度量驱动走 metricsCompartment 显式 reconfigure（同测试对
@@ -77,13 +81,19 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
         }
       }
 
-      update(_update: ViewUpdate): void {
+      update(update: ViewUpdate): void {
         const probe = this.ensureProbe()
         if (!probe) {
           return
         }
         const signature = this.signatureOf(probe)
         if (signature !== this.appliedSignature && !composingViews.has(this.view)) {
+          this.refresh()
+        }
+        // #372 容器宽与行区净宽感知：几何变化（视口/面板尺寸）与文档变更
+        // （网格行首次出现——availablePx 无行不可测）都延后一拍补测；值未
+        // 变不 dispatch（滚动/键入等连续事件零成本收敛）
+        if ((update.geometryChanged || update.docChanged) && !composingViews.has(this.view)) {
           this.refresh()
         }
       }
@@ -149,8 +159,13 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
         }
         const cellBoxPx = this.cellBoxPx ?? CELL_BOX_FALLBACK_PX
         const input: TableReadabilityInput = { contentPx, cellBoxPx }
+        const availablePx = this.measureRowAreaPx()
+        if (availablePx !== null) {
+          input.availablePx = availablePx
+        }
         const current = this.view.state.facet(tableMetricsFacet)
-        if (current && current.contentPx === contentPx && current.cellBoxPx === cellBoxPx) {
+        if (current && current.contentPx === contentPx && current.cellBoxPx === cellBoxPx &&
+            (current.availablePx ?? null) === (input.availablePx ?? null)) {
           this.appliedSignature = signature
           pendingViews.delete(this.view)
           return
@@ -160,6 +175,29 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
         this.view.dispatch({
           effects: metricsCompartment.reconfigure(tableMetricsFacet.of(input)),
         })
+      }
+
+      /** #372 行区净宽：首个网格行 border-box 宽 − 左右 padding/border
+       *  （引用行缩进在行盒 padding 内，扣除后即轨道区宽）；无行/无布局 null */
+      private measureRowAreaPx(): number | null {
+        const row = this.view.dom.querySelector<HTMLElement>('.vsidian-table-grid-row')
+        if (!row) {
+          return null
+        }
+        const win = this.view.dom.ownerDocument.defaultView
+        if (!win) {
+          return null
+        }
+        const rect = row.getBoundingClientRect()
+        if (!(rect.width > 0)) {
+          return null
+        }
+        const style = win.getComputedStyle(row)
+        const px = (value: string): number => parseFloat(value) || 0
+        const width = rect.width -
+          px(style.paddingLeft) - px(style.paddingRight) -
+          px(style.borderLeftWidth) - px(style.borderRightWidth)
+        return width > 0 ? width : null
       }
 
       /** 实测格盒占位：视口内首个网格格的左右 padding + border 合计（无表格行返回 null） */
