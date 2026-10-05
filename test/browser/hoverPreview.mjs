@@ -440,18 +440,22 @@ try {
   assert.equal(imgReq.docUri, 'file:///d%3A/notes/parent.md', '会话守卫字段仍是面板自身文档')
   assert.equal(imgReq.sessionId, 'hover-preview')
   assert.equal(imgReq.src, './img.png')
-  // 宿主解析结果注入（真实 handleHostMessage 同入口）→ src 应用到浮层图片
+  // 宿主解析结果注入（真实 handleHostMessage 同入口）→ src 应用到浮层图片。
+  // 测试环境无法服务 vscode-webview:// 资源——img 应用 src 后必然加载失败进入
+  // error 态（2026-10-05 起 error 清 src，26295f25）：appliedSrc 空与 error 态
+  // 一起构成「src 被应用并真实尝试加载」的证据（不应用就既不加载也不 error）
   await page.evaluate(({ reqId }) => window.respondHoverResult({
     kind: 'image.result', reqId, ok: true, src: 'vscode-webview://res/sub/img.png',
   }), { reqId: imgReq.reqId })
-  await page.waitForTimeout(80)
+  await page.waitForFunction(() => window.readHoverImages()[0]?.state === 'error',
+    null, { timeout: 5000, polling: 50 })
   const imgs = await page.evaluate(() => window.readHoverImages())
   assert.equal(imgs.length, 1, '浮层内应有一张图片')
   assert.equal(imgs[0].rawSrc, './img.png', '原始地址转入 data 属性')
-  assert.equal(imgs[0].appliedSrc, 'vscode-webview://res/sub/img.png',
-    'B 身份解析结果应应用到浮层图片（src 应用）')
+  assert.equal(imgs[0].state, 'error', '解析结果已应用并真实尝试加载（环境不可达 → 如实 error）')
+  assert.equal(imgs[0].appliedSrc, '', 'error 清 src（失效提示文字形态的前提）')
   passed++
-  console.log('[悬停预览][PASS] B 相对图片以 B 为来源：sourceDocUri 载荷 + 解析结果应用')
+  console.log('[悬停预览][PASS] B 相对图片以 B 为来源：sourceDocUri 载荷 + 解析结果应用（环境不可达 → error 佐证应用）')
 
   // ---- 场景 O：浮层内链接点击跳转——既有 open 通道附 sourceDocUri，浮层关闭 ----
   await page.locator('.vsidian-hover-popup a.vsidian-wikilink').click()
