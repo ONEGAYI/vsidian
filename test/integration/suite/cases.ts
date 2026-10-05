@@ -12406,11 +12406,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // #247 起混排位（`混排嵌入 ![[嵌入目标]] 保留源文。`）同挂一张卡——
     // Reading 探针的根卡数从 3 变 4（独占全文/章节/缺失 + 混排全文）
     const rootInners = new Set(['嵌入目标', '嵌入目标#章节一', '嵌入缺失目标'])
+    // 分态就绪全部并入等待：错误回包（not-found 走索引/磁盘确认）与成功
+    // 回包不保证同批到达——CI 慢机器上乱序时快照断言会在 loading 态上失败
+    // （run 37263652154 shard 2/4 实证，本地同片复跑绿）；语义断言（scope/
+    // 文案/fm/blocks）保留在等待后的快照上
     const shown = await waitViewState('嵌入样例.md', (v) => {
       const cards = (v.readingEmbed ?? []).filter((card) =>
         card.host === 'reading' && rootInners.has(card.inner))
+      const heading = cards.find((c) => c.inner === '嵌入目标#章节一')
+      const missing = cards.find((c) => c.inner === '嵌入缺失目标')
       return cards.length === 4 &&
-        cards.filter((c) => c.inner === '嵌入目标' && c.state === 'content' && c.scope === 'full').length === 2
+        cards.filter((c) => c.inner === '嵌入目标' && c.state === 'content' && c.scope === 'full').length === 2 &&
+        heading?.state === 'content' && missing?.state === 'error'
     })
     const cards = shown.readingEmbed!.filter((card) =>
       card.host === 'reading' && rootInners.has(card.inner))
