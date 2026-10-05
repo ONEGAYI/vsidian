@@ -20,7 +20,7 @@
 //   编辑期间父表暂停（嵌入子编辑器持焦不算父表离开信号）。
 // - 缓存随视图释放：逐格折行指标缓存（TABLE_OPT_CACHE_ROWS 上限清空）与
 //   已优化签名登记（TABLE_OPT_TRACKED_TABLES 上限清空），无持久存储。
-import { type EditorState, type Extension, type StateEffect, type Text } from '@codemirror/state'
+import { type EditorState, type Extension, StateEffect, type Text } from '@codemirror/state'
 import { EditorView, ViewPlugin } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import {
@@ -48,12 +48,23 @@ import {
   type TableHeightPlanPayload,
 } from './tableHeightPlan'
 
+/** PR #383 验收反馈（结构操作后立即重算）：把手拖拽重排（行/列）、删除
+ *  整行、删除整列的编辑事务自带本效果——载荷为表格 from（事务前坐标，
+ *  消费侧随变更映射）。三个操作离散且落定即结构终态：即使表仍活动
+ *  （光标/把手跟随留在表内）也立即一次完整重算，不与「连续键入活动表
+ *  零搜索」契约冲突；插入行/列、退格删空行、格区删除不携带（操作后
+ *  通常继续在表内输入，立即重算会在空结构上定格） */
+export const requestTableReworkOptimize = StateEffect.define<number>()
+
 const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
   class {
     /** 上一事务的活动表集合（Table 节点 from；docChanged 时随变更映射） */
     private prevActive = new Set<number>()
     /** 离开触发的待执行任务（表格身份集合；0ms 冲量消费） */
     private pendingLeave = new Set<number>()
+    /** 结构操作（重排/删行/删列）携带的立即重算任务（表格身份集合；
+     *  与 pendingLeave 同 flush 消费，唯一差别：不因活动态取消） */
+    private pendingForce = new Set<number>()
     /** 待执行刷新定时器（0ms；组合期/嵌入编辑期挂起） */
     private flushTimer: ReturnType<typeof setTimeout> | null = null
     /** 可见扫描请求（挂载/度量变化/viewport 非 doc 变更时置位） */
@@ -81,6 +92,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       this.destroyed = true
       this.disarmFlush()
       this.pendingLeave.clear()
+      this.pendingForce.clear()
       this.tracked.clear()
       this.fingerCache.clear()
       this.profileCache.clear()
@@ -88,7 +100,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
     }
 
     private readonly onCompositionEnd = (): void => {
-      if (this.pendingLeave.size > 0 || this.scanQueued) {
+      if (this.pendingLeave.size > 0 || this.pendingForce.size > 0 || this.scanQueued) {
         this.armFlush()
       }
     }
@@ -107,13 +119,25 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       if (u.docChanged) {
         // 区间迁移/删除/表前编辑：待执行任务全部取消（效果侧另有文档引用
         // 复核兜底）；不请求扫描——内容编辑后的重算由下一次离开/滚动/度量
-        // 事件承接，避免每次键入全表指纹评估
+        // 事件承接，避免每次键入全表指纹评估。结构操作自带的立即重算
+        // （pendingForce）不在此列：载荷已按本次变更映射，由 flush 消费
         this.pendingLeave.clear()
         const mapped = new Set<number>()
         for (const from of this.prevActive) {
           mapped.add(u.changes.mapPos(from, -1))
         }
         this.prevActive = mapped
+      }
+      // 结构操作（把手重排/删行/删列）事务自带：载荷为事务前表格 from，
+      // 随本次变更映射后入队（置于 docChanged 处理之后——先取消陈旧离开
+      // 任务再收新任务，两队列互不干扰）。effects 挂在事务上：经
+      // u.transactions 逐笔读取（ViewUpdate 无顶层 effects 快捷属性）
+      for (const tr of u.transactions) {
+        for (const e of tr.effects) {
+          if (e.is(requestTableReworkOptimize)) {
+            this.pendingForce.add(tr.docChanged ? tr.changes.mapPos(e.value, -1) : e.value)
+          }
+        }
       }
       const regionChanged =
         u.startState.field(tableRegionField, false) !== u.state.field(tableRegionField, false)
@@ -141,7 +165,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       // 带来父视图的常规事务）——挂起条件解除且任务仍在时重排一次 flush。
       // 视图隐藏（editorHidden）在 flush 内已丢弃任务（模式切换语义保持），
       // 此处对 hidden 的检查只是不无谓 arm
-      if (this.pendingLeave.size > 0 && !this.embedEditing() && !this.editorHidden()) {
+      if ((this.pendingLeave.size > 0 || this.pendingForce.size > 0) && !this.embedEditing() && !this.editorHidden()) {
         this.armFlush()
       }
     }
@@ -243,6 +267,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       // 模式切换/隐藏（liveWrapper display:none）：丢弃待执行任务
       if (this.editorHidden()) {
         this.pendingLeave.clear()
+        this.pendingForce.clear()
         this.scanQueued = false
         return
       }
@@ -259,6 +284,21 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         if (active.has(from)) {
           continue // 回表：取消
         }
+        const table = tableNodeClosest(field.tree, from, 1)
+        if (!table || table.from !== from) {
+          noteTableOptimizeDiscard()
+          continue
+        }
+        const payload = this.optimizeTable(state, table, metrics)
+        if (payload) {
+          effects.push(applyTableHeightPlan.of(payload))
+        }
+      }
+      // 结构操作自带的立即重算：与离开触发的唯一差别是不因活动态取消
+      // （三个操作离散且落定即结构终态）；表格身份/度量/指纹仲裁与发布
+      // 复核同一流程——同版本去重兜底 force 与 leave 对同表的重复入队
+      for (const from of [...this.pendingForce]) {
+        this.pendingForce.delete(from)
         const table = tableNodeClosest(field.tree, from, 1)
         if (!table || table.from !== from) {
           noteTableOptimizeDiscard()

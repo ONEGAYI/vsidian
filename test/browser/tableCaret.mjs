@@ -156,7 +156,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -207,6 +207,11 @@ try {
             : `| ${label} | 说明文字第${i}段承载较长内容驱动行高，优化后短标签列回填宽度减少折行。 | 备注内容第${i}条交替驱动行高，与说明列平衡分配可用宽度。 | ${i} | x${i} | 尾 |`)
         }
         source = `BEFORE\n\n| 功能 | 说明 | 备注 | 序号 | 标记 | 尾列 |\n| --- | --- | --- | --- | --- | --- |\n${rows.join('\n')}\n\nAFTER`
+      }
+      if (scenario === 'height-optimize-rework') {
+        // PR #383 人工验收反馈：三列小表——首数据行说明列携带全列最长内容
+        // （删除后该列样本骤减），备注列次长在第二数据行
+        source = 'BEFORE\n\n| 功能 | 说明 | 备注 |\n| --- | --- | --- |\n| 标签甲 | 这一行携带说明列的全列最长内容驱动折行，删除该行后说明列样本骤减，整表最优列宽模板须立即重算并把宽度回填其余列。 | 备一 |\n| 标签乙 | 短说明 | 备注列第二长的内容文字 |\n| 标签丙 | 中等长度说明 | 备三 |\n| 标签丁 | 短 | 备四 |\n\nAFTER'
       }
       if (scenario.startsWith('handle-cross-')) source += '\n\n| X1 | X2 |\n| --- | --- |\n| Y1 | Y2 |'
       if (scenario === 'enter-empty') source = source.replace('H2', '')
@@ -985,6 +990,102 @@ try {
         const dedup = await page.evaluate(() => window.tableOptimizeStats())
         assert.equal(dedup.searches, stats0.searches + 1, '同版本再次进出不得重复搜索')
         await captureTable(`table-${scenario}.png`)
+      } else if (scenario === 'height-optimize-rework') {
+        // PR #383 人工验收反馈：把手拖拽重排（行/列）、删除整行、删除整列
+        // ——三个离散结构操作的事务落定后，即使表仍处于活动态（光标跟随
+        // 留在表内）也须立即一次完整重算并发布改进模板。连续键入/Tab/拖选/
+        // IME 的「活动表零搜索」契约不变（height-optimize 系列场景钉住）。
+        // searches 等值等待（===）天然防超额：任何路径多搜一次都会超时红。
+        const readTable = () => page.evaluate(() => {
+          const rows = [...document.querySelectorAll('.vsidian-table-grid-row')]
+          if (!rows.length) return null
+          return {
+            rowCount: rows.length,
+            cols: getComputedStyle(rows[0]).gridTemplateColumns.split(' ').length,
+            plan: rows[0].style.getPropertyValue('--vsidian-table-col-widths'),
+          }
+        })
+        const waitSearches = (n) => page.waitForFunction((v) =>
+          window.tableOptimizeStats().searches === v, n, { timeout: 5000 })
+        const tableCommand = (op) => page.evaluate((o) =>
+          window.controller.handleHostMessage({ kind: 'table.command', op: o }), op)
+        await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0, undefined, { timeout: 5000 })
+        await page.waitForFunction(() => window.tableOptimizeStats().publishes >= 1, undefined, { timeout: 5000 })
+        // 光标进表（活动态）后取基线：①删行列走此路径（table.command 依赖
+        // 选区），②③把手拖拽改走表外路径（把手操作不要求光标进表）
+        await cell(1, 0).click()
+        await page.waitForTimeout(120)
+        const stats0 = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests }))
+        // ① 删除整行（携带说明列全列最长内容的数据行）：活动态立即重算
+        await tableCommand('deleteRow')
+        await waitSearches(stats0.searches + 1)
+        await page.waitForTimeout(80)
+        let s = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests, text: window.readEditor().text,
+          head: window.readEditor().head }))
+        assert(!s.text.includes('标签甲'), 'deleteRow 应移除光标所在数据行')
+        assert.equal((await readTable()).rowCount, 4, '删行后网格行 4（表头+3 数据行）')
+        assert(s.head > s.text.indexOf('| 功能') && s.head < s.text.indexOf('AFTER'),
+          '删行后光标跟随仍在表内——重算须发生于活动态')
+        assert(s.publishes - stats0.publishes <= 1,
+          `删行后发布至多一次（重算无改进合法走丢弃）: ${s.publishes - stats0.publishes}`)
+        assert.equal(s.editRequests, stats0.editRequests + 1,
+          '删行恰好一笔 edit.request 出站（结构编辑），布局重算零写回')
+        // ② 把手拖拽重排列（第三列拖到首位，真实鼠标 down/move/up）——
+        // 先把光标移出表：把手操作不要求光标进表，非活动表结构变更后
+        // 同样须立即重算（此前 docChanged 后无任何触发事件，模板与列序
+        // 错位一直挂到下次滚动/进离表）
+        await page.locator('.cm-line').filter({ hasText: /^AFTER$/ }).click()
+        await page.waitForTimeout(150)
+        const statsOut = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests }))
+        const from2 = await page.locator('.vsidian-table-column-handle').nth(2).boundingBox()
+        const to2 = await page.locator('.vsidian-table-column-handle').nth(0).boundingBox()
+        await page.mouse.move(from2.x + from2.width / 2, from2.y + from2.height / 2)
+        await page.mouse.down()
+        await page.mouse.move(to2.x + 2, from2.y + from2.height / 2, { steps: 8 })
+        await page.mouse.up()
+        await waitSearches(statsOut.searches + 1)
+        await page.waitForTimeout(80)
+        s = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests, text: window.readEditor().text }))
+        assert(s.text.includes('| 备注 | 功能 | 说明 |'), `列拖排后表头应为新列序: ${s.text.split('\n')[2]}`)
+        assert(s.publishes - statsOut.publishes <= 1, `列拖排后发布至多一次: ${s.publishes - statsOut.publishes}`)
+        assert.equal(s.editRequests, statsOut.editRequests + 1, '列拖排恰好一笔 edit.request 出站')
+        // ③ 把手拖拽重排行（第三个行把手拖到表头上方，拖动行升为表头）
+        // ——光标仍在表外（非活动路径）
+        const from3 = await page.locator('.vsidian-table-row-handle').nth(2).boundingBox()
+        const to3 = await page.locator('.vsidian-table-row-handle').nth(0).boundingBox()
+        await page.mouse.move(from3.x + from3.width / 2, from3.y + from3.height / 2)
+        await page.mouse.down()
+        await page.mouse.move(from3.x + from3.width / 2, to3.y + 2, { steps: 8 })
+        await page.mouse.up()
+        await waitSearches(statsOut.searches + 2)
+        await page.waitForTimeout(80)
+        s = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests, text: window.readEditor().text }))
+        const header3 = s.text.split('\n')[2]
+        assert(header3.includes('标签丙'), `行拖排后拖动行应升为表头: ${header3}`)
+        assert(s.publishes - statsOut.publishes <= 2, `行拖排后累计再发布至多一次: ${s.publishes - statsOut.publishes - 1}`)
+        assert.equal(s.editRequests, statsOut.editRequests + 2, '行拖排恰好一笔 edit.request 出站')
+        // ④ 删除整列（光标所在列）：重新进表（table.command 依赖选区），
+        // 三列变两列，立即重算后轨道数随列数
+        await cell(1, 0).click()
+        await page.waitForTimeout(100)
+        const statsIn = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests }))
+        await tableCommand('deleteColumn')
+        await waitSearches(statsIn.searches + 1)
+        await page.waitForTimeout(80)
+        s = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests }))
+        const finalTable = await readTable()
+        assert.equal(finalTable.cols, 2, `删列后 computed 轨道应为两列: ${finalTable.cols}`)
+        assert(finalTable.plan && finalTable.plan.length > 0, '删列后行内列宽计划仍挂载')
+        assert(s.publishes - statsIn.publishes <= 1, `删列后发布至多一次: ${s.publishes - statsIn.publishes}`)
+        assert.equal(s.editRequests, statsIn.editRequests + 1, '删列恰好一笔 edit.request 出站')
+        await captureTable('table-height-optimize-rework.png')
       } else {
         // drag-table-outside：表外文本发起、横跨整表拖选，一次 Delete 移除整表
         const beforeLine = page.locator('.cm-line').filter({ hasText: /^BEFORE$/ })
@@ -1004,7 +1105,8 @@ try {
             `表格前后正文按选区保留（选区端点所在字符按所见即所删）: ${JSON.stringify(state)}`)
           assert(state.rows === 0, '表格 DOM 应随整块删除消失')
         }
-      } else if (scenario === 'height-optimize-multi' || scenario === 'height-optimize-wide') {
+      } else if (scenario === 'height-optimize-multi' || scenario === 'height-optimize-wide'
+        || scenario === 'height-optimize-rework') {
         // #373 多列样例网格行数多（31/21 行），基表「首末行方向键导航」断言
         // 不适用——本场景的全部断言已在专属分支完成，这里跳过基表导航
       } else {
