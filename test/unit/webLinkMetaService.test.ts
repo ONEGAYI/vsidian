@@ -633,3 +633,235 @@ describe('WebLinkMetaService 默认参数契约（报告参数表的钉子）', 
     expect(WEB_LINK_LIMITS.cacheTtlMs).toBe(10 * 60 * 1000)
   })
 })
+
+// ---- #346（用户裁决改进）代理接入：VSCode http.proxy 语义 ----
+// 受控假代理（CONNECT 真实放行到既有 TLS 夹具服务器 + 绝对形态请求观测）
+// 驱动：配置在场走隧道、每跳重建、proxySupport=off 等价直连决策、非法代理
+// 回退直连 + warn 去抖、http 目标绝对形态、SSRF 降级如实钉住、隧道失败
+// 分态与取消。真实 TUN 代理无法自动化——manual-verification.md 外链卡片节
+// 人工待验第 7 条。
+import net from 'node:net'
+import type { Duplex } from 'node:stream'
+import { vi } from 'vitest'
+import type { ProxyDecision, ProxyTarget } from '../../src/host/proxyAgent'
+
+interface ProxyConnectRecord {
+  authority: string
+  authorization?: string
+}
+
+let fakeProxy: {
+  port: number
+  connects: ProxyConnectRecord[]
+  setConnectPolicy(policy: (req: http.IncomingMessage, socket: Duplex, head: Buffer) => void): void
+}
+
+const grantToTarget = (req: http.IncomingMessage, clientSocket: Duplex, head: Buffer): void => {
+  const authority = req.url ?? ''
+  const idx = authority.lastIndexOf(':')
+  const upstream = net.connect(Number(authority.slice(idx + 1)), authority.slice(0, idx), () => {
+    clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+    if (head.length > 0) {
+      upstream.write(head)
+    }
+    upstream.pipe(clientSocket)
+    clientSocket.pipe(upstream)
+  })
+  clientSocket.on('error', () => upstream.destroy())
+  clientSocket.on('close', () => upstream.destroy())
+  upstream.on('error', () => clientSocket.destroy())
+}
+
+beforeAll(async () => {
+  const connects: ProxyConnectRecord[] = []
+  let connectPolicy = grantToTarget
+  // CONNECT 升级 socket 脱离 Node 服务端连接追踪（closeAllConnections 不
+  // 覆盖，close 回调将挂起）——手动追踪，收尾显式销毁
+  const tunnelSockets = new Set<Duplex>()
+  const server = http.createServer((_req, res) => {
+    // http 目标的绝对形态请求落在普通 handler
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    res.end(PAGE)
+  })
+  server.on('connect', (req, clientSocket, head) => {
+    tunnelSockets.add(clientSocket)
+    clientSocket.on('close', () => tunnelSockets.delete(clientSocket))
+    connects.push({ authority: req.url ?? '', authorization: req.headers['proxy-authorization'] })
+    connectPolicy(req, clientSocket, head)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  openServers.push({
+    server,
+    port: (server.address() as { port: number }).port,
+    hits: [],
+    close: () => new Promise<void>((resolve) => {
+      for (const socket of tunnelSockets) {
+        socket.destroy()
+      }
+      server.close(() => resolve())
+      server.closeAllConnections()
+    }),
+  })
+  fakeProxy = {
+    port: (server.address() as { port: number }).port,
+    connects,
+    setConnectPolicy: (policy) => {
+      connectPolicy = policy
+    },
+  }
+})
+
+const proxyTarget = (extra: Partial<ProxyTarget> = {}): ProxyTarget => ({
+  url: new URL(`http://127.0.0.1:${fakeProxy.port}`),
+  rejectUnauthorized: false,
+  ...extra,
+})
+
+const makeProxiedService = (
+  getProxy: (protocol: string) => ProxyDecision,
+  overrides?: Partial<typeof WEB_LINK_LIMITS>,
+): WebLinkMetaService => new WebLinkMetaService({
+  limits: { ...WEB_LINK_LIMITS, ...overrides },
+  checkUrl: permissiveLoopbackCheck,
+  isAddressAllowed: () => true,
+  getProxy,
+})
+
+describe('WebLinkMetaService 代理接入（#346）', () => {
+  it('配置在场走 CONNECT 隧道：https 目标经代理送达 TLS 夹具服务器', async () => {
+    const connectsBefore = fakeProxy.connects.length
+    const hitsBefore = tls.hits.length
+    const protocols: string[] = []
+    const service = makeProxiedService((p) => {
+      protocols.push(p)
+      return { mode: 'proxy', target: proxyTarget() }
+    })
+    const outcome = await service.fetch(tls.tlsUrl('/ok'))
+    expect(outcome.ok).toBe(true)
+    if (outcome.ok) {
+      expect(outcome.meta.title).toBe('示例站点')
+    }
+    expect(fakeProxy.connects.length - connectsBefore).toBe(1)
+    expect(fakeProxy.connects[fakeProxy.connects.length - 1]).toEqual({ authority: `127.0.0.1:${tls.port}`, authorization: undefined })
+    expect(tls.hits.length - hitsBefore).toBe(1)
+    expect(protocols).toEqual(['https:'])
+  })
+
+  it('重定向链每跳重建隧道（CONNECT 次数 = 跳数）', async () => {
+    const connectsBefore = fakeProxy.connects.length
+    const service = makeProxiedService(() => ({ mode: 'proxy', target: proxyTarget() }))
+    const outcome = await service.fetch(tls.tlsUrl('/redirect-ok'))
+    expect(outcome.ok).toBe(true)
+    if (outcome.ok) {
+      expect(outcome.meta.url).toBe(tls.tlsUrl('/ok'))
+    }
+    expect(fakeProxy.connects.length - connectsBefore).toBe(2)
+  })
+
+  it('直连决策（proxySupport=off 等价）：请求直达目标，假代理零 CONNECT', async () => {
+    const connectsBefore = fakeProxy.connects.length
+    const hitsBefore = ctx.hits.length
+    const service = makeProxiedService(() => ({ mode: 'direct' }))
+    const outcome = await service.fetch(url('/html'))
+    expect(outcome.ok).toBe(true)
+    expect(ctx.hits.length - hitsBefore).toBe(1)
+    expect(fakeProxy.connects.length).toBe(connectsBefore)
+  })
+
+  it('代理 URL 非法回退直连 + warn 去抖（同会话同错只刷一次）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const connectsBefore = fakeProxy.connects.length
+      const service = makeProxiedService(() => ({ mode: 'invalid', source: 'socks5://127.0.0.1:1080' }))
+      expect((await service.fetch(url('/html'))).ok).toBe(true)
+      expect((await service.fetch(url('/plain'))).ok).toBe(false) // 第二次抓取：不重复 warn
+      expect(fakeProxy.connects.length).toBe(connectsBefore)
+      const messages = warn.mock.calls.map((c) => String(c[0]))
+      expect(messages.filter((m) => m.includes('socks5://127.0.0.1:1080')).length).toBe(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('http 目标走绝对形态代理请求（请求行绝对 URL、Host 为目标权威）', async () => {
+    // 用独立观测服务器作代理：绝对形态请求落在普通 handler，目标服务器零直连
+    const observed: Array<{ url: string; host?: string; authorization?: string }> = []
+    const proxySrv = await startServer((req, res) => {
+      observed.push({ url: req.url ?? '', host: req.headers.host, authorization: req.headers['proxy-authorization'] })
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(PAGE)
+    })
+    const protocols: string[] = []
+    const service = new WebLinkMetaService({
+      limits: { ...WEB_LINK_LIMITS },
+      checkUrl: permissiveLoopbackCheck,
+      isAddressAllowed: () => true,
+      getProxy: (p) => {
+        protocols.push(p)
+        return { mode: 'proxy', target: { url: new URL(`http://127.0.0.1:${proxySrv.port}`), authorization: `Basic ${Buffer.from('u:p').toString('base64')}`, rejectUnauthorized: false } }
+      },
+    })
+    const target = url('/html')
+    const outcome = await service.fetch(target)
+    expect(outcome.ok).toBe(true)
+    expect(observed).toEqual([{
+      url: target,
+      host: `127.0.0.1:${ctx.port}`,
+      authorization: `Basic ${Buffer.from('u:p').toString('base64')}`,
+    }])
+    expect(protocols).toEqual(['http:'])
+  })
+
+  it('代理模式 lookup 校验不可达：localhost 域名经隧道成功（SSRF 降级如实钉住，对照直连用例被拒）', async () => {
+    // 生产 isAddressAllowed（回环拒绝）+ 代理在场：DNS 解析发生在代理侧，
+    // 宿主 lookup 层校验不可达——直连形态（DNS 换址防护 describe）对同一
+    // localhost URL 按 web-invalid-address 拒绝，两例共同钉住降级语义
+    const service = new WebLinkMetaService({
+      limits: { ...WEB_LINK_LIMITS, timeoutMs: 4000 },
+      checkUrl: permissiveLoopbackCheck,
+      getProxy: () => ({ mode: 'proxy', target: proxyTarget() }),
+    })
+    const outcome = await service.fetch(`https://localhost:${tls.port}/ok`)
+    expect(outcome.ok).toBe(true)
+  })
+
+  it('隧道失败（CONNECT 407）：web-unreachable 且诊断日志含状态', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      fakeProxy.setConnectPolicy((_req, clientSocket) => {
+        clientSocket.end('HTTP/1.1 407 Proxy Authentication Required\r\n\r\n')
+      })
+      const service = makeProxiedService(() => ({ mode: 'proxy', target: proxyTarget() }))
+      const outcome = await service.fetch(tls.tlsUrl('/ok'))
+      expect(outcome).toEqual({ ok: false, reason: 'web-unreachable' })
+      const messages = warn.mock.calls.map((c) => String(c[0]))
+      expect(messages.some((m) => m.includes('407') && m.includes('隧道'))).toBe(true)
+    } finally {
+      fakeProxy.setConnectPolicy(grantToTarget)
+      warn.mockRestore()
+    }
+  })
+
+  it('隧道建立计入总预算：代理挂起不答按 web-timeout 失败', async () => {
+    fakeProxy.setConnectPolicy(() => {
+      // 不应答
+    })
+    try {
+      const service = makeProxiedService(() => ({ mode: 'proxy', target: proxyTarget() }), { timeoutMs: 250 })
+      const outcome = await service.fetch(tls.tlsUrl('/ok'))
+      expect(outcome).toEqual({ ok: false, reason: 'web-timeout' })
+    } finally {
+      fakeProxy.setConnectPolicy(grantToTarget)
+    }
+  })
+
+  it('消费者取消经隧道：请求以 AbortError 拒绝（取消语义在代理路径保持）', async () => {
+    const service = makeProxiedService(() => ({ mode: 'proxy', target: proxyTarget() }), { timeoutMs: 5000 })
+    const controller = new AbortController()
+    const pending = service.fetch(tls.tlsUrl('/hang'), controller.signal)
+    await new Promise((r) => setTimeout(r, 150))
+    const settle = expect(pending).rejects.toThrow()
+    controller.abort()
+    await settle
+  })
+})

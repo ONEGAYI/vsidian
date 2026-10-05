@@ -18,10 +18,21 @@
 //
 // 缓存：仅内存（键 = 形态 + 归一 URL），条目/字节双上限 + TTL + LRU
 // 淘汰，失败不缓存（保留重试语义）；不持久化任何浏览历史。
+//
+// #346（用户裁决改进）代理接入：接线侧注入 getProxy 决策器（VSCode
+// http.proxy 族），在场时 https 目标走 CONNECT 隧道、http 目标走绝对
+// 形态转发（proxyAgent.ts），消除宿主 Node 栈与系统浏览器网络路径分叉；
+// proxySupport=off / 未配置 / 配置非法（回退直连 + warn 去抖）时维持直连。
+// **代理模式 SSRF 降级语义**：DNS 解析与真实连接发生在代理侧，本服务的
+// lookup 层校验不可达——准入退为 URL 文本层 + 重定向链文本复核，实际 IP
+// 安全由代理侧承担（企业/本机代理语义下接受，语义对照测试钉住）；直连
+// 模式（未配置代理）的 lookup 校验一字不动。详见 proxyAgent.ts 头注与
+// 规格「外链形态、网络与退回」第 3 条。
 import * as dns from 'node:dns'
 import * as http from 'node:http'
 import * as https from 'node:https'
 import type { Readable } from 'node:stream'
+import type { TLSSocket } from 'node:tls'
 import {
   assessWebFrameEmbeddability,
   checkWebLinkUrl,
@@ -30,6 +41,7 @@ import {
   type WebLinkFailReason,
   type WebLinkUrlCheck,
 } from '../shared/webLink'
+import { connectThroughProxy, proxyPortOf, PROXY_TUNNEL_ERROR_CODE, type ProxyDecision, type ProxyTarget } from './proxyAgent'
 import { parseWebMetaFromHtml } from './webMetaExtract'
 
 /** 抓取与缓存界限（默认值的依据见 #342 报告参数表；契约测试钉住） */
@@ -105,9 +117,40 @@ export interface WebLinkMetaServiceOptions {
   /** 地址准入覆盖（默认 = shared/webLink 生产矩阵；lookup 层——域名解析后） */
   isAddressAllowed?: (address: string) => boolean
   now?: () => number
+  /** #346 代理决策注入（默认 = 恒直连；生产接线传 VSCode http.proxy 读取
+   *  器）。每跳请求前调用——配置变更无需重启生效。返回 mode=invalid 时回
+   *  退直连并对同值 warn 去抖；代理模式下 lookup 层地址校验不可达（SSRF
+   *  降级语义见模块头与 proxyAgent.ts） */
+  getProxy?: (targetProtocol: string) => ProxyDecision
 }
 
 const BLOCK_ADDR_CODE = 'VSIDIAN_WEB_BLOCKED_ADDR'
+
+/** 单次请求的三态收敛（redirect 继续下一跳 / outcome 终态） */
+type WebLinkRequestStep =
+  | { kind: 'redirect'; location: string }
+  | { kind: 'outcome'; outcome: WebLinkMetaOutcome }
+
+/** 网络错误归因（诊断日志细分 cause；不参与 outcome 分态判定） */
+type WebFetchErrorKind = 'dns' | 'tcp' | 'tunnel' | 'tls' | 'network'
+
+function classifyWebFetchError(err: NodeJS.ErrnoException): WebFetchErrorKind {
+  const code = err.code ?? ''
+  if (code === PROXY_TUNNEL_ERROR_CODE) {
+    return 'tunnel'
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EAI_NODATA' || code === 'EAI_FAIL' || code === 'EAI_NONAME' || code === 'ENODATA') {
+    return 'dns'
+  }
+  if (/CERT|SSL|TLS/i.test(code) || /certificate|SSL|TLS/i.test(err.message ?? '')) {
+    return 'tls'
+  }
+  if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'EHOSTUNREACH' || code === 'ENETUNREACH' ||
+    code === 'ECONNRESET' || code === 'EPIPE' || code === 'ENETDOWN' || code === 'EADDRNOTAVAIL') {
+    return 'tcp'
+  }
+  return 'network'
+}
 
 /**
  * 外链元信息服务：fetch 由有效悬停触发（服务自身不预抓——打开文档、
@@ -119,6 +162,9 @@ export class WebLinkMetaService {
   private readonly checkUrl: (href: string) => WebLinkUrlCheck
   private readonly isAddressAllowed: (address: string) => boolean
   private readonly now: () => number
+  private readonly getProxy: (targetProtocol: string) => ProxyDecision
+  /** 非法代理配置的 warn 去抖（同会话同值只刷一次） */
+  private readonly warnedInvalidProxy = new Set<string>()
   private readonly cache = new Map<string, CacheEntry>()
   private readonly inflight = new Map<string, InFlightEntry>()
   private cacheBytes = 0
@@ -130,6 +176,7 @@ export class WebLinkMetaService {
     this.checkUrl = options.checkUrl ?? checkWebLinkUrl
     this.isAddressAllowed = options.isAddressAllowed ?? isAllowedInetAddress
     this.now = options.now ?? Date.now
+    this.getProxy = options.getProxy ?? (() => ({ mode: 'direct' }))
   }
 
   /**
@@ -275,6 +322,8 @@ export class WebLinkMetaService {
   }
 
   /** 单次请求（含响应头边界与响应体读取）：redirect / fail / meta 三态。
+   *  #346：按代理决策三路分派——https 目标走 CONNECT 隧道、http 目标走
+   *  绝对形态转发、无代理维持直连（lookup 层校验仅直连路径装配）。
    *  #343：page 形态在 2xx 最终响应上捕获嵌入拒绝头（X-Frame-Options /
    *  Content-Security-Policy——report-only 不参与强制判定故不读取）与最终
    *  协议，预检结果随 meta 下发 */
@@ -283,13 +332,42 @@ export class WebLinkMetaService {
     signal: AbortSignal,
     causeOf: () => 'timeout' | 'consumer' | null,
     shape: 'card' | 'page',
-  ): Promise<
-    | { kind: 'redirect'; location: string }
-    | { kind: 'outcome'; outcome: WebLinkMetaOutcome }
-  > {
-    return new Promise((resolve) => {
-      const parsed = new URL(url)
-      const mod = parsed.protocol === 'https:' ? https : http
+  ): Promise<WebLinkRequestStep> {
+    const parsed = new URL(url)
+    const decision = this.resolveProxyDecision(parsed.protocol)
+    if (decision.mode === 'proxy' && parsed.protocol === 'https:') {
+      return this.requestViaTunnel(parsed, decision.target, signal, causeOf, shape)
+    }
+    if (decision.mode === 'proxy') {
+      return this.requestViaProxyHttp(parsed, decision.target, signal, causeOf, shape)
+    }
+    return this.requestDirect(url, parsed, signal, causeOf, shape)
+  }
+
+  /** #346：每跳请求前解析代理决策（接线侧每调用读一次 VSCode 配置——配置
+   *  变更无需重启生效）；非法代理值归一为直连并按原始值去抖告警一次 */
+  private resolveProxyDecision(protocol: string): ProxyDecision {
+    const decision = this.getProxy(protocol)
+    if (decision.mode === 'invalid') {
+      if (!this.warnedInvalidProxy.has(decision.source)) {
+        this.warnedInvalidProxy.add(decision.source)
+        console.warn(`[vsidian] 外链抓取代理配置无法应用，已回退直连：${decision.source}`)
+      }
+      return { mode: 'direct' }
+    }
+    return decision
+  }
+
+  /** 直连路径（现行为原样：URL 对象直入 mod.request，lookup 层地址准入装配） */
+  private requestDirect(
+    url: string,
+    parsed: URL,
+    signal: AbortSignal,
+    causeOf: () => 'timeout' | 'consumer' | null,
+    shape: 'card' | 'page',
+  ): Promise<WebLinkRequestStep> {
+    const mod = parsed.protocol === 'https:' ? https : http
+    return this.openRequest(url, parsed, (onResponse, onError) => {
       const req = mod.request(parsed, {
         method: 'GET',
         headers: {
@@ -298,75 +376,189 @@ export class WebLinkMetaService {
         },
         lookup: this.lookupAdapter.bind(this) as unknown as never,
         signal,
-      }, (res) => {
-        const status = res.statusCode ?? 0
-        if (status === 301 || status === 302 || status === 303 || status === 307 || status === 308) {
-          const location = res.headers.location
-          res.resume() // 丢弃重定向响应体
-          if (typeof location !== 'string' || location === '') {
-            resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-redirects' } })
-            return
-          }
-          // 畸形 Location（如 `http://[`）按重定向失败分态收敛——new URL
-          // 在响应回调内同步抛 TypeError 会逸出为进程级异常（review 修复），
-          // 该次抓取悬置至总预算超时误报 web-timeout
-          let redirectTarget: URL
-          try {
-            redirectTarget = new URL(location, url)
-          } catch {
-            resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-redirects' } })
-            return
-          }
-          resolve({ kind: 'redirect', location: redirectTarget.toString() })
-          return
-        }
-        if (status < 200 || status >= 300) {
-          res.resume()
-          req.destroy()
-          resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } })
-          return
-        }
-        const contentType = res.headers['content-type'] ?? ''
-        if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) {
-          res.resume()
-          req.destroy()
-          resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-not-html' } })
-          return
-        }
-        const declared = Number(res.headers['content-length'])
-        if (Number.isFinite(declared) && declared > this.limits.maxBytes) {
-          res.resume()
-          req.destroy()
-          resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-too-large' } })
-          return
-        }
-        const frame = shape === 'page'
-          ? assessWebFrameEmbeddability({
-            protocol: parsed.protocol,
-            xFrameOptions: res.headers['x-frame-options'],
-            contentSecurityPolicy: res.headers['content-security-policy'],
-          })
-          : undefined
-        this.readBody(url, req, res, resolve, frame, causeOf)
-      })
-      req.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === BLOCK_ADDR_CODE) {
-          resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-invalid-address' } })
-          return
-        }
-        if (causeOf() === 'timeout') {
-          resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-timeout' } })
-          return
-        }
-        if (isAbortError(err)) {
-          // 消费者取消：所有消费者已各自 reject，此处 outcome 仅为收敛占位
-          resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } })
-          return
-        }
-        resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } })
-      })
+      }, onResponse)
+      req.on('error', onError)
+      return req
+    }, causeOf, shape)
+  }
+
+  /** #346：https 目标走 CONNECT 隧道——先建隧道（超时预算与取消经同一
+   *  signal 贯穿，AbortSignal 同时覆盖 CONNECT 与 TLS 握手阶段），再以
+   *  createConnection 注入隧道 socket 发 https 请求（Node 惯例：https
+   *  请求的连接即 TLS socket，https.Agent 的 createConnection 同构） */
+  private async requestViaTunnel(
+    parsed: URL,
+    target: ProxyTarget,
+    signal: AbortSignal,
+    causeOf: () => 'timeout' | 'consumer' | null,
+    shape: 'card' | 'page',
+  ): Promise<WebLinkRequestStep> {
+    const url = parsed.toString()
+    const host = parsed.hostname // 含 IPv6 方括号（CONNECT authority 形态）
+    const port = parsed.port === '' ? 443 : Number(parsed.port)
+    let socket: TLSSocket
+    try {
+      socket = await connectThroughProxy(target, host, port, {
+        servername: host.replace(/^\[|\]$/g, ''),
+        rejectUnauthorized: target.rejectUnauthorized,
+      }, signal)
+    } catch (err) {
+      return this.requestErrorOutcome(url, err as NodeJS.ErrnoException, causeOf)
+    }
+    return this.openRequest(url, parsed, (onResponse, onError) => {
+      const req = https.request({
+        protocol: 'https:',
+        host: host.replace(/^\[|\]$/g, ''),
+        port,
+        path: `${parsed.pathname}${parsed.search}`,
+        method: 'GET',
+        headers: {
+          'user-agent': WEB_LINK_USER_AGENT,
+          accept: 'text/html,application/xhtml+xml',
+        },
+        createConnection: () => socket,
+        signal,
+      }, onResponse)
+      req.on('error', onError)
+      return req
+    }, causeOf, shape)
+  }
+
+  /** #346：http 目标经代理绝对形态转发（URL 准入同收 http，绝对形态是
+   *  正向代理对明文目标的标准路径）：请求行带完整 URL、Host 头为目标
+   *  权威；本路径无本地 lookup——目标域名解析在代理侧 */
+  private requestViaProxyHttp(
+    parsed: URL,
+    target: ProxyTarget,
+    signal: AbortSignal,
+    causeOf: () => 'timeout' | 'consumer' | null,
+    shape: 'card' | 'page',
+  ): Promise<WebLinkRequestStep> {
+    const url = parsed.toString()
+    return this.openRequest(url, parsed, (onResponse, onError) => {
+      const req = http.request({
+        host: target.url.hostname.replace(/^\[|\]$/g, ''),
+        port: proxyPortOf(target),
+        path: url,
+        method: 'GET',
+        headers: {
+          'user-agent': WEB_LINK_USER_AGENT,
+          accept: 'text/html,application/xhtml+xml',
+          host: parsed.host,
+          ...(target.authorization !== undefined ? { 'proxy-authorization': target.authorization } : {}),
+        },
+        signal,
+      }, onResponse)
+      req.on('error', onError)
+      return req
+    }, causeOf, shape)
+  }
+
+  /** 统一请求骨架：build 产生 ClientRequest（三路分派各自的连接形态），
+   *  响应与错误收敛同源（handleResponse / requestErrorOutcome） */
+  private openRequest(
+    url: string,
+    parsed: URL,
+    build: (
+      onResponse: (res: http.IncomingMessage) => void,
+      onError: (err: NodeJS.ErrnoException) => void,
+    ) => http.ClientRequest,
+    causeOf: () => 'timeout' | 'consumer' | null,
+    shape: 'card' | 'page',
+  ): Promise<WebLinkRequestStep> {
+    return new Promise((resolve) => {
+      const req = build(
+        (res) => this.handleResponse(url, parsed, req, res, resolve, causeOf, shape),
+        (err) => resolve(this.requestErrorOutcome(url, err, causeOf)),
+      )
       req.end()
     })
+  }
+
+  /** 响应头边界与分态收敛（三路共用）：redirect / 边界拒绝 / 读取移交 */
+  private handleResponse(
+    url: string,
+    parsed: URL,
+    req: http.ClientRequest,
+    res: http.IncomingMessage,
+    resolve: (step: WebLinkRequestStep) => void,
+    causeOf: () => 'timeout' | 'consumer' | null,
+    shape: 'card' | 'page',
+  ): void {
+    const status = res.statusCode ?? 0
+    if (status === 301 || status === 302 || status === 303 || status === 307 || status === 308) {
+      const location = res.headers.location
+      res.resume() // 丢弃重定向响应体
+      if (typeof location !== 'string' || location === '') {
+        resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-redirects' } })
+        return
+      }
+      // 畸形 Location（如 `http://[`）按重定向失败分态收敛——new URL
+      // 在响应回调内同步抛 TypeError 会逸出为进程级异常（review 修复），
+      // 该次抓取悬置至总预算超时误报 web-timeout
+      let redirectTarget: URL
+      try {
+        redirectTarget = new URL(location, url)
+      } catch {
+        resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-redirects' } })
+        return
+      }
+      resolve({ kind: 'redirect', location: redirectTarget.toString() })
+      return
+    }
+    if (status < 200 || status >= 300) {
+      res.resume()
+      req.destroy()
+      console.warn(`[vsidian] 外链抓取失败（状态码非 2xx）：${url}：HTTP ${status}`)
+      resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } })
+      return
+    }
+    const contentType = res.headers['content-type'] ?? ''
+    if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+      res.resume()
+      req.destroy()
+      resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-not-html' } })
+      return
+    }
+    const declared = Number(res.headers['content-length'])
+    if (Number.isFinite(declared) && declared > this.limits.maxBytes) {
+      res.resume()
+      req.destroy()
+      resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-too-large' } })
+      return
+    }
+    const frame = shape === 'page'
+      ? assessWebFrameEmbeddability({
+        protocol: parsed.protocol,
+        xFrameOptions: res.headers['x-frame-options'],
+        contentSecurityPolicy: res.headers['content-security-policy'],
+      })
+      : undefined
+    this.readBody(url, req, res, resolve, frame, causeOf)
+  }
+
+  /** 请求/隧道错误收敛（三路共用）：outcome 分态保持既有语义，另发细分
+   *  cause 诊断日志（DNS/TCP/隧道/TLS/网络——扩展宿主日志可辨真实原因，
+   *  用户 TUN 场景重测依据）；消费者取消不发日志（非失败） */
+  private requestErrorOutcome(
+    url: string,
+    err: NodeJS.ErrnoException,
+    causeOf: () => 'timeout' | 'consumer' | null,
+  ): WebLinkRequestStep {
+    if (err.code === BLOCK_ADDR_CODE) {
+      return { kind: 'outcome', outcome: { ok: false, reason: 'web-invalid-address' } }
+    }
+    if (causeOf() === 'timeout') {
+      console.warn(`[vsidian] 外链抓取失败（超时）：${url}`)
+      return { kind: 'outcome', outcome: { ok: false, reason: 'web-timeout' } }
+    }
+    if (isAbortError(err)) {
+      // 消费者取消：所有消费者已各自 reject，此处 outcome 仅为收敛占位
+      return { kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } }
+    }
+    const kind = classifyWebFetchError(err)
+    console.warn(`[vsidian] 外链抓取失败（${kind === 'dns' ? 'DNS 解析失败' : kind === 'tcp' ? 'TCP 连接失败' : kind === 'tunnel' ? '代理隧道失败' : kind === 'tls' ? 'TLS 失败' : '网络失败'}）：${url}：${err.code === PROXY_TUNNEL_ERROR_CODE ? err.message : (err.code ?? err.message)}`)
+    return { kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } }
   }
 
   /** 流式读取响应体：累计超限即中断（web-too-large）；完成即解析元信息
@@ -375,7 +567,7 @@ export class WebLinkMetaService {
     url: string,
     req: http.ClientRequest,
     res: Readable & { statusCode?: number },
-    resolve: (value: { kind: 'redirect'; location: string } | { kind: 'outcome'; outcome: WebLinkMetaOutcome }) => void,
+    resolve: (value: WebLinkRequestStep) => void,
     frame: WebFramePrecheck | undefined,
     causeOf: () => 'timeout' | 'consumer' | null,
   ): void {
@@ -423,6 +615,9 @@ export class WebLinkMetaService {
       // 按 web-unreachable；仅自身截断场景（流式超限 destroy，此处通常已
       // 由 data 处理器先行结算）保留 web-too-large
       const cause = causeOf()
+      if (cause === null) {
+        console.warn(`[vsidian] 外链抓取失败（截断）：${url}`)
+      }
       finish(cause === 'timeout'
         ? { ok: false, reason: 'web-timeout' }
         : cause === 'consumer'
@@ -432,6 +627,10 @@ export class WebLinkMetaService {
   }
 
   // ---- lookup 层地址准入（DNS 解析后、连接前；重定向每跳同过此层） ----
+  // #346 边界：本层仅直连路径装配（requestDirect）——代理模式下目标域名
+  // 在代理侧解析，本地 lookup 不发生（防 DNS 换址校验不可达，属已落档的
+  // 代理模式 SSRF 降级；对照测试：直连 localhost 被 web-invalid-address
+  // 拒绝、代理模式同 URL 经隧道成功）
 
   private readonly lookupAdapter = (
     hostname: string,

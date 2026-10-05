@@ -181,6 +181,7 @@ vsidian/
 │   ├── genNls.d.mts              # NLS 生成器类型声明
 │   ├── genNls.mjs                # manifest NLS 文件生成脚本
 │   ├── genStyleGuide.mjs         # 样式指南生成脚本
+│   ├── pdfBuildConfig.mjs        # PDF.js 双产物构建配置事实源
 │   ├── quick-action-icons.py     # 快速操作图标生成与校验
 │   ├── release.mjs               # 发布脚本：打包、包体检查与上传
 │   └── styleContractCheck.mjs    # 契约检查纯逻辑模块

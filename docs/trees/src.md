@@ -31,6 +31,7 @@ vsidian/
     │   ├── keybindingService.ts        # 快捷键全局存储服务
     │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
     │   ├── pasteHistoryTracker.ts      # 宿主粘贴阶段历史解释
+    │   ├── proxyAgent.ts               # 外链抓取代理接入（CONNECT 隧道）
     │   ├── refEditPorts.ts             # 引用编辑端口绑定注册表
     │   ├── searchReveal.ts             # 搜索定位恢复纯逻辑（#318）
     │   ├── settingsPage.ts             # 独立设置页面板装配

@@ -12,6 +12,7 @@ import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
 import { WebLinkMetaService } from './webLinkMetaService'
+import { resolveProxyConfig, type ProxyDecision } from './proxyAgent'
 import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type HoverExternalShapeMode } from '../shared/settings'
 import {
   appendImageVersionStamp,
@@ -376,7 +377,22 @@ export function createTextEditorProvider(
   // 合并计数——同一 URL 的多个悬停请求只发一次网络请求）。设置开关关闭
   // 时经 cancelAll 中止全部在途并清缓存（关闭态零请求的宿主侧防线）。
   // Remote SSH 下本服务随扩展宿主进程在远端运行——抓取自然发生在远端 ----
-  const webLinkMeta = new WebLinkMetaService()
+  // #346（用户裁决改进）：抓取尊重 VSCode http.proxy 配置族（TUN/企业代理
+  // 环境下宿主 Node 栈与系统浏览器网络路径分叉的修复）。每跳请求前读取
+  // （配置变更无需重启生效）；proxySupport=off / 未配置时维持直连；非法代
+  // 理值回退直连 + warn 去抖。代理模式 SSRF 降级语义见 proxyAgent.ts 头注
+  // 与规格「外链形态、网络与退回」第 3 条——直连 lookup 校验不受影响。
+  const webLinkProxyDecision = (targetProtocol: string): ProxyDecision => resolveProxyConfig(
+    {
+      proxy: vscode.workspace.getConfiguration('http').get('proxy'),
+      proxyAuthorization: vscode.workspace.getConfiguration('http').get('proxyAuthorization'),
+      proxyStrictSSL: vscode.workspace.getConfiguration('http').get('proxyStrictSSL'),
+      proxySupport: vscode.workspace.getConfiguration('http').get('proxySupport'),
+    },
+    process.env,
+    targetProtocol,
+  )
+  const webLinkMeta = new WebLinkMetaService({ getProxy: webLinkProxyDecision })
   /** 在途 web 抓取的取消注册表：hover.request（webview 关浮层/换目标的
    *  hover.cancel）→ documentSession 路由 → 此处按 instanceId+reqId 定位
    *  消费者中止（最后消费者离开即断开底层连接）。key 为面板会话内唯一 */
