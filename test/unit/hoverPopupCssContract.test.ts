@@ -231,18 +231,25 @@ describe('P2-06 悬停浮窗根引用内部 Live CSS 契约（#283）', () => {
     expect(actions).toMatch(/margin-left:\s*auto/)
   })
 
-  it('保存/模式切换/关闭编辑入口：与跳转入口同款图标按钮（尺寸/指针/hover 反馈）', () => {
+  it('保存/退回卡片/模式切换/关闭编辑入口：与跳转入口同款图标按钮（尺寸/指针/hover 反馈）', () => {
     const btn = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-close')
     expect(btn.split('{')[0])
       .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-save')
     expect(btn.split('{')[0])
       .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-mode')
+    // 2026-10-05 验收改版：外链 page 形态退回卡片按钮并入动作组按钮族
+    expect(btn.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback')
     expect(btn).toMatch(/width:\s*22px/)
     expect(btn).toMatch(/cursor:\s*pointer/)
-    const hover = rule(
-      '#app > .vsidian-hover-popup .vsidian-hover-popup-save:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,\n#app > .vsidian-hover-popup .vsidian-hover-popup-mode:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,\n#app > .vsidian-hover-popup .vsidian-hover-popup-close:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible',
-    )
+    // hover/focus 反馈组并列（尾段驱动匹配，组文本含新按钮两态选择器）
+    const hover = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:hover')
     expect(hover).toMatch(/border-color:/)
+    expect(hover.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:focus-visible')
+    // 焦点轮廓组（outline）：新按钮段落同组并列（:focus-visible 段在两组
+    // 重复出现，段级尾选择器不唯一——以原文包含钉住）
+    expect(css).toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:focus-visible')
   })
 
   it('未保存圆点：警示色加重（紧随目标显示名，绘制层可见）', () => {
@@ -293,22 +300,23 @@ describe('外链卡片 CSS 契约（#342）', () => {
   })
 })
 
-// ---- #343（P3-11）外链原网页视图（web 通道 page 形态）----
+// ---- #343（P3-11）外链原网页视图（web 通道 page 形态；2026-10-05 改版
+// ——退回按钮迁入标题条动作组，视图内工具行撤除）----
 describe('外链原网页视图 CSS 契约（#343）', () => {
-  it('页面容器：纵向布局（工具行 / iframe / 说明行的组织）', () => {
+  it('页面容器：纵向布局（iframe / 说明行的组织）', () => {
     const page = rule('#app > .vsidian-hover-popup .vsidian-hover-web-page')
     expect(page).toMatch(/display:\s*flex/)
     expect(page).toMatch(/flex-direction:\s*column/)
   })
 
-  it('退回卡片按钮：主题链接色 + 边框 + hover/focus 反馈（可点性）', () => {
-    const btn = rule('#app > .vsidian-hover-popup .vsidian-hover-web-fallback')
-    expect(btn).toMatch(/color:\s*var\(--vscode-textLink-foreground/)
-    expect(btn).toMatch(/border:\s*1px solid/)
-    expect(btn).toMatch(/cursor:\s*pointer/)
-    const hover = rule('#app > .vsidian-hover-popup .vsidian-hover-web-fallback:focus-visible')
-    expect(hover).toMatch(/background:/)
-    expect(hover.split('{')[0]).toContain('.vsidian-hover-web-fallback:hover')
+  it('退回按钮旧规则已迁移：视图内不再有工具行/文字按钮规则（迁入标题条动作组按钮族）', () => {
+    // 2026-10-05 验收改版：.vsidian-hover-web-toolbar 与
+    // .vsidian-hover-web-fallback 两族规则整体移除（按钮改走标题条
+    // .vsidian-hover-popup-web-fallback，规则并入 P2-06 动作组按钮族）。
+    // 剥离注释后断言——迁移缘由注释中允许提及旧类名，规则面不得残留
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(bare).not.toContain('.vsidian-hover-web-toolbar')
+    expect(bare).not.toContain('.vsidian-hover-web-fallback')
   })
 
   it('iframe：100% 宽固定视口高 + 主题背景 + 边框（可见的页面视口区域）', () => {

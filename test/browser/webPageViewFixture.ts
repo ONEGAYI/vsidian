@@ -93,17 +93,16 @@ Object.assign(window, {
       stateVisible: getComputedStyle(stateEl).display !== 'none',
     }
   },
-  /** 原网页视图观测：iframe 属性/尺寸/可见性与工具行文字（绘制层素材） */
+  /** 原网页视图观测：iframe 属性/尺寸/可见性与说明行（绘制层素材；
+   *  退回按钮 2026-10-05 改版迁入标题条——观测面见 readWebFallbackBtn） */
   readWebPage() {
     const page = document.querySelector<HTMLElement>('.vsidian-hover-web-page')
     const frame = document.querySelector<HTMLIFrameElement>('.vsidian-hover-web-frame')
     if (!page || !frame) {
       return null
     }
-    const btn = page.querySelector<HTMLButtonElement>('.vsidian-hover-web-fallback')
     const note = page.querySelector<HTMLElement>('.vsidian-hover-web-note')
     const rect = frame.getBoundingClientRect()
-    const btnRect = btn?.getBoundingClientRect()
     const noteStyle = note ? getComputedStyle(note) : null
     return {
       sandbox: frame.getAttribute('sandbox') ?? '',
@@ -113,11 +112,28 @@ Object.assign(window, {
       frameWidth: rect.width,
       frameHeight: rect.height,
       frameVisible: rect.width > 0 && rect.height > 0 && getComputedStyle(frame).visibility !== 'hidden',
-      fallbackText: (btn?.textContent ?? '').trim(),
-      fallbackVisible: btnRect !== undefined && btnRect.width > 0 && btnRect.height > 0,
       noteText: (note?.textContent ?? '').trim(),
       noteVisible: note !== null && noteStyle !== null && noteStyle.display !== 'none' &&
         noteStyle.visibility !== 'hidden' && (note.textContent ?? '').trim() !== '',
+    }
+  },
+  /** 标题条退回卡片按钮观测（2026-10-05 验收改版：⤶ 图标按钮在标题条
+   *  动作组、插在模式切换按钮左侧；仅 page 形态可见——绘制层口径） */
+  readWebFallbackBtn() {
+    const btn = document.querySelector<HTMLButtonElement>(
+      '.vsidian-hover-popup .vsidian-hover-popup-web-fallback')
+    if (!btn) {
+      return null
+    }
+    const rect = btn.getBoundingClientRect()
+    const actions = btn.closest('.vsidian-hover-popup-actions')
+    const order = actions
+      ? Array.from(actions.children).map((el) => el.className.replace('vsidian-hover-popup-', ''))
+      : []
+    return {
+      ariaLabel: btn.getAttribute('aria-label') ?? '',
+      visible: rect.width > 0 && rect.height > 0 && getComputedStyle(btn).display !== 'none',
+      order,
     }
   },
   /** 退回卡片观测（含自动退回原因行） */

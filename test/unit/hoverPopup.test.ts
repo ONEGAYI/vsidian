@@ -1563,7 +1563,7 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
   const iframeEl = (): HTMLIFrameElement | null =>
     document.querySelector<HTMLIFrameElement>('.vsidian-hover-web-frame')
 
-  it('embeddable=true：挂沙箱 iframe——sandbox 仅 allow-scripts、referrer no-referrer、src=最终 URL；退回按钮与「无法确认」说明在场', () => {
+  it('embeddable=true：挂沙箱 iframe——sandbox 仅 allow-scripts、referrer no-referrer、src=最终 URL；标题条退回按钮与「无法确认」说明在场', () => {
     openWebPopup({
       url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '摘要',
       frame: { embeddable: true },
@@ -1574,15 +1574,28 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
     expect(frame!.getAttribute('referrerpolicy')).toBe('no-referrer')
     expect(frame!.getAttribute('src')).toBe('https://example.com/page')
     expect(frame!.getAttribute('allow')).toBeNull()
-    const btn = document.querySelector<HTMLButtonElement>('.vsidian-hover-web-fallback')
-    expect(btn, '退回卡片按钮在场').not.toBeNull()
+    // 2026-10-05 验收改版：退回按钮移入浮窗标题条动作组（⤶ 图标按钮，
+    // 插在模式切换按钮左侧），page 视图内工具行整体撤除
+    const btn = document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')
+    expect(btn, '退回卡片按钮在场（标题条动作组）').not.toBeNull()
+    expect(btn!.getAttribute('aria-label')).toBe(zhCn['hover.webFallbackToCard'])
+    expect(btn!.getAttribute('data-tooltip')).toBe(zhCn['hover.webFallbackToCard'])
+    expect(btn!.closest('.vsidian-hover-popup-actions')).not.toBeNull()
+    expect(btn!.style.display).toBe('')
+    const actions = document.querySelector<HTMLElement>('.vsidian-hover-popup-actions')!
+    expect(Array.from(actions.children).map((el) => el.className)).toEqual([
+      'vsidian-hover-popup-save', 'vsidian-hover-popup-web-fallback',
+      'vsidian-hover-popup-mode', 'vsidian-hover-popup-close', 'vsidian-hover-popup-open',
+    ])
+    expect(document.querySelector('.vsidian-hover-web-toolbar'), '旧工具行已撤除').toBeNull()
+    expect(document.querySelector('.vsidian-hover-web-fallback'), '旧视图内按钮已撤除').toBeNull()
     const note = document.querySelector<HTMLElement>('.vsidian-hover-web-note')
     expect(note?.textContent).toBe(zhCn['hover.webPageNote'])
     expect(hoverPopupProbe().state).toBe('content')
     closeHoverPopup()
   })
 
-  it('已知拒绝（denied）：不挂 iframe，卡片 + 真实退回原因行', () => {
+  it('已知拒绝（denied）：不挂 iframe，卡片 + 真实退回原因行；标题条退回按钮隐藏', () => {
     openWebPopup({
       url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '摘要',
       frame: { embeddable: false, reason: 'denied' },
@@ -1591,6 +1604,10 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
     expect(document.querySelector('.vsidian-hover-web-card')).not.toBeNull()
     const reason = document.querySelector<HTMLElement>('.vsidian-hover-web-reason')
     expect(reason?.textContent).toBe(zhCn['hover.webFrameDenied'])
+    // 退回按钮仅 page 形态显示（装配常驻、卡片形态隐藏）
+    const btn = document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')
+    expect(btn).not.toBeNull()
+    expect(btn!.style.display).toBe('none')
     closeHoverPopup()
   })
 
@@ -1615,17 +1632,20 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
     closeHoverPopup()
   })
 
-  it('手动退回：点击按钮销毁 iframe 换卡片，不发任何设置写出站（不偷偷改形态设置）', () => {
+  it('手动退回：点击标题条按钮销毁 iframe 换卡片并隐藏按钮，不发任何设置写出站（不偷偷改形态设置）', () => {
     const h = openWebPopup({
       url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '摘要',
       frame: { embeddable: true },
     })
     const before = h.sent.length
-    document.querySelector<HTMLButtonElement>('.vsidian-hover-web-fallback')!.click()
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
     expect(iframeEl()).toBeNull()
     const card = document.querySelector<HTMLElement>('.vsidian-hover-web-card')
     expect(card).not.toBeNull()
     expect(card!.querySelector('.vsidian-hover-web-title')!.textContent).toBe('示例站')
+    // 退回后按钮隐藏（仅 page 形态显示）
+    expect(document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.style.display)
+      .toBe('none')
     // 退回不产生任何出站消息（含设置写）
     expect(h.sent.length).toBe(before)
     closeHoverPopup()
@@ -1705,7 +1725,7 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
       url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '',
       frame: { embeddable: true },
     })
-    document.querySelector<HTMLButtonElement>('.vsidian-hover-web-fallback')!.click()
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
     expect(hoverPopupProbe().open).toBe(true)
     // Chromium 变异清链后无 mouseleave——模拟直移域外的 mousemove（document 捕获）
     const outside = document.createElement('div')
@@ -1722,7 +1742,7 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
       url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '',
       frame: { embeddable: true },
     })
-    document.querySelector<HTMLButtonElement>('.vsidian-hover-web-fallback')!.click()
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
     // 域内移动（目标仍在锚点联合域内）：不触发关闭
     h.anchor.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
     vi.advanceTimersByTime(HOVER_POPUP_CLOSE_DELAY_MS + 50)
@@ -1758,7 +1778,7 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
       shape: 'page', frameMounted: true, sandbox: 'allow-scripts',
       referrerPolicy: 'no-referrer', src: 'https://example.com/page', fallbackButton: true,
     })
-    document.querySelector<HTMLButtonElement>('.vsidian-hover-web-fallback')!.click()
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
     const after = hoverPopupProbe() as { web?: { shape: string; frameMounted: boolean } }
     expect(after.web?.shape).toBe('card')
     expect(after.web?.frameMounted).toBe(false)

@@ -117,10 +117,14 @@ export const HOVER_POPUP_CLASS_NAMES = {
   header: 'vsidian-hover-popup-header',
   /** 标题（目标显示名 = spec.target，不随回包换） */
   title: 'vsidian-hover-popup-title',
-  /** P2-06 头部右侧动作组（保存/模式切换/关闭编辑 + 打开入口） */
+  /** P2-06 头部右侧动作组（保存/退回卡片/模式切换/关闭编辑 + 打开入口） */
   actions: 'vsidian-hover-popup-actions',
   /** P2-06 保存目标入口（目标未保存时可见） */
   save: 'vsidian-hover-popup-save',
+  /** 2026-10-05 验收改版：外链 page 形态退回卡片入口（⤶ 图标按钮，
+   *  仅 page 形态显示——原 #343 page 视图内工具行文字按钮迁入标题条，
+   *  槽位插在模式切换按钮左侧一槽） */
+  webFallback: 'vsidian-hover-popup-web-fallback',
   /** P2-06 内部模式切换入口（Reading ↔ Live） */
   mode: 'vsidian-hover-popup-mode',
   /** P2-06 显式关闭编辑入口（内部 Live 端口在场时可见） */
@@ -139,6 +143,15 @@ export const HOVER_POPUP_CLASS_NAMES = {
    *  一眼可辨「文件问题」而非正文内容；loading 不挂） */
   stateError: 'vsidian-hover-popup-state-error',
 } as const
+
+/** 2026-10-05 验收改版：外链 page 形态退回卡片图标（⤶ 竖下左拐回头箭头
+ *  ——语义「退回」；标题条动作组同款 16 网格 stroke currentColor 内联 SVG，
+ *  随按钮 --vscode-icon-foreground 着色，与 save/mode/close 同风格） */
+const WEB_FALLBACK_ICON =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M11.5 3v3.5a2.5 2.5 0 0 1-2.5 2.5H5.2"></path>' +
+  '<path d="M7.4 6.7L5.1 9l2.3 2.3"></path></svg>'
 
 /** 工程初值（规格：悬停开闭延迟按现有约定与测量确定；#221 设置项接入后
  *  仍以此为缺省）——进入链接 300ms 后开（防指针扫过误开），离开联合域
@@ -325,6 +338,9 @@ interface HoverPopupState {
   pdfView: PdfHoverView | null
   /** #343（P3-11）原网页视图（page 形态装配；null = 卡片/错误/装载中） */
   webView: WebPageView | null
+  /** 2026-10-05 验收改版：标题条退回卡片按钮（⤶ 图标，插在模式切换按钮
+   *  左侧一槽；仅 webView 在场时显示——显隐随视图装配/销毁翻转） */
+  webFallbackBtn: HTMLButtonElement
   /** #343（P3-11）page 形态抑制（装载中发生开关关闭/形态切回后置位——
    *  迟到的 page 载荷就地退卡片，不挂 iframe） */
   webPageSuppressed: boolean
@@ -461,8 +477,9 @@ export function hoverPopupProbe(): {
     firstSpanColor: string
   } | null
   /** #343（P3-11）外链视图观测（null = 非 web 形态）：shape=page 时
-   *  frameMounted 连同沙箱/src 与退回按钮在场性（集成层可见性证据的
-   *  webview 侧观测面）；shape=card 为卡片呈现（frameMounted=false） */
+   *  frameMounted 连同沙箱/src 与退回按钮在场性（按钮 2026-10-05 改版
+   *  迁至标题条——观测读标题条按钮显隐，集成层可见性证据的 webview 侧
+   *  观测面）；shape=card 为卡片呈现（frameMounted=false） */
   web: {
     shape: 'card' | 'page'
     frameMounted: boolean
@@ -533,7 +550,7 @@ export function hoverPopupProbe(): {
         src: frame.getAttribute('src') ?? '',
         frameWidth: rect.width,
         frameHeight: rect.height,
-        fallbackButton: popup.webView.el.querySelector('button.vsidian-hover-web-fallback') !== null,
+        fallbackButton: popup.webFallbackBtn.style.display !== 'none',
         note: popup.webView.el.querySelector('.vsidian-hover-web-note')?.textContent ?? '',
       }
     }
@@ -848,7 +865,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // 标题条（验收反馈 2026-09-30：嵌入卡片同款 header——目标显示名常驻
   // 不随回包换；跳转按钮与嵌入打开入口同图标同语义）。P2-06：右侧动作
   // 组新增保存/模式切换/关闭编辑入口（与嵌入卡片同款图标与语义；根会话
-  // 未接入（纯 Reading 形态）时隐藏）
+  // 未接入（纯 Reading 形态）时隐藏）；2026-10-05 验收改版另增外链 page
+  // 形态退回卡片入口（⤶，仅 page 形态显示——显隐随 webView 装配/销毁）
   const header = document.createElement('div')
   header.className = HOVER_POPUP_CLASS_NAMES.header
   const titleEl = document.createElement('span')
@@ -872,6 +890,12 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   }
   const saveBtn = mkChromeBtn(HOVER_POPUP_CLASS_NAMES.save, SAVE_ICON, 'embed.saveTarget')
   saveBtn.style.display = 'none'
+  // 2026-10-05 验收改版：退回卡片按钮（⤶ 图标）——装配常驻、仅 web page
+  // 形态显示（applyHoverWebContent 显、teardownWebView 隐；卡片/其他形态
+  // 不在场面上保持隐藏，Tab 序零新增停留点）
+  const webFallbackBtn = mkChromeBtn(
+    HOVER_POPUP_CLASS_NAMES.webFallback, WEB_FALLBACK_ICON, 'hover.webFallbackToCard')
+  webFallbackBtn.style.display = 'none'
   const modeBtn = mkChromeBtn(HOVER_POPUP_CLASS_NAMES.mode, MODE_LIVE_ICON, 'embed.modeToLive')
   const closeBtn = mkChromeBtn(HOVER_POPUP_CLASS_NAMES.close, CLOSE_ICON, 'embed.closeEditor')
   closeBtn.style.display = 'none'
@@ -883,6 +907,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   openBtn.setAttribute('data-tooltip', openLabel)
   openBtn.innerHTML = OPEN_ICON
   headerActions.appendChild(saveBtn)
+  headerActions.appendChild(webFallbackBtn)
   headerActions.appendChild(modeBtn)
   headerActions.appendChild(closeBtn)
   headerActions.appendChild(openBtn)
@@ -1031,6 +1056,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     note: '',
     webMeta: null,
     webView: null,
+    webFallbackBtn,
     webPageSuppressed: false,
     target: spec.target,
     spec,
@@ -1068,6 +1094,13 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
       root.requestClose('close')
     })
   }
+  // 2026-10-05 验收改版：标题条退回按钮（不依赖根会话——web 目标为纯
+  // Reading 形态时同样可用；#343 手动退回链路保持：零设置写、销毁 iframe
+  // 就地换卡片 + 移出边界自愈）
+  content.listen(webFallbackBtn, 'click', (event) => {
+    event.stopPropagation()
+    fallbackToWebCard(state)
+  })
 
   // #220 浮层内链接点击：B 内双链/普通链接/外链经既有 open 通道（附
   // sourceDocUri，宿主按 B 解析与分类）——preventDefault 阻断 webview
@@ -1499,9 +1532,11 @@ function applyHoverWebContent(state: HoverPopupState, meta: RefWebContent): void
   // 会被冲掉），web 卡片/页面视图无块语义，挂滚动区直下；容器销毁
   //（浮层关闭）经 teardownWebView 收敛释放，DOM 随树整体移除
   if (meta.frame?.embeddable === true && !state.webPageSuppressed) {
-    const view = buildWebPageView(meta, () => fallbackToWebCard(state))
+    // 退回按钮在标题条（2026-10-05 改版）——视图装配即显示
+    const view = buildWebPageView(meta)
     if (view !== null) {
       state.webView = view
+      state.webFallbackBtn.style.display = ''
       state.scrollEl.appendChild(view.el)
       position(state)
       return
@@ -1537,7 +1572,8 @@ function fallbackToWebCard(state: HoverPopupState): void {
 }
 
 /** #343（P3-11）移出边界自愈：就地退回销毁 iframe 视图时，悬停中的
- *  元素（退回按钮）随容器移除会让 Chromium 清空 hover 链——此后直移
+ *  元素（iframe 视口/说明行——退回按钮 2026-10-05 改版后在标题条常驻，
+ *  但视图元素仍随退回移除）会让 Chromium 清空 hover 链——此后直移
  *  浮层外部的 mousemove 不再对容器派发 mouseleave，浮层滞留不关。
  *  退回路径挂一次性 document 捕获 mousemove：首次移动若已出联合域，
  *  按 mouseleave 语义收尾（保活判定沿用 scheduleClose 既有链路）；若
@@ -1566,10 +1602,12 @@ function armJointDomainRecheck(state: HoverPopupState): void {
 }
 
 /** #343（P3-11）原网页视图销毁（幂等）：移除 DOM 即中止在途装载（消息
- *  来源准入为允许清单形态，见 untrustedFrame——iframe 移除无需注销） */
+ *  来源准入为允许清单形态，见 untrustedFrame——iframe 移除无需注销）；
+ *  标题条退回按钮随视图销毁隐藏（关闭/退回/设置联动同径收敛） */
 function teardownWebView(state: HoverPopupState): void {
   state.webView?.dispose()
   state.webView = null
+  state.webFallbackBtn.style.display = 'none'
 }
 
 /** #343（P3-11）外链设置变更联动（syncController 的 settings.snapshot/

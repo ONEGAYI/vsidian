@@ -158,11 +158,16 @@ try {
   assert.equal(view1.allowAttr, null, '无 allow 特性（付款/摄像头等默认全拒）')
   assert.ok(view1.frameVisible && view1.frameWidth > 300 && view1.frameHeight >= 300,
     `iframe 有实际绘制尺寸（实际 ${view1.frameWidth}x${view1.frameHeight}）`)
-  assert.ok(view1.fallbackVisible && view1.fallbackText === zhCn['hover.webFallbackToCard'],
-    '退回卡片按钮可见且文案正确')
+  // 2026-10-05 验收改版：退回按钮在标题条动作组（⤶ 图标），插在模式
+  // 切换按钮左侧一槽（DOM 序 = flex 行视觉序）
+  const fb1 = await page.evaluate(() => window.readWebFallbackBtn())
+  assert.ok(fb1 && fb1.visible, '标题条退回按钮可见')
+  assert.equal(fb1.ariaLabel, zhCn['hover.webFallbackToCard'], '退回按钮 aria-label 为词典文案')
+  assert.deepEqual(fb1.order, ['save', 'web-fallback', 'mode', 'close', 'open'],
+    '退回按钮插在模式切换按钮左侧（[保存][退回][模式][关闭][打开]）')
   assert.ok(view1.noteVisible && view1.noteText === zhCn['hover.webPageNote'],
     '无法确认诚实说明可见且文案正确')
-  passed++; console.log('[1] 沙箱 iframe 真实装载与工具行可见 ✓')
+  passed++; console.log('[1] 沙箱 iframe 真实装载与标题条退回按钮可见 ✓')
 
   // ---- 场景 2：滚轮在 iframe 上滚动其内容（可滚动的真证据） ----
   const iframeBox = await page.locator('.vsidian-hover-web-frame').boundingBox()
@@ -205,8 +210,10 @@ try {
   assert.equal(await page.evaluate(() => window.readWebPage() !== null), true,
     '重开 iframe 在场')
   const sentBefore = (await page.evaluate(() => window.webPageSent())).length
-  await page.locator('.vsidian-hover-web-fallback').click()
+  await page.locator('.vsidian-hover-popup .vsidian-hover-popup-web-fallback').click()
   assert.equal(await page.evaluate(() => window.readWebPage()), null, '手动退回后 iframe 销毁')
+  const fb5 = await page.evaluate(() => window.readWebFallbackBtn())
+  assert.equal(fb5.visible, false, '退回后标题条退回按钮隐藏（仅 page 形态显示）')
   const card5 = await page.evaluate(() => window.readWebFallbackCard())
   assert.ok(card5, '退回卡片呈现')
   assert.equal(card5.title, '可嵌入样本页', '卡片标题为宿主元信息')
@@ -231,6 +238,8 @@ try {
   assert.equal(card6.reasonText, zhCn['hover.webFrameDenied'], '退回原因为真实文案（denied）')
   assert.ok(card6.reasonVisible, '原因行实际可见（非透明/非隐藏）')
   assert.ok(card6.openEntryPresent, '标题条浏览器打开入口保留')
+  const fb6 = await page.evaluate(() => window.readWebFallbackBtn())
+  assert.equal(fb6?.visible ?? false, false, '卡片形态退回按钮不显示')
   passed++; console.log('[6] DENY 自动退回与真实原因 ✓')
   await closeByMoveAway()
 

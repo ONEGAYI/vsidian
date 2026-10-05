@@ -16,7 +16,9 @@
 // 诚实边界（iframe 事件语义，MDN）：跨源 iframe 的 load 事件不证明内容
 // 加载成功、error 事件不可靠——登录墙、脚本失败、空白渲染均不可观察。
 // 本视图不监听 load/error 编造「加载成功/失败」状态，只呈现无法确认的
-// 真实说明与可操作退路（退回卡片 / 标题条浏览器打开入口）。
+// 真实说明与可操作退路（退回卡片按钮在浮窗标题条动作组——2026-10-05
+// 验收改版自本视图内部工具行迁入，见 hoverPopup.ts 装配；标题条浏览器
+// 打开入口同在）。
 //
 // 生命周期：dispose 由容器（hoverPopup）在关闭/换目标/手动退回/设置联动
 // 销毁时调用——移除 DOM 即同时中止 iframe 在途网络装载（消息桥为允许
@@ -26,11 +28,12 @@ import { t } from '../shared/i18n'
 import type { RefWebContent } from '../shared/refContent'
 import type { WebFrameDenyReason } from '../shared/webLink'
 
-/** 页面视图类名（样式入口公开供片段覆写；登记于 styleContract hover-popup 条目） */
+/** 页面视图类名（样式入口公开供片段覆写；登记于 styleContract hover-popup 条目）。
+ *  2026-10-05 验收改版：退回卡片按钮迁入浮窗标题条动作组
+ *  （.vsidian-hover-popup-web-fallback，hoverPopup.ts 装配）——原工具行
+ *  toolbar/fallbackBtn 两类名随迁出移除，本视图仅含 iframe 与说明行 */
 export const WEB_PAGE_CLASS_NAMES = {
   page: 'vsidian-hover-web-page',
-  toolbar: 'vsidian-hover-web-toolbar',
-  fallbackBtn: 'vsidian-hover-web-fallback',
   frame: 'vsidian-hover-web-frame',
   note: 'vsidian-hover-web-note',
   reason: 'vsidian-hover-web-reason',
@@ -51,10 +54,11 @@ export interface WebPageView {
   dispose: () => void
 }
 
-/** 构建原网页视图：工具行（退回卡片按钮）+ 沙箱 iframe + 诚实说明行。
+/** 构建原网页视图：沙箱 iframe + 诚实说明行（退回卡片按钮自 2026-10-05
+ *  验收改版起在浮窗标题条动作组，由容器装配与接线——本视图无按钮）。
  *  meta.url 非 https 时防御性拒绝装配（宿主预检已保证，此处兜底——
  *  HTTP 页面无法在安全上下文中嵌入显示） */
-export function buildWebPageView(meta: RefWebContent, onFallback: () => void): WebPageView | null {
+export function buildWebPageView(meta: RefWebContent): WebPageView | null {
   let parsed: URL
   try {
     parsed = new URL(meta.url)
@@ -66,16 +70,6 @@ export function buildWebPageView(meta: RefWebContent, onFallback: () => void): W
   }
   const page = document.createElement('div')
   page.className = WEB_PAGE_CLASS_NAMES.page
-
-  const toolbar = document.createElement('div')
-  toolbar.className = WEB_PAGE_CLASS_NAMES.toolbar
-  const fallbackBtn = document.createElement('button')
-  fallbackBtn.type = 'button'
-  fallbackBtn.className = WEB_PAGE_CLASS_NAMES.fallbackBtn
-  fallbackBtn.textContent = t('hover.webFallbackToCard')
-  fallbackBtn.addEventListener('click', onFallback)
-  toolbar.appendChild(fallbackBtn)
-  page.appendChild(toolbar)
 
   const iframe = document.createElement('iframe')
   iframe.className = WEB_PAGE_CLASS_NAMES.frame
@@ -101,7 +95,6 @@ export function buildWebPageView(meta: RefWebContent, onFallback: () => void): W
         return
       }
       disposed = true
-      fallbackBtn.removeEventListener('click', onFallback)
       page.remove()
     },
   }

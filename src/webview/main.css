@@ -4361,8 +4361,13 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   margin-left: auto;
 }
 
-/* 保存目标 / 内部模式切换 / 显式关闭编辑入口：与跳转入口同款图标按钮 */
+/* 保存目标 / 退回卡片 / 内部模式切换 / 显式关闭编辑入口：与跳转入口同款
+   图标按钮。退回卡片（.vsidian-hover-popup-web-fallback）2026-10-05 验收
+   改版自 #343 page 视图内部工具行迁入（旧 .vsidian-hover-web-toolbar/
+   .vsidian-hover-web-fallback 两族规则随之移除——见下方 #343 节注），仅
+   web page 形态显示（JS 侧随 webView 装配/销毁翻转内联 display） */
 #app > .vsidian-hover-popup .vsidian-hover-popup-save,
+#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback,
 #app > .vsidian-hover-popup .vsidian-hover-popup-mode,
 #app > .vsidian-hover-popup .vsidian-hover-popup-close {
   display: inline-flex;
@@ -4382,6 +4387,8 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 
 #app > .vsidian-hover-popup .vsidian-hover-popup-save:hover,
 #app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:focus-visible,
 #app > .vsidian-hover-popup .vsidian-hover-popup-mode:hover,
 #app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,
 #app > .vsidian-hover-popup .vsidian-hover-popup-close:hover,
@@ -4391,6 +4398,7 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 }
 
 #app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:focus-visible,
 #app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,
 #app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
@@ -4613,8 +4621,12 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 
 /* ---- #343（P3-11）外链原网页视图（web 通道 page 形态；样式契约
    hover-popup 条目子结构追加）：跨源沙箱 iframe（sandbox=allow-scripts，
-   装配边界见 src/webview/webPage.ts 模块头）+ 工具行（退回卡片按钮）+
-   诚实说明行（跨源内容不可观测——不编造加载状态）。iframe 固定视口高
+   装配边界见 src/webview/webPage.ts 模块头）+ 诚实说明行（跨源内容
+   不可观测——不编造加载状态）。2026-10-05 验收改版：退回卡片按钮自
+   本视图内部工具行迁入浮窗标题条动作组（.vsidian-hover-popup-web-
+   fallback——规则并入上方 P2-06 动作组按钮族，仅 page 形态显示；
+   旧 .vsidian-hover-web-toolbar 工具行与 .vsidian-hover-web-fallback
+   文字按钮两族规则随迁出移除）。iframe 固定视口高
    （浮层 480×400 预算内 320px），内容滚动发生在 iframe 自身的滚动容器
    （父文档不可达跨源滚动位）；自动退回原因行（.vsidian-hover-web-reason）
    挂卡片内，主题错误色保证明暗/高对比下实际可见 ---- */
@@ -4624,27 +4636,6 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   flex-direction: column;
   gap: 6px;
   padding: 4px 2px;
-}
-
-#app > .vsidian-hover-popup .vsidian-hover-web-toolbar {
-  display: flex;
-  align-items: center;
-}
-
-#app > .vsidian-hover-popup .vsidian-hover-web-fallback {
-  background: transparent;
-  color: var(--vscode-textLink-foreground, #3794ff);
-  border: 1px solid var(--vscode-dropdown-border, rgba(128, 128, 128, 0.35));
-  border-radius: 3px;
-  padding: 2px 8px;
-  font-size: 0.9em;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-#app > .vsidian-hover-popup .vsidian-hover-web-fallback:hover,
-#app > .vsidian-hover-popup .vsidian-hover-web-fallback:focus-visible {
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
 }
 
 #app > .vsidian-hover-popup .vsidian-hover-web-frame {
