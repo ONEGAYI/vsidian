@@ -170,3 +170,48 @@ describe('组合接线（snippets.state 直连实例不回归）', () => {
     expect(parent.querySelectorAll('input[data-snippet-name]')).toHaveLength(0)
   })
 })
+
+describe('会话内恢复：页签选择经 state 载荷 capture/restore', () => {
+  it('captureState 记录当前页签；restoreState 在 mount 前应用（重载后页签还原）', () => {
+    const first = makeAppearance()
+    tabOf(first.parent, 'overview').click()
+    expect(first.appearance.captureState!()).toEqual({ tab: 'overview' })
+    // 面板重载：同一实例全新 mount（restore 先于 mount，selectSection 链路时序）
+    first.appearance.restoreState!({ tab: 'detail' })
+    const second = document.createElement('div')
+    document.body.append(second)
+    first.appearance.mount(second)
+    expect(tabOf(second, 'detail').getAttribute('aria-selected')).toBe('true')
+    expect(second.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(false)
+    second.remove()
+    first.dispose()
+  })
+
+  it('restoreState 形态不符整条忽略（未知页签 id / 非对象载荷不落地）', () => {
+    const { appearance } = makeAppearance()
+    appearance.restoreState!('overview')
+    appearance.restoreState!({ tab: 'nonsense' })
+    appearance.restoreState!({ tab: 3 })
+    expect(appearance.captureState!()).toEqual({ tab: 'cssSnippets' })
+  })
+
+  it('显式定位优先于恢复：mount 带 focusEntry 时按路由落页签，不按 activeTab', () => {
+    const { appearance } = makeAppearance()
+    appearance.restoreState!({ tab: 'detail' })
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    appearance.mount(parent, 'overview')
+    expect(tabOf(parent, 'overview').getAttribute('aria-selected')).toBe('true')
+    parent.remove()
+  })
+
+  it('setStateSink：页签切换经 sink 通知（视图据此重报 uiState 携带 state）', () => {
+    const { appearance, parent } = makeAppearance()
+    const calls: unknown[] = []
+    appearance.setStateSink?.(() => calls.push(1))
+    tabOf(parent, 'overview').click()
+    expect(calls.length).toBe(1)
+    tabOf(parent, 'cssSnippets').click()
+    expect(calls.length).toBe(2)
+  })
+})

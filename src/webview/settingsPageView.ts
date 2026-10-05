@@ -48,6 +48,26 @@ export interface SettingsPageSection {
   }[]
   /** 返回清理函数；focusEntry 为全局搜索定位到的入口。 */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
+  /**
+   * 会话内恢复（PR #346 方案 A）：捕获分页内输入态（settings.uiState 的
+   * state 透传载荷，宿主不解释内容）。无输入态的分页不实现；实现须在
+   * 任意时刻可调用且同态幂等（滚动上报路径不调，输入态变化与分页切换
+   * 上报路径调用）。录制/菜单开合类瞬态不入载荷（恢复无意义且可能误存
+   * 键位——由各分页实现自行排除）
+   */
+  captureState?(): unknown
+  /**
+   * 应用恢复的分页内输入态（面板重载后宿主经 settings.focusSection{state}
+   * 回放）。调用时序契约：在 mount 之前——mount 按已恢复的字段渲染；
+   * 载荷形态不符整条忽略（安全降级到默认输入态）。显式定位（mount 带
+   * focusEntry）不走本方法（定位语义优先，分页自身的清空分支兜底）
+   */
+  restoreState?(state: unknown): void
+  /**
+   * 视图注入的输入态变化回调（与 captureState 配对）：分页在用户输入
+   * 改变 captureState 结果时调用，视图据此重报 uiState 携带最新 state
+   */
+  setStateSink?(sink: () => void): void
 }
 
 /**
@@ -224,7 +244,13 @@ export class SettingsPageView {
     private readonly editorGroups: readonly SettingsPageDelegateGroup[] = [],
     /** #323 常规页二级组委托（默认编辑器守护）：挂常规页标准行之后，
      *  不占侧栏槽位（常规页装配扩展——委托组机制此前只挂编辑器页尾） */
-    private readonly generalGroups: readonly SettingsPageDelegateGroup[] = []) {}
+    private readonly generalGroups: readonly SettingsPageDelegateGroup[] = []) {
+    // PR #346：分页内输入态变化的上报钩子——分页捕获态一变即重报 uiState
+    //（携带最新 state 载荷），宿主记忆与分页现场保持同步
+    for (const section of sections) {
+      section.setStateSink?.(() => this.reportUiState(true))
+    }
+  }
 
   mount(parent: HTMLElement): void {
     const root = element('div', SETTINGS_PAGE_CLASS_NAMES.root)
@@ -289,13 +315,19 @@ export class SettingsPageView {
    *  #264 兼容路由：宿主按退役分页 id（legacySectionId，如分词
    *  'wordSegment'）发起定位时打开编辑器页，entry 透传给对应委托组。
    *  scroll（可选，会话内恢复）：渲染复位后应用的主区滚动位置——缺省 =
-   *  保持 render 的复位语义（顶部）；未知分页整条忽略（不设滚动） */
-  selectSection(id: string, entry?: string, scroll?: number): void {
+   *  保持 render 的复位语义（顶部）；未知分页整条忽略（不设滚动）。
+   *  state（可选，PR #346）：恢复的分页内输入态载荷——在 mount 之前应用
+   *  （mount 按已恢复字段渲染）；entry 在场时不应用（显式定位语义优先，
+   *  防御性跳过——协议约定二者不同时携带） */
+  selectSection(id: string, entry?: string, scroll?: number, state?: unknown): void {
     if (this.generalGroups.some((g) => g.legacySectionId === id)) id = 'general'
     if (this.editorGroups.some((g) => g.legacySectionId === id)) id = 'editor'
     const known = this.categories().some((c) => c.id === id)
     if (!known) return
     this.active = id
+    if (state !== undefined && entry === undefined) {
+      this.sections.find((s) => s.id === id)?.restoreState?.(state)
+    }
     this.render(entry)
     if (scroll !== undefined && this.mainEl) this.mainEl.scrollTop = scroll
   }
@@ -304,9 +336,10 @@ export class SettingsPageView {
     if (!isHostToWebview(message)) return
     // #132 样式参考：宿主命令定位到指定附加分页（未知 id 忽略）；
     // #231 外观合并：entry 可选透传（分页内定位）；
-    // 会话内恢复：scroll 可选透传（面板重开/重载后恢复滚动位置）
+    // 会话内恢复：scroll 可选透传（面板重开/重载后恢复滚动位置）、
+    // state（PR #346）可选透传（分页内输入态回放，selectSection 内应用）
     if (message.kind === 'settings.focusSection') {
-      this.selectSection(message.section, message.entry, message.scroll)
+      this.selectSection(message.section, message.entry, message.scroll, message.state)
       return
     }
     if (message.kind === 'settings.snapshot' || message.kind === 'settings.changed') {
@@ -490,26 +523,32 @@ export class SettingsPageView {
     this.renderContent(focusEntry, query, active)
     // 会话内恢复（面板关闭/隐藏重载后还原分页与滚动）：分页或搜索上下文
     // 变化即上报 UI 态——同分页回显重渲染（开关回显、换包）不重复上报；
-    // 宿主在下次 settings.get 握手按记忆补发 focusSection{scroll}。
+    // 宿主在下次 settings.get 握手按记忆补发 focusSection{scroll, state}。
     // 首帧回落默认页（active 未选）不上报：重开装载时首帧 render 先于
     // settings.get 到达宿主，若上报会把宿主记忆覆盖成默认页，握手补发的
     // 恢复就永远落回默认——只认用户真实所在（点过侧栏/搜索路由/滚动）的
-    // 分页；默认页内滚动仍经 scroll 事件上报（带上滚动值）
-    if (contextChanged && this.active) this.reportUiState()
+    // 分页；默认页内滚动仍经 scroll 事件上报（带上滚动值）。
+    // 切页上报携带新分页的 state 载荷（PR #346，captureState 产物）
+    if (contextChanged && this.active) this.reportUiState(true)
   }
 
   /** 会话内恢复上报：当前生效分页（active 未选时回落首个分类，与 render
    *  的回落渲染一致）与主区滚动位置。无激活分类（空 defs fixture）不发，
    *  宿主侧空 section 同样忽略。scrollTop 取整：DOM scrollTop 是 double，
    *  zoom/分数缩放下产生小数，协议守卫只收非负整数（不取整整条被静默
-   *  丢弃，恢复失效）；恢复误差 ≤0.5px 不可感知 */
-  private reportUiState(): void {
+   *  丢弃，恢复失效）；恢复误差 ≤0.5px 不可感知。
+   *  withState（PR #346）：输入态变化与分页切换的上报携带当前分页的
+   *  captureState 载荷（宿主不解释内容，原样记忆回放）；滚动上报不重报
+   *  state——输入态未变省载荷，宿主对同分页的无 state 上报保留既有记忆 */
+  private reportUiState(withState = false): void {
     const id = this.active ?? this.categories()[0]?.id
     if (!id) return
+    const state = withState ? this.sections.find((s) => s.id === id)?.captureState?.() : undefined
     this.bridge.postMessage({
       kind: 'settings.uiState',
       section: id,
       scrollTop: Math.round(this.mainEl?.scrollTop ?? 0),
+      ...(state !== undefined ? { state } : {}),
     })
   }
 
