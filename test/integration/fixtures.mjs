@@ -1684,6 +1684,11 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'embed-assets', 'B内双链目标.md'), '# B内双链目标\n\n只在 embed-assets 内的双链目标。\n', 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
+  // #376 T01 双链联想：来源 + 同目录/子目录目标（候选按来源相对路径插入）
+  mkdirSync(path.join(wsDir, '联想目录'), { recursive: true })
+  writeFileSync(path.join(wsDir, '联想目录', '联想来源.md'), '来源正文\n', 'utf8')
+  writeFileSync(path.join(wsDir, '联想目录', '同目录目标.md'), '同目录目标正文\n', 'utf8')
+  writeFileSync(path.join(wsDir, '子目录目标.md'), '子目录目标正文\n', 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
   // 既有 id 段（菜单两态与零写回断言载体）；#183 补围栏行（统一菜单降级
   // 矩阵的围栏区断言载体）

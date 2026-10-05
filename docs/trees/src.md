@@ -110,6 +110,8 @@ vsidian/
     │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
     │   ├── webLink.ts            # 外链 URL 准入与归一（两端共享）
     │   ├── wikilink.ts           # 双链形态学单一事实源（#11）
+    │   ├── wikilinkField.ts      # 双链文件字段识别器
+    │   ├── wikilinkQuery.ts      # 双链联想查询评分移植
     │   └── wordSegment.ts        # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
         ├── anchorFlash.ts              # 跳转目标高亮装饰状态
@@ -233,6 +235,8 @@ vsidian/
         ├── untrustedFrame.ts           # 不可信子页消息来源判定
         ├── webCard.ts                  # 外链卡片内容视图（web 通道）
         ├── webPage.ts                  # 外链原网页视图（iframe+退回）
+        ├── wikilinkSuggest.css         # 联想候选浮层样式
+        ├── wikilinkSuggest.ts          # 双链联想候选会话
         ├── wordMotion.ts               # 词级移动命令与引擎配置
         └── wordSegmentSettings.ts      # 设置页中文分词分页
 <!-- file-tree:tree^id=src:end -->

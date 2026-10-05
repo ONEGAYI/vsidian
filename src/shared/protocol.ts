@@ -325,7 +325,7 @@ export type HostToWebview =
   /** 测试钩子（#13）：向真实编辑器派发 Tab/Shift+Tab keydown（与用户按键
    *  同一 keymap 链路；纯选区导航，零写回）。宿主测试无法向 webview 派发
    *  真实键盘事件，以此通道验证导航装配 */
-  | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' }
+  | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' | 'down' | 'up' | 'escape' }
   /** 测试钩子：模拟 Live 纯光标移动和纯滚动；空载荷仅启用绘制探针。 */
   | { kind: 'viewport.test.position'; cursorLine?: number; scrollNearLine?: number; scrollBiasPx?: number }
   /** 测试钩子（#42）：在真实 webview 网格单元格派发鼠标点击及当前位置输入。 */
@@ -615,6 +615,26 @@ export type HostToWebview =
       reason?: 'no-workspace' | 'read-error'
       items?: OutlinkItemPayload[]
       seq?: number
+    }
+  /** 双链联想查询结果（#376 T01，wikilink.query 的应答）：reqId 为请求
+   *  配对（webview 只接受最新在途请求的回包，陈旧回包丢弃）；generation
+   *  为查询代次回显（webview 以自身代次守卫迟到响应）。status=unavailable
+   *  时附真实原因（no-workspace=来源文档不在任何工作区根内；
+   *  not-ready=所属根索引尚未就绪），webview 显示真实状态、允许手写，
+   *  不伪装为空结果。status=ready 时 items 为已排序候选（宿主侧全量排序
+   *  后限量回传），updating=true 表示所属根仍在构建（当前为部分数据）。
+   *  主正文经原会话；查询职责边界见 docs/specs/wikilink-completion.md */
+  | {
+      kind: 'wikilink.query.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      status: 'ready' | 'unavailable'
+      updating?: boolean
+      reason?: 'no-workspace' | 'not-ready'
+      items?: WikilinkCandidateItem[]
+      total?: number
     }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
@@ -1523,6 +1543,13 @@ export type WebviewToHost =
   /** 反链快照拉取（#197）：面板 init 后与文档切换后请求当前文档的反链；
    *  宿主以 backlinks.snapshot 响应（索引变更后主动推送，不逐次应答） */
   | { kind: 'backlinks.get'; sessionId: string; docUri: string }
+  /** 双链联想查询（#376 T01）：光标进入新建闭合双链 `[[]]`/`![[]]` 的文件
+   *  字段时由 webview 发起。query 为目标区光标左侧前缀（再触发时自动取
+   *  左侧文本，不并右侧）；reqId 为实例内单调请求序号（应答配对），
+   *  generation 为查询代次（查询文本或字段身份变化即递增——宿主原样回显，
+   *  webview 借此拒收迟到响应）。T01 复用现有索引 Markdown 文件表，仅
+   *  主正文接线（嵌入实例不经本消息出站） */
+  | { kind: 'wikilink.query'; sessionId: string; docUri: string; reqId: number; generation: number; query: string }
   /** 反链条目跳转意图（#197）：点击面板条目 → 宿主打开来源文档（Vsidian
    *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
    *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
@@ -1654,6 +1681,32 @@ export interface OutlinkItemPayload {
   /** 出链标记在当前正文中的 LF 偏移区间 */
   start: number
   end: number
+}
+
+/** 双链联想候选条目载荷（#376 T01 wikilink.query.result.items；宿主排序
+ *  后限量回传的稳定契约）。高亮区间对应原始文字的 UTF-16 偏移 */
+export interface WikilinkCandidateItem {
+  /** 候选身份：目标绝对 fsPath（宿主真实磁盘形态） */
+  id: string
+  /** 文件名（含扩展名；候选主显示文字） */
+  name: string
+  /** 根内目录（`/` 分隔；根直下为空串——目录用于区分同名文件） */
+  dir: string
+  /** 根内相对路径（`/` 分隔） */
+  relPath: string
+  /** 来源文档相对插入路径（`/` 分隔、含扩展名；宿主已经 vaultLink
+   *  往返核对为所选目标身份，webview 确认时原样插入） */
+  insertPath: string
+  /** 默认显示文字（Markdown 去尾 .md，其余完整文件名） */
+  alias: string
+  /** 文件修改时间（毫秒；未知 0——已按排序契约消费，回传作观测） */
+  mtimeMs: number
+  /** 匹配分数（空查询恒 0；排序已在宿主完成，回传作观测） */
+  score: number
+  /** 文件名匹配高亮区间（空查询为空数组） */
+  labelHighlights: Array<{ start: number; end: number }>
+  /** 目录匹配高亮区间（空查询为空数组） */
+  dirHighlights: Array<{ start: number; end: number }>
 }
 
 /** 悬停预览规范目标身份（#218 hover.result.ok）：fsPath 为宿主侧真实
@@ -2199,6 +2252,18 @@ export interface PaintProbe {
     display: string | null
     separatorCount: number
     disabledCount: number
+  }
+  /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性
+   *  （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、
+   *  候选行计数与键盘高亮行/状态行文本（会话关闭时缺省）。jsdom 无布局
+   *  恒 false，只作真宿主集成断言依据 */
+  wikilinkSuggest?: {
+    visible: boolean
+    display: string | null
+    itemCount: number
+    activeIndex: number | null
+    activeText: string | null
+    statusText: string | null
   }
 }
 
@@ -2965,6 +3030,16 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       isNullOrString(v.contextMenu.display) &&
       isNonNegativeInt(v.contextMenu.separatorCount) &&
       isNonNegativeInt(v.contextMenu.disabledCount)
+    )) &&
+    (v.wikilinkSuggest === undefined || (
+      isObject(v.wikilinkSuggest) &&
+      typeof v.wikilinkSuggest.visible === 'boolean' &&
+      isNullOrString(v.wikilinkSuggest.display) &&
+      isNonNegativeInt(v.wikilinkSuggest.itemCount) &&
+      (v.wikilinkSuggest.activeIndex === undefined || v.wikilinkSuggest.activeIndex === null ||
+        isNonNegativeInt(v.wikilinkSuggest.activeIndex)) &&
+      (v.wikilinkSuggest.activeText === undefined || isNullOrString(v.wikilinkSuggest.activeText)) &&
+      (v.wikilinkSuggest.statusText === undefined || isNullOrString(v.wikilinkSuggest.statusText))
     ))
   )
 }
@@ -3830,6 +3905,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'backlinks.get':
       return isString(v.sessionId) && isString(v.docUri)
+    case 'wikilink.query':
+      // #376 T01 双链联想查询：会话身份 + 请求配对与代次 + 查询文本
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) && isString(v.query)
     case 'backlink.activate':
       return isString(v.sessionId) && isString(v.docUri) &&
         isString(v.sourceUri) && isNonNegativeInt(v.offset)
@@ -4191,7 +4270,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isUiOperationId(v.op)
     case 'table.test.key':
       return v.key === 'tab' || v.key === 'shift-tab' || v.key === 'select-all' || v.key === 'enter' ||
-        v.key === 'backspace' || v.key === 'delete'
+        v.key === 'backspace' || v.key === 'delete' || v.key === 'down' || v.key === 'up' ||
+        v.key === 'escape'
     case 'viewport.test.position':
       return (v.cursorLine === undefined || isNonNegativeInt(v.cursorLine)) &&
         (v.scrollNearLine === undefined || isNonNegativeInt(v.scrollNearLine)) &&
@@ -4373,6 +4453,18 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.updating === undefined || typeof v.updating === 'boolean') &&
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isOutlinkItemPayload)))
+      )
+    case 'wikilink.query.result':
+      // #376 T01 双链联想查询结果：会话身份 + 请求配对与代次回显 + 真实
+      // 状态分态（ready 附候选与命中总数；unavailable 附原因）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        (v.status === 'ready' || v.status === 'unavailable') &&
+        (v.updating === undefined || typeof v.updating === 'boolean') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'not-ready') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkCandidateItem))) &&
+        (v.total === undefined || isNonNegativeInt(v.total))
       )
     case 'hover.result':
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
@@ -4662,6 +4754,27 @@ function isOutlinkItemPayload(v: unknown): v is OutlinkItemPayload {
     typeof v.resolved === 'boolean' &&
     isNonNegativeInt(v.start) &&
     isNonNegativeInt(v.end)
+  )
+}
+
+/** #376 T01 双链联想候选条目载荷形态守卫 */
+function isWikilinkCandidateItem(v: unknown): v is WikilinkCandidateItem {
+  if (!isObject(v)) {
+    return false
+  }
+  const isMatch = (m: unknown): boolean =>
+    isObject(m) && isNonNegativeInt(m.start) && isNonNegativeInt(m.end)
+  return (
+    isString(v.id) &&
+    isString(v.name) &&
+    isString(v.dir) &&
+    isString(v.relPath) &&
+    isString(v.insertPath) &&
+    isString(v.alias) &&
+    typeof v.mtimeMs === 'number' && v.mtimeMs >= 0 &&
+    typeof v.score === 'number' &&
+    Array.isArray(v.labelHighlights) && v.labelHighlights.every(isMatch) &&
+    Array.isArray(v.dirHighlights) && v.dirHighlights.every(isMatch)
   )
 }
 

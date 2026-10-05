@@ -609,6 +609,10 @@ export class DocumentSession {
         // #197 反链面板：面板级 UI 意图，provider 层拦截消费（索引服务与
         // 跳转执行都在 provider 域）；绕过面板入口则无副作用。
         return Promise.resolve()
+      case 'wikilink.query':
+        // #376 T01 双链联想查询：provider 层拦截消费（索引服务在 provider
+        // 域）；绕过面板入口则无副作用。
+        return Promise.resolve()
       case 'outlinks.get':
       case 'outlink.activate':
         // 出链面板（与反链镜像）：provider 层拦截消费；绕过面板入口无副作用

@@ -69,6 +69,7 @@ import { splitTableRowCells } from '../shared/tableCells'
 import { ImageResourceManager } from './imageResource'
 import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
 import { registerImagePopupSource, unregisterImagePopupSource, type ImagePopupSource } from './imagePopup'
+import { createWikilinkSuggest, type WikilinkSuggestController } from './wikilinkSuggest'
 
 /** 外部同步事务标记：updateListener 见到它即跳过（不回发）。
  *  性能探针（#5）复用同一注解——探针编辑走渲染路径但不写回宿主。
@@ -373,6 +374,9 @@ export interface LiveEditorInstanceDeps {
    *  决策与快照管线在根）。返回 true = 根接管（实例 preventDefault）；
    *  未提供或返回 false 放行默认粘贴链（嵌入实例缺省回落原生粘贴） */
   onRichPasteHtml?(payload: { view: EditorView; html: string; text?: string }): boolean
+  /** #376 T01 双链联想会话启用（主正文实例 true；嵌入实例缺省 false——
+   *  T01 仅主正文接线，内部 Live 的联想随后续票经 refEdit 通道接入） */
+  enableWikilinkSuggest?: boolean
 }
 
 /**
@@ -413,6 +417,8 @@ export class LiveEditorInstance {
   private readonly tabEscapeCompartment = new Compartment()
   private readonly darkCompartment = new Compartment()
   private hostDarkApplied: boolean | undefined
+  /** #376 T01 双链联想会话（主正文实例持有；嵌入实例为 null 不装配） */
+  private readonly wikilinkSuggest: WikilinkSuggestController | null
   /** #161 图片粘贴：面板内自增 reqId 与在途集合（结果按 reqId 路由，
    *  陈旧/未知 reqId 的回包丢弃，防止重复插入）；总开关运行时读设置
    *  快照（handler 每次事件自取，无需 Compartment——未命中直接放行） */
@@ -501,10 +507,20 @@ export class LiveEditorInstance {
     this.conflictRevision = typeof deps.initialConflictRevision === 'number' && deps.initialConflictRevision >= 0
       ? Math.floor(deps.initialConflictRevision) : 0
     this.hostDarkApplied = deps.initialDark
+    this.wikilinkSuggest = deps.enableWikilinkSuggest === true
+      ? createWikilinkSuggest({
+        send: (message) => this.deps.send(message),
+        getSession: () => this.sessionId ? { sessionId: this.sessionId, docUri: this.docUri } : null,
+        isLiveActive: () => this.deps.isLiveActive(),
+        isSuspended: () => this.suspended,
+        isExternal: (tr) => tr.annotation(externalSync) === true,
+      })
+      : null
     this.view = new EditorView({
       parent,
       state: EditorState.create({ doc: '', extensions: this.extensions(extraExtensions) }),
     })
+    this.wikilinkSuggest?.attach(this.view)
     // P2-11：图片弹窗实例上下文随实例注册（按 EditorView 反查——widget
     // 的 popup 按钮打开弹窗时捕获所属实例的资源身份，不读主正文）
     if (deps.imagePopupSource && this.view) {
@@ -636,11 +652,24 @@ export class LiveEditorInstance {
       clearTimeout(this.flushTimer)
       this.flushTimer = undefined
     }
+    this.wikilinkSuggest?.destroy()
     if (this.view) {
       unregisterImagePopupSource(this.view)
     }
     this.view?.destroy()
     this.view = undefined
+  }
+
+  // ---- #376 T01 双链联想会话（根路由与模式切换消费） ----
+
+  /** 查询结果入站（根按实例路由；控制器内 reqId/generation/会话三重守卫） */
+  handleWikilinkQueryResult(message: Extract<HostToWebview, { kind: 'wikilink.query.result' }>): void {
+    this.wikilinkSuggest?.handleResult(message)
+  }
+
+  /** 显式关闭候选（模式切换等根时机；幂等） */
+  closeWikilinkSuggest(): void {
+    this.wikilinkSuggest?.close()
   }
 
   // ---- 设置热重配（Live 扩展组；快照由根在 settings 消息到达时传入）----
@@ -965,6 +994,7 @@ export class LiveEditorInstance {
     const hasUnconfirmed =
       this.unconfirmed !== null || this.inFlight.size > 0 || this.deferredLocal !== null || this.composing
     this.suspended = true
+    this.wikilinkSuggest?.close()
     this.deps.onSuspendedChange?.(true)
     if (hasUnconfirmed) {
       this.reportConflictSnapshot()
@@ -1859,6 +1889,10 @@ export class LiveEditorInstance {
       // 闭合行后（filter 硬拦 + updateListener 兜底），编辑收敛到标题栏
       // 「修改」按钮的 Popover；文档变更同时驱动浮层按最新模型重建
       frontmatterEditing,
+      // #376 T01 双链联想候选：keymap 必须置于 fenceEscape 之前（keymap
+      // 正序尝试——候选确认/导航仅在会话内消费，未命中 return false 落穿
+      // 越界/切格/缩进/列表延续链）。主正文实例装配；嵌入实例不装配
+      ...(this.wikilinkSuggest ? [this.wikilinkSuggest.extension] : []),
       // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
       // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
       // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/

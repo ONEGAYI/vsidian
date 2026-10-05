@@ -1462,6 +1462,38 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       "counterpart": "None (Vsidian paste prompt)"
     }
   },
+  // ==== 双链联想候选（#376 T01）====
+  "wikilink-suggest-popup": {
+    "purpose": "Popup container for wikilink file suggestions: anchored at the wikilink fence opening, listing candidates and the real state (searching / no matches / not ready / no folder open).",
+    "states": "Mounted only while the main-body Live cursor sits inside the file field of a freshly typed closed wikilink [[]] / ![[ ]]; removed on confirm, Esc, leaving the field or switching mode.",
+    "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus.",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-item": {
+    "purpose": "Candidate row: the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; matched ranges are marked by the child .vsidian-wikilink-suggest-hl element.",
+    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name), .vsidian-wikilink-suggest-dir (folder), .vsidian-wikilink-suggest-hl (matched ranges).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-item-active": {
+    "purpose": "Keyboard-highlighted row (the Enter/Tab confirmation target): moved with arrow keys, auto-lands on the first item for non-empty queries, no highlight for empty queries.",
+    "states": "A modifier class on the same element as .vsidian-wikilink-suggest-item; aria-selected=true is kept in sync.",
+    "dom": "Modifier class on a candidate row (not a separate node).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-status": {
+    "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open and 'index still updating (partial results)'; not confirmable, never writes to the document.",
+    "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building).",
+    "dom": "Direct child rows of the container (not option semantics - placeholders are not confirmable).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
 }
 
 /**

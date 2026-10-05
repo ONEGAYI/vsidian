@@ -87,6 +87,9 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'toast-severity', // #305 同一瞬态卡片的严重性分支：plainPaste 对三种背景与高对比/片段覆盖绘制验证
   'paste-dialog', // #306 询问会话瞬态：richPaste 浏览器断背景、焦点和局部键盘；richPasteHost断宿主编辑及偏好记忆
   'hover-text-view', // #340 悬停浮层 text 形态（text 回包期间挂载，着色/行号/窗口由浏览器 textHover 套件按绘制层验证）
+  'wikilink-suggest-item', // #376 双链联想候选（会话开启期间挂载 document.body，行为路径由浏览器 wikilinkSuggest 与真宿主 paint.wikilinkSuggest 验证）
+  'wikilink-suggest-item-active', // #376 键盘高亮修饰类（随会话与方向键切换）
+  'wikilink-suggest-status', // #376 状态行（随查询结果与索引就绪态切换）
 ])
 
 describe('chromeContract 覆盖分工', () => {

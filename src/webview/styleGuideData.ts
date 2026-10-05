@@ -271,6 +271,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "粘贴询问",
     "titleKey": "styleRef.category.richPaste",
     "order": 17
+  },
+  {
+    "id": "wikilink-suggest",
+    "domain": "chrome",
+    "title": "双链联想候选",
+    "titleKey": "styleRef.category.wikilinkSuggest",
+    "order": 18
   }
 ] as readonly StyleContractCategory[]
 
@@ -4998,6 +5005,97 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "单元 richPasteInteraction：三种选择；浏览器 richPaste：模态背景/焦点与记忆回显；真宿主 richPasteHost：设置持久化"
     ],
     "introduced": "#306（2026-10-02）"
+  },
+  {
+    "id": "wikilink-suggest-popup",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "container",
+    "target": ".vsidian-wikilink-suggest",
+    "purpose": "双链文件联想候选浮层容器：锚定双链围栏开标记处，列出候选与真实状态（搜索中/无结果/未就绪/无工作区）。",
+    "views": [
+      "live"
+    ],
+    "states": "仅主正文 Live 光标进入新建闭合双链 [[]]/![[]] 的文件字段时挂载；确认、Esc、移出字段或切模式即移除。",
+    "dom": "document.body 直接后代（不在 #app 内）；role=listbox、aria-label 取词条 wikilinkSuggest.list.ariaLabel；不夺正文焦点。",
+    "example": ".vsidian-wikilink-suggest { max-height: 320px; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：真实键盘出候选/高亮/确认/Esc",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.visible（绘制层可见性）"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-item",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-item",
+    "purpose": "候选行：文件名为主文字、所在目录右对齐弱化呈现（区分同名文件）；匹配命中区间以子元素 .vsidian-wikilink-suggest-hl 标记。",
+    "views": [
+      "live"
+    ],
+    "dom": "容器 role=listbox 的 option 行；行内子结构：.vsidian-wikilink-suggest-name（文件名）、.vsidian-wikilink-suggest-dir（目录）、.vsidian-wikilink-suggest-hl（命中区间）。",
+    "example": ".vsidian-wikilink-suggest-item { padding: 2px 10px; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：候选行文件名/目录文本与命中高亮",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.itemCount"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-item-active",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-item-active",
+    "purpose": "键盘高亮行（Enter/Tab 确认的目标）：↑↓ 移动、有查询自动落在首项、空查询不高亮。",
+    "views": [
+      "live"
+    ],
+    "states": "与 .vsidian-wikilink-suggest-item 同元素叠加（active 修饰类）；aria-selected=true 同步。",
+    "dom": "候选行修饰类（不是独立节点）。",
+    "example": ".vsidian-wikilink-suggest-item-active { outline: 1px solid var(--vscode-focusBorder); }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：方向键移动与首项自动高亮",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.activeIndex/activeText"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-status",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-status",
+    "purpose": "状态行：搜索中、无匹配文件、索引未就绪、未打开文件夹与「仍在构建（部分结果）」等真实状态的文字呈现；不可确认、不写正文。",
+    "views": [
+      "live"
+    ],
+    "states": "随查询结果/索引就绪态切换；与候选行共存（仍在构建时可用项继续候选）。",
+    "dom": "容器直接子行（非 option 语义——占位不可确认）。",
+    "example": ".vsidian-wikilink-suggest-status { opacity: 0.7; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：无结果/未就绪状态行文案",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.statusText"
+    ],
+    "introduced": "#376（2026-10-06）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -6516,6 +6614,37 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Direct child of .vsidian-paste-dialog-overlay; role=dialog and aria-modal=true.",
     "obsidian": {
       "counterpart": "None (Vsidian paste prompt)"
+    }
+  },
+  "wikilink-suggest-popup": {
+    "purpose": "Popup container for wikilink file suggestions: anchored at the wikilink fence opening, listing candidates and the real state (searching / no matches / not ready / no folder open).",
+    "states": "Mounted only while the main-body Live cursor sits inside the file field of a freshly typed closed wikilink [[]] / ![[ ]]; removed on confirm, Esc, leaving the field or switching mode.",
+    "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus.",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-item": {
+    "purpose": "Candidate row: the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; matched ranges are marked by the child .vsidian-wikilink-suggest-hl element.",
+    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name), .vsidian-wikilink-suggest-dir (folder), .vsidian-wikilink-suggest-hl (matched ranges).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-item-active": {
+    "purpose": "Keyboard-highlighted row (the Enter/Tab confirmation target): moved with arrow keys, auto-lands on the first item for non-empty queries, no highlight for empty queries.",
+    "states": "A modifier class on the same element as .vsidian-wikilink-suggest-item; aria-selected=true is kept in sync.",
+    "dom": "Modifier class on a candidate row (not a separate node).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-status": {
+    "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open and 'index still updating (partial results)'; not confirmable, never writes to the document.",
+    "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building).",
+    "dom": "Direct child rows of the container (not option semantics - placeholders are not confirmable).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

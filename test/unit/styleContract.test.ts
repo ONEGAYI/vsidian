@@ -390,6 +390,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   tooltip: 11,
   toast: 26,
   'rich-paste': 2,
+  'wikilink-suggest': 4,
 }
 
 describe('styleContract 类目体系（#145）', () => {

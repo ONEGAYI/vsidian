@@ -1758,6 +1758,37 @@ export function createTextEditorProvider(
       })
   }
 
+  // ---- #376 T01 双链联想：查询应答（面板级查询意图的执行体） ----
+
+  /** 双链联想查询应答（wikilink.query 同步执行）：无索引服务按无工作区
+   *  真实报状态；候选条目为协议稳定契约形态（含经 vaultLink 往返核对的
+   *  插入路径与默认别名，均在服务侧完成） */
+  const respondWikilinkQuery = (
+    doc: vscode.TextDocument,
+    message: Extract<WebviewToHost, { kind: 'wikilink.query' }>,
+  ): Extract<HostToWebview, { kind: 'wikilink.query.result' }> => {
+    const result = vaultIndex
+      ? vaultIndex.queryWikilinkFileCandidates(doc.uri.fsPath, message.query)
+      : ({ status: 'unavailable', reason: 'no-workspace' } as const)
+    const base = {
+      kind: 'wikilink.query.result' as const,
+      sessionId: message.sessionId,
+      docUri: message.docUri,
+      reqId: message.reqId,
+      generation: message.generation,
+    }
+    if (result.status === 'unavailable') {
+      return { ...base, status: 'unavailable', reason: result.reason }
+    }
+    return {
+      ...base,
+      status: 'ready',
+      updating: result.updating,
+      total: result.total,
+      items: result.items,
+    }
+  }
+
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
 
   /** 反链广播序号（review-loops #16）：按文档单调递增——快照应答为异步
@@ -2690,6 +2721,14 @@ export function createTextEditorProvider(
         }
         if (isWebviewToHost(message) && message.kind === 'outlink.activate') {
           void openOutlinkTarget(message.targetUri, message.anchor)
+          return
+        }
+        // #376 T01 双链联想查询：主正文经原会话（嵌入实例不出站本消息）。
+        // 会话守卫：docUri 归属本面板文档；查询为内存模型同步执行（无 IO），
+        // reqId/generation 原样回显，迟到/乱序由 webview 侧守卫拒收
+        if (isWebviewToHost(message) && message.kind === 'wikilink.query' &&
+          message.docUri === document.uri.toString()) {
+          entry.session.postToPanel(sessionId, respondWikilinkQuery(document, message))
           return
         }
         // #224 引用视图订阅：provider 层拦截（协调器与订阅表在 provider 域，

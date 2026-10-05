@@ -60,6 +60,16 @@ import {
   planFlushAt,
   SCHEDULE_DEFAULTS,
 } from '../shared/vaultIndexSchedule'
+import {
+  defaultAliasOf,
+  planWikilinkInsertPath,
+  rankWikilinkCandidates,
+  type WikilinkCandidateFile,
+} from '../shared/wikilinkQuery'
+import type { WikilinkCandidateItem } from '../shared/protocol'
+
+/** 双链联想候选首屏限量（规格「首屏默认最多 50 项」；排序在截取前全量完成） */
+export const WIKILINK_QUERY_LIMIT = 50
 
 /** 工作区根引用（wiring 层已按 vscode 语义对语法异构同指向 URI 去重） */
 export interface VaultRootRef {
@@ -1849,6 +1859,74 @@ export class VaultIndexService {
       this.notify()
       this.scheduleCommit(state)
     }
+  }
+
+  /**
+   * 双链联想文件候选（#376 T01）：来源文档所属根的现有 Markdown 文件表
+   * （T01 复用基线登记，不等待全文件清单——未被引用的附件不在表中，规格
+   * 「沿用的现行边界」）。评分/排序纯逻辑在 shared/wikilinkQuery（VSCode
+   * 固定基线移植，ADR-0014）：有查询按匹配分数 → mtime 新→旧 → 稳定路径；
+   * 空查询按 mtime 新→旧（未知沉底）→ 稳定路径。插入路径在宿主侧按来源
+   * 文档目录计算并经 vaultLink 往返核对（核对失败的病态候选丢弃，不产出
+   * 不可信路径）。未就绪/越根真实报状态，不伪装空结果。同步执行（内存
+   * 模型，无 IO）——迟到/乱序由 webview 侧 reqId+generation 守卫承担。
+   */
+  queryWikilinkFileCandidates(
+    sourceFsPath: string,
+    query: string,
+    limit = WIKILINK_QUERY_LIMIT,
+  ):
+    | { status: 'unavailable'; reason: 'no-workspace' | 'not-ready' }
+    | { status: 'ready'; updating: boolean; total: number; items: WikilinkCandidateItem[] } {
+    const state = this.rootOf(sourceFsPath)
+    if (!state) {
+      return { status: 'unavailable', reason: 'no-workspace' }
+    }
+    if (!state.hasData || !state.model) {
+      return { status: 'unavailable', reason: 'not-ready' }
+    }
+    const sourceRel = this.relOf(state, sourceFsPath)
+    if (sourceRel === null) {
+      return { status: 'unavailable', reason: 'no-workspace' }
+    }
+    const files: WikilinkCandidateFile[] = []
+    for (const [rel, entry] of state.model.files) {
+      if (entry.kind !== 'markdown') {
+        continue
+      }
+      const nameAt = rel.lastIndexOf('/') + 1
+      files.push({
+        name: rel.slice(nameAt),
+        dir: nameAt > 0 ? rel.slice(0, nameAt - 1) : '',
+        relPath: rel,
+        mtimeMs: entry.mtimeMs,
+      })
+    }
+    const ranked = rankWikilinkCandidates(files, query, limit)
+    const docDir = this.dirname(sourceFsPath)
+    const items: WikilinkCandidateItem[] = []
+    for (const item of ranked.items) {
+      const abs = this.absOf(state, item.relPath)
+      // 插入路径按来源文档目录计算并经 vaultLink 往返核对——核对失败的
+      // 病态候选丢弃，不产出与所选身份不一致的路径
+      const insertPath = planWikilinkInsertPath(docDir, state.fsPath, this.opts.isWindowsHost, abs)
+      if (insertPath === null) {
+        continue
+      }
+      items.push({
+        id: abs,
+        name: item.name,
+        dir: item.dir,
+        relPath: item.relPath,
+        insertPath,
+        alias: defaultAliasOf(item.name, 'markdown'),
+        mtimeMs: item.mtimeMs,
+        score: item.score,
+        labelHighlights: item.labelHighlights,
+        dirHighlights: item.dirHighlights,
+      })
+    }
+    return { status: 'ready', updating: state.scanning, total: ranked.total, items }
   }
 
   /** 查询文档的反链（面板数据源；items 按来源路径/位置稳定排序） */

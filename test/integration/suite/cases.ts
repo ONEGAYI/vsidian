@@ -886,6 +886,16 @@ interface ViewState {
       separatorCount: number
       disabledCount: number
     }
+    /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性、
+     *  行计数与键盘高亮行/状态行文本（会话关闭时缺省） */
+    wikilinkSuggest?: {
+      visible: boolean
+      display: string | null
+      itemCount: number
+      activeIndex: number | null
+      activeText: string | null
+      statusText: string | null
+    }
   }
   /** #53 右侧栏观测：布局态与绘制层证据（结构见 src/shared/protocol.ts SidebarProbe） */
   sidebar?: {
@@ -16529,5 +16539,85 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
     await waitViewState('悬停文本.md', (v) => v.viewMode === 'live')
     console.log('[#344] 未 watch 目标编辑不落陈旧缓存 ✓')
+  }],
+  // ---- #376 T01 双链联想：新建闭合双链出候选、来源相对路径插入、dirty/撤销与绘制层断言 ----
+  ['双链联想：新建闭合双链出候选、按来源相对路径插入与撤销（#376 T01）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('联想目录/联想来源.md')
+    await waitSessionReady('联想目录/联想来源.md')
+    const uri = wsUri('联想目录/联想来源.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('联想目录/联想来源.md'))
+    assert(doc.getText() === '来源正文\n', '双链联想 fixture 初始文本不符')
+
+    const typeText = async (text: string) => {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text })
+    }
+    const pressKey = async (key: 'down' | 'up' | 'escape' | 'enter' | 'backspace') => {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key })
+    }
+    const suggestPaint = async (): Promise<
+      NonNullable<NonNullable<ViewState['paint']>['wikilinkSuggest']> | undefined
+    > => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
+      return v.paint?.wikilinkSuggest
+    }
+
+    // 光标到正文末（LF 坐标 4 = 尾随换行前），真实 DOM 输入两个 [——
+    // 既有成对补全形成 [[]] 并把光标留在中间，联想会话开启（空查询）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 5 })
+    await typeText('[')
+    await typeText('[')
+    // 绘制层断言（验收硬约束）：空查询不高亮、候选真实可见（elementFromPoint 命中）
+    const emptySuggest = await poll('空查询候选浮层开启且绘制', async () => {
+      const s = await suggestPaint()
+      return s && s.itemCount > 0 && s.activeIndex === null && s.visible ? s : undefined
+    })
+    assert(emptySuggest!.itemCount >= 3, `空查询应列出全部 Markdown 候选，实际 ${emptySuggest!.itemCount}`)
+
+    // 方向键移动高亮且不移动正文光标
+    const headBefore = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
+    await pressKey('down')
+    await poll('↓ 高亮首项', async () => (await suggestPaint())?.activeIndex === 0 ? true : undefined)
+    await pressKey('down')
+    await poll('↓ 高亮第二项', async () => (await suggestPaint())?.activeIndex === 1 ? true : undefined)
+    const headAfter = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
+    assert(headBefore !== undefined && headBefore === headAfter, '方向键不应移动正文光标')
+
+    // Esc 关闭（候选会话先于其他 Esc 链路消费一次）
+    await pressKey('escape')
+    await poll('Esc 关闭候选', async () => (await suggestPaint()) === undefined ? true : undefined)
+
+    // 同目录目标：查询自动高亮首项 → Enter 确认 → 相对路径 + 默认别名一笔写回
+    await typeText('同')
+    await typeText('目')
+    await poll('同目录查询自动高亮首项', async () => {
+      const s = await suggestPaint()
+      return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
+    })
+    await pressKey('enter')
+    const afterSame = '来源正文\n[[同目录目标.md|同目录目标]]'
+    await poll('同目录目标按相对路径插入', () => doc.getText() === afterSame ? true : undefined)
+    assert(doc.isDirty, '确认插入后文档应 dirty')
+    await poll('确认后候选关闭', async () => (await suggestPaint()) === undefined ? true : undefined)
+
+    // 撤销：确认是一笔宿主撤销记录，撤销恢复确认前文本
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销恢复确认前文本', () => doc.getText() === '来源正文\n[[同目]]' ? true : undefined)
+
+    // 子目录目标：清空字段后查询「子目」→ Enter 插入 .. 上行相对路径
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 9 })
+    await pressKey('backspace')
+    await pressKey('backspace')
+    await typeText('子')
+    await typeText('目')
+    await poll('子目录查询自动高亮首项', async () => {
+      const s = await suggestPaint()
+      return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
+    })
+    await pressKey('enter')
+    const afterNested = '来源正文\n[[../子目录目标.md|子目录目标]]'
+    await poll('子目录目标按 .. 上行相对路径插入', () => doc.getText() === afterNested ? true : undefined)
+    assert(doc.isDirty, '第二次确认后文档仍应 dirty')
+    await doc.save()
   }],
 ]

@@ -1286,7 +1286,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（116 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（120 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -2911,6 +2911,55 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>.vsidian-paste-dialog { border-radius: 12px; }</code></pre>
       <p class="verify">验证：单元 richPasteInteraction：三种选择；浏览器 richPaste：模态背景/焦点与记忆回显；真宿主 richPasteHost：设置持久化</p>
       <p class="life">引入：#306（2026-10-02）</p>
+    </article>
+    <h2>界面域 · 双链联想候选（4）</h2>
+    <article class="entry" id="wikilink-suggest-popup">
+      <h3><code>.vsidian-wikilink-suggest</code><span class="eid">wikilink-suggest-popup</span></h3>
+      <p class="purpose">双链文件联想候选浮层容器：锚定双链围栏开标记处，列出候选与真实状态（搜索中/无结果/未就绪/无工作区）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：仅主正文 Live 光标进入新建闭合双链 [[]]/![[]] 的文件字段时挂载；确认、Esc、移出字段或切模式即移除。</p>
+      <p class="obsidian">Obsidian 对应：无（Vsidian 双链联想候选）</p>
+
+      <p class="dom">DOM 关系：document.body 直接后代（不在 #app 内）；role=listbox、aria-label 取词条 wikilinkSuggest.list.ariaLabel；不夺正文焦点。</p>
+      <pre><code>.vsidian-wikilink-suggest { max-height: 320px; }</code></pre>
+      <p class="verify">验证：浏览器 wikilinkSuggest：真实键盘出候选/高亮/确认/Esc；真宿主「双链联想候选」：paint.wikilinkSuggest.visible（绘制层可见性）</p>
+      <p class="life">引入：#376（2026-10-06）</p>
+    </article>
+    <article class="entry" id="wikilink-suggest-item">
+      <h3><code>.vsidian-wikilink-suggest-item</code><span class="eid">wikilink-suggest-item</span></h3>
+      <p class="purpose">候选行：文件名为主文字、所在目录右对齐弱化呈现（区分同名文件）；匹配命中区间以子元素 .vsidian-wikilink-suggest-hl 标记。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Vsidian 双链联想候选）</p>
+
+      <p class="dom">DOM 关系：容器 role=listbox 的 option 行；行内子结构：.vsidian-wikilink-suggest-name（文件名）、.vsidian-wikilink-suggest-dir（目录）、.vsidian-wikilink-suggest-hl（命中区间）。</p>
+      <pre><code>.vsidian-wikilink-suggest-item { padding: 2px 10px; }</code></pre>
+      <p class="verify">验证：浏览器 wikilinkSuggest：候选行文件名/目录文本与命中高亮；真宿主「双链联想候选」：paint.wikilinkSuggest.itemCount</p>
+      <p class="life">引入：#376（2026-10-06）</p>
+    </article>
+    <article class="entry" id="wikilink-suggest-item-active">
+      <h3><code>.vsidian-wikilink-suggest-item-active</code><span class="eid">wikilink-suggest-item-active</span></h3>
+      <p class="purpose">键盘高亮行（Enter/Tab 确认的目标）：↑↓ 移动、有查询自动落在首项、空查询不高亮。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：与 .vsidian-wikilink-suggest-item 同元素叠加（active 修饰类）；aria-selected=true 同步。</p>
+      <p class="obsidian">Obsidian 对应：无（Vsidian 双链联想候选）</p>
+
+      <p class="dom">DOM 关系：候选行修饰类（不是独立节点）。</p>
+      <pre><code>.vsidian-wikilink-suggest-item-active { outline: 1px solid var(--vscode-focusBorder); }</code></pre>
+      <p class="verify">验证：浏览器 wikilinkSuggest：方向键移动与首项自动高亮；真宿主「双链联想候选」：paint.wikilinkSuggest.activeIndex/activeText</p>
+      <p class="life">引入：#376（2026-10-06）</p>
+    </article>
+    <article class="entry" id="wikilink-suggest-status">
+      <h3><code>.vsidian-wikilink-suggest-status</code><span class="eid">wikilink-suggest-status</span></h3>
+      <p class="purpose">状态行：搜索中、无匹配文件、索引未就绪、未打开文件夹与「仍在构建（部分结果）」等真实状态的文字呈现；不可确认、不写正文。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：随查询结果/索引就绪态切换；与候选行共存（仍在构建时可用项继续候选）。</p>
+      <p class="obsidian">Obsidian 对应：无（Vsidian 双链联想候选）</p>
+
+      <p class="dom">DOM 关系：容器直接子行（非 option 语义——占位不可确认）。</p>
+      <pre><code>.vsidian-wikilink-suggest-status { opacity: 0.7; }</code></pre>
+      <p class="verify">验证：浏览器 wikilinkSuggest：无结果/未就绪状态行文案；真宿主「双链联想候选」：paint.wikilinkSuggest.statusText</p>
+      <p class="life">引入：#376（2026-10-06）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>
