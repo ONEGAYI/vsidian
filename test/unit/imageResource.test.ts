@@ -7,6 +7,7 @@
 // 资源状态）。
 import { describe, it, expect, vi } from 'vitest'
 import { ImageResourceManager } from '../../src/webview/imageResource'
+import { t } from '../../src/shared/i18n'
 
 function makeManager() {
   const posted: Array<{ src: string; reqId: number }> = []
@@ -532,5 +533,78 @@ describe('#208 全量失效重挂（手动刷新通道）', () => {
     expect(posted.map((p) => p.reqId)).toEqual([1, 2])
     manager.handleResult({ reqId: 2, ok: true, src: 'vscode-webview://res/live.png?v=1' })
     expect(built).toEqual(['vscode-webview://res/live.png', 'vscode-webview://res/live.png?v=1'])
+  })
+})
+
+// ==== 失效提示文字（2026-10-05 验收：胶囊内直接显示提示信息）====
+// error 胶囊此前信息只在悬停 tooltip（内容塌陷后呈几像素细条、不悬停
+// 不可知）。改版：提示文案写入槽位 img 的 alt——无有效 src 的 img 按
+// 规范以文本渲染 alt，提示落进既有胶囊样式内直接可见；原 alt 记忆并
+// 在恢复时回写（用户写的 alt 不丢）。
+
+describe('失效提示文字（error 胶囊内可见）', () => {
+  it('解析失败进入 error：细分文案写入 alt（not-found 专属词条）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './missing.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(state(el)).toBe('error')
+    expect(el.getAttribute('alt')).toBe(t('decor.imageNotFound'))
+  })
+
+  it('加载失败（img error 事件）写入通用失败文案（原因缺省为未知）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './ok-but-broken.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/broken.png' })
+    el.dispatchEvent(new Event('error'))
+    expect(state(el)).toBe('error')
+    expect(el.getAttribute('alt')).toBe(t('decor.imageError', { reason: t('decor.unknownReason') }))
+    // src 一并清除：有 src 的加载失败在浏览器里呈坏图图标（alt 被截断），
+    // 清 src 落到「无 src + alt 文本」形态——两条失败路径呈现统一
+    expect(el.getAttribute('src')).toBeNull()
+  })
+
+  it('原 alt 记忆与回写：error 覆盖用户 alt，重试成功后回写原值', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    el.setAttribute('alt', '用户写的说明')
+    manager.attach(el, './a.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(el.getAttribute('alt')).toBe(t('decor.imageNotFound'))
+    el.click() // 重试
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: true, src: 'vscode-webview://res/a.png' })
+    el.dispatchEvent(new Event('load'))
+    expect(state(el)).toBe('loaded')
+    expect(el.getAttribute('alt')).toBe('用户写的说明')
+  })
+
+  it('live 槽位（render 回调）：error 文案写入内部 img 的 alt', () => {
+    const { manager, posted } = makeManager()
+    const slot = document.createElement('span')
+    manager.attach(slot, './live.png', (s, src) => {
+      s.textContent = ''
+      const image = document.createElement('img')
+      image.src = src
+      s.appendChild(image)
+      return image
+    })
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/live.png' })
+    const inner = slot.querySelector('img')!
+    inner.dispatchEvent(new Event('error'))
+    expect(state(slot)).toBe('error')
+    expect(inner.getAttribute('alt')).toBe(t('decor.imageError', { reason: t('decor.unknownReason') }))
+  })
+
+  it('原 alt 为空时恢复后不留 alt 属性', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './b.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'inaccessible' })
+    expect(el.getAttribute('alt')).toBe(t('decor.imageInaccessible'))
+    el.click()
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: true, src: 'vscode-webview://res/b.png' })
+    el.dispatchEvent(new Event('load'))
+    expect(el.getAttribute('alt')).toBeNull()
   })
 })

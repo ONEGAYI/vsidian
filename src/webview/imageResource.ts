@@ -111,6 +111,9 @@ interface SlotRecord {
   onLoad: (event: Event) => void
   onError: (event: Event) => void
   onClick: (event: MouseEvent) => void
+  /** 失效提示文字已写入 img.alt（原值记忆于 errorOriginalAlt；恢复回写） */
+  errorAltApplied?: boolean
+  errorOriginalAlt?: string
 }
 
 export class ImageResourceManager {
@@ -467,9 +470,53 @@ export class ImageResourceManager {
     if (state === 'error') {
       slot.dataset['vsidianImgReason'] = reason ?? 'unknown'
       slot.setAttribute('data-tooltip', imageErrorTitle(reason))
-
+      this.applyErrorAlt(slot, imageErrorTitle(reason))
     } else {
       delete slot.dataset['vsidianImgReason']
+      this.restoreAlt(slot)
+    }
+  }
+
+  /**
+   * 失效提示文字直接可见（2026-10-05 验收改版）：写入槽位 img 的 alt 并
+   * 清除 src——无有效 src 的 img 按规范以文本渲染 alt，提示落进既有
+   * error 胶囊内（此前信息只在悬停 tooltip，内容塌陷后呈几像素细条、
+   * 不悬停不可知）；「有 src 加载失败」在浏览器呈坏图图标且 alt 截断，
+   * 清 src 把两条失败路径统一到 alt 文本形态（重试经 applyToSlot 重写
+   * src，不受影响）。原 alt 记忆于 record，恢复非 error 态时回写
+   * （用户写的 alt 不丢）。边界：img 不在场（live 槽位解析失败、render
+   * 回调尚未构建）时不造占位元素——该窄路径维持容器占位现状。
+   */
+  private applyErrorAlt(slot: HTMLElement, text: string): void {
+    const imgEl = slot instanceof HTMLImageElement ? slot : slot.querySelector('img')
+    if (!imgEl) {
+      return
+    }
+    const record = this.slots.get(slot)
+    if (record && !record.errorAltApplied) {
+      record.errorOriginalAlt = imgEl.getAttribute('alt') ?? ''
+      record.errorAltApplied = true
+    }
+    imgEl.setAttribute('alt', text)
+    imgEl.removeAttribute('src')
+  }
+
+  /** 恢复（loading/loaded）：回写失效前记忆的原 alt（空串语义为移除属性） */
+  private restoreAlt(slot: HTMLElement): void {
+    const record = this.slots.get(slot)
+    if (!record?.errorAltApplied) {
+      return
+    }
+    const imgEl = slot instanceof HTMLImageElement ? slot : slot.querySelector('img')
+    record.errorAltApplied = false
+    if (!imgEl) {
+      return
+    }
+    const original = record.errorOriginalAlt ?? ''
+    if (original === '') {
+      imgEl.removeAttribute('alt')
+    } else {
+      imgEl.setAttribute('alt', original)
     }
   }
 

@@ -16,7 +16,7 @@ const output = artifactPath(root, 'imageEmbedParity/main.js')
 await build({ entryPoints: [path.join(root, 'test/browser/imageEmbedParityFixture.ts')],
   bundle: true, outfile: output, format: 'iife',
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]' })
-const { islandHtml } = await buildZhLocaleIsland(root)
+const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
 
 const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
@@ -213,6 +213,11 @@ try {
     null, { timeout: 8000, polling: 100 })
   const errSlot = (await page.evaluate(() => window.slotsOf('assets/缺失.png')))[0]
   assert.equal(errSlot.reason, 'not-found', '缺失图片嵌入的失败细分为 not-found（与普通图片同源）')
+  // 2026-10-05 验收改版：失效提示直接可见——文案写入 img 的 alt（无 src
+  // 的 img 以文本渲染 alt），胶囊高度撑起一行文字（此前内容塌陷呈几像素
+  // 细条、信息只在悬停 tooltip）——绘制层断言（用户可见的高度）
+  assert.equal(errSlot.alt, zhCn['decor.imageNotFound'], '失效提示文案写入 alt（胶囊内直接可见）')
+  assert.ok(errSlot.height > 15, `失效胶囊撑起提示文字（实测高 ${errSlot.height.toFixed(1)}px，塌陷态约 6px）`)
 
   // 解码下界矩阵（管线内实测：各格式在真实生产管线装载到 loaded）
   const uris = await page.evaluate(async () => ({

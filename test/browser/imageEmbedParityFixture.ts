@@ -170,6 +170,7 @@ function mainImageSlots(): Array<{
   width: number; height: number
   inTable: boolean; inLink: boolean
   chromeButtons: number; block: boolean
+  alt: string
 }> {
   return Array.from(document.querySelectorAll<HTMLElement>('.vsidian-image'))
     .filter((slot) => slot.closest('.vsidian-embed-card') === null && slot.closest('.vsidian-hover-popup') === null)
@@ -180,6 +181,7 @@ function mainImageSlots(): Array<{
         ? slot
         : slot.closest<HTMLElement>('.vsidian-graphic-frame')
       const box = slot.getBoundingClientRect()
+      const imgEl = slot instanceof HTMLImageElement ? slot : slot.querySelector('img')
       return {
         rawSrc: slot.dataset['vsidianImgSrc'] ?? '',
         state: slot.dataset['vsidianImgState'] ?? '',
@@ -190,6 +192,7 @@ function mainImageSlots(): Array<{
         inLink: slot.closest('a') !== null,
         chromeButtons: frame?.querySelectorAll('.vsidian-graphic-chrome button').length ?? 0,
         block: (frame ?? slot).classList.contains('vsidian-image-block'),
+        alt: imgEl?.getAttribute('alt') ?? '',
       }
     })
 }

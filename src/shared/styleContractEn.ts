@@ -374,8 +374,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'image-states': {
     purpose:
-      'The three image states: placeholder (alt text) / loaded (confirmed by the load event) / failed (click to retry, with a visible error outline).',
-    states: 'loading → loaded / error; clicking in the error state retries.',
+      'The three image states: placeholder (alt text) / loaded (confirmed by the load event) / failed (click to retry, with a visible error outline). Failure notices are directly visible (2026-10-05 acceptance rework): the notice text (per failure variant i18n entry) is written into the slot img\'s alt while the src is removed — an img without a valid src renders its alt as text per spec, so the notice sits inside the error capsule and reads without hovering (previously the info lived only in the hover tooltip, and alt-less failure slots collapsed into a few-pixel sliver). The original alt is remembered and restored on recovery (user-written alt is never lost), and "loaded-but-failed with a src" also drops the src to unify on the alt-text form (the broken-image icon form truncates the alt beyond reading).',
+    states: 'loading → loaded / error; clicking in the error state retries; in the error state the slot img has no src and alt = the failure notice (the original alt is restored on leaving the error state).',
     dom: 'Element-level state modifier classes on the image slot.',
     obsidian: { counterpart: 'No direct counterpart (Obsidian has no public loading state classes)' },
   },
