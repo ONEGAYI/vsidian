@@ -9,11 +9,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   TABLE_OPT_MAX_CANDIDATES,
+  TABLE_OPT_MAX_CANDIDATES_MULTI,
   TABLE_OPT_MAX_CELL_EVALS,
+  TABLE_OPT_MAX_COLUMNS,
   compareHeightScores,
   estimateCellLines,
+  optimizeTableHeight,
   optimizeTwoColumnTable,
   scoreTwoColumnSplit,
+  type HeightCandidateScore,
   type HeightRowInput,
 } from '../../src/webview/tableHeightPlan'
 import { tableGridTemplate } from '../../src/webview/tableColumnWidth'
@@ -297,5 +301,239 @@ describe('#372 两列有界搜索（optimizeTwoColumnTable）', () => {
     expect(result.template).toBe(tableGridTemplate(samples, { readability: METRICS }))
     expect(result.cellEvals).toBeLessThanOrEqual(TABLE_OPT_MAX_CELL_EVALS)
     expect(result.candidates).toBe(0)
+  })
+})
+
+
+// ---- #373 多列表格高度优化（纯规划层契约） ----
+
+describe('#373 多列高度优化（optimizeTableHeight）', () => {
+  const cjk = (n: number): string => '汉'.repeat(n)
+  /** 逐列最大样本（与调度层 collectColumnSamples 同口径：宽字符计 2） */
+  const samplesOf = (rows: HeightRowInput[], n: number): number[] => {
+    const out = new Array<number>(n).fill(0)
+    for (const r of rows) {
+      for (let c = 0; c < n; c++) {
+        const w = [...r.cells[c]!].reduce((acc, ch) => acc + (/[\u4e00-\u9fff]/.test(ch) ? 2 : 1), 0)
+        out[c] = Math.max(out[c]!, w)
+      }
+    }
+    return out
+  }
+
+  /**
+   * 三列可改进表（冻结样例）：列 1 全部为六字短标签（12u），列 2/3 各有
+   * 一个 30 字长段落交替驱动行高，末行全短。轻量基线（样本 12/60/60 →
+   * 下限钉 60px + 长列均分 140/140）下短标签列 3 行/行，全短行被拉到 3 行；
+   * 把列 1 拓宽到单行宽（≈122.4px）后整表估算高度 16 → 14（严格下降）。
+   */
+  const multi3: HeightRowInput[] = [
+    { header: true, cells: [cjk(6), cjk(2), cjk(2)] },
+    { header: false, cells: [cjk(6), cjk(30), cjk(1)] },
+    { header: false, cells: [cjk(6), cjk(1), cjk(30)] },
+    { header: false, cells: [cjk(6), cjk(1), cjk(1)] },
+  ]
+
+  it('三列：含轻量基线且严格不劣——可改进表优化后总分更低', () => {
+    const result = optimizeTableHeight({
+      rows: multi3,
+      samples: samplesOf(multi3, 3),
+      readability: METRICS,
+    })
+    expect(result.origin).toBe('optimized')
+    expect(result.baselineLines).toBe(16)
+    expect(result.totalLines).toBe(14)
+    expect(result.totalLines).toBeLessThanOrEqual(result.baselineLines)
+    // 模板形态：三段 minmax（保底 = T01 有效下限 60px，份额 = 100/3 向下 3 位）
+    expect(result.template)
+      .toMatch(/^minmax\(min\(60px, 33\.333%\), [\d.]+fr\) minmax\(min\(60px, 33\.333%\), [\d.]+fr\) minmax\(min\(60px, 33\.333%\), [\d.]+fr\)$/)
+  })
+
+  it('三列：列宽满足 T01 下限且总和不超网格', () => {
+    const result = optimizeTableHeight({
+      rows: multi3,
+      samples: samplesOf(multi3, 3),
+      readability: METRICS,
+    })
+    const floorPx = METRICS.contentPx + METRICS.cellBoxPx
+    expect(result.widthsPx).not.toBeNull()
+    for (const w of result.widthsPx!) {
+      expect(Number.isFinite(w)).toBe(true)
+      expect(w).toBeGreaterThanOrEqual(floorPx - 0.5)
+    }
+    const sum = result.widthsPx!.reduce((s, v) => s + v, 0)
+    expect(sum).toBeLessThanOrEqual(METRICS.availablePx! + 0.5)
+    expect(sum).toBeGreaterThanOrEqual(METRICS.availablePx! - 0.5)
+  })
+
+  it('候选与评估受集中预算约束：三列候选 ≤32、评估 = 候选×行×列', () => {
+    const result = optimizeTableHeight({
+      rows: multi3,
+      samples: samplesOf(multi3, 3),
+      readability: METRICS,
+    })
+    expect(result.candidates).toBeGreaterThanOrEqual(4) // 基线 + 等分 + 内容锚点
+    expect(result.candidates).toBeLessThanOrEqual(TABLE_OPT_MAX_CANDIDATES_MULTI)
+    expect(result.candidates).toBeLessThanOrEqual(TABLE_OPT_MAX_CANDIDATES)
+    expect(result.cellEvals).toBe(result.candidates * multi3.length * 3)
+    expect(result.cellEvals).toBeLessThanOrEqual(TABLE_OPT_MAX_CELL_EVALS)
+  })
+
+  it('六列：确定性与不劣于基线（同输入同预算逐字节相同）', () => {
+    const rows: HeightRowInput[] = [
+      { header: true, cells: [cjk(6), cjk(2), cjk(2), cjk(2), cjk(2), cjk(2)] },
+      { header: false, cells: [cjk(6), cjk(30), cjk(1), cjk(20), cjk(1), cjk(1)] },
+      { header: false, cells: [cjk(6), cjk(1), cjk(30), cjk(1), cjk(20), cjk(1)] },
+      { header: false, cells: [cjk(6), cjk(1), cjk(1), cjk(1), cjk(1), cjk(1)] },
+    ]
+    const samples = samplesOf(rows, 6)
+    const input = { rows, samples, readability: METRICS }
+    const first = optimizeTableHeight(input)
+    const second = optimizeTableHeight(input)
+    expect(first.template).toBe(second.template)
+    expect(first.candidates).toBe(second.candidates)
+    expect(['optimized', 'baseline']).toContain(first.origin)
+    if (first.widthsPx) {
+      for (const w of first.widthsPx) {
+        expect(Number.isFinite(w)).toBe(true)
+        expect(w).toBeGreaterThan(0)
+      }
+      const sum = first.widthsPx.reduce((s, v) => s + v, 0)
+      expect(sum).toBeLessThanOrEqual(METRICS.availablePx! + 0.5)
+    }
+    // 不劣于基线：基线在候选集内，赢家总分不高于基线
+    expect(first.totalLines).toBeLessThanOrEqual(first.baselineLines)
+  })
+
+  it('两列表经统一入口走既有两列搜索（结果与 optimizeTwoColumnTable 逐字节一致）', () => {
+    const rows: HeightRowInput[] = [
+      { header: true, cells: [cjk(1), cjk(1)] },
+      { header: false, cells: [cjk(44), cjk(5)] },
+      { header: false, cells: [cjk(1), cjk(8)] },
+    ]
+    const samples = samplesOf(rows, 2)
+    const viaUnified = optimizeTableHeight({ rows, samples, readability: METRICS })
+    const viaTwoColumn = optimizeTwoColumnTable({ rows, samples, readability: METRICS })
+    expect(viaUnified.template).toBe(viaTwoColumn.template)
+    expect(viaUnified.origin).toBe(viaTwoColumn.origin)
+    expect(viaUnified.candidates).toBe(viaTwoColumn.candidates)
+  })
+
+  it('空列与空表头：无 NaN/负宽/裁切撑破；恢复空间后恢复常规可读下限', () => {
+    const rows: HeightRowInput[] = [
+      { header: true, cells: ['', cjk(2), cjk(2)] },
+      { header: false, cells: [cjk(6), cjk(30), cjk(1)] },
+      { header: false, cells: [cjk(6), '', cjk(30)] },
+    ]
+    const samples = samplesOf(rows, 3)
+    // 窄容器：三列下限和 180 > 100 → 按比例收缩（T01 口径）
+    const narrow = { contentPx: 60, cellBoxPx: 0, availablePx: 100 }
+    const narrowResult = optimizeTableHeight({ rows, samples, readability: narrow })
+    expect(narrowResult.widthsPx).not.toBeNull()
+    for (const w of narrowResult.widthsPx!) {
+      expect(Number.isFinite(w)).toBe(true)
+      expect(w).toBeGreaterThanOrEqual(100 / 3 - 0.5)
+    }
+    expect(narrowResult.widthsPx!.reduce((s, v) => s + v, 0)).toBeLessThanOrEqual(100.5)
+    // 恢复宽容器：常规下限（60px）重新生效
+    const wide = optimizeTableHeight({ rows, samples, readability: METRICS })
+    for (const w of wide.widthsPx!) {
+      expect(w).toBeGreaterThanOrEqual(60 - 0.5)
+    }
+  })
+
+  it('预算三类输入均有确定结果：预算内 / 恰到预算 / 超预算', () => {
+    const makeRows = (count: number): HeightRowInput[] => [
+      { header: true, cells: [cjk(6), cjk(2), cjk(2), cjk(2), cjk(2)] },
+      ...Array.from({ length: count - 1 }, (_v, i) => ({
+        header: false,
+        cells: [cjk(6), cjk(2 + (i % 3)), cjk(1), cjk(2), cjk(1)] as string[],
+      })),
+    ]
+    const once = (count: number) => {
+      const rows = makeRows(count)
+      return optimizeTableHeight({ rows, samples: samplesOf(rows, 5), readability: METRICS })
+    }
+    // 预算内：125 行 × 5 列 × 32 = 20000 恰好不超 → 执行搜索（候选非零）
+    const atLimit = once(125)
+    expect(atLimit.origin).not.toBe('degraded')
+    expect(atLimit.candidates).toBeGreaterThan(0)
+    // 超预算：126 行 → 20160 > 20000 → 稳定降级（不跑搜索、评估为零）
+    const over = once(126)
+    expect(over.origin).toBe('degraded')
+    expect(over.candidates).toBe(0)
+    expect(over.cellEvals).toBe(0)
+    // 确定性：同类输入两次调用结果一致
+    expect(once(126).template).toBe(over.template)
+  })
+
+  it('千行表：确定降级到轻量计划（大表有界路径）', () => {
+    const rows: HeightRowInput[] = [
+      { header: true, cells: [cjk(6), cjk(2), cjk(2)] },
+      ...Array.from({ length: 999 }, (_v, i) => ({
+        header: false,
+        cells: [cjk(6), cjk(2 + (i % 5)), cjk(1)] as string[],
+      })),
+    ]
+    const samples = samplesOf(rows, 3)
+    const result = optimizeTableHeight({ rows, samples, readability: METRICS })
+    expect(result.origin).toBe('degraded')
+    expect(result.template).toBe(tableGridTemplate(samples, { readability: METRICS }))
+    expect(result.candidates).toBe(0)
+    expect(result.cellEvals).toBe(0)
+  })
+
+  it('密集 br / 超长单元格 / 中英混排：结果确定且有界', () => {
+    const rows: HeightRowInput[] = [
+      { header: true, cells: ['label', '中文 mixed text', '备注'] },
+      { header: false, cells: [cjk(6), 'a<br>b<br>c<br>d<br>e<br>f<br>g', 'x'.repeat(300)] },
+      { header: false, cells: [cjk(6), `中文english混合${cjk(10)}段落`, cjk(3)] },
+    ]
+    const samples = samplesOf(rows, 3)
+    const input = { rows, samples, readability: METRICS }
+    const first = optimizeTableHeight(input)
+    const second = optimizeTableHeight(input)
+    expect(first.template).toBe(second.template)
+    expect(first.candidates).toBeLessThanOrEqual(TABLE_OPT_MAX_CANDIDATES_MULTI)
+    expect(first.cellEvals).toBeLessThanOrEqual(TABLE_OPT_MAX_CELL_EVALS)
+    if (first.widthsPx) {
+      for (const w of first.widthsPx) {
+        expect(Number.isFinite(w)).toBe(true)
+        expect(w).toBeGreaterThan(0)
+        expect(w).toBeLessThanOrEqual(METRICS.availablePx! + 0.5)
+      }
+    }
+  })
+
+  it('列数超上限：直接走轻量计划（不搜索）', () => {
+    const columns = TABLE_OPT_MAX_COLUMNS + 1
+    const rows: HeightRowInput[] = [
+      { header: true, cells: Array.from({ length: columns }, () => cjk(2)) },
+      { header: false, cells: Array.from({ length: columns }, () => cjk(2)) },
+    ]
+    const samples = samplesOf(rows, columns)
+    const result = optimizeTableHeight({ rows, samples, readability: METRICS })
+    expect(result.origin).toBe('degraded')
+    expect(result.template).toBe(tableGridTemplate(samples, { readability: METRICS }))
+    expect(result.candidates).toBe(0)
+  })
+
+  it('同分决胜（多列分支）：先比距基线变化，再按列宽字典序', () => {
+    const mk = (dist: number, widths: number[]): HeightCandidateScore => ({
+      total: 10, headerLines: 3, shortWrapLines: 0, c1Units: 0,
+      multi: { baselineDistPx: dist, widthsPx: widths },
+    })
+    const near = mk(10, [100, 120, 120])
+    const far = mk(20, [110, 110, 120])
+    expect(compareHeightScores(near, far, 0)).toBeLessThan(0)
+    expect(compareHeightScores(far, near, 0)).toBeGreaterThan(0)
+    // 距基线相同 → 列宽字典序（首差列小者胜）
+    const lexSmall = mk(10, [100, 120, 120])
+    const lexLarge = mk(10, [110, 110, 120])
+    expect(compareHeightScores(lexSmall, lexLarge, 0)).toBeLessThan(0)
+    expect(compareHeightScores(lexLarge, lexSmall, 0)).toBeGreaterThan(0)
+    // 多列候选与两列候选混合比较时退回两列语义（multi 双侧才生效）
+    const twoCol: HeightCandidateScore = { total: 9, headerLines: 3, shortWrapLines: 0, c1Units: 5 }
+    expect(compareHeightScores(twoCol, near, 0)).toBeLessThan(0) // total 更小直接胜
   })
 })

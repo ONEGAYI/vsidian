@@ -1,10 +1,11 @@
-// #372 离开编辑后的整表高度优化调度层（ViewPlugin）。
+// #372/#373 离开编辑后的整表高度优化调度层（ViewPlugin）。
 //
 // 职责分工（规格 #371「实现边界与缓存」）：
-// - 纯函数算候选（tableHeightPlan.optimizeTwoColumnTable）；本插件只做
-//   调度与一次发布——效果事务（applyTableHeightPlan）经 liveDecorations
-//   验证后套用，模板变化 → 行装饰键变 → CM6 重绘。不写回源文本、不新增
-//   宿主消息与撤销记录。
+// - 纯函数算候选（tableHeightPlan.optimizeTableHeight——两列 #372 粗搜+
+//   细搜，三列及以上 #373 有限候选+阈值转移）；本插件只做调度与一次发布
+//   ——效果事务（applyTableHeightPlan）经 liveDecorations 验证后套用，
+//   模板变化 → 行装饰键变 → CM6 重绘。不写回源文本、不新增宿主消息
+//   与撤销记录。
 // - 活动定义以整表为单位：任一光标在表内（含分隔行，端点侧向解析）、
 //   任一线性选区与网格段相交、或矩形格区属于该表——任一成立即「活动」，
 //   完整搜索调用次数为零。表内切格仅局部处理；焦点短暂进工具栏/右键
@@ -37,7 +38,7 @@ import {
   applyTableHeightPlan,
   noteTableOptimizeDiscard,
   noteTableOptimizeSearch,
-  optimizeTwoColumnTable,
+  optimizeTableHeight,
   tableMetricsSig,
   type CellWrapProfile,
   type HeightRowInput,
@@ -369,13 +370,13 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         this.tracked.clear()
       }
       this.tracked.set(table.from, { sig })
-      if (info.columns !== 2) {
-        return null // 三列及以上：T03 前保持轻量计划（签名已登记防重扫）
-      }
       if (this.profileCache.size >= TABLE_OPT_CACHE_ROWS) {
         this.profileCache.clear()
       }
-      const result = optimizeTwoColumnTable(
+      // #373 统一入口：两列走 #372 粗搜+细搜，三列及以上走多列有限候选 +
+      // 阈值转移（超列数上限/超预算在纯层稳定降级——同源机制，无独立的
+      // 多列调度口径）
+      const result = optimizeTableHeight(
         { rows, samples, readability: metrics },
         { tokenCache: this.profileCache },
       )

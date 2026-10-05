@@ -156,7 +156,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'height-optimize', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -177,6 +177,36 @@ try {
       if (scenario === 'column-width') source = 'BEFORE\n\n| 短 | 这是一个内容比较长的表头列 |\n| --- | --- |\n| a | 这一列内容明显更长更长更长 |\n| b | 短 |\n\nAFTER'
       if (scenario === 'height-optimize') {
         source = 'BEFORE\n\n| 功能 | 说明 |\n| --- | --- |\n| 悬停文档预览 | Ctrl+悬停链接预览目标：笔记显示全文与章节或块引用，浮窗内可直接编辑保存；代码等文本文件按 VSCode 原生着色只读显示；PDF 分页浏览、文字可复制可缩放。 |\n| 跳转目标提示 | 悬停链接不弹预览浮层时，短暂停留显示目标路径与锚点的小浮标，双模式均可用。 |\n\nAFTER'
+      }
+      if (scenario === 'height-optimize-multi') {
+        // #373 冻结三列样例：六字短标签列 + 说明/备注交替长段落 + 周期性全短行
+        // （30 数据行，足以滚动出视口重挂）；基线把宽度过度分给长列，短标签
+        // 列接近下限多行折行，优化后空间回填短标签列、全短行高度下降
+        const labels = ['悬停文档预览', '跳转目标提示', '引用自动更新', '图片粘贴插入', '表格列宽分配', '大纲样式装饰']
+        const rows = []
+        for (let i = 0; i < 30; i++) {
+          const label = labels[i % labels.length]
+          if (i % 3 === 2) {
+            rows.push(`| ${label} | 短说明${i} | 备${i} |`)
+          } else if (i % 2 === 0) {
+            rows.push(`| ${label} | ${label}承载较长说明文字：基线下该列被长内容占据大部分宽度，标签列被压窄而逐字折行，离开编辑后整表高度优化应把宽度回填标签列并压缩全表高度（第${i}段）。 | 备注第${i}条 |`)
+          } else {
+            rows.push(`| ${label} | 说明第${i}段 | ${label}的备注列承载较长内容：与说明列交替驱动行高，验证多列阈值贪心转移在两长列间平衡分配（第${i}条）。 |`)
+          }
+        }
+        source = `BEFORE\n\n| 功能 | 说明 | 备注 |\n| --- | --- | --- |\n${rows.join('\n')}\n\nAFTER`
+      }
+      if (scenario === 'height-optimize-wide') {
+        // #373 冻结六列样例：短标签 + 两长列 + 三短列，预算内（20 行 × 6 列）
+        const labels = ['悬停预览', '跳转提示', '自动更新', '粘贴插入', '列宽分配', '样式装饰']
+        const rows = []
+        for (let i = 0; i < 20; i++) {
+          const label = labels[i % labels.length]
+          rows.push(i % 3 === 2
+            ? `| ${label} | 短${i} | 备${i} | 序${i} | 号${i} | 短 |`
+            : `| ${label} | 说明文字第${i}段承载较长内容驱动行高，优化后短标签列回填宽度减少折行。 | 备注内容第${i}条交替驱动行高，与说明列平衡分配可用宽度。 | ${i} | x${i} | 尾 |`)
+        }
+        source = `BEFORE\n\n| 功能 | 说明 | 备注 | 序号 | 标记 | 尾列 |\n| --- | --- | --- | --- | --- | --- |\n${rows.join('\n')}\n\nAFTER`
       }
       if (scenario.startsWith('handle-cross-')) source += '\n\n| X1 | X2 |\n| --- | --- |\n| Y1 | Y2 |'
       if (scenario === 'enter-empty') source = source.replace('H2', '')
@@ -824,6 +854,114 @@ try {
         const dedup = await page.evaluate(() => window.tableOptimizeStats())
         assert.equal(dedup.searches, stats0.searches + 1, '同版本再次进出不得重复搜索')
         await captureTable('table-height-optimize.png')
+      } else if (scenario === 'height-optimize-multi' || scenario === 'height-optimize-wide') {
+        // #373 多列高度优化（三列冻结样例 + 六列样例）：断言落在用户可见物
+        // ——退出编辑后真实表格总高度下降、可见文字不裁切（scrollWidth 不越
+        // 格盒）、同行格子同水平带、控件命中正确（checkCell painted 光标）、
+        // 滚动离屏重挂后消费同一计划。表内交互（Tab/矩形拖选/IME）搜索为零。
+        const readTable = () => page.evaluate(() => {
+          const rows = [...document.querySelectorAll('.vsidian-table-grid-row')]
+          if (!rows.length) return null
+          const first = rows[0].getBoundingClientRect()
+          const last = rows[rows.length - 1].getBoundingClientRect()
+          return {
+            height: last.bottom - first.top,
+            rowCount: rows.length,
+            plan: rows[0].style.getPropertyValue('--vsidian-table-col-widths'),
+            tracks: getComputedStyle(rows[0]).gridTemplateColumns.split(' ').map(Number.parseFloat),
+            tracksSum: getComputedStyle(rows[0]).gridTemplateColumns.split(' ').map(Number.parseFloat)
+              .reduce((s, v) => s + v, 0),
+            rowArea: rows[0].getBoundingClientRect().width,
+            labelWidth: rows[1].querySelector(':scope > .vsidian-table-grid-cell').getBoundingClientRect().width,
+            clipping: rows.some((row) => [...row.querySelectorAll(':scope > .vsidian-table-grid-cell')]
+              .some((c) => c.scrollWidth > c.clientWidth + 1)),
+            bandOk: rows.every((row) => {
+              const boxes = [...row.querySelectorAll(':scope > .vsidian-table-grid-cell')]
+                .map((c) => c.getBoundingClientRect())
+              return boxes.every((b, i) => i === 0 || Math.abs(b.y - boxes[0].y) < 1)
+            }),
+          }
+        })
+        await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0, undefined, { timeout: 5000 })
+        // 进表 + 净编辑：内容指纹区别于挂载扫描（同版本去重不拦截退出触发）
+        await cell(1, 0).click()
+        const caret0 = await page.evaluate(() => window.readEditor().head)
+        await page.keyboard.type('x')
+        const mutated = source.slice(0, caret0) + 'x' + source.slice(caret0)
+        const stats0 = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests }))
+        // 表内交互（Tab 切格 / 矩形拖选 / 真实 IME 组合）期间完整搜索为零
+        await page.keyboard.press('Tab')
+        const a = await cell(1, 0).boundingBox()
+        const b = await cell(2, 2).boundingBox()
+        await page.mouse.move(a.x + 8, a.y + a.height / 2)
+        await page.mouse.down()
+        await page.mouse.move(b.x + 20, b.y + b.height / 2, { steps: 4 })
+        await page.mouse.up()
+        await cell(2, 0).click()
+        const cdp = await page.context().newCDPSession(page)
+        for (const text of ['ce', 'cesh']) await cdp.send('Input.imeSetComposition',
+          { text, selectionStart: text.length, selectionEnd: text.length })
+        await cdp.send('Input.insertText', { text: '测试' })
+        await page.waitForTimeout(30)
+        await page.keyboard.press('Backspace')
+        await page.keyboard.press('Backspace')
+        await page.waitForTimeout(60)
+        const inTable = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests }))
+        assert.equal(inTable.searches - stats0.searches, 0, '多列表内交互期间完整搜索必须为零')
+        assert.equal(inTable.publishes - stats0.publishes, 0, '多列表内交互期间不得发布新计划')
+        assert.equal((await page.evaluate(() => window.readEditor())).text, mutated,
+          '多列表内交互后源文应只含净编辑')
+        const h0 = await readTable()
+        assert(h0.rowCount === (scenario === 'height-optimize-multi' ? 31 : 21),
+          `数据行网格行数: ${h0.rowCount}`)
+        // 控件命中正确：点击第三列格后绘制光标落在该格内，真实键入位置一致
+        const paintedIn = await cell(1, 2).evaluate((el) => {
+          const sel = getSelection()
+          const rect = sel?.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null
+          const box = el.getBoundingClientRect()
+          return { inside: el.contains(sel?.focusNode),
+            painted: !!rect && rect.height > 0 && rect.x >= box.left && rect.x < box.right }
+        })
+        assert(paintedIn.inside && paintedIn.painted, `第三列格控件命中须绘制光标: ${JSON.stringify(paintedIn)}`)
+        const typedAt = await page.evaluate(() => window.readEditor().head)
+        await page.keyboard.type('y')
+        const typedText = (await page.evaluate(() => window.readEditor())).text
+        assert.equal(typedText, mutated.slice(0, typedAt) + 'y' + mutated.slice(typedAt), '真实键入须落在点击格内')
+        await page.keyboard.press('Backspace')
+        // 退出（点击表后正文）——恰好一次完整优化并发布
+        await page.locator('.cm-line').filter({ hasText: /^AFTER$/ }).click()
+        await page.waitForFunction((n) => window.tableOptimizeStats().searches === n,
+          stats0.searches + 1, { timeout: 5000 })
+        const afterLeave = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
+          editRequests: window.__editRequests }))
+        assert.equal(afterLeave.publishes - stats0.publishes, 1, '多列表退出后恰好一次发布')
+        assert.equal(afterLeave.editRequests, stats0.editRequests, '布局变更零写回（无 edit.request 出站）')
+        const h1 = await readTable()
+        assert(h1.height < h0.height - 1,
+          `${scenario} 优化后可见总高度必须低于轻量基线: ${h1.height.toFixed(1)} vs ${h0.height.toFixed(1)}`)
+        assert(h1.plan !== h0.plan, '发布的多列计划应与轻量基线不同')
+        assert(h1.labelWidth >= 36, `短标签列宽不得低于 T01 下限附近: ${h1.labelWidth.toFixed(1)}`)
+        assert(h1.tracksSum <= h1.rowArea + 1, `轨道总宽不超行区: ${h1.tracksSum.toFixed(1)} vs ${h1.rowArea.toFixed(1)}`)
+        assert(h1.tracks.every((t) => Number.isFinite(t) && t > 0), `轨道宽须为正有限值: ${h1.tracks}`)
+        assert(!h1.clipping, '优化后可见文字不得横向裁切（scrollWidth 越格盒）')
+        assert(h1.bandOk, '同行格子必须同水平带')
+        // 视口重挂行消费同一计划：滚出视口再滚回，计划与列宽逐字节一致
+        await page.mouse.wheel(0, 1600)
+        await page.waitForTimeout(120)
+        await page.mouse.wheel(0, -1600)
+        await page.waitForTimeout(120)
+        const h2 = await readTable()
+        assert(h2.plan === h1.plan, '滚动离屏重挂后必须消费同一列宽计划')
+        assert(Math.abs(h2.height - h1.height) < 2, `重挂后表格总高度稳定: ${h2.height.toFixed(1)} vs ${h1.height.toFixed(1)}`)
+        // 同版本去重：再进出一次（无内容变化）不重复搜索
+        await cell(1, 0).click()
+        await page.locator('.cm-line').filter({ hasText: /^AFTER$/ }).click()
+        await page.waitForTimeout(80)
+        const dedup = await page.evaluate(() => window.tableOptimizeStats())
+        assert.equal(dedup.searches, stats0.searches + 1, '同版本再次进出不得重复搜索')
+        await captureTable(`table-${scenario}.png`)
       } else {
         // drag-table-outside：表外文本发起、横跨整表拖选，一次 Delete 移除整表
         const beforeLine = page.locator('.cm-line').filter({ hasText: /^BEFORE$/ })
@@ -843,6 +981,9 @@ try {
             `表格前后正文按选区保留（选区端点所在字符按所见即所删）: ${JSON.stringify(state)}`)
           assert(state.rows === 0, '表格 DOM 应随整块删除消失')
         }
+      } else if (scenario === 'height-optimize-multi' || scenario === 'height-optimize-wide') {
+        // #373 多列样例网格行数多（31/21 行），基表「首末行方向键导航」断言
+        // 不适用——本场景的全部断言已在专属分支完成，这里跳过基表导航
       } else {
         await page.locator('.cm-line').filter({ hasText: /^BEFORE$/ }).click({ position: { x: 5, y: 10 } })
         await page.keyboard.press('ArrowDown')

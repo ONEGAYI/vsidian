@@ -527,7 +527,109 @@ try {
     console.error(`[引用表格绘制][FAIL] #372 整表高度优化: ${error.message}`)
   } finally { await page.close() }
 }
+// ---- #373 多列表格高度优化（引用内三列：缩进口径 + 窄容器边界） ----
+// 断言落在用户可见物：引用内三列表退出编辑后可见总高度下降；轨道总宽不
+// 超引用行净宽（缩进扣除后的可用宽口径）；同行格子同水平带、列序不乱；
+// 窄容器收缩后仍无 NaN/负宽、总宽不超网格，恢复后回到常规下限。
+{
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: bundle })
+    const labels = ['悬停文档预览', '跳转目标提示', '引用自动更新', '图片粘贴插入']
+    const rows = []
+    for (let i = 0; i < 9; i++) {
+      const label = labels[i % labels.length]
+      rows.push(i % 3 === 2
+        ? `> | ${label} | 短${i} | 备${i} |`
+        : `> | ${label} | 第${i}段说明文字承载较长内容驱动行高，基线下短标签列被压窄逐字折行，优化后宽度回填标签列压缩整表高度。 | 备注内容第${i}条与说明列交替驱动行高。 |`)
+    }
+    const source = `前文
+
+> | 功能 | 说明 | 备注 |
+> | --- | --- | --- |
+${rows.join('\n')}
+
+后文`
+    await page.evaluate((text) => window.initTable(text), source)
+    await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0, undefined, { timeout: 5000 })
+    const read = () => page.evaluate(() => {
+      const rowsEl = [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
+      const first = rowsEl[0].getBoundingClientRect()
+      const last = rowsEl[rowsEl.length - 1].getBoundingClientRect()
+      const tracks = getComputedStyle(rowsEl[0]).gridTemplateColumns.split(' ').map(Number.parseFloat)
+      const rowArea = rowsEl[0].getBoundingClientRect().width - parseFloat(getComputedStyle(rowsEl[0]).paddingLeft)
+      return {
+        height: last.bottom - first.top,
+        rowCount: rowsEl.length,
+        plan: rowsEl[0].style.getPropertyValue('--vsidian-table-col-widths'),
+        tracks, tracksSum: tracks.reduce((s, v) => s + v, 0), rowArea,
+        bandOk: rowsEl.every((row) => {
+          const boxes = [...row.querySelectorAll(':scope > .vsidian-table-grid-cell')].map((c) => c.getBoundingClientRect())
+          return boxes.every((b, i) => i === 0 || b.x > boxes[i - 1].x) &&
+            boxes.every((b, i) => Math.abs(b.y - boxes[0].y) < 1)
+        }),
+      }
+    })
+    // 进表（活动态）+ 净编辑：内容指纹区别于挂载扫描
+    const cellPos = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
+      return rows.length ? window.readEditor().text.indexOf('悬停文档预览') + 2 : -1
+    })
+    await page.evaluate((pos) => window.moveCaret(pos), cellPos)
+    await page.evaluate(() => {
+      const view = window.controller.getView()
+      const pos = view.state.selection.main.head
+      view.dispatch({ changes: { from: pos, insert: 'x' }, selection: { anchor: pos + 1 } })
+    })
+    await page.waitForTimeout(60)
+    const stats0 = await page.evaluate(() => window.tableOptimizeStats())
+    const h0 = await read()
+    assert(h0.rowCount === 10, `引用三列表应有 10 行网格（表头 + 9 数据行）: ${h0.rowCount}`)
+    assert(h0.bandOk, '引用内多列基线同行格子同水平带且列序不乱')
+    // 退出整表：恰好一次完整优化并发布，可见总高度下降
+    await page.evaluate(() => window.moveCaret(0))
+    await page.waitForFunction((n) => window.tableOptimizeStats().searches === n, stats0.searches + 1,
+      { timeout: 5000 })
+    const afterStats = await page.evaluate(() => window.tableOptimizeStats())
+    assert.equal(afterStats.publishes - stats0.publishes, 1, '#373 引用多列表退出后恰好一次发布')
+    const h1 = await read()
+    assert(h1.height < h0.height - 1,
+      `#373 引用多列表优化后可见总高度下降: ${h1.height.toFixed(1)} vs ${h0.height.toFixed(1)}`)
+    assert(h1.plan !== h0.plan, '#373 引用多列表发布的计划应与轻量基线不同')
+    assert(h1.tracksSum <= h1.rowArea + 1,
+      `#373 引用多列轨道总宽不超行区净宽（引用缩进扣除）: ${h1.tracksSum.toFixed(1)} vs ${h1.rowArea.toFixed(1)}`)
+    assert(h1.tracks.every((t) => Number.isFinite(t) && t > 0), `轨道宽须为正有限值: ${h1.tracks}`)
+    assert(h1.bandOk, '引用内多列优化后同行格子同水平带且列序不乱')
+    // 窄容器收缩：度量变化触发重扫，仍无 NaN/负宽、总宽不超网格
+    await page.evaluate(() => { document.getElementById('app').style.width = '420px' })
+    await page.evaluate(() => window.controller.getView().requestMeasure())
+    await page.waitForTimeout(250)
+    const narrow = await read()
+    assert(narrow.tracks.every((t) => Number.isFinite(t) && t > 0), `窄容器轨道宽须为正有限值: ${narrow.tracks}`)
+    assert(narrow.tracksSum <= narrow.rowArea + 1,
+      `窄容器轨道总宽不超收缩后行区: ${narrow.tracksSum.toFixed(1)} vs ${narrow.rowArea.toFixed(1)}`)
+    assert(narrow.bandOk, '窄容器同行格子同水平带且列序不乱')
+    // 恢复宽容器：回到常规下限（短标签列宽回升）
+    await page.evaluate(() => { document.getElementById('app').style.width = '' })
+    await page.evaluate(() => window.controller.getView().requestMeasure())
+    await page.waitForTimeout(250)
+    const restored = await read()
+    assert(restored.tracksSum <= restored.rowArea + 1, '恢复宽容器后轨道总宽不超行区')
+    assert(restored.bandOk, '恢复宽容器后同行格子同水平带')
+    assert.deepEqual(errors, [], `#373 页面异常 ${JSON.stringify(errors)}`)
+    await page.screenshot({ path: artifactPath(root, 'bq-paint-373-multi-height-optimize.png'), fullPage: true })
+    passed++
+    console.log('[引用表格绘制][PASS] #373 多列高度优化（引用内三列 + 窄容器边界）')
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] #373 多列高度优化: ${error.message}`)
+  } finally { await page.close() }
+}
 
 await browser.close()
 if (failures.length) throw new AggregateError(failures, '引用块内表格绘制回归失败')
-console.log(`[引用表格绘制] ${passed}/${scenarios.length + 2} 场景通过`)
+console.log(`[引用表格绘制] ${passed}/${scenarios.length + 3} 场景通过`)

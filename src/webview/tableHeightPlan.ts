@@ -1,4 +1,4 @@
-// #372 两列表格整表高度优化：纯规划层（折行估算 / 评分 / 有界搜索 / 预算）。
+// #372/#373 表格整表高度优化：纯规划层（折行估算 / 评分 / 有界搜索 / 预算）。
 //
 // 职责边界（与 #371/#142 的纯规划层同族约束）：
 // - 本模块零 DOM、零视图依赖：输入是普通数据（行格文本 + 轻量样本 +
@@ -14,8 +14,13 @@
 // - 候选集必须含轻量基线候选，同模型评分不劣于基线；同分决胜序：
 //   ① 总折行数少 → ② 表头折行 + 短标签超一行折行少 → ③ 距轻量基线
 //   的列宽变化小 → ④ 列宽字典序（同输入同输出逐字节确定）。
-// - 预算集中定义（候选数 / 单轮格评估量 / 行缓存容量）；超预算降级保留
-//   T01 可读轻量计划，不反复触发无效搜索（由调度层按签名去重）。
+// - 搜索通道（#373 起统一入口 optimizeTableHeight）：两列 = 粗搜 + 内容
+//   锚点 + 细搜（#372）；三列及以上 = 有限候选（基线/等分/内容锚点种子）
+//   + 阈值贪心列间转移（把列拓宽到「最高格少折一行」的跨阈值最小宽，
+//   差额按各列下限以上余量比例分摊）——不穷举列宽组合。
+// - 预算集中定义（候选数 / 单轮格评估量 / 行缓存容量 / 列数上限）；超
+//   预算降级保留 T01 可读轻量计划，不反复触发无效搜索（由调度层按签名
+//   去重）。
 //
 // 发布通道：applyTableHeightPlan 携带表格身份（Table 节点 from）、文档
 // 引用、列数与度量签名，由 liveDecorations 的字段 update 验证后一次性
@@ -41,6 +46,19 @@ export const TABLE_OPT_COARSE_POINTS = 9
 export const TABLE_OPT_FINE_POINTS = 8
 /** 候选总数上限（粗搜 + 内容锚点 + 基线 + 细搜的去重结果） */
 export const TABLE_OPT_MAX_CANDIDATES = 24
+/**
+ * #373 多列候选总数上限（种子 + 阈值贪心转移的去重结果）。取 32 的依据：
+ * 每层阈值候选 ≤ 3n（n ≥ 6 时 2n），种子 n+2——n=3 可支撑约 3 层局部调整，
+ * n=6 支撑约 2 层；单轮格评估上限下 6 列 × 100 行 × 32 = 19200 ≤ 20000
+ * （百行六列表仍可搜索），千行表确定性降级（共同规格的大表有界路径）。
+ */
+export const TABLE_OPT_MAX_CANDIDATES_MULTI = 32
+/**
+ * #373 参与高度优化的列数上限：超出直接轻量计划（签名登记防重试）。
+ * 列数越多单候选评估成本越高而内容异质性收益递减，12 列已覆盖常规
+ * GFM 表；超限表仍走 T01 可读计划（有界路径，不是错误）。
+ */
+export const TABLE_OPT_MAX_COLUMNS = 12
 /** 单轮单元格评估量上限（行 × 列 × 候选的折行估算次数） */
 export const TABLE_OPT_MAX_CELL_EVALS = 20000
 /** 逐行折行指标缓存容量（条目；随视图释放，无持久存储） */
@@ -228,6 +246,12 @@ export interface HeightCandidateScore {
   shortWrapLines: number
   /** 第一列内容宽（度量单位）——决胜第三级（距基线变化）与第四级（字典序）用 */
   c1Units: number
+  /**
+   * #373 多列决胜载体：距基线的列宽距离（Σ|wi − baseline_i|，px）与逐列
+   * 宽（px，字典序决胜）。两列路径不设（保持 #372 的 c1Units 语义）；
+   * compareHeightScores 在双侧都携带时启用多列决胜分支。
+   */
+  multi?: { baselineDistPx: number; widthsPx: readonly number[] }
 }
 
 /** 已 tokenize 的评分输入（调度层缓存逐行指标后零重 tokenize 评分） */
@@ -261,24 +285,29 @@ function profileRows(
   }))
 }
 
-/** 评分核心：两列内容宽（度量单位）下的整表评分（profile 零重 tokenize） */
+/** 评分核心：各列内容宽（度量单位）下的整表评分（profile 零重 tokenize）。
+ *  #373 起按任意列数评分；colWrapExtras 为逐列最大超行数（阈值目标的
+ *  列选择与观测口径），两列包装层（scoreTwoColumnSplit）不向外暴露 */
 function scoreProfiledRows(
   rows: readonly ProfiledRow[],
-  s1Units: number,
-  s2Units: number,
-): Omit<HeightCandidateScore, 'c1Units'> {
+  widthsUnits: readonly number[],
+): { total: number; headerLines: number; shortWrapLines: number; colWrapExtras: number[] } {
   let total = 0
   let headerLines = 0
   let shortWrapLines = 0
+  const colWrapExtras = new Array<number>(widthsUnits.length).fill(0)
   for (const row of rows) {
     let rowLines = 0
     for (let col = 0; col < row.profiles.length; col++) {
-      const width = col === 0 ? s1Units : s2Units
+      const width = widthsUnits[col] ?? 0
       const lines = profileLines(row.profiles[col]!, width)
       if (row.header) {
         headerLines += lines
       } else if (row.profiles[col]!.naturalUnits <= TABLE_SHORT_LABEL_UNITS) {
         shortWrapLines += Math.max(0, lines - 1)
+      }
+      if (lines - 1 > colWrapExtras[col]!) {
+        colWrapExtras[col] = lines - 1
       }
       if (lines > rowLines) {
         rowLines = lines
@@ -286,7 +315,7 @@ function scoreProfiledRows(
     }
     total += Math.max(1, rowLines)
   }
-  return { total, headerLines, shortWrapLines }
+  return { total, headerLines, shortWrapLines, colWrapExtras }
 }
 
 /**
@@ -300,14 +329,16 @@ export function scoreTwoColumnSplit(
   options: { measure?: CellWidthMeasurer } = {},
 ): HeightCandidateScore {
   const measure = options.measure ?? defaultCellWidthMeasurer
-  const scored = scoreProfiledRows(profileRows(rows, measure), s1Units, totalUnits - s1Units)
-  return { ...scored, c1Units: s1Units }
+  const scored = scoreProfiledRows(profileRows(rows, measure), [s1Units, totalUnits - s1Units])
+  return { total: scored.total, headerLines: scored.headerLines, shortWrapLines: scored.shortWrapLines, c1Units: s1Units }
 }
 
 /**
  * 候选全序比较（同分决胜序）：① total 少者优 → ② headerLines+shortWrapLines
  * 少者优 → ③ 距轻量基线第一列宽（度量单位）的变化小者优 → ④ c1Units
- * 字典序小者优（保证全序确定：同输入同输出）。
+ * 字典序小者优（保证全序确定：同输入同输出）。#373 多列分支：双侧携带
+ * multi 载荷时 ③/④ 换为 Σ|wi − baseline_i|（px）与逐列宽字典序——决胜
+ * 序层级与两列完全同源（先总分、再表头/短标签、再距基线变化、再确定序）。
  */
 export function compareHeightScores(
   a: HeightCandidateScore,
@@ -321,6 +352,21 @@ export function compareHeightScores(
   const sb = b.headerLines + b.shortWrapLines
   if (sa !== sb) {
     return sa - sb
+  }
+  if (a.multi && b.multi) {
+    if (a.multi.baselineDistPx !== b.multi.baselineDistPx) {
+      return a.multi.baselineDistPx - b.multi.baselineDistPx
+    }
+    const wa = a.multi.widthsPx
+    const wb = b.multi.widthsPx
+    const n = Math.min(wa.length, wb.length)
+    for (let i = 0; i < n; i++) {
+      const d = wa[i]! - wb[i]!
+      if (d !== 0) {
+        return d
+      }
+    }
+    return 0
   }
   const da = Math.abs(a.c1Units - baselineC1Units)
   const db = Math.abs(b.c1Units - baselineC1Units)
@@ -434,7 +480,8 @@ function formatNumber(value: number): string {
 
 /**
  * 两列表格整表高度优化（粗搜 + 内容锚点 + 基线 + 细搜的有界候选集）。
- * 三列及以上、缺有效度量或超预算时返回轻量计划（T03 前的边界）。
+ * 缺有效度量或超预算时返回轻量计划；三列及以上经统一入口
+ * optimizeTableHeight 走多列通道（本函数保持两列专属语义）。
  */
 export function optimizeTwoColumnTable(
   input: TableHeightOptimizeInput,
@@ -495,7 +542,7 @@ export function optimizeTwoColumnTable(
     // 评分宽带安全系数收缩（刀口宽度悲观化）；决胜第三级的基线距离仍用原始宽
     const s1Units = ((c1Px - cellBoxPx) / unitPx) * TABLE_OPT_WRAP_SAFETY
     const s2Units = ((availablePx - c1Px - cellBoxPx) / unitPx) * TABLE_OPT_WRAP_SAFETY
-    const scored = scoreProfiledRows(profiled, s1Units, s2Units)
+    const scored = scoreProfiledRows(profiled, [s1Units, s2Units])
     cellEvals.count += rows.length * samples.length
     return { score: { ...scored, c1Units: s1Units }, c1Px }
   }
@@ -581,6 +628,335 @@ export function optimizeTwoColumnTable(
     cellEvals: cellEvals.count,
     widthsPx: [c1, c2],
   }
+}
+
+// ---- #373 多列高度优化（有限候选 + 阈值贪心列间转移） ----
+
+/** 多列候选：逐列像素宽 + 评分（multi 载承载决胜序） */
+interface MultiCandidate {
+  widths: number[]
+  score: HeightCandidateScore
+}
+
+/**
+ * 贪心折行在宽度上的单调性利用：二分找「目标行数 ≤ k」的最小内容宽
+ * （度量单位）。profileLines 随宽单调不增 → 40 次对折收敛到亚像素；
+ * 不可达（自然宽下仍超 k 行）返回 null。
+ */
+function minWidthUnitsForLines(profile: CellWrapProfile, targetLines: number): number | null {
+  const hi = profile.naturalUnits
+  if (profileLines(profile, hi) > targetLines) {
+    return null
+  }
+  let lo = 0
+  let best = hi
+  for (let iter = 0; iter < 40; iter++) {
+    const mid = (lo + best) / 2
+    if (profileLines(profile, mid) <= targetLines) {
+      best = mid
+    } else {
+      lo = mid
+    }
+  }
+  return best
+}
+
+/** 列 j 的阈值目标（px，升序去重，≤ 每列上限）：从当前最优出发，把该列
+ *  拓宽到「最高格少折一行/两行/三行」的最小宽度（跨折行阈值步长）；表头
+ *  格非最高格且折行时补一个表头阈值（决胜第二级）。目标须经可行性过滤
+ *  （高于当前宽才可能减行；不超 maxFeasible 保其余列可达下限）。 */
+function columnThresholdTargets(
+  profiled: readonly ProfiledRow[],
+  col: number,
+  currentPx: number,
+  cellBoxPx: number,
+  unitPx: number,
+  maxFeasiblePx: number,
+  perColumnLimit: number,
+): number[] {
+  const currentUnits = ((currentPx - cellBoxPx) / unitPx) * TABLE_OPT_WRAP_SAFETY
+  let tallest: CellWrapProfile | null = null
+  let tallestLines = 0
+  let tallestIsHeader = false
+  let headerProfile: CellWrapProfile | null = null
+  let headerLines = 0
+  for (const row of profiled) {
+    const profile = row.profiles[col]
+    if (!profile) {
+      continue
+    }
+    const lines = profileLines(profile, currentUnits)
+    if (row.header) {
+      headerProfile = profile
+      headerLines = lines
+    }
+    if (lines > tallestLines) {
+      tallestLines = lines
+      tallest = profile
+      tallestIsHeader = row.header
+    }
+  }
+  const raw: number[] = []
+  const pushTargets = (profile: CellWrapProfile, fromLines: number): void => {
+    for (let k = fromLines - 1; k >= 1 && raw.length < perColumnLimit + 1; k--) {
+      const units = minWidthUnitsForLines(profile, k)
+      if (units === null) {
+        break // 更小 k 更不可达
+      }
+      // 目标 px 换算回评分域须 ≥ 阈值单位：补 1e-3px 抵消浮点回转误差
+      raw.push((units / TABLE_OPT_WRAP_SAFETY) * unitPx + cellBoxPx + 1e-3)
+    }
+  }
+  if (tallest && tallestLines > 1) {
+    pushTargets(tallest, tallestLines)
+  }
+  if (headerProfile && !tallestIsHeader && headerLines > 1) {
+    pushTargets(headerProfile, headerLines)
+  }
+  const seen = new Set<number>()
+  const out: number[] = []
+  for (const px of raw.sort((a, b) => a - b)) {
+    const key = Math.round(px * 1e4)
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    if (px > currentPx + 0.5 && px <= maxFeasiblePx + 1e-6) {
+      out.push(px)
+    }
+  }
+  return out.slice(0, perColumnLimit)
+}
+
+/** 贪心列间转移：把列 j 拓宽到 targetPx，差额从其余列按「下限以上余量」
+ *  比例扣除（余量不足时扣除全部余量并下调目标）——列宽和恒等于可用宽、
+ *  各列不破下限。返回 null 表示无可行转移（目标即当前/余量为零）。 */
+function transferTo(
+  col: number,
+  targetPx: number,
+  src: readonly number[],
+  floorPx: number,
+): number[] | null {
+  const need = targetPx - src[col]!
+  if (!(need > 0.5)) {
+    return null
+  }
+  let totalSlack = 0
+  for (let i = 0; i < src.length; i++) {
+    if (i !== col) {
+      totalSlack += Math.max(0, src[i]! - floorPx)
+    }
+  }
+  let granted = need
+  if (totalSlack < need - 1e-6) {
+    granted = totalSlack
+    if (!(granted > 0.5)) {
+      return null
+    }
+  }
+  // 各 donor 按其下限以上余量的同比例分摊（scale = 授予量 / 总余量）：
+  // 列宽和守恒（Σ 扣除 = granted）、各列不破下限
+  const scale = totalSlack > 0 ? granted / totalSlack : 0
+  const out = [...src]
+  out[col] = src[col]! + granted
+  for (let i = 0; i < out.length; i++) {
+    if (i !== col) {
+      out[i] = out[i]! - Math.max(0, src[i]! - floorPx) * scale
+    }
+  }
+  return out
+}
+
+/**
+ * 多列表格整表高度优化（#373）：固定总宽内的有限候选 + 局部调整，不穷举
+ * 列宽组合。候选族：① 轻量基线（必含，同模型评分不劣于基线的保证）；
+ * ② 等分；③ 逐列内容锚点（该列单行自然宽，其余按样本比例）；④ 阈值贪
+ * 心转移层——逐列把宽拓到「最高格少折一行」的跨阈值最小宽，差额按各列
+ * 下限以上余量比例分摊，逐层围绕当前最优迭代直到无改进或候选预算耗尽
+ * （耗尽保留迄今最佳，基线在集内故不劣于基线）。评分/下限/安全系数/
+ * 同分决胜与两列完全同源（compareHeightScores 多列分支）。
+ */
+export function optimizeMultiColumnTable(
+  input: TableHeightOptimizeInput,
+  options: TableHeightOptimizeOptions = {},
+): TableHeightOptimizeResult {
+  const { rows, samples, readability } = input
+  const n = samples.length
+  const measure = options.measure ?? defaultCellWidthMeasurer
+  const baselineTemplate = tableGridTemplate(samples, { readability })
+  const baselineOnly = (widthsPx: number[] | null): TableHeightOptimizeResult => ({
+    template: baselineTemplate,
+    origin: 'baseline',
+    totalLines: 0,
+    baselineLines: 0,
+    candidates: 0,
+    cellEvals: 0,
+    widthsPx,
+  })
+  if (rows.length === 0 || n < 3) {
+    return baselineOnly(null)
+  }
+  if (n > TABLE_OPT_MAX_COLUMNS) {
+    return { ...baselineOnly(null), origin: 'degraded' }
+  }
+  const validMetrics = Number.isFinite(readability.contentPx) && readability.contentPx > 0 &&
+    Number.isFinite(readability.cellBoxPx) && readability.cellBoxPx >= 0 &&
+    Number.isFinite(readability.availablePx) && readability.availablePx! > 0
+  if (!validMetrics) {
+    return baselineOnly(null)
+  }
+  // 预算预检（T02 同式）：行 × 列 × 多列候选上限超评估预算 → 稳定降级
+  if (rows.length * n * TABLE_OPT_MAX_CANDIDATES_MULTI > TABLE_OPT_MAX_CELL_EVALS) {
+    return { ...baselineOnly(null), origin: 'degraded' }
+  }
+
+  const availablePx = readability.availablePx!
+  const cellBoxPx = readability.cellBoxPx
+  const unitPx = readability.contentPx / 6
+  const floorPx = effectiveColumnFloorPx(n, readability)
+  const maxFeasiblePx = availablePx - floorPx * (n - 1)
+  const baselineWeights = samples.map((s) => Math.max(0, s) + TABLE_WEIGHT_PADDING_UNITS)
+  if (!(maxFeasiblePx >= floorPx - 1e-6)) {
+    return baselineOnly(resolveTracksPx(baselineWeights, new Array<number>(n).fill(floorPx), availablePx))
+  }
+
+  const profiled = profileRows(rows, measure, options.tokenCache)
+  // 逐列单行自然宽（px）：最高格的自然内容宽（锚点候选）
+  const naturalPx = new Array<number>(n).fill(0)
+  for (const row of profiled) {
+    for (let c = 0; c < n; c++) {
+      const profile = row.profiles[c]
+      if (profile) {
+        const px = profile.naturalUnits * unitPx + cellBoxPx
+        if (px > naturalPx[c]!) {
+          naturalPx[c] = px
+        }
+      }
+    }
+  }
+
+  const baselineWidths = resolveTracksPx(baselineWeights, new Array<number>(n).fill(floorPx), availablePx)
+  const cellEvals = { count: 0 }
+  const evalAt = (widths: number[]): MultiCandidate => {
+    const widthsUnits = widths.map((w) => ((w - cellBoxPx) / unitPx) * TABLE_OPT_WRAP_SAFETY)
+    const scored = scoreProfiledRows(profiled, widthsUnits)
+    cellEvals.count += rows.length * n
+    let dist = 0
+    for (let i = 0; i < n; i++) {
+      dist += Math.abs(widths[i]! - baselineWidths[i]!)
+    }
+    return {
+      widths,
+      score: {
+        total: scored.total,
+        headerLines: scored.headerLines,
+        shortWrapLines: scored.shortWrapLines,
+        c1Units: 0,
+        multi: { baselineDistPx: dist, widthsPx: widths },
+      },
+    }
+  }
+
+  // ---- 候选集（种子 + 阈值转移层，去重键 = 逐列宽 1e-6 px 量化） ----
+  const seen = new Set<string>()
+  const evaluated: MultiCandidate[] = []
+  const tryCandidate = (widths: number[] | null): void => {
+    if (!widths || evaluated.length >= TABLE_OPT_MAX_CANDIDATES_MULTI) {
+      return
+    }
+    const key = widths.map((w) => Math.round(w * 1e6)).join(',')
+    if (seen.has(key)) {
+      return
+    }
+    seen.add(key)
+    evaluated.push(evalAt(widths))
+  }
+  tryCandidate(baselineWidths)
+  tryCandidate(new Array<number>(n).fill(availablePx / n))
+  for (let c = 0; c < n; c++) {
+    const anchor = Math.min(maxFeasiblePx, Math.max(floorPx, naturalPx[c]!))
+    const restWeights = baselineWeights.filter((_w, i) => i !== c)
+    const rest = resolveTracksPx(restWeights, new Array<number>(n - 1).fill(floorPx), availablePx - anchor)
+    const widths: number[] = []
+    for (let i = 0; i < n; i++) {
+      widths.push(i === c ? anchor : rest[i < c ? i : i - 1]!)
+    }
+    tryCandidate(widths)
+  }
+  const better = (a: MultiCandidate, b: MultiCandidate): boolean =>
+    compareHeightScores(a.score, b.score, 0) < 0
+  let best = evaluated[0]!
+  for (const cand of evaluated) {
+    if (better(cand, best)) {
+      best = cand
+    }
+  }
+
+  // 阈值贪心转移层：围绕当前最优迭代；一层无严格改进即终止（内容驱动
+  // 步长无需 δ 阶梯；全序严格下降 + 候选上限双保险终止）
+  const perColumnLimit = n >= 6 ? 2 : 3
+  let improved = true
+  while (improved && evaluated.length < TABLE_OPT_MAX_CANDIDATES_MULTI) {
+    improved = false
+    for (let j = 0; j < n && evaluated.length < TABLE_OPT_MAX_CANDIDATES_MULTI; j++) {
+      const targets = columnThresholdTargets(
+        profiled, j, best.widths[j]!, cellBoxPx, unitPx, maxFeasiblePx, perColumnLimit,
+      )
+      for (const target of targets) {
+        tryCandidate(transferTo(j, target, best.widths, floorPx))
+      }
+    }
+    for (const cand of evaluated) {
+      if (better(cand, best)) {
+        best = cand
+        improved = true
+      }
+    }
+  }
+
+  // 与基线重合（逐列 ±0.5px）时不发布：返回轻量模板原样（字节相同 →
+  // 行装饰键不变 → 零重绘）
+  const baselineCand = evaluated[0]!
+  if (best.widths.every((w, i) => Math.abs(w - baselineWidths[i]!) <= 0.5)) {
+    return {
+      template: baselineTemplate,
+      origin: 'baseline',
+      totalLines: best.score.total,
+      baselineLines: baselineCand.score.total,
+      candidates: evaluated.length,
+      cellEvals: cellEvals.count,
+      widthsPx: baselineWidths,
+    }
+  }
+  const share = Math.floor((100 / n) * 1000) / 1000
+  const template = best.widths
+    .map((w) => `minmax(min(${formatNumber(floorPx)}px, ${formatNumber(share)}%), ${formatNumber(w)}fr)`)
+    .join(' ')
+  return {
+    template,
+    origin: 'optimized',
+    totalLines: best.score.total,
+    baselineLines: baselineCand.score.total,
+    candidates: evaluated.length,
+    cellEvals: cellEvals.count,
+    widthsPx: best.widths,
+  }
+}
+
+/**
+ * 整表高度优化统一入口（调度层消费，#373 起）：两列走 #372 的粗搜+细搜
+ * 通道；三列至 TABLE_OPT_MAX_COLUMNS 走多列有限候选+阈值转移；超列数上
+ * 限或单列/空表回落轻量计划。输入/预算/结果口径与两列完全同源。
+ */
+export function optimizeTableHeight(
+  input: TableHeightOptimizeInput,
+  options: TableHeightOptimizeOptions = {},
+): TableHeightOptimizeResult {
+  const n = input.samples.length
+  if (n === 2) {
+    return optimizeTwoColumnTable(input, options)
+  }
+  return optimizeMultiColumnTable(input, options)
 }
 
 // ---- 观测口（千行表预算契约同族：差分断言，不提供重置） ----
