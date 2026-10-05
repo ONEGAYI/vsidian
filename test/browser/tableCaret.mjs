@@ -796,10 +796,17 @@ try {
             labelWidth: rows[1].querySelector(':scope > .vsidian-table-grid-cell').getBoundingClientRect().width,
           }
         })
-        // 度量就绪（availablePx 实测注入——确定性像素轨道的输入）
+        // 度量就绪（availablePx 实测注入——确定性像素轨道的输入）。就绪前先
+        // 取轻量基线高度（#142 比例布局——优化收益的对照物）
+        const hLight = await readHeights()
         await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0, undefined, { timeout: 5000 })
-        // 1) 进表 + 键入并保留：doc 变更使列宽回到轻量计划（表内轻量现状），
-        //    且内容指纹区别于挂载/度量扫描（同版本去重才不会拦截退出触发）
+        // 0) 挂载/度量扫描优化非活动可见表：等待一次发布（优化模板已应用）
+        await page.waitForFunction(() => window.tableOptimizeStats().publishes >= 1, undefined, { timeout: 5000 })
+        const planOptimized = (await readHeights()).plan
+        assert(planOptimized !== hLight.plan, '度量扫描应发布非轻量的优化计划')
+        // 1) 进表 + 键入并保留：doc 变更保持已发布优化模板（表内稳定，#372
+        //    评审修复——增量重建不得弹回轻量），且内容指纹区别于扫描版本
+        //    （同版本去重才不会拦截退出触发）
         await cell(1, 0).click()
         const caret0 = await page.evaluate(() => window.readEditor().head)
         await page.keyboard.type('x')
@@ -832,6 +839,8 @@ try {
         assert.equal(beforeLeave.text, mutated, '表内交互后源文应只含净编辑')
         const h0 = await readHeights()
         assert(h0.rowCount === 3, `两列表应有 3 行网格: ${h0.rowCount}`)
+        // 表内键入后仍是优化模板（doc 变更不弹回轻量——表内稳定）
+        assert(h0.plan === planOptimized, '表内键入应保持已发布的优化列宽计划')
         // 3) 退出（点击表后正文）——恰好一次完整优化并发布
         await page.locator('.cm-line').filter({ hasText: /^AFTER$/ }).click()
         await page.waitForFunction((n) => window.tableOptimizeStats().searches === n, stats0.searches + 1,
@@ -842,11 +851,11 @@ try {
         assert.equal(afterLeave.publishes - stats0.publishes, 1, '退出后恰好一次发布')
         assert.equal(afterLeave.editRequests, stats0.editRequests, '布局变更零写回（无 edit.request 出站）')
         assert.equal(afterLeave.text, mutated, '布局变更不得改源文')
-        // 4) 可见总高度低于原比例机制（真实几何：首末行高差）
+        // 4) 可见总高度低于原比例机制（真实几何：首末行高差，对轻量基线）
         const h1 = await readHeights()
-        assert(h1.height < h0.height - 1,
-          `优化后可见总高度必须低于轻量基线: ${h1.height.toFixed(1)} vs ${h0.height.toFixed(1)}`)
-        assert(h1.plan !== h0.plan, '发布的列宽计划应与轻量基线不同')
+        assert(h1.height < hLight.height - 1,
+          `优化后可见总高度必须低于轻量基线: ${h1.height.toFixed(1)} vs ${hLight.height.toFixed(1)}`)
+        assert(h1.plan !== hLight.plan, '发布的列宽计划应与轻量基线不同')
         assert(h1.labelWidth >= 36, `短标签列宽不得低于 T01 下限附近: ${h1.labelWidth.toFixed(1)}`)
         // 5) 同版本去重：再进出一次（无内容变化）不重复搜索
         await cell(1, 0).click()
@@ -883,8 +892,15 @@ try {
             }),
           }
         })
+        // 度量就绪前取轻量基线（优化收益的对照物），就绪后等挂载/度量扫描
+        // 对非活动可见表发布一次优化（两列场景同款时序）
+        const hLight = await readTable()
         await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0, undefined, { timeout: 5000 })
-        // 进表 + 净编辑：内容指纹区别于挂载扫描（同版本去重不拦截退出触发）
+        await page.waitForFunction(() => window.tableOptimizeStats().publishes >= 1, undefined, { timeout: 5000 })
+        const planOptimized = (await readTable()).plan
+        assert(planOptimized !== hLight.plan, '度量扫描应发布非轻量的优化计划')
+        // 进表 + 净编辑：doc 变更保持优化模板（表内稳定，#372 评审修复），
+        // 且内容指纹区别于扫描版本（同版本去重不拦截退出触发）
         await cell(1, 0).click()
         const caret0 = await page.evaluate(() => window.readEditor().head)
         await page.keyboard.type('x')
@@ -917,6 +933,8 @@ try {
         const h0 = await readTable()
         assert(h0.rowCount === (scenario === 'height-optimize-multi' ? 31 : 21),
           `数据行网格行数: ${h0.rowCount}`)
+        // 表内键入后仍是优化模板（doc 变更不弹回轻量——表内稳定）
+        assert(h0.plan === planOptimized, '多列表内键入应保持已发布的优化列宽计划')
         // 控件命中正确：点击第三列格后绘制光标落在该格内，真实键入位置一致
         const paintedIn = await cell(1, 2).evaluate((el) => {
           const sel = getSelection()
@@ -941,9 +959,9 @@ try {
         assert.equal(afterLeave.publishes - stats0.publishes, 1, '多列表退出后恰好一次发布')
         assert.equal(afterLeave.editRequests, stats0.editRequests, '布局变更零写回（无 edit.request 出站）')
         const h1 = await readTable()
-        assert(h1.height < h0.height - 1,
-          `${scenario} 优化后可见总高度必须低于轻量基线: ${h1.height.toFixed(1)} vs ${h0.height.toFixed(1)}`)
-        assert(h1.plan !== h0.plan, '发布的多列计划应与轻量基线不同')
+        assert(h1.height < hLight.height - 1,
+          `${scenario} 优化后可见总高度必须低于轻量基线: ${h1.height.toFixed(1)} vs ${hLight.height.toFixed(1)}`)
+        assert(h1.plan !== hLight.plan, '发布的多列计划应与轻量基线不同')
         assert(h1.labelWidth >= 36, `短标签列宽不得低于 T01 下限附近: ${h1.labelWidth.toFixed(1)}`)
         assert(h1.tracksSum <= h1.rowArea + 1, `轨道总宽不超行区: ${h1.tracksSum.toFixed(1)} vs ${h1.rowArea.toFixed(1)}`)
         assert(h1.tracks.every((t) => Number.isFinite(t) && t > 0), `轨道宽须为正有限值: ${h1.tracks}`)

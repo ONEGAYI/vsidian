@@ -2285,6 +2285,142 @@ describe('#372 离开编辑后的整表高度优化（调度层）', () => {
     expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
   })
 
+  /** 全部网格行装饰内联的列宽轨道串（--vsidian-table-col-widths 值，文档序） */
+  const inlineTrackTemplates = (view: EditorView): string[] => {
+    const out: string[] = []
+    view.state.field(liveDecorationsField).decos.between(0, Infinity, (_from, _to, value) => {
+      const cls = (value.spec as { class?: string }).class
+      if (typeof cls === 'string' && cls.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow)) {
+        const style = (value.spec as { attributes?: Record<string, string> }).attributes?.style ?? ''
+        const m = /--vsidian-table-col-widths: (.+)$/.exec(style)
+        out.push(m ? m[1]! : '')
+      }
+    })
+    return out
+  }
+
+  /** 断言全表各行内联轨道串非空、逐字节一致且等于期望模板 */
+  const expectUniformTracks = (view: EditorView, expected: string): void => {
+    const tracks = inlineTrackTemplates(view)
+    expect(tracks.length).toBeGreaterThan(1)
+    expect(new Set(tracks).size).toBe(1)
+    expect(tracks[0]).toBe(expected)
+  }
+
+  it('优化发布后表外编辑再回表：全表各行内联轨道串逐字节一致（优化模板不因局部重建丢失）', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    // 离开：发布优化模板（发布后基线本身一致）
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    const optimized = templateOf(view)
+    expect(optimized).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    expectUniformTracks(view, optimized)
+    // 表外编辑（docChanged、非表格行）：增量路径的 gridPlans 是局部重建新
+    // Map，不含该表——优化条目在此丢失（回归点）
+    view.dispatch({
+      changes: { from: view.state.doc.line(9).to, insert: '追加' },
+      selection: EditorSelection.single(view.state.doc.line(9).to + 2),
+    })
+    await settle()
+    // 选区回表（纯选区移动，单行重发射）：plan miss 的行不得回落轻量计划
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    await settle()
+    expectUniformTracks(view, optimized)
+    expect(templateOf(view)).toBe(optimized)
+  })
+
+  it('优化发布后表内键入：模板不变零跳变（表内编辑复用最近可用列宽）', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    const optimized = templateOf(view)
+    expect(optimized).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    // 回表键入（docChanged：变更行重建走新 Map，plan miss 不得回轻量）
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({
+      changes: { from: firstCellPos(view, 5), insert: '字' },
+      selection: EditorSelection.single(firstCellPos(view, 5) + 1),
+    })
+    await settle()
+    expectUniformTracks(view, optimized)
+    expect(templateOf(view)).toBe(optimized)
+  })
+
+  it('优化发布后 containerRender 开关切换：模板保持优化（非 metrics 的 facet 全量重建携带旧优化）', async () => {
+    const compartment = new Compartment()
+    const state = EditorState.create({
+      doc: OPT_TABLE,
+      extensions: [livePreviewDecorations, compartment.of(tableContainerRenderFacet.of(true))],
+    }).update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state
+    const host = document.body.appendChild(document.createElement('div'))
+    const view = new EditorView({ parent: host, state })
+    try {
+      // 进表（活动）→ 离开：发布优化
+      view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+      await settle()
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+      await settle()
+      const optimized = templateOf(view)
+      expect(optimized).not.toBe(lightweightTemplate(OPT_TABLE))
+      expectUniformTracks(view, optimized)
+      // 切开关（非 metrics 的 facet 变化 → 全量重建）：顶层表不受开关影响，
+      // 优化模板不得被轻量计划覆盖
+      view.dispatch({ effects: compartment.reconfigure(tableContainerRenderFacet.of(false)) })
+      await settle()
+      expect(templateOf(view)).toBe(optimized)
+      expectUniformTracks(view, optimized)
+      // 切回：仍保持
+      view.dispatch({ effects: compartment.reconfigure(tableContainerRenderFacet.of(true)) })
+      await settle()
+      expect(templateOf(view)).toBe(optimized)
+      expectUniformTracks(view, optimized)
+    } finally {
+      view.destroy()
+      host.remove()
+    }
+  })
+
+  it('已优化表 IME 定稿（空白格组合取消）：单行恢复且全表模板保持优化串', async () => {
+    // 40 数据行（预算内可优化）+ 尾部空白格行——整表重发射的 rowsScanned
+    // 远超 20，快路径（单行恢复）与否可由扫描增量区分。空白行取省略首尾
+    // 管道形态（' | '）：空白格组合通道（planBlankRowCellInput/表内
+    // tableComposition）只认该形态，组合期 preview 平移与 settled 定稿才走通
+    const rows = Array.from({ length: 40 }, (_v, i) =>
+      i % 2 === 0 ? `| ${cjk(44)} | ${cjk(5)} |` : `| ${cjk(1)} | ${cjk(8)} |`)
+    const bigOpt = [
+      '前文', '',
+      '| 功能 | 说明 |',
+      '| --- | --- |',
+      ...rows,
+      ' | ',
+      '', '后文', '',
+    ].join('\n')
+    const linked = await setupActive(bigOpt)
+    const view = linked.view
+    // 离开：发布优化
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(47).from) })
+    await settle()
+    const optimized = templateOf(view)
+    expect(optimized).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    expectUniformTracks(view, optimized)
+    // 回表到空白格行（line 45 末格内容首 = 行尾），组合先插后删（净结果复原）
+    const blankLine = view.state.doc.line(45)
+    const cpos = blankLine.to
+    view.dispatch({ selection: EditorSelection.single(cpos) })
+    const gridBefore = getTableGridStats()
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: cpos, insert: '词词' }, userEvent: 'input.type.compose' })
+    view.dispatch({ changes: { from: cpos, to: cpos + 2, insert: '' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    // 定稿走单行恢复快路径（千行表扫描红线口径），全表模板仍为优化串
+    expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBeLessThan(20)
+    expect(templateOf(view)).toBe(optimized)
+    expectUniformTracks(view, optimized)
+  })
+
   it('迟到结果按身份/版本/列数/度量签名验证：过期载荷全部拒绝（纯状态层）', () => {
     const state = EditorState.create({ doc: OPT_TABLE, extensions: [livePreviewDecorations] })
       .update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state

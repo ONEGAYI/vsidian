@@ -70,6 +70,7 @@ import {
   noteTableOptimizeDiscard,
   noteTableOptimizePublish,
   tableMetricsSig,
+  TABLE_OPT_TRACKED_TABLES,
   type TableHeightPlanPayload,
 } from './tableHeightPlan'
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
@@ -409,11 +410,29 @@ interface TableGridPlan {
   columns: number
   rows: Map<number, GridRowEntry>
   delimiterLine: number
-  /** #142 列宽计划（grid-template-columns 值）：按表内容比例分配，同表各行共享 */
+  /** #142 列宽计划（grid-template-columns 值）：按表内容比例分配，同表各行共享。
+   *  #372 优化发布或 override 采用时为优化轨道串（非轻量口径） */
   template: string
+  /** #372 轻量基线轨道串（#142/#371 口径）：template 被优化模板覆盖时必在，
+   *  供 IME 定稿快路径做同口径对拍（折叠串与轻量基线比较，不与优化串比）；
+   *  纯轻量计划不设（template 即基线） */
+  baselineTemplate?: string
   /** #142 逐行内容宽度样本缓存（行号 → 各列宽度）：IME 组合定稿时单行重折
    *  叠出新计划，计划未变即可走单行恢复快路径（千行表性能契约） */
   rowSamples: Map<number, number[]>
+}
+
+/** #372 优化模板登记（评审 I-1/I-2/I-4）：表格身份 → 最近一次发布的优化
+ *  轨道串及采用条件。与 gridPlans（增量重建的局部缓存——docChanged 后是
+ *  只含重建区间的新 Map）生命周期解耦：表外编辑、表内键入、非 metrics 的
+ *  facet 全量重建造成的 plan miss 重算不得把已优化表弹回轻量计划（表内
+ *  稳定承诺，issue372「表内编辑复用最近可用列宽」）。列数或度量签名变化
+ *  自然失效；表删除后键随变更映射到坍缩点，可能与新表/正文碰撞——与调度
+ *  层 tracked 同款身份碰撞特性，碰撞面接受（采用条件兜底列数与签名）。 */
+export interface TableGridOverride {
+  columns: number
+  metricsSig: string
+  template: string
 }
 
 const tableGridStats = { planCalls: 0, rowsScanned: 0 }
@@ -522,8 +541,14 @@ function tableGridPlan(
   table: SyntaxNode,
   containerRender = true,
   metrics: TableReadabilityInput | null = null,
+  override: TableGridOverride | null = null,
 ): TableGridPlan | null {
   tableGridStats.planCalls += 1
+  // 取舍记录（#372 评审 I-11）：结构判定轮（tableGridRowsInfo）与采样轮
+  // （循环内 collectColumnSamples）对同一表做两轮切格（×1.5-2 常数）——
+  // 分离是调度层复用所迫（tableGridRowsInfo 是导出的行身份单一事实源，
+  // 调度层的指纹与行数据提取只取结构不取样本），不为省一轮而在判定产物里
+  // 夹带样本（会污染共享判定口径）。接受常数，不在本函数内合并两轮。
   const info = tableGridRowsInfo(doc, table, containerRender)
   if (!info) {
     return null
@@ -549,7 +574,20 @@ function tableGridPlan(
   // #371 可读度量注入时下限随字号/盒模型变化（tableMetricsFacet，缺省回落
   // 静态 48px——两态行为都由 tableColumnWidth 契约测试钉住）
   const template = tableGridTemplate(samples, metrics ? { readability: metrics } : undefined)
-  return { columns: info.columns, rows, delimiterLine: info.delimiterLine, template, rowSamples }
+  // #372 优化模板采用：列数与度量签名与发布时一致即沿用优化轨道串——
+  // plan miss 的重算（表外编辑/表内键入/facet 重建）不弹回轻量（表内稳定，
+  // issue372）；内容变化不失效（重排由下一次离开触发的完整优化承接）。
+  // 轻量串存 baselineTemplate 供 IME 定稿快路径做同口径对拍
+  const applies = override !== null && metrics !== null &&
+    override.columns === info.columns && override.metricsSig === tableMetricsSig(metrics)
+  return {
+    columns: info.columns,
+    rows,
+    delimiterLine: info.delimiterLine,
+    template: applies ? override.template : template,
+    baselineTemplate: applies ? template : undefined,
+    rowSamples,
+  }
 }
 
 const gridLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
@@ -817,6 +855,7 @@ function emitForRange(
   fmFolded = false,
   containerRender = true,
   metrics: TableReadabilityInput | null = null,
+  overrides: ReadonlyMap<number, TableGridOverride> | null = null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -924,7 +963,9 @@ function emitForRange(
         eachNodeLine(doc, node, fromLine, toLine, (n) => addLineCls(n, LIVE_CLASS_NAMES.tableLine))
         let plan = gridPlans.get(node.from)
         if (plan === undefined && !gridPlans.has(node.from)) {
-          plan = tableGridPlan(doc, node, containerRender, metrics)
+          // #372 plan miss 重算：优化登记在场且采用条件满足时沿用优化轨道串
+          // （表内稳定——增量路径的局部新 Map 缺条目不得弹回轻量计划）
+          plan = tableGridPlan(doc, node, containerRender, metrics, overrides?.get(node.from) ?? null)
           gridPlans.set(node.from, plan)
         }
         if (plan) {
@@ -1261,6 +1302,36 @@ function mapGridSegments(segments: readonly GridTableSegment[], changes: ChangeS
   return out
 }
 
+/** 优化登记随文本变更映射（mapGridSegments 同款先例）：无变更沿用旧引用；
+ *  键按表格身份前向映射。表删除后键映射到坍缩点，可能与新表/正文碰撞——
+ *  采用条件（列数+度量签名）与调度层 tracked 同款身份碰撞特性，碰撞面接受 */
+function mapGridOverrides(
+  overrides: ReadonlyMap<number, TableGridOverride>,
+  changes: ChangeSet,
+): ReadonlyMap<number, TableGridOverride> {
+  if (changes.empty || overrides.size === 0) return overrides
+  const out = new Map<number, TableGridOverride>()
+  for (const [from, entry] of overrides) {
+    out.set(changes.mapPos(from, -1), entry)
+  }
+  return out
+}
+
+/** 优化登记写入（不可变）：容量与调度层缓存同族有界（TABLE_OPT_TRACKED_TABLES，
+ *  超限清空仅丢登记——重算回轻量，下次离开重新优化补回，无正确性影响） */
+function withGridOverride(
+  overrides: ReadonlyMap<number, TableGridOverride>,
+  tableFrom: number,
+  entry: TableGridOverride,
+): ReadonlyMap<number, TableGridOverride> {
+  const next = new Map(overrides)
+  if (next.size >= TABLE_OPT_TRACKED_TABLES) {
+    next.clear()
+  }
+  next.set(tableFrom, entry)
+  return next
+}
+
 /** 排序归并：仅位置重叠（或零隙相接）的段合并；段端不含行尾换行，
  *  行号相邻而来自不同提取的段各自保留——各多一次 between 扫描，
  *  后续任一段被触及重建即重新归并，无正确性影响 */
@@ -1311,6 +1382,8 @@ interface LiveDecoState {
   /** #140 成型头区模型（降级 null）；仅 fmTouched 时重析，装饰与 widget 共读 */
   fmModel: FmTableModel | null
   gridPlans: Map<number, TableGridPlan | null>
+  /** #372 优化模板登记（跨事务持久，随文本变更映射键——见 TableGridOverride） */
+  gridOverrides: ReadonlyMap<number, TableGridOverride>
   gridSegments: GridTableSegment[]
   compositionPreview: boolean
 }
@@ -1708,8 +1781,12 @@ function applyHeightPlans(
     const cached = next.gridPlans.get(node.from)
     const plan = cached === undefined
       // 局部重建缓存口径：doc 未变但 gridPlans 可缺该表（表外编辑产生的新
-      // Map）——按当前度量重算轻量计划再套用优化模板（列数/形态复核同源）
-      ? tableGridPlan(doc, node, state.facet(tableContainerRenderFacet), metrics)
+      // Map）——按当前度量重算计划再套用优化模板（列数/形态复核同源）；
+      // 优化登记在场且同版本时重算结果已含优化模板（模板与载荷相同 → 按
+      // 下行同模板判定丢弃，无视觉差——仅调度层缓存容量清空后的同版本重发
+      // 会走到，publishes 少计一次，接受）
+      ? tableGridPlan(doc, node, state.facet(tableContainerRenderFacet), metrics,
+          next.gridOverrides.get(node.from) ?? null)
       : cached
     if (!plan || plan.columns !== payload.columns || plan.template === payload.template) {
       noteTableOptimizeDiscard()
@@ -1721,20 +1798,32 @@ function applyHeightPlans(
       first = Math.min(first, rowNo)
       last = Math.max(last, rowNo)
     }
-    const gridPlans = new Map(next.gridPlans).set(node.from, { ...plan, template: payload.template })
+    // 轻量基线随计划落缓存（快路径对拍口径）；优化轨道串双写：gridPlans
+    // （本事务装饰重建消费）+ gridOverrides（跨事务登记——后续 plan miss
+    // 的重算沿用，I-1/I-2/I-4）
+    const baseline = plan.baselineTemplate ?? plan.template
+    const gridPlans = new Map(next.gridPlans).set(node.from, {
+      ...plan, template: payload.template, baselineTemplate: baseline,
+    })
+    const gridOverrides = withGridOverride(next.gridOverrides, node.from, {
+      columns: payload.columns,
+      metricsSig: payload.metricsSig,
+      template: payload.template,
+    })
     const decos = next.decos.update({
       filterFrom: doc.line(first).from,
       filterTo: doc.line(last).to,
       filter: () => false,
       add: emitForRange(next.tree, doc, state.selection, next.fm, first, last, gridPlans, next.fmModel,
         state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
-        state.facet(tableContainerRenderFacet), metrics),
+        state.facet(tableContainerRenderFacet), metrics, gridOverrides),
       sort: true,
     })
     next = {
       ...next,
       decos,
       gridPlans,
+      gridOverrides,
       gridSegments: updateGridSegments(next.gridSegments, tr.changes,
         [{ from: doc.line(first).from, to: doc.line(last).to }], decos, doc),
     }
@@ -1744,8 +1833,14 @@ function applyHeightPlans(
 }
 
 /** 全量构建（create 与设置热重配共用）：树/头区/网格计划从头解析，
- *  gridPlans 新 Map（容器行 plan 按 facet 当前值重算） */
-function buildLiveDecoState(state: EditorState): LiveDecoState {
+ *  gridPlans 新 Map（容器行 plan 按 facet 当前值重算）。热重配路径传入
+ *  旧优化登记（gridOverrides）：非 metrics 的 facet 变化（containerRender
+ *  开关）不使优化模板失效——重算的 plan 在采用条件满足时沿用优化轨道串；
+ *  metrics 变化时登记的度量签名自然失配（调度层重新优化后覆盖） */
+function buildLiveDecoState(
+  state: EditorState,
+  prevOverrides: ReadonlyMap<number, TableGridOverride> = new Map(),
+): LiveDecoState {
   const tree = parseTree(state.doc)
   const fm = frontmatterOf(state.doc)
   const fmModel = frontmatterModelOf(state.doc, fm)
@@ -1754,7 +1849,7 @@ function buildLiveDecoState(state: EditorState): LiveDecoState {
   const decos = RangeSet.of(
     emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
       state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
-      state.facet(tableContainerRenderFacet), state.facet(tableMetricsFacet)), true)
+      state.facet(tableContainerRenderFacet), state.facet(tableMetricsFacet), prevOverrides), true)
   return {
     decos,
     tree,
@@ -1762,6 +1857,7 @@ function buildLiveDecoState(state: EditorState): LiveDecoState {
     fm,
     fmModel,
     gridPlans,
+    gridOverrides: prevOverrides,
     gridSegments: deriveGridSegments(decos, [{ from: 0, to: state.doc.length }], state.doc),
     compositionPreview: false,
   }
@@ -1789,7 +1885,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     // 时全量重算列宽计划（下限随度量变化，行装饰内联值随之更新）
     if (tr.startState.facet(tableContainerRenderFacet) !== tr.state.facet(tableContainerRenderFacet) ||
         tr.startState.facet(tableMetricsFacet) !== tr.state.facet(tableMetricsFacet)) {
-      return buildLiveDecoState(tr.state)
+      return buildLiveDecoState(tr.state, value.gridOverrides)
     }
     // #251 命中显形：hitRevealField 值变化（命中集增删/停驻种入收缩）也
     // 是重建触发源——依赖读取（下方 hitRevealSpans）保证该 field 先更新
@@ -1817,7 +1913,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, 1, fmLast, value.gridPlans,
             value.fmModel, tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), fmFolded,
-            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
+            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
           sort: true,
         })
         return {
@@ -1862,7 +1958,13 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 }
               }
             }
-            if (tableGridTemplate(merged, settledMetrics ? { readability: settledMetrics } : undefined) === oldPlan.template) {
+            // #372 优化表的对拍口径：折叠串是轻量口径（#142/#371），须与
+            // baselineTemplate（轻量基线）比较——与优化串（template 已被
+            // #372 优化覆盖）恒不等，会把可单行恢复的定稿误判为计划变化而
+            // 整表重发射（优化被轻量覆盖，IME 定稿退化）。纯轻量计划无
+            // baselineTemplate（template 即轻量基线），行为不变
+            if (tableGridTemplate(merged, settledMetrics ? { readability: settledMetrics } : undefined) ===
+                (oldPlan.baselineTemplate ?? oldPlan.template)) {
               // #372：快路径同样回写定稿行样本——某行内容变化但逐列最大值
               // 未变时轻量模板不变（快路径成立），但逐行数据缓存不得滞留旧
               // 宽度（后续折叠与高度优化的行数据都以当前内容为准）
@@ -1877,7 +1979,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 filter: () => false,
                 add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, updatedPlans, value.fmModel,
                   tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
-                  tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
+                  tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
                 sort: true,
               })
               return {
@@ -1904,7 +2006,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             filter: () => false,
             add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
               tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
-              tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
+              tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
             sort: true,
           })
           return {
@@ -1933,7 +2035,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
             tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
-            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
+            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -1977,12 +2079,16 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         fm,
         fmModel: value.fmModel,
         gridSegments: mapGridSegments(value.gridSegments, tr.changes),
+        gridOverrides: mapGridOverrides(value.gridOverrides, tr.changes),
         compositionPreview: true,
       }
     }
     const spans = [...planRebuildSpans(tr, value.tree, tree, changed, value.fm, fm, fmTouched),
       ...regionSpans(tr, doc), ...hitRevealSpans(tr, doc)]
     const gridPlans = new Map<number, TableGridPlan | null>()
+    // 优化登记随变更映射键（表格身份迁移），随新值返回——增量路径的局部
+    // gridPlans 不含未重建表，plan miss 重算经登记沿用优化轨道串（I-1/I-2）
+    const gridOverrides = mapGridOverrides(value.gridOverrides, tr.changes)
     let decos = value.decos.map(tr.changes)
     let scanned = 0
     const rebuilt: Array<{ from: number; to: number }> = []
@@ -1996,7 +2102,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         filter: () => false,
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
           tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
-          tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet)),
+          tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), gridOverrides),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1
@@ -2014,6 +2120,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
       fm,
       fmModel,
       gridPlans,
+      gridOverrides,
       gridSegments: updateGridSegments(value.gridSegments, tr.changes, rebuilt, decos, doc),
       compositionPreview: false,
     }
