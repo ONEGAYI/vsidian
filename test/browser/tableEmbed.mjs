@@ -76,6 +76,19 @@ async function setupPage(docTextArg = PARENT_DOC, skipEmbedWait = false, viewpor
   return { page, errors }
 }
 
+/** 轮询等待（#324 加固，与 cssSnippetImports 等套件同惯例）：CI 慢机上
+ * 拖选后的 region 建立偶发晚于固定 sleep，断言前改为轮询实际信号；超时
+ * 报错携带当前值，配合 label 给出失败定位 */
+async function waitFor(fn, label, timeout = 8000) {
+  const start = Date.now()
+  for (;;) {
+    const value = await fn()
+    if (value !== undefined && value !== false && value !== null) return value
+    if (Date.now() - start > timeout) throw new Error(`等待超时：${label}（当前值 ${JSON.stringify(value)}）`)
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
+
 try {
   // ============ page1：长文（载荷/绘制/键盘/滚轮） ============
   const { page, errors } = await setupPage()
@@ -325,13 +338,19 @@ try {
   assert.equal(afterCardDrag.regionCells, 0, '卡内开始的拖选不启动父矩形格区选取')
   assert.equal(afterCardDrag.edits, 0, '卡内交互零写回')
   // F2：对照——普通格间拖选建立矩形格区（既有表格契约不回归）
+  // #324：固定 120ms sleep 在 CI 慢机上偶发早于 region 建立（run 37105138656
+  // 两轮 F2 失败、第三次 rerun 全绿），改为轮询「region 已建立」；steps 加大
+  // 使路径事件更密。本例同时是 F1 的拖选自检前置：F1 断言 0 格区无法区分
+  // 「隔离正确」与「拖选本轮未生效」，此处恒 0 超时即自检失败——报错先疑
+  // 拖选驱动本轮未生效（环境时序），再疑隔离逻辑扩散到普通格（契约回归）
   await page2.mouse.move(layout.a.x + 14, layout.a.y + layout.a.height / 2)
   await page2.mouse.down()
-  await page2.mouse.move(layout.b.x + 12, layout.b.y + layout.b.height / 2, { steps: 4 })
+  await page2.mouse.move(layout.b.x + 12, layout.b.y + layout.b.height / 2, { steps: 8 })
   await page2.mouse.up()
-  await page2.waitForTimeout(120)
-  const afterPlainDrag = await page2.evaluate(() =>
-    document.querySelectorAll('.vsidian-table-region-cell').length)
+  const afterPlainDrag = await waitFor(() => page2.evaluate(() => {
+    const cells = document.querySelectorAll('.vsidian-table-region-cell').length
+    return cells > 0 ? cells : null
+  }), 'F2 拖选自检：普通格拖选建立矩形格区（恒 0 时先查拖选驱动是否本轮生效，再查隔离是否扩散回归）', 4000)
   assert.equal(afterPlainDrag, 2, `普通格拖选照常建立矩形格区（2 格，实际 ${afterPlainDrag}）`)
   passed++
   console.log('[表格嵌入][PASS] 交互隔离：卡内拖选零格区零写回；普通格拖选契约保持')
@@ -354,9 +373,13 @@ try {
   // 点回落首格会反复交还原生拖选，观感等同用户拖选路径经过卡）
   await page2.mouse.move(mixBoxes.b.x + 16, mixBoxes.b.y + 12)
   await page2.mouse.down()
-  await page2.mouse.move(mixBoxes.a.x + 12, mixBoxes.a.y + 8, { steps: 4 })
+  await page2.mouse.move(mixBoxes.a.x + 12, mixBoxes.a.y + 8, { steps: 8 })
   await page2.mouse.up()
-  await page2.waitForTimeout(100)
+  // #324 同族加固：复制前以 region 建立信号替代固定 100ms sleep——慢机上
+  // region 晚建时 Ctrl+C 会复制到空选区，制造与 F2 同源的偶发失败
+  await waitFor(() => page2.evaluate(() =>
+    document.querySelectorAll('.vsidian-table-region-cell').length > 0 ? true : null),
+  'G 拖选建立格区（区域复制前置）', 4000)
   await page2.keyboard.press('Control+c')
   const copied = await page2.evaluate(() => window.__copiedTable)
   assert.ok(copied, `区域复制产出剪贴板文本（实际 ${JSON.stringify(copied)}；格区数 ${await page2.evaluate(() => document.querySelectorAll('.vsidian-table-region-cell').length)}）`)
