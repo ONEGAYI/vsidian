@@ -836,6 +836,7 @@ try {
         await page.locator('.cm-line').filter({ hasText: /^AFTER$/ }).click()
         await page.waitForFunction((n) => window.tableOptimizeStats().searches === n, stats0.searches + 1,
           { timeout: 5000 })
+        await page.waitForTimeout(80)
         const afterLeave = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
           editRequests: window.__editRequests, text: window.readEditor().text }))
         assert.equal(afterLeave.publishes - stats0.publishes, 1, '退出后恰好一次发布')
@@ -934,6 +935,7 @@ try {
         await page.locator('.cm-line').filter({ hasText: /^AFTER$/ }).click()
         await page.waitForFunction((n) => window.tableOptimizeStats().searches === n,
           stats0.searches + 1, { timeout: 5000 })
+        await page.waitForTimeout(80)
         const afterLeave = await page.evaluate(() => ({ ...window.tableOptimizeStats(),
           editRequests: window.__editRequests }))
         assert.equal(afterLeave.publishes - stats0.publishes, 1, '多列表退出后恰好一次发布')
