@@ -977,7 +977,9 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // 渲染宽按滚动区内容宽推（clientWidth 未布局时用缺省宽）。
   // #339 外链通道：PDF 内 http(s) 链接的显式点击经 link.activate 交宿主
   // 浏览器打开（无 sourceDocUri——PDF 不是文档解析语境；与 #342 web 卡片
-  // 同款）。浮层保持在场（外开是上下文之外的查看，不强制切换）
+  // 同款）。实测行为（2026-10-05 验收反馈）：外开引发系统焦点切换与窗口
+  // blur，普通（非 dirty）浮层按既有失焦规则关闭——接受此行为不做抑制
+  // （嵌入卡侧无失焦关闭机制，卡片保持在场）。
   const pdfView = pdfForm ? new PdfHoverView(scrollEl, {
     onExternalUrl: (url) => {
       const ctx = context
