@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vsidian 样式参考（v0.9.0）</title>
+<title>Vsidian 样式参考（v0.10.0）</title>
 <style>
 :root { color-scheme: light dark; }
 body { font: 14px/1.65 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0 auto; max-width: 880px; padding: 24px 20px 64px; }
@@ -30,7 +30,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </head>
 <body>
 <h1>Vsidian 样式参考</h1>
-<p>本指南由公开样式契约清单自动生成，与已安装版本 <strong>v0.9.0</strong> 配套；清单变更随版本更新，旧版本指南不承诺长期有效。CSS 片段的加载、目录与逐片段启停见扩展设置页「CSS 片段」。机器可读的契约 JSON（结构同源）可经扩展设置页「样式参考」分页或命令面板「Vsidian: 导出样式参考 JSON」导出。</p>
+<p>本指南由公开样式契约清单自动生成，与已安装版本 <strong>v0.10.0</strong> 配套；清单变更随版本更新，旧版本指南不承诺长期有效。CSS 片段的加载、目录与逐片段启停见扩展设置页「CSS 片段」。机器可读的契约 JSON（结构同源）可经扩展设置页「样式参考」分页或命令面板「Vsidian: 导出样式参考 JSON」导出。</p>
 
 <div class="note">
 <p><strong>Obsidian 原名兼容（别名桥）</strong>：标记 <code>direct</code> 的条目，其「别名承诺」列出的 Obsidian 原名选择器/变量在本扩展实际生效——DOM 同时挂载 vsidian 稳定类与 Obsidian 原名类；变量经 <code>var(Obsidian 名, 默认值)</code> 回退链生效，<strong>vsidian 名整条覆盖严格优先于 Obsidian 名</strong>。语义对应（<code>semantic</code>）条目不能用 Obsidian 原名，请改用 vsidian 名。</p>

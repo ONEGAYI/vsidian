@@ -1,8 +1,8 @@
 {
   "meta": {
     "schemaVersion": 1,
-    "vsidianVersion": "0.9.0",
-    "generatedAt": "2026-10-03",
+    "vsidianVersion": "0.10.0",
+    "generatedAt": "2026-10-05",
     "entryCount": 204,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",

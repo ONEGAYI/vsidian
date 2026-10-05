@@ -46,17 +46,19 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Wikilinks & anchors | Five `[[wikilink]]` forms; `#heading` and `#^block-id` jumps land on the target, with a highlight flash on arrival |
 | Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
 | Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable |
+| Image wikilink embeds | `![[image.png]]` embeds images that behave identically to plain Markdown image links — loading, failure hints, auto refresh, and the popup viewer are the same; hovering a wikilink that points to an image shows the image itself in the popup |
 | Image popup | Hover an image for its button group; the full-screen popup zooms, pans, refreshes, and exports the original; clicking the image no longer jumps to source |
 | Embedded refresh | Images replaced or deleted on disk reload automatically or show a not-found state; the toolbar button refreshes images and diagrams on demand; shortcut bindable (unbound by default) |
+| External link previews | Hover an http(s) link to show a card with its title, summary, and domain (off by default; restricted fetch that never sends note content or credentials); the "Live page" shape renders the page itself in a sandboxed view, with a one-click fallback to the card |
 | Search reveal | After a workspace-search result opens a note, the command "Reveal selected search result" moves the cursor to the match (unbound by default; no auto-reveal due to a VSCode API gap) |
 
 ### References & backlinks
 
 | Feature | Description |
 | --- | --- |
-| Hover document preview | Ctrl+hover a link to preview the target note — full text, a heading section, or a block reference; available in live preview, reading mode, and the link panels; edit and save the target inside the popup, with direct-hover and master toggles in settings |
+| Hover document preview | Ctrl+hover a link to preview the target: notes show the full text, a section, or a block reference, editable and savable inside the popup; text files render read-only with native VS Code coloring; PDFs browse by page with selectable text and zoom. Available in live preview, reading, and the link panels; direct-hover and master toggles in settings |
 | Jump target tip | When hovering shows no preview popup, a brief pause reveals a small badge with the target path and anchor; works in both views and the link panels, toggle in settings |
-| Document embeds | `![[note]]` mounts a card in both views where the target note can be edited and saved in place, leaving the parent document untouched; the cursor reveals the reference source for editing; inline, list, quote, and table-cell positions all render, with recursive expansion (three levels by default) |
+| Document embeds | `![[note]]` mounts a card where the target note can be edited and saved in place, leaving the parent untouched; `![[file.ts]]` and `![[file.pdf]]` embed text and PDF read-only, with `#line=N` / `#range=B-E` anchors; the cursor reveals the reference source for editing; inline, list, quote, and table-cell positions all render, with recursive expansion (three levels by default) |
 | Backlink panel | The sidebar shows which documents reference the current note: context cards grouped by source with the matched link highlighted, sortable and searchable, click to jump to the reference |
 | Outgoing links panel | The sidebar lists every link in the current note (wikilinks, links, images, reference definitions); click lands on the link's actual anchor, broken links dim |
 | Reference updates on rename | Renaming or moving files and folders inside VS Code rewrites wikilinks, links, and image references to the new locations; one undo reverts the whole rewrite |
