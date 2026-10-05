@@ -40,6 +40,7 @@ import {
   noteTableOptimizeDiscard,
   noteTableOptimizeSearch,
   noteTableSignatureScan,
+  noteTableStructureScan,
   optimizeTableHeight,
   tableMetricsSig,
   type CellWrapProfile,
@@ -135,6 +136,13 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         if (u.viewportChanged && !u.docChanged) {
           this.queueScan()
         }
+      }
+      // #372 评审 I-8：flush 因嵌入编辑挂起的任务没有专属事件（嵌入退出只
+      // 带来父视图的常规事务）——挂起条件解除且任务仍在时重排一次 flush。
+      // 视图隐藏（editorHidden）在 flush 内已丢弃任务（模式切换语义保持），
+      // 此处对 hidden 的检查只是不无谓 arm
+      if (this.pendingLeave.size > 0 && !this.embedEditing() && !this.editorHidden()) {
+        this.armFlush()
       }
     }
 
@@ -345,20 +353,21 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       if (!metrics || !(metrics.availablePx && metrics.availablePx > 0)) {
         return null
       }
-      const info = tableGridRowsInfo(state.doc, table, state.facet(tableContainerRenderFacet))
-      if (!info) {
-        return null
-      }
-      // 指纹缓存命中：doc 未变（Text 引用相等，与发布载荷的文档复核同机制）
-      // 且度量签名相同 → 上次仲裁键仍有效，tracked 同签名即零行重扫（纯滚动
-      // 的 viewportChanged 连发不再重复构造千行指纹）。tracked 未命中/不同
-      // （容量清空等）则照常全扫，行为与无缓存一致
+      // 指纹缓存命中（零扫描早退，先于结构扫描）：doc 未变（Text 引用相等，
+      // 与发布载荷的文档复核同机制）且度量签名相同 → 上次仲裁键仍有效，
+      // tracked 同签名即零结构扫描零行重扫（纯滚动的 viewportChanged 连发
+      // 连 tableGridRowsInfo 的行身份提取都不必做——行身份随 doc/列数不变）
       const metricsSig = tableMetricsSig(metrics)
       const cached = this.fingerCache.get(table.from)
       if (cached && cached.doc === state.doc && cached.metricsSig === metricsSig) {
         if (this.tracked.get(table.from)?.sig === cached.sig) {
           return null
         }
+      }
+      noteTableStructureScan()
+      const info = tableGridRowsInfo(state.doc, table, state.facet(tableContainerRenderFacet))
+      if (!info) {
+        return null
       }
       // 行数据与内容指纹（任一行内容/换行分布变化都改变指纹——不能仅凭
       // 逐列最大样本判缓存有效）
@@ -400,9 +409,14 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       }
       // #373 统一入口：两列走 #372 粗搜+细搜，三列及以上走多列有限候选 +
       // 阈值转移（超列数上限/超预算在纯层稳定降级——同源机制，无独立的
-      // 多列调度口径）
+      // 多列调度口径）。
+      // #372 评审 I-7：availablePx 按表实测——视图级 facet 单值对引用/顶层
+      // 表错配（引用缩进/容器差异），优化前对该表首个网格行实测行区宽
+      // （一次优化一次查询；查不到回退 facet 值）。仲裁签名仍用 facet 纲：
+      // 表级宽差不触发重搜，随 facet 变化（resize/度量）统一重评
+      const tableAvailPx = this.measureTableRowAreaPx(state, table) ?? metrics.availablePx!
       const result = optimizeTableHeight(
-        { rows, samples, readability: metrics },
+        { rows, samples, readability: { ...metrics, availablePx: tableAvailPx } },
         { tokenCache: this.profileCache },
       )
       noteTableOptimizeSearch(result.cellEvals, result.candidates)
@@ -416,6 +430,41 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         metricsSig,
         template: result.template,
       }
+    }
+
+    /** #372 评审 I-7：该表首个网格行的实测行区宽（border-box 宽 − 左右
+     *  padding/border——引用缩进随行盒 padding 扣除，与 tableMetrics 的
+     *  measureRowAreaPx 同源口径）。沿表区间行序取行首 DOM 判网格行
+     * （表头行即首个，一般 1-2 次 domAtPos）；无网格行 DOM（未渲染/无
+     *  布局/jsdom）返回 null，调用方回退 facet 的视图级单值 */
+    private measureTableRowAreaPx(state: EditorState, table: SyntaxNode): number | null {
+      const win = this.view.dom.ownerDocument.defaultView
+      if (!win) {
+        return null
+      }
+      for (let pos = table.from; pos < table.to; ) {
+        const line = state.doc.lineAt(pos)
+        const at = this.view.domAtPos(line.from)
+        const rowEl = (at.node instanceof Element ? at.node : at.node.parentElement)
+          ?.closest('.vsidian-table-grid-row')
+        if (rowEl instanceof HTMLElement) {
+          const rect = rowEl.getBoundingClientRect()
+          if (rect.width > 0) {
+            const style = win.getComputedStyle(rowEl)
+            const px = (value: string): number => parseFloat(value) || 0
+            const width = rect.width -
+              px(style.paddingLeft) - px(style.paddingRight) -
+              px(style.borderLeftWidth) - px(style.borderRightWidth)
+            return width > 0 ? width : null
+          }
+          return null // 行在 DOM 但无布局：与 tableMetrics 的无布局口径一致
+        }
+        if (line.to >= table.to) {
+          break
+        }
+        pos = line.to + 1
+      }
+      return null
     }
   },
 )

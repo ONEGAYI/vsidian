@@ -310,6 +310,13 @@ describe('#371 可见文字采样（隐藏链接目标与格式标记不计入�
     expect(samples[0]).toBe(defaultCellWidthMeasurer('snake_case_name'))
   })
 
+  it('intraword 星号按字面保留计宽（a*b*c 的 * 不剥——保守方向宁可略宽）', () => {
+    // #372 评审 I-12：`*` 分支与 `_` 同款词边界判定——CommonMark 星号其实
+    // 允许词内强调，此处从宽不剥（高估有界于标记字符数，不裁切格内容）
+    const samples = collectColumnSamples(['| a*b*c | x |'], 2)
+    expect(samples[0]).toBe(defaultCellWidthMeasurer('a*b*c'))
+  })
+
   it('嵌入 ![[…]] 按有界回退计，不随目标长度增长（#248 格内卡不主导父列宽）', () => {
     const short = collectColumnSamples(['| ![[笔记]] | x |'], 2)
     const long = collectColumnSamples(['| ![[目录/超长目标文件名/更长路径#深锚点\\|还有别名]] | x |'], 2)

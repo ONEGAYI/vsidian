@@ -402,9 +402,11 @@ function indexAfterTarget(
  * 成对行内格式标记剥离（**…** / __…__ / ==…== / ~~…~~ / *…* / _…_，内容
  * 非空且首尾非空白——CommonMark 强调规则近似）。这些标记在 Live 呈现中
  * 隐藏（EmphasisMark/HighlightMark 的 hideDeco），可见文字不含标记符号。
- * `_` 带词边界近似（两侧同为词字符时不剥——snake_case 不是斜体）；嵌套
- * 标记循环到不动点。列宽启发式的保守方向是低估（多折行、不裁切），与
- * 呈现层精确语义的偏差有界于标记字符数。
+ * `_` 与 `*` 同带词边界近似（两侧同为词字符时不剥——snake_case 不是
+ * 斜体；intraword `a*b*c` 按字面保留计宽：CommonMark 星号其实允许词内
+ * 强调，此处从宽不剥——列宽启发式的保守方向是「宁可略宽不可裁切」，高
+ * 估标记字符数有界）；嵌套标记循环到不动点。与呈现层精确语义的偏差有界
+ * 于标记字符数。
  */
 function stripInlineMarks(text: string): string {
   if (!/[*_=~]/.test(text)) {
@@ -418,7 +420,7 @@ function stripInlineMarks(text: string): string {
     out = out.replace(/__(\S(?:[\s\S]*?\S)?)__/g, '$1')
     out = out.replace(/==(\S(?:[\s\S]*?\S)?)==/g, '$1')
     out = out.replace(/~~(\S(?:[\s\S]*?\S)?)~~/g, '$1')
-    out = out.replace(/\*([^*\s](?:[^*]*[^*\s])?)\*/g, '$1')
+    out = out.replace(/(^|[^\w\\])\*([^*\s](?:[^*]*[^*\s])?)\*(?![\w])/g, '$1$2')
     out = out.replace(/(^|[^\w\\])_([^_\s](?:[^_]*[^_\s])?)_(?![\w])/g, '$1$2')
   }
   return out

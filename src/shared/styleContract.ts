@@ -678,7 +678,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '.vsidian-table-grid-row {\n  /* 覆写为固定轨道 */\n  grid-template-columns: 1fr 2fr;\n}',
     obsidian: { counterpart: 'Obsidian live 网格方向（无精确对应类）', support: 'semantic' },
     verification: ['单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则（防等分回潮）；tableColumnWidth：列宽计划契约（#371 起含可读下限与可见文字采样）'],
-    introduced: '#42（2026-09-24）；#142（2026-09-27）起内容比例列宽',
+    introduced: '#42（2026-09-24）；#142（2026-09-27）起内容比例列宽；#371（2026-10-05）起下限字号感知',
   },
   {
     id: 'live-table-grid-cell',

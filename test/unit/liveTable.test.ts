@@ -2090,6 +2090,9 @@ describe('#372 离开编辑后的整表高度优化（调度层）', () => {
       await settle()
       const scrolled = getTableOptimizeStats()
       expect(scrolled.signatureScans - left.signatureScans).toBe(0)
+      // #372 评审 I-5：指纹缓存命中且 tracked 同签名 → 结构扫描（行身份
+      // 提取）也零计——纯滚动路径零结构扫描
+      expect(scrolled.structureScans - left.structureScans).toBe(0)
       expect(scrolled.searches - left.searches).toBe(0)
       expect(scrolled.publishes - left.publishes).toBe(0)
       // doc 变化（表后正文键入，表身份不变而 doc 引用变化）：滚回表后指纹
@@ -2102,6 +2105,7 @@ describe('#372 离开编辑后的整表高度优化（调度层）', () => {
       await settle()
       const edited = getTableOptimizeStats()
       expect(edited.signatureScans - scrolled.signatureScans).toBe(1)
+      expect(edited.structureScans - scrolled.structureScans).toBe(1)
       expect(edited.searches - scrolled.searches).toBe(0)
     } finally {
       view.destroy()
@@ -2663,5 +2667,247 @@ describe('#373 多列高度优化（调度层）', () => {
     await settle()
     expect(getTableOptimizeStats().searches - before.searches).toBe(0)
     expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
+  })
+})
+
+// ---- #372 评审修复：调度挂起重排与度量通道行为 ----
+
+describe('#372 评审 I-8：嵌入编辑挂起的离开任务重排', () => {
+  const cjk = (n: number): string => '汉'.repeat(n)
+  const OPT_TABLE = [
+    '前文', '',
+    '| 功能 | 说明 |',
+    '| --- | --- |',
+    `| ${cjk(44)} | ${cjk(5)} |`,
+    `| ${cjk(1)} | ${cjk(8)} |`,
+    '', '后文', '',
+  ].join('\n')
+  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+
+  const firstCellPos = (view: EditorView, lineNo: number): number => {
+    const line = view.state.doc.line(lineNo)
+    return line.from + line.text.indexOf('|') + 2
+  }
+
+  it('嵌入退出后仅一笔表外事务即重排执行挂起任务（无需重新进表离开）', async () => {
+    const linked = await setupLinked(OPT_TABLE)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+    await settle()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    host.appendChild(view.dom)
+    const before = getTableOptimizeStats()
+    try {
+      // 表内活动 + 嵌入编辑（activeElement 钉在 contentDOM 内的嵌入宿主上）
+      // → 离开：任务入队但 flush 挂起（父表暂停，同既有嵌入暂停测试口径）
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+      const standIn = view.domAtPos(firstCellPos(view, 6)).node.parentElement!
+      standIn.classList.add('vsidian-live-embed')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => standIn,
+      })
+      await settle()
+      expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+      // 嵌入退出（activeElement 还原）：仅一笔表外选区事务 → update 重排
+      // flush → 挂起任务执行（一次搜索一次发布）
+      delete (document as unknown as { activeElement?: Element }).activeElement
+      standIn.classList.remove('vsidian-live-embed')
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(8).from + 2) })
+      await settle()
+      expect(getTableOptimizeStats().searches - before.searches).toBe(1)
+      expect(getTableOptimizeStats().publishes - before.publishes).toBe(1)
+    } finally {
+      delete (document as unknown as { activeElement?: Element }).activeElement
+      host.remove()
+      view.destroy()
+    }
+  })
+})
+
+describe('#372 评审 I-6/I-9：度量通道 ViewPlugin 行为（resize 去抖 / 纯滚动零重测）', () => {
+  const DOC = [
+    '| 功能 | 说明 |',
+    '| --- | --- |',
+    '| 悬停文档预览 | 悬停链接预览目标：笔记显示全文与章节 |',
+    '',
+    '正文段落。',
+    '',
+  ].join('\n')
+  /** 探针内容宽（px）：固定 60（字体度量全程不变的驱动前提） */
+  const PROBE_PX = 60
+
+  /** mock rect：探针恒 PROBE_PX、网格行取 rowWidth（可变）、其余 0 */
+  function mockRects(rowWidthRef: { value: number }, probeCalls: { count: number } | null): ReturnType<typeof vi.spyOn> {
+    return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.classList.contains('vsidian-table-metrics-probe') ? PROBE_PX
+        : this.classList.contains('vsidian-table-grid-row') ? rowWidthRef.value
+        : 0
+      if (probeCalls && this.classList.contains('vsidian-table-metrics-probe')) {
+        probeCalls.count += 1
+      }
+      return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
+    })
+  }
+
+  /** 直连 body 的视图 + facet 变化收集器（度量注入次数即 reconfigure 次数） */
+  function makeView(): { view: EditorView; host: HTMLElement; seen: Array<Record<string, number | undefined>> } {
+    const host = document.body.appendChild(document.createElement('div'))
+    const seen: Array<Record<string, number | undefined>> = []
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: DOC,
+        extensions: [
+          livePreviewDecorations,
+          EditorView.updateListener.of((u) => {
+            if (u.startState.facet(tableMetricsFacet) !== u.state.facet(tableMetricsFacet)) {
+              const m = u.state.facet(tableMetricsFacet)
+              seen.push(m ? { ...m } : {})
+            }
+          }),
+        ],
+      }),
+    })
+    return { view, host, seen }
+  }
+
+  it('I-6 resize 拖拽逐档仅 availablePx 变化：尾随去抖合并为一次 reconfigure', async () => {
+    vi.useFakeTimers()
+    const rowWidth = { value: 340 }
+    const gbcr = mockRects(rowWidth, null)
+    const { view, host, seen } = makeView()
+    try {
+      // 初测（挂载 0ms 宏任务）：字体度量首注入立即 reconfigure。行盒
+      // padding/border 合计由首测动态推算（jsdom 计算样式的常量差不入断言）
+      await vi.advanceTimersByTimeAsync(1)
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({ contentPx: PROBE_PX, cellBoxPx: 0 })
+      expect(seen[0]!.availablePx).toBeGreaterThan(0)
+      const padK = 340 - seen[0]!.availablePx!
+      // resize 拖拽：连续三档行区宽变化（字体度量不变），每档一笔补测回调
+      for (const w of [320, 300, 280]) {
+        rowWidth.value = w
+        view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'x' } })
+        await vi.advanceTimersByTimeAsync(1)
+      }
+      // 去抖窗口内（150ms 未满）：零 reconfigure（100ms 处仍在窗内）
+      await vi.advanceTimersByTimeAsync(100)
+      expect(seen).toHaveLength(1)
+      // 静止满窗：恰一次 reconfigure，值为最后一档
+      await vi.advanceTimersByTimeAsync(60)
+      expect(seen).toHaveLength(2)
+      expect(seen[1]).toEqual({ contentPx: PROBE_PX, cellBoxPx: 0, availablePx: 280 - padK })
+    } finally {
+      view.destroy()
+      host.remove()
+      gbcr.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('I-9 纯纵向滚动（scroller 宽度未变）：跳过整轮重测，探针 rect 读取计数不增', async () => {
+    vi.useFakeTimers()
+    const rowWidth = { value: 340 }
+    const probeCalls = { count: 0 }
+    const gbcr = mockRects(rowWidth, probeCalls)
+    const { view, host, seen } = makeView()
+    try {
+      // scroller 宽度注入（jsdom clientWidth 恒 0，实例级 defineProperty）
+      const scroller = view.contentDOM.parentElement!
+      let scrollerW = 800
+      Object.defineProperty(scroller, 'clientWidth', { configurable: true, get: () => scrollerW })
+      // 初测：行区宽就绪注入（早退条件尚未成立——lastScrollerWidth 未记）
+      await vi.advanceTimersByTimeAsync(1)
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({ contentPx: PROBE_PX, cellBoxPx: 0 })
+      expect(seen[0]!.availablePx).toBeGreaterThan(0)
+      expect(probeCalls.count).toBeGreaterThan(0)
+      const baseCalls = probeCalls.count
+      // 纵向滚动（宽度不变的 update 触发——以表后编辑代理 update 路径）：
+      // 早退，零 rect 读取、零 reconfigure
+      view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'y' } })
+      await vi.advanceTimersByTimeAsync(1)
+      view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'z' } })
+      await vi.advanceTimersByTimeAsync(1)
+      expect(probeCalls.count).toBe(baseCalls)
+      expect(seen).toHaveLength(1)
+      // scroller 宽度变化（横向 resize）：不早退，重测（rect 读取恢复）
+      scrollerW = 820
+      view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'w' } })
+      await vi.advanceTimersByTimeAsync(1)
+      expect(probeCalls.count).toBe(baseCalls + 1)
+    } finally {
+      view.destroy()
+      host.remove()
+      gbcr.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('#372 评审 I-7：availablePx 按表实测行区宽', () => {
+  const cjk = (n: number): string => '汉'.repeat(n)
+  /** 顶层表 + 引用表同内容形态（同列样本）：同 availablePx 下优化模板应相同，
+   *  模板互异即证明两表按各自行区宽分别取值 */
+  const TWO_TABLES = [
+    '前文', '',
+    '| 功能 | 说明 |',
+    '| --- | --- |',
+    `| ${cjk(44)} | ${cjk(5)} |`,
+    `| ${cjk(1)} | ${cjk(8)} |`,
+    '',
+    '> | 功能 | 说明 |',
+    '> | --- | --- |',
+    `> | ${cjk(44)} | ${cjk(5)} |`,
+    `> | ${cjk(1)} | ${cjk(8)} |`,
+    '',
+  ].join('\n')
+  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+
+  it('顶层表与引用表（同内容形态）优化的模板互异：各按首网格行实测行区宽', async () => {
+    const host = document.body.appendChild(document.createElement('div'))
+    const topRow = document.createElement('div')
+    topRow.className = 'vsidian-table-grid-row'
+    const quoteRow = document.createElement('div')
+    quoteRow.className = 'vsidian-table-grid-row'
+    const widths = new Map<HTMLElement, number>([[topRow, 400], [quoteRow, 300]])
+    const gbcr = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.classList.contains('vsidian-table-metrics-probe') ? 60
+        : widths.get(this) ?? 0
+      return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
+    })
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({ doc: TWO_TABLES, extensions: [livePreviewDecorations] }),
+    })
+    try {
+      // 调度层按表实测的行 DOM 定位：spy domAtPos——顶层表行（1-4）返回
+      // topRow（宽 400）、引用表行（6-9）返回 quoteRow（宽 300）
+      const domAtPos = vi.spyOn(view, 'domAtPos').mockImplementation((pos: number) => {
+        const line = view.state.doc.lineAt(Math.min(Math.max(pos, 0), view.state.doc.length))
+        return { node: line.number <= 6 ? topRow : quoteRow, offset: 0 }
+      })
+      view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+      await settle()
+      domAtPos.mockRestore()
+      // 挂载/度量扫描对两表各一次优化（同内容形态）：搜索输入的 availablePx
+      // 取各自实测（400/300），优化模板互异——同单值（facet 340 或任一）时
+      // 同内容表模板必然相同
+      const plans = view.state.field(liveDecorationsField).gridPlans
+      const templates = [...plans.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, p]) => p?.template)
+      expect(templates).toHaveLength(2)
+      expect(templates[0]).toBeTruthy()
+      expect(templates[1]).toBeTruthy()
+      expect(templates[0]).not.toBe(templates[1])
+    } finally {
+      view.destroy()
+      host.remove()
+      gbcr.mockRestore()
+    }
   })
 })

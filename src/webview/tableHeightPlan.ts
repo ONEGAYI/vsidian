@@ -944,8 +944,10 @@ export function optimizeTableHeight(
 /** #372 调度层统计：searches=完整搜索次数；publishes=实际应用次数（效果
  *  验证通过）；discards=迟到/无效载荷丢弃；cellEvals/candidates=预算记账；
  *  signatureScans=#373 调度层逐行构造内容指纹的全表扫描次数（doc 未变的
- *  纯滚动 flush 复用缓存指纹，不计入——观测滚动路径零重扫） */
-const optimizeStats = { searches: 0, publishes: 0, discards: 0, cellEvals: 0, candidates: 0, signatureScans: 0 }
+ *  纯滚动 flush 复用缓存指纹，不计入——观测滚动路径零重扫）；
+ *  structureScans=调度层 tableGridRowsInfo 结构扫描次数（指纹缓存命中且
+ *  tracked 同签名时零扫描早退，不计入——纯滚动路径零结构扫描） */
+const optimizeStats = { searches: 0, publishes: 0, discards: 0, cellEvals: 0, candidates: 0, signatureScans: 0, structureScans: 0 }
 
 export function getTableOptimizeStats(): Readonly<typeof optimizeStats> {
   return { ...optimizeStats }
@@ -971,6 +973,12 @@ export function noteTableOptimizeDiscard(): void {
 /** 内容指纹全行扫描记账（调度层每次逐行构造指纹时上报；缓存复用不计） */
 export function noteTableSignatureScan(): void {
   optimizeStats.signatureScans += 1
+}
+
+/** 结构扫描记账（调度层每次调 tableGridRowsInfo 提取行身份时上报；
+ *  指纹缓存命中的零扫描早退不计） */
+export function noteTableStructureScan(): void {
+  optimizeStats.structureScans += 1
 }
 
 /**

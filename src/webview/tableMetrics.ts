@@ -22,6 +22,12 @@
 // availablePx 就绪前保持轻量计划不搜索。容器宽变化经几何变化（非文档
 // 变更的 viewport/geometry 更新）补测：值未变不 dispatch（不因滚动/连续
 // resize 重复重建），变化即全量重算 + 高度优化签名失效（调度层消费）。
+// - 评审 I-6：仅 availablePx 变化（字体度量不变）判定为 resize 拖拽，
+//   尾随去抖 RESIZE_DEBOUNCE_MS 后一次 reconfigure（逐档注入会级联装饰
+//   全量重建与高度优化签名失效）；字体度量变化仍立即。
+// - 评审 I-9：纯纵向滚动（scroller 宽度未变 + 字体签名未变 + 行区宽已
+//   注入）跳过整轮重测——geometryChanged 后的 rect 读取是强制布局，滚动
+//   逐帧读取得省。
 //
 // jsdom（单元测试）探针无布局（宽度 0）：不注入，保持 #142 缺省行为——
 // 单测的度量驱动走 metricsCompartment 显式 reconfigure（同测试对
@@ -49,6 +55,9 @@ const PROBE_TEXT = '汉汉汉'
  *  border 1px 左右各一 = 22px，main.css 网格格规则；tablePaintCssContract
  *  钉住该规则，此兜底仅在首帧无表格时短暂使用，出现表格行后实测覆盖） */
 const CELL_BOX_FALLBACK_PX = 22
+/** #372 评审 I-6：仅 availablePx 变化（resize 拖拽逐档）的尾随去抖窗口
+ *  （ms）——静止后一次 reconfigure，拖拽期间不逐档全量重建 */
+const RESIZE_DEBOUNCE_MS = 150
 
 /**
  * 装配单元：注入槽位（缺省 null）+ 测量 ViewPlugin。挂 livePreviewDecorations
@@ -67,6 +76,13 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
       private appliedSignature = ''
       /** 实测格盒占位（null = 尚未见过表格行，用 CSS 字面值兜底） */
       private cellBoxPx: number | null = null
+      /** #372 评审 I-9：上次测量时的 scroller 宽度（clientWidth——布局未
+       *  脏时零成本读）；纯纵向滚动（宽度未变+签名未变+行区宽已注入）据此
+       *  跳过整轮重测（零 rect 读取零强制布局） */
+      private lastScrollerWidth = -1
+      /** #372 评审 I-6：仅 availablePx 变化的尾随去抖（resize 拖拽合并） */
+      private availTimer: ReturnType<typeof setTimeout> | null = null
+      private pendingAvail: TableReadabilityInput | null = null
       private disposed = false
 
       constructor(private view: EditorView) {
@@ -100,6 +116,7 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
 
       destroy(): void {
         this.disposed = true
+        this.cancelAvailDebounce()
         this.probe?.remove()
         this.probe = null
       }
@@ -149,6 +166,19 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
           return
         }
         const signature = this.signatureOf(probe)
+        // #372 评审 I-9 纯滚动早退：字体签名未变 + scroller 宽度未变 +
+        // 行区宽已注入 → 本次重测只可能由纵向滚动触发，跳过整轮 rect 读取
+        // （每次 geometryChanged 后读 rect 是强制布局）。行区宽未就绪（无
+        // 网格行/无布局）不跳过——等行区出现补测；jsdom clientWidth 恒 0
+        // → 永不命中，行为同现状（不注入）
+        const scroller = probe.parentElement
+        const scrollerWidth = scroller ? scroller.clientWidth : -1
+        const injected = this.view.state.facet(tableMetricsFacet)
+        if (this.lastScrollerWidth === scrollerWidth && scrollerWidth > 0 &&
+            signature === this.appliedSignature && injected !== null &&
+            (injected.availablePx ?? 0) > 0) {
+          return
+        }
         const contentPx = probe.getBoundingClientRect().width
         if (!(contentPx > 0)) {
           return // jsdom / 未布局：保持缺省行为
@@ -164,17 +194,51 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
           input.availablePx = availablePx
         }
         const current = this.view.state.facet(tableMetricsFacet)
-        if (current && current.contentPx === contentPx && current.cellBoxPx === cellBoxPx &&
-            (current.availablePx ?? null) === (input.availablePx ?? null)) {
-          this.appliedSignature = signature
-          pendingViews.delete(this.view)
+        const unchanged = current && current.contentPx === contentPx && current.cellBoxPx === cellBoxPx &&
+            (current.availablePx ?? null) === (input.availablePx ?? null)
+        this.appliedSignature = signature
+        this.lastScrollerWidth = scrollerWidth
+        pendingViews.delete(this.view)
+        if (unchanged) {
           return
         }
-        this.appliedSignature = signature
-        pendingViews.delete(this.view)
+        // #372 评审 I-6 尾随去抖：仅 availablePx 变化（contentPx/cellBoxPx
+        // 不变）= 容器 resize 拖拽——逐档 reconfigure 意味着 facet 变化 →
+        // 装饰全量重建 + 高度优化签名全部失效，代价与拖拽频率成正比；静止
+        // RESIZE_DEBOUNCE_MS 后一次注入（拖拽连发只刷新待注入值与计时）。
+        // 字体度量变化（字号/盒模型/字体族）仍立即
+        const fontChanged = !current || current.contentPx !== contentPx || current.cellBoxPx !== cellBoxPx
+        if (!fontChanged) {
+          this.pendingAvail = input
+          if (this.availTimer !== null) {
+            clearTimeout(this.availTimer)
+          }
+          this.availTimer = setTimeout(() => {
+            this.availTimer = null
+            const pending = this.pendingAvail
+            this.pendingAvail = null
+            if (!pending || this.disposed || composingViews.has(this.view)) {
+              return
+            }
+            this.view.dispatch({
+              effects: metricsCompartment.reconfigure(tableMetricsFacet.of(pending)),
+            })
+          }, RESIZE_DEBOUNCE_MS)
+          return
+        }
+        this.cancelAvailDebounce()
         this.view.dispatch({
           effects: metricsCompartment.reconfigure(tableMetricsFacet.of(input)),
         })
+      }
+
+      /** 取消挂起的 availablePx 去抖注入（字体度量立即注入/销毁时） */
+      private cancelAvailDebounce(): void {
+        if (this.availTimer !== null) {
+          clearTimeout(this.availTimer)
+          this.availTimer = null
+        }
+        this.pendingAvail = null
       }
 
       /** #372 行区净宽：首个网格行 border-box 宽 − 左右 padding/border
