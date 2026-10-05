@@ -1304,7 +1304,9 @@ function mapGridSegments(segments: readonly GridTableSegment[], changes: ChangeS
 
 /** 优化登记随文本变更映射（mapGridSegments 同款先例）：无变更沿用旧引用；
  *  键按表格身份前向映射。表删除后键映射到坍缩点，可能与新表/正文碰撞——
- *  采用条件（列数+度量签名）与调度层 tracked 同款身份碰撞特性，碰撞面接受 */
+ *  采用条件（列数+度量签名）不含内容校验，碰撞面较调度层 tracked（其仲
+ *  裁签名含逐行内容指纹）更宽：新表沿用旧模板时列数对齐、布局合法，仅列
+ *  宽非最优，下次离开重优化覆盖，接受 */
 function mapGridOverrides(
   overrides: ReadonlyMap<number, TableGridOverride>,
   changes: ChangeSet,
@@ -1782,9 +1784,10 @@ function applyHeightPlans(
     const plan = cached === undefined
       // 局部重建缓存口径：doc 未变但 gridPlans 可缺该表（表外编辑产生的新
       // Map）——按当前度量重算计划再套用优化模板（列数/形态复核同源）；
-      // 优化登记在场且同版本时重算结果已含优化模板（模板与载荷相同 → 按
-      // 下行同模板判定丢弃，无视觉差——仅调度层缓存容量清空后的同版本重发
-      // 会走到，publishes 少计一次，接受）
+      // 优化登记在场且当前模板已与载荷相同时按下行同模板判定丢弃（无视觉
+      // 差、override 无需刷新）：不只发生于调度层缓存容量清空后的同版本
+      // 重发——表内键入未改变最优模板后的退出重搜同样走到（载荷=现状），
+      // publishes 少计一次，效果断言以 searches/模板/高度为准
       ? tableGridPlan(doc, node, state.facet(tableContainerRenderFacet), metrics,
           next.gridOverrides.get(node.from) ?? null)
       : cached

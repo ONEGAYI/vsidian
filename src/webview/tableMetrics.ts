@@ -177,6 +177,10 @@ const tableMetricsPlugin = ViewPlugin.fromClass(
         if (this.lastScrollerWidth === scrollerWidth && scrollerWidth > 0 &&
             signature === this.appliedSignature && injected !== null &&
             (injected.availablePx ?? 0) > 0) {
+          // 已知边缘（接受）：scroller 宽与字体签名都不变而首个网格行的行区
+          // 净宽变化（引用块内新建/迁入表格、CSS 片段改行盒 padding）时，
+          // facet 的 availablePx 滞留旧值直到下次 resize/字体变化才重测——
+          // 优化路径由调度层按表实测行区宽兜住，失配只影响轻量下限收缩计算
           return
         }
         const contentPx = probe.getBoundingClientRect().width
