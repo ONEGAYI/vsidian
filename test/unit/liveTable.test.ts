@@ -31,6 +31,14 @@ import {
   livePreviewDecorations,
   tableContainerRenderFacet,
 } from '../../src/webview/liveDecorations'
+import { metricsCompartment, tableMetricsFacet } from '../../src/webview/tableMetrics'
+import {
+  applyTableHeightPlan,
+  getTableOptimizeStats,
+  tableMetricsSig,
+  type TableHeightPlanPayload,
+} from '../../src/webview/tableHeightPlan'
+import { setTableRegion } from '../../src/webview/tableRegionSelection'
 import { blankRowInputPlan, tableEditing, tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { splitTableRowCells, tableRowCellsForColumns } from '../../src/shared/tableCells'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -267,10 +275,11 @@ describe('live 表格装饰', () => {
     expect(rows[1]?.dataset['vsidianTableRow']).toBe('row')
     expect(rows[0]?.style.getPropertyValue('--vsidian-table-columns')).toBe('2')
     // #142 列宽计划：同表各行内联同一 grid-template-columns（行是独立 grid，
-    // 计划必须逐字节一致）；内容比例——「名字/苹果/`x|y`」列样本 5、「数量」
-    // 列样本 4，权重 = 样本 + 保底加成 4（9fr vs 8fr），保底 = min(48px, 等分 50%)
+    // 计划必须逐字节一致）；内容比例——「名字/苹果」列样本 4（#371 起 `x|y`
+    // 反引号按隐藏计，样本 5→3 不再主导）、「数量」列样本 4，权重 = 样本 +
+    // 保底加成 4（8fr vs 8fr），保底 = min(48px, 等分 50%)
     const template0 = rows[0]?.style.getPropertyValue('--vsidian-table-col-widths')
-    expect(template0).toBe('minmax(min(48px, 50%), 9fr) minmax(min(48px, 50%), 8fr)')
+    expect(template0).toBe('minmax(min(48px, 50%), 8fr) minmax(min(48px, 50%), 8fr)')
     for (const row of rows) {
       expect(row?.style.getPropertyValue('--vsidian-table-col-widths')).toBe(template0)
     }
@@ -623,6 +632,96 @@ describe('引用块内表格网格化（#296）', () => {
     const off = state.update({ effects: compartment.reconfigure(tableContainerRenderFacet.of(false)) }).state
     expect(collect(off.field(liveDecorationsField).decos).some((i) =>
       i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow))).toBe(false)
+  })
+
+  // ---- #371 可读度量注入（字号感知下限） ----
+
+  /** 从 liveDecorationsField.gridPlans 取首个网格计划（同表各行共享） */
+  function tableGridPlanOf(state: EditorState): { template: string } {
+    const plan = [...state.field(liveDecorationsField).gridPlans.values()].find(Boolean) as
+      { template: string } | undefined
+    if (!plan) throw new Error('文档应产出网格计划')
+    return plan
+  }
+
+  it('#371 可读度量注入改变列宽计划下限：缺省 48px → 注入后 contentPx+cellBoxPx（Facet 热重配全量重建）', () => {
+    const doc = '| 功能 | 说明 |\n| --- | --- |\n| 悬停文档预览 | 悬停链接预览目标：笔记显示全文与章节 |\n'
+    const state = EditorState.create({ doc, extensions: [livePreviewDecorations] })
+    const before = tableGridPlanOf(state)
+    expect(before.template).toMatch(/minmax\(min\(48px,/)
+    const injected = state.update({
+      effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 60, cellBoxPx: 22 })),
+    }).state
+    const after = tableGridPlanOf(injected)
+    // 60 + 22 = 82：下限随注入度量变化（字号感知）
+    expect(after.template).toMatch(/minmax\(min\(82px,/)
+    expect(after.template).not.toBe(before.template)
+    // fr 权重不随下限变化（同表样本不变，占比分配与 #142 口径一致）
+    const frOf = (t: string) => {
+      const m = /, ([\d.]+fr)\)$/.exec(t.trim())
+      if (!m) throw new Error(`段无 fr 权重: ${JSON.stringify(t)} / 模板: ${JSON.stringify(after.template)}`)
+      return m[1]
+    }
+    expect(after.template.split(/(?=minmax\()/).map(frOf))
+      .toEqual(before.template.split(/(?=minmax\()/).map(frOf))
+  })
+
+  it('#371 度量二次变化再次重建：更大字号 → 更大下限（单调）', () => {
+    const doc = '| 功能 | 说明 |\n| --- | --- |\n| 跳转目标提示 | 长 |\n'
+    const state = EditorState.create({ doc, extensions: [livePreviewDecorations] })
+    const mid = state.update({
+      effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 24, cellBoxPx: 22 })),
+    }).state
+    const big = mid.update({
+      effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 48, cellBoxPx: 22 })),
+    }).state
+    expect(tableGridPlanOf(mid).template).toMatch(/minmax\(min\(46px,/)
+    expect(tableGridPlanOf(big).template).toMatch(/minmax\(min\(70px,/)
+  })
+
+  it('#371 IME 组合期间列宽计划保持冻结（compositionPreview 只平移不重算）', async () => {
+    const source = 'a|b|c\n---|---|---\n | | \n'
+    const linked = await setupLinked(source)
+    const view = linked.controller.getView()!
+    view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of({ contentPx: 30, cellBoxPx: 22 })) })
+    await settle()
+    const before = view.state.field(liveDecorationsField).gridPlans
+    const pos = source.indexOf(' | | ') + 5
+    view.dispatch({ selection: EditorSelection.single(pos) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: pos, insert: '汉汉汉' }, userEvent: 'input.type.compose' })
+    // 组合进行中：gridPlans 沿用旧计划（平移后的同键或原键），template 不变
+    const during = view.state.field(liveDecorationsField).gridPlans
+    const beforeTemplates = [...before.values()].map((p) => p?.template ?? '')
+    const duringTemplates = [...during.values()].map((p) => p?.template ?? '')
+    expect(duringTemplates).toEqual(beforeTemplates)
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    expect(linked.doc.getText()).toBe(view.state.doc.toString())
+  })
+
+  it('#371 IME 定稿折叠计划与全量重建逐字节一致（含注入度量，两处同源）', async () => {
+    const source = '功能|说明\n---|---\n悬停文档预览|目标 |\n'
+    const linked = await setupLinked(source)
+    const view = linked.controller.getView()!
+    const metrics = tableMetricsFacet.of({ contentPx: 36, cellBoxPx: 22 })
+    view.dispatch({ effects: metricsCompartment.reconfigure(metrics) })
+    await settle()
+    const pos = source.indexOf('目标 ') + 2
+    view.dispatch({ selection: EditorSelection.single(pos) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: pos, to: pos + 2, insert: '编辑' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    // settled 折叠路径产出的计划 === 同 doc 同 facet 全量重建的计划
+    const settledPlan = [...view.state.field(liveDecorationsField).gridPlans.values()].find(Boolean)
+    expect(settledPlan).toBeTruthy()
+    const full = EditorState.create({
+      doc: view.state.doc.toString(),
+      extensions: [livePreviewDecorations],
+    }).update({ effects: metricsCompartment.reconfigure(metrics) }).state
+    const fullPlan = tableGridPlanOf(full)
+    expect(settledPlan!.template).toBe(fullPlan.template)
   })
 
   it('引用表格行保留 HyperMD-quote 别名（别名桥不因网格行丢失）', () => {
@@ -1836,5 +1935,979 @@ describe('千行单表性能边界', () => {
     expect(saved).toContain('| 首行政 | 1 | 备注内容 1 |')
     expect(saved).toContain('| 末行政 | 1000 | 备注内容 1000 |')
     expect(saved.split('\n')).toHaveLength(1003)
+  })
+})
+
+
+// ---- #372 离开编辑后的整表高度优化（调度层契约） ----
+
+describe('#372 离开编辑后的整表高度优化（调度层）', () => {
+  const cjk = (n: number): string => '汉'.repeat(n)
+  /** 可优化两列表：与纯函数契约的可改进表同构（d1 A=44 汉字/B=5 汉字，
+   *  d2 A=1 汉字/B=8 汉字）——轻量基线把宽度过度分给 A 列，最优布局下
+   *  d1/d2 的 B 列各少折一行，整表估算高度更低 */
+  const OPT_TABLE = [
+    '前文', '',
+    '| 功能 | 说明 |',
+    '| --- | --- |',
+    `| ${cjk(44)} | ${cjk(5)} |`,
+    `| ${cjk(1)} | ${cjk(8)} |`,
+    '', '后文', '',
+  ].join('\n')
+  /** 度量注入（含 availablePx——确定性像素轨道输入；unitPx=10） */
+  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+  /** 表头行号（OPT_TABLE 内）：3=表头 4=分隔 5/6=数据 */
+  const HEADER_LINE = 3
+
+  /** 表格行内第一个数据格内容位（lineNo 行，跳过行首 `| `） */
+  const firstCellPos = (view: EditorView, lineNo: number): number => {
+    const line = view.state.doc.line(lineNo)
+    return line.from + line.text.indexOf('|') + 2
+  }
+
+  /** 就绪链路：光标先进表（活动态）再注入度量——挂载/度量扫描不对非活动表先优化 */
+  async function setupActive(text = OPT_TABLE): Promise<LinkedPanel & { view: EditorView }> {
+    const linked = await setupLinked(text)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+    await settle()
+    return { ...linked, view }
+  }
+
+  /** 当前视图首表的网格计划模板（无计划时报错） */
+  const templateOf = (view: EditorView): string => {
+    const plans = view.state.field(liveDecorationsField).gridPlans
+    for (const plan of plans.values()) {
+      if (plan) return plan.template
+    }
+    throw new Error('应存在网格计划')
+  }
+
+  /** 同 doc 同度量的轻量基线模板（#142/#371 口径全量重建） */
+  const lightweightTemplate = (doc: string): string => {
+    const state = EditorState.create({ doc, extensions: [livePreviewDecorations] })
+      .update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state
+    for (const plan of state.field(liveDecorationsField).gridPlans.values()) {
+      if (plan) return plan.template
+    }
+    throw new Error('应存在网格计划')
+  }
+
+  it('表内连续编辑/切格/多光标/矩形选区/composition 期间完整搜索调用为零', async () => {
+    const { view } = await setupActive()
+    const before = getTableOptimizeStats()
+    // 表内切格（纯选区事务）
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 6)) })
+    // 多光标：跨行两格
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(firstCellPos(view, 5)),
+      EditorSelection.cursor(firstCellPos(view, 6) + 10),
+    ]) })
+    // 表内键入（doc 变更）
+    const pos = firstCellPos(view, 6)
+    view.dispatch({ changes: { from: pos, insert: '字' }, selection: EditorSelection.single(pos + 1) })
+    await settle()
+    // composition：组合期输入 + 定稿（仍在表内）
+    const cpos = firstCellPos(view, 5) + 2
+    view.dispatch({ selection: EditorSelection.single(cpos) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: cpos, to: cpos + 1, insert: '词' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    // 矩形格区属于该表（region 活动定义）
+    const headerLine = view.state.doc.line(HEADER_LINE)
+    view.dispatch({ effects: setTableRegion.of({
+      tableFrom: headerLine.from, rowFrom: 0, rowTo: 1, columnFrom: 0, columnTo: 1 }) })
+    await settle()
+    const after = getTableOptimizeStats()
+    expect(after.searches - before.searches).toBe(0)
+    expect(after.publishes - before.publishes).toBe(0)
+  })
+
+  it('离开最后一个表内选区后恰好一次完整优化并发布；同版本去重；零写回', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    const before = getTableOptimizeStats()
+    const editRequestsBefore = linked.hostSent.filter((m) => m.kind === 'edit.request').length
+    const docTextBefore = linked.doc.getText()
+    // 离开：光标移到表外正文
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    const once = getTableOptimizeStats()
+    expect(once.searches - before.searches).toBe(1)
+    expect(once.publishes - before.publishes).toBe(1)
+    // 发布的是优化模板（≠ 轻量基线）——高度更低的重排经既有装饰通道生效
+    const optimized = templateOf(view)
+    expect(optimized).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    // 零写回：无 edit.request、宿主文本不变、视图文本不变（纯效果事务）
+    expect(linked.hostSent.filter((m) => m.kind === 'edit.request').length).toBe(editRequestsBefore)
+    expect(linked.doc.getText()).toBe(docTextBefore)
+    expect(view.state.doc.toString()).toBe(docTextBefore)
+    // 同版本去重：再进出一次（无内容变化）不重复搜索
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    const again = getTableOptimizeStats()
+    expect(again.searches - once.searches).toBe(0)
+    expect(again.publishes - once.publishes).toBe(0)
+    expect(templateOf(view)).toBe(optimized)
+  })
+
+  it('纯滚动（viewportChanged、doc 不变）的可见扫描 flush 复用指纹不重扫；doc 变化后重扫', async () => {
+    // 直连 body 的视图（setupLinked 的宿主挂在 detached div，CM6 无法测量，
+    // viewport 恒全覆盖、scrollIntoView 恒 no-op——无法触达滚动路径）；长文
+    // 档垫前后文使表居于中部，scrollIntoView 才有真实视口位移（jsdom 探针
+    // 实证：连接态下 scrollIntoView 产生 viewportChanged=true 的 update）
+    const pad = (n: number, tag: string): string =>
+      Array.from({ length: n }, (_, i) => `${tag}垫行${i}`).join('\n')
+    const text = `${pad(150, '前')}\n${OPT_TABLE}\n${pad(150, '后')}\n`
+    const host = document.body.appendChild(document.createElement('div'))
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({ doc: text, extensions: [livePreviewDecorations] }),
+    })
+    try {
+      const tablePos = text.indexOf('| 功能') + 2
+      // 就绪链路（同 setupActive）：先进表（活动态）再注入度量——挂载/度量
+      // 扫描不提前优化该表
+      view.dispatch({ selection: EditorSelection.single(tablePos) })
+      view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+      await settle()
+      const before = getTableOptimizeStats()
+      // 离开表：一次完整优化 = 一次全表指纹扫描
+      view.dispatch({ selection: EditorSelection.single(0) })
+      await settle()
+      const left = getTableOptimizeStats()
+      expect(left.searches - before.searches).toBe(1)
+      expect(left.signatureScans - before.signatureScans).toBe(1)
+      // 纯滚动（滚到表 → 滚离 → 再滚回；viewportChanged、doc 不变）：
+      // 可见扫描 flush 复用缓存指纹，零重扫、零重复搜索、零重复发布
+      view.dispatch({ effects: EditorView.scrollIntoView(tablePos, { y: 'start' }) })
+      await settle()
+      view.dispatch({ effects: EditorView.scrollIntoView(0, { y: 'start' }) })
+      await settle()
+      view.dispatch({ effects: EditorView.scrollIntoView(tablePos, { y: 'center' }) })
+      await settle()
+      const scrolled = getTableOptimizeStats()
+      expect(scrolled.signatureScans - left.signatureScans).toBe(0)
+      // #372 评审 I-5：指纹缓存命中且 tracked 同签名 → 结构扫描（行身份
+      // 提取）也零计——纯滚动路径零结构扫描
+      expect(scrolled.structureScans - left.structureScans).toBe(0)
+      expect(scrolled.searches - left.searches).toBe(0)
+      expect(scrolled.publishes - left.publishes).toBe(0)
+      // doc 变化（表后正文键入，表身份不变而 doc 引用变化）：滚回表后指纹
+      // 缓存失效重扫；表内容指纹未变 → tracked 同签名不重复搜索
+      const tail = view.state.doc.line(view.state.doc.lines - 1)
+      view.dispatch({ changes: { from: tail.from, insert: '增' }, selection: EditorSelection.single(tail.from + 1) })
+      view.dispatch({ effects: EditorView.scrollIntoView(0, { y: 'start' }) })
+      await settle()
+      view.dispatch({ effects: EditorView.scrollIntoView(tablePos, { y: 'center' }) })
+      await settle()
+      const edited = getTableOptimizeStats()
+      expect(edited.signatureScans - scrolled.signatureScans).toBe(1)
+      expect(edited.structureScans - scrolled.structureScans).toBe(1)
+      expect(edited.searches - scrolled.searches).toBe(0)
+    } finally {
+      view.destroy()
+      host.remove()
+    }
+  })
+
+  it('待执行期间重新入表取消：同版本不触发搜索', async () => {
+    const { view } = await setupActive()
+    const before = getTableOptimizeStats()
+    // 同一同步块内离开又回表（flush 前取消）
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+  })
+
+  it('表前编辑导致区间迁移：待执行任务取消，过期结果不发布', async () => {
+    const { view } = await setupActive()
+    const before = getTableOptimizeStats()
+    const beforeTemplate = templateOf(view)
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    // flush 前在表前插入文本（Table 节点区间迁移）
+    view.dispatch({ changes: { from: view.state.doc.line(1).to, insert: '\n插入段落' } })
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+    expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
+    // 装饰仍一致可用：表格照常网格化（doc 变更路径的 gridPlans 是局部重建
+    // 缓存，未受影响的表不在其中——以网格行装饰在场为准）
+    const gridRows = collect(view.state.field(liveDecorationsField).decos)
+      .filter((i) => i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow)).length
+    expect(gridRows).toBeGreaterThan(0)
+    expect(beforeTemplate).toMatch(/minmax\(min\(/)
+  })
+
+  it('删除表格：待执行任务取消且不崩溃', async () => {
+    const { view } = await setupActive()
+    const before = getTableOptimizeStats()
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    const from = view.state.doc.line(HEADER_LINE).from
+    const to = view.state.doc.line(6).to
+    view.dispatch({ changes: { from, to, insert: '普通段落' } })
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+    expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
+  })
+
+  it('视图隐藏（模式切换 liveWrapper display:none）：待执行任务丢弃', async () => {
+    const { view } = await setupActive()
+    const before = getTableOptimizeStats()
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    // 隐藏编辑器宿主（applyModeDom 的机制：liveWrapper display:none）
+    const host = view.dom.parentElement
+    host!.style.display = 'none'
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+    host!.style.display = ''
+  })
+
+  it('availablePx 缺位不搜索（测量未就绪时保持轻量计划）', async () => {
+    const linked = await setupLinked(OPT_TABLE)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    // 只注入 contentPx/cellBoxPx（无 availablePx——jsdom 探针无布局的常态）
+    view.dispatch({ effects: metricsCompartment.reconfigure(
+      tableMetricsFacet.of({ contentPx: 60, cellBoxPx: 22 })) })
+    await settle()
+    const before = getTableOptimizeStats()
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+  })
+
+  it('非最长行改变换行分布且列最大值不变：IME 定稿走轻量快路径，退出后仍按新数据优化', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    const before = getTableOptimizeStats()
+    // d1 的 B 列（5 汉字，非列最大者——列最大在 d2 的 8 汉字）经组合输入改写，
+    // 逐列最大样本不变 → 轻量模板不变（快路径），但换行分布已变
+    const gridBefore = getTableGridStats()
+    const d1 = view.state.doc.line(5)
+    const bStart = d1.from + d1.text.indexOf('|', 2) + 2
+    view.dispatch({ selection: EditorSelection.single(bStart) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: bStart, to: bStart + 2, insert: '词词' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    // 定稿仍在表内：零完整搜索，且走单行折叠快路径（千行表扫描红线口径）
+    const midStats = getTableOptimizeStats()
+    expect(midStats.searches - before.searches).toBe(0)
+    expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBeLessThan(20)
+    // 退出：按新行数据（换行分布变化）重新优化——指纹失效不依赖列最大样本
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    expect(getTableOptimizeStats().searches - midStats.searches).toBe(1)
+  })
+
+  it('两表隔离：离开 A 表只优化 A，B 表（三列）不被 A 的离开波及', async () => {
+    const twoTables = [
+      '前文', '',
+      '| 功能 | 说明 |',
+      '| --- | --- |',
+      `| ${cjk(44)} | ${cjk(5)} |`,
+      `| ${cjk(1)} | ${cjk(8)} |`,
+      '', '间隔', '',
+      '| 功能 | 说明 | 备注 |',
+      '| --- | --- | --- |',
+      `| ${cjk(6)} | ${cjk(30)} | 短 |`,
+      `| ${cjk(6)} | 示 | ${cjk(30)} |`,
+      `| ${cjk(6)} | 一 | 二 |`,
+      '', '后文', '',
+    ].join('\n')
+    const linked = await setupActive(twoTables)
+    const view = linked.view
+    const plansOf = (): Map<number, string> => {
+      const out = new Map<number, string>()
+      view.state.field(liveDecorationsField).gridPlans.forEach((plan, key) => {
+        if (plan) out.set(key, plan.template)
+      })
+      return out
+    }
+    const before = getTableOptimizeStats()
+    // B（三列，非活动可见）可能已在度量注入的挂载扫描中优化——记录离开前基线
+    const beforePlans = [...plansOf().entries()].sort((a, b) => a[0] - b[0])
+    expect(beforePlans).toHaveLength(2)
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(15).from) })
+    await settle()
+    const afterStats = getTableOptimizeStats()
+    expect(afterStats.searches - before.searches).toBe(1)
+    expect(afterStats.publishes - before.publishes).toBe(1)
+    const entries = [...plansOf().entries()].sort((a, b) => a[0] - b[0])
+    // A 表（两列，小 from）发布优化模板——不与 B 计划混淆（表格身份隔离）
+    expect(entries[0]![1]).not.toBe(entries[1]![1])
+    // B 表计划不被「离开 A」波及：与离开前逐字节一致
+    expect(entries[1]![1]).toBe(beforePlans[1]![1])
+  })
+
+  it('预算降级：两列大表保留轻量计划且一次降级不重试', async () => {
+    const bigRows = Array.from({ length: 600 }, (_v, i) => `| 行${i} | 内容${i} |`)
+    const bigTable = ['| 功能 | 说明 |', '| --- | --- |', ...bigRows, ''].join('\n')
+    const linked = await setupActive(bigTable)
+    const view = linked.view
+    const before = getTableOptimizeStats()
+    const lightweight = lightweightTemplate(bigTable)
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(view.state.doc.lines).from) })
+    await settle()
+    const degraded = getTableOptimizeStats()
+    expect(degraded.searches - before.searches).toBe(1)
+    expect(degraded.publishes - before.publishes).toBe(0)
+    expect(templateOf(view)).toBe(lightweight)
+    // 同条件再进出不重试（一次降级不反复触发无效搜索）
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 2)) })
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(view.state.doc.lines).from) })
+    await settle()
+    expect(getTableOptimizeStats().searches - degraded.searches).toBe(0)
+  })
+
+  it('发布不触碰千行扫描红线：纯效果事务 rowsScanned 增量为零', async () => {
+    const { view } = await setupActive()
+    const gridBefore = getTableGridStats()
+    const optBefore = getTableOptimizeStats()
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    expect(getTableOptimizeStats().publishes - optBefore.publishes).toBe(1)
+    expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBe(0)
+  })
+
+  it('视图销毁：待执行任务与计时器回收，销毁后零搜索零崩溃', async () => {
+    const before = getTableOptimizeStats()
+    const state = EditorState.create({
+      doc: OPT_TABLE,
+      extensions: [livePreviewDecorations],
+      selection: EditorSelection.single(OPT_TABLE.indexOf(cjk(44)) + 1),
+    }).update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state
+    const view = new EditorView({ parent: document.createElement('div'), state })
+    // 表内（活动）→ 离开（入队 0ms 冲量）→ 立即销毁（计时器/缓存随 destroy 回收）
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    view.destroy()
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+    expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
+  })
+
+  /** 全部网格行装饰内联的列宽轨道串（--vsidian-table-col-widths 值，文档序） */
+  const inlineTrackTemplates = (view: EditorView): string[] => {
+    const out: string[] = []
+    view.state.field(liveDecorationsField).decos.between(0, Infinity, (_from, _to, value) => {
+      const cls = (value.spec as { class?: string }).class
+      if (typeof cls === 'string' && cls.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow)) {
+        const style = (value.spec as { attributes?: Record<string, string> }).attributes?.style ?? ''
+        const m = /--vsidian-table-col-widths: (.+)$/.exec(style)
+        out.push(m ? m[1]! : '')
+      }
+    })
+    return out
+  }
+
+  /** 断言全表各行内联轨道串非空、逐字节一致且等于期望模板 */
+  const expectUniformTracks = (view: EditorView, expected: string): void => {
+    const tracks = inlineTrackTemplates(view)
+    expect(tracks.length).toBeGreaterThan(1)
+    expect(new Set(tracks).size).toBe(1)
+    expect(tracks[0]).toBe(expected)
+  }
+
+  it('优化发布后表外编辑再回表：全表各行内联轨道串逐字节一致（优化模板不因局部重建丢失）', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    // 离开：发布优化模板（发布后基线本身一致）
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    const optimized = templateOf(view)
+    expect(optimized).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    expectUniformTracks(view, optimized)
+    // 表外编辑（docChanged、非表格行）：增量路径的 gridPlans 是局部重建新
+    // Map，不含该表——优化条目在此丢失（回归点）
+    view.dispatch({
+      changes: { from: view.state.doc.line(9).to, insert: '追加' },
+      selection: EditorSelection.single(view.state.doc.line(9).to + 2),
+    })
+    await settle()
+    // 选区回表（纯选区移动，单行重发射）：plan miss 的行不得回落轻量计划
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    await settle()
+    expectUniformTracks(view, optimized)
+    expect(templateOf(view)).toBe(optimized)
+  })
+
+  it('优化发布后表内键入：模板不变零跳变（表内编辑复用最近可用列宽）', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    const optimized = templateOf(view)
+    expect(optimized).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    // 回表键入（docChanged：变更行重建走新 Map，plan miss 不得回轻量）
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({
+      changes: { from: firstCellPos(view, 5), insert: '字' },
+      selection: EditorSelection.single(firstCellPos(view, 5) + 1),
+    })
+    await settle()
+    expectUniformTracks(view, optimized)
+    expect(templateOf(view)).toBe(optimized)
+  })
+
+  it('优化发布后 containerRender 开关切换：模板保持优化（非 metrics 的 facet 全量重建携带旧优化）', async () => {
+    const compartment = new Compartment()
+    const state = EditorState.create({
+      doc: OPT_TABLE,
+      extensions: [livePreviewDecorations, compartment.of(tableContainerRenderFacet.of(true))],
+    }).update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state
+    const host = document.body.appendChild(document.createElement('div'))
+    const view = new EditorView({ parent: host, state })
+    try {
+      // 进表（活动）→ 离开：发布优化
+      view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+      await settle()
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+      await settle()
+      const optimized = templateOf(view)
+      expect(optimized).not.toBe(lightweightTemplate(OPT_TABLE))
+      expectUniformTracks(view, optimized)
+      // 切开关（非 metrics 的 facet 变化 → 全量重建）：顶层表不受开关影响，
+      // 优化模板不得被轻量计划覆盖
+      view.dispatch({ effects: compartment.reconfigure(tableContainerRenderFacet.of(false)) })
+      await settle()
+      expect(templateOf(view)).toBe(optimized)
+      expectUniformTracks(view, optimized)
+      // 切回：仍保持
+      view.dispatch({ effects: compartment.reconfigure(tableContainerRenderFacet.of(true)) })
+      await settle()
+      expect(templateOf(view)).toBe(optimized)
+      expectUniformTracks(view, optimized)
+    } finally {
+      view.destroy()
+      host.remove()
+    }
+  })
+
+  it('已优化表 IME 定稿（空白格组合取消）：单行恢复且全表模板保持优化串', async () => {
+    // 40 数据行（预算内可优化）+ 尾部空白格行——整表重发射的 rowsScanned
+    // 远超 20，快路径（单行恢复）与否可由扫描增量区分。空白行取省略首尾
+    // 管道形态（' | '）：空白格组合通道（planBlankRowCellInput/表内
+    // tableComposition）只认该形态，组合期 preview 平移与 settled 定稿才走通
+    const rows = Array.from({ length: 40 }, (_v, i) =>
+      i % 2 === 0 ? `| ${cjk(44)} | ${cjk(5)} |` : `| ${cjk(1)} | ${cjk(8)} |`)
+    const bigOpt = [
+      '前文', '',
+      '| 功能 | 说明 |',
+      '| --- | --- |',
+      ...rows,
+      ' | ',
+      '', '后文', '',
+    ].join('\n')
+    const linked = await setupActive(bigOpt)
+    const view = linked.view
+    // 离开：发布优化
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(47).from) })
+    await settle()
+    const optimized = templateOf(view)
+    expect(optimized).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    expectUniformTracks(view, optimized)
+    // 回表到空白格行（line 45 末格内容首 = 行尾），组合先插后删（净结果复原）
+    const blankLine = view.state.doc.line(45)
+    const cpos = blankLine.to
+    view.dispatch({ selection: EditorSelection.single(cpos) })
+    const gridBefore = getTableGridStats()
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: cpos, insert: '词词' }, userEvent: 'input.type.compose' })
+    view.dispatch({ changes: { from: cpos, to: cpos + 2, insert: '' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    // 定稿走单行恢复快路径（千行表扫描红线口径），全表模板仍为优化串
+    expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBeLessThan(20)
+    expect(templateOf(view)).toBe(optimized)
+    expectUniformTracks(view, optimized)
+  })
+
+  it('迟到结果按身份/版本/列数/度量签名验证：过期载荷全部拒绝（纯状态层）', () => {
+    const state = EditorState.create({ doc: OPT_TABLE, extensions: [livePreviewDecorations] })
+      .update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) }).state
+    const field = state.field(liveDecorationsField)
+    const tableFrom = [...field.gridPlans.keys()].find((k) => field.gridPlans.get(k) !== null)!
+    const planTemplate = field.gridPlans.get(tableFrom)!.template
+    const otherTemplate = 'minmax(min(60px, 50%), 200fr) minmax(min(60px, 50%), 140fr)'
+    const dispatch = (payload: Partial<TableHeightPlanPayload> & { template: string }) =>
+      state.update({ effects: applyTableHeightPlan.of({
+        tableFrom, doc: state.doc, columns: 2,
+        metricsSig: tableMetricsSig(OPT_METRICS), ...payload,
+      } as TableHeightPlanPayload) }).state
+
+    // 文档引用过期（区间已迁移）
+    expect(dispatch({ doc: Text.of(['x']), template: otherTemplate })
+      .field(liveDecorationsField).gridPlans.get(tableFrom)!.template).toBe(planTemplate)
+    // 列数不符
+    expect(dispatch({ columns: 3, template: otherTemplate })
+      .field(liveDecorationsField).gridPlans.get(tableFrom)!.template).toBe(planTemplate)
+    // 度量签名过期
+    expect(dispatch({ metricsSig: 'stale', template: otherTemplate })
+      .field(liveDecorationsField).gridPlans.get(tableFrom)!.template).toBe(planTemplate)
+    // 表格身份不符（普通段落位置不是表格起点）
+    expect(dispatch({ tableFrom: 0, template: otherTemplate })
+      .field(liveDecorationsField).gridPlans.get(tableFrom)!.template).toBe(planTemplate)
+    // 合法载荷：模板应用到同表（装饰行内联值随之更新）
+    const applied = dispatch({ template: otherTemplate })
+    const appliedPlan = applied.field(liveDecorationsField).gridPlans.get(tableFrom)!
+    expect(appliedPlan.template).toBe(otherTemplate)
+    // 行装饰内联消费同一计划（模板变化 → 行装饰键变 → CM6 重绘）
+    const inline = collect(applied.field(liveDecorationsField).decos)
+      .find((i) => i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow))
+    expect(inline).toBeTruthy()
+  })
+})
+
+
+// ---- #373 多列表格高度优化（调度层契约：同源机制扩展到三列及以上） ----
+
+describe('#373 多列高度优化（调度层）', () => {
+  const cjk = (n: number): string => '汉'.repeat(n)
+  /** 三列可改进表（与纯函数 multi3 冻结样例同构）：列 1 六字短标签、列 2/3
+   *  长段落交替驱动 + 末行全短——轻量基线 16 行，优化后 14 行 */
+  const MULTI3_TABLE = [
+    '前文', '',
+    '| 功能 | 说明 | 备注 |',
+    '| --- | --- | --- |',
+    `| ${cjk(6)} | ${cjk(30)} | 短 |`,
+    `| ${cjk(6)} | 示 | ${cjk(30)} |`,
+    `| ${cjk(6)} | 一 | 二 |`,
+    '', '后文', '',
+  ].join('\n')
+  const MULTI_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+  /** 表头行号（MULTI3_TABLE）：3=表头 4=分隔 5–7=数据 */
+  const HEADER_LINE = 3
+
+  const firstCellPos = (view: EditorView, lineNo: number): number => {
+    const line = view.state.doc.line(lineNo)
+    return line.from + line.text.indexOf('|') + 2
+  }
+
+  async function setupActive(text = MULTI3_TABLE): Promise<LinkedPanel & { view: EditorView }> {
+    const linked = await setupLinked(text)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(MULTI_METRICS)) })
+    await settle()
+    return { ...linked, view }
+  }
+
+  const templateOf = (view: EditorView): string => {
+    const plans = view.state.field(liveDecorationsField).gridPlans
+    for (const plan of plans.values()) {
+      if (plan) return plan.template
+    }
+    throw new Error('应存在网格计划')
+  }
+
+  const lightweightTemplate = (doc: string): string => {
+    const state = EditorState.create({ doc, extensions: [livePreviewDecorations] })
+      .update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(MULTI_METRICS)) }).state
+    for (const plan of state.field(liveDecorationsField).gridPlans.values()) {
+      if (plan) return plan.template
+    }
+    throw new Error('应存在网格计划')
+  }
+
+  it('多列表内切格/键入/多光标/组合期/矩形格区：完整搜索与发布为零', async () => {
+    const { view } = await setupActive()
+    const before = getTableOptimizeStats()
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 6)) })
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(firstCellPos(view, 5)),
+      EditorSelection.cursor(firstCellPos(view, 6) + 10),
+    ]) })
+    const pos = firstCellPos(view, 6)
+    view.dispatch({ changes: { from: pos, insert: '字' }, selection: EditorSelection.single(pos + 1) })
+    await settle()
+    const cpos = firstCellPos(view, 5) + 2
+    view.dispatch({ selection: EditorSelection.single(cpos) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: cpos, to: cpos + 1, insert: '词' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    const headerLine = view.state.doc.line(HEADER_LINE)
+    view.dispatch({ effects: setTableRegion.of({
+      tableFrom: headerLine.from, rowFrom: 0, rowTo: 1, columnFrom: 0, columnTo: 2 }) })
+    await settle()
+    const after = getTableOptimizeStats()
+    expect(after.searches - before.searches).toBe(0)
+    expect(after.publishes - before.publishes).toBe(0)
+  })
+
+  it('多列表离开后恰好一次搜索并发布优化模板；零写回；同版本去重', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    const before = getTableOptimizeStats()
+    const editRequestsBefore = linked.hostSent.filter((m) => m.kind === 'edit.request').length
+    const docTextBefore = linked.doc.getText()
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    const once = getTableOptimizeStats()
+    expect(once.searches - before.searches).toBe(1)
+    expect(once.publishes - before.publishes).toBe(1)
+    // 发布的是优化模板（≠ 轻量基线）；零写回（纯效果事务）
+    expect(templateOf(view)).not.toBe(lightweightTemplate(view.state.doc.toString()))
+    expect(linked.hostSent.filter((m) => m.kind === 'edit.request').length).toBe(editRequestsBefore)
+    expect(linked.doc.getText()).toBe(docTextBefore)
+    expect(view.state.doc.toString()).toBe(docTextBefore)
+    // 同版本去重：再进出一次（无内容变化）不重复搜索
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    expect(getTableOptimizeStats().searches - once.searches).toBe(0)
+  })
+
+  it('多列大表超预算：稳定降级保留轻量计划，一次降级不自动重试', async () => {
+    const bigRows = Array.from({ length: 700 }, (_v, i) => `| 行${i} | 内容${i} | 备${i} |`)
+    const bigTable = ['| 功能 | 说明 | 备注 |', '| --- | --- | --- |', ...bigRows, ''].join('\n')
+    const linked = await setupActive(bigTable)
+    const view = linked.view
+    const before = getTableOptimizeStats()
+    const lightweight = lightweightTemplate(bigTable)
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(view.state.doc.lines).from) })
+    await settle()
+    const degraded = getTableOptimizeStats()
+    expect(degraded.searches - before.searches).toBe(1)
+    expect(degraded.publishes - before.publishes).toBe(0)
+    expect(templateOf(view)).toBe(lightweight)
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 2)) })
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(view.state.doc.lines).from) })
+    await settle()
+    expect(getTableOptimizeStats().searches - degraded.searches).toBe(0)
+  })
+
+  it('多列千行表：纯选区移动与组合取消扫描 <20 行、网格 DOM 视口裁剪', async () => {
+    const rows = Array.from({ length: 1000 }, (_v, i) => `| 行${i} | 内容${i} | 备${i} |`)
+    // 尾行全空白格（边缘形态 ` | | `——组合预览 tableComposition 只在空白格
+    // 置位，与既有千行契约同口径；组合取消走 preview→settled 快路径）
+    const bigTable = ['| 功能 | 说明 | 备注 |', '| --- | --- | --- |', ...rows, ' | | ', ''].join('\n')
+    const linked = await setupLinked(bigTable)
+    const view = linked.controller.getView()!
+    await settle()
+    const gridBefore = getTableGridStats()
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 500)) })
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 501)) })
+    await settle()
+    expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBeLessThan(20)
+    // 组合取消（净结果不变，空白格路径）：单行折叠快路径，不全表扫描
+    const blankLine = view.state.doc.line(view.state.doc.lines - 1)
+    const cpos = blankLine.to // 末空白格内容首（contentFrom）
+    view.dispatch({ selection: EditorSelection.single(cpos) })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    view.dispatch({ changes: { from: cpos, insert: '字' }, userEvent: 'input.type.compose' })
+    view.dispatch({ changes: { from: cpos, to: cpos + 1, insert: '' }, userEvent: 'input.type.compose' })
+    view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await settle()
+    expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBeLessThan(20)
+    // 视口 DOM 有界（CM6 视口裁剪，不随全表线性常驻）
+    expect(view.dom.querySelectorAll('.vsidian-table-grid-cell').length).toBeLessThan(150)
+  })
+
+  it('多列表发布为纯效果事务：rowsScanned 增量为零', async () => {
+    const { view } = await setupActive()
+    const gridBefore = getTableGridStats()
+    const optBefore = getTableOptimizeStats()
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    await settle()
+    expect(getTableOptimizeStats().publishes - optBefore.publishes).toBe(1)
+    expect(getTableGridStats().rowsScanned - gridBefore.rowsScanned).toBe(0)
+  })
+
+  it('格内嵌入编辑期间父表暂停：离表任务挂起零搜索，焦点归还后进出执行一次', async () => {
+    const linked = await setupActive()
+    const view = linked.view
+    // jsdom 无法在 CM6 调和下维持 contentDOM 内的焦点（装饰更新会移除外来
+    // 节点；真实浏览器中嵌入卡是 CM6 widget 不受影响）——离开派发后以
+    // activeElement getter 覆盖钉住「焦点在 contentDOM 内的嵌入卡上」前提，
+    // 直接检验调度层 embedEditing 的判定口径（closest('.vsidian-live-embed')）。
+    // 代理元素取第 6 行格 span（离开只重建旧/新选区行 5/9，第 6 行稳定）。
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    host.appendChild(view.dom)
+    const before = getTableOptimizeStats()
+    try {
+      // 表内活动 + 嵌入编辑 → 离开：任务入队但 flush 挂起（父表暂停）
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+      const standIn = view.domAtPos(firstCellPos(view, 6)).node.parentElement!
+      standIn.classList.add('vsidian-live-embed')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => standIn,
+      })
+      await settle()
+      expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+      expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
+      // 嵌入失焦退场后再进出：挂起任务被回表取消，再次离表执行恰好一次
+      delete (document as unknown as { activeElement?: Element }).activeElement
+      standIn.classList.remove('vsidian-live-embed')
+      view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+      await settle()
+      expect(getTableOptimizeStats().searches - before.searches).toBe(1)
+      expect(getTableOptimizeStats().publishes - before.publishes).toBe(1)
+    } finally {
+      delete (document as unknown as { activeElement?: Element }).activeElement
+      host.remove()
+    }
+  })
+
+  it('视图销毁：多列表待执行任务与计时器回收，销毁后零搜索零崩溃', async () => {
+    const before = getTableOptimizeStats()
+    const state = EditorState.create({
+      doc: MULTI3_TABLE,
+      extensions: [livePreviewDecorations],
+      selection: EditorSelection.single(MULTI3_TABLE.indexOf(cjk(6)) + 1),
+    }).update({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(MULTI_METRICS)) }).state
+    const view = new EditorView({ parent: document.createElement('div'), state })
+    view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+    view.destroy()
+    await settle()
+    expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+    expect(getTableOptimizeStats().publishes - before.publishes).toBe(0)
+  })
+})
+
+// ---- #372 评审修复：调度挂起重排与度量通道行为 ----
+
+describe('#372 评审 I-8：嵌入编辑挂起的离开任务重排', () => {
+  const cjk = (n: number): string => '汉'.repeat(n)
+  const OPT_TABLE = [
+    '前文', '',
+    '| 功能 | 说明 |',
+    '| --- | --- |',
+    `| ${cjk(44)} | ${cjk(5)} |`,
+    `| ${cjk(1)} | ${cjk(8)} |`,
+    '', '后文', '',
+  ].join('\n')
+  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+
+  const firstCellPos = (view: EditorView, lineNo: number): number => {
+    const line = view.state.doc.line(lineNo)
+    return line.from + line.text.indexOf('|') + 2
+  }
+
+  it('嵌入退出后仅一笔表外事务即重排执行挂起任务（无需重新进表离开）', async () => {
+    const linked = await setupLinked(OPT_TABLE)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: EditorSelection.single(firstCellPos(view, 5)) })
+    view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+    await settle()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    host.appendChild(view.dom)
+    const before = getTableOptimizeStats()
+    try {
+      // 表内活动 + 嵌入编辑（activeElement 钉在 contentDOM 内的嵌入宿主上）
+      // → 离开：任务入队但 flush 挂起（父表暂停，同既有嵌入暂停测试口径）
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(9).from) })
+      const standIn = view.domAtPos(firstCellPos(view, 6)).node.parentElement!
+      standIn.classList.add('vsidian-live-embed')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => standIn,
+      })
+      await settle()
+      expect(getTableOptimizeStats().searches - before.searches).toBe(0)
+      // 嵌入退出（activeElement 还原）：仅一笔表外选区事务 → update 重排
+      // flush → 挂起任务执行（一次搜索一次发布）
+      delete (document as unknown as { activeElement?: Element }).activeElement
+      standIn.classList.remove('vsidian-live-embed')
+      view.dispatch({ selection: EditorSelection.single(view.state.doc.line(8).from + 2) })
+      await settle()
+      expect(getTableOptimizeStats().searches - before.searches).toBe(1)
+      expect(getTableOptimizeStats().publishes - before.publishes).toBe(1)
+    } finally {
+      delete (document as unknown as { activeElement?: Element }).activeElement
+      host.remove()
+      view.destroy()
+    }
+  })
+})
+
+describe('#372 评审 I-6/I-9：度量通道 ViewPlugin 行为（resize 去抖 / 纯滚动零重测）', () => {
+  const DOC = [
+    '| 功能 | 说明 |',
+    '| --- | --- |',
+    '| 悬停文档预览 | 悬停链接预览目标：笔记显示全文与章节 |',
+    '',
+    '正文段落。',
+    '',
+  ].join('\n')
+  /** 探针内容宽（px）：固定 60（字体度量全程不变的驱动前提） */
+  const PROBE_PX = 60
+
+  /** mock rect：探针恒 PROBE_PX、网格行取 rowWidth（可变）、其余 0 */
+  function mockRects(rowWidthRef: { value: number }, probeCalls: { count: number } | null): ReturnType<typeof vi.spyOn> {
+    return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.classList.contains('vsidian-table-metrics-probe') ? PROBE_PX
+        : this.classList.contains('vsidian-table-grid-row') ? rowWidthRef.value
+        : 0
+      if (probeCalls && this.classList.contains('vsidian-table-metrics-probe')) {
+        probeCalls.count += 1
+      }
+      return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
+    })
+  }
+
+  /** 直连 body 的视图 + facet 变化收集器（度量注入次数即 reconfigure 次数） */
+  function makeView(): { view: EditorView; host: HTMLElement; seen: Array<Record<string, number | undefined>> } {
+    const host = document.body.appendChild(document.createElement('div'))
+    const seen: Array<Record<string, number | undefined>> = []
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: DOC,
+        extensions: [
+          livePreviewDecorations,
+          EditorView.updateListener.of((u) => {
+            if (u.startState.facet(tableMetricsFacet) !== u.state.facet(tableMetricsFacet)) {
+              const m = u.state.facet(tableMetricsFacet)
+              seen.push(m ? { ...m } : {})
+            }
+          }),
+        ],
+      }),
+    })
+    return { view, host, seen }
+  }
+
+  it('I-6 resize 拖拽逐档仅 availablePx 变化：尾随去抖合并为一次 reconfigure', async () => {
+    vi.useFakeTimers()
+    const rowWidth = { value: 340 }
+    const gbcr = mockRects(rowWidth, null)
+    const { view, host, seen } = makeView()
+    try {
+      // 初测（挂载 0ms 宏任务）：字体度量首注入立即 reconfigure。行盒
+      // padding/border 合计由首测动态推算（jsdom 计算样式的常量差不入断言）
+      await vi.advanceTimersByTimeAsync(1)
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({ contentPx: PROBE_PX, cellBoxPx: 0 })
+      expect(seen[0]!.availablePx).toBeGreaterThan(0)
+      const padK = 340 - seen[0]!.availablePx!
+      // resize 拖拽：连续三档行区宽变化（字体度量不变），每档一笔补测回调
+      for (const w of [320, 300, 280]) {
+        rowWidth.value = w
+        view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'x' } })
+        await vi.advanceTimersByTimeAsync(1)
+      }
+      // 去抖窗口内（150ms 未满）：零 reconfigure（100ms 处仍在窗内）
+      await vi.advanceTimersByTimeAsync(100)
+      expect(seen).toHaveLength(1)
+      // 静止满窗：恰一次 reconfigure，值为最后一档
+      await vi.advanceTimersByTimeAsync(60)
+      expect(seen).toHaveLength(2)
+      expect(seen[1]).toEqual({ contentPx: PROBE_PX, cellBoxPx: 0, availablePx: 280 - padK })
+    } finally {
+      view.destroy()
+      host.remove()
+      gbcr.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('I-9 纯纵向滚动（scroller 宽度未变）：跳过整轮重测，探针 rect 读取计数不增', async () => {
+    vi.useFakeTimers()
+    const rowWidth = { value: 340 }
+    const probeCalls = { count: 0 }
+    const gbcr = mockRects(rowWidth, probeCalls)
+    const { view, host, seen } = makeView()
+    try {
+      // scroller 宽度注入（jsdom clientWidth 恒 0，实例级 defineProperty）
+      const scroller = view.contentDOM.parentElement!
+      let scrollerW = 800
+      Object.defineProperty(scroller, 'clientWidth', { configurable: true, get: () => scrollerW })
+      // 初测：行区宽就绪注入（早退条件尚未成立——lastScrollerWidth 未记）
+      await vi.advanceTimersByTimeAsync(1)
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({ contentPx: PROBE_PX, cellBoxPx: 0 })
+      expect(seen[0]!.availablePx).toBeGreaterThan(0)
+      expect(probeCalls.count).toBeGreaterThan(0)
+      const baseCalls = probeCalls.count
+      // 纵向滚动（宽度不变的 update 触发——以表后编辑代理 update 路径）：
+      // 早退，零 rect 读取、零 reconfigure
+      view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'y' } })
+      await vi.advanceTimersByTimeAsync(1)
+      view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'z' } })
+      await vi.advanceTimersByTimeAsync(1)
+      expect(probeCalls.count).toBe(baseCalls)
+      expect(seen).toHaveLength(1)
+      // scroller 宽度变化（横向 resize）：不早退，重测（rect 读取恢复）
+      scrollerW = 820
+      view.dispatch({ changes: { from: view.state.doc.line(5).from, insert: 'w' } })
+      await vi.advanceTimersByTimeAsync(1)
+      expect(probeCalls.count).toBe(baseCalls + 1)
+    } finally {
+      view.destroy()
+      host.remove()
+      gbcr.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('#372 评审 I-7：availablePx 按表实测行区宽', () => {
+  const cjk = (n: number): string => '汉'.repeat(n)
+  /** 顶层表 + 引用表同内容形态（同列样本）：同 availablePx 下优化模板应相同，
+   *  模板互异即证明两表按各自行区宽分别取值 */
+  const TWO_TABLES = [
+    '前文', '',
+    '| 功能 | 说明 |',
+    '| --- | --- |',
+    `| ${cjk(44)} | ${cjk(5)} |`,
+    `| ${cjk(1)} | ${cjk(8)} |`,
+    '',
+    '> | 功能 | 说明 |',
+    '> | --- | --- |',
+    `> | ${cjk(44)} | ${cjk(5)} |`,
+    `> | ${cjk(1)} | ${cjk(8)} |`,
+    '',
+  ].join('\n')
+  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+
+  it('顶层表与引用表（同内容形态）优化的模板互异：各按首网格行实测行区宽', async () => {
+    const host = document.body.appendChild(document.createElement('div'))
+    const topRow = document.createElement('div')
+    topRow.className = 'vsidian-table-grid-row'
+    const quoteRow = document.createElement('div')
+    quoteRow.className = 'vsidian-table-grid-row'
+    const widths = new Map<HTMLElement, number>([[topRow, 400], [quoteRow, 300]])
+    const gbcr = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.classList.contains('vsidian-table-metrics-probe') ? 60
+        : widths.get(this) ?? 0
+      return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
+    })
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({ doc: TWO_TABLES, extensions: [livePreviewDecorations] }),
+    })
+    try {
+      // 调度层按表实测的行 DOM 定位：spy domAtPos——顶层表行（1-4）返回
+      // topRow（宽 400）、引用表行（6-9）返回 quoteRow（宽 300）
+      const domAtPos = vi.spyOn(view, 'domAtPos').mockImplementation((pos: number) => {
+        const line = view.state.doc.lineAt(Math.min(Math.max(pos, 0), view.state.doc.length))
+        return { node: line.number <= 6 ? topRow : quoteRow, offset: 0 }
+      })
+      view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+      await settle()
+      domAtPos.mockRestore()
+      // 挂载/度量扫描对两表各一次优化（同内容形态）：搜索输入的 availablePx
+      // 取各自实测（400/300），优化模板互异——同单值（facet 340 或任一）时
+      // 同内容表模板必然相同
+      const plans = view.state.field(liveDecorationsField).gridPlans
+      const templates = [...plans.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, p]) => p?.template)
+      expect(templates).toHaveLength(2)
+      expect(templates[0]).toBeTruthy()
+      expect(templates[1]).toBeTruthy()
+      expect(templates[0]).not.toBe(templates[1])
+    } finally {
+      view.destroy()
+      host.remove()
+      gbcr.mockRestore()
+    }
   })
 })

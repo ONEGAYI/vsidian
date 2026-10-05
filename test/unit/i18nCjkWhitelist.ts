@@ -20,4 +20,10 @@ export const CJK_LITERALS_WHITELIST: Readonly<Record<string, readonly string[]>>
   'src/webview/perfProbe.ts': [
     "探",
   ],
+  // #371 表格可读度量探针载荷（tableMetrics.ts PROBE_TEXT）：测量「约三个
+  // 汉字内容宽」的隐藏 span 文本——测量输入而非用户可见文案（探针
+  // visibility hidden、无命中面），非界面文字不自译，永久在案
+  'src/webview/tableMetrics.ts': [
+    "汉汉汉",
+  ],
 }

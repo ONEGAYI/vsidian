@@ -30,6 +30,7 @@ import { createTableControls } from './tableControls'
 import { planCreateTable } from './tableCreate'
 import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion } from './tableRegion'
 import { createTableRegionPointer, setTableRegion, tableRegionField } from './tableRegionSelection'
+import { requestTableReworkOptimize } from './tableHeightScheduler'
 
 /** 表格行身份的解析树节点名（分隔行整体是一个 TableDelimiter 节点） */
 const TABLE_LINE_NODE_NAMES = new Set(['TableHeader', 'TableRow', 'TableDelimiter'])
@@ -1117,6 +1118,11 @@ export function runTableEditAt(view: EditorView, pos: number, op: TableEditOp): 
     changes: plan.changes,
     selection: { anchor: plan.selection },
     scrollIntoView: true,
+    // 删整行/删整列：事务自带立即重算（插入类不携带——操作后通常继续在
+    // 表内输入，立即重算会在空结构上定格；把手重排同款语义见 move 两入口）
+    effects: op === 'deleteRow' || op === 'deleteColumn'
+      ? [requestTableReworkOptimize.of(rows[0]!.lineFrom)]
+      : undefined,
   })
   return true
 }
@@ -1161,7 +1167,8 @@ export function runTableRowMove(view: EditorView, sourcePos: number, slot: numbe
   }
   // #296 六轮：光标随行搬移——不带 selection 的默认映射会把替换区间内部的
   // 光标归到区间左端，引用表上恰落前缀区端点（显形、网格破裂）
-  view.dispatch({ changes: plan.changes, ...moveSelectionSpec(view, plan) })
+  view.dispatch({ changes: plan.changes, ...moveSelectionSpec(view, plan),
+    effects: requestTableReworkOptimize.of(rows[0]!.lineFrom) })
   return true
 }
 
@@ -1174,7 +1181,8 @@ export function runTableColumnMove(view: EditorView, tableFrom: number, source: 
   const plan = planTableColumnMove(view.state.doc.toString(), rows, source, slot,
     view.state.selection.main.head)
   if (!plan) return false
-  view.dispatch({ changes: plan.changes, ...moveSelectionSpec(view, plan) })
+  view.dispatch({ changes: plan.changes, ...moveSelectionSpec(view, plan),
+    effects: requestTableReworkOptimize.of(rows[0]!.lineFrom) })
   return true
 }
 

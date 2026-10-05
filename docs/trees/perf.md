@@ -22,6 +22,7 @@ vsidian/
         ├── 2026-10-ref-expansion-244.md               # 递归引用驻留实测
         ├── 2026-10-ref-phase15-249.md                 # 1.5 期收口资源实测汇总（#249）
         ├── 2026-10-ref-phase2-291.md                  # 二期引用性能收口报告
+        ├── 2026-10-table-height-opt.md                # 多列表格高度优化实测报告
         └── data/                                      # 性能探针原始报告数据
             ├── browser-test-runner.json               # 浏览器调度实测数据
             ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
@@ -32,6 +33,7 @@ vsidian/
             ├── ref-phase15-249.json                   # #249 资源实测原始报告数据
             ├── ref-phase2-291.json                    # 二期性能收口数据
             ├── ref-virtual-243.json                   # 引用长文虚拟挂载原始数据
+            ├── table-height-opt-perf.json             # 多列高度优化性能数据
             ├── vault-index-storage-bench-recheck.json # #202 三档复测报告
             └── vault-index-storage-bench.json         # 索引存储基准原始数据（#195）
 <!-- file-tree:tree^id=perf:end -->

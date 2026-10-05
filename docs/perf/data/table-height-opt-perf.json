@@ -1,0 +1,342 @@
+{
+  "measuredAt": "2026-10-05T13:33:02.472Z",
+  "environment": {
+    "chromium": "151.0.7922.34",
+    "platform": "win32",
+    "viewport": "1280x720（Playwright 默认）",
+    "headless": true,
+    "note": "纯计算为页内 performance.now 直调；显示重排含一次 CDP 往返与 waitForFunction 轮询（上界读数）；原生输入为页面内 keydown→input 事件间隔（含浏览器派发与 CM6 处理，不含 Playwright 出站）"
+  },
+  "methodology": {
+    "pureCompute": "benchOptimize 直调 optimizeTableHeight：冷 = 每轮新建 tokenCache 的首跑；热 = 复用全局缓存的第 2..N 轮中位/均值（N=20）",
+    "displayReflow": "真实控制器：点击表内格→净编辑一字→光标离开（perfLeave）→等待发布计数 +1→两帧 rAF 后读取高度；3 次取中位",
+    "nativeInput": "表内格点击聚焦后连续键入 20 个英文字符，页面内记录 keydown→input 时间差，取中位"
+  },
+  "scenarios": {
+    "cols3xRows101": {
+      "cols": 3,
+      "rows": 101,
+      "metrics": {
+        "availablePx": 880,
+        "contentPx": 42
+      },
+      "pureCompute": {
+        "origin": "optimized",
+        "totalLines": 168,
+        "baselineLines": 201,
+        "candidates": 10,
+        "cellEvals": 3030,
+        "coldMs": 0.8,
+        "warmMedianMs": 0.6,
+        "warmMeanMs": 0.66,
+        "cacheEntriesAfterFirstRun": 209
+      },
+      "displayReflow": {
+        "note": "含一次离开派发（CDP evaluate 往返）+ waitForFunction 轮询 + 两帧 rAF——上界读数。heightBeforeAfter 只覆盖视口内已挂载行（CM6 视口裁剪），且挂载扫描可能已优化（before 即优化后高度）；整表高度下降的几何证据在 tableCaret/blockquoteTablePaint 套件断言",
+        "leaveToSettleMsMedian": 41,
+        "leaveToSettleMsAll": [
+          39,
+          41,
+          43
+        ],
+        "mountedHeightBeforeAfterPx": [
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          }
+        ],
+        "publishedOptimization": true
+      },
+      "nativeInput": {
+        "keys": 20,
+        "keydownToInputMedianMs": 0.4,
+        "keydownToInputMaxMs": 0.8
+      },
+      "domBudget": {
+        "mountedGridCells": 69,
+        "mountedGridRows": 23,
+        "totalCellsIfFlat": 303,
+        "viewportClipped": true,
+        "note": "CM6 视口裁剪：mountedGridCells 不随全表行数线性增长（100 行与 1000 行同为视口量级）"
+      },
+      "schedulerStats": {
+        "searches": 4,
+        "publishes": 4,
+        "discards": 0,
+        "maxCandidates": 10
+      },
+      "pageErrors": []
+    },
+    "cols3xRows1001": {
+      "cols": 3,
+      "rows": 1001,
+      "metrics": {
+        "availablePx": 880,
+        "contentPx": 42
+      },
+      "pureCompute": {
+        "origin": "degraded",
+        "totalLines": 0,
+        "baselineLines": 0,
+        "candidates": 0,
+        "cellEvals": 0,
+        "coldMs": 0.1,
+        "warmMedianMs": 0,
+        "warmMeanMs": 0.01,
+        "cacheEntriesAfterFirstRun": 0
+      },
+      "displayReflow": {
+        "note": "含一次离开派发（CDP evaluate 往返）+ waitForFunction 轮询 + 两帧 rAF——上界读数。heightBeforeAfter 只覆盖视口内已挂载行（CM6 视口裁剪），且挂载扫描可能已优化（before 即优化后高度）；整表高度下降的几何证据在 tableCaret/blockquoteTablePaint 套件断言",
+        "leaveToSettleMsMedian": 37,
+        "leaveToSettleMsAll": [
+          27,
+          37,
+          38
+        ],
+        "mountedHeightBeforeAfterPx": [
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          }
+        ],
+        "publishedOptimization": false
+      },
+      "nativeInput": {
+        "keys": 20,
+        "keydownToInputMedianMs": 0.5,
+        "keydownToInputMaxMs": 0.7
+      },
+      "domBudget": {
+        "mountedGridCells": 69,
+        "mountedGridRows": 23,
+        "totalCellsIfFlat": 3003,
+        "viewportClipped": true,
+        "note": "CM6 视口裁剪：mountedGridCells 不随全表行数线性增长（100 行与 1000 行同为视口量级）"
+      },
+      "schedulerStats": {
+        "searches": 4,
+        "publishes": 0,
+        "discards": 0,
+        "maxCandidates": 0
+      },
+      "pageErrors": []
+    },
+    "cols6xRows101": {
+      "cols": 6,
+      "rows": 101,
+      "metrics": {
+        "availablePx": 880,
+        "contentPx": 42
+      },
+      "pureCompute": {
+        "origin": "optimized",
+        "totalLines": 168,
+        "baselineLines": 201,
+        "candidates": 10,
+        "cellEvals": 6060,
+        "coldMs": 1.5,
+        "warmMedianMs": 0.9,
+        "warmMeanMs": 0.95,
+        "cacheEntriesAfterFirstRun": 414
+      },
+      "displayReflow": {
+        "note": "含一次离开派发（CDP evaluate 往返）+ waitForFunction 轮询 + 两帧 rAF——上界读数。heightBeforeAfter 只覆盖视口内已挂载行（CM6 视口裁剪），且挂载扫描可能已优化（before 即优化后高度）；整表高度下降的几何证据在 tableCaret/blockquoteTablePaint 套件断言",
+        "leaveToSettleMsMedian": 33,
+        "leaveToSettleMsAll": [
+          28,
+          33,
+          39
+        ],
+        "mountedHeightBeforeAfterPx": [
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1174,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1174,
+            "after": 1153,
+            "rows": 23
+          }
+        ],
+        "publishedOptimization": true
+      },
+      "nativeInput": {
+        "keys": 20,
+        "keydownToInputMedianMs": 0.5,
+        "keydownToInputMaxMs": 0.9
+      },
+      "domBudget": {
+        "mountedGridCells": 138,
+        "mountedGridRows": 23,
+        "totalCellsIfFlat": 606,
+        "viewportClipped": true,
+        "note": "CM6 视口裁剪：mountedGridCells 不随全表行数线性增长（100 行与 1000 行同为视口量级）"
+      },
+      "schedulerStats": {
+        "searches": 4,
+        "publishes": 4,
+        "discards": 0,
+        "maxCandidates": 10
+      },
+      "pageErrors": []
+    },
+    "cols6xRows1001": {
+      "cols": 6,
+      "rows": 1001,
+      "metrics": {
+        "availablePx": 880,
+        "contentPx": 42
+      },
+      "pureCompute": {
+        "origin": "degraded",
+        "totalLines": 0,
+        "baselineLines": 0,
+        "candidates": 0,
+        "cellEvals": 0,
+        "coldMs": 0,
+        "warmMedianMs": 0,
+        "warmMeanMs": 0.01,
+        "cacheEntriesAfterFirstRun": 0
+      },
+      "displayReflow": {
+        "note": "含一次离开派发（CDP evaluate 往返）+ waitForFunction 轮询 + 两帧 rAF——上界读数。heightBeforeAfter 只覆盖视口内已挂载行（CM6 视口裁剪），且挂载扫描可能已优化（before 即优化后高度）；整表高度下降的几何证据在 tableCaret/blockquoteTablePaint 套件断言",
+        "leaveToSettleMsMedian": 39,
+        "leaveToSettleMsAll": [
+          28,
+          39,
+          44
+        ],
+        "mountedHeightBeforeAfterPx": [
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1174,
+            "after": 1174,
+            "rows": 23
+          },
+          {
+            "before": 1174,
+            "after": 1174,
+            "rows": 23
+          }
+        ],
+        "publishedOptimization": false
+      },
+      "nativeInput": {
+        "keys": 20,
+        "keydownToInputMedianMs": 0.6,
+        "keydownToInputMaxMs": 0.8
+      },
+      "domBudget": {
+        "mountedGridCells": 138,
+        "mountedGridRows": 23,
+        "totalCellsIfFlat": 6006,
+        "viewportClipped": true,
+        "note": "CM6 视口裁剪：mountedGridCells 不随全表行数线性增长（100 行与 1000 行同为视口量级）"
+      },
+      "schedulerStats": {
+        "searches": 4,
+        "publishes": 0,
+        "discards": 0,
+        "maxCandidates": 0
+      },
+      "pageErrors": []
+    },
+    "cols5xRows125": {
+      "cols": 5,
+      "rows": 125,
+      "metrics": {
+        "availablePx": 880,
+        "contentPx": 42
+      },
+      "pureCompute": {
+        "origin": "optimized",
+        "totalLines": 208,
+        "baselineLines": 249,
+        "candidates": 10,
+        "cellEvals": 6250,
+        "coldMs": 1.6,
+        "warmMedianMs": 1,
+        "warmMeanMs": 1.03,
+        "cacheEntriesAfterFirstRun": 507
+      },
+      "displayReflow": {
+        "note": "含一次离开派发（CDP evaluate 往返）+ waitForFunction 轮询 + 两帧 rAF——上界读数。heightBeforeAfter 只覆盖视口内已挂载行（CM6 视口裁剪），且挂载扫描可能已优化（before 即优化后高度）；整表高度下降的几何证据在 tableCaret/blockquoteTablePaint 套件断言",
+        "leaveToSettleMsMedian": 42,
+        "leaveToSettleMsAll": [
+          42,
+          42,
+          47
+        ],
+        "mountedHeightBeforeAfterPx": [
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          },
+          {
+            "before": 1153,
+            "after": 1153,
+            "rows": 23
+          }
+        ],
+        "publishedOptimization": true
+      },
+      "nativeInput": {
+        "keys": 20,
+        "keydownToInputMedianMs": 0.6,
+        "keydownToInputMaxMs": 0.8
+      },
+      "domBudget": {
+        "mountedGridCells": 115,
+        "mountedGridRows": 23,
+        "totalCellsIfFlat": 625,
+        "viewportClipped": true,
+        "note": "CM6 视口裁剪：mountedGridCells 不随全表行数线性增长（100 行与 1000 行同为视口量级）"
+      },
+      "schedulerStats": {
+        "searches": 4,
+        "publishes": 4,
+        "discards": 0,
+        "maxCandidates": 10
+      },
+      "pageErrors": []
+    }
+  }
+}

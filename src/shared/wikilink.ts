@@ -305,6 +305,28 @@ export function linkLabelRangesInLine(line: string, base = 0): Array<{ from: num
   return labelRangeCandidates(line, base).map(({ from, to }) => ({ from, to }))
 }
 
+/**
+ * 行内链接/图片文字域（含目标闭合判定与图片标志，#371）：与
+ * linkLabelRangesInLine 共享同一栈配对核心（形态学单一实现），面向需要
+ * 区分「闭合才算链接/图片」（markdown-it 对未闭合形态按字面文本渲染）
+ * 与「图片域与链接域」的消费方——Live 表格列宽的可见文字采样是首个
+ * 使用者：闭合链接计文字域（目标不可见）、闭合图片按 widget 有界回退。
+ */
+export function linkLabelDomainRangesInLine(
+  line: string,
+  base = 0,
+): Array<{ from: number; to: number; image: boolean; closed: boolean }> {
+  if (!line.includes('[')) {
+    return []
+  }
+  return labelRangeCandidates(line, base).map(({ from, to, image, targetClosed }) => ({
+    from,
+    to,
+    image,
+    closed: targetClosed,
+  }))
+}
+
 /** 一次栈配对扫描的完整域产物（linkLabelRangesInLine 与
  *  imageAltRangesInLine 的共享核心——形态学单一实现，两入口各取所需） */
 interface LabelRangeCandidate {
