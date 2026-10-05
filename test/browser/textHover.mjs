@@ -182,6 +182,39 @@ try {
     await page.waitForTimeout(450)
   }
 
+  // ---- 场景 B2：长行横向滚动归浮层滚动区（2026-10-05 验收 5b 改版） ----
+  // 横条贴浮窗视口底缘的结构前提：溢出计入浮层 scrollEl（scrollWidth 超出、
+  // scrollLeft 可推进），code 区不再自持横滚（赋值回零），行号列 sticky 钉
+  // 视口左缘（横滚后视觉位置不动）。滚动条本体 headless 不渲染（5b 实测
+  // 盲区），断言落在滚动几何上——条贴视口底缘 ⟺ 滚动容器是 scrollEl。
+  {
+    const WIDE_TEXT = [
+      'const alpha = 1;',
+      `const bravo = 'x'.repeat(300); // ${'长'.repeat(200)}`,
+      'const charlie = 3;',
+      'const delta = 4;',
+      'const echo = 5;',
+      'const foxtrot = 6',
+    ].join('\n')
+    await hoverLinkWith(/^code\.ts$/)
+    const req = await lastRequest(0)
+    assert.ok(req)
+    await respondTextResult({ reqId: req.reqId, instanceId: req.instanceId, text: WIDE_TEXT })
+    await page.waitForTimeout(120)
+    const geo = await page.evaluate(() => window.readTextHScroll())
+    assert.equal(geo.present, true, '横滚几何探针要素在场（浮层 + code + gutter）')
+    assert.ok(geo.scrollWidth > geo.clientWidth + 50,
+      `长行溢出计入浮层滚动区（scrollWidth=${geo.scrollWidth} > clientWidth=${geo.clientWidth}）`)
+    assert.equal(geo.codeSelfScroll, 0, 'code 区不自持横滚（赋 scrollLeft 回零——溢出走宿主滚动区）')
+    assert.equal(geo.scrollLeftApplied, 80, `浮层滚动区横滚可推进（实测 ${geo.scrollLeftApplied}）`)
+    assert.ok(geo.gutterAt80 < 1,
+      `横滚后行号列钉视口左缘（视觉位置 ${geo.gutterAt80.toFixed(2)}px，未滚时 ${geo.gutterAt0.toFixed(2)}px——sticky 吸附）`)
+    assert.ok(geo.gutterWidth > 0, '行号列在布局中占宽')
+    passed++
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(450)
+  }
+
   // ---- 场景 C：#range=2-3 硬窗口（范围外不渲染、不可滚达） ----
   {
     await hoverLinkWith(/#range=2-3$/)

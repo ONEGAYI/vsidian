@@ -33,10 +33,17 @@ describe('可读文本悬停视图 CSS 契约（#340）', () => {
     expect(gutter).toMatch(/color:\s*var\(--vscode-editorLineNumber-foreground/)
   })
 
-  it('代码区：横向滚动承载（原生编辑器默认不折行）、纵向归浮层滚动区', () => {
+  it('行号列：横向滚动时钉视口左缘（sticky left）＋不透明底色遮住滑过文本（2026-10-05 验收 5b 改版）', () => {
+    const gutter = rule('.vsidian-text-gutter')
+    expect(gutter).toMatch(/position:\s*sticky/)
+    expect(gutter).toMatch(/left:\s*0/)
+    expect(gutter).toMatch(/z-index:\s*1/)
+    expect(gutter).toMatch(/background-color:\s*var\(--vscode-editor-background/)
+  })
+
+  it('代码区：不自持横滚（横向滚动归宿主滚动区——横条贴浮窗/卡片视口底缘，原生编辑器同款语义；2026-10-05 验收 5b 改版）', () => {
     const code = rule('.vsidian-text-code')
-    expect(code).toMatch(/overflow-x:\s*auto/)
-    expect(code).toMatch(/overflow-y:\s*hidden/)
+    expect(code).toMatch(/overflow:\s*visible/)
   })
 
   it('行内容：white-space pre（列对齐与尾随空格保真）', () => {
