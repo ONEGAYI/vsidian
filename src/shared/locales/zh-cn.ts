@@ -131,6 +131,13 @@ export const zhCn: Record<MessageKey, string> = {
   /** #299 跳转目标提示（hover.targetTip） */
   'setting.hoverTargetTip.title': '悬停显示跳转目标',
   'setting.hoverTargetTip.description': '悬停在引用上且不会弹出引用视图浮层时（如实时预览中未按住 Ctrl，或悬停预览总开关已关闭），短暂停留后显示目标位置的路径提示。独立于「悬停预览引用文档」总开关——关闭总开关后提示仍可用。',
+  /** #342（P3-10）外链预览设置（hover.externalEnabled / hover.externalShape） */
+  'setting.hoverExternalEnabled.title': '悬停预览外部链接卡片',
+  'setting.hoverExternalEnabled.description': '开启后悬停 HTTP(S) 网页链接会显示标题、摘要与域名卡片：由扩展宿主发起受限网络抓取（仅 HTML 元信息、限制超时与响应大小、拒绝内网地址），不发送笔记内容、路径或任何登录凭据。默认关闭——关闭时不发起任何网络请求。远程开发（Remote SSH）下抓取发生在远端机器。',
+  'setting.hoverExternalShape.title': '外链预览形态',
+  'setting.hoverExternalShape.description': '选择悬停外部链接时的呈现形态。「卡片」显示标题、摘要与域名；「原网页」在浮层内尽力显示网页本身——网页内容在编辑器本地加载，会连接目标站点及其第三方服务（与宿主侧仅抓取元信息的受限抓取是两条独立的网络路径），不继承日常浏览器的登录状态；网站拒绝被内嵌或无法安全显示时自动退回卡片并给出原因，退回不会改写本选择。抓取缓存按链接地址与形态分别记录。',
+  'setting.hoverExternalShapeCard': '卡片（标题摘要域名）',
+  'setting.hoverExternalShapePage': '原网页（浮层内显示网页）',
   /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停）；#298 改名并重写描述 */
   'setting.hoverLiveDirect.title': '实时预览中直接悬停显示',
   'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可直接打开引用视图浮层，无需修饰键；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停，或悬停中补按 Ctrl。关闭「悬停预览引用文档」总开关后本设置不再生效。',
@@ -447,6 +454,19 @@ export const zhCn: Record<MessageKey, string> = {
   /** 悬停文档预览（#218：浮层就地状态行；错误分态不弹宿主通知。#219 起
    *  双链与普通链接共用分态——目标原文不再裹双链括号；anchor-missing 为
    *  锚点缺失分态，不以全文替代） */
+  /** #342（P3-10）外链卡片失败分态：真实网络原因，不伪装成文件缺失 */
+  'hover.errorWebDisabled': '外部链接预览未开启（可在 Vsidian 设置页开启）。',
+  'hover.errorWebInvalidAddress': '目标地址被安全策略拒绝（内网、回环、带凭据或非法 URL）。',
+  'hover.errorWebTimeout': '目标网页响应超时。',
+  'hover.errorWebTooLarge': '目标网页超出响应大小上限。',
+  'hover.errorWebNotHtml': '目标不是可解析的网页（非 HTML 内容）。',
+  'hover.errorWebRedirects': '目标网页重定向次数过多。',
+  'hover.errorWebUnreachable': '无法访问目标网页（网络错误或服务器返回错误状态）。',
+  /** #343（P3-11）原网页形态：退回原因（真实已知原因）与无法确认说明 */
+  'hover.webFrameDenied': '已退回卡片：该网站限制嵌入显示（X-Frame-Options / CSP frame-ancestors），可在浏览器打开。',
+  'hover.webFrameHttp': '已退回卡片：HTTP 页面无法在安全上下文中嵌入显示，可在浏览器打开。',
+  'hover.webPageNote': '网页内容在本浮层内加载，会与目标站点及其第三方服务建立连接；不继承日常浏览器登录态。跨源内容不可观测，无法确认其显示是否完整——若显示异常，请退回卡片或在浏览器打开。',
+  'hover.webFallbackToCard': '退回卡片',
   'hover.loading': '正在加载预览…',
   'hover.errorUnsupported': '不支持的目标形态：没有可预览的目标（外部网页不在预览范围）',
   'hover.errorNoWorkspace': '当前文档不在任何工作区文件夹内：无法解析链接目标进行预览',
@@ -455,13 +475,41 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorNonMarkdown': '{target} 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
   'hover.errorReadFailed': '读取目标文档失败',
   'hover.errorAnchorMissing': '目标笔记中不存在锚点：{target}#{anchor}（不会以全文替代显示）',
+  /** #337 PDF 悬停预览：锚点语法非法（page=0/非数字/未知键/重复键等，
+   *  不静默回落第一页——修正链接后可重试） */
+  'hover.errorAnchorInvalid': '锚点语法无效：{target}#{anchor}（页码须为正整数，如 #page=3；不会静默改用第一页）',
   'hover.errorWatchCapacity': '同时打开的引用笔记过多。请关闭其他预览或卡片后重新打开。',
   'hover.errorSourceExpired': '来源笔记已变更或关闭。请重新打开此引用。',
   'hover.errorCycle': '当前引用路径中已包含这篇笔记。',
   'hover.errorDepth': '已达到引用展开的最大层级。',
   'hover.errorBudget': '当前引用树已达到资源上限。',
+  /** #340（P3-08）可读文本悬停的准入与锚点错误分态：就地报错不静默
+   *  回顶/截断；{maxMb} 为单文件准入上限（MB），失败均可经浮层标题栏
+   *  打开入口在原生编辑器继续 */
+  'hover.errorTextBinary': '{target} 是二进制文件，无法作为文本预览。可点击右上角打开按钮在原生编辑器中打开。',
+  'hover.errorTextEncoding': '{target} 不是有效的 UTF-8 文本，无法可靠预览。可点击右上角打开按钮，用「Reopen with Encoding」选择正确编码。',
+  'hover.errorTextTooLarge': '{target} 超过单文件预览上限（{maxMb} MB），不读取完整内容。可点击右上角打开按钮在原生编辑器中打开。',
+  'hover.errorTextLongLine': '{target} 含超长行，为避免预览卡顿已停止加载（不截断显示）。可点击右上角打开按钮在原生编辑器中打开。',
+  'hover.errorTextAnchorFormat': '锚点语法非法：#{anchor}（文本锚点支持 #line=N 与 #range=B-E，可组合；行号为正整数）',
+  'hover.errorTextAnchorOrder': '锚点窗口非法：#{anchor}（range 的起始行不得大于结束行）',
+  'hover.errorTextAnchorBounds': '锚点越界：#{anchor}（行号超出文件总行数）',
+  'hover.errorTextAnchorOutside': '锚点冲突：#{anchor}（line 不在 range 窗口内；不会静默改用其他位置）',
   /** #220 引用 Reading 内容：浮层内笔记属性区展开/折叠按钮的无障碍文案
    *  （aria-label 与 title 同词；按钮是唯一操作入口，标题行悬停只负责显示） */
+  /** #337 PDF 悬停渲染：页码信息行与渲染失败分态（就地呈现，不弹宿主
+   *  通知；加密文件首批提示在原应用打开，不采集密码） */
+  'hover.pdfPageInfo': '第 {page} / {total} 页',
+  /** #339 页码行的缩放反馈（相对适合宽度的达成百分比） */
+  'hover.pdfPageInfoZoom': '第 {page} / {total} 页 · {percent}%',
+  /** #339 链接层禁用提示（显式安全边界） */
+  'hover.pdfLinkExternalOnly': '预览中仅支持在浏览器打开 http(s) 链接',
+  'hover.pdfLinkUnsupported': '此链接操作在预览中已禁用（安全限制）',
+  'hover.pdfLinkUnresolved': '链接目标无法解析',
+  'hover.pdfErrorCorrupt': 'PDF 文件已损坏或不是有效的 PDF，无法预览',
+  'hover.pdfErrorEncrypted': '此 PDF 已加密，暂不支持在预览中打开。请使用本地 PDF 阅读器打开原文件。',
+  'hover.pdfErrorPageRange': '页码超出范围：请求第 {page} 页，该 PDF 共 {total} 页（不会静默跳到第一页）',
+  'hover.pdfErrorResource': 'PDF 资源装载或渲染失败，请重试',
+  'hover.pdfErrorLoadFailed': 'PDF 渲染组件装载失败（扩展安装可能不完整）',
   'hover.content.fmExpand': '展开笔记属性',
   'hover.content.fmCollapse': '收起笔记属性',
   /** #222 Reading 嵌入卡片：装载中文案与卡片头部打开入口的无障碍文案
@@ -692,6 +740,12 @@ export const zhCn: Record<MessageKey, string> = {
   'command.editor.addCursorBelow.title': '在下方添加光标',
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
+  'command.ui.hoverPdfPageNext.title': 'PDF 预览：下一页',
+  'command.ui.hoverPdfPagePrev.title': 'PDF 预览：上一页',
+  /** #339 PDF 缩放三操作（只读预览呈现；默认未绑定） */
+  'command.ui.hoverPdfZoomIn.title': 'PDF 预览：放大',
+  'command.ui.hoverPdfZoomOut.title': 'PDF 预览：缩小',
+  'command.ui.hoverPdfZoomReset.title': 'PDF 预览：适合宽度',
   'command.ui.embedToggleMode.title': '切换引用的内部视图模式',
   /** P2-10 引用 Live 操作入口（保存目标/显式关闭/冲突三项；默认均未绑定） */
   'command.embed.saveTarget.title': '保存焦点引用的目标',
@@ -703,6 +757,8 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
   'host.wikilinkBlockMissing': '已在目标文档中打开{link}，但未找到块引用「^{blockId}」（块 id 是块尾行行尾的 ` ^id` 标记）',
+  /** #340（P3-08）text 目标双链跳转的锚点非法提示（仍原生打开到顶部） */
+  'host.wikilinkTextAnchorInvalid': '已在编辑器中打开{link}，但锚点「#{anchor}」非法（文本锚点支持 #line=N 与 #range=B-E，可组合；行号为正整数且不得越界）',
 
   // ---- #160 普通链接锚点定位（host 通知）----
   'host.linkAnchorMissing':

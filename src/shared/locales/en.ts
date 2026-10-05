@@ -152,6 +152,13 @@ export const en = {
   'setting.hoverTargetTip.title': 'Show jump target on hover',
   'setting.hoverTargetTip.description': 'When hovering a reference would not open the preview popup (for example without holding Ctrl in the live view, or while the hover preview master switch is off), show a brief path tip for the target location after a short dwell. Independent of "Preview references on hover" — the tip stays available with the master switch off.',
   /** #221 Live hover trigger (Ctrl+hover vs direct hover); #298 renamed + rewritten */
+  /** #342 (P3-10) external link preview settings (hover.externalEnabled / hover.externalShape) */
+  'setting.hoverExternalEnabled.title': 'Preview external link cards on hover',
+  'setting.hoverExternalEnabled.description': 'When enabled, hovering an HTTP(S) web link shows a card with its title, summary, and domain: the extension host performs a restricted fetch (HTML metadata only, with timeout, size limits, and private-network rejection) and never sends note content, paths, or credentials. Off by default — no network requests are made while disabled. Under Remote SSH the fetch happens on the remote machine.',
+  'setting.hoverExternalShape.title': 'External link preview shape',
+  'setting.hoverExternalShape.description': 'Choose how hovered external links are presented. "Card" shows the title, summary, and domain; "Live page" renders the page itself inside the popup — the page loads locally in the editor and connects to the target site and its third-party services (an independent network path from the host-side metadata-only restricted fetch), and your everyday browser login is not carried over; sites that refuse embedding or cannot be shown safely fall back to the card with the reason, and a fallback never rewrites this choice. Fetch caches are tracked per link address and shape.',
+  'setting.hoverExternalShapeCard': 'Card (title, summary, domain)',
+  'setting.hoverExternalShapePage': 'Live page (rendered in the popup)',
   'setting.hoverLiveDirect.title': 'Show previews directly on hover in the live view',
   'setting.hoverLiveDirect.description': 'Point at a link in the live preview to open the reference popup directly, without a modifier key. When off, hold Ctrl (Cmd on macOS) while hovering, or press Ctrl mid-hover. Has no effect while "Preview references on hover" is off.',
   'setting.codeblockCard.title': 'Code block card',
@@ -483,6 +490,19 @@ export const en = {
    *  the states — the raw target is no longer wrapped in wikilink brackets;
    *  anchor-missing covers missing heading/block anchors without falling back
    *  to the full document) */
+  /** #342 (P3-10) external card failure states: real network causes, never masked as missing files */
+  'hover.errorWebDisabled': 'External link preview is not enabled (turn it on in the Vsidian settings page).',
+  'hover.errorWebInvalidAddress': 'The target address was rejected by the safety policy (private network, loopback, credentials, or malformed URL).',
+  'hover.errorWebTimeout': 'The target page timed out.',
+  'hover.errorWebTooLarge': 'The target page exceeds the response size limit.',
+  'hover.errorWebNotHtml': 'The target is not a parsable web page (non-HTML content).',
+  'hover.errorWebRedirects': 'The target page redirected too many times.',
+  'hover.errorWebUnreachable': 'The target page could not be reached (network error or error status).',
+  /** #343 (P3-11) live page shape: fallback reasons (real known causes) and the honest note */
+  'hover.webFrameDenied': 'Fell back to the card: this site restricts embedding (X-Frame-Options / CSP frame-ancestors); you can open it in the browser.',
+  'hover.webFrameHttp': 'Fell back to the card: an HTTP page cannot be embedded in a secure context; you can open it in the browser.',
+  'hover.webPageNote': 'The page loads inside this popup and connects to the target site and its third-party services; your everyday browser login is not carried over. Cross-origin content cannot be observed, so there is no way to confirm it renders fully — if it looks wrong, fall back to the card or open it in the browser.',
+  'hover.webFallbackToCard': 'Back to card',
   'hover.loading': 'Loading preview…',
   'hover.errorUnsupported': 'Unsupported link form: no preview target to show (web pages are out of scope)',
   'hover.errorNoWorkspace': 'The current document is not in any workspace folder: link targets cannot be resolved for preview',
@@ -491,15 +511,46 @@ export const en = {
   'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
   'hover.errorReadFailed': 'Failed to read the target document',
   'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',
+  /** #337 PDF hover preview: invalid anchor syntax (page=0 / non-numeric /
+   *  unknown key / duplicate key - never silently falls back to page 1; fix
+   *  the link and retry) */
+  'hover.errorAnchorInvalid': 'Invalid anchor syntax: {target}#{anchor} (the page number must be a positive integer such as #page=3; page 1 is not silently used)',
   'hover.errorWatchCapacity': 'Too many referenced notes are open. Close another preview or card, then reopen this one.',
   'hover.errorSourceExpired': 'The source note changed or closed. Reopen this reference to refresh it.',
   'hover.errorCycle': 'This note is already in the current reference path.',
   'hover.errorDepth': 'The reference depth limit has been reached.',
   'hover.errorBudget': 'The reference tree has reached its resource limit.',
+  /** #340 (P3-08) readable-text admission and anchor error states: reported
+   *  in place, never silently falling back to the top or truncating; {maxMb}
+   *  is the per-file admission cap in MB; every failure can continue in the
+   *  native editor via the popup header open action */
+  'hover.errorTextBinary': '{target} is a binary file and cannot be previewed as text. Use the open button in the top-right corner to open it in the native editor.',
+  'hover.errorTextEncoding': '{target} is not valid UTF-8 text and cannot be previewed reliably. Use the open button in the top-right corner, then "Reopen with Encoding" to pick the right encoding.',
+  'hover.errorTextTooLarge': '{target} exceeds the per-file preview cap ({maxMb} MB); the full content is not read. Use the open button in the top-right corner to open it in the native editor.',
+  'hover.errorTextLongLine': '{target} contains extremely long lines; loading stopped to keep the preview responsive (no truncated display). Use the open button in the top-right corner to open it in the native editor.',
+  'hover.errorTextAnchorFormat': 'Invalid anchor syntax: #{anchor} (text anchors support #line=N and #range=B-E, combinable; line numbers are positive integers)',
+  'hover.errorTextAnchorOrder': 'Invalid anchor window: #{anchor} (the range start line must not exceed the end line)',
+  'hover.errorTextAnchorBounds': 'Anchor out of bounds: #{anchor} (line number exceeds the file total)',
+  'hover.errorTextAnchorOutside': 'Anchor conflict: #{anchor} (line is outside the range window; no other position is silently used)',
   /** #220 referenced Reading content: accessibility labels of the expand/
    *  collapse button of the note-properties section inside the hover popup
    *  (aria-label and title share the word; the button is the only operable
    *  entry, hovering the header row only reveals it) */
+  /** #337 PDF hover rendering: page info line and render failure states
+   *  (shown in place, never as host notifications; encrypted files prompt to
+   *  open the original in a local reader - no password collection) */
+  'hover.pdfPageInfo': 'Page {page} of {total}',
+  /** #339 zoom feedback on the page-info line (achieved percent vs fit width) */
+  'hover.pdfPageInfoZoom': 'Page {page} of {total} - {percent}%',
+  /** #339 link-layer disabled tooltips (explicit security boundary) */
+  'hover.pdfLinkExternalOnly': 'Only http(s) links can be opened in the browser from the preview',
+  'hover.pdfLinkUnsupported': 'This link action is disabled in the preview (security restriction)',
+  'hover.pdfLinkUnresolved': 'The link target could not be resolved',
+  'hover.pdfErrorCorrupt': 'The PDF file is damaged or not a valid PDF; it cannot be previewed',
+  'hover.pdfErrorEncrypted': 'This PDF is encrypted and cannot be opened in the preview yet. Open the original file in a local PDF reader.',
+  'hover.pdfErrorPageRange': 'Page number out of range: page {page} was requested but the PDF has {total} pages (page 1 is not silently used)',
+  'hover.pdfErrorResource': 'Failed to load or render the PDF resource; please retry',
+  'hover.pdfErrorLoadFailed': 'The PDF renderer failed to load (the extension installation may be incomplete)',
   'hover.content.fmExpand': 'Expand note properties',
   'hover.content.fmCollapse': 'Collapse note properties',
   /** #222 Reading embed cards: loading line and the open-target entry in the
@@ -742,6 +793,12 @@ export const en = {
   'command.editor.addCursorBelow.title': 'Add cursor below',
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
+  'command.ui.hoverPdfPageNext.title': 'PDF preview: next page',
+  'command.ui.hoverPdfPagePrev.title': 'PDF preview: previous page',
+  /** #339 PDF zoom trio (read-only preview presentation; unbound by default) */
+  'command.ui.hoverPdfZoomIn.title': 'PDF preview: zoom in',
+  'command.ui.hoverPdfZoomOut.title': 'PDF preview: zoom out',
+  'command.ui.hoverPdfZoomReset.title': 'PDF preview: fit width',
   'command.ui.embedToggleMode.title': 'Toggle reference internal view mode',
   /** P2-10 reference Live action entries (save target / explicit close / conflict trio; all unbound by default) */
   'command.embed.saveTarget.title': 'Save focused reference target',
@@ -753,6 +810,8 @@ export const en = {
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
   'host.wikilinkBlockMissing': 'Opened {link} in the target document, but the block reference "^{blockId}" was not found (block ids are ` ^id` markers at the end of a block’s last line)',
+  /** #340 (P3-08) invalid-anchor notice for text-target wikilink jumps (still opened natively at the top) */
+  'host.wikilinkTextAnchorInvalid': 'Opened {link} in the editor, but the anchor "#{anchor}" is invalid (text anchors support #line=N and #range=B-E, combinable; line numbers are positive integers within the file)',
 
   // ---- #160 普通链接锚点定位（host 通知）----
   'host.linkAnchorMissing':

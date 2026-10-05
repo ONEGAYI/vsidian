@@ -183,6 +183,8 @@ Object.assign(window, {
     return Array.from(el.querySelectorAll<HTMLImageElement>('img')).map((img) => ({
       rawSrc: img.dataset['vsidianImgSrc'] ?? '',
       appliedSrc: img.getAttribute('src') ?? '',
+      state: img.dataset['vsidianImgState'] ?? '',
+      alt: img.getAttribute('alt') ?? '',
     }))
   },
   /** 滚动浮层内容到指定位置（保活下的滚动承载） */

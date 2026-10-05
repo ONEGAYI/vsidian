@@ -235,3 +235,36 @@ jobs:
             out/test/browser-runs/run-*/*.log
             out/test/browser-runs/run-*/*.phases.jsonl
           if-no-files-found: ignore
+
+  # #344（P3-12 收口）真宿主高亮对照套件接线：#340 产出的生产
+  # TextAppearanceService 对照（语法层颜色与 #335 探针锚点一致）。与常规
+  # 集成回归的差异：不 --disable-extensions（内置语言/主题扩展必须在场）
+  # 并预置 Default Dark Modern——单宿主单轮，报告 .vscode-test/text-appearance.log。
+  # 与 browser 同为非必需检查（2026-09 核查保护规则仅含 unit / integration /
+  # style-contract）；失败红灯保留完整报告，不阻断必需检查。
+  text-appearance:
+    name: text-appearance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 安装 VSCode 宿主所需系统库
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0t64 libdrm2 \
+            libxkbcommon0 libgbm1 libasound2t64 libgtk-3-0t64 libsecret-1-0 libxkbfile1
+      - name: 真宿主文本外观对照（1.82.3，内置扩展在场）
+        run: xvfb-run -a npm run test:text-appearance
+      - name: 保存对照报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: text-appearance-a${{ github.run_attempt }}
+          path: .vscode-test/text-appearance.log
+          if-no-files-found: warn

@@ -384,6 +384,31 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.ui.hoverPdfPageNext",
+        "title": "%command.ui.hoverPdfPageNext.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.hoverPdfPagePrev",
+        "title": "%command.ui.hoverPdfPagePrev.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.hoverPdfZoomIn",
+        "title": "%command.ui.hoverPdfZoomIn.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.hoverPdfZoomOut",
+        "title": "%command.ui.hoverPdfZoomOut.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.hoverPdfZoomReset",
+        "title": "%command.ui.hoverPdfZoomReset.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.embedToggleMode",
         "title": "%command.ui.embedToggleMode.title%",
         "category": "Vsidian"
@@ -484,6 +509,7 @@
     "test:integration": "node esbuild.mjs && node ./test/integration/runTest.mjs",
     "test:browser": "node test/browser/run.mjs",
     "test:keybindings-host": "node test/browser/keybindingsHost.mjs",
+    "test:text-appearance": "node esbuild.mjs && node test/integration/runTextAppearance.mjs",
     "check:stylecontract": "node scripts/checkStyleContract.mjs",
     "check:stylecontract:baseline": "node scripts/checkStyleContract.mjs --verify-baseline",
     "release:check": "npm run check:stylecontract:baseline && npm run check:stylecontract && node scripts/release.mjs",
@@ -520,17 +546,23 @@
     "@lezer/highlight": "1.2.3",
     "@lezer/markdown": "1.7.2",
     "@vscode/markdown-it-katex": "1.1.2",
+    "htmlparser2": "12.0.0",
     "katex": "0.16.47",
     "markdown-it": "15.0.2",
     "mermaid": "11.12.2",
+    "pdfjs-dist": "6.4.299",
+    "vscode-oniguruma": "1.7.0",
+    "vscode-textmate": "9.0.0",
     "yaml": "2.9.1"
   },
   "devDependencies": {
+    "@pdf-lib/fontkit": "1.1.1",
     "@types/node": "22.20.4",
     "@types/vscode": "1.82.0",
     "@vscode/test-electron": "3.1.0",
     "esbuild": "0.28.2",
     "jsdom": "30.1.1",
+    "pdf-lib": "1.17.1",
     "playwright": "1.62.1",
     "sql.js": "1.14.2",
     "typescript": "6.0.3",

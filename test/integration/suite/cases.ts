@@ -5,10 +5,15 @@ import * as vscode from 'vscode'
 import { liveEmbedReady, mixedEmbedReady, readingEmbedCard, readingEmbedHeightReady } from './embedReadiness'
 import { probe278Cases } from './probe278'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import * as nodeHttps from 'node:https'
+import * as nodePath from 'node:path'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
+import type { HoverPreviewPdfProbe, ReadingEmbedPdfProbe } from '../../../src/shared/protocol'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
 import { CHROME_CONTRACT_PROBES } from '../../../src/shared/chromeContract'
+import { buildThreePageColorPdf } from '../../../test/pdfSample.mjs'
 
 /** #134 历史基线旧片段用例（基线 JSON 的 legacySnippetCases 元素形态） */
 interface LegacySnippetCase {
@@ -985,7 +990,8 @@ interface ViewState {
     state: 'loading' | 'content' | 'error'
     note: string
     blocks: number
-    scope: 'full' | 'heading' | 'block' | ''
+    /** #337 起 'pdf' 标记 PDF 载荷形态 */
+    scope: 'full' | 'heading' | 'block' | 'pdf' | ''
     fm?: 'none' | 'collapsed' | 'expanded'
     imageSrcs?: string[]
     internalMode?: 'reading' | 'live'
@@ -993,6 +999,34 @@ interface ViewState {
     liveDirty?: boolean
     liveSuspended?: boolean
     closeDialogOpen?: boolean
+    /** #337 PDF 渲染观测（绘制层证据：canvas 实际尺寸与非白像素比例）。
+     *  #339（P3-07）追加 zoom/textLayerPages/linkAnnotations（可选——
+     *  旧 webview 缺省缺席）。形状收敛为共享类型（protocol.ts 单一
+     *  事实源——本地镜像曾漂移，review-loops 三期收敛） */
+    pdf?: HoverPreviewPdfProbe
+    /** #343 请求配对身份（注入回包用；旧 webview 缺省） */
+    instanceId?: string
+    reqId?: number
+    /** #343 外链视图观测（null/缺省 = 非 web 形态；旧 webview 缺省） */
+    web?: {
+      shape: 'card' | 'page'
+      frameMounted: boolean
+      sandbox: string
+      referrerPolicy: string
+      src: string
+      frameWidth: number
+      frameHeight: number
+      fallbackButton: boolean
+      note: string
+    } | null
+    /** #344（P3-12 收口）text 视图观测（null = 非 text 形态/未装载）：
+     *  textStats 虚拟化统计与首个内联着色 span 的计算色（绘制层断言面） */
+    text?: {
+      renderedLines: number
+      totalLines: number
+      coloredSpans: number
+      firstSpanColor: string
+    } | null
   }
   /** #299 跳转目标提示观测：在场与路径文本 */
   targetTip?: {
@@ -1012,6 +1046,10 @@ interface ViewState {
     rootHost?: 'reading' | 'live'
     /** #224 内容文本字符数（未保存修改推送后刷新可见性断言） */
     textLen?: number
+    /** #344（P3-12 收口）text 视图绘制层观测（null = markdown 装载）：
+     *  着色 span 计数与首个着色 span 的计算色（无 token 为 ''） */
+    textStats?: { renderedLines: number; totalLines: number } | null
+    textPaint?: { coloredSpans: number; firstSpanColor: string } | null
     /** #243 现有虚拟窗口观测；仅取目标自身块数，排除子卡正文长度。 */
     viewStats?: { totalBlocks: number; mountedBlocks: number } | null
     /** P2-04（#281）内部模式与目标编辑端口观测 */
@@ -1033,6 +1071,10 @@ interface ViewState {
     conflictChoice?: 'none' | 'open' | 'collapsed'
     conflictComparePending?: boolean
     conflictNotice?: boolean
+    /** #338（P3-06）PDF 视图观测（嵌入卡 pdf 载荷的绘制层断言载体：
+     *  phase/page/totalPages/mountedPages/canvasBytes/nonWhiteRatio——
+     *  非 pdf 卡缺省缺席）。形状收敛为共享类型（同 hoverPreview.pdf） */
+    pdf?: ReadingEmbedPdfProbe | null
     /** P2-09（#286）递归深度与直接父身份——根级计数口径的观测维度 */
     depth?: number
     parentInstanceId?: string | null
@@ -1245,6 +1287,7 @@ async function waitViewState(
     // 超时附最后观测快照（关键字段）——定位「卡在哪个谓词」不再盲猜
     if (lastSeen !== undefined) {
       const s = lastSeen as unknown as Record<string, unknown>
+      const hover = s['hoverPreview'] as Record<string, unknown> | undefined
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
@@ -1254,6 +1297,11 @@ async function waitViewState(
         imageProbe: s['imageProbe'],
         readingEmbed: s['readingEmbed'],
         liveEmbedReveal: s['liveEmbedReveal'],
+        readingWikilinkCount: s['readingWikilinkCount'],
+        hoverPreview: hover === undefined ? undefined : {
+          open: hover['open'], state: hover['state'], note: hover['note'],
+          pdf: hover['pdf'],
+        },
       })}`)
     }
     throw err
@@ -4460,7 +4508,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const diskSource = await readDisk('wikilinks.md')
     const diskTarget = await readDisk('目标笔记.md')
 
-    // 目标面板切到阅读模式（活动 tab = 目标面板）
+    // 目标面板切到阅读模式（活动 tab = 目标面板）。waitSessionReady 只等
+    // webview ready，不等 tab 激活落地——beside 打开后活动 tab 翻转与
+    // ready 上报的完成顺序在 CI 慢机上可倒置，toggleViewMode 按
+    // activeTab 推导目标（textEditorProvider deriveActiveTabMode），届时
+    // 会误切源面板、目标面板恒 live，poll 干等 20s 超时（CI s1 间歇挂的
+    // 失败形态）。与同 describe 相邻用例（waitSessionReady 后紧跟
+    // waitActiveCustomTab）一致化，显式等目标面板成为活动 tab 再切换
+    await waitActiveCustomTab('目标笔记.md')
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const before = await poll('目标进入阅读模式', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
@@ -11947,6 +12002,154 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await rm(`${wsDir}/git-switch`, { recursive: true, force: true }).catch(() => {})
   }],
 
+  ['悬停 PDF：双链 #page 指定页真实绘制、非法页码分态与零写回（#337）', async () => {
+    await openWithEditor('悬停 PDF.md')
+    await waitSessionReady('悬停 PDF.md')
+    const uri = wsUri('悬停 PDF.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停 PDF.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 4)
+    const parentBefore = await readDisk('悬停 PDF.md')
+
+    // 场景 1：全文双链 [[资料.pdf]]（index 0）→ pdf 载荷 → 第一页真实绘制
+    //（绘制层证据：canvas 实际尺寸与非白像素比例——非 DOM 存在性）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const first = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content')
+    const firstPdf = first.hoverPreview!.pdf!
+    assert(firstPdf.page === 1, `无页码从第一页开始（实际 ${firstPdf.page}）`)
+    assert(firstPdf.totalPages === 3, `总页数来自真实 PDF.js 装载（实际 ${firstPdf.totalPages}）`)
+    assert(firstPdf.canvasWidth > 0 && firstPdf.canvasHeight > 0, 'canvas 实际尺寸入观测面')
+    assert(firstPdf.nonWhiteRatio > 0.5, `canvas 非白像素比例应过半（实测 ${firstPdf.nonWhiteRatio}——绘制层证据）`)
+    assert(first.hoverPreview?.scope === 'pdf', 'scope 标记 pdf 载荷形态')
+    assert(first.hoverPreview?.note === '资料.pdf', '浮层目标标识为根内相对路径')
+
+    // 零写回：父文档不脏、磁盘不动、无 applyEdit（PDF 全程只读）
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '悬停 PDF 不得弄脏父文档')
+    assert(await readDisk('悬停 PDF.md') === parentBefore, '悬停 PDF 不得改写磁盘')
+    const hoverState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(hoverState.appliedEdits === 0, '悬停 PDF 链路不得产生 applyEdit')
+
+    // 场景 2：指定页双链 [[资料.pdf#page=2]]（index 1）→ 宿主解析页码 → 第 2 页绘制
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+    const second = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content' && v.hoverPreview.pdf?.page === 2)
+    assert(second.hoverPreview!.pdf!.nonWhiteRatio > 0.5, '指定页绘制层证据（非白比例）')
+
+    // 场景 3：非法锚点 [[资料.pdf#page=0]]（index 2）→ anchor-invalid 分态
+    //（不静默回落第一页；修正引用后可重试）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 2 })
+    const invalid = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'error')
+    assert(invalid.hoverPreview?.pdf?.phase === 'error' || invalid.hoverPreview?.pdf?.phase === 'idle',
+      '非法锚点不进入绘制态')
+    assert(invalid.hoverPreview?.note.includes('page=0'),
+      `anchor-invalid 文案附锚点原文（实际 ${invalid.hoverPreview?.note}）`)
+
+    // 场景 4：普通链接 fragment 不解析（[fragment](资料.pdf#page=3)）→
+    // 悬停仍可预览但从第一页开始（index 0 的 md 链接为「本地 PDF」——
+    // 断言改用第 1 个链接即 fragment 链接：md 链接序按文档顺序 0=本地、
+    // 1=fragment；此处驱动 1 号链接验证 fragment 不生效）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 2 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'md' })
+    const md = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content')
+    assert(md.hoverPreview?.pdf?.page === 1, `普通链接 fragment 不解析——从第一页开始（实际 ${md.hoverPreview?.pdf?.page}）`)
+
+    // 场景 5（#339）：文本+链接样本双链 [[文本链接.pdf]]（第 5 枚 wikilink，
+    // index 4）→ 真实 TextLayer 装载（带 span 文本层）、缺省适合宽度
+    //（zoom=1）与链接层挂载（六枚注解矩阵——分类矩阵的宿主侧在场观测；
+    // 交互细节由浏览器套件 pdfZoomCopyLinks 钉住）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1, link: 'md' })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 4 })
+    const textPdf = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content' &&
+      (v.hoverPreview.pdf?.textLayerPages ?? 0) >= 1 &&
+      (v.hoverPreview.pdf?.linkAnnotations ?? 0) >= 6, 0, 120000)
+    const tp = textPdf.hoverPreview!.pdf!
+    assert(tp.zoom === 1, `缺省适合容器宽（zoom=1，实际 ${tp.zoom}）`)
+    assert((tp.textLayerPages ?? 0) >= 1, `文本层真实装载（实测 ${tp.textLayerPages} 页带 span）`)
+    assert((tp.linkAnnotations ?? 0) >= 6, `链接层注解矩阵挂载（实测 ${tp.linkAnnotations} 枚）`)
+    assert(tp.nonWhiteRatio > 0, '文本样本绘制层证据（非白比例>0——黑字墨迹）')
+    // 场景 5 收尾：离开链接（浮层关闭）后再核零写回
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 4 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    const finalDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(finalDoc?.isDirty === false, '文本层/链接层观测不得弄脏父文档')
+    assert(await readDisk('悬停 PDF.md') === parentBefore, '文本层/链接层观测不得改写磁盘')
+  }],
+
+  ['嵌入 PDF：容器矩阵绘制、挂载有界与 changed 重载钳制（#338）', async () => {
+    await openWithEditor('嵌入 PDF.md')
+    await waitSessionReady('嵌入 PDF.md')
+    const uri = wsUri('嵌入 PDF.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('嵌入 PDF.md')
+
+    // 容器矩阵：独占行/混排/引用/表格格内/递归孙卡全部装载绘制（真实
+    // pdfjs + 宿主 pdf 载荷链路；绘制层证据 = nonWhiteRatio 像素采样）
+    const shown = await waitViewState('嵌入 PDF.md', (v) => {
+      const pdfCards = (v.readingEmbed ?? []).filter((c) => c.pdf !== undefined && c.pdf !== null)
+      return v.viewMode === 'reading' &&
+        pdfCards.length >= 5 && pdfCards.every((c) => c.pdf!.phase === 'content')
+    }, 0, 120000)
+    const pdfCards = (shown.readingEmbed ?? []).filter((c) => c.pdf != null)
+    assert(pdfCards.length >= 5, `容器矩阵五枚 PDF 卡在场（实际 ${pdfCards.length}）`)
+    const sole = pdfCards.find((c) => c.inner === '长文.pdf')
+    assert(sole?.pdf?.totalPages === 12, `长文 12 页真实装载（实际 ${sole?.pdf?.totalPages}）`)
+    assert(sole?.pdf?.page === 1, '无锚点独占行卡从第一页开始')
+    assert(sole.pdf.nonWhiteRatio > 0.5, `独占行卡绘制层证据（实测 ${sole.pdf.nonWhiteRatio}）`)
+    assert(sole.pdf.mountedPages < 12, `画布挂载有界（实测 ${sole.pdf.mountedPages}/12——不随总页数增长）`)
+    const mixed = pdfCards.find((c) => c.inner === '长文.pdf#page=2')
+    assert(mixed?.pdf?.page === 2, `混排卡初始定位第 2 页（实际 ${mixed?.pdf?.page}）`)
+    const quote = pdfCards.find((c) => c.inner === '长文.pdf#page=3')
+    assert(quote?.pdf?.page === 3, `引用内卡初始定位第 3 页（实际 ${quote?.pdf?.page}）`)
+    const table = pdfCards.filter((c) => c.inner === '长文.pdf')[1]
+    assert(table?.pdf?.phase === 'content', '表格格内卡绘制态')
+    const grand = pdfCards.find((c) => (c.depth ?? 1) >= 2)
+    assert(grand?.pdf?.phase === 'content', '递归孙卡（depth≥2）绘制态')
+    assert(grand.pdf.nonWhiteRatio > 0.5, `递归孙卡绘制层证据——probe 的 canvas 实际像素采样（实测 ${grand.pdf.nonWhiteRatio}）`)
+    assert(grand.pdf.mountedPages < 12, `递归孙卡画布挂载有界（实测 ${grand.pdf.mountedPages}/12）`)
+
+    // 零写回：父文档不脏、磁盘不动、无 applyEdit
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '嵌入 PDF 不得弄脏父文档')
+    assert(await readDisk('嵌入 PDF.md') === parentBefore, '嵌入 PDF 不得改写父文档磁盘')
+    const embedState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(embedState.appliedEdits === 0, '嵌入 PDF 链路不得产生 applyEdit')
+
+    // changed 失效重载：替换 长文.pdf 为三页样本 → watch 推送 → 静默重发 →
+    // 新代次 uri 重载（页数 12→3，浏览位置合法钳制回第一页区间）
+    await vscode.workspace.fs.writeFile(wsUri('长文.pdf'), await buildThreePageColorPdf())
+    const reloaded = await waitViewState('嵌入 PDF.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '长文.pdf')
+      return card?.pdf?.phase === 'content' && card.pdf.totalPages === 3
+    }, 0, 120000)
+    const soleAfter = (reloaded.readingEmbed ?? []).find((c) => c.inner === '长文.pdf')
+    assert(soleAfter?.pdf?.totalPages === 3, `替换后按新文档装载（实际 ${soleAfter?.pdf?.totalPages} 页）`)
+    assert(soleAfter.pdf.nonWhiteRatio > 0.5, '替换后绘制层证据（新文档像素）')
+  }],
+
   ['悬停预览：Reading 双链读取目标全文、错误分态就地呈现与双零 dirty（#218）', async () => {
     await openWithEditor('悬停预览.md')
     await waitSessionReady('悬停预览.md')
@@ -12203,11 +12406,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // #247 起混排位（`混排嵌入 ![[嵌入目标]] 保留源文。`）同挂一张卡——
     // Reading 探针的根卡数从 3 变 4（独占全文/章节/缺失 + 混排全文）
     const rootInners = new Set(['嵌入目标', '嵌入目标#章节一', '嵌入缺失目标'])
+    // 分态就绪全部并入等待：错误回包（not-found 走索引/磁盘确认）与成功
+    // 回包不保证同批到达——CI 慢机器上乱序时快照断言会在 loading 态上失败
+    // （run 37263652154 shard 2/4 实证，本地同片复跑绿）；语义断言（scope/
+    // 文案/fm/blocks）保留在等待后的快照上
     const shown = await waitViewState('嵌入样例.md', (v) => {
       const cards = (v.readingEmbed ?? []).filter((card) =>
         card.host === 'reading' && rootInners.has(card.inner))
+      const heading = cards.find((c) => c.inner === '嵌入目标#章节一')
+      const missing = cards.find((c) => c.inner === '嵌入缺失目标')
       return cards.length === 4 &&
-        cards.filter((c) => c.inner === '嵌入目标' && c.state === 'content' && c.scope === 'full').length === 2
+        cards.filter((c) => c.inner === '嵌入目标' && c.state === 'content' && c.scope === 'full').length === 2 &&
+        heading?.state === 'content' && missing?.state === 'error'
     })
     const cards = shown.readingEmbed!.filter((card) =>
       card.host === 'reading' && rootInners.has(card.inner))
@@ -15852,5 +16062,472 @@ export const cases: Array<[string, () => Promise<void>]> = [
         await Promise.resolve(vscode.workspace.fs.delete(wsUri(file), { useTrash: false })).catch(() => undefined)
       }
     }
+  }],
+
+  // ---- #343（P3-11）外链原网页形态 ----
+  // 真实宿主 webview 内验证 page 形态：跨源沙箱 iframe 的装配属性（sandbox
+  // 仅 allow-scripts / referrer no-referrer / src 为宿主归一 URL）与绘制
+  // 尺寸、受控 https 样本的真实导航（服务端收到 webview 发起的 GET——
+  // CSP frame-src 放行与真实装载的直接证据）、恶意子页 postMessage 注入
+  // 不被消息桥消费、DENY/HTTP 混合内容自动退回卡片与真实原因、开关关闭
+  // 联动销毁与关闭释放。宿主回包经 postToPanel 注入（先等待真实宿主对
+  // 回环地址的准入拒绝落地——同时钉住「私网地址零网络请求」的宿主侧
+  // 防线，再以同配对身份注入受控载荷，无竞态）；预检判定与抓取边界在
+  // 单元/浏览器层钉住。
+  ['悬停预览：外链原网页形态——真宿主 iframe 沙箱、退回矩阵与释放（#343）', async () => {
+    // 受控 https 服务器（自签证书，仓库 test/fixtures——仅供测试）：可嵌
+    // 入样本页装载即向父窗口注入伪造宿主消息（守卫失效时伪造
+    // settings.snapshot 会联动销毁 iframe——在场性即隔离证据）
+    const samplePage = [
+      '<!doctype html><html><head><meta charset="utf-8"><title>受控样本页</title></head>',
+      '<body style="margin:0"><div id="marker" style="padding:12px">受控样本页顶部标记</div>',
+      '<div style="height:4000px"></div>',
+      '<script>',
+      "  window.parent.postMessage({ kind: 'view.mode.set', mode: 'reading' }, '*')",
+      "  window.parent.postMessage({ kind: 'settings.snapshot', values: { 'hover.externalShape': 'card' } }, '*')",
+      '</script>',
+      '</body></html>',
+    ].join('')
+    // 证据口径（与 #130「HTTPS 导入放行」同源）：真宿主 webview 对自签证书
+    // 做真实校验（测试无法注入信任）——iframe 内容字节是否送达不可证；
+    // 可证的是 **网络层差分**：CSP frame-src https: 放行的导航会发起出网
+    // （socket 连接到达服务端，证书校验在其后才失败），CSP 若拦截则零
+    // 连接。iframe 内容元素的真实可见与滚轮滚动由浏览器套件
+    // webPageView（受控证书校验跳过）以绘制层断言覆盖。
+    const tlsSeen = { connections: 0 }
+    const fixturesDir = nodePath.resolve(__dirname, '..', '..', '..', '..', 'test', 'fixtures')
+    const tlsServer = nodeHttps.createServer({
+      key: readFileSync(nodePath.join(fixturesDir, 'webframe-test-key.pem')),
+      cert: readFileSync(nodePath.join(fixturesDir, 'webframe-test-cert.pem')),
+    }, (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(samplePage)
+    })
+    tlsServer.on('connection', () => {
+      tlsSeen.connections += 1
+    })
+    await new Promise<void>((resolve) => tlsServer.listen(0, '127.0.0.1', resolve))
+    const embedUrl = `https://127.0.0.1:${(tlsServer.address() as { port: number }).port}/embed`
+    // 父文档：外链指向回环地址（宿主准入文本层拒绝——零网络请求；回包
+    // 由用例注入受控载荷，行为面不受影响）
+    const docFile = '外链预览343.md'
+    const messages = editorMessages()
+    try {
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': true, 'hover.externalShape': 'page' })
+      await writeFile(nodePath.join(wsDir, docFile),
+        '# 外链预览样例\n\n外链 [样本](https://127.0.0.1:9/emb)。\n', 'utf8')
+      await openWithEditor(docFile)
+      await waitSessionReady(docFile)
+      const uri = wsUri(docFile).toString()
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+      await waitViewState(docFile, (v) => v.viewMode === 'reading')
+
+      /** 悬停外链 → 等真实宿主的准入拒绝落地（web-invalid-address）→
+       *  以同配对身份注入受控 web 载荷 → 返回注入后的观测 */
+      const hoverAndInject = async (web: Record<string, unknown>): Promise<ViewState> => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri,
+          { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'md' })
+        const errored = await waitViewState(docFile, (v) =>
+          v.hoverPreview?.open === true && v.hoverPreview.state === 'error' &&
+          v.hoverPreview.note === messages['hover.errorWebInvalidAddress'])
+        assert(errored.hoverPreview?.instanceId && errored.hoverPreview.reqId,
+          `准入拒绝态应暴露请求配对身份（实际 ${JSON.stringify(errored.hoverPreview)}）`)
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'hover.result',
+          reqId: errored.hoverPreview.reqId,
+          instanceId: errored.hoverPreview.instanceId!,
+          ok: true,
+          contentKind: 'web',
+          web,
+          target: { fsPath: '', relPath: '' },
+          version: 0,
+          text: '',
+          range: { start: 0, end: 0 },
+          scope: { kind: 'full' },
+        })
+        return waitViewState(docFile, (v) => v.hoverPreview?.open === true && v.hoverPreview.state === 'content')
+      }
+      const leaveAndClose = async (): Promise<void> => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri,
+          { kind: 'hover.test.pointer', action: 'leave', index: 0, link: 'md' })
+        await waitViewState(docFile, (v) => v.hoverPreview?.open === false)
+      }
+
+      // —— page 形态：沙箱 iframe 真实装配与受控样本导航 ——
+      const mounted = await hoverAndInject({
+        url: embedUrl, domain: '127.0.0.1', title: '受控样本页', description: '',
+        frame: { embeddable: true },
+      })
+      const webMounted = mounted.hoverPreview?.web
+      assert(webMounted?.shape === 'page', `应为 page 形态（实际 ${JSON.stringify(webMounted)}）`)
+      assert(webMounted.frameMounted === true, 'iframe 已装配')
+      assert(webMounted.sandbox === 'allow-scripts', `sandbox 仅 allow-scripts（实际 ${webMounted.sandbox}）`)
+      assert(webMounted.referrerPolicy === 'no-referrer', `referrer 不泄露（实际 ${webMounted.referrerPolicy}）`)
+      assert(webMounted.src === embedUrl, `iframe src 为宿主归一 URL（实际 ${webMounted.src}）`)
+      assert(webMounted.frameWidth > 300 && webMounted.frameHeight >= 300,
+        `iframe 有实际绘制尺寸（实际 ${webMounted.frameWidth}x${webMounted.frameHeight}）`)
+      assert(webMounted.fallbackButton === true, '退回卡片按钮在场')
+      // 网络层差分：webview 内 iframe 对受控 https 服务器发起出网连接
+      // （CSP frame-src https: 放行导航——被 CSP 拦截则零连接；自签证书的
+      // 校验失败发生在 socket 到达之后，属测试环境不可注入信任的既知边界）
+      await poll('受控服务器收到 iframe 出网连接', async () =>
+        tlsSeen.connections > 0 ? tlsSeen : undefined, 10000)
+      // 恶意子页消息隔离（真宿主侧的结构性断言）：自签证书下样本页脚本
+      // 不会执行（内容未送达），此处钉「iframe 挂载态不因任何到达的窗口
+      // 消息被联动销毁」；子页脚本真实执行时的注入丢弃由浏览器套件
+      // webPageView 场景 3 以真实装载覆盖
+      await new Promise((r) => setTimeout(r, 900))
+      const afterHostile = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+      assert(afterHostile.hoverPreview?.web?.frameMounted === true,
+        `iframe 挂载态保持（无消息可联动销毁，实际 ${JSON.stringify(afterHostile.hoverPreview?.web)}）`)
+      console.log('[#343] 真宿主 iframe 沙箱装配与出网连接 ✓')
+
+      // —— 开关关闭：在场 iframe 销毁、就地退回卡片 ——
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'hover.externalEnabled': false })
+      const flipped = await waitViewState(docFile, (v) => v.hoverPreview?.web?.shape === 'card')
+      assert(flipped.hoverPreview?.web?.frameMounted === false, '开关关闭后 iframe 销毁')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': true, 'hover.externalShape': 'page' })
+      await leaveAndClose()
+      console.log('[#343] 开关关闭联动销毁 ✓')
+
+      // —— DENY 样本：自动退回卡片 + 真实原因（X-Frame-Options 字样为
+      // 两种语言包共有的判据标记） ——
+      const denied = await hoverAndInject({
+        url: 'https://deny.example.com/page', domain: 'deny.example.com', title: '拒绝内嵌站点', description: '',
+        frame: { embeddable: false, reason: 'denied' },
+      })
+      const webDenied = denied.hoverPreview?.web
+      assert(webDenied?.shape === 'card', 'DENY 退回卡片形态')
+      assert(webDenied?.frameMounted === false, 'DENY 不挂 iframe')
+      assert(webDenied?.note.includes('X-Frame-Options'),
+        `DENY 退回原因含真实判据（实际 ${JSON.stringify(webDenied?.note)}）`)
+      await leaveAndClose()
+      console.log('[#343] DENY 自动退回与真实原因 ✓')
+
+      // —— HTTP 混合内容样本：卡片 + 原因 ——
+      const httpCase = await hoverAndInject({
+        url: 'http://plain.example.com/page', domain: 'plain.example.com', title: '', description: '',
+        frame: { embeddable: false, reason: 'http' },
+      })
+      const webHttp = httpCase.hoverPreview?.web
+      assert(webHttp?.shape === 'card' && webHttp?.frameMounted === false, 'HTTP 样本退回卡片')
+      assert(/http/i.test(webHttp?.note ?? ''),
+        `HTTP 退回原因在场（实际 ${JSON.stringify(webHttp?.note)}）`)
+      await leaveAndClose()
+      console.log('[#343] HTTP 混合内容退回 ✓')
+
+      // —— 关闭释放：浮层关闭后 iframe 随之销毁 ——
+      const releaseProbe = await hoverAndInject({
+        url: embedUrl, domain: '127.0.0.1', title: '', description: '',
+        frame: { embeddable: true },
+      })
+      assert(releaseProbe.hoverPreview?.web?.frameMounted === true, '关闭释放用例的 iframe 在场')
+      await leaveAndClose()
+      const closed = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+      assert(closed.hoverPreview?.open === false, '浮层已关闭')
+      assert(closed.hoverPreview?.web === null || closed.hoverPreview?.web === undefined,
+        '关闭后 web 视图观测随之清空')
+      console.log('[#343] 关闭释放 ✓')
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': false, 'hover.externalShape': 'card' }))
+        .catch(() => undefined)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri(docFile), { useTrash: false })).catch(() => undefined)
+      await new Promise<void>((resolve) => {
+        tlsServer.close(() => resolve())
+        tlsServer.closeAllConnections()
+      })
+    }
+  }],
+
+  // ---- B-1（review-loops 波次一）：text/pdf 引用目标失效推送事件源 ----
+
+  // 三场景验收「宿主事件源 → hover.invalidated → webview 重载」对 text/pdf
+  // 目标可达（修复前：TextDocument 转发被 /\.md$/i 硬过滤拦死，text 磁盘
+  // 事件无 watcher，PDF 缓存无失效路径；图片目标有 #201 管线补偿，text/
+  // pdf 完全无补偿）：
+  // ① text 嵌入卡在场 → 宿主内未保存编辑 .txt → 350ms 防抖推送 → 卡片
+  //   静默重发刷新（textLen 增长——#340「未保存修改正确刷新」对 text 的
+  //   通路；TextDocument 权威正文含未保存修改）；
+  // ② 悬停 .json 在场 → 磁盘替换 → per-file watcher（B-1 新增，登记
+  //   驱动 + LRU）changed 去抖推送 → 浮层静默重发（reqId 推进即推送到达
+  //   与重发动作的证据；重载字面值以宿主已打开文档为准是 #340 读取层
+  //   既有边界——编码以宿主打开文档的解码结果为准）；
+  // ③ 悬停 PDF 在场 → 磁盘替换 5 页 → 3 页 → #338 pdf 分流事件 →
+  //   changed 推送 → 新代次资源重载（页数变化；#338 已覆盖嵌入侧，
+  //   此处补悬停侧）。
+  ['悬停/嵌入失效推送：text 未保存编辑跟随与 text/PDF 磁盘替换（B-1）', async () => {
+    await openWithEditor('悬停文本.md')
+    await waitSessionReady('悬停文本.md')
+    const uri = wsUri('悬停文本.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('悬停文本.md')
+
+    // 场景 1：text 嵌入卡装载与未保存编辑刷新
+    const shown = await waitViewState('悬停文本.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '笔记.txt')
+      return v.viewMode === 'reading' && card?.state === 'content' && (card.textLen ?? 0) > 0
+    })
+    const cardBefore = shown.readingEmbed!.find((c) => c.inner === '笔记.txt')!
+    const lenBefore = cardBefore.textLen ?? 0
+    assert(cardBefore.note === '笔记.txt', `嵌入 text 卡目标标识（实际 ${cardBefore.note}）`)
+
+    const txtDoc = await vscode.workspace.openTextDocument(wsUri('笔记.txt'))
+    const appendAt = new vscode.Position(txtDoc.lineCount, 0)
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(txtDoc.uri, appendAt, '追加行：未保存编辑应刷新嵌入卡。\n')
+    assert(await vscode.workspace.applyEdit(edit), 'text 目标未保存编辑应成功')
+    const refreshed = await waitViewState('悬停文本.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '笔记.txt')
+      return card?.state === 'content' && (card.textLen ?? 0) > lenBefore
+    })
+    const lenAfter = refreshed.readingEmbed!.find((c) => c.inner === '笔记.txt')!.textLen ?? 0
+    assert(lenAfter > lenBefore, `未保存修改推送后嵌入卡刷新（${lenBefore} → ${lenAfter}）`)
+    // 编辑恢复（反向删除追加行；恢复本身触发一次回落刷新，不影响后续场景）
+    const restore = new vscode.WorkspaceEdit()
+    restore.delete(txtDoc.uri, new vscode.Range(appendAt, new vscode.Position(txtDoc.lineCount, 0)))
+    await vscode.workspace.applyEdit(restore)
+    console.log('[B-1] text 未保存编辑跟随 ✓')
+
+    // 场景 2：悬停 [[配置.json]]（Reading wikilink 序 0——嵌入卡不占序）
+    // → 磁盘替换 → watcher changed 推送 → 浮层静默重发（reqId 推进）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const json = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content')
+    const reqBefore = json.hoverPreview!.reqId ?? 0
+    assert(json.hoverPreview?.note === '配置.json',
+      `text 悬停目标标识应为根内相对路径（实际 ${json.hoverPreview?.note}）`)
+    await vscode.workspace.fs.writeFile(wsUri('配置.json'),
+      Buffer.from(`${JSON.stringify({ env: 'itest', revision: 2 }, null, 2)}\n`, 'utf8'))
+    await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.reqId ?? 0) > reqBefore)
+    console.log('[B-1] text 磁盘替换失效推送 ✓')
+
+    // 场景 3：换悬停 [[替换样本.pdf]]（序 1）→ 磁盘替换 5 页 → 3 页 →
+    // changed 推送 → 新代次重载（页数变化即绘制层重载证据）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+    const pdfShown = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content')
+    assert(pdfShown.hoverPreview!.pdf!.totalPages === 5,
+      `替换前 PDF 悬停按 5 页样本装载（实际 ${pdfShown.hoverPreview!.pdf!.totalPages}）`)
+    await vscode.workspace.fs.writeFile(wsUri('替换样本.pdf'), await buildThreePageColorPdf())
+    const pdfReloaded = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content' && v.hoverPreview.pdf.totalPages === 3)
+    assert(pdfReloaded.hoverPreview!.pdf!.totalPages === 3,
+      `悬停 PDF 磁盘替换后按新文档重载（实际 ${pdfReloaded.hoverPreview!.pdf!.totalPages} 页）`)
+
+    // 零写回与状态复位（父文档不脏不写；浮层关闭、磁盘样本恢复不污染重跑）
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '失效推送链路不得弄脏父文档')
+    assert(await readDisk('悬停文本.md') === parentBefore, '失效推送链路不得改写父文档磁盘')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停文本.md', (v) => v.viewMode === 'live')
+    await vscode.workspace.fs.writeFile(wsUri('配置.json'),
+      Buffer.from(`${JSON.stringify({ env: 'itest', revision: 1 }, null, 2)}\n`, 'utf8'))
+    console.log('[B-1] PDF 悬停侧磁盘替换重载 ✓')
+  }],
+
+  // ---- #344（P3-12 收口）：text 用例的绘制层断言欠账 ----
+  // 现有 text 用例（B-1）只断 textLen/reqId（消息级），无「用户看到的
+  // 东西」级证据；本用例补 textStats 虚拟化观测与计算色断言（内联 token
+  // span 的 getComputedStyle——rgb(86,156,214) = Default Dark Modern 的
+  // const 语法层色 #569cd6）。宿主能力分派按在场扩展实测判定：1.82.3 的
+  // --disable-extensions 不卸载内置主题/语言扩展（vscode.theme-defaults
+  // 仍在场，dev 宿主实测走计算色分支）；else 分支为无语法扩展环境的防御
+  // （#335 结论：无 grammar 的纯文本单色呈现不算降级——coloredSpans=0
+  // 为诚实态）。
+  ['文本绘制层：textStats 虚拟化与计算色断言——嵌入卡与悬停浮层（#344）', async () => {
+    await openWithEditor('文本外观.md')
+    await waitSessionReady('文本外观.md')
+    const uri = wsUri('文本外观.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('文本外观.md')
+
+    // 嵌入卡：textStats（totalLines = 窗口内行数；renderedLines 受视口约束）
+    const shown = await waitViewState('文本外观.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '代码样本.ts')
+      return v.viewMode === 'reading' && card?.state === 'content' && (card.textStats?.totalLines ?? 0) > 0
+    })
+    const card = shown.readingEmbed!.find((c) => c.inner === '代码样本.ts')!
+    assert(card.note === '代码样本.ts', `嵌入 text 卡目标标识（实际 ${card.note}）`)
+    const stats = card.textStats!
+    assert(stats.renderedLines >= 1 && stats.renderedLines <= stats.totalLines,
+      `虚拟化统计合法（rendered ${stats.renderedLines} / total ${stats.totalLines}）`)
+    assert(card.textPaint !== null, 'text 装载卡应携带 textPaint 观测（markdown 卡为 null）')
+
+    const grammarCapable = vscode.extensions.all.some((e) => e.id === 'vscode.theme-defaults')
+    if (grammarCapable) {
+      const painted = await waitViewState('文本外观.md', (v) => {
+        const c = (v.readingEmbed ?? []).find((x) => x.inner === '代码样本.ts')
+        return (c?.textPaint?.coloredSpans ?? 0) > 0
+      })
+      const paint = painted.readingEmbed!.find((x) => x.inner === '代码样本.ts')!.textPaint!
+      assert(paint.firstSpanColor.includes('86, 156, 214'),
+        `嵌入卡 text 首着色 span 计算色应为 const 语法层蓝 rgb(86,156,214)（实际 ${paint.firstSpanColor}）`)
+      console.log('[#344] 嵌入卡 text 计算色（宿主语法/主题扩展在场） ✓')
+    } else {
+      assert(card.textPaint!.coloredSpans === 0 && card.textPaint!.firstSpanColor === '',
+        `dev 宿主（--disable-extensions）无语法扩展：纯文本单色呈现是诚实态（实际 ${JSON.stringify(card.textPaint)}）`)
+      console.log('[#344] 嵌入卡 text 纯文本呈现（宿主无语法扩展，口径符合 #335） ✓')
+    }
+
+    // 悬停侧：hoverPreview.text 同款观测（wikilink 序 0 = [[代码样本.ts]]，
+    // 嵌入卡不占序）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const hovered = await waitViewState('文本外观.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.text?.totalLines ?? 0) > 0)
+    assert(hovered.hoverPreview!.note === '代码样本.ts',
+      `悬停 text 目标标识（实际 ${hovered.hoverPreview!.note}）`)
+    const text = hovered.hoverPreview!.text!
+    assert(text.renderedLines >= 1 && text.renderedLines <= text.totalLines,
+      `悬停 text 虚拟化统计合法（rendered ${text.renderedLines} / total ${text.totalLines}）`)
+    if (grammarCapable) {
+      const colored = await waitViewState('文本外观.md', (v) =>
+        v.hoverPreview?.open === true && (v.hoverPreview.text?.coloredSpans ?? 0) > 0)
+      assert(colored.hoverPreview!.text!.firstSpanColor.includes('86, 156, 214'),
+        `悬停 text 首着色 span 计算色应为 rgb(86,156,214)（实际 ${colored.hoverPreview!.text!.firstSpanColor}）`)
+      console.log('[#344] 悬停 text 计算色 ✓')
+    } else {
+      assert(text.coloredSpans === 0 && text.firstSpanColor === '',
+        `dev 宿主悬停 text 纯文本呈现（实际 ${JSON.stringify(text)}）`)
+      console.log('[#344] 悬停 text 纯文本呈现（宿主无语法扩展口径） ✓')
+    }
+
+    // 零写回与复位
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '文本绘制层链路不得弄脏父文档')
+    assert(await readDisk('文本外观.md') === parentBefore, '文本绘制层链路不得改写父文档磁盘')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('文本外观.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('文本外观.md', (v) => v.viewMode === 'live')
+  }],
+
+  // ---- #344（P3-12 收口）：图片双语法同源对比（视觉层断言硬规则欠账） ----
+  // #336 此前只测单语法；同源承诺 = ![[图.png]] 与 ![](图.png) 走同一
+  // 加载/重试/失效管线。断言落在用户所见：同一资源地址（含 ?v= 代次）、
+  // 同一解码位图（naturalWidth）、双 loaded 态——阅读与 Live 双模式。
+  ['图片双链同源：![[图]] 与 ![](图) 渲染结果一致（#344）', async () => {
+    await openWithEditor('图片双链.md')
+    await waitSessionReady('图片双链.md')
+    const uri = wsUri('图片双链.md').toString()
+    const parentBefore = await readDisk('图片双链.md')
+
+    const assertParity = (slots: NonNullable<ViewState['imageProbe']>, mode: string): void => {
+      assert(slots.length >= 2, `${mode} 模式应有双语法的两个图片槽（实际 ${slots.length}）`)
+      const loaded = slots.filter((s) => s.state === 'loaded')
+      assert(loaded.length === slots.length, `${mode} 模式全部图片装载成功（实际 ${JSON.stringify(slots)}）`)
+      assert(slots[0]!.src !== null && slots[0]!.src === slots[1]!.src,
+        `${mode} 模式双语法应命中同一资源地址（实际 ${slots[0]!.src} vs ${slots[1]!.src}）`)
+      assert((slots[0]!.naturalWidth ?? 0) > 0 && slots[0]!.naturalWidth === slots[1]!.naturalWidth,
+        `${mode} 模式双语法解码位图一致（实际 ${slots[0]!.naturalWidth} vs ${slots[1]!.naturalWidth}）`)
+    }
+
+    // 阅读模式：markdown-it 的 <img>（双链 embed 图与普链图同代码路径）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const reading = await waitViewState('图片双链.md', (v) =>
+      v.viewMode === 'reading' && (v.imageProbe?.length ?? 0) >= 2 &&
+      v.imageProbe!.every((s) => s.state === 'loaded'))
+    assertParity(reading.imageProbe!, '阅读')
+    assert((reading.readingImageCount ?? 0) >= 2, '阅读模式双 <img> 在场')
+    console.log('[#344] 阅读模式图片双语法同源 ✓')
+
+    // Live 模式：LiveImageWidget（#336 的装饰分流）与普链同管线
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    const live = await waitViewState('图片双链.md', (v) =>
+      v.viewMode === 'live' && (v.imageProbe?.length ?? 0) >= 2 &&
+      v.imageProbe!.every((s) => s.state === 'loaded'))
+    assertParity(live.imageProbe!, 'Live')
+    console.log('[#344] Live 模式图片双语法同源 ✓')
+
+    // 悬停侧：图片目标浮层（imageSrcs 携带已应用地址；#336 悬停图片目标
+    // 以纯 Reading 形态开浮层）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('图片双链.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 1)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const imaged = await waitViewState('图片双链.md', (v) =>
+      v.hoverPreview?.open === true && (v.hoverPreview.imageSrcs?.length ?? 0) > 0)
+    const hoverSrc = imaged.hoverPreview!.imageSrcs![0]!
+    assert(hoverSrc.includes('%E5%90%8C%E6%BA%90%E5%9B%BE') || hoverSrc.includes('同源图'),
+      `悬停图片目标浮层应装载同源图（实际 ${hoverSrc}）`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('图片双链.md', (v) => v.hoverPreview?.open === false)
+
+    // 零写回与复位
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '图片同源链路不得弄脏父文档')
+    assert(await readDisk('图片双链.md') === parentBefore, '图片同源链路不得改写父文档磁盘')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('图片双链.md', (v) => v.viewMode === 'live')
+  }],
+
+  // ---- #344（P3-12 收口）：未 watch 目标编辑事件不对称的小修验证 ----
+  // 窄场景：悬停 text 目标 → 关闭（unwatch）→ VSCode 内未保存编辑 → 再
+  // 悬停。B-1 门控下未 watch 的 text 编辑事件不转发，读取缓存不失效，
+  // 再悬停命中陈旧缓存；修复（缓存目标与订阅目标同权转发）后编辑事件
+  // 照常广播失效，重开悬停必然重读（totalLines 随编辑增长）。
+  ['未 watch 目标编辑：关闭悬停后的未保存编辑不落陈旧缓存（#344）', async () => {
+    await openWithEditor('悬停文本.md')
+    await waitSessionReady('悬停文本.md')
+    const uri = wsUri('悬停文本.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+
+    // 首次悬停 [[配置.json]]（wikilink 序 0）：装载并缓存
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const first = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.text?.totalLines ?? 0) > 0)
+    const linesBefore = first.hoverPreview!.text!.totalLines
+    // 关闭浮层（unwatch——事件通道随订阅退场）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+
+    // VSCode 内未保存编辑（无磁盘事件——TextDocument 通道是唯一事件源）
+    const jsonDoc = await vscode.workspace.openTextDocument(wsUri('配置.json'))
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(jsonDoc.uri, new vscode.Position(jsonDoc.lineCount, 0), '  "staleProbe": true\n')
+    assert(await vscode.workspace.applyEdit(edit), '未保存编辑应成功')
+
+    // 再悬停：缓存已失效（编辑事件广播）→ 重读含未保存内容
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const second = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.text?.totalLines ?? 0) > linesBefore)
+    assert(second.hoverPreview!.text!.totalLines > linesBefore,
+      `再悬停应读到含未保存编辑的正文（${linesBefore} → ${second.hoverPreview!.text!.totalLines} 行）——` +
+      '命中陈旧缓存则为旧行数')
+
+    // 复原：删除插入行（恢复本身走同一失效链路，不污染重跑）
+    const restore = new vscode.WorkspaceEdit()
+    restore.delete(jsonDoc.uri, new vscode.Range(
+      new vscode.Position(jsonDoc.lineCount - 1, 0), new vscode.Position(jsonDoc.lineCount, 0)))
+    await vscode.workspace.applyEdit(restore)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停文本.md', (v) => v.viewMode === 'live')
+    console.log('[#344] 未 watch 目标编辑不落陈旧缓存 ✓')
   }],
 ]

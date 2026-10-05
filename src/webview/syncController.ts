@@ -39,6 +39,7 @@ import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
+import { PDF_ZOOM_STEP } from './pdfRender'
 import { KeybindingRouter, keyStep } from './keybindingRouter'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
@@ -48,6 +49,7 @@ import { htmlToMarkdown } from './htmlToMarkdown'
 import { planRichPaste, richPasteDistributionMatches } from './richPastePlan'
 import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
+import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage } from '../shared/protocol'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
@@ -102,6 +104,7 @@ import {
   HOVER_ENABLED_KEY,
   HOVER_TARGET_TIP_KEY,
   HOVER_LIVE_DIRECT_KEY,
+  HOVER_EXTERNAL_ENABLED_KEY,
   WORD_SEGMENT_ENGINE_DEFAULT,
   WORD_SEGMENT_ENGINE_KEY,
   type SettingsPayload,
@@ -174,8 +177,14 @@ import {
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  turnHoverPdfPage,
+  zoomHoverPdf,
+  resetHoverPdfZoom,
   hoverPopupLiveTestAction,
+  notifyHoverTokens,
   notifyHoverWatchRejected,
+  notifyAppearanceChanged,
+  notifyHoverExternalSettings,
   openHoverPopupForKeyboard,
   setHoverPreviewContext,
   type HoverPopupTargetSpec,
@@ -903,6 +912,14 @@ export class WebviewSyncController {
       // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
       // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
       else if (id === 'hoverPreviewLink') { if (!embedBlocked()) this.previewLinkAtFocus() }
+      // #337 PDF 翻页：作用于在场 PDF 悬停浮层（只读；无浮层/翻出界静默）
+      else if (id === 'pdfPageNext') { if (!embedBlocked()) turnHoverPdfPage(1) }
+      else if (id === 'pdfPagePrev') { if (!embedBlocked()) turnHoverPdfPage(-1) }
+      // #339 PDF 缩放：与翻页同款只读浮层域（无 PDF 浮层/触达 scale 上下
+      // 限静默无效——受理会谎称缩放生效）
+      else if (id === 'pdfZoomIn') { if (!embedBlocked()) zoomHoverPdf(PDF_ZOOM_STEP) }
+      else if (id === 'pdfZoomOut') { if (!embedBlocked()) zoomHoverPdf(1 / PDF_ZOOM_STEP) }
+      else if (id === 'pdfZoomReset') { if (!embedBlocked()) resetHoverPdfZoom() }
       // #237 上下添加光标：同「本地消化不转发宿主」先例——命令在 webview
       // 的 CM6 上执行（与命令面板 ui.command 回发入口共用 runCursorAdd）
       else if (id === 'addCursorAbove' || id === 'addCursorBelow') this.runCursorAdd(id)
@@ -1206,7 +1223,7 @@ export class WebviewSyncController {
       // 同一提取口径：外部 scheme 与非法目标 null 不提示）；spec 经
       // thunk 统一形态（DOM 属性提取廉价，求值时机由 enterHoverOrTip
       // 的两路由决定）
-      this.enterHoverOrTip(anchor, () => hoverPopupSpecOfAnchor(anchor))
+      this.enterHoverOrTip(anchor, () => hoverPopupSpecOfAnchor(anchor, { allowExternalHttp: this.hoverExternalEnabled() }))
     })
     this.readingContainer.addEventListener('mouseout', (event) => {
       const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
@@ -1934,6 +1951,9 @@ export class WebviewSyncController {
         this.applyEmbedMaxHeightSetting()
         this.embedCards?.setMaxDepth(this.embedMaxDepth())
         this.applyWordSegmentEngineSetting()
+        // #343（P3-11）外链设置联动：总开关关闭或形态切回 card 时销毁
+        // 在场原网页 iframe、就地退回卡片（缺键 = 无关变更不动作）
+        notifyHoverExternalSettings(message.values)
         break
       case 'wordSegment.state': {
         // #239 jieba 资源状态（宿主下载/删除后推送）：资源 URI 变化驱动
@@ -2127,6 +2147,23 @@ export class WebviewSyncController {
       case 'hover.watch.rejected': {
         notifyHoverWatchRejected(message)
         this.embedCards?.notifyWatchRejected(message)
+        break
+      }
+      case 'hover.tokens': {
+        // #340（P3-08）文本 token 分层推送：转发浮层模块（instanceId 配
+        // 对 + 版本仲裁在 applyTextTokens——迟到/过期 token 不覆盖新正文）；
+        // #341（P3-09）嵌入卡片同点转发（notifyTokens 遍历在场挂载，按
+        // occurrence/hostId 配对——同 occurrence 双容器各视图分别应用）
+        notifyHoverTokens(message)
+        this.embedCards?.notifyTokens(message)
+        break
+      }
+      case 'appearance.changed': {
+        // #340 外观代次广播：text 浮层静默重载（语言字体随正文载荷刷新、
+        // token 随 render 重取）；#341 嵌入卡片同点转发（在场 text 卡静默
+        // 重载）。Markdown 侧 CSS 变量自带跟随
+        notifyAppearanceChanged()
+        this.embedCards?.notifyAppearanceChanged()
         break
       }
       case 'refEdit.bound':
@@ -2475,6 +2512,12 @@ export class WebviewSyncController {
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break
+          case 'pdfPageNext': turnHoverPdfPage(1); break
+          case 'pdfPagePrev': turnHoverPdfPage(-1); break
+          // #339 PDF 缩放（命令面板/宿主命令入口与快捷键同一实现）
+          case 'pdfZoomIn': zoomHoverPdf(PDF_ZOOM_STEP); break
+          case 'pdfZoomOut': zoomHoverPdf(1 / PDF_ZOOM_STEP); break
+          case 'pdfZoomReset': resetHoverPdfZoom(); break
           // #237 上下添加光标：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（仅 Live 正文生效，边界见 runCursorAdd）
           case 'addCursorAbove': this.runCursorAdd('addCursorAbove'); break
@@ -5362,6 +5405,14 @@ export class WebviewSyncController {
     return this.settings?.[HOVER_ENABLED_KEY] !== false
   }
 
+  /** #342（P3-10）外链预览开关（hover.externalEnabled；缺省/快照未达 =
+   *  false 关）：预滤门控——开启时 Reading/Live 的 http(s) 链接进入悬停
+   *  浮层（宿主经 web 通道受限抓取）；关闭态预滤不放行（零 hover.request，
+   *  宿主解析层复核兜底——双保险） */
+  private hoverExternalEnabled(): boolean {
+    return this.settings?.[HOVER_EXTERNAL_ENABLED_KEY] === true
+  }
+
   /** #299 跳转目标提示开关（hover.targetTip；缺省/快照未达 = true 开，
   *  独立于总开关——总开关关闭时提示反而成为悬停的唯一反馈）：经
   *  targetTip 上下文投影，门控收敛在 targetTip 模块入口 */
@@ -5483,14 +5534,14 @@ export class WebviewSyncController {
     })
     if (!spec) {
       activateLinkAtPos(view, pos, (href, from, to) => {
-        if (isHoverableMdLinkHref(href)) {
+        if (isHoverableMdLinkHref(href) || (this.hoverExternalEnabled() && isHttpLinkHref(href))) {
           spec = { target: href, linkHref: href, sourceStart: from, sourceEnd: to }
         }
       })
     }
     if (!spec) {
       activateLooseLinkAtPos(view, pos, (dest, from, to) => {
-        if (isHoverableMdLinkHref(dest)) {
+        if (isHoverableMdLinkHref(dest) || (this.hoverExternalEnabled() && isHttpLinkHref(dest))) {
           spec = { target: dest, linkHref: dest, sourceStart: from, sourceEnd: to }
         }
       })
@@ -5628,7 +5679,7 @@ export class WebviewSyncController {
       this.readingContainer?.contains(anchor) &&
       !anchor.closest(`.${EMBED_CARD_CLASS_NAMES.card}`)
     ) {
-      const spec = hoverPopupSpecOfAnchor(anchor)
+      const spec = hoverPopupSpecOfAnchor(anchor, { allowExternalHttp: this.hoverExternalEnabled() })
       if (spec) {
         openHoverPopupForKeyboard(anchor, spec)
       }

@@ -109,11 +109,13 @@ export function suggestImageExportFileName(rawSrc: string): string {
  * 图片出现定位（刷新重定位的形态学）：rawSrc（解码形态）在文档中以图片
  * 目标出现——标准形态 `](目标)`（后随 `)` / 空白 / `>` 标题边界）或尖括号
  * 形态 `](<目标>)`（含空格路径的标准写法，live linkHrefOf 与 markdown-it
- * 两侧均剥尖括号取内部值）即定位到。文档存的是源文原样（可能是 %20
- * 编码形态），解码值直接找不到时以 encodeURI 回查原文形态（markdown-it
- * normalizeLink 同款编码面）。图片的「身份」就是 rawSrc——src 被改写即
- * 旧身份消失（新图是新弹窗语境），与图表弹窗按「语言+源码」重定位的
- * 语义对偶。
+ * 两侧均剥尖括号取内部值）即定位到。#336（P3-04）起图源身份可来自双链
+ * 形态：图片嵌入 `![[图.png]]` / `![[图.png|别名]]` 与双链链接 `[[图.png]]`
+ * （悬停浮层图片打开弹窗的刷新场景）——右边界 `]]` 或 `|`（别名），更长
+ * 目标的前缀不算命中。文档存的是源文原样（可能是 %20 编码形态），解码值
+ * 直接找不到时以 encodeURI 回查原文形态（markdown-it normalizeLink 同款
+ * 编码面）。图片的「身份」就是 rawSrc——src 被改写即旧身份消失（新图是
+ * 新弹窗语境），与图表弹窗按「语言+源码」重定位的语义对偶。
  */
 export function locateImageOccurrence(doc: string, rawSrc: string): boolean {
   if (rawSrc.length === 0) {
@@ -133,6 +135,18 @@ export function locateImageOccurrence(doc: string, rawSrc: string): boolean {
     // 尖括号形态：`](<目标>)`——目标整体在尖括号内，无标题边界跟随
     if (doc.includes(`](<${candidate}>)`)) {
       return true
+    }
+    // #336 双链形态：`![[目标`/`[[目标` 后随 `]`（闭合 `]]` 的首字符）或
+    // `|`（别名分隔）——`![[图.png.bak]]` 等更长目标不命中
+    for (const opener of ['![[', '[[']) {
+      let base = doc.indexOf(`${opener}${candidate}`)
+      while (base >= 0) {
+        const next = doc[base + opener.length + candidate.length]
+        if (next === ']' || next === '|') {
+          return true
+        }
+        base = doc.indexOf(`${opener}${candidate}`, base + 1)
+      }
     }
   }
   return false

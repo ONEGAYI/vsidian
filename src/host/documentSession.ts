@@ -25,6 +25,7 @@ import {
   type DocumentChangeReason,
   type PasteHistory,
   type HostToWebview,
+  type HoverAnchorInvalidDetail,
   type HoverPreviewRequestPayload,
   type HoverPreviewFailReason,
   type HoverPreviewScope,
@@ -35,15 +36,17 @@ import {
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
-import type { HoverReadOutcome, HoverTargetTipOutcome } from './hoverDocAccess'
+import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
+import type { RefImageContent, RefMarkdownContent, RefPdfContent, RefPdfNavSelector, RefTextContent } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
+import { isHttpLinkHref } from '../shared/webLink'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
 import { PasteHistoryTracker } from './pasteHistoryTracker'
 import type { ImageResolution } from './linkTarget'
 import { imageFsKey } from './imageVersioning'
 import type { ImageVerifyItem } from '../shared/imageRefresh'
-import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
+import { HOVER_REFRESH_DEFAULTS, hoverWatchKeyOf } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget, canonicalRefTargetKey, inExpansionPath,
   validChildSource } from '../shared/refExpansion'
 
@@ -82,7 +85,24 @@ export interface PanelPort {
    *  edit.request 通道，暂停态同样放行 */
   readHoverTarget?(
     payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
-    report: (result: HoverReadOutcome) => void,
+    report: (result: RefReadOutcome) => void,
+  ): void
+  /** #342（P3-10）悬停请求取消（vscode 层注入：定位在途 web 抓取消费者
+   *  并中止——WebLinkMetaService 的合并计数减一，最后消费者离开即断开
+   *  底层连接；markdown 读取不可中止，无操作）。instanceId/reqId 与被
+   *  取消的 hover.request 配对 */
+  cancelHoverRead?(identity: { instanceId: string; reqId: number }): void
+  /** #340（P3-08）文本 token 计算（vscode 层注入：外观服务——语法层
+   *  vscode-textmate + 语义层公开命令；**fsPath 守卫在此端口上游**：调用
+   *  方按 hoverSourceFsPaths 复核已送达目标，被攻陷 webview 不能借本通道
+   *  探测任意文件）。version 为请求方装载版本——目标已推进回 stale。
+   *  只读交互，不进 edit.request 通道 */
+  readTextTokens?(
+    payload: { fsPath: string; version: number; beginLine: number; endLine: number },
+    report: (result:
+      | { ok: true; layer: 'textmate'; colors: string[]; tokens: number[]; version: number }
+      | { ok: true; layer: 'semantic'; colors: string[]; tokens: number[]; version: number }
+      | { ok: false; reason: 'stale' | 'unavailable' }) => void,
   ): void
   readHoverSource?(fsPath: string): Promise<{ version: number; text: string } | null>
   /** #299 跳转目标提示轻量解析（vscode 层注入：hoverDocAccess 的
@@ -276,9 +296,10 @@ interface HoverSourceGrant {
   version: number
   /** P2-03（#280）：初始定位区间参考（锚点命中的锚定区间；宽容重载为全文
    *  区间）——子引用准入已不以它为界（validChildSource 按来源全文校验），
-   *  仅随租约保留定位语义 */
+   *  仅随租约保留定位语义。#337 起 pdf 载荷为零区间占位（PDF 无 LF
+   *  坐标——定位由 scope.page 承载） */
   range: { start: number; end: number }
-  scope: HoverPreviewScope
+  scope: HoverPreviewScope | RefPdfNavSelector
   path: string[]
   depth: number
   treeId: string
@@ -384,8 +405,11 @@ export class DocumentSession {
    *  在形态内（锚点在 target/href/anchor 原文中）。成功缓存 + 在途合并
    *  （同形态并发共享一次读取）+ 世代守卫（失效窗口内完成不回写），
    *  先例：imageCache/imageInFlight/imageEpochs（#201/#208 同构） */
-  private readonly hoverReadCache = new Map<string, Extract<HoverReadOutcome, { ok: true }>>()
-  private readonly hoverReadInFlight = new Map<string, Promise<HoverReadOutcome>>()
+  // #342：web 载荷不经会话缓存（web 元信息缓存归 WebLinkMetaService，
+  // 外链请求绕过本缓存路径；#336 起 markdown/image 成功结果入缓存——
+  // 图片按身份载荷小常数计量，见 commitHoverRead）
+  private readonly hoverReadCache = new Map<string, Extract<RefReadOutcome, { ok: true }>>()
+  private readonly hoverReadInFlight = new Map<string, Promise<RefReadOutcome>>()
   /** 目标 fsPath → 形态键集合（失效反查：版本变更按目标清缓存） */
   private readonly hoverShapeTargets = new Map<string, Set<string>>()
   /** 形态键 → 失效世代（单调；在途发起时快照、完成时比对） */
@@ -606,6 +630,61 @@ export class DocumentSession {
           this.trimHoverSources(panel)
         }
         return Promise.resolve()
+      case 'hover.tokens.request': {
+        // #340（P3-08）文本 token 请求：会话守卫与 hover.request 同款；
+        // **fsPath 来源守卫**——必须是本面板成功送达过的目标
+        // （hoverSourceFsPaths，成功读取即入集合），被攻陷 webview 不能借
+        // 本通道探测任意文件的内容侧信道。计算经面板端口注入（外观服务），
+        // 结果按 reqId+instanceId 回来源面板（webview 侧再做版本配对——
+        // 迟到/过期 token 不覆盖新正文）。只读交互：不进 edit.request
+        // 通道、不建租约，暂停态同样放行
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (!panel.hoverSourceFsPaths.has(message.fsPath)) {
+          panel.port.send({
+            kind: 'hover.tokens', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason: 'stale',
+          })
+          return Promise.resolve()
+        }
+        const tokenPort = panel.port.readTextTokens
+        if (!tokenPort) {
+          panel.port.send({
+            kind: 'hover.tokens', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason: 'unavailable',
+          })
+          return Promise.resolve()
+        }
+        tokenPort(
+          { fsPath: message.fsPath, version: message.version, beginLine: message.beginLine, endLine: message.endLine },
+          (result) => {
+            if (this.disposed || this.panels.get(sessionId) !== panel) {
+              return
+            }
+            panel.port.send(
+              result.ok
+                ? {
+                    kind: 'hover.tokens',
+                    reqId: message.reqId,
+                    instanceId: message.instanceId,
+                    ok: true,
+                    fsPath: message.fsPath,
+                    version: result.version,
+                    layer: result.layer,
+                    colors: result.colors,
+                    tokens: result.tokens,
+                  }
+                : {
+                    kind: 'hover.tokens',
+                    reqId: message.reqId,
+                    instanceId: message.instanceId,
+                    ok: false,
+                    reason: result.reason,
+                  },
+            )
+          },
+        )
+        return Promise.resolve()
+      }
       case 'hover.target.resolve': {
         // #299 跳转目标提示轻量解析：会话守卫与其余请求同款（就绪且
         // docUri 匹配才放行，否则静默丢弃）；解析执行经面板端口注入
@@ -1076,6 +1155,16 @@ export class DocumentSession {
         panel.port.send({ kind: 'refresh.invalidated', reqId: message.reqId, generation })
         return Promise.resolve()
       }
+      case 'hover.cancel': {
+        // #342（P3-10）悬停请求取消：webview 浮层关闭/换目标时中止在途
+        // 抓取（外链元信息的合并消费者离开；markdown 读取不可中止——迟到
+        // 回包由 reqId/instanceId 配对守卫丢弃，行为不变）。只读消息
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        panel.port.cancelHoverRead?.({ instanceId: message.instanceId, reqId: message.reqId })
+        return Promise.resolve()
+      }
       case 'hover.request': {
         // #218 悬停预览文档读取：会话守卫对齐 image.request / diagram.export
         // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；读取执行经面板
@@ -1122,7 +1211,7 @@ export class DocumentSession {
             return
           }
         }
-        const report = (result: HoverReadOutcome): void => {
+        const report = (result: RefReadOutcome): void => {
           const currentRead = occurrenceId === undefined ||
             panel.expansionBudget.isCurrentRead(occurrenceId, readToken)
           if (occurrenceId !== undefined) panel.expansionBudget.finishRead(occurrenceId, readToken)
@@ -1130,6 +1219,52 @@ export class DocumentSession {
           if (!currentRead) result = { ok: false, reason: 'source-expired' }
           if (message.source !== undefined && panel.hoverParentGrants.get(message.source.parentInstanceId) !== parent) {
             result = { ok: false, reason: 'source-expired' }
+          }
+          // #342（P3-10）web 通道出站：外链卡片载荷走 hover.result 的 web
+          // 形态（Markdown 专属字段为占位值）。无本地文件身份——不进
+          // cycle/attachContent/租约/来源集合/expansionPath 链路（网页缓存
+          // 按规范 URL 与形态在抓取服务内管理，不伪造宿主文档版本）
+          if (result.ok && result.content.kind === 'web') {
+            panel.port.send({
+              kind: 'hover.result',
+              reqId: message.reqId,
+              instanceId: message.instanceId,
+              ok: true,
+              contentKind: 'web',
+              web: {
+                url: result.content.url,
+                domain: result.content.domain,
+                title: result.content.title,
+                description: result.content.description,
+                // #343（P3-11）page 形态嵌入预检透传（card 形态缺席）
+                ...(result.content.frame !== undefined ? { frame: result.content.frame } : {}),
+              },
+              target: { fsPath: '', relPath: '' },
+              version: 0,
+              text: '',
+              range: { start: 0, end: 0 },
+              scope: { kind: 'full' },
+            })
+            // web 无租约、无内容挂载，webview 侧 web 浮层也不 watch——
+            // 失败分支与 unwatch/source.release 的释放路径全部不可达，
+            // 出站即就地释放读取预留（review 修复：防重复外链悬停后面板
+            // 实例预算耗尽，64 次开-关后新悬停一律 budget 拒绝）
+            if (occurrenceId !== undefined) panel.expansionBudget.release(occurrenceId)
+            return
+          }
+          // 窄化：web 已出站返回，此后成功结果为 markdown / image / pdf /
+          // text 载荷（#336 登记 image；#337 登记 pdf；#340 登记 text）；
+          // 未知扩展类型防御性收敛 non-markdown（结构性不可达）
+          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefImageContent | RefPdfContent | RefTextContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string; anchorDetail?: HoverAnchorInvalidDetail }
+          if (result.ok) {
+            // 解构后判别：TS 判别联合窄化不支持 x.content.kind 嵌套路径，
+            // content 单独绑定后 kind 判别为标准形态
+            const { fsPath, relPath, content } = result
+            outcome = content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf' || content.kind === 'text'
+              ? { ok: true, fsPath, relPath, content }
+              : { ok: false, reason: 'non-markdown' }
+          } else {
+            outcome = result
           }
           // P2-03（#280，ADR-0011）：祖先循环按规范目标文档身份判定——不同
           // 锚点不能绕过祖先循环，同目标兄弟 occurrence 仍合法。判定只对
@@ -1139,23 +1274,47 @@ export class DocumentSession {
           // grant.path/expansionPath 仍从根面板起算——B→A 回指在链上可见。
           const pathToParent = parent?.path ?? [canonicalRefTargetKey(
             this.options.rootFsPath ?? this.docUri, this.options.isWindowsHost ?? false)]
-          if (result.ok) {
-            const key = canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)
-            if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
+          if (outcome.ok) {
+            const key = canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)
+            // 内容字节费用按类型计（#337/#336/#340）：markdown 为 LF 全文
+            // UTF-16（+ 小常数开销）；text 为窗口正文 LF UTF-16（#range 硬
+            // 窗口只计 B–E 行——范围外结构性不可达，不占预算）；pdf 为源
+            // 文件字节（逻辑预算费用，不代表解码内存）；image/web 载荷无
+            // 正文——按身份载荷小常数计量（图片解码内存归图片管线，与普通
+            // Markdown 图片同口径，不占文本预算大额）
+            const contentBytes = (outcome.content.kind === 'markdown' || outcome.content.kind === 'text')
+              ? outcome.content.lfText.length * 2 + 128
+              : outcome.content.kind === 'pdf'
+                ? outcome.content.bytes + 128
+                : 256
+            if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) outcome = { ok: false, reason: 'cycle' }
             else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
-              occurrenceId, `${occurrenceId}\n${result.fsPath}\n${result.version}`,
-              result.lfText.length * 2 + 128) !== 'ok') {
-              result = { ok: false, reason: 'budget' }
+              occurrenceId, `${occurrenceId}\n${outcome.fsPath}\n${outcome.content.version}`,
+              contentBytes) !== 'ok') {
+              outcome = { ok: false, reason: 'budget' }
             }
           }
-          const sourceLeaseId = result.ok && message.retainSource
+          const sourceLeaseId = outcome.ok && message.retainSource
             ? `${sessionId}:source-${++this.hoverSourceLeaseSeq}` : undefined
-          if (result.ok) {
+          if (outcome.ok) {
             if (sourceLeaseId !== undefined) {
-              panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
+              panel.hoverSourceLeases.set(sourceLeaseId, outcome.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
-                fsPath: result.fsPath, version: result.version, range: result.range, scope: result.scope,
-                path: [...pathToParent, canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)],
+                fsPath: outcome.fsPath, version: outcome.content.version,
+                // #336：图片载荷无定位区间与 Markdown 选择器——租约只保留
+                // 身份语义（range/scope 退化中性值；图片无锚点定位语义）；
+                // #337：pdf 载荷无 LF 区间语义——零区间占位（定位由 pdf
+                // 选择器的 page 承载，租约保留 pdf 选择器）；#340：text 载荷
+                // 的选择器为 RefTextNavSelector（非 HoverPreviewScope）——
+                // 租约的 scope 字段只保留定位语义，text 归 full 形态（观感/
+                // 观测面），锚点语义在 textNav 载荷
+                range: (outcome.content.kind === 'markdown' || outcome.content.kind === 'text')
+                  ? outcome.content.range
+                  : { start: 0, end: 0 },
+                scope: outcome.content.kind === 'markdown' || outcome.content.kind === 'pdf'
+                  ? outcome.content.selector
+                  : { kind: 'full' },
+                path: [...pathToParent, canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
             }
@@ -1165,30 +1324,64 @@ export class DocumentSession {
             // 已存在成员重读时移到队尾（插入序 = 淘汰序改最近读取序）——
             // #242 watch 持有者固定来源；LRU 只回收未固定记录，刚送达
             // 的目标保留到前端订阅（或下一次读取后回收）。
-            if (panel.hoverSourceFsPaths.has(result.fsPath)) {
-              panel.hoverSourceFsPaths.delete(result.fsPath)
+            if (panel.hoverSourceFsPaths.has(outcome.fsPath)) {
+              panel.hoverSourceFsPaths.delete(outcome.fsPath)
             }
-            panel.hoverSourceFsPaths.add(result.fsPath)
-            this.trimHoverSources(panel, result.fsPath)
-            panel.hoverSourceFsPath = result.fsPath
+            panel.hoverSourceFsPaths.add(outcome.fsPath)
+            this.trimHoverSources(panel, outcome.fsPath)
+            panel.hoverSourceFsPath = outcome.fsPath
           } else if (occurrenceId !== undefined && !panel.hoverParentGrants.has(occurrenceId) &&
             !panel.expansionBudget.hasActiveRead(occurrenceId) &&
             ![...panel.hoverLeaseGrants.values()].some((grant) => grant.occurrenceId === occurrenceId)) {
             panel.expansionBudget.release(occurrenceId)
           }
           panel.port.send(
-            result.ok
+            outcome.ok
               ? {
                   kind: 'hover.result',
                   reqId: message.reqId,
                   instanceId: message.instanceId,
                   ok: true,
-                  target: { fsPath: result.fsPath, relPath: result.relPath },
-                  version: result.version,
-                  text: result.lfText,
-                  range: result.range,
-                  scope: result.scope,
-                  expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath,
+                  // #333（P3-01）类型化出站：生产读取经 readRefContentTarget
+                  // 类型分派，成功显式携带 contentKind（缺省 = markdown 的
+                  // 兼容识别留给旧消息——校验器各形态都放行）。#336（P3-04）
+                  // image 通道：图源载荷（来源相对 src；字节与版本戳走既有
+                  // 图片通道），Markdown 全文/区间/选择器退化形态；#337
+                  // （P3-05）pdf 通道：pdf 资源字段 + 空 text + pdf 选择器
+                  // scope + 零区间 range（PDF 无 LF 坐标）；#340（P3-08）text
+                  // 通道：窗口正文入 text、定位区间入 range；Markdown 语义
+                  // 选择器不适用于代码文件（观感探针沿用 full），窗口/落点/
+                  // 语言/字体在 textNav
+                  contentKind: outcome.content.kind,
+                  target: { fsPath: outcome.fsPath, relPath: outcome.relPath },
+                  version: outcome.content.version,
+                  ...(outcome.content.kind === 'image' ? { imageSrc: outcome.content.src } : {}),
+                  ...(outcome.content.kind === 'pdf' ? { pdf: { uri: outcome.content.uri, bytes: outcome.content.bytes } } : {}),
+                  text: (outcome.content.kind === 'markdown' || outcome.content.kind === 'text') ? outcome.content.lfText : '',
+                  range: (outcome.content.kind === 'markdown' || outcome.content.kind === 'text')
+                    ? outcome.content.range
+                    : { start: 0, end: 0 },
+                  scope: outcome.content.kind === 'image' ? { kind: 'plain' }
+                    : outcome.content.kind === 'text' ? { kind: 'full' as const }
+                      : outcome.content.selector,
+                  ...(outcome.content.kind === 'text'
+                    ? {
+                        textNav: {
+                          languageId: outcome.content.languageId,
+                          hasWindow: outcome.content.hasWindow,
+                          beginLine: outcome.content.beginLine,
+                          endLine: outcome.content.endLine,
+                          locateLine: outcome.content.locateLine,
+                          jumpLine: outcome.content.jumpLine,
+                          totalLines: outcome.content.totalLines,
+                          ...(outcome.content.font.family !== undefined ? { fontFamily: outcome.content.font.family } : {}),
+                          ...(outcome.content.font.size !== undefined ? { fontSize: outcome.content.font.size } : {}),
+                          ...(outcome.content.font.ligatures !== undefined ? { fontLigatures: outcome.content.font.ligatures } : {}),
+                          lineNumbers: outcome.content.lineNumbers,
+                        },
+                      }
+                    : {}),
+                  expansionPath: [...pathToParent, canonicalRefTargetKey(outcome.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
                   ...(sourceLeaseId !== undefined ? { sourceLeaseId } : {}),
@@ -1198,14 +1391,24 @@ export class DocumentSession {
                   reqId: message.reqId,
                   instanceId: message.instanceId,
                   ok: false,
-                  reason: result.reason,
-                  ...(result.anchor !== undefined ? { anchor: result.anchor } : {}),
+                  reason: outcome.reason,
+                  ...(outcome.anchor !== undefined ? { anchor: outcome.anchor } : {}),
+                  ...(outcome.anchorDetail !== undefined ? { anchorDetail: outcome.anchorDetail } : {}),
                 },
           )
         }
         const port = panel.port.readHoverTarget
         if (!port) {
           report({ ok: false, reason: 'read-failed' })
+          return Promise.resolve()
+        }
+        // #342（P3-10）外链请求绕过会话读取缓存/在途合并：web 元信息的
+        // 缓存（规范 URL + 形态键）与同 URL 合并在抓取服务（WebLinkMeta
+        // Service）内管理——会话级 shapeKey 按目标文本形态区分，URL 微差
+        // 产生不同键，合并口径以服务层归一为准。此处仅按 href scheme 预
+        // 判路由（安全边界仍由 resolveHoverTargetForm 的开关/准入复核）
+        if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
+          port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, report)
           return Promise.resolve()
         }
         const shapeKey = hoverShapeKeyOf(message, verifiedSource)
@@ -1224,7 +1427,7 @@ export class DocumentSession {
           // 失效时钟补齐「登记尚未发生」的竞态窗口
           const epoch = this.hoverEpochs.get(shapeKey) ?? 0
           const requestClock = this.hoverClock
-          pending = new Promise<HoverReadOutcome>((resolve) => {
+          pending = new Promise<RefReadOutcome>((resolve) => {
             port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, resolve)
           })
           this.hoverReadInFlight.set(shapeKey, pending)
@@ -1235,12 +1438,23 @@ export class DocumentSession {
             if ((this.hoverEpochs.get(shapeKey) ?? 0) !== epoch) {
               return // 世代已过：迟到结果不复活旧缓存
             }
+            // #342：web 载荷不经会话缓存（外链请求已绕过本路径——防御
+            // 性跳过 web 载荷的缓存写回；#336：image 载荷入缓存——图片
+            // 按身份载荷小常数计量；#337：pdf 载荷入缓存——按源文件字节
+            // 计量；#340：text 载荷入缓存——按窗口 LF 正文 UTF-16 计量，
+            // 与 markdown 同款（B-1 补登：#340 登记读取通道时缓存写回
+            // 判别漏 text，致 text 目标重复悬停不合并/不缓存，失效通道
+            // 也无从钉住））；content 解构后判别（TS 不支持嵌套路径判别，
+            // 同 report 处）
             if (outcome.ok) {
-              // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
-              // 登记未发生、反查为空）——不写缓存
-              const invalidatedAt = this.hoverInvalidatedAt.get(outcome.fsPath) ?? 0
-              if (invalidatedAt <= requestClock) {
-                this.commitHoverRead(shapeKey, outcome)
+              const { fsPath, relPath, content } = outcome
+              if (content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf' || content.kind === 'text') {
+                // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
+                // 登记未发生、反查为空）——不写缓存
+                const invalidatedAt = this.hoverInvalidatedAt.get(fsPath) ?? 0
+                if (invalidatedAt <= requestClock) {
+                  this.commitHoverRead(shapeKey, { ok: true, fsPath, relPath, content })
+                }
               }
             }
           })
@@ -1585,6 +1799,39 @@ export class DocumentSession {
     }
   }
 
+  /**
+   * #344（P3-12 收口）：该目标是否有驻留的悬停读取缓存条目（读取后未
+   * 失效/未淘汰）。provider 的 TextDocument 事件转发门控查询面——B-1
+   * 的窄代价（未 watch 的 text 目标编辑事件不转发）会把「悬停→关闭→
+   * 编辑→再悬停」落进陈旧缓存；缓存目标与已 watch 目标同权转发后，
+   * 编辑事件照常广播失效，重开悬停必然重读。md 目标事件域本就恒放行，
+   * 不经此查询。
+   */
+  hasCachedHoverTarget(fsPath: string): boolean {
+    const keys = this.hoverShapeTargets.get(fsPath)
+    if (keys !== undefined) {
+      return keys.size > 0
+    }
+    if (!this.options.isWindowsHost) {
+      return false
+    }
+    // 查询键漂移兜底（review-loops 三期修复）：登记键来自 outcome.fsPath
+    //（生产为 statFileRealPath 归正的磁盘真值，大小写任意），调用方
+    //（TextDocument 事件转发门控）传 event.document.uri.fsPath——Windows
+    // 上两者可能仅大小写/斜杠方向不同，精确匹配漏报会让未 watch 的 text
+    // 目标编辑事件不转发（与 isWatched 的 keyOf 口径不对称）。与
+    // coordinator keyOf 共用 hoverWatchKeyOf 同口径归一后线性扫描（表量级
+    // = 悬停缓存目标数，小表；幂等——精确命中已由上方 get 覆盖，本分支
+    // 只兜漂移查询，不改变既有精确路径）
+    const needle = hoverWatchKeyOf(fsPath, true)
+    for (const key of this.hoverShapeTargets.keys()) {
+      if (hoverWatchKeyOf(key, true) === needle) {
+        return true
+      }
+    }
+    return false
+  }
+
   /** 悬停读取缓存观测（测试钩子与性能计量：条目/字节/命中/未命中与
    *  辅助索引条目数——修 3 清理行为的行为断言面） */
   hoverReadCacheStats(): {
@@ -1611,10 +1858,17 @@ export class DocumentSession {
     }
   }
 
-  /** 成功结果入缓存（字节按 LF 全文 UTF-16 code unit ×2 近似计量；
-   *  条目/字节双上限按插入序淘汰——单条超字节上限不入缓存） */
-  private commitHoverRead(shapeKey: string, outcome: Extract<HoverReadOutcome, { ok: true }>): void {
-    const bytes = outcome.lfText.length * 2
+  /** 成功结果入缓存（字节按内容类型近似计量：markdown/#340 text 为 LF
+   *  正文 UTF-16 code unit ×2（text 为窗口正文），#337 起 pdf 为源文件
+   *  字节；#336 图片载荷无正文，按身份载荷小常数计量（与读取预算同口
+   *  径）；条目/字节双上限按插入序淘汰——单条超字节上限不入缓存。#342：
+   *  web 载荷不进本缓存（调用侧过滤，元信息缓存归 WebLinkMetaService） */
+  private commitHoverRead(shapeKey: string, outcome: Extract<RefReadOutcome, { ok: true }>): void {
+    const bytes = outcome.content.kind === 'markdown' || outcome.content.kind === 'text'
+      ? outcome.content.lfText.length * 2
+      : outcome.content.kind === 'pdf'
+        ? outcome.content.bytes
+        : 256
     if (bytes > this.hoverCacheLimits.byteLimit) {
       return
     }
@@ -1651,7 +1905,11 @@ export class DocumentSession {
       return
     }
     this.hoverReadCache.delete(shapeKey)
-    this.hoverCacheBytes -= hit.lfText.length * 2
+    this.hoverCacheBytes -= hit.content.kind === 'markdown' || hit.content.kind === 'text'
+      ? hit.content.lfText.length * 2
+      : hit.content.kind === 'pdf'
+        ? hit.content.bytes
+        : 256
     const keys = this.hoverShapeTargets.get(hit.fsPath)
     if (keys) {
       keys.delete(shapeKey)

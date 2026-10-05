@@ -12,8 +12,16 @@ const css = readFileSync(path.resolve(process.cwd(), 'src/webview/main.css'), 'u
 
 function rule(selector: string, declaration?: RegExp): string {
   const blocks = css.match(/[^{}]+\{[^{}]*\}/g) ?? []
-  const found = blocks.filter((block) => block.split('{')[0]?.trim().endsWith(selector) &&
-    (declaration === undefined || declaration.test(block.split('{')[1] ?? '')))
+  // 匹配两级（#338 扩展）：整头 endsWith（旧路径——单选择器块，以及以
+  // 完整分组头为 selector 的断言）；段级 endsWith（新路径——分组选择器
+  // 浮层与嵌入卡双作用域并列时，两侧段各取所需）。段级对旧单选择器块
+  // 与整头匹配等价（尾段即整头），唯一性语义不变（命中至多一处）
+  const found = blocks.filter((block) => {
+    const head = block.split('{')[0]!
+    const headMatches = head.trim().endsWith(selector) ||
+      head.split(',').some((part) => part.trim().endsWith(selector))
+    return headMatches && (declaration === undefined || declaration.test(block.split('{')[1] ?? ''))
+  })
   expect(found, `CSS 规则 ${selector} 应唯一存在`).toHaveLength(1)
   return found[0]!
 }
@@ -80,9 +88,94 @@ describe('悬停预览浮层 CSS 契约（#218）', () => {
     expect(content).toMatch(/padding:\s*10px 14px/)
   })
 
+  it('内部 Reading 容器不自持滚动（滚动承载归浮层 scrollEl——横滚上移的前提，2026-10-05 验收 5b 改版）', () => {
+    const content = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading')
+    expect(content).toMatch(/overflow:\s*visible/)
+  })
+
   it('任务禁写呈现：浮层内 checkbox 不响应指针（只读契约的样式侧）', () => {
     const box = rule('.vsidian-hover-popup input\[type="checkbox"\]')
     expect(box).toMatch(/pointer-events:\s*none/)
+  })
+})
+
+describe('悬停 PDF 内容视图 CSS 契约（#337 hover-pdf-view；#338 全文滚动扩展）', () => {
+  it('PDF 容器在场承载页塔与页码行（紧凑内边距——浮层与嵌入卡双作用域）', () => {
+    const root = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf')
+    expect(root).toMatch(/padding:\s*8px/)
+    const cardRoot = rule('#app .vsidian-embed-card .vsidian-hover-pdf')
+    expect(cardRoot).toMatch(/padding:\s*8px/)
+  })
+
+  it('窗口内页占位：内容宽内居中（#338 页池 DOM；#339 safe——放大溢出两端可达）', () => {
+    const page = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-page')
+    expect(page).toMatch(/display:\s*flex/)
+    expect(page).toMatch(/justify-content:\s*safe center/)
+    const cardPage = rule('#app .vsidian-embed-card .vsidian-hover-pdf-page')
+    expect(cardPage).toMatch(/justify-content:\s*safe center/)
+  })
+
+  it('页体包裹：相对定位基准（#339 画布/文本层/链接层的共同坐标系）', () => {
+    const body = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-body')
+    expect(body).toMatch(/position:\s*relative/)
+    const cardBody = rule('#app .vsidian-embed-card .vsidian-hover-pdf-body')
+    expect(cardBody).toMatch(/position:\s*relative/)
+  })
+
+  it('页面画布：块级呈现、无 max-width 缩放（绘制面即显示面——放大由滚动区横向承接）', () => {
+    const canvas = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas')
+    expect(canvas).toMatch(/display:\s*block/)
+    expect(canvas).not.toMatch(/max-width\s*:/)
+    const cardCanvas = rule('#app .vsidian-embed-card .vsidian-hover-pdf-canvas')
+    expect(cardCanvas).not.toMatch(/max-width\s*:/)
+  })
+
+  it('文本层：绝对铺满页体、透明 span 可选中（#339 与画布字符对齐的选区面）', () => {
+    const text = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-text')
+    expect(text).toMatch(/position:\s*absolute/)
+    expect(text).toMatch(/inset:\s*0/)
+    expect(text).toMatch(/overflow:\s*clip/)
+    // 变量族：pdfjs TextLayer 的定位换算（--total-scale-factor 由渲染器内联）
+    expect(text).toMatch(/--text-scale-factor:\s*calc\(var\(--total-scale-factor\) \* var\(--min-font-size\)\)/)
+    const span = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-text span')
+    expect(span).toMatch(/color:\s*transparent/)
+    expect(span).toMatch(/position:\s*absolute/)
+    expect(span).toMatch(/white-space:\s*pre/)
+    expect(span).toMatch(/user-select:\s*text/)
+    expect(span).toMatch(/cursor:\s*text/)
+    const cardSpan = rule('#app .vsidian-embed-card .vsidian-hover-pdf-text span')
+    expect(cardSpan).toMatch(/user-select:\s*text/)
+    // 选区可见：透明文字 + 半透明主题色底
+    const sel = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-text ::selection')
+    expect(sel).toMatch(/color:\s*transparent/)
+    expect(sel).toMatch(/background:\s*color-mix\(in srgb, var\(--vscode-focusBorder/)
+  })
+
+  it('链接层：绝对定位、指针可点、悬停反馈与禁用观感（#339）', () => {
+    const link = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-link')
+    expect(link).toMatch(/position:\s*absolute/)
+    expect(link).toMatch(/cursor:\s*pointer/)
+    const cardLink = rule('#app .vsidian-embed-card .vsidian-hover-pdf-link')
+    expect(cardLink).toMatch(/cursor:\s*pointer/)
+    const hover = rule(
+      '#app > .vsidian-hover-popup .vsidian-hover-pdf-link:hover,\n#app .vsidian-embed-card .vsidian-hover-pdf-link:hover,\n#app > .vsidian-hover-popup .vsidian-hover-pdf-link:focus-visible,\n#app .vsidian-embed-card .vsidian-hover-pdf-link:focus-visible',
+    )
+    expect(hover).toMatch(/background:/)
+    const disabled = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-link-disabled')
+    expect(disabled).toMatch(/cursor:\s*not-allowed/)
+    const cardDisabled = rule('#app .vsidian-embed-card .vsidian-hover-pdf-link-disabled')
+    expect(cardDisabled).toMatch(/cursor:\s*not-allowed/)
+  })
+
+  it('页码信息行：sticky 固定滚动区底部、居中弱化反馈（#338 不随滚动走失）', () => {
+    const info = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info')
+    expect(info).toMatch(/position:\s*sticky/)
+    expect(info).toMatch(/bottom:\s*0/)
+    expect(info).toMatch(/text-align:\s*center/)
+    expect(info).toMatch(/opacity:\s*0\.85/)
+    expect(info).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    const cardInfo = rule('#app .vsidian-embed-card .vsidian-hover-pdf-page-info')
+    expect(cardInfo).toMatch(/position:\s*sticky/)
   })
 })
 
@@ -143,18 +236,25 @@ describe('P2-06 悬停浮窗根引用内部 Live CSS 契约（#283）', () => {
     expect(actions).toMatch(/margin-left:\s*auto/)
   })
 
-  it('保存/模式切换/关闭编辑入口：与跳转入口同款图标按钮（尺寸/指针/hover 反馈）', () => {
+  it('保存/退回卡片/模式切换/关闭编辑入口：与跳转入口同款图标按钮（尺寸/指针/hover 反馈）', () => {
     const btn = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-close')
     expect(btn.split('{')[0])
       .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-save')
     expect(btn.split('{')[0])
       .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-mode')
+    // 2026-10-05 验收改版：外链 page 形态退回卡片按钮并入动作组按钮族
+    expect(btn.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback')
     expect(btn).toMatch(/width:\s*22px/)
     expect(btn).toMatch(/cursor:\s*pointer/)
-    const hover = rule(
-      '#app > .vsidian-hover-popup .vsidian-hover-popup-save:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,\n#app > .vsidian-hover-popup .vsidian-hover-popup-mode:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,\n#app > .vsidian-hover-popup .vsidian-hover-popup-close:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible',
-    )
+    // hover/focus 反馈组并列（尾段驱动匹配，组文本含新按钮两态选择器）
+    const hover = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:hover')
     expect(hover).toMatch(/border-color:/)
+    expect(hover.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:focus-visible')
+    // 焦点轮廓组（outline）：新按钮段落同组并列（:focus-visible 段在两组
+    // 重复出现，段级尾选择器不唯一——以原文包含钉住）
+    expect(css).toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-web-fallback:focus-visible')
   })
 
   it('未保存圆点：警示色加重（紧随目标显示名，绘制层可见）', () => {
@@ -168,5 +268,79 @@ describe('P2-06 悬停浮窗根引用内部 Live CSS 契约（#283）', () => {
     expect(live).toMatch(/overflow:\s*hidden/)
     const editor = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-live .cm-editor')
     expect(editor).toMatch(/max-height:\s*100%/)
+  })
+})
+
+// ---- #342（P3-10）外链卡片（web 通道）：卡片结构四规则 ----
+describe('外链卡片 CSS 契约（#342）', () => {
+  it('卡片容器：纵向行距组织（挂在浮层 Reading 容器内，正文留白复用）', () => {
+    const card = rule('#app > .vsidian-hover-popup .vsidian-hover-web-card')
+    expect(card).toMatch(/display:\s*flex/)
+    expect(card).toMatch(/flex-direction:\s*column/)
+    expect(card).toMatch(/gap:\s*8px/)
+  })
+
+  it('标题：加粗 + 主题前景色 + 长词折行（标题缺席时 JS 以域名兜底）', () => {
+    const title = rule('#app > .vsidian-hover-popup .vsidian-hover-web-title')
+    expect(title).toMatch(/font-weight:\s*600/)
+    expect(title).toMatch(/color:\s*var\(--vscode-editor-foreground/)
+    expect(title).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('摘要：描述色次级文字 + 折行（textContent 赋值，无 HTML 注入面）', () => {
+    const desc = rule('#app > .vsidian-hover-popup .vsidian-hover-web-desc')
+    expect(desc).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    expect(desc).toMatch(/line-height:\s*1\.5/)
+    expect(desc).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('域名链接：主题链接色 + hover/focus 下划线（显式安全链接可点性）', () => {
+    const domain = rule('#app > .vsidian-hover-popup .vsidian-hover-web-domain')
+    expect(domain).toMatch(/color:\s*var\(--vscode-textLink-foreground/)
+    expect(domain).toMatch(/text-decoration:\s*none/)
+    // hover/focus-visible 并列组（组文本含两态选择器；尾选择器驱动匹配）
+    const hover = rule('#app > .vsidian-hover-popup .vsidian-hover-web-domain:focus-visible')
+    expect(hover).toMatch(/text-decoration:\s*underline/)
+    expect(hover.split('{')[0]).toContain('.vsidian-hover-web-domain:hover')
+  })
+})
+
+// ---- #343（P3-11）外链原网页视图（web 通道 page 形态；2026-10-05 改版
+// ——退回按钮迁入标题条动作组，视图内工具行撤除）----
+describe('外链原网页视图 CSS 契约（#343）', () => {
+  it('页面容器：纵向布局（iframe / 说明行的组织）', () => {
+    const page = rule('#app > .vsidian-hover-popup .vsidian-hover-web-page')
+    expect(page).toMatch(/display:\s*flex/)
+    expect(page).toMatch(/flex-direction:\s*column/)
+  })
+
+  it('退回按钮旧规则已迁移：视图内不再有工具行/文字按钮规则（迁入标题条动作组按钮族）', () => {
+    // 2026-10-05 验收改版：.vsidian-hover-web-toolbar 与
+    // .vsidian-hover-web-fallback 两族规则整体移除（按钮改走标题条
+    // .vsidian-hover-popup-web-fallback，规则并入 P2-06 动作组按钮族）。
+    // 剥离注释后断言——迁移缘由注释中允许提及旧类名，规则面不得残留
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(bare).not.toContain('.vsidian-hover-web-toolbar')
+    expect(bare).not.toContain('.vsidian-hover-web-fallback')
+  })
+
+  it('iframe：100% 宽固定视口高 + 主题背景 + 边框（可见的页面视口区域）', () => {
+    const frame = rule('#app > .vsidian-hover-popup .vsidian-hover-web-frame')
+    expect(frame).toMatch(/width:\s*100%/)
+    expect(frame).toMatch(/height:\s*320px/)
+    expect(frame).toMatch(/background:\s*var\(--vscode-editor-background/)
+    expect(frame).toMatch(/border:\s*1px solid/)
+  })
+
+  it('诚实说明行：描述色次级小字 + 折行', () => {
+    const note = rule('#app > .vsidian-hover-popup .vsidian-hover-web-note')
+    expect(note).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    expect(note).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('自动退回原因行：主题错误色（明暗/高对比下实际可见的失败说明）', () => {
+    const reason = rule('#app > .vsidian-hover-popup .vsidian-hover-web-reason')
+    expect(reason).toMatch(/color:\s*var\(--vscode-errorForeground/)
+    expect(reason).toMatch(/overflow-wrap:\s*anywhere/)
   })
 })

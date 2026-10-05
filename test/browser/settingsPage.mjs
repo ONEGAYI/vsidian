@@ -34,7 +34,8 @@ try {
           // 通知型消息（uiState 等宿主不回执）不产生回包——真实宿主对
           // uiState 无应答；对请求/保存类回 snapshot/changed
           if (message.kind === 'settings.uiState') return
-          window.dispatchEvent(new MessageEvent('message', { data: { kind: message.kind === 'settings.set' ? 'settings.changed' : 'settings.snapshot', values: window.savedSettings } }))
+          // source: window 走允许清单身份层（#344 起设置页消息桥同款守卫）
+          window.dispatchEvent(new MessageEvent('message', { source: window, data: { kind: message.kind === 'settings.set' ? 'settings.changed' : 'settings.snapshot', values: window.savedSettings } }))
         }, 0)
       } })
     })
@@ -253,9 +254,12 @@ try {
       zhCn['setting.hoverEnabled.title'],
       zhCn['setting.hoverLiveDirect.title'],
       zhCn['setting.hoverTargetTip.title'],
+      // #342（P3-10）外链预览两件：跳转目标提示之后、嵌入两项之前
+      zhCn['setting.hoverExternalEnabled.title'],
+      zhCn['setting.hoverExternalShape.title'],
       zhCn['setting.embedMaxDepth.title'],
       zhCn['setting.embedMaxHeight.title'],
-    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度')
+    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 外链开关与形态 → 嵌入展开层级 → 嵌入最大高度')
     assert.equal(await refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverLiveDirect.title'], exact: true })
       .isVisible(), true, '改名后的「实时预览中直接悬停显示」条目在组内呈现')
     const hoverEnabledBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverEnabled.title'], exact: true })
@@ -393,9 +397,12 @@ try {
     await page.getByRole('button', { name: zhCn['styleRef.exportJson'], exact: true }).click()
     assert.equal(await page.evaluate(() => window.sentMessages.some(m => m.kind === 'styleRef.export')), true)
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-style-ref.png`) })
-    // #231：CSS 片段为外观分页第一页签（侧栏点「外观」默认即落此页签）；
-    // 远程缓存说明为 callout 形态（左强调条 + 圆角色底，绘制层）
+    // #231：CSS 片段为外观分页第一页签；远程缓存说明为 callout 形态
+    // （左强调条 + 圆角色底，绘制层）。页签选择会话内记忆（PR #346）：
+    // 用例此前停在「详细查询」，侧栏重入外观后保持该页签——显式点回
+    // 第一页签再断言 callout
     await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
+    await page.locator('.vsidian-style-ref-tab').nth(0).click()
     const remoteNote = page.locator('.vsidian-css-snippets-remote-note')
     await remoteNote.waitFor()
     const calloutPaint = await remoteNote.evaluate(el => {
@@ -439,6 +446,7 @@ try {
     // 兼容路由：宿主按退役分页 id 定位（focusSection wordSegment）打开编辑器
     // 页分词组：外框只容忍原生滚动的亚像素取整，文字/控件必须完整可见。
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      source: window,
       data: { kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' } })))
     const wordsegLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
     await wordsegLocated.waitFor()

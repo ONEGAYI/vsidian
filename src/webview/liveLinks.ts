@@ -38,6 +38,7 @@ import {
   soleEmbedOfLine,
   wikilinkAtCol,
 } from '../shared/wikilink'
+import { refEmbedTargetIsImage } from '../shared/refContent'
 import { looseLinkAtCol, scanLooseLinksInLine } from '../shared/looseLink'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 
@@ -187,6 +188,18 @@ export function imageWidgetDeco(
   return deco
 }
 
+/** #336：live 编辑器视图 → 其图片资源管理器的登记表（createLinkInteractions
+ *  装配时登记）。StateField 构建的嵌入装饰拿不到视图实例——图片嵌入
+ *  widget（liveEmbed 分流）在 toDOM(view) 经此解析所属编辑器的管理器：
+ *  根正文 = 面板管理器（A 身份解析）、嵌入内部 Live = B 实例管理器（B
+ *  会话出站）——「B 中图片按 B 解析」随视图身份自动成立 */
+const liveImagesByView = new WeakMap<EditorView, ImageResourceManager>()
+
+/** 视图所属的图片资源管理器（未装配 createLinkInteractions 的裸视图无） */
+export function liveImagesOfView(view: EditorView): ImageResourceManager | undefined {
+  return liveImagesByView.get(view)
+}
+
 /** live 图片 widget：占位（alt 文本）→ 经资源管理器装载 → 失败可重试。
  *  block = 独立成行形态（该行其余文本全空白）：容器取块级布局，为无固有
  *  尺寸的图源（viewBox-only 百分比宽 SVG）给出确定宽度基准。
@@ -194,7 +207,10 @@ export function imageWidgetDeco(
  *  不再触发光标落位/源码显形（误触源），编辑入口收敛到 edit 按钮；链接
  *  内嵌与表格网格内图片不挂（chrome=false 保持既有落位/跳转语义，规格
  *  明确排除）。按钮组 DOM 是 graphicBlockChrome 通用件（代码块同款），
- *  显现由 CSS 的 loaded 态兄弟选择器承担（错误/加载态无按钮）。 */
+ *  显现由 CSS 的 loaded 态兄弟选择器承担（错误/加载态无按钮）。
+ *  #336：images 缺省 = 惰性解析（toDOM 时按所属视图查 liveImagesOfView
+ *  ——StateField 装饰的图片嵌入 widget 用；与 `![](x)` 同一管理器同一管
+ *  线，eq 不比较管理器身份——同一视图内管理器唯一） */
 export class LiveImageWidget extends WidgetType {
   constructor(
     readonly src: string,
@@ -212,7 +228,7 @@ export class LiveImageWidget extends WidgetType {
     )
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view?: EditorView): HTMLElement {
     const span = document.createElement('span')
     // chrome 形态槽位兼任按钮组定位宿主（vsidian-graphic-frame 的
     // position:relative + inline-block 行内形态覆盖规则），按钮组为 img 的
@@ -229,7 +245,8 @@ export class LiveImageWidget extends WidgetType {
     span.setAttribute('data-tooltip', this.alt)
 
     span.textContent = this.alt
-    this.images?.attach(span, this.src, (slot, src) => {
+    const images = this.images ?? (view !== undefined ? liveImagesOfView(view) : undefined)
+    images?.attach(span, this.src, (slot, src) => {
       slot.textContent = ''
       const image = document.createElement('img')
       image.alt = this.alt
@@ -573,6 +590,12 @@ export function buildWikilinkDecorationRanges(
           if (inlineScanSuppressed(tree, hit.from, fm)) {
             continue
           }
+          // #336（P3-04）图片嵌入是图片不是链接：不发射 wikilink mark
+          // （源码形态无链接着色，与 `![](x)` 触及/源码形态一致；呈现由
+          // 图片嵌入 widget 接管）
+          if (refEmbedTargetIsImage(hit.inner)) {
+            continue
+          }
           // 独占行嵌入：仅光标/选区触及（显形态——liveEmbed 已撤整行
           // replace、源文在场）时发射 mark；未及时该行由 liveEmbed 的
           // replace 接管，零发射避免重叠渲染冲突。混排行永不接管，常驻
@@ -830,7 +853,12 @@ export function createLinkInteractions(opts: {
     class {
       decorations: DecorationSet
       constructor(view: EditorView) {
+        // #336：视图 → 图片管理器登记（图片嵌入 widget 的惰性解析来源）
+        liveImagesByView.set(view, opts.images)
         this.decorations = this.build(view)
+      }
+      destroy(): void {
+        // WeakMap 无需显式解绑（视图销毁即键不可达）；保持空实现占位
       }
       update(update: import('@codemirror/view').ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.viewportChanged ||
@@ -892,12 +920,13 @@ export function createLinkInteractions(opts: {
           // 按下无修饰、抬起带 Alt（或反之）的混合手势误触发跳转
           if (event.altKey) return false
           const target = event.target instanceof Element ? event.target : null
-          // #42 网格中的普通单击先进入对应单元格源码；显式 Ctrl/Cmd
-          // 仍按上方分支跳转，避免整格都是链接时失去点击编辑入口。
-          if (target?.closest('.vsidian-table-grid-row')) return false
           const rendered = target?.closest('[data-vsidian-rendered-wikilink="true"]')
             ? 'wikilink'
             : target?.closest('[data-vsidian-rendered-link="true"]') ? 'link' : null
+          // 表格网格（#42）单击分工（2026-10-05 用户裁决改版）：链接命中
+          // 区单击即跳转（与正文渲染态同语义），格内空白（未命中链接）
+          // 单击进入单元格源码编辑；显式 Ctrl/Cmd 分支保留为冗余入口。
+          // 无链接命中且不在网格内：正文默认行为（返回 false 不处理）。
           if (!rendered) return false
           const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
           if (pos !== null) pendingClick = { target: rendered, pos, x: event.clientX, y: event.clientY }

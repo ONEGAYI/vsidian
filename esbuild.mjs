@@ -6,6 +6,23 @@
 //   （同 browser/iife 形态）。mermaid 不进主 bundle（约 2.7MB 会让每个 webview
 //   启动都付出解析成本），宿主在 webview HTML 注入资源 URI、webview 存在
 //   mermaid 围栏时按需 <script> 加载。
+// - PDF 双产物（#337 / P3-05，装配结论来自 #334 探针）：
+//   src/webview/pdfMainEntry.ts -> out/webview/pdfMain.js（pdfjs-dist@6.4.299
+//   legacy 主库，约 480KB minified——不进主 bundle，悬停 PDF 时动态 <script>
+//   按需装载，pdfjsLib 挂全局）；src/webview/pdfWorkerEntry.ts ->
+//   out/webview/pdfWorker.js（legacy worker 单文件 iife，运行时经 fetch 文本
+//   -> Blob -> objectURL 装配，CSP worker-src blob: 放行）。
+//   target chrome114（对齐下界宿主 Electron 25 / Chromium 114——比
+//   webviewBase 的 chrome118 更保守：PDF.js 6.x 官方 legacy 下界为
+//   Chrome 125，1.82.3 靠 banner 双 polyfill 补齐 Promise.withResolvers 与
+//   ReadableStream async iteration；升级 pdfjs-dist 必须重跑
+//   test/integration/pdfProbe 回归门禁）。
+// - PDF 资产复制：node_modules/pdfjs-dist 的 cmaps / standard_fonts / wasm /
+//   iccs -> out/webview/pdfjs/<同名目录>（构建产物目录，gitignore 天然排除、
+//   .vscodeignore 保留 out/webview 进包）。wasm 裁掉 quickjs-eval（sandbox
+//   产物专用——不随包即天然拒绝 PDF JavaScript）与 *_nowasm_fallback.js
+//   （#334 探针口径：wasm 失败降级路径未随包，属待验降级面）；分许可
+//   文件随包（Apache-2.0 的 Foxit/Liberation/OpenJPEG/QCMS/JBIG2 条款）。
 // - 集成测试入口（仅开发构建）：test/integration/suite/index.ts -> out/test/integration/suite/index.js
 // 类型检查由 `tsc --noEmit`（npm run typecheck / compile）负责，esbuild 只做转译打包。
 //
@@ -13,8 +30,9 @@
 // 移除 woff/ttf 回退条目（chrome118 目标只需 woff2），并以 assetNames 固定
 // 产物名为 out/webview/assets/<原名>（无 hash，供发布检查的必需清单逐文件登记）。
 import * as esbuild from 'esbuild'
-import { readFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { pdfBuildTargets } from './scripts/pdfBuildConfig.mjs'
 
 const production = process.argv.includes('--production')
 const watch = process.argv.includes('--watch')
@@ -47,6 +65,22 @@ const katexMinJsPlugin = {
   },
 }
 
+/** #340（P3-08）oniguruma WASM 复制：vscode-oniguruma 的 onig.wasm 是
+ *  运行时按路径读取的二进制资产（vscode-textmate 引擎初始化 loadWASM
+ *  需要），不能进 JS bundle——复制到 out/onig.wasm（VSIX 打包 out/ 目录
+ *  随包；运行时经 extensionUri/out/onig.wasm 定位）。release.mjs 的
+ *  REQUIRED 清单已登记该文件。 */
+const onigWasmCopyPlugin = {
+  name: 'onig-wasm-copy',
+  setup(build) {
+    build.onEnd(() => import('node:fs').then((fs) =>
+      fs.promises.copyFile(
+        path.resolve('node_modules/vscode-oniguruma/release/onig.wasm'),
+        path.resolve('out/onig.wasm'),
+      )))
+  },
+}
+
 /** webview 产物共用配置（browser/iife/chrome118 + KaTeX 字体装载） */
 const webviewBase = {
   bundle: true,
@@ -64,6 +98,30 @@ const webviewBase = {
   plugins: [katexFontPlugin, katexMinJsPlugin],
 }
 
+/** #337 PDF 资产复制（pdfjs-dist 运行时必要集，#334 探针生产候选布局）：
+ *  cmaps 全量 + standard_fonts 全量（含 LiberationSans .ttf——PDF.js 内建
+ *  文件名，禁止改名/转格式，release 白名单按路径例外）+ wasm 三件（裁掉
+ *  quickjs-eval 与 *_nowasm_fallback）+ iccs；分许可文件随包。幂等：先清
+ *  旧目录再复制（依赖升级后无残留） */
+async function copyPdfjsAssets() {
+  const srcRoot = 'node_modules/pdfjs-dist'
+  const destRoot = 'out/webview/pdfjs'
+  await rm(destRoot, { recursive: true, force: true })
+  await mkdir(destRoot, { recursive: true })
+  await cp(path.join(srcRoot, 'cmaps'), path.join(destRoot, 'cmaps'), { recursive: true })
+  await cp(path.join(srcRoot, 'standard_fonts'), path.join(destRoot, 'standard_fonts'), { recursive: true })
+  await cp(path.join(srcRoot, 'iccs'), path.join(destRoot, 'iccs'), { recursive: true })
+  // wasm：排除 sandbox 专用 quickjs-eval 与未随包的 nowasm 降级回退
+  await mkdir(path.join(destRoot, 'wasm'), { recursive: true })
+  const wasmFiles = await readdir(path.join(srcRoot, 'wasm'))
+  for (const name of wasmFiles) {
+    if (name.startsWith('quickjs-eval') || name.includes('_nowasm_')) {
+      continue
+    }
+    await cp(path.join(srcRoot, 'wasm', name), path.join(destRoot, 'wasm', name))
+  }
+}
+
 /** @type {Array<import('esbuild').BuildOptions>} */
 const targets = [
   {
@@ -77,6 +135,7 @@ const targets = [
     sourcemap: !production,
     minify: production,
     logLevel: 'info',
+    plugins: [onigWasmCopyPlugin],
   },
   {
     entryPoints: ['src/webview/main.ts'],
@@ -97,6 +156,10 @@ const targets = [
     outfile: 'out/webview/mermaid.js',
     ...webviewBase,
   },
+  // PDF.js 双产物（#337）：配置单一事实源在 scripts/pdfBuildConfig.mjs
+  //（#346 修复轮 2 提取——浏览器测试侧 ensurePdfArtifacts 消费同一工厂，
+  // 相同 outfile 逐字段一致；banner/iife/chrome114 语义注释在彼处）
+  ...pdfBuildTargets(process.cwd(), { production }),
 ]
 
 if (!production) {
@@ -109,6 +172,63 @@ if (!production) {
     target: 'node18',
     external: ['vscode'],
     sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    // #340（P3-08）真宿主高亮对照套件（生产外观服务的颜色对照断言）
+    entryPoints: ['test/integration/textAppearance/suite.ts'],
+    outfile: 'out/test/integration/textAppearance/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  // #334（P3-02）PDF 兼容性探针三产物（研究票，不进 VSIX）：
+  // - suite：宿主侧套件（node18/cjs，复用生产 editorCsp 纯逻辑）
+  // - main：webview 主线程（browser/iife，target chrome114 对齐下界宿主
+  //   Electron 25/Chromium 114 —— 比生产 webviewBase 的 chrome118 更保守，
+  //   探明下界语法面后生产 target 是否调整由 P3-05 决策）
+  // - worker：PDF.js legacy worker 单文件 iife（blob 装配候选）
+  // banner 的 Promise.withResolvers polyfill：pdfjs-dist 6.x 的 legacy 产物
+  // 不 polyfill 该 API（Chromium 119+），1.82.3 宿主（Chromium 114）缺它；
+  // 主线程与 worker 全局作用域独立，两侧都要注入（存在性检测，无副作用）。
+  const pdfProbeBanner = {
+    js: `if (typeof Promise.withResolvers !== "function") { Promise.withResolvers = function () { let resolve, reject; const promise = new Promise((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; } }if (!ReadableStream.prototype[Symbol.asyncIterator]) { ReadableStream.prototype[Symbol.asyncIterator] = async function* () { const reader = this.getReader(); try { for (;;) { const { done, value } = await reader.read(); if (done) return; yield value; } } finally { reader.releaseLock(); } }; }`,
+  }
+  targets.push({
+    entryPoints: ['test/integration/pdfProbe/suite.ts'],
+    outfile: 'out/test/integration/pdfProbe/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfProbe/webviewMain.ts'],
+    outfile: 'out/test/integration/pdfProbe/main.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    banner: pdfProbeBanner,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfProbe/workerEntry.ts'],
+    outfile: 'out/test/integration/pdfProbe/worker.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    banner: pdfProbeBanner,
     logLevel: 'info',
   })
   targets.push({
@@ -136,6 +256,20 @@ if (!production) {
     sourcemap: true,
     logLevel: 'info',
   })
+  targets.push({
+    // #335 原生文字外观探针套件（研究票，不进 VSIX）：由
+    // test/integration/runAppearanceProbe.mjs 启动；依赖
+    // vscode-textmate/vscode-oniguruma（探针专属 devDependencies）
+    entryPoints: ['test/integration/appearanceProbe/index.ts'],
+    outfile: 'out/test/integration/appearanceProbe/index.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
 }
 
 async function main() {
@@ -146,6 +280,9 @@ async function main() {
   } else {
     await Promise.all(contexts.map((ctx) => ctx.rebuild()))
     await Promise.all(contexts.map((ctx) => ctx.dispose()))
+    // #337 PDF 资产复制（一次性收尾步骤——不进 watch 循环；依赖变更后
+    // 重跑构建刷新）
+    await copyPdfjsAssets()
   }
 }
 

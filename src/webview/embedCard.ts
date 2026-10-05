@@ -35,7 +35,8 @@ import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
-import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
+import { RefContentInstance, isRefLoadedMarkdown, isRefLoadedPdf, refLoadedContentOfResult, type RefContentMount, type RefLoadedAny, type RefLoadedContent, type RefLoadedTextContent, type RefLoadedPdfContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
+import { PdfHoverView, pdfErrorText, type PdfRenderProbe } from './pdfRender'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -222,7 +223,7 @@ export interface HoverPopupRootSession {
   /** 显式关闭编辑（复用 P2-05 链路：dirty 弹三项模态、干净直接退出） */
   requestClose(intent?: 'close' | 'escape'): void
   /** 装载成功送达：entry.loaded 填充 + 生效 Live 时绑定端口 */
-  contentLoaded(loaded: RefLoadedContent): void
+  contentLoaded(loaded: RefLoadedContent | RefLoadedTextContent): void
   /** Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
   markPendingReadingRefresh(): void
   /** 内部 Live 端口是否在场（Esc 分层等） */
@@ -273,8 +274,19 @@ export interface EmbedCardContext {
   mainEditorView?(): EditorView | null
 }
 
-/** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
-type EmbedLoaded = RefLoadedContent
+/** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除）。
+ *  #341（P3-09）起 text 形态入缓存——text 与 markdown 同走 entry 装载/
+ *  失效/重挂链路，差异只在渲染分派（RefContentMount.render 的 text 分支）
+ *  与只读边界（text 无内部 Live 端口）；#338（P3-06）起联合再收宽：
+ *  pdf 载荷的嵌入卡缓存（身份 + 资源 URI + 初始定位页——重挂直接侧挂
+ *  PDF 视图，零新请求） */
+type EmbedLoaded = RefLoadedContent | RefLoadedTextContent | RefLoadedPdfContent
+
+/** #341：装载形态判别（text 只读边界与探针分派；参数收宽到联合——
+ *  image/markdown 成员恒 false，refLoadedContentOfResult 出口直接喂入） */
+function isTextLoaded(loaded: RefLoadedAny | null | undefined): loaded is RefLoadedTextContent {
+  return loaded !== null && loaded !== undefined && 'kind' in loaded && loaded.kind === 'text'
+}
 
 /** P2-04 嵌入实例的目标编辑端口状态（entry 级——同一 occurrence 的双容器
  *  挂载共享一份；Reading 态不存在，即「Reading 无写端口」） */
@@ -378,6 +390,10 @@ interface EmbedEntry {
   watchedFsPath: string | null
   watchLeaseId: string | null
   parseBytes: number
+  /** #338（P3-06）PDF occurrence 的浏览位置记忆（卸载/刷新前保存当前
+   *  可见页；重挂与新版本重载按它恢复——合法钳制口径）。markdown 形态
+   *  的滚动记忆沿用 content.scrollTop（PDF 页塔不占该字段） */
+  pdfPage: number
 }
 
 /** 挂载中的卡片实例（DOM 生命周期 = 宿主元素在场期间——Reading 块元素
@@ -398,6 +414,10 @@ interface EmbedCardHandle {
   /** P2-05 显式关闭编辑入口（内部 Live 在场时可见） */
   closeBtn: HTMLButtonElement
   content: RefContentMount
+  /** #338（P3-06）PDF 视图实例（pdf 载荷装载后非空；挂卡片滚动区内，
+   *  与 Reading/Live 容器并列——每容器一份，同 URI 多 occurrence 经共
+   *  享文档存储复用文档数据，滚动各自独立） */
+  pdfView: PdfHoverView | null
   display: 'loading' | 'content' | 'error'
   note: string
   /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配）。P2-06
@@ -426,6 +446,14 @@ export interface EmbedCardProbe {
   viewStats: ReadingViewStats | null
   /** P2-04 生效内部模式（覆盖优先，缺省跟随直接父） */
   internalMode: 'reading' | 'live'
+  /** #341（P3-09）text 视图虚拟化统计（markdown 装载为 null）：
+   *  totalLines = 窗口内总行数（#range 硬窗口时即窗口行数——窗口外
+   *  不进载荷），renderedLines = 当前 DOM 常驻行数（受视口约束） */
+  textStats: { renderedLines: number; totalLines: number } | null
+  /** #344（P3-12 收口）text 视图绘制层观测（markdown 装载为 null）：着
+   *  色 span 计数与首个着色 span 的**计算色**（rgb(…)；无 token 为 ''）
+   *  ——集成层「用户看到的颜色」级断言面（视觉层断言规则欠账补齐） */
+  textPaint: { coloredSpans: number; firstSpanColor: string } | null
   /** P2-04 目标编辑端口是否已绑定（可见且内部 Live 才为 true） */
   liveBound: boolean
   livePortId: string | null
@@ -439,6 +467,22 @@ export interface EmbedCardProbe {
   /** P2-11（#288）内部 Live 图片管理器的已应用地址（B 身份解析结果——
    *  「按 B 目录解析才命中」的集成断言面） */
   liveImageSrcs: string[]
+  /** #338（P3-06）PDF 视图观测（嵌入卡 pdf 载荷的绘制层断言载体：
+   *  phase/page/totalPages/mountedPages/canvasBytes——非 pdf 卡恒 null）。
+   *  #339（P3-07）追加 zoom（缩放乘子）/textLayerPages（带 span 文本层
+   *  页数）/linkAnnotations（窗口内链接元素数） */
+  pdf: {
+    phase: PdfRenderProbe['phase']
+    page: number
+    totalPages: number
+    errorReason: PdfRenderProbe['errorReason']
+    mountedPages: number
+    canvasBytes: number
+    nonWhiteRatio: number
+    zoom: number
+    textLayerPages: number
+    linkAnnotations: number
+  } | null
   /** P2-05 该嵌入发起的关闭确认模态态（none/open/stale） */
   closeDialog: 'none' | 'open' | 'stale'
   /** P2-05 发起（或挂起）的退出意图径 */
@@ -460,6 +504,26 @@ export interface EmbedCardProbe {
 function targetOfInner(inner: string): string {
   const pipeAt = inner.indexOf('|')
   return pipeAt >= 0 ? inner.slice(0, pipeAt) : inner
+}
+
+/** #344 着色 span 绘制观测（共享探针）：过滤有内联色的 span 计数，首个
+ *  取 getComputedStyle 计算色（绘制层口径——样式注入失效时与内联值分道，
+ *  集成断言据此不虚过，视觉层断言规则）。hoverPopup 的 hoverPreview 探针
+ *  与嵌入卡 probeTextPaintOf 同款消费（#344 同批引入的两份重复，
+ *  review-loops 三期收敛为单一实现——纯搬移，零行为变化） */
+export function probeSpanPaint(contentEl: Element): { coloredSpans: number; firstSpanColor: string } {
+  let coloredSpans = 0
+  let firstSpanColor = ''
+  for (const span of Array.from(contentEl.querySelectorAll<HTMLElement>('span'))) {
+    if (span.style.color === '') {
+      continue // 无内联着色的 span（无 token 整行/纯字形段）不计
+    }
+    coloredSpans++
+    if (firstSpanColor === '') {
+      firstSpanColor = getComputedStyle(span).color
+    }
+  }
+  return { coloredSpans, firstSpanColor }
 }
 
 /** P2-08（#285）重定位命中判定：A 的变更使嵌入源区间被覆盖重写时，检查
@@ -647,6 +711,7 @@ export class EmbedCardManager {
         watchedFsPath: null,
         watchLeaseId: null,
         parseBytes: 0,
+        pdfPage: 0,
       }
       this.entries.set(key, entry)
       const owned = entry
@@ -738,6 +803,7 @@ export class EmbedCardManager {
       modeBtn,
       saveBtn,
       closeBtn,
+      pdfView: null,
       content: entry.content.mount({
         contentEl, scrollEl, strategy: 'virtual',
         session: () => this.context.session(),
@@ -760,6 +826,7 @@ export class EmbedCardManager {
     if (source?.parentInstanceId !== undefined && !parentEntry) {
       modeBtn.style.display = 'none'
       modeBtn.tabIndex = -1
+      modeBtn.dataset['locked'] = '1' // refreshModeChrome 恢复分支的豁免标记
       entry.modeOverride = 'reading'
     }
     this.active.set(el, handle)
@@ -902,6 +969,7 @@ export class EmbedCardManager {
         watchedFsPath: null,
         watchLeaseId: null,
         parseBytes: 0,
+        pdfPage: 0,
       }
       this.entries.set(key, entry)
       const owned = entry
@@ -941,6 +1009,7 @@ export class EmbedCardManager {
       modeBtn: args.modeBtn,
       saveBtn: args.saveBtn,
       closeBtn: args.closeBtn,
+      pdfView: null,
       content,
       display: 'loading',
       note: '',
@@ -965,6 +1034,11 @@ export class EmbedCardManager {
       requestClose: (intent) => this.requestClose(entry, intent ?? 'close'),
       contentLoaded: (loaded) => {
         if (!this.isPopupRootOpen(entry)) {
+          return
+        }
+        // #340：text 载荷无内部 Live 语义（只读浮层不走根会话 Live 端口；
+        // #341 接入嵌入文本视图时统一登记 entry 形态）
+        if ('kind' in loaded) {
           return
         }
         entry.loaded = loaded
@@ -1147,35 +1221,35 @@ export class EmbedCardManager {
           if (message.ok) {
             this.applyResult(handle, message)
           } else {
-            this.applyError(handle, message.reason, message.anchor)
+            this.applyError(handle, message.reason, message.anchor, message.anchorDetail)
           }
         }
       }
       return true
     }
     // 卸载后在途：同配对写入缓存（重挂直接用）；过期回包只清 lastReq
-    //（缓存不得写入旧版本——重挂会绕过仲裁直接渲染）
+    //（缓存不得写入旧版本——重挂会绕过仲裁直接渲染）。
+    // #333：类型化装载入口分派——kind 与载荷不匹配不缓存（不可应用载荷
+    // 复用会绕过宿主修复），仅清配对并释放租约
+    const okMessage = message.ok ? message : null
     for (const entry of this.entries.values()) {
       if (entry.lastReq !== null &&
           entry.lastReq.instanceId === message.instanceId &&
           entry.lastReq.reqId === message.reqId) {
-        if (!stale && message.ok) {
-          entry.loaded = {
-            fsPath: message.target.fsPath,
-            relPath: message.target.relPath,
-            scope: message.scope.kind,
-            selector: message.scope,
-            version: message.version,
-            text: message.text,
-            range: message.range,
-            depth: message.depth,
-            expansionPath: message.expansionPath,
-          }
-          entry.lastKnown = { fsPath: message.target.fsPath, version: message.version }
-          this.watchEntry(entry, message.sourceLeaseId)
+        // #336：image 载荷对卡片路径不可应用（嵌入卡片结构上不发图片请求
+        // ——图片嵌入在装饰/渲染层分流图片管线；此处为防御性第二道防线）。
+        // #341：text 载荷接入卡片装载（窗口正文 + 导航字段）；#338：pdf
+        // 载荷可缓存（重挂直接侧挂 PDF 视图，零新请求）；其余不可应用
+        // 形态（web）仍按不可应用处理
+        const converted = !stale && okMessage !== null ? refLoadedContentOfResult(okMessage) : null
+        const loaded = converted !== null && (isRefLoadedMarkdown(converted) || isTextLoaded(converted) || isRefLoadedPdf(converted)) ? converted : null
+        if (loaded !== null && okMessage !== null) {
+          entry.loaded = loaded
+          entry.lastKnown = { fsPath: okMessage.target.fsPath, version: okMessage.version }
+          this.watchEntry(entry, okMessage.sourceLeaseId)
         }
         entry.lastReq = null
-        if (stale && message.ok) releaseRefSourceLease(this.context, message.sourceLeaseId)
+        if (loaded === null && okMessage !== null) releaseRefSourceLease(this.context, okMessage.sourceLeaseId)
         return true
       }
     }
@@ -1190,6 +1264,50 @@ export class EmbedCardManager {
   notifyImageResult(msg: { reqId: number; ok: boolean; src?: string; reason?: string }): void {
     for (const handle of this.active.values()) {
       handle.content.notifyImageResult(msg)
+    }
+  }
+
+  /**
+   * #341（P3-09）text token 分层推送路由（syncController 转发 hover.tokens）：
+   * 按在场 handle 的内容挂载配对（instanceId = occurrence/hostId；版本与
+   * 当前 target 比对在 RefContentMount.applyTextTokens——迟到/过期 token
+   * 不覆盖新正文，释放后的挂载拒绝）。任一挂载消费即返回 true（消息非
+   * 本管理器消费时返回 false——syncController 据此观测，不发回执）。
+   */
+  notifyTokens(message: {
+    instanceId: string
+    reqId: number
+    ok: boolean
+    layer?: 'textmate' | 'semantic'
+    version?: number
+    colors?: string[]
+    tokens?: number[]
+  }): boolean {
+    let consumed = false
+    for (const handle of this.active.values()) {
+      if (handle.content.applyTextTokens(message)) {
+        consumed = true
+      }
+    }
+    return consumed
+  }
+
+  /**
+   * #341（P3-09）外观代次广播路由（appearance.changed——主题/颜色自定义/
+   * 语言字体设置/扩展清单变化）：在场 text 嵌入卡静默重载（正文载荷含
+   * 语言级字体，token 随 render 重取；重载带 anchorOptional——已打开视图
+   * 的窗口与定位合法钳制）。Markdown 卡不重载（CSS 变量自带跟随）。
+   */
+  notifyAppearanceChanged(): void {
+    for (const entry of [...this.entries.values()]) {
+      if (!isTextLoaded(entry.loaded) || entry.live) {
+        continue // 非 text 装载；Live 在场时 Reading 侧不重载（P2-04 语义——
+        // text 无端口，实际不可达，防御性排除）
+      }
+      const first = [...this.active.values()].find((h) => h.entry === entry)
+      if (first) {
+        this.requestLoad(first, { silent: true, reload: true })
+      }
     }
   }
 
@@ -1240,6 +1358,10 @@ export class EmbedCardManager {
       }
       // 在场滚动位置先保存（重建后恢复；离屏 entry 保留旧值）
       for (const handle of this.active.values()) {
+        if (handle.entry === entry && handle.pdfView !== null && handle.pdfView.probe().page > 0) {
+          // #338 PDF：浏览位置按当前可见页保存（重载后合法钳制恢复）
+          entry.pdfPage = handle.pdfView.probe().page
+        }
         if (handle.entry === entry && handle.scrollEl.scrollTop > 0) {
           entry.content.scrollTop = handle.scrollEl.scrollTop
         }
@@ -1265,6 +1387,8 @@ export class EmbedCardManager {
         for (const handle of handles) {
           handle.content.clear()
           handle.contentEl.textContent = '' // 旧内容撤下（防 display 反转闪现）
+          // #338 PDF：旧页一并撤下（不冒充在场内容；视图保留待恢复重载）
+          handle.pdfView?.discardContent()
           this.applyDisplay(handle, 'error', note)
         }
       }
@@ -1285,6 +1409,9 @@ export class EmbedCardManager {
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) continue
       handle.content.clear()
+      // #338 PDF：页塔与画布一并撤下（与 deleted/stale 失效路径同款——
+      // watch 被拒后旧页不冒充在场内容；视图骨架保留待后续装载复用）
+      handle.pdfView?.discardContent()
       this.applyDisplay(handle, 'error', note)
     }
   }
@@ -1473,8 +1600,13 @@ export class EmbedCardManager {
   }
 
   /** 生效内部模式：手动覆盖优先；缺省跟随直接父视图（根级嵌入取根面板
-   *  模式，子卡取直接父嵌入的内部模式——Q19 语义） */
+   *  模式，子卡取直接父嵌入的内部模式——Q19 语义）。#341（P3-09）：text
+   *  装载恒 reading——只读文本不建编辑端口，父模式/覆盖/父切换均不改变
+   *  （「父文档模式改变不使 PDF／图片／文本／网页可写」的规格口径） */
   private effectiveMode(entry: EmbedEntry): 'reading' | 'live' {
+    if (isTextLoaded(entry.loaded)) {
+      return 'reading'
+    }
     if (entry.modeOverride) {
       return entry.modeOverride
     }
@@ -1487,8 +1619,12 @@ export class EmbedCardManager {
   }
 
   /** 手动切换内部模式（头部按钮 / 焦点嵌入的键位入口）：按 occurrence 记
-   *  忆，父模式切换不回滚 */
+   *  忆，父模式切换不回滚。#341：text 装载零操作（只读边界——按钮已在
+   *  refreshModeChrome 隐藏，此处为调用面防御） */
   private toggleMode(entry: EmbedEntry): void {
+    if (isTextLoaded(entry.loaded)) {
+      return
+    }
     entry.modeOverride = this.effectiveMode(entry) === 'live' ? 'reading' : 'live'
     this.applyInternalMode(entry)
   }
@@ -1564,10 +1700,13 @@ export class EmbedCardManager {
   }
 
   /** 句柄级内容显隐：Live 态显示编辑器容器（实例已建）并隐藏 Reading
-   *  容器；Reading 态反转。mode 传入避免递归重算 */
+   *  容器；Reading 态反转。mode 传入避免递归重算。#338：pdf 装载的
+   *  entry 两容器均让位给 PDF 视图（挂卡片滚动区内，与容器并列）——
+   *  只读内容无编辑语义，恒不进 Live 呈现 */
   private applyInternalDom(handle: EmbedCardHandle, mode = this.effectiveMode(handle.entry)): void {
-    const liveOn = mode === 'live' && handle.entry.live?.instance != null
-    handle.contentEl.style.display = liveOn ? 'none' : ''
+    const pdfLoaded = isRefLoadedPdf(handle.entry.loaded ?? undefined)
+    const liveOn = !pdfLoaded && mode === 'live' && handle.entry.live?.instance != null
+    handle.contentEl.style.display = liveOn || pdfLoaded ? 'none' : ''
     handle.liveEl.style.display = liveOn ? '' : 'none'
   }
 
@@ -1604,9 +1743,12 @@ export class EmbedCardManager {
   /** 绑定目标编辑端口（可见且内部 Live 且已装载——装载完成的 watch 固定
    *  是宿主 bind 校验的前置）。幂等：已有端口或绑定在途直接返回。P2-06：
    *  浮窗根须在场挂载（已关浮窗的驻留 entry 不建端口——重开时按当次
-   *  装载重新绑定） */
+   *  装载重新绑定）。#341：text 装载不绑定（只读文本无编辑端口——
+   *  effectiveMode 恒 reading 已挡调用面，此处为调用分支防御）；#338：
+   *  pdf 装载同型防御（applyLoaded 已分流 applyPdfLoaded，结构性不可达，
+   *  防御一致性） */
   private ensureLivePort(entry: EmbedEntry): void {
-    if (entry.live || !entry.loaded) {
+    if (entry.live || !entry.loaded || isTextLoaded(entry.loaded) || isRefLoadedPdf(entry.loaded)) {
       return
     }
     if (entry.popupRoot && !this.isPopupRootOpen(entry)) {
@@ -2040,7 +2182,12 @@ export class EmbedCardManager {
       return
     }
     const loaded = entry.loaded
-    if (loaded && loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
+    // #338/#341：EmbedLoaded 联合收宽后此处只对 markdown 形态定位（text
+    // 装载无 Markdown 选择器/端口、PDF 无文本坐标——live 视图本就不为
+    // 二者建立，locateLiveInstance 只在 live 端口 init 后到达，结构性
+    // 不可达，窄化为防御性跳过）
+    if (loaded !== null && isRefLoadedMarkdown(loaded) &&
+      loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
       loaded.range.start > 0 && loaded.range.start <= view.state.doc.length) {
       const at = loaded.range.start
       view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at) })
@@ -2308,8 +2455,21 @@ export class EmbedCardManager {
     }
   }
 
-  /** 模式按钮 chrome：图标与悬停词指向另一态 */
+  /** 模式按钮 chrome：图标与悬停词指向另一态。#341：text 装载无内部 Live
+   *  语义——模式按钮隐藏（Tab 不可达；装载完成前后都经 refreshModeChrome
+   *  收敛——装载前按 entry.loaded 判定，重挂路径同样命中）。恢复分支尊重
+   *  P2-09 范围锁（dataset['locked']——父不在状态库的锁 Reading 不被本
+   *  刷新翻转） */
   private refreshModeChrome(handle: EmbedCardHandle): void {
+    if (isTextLoaded(handle.entry.loaded)) {
+      handle.modeBtn.style.display = 'none'
+      handle.modeBtn.tabIndex = -1
+      return
+    }
+    if (handle.modeBtn.dataset['locked'] !== '1') {
+      handle.modeBtn.style.display = ''
+      handle.modeBtn.tabIndex = 0
+    }
     const mode = this.effectiveMode(handle.entry)
     const toLive = mode !== 'live'
     const label = t(toLive ? 'embed.modeToLive' : 'embed.modeToReading')
@@ -2905,6 +3065,24 @@ export class EmbedCardManager {
     }
   }
 
+  /** probe 的 scope 字段取值：markdown 装载报区间形态，pdf／未装载报空
+   *  （#338 联合收宽——pdf 无文本坐标，形态区分走 probe 的 pdf 字段） */
+  private probeScopeOf(loaded: EmbedLoaded | null): 'full' | 'heading' | 'block' | '' {
+    if (loaded === null || !isRefLoadedMarkdown(loaded)) {
+      return ''
+    }
+    return loaded.scope ?? ''
+  }
+
+  /** #344（P3-12 收口）：text 装载的着色 span 观测（markdown/未装载为
+   *  null）。span 遍历核心经共享 probeSpanPaint */
+  private probeTextPaintOf(handle: EmbedCardHandle): { coloredSpans: number; firstSpanColor: string } | null {
+    if (!handle.content.isTextContent) {
+      return null
+    }
+    return probeSpanPaint(handle.contentEl)
+  }
+
   /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器）。P2-06：
    *  浮窗根（host='hover'）不进嵌入探针——它有自己的 hoverPreview 探针，
    *  且驻留 entry 会污染嵌入 occurrence 序号 */
@@ -2920,7 +3098,10 @@ export class EmbedCardManager {
         state: handle.display,
         note: handle.note,
         blocks: handle.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
-        scope: handle.entry.loaded?.scope ?? '',
+        // #338/#341：text 装载无 Markdown scope 语义（窗口/落点在 textNav
+        // ——探针按形态取 textStats 观测）；pdf 装载无文本区间形态（形态
+        // 区分走下方 pdf 字段）——probeScopeOf 经 isRefLoadedMarkdown 收窄
+        scope: this.probeScopeOf(handle.entry.loaded),
         fm: fmSection ? (handle.entry.content.fmExpanded ? 'expanded' : 'collapsed') : 'none',
         maxHeightPx: Number.parseInt(handle.scrollEl.style.maxHeight, 10) || 0,
         host: handle.host,
@@ -2930,6 +3111,11 @@ export class EmbedCardManager {
         // #224 内容文本字符数（集成断言未保存修改推送后的刷新可见性）
         textLen: (handle.contentEl.textContent ?? '').length,
         viewStats: handle.content.getStats(),
+        // #341（P3-09）text 视图虚拟化统计（markdown 为 null）——DOM 常驻
+        // 受视口/窗口约束的观测面（renderedLines 远小于 totalLines）
+        textStats: handle.content.getTextStats(),
+        // #344（P3-12 收口）text 视图绘制层观测（计算色断言面）
+        textPaint: this.probeTextPaintOf(handle),
         internalMode: this.effectiveMode(handle.entry),
         liveBound: handle.entry.live?.portId != null,
         livePortId: handle.entry.live?.portId ?? null,
@@ -2942,6 +3128,24 @@ export class EmbedCardManager {
           .map((e) => e.appliedSrc!),
         depth: handle.entry.content.source.depth ?? 1,
         parentInstanceId: handle.entry.content.source.parentInstanceId ?? null,
+        pdf: handle.pdfView !== null
+          ? (() => {
+              const p = handle.pdfView!.probe()
+              return {
+                phase: p.phase,
+                page: p.page,
+                totalPages: p.totalPages,
+                errorReason: p.errorReason,
+                mountedPages: p.mountedPages,
+                canvasBytes: p.canvasBytes,
+                nonWhiteRatio: p.nonWhiteRatio,
+                // #339 缩放/文本层/链接层观测（集成断言面）
+                zoom: p.zoom,
+                textLayerPages: p.textLayerPages,
+                linkAnnotations: p.linkAnnotations,
+              }
+            })()
+          : null,
         closeDialog: this.closeDialogBelongsTo(handle.entry)
           ? (this.closeDialog!.stale ? 'stale' : 'open')
           : 'none',
@@ -2963,7 +3167,7 @@ export class EmbedCardManager {
   }
 
   /** 悬停根 B 与正文卡树共用面板预算；解析字节在 DOM 挂载前准入。 */
-  admitPopupRoot(instanceId: string, loaded: RefLoadedContent, bytes: number): boolean {
+  admitPopupRoot(instanceId: string, loaded: RefLoadedAny, bytes: number): boolean {
     this.budget.setDepthLimit(this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)
     if (this.budget.reserve(instanceId, instanceId, 1) !== 'ok' ||
       this.budget.attachContent(instanceId, `${instanceId}\n${loaded.fsPath}\n${loaded.version}`, bytes) !== 'ok') {
@@ -3425,7 +3629,15 @@ export class EmbedCardManager {
     })
   }
 
-  /** 成功回包：缓存 + 渲染（在场路径） */
+  /** 成功回包：缓存 + 渲染（在场路径）。#333（P3-01）：经
+   *  refLoadedContentOfResult 类型化装载入口（contentKind 分派）——kind
+   *  与载荷不匹配返回 null，按不可应用回包处理：释放租约、清在途配对、
+   *  错误分态（不入装载缓存、不触发 refEdit 写端口——非 markdown 载荷
+   *  结构上到不了装载与端口绑定路径）。
+   *  #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
+   *  管线，不经卡片请求——防御性第二道防线与 #333 同口径）。
+   *  #338（P3-06）：pdf 载荷在此分派到 PDF 视图（applyPdfLoaded——嵌入
+   *  卡侧挂 PdfHoverView 实例，不进 Markdown Reading 装载链） */
   private applyResult(handle: EmbedCardHandle, message: Extract<HoverPreviewResult, { ok: true }>): void {
     if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
@@ -3433,19 +3645,24 @@ export class EmbedCardManager {
       this.applyDisplay(handle, 'error', t('hover.errorDepth'))
       return
     }
-    const loaded: EmbedLoaded = {
-      fsPath: message.target.fsPath,
-      relPath: message.target.relPath,
-      scope: message.scope.kind,
-      selector: message.scope,
-      version: message.version,
-      text: message.text,
-      range: message.range,
-      depth: message.depth,
-      expansionPath: message.expansionPath,
+    const converted = refLoadedContentOfResult(message)
+    // #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
+    // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）；#341：text
+    // 载荷接入卡片装载（同一 TextRefView 渲染管线）；#338：pdf 载荷接入
+    // 卡片装载（侧挂 PDF 视图）；其余不可应用形态（web）释放租约呈现错误分态
+    const loaded = converted !== null && (isRefLoadedMarkdown(converted) || isTextLoaded(converted) || isRefLoadedPdf(converted)) ? converted : null
+    if (loaded === null) {
+      releaseRefSourceLease(this.context, message.sourceLeaseId)
+      handle.entry.lastReq = null
+      this.applyDisplay(handle, 'error', refErrorText('read-failed', targetOfInner(handle.entry.inner)))
+      return
     }
     handle.entry.lastReq = null
     handle.entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
+    if (isRefLoadedPdf(loaded)) {
+      this.applyPdfLoaded(handle, loaded, message.sourceLeaseId)
+      return
+    }
     this.applyLoaded(handle, loaded, message.sourceLeaseId)
   }
 
@@ -3457,6 +3674,11 @@ export class EmbedCardManager {
    *  applyInternalDom 切换到编辑器容器；生效内部模式为 Live 时随后发起
    *  端口绑定（装载完成的 watch 固定是宿主 bind 校验的前置）。 */
   private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded, sourceLeaseId?: string): void {
+    if (isRefLoadedPdf(loaded)) {
+      // 防御性入口归一（外部调用点已分流；联合收窄保证下方 render 只见 markdown）
+      this.applyPdfLoaded(handle, loaded, sourceLeaseId)
+      return
+    }
     if (handle.scrollEl.scrollTop > 0) {
       handle.entry.content.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
     }
@@ -3482,6 +3704,9 @@ export class EmbedCardManager {
     if (this.effectiveMode(handle.entry) === 'live') {
       this.ensureLivePort(handle.entry)
     }
+    // #341：装载形态确定后收敛模式 chrome（text 隐藏模式按钮——装载前
+    // 未知形态时按钮在场，此处按 loaded 形态收敛；markdown 路径幂等）
+    this.refreshModeChrome(handle)
     // 顶部文件名：装载后为目标根内相对路径
     const titleEl = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.title}`)
     if (titleEl) {
@@ -3502,10 +3727,118 @@ export class EmbedCardManager {
     // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
   }
 
-  /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */
-  private applyError(handle: EmbedCardHandle, reason: Extract<HoverPreviewResult, { ok: false }>['reason'], anchor?: string): void {
+  /**
+   * #338（P3-06）PDF 装载渲染：嵌入卡侧挂 PDF 视图实例（PdfHoverView 挂
+   * 卡片滚动区内，按页 canvas 池全文滚动——容器只负责尺寸、挂载与焦点；
+   * 同 URI 多 occurrence 经共享文档存储复用文档数据，滚动/生命周期各自
+   * 独立）。只读卡壳：Reading/Live 容器与模式/保存/关闭入口让位；occurrence
+   * 浏览位置（entry.pdfPage）优先于载荷初始页——重挂与文件替换重载按它
+   * 恢复（合法钳制），初次装载用双链 #page=N 解析产物。
+   */
+  private applyPdfLoaded(handle: EmbedCardHandle, loaded: RefLoadedPdfContent, sourceLeaseId?: string): void {
+    if (handle.scrollEl.scrollTop > 0) {
+      handle.entry.content.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
+    }
+    handle.entry.loaded = loaded
+    this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
+    // 预算：源字节逻辑费用（PDF 解码内存不占文本预算——三期「不能用 2MiB
+    // 文本预算套作 PDF 解码内存」口径；canvas 费用由 PDF_SCROLL_LIMITS 自持）
+    const borrowers = [...this.active.values()].filter((h) => h.entry === handle.entry).length
+    if (this.budget.attachContent(handle.entry.hostId, this.dataKey(handle.entry, loaded),
+      loaded.bytes * Math.max(1, borrowers)) !== 'ok') {
+      releaseRefSourceLease(this.context, sourceLeaseId)
+      handle.entry.loaded = null
+      this.budget.release(handle.entry.hostId)
+      this.applyDisplay(handle, 'error', t('hover.errorBudget'))
+      return
+    }
+    handle.entry.parseBytes = loaded.bytes
+    // 先交接新版本来源（同 fsPath 未保存刷新需要此顺序），再挂视图
+    this.watchEntry(handle.entry, sourceLeaseId)
+    // 只读卡壳：容器与编辑入口让位（PDF 无内部模式切换/dirty/关闭语义）
+    this.applyInternalDom(handle)
+    handle.modeBtn.style.display = 'none'
+    handle.modeBtn.tabIndex = -1
+    handle.saveBtn.style.display = 'none'
+    handle.closeBtn.style.display = 'none'
+    if (handle.pdfView === null) {
+      // #339 外链通道：PDF 内 http(s) 链接的显式点击经面板会话发
+      // link.activate（无 sourceDocUri——PDF 不是文档解析语境；宿主按
+      // external 白名单 openExternal，与 #342 web 卡片同款）。卡片保持在场
+      handle.pdfView = new PdfHoverView(handle.scrollEl, {
+        onExternalUrl: (url) => {
+          const ses = this.context.session()
+          if (!ses.sessionId || !ses.docUri) {
+            return
+          }
+          this.context.send({
+            kind: 'link.activate',
+            sessionId: ses.sessionId,
+            docUri: ses.docUri,
+            href: url,
+            srcStart: 0,
+            srcEnd: 0,
+          })
+        },
+      })
+      // 视图随挂载释放（content.onDispose 链）；occurrence 浏览位置先存
+      // entry（重挂与新版本重载的恢复位）
+      handle.content.onDispose(() => {
+        const view = handle.pdfView
+        if (view !== null) {
+          const page = view.probe().page
+          if (page > 0) handle.entry.pdfPage = page
+          view.dispose()
+          handle.pdfView = null
+        }
+      })
+    }
+    // 先建视口再装载（loading 期滚动区隐藏会取不到内容宽——content 态
+    // 建立视口后 ResizeObserver 兜底宽度变化的重排）
+    this.applyDisplay(handle, 'content', loaded.relPath)
+    const inner = handle.scrollEl.clientWidth
+    const width = inner > 0 ? inner - 16 : 400
+    // occurrence 浏览位置（entry.pdfPage）优先于载荷初始页——resume 语义
+    //（E-2）：记忆路径（重挂/删除恢复链——视图页码已清零）越界钳制而非
+    // 报错；双链初始页（loaded.page，用户手写锚点）不传 resume，保持初次
+    // 非法就地报错（#337 契约）
+    const resume = handle.entry.pdfPage > 0
+    const page = resume ? handle.entry.pdfPage : loaded.page
+    void handle.pdfView.show(loaded.uri, page, width, resume).then((applied) => {
+      const view = handle.pdfView
+      if (!applied || view === null) {
+        if (view === null) releaseRefSourceLease(this.context, sourceLeaseId)
+        return
+      }
+      const probe = view.probe()
+      if (probe.phase === 'error') {
+        releaseRefSourceLease(this.context, sourceLeaseId)
+        this.applyDisplay(handle, 'error',
+          pdfErrorText(probe.errorReason === '' ? 'resource' : probe.errorReason, probe.requestedPage, probe.totalPages))
+      } else if (probe.phase === 'content' && page !== undefined && page > 1 && probe.page !== page) {
+        // #338：loading 期滚动区布局未定（挂载瞬间 clientHeight 不足使
+        // scrollToPage 的 scrollTop 写入被钳回 0——页码观感退回第一页）。
+        // 内容态建立后重定位到目标页（重定位钳制语义，与浮层 applyHover
+        // PdfContent 的 locateTo 同口径，非初次非法页码报错路径）；resume
+        // 记忆页越界时 show 已钳制呈现，重定位同样按钳制后目标
+        view.locateTo(resume ? Math.min(page, probe.totalPages) : page)
+      }
+      this.context.requestMeasure?.()
+    })
+    this.context.requestMeasure?.()
+  }
+
+  /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 与 anchor-invalid
+   *  附锚点原文；#341 起 anchor-invalid 的 text 细分（format/range-order/
+   *  out-of-bounds/line-outside-window）与浮层同文案面透传） */
+  private applyError(
+    handle: EmbedCardHandle,
+    reason: Extract<HoverPreviewResult, { ok: false }>['reason'],
+    anchor?: string,
+    anchorDetail?: 'format' | 'range-order' | 'out-of-bounds' | 'line-outside-window',
+  ): void {
     handle.entry.lastReq = null
-    this.applyDisplay(handle, 'error', refErrorText(reason, targetOfInner(handle.entry.inner), anchor))
+    this.applyDisplay(handle, 'error', refErrorText(reason, targetOfInner(handle.entry.inner), anchor, anchorDetail))
   }
 
   /** 显示态施加（loading/content 切换与状态行文案） */

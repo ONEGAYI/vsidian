@@ -5,13 +5,17 @@
 import { describe, expect, it } from 'vitest'
 import * as path from 'node:path'
 import {
+  PDF_HOVER_MAX_BYTES,
+  flattenHoverReadOutcome,
   readHoverDocTarget,
   readHoverDirectTarget,
   readHoverMdLinkTarget,
+  readRefContentTarget,
   resolveHoverTargetTip,
   type HoverDocAccessContext,
   type HoverDocAccessPorts,
   type HoverReadOutcome,
+  type RefReadOutcome,
 } from '../../src/host/hoverDocAccess'
 import type { VaultLinkFileResolution } from '../../src/shared/vaultLink'
 
@@ -742,5 +746,599 @@ describe('P2-03 全文可达与锚点初始定位（#280，ADR-0011）', () => {
       range: { start: 0, end: TARGET_TEXT.length },
       scope: { kind: 'block', anchor: '^已删除' },
     })
+  })
+})
+
+// #333（P3-01）类型分派入口：目标三形态（双链/普通链接/直接目标）解析
+// 出 fsPath 后按类型分派——markdown 通道装载既有全文载荷（身份/版本/LF/
+// 定位区间/选择器）；其余类型维持 non-markdown 分态（附件/外链载荷由
+// P3-04/P3-05/P3-08/P3-10 登记）。旧三入口为兼容适配（经本入口后展开为
+// 旧扁平形态）——等价矩阵钉住「同一输入两条入口同果」。
+//
+// #337（P3-05）起 pdf 类型在分派表登记真实载荷（RefPdfContent：资源 URI
+// + 文件状态代次 + 源字节 + PDF 导航选择器）；锚点解析双链限定（普通链接
+// fragment 不解析页码，悬停仍可预览但从第一页开始）。
+//
+// #337（P3-05）PDF 通道的端口替身：文件资源形态（stat + 资源 URI + 代次）。
+type PdfResource =
+  | { kind: 'ok'; uri: string; version: number; bytes: number }
+  | { kind: 'not-found' }
+  | { kind: 'inaccessible' }
+
+/** PDF 资源端口替身：默认命中返回稳定 URI 与代次 */
+function pdfHarness(disk?: Disk, resources?: Map<string, PdfResource>): Harness {
+  const base = makeHarness(disk ?? new Map<string, { version: number; text: string }>([
+    ['D:\\notes\\a.md', note('# 父文档\n')],
+    ['D:\\notes\\资料.pdf', note('pdf-bytes')],
+  ]))
+  const res = resources ?? new Map<string, PdfResource>([
+    ['D:\\notes\\资料.pdf', { kind: 'ok', uri: 'https://vscode-cdn.net/资料.pdf?v=3', version: 3, bytes: 709 }],
+  ])
+  ;(base.ports as unknown as { readPdfFileResource: (fsPath: string) => Promise<PdfResource> }).readPdfFileResource =
+    async (fsPath) => res.get(fsPath) ?? { kind: 'not-found' }
+  return base
+}
+
+describe('#337 PDF 分派：双链 #page 解析与文件资源载荷', () => {
+  it('双链指定页：[[资料.pdf#page=3]] → pdf 载荷携带 page 选择器（不读 TextDocument）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf#page=3' }, h.ctx, h.ports)
+    expect(out).toEqual({
+      ok: true,
+      fsPath: 'D:\\notes\\资料.pdf',
+      relPath: '资料.pdf',
+      content: {
+        kind: 'pdf',
+        version: 3,
+        uri: 'https://vscode-cdn.net/资料.pdf?v=3',
+        bytes: 709,
+        selector: { kind: 'pdf', page: 3 },
+      },
+    } satisfies RefReadOutcome)
+    expect(h.opened, 'PDF 目标不经 TextDocument 通道').toEqual([])
+  })
+
+  it('双链无锚点 → 第一页（selector 无 page 字段）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.content.kind).toBe('pdf')
+      if (out.content.kind === 'pdf') {
+        expect(out.content.selector).toEqual({ kind: 'pdf' })
+      }
+    }
+  })
+
+  it('页码格式非法（0/负数/小数/非数字）与不支持 fragment → anchor-invalid 分态（不静默回落第一页）', async () => {
+    const h = pdfHarness()
+    for (const anchor of ['page=0', 'page=-1', 'page=1.5', 'page=abc', 'zoom=2', 'page=1;page=2']) {
+      const out = await readRefContentTarget({ target: `资料.pdf#${anchor}` }, h.ctx, h.ports)
+      expect(out, `锚点 ${anchor} 应 anchor-invalid`).toEqual({ ok: false, reason: 'anchor-invalid', anchor })
+    }
+  })
+
+  it('块 id 锚点（#^blk）对 PDF 非法（PDF 锚点键只有 page）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf#^blk' }, h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'anchor-invalid', anchor: '^blk' })
+  })
+
+  it('普通链接 fragment 不解析：[x](资料.pdf#page=3) 仍可预览但从第一页开始', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ linkHref: '资料.pdf#page=3' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.content.kind).toBe('pdf')
+      if (out.content.kind === 'pdf') {
+        expect(out.content.selector).toEqual({ kind: 'pdf' })
+      }
+    }
+  })
+
+  it('直接目标（面板条目）不走双链锚点语义：无 page 选择器', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget(
+      { directTarget: { fsPath: 'D:\\notes\\资料.pdf', anchor: 'page=3' } }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.content.kind).toBe('pdf')
+      if (out.content.kind === 'pdf') {
+        expect(out.content.selector).toEqual({ kind: 'pdf' })
+      }
+    }
+  })
+
+  it('文件资源分态：解析命中但 stat 缺失 → not-found；不可访问（权限/断连）→ read-failed', async () => {
+    const missing = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'not-found' }],
+    ]))
+    expect(await readRefContentTarget({ target: '资料.pdf' }, missing.ctx, missing.ports))
+      .toEqual({ ok: false, reason: 'not-found' })
+
+    const broken = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'inaccessible' }],
+    ]))
+    expect(await readRefContentTarget({ target: '资料.pdf' }, broken.ctx, broken.ports))
+      .toEqual({ ok: false, reason: 'read-failed' })
+  })
+
+  it('大小门（review 修复）：stat 字节超 PDF_HOVER_MAX_BYTES → file-too-large；未超限放行', async () => {
+    // 悬停浮层与嵌入卡同经 readPdfContent 读取点，一并受门（预期行为）；
+    // 复用既有 file-too-large 分态与文案，不新增 i18n 键
+    const huge = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'ok', uri: 'https://vscode-cdn.net/资料.pdf?v=3', version: 3, bytes: PDF_HOVER_MAX_BYTES + 1 }],
+    ]))
+    expect(await readRefContentTarget({ target: '资料.pdf' }, huge.ctx, huge.ports))
+      .toEqual({ ok: false, reason: 'file-too-large' })
+
+    // 边界值（恰好上限）放行：判定为严格大于
+    const boundary = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'ok', uri: 'https://vscode-cdn.net/资料.pdf?v=3', version: 3, bytes: PDF_HOVER_MAX_BYTES }],
+    ]))
+    const out = await readRefContentTarget({ target: '资料.pdf' }, boundary.ctx, boundary.ports)
+    expect(out.ok).toBe(true)
+  })
+
+  it('旧扁平入口对 pdf 载荷的兼容适配：flatten 收敛为 non-markdown（Markdown 消费端不接收 PDF）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(flattenHoverReadOutcome(out)).toEqual({ ok: false, reason: 'non-markdown' })
+    }
+  })
+})
+describe('#333 类型分派入口 readRefContentTarget', () => {
+  function matrixDisk(): Disk {
+    return new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('# 父文档\n\n## 父章节\n\n父段。\n\n父块。 ^blk-p\n', 4)],
+      ['D:\\notes\\目标.md', note(SECTION_DOC, 9)],
+      ['D:\\notes\\图.png', note('binary')],
+      ['D:\\notes\\资料.pdf', note('pdf-bytes')],
+      ['D:\\notes\\脚本.ts', note('const x = 1\n')],
+    ])
+  }
+
+  it('markdown 全文：类型化结果携带 kind 标记的 Markdown 载荷（身份在顶层、内容在 content）', async () => {
+    const h = makeHarness(matrixDisk())
+    const out = await readRefContentTarget({ target: '目标' }, h.ctx, h.ports)
+    expect(out).toEqual({
+      ok: true,
+      fsPath: 'D:\\notes\\目标.md',
+      relPath: '目标.md',
+      content: {
+        kind: 'markdown',
+        version: 9,
+        lfText: SECTION_DOC,
+        range: { start: 0, end: SECTION_DOC.length },
+        selector: { kind: 'full' },
+      },
+    } satisfies RefReadOutcome)
+  })
+
+  it('markdown 锚点两形态：heading/block 选择器与定位区间经类型化通道保真', async () => {
+    const h = makeHarness(matrixDisk())
+    const heading = await readRefContentTarget({ target: '目标#章节甲' }, h.ctx, h.ports)
+    expect(heading.ok).toBe(true)
+    if (heading.ok) {
+      // 局部变量判别（TS 嵌套路径判别限制，同 documentSession 注记）
+      const content = heading.content
+      expect(content.kind).toBe('markdown')
+      if (content.kind === 'markdown') {
+        expect(content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
+        expect(content.lfText.slice(content.range.start, content.range.end))
+          .toBe('## 章节甲\n\n甲段一。\n\n```js\nconst a = 1\n```')
+      }
+    }
+    const bh = makeHarness(new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\notes\\目标.md', note(BLOCK_DOC)],
+    ]))
+    const block = await readRefContentTarget({ target: '目标#^blk1' }, bh.ctx, bh.ports)
+    expect(block.ok).toBe(true)
+    if (block.ok) {
+      const blockContent = block.content
+      if (blockContent.kind === 'markdown') {
+        expect(blockContent.selector).toEqual({ kind: 'block', anchor: '^blk1' })
+      }
+    }
+  })
+
+  it('普通链接与直接目标形态同经类型化通道；页内锚点目标即来源文档', async () => {
+    const h = makeHarness(matrixDisk())
+    const link = await readRefContentTarget({ linkHref: '目标.md#章节乙' }, h.ctx, h.ports)
+    expect(link.ok).toBe(true)
+    if (link.ok) {
+      const linkContent = link.content
+      if (linkContent.kind === 'markdown') {
+        expect(linkContent.selector).toEqual({ kind: 'heading', anchor: '章节乙' })
+      }
+    }
+    const direct = await readRefContentTarget(
+      { directTarget: { fsPath: 'D:\\notes\\目标.md', anchor: '章节甲' } }, h.ctx, h.ports)
+    expect(direct.ok).toBe(true)
+    if (direct.ok) {
+      const directContent = direct.content
+      if (directContent.kind === 'markdown') {
+        expect(directContent.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
+      }
+    }
+    const pageAnchor = await readRefContentTarget({ linkHref: '#父章节' }, h.ctx, h.ports)
+    expect(pageAnchor.ok).toBe(true)
+    if (pageAnchor.ok) {
+      expect(pageAnchor.fsPath).toBe('D:\\notes\\a.md')
+    }
+  })
+
+  it('pdf 资源端口未注入 → non-markdown 分态（纯 Markdown 消费端的兼容降级）；image/text 各自登记走专用通道（契约见 #336 describe 与 hoverDocAccessText.test.ts）', async () => {
+    const h = makeHarness(matrixDisk())
+    // pdf（#337）：资源端口未注入时保持 non-markdown 分态（旧调用面不因
+    // 类型登记被迫接入 PDF 通道）；#336/#340 起 image/text 已登记各自载荷，
+    // 不再回落本分态
+    expect(await readRefContentTarget({ linkHref: '资料.pdf' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'non-markdown',
+    })
+  })
+
+  it('失败分态经类型化通道原样保留（unsupported/not-found/escape/no-workspace）', async () => {
+    const h = makeHarness(new Map())
+    expect(await readRefContentTarget({ target: 'a#b#c' }, h.ctx, h.ports)).toEqual({ ok: false, reason: 'unsupported' })
+    expect(await readRefContentTarget({ target: '不存在' }, h.ctx, h.ports)).toEqual({ ok: false, reason: 'not-found' })
+    const esc = makeHarness(new Map(), () => ({ kind: 'escape', detail: '../../x' }))
+    expect(await readRefContentTarget({ target: '../../x' }, esc.ctx, esc.ports)).toEqual({ ok: false, reason: 'escape' })
+    const noWs = makeHarness(new Map(), () => ({ kind: 'no-workspace' }))
+    expect(await readRefContentTarget({ target: 'x' }, noWs.ctx, noWs.ports)).toEqual({ ok: false, reason: 'no-workspace' })
+  })
+
+  it('anchorOptional 语义经类型化通道保持（宽容重载回成功全文）', async () => {
+    const h = makeHarness(matrixDisk())
+    const out = await readRefContentTarget({ target: '目标#已删除的标题' }, h.ctx, h.ports, { anchorOptional: true })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      const outContent = out.content
+      if (outContent.kind === 'markdown') {
+        expect(outContent.range).toEqual({ start: 0, end: SECTION_DOC.length })
+        expect(outContent.selector).toEqual({ kind: 'heading', anchor: '已删除的标题' })
+      }
+    }
+    const strict = await readRefContentTarget({ target: '目标#已删除的标题' }, h.ctx, h.ports)
+    expect(strict).toEqual({ ok: false, reason: 'anchor-missing', anchor: '已删除的标题' })
+  })
+
+  it('等价矩阵：同一输入下旧扁平入口与类型化入口内容一致（兼容适配不改变语义）', async () => {
+    const disk = matrixDisk()
+    const cases: Array<{
+      label: string
+      form: { target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } }
+    }> = [
+      { label: '双链全文', form: { target: '目标' } },
+      { label: '双链标题', form: { target: '目标#章节甲' } },
+      { label: '双链本文件锚点', form: { target: '#父章节' } },
+      { label: '普通链接全文', form: { linkHref: '目标.md' } },
+      { label: '普通链接块锚点', form: { linkHref: '目标.md#章节乙' } },
+      { label: '直接目标', form: { directTarget: { fsPath: 'D:\\notes\\目标.md' } } },
+      { label: '不存在', form: { target: '不存在' } },
+      { label: '锚点缺失', form: { target: '目标#没有的标题' } },
+    ]
+    for (const { label, form } of cases) {
+      const h = makeHarness(new Map(disk))
+      const legacy: HoverReadOutcome = form.directTarget !== undefined
+        ? await readHoverDirectTarget(form.directTarget, h.ctx, h.ports)
+        : form.linkHref !== undefined
+          ? await readHoverMdLinkTarget(form.linkHref, h.ctx, h.ports)
+          : await readHoverDocTarget(form.target!, h.ctx, h.ports)
+      const typed = await readRefContentTarget(form, h.ctx, h.ports)
+      // 兼容适配等价：类型化结果经 flattenHoverReadOutcome 展开后与旧扁平
+      // 入口逐字段一致（身份 + kind 标记载荷 + 失败分态）
+      expect(typed.ok, `${label}：成败一致`).toBe(legacy.ok)
+      if (legacy.ok && typed.ok) {
+        expect(flattenHoverReadOutcome(typed), `${label}：内容一致`).toEqual(legacy)
+        expect(typed.content.kind, `${label}：kind 标记`).toBe('markdown')
+        if (typed.content.kind === 'markdown') {
+          // markdown 载荷字段（等价矩阵只覆盖 markdown 目标）
+          expect(typed.content.lfText.length + typed.content.range.end).toBeGreaterThanOrEqual(0)
+        }
+      } else if (!legacy.ok && !typed.ok) {
+        expect(typed, `${label}：失败分态一致`).toEqual(legacy)
+      }
+    }
+  })
+})
+
+// ---- #342（P3-10）外链悬停分派：external 分支的 web 载荷装载 ----
+
+describe('readRefContentTarget 外链（web）分派', () => {
+  /** web 抓取端口替身：记录调用并返回可控结果 */
+  function webHarness(
+    fetchImpl: (_url: string, signal?: AbortSignal) => Promise<import('../../src/host/webLinkMetaService').WebLinkMetaOutcome>,
+  ): { h: Harness; fetches: Array<{ url: string; aborted: boolean }> } {
+    const h = makeHarness(new Map())
+    const fetches: Array<{ url: string; aborted: boolean }> = []
+    ;(h.ports as HoverDocAccessPorts & {
+      fetchWebMeta?: (url: string, signal?: AbortSignal) => Promise<import('../../src/host/webLinkMetaService').WebLinkMetaOutcome>
+    }).fetchWebMeta = async (url, signal) => {
+      fetches.push({ url, aborted: signal?.aborted === true })
+      return fetchImpl(url, signal)
+    }
+    return { h, fetches }
+  }
+
+  const okMeta = { url: 'https://example.com/page', domain: 'example.com', title: '示例', description: '摘要' }
+
+  it('开关开启 + 端口在场：http(s) 链接装载 web 载荷（身份字段为空串占位）', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    expect(outcome).toEqual({ ok: true, fsPath: '', relPath: '', content: { kind: 'web', ...okMeta } })
+    expect(fetches.length).toBe(1)
+    expect(fetches[0].url).toBe('https://example.com/page')
+  })
+
+  it('开关关闭（web 未开）：external 维持 unsupported（关闭态零抓取）', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const outcome = await readRefContentTarget({ linkHref: 'https://example.com/page' }, h.ctx, h.ports)
+    expect(outcome).toEqual({ ok: false, reason: 'unsupported' })
+    expect(fetches.length).toBe(0)
+  })
+
+  it('web.enabled=false 显式关闭同 unsupported', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: false } },
+    )
+    expect(outcome).toEqual({ ok: false, reason: 'unsupported' })
+    expect(fetches.length).toBe(0)
+  })
+
+  it('端口缺席（宿主未装配抓取服务）：unsupported', async () => {
+    const h = makeHarness(new Map())
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    expect(outcome).toEqual({ ok: false, reason: 'unsupported' })
+  })
+
+  it('非 http(s) scheme（ftp/mailto）不进 web 通道：unsupported', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    for (const href of ['ftp://example.com/f', 'mailto:a@b.c', 'javascript:alert(1)']) {
+      const outcome = await readRefContentTarget({ linkHref: href }, h.ctx, h.ports, { web: { enabled: true } })
+      expect(outcome, href).toEqual({ ok: false, reason: 'unsupported' })
+    }
+    expect(fetches.length).toBe(0)
+  })
+
+  it('凭据/私网 URL 在准入层拒绝（web-invalid-address），不进抓取端口', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    for (const href of ['http://user:pw@example.com/', 'http://192.168.1.1/x', 'http://127.0.0.1:8080/']) {
+      const outcome = await readRefContentTarget({ linkHref: href }, h.ctx, h.ports, { web: { enabled: true } })
+      expect(outcome, href).toEqual({ ok: false, reason: 'web-invalid-address' })
+    }
+    expect(fetches.length).toBe(0)
+  })
+
+  it('抓取失败 reason 逐字透传（网络失败不伪装成文件缺失）', async () => {
+    const reasons = ['web-timeout', 'web-too-large', 'web-not-html', 'web-redirects', 'web-unreachable'] as const
+    for (const reason of reasons) {
+      const { h } = webHarness(async () => ({ ok: false, reason }))
+      const outcome = await readRefContentTarget(
+        { linkHref: 'https://example.com/slow' },
+        h.ctx,
+        h.ports,
+        { web: { enabled: true } },
+      )
+      expect(outcome).toEqual({ ok: false, reason })
+    }
+  })
+
+  it('取消信号透传到抓取端口（webview 关浮层 → 宿主 abort）', async () => {
+    const { h, fetches } = webHarness((_url, signal) => new Promise((resolve) => {
+      // 已中止的 signal 不再派发 abort 事件——先查 aborted（与生产服务行为一致）
+      if (signal?.aborted) {
+        resolve({ ok: false, reason: 'web-unreachable' })
+        return
+      }
+      signal?.addEventListener('abort', () => {
+        resolve({ ok: false, reason: 'web-unreachable' })
+      })
+    }))
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/cancelled' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true, signal: AbortSignal.abort() } },
+    )
+    expect(outcome).toEqual({ ok: false, reason: 'web-unreachable' })
+    expect(fetches.length).toBe(1)
+  })
+
+  it('兼容适配壳：旧入口不带 web 选项，external 恒 unsupported（旧调用方不见 web 数据）', async () => {
+    const { h } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const typed = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    // 类型化通道装载 web 载荷后经 flatten 收敛 non-markdown（防御性）；
+    // 旧壳入口不带 web 选项 → external 在解析层即 unsupported
+    expect(flattenHoverReadOutcome(typed as RefReadOutcome)).toEqual({ ok: false, reason: 'non-markdown' })
+    expect(await readHoverMdLinkTarget('https://example.com/page', h.ctx, h.ports)).toEqual({ ok: false, reason: 'unsupported' })
+  })
+
+  it('大写 scheme/fragment 归一后进抓取端口（缓存键同源）', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    await readRefContentTarget(
+      { linkHref: 'HTTPS://EXAMPLE.com/page#frag' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    expect(fetches.length).toBe(1)
+    expect(fetches[0].url).toBe('https://example.com/page')
+  })
+})
+
+// #336（P3-04）image 分派登记：图片目标装载 RefImageContent——身份
+// （fsPath/relPath）在顶层，内容为「来源文档相对图源 + 文件资源版本」。
+// 不读正文（openTextDocument 零调用——图片不是 TextDocument 权威语义），
+// 版本来自可选 statFile 端口（mtimeMs 文件状态；缺省 0——仅回包排序用，
+// 刷新权威在失效通道）。锚点不构成 anchor-missing（图片无锚点语义）。
+// 旧扁平入口经 flattenHoverReadOutcome 把 image 收敛回 non-markdown 分态
+// （旧消费者语义保持——图片渲染走 webview 图片管线，不走旧 Markdown 通
+// 道）。
+describe('#336 image 分派：RefImageContent 载荷', () => {
+  function imageDisk(): Disk {
+    return new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('# 父文档\n')],
+      ['D:\\notes\\图.png', note('binary')],
+      ['D:\\notes\\assets\\子图.jpeg', note('binary')],
+      ['D:\\notes\\sub\\来源.md', note('# 来源\n')],
+    ])
+  }
+
+  it('双链图片：ok 载荷携带身份 + 来源相对图源（src 以来源文档目录为基准，posix 分隔）', async () => {
+    const h = makeHarness(imageDisk())
+    const out = await readRefContentTarget({ target: '图.png' }, h.ctx, h.ports)
+    expect(out).toEqual({
+      ok: true,
+      fsPath: 'D:\\notes\\图.png',
+      relPath: '图.png',
+      content: { kind: 'image', src: '图.png', version: 0 },
+    } satisfies RefReadOutcome)
+    expect(h.opened, '图片目标不读正文（openTextDocument 零调用）').toEqual([])
+  })
+
+  it('子目录图源与来源在子目录：src 相对路径含目录前缀／../ 形态', async () => {
+    const h = makeHarness(imageDisk())
+    const sub = await readRefContentTarget({ target: 'assets/子图.jpeg' }, h.ctx, h.ports)
+    expect(sub.ok).toBe(true)
+    if (sub.ok) {
+      expect(sub.content.kind).toBe('image')
+      if (sub.content.kind === 'image') {
+        expect(sub.content.src).toBe('assets/子图.jpeg')
+      }
+    }
+    // 来源文档在 sub/：同图源相对路径经 ../ 上溯
+    const subCtx: HoverDocAccessContext = {
+      resolve: { docDir: 'D:\\notes\\sub', rootDir: 'D:\\notes', isWindowsHost: true, hasWorkspace: true },
+      sourceFsPath: 'D:\\notes\\sub\\来源.md',
+      rootFsPath: 'D:\\notes',
+    }
+    const subPorts: HoverDocAccessPorts = {
+      resolveVaultFile: async (rawPath) => {
+        const base = path.win32.resolve(subCtx.resolve.docDir, rawPath)
+        return imageDisk().get(base) ? { kind: 'target', fsPath: base } : { kind: 'not-found' }
+      },
+      openTextDocument: async () => null,
+    }
+    const up = await readRefContentTarget({ target: '../图.png' }, subCtx, subPorts)
+    expect(up.ok).toBe(true)
+    if (up.ok && up.content.kind === 'image') {
+      expect(up.content.src).toBe('../图.png')
+    }
+  })
+
+  it('statFile 端口在场：version 取文件 mtimeMs（文件资源版本——回包排序基准）', async () => {
+    const h = makeHarness(imageDisk())
+    const stated: string[] = []
+    h.ports.statFile = async (fsPath) => {
+      stated.push(fsPath)
+      return fsPath.endsWith('图.png') ? { mtimeMs: 1760000000123 } : null
+    }
+    const out = await readRefContentTarget({ target: '图.png' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok && out.content.kind === 'image') {
+      expect(out.content.version).toBe(1760000000123)
+    }
+    expect(stated).toEqual(['D:\\notes\\图.png'])
+  })
+
+  it('普通链接与直接目标形态同经 image 分派；锚点不构成 anchor-missing', async () => {
+    const h = makeHarness(imageDisk())
+    const link = await readRefContentTarget({ linkHref: '图.png' }, h.ctx, h.ports)
+    expect(link.ok).toBe(true)
+    if (link.ok) {
+      expect(link.content.kind).toBe('image')
+    }
+    const direct = await readRefContentTarget(
+      { directTarget: { fsPath: 'D:\\notes\\assets\\子图.jpeg' } }, h.ctx, h.ports)
+    expect(direct.ok).toBe(true)
+    if (direct.ok && direct.content.kind === 'image') {
+      expect(direct.content.src).toBe('assets/子图.jpeg')
+    }
+    const anchored = await readRefContentTarget({ target: '图.png#任意锚' }, h.ctx, h.ports)
+    expect(anchored.ok, '图片目标锚点忽略，不 anchor-missing').toBe(true)
+    // anchorOptional 重载与严格首开对图片同形（宽容语义只对 markdown 锚点）
+    const tolerant = await readRefContentTarget({ target: '图.png#任意锚' }, h.ctx, h.ports, { anchorOptional: true })
+    expect(tolerant.ok).toBe(true)
+  })
+
+  it('解析失败分态先于类型分派（not-found 图片目标仍 not-found）', async () => {
+    const h = makeHarness(imageDisk())
+    expect(await readRefContentTarget({ target: '不存在的图.png' }, h.ctx, h.ports))
+      .toEqual({ ok: false, reason: 'not-found' })
+  })
+
+  it('旧扁平入口把 image 收敛回 non-markdown 分态（兼容适配语义保持）', async () => {
+    const h = makeHarness(imageDisk())
+    expect(await readHoverDocTarget('图.png', h.ctx, h.ports)).toEqual({ ok: false, reason: 'non-markdown' })
+    const typed = await readRefContentTarget({ target: '图.png' }, h.ctx, h.ports)
+    expect(typed.ok).toBe(true)
+    if (typed.ok) {
+      expect(flattenHoverReadOutcome(typed)).toEqual({ ok: false, reason: 'non-markdown' })
+    }
+  })
+
+  // posix 宿主对照钉子（#346 修复轮 2）：win32 分支由上文 Windows 语境用例
+  // 覆盖，此处固定 posix 分支（isWindowsHost: false + posix 风格路径）的
+  // 输出形态——两分支都正确，不依赖运行平台（CI Linux / 本地 Windows 同断言）。
+  it('posix 宿主语境对照：isWindowsHost=false 时 relPath/src 按 posix 语义相对化', async () => {
+    const posixDisk = new Map<string, { version: number; text: string }>([
+      ['/notes/a.md', note('# 父文档\n')],
+      ['/notes/assets/x.jpeg', note('binary')],
+      ['/notes/sub/来源.md', note('# 来源\n')],
+    ])
+    const diskPorts = (docDir: string): HoverDocAccessPorts => ({
+      resolveVaultFile: async (rawPath) => {
+        const base = path.posix.resolve(docDir, rawPath)
+        return posixDisk.get(base) ? { kind: 'target', fsPath: base } : { kind: 'not-found' }
+      },
+      openTextDocument: async () => null,
+    })
+    const rootCtx: HoverDocAccessContext = {
+      resolve: { docDir: '/notes', rootDir: '/notes', isWindowsHost: false, hasWorkspace: true },
+      sourceFsPath: '/notes/a.md',
+      rootFsPath: '/notes',
+    }
+    const img = await readRefContentTarget({ target: 'assets/x.jpeg' }, rootCtx, diskPorts('/notes'))
+    expect(img.ok).toBe(true)
+    if (img.ok) {
+      expect(img.relPath).toBe('assets/x.jpeg')
+      if (img.content.kind === 'image') {
+        expect(img.content.src).toBe('assets/x.jpeg')
+      }
+    }
+    const subCtx: HoverDocAccessContext = {
+      resolve: { docDir: '/notes/sub', rootDir: '/notes', isWindowsHost: false, hasWorkspace: true },
+      sourceFsPath: '/notes/sub/来源.md',
+      rootFsPath: '/notes',
+    }
+    const up = await readRefContentTarget({ target: '../assets/x.jpeg' }, subCtx, diskPorts('/notes/sub'))
+    expect(up.ok).toBe(true)
+    if (up.ok && up.content.kind === 'image') {
+      expect(up.content.src, '来源在子目录：src 经 ../ 上溯').toBe('../assets/x.jpeg')
+    }
   })
 })

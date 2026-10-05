@@ -31,6 +31,7 @@ vsidian/
     │   ├── keybindingService.ts        # 快捷键全局存储服务
     │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
     │   ├── pasteHistoryTracker.ts      # 宿主粘贴阶段历史解释
+    │   ├── proxyAgent.ts               # 外链抓取代理接入（CONNECT 隧道）
     │   ├── refEditPorts.ts             # 引用编辑端口绑定注册表
     │   ├── searchReveal.ts             # 搜索定位恢复纯逻辑（#318）
     │   ├── settingsPage.ts             # 独立设置页面板装配
@@ -38,6 +39,11 @@ vsidian/
     │   ├── skeletonScreen.ts           # 骨架屏内联装配纯逻辑（#292）
     │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
     │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
+    │   ├── textAppearance/             # 宿主文本外观服务目录
+    │   │   ├── appearanceService.ts # 外观服务 vscode 装配
+    │   │   ├── themeResolution.ts   # 主题链解析与颜色管线
+    │   │   ├── tmEngine.ts          # TM 引擎封装（同版同算法）
+    │   │   └── tmScopeMatcher.ts    # TM scope 匹配器（官方移植）
     │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
     │   ├── vaultIndexMaintenance.ts    # 索引维护接线：排除持久化与操作编排
     │   ├── vaultIndexOverlay.ts        # 索引覆盖层与反链查询纯逻辑（#197）
@@ -46,6 +52,8 @@ vsidian/
     │   ├── vaultLinkExtract.ts         # 出链抽取纯逻辑（#197）
     │   ├── vaultRenameWiring.ts        # rename 引用更新装配（#199）
     │   ├── viewCycle.ts                # 三态视图编排纯逻辑
+    │   ├── webLinkMetaService.ts       # 外链元信息受限抓取服务
+    │   ├── webMetaExtract.ts           # HTML 元信息非执行提取
     │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
     │   ├── blockId.ts            # 块 id 与块边界单一事实源
@@ -60,6 +68,7 @@ vsidian/
     │   ├── findOptions.ts        # 查找选项三开关单一事实源
     │   ├── formatOperations.ts   # 格式操作注册清单
     │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
+    │   ├── globLiteral.ts        # watcher 文件名 glob 转义
     │   ├── hoverRefresh.ts       # 引用视图同步参数与订阅注册表
     │   ├── i18n.ts               # t() 取词与语言包装配状态模块
     │   ├── imageRefresh.ts       # 图片刷新共享常量与核验决策
@@ -77,8 +86,12 @@ vsidian/
     │   ├── mermaid.ts            # Mermaid 围栏形态学（#60）
     │   ├── newline.ts            # CRLF/LF 换行协调器
     │   ├── obsidianAlias.ts      # Obsidian 别名桥实现同源表
+    │   ├── pdfNav.ts             # PDF 导航锚点解析纯逻辑
     │   ├── protocol.ts           # 消息协议单一事实源
+    │   ├── refContent.ts         # 引用内容类型分派共享内核（#333）
     │   ├── refExpansion.ts       # 引用递归路径与容量预算
+    │   ├── refText.ts            # 可读文本锚点与准入共享内核
+    │   ├── relocationScan.ts     # 重定位逐字检索扫描预算（#320）
     │   ├── settings.ts           # 设置定义与读写纯逻辑
     │   ├── skeletonTiming.ts     # 骨架屏撤除计算与装配常量（#292）
     │   ├── styleContract.ts      # 公开样式契约清单单一事实源
@@ -95,6 +108,7 @@ vsidian/
     │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
     │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
     │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
+    │   ├── webLink.ts            # 外链 URL 准入与归一（两端共享）
     │   ├── wikilink.ts           # 双链形态学单一事实源（#11）
     │   └── wordSegment.ts        # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
@@ -167,6 +181,9 @@ vsidian/
         ├── outlineSection.ts           # 大纲控制域纯函数
         ├── outlinkPanel.ts             # 出链面板 DOM 与四态渲染
         ├── overlayAnchor.ts            # 浮层右缘锚点计划纯函数
+        ├── pdfMainEntry.ts             # PDF.js 主库独立产物入口
+        ├── pdfRender.ts                # PDF 渲染器（全文按页滚动）
+        ├── pdfWorkerEntry.ts           # PDF.js worker 独立产物入口
         ├── perfProbe.ts                # webview 性能探针（#5）
         ├── popupMutex.ts               # 图表与图片弹窗互斥
         ├── quickActionState.ts         # 快速操作状态判定
@@ -204,11 +221,15 @@ vsidian/
         ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
         ├── targetTip.ts                # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
+        ├── textRefView.ts              # 文本只读视图（虚拟化着色渲染）
         ├── toast.css                   # 轻提示主题与公开样式变量
         ├── toast.ts                    # 编辑器独立轻提示通道
         ├── tooltipCard.css             # 悬停提示共享样式
         ├── tooltipCard.ts              # 悬停提示委托控制器
         ├── tooltipGeometry.ts          # 悬停提示定位几何纯函数
+        ├── untrustedFrame.ts           # 不可信子页消息来源判定
+        ├── webCard.ts                  # 外链卡片内容视图（web 通道）
+        ├── webPage.ts                  # 外链原网页视图（iframe+退回）
         ├── wordMotion.ts               # 词级移动命令与引擎配置
         └── wordSegmentSettings.ts      # 设置页中文分词分页
 <!-- file-tree:tree^id=src:end -->

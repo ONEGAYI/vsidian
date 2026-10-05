@@ -10,7 +10,7 @@ import {
   HoverRefreshCoordinator,
   type HoverInvalidationStatus,
 } from '../../src/host/hoverRefreshCoordinator'
-import type { HoverReadOutcome } from '../../src/host/hoverDocAccess'
+import type { RefReadOutcome } from '../../src/host/hoverDocAccess'
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 
@@ -49,7 +49,7 @@ interface Harness {
 }
 
 function makeHarness(opts?: {
-  outcome?: (target: string) => HoverReadOutcome
+  outcome?: (target: string) => RefReadOutcome
   cacheLimits?: { entryLimit?: number; byteLimit?: number }
 }): Harness {
   const out: HostToWebview[] = []
@@ -68,16 +68,21 @@ function makeHarness(opts?: {
           ? `href:${payload.linkHref}`
           : `wikilink:${payload.target}`
       reads.set(target, (reads.get(target) ?? 0) + 1)
-      const outcome: HoverReadOutcome = opts?.outcome
+      // #333 类型化读取端口：成功载荷为 kind 标记的 Markdown 内容
+      //（生产 readRefContentTarget 的出站形态）
+      const outcome: RefReadOutcome = opts?.outcome
         ? opts.outcome(target)
         : {
             ok: true,
             fsPath: B_PATH,
             relPath: 'b.md',
-            version: 3,
-            lfText: '# B\n',
-            range: { start: 0, end: 5 },
-            scope: { kind: 'full' },
+            content: {
+              kind: 'markdown',
+              version: 3,
+              lfText: '# B\n',
+              range: { start: 0, end: 5 },
+              selector: { kind: 'full' },
+            },
           }
       report(outcome)
     },
@@ -201,7 +206,7 @@ describe('悬停读取缓存：失效与世代守卫', () => {
   it('在途跨失效窗口完成不回写缓存（世代守卫）：下一请求重新读取', async () => {
     const out: HostToWebview[] = []
     const reads = { count: 0 }
-    const releaseRead: Array<(o: HoverReadOutcome) => void> = []
+    const releaseRead: Array<(o: RefReadOutcome) => void> = []
     const session = new DocumentSession(new StaticDoc('# A\n'), { docUri: DOC_URI, isWindowsHost: true })
     const panelId = session.attachPanel({
       send: (m) => out.push(m),
@@ -220,10 +225,13 @@ describe('悬停读取缓存：失效与世代守卫', () => {
       ok: true,
       fsPath: B_PATH,
       relPath: 'b.md',
-      version: 3,
-      lfText: '# B\n',
-      range: { start: 0, end: 5 },
-      scope: { kind: 'full' },
+      content: {
+        kind: 'markdown',
+        version: 3,
+        lfText: '# B\n',
+        range: { start: 0, end: 5 },
+        selector: { kind: 'full' },
+      },
     })
     await new Promise((r) => setTimeout(r, 0))
     // 请求面板仍收到回包（webview 侧按 reqId/版本仲裁丢弃旧内容）
@@ -255,14 +263,17 @@ describe('悬停读取缓存：双上限（条目与字节分别计量）', () =
   it('字节上限：大文本写入触发淘汰（容量/内存有界）', async () => {
     const bigText = 'x'.repeat(600)
     const t = makeHarness({
-      outcome: (target) => ({
+      outcome: (target): RefReadOutcome => ({
         ok: true,
         fsPath: `D:\\notes\\${target.split(':').pop()}.md`,
         relPath: `${target.split(':').pop()}.md`,
-        version: 1,
-        lfText: target === 'wikilink:big' ? bigText : '# 小\n',
-        range: { start: 0, end: target === 'wikilink:big' ? bigText.length : 4 },
-        scope: { kind: 'full' },
+        content: {
+          kind: 'markdown',
+          version: 1,
+          lfText: target === 'wikilink:big' ? bigText : '# 小\n',
+          range: { start: 0, end: target === 'wikilink:big' ? bigText.length : 4 },
+          selector: { kind: 'full' },
+        },
       }),
       cacheLimits: { byteLimit: 1000 }, // big（600×2=1200 字节）单条即超限
     })
@@ -369,6 +380,63 @@ describe('事件接线（connectHoverEvents）：缓存失效不依赖订阅在�
     expect(stats.misses).toBe(0)
     expect(stats.invalidatedAtEntries).toBe(0) // 无在途读取：失效钟零登记
   })
+
+  // B-1（review-loops 波次一）：text 载荷缓存同样走 fsPath 反查失效——
+  // #340 的 text 通道载荷（RefTextContent）入缓存后，docChanged/磁盘
+  // 事件经事件源打通（provider 侧转发判据 + per-file watcher）到达
+  // connectHoverEvents 即失效；此处钉住失效通道对 text fsPath 无 md 假设
+  it('text 载荷缓存：docChanged 与磁盘事件按 fsPath 反查失效（B-1）', async () => {
+    const textPath = 'D:\\notes\\配置.json'
+    const t = makeHarness({
+      outcome: () => ({
+        ok: true,
+        fsPath: textPath,
+        relPath: '配置.json',
+        content: {
+          kind: 'text',
+          version: 2,
+          lfText: '{ "k": 1 }\n',
+          range: { start: 0, end: 13 },
+          languageId: 'json',
+          selector: { kind: 'text' },
+          hasWindow: false,
+          beginLine: 1,
+          endLine: 2,
+          locateLine: 1,
+          jumpLine: 1,
+          totalLines: 2,
+          font: {},
+          lineNumbers: true,
+        },
+      }),
+    })
+    const pushed: Array<{ sessionKeys: string[]; fsPath: string; status: HoverInvalidationStatus; generation: number }> = []
+    const coordinator = new HoverRefreshCoordinator({
+      pushInvalidation: (sessionKeys, fsPath, status, generation) => {
+        pushed.push({ sessionKeys: [...sessionKeys], fsPath, status, generation })
+      },
+    })
+    const events = connectHoverEvents(coordinator, () => [t.session])
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    expect(t.reads.get('wikilink:b')).toBe(1)
+    expect(t.session.hoverReadCacheStats().entries).toBe(1)
+    // 已 watch 的 text 目标：编辑事件防抖后推送 + 缓存失效
+    const sessionKey = `${DOC_URI}\n${t.panelId}`
+    coordinator.watch(sessionKey, textPath, 'hover-1')
+    events.onDocChanged(textPath)
+    vi.advanceTimersByTime(HOVER_REFRESH_DEFAULTS.debounceMs)
+    expect(pushed).toHaveLength(1)
+    expect(pushed[0]!.fsPath).toBe(textPath)
+    await t.send(hoverRequest(2, 'hover-2'))
+    expect(t.reads.get('wikilink:b')).toBe(2) // 缓存已失效重新读取
+    // 磁盘事件直通同链路（per-file watcher 的生产事件源形态）
+    events.onDiskEvent(textPath, 'changed')
+    expect(pushed).toHaveLength(2)
+    await t.send(hoverRequest(3, 'hover-3'))
+    expect(t.reads.get('wikilink:b')).toBe(3)
+    coordinator.dispose()
+  })
 })
 
 // ---- 修 3（review 第二轮 P3）：辅助索引清理 ----
@@ -388,7 +456,7 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
 
   it('有在途读取时失效钟条目保留（竞态窗口守卫），下一次 quiescent 失效顺带清理', async () => {
     const out: HostToWebview[] = []
-    const releaseRead: Array<(o: HoverReadOutcome) => void> = []
+    const releaseRead: Array<(o: RefReadOutcome) => void> = []
     const session = new DocumentSession(new StaticDoc('# A\n'), { docUri: DOC_URI, isWindowsHost: true })
     const panelId = session.attachPanel({
       send: (m) => out.push(m),
@@ -406,10 +474,13 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
       ok: true,
       fsPath: B_PATH,
       relPath: 'b.md',
-      version: 3,
-      lfText: '# B\n',
-      range: { start: 0, end: 5 },
-      scope: { kind: 'full' },
+      content: {
+        kind: 'markdown',
+        version: 3,
+        lfText: '# B\n',
+        range: { start: 0, end: 5 },
+        selector: { kind: 'full' },
+      },
     })
     await new Promise((r) => setTimeout(r, 0))
     // 完成后条目仍在（等待下次失效顺带清理——无缓存反查时清）
@@ -419,14 +490,17 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
 
   it('世代条目随缓存条目淘汰同步清理（LRU 淘汰路径挂钩）', async () => {
     const t = makeHarness({
-      outcome: (target) => ({
+      outcome: (target): RefReadOutcome => ({
         ok: true,
         fsPath: `D:\\notes\\${target.split(':').pop()}.md`,
         relPath: `${target.split(':').pop()}.md`,
-        version: 1,
-        lfText: '# t\n',
-        range: { start: 0, end: 4 },
-        scope: { kind: 'full' as const },
+        content: {
+          kind: 'markdown',
+          version: 1,
+          lfText: '# t\n',
+          range: { start: 0, end: 4 },
+          selector: { kind: 'full' },
+        },
       }),
       cacheLimits: { entryLimit: 1 },
     })
@@ -439,5 +513,130 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
     await t.send(hoverRequest(3, 'i3', 'c')) // entryLimit=1：淘汰 b 形态
     expect(t.session.hoverReadCacheStats().entries).toBe(1)
     expect(t.session.hoverReadCacheStats().epochEntries).toBe(0) // 淘汰同步清理
+  })
+})
+
+// ---- #333（P3-01）类型化出站：生产 Markdown 读取结果经类型化端口回报，
+// 出站 hover.result 显式携带 contentKind:markdown；缓存/合并/世代守卫
+// 语义不变（上文各节即等价回归——此处钉住新出站形态）。
+describe('#333 类型化出站：contentKind 显式标记', () => {
+  it('成功回包携带 contentKind: markdown 与 Markdown 通道载荷字段', async () => {
+    const t = makeHarness()
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    const results = resultsOf(t)
+    expect(results).toHaveLength(1)
+    const r = results[0]!
+    expect(r.ok).toBe(true)
+    if (!r.ok) {
+      return
+    }
+    expect(r.contentKind).toBe('markdown')
+    expect(r.version).toBe(3)
+    expect(r.text).toBe('# B\n')
+    expect(r.range).toEqual({ start: 0, end: 5 })
+    expect(r.scope).toEqual({ kind: 'full' })
+  })
+
+  it('失败回包不携带 contentKind（失败分态无载荷）', async () => {
+    const t = makeHarness({ outcome: () => ({ ok: false, reason: 'not-found' }) })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    const results = resultsOf(t)
+    expect(results).toHaveLength(1)
+    const r = results[0]!
+    expect(r.ok).toBe(false)
+    expect('contentKind' in r).toBe(false)
+  })
+})
+
+// ---- #344（P3-12 收口）：缓存目标查询面（事件转发门控的判据） ----
+// 契约：hasCachedHoverTarget 反映「该目标有驻留缓存条目」——成功读取后
+// true（未 watch 的 text 目标据此获得编辑事件转发，不落陈旧缓存），
+// 失效或淘汰后回落 false，失败读取不置位。
+describe('#344 hasCachedHoverTarget：事件转发门控的缓存目标查询', () => {
+  it('未读取为 false；成功读取后 true；invalidateHoverReads 后回落 false', async () => {
+    const t = makeHarness()
+    await ready(t)
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+    await t.send(hoverRequest(1, 'hover-1'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(true)
+    t.session.invalidateHoverReads(B_PATH)
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+  })
+
+  it('失败读取不缓存：查询不置位', async () => {
+    const t = makeHarness({ outcome: () => ({ ok: false, reason: 'not-found' }) })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+  })
+
+  it('缓存条目淘汰后查询回落（双上限收敛的查询面同源）', async () => {
+    // 按目标区分 fsPath（默认 outcome 恒报 B_PATH，驱逐后第二形态仍登记
+    // 在同名下——测不出回落）
+    const t = makeHarness({
+      cacheLimits: { entryLimit: 1 },
+      outcome: (target) => ({
+        ok: true,
+        fsPath: target === 'wikilink:b' ? B_PATH : 'D:\\notes\\sub\\c.md',
+        relPath: 'sub/c.md',
+        content: {
+          kind: 'markdown',
+          version: 3,
+          lfText: '# C\n',
+          range: { start: 0, end: 5 },
+          selector: { kind: 'full' },
+        },
+      }),
+    })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1', 'b'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(true)
+    // 第二目标驱逐第一目标（entryLimit=1）
+    await t.send(hoverRequest(2, 'hover-2', 'sub/c'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+    expect(t.session.hasCachedHoverTarget('D:\\notes\\sub\\c.md')).toBe(true)
+  })
+
+  it('查询键大小写/斜杠漂移仍命中（Windows 归一——与 isWatched 的 keyOf 同口径）', async () => {
+    // 登记键来自 outcome.fsPath（生产为 statFileRealPath 归正的磁盘真值，
+    // 大小写任意）；调用方（textEditorProvider 的事件转发门控）传
+    // event.document.uri.fsPath——Windows 上两者可能仅大小写/斜杠方向
+    // 不同。精确匹配漏报 → 未 watch 的 text 目标编辑事件不转发 →
+    // 「悬停→关闭→编辑→再悬停」落陈旧缓存（与 isWatched 口径不对称）
+    const truth = 'D:\\Notes\\配置.JSON'
+    const t = makeHarness({
+      outcome: () => ({
+        ok: true,
+        fsPath: truth,
+        relPath: '配置.JSON',
+        content: {
+          kind: 'text',
+          version: 2,
+          lfText: '{ "k": 1 }\n',
+          range: { start: 0, end: 13 },
+          languageId: 'json',
+          selector: { kind: 'text' },
+          hasWindow: false,
+          beginLine: 1,
+          endLine: 2,
+          locateLine: 1,
+          jumpLine: 1,
+          totalLines: 2,
+          font: {},
+          lineNumbers: true,
+        },
+      }),
+    })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    // 磁盘真值精确命中（既有路径不变）
+    expect(t.session.hasCachedHoverTarget(truth)).toBe(true)
+    // 大小写折叠与正斜杠归一后的漂移查询仍命中
+    expect(t.session.hasCachedHoverTarget('d:\\notes\\配置.json')).toBe(true)
+    expect(t.session.hasCachedHoverTarget('D:/Notes/配置.JSON')).toBe(true)
+    // 归一不引入误报：不同目标仍不命中
+    expect(t.session.hasCachedHoverTarget('D:\\notes\\其他.json')).toBe(false)
   })
 })

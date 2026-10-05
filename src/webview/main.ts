@@ -9,6 +9,7 @@ import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
+import { isTrustedHostMessageSource } from './untrustedFrame'
 import './main.css'
 // #59 KaTeX 基础样式：esbuild 合并进 main.css，字体（仅 woff2）经 CSS url()
 // 产物化到 out/webview/assets/（CSP font-src 已放行 cspSource 域）
@@ -42,6 +43,12 @@ controller.mount(document.getElementById('app') ?? document.body, [
 ])
 
 window.addEventListener('message', (event) => {
+  // #343（P3-11）消息桥隔离：允许清单——来源非真宿主桥的 message 一律
+  // 丢弃。原网页沙箱 iframe 及其嵌套帧、移除竞态的旧窗口引用全部落选
+  //（判定依据与边界见 untrustedFrame 模块头）
+  if (!isTrustedHostMessageSource(event.source, event.origin)) {
+    return
+  }
   controller.handleHostMessage(event.data)
   // 语言切换：换包 + <html lang> 同步；常驻文本重渲染订阅方各自处理
   handleLocaleChangedMessage(event.data)

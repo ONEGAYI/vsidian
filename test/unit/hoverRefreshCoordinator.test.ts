@@ -7,6 +7,7 @@ import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 import {
   admitHoverWatch,
   HoverRefreshCoordinator,
+  shouldForwardHoverDocChange,
   type HoverInvalidationStatus,
 } from '../../src/host/hoverRefreshCoordinator'
 
@@ -236,6 +237,70 @@ describe('自引用防循环（收敛语义）', () => {
     expect(pushed).toHaveLength(1)
     vi.advanceTimersByTime(HOVER_REFRESH_DEFAULTS.maxWaitMs + 100)
     expect(pushed).toHaveLength(1) // 无后续自发推送
+    coordinator.dispose()
+  })
+})
+
+// ---- B-1（review-loops 波次一）：text/pdf 引用目标的宿主事件源可达性 ----
+// 缺陷：provider 的 onDidChangeTextDocument 转发带 /\.md$/i 硬过滤，
+// text 目标（.txt/.json 等）已 watch 时编辑事件被拦（#340「未保存修改
+// 正确刷新」对 text 不成立）。判据数据面 = 协调器登记表（isWatched），
+// 与 handleDiskEvent 的 registry.has 同一登记表。
+describe('B-1：isWatched 观测与 TextDocument 事件转发判据', () => {
+  it('isWatched：watch 后为真（归一键大小写折叠），目标内最后实例退场后为假', () => {
+    const coordinator = new HoverRefreshCoordinator(
+      { pushInvalidation: () => {} },
+      { isWindowsHost: true },
+    )
+    expect(coordinator.isWatched('D:\\notes\\a.txt')).toBe(false)
+    coordinator.watch('s1', 'D:\\notes\\a.txt', 'e1')
+    expect(coordinator.isWatched('D:\\notes\\a.txt')).toBe(true)
+    expect(coordinator.isWatched('D:\\notes\\A.TXT')).toBe(true) // Windows 键归一
+    coordinator.unwatch('s1', 'D:\\notes\\a.txt', 'e1')
+    expect(coordinator.isWatched('D:\\notes\\a.txt')).toBe(false)
+    coordinator.dispose()
+  })
+
+  it('isWatched：releaseSession 整体释放与 dispose 后为假（订阅生命周期）', () => {
+    const coordinator = new HoverRefreshCoordinator({ pushInvalidation: () => {} })
+    coordinator.watch('s1', '/ws/配置.json', 'e1')
+    coordinator.releaseSession('s1')
+    expect(coordinator.isWatched('/ws/配置.json')).toBe(false)
+    coordinator.watch('s2', '/ws/配置.json', 'e2')
+    coordinator.dispose()
+    expect(coordinator.isWatched('/ws/配置.json')).toBe(false)
+  })
+
+  it('转发判据：.md 既有域不变（未订阅也放行——缓存失效广播不依赖订阅在场）；text 未订阅不放行', () => {
+    const watched = new Set(['/ws/笔记.txt'])
+    const isWatched = (fsPath: string) => watched.has(fsPath)
+    // .md 既有行为：未 watch 的 .md 仍转发（修 1 语义保持，不得收窄）
+    expect(shouldForwardHoverDocChange('/ws/任意.md', '/ws/任意.md', isWatched)).toBe(true)
+    // text：已 watch 放行、未 watch 不放行（按订阅集合驱动）
+    expect(shouldForwardHoverDocChange('/ws/笔记.txt', '/ws/笔记.txt', isWatched)).toBe(true)
+    expect(shouldForwardHoverDocChange('/ws/其他.json', '/ws/其他.json', isWatched)).toBe(false)
+  })
+
+  it('转发判据与协调器登记表同源：watch 登记后 text 目标放行、退场后收回', () => {
+    const coordinator = new HoverRefreshCoordinator({ pushInvalidation: () => {} })
+    const forward = (docPath: string, fsPath: string) =>
+      shouldForwardHoverDocChange(docPath, fsPath, (p) => coordinator.isWatched(p))
+    expect(forward('/ws/笔记.txt', '/ws/笔记.txt')).toBe(false)
+    coordinator.watch('s1', '/ws/笔记.txt', 'e1')
+    expect(forward('/ws/笔记.txt', '/ws/笔记.txt')).toBe(true)
+    coordinator.unwatch('s1', '/ws/笔记.txt', 'e1')
+    expect(forward('/ws/笔记.txt', '/ws/笔记.txt')).toBe(false)
+    coordinator.dispose()
+  })
+
+  it('handleDocChanged 对 text 目标同样防抖推送（协调器无 md 载荷假设）', () => {
+    const { coordinator, pushed } = makeCoordinator()
+    coordinator.watch('s1', '/ws/配置.json', 'embed-1')
+    coordinator.handleDocChanged('/ws/配置.json')
+    vi.advanceTimersByTime(HOVER_REFRESH_DEFAULTS.debounceMs)
+    expect(pushed).toEqual([
+      { sessionKeys: ['s1'], fsPath: '/ws/配置.json', status: 'changed', generation: 1 },
+    ])
     coordinator.dispose()
   })
 })

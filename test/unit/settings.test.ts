@@ -612,3 +612,49 @@ describe('引用视图设置组（#298：总开关 + liveDirect 改名 + embed �
       .toContain('embeds written in the note body are not affected')
   })
 })
+
+// ---- #342（P3-10）外链预览设置：总开关（默认关）+ 形态（默认卡片） ----
+
+describe('外链预览设置（#342）', () => {
+  it('hover.externalEnabled 注册为布尔项，默认 false（关闭态零请求）', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.externalEnabled')
+    expect(def).toMatchObject({ type: 'boolean', default: false })
+    expect(def?.titleKey).toBe('setting.hoverExternalEnabled.title')
+    expect(def?.descriptionKey).toBe('setting.hoverExternalEnabled.description')
+    expect(settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)['hover.externalEnabled']).toBe(false)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.externalEnabled': 'on' })['hover.externalEnabled'])
+      .toBe(false)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.externalEnabled': true })['hover.externalEnabled'])
+      .toBe(true)
+  })
+
+  it('hover.externalShape 注册为 string 枚举（card/page），默认 card；依赖总开关灰化', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.externalShape')
+    expect(def).toMatchObject({
+      type: 'string',
+      default: 'card',
+      enum: ['card', 'page'],
+      dependsOn: 'hover.externalEnabled',
+    })
+    expect(def?.titleKey).toBe('setting.hoverExternalShape.title')
+    expect(def?.descriptionKey).toBe('setting.hoverExternalShape.description')
+    expect(def?.type === 'string' && 'enum' in def ? def.optionLabelKeys : undefined)
+      .toMatchObject({ card: 'setting.hoverExternalShapeCard', page: 'setting.hoverExternalShapePage' })
+    expect(settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)['hover.externalShape']).toBe('card')
+    // 非法存量（未知枚举值/类型不符）恢复默认
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.externalShape': 'iframe' })['hover.externalShape'])
+      .toBe('card')
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.externalShape': 3 })['hover.externalShape'])
+      .toBe('card')
+  })
+
+  it('isSettingEnabled：外链总开关关闭时形态选择灰化（值不清除）', () => {
+    const shape = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.externalShape')!
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { 'hover.externalEnabled': false }, shape)).toBe(false)
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { 'hover.externalEnabled': true }, shape)).toBe(true)
+  })
+
+  it('注册表整体恒合法（依赖链无环无悬空）', () => {
+    expect(validateSettingDependencies(PRODUCTION_SETTING_DEFINITIONS)).toEqual([])
+  })
+})

@@ -111,6 +111,9 @@ interface SlotRecord {
   onLoad: (event: Event) => void
   onError: (event: Event) => void
   onClick: (event: MouseEvent) => void
+  /** 失效提示文字已写入 img.alt（原值记忆于 errorOriginalAlt；恢复回写） */
+  errorAltApplied?: boolean
+  errorOriginalAlt?: string
 }
 
 export class ImageResourceManager {
@@ -201,6 +204,13 @@ export class ImageResourceManager {
     const record = this.slots.get(slot)
     if (!record) {
       return
+    }
+    // 记忆随 record 丢弃前先把 alt 回写到 DOM（review-loops #346 增量轮
+    // A 组发现 2：invalidateAll 等「detach→attach 复用同槽位」路径下，新
+    // record 无记忆而 DOM 残留提示文案——恢复后 alt 是提示文案而非用户
+    // 原值，二次失效还会把提示文案记忆为「原值」永久污染）
+    if (record.errorAltApplied) {
+      this.restoreAlt(slot)
     }
     this.slots.delete(slot)
     record.entry.waiters.delete(slot)
@@ -467,9 +477,57 @@ export class ImageResourceManager {
     if (state === 'error') {
       slot.dataset['vsidianImgReason'] = reason ?? 'unknown'
       slot.setAttribute('data-tooltip', imageErrorTitle(reason))
-
+      this.applyErrorAlt(slot, imageErrorTitle(reason))
     } else {
       delete slot.dataset['vsidianImgReason']
+      this.restoreAlt(slot)
+    }
+  }
+
+  /**
+   * 失效提示文字直接可见（2026-10-05 验收改版）：写入槽位 img 的 alt 并
+   * 清除 src——无有效 src 的 img 按规范以文本渲染 alt，提示落进既有
+   * error 胶囊内直接可读（此前信息只在悬停 tooltip，内容塌陷后呈几像素
+   * 细条、不悬停不可知）；「有 src 加载失败」在浏览器呈坏图图标且 alt 截断，
+   * 清 src 把两条失败路径统一到 alt 文本形态（重试经 applyToSlot 重写
+   * src，不受影响）。原 alt 记忆于 record，恢复非 error 态时回写
+   * （用户写的 alt 不丢）。
+   * 无 img 的槽位（live 正文初次装载即失效——error 路径不执行 render，
+   * 「打开文档时图片已缺失」非窄路径，review-loops #346 增量轮 A 组勘正）：
+   * 提示文案写入槽位文本（span 的初始占位被覆盖）；恢复闭环由 render
+   * 回调承担（重建首行清空槽位再建 img）。
+   */
+  private applyErrorAlt(slot: HTMLElement, text: string): void {
+    const imgEl = slot instanceof HTMLImageElement ? slot : slot.querySelector('img')
+    if (!imgEl) {
+      slot.textContent = text
+      return
+    }
+    const record = this.slots.get(slot)
+    if (record && !record.errorAltApplied) {
+      record.errorOriginalAlt = imgEl.getAttribute('alt') ?? ''
+      record.errorAltApplied = true
+    }
+    imgEl.setAttribute('alt', text)
+    imgEl.removeAttribute('src')
+  }
+
+  /** 恢复（loading/loaded）：回写失效前记忆的原 alt（空串语义为移除属性） */
+  private restoreAlt(slot: HTMLElement): void {
+    const record = this.slots.get(slot)
+    if (!record?.errorAltApplied) {
+      return
+    }
+    const imgEl = slot instanceof HTMLImageElement ? slot : slot.querySelector('img')
+    record.errorAltApplied = false
+    if (!imgEl) {
+      return
+    }
+    const original = record.errorOriginalAlt ?? ''
+    if (original === '') {
+      imgEl.removeAttribute('alt')
+    } else {
+      imgEl.setAttribute('alt', original)
     }
   }
 

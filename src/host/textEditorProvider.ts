@@ -7,9 +7,13 @@
 // WorkspaceEdit 写回；文档事件回流经 session 识别自家确认与外部变更。
 import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
+import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
+import { WebLinkMetaService } from './webLinkMetaService'
+import { resolveProxyConfig, type ProxyDecision } from './proxyAgent'
+import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type HoverExternalShapeMode } from '../shared/settings'
 import {
   appendImageVersionStamp,
   classifyImageTarget,
@@ -27,6 +31,8 @@ import {
   type VaultLinkResolveContext,
 } from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
+import { classifyLocalRefContentKind } from '../shared/refContent'
+import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
 import { buildEditorCsp } from './editorCsp'
 // #292 骨架屏内联装配（样式/#app 开标签含骨架标记/可读行宽预注入取值）
@@ -71,8 +77,11 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
-import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
-import type { ImageVersionTable } from './imageVersioning'
+import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator, shouldForwardHoverDocChange } from './hoverRefreshCoordinator'
+import { selectTextWatchEvictions } from '../shared/hoverRefresh'
+import { escapeGlobFilenameLiteral } from '../shared/globLiteral'
+import { TextAppearanceService } from './textAppearance/appearanceService'
+import { ImageVersionTable } from './imageVersioning'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
   IMAGE_WAKE_MIN_GAP_MS,
@@ -87,12 +96,10 @@ import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { matchHostOffset, parseCopyMatch, shouldShowSearchRevealHint } from './searchReveal'
 import {
-  readHoverDocTarget,
-  readHoverDirectTarget,
-  readHoverMdLinkTarget,
+  readRefContentTarget,
   resolveHoverTargetTip,
   type HoverDocAccessContext,
-  type HoverReadOutcome,
+  type RefReadOutcome,
 } from './hoverDocAccess'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
@@ -366,6 +373,52 @@ export function createTextEditorProvider(
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   const diagnostics = new TestDiagnostics()
+  // ---- #342（P3-10）外链元信息服务：provider 级单例（跨面板共享缓存与
+  // 合并计数——同一 URL 的多个悬停请求只发一次网络请求）。设置开关关闭
+  // 时经 cancelAll 中止全部在途并清缓存（关闭态零请求的宿主侧防线）。
+  // Remote SSH 下本服务随扩展宿主进程在远端运行——抓取自然发生在远端 ----
+  // #346（用户裁决改进）：抓取尊重 VSCode http.proxy 配置族（TUN/企业代理
+  // 环境下宿主 Node 栈与系统浏览器网络路径分叉的修复）。每跳请求前读取
+  // （配置变更无需重启生效）；proxySupport=off / 未配置时维持直连；非法代
+  // 理值回退直连 + warn 去抖。代理模式 SSRF 降级语义见 proxyAgent.ts 头注
+  // 与规格「外链形态、网络与退回」第 3 条——直连 lookup 校验不受影响。
+  const webLinkProxyDecision = (targetProtocol: string): ProxyDecision => resolveProxyConfig(
+    {
+      proxy: vscode.workspace.getConfiguration('http').get('proxy'),
+      proxyAuthorization: vscode.workspace.getConfiguration('http').get('proxyAuthorization'),
+      proxyStrictSSL: vscode.workspace.getConfiguration('http').get('proxyStrictSSL'),
+      proxySupport: vscode.workspace.getConfiguration('http').get('proxySupport'),
+    },
+    process.env,
+    targetProtocol,
+  )
+  const webLinkMeta = new WebLinkMetaService({ getProxy: webLinkProxyDecision })
+  /** 在途 web 抓取的取消注册表：hover.request（webview 关浮层/换目标的
+   *  hover.cancel）→ documentSession 路由 → 此处按 instanceId+reqId 定位
+   *  消费者中止（最后消费者离开即断开底层连接）。key 为面板会话内唯一 */
+  const pendingWebFetches = new Map<string, AbortController>()
+  /** 外链预览开关（hover.externalEnabled）的宿主侧门控：false = 解析层
+   *  维持 unsupported（被攻陷 webview 无法绕过开关发起抓取） */
+  const externalHoverEnabled = (): boolean =>
+    settings !== undefined && settings.service.getSnapshot()[HOVER_EXTERNAL_ENABLED_KEY] === true
+  const externalHoverShape = (): HoverExternalShapeMode => {
+    const value = settings?.service.getSnapshot()[HOVER_EXTERNAL_SHAPE_KEY]
+    return value === 'page' ? 'page' : 'card'
+  }
+  // 开关关闭即中止在途并清缓存（含「设置页关闭时编辑器有在途抓取」的
+  // 跨面板场景；迟到结果无从产生——服务层消费者已全部取消）
+  if (settings !== undefined) {
+    context.subscriptions.push({
+      dispose: () => webLinkMeta.cancelAll(),
+    })
+    const releaseSettingsWatch = settings.service.onChange((values) => {
+      if (values[HOVER_EXTERNAL_ENABLED_KEY] !== true) {
+        webLinkMeta.cancelAll()
+        pendingWebFetches.clear()
+      }
+    })
+    context.subscriptions.push({ dispose: releaseSettingsWatch })
+  }
   /** P2-13（#290）最近一条「面板关闭残留输入」快照（宿主留存）：无条件记录
    *  ——「取消不静默清除宿主已收到快照」的可观测实现；测试钩子
    *  getLastClosedInput 暴露，放弃当前版本时清除 */
@@ -727,6 +780,11 @@ export function createTextEditorProvider(
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
   const isWindowsHost = process.platform === 'win32'
   const imageRefreshEvents: string[] = []
+  // #337（P3-05）PDF 文件状态版本表（provider 级单件，图片版本表同款语义
+  // ——mtime/size 观测推进单调代次；hover.result 的 pdf version 与资源 URI
+  // 的 ?v= 戳同源）。独立于图片表：失效通道与代次语义不混用（图片的周期
+  // 核验/事件推进不扰动 PDF 目标；PDF 变化经 hover.invalidated 通道刷新）
+  const pdfVersions = new ImageVersionTable(isWindowsHost)
   const IMAGE_EVENT_LOG_LIMIT = 8 // 环形上限（RENAME_LOG_LIMIT 同形态）：会话生命周期内无界增长
   const imageRefresh = new ImageRefreshCoordinator(
     {
@@ -775,6 +833,26 @@ export function createTextEditorProvider(
     )
   }
   let imageWatchers: vscode.FileSystemWatcher[] = []
+  /** #338 PDF 磁盘事件去抖计时器（与图片同窗——保存器 rename 成组归并） */
+  const pdfWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** #338 PDF 目标磁盘事件分流：索引域 watcher 只盯 *.md、图片自建管线
+   *  只覆盖图片扩展——PDF 的 changed/deleted 在此自建去抖后送 #224 刷新
+   *  协调器（hover.invalidated 推送的事件源；闭包晚绑定 hoverEvents——
+   *  事件触发恒晚于其声明，与 md 域接线同款前提）。stale 的周期核验挂
+   *  图片管线，PDF 事件驱动为一期边界（装载时 stat 三态已覆盖 inaccessible） */
+  const schedulePdfEvent = (fsPath: string, status: 'changed' | 'deleted'): void => {
+    const prev = pdfWatchTimers.get(fsPath)
+    if (prev !== undefined) {
+      clearTimeout(prev)
+    }
+    pdfWatchTimers.set(
+      fsPath,
+      setTimeout(() => {
+        pdfWatchTimers.delete(fsPath)
+        hoverEvents.onDiskEvent(fsPath, status)
+      }, IMAGE_EVENT_DEBOUNCE_MS),
+    )
+  }
   const teardownImageWatchers = (): void => {
     for (const watcher of imageWatchers) {
       watcher.dispose() // 其上的事件订阅随之释放
@@ -786,6 +864,10 @@ export function createTextEditorProvider(
       clearTimeout(timer)
     }
     imageWatchTimers.clear()
+    for (const timer of pdfWatchTimers.values()) {
+      clearTimeout(timer)
+    }
+    pdfWatchTimers.clear()
   }
   const setupImageWatchers = (): void => {
     teardownImageWatchers()
@@ -793,19 +875,28 @@ export function createTextEditorProvider(
     if (!folders || folders.length === 0) {
       return
     }
-    const glob = `**/*.{${IMAGE_WATCH_GLOB_SEGMENTS.join(',')}}`
+    // #338：glob 追加 pdf 段（PDF 磁盘事件与图片共用自建 watcher——分流
+    //  在 forward；pdf 不进图片刷新管线，走 #224 协调器）
+    const glob = `**/*.{${IMAGE_WATCH_GLOB_SEGMENTS.join(',')},pdf}`
     for (const folder of folders) {
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(folder.uri, glob),
       )
-      const forward = (uri: vscode.Uri | undefined): void => {
-        if (uri && isImageFileExtension(uri.fsPath)) {
+      const forward = (uri: vscode.Uri | undefined, pdfStatus: 'changed' | 'deleted'): void => {
+        if (!uri) {
+          return
+        }
+        if (isImageFileExtension(uri.fsPath)) {
           scheduleImageEvent(uri.fsPath)
+          return
+        }
+        if (classifyLocalRefContentKind(uri.fsPath) === 'pdf') {
+          schedulePdfEvent(uri.fsPath, pdfStatus)
         }
       }
-      watcher.onDidChange(forward)
-      watcher.onDidCreate(forward)
-      watcher.onDidDelete(forward)
+      watcher.onDidChange((uri) => forward(uri, 'changed'))
+      watcher.onDidCreate((uri) => forward(uri, 'changed'))
+      watcher.onDidDelete((uri) => forward(uri, 'deleted'))
       imageWatchers.push(watcher)
     }
   }
@@ -890,8 +981,145 @@ export function createTextEditorProvider(
   const hoverEvents = connectHoverEvents(hoverRefresh, () =>
     Array.from(sessions.values(), (entry) => entry.session),
   )
+
+  // ---- B-1（review-loops 波次一）：text 引用目标磁盘事件源 ----
+  // 缺陷：#338 自建 watcher 的 glob 只含图片扩展与 pdf，text 目标（#340
+  // 的 .txt/.json/代码文件等开放扩展集）的磁盘替换/删除/恢复无事件源
+  // ——P3-U7「附件替换、删除／恢复有正确刷新或提示」对 text 不成立。
+  // 不为全部 text 扩展建工作区级监听（.json/.ts 在工作区内海量存在），
+  // 按已 watch 目标驱动：hover.watch 登记成功时为该目标建 per-file
+  // watcher（base=目标所在目录 + 转义文件名，非递归——vs/base/common/
+  // glob 的精确匹配形态，1.82.3 源码核对的 API 用法），事件与 pdf 分流
+  // 同窗去抖后送 #224 刷新协调器（schedulePdfEvent 同构）。text 目标
+  // 扩展判定复用 classifyLocalRefContentKind 的 text 通道口径，不自造
+  // 扩展清单。
+  // watcher 生命周期独立于订阅登记：常驻至 LRU 淘汰/provider 释放——
+  // 退场目标的磁盘事件仍广播 session 缓存失效（修 1 的「unwatch 后修改
+  // 不留陈旧缓存」对 text 载荷同样成立），推送门控由协调器 registry.has
+  // 早退兜住（未订阅零推送）。挂起去抖计时器随 watcher 语义：事件本身
+  // 真实，到期转发正确；teardown 时统一清（review-loops #21 同款边界）
+  interface TextWatchSlot {
+    watcher: vscode.FileSystemWatcher
+  }
+  /** 归一键（与协调器 keyOf 同口径：Windows 折叠大小写 + 正斜杠） */
+  const textWatchKeyOf = (fsPath: string): string =>
+    isWindowsHost ? fsPath.replaceAll('\\', '/').toLowerCase() : fsPath
+  /** Map 插入序 = LRU 触达序（HoverWatchRegistry 淘汰同款手法）。上限
+   *  语义（#344 RB-1 起）：**无订阅陈旧条目**的淘汰上限——仍有活跃订阅
+   *  的目标跳过淘汰（订阅注册表上限 128 为总量的另一道上界，全在 watch
+   *  时表可临时超过本值但不无界增长） */
+  const textWatchers = new Map<string, TextWatchSlot>()
+  const TEXT_WATCHER_LIMIT = 64
+  /** text 目标磁盘事件去抖计时器（与 pdf 同窗——保存器 rename 成组归并） */
+  const textWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const scheduleTextDiskEvent = (fsPath: string, status: 'changed' | 'deleted'): void => {
+    const prev = textWatchTimers.get(fsPath)
+    if (prev !== undefined) {
+      clearTimeout(prev)
+    }
+    textWatchTimers.set(
+      fsPath,
+      setTimeout(() => {
+        textWatchTimers.delete(fsPath)
+        hoverEvents.onDiskEvent(fsPath, status)
+      }, IMAGE_EVENT_DEBOUNCE_MS),
+    )
+  }
+  /** watch 登记成功后调用：text 目标建 per-file watcher（幂等，LRU 触达） */
+  const ensureTextWatch = (fsPath: string): void => {
+    if (classifyLocalRefContentKind(fsPath) !== 'text') {
+      return // md 域走索引 watcher、pdf/image 走自建分流——各有事件源
+    }
+    const key = textWatchKeyOf(fsPath)
+    const prev = textWatchers.get(key)
+    if (prev !== undefined) {
+      textWatchers.delete(key) // LRU 触达：移到队尾
+      textWatchers.set(key, prev)
+      return
+    }
+    const fileUri = vscode.Uri.file(fsPath)
+    const slash = fileUri.path.lastIndexOf('/')
+    const dirUri = fileUri.with({ path: slash > 0 ? fileUri.path.slice(0, slash) : '/' })
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(dirUri, escapeGlobFilenameLiteral(fileUri.path.slice(slash + 1))),
+    )
+    watcher.onDidChange((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
+    watcher.onDidCreate((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
+    watcher.onDidDelete((uri) => scheduleTextDiskEvent(uri.fsPath, 'deleted'))
+    textWatchers.set(key, { watcher })
+    // #344（P3-12 收口·RB-1）淘汰选取：跳过仍有活跃订阅的目标（订阅在
+    // 登记表而事件源被盲 LRU 淘汰 = 磁盘推送承诺落空的不对称修复）。
+    // isWatched 传归一键幂等（协调器内部再归一，见纯函数注释）
+    for (const victim of selectTextWatchEvictions(
+      [...textWatchers.keys()],
+      (victimKey) => hoverRefresh.isWatched(victimKey),
+      TEXT_WATCHER_LIMIT,
+    )) {
+      const slot = textWatchers.get(victim)
+      textWatchers.delete(victim)
+      slot?.watcher.dispose()
+    }
+  }
+  const teardownTextWatches = (): void => {
+    for (const slot of textWatchers.values()) {
+      slot.watcher.dispose()
+    }
+    textWatchers.clear()
+    for (const timer of textWatchTimers.values()) {
+      clearTimeout(timer)
+    }
+    textWatchTimers.clear()
+  }
+  context.subscriptions.push({ dispose: teardownTextWatches })
+
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
+
+  // ---- #340（P3-08）文本外观服务（provider 级单件）：语法层 vscode-
+  //  textmate + 语义层公开命令 + 主题链复刻（#335 验证路线）；onig WASM
+  //  随 VSIX 打包（esbuild 复制到 out/onig.wasm，运行时按扩展目录定位）。
+  //  主题/颜色自定义/扩展清单变化 → 失效缓存并广播 appearance.changed
+  //  （webview 在场文本视图静默重载——正文载荷含语言级字体，token 随
+  //  render 重取；Markdown 侧 CSS 变量自带跟随，忽略该广播） ----
+  const appearanceService = new TextAppearanceService(
+    vscode.Uri.joinPath(context.extensionUri, 'out', 'onig.wasm').fsPath,
+  )
+  let appearanceGeneration = 0
+  const broadcastAppearanceChanged = (): void => {
+    appearanceService.invalidateAppearance()
+    appearanceGeneration++
+    const message: HostToWebview = { kind: 'appearance.changed', generation: appearanceGeneration }
+    for (const entry of sessions.values()) {
+      for (const { sessionId } of entry.session.getInfo().panels) {
+        entry.session.postToPanel(sessionId, message)
+      }
+    }
+  }
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration('workbench.colorTheme') ||
+      event.affectsConfiguration('workbench.preferredDarkColorTheme') ||
+      event.affectsConfiguration('workbench.preferredLightColorTheme') ||
+      event.affectsConfiguration('window.autoDetectColorScheme') ||
+      event.affectsConfiguration('editor.tokenColorCustomizations') ||
+      event.affectsConfiguration('editor.semanticTokenColorCustomizations') ||
+      event.affectsConfiguration('editor.fontFamily') ||
+      event.affectsConfiguration('editor.fontSize') ||
+      event.affectsConfiguration('editor.fontLigatures') ||
+      event.affectsConfiguration('editor.lineNumbers')) {
+      broadcastAppearanceChanged()
+    }
+  }))
+  context.subscriptions.push(vscode.window.onDidChangeActiveColorTheme(() => {
+    // 生效主题变化（跟随系统深浅的自动切换、主题预览回落）：此路径
+    // workbench.colorTheme 配置值不动、无 configuration 事件——主题身份
+    // 复刻（appearanceService 按深浅取 preferred）依赖本事件触发失效与
+    // 广播，否则已装配引擎停留旧主题（#340 着色发灰根因修复面）
+    broadcastAppearanceChanged()
+  }))
+  context.subscriptions.push(vscode.extensions.onDidChange(() => {
+    // 扩展安装/卸载：grammar/主题贡献集变化（#335 韧性口径——清单重扫）
+    broadcastAppearanceChanged()
+  }))
 
   /** 向面板请求最新 view.state（面板存活时的最可靠未确认输入来源） */
   const fetchPanelText = async (
@@ -1736,6 +1964,52 @@ export function createTextEditorProvider(
           ? `#^${parsed.blockId}`
           : ''
     }]]`
+
+    // #340（P3-08）text 目标跳转：原生编辑器打开（reveal 到行）——跳转
+    // 锚点落点由 #line 决定（仅 range 落窗口起点 B、无锚点落文件顶部）；
+    // 双链限定的 #line/#range 锚点在此解析（分词与校验单一事实源在
+    // shared/refText）。锚点非法仍打开（顶部）+ 警告提示（同锚点缺失的
+    // 「打开后提示」语义）；Markdown 锚点定位保持既有 Vsidian 面板路径
+    if (classifyLocalRefContentKind(targetPath) === 'text') {
+      let jumpLine = 1
+      let anchorInvalid: string | null = null
+      if (parsed.heading !== null || parsed.blockId !== null) {
+        const anchorRaw = parsed.heading !== null ? parsed.heading : `^${parsed.blockId}`
+        const anchorSpec = parsed.heading !== null ? parseTextAnchorSpec(parsed.heading) : null
+        if (anchorSpec === null) {
+          anchorInvalid = anchorRaw
+        } else {
+          const textDoc = await vscode.workspace.openTextDocument(targetUri)
+          const resolved = resolveTextNav(anchorSpec, textDoc.lineCount)
+          if (resolved.ok) {
+            jumpLine = resolved.nav.jumpLine
+          } else {
+            anchorInvalid = anchorRaw
+          }
+        }
+      }
+      pushLog({
+        kind: 'wikilink-doc',
+        target: parsed.path,
+        path: targetPath,
+        heading: parsed.heading ?? undefined,
+        blockId: parsed.blockId ?? undefined,
+        locate: jumpLine > 1 ? 'custom-panel' : 'none',
+      })
+      const textEditor = await vscode.window.showTextDocument(targetUri, { preview: false })
+      const lineIdx = Math.min(jumpLine - 1, Math.max(0, textEditor.document.lineCount - 1))
+      textEditor.revealRange(
+        new vscode.Range(lineIdx, 0, lineIdx, 0),
+        vscode.TextEditorRevealType.InCenter,
+      )
+      if (anchorInvalid !== null) {
+        void vscode.window.showWarningMessage(
+          t('host.wikilinkTextAnchorInvalid', { link: display, anchor: anchorInvalid }),
+        )
+      }
+      return
+    }
+
     // 锚点定位（#159：标题→findHeadingOffset、块 id→findBlockOffset，互斥）：
     // 先读目标内容算 offset（openTextDocument 只装载不显示）。offset 是宿主系
     // （getText 保留 \r\n），发 view.locate 前须转 LF 系（见下）
@@ -1957,17 +2231,20 @@ export function createTextEditorProvider(
       // #218 悬停预览文档读取端口：hoverDocAccess 无副作用路径（目标解析 +
       // openTextDocument 只装载不显示 + LF 转换）；报告回 hover.result（经
       // 会话 report 闭包回来源面板）。读取异常一律收敛为 read-failed 分态
-      // ——就地 i18n 呈现，不弹宿主通知。#219 起按 linkHref 分流：普通本地
-      // Markdown 链接走 readHoverMdLinkTarget（外部网页 webview 已预滤，
-      // 宿主复核兜底），缺省为双链 readHoverDocTarget；#221 起 directTarget
-      // 优先（反链/出链面板条目的直接目标——宿主快照身份直读，不走文本
-      // 解析；断链条目空串 fsPath 由 readHoverDirectTarget 回 not-found）
+      // ——就地 i18n 呈现，不弹宿主通知。目标三形态择一：directTarget
+      // （#221 反链/出链面板条目的直接目标——宿主快照身份直读；断链条目
+      // 空串 fsPath 回 not-found）> linkHref（#219 普通本地 Markdown 链接，
+      // 外部网页 webview 已预滤、宿主复核兜底）> target（双链原文）。
+      // #333（P3-01）起读取走 readRefContentTarget 类型化分派入口（成功
+      // 载荷按 kind 标记；旧扁平入口保留为兼容适配）
       const readHoverTargetPort = (
         payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
-        report: (result: HoverReadOutcome) => void,
+        report: (result: RefReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
-          let outcome: HoverReadOutcome
+          let outcome: RefReadOutcome
+          // 在途抓取登记键（try 外声明：finally 清理与 try 内注册共用）
+          const webFetchKey = `${document.uri.toString()}#${payload.instanceId}:${payload.reqId}`
           try {
             let sourceDoc = document
             if (payload.source !== undefined) {
@@ -1982,28 +2259,148 @@ export function createTextEditorProvider(
               }
             }
             const access = hoverAccessContextOf(sourceDoc)
+            // #342（P3-10）外链抓取端口与取消注册：开关开（hover.external
+            // Enabled）才提供 web 通道——关闭态解析层 unsupported，零网络
+            // 请求；在途抓取登记取消句柄（hover.cancel → documentSession
+            // 路由 → abort——同 URL 合并的最后消费者离开即断开底层连接）
+            const webEnabled = externalHoverEnabled()
+            const webAbort = webEnabled ? new AbortController() : undefined
+            if (webAbort !== undefined) {
+              pendingWebFetches.set(webFetchKey, webAbort)
+              webAbort.signal.addEventListener('abort', () => {
+                pendingWebFetches.delete(webFetchKey)
+              }, { once: true })
+            }
             const ports = {
               resolveVaultFile: (rawPath: string) =>
                 resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
               openTextDocument: async (fsPath: string) => {
                 try {
                   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
-                  return { version: doc.version, text: doc.getText() }
+                  // #340：languageId 随读取携带（text 通道的语言身份——
+                  // 高亮按用户已装语言插件的原生身份分派）
+                  return { version: doc.version, text: doc.getText(), languageId: doc.languageId }
                 } catch {
                   return null
                 }
               },
+              // #340（P3-08）text 通道准入端口：stat 大小与有界头部读取
+              //（node fs 直读——workspace.fs 无部分读取；大小超限不打开）
+              statFileSize: async (fsPath: string) => {
+                try {
+                  return (await fsp.stat(fsPath)).size
+                } catch {
+                  return null
+                }
+              },
+              readFileHead: async (fsPath: string, maxBytes: number) => {
+                try {
+                  const handle = await fsp.open(fsPath, 'r')
+                  try {
+                    const buffer = Buffer.alloc(Math.max(0, maxBytes))
+                    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+                    return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead)
+                  } finally {
+                    await handle.close()
+                  }
+                } catch {
+                  return null
+                }
+              },
+              // #340 语言级生效外观（getConfiguration('editor', doc) 合并读取）
+              readTextEditorConfig: async (fsPath: string) => {
+                try {
+                  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+                  const editor = vscode.workspace.getConfiguration('editor', doc)
+                  const family = editor.get<string | undefined>('fontFamily')
+                  const size = editor.get<number | undefined>('fontSize')
+                  const ligatures = editor.get<boolean | string | undefined>('fontLigatures')
+                  const lineNumbers = editor.get<string>('lineNumbers', 'on')
+                  return {
+                    ...(family !== undefined ? { family } : {}),
+                    ...(size !== undefined ? { size } : {}),
+                    ...(ligatures !== undefined ? { ligatures: ligatures === true } : {}),
+                    lineNumbers: lineNumbers !== 'off',
+                  }
+                } catch {
+                  return null
+                }
+              },
+              ...(webAbort !== undefined
+                ? {
+                  fetchWebMeta: (url: string, signal?: AbortSignal) =>
+                    webLinkMeta.fetch(url, signal ?? webAbort.signal, externalHoverShape()),
+                }
+                : {}),
+              // #336（P3-04）图片目标的文件资源版本（mtimeMs——图片不是
+              // TextDocument 权威语义；stat 失败由访问层退 0 不构成读取失败）
+              statFile: async (fsPath: string) => {
+                try {
+                  const stat = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+                  return { mtimeMs: stat.mtime }
+                } catch {
+                  return null
+                }
+              },
+              // #337（P3-05）PDF 文件资源端口：stat 三态（FileNotFound =
+              // not-found；权限/断连 = inaccessible 不冒充删除）+ asWebviewUri
+              // + 文件状态代次戳。本地与 Remote SSH 同通道（webview 资源
+              // 服务按远程权威路由）。不装载正文字节——宿主侧零 PDF 解析
+              // 代码，PDF 源由 webview 按需 fetch
+              readPdfFileResource: async (fsPath: string) => {
+                const uri = vscode.Uri.file(fsPath)
+                let stat: vscode.FileStat
+                try {
+                  stat = await vscode.workspace.fs.stat(uri)
+                } catch (err) {
+                  return isFileNotFound(err) ? { kind: 'not-found' } as const : { kind: 'inaccessible' } as const
+                }
+                if ((stat.type & vscode.FileType.File) === 0) {
+                  return { kind: 'not-found' } as const
+                }
+                const { generation } = pdfVersions.recordObservation(fsPath, {
+                  mtimeMs: stat.mtime,
+                  size: stat.size,
+                })
+                return {
+                  kind: 'ok' as const,
+                  uri: appendImageVersionStamp(
+                    webviewPanel.webview.asWebviewUri(uri).toString(),
+                    generation,
+                  ),
+                  version: generation,
+                  bytes: stat.size,
+                }
+              },
             }
-            outcome = payload.directTarget !== undefined
-              ? await readHoverDirectTarget(payload.directTarget, access, ports,
-                payload.anchorOptional === true ? { anchorOptional: true } : undefined)
-              : payload.linkHref !== undefined
-                ? await readHoverMdLinkTarget(payload.linkHref, access, ports,
-                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
-                : await readHoverDocTarget(payload.target, access, ports,
-                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
+            // #333（P3-01）生产读取走类型化分派入口 readRefContentTarget：
+            // 三形态（directTarget/linkHref/target 择一）在共用解析层归一，
+            // 按解析出的目标类型分派（markdown 通道装载既有全文载荷；
+            // web 通道 #342 装载外链卡片载荷；其余类型 non-markdown 分态
+            // ——附件载荷由三期后续票登记）。
+            // 旧三入口保留为兼容适配（测试与既有调用等价使用）
+            outcome = await readRefContentTarget(
+              {
+                ...(payload.directTarget !== undefined ? { directTarget: payload.directTarget } : {}),
+                ...(payload.linkHref !== undefined ? { linkHref: payload.linkHref } : {}),
+                ...(payload.directTarget === undefined && payload.linkHref === undefined
+                  ? { target: payload.target }
+                  : {}),
+              },
+              access,
+              ports,
+              {
+                ...(payload.anchorOptional === true ? { anchorOptional: true } : {}),
+                ...(webAbort !== undefined ? { web: { enabled: true } } : {}),
+              },
+            )
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
+          } finally {
+            // review 修复：登记的取消句柄在 finally 清理——读取抛异常时
+            // Map 条目不再残留（残留会滞留已死的 AbortController，阻碍同
+            // 键后续抓取的取消注册）
+            pendingWebFetches.delete(webFetchKey)
           }
           report(outcome)
         })()
@@ -2029,6 +2426,45 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
+        // #342（P3-10）悬停请求取消路由：webview hover.cancel → 在途 web
+        // 抓取消费者中止（markdown 读取不可中止——迟到回包由既有配对守卫
+        // 丢弃，行为不变）；key 与 readHoverTargetPort 的登记同构
+        cancelHoverRead: (identity) => {
+          pendingWebFetches.get(`${document.uri.toString()}#${identity.instanceId}:${identity.reqId}`)?.abort()
+        },
+        // #340（P3-08）文本 token 计算（外观服务）：版本配对在计算前
+        // （目标已推进回 stale，webview 等失效重载）与语义层回包前（3s
+        // 计算窗内文档可能再变）各核一次；语义层无 provider/超时/失败
+        // 静默不发（语法层保持——「语义暂不可用不抹掉已验证语法层」）
+        readTextTokens: (payload, report) => {
+          void (async (): Promise<void> => {
+            let doc: vscode.TextDocument
+            try {
+              doc = await vscode.workspace.openTextDocument(vscode.Uri.file(payload.fsPath))
+            } catch {
+              report({ ok: false, reason: 'stale' })
+              return
+            }
+            if (doc.version !== payload.version) {
+              report({ ok: false, reason: 'stale' })
+              return
+            }
+            const tm = await appearanceService.computeTextmateTokens(doc, payload.beginLine, payload.endLine)
+            if (doc.version !== payload.version) {
+              report({ ok: false, reason: 'stale' })
+              return
+            }
+            if (tm === null) {
+              report({ ok: false, reason: 'unavailable' })
+              return
+            }
+            report({ ok: true, layer: 'textmate', colors: tm.colors, tokens: tm.data, version: doc.version })
+            const semantic = await appearanceService.computeSemanticTokens(doc, payload.beginLine, payload.endLine)
+            if (semantic !== null && doc.version === payload.version) {
+              report({ ok: true, layer: 'semantic', colors: semantic.colors, tokens: semantic.data, version: doc.version })
+            }
+          })()
+        },
         // #299 跳转目标提示轻量解析：纯路径计算、零文件系统请求——不读
         // 正文、不建读取与租约链路（用户裁定：诚实反映链接目标，不做存在性探测）
         resolveHoverTarget: (payload, report) => {
@@ -2286,6 +2722,10 @@ export function createTextEditorProvider(
                 message.fsPath,
                 `累计 ${hoverWatchRejected} 次`,
               )
+            } else {
+              // B-1：text 目标的磁盘事件源按登记驱动建立（md/pdf/image
+              // 各有事件源，内部按扩展分类空操作）
+              ensureTextWatch(message.fsPath)
             }
           } else {
             void entry.session.handleWebviewMessage(message, sessionId)
@@ -2814,8 +3254,19 @@ export function createTextEditorProvider(
       // 空 contentChanges 是 dirty 状态事件，无内容变更不触发）。目标自
       // 引用（A 嵌入 A）同链路收敛：推送只读重载，不产生新事件。修 1 起
       // 经 connectHoverEvents 接线：未订阅目标同时广播 session 缓存失效
+      // B-1（review-loops 波次一）：转发判据改为 shouldForwardHoverDocChange
+      // ——.md 既有域不变（未订阅也放行，缓存失效广播语义），text 目标
+      //（.txt/.json/代码文件等）按订阅集合放行（#340「未保存修改正确刷新」
+      // 对 text 的通路；此前 /\.md$/i 硬过滤把已 watch 的 text 编辑拦死）
+      // #344（P3-12 收口）：text 放行集合扩至「订阅中 ∪ 读取缓存驻留」
+      // ——未 watch 的 text 目标编辑事件不转发是 B-1 的窄代价，但「悬停
+      // →关闭→编辑→再悬停」会命中陈旧缓存；缓存目标同权转发后编辑事件
+      // 照常广播失效（推送门控仍在协调器内——未订阅零推送开销不变）
       if (event.contentChanges.length > 0 &&
-        event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
+        event.document.uri.scheme === 'file' &&
+        shouldForwardHoverDocChange(event.document.uri.path, event.document.uri.fsPath,
+          (fsPath) => hoverRefresh.isWatched(fsPath) ||
+            Array.from(sessions.values(), (e) => e.session).some((s) => s.hasCachedHoverTarget(fsPath)))) {
         hoverEvents.onDocChanged(event.document.uri.fsPath)
       }
       const entry = getEntry(event.document.uri)
@@ -4087,6 +4538,20 @@ async function executeLinkIntent(
     } catch {
       continue
     }
+    // #340（P3-08）text 目标（普链）：原生编辑器打开——fragment 不解析
+    //（锚点控制仅双链可用，普链 fragment 原样交宿主打开，2026-10-04 规范
+    // 修订口径），不带行定位、不弹锚点警告
+    if (classifyLocalRefContentKind(fsPath) === 'text') {
+      pushLog({
+        kind: 'doc',
+        href: intent.href,
+        path: fsPath,
+        fragment: target.fragment ?? undefined,
+        locate: 'none',
+      })
+      await vscode.window.showTextDocument(uri, { preview: false })
+      return
+    }
     // openTextDocument 只装载不显示；fragment 定位区间与日志先于打开动作
     const targetDoc = await vscode.workspace.openTextDocument(uri)
     const isBlock = target.fragment !== null && isBlockIdFragment(target.fragment)
@@ -4220,6 +4685,18 @@ function buildWebviewHtml(
   const mermaidUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'mermaid.js'),
   ).toString()
+  // #337（P3-05）PDF 装配资源 URI（mermaid 同款全局传递机制）：pdfMain/
+  // pdfWorker 双产物 + cmaps/standard_fonts/wasm/iccs 资产目录（尾斜杠由
+  // webview 渲染器按 PDF.js 参数约定补齐）。webview 无法自行构造
+  // asWebviewUri 前缀，经此内联注入
+  const pdfAssets = {
+    mainJs: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfMain.js')).toString(),
+    workerJs: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfWorker.js')).toString(),
+    cMapUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'cmaps')).toString(),
+    fontUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'standard_fonts')).toString(),
+    wasmUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'wasm')).toString(),
+    iccUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'iccs')).toString(),
+  }
   // 稳定样式契约内部测试片段（#6）：验证外部样式表可经稳定类名/变量
   // 定位两种视图；一期不提供用户 CSS 加载（见 docs/design/obsidian-selector-map.md）
   const probeCssUri = webview.asWebviewUri(
@@ -4243,7 +4720,7 @@ ${buildSkeletonStyleHtml()}
 <body>
 ${buildAppOpenTag(initial.readableLineWidthPx)}
 ${buildLocaleIslandHtml(locale, LOCALE_MESSAGES[locale])}
-<script nonce="${nonce}">window.__vsidianMermaidUri = "${mermaidUri}";${initial.holdSkeleton ? `window.${SKELETON_HOLD_GLOBAL} = true;` : ''}window.${SKELETON_SHOWN_AT_GLOBAL} = performance.now();</script>
+<script nonce="${nonce}">window.__vsidianMermaidUri = "${mermaidUri}";window.__vsidianPdfAssets = ${JSON.stringify(pdfAssets)};${initial.holdSkeleton ? `window.${SKELETON_HOLD_GLOBAL} = true;` : ''}window.${SKELETON_SHOWN_AT_GLOBAL} = performance.now();</script>
 <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`

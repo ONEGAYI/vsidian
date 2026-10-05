@@ -67,9 +67,10 @@ export interface SettingsPageInfo {
   /** webview 已装载并请求过快照（ready 握手完成） */
   ready: boolean
   title: string
-  /** 会话内恢复：webview 最近上报的 UI 态（分页 + 主区滚动）；undefined =
-   *  本会话尚无上报。面板关闭/隐藏重载后按它经 focusSection{scroll} 恢复 */
-  uiState?: { section: string; scrollTop: number }
+  /** 会话内恢复：webview 最近上报的 UI 态（分页 + 主区滚动 + 可选的分页内
+   *  输入态载荷）；undefined = 本会话尚无上报。面板关闭/隐藏重载后按它经
+   *  focusSection{scroll, state} 恢复（state 透传不解释） */
+  uiState?: { section: string; scrollTop: number; state?: unknown }
 }
 
 export interface SettingsPageHandle {
@@ -140,8 +141,9 @@ export function createSettingsPage(
   let pendingSection: { section: string; entry?: string } | undefined
   // 会话内恢复：webview 最近上报的 UI 态（settings.uiState）。存活于扩展
   // 宿主内存（会话级，非 workspaceState——跨会话不恢复）；面板关闭不清除，
-  // 重开/隐藏重载的 settings.get 握手时按它补发恢复定位
-  let lastUiState: { section: string; scrollTop: number } | undefined
+  // 重开/隐藏重载的 settings.get 握手时按它补发恢复定位。state（PR #346）
+  // 为分页内输入态透传载荷（宿主不解释内容，原样记忆与回放）
+  let lastUiState: { section: string; scrollTop: number; state?: unknown } | undefined
 
   /** 设置页 webview 消息处理（onDidReceiveMessage 与测试注入共用入口） */
   const handleMessage = (message: unknown): void => {
@@ -188,13 +190,16 @@ export function createSettingsPage(
             ...(pending.entry !== undefined ? { entry: pending.entry } : {}),
           })
         } else if (lastUiState) {
-          // 会话内恢复：无显式定位请求时按 webview 上报的记忆恢复分页与
-          // 滚动（面板关闭重开与隐藏重载共用 settings.get 握手时机，每次
-          // 握手都补发——同值幂等；显式 openWithSection 优先于恢复）
+          // 会话内恢复：无显式定位请求时按 webview 上报的记忆恢复分页、
+          // 滚动与分页内输入态（面板关闭重开与隐藏重载共用 settings.get
+          // 握手时机，每次握手都补发——同值幂等；显式 openWithSection
+          // 优先于恢复）。state 透传不解释（webview 分页 restoreState 自查
+          // 形态，不符整条忽略）
           void current?.webview.postMessage({
             kind: 'settings.focusSection',
             section: lastUiState.section,
             scroll: lastUiState.scrollTop,
+            ...(lastUiState.state !== undefined ? { state: lastUiState.state } : {}),
           })
         }
         // #96 R1 ready 即校准（设置页路径）：settings.get 是设置页的 ready
@@ -306,9 +311,18 @@ export function createSettingsPage(
         return
       case 'settings.uiState':
         // 会话内恢复上报：仅面板存活期间的上报才记忆（disposeSub 已清
-        // panel，旧面板迟到上报天然拦住）；空 section（尚无激活分页）忽略
+        // panel，旧面板迟到上报天然拦住）；空 section（尚无激活分页）忽略。
+        // state 载荷（PR #346）合并规则：消息带 state 即覆盖；同分页的
+        // 无 state 上报（滚动路径省载荷）保留既有记忆；跨分页上报不带
+        // state = 目标分页无输入态，记忆随之清除
         if (panel && message.section) {
-          lastUiState = { section: message.section, scrollTop: message.scrollTop }
+          const prev = lastUiState?.section === message.section ? lastUiState : undefined
+          lastUiState = {
+            section: message.section,
+            scrollTop: message.scrollTop,
+            ...(message.state !== undefined ? { state: message.state }
+              : prev?.state !== undefined ? { state: prev.state } : {}),
+          }
         }
         return
       case 'settings.set': {

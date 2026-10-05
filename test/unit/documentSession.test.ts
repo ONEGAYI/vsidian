@@ -4,8 +4,33 @@
 // 权威文档通过 HostDocumentPort 注入（vscode 层实现），此处用假文档驱动。
 import { describe, it, expect } from 'vitest'
 import { DocumentSession, type HostDocumentPort, type PanelPort, type SessionNotice } from '../../src/host/documentSession'
+import type { RefReadOutcome } from '../../src/host/hoverDocAccess'
 import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
+
+/** #333 类型化读取端口的成功桩（生产 readRefContentTarget 的出站形态：
+ *  markdown kind 标记载荷） */
+function mdReadOutcome(
+  fsPath: string,
+  relPath: string,
+  text: string,
+  version = 1,
+  range?: { start: number; end: number },
+  selector: { kind: 'full' } | { kind: 'heading'; anchor: string } | { kind: 'block'; anchor: string } = { kind: 'full' },
+): RefReadOutcome {
+  return {
+    ok: true,
+    fsPath,
+    relPath,
+    content: {
+      kind: 'markdown',
+      version,
+      lfText: text,
+      range: range ?? { start: 0, end: text.length },
+      selector,
+    },
+  }
+}
 
 function applyToText(text: string, changes: SerChange[]): string {
   const sorted = [...changes].sort((a, b) => a.offset - b.offset)
@@ -246,8 +271,7 @@ describe('#244 宿主直接父来源与当前路径', () => {
         reads.push({ target: payload.target, source: payload.verifiedSource?.fsPath })
         const fsPath = payload.target === 'B' ? bPath : payload.target === 'A' ? aPath : 'D:\\notes\\c.md'
         const text = payload.target === 'B' ? b.text : '# target'
-        report({ ok: true, fsPath, relPath: `${payload.target}.md`, version: 1,
-          lfText: text, range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+        report(mdReadOutcome(fsPath, `${payload.target}.md`, text))
       },
     })
     await session.handleWebviewMessage({ kind: 'ready' }, id)
@@ -291,8 +315,7 @@ describe('#244 宿主直接父来源与当前路径', () => {
         const fsPath = payload.target === 'C' ? source.replace('B.md', 'C.md')
           : `D:\\notes\\${payload.target.replaceAll('/', '\\')}.md`
         const text = payload.target === 'C' ? '# C' : bText
-        report({ ok: true, fsPath, relPath: `${payload.target}.md`, version: 1,
-          lfText: text, range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+        report(mdReadOutcome(fsPath, `${payload.target}.md`, text))
       },
     })
     await session.handleWebviewMessage({ kind: 'ready' }, id)
@@ -327,9 +350,9 @@ describe('#244 宿主直接父来源与当前路径', () => {
       readHoverSource: async () => b,
       readHoverTarget: (payload, report) => {
         const text = payload.target === 'B' ? b.text : '# leaf'
-        report({ ok: true, fsPath: payload.target === 'B' ? bPath : `D:\\notes\\${payload.target}.md`,
-          relPath: `${payload.target}.md`, version: payload.target === 'B' ? b.version : 1,
-          lfText: text, range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+        report(mdReadOutcome(
+          payload.target === 'B' ? bPath : `D:\\notes\\${payload.target}.md`,
+          `${payload.target}.md`, text, payload.target === 'B' ? b.version : 1))
       },
     })
     await session.handleWebviewMessage({ kind: 'ready' }, id)
@@ -367,8 +390,7 @@ describe('#244 宿主直接父来源与当前路径', () => {
     const id = session.attachPanel({
       send: (m) => out.push(m),
       readHoverTarget: (_payload, report) => {
-        complete.push(() => report({ ok: true, fsPath: 'D:\\notes\\b.md', relPath: 'b.md',
-          version: 1, lfText: '# B', range: { start: 0, end: 3 }, scope: { kind: 'full' } }))
+        complete.push(() => report(mdReadOutcome('D:\\notes\\b.md', 'b.md', '# B')))
       },
     })
     await session.handleWebviewMessage({ kind: 'ready' }, id)
@@ -399,8 +421,7 @@ describe('#244 宿主直接父来源与当前路径', () => {
       send: (m) => out.push(m),
       readHoverTarget: (payload, report) => {
         const fsPath = `D:\\notes\\${payload.target}.md`
-        const done = () => report({ ok: true, fsPath, relPath: `${payload.target}.md`,
-          version: 1, lfText: '# B', range: { start: 0, end: 3 }, scope: { kind: 'full' } })
+        const done = () => report(mdReadOutcome(fsPath, `${payload.target}.md`, '# B'))
         if (!first.has(payload.target)) {
           first.add(payload.target)
           done()
@@ -440,9 +461,8 @@ describe('#244 宿主直接父来源与当前路径', () => {
     const id = session.attachPanel({
       send: (m) => out.push(m),
       readHoverTarget: (payload, report) => {
-        complete.push(() => report({ ok: true, fsPath: `D:\\notes\\${payload.target}.md`,
-          relPath: `${payload.target}.md`, version: 1, lfText: '# target',
-          range: { start: 0, end: 8 }, scope: { kind: 'full' } }))
+        complete.push(() => report(mdReadOutcome(
+          `D:\\notes\\${payload.target}.md`, `${payload.target}.md`, '# target')))
       },
     })
     await session.handleWebviewMessage({ kind: 'ready' }, id)
@@ -460,6 +480,43 @@ describe('#244 宿主直接父来源与当前路径', () => {
     complete[1]!()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(out.find((m) => m.kind === 'hover.result' && m.reqId === 2)).toMatchObject({ ok: true })
+  })
+
+  it('#342 web 成功出站就地释放 occurrence 预留（重复外链悬停不耗尽面板实例预算）', async () => {
+    // review 修复：web 成功分支出站后提前 return，曾跳过租约/attachContent/
+    // unwatch 等全部释放路径——每次外链悬停滞留一个面板实例预留，64 次
+    // 开-关后新悬停一律 budget 拒绝。出站即 release 后，独立 occurrence
+    // 反复悬停不占用面板实例预算
+    const session = new DocumentSession(new FakeDoc('![[B]]'),
+      { docUri: DOC_URI, rootFsPath: 'D:\\notes\\a.md', isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        report({
+          ok: true,
+          fsPath: '',
+          relPath: '',
+          content: {
+            kind: 'web',
+            url: 'https://example.com/a',
+            domain: 'example.com',
+            title: 'A',
+            description: 'd',
+          },
+        })
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    // 面板实例上限 64：80 次独立 occurrence 全部成功 = 无预留滞留
+    //（修复前第 65 次起 budget 拒绝）
+    for (let i = 1; i <= 80; i++) {
+      await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+        reqId: i, instanceId: `hover-${i}`, occurrenceId: `web-occ-${i}`,
+        sourceStart: 0, sourceEnd: 6, target: 'https://example.com/a' }, id)
+      expect(out.at(-1), `第 ${i} 次外链悬停不应被预算拒绝`)
+        .toMatchObject({ kind: 'hover.result', ok: true, contentKind: 'web' })
+    }
   })
 })
 
@@ -2077,15 +2134,7 @@ describe('#220 来源资源：hover.result 来源记录与守卫路由', () => {
     const id = s.session.attachPanel({
       send: (m) => out.push(m),
       readHoverTarget: (_payload, report) => {
-        report({
-          ok: true,
-          fsPath: B_PATH,
-          relPath: 'sub/b.md',
-          version: 1,
-          lfText: '# B\n',
-          range: { start: 0, end: 5 },
-          scope: { kind: 'full' },
-        })
+        report(mdReadOutcome(B_PATH, 'sub/b.md', '# B\n', 1, { start: 0, end: 5 }))
       },
       resolveImage: async (src, sourceDocUri) => {
         resolveCalls.push({ src, sourceDocUri })
@@ -2163,10 +2212,7 @@ describe('#220 来源资源：hover.result 来源记录与守卫路由', () => {
     const id = s.session.attachPanel({
       send: (m) => out.push(m),
       readHoverTarget: (_payload, report) => {
-        report({
-          ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1,
-          lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' },
-        })
+        report(mdReadOutcome(B_PATH, 'sub/b.md', '# B\n', 1, { start: 0, end: 5 }))
       },
       resolveImage: async () => {
         throw new Error('boom')
@@ -2253,10 +2299,7 @@ describe('#220 来源资源：hover.result 来源记录与守卫路由', () => {
     const id = s.session.attachPanel({
       send: (m) => out.push(m),
       readHoverTarget: (_payload, report) => {
-        report({
-          ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1,
-          lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' },
-        })
+        report(mdReadOutcome(B_PATH, 'sub/b.md', '# B\n', 1, { start: 0, end: 5 }))
       },
       exportImage: (payload, report) => {
         exportCalls.push({ src: payload.src, sourceDocUri: payload.sourceDocUri })
@@ -2304,8 +2347,8 @@ describe('#222 来源集合：嵌入与悬停多目标同面板在场', () => {
         serve += 1
         report(
           serve === 1
-            ? { ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1, lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' } }
-            : { ok: true, fsPath: C_PATH, relPath: 'sub/c.md', version: 1, lfText: '# C\n', range: { start: 0, end: 5 }, scope: { kind: 'full' } },
+            ? mdReadOutcome(B_PATH, 'sub/b.md', '# B\n', 1, { start: 0, end: 5 })
+            : mdReadOutcome(C_PATH, 'sub/c.md', '# C\n', 1, { start: 0, end: 5 }),
         )
       },
       resolveImage: async (src, sourceDocUri) => {
@@ -2353,15 +2396,7 @@ describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
       readHoverTarget: (payload, report) => {
         const target = payload.target
         served.push(target)
-        report({
-          ok: true,
-          fsPath: `D:\\notes\\${target}.md`,
-          relPath: `${target}.md`,
-          version: 1,
-          lfText: '# t\n',
-          range: { start: 0, end: 4 },
-          scope: { kind: 'full' },
-        })
+        report(mdReadOutcome(`D:\\notes\\${target}.md`, `${target}.md`, '# t\n', 1, { start: 0, end: 4 }))
       },
     })
     return { s, id, served, results }
@@ -2516,8 +2551,7 @@ describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
     const id = s.session.attachPanel({
       send: (msg) => { sent.push(msg) },
       readHoverTarget: (_payload, report) => {
-        deliver = () => report({ ok: true, fsPath: 'D:\\notes\\late.md', relPath: 'late.md',
-          version: 1, lfText: '# late', range: { start: 0, end: 6 }, scope: { kind: 'full' } })
+        deliver = () => report(mdReadOutcome('D:\\notes\\late.md', 'late.md', '# late'))
       },
     })
     await ready10(s, id)
@@ -2712,13 +2746,12 @@ describe('P2-03 全文可达：循环身份、刷新宽容与全文计费（#280
           verifiedSource: payload.verifiedSource?.fsPath,
         })
         if (payload.target === 'B#章节') {
-          report({ ok: true, fsPath: bPath, relPath: 'b.md', version: 1, lfText: bText,
-            range: { start: bText.indexOf('正文'), end: bText.length }, scope: { kind: 'heading', anchor: '章节' } })
+          report(mdReadOutcome(bPath, 'b.md', bText, 1,
+            { start: bText.indexOf('正文'), end: bText.length }, { kind: 'heading', anchor: '章节' }))
           return
         }
         if (payload.target === 'A#某标题' || payload.target === 'A') {
-          report({ ok: true, fsPath: aPath, relPath: 'a.md', version: 1, lfText: doc.getText(),
-            range: { start: 0, end: doc.getText().length }, scope: { kind: 'full' } })
+          report(mdReadOutcome(aPath, 'a.md', doc.getText()))
           return
         }
         report({ ok: false, reason: 'not-found' })
@@ -2803,11 +2836,10 @@ describe('P2-03 全文可达：循环身份、刷新宽容与全文计费（#280
       readHoverTarget: (payload, report) => {
         if (payload.target === 'B#章节') {
           // 锚定定位区间只覆盖「正文」段（子引用位于其外）
-          report({ ok: true, fsPath: bPath, relPath: 'b.md', version: 1, lfText: cText,
-            range: { start: cText.indexOf('正文'), end: cText.length }, scope: { kind: 'heading', anchor: '章节' } })
+          report(mdReadOutcome(bPath, 'b.md', cText, 1,
+            { start: cText.indexOf('正文'), end: cText.length }, { kind: 'heading', anchor: '章节' }))
         } else if (payload.target === 'D') {
-          report({ ok: true, fsPath: 'D:\\notes\\d.md', relPath: 'd.md', version: 1, lfText: 'D 全文',
-            range: { start: 0, end: 5 }, scope: { kind: 'full' } })
+          report(mdReadOutcome('D:\\notes\\d.md', 'd.md', 'D 全文', 1, { start: 0, end: 5 }))
         } else {
           report({ ok: false, reason: 'not-found' })
         }
@@ -2851,8 +2883,8 @@ describe('P2-03 全文可达：循环身份、刷新宽容与全文计费（#280
         reads2.push({ target: payload.target, anchorOptional: payload.anchorOptional })
         if (payload.target === 'T#标题') {
           if (anchorHit) {
-            report({ ok: true, fsPath: 'D:\\notes\\t.md', relPath: 't.md', version: 2,
-              lfText: headingText, range: { start: 0, end: headingText.length }, scope: { kind: 'heading', anchor: '标题' } })
+            report(mdReadOutcome('D:\\notes\\t.md', 't.md', headingText, 2, undefined,
+              { kind: 'heading', anchor: '标题' }))
           } else {
             report({ ok: false, reason: 'anchor-missing', anchor: '标题' })
           }
@@ -2891,10 +2923,8 @@ describe('P2-03 全文可达：循环身份、刷新宽容与全文计费（#280
     const h = setupHost({
       getEmbedDepthLimit: () => 3,
       readHoverTarget: (_payload, report) => {
-        report({ ok: true, fsPath: 'D:\\notes\\big.md', relPath: 'big.md', version: 1,
-          lfText: bigText,
-          range: { start: bigText.indexOf('## 章节'), end: bigText.length },
-          scope: { kind: 'heading', anchor: '章节' } })
+        report(mdReadOutcome('D:\\notes\\big.md', 'big.md', bigText, 1,
+          { start: bigText.indexOf('## 章节'), end: bigText.length }, { kind: 'heading', anchor: '章节' }))
       },
     })
     await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)

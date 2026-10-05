@@ -391,3 +391,97 @@ describe('P2-03 全文可达与锚点初始定位', () => {
     locate.mockRestore()
   })
 })
+
+// #333（P3-01）挂载代次与类型化装载入口：RefContentInstance 为 occurrence
+// 挂载代次的发放者（每次 mount 递增；释放后的挂载拒绝渲染——「过期挂载
+// 」的运行期拒绝点）；refLoadedContentOfResult 为 webview 侧类型分派入口
+// （markdown 通道转换、kind 与载荷不匹配返回 null）；创建/卸载循环后
+// 活跃块计数归零（既有实例/字节预算不被类型化路径绕过）。
+describe('#333 挂载代次与类型化装载入口', () => {
+  it('同实例多次挂载各得递增挂载代次；释放后的挂载拒绝渲染（过期挂载）', () => {
+    const instance = new RefContentInstance({
+      panelDocUri: 'file:///a.md', sourceDocUri: 'file:///a.md',
+      range: { start: 0, end: 6 }, occurrence: 'gen-occ',
+    })
+    const surface = () => ({
+      contentEl: document.createElement('div'),
+      scrollEl: document.createElement('div'),
+      strategy: 'full' as const,
+      session: () => ({ sessionId: 'panel', docUri: 'file:///a.md' }),
+      send: () => {},
+      codeHighlight: () => true,
+    })
+    const m1 = instance.mount(surface())
+    const m2 = instance.mount(surface())
+    expect(m1.generation).toBeGreaterThan(0)
+    expect(m2.generation).toBeGreaterThan(m1.generation)
+    m1.dispose()
+    expect(m1.disposed).toBe(true)
+    expect(m1.render(loaded), '已释放挂载拒绝渲染').toBe(false)
+    expect(m2.disposed, '同实例其余挂载不受影响').toBe(false)
+    m2.dispose()
+    instance.dispose()
+  })
+
+  it('refLoadedContentOfResult：markdown（显式与缺省）转换为装载内容；未登记 kind 返回 null', async () => {
+    const { refLoadedContentOfResult } = await import('../../src/webview/refContentInstance')
+    const message = (extra?: Record<string, unknown>) => ({
+      kind: 'hover.result',
+      reqId: 1,
+      instanceId: 'hover-1',
+      ok: true,
+      target: { fsPath: 'D:/notes/b.md', relPath: 'b.md' },
+      version: 2,
+      text: '# B\n\n正文\n',
+      range: { start: 0, end: 10 },
+      scope: { kind: 'full' as const },
+      ...extra,
+    })
+    const explicit = refLoadedContentOfResult(message({ contentKind: 'markdown' }) as Parameters<typeof refLoadedContentOfResult>[0])
+    expect(explicit).toMatchObject({
+      fsPath: 'D:/notes/b.md', relPath: 'b.md', version: 2, text: '# B\n\n正文\n', scope: 'full',
+    })
+    const legacy = refLoadedContentOfResult(message() as Parameters<typeof refLoadedContentOfResult>[0])
+    expect(legacy, '缺省 contentKind 兼容识别为 markdown').not.toBeNull()
+    for (const kind of ['pdf', 'text', 'web']) {
+      expect(refLoadedContentOfResult(message({ contentKind: kind }) as Parameters<typeof refLoadedContentOfResult>[0]), `kind=${kind} 应返回 null`).toBeNull()
+    }
+  })
+
+  it('#336 refLoadedContentOfResult：image 载荷转换为图片装载形态（身份 + 来源相对图源 + 版本）', async () => {
+    const { refLoadedContentOfResult } = await import('../../src/webview/refContentInstance')
+    const loaded = refLoadedContentOfResult({
+      kind: 'hover.result',
+      reqId: 1,
+      instanceId: 'hover-1',
+      ok: true,
+      contentKind: 'image',
+      target: { fsPath: 'D:/notes/assets/图.png', relPath: 'assets/图.png' },
+      version: 1760000000123,
+      imageSrc: 'assets/图.png',
+      text: '',
+      range: { start: 0, end: 0 },
+      scope: { kind: 'plain' },
+    } as Parameters<typeof refLoadedContentOfResult>[0])
+    expect(loaded).toMatchObject({
+      kind: 'image',
+      fsPath: 'D:/notes/assets/图.png',
+      relPath: 'assets/图.png',
+      src: 'assets/图.png',
+      version: 1760000000123,
+    })
+  })
+
+  it('创建/卸载循环后活跃块计数归零（类型化路径不绕过实例预算）', async () => {
+    const { getRefContentLifecycleStats } = await import('../../src/webview/refContentInstance')
+    const before = getRefContentLifecycleStats()
+    for (let i = 0; i < 5; i++) {
+      const f = fixture(`cyc-${i}`, i * 10, [])
+      expect(f.mount.render(loaded)).toBe(true)
+      f.instance.dispose()
+    }
+    const after = getRefContentLifecycleStats()
+    expect(after.activeBlocks).toBe(before.activeBlocks)
+    expect(after.releases - before.releases).toBe(after.mounts - before.mounts)
+  })
+})

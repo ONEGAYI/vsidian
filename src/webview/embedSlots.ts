@@ -27,6 +27,7 @@
 import { imageAltRangesInLine, normalizeReferenceLabel, scanEmbedsInLine } from '../shared/wikilink'
 import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
 import { chainAt, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
+import { refEmbedTargetIsImage } from '../shared/refContent'
 import { READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES, createMarkdownRenderer } from './readingMarkdown'
 import type { Tree } from '@lezer/common'
@@ -147,6 +148,12 @@ export function blockEmbedOccurrences(
           continue
         }
         if (altRanges.some((r) => hit.from >= r.from && hit.from < r.to)) {
+          continue
+        }
+        // #336（P3-04）图片嵌入不产占位 span（inline 规则产出 <img> 走图片
+        // 管线）——occurrence 扫描同步跳过，否则 pairEmbedSlots 两侧数量不
+        // 等触发整块降级（同段 markdown 嵌入卡片连带丢失）
+        if (refEmbedTargetIsImage(hit.inner)) {
           continue
         }
         out.push({ inner: hit.inner, start: base + hit.from, end: base + hit.to })

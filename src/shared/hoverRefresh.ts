@@ -48,6 +48,17 @@ export function shouldApplyHoverVersion(applied: number | null, incoming: number
 }
 
 /**
+ * hover 域目标路径归一（review-loops 三期修复）：Windows 宿主折叠大小写
+ * 并统一正斜杠，其他平台恒等。编辑器事件（event.document.uri.fsPath）与
+ * 读取归正（statFileRealPath 的磁盘真值）可能仅大小写/斜杠方向不同——
+ * coordinator 的登记/查询键（keyOf）与 documentSession 的缓存目标查询
+ * 兜底共用本函数保持同一口径。幂等：对已归一键再跑一次结果不变。
+ */
+export function hoverWatchKeyOf(fsPath: string, isWindowsHost: boolean): string {
+  return isWindowsHost ? fsPath.replaceAll('\\', '/').toLowerCase() : fsPath
+}
+
+/**
  * 订阅注册表（#224「相同目标合并读取、各实例订阅独立释放」的数据面）：
  * fsPath → 会话 → 实例集合的三级表。目标级合并（has/targets 以目标为
  * 单位），实例级释放（unwatch 单实例，目标内最后一个实例退场才撤目标）。
@@ -193,4 +204,42 @@ export class HoverWatchRegistry {
     }
   }
 
+}
+
+/**
+ * #344（P3-12 收口·RB-1）：text per-file watcher 的 LRU 淘汰选取（纯
+ * 函数——provider 的 ensureTextWatch 在表超限时调用）。背景：text 事件源
+ * per-file watcher 表（provider 域，上限 64）与订阅注册表（目标上限
+ * watchTargetLimit=128）不对称——盲 LRU 会把**仍有活跃订阅**的目标的
+ * watcher 淘汰掉，订阅还在但磁盘事件源断流（推送承诺落空）。
+ *
+ * 策略：按 LRU 序（Map 插入/触达序，旧在前）**跳过仍有活跃订阅的条目**，
+ * 只淘汰无订阅的陈旧条目（watcher 生命周期独立于订阅是修 1 的既有语义
+ * ——退场目标的磁盘事件继续广播缓存失效，陈旧条目是缓存失效的余量，
+ * 不是泄漏）；全部在 watch 时返回不足额（不强拆活跃事件源——此时表
+ * 大小由订阅注册表上限另有界，不无界增长）。
+ *
+ * isWatched 入参传**归一后的键**是安全的：协调器 isWatched 内部再做
+ * 键归一（Windows 折叠大小写 + 正斜杠），对已归一键幂等。
+ */
+export function selectTextWatchEvictions(
+  keysInLruOrder: readonly string[],
+  isWatched: (key: string) => boolean,
+  limit: number,
+): string[] {
+  if (keysInLruOrder.length <= limit) {
+    return []
+  }
+  const excess = keysInLruOrder.length - limit
+  const victims: string[] = []
+  for (const key of keysInLruOrder) {
+    if (victims.length >= excess) {
+      break
+    }
+    if (isWatched(key)) {
+      continue // 仍有活跃订阅：事件源不得断流
+    }
+    victims.push(key)
+  }
+  return victims
 }

@@ -23,10 +23,12 @@ export const IMAGE_WAKE_MIN_GAP_MS = 5_000
 /**
  * 图片文件扩展清单（小写；watcher glob 段与事件过滤同源）。与粘贴落盘
  * 的 mime 映射（imagePastePlan）口径对齐：覆盖常见位图/矢量格式；其余
- * 扩展的文件不经图片管线呈现，不监听。
+ * 扩展的文件不经图片管线呈现，不监听。#336（P3-04）起纳入 apng——动图
+ * PNG 以独立扩展名存在时同走图片管线（解码由 Chromium 的 PNG 路径承担，
+ * 格式下界实测矩阵见 test/browser/imageEmbedParity.mjs）。
  */
 export const IMAGE_WATCH_GLOB_SEGMENTS: readonly string[] = [
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif',
+  'png', 'apng', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif',
 ]
 
 /** 路径是否图片类文件（按扩展名；大小写不敏感） */

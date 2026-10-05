@@ -2,6 +2,7 @@
 // runTest.mjs（开发模式加载）与 runInstalled.mjs（VSIX 安装态回归）共用，
 // 两条路径跑同一套 fixture，保证安装态与开发态断言的是同一组文档。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { buildMultiPageColorPdf, buildTextLinkPdf, buildThreePageColorPdf } from '../pdfSample.mjs'
 import path from 'node:path'
 
 const LF_DOC = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n- 列表项一\n- 列表项二\n'
@@ -847,7 +848,7 @@ const HR_DOC = [
  * 向目录写入全部集成测试 fixture（字节由脚本直接生成，不经 git 检出，
  * 避免 autocrlf 干扰断言）。返回 { largeDocLines } 供启动器注入环境变量。
  */
-export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
+export async function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
   writeFileSync(path.join(wsDir, 'lf.md'), LF_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find.md'), FIND_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find-hidden-source.md'),
@@ -1078,6 +1079,97 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
+  // #337 悬停 PDF：三页色样本（红/绿/蓝——页身份供「指定页图像与样本
+  // 正确对应」的像素断言；脚本生成不引入二进制样本入库）与悬停文档
+  // （双链全文/指定页/非法锚点 + 普通链接 fragment 不解析）
+  writeFileSync(path.join(wsDir, '资料.pdf'), await buildThreePageColorPdf())
+  writeFileSync(path.join(wsDir, '悬停 PDF.md'), [
+    '# 悬停 PDF 样例',
+    '',
+    '全文 [[资料.pdf]]、指定页 [[资料.pdf#page=2]]。',
+    '',
+    '非法 [[资料.pdf#page=0]] 与未知键 [[资料.pdf#zoom=2]]。',
+    '',
+    '普通链接 [本地 PDF](资料.pdf) 与 [fragment](资料.pdf#page=3)。',
+    '',
+    // #339 文本+链接样本双链（第 5 枚 wikilink——文本层/链接层观测）
+    '文本链接 [[文本链接.pdf]]。',
+    '',
+  ].join('\n'), 'utf8')
+  // #339（P3-07）文本+链接样本：真实文本（TextLayer 装载断言的 pdfjs 侧
+  // 前提——宿主机有 CJK 字体时附中文行）与六枚链接注解矩阵
+  writeFileSync(path.join(wsDir, '文本链接.pdf'), (await buildTextLinkPdf()).bytes)
+  // #338（P3-06）嵌入 PDF：容器矩阵样例（独占行/混排/引用/表格格内/递归
+  // 孙卡）与多页长样本（12 页红绿蓝循环——全文滚动与窗口回收断言）
+  writeFileSync(path.join(wsDir, '长文.pdf'), await buildMultiPageColorPdf(12))
+  writeFileSync(path.join(wsDir, '嵌入 PDF.md'), [
+    '# 嵌入 PDF 样例',
+    '',
+    '![[长文.pdf]]',
+    '',
+    '混排 ![[长文.pdf#page=2]] 保留源文。',
+    '',
+    '> 引用内 ![[长文.pdf#page=3]]',
+    '',
+    '| 列一 | 列二 |',
+    '| --- | --- |',
+    '| ![[长文.pdf]] | 普通格 |',
+    '',
+    '递归 ![[嵌入 PDF 子文档]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入 PDF 子文档.md'), [
+    '# 嵌入 PDF 子文档',
+    '',
+    '内层 ![[长文.pdf]]',
+    '',
+  ].join('\n'), 'utf8')
+  // B-1（review-loops 波次一）text 引用目标失效推送：text 嵌入/悬停目标
+  //（.txt 嵌入卡断言未保存编辑刷新；.json 悬停断言磁盘替换失效推送）
+  // 与 PDF 悬停替换样本（5 页 → 3 页，页数变化即重载证据）
+  writeFileSync(path.join(wsDir, '笔记.txt'), [
+    '第一行：文本目标正文。',
+    '第二行：未保存编辑的追加锚点。',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '配置.json'), `${JSON.stringify({ env: 'itest', revision: 1 }, null, 2)}\n`, 'utf8')
+  writeFileSync(path.join(wsDir, '替换样本.pdf'), await buildMultiPageColorPdf(5))
+  writeFileSync(path.join(wsDir, '悬停文本.md'), [
+    '# 悬停文本样例',
+    '',
+    '![[笔记.txt]]',
+    '',
+    '悬停 [[配置.json]] 与 [[替换样本.pdf]]。',
+    '',
+  ].join('\n'), 'utf8')
+  // #344（P3-12 收口）文本绘制层与图片双链同源样本：代码样本.ts 首行
+  // const（Default Dark Modern 语法层 #569cd6 = rgb(86,156,214)——安装态
+  // 宿主内置扩展在场时的计算色锚点）；同源图.png 供 ![[图]] 与 ![](图)
+  // 双语法同源对比（同一文件、同一资源管线）
+  writeFileSync(path.join(wsDir, '代码样本.ts'), [
+    'const 收口样本 = 1;',
+    '// 注释行：第二着色锚点（#6a9955）',
+    'export const label = "text";',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '文本外观.md'), [
+    '# 文本外观样例',
+    '',
+    '![[代码样本.ts]]',
+    '',
+    '悬停 [[代码样本.ts]] 观察计算色。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '同源图.png'), Buffer.from(REFRESH_GREEN_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, '图片双链.md'), [
+    '# 图片双链同源样例',
+    '',
+    '![[同源图.png]]',
+    '',
+    '![普链同源](同源图.png)',
+    '',
+    '悬停 [[同源图.png]] 观察图片目标浮层。',
+    '',
+  ].join('\n'), 'utf8')
   // #222 嵌入：父文档（独占行全文/章节嵌入 + 混排 + 缺失目标）与目标文档
   // （frontmatter + 任务 + 章节结构 + 二层嵌入——一层展开场景）；二层目标
   // 文件名含空格（嵌入 inner 字面路径解析）。嵌入改写文档独立成组（rename

@@ -76,9 +76,25 @@ describe('编辑器 CSP 装配（#130 HTTPS 样式导入与联网字体）', () 
     expect(directives.get('connect-src')).toEqual(['https://vscode-webview.test-origin'])
   })
 
+  it("#337 worker-src：精确等值 ['blob:']——PDF.js worker 的 Blob URL 装配（移除即红：#334 探针实证生产 CSP 原样时 new Worker(blob:) 抛 SecurityError；收紧即红：不放行其他源)", () => {
+    // worker 走「esbuild 单文件产物 → fetch 文本 → Blob → objectURL」装配
+    //（官方 webview worker 指南允许 data:/blob:）；worker-src 缺省回落
+    // script-src，nonce 门控不放行 blob:——故须独立指令。只放行 blob:，
+    // 不放行 data:（探针未用）与任何 http(s): 源
+    expect(directives.get('worker-src')).toEqual(['blob:'])
+  })
+
+  it('frame-src 仅放行 https:（#343 原网页 iframe——预检退回 HTTP 后生产恒挂 https 源；不放行 http:/cspSource 帧导航）', () => {
+    // #343（P3-11）外链 page 形态：跨源沙箱 iframe 装载远程站点内容。
+    // 只放行 https: 源表达式——HTTP 最终地址在预检层已退回卡片（安全
+    // 上下文混合内容），CSP 不为测试便利放行明文 http:；iframe 的子
+    // 资源装载由目标站点自身响应的 CSP 管辖（父文档 CSP 不作用于子文档）
+    expect(directives.get('frame-src')).toEqual(['https:'])
+  })
+
   it('指令集穷举（新增指令须随测试更新语义说明）', () => {
     expect([...directives.keys()].sort()).toEqual(
-      ['connect-src', 'default-src', 'font-src', 'img-src', 'script-src', 'style-src'],
+      ['connect-src', 'default-src', 'font-src', 'frame-src', 'img-src', 'script-src', 'style-src', 'worker-src'],
     )
   })
 

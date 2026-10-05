@@ -410,3 +410,31 @@ describe('splitReadingBlocks：嵌入块（#222 独占行挂载适配）', () =>
     expect(embed.html).toContain('![[别名]]')
   })
 })
+
+// #336（P3-04）图片嵌入块形态：独占行 `![[图.png]]` 不升级为嵌入卡片块
+// （不新增文件名引用卡片壳），按普通段落走 markdown-it 渲染（inline 规则
+// 产 img——与 `![](图.png)` 独行段落同块形态）；含图片嵌入的混排多行段
+// 落整体保持段落（markdown 嵌入行经 #246 占位提升路径挂卡，不因同段图
+// 片嵌入丢卡片）。
+describe('#336 图片嵌入块形态：独行图不入嵌入块', () => {
+  it('独占行图片嵌入 → 段落块（kind=paragraph，无 embedInner——不挂卡片壳）', () => {
+    const blocks = splitReadingBlocks('![[图.png]]\n')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]!.kind).toBe('paragraph')
+    expect((blocks[0] as { embedInner?: string }).embedInner).toBeUndefined()
+    expect(blocks[0]!.html).toContain('<img')
+  })
+
+  it('混排多行段落（markdown 嵌入 + 图片嵌入）→ 整段保持段落（占位提升路径挂卡）', () => {
+    const blocks = splitReadingBlocks('![[目标笔记]]\n![[图.png]]\n')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]!.kind).toBe('paragraph')
+    expect((blocks[0] as { embedInner?: string }).embedInner).toBeUndefined()
+    expect(blocks[0]!.html).toContain('<img')
+  })
+
+  it('纯 markdown 多行嵌入段不变（仍逐行升级嵌入块）', () => {
+    const blocks = splitReadingBlocks('![[A]]\n![[B]]\n')
+    expect(blocks.map((b) => b.kind)).toEqual(['embed', 'embed'])
+  })
+})

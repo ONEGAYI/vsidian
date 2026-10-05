@@ -10,6 +10,7 @@ import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
 import { sanitizeFindOptions, type FindOptions } from './findOptions'
 import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
+import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -527,10 +528,19 @@ export type HostToWebview =
    * 条目归属路由到页内页签（片段目录/文件 → CSS 片段；overview → 样式参考；
    * 契约条目 → 详细查询）。缺省时目标分页按自身默认形态呈现（向后兼容）。
    * scroll（可选，会话内恢复）：定位后应用的主区滚动位置——面板关闭/隐藏
-   * 重载后按宿主记忆的 UI 态恢复分页与滚动；缺省 = 顶部（既有定位语义），
-   * 与 entry 不同时使用（恢复消息只带 scroll）
+   *  重载后按宿主记忆的 UI 态恢复分页与滚动；缺省 = 顶部（既有定位语义），
+   *  与 entry 不同时使用（恢复消息只带 scroll）。state（可选，PR #346）：
+   *  随恢复回放的分页内输入态载荷——webview 分页 captureState 的产物，
+   *  宿主不解释内容、原样记忆与回放；与 entry 不同时使用（显式定位语义
+   *  优先，恢复消息只带 scroll+state）
    */
-  | { kind: 'settings.focusSection'; section: string; entry?: string; scroll?: number }
+  | {
+      kind: 'settings.focusSection'
+      section: string
+      entry?: string
+      scroll?: number
+      state?: unknown
+    }
   /** 设置变更通知（#33）：任一设置项保存成功后广播到全部已打开 Vsidian
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
@@ -620,12 +630,64 @@ export type HostToWebview =
       reqId: number
       instanceId: string
       ok: true
+      /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
+       *  Target）成功时显式携带；缺省 = markdown（旧合法 Markdown 消息兼容
+       *  识别）。#336（P3-04）起 'image' 登记：图片载荷（imageSrc 在场，
+       *  Markdown 专属字段为退化形态——空文本 / 零区间 / plain 选择器）；
+       *  #337（P3-05）起 'pdf' 登记载荷形态（pdf 字段 + 空 text + pdf
+       *  选择器 scope，页码定位由 scope.page 承载）；#342（P3-10）起 'web'
+       *  登记：外链卡片载荷（web 字段在场，Markdown 专属字段为占位值——
+       *  target 空身份 / version 0 / 空文本 / 全文区间 / full 选择器，
+       *  字段形态仍须合法）；#340（P3-08）起 'text' 登记：文本载荷
+       *  （contentKind === 'text' 的成功形态必须携带 textNav，窗口正文
+       *  与导航由其承载）。四通道载荷形态均已登记——携带未知 kind 或
+       *  类型与载荷不匹配的整体拒绝。失败形态无载荷，不带本字段。类型学
+       *  单一事实源：shared/refContent */
+      contentKind?: RefContentKind
+      /** #342（P3-10）外链卡片载荷（contentKind === 'web' 时在场，与
+       *  Markdown 载荷互斥）：宿主受限抓取提取的元信息——url 为最终归一
+       *  地址（重定向后）、domain/title/description 为展示面（title/
+       *  description 缺席为空串，webview 以域名兜底显示）。显示内容仅
+       *  文字与显式安全链接，不携带也不触发任何子资源。
+       *  #343（P3-11）：frame 为 page 形态抓取附带的 iframe 嵌入预检
+       *  （card 形态缺席）——embeddable=false 携带真实退回原因（denied =
+       *  站点以 X-Frame-Options/frame-ancestors 明确拒绝；http = 最终
+       *  地址非 https 无法安全内嵌），消费端不挂 iframe 就地退回卡片 */
+      web?: {
+        url: string
+        domain: string
+        title: string
+        description: string
+        frame?: { embeddable: boolean; reason?: 'denied' | 'http' }
+      }
       target: HoverPreviewTargetIdentity
       version: number
       text: string
-      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间） */
+      /** #336（P3-04）image 载荷（contentKind === 'image' 必带）：来源文档
+       *  相对图源——webview 经 image.request（面板文档身份）解析装载，宿主
+       *  不经本消息回传字节或资源 URI（图片资源通道单一）；markdown 形态
+       *  不得携带（校验器按类型与载荷匹配拒绝） */
+      imageSrc?: string
+      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间；
+       *  image 形态恒为零区间——图片无锚点定位语义；PDF 无 LF 坐标语义
+       *  （#337）：恒零区间占位（[0,0]），初始定位由 scope 的 page 字段承载；
+       *  text 通道 = locateLine 行首起的窗口正文区间（#340） */
       range: { start: number; end: number }
-      scope: HoverPreviewScope
+      /** Markdown 导航选择器（full/heading/block）；image 形态为 plain
+       *  （RefPlainNavSelector——图片无锚点定位语义）；#337 起 pdf =
+       *  RefPdfNavSelector（{kind:'pdf', page?}——双链 #page=N 解析产物，
+       *  类型与载荷匹配由校验器钉住） */
+      scope: HoverPreviewScope | RefPlainNavSelector | RefPdfNavSelector
+      /** #337（P3-05）PDF 资源载荷（contentKind === 'pdf' 时必带）：PDF 源
+       *  经 webview 资源域按需 fetch——uri 含 `?v=` 文件状态代次戳（缓存
+       *  击穿；version 字段同源），bytes 为源文件字节（逻辑预算费用）。
+       *  宿主不装载正文字节（Node 侧零 PDF 渲染代码），损坏/加密分态由
+       *  webview 装载后如实回报 */
+      pdf?: { uri: string; bytes: number }
+      /** #340（P3-08）text 通道导航载荷（contentKind === 'text' 时必带）：
+       *  窗口/落点（1-based 绝对行）、语言身份、语言级生效字体与行号开关。
+       *  行号语义见 shared/refContent 的 RefTextContent */
+      textNav?: HoverTextNavPayload
       /** #244 Host-authenticated expansion ancestry, including root A. */
       expansionPath?: string[]
       depth?: number
@@ -638,8 +700,11 @@ export type HostToWebview =
       instanceId: string
       ok: false
       reason: HoverPreviewFailReason
-      /** anchor-missing 时的锚点原文（块 id 带 ^ 前缀），供就地提示 */
+      /** anchor-missing / anchor-invalid 时的锚点原文（块 id 带 ^ 前缀），
+       *  供就地提示 */
       anchor?: string
+      /** #340 anchor-invalid 的细分原因（错误分态文案参数） */
+      anchorDetail?: HoverAnchorInvalidDetail
     }
   /** 悬停目标失效推送（#224 引用视图同步）：宿主观测到被订阅目标（hover.watch
    *  登记）的内容或磁盘状态变化后，向订阅该目标的全部面板推送——webview
@@ -658,6 +723,41 @@ export type HostToWebview =
       generation: number
     }
   | { kind: 'hover.watch.rejected'; fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string }
+  /** #340（P3-08）文本 token 分层推送（hover.tokens.request 的应答，
+   *  reqId+instanceId 双配对）：宿主外观服务计算的窗口内着色数据——
+   *  - layer 'textmate'：语法层（vscode-textmate 同版同算法），先到先染；
+   *  - layer 'semantic'：语义层（公开命令 + 主题/自定义解析），后到按
+   *    字符区间覆盖语法层（原生同构叠加）；无 provider 的语言不推送该层
+   *    （不算降级——原生同样无）。
+   *  tokens 为 5 元组增量编码（deltaLine/deltaStart/length/colorIdx/
+   *  fontStyleBits，**窗口内 0-based 行坐标、UTF-16 列**），colors 为颜色
+   *  表（#rrggbb(aa)，colorIdx 索引）。version 为计算时的目标 TextDocument
+   *  .version——与 webview 已装载正文版本不匹配即整体丢弃（迟到/过期
+   *  token 不覆盖新正文）。失败形态：stale=版本不配（webview 丢弃等重载）、
+   *  unavailable=引擎不可用（纯文本呈现）。只读消息 */
+  | {
+      kind: 'hover.tokens'
+      reqId: number
+      instanceId: string
+      ok: true
+      fsPath: string
+      version: number
+      layer: 'textmate' | 'semantic'
+      colors: string[]
+      tokens: number[]
+    }
+  | {
+      kind: 'hover.tokens'
+      reqId: number
+      instanceId: string
+      ok: false
+      reason: 'stale' | 'unavailable'
+    }
+  /** #340（P3-08）外观代次广播（主题/颜色自定义/语言字体设置/扩展清单
+   *  变化）：webview 在场文本视图据此重发 hover.tokens.request（generation
+   *  单调递增，仅观测——单面板 FIFO 保序，不做乱序丢弃）。Markdown 侧
+   *  CSS 变量自带跟随，无消费方则忽略 */
+  | { kind: 'appearance.changed'; generation: number }
   /** #299 跳转目标提示解析结果（hover.target.resolve 的应答，reqId 配对）：
    *  成功携带所属根内相对路径（`/` 分隔、含扩展名）与源码形态锚点
    *  （`#标题` / `#^块id`；无锚点缺省）；webview 侧拼接 `relPath + anchor`
@@ -990,7 +1090,8 @@ export type WebviewToHost =
         state: 'loading' | 'content' | 'error'
         note: string
         blocks: number
-        scope: 'full' | 'heading' | 'block' | ''
+        /** #337 起 'pdf' 标记 PDF 载荷形态（导航选择器 kind） */
+        scope: 'full' | 'heading' | 'block' | 'pdf' | ''
         fm?: 'none' | 'collapsed' | 'expanded'
         imageSrcs?: string[]
         /** #243 引用内部虚拟窗口与解析观测；旧 webview 缺省。 */
@@ -998,6 +1099,20 @@ export type WebviewToHost =
           totalBlocks: number; mountedBlocks: number; contentDomCount: number
           parseCount: number; virtualized: boolean; maxMountedBlocks: number
           mountedEver: number; unmountedEver: number
+        } | null
+        /** #337（P3-05）PDF 渲染观测：phase（idle=非 PDF 形态或未装载）、
+         *  当前页/总页数、canvas 实际绘制尺寸（绘制层断言面——非 DOM
+         *  存在性）、错误分态与请求页码；旧 webview 缺省 */
+        pdf?: HoverPreviewPdfProbe
+        /** #344（P3-12 收口）text 视图观测（null = 非 text 形态/未装载）：
+         *  textStats（DOM 常驻受视口约束）与首个内联着色 span 的计算色
+         *  （rgb(…)；无 token 为 ''）——「用户看到的颜色」级集成断言面；
+         *  旧 webview 缺省 */
+        text?: {
+          renderedLines: number
+          totalLines: number
+          coloredSpans: number
+          firstSpanColor: string
         } | null
       }
       /** #299 跳转目标提示观测：在场与路径文本（旧 webview 缺省）。 */
@@ -1022,6 +1137,20 @@ export type WebviewToHost =
         /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面：
          *  目标内容变化 → textLen 变化；旧 webview 缺省） */
         textLen?: number
+        /** P2-04 生效内部模式与编辑端口绑定态（#341 起 text 装载恒
+         *  'reading'/false——只读边界；协议类型补记 probe 自 P2-04 起
+         *  已携带的线上形态） */
+        internalMode?: 'reading' | 'live'
+        liveBound?: boolean
+        /** #341（P3-09）text 视图虚拟化统计（markdown 装载为 null）：
+         *  totalLines = 窗口内总行数（#range 硬窗口时即窗口行数——窗口外
+         *  不进载荷），renderedLines = 当前 DOM 常驻行数（受视口约束）；
+         *  旧 webview 缺省 */
+        textStats?: { renderedLines: number; totalLines: number } | null
+        /** #344（P3-12 收口）text 视图绘制层观测（markdown 装载为 null）：
+         *  着色 span 计数与首个着色 span 的计算色（rgb(…)；无 token 为
+         *  ''）——「用户看到的颜色」级集成断言面；旧 webview 缺省 */
+        textPaint?: { coloredSpans: number; firstSpanColor: string } | null
         /** #243 引用内部虚拟窗口与解析观测；旧 webview 缺省。 */
         viewStats?: {
           totalBlocks: number; mountedBlocks: number; contentDomCount: number
@@ -1041,6 +1170,10 @@ export type WebviewToHost =
         conflictComparePending?: boolean
         /** P2-12 对比打开失败的就地提示在场；旧 webview 缺省。 */
         conflictNotice?: boolean
+        /** #338（P3-06）PDF 视图观测（pdf 载荷卡）：phase/page/totalPages/
+         *  mountedPages/canvasBytes/nonWhiteRatio——非 pdf 卡缺省。
+         *  #339 追加 zoom/textLayerPages/linkAnnotations（旧 webview 缺省）。 */
+        pdf?: ReadingEmbedPdfProbe | null
       }>
       /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
@@ -1205,6 +1338,25 @@ export type WebviewToHost =
       instanceId: string
     }
   | { kind: 'hover.source.release'; sessionId: string; docUri: string; sourceLeaseId: string }
+  /** #340（P3-08）文本 token 请求（只读消息，**不进 edit.request 通道**）：
+   *  webview 侧文本视图装载正文（或收到 appearance.changed 广播）后请求
+   *  窗口内着色数据，应答经 hover.tokens（reqId+instanceId 双配对）。
+   *  fsPath 必须为宿主已成功送达的目标（宿主按来源集合守卫——被攻陷
+   *  webview 不能借本通道探测任意文件的内容侧信道）；version 为请求方
+   *  当前装载正文版本——宿主按此配对，目标已推进则回 stale。beginLine/
+   *  endLine 为 1-based 闭区间窗口（与装载载荷 textNav 一致），token 行
+   *  坐标按窗口内相对行返回 */
+  | {
+      kind: 'hover.tokens.request'
+      sessionId: string
+      docUri: string
+      reqId: number
+      instanceId: string
+      fsPath: string
+      version: number
+      beginLine: number
+      endLine: number
+    }
   /** #299 跳转目标提示轻量解析（只读消息，**不进 edit.request 通道**）：
    *  webview 侧「浮层不将现」的悬停场景请求宿主把目标解析为所属根内
    *  相对路径，应答经 hover.target.resolved（reqId 配对）。载荷三形态与
@@ -1225,6 +1377,18 @@ export type WebviewToHost =
       linkHref?: string
       /** 面板直接目标（反链/出链条目；空串 fsPath = 断链条目） */
       directTarget?: { fsPath: string; anchor?: string }
+    }
+  /** #342（P3-10）悬停请求取消（只读消息，**不进 edit.request 通道**）：
+   *  webview 浮层关闭/换目标时对在途 hover.request 的消费者取消——宿主
+   *  中止外链元信息抓取（同 URL 合并的最后消费者离开即断开底层连接；
+   *  markdown 读取不可中止，迟到回包由既有 reqId/instanceId 配对守卫
+   *  丢弃，行为不变）。reqId/instanceId 与被取消的 hover.request 配对 */
+  | {
+      kind: 'hover.cancel'
+      sessionId: string
+      docUri: string
+      instanceId: string
+      reqId: number
     }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
@@ -1263,11 +1427,20 @@ export type WebviewToHost =
    *  校验：通过才持久化并广播 settings.changed；拒绝时向来源设置页回
    *  settings.snapshot 以权威值恢复显示 */
   | { kind: 'settings.set'; values: SettingsPayload }
-  /** 设置页 UI 态上报（会话内恢复）：当前分页 id 与主区滚动位置。webview
-   *  在分页切换与主区滚动时上送，宿主记忆于扩展宿主内存（会话内存活）；
-   *  面板关闭/隐藏重载后按记忆经 settings.focusSection{scroll} 恢复。
-   *  section 为空字符串时宿主忽略（尚无激活分页——如首帧默认页未回落） */
-  | { kind: 'settings.uiState'; section: string; scrollTop: number }
+  /** 设置页 UI 态上报（会话内恢复）：当前分页 id、主区滚动位置与可选的
+   *  分页内输入态载荷。webview 在分页切换与主区滚动时上送，宿主记忆于
+   *  扩展宿主内存（会话内存活）；面板关闭/隐藏重载后按记忆经
+   *  settings.focusSection{scroll, state} 恢复。section 为空字符串时宿主
+   *  忽略（尚无激活分页——如首帧默认页未回落）。state（可选，PR #346）：
+   *  分页内输入态透传载荷（分页 captureState 的产物，宿主不解释内容）——
+   *  输入态变化与分页切换的上报携带；滚动上报不重报（输入态未变省载荷），
+   *  宿主对同分页的无 state 上报保留既有记忆，跨分页上报不带即清除 */
+  | {
+      kind: 'settings.uiState'
+      section: string
+      scrollTop: number
+      state?: unknown
+    }
   /** 请求查找选项快照（#236）：编辑器面板 init 后拉取当前三开关状态，
    *  宿主以 findOptions.snapshot 响应（workspace 级记忆权威在宿主） */
   | { kind: 'findOptions.get' }
@@ -1500,15 +1673,93 @@ export type HoverPreviewScope =
   | { kind: 'heading'; anchor: string }
   | { kind: 'block'; anchor: string }
 
+/** #337/#339 悬停 PDF 渲染观测（view.state hoverPreview.pdf 的消息形态；
+ *  旧 webview 缺省整块缺席）。导出供集成测试读侧共享——观测形状的单一
+ *  事实源（cases.ts 曾维护本地镜像导致漂移，review-loops 三期收敛） */
+export interface HoverPreviewPdfProbe {
+  phase: 'idle' | 'loading' | 'content' | 'error'
+  page: number
+  totalPages: number
+  canvasWidth: number
+  canvasHeight: number
+  errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+  requestedPage: number
+  /** content 态的 canvas 非白像素比例（绘制层证据；其他态 -1） */
+  nonWhiteRatio: number
+  /** #339 用户缩放乘子（1 = 适合宽度缺省态；旧 webview 缺省） */
+  zoom?: number
+  /** #339 当前窗口内实际带 span 的文本层页数（旧 webview 缺省） */
+  textLayerPages?: number
+  /** #339 当前窗口内已挂载的链接注解元素数（旧 webview 缺省） */
+  linkAnnotations?: number
+}
+
+/** #338/#339 嵌入卡 PDF 视图观测（view.state readingEmbed 条目的 pdf 字段
+ *  消息形态；非 pdf 卡为 null、旧 webview 缺省）。导出理由同上 */
+export interface ReadingEmbedPdfProbe {
+  phase: 'idle' | 'loading' | 'content' | 'error'
+  page: number
+  totalPages: number
+  errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+  mountedPages: number
+  canvasBytes: number
+  nonWhiteRatio: number
+  /** 用户缩放乘子（1 = 适合宽度缺省态） */
+  zoom?: number
+  /** 当前窗口内实际带 span 的文本层页数 */
+  textLayerPages?: number
+  /** 当前窗口内已挂载的链接注解元素数 */
+  linkAnnotations?: number
+}
+
+/** #340（P3-08）text 通道导航载荷（hover.result 成功形态的 textNav 字段；
+ *  载荷语义单一事实源在 shared/refContent 的 RefTextContent，此处为消息
+ *  形态）。行号全部 1-based 绝对行（宿主 LF 权威正文） */
+export interface HoverTextNavPayload {
+  languageId: string
+  /** 是否显式 #range 硬展示窗口（false = 全文可滚） */
+  hasWindow: boolean
+  /** 当前正文覆盖窗口（闭区间；无 range 即 [1, totalLines]） */
+  beginLine: number
+  endLine: number
+  /** 初始展示起点（= #line ?? 窗口起点） */
+  locateLine: number
+  /** 跳转锚点（规范：line 决定；仅 range 落窗口起点 B；无锚点落文件顶部） */
+  jumpLine: number
+  /** 宿主 LF 权威正文总行数 */
+  totalLines: number
+  fontFamily?: string
+  fontSize?: number
+  fontLigatures?: boolean
+  lineNumbers: boolean
+}
+
 /** 悬停预览失败原因（#218 错误分态，就地 i18n 呈现；#219 增锚点缺失）：
  *  unsupported=目标形态非法/外部网页不接入；no-workspace=来源不在工作区；
  *  escape=目标越出所属根；not-found=目标文件不存在；non-markdown=目标非
- *  Markdown（一期只接 Markdown）；read-failed=打开/读取目标失败；
+ *  Markdown（本扩展暂未接入的类型分派）；read-failed=打开/读取目标失败；
  *  anchor-missing=目标文件在但标题/块锚点不存在（不以全文替代，附锚点
- *  原文） */
+ *  原文）；anchor-invalid=非 Markdown 目标的锚点语法非法（#337 PDF
+ *  #page=0/非数字/未知键/重复键等——不静默回落第一页，附锚点原文，
+ *  修正后可重试）。
+ *  #340（P3-08）text 通道准入与锚点分态：binary-file=二进制（头部探测
+ *  含 NUL，不读完整无界内容）；invalid-encoding=严格 UTF-8 探测失败
+ *  （编码以宿主打开文档的解码结果为准——探测只拦宿主解码必然无意义的
+ *  形态）；file-too-large=超单文件准入上限；line-too-long=单行超上限
+ *  （不悄悄截断）；text 锚点段非法细分见 anchor-detail，附锚点原文。
+ *  失败均提供原生打开入口继续 */
 export type HoverPreviewFailReason =
-  'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' |
-  'source-expired' | 'cycle' | 'depth' | 'budget'
+  | 'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' | 'anchor-invalid'
+  | 'source-expired' | 'cycle' | 'depth' | 'budget'
+  // #340（P3-08）text 通道准入分态（见上方注释）
+  | 'binary-file' | 'invalid-encoding' | 'file-too-large' | 'line-too-long'
+  // #342（P3-10）外链卡片失败分态族：真实网络失败如实呈现（就地 i18n），
+  // 不伪装成文件缺失；语义与矩阵见 shared/webLink 的 WebLinkFailReason
+  | 'web-disabled' | 'web-invalid-address' | 'web-timeout' | 'web-too-large' | 'web-not-html' | 'web-redirects' | 'web-unreachable'
+
+/** #340 anchor-invalid 的细分原因（错误分态文案参数；shared/refText 的
+ *  TextAnchorInvalidCode 同源——协议侧为消息形态单一事实源） */
+export type HoverAnchorInvalidDetail = 'format' | 'range-order' | 'out-of-bounds' | 'line-outside-window'
 
 /** #218 悬停预览请求载荷（宿主侧消费形态） */
 export type HoverPreviewRequestPayload = Extract<WebviewToHost, { kind: 'hover.request' }>
@@ -2362,8 +2613,43 @@ function isTableGridProbe(v: unknown): boolean {
     isNonNegativeInt(v.rowHandles)
 }
 
+/** #342（P3-10）外链卡片载荷校验：四字段全字符串（title/description 允许
+ *  空串——消费端以域名兜底；url/domain 为展示与身份，空串无意义，但不
+ *  在校验层收紧——宿主装配层保证非空） */
+function isWebLinkMetaPayload(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    isString(v.url) &&
+    isString(v.domain) &&
+    isString(v.title) &&
+    isString(v.description) &&
+    // #343（P3-11）frame 嵌入预检：缺席（card 形态）或形态合法——
+    // embeddable=false 必带已知退回原因；embeddable=true 不携带原因
+    // （语义矛盾形态整体拒绝，防伪造「可内嵌」以外的歧义状态）
+    (v.frame === undefined ||
+      (isObject(v.frame) &&
+        typeof v.frame.embeddable === 'boolean' &&
+        (v.frame.embeddable
+          ? v.frame.reason === undefined
+          : v.frame.reason === 'denied' || v.frame.reason === 'http')))
+  )
+}
+
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** 会话内恢复的 state 载荷（settings.uiState / settings.focusSection 透传，
+ *  PR #346）：宿主不解释内容——分页内输入态的内部形态由捕获方（分页的
+ *  captureState）自负，协议层只拦 postMessage 不可序列化的值（函数等），
+ *  嵌套内部同样由捕获方保证可序列化。已知边界（review-loops #346 增量轮
+ *  落档）：本校验只查顶层形态，循环引用/嵌套 Map 等不可序列化纯对象会
+ *  通过——若此类载荷进入宿主记忆（lastUiState），此后每次重开面板的
+ *  恢复补发在宿主侧序列化失败、中断该次恢复链（不崩宿主）；当前两个
+ *  捕获方均为纯标量对象，新增分页钩子时捕获方须自守 */
+function isOpaqueStatePayload(v: unknown): boolean {
+  return v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+    || Array.isArray(v) || isObject(v)
 }
 
 /** #33 设置载荷校验：键 → 标量值（boolean/number/string）。协议层只约束
@@ -2721,6 +3007,38 @@ function isPositiveInt(v: unknown): boolean {
   return typeof v === 'number' && Number.isInteger(v) && v > 0
 }
 
+/** #340 text 通道导航载荷校验：结构完整 + 行号字段为 1-based 正整数 +
+ * 窗口/落点约束（begin<=end、locate/jump 落窗口内、窗口贴合总行数界内） */
+function isHoverTextNavPayload(v: unknown): boolean {
+  if (!isObject(v)) {
+    return false
+  }
+  const languageId = v.languageId
+  if (typeof languageId !== 'string' || languageId.length === 0) {
+    return false
+  }
+  const beginLine = v.beginLine
+  const endLine = v.endLine
+  const locateLine = v.locateLine
+  const jumpLine = v.jumpLine
+  const totalLines = v.totalLines
+  const lineOk = (n: unknown): n is number =>
+    typeof n === 'number' && Number.isInteger(n) && n > 0
+  if (!lineOk(beginLine) || !lineOk(endLine) || !lineOk(locateLine) || !lineOk(jumpLine) || !lineOk(totalLines)) {
+    return false
+  }
+  if (beginLine > endLine || endLine > totalLines) {
+    return false
+  }
+  if (locateLine < beginLine || locateLine > endLine || jumpLine < beginLine || jumpLine > endLine) {
+    return false
+  }
+  return (v.fontFamily === undefined || isString(v.fontFamily)) &&
+    (v.fontSize === undefined || (typeof v.fontSize === 'number' && Number.isFinite(v.fontSize) && v.fontSize > 0)) &&
+    (v.fontLigatures === undefined || typeof v.fontLigatures === 'boolean') &&
+    typeof v.lineNumbers === 'boolean' && typeof v.hasWindow === 'boolean'
+}
+
 function isString(v: unknown): boolean {
   return typeof v === 'string'
 }
@@ -3003,8 +3321,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'settings.set':
       return isSettingsPayload(v.values)
     case 'settings.uiState':
-      // 会话内恢复：分页 id（可为空串=尚无激活分页）与非负滚动位置
-      return isString(v.section) && isNonNegativeInt(v.scrollTop)
+      // 会话内恢复：分页 id（可为空串=尚无激活分页）、非负滚动位置与可选
+      // state 载荷（透传不解释内容，只拦不可序列化形态；缺省兼容旧端）
+      return isString(v.section) && isNonNegativeInt(v.scrollTop) &&
+        (v.state === undefined || isOpaqueStatePayload(v.state))
     case 'findOptions.get':
       return true
     case 'findOptions.set':
@@ -3196,11 +3516,40 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           isString(v.hoverPreview.note) &&
           isNonNegativeInt(v.hoverPreview.blocks) &&
           (v.hoverPreview.scope === 'full' || v.hoverPreview.scope === 'heading' ||
-            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === '') &&
+            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === 'pdf' ||
+            v.hoverPreview.scope === '') &&
           (v.hoverPreview.fm === undefined || v.hoverPreview.fm === 'none' ||
             v.hoverPreview.fm === 'collapsed' || v.hoverPreview.fm === 'expanded') &&
           (v.hoverPreview.imageSrcs === undefined ||
-            (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))))) &&
+            (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))) &&
+          (v.hoverPreview.pdf === undefined || (isObject(v.hoverPreview.pdf) &&
+            (v.hoverPreview.pdf.phase === 'idle' || v.hoverPreview.pdf.phase === 'loading' ||
+              v.hoverPreview.pdf.phase === 'content' || v.hoverPreview.pdf.phase === 'error') &&
+            isNonNegativeInt(v.hoverPreview.pdf.page) &&
+            isNonNegativeInt(v.hoverPreview.pdf.totalPages) &&
+            isNonNegativeInt(v.hoverPreview.pdf.canvasWidth) &&
+            isNonNegativeInt(v.hoverPreview.pdf.canvasHeight) &&
+            (v.hoverPreview.pdf.errorReason === 'corrupt' || v.hoverPreview.pdf.errorReason === 'encrypted' ||
+              v.hoverPreview.pdf.errorReason === 'page-range' || v.hoverPreview.pdf.errorReason === 'resource' ||
+              v.hoverPreview.pdf.errorReason === 'load-failed' || v.hoverPreview.pdf.errorReason === '') &&
+            isNonNegativeInt(v.hoverPreview.pdf.requestedPage) &&
+            typeof v.hoverPreview.pdf.nonWhiteRatio === 'number' &&
+            Number.isFinite(v.hoverPreview.pdf.nonWhiteRatio) &&
+            v.hoverPreview.pdf.nonWhiteRatio >= -1 &&
+            // #339 缩放/文本层/链接层观测（旧 webview 缺省；乘子为正有限数）
+            (v.hoverPreview.pdf.zoom === undefined ||
+              (typeof v.hoverPreview.pdf.zoom === 'number' &&
+                Number.isFinite(v.hoverPreview.pdf.zoom) && v.hoverPreview.pdf.zoom > 0)) &&
+            (v.hoverPreview.pdf.textLayerPages === undefined ||
+              isNonNegativeInt(v.hoverPreview.pdf.textLayerPages)) &&
+            (v.hoverPreview.pdf.linkAnnotations === undefined ||
+              isNonNegativeInt(v.hoverPreview.pdf.linkAnnotations))) &&
+          (v.hoverPreview.text === undefined || v.hoverPreview.text === null ||
+            (isObject(v.hoverPreview.text) &&
+              isNonNegativeInt(v.hoverPreview.text.renderedLines) &&
+              isNonNegativeInt(v.hoverPreview.text.totalLines) &&
+              isNonNegativeInt(v.hoverPreview.text.coloredSpans) &&
+              isString(v.hoverPreview.text.firstSpanColor)))))) &&
         (v.targetTip === undefined || (isObject(v.targetTip) &&
           typeof v.targetTip.open === 'boolean' &&
           isString(v.targetTip.text))) &&
@@ -3218,7 +3567,31 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             // 同步——缺省 / reading 块挂载 / live widget 挂载）
             (e.host === undefined || e.host === 'reading' || e.host === 'live') &&
             (e.rootHost === undefined || e.rootHost === 'reading' || e.rootHost === 'live' || e.rootHost === 'hover') &&
-            (e.textLen === undefined || isNonNegativeInt(e.textLen))))) &&
+            (e.textLen === undefined || isNonNegativeInt(e.textLen)) &&
+            // #344（P3-12 收口）text 视图绘制层观测（旧 webview 缺省；null
+            // = markdown 装载/未装载）
+            (e.textPaint === undefined || e.textPaint === null || (isObject(e.textPaint) &&
+              isNonNegativeInt(e.textPaint.coloredSpans) &&
+              isString(e.textPaint.firstSpanColor))) &&
+            // #338（P3-06）嵌入卡 PDF 观测（旧 webview 缺省；null = 非 pdf 卡）
+            (e.pdf === undefined || e.pdf === null || (isObject(e.pdf) &&
+              (e.pdf.phase === 'idle' || e.pdf.phase === 'loading' || e.pdf.phase === 'content' || e.pdf.phase === 'error') &&
+              isNonNegativeInt(e.pdf.page) &&
+              isNonNegativeInt(e.pdf.totalPages) &&
+              (e.pdf.errorReason === 'corrupt' || e.pdf.errorReason === 'encrypted' ||
+                e.pdf.errorReason === 'page-range' || e.pdf.errorReason === 'resource' ||
+                e.pdf.errorReason === 'load-failed' || e.pdf.errorReason === '') &&
+              isNonNegativeInt(e.pdf.mountedPages) &&
+              isNonNegativeInt(e.pdf.canvasBytes) &&
+              typeof e.pdf.nonWhiteRatio === 'number' &&
+              Number.isFinite(e.pdf.nonWhiteRatio) &&
+              e.pdf.nonWhiteRatio >= -1 &&
+              // #339 缩放/文本层/链接层观测（旧 webview 缺省；乘子为正有限数）
+              (e.pdf.zoom === undefined ||
+                (typeof e.pdf.zoom === 'number' &&
+                  Number.isFinite(e.pdf.zoom) && e.pdf.zoom > 0)) &&
+              (e.pdf.textLayerPages === undefined || isNonNegativeInt(e.pdf.textLayerPages)) &&
+              (e.pdf.linkAnnotations === undefined || isNonNegativeInt(e.pdf.linkAnnotations))))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':
@@ -3375,6 +3748,19 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'hover.source.release':
       return isString(v.sessionId) && isString(v.docUri) &&
         typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0
+    case 'hover.tokens.request':
+      // #340 文本着色请求：会话守卫 + reqId/instanceId 配对 + 已送达目标
+      // 身份（fsPath 守卫在宿主读取端口按来源集合复核）+ 请求方装载版本
+      // 与 1-based 闭区间窗口（begin<=end）
+      return isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.instanceId === 'string' && v.instanceId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        isNonNegativeInt(v.version) &&
+        typeof v.beginLine === 'number' && isPositiveInt(v.beginLine) &&
+        typeof v.endLine === 'number' && isPositiveInt(v.endLine) &&
+        v.beginLine <= v.endLine
     case 'hover.target.resolve':
       // #299 目标提示轻量解析：会话守卫 + reqId + 三形态目标载荷
       //（target/linkHref/directTarget 与 hover.request 同口径）
@@ -3389,6 +3775,16 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             typeof (v.directTarget as { fsPath?: unknown }).fsPath === 'string' &&
             ((v.directTarget as { anchor?: unknown }).anchor === undefined ||
               typeof (v.directTarget as { anchor?: unknown }).anchor === 'string')))
+      )
+    case 'hover.cancel':
+      // #342 悬停请求取消：会话守卫 + instanceId/reqId 配对（与被取消的
+      // hover.request 同对——宿主据此定位在途消费者中止外链抓取）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        typeof v.instanceId === 'string' &&
+        v.instanceId.length > 0 &&
+        isPositiveInt(v.reqId)
       )
     case 'perf.report':
       return (
@@ -3919,9 +4315,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isSettingsPayload(v.values)
     case 'settings.focusSection':
       // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）；
-      // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用
+      // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用；
+      // state（PR #346）可选透传载荷（分页内输入态回放），同与 entry 不同时
+      // 使用（互斥由发送方保证，形态层只拦不可序列化值）
       return isString(v.section) && (v.entry === undefined || isString(v.entry)) &&
-        (v.scroll === undefined || isNonNegativeInt(v.scroll))
+        (v.scroll === undefined || isNonNegativeInt(v.scroll)) &&
+        (v.state === undefined || isOpaqueStatePayload(v.state))
     case 'settings.changed':
       return isSettingsPayload(v.values)
     case 'findOptions.snapshot':
@@ -3979,18 +4378,104 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
       // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起
       // heading/block 附锚点原文）；失败形态 reason 限定错误分态枚举
-      // （anchor-missing 附锚点原文）
+      // （anchor-missing/anchor-invalid 附锚点原文）
+      // #333（P3-01）contentKind 类型分派校验：成功形态可带可选
+      // contentKind（缺省 = markdown 兼容）——未知类型拒绝；载荷形态按
+      // kind 分派匹配（#336 image / #337 pdf / #340 text / #342 web 四
+      // 通道登记），类型与载荷不匹配整体拒绝；失败形态无载荷，携带
+      // contentKind 即拒绝。
+      // #340（P3-08）text 载荷形态登记：contentKind === 'text' 的成功
+      // 形态必须携带结构合法的 textNav（行号字段 1-based 正整数且窗口/
+      // 落点约束成立）；其余形态不得携带 textNav。失败形态含 text 通道
+      // 分态（准入与锚点），anchorDetail 仅 anchor-invalid 可带
       if (!isPositiveInt(v.reqId) ||
         typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
         return false
       }
       if (v.ok === true) {
+        // #340（P3-08）textNav 载荷互斥前置：仅 text 形态可携带且必须结构
+        // 合法（行号 1-based 正整数、窗口/落点约束成立），其余四形态
+        // （markdown/web/image/pdf）携带即整体拒绝
+        if (v.contentKind === 'text' ? !isHoverTextNavPayload(v.textNav) : v.textNav !== undefined) {
+          return false
+        }
+        // #342（P3-10）web 载荷互斥校验：contentKind === 'web' ⇔ web 在场；
+        // web 形态的 Markdown 专属字段为占位值（字段形态仍须合法）；markdown
+        // 形态（缺省/'markdown'）携带 web 即整体拒绝
+        if (v.contentKind === 'web') {
+          if (!isWebLinkMetaPayload(v.web)) {
+            return false
+          }
+        } else {
+          // 类型已知性 + 载荷匹配：#333 登记 markdown；#336（P3-04）登记
+          // image（imageSrc 必带非空、Markdown 载荷退化形态、plain 选择器）；
+          // #337（P3-05）登记 pdf（pdf 字段必带、空 text、pdf 选择器——
+          // 形态经下方 pdf 分支校验）；#340（P3-08）登记 text（textNav 经
+          // 前置互斥校验）
+          if (v.contentKind !== undefined) {
+            if (!isRefContentKind(v.contentKind)) {
+              return false
+            }
+            if (v.contentKind === 'image') {
+              const imageSrc = (v as { imageSrc?: unknown }).imageSrc
+              return (
+                typeof imageSrc === 'string' && imageSrc.length > 0 &&
+                isObject(v.target) && isString(v.target.fsPath) && isString(v.target.relPath) &&
+                isNonNegativeInt(v.version) &&
+                isString(v.text) && v.text === '' &&
+                (v.expansionPath === undefined || (Array.isArray(v.expansionPath) && v.expansionPath.every(isString))) &&
+                (v.depth === undefined || isPositiveInt(v.depth)) &&
+                (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
+                isObject(v.range) && v.range.start === 0 && v.range.end === 0 &&
+                isObject(v.scope) && v.scope.kind === 'plain'
+              )
+            }
+            if (v.contentKind !== 'markdown' && v.contentKind !== 'pdf' && v.contentKind !== 'text') {
+              return false
+            }
+          }
+          // markdown（显式或缺省兼容）：不得携带 web 载荷（#342）、image
+          // 载荷或 plain/pdf 选择器（#336/#337）；pdf 形态不适用 markdown
+          // 互斥，由下方 pdf 分支按自身契约校验；textNav 已由前置互斥校验
+          if (v.contentKind !== 'pdf' && (
+            v.web !== undefined ||
+            (v as { imageSrc?: unknown }).imageSrc !== undefined ||
+            (isObject(v.scope) && (v.scope.kind === 'plain' || v.scope.kind === 'pdf')))) {
+            return false
+          }
+        }
+        if (v.contentKind === 'pdf') {
+          // #337（P3-05）PDF 载荷契约：pdf 资源字段必带（uri 非空 + bytes
+          // 正整数）；text 恒空（无 LF 全文）；range 零区间（PDF 无 LF 坐标）；
+          // scope 为 pdf 选择器（page 1-based 正整数或缺失=第一页）
+          if (!isObject(v.pdf) ||
+            typeof v.pdf.uri !== 'string' || v.pdf.uri.length === 0 ||
+            !isPositiveInt(v.pdf.bytes)) {
+            return false
+          }
+          return (
+            v.text === '' &&
+            isObject(v.target) &&
+            isString(v.target.fsPath) &&
+            isString(v.target.relPath) &&
+            isNonNegativeInt(v.version) &&
+            isObject(v.range) &&
+            v.range.start === 0 && v.range.end === 0 &&
+            isObject(v.scope) &&
+            v.scope.kind === 'pdf' &&
+            (v.scope.page === undefined || isPositiveInt(v.scope.page)) &&
+            (v.expansionPath === undefined || (Array.isArray(v.expansionPath) && v.expansionPath.every(isString))) &&
+            (v.depth === undefined || isPositiveInt(v.depth)) &&
+            (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0))
+          )
+        }
         return (
           isObject(v.target) &&
           isString(v.target.fsPath) &&
           isString(v.target.relPath) &&
           isNonNegativeInt(v.version) &&
           isString(v.text) &&
+          v.pdf === undefined &&
           (v.expansionPath === undefined || (Array.isArray(v.expansionPath) && v.expansionPath.every(isString))) &&
           (v.depth === undefined || isPositiveInt(v.depth)) &&
           (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
@@ -4007,11 +4492,25 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       }
       return (
         v.ok === false &&
+        v.contentKind === undefined &&
+        v.web === undefined &&
         (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
           v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
-          v.reason === 'anchor-missing' || v.reason === 'source-expired' || v.reason === 'cycle' ||
-          v.reason === 'depth' || v.reason === 'budget') &&
-        (v.anchor === undefined || isString(v.anchor))
+          v.reason === 'anchor-missing' || v.reason === 'anchor-invalid' ||
+          v.reason === 'source-expired' || v.reason === 'cycle' ||
+          v.reason === 'depth' || v.reason === 'budget' ||
+          // #340（P3-08）text 通道准入分态
+          v.reason === 'binary-file' || v.reason === 'invalid-encoding' || v.reason === 'file-too-large' ||
+          v.reason === 'line-too-long' ||
+          // #342（P3-10）web 失败分态族（真实网络失败，不伪装成文件缺失）
+          v.reason === 'web-disabled' || v.reason === 'web-invalid-address' || v.reason === 'web-timeout' ||
+          v.reason === 'web-too-large' || v.reason === 'web-not-html' || v.reason === 'web-redirects' ||
+          v.reason === 'web-unreachable') &&
+        (v.anchor === undefined || isString(v.anchor)) &&
+        (v.anchorDetail === undefined ||
+          (v.reason === 'anchor-invalid' &&
+            (v.anchorDetail === 'format' || v.anchorDetail === 'range-order' ||
+              v.anchorDetail === 'out-of-bounds' || v.anchorDetail === 'line-outside-window')))
       )
     case 'hover.invalidated':
       // #224 失效推送：非空目标路径 + status 三态（vaultIndex onTargetChange
@@ -4027,6 +4526,29 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         typeof v.instanceId === 'string' && v.instanceId.length > 0 &&
         (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
         (v.reason === 'capacity' || v.reason === 'source')
+    case 'hover.tokens':
+      // #340 文本着色分层推送：reqId+instanceId 双配对；成功形态带窗口内
+      // 5 元组增量数据与颜色表（坐标约束在解码侧按窗口复核）；失败形态
+      // 限定 stale/unavailable 且无载荷字段
+      if (!isPositiveInt(v.reqId) ||
+        typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
+        return false
+      }
+      if (v.ok === true) {
+        return (
+          typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+          isNonNegativeInt(v.version) &&
+          (v.layer === 'textmate' || v.layer === 'semantic') &&
+          Array.isArray(v.colors) && v.colors.every((c) => typeof c === 'string' && c.length > 0) &&
+          Array.isArray(v.tokens) && v.tokens.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0) &&
+          v.tokens.length % 5 === 0
+        )
+      }
+      return v.ok === false && (v.reason === 'stale' || v.reason === 'unavailable') &&
+        v.colors === undefined && v.tokens === undefined && v.fsPath === undefined
+    case 'appearance.changed':
+      // #340 外观代次广播：非负整数代次（单调递增；首观测为 1）
+      return isNonNegativeInt(v.generation)
     case 'hover.target.resolved':
       // #299 目标提示解析结果：reqId 配对；成功形态必带非空相对路径，
       // 锚点为源码形态字符串（`#标题` / `#^块id`）或缺省

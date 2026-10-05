@@ -49,7 +49,7 @@ describe('manifest NLS：两份 nls 文件键集契约', () => {
 })
 
 describe('manifest NLS：package.json 引用契约', () => {
- it('全部命令 title 为 %key% 引用（81 条全覆盖，无硬编码）', () => {
+ it('全部命令 title 为 %key% 引用（86 条全覆盖，无硬编码）', () => {
     const commands: { command: string; title: string }[] = pkg.contributes.commands
     // 命令清单基线（#97 工单口径 + #105 高亮 + #106 分割线 + #128 片段刷新 + #131 片段暂停/恢复
     // + #132 样式参考 + #145 导出样式参考 JSON + #139 HTML 注释 + #141 双态切换 + #162 复制块链接
@@ -57,8 +57,9 @@ describe('manifest NLS：package.json 引用契约', () => {
     // + #236 查找替换三命令 + #237 上下添加光标两条 + #239 词级移动四命令 + #238 选下一处相同词四命令
     // + #281 切换引用内部模式 + P2-10/#287 引用 Live 操作五条（保存目标/显式关闭/冲突三项——显式关闭
     // 与 P2-05/#282 确认链路统一为同一操作 embedClose）+ #314 粘贴两条（clipboard.paste/pastePlain）
-    // + #318 搜索定位恢复——新增/删减命令须同步本断言）
-    expect(commands.length).toBe(81)
+    // + #318 搜索定位恢复 + #339 PDF 缩放三命令（放大/缩小/适合宽度）
+    // ——新增/删减命令须同步本断言）
+    expect(commands.length).toBe(86)
     const literal = commands.filter((c) => !/^%.+%$/.test(c.title))
     expect(
       literal.map((c) => `${c.command}: ${c.title}`),

@@ -14,6 +14,7 @@ import { WordSegmentSection } from './wordSegmentSettings'
 import { DefaultEditorSection } from './defaultEditorSettings'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
+import { isTrustedHostMessageSource } from './untrustedFrame'
 import './settingsPage.css'
 
 declare function acquireVsCodeApi(): {
@@ -73,6 +74,13 @@ vscode.postMessage({ kind: 'wordSegment.get' })
 vscode.postMessage({ kind: 'defaultEditor.get' })
 
 window.addEventListener('message', (event) => {
+  // #344（P3-12 收口）消息桥隔离与主 webview 对齐：来源非真宿主桥的
+  // message 一律丢弃（允许清单判据见 untrustedFrame 模块头）。设置页当前
+  // 不承载 iframe，无现实注入向量——此为一致性与纵深防御（两个 webview
+  // 同一桥形态同一信任规则，未来向设置页引入嵌入内容时不留静默缺口）
+  if (!isTrustedHostMessageSource(event.source, event.origin)) {
+    return
+  }
   view.handleHostMessage(event.data)
   keybindings.handleHostMessage(event.data)
   snippets.handleHostMessage(event.data)

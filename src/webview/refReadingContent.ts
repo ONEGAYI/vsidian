@@ -190,9 +190,16 @@ function applyFmCollapsedTo(section: HTMLElement, expanded: boolean): void {
   }
 }
 
-/** 引用读取错误分态 → 就地 i18n 文案（不弹宿主通知；anchor-missing 附
- *  锚点原文）——悬停浮层与嵌入卡片共用同一文案面 */
-export function refErrorText(reason: HoverPreviewFailReason, target: string, anchor?: string): string {
+/** 引用读取错误分态 → 就地 i18n 文案（不弹宿主通知；anchor-missing 与
+ *  #337 anchor-invalid 附锚点原文）——悬停浮层与嵌入卡片共用同一文案面。
+ *  #340（P3-08）text 通道准入与锚点分态：失败均附原生打开指引（浮层
+ *  标题栏跳转入口对 text 目标即原生编辑器打开） */
+export function refErrorText(
+  reason: HoverPreviewFailReason,
+  target: string,
+  anchor?: string,
+  anchorDetail?: 'format' | 'range-order' | 'out-of-bounds' | 'line-outside-window',
+): string {
   switch (reason) {
     case 'unsupported':
       return t('hover.errorUnsupported')
@@ -208,6 +215,12 @@ export function refErrorText(reason: HoverPreviewFailReason, target: string, anc
       return t('hover.errorReadFailed')
     case 'anchor-missing':
       return t('hover.errorAnchorMissing', { target, anchor: anchor ?? '' })
+    case 'anchor-invalid':
+      // #337 PDF（无细分）与 #340 text（anchorDetail 细分）共用此分态：
+      // 有 detail 走 text 细分文案，缺省保持 #337 版文案
+      return anchorDetail !== undefined
+        ? t(anchorDetailKey(anchorDetail), { target, anchor: anchor ?? '' })
+        : t('hover.errorAnchorInvalid', { target, anchor: anchor ?? '' })
     case 'source-expired':
       return t('hover.errorSourceExpired')
     case 'cycle':
@@ -216,5 +229,44 @@ export function refErrorText(reason: HoverPreviewFailReason, target: string, anc
       return t('hover.errorDepth')
     case 'budget':
       return t('hover.errorBudget')
+    // #342（P3-10）外链卡片失败分态：真实网络原因如实呈现，不伪装成
+    // 文件缺失；打开入口（浮层标题条 open 按钮）在错误态保持可用
+    case 'web-disabled':
+      return t('hover.errorWebDisabled')
+    case 'web-invalid-address':
+      return t('hover.errorWebInvalidAddress')
+    case 'web-timeout':
+      return t('hover.errorWebTimeout')
+    case 'web-too-large':
+      return t('hover.errorWebTooLarge')
+    case 'web-not-html':
+      return t('hover.errorWebNotHtml')
+    case 'web-redirects':
+      return t('hover.errorWebRedirects')
+    case 'web-unreachable':
+      return t('hover.errorWebUnreachable')
+    // #340（P3-08）text 通道准入分态（见函数头注释）
+    case 'binary-file':
+      return t('hover.errorTextBinary', { target })
+    case 'invalid-encoding':
+      return t('hover.errorTextEncoding', { target })
+    case 'file-too-large':
+      return t('hover.errorTextTooLarge', { target, maxMb: '2' })
+    case 'line-too-long':
+      return t('hover.errorTextLongLine', { target })
+  }
+}
+
+/** anchor-invalid 细分原因 → 文案键（分态口径：就地报错不静默回顶） */
+function anchorDetailKey(detail?: 'format' | 'range-order' | 'out-of-bounds' | 'line-outside-window'): string {
+  switch (detail) {
+    case 'range-order':
+      return 'hover.errorTextAnchorOrder'
+    case 'out-of-bounds':
+      return 'hover.errorTextAnchorBounds'
+    case 'line-outside-window':
+      return 'hover.errorTextAnchorOutside'
+    default:
+      return 'hover.errorTextAnchorFormat'
   }
 }

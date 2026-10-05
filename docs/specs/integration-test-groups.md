@@ -55,6 +55,14 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 
 `all` 为默认组，显式组名只接受 `all / core / sensitive`。定向筛选未命中当前组即报错；切片后合法的空片仍允许。开发态 all/core 的报告沿用 `.vscode-test/integration-dev.log` 或 `integration-dev-s<片号>.log`；sensitive 使用 `integration-sensitive.log` 或 `integration-sensitive-s<片号>.log`。报告记录分组、计划数量、逐项 START/PASS/FAIL/TIME 和宿主退出码；首次运行即落盘，复核只读报告。
 
+## 真宿主文本外观对照套件（#344 接线，2026-10-04）
+
+`npm run test:text-appearance`（`test/integration/runTextAppearance.mjs`）是 #340 产出的生产外观对照套件：在 1.82.3 真宿主内驱动生产 `TextAppearanceService`，断言语法层 token 颜色与 #335 探针对照锚点一致（import `#c586c0` / 注释 `#6a9955` / 字符串 `#ce9178`，主题预置 Default Dark Modern），语义层为可达性观察项。与常规集成回归的差异：**不传 `--disable-extensions`**（内置语言/主题扩展是 grammar 与主题文件的来源），因此不与 core 四片共用宿主装配，独立单轮运行。
+
+- 调度：CI 的 `text-appearance` job（xvfb 单轮，报告上传 `text-appearance-a<attempt>`）；与 `browser` 同为**非必需检查**（2026-09 核查的保护规则仅含 `unit / integration / style-contract`），失败保留红灯与完整报告、不阻断必需检查。ci.yml 改动的实际运行由推送后 CI 验证。
+- 本地入口：`npm run test:text-appearance`（先跑 `node esbuild.mjs` 构建套件产物）；报告固定落 `.vscode-test/text-appearance.log`。
+- 归属说明：本套件**不在** core/sensitive 分组语义内——它是生产链路与探针的同色证据（横向对照），不承担回归门禁职责。
+
 ## 测试钩子与消息通道门控（`_test.*`）
 
 扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入，仅 `VSIDIAN_TEST_HOOKS=1` 时注册。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key` / `task.test.click` / `reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口。**勿误判为 webview 未设防**：这不是漏加门控，而是分层设计的既定边界。

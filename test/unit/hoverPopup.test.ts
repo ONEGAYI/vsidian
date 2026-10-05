@@ -17,6 +17,7 @@ import {
   hoverPreviewAnchorLeave,
   invalidateHoverPopupImages,
   isHoverPopupOpen,
+  notifyHoverExternalSettings,
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverInvalidated,
@@ -28,6 +29,7 @@ import {
   HOVER_POPUP_CLOSE_DELAY_MS,
   HOVER_POPUP_OPEN_DELAY_MS,
 } from '../../src/webview/hoverPopup'
+import { untrustedFrameWindowCount } from '../../src/webview/untrustedFrame'
 
 // 错误分态文案断言需要已装配语言包（生产经数据岛/locale.changed 装配；
 // 单测直接注入 zh-cn 字典——与浏览器套件 buildZhLocaleIsland 同源）
@@ -1373,5 +1375,413 @@ describe('#242 浮层挂载释放', () => {
     const before = h.sent.length
     open.click()
     expect(h.sent.length).toBe(before)
+  })
+})
+
+// #333（P3-01）类型化装载：hover.result 成功回包经 contentKind 分派——
+// markdown（显式与缺省兼容）照常应用；kind 与载荷不匹配的回包（本票
+// 防御路径：宿主/校验器已拦，此处钉住消费端不应用、不悬挂租约）。
+describe('#333 类型化装载（contentKind 分派）', () => {
+  it('显式 contentKind: markdown 照常应用内容（生产类型化出站形态）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      contentKind: 'markdown', ...RESULT_OK,
+    })
+    expect(hoverPopupProbe().state).toBe('content')
+    expect(hoverPopupProbe().scope).toBe('full')
+    expect(hoverPopupProbe().blocks).toBeGreaterThan(0)
+    closeHoverPopup()
+  })
+
+  it('kind 与载荷不匹配（pdf + Markdown 载荷）：不应用内容、显示错误分态、释放来源租约', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      contentKind: 'pdf', sourceLeaseId: 'lease-1', ...RESULT_OK,
+    })
+    expect(hoverPopupProbe().state).toBe('error')
+    expect(hoverPopupProbe().blocks).toBe(0)
+    expect(h.sent).toContainEqual({
+      kind: 'hover.source.release', sessionId: SESSION.sessionId, docUri: SESSION.docUri,
+      sourceLeaseId: 'lease-1',
+    })
+    closeHoverPopup()
+  })
+})
+
+// #336（P3-04）图片目标浮层：悬停图片双链/链接 → hover.result 的 image
+// 载荷在浮层内渲染图片槽位（经 ImageResourceManager 装载——与普通图片同
+// 一加载/重试/弹窗行为源）；图源请求按面板文档解析（非来源化 image.request
+// ——与主视图图片同通道）；目标订阅与失效刷新沿用既有规则；纯 Reading 形
+// 态（不接根会话——图片无内部模式切换语义）。
+describe('#336 图片目标浮层：image 载荷渲染', () => {
+  const IMAGE_RESULT_OK = {
+    contentKind: 'image' as const,
+    target: { fsPath: 'D:\notes\图.png', relPath: '图.png' },
+    version: 1760000000123,
+    imageSrc: 'assets/图.png',
+    text: '',
+    range: { start: 0, end: 0 },
+    scope: { kind: 'plain' as const },
+  }
+
+  function imageHarness(): Harness {
+    const h = makeHarness()
+    h.anchor.setAttribute('href', 'assets/图.png')
+    return h
+  }
+
+  function imageRequestOf(h: Harness) {
+    const req = h.sent.find((m) => m.kind === 'image.request')
+    if (!req || req.kind !== 'image.request') {
+      throw new Error('image.request 未发出')
+    }
+    return req
+  }
+
+  it('image 载荷渲染图片槽位：img 携带图源身份，请求按面板文档解析（无 sourceDocUri）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    expect(hoverPopupProbe().state).toBe('content')
+    const img = popupEl()?.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img!.dataset['vsidianImgSrc']).toBe('assets/图.png')
+    const imgReq = imageRequestOf(h)
+    expect(imgReq.src).toBe('assets/图.png')
+    expect('sourceDocUri' in imgReq, '图片目标浮层的图源按面板文档解析（非来源化）').toBe(false)
+    expect(h.sent.some((m) => m.kind === 'hover.watch' && m.fsPath === 'D:\notes\图.png'), '登记目标订阅').toBe(true)
+    closeHoverPopup()
+  })
+
+  it('image.result 路由驱动槽位装载（frame chrome 在场——查看大图入口）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    const imgReq = imageRequestOf(h)
+    notifyHoverImageResult({ reqId: imgReq.reqId, ok: true, src: 'data:image/png;base64,xxx' })
+    const img = popupEl()?.querySelector('img')
+    expect(img?.getAttribute('src')).toBe('data:image/png;base64,xxx')
+    // jsdom 不触发 img load 事件——loaded 态由浏览器套件断言（绘制层）
+    expect(img?.dataset['vsidianImgState']).toBe('loading')
+    expect(popupEl()?.querySelector('.vsidian-graphic-frame'), '图片 frame chrome 在场（查看大图入口）').not.toBeNull()
+    expect(hoverPopupProbe().imageSrcs).toContain('data:image/png;base64,xxx')
+    closeHoverPopup()
+  })
+
+  it('图片目标不接根会话：模式/保存/关闭按钮隐藏（纯 Reading 形态——无内部模式切换）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const el = popupEl()
+    const modeBtn = el?.querySelector<HTMLElement>('.vsidian-hover-popup-mode')
+    expect(modeBtn?.style.display, '图片目标无内部 Live 语义').toBe('none')
+    const saveBtn = el?.querySelector<HTMLElement>('.vsidian-hover-popup-save')
+    expect(saveBtn?.style.display).toBe('none')
+    closeHoverPopup()
+  })
+
+  it('目标失效 changed → 静默重发 hover.request（刷新链路沿用既有规则）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    const requestsBefore = h.sent.filter((m) => m.kind === 'hover.request').length
+    notifyHoverInvalidated({ fsPath: 'D:\notes\图.png', status: 'changed', generation: 1 })
+    const requests = h.sent.filter((m) => m.kind === 'hover.request')
+    expect(requests.length).toBe(requestsBefore + 1)
+    expect(hoverPopupProbe().state, '刷新期间保留旧内容（不闪 loading）').toBe('content')
+    closeHoverPopup()
+  })
+
+  it('关闭后撤下图片（槽位释放零残留）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    closeHoverPopup()
+    expect(popupEl()).toBeNull()
+    expect(document.querySelectorAll('img').length).toBe(0)
+  })
+})
+
+// ---- #343（P3-11）外链原网页形态：page iframe 装配、退回与生命周期 ----
+// ---- #343（P3-11）外链原网页形态：page iframe 装配、退回与生命周期 ----
+
+describe('#343 外链原网页形态（page iframe 与退回）', () => {
+  type WebPayload = {
+    url: string; domain: string; title: string; description: string
+    frame?: { embeddable: boolean; reason?: 'denied' | 'http' }
+  }
+  const respondWeb = (
+    req: { reqId: number; instanceId: string },
+    web: WebPayload,
+  ): void => {
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      contentKind: 'web', web,
+      target: { fsPath: '', relPath: '' }, version: 0, text: '',
+      range: { start: 0, end: 0 }, scope: { kind: 'full' },
+    })
+  }
+  const openWebPopup = (web: WebPayload): Harness => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    respondWeb(requestOf(h), web)
+    return h
+  }
+  const iframeEl = (): HTMLIFrameElement | null =>
+    document.querySelector<HTMLIFrameElement>('.vsidian-hover-web-frame')
+
+  it('embeddable=true：挂沙箱 iframe——sandbox 仅 allow-scripts、referrer no-referrer、src=最终 URL；标题条退回按钮与「无法确认」说明在场', () => {
+    openWebPopup({
+      url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '摘要',
+      frame: { embeddable: true },
+    })
+    const frame = iframeEl()
+    expect(frame, 'iframe 在场').not.toBeNull()
+    expect(frame!.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(frame!.getAttribute('referrerpolicy')).toBe('no-referrer')
+    expect(frame!.getAttribute('src')).toBe('https://example.com/page')
+    expect(frame!.getAttribute('allow')).toBeNull()
+    // 2026-10-05 验收改版：退回按钮移入浮窗标题条动作组（⤶ 图标按钮，
+    // 插在模式切换按钮左侧），page 视图内工具行整体撤除
+    const btn = document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')
+    expect(btn, '退回卡片按钮在场（标题条动作组）').not.toBeNull()
+    expect(btn!.getAttribute('aria-label')).toBe(zhCn['hover.webFallbackToCard'])
+    expect(btn!.getAttribute('data-tooltip')).toBe(zhCn['hover.webFallbackToCard'])
+    expect(btn!.closest('.vsidian-hover-popup-actions')).not.toBeNull()
+    expect(btn!.style.display).toBe('')
+    const actions = document.querySelector<HTMLElement>('.vsidian-hover-popup-actions')!
+    expect(Array.from(actions.children).map((el) => el.className)).toEqual([
+      'vsidian-hover-popup-save', 'vsidian-hover-popup-web-fallback',
+      'vsidian-hover-popup-mode', 'vsidian-hover-popup-close', 'vsidian-hover-popup-open',
+    ])
+    expect(document.querySelector('.vsidian-hover-web-toolbar'), '旧工具行已撤除').toBeNull()
+    expect(document.querySelector('.vsidian-hover-web-fallback'), '旧视图内按钮已撤除').toBeNull()
+    const note = document.querySelector<HTMLElement>('.vsidian-hover-web-note')
+    expect(note?.textContent).toBe(zhCn['hover.webPageNote'])
+    expect(hoverPopupProbe().state).toBe('content')
+    closeHoverPopup()
+  })
+
+  it('已知拒绝（denied）：不挂 iframe，卡片 + 真实退回原因行；标题条退回按钮隐藏', () => {
+    openWebPopup({
+      url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '摘要',
+      frame: { embeddable: false, reason: 'denied' },
+    })
+    expect(iframeEl()).toBeNull()
+    expect(document.querySelector('.vsidian-hover-web-card')).not.toBeNull()
+    const reason = document.querySelector<HTMLElement>('.vsidian-hover-web-reason')
+    expect(reason?.textContent).toBe(zhCn['hover.webFrameDenied'])
+    // 退回按钮仅 page 形态显示（装配常驻、卡片形态隐藏）
+    const btn = document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')
+    expect(btn).not.toBeNull()
+    expect(btn!.style.display).toBe('none')
+    closeHoverPopup()
+  })
+
+  it('HTTP 混合内容（http）：卡片 + 混合内容原因行', () => {
+    openWebPopup({
+      url: 'http://example.com/page', domain: 'example.com', title: '', description: '',
+      frame: { embeddable: false, reason: 'http' },
+    })
+    expect(iframeEl()).toBeNull()
+    const reason = document.querySelector<HTMLElement>('.vsidian-hover-web-reason')
+    expect(reason?.textContent).toBe(zhCn['hover.webFrameHttp'])
+    closeHoverPopup()
+  })
+
+  it('防御：embeddable=true 但 URL 非 https 不挂 iframe（HTTP 无法安全内嵌的 webview 侧兜底）', () => {
+    openWebPopup({
+      url: 'http://example.com/page', domain: 'example.com', title: '', description: '',
+      frame: { embeddable: true },
+    })
+    expect(iframeEl()).toBeNull()
+    expect(document.querySelector('.vsidian-hover-web-card')).not.toBeNull()
+    closeHoverPopup()
+  })
+
+  it('手动退回：点击标题条按钮销毁 iframe 换卡片并隐藏按钮，不发任何设置写出站（不偷偷改形态设置）', () => {
+    const h = openWebPopup({
+      url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '摘要',
+      frame: { embeddable: true },
+    })
+    const before = h.sent.length
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
+    expect(iframeEl()).toBeNull()
+    const card = document.querySelector<HTMLElement>('.vsidian-hover-web-card')
+    expect(card).not.toBeNull()
+    expect(card!.querySelector('.vsidian-hover-web-title')!.textContent).toBe('示例站')
+    // 退回后按钮隐藏（仅 page 形态显示）
+    expect(document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.style.display)
+      .toBe('none')
+    // 退回不产生任何出站消息（含设置写）
+    expect(h.sent.length).toBe(before)
+    closeHoverPopup()
+  })
+
+  it('关闭浮层：iframe 移除且不可信窗口注册清空（消息桥隔离释放）', async () => {
+    openWebPopup({
+      url: 'https://example.com/page', domain: 'example.com', title: '', description: '',
+      frame: { embeddable: true },
+    })
+    expect(iframeEl()).not.toBeNull()
+    expect(untrustedFrameWindowCount()).toBe(1)
+    closeHoverPopup()
+    expect(iframeEl()).toBeNull()
+    expect(untrustedFrameWindowCount()).toBe(0)
+  })
+
+  it('换目标重开：旧 iframe 销毁（一次一个浮层的既有语义连带 web 视图）', () => {
+    openWebPopup({
+      url: 'https://example.com/a', domain: 'example.com', title: '', description: '',
+      frame: { embeddable: true },
+    })
+    const first = iframeEl()
+    expect(first).not.toBeNull()
+    // 换锚点悬停 → openPopup 先 closeHoverPopup（旧 iframe 随容器销毁）
+    const block2 = document.createElement('div')
+    const anchor2 = document.createElement('a')
+    anchor2.className = 'vsidian-wikilink'
+    anchor2.setAttribute('href', '另一目标')
+    block2.appendChild(anchor2)
+    document.body.appendChild(block2)
+    hoverPreviewAnchorEnter(anchor2)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    // 重开过程旧 iframe 随容器销毁（在场元素计数归零）
+    expect(untrustedFrameWindowCount()).toBe(0)
+    closeHoverPopup()
+  })
+
+  describe('设置联动（notifyHoverExternalSettings）', () => {
+    it('开关关闭：在场 iframe 销毁、卡片呈现', () => {
+      openWebPopup({
+        url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '',
+        frame: { embeddable: true },
+      })
+      notifyHoverExternalSettings({ 'hover.externalEnabled': false })
+      expect(iframeEl()).toBeNull()
+      expect(document.querySelector('.vsidian-hover-web-card')).not.toBeNull()
+      expect(untrustedFrameWindowCount()).toBe(0)
+      closeHoverPopup()
+    })
+
+    it('形态切回 card：iframe 销毁、卡片呈现', () => {
+      openWebPopup({
+        url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '',
+        frame: { embeddable: true },
+      })
+      notifyHoverExternalSettings({ 'hover.externalShape': 'card' })
+      expect(iframeEl()).toBeNull()
+      expect(document.querySelector('.vsidian-hover-web-card')).not.toBeNull()
+      closeHoverPopup()
+    })
+
+    it('无关设置变更 / 开关仍开且形态仍 page：不动在场 iframe', () => {
+      openWebPopup({
+        url: 'https://example.com/page', domain: 'example.com', title: '', description: '',
+        frame: { embeddable: true },
+      })
+      notifyHoverExternalSettings({ 'hover.externalEnabled': true, 'hover.externalShape': 'page', 'editor.other': 1 })
+      expect(iframeEl()).not.toBeNull()
+      closeHoverPopup()
+    })
+  })
+
+  it('退回后的移出边界自愈：DOM 变异丢 mouseleave 时，域外首移按离开收尾关闭', () => {
+    vi.useFakeTimers()
+    openWebPopup({
+      url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '',
+      frame: { embeddable: true },
+    })
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
+    expect(hoverPopupProbe().open).toBe(true)
+    // Chromium 变异清链后无 mouseleave——模拟直移域外的 mousemove（document 捕获）
+    const outside = document.createElement('div')
+    document.body.appendChild(outside)
+    outside.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
+    vi.advanceTimersByTime(HOVER_POPUP_CLOSE_DELAY_MS)
+    expect(isHoverPopupOpen()).toBe(false) // 域外首移触发延迟关闭
+    outside.remove()
+  })
+
+  it('退回后的移出边界自愈：域内首移不关闭（hover 链重建后交还常规语义）', () => {
+    vi.useFakeTimers()
+    const h = openWebPopup({
+      url: 'https://example.com/page', domain: 'example.com', title: '示例站', description: '',
+      frame: { embeddable: true },
+    })
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
+    // 域内移动（目标仍在锚点联合域内）：不触发关闭
+    h.anchor.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
+    vi.advanceTimersByTime(HOVER_POPUP_CLOSE_DELAY_MS + 50)
+    expect(isHoverPopupOpen()).toBe(true) // 域内首移不关闭
+    closeHoverPopup()
+  })
+
+  it('装载中开关关闭：迟到的 page 载荷就地退卡片（抑制标记）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    // loading 中翻转设置（webView 尚未装配）
+    notifyHoverExternalSettings({ 'hover.externalEnabled': false })
+    respondWeb(requestOf(h), {
+      url: 'https://example.com/page', domain: 'example.com', title: '迟到样本', description: '',
+      frame: { embeddable: true },
+    })
+    expect(iframeEl()).toBeNull()
+    const card = document.querySelector<HTMLElement>('.vsidian-hover-web-card')
+    expect(card?.querySelector('.vsidian-hover-web-title')?.textContent).toBe('迟到样本')
+    expect(hoverPopupProbe().state).toBe('content')
+    closeHoverPopup()
+  })
+
+  it('探针：web 视图观测面（page 形态、sandbox、src、按钮在场；退回后转 card）', () => {
+    openWebPopup({
+      url: 'https://example.com/page', domain: 'example.com', title: '', description: '',
+      frame: { embeddable: true },
+    })
+    const probe = hoverPopupProbe() as { web?: { shape: string; frameMounted: boolean; sandbox: string; referrerPolicy: string; src: string; fallbackButton: boolean } }
+    expect(probe.web).toMatchObject({
+      shape: 'page', frameMounted: true, sandbox: 'allow-scripts',
+      referrerPolicy: 'no-referrer', src: 'https://example.com/page', fallbackButton: true,
+    })
+    document.querySelector<HTMLButtonElement>('button.vsidian-hover-popup-web-fallback')!.click()
+    const after = hoverPopupProbe() as { web?: { shape: string; frameMounted: boolean } }
+    expect(after.web?.shape).toBe('card')
+    expect(after.web?.frameMounted).toBe(false)
+    closeHoverPopup()
   })
 })
