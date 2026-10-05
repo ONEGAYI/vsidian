@@ -74,4 +74,34 @@ Object.assign(window, {
       fontSize: getComputedStyle(scrollEl.querySelector<HTMLElement>('.vsidian-text-view') ?? scrollEl).fontSize,
     }
   },
+  /** 横向滚动几何探针（2026-10-05 验收 5b 改版）：横滚归宿主滚动区、
+      code 区不自持横滚、行号列 sticky 钉视口左缘——横条贴浮窗视口底缘
+      的结构性前提（滚动条本体 headless 不渲染，断言落在滚动几何上） */
+  readTextHScroll() {
+    const scrollEl = document.querySelector<HTMLElement>('.vsidian-hover-popup-scroll')
+    const code = scrollEl?.querySelector<HTMLElement>('.vsidian-text-code') ?? null
+    const gutter = scrollEl?.querySelector<HTMLElement>('.vsidian-text-gutter') ?? null
+    if (!scrollEl || !code || !gutter) {
+      return { present: false as const }
+    }
+    code.scrollLeft = 100
+    const codeSelfScroll = code.scrollLeft
+    const clip = scrollEl.getBoundingClientRect()
+    const gutterAt0 = gutter.getBoundingClientRect().left - clip.left
+    scrollEl.scrollLeft = 80
+    const scrollLeftApplied = scrollEl.scrollLeft
+    const gutterAt80 = gutter.getBoundingClientRect().left - clip.left
+    const gutterWidth = gutter.getBoundingClientRect().width
+    scrollEl.scrollLeft = 0
+    return {
+      present: true as const,
+      scrollWidth: scrollEl.scrollWidth,
+      clientWidth: scrollEl.clientWidth,
+      codeSelfScroll,
+      scrollLeftApplied,
+      gutterAt0,
+      gutterAt80,
+      gutterWidth,
+    }
+  },
 })

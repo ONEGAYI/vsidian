@@ -4427,12 +4427,18 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 }
 
 /* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上）。
-   同属 #app 作用域，覆盖主阅读容器的 40vh 文末留白，浮层用紧凑内边距。 */
+   同属 #app 作用域，覆盖主阅读容器的 40vh 文末留白，浮层用紧凑内边距。
+   overflow: visible（2026-10-05 验收 5b 改版）：主视图规则的
+   overflow-y:auto 在此语境会把横轴一并计算为 auto，容器成为隐形双向
+   滚动容器——text 视图长行溢出被截在容器盒内、横条贴内容流末尾（验收
+   实测）。浮层内滚动承载一贯是 scrollEl（虚拟化视口与滚动监听均挂它），
+   容器不自持滚动，横向溢出上移 scrollEl（横条贴浮层视口底缘）。 */
 #app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
   font-family: var(--vsidian-content-font-family, monospace);
   font-size: var(--vsidian-content-font-size, 14px);
   line-height: var(--vsidian-content-line-height, 1.5);
   padding: 10px 14px;
+  overflow: visible;
   overflow-wrap: break-word;
 }
 
@@ -4909,9 +4915,14 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   color: var(--vscode-errorForeground, #f14c4c);
 }
 
-/* 卡片内 Reading 容器贴边微收（正文样式随嵌套命中，不复制主题） */
+/* 卡片内 Reading 容器贴边微收（正文样式随嵌套命中，不复制主题）。
+   overflow: visible（2026-10-05 验收 5b 改版）：与浮层同因——主视图规则
+   overflow-y:auto 在卡内命中会使容器自持双向滚动，text 视图长行溢出
+   被截在容器内；卡内滚动承载是 .vsidian-embed-card-scroll，横向溢出
+   上移卡滚动区（横条贴卡片视口底缘）。 */
 #app .vsidian-embed-card .vsidian-embed-card-scroll .vsidian-view-reading {
   padding: 8px 12px;
+  overflow: visible;
 }
 
 /* #217 验收反馈（行距对齐）：Live 卡片在 .cm-content 内，CM6 的
@@ -5203,8 +5214,14 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
    写入，缺席回落编辑器默认变量族）；token 颜色全部内联（宿主外观服务计
    算值）；行号列与前景色回落工作台 CSS 变量（与原生编辑器同源）。本段
    只承担布局与滚动语义：gutter 纵向随内容流（浮层 scrollEl 滚动）、横向
-   固定；code 区横向滚动（原生编辑器默认不折行）。公开变量零新增——颜色
-   全部随主题变量或内联 token 值。 */
+   sticky 钉视口左缘；code 区不自持横滚（原生编辑器默认不折行）。公开
+   变量零新增——颜色全部随主题变量或内联 token 值。
+   2026-10-05 验收 5b 改版：横向滚动归宿主滚动区（浮层 scrollEl / 嵌入卡
+   卡内滚动区）——横条贴视口底缘（原生编辑器同款语义）。此前 code 区
+   overflow-x:auto 自持横滚，而视图盒高=全文内容高，横条贴内容流末尾、
+   垂直滚到底才可见（验收实测）；行号列相应 sticky 钉左并以不透明底色
+   遮住横滚滑过的文本（#191 code-card 行号同款手法，单层编辑器底色——
+   文本视图无卡片半透明底）。 */
 .vsidian-text-view {
   display: flex;
   min-width: 0;
@@ -5222,7 +5239,10 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   text-align: right;
   color: var(--vscode-editorLineNumber-foreground, #858585);
   user-select: none;
-  position: relative;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--vscode-editor-background, #1e1e1e);
   overflow: hidden;
 }
 
@@ -5239,8 +5259,7 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
 .vsidian-text-code {
   flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   position: relative;
 }
 
