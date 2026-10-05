@@ -9,6 +9,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - 通用工程规范（提交规范、TDD、文件树维护）遵循工程根 `D:\CODE\Project\AGENTS.md`，此处不重复展开。
 - **CI 敏感期处置（用户授权，2026-10-01）**：纯文档提交（规格、CHANGELOG 等）直推 main，不走 PR；CI 因 #272 已知抖动族挂红不重跑不回滚。代码变更不受豁免，合并仍以该提交全绿为准。至 #272 根治为止。
 - **插件设置入口**：Vsidian 面向用户的设置统一在扩展自己的设置页面展示与修改，不复用 VSCode 统一设置中心作为设置界面。后续新增设置项时，同步纳入该页面，并验证设置持久化、重新打开后的回显及变更生效。
+- **Vsidian 附加组件公开 API**（2026-10-04 设计方向）：设计或修改附加组件的发现与调用机制、公开 API、配套文档及兼容检查前，必读 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)。API 文档与 CSS 样式契约同等维护；声明、契约与版本文档以主仓库为事实源，另提供独立示例仓库，文档不要求随 Vsidian VSIX 分发。API 分稳定接口和显式实验入口；发现与安装经 VSCode，具体设置在 Vsidian 自有设置页汇总。接口与兼容检查的设计草案见 [附加组件规格](docs/specs/vsidian-addons.md)，装载、SDK 和宿主历史协调提议及最小探针范围见[技术方案](docs/design/vsidian-addon-api.md)。API 与门禁尚未实施，不将本约定、草案或探针当作已发布契约。
 - **操作与快捷键注册**：快捷键管理覆盖项目全部面向用户的可绑定操作。每次新增或修改操作，都必须评估并记录是否提供快捷键入口、默认绑定（允许默认未绑定）及生效模式；不能仅因操作不常驻工具栏就省略快捷键入口。写操作快捷键仅在 Live 编辑正文时覆盖宿主绑定，不接管源码模式或设置页输入；注册模型须支持未来其他操作按需覆盖 Live、阅读或双模式。绑定支持显式清空、单项恢复默认与全部恢复默认；清空不能因重启或升级自动恢复。插件内部冲突按键位及生效范围是否重叠判定。
 - **图形化代码块扩展约定（#111 落档）**：新增或修改「渲染成图形的围栏代码块」的语言支持、按钮组、图表弹窗或导出行为前，必读 [docs/specs/graphic-code-block-interaction.md](docs/specs/graphic-code-block-interaction.md) 的「扩展约定（落档）」节——注册表两表（`RENDERED_FENCE_LABELS` 与 `graphicRenderers.ts`）必须同步登记，三步接入清单与降级边界在其中。
 - **符号输入与行内围栏扩展约定（#103/#107/#123/#124/#125 落档）**：新增符号对、新增成对行内标记操作（粗体/斜体/删除线/行内代码类）、调整选区包裹、Tab 越界、IME 组合期输入行为或 CM6 扩展装配顺序前，必读 [docs/specs/symbol-input.md](docs/specs/symbol-input.md)——注册表驱动路径、装配顺序陷阱、「既有边界不得顺手放宽」清单与测试惯例均在其中。
@@ -83,17 +84,18 @@ vsidian/
 ├── CONTEXT.md             # 领域语言与产品边界事实源
 ├── docs/                  # 项目文档根
 │   ├── adr/        # 架构决策记录
-│   │   ├── 0001-vscode-186-remote-support.md          # VSCode 兼容下界与远程支持决策
-│   │   ├── 0002-wikilink-on-demand-resolution.md      # 双链按需解析不建持久索引
-│   │   ├── 0003-source-text-dual-view-editor.md       # 基于源文本的双视图编辑架构
-│   │   ├── 0004-stable-styling-contract.md            # 一期建立稳定样式入口
-│   │   ├── 0005-viewport-rendering.md                 # 全文模型与视口渲染分离
-│   │   ├── 0006-rebrand-to-vsidian.md                 # 统一更名为 vsidian 的映射记录
-│   │   ├── 0007-css-snippet-env-isolation.md          # CSS 片段环境隔离决策记录（#131）
-│   │   ├── 0008-workspace-reference-index.md          # 工作区引用索引架构与存储选型
-│   │   ├── 0009-referenced-document-views.md          # 引用文档视图读写分离决策
-│   │   ├── 0010-reference-edit-target-session.md      # 引用编辑的目标会话与历史归属
-│   │   └── 0011-reference-full-document-navigation.md # 引用全文可达与锚点导航决策
+│   │   ├── 0001-vscode-186-remote-support.md                  # VSCode 兼容下界与远程支持决策
+│   │   ├── 0002-wikilink-on-demand-resolution.md              # 双链按需解析不建持久索引
+│   │   ├── 0003-source-text-dual-view-editor.md               # 基于源文本的双视图编辑架构
+│   │   ├── 0004-stable-styling-contract.md                    # 一期建立稳定样式入口
+│   │   ├── 0005-viewport-rendering.md                         # 全文模型与视口渲染分离
+│   │   ├── 0006-rebrand-to-vsidian.md                         # 统一更名为 vsidian 的映射记录
+│   │   ├── 0007-css-snippet-env-isolation.md                  # CSS 片段环境隔离决策记录（#131）
+│   │   ├── 0008-workspace-reference-index.md                  # 工作区引用索引架构与存储选型
+│   │   ├── 0009-referenced-document-views.md                  # 引用文档视图读写分离决策
+│   │   ├── 0010-reference-edit-target-session.md              # 引用编辑的目标会话与历史归属
+│   │   ├── 0011-reference-full-document-navigation.md         # 引用全文可达与锚点导航决策
+│   │   └── 0012-vsidian-addons-distribution-api-governance.md # 附加组件接入与API治理决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -102,7 +104,8 @@ vsidian/
 │   │   ├── find-panel-icons-reference.png  # 查找面板图标参考图
 │   │   ├── links-panel-icons-reference.png # 链环图标参考图（反链/出链）
 │   │   ├── obsidian-selector-map.md        # Obsidian 选择器映射表
-│   │   └── outlinks-panel-reference.png    # 出链面板形态参考图
+│   │   ├── outlinks-panel-reference.png    # 出链面板形态参考图
+│   │   └── vsidian-addon-api.md            # 附加组件接口与装载技术方案
 │   ├── features.md # README 功能与设置详解下沉页
 │   ├── perf/…      # 性能实测数据与测量工具说明
 │   ├── research/   # 技术调研报告
@@ -113,6 +116,7 @@ vsidian/
 │   │   ├── obsidian-viewport-rendering.md         # 视口渲染性能补充调研
 │   │   ├── pdf-engine-compatibility-probe.md      # P3-02 PDF 引擎兼容性探针报告
 │   │   ├── vscode-1823-host-route-probes.md       # P2-01 宿主路线探针结论
+│   │   ├── vscode-addon-discovery.md              # 附加组件发现与调用边界调研
 │   │   ├── vscode-native-text-appearance-probe.md # 原生文字外观复用探针报告
 │   │   └── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
 │   ├── specs/      # 产品规格
@@ -122,6 +126,7 @@ vsidian/
 │   │   ├── batch-2026-09.md                   # 2026-09 开票批次总览
 │   │   ├── batch-2026-10-settings-sections.md # 2026-10 设置页批次实施树
 │   │   ├── batch-2026-10-vscode-ops.md        # 2026-10 编辑器操作批次实施树
+│   │   ├── batch-2026-10-vsidian-addons.md    # 附加组件验证与实施批次索引
 │   │   ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
 │   │   ├── blockquote-table.md                # 引用块内表格规格
 │   │   ├── code-block-card.md                 # 代码块卡片功能规格
@@ -157,7 +162,9 @@ vsidian/
 │   │   ├── toolbar-view-toggle.md             # 工具栏双态切换按钮规格
 │   │   ├── tooltip.md                         # 统一自绘悬停提示规格
 │   │   ├── vault-index-backlinks.md           # 引用索引与反链实施规格
-│   │   └── viewport-width.md                  # 可读行宽与双模式列布局规格
+│   │   ├── viewport-width.md                  # 可读行宽与双模式列布局规格
+│   │   ├── vsidian-addons-tickets/…           # 附加组件验证与实施票面
+│   │   └── vsidian-addons.md                  # 附加组件接入与公开API规格草案
 │   └── trees/      # 文件树子视图承载目录
 │       ├── perf.md # 性能实测归档视图
 │       └── src.md  # 源码结构视图：三端全量展开

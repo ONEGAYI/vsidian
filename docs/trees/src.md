@@ -91,7 +91,7 @@ vsidian/
     │   ├── refContent.ts         # 引用内容类型分派共享内核（#333）
     │   ├── refExpansion.ts       # 引用递归路径与容量预算
     │   ├── refText.ts            # 可读文本锚点与准入共享内核
-    │   ├── relocationScan.ts     # 重定位逐字检索扫描预算（#320）
+    │   ├── relocationScan.ts     # 嵌入重定位逐字检索预算
     │   ├── settings.ts           # 设置定义与读写纯逻辑
     │   ├── skeletonTiming.ts     # 骨架屏撤除计算与装配常量（#292）
     │   ├── styleContract.ts      # 公开样式契约清单单一事实源
