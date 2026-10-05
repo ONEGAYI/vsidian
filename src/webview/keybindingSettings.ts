@@ -114,6 +114,47 @@ export class KeybindingSettingsSection implements SettingsPageSection {
 
   constructor(private readonly bridge: SettingsPageBridge) {}
 
+  /** 视图注入的输入态变化回调（PR #346）：query/keyQuery/searchMode/filter
+   *  变化处调用，视图据此重报 uiState 携带 captureState 载荷 */
+  private stateSink: (() => void) | undefined
+
+  setStateSink(sink: () => void): void {
+    this.stateSink = sink
+  }
+
+  /**
+   * 会话内恢复（PR #346 方案 A）：序列化分页内输入态四项（搜索词 query、
+   * 键位查询 keyQuery、键位过滤模式 searchMode、筛选签 filter）。边界：
+   * 键位录制现场（selected/draft/draftRaw）与 ⋯ 菜单开合（menuOpenId）
+   * 不入载荷——恢复录制现场无意义且可能误存键位，重载后一律回到非录制
+   * 形态；恢复后的列表滚动由设置页主区 scrollTop 链路承担
+   */
+  captureState(): unknown {
+    return {
+      query: this.query,
+      keyQuery: this.keyQuery,
+      searchMode: this.searchMode,
+      filter: this.filter,
+    }
+  }
+
+  /** 应用恢复的输入态（selectSection 在 mount 前调用）。形态不符整条忽略
+   *  （旧端/损坏载荷安全降级）；text 模式强制清空键位查询——keyQuery 只
+   *  在 key 模式有意义，与 setKeyMode 的既有清理行为同源（capture 自洽
+   *  载荷不受影响） */
+  restoreState(state: unknown): void {
+    if (typeof state !== 'object' || state === null || Array.isArray(state)) return
+    const record = state as Record<string, unknown>
+    if (typeof record.query === 'string') this.query = record.query
+    if (record.searchMode === 'text' || record.searchMode === 'key') {
+      this.searchMode = record.searchMode
+    }
+    if (typeof record.keyQuery === 'string') this.keyQuery = this.searchMode === 'text' ? '' : record.keyQuery
+    if ((KEYBINDING_FILTER_KINDS as readonly string[]).includes(record.filter as string)) {
+      this.filter = record.filter as KeybindingFilterKind
+    }
+  }
+
   mount(parent: HTMLElement, focusEntry?: string): () => void {
     this.parent = parent
     if (focusEntry) {
@@ -324,6 +365,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       this.keyQuery = ''
       this.keyQueryRaw = ''
     }
+    this.stateSink?.() // 输入态变化（PR #346）：捕获态上报
     this.render()
     this.searchEl?.focus()
   }
@@ -352,6 +394,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     nameSearch.addEventListener('input', () => {
       if (this.searchMode !== 'text') return
       this.query = nameSearch.value
+      this.stateSink?.() // 输入态变化（PR #346）：捕获态上报
       this.renderRows()
     })
     nameSearch.addEventListener('keydown', (event) => {
@@ -359,6 +402,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
         if (event.key === 'Escape') {
           nameSearch.value = ''
           this.query = ''
+          this.stateSink?.()
           this.renderRows()
         }
         return
@@ -370,6 +414,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
         this.keyQuery = ''
         this.keyQueryRaw = ''
         nameSearch.value = ''
+        this.stateSink?.() // 输入态变化（PR #346）：捕获态上报
         this.renderRows()
         return
       }
@@ -379,6 +424,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       this.keyQueryRaw = chord.includes(' ') ? '' : chord
       this.keyQuery = chord
       nameSearch.value = formatBindingLabel(chord)
+      this.stateSink?.() // 输入态变化（PR #346）：捕获态上报
       this.renderRows()
     })
     const keyToggle = el('button', 'vsidian-keybindings-key-toggle') as HTMLButtonElement
@@ -427,6 +473,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       chip.addEventListener('click', () => {
         this.cancelCapture() // 筛选是离开录制意图（N-1：显式取消，不依赖帧时序）
         this.filter = kind
+        this.stateSink?.() // 输入态变化（PR #346）：捕获态上报
         this.renderFilters()
         this.renderRows()
       })

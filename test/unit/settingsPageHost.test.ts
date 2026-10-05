@@ -374,4 +374,39 @@ describe('设置页会话内 UI 态恢复（webview 上报 uiState，重开/重�
     page.injectMessage({ kind: 'settings.get' })
     expect(focusSent(fresh.sent)).toEqual([{ kind: 'settings.focusSection', section: 'appearance' }])
   })
+
+  it('uiState 带 state 载荷：宿主原样记忆（getInfo 可观测），重开握手补发携带', () => {
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    const first = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(first.panel)
+    page.open()
+    const state = { query: '粗体', keyQuery: '', searchMode: 'text', filter: 'userAssigned' }
+    page.injectMessage({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 90, state })
+    expect(page.getInfo().uiState).toEqual({ section: 'keybindings', scrollTop: 90, state })
+    page.close()
+    const second = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(second.panel)
+    page.open()
+    page.injectMessage({ kind: 'settings.get' })
+    expect(second.sent).toContainEqual({
+      kind: 'settings.focusSection', section: 'keybindings', scroll: 90, state,
+    })
+  })
+
+  it('同分页滚动上报（无 state）保留记忆的 state；跨分页上报（无 state）清除', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    page.open()
+    const state = { query: '粗体' }
+    page.injectMessage({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 0, state })
+    // 滚动上报不带 state（输入态未变省载荷）：同分页不得丢已记忆的 state
+    page.injectMessage({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 300 })
+    expect(page.getInfo().uiState).toEqual({ section: 'keybindings', scrollTop: 300, state })
+    // 切页上报不带 state（目标分页无输入态）：记忆随分页切换清除
+    page.injectMessage({ kind: 'settings.uiState', section: 'editor', scrollTop: 0 })
+    expect(page.getInfo().uiState).toEqual({ section: 'editor', scrollTop: 0 })
+  })
 })

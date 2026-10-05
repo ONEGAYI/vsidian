@@ -528,10 +528,19 @@ export type HostToWebview =
    * 条目归属路由到页内页签（片段目录/文件 → CSS 片段；overview → 样式参考；
    * 契约条目 → 详细查询）。缺省时目标分页按自身默认形态呈现（向后兼容）。
    * scroll（可选，会话内恢复）：定位后应用的主区滚动位置——面板关闭/隐藏
-   * 重载后按宿主记忆的 UI 态恢复分页与滚动；缺省 = 顶部（既有定位语义），
-   * 与 entry 不同时使用（恢复消息只带 scroll）
+   *  重载后按宿主记忆的 UI 态恢复分页与滚动；缺省 = 顶部（既有定位语义），
+   *  与 entry 不同时使用（恢复消息只带 scroll）。state（可选，PR #346）：
+   *  随恢复回放的分页内输入态载荷——webview 分页 captureState 的产物，
+   *  宿主不解释内容、原样记忆与回放；与 entry 不同时使用（显式定位语义
+   *  优先，恢复消息只带 scroll+state）
    */
-  | { kind: 'settings.focusSection'; section: string; entry?: string; scroll?: number }
+  | {
+      kind: 'settings.focusSection'
+      section: string
+      entry?: string
+      scroll?: number
+      state?: unknown
+    }
   /** 设置变更通知（#33）：任一设置项保存成功后广播到全部已打开 Vsidian
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
@@ -1418,11 +1427,20 @@ export type WebviewToHost =
    *  校验：通过才持久化并广播 settings.changed；拒绝时向来源设置页回
    *  settings.snapshot 以权威值恢复显示 */
   | { kind: 'settings.set'; values: SettingsPayload }
-  /** 设置页 UI 态上报（会话内恢复）：当前分页 id 与主区滚动位置。webview
-   *  在分页切换与主区滚动时上送，宿主记忆于扩展宿主内存（会话内存活）；
-   *  面板关闭/隐藏重载后按记忆经 settings.focusSection{scroll} 恢复。
-   *  section 为空字符串时宿主忽略（尚无激活分页——如首帧默认页未回落） */
-  | { kind: 'settings.uiState'; section: string; scrollTop: number }
+  /** 设置页 UI 态上报（会话内恢复）：当前分页 id、主区滚动位置与可选的
+   *  分页内输入态载荷。webview 在分页切换与主区滚动时上送，宿主记忆于
+   *  扩展宿主内存（会话内存活）；面板关闭/隐藏重载后按记忆经
+   *  settings.focusSection{scroll, state} 恢复。section 为空字符串时宿主
+   *  忽略（尚无激活分页——如首帧默认页未回落）。state（可选，PR #346）：
+   *  分页内输入态透传载荷（分页 captureState 的产物，宿主不解释内容）——
+   *  输入态变化与分页切换的上报携带；滚动上报不重报（输入态未变省载荷），
+   *  宿主对同分页的无 state 上报保留既有记忆，跨分页上报不带即清除 */
+  | {
+      kind: 'settings.uiState'
+      section: string
+      scrollTop: number
+      state?: unknown
+    }
   /** 请求查找选项快照（#236）：编辑器面板 init 后拉取当前三开关状态，
    *  宿主以 findOptions.snapshot 响应（workspace 级记忆权威在宿主） */
   | { kind: 'findOptions.get' }
@@ -2621,6 +2639,15 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/** 会话内恢复的 state 载荷（settings.uiState / settings.focusSection 透传，
+ *  PR #346）：宿主不解释内容——分页内输入态的内部形态由捕获方（分页的
+ *  captureState）自负，协议层只拦 postMessage 不可序列化的值（函数等），
+ *  嵌套内部同样由捕获方保证可序列化 */
+function isOpaqueStatePayload(v: unknown): boolean {
+  return v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+    || Array.isArray(v) || isObject(v)
+}
+
 /** #33 设置载荷校验：键 → 标量值（boolean/number/string）。协议层只约束
  *  形态（键值对可序列化）；键是否已定义、值是否符合类型语义由
  *  shared/settings 的定义校验判定——两层职责分离 */
@@ -3290,8 +3317,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'settings.set':
       return isSettingsPayload(v.values)
     case 'settings.uiState':
-      // 会话内恢复：分页 id（可为空串=尚无激活分页）与非负滚动位置
-      return isString(v.section) && isNonNegativeInt(v.scrollTop)
+      // 会话内恢复：分页 id（可为空串=尚无激活分页）、非负滚动位置与可选
+      // state 载荷（透传不解释内容，只拦不可序列化形态；缺省兼容旧端）
+      return isString(v.section) && isNonNegativeInt(v.scrollTop) &&
+        (v.state === undefined || isOpaqueStatePayload(v.state))
     case 'findOptions.get':
       return true
     case 'findOptions.set':
@@ -4282,9 +4311,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isSettingsPayload(v.values)
     case 'settings.focusSection':
       // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）；
-      // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用
+      // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用；
+      // state（PR #346）可选透传载荷（分页内输入态回放），同与 entry 不同时
+      // 使用（互斥由发送方保证，形态层只拦不可序列化值）
       return isString(v.section) && (v.entry === undefined || isString(v.entry)) &&
-        (v.scroll === undefined || isNonNegativeInt(v.scroll))
+        (v.scroll === undefined || isNonNegativeInt(v.scroll)) &&
+        (v.state === undefined || isOpaqueStatePayload(v.state))
     case 'settings.changed':
       return isSettingsPayload(v.values)
     case 'findOptions.snapshot':

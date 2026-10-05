@@ -998,11 +998,12 @@ describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面�
     return sent.filter((m) => (m as { kind?: string }).kind === 'settings.uiState') as never
   }
 
-  it('切换分页上报 uiState：section 为目标分页，scrollTop 为复位后的 0', () => {
+  it('切换分页上报 uiState：section 为目标分页，scrollTop 为复位后的 0；分页有输入态时携带 state 载荷', () => {
     const { sent, parent } = makeTrackedFullView()
     clickNav(parent, zhCn['appearance.title'])
     expect(uiStateMessages(sent).at(-1)).toEqual({
       kind: 'settings.uiState', section: 'appearance', scrollTop: 0,
+      state: { tab: 'cssSnippets' },
     })
   })
 
@@ -1074,6 +1075,103 @@ describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面�
     view.handleHostMessage({ kind: 'settings.focusSection', section: 'general' })
     expect(parent.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['settings.generalSection'])
     expect(mainEl(parent).scrollTop).toBe(0)
+  })
+})
+
+describe('会话内恢复：state 载荷（分页内输入态上报与恢复，方案 A）', () => {
+  function makeTrackedFullView(): { view: SettingsPageView; sent: unknown[]; parent: HTMLElement } {
+    const sent: unknown[] = []
+    const snippets = new CssSnippetSettingsSection({ postMessage() {} })
+    const appearance = new AppearanceSection(
+      snippets, new StyleReferenceSection({ postMessage() {} }))
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [new KeybindingSettingsSection({ postMessage() {} }), appearance, new IndexMaintenanceSection({ postMessage() {} })],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, sent, parent }
+  }
+  const uiStateMessages = (sent: unknown[]) =>
+    sent.filter((m) => (m as { kind?: string }).kind === 'settings.uiState')
+  const keySearch = (parent: HTMLElement) =>
+    parent.querySelector<HTMLInputElement>('.vsidian-keybindings-search')!
+  const keyChip = (parent: HTMLElement, kind: string) =>
+    parent.querySelector<HTMLButtonElement>(`.vsidian-keybindings-filter[data-filter="${kind}"]`)!
+
+  it('快捷键页输入态变化经 sink 即时上报：uiState 携带 captureState 载荷', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['keybindingSettings.title'])
+    sent.length = 0
+    keySearch(parent).value = '粗体'
+    keySearch(parent).dispatchEvent(new Event('input', { bubbles: true }))
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({
+      kind: 'settings.uiState', section: 'keybindings',
+      state: { query: '粗体', searchMode: 'text', filter: 'all' },
+    })
+    keyChip(parent, 'userAssigned').click()
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({
+      state: { query: '粗体', filter: 'userAssigned' },
+    })
+  })
+
+  it('滚动上报不携带 state（输入态未变省载荷）：同分页滚动不重复报 state', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['keybindingSettings.title'])
+    keySearch(parent).value = '粗体'
+    keySearch(parent).dispatchEvent(new Event('input', { bubbles: true }))
+    sent.length = 0
+    const main = parent.querySelector<HTMLElement>('.vsidian-settings-main')!
+    main.scrollTop = 120
+    main.dispatchEvent(new Event('scroll'))
+    const last = uiStateMessages(sent).at(-1) as { state?: unknown }
+    expect(last).toMatchObject({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 120 })
+    expect('state' in last && last.state !== undefined).toBe(false)
+  })
+
+  it('focusSection 带 state（恢复形态）：分页内输入态还原（mount 前应用）', () => {
+    const { view, parent } = makeTrackedFullView()
+    view.handleHostMessage({
+      kind: 'settings.focusSection', section: 'keybindings', scroll: 0,
+      state: { query: '粗体', keyQuery: '', searchMode: 'text', filter: 'userAssigned' },
+    })
+    expect(keySearch(parent).value).toBe('粗体')
+    expect(keyChip(parent, 'userAssigned').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('focusSection 带 entry（显式定位）：不应用 state（定位优先，防御性跳过）', () => {
+    const { view, parent } = makeTrackedFullView()
+    view.handleHostMessage({
+      kind: 'settings.focusSection', section: 'keybindings', entry: 'italic',
+      state: { query: '粗体', keyQuery: '', searchMode: 'text', filter: 'userAssigned' },
+    })
+    // 显式定位语义：mount 的 focusEntry 清空分支生效，恢复载荷不得落地
+    expect(keySearch(parent).value).toBe('')
+    expect(keyChip(parent, 'all').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('外观页签选择经 state 载荷上报与恢复', () => {
+    const { view, sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    sent.length = 0
+    parent.querySelector<HTMLButtonElement>('.vsidian-style-ref-tab[data-tab="overview"]')!.click()
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({
+      kind: 'settings.uiState', section: 'appearance', state: { tab: 'overview' },
+    })
+    // 面板重载路径：宿主回放 state → 页签还原为样式参考
+    view.handleHostMessage({
+      kind: 'settings.focusSection', section: 'appearance', scroll: 0, state: { tab: 'detail' },
+    })
+    expect(parent.querySelector('.vsidian-style-ref-tab[data-tab="detail"]')!.getAttribute('aria-selected')).toBe('true')
+    expect(parent.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(false)
+  })
+
+  it('无输入态分页（general）上报不带 state 字段：旧消息形态保持', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['settings.generalSection'])
+    const last = uiStateMessages(sent).at(-1) as { state?: unknown }
+    expect('state' in last && last.state !== undefined).toBe(false)
   })
 })
 

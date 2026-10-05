@@ -397,9 +397,12 @@ try {
     await page.getByRole('button', { name: zhCn['styleRef.exportJson'], exact: true }).click()
     assert.equal(await page.evaluate(() => window.sentMessages.some(m => m.kind === 'styleRef.export')), true)
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-style-ref.png`) })
-    // #231：CSS 片段为外观分页第一页签（侧栏点「外观」默认即落此页签）；
-    // 远程缓存说明为 callout 形态（左强调条 + 圆角色底，绘制层）
+    // #231：CSS 片段为外观分页第一页签；远程缓存说明为 callout 形态
+    // （左强调条 + 圆角色底，绘制层）。页签选择会话内记忆（PR #346）：
+    // 用例此前停在「详细查询」，侧栏重入外观后保持该页签——显式点回
+    // 第一页签再断言 callout
     await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
+    await page.locator('.vsidian-style-ref-tab').nth(0).click()
     const remoteNote = page.locator('.vsidian-css-snippets-remote-note')
     await remoteNote.waitFor()
     const calloutPaint = await remoteNote.evaluate(el => {

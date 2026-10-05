@@ -38,6 +38,31 @@ export class AppearanceSection implements SettingsPageSection {
   constructor(private readonly snippets: CssSnippetSettingsSection,
     private readonly styleRef: StyleReferenceSection) {}
 
+  /** 当前页内页签（会话内恢复，PR #346）：切页签时记录；mount 无定位时
+   *  按！它呈现（有 focusEntry 时定位路由优先——显式定位语义不变） */
+  private activeTab: AppearanceTab = 'cssSnippets'
+  /** 视图注入的输入态变化回调：页签切换时重报 uiState 携带 captureState */
+  private stateSink: (() => void) | undefined
+
+  setStateSink(sink: () => void): void {
+    this.stateSink = sink
+  }
+
+  /** 会话内恢复：捕获当前页签选择（分页内输入态的最小集——外观页无
+   *  其他自由输入，页签即全部浏览状态） */
+  captureState(): unknown {
+    return { tab: this.activeTab }
+  }
+
+  /** 应用恢复的页签（selectSection 在 mount 前调用）；形态不符整条忽略 */
+  restoreState(state: unknown): void {
+    if (typeof state !== 'object' || state === null || Array.isArray(state)) return
+    const tab = (state as Record<string, unknown>).tab
+    if (tab === 'cssSnippets' || tab === 'overview' || tab === 'detail') {
+      this.activeTab = tab
+    }
+  }
+
   /** 全局搜索索引：聚合两子分页条目（片段域 + 契约域），点击后按归属路由 */
   get entries() {
     return [...this.snippets.entries, ...this.styleRef.entries]
@@ -45,7 +70,8 @@ export class AppearanceSection implements SettingsPageSection {
 
   mount(parent: HTMLElement, focusEntry?: string): () => void {
     parent.replaceChildren()
-    const tab = routeAppearanceTab(focusEntry)
+    // 定位路由优先（显式定位语义）：无定位时按记忆页签呈现（会话内恢复）
+    const tab = focusEntry ? routeAppearanceTab(focusEntry) : this.activeTab
 
     // ---- 三页签 tablist：复用样式参考页签机制（类名/aria 语义与 #155 同源，
     // settingsPage.css 的页签样式契约与 detail 可见时主区滚动规则照常生效）----
@@ -78,6 +104,12 @@ export class AppearanceSection implements SettingsPageSection {
       }
       for (const [id, panel] of Object.entries(panels) as Array<[AppearanceTab, HTMLElement]>) {
         panel.toggleAttribute('hidden', id !== selected)
+      }
+      // 会话内恢复（PR #346）：页签选择变化时入捕获态并通知上报——同值
+      // 的重渲染（mount 初始 setTab、换包重建）不重复上报
+      if (this.activeTab !== selected) {
+        this.activeTab = selected
+        this.stateSink?.()
       }
     }
     for (const id of ['cssSnippets', 'overview', 'detail'] as const) {

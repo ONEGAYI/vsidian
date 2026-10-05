@@ -25,7 +25,7 @@ try {
    *  提供，缺样式时 scrollTop 恒 0，滚动链路无从验证 */
   async function loadSettingsPage(hostReplies = []) {
     await page.setContent(`<html lang="zh-CN"><body class="vscode-dark">${islandHtml}<div id="app"></div></body></html>`)
-    await page.addStyleTag({ content: `:root { --vscode-font-family: "Segoe UI", "Microsoft YaHei", sans-serif; --vscode-editor-background:#1e1e1e; --vscode-editor-foreground:#dddddd; --vscode-sideBar-background:#252526; --vscode-descriptionForeground:#aaaaaa; --vscode-list-activeSelectionBackground:#373d49; --vscode-list-activeSelectionForeground:#ffffff; --vscode-input-background:#313136; --vscode-input-foreground:#dddddd; --vscode-panel-border:#474750; --vscode-focusBorder:#2687d4; }` })
+    await page.addStyleTag({ content: `:root { --vscode-font-family: "Segoe UI", "Microsoft YaHei", sans-serif; --vscode-editor-background:#1e1e1e; --vscode-editor-foreground:#dddddd; --vscode-sideBar-background:#252526; --vscode-descriptionForeground:#aaaaaa; --vscode-list-activeSelectionBackground:#373d49; --vscode-list-activeSelectionForeground:#ffffff; --vscode-input-background:#313136; --vscode-input-foreground:#dddddd; --vscode-panel-border:#474750; --vscode-focusBorder:#2687d4; } .vsidian-settings-main { height: 420px !important; }` })
     await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
     await page.evaluate((replies) => {
       window.savedSettings = {}
@@ -90,6 +90,75 @@ try {
     const last = states.at(-1)
     return last && last.section === 'editor' && last.scrollTop === expected
   }, Math.round(scrolled))
+  assert.equal(await mainEl().evaluate((el) => el.scrollTop), scrolled, '重载后滚动应恢复到记忆位置')
+
+  // ---- 快捷键分页输入态恢复（PR #346 方案 A：state 载荷）----
+  // 快捷键页此前是会话内恢复的漏网之鱼：分页 id 与主区滚动经 uiState 恢复
+  // 了，但搜索词/筛选签/键位过滤模式丢失（webview 销毁即失）。用例覆盖
+  // 重载路径的三态恢复：搜索词、筛选签（userAssigned）与滚动位。
+  // 可滚性保障：主区高度在装载注入中压到 420px（loadSettingsPage 固定
+  // 样式，重载同样生效），overrides 覆盖表格族七操作——userAssigned 筛选
+  // 下七行（标题均含「表格」），内容超出可视高，滚动恢复断言才有意义
+  // （选 editor 分页的同款理由）
+  const kbOverrides = {}
+  const tableOpIds = ['tableCreate', 'insertRowAbove', 'insertRowBelow', 'deleteRow',
+    'insertColumnLeft', 'insertColumnRight', 'deleteColumn']
+  for (const [index, id] of tableOpIds.entries()) {
+    kbOverrides[id] = [`ctrl+alt+${index}`] // 唯一键位（互不冲突，也不撞默认绑定）
+  }
+  kbOverrides.bold = []
+  const kbSnapshot = { kind: 'keybindings.snapshot', overrides: kbOverrides }
+  await loadSettingsPage([kbSnapshot])
+  await page.locator('.vsidian-settings-nav-item').first().waitFor()
+  await page.getByRole('button', { name: zhCn['keybindingSettings.title'], exact: true }).click()
+  await page.waitForFunction(() =>
+    window.sentMessages.some((m) => m.kind === 'settings.uiState' && m.section === 'keybindings'))
+  const kbSearch = page.locator('.vsidian-keybindings-search')
+  await kbSearch.fill('表格')
+  await page.locator('.vsidian-keybindings-filter[data-filter="userAssigned"]').click()
+  // 输入态变化即时报：uiState 携带 state 载荷（captureState 四项）
+  await page.waitForFunction(() => {
+    const last = window.sentMessages.filter((m) => m.kind === 'settings.uiState').at(-1)
+    return last?.state?.filter === 'userAssigned' && last?.state?.query === '表格'
+  })
+  const kbScrolled = await page.evaluate(() => {
+    const main = document.querySelector('.vsidian-settings-main')
+    main.scrollTop = 260
+    return main.scrollTop
+  })
+  assert.ok(kbScrolled > 0, '快捷键页筛选后内容应可滚动（否则恢复断言无意义）')
+  // 滚动上报到达后再取消息（scroll 事件在赋值后异步派发）
+  await page.waitForFunction((expected) => {
+    const last = window.sentMessages.filter((m) => m.kind === 'settings.uiState').at(-1)
+    return last?.section === 'keybindings' && last.scrollTop === expected
+  }, Math.round(kbScrolled))
+  // 滚动上报不重报 state（输入态未变省载荷）：带 state 的最近一条仍是输入
+  // 态变化时的上报，其后纯滚动消息不带 state 字段
+  const kbStates = await uiStates()
+  const kbState = kbStates.filter((m) => m.state).at(-1).state
+  assert.deepEqual(kbState, { query: '表格', keyQuery: '', searchMode: 'text', filter: 'userAssigned' })
+  const kbScrollReport = kbStates.at(-1)
+  assert.equal(kbScrollReport.scrollTop, Math.round(kbScrolled), '滚动上报应携带取整后的滚动位置')
+  assert.ok(!('state' in kbScrollReport), '纯滚动上报不得携带 state 载荷（省载荷契约）')
+
+  // 重载（假宿主按记忆回放完整握手序列：keybindings.snapshot →
+  // focusSection{scroll, state} → locale.changed——换包重渲染不破坏恢复态）
+  await loadSettingsPage([
+    kbSnapshot,
+    { kind: 'settings.focusSection', section: 'keybindings', scroll: kbScrolled, state: kbState },
+    { kind: 'locale.changed', lang: 'zh-cn', messages: zhCn },
+  ])
+  await page.locator('.vsidian-keybindings-search').waitFor()
+  // 三态恢复断言：搜索词、筛选签、滚动位
+  assert.equal(await page.locator('.vsidian-keybindings-search').inputValue(), '表格', '重载后搜索词应恢复')
+  assert.equal(
+    await page.locator('.vsidian-keybindings-filter[data-filter="userAssigned"]').getAttribute('aria-pressed'),
+    'true', '重载后筛选签应恢复为 userAssigned')
+  const kbRowCount = await page.locator('.vsidian-keybindings-row').count()
+  assert.equal(kbRowCount, 7, '恢复的搜索词+筛选签应过滤出表格族七行')
+  await page.waitForFunction((expected) =>
+    document.querySelector('.vsidian-settings-main').scrollTop === expected, kbScrolled)
+  assert.equal(await mainEl().evaluate((el) => el.scrollTop), kbScrolled, '重载后快捷键页滚动应恢复到记忆位置')
   assert.deepEqual(errors, [], '页面不得有未捕获错误')
 } finally {
   await browser.close()

@@ -428,3 +428,130 @@ describe('#164 装载快照幂等（间歇竞态源）', () => {
     root.remove()
   })
 })
+
+describe('会话内恢复：captureState/restoreState（分页内输入态透传载荷）', () => {
+  /** 生产口径装配：mount 后推快照，返回句柄 */
+  function setupRestore(overrides: Record<string, string[]> = {}) {
+    const section = new KeybindingSettingsSection({ postMessage: () => {} })
+    const root = document.createElement('div')
+    document.body.append(root)
+    section.mount(root)
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides })
+    return { section, root, cleanup: () => root.remove() }
+  }
+  const searchOf = (root: HTMLElement) => root.querySelector<HTMLInputElement>('.vsidian-keybindings-search')!
+  const chipOf = (root: HTMLElement, kind: string) =>
+    root.querySelector<HTMLButtonElement>(`.vsidian-keybindings-filter[data-filter="${kind}"]`)!
+  const rowIds = (root: HTMLElement) => [...root.querySelectorAll('.vsidian-keybindings-row')]
+    .map((r) => r.getAttribute('data-operation-id'))
+
+  it('captureState 序列化四项输入态（query/keyQuery/searchMode/filter）', () => {
+    const { section, root, cleanup } = setupRestore({ bold: [] })
+    searchOf(root).value = '粗体'
+    searchOf(root).dispatchEvent(new Event('input', { bubbles: true }))
+    chipOf(root, 'userAssigned').click()
+    const state = section.captureState() as Record<string, unknown>
+    expect(state).toEqual({ query: '粗体', keyQuery: '', searchMode: 'text', filter: 'userAssigned' })
+    cleanup()
+  })
+
+  it('录制现场不入载荷：捕获中 captureState 仍只产出四项（selected/draft/菜单开合不产出）', () => {
+    const { section, root, cleanup } = setupRestore()
+    rowOf(root, 'bold').querySelector<HTMLButtonElement>('.vsidian-keybindings-add')!.click()
+    const capture = rowOf(root, 'bold').querySelector<HTMLInputElement>('.vsidian-keybindings-capture')!
+    capture.dispatchEvent(chord('b'))
+    rowOf(root, 'bold').querySelector<HTMLButtonElement>('.vsidian-keybindings-menu-btn')!.click()
+    const state = section.captureState() as Record<string, unknown>
+    // 边界契约：录制（selected/draft）与 ⋯ 菜单开合恢复无意义且可能误存键位，
+    // 载荷不得携带这些键
+    expect(Object.keys(state).sort()).toEqual(['filter', 'keyQuery', 'query', 'searchMode'])
+    cleanup()
+  })
+
+  it('restoreState 恢复四项并反映到渲染：搜索词、筛选签、行过滤', () => {
+    const { section, root, cleanup } = setupRestore({
+      bold: [], italic: ['ctrl+b'], find: ['ctrl+b'],
+    })
+    // 模拟面板重载：全新 mount 前 restore（selectSection 链路的调用时序）
+    section.restoreState({ query: '粗', searchMode: 'text', keyQuery: '', filter: 'userAssigned' })
+    expect(searchOf(root).value).toBe('')  // 旧 DOM 不受影响（restore 只改字段）
+    const fresh = document.createElement('div')
+    document.body.append(fresh)
+    section.mount(fresh)
+    expect(searchOf(fresh).value).toBe('粗')
+    expect(chipOf(fresh, 'userAssigned').getAttribute('aria-pressed')).toBe('true')
+    // userAssigned 命中 bold/italic/find，query「粗」仅匹配操作名「粗体」
+    expect(rowIds(fresh)).toEqual(['bold'])
+    fresh.remove()
+    cleanup()
+  })
+
+  it('restoreState 恢复键位过滤模式：searchMode=key 时搜索框为捕获面（readOnly）', () => {
+    const { section, cleanup } = setupRestore({ inlineMath: ['ctrl+k ctrl+m'] })
+    section.restoreState({ query: '', keyQuery: 'ctrl+k ctrl+m', searchMode: 'key', filter: 'all' })
+    const fresh = document.createElement('div')
+    document.body.append(fresh)
+    section.mount(fresh)
+    const search = fresh.querySelector<HTMLInputElement>('.vsidian-keybindings-search')!
+    expect(search.readOnly).toBe(true)
+    expect(search.value).toBe('Ctrl+K Ctrl+M')
+    expect(rowIds(fresh)).toEqual(['inlineMath'])
+    fresh.remove()
+    cleanup()
+  })
+
+  it('restoreState 形态不符整条忽略（null/字符串/未知 filter 值不落入字段）', () => {
+    const { section, cleanup } = setupRestore()
+    section.restoreState(null)
+    section.restoreState('keybindings')
+    section.restoreState({ query: 42, filter: 'nonsense', searchMode: 'voice' })
+    const state = section.captureState() as Record<string, unknown>
+    expect(state).toEqual({ query: '', keyQuery: '', searchMode: 'text', filter: 'all' })
+    cleanup()
+  })
+
+  it('restore 不重建录制现场：恢复后无捕获签、＋在位（selected/draft 不入载荷的回放侧）', () => {
+    const { section, cleanup } = setupRestore()
+    section.restoreState({ query: '粗体', searchMode: 'text', keyQuery: '', filter: 'all' })
+    const fresh = document.createElement('div')
+    document.body.append(fresh)
+    section.mount(fresh)
+    expect(fresh.querySelector('.vsidian-keybindings-capture')).toBeNull()
+    expect(rowOf(fresh, 'bold').querySelector('.vsidian-keybindings-add')).toBeTruthy()
+    fresh.remove()
+    cleanup()
+  })
+
+  it('显式定位优先于恢复：mount 带 focusEntry 时输入态清空（既有清空分支保持）', () => {
+    const { section, cleanup } = setupRestore()
+    section.restoreState({ query: '粗体', searchMode: 'text', keyQuery: '', filter: 'userAssigned' })
+    const fresh = document.createElement('div')
+    document.body.append(fresh)
+    section.mount(fresh, 'italic')
+    expect(searchOf(fresh).value).toBe('')
+    expect(chipOf(fresh, 'all').getAttribute('aria-pressed')).toBe('true')
+    // 定位目标行在场（捕获签就地打开，与全局搜索定位行为一致）
+    expect(rowOf(fresh, 'italic').querySelector('.vsidian-keybindings-capture')).toBeTruthy()
+    fresh.remove()
+    cleanup()
+  })
+
+  it('setStateSink：输入态变化经 sink 通知（视图据此重报 uiState 携带 state）', () => {
+    const sinkCalls: number[] = []
+    const { section, root, cleanup } = setupRestore()
+    section.setStateSink(() => sinkCalls.push(1))
+    const before = sinkCalls.length
+    searchOf(root).value = '粗体'
+    searchOf(root).dispatchEvent(new Event('input', { bubbles: true }))
+    expect(sinkCalls.length).toBe(before + 1)
+    chipOf(root, 'conflict').click()
+    expect(sinkCalls.length).toBe(before + 2)
+    root.querySelector<HTMLButtonElement>('.vsidian-keybindings-key-toggle')!.click()
+    expect(sinkCalls.length).toBe(before + 3)
+    cleanup()
+  })
+})
+
+function rowOf(root: HTMLElement, id: string): HTMLElement {
+  return root.querySelector<HTMLElement>(`[data-operation-id="${id}"]`)!
+}

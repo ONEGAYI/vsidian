@@ -1946,6 +1946,33 @@ describe('设置消息协议（#33）', () => {
     // 方向校验：宿主方向不接受
     expect(isHostToWebview({ kind: 'settings.uiState', section: 'editor', scrollTop: 0 })).toBe(false)
   })
+
+  it('settings.uiState state（会话内恢复输入态载荷）：可选透传，缺失兼容旧端，不可序列化形态拒绝', () => {
+    // 带 state：分页内输入态透传（宿主不解释内容，捕获方自查内部形态），
+    // 协议层只拦 postMessage 不可序列化的值（函数等）
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 0, state: { query: '粗体', filter: 'userAssigned' } })).toBe(true)
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'appearance', scrollTop: 88, state: { tab: 'overview' } })).toBe(true)
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 0, state: [] })).toBe(true)
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 0, state: null })).toBe(true)
+    // 缺 state：旧端（无输入态载荷的上报）兼容，整条仍合法
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'editor', scrollTop: 30 })).toBe(true)
+    // 拒绝：函数值不可 postMessage 序列化
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 0, state: () => {} })).toBe(false)
+    // 方向校验：宿主方向不接受
+    expect(isHostToWebview({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 0, state: {} })).toBe(false)
+  })
+
+  it('settings.focusSection state（会话内恢复输入态回放）：可选透传，缺失兼容旧端，不可序列化形态拒绝', () => {
+    // 恢复形态：section + scroll + state（重载后按记忆回放分页内输入态）
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'keybindings', scroll: 88, state: { query: '粗体', searchMode: 'text', filter: 'userAssigned' } })).toBe(true)
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'appearance', scroll: 0, state: { tab: 'detail' } })).toBe(true)
+    // 缺 state：既有恢复形态（分页 + 滚动）不变，向后兼容
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'editor', scroll: 120 })).toBe(true)
+    // 拒绝：函数值不可序列化
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'keybindings', scroll: 0, state: () => {} })).toBe(false)
+    // 方向校验：webview 方向不接受
+    expect(isWebviewToHost({ kind: 'settings.focusSection', section: 'keybindings', scroll: 0, state: {} })).toBe(false)
+  })
 })
 
 describe('图表导出协议校验（#111）', () => {
