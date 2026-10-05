@@ -10,6 +10,8 @@ import {
   normalizeColorHex,
   parseClassifierString,
   pickSemanticCustomRules,
+  resolveActiveThemeSettingsId,
+  resolveDefaultForeground,
   resolveTextMateColor,
   stripJsonc,
 } from '../../src/host/textAppearance/themeResolution'
@@ -196,5 +198,55 @@ describe('主题 include 链合并', () => {
     const theme = await loadThemeChain('d:/ext/themes/own.json', async (p) => files[p])
     expect(theme.chain).toEqual(['d:/ext/themes/base.json', 'd:/ext/themes/own.json'])
     expect(theme.tokenColors).toHaveLength(1)
+  })
+})
+
+describe('主题身份解析（autoDetect 跟随系统深浅）', () => {
+  it('跟随关闭：一律用手选值，preferred 在场也不用', () => {
+    expect(resolveActiveThemeSettingsId('Dark+', false, true, 'Dark 2026', 'Light 2026')).toBe('Dark+')
+  })
+
+  it('跟随开启 + 深侧（Dark/HighContrast）：取 preferredDark', () => {
+    expect(resolveActiveThemeSettingsId('Light 2026', true, true, 'Dark 2026', 'Light Modern')).toBe('Dark 2026')
+  })
+
+  it('跟随开启 + 浅侧（Light/HighContrastLight）：取 preferredLight', () => {
+    expect(resolveActiveThemeSettingsId('Dark+', true, false, 'Dark Modern', 'Light 2026')).toBe('Light 2026')
+  })
+
+  it('跟随开启但 preferred 缺席或空串：回退手选值（不产出空身份）', () => {
+    expect(resolveActiveThemeSettingsId('Dark+', true, true, undefined, 'Light 2026')).toBe('Dark+')
+    expect(resolveActiveThemeSettingsId('Dark+', true, false, 'Dark 2026', '')).toBe('Dark+')
+  })
+})
+
+describe('主题默认前景补全链（dark_plus 类主题 colors 无 editor.foreground）', () => {
+  it('colors 显式定义：直用（dark_vs/2026-light 场景）', () => {
+    expect(resolveDefaultForeground({ 'editor.foreground': '#D4D4D4' }, [])).toBe('#D4D4D4')
+  })
+
+  it('colors 缺席：取 tokenColors 无 scope 规则的前景（dark_plus 场景 #D4D4D4，归一化小写）', () => {
+    const rules = [
+      { settings: { foreground: '#D4D4D4' } },
+      { scope: 'comment', settings: { foreground: '#6A9955' } },
+    ]
+    expect(resolveDefaultForeground({}, rules)).toBe('#d4d4d4')
+  })
+
+  it('带 scope 的规则不参与补全（原生默认 token 色只认无 scope 规则）', () => {
+    const rules = [{ scope: 'comment', settings: { foreground: '#6A9955' } }]
+    expect(resolveDefaultForeground({}, rules)).toBe('#000000')
+  })
+
+  it('多条无 scope 规则：后一条胜（include 先 own 后的追加覆盖序，与 textmate 引擎同构）', () => {
+    const rules = [
+      { settings: { foreground: '#111111' } },
+      { settings: { foreground: '#222222' } },
+    ]
+    expect(resolveDefaultForeground({}, rules)).toBe('#222222')
+  })
+
+  it('两处都无定义：保底 #000000（现行兜底值不变）', () => {
+    expect(resolveDefaultForeground({}, [])).toBe('#000000')
   })
 })

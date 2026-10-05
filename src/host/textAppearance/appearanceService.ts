@@ -28,6 +28,8 @@ import {
   buildCustomTokenRules,
   loadThemeChain,
   pickSemanticCustomRules,
+  resolveActiveThemeSettingsId,
+  resolveDefaultForeground,
   resolveSemanticColor,
   type LoadedTheme,
   type SemanticStyleRule,
@@ -79,6 +81,7 @@ export class TextAppearanceService {
   private pipeline: ThemePipeline | null = null
   private pipelineKey = ''
   private enginePromise: Promise<TextMateEngine | null> | null = null
+  private enginePipelineKey = ''
 
   constructor(private readonly onigWasmPath: string) {}
 
@@ -88,6 +91,7 @@ export class TextAppearanceService {
     this.pipeline = null
     this.pipelineKey = ''
     this.enginePromise = null
+    this.enginePipelineKey = ''
   }
 
   /** 扩展清单扫描（grammars + themes 贡献；缓存到失效） */
@@ -135,7 +139,18 @@ export class TextAppearanceService {
   private async pipelineOf(): Promise<ThemePipeline | null> {
     const workbench = vscode.workspace.getConfiguration('workbench')
     const editor = vscode.workspace.getConfiguration('editor')
-    const themeSettingsId = String(workbench.get('colorTheme') ?? '')
+    // 生效主题身份（autoDetect 语义复刻）：跟随系统深浅开启时
+    // workbench.colorTheme 配置值是手选历史值，真实生效主题按
+    // activeColorTheme 深浅取 preferred 值（Dark/HighContrast 为深侧）
+    const kind = vscode.window.activeColorTheme.kind
+    const prefersDark = kind === vscode.ColorThemeKind.Dark || kind === vscode.ColorThemeKind.HighContrast
+    const themeSettingsId = resolveActiveThemeSettingsId(
+      String(workbench.get('colorTheme') ?? ''),
+      vscode.workspace.getConfiguration('window').get<boolean>('autoDetectColorScheme') ?? false,
+      prefersDark,
+      workbench.get<string>('preferredDarkColorTheme'),
+      workbench.get<string>('preferredLightColorTheme'),
+    )
     const tokenCustom = editor.get('tokenColorCustomizations') as TokenColorCustomizations | undefined
     const semanticCustom = editor.get('semanticTokenColorCustomizations')
     const key = JSON.stringify([themeSettingsId, tokenCustom ?? null, semanticCustom ?? null])
@@ -166,17 +181,22 @@ export class TextAppearanceService {
     return pipeline
   }
 
-  /** TM 引擎（惰性单例；失败返回 null 允许下次重试） */
+  /** TM 引擎（惰性单例 + 主题身份自愈；失败返回 null 允许下次重试）。
+   *  身份自愈：每次请求先重读管线（pipelineOf 每次重读配置算 key），key
+   *  与引擎装配时不一致即重建——主题事件（跟随系统深浅切换等）缺失或监
+   *  听遗漏时，配置/深浅漂移在下一次请求自愈，不依赖 invalidate 的时序 */
   private async engineOf(): Promise<TextMateEngine | null> {
-    if (this.enginePromise !== null) {
+    const pipeline = await this.pipelineOf()
+    if (pipeline === null) {
+      return null
+    }
+    if (this.enginePromise !== null && this.enginePipelineKey === this.pipelineKey) {
       return this.enginePromise
     }
+    const pipelineKey = this.pipelineKey
+    this.enginePipelineKey = pipelineKey
     this.enginePromise = (async (): Promise<TextMateEngine | null> => {
       try {
-        const pipeline = await this.pipelineOf()
-        if (pipeline === null) {
-          return null
-        }
         const engine = await TextMateEngine.create(this.onigWasmPath, this.inventoryOf().grammars)
         // 扁平规则序（原生同构）：默认（editor.foreground/background）→
         // 主题链 tokenColors → 用户自定义
@@ -185,7 +205,13 @@ export class TextAppearanceService {
           ...pipeline.theme.tokenColors,
           ...pipeline.customTokenRules,
         ]
-        engine.setTheme(pipeline.themeSettingsId, flatRules, pipeline.theme.colors['editor.foreground'] ?? '#000000')
+        // 默认前景补全链（原生同口径）：dark_plus 类主题 colors 段无
+        // editor.foreground，正文色定义在 tokenColors 无 scope 规则里
+        engine.setTheme(
+          pipeline.themeSettingsId,
+          flatRules,
+          resolveDefaultForeground(pipeline.theme.colors, pipeline.theme.tokenColors),
+        )
         return engine
       } catch {
         return null
@@ -195,6 +221,7 @@ export class TextAppearanceService {
     void this.enginePromise.then((engine) => {
       if (engine === null) {
         this.enginePromise = null
+        this.enginePipelineKey = ''
       }
     })
     return this.enginePromise

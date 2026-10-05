@@ -1097,6 +1097,9 @@ export function createTextEditorProvider(
   }
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration('workbench.colorTheme') ||
+      event.affectsConfiguration('workbench.preferredDarkColorTheme') ||
+      event.affectsConfiguration('workbench.preferredLightColorTheme') ||
+      event.affectsConfiguration('window.autoDetectColorScheme') ||
       event.affectsConfiguration('editor.tokenColorCustomizations') ||
       event.affectsConfiguration('editor.semanticTokenColorCustomizations') ||
       event.affectsConfiguration('editor.fontFamily') ||
@@ -1105,6 +1108,13 @@ export function createTextEditorProvider(
       event.affectsConfiguration('editor.lineNumbers')) {
       broadcastAppearanceChanged()
     }
+  }))
+  context.subscriptions.push(vscode.window.onDidChangeActiveColorTheme(() => {
+    // 生效主题变化（跟随系统深浅的自动切换、主题预览回落）：此路径
+    // workbench.colorTheme 配置值不动、无 configuration 事件——主题身份
+    // 复刻（appearanceService 按深浅取 preferred）依赖本事件触发失效与
+    // 广播，否则已装配引擎停留旧主题（#340 着色发灰根因修复面）
+    broadcastAppearanceChanged()
   }))
   context.subscriptions.push(vscode.extensions.onDidChange(() => {
     // 扩展安装/卸载：grammar/主题贡献集变化（#335 韧性口径——清单重扫）

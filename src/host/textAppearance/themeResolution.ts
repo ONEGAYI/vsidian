@@ -206,6 +206,47 @@ function joinPath(dir: string, rel: string): string {
   return isWindowsDrive ? joined : `/${joined}`
 }
 
+/** 主题身份解析（主题服务 autoDetect 语义复刻）：跟随系统深浅开启时，
+ *  生效主题按深浅取 preferred 值而非 workbench.colorTheme 手选值——后者
+ *  在跟随模式下保持历史值不随系统切换更新（2026-10 着色发灰根因：配置值
+ *  ≠生效主题）。preferred 缺席或空串回退手选值，不产出空身份 */
+export function resolveActiveThemeSettingsId(
+  colorTheme: string,
+  autoDetect: boolean,
+  prefersDark: boolean,
+  preferredDark: string | undefined,
+  preferredLight: string | undefined,
+): string {
+  if (!autoDetect) {
+    return colorTheme
+  }
+  const preferred = prefersDark ? preferredDark : preferredLight
+  return typeof preferred === 'string' && preferred.length > 0 ? preferred : colorTheme
+}
+
+/** 主题默认前景补全链（原生 colorThemeData 同口径）：colors 段的
+ *  editor.foreground 优先；缺席时取 tokenColors 无 scope 规则（主题默认
+ *  token 色，dark_plus 类主题的正文色只定义在这里——直读 colors 会错拿
+ *  #000000 兜底）；多条无 scope 规则后一条胜（include 先 own 后的追加覆
+ *  盖序，与 textmate 引擎内同分覆盖同构） */
+export function resolveDefaultForeground(colors: Record<string, string>, tokenColors: ThemedTokenRule[]): string {
+  const explicit = colors['editor.foreground']
+  if (explicit) {
+    return explicit
+  }
+  let fallback = '#000000'
+  for (const rule of tokenColors) {
+    if (rule.scope) {
+      continue
+    }
+    const fg = normalizeColorHex(rule.settings.foreground)
+    if (fg) {
+      fallback = fg
+    }
+  }
+  return fallback
+}
+
 function readSemanticStyleRule(selectorString: string, settings: unknown): SemanticStyleRule | undefined {
   if (typeof settings === 'string') {
     const fg = normalizeColorHex(settings)

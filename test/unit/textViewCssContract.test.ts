@@ -56,4 +56,9 @@ describe('可读文本悬停视图 CSS 契约（#340）', () => {
     expect(rule('.vsidian-text-gutter-window')).toMatch(/position:\s*absolute/)
     expect(rule('.vsidian-text-lines')).toMatch(/position:\s*relative/)
   })
+
+  it('虚拟化窗口层不携带 will-change（强制合成层禁用子像素抗锯齿，浅色主题文字观感发灰——2026-10-04 着色发灰次要因素修复）', () => {
+    expect(rule('.vsidian-text-window')).not.toMatch(/will-change/)
+    expect(rule('.vsidian-text-gutter-window')).not.toMatch(/will-change/)
+  })
 })
