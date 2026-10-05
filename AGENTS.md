@@ -95,7 +95,9 @@ vsidian/
 │   │   ├── 0009-referenced-document-views.md                  # 引用文档视图读写分离决策
 │   │   ├── 0010-reference-edit-target-session.md              # 引用编辑的目标会话与历史归属
 │   │   ├── 0011-reference-full-document-navigation.md         # 引用全文可达与锚点导航决策
-│   │   └── 0012-vsidian-addons-distribution-api-governance.md # 附加组件接入与API治理决策
+│   │   ├── 0012-vsidian-addons-distribution-api-governance.md # 附加组件接入与API治理决策
+│   │   ├── 0013-wikilink-completion-file-catalog.md           # 全文件登记与联想架构决策
+│   │   └── 0014-vscode-query-matching-for-wikilinks.md        # VSCode 查询匹配复用决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -118,53 +120,57 @@ vsidian/
 │   │   ├── vscode-1823-host-route-probes.md       # P2-01 宿主路线探针结论
 │   │   ├── vscode-addon-discovery.md              # 附加组件发现与调用边界调研
 │   │   ├── vscode-native-text-appearance-probe.md # 原生文字外观复用探针报告
+│   │   ├── vscode-quick-open-matching.md          # Ctrl+P 文件匹配源码核查
 │   │   └── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
 │   ├── specs/      # 产品规格
-│   │   ├── anchor-navigation.md               # 锚点跳转规格（标题/块引用/复制块链接）
-│   │   ├── appearance-merge.md                # 外观合并分页规格
-│   │   ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
-│   │   ├── batch-2026-09.md                   # 2026-09 开票批次总览
-│   │   ├── batch-2026-10-settings-sections.md # 2026-10 设置页批次实施树
-│   │   ├── batch-2026-10-vscode-ops.md        # 2026-10 编辑器操作批次实施树
-│   │   ├── batch-2026-10-vsidian-addons.md    # 附加组件验证与实施批次索引
-│   │   ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
-│   │   ├── blockquote-table.md                # 引用块内表格规格
-│   │   ├── code-block-card.md                 # 代码块卡片功能规格
-│   │   ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
-│   │   ├── css-snippets.md                    # CSS片段与样式兼容规格
-│   │   ├── default-editor-guard.md            # 默认编辑器守护规格
-│   │   ├── frontmatter-table.md               # frontmatter 表格化规格
-│   │   ├── graphic-code-block-interaction.md  # 图形化代码块交互规格
-│   │   ├── hover-embed-phase2-tickets/…       # 二期票据正文与依赖
-│   │   ├── hover-embed-phase3-tickets/…       # 三期票据正文与依赖
-│   │   ├── hover-preview-embed.md             # 悬停预览与文档嵌入规格
-│   │   ├── html-comment-support.md            # HTML 注释快捷键与呈现规格
-│   │   ├── i18n.md                            # 全局 i18n 适配规格
-│   │   ├── image-paste.md                     # 图片粘贴插入与资产文件夹规格
-│   │   ├── image-popup.md                     # 图片弹窗查看与防误触规格
-│   │   ├── integration-host-teardown-noise.md # CI 收尾退出噪声边界（#211）
-│   │   ├── integration-test-groups.md         # 四片强制与第五敏感组规格
-│   │   ├── keybindings.md                     # 快捷键清单与默认值
-│   │   ├── live-table-column-width.md         # Live 表格列宽规格
-│   │   ├── manual-verification.md             # 人工验证清单
-│   │   ├── mvp-issues.md                      # MVP GitHub Issue 索引
-│   │   ├── mvp.md                             # MVP 规格主文档
-│   │   ├── reference-view-group.md            # 引用视图设置组与跳转目标提示规格
-│   │   ├── rich-text-paste.md                 # 富文本粘贴与分步撤销规格
-│   │   ├── search-reveal.md                   # 外部搜索导航定位恢复规格
-│   │   ├── settings-page-visual-refresh.md    # 设置页视觉刷新规格（#155）
-│   │   ├── skeleton-screen.md                 # 编辑器初开骨架屏加载规格
-│   │   ├── style-contract-gate.md             # 契约门禁 CI 接线与远端配置文档
-│   │   ├── style-reference-i18n.md            # 样式参考条目双语化规格
-│   │   ├── symbol-input.md                    # 符号输入与行内围栏扩展约定落档
-│   │   ├── table-interaction-rework.md        # 表格交互重做规格
-│   │   ├── toolbar-refresh.md                 # 工具栏刷新按钮与缓存刷新规格
-│   │   ├── toolbar-view-toggle.md             # 工具栏双态切换按钮规格
-│   │   ├── tooltip.md                         # 统一自绘悬停提示规格
-│   │   ├── vault-index-backlinks.md           # 引用索引与反链实施规格
-│   │   ├── viewport-width.md                  # 可读行宽与双模式列布局规格
-│   │   ├── vsidian-addons-tickets/…           # 附加组件验证与实施票面
-│   │   └── vsidian-addons.md                  # 附加组件接入与公开API规格草案
+│   │   ├── anchor-navigation.md                 # 锚点跳转规格（标题/块引用/复制块链接）
+│   │   ├── appearance-merge.md                  # 外观合并分页规格
+│   │   ├── batch-2026-09-menu.md                # 右键菜单批次总览与决策回执
+│   │   ├── batch-2026-09.md                     # 2026-09 开票批次总览
+│   │   ├── batch-2026-10-settings-sections.md   # 2026-10 设置页批次实施树
+│   │   ├── batch-2026-10-vscode-ops.md          # 2026-10 编辑器操作批次实施树
+│   │   ├── batch-2026-10-vsidian-addons.md      # 附加组件验证与实施批次索引
+│   │   ├── batch-2026-10-wikilink-completion.md # 双链输入联想实施批次
+│   │   ├── blockquote-accent-bar.md             # 引用块紫色提示边条规格
+│   │   ├── blockquote-table.md                  # 引用块内表格规格
+│   │   ├── code-block-card.md                   # 代码块卡片功能规格
+│   │   ├── context-menu.md                      # 统一右键菜单规格（正文全域接管）
+│   │   ├── css-snippets.md                      # CSS片段与样式兼容规格
+│   │   ├── default-editor-guard.md              # 默认编辑器守护规格
+│   │   ├── frontmatter-table.md                 # frontmatter 表格化规格
+│   │   ├── graphic-code-block-interaction.md    # 图形化代码块交互规格
+│   │   ├── hover-embed-phase2-tickets/…         # 二期票据正文与依赖
+│   │   ├── hover-embed-phase3-tickets/…         # 三期票据正文与依赖
+│   │   ├── hover-preview-embed.md               # 悬停预览与文档嵌入规格
+│   │   ├── html-comment-support.md              # HTML 注释快捷键与呈现规格
+│   │   ├── i18n.md                              # 全局 i18n 适配规格
+│   │   ├── image-paste.md                       # 图片粘贴插入与资产文件夹规格
+│   │   ├── image-popup.md                       # 图片弹窗查看与防误触规格
+│   │   ├── integration-host-teardown-noise.md   # CI 收尾退出噪声边界（#211）
+│   │   ├── integration-test-groups.md           # 四片强制与第五敏感组规格
+│   │   ├── keybindings.md                       # 快捷键清单与默认值
+│   │   ├── live-table-column-width.md           # Live 表格列宽规格
+│   │   ├── manual-verification.md               # 人工验证清单
+│   │   ├── mvp-issues.md                        # MVP GitHub Issue 索引
+│   │   ├── mvp.md                               # MVP 规格主文档
+│   │   ├── reference-view-group.md              # 引用视图设置组与跳转目标提示规格
+│   │   ├── rich-text-paste.md                   # 富文本粘贴与分步撤销规格
+│   │   ├── search-reveal.md                     # 外部搜索导航定位恢复规格
+│   │   ├── settings-page-visual-refresh.md      # 设置页视觉刷新规格（#155）
+│   │   ├── skeleton-screen.md                   # 编辑器初开骨架屏加载规格
+│   │   ├── style-contract-gate.md               # 契约门禁 CI 接线与远端配置文档
+│   │   ├── style-reference-i18n.md              # 样式参考条目双语化规格
+│   │   ├── symbol-input.md                      # 符号输入与行内围栏扩展约定落档
+│   │   ├── table-interaction-rework.md          # 表格交互重做规格
+│   │   ├── toolbar-refresh.md                   # 工具栏刷新按钮与缓存刷新规格
+│   │   ├── toolbar-view-toggle.md               # 工具栏双态切换按钮规格
+│   │   ├── tooltip.md                           # 统一自绘悬停提示规格
+│   │   ├── vault-index-backlinks.md             # 引用索引与反链实施规格
+│   │   ├── viewport-width.md                    # 可读行宽与双模式列布局规格
+│   │   ├── vsidian-addons-tickets/…             # 附加组件验证与实施票面
+│   │   ├── vsidian-addons.md                    # 附加组件接入与公开API规格草案
+│   │   ├── wikilink-completion-tickets/…        # 双链联想验证与实施票面
+│   │   └── wikilink-completion.md               # 双链文件输入联想规格
 │   └── trees/      # 文件树子视图承载目录
 │       ├── perf.md # 性能实测归档视图
 │       └── src.md  # 源码结构视图：三端全量展开
