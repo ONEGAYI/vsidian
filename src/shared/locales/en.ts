@@ -31,6 +31,50 @@ export const en = {
   'toast.pasteImageOnly': 'An image cannot be pasted as plain text. Use {paste} to paste the image.',
   'toast.pasteTextOnly': 'Text pasted without the image. Use {paste} to paste the image.',
   'styleRef.category.toast': 'Light notifications',
+  'styleRef.category.wikilinkSuggest': 'Wikilink suggestions',
+  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
+  'wikilinkSuggest.list.ariaLabel': 'Wikilink suggestions',
+  'wikilinkSuggest.status.loading': 'Searching files…',
+  'wikilinkSuggest.status.empty': 'No matching files',
+  'wikilinkSuggest.status.noWorkspace': 'No folder open — type the link manually',
+  'wikilinkSuggest.status.notReady': 'Index is being prepared — type the link manually',
+  'wikilinkSuggest.status.updating': 'Index still updating — results are partial',
+  'wikilinkSuggest.status.more': '{count} more — press ↓ to load more',
+  // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
+  'wikilinkSuggest.placeholder.heading': 'Type a heading…',
+  'wikilinkSuggest.placeholder.block': 'Type a block ID…',
+  // 验收反馈（2026-10-06）：浮层底部键提示条——按阶段裁剪显示当前可用进阶键
+  'wikilinkSuggest.hint.heading': 'Type # to link to a heading',
+  'wikilinkSuggest.hint.block': 'Type ^ to link a text block',
+  'wikilinkSuggest.hint.alias': 'Type | to set display text',
+  // #379 T04：标题阶段状态与候选（明确 Markdown 目标的真实候选；
+  // 失败分真实状态，不伪装空结果）
+  'wikilinkSuggest.status.headingLoading': 'Loading headings…',
+  'wikilinkSuggest.status.headingEmpty': 'No matching headings',
+  'wikilinkSuggest.status.headingNotFound': 'Target document not found — type the anchor manually',
+  'wikilinkSuggest.status.headingNotMd': 'Target is not a Markdown file — no heading candidates',
+  'wikilinkSuggest.status.headingReadError': 'Failed to read target document — type the anchor manually',
+  'wikilinkSuggest.heading.meta': 'H{level} · line {line}',
+  'wikilinkSuggest.toast.duplicateHeading': 'Duplicate headings exist; navigation goes to the first match',
+  // #380 T05: block-stage states and candidates (blocks without an ID listed
+  // as usual; accepting goes through host-side ^id insertion)
+  'wikilinkSuggest.status.blockLoading': 'Loading blocks…',
+  'wikilinkSuggest.status.blockEmpty': 'No matching blocks',
+  'wikilinkSuggest.status.blockNotFound': 'Target document not found — type the block reference manually',
+  'wikilinkSuggest.status.blockNotMd': 'Target is not a Markdown file — no block candidates',
+  'wikilinkSuggest.status.blockReadError': 'Failed to read target document — type the block reference manually',
+  'wikilinkSuggest.status.blockAccepting': 'Inserting block ID…',
+  'wikilinkSuggest.block.meta': 'line {line} · {count} lines',
+  'wikilinkSuggest.toast.blockAcceptFailed': 'Failed to insert the block ID — input kept',
+  // #380 T05: host-side withdraw coordination notices (best-effort removal of
+  // the auto-added marker when the origin link is undone)
+  'host.wikilinkBlockIdKept': 'Auto-added block marker ^{id} was kept: {reason}',
+  'host.wikilinkBlockIdKeptReason.versionChanged': 'target document changed',
+  'host.wikilinkBlockIdKeptReason.markerChanged': 'block marker changed',
+  'host.wikilinkBlockIdKeptReason.newUse': 'other references exist',
+  'host.wikilinkBlockIdKeptReason.applyFailed': 'write failed',
+  'host.wikilinkBlockIdKeptReason.notFound': 'target unreadable',
+  'host.wikilinkBlockIdRebuildFailed': 'Failed to rebuild block marker ^{id} — the link may be broken',
   'styleRef.category.richPaste': 'Paste prompt',
   // ---- settings.（设置页框架：标题、搜索、分类、保存状态、空状态）----
   /** 设置页面板标题（宿主 createWebviewPanel 标题与页面 h1 同源） */

@@ -1,0 +1,915 @@
+// 双链联想候选浏览器回归（#376 T01 + #378 T03）：真实键盘/CDP IME 驱动
+// 生产控制器，宿主侧由夹具扮演（wikilink.query → wikilink.query.result 回灌）。
+// T01 覆盖：连续两个 [ 出候选（空查询无高亮）、有查询自动高亮首项、方向键
+// 移动高亮不动光标、Enter/Tab 确认插入相对路径+默认别名并关浮层、Esc 关闭、
+// 移出字段关闭、无结果状态行且 Enter 落穿、迟到响应拒收、无工作区真实状态、
+// IME 组合期候选不确认、多 range 不接管。
+// T03 覆盖：Esc 后二次触发矩阵（纯移动/编辑显示文字不重开，目标区修改才
+// 重开且查询取光标左侧）、#／^／| 真实键盘转阶段（高亮补全/无高亮保留、
+// 已有 # 只补 ^）、标题/块占位文案与不可确认（Tab 落穿围栏越界零写回）、
+// | 进显示文字（新链接留空、已有别名保留）、组合期 # 不转阶段。
+import assert from 'node:assert/strict'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { readFile } from 'node:fs/promises'
+import { build } from 'esbuild'
+import { chromium } from 'playwright'
+import { buildZhLocaleIsland } from './localeIsland.mjs'
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const bundle = path.join(root, 'out/test/browser/wikilinkSuggest.js')
+const katexFontStrip = {
+  name: 'katex-font-fallback-strip',
+  setup(b) {
+    b.onLoad({ filter: /katex\.min\.css$/ }, async (args) => ({
+      contents: (await readFile(args.path, 'utf8')).replace(
+        /,\s*url\([^)]+\.(?:woff|ttf)\)\s*format\((["']?)(?:woff|truetype)\1\)/g, ''),
+      loader: 'css',
+    }))
+  },
+}
+const katexMinJs = {
+  name: 'katex-min-js',
+  setup(b) {
+    b.onResolve({ filter: /^katex$/ }, () => ({
+      path: path.resolve(root, 'node_modules/katex/dist/katex.min.js'),
+    }))
+  },
+}
+await build({ entryPoints: [path.join(root, 'test/browser/wikilinkSuggestFixture.ts')],
+  bundle: true, outfile: bundle, format: 'iife',
+  loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]', plugins: [katexFontStrip, katexMinJs] })
+
+// #94：状态行文案经 t() 取词——注入 zh-cn 语言岛（与 webview 首帧同路径）
+const { islandHtml } = await buildZhLocaleIsland(root)
+const browser = await chromium.launch({ headless: true,
+  channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
+let passed = 0
+let total = 0
+
+const fangan = (over = {}) => ({
+  id: 'C:\\vault\\资料\\方案.md', name: '方案.md', dir: '资料', relPath: '资料/方案.md',
+  insertPath: '../资料/方案.md', alias: '方案', mtimeMs: 1000, score: 0,
+  labelHighlights: [], dirHighlights: [], ...over,
+})
+const tongzhi = (over = {}) => ({
+  id: 'C:\\vault\\通知.md', name: '通知.md', dir: '', relPath: '通知.md',
+  insertPath: '../通知.md', alias: '通知', mtimeMs: 2000, score: 0,
+  labelHighlights: [], dirHighlights: [], ...over,
+})
+
+async function newPage() {
+  const page = await browser.newPage()
+  await page.setContent(`<!DOCTYPE html><html><body>${islandHtml}<div id="app"></div></body></html>`)
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await page.addScriptTag({ path: bundle })
+  return { page, errors }
+}
+
+/** 单场景执行器：打开页面、初始化文档、定位光标、执行步骤、断言终态 */
+async function scenario(name, { doc, cursor }, run) {
+  total++
+  const { page, errors } = await newPage()
+  try {
+    await page.evaluate((text) => window.initDoc(text), doc)
+    await page.click('.cm-content')
+    if (cursor !== undefined) {
+      await page.evaluate((offset) => window.locate(offset), cursor)
+    }
+    await run(page)
+    assert.deepEqual(errors, [], `${name} 页面错误`)
+    passed++
+    console.log(`[双链联想][PASS] ${name}`)
+  } catch (error) {
+    console.log(`[双链联想][FAIL] ${name}: ${error.message}`)
+    throw error
+  } finally {
+    await page.close()
+  }
+}
+
+const read = (page) => page.evaluate(() => window.readEditor())
+const popup = (page) => page.evaluate(() => window.readPopup())
+
+try {
+  // ---- 触发与初始高亮 ----
+  await scenario('连续两个 [ 出现候选；空查询无高亮', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    assert.equal((await read(page)).text, '[[]]', '自动补全成 [[]]')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.query), '', '空查询出站')
+    await page.evaluate((items) => window.respondQuery(items), [fangan(), tongzhi()])
+    const p = await popup(page)
+    assert.equal(p.open, true, '候选浮层开启')
+    assert.equal(p.itemCount, 2)
+    assert.equal(p.activeIndex, null, '空查询不高亮')
+    assert.deepEqual(p.names, ['方案.md', '通知.md'])
+  })
+
+  // ---- 验收反馈 2026-10-06：光标居中锚点 + 底部键提示条 ----
+  // 行中触发用拉丁长前缀：CI 无 CJK 字体时汉字 fallback 宽度不可靠，
+  // 拉丁等宽 80 字 ≈ 560px 稳定越过居中前置断言（>200px）
+  await scenario('行中触发浮层以光标居中；底部键提示条三段与分割线', { doc: 'x'.repeat(80), cursor: 80 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.evaluate((items) => window.respondQuery(items), [fangan(), tongzhi()])
+    const p = await popup(page)
+    assert.equal(p.open, true, '候选浮层开启')
+    // 居中锚点：浮层水平中心贴光标像素 x（±4px；行中触发不触视口钳制）
+    assert.ok(p.caretLeft > 200, `光标应在行中（实际 ${p.caretLeft}）`)
+    assert.ok(
+      Math.abs(p.popupCenter - p.caretLeft) <= 4,
+      `浮层中心应贴光标（中心 ${p.popupCenter} vs 光标 ${p.caretLeft}）`,
+    )
+    // 底部键提示条：三段（# / ^ / |）、绘制层可见、与条目主体间实线分割
+    assert.equal(p.hintsCount, 3, 'file 会话三段键提示')
+    assert.ok(p.hintsText.includes('#') && p.hintsText.includes('^') && p.hintsText.includes('|'), '三段含 # ^ |')
+    assert.equal(p.hintsVisible, true, '提示条绘制可见')
+    assert.ok(p.hintsBorderTop.startsWith('solid'), `分割线应为实线（实际 ${p.hintsBorderTop}）`)
+    assert.ok(parseFloat(p.hintsBorderTop.split('/')[1]) > 0, `分割线宽度 > 0（实际 ${p.hintsBorderTop}）`)
+  })
+
+  await scenario('标题阶段键提示条仅 ^ 与 | 两段（# 已消费不再提示）', { doc: '[[../资料/方案.md#xx]]', cursor: 15 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    const p = await popup(page)
+    assert.equal(p.open, true, '标题候选列表在场')
+    assert.equal(p.hintsCount, 2, 'heading 会话两段')
+    assert.ok(!p.hintsText.includes('#'), '不再提示 #')
+    assert.ok(p.hintsText.includes('^') && p.hintsText.includes('|'), '保留 ^ 与 |')
+    assert.ok(p.hintsBorderTop.startsWith('solid'), '分割线在标题阶段同样在场')
+  })
+
+  await scenario('块阶段键提示条仅 | 一段', { doc: '[[../资料/方案.md#^xx]]', cursor: 16 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondBlockQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#^2', blockId: 'keep01', snippet: '预算编制说明', line: 2, lineCount: 1, alias: '方案' },
+    ])
+    const p = await popup(page)
+    assert.equal(p.open, true, '块候选列表在场')
+    assert.equal(p.hintsCount, 1, 'block 会话一段')
+    assert.ok(p.hintsText.includes('|') && !p.hintsText.includes('^') && !p.hintsText.includes('#'), '仅 | 提示')
+  })
+
+  await scenario('有查询自动高亮首项，目录区分同名文件', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.query), '方')
+    const sameNamed = [
+      fangan({ labelHighlights: [{ start: 0, end: 1 }] }),
+      fangan({ id: 'C:\vault\old\方案.md', dir: 'old', relPath: 'old/方案.md', insertPath: '../old/方案.md' }),
+    ]
+    await page.evaluate((items) => window.respondQuery(items), sameNamed)
+    const p = await popup(page)
+    assert.equal(p.activeIndex, 0, '非空查询自动高亮首项')
+    assert.deepEqual(p.names, ['方案.md', '方案.md'])
+    assert.deepEqual(p.dirs, ['资料', 'old'])
+  })
+
+  await scenario('方向键移动高亮且不移动正文光标', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    await page.evaluate((items) => window.respondQuery(items), [fangan(), tongzhi()])
+    const headBefore = (await read(page)).head
+    await page.keyboard.press('ArrowDown')
+    assert.equal((await popup(page)).activeIndex, 1, '↓ 移到第 2 项')
+    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('ArrowUp')
+    assert.equal((await popup(page)).activeIndex, 0, '↑ 到首项后不再上移')
+    assert.equal((await read(page)).head, headBefore, '正文光标不动')
+  })
+
+  // ---- 确认插入 ----
+  await scenario('Enter 确认：插入来源相对路径与默认别名，关浮层', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('Enter')
+    assert.equal((await read(page)).text, '[[../资料/方案.md|方案]]', '插入相对路径|默认别名')
+    assert.equal((await read(page)).head, 2 + '../资料/方案.md'.length, '光标在别名分隔符之前')
+    assert.equal((await popup(page)).open, false, '确认后浮层关闭')
+    assert.equal(await page.evaluate(() => window.queryCount()), 2, '确认本身不再触发查询')
+  })
+
+  await scenario('Tab 确认：替换整个文件字段、保留已有显示文字', { doc: '', cursor: 0 }, async (page) => {
+    // 先手写完整链接 [[方案.md|手写]]，再回到文件段中部编辑目标并 Tab 确认
+    await page.keyboard.type('[[')
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.type('方案.md|手写')
+    assert.equal((await read(page)).text, '[[方案.md|手写]]')
+    assert.equal((await popup(page)).open, false, '显示文字区无候选')
+    // 光标落到文件段中部（「.」「m」之间）：纯移动不重开，键入才再触发
+    await page.evaluate((offset) => window.locate(offset), 5)
+    await page.keyboard.type('x')
+    const q = await page.evaluate(() => window.lastQuery())
+    assert.equal(q.query, '方案.x', '再触发自动取光标左侧目标输入')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('Tab')
+    assert.equal((await read(page)).text, '[[../资料/方案.md|手写]]', '文件字段整体替换、显示文字保留')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  // ---- 关闭路径 ----
+  await scenario('Esc 关闭候选不改正文', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('Escape')
+    assert.equal((await popup(page)).open, false)
+    assert.equal((await read(page)).text, '[[]]')
+    assert.equal((await read(page)).head, 2)
+  })
+
+  await scenario('键入 | 进入显示文字：候选关闭、保留原输入', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.type('|')
+    assert.equal((await read(page)).text, '[[|]]', '无高亮确认语义（T01）：| 原样输入')
+    assert.equal((await popup(page)).open, false, '移出文件字段即关闭')
+  })
+
+  // ---- 真实状态与落穿 ----
+  await scenario('无结果状态行；Enter 落穿（候选不吞键）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.evaluate(() => window.respondQuery([]))
+    const p = await popup(page)
+    assert.equal(p.open, true)
+    assert.equal(p.itemCount, 0)
+    assert.match(p.statusText, /没有匹配的文件|No matching files/)
+    const textBefore = (await read(page)).text
+    await page.keyboard.press('Enter')
+    assert.notEqual((await read(page)).text, textBefore, '无可确认项时 Enter 落穿默认换行')
+    assert.equal((await popup(page)).open, false, '换行使围栏失效、候选关闭')
+  })
+
+  await scenario('索引未就绪显示真实状态、允许手写', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.evaluate(() => window.respondUnavailable('not-ready'))
+    const p = await popup(page)
+    assert.equal(p.open, true)
+    assert.match(p.statusText, /索引准备中|Index is being prepared/)
+    await page.keyboard.type('方案')
+    assert.equal((await read(page)).text, '[[方案]]', '状态不阻塞手写')
+  })
+
+  await scenario('迟到响应拒收（旧 reqId 的应答不覆盖新状态）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    assert.equal(await page.evaluate(() => window.queryCount()), 1)
+    // 键入新字符触发代次 +1 的第二个查询
+    await page.keyboard.type('方')
+    assert.equal(await page.evaluate(() => window.queryCount()), 2)
+    // 以过期 reqId/generation 回灌：必须被守卫拒收（候选保持加载态、不显示旧结果）
+    const latest = await page.evaluate(() => ({
+      reqId: window.lastQuery().reqId, generation: window.lastQuery().generation,
+    }))
+    await page.evaluate(({ reqId, generation, item }) => {
+      window.respondStale(reqId, generation, [item])
+    }, { reqId: latest.reqId - 1, generation: latest.generation - 1, item: fangan() })
+    const staleState = await popup(page)
+    assert.equal(staleState.itemCount, 0, '过期应答不进候选')
+    // 最新查询正常应答
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    assert.equal((await popup(page)).itemCount, 1)
+  })
+
+  // ---- #377 T02 分页与清单代次（F6 起以满页口径承载——不满页即穷尽） ----
+  /** F6：满页候选生成（50 = WIKILINK_QUERY_LIMIT；宿主回包不满页 = 穷尽） */
+  const fullPage = (page) => page.evaluate(() => Array.from({ length: 50 }, (_, i) => ({
+    id: `C:\\vault\\f${i}.md`, name: `f${i}.md`, dir: '', relPath: `f${i}.md`,
+    insertPath: `../f${i}.md`, alias: `f${i}`, mtimeMs: 1000, score: 0,
+    labelHighlights: [], dirHighlights: [],
+  })))
+
+  await scenario('触底 ↓ 续页加载：offset 出站、条目追加、高亮与 more 状态行', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('f')
+    const full = await fullPage(page)
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 7 }), full)
+    let p = await popup(page)
+    assert.equal(p.itemCount, 50, '首屏满页 50 条')
+    assert.match(p.statusText, /还有 1 项|1 more/, 'more 状态行提示剩余数')
+    // 高亮移到末项后再 ↓：触发续页（offset=50 出站——已投递数）
+    for (let i = 0; i < 49; i++) {
+      await page.keyboard.press('ArrowDown')
+    }
+    assert.equal((await popup(page)).activeIndex, 49, '高亮在末项')
+    await page.keyboard.press('ArrowDown')
+    const more = await page.evaluate(() => window.lastQuery())
+    assert.equal(more.offset, 50, '续页请求 offset=50')
+    assert.equal(more.query, 'f', '同查询续页')
+    assert.equal(more.generation >= 1, true, '代次不重置')
+    const tail = {
+      id: 'C:\\vault\\翻新.md', name: '翻新.md', dir: '', relPath: '翻新.md',
+      insertPath: '../翻新.md', alias: '翻新', mtimeMs: 3000, score: 0,
+      labelHighlights: [], dirHighlights: [],
+    }
+    // 追加页 1 条（< 页大小）：拼接后穷尽，more 行消失
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 7 }), [tail])
+    p = await popup(page)
+    assert.equal(p.itemCount, 51, '追加页拼接后 51 条')
+    assert.equal(p.names[50], '翻新.md', '追加条目在末位')
+    assert.equal(p.activeIndex, 49, '手动高亮保持在末项原位置（不跳首项）')
+    assert.equal(p.statusText === null || !/还有|more/.test(p.statusText ?? ''), true, '穷尽后无 more 行')
+    await page.keyboard.press('ArrowDown')
+    assert.equal((await popup(page)).activeIndex, 50, '后续 ↓ 恢复移动高亮')
+  })
+
+  await scenario('跨清单代次的追加页不拼接：重取首页', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('f')
+    const full = await fullPage(page)
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 7 }), full)
+    for (let i = 0; i < 50; i++) {
+      await page.keyboard.press('ArrowDown')
+    }
+    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 50)
+    // 清单代次已变（7 → 8）：追加页必须被拒拼，并按新代次重取首页
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 8 }), full)
+    const refetch = await page.evaluate(() => window.lastQuery())
+    assert.equal(refetch.offset, undefined, '重取首页（无 offset）')
+    assert.equal((await popup(page)).itemCount, 50, '旧追加结果未进候选')
+    // 新首页应答正常呈现（不满页 = 穷尽）
+    const fresh = [{
+      id: 'C:\\vault\\f0.md', name: 'f0.md', dir: '', relPath: 'f0.md',
+      insertPath: '../f0.md', alias: 'f0', mtimeMs: 1000, score: 0,
+      labelHighlights: [], dirHighlights: [],
+    }]
+    await page.evaluate((items) => window.respondQuery(items, { total: 1, catalogGen: 8 }), fresh)
+    const p = await popup(page)
+    assert.equal(p.itemCount, 1)
+    assert.equal(p.activeIndex, 0, '首页响应恢复自动高亮首项')
+  })
+
+  await scenario('续页请求在途时触底 ↓ 不重复出站', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('f')
+    const full = await fullPage(page)
+    await page.evaluate((items) => window.respondQuery(items, { total: 53, catalogGen: 1 }), full)
+    for (let i = 0; i < 50; i++) {
+      await page.keyboard.press('ArrowDown')
+    }
+    const countAfterTrigger = await page.evaluate(() => window.queryCount())
+    await page.keyboard.press('ArrowDown') // 在途再按
+    await page.keyboard.press('ArrowDown')
+    assert.equal(await page.evaluate(() => window.queryCount()), countAfterTrigger, '在途不重复发')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 50, '仍等待 offset=50 应答')
+  })
+
+  // ---- #377 T02 候选失效信号 ----
+  await scenario('invalidate 广播：会话在场去抖重发当前查询并整体替换结果', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    await page.evaluate((items) => window.respondQuery(items, { catalogGen: 3 }), [fangan()])
+    assert.equal((await popup(page)).itemCount, 1)
+    const countBefore = await page.evaluate(() => window.queryCount())
+    // 失效信号：去抖 300ms 后重发同查询（新 reqId）
+    await page.evaluate(() => window.sendInvalidate())
+    await page.waitForFunction((n) => window.queryCount() === n + 1, countBefore)
+    const requery = await page.evaluate(() => window.lastQuery())
+    assert.equal(requery.query, '方', '同查询重发')
+    assert.equal(requery.offset, undefined, '失效重查取首页')
+    // 新结果整体替换（清单已变——新代次新候选集合）
+    await page.evaluate((items) => window.respondQuery(items, { catalogGen: 4 }), [tongzhi()])
+    const p = await popup(page)
+    assert.deepEqual(p.names, ['通知.md'], '结果整体替换不残留旧候选')
+    assert.equal(p.activeIndex, 0, '重查恢复自动高亮首项')
+  })
+
+  await scenario('invalidate 无会话时零动作（不出站查询）', { doc: '', cursor: 0 }, async (page) => {
+    await page.evaluate(() => window.sendInvalidate())
+    assert.equal(await page.evaluate(() => window.queryCount()), 0)
+  })
+
+  // ---- IME 与多光标 ----
+  // CDP 组合实测：组合文本进 CM6 文档并触发查询（候选随组合更新、会话
+  // 存活）；组合期 Enter 不确认候选（无插入路径写入正文）。组合期带可确认
+  // 高亮的 Enter 守卫由控制器 compositionStarted 条件承担，真实 IME 手感
+  // 归人工验证清单。
+  await scenario('IME 组合期：候选保持可用且 Enter 不确认候选', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.evaluate((items) => window.respondQuery(items), [])
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Input.imeSetComposition', { text: '方', selectionStart: 4, selectionEnd: 4 })
+    await page.waitForFunction(() => window.queryCount() >= 2)
+    const p = await popup(page)
+    assert.equal(p.open, true, '组合期候选会话存活（查询随组合更新）')
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text.includes('../资料/方案.md'), false, '组合期 Enter 未确认候选（无插入路径写入）')
+    assert.equal(after.text.includes('\n'), true, '无可确认项时 Enter 落穿默认行为')
+    assert.equal((await popup(page)).open, false, '换行破坏围栏后候选关闭')
+  })
+
+  await scenario('多 range 不接管（不出候选、不出站查询）', { doc: 'abc\ndef', cursor: 2 }, async (page) => {
+    await page.evaluate(() => window.setTwoCursors(2, 6))
+    const queriesBefore = await page.evaluate(() => window.queryCount())
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    assert.equal(await page.evaluate(() => window.queryCount()), queriesBefore, '多 range 不出站查询')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('行内代码上下文不出候选', { doc: '` `', cursor: 2 }, async (page) => {
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    assert.equal(await page.evaluate(() => window.queryCount()), 0, '代码上下文不触发')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  // ---- #378 T03：Esc 后二次触发矩阵 ----
+  await scenario('Esc 后纯光标移动与显示文字编辑不重开；目标区修改才重开且查询取左侧', { doc: '[[Aa|B]]', cursor: 3 }, async (page) => {
+    // 目标区中部输入触发：查询为光标左侧（A + 新输入 x）
+    await page.keyboard.type('x')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.query), 'Ax')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    assert.equal((await popup(page)).open, true)
+    // Esc 关闭；移动光标（字段内各处/围栏外再回来）不重开、不出站
+    await page.keyboard.press('Escape')
+    assert.equal((await popup(page)).open, false)
+    const countAfterEsc = await page.evaluate(() => window.queryCount())
+    await page.evaluate((offset) => window.locate(offset), 2)
+    await page.evaluate((offset) => window.locate(offset), 4)
+    assert.equal(await page.evaluate(() => window.queryCount()), countAfterEsc, '纯移动不重开')
+    // 显示文字 B 编辑不触发
+    await page.evaluate((offset) => window.locate(offset), 6)
+    await page.keyboard.type('y')
+    assert.equal((await read(page)).text, '[[Axa|yB]]')
+    assert.equal(await page.evaluate(() => window.queryCount()), countAfterEsc, '显示文字编辑不触发')
+    assert.equal((await popup(page)).open, false)
+    // 返回目标区删除才重开；查询仍为光标左侧（Axa）
+    await page.evaluate((offset) => window.locate(offset), 6)
+    await page.keyboard.press('Backspace')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.query), 'Axa', '再触发查询取光标左侧')
+  })
+
+  // ---- #378 T03：# / ^ 转阶段（真实键盘字符键）----
+  await scenario('高亮文件后 # 转标题阶段：补全相对路径并出站标题查询（#379 T04）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方案')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    const fileQueries = await page.evaluate(() => window.queryCount())
+    await page.keyboard.press('#')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#]]', '补全文件并加 #')
+    assert.equal(after.head, '[[../资料/方案.md#'.length, '光标在 # 后')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.ok(hq, '转阶段出站标题查询')
+    assert.equal(hq.query, '', '空标题前缀')
+    assert.equal(hq.target, '../资料/方案.md', '目标为补全后的文件字段')
+    assert.equal(await page.evaluate(() => window.queryCount()), fileQueries, '文件查询不复发')
+    // 回灌真实候选：标题列表（含层级/行号元信息），空查询无高亮
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#1', heading: '概述', level: 1, line: 1, duplicate: false, alias: '方案' },
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: true, alias: '方案' },
+    ])
+    const p = await popup(page)
+    assert.equal(p.open, true, '标题候选列表在场')
+    assert.equal(p.itemCount, 2)
+    assert.equal(p.activeIndex, null, '空查询无高亮')
+    assert.deepEqual(p.names, ['概述', '预算'])
+    assert.deepEqual(p.dirs, ['H1 · 行 1', 'H2 · 行 3'], '层级/行号元信息（i18n）')
+  })
+
+  await scenario('无高亮按 #：不补文件名，保留原输入并出站标题查询（目标=原输入）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方')
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.press('#')
+    const after = await read(page)
+    assert.equal(after.text, '[[方#]]', '保留原输入')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.ok(hq, '有目标即出站标题查询')
+    assert.equal(hq.target, '方')
+    // 宿主回灌不可定位：真实状态行（可继续手写）
+    await page.evaluate((r) => window.respondHeadingUnavailable(r), 'target-not-found')
+    const p2 = await popup(page)
+    assert.match(p2.statusText, /未找到目标文档|Target document not found/, '目标不可定位状态行（i18n）')
+  })
+
+  await scenario('高亮文件后 ^ 一次形成 #^ 转块占位；标题占位再按 ^ 不重复补 #', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方案')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('^')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^]]', '补全文件一次形成 #^')
+    assert.equal(after.head, '[[../资料/方案.md#^'.length, '光标在 ^ 后')
+    const p = await popup(page)
+    // #380 T05：目标明确即出站块查询（空目标才占位）——fixture 未回灌时
+    // 显示块读取中
+    assert.match(p.statusText, /正在读取块|Loading blocks/, '块查询出站（i18n）')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    // 继续按 ^：块阶段不接管——真实键盘落穿会把 ^ 作为普通文本插入
+    await page.keyboard.press('^')
+    assert.equal((await read(page)).text, '[[../资料/方案.md#^^]]', '块阶段 ^ 落穿普通输入')
+  })
+
+  await scenario('标题占位下按 ^ 只补 ^（已有 # 不重复补）', { doc: '[[方案.md#]]', cursor: 8 }, async (page) => {
+    // 锚点字段输入触发占位会话
+    await page.keyboard.type('x')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('^')
+    const after = await read(page)
+    assert.equal(after.text, '[[方案.md#^]]', '只补 ^ 不重复补 #')
+    assert.equal(after.head, '[[方案.md#^'.length)
+    // #380 T05：目标明确即出站块查询
+    assert.match((await popup(page)).statusText, /正在读取块|Loading blocks/)
+  })
+
+  await scenario('空双链按 # / ^：不补文件名，进入对应占位（空目标不猜文档）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.press('#')
+    assert.equal((await read(page)).text, '[[#]]', '空目标 # 不补文件名')
+    assert.match((await popup(page)).statusText, /输入小标题|Type a heading/)
+    await page.keyboard.press('Escape')
+    await page.keyboard.type('x')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('^')
+    assert.equal((await read(page)).text, '[[#^]]', '空目标 ^ 形成空块字段、不写占位词')
+    assert.match((await popup(page)).statusText, /输入块 ID|Type a block ID/)
+  })
+
+  // ---- #378 T03：| 进显示文字 ----
+  await scenario('高亮文件后 |：补全目标、显示文字留空、关闭候选，光标在 | 后', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方案.md')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('|')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md|]]', '新链接 | 显示文字留空')
+    assert.equal(after.head, '[[../资料/方案.md|'.length, '光标在 | 后等待手动输入')
+    assert.equal((await popup(page)).open, false, '进显示文字关闭候选')
+  })
+
+  await scenario('无高亮按 |：保留原输入关候选；已有 | 复用跳转、已有别名保留', { doc: '[[Aa|B]]', cursor: 4 }, async (page) => {
+    await page.keyboard.type('x')
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('|')
+    const after = await read(page)
+    assert.equal(after.text, '[[Aa|B]]', '已有 | 零编辑、别名 B 保留')
+    assert.equal(after.head, 5, '光标跳到已有 | 后')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  // ---- #378 T03：占位不可确认（Tab 落穿围栏越界零写回） ----
+  await scenario('块占位下 Tab 落穿围栏两步越界零写回；Enter 落穿换行后关闭', { doc: '[[方案.md#^id]]', cursor: 11 }, async (page) => {
+    await page.keyboard.type('x')
+    await page.keyboard.press('Backspace')
+    // #380 T05：目标明确出站块查询；未回灌候选无高亮，Tab 仍按无可确认项落穿
+    assert.match((await popup(page)).statusText, /正在读取块|Loading blocks/)
+    const textBefore = (await read(page)).text
+    // Tab：块阶段无可确认项——落穿 fenceEscape 两步越界，纯选区移动零写回；
+    // 第一步即移出锚点字段（光标进入闭围栏），候选随之关闭（移出目标字段）
+    await page.keyboard.press('Tab')
+    const afterTab = await read(page)
+    assert.equal(afterTab.text, textBefore, 'Tab 落穿零写回')
+    assert.equal(afterTab.head, 12, 'Tab 第一步：进入闭围栏内边界')
+    assert.equal((await popup(page)).open, false, '移出锚点字段后候选关闭')
+    await page.keyboard.press('Tab')
+    const afterTab2 = await read(page)
+    assert.equal(afterTab2.text, textBefore, '第二步仍零写回')
+    assert.equal(afterTab2.head, textBefore.length, 'Tab 第二步：越出闭围栏')
+    // Enter：落穿默认换行——围栏跨行破坏，候选关闭
+    await page.keyboard.type('x') // 移回块字段（越出后目标区输入重开）
+    await page.keyboard.press('Enter')
+    const afterEnter = await read(page)
+    assert.equal(afterEnter.text.includes('../资料/方案.md'), false, '占位不可确认')
+    assert.equal(afterEnter.text.includes('\n'), true, 'Enter 落穿默认换行')
+    assert.equal((await popup(page)).open, false, '换行破坏围栏后关闭')
+  })
+
+  // ---- #379 T04：标题阶段真实候选、键盘确认、重名 toast 与状态 ----
+  await scenario('标题候选方向键+Enter 确认：锚点整体替换、默认别名、关闭候选', { doc: '[[../资料/方案.md#]]', cursor: 14 }, async (page) => {
+    // 锚点字段输入触发标题会话（出站带目标与前缀）
+    await page.keyboard.type('预')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.equal(hq.query, '预', '标题前缀查询')
+    assert.equal(hq.target, '../资料/方案.md', '文件目标原文')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    const p = await popup(page)
+    assert.equal(p.activeIndex, 0, '非空查询自动高亮首项')
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#预算|方案]]', '#标题 + 文件名默认别名')
+    assert.equal(after.head, '[[../资料/方案.md#预算'.length, '光标落锚点末（| 前）')
+    assert.equal((await popup(page)).open, false, '确认后关闭候选')
+  })
+
+  await scenario('锚点中部输入确认不留残留；手写别名保留', { doc: '[[../资料/方案.md#xx]]', cursor: 15 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    await page.keyboard.press('Tab')
+    const after = await read(page)
+    // 光标右侧旧 xx 不残留：锚点字段整体替换
+    assert.equal(after.text, '[[../资料/方案.md#预算|方案]]', 'Tab 确认同 Enter 口径')
+  })
+
+  await scenario('重复标题全部展示；选中同名项 toast 提示风险并继续接受', { doc: '[[../资料/方案.md#]]', cursor: 14 }, async (page) => {
+    await page.keyboard.type('预')
+    // 宿主回灌：两个「预算」（duplicate 标记）+ 一个「预算编制」
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: true, alias: '方案' },
+      { id: 'C:\\vault\\资料\\方案.md#7', heading: '预算', level: 1, line: 7, duplicate: true, alias: '方案' },
+      { id: 'C:\\vault\\资料\\方案.md#9', heading: '预算编制', level: 2, line: 9, duplicate: false, alias: '方案' },
+    ])
+    let p = await popup(page)
+    assert.equal(p.itemCount, 3, '重复标题独立候选不合并')
+    assert.deepEqual(p.names, ['预算', '预算', '预算编制'])
+    // 下移到第二个「预算」：Enter 确认 → toast + 继续接受
+    await page.keyboard.press('ArrowDown')
+    p = await popup(page)
+    assert.equal(p.activeIndex, 1)
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#预算|方案]]', '同名项选择被继续接受（不改跳转语义）')
+    const toast = await page.evaluate(() => window.readToast())
+    assert.ok(toast, 'toast 在场')
+    assert.match(toast.text, /同名标题|Duplicate headings/, '重名风险提示（i18n）')
+    assert.equal(toast.severity, 'warning')
+  })
+
+  await scenario('标题阶段 | 接受高亮：锚点替换、显示文字留空', { doc: '[[../资料/方案.md#x]]', cursor: 14 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    await page.keyboard.press('|')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#预算|]]', '接受标题后 | 进显示文字（留空）')
+    assert.equal(after.head, '[[../资料/方案.md#预算|'.length, '光标在 | 后')
+    assert.equal((await popup(page)).open, false, '关闭候选')
+  })
+
+  await scenario('非 Markdown 目标状态行；无匹配标题空态', { doc: '[[配图.png#]]', cursor: 9 }, async (page) => {
+    await page.keyboard.type('x')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.equal(hq.target, '配图.png')
+    await page.evaluate((r) => window.respondHeadingUnavailable(r), 'target-not-md')
+    assert.match((await popup(page)).statusText, /不是 Markdown|not a Markdown/, '非 Markdown 状态行（i18n）')
+    // 换回 Markdown 目标：空结果是空态而非失败
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type('方案.md#')
+    await page.evaluate(() => window.respondHeadingQuery([]))
+    assert.match((await popup(page)).statusText, /没有匹配的标题|No matching headings/, '空态（i18n）')
+  })
+
+  // ---- #378 T03：IME 组合期 # 不转阶段 ----
+  await scenario('IME 组合期 # 不转阶段（组合期按键不消费）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Input.imeSetComposition', { text: '方', selectionStart: 4, selectionEnd: 4 })
+    await page.waitForFunction(() => window.queryCount() >= 2)
+    await page.keyboard.press('#')
+    const after = await read(page)
+    assert.equal(after.text.includes('../资料/方案.md#'), false, '组合期 # 未执行转阶段')
+    assert.equal(after.text.includes('\n'), false, '组合期无换行副作用')
+    await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 })
+  })
+
+  // ---- #380 T05：块阶段真实候选、确认与无 ID 补写 ----
+  const blockHasId = (over = {}) => ({
+    id: 'C:\\vault\\资料\\方案.md#^2', blockId: 'keep01', snippet: '预算编制说明',
+    line: 2, lineCount: 1, alias: '方案', ...over,
+  })
+  const blockNoId = (over = {}) => ({
+    id: 'C:\\vault\\资料\\方案.md#^4', blockId: '', snippet: '会议记录',
+    line: 4, lineCount: 2, alias: '方案', ...over,
+  })
+
+  await scenario('^ 转块阶段：真实键盘出站块查询并渲染候选（#380 T05）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方案')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('^')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^]]', '补全文件一次形成 #^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    const bq = await page.evaluate(() => window.lastBlockQuery())
+    assert.equal(bq.query, '', '空块前缀')
+    assert.equal(bq.target, '../资料/方案.md', '块目标为补全后的文件字段')
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockHasId(), blockNoId()])
+    const p = await popup(page)
+    assert.equal(p.open, true, '块候选浮层在场')
+    assert.equal(p.itemCount, 2)
+    assert.equal(p.activeIndex, null, '空查询无高亮')
+    assert.deepEqual(p.names, ['预算编制说明 ^keep01', '会议记录'], '已有 id 随行展示、无 id 块照常列出')
+    assert.deepEqual(p.dirs, ['行 2 · 1 行', '行 4 · 2 行'], '行号/行数元信息（i18n）')
+  })
+
+  await scenario('块前缀过滤：按已有 id 搜索（宿主过滤回灌）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.keyboard.type('meet')
+    await page.waitForFunction(() => window.lastBlockQuery()?.query === 'meet')
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId({ blockId: 'meet01' })])
+    const p = await popup(page)
+    assert.equal(p.itemCount, 1)
+    assert.equal(p.activeIndex, 0, '非空查询自动高亮首项')
+  })
+
+  await scenario('已有 ID 块 Enter：本地直接确认 #^id + 默认别名（零宿主往返）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockHasId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^keep01|方案]]', '#^ 语法 + 文件名默认别名')
+    assert.equal(after.head, '[[../资料/方案.md#^keep01'.length, '光标在锚点末')
+    assert.equal((await popup(page)).open, false, '确认后浮层关闭')
+    const accepts = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.accept').length)
+    assert.equal(accepts, 0, '已有 id 不走宿主补写')
+  })
+
+  await scenario('无 ID 块 Enter：出站 accept → 宿主补写回包 → 写入并回 linked', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    // 在途：补写状态行（不可确认、正文未写）
+    let p = await popup(page)
+    assert.match(p.statusText, /正在补写块 ID|Inserting block ID/, '补写状态行（i18n）')
+    const before = (await read(page)).text
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    const acc = await page.evaluate(() => window.lastBlockAccept())
+    assert.equal(acc.line, 4, '块首行回传')
+    assert.equal(acc.targetVersion, 7, '版本基准回传')
+    assert.equal((await read(page)).text, before, '回包前不写正文')
+    // 宿主补写成功（跨文档）：回包 → 本地接受 + linked
+    await page.evaluate(() => window.respondBlockAccept({ ok: true, blockId: 'abc123', alias: '方案' }))
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^abc123|方案]]', '无 ID 块以宿主补写的 id 接受')
+    assert.equal((await popup(page)).open, false)
+    const linkeds = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.linked'))
+    assert.equal(linkeds.length, 1, '链接落地确认出站')
+    assert.equal(linkeds[0].reqId, acc.reqId, 'linked 与 accept 配对')
+  })
+
+  await scenario('无 ID 块接受失败：toast 提示并保留输入', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    await page.evaluate(() => window.respondBlockAccept({ ok: false, reason: 'apply-failed' }))
+    const toast = await page.evaluate(() => window.readToast())
+    assert.ok(toast, 'toast 在场')
+    assert.match(toast.text, /未能补写块 ID|Failed to insert the block ID/, '接受失败提示（i18n）')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^]]', '失败保留输入')
+    const p = await popup(page)
+    assert.equal(p.open, true, '候选保留（可重试）')
+  })
+
+  await scenario('同文档无 ID 块：标记插入并入同一笔确认事务（一笔受控操作）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    // sameDoc：宿主未写，webview 合笔（标记插在文档末尾——块尾行行尾；
+    // `[[../资料/方案.md#^]]` 长 17）
+    await page.evaluate(() => window.respondBlockAccept({
+      ok: true, blockId: 'same001', sameDoc: true, alias: '方案',
+      markerLfOffset: 17, markerText: '\n\n^same001',
+    }))
+    const after = await read(page)
+    assert.ok(after.text.includes('[[../资料/方案.md#^same001|方案]]'), '链接写入')
+    assert.ok(after.text.includes('\n\n^same001'), '标记同事务写入（合笔）')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('F4：target-changed 失败不 toast——重发查询刷新版本基准，重试即成功', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
+    const queriesBefore = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length)
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    // IME 定稿落地晚于查询：版本守卫拒绝
+    await page.evaluate(() => window.respondBlockAccept({ ok: false, reason: 'target-changed' }))
+    assert.equal(await page.evaluate(() => window.readToast()), null, '不 toast（刷新即自愈）')
+    assert.equal((await popup(page)).open, true, '候选保留')
+    // 重发块查询（同查询新 reqId——版本基准刷新）
+    await page.waitForFunction(
+      (n) => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length === n + 1,
+      queriesBefore,
+    )
+    await page.evaluate((items) => window.respondBlockQuery(items, 9), [blockNoId()])
+    // 重按 Enter：新基准出站 → 成功
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept()?.targetVersion === 9)
+    await page.evaluate(() => window.respondBlockAccept({ ok: true, blockId: 'abc123', alias: '方案' }))
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^abc123|方案]]', '重试以新版本基准接受')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('F8：sameDoc 合笔标记在字段上方——光标平移到锚点末（不落链接内部）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    // 标记插在文档头（字段上方）
+    await page.evaluate(() => window.respondBlockAccept({
+      ok: true, blockId: 'same001', sameDoc: true, alias: '方案',
+      markerLfOffset: 0, markerText: '\n\n^same001',
+    }))
+    const after = await read(page)
+    assert.ok(after.text.startsWith('\n\n^same001'), '标记写在文档头')
+    assert.ok(after.text.includes('[[../资料/方案.md#^same001|方案]]'), '链接写入')
+    assert.equal(after.head, after.text.indexOf('|方案'), '光标在锚点末（| 前）——已按标记长度平移')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('F11：加载中方向键消费——正文光标不动、会话不销毁', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    // 查询在途（未回灌）：loading 态
+    const headBefore = (await read(page)).head
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowUp')
+    const mid = await read(page)
+    assert.equal(mid.head, headBefore, '正文光标不动（不落穿移动）')
+    let p = await popup(page)
+    assert.equal(p.open, true, '会话不销毁（在途结果不被弃）')
+    assert.match(p.statusText, /正在搜索|Searching/, 'loading 状态行（i18n）')
+    // 结果到达后方向键恢复移动语义：首帧高亮首项，↓ 移到第二项
+    await page.evaluate((items) => window.respondQuery(items), [fangan(), tongzhi()])
+    p = await popup(page)
+    assert.equal(p.activeIndex, 0, '首帧高亮首项')
+    await page.keyboard.press('ArrowDown')
+    p = await popup(page)
+    assert.equal(p.activeIndex, 1, '↓ 恢复移动高亮')
+  })
+
+  await scenario('F3：快速输入未确认窗口 Enter 消费不出站 accept——推进出站并重发查询，落定后重按即接受', { doc: '', cursor: 0 }, async (page) => {
+    // 关闭 ack 扮演：模拟「前一笔 ack 往返慢」——连续键入的后续笔进入
+    // 暂缓集（宿主收不到、whenEditsSettled 也不等），构成 F3 未出站窗口
+    await page.evaluate(() => window.setAutoAck(false))
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
+    const queriesBefore = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length)
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    const accepts = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.accept').length)
+    assert.equal(accepts, 0, '未确认窗口不出站 accept（宿主系坐标会错位）')
+    // 已推进暂缓编辑出站（flush）并重发当前查询（宿主装载最新文本后
+    // targetVersion 刷新）
+    await page.waitForFunction(
+      (n) => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length === n + 1,
+      queriesBefore,
+    )
+    await page.evaluate((items) => window.respondBlockQuery(items, 9), [blockNoId()])
+    // 模拟 ack 往返完成：补发窗口内积压确认并恢复自动 ack——暂缓集
+    // 经 sendDeferredLocal 链式出站、确认，未确认窗口收敛（微任务链）
+    await page.evaluate(() => {
+      window.setAutoAck(true)
+      window.ackPendingEdits()
+    })
+    await page.waitForTimeout(50)
+    // 窗口收敛后重按 Enter 正常接受
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    const acc = await page.evaluate(() => window.lastBlockAccept())
+    assert.equal(acc.targetVersion, 9, '以刷新后的版本基准出站')
+    await page.evaluate(() => window.respondBlockAccept({ ok: true, blockId: 'f3win1', alias: '方案' }))
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^f3win1|方案]]', '落定后接受成功')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('接受在途 Esc：关闭候选并出站 cancel（宿主守卫撤回）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    await page.keyboard.press('Escape')
+    assert.equal((await popup(page)).open, false)
+    const cancels = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.cancel'))
+    assert.equal(cancels.length, 1, '放弃接受出站 cancel')
+  })
+} finally {
+  await browser.close()
+}
+
+console.log(`双链联想浏览器回归：${passed}/${total} 通过`)
+if (passed !== total) {
+  process.exitCode = 1
+}

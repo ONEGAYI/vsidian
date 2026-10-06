@@ -60,6 +60,29 @@ import {
   planFlushAt,
   SCHEDULE_DEFAULTS,
 } from '../shared/vaultIndexSchedule'
+import {
+  defaultAliasOf,
+  planWikilinkInsertPath,
+  prepareWikilinkQuery,
+  rankWikilinkCandidates,
+  wikilinkFileCandidateSafe,
+  type WikilinkCandidateFile,
+} from '../shared/wikilinkQuery'
+import {
+  classifyVaultFileCategory,
+  isCommonVaultFileCategory,
+  type VaultFileCategory,
+} from '../shared/vaultFileCategory'
+import {
+  diffVaultCatalog,
+  parseVaultCatalog,
+  serializeVaultCatalog,
+  type VaultCatalogEntry,
+} from '../shared/vaultFileCatalog'
+import type { WikilinkCandidateItem } from '../shared/protocol'
+import { WIKILINK_QUERY_LIMIT } from '../shared/protocol'
+
+export { WIKILINK_QUERY_LIMIT }
 
 /** 工作区根引用（wiring 层已按 vscode 语义对语法异构同指向 URI 去重） */
 export interface VaultRootRef {
@@ -73,15 +96,30 @@ export interface VaultRootRef {
 export interface VaultIndexScanPort {
   /** 列根内全部 Markdown（绝对 fsPath，磁盘真实形态；含将被排除者） */
   listMarkdownFiles(rootFsPath: string): Promise<string[]>
+  /** 列根内全部普通文件（#377 T02 全文件清单；含将被排除者）。skipDir
+   *  为服务侧注入的目录剪枝判定（排除语义单一事实源不进端口）；failedDirs
+   *  为读取失败的目录（不可访问——不冒充其下文件删除）。 */
+  listAllFiles(
+    rootFsPath: string,
+    opts?: { skipDir?: (fsPath: string) => boolean },
+  ): Promise<{ files: string[]; failedDirs: string[] }>
   /** 读文件 utf-8 文本；失败/不存在 null（原样返回，CRLF 由服务归一） */
   readFileText(fsPath: string): Promise<string | null>
   /** stat（mtime/size——快照条目与增量筛选；birthtimeMs 可选：Windows 宿主
-   *  取创建时间，POSIX 常不可得缺省）；失败 null */
-  statFile(fsPath: string): Promise<{ mtimeMs: number; size: number; birthtimeMs?: number } | null>
+   *  取创建时间，POSIX 常不可得缺省）；失败 null。type 可选区分文件/目录
+   *  （#377 T02 清单事件维护：目录事件不入清单；缺省按文件对待——兼容
+   *  既有测试桩与只关心 md 的调用面）。 */
+  statFile(fsPath: string): Promise<{
+    mtimeMs: number
+    size: number
+    birthtimeMs?: number
+    type?: 'file' | 'dir'
+  } | null>
   /** 可访问性探测（#198）：区分「明确不存在」与「不可访问」（SSH 断连/
    *  权限错误）——后者不得等同删除。 */
   accessOf(fsPath: string): Promise<'ok' | 'missing' | 'inaccessible'>
-  /** 递归监听根内 *.md 变更（保存/删除/外部修改触发单文件重扫） */
+  /** 递归监听根内文件变更（#377 T02 起全文件域 watcher：md 走既有增量
+   *  重扫管道，非 md 只维护全文件清单；保存/删除/外部修改触发回调） */
   watchRoot(rootFsPath: string, onEvent: (fsPath: string | null) => void): () => void
   /** 让出事件循环（扫描分批与快照片间；vscode 层传 setImmediate） */
   yieldToEventLoop(): Promise<void>
@@ -209,6 +247,24 @@ interface RootIndexState {
   verifying: boolean
   /** 泵忙碌时错过的核验请求（溢出降级触发；泵完成后补跑） */
   verifyPending: boolean
+  // ---- #377 T02 全文件清单 ----
+  /** 根内相对路径 → 清单条目（null = 尚未枚举；查询回退现有索引模型） */
+  catalog: Map<string, VaultCatalogEntry> | null
+  /** 清单枚举/重算进行中（查询可用项继续候选 + updating 标注） */
+  catalogScanning: boolean
+  /** 当前清单枚举的所有权（旧轮不得发布过期模型/复位新轮状态） */
+  catalogOwner: symbol | undefined
+  /** 最近一次枚举无失败目录（部分就绪不冒充完整——不参与移除 diff） */
+  catalogComplete: boolean
+  /** 清单代次（创建/删除/改名/排除修改/根增删/重连/周期核验递增；查询
+   *  结果携带，旧枚举/旧 stat/旧查询不得复活已删除身份） */
+  catalogGen: number
+  /** 清单增量提交去抖定时器（事件/核验触发的合并写盘） */
+  catalogCommitTimer: ReturnType<typeof setTimeout> | undefined
+  /** 非 md 文件事件去抖（md 事件走既有 rescanTimers 增量管道） */
+  catalogTimers: Map<string, ReturnType<typeof setTimeout>>
+  /** 清单扫描期间到达的文件事件（发布后重放——闭掉「扫描窗口漏事件」） */
+  catalogPendingEvents: Set<string>
 }
 
 export interface VaultIndexServiceOptions {
@@ -409,6 +465,8 @@ export class VaultIndexService {
         return
       }
       await this.fullScan(state, { epoch })
+      // #377 T02：根增删改变覆盖范围——清单同轮重算
+      await this.scanCatalog(state, epoch)
     }
     this.notify()
   }
@@ -459,6 +517,11 @@ export class VaultIndexService {
       queued: number
       fileCount: number
       edgeCount: number
+      /** #377 T02 全文件清单观测：条目数（null 为 0）、枚举/完整性状态与代次 */
+      catalogFileCount: number
+      catalogScanning: boolean
+      catalogComplete: boolean
+      catalogGeneration: number
     }>
   } {
     return {
@@ -472,6 +535,10 @@ export class VaultIndexService {
         queued: state.rescanQueue.size,
         fileCount: state.model?.files.size ?? 0,
         edgeCount: state.model?.edges.length ?? 0,
+        catalogFileCount: state.catalog?.size ?? 0,
+        catalogScanning: state.catalogScanning,
+        catalogComplete: state.catalogComplete,
+        catalogGeneration: state.catalogGen,
       })),
     }
   }
@@ -497,6 +564,8 @@ export class VaultIndexService {
         }
       }
       await this.fullScan(state, { epoch })
+      // #377 T02：排除变更触发清单覆盖范围重算（epoch 守卫——旧枚举不发布）
+      await this.scanCatalog(state, epoch)
     }
     this.notify()
   }
@@ -593,6 +662,11 @@ export class VaultIndexService {
         if (this.disposed || epoch !== this.maintenanceEpoch) {
           return 'cancelled'
         }
+        // #377 T02：完整重建核验资源——清单同轮重算
+        await this.scanCatalog(state, epoch)
+        if (this.disposed || epoch !== this.maintenanceEpoch) {
+          return 'cancelled'
+        }
         offset += state.model?.files.size ?? 0
       }
       return 'done'
@@ -651,6 +725,14 @@ export class VaultIndexService {
       pumpPending: false,
       verifying: false,
       verifyPending: false,
+      catalog: null,
+      catalogScanning: false,
+      catalogOwner: undefined,
+      catalogComplete: false,
+      catalogGen: 0,
+      catalogCommitTimer: undefined,
+      catalogTimers: new Map(),
+      catalogPendingEvents: new Set(),
     }
   }
 
@@ -661,14 +743,22 @@ export class VaultIndexService {
       clearTimeout(state.commitTimer)
       state.commitTimer = undefined
     }
+    if (state.catalogCommitTimer !== undefined) {
+      clearTimeout(state.catalogCommitTimer)
+      state.catalogCommitTimer = undefined
+    }
     for (const timer of state.rescanTimers.values()) {
       clearTimeout(timer)
     }
     for (const timer of state.unsavedTimers.values()) {
       clearTimeout(timer)
     }
+    for (const timer of state.catalogTimers.values()) {
+      clearTimeout(timer)
+    }
     state.rescanTimers.clear()
     state.unsavedTimers.clear()
+    state.catalogTimers.clear()
     state.unsaved.clear()
     state.unsavedSince.clear()
     state.rescanQueue.clear()
@@ -696,12 +786,17 @@ export class VaultIndexService {
         // 启动核验（#198）：快照恢复不读正文——停机窗口内的漂移由清单比对
         // 检出（mtime+size 仅筛变化；后台执行，不阻塞激活）
         void this.verifyRoot(state)
+        // #377 T02 全文件清单：恢复或重建（与引用关系独立——清单就绪不
+        // 撑引用就绪，反之亦然）
+        await this.ensureCatalog(state)
         return
       }
     } catch {
       // 快照读取异常按全损处理（索引是可重建缓存）
     }
-    await this.fullScan(state)
+    // 清单枚举（纯名称）与正文扫描并发——名称枚举不等待 Markdown 出链
+    // 核验完成（清单就绪与引用关系就绪分别标记，ADR-0013）
+    await Promise.all([this.fullScan(state), this.ensureCatalog(state)])
   }
 
   /** 全量扫描：分批读盘抽取（批间让出）→ 附件登记（两遍法）→ 快照提交。
@@ -1180,13 +1275,26 @@ export class VaultIndexService {
       return
     }
     const key = this.normKey(fsPath)
-    const prev = state.rescanTimers.get(key)
+    if (/\.md$/i.test(fsPath)) {
+      const prev = state.rescanTimers.get(key)
+      if (prev !== undefined) {
+        clearTimeout(prev)
+      }
+      state.rescanTimers.set(key, setTimeout(() => {
+        state.rescanTimers.delete(key)
+        void this.enqueueRescan(state, key)
+      }, this.rescanDebounce))
+      return
+    }
+    // #377 T02 非 md 文件：只维护全文件清单（无正文抽取语义）；去抖键
+    // 与 md 增量管道分立互不干扰
+    const prev = state.catalogTimers.get(key)
     if (prev !== undefined) {
       clearTimeout(prev)
     }
-    state.rescanTimers.set(key, setTimeout(() => {
-      state.rescanTimers.delete(key)
-      void this.enqueueRescan(state, key)
+    state.catalogTimers.set(key, setTimeout(() => {
+      state.catalogTimers.delete(key)
+      void this.catalogFileEvent(state, fsPath)
     }, this.rescanDebounce))
   }
 
@@ -1334,6 +1442,9 @@ export class VaultIndexService {
     })
     state.model.edges = state.model.edges.filter((e) => e.source !== rel).concat(edges)
     state.backlinks = buildBacklinkIndex(state.model.edges)
+    // #377 T02：md 增量重扫同步维护清单条目（磁盘 stat——未保存编辑不参
+    // 与；changed 广播由下方既有发布承担，不双发）
+    this.applyCatalogUpsert(state, rel, 'markdown', stat.mtimeMs, stat.size, false)
     if (!prevEntry || prevEntry.mtimeMs !== stat.mtimeMs || prevEntry.size !== stat.size) {
       this.publishTargetChange(state, rel, 'changed', { mtimeMs: stat.mtimeMs, size: stat.size })
     }
@@ -1342,13 +1453,17 @@ export class VaultIndexService {
 
   /** 移除基线条目与该文件的全部出链（删除的正证据路径专用） */
   private removeBaselineEntry(state: RootIndexState, rel: string): void {
-    if (!state.model?.files.has(rel)) {
-      return
+    const hadModel = state.model?.files.has(rel) === true
+    if (hadModel) {
+      state.model!.files.delete(rel)
+      state.model!.edges = state.model!.edges.filter((e) => e.source !== rel)
+      state.backlinks = buildBacklinkIndex(state.model!.edges)
     }
-    state.model.files.delete(rel)
-    state.model.edges = state.model.edges.filter((e) => e.source !== rel)
-    state.backlinks = buildBacklinkIndex(state.model.edges)
-    this.notify()
+    // #377 T02：清单条目随基线退场（调用方语义为删除正证据路径）
+    const hadCatalog = this.removeCatalogEntry(state, rel)
+    if (hadModel || hadCatalog) {
+      this.notify()
+    }
   }
 
   /** 基线 resolver：model.files 键精确 + 平台折叠（覆盖层文档不在基线时按断链） */
@@ -1363,6 +1478,299 @@ export class VaultIndexService {
         return null
       }
       return foldIndex.get(this.foldKey(rel)) ?? null
+    }
+  }
+
+  // ---- 全文件清单（#377 T02）----
+
+  /**
+   * 清单就绪入口（恢复或重建）：健康 catalog.json 直接恢复（不重新列举）；
+   * 缺失/损坏走全量枚举。与引用关系（model）独立维护——清单就绪不撑引用
+   * 就绪（rename 候选仍按 hasData 判定），反之亦然。
+   */
+  private async ensureCatalog(state: RootIndexState): Promise<void> {
+    if (this.disposed || state.catalogScanning) {
+      return
+    }
+    if (await this.loadCatalogFile(state)) {
+      this.notify()
+      return
+    }
+    await this.scanCatalog(state)
+  }
+
+  /** 恢复持久化清单（baseDir/catalog.json——单文件原子写）；损坏/缺失 false */
+  private async loadCatalogFile(state: RootIndexState): Promise<boolean> {
+    try {
+      const content = await this.storage.readFile(`${this.baseDirOf(state)}/catalog.json`)
+      const parsed = parseVaultCatalog(content)
+      if (parsed === null) {
+        return false
+      }
+      state.catalog = new Map(parsed.entries.map((e) => [e.relPath, e]))
+      state.catalogComplete = parsed.complete
+      state.catalogGen++
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 全文件清单枚举（#377 T02）：所有未排除普通文件登记名称、根内路径与
+   * 类型提示；常用资源取真实 mtime/size（stat——磁盘修改时间，不是入列
+   * 时间），未知类型仅记名（未知显式建模 0，沉底，不伪装为当前时间）。
+   * 分批让出、epoch+所有权双守卫——旧枚举不得发布过期模型或复位新轮状态。
+   * failedDirs 非空 → catalogComplete=false（部分就绪不冒充完整、不参与
+   * 下轮移除 diff）。发布后重放扫描窗口内到达的文件事件。
+   */
+  private async scanCatalog(state: RootIndexState, epoch = this.maintenanceEpoch): Promise<void> {
+    if (this.disposed) {
+      return
+    }
+    const owner = Symbol()
+    const cancelled = (): boolean =>
+      this.disposed || epoch !== this.maintenanceEpoch || state.catalogOwner !== owner
+    state.catalogOwner = owner
+    state.catalogScanning = true
+    this.notify()
+    try {
+      const listed = await this.scan.listAllFiles(state.fsPath, {
+        skipDir: (dirFsPath) => this.isExcludedDirDeep(dirFsPath),
+      })
+      const entries = new Map<string, VaultCatalogEntry>()
+      for (let i = 0; i < listed.files.length; i++) {
+        if (cancelled()) {
+          return
+        }
+        const abs = listed.files[i]!
+        const rel = this.relOf(state, abs)
+        // 嵌套根归属/排除与 md 索引域同口径（端口列举含将被排除者）
+        if (rel === null || this.rootOf(abs) !== state || this.excludeMatcher.test(rel)) {
+          continue
+        }
+        const category = classifyVaultFileCategory(rel)
+        let mtimeMs = 0
+        let size = 0
+        if (isCommonVaultFileCategory(category)) {
+          const stat = await this.scan.statFile(abs)
+          if (stat && stat.type !== 'dir') {
+            mtimeMs = stat.mtimeMs
+            size = stat.size
+          }
+          // stat 失败：保留名称身份，元数据未知（0）——不为判定读文件、
+          // 也不丢弃条目（下一轮核验自愈）
+        }
+        entries.set(rel, { relPath: rel, category, mtimeMs, size })
+        if ((i + 1) % this.scanBatch === 0) {
+          await this.scan.yieldToEventLoop()
+        }
+      }
+      if (cancelled()) {
+        return
+      }
+      state.catalog = entries
+      state.catalogComplete = listed.failedDirs.length === 0
+      state.catalogGen++
+      this.notify()
+      await this.commitCatalog(state)
+      // 扫描窗口内到达的事件重放（fromReplay 绕过 pending 登记；残留由
+      // 周期核验兜底）。重放前复位 catalogScanning：整体覆盖已发生
+      // （entries 已发布为权威清单），重放的三态登记必须走直写——否则
+      // applyCatalogUpsert 的 F15 拦截会把同一事件回填 pending，重放循环
+      // 永不收敛（CI s3 实证：扫描窗口内 watcher 事件到达即死循环，
+      // scanCatalog 永不返回、清单事件永不上清）
+      state.catalogScanning = false
+      for (
+        let pending = [...state.catalogPendingEvents];
+        pending.length > 0 && !cancelled();
+        pending = [...state.catalogPendingEvents]
+      ) {
+        state.catalogPendingEvents.clear()
+        for (const fsPath of pending) {
+          if (cancelled()) {
+            return
+          }
+          await this.catalogFileEvent(state, fsPath, true)
+        }
+      }
+    } finally {
+      if (state.catalogOwner === owner) {
+        state.catalogOwner = undefined
+        state.catalogScanning = false
+        this.notify()
+      }
+    }
+  }
+
+  /**
+   * 非 md 文件事件维护（watcher 去抖后）：三态判定——missing 正证据移除
+   * （发布 deleted 代次）；inaccessible 保留条目（不冒充删除，曾有已知
+   * 元数据者发 stale）；ok 时 stat 后按分类登记（目录事件不入清单——
+   * 只登记普通文件）。清单枚举期间到达的事件入 pending（发布后重放）。
+   */
+  private async catalogFileEvent(
+    state: RootIndexState,
+    fsPath: string,
+    fromReplay = false,
+  ): Promise<void> {
+    if (this.disposed) {
+      return
+    }
+    if (state.catalogScanning && !fromReplay) {
+      state.catalogPendingEvents.add(this.normKey(fsPath))
+      return
+    }
+    if (!state.catalog) {
+      return // 清单未建：ensureCatalog 全量枚举稍后覆盖（周期核验兜底）
+    }
+    const rel = this.relOf(state, fsPath)
+    if (rel === null || this.rootOf(fsPath) !== state) {
+      return
+    }
+    // 排除复检（去抖窗口内排除可能已变——排除域不进不出）
+    if (this.excludeMatcher.test(rel)) {
+      if (this.removeCatalogEntry(state, rel)) {
+        this.publishTargetChange(state, rel, 'deleted', null)
+        this.notify()
+      }
+      return
+    }
+    const access = await this.scan.accessOf(fsPath)
+    if (this.disposed) {
+      return
+    }
+    if (access === 'missing') {
+      // 清单侧的 deleted 广播归此（removeCatalogEntry 只登记不广播）
+      if (this.removeCatalogEntry(state, rel)) {
+        this.publishTargetChange(state, rel, 'deleted', null)
+        this.notify()
+      }
+      return
+    }
+    if (access === 'inaccessible') {
+      const prev = state.catalog.get(rel)
+      if (prev && (prev.mtimeMs > 0 || prev.size > 0)) {
+        this.publishTargetChange(state, rel, 'stale', { mtimeMs: prev.mtimeMs, size: prev.size })
+      }
+      return
+    }
+    const stat = await this.scan.statFile(fsPath)
+    if (stat === null) {
+      // 可访问但 stat 失败：保守按 stale（与 rescanFile 同口径）
+      const prev = state.catalog.get(rel)
+      if (prev && (prev.mtimeMs > 0 || prev.size > 0)) {
+        this.publishTargetChange(state, rel, 'stale', { mtimeMs: prev.mtimeMs, size: prev.size })
+      }
+      return
+    }
+    if (stat.type === 'dir') {
+      return // 目录身份不入清单（全文件清单只登记普通文件）
+    }
+    const category = classifyVaultFileCategory(rel)
+    const changed = isCommonVaultFileCategory(category)
+      ? this.applyCatalogUpsert(state, rel, category, stat.mtimeMs, stat.size)
+      : this.applyCatalogUpsert(state, rel, category, 0, 0)
+    if (changed) {
+      // watcher 单文件事件：变更后广播（面板快照与 #377 候选失效信号
+      // wikilink.invalidate 的共同触发点——候选会话据此重发当前查询）
+      this.notify()
+    }
+  }
+
+  /**
+   * 清单条目登记（增量路径共用体）：无变化不动（不空转代次）；新条目只建
+   * 目标代次不广播（避免启动风暴——与 fullScan 同口径）；已有条目元数据
+   * 变化发布 changed（#201 变化通道随清单扩展到非 md 目标自动接通）。
+   * publishChange=false 供已自行广播的调用方（rescanFile 的 md 路径）复用
+   * 登记逻辑而不双发。返回是否实际变更——调用方聚合后统一 notify（#200
+   * 「批末一次广播」契约：批量 rename 不按文件数广播）。清单未建（null）
+   * 时空操作——全量枚举稍后覆盖。
+   */
+  private applyCatalogUpsert(
+    state: RootIndexState,
+    rel: string,
+    category: VaultFileCategory,
+    mtimeMs: number,
+    size: number,
+    publishChange = true,
+  ): boolean {
+    const catalog = state.catalog
+    if (!catalog) {
+      return false
+    }
+    // F15：清单枚举进行中不直写——运行中重扫窗口内到达的直写通道
+    // （verifyRoot 的清单比对、md 泵 rescanFile、rename 批）会被
+    // scanCatalog 完成时的整体覆盖吞掉（≤ 周期核验间隔才自愈）；改走
+    // catalogPendingEvents，由扫描收尾的既有重放循环按三态重新判定
+    if (state.catalogScanning) {
+      state.catalogPendingEvents.add(this.normKey(this.absOf(state, rel)))
+      return false
+    }
+    const prev = catalog.get(rel)
+    if (prev && prev.category === category && prev.mtimeMs === mtimeMs && prev.size === size) {
+      return false
+    }
+    catalog.set(rel, { relPath: rel, category, mtimeMs, size })
+    state.catalogGen++
+    if (prev === undefined) {
+      this.ensureGeneration(this.absOf(state, rel))
+    } else if (
+      publishChange &&
+      (prev.mtimeMs !== mtimeMs || prev.size !== size)
+    ) {
+      this.publishTargetChange(state, rel, 'changed', mtimeMs > 0 ? { mtimeMs, size } : null)
+    }
+    this.scheduleCatalogCommit(state)
+    return true
+  }
+
+  /** 清单条目移除（删除正证据路径）：移除即推进代次；**不广播**——deleted
+   *  广播统一由调用方承担（rescanFile/verifyRoot/rename 批/catalogFileEvent
+   *  各自已有发布点，避免双发）。返回是否实际移除（调用方聚合 notify）。
+   *  F15：清单枚举进行中不直写（同 applyCatalogUpsert）——扫描收尾的
+   *  整体覆盖会吞掉本移除；转 pending 由重放按 missing 正证据重新判定。 */
+  private removeCatalogEntry(state: RootIndexState, rel: string): boolean {
+    const catalog = state.catalog
+    if (!catalog || !catalog.has(rel)) {
+      return false
+    }
+    if (state.catalogScanning) {
+      state.catalogPendingEvents.add(this.normKey(this.absOf(state, rel)))
+      return false
+    }
+    catalog.delete(rel)
+    state.catalogGen++
+    this.scheduleCatalogCommit(state)
+    return true
+  }
+
+  /** 清单增量提交去抖（事件/核验触发的合并写盘；全量枚举直写不经此） */
+  private scheduleCatalogCommit(state: RootIndexState): void {
+    if (state.catalogCommitTimer !== undefined) {
+      clearTimeout(state.catalogCommitTimer)
+    }
+    state.catalogCommitTimer = setTimeout(() => {
+      state.catalogCommitTimer = undefined
+      void this.commitCatalog(state)
+    }, this.commitDebounce)
+  }
+
+  /** 清单落盘（单文件原子写——临时写 + rename 由端口保证；写失败仅影响
+   *  持久化，内存清单与 notify 照常，下一轮提交兜底） */
+  private async commitCatalog(state: RootIndexState): Promise<void> {
+    if (this.disposed || !state.catalog) {
+      return
+    }
+    const content = serializeVaultCatalog(state.catalog.values(), state.catalogComplete)
+    try {
+      await this.storage.ensureDir(this.baseDirOf(state))
+      await this.storage.writeFile(`${this.baseDirOf(state)}/catalog.json`, content)
+    } catch (err) {
+      console.warn(
+        `[vsidian] 全文件清单写入失败（root=${state.fsPath}）：` +
+        `${err instanceof Error ? err.message : String(err)}；下一轮提交兜底`,
+      )
     }
   }
 
@@ -1448,6 +1856,95 @@ export class VaultIndexService {
         touched = true
         if ((i + 1) % this.rescanBatchFiles === 0) {
           await this.scan.yieldToEventLoop()
+        }
+      }
+      // #377 T02 清单核验：全文件列举比对——外部增删（无事件漂移）兜底；
+      // 部分枚举（failedDirs 非空）不做移除（不可访问不冒充删除）且
+      // catalogComplete=false（查询侧呈部分就绪）。
+      if (state.catalog) {
+        if (cancelled()) {
+          return 'cancelled'
+        }
+        const catListed = await this.scan.listAllFiles(state.fsPath, {
+          skipDir: (dirFsPath) => this.isExcludedDirDeep(dirFsPath),
+        })
+        const completeNow = catListed.failedDirs.length === 0
+        const listedRels = new Set<string>()
+        // 列举项元数据：常用资源批量 stat（分批让出；仅记名条目 0/0——
+        // 与 known 侧同形态，天然不误报 changed）
+        const current: Array<{ path: string; mtimeMs: number; size: number }> = []
+        let statDone = 0
+        for (const abs of catListed.files) {
+          if (cancelled()) {
+            return 'cancelled'
+          }
+          const rel = this.relOf(state, abs)
+          if (rel === null || this.rootOf(abs) !== state || this.excludeMatcher.test(rel)) {
+            continue
+          }
+          listedRels.add(rel)
+          if (!isCommonVaultFileCategory(classifyVaultFileCategory(rel))) {
+            current.push({ path: rel, mtimeMs: 0, size: 0 })
+            continue
+          }
+          const stat = await this.scan.statFile(abs)
+          if (statDone++ % this.verifyBatchFiles === 0) {
+            await this.scan.yieldToEventLoop()
+          }
+          if (stat && stat.type !== 'dir') {
+            current.push({ path: rel, mtimeMs: stat.mtimeMs, size: stat.size })
+          }
+        }
+        const known = new Map<string, { mtimeMs: number; size: number }>()
+        for (const [rel, entry] of state.catalog) {
+          known.set(rel, entry)
+        }
+        const catDiff = diffVaultCatalog(known, current)
+        let catalogTouched = false
+        const currentByPath = new Map(current.map((c) => [c.path, c] as const))
+        for (const rel of [...catDiff.added, ...catDiff.changed]) {
+          if (cancelled()) {
+            return 'cancelled'
+          }
+          const hit = currentByPath.get(rel) ?? { mtimeMs: 0, size: 0 }
+          catalogTouched = this.applyCatalogUpsert(
+            state, rel, classifyVaultFileCategory(rel), hit.mtimeMs, hit.size,
+          ) || catalogTouched
+        }
+        // 移除：仅完整枚举参与（正证据 accessOf=missing）
+        if (completeNow) {
+          for (const rel of catDiff.removed) {
+            if (cancelled()) {
+              return 'cancelled'
+            }
+            const access = await this.scan.accessOf(this.absOf(state, rel))
+            if (access === 'missing') {
+              if (this.removeCatalogEntry(state, rel)) {
+                this.publishTargetChange(state, rel, 'deleted', null)
+                catalogTouched = true
+              }
+            } else if (access === 'inaccessible') {
+              const prev = state.catalog.get(rel)
+              if (prev && (prev.mtimeMs > 0 || prev.size > 0)) {
+                this.publishTargetChange(state, rel, 'stale', { mtimeMs: prev.mtimeMs, size: prev.size })
+              }
+            }
+            // access=ok 但未在列举（列举漂移）：保守跳过，下轮核验兜底
+          }
+        }
+        if (state.catalogComplete !== completeNow) {
+          state.catalogComplete = completeNow
+          state.catalogGen++
+          this.scheduleCatalogCommit(state)
+          catalogTouched = true
+        }
+        // F14：清单核验零变化不置位 touched——周期核验/焦点回归每 10 分钟
+        // 一次，无条件 touched 会触发全模型序列化提交（10 万档实测 3.72s）
+        // 与代际空转；仅在清单确有变化（catalogTouched）时合流 touched，
+        // 「确有变化时」的提交与广播行为不变
+        if (catalogTouched) {
+          touched = true
+          this.notify() // 清单核验变更：一次广播（聚合——不按条目数）
         }
       }
       if (touched) {
@@ -1697,6 +2194,10 @@ export class VaultIndexService {
             state.model.edges = state.model.edges.filter((e) => e.source !== rel)
             touchedRoots.add(state)
           }
+          // #377 T02：清单条目随旧路径退场（missing 正证据；发布 deleted）
+          if (this.removeCatalogEntry(state, rel)) {
+            touchedRoots.add(state)
+          }
           this.publishTargetChange(state, rel, 'deleted', null)
         } else if (access === 'inaccessible') {
           const prev = state.model.files.get(rel)
@@ -1749,6 +2250,11 @@ export class VaultIndexService {
             contentVersion: (state.model.files.get(rel)?.contentVersion ?? 0) + 1,
             ...this.birthtimeOf(stat),
           })
+          // #377 T02：md 新位置入清单（磁盘 stat；排除域不入清单；changed
+          // 由批末统一发布，此处静默登记不双发）
+          if (!this.excludeMatcher.test(rel)) {
+            this.applyCatalogUpsert(state, rel, 'markdown', stat.mtimeMs, stat.size, false)
+          }
           registered.add(rel)
         } else {
           assetPaths.push(fsPath)
@@ -1780,6 +2286,16 @@ export class VaultIndexService {
           ...this.birthtimeOf(stat),
         })
         this.ensureGeneration(fsPath)
+        // #377 T02：附件新位置入清单（引用关系登记与清单登记分别判定——
+        // 排除位置目标仍登记 asset（#198 语义），清单侧排除不入）
+        if (!this.excludeMatcher.test(rel) && stat.type !== 'dir') {
+          const category = classifyVaultFileCategory(rel)
+          if (isCommonVaultFileCategory(category)) {
+            this.applyCatalogUpsert(state, rel, category, stat.mtimeMs, stat.size)
+          } else {
+            this.applyCatalogUpsert(state, rel, category, 0, 0)
+          }
+        }
         registered.add(rel)
         touched = true
       }
@@ -1848,6 +2364,137 @@ export class VaultIndexService {
       state.backlinks = buildBacklinkIndex(state.model.edges)
       this.notify()
       this.scheduleCommit(state)
+    }
+  }
+
+  /**
+   * 双链联想文件候选（#376 T01 建立，#377 T02 扩展为全文件清单）：候选源
+   * 为来源文档所属根的全文件清单（所有未排除普通文件——未被引用的附件与
+   * 未知类型可搜索）；清单未就绪（null，构建中/待恢复）时回退现有索引
+   * Markdown/附件条目并标 updating（部分就绪不冒充完整空结果）。
+   *
+   * 排序契约（shared/wikilinkQuery，VSCode 基线移植 ADR-0014）：空查询仅
+   * 常用资源（Markdown/图片/PDF/音视频/可读文本——零 IO 后缀派生），按
+   * mtime 新→旧（未知沉底）、稳定路径破同分；有查询允许 .pyc 等未知/编译
+   * 类型，匹配分数优先、同分再 mtime、稳定路径破同分。total 为命中总数，
+   * items 自第 offset 个**可投递**候选（病态候选滑动跳过后）起取至多
+   * limit 条——items.length < limit 即已穷尽（分页终态判据；排序在截取
+   * 前全量完成）。
+   *
+   * 插入路径在宿主侧按来源文档目录计算并经 vaultLink 往返核对（核对失败
+   * 的病态候选丢弃，不产出不可信路径）；别名 Markdown 去尾 .md、其余保留
+   * 完整文件名。catalogGen 为清单代次回显（webview 侧拒收跨代次的迟到追
+   * 加页）。未就绪/越根真实报状态，不伪装空结果。同步执行（内存模型，
+   * 无 IO）——迟到/乱序由 webview 侧 reqId+generation 守卫承担。
+   */
+  queryWikilinkFileCandidates(
+    sourceFsPath: string,
+    query: string,
+    offset = 0,
+    limit = WIKILINK_QUERY_LIMIT,
+  ):
+    | { status: 'unavailable'; reason: 'no-workspace' | 'not-ready' }
+    | { status: 'ready'; updating: boolean; total: number; catalogGen: number; items: WikilinkCandidateItem[] } {
+    const state = this.rootOf(sourceFsPath)
+    if (!state) {
+      return { status: 'unavailable', reason: 'no-workspace' }
+    }
+    if (!state.hasData || !state.model) {
+      return { status: 'unavailable', reason: 'not-ready' }
+    }
+    const sourceRel = this.relOf(state, sourceFsPath)
+    if (sourceRel === null) {
+      return { status: 'unavailable', reason: 'no-workspace' }
+    }
+    const files: WikilinkCandidateFile[] = []
+    /** 候选类型（别名派生：markdown 去尾 .md，其余完整文件名） */
+    const kindByRel = new Map<string, 'markdown' | 'asset'>()
+    const pushFile = (rel: string, mtimeMs: number, kind: 'markdown' | 'asset'): void => {
+      const nameAt = rel.lastIndexOf('/') + 1
+      files.push({
+        name: rel.slice(nameAt),
+        dir: nameAt > 0 ? rel.slice(0, nameAt - 1) : '',
+        relPath: rel,
+        mtimeMs,
+      })
+      kindByRel.set(rel, kind)
+    }
+    const catalog = state.catalog
+    if (catalog !== null) {
+      for (const [rel, entry] of catalog) {
+        pushFile(rel, entry.mtimeMs, entry.category === 'markdown' ? 'markdown' : 'asset')
+      }
+    } else {
+      // 清单未就绪回退：现有索引的 Markdown 与被引用附件（可用项继续候选）
+      for (const [rel, entry] of state.model.files) {
+        pushFile(
+          rel,
+          entry.mtimeMs,
+          entry.kind === 'markdown' ? 'markdown' : 'asset',
+        )
+      }
+    }
+    // 空查询资格：仅常用资源（其他类型可被有查询命中——分页/排序共用同一
+    // 排序实现，过滤在排序前完成）。F10：判空与评分侧同源
+    // （prepareWikilinkQuery 的 normalized——单 `*`/引号等全符号查询在评分
+    // 侧为空查询，此处不得以 trim 口径分叉放开常用资源过滤）
+    const preparedEmpty = prepareWikilinkQuery(query).normalized === ''
+    const pool = preparedEmpty
+      ? files.filter((f) => {
+        const rel = f.relPath
+        const entry = catalog?.get(rel)
+        const category = entry
+          ? entry.category
+          : classifyVaultFileCategory(rel) // 回退路径零 IO 派生（asset 按 after 派生）
+        return isCommonVaultFileCategory(category)
+      })
+      : files
+    const docDir = this.dirname(sourceFsPath)
+    const items: WikilinkCandidateItem[] = []
+    // F6：病态候选（insertPath 规划失败或写回往返失败）在页内丢弃须**补位**
+    // ——排名全量取得后自头部滑动跳过病态条目，从第 offset 个**可投递**
+    // 候选起凑满 limit 或穷尽（webview 续页的 offset 为已投递数，病态占位
+    // 会使排名偏移错位、续页重复/尾部空页死循环）。items.length < limit 即
+    // 穷尽信号（webview 以满页与否作终态判据）；total 保持命中总数，排序
+    // 契约不变（滑动只跳过、不重排）
+    const ranked = rankWikilinkCandidates(pool, query, pool.length)
+    const limitClamped = Math.max(0, limit)
+    let deliverableSeen = 0
+    for (const item of ranked.items) {
+      if (items.length >= limitClamped) {
+        break // 已凑满（offset 之前不可能凑满，deliverableSeen 已越过）
+      }
+      const abs = this.absOf(state, item.relPath)
+      // 插入路径按来源文档目录计算并经 vaultLink 往返核对 + F5 写回语法
+      // 往返核对——核对失败的病态候选丢弃，不产出与所选身份不一致或写入
+      // 即损坏引用的路径
+      const insertPath = planWikilinkInsertPath(docDir, state.fsPath, this.opts.isWindowsHost, abs)
+      const alias = defaultAliasOf(item.name, kindByRel.get(item.relPath) ?? 'asset')
+      if (insertPath === null || !wikilinkFileCandidateSafe(insertPath, alias)) {
+        continue
+      }
+      if (deliverableSeen >= Math.max(0, offset)) {
+        items.push({
+          id: abs,
+          name: item.name,
+          dir: item.dir,
+          relPath: item.relPath,
+          insertPath,
+          alias,
+          mtimeMs: item.mtimeMs,
+          score: item.score,
+          labelHighlights: item.labelHighlights,
+          dirHighlights: item.dirHighlights,
+        })
+      }
+      deliverableSeen++
+    }
+    return {
+      status: 'ready',
+      updating: state.scanning || state.catalogScanning || !state.catalogComplete,
+      total: ranked.total,
+      catalogGen: state.catalogGen,
+      items,
     }
   }
 

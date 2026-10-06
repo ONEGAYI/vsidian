@@ -164,9 +164,15 @@ function parseCaseArray(fileName: string, varName: string): Array<[string, null]
 }
 
 function productionCases(): Array<[string, null]> {
-  // #278 探针清单独立成文件，经 cases.ts 数组内展开合入——解析器允许该
-  // 唯一展开并按运行时顺序内联其字面量名；其余展开形态仍立即失败
-  const probes = parseCaseArray('probe278.ts', 'probe278Cases')
+  // 探针清单独立成文件，经 cases.ts 数组内展开合入——解析器允许**登记过**
+  // 的探针展开（#278 probe278、#375 probe375）并按运行时顺序内联其字面量
+  // 名；其余展开形态仍立即失败
+  const probeSpreads = new Map<string, Array<[string, null]>>([
+    ['probe278Cases', parseCaseArray('probe278.ts', 'probe278Cases')],
+    ['probe375Cases', parseCaseArray('probe375.ts', 'probe375Cases')],
+    ['wikilinkBlockCases', parseCaseArray('wikilinkBlock.ts', 'wikilinkBlockCases')],
+    ['wikilinkEmbedCases', parseCaseArray('wikilinkEmbed.ts', 'wikilinkEmbedCases')],
+  ])
   const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
     ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const names: Array<[string, null]> = []
@@ -178,8 +184,9 @@ function productionCases(): Array<[string, null]> {
       if (!array || !ts.isArrayLiteralExpression(array)) throw new Error('cases 须为明确的用例数组')
       for (const entry of array.elements) {
         if (ts.isSpreadElement(entry)) {
-          if (ts.isIdentifier(entry.expression) && entry.expression.text === 'probe278Cases') {
-            names.push(...probes)
+          const inlined = ts.isIdentifier(entry.expression) ? probeSpreads.get(entry.expression.text) : undefined
+          if (inlined) {
+            names.push(...inlined)
             continue
           }
           throw new Error('用例数组不支持未知展开')

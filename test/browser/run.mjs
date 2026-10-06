@@ -83,7 +83,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'embedPdf',
   // #339（P3-07）PDF 适合宽度/缩放/文本选择/链接：紧随 hoverPdf/embedPdf（同 PDF 族
   // ——真实 TextLayer 对齐/选区/缩放重绘/链接矩阵与零写回）
-  'pdfZoomCopyLinks']
+  'pdfZoomCopyLinks',
+  // #376（T01）双链文件联想候选：紧随 symbolInput（同输入族——真实键盘/IME
+  // 驱动、宿主应答由夹具回灌、候选浮层与键位行为）
+  'wikilinkSuggest']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

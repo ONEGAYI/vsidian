@@ -4,6 +4,8 @@
 
 2026-10-05 用户确认直接基于 VSCode 查询逻辑实现候选联想，仅按 Vsidian 的实际需要作少量修改。方向已接受，查询匹配实现和完整技术规格尚未交付。
 
+2026-10-06 T07 收口核对（#382）：移植已随 T01（#376）落地于 `src/shared/wikilinkQuery.ts`，文件头部固定声明来源提交 `2dca67a07aba894351849f39d337a921758722e8`（microsoft/vscode 的 `src/vs/base/common/fuzzyScorer.ts` scoreFuzzy/prepareQuery/scoreItemFuzzy 与 `src/vs/base/common/filters.ts` matchesPrefix）与上游许可 MIT（Copyright (c) Microsoft Corporation，随本项目 MIT 依赖分发合规），并列明四项适配差异（路径分隔符归一、不移植完整比较器、不移植 PATH_IDENTITY/评分缓存、引号连续匹配按上游口径）；核查记录与官方测试例对照见[研究记录](../research/vscode-quick-open-matching.md)。官方测试例对照契约测试在 `test/unit/wikilinkQuery.test.ts`；大库费用实测见[容量基准](../perf/2026-10-wikilink-completion-capacity.md)。来源、版本与许可三方（代码头注、本 ADR、研究记录）一致。
+
 ## 背景与决定
 
 双链输入联想需要成熟的文件名和路径匹配，用户提出以 VSCode Ctrl+P 为参考，随后明确采用其现有查询逻辑作为实现基线。源码核查表明，其模糊评分有文件名／前缀加权、路径和多词分支，不能用四段分类排序准确替代；证据与固定参照见[研究记录](../research/vscode-quick-open-matching.md)。

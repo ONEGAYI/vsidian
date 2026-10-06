@@ -272,6 +272,11 @@ export interface EmbedCardContext {
    *  确认后派发到主编辑器（生产由 syncController 注入；缺省时删除意图
    *  确认后不重放——引用保留，保守路径） */
   mainEditorView?(): EditorView | null
+  /** #381 T06 双链联想轻提示通道（重复标题风险/块接受失败等）：内部 Live
+   *  实例的候选会话经此把 toast 呈现在宿主面板面（B 嵌入在 A 的 webview
+   *  内，A 的 toast 容器即 B 的会话面）；缺省静默跳过（无 toast 面的装配
+   *  不阻塞确认） */
+  notifyToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除）。
@@ -1875,6 +1880,13 @@ export class EmbedCardManager {
       images: live.images,
       isLiveActive: (): boolean => entryRef.live?.instance === created,
       initialDark: embedHostDark(),
+      // #381 T06 双链联想：内部 Live 与主正文同装配（每实例独立会话/
+      //  代次/守卫；查询经 sendRefEditOut → refEdit.message 信封以 B 为
+      //  来源，回包经 notifyPush 的 wikilink 分支定向路由）
+      enableWikilinkSuggest: true,
+      // #381 T06 轻提示（重复标题风险/块接受失败）：经根 toast 面呈现
+      //（B 嵌入在 A 的 webview 内，toast 通道即 B 的会话面）
+      notifyToast: (text, severity) => this.context.notifyToast?.(text, severity),
       onSuspendedChange: () => {
         if (instanceLive.instance) {
           instanceLive.suspended = instanceLive.instance.isSuspended
@@ -2049,6 +2061,15 @@ export class EmbedCardManager {
       // P2-14（#291）代码卡复制经目标端口走宿主剪贴板（B 会话按自身
       // docUri 守卫 + B 文档 EOL 归一——与根面板 #81 同语义）
       case 'codeblock.copy':
+      // #381 T06 双链联想查询族经目标端口以 B 为来源执行（宿主 provider
+      // 层拦截——文件清单、插入相对路径与块 ID 编排都以 B 目录/根为准，
+      // 回包经 refEdit.push 信封定向回推本实例）
+      case 'wikilink.query':
+      case 'wikilink.heading.query':
+      case 'wikilink.block.query':
+      case 'wikilink.block.accept':
+      case 'wikilink.block.linked':
+      case 'wikilink.block.cancel':
         this.context.send({
           kind: 'refEdit.message',
           panelSessionId: session.sessionId,
@@ -2156,6 +2177,39 @@ export class EmbedCardManager {
           break
         case 'refresh.invalidated':
           live.images?.invalidateAll()
+          break
+        // ---- #381 T06 双链联想回包：信封定向回推到本实例（三重守卫在
+        //  实例内——reqId/generation/会话；实例已销毁/释放时迟到回包在此
+        //  丢弃，不写父 A 或新 B 会话）----
+        case 'wikilink.query.result':
+          if (!inst) {
+            continue
+          }
+          inst.handleWikilinkQueryResult(message.message)
+          break
+        case 'wikilink.heading.query.result':
+          if (!inst) {
+            continue
+          }
+          inst.handleWikilinkHeadingQueryResult(message.message)
+          break
+        case 'wikilink.block.query.result':
+          if (!inst) {
+            continue
+          }
+          inst.handleWikilinkBlockQueryResult(message.message)
+          break
+        case 'wikilink.block.accept.result':
+          if (!inst) {
+            continue
+          }
+          inst.handleWikilinkBlockAcceptResult(message.message)
+          break
+        case 'wikilink.invalidate':
+          if (!inst) {
+            continue
+          }
+          inst.handleWikilinkInvalidate()
           break
       }
     }
@@ -2996,11 +3050,16 @@ export class EmbedCardManager {
     }
   }
 
-  /** 嵌入内 Esc：非空选区先收选区（不关闭）；空选区触发显式关闭 */
+  /** 嵌入内 Esc：非空选区先收选区（不关闭）；空选区触发显式关闭。
+   *  #381 T06：候选会话在场时先豁免（return false 落穿给联想会话的 Esc
+   *  ——Prec.high 先尝试，候选先关列表，下一次 Esc 才进入本关闭链） */
   private embedEscapeKeymap(entry: EmbedEntry): Extension {
     return Prec.high(keymap.of([{
       key: 'Escape',
       run: (view) => {
+        if (entry.live?.instance?.hasActiveWikilinkSuggest() === true) {
+          return false // 候选先关（wikilinkSuggest 的 Esc 消费）；本次不关卡片
+        }
         const sel = view.state.selection.main
         if (!sel.empty) {
           // 先收选区（标准编辑器语义：Esc 折叠选区到光标）——默认 keymap
@@ -3232,6 +3291,45 @@ export class EmbedCardManager {
       return false
     }
     view.dispatch({ changes: { from: pos, to: pos, insert: text } })
+    return true
+  }
+
+  /** #381 T06 测试钩子：嵌入实例的浏览器输入路径（execCommand——与主面板
+   *  table.test.domType 同构；真实 contentEditable 输入驱动 symbol 补全与
+   *  候选触发链）。焦点先落嵌入 contentDOM */
+  domTypeInEmbed(inner: string, text: string, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const view = entry?.live?.instance?.getView()
+    if (!entry || !view) {
+      return false
+    }
+    view.focus()
+    if (document.activeElement !== view.contentDOM) {
+      return false
+    }
+    document.execCommand('insertText', false, text)
+    return true
+  }
+
+  /** #381 T06 测试钩子：嵌入实例派发 keydown（候选会话键走同一 keymap
+   *  优先级链——与主面板 table.test.key 同构的键名映射） */
+  keyInEmbed(inner: string, key: string, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const view = entry?.live?.instance?.getView()
+    if (!entry || !view) {
+      return false
+    }
+    const mapped: Record<string, string> = {
+      enter: 'Enter', down: 'ArrowDown', up: 'ArrowUp', escape: 'Escape', tab: 'Tab',
+      backspace: 'Backspace', delete: 'Delete',
+    }
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: mapped[key] ?? key,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
     return true
   }
 

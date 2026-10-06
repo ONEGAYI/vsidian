@@ -26,6 +26,12 @@ import {
   findBlockOffset,
   findHeadingOffset,
 } from './wikilinkTarget'
+import { queryWikilinkHeadings } from './wikilinkHeadingSource'
+import { queryWikilinkBlocks } from './wikilinkBlockSource'
+import { WikilinkBlockIdCoordinator } from './wikilinkBlockIdCoordinator'
+import { planTargetBlockId } from '../shared/wikilinkBlock'
+import { classifyVaultFileCategory } from '../shared/vaultFileCategory'
+import { defaultAliasOf } from '../shared/wikilinkQuery'
 import {
   resolveVaultLinkFile,
   type VaultLinkResolveContext,
@@ -107,6 +113,7 @@ import { hostLocale } from './hostLocale'
 import type { FindOptionsStore } from './findOptionsStore'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
+import type { MessageKey } from '../shared/locales/en'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
@@ -368,9 +375,9 @@ export function createTextEditorProvider(
    *  extension.ts 注入 createIndexMaintenance 产物） */
   indexMaintenance?: IndexMaintenance,
   /** #239 分词资源接线（jieba 下载/删除宿主权威；编辑器面板消费
-   *  wordSegment.get 应答与 loadResult 转发、状态变化广播） */
+   *  wordSegment.get 应答与 loadResult 转发、状态变更广播） */
   jieba?: JiebaWiring,
-): vscode.CustomTextEditorProvider {
+): vscode.CustomTextEditorProvider & { dispose(): Promise<void> } {
   const sessions = new Map<string, SessionEntry>()
   const diagnostics = new TestDiagnostics()
   // ---- #342（P3-10）外链元信息服务：provider 级单例（跨面板共享缓存与
@@ -1504,6 +1511,11 @@ export function createTextEditorProvider(
       // 虚拟面板的重复 ready 以 virtualSessionId 调用，注册表按面板键查不到
       // 为无害 no-op
       onPanelReload: (sessionId) => releaseRefPortsOnWebviewReload(key, sessionId),
+      // #380 T05：来源 undo/redo 落定后驱动块 ID 撤回协调（尽力撤回本次
+      // 自动新增标记/重做重核重建——V01 放行路径，best-effort 不阻塞撤销）
+      onHistoryApplied: (op) => {
+        void blockIdCoordinator.onHistoryApplied(key, op)
+      },
     })
     sessions.set(key, fresh)
     return fresh
@@ -1524,6 +1536,9 @@ export function createTextEditorProvider(
       }
       entry.session.dispose()
       sessions.delete(uri.toString())
+      // #380 T05：来源会话退役——未落地的补 ID pending 尽力收尾撤回
+      //（V01 场景 6/7 收尾）；已落地记录按 origin-closed 保留标记
+      void blockIdCoordinator.disposeOrigin(uri.toString())
     }
   }
 
@@ -1756,6 +1771,320 @@ export function createTextEditorProvider(
           searchRevealLocateWithFeedback()
         }
       })
+  }
+
+  // ---- #376 T01 双链联想：查询应答（面板级查询意图的执行体） ----
+
+  /** 双链联想查询应答（wikilink.query 同步执行）：无索引服务按无工作区
+   *  真实报状态；候选条目为协议稳定契约形态（含经 vaultLink 往返核对的
+   *  插入路径与默认别名，均在服务侧完成）。#377 T02 起透传 offset（分页
+   *  继续加载）并回传 catalogGen（清单代次——webview 拒收跨代次追加页） */
+  const respondWikilinkQuery = (
+    doc: vscode.TextDocument,
+    message: Extract<WebviewToHost, { kind: 'wikilink.query' }>,
+  ): Extract<HostToWebview, { kind: 'wikilink.query.result' }> => {
+    const result = vaultIndex
+      ? vaultIndex.queryWikilinkFileCandidates(doc.uri.fsPath, message.query, message.offset ?? 0)
+      : ({ status: 'unavailable', reason: 'no-workspace' } as const)
+    const base = {
+      kind: 'wikilink.query.result' as const,
+      sessionId: message.sessionId,
+      docUri: message.docUri,
+      reqId: message.reqId,
+      generation: message.generation,
+    }
+    if (result.status === 'unavailable') {
+      return { ...base, status: 'unavailable', reason: result.reason }
+    }
+    return {
+      ...base,
+      status: 'ready',
+      updating: result.updating,
+      total: result.total,
+      catalogGen: result.catalogGen,
+      items: result.items,
+    }
+  }
+
+  // ---- #379 T04 双链联想：标题查询应答（面板级查询意图的执行体） ----
+
+  /** 双链联想标题查询应答（wikilink.heading.query 异步执行——目标解析与
+   *  正文读取含 IO）：先等本会话在途 edit.request 全部应用（未保存正文
+   *  协调——目标==来源文档时候选反映当前有效版本，不以陈旧 TextDocument
+   *  枚举；目标==其他文档不受影响，统一等待代价可忽略——queue 通常已空）。
+   *  正文依据：已打开 TextDocument 优先（未保存内容不被磁盘替代），未打开
+   *  读磁盘最新内容；读取经 queryWikilinkHeadings 编排（shared/vaultLink
+   *  同一解析 + shared/wikilinkHeading 同一 ATX 口径）。reqId/generation
+   *  原样回显，迟到/乱序由 webview 侧守卫拒收 */
+  const respondWikilinkHeadingQuery = async (
+    entry: SessionEntry,
+    sessionId: string,
+    doc: vscode.TextDocument,
+    message: Extract<WebviewToHost, { kind: 'wikilink.heading.query' }>,
+  ): Promise<void> => {
+    await entry.session.whenEditsSettled()
+    const folder = vscode.workspace.getWorkspaceFolder(doc.uri)
+    const ctx: VaultLinkResolveContext = {
+      docDir: path.dirname(doc.uri.fsPath),
+      rootDir: (folder ? folder.uri : vscode.Uri.joinPath(doc.uri, '..')).fsPath,
+      isWindowsHost: process.platform === 'win32',
+      hasWorkspace: folder !== undefined,
+    }
+    const result = await queryWikilinkHeadings(message.target, message.query, ctx, {
+      exists: statFileRealPath,
+      openTextDocument: (fsPath) => {
+        // 已打开文档优先：未保存内容不被磁盘替代（大小写折叠兜底——
+        // Windows 宿主 fsPath 形态可能漂移，真实形态对齐）
+        const fold = process.platform === 'win32'
+          ? (p: string) => p.toLowerCase()
+          : (p: string) => p
+        const hit = vscode.workspace.textDocuments.find((d) =>
+          d.uri.scheme === 'file' && (d.uri.fsPath === fsPath || fold(d.uri.fsPath) === fold(fsPath)))
+        return hit ? { text: hit.getText(), version: hit.version } : null
+      },
+      openTextDocumentFromDisk: async (fsPath) => {
+        const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+        return { text: opened.getText(), version: opened.version }
+      },
+    })
+    const base = {
+      kind: 'wikilink.heading.query.result' as const,
+      sessionId: message.sessionId,
+      docUri: message.docUri,
+      reqId: message.reqId,
+      generation: message.generation,
+    }
+    await entry.session.postToPanel(sessionId, result.status === 'unavailable'
+      ? { ...base, status: 'unavailable', reason: result.reason }
+      : { ...base, status: 'ready', targetVersion: result.targetVersion, items: result.items })
+  }
+
+  // ---- #380 T05 双链联想：块查询应答与无 ID 块接受编排（面板级执行体） ----
+
+  /** 块 ID 撤回协调器（V01 放行路径）：登记「来源接受 ↔ 目标新增标记」
+   *  因果，来源 undo/redo 后按引用消长尽力撤回或重核重建——全部走
+   *  withdrawalGuard 双守卫的正向 WorkspaceEdit，绝不借目标 undo */
+  const blockIdCoordinator = new WikilinkBlockIdCoordinator({
+    getOriginText: (docUri) => {
+      const entry = findEntry(vscode.Uri.parse(docUri))
+      return entry ? new NewlineCoordinator().toLfText(entry.doc.getText()) : null
+    },
+    openTarget: async (fsPath) => {
+      try {
+        const target = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+        return {
+          text: target.getText(),
+          version: target.version,
+          crlf: target.eol === vscode.EndOfLine.CRLF,
+          insertAt: async (offset, text) => {
+            const edit = new vscode.WorkspaceEdit()
+            edit.insert(target.uri, target.positionAt(offset), text)
+            return vscode.workspace.applyEdit(edit)
+          },
+          deleteRange: async (offset, length) => {
+            const edit = new vscode.WorkspaceEdit()
+            edit.delete(target.uri,
+              new vscode.Range(target.positionAt(offset), target.positionAt(offset + length)))
+            return vscode.workspace.applyEdit(edit)
+          },
+        }
+      } catch {
+        return null
+      }
+    },
+    hasOtherReferences: async (fsPath, blockId, originDocUri) => {
+      if (!vaultIndex) {
+        return null // 索引不可用：跳过该关（不阻塞撤回——「已观测」限定为可观测事实）
+      }
+      const backlinks = await vaultIndex.backlinksOf(fsPath)
+      if (backlinks.status !== 'ready') {
+        return null
+      }
+      const originFsPath = vscode.Uri.parse(originDocUri).fsPath
+      const fold = process.platform === 'win32'
+        ? (p: string) => p.toLowerCase()
+        : (p: string) => p
+      return backlinks.items.some((item) => item.anchor === `^${blockId}` &&
+        fold(item.sourceFsPath) !== fold(originFsPath))
+    },
+    notifyKept: (reason, blockId) => {
+      const reasonKey: Record<string, MessageKey> = {
+        'version-changed': 'host.wikilinkBlockIdKeptReason.versionChanged',
+        'marker-changed': 'host.wikilinkBlockIdKeptReason.markerChanged',
+        'new-use': 'host.wikilinkBlockIdKeptReason.newUse',
+        'apply-failed': 'host.wikilinkBlockIdKeptReason.applyFailed',
+        'not-found': 'host.wikilinkBlockIdKeptReason.notFound',
+      }
+      const reasonText = t(reasonKey[reason] ?? 'host.wikilinkBlockIdKeptReason.versionChanged')
+      void vscode.window.showWarningMessage(t('host.wikilinkBlockIdKept', { id: blockId, reason: reasonText }))
+    },
+    notifyRebuildFailed: (blockId) => {
+      void vscode.window.showWarningMessage(t('host.wikilinkBlockIdRebuildFailed', { id: blockId }))
+    },
+  })
+
+  /** 来源相对语义解析上下文（标题/块查询共用；来源为当前面板文档） */
+  const vaultResolveCtxOf = (doc: vscode.TextDocument): VaultLinkResolveContext => {
+    const folder = vscode.workspace.getWorkspaceFolder(doc.uri)
+    return {
+      docDir: path.dirname(doc.uri.fsPath),
+      rootDir: (folder ? folder.uri : vscode.Uri.joinPath(doc.uri, '..')).fsPath,
+      isWindowsHost: process.platform === 'win32',
+      hasWorkspace: folder !== undefined,
+    }
+  }
+
+  /** 已打开 TextDocument 的当前文本（Windows fsPath 大小写折叠兜底；标题/
+   *  块两查询源共用——未保存内容不被磁盘替代） */
+  const findOpenTextDocument = (fsPath: string): vscode.TextDocument | undefined => {
+    const fold = process.platform === 'win32'
+      ? (p: string) => p.toLowerCase()
+      : (p: string) => p
+    return vscode.workspace.textDocuments.find((d) =>
+      d.uri.scheme === 'file' && (d.uri.fsPath === fsPath || fold(d.uri.fsPath) === fold(fsPath)))
+  }
+
+  /** 双链联想块查询应答（wikilink.block.query 异步执行——目标解析与正文
+   *  读取含 IO）：先等本会话在途 edit.request 全部应用（未保存正文协调），
+   *  再按 shared/wikilinkBlock 块边界枚举（无 ID 块照常列出）。reqId/
+   *  generation 原样回显，迟到/乱序由 webview 侧守卫拒收 */
+  const respondWikilinkBlockQuery = async (
+    entry: SessionEntry,
+    sessionId: string,
+    doc: vscode.TextDocument,
+    message: Extract<WebviewToHost, { kind: 'wikilink.block.query' }>,
+  ): Promise<void> => {
+    await entry.session.whenEditsSettled()
+    const result = await queryWikilinkBlocks(message.target, message.query, vaultResolveCtxOf(doc), {
+      exists: statFileRealPath,
+      openTextDocument: (fsPath) => {
+        const hit = findOpenTextDocument(fsPath)
+        return hit ? { text: hit.getText(), version: hit.version } : null
+      },
+      openTextDocumentFromDisk: async (fsPath) => {
+        const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+        return { text: opened.getText(), version: opened.version }
+      },
+    })
+    const base = {
+      kind: 'wikilink.block.query.result' as const,
+      sessionId: message.sessionId,
+      docUri: message.docUri,
+      reqId: message.reqId,
+      generation: message.generation,
+    }
+    await entry.session.postToPanel(sessionId, result.status === 'unavailable'
+      ? { ...base, status: 'unavailable', reason: result.reason }
+      : { ...base, status: 'ready', targetVersion: result.targetVersion, items: result.items })
+  }
+
+  /** 双链联想无 ID 块接受编排（wikilink.block.accept，V01 放行路径）：
+   *  先等本会话在途编辑应用 → 目标解析（不猜目标）→ 正文读取（已打开
+   *  优先）→ 目标写入守卫（版本核对 + 块身份计划）→ 补写或同文档合笔
+   *  计划。绝不先写虚构 ID：所有失败分支保留来源输入并回真实原因 */
+  const respondWikilinkBlockAccept = async (
+    entry: SessionEntry,
+    sessionId: string,
+    doc: vscode.TextDocument,
+    message: Extract<WebviewToHost, { kind: 'wikilink.block.accept' }>,
+  ): Promise<void> => {
+    await entry.session.whenEditsSettled()
+    const fail = (reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' |
+      'target-changed' | 'apply-failed'): void => {
+      entry.session.postToPanel(sessionId, {
+        kind: 'wikilink.block.accept.result',
+        sessionId: message.sessionId,
+        docUri: message.docUri,
+        reqId: message.reqId,
+        generation: message.generation,
+        ok: false,
+        reason,
+      })
+    }
+    const resolution = await resolveVaultLinkFile(message.target, vaultResolveCtxOf(doc), statFileRealPath)
+    if (resolution.kind === 'no-workspace') {
+      return fail('no-workspace')
+    }
+    if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
+      return fail('target-not-found')
+    }
+    const targetFsPath = resolution.fsPath
+    if (classifyVaultFileCategory(targetFsPath) !== 'markdown') {
+      return fail('target-not-md')
+    }
+    let target: vscode.TextDocument
+    const opened = findOpenTextDocument(targetFsPath)
+    if (opened !== undefined) {
+      target = opened
+    } else {
+      try {
+        target = await vscode.workspace.openTextDocument(vscode.Uri.file(targetFsPath))
+      } catch {
+        return fail('read-error')
+      }
+    }
+    // 目标写入守卫 1：版本核对——查询后目标正文有改动即淘汰本次接受
+    //（磁盘读取目标两次装载为同一实例，版本连续可比）
+    if (target.version !== message.targetVersion) {
+      return fail('target-changed')
+    }
+    // 目标写入守卫 2：块身份计划——按查询时的块首行重算补写计划
+    const plan = planTargetBlockId(target.getText(), message.line)
+    if (plan === null) {
+      return fail('target-changed')
+    }
+    const aliasOfTarget = defaultAliasOf(path.basename(targetFsPath), 'markdown')
+    if (plan.kind === 'reused') {
+      // 防御分支：版本未变时不应出现（查询时无 id 现在有）；复用零写入
+      return entry.session.postToPanel(sessionId, {
+        kind: 'wikilink.block.accept.result',
+        sessionId: message.sessionId, docUri: message.docUri,
+        reqId: message.reqId, generation: message.generation,
+        ok: true, blockId: plan.id, alias: aliasOfTarget,
+      })
+    }
+    const targetCrlf = target.eol === vscode.EndOfLine.CRLF
+    const markerText = targetCrlf ? plan.insertText.replace(/\n/g, '\r\n') : plan.insertText
+    const isSameDoc = process.platform === 'win32'
+      ? targetFsPath.toLowerCase() === doc.uri.fsPath.toLowerCase()
+      : targetFsPath === doc.uri.fsPath
+    if (isSameDoc) {
+      // 源与目标同一文档：宿主不写（避免 undo 两笔）——标记插入点换算为
+      // webview LF 坐标随包返回，由 webview 并入同一笔确认编辑（V01 场景
+      // 2 验证的一笔受控操作路径）
+      const markerLfOffset = new NewlineCoordinator(target.getText()).hostOffsetToLf(plan.insertOffset)
+      return entry.session.postToPanel(sessionId, {
+        kind: 'wikilink.block.accept.result',
+        sessionId: message.sessionId, docUri: message.docUri,
+        reqId: message.reqId, generation: message.generation,
+        ok: true, blockId: plan.id, sameDoc: true,
+        markerLfOffset, markerText: plan.insertText, alias: aliasOfTarget,
+      })
+    }
+    // 跨文档：宿主先补写 ^id（V01 场景 1 路径），成功后登记因果记录
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(target.uri, target.positionAt(plan.insertOffset), markerText)
+    const ok = await vscode.workspace.applyEdit(edit)
+    if (!ok) {
+      return fail('apply-failed')
+    }
+    blockIdCoordinator.registerPending({
+      reqId: message.reqId,
+      originDocUri: message.docUri,
+      targetFsPath,
+      id: plan.id,
+      markerLf: plan.insertText,
+      offset: plan.insertOffset,
+      versionAfterInsert: target.version,
+      blockFirstLine: message.line,
+      targetCrlf,
+    })
+    return entry.session.postToPanel(sessionId, {
+      kind: 'wikilink.block.accept.result',
+      sessionId: message.sessionId, docUri: message.docUri,
+      reqId: message.reqId, generation: message.generation,
+      ok: true, blockId: plan.id, alias: aliasOfTarget,
+    })
   }
 
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
@@ -2077,7 +2406,13 @@ export function createTextEditorProvider(
     }
   }
 
-  const provider: vscode.CustomTextEditorProvider = {
+  // F13：provider 公开停用收尾——blockIdCoordinator.disposeAll 对未落地
+  // 的补 ID pending 尽力撤回（来源会话还在场时 linked 未到的记录按权威
+  // 文本核对后收尾），由 extension.deactivate 返回其 Promise 驱动
+  //（VSCode 停用窗口约 5s；面板尚开时 confirmed 记录本就不在收尾范围）
+  const provider: vscode.CustomTextEditorProvider & {
+    dispose(): Promise<void>
+  } = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
       // 默认把 .md 交给本扩展，用户上次停留在源码态则还原该选择。早退：
@@ -2692,6 +3027,49 @@ export function createTextEditorProvider(
           void openOutlinkTarget(message.targetUri, message.anchor)
           return
         }
+        // #376 T01 双链联想查询：主正文经原会话（嵌入实例不出站本消息）。
+        // 会话守卫：docUri 归属本面板文档；查询为内存模型同步执行（无 IO），
+        // reqId/generation 原样回显，迟到/乱序由 webview 侧守卫拒收
+        if (isWebviewToHost(message) && message.kind === 'wikilink.query' &&
+          message.docUri === document.uri.toString()) {
+          entry.session.postToPanel(sessionId, respondWikilinkQuery(document, message))
+          return
+        }
+        // #379 T04 标题联想查询：主正文经原会话（同 wikilink.query 边界）。
+        // 会话守卫：docUri 归属本面板文档；异步执行（目标解析与正文读取含
+        // IO），先等本会话在途编辑应用（未保存正文协调），迟到/乱序由
+        // webview 侧 reqId+generation 守卫拒收
+        if (isWebviewToHost(message) && message.kind === 'wikilink.heading.query' &&
+          message.docUri === document.uri.toString()) {
+          void respondWikilinkHeadingQuery(entry, sessionId, document, message)
+          return
+        }
+        // #380 T05 块联想查询：主正文经原会话（同标题查询边界——异步执行，
+        // 先等在途编辑应用；reqId/generation 原样回显，迟到由 webview 拒收）
+        if (isWebviewToHost(message) && message.kind === 'wikilink.block.query' &&
+          message.docUri === document.uri.toString()) {
+          void respondWikilinkBlockQuery(entry, sessionId, document, message)
+          return
+        }
+        // #380 T05 无 ID 块接受：宿主先按目标写入守卫补写 ^id（V01 放行
+        // 路径）再回包；失败分支保留来源输入并回真实原因
+        if (isWebviewToHost(message) && message.kind === 'wikilink.block.accept' &&
+          message.docUri === document.uri.toString()) {
+          void respondWikilinkBlockAccept(entry, sessionId, document, message)
+          return
+        }
+        // #380 T05 块链接落地确认/接受放弃：撤回协调的因果面（linked 激活
+        // 历史协调；cancel 尽力收尾撤回未落地标记）
+        if (isWebviewToHost(message) && message.kind === 'wikilink.block.linked' &&
+          message.docUri === document.uri.toString()) {
+          blockIdCoordinator.confirmLinked(message.docUri, message.reqId)
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'wikilink.block.cancel' &&
+          message.docUri === document.uri.toString()) {
+          void blockIdCoordinator.cancelAccept(message.docUri, message.reqId)
+          return
+        }
         // #224 引用视图订阅：provider 层拦截（协调器与订阅表在 provider 域，
         // 与 backlinks 先例同位）。会话守卫：docUri 归属本面板文档且 sessionId
         // 为本面板（不信任前端任意身份）；P2-2（review 修复）watch 的 fsPath
@@ -2938,6 +3316,46 @@ export function createTextEditorProvider(
                   portId: message.portId,
                   targetUri: binding.targetUri,
                 })
+                return
+              }
+              // #381 T06 双链联想查询族：执行体在 provider 域（索引服务、
+              // 目标读取与块 ID 编排——DocumentSession 对该族显式 no-op），
+              // 在此以 B 为来源文档执行并经虚拟面板回包（wrapRefEditPush
+              // 信封定向回推）。归属守卫：内消息 docUri 须为 B 规范 URI
+              //（不信任前端自报 A 或其他身份——错误身份静默拒收）
+              const inner = message.message
+              if (inner.kind === 'wikilink.query' || inner.kind === 'wikilink.heading.query' ||
+                  inner.kind === 'wikilink.block.query' || inner.kind === 'wikilink.block.accept' ||
+                  inner.kind === 'wikilink.block.linked' || inner.kind === 'wikilink.block.cancel') {
+                if (inner.docUri !== bEntry.doc.uri.toString()) {
+                  console.debug('[vsidian] refEdit.message 双链联想来源身份不符拒收', {
+                    portId: message.portId,
+                    innerKind: inner.kind,
+                    expectDocUri: bEntry.doc.uri.toString(),
+                  })
+                  return
+                }
+                switch (inner.kind) {
+                  case 'wikilink.query':
+                    bEntry.session.postToPanel(binding.virtualSessionId,
+                      respondWikilinkQuery(bEntry.doc, inner))
+                    return
+                  case 'wikilink.heading.query':
+                    void respondWikilinkHeadingQuery(bEntry, binding.virtualSessionId, bEntry.doc, inner)
+                    return
+                  case 'wikilink.block.query':
+                    void respondWikilinkBlockQuery(bEntry, binding.virtualSessionId, bEntry.doc, inner)
+                    return
+                  case 'wikilink.block.accept':
+                    void respondWikilinkBlockAccept(bEntry, binding.virtualSessionId, bEntry.doc, inner)
+                    return
+                  case 'wikilink.block.linked':
+                    blockIdCoordinator.confirmLinked(inner.docUri, inner.reqId)
+                    return
+                  case 'wikilink.block.cancel':
+                    void blockIdCoordinator.cancelAccept(inner.docUri, inner.reqId)
+                    return
+                }
                 return
               }
               // 内消息的 docUri 由 B 会话按自身校验（= B 规范 URI）；面板
@@ -3192,6 +3610,12 @@ export function createTextEditorProvider(
         },
       )
     },
+
+    // F13：扩展停用收尾——协调器全量退役（未落地 pending 尽力撤回；linked
+    // 在途的记录按权威文本核对，见 disposeOrigin 的 F7 语义）
+    dispose(): Promise<void> {
+      return blockIdCoordinator.disposeAll()
+    },
   }
 
   // #270 dirty 丢弃/还原的覆盖层通用退役信号：「空 contentChanges 且文档
@@ -3282,6 +3706,11 @@ export function createTextEditorProvider(
         event.document.version,
         event.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : event.reason === vscode.TextDocumentChangeReason.Redo ? 'redo' : undefined,
       )
+      // #380 T05：来源权威文本变更 → 块 ID 协调器单调刷新「曾引用」观察
+      //（undo 撤掉链接的翻转判定基准；手动删除链接不触发撤回）
+      if (event.contentChanges.length > 0) {
+        blockIdCoordinator.observeOriginText(event.document.uri.toString())
+      }
       // P2-04：B 的 dirty 变化（content 与 dirty-state 两类事件）推送到
       // 绑定中的来源面板（pushRefEditDirty 内按值去重，翻转才发）
       pushRefEditDirty(event.document)
@@ -3459,6 +3888,9 @@ export function createTextEditorProvider(
           if (panel.ready) {
             void sendBacklinksSnapshot(entry, panel.sessionId, entry.doc.uri)
             void sendOutlinksSnapshot(entry, panel.sessionId, entry.doc.uri)
+            // #377 T02：索引/全文件清单变更——候选会话在场的 webview 自行
+            // 重发当前查询（控制器侧去抖；无会话时零动作）
+            void entry.session.postToPanel(panel.sessionId, { kind: 'wikilink.invalidate' })
           }
         }
       }

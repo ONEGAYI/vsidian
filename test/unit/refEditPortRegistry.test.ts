@@ -5,7 +5,12 @@
 // 生命周期：随面板销毁（releasePanel）整体清账；单个端口释放（releasePort，
 // 离屏回收路径）不清——曾编辑事实与端口在场是两个概念。
 import { describe, expect, it } from 'vitest'
-import { isRefEditClientMessage, RefEditPortRegistry, type RefEditBinding } from '../../src/host/refEditPorts'
+import {
+  isRefEditClientMessage,
+  RefEditPortRegistry,
+  wrapRefEditPush,
+  type RefEditBinding,
+} from '../../src/host/refEditPorts'
 
 const PANEL_A = { panelSessionId: 'panel-1', panelDocUri: 'file:///d%3A/notes/a.md' }
 const TARGET_B = 'file:///d%3A/notes/b.md'
@@ -125,5 +130,50 @@ describe('isRefEditClientMessage：refEdit.message 内消息白名单', () => {
   it('面板级消息仍拒绝（settings/view 族不走目标端口）', () => {
     expect(isRefEditClientMessage({ kind: 'view.switch.request', target: 'reading' })).toBe(false)
     expect(isRefEditClientMessage({ kind: 'settings.open' })).toBe(false)
+  })
+})
+
+describe('#381 T06 双链联想经目标端口：双向白名单', () => {
+  it('isRefEditClientMessage 放行查询族（query/heading/block）与接受族（accept/linked/cancel）', () => {
+    expect(isRefEditClientMessage({
+      kind: 'wikilink.query', sessionId: 'refport-1', docUri: TARGET_B, reqId: 1, generation: 1, query: 'a',
+    })).toBe(true)
+    expect(isRefEditClientMessage({
+      kind: 'wikilink.heading.query', sessionId: 'refport-1', docUri: TARGET_B, reqId: 2, generation: 1, query: '', target: 'b.md',
+    })).toBe(true)
+    expect(isRefEditClientMessage({
+      kind: 'wikilink.block.query', sessionId: 'refport-1', docUri: TARGET_B, reqId: 3, generation: 1, query: '', target: 'b.md',
+    })).toBe(true)
+    expect(isRefEditClientMessage({
+      kind: 'wikilink.block.accept', sessionId: 'refport-1', docUri: TARGET_B, reqId: 4, generation: 2, target: 'c.md', line: 5, targetVersion: 3,
+    })).toBe(true)
+    expect(isRefEditClientMessage({
+      kind: 'wikilink.block.linked', sessionId: 'refport-1', docUri: TARGET_B, reqId: 4,
+    })).toBe(true)
+    expect(isRefEditClientMessage({
+      kind: 'wikilink.block.cancel', sessionId: 'refport-1', docUri: TARGET_B, reqId: 4,
+    })).toBe(true)
+  })
+
+  it('wrapRefEditPush 放行联想回包与失效信号（信封定向回推到来源端口）', () => {
+    const binding = bindingOf('refport-1', TARGET_B)
+    const result = wrapRefEditPush(binding, {
+      kind: 'wikilink.query.result', sessionId: 'refport-1', docUri: TARGET_B,
+      reqId: 1, generation: 1, status: 'ready', updating: false, total: 0, catalogGen: 1, items: [],
+    })
+    expect(result).toEqual({
+      kind: 'refEdit.push', portId: 'refport-1', fsPath: binding.fsPath,
+      message: {
+        kind: 'wikilink.query.result', sessionId: 'refport-1', docUri: TARGET_B,
+        reqId: 1, generation: 1, status: 'ready', updating: false, total: 0, catalogGen: 1, items: [],
+      },
+    })
+    expect(wrapRefEditPush(binding, { kind: 'wikilink.invalidate' })).not.toBeNull()
+    expect(wrapRefEditPush(binding, {
+      kind: 'wikilink.block.accept.result', sessionId: 'refport-1', docUri: TARGET_B,
+      reqId: 4, generation: 2, ok: false, reason: 'target-changed',
+    })).not.toBeNull()
+    // 面板级消息仍不进信封
+    expect(wrapRefEditPush(binding, { kind: 'settings.snapshot', values: {} })).toBeNull()
   })
 })

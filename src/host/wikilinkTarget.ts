@@ -35,12 +35,10 @@ import {
   fenceMarkerOf,
   standaloneBlockIdOf,
 } from '../shared/blockId'
-
-/** 标题比较键：trim + 空白折叠 + 小写（大小写不敏感是标题匹配的一期规则，
- *  与文件路径的平台相关大小写语义无关—— Obsidian 同款宽松标题匹配） */
-export function normalizeHeadingText(s: string): string {
-  return s.trim().replace(/\s+/g, ' ').toLowerCase()
-}
+// 标题比较键单一事实源已提炼至 shared（#379 T04：联想候选的同名风险标记
+// 与跳转定位共用同一规范化口径，不建第二套）；re-export 保持既有导入面
+export { normalizeHeadingText } from '../shared/wikilinkHeading'
+import { normalizeHeadingText } from '../shared/wikilinkHeading'
 
 /** 围栏行标记（``` 或 ~~~，≥3 个）：返回围栏字符，非围栏行返回 null。
  *  #162 起实现提炼至 shared/blockId（本模块 import 同源实现） */

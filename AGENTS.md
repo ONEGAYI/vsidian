@@ -33,7 +33,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **运行时**：TypeScript + CodeMirror 6（`@codemirror/state`、`@codemirror/view`、`@codemirror/commands`，单包组合，不用 `codemirror` 聚合包与 basicSetup/history——撤销栈归宿主文本管线）。阅读模式用 markdown-it（#8 起）；公式渲染 KaTeX 0.16.47 + `@vscode/markdown-it-katex` 1.1.2（#59，仅随包 woff2 字体）；Mermaid 11.12.2 独立产物按需懒加载（#60）；代码块卡片（#78–#85，规格 `docs/specs/code-block-card.md`）语法高亮为 Lezer 官方语言包 + `@codemirror/legacy-modes` StreamLanguage 统一引擎（`tok-*` 词表两端共用，`src/webview/codeHighlight.ts`），围栏表复用 `mermaidFencesField`，语言注册表在 `src/shared/codeLangs.ts`。
 - **宿主端**（`src/extension.ts`、`src/host/`）：`CustomTextEditorProvider`，保存/dirty/Hot Exit 由 VSCode 文本管线自动处理；`TextDocument` 为权威文本，编辑经 `WorkspaceEdit` 写回。
 - **webview 端**（`src/webview/`）：CM6 EditorView + `acquireVsCodeApi` 消息桥；`src/shared/` 为两端共享的消息协议单一事实源（不依赖 vscode/DOM）。协议约定 webview 全程 LF 坐标（CM6 内部把 `\r\n` 规范化为 `\n`，宿主侧 `NewlineCoordinator` 负责双向坐标与文本转换）。
-- **构建**：esbuild 多产物——宿主 `out/extension.js`（node18/cjs/external vscode）、编辑器 webview `out/webview/main.js` 与设置页 webview `out/webview/settings.js`（#33；chrome118/iife，CSS 随 import 打包为同名 `.css`）；`npm run compile` 另跑 `tsc --noEmit` 做类型检查（esbuild 不查类型）。
+- **构建**：esbuild 多产物——宿主 `out/extension.js`（node18/cjs/external vscode）、编辑器 webview `out/webview/main.js` 与设置页 webview `out/webview/settings.js`（#33；chrome118/iife，CSS 随 import 打包为同名 `.css`）；`npm run compile` 另跑 `tsc --noEmit` 做类型检查（esbuild 不查类型）。worktree 依赖预置：`node scripts/linkDeps.mjs <工作树>` 把 `node_modules` junction 到 `<父目录>/.deps/<lockfile哈希前12位>` 共享缓存（junction 在场禁 `npm ci/install`，防写穿缓存；真实 node_modules 在场时脚本中止不删）。
 - **测试**：`npm run test:unit`（vitest + `node --test` 启动器契约，纯逻辑 + jsdom 控制器，无宿主依赖；`VSIDIAN_TEST_HOST_MODE=foreground` 跳过独立桌面探针）；`npm run test:browser`（Playwright headless Chromium 以原生键盘/IME 驱动生产控制器——**涉及 webview 输入/光标行为的变更合并前必跑**，首次需 `npx playwright install chromium`；`VSIDIAN_TEST_BROWSER_CHANNEL=msedge` 仅本机借 Edge 调试）；`npm run test:integration`（1.82.3 真宿主，fixture 由 `test/integration/fixtures.mjs` 统一生成，三条启动器共用 `testHost.mjs` 策略——Windows 默认独立桌面不抢前台，完整逐例输出与退出码自动落盘 `.vscode-test/` 报告（`integration-dev.log` / `integration-installed.log` / `settings-activation.log`），**复核与追查失败优先读报告，不为补看信息重跑**；手动自跑的验证命令日志（含退出码）统一落 `out/test/`）。`_test.*` 注入命令仅 `VSIDIAN_TEST_HOOKS=1` 时注册、宿主侧门控（webview 被动接收的分层设计与「勿误判未设防」辨析见 [docs/specs/integration-test-groups.md](docs/specs/integration-test-groups.md)「测试钩子与消息通道门控」节）。
 - **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认三并发运行全部脚本（清单即 `names` 数组）；`-- --workers=1` 回退串行，`-- --suite=<名称>` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入 `out/test/browser-runs/run-*/`（report.json / report.md / 逐脚本日志），任一失败整体非零、单脚本 120 秒超时。CI 无论成败均上传报告（artifact `browser-reports-a<attempt>`，attempt 从 1 起）——CI 失败时 `gh run view` 只有脚本名级结论，断言栈与逐脚本日志先 `gh run download <run-id> -n browser-reports-a<attempt>` 取报告，再决定是否本地复现。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
 - **集成测试分组与分片（2026-10-01 用户授权）**：本地默认全量，`VSIDIAN_ITEST_SHARDS=4` 可起四个独立便携宿主；CI 四片设置 `VSIDIAN_TEST_GROUP=core` 与 `VSIDIAN_TEST_SHARD=k/4`，第五组 `integration-sensitive` 独立运行 `VSIDIAN_TEST_GROUP=sensitive`（失败红灯、暂不纳入强制汇总）。完整名称名单、证据、报告留存与本地入口只维护于 [docs/specs/integration-test-groups.md](docs/specs/integration-test-groups.md)；分组不代表根因已排除，不自动扩大豁免。
@@ -121,7 +121,8 @@ vsidian/
 │   │   ├── vscode-addon-discovery.md              # 附加组件发现与调用边界调研
 │   │   ├── vscode-native-text-appearance-probe.md # 原生文字外观复用探针报告
 │   │   ├── vscode-quick-open-matching.md          # Ctrl+P 文件匹配源码核查
-│   │   └── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
+│   │   ├── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
+│   │   └── wikilink-completion-v01-probe.md       # V01 补 ID 与尽力撤销探针报告
 │   ├── specs/      # 产品规格
 │   │   ├── anchor-navigation.md                 # 锚点跳转规格（标题/块引用/复制块链接）
 │   │   ├── appearance-merge.md                  # 外观合并分页规格
@@ -194,6 +195,7 @@ vsidian/
 │   ├── genNls.d.mts              # NLS 生成器类型声明
 │   ├── genNls.mjs                # manifest NLS 文件生成脚本
 │   ├── genStyleGuide.mjs         # 样式指南生成脚本
+│   ├── linkDeps.mjs              # worktree 依赖预置脚本
 │   ├── pdfBuildConfig.mjs        # PDF.js 双产物构建配置事实源
 │   ├── quick-action-icons.py     # 快速操作图标生成与校验
 │   ├── release.mjs               # 发布脚本：打包、包体检查与上传

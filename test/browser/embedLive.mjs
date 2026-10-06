@@ -382,6 +382,163 @@ try {
   passed += 6
   console.log('[嵌入Live][PASS] I-N 显式关闭确认：Esc/按钮/删除拦截、stale 重确认、保存失败保留现场')
 
+  // ---- #381 T06 场景组：内部 Live 双链联想（B 归属 / 同名文件 / Esc 优先级 /
+  //      格内转义竖线 / 端口释放关闭）。重开干净页面（同文档重 init 的
+  //      双容器 handle 残留属既有挂载机制，不进本组断言口径）----
+  await page.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
+  await page.addStyleTag({ content: 'html, body { margin: 0; height: 100%; } #app { height: 100vh; }' })
+  await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await page.addScriptTag({ path: bundle })
+  await settle(200)
+  // 候选：两个同名文件按目录区分（伪宿主以来源目录计算相对路径——B 与 A
+  // 同目录时同形态；B 内接受只写 B，A 字节不变）
+  await page.evaluate((items) => window.embedSetWikilinkFiles(items), [
+    { id: 'D:\\notes\\同名.md', name: '同名.md', dir: '', relPath: '同名.md',
+      insertPath: '同名.md', alias: '同名', mtimeMs: 1000, score: 0, labelHighlights: [], dirHighlights: [] },
+    { id: 'D:\\notes\\子目录\\同名.md', name: '同名.md', dir: '子目录', relPath: '子目录/同名.md',
+      insertPath: '子目录/同名.md', alias: '同名', mtimeMs: 2000, score: 0, labelHighlights: [], dirHighlights: [] },
+  ])
+  const T06_PARENT = [
+    '# T06 父文档',
+    '',
+    EMBED_LINE,
+    '',
+    '| 单元格 | 说明 |',
+    '| --- | --- |',
+    '| [[ ]] | t |',
+    '',
+  ].join('\n')
+  await page.evaluate((text) => window.initEmbedLiveDoc(text), T06_PARENT)
+  await page.locator('.vsidian-embed-card').first().waitFor({ timeout: 5000 })
+  await settle(400)
+  const t06Card = (await cards())[0]
+  assert.equal(t06Card.internalMode, 'live', 'T06 父 Live：嵌入自动进入内部 Live')
+
+  // O1：B 内真实键盘触发候选——出站经 B 端口信封、docUri/sessionId = B
+  assert.equal(await page.evaluate(() => window.focusEmbedEditor()), true, '焦点进嵌入编辑器')
+  const markO = await mark()
+  await page.keyboard.press('End')
+  await page.keyboard.type('[[t')
+  await settle(350)
+  const wikReqsO = await page.evaluate(() => window.embedWikilinkRequests())
+  const lastQ = wikReqsO.at(-1)
+  assert.ok(lastQ && lastQ.message.kind === 'wikilink.query', 'B 内输入触发双链查询出站')
+  assert.ok(typeof lastQ.portId === 'string' && lastQ.portId.length > 0,
+    '查询经 B 端口信封（refEdit.message）出站——portId 为目标端口')
+  assert.equal(lastQ.message.docUri, 'file:///d%3A/notes/%E7%9B%AE%E6%A0%87%E7%AC%94%E8%AE%B0.md',
+    '查询目标戳记 = B 规范 URI（不是 A）')
+  assert.equal(lastQ.message.query, 't', '查询为光标左侧前缀')
+  const suggestO = await page.evaluate(() => window.embedSuggestState())
+  assert.equal(suggestO.open, true, '候选浮层实际可见（绘制层）')
+  assert.equal(suggestO.itemCount, 2, '同名文件两项全部展示（目录区分）')
+  // ↓ 选子目录项 → Enter 确认：B 写入、A 字节不变
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await settle(300)
+  const modelO = await page.evaluate(() => window.embedTargetModel())
+  assert.ok(modelO.text.includes('[[子目录/同名.md|同名]]'),
+    'B 权威文本收到确认链接（insertPath 以 B 为来源）')
+  const mainTextO = await page.evaluate(() => window.mainEditorText())
+  assert.equal(mainTextO, T06_PARENT, 'A 主文档字节不变（接受不写 A）')
+  const sentO = await sentAfter(markO)
+  assert.ok(sentO.some((m) => m.kind === 'refEdit.message' && m.message.kind === 'edit.request'),
+    '确认编辑经 B 端口出站 edit.request')
+  passed++
+  console.log('[嵌入Live][PASS] O1 B 内联想：端口信封出站 + 同名候选 + 确认只写 B')
+
+  // O2：Esc 优先级——候选在场时第一次 Esc 只关列表（卡片不关、无模态），
+  //     第二次 Esc 才进入嵌入关闭链（B dirty → 确认模态）
+  await page.keyboard.press('End')
+  await page.keyboard.type('[[')
+  await settle(350)
+  assert.equal((await page.evaluate(() => window.embedSuggestState())).open, true, '第二次会话候选在场')
+  await page.keyboard.press('Escape')
+  await settle(200)
+  assert.equal((await page.evaluate(() => window.embedSuggestState())).open, false, 'Esc 先关候选列表')
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, false, '不直接触发关闭模态')
+  assert.equal(await page.evaluate(() => window.embedCardEditorCount()), 1, '嵌入编辑器仍在（卡片未关）')
+  await page.keyboard.press('Escape')
+  await settle(250)
+  const dialogO2 = await page.evaluate(() => window.embedCloseDialogState())
+  assert.equal(dialogO2.open, true, '第二次 Esc 进入嵌入关闭链（B dirty 弹确认模态）')
+  await page.evaluate(() => window.embedDialogClick('cancel'))
+  await settle(200)
+  passed++
+  console.log('[嵌入Live][PASS] O2 Esc 优先级：候选先关、下一次 Esc 才走引用关闭链')
+
+  // O3：B 内表格格内联想——别名竖线按 \\| 转义（网格完整）
+  await page.evaluate(() => {
+    // B 全文换成含表格的文本（外部增量：其他视图整文替换——生产语义）；
+    // 第三格预置闭合空围栏 [[ ]]，光标进目标区输入触发
+    const tableText = '| a | b |\n| --- | --- |\n| [[ ]] | y |'
+    const model = window.embedTargetModel()
+    window.embedTargetExternalEdit(0, model.text.length, tableText)
+  })
+  await settle(300)
+  assert.equal(await page.evaluate(() => window.focusEmbedEditor()), true, 'O3 焦点进嵌入编辑器')
+  await page.evaluate(() => {
+    const editorText = window.embedEditorText()
+    const at = editorText.indexOf('| [[ ]] | y |') + 4
+    window.selectEmbedRange(at, at)
+  })
+  await page.keyboard.type('t')
+  await settle(350)
+  assert.equal((await page.evaluate(() => window.embedSuggestState())).open, true, 'B 表格格内候选打开')
+  await page.keyboard.press('Enter')
+  await settle(300)
+  const editorO3 = await page.evaluate(() => window.embedEditorText())
+  assert.ok(editorO3.includes('| [[同名.md\\|同名]] | y |'),
+    '格内确认写转义竖线（\\| 两字符），网格不被裸管破坏')
+  passed++
+  console.log('[嵌入Live][PASS] O3 B 表格格内：转义竖线确认不破坏网格')
+
+  // O4：A 主表格格内联想（主会话路径，非信封）+ 转义竖线
+  await page.evaluate(() => window.embedSetWikilinkFiles([
+    { id: 'D:\\notes\\同名.md', name: '同名.md', dir: '', relPath: '同名.md',
+      insertPath: '同名.md', alias: '同名', mtimeMs: 1000, score: 0, labelHighlights: [], dirHighlights: [] },
+  ]))
+  assert.equal(await page.evaluate(() => window.focusMain()), true, '焦点回主编辑器 A')
+  await page.evaluate(() => {
+    const text = window.mainEditorText()
+    const at = text.indexOf('| [[ ]] | t |') + 4
+    window.mainLocate(at)
+  })
+  await page.keyboard.type('x')
+  await settle(350)
+  const wikReqsO4 = await page.evaluate(() => window.embedWikilinkRequests())
+  const lastQ4 = wikReqsO4.at(-1)
+  assert.ok(lastQ4 && lastQ4.message.kind === 'wikilink.query' && lastQ4.portId === '',
+    'A 主表格格内查询走主会话（非端口信封）')
+  assert.equal((await page.evaluate(() => window.embedSuggestState())).open, true, 'A 格内候选打开')
+  await page.keyboard.press('Enter')
+  await settle(300)
+  const mainO4 = await page.evaluate(() => window.mainEditorText())
+  assert.ok(mainO4.includes('| [[同名.md\\|同名]] | t |'),
+    'A 表格格内确认同样写转义竖线')
+  passed++
+  console.log('[嵌入Live][PASS] O4 A 主表格格内：主会话路径 + 转义竖线')
+
+  // O5：切 Reading 释放端口——实例销毁、候选浮层消失（释放后迟到拒收的
+  //     行为面：实例不在场，notifyPush 查不到端口即丢弃）
+  assert.equal(await page.evaluate(() => window.focusEmbedEditor()), true)
+  await page.evaluate(() => {
+    // 光标进 B 第三行格 1（y 内）——干净格内输入触发（格 0 已有确认链接）
+    const t = window.embedEditorText()
+    const at = t.indexOf('| y |') + 3
+    window.selectEmbedRange(at, at)
+  })
+  await page.keyboard.type('[[')
+  await settle(350)
+  assert.equal((await page.evaluate(() => window.embedSuggestState())).open, true, '释放前候选在场')
+  await page.evaluate(() => window.clickEmbedModeButton())
+  await settle(400)
+  assert.equal(await page.evaluate(() => window.embedCardEditorCount()), 0, '切 Reading 后嵌入实例销毁')
+  assert.equal((await page.evaluate(() => window.embedSuggestState())).open, false, '端口释放后候选浮层消失')
+  assert.equal((await cards())[0].liveBound, false, '端口已释放（teardown 出站 unbind）')
+  assert.equal(errors.length, 0, `T06 场景零页面错误（实际 ${JSON.stringify(errors)}）`)
+  passed++
+  console.log('[嵌入Live][PASS] O5 切 Reading：端口释放、实例与候选浮层销毁')
+
   console.log(`embedLive：${passed} 场景通过`)
 } finally {
   await browser.close()

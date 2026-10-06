@@ -69,6 +69,7 @@ import { splitTableRowCells } from '../shared/tableCells'
 import { ImageResourceManager } from './imageResource'
 import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
 import { registerImagePopupSource, unregisterImagePopupSource, type ImagePopupSource } from './imagePopup'
+import { createWikilinkSuggest, type WikilinkSuggestController } from './wikilinkSuggest'
 
 /** 外部同步事务标记：updateListener 见到它即跳过（不回发）。
  *  性能探针（#5）复用同一注解——探针编辑走渲染路径但不写回宿主。
@@ -373,6 +374,13 @@ export interface LiveEditorInstanceDeps {
    *  决策与快照管线在根）。返回 true = 根接管（实例 preventDefault）；
    *  未提供或返回 false 放行默认粘贴链（嵌入实例缺省回落原生粘贴） */
   onRichPasteHtml?(payload: { view: EditorView; html: string; text?: string }): boolean
+  /** #376 T01 双链联想会话启用（#381 T06 起主正文与内部 Live 实例都启用
+   *  ——内部 B 的查询经 refEdit.message 信封出站、回包经 refEdit.push 信封
+   *  定向回推，接线在 embedCard 侧；缺省 false 供测试等环境显式关闭） */
+  enableWikilinkSuggest?: boolean
+  /** #379 T04 双链联想的轻提示通道（重复标题风险提示等）：根 toast 面的
+   *  注入点；缺省静默跳过（无 toast 面的装配不阻塞确认） */
+  notifyToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
 }
 
 /**
@@ -413,6 +421,9 @@ export class LiveEditorInstance {
   private readonly tabEscapeCompartment = new Compartment()
   private readonly darkCompartment = new Compartment()
   private hostDarkApplied: boolean | undefined
+  /** #376 T01 双链联想会话（#381 T06 起主正文与内部 Live 实例都按
+   *  deps.enableWikilinkSuggest 装配；关闭时为 null） */
+  private readonly wikilinkSuggest: WikilinkSuggestController | null
   /** #161 图片粘贴：面板内自增 reqId 与在途集合（结果按 reqId 路由，
    *  陈旧/未知 reqId 的回包丢弃，防止重复插入）；总开关运行时读设置
    *  快照（handler 每次事件自取，无需 Compartment——未命中直接放行） */
@@ -501,10 +512,26 @@ export class LiveEditorInstance {
     this.conflictRevision = typeof deps.initialConflictRevision === 'number' && deps.initialConflictRevision >= 0
       ? Math.floor(deps.initialConflictRevision) : 0
     this.hostDarkApplied = deps.initialDark
+    this.wikilinkSuggest = deps.enableWikilinkSuggest === true
+      ? createWikilinkSuggest({
+        send: (message) => this.deps.send(message),
+        getSession: () => this.sessionId ? { sessionId: this.sessionId, docUri: this.docUri } : null,
+        isLiveActive: () => this.deps.isLiveActive(),
+        isSuspended: () => this.suspended,
+        isExternal: (tr) => tr.annotation(externalSync) === true,
+        // #379 T04 重复标题风险提示（根 toast 面经 deps 注入；缺省静默）
+        showToast: (text, severity) => this.deps.notifyToast?.(text, severity),
+        // F3 无 ID 块接受的未出站编辑核对：宿主系 markerLfOffset 基于权威
+        // 文本，本地有未出站编辑时先推进出站并刷新查询，落定后重按确认
+        hasUnsentLocalEdits: () => this.hasUnsentLocalEditsNow(),
+        scheduleFlush: () => this.requestFlushNow(),
+      })
+      : null
     this.view = new EditorView({
       parent,
       state: EditorState.create({ doc: '', extensions: this.extensions(extraExtensions) }),
     })
+    this.wikilinkSuggest?.attach(this.view)
     // P2-11：图片弹窗实例上下文随实例注册（按 EditorView 反查——widget
     // 的 popup 按钮打开弹窗时捕获所属实例的资源身份，不读主正文）
     if (deps.imagePopupSource && this.view) {
@@ -636,11 +663,56 @@ export class LiveEditorInstance {
       clearTimeout(this.flushTimer)
       this.flushTimer = undefined
     }
+    this.wikilinkSuggest?.destroy()
     if (this.view) {
       unregisterImagePopupSource(this.view)
     }
     this.view?.destroy()
     this.view = undefined
+  }
+
+  // ---- #376 T01 双链联想会话（根路由与模式切换消费） ----
+
+  /** 查询结果入站（根按实例路由；控制器内 reqId/generation/会话三重守卫） */
+  handleWikilinkQueryResult(message: Extract<HostToWebview, { kind: 'wikilink.query.result' }>): void {
+    this.wikilinkSuggest?.handleResult(message)
+  }
+
+  /** 标题查询结果入站（#379 T04；根按实例路由，控制器内同构守卫） */
+  handleWikilinkHeadingQueryResult(
+    message: Extract<HostToWebview, { kind: 'wikilink.heading.query.result' }>,
+  ): void {
+    this.wikilinkSuggest?.handleHeadingResult(message)
+  }
+
+  /** 块查询结果入站（#380 T05；根按实例路由，控制器内同构守卫） */
+  handleWikilinkBlockQueryResult(
+    message: Extract<HostToWebview, { kind: 'wikilink.block.query.result' }>,
+  ): void {
+    this.wikilinkSuggest?.handleBlockResult(message)
+  }
+
+  /** 无 ID 块接受结果入站（#380 T05；控制器内 reqId/会话守卫与字段复核） */
+  handleWikilinkBlockAcceptResult(
+    message: Extract<HostToWebview, { kind: 'wikilink.block.accept.result' }>,
+  ): void {
+    this.wikilinkSuggest?.handleBlockAcceptResult(message)
+  }
+
+  /** 候选失效信号（#377 T02）：索引/清单变更——控制器去抖后重发当前查询 */
+  handleWikilinkInvalidate(): void {
+    this.wikilinkSuggest?.handleInvalidate()
+  }
+
+  /** 候选会话是否在场（#381 T06：嵌入 Esc 链的豁免判定——候选先关一次，
+   *  下一次 Esc 才走引用关闭链路；未装配联想的实例恒 false） */
+  hasActiveWikilinkSuggest(): boolean {
+    return this.wikilinkSuggest !== null && this.wikilinkSuggest.hasActiveSession()
+  }
+
+  /** 显式关闭候选（模式切换等根时机；幂等） */
+  closeWikilinkSuggest(): void {
+    this.wikilinkSuggest?.close()
   }
 
   // ---- 设置热重配（Live 扩展组；快照由根在 settings 消息到达时传入）----
@@ -965,6 +1037,7 @@ export class LiveEditorInstance {
     const hasUnconfirmed =
       this.unconfirmed !== null || this.inFlight.size > 0 || this.deferredLocal !== null || this.composing
     this.suspended = true
+    this.wikilinkSuggest?.close()
     this.deps.onSuspendedChange?.(true)
     if (hasUnconfirmed) {
       this.reportConflictSnapshot()
@@ -1706,6 +1779,20 @@ export class LiveEditorInstance {
     return this.hasUnlandedLocalEdits()
   }
 
+  /** F3（双链联想无 ID 块接受）：本地是否有**尚未出站**的编辑——组合中
+   *  （composition 文本不出站）、空白组合暂缓、暂缓未发集任一在场。已
+   *  出站在途的请求不在此列：宿主 whenEditsSettled 会等其应用后再装载
+   *  文本，权威文本与本地一致、宿主系坐标可直接使用 */
+  hasUnsentLocalEditsNow(): boolean {
+    return this.composing || this.blankComposition !== null || this.deferredLocal !== null
+  }
+
+  /** F3（双链联想无 ID 块接受）：主动推进暂缓编辑出站——联想确认前
+   *  核对到未出站编辑时由建议会话触发（宿主系坐标须待权威文本收敛） */
+  requestFlushNow(): void {
+    this.scheduleFlush()
+  }
+
   private releasePendingHistory(): void {
     if (this.pendingHistoryOps.length === 0) {
       return
@@ -1859,6 +1946,12 @@ export class LiveEditorInstance {
       // 闭合行后（filter 硬拦 + updateListener 兜底），编辑收敛到标题栏
       // 「修改」按钮的 Popover；文档变更同时驱动浮层按最新模型重建
       frontmatterEditing,
+      // #376 T01 双链联想候选：keymap 必须置于 fenceEscape 之前（keymap
+      // 正序尝试——候选确认/导航仅在会话内消费，未命中 return false 落穿
+      // 越界/切格/缩进/列表延续链）。#381 T06 起主正文与嵌入实例统一装配；
+      // 嵌入的 Esc 与本 keymap 的次序协调在 embedCard.embedEscapeKeymap
+      //（Prec.high 先尝试——候选在场时豁免落穿到本组）
+      ...(this.wikilinkSuggest ? [this.wikilinkSuggest.extension] : []),
       // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
       // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
       // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/

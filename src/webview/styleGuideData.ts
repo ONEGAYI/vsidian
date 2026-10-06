@@ -271,6 +271,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "粘贴询问",
     "titleKey": "styleRef.category.richPaste",
     "order": 17
+  },
+  {
+    "id": "wikilink-suggest",
+    "domain": "chrome",
+    "title": "双链联想候选",
+    "titleKey": "styleRef.category.wikilinkSuggest",
+    "order": 18
   }
 ] as readonly StyleContractCategory[]
 
@@ -4998,6 +5005,120 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "单元 richPasteInteraction：三种选择；浏览器 richPaste：模态背景/焦点与记忆回显；真宿主 richPasteHost：设置持久化"
     ],
     "introduced": "#306（2026-10-02）"
+  },
+  {
+    "id": "wikilink-suggest-popup",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "container",
+    "target": ".vsidian-wikilink-suggest",
+    "purpose": "双链联想候选浮层容器：锚定双链围栏开标记处，列出候选与真实状态（搜索中/无结果/未就绪/无工作区；标题阶段另有目标不可定位/非 Markdown/读取失败分态，#379 T04；块阶段同分态并含无 ID 块接受在途的「正在补写块 ID」状态，#380 T05）。",
+    "views": [
+      "live"
+    ],
+    "states": "主正文 Live 光标进入闭合双链 [[]]/![[]] 的目标字段（文件字段，或文件目标明确的标题/块锚点字段）时挂载；确认、Esc、移出字段或切模式即移除。空目标 #/^ 保持占位提示（不读目标文档）；文件目标明确时标题/块阶段出站查询（#380 T05 起块阶段同样）。",
+    "dom": "document.body 直接后代（不在 #app 内）；role=listbox、aria-label 取词条 wikilinkSuggest.list.ariaLabel；不夺正文焦点。两段结构：候选与状态行收进 .vsidian-wikilink-suggest-list 滚动区，底部固定 .vsidian-wikilink-suggest-hints 键提示条；max-height 留在容器（覆盖示例形态不变）。定位：水平以光标居中对齐（8px 视口钳制，光标坐标不可得回退字段起点），垂直贴字段行、越下缘翻到上方。",
+    "example": ".vsidian-wikilink-suggest { max-height: 320px; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：真实键盘出候选/高亮/确认/Esc（含标题阶段键盘与重名 toast、块阶段确认与补写在途，#380 T05）",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.visible（绘制层可见性）"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-item",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-item",
+    "purpose": "候选行：文件阶段以文件名为主文字、所在目录右对齐弱化呈现（区分同名文件）；标题阶段（#379 T04）以标题原文为主文字、层级/行号元信息右对齐弱化呈现；块阶段（#380 T05）以块首行文本片段为主文字（已有 id 以「 ^id」缀尾随行展示、无 ID 块照常列出）、块首行行号/行数元信息右对齐弱化呈现（同一弱化槽位语义）；匹配命中区间以子元素 .vsidian-wikilink-suggest-hl 标记（文件阶段）。",
+    "views": [
+      "live"
+    ],
+    "dom": "容器 role=listbox 的 option 行；行内子结构：.vsidian-wikilink-suggest-name（文件名/标题原文/块片段）、.vsidian-wikilink-suggest-dir（目录/标题层级行号/块行号行数元信息）、.vsidian-wikilink-suggest-hl（命中区间）。",
+    "example": ".vsidian-wikilink-suggest-item { padding: 2px 10px; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：候选行文件名/目录文本与命中高亮；标题行标题与 H{level}·行{line} 元信息；块行片段与 行{line}·{count}行 元信息（#380 T05）",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.itemCount 与 names（标题/块候选按名核对）"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-item-active",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-item-active",
+    "purpose": "键盘高亮行（Enter/Tab 确认的目标）：↑↓ 移动、有查询自动落在首项、空查询不高亮。",
+    "views": [
+      "live"
+    ],
+    "states": "与 .vsidian-wikilink-suggest-item 同元素叠加（active 修饰类）；aria-selected=true 同步。",
+    "dom": "候选行修饰类（不是独立节点）。",
+    "example": ".vsidian-wikilink-suggest-item-active { outline: 1px solid var(--vscode-focusBorder); }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：方向键移动与首项自动高亮",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.activeIndex/activeText"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-status",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-status",
+    "purpose": "状态行：搜索中、无匹配文件、索引未就绪、未打开文件夹、「仍在构建（部分结果）」与分页剩余提示（#377——「还有 N 项，按 ↓ 继续加载」）等真实状态的文字呈现；不可确认、不写正文。",
+    "views": [
+      "live"
+    ],
+    "states": "随查询结果/索引就绪态切换；与候选行共存（仍在构建时可用项继续候选）；命中总数未尽时列表尾部追加一行剩余计数（#377 触底续页加载的入口提示）。",
+    "dom": "列表滚动区（.vsidian-wikilink-suggest-list）直接子行（非 option 语义——占位不可确认）。",
+    "example": ".vsidian-wikilink-suggest-status { opacity: 0.7; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：无结果/未就绪状态行文案与分页剩余提示行",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.statusText"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-hints",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-hints",
+    "purpose": "底部键提示条（验收反馈 2026-10-06）：提示当前阶段仍可用的进阶键——file 阶段三段（# 链接标题、^ 链接文本块、| 指定显示文字）、heading 阶段两段（# 已消费）、block 阶段仅 | 一段；弱化小字、不参与滚动与确认。",
+    "views": [
+      "live"
+    ],
+    "states": "随会话阶段切换段落数；与候选/状态行共存（无结果、加载、占位时同样在场）。",
+    "dom": "容器直接末子行（在 .vsidian-wikilink-suggest-list 滚动区之外）；子 span 每键一段；顶 border-top 1px 实线与条目主体分割。",
+    "example": ".vsidian-wikilink-suggest-hints { border-top-color: var(--vscode-editorHoverWidget-border); }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：三阶段提示段数、绘制层可见性与 border-top 实线分割",
+      "单元 wikilinkSuggestSession：阶段裁剪矩阵与容器末尾结构"
+    ],
+    "introduced": "#374（2026-10-06）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -6516,6 +6637,45 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Direct child of .vsidian-paste-dialog-overlay; role=dialog and aria-modal=true.",
     "obsidian": {
       "counterpart": "None (Vsidian paste prompt)"
+    }
+  },
+  "wikilink-suggest-popup": {
+    "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04; the block stage shares those states and adds the 'inserting block ID' state while an ID-less block acceptance is in flight, #380 T05).",
+    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading/block anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty #/^ target keeps the placeholder hint (the target document is not read); with an explicit file target the heading/block stages query outbound (the block stage since #380 T05).",
+    "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus. Two-segment structure: candidates and status rows live in the .vsidian-wikilink-suggest-list scroll region while the fixed .vsidian-wikilink-suggest-hints key-hint bar sits at the bottom; max-height stays on the container (the override example keeps its shape). Positioning: horizontally centered on the caret (8px viewport clamping, falling back to the field start when caret coords are unavailable), vertically attached to the field line and flipped above it when it would overflow the bottom edge.",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-item": {
+    "purpose": "Candidate row: in the file stage the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; in the heading stage (#379 T04) the heading text is the primary text and the level/line meta is right-aligned in the same muted slot; in the block stage (#380 T05) the first-line snippet is the primary text (an existing id trails as ' ^id' on the same row and ID-less blocks are listed as-is) with the block start line / line-count meta right-aligned; matched ranges are marked by the child .vsidian-wikilink-suggest-hl element (file stage).",
+    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name / heading text / block snippet), .vsidian-wikilink-suggest-dir (folder / heading level-and-line / block line-and-count meta), .vsidian-wikilink-suggest-hl (matched ranges).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-item-active": {
+    "purpose": "Keyboard-highlighted row (the Enter/Tab confirmation target): moved with arrow keys, auto-lands on the first item for non-empty queries, no highlight for empty queries.",
+    "states": "A modifier class on the same element as .vsidian-wikilink-suggest-item; aria-selected=true is kept in sync.",
+    "dom": "Modifier class on a candidate row (not a separate node).",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-status": {
+    "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open, 'index still updating (partial results)' and the pagination hint (#377 - 'N more, press ArrowDown to load more'); not confirmable, never writes to the document.",
+    "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building); appends a remaining-count row at the list tail when the match total is not exhausted (#377 load-more hint).",
+    "dom": "Direct child rows of the list scroll region (.vsidian-wikilink-suggest-list), not option semantics - placeholders are not confirmable.",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-hints": {
+    "purpose": "Bottom key-hint bar (acceptance feedback 2026-10-06): hints the advanced keys still available in the current stage - three segments in the file stage (# links a heading, ^ links a text block, | sets display text), two in the heading stage (# already consumed), only | in the block stage; muted small text, never scrolls with the list and is never confirmable.",
+    "states": "Segment count switches with the session stage; coexists with candidate and status rows (also present for no-result, loading and placeholder states).",
+    "dom": "Last direct child row of the container (outside the .vsidian-wikilink-suggest-list scroll region); one child span per key hint; separated from the item body by a 1px solid border-top.",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

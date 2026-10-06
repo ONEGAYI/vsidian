@@ -27,6 +27,48 @@ export const zhCn: Record<MessageKey, string> = {
   'toast.pasteImageOnly': '无法将图片粘贴为纯文本，请使用{paste}粘贴图片',
   'toast.pasteTextOnly': '已粘贴文本，未粘贴图片；如需图片，请使用{paste}',
   'styleRef.category.toast': '轻提示',
+  'styleRef.category.wikilinkSuggest': '双链联想候选',
+  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
+  'wikilinkSuggest.list.ariaLabel': '双链联想候选',
+  'wikilinkSuggest.status.loading': '正在搜索文件…',
+  'wikilinkSuggest.status.empty': '没有匹配的文件',
+  'wikilinkSuggest.status.noWorkspace': '未打开文件夹——可继续手写链接',
+  'wikilinkSuggest.status.notReady': '索引准备中——可继续手写链接',
+  'wikilinkSuggest.status.updating': '索引仍在构建——当前为部分结果',
+  'wikilinkSuggest.status.more': '还有 {count} 项——按 ↓ 继续加载',
+  // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
+  'wikilinkSuggest.placeholder.heading': '输入小标题…',
+  'wikilinkSuggest.placeholder.block': '输入块 ID…',
+  // 验收反馈（2026-10-06）：浮层底部键提示条——按阶段裁剪显示当前可用进阶键
+  'wikilinkSuggest.hint.heading': '输入 # 可以链接到标题',
+  'wikilinkSuggest.hint.block': '输入 ^ 链接文本块',
+  'wikilinkSuggest.hint.alias': '输入 | 指定显示的文本',
+  // #379 T04：标题阶段状态与候选（明确 Markdown 目标的真实候选；
+  // 失败分真实状态，不伪装空结果）
+  'wikilinkSuggest.status.headingLoading': '正在读取标题…',
+  'wikilinkSuggest.status.headingEmpty': '没有匹配的标题',
+  'wikilinkSuggest.status.headingNotFound': '未找到目标文档——可继续手写锚点',
+  'wikilinkSuggest.status.headingNotMd': '目标不是 Markdown 文件——无标题候选',
+  'wikilinkSuggest.status.headingReadError': '目标文档读取失败——可继续手写锚点',
+  'wikilinkSuggest.heading.meta': 'H{level} · 行 {line}',
+  'wikilinkSuggest.toast.duplicateHeading': '存在多个同名标题，跳转将定位到第一个',
+  // #380 T05：块阶段状态与候选（无 ID 块照常列出；接受经宿主补写 ^id）
+  'wikilinkSuggest.status.blockLoading': '正在读取块…',
+  'wikilinkSuggest.status.blockEmpty': '没有匹配的块',
+  'wikilinkSuggest.status.blockNotFound': '未找到目标文档——可继续手写块引用',
+  'wikilinkSuggest.status.blockNotMd': '目标不是 Markdown 文件——无块候选',
+  'wikilinkSuggest.status.blockReadError': '目标文档读取失败——可继续手写块引用',
+  'wikilinkSuggest.status.blockAccepting': '正在补写块 ID…',
+  'wikilinkSuggest.block.meta': '行 {line} · {count} 行',
+  'wikilinkSuggest.toast.blockAcceptFailed': '未能补写块 ID——已保留输入',
+  // #380 T05：宿主侧撤回协调提示（来源撤销时尽力撤回目标新增标记）
+  'host.wikilinkBlockIdKept': '自动新增的块标记 ^{id} 未撤回：{reason}',
+  'host.wikilinkBlockIdKeptReason.versionChanged': '目标文档已变化',
+  'host.wikilinkBlockIdKeptReason.markerChanged': '块标记已变化',
+  'host.wikilinkBlockIdKeptReason.newUse': '已有其他引用',
+  'host.wikilinkBlockIdKeptReason.applyFailed': '写入失败',
+  'host.wikilinkBlockIdKeptReason.notFound': '目标不可读',
+  'host.wikilinkBlockIdRebuildFailed': '未能重建块标记 ^{id}——链接可能失效',
   'styleRef.category.richPaste': '粘贴询问',
   // ---- settings.（设置页框架）----
   'settings.pageTitle': 'Vsidian 设置',

@@ -2283,3 +2283,57 @@ describe('默认编辑器守护消息协议（#323 设置页委托组）', () =>
     expect(isWebviewToHost({ kind: 'defaultEditor.state', status: 'none', viewType: null, label: null })).toBe(false)
   })
 })
+
+describe('isWebviewToHost / isHostToWebview：wikilink 查询分页字段（#377 T02）', () => {
+  it('wikilink.query 可选 offset：非负整数放行、负数与非数拒绝、缺省兼容', () => {
+    const base = { kind: 'wikilink.query', sessionId: 's1', docUri: 'file:///d/a.md', reqId: 1, generation: 1, query: '方' }
+    expect(isWebviewToHost(base)).toBe(true)
+    expect(isWebviewToHost({ ...base, offset: 50 })).toBe(true)
+    expect(isWebviewToHost({ ...base, offset: 0 })).toBe(true)
+    expect(isWebviewToHost({ ...base, offset: -1 })).toBe(false)
+    expect(isWebviewToHost({ ...base, offset: '50' })).toBe(false)
+  })
+  it('wikilink.query.result 可选 catalogGen：非负整数放行、负数与非数拒绝、缺省兼容', () => {
+    const base = { kind: 'wikilink.query.result', sessionId: 's1', docUri: 'file:///d/a.md', reqId: 1, generation: 1, status: 'ready', items: [], total: 0 }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, catalogGen: 7 })).toBe(true)
+    expect(isHostToWebview({ ...base, catalogGen: 0 })).toBe(true)
+    expect(isHostToWebview({ ...base, catalogGen: -1 })).toBe(false)
+    expect(isHostToWebview({ ...base, catalogGen: '7' })).toBe(false)
+  })
+})
+
+describe('isWebviewToHost / isHostToWebview：wikilink 标题查询（#379 T04）', () => {
+  it('wikilink.heading.query：身份/代次/前缀/目标齐备放行，缺字段或未知原因拒绝', () => {
+    const base = { kind: 'wikilink.heading.query', sessionId: 's1', docUri: 'file:///d/a.md', reqId: 1, generation: 1, query: '预', target: '../资料/方案.md' }
+    expect(isWebviewToHost(base)).toBe(true)
+    expect(isWebviewToHost({ ...base, query: '', target: '' })).toBe(true)
+    expect(isWebviewToHost({ ...base, reqId: -1 })).toBe(false)
+    expect(isWebviewToHost({ ...base, generation: 'x' })).toBe(false)
+    expect(isWebviewToHost({ ...base, target: undefined })).toBe(false)
+    // 方向校验：宿主不发起
+    expect(isHostToWebview(base as never)).toBe(false)
+  })
+  it('wikilink.heading.query.result：分态与载荷校验（items 形态、reason 枚举、targetVersion 非负）', () => {
+    const base = { kind: 'wikilink.heading.query.result', sessionId: 's1', docUri: 'file:///d/a.md', reqId: 1, generation: 1, status: 'ready' }
+    const item = { id: 'C:\\vault\\t.md#3', heading: '预算', level: 2, line: 3, duplicate: true, alias: '预算' }
+    expect(isHostToWebview({ ...base, items: [item], targetVersion: 4 })).toBe(true)
+    expect(isHostToWebview({ ...base, items: [] })).toBe(true)
+    expect(isHostToWebview({ ...base, items: [{ ...item, level: 0 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, items: [{ ...item, level: 7 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, items: [{ ...item, line: 0 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, items: [{ ...item, duplicate: 'yes' }] })).toBe(false)
+    expect(isHostToWebview({ ...base, items: [{ ...item, heading: 3 }] })).toBe(false)
+    // 空标题是 ATX 合法形态（「# 」行）——载荷放行；确认计划侧另有防御
+    expect(isHostToWebview({ ...base, items: [{ ...item, heading: '' }] })).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'unavailable', reason: 'target-not-found' })).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'unavailable', reason: 'target-not-md' })).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'unavailable', reason: 'read-error' })).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'unavailable', reason: 'no-workspace' })).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'unavailable', reason: 'not-ready' })).toBe(false)
+    expect(isHostToWebview({ ...base, targetVersion: -1 })).toBe(false)
+    expect(isHostToWebview({ ...base, targetVersion: '4' })).toBe(false)
+    // 方向校验：webview 不发起
+    expect(isWebviewToHost({ ...base, items: [] } as never)).toBe(false)
+  })
+})

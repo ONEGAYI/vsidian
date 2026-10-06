@@ -209,6 +209,11 @@ export interface DocumentSessionOptions {
    *  查不到旧端口直接注册新端口，等价自愈）。会话保持纯逻辑：释放动作在
    *  provider 域；未注入时无行为变化 */
   onPanelReload?: (sessionId: string) => void
+  /** #380 T05：本会话文档一次 undo/redo 实际执行后的回调（provider 据此
+   *  驱动块 ID 撤回协调——来源撤销撤链接时尽力撤回目标新增标记，V01
+   *  放行路径）。仅在权威端口返回已执行（true）时触发；排在 queue 串行
+   *  链之后，观察到的是该次历史操作落定后的权威文本 */
+  onHistoryApplied?: (op: 'undo' | 'redo') => void
   /** #201 周期核验端口：image.verify 的 items 透传给 provider 协调器
    *  （stat + 版本表决策 + 失效回调走 invalidateImagesByFsPath）。
    *  会话侧只做会话守卫与串行合并（并发有界）；未注入时 verify 静默
@@ -381,6 +386,17 @@ export class DocumentSession {
   private nextPanelId = 1
   private disposed = false
   private hoverSourceLeaseSeq = 0
+
+  /**
+   * 等待本会话在途 edit.request 全部应用到权威 TextDocument（#379 T04
+   * 未保存正文协调）：queue 是 edit.request 的串行应用链，await 它即读到
+   * 「webview 已出站编辑全部落地」后的当前有效版本。webview 组合期暂缓
+   * 未出站的输入不在协调范围（宿主不可见，规格已知边界）。只读等待，
+   * 不触发任何编辑或广播。
+   */
+  whenEditsSettled(): Promise<void> {
+    return this.queue.then(() => undefined)
+  }
   /** #10 图片解析：同 src 在途去重与成功结果缓存（失败不缓存，重试重解析） */
   private readonly imageInFlight = new Map<string, Promise<ImageResolution>>()
   private readonly imageCache = new Map<string, ImageResolution>()
@@ -608,6 +624,15 @@ export class DocumentSession {
       case 'backlink.activate':
         // #197 反链面板：面板级 UI 意图，provider 层拦截消费（索引服务与
         // 跳转执行都在 provider 域）；绕过面板入口则无副作用。
+        return Promise.resolve()
+      case 'wikilink.query':
+        // #376 T01 双链联想查询：provider 层拦截消费（索引服务在 provider
+        // 域）；绕过面板入口则无副作用。
+        return Promise.resolve()
+      case 'wikilink.heading.query':
+        // #379 T04 标题联想查询：同 wikilink.query——provider 层拦截消费
+        //（目标解析与 TextDocument 读取在 provider 域）；绕过面板入口则
+        // 无副作用。
         return Promise.resolve()
       case 'outlinks.get':
       case 'outlink.activate':
@@ -1013,6 +1038,13 @@ export class DocumentSession {
         const task = this.queue.then(() =>
           op === 'undo' ? this.doc.undo(origin) : this.doc.redo(origin))
         this.queue = task.then(() => undefined, () => undefined)
+        // #380 T05：实际执行的历史操作落定后通知 provider（块 ID 撤回协调
+        //  的观察点——undo 撤掉来源链接时尽力撤回目标新增标记）
+        void task.then((executed) => {
+          if (executed) {
+            this.options.onHistoryApplied?.(op)
+          }
+        })
         return task.then(() => undefined)
       }
       case 'sync.request': {

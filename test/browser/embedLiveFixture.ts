@@ -80,6 +80,14 @@ let bindReqSeq = 0
 const conflictCompareRequests: Array<{ text: string }> = []
 let conflictCompareOk = true
 
+/** #381 T06 双链联想伪宿主配置：候选应答（null = 不回包，观察加载态）；
+ *  出站记录含 portId 归属（B 内出站的查询以 B 端口为信封） */
+const wikilinkRequests: Array<{ portId: string; message: WebviewToHost }> = []
+let wikilinkFiles: import('../../src/shared/protocol').WikilinkCandidateItem[] | null = null
+let wikilinkHeadings: import('../../src/shared/protocol').WikilinkHeadingItem[] | null = null
+let wikilinkBlocks: import('../../src/shared/protocol').WikilinkBlockItem[] | null = null
+let wikilinkBlockId = 'test-block-1'
+
 /** 定向推送（指定端口） */
 function bPushTo(portId: string, message: WebviewToHost | import('../../src/shared/protocol').HostToWebview): void {
   controller.handleHostMessage({ kind: 'refEdit.push', portId, fsPath: B_FS, message })
@@ -127,6 +135,19 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
         expansionPath: [],
         sourceLeaseId: `panel-1:source-${++bindReqSeq}`,
       })
+      return
+    }
+    // ---- #381 T06 主正文（非信封）双链联想查询：与端口路径同一候选配置，
+    //  回包直发主会话（sessionId/docUri 原样回显）----
+    case 'wikilink.query': {
+      wikilinkRequests.push({ portId: '', message })
+      if (wikilinkFiles) {
+        controller.handleHostMessage({
+          kind: 'wikilink.query.result', sessionId: message.sessionId, docUri: message.docUri,
+          reqId: message.reqId, generation: message.generation, status: 'ready',
+          updating: false, total: wikilinkFiles.length, catalogGen: 1, items: wikilinkFiles,
+        })
+      }
       return
     }
     case 'refEdit.bind': {
@@ -190,6 +211,55 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
         }
         // undo 的文档变更以外部增量回流（不匹配任何 pending 正向变更）
         bPush({ kind: 'doc.changed', version: bModel.ver, changes: inverse, origin: 'external' })
+      }
+      // ---- #381 T06 双链联想查询族：记录出站并按配置自动回包（经
+      //  refEdit.push 信封定向回推——与真实宿主同路径；回包的 reqId/
+      //  generation 原样回显，迟到守卫在 webview 实例侧）----
+      if (inner.kind === 'wikilink.query') {
+        wikilinkRequests.push({ portId: message.portId, message: inner })
+        if (wikilinkFiles) {
+          bPushTo(message.portId, {
+            kind: 'wikilink.query.result', sessionId: inner.sessionId, docUri: inner.docUri,
+            reqId: inner.reqId, generation: inner.generation, status: 'ready',
+            updating: false, total: wikilinkFiles.length, catalogGen: 1, items: wikilinkFiles,
+          })
+        }
+        return
+      }
+      if (inner.kind === 'wikilink.heading.query') {
+        wikilinkRequests.push({ portId: message.portId, message: inner })
+        if (wikilinkHeadings) {
+          bPushTo(message.portId, {
+            kind: 'wikilink.heading.query.result', sessionId: inner.sessionId, docUri: inner.docUri,
+            reqId: inner.reqId, generation: inner.generation, status: 'ready',
+            targetVersion: bModel.ver, items: wikilinkHeadings,
+          })
+        }
+        return
+      }
+      if (inner.kind === 'wikilink.block.query') {
+        wikilinkRequests.push({ portId: message.portId, message: inner })
+        if (wikilinkBlocks) {
+          bPushTo(message.portId, {
+            kind: 'wikilink.block.query.result', sessionId: inner.sessionId, docUri: inner.docUri,
+            reqId: inner.reqId, generation: inner.generation, status: 'ready',
+            targetVersion: bModel.ver, items: wikilinkBlocks,
+          })
+        }
+        return
+      }
+      if (inner.kind === 'wikilink.block.accept') {
+        wikilinkRequests.push({ portId: message.portId, message: inner })
+        bPushTo(message.portId, {
+          kind: 'wikilink.block.accept.result', sessionId: inner.sessionId, docUri: inner.docUri,
+          reqId: inner.reqId, generation: inner.generation, ok: true,
+          blockId: wikilinkBlockId, alias: '目标笔记',
+        })
+        return
+      }
+      if (inner.kind === 'wikilink.block.linked' || inner.kind === 'wikilink.block.cancel') {
+        wikilinkRequests.push({ portId: message.portId, message: inner })
+        return
       }
       return
     }
@@ -304,6 +374,16 @@ Object.assign(window, {
   setEmbedLiveMode(mode: 'live' | 'reading') {
     controller.handleHostMessage({ kind: 'view.mode.set', mode })
   },
+  /** #381 T06 主正文光标定位（view.locate 生产链路） */
+  mainLocate(offset: number): void {
+    controller.handleHostMessage({ kind: 'view.locate', offset })
+  },
+  /** #381 T06 主编辑器焦点 */
+  focusMain(): boolean {
+    mainView()?.focus()
+    return document.activeElement instanceof HTMLElement &&
+      !!document.activeElement.closest('.vsidian-view-live')
+  },
   /** 已出站消息快照（refEdit.* 观测） */
   embedLiveSent(): WebviewToHost[] {
     return [...sent]
@@ -357,6 +437,38 @@ Object.assign(window, {
   /** 伪造 B 模型状态 */
   embedTargetModel(): { text: string; version: number; dirty: boolean; saved: number } {
     return { text: bModel.content, version: bModel.ver, dirty: bModel.dirty, saved: bModel.savedCount }
+  },
+  /** #381 T06 双链联想出站记录（含 portId 归属——B 内出站经 B 端口信封） */
+  embedWikilinkRequests(): Array<{ portId: string; message: WebviewToHost }> {
+    return wikilinkRequests.map((r) => ({ portId: r.portId, message: { ...r.message } }))
+  },
+  /** 配置文件候选应答（null = 不回包；#381 T06） */
+  embedSetWikilinkFiles(items: import('../../src/shared/protocol').WikilinkCandidateItem[] | null): void {
+    wikilinkFiles = items
+  },
+  /** 配置标题候选应答（null = 不回包；#381 T06） */
+  embedSetWikilinkHeadings(items: import('../../src/shared/protocol').WikilinkHeadingItem[] | null): void {
+    wikilinkHeadings = items
+  },
+  /** 配置块候选应答（null = 不回包；#381 T06） */
+  embedSetWikilinkBlocks(items: import('../../src/shared/protocol').WikilinkBlockItem[] | null): void {
+    wikilinkBlocks = items
+  },
+  /** 无 ID 块接受回包的 blockId（#381 T06；默认 test-block-1） */
+  embedSetWikilinkBlockId(id: string): void {
+    wikilinkBlockId = id
+  },
+  /** 候选浮层观测（document 级单例挂载；#381 T06） */
+  embedSuggestState(): { open: boolean; itemCount: number; statusText: string } {
+    const el = document.querySelector<HTMLElement>('.vsidian-wikilink-suggest')
+    if (!el) {
+      return { open: false, itemCount: 0, statusText: '' }
+    }
+    return {
+      open: getComputedStyle(el).visibility !== 'hidden' && el.offsetHeight > 0,
+      itemCount: el.querySelectorAll('.vsidian-wikilink-suggest-item').length,
+      statusText: el.querySelector<HTMLElement>('.vsidian-wikilink-suggest-status')?.textContent ?? '',
+    }
   },
   /** 外部编辑注入（B 其他视图修改 → 广播 doc.changed 增量） */
   embedTargetExternalEdit(offset: number, length: number, text: string) {

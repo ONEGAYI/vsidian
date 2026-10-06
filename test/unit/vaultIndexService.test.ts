@@ -34,14 +34,57 @@ function makeFs(initial: Record<string, string> = {}): FakeFs {
 }
 
 /** 扫描端口：listMarkdownFiles 按扩展名过滤 .md（磁盘真实形态，/ 分隔）；
- *  inaccessible 集合模拟 SSH 断连/权限错误（accessOf 返回 inaccessible） */
-function scanPortOf(fs: FakeFs, events: string[] = []): VaultIndexScanPort & { yields: number; inaccessible: Set<string> } {
+ *  inaccessible 集合模拟 SSH 断连/权限错误（accessOf 返回 inaccessible）；
+ *  #377 T02 起 listAllFiles 支持全文件列举（目录推导 + skipDir 剪枝 +
+ *  failedDirs 三态）与 watcher 事件手动发射（emit） */
+function scanPortOf(fs: FakeFs, events: string[] = []): VaultIndexScanPort & {
+  yields: number
+  inaccessible: Set<string>
+  inaccessibleDirs: Set<string>
+  emit: (fsPath: string) => void
+  listAllCalls: number
+} {
+  const watchers: Array<(fsPath: string | null) => void> = []
   return {
     yields: 0,
     inaccessible: new Set<string>(),
+    inaccessibleDirs: new Set<string>(),
+    listAllCalls: 0,
+    emit(fsPath: string) {
+      for (const w of watchers) w(fsPath)
+    },
     async listMarkdownFiles(rootFsPath: string) {
       const prefix = rootFsPath.replace(/\\/g, '/').replace(/\/$/, '') + '/'
       return [...fs.files.keys()].filter((p) => p.startsWith(prefix) && /\.md$/i.test(p))
+    },
+    async listAllFiles(rootFsPath: string, opts?: { skipDir?: (fsPath: string) => boolean }) {
+      this.listAllCalls += 1
+      const prefix = rootFsPath.replace(/\\/g, '/').replace(/\/$/, '') + '/'
+      const all = [...fs.files.keys()].filter((p) => p.startsWith(prefix))
+      // 根内祖先目录推导（含根自身）
+      const dirs = new Set<string>([prefix.slice(0, -1)])
+      for (const p of all) {
+        let d = p.slice(0, p.lastIndexOf('/'))
+        while (d.length >= prefix.length - 1 && !dirs.has(d)) {
+          dirs.add(d)
+          if (d.length <= prefix.length) break
+          d = d.slice(0, d.lastIndexOf('/'))
+        }
+      }
+      // 不可访问目录（三态：子树不列举且记 failedDirs——不冒充删除）
+      const failedDirs = [...dirs].filter((d) => this.inaccessibleDirs.has(d))
+      // 剪枝目录（skipDir 判定；剪掉的子树不进 failedDirs）
+      const prunedDirs = new Set<string>()
+      if (opts?.skipDir) {
+        for (const d of dirs) {
+          if (opts.skipDir(d.replace(/\\/g, '/'))) {
+            prunedDirs.add(d)
+          }
+        }
+      }
+      const blocked = (p: string) =>
+        failedDirs.some((d) => p.startsWith(`${d}/`)) || [...prunedDirs].some((d) => p.startsWith(`${d}/`))
+      return { files: all.filter((p) => !blocked(p)), failedDirs }
     },
     async readFileText(fsPath: string) {
       const key = fsPath.replace(/\\/g, '/')
@@ -64,15 +107,22 @@ function scanPortOf(fs: FakeFs, events: string[] = []): VaultIndexScanPort & { y
       }
       return fs.files.has(key) ? ('ok' as const) : ('missing' as const)
     },
-    watchRoot(_rootFsPath, _onEvent) {
+    watchRoot(_rootFsPath, onEvent) {
       events.push('watch')
+      watchers.push(onEvent)
       return () => events.push('unwatch')
     },
     async yieldToEventLoop() {
       this.yields += 1
       await Promise.resolve()
     },
-  } as VaultIndexScanPort & { yields: number; inaccessible: Set<string> }
+  } as VaultIndexScanPort & {
+    yields: number
+    inaccessible: Set<string>
+    inaccessibleDirs: Set<string>
+    emit: (fsPath: string) => void
+    listAllCalls: number
+  }
 }
 
 /** 存储端口：内存目录树（沿用 snapshot 的 `/` 拼接路径） */
@@ -1993,5 +2043,433 @@ describe('VaultIndexService：birthtime 与长片段（形态改版批次）', (
     const item = itemsOf(await service.backlinksOf('C:/vault/目标.md'))[0]!
     expect(item.snippetLong.length).toBe(301) // 300 + 「…」
     expect(item.snippetLong.endsWith('…')).toBe(true)
+  })
+})
+
+// ---- #377 T02 全文件清单：登记 / 排除 / 持久化 / 事件 / 代次 / 核验 / 查询 ----
+
+/** 服务级候选查询收窄：非 ready 直接失败 */
+function candidatesOf(r: ReturnType<VaultIndexService['queryWikilinkFileCandidates']>) {
+  if (r.status !== 'ready') {
+    throw new Error(`期望 ready 状态，实际 ${r.status}`)
+  }
+  return r
+}
+
+describe('VaultIndexService：全文件清单（#377 T02）', () => {
+  it('全文件登记：所有未排除文件入清单并落盘 catalog.json；常用资源取真实 mtime，未知类型仅记名 mtime=0', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/素材/配图.png': 'png',
+      'C:/vault/手册.pdf': 'pdf',
+      'C:/vault/歌曲.mp3': 'mp3',
+      'C:/vault/片段.mp4': 'mp4',
+      'C:/vault/说明.txt': 'txt',
+      'C:/vault/cache.pyc': 'pyc',
+      'C:/vault/lib.so': 'so',
+      'C:/vault/Makefile': 'mk',
+    })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_000, size: 4 })
+    fs.stats.set('C:/vault/素材/配图.png', { mtimeMs: 2_000, size: 3 })
+    fs.stats.set('C:/vault/cache.pyc', { mtimeMs: 9_000, size: 99 }) // 即使磁盘可 stat，other 类不取
+    for (const p of ['C:/vault/手册.pdf', 'C:/vault/歌曲.mp3', 'C:/vault/片段.mp4', 'C:/vault/说明.txt', 'C:/vault/lib.so', 'C:/vault/Makefile']) {
+      fs.stats.set(p, { mtimeMs: 500, size: 1 }) // 同 mtime：稳定路径破同分
+    }
+    const { service, storage } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(9)
+    const persisted = storage.files.get(`${STORE_BASE}/catalog.json`)
+    expect(persisted).toBeDefined()
+    const empty = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', ''))
+    expect(empty.total).toBe(6) // md/图片/PDF/音频/视频/文本——other 三项不进空查询
+    expect(empty.items.map((i) => i.name)).toEqual([
+      '配图.png', 'a.md', '手册.pdf', '歌曲.mp3', '片段.mp4', '说明.txt',
+    ]) // mtime 已知者按新→旧（2000 → 1000 → 其余默认 1.7e12 同值走稳定路径）
+    const withQuery = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', 'pyc'))
+    expect(withQuery.items.map((i) => i.name)).toEqual(['cache.pyc']) // 有查询允许未知/编译类型
+    expect(withQuery.items[0]!.mtimeMs).toBe(0) // 仅记名：未知不伪装为磁盘时间
+  })
+
+  it('来源无路径/不属于任何根：候选返回 no-workspace，不猜根不产候选（T07 补钉）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 未保存无路径文档（untitled）或根外路径：rootOf 无匹配 → no-workspace
+    const r = service.queryWikilinkFileCandidates('C:/别处/来源.md', 'a')
+    expect(r).toEqual({ status: 'unavailable', reason: 'no-workspace' })
+  })
+
+  it('排除语义：.git / node_modules 与用户排除不入清单；排除变更触发覆盖范围重算', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/.git/objects/pack.png': 'x',
+      'C:/vault/node_modules/pkg/res.png': 'x',
+      'C:/vault/草稿/draft.png': 'x',
+    })
+    const { service } = makeService(fs, {
+      excludePatterns: ['**/.git/**', '**/node_modules/**', '草稿'],
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(1)
+    // 用户排除移除（保留默认排除）：draft.png 随覆盖范围重算入清单
+    await service.setExcludePatterns(['**/.git/**', '**/node_modules/**'])
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(2)
+    const hit = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', 'draft'))
+    expect(hit.items.map((i) => i.relPath)).toEqual(['草稿/draft.png'])
+    // 排除恢复：重算后再次退出清单（排除域不进不出）
+    await service.setExcludePatterns(['**/.git/**', '**/node_modules/**', '草稿'])
+    expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', 'draft')).total).toBe(0)
+  })
+
+  it('持久化恢复：健康 catalog.json 重开不重新列举；损坏 catalog.json 走全量重建', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/配图.png': 'png' })
+    const first = makeService(fs)
+    await first.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(first.storage.files.get(`${STORE_BASE}/catalog.json`)).toBeDefined()
+    // 第二实例：健康快照 → 直接恢复，不再列举
+    const second = new VaultIndexService(first.scan, first.storage, {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    await second.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const callsAfterRestore = first.scan.listAllCalls
+    expect(second.maintenanceInfo().roots[0]!.catalogFileCount).toBe(2)
+    // 第三实例：损坏 catalog.json → 重建（重新列举）
+    first.storage.files.set(`${STORE_BASE}/catalog.json`, '{corrupted')
+    const third = new VaultIndexService(first.scan, first.storage, {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    await third.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(first.scan.listAllCalls).toBeGreaterThan(callsAfterRestore)
+    expect(third.maintenanceInfo().roots[0]!.catalogFileCount).toBe(2)
+    expect(candidatesOf(third.queryWikilinkFileCandidates('C:/vault/a.md', '配图')).total).toBe(1)
+  })
+
+  it('watcher 事件维护：非 md 文件创建/删除更新清单并递增清单代次；不可访问不冒充删除', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n' })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const gen0 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '')).catalogGen
+    // 创建：新 png 落盘 + 事件
+    fs.files.set('C:/vault/新图.png', 'png')
+    fs.stats.set('C:/vault/新图.png', { mtimeMs: 5_000, size: 3 })
+    scan.emit('C:/vault/新图.png')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(2)
+    const afterCreate = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '新图'))
+    expect(afterCreate.items[0]!.mtimeMs).toBe(5_000)
+    expect(afterCreate.catalogGen).toBeGreaterThan(gen0)
+    // 不可访问（SSH 断连）：条目保留
+    scan.inaccessible.add('C:/vault/新图.png')
+    scan.emit('C:/vault/新图.png')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(2)
+    // 删除（missing 正证据）：条目移除
+    scan.inaccessible.delete('C:/vault/新图.png')
+    fs.files.delete('C:/vault/新图.png')
+    fs.stats.delete('C:/vault/新图.png')
+    scan.emit('C:/vault/新图.png')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(1)
+    expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '新图')).total).toBe(0)
+  })
+
+  it('md 保存路径与 rename 批刷新同步维护清单条目', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n![[配图.png]]\n',
+      'C:/vault/配图.png': 'png',
+      'C:/vault/未引用图.png': 'png',
+    })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 100, size: 10 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // md 保存（mtime 更新）：清单条目跟随磁盘 stat
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 200, size: 14 })
+    fs.files.set('C:/vault/a.md', '# A\n\n![[配图.png]]\n更多\n')
+    await service.documentSaved('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', 'a.md')).items[0]!.mtimeMs).toBe(200)
+    // rename：旧路径退场、新路径登记（含未被引用附件）
+    fs.files.delete('C:/vault/未引用图.png')
+    fs.stats.delete('C:/vault/未引用图.png')
+    fs.files.set('C:/vault/改名图.png', 'png')
+    fs.stats.set('C:/vault/改名图.png', { mtimeMs: 300, size: 3 })
+    await service.refreshRenamedBatch([{ oldFsPath: 'C:/vault/未引用图.png', newFsPath: 'C:/vault/改名图.png' }])
+    const hit = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '图'))
+    expect(hit.items.map((i) => i.name).sort()).toEqual(['改名图.png', '配图.png'])
+  })
+
+  it('周期核验：外部增删（无事件漂移）由清单核验兜底；失败目录下不移除、清单标记不完整', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/sub/漂移.png': 'png',
+      'C:/vault/外部删.txt': 'txt',
+    })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(3)
+    // 外部新增（无事件）+ 外部删除（无事件）
+    fs.files.set('C:/vault/漂入.pdf', 'pdf')
+    fs.stats.set('C:/vault/漂入.pdf', { mtimeMs: 1, size: 1 })
+    fs.files.delete('C:/vault/外部删.txt')
+    fs.stats.delete('C:/vault/外部删.txt')
+    await service.verifyNow()
+    const info = service.maintenanceInfo().roots[0]!
+    expect(info.catalogFileCount).toBe(3) // +漂入.pdf -外部删.txt
+    expect(info.catalogComplete).toBe(true)
+    // 子目录不可访问：其下文件不被移除；complete=false（部分就绪不冒充完整）
+    scan.inaccessibleDirs.add('C:/vault/sub')
+    await service.verifyNow()
+    const partial = service.maintenanceInfo().roots[0]!
+    expect(partial.catalogComplete).toBe(false)
+    expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '漂移')).total).toBe(1)
+    expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '')).updating).toBe(true)
+  })
+
+  it('代次守卫：取消（epoch 递增）后旧清单枚举不得发布', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/旧图.png': 'png' })
+    const { service, scan } = makeService(fs)
+    // 挂起首轮枚举：listAllFiles 返回手动受控 promise
+    let release!: (v: { files: string[]; failedDirs: string[] }) => void
+    const original = scan.listAllFiles.bind(scan)
+    scan.listAllFiles = async () => await new Promise((resolve) => { release = resolve }) as { files: string[]; failedDirs: string[] }
+    const init = service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(0) // 推进至 listAllFiles 挂起点
+    scan.listAllFiles = original
+    service.cancelMaintenance() // 旧枚举在途时取消
+    release({ files: ['C:/vault/旧图.png'], failedDirs: [] })
+    await init
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(0) // 旧枚举未发布
+    // 重触发（排除重算同路径）后正常建立
+    await service.setExcludePatterns([])
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(2)
+  })
+
+  it('清单未就绪回退：构建中退回现有索引 Markdown/附件候选并明确 updating；部分结果不冒充完整空结果', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n![[被引图.png]]\n',
+      'C:/vault/被引图.png': 'png',
+      'C:/vault/未引图.png': 'png',
+    })
+    const { service, scan } = makeService(fs)
+    let release!: (v: { files: string[]; failedDirs: string[] }) => void
+    scan.listAllFiles = async () => await new Promise((resolve) => { release = resolve }) as { files: string[]; failedDirs: string[] }
+    const init = service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(0) // 推进：md 索引建完、清单挂起
+    // 引用索引（md）已就绪、清单仍在构建：可用项继续候选 + updating 标注
+    const during = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', ''))
+    expect(during.updating).toBe(true)
+    expect(during.items.map((i) => i.name).sort()).toEqual(['a.md', '被引图.png'])
+    release({ files: [], failedDirs: [] })
+    await init
+  })
+
+  it('分页与总量：offset 越过首屏继续取页，total 为命中总数', async () => {
+    const files: Record<string, string> = { 'C:/vault/a.md': '# A\n' }
+    for (let i = 0; i < 8; i++) {
+      files[`C:/vault/分页图${i}.png`] = 'png'
+    }
+    const { service } = makeService(makeFs(files))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const page1 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '分页图', 0, 3))
+    const page2 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '分页图', 3, 3))
+    const page3 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '分页图', 6, 3))
+    expect(page1.total).toBe(8)
+    expect(page1.items).toHaveLength(3)
+    expect(page2.items).toHaveLength(3)
+    expect(page3.items).toHaveLength(2)
+    const all = [...page1.items, ...page2.items, ...page3.items].map((i) => i.relPath)
+    expect(new Set(all).size).toBe(8) // 无重复无遗漏
+  })
+
+  it('未保存编辑不冒充磁盘修改时间：applyUnsaved 后候选 mtime 仍为磁盘 stat', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/b.md': '# B\n' })
+    fs.stats.set('C:/vault/b.md', { mtimeMs: 4_000, size: 5 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    service.applyUnsaved('C:/vault/b.md', 7, '# B 改\n')
+    await vi.advanceTimersByTimeAsync(1_000)
+    const hit = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', 'b.md'))
+    expect(hit.items[0]!.mtimeMs).toBe(4_000) // 磁盘 mtime，未保存内容不参与
+  })
+
+  it('清单就绪与引用关系就绪分别标记：清单完成不改变 rename not-ready 语义', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/x.png': 'png' })
+    let release!: (v: { files: string[]; failedDirs: string[] }) => void
+    const { service, scan } = makeService(fs)
+    scan.readFileText = async () => await new Promise<string | null>(() => {}) // md 正文读取挂起 → 引用索引未就绪
+    scan.listAllFiles = async () => await new Promise((resolve) => { release = resolve }) as { files: string[]; failedDirs: string[] }
+    const init = service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(0) // 推进至 listAllFiles 挂起点
+    release({ files: ['C:/vault/a.md', 'C:/vault/x.png'], failedDirs: [] }) // 清单先行完成
+    await vi.advanceTimersByTimeAsync(1_000)
+    // 清单已发布（count=2）而引用关系未就绪：rename 候选仍 not-ready（不因名称枚举完成放行）
+    expect(service.maintenanceInfo().roots[0]!.catalogFileCount).toBe(2)
+    expect(service.renameCandidatesOf('C:/vault/a.md').status).toBe('not-ready')
+    void init
+  })
+})
+
+// ---- code-review 修复批次：F5/F6/F10/F14/F15（候选语法往返与分页、空查询
+// 口径、核验零变化、扫描窗口直写） ----
+
+describe('VaultIndexService：code-review 修复（F5/F6/F10/F14/F15）', () => {
+  it('F5+F6：文件名含语法字符的候选写回即损坏——不入列表且不占页位（补位）', async () => {
+    // POSIX 形态病态名在桩文件系统合法登记；mtime 控制排序（a|b.md 最前）
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/a|b.md': '# 病态\n',
+      'C:/vault/c1.md': '# C1\n',
+      'C:/vault/c2.md': '# C2\n',
+    })
+    fs.stats.set('C:/vault/a|b.md', { mtimeMs: 20_000, size: 5 })
+    fs.stats.set('C:/vault/c1.md', { mtimeMs: 5_000, size: 4 })
+    fs.stats.set('C:/vault/c2.md', { mtimeMs: 4_000, size: 4 })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 3_000, size: 4 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 病态占位补位：首页（limit 1）跳过 a|b.md 投递 c1.md
+    const page1 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 0, 1))
+    expect(page1.items.map((i) => i.relPath)).toEqual(['c1.md'])
+    // 续页 offset=1（已投递数）：投递 c2（旧实现的排名偏移会重复投递 c1）
+    const page2 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 1, 1))
+    expect(page2.items.map((i) => i.relPath)).toEqual(['c2.md'])
+    // 病态全局不可达：无论怎么翻页都选不到（候选侧静默排除，不产出损坏引用）
+    const full = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 0, 50))
+    expect(full.items.map((i) => i.relPath)).toEqual(['c1.md', 'c2.md', 'a.md'])
+  })
+
+  it('F6：尾部病态——items.length < limit 即穷尽信号（webview 终态判据的宿主侧语义）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/c1.md': '# C1\n',
+      'C:/vault/z|尾病.md': '# 病态\n',
+    })
+    fs.stats.set('C:/vault/c1.md', { mtimeMs: 5_000, size: 4 })
+    fs.stats.set('C:/vault/z|尾病.md', { mtimeMs: 1_000, size: 4 })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 3_000, size: 4 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 0, 3))
+    expect(r.items).toHaveLength(2) // 3 < limit=3 的窗口内只投递 2 个（穷尽）
+    expect(r.items.map((i) => i.relPath)).toEqual(['c1.md', 'a.md'])
+  })
+
+  it('F10：全符号查询（单 *）与评分侧同源判空——按空查询口径只列常用资源', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/图.png': 'png',
+      'C:/vault/cache.pyc': 'pyc',
+    })
+    fs.stats.set('C:/vault/图.png', { mtimeMs: 2_000, size: 3 })
+    fs.stats.set('C:/vault/cache.pyc', { mtimeMs: 9_000, size: 99 })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_000, size: 4 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 单 `*`：prepare 的 normalized 为空（通配符剥除）——空查询口径只列
+    // 常用资源（旧 trim 口径会把 other 类 cache.pyc 混入首位）
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '*'))
+    expect(r.items.map((i) => i.relPath)).toEqual(['图.png', 'a.md'])
+    expect(r.total).toBe(2)
+  })
+
+  it('F14：verifyNow 零变化不触发任何提交写盘（不为周期核验空转全模型序列化）', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n见 [[b]]。\n', 'C:/vault/b.md': '# B\n' })
+    const { service, storage } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(2_000) // 初始快照/清单提交落定
+    const writesBefore = storage.writes.length
+    await service.verifyNow()
+    await vi.advanceTimersByTimeAsync(2_000) // 若误排提交，防抖定时器在此落盘
+    expect(storage.writes.length).toBe(writesBefore) // 零变化 → 零写入
+    // 确有变化时行为不变：磁盘新增文件 → 清单 diff 非空 → 提交发生
+    fs.files.set('C:/vault/新图.png', 'png')
+    fs.stats.set('C:/vault/新图.png', { mtimeMs: 7_000, size: 3 })
+    await service.verifyNow()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(storage.writes.length).toBeGreaterThan(writesBefore)
+    expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '新图')).items)
+      .toHaveLength(1)
+  })
+
+  it('F15：清单枚举窗口内 verifyRoot 的直写转 pending 重放——不被完成时的整体覆盖吞掉', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/x.png': 'png' })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 受控挂起：setExcludePatterns 触发重扫（fullScan → scanCatalog），
+    // scanCatalog 的逐文件 stat 挂在 gate 上（模拟大目录扫描窗口）
+    const gate = makeGate4Test()
+    const originalStat = scan.statFile.bind(scan)
+    let armed = true
+    scan.statFile = (async (p: string) => {
+      if (armed && p.endsWith('a.md')) {
+        armed = false
+        await gate.promise
+      }
+      return originalStat(p)
+    }) as typeof scan.statFile
+    const reapply = service.setExcludePatterns(['**/.git/**', '**/node_modules/**'])
+    await vi.advanceTimersByTimeAsync(0) // 推进至 scanCatalog 的 stat 挂起点
+    // 窗口内：新文件落盘（无 watcher 事件），verifyRoot 直写通道到达
+    //（verifyRoot 不检查 catalogScanning——F15 场景本体）
+    fs.files.set('C:/vault/窗口直写.png', 'png')
+    fs.stats.set('C:/vault/窗口直写.png', { mtimeMs: 8_000, size: 3 })
+    await service.verifyNow()
+    // 放行重扫：scanCatalog 收尾整体覆盖（旧枚举不含新文件）+ pending 重放
+    gate.resolve()
+    await reapply
+    await vi.advanceTimersByTimeAsync(1_000)
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '窗口直写'))
+    expect(r.items).toHaveLength(1) // 旧实现：直写被覆盖吞掉，候选查不到
+    expect(r.items[0]!.relPath).toBe('窗口直写.png')
+  })
+})
+
+/** 手动放行闸门（F15 用例） */
+function makeGate4Test(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+describe('VaultIndexService：F15 回归（CI s3 T02/#198 扫描窗口重放）', () => {
+  it('扫描窗口内 watcher 事件经 pending 重放真正入清单且收敛（不死循环）', async () => {
+    let notify: ((p: string | null) => void) | undefined
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/x.png': 'png' })
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_r, onEvent) => { notify = onEvent; return () => {} }
+    const service = new VaultIndexService(scan, storagePortOf(), { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 重扫：statFile 挂 gate 模拟大目录扫描窗口（catalogScanning=true 期间）
+    const gate = makeGate4Test()
+    const originalStat = scan.statFile.bind(scan)
+    let armed = true
+    // armed 目标选非 md（x.png）：fullScan 只 stat md，重扫的 scanCatalog 才
+    // 会 stat 它——gate 精确挂在 catalogScanning=true 的窗口内
+    scan.statFile = (async (p: string) => {
+      if (armed && p.endsWith('x.png')) {
+        armed = false
+        await gate.promise
+      }
+      return originalStat(p)
+    }) as typeof scan.statFile
+    const reapply = service.setExcludePatterns(['**/.git/**', '**/node_modules/**'])
+    await vi.advanceTimersByTimeAsync(50) // 链推进至 scanCatalog 挂 gate（scanning=true）
+    // 窗口内注册去抖：到期必落在 scanCatalog 挂起中
+    fs.files.set('C:/vault/事件图.png', 'png')
+    fs.stats.set('C:/vault/事件图.png', { mtimeMs: 9_000, size: 3 })
+    notify!('C:/vault/事件图.png')
+    await vi.advanceTimersByTimeAsync(1_000) // 去抖到期 → pending（scanning=true）
+    // 放行：整体覆盖 + pending 重放——若重放登记被 applyCatalogUpsert 的
+    // F15 拦截回填 pending，重放循环永不收敛（reapply 永挂，用例超时红）
+    gate.resolve()
+    await reapply
+    await vi.advanceTimersByTimeAsync(1_000)
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '事件图'))
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]!.relPath).toBe('事件图.png')
   })
 })

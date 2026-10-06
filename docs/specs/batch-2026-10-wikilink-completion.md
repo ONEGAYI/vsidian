@@ -4,6 +4,8 @@
 
 2026-10-05 用户确认拆分并授权发布，已创建[总览 #374](https://github.com/ONEGAYI/vsidian/issues/374)、V01 验证票 #375 与 T01–T07 子票 #376–#382。本地票面记录自包含范围、实际依赖和验收标准；功能尚未实施。用户本轮另授权推送、合并文档并清理独立工作树。
 
+**2026-10-06 实施完成**：V01 与 T01–T07 全部实施完毕（T01–T06 已合入；T07 为本批收口票——全量回归、三档容量测量与交付落档，结果见[人工验证清单](manual-verification.md) T07 节与[容量基准](../perf/2026-10-wikilink-completion-capacity.md)）。总览 #374 保持开放；人工待验（真实 IME／物理输入／观感／Remote SSH）不随自动化通过而关闭。
+
 主规格：[双链文件输入联想](wikilink-completion.md)。架构依据：[全文件清单](../adr/0013-wikilink-completion-file-catalog.md)、[VSCode 查询复用](../adr/0014-vscode-query-matching-for-wikilinks.md)。匹配证据：[Ctrl+P 源码核查](../research/vscode-quick-open-matching.md)。
 
 ## 拆分与依赖

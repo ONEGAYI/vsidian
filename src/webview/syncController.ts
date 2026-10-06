@@ -265,6 +265,7 @@ import {
   outlineStructuralExpand,
 } from './outlineMenu'
 import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES, focusMenuDom } from './contextMenuDom'
+import { WIKILINK_SUGGEST_CLASS_NAMES } from './wikilinkSuggest'
 import {
   PLAIN_MENU_LINE,
   buildContextMenuModel,
@@ -1095,6 +1096,9 @@ export class WebviewSyncController {
       // P2-05（#282）主编辑器（A 的 Live 视图）：删除活跃引用的拦截重放
       // 在确认后派发（changeFilter 由 rootOwnedViewExtensions 装配）
       mainEditorView: () => this.view ?? null,
+      // #381 T06 内部 Live 双链联想的轻提示通道（重复标题风险/块接受失败
+      // 呈现）：与主正文共用根 toast 面（B 嵌入在 A 的 webview 内）
+      notifyToast: (text, severity) => this.toast?.show(text, severity),
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
@@ -1519,6 +1523,10 @@ export class WebviewSyncController {
       initialDark: isVscodeDarkBody(),
       initialSeq: this.initialSeq,
       initialConflictRevision: this.initialConflictRevision,
+      // #376 T01：主正文实例启用双链联想会话（嵌入实例缺省不装配）
+      enableWikilinkSuggest: true,
+      // #379 T04：双链联想轻提示（重复标题风险）转发根 toast 面
+      notifyToast: (text, severity) => this.toast?.show(text, severity),
       onSuspendedChange: (active) => {
         // #314：进入暂停即作废粘贴现场（对齐 main 版 enterSuspended 开头
         // 的清理——弹窗取消、rich 反馈作废清空；暂停态下粘贴入口全被
@@ -2222,6 +2230,15 @@ export class WebviewSyncController {
         // 请求管线——实例竞态守卫后经 refEdit.message 出站）
         this.embedCards?.testHistory(message.inner, message.op, message.occurrence ?? 0)
         break
+      case 'embed.test.domType':
+        // #381 T06 测试钩子：嵌入实例的浏览器输入路径（真实 contentEditable
+        // 输入——驱动 symbol 补全与候选触发链）
+        this.embedCards?.domTypeInEmbed(message.inner, message.text, message.occurrence ?? 0)
+        break
+      case 'embed.test.key':
+        // #381 T06 测试钩子：嵌入实例派发 keydown（候选会话键同一 keymap 链）
+        this.embedCards?.keyInEmbed(message.inner, message.key, message.occurrence ?? 0)
+        break
       case 'embed.test.pasteImage':
         // P2-11 测试钩子：向嵌入实例注入图片粘贴载荷（与真实 paste 拦截
         // 同一实例管线——reqId 分配/在途登记/经目标端口出站）
@@ -2377,6 +2394,33 @@ export class WebviewSyncController {
         // 撤销一步还原）；失败不插入文本（宿主已弹 i18n 通知）——
         // 在途表与插入守卫随实例（P2-02）
         this.live?.handleImagePasteResult(message)
+        break
+      }
+      case 'wikilink.query.result': {
+        // #376 T01 双链联想查询结果：reqId/generation/会话守卫随实例
+        //（主正文实例持有联想会话；#381 T06 起嵌入实例的回包经
+        // refEdit.push 信封由 embedCards.notifyPush 定向路由，不经本分支）
+        this.live?.handleWikilinkQueryResult(message)
+        break
+      }
+      case 'wikilink.heading.query.result': {
+        // #379 T04 标题联想查询结果：守卫与路由同 wikilink.query.result
+        this.live?.handleWikilinkHeadingQueryResult(message)
+        break
+      }
+      case 'wikilink.block.query.result': {
+        // #380 T05 块联想查询结果：守卫与路由同 wikilink.query.result
+        this.live?.handleWikilinkBlockQueryResult(message)
+        break
+      }
+      case 'wikilink.block.accept.result': {
+        // #380 T05 无 ID 块接受结果（宿主补写 ^id 后回包）：随实例路由
+        this.live?.handleWikilinkBlockAcceptResult(message)
+        break
+      }
+      case 'wikilink.invalidate': {
+        // #377 T02 候选失效信号：主正文实例的候选会话自行去抖重查
+        this.live?.handleWikilinkInvalidate()
         break
       }
       case 'edit.ack': {
@@ -2816,11 +2860,16 @@ export class WebviewSyncController {
       }
       case 'table.test.key': {
         // 测试钩子：向真实编辑器派发 keydown，走用户按键的同一 keymap 链路。
+        // #378 T03：任意单字符 key（'#'／'^'／'|' 等）原样透传——驱动候选
+        // 会话的字符键（转阶段）经同一 keymap 优先级链。
         if (this.view) {
+          const mapped: Record<string, string> = {
+            'select-all': 'a', backspace: 'Backspace', delete: 'Delete', enter: 'Enter',
+            down: 'ArrowDown', up: 'ArrowUp', escape: 'Escape', tab: 'Tab', 'shift-tab': 'Tab',
+          }
           this.view.contentDOM.dispatchEvent(
             new KeyboardEvent('keydown', {
-              key: message.key === 'select-all' ? 'a' : message.key === 'backspace' ? 'Backspace'
-                : message.key === 'delete' ? 'Delete' : message.key === 'enter' ? 'Enter' : 'Tab',
+              key: mapped[message.key] ?? message.key,
               ctrlKey: message.key === 'select-all',
               shiftKey: message.key === 'shift-tab',
               bubbles: true,
@@ -3510,6 +3559,8 @@ export class WebviewSyncController {
     this.keybindingRouter.cancel()
     // #238 切换模式 = 离开 Live 编辑域，选词会话结束（选项条淡出）
     this.endOccurrenceSession()
+    // #376 T01：候选浮层不跨模式存活（Reading 只读不接管）
+    this.live?.closeWikilinkSuggest()
     const next: ViewMode =
       target === 'toggle' ? (this.viewMode === 'live' ? 'reading' : 'live') : target
     if (next === this.viewMode) {
@@ -9349,6 +9400,30 @@ export class WebviewSyncController {
           disabledCount: contextMenuEl.querySelectorAll('button:disabled').length,
         }
       : undefined
+    // #376 T01 双链联想候选绘制：document 级浮层（不在 #app 内），可见性
+    // 口径与右键菜单同源（elementFromPoint 命中）；行/高亮/状态取实时 DOM
+    const suggestEl = document.querySelector<HTMLElement>(`.${WIKILINK_SUGGEST_CLASS_NAMES.popup}`)
+    const suggestActive = suggestEl?.querySelector<HTMLElement>(
+      `.${WIKILINK_SUGGEST_CLASS_NAMES.item}.${WIKILINK_SUGGEST_CLASS_NAMES.itemActive}`) ?? null
+    const suggestStatus = suggestEl?.querySelector<HTMLElement>(
+      `.${WIKILINK_SUGGEST_CLASS_NAMES.status}`) ?? null
+    const wikilinkSuggest = suggestEl
+      ? {
+        visible: hitPaintedElement(suggestEl),
+        display: getComputedStyle(suggestEl).display,
+        itemCount: suggestEl.querySelectorAll(`.${WIKILINK_SUGGEST_CLASS_NAMES.item}`).length,
+        activeIndex: suggestActive
+          ? [...suggestEl.querySelectorAll(`.${WIKILINK_SUGGEST_CLASS_NAMES.item}`)].indexOf(suggestActive)
+          : null,
+        activeText: suggestActive?.textContent ?? null,
+        statusText: suggestStatus?.textContent ?? null,
+        // #377 T02：候选文件名序列（集成按名核对候选集合——分类过滤与
+        // 新资源出现的可断言依据）
+        names: [...suggestEl.querySelectorAll(`.${WIKILINK_SUGGEST_CLASS_NAMES.name}`)].map(
+          (el) => el.textContent ?? '',
+        ),
+      }
+      : undefined
     const quickBar = this.quickActionsEl
     const quickBold = quickBar?.querySelector<HTMLElement>('[data-op="bold"]') ?? null
     const quickActive = quickBar?.querySelector<HTMLElement>('[data-format-state="active"]') ?? null
@@ -9513,6 +9588,7 @@ export class WebviewSyncController {
       fm,
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
+      ...(wikilinkSuggest ? { wikilinkSuggest } : {}),
       toast: this.collectToastPaint(),
     }
   }

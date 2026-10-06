@@ -133,6 +133,13 @@ export type HostToWebview =
   /** P2-04 测试钩子：向指定嵌入实例转发撤销/重做（与真实键入 Mod-Z 同一
    *  请求管线——实例竞态守卫后经 refEdit.message 出站 history.request） */
   | { kind: 'embed.test.history'; inner: string; op: 'undo' | 'redo'; occurrence?: number }
+  /** #381 T06 测试钩子：向嵌入实例的 contentDOM 走浏览器输入路径注入文本
+   *  （execCommand insertText——与 table.test.domType 同构；驱动 symbol
+   *  补全/候选触发的真实输入链）；宿主测试无法向 webview 派发真实键入 */
+  | { kind: 'embed.test.domType'; inner: string; text: string; occurrence?: number }
+  /** #381 T06 测试钩子：向嵌入实例派发 keydown（候选会话键走同一 keymap
+   *  优先级链——enter/down/escape 等；与 table.test.key 同构的映射） */
+  | { kind: 'embed.test.key'; inner: string; key: string; occurrence?: number }
   /** P2-11 测试钩子：向指定嵌入实例注入图片粘贴载荷（与真实 paste 拦截
    *  同一实例管线——实例 reqId 分配 + 在途登记 + refEdit.message 信封
    *  出站；宿主测试无法向 webview 派发真实剪贴板事件） */
@@ -324,8 +331,9 @@ export type HostToWebview =
   | { kind: 'ui.command'; op: UiOperationId }
   /** 测试钩子（#13）：向真实编辑器派发 Tab/Shift+Tab keydown（与用户按键
    *  同一 keymap 链路；纯选区导航，零写回）。宿主测试无法向 webview 派发
-   *  真实键盘事件，以此通道验证导航装配 */
-  | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' }
+   *  真实键盘事件，以此通道验证导航装配。#378 T03 起另接受任意**单字符**
+   *  key（'#'／'^'／'|' 等字符键，驱动候选会话转阶段按键） */
+  | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' | 'down' | 'up' | 'escape' | (string & {}) }
   /** 测试钩子：模拟 Live 纯光标移动和纯滚动；空载荷仅启用绘制探针。 */
   | { kind: 'viewport.test.position'; cursorLine?: number; scrollNearLine?: number; scrollBiasPx?: number }
   /** 测试钩子（#42）：在真实 webview 网格单元格派发鼠标点击及当前位置输入。 */
@@ -616,6 +624,103 @@ export type HostToWebview =
       items?: OutlinkItemPayload[]
       seq?: number
     }
+  /** 双链联想查询结果（#376 T01，wikilink.query 的应答）：reqId 为请求
+   *  配对（webview 只接受最新在途请求的回包，陈旧回包丢弃）；generation
+   *  为查询代次回显（webview 以自身代次守卫迟到响应）。status=unavailable
+   *  时附真实原因（no-workspace=来源文档不在任何工作区根内；
+   *  not-ready=所属根索引尚未就绪），webview 显示真实状态、允许手写，
+   *  不伪装为空结果。status=ready 时 items 为已排序候选（宿主侧全量排序
+   *  后限量回传），updating=true 表示所属根仍在构建（当前为部分数据）。
+   *  主正文经原会话；查询职责边界见 docs/specs/wikilink-completion.md */
+  | {
+      kind: 'wikilink.query.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      status: 'ready' | 'unavailable'
+      updating?: boolean
+      reason?: 'no-workspace' | 'not-ready'
+      items?: WikilinkCandidateItem[]
+      total?: number
+      /** 清单代次（#377 T02）：本次查询所见的全文件清单代次——webview 拒收
+       *  跨代次的迟到追加页（清单已变时重新取首页，不拼接错位页） */
+      catalogGen?: number
+    }
+  /** 双链联想候选失效信号（#377 T02）：索引/全文件清单变更（文件增删改名、
+   *  排除变化、清单代次推进）后宿主广播；候选会话在场的 webview 自行重新
+   *  发起当前查询（同查询新 reqId——结果按既有守卫整体替换）。无载荷，
+   *  触发即失效——与 backlinks/outlinks 快照推送同一 onChange 广播点；
+   *  #379 T04 起标题会话同样消费（覆盖层冲刷含目标正文未保存变化） */
+  | { kind: 'wikilink.invalidate' }
+  /** 双链联想标题查询结果（#379 T04，wikilink.heading.query 的应答）：
+   *  reqId+generation+会话守卫与 wikilink.query.result 同构（webview 拒收
+   *  迟到响应）。status=unavailable 附真实原因：no-workspace=来源文档不在
+   *  任何工作区根内；target-not-found=目标按来源相对语义不可定位（含越界
+   *  ——不按部分文件名猜目标）；target-not-md=目标非 Markdown（标题联想仅
+   *  用于 Markdown）；read-error=目标读取失败（删除竞态/权限）。ready 时
+   *  items 为 ATX 口径枚举 + 前缀过滤后的候选（重复标题独立身份全部展示），
+   *  targetVersion 为所依据目标 TextDocument.version（磁盘读取为 0——观测
+   *  用，webview 不消费做乱序丢弃） */
+  | {
+      kind: 'wikilink.heading.query.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      status: 'ready' | 'unavailable'
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error'
+      targetVersion?: number
+      items?: WikilinkHeadingItem[]
+    }
+  /** 双链联想块查询结果（#380 T05，wikilink.block.query 的应答）：
+   *  reqId+generation+会话守卫与 wikilink.query.result 同构（webview 拒收
+   *  迟到响应）。status=unavailable 附真实原因（与标题查询同枚举——目标
+   *  不可定位/非 Markdown/读取失败）。ready 时 items 为块边界枚举 + 片段
+   *  过滤后的候选（无 ID 块照常列出，blockId 为空串；已有 ID 块带
+   *  blockId），targetVersion 为所依据目标 TextDocument.version（磁盘读取
+   *  为 0）——webview 接受无 ID 块时原样回传，宿主按版本核对淘汰「目标
+   *  正文在请求中改动」的旧候选 */
+  | {
+      kind: 'wikilink.block.query.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      status: 'ready' | 'unavailable'
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error'
+      targetVersion?: number
+      items?: WikilinkBlockItem[]
+    }
+  /** 双链联想无 ID 块接受结果（#380 T05，wikilink.block.accept 的应答）：
+   *  宿主按 V01 放行路径先在目标文档补写 ^id 再回包。ok=true 时 blockId
+   *  为最终 id（复用或新生成）；跨文档时宿主已写入目标（webview 随后本地
+   *  接受链接）；sameDoc=true（源与目标同一文档）时宿主只**计划**未写入
+   *  ——markerLfOffset（webview LF 系插入点）与 markerText（LF 形态）由
+   *  webview 并入同一笔编辑（一笔受控操作 = 一次 undo 同时含标记与链接，
+   *  V01 场景 2 验证路径）。ok=false 附 reason：真实状态分态（与查询同
+   *  枚举）+ target-changed（目标版本/块身份已变，淘汰本次接受）+
+   *  apply-failed（补写 WorkspaceEdit 失败——含只读/权限） */
+  | {
+      kind: 'wikilink.block.accept.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      ok: boolean
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' |
+        'target-changed' | 'apply-failed'
+      /** 最终块 id（ok=true 在场；复用或新生成） */
+      blockId?: string
+      /** 源与目标同一文档（ok=true 在场）：宿主未写入，标记由 webview 合笔 */
+      sameDoc?: boolean
+      /** 标记插入点（webview LF 系；sameDoc=true 在场） */
+      markerLfOffset?: number
+      /** 标记插入文本（LF 形态 '\n\n^id'；sameDoc=true 在场） */
+      markerText?: string
+      /** 默认显示文字（ok=true 在场；无手写别名时 webview 补用） */
+      alias?: string
+    }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
    *  （TextDocument.version，#224 变更刷新的版本基准）与 LF UTF-16 全文。
@@ -816,7 +921,11 @@ export type HostToWebview =
  *  面板级消息。P2-11（#288）起资源回包同信封定向回推（image.result /
  *  image.invalidate / image.paste.result / refresh.invalidated）——B 会话
  *  的资源结果按 portId 路由到嵌入实例，不广播根面板（reqId 空间隔离，
- *  不与 A 面板或其他 B occurrence 的管理器撞号）。 */
+ *  不与 A 面板或其他 B occurrence 的管理器撞号）。#381 T06 起双链联想
+ *  回包与失效信号同信封（wikilink.query.result / heading / block /
+ *  block.accept.result 与 wikilink.invalidate）——B 内候选会话的迟到守卫
+ *  （reqId+generation+会话三重）在 webview 实例侧，信封只保证定向回推
+ *  到来源端口。 */
 export type RefEditHostEvent = Extract<
   HostToWebview,
   | { kind: 'init' }
@@ -828,6 +937,11 @@ export type RefEditHostEvent = Extract<
   | { kind: 'image.invalidate' }
   | { kind: 'image.paste.result' }
   | { kind: 'refresh.invalidated' }
+  | { kind: 'wikilink.query.result' }
+  | { kind: 'wikilink.heading.query.result' }
+  | { kind: 'wikilink.block.query.result' }
+  | { kind: 'wikilink.block.accept.result' }
+  | { kind: 'wikilink.invalidate' }
 >
 
 /** webview → 宿主消息 */
@@ -897,8 +1011,8 @@ export type WebviewToHost =
       fsPath: string
     }
   /** 编辑通道出站：edit.request / conflict.report / composition.changed /
-   *  history.request / sync.request / conflict.action（链接/图片/资源消息
-   *  不混入本通道——完整接线归后续票） */
+   *  history.request / sync.request / conflict.action（资源与双链联想消息
+   *  经同通道入站——形态见 RefEditClientMessage） */
   | {
       kind: 'refEdit.message'
       panelSessionId: string
@@ -1523,6 +1637,92 @@ export type WebviewToHost =
   /** 反链快照拉取（#197）：面板 init 后与文档切换后请求当前文档的反链；
    *  宿主以 backlinks.snapshot 响应（索引变更后主动推送，不逐次应答） */
   | { kind: 'backlinks.get'; sessionId: string; docUri: string }
+  /** 双链联想查询（#376 T01）：光标进入新建闭合双链 `[[]]`/`![[]]` 的文件
+   *  字段时由 webview 发起。query 为目标区光标左侧前缀（再触发时自动取
+   *  左侧文本，不并右侧）；reqId 为实例内单调请求序号（应答配对），
+   *  generation 为查询代次（查询文本或字段身份变化即递增——宿主原样回显，
+   *  webview 借此拒收迟到响应）。#377 T02 起 offset 为分页起点（缺省 0，
+   *  首屏后继续加载——宿主按已定排序取 [offset, offset+limit)）。#381
+   *  T06 起全部 Live 实例接线（主正文经原会话；嵌入 B 经 refEdit.message
+   *  信封——docUri 为 B 规范 URI，宿主以 B 为来源执行） */
+  | {
+      kind: 'wikilink.query'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      query: string
+      /** 分页起点（#377 T02；缺省 0 = 首屏） */
+      offset?: number
+    }
+  /** 双链联想标题查询（#379 T04）：光标进入闭合双链的**标题锚点字段**
+   *  （`[[目标#前缀…]]`）时由 webview 发起。target 为文件字段原文（宿主按
+   *  来源相对语义解析——与跳转同一 resolveVaultLinkFile，不按部分文件名猜
+   *  目标）；query 为锚点字段光标左侧前缀；reqId/generation 守卫与
+   *  wikilink.query 同构。#381 T06 起嵌入 B 同通道出站（来源 = B） */
+  | {
+      kind: 'wikilink.heading.query'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      query: string
+      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标） */
+      target: string
+    }
+  /** 双链联想块查询（#380 T05）：光标进入闭合双链的**块锚点字段**
+   *  （`[[目标#^前缀…]]`）时由 webview 发起。target 为文件字段原文（宿主
+   *  按来源相对语义解析，不按部分文件名猜目标）；query 为块锚点字段光标
+   *  左侧前缀（按显示片段与已有 id 搜索）；reqId/generation 守卫与
+   *  wikilink.query 同构。#381 T06 起嵌入 B 同通道出站（来源 = B） */
+  | {
+      kind: 'wikilink.block.query'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      query: string
+      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标） */
+      target: string
+    }
+  /** 双链联想无 ID 块接受（#380 T05）：webview 选定无 ID 块时发起——宿主
+   *  先按目标写入守卫在目标文档补写 ^id（blockId 查重/生成/插入计划，
+   *  V01 放行路径），成功后回 wikilink.block.accept.result，webview 再本地
+   *  接受来源链接。line 为查询结果携带的块首行（1-based）；
+   *  targetVersion 为查询结果的版本基准（宿主核对：目标正文在请求中改动
+   *  即淘汰）。reqId/generation 守卫与查询族同构。已有 ID 块不走本消息
+   *  （webview 本地直接确认） */
+  | {
+      kind: 'wikilink.block.accept'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      /** 文件目标原文（宿主解析为明确 Markdown 目标） */
+      target: string
+      /** 块首行（1-based；查询结果身份回传） */
+      line: number
+      /** 查询结果的版本基准（目标版本核对） */
+      targetVersion: number
+    }
+  /** 双链联想块链接落地确认（#380 T05）：webview 在来源链接实际进入本地
+   *  文本（确认 dispatch 完成）后发出——宿主据此把「补 ID 记录」标记为
+   *  因果成立（撤销撤回协调只针对已落地的链接；reqId 与 accept 配对） */
+  | {
+      kind: 'wikilink.block.linked'
+      sessionId: string
+      docUri: string
+      reqId: number
+    }
+  /** 双链联想块接受放弃（#380 T05）：宿主补 ID 已成功但 webview 侧最终
+   *  未能插入链接（会话已变/字段漂移/确认失败）——宿主按撤回守卫尽力
+   *  移除本次新增标记（V01 场景 6 收尾），风险时保留 */
+  | {
+      kind: 'wikilink.block.cancel'
+      sessionId: string
+      docUri: string
+      reqId: number
+    }
   /** 反链条目跳转意图（#197）：点击面板条目 → 宿主打开来源文档（Vsidian
    *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
    *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
@@ -1584,8 +1784,12 @@ export type WebviewToHost =
  *  （直发按面板已送达目标比对，端口按 portId 绑定比对；后者即「经过宿主
  *  验证的目标绑定」）。P2-14（#291）起 codeblock.copy 同通道：嵌入内代码
  *  卡复制经端口进 B 会话走宿主剪贴板（webview 不触碰剪贴板权限；B 会话
- *  按自身 docUri 守卫 + B 文档 EOL 归一）。面板级消息（locale/settings/
- *  view 族）仍不得混入。 */
+ *  按自身 docUri 守卫 + B 文档 EOL 归一）。#381 T06 起双链联想查询族同
+ *  通道（wikilink.query / heading.query / block.query / block.accept /
+ *  block.linked / block.cancel）——宿主在 provider 层以 B 为来源文档执行
+ *  （文件清单、插入相对路径与块 ID 编排都以 B 目录/根为准），回包经
+ *  refEdit.push 信封定向回推。面板级消息（locale/settings/view 族）仍
+ *  不得混入。 */
 export type RefEditClientMessage = Extract<
   WebviewToHost,
   | { kind: 'edit.request' }
@@ -1600,6 +1804,12 @@ export type RefEditClientMessage = Extract<
   | { kind: 'image.paste' }
   | { kind: 'refresh.request' }
   | { kind: 'codeblock.copy' }
+  | { kind: 'wikilink.query' }
+  | { kind: 'wikilink.heading.query' }
+  | { kind: 'wikilink.block.query' }
+  | { kind: 'wikilink.block.accept' }
+  | { kind: 'wikilink.block.linked' }
+  | { kind: 'wikilink.block.cancel' }
 >
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
@@ -1654,6 +1864,73 @@ export interface OutlinkItemPayload {
   /** 出链标记在当前正文中的 LF 偏移区间 */
   start: number
   end: number
+}
+
+/** 双链联想候选条目载荷（#376 T01 wikilink.query.result.items；宿主排序
+ *  后限量回传的稳定契约）。高亮区间对应原始文字的 UTF-16 偏移 */
+/** 双链联想候选分页页大小（规格「首屏默认最多 50 项，可继续加载」；
+ *  宿主侧排序在截取前全量完成。webview 以「回包 items 数 < 页大小」为
+ *  穷尽信号（code-review F6 终态判据），两端共用同一常量） */
+export const WIKILINK_QUERY_LIMIT = 50
+
+export interface WikilinkCandidateItem {
+  /** 候选身份：目标绝对 fsPath（宿主真实磁盘形态） */
+  id: string
+  /** 文件名（含扩展名；候选主显示文字） */
+  name: string
+  /** 根内目录（`/` 分隔；根直下为空串——目录用于区分同名文件） */
+  dir: string
+  /** 根内相对路径（`/` 分隔） */
+  relPath: string
+  /** 来源文档相对插入路径（`/` 分隔、含扩展名；宿主已经 vaultLink
+   *  往返核对为所选目标身份，webview 确认时原样插入） */
+  insertPath: string
+  /** 默认显示文字（Markdown 去尾 .md，其余完整文件名） */
+  alias: string
+  /** 文件修改时间（毫秒；未知 0——已按排序契约消费，回传作观测） */
+  mtimeMs: number
+  /** 匹配分数（空查询恒 0；排序已在宿主完成，回传作观测） */
+  score: number
+  /** 文件名匹配高亮区间（空查询为空数组） */
+  labelHighlights: Array<{ start: number; end: number }>
+  /** 目录匹配高亮区间（空查询为空数组） */
+  dirHighlights: Array<{ start: number; end: number }>
+}
+
+/** 双链联想标题候选条目载荷（#379 T04 wikilink.heading.query.result.items；
+ *  宿主按 ATX 口径枚举、前缀过滤后回传的稳定契约——重复标题独立身份全部
+ *  展示不合并，duplicate 为规范化同名标记） */
+export interface WikilinkHeadingItem {
+  /** 候选身份：目标绝对 fsPath + '#' + 1-based 行号（同目标内行号唯一） */
+  id: string
+  /** 标题原文（写入 #锚点 的形态） */
+  heading: string
+  /** ATX 层级（1-6） */
+  level: number
+  /** 1-based 行号（「层级／位置」显示） */
+  line: number
+  /** 规范化同名项在场（选中时 toast 提示定位风险的依据；不改变跳转语义） */
+  duplicate: boolean
+  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用） */
+  alias: string
+}
+
+/** 双链联想块候选条目载荷（#380 T05 wikilink.block.query.result.items；
+ *  宿主按 shared/blockId 块边界枚举、片段过滤后回传的稳定契约——无 ID
+ *  块照常列出（blockId 空串），接受时经 wikilink.block.accept 先补写） */
+export interface WikilinkBlockItem {
+  /** 候选身份：目标绝对 fsPath + '#^' + 1-based 块首行行号（同目标内唯一） */
+  id: string
+  /** 已有块 id（三落点判定；无 ID 块为空串——确认走宿主补写通道） */
+  blockId: string
+  /** 显示文本片段（块首行 trim 后截断；搜索内容之一） */
+  snippet: string
+  /** 块首行（1-based；无 ID 块接受时的块身份核对键） */
+  line: number
+  /** 块行数（「位置」元信息显示） */
+  lineCount: number
+  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用） */
+  alias: string
 }
 
 /** 悬停预览规范目标身份（#218 hover.result.ok）：fsPath 为宿主侧真实
@@ -2199,6 +2476,21 @@ export interface PaintProbe {
     display: string | null
     separatorCount: number
     disabledCount: number
+  }
+  /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性
+   *  （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、
+   *  候选行计数与键盘高亮行/状态行文本（会话关闭时缺省）。jsdom 无布局
+   *  恒 false，只作真宿主集成断言依据 */
+  wikilinkSuggest?: {
+    visible: boolean
+    display: string | null
+    itemCount: number
+    activeIndex: number | null
+    activeText: string | null
+    statusText: string | null
+    /** 候选文件名文本序列（#377 T02——集成断言按名核对候选集合；与
+     *  itemCount 同源，顺序一致；浮层不在场为 null） */
+    names: string[] | null
   }
 }
 
@@ -2965,6 +3257,18 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       isNullOrString(v.contextMenu.display) &&
       isNonNegativeInt(v.contextMenu.separatorCount) &&
       isNonNegativeInt(v.contextMenu.disabledCount)
+    )) &&
+    (v.wikilinkSuggest === undefined || (
+      isObject(v.wikilinkSuggest) &&
+      typeof v.wikilinkSuggest.visible === 'boolean' &&
+      isNullOrString(v.wikilinkSuggest.display) &&
+      isNonNegativeInt(v.wikilinkSuggest.itemCount) &&
+      (v.wikilinkSuggest.activeIndex === undefined || v.wikilinkSuggest.activeIndex === null ||
+        isNonNegativeInt(v.wikilinkSuggest.activeIndex)) &&
+      (v.wikilinkSuggest.activeText === undefined || isNullOrString(v.wikilinkSuggest.activeText)) &&
+      (v.wikilinkSuggest.statusText === undefined || isNullOrString(v.wikilinkSuggest.statusText)) &&
+      (v.wikilinkSuggest.names === undefined || v.wikilinkSuggest.names === null ||
+        (Array.isArray(v.wikilinkSuggest.names) && v.wikilinkSuggest.names.every(isString)))
     ))
   )
 }
@@ -3434,13 +3738,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           return isWebviewToHost(inner)
         // P2-11 资源消息：复用直发形态的完整校验（内消息 docUri 须为 B 的
         // 规范 URI——宿主 B 会话按自身 docUri 守卫）；P2-14 codeblock.copy
-        // 同口径（复制文本经端口走宿主剪贴板）
+        // 同口径（复制文本经端口走宿主剪贴板）；#381 T06 双链联想查询族
+        // 同口径（宿主 provider 层以 B 为来源执行，回包经 refEdit.push 信封）
         case 'link.activate':
         case 'wikilink.activate':
         case 'image.request':
         case 'image.paste':
         case 'refresh.request':
         case 'codeblock.copy':
+        case 'wikilink.query':
+        case 'wikilink.heading.query':
+        case 'wikilink.block.query':
+        case 'wikilink.block.accept':
+        case 'wikilink.block.linked':
+        case 'wikilink.block.cancel':
           return isWebviewToHost(inner)
         default:
           return false
@@ -3830,6 +4141,37 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'backlinks.get':
       return isString(v.sessionId) && isString(v.docUri)
+    case 'wikilink.query':
+      // #376 T01 双链联想查询：会话身份 + 请求配对与代次 + 查询文本；
+      // #377 T02 起可选 offset（分页起点，缺省 0 = 首屏）
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) && isString(v.query) &&
+        (v.offset === undefined || isNonNegativeInt(v.offset))
+    case 'wikilink.heading.query':
+      // #379 T04 标题查询：会话身份 + 请求配对与代次 + 标题前缀 + 文件目标
+      // 原文（宿主解析——不按部分文件名猜目标）
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        isString(v.query) && isString(v.target)
+    case 'wikilink.block.query':
+      // #380 T05 块查询：会话身份 + 请求配对与代次 + 块前缀（片段/id 搜索）
+      // + 文件目标原文（宿主解析——不按部分文件名猜目标）
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        isString(v.query) && isString(v.target)
+    case 'wikilink.block.accept':
+      // #380 T05 无 ID 块接受：块首行 + 版本基准（目标写入守卫核对键）
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        isString(v.target) &&
+        typeof v.line === 'number' && Number.isInteger(v.line) && v.line >= 1 &&
+        isNonNegativeInt(v.targetVersion)
+    case 'wikilink.block.linked':
+      // #380 T05 块链接落地确认：reqId 与 accept 配对
+      return isString(v.sessionId) && isString(v.docUri) && isNonNegativeInt(v.reqId)
+    case 'wikilink.block.cancel':
+      // #380 T05 块接受放弃：reqId 与 accept 配对
+      return isString(v.sessionId) && isString(v.docUri) && isNonNegativeInt(v.reqId)
     case 'backlink.activate':
       return isString(v.sessionId) && isString(v.docUri) &&
         isString(v.sourceUri) && isNonNegativeInt(v.offset)
@@ -3943,7 +4285,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return false
     case 'refEdit.push': {
       // 编辑与资源回包白名单：inner 事件须为 RefEditHostEvent 合法形态
-      //（P2-11 起含 image.* / refresh.invalidated 定向回推）
+      //（P2-11 起含 image.* / refresh.invalidated 定向回推；#381 T06 起含
+      //  双链联回包与失效信号定向回推）
       if (
         !(typeof v.portId === 'string' && v.portId.length > 0) ||
         !(typeof v.fsPath === 'string' && v.fsPath.length > 0) ||
@@ -3963,6 +4306,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         case 'image.invalidate':
         case 'image.paste.result':
         case 'refresh.invalidated':
+          return isHostToWebview(inner)
+        case 'wikilink.query.result':
+        case 'wikilink.heading.query.result':
+        case 'wikilink.block.query.result':
+        case 'wikilink.block.accept.result':
+        case 'wikilink.invalidate':
           return isHostToWebview(inner)
         default:
           return false
@@ -4030,6 +4379,20 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         typeof v.inner === 'string' && v.inner.length > 0 &&
         (v.op === 'undo' || v.op === 'redo') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.domType':
+      // #381 T06 测试钩子：嵌入实例的浏览器输入路径注入
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        isString(v.text) &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.key':
+      // #381 T06 测试钩子：嵌入实例的 keydown 派发（key 名透传）
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        typeof v.key === 'string' && v.key.length > 0 &&
         (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
       )
     case 'embed.test.pasteImage':
@@ -4191,7 +4554,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isUiOperationId(v.op)
     case 'table.test.key':
       return v.key === 'tab' || v.key === 'shift-tab' || v.key === 'select-all' || v.key === 'enter' ||
-        v.key === 'backspace' || v.key === 'delete'
+        v.key === 'backspace' || v.key === 'delete' || v.key === 'down' || v.key === 'up' ||
+        v.key === 'escape' ||
+        (typeof v.key === 'string' && v.key.length === 1 && v.key !== ' ') // #378 T03：单字符键（# ^ | 等）
     case 'viewport.test.position':
       return (v.cursorLine === undefined || isNonNegativeInt(v.cursorLine)) &&
         (v.scrollNearLine === undefined || isNonNegativeInt(v.scrollNearLine)) &&
@@ -4373,6 +4738,62 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.updating === undefined || typeof v.updating === 'boolean') &&
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isOutlinkItemPayload)))
+      )
+    case 'wikilink.query.result':
+      // #376 T01 双链联想查询结果：会话身份 + 请求配对与代次回显 + 真实
+      // 状态分态（ready 附候选与命中总数；unavailable 附原因）；
+      // #377 T02 起可选 catalogGen（清单代次——分页守卫）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        (v.status === 'ready' || v.status === 'unavailable') &&
+        (v.updating === undefined || typeof v.updating === 'boolean') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'not-ready') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkCandidateItem))) &&
+        (v.total === undefined || isNonNegativeInt(v.total)) &&
+        (v.catalogGen === undefined || isNonNegativeInt(v.catalogGen))
+      )
+    case 'wikilink.invalidate':
+      // #377 T02 候选失效信号：无载荷广播（触发即失效）
+      return true
+    case 'wikilink.heading.query.result':
+      // #379 T04 标题查询结果：会话身份 + 请求配对与代次回显 + 真实状态
+      // 分态（ready 附候选与目标版本观测；unavailable 附原因枚举）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        (v.status === 'ready' || v.status === 'unavailable') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
+          v.reason === 'target-not-md' || v.reason === 'read-error') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkHeadingItem))) &&
+        (v.targetVersion === undefined || isNonNegativeInt(v.targetVersion))
+      )
+    case 'wikilink.block.query.result':
+      // #380 T05 块查询结果：守卫与标题查询同构（块候选含无 ID 块）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        (v.status === 'ready' || v.status === 'unavailable') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
+          v.reason === 'target-not-md' || v.reason === 'read-error') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkBlockItem))) &&
+        (v.targetVersion === undefined || isNonNegativeInt(v.targetVersion))
+      )
+    case 'wikilink.block.accept.result':
+      // #380 T05 无 ID 块接受结果：reqId/generation 守卫回显 + ok 分态
+      //（ok=true 附最终 id 与同文档合笔载荷；false 附原因枚举）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        typeof v.ok === 'boolean' &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
+          v.reason === 'target-not-md' || v.reason === 'read-error' ||
+          v.reason === 'target-changed' || v.reason === 'apply-failed') &&
+        (v.blockId === undefined || isString(v.blockId)) &&
+        (v.sameDoc === undefined || typeof v.sameDoc === 'boolean') &&
+        (v.markerLfOffset === undefined || isNonNegativeInt(v.markerLfOffset)) &&
+        (v.markerText === undefined || isString(v.markerText)) &&
+        (v.alias === undefined || isString(v.alias))
       )
     case 'hover.result':
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
@@ -4662,6 +5083,53 @@ function isOutlinkItemPayload(v: unknown): v is OutlinkItemPayload {
     typeof v.resolved === 'boolean' &&
     isNonNegativeInt(v.start) &&
     isNonNegativeInt(v.end)
+  )
+}
+
+/** #376 T01 双链联想候选条目载荷形态守卫 */
+function isWikilinkCandidateItem(v: unknown): v is WikilinkCandidateItem {
+  if (!isObject(v)) {
+    return false
+  }
+  const isMatch = (m: unknown): boolean =>
+    isObject(m) && isNonNegativeInt(m.start) && isNonNegativeInt(m.end)
+  return (
+    isString(v.id) &&
+    isString(v.name) &&
+    isString(v.dir) &&
+    isString(v.relPath) &&
+    isString(v.insertPath) &&
+    isString(v.alias) &&
+    typeof v.mtimeMs === 'number' && v.mtimeMs >= 0 &&
+    typeof v.score === 'number' &&
+    Array.isArray(v.labelHighlights) && v.labelHighlights.every(isMatch) &&
+    Array.isArray(v.dirHighlights) && v.dirHighlights.every(isMatch)
+  )
+}
+
+/** #379 T04 双链联想标题候选条目载荷形态守卫 */
+function isWikilinkHeadingItem(v: unknown): v is WikilinkHeadingItem {
+  return (
+    isObject(v) &&
+    isString(v.id) &&
+    isString(v.heading) &&
+    typeof v.level === 'number' && Number.isInteger(v.level) && v.level >= 1 && v.level <= 6 &&
+    typeof v.line === 'number' && Number.isInteger(v.line) && v.line >= 1 &&
+    typeof v.duplicate === 'boolean' &&
+    isString(v.alias)
+  )
+}
+
+/** #380 T05 块候选条目形态守卫 */
+function isWikilinkBlockItem(v: unknown): v is WikilinkBlockItem {
+  return (
+    isObject(v) &&
+    isString(v.id) &&
+    isString(v.blockId) &&
+    isString(v.snippet) &&
+    typeof v.line === 'number' && Number.isInteger(v.line) && v.line >= 1 &&
+    typeof v.lineCount === 'number' && Number.isInteger(v.lineCount) && v.lineCount >= 1 &&
+    isString(v.alias)
   )
 }
 

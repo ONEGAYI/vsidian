@@ -147,6 +147,7 @@ export const STYLE_CONTRACT_CATEGORIES: readonly StyleContractCategory[] = [
   { id: 'tooltip', domain: 'chrome', title: '悬停提示', titleKey: 'styleRef.category.tooltip', order: 15 },
   { id: 'toast', domain: 'chrome', title: '轻提示', titleKey: 'styleRef.category.toast', order: 16 },
   { id: 'rich-paste', domain: 'chrome', title: '粘贴询问', titleKey: 'styleRef.category.richPaste', order: 17 },
+  { id: 'wikilink-suggest', domain: 'chrome', title: '双链联想候选', titleKey: 'styleRef.category.wikilinkSuggest', order: 18 },
 ]
 
 /** 类目按 ID 索引（消费方查找用） */
@@ -3805,6 +3806,122 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
       "单元 richPasteInteraction：三种选择；浏览器 richPaste：模态背景/焦点与记忆回显；真宿主 richPasteHost：设置持久化"
     ],
     "introduced": "#306（2026-10-02）"
+  },
+
+  // ==== 双链联想候选（#376 T01）====
+  {
+    "id": "wikilink-suggest-popup",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "container",
+    "target": ".vsidian-wikilink-suggest",
+    "purpose": "双链联想候选浮层容器：锚定双链围栏开标记处，列出候选与真实状态（搜索中/无结果/未就绪/无工作区；标题阶段另有目标不可定位/非 Markdown/读取失败分态，#379 T04；块阶段同分态并含无 ID 块接受在途的「正在补写块 ID」状态，#380 T05）。",
+    "views": [
+      "live"
+    ],
+    "states": "主正文 Live 光标进入闭合双链 [[]]/![[]] 的目标字段（文件字段，或文件目标明确的标题/块锚点字段）时挂载；确认、Esc、移出字段或切模式即移除。空目标 #/^ 保持占位提示（不读目标文档）；文件目标明确时标题/块阶段出站查询（#380 T05 起块阶段同样）。",
+    "dom": "document.body 直接后代（不在 #app 内）；role=listbox、aria-label 取词条 wikilinkSuggest.list.ariaLabel；不夺正文焦点。两段结构：候选与状态行收进 .vsidian-wikilink-suggest-list 滚动区，底部固定 .vsidian-wikilink-suggest-hints 键提示条；max-height 留在容器（覆盖示例形态不变）。定位：水平以光标居中对齐（8px 视口钳制，光标坐标不可得回退字段起点），垂直贴字段行、越下缘翻到上方。",
+    "example": ".vsidian-wikilink-suggest { max-height: 320px; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：真实键盘出候选/高亮/确认/Esc（含标题阶段键盘与重名 toast、块阶段确认与补写在途，#380 T05）",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.visible（绘制层可见性）"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-item",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-item",
+    "purpose": "候选行：文件阶段以文件名为主文字、所在目录右对齐弱化呈现（区分同名文件）；标题阶段（#379 T04）以标题原文为主文字、层级/行号元信息右对齐弱化呈现；块阶段（#380 T05）以块首行文本片段为主文字（已有 id 以「 ^id」缀尾随行展示、无 ID 块照常列出）、块首行行号/行数元信息右对齐弱化呈现（同一弱化槽位语义）；匹配命中区间以子元素 .vsidian-wikilink-suggest-hl 标记（文件阶段）。",
+    "views": [
+      "live"
+    ],
+    "dom": "容器 role=listbox 的 option 行；行内子结构：.vsidian-wikilink-suggest-name（文件名/标题原文/块片段）、.vsidian-wikilink-suggest-dir（目录/标题层级行号/块行号行数元信息）、.vsidian-wikilink-suggest-hl（命中区间）。",
+    "example": ".vsidian-wikilink-suggest-item { padding: 2px 10px; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：候选行文件名/目录文本与命中高亮；标题行标题与 H{level}·行{line} 元信息；块行片段与 行{line}·{count}行 元信息（#380 T05）",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.itemCount 与 names（标题/块候选按名核对）"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-item-active",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-item-active",
+    "purpose": "键盘高亮行（Enter/Tab 确认的目标）：↑↓ 移动、有查询自动落在首项、空查询不高亮。",
+    "views": [
+      "live"
+    ],
+    "states": "与 .vsidian-wikilink-suggest-item 同元素叠加（active 修饰类）；aria-selected=true 同步。",
+    "dom": "候选行修饰类（不是独立节点）。",
+    "example": ".vsidian-wikilink-suggest-item-active { outline: 1px solid var(--vscode-focusBorder); }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：方向键移动与首项自动高亮",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.activeIndex/activeText"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-status",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-status",
+    "purpose": "状态行：搜索中、无匹配文件、索引未就绪、未打开文件夹、「仍在构建（部分结果）」与分页剩余提示（#377——「还有 N 项，按 ↓ 继续加载」）等真实状态的文字呈现；不可确认、不写正文。",
+    "views": [
+      "live"
+    ],
+    "states": "随查询结果/索引就绪态切换；与候选行共存（仍在构建时可用项继续候选）；命中总数未尽时列表尾部追加一行剩余计数（#377 触底续页加载的入口提示）。",
+    "dom": "列表滚动区（.vsidian-wikilink-suggest-list）直接子行（非 option 语义——占位不可确认）。",
+    "example": ".vsidian-wikilink-suggest-status { opacity: 0.7; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：无结果/未就绪状态行文案与分页剩余提示行",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.statusText"
+    ],
+    "introduced": "#376（2026-10-06）"
+  },
+  {
+    "id": "wikilink-suggest-hints",
+    "domain": "chrome",
+    "category": "wikilink-suggest",
+    "kind": "selector",
+    "target": ".vsidian-wikilink-suggest-hints",
+    "purpose": "底部键提示条（验收反馈 2026-10-06）：提示当前阶段仍可用的进阶键——file 阶段三段（# 链接标题、^ 链接文本块、| 指定显示文字）、heading 阶段两段（# 已消费）、block 阶段仅 | 一段；弱化小字、不参与滚动与确认。",
+    "views": [
+      "live"
+    ],
+    "states": "随会话阶段切换段落数；与候选/状态行共存（无结果、加载、占位时同样在场）。",
+    "dom": "容器直接末子行（在 .vsidian-wikilink-suggest-list 滚动区之外）；子 span 每键一段；顶 border-top 1px 实线与条目主体分割。",
+    "example": ".vsidian-wikilink-suggest-hints { border-top-color: var(--vscode-editorHoverWidget-border); }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 双链联想候选）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 wikilinkSuggest：三阶段提示段数、绘制层可见性与 border-top 实线分割",
+      "单元 wikilinkSuggestSession：阶段裁剪矩阵与容器末尾结构"
+    ],
+    "introduced": "#374（2026-10-06）"
   },
 ]
 
