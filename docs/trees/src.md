@@ -70,6 +70,7 @@ vsidian/
     │   ├── cssSnippetImports.ts    # CSS 片段依赖导入形态学单一事实源
     │   ├── cssSnippets.ts          # CSS 片段纯逻辑单一事实源
     │   ├── editorGuard.ts          # 默认编辑器守护共享纯逻辑
+    │   ├── editOrigin.ts           # T03可选编辑来源元数据
     │   ├── findOptions.ts          # 查找选项三开关单一事实源
     │   ├── formatOperations.ts     # 格式操作注册清单
     │   ├── frontmatterTable.ts     # frontmatter 表格化纯逻辑
