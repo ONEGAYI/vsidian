@@ -8,54 +8,56 @@ vsidian/
 └── src/ # 扩展源码
     ├── extension.ts # 扩展激活入口
     ├── host/        # 宿主端实现
-    │   ├── cssSnippetService.ts        # CSS 片段宿主权威服务
-    │   ├── cssSnippetWiring.ts         # CSS 片段 vscode 层装配
-    │   ├── diagramExportHost.ts        # 宿主图表导出执行壳
-    │   ├── diagramExportValidate.ts    # 图表导出载荷校验
-    │   ├── documentSession.ts          # 文档会话与写回同步
-    │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
-    │   ├── editorGuardService.ts       # 默认编辑器守护宿主服务
-    │   ├── editorGuardWiring.ts        # 默认编辑器守护 vscode 层装配
-    │   ├── findOptionsStore.ts         # 查找选项持久化存取
-    │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
-    │   ├── hoverDocAccess.ts           # 悬停预览文档访问纯逻辑
-    │   ├── hoverRefreshCoordinator.ts  # 引用视图刷新协调器（宿主）
-    │   ├── imageExportHost.ts          # 宿主图片导出执行壳
-    │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
-    │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
-    │   ├── imageRefreshCoordinator.ts  # 图片刷新协调器（provider 级）
-    │   ├── imageVersioning.ts          # 图片资源版本表纯逻辑
-    │   ├── jiebaResourceService.ts     # jieba 资源宿主服务（端口注入）
-    │   ├── jiebaResourceWiring.ts      # jieba 资源 vscode 层装配
-    │   ├── jiebaTar.ts                 # npm tarball 最小提取器
-    │   ├── keybindingService.ts        # 快捷键全局存储服务
-    │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
-    │   ├── pasteHistoryTracker.ts      # 宿主粘贴阶段历史解释
-    │   ├── proxyAgent.ts               # 外链抓取代理接入（CONNECT 隧道）
-    │   ├── refEditPorts.ts             # 引用编辑端口绑定注册表
-    │   ├── searchReveal.ts             # 搜索定位恢复纯逻辑（#318）
-    │   ├── settingsPage.ts             # 独立设置页面板装配
-    │   ├── settingsService.ts          # 宿主设置服务
-    │   ├── skeletonScreen.ts           # 骨架屏内联装配纯逻辑（#292）
-    │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
-    │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
-    │   ├── textAppearance/             # 宿主文本外观服务目录
+    │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
+    │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
+    │   ├── diagramExportHost.ts          # 宿主图表导出执行壳
+    │   ├── diagramExportValidate.ts      # 图表导出载荷校验
+    │   ├── documentSession.ts            # 文档会话与写回同步
+    │   ├── editorCsp.ts                  # 编辑器 CSP 装配纯模块（#130）
+    │   ├── editorGuardService.ts         # 默认编辑器守护宿主服务
+    │   ├── editorGuardWiring.ts          # 默认编辑器守护 vscode 层装配
+    │   ├── findOptionsStore.ts           # 查找选项持久化存取
+    │   ├── hostLocale.ts                 # 生效语言宿主装配解析帮手
+    │   ├── hoverDocAccess.ts             # 悬停预览文档访问纯逻辑
+    │   ├── hoverRefreshCoordinator.ts    # 引用视图刷新协调器（宿主）
+    │   ├── imageExportHost.ts            # 宿主图片导出执行壳
+    │   ├── imagePasteHost.ts             # 图片粘贴落盘执行壳（#161）
+    │   ├── imagePastePlan.ts             # 图片粘贴纯逻辑（#161）
+    │   ├── imageRefreshCoordinator.ts    # 图片刷新协调器（provider 级）
+    │   ├── imageVersioning.ts            # 图片资源版本表纯逻辑
+    │   ├── jiebaResourceService.ts       # jieba 资源宿主服务（端口注入）
+    │   ├── jiebaResourceWiring.ts        # jieba 资源 vscode 层装配
+    │   ├── jiebaTar.ts                   # npm tarball 最小提取器
+    │   ├── keybindingService.ts          # 快捷键全局存储服务
+    │   ├── linkTarget.ts                 # 宿主侧链接目标分类纯逻辑（#10）
+    │   ├── pasteHistoryTracker.ts        # 宿主粘贴阶段历史解释
+    │   ├── proxyAgent.ts                 # 外链抓取代理接入（CONNECT 隧道）
+    │   ├── refEditPorts.ts               # 引用编辑端口绑定注册表
+    │   ├── searchReveal.ts               # 搜索定位恢复纯逻辑（#318）
+    │   ├── settingsPage.ts               # 独立设置页面板装配
+    │   ├── settingsService.ts            # 宿主设置服务
+    │   ├── skeletonScreen.ts             # 骨架屏内联装配纯逻辑（#292）
+    │   ├── styleReferenceExport.ts       # 契约 JSON 导出宿主执行壳
+    │   ├── styleReferenceExportPlan.ts   # 契约 JSON 导出纯规划逻辑
+    │   ├── textAppearance/               # 宿主文本外观服务目录
     │   │   ├── appearanceService.ts # 外观服务 vscode 装配
     │   │   ├── themeResolution.ts   # 主题链解析与颜色管线
     │   │   ├── tmEngine.ts          # TM 引擎封装（同版同算法）
     │   │   └── tmScopeMatcher.ts    # TM scope 匹配器（官方移植）
-    │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
-    │   ├── vaultIndexMaintenance.ts    # 索引维护接线：排除持久化与操作编排
-    │   ├── vaultIndexOverlay.ts        # 索引覆盖层与反链查询纯逻辑（#197）
-    │   ├── vaultIndexService.ts        # 引用索引宿主服务（#197）
-    │   ├── vaultIndexWiring.ts         # 索引服务 vscode 层端口装配
-    │   ├── vaultLinkExtract.ts         # 出链抽取纯逻辑（#197）
-    │   ├── vaultRenameWiring.ts        # rename 引用更新装配（#199）
-    │   ├── viewCycle.ts                # 三态视图编排纯逻辑
-    │   ├── webLinkMetaService.ts       # 外链元信息受限抓取服务
-    │   ├── webMetaExtract.ts           # HTML 元信息非执行提取
-    │   ├── wikilinkHeadingSource.ts    # 标题联想宿主查询编排
-    │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
+    │   ├── textEditorProvider.ts         # 自定义文本编辑器提供者
+    │   ├── vaultIndexMaintenance.ts      # 索引维护接线：排除持久化与操作编排
+    │   ├── vaultIndexOverlay.ts          # 索引覆盖层与反链查询纯逻辑（#197）
+    │   ├── vaultIndexService.ts          # 引用索引宿主服务（#197）
+    │   ├── vaultIndexWiring.ts           # 索引服务 vscode 层端口装配
+    │   ├── vaultLinkExtract.ts           # 出链抽取纯逻辑（#197）
+    │   ├── vaultRenameWiring.ts          # rename 引用更新装配（#199）
+    │   ├── viewCycle.ts                  # 三态视图编排纯逻辑
+    │   ├── webLinkMetaService.ts         # 外链元信息受限抓取服务
+    │   ├── webMetaExtract.ts             # HTML 元信息非执行提取
+    │   ├── wikilinkBlockIdCoordinator.ts # 块 ID 撤回协调器
+    │   ├── wikilinkBlockSource.ts        # 块联想宿主查询编排
+    │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
+    │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
     │   ├── blockId.ts            # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts      # 变更重定位纯函数
@@ -113,6 +115,7 @@ vsidian/
     │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
     │   ├── webLink.ts            # 外链 URL 准入与归一（两端共享）
     │   ├── wikilink.ts           # 双链形态学单一事实源（#11）
+    │   ├── wikilinkBlock.ts      # 块候选纯逻辑（#380 T05）
     │   ├── wikilinkField.ts      # 双链目标字段阶段化识别与编辑计划
     │   ├── wikilinkHeading.ts    # 标题候选枚举与前缀过滤
     │   ├── wikilinkQuery.ts      # 双链联想查询评分移植

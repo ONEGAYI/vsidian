@@ -1464,16 +1464,16 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   // ==== 双链联想候选（#376 T01）====
   "wikilink-suggest-popup": {
-    "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04).",
-    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty # target and block anchors keep the placeholder hint (the target document is not read).",
+    "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04; the block stage shares those states and adds the 'inserting block ID' state while an ID-less block acceptance is in flight, #380 T05).",
+    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading/block anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty #/^ target keeps the placeholder hint (the target document is not read); with an explicit file target the heading/block stages query outbound (the block stage since #380 T05).",
     "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }
   },
   "wikilink-suggest-item": {
-    "purpose": "Candidate row: in the file stage the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; in the heading stage (#379 T04) the heading text is the primary text and the level/line meta is right-aligned in the same muted slot (duplicate headings keep separate rows, never merged); matched ranges are marked by the child .vsidian-wikilink-suggest-hl element (file stage).",
-    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name / heading text), .vsidian-wikilink-suggest-dir (folder / heading level-and-line meta), .vsidian-wikilink-suggest-hl (matched ranges).",
+    "purpose": "Candidate row: in the file stage the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; in the heading stage (#379 T04) the heading text is the primary text and the level/line meta is right-aligned in the same muted slot; in the block stage (#380 T05) the first-line snippet is the primary text (an existing id trails as ' ^id' on the same row and ID-less blocks are listed as-is) with the block start line / line-count meta right-aligned; matched ranges are marked by the child .vsidian-wikilink-suggest-hl element (file stage).",
+    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name / heading text / block snippet), .vsidian-wikilink-suggest-dir (folder / heading level-and-line / block line-and-count meta), .vsidian-wikilink-suggest-hl (matched ranges).",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }

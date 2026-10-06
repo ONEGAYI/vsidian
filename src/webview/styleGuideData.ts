@@ -5012,11 +5012,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "wikilink-suggest",
     "kind": "container",
     "target": ".vsidian-wikilink-suggest",
-    "purpose": "双链联想候选浮层容器：锚定双链围栏开标记处，列出候选与真实状态（搜索中/无结果/未就绪/无工作区；标题阶段另有目标不可定位/非 Markdown/读取失败分态，#379 T04）。",
+    "purpose": "双链联想候选浮层容器：锚定双链围栏开标记处，列出候选与真实状态（搜索中/无结果/未就绪/无工作区；标题阶段另有目标不可定位/非 Markdown/读取失败分态，#379 T04；块阶段同分态并含无 ID 块接受在途的「正在补写块 ID」状态，#380 T05）。",
     "views": [
       "live"
     ],
-    "states": "主正文 Live 光标进入闭合双链 [[]]/![[]] 的目标字段（文件字段，或文件目标明确的标题锚点字段）时挂载；确认、Esc、移出字段或切模式即移除。空目标 # 与块锚点保持占位提示（不读目标文档）。",
+    "states": "主正文 Live 光标进入闭合双链 [[]]/![[]] 的目标字段（文件字段，或文件目标明确的标题/块锚点字段）时挂载；确认、Esc、移出字段或切模式即移除。空目标 #/^ 保持占位提示（不读目标文档）；文件目标明确时标题/块阶段出站查询（#380 T05 起块阶段同样）。",
     "dom": "document.body 直接后代（不在 #app 内）；role=listbox、aria-label 取词条 wikilinkSuggest.list.ariaLabel；不夺正文焦点。",
     "example": ".vsidian-wikilink-suggest { max-height: 320px; }",
     "obsidian": {
@@ -5024,7 +5024,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 wikilinkSuggest：真实键盘出候选/高亮/确认/Esc（含标题阶段键盘与重名 toast）",
+      "浏览器 wikilinkSuggest：真实键盘出候选/高亮/确认/Esc（含标题阶段键盘与重名 toast、块阶段确认与补写在途，#380 T05）",
       "真宿主「双链联想候选」：paint.wikilinkSuggest.visible（绘制层可见性）"
     ],
     "introduced": "#376（2026-10-06）"
@@ -5035,19 +5035,19 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "wikilink-suggest",
     "kind": "selector",
     "target": ".vsidian-wikilink-suggest-item",
-    "purpose": "候选行：文件阶段以文件名为主文字、所在目录右对齐弱化呈现（区分同名文件）；标题阶段（#379 T04）以标题原文为主文字、层级/行号元信息右对齐弱化呈现（同一弱化槽位语义，重复标题独立行不合并）；匹配命中区间以子元素 .vsidian-wikilink-suggest-hl 标记（文件阶段）。",
+    "purpose": "候选行：文件阶段以文件名为主文字、所在目录右对齐弱化呈现（区分同名文件）；标题阶段（#379 T04）以标题原文为主文字、层级/行号元信息右对齐弱化呈现；块阶段（#380 T05）以块首行文本片段为主文字（已有 id 以「 ^id」缀尾随行展示、无 ID 块照常列出）、块首行行号/行数元信息右对齐弱化呈现（同一弱化槽位语义）；匹配命中区间以子元素 .vsidian-wikilink-suggest-hl 标记（文件阶段）。",
     "views": [
       "live"
     ],
-    "dom": "容器 role=listbox 的 option 行；行内子结构：.vsidian-wikilink-suggest-name（文件名/标题原文）、.vsidian-wikilink-suggest-dir（目录/标题层级行号元信息）、.vsidian-wikilink-suggest-hl（命中区间）。",
+    "dom": "容器 role=listbox 的 option 行；行内子结构：.vsidian-wikilink-suggest-name（文件名/标题原文/块片段）、.vsidian-wikilink-suggest-dir（目录/标题层级行号/块行号行数元信息）、.vsidian-wikilink-suggest-hl（命中区间）。",
     "example": ".vsidian-wikilink-suggest-item { padding: 2px 10px; }",
     "obsidian": {
       "counterpart": "无（Vsidian 双链联想候选）",
       "support": "none"
     },
     "verification": [
-      "浏览器 wikilinkSuggest：候选行文件名/目录文本与命中高亮；标题行标题与 H{level}·行{line} 元信息",
-      "真宿主「双链联想候选」：paint.wikilinkSuggest.itemCount 与 names（标题候选按名核对）"
+      "浏览器 wikilinkSuggest：候选行文件名/目录文本与命中高亮；标题行标题与 H{level}·行{line} 元信息；块行片段与 行{line}·{count}行 元信息（#380 T05）",
+      "真宿主「双链联想候选」：paint.wikilinkSuggest.itemCount 与 names（标题/块候选按名核对）"
     ],
     "introduced": "#376（2026-10-06）"
   },
@@ -6617,16 +6617,16 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "wikilink-suggest-popup": {
-    "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04).",
-    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty # target and block anchors keep the placeholder hint (the target document is not read).",
+    "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04; the block stage shares those states and adds the 'inserting block ID' state while an ID-less block acceptance is in flight, #380 T05).",
+    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading/block anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty #/^ target keeps the placeholder hint (the target document is not read); with an explicit file target the heading/block stages query outbound (the block stage since #380 T05).",
     "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }
   },
   "wikilink-suggest-item": {
-    "purpose": "Candidate row: in the file stage the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; in the heading stage (#379 T04) the heading text is the primary text and the level/line meta is right-aligned in the same muted slot (duplicate headings keep separate rows, never merged); matched ranges are marked by the child .vsidian-wikilink-suggest-hl element (file stage).",
-    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name / heading text), .vsidian-wikilink-suggest-dir (folder / heading level-and-line meta), .vsidian-wikilink-suggest-hl (matched ranges).",
+    "purpose": "Candidate row: in the file stage the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; in the heading stage (#379 T04) the heading text is the primary text and the level/line meta is right-aligned in the same muted slot; in the block stage (#380 T05) the first-line snippet is the primary text (an existing id trails as ' ^id' on the same row and ID-less blocks are listed as-is) with the block start line / line-count meta right-aligned; matched ranges are marked by the child .vsidian-wikilink-suggest-hl element (file stage).",
+    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name / heading text / block snippet), .vsidian-wikilink-suggest-dir (folder / heading level-and-line / block line-and-count meta), .vsidian-wikilink-suggest-hl (matched ranges).",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }

@@ -666,6 +666,54 @@ export type HostToWebview =
       targetVersion?: number
       items?: WikilinkHeadingItem[]
     }
+  /** 双链联想块查询结果（#380 T05，wikilink.block.query 的应答）：
+   *  reqId+generation+会话守卫与 wikilink.query.result 同构（webview 拒收
+   *  迟到响应）。status=unavailable 附真实原因（与标题查询同枚举——目标
+   *  不可定位/非 Markdown/读取失败）。ready 时 items 为块边界枚举 + 片段
+   *  过滤后的候选（无 ID 块照常列出，blockId 为空串；已有 ID 块带
+   *  blockId），targetVersion 为所依据目标 TextDocument.version（磁盘读取
+   *  为 0）——webview 接受无 ID 块时原样回传，宿主按版本核对淘汰「目标
+   *  正文在请求中改动」的旧候选 */
+  | {
+      kind: 'wikilink.block.query.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      status: 'ready' | 'unavailable'
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error'
+      targetVersion?: number
+      items?: WikilinkBlockItem[]
+    }
+  /** 双链联想无 ID 块接受结果（#380 T05，wikilink.block.accept 的应答）：
+   *  宿主按 V01 放行路径先在目标文档补写 ^id 再回包。ok=true 时 blockId
+   *  为最终 id（复用或新生成）；跨文档时宿主已写入目标（webview 随后本地
+   *  接受链接）；sameDoc=true（源与目标同一文档）时宿主只**计划**未写入
+   *  ——markerLfOffset（webview LF 系插入点）与 markerText（LF 形态）由
+   *  webview 并入同一笔编辑（一笔受控操作 = 一次 undo 同时含标记与链接，
+   *  V01 场景 2 验证路径）。ok=false 附 reason：真实状态分态（与查询同
+   *  枚举）+ target-changed（目标版本/块身份已变，淘汰本次接受）+
+   *  apply-failed（补写 WorkspaceEdit 失败——含只读/权限） */
+  | {
+      kind: 'wikilink.block.accept.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      ok: boolean
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' |
+        'target-changed' | 'apply-failed'
+      /** 最终块 id（ok=true 在场；复用或新生成） */
+      blockId?: string
+      /** 源与目标同一文档（ok=true 在场）：宿主未写入，标记由 webview 合笔 */
+      sameDoc?: boolean
+      /** 标记插入点（webview LF 系；sameDoc=true 在场） */
+      markerLfOffset?: number
+      /** 标记插入文本（LF 形态 '\n\n^id'；sameDoc=true 在场） */
+      markerText?: string
+      /** 默认显示文字（ok=true 在场；无手写别名时 webview 补用） */
+      alias?: string
+    }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
    *  （TextDocument.version，#224 变更刷新的版本基准）与 LF UTF-16 全文。
@@ -1605,6 +1653,59 @@ export type WebviewToHost =
       /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标） */
       target: string
     }
+  /** 双链联想块查询（#380 T05）：光标进入闭合双链的**块锚点字段**
+   *  （`[[目标#^前缀…]]`）时由 webview 发起。target 为文件字段原文（宿主
+   *  按来源相对语义解析，不按部分文件名猜目标）；query 为块锚点字段光标
+   *  左侧前缀（按显示片段与已有 id 搜索）；reqId/generation 守卫与
+   *  wikilink.query 同构。仅主正文接线（嵌入实例不出站） */
+  | {
+      kind: 'wikilink.block.query'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      query: string
+      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标） */
+      target: string
+    }
+  /** 双链联想无 ID 块接受（#380 T05）：webview 选定无 ID 块时发起——宿主
+   *  先按目标写入守卫在目标文档补写 ^id（blockId 查重/生成/插入计划，
+   *  V01 放行路径），成功后回 wikilink.block.accept.result，webview 再本地
+   *  接受来源链接。line 为查询结果携带的块首行（1-based）；
+   *  targetVersion 为查询结果的版本基准（宿主核对：目标正文在请求中改动
+   *  即淘汰）。reqId/generation 守卫与查询族同构。已有 ID 块不走本消息
+   *  （webview 本地直接确认） */
+  | {
+      kind: 'wikilink.block.accept'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      /** 文件目标原文（宿主解析为明确 Markdown 目标） */
+      target: string
+      /** 块首行（1-based；查询结果身份回传） */
+      line: number
+      /** 查询结果的版本基准（目标版本核对） */
+      targetVersion: number
+    }
+  /** 双链联想块链接落地确认（#380 T05）：webview 在来源链接实际进入本地
+   *  文本（确认 dispatch 完成）后发出——宿主据此把「补 ID 记录」标记为
+   *  因果成立（撤销撤回协调只针对已落地的链接；reqId 与 accept 配对） */
+  | {
+      kind: 'wikilink.block.linked'
+      sessionId: string
+      docUri: string
+      reqId: number
+    }
+  /** 双链联想块接受放弃（#380 T05）：宿主补 ID 已成功但 webview 侧最终
+   *  未能插入链接（会话已变/字段漂移/确认失败）——宿主按撤回守卫尽力
+   *  移除本次新增标记（V01 场景 6 收尾），风险时保留 */
+  | {
+      kind: 'wikilink.block.cancel'
+      sessionId: string
+      docUri: string
+      reqId: number
+    }
   /** 反链条目跳转意图（#197）：点击面板条目 → 宿主打开来源文档（Vsidian
    *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
    *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
@@ -1778,6 +1879,24 @@ export interface WikilinkHeadingItem {
   line: number
   /** 规范化同名项在场（选中时 toast 提示定位风险的依据；不改变跳转语义） */
   duplicate: boolean
+  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用） */
+  alias: string
+}
+
+/** 双链联想块候选条目载荷（#380 T05 wikilink.block.query.result.items；
+ *  宿主按 shared/blockId 块边界枚举、片段过滤后回传的稳定契约——无 ID
+ *  块照常列出（blockId 空串），接受时经 wikilink.block.accept 先补写） */
+export interface WikilinkBlockItem {
+  /** 候选身份：目标绝对 fsPath + '#^' + 1-based 块首行行号（同目标内唯一） */
+  id: string
+  /** 已有块 id（三落点判定；无 ID 块为空串——确认走宿主补写通道） */
+  blockId: string
+  /** 显示文本片段（块首行 trim 后截断；搜索内容之一） */
+  snippet: string
+  /** 块首行（1-based；无 ID 块接受时的块身份核对键） */
+  line: number
+  /** 块行数（「位置」元信息显示） */
+  lineCount: number
   /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用） */
   alias: string
 }
@@ -3995,6 +4114,25 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isString(v.sessionId) && isString(v.docUri) &&
         isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
         isString(v.query) && isString(v.target)
+    case 'wikilink.block.query':
+      // #380 T05 块查询：会话身份 + 请求配对与代次 + 块前缀（片段/id 搜索）
+      // + 文件目标原文（宿主解析——不按部分文件名猜目标）
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        isString(v.query) && isString(v.target)
+    case 'wikilink.block.accept':
+      // #380 T05 无 ID 块接受：块首行 + 版本基准（目标写入守卫核对键）
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        isString(v.target) &&
+        typeof v.line === 'number' && Number.isInteger(v.line) && v.line >= 1 &&
+        isNonNegativeInt(v.targetVersion)
+    case 'wikilink.block.linked':
+      // #380 T05 块链接落地确认：reqId 与 accept 配对
+      return isString(v.sessionId) && isString(v.docUri) && isNonNegativeInt(v.reqId)
+    case 'wikilink.block.cancel':
+      // #380 T05 块接受放弃：reqId 与 accept 配对
+      return isString(v.sessionId) && isString(v.docUri) && isNonNegativeInt(v.reqId)
     case 'backlink.activate':
       return isString(v.sessionId) && isString(v.docUri) &&
         isString(v.sourceUri) && isNonNegativeInt(v.offset)
@@ -4570,6 +4708,33 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkHeadingItem))) &&
         (v.targetVersion === undefined || isNonNegativeInt(v.targetVersion))
       )
+    case 'wikilink.block.query.result':
+      // #380 T05 块查询结果：守卫与标题查询同构（块候选含无 ID 块）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        (v.status === 'ready' || v.status === 'unavailable') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
+          v.reason === 'target-not-md' || v.reason === 'read-error') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkBlockItem))) &&
+        (v.targetVersion === undefined || isNonNegativeInt(v.targetVersion))
+      )
+    case 'wikilink.block.accept.result':
+      // #380 T05 无 ID 块接受结果：reqId/generation 守卫回显 + ok 分态
+      //（ok=true 附最终 id 与同文档合笔载荷；false 附原因枚举）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        typeof v.ok === 'boolean' &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
+          v.reason === 'target-not-md' || v.reason === 'read-error' ||
+          v.reason === 'target-changed' || v.reason === 'apply-failed') &&
+        (v.blockId === undefined || isString(v.blockId)) &&
+        (v.sameDoc === undefined || typeof v.sameDoc === 'boolean') &&
+        (v.markerLfOffset === undefined || isNonNegativeInt(v.markerLfOffset)) &&
+        (v.markerText === undefined || isString(v.markerText)) &&
+        (v.alias === undefined || isString(v.alias))
+      )
     case 'hover.result':
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
       // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起
@@ -4891,6 +5056,19 @@ function isWikilinkHeadingItem(v: unknown): v is WikilinkHeadingItem {
     typeof v.level === 'number' && Number.isInteger(v.level) && v.level >= 1 && v.level <= 6 &&
     typeof v.line === 'number' && Number.isInteger(v.line) && v.line >= 1 &&
     typeof v.duplicate === 'boolean' &&
+    isString(v.alias)
+  )
+}
+
+/** #380 T05 块候选条目形态守卫 */
+function isWikilinkBlockItem(v: unknown): v is WikilinkBlockItem {
+  return (
+    isObject(v) &&
+    isString(v.id) &&
+    isString(v.blockId) &&
+    isString(v.snippet) &&
+    typeof v.line === 'number' && Number.isInteger(v.line) && v.line >= 1 &&
+    typeof v.lineCount === 'number' && Number.isInteger(v.lineCount) && v.lineCount >= 1 &&
     isString(v.alias)
   )
 }

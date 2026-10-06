@@ -2395,6 +2395,16 @@ export class WebviewSyncController {
         this.live?.handleWikilinkHeadingQueryResult(message)
         break
       }
+      case 'wikilink.block.query.result': {
+        // #380 T05 块联想查询结果：守卫与路由同 wikilink.query.result
+        this.live?.handleWikilinkBlockQueryResult(message)
+        break
+      }
+      case 'wikilink.block.accept.result': {
+        // #380 T05 无 ID 块接受结果（宿主补写 ^id 后回包）：随实例路由
+        this.live?.handleWikilinkBlockAcceptResult(message)
+        break
+      }
       case 'wikilink.invalidate': {
         // #377 T02 候选失效信号：主正文实例的候选会话自行去抖重查
         this.live?.handleWikilinkInvalidate()

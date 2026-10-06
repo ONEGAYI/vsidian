@@ -9,7 +9,7 @@ import { WebviewSyncController } from '../../src/webview/syncController'
 import { EditorSelection } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
-import type { WebviewToHost, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
+import type { WebviewToHost, WikilinkBlockItem, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
 import '../../src/webview/main.css'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 
@@ -41,6 +41,16 @@ const lastQuery = (): Extract<WebviewToHost, { kind: 'wikilink.query' }> | undef
 const lastHeadingQuery = (): Extract<WebviewToHost, { kind: 'wikilink.heading.query' }> | undefined =>
   [...hostMessages].reverse().find((m) => (m as { kind?: string }).kind === 'wikilink.heading.query') as
     Extract<WebviewToHost, { kind: 'wikilink.heading.query' }> | undefined
+
+/** #380 T05：最新块查询出站 */
+const lastBlockQueryRef = (): Extract<WebviewToHost, { kind: 'wikilink.block.query' }> | undefined =>
+  [...hostMessages].reverse().find((m) => (m as { kind?: string }).kind === 'wikilink.block.query') as
+    Extract<WebviewToHost, { kind: 'wikilink.block.query' }> | undefined
+
+/** #380 T05：最新无 ID 块接受出站 */
+const lastBlockAcceptRef = (): Extract<WebviewToHost, { kind: 'wikilink.block.accept' }> | undefined =>
+  [...hostMessages].reverse().find((m) => (m as { kind?: string }).kind === 'wikilink.block.accept') as
+    Extract<WebviewToHost, { kind: 'wikilink.block.accept' }> | undefined
 
 Object.assign(window, {
   initDoc(text: string) {
@@ -138,6 +148,35 @@ Object.assign(window, {
       names: items.map((i) => i.querySelector('.vsidian-wikilink-suggest-name')?.textContent ?? ''),
       dirs: items.map((i) => i.querySelector('.vsidian-wikilink-suggest-dir')?.textContent ?? null),
     }
+  },
+  /** #380 T05：最新块查询出站 */
+  lastBlockQuery: lastBlockQueryRef,
+  /** 最新无 ID 块接受出站（#380 T05） */
+  lastBlockAccept: lastBlockAcceptRef,
+  /** 以最新出站块查询回灌应答（宿主扮演，#380 T05） */
+  respondBlockQuery(items: WikilinkBlockItem[], targetVersion = 3) {
+    const q = lastBlockQueryRef()
+    if (!q) throw new Error('缺少待应答的 wikilink.block.query')
+    controller.handleHostMessage({
+      kind: 'wikilink.block.query.result', sessionId: q.sessionId, docUri: q.docUri,
+      reqId: q.reqId, generation: q.generation, status: 'ready',
+      targetVersion, items,
+    })
+  },
+  /** 以最新出站 accept 回灌结果（宿主扮演，#380 T05） */
+  respondBlockAccept(payload:
+    | { ok: true; blockId: string; alias?: string; sameDoc?: boolean; markerLfOffset?: number; markerText?: string }
+    | { ok: false; reason: string }) {
+    const q = lastBlockAcceptRef()
+    if (!q) throw new Error('缺少待应答的 wikilink.block.accept')
+    controller.handleHostMessage({
+      kind: 'wikilink.block.accept.result', sessionId: q.sessionId, docUri: q.docUri,
+      reqId: q.reqId, generation: q.generation, ...payload,
+    } as Parameters<typeof controller.handleHostMessage>[0])
+  },
+  /** 出站消息清单（cancel/linked 断言用，#380 T05） */
+  hostMessages(): Array<{ kind: string; reqId?: number }> {
+    return hostMessages.map((m) => ({ kind: (m as { kind: string }).kind, reqId: (m as { reqId?: number }).reqId }))
   },
   /** 注入候选失效信号（#377 T02 wikilink.invalidate——宿主索引/清单变更广播） */
   sendInvalidate() {

@@ -679,6 +679,20 @@ export class LiveEditorInstance {
     this.wikilinkSuggest?.handleHeadingResult(message)
   }
 
+  /** 块查询结果入站（#380 T05；根按实例路由，控制器内同构守卫） */
+  handleWikilinkBlockQueryResult(
+    message: Extract<HostToWebview, { kind: 'wikilink.block.query.result' }>,
+  ): void {
+    this.wikilinkSuggest?.handleBlockResult(message)
+  }
+
+  /** 无 ID 块接受结果入站（#380 T05；控制器内 reqId/会话守卫与字段复核） */
+  handleWikilinkBlockAcceptResult(
+    message: Extract<HostToWebview, { kind: 'wikilink.block.accept.result' }>,
+  ): void {
+    this.wikilinkSuggest?.handleBlockAcceptResult(message)
+  }
+
   /** 候选失效信号（#377 T02）：索引/清单变更——控制器去抖后重发当前查询 */
   handleWikilinkInvalidate(): void {
     this.wikilinkSuggest?.handleInvalidate()

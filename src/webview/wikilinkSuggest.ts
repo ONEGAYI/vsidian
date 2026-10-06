@@ -41,6 +41,7 @@ import { EditorView, keymap, type ViewUpdate } from '@codemirror/view'
 import {
   findWikilinkTargetField,
   planWikilinkFieldEdit,
+  type WikilinkBlockPlanItem,
   type WikilinkHeadingPlanItem,
   type WikilinkPhaseKey,
   type WikilinkPlanItem,
@@ -49,6 +50,7 @@ import {
 import type {
   HostToWebview,
   WebviewToHost,
+  WikilinkBlockItem,
   WikilinkCandidateItem,
   WikilinkHeadingItem,
 } from '../shared/protocol'
@@ -101,7 +103,7 @@ interface SuggestOrigin {
   pipeAt: number
 }
 
-/** 最近一次接受的查询结果（真实状态面；阶段化——文件/标题） */
+/** 最近一次接受的查询结果（真实状态面；阶段化——文件/标题/块） */
 type SuggestResult =
   | {
       stage: 'file'
@@ -117,6 +119,25 @@ type SuggestResult =
       status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError'
       items: WikilinkHeadingItem[]
     }
+  | {
+      stage: 'block'
+      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError'
+      items: WikilinkBlockItem[]
+      /** 查询依据的目标版本（无 ID 块接受时回传——宿主核对淘汰旧候选） */
+      targetVersion: number
+    }
+
+/** 无 ID 块接受在途（#380 T05）：reqId 配对 + 接受键语义 + 会话身份快照。
+ *  在途期间浮层显示「正在补写块 ID…」；会话重建/关闭时发 cancel 让宿主
+ *  守卫撤回已补写的标记（V01 场景 6 收尾） */
+interface PendingBlockAccept {
+  reqId: number
+  /** 接受键（Enter/Tab=confirm、|=进显示文字）——结果到达时按原语义组计划 */
+  key: 'confirm' | '|'
+  /** 出站时的会话身份（cancel 时可能当前会话已重建，用快照） */
+  sessionId: string
+  docUri: string
+}
 
 /** 字段身份全量比较（去重守卫用）：任何边界变化（如光标右侧闭围栏被删）
  *  都产生新 origin——陈旧边界会让「移出字段关闭」误判在界内 */
@@ -145,6 +166,8 @@ export class WikilinkSuggestController {
   private activeId: string | null = null
   /** 确认/转阶段 dispatch 期间抑制识别（会话内编辑不得重开会话） */
   private confirming = false
+  /** 无 ID 块接受在途（#380 T05） */
+  private pendingBlockAccept: PendingBlockAccept | null = null
   private popup: HTMLDivElement | null = null
   private readonly deps: WikilinkSuggestDeps
   private readonly scrollListeners: Array<() => void> = []
@@ -181,6 +204,7 @@ export class WikilinkSuggestController {
       clearTimeout(this.invalidateTimer)
       this.invalidateTimer = undefined
     }
+    this.cancelPendingBlockAccept('closed')
     this.detachScrollListeners()
     this.removePopup()
     this.view = null
@@ -299,6 +323,118 @@ export class WikilinkSuggestController {
     this.render()
   }
 
+  /**
+   * 块查询结果入站（#380 T05）：reqId + generation + 会话三重守卫（与
+   * handleResult 同构），任一不符即迟到响应，拒收不改状态；仅块阶段会话
+   * 消费。无 ID 块照常列出（接受经宿主补写通道）；同一查询的重发帧按候选
+   * 身份保留手动高亮。
+   */
+  handleBlockResult(message: Extract<HostToWebview, { kind: 'wikilink.block.query.result' }>): void {
+    if (!this.session || this.lastReqId < 0 || message.reqId !== this.lastReqId) {
+      return
+    }
+    if (this.session.generation !== message.generation) {
+      return
+    }
+    const current = this.deps.getSession()
+    if (!current || current.sessionId !== message.sessionId || current.docUri !== message.docUri) {
+      return
+    }
+    if (this.deps.isSuspended() || !this.deps.isLiveActive()) {
+      return
+    }
+    if (this.session.origin.stage !== 'block') {
+      return
+    }
+    const sameQueryUpdate = this.result !== null
+    const prevActiveId = this.activeId
+    if (message.status === 'unavailable') {
+      this.result = {
+        stage: 'block',
+        status: message.reason === 'no-workspace' ? 'noWorkspace'
+          : message.reason === 'target-not-md' ? 'notMd'
+          : message.reason === 'read-error' ? 'readError'
+          : 'notFound',
+        items: [],
+        targetVersion: 0,
+      }
+    } else {
+      this.result = {
+        stage: 'block',
+        status: 'ready',
+        items: message.items ?? [],
+        targetVersion: message.targetVersion ?? 0,
+      }
+    }
+    this.applyHighlightRule(sameQueryUpdate, prevActiveId)
+    this.render()
+  }
+
+  /**
+   * 无 ID 块接受结果入站（#380 T05）：pendingBlockAccept 的 reqId 配对 +
+   * 会话身份/generation 守卫。ok=true → 复核字段身份后按原接受键组编辑
+   * 计划一笔 dispatch（sameDoc 时标记插入并入同一事务——一笔受控操作），
+   * 关闭会话并回 linked（因果登记）；字段漂移/守卫不符 → cancel 让宿主守卫
+   * 撤回；ok=false → toast 保留输入（会话与候选原样，可重试或 Esc）。
+   */
+  handleBlockAcceptResult(message: Extract<HostToWebview, { kind: 'wikilink.block.accept.result' }>): void {
+    const pending = this.pendingBlockAccept
+    if (pending === null || message.reqId !== pending.reqId) {
+      return
+    }
+    const current = this.deps.getSession()
+    if (!current || current.sessionId !== message.sessionId || current.docUri !== message.docUri) {
+      this.cancelPendingBlockAccept('stale-result')
+      return
+    }
+    if (this.deps.isSuspended() || !this.deps.isLiveActive()) {
+      this.cancelPendingBlockAccept('stale-result')
+      return
+    }
+    if (!message.ok) {
+      // 失败保留输入并提示（规格：不能先写虚构 ID；目标变化/只读/失败真实分态）
+      this.pendingBlockAccept = null
+      this.deps.showToast?.(t('wikilinkSuggest.toast.blockAcceptFailed'), 'warning')
+      this.render()
+      return
+    }
+    const blockId = message.blockId ?? ''
+    if (blockId === '') {
+      this.cancelPendingBlockAccept('stale-result')
+      return
+    }
+    const guard = this.guardedField()
+    if (!guard || guard.session.origin.stage !== 'block') {
+      // 字段身份漂移/会话已重建：放弃本地插入，宿主守卫撤回已补写标记
+      this.cancelPendingBlockAccept('stale-result')
+      return
+    }
+    const { view, field, head } = guard
+    const blockItem: WikilinkBlockPlanItem = { blockId, alias: message.alias ?? '' }
+    const plan = planWikilinkFieldEdit(field, pending.key, head, null, null, blockItem)
+    if (!plan) {
+      this.cancelPendingBlockAccept('stale-result')
+      return
+    }
+    const changes = [...plan.changes]
+    if (message.sameDoc === true &&
+      typeof message.markerLfOffset === 'number' && typeof message.markerText === 'string') {
+      // 同文档合笔：标记插入并入同一事务（一次 undo 同时回退标记与链接，
+      // V01 场景 2 验证路径；两段编辑不重叠——标记在块尾行行尾，链接在
+      // 当前行字段内；CM6 changes 乱序自动排序）
+      changes.push({ from: message.markerLfOffset, to: message.markerLfOffset, insert: message.markerText })
+    }
+    this.pendingBlockAccept = null
+    this.dispatchPlan(view, changes, plan.cursorTo)
+    this.close()
+    this.deps.send({
+      kind: 'wikilink.block.linked',
+      sessionId: pending.sessionId,
+      docUri: pending.docUri,
+      reqId: pending.reqId,
+    })
+  }
+
   /** 高亮规则（文件/标题共用）：更新帧按身份找位（身份消失时空查询回无
    *  高亮、非空查询取首项）；新查询首帧执行初始规则（空查询无高亮、非空
    *  高亮首项） */
@@ -333,7 +469,8 @@ export class WikilinkSuggestController {
       return
     }
     const stage = this.session.origin.stage
-    if (stage === 'block' || (stage === 'heading' && this.session.target.trim() === '')) {
+    // 占位无查询语义（空目标标题/块占位），出站只会污染 result 状态
+    if ((stage === 'block' || stage === 'heading') && this.session.target.trim() === '') {
       return
     }
     if (this.invalidateTimer !== undefined) {
@@ -346,23 +483,27 @@ export class WikilinkSuggestController {
         return
       }
       const curStage = session.origin.stage
-      if (curStage === 'block' || (curStage === 'heading' && session.target.trim() === '')) {
+      if ((curStage === 'block' || curStage === 'heading') && session.target.trim() === '') {
         return
       }
       this.morePending = false
       if (curStage === 'file') {
         this.sendQuery(session.query, session.generation, 0)
-      } else {
+      } else if (curStage === 'heading') {
         this.sendHeadingQuery(session.query, session.target, session.generation)
+      } else {
+        this.sendBlockQuery(session.query, session.target, session.generation)
       }
     }, 300)
   }
 
   /** 显式关闭（模式切换/暂停/实例收尾由调用方触发；幂等） */
   close(): void {
-    if (!this.session && this.result === null && !this.popup) {
+    if (!this.session && this.result === null && !this.popup && this.pendingBlockAccept === null) {
       return
     }
+    // 在途接受作废：宿主守卫撤回已补写标记（V01 场景 6 收尾语义）
+    this.cancelPendingBlockAccept('closed')
     this.session = null
     this.result = null
     this.activeIndex = null
@@ -423,7 +564,7 @@ export class WikilinkSuggestController {
     }
     const line = update.state.doc.lineAt(head)
     let query: string
-    /** 标题阶段的文件目标原文（#379 T04；宿主按来源相对语义解析） */
+    /** 标题/块阶段的文件目标原文（#379 T04/#380 T05；宿主按来源相对语义解析） */
     let target = ''
     if (origin.stage === 'file') {
       query = line.text.slice(origin.innerFrom - line.from, head - line.from)
@@ -431,12 +572,17 @@ export class WikilinkSuggestController {
       query = line.text.slice(origin.anchorFrom - line.from, head - line.from)
       target = line.text.slice(origin.innerFrom - line.from, origin.fileTo - line.from)
     } else {
-      query = '' // 块阶段（T05 前占位）：无查询语义
+      // 块阶段（#380 T05）：^ 后前缀按显示片段与已有 id 搜索
+      query = line.text.slice(origin.anchorFrom - line.from, head - line.from)
+      target = line.text.slice(origin.innerFrom - line.from, origin.fileTo - line.from)
     }
     const prev = this.session
     if (prev && sameOrigin(prev.origin, origin) && prev.query === query && prev.target === target) {
       return // 同字段同阶段同查询：不重复出站/重建（纯定位等价变更）
     }
+    // 会话重建（查询/字段身份变化）：在途的无 ID 块接受作废——宿主守卫
+    // 撤回已补写标记（用户已改变意图，旧结果不落正文）
+    this.cancelPendingBlockAccept('session-rebuilt')
     const generation = prev ? prev.generation + 1 : 1
     this.session = { origin, query, generation, target }
     this.result = null
@@ -447,8 +593,11 @@ export class WikilinkSuggestController {
     } else if (origin.stage === 'heading' && target.trim() !== '') {
       // 文件目标明确才读标题（空目标 # 保持占位——T03 语义不动，不猜默认文档）
       this.sendHeadingQuery(query, target, generation)
+    } else if (origin.stage === 'block' && target.trim() !== '') {
+      // #380 T05：文件目标明确才读块（空目标 ^ 保持占位，不猜默认文档）
+      this.sendBlockQuery(query, target, generation)
     } else {
-      this.lastReqId = -1 // 占位阶段不出站（块阶段 T05 / 空目标标题占位）
+      this.lastReqId = -1 // 占位阶段不出站（空目标标题/块占位）
     }
     this.render()
   }
@@ -545,17 +694,91 @@ export class WikilinkSuggestController {
     })
   }
 
+  /** 块查询出站（#380 T05）：target 为文件字段原文（宿主解析）；query 为
+   *  ^ 后的块字段前缀（按显示片段与已有 id 搜索） */
+  private sendBlockQuery(query: string, target: string, generation: number): void {
+    const current = this.deps.getSession()
+    if (!current) {
+      return
+    }
+    const reqId = ++this.reqSeq
+    this.lastReqId = reqId
+    this.lastReqOffset = 0
+    this.deps.send({
+      kind: 'wikilink.block.query',
+      sessionId: current.sessionId,
+      docUri: current.docUri,
+      reqId,
+      generation,
+      query,
+      target,
+    })
+  }
+
+  /** 无 ID 块接受出站（#380 T05）：宿主先按目标写入守卫补写 ^id（V01
+   *  放行路径——不能先写虚构 ID），成功回包后本地接受链接 */
+  private sendBlockAccept(
+    key: 'confirm' | '|',
+    line: number,
+    targetVersion: number,
+    target: string,
+    generation: number,
+  ): boolean {
+    const current = this.deps.getSession()
+    if (!current) {
+      return false
+    }
+    if (this.pendingBlockAccept !== null) {
+      return true // 防重：在途期间重复确认不再出站
+    }
+    const reqId = ++this.reqSeq
+    this.lastReqId = reqId
+    this.lastReqOffset = 0
+    this.pendingBlockAccept = { reqId, key, sessionId: current.sessionId, docUri: current.docUri }
+    this.deps.send({
+      kind: 'wikilink.block.accept',
+      sessionId: current.sessionId,
+      docUri: current.docUri,
+      reqId,
+      generation,
+      target,
+      line,
+      targetVersion,
+    })
+    this.render()
+    return true
+  }
+
+  /** 在途接受放弃（#380 T05）：宿主按撤回守卫尽力移除本次新增标记 */
+  private cancelPendingBlockAccept(reason: 'session-rebuilt' | 'closed' | 'stale-result'): void {
+    const pending = this.pendingBlockAccept
+    if (pending === null) {
+      return
+    }
+    this.pendingBlockAccept = null
+    this.deps.send({
+      kind: 'wikilink.block.cancel',
+      sessionId: pending.sessionId,
+      docUri: pending.docUri,
+      reqId: pending.reqId,
+    })
+    void reason
+  }
+
   // ---- 会话键位（候选控件按键；未命中一律落穿） ----
 
   private moveActive(delta: number): boolean {
     if (!this.session || !this.view || this.view.compositionStarted) {
       return false
     }
-    if (this.session.origin.stage === 'block') {
-      return false // 块占位阶段无候选可高亮（T05）：方向键落穿移动光标
+    if (this.pendingBlockAccept !== null) {
+      return true // 接受在途：方向键不移动高亮（等待宿主补写回包）
     }
     if (this.session.origin.stage === 'heading' && this.session.target.trim() === '') {
       return false // 空目标标题占位：方向键落穿
+    }
+    if (this.session.origin.stage === 'block' && this.session.target.trim() === '') {
+      return false // 空目标块占位：方向键落穿（#380 T05 保持占位口径）
     }
     if (!this.result || this.result.status !== 'ready' || this.result.items.length === 0) {
       return false
@@ -620,16 +843,24 @@ export class WikilinkSuggestController {
     return { view, session, field, head }
   }
 
-  /** Enter/Tab 确认：文件/标题阶段有可确认高亮项时接管（占位/无高亮落穿）；
+  /** Enter/Tab 确认：文件/标题/块阶段有可确认高亮项时接管（占位/无高亮落穿）；
    *  文件确认替换整个文件字段（保留已有锚点/显示文字），无分隔符时在目标区
-   *  末补默认别名；标题确认（#379 T04）替换整个锚点字段；光标落目标区
-   *  末端；一笔事务=一笔宿主撤销记录，确认后关闭会话 */
+   *  末补默认别名；标题确认（#379 T04）替换整个锚点字段；块确认（#380
+   *  T05）替换 ^ 后锚点字段——已有 ID 本地直确认，无 ID 经宿主补写 ^id
+   *  后回包再确认；光标落目标区末端；一笔事务=一笔宿主撤销记录，确认后
+   *  关闭会话 */
   private confirm(): boolean {
     const guard = this.guardedField()
     if (!guard) {
       return false
     }
-    const { view, field, head } = guard
+    const { view, session, field, head } = guard
+    if (field.stage === 'block') {
+      // #380 T05 块确认：有 ID 块本地直确认（零宿主往返）；无 ID 块出站
+      // accept——宿主先按目标写入守卫补写 ^id（不能先写虚构 ID），回包后
+      // 按原键语义组计划
+      return this.confirmBlock(view, session, field, head, 'confirm')
+    }
     if (field.stage === 'heading') {
       // #379 T04 标题确认：有真实高亮项时接管（占位/无高亮落穿）——替换
       // 整个锚点字段，无手写别名补文件名默认别名；选中规范化同名项以
@@ -652,7 +883,7 @@ export class WikilinkSuggestController {
       return true
     }
     if (field.stage !== 'file') {
-      return false // 块占位不是候选（T05）：Enter/Tab 继续按无可确认项处理（落穿）
+      return false // 防御：非文件/标题/块阶段的形态不接管
     }
     const item = this.result?.stage === 'file' && this.result.status === 'ready' && this.activeIndex !== null
       ? this.result.items[this.activeIndex]
@@ -674,6 +905,48 @@ export class WikilinkSuggestController {
     return this.activeIndex !== null ? this.result.items[this.activeIndex] ?? null : null
   }
 
+  /** 块阶段当前键盘高亮的候选（#380 T05；无会话/无结果/无高亮返回 null） */
+  private blockActiveItem(): WikilinkBlockItem | null {
+    if (this.result === null || this.result.stage !== 'block' || this.result.status !== 'ready') {
+      return null
+    }
+    return this.activeIndex !== null ? this.result.items[this.activeIndex] ?? null : null
+  }
+
+  /** 块候选确认执行（#380 T05，Enter/Tab 与 | 共用）：已有 ID 本地一笔
+   *  确认；无 ID 出站 accept（宿主补写 ^id 后回包再按原键组计划——
+   *  handleBlockAcceptResult）。无高亮/占位返回 false 落穿 */
+  private confirmBlock(
+    view: EditorView,
+    session: { origin: SuggestOrigin; query: string; generation: number; target: string },
+    field: SuggestOrigin,
+    head: number,
+    key: 'confirm' | '|',
+  ): boolean {
+    const item = this.blockActiveItem()
+    if (!item) {
+      return false // 占位/无高亮不是候选：Enter/Tab 继续按无可确认项处理（落穿）
+    }
+    if (item.blockId !== '') {
+      if (this.pendingBlockAccept !== null) {
+        return true
+      }
+      const plan = planWikilinkFieldEdit(field, key, head, null, null, {
+        blockId: item.blockId, alias: item.alias,
+      })
+      if (!plan) {
+        return false
+      }
+      this.dispatchPlan(view, plan.changes, plan.cursorTo)
+      this.close()
+      return true
+    }
+    // 无 ID 块：宿主先补写（V01 放行路径），在途浮层显示补写状态
+    const result = this.result
+    const targetVersion = result !== null && result.stage === 'block' ? result.targetVersion : 0
+    return this.sendBlockAccept(key, item.line, targetVersion, session.target, session.generation)
+  }
+
   /** #／^／| 转阶段（#378 T03；#379 T04 起 | 接受标题阶段真实高亮）：
    *  未命中阶段或无会话 return false 落穿普通输入；编辑计划一笔事务，
    *  产物阶段重建会话（转标题时按目标明确性出站查询）或关闭 */
@@ -693,10 +966,25 @@ export class WikilinkSuggestController {
       this.result?.stage === 'file' && this.result.status === 'ready' && this.activeIndex !== null
       ? this.result.items[this.activeIndex] ?? null
       : null
-    // #379 T04：| 在标题阶段接受真实高亮（替换锚点字段）；块阶段占位无高亮
+    // #379 T04：| 在标题阶段接受真实高亮（替换锚点字段）
     const headingItem: WikilinkHeadingPlanItem | null = key === '|' && field.stage === 'heading'
       ? this.headingActiveItem()
       : null
+    // #380 T05：| 在块阶段有真实高亮走确认路径（confirmBlock 内分已有 ID
+    // 本地确认/无 ID 宿主补写两路）；无高亮保持 T03 语义——保留锚点、
+    // 插 | 进显示文字（关闭候选）
+    if (key === '|' && field.stage === 'block') {
+      if (this.blockActiveItem() !== null) {
+        return this.confirmBlock(view, session, field, head, '|')
+      }
+      const fallback = planWikilinkFieldEdit(field, '|', head, null, null, null)
+      if (!fallback) {
+        return false
+      }
+      this.dispatchPlan(view, fallback.changes, fallback.cursorTo)
+      this.close()
+      return true
+    }
     const plan = planWikilinkFieldEdit(field, key, head, item, headingItem)
     if (!plan) {
       return false
@@ -707,25 +995,25 @@ export class WikilinkSuggestController {
       this.close()
       return true
     }
-    // 转阶段：在编辑后状态按新光标重识别，重建会话——标题阶段且文件目标
-    // 明确时出站标题查询（#379 T04；#^ 与空目标保持占位不出站）
+    // 转阶段：在编辑后状态按新光标重识别，重建会话——标题/块阶段且文件
+    // 目标明确时出站对应查询（#379 T04/#380 T05；空目标保持占位不出站）
     const next = this.recognizeAt(view.state, plan.cursorTo)
     if (!next || next.stage === 'file') {
       this.close()
       return true
     }
     const nextLine = view.state.doc.lineAt(plan.cursorTo)
-    const nextTarget = next.stage === 'heading'
-      ? nextLine.text.slice(next.innerFrom - nextLine.from, next.fileTo - nextLine.from)
-      : ''
+    const nextTarget = nextLine.text.slice(next.innerFrom - nextLine.from, next.fileTo - nextLine.from)
     this.session = { origin: next, query: '', generation: session.generation + 1, target: nextTarget }
     this.result = null
     this.activeIndex = null
     this.activeId = null
     if (next.stage === 'heading' && nextTarget.trim() !== '') {
       this.sendHeadingQuery('', nextTarget, session.generation + 1)
+    } else if (next.stage === 'block' && nextTarget.trim() !== '') {
+      this.sendBlockQuery('', nextTarget, session.generation + 1)
     } else {
-      this.lastReqId = -1 // 块占位（T05）/ 空目标标题占位不出站
+      this.lastReqId = -1 // 空目标标题/块占位不出站
     }
     this.render()
     return true
@@ -810,11 +1098,34 @@ export class WikilinkSuggestController {
     popup.replaceChildren()
     const result = this.result
     const stage = this.session.origin.stage
-    if (stage === 'heading' && this.session.target.trim() === '') {
+    const targetEmpty = this.session.target.trim() === ''
+    if (stage === 'heading' && targetEmpty) {
       // 空目标标题占位（T03 语义保持：不猜默认文档，仅提示；占位不可确认）
       popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.heading')))
-    } else if (stage === 'block') {
+    } else if (stage === 'block' && targetEmpty) {
+      // 空目标块占位（T03 语义保持：不猜默认文档；占位不可确认）
       popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.block')))
+    } else if (stage === 'block' && this.pendingBlockAccept !== null) {
+      // 无 ID 块接受在途（#380 T05）：宿主补写 ^id 中——占位状态行不可确认
+      popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockAccepting')))
+    } else if (stage === 'block' && result !== null && result.stage === 'block') {
+      // 块阶段（#380 T05）：失败真实状态或候选列表（无 ID 块照常列出）
+      if (result.status === 'noWorkspace') {
+        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.noWorkspace')))
+      } else if (result.status === 'notFound') {
+        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotFound')))
+      } else if (result.status === 'notMd') {
+        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotMd')))
+      } else if (result.status === 'readError') {
+        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockReadError')))
+      } else {
+        for (let i = 0; i < result.items.length; i++) {
+          popup.appendChild(this.buildBlockRow(result.items[i]!, i === this.activeIndex))
+        }
+        if (result.items.length === 0) {
+          popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockEmpty')))
+        }
+      }
     } else if (stage === 'heading' && result !== null && result.stage === 'heading') {
       // 标题阶段（#379 T04）：失败真实状态或候选列表（重复标题独立身份
       // 全部展示，层级/行号随行显示）；result 未到（null）显示加载
@@ -834,11 +1145,13 @@ export class WikilinkSuggestController {
           popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingEmpty')))
         }
       }
-    } else if (stage === 'heading' || result === null) {
-      // 标题/文件阶段的查询在途（结果未到）
+    } else if (stage === 'heading' || stage === 'block' || result === null) {
+      // 标题/块阶段的查询在途（结果未到）
       popup.appendChild(this.buildStatusRow(stage === 'heading'
         ? t('wikilinkSuggest.status.headingLoading')
-        : t('wikilinkSuggest.status.loading')))
+        : stage === 'block'
+          ? t('wikilinkSuggest.status.blockLoading')
+          : t('wikilinkSuggest.status.loading')))
     } else if (result.stage !== 'file') {
       // 防御：文件会话的 result 恒为 file 变体（阶段与结果同生不变式）；
       // 形态不符零渲染（不把未知变体当文件候选）
@@ -892,6 +1205,27 @@ export class WikilinkSuggestController {
     const meta = document.createElement('span')
     meta.className = WIKILINK_SUGGEST_CLASS_NAMES.dir
     meta.textContent = t('wikilinkSuggest.heading.meta', { level: item.level, line: item.line })
+    row.appendChild(meta)
+    return row
+  }
+
+  /** 块候选行（#380 T05）：主文字 = 块首行文本片段；右侧弱化段 = 块首行
+   *  行号与行数元信息（复用 dir 槽位类，样式规则零新增——契约描述按
+   *  「文件=目录、标题=层级行号、块=行号/行数」扩展） */
+  private buildBlockRow(item: WikilinkBlockItem, active: boolean): HTMLDivElement {
+    const row = document.createElement('div')
+    row.className = active
+      ? `${WIKILINK_SUGGEST_CLASS_NAMES.item} ${WIKILINK_SUGGEST_CLASS_NAMES.itemActive}`
+      : WIKILINK_SUGGEST_CLASS_NAMES.item
+    row.setAttribute('role', 'option')
+    row.setAttribute('aria-selected', active ? 'true' : 'false')
+    const name = document.createElement('span')
+    name.className = WIKILINK_SUGGEST_CLASS_NAMES.name
+    name.textContent = item.blockId !== '' ? `${item.snippet} ^${item.blockId}` : item.snippet
+    row.appendChild(name)
+    const meta = document.createElement('span')
+    meta.className = WIKILINK_SUGGEST_CLASS_NAMES.dir
+    meta.textContent = t('wikilinkSuggest.block.meta', { line: item.line, count: item.lineCount })
     row.appendChild(meta)
     return row
   }

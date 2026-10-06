@@ -1802,5 +1802,23 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'v01-fail-b.md'), 'v01 失败目标段行一\n失败目标段行二\n', 'utf8')
   writeFileSync(path.join(wsDir, 'v01-close-a.md'), '# V01 关闭甲\n\n关闭甲正文与落点锚。\n', 'utf8')
   writeFileSync(path.join(wsDir, 'v01-close-b.md'), 'v01 关闭目标段行一\n关闭目标段行二\n', 'utf8')
+  // #380 T05 块联想端到端：来源 A + 跨文档目标 B（无 id 块/已有 id 块/列表/
+  // 围栏）+ 同文档目标（合笔路径）
+  writeFileSync(path.join(wsDir, 't05-a.md'), '# T05 来源\n\n来源落点锚\n', 'utf8')
+  writeFileSync(path.join(wsDir, 't05-b.md'), [
+    't05 跨文档目标段落行一',
+    '目标段落行二',
+    '',
+    '已有 id 段落 ^t05keep',
+    '',
+    '- 列表项一',
+    '- 列表项二',
+    '',
+    '```js',
+    'const x = 1',
+    '```',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 't05-same.md'), 't05 同文档段落行一\n同文档段落行二\n\n同文档落点锚\n', 'utf8')
   return { largeDocLines: LARGE_DOC_LINES }
 }

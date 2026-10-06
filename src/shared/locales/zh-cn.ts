@@ -48,6 +48,23 @@ export const zhCn: Record<MessageKey, string> = {
   'wikilinkSuggest.status.headingReadError': '目标文档读取失败——可继续手写锚点',
   'wikilinkSuggest.heading.meta': 'H{level} · 行 {line}',
   'wikilinkSuggest.toast.duplicateHeading': '存在多个同名标题，跳转将定位到第一个',
+  // #380 T05：块阶段状态与候选（无 ID 块照常列出；接受经宿主补写 ^id）
+  'wikilinkSuggest.status.blockLoading': '正在读取块…',
+  'wikilinkSuggest.status.blockEmpty': '没有匹配的块',
+  'wikilinkSuggest.status.blockNotFound': '未找到目标文档——可继续手写块引用',
+  'wikilinkSuggest.status.blockNotMd': '目标不是 Markdown 文件——无块候选',
+  'wikilinkSuggest.status.blockReadError': '目标文档读取失败——可继续手写块引用',
+  'wikilinkSuggest.status.blockAccepting': '正在补写块 ID…',
+  'wikilinkSuggest.block.meta': '行 {line} · {count} 行',
+  'wikilinkSuggest.toast.blockAcceptFailed': '未能补写块 ID——已保留输入',
+  // #380 T05：宿主侧撤回协调提示（来源撤销时尽力撤回目标新增标记）
+  'host.wikilinkBlockIdKept': '自动新增的块标记 ^{id} 未撤回：{reason}',
+  'host.wikilinkBlockIdKeptReason.versionChanged': '目标文档已变化',
+  'host.wikilinkBlockIdKeptReason.markerChanged': '块标记已变化',
+  'host.wikilinkBlockIdKeptReason.newUse': '已有其他引用',
+  'host.wikilinkBlockIdKeptReason.applyFailed': '写入失败',
+  'host.wikilinkBlockIdKeptReason.notFound': '目标不可读',
+  'host.wikilinkBlockIdRebuildFailed': '未能重建块标记 ^{id}——链接可能失效',
   'styleRef.category.richPaste': '粘贴询问',
   // ---- settings.（设置页框架）----
   'settings.pageTitle': 'Vsidian 设置',

@@ -52,6 +52,25 @@ export const en = {
   'wikilinkSuggest.status.headingReadError': 'Failed to read target document — type the anchor manually',
   'wikilinkSuggest.heading.meta': 'H{level} · line {line}',
   'wikilinkSuggest.toast.duplicateHeading': 'Duplicate headings exist; navigation goes to the first match',
+  // #380 T05: block-stage states and candidates (blocks without an ID listed
+  // as usual; accepting goes through host-side ^id insertion)
+  'wikilinkSuggest.status.blockLoading': 'Loading blocks…',
+  'wikilinkSuggest.status.blockEmpty': 'No matching blocks',
+  'wikilinkSuggest.status.blockNotFound': 'Target document not found — type the block reference manually',
+  'wikilinkSuggest.status.blockNotMd': 'Target is not a Markdown file — no block candidates',
+  'wikilinkSuggest.status.blockReadError': 'Failed to read target document — type the block reference manually',
+  'wikilinkSuggest.status.blockAccepting': 'Inserting block ID…',
+  'wikilinkSuggest.block.meta': 'line {line} · {count} lines',
+  'wikilinkSuggest.toast.blockAcceptFailed': 'Failed to insert the block ID — input kept',
+  // #380 T05: host-side withdraw coordination notices (best-effort removal of
+  // the auto-added marker when the origin link is undone)
+  'host.wikilinkBlockIdKept': 'Auto-added block marker ^{id} was kept: {reason}',
+  'host.wikilinkBlockIdKeptReason.versionChanged': 'target document changed',
+  'host.wikilinkBlockIdKeptReason.markerChanged': 'block marker changed',
+  'host.wikilinkBlockIdKeptReason.newUse': 'other references exist',
+  'host.wikilinkBlockIdKeptReason.applyFailed': 'write failed',
+  'host.wikilinkBlockIdKeptReason.notFound': 'target unreadable',
+  'host.wikilinkBlockIdRebuildFailed': 'Failed to rebuild block marker ^{id} — the link may be broken',
   'styleRef.category.richPaste': 'Paste prompt',
   // ---- settings.（设置页框架：标题、搜索、分类、保存状态、空状态）----
   /** 设置页面板标题（宿主 createWebviewPanel 标题与页面 h1 同源） */

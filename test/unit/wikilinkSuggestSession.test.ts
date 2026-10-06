@@ -12,7 +12,7 @@ import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
-import type { WebviewToHost, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
+import type { WebviewToHost, WikilinkBlockItem, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
 
 if (Range.prototype.getClientRects === undefined) {
   ;(Range.prototype as unknown as { getClientRects(): DOMRectList }).getClientRects =
@@ -77,6 +77,13 @@ const headingQueries = (sent: WebviewToHost[]) =>
     m.kind === 'wikilink.heading.query')
 
 const lastHeadingQuery = (sent: WebviewToHost[]) => headingQueries(sent).at(-1)
+
+/** #380 T05：块查询出站记录 */
+const blockQueries = (sent: WebviewToHost[]) =>
+  sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.block.query' }> =>
+    m.kind === 'wikilink.block.query')
+
+const lastBlockQuery = (sent: WebviewToHost[]) => blockQueries(sent).at(-1)
 
 /** 以最新出站标题查询回灌应答（宿主扮演；#379 T04） */
 function respondHeading(
@@ -249,13 +256,35 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
     }
   })
 
-  it('块锚点字段重编辑显示块占位', () => {
+  it('块锚点字段重编辑：有明确目标出站块查询（#380 T05；空目标才占位）', () => {
     const { controller, sent, view } = setup('[[方案.md#^id]]')
     try {
       locate(controller, 10) // id 中部
       deleteAt(view, 10, 11)
-      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.placeholder.block'])
-      expect(queries(sent)).toHaveLength(0)
+      expect(view.state.doc.toString()).toBe('[[方案.md#^i]]')
+      const p = popupState()
+      expect(p.open).toBe(true)
+      expect(p.statusText).toBe(zhCn['wikilinkSuggest.status.blockLoading'])
+      const bq = lastBlockQuery(sent)
+      expect(bq).toBeDefined()
+      expect(bq!.query).toBe('i')
+      expect(bq!.target).toBe('方案.md')
+      expect(queries(sent)).toHaveLength(0) // 文件查询不复发
+      expect(headingQueries(sent)).toHaveLength(0) // 标题查询不复发
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('空目标块锚点保持占位不出站（T03 语义不动）', () => {
+    const { controller, sent, view } = setup('[[#^id]]')
+    try {
+      locate(controller, 5) // id 中部
+      deleteAt(view, 5, 6)
+      const p = popupState()
+      expect(p.open).toBe(true)
+      expect(p.statusText).toBe(zhCn['wikilinkSuggest.placeholder.block'])
+      expect(blockQueries(sent)).toHaveLength(0)
     } finally {
       controller.dispose()
     }
@@ -342,8 +371,8 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
     }
   })
 
-  it('标题占位阶段按 ^：不重复补 #，只补 ^ 转块占位', () => {
-    const { controller, view } = setup('[[方案.md#]]')
+  it('标题占位阶段按 ^：不重复补 #，只补 ^ 转块阶段（目标明确出站块查询）', () => {
+    const { controller, sent, view } = setup('[[方案.md#]]')
     try {
       locate(controller, 8)
       typeAt(view, 8, 'x')
@@ -351,13 +380,15 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
       press(view, '^')
       expect(view.state.doc.toString()).toBe('[[方案.md#^]]')
       expect(view.state.selection.main.head).toBe('[[方案.md#^'.length)
-      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.placeholder.block'])
+      // #380 T05：目标明确即出站块查询（空目标才保持占位）
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.blockLoading'])
+      expect(lastBlockQuery(sent)?.target).toBe('方案.md')
     } finally {
       controller.dispose()
     }
   })
 
-  it('高亮文件后 ^：补全文件一次形成 #^', () => {
+  it('高亮文件后 ^：补全文件一次形成 #^（目标明确出站块查询）', () => {
     const { controller, sent, view } = setup('[[方]]')
     try {
       locate(controller, 3)
@@ -365,7 +396,8 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
       respond(controller, sent, [FANGAN])
       press(view, '^')
       expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^]]')
-      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.placeholder.block'])
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.blockLoading'])
+      expect(lastBlockQuery(sent)?.target).toBe('../资料/方案.md')
     } finally {
       controller.dispose()
     }
@@ -858,6 +890,244 @@ describe('标题阶段重名提示与 toast（#379 T04）', () => {
       expect(document.querySelector('.vsidian-toast')).toBeNull()
     } finally {
       cleanup()
+    }
+  })
+})
+
+describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () => {
+  const BLOCK_HAS_ID: WikilinkBlockItem = {
+    id: 'C:\vault\资料\方案.md#^2', blockId: 'keep01', snippet: '预算编制说明',
+    line: 2, lineCount: 1, alias: '方案',
+  }
+  const BLOCK_NO_ID: WikilinkBlockItem = {
+    id: 'C:\vault\资料\方案.md#^4', blockId: '', snippet: '会议记录',
+    line: 4, lineCount: 2, alias: '方案',
+  }
+
+  /** 以最新出站块查询回灌应答（宿主扮演） */
+  function respondBlock(
+    c: ReturnType<typeof setup>['controller'],
+    sent: WebviewToHost[],
+    items: WikilinkBlockItem[],
+    targetVersion = 3,
+  ) {
+    const q = lastBlockQuery(sent)
+    if (!q) {
+      throw new Error('缺少待应答的 wikilink.block.query')
+    }
+    c.handleHostMessage({
+      kind: 'wikilink.block.query.result', sessionId: q.sessionId, docUri: q.docUri,
+      reqId: q.reqId, generation: q.generation, status: 'ready', targetVersion, items,
+    })
+  }
+
+  const accepts = (sent: WebviewToHost[]) =>
+    sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.block.accept' }> =>
+      m.kind === 'wikilink.block.accept')
+  const lastAccept = (sent: WebviewToHost[]) => accepts(sent).at(-1)
+  const cancels = (sent: WebviewToHost[]) =>
+    sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.block.cancel' }> =>
+      m.kind === 'wikilink.block.cancel')
+  const linkeds = (sent: WebviewToHost[]) =>
+    sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.block.linked' }> =>
+      m.kind === 'wikilink.block.linked')
+
+  /** 以最新出站 accept 回灌结果（宿主扮演） */
+  function respondAccept(
+    c: ReturnType<typeof setup>['controller'],
+    sent: WebviewToHost[],
+    payload: { ok: true; blockId: string; alias?: string; sameDoc?: boolean; markerLfOffset?: number; markerText?: string } |
+      { ok: false; reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' | 'target-changed' | 'apply-failed' },
+  ) {
+    const q = lastAccept(sent)
+    if (!q) {
+      throw new Error('缺少待应答的 wikilink.block.accept')
+    }
+    c.handleHostMessage({
+      kind: 'wikilink.block.accept.result', sessionId: q.sessionId, docUri: q.docUri,
+      reqId: q.reqId, generation: q.generation, ...payload,
+    })
+  }
+
+  /** 块阶段会话开启（输入触发重开）并回灌候选 */
+  function openBlockSession(
+    controller: ReturnType<typeof setup>['controller'],
+    sent: WebviewToHost[],
+    view: ReturnType<typeof setup>['view'],
+    caret: number,
+    items: WikilinkBlockItem[],
+    targetVersion = 3,
+  ) {
+    locate(controller, caret)
+    typeAt(view, caret, 'x')
+    respondBlock(controller, sent, items, targetVersion)
+  }
+
+  it('块候选渲染：snippet 主文字、行号/行数元信息、已有 id 随行展示', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_HAS_ID, BLOCK_NO_ID])
+      const p = popupState()
+      expect(p.open).toBe(true)
+      expect(p.itemCount).toBe(2)
+      expect(p.activeIndex).toBe(0) // 非空查询高亮首项
+      const names = [...document.querySelectorAll('.vsidian-wikilink-suggest .vsidian-wikilink-suggest-name')]
+        .map((n) => n.textContent)
+      expect(names).toEqual(['预算编制说明 ^keep01', '会议记录'])
+      const metas = [...document.querySelectorAll('.vsidian-wikilink-suggest .vsidian-wikilink-suggest-dir')]
+        .map((n) => n.textContent)
+      expect(metas).toEqual(['行 2 · 1 行', '行 4 · 2 行'])
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('已有 ID 块 Enter：本地直接确认（零宿主往返），产物 #^id + 默认别名', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_HAS_ID])
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^keep01|方案]]')
+      expect(view.state.selection.main.head).toBe('[[../资料/方案.md#^keep01'.length)
+      expect(popupState().open).toBe(false)
+      expect(accepts(sent)).toHaveLength(0) // 已有 id 不走宿主补写
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('无 ID 块 Enter：先出站 accept（带行号与版本基准），回包后写入并回 linked', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID], 7)
+      press(view, 'Enter')
+      // 在途：浮层显示补写状态、无候选确认
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.blockAccepting'])
+      const q = lastAccept(sent)
+      expect(q).toBeDefined()
+      expect(q!.line).toBe(4)
+      expect(q!.targetVersion).toBe(7)
+      expect(q!.target).toBe('../资料/方案.md')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^x]]') // 未写正文
+      // 回包（跨文档：宿主已补写）→ 本地接受 + linked
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abc123|方案]]')
+      expect(popupState().open).toBe(false)
+      expect(linkeds(sent)).toHaveLength(1)
+      expect(linkeds(sent)[0]!.reqId).toBe(q!.reqId)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('无 ID 块接受失败：toast 提示并保留输入（候选原样、可重试）', () => {
+    const sent: WebviewToHost[] = []
+    const bridge: VsCodeBridge = {
+      postMessage: (message) => sent.push(message as WebviewToHost),
+      getState: () => undefined,
+      setState: () => {},
+    }
+    const controller = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    document.body.appendChild(parent) // toast 容器随 mount parent 创建——需在文档内
+    controller.mount(parent, [keymap.of(defaultKeymap)])
+    controller.handleHostMessage({ kind: 'init', sessionId: 't05-session', docUri: 'file:///t05.md', version: 1, text: '[[../资料/方案.md#^]]' })
+    const view = controller.getView()!
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID])
+      press(view, 'Enter')
+      respondAccept(controller, sent, { ok: false, reason: 'target-changed' })
+      const toast = document.querySelector<HTMLElement>('.vsidian-toast')
+      expect(toast?.textContent).toBe(zhCn['wikilinkSuggest.toast.blockAcceptFailed'])
+      expect(toast?.dataset['severity']).toBe('warning')
+      // 输入与候选保留
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^x]]')
+      expect(popupState().open).toBe(true)
+      expect(popupState().itemCount).toBe(1)
+      expect(linkeds(sent)).toHaveLength(0)
+    } finally {
+      controller.dispose()
+      parent.remove()
+    }
+  })
+
+  it('同文档无 ID 块：宿主未写入，标记插入并入同一笔确认事务（一笔受控操作）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID])
+      press(view, 'Enter')
+      respondAccept(controller, sent, {
+        ok: true, blockId: 'same001', sameDoc: true, alias: '方案',
+        markerLfOffset: 18, markerText: '\n\n^same001',
+      })
+      // 一笔事务同时写链接与标记（此处 CM6 文本直接验证两段都在）
+      const text = view.state.doc.toString()
+      expect(text).toContain('[[../资料/方案.md#^same001|方案]]')
+      expect(text).toContain('\n\n^same001')
+      expect(popupState().open).toBe(false)
+      expect(linkeds(sent)).toHaveLength(1)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('接受在途时继续输入：会话重建即出站 cancel（宿主守卫撤回）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID])
+      press(view, 'Enter')
+      expect(lastAccept(sent)).toBeDefined()
+      // 用户继续输入：会话重建 → 在途接受作废
+      typeAt(view, 18, 'y')
+      expect(cancels(sent)).toHaveLength(1)
+      // 旧回包拒收（reqId 已过）：不写正文
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      expect(view.state.doc.toString()).not.toContain('#^abc123')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('接受在途时 Esc：关闭候选并出站 cancel', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID])
+      press(view, 'Enter')
+      press(view, 'Escape')
+      expect(popupState().open).toBe(false)
+      expect(cancels(sent)).toHaveLength(1)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('块阶段 | 有高亮：接受块候选进显示文字（已有 ID 本地路径）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_HAS_ID])
+      press(view, '|')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^keep01|]]')
+      expect(view.state.selection.main.head).toBe('[[../资料/方案.md#^keep01|'.length)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('块查询失败真实状态：目标不可定位显示状态行（不伪装空结果）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      locate(controller, 15)
+      typeAt(view, 15, 'x')
+      const q = lastBlockQuery(sent)
+      expect(q).toBeDefined()
+      controller.handleHostMessage({
+        kind: 'wikilink.block.query.result', sessionId: q!.sessionId, docUri: q!.docUri,
+        reqId: q!.reqId, generation: q!.generation, status: 'unavailable', reason: 'target-not-found',
+      })
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.blockNotFound'])
+    } finally {
+      controller.dispose()
     }
   })
 })
