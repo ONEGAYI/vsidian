@@ -11,6 +11,7 @@ import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
+import { AddonHistoryProbeHub } from './addonHistoryProbe'
 import { WebLinkMetaService } from './webLinkMetaService'
 import { resolveProxyConfig, type ProxyDecision } from './proxyAgent'
 import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type HoverExternalShapeMode } from '../shared/settings'
@@ -448,6 +449,32 @@ export function createTextEditorProvider(
   let refEditBindSuspend: Promise<void> | null = null
   let refEditBindSuspendRelease: (() => void) | null = null
   let refEditBindSuspendHits = 0
+
+  // ---- V01（#348）附加组件历史分组探针（实验件；VSIDIAN_TEST_HOOKS 门控，
+  // 未 attach 的目标端口纯透传，生产/常规开发零行为差异；命令注册见
+  // _test.addonHistory.* 块）----
+  const addonHistoryHub = process.env.VSIDIAN_TEST_HOOKS === '1'
+    ? new AddonHistoryProbeHub({
+      viewType: VIEW_TYPE,
+      ensureSession: async (uriStr) => {
+        const uri = vscode.Uri.parse(uriStr)
+        let entry = sessions.get(uriStr)
+        if (!entry) {
+          let doc: vscode.TextDocument
+          try {
+            doc = await vscode.workspace.openTextDocument(uri)
+          } catch {
+            return undefined
+          }
+          entry = openEntry(doc)
+        }
+        return { session: entry.session, doc: entry.doc }
+      },
+      isActiveCustomEditor: (uriStr) =>
+        isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, uriStr),
+      hasSourcePanels: (uriStr) => (sessions.get(uriStr)?.panels.size ?? 0) > 0,
+    })
+    : undefined
 
   /** 释放一个目标端口：B 会话 detach 虚拟面板；B 无面板时释放会话 */
   const releaseRefPort = (portId: string): void => {
@@ -1481,7 +1508,9 @@ export function createTextEditorProvider(
     }
     // #201 图片周期核验与失效：会话按自身 linkCtx 解析图源目标（同一 src
     // 在不同文档指向不同文件——目标解析必须按文档）；决策与版本表在协调器
-    fresh.session = new DocumentSession(port, {
+    // V01（#348）：TEST_HOOKS 下经历史分组探针包装（未 attach 目标纯透传）
+    const sessionPort = addonHistoryHub ? addonHistoryHub.wrapPort(port, doc) : port
+    fresh.session = new DocumentSession(sessionPort, {
       docUri: key,
       rootFsPath: doc.uri.fsPath,
       getEmbedDepthLimit: () => {
@@ -4356,6 +4385,9 @@ export function createTextEditorProvider(
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时
   // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露 ----
   if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+    // V01（#348）历史分组探针：文档事件路由启动 + 随 context 释放
+    addonHistoryHub?.start()
+    context.subscriptions.push({ dispose: () => addonHistoryHub?.dispose() })
     context.subscriptions.push(
       vscode.commands.registerCommand('onegayi.vsidian._test.setDiagnostics', (enabled: boolean) => {
         diagnostics.reset(enabled === true)
@@ -4571,6 +4603,53 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.getConflictTempUris',
       () => [...conflictTempUris],
     ),
+    ...(addonHistoryHub ? [
+      vscode.commands.registerCommand(
+        // V01（#348）历史分组探针：attach 激活目标包装（虚拟面板走真实
+        // edit.request/ack 链路）；state/submit/history/reset/snapshot 族
+        // 见下——探针实现与边界见 src/host/addonHistoryProbe.ts 头注
+        'onegayi.vsidian._test.addonHistory.attach',
+        (uriStr: string) => addonHistoryHub.attach(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.state',
+        (uriStr: string) => addonHistoryHub.state(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.submit',
+        (uriStr: string, input: { opId: string; atomic: boolean; changes: Array<{ offset: number; length: number; text: string }>; refOriginUri?: string }) =>
+          addonHistoryHub.submit(uriStr, input),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.history',
+        (uriStr: string, op: 'undo' | 'redo', refOriginUri?: string) =>
+          addonHistoryHub.history(uriStr, op, refOriginUri),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.externalWrite',
+        (uriStr: string, text: string) => addonHistoryHub.externalWrite(uriStr, text),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.nativeHistory',
+        (uriStr: string, op: 'undo' | 'redo') => addonHistoryHub.nativeHistory(uriStr, op),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.snapshot',
+        (uriStr: string) => addonHistoryHub.snapshot(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.restore',
+        (uriStr: string, snap: unknown) => addonHistoryHub.restore(uriStr, snap),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.reset',
+        (uriStr: string) => addonHistoryHub.resetMapping(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.rebuild',
+        (uriStr: string) => addonHistoryHub.rebuildMapping(uriStr),
+      ),
+    ] : []),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.requestViewState',
       async (uriStr: string, panelIndex = 0) => {

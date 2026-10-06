@@ -7,6 +7,7 @@ import { probe278Cases } from './probe278'
 import { probe375Cases } from './probe375'
 import { wikilinkBlockCases } from './wikilinkBlock'
 import { wikilinkEmbedCases } from './wikilinkEmbed'
+import { addonHistoryCases } from './addonHistoryCases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17327,4 +17328,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.closeSettingsPage)
     console.log('[#350] 设置页状态区载荷与入口通道通过')
   }],
+  // V01（#348）附加组件历史分组：真宿主验证组（独立文件维护，探针经
+  // _test.addonHistory.* 走真实 edit.request/ack/history.request 管线）
+  ...addonHistoryCases,
 ]
