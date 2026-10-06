@@ -1720,5 +1720,46 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     writeFileSync(path.join(wsDir, `p201-${name}-b.md`), `P2-01 ${name} 乙第一行\n乙第二行\n`, 'utf8')
   }
   writeFileSync(path.join(wsDir, 'p201-hand-c.md'), 'P2-01 hand 旁观丙\n', 'utf8')
+  // #375 V01 真宿主探针 fixture：补写块 ID 与尽力撤销的协调路径验证。
+  // -a.md = 来源甲（custom editor 打开）；-b.md = 目标乙（仅 openTextDocument
+  // 装载，无标签）；mod2 为标记改写变体的独立目标。每用例把缓冲与磁盘还原
+  // 回以下字节后结束，跨用例零污染。
+  writeFileSync(path.join(wsDir, 'v01-cross-a.md'), '# V01 跨文档甲\n\n跨文档甲正文与落点锚。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-cross-b.md'), 'v01 跨文档目标段落行一\n目标段落行二\n\n后续段落与目标块以空行相隔。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-same-a.md'), 'v01 同文档段落行一\n同文档段落行二\n\n同文档落点锚正文。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-dirty-a.md'), '# V01 未保存甲\n\n未保存甲正文与落点锚。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-dirty-b.md'), 'v01 dirty 目标段行一\ndirty 段行二\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-morph-a.md'), '# V01 形态甲\n\n形态甲正文与落点锚。\n', 'utf8')
+  // 形态矩阵：段落 / 无空行连续列表（整体一块）/ 围栏 + 已有 id 三落点
+  // （行尾 ^keep01、跨空行独立行 ^stand01、紧贴独立行 ^tight01）+ 结尾无 id 段
+  writeFileSync(path.join(wsDir, 'v01-morph-b.md'), [
+    'v01 形态学段落一',
+    '形态学段落行二',
+    '',
+    '- 形态列表项一',
+    '- 形态列表项二',
+    '',
+    '```js',
+    'const fence = 1',
+    '```',
+    '',
+    '已有行尾 id 段落 ^keep01',
+    '',
+    '独立行 id 上方段落',
+    '',
+    '^stand01',
+    '',
+    '紧贴独立行段落',
+    '^tight01',
+    '',
+    '结尾无 id 段落',
+  ].join('\n') + '\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-mod-a.md'), '# V01 修改甲\n\n修改甲正文与落点锚。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-mod-b.md'), 'v01 修改目标段行一\n修改目标段行二\n\n后续段落。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-mod2-b.md'), 'v01 修改目标段行一\n修改目标段行二\n\n后续段落。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-fail-a.md'), '# V01 失败甲\n\n失败甲正文与落点锚。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-fail-b.md'), 'v01 失败目标段行一\n失败目标段行二\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-close-a.md'), '# V01 关闭甲\n\n关闭甲正文与落点锚。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-close-b.md'), 'v01 关闭目标段行一\n关闭目标段行二\n', 'utf8')
   return { largeDocLines: LARGE_DOC_LINES }
 }
