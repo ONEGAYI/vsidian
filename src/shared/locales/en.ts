@@ -43,6 +43,15 @@ export const en = {
   // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
   'wikilinkSuggest.placeholder.heading': 'Type a heading…',
   'wikilinkSuggest.placeholder.block': 'Type a block ID…',
+  // #379 T04：标题阶段状态与候选（明确 Markdown 目标的真实候选；
+  // 失败分真实状态，不伪装空结果）
+  'wikilinkSuggest.status.headingLoading': 'Loading headings…',
+  'wikilinkSuggest.status.headingEmpty': 'No matching headings',
+  'wikilinkSuggest.status.headingNotFound': 'Target document not found — type the anchor manually',
+  'wikilinkSuggest.status.headingNotMd': 'Target is not a Markdown file — no heading candidates',
+  'wikilinkSuggest.status.headingReadError': 'Failed to read target document — type the anchor manually',
+  'wikilinkSuggest.heading.meta': 'H{level} · line {line}',
+  'wikilinkSuggest.toast.duplicateHeading': 'Duplicate headings exist; navigation goes to the first match',
   'styleRef.category.richPaste': 'Paste prompt',
   // ---- settings.（设置页框架：标题、搜索、分类、保存状态、空状态）----
   /** 设置页面板标题（宿主 createWebviewPanel 标题与页面 h1 同源） */

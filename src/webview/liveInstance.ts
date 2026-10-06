@@ -377,6 +377,9 @@ export interface LiveEditorInstanceDeps {
   /** #376 T01 双链联想会话启用（主正文实例 true；嵌入实例缺省 false——
    *  T01 仅主正文接线，内部 Live 的联想随后续票经 refEdit 通道接入） */
   enableWikilinkSuggest?: boolean
+  /** #379 T04 双链联想的轻提示通道（重复标题风险提示等）：根 toast 面的
+   *  注入点；缺省静默跳过（无 toast 面的装配不阻塞确认） */
+  notifyToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
 }
 
 /**
@@ -514,6 +517,8 @@ export class LiveEditorInstance {
         isLiveActive: () => this.deps.isLiveActive(),
         isSuspended: () => this.suspended,
         isExternal: (tr) => tr.annotation(externalSync) === true,
+        // #379 T04 重复标题风险提示（根 toast 面经 deps 注入；缺省静默）
+        showToast: (text, severity) => this.deps.notifyToast?.(text, severity),
       })
       : null
     this.view = new EditorView({
@@ -665,6 +670,13 @@ export class LiveEditorInstance {
   /** 查询结果入站（根按实例路由；控制器内 reqId/generation/会话三重守卫） */
   handleWikilinkQueryResult(message: Extract<HostToWebview, { kind: 'wikilink.query.result' }>): void {
     this.wikilinkSuggest?.handleResult(message)
+  }
+
+  /** 标题查询结果入站（#379 T04；根按实例路由，控制器内同构守卫） */
+  handleWikilinkHeadingQueryResult(
+    message: Extract<HostToWebview, { kind: 'wikilink.heading.query.result' }>,
+  ): void {
+    this.wikilinkSuggest?.handleHeadingResult(message)
   }
 
   /** 候选失效信号（#377 T02）：索引/清单变更——控制器去抖后重发当前查询 */

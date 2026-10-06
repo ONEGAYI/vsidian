@@ -54,6 +54,7 @@ vsidian/
     │   ├── viewCycle.ts                # 三态视图编排纯逻辑
     │   ├── webLinkMetaService.ts       # 外链元信息受限抓取服务
     │   ├── webMetaExtract.ts           # HTML 元信息非执行提取
+    │   ├── wikilinkHeadingSource.ts    # 标题联想宿主查询编排
     │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
     │   ├── blockId.ts            # 块 id 与块边界单一事实源
@@ -113,6 +114,7 @@ vsidian/
     │   ├── webLink.ts            # 外链 URL 准入与归一（两端共享）
     │   ├── wikilink.ts           # 双链形态学单一事实源（#11）
     │   ├── wikilinkField.ts      # 双链目标字段阶段化识别与编辑计划
+    │   ├── wikilinkHeading.ts    # 标题候选枚举与前缀过滤
     │   ├── wikilinkQuery.ts      # 双链联想查询评分移植
     │   └── wordSegment.ts        # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现

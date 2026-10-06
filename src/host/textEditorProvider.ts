@@ -26,6 +26,7 @@ import {
   findBlockOffset,
   findHeadingOffset,
 } from './wikilinkTarget'
+import { queryWikilinkHeadings } from './wikilinkHeadingSource'
 import {
   resolveVaultLinkFile,
   type VaultLinkResolveContext,
@@ -1791,6 +1792,59 @@ export function createTextEditorProvider(
     }
   }
 
+  // ---- #379 T04 双链联想：标题查询应答（面板级查询意图的执行体） ----
+
+  /** 双链联想标题查询应答（wikilink.heading.query 异步执行——目标解析与
+   *  正文读取含 IO）：先等本会话在途 edit.request 全部应用（未保存正文
+   *  协调——目标==来源文档时候选反映当前有效版本，不以陈旧 TextDocument
+   *  枚举；目标==其他文档不受影响，统一等待代价可忽略——queue 通常已空）。
+   *  正文依据：已打开 TextDocument 优先（未保存内容不被磁盘替代），未打开
+   *  读磁盘最新内容；读取经 queryWikilinkHeadings 编排（shared/vaultLink
+   *  同一解析 + shared/wikilinkHeading 同一 ATX 口径）。reqId/generation
+   *  原样回显，迟到/乱序由 webview 侧守卫拒收 */
+  const respondWikilinkHeadingQuery = async (
+    entry: SessionEntry,
+    sessionId: string,
+    doc: vscode.TextDocument,
+    message: Extract<WebviewToHost, { kind: 'wikilink.heading.query' }>,
+  ): Promise<void> => {
+    await entry.session.whenEditsSettled()
+    const folder = vscode.workspace.getWorkspaceFolder(doc.uri)
+    const ctx: VaultLinkResolveContext = {
+      docDir: path.dirname(doc.uri.fsPath),
+      rootDir: (folder ? folder.uri : vscode.Uri.joinPath(doc.uri, '..')).fsPath,
+      isWindowsHost: process.platform === 'win32',
+      hasWorkspace: folder !== undefined,
+    }
+    const result = await queryWikilinkHeadings(message.target, message.query, ctx, {
+      exists: statFileRealPath,
+      openTextDocument: (fsPath) => {
+        // 已打开文档优先：未保存内容不被磁盘替代（大小写折叠兜底——
+        // Windows 宿主 fsPath 形态可能漂移，真实形态对齐）
+        const fold = process.platform === 'win32'
+          ? (p: string) => p.toLowerCase()
+          : (p: string) => p
+        const hit = vscode.workspace.textDocuments.find((d) =>
+          d.uri.scheme === 'file' && (d.uri.fsPath === fsPath || fold(d.uri.fsPath) === fold(fsPath)))
+        return hit ? { text: hit.getText(), version: hit.version } : null
+      },
+      openTextDocumentFromDisk: async (fsPath) => {
+        const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+        return { text: opened.getText(), version: opened.version }
+      },
+    })
+    const base = {
+      kind: 'wikilink.heading.query.result' as const,
+      sessionId: message.sessionId,
+      docUri: message.docUri,
+      reqId: message.reqId,
+      generation: message.generation,
+    }
+    await entry.session.postToPanel(sessionId, result.status === 'unavailable'
+      ? { ...base, status: 'unavailable', reason: result.reason }
+      : { ...base, status: 'ready', targetVersion: result.targetVersion, items: result.items })
+  }
+
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
 
   /** 反链广播序号（review-loops #16）：按文档单调递增——快照应答为异步
@@ -2731,6 +2785,15 @@ export function createTextEditorProvider(
         if (isWebviewToHost(message) && message.kind === 'wikilink.query' &&
           message.docUri === document.uri.toString()) {
           entry.session.postToPanel(sessionId, respondWikilinkQuery(document, message))
+          return
+        }
+        // #379 T04 标题联想查询：主正文经原会话（同 wikilink.query 边界）。
+        // 会话守卫：docUri 归属本面板文档；异步执行（目标解析与正文读取含
+        // IO），先等本会话在途编辑应用（未保存正文协调），迟到/乱序由
+        // webview 侧 reqId+generation 守卫拒收
+        if (isWebviewToHost(message) && message.kind === 'wikilink.heading.query' &&
+          message.docUri === document.uri.toString()) {
+          void respondWikilinkHeadingQuery(entry, sessionId, document, message)
           return
         }
         // #224 引用视图订阅：provider 层拦截（协调器与订阅表在 provider 域，

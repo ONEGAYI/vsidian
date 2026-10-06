@@ -12,7 +12,7 @@ import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
-import type { WebviewToHost, WikilinkCandidateItem } from '../../src/shared/protocol'
+import type { WebviewToHost, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
 
 if (Range.prototype.getClientRects === undefined) {
   ;(Range.prototype as unknown as { getClientRects(): DOMRectList }).getClientRects =
@@ -70,6 +70,46 @@ const queries = (sent: WebviewToHost[]) =>
   sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.query' }> => m.kind === 'wikilink.query')
 
 const lastQuery = (sent: WebviewToHost[]) => queries(sent).at(-1)
+
+/** #379 T04：标题查询出站记录 */
+const headingQueries = (sent: WebviewToHost[]) =>
+  sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.heading.query' }> =>
+    m.kind === 'wikilink.heading.query')
+
+const lastHeadingQuery = (sent: WebviewToHost[]) => headingQueries(sent).at(-1)
+
+/** 以最新出站标题查询回灌应答（宿主扮演；#379 T04） */
+function respondHeading(
+  c: ReturnType<typeof setup>['controller'],
+  sent: WebviewToHost[],
+  items: WikilinkHeadingItem[],
+) {
+  const q = lastHeadingQuery(sent)
+  if (!q) {
+    throw new Error('缺少待应答的 wikilink.heading.query')
+  }
+  c.handleHostMessage({
+    kind: 'wikilink.heading.query.result', sessionId: q.sessionId, docUri: q.docUri,
+    reqId: q.reqId, generation: q.generation, status: 'ready',
+    targetVersion: 1, items,
+  })
+}
+
+/** 以最新出站标题查询回灌失败状态（宿主扮演；#379 T04） */
+function respondHeadingUnavailable(
+  c: ReturnType<typeof setup>['controller'],
+  sent: WebviewToHost[],
+  reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error',
+) {
+  const q = lastHeadingQuery(sent)
+  if (!q) {
+    throw new Error('缺少待应答的 wikilink.heading.query')
+  }
+  c.handleHostMessage({
+    kind: 'wikilink.heading.query.result', sessionId: q.sessionId, docUri: q.docUri,
+    reqId: q.reqId, generation: q.generation, status: 'unavailable', reason,
+  })
+}
 
 /** 以最新出站查询回灌候选（宿主扮演）；同 reqId/generation 再次回灌即
  *  模拟宿主「更新帧」（部分结果→完整结果的流式推送） */
@@ -173,7 +213,24 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
     }
   })
 
-  it('锚点字段输入/删除重开占位会话（不读目标文档、不出站锚点查询）', () => {
+  it('空目标锚点字段输入/删除重开占位会话（不猜默认文档、不出站标题查询）', () => {
+    const { controller, sent, view } = setup('[[#]]')
+    try {
+      locate(controller, 3) // # 后
+      typeAt(view, 3, '预')
+      expect(view.state.doc.toString()).toBe('[[#预]]')
+      const p = popupState()
+      expect(p.open).toBe(true)
+      expect(p.itemCount).toBe(0)
+      expect(p.statusText).toBe(zhCn['wikilinkSuggest.placeholder.heading'])
+      expect(queries(sent)).toHaveLength(0)
+      expect(headingQueries(sent)).toHaveLength(0)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('有目标锚点字段输入重开标题会话并出站标题查询（#379 T04）', () => {
     const { controller, sent, view } = setup('[[方案.md#]]')
     try {
       locate(controller, 8) // # 后
@@ -181,9 +238,12 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
       expect(view.state.doc.toString()).toBe('[[方案.md#预]]')
       const p = popupState()
       expect(p.open).toBe(true)
-      expect(p.itemCount).toBe(0)
-      expect(p.statusText).toBe(zhCn['wikilinkSuggest.placeholder.heading'])
-      expect(queries(sent)).toHaveLength(0)
+      expect(p.statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      const hq = lastHeadingQuery(sent)
+      expect(hq).toBeDefined()
+      expect(hq!.query).toBe('预')
+      expect(hq!.target).toBe('方案.md')
+      expect(queries(sent)).toHaveLength(0) // 文件查询不复发
     } finally {
       controller.dispose()
     }
@@ -222,7 +282,7 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
 })
 
 describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
-  it('高亮文件后 #：补全文件转标题占位，光标在 # 后，不出站标题查询', () => {
+  it('高亮文件后 #：补全文件转标题阶段并出站标题查询（#379 T04）', () => {
     const { controller, sent, view } = setup('[[方]]')
     try {
       locate(controller, 3)
@@ -236,14 +296,18 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
       const p = popupState()
       expect(p.open).toBe(true)
       expect(p.itemCount).toBe(0)
-      expect(p.statusText).toBe(zhCn['wikilinkSuggest.placeholder.heading'])
-      expect(queries(sent).length).toBe(queryCount) // 转阶段不出站标题查询
+      expect(p.statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      expect(queries(sent).length).toBe(queryCount) // 文件查询不复发
+      const hq = lastHeadingQuery(sent)
+      expect(hq).toBeDefined()
+      expect(hq!.query).toBe('')
+      expect(hq!.target).toBe('../资料/方案.md')
     } finally {
       controller.dispose()
     }
   })
 
-  it('无高亮按 #：不补文件名，保留原输入进入占位', () => {
+  it('无高亮按 #：不补文件名，保留原输入并出站标题查询（目标=原输入）', () => {
     const { controller, sent, view } = setup('[[方]]')
     try {
       locate(controller, 3)
@@ -251,7 +315,10 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
       respond(controller, sent, []) // 无结果：无高亮
       press(view, '#')
       expect(view.state.doc.toString()).toBe('[[方案#]]')
-      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.placeholder.heading'])
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      const hq = lastHeadingQuery(sent)
+      expect(hq).toBeDefined()
+      expect(hq!.target).toBe('方案')
     } finally {
       controller.dispose()
     }
@@ -555,6 +622,242 @@ describe('输入仲裁：IME、多 range、非空选区、无会话不接管', (
       expect(popupState().open).toBe(false)
     } finally {
       controller.dispose()
+    }
+  })
+})
+
+// ---- #379 T04：标题阶段会话（真实候选、键盘确认、重名 toast、守卫）----
+
+const YUSUAN: WikilinkHeadingItem = {
+  id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3,
+  duplicate: true, alias: '方案',
+}
+const YUSUAN_DUP: WikilinkHeadingItem = {
+  id: 'C:\\vault\\资料\\方案.md#5', heading: '预算', level: 1, line: 5,
+  duplicate: true, alias: '方案',
+}
+const GAISHU: WikilinkHeadingItem = {
+  id: 'C:\\vault\\资料\\方案.md#1', heading: '概述', level: 1, line: 1,
+  duplicate: false, alias: '方案',
+}
+
+/** 标题候选行主文字序列 */
+const headingNames = () =>
+  [...document.querySelectorAll<HTMLElement>('.vsidian-wikilink-suggest-item')]
+    .map((row) => row.querySelector('.vsidian-wikilink-suggest-name')?.textContent ?? '')
+
+describe('标题阶段会话：候选、键盘与确认（#379 T04）', () => {
+  it('# 转阶段后真实候选：空查询列出全部不高亮，方向键可选，Enter 确认默认别名', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      locate(controller, 3)
+      typeAt(view, 3, '案')
+      respond(controller, sent, [FANGAN])
+      press(view, '#')
+      respondHeading(controller, sent, [GAISHU, YUSUAN, YUSUAN_DUP])
+      const p = popupState()
+      expect(p.open).toBe(true)
+      expect(p.itemCount).toBe(3)
+      expect(p.activeIndex).toBe(null) // 空查询初始无高亮
+      expect(headingNames()).toEqual(['概述', '预算', '预算']) // 重复不合并
+      // 方向键移动高亮（不移动正文光标）
+      const headBefore = view.state.selection.main.head
+      press(view, 'ArrowDown')
+      expect(popupState().activeIndex).toBe(0)
+      press(view, 'ArrowDown')
+      expect(popupState().activeIndex).toBe(1)
+      expect(view.state.selection.main.head).toBe(headBefore)
+      // Enter 确认：替换锚点字段 + 文件名默认别名，关闭候选
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#预算|方案]]')
+      expect(view.state.selection.main.head).toBe('[[../资料/方案.md#预算'.length)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('输入前缀自动查询并高亮首项；锚点中部确认替换整个字段不留残留', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#]]')
+    try {
+      locate(controller, 14) // # 后
+      typeAt(view, 14, '预x')
+      const q1 = lastHeadingQuery(sent)
+      expect(q1!.query).toBe('预x')
+      respondHeading(controller, sent, [YUSUAN])
+      expect(popupState().activeIndex).toBe(0) // 非空查询自动高亮首项
+      press(view, 'Enter')
+      // 光标右侧 x 不残留：锚点字段整体替换
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#预算|方案]]')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('已有别名保留不覆盖（无 | 才补默认别名）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#|手写]]')
+    try {
+      locate(controller, 14) // # 后、| 前
+      typeAt(view, 14, '预')
+      respondHeading(controller, sent, [YUSUAN])
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#预算|手写]]')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('标题阶段 | 接受高亮：替换锚点字段、显示文字留空、关闭候选', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#x]]')
+    try {
+      locate(controller, 14) // 锚点起点（x 前）
+      typeAt(view, 14, '预')
+      respondHeading(controller, sent, [YUSUAN])
+      press(view, '|')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#预算|]]')
+      expect(view.state.selection.main.head).toBe('[[../资料/方案.md#预算|'.length)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('迟到/错位响应拒收：旧 reqId 与旧 generation 的回包不改状态', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#]]')
+    try {
+      locate(controller, 14)
+      typeAt(view, 14, '预')
+      const q = lastHeadingQuery(sent)!
+      // 伪造迟到帧（reqId 不匹配）：状态保持加载
+      controller.handleHostMessage({
+        kind: 'wikilink.heading.query.result', sessionId: q.sessionId, docUri: q.docUri,
+        reqId: q.reqId + 100, generation: q.generation, status: 'ready',
+        targetVersion: 1, items: [GAISHU],
+      })
+      expect(popupState().itemCount).toBe(0)
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      controller.handleHostMessage({
+        kind: 'wikilink.heading.query.result', sessionId: q.sessionId, docUri: q.docUri,
+        reqId: q.reqId, generation: q.generation + 5, status: 'unavailable',
+        reason: 'target-not-found',
+      })
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      // 正配对回包正常接受
+      respondHeading(controller, sent, [YUSUAN])
+      expect(popupState().itemCount).toBe(1)
+      // 查询更新（新 generation）后旧回包再拒收
+      typeAt(view, 15, '算')
+      const stale = lastHeadingQuery(sent)!
+      controller.handleHostMessage({
+        kind: 'wikilink.heading.query.result', sessionId: stale.sessionId, docUri: stale.docUri,
+        reqId: stale.reqId - 1, generation: stale.generation - 1, status: 'ready',
+        targetVersion: 1, items: [GAISHU],
+      })
+      expect(popupState().itemCount).toBe(0) // 新查询在途（旧结果已随重开清空）
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('失败真实状态分态呈现：目标不可定位 / 非 Markdown / 读取失败 / 空结果', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#]]')
+    try {
+      locate(controller, 14)
+      typeAt(view, 14, 'x')
+      respondHeadingUnavailable(controller, sent, 'target-not-found')
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingNotFound'])
+      deleteAt(view, 14, 15) // 清回空锚点（重开新查询）
+      typeAt(view, 14, 'y')
+      respondHeadingUnavailable(controller, sent, 'target-not-md')
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingNotMd'])
+      deleteAt(view, 14, 15)
+      typeAt(view, 14, 'z')
+      respondHeadingUnavailable(controller, sent, 'read-error')
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingReadError'])
+      // ready + 空列表是空态（与失败分态不同，不冒充）
+      deleteAt(view, 14, 15)
+      respondHeading(controller, sent, [])
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingEmpty'])
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('invalidate 去抖后标题会话重查（目标改动淘汰旧候选）', async () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#]]')
+    try {
+      locate(controller, 14)
+      typeAt(view, 14, '预')
+      respondHeading(controller, sent, [YUSUAN])
+      expect(popupState().itemCount).toBe(1)
+      controller.handleHostMessage({ kind: 'wikilink.invalidate' })
+      // 300ms 去抖后重发当前查询（同查询新 reqId）
+      await new Promise((resolve) => setTimeout(resolve, 380))
+      const after = headingQueries(sent)
+      expect(after.length).toBe(2)
+      expect(after.at(-1)!.query).toBe('预')
+      expect(after.at(-1)!.target).toBe('../资料/方案.md')
+    } finally {
+      controller.dispose()
+    }
+  })
+})
+
+describe('标题阶段重名提示与 toast（#379 T04）', () => {
+  /** 挂 body 的装配（toast 容器随 mount 的 parent 创建——需在 document 内
+   *  才能被断言；与 setup 同构，仅 parent 连接文档） */
+  function setupWithToast(text: string) {
+    const sent: WebviewToHost[] = []
+    const bridge: VsCodeBridge = {
+      postMessage: (message) => sent.push(message as WebviewToHost),
+      getState: () => undefined,
+      setState: () => {},
+    }
+    const controller = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    controller.mount(parent, [keymap.of(defaultKeymap)])
+    controller.handleHostMessage({ kind: 'init', sessionId: 't04-session', docUri: 'file:///t04.md', version: 1, text })
+    return {
+      controller, sent, view: controller.getView()!,
+      cleanup: () => { controller.dispose(); parent.remove() },
+    }
+  }
+
+  it('选中重复标题：toast 提示定位风险并继续接受（不合并、不改跳转语义）', () => {
+    const { controller, sent, view, cleanup } = setupWithToast('[[../资料/方案.md#]]')
+    try {
+      locate(controller, 14)
+      typeAt(view, 14, '预')
+      // 宿主已按前缀过滤回灌（'概述' 不匹配 '预'）：同名两项独立候选
+      respondHeading(controller, sent, [YUSUAN, YUSUAN_DUP])
+      // 非空查询高亮首项；下移选中第二个「预算」（重复项）
+      press(view, 'ArrowDown')
+      expect(popupState().activeIndex).toBe(1)
+      press(view, 'Enter')
+      // toast 在场且文案为重名风险提示
+      const toast = document.querySelector<HTMLElement>('.vsidian-toast')
+      expect(toast?.textContent).toBe(zhCn['wikilinkSuggest.toast.duplicateHeading'])
+      expect(toast?.dataset['severity']).toBe('warning')
+      // 继续接受：确认照常写入
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#预算|方案]]')
+      expect(popupState().open).toBe(false)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('选中非重复标题不弹 toast', () => {
+    const { controller, sent, view, cleanup } = setupWithToast('[[../资料/方案.md#]]')
+    try {
+      locate(controller, 14)
+      typeAt(view, 14, '概')
+      respondHeading(controller, sent, [GAISHU])
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#概述|方案]]')
+      expect(document.querySelector('.vsidian-toast')).toBeNull()
+    } finally {
+      cleanup()
     }
   })
 })

@@ -1,14 +1,15 @@
-// 双链联想候选浏览器回归（#376 T01）：装配生产 webview 控制器（联想会话
-// 随主实例扩展进入，键位于 fenceEscape 之前），按键只由浏览器键盘/CDP IME
-// 发起。宿主侧由夹具扮演：读取出站的 wikilink.query 并回灌
-// wikilink.query.result（reqId/generation 原样回显，与真实宿主应答同构）。
-// 光标定位经 view.locate 消息走生产链路。与 symbolInputFixture 同口径。
+// 双链联想候选浏览器回归（#376 T01 + #378 T03 + #379 T04）：装配生产
+// webview 控制器（联想会话随主实例扩展进入，键位于 fenceEscape 之前），
+// 按键只由浏览器键盘/CDP IME 发起。宿主侧由夹具扮演：读取出站的
+// wikilink.query / wikilink.heading.query 并回灌对应 result（reqId/
+// generation 原样回显，与真实宿主应答同构）。光标定位经 view.locate
+// 消息走生产链路。与 symbolInputFixture 同口径。
 import 'katex/dist/katex.min.css'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { EditorSelection } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
-import type { WebviewToHost, WikilinkCandidateItem } from '../../src/shared/protocol'
+import type { WebviewToHost, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
 import '../../src/webview/main.css'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 
@@ -36,6 +37,11 @@ const lastQuery = (): Extract<WebviewToHost, { kind: 'wikilink.query' }> | undef
   [...hostMessages].reverse().find((m) => (m as { kind?: string }).kind === 'wikilink.query') as
     Extract<WebviewToHost, { kind: 'wikilink.query' }> | undefined
 
+/** #379 T04：最新标题查询出站 */
+const lastHeadingQuery = (): Extract<WebviewToHost, { kind: 'wikilink.heading.query' }> | undefined =>
+  [...hostMessages].reverse().find((m) => (m as { kind?: string }).kind === 'wikilink.heading.query') as
+    Extract<WebviewToHost, { kind: 'wikilink.heading.query' }> | undefined
+
 Object.assign(window, {
   initDoc(text: string) {
     controller.handleHostMessage({ kind: 'init', sessionId: 'wikilink-suggest',
@@ -45,8 +51,35 @@ Object.assign(window, {
     controller.handleHostMessage({ kind: 'view.locate', offset })
   },
   lastQuery,
+  lastHeadingQuery,
   queryCount() {
     return hostMessages.filter((m) => (m as { kind?: string }).kind === 'wikilink.query').length
+  },
+  headingQueryCount() {
+    return hostMessages.filter((m) => (m as { kind?: string }).kind === 'wikilink.heading.query').length
+  },
+  /** 以最新出站标题查询回灌应答（宿主扮演，#379 T04） */
+  respondHeadingQuery(items: WikilinkHeadingItem[]) {
+    const q = lastHeadingQuery()
+    if (!q) throw new Error('缺少待应答的 wikilink.heading.query')
+    controller.handleHostMessage({
+      kind: 'wikilink.heading.query.result', sessionId: q.sessionId, docUri: q.docUri,
+      reqId: q.reqId, generation: q.generation, status: 'ready',
+      targetVersion: 1, items,
+    })
+  },
+  respondHeadingUnavailable(reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error') {
+    const q = lastHeadingQuery()
+    if (!q) throw new Error('缺少待应答的 wikilink.heading.query')
+    controller.handleHostMessage({
+      kind: 'wikilink.heading.query.result', sessionId: q.sessionId, docUri: q.docUri,
+      reqId: q.reqId, generation: q.generation, status: 'unavailable', reason,
+    })
+  },
+  /** 读取 toast 面当前可见文本与严重级（#379 T04 重名提示断言） */
+  readToast() {
+    const el = document.querySelector<HTMLElement>('.vsidian-toast')
+    return el ? { text: el.textContent ?? '', severity: el.dataset['severity'] ?? '' } : null
   },
   /** 以最新出站查询的 reqId/generation 回灌应答（宿主扮演）。#377 T02 起
    *  opts 可指定 total（命中总数——分页 more 状态）与 catalogGen（清单

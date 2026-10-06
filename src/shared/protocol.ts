@@ -643,8 +643,29 @@ export type HostToWebview =
   /** 双链联想候选失效信号（#377 T02）：索引/全文件清单变更（文件增删改名、
    *  排除变化、清单代次推进）后宿主广播；候选会话在场的 webview 自行重新
    *  发起当前查询（同查询新 reqId——结果按既有守卫整体替换）。无载荷，
-   *  触发即失效——与 backlinks/outlinks 快照推送同一 onChange 广播点 */
+   *  触发即失效——与 backlinks/outlinks 快照推送同一 onChange 广播点；
+   *  #379 T04 起标题会话同样消费（覆盖层冲刷含目标正文未保存变化） */
   | { kind: 'wikilink.invalidate' }
+  /** 双链联想标题查询结果（#379 T04，wikilink.heading.query 的应答）：
+   *  reqId+generation+会话守卫与 wikilink.query.result 同构（webview 拒收
+   *  迟到响应）。status=unavailable 附真实原因：no-workspace=来源文档不在
+   *  任何工作区根内；target-not-found=目标按来源相对语义不可定位（含越界
+   *  ——不按部分文件名猜目标）；target-not-md=目标非 Markdown（标题联想仅
+   *  用于 Markdown）；read-error=目标读取失败（删除竞态/权限）。ready 时
+   *  items 为 ATX 口径枚举 + 前缀过滤后的候选（重复标题独立身份全部展示），
+   *  targetVersion 为所依据目标 TextDocument.version（磁盘读取为 0——观测
+   *  用，webview 不消费做乱序丢弃） */
+  | {
+      kind: 'wikilink.heading.query.result'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      status: 'ready' | 'unavailable'
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error'
+      targetVersion?: number
+      items?: WikilinkHeadingItem[]
+    }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
    *  （TextDocument.version，#224 变更刷新的版本基准）与 LF UTF-16 全文。
@@ -1560,15 +1581,30 @@ export type WebviewToHost =
    *  首屏后继续加载——宿主按已定排序取 [offset, offset+limit)）。仅主正文
    *  接线（嵌入实例不经本消息出站） */
   | {
-    kind: 'wikilink.query'
-    sessionId: string
-    docUri: string
-    reqId: number
-    generation: number
-    query: string
-    /** 分页起点（#377 T02；缺省 0 = 首屏） */
-    offset?: number
-  }
+      kind: 'wikilink.query'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      query: string
+      /** 分页起点（#377 T02；缺省 0 = 首屏） */
+      offset?: number
+    }
+  /** 双链联想标题查询（#379 T04）：光标进入闭合双链的**标题锚点字段**
+   *  （`[[目标#前缀…]]`）时由 webview 发起。target 为文件字段原文（宿主按
+   *  来源相对语义解析——与跳转同一 resolveVaultLinkFile，不按部分文件名猜
+   *  目标）；query 为锚点字段光标左侧前缀；reqId/generation 守卫与
+   *  wikilink.query 同构。仅主正文接线（嵌入实例不出站） */
+  | {
+      kind: 'wikilink.heading.query'
+      sessionId: string
+      docUri: string
+      reqId: number
+      generation: number
+      query: string
+      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标） */
+      target: string
+    }
   /** 反链条目跳转意图（#197）：点击面板条目 → 宿主打开来源文档（Vsidian
    *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
    *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
@@ -1726,6 +1762,24 @@ export interface WikilinkCandidateItem {
   labelHighlights: Array<{ start: number; end: number }>
   /** 目录匹配高亮区间（空查询为空数组） */
   dirHighlights: Array<{ start: number; end: number }>
+}
+
+/** 双链联想标题候选条目载荷（#379 T04 wikilink.heading.query.result.items；
+ *  宿主按 ATX 口径枚举、前缀过滤后回传的稳定契约——重复标题独立身份全部
+ *  展示不合并，duplicate 为规范化同名标记） */
+export interface WikilinkHeadingItem {
+  /** 候选身份：目标绝对 fsPath + '#' + 1-based 行号（同目标内行号唯一） */
+  id: string
+  /** 标题原文（写入 #锚点 的形态） */
+  heading: string
+  /** ATX 层级（1-6） */
+  level: number
+  /** 1-based 行号（「层级／位置」显示） */
+  line: number
+  /** 规范化同名项在场（选中时 toast 提示定位风险的依据；不改变跳转语义） */
+  duplicate: boolean
+  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用） */
+  alias: string
 }
 
 /** 悬停预览规范目标身份（#218 hover.result.ok）：fsPath 为宿主侧真实
@@ -3935,6 +3989,12 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isString(v.sessionId) && isString(v.docUri) &&
         isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) && isString(v.query) &&
         (v.offset === undefined || isNonNegativeInt(v.offset))
+    case 'wikilink.heading.query':
+      // #379 T04 标题查询：会话身份 + 请求配对与代次 + 标题前缀 + 文件目标
+      // 原文（宿主解析——不按部分文件名猜目标）
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        isString(v.query) && isString(v.target)
     case 'backlink.activate':
       return isString(v.sessionId) && isString(v.docUri) &&
         isString(v.sourceUri) && isNonNegativeInt(v.offset)
@@ -4498,6 +4558,18 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'wikilink.invalidate':
       // #377 T02 候选失效信号：无载荷广播（触发即失效）
       return true
+    case 'wikilink.heading.query.result':
+      // #379 T04 标题查询结果：会话身份 + 请求配对与代次回显 + 真实状态
+      // 分态（ready 附候选与目标版本观测；unavailable 附原因枚举）
+      return (
+        isString(v.sessionId) && isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
+        (v.status === 'ready' || v.status === 'unavailable') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
+          v.reason === 'target-not-md' || v.reason === 'read-error') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkHeadingItem))) &&
+        (v.targetVersion === undefined || isNonNegativeInt(v.targetVersion))
+      )
     case 'hover.result':
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
       // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起
@@ -4807,6 +4879,19 @@ function isWikilinkCandidateItem(v: unknown): v is WikilinkCandidateItem {
     typeof v.score === 'number' &&
     Array.isArray(v.labelHighlights) && v.labelHighlights.every(isMatch) &&
     Array.isArray(v.dirHighlights) && v.dirHighlights.every(isMatch)
+  )
+}
+
+/** #379 T04 双链联想标题候选条目载荷形态守卫 */
+function isWikilinkHeadingItem(v: unknown): v is WikilinkHeadingItem {
+  return (
+    isObject(v) &&
+    isString(v.id) &&
+    isString(v.heading) &&
+    typeof v.level === 'number' && Number.isInteger(v.level) && v.level >= 1 && v.level <= 6 &&
+    typeof v.line === 'number' && Number.isInteger(v.line) && v.line >= 1 &&
+    typeof v.duplicate === 'boolean' &&
+    isString(v.alias)
   )
 }
 

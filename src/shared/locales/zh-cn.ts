@@ -39,6 +39,15 @@ export const zhCn: Record<MessageKey, string> = {
   // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
   'wikilinkSuggest.placeholder.heading': '输入小标题…',
   'wikilinkSuggest.placeholder.block': '输入块 ID…',
+  // #379 T04：标题阶段状态与候选（明确 Markdown 目标的真实候选；
+  // 失败分真实状态，不伪装空结果）
+  'wikilinkSuggest.status.headingLoading': '正在读取标题…',
+  'wikilinkSuggest.status.headingEmpty': '没有匹配的标题',
+  'wikilinkSuggest.status.headingNotFound': '未找到目标文档——可继续手写锚点',
+  'wikilinkSuggest.status.headingNotMd': '目标不是 Markdown 文件——无标题候选',
+  'wikilinkSuggest.status.headingReadError': '目标文档读取失败——可继续手写锚点',
+  'wikilinkSuggest.heading.meta': 'H{level} · 行 {line}',
+  'wikilinkSuggest.toast.duplicateHeading': '存在多个同名标题，跳转将定位到第一个',
   'styleRef.category.richPaste': '粘贴询问',
   // ---- settings.（设置页框架）----
   'settings.pageTitle': 'Vsidian 设置',

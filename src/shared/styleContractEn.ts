@@ -1464,16 +1464,16 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   // ==== 双链联想候选（#376 T01）====
   "wikilink-suggest-popup": {
-    "purpose": "Popup container for wikilink file suggestions: anchored at the wikilink fence opening, listing candidates and the real state (searching / no matches / not ready / no folder open).",
-    "states": "Mounted only while the main-body Live cursor sits inside the file field of a freshly typed closed wikilink [[]] / ![[ ]]; removed on confirm, Esc, leaving the field or switching mode.",
+    "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04).",
+    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty # target and block anchors keep the placeholder hint (the target document is not read).",
     "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }
   },
   "wikilink-suggest-item": {
-    "purpose": "Candidate row: the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; matched ranges are marked by the child .vsidian-wikilink-suggest-hl element.",
-    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name), .vsidian-wikilink-suggest-dir (folder), .vsidian-wikilink-suggest-hl (matched ranges).",
+    "purpose": "Candidate row: in the file stage the file name is the primary text and its folder is right-aligned in a muted tone to disambiguate same-named files; in the heading stage (#379 T04) the heading text is the primary text and the level/line meta is right-aligned in the same muted slot (duplicate headings keep separate rows, never merged); matched ranges are marked by the child .vsidian-wikilink-suggest-hl element (file stage).",
+    "dom": "Option rows of the listbox container; child structure: .vsidian-wikilink-suggest-name (file name / heading text), .vsidian-wikilink-suggest-dir (folder / heading level-and-line meta), .vsidian-wikilink-suggest-hl (matched ranges).",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }

@@ -381,6 +381,17 @@ export class DocumentSession {
   private nextPanelId = 1
   private disposed = false
   private hoverSourceLeaseSeq = 0
+
+  /**
+   * 等待本会话在途 edit.request 全部应用到权威 TextDocument（#379 T04
+   * 未保存正文协调）：queue 是 edit.request 的串行应用链，await 它即读到
+   * 「webview 已出站编辑全部落地」后的当前有效版本。webview 组合期暂缓
+   * 未出站的输入不在协调范围（宿主不可见，规格已知边界）。只读等待，
+   * 不触发任何编辑或广播。
+   */
+  whenEditsSettled(): Promise<void> {
+    return this.queue.then(() => undefined)
+  }
   /** #10 图片解析：同 src 在途去重与成功结果缓存（失败不缓存，重试重解析） */
   private readonly imageInFlight = new Map<string, Promise<ImageResolution>>()
   private readonly imageCache = new Map<string, ImageResolution>()
@@ -612,6 +623,11 @@ export class DocumentSession {
       case 'wikilink.query':
         // #376 T01 双链联想查询：provider 层拦截消费（索引服务在 provider
         // 域）；绕过面板入口则无副作用。
+        return Promise.resolve()
+      case 'wikilink.heading.query':
+        // #379 T04 标题联想查询：同 wikilink.query——provider 层拦截消费
+        //（目标解析与 TextDocument 读取在 provider 域）；绕过面板入口则
+        // 无副作用。
         return Promise.resolve()
       case 'outlinks.get':
       case 'outlink.activate':

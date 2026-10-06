@@ -1522,6 +1522,8 @@ export class WebviewSyncController {
       initialConflictRevision: this.initialConflictRevision,
       // #376 T01：主正文实例启用双链联想会话（嵌入实例缺省不装配）
       enableWikilinkSuggest: true,
+      // #379 T04：双链联想轻提示（重复标题风险）转发根 toast 面
+      notifyToast: (text, severity) => this.toast?.show(text, severity),
       onSuspendedChange: (active) => {
         // #314：进入暂停即作废粘贴现场（对齐 main 版 enterSuspended 开头
         // 的清理——弹窗取消、rich 反馈作废清空；暂停态下粘贴入口全被
@@ -2386,6 +2388,11 @@ export class WebviewSyncController {
         // #376 T01 双链联想查询结果：reqId/generation/会话守卫随实例
         //（主正文实例持有联想会话；嵌入实例不出站查询、无回包）
         this.live?.handleWikilinkQueryResult(message)
+        break
+      }
+      case 'wikilink.heading.query.result': {
+        // #379 T04 标题联想查询结果：守卫与路由同 wikilink.query.result
+        this.live?.handleWikilinkHeadingQueryResult(message)
         break
       }
       case 'wikilink.invalidate': {

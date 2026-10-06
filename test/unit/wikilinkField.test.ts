@@ -224,9 +224,10 @@ describe('planWikilinkFieldEdit：Enter/Tab 确认（文件字段整体替换）
     expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md¦|方案]]')
   })
 
-  it('confirm 仅文件阶段有效：标题/块阶段或缺高亮项返回 null', () => {
-    expect(planWikilinkFieldEdit(fieldOf('[[A#H]]', 5), 'confirm', 5, FANGAN)).toBeNull()
+  it('confirm 文件阶段缺高亮返回 null；标题/块阶段缺标题候选返回 null（占位不可确认）', () => {
     expect(planWikilinkFieldEdit(fieldOf('[[A]]', 3), 'confirm', 3, null)).toBeNull()
+    expect(planWikilinkFieldEdit(fieldOf('[[A#H]]', 5), 'confirm', 5, FANGAN)).toBeNull()
+    expect(planWikilinkFieldEdit(fieldOf('[[A#^id]]', 7), 'confirm', 7, FANGAN)).toBeNull()
   })
 })
 
@@ -353,5 +354,63 @@ describe('planWikilinkFieldEdit：| 进显示文字', () => {
     const line = '[[A#^id]]'
     const plan = planWikilinkFieldEdit(fieldOf(line, 7), '|', 7, null)
     expect(applyPlan(line, plan!)).toBe('[[A#^id|¦]]')
+  })
+})
+
+// ---- #379 T04：标题阶段确认与竖线（标题候选产物 {heading, alias}）----
+
+const YUSUAN = { heading: '预算', alias: '方案' }
+
+describe('planWikilinkFieldEdit：标题阶段 Enter/Tab 确认（#379 T04）', () => {
+  it('[[方案.md#预¦x]]：标题字段整体替换不留残留，无别名补文件名默认别名', () => {
+    // col=9：锚点字段中部（'预' 与 'x' 之间）——确认替换整个标题字段，
+    // 光标右侧的 'x' 不残留
+    const line = '[[方案.md#预x]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 9), 'confirm', 9, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算¦|方案]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('已有别名保留不用默认别名覆盖：[[方案.md#H¦|手写]]', () => {
+    const line = '[[方案.md#H|手写]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 8), 'confirm', 8, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算¦|手写]]')
+  })
+
+  it('光标在标题字段首与字段尾同形态（替换区间是整个锚点字段）', () => {
+    const head = planWikilinkFieldEdit(fieldOf('[[A#xy]]', 4), 'confirm', 4, null, YUSUAN)
+    expect(applyPlan('[[A#xy]]', head!)).toBe('[[A#预算¦|方案]]')
+    const tail = planWikilinkFieldEdit(fieldOf('[[A#xy]]', 6), 'confirm', 6, null, YUSUAN)
+    expect(applyPlan('[[A#xy]]', tail!)).toBe('[[A#预算¦|方案]]')
+  })
+
+  it('缺标题候选返回 null（占位/无高亮不可确认，Enter/Tab 落穿）', () => {
+    expect(planWikilinkFieldEdit(fieldOf('[[A#H]]', 5), 'confirm', 5, null, null)).toBeNull()
+  })
+
+  it('文件阶段带标题候选不消费（文件确认仍走文件产物）', () => {
+    expect(planWikilinkFieldEdit(fieldOf('[[A]]', 3), 'confirm', 3, null, YUSUAN)).toBeNull()
+  })
+})
+
+describe('planWikilinkFieldEdit：标题阶段 | 进显示文字（#379 T04）', () => {
+  it('有真实高亮：接受标题并替换锚点字段（不留残留），| 落在锚点末、显示文字留空', () => {
+    const line = '[[方案.md#预x]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 9), '|', 9, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算|¦]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('无高亮保留原输入：| 落在锚点区末（沿用 T03 口径）', () => {
+    // col=6：锚点字段（HI）末、闭围栏前
+    const line = '[[A#HI]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 6), '|', 6, null, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#HI|¦]]')
+  })
+
+  it('已有 |：接受标题后复用分隔符，已有别名保留、光标跳 | 后', () => {
+    const line = '[[方案.md#H|手写]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 8), '|', 8, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算|¦手写]]')
   })
 })

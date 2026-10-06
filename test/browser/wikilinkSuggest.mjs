@@ -383,30 +383,46 @@ try {
     assert.equal(await page.evaluate(() => window.lastQuery()?.query), 'Axa', '再触发查询取光标左侧')
   })
 
-  // ---- #378 T03：# / ^ 转阶段（真实键盘字符键） ----
-  await scenario('高亮文件后 # 直接转标题占位：补全相对路径、占位提示、不出站标题查询', { doc: '', cursor: 0 }, async (page) => {
+  // ---- #378 T03：# / ^ 转阶段（真实键盘字符键）----
+  await scenario('高亮文件后 # 转标题阶段：补全相对路径并出站标题查询（#379 T04）', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[方案')
     await page.evaluate((items) => window.respondQuery(items), [fangan()])
-    const before = await page.evaluate(() => window.queryCount())
+    const fileQueries = await page.evaluate(() => window.queryCount())
     await page.keyboard.press('#')
     const after = await read(page)
     assert.equal(after.text, '[[../资料/方案.md#]]', '补全文件并加 #')
     assert.equal(after.head, '[[../资料/方案.md#'.length, '光标在 # 后')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.ok(hq, '转阶段出站标题查询')
+    assert.equal(hq.query, '', '空标题前缀')
+    assert.equal(hq.target, '../资料/方案.md', '目标为补全后的文件字段')
+    assert.equal(await page.evaluate(() => window.queryCount()), fileQueries, '文件查询不复发')
+    // 回灌真实候选：标题列表（含层级/行号元信息），空查询无高亮
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#1', heading: '概述', level: 1, line: 1, duplicate: false, alias: '方案' },
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: true, alias: '方案' },
+    ])
     const p = await popup(page)
-    assert.equal(p.open, true, '占位会话在场')
-    assert.equal(p.itemCount, 0, '占位不是候选')
-    assert.match(p.statusText, /输入小标题|Type a heading/, '标题占位提示（i18n）')
-    assert.equal(await page.evaluate(() => window.queryCount()), before, '转阶段不出站标题查询')
+    assert.equal(p.open, true, '标题候选列表在场')
+    assert.equal(p.itemCount, 2)
+    assert.equal(p.activeIndex, null, '空查询无高亮')
+    assert.deepEqual(p.names, ['概述', '预算'])
+    assert.deepEqual(p.dirs, ['H1 · 行 1', 'H2 · 行 3'], '层级/行号元信息（i18n）')
   })
 
-  await scenario('无高亮按 #：不补文件名，保留原输入进入标题占位', { doc: '', cursor: 0 }, async (page) => {
+  await scenario('无高亮按 #：不补文件名，保留原输入并出站标题查询（目标=原输入）', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[方')
     await page.evaluate(() => window.respondQuery([]))
     await page.keyboard.press('#')
     const after = await read(page)
     assert.equal(after.text, '[[方#]]', '保留原输入')
-    assert.equal(after.head, '[[方#'.length)
-    assert.match((await popup(page)).statusText, /输入小标题|Type a heading/)
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.ok(hq, '有目标即出站标题查询')
+    assert.equal(hq.target, '方')
+    // 宿主回灌不可定位：真实状态行（可继续手写）
+    await page.evaluate((r) => window.respondHeadingUnavailable(r), 'target-not-found')
+    const p2 = await popup(page)
+    assert.match(p2.statusText, /未找到目标文档|Target document not found/, '目标不可定位状态行（i18n）')
   })
 
   await scenario('高亮文件后 ^ 一次形成 #^ 转块占位；标题占位再按 ^ 不重复补 #', { doc: '', cursor: 0 }, async (page) => {
@@ -495,6 +511,86 @@ try {
     assert.equal(afterEnter.text.includes('../资料/方案.md'), false, '占位不可确认')
     assert.equal(afterEnter.text.includes('\n'), true, 'Enter 落穿默认换行')
     assert.equal((await popup(page)).open, false, '换行破坏围栏后关闭')
+  })
+
+  // ---- #379 T04：标题阶段真实候选、键盘确认、重名 toast 与状态 ----
+  await scenario('标题候选方向键+Enter 确认：锚点整体替换、默认别名、关闭候选', { doc: '[[../资料/方案.md#]]', cursor: 14 }, async (page) => {
+    // 锚点字段输入触发标题会话（出站带目标与前缀）
+    await page.keyboard.type('预')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.equal(hq.query, '预', '标题前缀查询')
+    assert.equal(hq.target, '../资料/方案.md', '文件目标原文')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    const p = await popup(page)
+    assert.equal(p.activeIndex, 0, '非空查询自动高亮首项')
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#预算|方案]]', '#标题 + 文件名默认别名')
+    assert.equal(after.head, '[[../资料/方案.md#预算'.length, '光标落锚点末（| 前）')
+    assert.equal((await popup(page)).open, false, '确认后关闭候选')
+  })
+
+  await scenario('锚点中部输入确认不留残留；手写别名保留', { doc: '[[../资料/方案.md#xx]]', cursor: 15 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    await page.keyboard.press('Tab')
+    const after = await read(page)
+    // 光标右侧旧 xx 不残留：锚点字段整体替换
+    assert.equal(after.text, '[[../资料/方案.md#预算|方案]]', 'Tab 确认同 Enter 口径')
+  })
+
+  await scenario('重复标题全部展示；选中同名项 toast 提示风险并继续接受', { doc: '[[../资料/方案.md#]]', cursor: 14 }, async (page) => {
+    await page.keyboard.type('预')
+    // 宿主回灌：两个「预算」（duplicate 标记）+ 一个「预算编制」
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: true, alias: '方案' },
+      { id: 'C:\\vault\\资料\\方案.md#7', heading: '预算', level: 1, line: 7, duplicate: true, alias: '方案' },
+      { id: 'C:\\vault\\资料\\方案.md#9', heading: '预算编制', level: 2, line: 9, duplicate: false, alias: '方案' },
+    ])
+    let p = await popup(page)
+    assert.equal(p.itemCount, 3, '重复标题独立候选不合并')
+    assert.deepEqual(p.names, ['预算', '预算', '预算编制'])
+    // 下移到第二个「预算」：Enter 确认 → toast + 继续接受
+    await page.keyboard.press('ArrowDown')
+    p = await popup(page)
+    assert.equal(p.activeIndex, 1)
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#预算|方案]]', '同名项选择被继续接受（不改跳转语义）')
+    const toast = await page.evaluate(() => window.readToast())
+    assert.ok(toast, 'toast 在场')
+    assert.match(toast.text, /同名标题|Duplicate headings/, '重名风险提示（i18n）')
+    assert.equal(toast.severity, 'warning')
+  })
+
+  await scenario('标题阶段 | 接受高亮：锚点替换、显示文字留空', { doc: '[[../资料/方案.md#x]]', cursor: 14 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    await page.keyboard.press('|')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#预算|]]', '接受标题后 | 进显示文字（留空）')
+    assert.equal(after.head, '[[../资料/方案.md#预算|'.length, '光标在 | 后')
+    assert.equal((await popup(page)).open, false, '关闭候选')
+  })
+
+  await scenario('非 Markdown 目标状态行；无匹配标题空态', { doc: '[[配图.png#]]', cursor: 9 }, async (page) => {
+    await page.keyboard.type('x')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.equal(hq.target, '配图.png')
+    await page.evaluate((r) => window.respondHeadingUnavailable(r), 'target-not-md')
+    assert.match((await popup(page)).statusText, /不是 Markdown|not a Markdown/, '非 Markdown 状态行（i18n）')
+    // 换回 Markdown 目标：空结果是空态而非失败
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type('方案.md#')
+    await page.evaluate(() => window.respondHeadingQuery([]))
+    assert.match((await popup(page)).statusText, /没有匹配的标题|No matching headings/, '空态（i18n）')
   })
 
   // ---- #378 T03：IME 组合期 # 不转阶段 ----

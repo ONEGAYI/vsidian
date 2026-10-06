@@ -175,6 +175,13 @@ export interface WikilinkPlanItem {
   alias: string
 }
 
+/** 标题阶段确认/竖线可选中的候选产物（#379 T04；宿主已解析明确 Markdown
+ *  目标并派生文件名默认别名——heading 为写入 #锚点 的标题原文） */
+export interface WikilinkHeadingPlanItem {
+  heading: string
+  alias: string
+}
+
 /** 一次编辑计划（行内坐标；changes 按原坐标升序、互不重叠） */
 export interface WikilinkFieldEditPlan {
   changes: Array<{ from: number; to: number; insert: string }>
@@ -208,16 +215,43 @@ export function planWikilinkFieldEdit(
   key: WikilinkPhaseKey,
   col: number,
   item: WikilinkPlanItem | null,
+  headingItem: WikilinkHeadingPlanItem | null = null,
 ): WikilinkFieldEditPlan | null {
-  const { innerFrom, fileTo, hashAt, pipeAt, closeFrom, stage } = field
+  const { innerFrom, fileTo, hashAt, anchorFrom, anchorTo, pipeAt, closeFrom, stage } = field
   // 目标区末（| 前或 ] 前；有锚点时 = anchorTo，无锚点 = fileTo）
   const targetEnd = pipeAt >= 0 ? pipeAt : closeFrom
   /** 文件字段替换的坐标平移（插入点/光标在 fileTo 之后时叠加） */
   const replaceDelta = (replace: boolean, insertPath: string): number =>
     replace ? insertPath.length - (fileTo - innerFrom) : 0
   const replaceItem = item !== null && item.insertPath !== '' ? item : null
+  /** 标题阶段真实候选（T04；heading 空串防御——宿主已保证非空） */
+  const replaceHeading = headingItem !== null && headingItem.heading !== '' ? headingItem : null
+  /** 锚点字段替换的坐标平移（插入点/光标在 anchorTo 之后时叠加） */
+  const headingDelta = replaceHeading !== null
+    ? replaceHeading.heading.length - (anchorTo - anchorFrom)
+    : 0
 
   if (key === 'confirm') {
+    if (stage === 'heading') {
+      // #379 T04 标题确认：替换整个锚点字段（不留光标右侧残留），无分隔符
+      // 时补文件名默认别名（规格「路径与显示文字」：标题选择完成后没有
+      // 用户手写别名仍用文件名）；已有 |（含空别名）原样保留；关闭会话
+      if (!replaceHeading) {
+        return null
+      }
+      const changes: WikilinkFieldEditPlan['changes'] = [
+        { from: anchorFrom, to: anchorTo, insert: replaceHeading.heading },
+      ]
+      if (pipeAt < 0) {
+        changes.push({ from: closeFrom, to: closeFrom, insert: `|${replaceHeading.alias}` })
+      }
+      // 光标落锚点末（| 前 / 闭围栏前）——与文件确认「留在目标区末端」对称
+      return {
+        changes,
+        cursorTo: anchorFrom + replaceHeading.heading.length,
+        nextStage: null,
+      }
+    }
     if (stage !== 'file' || !item || item.insertPath === '') {
       return null
     }
@@ -280,7 +314,19 @@ export function planWikilinkFieldEdit(
   }
 
   // key === '|'：竖线在文件／标题／块阶段都只接受**该阶段**的真实高亮——
-  // T03 标题/块为占位态（无候选），仅文件阶段可替换
+  // 文件阶段=文件候选（T01）、标题阶段=标题候选（#379 T04）、块阶段候选
+  // 归 T05（当前占位无高亮）
+  if (stage === 'heading') {
+    const changes: WikilinkFieldEditPlan['changes'] = replaceHeading !== null
+      ? [{ from: anchorFrom, to: anchorTo, insert: replaceHeading.heading }]
+      : []
+    if (pipeAt >= 0) {
+      // 已有分隔符：复用，光标跳到已有 | 后（已有别名保留）
+      return { changes, cursorTo: pipeAt + 1 + headingDelta, nextStage: null }
+    }
+    changes.push({ from: closeFrom, to: closeFrom, insert: '|' })
+    return { changes, cursorTo: closeFrom + 1 + headingDelta, nextStage: null }
+  }
   const pipeItem = stage === 'file' ? replaceItem : null
   const delta = replaceDelta(pipeItem !== null, pipeItem?.insertPath ?? '')
   const changes: WikilinkFieldEditPlan['changes'] = pipeItem !== null

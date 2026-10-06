@@ -1684,11 +1684,36 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'embed-assets', 'B内双链目标.md'), '# B内双链目标\n\n只在 embed-assets 内的双链目标。\n', 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
-  // #376 T01 双链联想：来源 + 同目录/子目录目标（候选按来源相对路径插入）
+  // #376 T01 双链联想：来源 + 同目录/子目录目标（候选按来源相对路径插入）；
+  // 同目录目标带标题（T04 起标题联想的真实目标）
   mkdirSync(path.join(wsDir, '联想目录'), { recursive: true })
   writeFileSync(path.join(wsDir, '联想目录', '联想来源.md'), '来源正文\n', 'utf8')
-  writeFileSync(path.join(wsDir, '联想目录', '同目录目标.md'), '同目录目标正文\n', 'utf8')
+  writeFileSync(path.join(wsDir, '联想目录', '同目录目标.md'), '# 同目录标题\n\n同目录目标正文\n', 'utf8')
   writeFileSync(path.join(wsDir, '子目录目标.md'), '子目录目标正文\n', 'utf8')
+  // #379 T04 标题联想：多级标题 + 重复标题（「预算」两处——重名候选独立
+  // 身份与 toast 风险提示载体）+ 围栏内伪标题（枚举排除断言）
+  writeFileSync(path.join(wsDir, '联想目录', 'T04目标.md'), [
+    '# 概述',
+    '',
+    'T04 目标正文。',
+    '',
+    '## 预算',
+    '',
+    '第一处预算内容。',
+    '',
+    '# 预算',
+    '',
+    '第二处预算内容（与 ## 预算 同名——规范化口径命中）。',
+    '',
+    '## 附录',
+    '',
+    '```md',
+    '# 围栏内伪标题（不进候选）',
+    '```',
+    '',
+    '围栏后正文。',
+    '',
+  ].join('\n'), 'utf8')
   // #377 T02 全文件清单：未被引用的资源候选（png/pdf/音视频/文本命中空
   // 查询；.pyc 为 other——仅记名不进空查询、可被有查询命中）+ 默认排除域
   // 内文件（node_modules 不入清单）。T02 独立来源文档避免污染 T01 现场
