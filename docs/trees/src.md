@@ -9,6 +9,10 @@ vsidian/
     ├── extension.ts # 扩展激活入口
     ├── host/        # 宿主端实现
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
+    │   ├── addons/
+    │   │   ├── addonCoordinator.ts # 附加组件发现协调与唤醒
+    │   │   ├── addonRegistry.ts    # 附加组件注册表与 registerAddon 校验
+    │   │   └── addonWiring.ts      # 附加组件宿主装配接线
     │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
     │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
     │   ├── diagramExportHost.ts          # 宿主图表导出执行壳
@@ -61,6 +65,7 @@ vsidian/
     │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
+    │   ├── addonIdentity.ts        # 附加组件身份声明解析与兼容判定
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts        # 变更重定位纯函数
     │   ├── chromeContract.ts       # 界面域样式契约探针表
@@ -98,6 +103,7 @@ vsidian/
     │   ├── refExpansion.ts         # 引用递归路径与容量预算
     │   ├── refText.ts              # 可读文本锚点与准入共享内核
     │   ├── relocationScan.ts       # 嵌入重定位逐字检索预算
+    │   ├── semverRange.ts          # API 版本范围语义子集求值器
     │   ├── settings.ts             # 设置定义与读写纯逻辑
     │   ├── skeletonTiming.ts       # 骨架屏撤除计算与装配常量（#292）
     │   ├── styleContract.ts        # 公开样式契约清单单一事实源
@@ -124,6 +130,7 @@ vsidian/
     │   ├── wikilinkQuery.ts        # 双链联想查询评分移植
     │   └── wordSegment.ts          # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
+        ├── addonSettingsSection.ts     # 设置页附加组件分页状态区
         ├── anchorFlash.ts              # 跳转目标高亮装饰状态
         ├── appearanceSettings.ts       # 外观合并分页
         ├── backlinkGrouping.ts         # 反链面板分组排序过滤纯函数
