@@ -113,6 +113,8 @@ export function activate(context: vscode.ExtensionContext): void {
     // storageService WORKSPACE 级口径；各工作区独立记忆）
     findOptions: createFindOptionsStore(context.workspaceState),
   }, snippetService, vaultIndex, indexMaintenance, jieba)
+  // F13：停用收尾接线（deactivate 返回其 Promise）
+  providerDispose = () => provider.dispose()
   void snippetService.initialize()
   if (vaultIndex) {
     // 后台初始化（不阻塞激活）；#198 根增删与窗口焦点由下方订阅接线
@@ -206,6 +208,11 @@ export function activate(context: vscode.ExtensionContext): void {
   )
 }
 
-export function deactivate(): void {
-  // 资源经 context.subscriptions 自动释放
+/** 停用收尾（F13）：provider.dispose 驱动块 ID 协调器全量退役——未落地
+ *  的补 ID pending 尽力撤回，不留孤儿 ^id。deactivate 返回 thenable 时
+ * VSCode 等待（约 5s 窗口）；activate 未跑完（provider 未建）时无收尾 */
+let providerDispose: (() => Promise<void>) | undefined
+
+export function deactivate(): Promise<void> | undefined {
+  return providerDispose?.()
 }

@@ -28,6 +28,7 @@
 //   改写（新标记占了块 / id 被挪用）→ 认用户的，不复活旧标记、静默退出
 //   协调（V01 场景 5 及变体）。
 import { blockIdOfLine, collectBlockIds, standaloneBlockIdOf } from '../shared/blockId'
+import { parseWikilinkInner, scanWikilinksInLine } from '../shared/wikilink'
 import { planTargetBlockId, withdrawalGuard, type BlockIdWithdrawRecord } from '../shared/wikilinkBlock'
 
 /** 目标文档访问端口（vscode 层注入：openTextDocument 装载 + WorkspaceEdit）。
@@ -84,13 +85,58 @@ function markerForDoc(lfMarker: string, crlf: boolean): string {
   return crlf ? lfMarker.replace(/\n/g, '\r\n') : lfMarker
 }
 
+/** 来源 LF 全文中是否存在**结构上**指向 blockId 的块引用（F7）：逐行扫描
+ *  合法双链并经 parseWikilinkInner 全等比对——`#^id` 以纯文本/代码块形态
+ *  出现不算引用（不撤回真实链接的标记，也不被文本巧合误留） */
+function originTextReferencesBlockId(lfText: string, blockId: string): boolean {
+  if (blockId === '') {
+    return false
+  }
+  for (const rawLine of lfText.split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+    for (const occurrence of scanWikilinksInLine(line)) {
+      const parsed = parseWikilinkInner(occurrence.inner)
+      if (parsed !== null && parsed.blockId === blockId) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 export class WikilinkBlockIdCoordinator {
   private readonly ports: BlockIdCoordinatorPorts
   /** 来源 docUri → 活动记录（链接级粒度，少量） */
   private readonly records = new Map<string, BlockIdRecord[]>()
+  /** 来源 docUri → 串行队列尾（F1：异步入口互斥——读 records 到 set 的
+   *  await 窗口内并发入口会以陈旧快照覆盖写，丢失/复活记录或双 withdraw） */
+  private readonly originQueues = new Map<string, Promise<unknown>>()
 
   constructor(ports: BlockIdCoordinatorPorts) {
     this.ports = ports
+  }
+
+  /**
+   * per-origin 串行执行（F1 修复）：onHistoryApplied / cancelAccept /
+   * disposeOrigin / registerPending 的 records 读写全部入队——同一来源的
+   * 操作链式排队，前一任务完成（含失败）后下一个才开始，records 读写天然
+   * 互斥。队列尾完成时清 entry（空队列不留泄漏）。不同来源互不阻塞。
+   */
+  private runExclusive<T>(originDocUri: string, task: () => Promise<T> | T): Promise<T> {
+    const prev = this.originQueues.get(originDocUri) ?? Promise.resolve()
+    const run = prev.then(task, task)
+    const tail = run.then(
+      () => { this.releaseQueueTail(originDocUri, tail) },
+      () => { this.releaseQueueTail(originDocUri, tail) },
+    )
+    this.originQueues.set(originDocUri, tail)
+    return run
+  }
+
+  private releaseQueueTail(originDocUri: string, tail: Promise<void>): void {
+    if (this.originQueues.get(originDocUri) === tail) {
+      this.originQueues.delete(originDocUri)
+    }
   }
 
   /**
@@ -112,21 +158,26 @@ export class WikilinkBlockIdCoordinator {
     blockFirstLine: number
     targetCrlf: boolean
   }): void {
-    const list = this.records.get(input.originDocUri) ?? []
-    list.push({
-      reqId: input.reqId,
-      originDocUri: input.originDocUri,
-      targetFsPath: input.targetFsPath,
-      blockFirstLine: input.blockFirstLine,
-      id: input.id,
-      marker: markerForDoc(input.markerLf, input.targetCrlf),
-      offset: input.offset,
-      versionAfterInsert: input.versionAfterInsert,
-      confirmed: false,
-      everReferenced: false,
-      versionAfterWithdraw: -1,
+    // F1：写点入 per-origin 串行队列（fire-and-forget）——异步入口挂起
+    //（读盘 await）期间到达的新登记不被其后的 records.set 陈旧快照覆盖
+    // 丢失；调用方无需等待（后续 cancel/undo 消息经消息桥，晚于本微任务）
+    void this.runExclusive(input.originDocUri, () => {
+      const list = this.records.get(input.originDocUri) ?? []
+      list.push({
+        reqId: input.reqId,
+        originDocUri: input.originDocUri,
+        targetFsPath: input.targetFsPath,
+        blockFirstLine: input.blockFirstLine,
+        id: input.id,
+        marker: markerForDoc(input.markerLf, input.targetCrlf),
+        offset: input.offset,
+        versionAfterInsert: input.versionAfterInsert,
+        confirmed: false,
+        everReferenced: false,
+        versionAfterWithdraw: -1,
+      })
+      this.records.set(input.originDocUri, list)
     })
-    this.records.set(input.originDocUri, list)
   }
 
   /** 链接落地确认（wikilink.block.linked）：因果成立，历史协调激活 */
@@ -160,16 +211,19 @@ export class WikilinkBlockIdCoordinator {
    * 链接——尽力收尾撤回（V01 场景 6），风险时保留并提示；记录移除。
    */
   async cancelAccept(originDocUri: string, reqId: number): Promise<void> {
-    const list = this.recordsOf(originDocUri)
-    const keep: BlockIdRecord[] = []
-    for (const record of list) {
-      if (record.reqId === reqId && !record.confirmed) {
-        await this.withdraw(record)
-      } else {
-        keep.push(record)
+    // F1：records 读写入 per-origin 串行队列
+    await this.runExclusive(originDocUri, async () => {
+      const list = this.recordsOf(originDocUri)
+      const keep: BlockIdRecord[] = []
+      for (const record of list) {
+        if (record.reqId === reqId && !record.confirmed) {
+          await this.withdraw(record)
+        } else {
+          keep.push(record)
+        }
       }
-    }
-    this.records.set(originDocUri, keep)
+      this.records.set(originDocUri, keep)
+    })
   }
 
   /**
@@ -179,67 +233,83 @@ export class WikilinkBlockIdCoordinator {
    * 动作 best-effort）。
    */
   async onHistoryApplied(originDocUri: string, op: 'undo' | 'redo'): Promise<void> {
-    const list = this.recordsOf(originDocUri)
-    if (list.length === 0) {
-      return
-    }
-    const text = this.ports.getOriginText(originDocUri)
-    if (text === null) {
-      this.records.delete(originDocUri)
-      return
-    }
-    const keep: BlockIdRecord[] = []
-    for (const record of list) {
-      if (!record.confirmed) {
-        keep.push(record) // linked 未到：不做历史协调（可恢复暂停场景不误撤）
-        continue
+    // F1：records 读写入 per-origin 串行队列——连续 undo/redo 交错时后一
+    // 操作必在前一操作的撤回/重核与 records.set 完成后才开始（陈旧快照
+    // 不再覆盖写、同一记录不双 withdraw）
+    await this.runExclusive(originDocUri, async () => {
+      const list = this.recordsOf(originDocUri)
+      if (list.length === 0) {
+        return
       }
-      const referenced = text.includes(`#^${record.id}`)
-      if (op === 'undo' && !referenced && record.everReferenced) {
-        // 来源链接被撤销 → 尽力撤回本次新增标记（V01 双守卫）
-        const outcome = await this.withdraw(record)
-        if (outcome.kept) {
-          // 保留（风险/失败）：标记在场，后续 redo 重核可复用
-          record.everReferenced = false
-          keep.push(record)
-        } else {
-          // 撤回成功：记录留存待 redo 重核重建（标记已不在，版本守卫换轨）
-          const after = await this.ports.openTarget(record.targetFsPath)
-          record.versionAfterWithdraw = after !== null ? after.version : -1
-          record.everReferenced = false
-          keep.push(record)
+      const text = this.ports.getOriginText(originDocUri)
+      if (text === null) {
+        this.records.delete(originDocUri)
+        return
+      }
+      const keep: BlockIdRecord[] = []
+      for (const record of list) {
+        if (!record.confirmed) {
+          keep.push(record) // linked 未到：不做历史协调（可恢复暂停场景不误撤）
+          continue
         }
-        continue
-      }
-      if (op === 'redo' && referenced) {
-        // 来源链接重现（重做/再次接受）→ 重核目标
-        const next = await this.recheckAfterRedo(record)
-        if (next !== null) {
-          keep.push(next)
+        const referenced = text.includes(`#^${record.id}`)
+        if (op === 'undo' && !referenced && record.everReferenced) {
+          // 来源链接被撤销 → 尽力撤回本次新增标记（V01 双守卫）
+          const outcome = await this.withdraw(record)
+          if (outcome.kept) {
+            // 保留（风险/失败）：标记在场，后续 redo 重核可复用
+            record.everReferenced = false
+            keep.push(record)
+          } else {
+            // 撤回成功：记录留存待 redo 重核重建（标记已不在，版本守卫换轨）
+            const after = await this.ports.openTarget(record.targetFsPath)
+            record.versionAfterWithdraw = after !== null ? after.version : -1
+            record.everReferenced = false
+            keep.push(record)
+          }
+          continue
         }
-        continue
+        if (op === 'redo' && referenced) {
+          // 来源链接重现（重做/再次接受）→ 重核目标
+          const next = await this.recheckAfterRedo(record)
+          if (next !== null) {
+            keep.push(next)
+          }
+          continue
+        }
+        keep.push(record)
       }
-      keep.push(record)
-    }
-    this.records.set(originDocUri, keep)
+      this.records.set(originDocUri, keep)
+    })
   }
 
   /**
    * 来源会话退役（全部面板关闭）：未落地 pending 尽力收尾撤回（V01 场景
    * 6/7 收尾）；已落地记录按 origin-closed 移除并保留标记（迟到协调拒收
    * ——不动目标、不抛异常）。
+   * F7 修复：unconfirmed 记录先核对来源权威文本——linked 回包晚于 dispose
+   * 到达（已 post 未投递）时链接已落权威文本，此时链接真实在场，按
+   * origin-closed **保留标记**收尾（撤回会把用户可见的有效引用打成悬空）；
+   * 权威文本结构上确无该块引用（parseWikilinkInner 全等比对）才收尾撤回。
    */
   async disposeOrigin(originDocUri: string): Promise<void> {
-    const list = this.records.get(originDocUri)
-    if (!list) {
-      return
-    }
-    for (const record of list) {
-      if (!record.confirmed) {
-        await this.withdraw(record)
+    // F1：records 读写入 per-origin 串行队列
+    await this.runExclusive(originDocUri, async () => {
+      const list = this.records.get(originDocUri)
+      if (!list) {
+        return
       }
-    }
-    this.records.delete(originDocUri)
+      const text = this.ports.getOriginText(originDocUri)
+      for (const record of list) {
+        if (!record.confirmed) {
+          const referenced = text !== null && originTextReferencesBlockId(text, record.id)
+          if (!referenced) {
+            await this.withdraw(record)
+          }
+        }
+      }
+      this.records.delete(originDocUri)
+    })
   }
 
   /** 全量退役（扩展停用） */
@@ -253,7 +323,11 @@ export class WikilinkBlockIdCoordinator {
     return this.records.get(originDocUri) ?? []
   }
 
-  /** 尽力撤回（V01 双守卫 + 新使用检查；正向 delete，绝不 undo） */
+  /** 尽力撤回（V01 双守卫 + 新使用检查；正向 delete，绝不 undo）。
+   *  F2 修复：openTarget 快照经 hasOtherReferences 读盘 await 后守卫仍用
+   *  旧快照——deleteRange 执行前以活文档重读复核双守卫（版本不等或标记
+   *  不在记录 offset 逐字在场即放弃并走保留分支），不按陈旧 offset
+   *  positionAt 删错正文；复核读与 WorkspaceEdit 构造在同一同步段。 */
   private async withdraw(record: BlockIdRecord): Promise<WithdrawOutcome> {
     const target = await this.ports.openTarget(record.targetFsPath)
     if (target === null) {
@@ -273,7 +347,18 @@ export class WikilinkBlockIdCoordinator {
       this.ports.notifyKept(verdict.reason, record.id)
       return { kept: true, reason: verdict.reason }
     }
-    const ok = await target.deleteRange(verdict.offset, verdict.length)
+    // F2 TOCTOU 复核：读盘窗口内目标可能已变——重新装载活文档复核双守卫
+    const live = await this.ports.openTarget(record.targetFsPath)
+    if (live === null) {
+      this.ports.notifyKept('not-found', record.id)
+      return { kept: true, reason: 'not-found' }
+    }
+    const liveVerdict = withdrawalGuard(record, { text: live.text, version: live.version })
+    if (liveVerdict.action === 'keep') {
+      this.ports.notifyKept(liveVerdict.reason, record.id)
+      return { kept: true, reason: liveVerdict.reason }
+    }
+    const ok = await live.deleteRange(liveVerdict.offset, liveVerdict.length)
     if (!ok) {
       this.ports.notifyKept('apply-failed', record.id)
       return { kept: true, reason: 'apply-failed' }

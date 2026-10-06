@@ -375,9 +375,9 @@ export function createTextEditorProvider(
    *  extension.ts 注入 createIndexMaintenance 产物） */
   indexMaintenance?: IndexMaintenance,
   /** #239 分词资源接线（jieba 下载/删除宿主权威；编辑器面板消费
-   *  wordSegment.get 应答与 loadResult 转发、状态变化广播） */
+   *  wordSegment.get 应答与 loadResult 转发、状态变更广播） */
   jieba?: JiebaWiring,
-): vscode.CustomTextEditorProvider {
+): vscode.CustomTextEditorProvider & { dispose(): Promise<void> } {
   const sessions = new Map<string, SessionEntry>()
   const diagnostics = new TestDiagnostics()
   // ---- #342（P3-10）外链元信息服务：provider 级单例（跨面板共享缓存与
@@ -2406,7 +2406,13 @@ export function createTextEditorProvider(
     }
   }
 
-  const provider: vscode.CustomTextEditorProvider = {
+  // F13：provider 公开停用收尾——blockIdCoordinator.disposeAll 对未落地
+  // 的补 ID pending 尽力撤回（来源会话还在场时 linked 未到的记录按权威
+  // 文本核对后收尾），由 extension.deactivate 返回其 Promise 驱动
+  //（VSCode 停用窗口约 5s；面板尚开时 confirmed 记录本就不在收尾范围）
+  const provider: vscode.CustomTextEditorProvider & {
+    dispose(): Promise<void>
+  } = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
       // 默认把 .md 交给本扩展，用户上次停留在源码态则还原该选择。早退：
@@ -3603,6 +3609,12 @@ export function createTextEditorProvider(
           holdSkeleton: process.env.VSIDIAN_TEST_HOOKS === '1',
         },
       )
+    },
+
+    // F13：扩展停用收尾——协调器全量退役（未落地 pending 尽力撤回；linked
+    // 在途的记录按权威文本核对，见 disposeOrigin 的 F7 语义）
+    dispose(): Promise<void> {
+      return blockIdCoordinator.disposeAll()
     },
   }
 
