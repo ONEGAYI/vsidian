@@ -57,6 +57,11 @@ const wsDirs = []
 const wsFiles = []
 const portableDirs = []
 const testCacheDir = path.join(root, '.vscode-test')
+// #350 T01 附加组件夹具（清单与实现见 test/integration/addonFixtures/）：
+// 兼容注册（addon-ok）、声明合法但不兼容（addon-incompatible）、激活失败
+// （addon-fail）
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail'].map((name) =>
+  path.join(root, 'test', 'integration', 'addonFixtures', name))
 const started = Date.now()
 try {
   // 所有宿主结束后再清理便携目录；若一片启动异常，也不能清理仍在运行的其他片。
@@ -85,6 +90,9 @@ try {
         extensionsDir: portable.extensionsDir,
         userDataDir: portable.userDataDir,
         disableExtensions: true,
+        // #350 T01 附加组件夹具：以附加 development path 装载——与被测扩
+        // 展同宿主，供集成用例断言发现、兼容检查、唤醒与状态呈现
+        extraExtensionPaths: ADDON_FIXTURE_PATHS,
       })
       // CI 的 xvfb 虚拟显示无 GPU，Electron GPU 进程反复崩溃会拖垮 webview 面板
       if (process.env.CI) {

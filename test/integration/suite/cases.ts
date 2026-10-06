@@ -95,6 +95,9 @@ const CMD = {
   getKeybindings: 'onegayi.vsidian._test.getKeybindings',
   setKeybindings: 'onegayi.vsidian._test.setKeybindings',
   resetKeybindings: 'onegayi.vsidian._test.resetKeybindings',
+  // #350 T01 附加组件：状态载荷观测与手动重扫（重复请求幂等断言面）
+  getAddonsState: 'onegayi.vsidian._test.getAddonsState',
+  addonsRescan: 'onegayi.vsidian._test.addonsRescan',
 }
 
 const wsDir = process.env['WORKSPACE_DIR'] ?? ''
@@ -17198,5 +17201,130 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.workspace.applyEdit(reset)
     await poll('来源清回基线', () => doc.getText() === '来源正文\n' ? true : undefined)
     await doc.save()
+  }],
+
+  // ---- #350 T01：附加组件身份发现、兼容检查与轻量注册 ---- 夹具扩展由
+  // runTest.mjs 以附加 --extensionDevelopmentPath 装载（addon-ok 兼容注册 /
+  // addon-incompatible 声明合法但不兼容 / addon-fail 激活即抛错）。呈现面
+  // 的用户可见文本由 vitest jsdom 套件钉住（addonSettingsSection.test.ts，
+  // 与生产 settingsMain 同构装配）；此处断言真宿主侧「协调器算出的状态」
+  // 「两条激活路径只注册一次」「重复注册与清单刷新幂等」与设置页消息通道。
+
+  ['附加组件：身份发现、兼容检查与两条激活路径（#350）', async () => {
+    // API 在注册前可访问：自身激活完成后 exports 已公布（依赖等待语义）
+    const host = vscode.extensions.getExtension(EXT_ID)
+    assert(host, '被测扩展须在场')
+    const exports = (await host.activate()) as
+      | { apiVersion: string; registerAddon: (owner: unknown, definition?: unknown) => unknown }
+      | undefined
+    assert(exports && exports.apiVersion === '1.0.0',
+      `导出 API 应含 apiVersion 1.0.0，实际 ${JSON.stringify(exports && exports.apiVersion)}`)
+    assert(typeof exports!.registerAddon === 'function', '导出 API 应含 registerAddon 函数')
+
+    // 路径一（VSCode 原生激活）：contributes.commands 自动派生激活事件，
+    // 命令执行即激活组件（依赖先激活 Vsidian，组件激活中注册）
+    const stats = (await vscode.commands.executeCommand(
+      'vsidian-test-fixture.addon-ok.stats')) as {
+        activateCount: number; registerCount: number; setupCount: number
+        lastRegisterResult: { ok: boolean } | null; apiVersionAtRegister: string | null
+      }
+    assert(stats.activateCount === 1, `夹具应恰被激活一次，实际 ${stats.activateCount}`)
+    assert(stats.registerCount === 1, `夹具应恰注册一次（两路径共用幂等 activate），实际 ${stats.registerCount}`)
+    assert(stats.setupCount === 1, `setup 应恰执行一次，实际 ${stats.setupCount}`)
+    assert(stats.lastRegisterResult?.ok === true, `首次注册应成功，实际 ${JSON.stringify(stats.lastRegisterResult)}`)
+    assert(stats.apiVersionAtRegister === '1.0.0', `注册时 API 应可访问（版本随行），实际 ${String(stats.apiVersionAtRegister)}`)
+
+    // 路径二（Vsidian 主动唤醒）与状态判定：轮询协调器状态收敛
+    const state = async () =>
+      (await vscode.commands.executeCommand(CMD.getAddonsState)) as {
+        apiVersion: string; draft: boolean
+        addons: Array<{ id: string; label: string; official: boolean; status: string; detail?: string; apiRange?: string }>
+      }
+    await poll('不兼容夹具状态收敛', async () => {
+      const s = await state()
+      return s.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-incompatible')
+        ?.status === 'incompatible' ? s : undefined
+    })
+    await poll('激活失败夹具状态收敛', async () => {
+      const s = await state()
+      const entry = s.addons.find((item) => item.id === 'vsidian-test-fixture.addon-fail')
+      return entry?.status === 'activation-failed' && typeof entry.detail === 'string' &&
+        entry.detail.includes('intentional activation failure') ? s : undefined
+    })
+    const settled = await state()
+    const ok = settled.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-ok')
+    assert(ok?.status === 'registered', `兼容夹具应为 registered，实际 ${JSON.stringify(ok)}`)
+    const incompatible = settled.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-incompatible')
+    assert(incompatible?.apiRange === '^2.0.0', `不兼容状态应携带声明范围，实际 ${JSON.stringify(incompatible)}`)
+    assert(settled.apiVersion === '1.0.0' && settled.draft === true,
+      `载荷应含候选版本与草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
+
+    // 普通扩展不入列表：内置扩展（vscode.* / ms-*）无身份声明，一律不在场
+    for (const entry of settled.addons) {
+      assert(!entry.id.startsWith('vscode.') && !entry.id.startsWith('ms-'),
+        `普通扩展不得入组件列表，实际含 ${entry.id}`)
+    }
+    // 官方清单初版为空：全部归第三方
+    assert(settled.addons.every((entry) => entry.official === false), '官方清单为空时全部应为第三方')
+    console.log('[#350] 身份发现、兼容检查与两条激活路径通过（夹具 3 个：ok/incompatible/fail）')
+  }],
+
+  ['附加组件：重复注册与清单刷新幂等（#350）', async () => {
+    const stats = async () =>
+      (await vscode.commands.executeCommand('vsidian-test-fixture.addon-ok.stats')) as {
+        registerCount: number; setupCount: number
+        lastRegisterResult: { ok: boolean; reason?: string } | null
+      }
+    const before = await stats()
+    assert(before.setupCount === 1, `前置：setup 应恰一次，实际 ${before.setupCount}`)
+    // 显式重复注册：同一接入代次返回 already-registered，setup 不重跑
+    const again = (await vscode.commands.executeCommand(
+      'vsidian-test-fixture.addon-ok.registerAgain')) as { ok: boolean; reason?: string }
+    assert(again.ok === false && again.reason === 'already-registered',
+      `重复注册应返回 already-registered，实际 ${JSON.stringify(again)}`)
+    const afterRegister = await stats()
+    assert(afterRegister.setupCount === 1, `重复注册不得重跑 setup，实际 ${afterRegister.setupCount}`)
+    // 清单刷新（重复扫描请求）：不重复唤醒、不重复注册
+    await vscode.commands.executeCommand(CMD.addonsRescan)
+    await vscode.commands.executeCommand(CMD.addonsRescan)
+    const afterRescan = await stats()
+    assert(afterRescan.setupCount === 1 && afterRescan.registerCount === afterRegister.registerCount,
+      `重扫不得重复注册（register ${afterRescan.registerCount} / setup ${afterRescan.setupCount}）`)
+    const state = (await vscode.commands.executeCommand(CMD.getAddonsState)) as {
+      addons: Array<{ id: string; status: string }>
+    }
+    const ok = state.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-ok')
+    assert(ok?.status === 'registered', `重扫后应仍为 registered，实际 ${JSON.stringify(ok)}`)
+    console.log('[#350] 重复注册与清单刷新幂等通过')
+  }],
+
+  ['附加组件：设置页状态区载荷与入口通道（#350）', async () => {
+    const state = (await vscode.commands.executeCommand(CMD.getAddonsState)) as {
+      apiVersion: string; draft: boolean
+      addons: Array<{ id: string; label: string; status: string; official: boolean }>
+    }
+    // 载荷三态齐备（呈现面文本由 jsdom 套件钉住）
+    const byId = new Map(state.addons.map((entry) => [entry.id, entry.status]))
+    assert(byId.get('vsidian-test-fixture.addon-ok') === 'registered',
+      `载荷应含 registered 状态，实际 ${JSON.stringify(state.addons)}`)
+    assert(byId.get('vsidian-test-fixture.addon-incompatible') === 'incompatible',
+      `载荷应含 incompatible 状态，实际 ${JSON.stringify(state.addons)}`)
+    assert(byId.get('vsidian-test-fixture.addon-fail') === 'activation-failed',
+      `载荷应含 activation-failed 状态，实际 ${JSON.stringify(state.addons)}`)
+    assert(state.addons.every((entry) => typeof entry.label === 'string' && entry.label.length > 0),
+      '每条载荷应携带展示名（displayName 或 id 回退）')
+
+    // 打开真实设置页面板，经正式消息通道拉取状态（webview 装载回填链路）
+    await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+    await poll('设置页打开并就绪', async () => {
+      const info = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { open: boolean; ready: boolean } | undefined
+      return info?.open && info.ready ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'addons.get' })
+    // 市场搜索入口通道走通（打开 VSCode 扩展视图搜索——安装管理仍归 VSCode）
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'addons.openSearch' })
+    await vscode.commands.executeCommand(CMD.closeSettingsPage)
+    console.log('[#350] 设置页状态区载荷与入口通道通过')
   }],
 ]

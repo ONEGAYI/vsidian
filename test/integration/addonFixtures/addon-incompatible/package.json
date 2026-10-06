@@ -1,0 +1,12 @@
+{
+  "name": "addon-incompatible",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (Incompatible)",
+  "description": "Integration fixture: a declared but API-incompatible Vsidian add-on (T01, #350).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "vsidianAddon": { "manifestVersion": 1, "api": "^2.0.0" }
+}

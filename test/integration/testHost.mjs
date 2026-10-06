@@ -27,7 +27,7 @@ function openReport(reportPath, stderr) {
   }
 }
 
-export function buildTestHostArgs({ workspaceDir, testsPath, extensionPath, extensionsDir, userDataDir, disableExtensions = false }) {
+export function buildTestHostArgs({ workspaceDir, testsPath, extensionPath, extensionsDir, userDataDir, disableExtensions = false, extraExtensionPaths = [] }) {
   return [
     ...(disableExtensions ? ['--disable-extensions'] : []),
     '--no-sandbox',
@@ -38,7 +38,10 @@ export function buildTestHostArgs({ workspaceDir, testsPath, extensionPath, exte
     '--no-cached-data',
     '--disable-workspace-trust',
     `--extensionTestsPath=${testsPath}`,
+    // #350 T01 附加组件夹具：--extensionDevelopmentPath 可重复传递（CLI
+    // 定义为多值），附加夹具扩展与被测扩展同宿主装载
     `--extensionDevelopmentPath=${extensionPath}`,
+    ...extraExtensionPaths.map((extra) => `--extensionDevelopmentPath=${extra}`),
     `--extensions-dir=${extensionsDir}`,
     `--user-data-dir=${userDataDir}`,
     workspaceDir,
