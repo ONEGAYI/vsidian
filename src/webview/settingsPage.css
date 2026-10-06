@@ -498,3 +498,19 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
   .vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) { display: block; overflow-y: auto; }
   .vsidian-style-ref-list { overflow: visible; }
 }
+
+/* ---- #350 T01「附加组件」分页：状态列表与 VSCode 管理入口（内部样式，
+   非公开样式契约入口——设置页域与 defedit/index 族同层） ---- */
+.vsidian-addons-list { display: flex; flex-direction: column; gap: 10px; }
+.vsidian-addons-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 0 6px; }
+.vsidian-addons-actions button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-actions button.vsidian-addons-primary {
+  color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4);
+  border-color: transparent; }
+.vsidian-addons-actions button.vsidian-addons-primary:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
+.vsidian-addons-apiversion { min-height: 20px; margin: 8px 0 0;
+  color: var(--vscode-descriptionForeground, #666); }

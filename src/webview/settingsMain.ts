@@ -12,6 +12,7 @@ import { AppearanceSection } from './appearanceSettings'
 import { IndexMaintenanceSection } from './indexMaintenanceSettings'
 import { WordSegmentSection } from './wordSegmentSettings'
 import { DefaultEditorSection } from './defaultEditorSettings'
+import { AddonSection } from './addonSettingsSection'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
 import { isTrustedHostMessageSource } from './untrustedFrame'
@@ -50,11 +51,14 @@ const wordSegment = new WordSegmentSection({ postMessage: (message) => vscode.po
 // #323 默认编辑器守护：常规页「默认编辑器」委托组（状态行四形态 +
 // 守护开关 + 手动设为默认；判定权威在宿主，defaultEditor.state 推送回显）
 const defaultEditor = new DefaultEditorSection({ postMessage: (message) => vscode.postMessage(message) })
+// #350 T01 附加组件：状态列表 + 市场搜索 + VSCode 扩展管理入口（状态
+// 权威在宿主，addons.state 推送回显；装载即拉取）
+const addons = new AddonSection({ postMessage: (message) => vscode.postMessage(message) })
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
-  [keybindings, appearance, indexMaintenance],
+  [keybindings, appearance, indexMaintenance, addons],
   [wordSegment],
   [defaultEditor],
 )
@@ -72,6 +76,9 @@ vscode.postMessage({ kind: 'wordSegment.get' })
 // #323 默认编辑器守护状态：同「装载即拉取」模式（defaultEditor.state
 // 应答；associations 变化与手动改回后宿主经 onStateChanged 推送）
 vscode.postMessage({ kind: 'defaultEditor.get' })
+// #350 T01 附加组件状态：同「装载即拉取」模式（addons.state 应答；发现/
+// 唤醒/注册变化后宿主经协调器 onStateChanged 推送）
+vscode.postMessage({ kind: 'addons.get' })
 
 window.addEventListener('message', (event) => {
   // #344（P3-12 收口）消息桥隔离与主 webview 对齐：来源非真宿主桥的
@@ -87,5 +94,6 @@ window.addEventListener('message', (event) => {
   indexMaintenance.handleHostMessage(event.data)
   wordSegment.handleHostMessage(event.data)
   defaultEditor.handleHostMessage(event.data)
+  addons.handleHostMessage(event.data)
   handleLocaleChangedMessage(event.data)
 })

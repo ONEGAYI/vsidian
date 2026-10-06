@@ -967,6 +967,26 @@ export const en = {
   'defaultEditor.statusOther': 'Another extension: {name}',
   'defaultEditor.statusNone': 'No association recorded — VSCode picks the editor when a Markdown file opens',
   'defaultEditor.fixButton': 'Set as Default',
+  /** #350 T01 附加组件：设置页「附加组件」分页（状态列表与 VSCode 管理入口） */
+  'settings.addonsSection': 'Add-ons',
+  'settings.addonsSectionDescription': 'Vsidian add-ons are separate VSCode extensions. Install, uninstall and disable them in VSCode; their capabilities register through the add-on API. The add-on API is still a draft.',
+  'addons.groupOfficial': 'Core add-ons',
+  'addons.groupThirdParty': 'Third-party add-ons',
+  'addons.empty': 'No Vsidian add-ons are visible in the current extension host.',
+  'addons.statusRegistered': 'Registered',
+  'addons.statusActivating': 'Activating…',
+  'addons.statusAwaitingRegistration': 'Activated — waiting for the add-on to register',
+  'addons.statusIncompatible': 'Incompatible: declared API {range}, host API {version}',
+  'addons.statusActivationFailed': 'Activation failed: {detail}',
+  'addons.statusHostUnavailable': 'Not visible in the current extension host — check its installation or running location via VSCode extension management',
+  'addons.statusInvalidDeclaration': 'Invalid identity declaration: {detail}',
+  'addons.apiVersionLabel': 'Add-on API version {version} (draft — not a published stable API)',
+  'addons.searchMarketplace': 'Search Marketplace for add-ons',
+  'addons.openExtensionsView': 'Manage extensions in VSCode',
+  'addons.openDetail': 'Extension details',
+  'addons.officialBadge': 'Official',
+  /** #350 T01 附加组件：宿主输出通道名（安装态日志，标明组件 ID 与原因） */
+  'host.addonsChannelName': 'Vsidian Add-ons',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

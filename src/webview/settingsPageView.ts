@@ -32,7 +32,7 @@ export interface SettingsPageSection {
    *  （#332 二轮自链环 glyph 换装：文件夹 + 右下角齿轮，用户指定意象）；
    *  'keyboard' 为快捷键分页的字形（#264 中文分词分页退役——其曾占位借
    *  用的 keyboard 槽位随之消失） */
-  icon: 'keyboard' | 'editor' | 'palette' | 'folderCog'
+  icon: 'keyboard' | 'editor' | 'palette' | 'folderCog' | 'blocks'
   entries: readonly { id: string; title: string; description?: string }[]
   /**
    * 附加分页内嵌标准设置行组（#332 设置重组）：每组由视图统一装配为 h3
@@ -171,6 +171,10 @@ const ICON_PATHS = {
   experimental:
     'M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2 M8.5 2h7 M7 15h10',
   table: 'M3 5h18v14H3zM12 5v14M3 12h18',
+  // blocks（#350 T01「附加组件」分页）：2×2 四块圆角方块——独立扩展模块
+  // 组合成整体的意象（与 VSCode 扩展图标同构，纯几何零认知风险）
+  blocks:
+    'M4 2h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M15 2h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M4 13h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z M15 13h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
