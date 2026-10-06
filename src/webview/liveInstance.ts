@@ -374,8 +374,9 @@ export interface LiveEditorInstanceDeps {
    *  决策与快照管线在根）。返回 true = 根接管（实例 preventDefault）；
    *  未提供或返回 false 放行默认粘贴链（嵌入实例缺省回落原生粘贴） */
   onRichPasteHtml?(payload: { view: EditorView; html: string; text?: string }): boolean
-  /** #376 T01 双链联想会话启用（主正文实例 true；嵌入实例缺省 false——
-   *  T01 仅主正文接线，内部 Live 的联想随后续票经 refEdit 通道接入） */
+  /** #376 T01 双链联想会话启用（#381 T06 起主正文与内部 Live 实例都启用
+   *  ——内部 B 的查询经 refEdit.message 信封出站、回包经 refEdit.push 信封
+   *  定向回推，接线在 embedCard 侧；缺省 false 供测试等环境显式关闭） */
   enableWikilinkSuggest?: boolean
   /** #379 T04 双链联想的轻提示通道（重复标题风险提示等）：根 toast 面的
    *  注入点；缺省静默跳过（无 toast 面的装配不阻塞确认） */
@@ -420,7 +421,8 @@ export class LiveEditorInstance {
   private readonly tabEscapeCompartment = new Compartment()
   private readonly darkCompartment = new Compartment()
   private hostDarkApplied: boolean | undefined
-  /** #376 T01 双链联想会话（主正文实例持有；嵌入实例为 null 不装配） */
+  /** #376 T01 双链联想会话（#381 T06 起主正文与内部 Live 实例都按
+   *  deps.enableWikilinkSuggest 装配；关闭时为 null） */
   private readonly wikilinkSuggest: WikilinkSuggestController | null
   /** #161 图片粘贴：面板内自增 reqId 与在途集合（结果按 reqId 路由，
    *  陈旧/未知 reqId 的回包丢弃，防止重复插入）；总开关运行时读设置
@@ -696,6 +698,12 @@ export class LiveEditorInstance {
   /** 候选失效信号（#377 T02）：索引/清单变更——控制器去抖后重发当前查询 */
   handleWikilinkInvalidate(): void {
     this.wikilinkSuggest?.handleInvalidate()
+  }
+
+  /** 候选会话是否在场（#381 T06：嵌入 Esc 链的豁免判定——候选先关一次，
+   *  下一次 Esc 才走引用关闭链路；未装配联想的实例恒 false） */
+  hasActiveWikilinkSuggest(): boolean {
+    return this.wikilinkSuggest !== null && this.wikilinkSuggest.hasActiveSession()
   }
 
   /** 显式关闭候选（模式切换等根时机；幂等） */
@@ -1922,7 +1930,9 @@ export class LiveEditorInstance {
       frontmatterEditing,
       // #376 T01 双链联想候选：keymap 必须置于 fenceEscape 之前（keymap
       // 正序尝试——候选确认/导航仅在会话内消费，未命中 return false 落穿
-      // 越界/切格/缩进/列表延续链）。主正文实例装配；嵌入实例不装配
+      // 越界/切格/缩进/列表延续链）。#381 T06 起主正文与嵌入实例统一装配；
+      // 嵌入的 Esc 与本 keymap 的次序协调在 embedCard.embedEscapeKeymap
+      //（Prec.high 先尝试——候选在场时豁免落穿到本组）
       ...(this.wikilinkSuggest ? [this.wikilinkSuggest.extension] : []),
       // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
       // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按

@@ -31,7 +31,9 @@ export interface RefEditBinding {
  *  settings.snapshot / view.state.request 等面板级消息）不进目标端口通道
  *  ——它们经 ready 注入的 init 之后的补发只对根面板有意义。
  *  资源回包经信封按 portId 定向回推（不广播根面板——实例管理器的 reqId
- *  空间与 A 面板独立，广播投递会在撞号时错插错图）。返回 null = 不推送。 */
+ *  空间与 A 面板独立，广播投递会在撞号时错插错图）。#381 T06 起双链联想
+ *  回包与失效信号同信封（B 内候选的迟到守卫在 webview 实例侧——reqId/
+ *  generation/会话三重，信封只负责定向回推）。返回 null = 不推送。 */
 export function wrapRefEditPush(
   binding: RefEditBinding,
   message: HostToWebview,
@@ -46,6 +48,11 @@ export function wrapRefEditPush(
     case 'image.invalidate':
     case 'image.paste.result':
     case 'refresh.invalidated':
+    case 'wikilink.query.result':
+    case 'wikilink.heading.query.result':
+    case 'wikilink.block.query.result':
+    case 'wikilink.block.accept.result':
+    case 'wikilink.invalidate':
       return { kind: 'refEdit.push', portId: binding.portId, fsPath: binding.fsPath, message: message as RefEditHostEvent }
     default:
       return null
@@ -201,7 +208,10 @@ export class RefEditPortRegistry {
 /** refEdit.message 的内消息是否属于端口通道（冗余防线：协议校验已白名单，
  *  provider 路由前再判定一次——错误路由直接写 B 的代价高）。P2-11 起资源
  *  消息同通道：B 会话按自身 docUri 守卫并以 B 目录/根边界解析执行；P2-14
- *  起 codeblock.copy 同通道（复制文本经 B 会话 EOL 归一后走宿主剪贴板）。 */
+ *  起 codeblock.copy 同通道（复制文本经 B 会话 EOL 归一后走宿主剪贴板）。
+ *  #381 T06 起双链联想查询族同通道：宿主在 provider 层以 B 为来源文档执行
+ *  （不走 B 会话的 handleWebviewMessage——DocumentSession 对该族显式
+ *  no-op，执行体与索引服务在 provider 域）。 */
 export function isRefEditClientMessage(message: WebviewToHost): boolean {
   switch (message.kind) {
     case 'edit.request':
@@ -216,6 +226,12 @@ export function isRefEditClientMessage(message: WebviewToHost): boolean {
     case 'image.paste':
     case 'refresh.request':
     case 'codeblock.copy':
+    case 'wikilink.query':
+    case 'wikilink.heading.query':
+    case 'wikilink.block.query':
+    case 'wikilink.block.accept':
+    case 'wikilink.block.linked':
+    case 'wikilink.block.cancel':
       return true
     default:
       return false

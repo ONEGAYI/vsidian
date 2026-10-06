@@ -1820,5 +1820,28 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 't05-same.md'), 't05 同文档段落行一\n同文档段落行二\n\n同文档落点锚\n', 'utf8')
+  // #381 T06 表格及引用内部 Live 联想：来源 A（嵌入 B）+ 目标 B（子目录，
+  // 含表格）+ C（无 id 块）+ 同名文件（根/sub 各一，目录区分候选）
+  mkdirSync(path.join(wsDir, 'sub'), { recursive: true })
+  writeFileSync(path.join(wsDir, 't06-a.md'), [
+    '# T06 来源甲',
+    '',
+    '![[sub/t06-b.md]]',
+    '',
+    '来源甲正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'sub', 't06-b.md'), [
+    '# T06 目标乙',
+    '',
+    '目标乙正文与落点。',
+    '',
+    '| 单元格 | 说明 |',
+    '| --- | --- |',
+    '| [[ ]] | t |',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'sub', 't06-c.md'), 't06 子目录无 id 段落行一\n子目录段落行二\n', 'utf8')
+  writeFileSync(path.join(wsDir, 't06-c.md'), 't06 根目录段落（与 sub 同名文件）\n', 'utf8')
   return { largeDocLines: LARGE_DOC_LINES }
 }

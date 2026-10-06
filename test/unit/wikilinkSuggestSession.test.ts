@@ -1131,3 +1131,127 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
     }
   })
 })
+
+// ---- #381 T06：表格格内联想（pipeEscape 端到端）与 focusout 关闭 ----
+
+describe('表格格内联想：转义竖线识别、确认与键位优先级（#381 T06）', () => {
+  // 行 1：| [[A\|B]] | c | —— 光标 5 = A 后（转义管前）；2 格 × 2 列合法表格
+  const TABLE_DOC = '| [[A\\|B]] | c |\n| --- | --- |\n| x | y |'
+
+  it('格内目标区输入触发查询；Tab 确认替换文件字段、已有转义别名原样保留（网格完整）', () => {
+    const { controller, sent, view } = setup(TABLE_DOC)
+    try {
+      locate(controller, 5)
+      typeAt(view, 5, 'x')
+      expect(lastQuery(sent)?.query).toBe('Ax')
+      respond(controller, sent, [FANGAN])
+      expect(popupState().open).toBe(true)
+      press(view, 'Tab')
+      // 确认替换整个文件字段（Ax → ../资料/方案.md），已有转义别名 \|B
+      // 复用保留、光标落转义管前——格边界裸管未被触碰（网格完整）
+      expect(view.state.doc.line(1).text).toBe('| [[../资料/方案.md\\|B]] | c |')
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('格内无分隔符确认补默认别名写转义竖线（不写裸竖线破坏网格）', () => {
+    const { controller, sent, view } = setup('| [[A]] | c |\n| --- | --- |\n| x | y |')
+    try {
+      locate(controller, 5)
+      deleteAt(view, 4, 5) // A → 空字段，触发空查询
+      respond(controller, sent, [FANGAN])
+      press(view, 'ArrowDown') // 空查询无高亮——↓ 取首项
+      press(view, 'Enter')
+      expect(view.state.doc.line(1).text).toBe('| [[../资料/方案.md\\|方案]] | c |')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('格内会话中按 | 插转义竖线（无高亮保留原输入、关闭候选）', () => {
+    const { controller, sent, view } = setup('| [[A]] | c |\n| --- | --- |\n| x | y |')
+    try {
+      locate(controller, 5)
+      typeAt(view, 5, 'x')
+      respond(controller, sent, []) // 空结果：无高亮
+      press(view, '|')
+      expect(view.state.doc.line(1).text).toBe('| [[Ax\\|]] | c |')
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('无高亮 Tab 不被候选吞键：按 #125 两步越出围栏后落到表格切格', () => {
+    const { controller, sent, view } = setup('| [[A]] | c |\n| --- | --- |\n| x | y |')
+    try {
+      locate(controller, 5)
+      deleteAt(view, 4, 5)
+      respond(controller, sent, []) // 无可确认项
+      expect(view.state.doc.line(1).text).toBe('| [[]] | c |')
+      // Tab1/Tab2：fenceEscape 围栏内两步越界（#125 既定优先级——候选
+      // 落穿后先越界再切格）；Tab3：tableTabForward 切到下一格（c 内容区）
+      press(view, 'Tab')
+      expect(view.state.selection.main.head).toBe(5)
+      press(view, 'Tab')
+      expect(view.state.selection.main.head).toBe(6)
+      press(view, 'Tab')
+      const sel = view.state.selection.main
+      expect(sel.head).toBe(9)
+      expect(view.state.doc.line(1).text.slice(sel.head - 1, sel.head + 1)).toContain('c')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('裸管切开的双链形态不跨格识别（窗口截断：格内无闭合围栏不触发）', () => {
+    // 3 列合法表格：header 三格 = [[A / B]] / c——格 0 窗口 = `[[A `，
+    // 右侧裸管截断后无 ]]: 识别不跨格
+    const { controller, sent, view } = setup('| [[A | B]] | c |\n| --- | --- | --- |\n| x | y | z |')
+    try {
+      locate(controller, 5)
+      typeAt(view, 5, 'x')
+      expect(queries(sent)).toHaveLength(0)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('候选中的 Esc 先关列表（不进入其他 Esc 链路）；显示文字字段（越过转义管）不触发', () => {
+    const { controller, sent, view } = setup(TABLE_DOC)
+    try {
+      locate(controller, 5)
+      typeAt(view, 5, 'x')
+      respond(controller, sent, [FANGAN])
+      press(view, 'Escape')
+      expect(popupState().open).toBe(false)
+      expect(view.state.doc.line(1).text).toContain('[[Ax\\|B]]') // 正文未被 Esc 改写
+      const count = queries(sent).length
+      // 显示文字字段（B 内）输入不触发
+      locate(controller, 8)
+      typeAt(view, 8, 'y')
+      expect(queries(sent).length).toBe(count)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('焦点离开编辑器关闭候选（多实例并存不残留浮层）', () => {
+    const { controller, sent, view } = setup(TABLE_DOC)
+    try {
+      locate(controller, 5)
+      typeAt(view, 5, 'x')
+      respond(controller, sent, [FANGAN])
+      expect(popupState().open).toBe(true)
+      view.contentDOM.dispatchEvent(
+        new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }),
+      )
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+})

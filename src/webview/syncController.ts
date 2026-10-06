@@ -1096,6 +1096,9 @@ export class WebviewSyncController {
       // P2-05（#282）主编辑器（A 的 Live 视图）：删除活跃引用的拦截重放
       // 在确认后派发（changeFilter 由 rootOwnedViewExtensions 装配）
       mainEditorView: () => this.view ?? null,
+      // #381 T06 内部 Live 双链联想的轻提示通道（重复标题风险/块接受失败
+      // 呈现）：与主正文共用根 toast 面（B 嵌入在 A 的 webview 内）
+      notifyToast: (text, severity) => this.toast?.show(text, severity),
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
@@ -2227,6 +2230,15 @@ export class WebviewSyncController {
         // 请求管线——实例竞态守卫后经 refEdit.message 出站）
         this.embedCards?.testHistory(message.inner, message.op, message.occurrence ?? 0)
         break
+      case 'embed.test.domType':
+        // #381 T06 测试钩子：嵌入实例的浏览器输入路径（真实 contentEditable
+        // 输入——驱动 symbol 补全与候选触发链）
+        this.embedCards?.domTypeInEmbed(message.inner, message.text, message.occurrence ?? 0)
+        break
+      case 'embed.test.key':
+        // #381 T06 测试钩子：嵌入实例派发 keydown（候选会话键同一 keymap 链）
+        this.embedCards?.keyInEmbed(message.inner, message.key, message.occurrence ?? 0)
+        break
       case 'embed.test.pasteImage':
         // P2-11 测试钩子：向嵌入实例注入图片粘贴载荷（与真实 paste 拦截
         // 同一实例管线——reqId 分配/在途登记/经目标端口出站）
@@ -2386,7 +2398,8 @@ export class WebviewSyncController {
       }
       case 'wikilink.query.result': {
         // #376 T01 双链联想查询结果：reqId/generation/会话守卫随实例
-        //（主正文实例持有联想会话；嵌入实例不出站查询、无回包）
+        //（主正文实例持有联想会话；#381 T06 起嵌入实例的回包经
+        // refEdit.push 信封由 embedCards.notifyPush 定向路由，不经本分支）
         this.live?.handleWikilinkQueryResult(message)
         break
       }

@@ -26,9 +26,21 @@
 //
 // 本模块不依赖 vscode/DOM/CM6（node 单测直驱；webview 侧叠加代码上下文
 // /frontmatter/表格格区等环境守卫后消费）。
+//
+// #381 T06 表格格形态（pipeEscape）：表格单元格内的别名分隔符为转义序列
+// `\|`（两字符——裸 `|` 是格边界，写入会破坏网格，见 shared/tableCells 的
+// 转义口径）。pipeEscape 模式下围栏内只认 `\|` 为分隔符（pipeAt 指向 `\`，
+// pipeWidth=2），编辑计划插入/复用分隔符时写 `\|`。调用方负责把识别窗口
+// 收窄到格内容（裸管之外），本模块不判定表格形态。
 
 /** 目标区阶段：文件字段 / 标题锚点 / 块锚点（#378 T03） */
 export type WikilinkTargetStage = 'file' | 'heading' | 'block'
+
+/** 识别选项（#381 T06） */
+export interface WikilinkFieldScanOptions {
+  /** 表格格内形态：别名分隔符为 `\|`（默认 false = 正文单字符 `|`） */
+  pipeEscape?: boolean
+}
 
 /** 阶段化目标字段识别结果（偏移为传入 line 的本地偏移；调用方加行基准） */
 export interface WikilinkTargetField {
@@ -46,10 +58,12 @@ export interface WikilinkTargetField {
   hashAt: number
   /** 锚点字段起点（# 后；`#^` 形态在 ^ 后）；hashAt < 0 时 -1 */
   anchorFrom: number
-  /** 锚点字段终点（`|` 前或 `]]` 前；hashAt < 0 时 -1） */
+  /** 锚点字段终点（`|` 前或 `]]` 前）；hashAt < 0 时 -1 */
   anchorTo: number
-  /** 别名分隔符 `|` 位置；-1 = 无 */
+  /** 别名分隔符位置（pipeEscape 时指向 `\`；无分隔符 -1） */
   pipeAt: number
+  /** 分隔符字符数（#381 T06：pipeEscape 为 2（`\|`），默认 1） */
+  pipeWidth: 1 | 2
   /** 光标所在字段阶段 */
   stage: WikilinkTargetStage
 }
@@ -99,17 +113,26 @@ function findOpenMark(line: string, col: number): { openAt: number; embed: boole
 /**
  * 判定 line 的 col（0 基）是否位于可触发联想的闭合双链**目标区**（| 之前
  * 的文件/锚点字段）中；命中返回阶段化字段边界，否则 null。
+ * #381 T06：pipeEscape 模式（表格格内）分隔符为 `\|`（pipeAt 指向 `\`、
+ * pipeWidth=2）；围栏内只认转义序列为分隔符——裸 `|` 不会出现在格窗口内
+ * （调用方收窄），若出现按既有左侧守卫降级。
  */
-export function findWikilinkTargetField(line: string, col: number): WikilinkTargetField | null {
+export function findWikilinkTargetField(
+  line: string,
+  col: number,
+  options?: WikilinkFieldScanOptions,
+): WikilinkTargetField | null {
   if (col < 0 || col > line.length) {
     return null
   }
+  const pipeEscape = options?.pipeEscape === true
   const { openAt, embed } = findOpenMark(line, col)
   if (openAt < 0) {
     return null
   }
   const innerFrom = openAt + 2
   // 光标左侧（开标记到光标）不得出现 `|`——越过即显示文字字段
+  //（pipeEscape 下转义管的 `|` 同样被此拦下：col 越过 `\` 即字段外）
   const left = line.slice(innerFrom, col)
   if (/[\[\]|]/.test(left)) {
     return null
@@ -123,8 +146,24 @@ export function findWikilinkTargetField(line: string, col: number): WikilinkTarg
   if (/[\[\]]/.test(inner)) {
     return null
   }
-  // 别名分隔符：围栏内首个 `|`（光标已在首个 | 前——左侧检查保证）
-  const pipeAt = inner.indexOf('|') >= 0 ? innerFrom + inner.indexOf('|') : -1
+  // 别名分隔符：默认围栏内首个 `|`；pipeEscape 下首个转义序列 `\|`
+  //（pipeAt 指向 `\`——编辑计划据此复用/越过完整序列）
+  let pipeAt: number
+  let pipeWidth: 1 | 2
+  if (pipeEscape) {
+    const escAt = inner.indexOf('\\|')
+    pipeAt = escAt >= 0 ? innerFrom + escAt : -1
+    pipeWidth = 2
+  } else {
+    const bareAt = inner.indexOf('|')
+    pipeAt = bareAt >= 0 ? innerFrom + bareAt : -1
+    pipeWidth = 1
+  }
+  // pipeEscape 时光标越过转义管首字符（含 `\` 与 `|` 之间）＝显示文字字段：
+  // 上方 left 检查拦住 `|` 之后，此处拦 `\` 与 `|` 之间的位置
+  if (pipeEscape && pipeAt >= 0 && col > pipeAt) {
+    return null
+  }
   const targetEnd = pipeAt >= 0 ? pipeAt : closeAt
   // 锚点标记：目标区内首个 `#`（| 后的 # 属显示文字，不算）
   const hashRel = line.slice(innerFrom, targetEnd).indexOf('#')
@@ -142,7 +181,7 @@ export function findWikilinkTargetField(line: string, col: number): WikilinkTarg
   const anchorTo = hashAt >= 0 ? targetEnd : -1
   return {
     embed, openFrom: embed ? openAt - 1 : openAt, innerFrom, fileTo, closeFrom: closeAt,
-    hashAt, anchorFrom, anchorTo, pipeAt, stage,
+    hashAt, anchorFrom, anchorTo, pipeAt, pipeWidth, stage,
   }
 }
 
@@ -226,7 +265,9 @@ export function planWikilinkFieldEdit(
   headingItem: WikilinkHeadingPlanItem | null = null,
   blockItem: WikilinkBlockPlanItem | null = null,
 ): WikilinkFieldEditPlan | null {
-  const { innerFrom, fileTo, hashAt, anchorFrom, anchorTo, pipeAt, closeFrom, stage } = field
+  const { innerFrom, fileTo, hashAt, anchorFrom, anchorTo, pipeAt, pipeWidth, closeFrom, stage } = field
+  /** 分隔符写入形态（#381 T06：格内 pipeWidth=2 写 `\|`——裸 `|` 破坏网格） */
+  const pipeIns = pipeWidth === 2 ? '\\|' : '|'
   // 目标区末（| 前或 ] 前；有锚点时 = anchorTo，无锚点 = fileTo）
   const targetEnd = pipeAt >= 0 ? pipeAt : closeFrom
   /** 文件字段替换的坐标平移（插入点/光标在 fileTo 之后时叠加） */
@@ -255,7 +296,7 @@ export function planWikilinkFieldEdit(
         { from: anchorFrom, to: anchorTo, insert: replaceBlock.blockId },
       ]
       if (pipeAt < 0) {
-        blockChanges.push({ from: closeFrom, to: closeFrom, insert: `|${replaceBlock.alias}` })
+        blockChanges.push({ from: closeFrom, to: closeFrom, insert: `${pipeIns}${replaceBlock.alias}` })
       }
       return {
         changes: blockChanges,
@@ -274,7 +315,7 @@ export function planWikilinkFieldEdit(
         { from: anchorFrom, to: anchorTo, insert: replaceHeading.heading },
       ]
       if (pipeAt < 0) {
-        changes.push({ from: closeFrom, to: closeFrom, insert: `|${replaceHeading.alias}` })
+        changes.push({ from: closeFrom, to: closeFrom, insert: `${pipeIns}${replaceHeading.alias}` })
       }
       // 光标落锚点末（| 前 / 闭围栏前）——与文件确认「留在目标区末端」对称
       return {
@@ -291,7 +332,7 @@ export function planWikilinkFieldEdit(
     ]
     if (pipeAt < 0) {
       // 无分隔符：目标区末补默认别名（有锚点时锚点保留在 | 前）
-      changes.push({ from: targetEnd, to: targetEnd, insert: `|${item.alias}` })
+      changes.push({ from: targetEnd, to: targetEnd, insert: `${pipeIns}${item.alias}` })
     }
     // 光标 = 目标区末端（新坐标）：文件字段替换后加锚点保留长度（有锚点
     // 时光标在锚点末/新 | 前，无锚点在 | 前——均「便于随后添加锚点」）
@@ -356,11 +397,12 @@ export function planWikilinkFieldEdit(
       ? replaceBlock.blockId.length - (anchorTo - anchorFrom)
       : 0
     if (pipeAt >= 0) {
-      // 已有分隔符：复用，光标跳到已有 | 后（已有别名保留）
-      return { changes: blockChanges, cursorTo: pipeAt + 1 + blockDelta, nextStage: null }
+      // 已有分隔符：复用，光标跳到已有 | 后（已有别名保留；pipeEscape 越
+      // 过完整 `\|` 序列——pipeWidth=2）
+      return { changes: blockChanges, cursorTo: pipeAt + pipeWidth + blockDelta, nextStage: null }
     }
-    blockChanges.push({ from: closeFrom, to: closeFrom, insert: '|' })
-    return { changes: blockChanges, cursorTo: closeFrom + 1 + blockDelta, nextStage: null }
+    blockChanges.push({ from: closeFrom, to: closeFrom, insert: pipeIns })
+    return { changes: blockChanges, cursorTo: closeFrom + pipeWidth + blockDelta, nextStage: null }
   }
   if (stage === 'heading') {
     const changes: WikilinkFieldEditPlan['changes'] = replaceHeading !== null
@@ -368,10 +410,10 @@ export function planWikilinkFieldEdit(
       : []
     if (pipeAt >= 0) {
       // 已有分隔符：复用，光标跳到已有 | 后（已有别名保留）
-      return { changes, cursorTo: pipeAt + 1 + headingDelta, nextStage: null }
+      return { changes, cursorTo: pipeAt + pipeWidth + headingDelta, nextStage: null }
     }
-    changes.push({ from: closeFrom, to: closeFrom, insert: '|' })
-    return { changes, cursorTo: closeFrom + 1 + headingDelta, nextStage: null }
+    changes.push({ from: closeFrom, to: closeFrom, insert: pipeIns })
+    return { changes, cursorTo: closeFrom + pipeWidth + headingDelta, nextStage: null }
   }
   const pipeItem = stage === 'file' ? replaceItem : null
   const delta = replaceDelta(pipeItem !== null, pipeItem?.insertPath ?? '')
@@ -380,10 +422,10 @@ export function planWikilinkFieldEdit(
     : []
   if (pipeAt >= 0) {
     // 已有分隔符：复用，零编辑，光标跳到已有 | 后（已有别名保留）
-    return { changes, cursorTo: pipeAt + 1 + delta, nextStage: null }
+    return { changes, cursorTo: pipeAt + pipeWidth + delta, nextStage: null }
   }
-  changes.push({ from: targetEnd, to: targetEnd, insert: '|' })
-  return { changes, cursorTo: targetEnd + 1 + delta, nextStage: null }
+  changes.push({ from: targetEnd, to: targetEnd, insert: pipeIns })
+  return { changes, cursorTo: targetEnd + pipeWidth + delta, nextStage: null }
 }
 
 //#endregion

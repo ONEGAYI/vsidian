@@ -3312,6 +3312,46 @@ export function createTextEditorProvider(
                 })
                 return
               }
+              // #381 T06 双链联想查询族：执行体在 provider 域（索引服务、
+              // 目标读取与块 ID 编排——DocumentSession 对该族显式 no-op），
+              // 在此以 B 为来源文档执行并经虚拟面板回包（wrapRefEditPush
+              // 信封定向回推）。归属守卫：内消息 docUri 须为 B 规范 URI
+              //（不信任前端自报 A 或其他身份——错误身份静默拒收）
+              const inner = message.message
+              if (inner.kind === 'wikilink.query' || inner.kind === 'wikilink.heading.query' ||
+                  inner.kind === 'wikilink.block.query' || inner.kind === 'wikilink.block.accept' ||
+                  inner.kind === 'wikilink.block.linked' || inner.kind === 'wikilink.block.cancel') {
+                if (inner.docUri !== bEntry.doc.uri.toString()) {
+                  console.debug('[vsidian] refEdit.message 双链联想来源身份不符拒收', {
+                    portId: message.portId,
+                    innerKind: inner.kind,
+                    expectDocUri: bEntry.doc.uri.toString(),
+                  })
+                  return
+                }
+                switch (inner.kind) {
+                  case 'wikilink.query':
+                    bEntry.session.postToPanel(binding.virtualSessionId,
+                      respondWikilinkQuery(bEntry.doc, inner))
+                    return
+                  case 'wikilink.heading.query':
+                    void respondWikilinkHeadingQuery(bEntry, binding.virtualSessionId, bEntry.doc, inner)
+                    return
+                  case 'wikilink.block.query':
+                    void respondWikilinkBlockQuery(bEntry, binding.virtualSessionId, bEntry.doc, inner)
+                    return
+                  case 'wikilink.block.accept':
+                    void respondWikilinkBlockAccept(bEntry, binding.virtualSessionId, bEntry.doc, inner)
+                    return
+                  case 'wikilink.block.linked':
+                    blockIdCoordinator.confirmLinked(inner.docUri, inner.reqId)
+                    return
+                  case 'wikilink.block.cancel':
+                    void blockIdCoordinator.cancelAccept(inner.docUri, inner.reqId)
+                    return
+                }
+                return
+              }
               // 内消息的 docUri 由 B 会话按自身校验（= B 规范 URI）；面板
               // 身份用绑定的虚拟面板 id（webview 侧 portId 仅作路由键）
               void bEntry.session.handleWebviewMessage(message.message, binding.virtualSessionId)

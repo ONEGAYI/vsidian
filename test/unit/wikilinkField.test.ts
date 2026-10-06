@@ -414,3 +414,103 @@ describe('planWikilinkFieldEdit：标题阶段 | 进显示文字（#379 T04）',
     expect(applyPlan(line, plan!)).toBe('[[方案.md#预算|¦手写]]')
   })
 })
+
+// ---- #381 T06：表格格内 pipeEscape 形态（别名分隔符为转义序列，行文本
+// 为格窗口内文本（调用侧窗口化）——识别 pipeAt 指向反斜杠、pipeWidth=2，
+// 计划插入/复用按两字符序列，不写裸竖线破坏网格）----
+
+const ESC_FANGAN = { insertPath: '../资料/方案.md', alias: '方案' }
+
+/** pipeEscape 识别简写（#381 T06） */
+const escTarget = (line: string, col: number) => findWikilinkTargetField(line, col, { pipeEscape: true })
+
+/** pipeEscape 识别结果取计划输入（识别失败即抛错；#381 T06） */
+function escFieldOf(line: string, col: number): WikilinkTargetField {
+  const field = findWikilinkTargetField(line, col, { pipeEscape: true })
+  if (!field) {
+    throw new Error(`pipeEscape 识别失败: ${line}@${col}`)
+  }
+  return field
+}
+
+describe('findWikilinkTargetField（pipeEscape：表格格内转义竖线形态，#381 T06）', () => {
+  it('目标区光标命中：pipeAt 指向转义反斜杠、pipeWidth=2', () => {
+    // 源码 8 字符：[ [ A 反斜杠 | B ] ] —— col=3（A 后）
+    expect(escTarget('[[A\\|B]]', 3)).toEqual({
+      embed: false, openFrom: 0, innerFrom: 2, fileTo: 3, closeFrom: 6,
+      hashAt: -1, anchorFrom: -1, anchorTo: -1, pipeAt: 3, pipeWidth: 2, stage: 'file',
+    })
+  })
+
+  it('光标越过转义反斜杠（反斜杠与竖线之间）＝显示文字区，不命中', () => {
+    expect(escTarget('[[A\\|B]]', 4)).toBeNull()
+    expect(escTarget('[[A\\|B]]', 5)).toBeNull()
+  })
+
+  it('无转义管的空字段照常命中（pipeEscape 下 pipeWidth 恒 2——写入用转义形态）', () => {
+    const field = escTarget('[[A]]', 3)
+    expect(field?.stage).toBe('file')
+    expect(field?.pipeAt).toBe(-1)
+    expect(field?.pipeWidth).toBe(2)
+  })
+
+  it('锚点 + 转义别名：fileTo 在 # 前、目标区不受转义管影响', () => {
+    // [[A#H 转义竖线 B]] —— col=5（H 后）
+    const field = escTarget('[[A#H\\|B]]', 5)
+    expect(field?.stage).toBe('heading')
+    expect(field?.anchorFrom).toBe(4)
+    expect(field?.anchorTo).toBe(5)
+    expect(field?.pipeAt).toBe(5)
+    expect(field?.pipeWidth).toBe(2)
+  })
+})
+
+describe('planWikilinkFieldEdit（pipeEscape：格内确认与转阶段写转义竖线，#381 T06）', () => {
+  it('confirm 无分隔符：替换文件字段并在闭围栏前补转义竖线别名，光标在分隔符前', () => {
+    const plan = planWikilinkFieldEdit(escFieldOf('[[A]]', 3), 'confirm', 3, ESC_FANGAN)
+    expect(applyPlan('[[A]]', plan!)).toBe('[[../资料/方案.md¦\\|方案]]')
+  })
+
+  it('confirm 已有转义分隔符：只替换文件字段，转义别名原样保留、光标落转义管前', () => {
+    const plan = planWikilinkFieldEdit(escFieldOf('[[A\\|手写]]', 3), 'confirm', 3, ESC_FANGAN)
+    expect(applyPlan('[[A\\|手写]]', plan!)).toBe('[[../资料/方案.md¦\\|手写]]')
+  })
+
+  it('| 转阶段无分隔符：插转义竖线且光标落其后（格内不写裸竖线）', () => {
+    const plan = planWikilinkFieldEdit(escFieldOf('[[A]]', 3), '|', 3, null)
+    expect(applyPlan('[[A]]', plan!)).toBe('[[A\\|¦]]')
+  })
+
+  it('| 转阶段无高亮已有转义分隔符：复用，光标跳到竖线之后（越过两字符）', () => {
+    const plan = planWikilinkFieldEdit(escFieldOf('[[A\\|B]]', 3), '|', 3, null)
+    expect(applyPlan('[[A\\|B]]', plan!)).toBe('[[A\\|¦B]]')
+  })
+
+  it('| 转阶段有高亮：补全文件后插转义管', () => {
+    const plan = planWikilinkFieldEdit(escFieldOf('[[A]]', 3), '|', 3, ESC_FANGAN)
+    expect(applyPlan('[[A]]', plan!)).toBe('[[../资料/方案.md\\|¦]]')
+  })
+
+  it('标题阶段 confirm：补别名写转义竖线，光标在分隔符前（与文件阶段同规则）', () => {
+    const line = '[[A.md#预x]]'
+    const plan = planWikilinkFieldEdit(escFieldOf(line, 9), 'confirm', 9, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[A.md#预算¦\\|方案]]')
+  })
+
+  it('标题阶段 | 已有转义分隔符：复用，光标跳转义管后', () => {
+    const line = '[[A.md#H\\|手写]]'
+    const plan = planWikilinkFieldEdit(escFieldOf(line, 8), '|', 8, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[A.md#预算\\|¦手写]]')
+  })
+
+  it('块阶段 confirm：补别名写转义竖线，光标在分隔符前', () => {
+    const line = '[[A.md#^abc1]]'
+    const plan = planWikilinkFieldEdit(escFieldOf(line, 11), 'confirm', 11, null, null, { blockId: 'abc1', alias: 'A' })
+    expect(applyPlan(line, plan!)).toBe('[[A.md#^abc1¦\\|A]]')
+  })
+
+  it('# 转阶段不触分隔符：插 # 与光标跳转不受 pipeWidth 影响', () => {
+    const plan = planWikilinkFieldEdit(escFieldOf('[[A\\|B]]', 3), '#', 3, null)
+    expect(applyPlan('[[A\\|B]]', plan!)).toBe('[[A#¦\\|B]]')
+  })
+})

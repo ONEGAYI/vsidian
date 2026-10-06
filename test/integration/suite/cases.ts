@@ -6,6 +6,7 @@ import { liveEmbedReady, mixedEmbedReady, readingEmbedCard, readingEmbedHeightRe
 import { probe278Cases } from './probe278'
 import { probe375Cases } from './probe375'
 import { wikilinkBlockCases } from './wikilinkBlock'
+import { wikilinkEmbedCases } from './wikilinkEmbed'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -1430,6 +1431,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #380（T05）真宿主端到端：块候选 → 无 ID 块补写 → 撤销撤回 → 重做重建
   //（V01 结论的生产化验收，独立成文件）
   ...wikilinkBlockCases,
+  // #381（T06）真宿主端到端：内部 Live 双链联想（B 归属/补 ID/端口释放）
+  ...wikilinkEmbedCases,
   ['激活与默认编辑器声明（#38 后接管 .md 默认打开）', async () => {
     const ext = vscode.extensions.getExtension(EXT_ID)
     assert(ext, `扩展 ${EXT_ID} 未找到`)

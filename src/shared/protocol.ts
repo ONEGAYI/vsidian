@@ -133,6 +133,13 @@ export type HostToWebview =
   /** P2-04 测试钩子：向指定嵌入实例转发撤销/重做（与真实键入 Mod-Z 同一
    *  请求管线——实例竞态守卫后经 refEdit.message 出站 history.request） */
   | { kind: 'embed.test.history'; inner: string; op: 'undo' | 'redo'; occurrence?: number }
+  /** #381 T06 测试钩子：向嵌入实例的 contentDOM 走浏览器输入路径注入文本
+   *  （execCommand insertText——与 table.test.domType 同构；驱动 symbol
+   *  补全/候选触发的真实输入链）；宿主测试无法向 webview 派发真实键入 */
+  | { kind: 'embed.test.domType'; inner: string; text: string; occurrence?: number }
+  /** #381 T06 测试钩子：向嵌入实例派发 keydown（候选会话键走同一 keymap
+   *  优先级链——enter/down/escape 等；与 table.test.key 同构的映射） */
+  | { kind: 'embed.test.key'; inner: string; key: string; occurrence?: number }
   /** P2-11 测试钩子：向指定嵌入实例注入图片粘贴载荷（与真实 paste 拦截
    *  同一实例管线——实例 reqId 分配 + 在途登记 + refEdit.message 信封
    *  出站；宿主测试无法向 webview 派发真实剪贴板事件） */
@@ -914,7 +921,11 @@ export type HostToWebview =
  *  面板级消息。P2-11（#288）起资源回包同信封定向回推（image.result /
  *  image.invalidate / image.paste.result / refresh.invalidated）——B 会话
  *  的资源结果按 portId 路由到嵌入实例，不广播根面板（reqId 空间隔离，
- *  不与 A 面板或其他 B occurrence 的管理器撞号）。 */
+ *  不与 A 面板或其他 B occurrence 的管理器撞号）。#381 T06 起双链联想
+ *  回包与失效信号同信封（wikilink.query.result / heading / block /
+ *  block.accept.result 与 wikilink.invalidate）——B 内候选会话的迟到守卫
+ *  （reqId+generation+会话三重）在 webview 实例侧，信封只保证定向回推
+ *  到来源端口。 */
 export type RefEditHostEvent = Extract<
   HostToWebview,
   | { kind: 'init' }
@@ -926,6 +937,11 @@ export type RefEditHostEvent = Extract<
   | { kind: 'image.invalidate' }
   | { kind: 'image.paste.result' }
   | { kind: 'refresh.invalidated' }
+  | { kind: 'wikilink.query.result' }
+  | { kind: 'wikilink.heading.query.result' }
+  | { kind: 'wikilink.block.query.result' }
+  | { kind: 'wikilink.block.accept.result' }
+  | { kind: 'wikilink.invalidate' }
 >
 
 /** webview → 宿主消息 */
@@ -995,8 +1011,8 @@ export type WebviewToHost =
       fsPath: string
     }
   /** 编辑通道出站：edit.request / conflict.report / composition.changed /
-   *  history.request / sync.request / conflict.action（链接/图片/资源消息
-   *  不混入本通道——完整接线归后续票） */
+   *  history.request / sync.request / conflict.action（资源与双链联想消息
+   *  经同通道入站——形态见 RefEditClientMessage） */
   | {
       kind: 'refEdit.message'
       panelSessionId: string
@@ -1626,8 +1642,9 @@ export type WebviewToHost =
    *  左侧文本，不并右侧）；reqId 为实例内单调请求序号（应答配对），
    *  generation 为查询代次（查询文本或字段身份变化即递增——宿主原样回显，
    *  webview 借此拒收迟到响应）。#377 T02 起 offset 为分页起点（缺省 0，
-   *  首屏后继续加载——宿主按已定排序取 [offset, offset+limit)）。仅主正文
-   *  接线（嵌入实例不经本消息出站） */
+   *  首屏后继续加载——宿主按已定排序取 [offset, offset+limit)）。#381
+   *  T06 起全部 Live 实例接线（主正文经原会话；嵌入 B 经 refEdit.message
+   *  信封——docUri 为 B 规范 URI，宿主以 B 为来源执行） */
   | {
       kind: 'wikilink.query'
       sessionId: string
@@ -1642,7 +1659,7 @@ export type WebviewToHost =
    *  （`[[目标#前缀…]]`）时由 webview 发起。target 为文件字段原文（宿主按
    *  来源相对语义解析——与跳转同一 resolveVaultLinkFile，不按部分文件名猜
    *  目标）；query 为锚点字段光标左侧前缀；reqId/generation 守卫与
-   *  wikilink.query 同构。仅主正文接线（嵌入实例不出站） */
+   *  wikilink.query 同构。#381 T06 起嵌入 B 同通道出站（来源 = B） */
   | {
       kind: 'wikilink.heading.query'
       sessionId: string
@@ -1657,7 +1674,7 @@ export type WebviewToHost =
    *  （`[[目标#^前缀…]]`）时由 webview 发起。target 为文件字段原文（宿主
    *  按来源相对语义解析，不按部分文件名猜目标）；query 为块锚点字段光标
    *  左侧前缀（按显示片段与已有 id 搜索）；reqId/generation 守卫与
-   *  wikilink.query 同构。仅主正文接线（嵌入实例不出站） */
+   *  wikilink.query 同构。#381 T06 起嵌入 B 同通道出站（来源 = B） */
   | {
       kind: 'wikilink.block.query'
       sessionId: string
@@ -1767,8 +1784,12 @@ export type WebviewToHost =
  *  （直发按面板已送达目标比对，端口按 portId 绑定比对；后者即「经过宿主
  *  验证的目标绑定」）。P2-14（#291）起 codeblock.copy 同通道：嵌入内代码
  *  卡复制经端口进 B 会话走宿主剪贴板（webview 不触碰剪贴板权限；B 会话
- *  按自身 docUri 守卫 + B 文档 EOL 归一）。面板级消息（locale/settings/
- *  view 族）仍不得混入。 */
+ *  按自身 docUri 守卫 + B 文档 EOL 归一）。#381 T06 起双链联想查询族同
+ *  通道（wikilink.query / heading.query / block.query / block.accept /
+ *  block.linked / block.cancel）——宿主在 provider 层以 B 为来源文档执行
+ *  （文件清单、插入相对路径与块 ID 编排都以 B 目录/根为准），回包经
+ *  refEdit.push 信封定向回推。面板级消息（locale/settings/view 族）仍
+ *  不得混入。 */
 export type RefEditClientMessage = Extract<
   WebviewToHost,
   | { kind: 'edit.request' }
@@ -1783,6 +1804,12 @@ export type RefEditClientMessage = Extract<
   | { kind: 'image.paste' }
   | { kind: 'refresh.request' }
   | { kind: 'codeblock.copy' }
+  | { kind: 'wikilink.query' }
+  | { kind: 'wikilink.heading.query' }
+  | { kind: 'wikilink.block.query' }
+  | { kind: 'wikilink.block.accept' }
+  | { kind: 'wikilink.block.linked' }
+  | { kind: 'wikilink.block.cancel' }
 >
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
@@ -3706,13 +3733,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           return isWebviewToHost(inner)
         // P2-11 资源消息：复用直发形态的完整校验（内消息 docUri 须为 B 的
         // 规范 URI——宿主 B 会话按自身 docUri 守卫）；P2-14 codeblock.copy
-        // 同口径（复制文本经端口走宿主剪贴板）
+        // 同口径（复制文本经端口走宿主剪贴板）；#381 T06 双链联想查询族
+        // 同口径（宿主 provider 层以 B 为来源执行，回包经 refEdit.push 信封）
         case 'link.activate':
         case 'wikilink.activate':
         case 'image.request':
         case 'image.paste':
         case 'refresh.request':
         case 'codeblock.copy':
+        case 'wikilink.query':
+        case 'wikilink.heading.query':
+        case 'wikilink.block.query':
+        case 'wikilink.block.accept':
+        case 'wikilink.block.linked':
+        case 'wikilink.block.cancel':
           return isWebviewToHost(inner)
         default:
           return false
@@ -4246,7 +4280,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return false
     case 'refEdit.push': {
       // 编辑与资源回包白名单：inner 事件须为 RefEditHostEvent 合法形态
-      //（P2-11 起含 image.* / refresh.invalidated 定向回推）
+      //（P2-11 起含 image.* / refresh.invalidated 定向回推；#381 T06 起含
+      //  双链联回包与失效信号定向回推）
       if (
         !(typeof v.portId === 'string' && v.portId.length > 0) ||
         !(typeof v.fsPath === 'string' && v.fsPath.length > 0) ||
@@ -4266,6 +4301,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         case 'image.invalidate':
         case 'image.paste.result':
         case 'refresh.invalidated':
+          return isHostToWebview(inner)
+        case 'wikilink.query.result':
+        case 'wikilink.heading.query.result':
+        case 'wikilink.block.query.result':
+        case 'wikilink.block.accept.result':
+        case 'wikilink.invalidate':
           return isHostToWebview(inner)
         default:
           return false
@@ -4333,6 +4374,20 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         typeof v.inner === 'string' && v.inner.length > 0 &&
         (v.op === 'undo' || v.op === 'redo') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.domType':
+      // #381 T06 测试钩子：嵌入实例的浏览器输入路径注入
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        isString(v.text) &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.key':
+      // #381 T06 测试钩子：嵌入实例的 keydown 派发（key 名透传）
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        typeof v.key === 'string' && v.key.length > 0 &&
         (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
       )
     case 'embed.test.pasteImage':

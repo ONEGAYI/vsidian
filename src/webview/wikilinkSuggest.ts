@@ -1,11 +1,13 @@
-// 双链文件联想会话（工单 #376 T01 + #378 T03 + #379 T04）：新建闭合双链
-// `[[]]` / `![[]]`、既有双链目标区重编辑、#／^／| 转阶段与输入仲裁——识别、
-// 查询、候选 UI、键盘与确认插入。
+// 双链文件联想会话（工单 #376 T01 + #378 T03 + #379 T04 + #380 T05 +
+// #381 T06）：新建闭合双链 `[[]]` / `![[]]`、既有双链目标区重编辑、#／^／|
+// 转阶段与输入仲裁——识别、查询、候选 UI、键盘与确认插入。
 //
 // 职责与边界（规格 docs/specs/wikilink-completion.md「技术设计与实施边界」）：
 // - 识别是**新增局部逻辑**（shared/wikilinkField），只服务联想触发；完整
-//   渲染解析器（shared/wikilink.ts）语义不动。代码上下文/前端头区/表格
-//   格区不启用候选（inCodeContext + tableRegionField 环境守卫）。
+//   渲染解析器（shared/wikilink.ts）语义不动。代码上下文/前端头区不启用
+//   候选（inCodeContext 环境守卫）。#381 T06 起表格格内启用：格内容窗口
+//   + `\|` 转义分隔符（pipeEscape），矩形蒙版态（tableRegionField 在场）
+//   仍不识别。
 // - 会话只认单个折叠光标的可编辑 Live 正文：多 range／非空选区、IME 组合
 //   期、暂停、源码模式与 Reading 不接管。纯光标移动不发起新查询；移出
 //   目标字段（按阶段：文件字段或锚点字段）、切模式、暂停、外部同步与
@@ -57,6 +59,10 @@ import type {
 import { t } from '../shared/i18n'
 import { inCodeContext } from './symbolAutocomplete'
 import { tableRegionField } from './tableRegionSelection'
+import { liveDecorationsField } from './liveDecorations'
+import { tableRowsAt } from './tableEditing'
+import type { TableRowInfo } from './tableStructure'
+import { isEscapedAt, scanCodeSpans } from '../shared/tableCells'
 import './wikilinkSuggest.css'
 
 /** 浮层类名（公开样式契约 chrome 域 wikilink-suggest 类目；单一事实源
@@ -101,6 +107,8 @@ interface SuggestOrigin {
   anchorFrom: number
   anchorTo: number
   pipeAt: number
+  /** 分隔符字符数（#381 T06 表格格内为 2——`\|` 转义序列） */
+  pipeWidth: 1 | 2
 }
 
 /** 最近一次接受的查询结果（真实状态面；阶段化——文件/标题/块） */
@@ -144,7 +152,8 @@ interface PendingBlockAccept {
 function sameOrigin(a: SuggestOrigin, b: SuggestOrigin): boolean {
   return a.stage === b.stage && a.embed === b.embed && a.innerFrom === b.innerFrom &&
     a.fileTo === b.fileTo && a.closeFrom === b.closeFrom && a.hashAt === b.hashAt &&
-    a.anchorFrom === b.anchorFrom && a.anchorTo === b.anchorTo && a.pipeAt === b.pipeAt
+    a.anchorFrom === b.anchorFrom && a.anchorTo === b.anchorTo && a.pipeAt === b.pipeAt &&
+    a.pipeWidth === b.pipeWidth
 }
 
 export class WikilinkSuggestController {
@@ -176,7 +185,10 @@ export class WikilinkSuggestController {
     this.deps = deps
   }
 
-  /** CM6 扩展组：会话键位 + 更新监听。装配次序由实例决定（fenceEscape 之前） */
+  /** CM6 扩展组：会话键位 + 更新监听。装配次序由实例决定（fenceEscape 之前）。
+   *  #381 T06 起 focusout 关闭候选：焦点真正离开本编辑器（主正文 → 嵌入 B
+   *  或反向）即关闭会话——多实例并存时浮层不残留（候选 UI 仅操作当前
+   *  焦点实例）；候选行的 pointerdown 已 preventDefault 不触发 focusout */
   get extension(): Extension {
     return [
       keymap.of([
@@ -190,6 +202,26 @@ export class WikilinkSuggestController {
         { key: '|', run: () => this.phase('|') },
       ]),
       EditorView.updateListener.of((update) => this.onUpdate(update)),
+      EditorView.domEventHandlers({
+        focusout: (event, view) => {
+          const next = event.relatedTarget
+          if (next instanceof Node && view.contentDOM.contains(next)) {
+            return false // 焦点仍在编辑器域内（widget 内等）
+          }
+          if (next instanceof Node) {
+            this.close()
+            return false
+          }
+          // 无 relatedTarget 的浏览器路径：微任务后核对 activeElement（Tab
+          // 导航离开时 relatedTarget 为 null 但焦点确已离开）
+          queueMicrotask(() => {
+            if (!view.contentDOM.contains(document.activeElement)) {
+              this.close()
+            }
+          })
+          return false
+        },
+      }),
     ]
   }
 
@@ -519,6 +551,12 @@ export class WikilinkSuggestController {
     this.removePopup()
   }
 
+  /** 候选会话是否在场（#381 T06：实例的 Esc 链豁免判定——候选先关一次，
+   *  下一次 Esc 才进入引用关闭/选区收起链路） */
+  hasActiveSession(): boolean {
+    return this.session !== null
+  }
+
   // ---- 事务观测 ----
 
   private onUpdate(update: ViewUpdate): void {
@@ -602,7 +640,12 @@ export class WikilinkSuggestController {
     this.render()
   }
 
-  /** 光标处识别（叠加环境守卫：代码上下文/frontmatter 与表格格区不启用） */
+  /** 光标处识别（叠加环境守卫：代码上下文/frontmatter 不启用）。
+   *  #381 T06 表格格接入：光标所在行为表格行（live 解析树）时以**格内容
+   *  窗口**识别——窗口由两侧最近裸管（格边界，代码 span 与转义语义同
+   *  splitTableRowCells）截断，窗口内 `\|` 按转义分隔符识别与写回（不
+   *  写裸竖线破坏网格）；矩形蒙版态（tableRegionField 在场）保持不识别
+   *  （格区选取归表格语义；蒙版随输入清除后正常识别） */
   private recognizeAt(state: EditorState, pos: number): SuggestOrigin | null {
     const view = this.view
     if (!view) {
@@ -612,9 +655,32 @@ export class WikilinkSuggestController {
       return null
     }
     if (view.state.field(tableRegionField, false)) {
-      return null // 表格格区归表格编辑语义（T01 主正文）
+      return null // 矩形蒙版态归表格选取语义（T01 守卫保持）
     }
     const line = state.doc.lineAt(pos)
+    const row = tableRowOfCaret(state, pos)
+    if (row !== null) {
+      const win = tableCellWindowOf(line.text, pos - line.from, row.prefixLen ?? 0)
+      const field = findWikilinkTargetField(
+        line.text.slice(win.from, win.to), pos - line.from - win.from, { pipeEscape: true })
+      if (!field) {
+        return null
+      }
+      const shift = line.from + win.from
+      return {
+        stage: field.stage,
+        embed: field.embed,
+        openFrom: shift + field.openFrom,
+        innerFrom: shift + field.innerFrom,
+        fileTo: shift + field.fileTo,
+        closeFrom: shift + field.closeFrom,
+        hashAt: field.hashAt >= 0 ? shift + field.hashAt : -1,
+        anchorFrom: field.anchorFrom >= 0 ? shift + field.anchorFrom : -1,
+        anchorTo: field.anchorTo >= 0 ? shift + field.anchorTo : -1,
+        pipeAt: field.pipeAt >= 0 ? shift + field.pipeAt : -1,
+        pipeWidth: field.pipeWidth,
+      }
+    }
     const field = findWikilinkTargetField(line.text, pos - line.from)
     if (!field) {
       return null
@@ -630,6 +696,7 @@ export class WikilinkSuggestController {
       anchorFrom: field.anchorFrom >= 0 ? line.from + field.anchorFrom : -1,
       anchorTo: field.anchorTo >= 0 ? line.from + field.anchorTo : -1,
       pipeAt: field.pipeAt >= 0 ? line.from + field.pipeAt : -1,
+      pipeWidth: field.pipeWidth,
     }
   }
 
@@ -1320,4 +1387,40 @@ export class WikilinkSuggestController {
 /** 会话工厂（实例装配入口）：返回控制器与 CM6 扩展组的持有者 */
 export function createWikilinkSuggest(deps: WikilinkSuggestDeps): WikilinkSuggestController {
   return new WikilinkSuggestController(deps)
+}
+
+/** 光标所在行的表格行身份（#381 T06）：live 解析树中包含光标行的表格行
+ *  信息（含 #296 容器前缀宽）；非表格行（或解析树缺席）返回 null */
+function tableRowOfCaret(state: EditorState, pos: number): TableRowInfo | null {
+  const live = state.field(liveDecorationsField, false)
+  if (!live) {
+    return null
+  }
+  const rows = tableRowsAt(state, pos, live.tree)
+  if (!rows) {
+    return null
+  }
+  const lineFrom = state.doc.lineAt(pos).from
+  return rows.find((row) => row.lineFrom === lineFrom) ?? null
+}
+
+/** 格内容窗口（#381 T06）：光标两侧最近的裸管（格边界）截断的行内区间
+ *  ——窗口内无裸管（识别不跨格）；前缀区（引用层/缩进/列表标记，#296）
+ *  排除在窗口外。裸管判定与 splitTableRowCells 同语义（代码 span 内与
+ *  已转义 `\|` 的竖线不是格边界） */
+export function tableCellWindowOf(lineText: string, col: number, prefixLen: number): { from: number; to: number } {
+  const inSpan = scanCodeSpans(lineText)
+  let from = prefixLen
+  let to = lineText.length
+  for (let i = prefixLen; i < lineText.length; i++) {
+    if (lineText[i] === '|' && !inSpan[i] && !isEscapedAt(lineText, i)) {
+      if (i < col) {
+        from = i + 1
+      } else {
+        to = i
+        break
+      }
+    }
+  }
+  return { from, to }
 }
