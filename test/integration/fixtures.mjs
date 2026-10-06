@@ -1689,6 +1689,17 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, '联想目录', '联想来源.md'), '来源正文\n', 'utf8')
   writeFileSync(path.join(wsDir, '联想目录', '同目录目标.md'), '同目录目标正文\n', 'utf8')
   writeFileSync(path.join(wsDir, '子目录目标.md'), '子目录目标正文\n', 'utf8')
+  // #377 T02 全文件清单：未被引用的资源候选（png/pdf/音视频/文本命中空
+  // 查询；.pyc 为 other——仅记名不进空查询、可被有查询命中）+ 默认排除域
+  // 内文件（node_modules 不入清单）。T02 独立来源文档避免污染 T01 现场
+  writeFileSync(path.join(wsDir, '联想目录', 'T02来源.md'), 'T02 正文\n', 'utf8')
+  writeFileSync(path.join(wsDir, '联想目录', 'T02素材-配图.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, '联想目录', 'T02素材-手册.pdf'), '%PDF-1.4 T02 sample\n', 'utf8')
+  writeFileSync(path.join(wsDir, '联想目录', 'T02素材-片段.mp4'), 'T02 video sample\n', 'utf8')
+  writeFileSync(path.join(wsDir, '联想目录', 'T02素材-说明.txt'), 'T02 text sample\n', 'utf8')
+  writeFileSync(path.join(wsDir, '联想目录', 'T02素材-cache.pyc'), 'T02 compiled\n', 'utf8')
+  mkdirSync(path.join(wsDir, 'node_modules', 'T02pkg'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'node_modules', 'T02pkg', 'T02素材-排除.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
   // 既有 id 段（菜单两态与零写回断言载体）；#183 补围栏行（统一菜单降级
   // 矩阵的围栏区断言载体）

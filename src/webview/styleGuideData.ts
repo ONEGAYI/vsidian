@@ -5080,11 +5080,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "wikilink-suggest",
     "kind": "selector",
     "target": ".vsidian-wikilink-suggest-status",
-    "purpose": "状态行：搜索中、无匹配文件、索引未就绪、未打开文件夹与「仍在构建（部分结果）」等真实状态的文字呈现；不可确认、不写正文。",
+    "purpose": "状态行：搜索中、无匹配文件、索引未就绪、未打开文件夹、「仍在构建（部分结果）」与分页剩余提示（#377——「还有 N 项，按 ↓ 继续加载」）等真实状态的文字呈现；不可确认、不写正文。",
     "views": [
       "live"
     ],
-    "states": "随查询结果/索引就绪态切换；与候选行共存（仍在构建时可用项继续候选）。",
+    "states": "随查询结果/索引就绪态切换；与候选行共存（仍在构建时可用项继续候选）；命中总数未尽时列表尾部追加一行剩余计数（#377 触底续页加载的入口提示）。",
     "dom": "容器直接子行（非 option 语义——占位不可确认）。",
     "example": ".vsidian-wikilink-suggest-status { opacity: 0.7; }",
     "obsidian": {
@@ -5092,7 +5092,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 wikilinkSuggest：无结果/未就绪状态行文案",
+      "浏览器 wikilinkSuggest：无结果/未就绪状态行文案与分页剩余提示行",
       "真宿主「双链联想候选」：paint.wikilinkSuggest.statusText"
     ],
     "introduced": "#376（2026-10-06）"
@@ -6640,8 +6640,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "wikilink-suggest-status": {
-    "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open and 'index still updating (partial results)'; not confirmable, never writes to the document.",
-    "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building).",
+    "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open, 'index still updating (partial results)' and the pagination hint (#377 - 'N more, press ArrowDown to load more'); not confirmable, never writes to the document.",
+    "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building); appends a remaining-count row at the list tail when the match total is not exhausted (#377 load-more hint).",
     "dom": "Direct child rows of the container (not option semantics - placeholders are not confirmable).",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"

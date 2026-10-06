@@ -39,6 +39,7 @@ export const en = {
   'wikilinkSuggest.status.noWorkspace': 'No folder open — type the link manually',
   'wikilinkSuggest.status.notReady': 'Index is being prepared — type the link manually',
   'wikilinkSuggest.status.updating': 'Index still updating — results are partial',
+  'wikilinkSuggest.status.more': '{count} more — press ↓ to load more',
   'styleRef.category.richPaste': 'Paste prompt',
   // ---- settings.（设置页框架：标题、搜索、分类、保存状态、空状态）----
   /** 设置页面板标题（宿主 createWebviewPanel 标题与页面 h1 同源） */

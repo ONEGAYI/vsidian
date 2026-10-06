@@ -33,6 +33,39 @@ function createScanPort(): VaultIndexScanPort {
       const uris = await vscode.workspace.findFiles(pattern, undefined)
       return uris.filter((u) => u.scheme === 'file').map((u) => u.fsPath)
     },
+    async listAllFiles(rootFsPath: string, opts?: { skipDir?: (fsPath: string) => boolean }) {
+      // #377 T02 全文件清单：workspace.fs 递归列举（Remote SSH 走远端语义，
+      // 不经 findFiles 的默认排除/结果上限——清单排除语义单一事实源在服务
+      // 侧）。每层让出一次（大库不饿死）；skipDir 为服务注入的剪枝判定
+      // （.git/node_modules 等整树排除不进入列举）；目录读取失败记
+      // failedDirs（不可访问不冒充其下文件删除）
+      const files: string[] = []
+      const failedDirs: string[] = []
+      const walk = async (dir: vscode.Uri): Promise<void> => {
+        let entries: [string, vscode.FileType][]
+        try {
+          entries = await vscode.workspace.fs.readDirectory(dir)
+        } catch {
+          failedDirs.push(dir.fsPath)
+          return
+        }
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        for (const [name, type] of entries) {
+          const child = vscode.Uri.joinPath(dir, name)
+          if ((type & vscode.FileType.Directory) !== 0) {
+            if (opts?.skipDir?.(child.fsPath)) {
+              continue
+            }
+            await walk(child)
+          } else if ((type & vscode.FileType.File) !== 0) {
+            files.push(child.fsPath)
+          }
+          // 符号链接等其余类型不入清单（不解析目标身份）
+        }
+      }
+      await walk(vscode.Uri.file(rootFsPath))
+      return { files, failedDirs }
+    },
     async readFileText(fsPath: string) {
       try {
         const buffer = await readFile(fsPath)
@@ -47,10 +80,14 @@ function createScanPort(): VaultIndexScanPort {
       try {
         const st = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
         // birthtimeMs：FileStat.ctime 为创建时间（毫秒）；POSIX 宿主语义
-        // 弱（常为 0 或 mtime 回填）——0/缺省不写键，面板排序沉底
-        return st.ctime > 0
-          ? { mtimeMs: st.mtime, size: st.size, birthtimeMs: st.ctime }
-          : { mtimeMs: st.mtime, size: st.size }
+        // 弱（常为 0 或 mtime 回填）——0/缺省不写键，面板排序沉底。
+        // type：#377 T02 清单事件维护的目录判定（目录不入清单）
+        return {
+          mtimeMs: st.mtime,
+          size: st.size,
+          ...(st.ctime > 0 ? { birthtimeMs: st.ctime } : {}),
+          ...(st.type === vscode.FileType.Directory ? { type: 'dir' as const } : { type: 'file' as const }),
+        }
       } catch {
         return null
       }
@@ -68,9 +105,11 @@ function createScanPort(): VaultIndexScanPort {
       }
     },
     watchRoot(rootFsPath, onEvent) {
-      // 递归监听根内 *.md（cssSnippetWiring 同形态：目录暂不存在时 watcher
-      // 保持注册，监听其重建）；事件只带 URI，经端口转发给服务分流
-      const pattern = new vscode.RelativePattern(vscode.Uri.file(rootFsPath), '**/*.md')
+      // 递归监听根内全部文件（#377 T02 起全文件域：md 事件走服务侧既有增量
+      // 重扫管道，非 md 事件只维护全文件清单；cssSnippetWiring 同形态——
+      // 目录暂不存在时 watcher 保持注册，监听其重建）；事件只带 URI，
+      // 经端口转发给服务分流
+      const pattern = new vscode.RelativePattern(vscode.Uri.file(rootFsPath), '**/*')
       const watcher = vscode.workspace.createFileSystemWatcher(pattern)
       const forward = (uri: vscode.Uri | undefined): void => onEvent(uri?.fsPath ?? null)
       const changeSub = watcher.onDidChange(forward)

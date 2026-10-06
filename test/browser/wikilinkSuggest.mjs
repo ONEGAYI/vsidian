@@ -224,6 +224,99 @@ try {
     assert.equal((await popup(page)).itemCount, 1)
   })
 
+  // ---- #377 T02 分页与清单代次 ----
+  await scenario('触底 ↓ 续页加载：offset 出站、条目追加、高亮与 more 状态行', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 7 }), [fangan(), tongzhi()])
+    let p = await popup(page)
+    assert.equal(p.itemCount, 2, '首屏 2 条')
+    assert.match(p.statusText, /还有 1 项|1 more/, 'more 状态行提示剩余数')
+    // 高亮移到末项后再 ↓：触发续页（offset=2 出站）
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown')
+    assert.equal((await popup(page)).activeIndex, 1, '高亮在末项')
+    await page.keyboard.press('ArrowDown')
+    const more = await page.evaluate(() => window.lastQuery())
+    assert.equal(more.offset, 2, '续页请求 offset=2')
+    assert.equal(more.query, '方', '同查询续页')
+    assert.equal(more.generation >= 1, true, '代次不重置')
+    const third = {
+      id: 'C:\\vault\\翻新.md', name: '翻新.md', dir: '', relPath: '翻新.md',
+      insertPath: '../翻新.md', alias: '翻新', mtimeMs: 3000, score: 0,
+      labelHighlights: [], dirHighlights: [],
+    }
+    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 7 }), [third])
+    p = await popup(page)
+    assert.equal(p.itemCount, 3, '追加页拼接后 3 条')
+    assert.deepEqual(p.names, ['方案.md', '通知.md', '翻新.md'])
+    assert.equal(p.activeIndex, 1, '手动高亮保持在末项原位置（不跳首项）')
+    // 全部加载完成后 more 行消失
+    assert.equal((await popup(page)).statusText === null || !/还有|more/.test(p.statusText ?? ''), true, '总数尽后无 more 行')
+    await page.keyboard.press('ArrowDown')
+    assert.equal((await popup(page)).activeIndex, 2, '后续 ↓ 恢复移动高亮')
+  })
+
+  await scenario('跨清单代次的追加页不拼接：重取首页', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 7 }), [fangan(), tongzhi()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown') // 触底触发续页
+    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 2)
+    // 清单代次已变（7 → 8）：追加页必须被拒拼，并按新代次重取首页
+    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 8 }),
+      [fangan(), tongzhi()])
+    const refetch = await page.evaluate(() => window.lastQuery())
+    assert.equal(refetch.offset, undefined, '重取首页（无 offset）')
+    assert.equal((await popup(page)).itemCount, 2, '旧追加结果未进候选')
+    // 新首页应答正常呈现
+    await page.evaluate((items) => window.respondQuery(items, { total: 2, catalogGen: 8 }), [fangan()])
+    const p = await popup(page)
+    assert.equal(p.itemCount, 1)
+    assert.equal(p.activeIndex, 0, '首页响应恢复自动高亮首项')
+  })
+
+  await scenario('续页请求在途时触底 ↓ 不重复出站', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    await page.evaluate((items) => window.respondQuery(items, { total: 5, catalogGen: 1 }), [fangan(), tongzhi()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown') // 触发续页
+    const countAfterTrigger = await page.evaluate(() => window.queryCount())
+    await page.keyboard.press('ArrowDown') // 在途再按
+    await page.keyboard.press('ArrowDown')
+    assert.equal(await page.evaluate(() => window.queryCount()), countAfterTrigger, '在途不重复发')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 2, '仍等待 offset=2 应答')
+  })
+
+  // ---- #377 T02 候选失效信号 ----
+  await scenario('invalidate 广播：会话在场去抖重发当前查询并整体替换结果', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    await page.evaluate((items) => window.respondQuery(items, { catalogGen: 3 }), [fangan()])
+    assert.equal((await popup(page)).itemCount, 1)
+    const countBefore = await page.evaluate(() => window.queryCount())
+    // 失效信号：去抖 300ms 后重发同查询（新 reqId）
+    await page.evaluate(() => window.sendInvalidate())
+    await page.waitForFunction((n) => window.queryCount() === n + 1, countBefore)
+    const requery = await page.evaluate(() => window.lastQuery())
+    assert.equal(requery.query, '方', '同查询重发')
+    assert.equal(requery.offset, undefined, '失效重查取首页')
+    // 新结果整体替换（清单已变——新代次新候选集合）
+    await page.evaluate((items) => window.respondQuery(items, { catalogGen: 4 }), [tongzhi()])
+    const p = await popup(page)
+    assert.deepEqual(p.names, ['通知.md'], '结果整体替换不残留旧候选')
+    assert.equal(p.activeIndex, 0, '重查恢复自动高亮首项')
+  })
+
+  await scenario('invalidate 无会话时零动作（不出站查询）', { doc: '', cursor: 0 }, async (page) => {
+    await page.evaluate(() => window.sendInvalidate())
+    assert.equal(await page.evaluate(() => window.queryCount()), 0)
+  })
+
   // ---- IME 与多光标 ----
   // CDP 组合实测：组合文本进 CM6 文档并触发查询（候选随组合更新、会话
   // 存活）；组合期 Enter 不确认候选（无插入路径写入正文）。组合期带可确认

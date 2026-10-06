@@ -1762,13 +1762,14 @@ export function createTextEditorProvider(
 
   /** 双链联想查询应答（wikilink.query 同步执行）：无索引服务按无工作区
    *  真实报状态；候选条目为协议稳定契约形态（含经 vaultLink 往返核对的
-   *  插入路径与默认别名，均在服务侧完成） */
+   *  插入路径与默认别名，均在服务侧完成）。#377 T02 起透传 offset（分页
+   *  继续加载）并回传 catalogGen（清单代次——webview 拒收跨代次追加页） */
   const respondWikilinkQuery = (
     doc: vscode.TextDocument,
     message: Extract<WebviewToHost, { kind: 'wikilink.query' }>,
   ): Extract<HostToWebview, { kind: 'wikilink.query.result' }> => {
     const result = vaultIndex
-      ? vaultIndex.queryWikilinkFileCandidates(doc.uri.fsPath, message.query)
+      ? vaultIndex.queryWikilinkFileCandidates(doc.uri.fsPath, message.query, message.offset ?? 0)
       : ({ status: 'unavailable', reason: 'no-workspace' } as const)
     const base = {
       kind: 'wikilink.query.result' as const,
@@ -1785,6 +1786,7 @@ export function createTextEditorProvider(
       status: 'ready',
       updating: result.updating,
       total: result.total,
+      catalogGen: result.catalogGen,
       items: result.items,
     }
   }
@@ -3498,6 +3500,9 @@ export function createTextEditorProvider(
           if (panel.ready) {
             void sendBacklinksSnapshot(entry, panel.sessionId, entry.doc.uri)
             void sendOutlinksSnapshot(entry, panel.sessionId, entry.doc.uri)
+            // #377 T02：索引/全文件清单变更——候选会话在场的 webview 自行
+            // 重发当前查询（控制器侧去抖；无会话时零动作）
+            void entry.session.postToPanel(panel.sessionId, { kind: 'wikilink.invalidate' })
           }
         }
       }
