@@ -1,6 +1,8 @@
 # Vsidian 附加组件：接口与装载技术方案
 
-状态：2026-10-05 的第一版技术提议。产品规则以 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 和[规格](../specs/vsidian-addons.md)为准；本文收敛实现路线，尚未发布 SDK，也未接入生产代码。字段、接口名称与首个 API 版本仍须随公开声明和消费样例冻结。
+状态：2026-10-05 的第一版技术提议。产品规则以 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 和[规格](../specs/vsidian-addons.md)为准；本文收敛实现路线，尚未发布 SDK。字段、接口名称与首个 API 版本仍须随公开声明和消费样例冻结。
+
+**实施进度**：T01（#350，2026-10-07）已将第 2 节的身份发现、兼容检查与轻量注册接入生产路径（`src/shared/addonIdentity.ts`、`src/host/addons/`、设置页「附加组件」分页），并携带三个测试夹具扩展（`test/integration/addonFixtures/`）作为消费样例；真宿主集成测试覆盖两条激活路径、重复注册与清单刷新。`registerAddon` 当前仅含 `setup` 轻量接入回调，运行能力（enable、页面入口、通信）属 T02+；已实现部分仍是草案形状，不冒充已发布稳定 API。
 
 **安装后即可使用，作者通过代码注册能力**。清单负责识别与兼容，Vsidian 负责生命周期、设置和行为协调。输入与渲染代码在页面运行，宿主端保留权威文本和持久化能力。
 
@@ -40,6 +42,8 @@ IIFE 指执行后注册入口的独立浏览器脚本。组件仍可用 TypeScri
 
 这是提议格式，`1.0.0` 是首个稳定 API 的候选版本，当前不存在该公开 API。实验能力需要时另加 `experimental` 兼容声明；具体实验版本标记随入口冻结。
 
+**T01 实施落点（#350）**：上述清单形状已由 `src/shared/addonIdentity.ts` 解析校验（`manifestVersion: 1`、`api` 范围、可选 `experimental` 表；范围求值子集见同仓 `semverRange.ts`）。宿主实验入口表当前为空——任何 `experimental` 声明都判不兼容，如实反映实验入口未发布。官方清单为 `OFFICIAL_ADDON_EXTENSION_IDS`（初版空，登记新官方组件只改该表）。消费样例即测试夹具 `test/integration/addonFixtures/addon-ok`（声明 + 依赖 + 代码注册）。
+
 | 字段或身份 | 责任 |
 | --- | --- |
 | VSCode `Extension.id` | 唯一组件 ID，沿用 `publisher.name`；不在私有清单重复维护 |
@@ -64,6 +68,8 @@ Vsidian 的 `activate()` 构造并返回宿主 API。发现协调任务等待自
 同一接入代次再次注册时返回 `AlreadyRegistered`，不重复调用接入回调。手动重试先释放旧代次，再创建新代次；原生 `activate()` 的缓存不能代替这层注册管理。
 
 首版只接受当前宿主可调用的组件。未发现时显示「当前宿主不可用」并提供 VSCode 管理入口，不能仅凭查询为空判断未安装或装错侧。
+
+**T01 实施落点（#350）**：上述顺序由 `src/host/addons/addonCoordinator.ts` 实现——`start()` 同步返回（先订阅 `extensions.onDidChange` 再发起扫描；扫描先等自身 API 公布，不被自身 `activate()` 等待），按组件 ID 合并在途唤醒；`src/host/addons/addonRegistry.ts` 承担注册校验链与 `AlreadyRegistered`。真宿主实证补充两点 VSCode 1.82.3 语义（已钉入实现与测试）：其一，`Extension.isActive` 表示「已尝试激活」而非「激活成功」——激活失败的扩展 `isActive` 仍为 `true`，协调器须按自身记录短路而不是信 `isActive`；其二，对激活失败过的扩展再次 `activate()` 会假成功（resolve 而非重抛），故不自动重试故障组件（ADR 已确认方向），重试走后续票的手动入口（先释放旧代次）。
 
 ## 3. 公开接口与两种生命周期
 
@@ -248,7 +254,7 @@ AGENTS 只保留触发入口，正文留在规格和技术方案。正式门禁�
 
 后续按以下顺序接入生产，前一步的公开消费路径通过后再展开下一步：
 
-1. 发现、兼容和轻量注册，公开声明及输入／渲染／界面三类消费样例。
+1. 发现、兼容和轻量注册，公开声明及输入／渲染／界面三类消费样例。（T01 #350 已落地发现/兼容/轻量注册与夹具消费样例；公开声明文档与三类正式消费样例待后续票。）
 2. 编辑器页与设置页的资源、工厂装配、普通停用和故障释放；补资源拒绝对照及实际 CM6 扩展接入。
 3. 输入行为、权威写回和历史协调；覆盖 IME、连续操作、引用 B、原生入口、失败和重载。
 4. 渲染自动接管、已开文档热切换及首选恢复，设置分组、作用范围和行为冲突管理。
