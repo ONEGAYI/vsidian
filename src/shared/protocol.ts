@@ -1868,6 +1868,11 @@ export interface OutlinkItemPayload {
 
 /** 双链联想候选条目载荷（#376 T01 wikilink.query.result.items；宿主排序
  *  后限量回传的稳定契约）。高亮区间对应原始文字的 UTF-16 偏移 */
+/** 双链联想候选分页页大小（规格「首屏默认最多 50 项，可继续加载」；
+ *  宿主侧排序在截取前全量完成。webview 以「回包 items 数 < 页大小」为
+ *  穷尽信号（code-review F6 终态判据），两端共用同一常量） */
+export const WIKILINK_QUERY_LIMIT = 50
+
 export interface WikilinkCandidateItem {
   /** 候选身份：目标绝对 fsPath（宿主真实磁盘形态） */
   id: string

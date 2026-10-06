@@ -365,11 +365,15 @@ export function planWikilinkFieldEdit(
       return null
     }
     if (stage === 'heading') {
-      // 标题阶段：光标处补 ^（已有 # 不重复补）；保留两侧锚点文字
+      // 标题阶段：光标处补 ^（已有 # 不重复补）；保留两侧锚点文字。
+      // F9：nextStage 为插入后重识别的如实值——^ 恰插在 # 紧后（锚点
+      // 起点）形成 `#^` 形态才是块阶段；中部/尾部插入后首个 # 后并非 ^，
+      // 重识别仍是标题阶段（此前恒宣称 block 而实际重识别恒 heading，
+      // 会话语义与宣称不符；消费方以重识别结果为准，本字段对齐之）
       return {
         changes: [{ from: col, to: col, insert: '^' }],
         cursorTo: col + 1,
-        nextStage: 'block',
+        nextStage: col === anchorFrom ? 'block' : 'heading',
       }
     }
     // 文件阶段：有高亮先补全，再形成 #^（已有 # 只补 ^）

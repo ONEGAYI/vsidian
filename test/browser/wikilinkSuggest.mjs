@@ -228,55 +228,69 @@ try {
     assert.equal((await popup(page)).itemCount, 1)
   })
 
-  // ---- #377 T02 分页与清单代次 ----
+  // ---- #377 T02 分页与清单代次（F6 起以满页口径承载——不满页即穷尽） ----
+  /** F6：满页候选生成（50 = WIKILINK_QUERY_LIMIT；宿主回包不满页 = 穷尽） */
+  const fullPage = (page) => page.evaluate(() => Array.from({ length: 50 }, (_, i) => ({
+    id: `C:\\vault\\f${i}.md`, name: `f${i}.md`, dir: '', relPath: `f${i}.md`,
+    insertPath: `../f${i}.md`, alias: `f${i}`, mtimeMs: 1000, score: 0,
+    labelHighlights: [], dirHighlights: [],
+  })))
+
   await scenario('触底 ↓ 续页加载：offset 出站、条目追加、高亮与 more 状态行', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[')
-    await page.keyboard.type('方')
-    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 7 }), [fangan(), tongzhi()])
+    await page.keyboard.type('f')
+    const full = await fullPage(page)
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 7 }), full)
     let p = await popup(page)
-    assert.equal(p.itemCount, 2, '首屏 2 条')
+    assert.equal(p.itemCount, 50, '首屏满页 50 条')
     assert.match(p.statusText, /还有 1 项|1 more/, 'more 状态行提示剩余数')
-    // 高亮移到末项后再 ↓：触发续页（offset=2 出站）
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('ArrowDown')
-    assert.equal((await popup(page)).activeIndex, 1, '高亮在末项')
+    // 高亮移到末项后再 ↓：触发续页（offset=50 出站——已投递数）
+    for (let i = 0; i < 49; i++) {
+      await page.keyboard.press('ArrowDown')
+    }
+    assert.equal((await popup(page)).activeIndex, 49, '高亮在末项')
     await page.keyboard.press('ArrowDown')
     const more = await page.evaluate(() => window.lastQuery())
-    assert.equal(more.offset, 2, '续页请求 offset=2')
-    assert.equal(more.query, '方', '同查询续页')
+    assert.equal(more.offset, 50, '续页请求 offset=50')
+    assert.equal(more.query, 'f', '同查询续页')
     assert.equal(more.generation >= 1, true, '代次不重置')
-    const third = {
+    const tail = {
       id: 'C:\\vault\\翻新.md', name: '翻新.md', dir: '', relPath: '翻新.md',
       insertPath: '../翻新.md', alias: '翻新', mtimeMs: 3000, score: 0,
       labelHighlights: [], dirHighlights: [],
     }
-    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 7 }), [third])
+    // 追加页 1 条（< 页大小）：拼接后穷尽，more 行消失
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 7 }), [tail])
     p = await popup(page)
-    assert.equal(p.itemCount, 3, '追加页拼接后 3 条')
-    assert.deepEqual(p.names, ['方案.md', '通知.md', '翻新.md'])
-    assert.equal(p.activeIndex, 1, '手动高亮保持在末项原位置（不跳首项）')
-    // 全部加载完成后 more 行消失
-    assert.equal((await popup(page)).statusText === null || !/还有|more/.test(p.statusText ?? ''), true, '总数尽后无 more 行')
+    assert.equal(p.itemCount, 51, '追加页拼接后 51 条')
+    assert.equal(p.names[50], '翻新.md', '追加条目在末位')
+    assert.equal(p.activeIndex, 49, '手动高亮保持在末项原位置（不跳首项）')
+    assert.equal(p.statusText === null || !/还有|more/.test(p.statusText ?? ''), true, '穷尽后无 more 行')
     await page.keyboard.press('ArrowDown')
-    assert.equal((await popup(page)).activeIndex, 2, '后续 ↓ 恢复移动高亮')
+    assert.equal((await popup(page)).activeIndex, 50, '后续 ↓ 恢复移动高亮')
   })
 
   await scenario('跨清单代次的追加页不拼接：重取首页', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[')
-    await page.keyboard.type('方')
-    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 7 }), [fangan(), tongzhi()])
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('ArrowDown') // 触底触发续页
-    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 2)
+    await page.keyboard.type('f')
+    const full = await fullPage(page)
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 7 }), full)
+    for (let i = 0; i < 50; i++) {
+      await page.keyboard.press('ArrowDown')
+    }
+    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 50)
     // 清单代次已变（7 → 8）：追加页必须被拒拼，并按新代次重取首页
-    await page.evaluate((items) => window.respondQuery(items, { total: 3, catalogGen: 8 }),
-      [fangan(), tongzhi()])
+    await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 8 }), full)
     const refetch = await page.evaluate(() => window.lastQuery())
     assert.equal(refetch.offset, undefined, '重取首页（无 offset）')
-    assert.equal((await popup(page)).itemCount, 2, '旧追加结果未进候选')
-    // 新首页应答正常呈现
-    await page.evaluate((items) => window.respondQuery(items, { total: 2, catalogGen: 8 }), [fangan()])
+    assert.equal((await popup(page)).itemCount, 50, '旧追加结果未进候选')
+    // 新首页应答正常呈现（不满页 = 穷尽）
+    const fresh = [{
+      id: 'C:\\vault\\f0.md', name: 'f0.md', dir: '', relPath: 'f0.md',
+      insertPath: '../f0.md', alias: 'f0', mtimeMs: 1000, score: 0,
+      labelHighlights: [], dirHighlights: [],
+    }]
+    await page.evaluate((items) => window.respondQuery(items, { total: 1, catalogGen: 8 }), fresh)
     const p = await popup(page)
     assert.equal(p.itemCount, 1)
     assert.equal(p.activeIndex, 0, '首页响应恢复自动高亮首项')
@@ -284,16 +298,17 @@ try {
 
   await scenario('续页请求在途时触底 ↓ 不重复出站', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[')
-    await page.keyboard.type('方')
-    await page.evaluate((items) => window.respondQuery(items, { total: 5, catalogGen: 1 }), [fangan(), tongzhi()])
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('ArrowDown') // 触发续页
+    await page.keyboard.type('f')
+    const full = await fullPage(page)
+    await page.evaluate((items) => window.respondQuery(items, { total: 53, catalogGen: 1 }), full)
+    for (let i = 0; i < 50; i++) {
+      await page.keyboard.press('ArrowDown')
+    }
     const countAfterTrigger = await page.evaluate(() => window.queryCount())
     await page.keyboard.press('ArrowDown') // 在途再按
     await page.keyboard.press('ArrowDown')
     assert.equal(await page.evaluate(() => window.queryCount()), countAfterTrigger, '在途不重复发')
-    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 2, '仍等待 offset=2 应答')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 50, '仍等待 offset=50 应答')
   })
 
   // ---- #377 T02 候选失效信号 ----
@@ -698,7 +713,7 @@ try {
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
-    await page.evaluate(() => window.respondBlockAccept({ ok: false, reason: 'target-changed' }))
+    await page.evaluate(() => window.respondBlockAccept({ ok: false, reason: 'apply-failed' }))
     const toast = await page.evaluate(() => window.readToast())
     assert.ok(toast, 'toast 在场')
     assert.match(toast.text, /未能补写块 ID|Failed to insert the block ID/, '接受失败提示（i18n）')
@@ -724,6 +739,111 @@ try {
     const after = await read(page)
     assert.ok(after.text.includes('[[../资料/方案.md#^same001|方案]]'), '链接写入')
     assert.ok(after.text.includes('\n\n^same001'), '标记同事务写入（合笔）')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('F4：target-changed 失败不 toast——重发查询刷新版本基准，重试即成功', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
+    const queriesBefore = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length)
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    // IME 定稿落地晚于查询：版本守卫拒绝
+    await page.evaluate(() => window.respondBlockAccept({ ok: false, reason: 'target-changed' }))
+    assert.equal(await page.evaluate(() => window.readToast()), null, '不 toast（刷新即自愈）')
+    assert.equal((await popup(page)).open, true, '候选保留')
+    // 重发块查询（同查询新 reqId——版本基准刷新）
+    await page.waitForFunction(
+      (n) => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length === n + 1,
+      queriesBefore,
+    )
+    await page.evaluate((items) => window.respondBlockQuery(items, 9), [blockNoId()])
+    // 重按 Enter：新基准出站 → 成功
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept()?.targetVersion === 9)
+    await page.evaluate(() => window.respondBlockAccept({ ok: true, blockId: 'abc123', alias: '方案' }))
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^abc123|方案]]', '重试以新版本基准接受')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('F8：sameDoc 合笔标记在字段上方——光标平移到锚点末（不落链接内部）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    // 标记插在文档头（字段上方）
+    await page.evaluate(() => window.respondBlockAccept({
+      ok: true, blockId: 'same001', sameDoc: true, alias: '方案',
+      markerLfOffset: 0, markerText: '\n\n^same001',
+    }))
+    const after = await read(page)
+    assert.ok(after.text.startsWith('\n\n^same001'), '标记写在文档头')
+    assert.ok(after.text.includes('[[../资料/方案.md#^same001|方案]]'), '链接写入')
+    assert.equal(after.head, after.text.indexOf('|方案'), '光标在锚点末（| 前）——已按标记长度平移')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  await scenario('F11：加载中方向键消费——正文光标不动、会话不销毁', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.keyboard.type('方')
+    // 查询在途（未回灌）：loading 态
+    const headBefore = (await read(page)).head
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowUp')
+    const mid = await read(page)
+    assert.equal(mid.head, headBefore, '正文光标不动（不落穿移动）')
+    let p = await popup(page)
+    assert.equal(p.open, true, '会话不销毁（在途结果不被弃）')
+    assert.match(p.statusText, /正在搜索|Searching/, 'loading 状态行（i18n）')
+    // 结果到达后方向键恢复移动语义：首帧高亮首项，↓ 移到第二项
+    await page.evaluate((items) => window.respondQuery(items), [fangan(), tongzhi()])
+    p = await popup(page)
+    assert.equal(p.activeIndex, 0, '首帧高亮首项')
+    await page.keyboard.press('ArrowDown')
+    p = await popup(page)
+    assert.equal(p.activeIndex, 1, '↓ 恢复移动高亮')
+  })
+
+  await scenario('F3：快速输入未确认窗口 Enter 消费不出站 accept——推进出站并重发查询，落定后重按即接受', { doc: '', cursor: 0 }, async (page) => {
+    // 关闭 ack 扮演：模拟「前一笔 ack 往返慢」——连续键入的后续笔进入
+    // 暂缓集（宿主收不到、whenEditsSettled 也不等），构成 F3 未出站窗口
+    await page.evaluate(() => window.setAutoAck(false))
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
+    const queriesBefore = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length)
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    const accepts = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.accept').length)
+    assert.equal(accepts, 0, '未确认窗口不出站 accept（宿主系坐标会错位）')
+    // 已推进暂缓编辑出站（flush）并重发当前查询（宿主装载最新文本后
+    // targetVersion 刷新）
+    await page.waitForFunction(
+      (n) => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length === n + 1,
+      queriesBefore,
+    )
+    await page.evaluate((items) => window.respondBlockQuery(items, 9), [blockNoId()])
+    // 模拟 ack 往返完成：补发窗口内积压确认并恢复自动 ack——暂缓集
+    // 经 sendDeferredLocal 链式出站、确认，未确认窗口收敛（微任务链）
+    await page.evaluate(() => {
+      window.setAutoAck(true)
+      window.ackPendingEdits()
+    })
+    await page.waitForTimeout(50)
+    // 窗口收敛后重按 Enter 正常接受
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    const acc = await page.evaluate(() => window.lastBlockAccept())
+    assert.equal(acc.targetVersion, 9, '以刷新后的版本基准出站')
+    await page.evaluate(() => window.respondBlockAccept({ ok: true, blockId: 'f3win1', alias: '方案' }))
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^f3win1|方案]]', '落定后接受成功')
     assert.equal((await popup(page)).open, false)
   })
 

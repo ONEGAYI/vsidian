@@ -306,6 +306,19 @@ describe('planWikilinkFieldEdit：^ 转块阶段', () => {
     expect(applyPlan(line, plan!)).toBe('[[A#^¦H]]')
   })
 
+  it('F9：nextStage 为插入后重识别的如实值——锚点起点成 #^ 形态转块，中部/尾部仍是标题', () => {
+    // 锚点起点（# 紧后）：插入后 #^H 为块形态
+    const atStart = planWikilinkFieldEdit(fieldOf('[[A#H]]', 4), '^', 4, null)
+    expect(atStart!.nextStage).toBe('block')
+    // 锚点中部（H 与 I 之间）：插入后 #H^I 首个 # 后并非 ^，重识别仍是标题
+    const mid = planWikilinkFieldEdit(fieldOf('[[A#HI]]', 5), '^', 5, null)
+    expect(mid!.changes).toEqual([{ from: 5, to: 5, insert: '^' }])
+    expect(mid!.nextStage).toBe('heading')
+    // 锚点尾部（闭围栏前）：#HI^ 重识别仍是标题
+    const tail = planWikilinkFieldEdit(fieldOf('[[A#HI]]', 6), '^', 6, null)
+    expect(tail!.nextStage).toBe('heading')
+  })
+
   it('块阶段按 ^ 返回 null（不接管）', () => {
     expect(planWikilinkFieldEdit(fieldOf('[[A#^]]', 5), '^', 5, null)).toBeNull()
   })

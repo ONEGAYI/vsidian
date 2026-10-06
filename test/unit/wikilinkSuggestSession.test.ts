@@ -1020,7 +1020,7 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
     }
   })
 
-  it('无 ID 块接受失败：toast 提示并保留输入（候选原样、可重试）', () => {
+  it('无 ID 块接受失败（apply-failed）：toast 提示并保留输入（候选原样、可重试）', () => {
     const sent: WebviewToHost[] = []
     const bridge: VsCodeBridge = {
       postMessage: (message) => sent.push(message as WebviewToHost),
@@ -1036,7 +1036,7 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
     try {
       openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID])
       press(view, 'Enter')
-      respondAccept(controller, sent, { ok: false, reason: 'target-changed' })
+      respondAccept(controller, sent, { ok: false, reason: 'apply-failed' })
       const toast = document.querySelector<HTMLElement>('.vsidian-toast')
       expect(toast?.textContent).toBe(zhCn['wikilinkSuggest.toast.blockAcceptFailed'])
       expect(toast?.dataset['severity']).toBe('warning')
@@ -1048,6 +1048,36 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
     } finally {
       controller.dispose()
       parent.remove()
+    }
+  })
+
+  it('F4：target-changed 失败不 toast——重发当前阶段查询刷新版本基准，重试即成功', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID], 7)
+      press(view, 'Enter')
+      const firstAccept = lastAccept(sent)
+      expect(firstAccept!.targetVersion).toBe(7)
+      // IME 定稿落地晚于查询结果：版本守卫拒绝
+      respondAccept(controller, sent, { ok: false, reason: 'target-changed' })
+      const toast = document.querySelector<HTMLElement>('.vsidian-toast')
+      expect(toast).toBeNull() // 不打扰——刷新即自愈路径
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^x]]') // 输入保留
+      expect(popupState().open).toBe(true)
+      // 重发块查询（同查询新 reqId；旧版本基准作废）
+      const queries = sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.block.query' }> =>
+        m.kind === 'wikilink.block.query')
+      expect(queries.length).toBe(2)
+      // 新结果到达（新 targetVersion=9）→ 重按 Enter 以新基准出站
+      respondBlock(controller, sent, [BLOCK_NO_ID], 9)
+      press(view, 'Enter')
+      const retry = lastAccept(sent)
+      expect(retry).toBeDefined()
+      expect(retry!.targetVersion).toBe(9)
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abc123|方案]]')
+    } finally {
+      controller.dispose()
     }
   })
 
@@ -1066,6 +1096,26 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
       expect(text).toContain('\n\n^same001')
       expect(popupState().open).toBe(false)
       expect(linkeds(sent)).toHaveLength(1)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('F8：sameDoc 合笔标记在字段上方——光标平移到锚点末（不落链接内部）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    try {
+      openBlockSession(controller, sent, view, 15, [BLOCK_NO_ID])
+      press(view, 'Enter')
+      // 标记插在文档头（字段上方）：selection 坐标须按新文档语义平移
+      respondAccept(controller, sent, {
+        ok: true, blockId: 'same001', sameDoc: true, alias: '方案',
+        markerLfOffset: 0, markerText: '\n\n^same001',
+      })
+      const text = view.state.doc.toString()
+      expect(text.startsWith('\n\n^same001')).toBe(true)
+      expect(text).toContain('[[../资料/方案.md#^same001|方案]]')
+      // 光标 = 锚点末（| 之前）；未平移时会早 markerText.length 落链接内部
+      expect(view.state.selection.main.head).toBe(text.indexOf('|方案'))
     } finally {
       controller.dispose()
     }
@@ -1252,6 +1302,207 @@ describe('表格格内联想：转义竖线识别、确认与键位优先级（#
       expect(popupState().open).toBe(false)
     } finally {
       controller.dispose()
+    }
+  })
+})
+
+// ---- code-review 修复批次：F6（webview 终态）/ F8 / F11 ----
+
+describe('code-review 修复：webview 侧（F6 终态与去重 / F8 合笔光标 / F11 方向键）', () => {
+  /** 开文件阶段会话（typeAt 触发出站查询，不回灌） */
+  function openFileSession(
+    c: ReturnType<typeof setup>['controller'],
+    view: ReturnType<typeof setup>['view'],
+    sent: WebviewToHost[],
+  ) {
+    locate(c, 2)
+    typeAt(view, 2, '方')
+    expect(lastQuery(sent)).toBeDefined()
+  }
+
+  it('F6：不满页即穷尽——高亮在末项按 ↓ 不再续页（total 虚高不触发追加）', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      openFileSession(controller, view, sent)
+      // 宿主回包 2 项但 total 5（病态占位虚高）：不满页 = 穷尽
+      const q = lastQuery(sent)!
+      controller.handleHostMessage({
+        kind: 'wikilink.query.result', sessionId: q.sessionId, docUri: q.docUri,
+        reqId: q.reqId, generation: q.generation, status: 'ready',
+        updating: false, total: 5, items: [FANGAN, TONGZHI],
+      })
+      const queriesBefore = queries(sent).length
+      press(view, 'ArrowDown') // 高亮首项 → 第二项
+      expect(popupState().activeIndex).toBe(1)
+      press(view, 'ArrowDown') // 末项触底：不满页不续页
+      expect(queries(sent).length).toBe(queriesBefore) // 无追加请求
+      expect(popupState().activeIndex).toBe(1) // 高亮不动
+      expect(popupState().open).toBe(true) // 会话不销毁
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('F6：满页触底续页，追加页按候选 id 去重（跨页身份复现不产生重复行）', () => {
+    const { controller, sent, view } = setup('[[f]]')
+    try {
+      openFileSession(controller, view, sent)
+      const makeItems = (from: number, count: number): WikilinkCandidateItem[] =>
+        Array.from({ length: count }, (_, i) => ({
+          id: `C:\vault\f${from + i}.md`,
+          name: `f${from + i}.md`, dir: '', relPath: `f${from + i}.md`,
+          insertPath: `../f${from + i}.md`, alias: `f${from + i}`, mtimeMs: 1000, score: 0,
+          labelHighlights: [], dirHighlights: [],
+        }))
+      const q1 = lastQuery(sent)!
+      controller.handleHostMessage({
+        kind: 'wikilink.query.result', sessionId: q1.sessionId, docUri: q1.docUri,
+        reqId: q1.reqId, generation: q1.generation, status: 'ready',
+        updating: false, total: 57, items: makeItems(0, 50),
+      })
+      // 高亮到末项触底 → 满页续页（offset = 已投递数 50）
+      for (let i = 0; i < 50; i++) {
+        press(view, 'ArrowDown')
+      }
+      const q2 = queries(sent).at(-1)!
+      expect(q2.offset).toBe(50)
+      // 追加页 10 项中 3 项与首页重复 id（防御场景）→ 只拼接 7 项新身份
+      controller.handleHostMessage({
+        kind: 'wikilink.query.result', sessionId: q2.sessionId, docUri: q2.docUri,
+        reqId: q2.reqId, generation: q2.generation, status: 'ready',
+        updating: false, total: 57,
+        items: [...makeItems(0, 3), ...makeItems(50, 7)],
+      })
+      expect(popupState().itemCount).toBe(57)
+      // 不满页追加（7 < 50）：穷尽，再触底不出站
+      const queriesAfter = queries(sent).length
+      press(view, 'ArrowDown')
+      expect(queries(sent).length).toBe(queriesAfter)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('F11：加载中方向键消费——光标不动、会话不销毁（在途结果不被弃）', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      openFileSession(controller, view, sent)
+      const headBefore = view.state.selection.main.head
+      press(view, 'ArrowDown')
+      expect(view.state.selection.main.head).toBe(headBefore) // 不落穿移动光标
+      expect(popupState().open).toBe(true) // 会话在场（loading 态浮层）
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.loading'])
+      // 结果到达后方向键恢复移动语义：首帧高亮首项，↓ 移到第二项
+      respond(controller, sent, [FANGAN, TONGZHI])
+      expect(popupState().activeIndex).toBe(0)
+      press(view, 'ArrowDown')
+      expect(popupState().activeIndex).toBe(1)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('F11：零命中方向键消费不落穿（会话保留，候选重查可达）', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      openFileSession(controller, view, sent)
+      respond(controller, sent, [])
+      const headBefore = view.state.selection.main.head
+      press(view, 'ArrowUp')
+      press(view, 'ArrowDown')
+      expect(view.state.selection.main.head).toBe(headBefore)
+      expect(popupState().open).toBe(true)
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.empty'])
+    } finally {
+      controller.dispose()
+    }
+  })
+})
+
+describe('F3：无 ID 块接受前的未出站编辑核对（hasUnsentLocalEdits 桩）', () => {
+  it('未出站编辑在场时 Enter 消费不出站 accept——推进 flush 并重发查询；落定后重按即接受', async () => {
+    const { WikilinkSuggestController } = await import('../../src/webview/wikilinkSuggest')
+    const { liveDecorationsField } = await import('../../src/webview/liveDecorations')
+    const { EditorView } = await import('@codemirror/view')
+    const { EditorState } = await import('@codemirror/state')
+    const sent: WebviewToHost[] = []
+    let unsent = true
+    let flushes = 0
+    const controller = new WikilinkSuggestController({
+      send: (message) => sent.push(message),
+      getSession: () => ({ sessionId: 'f3-session', docUri: 'file:///f3.md' }),
+      isLiveActive: () => true,
+      isSuspended: () => false,
+      isExternal: () => false,
+      hasUnsentLocalEdits: () => unsent,
+      scheduleFlush: () => {
+        flushes += 1
+      },
+    })
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc: '[[../资料/方案.md#^]]',
+        // liveDecorationsField 在场（空数据）让 inCodeContext 不落入
+        // 「无装饰=防御性视为代码上下文」分支（生产装配恒有该字段）
+        extensions: [controller.extension, liveDecorationsField],
+      }),
+    })
+    controller.attach(view)
+    const blockItem: WikilinkBlockItem = {
+      id: 'C:\vault\资料\方案.md#^4', blockId: '', snippet: '会议记录',
+      line: 4, lineCount: 2, alias: '方案',
+    }
+    const blockQueriesOf = () =>
+      sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.block.query' }> =>
+        m.kind === 'wikilink.block.query')
+    const acceptsOf = () =>
+      sent.filter((m): m is Extract<WebviewToHost, { kind: 'wikilink.block.accept' }> =>
+        m.kind === 'wikilink.block.accept')
+    try {
+      // 开块会话：光标先进锚点（selection 事务），再模拟用户键入查询
+      view.dispatch({ selection: { anchor: 15 }, userEvent: 'select' })
+      view.dispatch({
+        changes: { from: 15, insert: 'x' },
+        selection: { anchor: 16 },
+        userEvent: 'input.type',
+      })
+      const q1 = blockQueriesOf()[0]!
+      expect(q1).toBeDefined()
+      controller.handleBlockResult({
+        kind: 'wikilink.block.query.result', sessionId: q1.sessionId, docUri: q1.docUri,
+        reqId: q1.reqId, generation: q1.generation, status: 'ready',
+        targetVersion: 3, items: [blockItem],
+      })
+      // Enter：未出站编辑在场 → 消费本次按键，不出站 accept
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      )
+      expect(acceptsOf()).toHaveLength(0)
+      expect(flushes).toBe(1)
+      // 已推进 flush 并重发当前阶段查询（宿主 whenEditsSettled 后装载
+      // 最新文本，targetVersion 随之刷新）
+      expect(blockQueriesOf().length).toBe(2)
+      const q2 = blockQueriesOf()[1]!
+      controller.handleBlockResult({
+        kind: 'wikilink.block.query.result', sessionId: q2.sessionId, docUri: q2.docUri,
+        reqId: q2.reqId, generation: q2.generation, status: 'ready',
+        targetVersion: 9, items: [blockItem],
+      })
+      // 暂缓编辑落定（IME 定稿出站完成）→ 重按 Enter 正常接受（新基准）
+      unsent = false
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      )
+      const accept = acceptsOf()[0]!
+      expect(accept).toBeDefined()
+      expect(accept.targetVersion).toBe(9)
+    } finally {
+      controller.destroy()
+      view.destroy()
+      parent.remove()
     }
   })
 })

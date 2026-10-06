@@ -56,6 +56,7 @@ import type {
   WikilinkCandidateItem,
   WikilinkHeadingItem,
 } from '../shared/protocol'
+import { WIKILINK_QUERY_LIMIT } from '../shared/protocol'
 import { t } from '../shared/i18n'
 import { inCodeContext } from './symbolAutocomplete'
 import { tableRegionField } from './tableRegionSelection'
@@ -90,6 +91,15 @@ export interface WikilinkSuggestDeps {
   /** 轻提示通道（#379 T04 重复标题风险提示；缺省静默跳过——无 toast 面
    *  的装配环境不阻塞确认） */
   showToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
+  /** 本地是否有**尚未出站**的编辑（IME 组合中/空白组合暂缓/暂缓未发集；
+   *  F3——无 ID 块接受出站前核对：sameDoc 回包的宿主系 markerLfOffset
+   *  基于权威文本，未出站编辑宿主收不到（whenEditsSettled 也不等），
+   *  此窗口内接受会让插入点在本地系错位破坏正文。已出站在途的请求不
+   *  在此列——宿主会等其应用后再装载，文本与本地一致。缺省视为无
+   *  暂缓（不阻塞确认） */
+  hasUnsentLocalEdits?(): boolean
+  /** 主动推进暂缓编辑出站（flush 定时提前；F3 与核对配套） */
+  scheduleFlush?(): void
 }
 
 /** 识别快照（字段边界为文档绝对偏移；T03 起阶段化——文件/标题/块） */
@@ -121,6 +131,9 @@ type SuggestResult =
       total: number
       /** 结果携带的清单代次（#377 T02；跨代次的追加页不拼接——重取首页） */
       catalogGen: number
+      /** 最近一页是否为满页（F6：items 数 === 页大小；不满页 = 排名穷尽，
+       *  触底续页与 remaining 提示以此为终态判据，不信 total 虚高） */
+      pageFull: boolean
     }
   | {
       stage: 'heading'
@@ -272,12 +285,16 @@ export class WikilinkSuggestController {
       this.result = {
         stage: 'file',
         status: message.reason === 'not-ready' ? 'notReady' : 'noWorkspace',
-        updating: false, items: [], total: 0, catalogGen: 0,
+        updating: false, items: [], total: 0, catalogGen: 0, pageFull: false,
       }
       this.morePending = false
     } else {
       const pageItems = message.items ?? []
       const pageGen = message.catalogGen ?? 0
+      // F6：满页判定（items 数 === 页大小）——不满页即排名穷尽（宿主侧
+      // 病态补位后的终态信号）；updating 部分数据不判穷尽（构建完成后经
+      // invalidate 整页刷新）
+      const pageFull = !message.updating && pageItems.length >= WIKILINK_QUERY_LIMIT
       const prev = this.result
       if (this.lastReqOffset > 0 && prev !== null && prev.stage === 'file' && prev.status === 'ready') {
         if (prev.catalogGen !== pageGen) {
@@ -285,13 +302,18 @@ export class WikilinkSuggestController {
           this.sendQuery(this.session.query, this.session.generation, 0)
           return
         }
+        // F6：追加页按候选 id 去重兜底（宿主滑动补位后不应重复；防御性
+        // 挡住跨页身份复现造成的重复行）
+        const seen = new Set(prev.items.map((item) => item.id))
+        const fresh = pageItems.filter((item) => !seen.has(item.id))
         this.result = {
           stage: 'file',
           status: 'ready',
           updating: message.updating === true,
-          items: prev.items.concat(pageItems),
+          items: prev.items.concat(fresh),
           total: message.total ?? prev.total,
           catalogGen: pageGen,
+          pageFull,
         }
         this.morePending = false
         this.render()
@@ -304,6 +326,7 @@ export class WikilinkSuggestController {
         items: pageItems,
         total: message.total ?? 0,
         catalogGen: pageGen,
+        pageFull,
       }
       this.morePending = false
     }
@@ -424,9 +447,16 @@ export class WikilinkSuggestController {
       return
     }
     if (!message.ok) {
-      // 失败保留输入并提示（规格：不能先写虚构 ID；目标变化/只读/失败真实分态）
+      // 失败保留输入并提示（规格：不能先写虚构 ID；目标变化/只读/失败真实分态）。
+      // F4：target-changed（目标版本已变——典型为 IME 定稿/暂缓编辑落地
+      // 晚于查询结果）不 toast 也不就此了结——重发当前阶段查询刷新 result
+      // （含新 targetVersion），用户重按确认即成功；否则过期版本重试恒败
       this.pendingBlockAccept = null
-      this.deps.showToast?.(t('wikilinkSuggest.toast.blockAcceptFailed'), 'warning')
+      if (message.reason === 'target-changed' && this.session !== null) {
+        this.refreshCurrentStageQuery()
+      } else {
+        this.deps.showToast?.(t('wikilinkSuggest.toast.blockAcceptFailed'), 'warning')
+      }
       this.render()
       return
     }
@@ -449,15 +479,23 @@ export class WikilinkSuggestController {
       return
     }
     const changes = [...plan.changes]
+    let cursorTo = plan.cursorTo
     if (message.sameDoc === true &&
       typeof message.markerLfOffset === 'number' && typeof message.markerText === 'string') {
       // 同文档合笔：标记插入并入同一事务（一次 undo 同时回退标记与链接，
       // V01 场景 2 验证路径；两段编辑不重叠——标记在块尾行行尾，链接在
-      // 当前行字段内；CM6 changes 乱序自动排序）
+      // 当前行字段内；CM6 changes 乱序自动排序）。
+      // F8：cursorTo 为字段内编辑后的新坐标，标记插入点在字段上方
+      // （markerLfOffset < 字段起点）时，字段整体右移——selection 坐标
+      // 按新文档语义需平移 markerText.length，否则光标落链接内部（早
+      // markerText.length 处）
       changes.push({ from: message.markerLfOffset, to: message.markerLfOffset, insert: message.markerText })
+      if (message.markerLfOffset < field.innerFrom) {
+        cursorTo += message.markerText.length
+      }
     }
     this.pendingBlockAccept = null
-    this.dispatchPlan(view, changes, plan.cursorTo)
+    this.dispatchPlan(view, changes, cursorTo)
     this.close()
     this.deps.send({
       kind: 'wikilink.block.linked',
@@ -847,17 +885,22 @@ export class WikilinkSuggestController {
     if (this.session.origin.stage === 'block' && this.session.target.trim() === '') {
       return false // 空目标块占位：方向键落穿（#380 T05 保持占位口径）
     }
+    // F11：浮层可见的加载/真实状态/零命中态——方向键一律消费不落穿：
+    // 落穿会移动正文光标移出目标字段，会话随即销毁、在途查询结果被弃；
+    // 此时无 items 可移动，不动作（与「接受在途方向键吞掉」口径统一）
     if (!this.result || this.result.status !== 'ready' || this.result.items.length === 0) {
-      return false
+      return true
     }
     const count = this.result.items.length
     const from = this.activeIndex
     // #377 T02 触底续页（仅文件阶段——标题查询无分页）：高亮在末项且总数
-    // 未尽时 ↓ 触发下一页加载（同查询同代次；应答追加，高亮保持）
+    // 未尽时 ↓ 触发下一页加载（同查询同代次；应答追加，高亮保持）。
+    // F6：续页仅在最近一页为满页时发起（不满页 = 排名穷尽——尾部病态
+    // 候选被宿主滑动跳过后 total 虚高，按 total 续页会空页死循环）
     if (
       this.result.stage === 'file' &&
       delta > 0 && from === count - 1 && !this.morePending &&
-      this.result.total > count
+      this.result.total > count && this.result.pageFull
     ) {
       this.morePending = true
       this.sendQuery(this.session.query, this.session.generation, count)
@@ -1008,10 +1051,39 @@ export class WikilinkSuggestController {
       this.close()
       return true
     }
+    // F3：本地存在**尚未出站**的编辑（IME 组合/暂缓集——宿主收不到、
+    // whenEditsSettled 也不等）时不立即出站：sameDoc 回包的宿主系
+    // markerLfOffset 基于权威文本，此窗口内接受会让插入点在本地系错位
+    // 破坏正文。消费本次按键、推进 flush 出站并重发当前查询（宿主
+    // whenEditsSettled 等编辑落地后装载最新文本，targetVersion 随之刷新）；
+    // 落定后重按确认即正常接受。已出站在途请求不推迟（宿主会等其应用）
+    if (this.deps.hasUnsentLocalEdits?.() === true) {
+      this.deps.scheduleFlush?.()
+      this.refreshCurrentStageQuery()
+      return true
+    }
     // 无 ID 块：宿主先补写（V01 放行路径），在途浮层显示补写状态
     const result = this.result
     const targetVersion = result !== null && result.stage === 'block' ? result.targetVersion : 0
     return this.sendBlockAccept(key, item.line, targetVersion, session.target, session.generation)
+  }
+
+  /** 按当前会话阶段重发查询（同查询新 reqId，结果按守卫整体替换——含
+   *  targetVersion 刷新；F4 接受失败 target-changed 与 F3 暂缓编辑推进
+   *  出站后的刷新共用） */
+  private refreshCurrentStageQuery(): void {
+    const session = this.session
+    if (!session) {
+      return
+    }
+    this.morePending = false
+    if (session.origin.stage === 'file') {
+      this.sendQuery(session.query, session.generation, 0)
+    } else if (session.origin.stage === 'heading' && session.target.trim() !== '') {
+      this.sendHeadingQuery(session.query, session.target, session.generation)
+    } else if (session.origin.stage === 'block' && session.target.trim() !== '') {
+      this.sendBlockQuery(session.query, session.target, session.generation)
+    }
   }
 
   /** #／^／| 转阶段（#378 T03；#379 T04 起 | 接受标题阶段真实高亮）：
@@ -1230,7 +1302,9 @@ export class WikilinkSuggestController {
       for (let i = 0; i < result.items.length; i++) {
         popup.appendChild(this.buildItemRow(result.items[i]!, i === this.activeIndex))
       }
-      const remaining = result.total - result.items.length
+      // F6：remaining 提示以满页终态为口径——不满页即穷尽，不为病态占位
+      // 的 total 虚高显示「还有 N 项」
+      const remaining = result.pageFull ? result.total - result.items.length : 0
       if (result.items.length === 0 && !result.updating) {
         popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.empty')))
       }

@@ -16,10 +16,27 @@ import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 bootLocaleFromDocument()
 
 const hostMessages: unknown[] = []
+/** 宿主 ack 扮演开关（F3 场景模拟「前一笔 ack 往返慢」的暂缓窗口） */
+let autoAck = true
+/** 已确认的 edit.request seq（自动 ack 与补发 ack 共享去重） */
+const ackedSeqs = new Set<number>()
 const controller = new WebviewSyncController({
   postMessage(message) {
     hostMessages.push(message)
     ;(window as unknown as Record<string, unknown>)['__lastHostMessage'] = message
+    // 宿主扮演：edit.request 即时 ack（F3——生产宿主应用编辑后立即确认，
+    // unconfirmed 推进、暂缓链收敛；fixture 缺省不 ack 会让连续键入全部
+    // 暂缓且永不清空，无 ID 块接受的未出站核对恒触发）
+    const req = message as Extract<WebviewToHost, { kind: 'edit.request' }>
+    if ((message as { kind?: string }).kind === 'edit.request' && controller && autoAck) {
+      ackedSeqs.add(req.seq)
+      ackVersion += 1
+      queueMicrotask(() => {
+        controller.handleHostMessage({
+          kind: 'edit.ack', seq: req.seq, ok: true, version: ackVersion,
+        } as Parameters<typeof controller.handleHostMessage>[0])
+      })
+    }
   },
   getState() {
     return undefined
@@ -27,6 +44,9 @@ const controller = new WebviewSyncController({
   setState() {},
 })
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+
+/** ack 扮演的版本计数（init 后每笔编辑 +1——与生产宿主节奏同构） */
+let ackVersion = 1
 
 const POPUP = '.vsidian-wikilink-suggest'
 const ITEM = '.vsidian-wikilink-suggest-item'
@@ -53,6 +73,26 @@ const lastBlockAcceptRef = (): Extract<WebviewToHost, { kind: 'wikilink.block.ac
     Extract<WebviewToHost, { kind: 'wikilink.block.accept' }> | undefined
 
 Object.assign(window, {
+  /** 宿主 ack 扮演开关（F3 场景：关闭以模拟「前一笔 ack 往返慢」——
+   *  连续键入的后续笔进入暂缓集（宿主收不到），构成未出站窗口） */
+  setAutoAck(enabled: boolean) {
+    autoAck = enabled
+  },
+  /** 补发窗口内积压的 edit.request 确认（F3 场景：模拟 ack 往返完成。
+   *  暂缓集出站产生的新请求由 autoAck 兜底——恢复 true 后链式收敛） */
+  ackPendingEdits() {
+    for (const m of [...hostMessages]) {
+      const req = m as Extract<WebviewToHost, { kind: 'edit.request' }>
+      if ((m as { kind?: string }).kind !== 'edit.request' || ackedSeqs.has(req.seq)) {
+        continue
+      }
+      ackedSeqs.add(req.seq)
+      ackVersion += 1
+      controller.handleHostMessage({
+        kind: 'edit.ack', seq: req.seq, ok: true, version: ackVersion,
+      } as Parameters<typeof controller.handleHostMessage>[0])
+    }
+  },
   initDoc(text: string) {
     controller.handleHostMessage({ kind: 'init', sessionId: 'wikilink-suggest',
       docUri: 'file:///vault/%E9%A1%B9%E7%9B%AE/%E8%AE%B0%E5%BD%95.md', version: 1, text })

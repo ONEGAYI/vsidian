@@ -521,6 +521,10 @@ export class LiveEditorInstance {
         isExternal: (tr) => tr.annotation(externalSync) === true,
         // #379 T04 重复标题风险提示（根 toast 面经 deps 注入；缺省静默）
         showToast: (text, severity) => this.deps.notifyToast?.(text, severity),
+        // F3 无 ID 块接受的未出站编辑核对：宿主系 markerLfOffset 基于权威
+        // 文本，本地有未出站编辑时先推进出站并刷新查询，落定后重按确认
+        hasUnsentLocalEdits: () => this.hasUnsentLocalEditsNow(),
+        scheduleFlush: () => this.requestFlushNow(),
       })
       : null
     this.view = new EditorView({
@@ -1773,6 +1777,20 @@ export class LiveEditorInstance {
    *  finishPasteHistory 的「本地全部落定」判定随目标实例） */
   hasUnlandedLocalEditsNow(): boolean {
     return this.hasUnlandedLocalEdits()
+  }
+
+  /** F3（双链联想无 ID 块接受）：本地是否有**尚未出站**的编辑——组合中
+   *  （composition 文本不出站）、空白组合暂缓、暂缓未发集任一在场。已
+   *  出站在途的请求不在此列：宿主 whenEditsSettled 会等其应用后再装载
+   *  文本，权威文本与本地一致、宿主系坐标可直接使用 */
+  hasUnsentLocalEditsNow(): boolean {
+    return this.composing || this.blankComposition !== null || this.deferredLocal !== null
+  }
+
+  /** F3（双链联想无 ID 块接受）：主动推进暂缓编辑出站——联想确认前
+   *  核对到未出站编辑时由建议会话触发（宿主系坐标须待权威文本收敛） */
+  requestFlushNow(): void {
+    this.scheduleFlush()
   }
 
   private releasePendingHistory(): void {

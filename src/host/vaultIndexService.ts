@@ -80,9 +80,9 @@ import {
   type VaultCatalogEntry,
 } from '../shared/vaultFileCatalog'
 import type { WikilinkCandidateItem } from '../shared/protocol'
+import { WIKILINK_QUERY_LIMIT } from '../shared/protocol'
 
-/** 双链联想候选首屏限量（规格「首屏默认最多 50 项」；排序在截取前全量完成） */
-export const WIKILINK_QUERY_LIMIT = 50
+export { WIKILINK_QUERY_LIMIT }
 
 /** 工作区根引用（wiring 层已按 vscode 语义对语法异构同指向 URI 去重） */
 export interface VaultRootRef {
