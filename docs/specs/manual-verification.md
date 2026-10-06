@@ -1846,7 +1846,7 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 
 - 实施：worktree `vsidian-wt-382`，分支 `feat/382-t07-capacity-regression`（基于 f38775ad——V01 与 T01–T06 全部合入后）。本票零 `src/` 行为变更（收口票）：交付容量基准脚本与实测报告、来源无路径契约补钉单测、全量门禁分拣与人工待验汇总。
 - 全量门禁（首轮日志与工具报告落 `out/test/t07/`，失败逐项分拣）：
-  - 单测全量：vitest 6 503 例中 6 499 过，4 例失败均为「构建产物缺失」（worktree 初次未构建——i18nBundleBytes 读 `out/webview/main.js` 不存在，测试自述先跑 compile）；`npm run compile`（EXIT=0）后该文件复验 8/8 绿。属环境前置缺失，非代码回归。收口补钉「来源无路径/不属于任何根 → no-workspace」单测（vaultIndexService 89/89）。
+  - 单测全量：vitest 6 503 例中 6 499 过，4 例失败均为「构建产物缺失」（worktree 初次未构建——i18nBundleBytes 读 `out/webview/main.js` 不存在，测试自述先跑 compile）；`npm run compile`（EXIT=0）后该文件复验 8/8 绿。属环境前置缺失，非代码回归。收口补钉「来源无路径/不属于任何根 → no-workspace」单测（vaultIndexService 89/89）。收口终跑全量（提交后复核）单测 6 504 例中另有 plainPasteInteraction「图片加文字遭宿主 error 拒绝」1 例失败——定向复跑该文件 10/10 全绿，flaky 确认，归 #318 剪贴板族已知环境噪声（批次说明在案；首轮全量该文件通过）。
   - 生产 browser 全量：81 套件 80 过、总耗时 279s（`browser-runs/run-IV6dAS`，报告与逐脚本日志留存）。唯一失败 mixedEmbed 场景 D2——断言外链图 `https://e.example/i.png` 的 alt，实际值是失败态文案（图片请求失败改写 alt 的竞态）；复跑同败（run-tE3dqZ）。分拣：与 T02 批次落档同签名同判定（本地 DNS 对假域名负缓存形成后失败加速，断言落入改写后窗口，环境性）；另 b700eb87（#346 图片失效提示覆盖 alt 记忆，2026-10-05 已在 main）使改写更确定发生——两证据一致指向 main 既有，非本批回归（本批零 src 改动）。CI Linux 通道不受本地 DNS 影响。
   - 开发宿主集成四分片：`VSIDIAN_ITEST_SHARDS=4`，4/4 片宿主退出码 0，共 326 用例（82+82+81+81）全 PASS、零 FAIL（首轮因 worktree 无宿主缓存在版本解析阶段 ECONNRESET——外网下载抖动，junction 主工作树 1.82.3 便携宿主缓存后复跑成功；逐片日志 `integration-dev-s1..4.log`）。
   - style-contract：`check:stylecontract:baseline`（基线 0.4.0↔候选 v0.10.0，映射表 89 行零差异）+ 八项检查零失败（一条常规 WARN：0.10.0 未固化进基线快照，经 CHANGELOG+tag 交叉验证纳入受信任集合）。
