@@ -263,22 +263,33 @@ export class WikilinkSuggestController {
    *  不符即迟到响应，拒收不改状态。#377 T02 起区分首页/追加页：追加页
    *  （请求 offset>0）拼接条目并保留手动高亮；清单代次与当前结果不一致
    *  的追加页不拼接——按新代次重取首页（不复活旧清单条目） */
-  handleResult(message: Extract<HostToWebview, { kind: 'wikilink.query.result' }>): void {
+
+  /** 结果回包五重守卫（#386 收敛：reqId／代次／会话身份／挂起与活跃／
+   *  阶段）——file/heading/block 三个回包入口共用；不符即迟到或错位
+   *  响应，拒收不改状态 */
+  private resultAdmissible(
+    message: { reqId: number; generation: number; sessionId: string; docUri: string },
+    stage: 'file' | 'heading' | 'block',
+  ): boolean {
     if (!this.session || this.lastReqId < 0 || message.reqId !== this.lastReqId) {
-      return
+      return false
     }
     if (this.session.generation !== message.generation) {
-      return
+      return false
     }
     const current = this.deps.getSession()
     if (!current || current.sessionId !== message.sessionId || current.docUri !== message.docUri) {
-      return
+      return false
     }
     if (this.deps.isSuspended() || !this.deps.isLiveActive()) {
-      return
+      return false
     }
-    if (this.session.origin.stage !== 'file') {
-      return // 标题会话不消费文件回包（无出站路径，防御性拒收）
+    return this.session.origin.stage === stage
+  }
+
+  handleResult(message: Extract<HostToWebview, { kind: 'wikilink.query.result' }>): void {
+    if (!this.resultAdmissible(message, 'file')) {
+      return // 守卫不符即迟到/错位响应（五重守卫见 resultAdmissible）
     }
     // 同一查询的更新帧（此前已有该代次结果）：手动高亮按候选身份保留
     const sameQueryUpdate = this.result !== null
@@ -346,21 +357,8 @@ export class WikilinkSuggestController {
    * 保留手动高亮。
    */
   handleHeadingResult(message: Extract<HostToWebview, { kind: 'wikilink.heading.query.result' }>): void {
-    if (!this.session || this.lastReqId < 0 || message.reqId !== this.lastReqId) {
-      return
-    }
-    if (this.session.generation !== message.generation) {
-      return
-    }
-    const current = this.deps.getSession()
-    if (!current || current.sessionId !== message.sessionId || current.docUri !== message.docUri) {
-      return
-    }
-    if (this.deps.isSuspended() || !this.deps.isLiveActive()) {
-      return
-    }
-    if (this.session.origin.stage !== 'heading') {
-      return
+    if (!this.resultAdmissible(message, 'heading')) {
+      return // 守卫不符即迟到/错位响应（五重守卫见 resultAdmissible）
     }
     const sameQueryUpdate = this.result !== null
     const prevActiveId = this.activeId
@@ -387,21 +385,8 @@ export class WikilinkSuggestController {
    * 身份保留手动高亮。
    */
   handleBlockResult(message: Extract<HostToWebview, { kind: 'wikilink.block.query.result' }>): void {
-    if (!this.session || this.lastReqId < 0 || message.reqId !== this.lastReqId) {
-      return
-    }
-    if (this.session.generation !== message.generation) {
-      return
-    }
-    const current = this.deps.getSession()
-    if (!current || current.sessionId !== message.sessionId || current.docUri !== message.docUri) {
-      return
-    }
-    if (this.deps.isSuspended() || !this.deps.isLiveActive()) {
-      return
-    }
-    if (this.session.origin.stage !== 'block') {
-      return
+    if (!this.resultAdmissible(message, 'block')) {
+      return // 守卫不符即迟到/错位响应（五重守卫见 resultAdmissible）
     }
     const sameQueryUpdate = this.result !== null
     const prevActiveId = this.activeId
