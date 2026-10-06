@@ -179,6 +179,14 @@ Object.assign(window, {
     const items = [...el.querySelectorAll<HTMLElement>(ITEM)]
     const active = el.querySelector<HTMLElement>(ITEM_ACTIVE)
     const status = el.querySelector<HTMLElement>(STATUS)
+    // 验收反馈 2026-10-06：键提示条可见性与分割线（绘制层）、浮层/光标
+    // 几何（居中锚点断言）——全部从真实渲染读出
+    const hints = el.querySelector<HTMLElement>('.vsidian-wikilink-suggest-hints')
+    const view = controller.getView()
+    const caret = view ? view.coordsAtPos(view.state.selection.main.head) : null
+    const rect = el.getBoundingClientRect()
+    const hintsCs = hints ? getComputedStyle(hints) : null
+    const hintsRect = hints?.getBoundingClientRect()
     return {
       open: el.style.display !== 'none',
       itemCount: items.length,
@@ -187,6 +195,14 @@ Object.assign(window, {
       statusText: status?.textContent ?? null,
       names: items.map((i) => i.querySelector('.vsidian-wikilink-suggest-name')?.textContent ?? ''),
       dirs: items.map((i) => i.querySelector('.vsidian-wikilink-suggest-dir')?.textContent ?? null),
+      hintsText: hints?.textContent ?? null,
+      hintsCount: hints ? hints.querySelectorAll(':scope > span').length : 0,
+      hintsVisible: hintsRect ? hintsRect.height > 0 && hintsCs?.visibility !== 'hidden' : false,
+      hintsBorderTop: hintsCs ? `${hintsCs.borderTopStyle}/${hintsCs.borderTopWidth}` : null,
+      popupLeft: rect.left,
+      popupWidth: rect.width,
+      popupCenter: rect.left + rect.width / 2,
+      caretLeft: caret ? caret.left : null,
     }
   },
   /** #380 T05：最新块查询出站 */

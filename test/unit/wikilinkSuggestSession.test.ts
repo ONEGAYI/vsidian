@@ -1506,3 +1506,138 @@ describe('F3：无 ID 块接受前的未出站编辑核对（hasUnsentLocalEdits
     }
   })
 })
+
+describe('浮层定位与底部键提示条（2026-10-06 验收反馈）', () => {
+  /** 开文件会话浮层并回灌候选；stub 光标/字段坐标与浮层尺寸后经 resize 重定位 */
+  function openFilePopup(lefts: { head: number; anchor: number }, size: { w: number; h: number }) {
+    const { controller, sent, view } = setup('[[方案]]')
+    locate(controller, 2)
+    typeAt(view, 2, '方')
+    respond(controller, sent, [FANGAN])
+    const popup = document.querySelector<HTMLElement>(POPUP)
+    expect(popup).not.toBeNull()
+    const head = view.state.selection.main.head
+    const stubbed = view as unknown as {
+      coordsAtPos: (pos: number) => { left: number; top: number; bottom: number } | null
+    }
+    stubbed.coordsAtPos = (pos: number) => pos === head
+      ? { left: lefts.head, top: 100, bottom: 118 }
+      : { left: lefts.anchor, top: 100, bottom: 118 } // innerFrom=2 ≠ head
+    Object.defineProperty(popup!, 'offsetWidth', { configurable: true, get: () => size.w })
+    Object.defineProperty(popup!, 'offsetHeight', { configurable: true, get: () => size.h })
+    window.dispatchEvent(new Event('resize'))
+    return { controller, view, popup: popup! }
+  }
+
+  it('水平锚点以光标居中：光标 520、宽 200 → left=420（字段起点 400 不参与水平锚定）', () => {
+    const { controller, popup } = openFilePopup({ head: 520, anchor: 400 }, { w: 200, h: 100 })
+    try {
+      expect(popup.style.left).toBe('420px')
+      expect(popup.style.display).not.toBe('none')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('光标近左缘钳制到 8；光标近右缘钳制到 innerWidth - width - 8', () => {
+    // jsdom window.innerWidth 默认 1024；宽 200 → 右钳位 816
+    const nearLeft = openFilePopup({ head: 5, anchor: 400 }, { w: 200, h: 100 })
+    try {
+      expect(nearLeft.popup.style.left).toBe('8px')
+    } finally {
+      nearLeft.controller.dispose()
+    }
+    const nearRight = openFilePopup({ head: 1010, anchor: 400 }, { w: 200, h: 100 })
+    try {
+      expect(nearRight.popup.style.left).toBe('816px')
+    } finally {
+      nearRight.controller.dispose()
+    }
+  })
+
+  it('光标坐标不可得（越视口）回退字段起点居中', () => {
+    const { controller, sent, view } = setup('[[方案]]')
+    try {
+      locate(controller, 2)
+      typeAt(view, 2, '方')
+      respond(controller, sent, [FANGAN])
+      const popup = document.querySelector<HTMLElement>(POPUP)!
+      const head = view.state.selection.main.head
+      const stubbed = view as unknown as {
+        coordsAtPos: (pos: number) => { left: number; top: number; bottom: number } | null
+      }
+      stubbed.coordsAtPos = (pos: number) => pos === head
+        ? null
+        : { left: 400, top: 100, bottom: 118 }
+      Object.defineProperty(popup, 'offsetWidth', { configurable: true, get: () => 200 })
+      Object.defineProperty(popup, 'offsetHeight', { configurable: true, get: () => 100 })
+      window.dispatchEvent(new Event('resize'))
+      expect(popup.style.left).toBe('300px') // 400 - 200/2
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('file 会话：底部键提示条三段（# / ^ / |）在条目主体外、容器末尾；条目收进列表滚动区', () => {
+    const { controller, sent, view } = setup('[[方案]]')
+    try {
+      locate(controller, 2)
+      typeAt(view, 2, '方')
+      respond(controller, sent, [FANGAN])
+      const popup = document.querySelector<HTMLElement>(POPUP)!
+      const hints = popup.querySelector<HTMLElement>('.vsidian-wikilink-suggest-hints')
+      expect(hints).not.toBeNull()
+      expect(hints!.textContent).toContain(zhCn['wikilinkSuggest.hint.heading'])
+      expect(hints!.textContent).toContain(zhCn['wikilinkSuggest.hint.block'])
+      expect(hints!.textContent).toContain(zhCn['wikilinkSuggest.hint.alias'])
+      // 结构：条目在列表滚动区内；提示条在容器直接末尾（与条目主体分离）
+      const list = popup.querySelector<HTMLElement>('.vsidian-wikilink-suggest-list')
+      expect(list).not.toBeNull()
+      expect(list!.querySelector(ITEM)).not.toBeNull()
+      expect(popup.lastElementChild).toBe(hints)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('heading 会话：提示条仅 ^ 与 | 两段（# 已消费不再提示）；占位会话同口径', () => {
+    const { controller, sent, view } = setup('[[方案.md#]]')
+    try {
+      locate(controller, 8)
+      typeAt(view, 8, '预')
+      respondHeading(controller, sent, [YUSUAN])
+      const hints = document.querySelector<HTMLElement>('.vsidian-wikilink-suggest-hints')!
+      expect(hints.textContent).toContain(zhCn['wikilinkSuggest.hint.block'])
+      expect(hints.textContent).toContain(zhCn['wikilinkSuggest.hint.alias'])
+      expect(hints.textContent).not.toContain(zhCn['wikilinkSuggest.hint.heading'])
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('block 会话：提示条仅 | 一段', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
+    const respondBlockHere = (c: ReturnType<typeof setup>['controller'], s: WebviewToHost[]) => {
+      const q = lastBlockQuery(s)
+      if (!q) {
+        throw new Error('缺少待应答的 wikilink.block.query')
+      }
+      c.handleHostMessage({
+        kind: 'wikilink.block.query.result', sessionId: q.sessionId, docUri: q.docUri,
+        reqId: q.reqId, generation: q.generation, status: 'ready', targetVersion: 3,
+        items: [{ id: 'C:\\vault\\资料\\方案.md#^2', blockId: 'keep01', snippet: '预算编制说明', line: 2, lineCount: 1, alias: '方案' }],
+      })
+    }
+    try {
+      locate(controller, 15)
+      typeAt(view, 15, 'x')
+      respondBlockHere(controller, sent)
+      const hints = document.querySelector<HTMLElement>('.vsidian-wikilink-suggest-hints')!
+      expect(hints.textContent).toContain(zhCn['wikilinkSuggest.hint.alias'])
+      expect(hints.textContent).not.toContain(zhCn['wikilinkSuggest.hint.heading'])
+      expect(hints.textContent).not.toContain(zhCn['wikilinkSuggest.hint.block'])
+    } finally {
+      controller.dispose()
+    }
+  })
+})

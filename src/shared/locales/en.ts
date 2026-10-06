@@ -43,6 +43,10 @@ export const en = {
   // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
   'wikilinkSuggest.placeholder.heading': 'Type a heading…',
   'wikilinkSuggest.placeholder.block': 'Type a block ID…',
+  // 验收反馈（2026-10-06）：浮层底部键提示条——按阶段裁剪显示当前可用进阶键
+  'wikilinkSuggest.hint.heading': 'Type # to link to a heading',
+  'wikilinkSuggest.hint.block': 'Type ^ to link a text block',
+  'wikilinkSuggest.hint.alias': 'Type | to set display text',
   // #379 T04：标题阶段状态与候选（明确 Markdown 目标的真实候选；
   // 失败分真实状态，不伪装空结果）
   'wikilinkSuggest.status.headingLoading': 'Loading headings…',

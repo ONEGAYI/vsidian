@@ -70,9 +70,11 @@ import './wikilinkSuggest.css'
  *  src/shared/styleContract.ts） */
 export const WIKILINK_SUGGEST_CLASS_NAMES = {
   popup: 'vsidian-wikilink-suggest',
+  list: 'vsidian-wikilink-suggest-list',
   item: 'vsidian-wikilink-suggest-item',
   itemActive: 'vsidian-wikilink-suggest-item-active',
   status: 'vsidian-wikilink-suggest-status',
+  hints: 'vsidian-wikilink-suggest-hints',
   name: 'vsidian-wikilink-suggest-name',
   dir: 'vsidian-wikilink-suggest-dir',
   highlight: 'vsidian-wikilink-suggest-hl',
@@ -1235,58 +1237,64 @@ export class WikilinkSuggestController {
     }
     const popup = this.ensurePopup()
     popup.replaceChildren()
+    // 条目主体收进列表滚动区（与底部键提示条分离，验收反馈 2026-10-06）；
+    // 浮层 max-height 留在容器（契约 example 的覆盖形态不变），list 在
+    // flex 约束下自行滚动
+    const list = document.createElement('div')
+    list.className = WIKILINK_SUGGEST_CLASS_NAMES.list
+    popup.appendChild(list)
     const result = this.result
     const stage = this.session.origin.stage
     const targetEmpty = this.session.target.trim() === ''
     if (stage === 'heading' && targetEmpty) {
       // 空目标标题占位（T03 语义保持：不猜默认文档，仅提示；占位不可确认）
-      popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.heading')))
+      list.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.heading')))
     } else if (stage === 'block' && targetEmpty) {
       // 空目标块占位（T03 语义保持：不猜默认文档；占位不可确认）
-      popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.block')))
+      list.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.block')))
     } else if (stage === 'block' && this.pendingBlockAccept !== null) {
       // 无 ID 块接受在途（#380 T05）：宿主补写 ^id 中——占位状态行不可确认
-      popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockAccepting')))
+      list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockAccepting')))
     } else if (stage === 'block' && result !== null && result.stage === 'block') {
       // 块阶段（#380 T05）：失败真实状态或候选列表（无 ID 块照常列出）
       if (result.status === 'noWorkspace') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.noWorkspace')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.noWorkspace')))
       } else if (result.status === 'notFound') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotFound')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotFound')))
       } else if (result.status === 'notMd') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotMd')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotMd')))
       } else if (result.status === 'readError') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockReadError')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockReadError')))
       } else {
         for (let i = 0; i < result.items.length; i++) {
-          popup.appendChild(this.buildBlockRow(result.items[i]!, i === this.activeIndex))
+          list.appendChild(this.buildBlockRow(result.items[i]!, i === this.activeIndex))
         }
         if (result.items.length === 0) {
-          popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockEmpty')))
+          list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockEmpty')))
         }
       }
     } else if (stage === 'heading' && result !== null && result.stage === 'heading') {
       // 标题阶段（#379 T04）：失败真实状态或候选列表（重复标题独立身份
       // 全部展示，层级/行号随行显示）；result 未到（null）显示加载
       if (result.status === 'noWorkspace') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.noWorkspace')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.noWorkspace')))
       } else if (result.status === 'notFound') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingNotFound')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingNotFound')))
       } else if (result.status === 'notMd') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingNotMd')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingNotMd')))
       } else if (result.status === 'readError') {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingReadError')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingReadError')))
       } else {
         for (let i = 0; i < result.items.length; i++) {
-          popup.appendChild(this.buildHeadingRow(result.items[i]!, i === this.activeIndex))
+          list.appendChild(this.buildHeadingRow(result.items[i]!, i === this.activeIndex))
         }
         if (result.items.length === 0) {
-          popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingEmpty')))
+          list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingEmpty')))
         }
       }
     } else if (stage === 'heading' || stage === 'block' || result === null) {
       // 标题/块阶段的查询在途（结果未到）
-      popup.appendChild(this.buildStatusRow(stage === 'heading'
+      list.appendChild(this.buildStatusRow(stage === 'heading'
         ? t('wikilinkSuggest.status.headingLoading')
         : stage === 'block'
           ? t('wikilinkSuggest.status.blockLoading')
@@ -1295,31 +1303,56 @@ export class WikilinkSuggestController {
       // 防御：文件会话的 result 恒为 file 变体（阶段与结果同生不变式）；
       // 形态不符零渲染（不把未知变体当文件候选）
     } else if (result.status === 'noWorkspace') {
-      popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.noWorkspace')))
+      list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.noWorkspace')))
     } else if (result.status === 'notReady') {
-      popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.notReady')))
+      list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.notReady')))
     } else {
       for (let i = 0; i < result.items.length; i++) {
-        popup.appendChild(this.buildItemRow(result.items[i]!, i === this.activeIndex))
+        list.appendChild(this.buildItemRow(result.items[i]!, i === this.activeIndex))
       }
       // F6：remaining 提示以满页终态为口径——不满页即穷尽，不为病态占位
       // 的 total 虚高显示「还有 N 项」
       const remaining = result.pageFull ? result.total - result.items.length : 0
       if (result.items.length === 0 && !result.updating) {
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.empty')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.empty')))
       }
       if (remaining > 0) {
         // 分页续载提示（#377 T02）：总数未尽时提示按 ↓ 继续（触底加载）
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.more', { count: remaining })))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.more', { count: remaining })))
       }
       if (result.updating) {
         // 部分数据在场：可用项继续候选 + 明确标注仍在构建（不冒充完整）
-        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.updating')))
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.updating')))
       }
     }
     this.attachScrollListeners()
+    // 底部键提示条（验收反馈 2026-10-06）：与条目主体分离的固定底栏，
+    // 顶部 1px 分割线由契约样式提供；按阶段裁剪当前仍可用的进阶键
+    popup.appendChild(this.buildHintsRow(stage))
     this.placePopup()
     this.scrollActiveIntoView()
+  }
+
+  /** 底部键提示条：file 阶段三段全显；heading 阶段 # 已消费只余 ^ 与 |；
+   *  block 阶段只余 |（| 三阶段通用） */
+  private buildHintsRow(stage: 'file' | 'heading' | 'block'): HTMLDivElement {
+    const row = document.createElement('div')
+    row.className = WIKILINK_SUGGEST_CLASS_NAMES.hints
+    const parts = stage === 'file'
+      ? [
+          t('wikilinkSuggest.hint.heading'),
+          t('wikilinkSuggest.hint.block'),
+          t('wikilinkSuggest.hint.alias'),
+        ]
+      : stage === 'heading'
+        ? [t('wikilinkSuggest.hint.block'), t('wikilinkSuggest.hint.alias')]
+        : [t('wikilinkSuggest.hint.alias')]
+    for (const part of parts) {
+      const seg = document.createElement('span')
+      seg.textContent = part
+      row.appendChild(seg)
+    }
+    return row
   }
 
   private buildStatusRow(text: string): HTMLDivElement {
@@ -1436,14 +1469,26 @@ export class WikilinkSuggestController {
       return
     }
     popup.style.visibility = 'hidden'
-    popup.style.display = 'block'
+    popup.style.display = 'flex'
     const height = popup.offsetHeight
     const width = popup.offsetWidth
     let top = coords.bottom + 4
     if (top + height > window.innerHeight - 8) {
       top = Math.max(8, coords.top - height - 4)
     }
-    const left = Math.min(Math.max(8, coords.left), Math.max(8, window.innerWidth - width - 8))
+    // 水平锚点 = 光标（用户输入处）且浮层居中对齐（验收反馈 2026-10-06，
+    // 原左对齐字段起点）；光标坐标不可得（组合/滚动边缘）回退字段起点。
+    // 垂直仍以字段行坐标为准（光标与字段同行）
+    let anchorLeft = coords.left
+    try {
+      const caret = view.coordsAtPos(view.state.selection.main.head)
+      if (caret) {
+        anchorLeft = caret.left
+      }
+    } catch {
+      // 光标越视口：回退字段起点
+    }
+    const left = Math.min(Math.max(8, anchorLeft - width / 2), Math.max(8, window.innerWidth - width - 8))
     popup.style.left = `${Math.round(left)}px`
     popup.style.top = `${Math.round(top)}px`
     popup.style.visibility = 'visible'

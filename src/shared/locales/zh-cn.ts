@@ -39,6 +39,10 @@ export const zhCn: Record<MessageKey, string> = {
   // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
   'wikilinkSuggest.placeholder.heading': '输入小标题…',
   'wikilinkSuggest.placeholder.block': '输入块 ID…',
+  // 验收反馈（2026-10-06）：浮层底部键提示条——按阶段裁剪显示当前可用进阶键
+  'wikilinkSuggest.hint.heading': '输入 # 可以链接到标题',
+  'wikilinkSuggest.hint.block': '输入 ^ 链接文本块',
+  'wikilinkSuggest.hint.alias': '输入 | 指定显示的文本',
   // #379 T04：标题阶段状态与候选（明确 Markdown 目标的真实候选；
   // 失败分真实状态，不伪装空结果）
   'wikilinkSuggest.status.headingLoading': '正在读取标题…',

@@ -108,6 +108,50 @@ try {
     assert.deepEqual(p.names, ['方案.md', '通知.md'])
   })
 
+  // ---- 验收反馈 2026-10-06：光标居中锚点 + 底部键提示条 ----
+  await scenario('行中触发浮层以光标居中；底部键提示条三段与分割线', { doc: '一'.repeat(40), cursor: 40 }, async (page) => {
+    await page.keyboard.type('[[')
+    await page.evaluate((items) => window.respondQuery(items), [fangan(), tongzhi()])
+    const p = await popup(page)
+    assert.equal(p.open, true, '候选浮层开启')
+    // 居中锚点：浮层水平中心贴光标像素 x（±4px；行中触发不触视口钳制）
+    assert.ok(p.caretLeft > 200, `光标应在行中（实际 ${p.caretLeft}）`)
+    assert.ok(
+      Math.abs(p.popupCenter - p.caretLeft) <= 4,
+      `浮层中心应贴光标（中心 ${p.popupCenter} vs 光标 ${p.caretLeft}）`,
+    )
+    // 底部键提示条：三段（# / ^ / |）、绘制层可见、与条目主体间实线分割
+    assert.equal(p.hintsCount, 3, 'file 会话三段键提示')
+    assert.ok(p.hintsText.includes('#') && p.hintsText.includes('^') && p.hintsText.includes('|'), '三段含 # ^ |')
+    assert.equal(p.hintsVisible, true, '提示条绘制可见')
+    assert.ok(p.hintsBorderTop.startsWith('solid'), `分割线应为实线（实际 ${p.hintsBorderTop}）`)
+    assert.ok(parseFloat(p.hintsBorderTop.split('/')[1]) > 0, `分割线宽度 > 0（实际 ${p.hintsBorderTop}）`)
+  })
+
+  await scenario('标题阶段键提示条仅 ^ 与 | 两段（# 已消费不再提示）', { doc: '[[../资料/方案.md#xx]]', cursor: 15 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
+    ])
+    const p = await popup(page)
+    assert.equal(p.open, true, '标题候选列表在场')
+    assert.equal(p.hintsCount, 2, 'heading 会话两段')
+    assert.ok(!p.hintsText.includes('#'), '不再提示 #')
+    assert.ok(p.hintsText.includes('^') && p.hintsText.includes('|'), '保留 ^ 与 |')
+    assert.ok(p.hintsBorderTop.startsWith('solid'), '分割线在标题阶段同样在场')
+  })
+
+  await scenario('块阶段键提示条仅 | 一段', { doc: '[[../资料/方案.md#^xx]]', cursor: 16 }, async (page) => {
+    await page.keyboard.type('预')
+    await page.evaluate((items) => window.respondBlockQuery(items), [
+      { id: 'C:\\vault\\资料\\方案.md#^2', blockId: 'keep01', snippet: '预算编制说明', line: 2, lineCount: 1, alias: '方案' },
+    ])
+    const p = await popup(page)
+    assert.equal(p.open, true, '块候选列表在场')
+    assert.equal(p.hintsCount, 1, 'block 会话一段')
+    assert.ok(p.hintsText.includes('|') && !p.hintsText.includes('^') && !p.hintsText.includes('#'), '仅 | 提示')
+  })
+
   await scenario('有查询自动高亮首项，目录区分同名文件', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[')
     await page.keyboard.type('方')

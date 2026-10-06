@@ -1466,7 +1466,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   "wikilink-suggest-popup": {
     "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04; the block stage shares those states and adds the 'inserting block ID' state while an ID-less block acceptance is in flight, #380 T05).",
     "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading/block anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty #/^ target keeps the placeholder hint (the target document is not read); with an explicit file target the heading/block stages query outbound (the block stage since #380 T05).",
-    "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus.",
+    "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus. Two-segment structure: candidates and status rows live in the .vsidian-wikilink-suggest-list scroll region while the fixed .vsidian-wikilink-suggest-hints key-hint bar sits at the bottom; max-height stays on the container (the override example keeps its shape). Positioning: horizontally centered on the caret (8px viewport clamping, falling back to the field start when caret coords are unavailable), vertically attached to the field line and flipped above it when it would overflow the bottom edge.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }
@@ -1489,7 +1489,15 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   "wikilink-suggest-status": {
     "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open, 'index still updating (partial results)' and the pagination hint (#377 - 'N more, press ArrowDown to load more'); not confirmable, never writes to the document.",
     "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building); appends a remaining-count row at the list tail when the match total is not exhausted (#377 load-more hint).",
-    "dom": "Direct child rows of the container (not option semantics - placeholders are not confirmable).",
+    "dom": "Direct child rows of the list scroll region (.vsidian-wikilink-suggest-list), not option semantics - placeholders are not confirmable.",
+    "obsidian": {
+      "counterpart": "None (Vsidian wikilink suggestions)"
+    }
+  },
+  "wikilink-suggest-hints": {
+    "purpose": "Bottom key-hint bar (acceptance feedback 2026-10-06): hints the advanced keys still available in the current stage - three segments in the file stage (# links a heading, ^ links a text block, | sets display text), two in the heading stage (# already consumed), only | in the block stage; muted small text, never scrolls with the list and is never confirmable.",
+    "states": "Segment count switches with the session stage; coexists with candidate and status rows (also present for no-result, loading and placeholder states).",
+    "dom": "Last direct child row of the container (outside the .vsidian-wikilink-suggest-list scroll region); one child span per key hint; separated from the item body by a 1px solid border-top.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }

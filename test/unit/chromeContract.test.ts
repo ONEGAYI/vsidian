@@ -90,6 +90,7 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'wikilink-suggest-item', // #376 双链联想候选（会话开启期间挂载 document.body，行为路径由浏览器 wikilinkSuggest 与真宿主 paint.wikilinkSuggest 验证）
   'wikilink-suggest-item-active', // #376 键盘高亮修饰类（随会话与方向键切换）
   'wikilink-suggest-status', // #376 状态行（随查询结果与索引就绪态切换）
+  'wikilink-suggest-hints', // 2026-10-06 验收反馈：底部键提示条（随会话挂载 document.body，三阶段段落数切换；browser wikilinkSuggest 断言可见性与分割线）
 ])
 
 describe('chromeContract 覆盖分工', () => {
