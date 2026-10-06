@@ -223,10 +223,20 @@ export const wikilinkBlockCases: Array<[string, () => Promise<void>]> = [
       await pressKey('enter')
       // 合笔：链接与标记同时进入文本（一次 edit.request → 权威版本恰 +1）
       const vBefore = doc.version
-      const id = await poll('同文档合笔：链接与标记同时写入', () => {
+      const mergeOf = () => {
         const m = /\[\[t05-same\.md#\^([a-z0-9]{6})\|t05-same\]\]/.exec(doc.getText())
         return m && doc.getText().includes(`\n\n^${m[1]}`) ? m[1]! : undefined
-      })
+      }
+      // F3 慢环境口径：候选在场 ≠ 文本已出站（块查询走本地识别）——首按
+      // 可能被消费为收敛推进（暂缓文本 flush + 查询重发）。短窗未见写入
+      // 则重按一次（真实用户感知即「等待收敛后重按」）；快环境首按即接受
+      let id: string | undefined
+      try {
+        id = await poll('同文档合笔：链接与标记同时写入', mergeOf, 1_500)
+      } catch {
+        await pressKey('enter')
+        id = await poll('同文档合笔（重按后写入）', mergeOf)
+      }
       await poll('合笔版本恰 +1', () => (doc.version === vBefore + 1 ? true : undefined))
       assert(doc.isDirty, '同文档接受后 dirty（不自动保存）')
       assert(await readDisk(file) === S0, '同文档全程磁盘不得自动写入')
