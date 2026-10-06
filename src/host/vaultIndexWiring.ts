@@ -7,7 +7,7 @@
 // 平台真实路径（node:fs 作用于扩展宿主所在机器——远程 SSH 时天然落远端，
 // 不写入笔记目录，ADR-0008）。
 import * as vscode from 'vscode'
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises'
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises'
 import * as path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { VaultIndexService, normalizeSeparators, type VaultIndexScanPort, type VaultIndexStoragePort, type VaultRootRef } from './vaultIndexService'
@@ -39,8 +39,21 @@ function createScanPort(): VaultIndexScanPort {
       // 侧）。每层让出一次（大库不饿死）；skipDir 为服务注入的剪枝判定
       // （.git/node_modules 等整树排除不进入列举）；目录读取失败记
       // failedDirs（不可访问不冒充其下文件删除）
+      // #385 V7：目录符号链接不跟随——VSCode readDirectory 在 Windows 对
+      // junction 实测报 Directory（跟随展开），type 位不足以判定；本机以
+      // node lstat 识别 reparse/symlink 后整树跳过（防环、防跨根、防同一
+      // 文件双路径身份）。lstat 不可达（远程工作区的本机路径必然失败等）
+      // 保守维持跟随——远程边界见 wikilink-completion.md「已知边界」
       const files: string[] = []
       const failedDirs: string[] = []
+      const isLinkDir = async (fsPath: string): Promise<boolean> => {
+        try {
+          const st = await lstat(fsPath)
+          return st.isSymbolicLink()
+        } catch {
+          return false
+        }
+      }
       const walk = async (dir: vscode.Uri): Promise<void> => {
         let entries: [string, vscode.FileType][]
         try {
@@ -56,11 +69,14 @@ function createScanPort(): VaultIndexScanPort {
             if (opts?.skipDir?.(child.fsPath)) {
               continue
             }
+            if (await isLinkDir(child.fsPath)) {
+              continue // 链接目录整树不列举（归属只认真实路径）
+            }
             await walk(child)
           } else if ((type & vscode.FileType.File) !== 0) {
             files.push(child.fsPath)
           }
-          // 符号链接等其余类型不入清单（不解析目标身份）
+          // 符号链接文件等其余类型不入清单（不解析目标身份）
         }
       }
       await walk(vscode.Uri.file(rootFsPath))
@@ -131,6 +147,8 @@ function createScanPort(): VaultIndexScanPort {
 /** 存储端口：node fs 实现（原子写 = 临时文件 + rename，ADR-0008 三要素之一） */
 function createStoragePort(): VaultIndexStoragePort {
   return {
+    // 快照存储目录列举（storageUri/vsidian-index 下，非 vault 清单——
+    // vault 目录符号链接口径在上方 listAllFiles 的 isLinkDir）
     async listDirs(baseDir: string) {
       try {
         const entries = await readdir(realPathOf(baseDir), { withFileTypes: true })

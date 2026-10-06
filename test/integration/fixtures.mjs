@@ -1,7 +1,7 @@
 // 集成测试 fixture 单一事实源（工单 #15 抽取）：生成临时工作区全部样例文档。
 // runTest.mjs（开发模式加载）与 runInstalled.mjs（VSIX 安装态回归）共用，
 // 两条路径跑同一套 fixture，保证安装态与开发态断言的是同一组文档。
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { buildMultiPageColorPdf, buildTextLinkPdf, buildThreePageColorPdf } from '../pdfSample.mjs'
 import path from 'node:path'
 
@@ -1725,6 +1725,18 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, '联想目录', 'T02素材-cache.pyc'), 'T02 compiled\n', 'utf8')
   mkdirSync(path.join(wsDir, 'node_modules', 'T02pkg'), { recursive: true })
   writeFileSync(path.join(wsDir, 'node_modules', 'T02pkg', 'T02素材-排除.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #385 V7：目录链接不跟随——链接目录下文件不进清单、归属只认真实路径。
+  // Windows 用 junction（无需特权，目标须绝对路径），POSIX 用 dir symlink；
+  // 建链失败（受限环境）跳过链接，对照断言（真实路径恰一条候选）仍有效
+  mkdirSync(path.join(wsDir, '联想目录', '链接目标目录'), { recursive: true })
+  writeFileSync(path.join(wsDir, '联想目录', '链接目标目录', '链接内文件.md'), '链接目录正文\n', 'utf8')
+  try {
+    const linkTarget = path.resolve(wsDir, '联想目录', '链接目标目录')
+    const linkPath = path.join(wsDir, '联想目录', '目录链接')
+    symlinkSync(linkTarget, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
+  } catch {
+    // 建不了链接的环境：链接回归检测退化为普通真实路径候选（无害）
+  }
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
   // 既有 id 段（菜单两态与零写回断言载体）；#183 补围栏行（统一菜单降级
   // 矩阵的围栏区断言载体）

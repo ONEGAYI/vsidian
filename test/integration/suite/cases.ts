@@ -16636,6 +16636,59 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await doc.save()
   }],
 
+  // ---- #385 V7 目录链接：junction/symlink 目录不跟随，归属只认真实路径 ----
+  ['双链联想：目录链接不跟随——链接目录下文件不产生候选（#385 V7）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('联想目录/联想来源.md')
+    await waitSessionReady('联想目录/联想来源.md')
+    const uri = wsUri('联想目录/联想来源.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('联想目录/联想来源.md'))
+    // T01/T03 用例先跑可能留下确认产物——经外部链路重置回基线文本
+    if (doc.getText() !== '来源正文\n') {
+      const reset = new vscode.WorkspaceEdit()
+      reset.replace(doc.uri, new vscode.Range(0, 0, doc.lineCount, 0), '来源正文\n')
+      await vscode.workspace.applyEdit(reset)
+    }
+    await poll('V7 基线文本就绪', () => doc.getText() === '来源正文\n' ? true : undefined)
+    const typeText = async (text: string) => {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text })
+    }
+    const pressKey = async (key: 'down' | 'up' | 'escape' | 'enter' | 'backspace') => {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key })
+    }
+    const suggestPaint = async (): Promise<
+      NonNullable<NonNullable<ViewState['paint']>['wikilinkSuggest']> | undefined
+    > => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
+      return v.paint?.wikilinkSuggest
+    }
+
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 5 })
+    await typeText('[')
+    await typeText('[')
+    await typeText('链接内文件')
+    // 唯一性即口径：链接若被跟随，同一文件会以「目录链接/」与「链接目标
+    // 目录/」两条路径重复入清单；恰一条 = 不跟随 + 真实路径归属
+    const s = await poll('链接内文件查询就绪', async () => {
+      const p = await suggestPaint()
+      return p && p.itemCount >= 1 ? p : undefined
+    })
+    assert(s.itemCount === 1, `链接目录下文件应恰一条真实路径候选（不跟随目录链接），实际 ${s.itemCount}`)
+    await pressKey('enter')
+    // 插入路径走真实目录（来源与目标同在联想目录——下行相对路径）
+    await poll('按真实路径插入', () =>
+      doc.getText() === '来源正文\n[[链接目标目录/链接内文件.md|链接内文件]]' ? true : undefined)
+    assert(!doc.getText().includes('目录链接/'), '插入路径不应经目录链接')
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销恢复确认前文本', () =>
+      doc.getText() === '来源正文\n[[链接内文件]]' ? true : undefined)
+    const cleanup = new vscode.WorkspaceEdit()
+    cleanup.replace(doc.uri, new vscode.Range(0, 0, doc.lineCount, 0), '来源正文\n')
+    await vscode.workspace.applyEdit(cleanup)
+    await poll('清理回基线', () => doc.getText() === '来源正文\n' ? true : undefined)
+    await doc.save()
+  }],
+
   // ---- #377 T02 全文件清单：资源类型过滤 / 默认排除 / 清单计数与持久化 ----
   ['双链联想：全文件清单资源候选与类型过滤（#377 T02）', async () => {
     await waitRenameIndexReady()
