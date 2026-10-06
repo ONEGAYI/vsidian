@@ -37,6 +37,10 @@ const AH = {
   reset: 'onegayi.vsidian._test.addonHistory.reset',
   rebuild: 'onegayi.vsidian._test.addonHistory.rebuild',
   sessionState: 'onegayi.vsidian._test.getSessionState',
+  // T03（#352）生产接入点观测：直通提交 / 归属记录 / 组历史
+  t03Submit: 'onegayi.vsidian._test.addonHistory.t03Submit',
+  t03Attributions: 'onegayi.vsidian._test.addonHistory.t03Attributions',
+  t03GroupHistory: 'onegayi.vsidian._test.addonHistory.t03GroupHistory',
 }
 
 async function poll<T>(label: string, fn: () => T | undefined | Promise<T | undefined>, timeoutMs = 20000): Promise<T> {
@@ -386,5 +390,155 @@ export const addonHistoryCases: Array<[string, () => Promise<void>]> = [
     assert(!stateAfterRestore.lost, `边界态恢复应对上宿主实际状态：${JSON.stringify(stateAfterRestore.lastRejection)}`)
     const r2 = await history(uri, 'redo')
     assert(r2.executedSteps === 2 && doc.getText() === 'V01重载基\naAbB', `恢复后重做整组：${JSON.stringify(r2)}`)
+  }],
+
+  // ---- T03（#352）编辑来源与宿主历史接入点：生产管线验证——origin 元数据
+  //  经真实 edit.request/写回/回流归属（onEditAttributed 按 ack version 对位，
+  //  替代探针文本全等对账）、纯选区不造历史项、跨会话隔离、组历史窄适配点
+  //  （会话队列串行 + 每步版本核对）与引用 B 临时激活整组路由 + F1 脏态
+  //  收口禁丢。生产语义断言不依赖探针分组状态机（submitViaPanel 直通）。 ----
+  ['T03 来源元数据：真实写回归属对位、纯选区不造历史项与跨会话隔离', async () => {
+    const T0 = 'T03来源基\n'
+    const { uri, doc } = await setup('v01-t03-origin.md')
+    assert(doc.getText() === T0, '初始基态')
+    const ORIGIN = { addonId: 'onegayi.t03-fixture', opId: 't03-a', undo: 'atomic' } as const
+    const baseVersion = doc.version
+
+    // 单笔 origin 提交：归属恰一条，version 与 ack 对位
+    const r1 = (await vscode.commands.executeCommand(AH.t03Submit, uri, {
+      changes: append(doc.getText(), 'oX'),
+      origin: ORIGIN,
+    })) as { ok: boolean; version?: number }
+    assert(r1.ok && r1.version === baseVersion + 1, `origin 提交应成功且版本 +1：${JSON.stringify(r1)}`)
+    let attr = (await vscode.commands.executeCommand(AH.t03Attributions, uri)) as Array<{ seq: number; version: number; origin: { addonId: string; opId: string; undo: string }; changes: unknown[] }>
+    assert(attr.length === 1, `归属应恰一条，实际 ${attr.length}`)
+    assert(attr[0]!.version === baseVersion + 1 && attr[0]!.origin.opId === 't03-a' &&
+      attr[0]!.origin.addonId === 'onegayi.t03-fixture' && attr[0]!.origin.undo === 'atomic',
+      `归属 version 应与 ack 对位且 origin 完整：${JSON.stringify(attr[0])}`)
+
+    // 多范围一笔：一条归属、多段完整
+    const text = doc.getText()
+    const r2 = (await vscode.commands.executeCommand(AH.t03Submit, uri, {
+      changes: [{ offset: 0, length: 0, text: '[' }, { offset: text.length, length: 0, text: ']' }],
+      origin: { ...ORIGIN, opId: 't03-multi' },
+    })) as { ok: boolean }
+    assert(r2.ok, '多范围 origin 提交应成功')
+    attr = (await vscode.commands.executeCommand(AH.t03Attributions, uri)) as typeof attr
+    assert(attr.length === 2 && attr[1]!.origin.opId === 't03-multi' && attr[1]!.changes.length === 2,
+      `多范围应一条归属（两段变更）：${JSON.stringify(attr[1])}`)
+
+    // 纯选区（origin + 无净文本变更）：ack 成功、不写回、不归属
+    const versionBefore = doc.version
+    const textBefore = doc.getText()
+    const r3 = (await vscode.commands.executeCommand(AH.t03Submit, uri, {
+      changes: [],
+      origin: { ...ORIGIN, opId: 't03-selection-only' },
+    })) as { ok: boolean; version?: number }
+    assert(r3.ok && r3.version === versionBefore, `纯选区应 ack 成功且版本不动：${JSON.stringify(r3)}`)
+    assert(doc.version === versionBefore && doc.getText() === textBefore, '纯选区不得写回权威文档')
+    attr = (await vscode.commands.executeCommand(AH.t03Attributions, uri)) as typeof attr
+    assert(attr.length === 2, `纯选区不得产生归属记录，实际 ${attr.length}`)
+
+    // 跨会话隔离：另一目标的 origin 归属不并入本文档记录
+    const { uri: isoUri, doc: isoDoc } = await setup('v01-t03-iso.md')
+    const r4 = (await vscode.commands.executeCommand(AH.t03Submit, isoUri, {
+      changes: append(isoDoc.getText(), 'iZ'),
+      origin: { ...ORIGIN, opId: 't03-iso' },
+    })) as { ok: boolean }
+    assert(r4.ok, '隔离目标提交应成功')
+    const isoAttr = (await vscode.commands.executeCommand(AH.t03Attributions, isoUri)) as typeof attr
+    assert(isoAttr.length === 1 && isoAttr[0]!.origin.opId === 't03-iso', `隔离目标应恰一条归属：${JSON.stringify(isoAttr)}`)
+    attr = (await vscode.commands.executeCommand(AH.t03Attributions, uri)) as typeof attr
+    assert(attr.length === 2, `跨目标元数据不得合并到父文档历史（本文档仍 2 条，实际 ${attr.length}）`)
+  }],
+
+  ['T03 组历史：root 活动场景整组执行、每步版本核对与超量中止', async () => {
+    const T0 = 'T03组基\n'
+    const { uri, doc } = await setup('v01-t03-group.md')
+    assert(doc.getText() === T0, '初始基态')
+    const ORIGIN = { addonId: 'onegayi.t03-fixture', opId: '', undo: 'atomic' }
+    for (const mark of ['g1', 'g2', 'g3']) {
+      const r = (await vscode.commands.executeCommand(AH.t03Submit, uri, {
+        changes: append(doc.getText(), mark),
+        origin: { ...ORIGIN, opId: `t03-${mark}` },
+      })) as { ok: boolean }
+      assert(r.ok, `${mark} 提交应成功`)
+    }
+    assert(doc.getText() === 'T03组基\ng1g2g3', `三笔修饰生效：${JSON.stringify(doc.getText())}`)
+    const afterEdits = doc.version
+
+    // 整组撤回（root 活动 custom editor 场景，经会话队列串行）
+    const undo = (await vscode.commands.executeCommand(AH.t03GroupHistory, uri, 'undo', 3)) as { executedSteps: number; aborted?: string }
+    assert(undo.executedSteps === 3 && undo.aborted === undefined, `整组撤回应执行 3 步：${JSON.stringify(undo)}`)
+    assert(doc.getText() === T0 && doc.version === afterEdits + 3, `整组撤回后回基态且版本 +3：${doc.version}`)
+
+    // 整组重做
+    const redo = (await vscode.commands.executeCommand(AH.t03GroupHistory, uri, 'redo', 3)) as { executedSteps: number; aborted?: string }
+    assert(redo.executedSteps === 3 && doc.getText() === 'T03组基\ng1g2g3', `整组重做恢复：${JSON.stringify(redo)}`)
+
+    // 超量请求：栈仅 3 步，第 4 步版本不动 → 失配中止（不撤其他、不多撤）
+    const over = (await vscode.commands.executeCommand(AH.t03GroupHistory, uri, 'undo', 99)) as { executedSteps: number; aborted?: string }
+    assert(over.executedSteps === 3 && over.aborted === 'version-mismatch',
+      `超量应在第 4 步失配中止（执行 3 步）：${JSON.stringify(over)}`)
+    assert(doc.getText() === T0, '超量中止后停在基态（不多撤）')
+    const settled = doc.version
+    await new Promise((r) => setTimeout(r, 300))
+    assert(doc.version === settled && doc.getText() === T0, '中止后文档稳定（无残留步骤）')
+  }],
+
+  ['T03 引用 B 组历史：临时激活整组执行与 F1 脏态收口不丢未保存修改', async () => {
+    const A_T0 = '# T03 引用 A\n\n![[v01-t03-ref-b]]\n'
+    const B_T0 = 'T03引用B基\n'
+    await openWithEditor('v01-t03-ref-a.md')
+    await waitSessionReady('v01-t03-ref-a.md')
+    const aUri = wsUri('v01-t03-ref-a.md').toString()
+    const bUri = wsUri('v01-t03-ref-b.md').toString()
+    const aDoc = await vscode.workspace.openTextDocument(wsUri('v01-t03-ref-a.md'))
+    // 嵌入内部 Live 真实 bind（生产端口绑定在场 = refOrigin 路由前置）
+    await poll('嵌入卡片绑定目标编辑端口', async () => {
+      const stats = (await vscode.commands.executeCommand('onegayi.vsidian._test.refPortStats')) as { size: number }
+      return stats.size >= 1 ? true : undefined
+    })
+    await vscode.commands.executeCommand(AH.attach, bUri)
+    const bDoc = await vscode.workspace.openTextDocument(wsUri('v01-t03-ref-b.md'))
+    assert(bDoc.getText() === B_T0, 'B 初始基态')
+    const aVersionBefore = aDoc.version
+    const bTextTabs = (): number =>
+      vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === bUri).length
+    const ORIGIN = { addonId: 'onegayi.t03-fixture', opId: 't03-ref', undo: 'atomic' }
+    const submitB = async (mark: string, opId: string): Promise<void> => {
+      const r = (await vscode.commands.executeCommand(AH.t03Submit, bUri, {
+        changes: append(bDoc.getText(), mark), origin: { ...ORIGIN, opId },
+      })) as { ok: boolean }
+      assert(r.ok, `B 提交 ${opId} 应成功`)
+    }
+
+    // 场景一（clean 收口）：提交 → 撤回回盘面基态 → 收口关闭临时标签
+    await submitB('b1', 't03-ref-b1')
+    assert(bDoc.getText() === 'T03引用B基\nb1' && bDoc.isDirty, 'B 提交后 dirty')
+    const undo1 = (await vscode.commands.executeCommand(AH.t03GroupHistory, bUri, 'undo', 1, aUri)) as { executedSteps: number; aborted?: string }
+    assert(undo1.executedSteps === 1 && undo1.aborted === undefined, `引用 B 组撤回一步：${JSON.stringify(undo1)}`)
+    assert(bDoc.getText() === B_T0 && !bDoc.isDirty, '撤回回盘面基态（clean）')
+    await poll('clean 收口关闭 B 临时标签', () => (bTextTabs() === 0 ? true : undefined))
+    assert(aDoc.getText() === A_T0 && aDoc.version === aVersionBefore, 'B 的组历史不得触碰父文档 A')
+
+    // 场景二（F1 脏态收口）：提交 → 保存（盘面前移）→ 撤回 ≠ 盘面 → dirty
+    // → 收口必须保留临时标签（关闭会静默丢弃修改，V01 F1 实测）
+    await submitB('b2', 't03-ref-b2')
+    assert(await bDoc.save(), '保存 B（盘面 = 基态+b2）')
+    assert(!bDoc.isDirty, '保存后 clean')
+    const undo2 = (await vscode.commands.executeCommand(AH.t03GroupHistory, bUri, 'undo', 1, aUri)) as { executedSteps: number; aborted?: string }
+    assert(undo2.executedSteps === 1, `脏态前组撤回一步：${JSON.stringify(undo2)}`)
+    assert(bDoc.getText() === B_T0 && bDoc.isDirty, `撤回后 B 文本=基态 ≠ 盘面（dirty）：${JSON.stringify(bDoc.getText())}`)
+    // F1 核心：临时标签保留且内容稳定（关闭脏标签会版本 +1 回滚盘面）
+    await poll('F1 脏态保留 B 临时标签', () => (bTextTabs() >= 1 ? true : undefined))
+    const dirtyVersion = bDoc.version
+    await new Promise((r) => setTimeout(r, 400))
+    assert(bDoc.version === dirtyVersion && bDoc.getText() === B_T0,
+      `脏态 B 不得被收口丢弃（版本应稳定 ${dirtyVersion}，实际 ${bDoc.version}；文本 ${JSON.stringify(bDoc.getText())}）`)
+    assert(aDoc.version === aVersionBefore, 'F1 场景 A 仍不动')
+    // 收尾：恢复 A 面板激活
+    await vscode.commands.executeCommand('vscode.openWith', wsUri('v01-t03-ref-a.md'), VIEW_TYPE)
   }],
 ]
