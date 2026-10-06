@@ -246,3 +246,62 @@ describe('F5：候选写回语法往返校验（wikilinkFileCandidateSafe / wiki
     expect(wikilinkHeadingCandidateSafe('  ')).toBe(false)
   })
 })
+
+describe('前缀碰撞字界（#385 V11——字界加分形态的排序钉）', () => {
+  it('同片命中不同字界：词首 > 路径分隔符后 > 普通分隔符后 > 无边界', () => {
+    const q = prepareWikilinkQuery('方案')
+    const wordStart = scoreWikilinkItem('方案.md', '', q)
+    const afterSlash = scoreWikilinkItem('旧/方案.md', '', q)
+    const afterDash = scoreWikilinkItem('my-方案.md', '', q)
+    const noBoundary = scoreWikilinkItem('地方案.md', '', q)
+    expect(wordStart).not.toBeNull()
+    expect(afterSlash).not.toBeNull()
+    expect(afterDash).not.toBeNull()
+    expect(noBoundary).not.toBeNull()
+    // 词首 +8 > '/' +5 > '-' +4 > 前字为汉字（无字界加分）
+    expect(wordStart!.score).toBeGreaterThan(afterSlash!.score)
+    expect(afterSlash!.score).toBeGreaterThan(afterDash!.score)
+    expect(afterDash!.score).toBeGreaterThan(noBoundary!.score)
+  })
+
+  it('高亮区间如实落在各字界命中起点（UTF-16）', () => {
+    const q = prepareWikilinkQuery('方案')
+    expect(scoreWikilinkItem('my-方案.md', '', q)!.labelMatch).toEqual([{ start: 3, end: 5 }])
+    expect(scoreWikilinkItem('地方案.md', '', q)!.labelMatch).toEqual([{ start: 1, end: 3 }])
+    expect(scoreWikilinkItem('旧/方案.md', '', q)!.labelMatch).toEqual([{ start: 2, end: 4 }])
+  })
+
+  it('小写查询下驼峰形态等分：驼峰 +2 被大小写一致加分抵消（fa：myFA.md ≡ myfa.md）', () => {
+    // 命中位逐字得分：myFA 的 F 得驼峰 +2 但失大小写一致，myfa 的 f 失驼峰
+    // 但每字得大小写一致——两目标合计恰抵消，这是当前算法的真实语义
+    const q = prepareWikilinkQuery('fa')
+    const camel = scoreWikilinkItem('myFA.md', '', q)
+    const plain = scoreWikilinkItem('myfa.md', '', q)
+    expect(camel).not.toBeNull()
+    expect(plain).not.toBeNull()
+    expect(camel!.score).toBe(plain!.score)
+    expect(camel!.labelMatch).toEqual([{ start: 2, end: 4 }])
+    expect(plain!.labelMatch).toEqual([{ start: 2, end: 4 }])
+  })
+
+  it('大小写一致查询下驼峰形态领先：fA 命中 myFA.md 压过 myfa.md', () => {
+    const q = prepareWikilinkQuery('fA')
+    const camel = scoreWikilinkItem('myFA.md', '', q)
+    const plain = scoreWikilinkItem('myfa.md', '', q)
+    expect(camel).not.toBeNull()
+    expect(plain).not.toBeNull()
+    expect(camel!.score).toBeGreaterThan(plain!.score)
+  })
+
+  it('排序端到端：字界序压过 mtime（同片前缀碰撞四候选）', () => {
+    // mtime 全部给无边界者最新——字界分仍须领先（分数优先于 mtime）
+    const files = [
+      file('地方案.md', '', 4000),
+      file('my-方案.md', '', 3000),
+      file('旧/方案.md', '', 2000),
+      file('方案.md', '', 1000),
+    ]
+    const { items } = rankWikilinkCandidates(files, '方案', 50)
+    expect(items.map((i) => i.relPath)).toEqual(['方案.md', '旧/方案.md', 'my-方案.md', '地方案.md'])
+  })
+})

@@ -123,6 +123,13 @@ export function prepareWikilinkQuery(original: string): WikilinkPreparedQuery {
 //#endregion
 
 //#region 逐字符模糊评分（上游 doScoreFuzzy/computeCharScore 逐行移植）
+// 上游坐标：VSCode src/vs/base/common/fuzzyScorer.ts（1.82 基线，ADR-0014
+// 决策复用算法本体）。已知差异仅在：① label+description 拼接评分的路径
+// 分隔符按本项目索引域固定 /（上游按平台 sep）；② 剥离 aria/幽灵文本等
+// 宿主专用钩子。除此之外的行序与常量（词首 +8、路径分隔 +5、其他分隔
+// +4、驼峰 +2、连续奖励 6/3）与上游逐行对应——对照核对以上游 1.82 源
+// 为准，不在此段内引入本地优化（前缀碰撞字界语义由 wikilinkQuery.test
+// 「前缀碰撞字界」组钉住）
 
 export type WikilinkFuzzyScore = [number, number[]]
 
