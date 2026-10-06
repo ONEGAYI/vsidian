@@ -109,7 +109,9 @@ try {
   })
 
   // ---- 验收反馈 2026-10-06：光标居中锚点 + 底部键提示条 ----
-  await scenario('行中触发浮层以光标居中；底部键提示条三段与分割线', { doc: '一'.repeat(40), cursor: 40 }, async (page) => {
+  // 行中触发用拉丁长前缀：CI 无 CJK 字体时汉字 fallback 宽度不可靠，
+  // 拉丁等宽 80 字 ≈ 560px 稳定越过居中前置断言（>200px）
+  await scenario('行中触发浮层以光标居中；底部键提示条三段与分割线', { doc: 'x'.repeat(80), cursor: 80 }, async (page) => {
     await page.keyboard.type('[[')
     await page.evaluate((items) => window.respondQuery(items), [fangan(), tongzhi()])
     const p = await popup(page)
