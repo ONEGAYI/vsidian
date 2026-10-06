@@ -36,6 +36,7 @@ import {
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
+import { hasNetTextChange, type EditOriginMeta } from '../shared/editOrigin'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
 import type { RefImageContent, RefMarkdownContent, RefPdfContent, RefPdfNavSelector, RefTextContent } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
@@ -50,6 +51,14 @@ import { HOVER_REFRESH_DEFAULTS, hoverWatchKeyOf } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget, canonicalRefTargetKey, inExpansionPath,
   validChildSource } from '../shared/refExpansion'
 
+/** T03（#352）组历史执行结果（HostDocumentPort 可选组入口的返回）：
+ *  executedSteps 为实际完成的原生步骤数；aborted 携带中止原因时剩余
+ *  步骤未执行（版本核对失配或路由不可用） */
+export interface HostHistoryGroupResult {
+  executedSteps: number
+  aborted?: 'version-mismatch' | 'route-unavailable'
+}
+
 /** 权威文档适配器：vscode 层实现 */
 export interface HostDocumentPort {
   readonly version: number
@@ -57,8 +66,10 @@ export interface HostDocumentPort {
    *  按此归一（webview 出站恒为 LF）；缺省按 LF 处理 */
   readonly eol?: 1 | 2
   getText(): string
-  /** 应用一组全文偏移变更；返回是否成功 */
-  applyChanges(changes: SerChange[]): Promise<boolean>
+  /** 应用一组全文偏移变更；返回是否成功。T03（#352）起可选 origin：
+   *  携带来源元数据的提交经写回层透传（vscode 层按需记账）；缺省
+   *  （旧调用）为 undefined，语义不变 */
+  applyChanges(changes: SerChange[], origin?: EditOriginMeta): Promise<boolean>
   /** 对权威文档执行宿主撤销（undoRedoService 文本栈）；返回是否执行。
    *  P2-04（#281）起 origin（请求面板的来源身份）：嵌入目标端口的请求
    *  经 provider 实现「临时激活 B → 全局 undo → 重显来源面板」的 P2-01
@@ -66,6 +77,26 @@ export interface HostDocumentPort {
   undo(origin?: { docUri: string }): Promise<boolean>
   /** 对权威文档执行宿主重做（undoRedoService 文本栈）；返回是否执行（origin 语义同 undo） */
   redo(origin?: { docUri: string }): Promise<boolean>
+  /** T03（#352）可选组历史入口：一次激活整组执行 steps 个连续原生步骤，
+   *  每步核对版本恰 +1、失配中止剩余步骤（V01 F2/F4 生产形态）。生产由
+   *  provider 的临时激活路由实现（含 F1 脏态收口禁丢）；未实现时调用方
+   *  得到 route-unavailable，不降级为其他撤销语义 */
+  undoGroup?(steps: number, origin?: { docUri: string }): Promise<HostHistoryGroupResult>
+  /** 组重做入口（语义同 undoGroup） */
+  redoGroup?(steps: number, origin?: { docUri: string }): Promise<HostHistoryGroupResult>
+}
+
+/** T03（#352）来源归属确认记录：带 origin 的编辑经真实写回/回流确认后
+ *  恰好触发一次（onEditAttributed）。version 与该笔 edit.ack(ok) 同源——
+ *  历史协调（T06）据此把宿主历史条目与来源/原子组对位，不依赖文本全等 */
+export interface EditAttributionRecord {
+  docUri: string
+  sessionId: string
+  seq: number
+  version: number
+  /** 落定变更（LF 坐标，与 doc.changed 广播同款） */
+  changes: SerChange[]
+  origin: EditOriginMeta
 }
 
 /** 面板发送通道 */
@@ -214,6 +245,12 @@ export interface DocumentSessionOptions {
    *  放行路径）。仅在权威端口返回已执行（true）时触发；排在 queue 串行
    *  链之后，观察到的是该次历史操作落定后的权威文本 */
   onHistoryApplied?: (op: 'undo' | 'redo') => void
+  /** T03（#352）来源归属确认：带 origin 的编辑经真实写回且确认（回流
+   *  匹配或兜底确认）后恰好触发一次；失败/拒绝/重放不触发。公开编辑
+   *  API 的历史协调（T06）按 version 对位来源记录，替代 V01 探针的文本
+   *  全等对账。生产暂不装配（T06 接线）；测试钩子经 VSIDIAN_TEST_HOOKS
+   *  消费 */
+  onEditAttributed?: (record: EditAttributionRecord) => void
   /** #201 周期核验端口：image.verify 的 items 透传给 provider 协调器
    *  （stat + 版本表决策 + 失效回调走 invalidateImagesByFsPath）。
    *  会话侧只做会话守卫与串行合并（并发有界）；未注入时 verify 静默
@@ -235,6 +272,9 @@ interface PendingEdit {
   changes: SerChange[]
   confirmed: boolean
   paste?: PasteHistory
+  /** T03（#352）可选来源元数据：确认成功时触发归属（onEditAttributed）；
+   *  失败路径不产生归属记录 */
+  origin?: EditOriginMeta
 }
 
 interface PanelEntry {
@@ -372,6 +412,9 @@ export class DocumentSession {
   /** 兜底确认记录（C-4）：applyEdit resolve 后回流迟到时，回流到达按
    *  (version, changes) 匹配识别为自家确认，不作为外部变更重复广播 */
   private readonly confirmedEchoes: { version: number; changes: SerChange[] }[] = []
+  /** T03（#352）来源归属登记（version → 请求身份 + origin；有界）：
+   *  editOriginAtVersion 的查询数据源 */
+  private readonly attributed: { version: number; seq: number; sessionId: string; origin: EditOriginMeta }[] = []
   /** #48 已应用未确认窗口的外部广播暂存：面板 pending 存在已应用未确认
    *  条目时，外部增量的坐标参考系（权威文本已含该编辑）与 webview 的
    *  ackedChain（不含）不一致——先行广播会让 webview 逆穿 unconfirmed
@@ -2039,6 +2082,14 @@ export class DocumentSession {
       })
       return
     }
+    // T03（#352）纯选区事务：携带 origin 且无净文本变更（选区设置类）的
+    // 请求不写回、不造宿主历史项、不留来源记录——直接以当前版本确认。
+    // 无 origin 的空请求保持既有行为（webview 出站前已过滤空变更，此处
+    // 防御性维持原路径，契约等价）
+    if (message.origin !== undefined && !hasNetTextChange(message.changes)) {
+      this.sendAck(panel, { kind: 'edit.ack', seq: message.seq, ok: true, version: this.doc.version })
+      return
+    }
     let mapped: SerChange[] | null
     if (message.baseVersion === this.doc.version) {
       // webview 消息为 LF 坐标，先转换为宿主坐标再校验/应用
@@ -2073,12 +2124,13 @@ export class DocumentSession {
       return
     }
     const pending: PendingEdit = { seq: message.seq, changes: mapped, confirmed: false,
-      ...(message.paste ? { paste: { ...message.paste, sessionId: panel.sessionId } } : {}) }
+      ...(message.paste ? { paste: { ...message.paste, sessionId: panel.sessionId } } : {}),
+      ...(message.origin !== undefined ? { origin: message.origin } : {}) }
     panel.pending.push(pending)
     // #52：快照 apply 前版本——兜底确认时据此推导 E 实际落地的权威版本
     //（apply 窗口内到达的外部增量会把 doc.version 推进到高于 E 的值）
     const versionBeforeApply = this.doc.version
-    const ok = await this.doc.applyChanges(mapped)
+    const ok = await this.doc.applyChanges(mapped, message.origin)
     const entry = panel.pending.find((p) => p === pending)
     if (!entry) {
       // 已被其他路径处理（resumePanel 清空 pending 等）。apply 失败时该编辑
@@ -2290,10 +2342,64 @@ export class DocumentSession {
     this.sendAck(panel, { kind: 'edit.ack', seq: pending.seq, ok: true, version })
     // 其他面板需要看到这次变更（split 多实例广播），坐标转换为 LF 形态
     const lfChanges = this.newline.hostChangesToLf(pending.changes)
+    // T03（#352）来源归属：确认成功的单一汇合点（回流匹配与兜底确认都在
+    // 此触发）；每笔 pending 恰好一次，失败/重放路径不经过此处
+    if (pending.origin !== undefined) {
+      this.noteAttribution(panel, pending, version, lfChanges)
+    }
     this.broadcastExternal(version, lfChanges, panel)
     // #48：确认后参考系一致（本面板 ack 已发、其他面板已见本笔广播），
     // 暂存的外部增量可按序补发
     this.flushPendingExternal()
+  }
+
+  /** T03（#352）归属记账：回调通知 + 按版本登记（有界，与版本日志同窗） */
+  private noteAttribution(
+    panel: PanelEntry,
+    pending: PendingEdit,
+    version: number,
+    lfChanges: SerChange[],
+  ): void {
+    const record: EditAttributionRecord = {
+      docUri: this.docUri,
+      sessionId: panel.sessionId,
+      seq: pending.seq,
+      version,
+      changes: lfChanges,
+      origin: pending.origin!,
+    }
+    this.attributed.push({ version, seq: pending.seq, sessionId: panel.sessionId, origin: pending.origin! })
+    while (this.attributed.length > VERSION_LOG_LIMIT) {
+      this.attributed.shift()
+    }
+    this.options.onEditAttributed?.(record)
+  }
+
+  /** T03（#352）按落定版本查询来源归属（未携带 origin 的版本返回
+   *  undefined——外来条目；重放不重复计入：同版本只登记一次） */
+  editOriginAtVersion(version: number): { seq: number; sessionId: string; origin: EditOriginMeta } | undefined {
+    return this.attributed.find((e) => e.version === version)
+  }
+
+  /** T03（#352）组历史窄适配点：排在会话队列（在途 edit.request 之后）
+   *  串行执行，调用权威端口的可选组入口。steps 为计划的原生步骤数（计划
+   *  在执行时点由调用方计算——V01 F2）；端口未实现组入口时明确
+   *  route-unavailable，不降级为逐次单步（不改变单步 history.request 的
+   *  既有语义）。origin 语义同 undo/redo（引用 B 的临时激活路由） */
+  runHistorySteps(
+    op: 'undo' | 'redo',
+    steps: number,
+    origin?: { docUri: string },
+  ): Promise<HostHistoryGroupResult> {
+    const run = this.queue.then(() => {
+      // 显式分支调用：三元取方法引用会丢 this 绑定
+      if (op === 'undo') {
+        return this.doc.undoGroup ? this.doc.undoGroup(steps, origin) : undefined
+      }
+      return this.doc.redoGroup ? this.doc.redoGroup(steps, origin) : undefined
+    })
+    this.queue = run.then(() => undefined, () => undefined)
+    return run.then((result) => result ?? { executedSteps: 0, aborted: 'route-unavailable' })
   }
 
   /** 广播一笔外部变更（doc.changed）给全部 ready 面板；exclude 排除变更

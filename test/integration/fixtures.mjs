@@ -892,6 +892,14 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'v01-reload.md'), 'V01重载基\n', 'utf8')
   writeFileSync(path.join(wsDir, 'v01-ref-a.md'), '# V01 引用 A\n\n![[v01-ref-b]]\n', 'utf8')
   writeFileSync(path.join(wsDir, 'v01-ref-b.md'), 'V01引用B基\n', 'utf8')
+  // T03（#352）编辑来源与宿主历史接入点：来源归属（origin 归属/纯选区/
+  // 隔离对照）、root 组历史、引用 B 组路由 + F1 脏态收口（保存点交错构造
+  // undo 后仍 dirty 的场景）
+  writeFileSync(path.join(wsDir, 'v01-t03-origin.md'), 'T03来源基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-iso.md'), 'T03隔离基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-group.md'), 'T03组基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-ref-a.md'), '# T03 引用 A\n\n![[v01-t03-ref-b]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-ref-b.md'), 'T03引用B基\n', 'utf8')
   writeFileSync(path.join(wsDir, 'ackorder.md'), ACKORDER_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'resync.md'), RESYNC_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'ime-escape.md'), IME_ESC_DOC, 'utf8')

@@ -619,6 +619,31 @@ export function createTextEditorProvider(
    *  .md 会落回本扩展 custom editor）→ 全局 undo/redo → 重显来源面板 A →
    *  收掉 B 预览标签（只收 isPreview 的——用户已开的钉住文本标签不动）。
    *  标签栏短暂切换与键盘焦点离开 A 是已接受的可见代价。 */
+  /** T03（#352，V01 F1 实测）：1.82.3 的 tabGroups.close 关闭**脏**文本标签
+   *  会静默丢弃未保存修改（版本 +1、文本回落盘面，无提示）。收口只允许在
+   *  目标非脏时执行；脏态保留临时标签（激活态已恢复来源 A），否则引用 B 的
+   *  撤销/重做会静默丢用户可见内容。 */
+  const closeTempTextTabsIfClean = async (
+    bDoc: vscode.TextDocument,
+    tabsBefore: Set<vscode.Tab>,
+  ): Promise<boolean> => {
+    if (bDoc.isDirty) {
+      return false // 脏态不关（F1）：标签留给用户，不丢弃未保存修改
+    }
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (
+          tab.input instanceof vscode.TabInputText &&
+          tab.input.uri.toString() === bDoc.uri.toString() &&
+          !tabsBefore.has(tab)
+        ) {
+          await vscode.window.tabGroups.close(tab)
+        }
+      }
+    }
+    return true
+  }
+
   const historyViaTempActivation = async (
     bDoc: vscode.TextDocument,
     originUri: vscode.Uri,
@@ -645,20 +670,70 @@ export function createTextEditorProvider(
           // 来源面板关闭竞态：保留当前激活态
         }
       }
-      for (const group of vscode.window.tabGroups.all) {
-        for (const tab of group.tabs) {
-          if (
-            tab.input instanceof vscode.TabInputText &&
-            tab.input.uri.toString() === bDoc.uri.toString() &&
-            !tabsBefore.has(tab)
-          ) {
-            await vscode.window.tabGroups.close(tab)
-          }
-        }
-      }
+      // F1 修复（V01 实测）：撤销/重做后 B 仍 dirty（撤回未到保存点、或重做
+      // 恢复了修改）时关闭临时标签会静默丢弃修改——脏态跳过收口
+      await closeTempTextTabsIfClean(bDoc, tabsBefore)
       return executed
     } catch {
       return false
+    }
+  }
+
+  /** T03（#352）组历史核心执行器：连续执行 steps 个原生 undo/redo 步骤，
+   *  每步执行前快照版本、执行后核对版本恰 +1（V01 F2「计划在执行时点计算」
+   *  与 F4「预期版本对位」的生产形态——不依赖文本全等对账）；命令失败或
+   *  版本失配即中止剩余步骤（V01 探针 runSteps 的生产迁移，核对口径收敛为
+   *  版本推进）。 */
+  const runHistoryStepsCore = async (
+    doc: vscode.TextDocument,
+    op: 'undo' | 'redo',
+    steps: number,
+  ): Promise<{ executedSteps: number; aborted?: 'version-mismatch' }> => {
+    let executed = 0
+    for (let i = 0; i < steps; i++) {
+      const beforeVersion = doc.version
+      const ran = await vscode.commands.executeCommand(op).then(() => true, () => false)
+      if (!ran) {
+        break
+      }
+      // 等待该步回流落定（版本恰 +1；超时视为失配——栈空/命令无效果）
+      const settled = await waitForDocVersion(doc, beforeVersion + 1, 4000)
+      if (!settled) {
+        return { executedSteps: executed, aborted: 'version-mismatch' }
+      }
+      executed += 1
+    }
+    return { executedSteps: executed }
+  }
+
+  /** T03（#352）引用 B 的组历史路由（窄适配点）：一次临时激活执行整组、
+   *  结束后才恢复来源 A（票面口径），叠加 F1 的脏态收口禁丢边界。失败不
+   *  回滚 B（与既有单步路由同语义）。 */
+  const historyGroupViaTempActivation = async (
+    bDoc: vscode.TextDocument,
+    originUri: vscode.Uri,
+    op: 'undo' | 'redo',
+    steps: number,
+  ): Promise<{ executedSteps: number; aborted?: 'version-mismatch' }> => {
+    try {
+      const tabsBefore = new Set(
+        vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) =>
+          t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === bDoc.uri.toString()))
+      await vscode.window.showTextDocument(bDoc, { preview: true })
+      const result = await runHistoryStepsCore(bDoc, op, steps)
+      if (sessions.get(originUri.toString())?.panels.size) {
+        try {
+          await vscode.commands.executeCommand('vscode.openWith', originUri, VIEW_TYPE)
+        } catch {
+          // 来源面板关闭竞态：保留当前激活态
+        }
+      }
+      // F1：整组完成后 B 仍 dirty 时保留临时标签（收口禁丢）
+      await closeTempTextTabsIfClean(bDoc, tabsBefore)
+      return result
+    } catch {
+      return { executedSteps: 0 }
     }
   }
 
@@ -1505,6 +1580,28 @@ export function createTextEditorProvider(
         }
         return historyViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'redo')
       },
+      // T03（#352）组历史入口（窄适配点）：活动 custom editor 场景直接整组
+      // 执行（每步版本核对）；引用 B 场景走组临时激活路由（一次激活执行
+      // 整组、恢复来源 A、F1 脏态收口禁丢）。其余场景明确 route-unavailable
+      // （不撤销其他文档、不降级语义）
+      undoGroup: async (steps: number, origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return runHistoryStepsCore(doc, 'undo', steps)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
+          return { executedSteps: 0, aborted: 'route-unavailable' as const }
+        }
+        return historyGroupViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'undo', steps)
+      },
+      redoGroup: async (steps: number, origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return runHistoryStepsCore(doc, 'redo', steps)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
+          return { executedSteps: 0, aborted: 'route-unavailable' as const }
+        }
+        return historyGroupViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'redo', steps)
+      },
     }
     // #201 图片周期核验与失效：会话按自身 linkCtx 解析图源目标（同一 src
     // 在不同文档指向不同文件——目标解析必须按文档）；决策与版本表在协调器
@@ -1513,6 +1610,9 @@ export function createTextEditorProvider(
     fresh.session = new DocumentSession(sessionPort, {
       docUri: key,
       rootFsPath: doc.uri.fsPath,
+      // T03（#352）归属确认接线：生产（T06 落地前）不消费——TEST_HOOKS 下
+      // 记录到探针 hub 供集成验证（按 ack version 对位来源，替代文本对账）
+      ...(addonHistoryHub ? { onEditAttributed: (record) => addonHistoryHub.noteAttribution(key, record) } : {}),
       getEmbedDepthLimit: () => {
         const value = settings?.service.getSnapshot()[EMBED_MAX_DEPTH_KEY]
         return typeof value === 'number' ? value : EMBED_MAX_DEPTH_DEFAULT
@@ -4649,6 +4749,23 @@ export function createTextEditorProvider(
         'onegayi.vsidian._test.addonHistory.rebuild',
         (uriStr: string) => addonHistoryHub.rebuildMapping(uriStr),
       ),
+      vscode.commands.registerCommand(
+        // T03（#352）生产归属记录观测：onEditAttributed 的消费侧证据
+        //（失败/重放不产生记录；version 与 edit.ack(ok) 同源）
+        'onegayi.vsidian._test.addonHistory.t03Attributions',
+        (uriStr: string) => addonHistoryHub.attributions(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.t03GroupHistory',
+        (uriStr: string, op: 'undo' | 'redo', steps: number, refOriginUri?: string) =>
+          addonHistoryHub.t03GroupHistory(uriStr, op, steps, refOriginUri),
+      ),
+      vscode.commands.registerCommand(
+        // T03（#352）真实管线直通提交：ack 形态观测（纯选区/失败/正常确认）
+        'onegayi.vsidian._test.addonHistory.t03Submit',
+        (uriStr: string, input: { changes: Array<{ offset: number; length: number; text: string }>; origin?: { addonId: string; opId: string; undo: 'atomic' | 'joinPrevious' }; refOriginUri?: string }) =>
+          addonHistoryHub.t03Submit(uriStr, input),
+      ),
     ] : []),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.requestViewState',
@@ -4952,8 +5069,20 @@ function isBlockIdFragment(fragment: string): boolean {
  *  避免以注入形态建立 URI 与真实文档/面板身份漂移（集成实测教训）；
  *  远程 POSIX 宿主 stat 严格命中即真实路径，原样返回。#197 引用索引
  *  落地后可换传索引查询（索引持磁盘真实路径，直接返回）。 */
-async function statFileRealPath(fsPath: string): Promise<string | null> {
-  const uri = vscode.Uri.file(fsPath)
+/** T03（#352）等待权威文档到达预期版本（组历史每步核对用）：轮询读取
+ *  + 超时（V01 探针 waitDocState 的生产等价物，核对口径收敛为版本推进） */
+async function waitForDocVersion(doc: vscode.TextDocument, version: number, timeoutMs: number): Promise<boolean> {
+  const until = Date.now() + timeoutMs
+  while (Date.now() < until) {
+    if (doc.version >= version) {
+      return true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40))
+  }
+  return doc.version >= version
+}
+
+async function statFileRealPath(fsPath: string): Promise<string | null> {  const uri = vscode.Uri.file(fsPath)
   try {
     const st = await vscode.workspace.fs.stat(uri)
     if ((st.type & vscode.FileType.File) === 0) {

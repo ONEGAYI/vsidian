@@ -13,6 +13,7 @@ import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics
 import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
+import { isEditOriginMeta, type EditOriginMeta } from './editOrigin'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -989,6 +990,10 @@ export type WebviewToHost =
       baseVersion: number
       changes: SerChange[]
       paste?: PasteStage
+      /** T03（#352）可选来源与原子操作归属元数据：公开编辑 API（T06）的
+       *  提交通道携带；旧调用缺省不携带，行为不变。经真实写回/回流确认后
+       *  由宿主按 ack version 对位归属（DocumentSession.onEditAttributed） */
+      origin?: EditOriginMeta
     }
   /** 撤销/重做请求：作用于宿主 TextDocument 权威历史（探索笔记 03 §4） */
   | { kind: 'history.request'; op: 'undo' | 'redo' }
@@ -3626,7 +3631,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isPositiveInt(v.seq) &&
         isNonNegativeInt(v.baseVersion) &&
         isSerChangeArray(v.changes) &&
-        (v.paste === undefined || isPasteStage(v.paste))
+        (v.paste === undefined || isPasteStage(v.paste)) &&
+        // T03（#352）可选来源元数据：在场即须形状合法，非法整条拒绝
+        (v.origin === undefined || isEditOriginMeta(v.origin))
       )
     case 'history.request':
       return v.op === 'undo' || v.op === 'redo'

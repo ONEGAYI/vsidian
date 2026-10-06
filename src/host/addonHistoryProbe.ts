@@ -25,7 +25,8 @@ import {
   type AddonHistoryStep,
   type AddonHistorySnapshot,
 } from '../shared/addonHistoryGrouping'
-import type { DocumentSession, HostDocumentPort, PanelPort } from './documentSession'
+import type { EditOriginMeta } from '../shared/editOrigin'
+import type { DocumentSession, EditAttributionRecord, HostDocumentPort, HostHistoryGroupResult, PanelPort } from './documentSession'
 import type { HostToWebview, SerChange, WebviewToHost } from '../shared/protocol'
 
 /** 探针依赖（provider 闭包注入，避免探针耦合其内部结构） */
@@ -47,6 +48,9 @@ export interface AddonHistorySubmitInput {
   changes: SerChange[]
   /** 引用目标：携带时虚拟面板带 refOrigin（B 的历史走临时激活路由） */
   refOriginUri?: string
+  /** T03（#352）可选来源元数据：透传到真实 edit.request 通道（生产归属
+   *  管线验证入口——经 onEditAttributed 按 ack version 对位） */
+  origin?: EditOriginMeta
 }
 
 export type AddonHistorySubmitResult =
@@ -315,9 +319,40 @@ class AddonHistoryProbe {
     return panel.virtualSessionId
   }
 
+  /** T03（#352）真实管线直通提交（不经分组状态机对账）：生产 edit.request
+   *  通道的观测面——ack 形态原样返回，纯选区短路、失败拒绝、正常确认都
+   *  可见；归属对位由生产 onEditAttributed 通道（t03Attributions）断言 */
+  submitViaPanel(input: {
+    changes: SerChange[]
+    origin?: EditOriginMeta
+    refOriginUri?: string
+  }): Promise<{ ok: boolean; version?: number; reason?: string }> {
+    const virtualSessionId = this.ensurePanel(input.refOriginUri)
+    const panel = this.panels.get(virtualSessionId)!
+    const seq = panel.seq++
+    panel.lastAck = undefined
+    const task = this.chain.then(async (): Promise<{ ok: boolean; version?: number; reason?: string }> => {
+      void this.session.handleWebviewMessage({
+        kind: 'edit.request',
+        sessionId: virtualSessionId,
+        docUri: this.uriStr,
+        seq,
+        baseVersion: this.doc.version,
+        changes: input.changes,
+        ...(input.origin !== undefined ? { origin: input.origin } : {}),
+      } as WebviewToHost, virtualSessionId)
+      const ack = await waitFor(() => panel.lastAck, 5000)
+      if (!ack) {
+        return { ok: false, reason: 'ack-timeout' }
+      }
+      return ack.ok ? { ok: true, version: ack.version } : { ok: false, reason: 'ack-rejected' }
+    })
+    this.chain = task.then(() => undefined, () => undefined)
+    return task
+  }
+
   /** 修饰提交：planSubmit → 真实 edit.request → ack 版本对位复核 */
-  submit(input: AddonHistorySubmitInput): Promise<AddonHistorySubmitResult> {
-    const check = this.grouping.planSubmit(input.opId, input.atomic)
+  submit(input: AddonHistorySubmitInput): Promise<AddonHistorySubmitResult> {    const check = this.grouping.planSubmit(input.opId, input.atomic)
     if (!check.ok) {
       this.lastRejection = check.reason
       return Promise.resolve({ ok: false, opId: input.opId, reason: check.reason })
@@ -335,6 +370,7 @@ class AddonHistoryProbe {
         seq,
         baseVersion: this.doc.version,
         changes: input.changes,
+        ...(input.origin !== undefined ? { origin: input.origin } : {}),
       } as WebviewToHost, virtualSessionId)
       const ack = await waitFor(() => panel.lastAck, 5000)
       if (!ack) {
@@ -492,8 +528,43 @@ class AddonHistoryProbe {
 export class AddonHistoryProbeHub {
   private readonly probes = new Map<string, AddonHistoryProbe>()
   private listener: vscode.Disposable | undefined
+  /** T03（#352）生产归属记录（TEST_HOOKS 观测面）：onEditAttributed 的
+   *  消费侧——集成用例按 ack version 断言来源对位（替代文本全等对账） */
+  private readonly t03Attributions = new Map<string, EditAttributionRecord[]>()
 
   constructor(private readonly deps: AddonHistoryProbeDeps) {}
+
+  /** T03（#352）归属记账（provider 的 onEditAttributed 接线；TEST_HOOKS） */
+  noteAttribution(docUri: string, record: EditAttributionRecord): void {
+    let list = this.t03Attributions.get(docUri)
+    if (!list) {
+      list = []
+      this.t03Attributions.set(docUri, list)
+    }
+    list.push(record)
+  }
+
+  /** T03（#352）归属记录查询（_test.addonHistory.t03Attributions 数据源） */
+  attributions(uriStr: string): EditAttributionRecord[] {
+    return [...(this.t03Attributions.get(uriStr) ?? [])]
+  }
+
+  /** T03（#352）生产组历史入口：经目标会话队列串行（单一路由点）调用
+   *  权威端口 undoGroup/redoGroup——provider 的窄适配点（临时激活整组
+   *  执行 + F1 脏态收口禁丢）。refOriginUri 携带时走引用 B 路由（要求
+   *  B 有真实活跃端口绑定） */
+  async t03GroupHistory(
+    uriStr: string,
+    op: 'undo' | 'redo',
+    steps: number,
+    refOriginUri?: string,
+  ): Promise<HostHistoryGroupResult> {
+    const entry = await this.deps.ensureSession(uriStr)
+    if (!entry) {
+      throw new Error(`无可用会话：${uriStr}`)
+    }
+    return entry.session.runHistorySteps(op, steps, refOriginUri !== undefined ? { docUri: refOriginUri } : undefined)
+  }
 
   /** provider openEntry 调用：包装端口（未 attach 的目标纯透传，零行为差异） */
   wrapPort(base: HostDocumentPort, doc: vscode.TextDocument): HostDocumentPort {
@@ -526,6 +597,15 @@ export class AddonHistoryProbeHub {
         }
         return probe.executeGroup('redo', origin)
       },
+      // T03（#352）组入口透传：探针自身的分组展开走 undo/redo（文本对账
+      // 语义，验证工件）；生产组路由（undoGroup/redoGroup）不经探针状态机，
+      // 原样透传给被包装端口
+      undoGroup: base.undoGroup
+        ? (steps: number, origin?: { docUri: string }) => base.undoGroup!(steps, origin)
+        : undefined,
+      redoGroup: base.redoGroup
+        ? (steps: number, origin?: { docUri: string }) => base.redoGroup!(steps, origin)
+        : undefined,
     }
     return wrapper
   }
@@ -585,6 +665,18 @@ export class AddonHistoryProbeHub {
       throw new Error(`探针未 attach：${uriStr}`)
     }
     return probe.submit(input)
+  }
+
+  /** T03（#352）真实管线直通提交（_test.addonHistory.t03Submit 数据源） */
+  async t03Submit(
+    uriStr: string,
+    input: { changes: SerChange[]; origin?: EditOriginMeta; refOriginUri?: string },
+  ): Promise<{ ok: boolean; version?: number; reason?: string }> {
+    const probe = this.probes.get(uriStr)
+    if (!probe) {
+      throw new Error(`探针未 attach：${uriStr}`)
+    }
+    return probe.submitViaPanel(input)
   }
 
   async history(uriStr: string, op: 'undo' | 'redo', refOriginUri?: string): Promise<Record<string, unknown>> {
