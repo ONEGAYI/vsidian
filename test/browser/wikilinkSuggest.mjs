@@ -1,9 +1,13 @@
-// 双链联想候选浏览器回归（#376 T01）：真实键盘/CDP IME 驱动生产控制器，
-// 宿主侧由夹具扮演（wikilink.query → wikilink.query.result 回灌）。覆盖：
-// 连续两个 [ 出候选（空查询无高亮）、有查询自动高亮首项、方向键移动高亮
-// 不动光标、Enter/Tab 确认插入相对路径+默认别名并关浮层、Esc 关闭、移出
-// 字段关闭、无结果状态行且 Enter 落穿、迟到响应拒收、无工作区真实状态、
+// 双链联想候选浏览器回归（#376 T01 + #378 T03）：真实键盘/CDP IME 驱动
+// 生产控制器，宿主侧由夹具扮演（wikilink.query → wikilink.query.result 回灌）。
+// T01 覆盖：连续两个 [ 出候选（空查询无高亮）、有查询自动高亮首项、方向键
+// 移动高亮不动光标、Enter/Tab 确认插入相对路径+默认别名并关浮层、Esc 关闭、
+// 移出字段关闭、无结果状态行且 Enter 落穿、迟到响应拒收、无工作区真实状态、
 // IME 组合期候选不确认、多 range 不接管。
+// T03 覆盖：Esc 后二次触发矩阵（纯移动/编辑显示文字不重开，目标区修改才
+// 重开且查询取光标左侧）、#／^／| 真实键盘转阶段（高亮补全/无高亮保留、
+// 已有 # 只补 ^）、标题/块占位文案与不可确认（Tab 落穿围栏越界零写回）、
+// | 进显示文字（新链接留空、已有别名保留）、组合期 # 不转阶段。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -258,6 +262,161 @@ try {
     await page.keyboard.type('[')
     assert.equal(await page.evaluate(() => window.queryCount()), 0, '代码上下文不触发')
     assert.equal((await popup(page)).open, false)
+  })
+
+  // ---- #378 T03：Esc 后二次触发矩阵 ----
+  await scenario('Esc 后纯光标移动与显示文字编辑不重开；目标区修改才重开且查询取左侧', { doc: '[[Aa|B]]', cursor: 3 }, async (page) => {
+    // 目标区中部输入触发：查询为光标左侧（A + 新输入 x）
+    await page.keyboard.type('x')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.query), 'Ax')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    assert.equal((await popup(page)).open, true)
+    // Esc 关闭；移动光标（字段内各处/围栏外再回来）不重开、不出站
+    await page.keyboard.press('Escape')
+    assert.equal((await popup(page)).open, false)
+    const countAfterEsc = await page.evaluate(() => window.queryCount())
+    await page.evaluate((offset) => window.locate(offset), 2)
+    await page.evaluate((offset) => window.locate(offset), 4)
+    assert.equal(await page.evaluate(() => window.queryCount()), countAfterEsc, '纯移动不重开')
+    // 显示文字 B 编辑不触发
+    await page.evaluate((offset) => window.locate(offset), 6)
+    await page.keyboard.type('y')
+    assert.equal((await read(page)).text, '[[Axa|yB]]')
+    assert.equal(await page.evaluate(() => window.queryCount()), countAfterEsc, '显示文字编辑不触发')
+    assert.equal((await popup(page)).open, false)
+    // 返回目标区删除才重开；查询仍为光标左侧（Axa）
+    await page.evaluate((offset) => window.locate(offset), 6)
+    await page.keyboard.press('Backspace')
+    assert.equal(await page.evaluate(() => window.lastQuery()?.query), 'Axa', '再触发查询取光标左侧')
+  })
+
+  // ---- #378 T03：# / ^ 转阶段（真实键盘字符键） ----
+  await scenario('高亮文件后 # 直接转标题占位：补全相对路径、占位提示、不出站标题查询', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方案')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    const before = await page.evaluate(() => window.queryCount())
+    await page.keyboard.press('#')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#]]', '补全文件并加 #')
+    assert.equal(after.head, '[[../资料/方案.md#'.length, '光标在 # 后')
+    const p = await popup(page)
+    assert.equal(p.open, true, '占位会话在场')
+    assert.equal(p.itemCount, 0, '占位不是候选')
+    assert.match(p.statusText, /输入小标题|Type a heading/, '标题占位提示（i18n）')
+    assert.equal(await page.evaluate(() => window.queryCount()), before, '转阶段不出站标题查询')
+  })
+
+  await scenario('无高亮按 #：不补文件名，保留原输入进入标题占位', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方')
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.press('#')
+    const after = await read(page)
+    assert.equal(after.text, '[[方#]]', '保留原输入')
+    assert.equal(after.head, '[[方#'.length)
+    assert.match((await popup(page)).statusText, /输入小标题|Type a heading/)
+  })
+
+  await scenario('高亮文件后 ^ 一次形成 #^ 转块占位；标题占位再按 ^ 不重复补 #', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方案')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('^')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md#^]]', '补全文件一次形成 #^')
+    assert.equal(after.head, '[[../资料/方案.md#^'.length, '光标在 ^ 后')
+    const p = await popup(page)
+    assert.match(p.statusText, /输入块 ID|Type a block ID/, '块占位提示（i18n）')
+    // 继续按 ^：块阶段不接管——真实键盘落穿会把 ^ 作为普通文本插入
+    await page.keyboard.press('^')
+    assert.equal((await read(page)).text, '[[../资料/方案.md#^^]]', '块阶段 ^ 落穿普通输入')
+  })
+
+  await scenario('标题占位下按 ^ 只补 ^（已有 # 不重复补）', { doc: '[[方案.md#]]', cursor: 8 }, async (page) => {
+    // 锚点字段输入触发占位会话
+    await page.keyboard.type('x')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('^')
+    const after = await read(page)
+    assert.equal(after.text, '[[方案.md#^]]', '只补 ^ 不重复补 #')
+    assert.equal(after.head, '[[方案.md#^'.length)
+    assert.match((await popup(page)).statusText, /输入块 ID|Type a block ID/)
+  })
+
+  await scenario('空双链按 # / ^：不补文件名，进入对应占位（空目标不猜文档）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.press('#')
+    assert.equal((await read(page)).text, '[[#]]', '空目标 # 不补文件名')
+    assert.match((await popup(page)).statusText, /输入小标题|Type a heading/)
+    await page.keyboard.press('Escape')
+    await page.keyboard.type('x')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('^')
+    assert.equal((await read(page)).text, '[[#^]]', '空目标 ^ 形成空块字段、不写占位词')
+    assert.match((await popup(page)).statusText, /输入块 ID|Type a block ID/)
+  })
+
+  // ---- #378 T03：| 进显示文字 ----
+  await scenario('高亮文件后 |：补全目标、显示文字留空、关闭候选，光标在 | 后', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[方案.md')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    await page.keyboard.press('|')
+    const after = await read(page)
+    assert.equal(after.text, '[[../资料/方案.md|]]', '新链接 | 显示文字留空')
+    assert.equal(after.head, '[[../资料/方案.md|'.length, '光标在 | 后等待手动输入')
+    assert.equal((await popup(page)).open, false, '进显示文字关闭候选')
+  })
+
+  await scenario('无高亮按 |：保留原输入关候选；已有 | 复用跳转、已有别名保留', { doc: '[[Aa|B]]', cursor: 4 }, async (page) => {
+    await page.keyboard.type('x')
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('|')
+    const after = await read(page)
+    assert.equal(after.text, '[[Aa|B]]', '已有 | 零编辑、别名 B 保留')
+    assert.equal(after.head, 5, '光标跳到已有 | 后')
+    assert.equal((await popup(page)).open, false)
+  })
+
+  // ---- #378 T03：占位不可确认（Tab 落穿围栏越界零写回） ----
+  await scenario('块占位下 Tab 落穿围栏两步越界零写回；Enter 落穿换行后关闭', { doc: '[[方案.md#^id]]', cursor: 11 }, async (page) => {
+    await page.keyboard.type('x')
+    await page.keyboard.press('Backspace')
+    assert.match((await popup(page)).statusText, /输入块 ID|Type a block ID/)
+    const textBefore = (await read(page)).text
+    // Tab：块阶段无可确认项——落穿 fenceEscape 两步越界，纯选区移动零写回；
+    // 第一步即移出锚点字段（光标进入闭围栏），候选随之关闭（移出目标字段）
+    await page.keyboard.press('Tab')
+    const afterTab = await read(page)
+    assert.equal(afterTab.text, textBefore, 'Tab 落穿零写回')
+    assert.equal(afterTab.head, 12, 'Tab 第一步：进入闭围栏内边界')
+    assert.equal((await popup(page)).open, false, '移出锚点字段后候选关闭')
+    await page.keyboard.press('Tab')
+    const afterTab2 = await read(page)
+    assert.equal(afterTab2.text, textBefore, '第二步仍零写回')
+    assert.equal(afterTab2.head, textBefore.length, 'Tab 第二步：越出闭围栏')
+    // Enter：落穿默认换行——围栏跨行破坏，候选关闭
+    await page.keyboard.type('x') // 移回块字段（越出后目标区输入重开）
+    await page.keyboard.press('Enter')
+    const afterEnter = await read(page)
+    assert.equal(afterEnter.text.includes('../资料/方案.md'), false, '占位不可确认')
+    assert.equal(afterEnter.text.includes('\n'), true, 'Enter 落穿默认换行')
+    assert.equal((await popup(page)).open, false, '换行破坏围栏后关闭')
+  })
+
+  // ---- #378 T03：IME 组合期 # 不转阶段 ----
+  await scenario('IME 组合期 # 不转阶段（组合期按键不消费）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Input.imeSetComposition', { text: '方', selectionStart: 4, selectionEnd: 4 })
+    await page.waitForFunction(() => window.queryCount() >= 2)
+    await page.keyboard.press('#')
+    const after = await read(page)
+    assert.equal(after.text.includes('../资料/方案.md#'), false, '组合期 # 未执行转阶段')
+    assert.equal(after.text.includes('\n'), false, '组合期无换行副作用')
+    await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 })
   })
 } finally {
   await browser.close()

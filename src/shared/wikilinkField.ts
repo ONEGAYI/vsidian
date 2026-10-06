@@ -1,28 +1,58 @@
-// 新建闭合双链围栏的文件字段识别（工单 #376 T01，局部输入识别器）：
-// 光标所在行内，从 `[[` / `![[` 到 `]]` 的**闭合**围栏，且光标位于「文件
-// 字段」（开标记之后、首个 `|` 或 `#` 之前）时给出字段边界与嵌入前缀标记。
+// 新建闭合双链围栏的文件字段识别（工单 #376 T01，局部输入识别器；
+// #378 T03 扩展为阶段化目标字段识别 + 转阶段/确认编辑计划）：
+// 光标所在行内，从 `[[` / `![[` 到 `]]` 的**闭合**围栏，且光标位于
+// 「目标区」（开标记之后、`|` 之前——含文件字段与锚点字段）时给出字段
+// 边界与阶段标记。
 //
 // 与既有完整渲染解析器的边界（symbol-input 约定「不放宽」）：本识别器是
 // 新增局部逻辑，只服务联想触发；`src/shared/wikilink.ts` 的
 // parseWikilinkInner / scanWikilinksInLine / scanEmbedsInLine 语义一律不动
 // ——识别器认得的形态是渲染解析器命中集合的**超集输入**（如空字段
-// `[[]]`、未完成目标 `[[Aa|B]]` 的目标区），反向不成立：识别器对残缺/
-// 未闭合/嵌套形态返回 null，保留普通输入。
+// `[[]]`、未完成目标 `[[Aa|B]]` 的目标区、空锚点 `[[#]]`），反向不成立：
+// 识别器对残缺/未闭合/嵌套形态返回 null，保留普通输入。
 //
 // 识别口径（与 scanWikilinksInLine / scanEmbedsInLine 的守卫同向）：
 // - 前置守卫：`[[` 的前一字符为 `[` 时不命中（三连括号）；嵌入 `![[` 的
 //   `!` 前为 `[` 或 `!` 时不命中（`[![[x]]` 链接域 / `!![[x]]` 双叹）
 // - 围栏内部（开标记与 `]]` 之间）不得出现 `[` / `]` / 换行（行内识别
 //   天然无换行）
-// - 光标左侧（开标记到光标）不得出现 `|` / `#`——出现即说明光标已落入
-//   显示文字/锚点字段，不属于文件字段（显示文字编辑不触发候选，规格
-//   「路径与显示文字」）
+// - 光标必须在 `|` 之前（含左边界）——越过首个 `|` 即显示文字字段，不
+//   触发候选（规格「路径与显示文字」：编辑显示文字 B 不触发）
 // - 只认闭合围栏（`]]` 必须在光标之后存在）；未闭合保留普通输入
-// - 文件字段终点 = 内部首个 `|` 或 `#`（恒在光标之后或与光标重合），
-//   无则为 `]]` 起点
+// - 阶段判定：围栏内、`|` 前的首个 `#` 为锚点标记；光标在 `#` 左边界
+//   （含）之前为文件阶段；其后为锚点字段——`#^` 形态（# 紧跟 ^）且光标
+//   越过 ^ 为块阶段，否则标题阶段。锚点文字中的后续 `#` / `^` 均按文字
+//   处理（与 parseWikilinkInner 的「首个 # 恒为分割」同向）
 //
 // 本模块不依赖 vscode/DOM/CM6（node 单测直驱；webview 侧叠加代码上下文
 // /frontmatter/表格格区等环境守卫后消费）。
+
+/** 目标区阶段：文件字段 / 标题锚点 / 块锚点（#378 T03） */
+export type WikilinkTargetStage = 'file' | 'heading' | 'block'
+
+/** 阶段化目标字段识别结果（偏移为传入 line 的本地偏移；调用方加行基准） */
+export interface WikilinkTargetField {
+  /** 是否嵌入前缀 `![[`（false = 普通 `[[`） */
+  embed: boolean
+  /** 开标记起点（embed 时含 `!`） */
+  openFrom: number
+  /** 围栏内部起点（开标记之后 = 文件字段起点） */
+  innerFrom: number
+  /** 文件字段终点（首个 `#`/`|` 之前；无则为 `]]` 起点） */
+  fileTo: number
+  /** 闭围栏 `]]` 起点 */
+  closeFrom: number
+  /** 锚点标记 `#` 位置（围栏内、`|` 前的首个 #）；-1 = 无锚点标记 */
+  hashAt: number
+  /** 锚点字段起点（# 后；`#^` 形态在 ^ 后）；hashAt < 0 时 -1 */
+  anchorFrom: number
+  /** 锚点字段终点（`|` 前或 `]]` 前；hashAt < 0 时 -1） */
+  anchorTo: number
+  /** 别名分隔符 `|` 位置；-1 = 无 */
+  pipeAt: number
+  /** 光标所在字段阶段 */
+  stage: WikilinkTargetStage
+}
 
 /** 一次文件字段识别结果（偏移为传入 line 的本地偏移；调用方加行基准） */
 export interface WikilinkFileField {
@@ -39,17 +69,10 @@ export interface WikilinkFileField {
 }
 
 /**
- * 判定 line 的 col（0 基，col 须在文件字段内）是否位于可触发联想的闭合
- * 双链文件字段中；命中返回字段边界，否则 null。
+ * 自右向左找最近的开标记（`[[` 且其起点 ≤ 光标）：返回行内偏移与嵌入
+ * 标记；无合法开标记（三连括号 / `[![[` / `!![[` 前置守卫）返回 -1。
  */
-export function findWikilinkFileField(line: string, col: number): WikilinkFileField | null {
-  if (col < 0 || col > line.length) {
-    return null
-  }
-  // 自右向左找最近的开标记（`[[` 且其起点 ≤ 光标）：左侧内容须落在
-  // 文件字段内（无 `|`/`#` 分隔符、无方括号残缺）
-  let openAt = -1
-  let embed = false
+function findOpenMark(line: string, col: number): { openAt: number; embed: boolean } {
   for (let p = col - 2; p >= 0; p--) {
     if (line[p] !== '[' || line[p + 1] !== '[') {
       continue
@@ -58,42 +81,217 @@ export function findWikilinkFileField(line: string, col: number): WikilinkFileFi
     // 再往左的开标记不可能包含光标（中间已有 `]]`）
     const prev = p > 0 ? line[p - 1] : ''
     if (prev === '[') {
-      return null // 三连括号（[[[）：不识别（与扫描器前置守卫同向）
+      return { openAt: -1, embed: false } // 三连括号（[[[）：不识别（与扫描器前置守卫同向）
     }
+    let embed = false
     if (prev === '!') {
       const bang = p - 1
       if (bang > 0 && (line[bang - 1] === '[' || line[bang - 1] === '!')) {
-        return null // [![[ 链接域 / !![[ 双叹：不识别
+        return { openAt: -1, embed: false } // [![[ 链接域 / !![[ 双叹：不识别
       }
       embed = true
     }
-    openAt = p
-    break
+    return { openAt: p, embed }
   }
+  return { openAt: -1, embed: false }
+}
+
+/**
+ * 判定 line 的 col（0 基）是否位于可触发联想的闭合双链**目标区**（| 之前
+ * 的文件/锚点字段）中；命中返回阶段化字段边界，否则 null。
+ */
+export function findWikilinkTargetField(line: string, col: number): WikilinkTargetField | null {
+  if (col < 0 || col > line.length) {
+    return null
+  }
+  const { openAt, embed } = findOpenMark(line, col)
   if (openAt < 0) {
     return null
   }
-  const fieldFrom = openAt + 2
-  const left = line.slice(fieldFrom, col)
-  if (/[\[\]|#]/.test(left)) {
-    return null // 左侧已离开文件字段（|/# 分隔）或围栏残缺（方括号）
+  const innerFrom = openAt + 2
+  // 光标左侧（开标记到光标）不得出现 `|`——越过即显示文字字段
+  const left = line.slice(innerFrom, col)
+  if (/[\[\]|]/.test(left)) {
+    return null
   }
   const closeAt = line.indexOf(']]', col)
   if (closeAt < 0) {
     return null // 未闭合：保留普通输入
   }
-  const right = line.slice(col, closeAt)
-  if (/[\[\]]/.test(right)) {
-    return null // 右侧围栏内部残缺（单独的 ] 或 [）
+  // 围栏内部不得出现 `[` / `]`（残缺形态）
+  const inner = line.slice(innerFrom, closeAt)
+  if (/[\[\]]/.test(inner)) {
+    return null
   }
-  // 文件字段终点：内部首个 | 或 #（必在光标之后——左侧已排除），无则 closeAt
-  let fieldTo = closeAt
-  for (let i = col; i < closeAt; i++) {
-    const ch = line[i]
-    if (ch === '|' || ch === '#') {
-      fieldTo = i
-      break
+  // 别名分隔符：围栏内首个 `|`（光标已在首个 | 前——左侧检查保证）
+  const pipeAt = inner.indexOf('|') >= 0 ? innerFrom + inner.indexOf('|') : -1
+  const targetEnd = pipeAt >= 0 ? pipeAt : closeAt
+  // 锚点标记：目标区内首个 `#`（| 后的 # 属显示文字，不算）
+  const hashRel = line.slice(innerFrom, targetEnd).indexOf('#')
+  const hashAt = hashRel >= 0 ? innerFrom + hashRel : -1
+  // 阶段判定：# 左边界（含）之前为文件字段；其后锚点字段——`#^` 且光标
+  // 越过 ^ 为块阶段，否则标题阶段
+  let stage: WikilinkTargetStage = 'file'
+  if (hashAt >= 0 && col > hashAt) {
+    stage = line.startsWith('^', hashAt + 1) && col > hashAt + 1 ? 'block' : 'heading'
+  }
+  const fileTo = hashAt >= 0 ? hashAt : targetEnd
+  // 锚点字段起点按阶段取：标题阶段从 # 后起（区间含 #^ 间光标），块阶段
+  // （恒为 #^ 形态）从 ^ 后起
+  const anchorFrom = hashAt >= 0 ? (stage === 'block' ? hashAt + 2 : hashAt + 1) : -1
+  const anchorTo = hashAt >= 0 ? targetEnd : -1
+  return {
+    embed, openFrom: embed ? openAt - 1 : openAt, innerFrom, fileTo, closeFrom: closeAt,
+    hashAt, anchorFrom, anchorTo, pipeAt, stage,
+  }
+}
+
+/**
+ * 判定 line 的 col（0 基，col 须在文件字段内）是否位于可触发联想的闭合
+ * 双链文件字段中；命中返回字段边界，否则 null。
+ */
+export function findWikilinkFileField(line: string, col: number): WikilinkFileField | null {
+  const field = findWikilinkTargetField(line, col)
+  if (!field || field.stage !== 'file') {
+    return null
+  }
+  return {
+    embed: field.embed,
+    openFrom: field.openFrom,
+    fieldFrom: field.innerFrom,
+    fieldTo: field.fileTo,
+    closeFrom: field.closeFrom,
+  }
+}
+
+//#region 转阶段与确认编辑计划（#378 T03，纯函数；webview 控制器组装事务）
+
+/** 会话内可规划按键：# / ^ 转阶段、| 进显示文字、Enter/Tab 确认 */
+export type WikilinkPhaseKey = '#' | '^' | '|' | 'confirm'
+
+/** 确认/转阶段可选中的候选产物（宿主已核对插入路径与默认别名） */
+export interface WikilinkPlanItem {
+  insertPath: string
+  alias: string
+}
+
+/** 一次编辑计划（行内坐标；changes 按原坐标升序、互不重叠） */
+export interface WikilinkFieldEditPlan {
+  changes: Array<{ from: number; to: number; insert: string }>
+  /** 编辑后光标（行内坐标，按 changes 应用后的新坐标） */
+  cursorTo: number
+  /** 编辑后会话去向：heading/block = 转对应阶段（占位）；null = 关闭 */
+  nextStage: 'heading' | 'block' | null
+}
+
+/**
+ * 转阶段/确认编辑计划（规格「高亮与确认」「路径与显示文字」）：
+ * - `confirm`（Enter/Tab）：仅文件阶段且须有高亮项——替换整个文件字段
+ *   （不留光标右侧旧名称），无 `|` 时在目标区末补默认别名（锚点保留在
+ *   `|` 前），已有 `|`（含空别名）原样保留；光标落目标区末端（分隔符/
+ *   闭围栏之前）；关闭会话。
+ * - `#`：仅文件阶段——有高亮先补全文件，无高亮保留原输入；目标区末
+ *   （`fileTo`）已有 `#` 则复用不重复插，否则插 `#`；光标跳/落在锚点
+ *   起点，转标题阶段。
+ * - `^`：文件/标题阶段——文件阶段无 `#` 一次形成 `#^`（有高亮先补全），
+ *   已有 `#` 只补 `^`；标题阶段在光标处补 `^`（保留两侧锚点文字）；
+ *   转块阶段。块阶段不接管（null）。
+ * - `|`：任意阶段——有真实高亮（仅文件阶段，T03）先补全目标；已有 `|`
+ *   复用（光标跳其后、零编辑），否则在目标区末插 `|`；显示文字留空、
+ *   已有别名保留；关闭会话（显示文字区不触发候选）。
+ *
+ * 坐标均为传入 line 的行内偏移；cursorTo 按 changes 应用后的新坐标计算。
+ * 阶段不匹配或缺前置条件返回 null（调用方落穿普通输入）。
+ */
+export function planWikilinkFieldEdit(
+  field: WikilinkTargetField,
+  key: WikilinkPhaseKey,
+  col: number,
+  item: WikilinkPlanItem | null,
+): WikilinkFieldEditPlan | null {
+  const { innerFrom, fileTo, hashAt, pipeAt, closeFrom, stage } = field
+  // 目标区末（| 前或 ] 前；有锚点时 = anchorTo，无锚点 = fileTo）
+  const targetEnd = pipeAt >= 0 ? pipeAt : closeFrom
+  /** 文件字段替换的坐标平移（插入点/光标在 fileTo 之后时叠加） */
+  const replaceDelta = (replace: boolean, insertPath: string): number =>
+    replace ? insertPath.length - (fileTo - innerFrom) : 0
+  const replaceItem = item !== null && item.insertPath !== '' ? item : null
+
+  if (key === 'confirm') {
+    if (stage !== 'file' || !item || item.insertPath === '') {
+      return null
+    }
+    const changes: WikilinkFieldEditPlan['changes'] = [
+      { from: innerFrom, to: fileTo, insert: item.insertPath },
+    ]
+    if (pipeAt < 0) {
+      // 无分隔符：目标区末补默认别名（有锚点时锚点保留在 | 前）
+      changes.push({ from: targetEnd, to: targetEnd, insert: `|${item.alias}` })
+    }
+    // 光标 = 目标区末端（新坐标）：文件字段替换后加锚点保留长度（有锚点
+    // 时光标在锚点末/新 | 前，无锚点在 | 前——均「便于随后添加锚点」）
+    const anchorKeep = hashAt >= 0 ? targetEnd - fileTo : 0
+    return {
+      changes,
+      cursorTo: innerFrom + item.insertPath.length + anchorKeep,
+      nextStage: null,
     }
   }
-  return { embed, openFrom: embed ? openAt - 1 : openAt, fieldFrom, fieldTo, closeFrom: closeAt }
+
+  if (key === '#') {
+    if (stage !== 'file') {
+      return null
+    }
+    const delta = replaceDelta(replaceItem !== null, replaceItem?.insertPath ?? '')
+    const changes: WikilinkFieldEditPlan['changes'] = replaceItem !== null
+      ? [{ from: innerFrom, to: fileTo, insert: replaceItem.insertPath }]
+      : []
+    if (hashAt >= 0) {
+      // 已有锚点标记：复用，光标跳到锚点起点
+      return { changes, cursorTo: hashAt + 1 + delta, nextStage: 'heading' }
+    }
+    changes.push({ from: fileTo, to: fileTo, insert: '#' })
+    return { changes, cursorTo: fileTo + 1 + delta, nextStage: 'heading' }
+  }
+
+  if (key === '^') {
+    if (stage === 'block') {
+      return null
+    }
+    if (stage === 'heading') {
+      // 标题阶段：光标处补 ^（已有 # 不重复补）；保留两侧锚点文字
+      return {
+        changes: [{ from: col, to: col, insert: '^' }],
+        cursorTo: col + 1,
+        nextStage: 'block',
+      }
+    }
+    // 文件阶段：有高亮先补全，再形成 #^（已有 # 只补 ^）
+    const delta = replaceDelta(replaceItem !== null, replaceItem?.insertPath ?? '')
+    const changes: WikilinkFieldEditPlan['changes'] = replaceItem !== null
+      ? [{ from: innerFrom, to: fileTo, insert: replaceItem.insertPath }]
+      : []
+    if (hashAt >= 0) {
+      changes.push({ from: hashAt + 1, to: hashAt + 1, insert: '^' })
+      return { changes, cursorTo: hashAt + 2 + delta, nextStage: 'block' }
+    }
+    changes.push({ from: fileTo, to: fileTo, insert: '#^' })
+    return { changes, cursorTo: fileTo + 2 + delta, nextStage: 'block' }
+  }
+
+  // key === '|'：竖线在文件／标题／块阶段都只接受**该阶段**的真实高亮——
+  // T03 标题/块为占位态（无候选），仅文件阶段可替换
+  const pipeItem = stage === 'file' ? replaceItem : null
+  const delta = replaceDelta(pipeItem !== null, pipeItem?.insertPath ?? '')
+  const changes: WikilinkFieldEditPlan['changes'] = pipeItem !== null
+    ? [{ from: innerFrom, to: fileTo, insert: pipeItem.insertPath }]
+    : []
+  if (pipeAt >= 0) {
+    // 已有分隔符：复用，零编辑，光标跳到已有 | 后（已有别名保留）
+    return { changes, cursorTo: pipeAt + 1 + delta, nextStage: null }
+  }
+  changes.push({ from: targetEnd, to: targetEnd, insert: '|' })
+  return { changes, cursorTo: targetEnd + 1 + delta, nextStage: null }
 }
+
+//#endregion

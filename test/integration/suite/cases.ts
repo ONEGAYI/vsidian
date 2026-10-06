@@ -16620,4 +16620,119 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(doc.isDirty, '第二次确认后文档仍应 dirty')
     await doc.save()
   }],
+  // ---- #378 T03 双链联想：目标区重编辑、#／^／| 转阶段与输入仲裁 ----
+  ['双链联想：#／^／| 转阶段占位、| 进显示文字、撤销分段与零文本动作（#378 T03）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('联想目录/联想来源.md')
+    await waitSessionReady('联想目录/联想来源.md')
+    const uri = wsUri('联想目录/联想来源.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('联想目录/联想来源.md'))
+    // T01 用例先跑并在本文档留下确认产物——先经外部链路重置回基线文本
+    if (doc.getText() !== '来源正文\n') {
+      const reset = new vscode.WorkspaceEdit()
+      reset.replace(doc.uri, new vscode.Range(0, 0, doc.lineCount, 0), '来源正文\n')
+      await vscode.workspace.applyEdit(reset)
+    }
+    await poll('T03 基线文本就绪', () => doc.getText() === '来源正文\n' ? true : undefined)
+    // 打开面板在重置之后（面板装载最新权威文本）
+
+    const typeText = async (text: string) => {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text })
+    }
+    const pressKey = async (key: string) => {
+      // #378 T03：单字符 key（#／^／|）经同一 keymap 链派发（table.test.key
+      // 钩子透传）；枚举键沿用 T01 同款通道
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key })
+    }
+    const suggestPaint = async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
+      return v.paint?.wikilinkSuggest
+    }
+    const sessionEdits = async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, wsUri('联想目录/联想来源.md').toString())) as SessionState
+      return s.appliedEdits
+    }
+
+    // 新建双链并查询「同目」——高亮首项（同目录目标.md）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 5 })
+    await typeText('[')
+    await typeText('[')
+    await typeText('同')
+    await typeText('目')
+    await poll('同目查询自动高亮首项', async () => {
+      const s = await suggestPaint()
+      return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
+    })
+
+    // # 直接转标题占位：补全高亮文件、光标在 # 后、占位不可确认
+    await pressKey('#')
+    const afterHash = '来源正文\n[[同目录目标.md#]]'
+    await poll('# 转阶段补全文件并加 #', () => doc.getText() === afterHash ? true : undefined)
+    const headingPaint = await poll('# 后标题占位浮层（绘制层可见）', async () => {
+      const s = await suggestPaint()
+      return s && s.itemCount === 0 && s.visible && s.statusText && /输入小标题|Type a heading/.test(s.statusText) ? s : undefined
+    })
+    assert(headingPaint !== undefined, '标题占位浮层应可见')
+    const selectionAfterHash = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
+    assert(selectionAfterHash === '来源正文\n[[同目录目标.md#'.length, `# 转阶段后光标在 # 后，实际 ${selectionAfterHash}`)
+
+    // 占位阶段方向键落穿移动光标：零文本动作不产生任何写回（appliedEdits
+    // 不增、文本不变）；光标移出锚点字段后占位关闭（移出目标字段语义）
+    const editsBeforeArrow = await sessionEdits()
+    await pressKey('down')
+    await pressKey('up')
+    await poll('方向键落穿后候选关闭（光标移出锚点字段）', async () => (await suggestPaint()) === undefined ? true : undefined)
+    assert(await sessionEdits() === editsBeforeArrow, '占位下方向键零写回（appliedEdits 不增）')
+    assert(doc.getText() === afterHash, '占位下方向键零文本')
+
+    // ^ 转块占位：已有 # 不重复补，只补 ^——先在锚点字段重开占位会话
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: afterHash.length - 2 })
+    await typeText('x')
+    await pressKey('backspace')
+    await poll('标题占位重开', async () => {
+      const s = await suggestPaint()
+      return s && s.visible ? s : undefined
+    })
+    await pressKey('^')
+    const afterCaret = '来源正文\n[[同目录目标.md#^]]'
+    await poll('^ 转块占位（已有 # 只补 ^）', () => doc.getText() === afterCaret ? true : undefined)
+    const blockPaint = await poll('^ 后块占位浮层', async () => {
+      const s = await suggestPaint()
+      return s && s.visible && s.statusText && /输入块 ID|Type a block ID/.test(s.statusText) ? s : undefined
+    })
+    assert(blockPaint !== undefined, '块占位浮层应可见')
+
+    // | 进显示文字：锚点保留、| 落在锚点末、显示文字留空、关闭候选
+    await pressKey('|')
+    const afterPipe = '来源正文\n[[同目录目标.md#^|]]'
+    await poll('| 进显示文字（锚点保留、| 在锚点末）', () => doc.getText() === afterPipe ? true : undefined)
+    const selectionAfterPipe = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
+    assert(selectionAfterPipe === afterPipe.length - 2, `| 后光标在 | 后（闭围栏前），实际 ${selectionAfterPipe}`)
+    await poll('| 后候选关闭', async () => (await suggestPaint()) === undefined ? true : undefined)
+
+    // 撤销分段：| 是一笔宿主撤销记录——一次 undo 恢复到块占位文本
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销 | 恢复块占位文本', () => doc.getText() === afterCaret ? true : undefined)
+
+    // 外部更新不重开：块占位重开后，宿主 WorkspaceEdit 直接改文档（另一编辑
+    // 视角的正文变更）——候选关闭、无误写
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: afterCaret.length - 2 })
+    await typeText('x')
+    await pressKey('backspace')
+    await poll('块占位重开', async () => {
+      const s = await suggestPaint()
+      return s && s.visible ? s : undefined
+    })
+    const externalEdit = new vscode.WorkspaceEdit()
+    externalEdit.insert(doc.uri, new vscode.Position(0, 0), '外部改动 ')
+    await vscode.workspace.applyEdit(externalEdit)
+    await poll('外部更新后候选关闭', async () => (await suggestPaint()) === undefined ? true : undefined)
+    assert(doc.getText().startsWith('外部改动 来源正文'), '外部更新已应用')
+    // 收尾清理外部改动（恢复 fixture；走同一外部链路）后保存
+    const cleanup = new vscode.WorkspaceEdit()
+    cleanup.delete(doc.uri, new vscode.Range(0, 0, 0, '外部改动 '.length))
+    await vscode.workspace.applyEdit(cleanup)
+    await poll('清理外部改动', () => doc.getText() === afterCaret ? true : undefined)
+    await doc.save()
+  }],
 ]

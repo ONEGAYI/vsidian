@@ -1,8 +1,15 @@
-// 双链文件字段识别器单测（#376 T01）：闭合空双链 [[]] / ![[]]、文件前缀
-// 输入、别名/锚点字段边界与残缺形态降级。识别器是新增局部逻辑——既有
-// 完整渲染解析器（wikilink.ts）的命中集合不因本模块扩大（对照断言）。
+// 双链文件字段识别器单测（#376 T01；#378 T03 扩展阶段化识别与编辑计划）：
+// 闭合空双链 [[]] / ![[]]、文件前缀输入、别名/锚点字段边界与残缺形态降级。
+// 识别器是新增局部逻辑——既有完整渲染解析器（wikilink.ts）的命中集合不因
+// 本模块扩大（对照断言）。T03 增补：锚点字段（# 标题 / #^ 块）阶段识别，
+// 与 #／^／| 转阶段、Enter/Tab 确认的编辑计划纯函数矩阵。
 import { describe, expect, it } from 'vitest'
-import { findWikilinkFileField } from '../../src/shared/wikilinkField'
+import {
+  findWikilinkFileField,
+  findWikilinkTargetField,
+  planWikilinkFieldEdit,
+  type WikilinkTargetField,
+} from '../../src/shared/wikilinkField'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../../src/shared/wikilink'
 
 /** 便于断言：返回 {embed, openFrom, fieldFrom, fieldTo, closeFrom} 简写 */
@@ -113,5 +120,238 @@ describe('识别器不放宽既有完整渲染解析器', () => {
     const line = '[[a]] ![[b.png]]'
     expect(scanWikilinksInLine(line)).toHaveLength(1)
     expect(scanEmbedsInLine(line)).toHaveLength(1)
+  })
+})
+
+// ---- #378 T03：阶段化目标字段识别（文件 / 标题锚点 / 块锚点）----
+
+/** 简写：行内 col 处的阶段化识别 */
+const target = (line: string, col: number) => findWikilinkTargetField(line, col)
+
+describe('findWikilinkTargetField（锚点字段阶段识别）', () => {
+  it('空锚点 # 后光标为标题阶段', () => {
+    expect(target('[[#]]', 3)).toMatchObject({
+      stage: 'heading', embed: false, openFrom: 0, innerFrom: 2,
+      hashAt: 2, anchorFrom: 3, anchorTo: 3, pipeAt: -1, closeFrom: 3,
+    })
+  })
+
+  it('空锚点 #^ 后光标为块阶段；# 与 ^ 之间仍是标题阶段', () => {
+    expect(target('[[#^]]', 4)).toMatchObject({ stage: 'block', hashAt: 2, anchorFrom: 4 })
+    expect(target('[[#^]]', 3)).toMatchObject({ stage: 'heading', hashAt: 2, anchorFrom: 3 })
+  })
+
+  it('块 ID 中部光标仍是块阶段', () => {
+    expect(target('[[#^abc]]', 7)).toMatchObject({ stage: 'block' })
+  })
+
+  it('标题字段中部与字段末端（| 左边界）均为标题阶段', () => {
+    expect(target('[[A#H|B]]', 4)).toMatchObject({ stage: 'heading', hashAt: 3, anchorFrom: 4, anchorTo: 5, pipeAt: 5 })
+    expect(target('[[A#H|B]]', 5)).toMatchObject({ stage: 'heading' })
+  })
+
+  it('标题字段内无 |：anchorTo 落在闭围栏前', () => {
+    expect(target('[[A#H]]', 5)).toMatchObject({ stage: 'heading', anchorTo: 5, pipeAt: -1, closeFrom: 5 })
+  })
+
+  it('已有锚点标记时光标在 # 左边界（含）之前仍是文件阶段', () => {
+    expect(target('[[A#H]]', 3)).toMatchObject({ stage: 'file', fileTo: 3, hashAt: 3 })
+    expect(target('[[A#H|B]]', 2)).toMatchObject({ stage: 'file', fileTo: 3 })
+  })
+
+  it('显示文字区（| 右侧）与 | 后的 # 均不命中', () => {
+    expect(target('[[A|B]]', 6)).toBeNull()
+    expect(target('[[A|B#C]]', 7)).toBeNull()
+  })
+
+  it('锚点内第二个 # 属标题文字（首个 # 为标记），嵌入前缀同构', () => {
+    expect(target('[[A#B#C]]', 7)).toMatchObject({ stage: 'heading', hashAt: 3 })
+    expect(target('![[A#^i]]', 7)).toMatchObject({ stage: 'block', embed: true, openFrom: 0, innerFrom: 3 })
+  })
+
+  it('残缺与未闭合沿用 T01 守卫（锚点字段同样不命中）', () => {
+    expect(target('[[A#', 4)).toBeNull()
+    expect(target('[[A#[b]]', 6)).toBeNull()
+    expect(target('[[A#H]]', 6)).toBeNull() // 闭合之后
+  })
+})
+
+// ---- #378 T03：转阶段与确认编辑计划（行内坐标；¦ 表示光标）----
+
+const FANGAN = { insertPath: '../资料/方案.md', alias: '方案' }
+
+/** 便于断言：把计划应用到行文本并给出新光标位置（¦ 标记） */
+function applyPlan(line: string, plan: { changes: Array<{ from: number; to: number; insert: string }>; cursorTo: number }): string {
+  let text = line
+  for (const change of [...plan.changes].sort((a, b) => b.from - a.from)) {
+    text = text.slice(0, change.from) + change.insert + text.slice(change.to)
+  }
+  return `${text.slice(0, plan.cursorTo)}¦${text.slice(plan.cursorTo)}`
+}
+
+/** 从行文本与光标取识别结果（计划矩阵输入同源单一事实源） */
+function fieldOf(line: string, col: number): WikilinkTargetField {
+  const field = findWikilinkTargetField(line, col)
+  if (!field) {
+    throw new Error(`识别失败: ${line}@${col}`)
+  }
+  return field
+}
+
+describe('planWikilinkFieldEdit：Enter/Tab 确认（文件字段整体替换）', () => {
+  it('[[A¦a|B]]：替换完整 Aa、原样保留 B、光标在分隔符前', () => {
+    const line = '[[Aa|B]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), 'confirm', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md¦|B]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('[[A¦#H]]：锚点保留在 | 前，无分隔符补默认别名，光标在锚点末尾', () => {
+    const line = '[[A#H]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), 'confirm', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md#H¦|方案]]')
+  })
+
+  it('[[A#^id|B¦]] 目标侧光标位（#^id|B 之前）：已有别名不覆盖、块锚点保留', () => {
+    const line = '[[A#^id|B]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), 'confirm', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md#^id¦|B]]')
+  })
+
+  it('[[A¦]]：无锚点无分隔符——插入相对路径|默认别名，光标在 | 前（T01 兼容）', () => {
+    const line = '[[A]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), 'confirm', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md¦|方案]]')
+  })
+
+  it('confirm 仅文件阶段有效：标题/块阶段或缺高亮项返回 null', () => {
+    expect(planWikilinkFieldEdit(fieldOf('[[A#H]]', 5), 'confirm', 5, FANGAN)).toBeNull()
+    expect(planWikilinkFieldEdit(fieldOf('[[A]]', 3), 'confirm', 3, null)).toBeNull()
+  })
+})
+
+describe('planWikilinkFieldEdit：# 转标题阶段', () => {
+  it('有高亮：补全文件并加 #，光标在 # 后', () => {
+    const line = '[[方]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md#¦]]')
+    expect(plan!.nextStage).toBe('heading')
+  })
+
+  it('无高亮：不补文件名，保留原输入加 #（空目标占位）', () => {
+    const line = '[[方]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[方#¦]]')
+    expect(plan!.nextStage).toBe('heading')
+  })
+
+  it('光标在目标中部且无高亮：保留完整目标，# 落在字段末（右侧文字不残留）', () => {
+    // [[A¦a]]：col=3 在 A 与 a 之间
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[Aa#¦]]')
+  })
+
+  it('已有锚点标记：不重复插 #，光标跳到锚点起点', () => {
+    const line = '[[A#H]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#¦H]]')
+    const withItem = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, FANGAN)
+    expect(applyPlan(line, withItem!)).toBe('[[../资料/方案.md#¦H]]')
+  })
+
+  it('已有 |：# 插在锚点位置（| 之前），显示文字保留', () => {
+    const line = '[[A|B]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#¦|B]]')
+  })
+
+  it('非文件阶段按 # 返回 null（标题/块阶段落穿）', () => {
+    expect(planWikilinkFieldEdit(fieldOf('[[A#H]]', 5), '#', 5, null)).toBeNull()
+    expect(planWikilinkFieldEdit(fieldOf('[[A#^]]', 5), '#', 5, null)).toBeNull()
+  })
+})
+
+describe('planWikilinkFieldEdit：^ 转块阶段', () => {
+  it('文件阶段无 #：一次形成 #^ 语法，光标在 ^ 后', () => {
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 4), '^', 4, null)
+    expect(applyPlan(line, plan!)).toBe('[[Aa#^¦]]')
+    expect(plan!.nextStage).toBe('block')
+  })
+
+  it('文件阶段有高亮：补全文件再形成 #^', () => {
+    const line = '[[方]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '^', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md#^¦]]')
+  })
+
+  it('文件阶段已有锚点标记（光标在 # 前）：不重复补 #，只补 ^', () => {
+    const line = '[[A#B]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '^', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#^¦B]]')
+  })
+
+  it('标题阶段（空锚点）：光标处补 ^ 得 #^，光标在 ^ 后', () => {
+    const line = '[[A#]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 4), '^', 4, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#^¦]]')
+    expect(plan!.nextStage).toBe('block')
+  })
+
+  it('标题阶段锚点中部：^ 插在光标处（用户显式输入，保留两侧锚点文字）', () => {
+    const line = '[[A#H]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 4), '^', 4, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#^¦H]]')
+  })
+
+  it('块阶段按 ^ 返回 null（不接管）', () => {
+    expect(planWikilinkFieldEdit(fieldOf('[[A#^]]', 5), '^', 5, null)).toBeNull()
+  })
+
+  it('空目标按 ^：不写占位词，只形成可继续手写的空块字段', () => {
+    const line = '[[]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 2), '^', 2, null)
+    expect(applyPlan(line, plan!)).toBe('[[#^¦]]')
+  })
+})
+
+describe('planWikilinkFieldEdit：| 进显示文字', () => {
+  it('有高亮：补全目标后加 |，显示文字留空等待手动输入（新链接）', () => {
+    // [[方案.md¦]]：col=7 在 ] 前
+    const line = '[[方案.md]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 7), '|', 7, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[../资料/方案.md|¦]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('无高亮：保留原输入（含光标右侧文字），| 落在目标区末', () => {
+    // [[A¦a]]：col=3 在 A 与 a 之间
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '|', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[Aa|¦]]')
+  })
+
+  it('已有 |：不重复插入，光标跳到已有分隔符后（已有别名保留）', () => {
+    const line = '[[Aa|B]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 4), '|', 4, null)
+    expect(applyPlan(line, plan!)).toBe('[[Aa|¦B]]')
+    expect(plan!.changes).toHaveLength(0)
+    const withItem = planWikilinkFieldEdit(fieldOf(line, 3), '|', 3, FANGAN)
+    expect(applyPlan(line, withItem!)).toBe('[[../资料/方案.md|¦B]]')
+  })
+
+  it('标题阶段按 |：无高亮保留锚点，| 在锚点区末（或复用已有 |）', () => {
+    const line = '[[Aa#H]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 6), '|', 6, null)
+    expect(applyPlan(line, plan!)).toBe('[[Aa#H|¦]]')
+    const piped = planWikilinkFieldEdit(fieldOf('[[Aa#H|B]]', 6), '|', 6, null)
+    expect(applyPlan('[[Aa#H|B]]', piped!)).toBe('[[Aa#H|¦B]]')
+  })
+
+  it('块阶段按 |：同标题口径', () => {
+    const line = '[[A#^id]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 7), '|', 7, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#^id|¦]]')
   })
 })

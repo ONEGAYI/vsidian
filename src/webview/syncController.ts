@@ -2825,13 +2825,16 @@ export class WebviewSyncController {
       }
       case 'table.test.key': {
         // 测试钩子：向真实编辑器派发 keydown，走用户按键的同一 keymap 链路。
+        // #378 T03：任意单字符 key（'#'／'^'／'|' 等）原样透传——驱动候选
+        // 会话的字符键（转阶段）经同一 keymap 优先级链。
         if (this.view) {
+          const mapped: Record<string, string> = {
+            'select-all': 'a', backspace: 'Backspace', delete: 'Delete', enter: 'Enter',
+            down: 'ArrowDown', up: 'ArrowUp', escape: 'Escape', tab: 'Tab', 'shift-tab': 'Tab',
+          }
           this.view.contentDOM.dispatchEvent(
             new KeyboardEvent('keydown', {
-              key: message.key === 'select-all' ? 'a' : message.key === 'backspace' ? 'Backspace'
-                : message.key === 'delete' ? 'Delete' : message.key === 'enter' ? 'Enter'
-                : message.key === 'down' ? 'ArrowDown' : message.key === 'up' ? 'ArrowUp'
-                : message.key === 'escape' ? 'Escape' : 'Tab',
+              key: mapped[message.key] ?? message.key,
               ctrlKey: message.key === 'select-all',
               shiftKey: message.key === 'shift-tab',
               bubbles: true,
