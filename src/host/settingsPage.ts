@@ -24,6 +24,7 @@ import type { CssSnippetState } from '../shared/cssSnippets'
 import type { IndexStateMessage } from './vaultIndexMaintenance'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import type { EditorGuardWiring } from './editorGuardWiring'
+import type { AddonPageWiring } from './addons/addonWiring'
 
 /** #128 CSS 片段管理接线（extension.ts 注入）：设置页面板的片段消息处理
  *  与状态推送。目录选择对话框（chooseDirectory）经回调进宿主 vscode 层——
@@ -109,6 +110,11 @@ export interface SettingsPageHandle {
    */
   notifyDefaultEditorChanged(): void
   /**
+   * #350 T01 附加组件：协调器状态变化后向已开设置页发 addons.state
+   * （面板未开时 no-op——重开经 addons.get 重新拉取权威状态回显）
+   */
+  notifyAddonsChanged(): void
+  /**
    * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
    * 面板未 ready 时在握手完成后补发（webview 装载是异步的）。
    * #231：entry 可选——分页内进一步定位的条目 id（外观分页按条目归属
@@ -133,6 +139,9 @@ export function createSettingsPage(
   /** #323 默认编辑器守护接线（extension.ts 注入 createEditorGuardWiring
    *  产物）：设置页常规页「默认编辑器」委托组的状态拉取与手动改回 */
   editorGuard?: EditorGuardWiring,
+  /** #350 T01 附加组件接线（extension.ts 注入 createAddonWiring 产物）：
+   *  设置页「附加组件」分页的状态拉取与 VSCode 管理入口 */
+  addons?: AddonPageWiring,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
@@ -292,6 +301,25 @@ export function createSettingsPage(
         // 手动「设为默认」：守护修复链路（合并写回 + 复查 + 失败降级引导）；
         // 结果经 defaultEditor.state 推送与宿主通知呈现，不逐次应答
         void editorGuard?.fixNow()
+        return
+      case 'addons.get':
+        // #350 T01 附加组件状态拉取（设置页装载/重载的 ready 回填）
+        if (addons) {
+          ready = true
+          void current?.webview.postMessage(addons.getState())
+        }
+        return
+      case 'addons.openSearch':
+        // 市场搜索入口（关键词仅搜索辅助）；结果在 VSCode 扩展视图呈现
+        addons?.openSearch()
+        return
+      case 'addons.openExtensionsView':
+        // VSCode 扩展管理入口（安装/卸载/整扩展禁用由 VSCode 管理）
+        addons?.openExtensionsView()
+        return
+      case 'addons.openExtension':
+        // 打开某组件的 VSCode 扩展详情页
+        addons?.openExtension(message.extensionId)
         return
       case 'index.setPatterns':
         // 结果（含被拒项回显）经 notifyIndexChanged 的 index.state 推送
@@ -471,6 +499,14 @@ export function createSettingsPage(
         kind: 'defaultEditor.state',
         ...editorGuard.stateFor(),
       })
+    },
+    // #350 T01 附加组件状态推送（协调器 onStateChanged → extension.ts 接线）：
+    // 面板未开时 no-op（重开经 addons.get 重新拉取）
+    notifyAddonsChanged: () => {
+      if (!panel || !addons) {
+        return
+      }
+      void panel.webview.postMessage(addons.getState())
     },
   }
 }

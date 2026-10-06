@@ -12,6 +12,7 @@ import { sanitizeFindOptions, type FindOptions } from './findOptions'
 import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
 import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
+import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -914,6 +915,22 @@ export type HostToWebview =
    *  （associations 配置变更、fixNow 修复）后经 notifyDefaultEditorChanged
    *  推送。守护开关值不经本消息（随 settings.snapshot/changed 回显）。 */
   | { kind: 'defaultEditor.state' } & DefaultEditorDisplayState
+  /** #350 T01 附加组件状态（宿主权威）：设置页「附加组件」分页消费；
+   *  apiVersion 为宿主当前提供的稳定 API 版本（首个候选 1.0.0）；draft
+   *  恒为 true——API 形状仍是草案，未发布。设置页经 addons.get 拉取；
+   *  协调器状态变化后经 notifyAddonsChanged 推送 */
+  | { kind: 'addons.state' } & AddonsStatePayload
+
+/** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
+ * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
+export interface AddonsStatePayload {
+  /** 宿主当前提供的稳定 API 版本（首个候选 1.0.0） */
+  apiVersion: string
+  /** API 形状仍是草案、未发布——呈现层据此标注，不冒充已发布契约 */
+  draft: true
+  /** 发现/注册协调合并后的组件状态列表（官方在前，其余按 ID 排序） */
+  addons: readonly AddonStatusEntry[]
+}
 
 /** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
  *  面板 send 出站的编辑通道子集——与根面板同构的同步语义（init 装载 /
@@ -1774,6 +1791,17 @@ export type WebviewToHost =
    *  引导）；结果经 defaultEditor.state 推送（状态行更新为 Vsidian）与宿主
    *  通知呈现，不逐次应答 */
   | { kind: 'defaultEditor.fix' }
+  /** #350 T01 附加组件状态拉取（设置页「附加组件」分页装载/重载时）：
+   *  宿主以 addons.state 应答；协调器状态变化后亦经同款消息推送 */
+  | { kind: 'addons.get' }
+  /** #350 T01 在 VSCode 市场搜索附加组件（关键词 vsidian-addon 仅搜索
+   *  辅助）：宿主执行 workbench.extensions.search 打开扩展视图搜索 */
+  | { kind: 'addons.openSearch' }
+  /** #350 T01 打开 VSCode 扩展管理视图（安装/卸载/整扩展禁用继续由
+   *  VSCode 管理——本插件不建内部安装器） */
+  | { kind: 'addons.openExtensionsView' }
+  /** #350 T01 打开某组件在 VSCode 的扩展详情页（VSCode 管理入口） */
+  | { kind: 'addons.openExtension'; extensionId: string }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -4190,7 +4218,12 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'wordSegment.delete':
     case 'defaultEditor.get':
     case 'defaultEditor.fix':
+    case 'addons.get':
+    case 'addons.openSearch':
+    case 'addons.openExtensionsView':
       return true
+    case 'addons.openExtension':
+      return isString(v.extensionId)
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
         (v.detail === undefined || isString(v.detail))
@@ -5014,6 +5047,15 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.viewType === null || isString(v.viewType)) &&
         (v.label === null || isString(v.label))
       )
+    case 'addons.state':
+      // #350 T01 附加组件状态：apiVersion/draft 恒真标记 + 列表条目形态
+      // （AddonStatusEntry 单一事实源在 shared/addonIdentity）
+      return (
+        isString(v.apiVersion) &&
+        v.draft === true &&
+        Array.isArray(v.addons) &&
+        v.addons.every(isAddonStatusEntry)
+      )
     default:
       return false
   }
@@ -5045,6 +5087,30 @@ const DEFAULT_EDITOR_DISPLAY_STATUSES = ['vsidian', 'builtin', 'other', 'none'] 
 function isDefaultEditorDisplayStatus(v: unknown): v is DefaultEditorDisplayStatus {
   return typeof v === 'string' &&
     (DEFAULT_EDITOR_DISPLAY_STATUSES as readonly string[]).includes(v)
+}
+
+/** #350 T01 附加组件状态条目形态守卫（单一事实源 shared/addonIdentity） */
+const ADDON_STATUS_KINDS: readonly AddonStatusKind[] = [
+  'registered', 'activating', 'awaiting-registration', 'incompatible',
+  'activation-failed', 'host-unavailable', 'invalid-declaration',
+]
+
+function isAddonStatusKind(v: unknown): v is AddonStatusKind {
+  return typeof v === 'string' && (ADDON_STATUS_KINDS as readonly string[]).includes(v)
+}
+
+function isAddonStatusEntry(v: unknown): v is AddonStatusEntry {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    isString(v.id) &&
+    isString(v.label) &&
+    typeof v.official === 'boolean' &&
+    isAddonStatusKind(v.status) &&
+    (v.detail === undefined || isString(v.detail)) &&
+    (v.apiRange === undefined || isString(v.apiRange))
+  )
 }
 
 /** #197 反链条目载荷形态守卫（新字段可选：旧宿主快照缺省容忍） */

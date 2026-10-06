@@ -26,9 +26,10 @@ import { createIndexMaintenance, createIndexSettingsStore, initialExcludePattern
 import { createJiebaWiring } from './host/jiebaResourceWiring'
 import { createEditorGuardWiring } from './host/editorGuardWiring'
 import { createFindOptionsStore } from './host/findOptionsStore'
+import { createAddonWiring, type VsidianAddonExports } from './host/addons/addonWiring'
 import { t } from './shared/i18n'
 
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): VsidianAddonExports {
   // 设置存储：context.globalState（用户级，跨窗口一致、重启保留）+ 纯代码
   // schema——不使用 workspace.getConfiguration、不声明 contributes.
   // configuration，与 VSCode 统一设置中心完全解耦（AGENTS.md「插件设置入口」）
@@ -87,6 +88,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // host.defaultEditor* 词条，_test 钩子在 wiring 内门控注册。#323 起设置页
   // 常规页「默认编辑器」委托组消费其 stateFor/fixNow（下方传参接线）
   const editorGuard = createEditorGuardWiring(context, settingsService)
+  // #350 T01 附加组件：注册表 + 发现协调 + 公开 registerAddon 导出。
+  // start() 内部 fire-and-forget（先订阅 extensions.onDidChange 再扫描；
+  // 协调先等自身 API 公布——不被下方 activate 返回等待，无互等）
+  const addons = createAddonWiring(context)
   const settingsPage = createSettingsPage(
     context,
     settingsService,
@@ -100,11 +105,15 @@ export function activate(context: vscode.ExtensionContext): void {
     jieba,
     // #323 默认编辑器守护：设置页常规页「默认编辑器」委托组的状态与手动改回
     editorGuard,
+    // #350 T01 附加组件：设置页「附加组件」分页的状态与 VSCode 管理入口
+    addons.page,
   )
   indexMaintenance.onStateChanged(() => settingsPage.notifyIndexChanged())
   jieba.service.onStateChanged(() => settingsPage.notifyWordSegmentChanged())
   // #323 生效判定变化（associations 变更 / 手动改回）→ 设置页状态行推送
   editorGuard.service.onStateChanged(() => settingsPage.notifyDefaultEditorChanged())
+  // #350 T01 附加组件：协调器状态变化（发现/唤醒/注册）→ 设置页 addons.state 推送
+  addons.onStateChanged(() => settingsPage.notifyAddonsChanged())
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,
@@ -115,6 +124,8 @@ export function activate(context: vscode.ExtensionContext): void {
   }, snippetService, vaultIndex, indexMaintenance, jieba)
   // F13：停用收尾接线（deactivate 返回其 Promise）
   providerDispose = () => provider.dispose()
+  // #350 T01：启动附加组件发现协调（fire-and-forget，不阻塞激活返回）
+  addons.start()
   void snippetService.initialize()
   if (vaultIndex) {
     // 后台初始化（不阻塞激活）；#198 根增删与窗口焦点由下方订阅接线
@@ -205,7 +216,12 @@ export function activate(context: vscode.ExtensionContext): void {
           t('host.indexCleanupDone', { count: String(result.removedDirs) }))
       })),
     snippetService,
+    // #350 T01 附加组件：停用收尾（退订清单变化与注册表联动）
+    addons,
   )
+  // #350 T01：原生激活完成后经返回值公布附加组件 API（apiVersion 1.0.0
+  // 为首个候选版本——草案，未发布；组件经 exports.registerAddon 接入）
+  return addons.exports
 }
 
 /** 停用收尾（F13）：provider.dispose 驱动块 ID 协调器全量退役——未落地
