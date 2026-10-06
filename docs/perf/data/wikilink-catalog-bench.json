@@ -1,0 +1,619 @@
+{
+  "meta": {
+    "date": "2026-10-06T08:35:18.897Z",
+    "node": "v24.15.0",
+    "platform": "win32 x64",
+    "cpuModel": "AMD Ryzen 7 9700X 8-Core Processor             ",
+    "corpusRoot": "D:/CODE/Project/_ForExplore/vsidian-382-bench",
+    "tiers": [
+      "1k",
+      "10k",
+      "100k"
+    ],
+    "queryWallRounds": 25,
+    "queryStarveRounds": 3,
+    "methods": {
+      "runtime": "纯 Node 直驱生产 VaultIndexService（esbuild 编译单一事实源；端口为真实 node:fs，写盘为临时写+rename 原子提交）",
+      "coldRestore": "子进程重启（JS 堆/编译缓存冷；OS 文件缓存热——用户态无法清空，如实标注）；initialize 墙钟为激活感知，启动核验（#198 快照恢复后清单比对，含 listAllFiles+stat）后台执行不阻塞",
+      "eventLoop": "monitorEventLoopDelay 直方图 + 20ms 饿死探针（同步阻塞下直方图样本缺失）",
+      "event": "文件事件经 watchRoot 端口回调直驱（服务内去抖→三态判定→清单更新真实），OS watcher 传播延迟不在测量内；可见性以 maintenanceInfo 轮询（零查询污染）",
+      "typing": "逐字前缀序列 6 步，每步单独计墙钟",
+      "queries": "每查询 25 轮裸计墙钟取中位 + 3 轮饿死探针采样",
+      "cancel": "setExcludePatterns 双驱动（同轮 epoch 失配中止）验证覆盖重算可取消与终态一致",
+      "sentinel": "附件正文埋唯一哨兵字符串，扫描 catalog.json 确认不含附件全文"
+    }
+  },
+  "tiers": {
+    "1k": {
+      "corpus": {
+        "tier": "1k",
+        "files": 1000,
+        "mdCount": 550,
+        "assetCount": 200,
+        "otherCount": 250,
+        "assetBytes": 2287546,
+        "sentinel": "VSI382T07SENTINEL-1k-",
+        "genMs": 574,
+        "corpusDir": "D:\\CODE\\Project\\_ForExplore\\vsidian-382-bench\\1k",
+        "storageRoot": "D:\\CODE\\Project\\_ForExplore\\vsidian-382-bench\\storage-1k"
+      },
+      "firstBuild": {
+        "wallMs": 764.225,
+        "loopDelay": {
+          "meanMs": 10.640335238095238,
+          "p99Ms": 15.597567,
+          "maxMs": 16.179199,
+          "maxStarveMs": 11.6019
+        },
+        "memory": {
+          "rssBefore": 62771200,
+          "rssPeak": 86261760,
+          "heapUsedPeak": 24036200
+        },
+        "info": [
+          {
+            "catalogFileCount": 1000,
+            "catalogComplete": true,
+            "catalogScanning": false,
+            "hasData": true
+          }
+        ],
+        "portCounts": {
+          "listAllFiles": 3,
+          "listAllFilesReturned": 3000,
+          "listMarkdown": 3,
+          "readFileText": 2328,
+          "readFileTextBytes": 883997,
+          "statFile": 12045,
+          "accessOf": 2,
+          "storageReadFile": 1,
+          "storageReadBytes": 1144,
+          "storageWriteBytes": 311158,
+          "yieldCount": 551
+        },
+        "storageBytes": 257355,
+        "catalogJsonBytes": 52446
+      },
+      "sentinelCheck": "clean",
+      "queries": {
+        "empty": {
+          "query": "",
+          "rounds": 25,
+          "medianWallMs": 0.8757000000000517,
+          "maxWallMs": 1.8666000000000622,
+          "maxStarveMs": 14.83400000000006,
+          "totalMatches": 750,
+          "itemsCount": 50,
+          "payloadBytes": 17439
+        },
+        "short-cn": {
+          "query": "设计",
+          "rounds": 25,
+          "medianWallMs": 1.5516999999999825,
+          "maxWallMs": 3.679800000000114,
+          "maxStarveMs": 12.19380000000001,
+          "totalMatches": 49,
+          "itemsCount": 49,
+          "payloadBytes": 17834
+        },
+        "short-en": {
+          "query": "design",
+          "rounds": 25,
+          "medianWallMs": 3.150300000000243,
+          "maxWallMs": 6.679200000000037,
+          "maxStarveMs": 12.01220000000012,
+          "totalMatches": 88,
+          "itemsCount": 50,
+          "payloadBytes": 18520
+        },
+        "long": {
+          "query": "arch-review-meeting-notes",
+          "rounds": 25,
+          "medianWallMs": 5.741799999999785,
+          "maxWallMs": 8.077600000000075,
+          "maxStarveMs": 11.666200000000117,
+          "totalMatches": 0,
+          "itemsCount": 0,
+          "payloadBytes": 2
+        },
+        "multi-word": {
+          "query": "设计 meeting",
+          "rounds": 25,
+          "medianWallMs": 1.138800000000174,
+          "maxWallMs": 1.9338999999999942,
+          "maxStarveMs": 11.868600000000242,
+          "totalMatches": 1,
+          "itemsCount": 1,
+          "payloadBytes": 396
+        }
+      },
+      "typing": {
+        "steps": [
+          {
+            "query": "d",
+            "wallMs": 1.8838000000000648,
+            "total": 744,
+            "items": 50
+          },
+          {
+            "query": "de",
+            "wallMs": 2.530899999999747,
+            "total": 260,
+            "items": 50
+          },
+          {
+            "query": "des",
+            "wallMs": 2.4843000000000757,
+            "total": 88,
+            "items": 50
+          },
+          {
+            "query": "desi",
+            "wallMs": 3.0875999999998385,
+            "total": 88,
+            "items": 50
+          },
+          {
+            "query": "desig",
+            "wallMs": 3.961699999999837,
+            "total": 88,
+            "items": 50
+          },
+          {
+            "query": "design",
+            "wallMs": 5.1194000000000415,
+            "total": 88,
+            "items": 50
+          }
+        ],
+        "totalMs": 19.067699999999604
+      },
+      "fileEvent": {
+        "visibleMs": 863.9352999999996,
+        "removeVisibleMs": 872.6037999999999,
+        "timeoutMs": 30000
+      },
+      "cancelRework": {
+        "probeWaitMs": 60,
+        "firstPassMs": 68.69040000000041,
+        "secondPassMs": 665.7317000000003,
+        "finalCatalogCount": 1000,
+        "finalComplete": true,
+        "excludeReset": true
+      },
+      "finalMemory": {
+        "rss": 145592320,
+        "heapUsed": 40939496
+      },
+      "coldRestore": {
+        "rounds": [
+          {
+            "loadMs": 11.760400000000004,
+            "maxStarveMs": 11.642000000000024,
+            "heapPeak": 14395200,
+            "listAllFilesCalls": 1,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 1000
+          },
+          {
+            "loadMs": 12.299599999999998,
+            "maxStarveMs": 11.773200000000003,
+            "heapPeak": 16684480,
+            "listAllFilesCalls": 1,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 1000
+          },
+          {
+            "loadMs": 12.054299999999998,
+            "maxStarveMs": 11.26339999999999,
+            "heapPeak": 13437936,
+            "listAllFilesCalls": 1,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 1000
+          }
+        ],
+        "medianLoadMs": 12.054299999999998,
+        "medianMaxStarveMs": 11.642000000000024,
+        "restoredFromCache": true,
+        "catalogIntact": true
+      }
+    },
+    "10k": {
+      "corpus": {
+        "tier": "10k",
+        "files": 10000,
+        "mdCount": 5500,
+        "assetCount": 2000,
+        "otherCount": 2500,
+        "assetBytes": 23045224,
+        "sentinel": "VSI382T07SENTINEL-10k-",
+        "genMs": 4248,
+        "corpusDir": "D:\\CODE\\Project\\_ForExplore\\vsidian-382-bench\\10k",
+        "storageRoot": "D:\\CODE\\Project\\_ForExplore\\vsidian-382-bench\\storage-10k"
+      },
+      "firstBuild": {
+        "wallMs": 6992.1726,
+        "loopDelay": {
+          "meanMs": 10.202327347639484,
+          "p99Ms": 15.491071,
+          "maxMs": 53.247999,
+          "maxStarveMs": 42.15380000000005
+        },
+        "memory": {
+          "rssBefore": 157614080,
+          "rssPeak": 266711040,
+          "heapUsedPeak": 140831232
+        },
+        "info": [
+          {
+            "catalogFileCount": 10000,
+            "catalogComplete": true,
+            "catalogScanning": false,
+            "hasData": true
+          }
+        ],
+        "portCounts": {
+          "listAllFiles": 3,
+          "listAllFilesReturned": 30000,
+          "listMarkdown": 3,
+          "readFileText": 22482,
+          "readFileTextBytes": 8624421,
+          "statFile": 114369,
+          "accessOf": 2,
+          "storageReadFile": 1,
+          "storageReadBytes": 1168,
+          "storageWriteBytes": 3679898,
+          "yieldCount": 5002
+        },
+        "storageBytes": 2631303,
+        "catalogJsonBytes": 523618
+      },
+      "sentinelCheck": "clean",
+      "queries": {
+        "empty": {
+          "query": "",
+          "rounds": 25,
+          "medianWallMs": 2.6129000000000815,
+          "maxWallMs": 5.107899999999063,
+          "maxStarveMs": 12.906999999999243,
+          "totalMatches": 7500,
+          "itemsCount": 50,
+          "payloadBytes": 17574
+        },
+        "short-cn": {
+          "query": "设计",
+          "rounds": 25,
+          "medianWallMs": 9.724899999997433,
+          "maxWallMs": 15.897100000001956,
+          "maxStarveMs": 12.776099999999133,
+          "totalMatches": 435,
+          "itemsCount": 50,
+          "payloadBytes": 17562
+        },
+        "short-en": {
+          "query": "design",
+          "rounds": 25,
+          "medianWallMs": 26.10580000000118,
+          "maxWallMs": 29.96020000000135,
+          "maxStarveMs": 14.708699999999226,
+          "totalMatches": 819,
+          "itemsCount": 50,
+          "payloadBytes": 18840
+        },
+        "long": {
+          "query": "arch-review-meeting-notes",
+          "rounds": 25,
+          "medianWallMs": 54.634900000000926,
+          "maxWallMs": 62.024499999999534,
+          "maxStarveMs": 43.468300000000454,
+          "totalMatches": 0,
+          "itemsCount": 0,
+          "payloadBytes": 2
+        },
+        "multi-word": {
+          "query": "设计 meeting",
+          "rounds": 25,
+          "medianWallMs": 12.181300000000192,
+          "maxWallMs": 13.938100000003033,
+          "maxStarveMs": 11.355500000001484,
+          "totalMatches": 41,
+          "itemsCount": 41,
+          "payloadBytes": 16227
+        }
+      },
+      "typing": {
+        "steps": [
+          {
+            "query": "d",
+            "wallMs": 6.59690000000046,
+            "total": 7323,
+            "items": 50
+          },
+          {
+            "query": "de",
+            "wallMs": 9.523600000000442,
+            "total": 2489,
+            "items": 50
+          },
+          {
+            "query": "des",
+            "wallMs": 12.502400000001217,
+            "total": 819,
+            "items": 50
+          },
+          {
+            "query": "desi",
+            "wallMs": 18.780800000000454,
+            "total": 819,
+            "items": 50
+          },
+          {
+            "query": "desig",
+            "wallMs": 23.7484000000004,
+            "total": 819,
+            "items": 50
+          },
+          {
+            "query": "design",
+            "wallMs": 27.42740000000049,
+            "total": 819,
+            "items": 50
+          }
+        ],
+        "totalMs": 98.57950000000346
+      },
+      "fileEvent": {
+        "visibleMs": 860.3773000000001,
+        "removeVisibleMs": 872.8652000000002,
+        "timeoutMs": 30000
+      },
+      "cancelRework": {
+        "probeWaitMs": 200,
+        "firstPassMs": 257.21649999999863,
+        "secondPassMs": 7128.752099999998,
+        "finalCatalogCount": 10000,
+        "finalComplete": true,
+        "excludeReset": true
+      },
+      "finalMemory": {
+        "rss": 304287744,
+        "heapUsed": 98071280
+      },
+      "coldRestore": {
+        "rounds": [
+          {
+            "loadMs": 50.3925,
+            "maxStarveMs": 14.321300000000008,
+            "heapPeak": 43384832,
+            "listAllFilesCalls": 0,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 10000
+          },
+          {
+            "loadMs": 52.97659999999999,
+            "maxStarveMs": 16.938799999999986,
+            "heapPeak": 43265576,
+            "listAllFilesCalls": 0,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 10000
+          },
+          {
+            "loadMs": 44.443,
+            "maxStarveMs": 17.9598,
+            "heapPeak": 51137456,
+            "listAllFilesCalls": 0,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 10000
+          }
+        ],
+        "medianLoadMs": 50.3925,
+        "medianMaxStarveMs": 16.938799999999986,
+        "restoredFromCache": true,
+        "catalogIntact": true
+      }
+    },
+    "100k": {
+      "corpus": {
+        "tier": "100k",
+        "files": 100000,
+        "mdCount": 55000,
+        "assetCount": 20000,
+        "otherCount": 25000,
+        "assetBytes": 229017633,
+        "sentinel": "VSI382T07SENTINEL-100k-",
+        "genMs": 42496,
+        "corpusDir": "D:\\CODE\\Project\\_ForExplore\\vsidian-382-bench\\100k",
+        "storageRoot": "D:\\CODE\\Project\\_ForExplore\\vsidian-382-bench\\storage-100k"
+      },
+      "firstBuild": {
+        "wallMs": 266981.8581,
+        "loopDelay": {
+          "meanMs": 11.490772610169492,
+          "p99Ms": 14.876671,
+          "maxMs": 460.324863,
+          "maxStarveMs": 450.05569999999716
+        },
+        "memory": {
+          "rssBefore": 331051008,
+          "rssPeak": 791162880,
+          "heapUsedPeak": 576296632
+        },
+        "info": [
+          {
+            "catalogFileCount": 100000,
+            "catalogComplete": true,
+            "catalogScanning": false,
+            "hasData": true
+          }
+        ],
+        "portCounts": {
+          "listAllFiles": 3,
+          "listAllFilesReturned": 300000,
+          "listMarkdown": 3,
+          "readFileText": 225255,
+          "readFileTextBytes": 86330121,
+          "statFile": 1096660,
+          "accessOf": 2,
+          "storageReadFile": 1,
+          "storageReadBytes": 4386,
+          "storageWriteBytes": 37167283,
+          "yieldCount": 47900
+        },
+        "storageBytes": 26688392,
+        "catalogJsonBytes": 5236893
+      },
+      "sentinelCheck": "clean",
+      "queries": {
+        "empty": {
+          "query": "",
+          "rounds": 25,
+          "medianWallMs": 42.39370000001509,
+          "maxWallMs": 53.964099999982864,
+          "maxStarveMs": 27.041399999987334,
+          "totalMatches": 75000,
+          "itemsCount": 50,
+          "payloadBytes": 17614
+        },
+        "short-cn": {
+          "query": "设计",
+          "rounds": 25,
+          "medianWallMs": 100.58200000005309,
+          "maxWallMs": 143.26400000002468,
+          "maxStarveMs": 88.5071000000462,
+          "totalMatches": 4072,
+          "itemsCount": 50,
+          "payloadBytes": 16781
+        },
+        "short-en": {
+          "query": "design",
+          "rounds": 25,
+          "medianWallMs": 248.11650000000373,
+          "maxWallMs": 293.30589999997756,
+          "maxStarveMs": 265.241399999999,
+          "totalMatches": 8234,
+          "itemsCount": 50,
+          "payloadBytes": 18879
+        },
+        "long": {
+          "query": "arch-review-meeting-notes",
+          "rounds": 25,
+          "medianWallMs": 516.0736000000034,
+          "maxWallMs": 602.1280999999726,
+          "maxStarveMs": 508.3635999999824,
+          "totalMatches": 0,
+          "itemsCount": 0,
+          "payloadBytes": 2
+        },
+        "multi-word": {
+          "query": "设计 meeting",
+          "rounds": 25,
+          "medianWallMs": 104.02820000000065,
+          "maxWallMs": 111.01520000002347,
+          "maxStarveMs": 88.81990000000224,
+          "totalMatches": 352,
+          "itemsCount": 50,
+          "payloadBytes": 19237
+        }
+      },
+      "typing": {
+        "steps": [
+          {
+            "query": "d",
+            "wallMs": 81.09090000001015,
+            "total": 72590,
+            "items": 50
+          },
+          {
+            "query": "de",
+            "wallMs": 97.73610000003828,
+            "total": 24810,
+            "items": 50
+          },
+          {
+            "query": "des",
+            "wallMs": 124.90789999999106,
+            "total": 8234,
+            "items": 50
+          },
+          {
+            "query": "desi",
+            "wallMs": 170.22319999994943,
+            "total": 8234,
+            "items": 50
+          },
+          {
+            "query": "desig",
+            "wallMs": 240.55819999997038,
+            "total": 8234,
+            "items": 50
+          },
+          {
+            "query": "design",
+            "wallMs": 247.60499999998137,
+            "total": 8234,
+            "items": 50
+          }
+        ],
+        "totalMs": 962.1212999999407
+      },
+      "fileEvent": {
+        "visibleMs": 874.266799999983,
+        "removeVisibleMs": 874.2342000000062,
+        "timeoutMs": 30000
+      },
+      "cancelRework": {
+        "probeWaitMs": 2000,
+        "firstPassMs": 2553.7271000000183,
+        "secondPassMs": 275302.2016,
+        "finalCatalogCount": 100000,
+        "finalComplete": true,
+        "excludeReset": true
+      },
+      "finalMemory": {
+        "rss": 926121984,
+        "heapUsed": 634799952
+      },
+      "coldRestore": {
+        "rounds": [
+          {
+            "loadMs": 464.9893,
+            "maxStarveMs": 219.50549999999998,
+            "heapPeak": 213176416,
+            "listAllFilesCalls": 0,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 100000
+          },
+          {
+            "loadMs": 445.7338,
+            "maxStarveMs": 212.93050000000005,
+            "heapPeak": 201724752,
+            "listAllFilesCalls": 0,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 100000
+          },
+          {
+            "loadMs": 441.36780000000005,
+            "maxStarveMs": 204.95949999999993,
+            "heapPeak": 229173568,
+            "listAllFilesCalls": 0,
+            "readFileTextCalls": 0,
+            "catalogWriteBytes": 0,
+            "catalogFileCount": 100000
+          }
+        ],
+        "medianLoadMs": 445.7338,
+        "medianMaxStarveMs": 212.93050000000005,
+        "restoredFromCache": true,
+        "catalogIntact": true
+      }
+    }
+  }
+}
