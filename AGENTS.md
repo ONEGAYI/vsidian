@@ -121,7 +121,8 @@ vsidian/
 │   │   ├── vscode-addon-discovery.md              # 附加组件发现与调用边界调研
 │   │   ├── vscode-native-text-appearance-probe.md # 原生文字外观复用探针报告
 │   │   ├── vscode-quick-open-matching.md          # Ctrl+P 文件匹配源码核查
-│   │   └── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
+│   │   ├── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
+│   │   └── wikilink-completion-v01-probe.md       # V01 补 ID 与尽力撤销探针报告
 │   ├── specs/      # 产品规格
 │   │   ├── anchor-navigation.md                 # 锚点跳转规格（标题/块引用/复制块链接）
 │   │   ├── appearance-merge.md                  # 外观合并分页规格
