@@ -16876,24 +16876,25 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(headAfterArrow === headBeforeArrow, '方向键不移动正文光标')
     assert(doc.getText() === afterHash, '方向键零文本')
 
-    // ^ 转块占位：已有 # 不重复补，只补 ^——先在锚点字段重开占位会话
+    // ^ 转块阶段：已有 # 不重复补，只补 ^——先在锚点字段重开会话
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: afterHash.length - 2 })
     await typeText('x')
     await pressKey('backspace')
-    await poll('标题占位重开', async () => {
+    await poll('标题会话重开', async () => {
       const s = await suggestPaint()
       return s && s.visible ? s : undefined
     })
     await pressKey('^')
     const afterCaret = '来源正文\n[[同目录目标.md#^]]'
-    await poll('^ 转块占位（已有 # 只补 ^）', () => doc.getText() === afterCaret ? true : undefined)
-    const blockPaint = await poll('^ 后块占位浮层', async () => {
+    await poll('^ 转块阶段（已有 # 只补 ^）', () => doc.getText() === afterCaret ? true : undefined)
+    // T05 起块阶段为真实候选（仅空目标保持占位）：fixture 的同目录目标.md
+    // 恰有一个无 ID 块（段落「同目录目标正文」），空查询应列出全部块
+    const blockPaint = await poll('^ 后块候选浮层（T05 真实候选）', async () => {
       const s = await suggestPaint()
-      return s && s.visible && s.statusText && /输入块 ID|Type a block ID/.test(s.statusText) ? s : undefined
+      return s && s.visible && s.itemCount >= 1 ? s : undefined
     })
-    assert(blockPaint !== undefined, '块占位浮层应可见')
-
-    // | 进显示文字：锚点保留、| 落在锚点末、显示文字留空、关闭候选
+    assert(blockPaint !== undefined, '块候选浮层应可见且列出目标文档的块')
+    // 空查询无高亮：| 保留锚点原样、只落显示文字分隔符（与占位期行为一致）
     await pressKey('|')
     const afterPipe = '来源正文\n[[同目录目标.md#^|]]'
     await poll('| 进显示文字（锚点保留、| 在锚点末）', () => doc.getText() === afterPipe ? true : undefined)
