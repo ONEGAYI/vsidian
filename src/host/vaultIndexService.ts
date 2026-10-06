@@ -1575,7 +1575,12 @@ export class VaultIndexService {
       this.notify()
       await this.commitCatalog(state)
       // 扫描窗口内到达的事件重放（fromReplay 绕过 pending 登记；残留由
-      // 周期核验兜底）
+      // 周期核验兜底）。重放前复位 catalogScanning：整体覆盖已发生
+      // （entries 已发布为权威清单），重放的三态登记必须走直写——否则
+      // applyCatalogUpsert 的 F15 拦截会把同一事件回填 pending，重放循环
+      // 永不收敛（CI s3 实证：扫描窗口内 watcher 事件到达即死循环，
+      // scanCatalog 永不返回、清单事件永不上清）
+      state.catalogScanning = false
       for (
         let pending = [...state.catalogPendingEvents];
         pending.length > 0 && !cancelled();

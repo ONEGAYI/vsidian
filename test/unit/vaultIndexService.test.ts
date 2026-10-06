@@ -2434,3 +2434,42 @@ function makeGate4Test(): { promise: Promise<void>; resolve(): void } {
   })
   return { promise, resolve }
 }
+
+describe('VaultIndexService：F15 回归（CI s3 T02/#198 扫描窗口重放）', () => {
+  it('扫描窗口内 watcher 事件经 pending 重放真正入清单且收敛（不死循环）', async () => {
+    let notify: ((p: string | null) => void) | undefined
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/x.png': 'png' })
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_r, onEvent) => { notify = onEvent; return () => {} }
+    const service = new VaultIndexService(scan, storagePortOf(), { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 重扫：statFile 挂 gate 模拟大目录扫描窗口（catalogScanning=true 期间）
+    const gate = makeGate4Test()
+    const originalStat = scan.statFile.bind(scan)
+    let armed = true
+    // armed 目标选非 md（x.png）：fullScan 只 stat md，重扫的 scanCatalog 才
+    // 会 stat 它——gate 精确挂在 catalogScanning=true 的窗口内
+    scan.statFile = (async (p: string) => {
+      if (armed && p.endsWith('x.png')) {
+        armed = false
+        await gate.promise
+      }
+      return originalStat(p)
+    }) as typeof scan.statFile
+    const reapply = service.setExcludePatterns(['**/.git/**', '**/node_modules/**'])
+    await vi.advanceTimersByTimeAsync(50) // 链推进至 scanCatalog 挂 gate（scanning=true）
+    // 窗口内注册去抖：到期必落在 scanCatalog 挂起中
+    fs.files.set('C:/vault/事件图.png', 'png')
+    fs.stats.set('C:/vault/事件图.png', { mtimeMs: 9_000, size: 3 })
+    notify!('C:/vault/事件图.png')
+    await vi.advanceTimersByTimeAsync(1_000) // 去抖到期 → pending（scanning=true）
+    // 放行：整体覆盖 + pending 重放——若重放登记被 applyCatalogUpsert 的
+    // F15 拦截回填 pending，重放循环永不收敛（reapply 永挂，用例超时红）
+    gate.resolve()
+    await reapply
+    await vi.advanceTimersByTimeAsync(1_000)
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '事件图'))
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]!.relPath).toBe('事件图.png')
+  })
+})
