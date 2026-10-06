@@ -2090,6 +2090,17 @@ describe('VaultIndexService：全文件清单（#377 T02）', () => {
     expect(withQuery.items[0]!.mtimeMs).toBe(0) // 仅记名：未知不伪装为磁盘时间
   })
 
+  it('来源无路径/不属于任何根：候选返回 no-workspace，不猜根不产候选（T07 补钉）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 未保存无路径文档（untitled）或根外路径：rootOf 无匹配 → no-workspace
+    const r = service.queryWikilinkFileCandidates('C:/别处/来源.md', 'a')
+    expect(r).toEqual({ status: 'unavailable', reason: 'no-workspace' })
+  })
+
   it('排除语义：.git / node_modules 与用户排除不入清单；排除变更触发覆盖范围重算', async () => {
     const fs = makeFs({
       'C:/vault/a.md': '# A\n',
