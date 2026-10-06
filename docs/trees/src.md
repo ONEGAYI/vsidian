@@ -9,9 +9,9 @@ vsidian/
     ├── extension.ts # 扩展激活入口
     ├── host/        # 宿主端实现
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
-    │   ├── addons/
+    │   ├── addons/                       # 附加组件宿主端实现
     │   │   ├── addonCoordinator.ts # 附加组件发现协调与唤醒
-    │   │   ├── addonRegistry.ts    # 附加组件注册表与 registerAddon 校验
+    │   │   ├── addonRegistry.ts    # 附加组件注册表
     │   │   └── addonWiring.ts      # 附加组件宿主装配接线
     │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
     │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
