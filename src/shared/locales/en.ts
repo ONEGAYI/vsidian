@@ -32,13 +32,16 @@ export const en = {
   'toast.pasteTextOnly': 'Text pasted without the image. Use {paste} to paste the image.',
   'styleRef.category.toast': 'Light notifications',
   'styleRef.category.wikilinkSuggest': 'Wikilink suggestions',
-  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01）----
-  'wikilinkSuggest.list.ariaLabel': 'Wikilink file candidates',
+  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
+  'wikilinkSuggest.list.ariaLabel': 'Wikilink suggestions',
   'wikilinkSuggest.status.loading': 'Searching files…',
   'wikilinkSuggest.status.empty': 'No matching files',
   'wikilinkSuggest.status.noWorkspace': 'No folder open — type the link manually',
   'wikilinkSuggest.status.notReady': 'Index is being prepared — type the link manually',
   'wikilinkSuggest.status.updating': 'Index still updating — results are partial',
+  // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
+  'wikilinkSuggest.placeholder.heading': 'Type a heading…',
+  'wikilinkSuggest.placeholder.block': 'Type a block ID…',
   'styleRef.category.richPaste': 'Paste prompt',
   // ---- settings.（设置页框架：标题、搜索、分类、保存状态、空状态）----
   /** 设置页面板标题（宿主 createWebviewPanel 标题与页面 h1 同源） */

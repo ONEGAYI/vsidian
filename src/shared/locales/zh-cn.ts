@@ -28,13 +28,16 @@ export const zhCn: Record<MessageKey, string> = {
   'toast.pasteTextOnly': '已粘贴文本，未粘贴图片；如需图片，请使用{paste}',
   'styleRef.category.toast': '轻提示',
   'styleRef.category.wikilinkSuggest': '双链联想候选',
-  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01）----
-  'wikilinkSuggest.list.ariaLabel': '双链文件候选',
+  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
+  'wikilinkSuggest.list.ariaLabel': '双链联想候选',
   'wikilinkSuggest.status.loading': '正在搜索文件…',
   'wikilinkSuggest.status.empty': '没有匹配的文件',
   'wikilinkSuggest.status.noWorkspace': '未打开文件夹——可继续手写链接',
   'wikilinkSuggest.status.notReady': '索引准备中——可继续手写链接',
   'wikilinkSuggest.status.updating': '索引仍在构建——当前为部分结果',
+  // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
+  'wikilinkSuggest.placeholder.heading': '输入小标题…',
+  'wikilinkSuggest.placeholder.block': '输入块 ID…',
   'styleRef.category.richPaste': '粘贴询问',
   // ---- settings.（设置页框架）----
   'settings.pageTitle': 'Vsidian 设置',

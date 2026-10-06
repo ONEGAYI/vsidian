@@ -324,8 +324,9 @@ export type HostToWebview =
   | { kind: 'ui.command'; op: UiOperationId }
   /** 测试钩子（#13）：向真实编辑器派发 Tab/Shift+Tab keydown（与用户按键
    *  同一 keymap 链路；纯选区导航，零写回）。宿主测试无法向 webview 派发
-   *  真实键盘事件，以此通道验证导航装配 */
-  | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' | 'down' | 'up' | 'escape' }
+   *  真实键盘事件，以此通道验证导航装配。#378 T03 起另接受任意**单字符**
+   *  key（'#'／'^'／'|' 等字符键，驱动候选会话转阶段按键） */
+  | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' | 'down' | 'up' | 'escape' | (string & {}) }
   /** 测试钩子：模拟 Live 纯光标移动和纯滚动；空载荷仅启用绘制探针。 */
   | { kind: 'viewport.test.position'; cursorLine?: number; scrollNearLine?: number; scrollBiasPx?: number }
   /** 测试钩子（#42）：在真实 webview 网格单元格派发鼠标点击及当前位置输入。 */
@@ -4271,7 +4272,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'table.test.key':
       return v.key === 'tab' || v.key === 'shift-tab' || v.key === 'select-all' || v.key === 'enter' ||
         v.key === 'backspace' || v.key === 'delete' || v.key === 'down' || v.key === 'up' ||
-        v.key === 'escape'
+        v.key === 'escape' ||
+        (typeof v.key === 'string' && v.key.length === 1 && v.key !== ' ') // #378 T03：单字符键（# ^ | 等）
     case 'viewport.test.position':
       return (v.cursorLine === undefined || isNonNegativeInt(v.cursorLine)) &&
         (v.scrollNearLine === undefined || isNonNegativeInt(v.scrollNearLine)) &&
