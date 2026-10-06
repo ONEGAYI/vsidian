@@ -1,0 +1,23 @@
+/* V02 测试附加组件样式（探针资产，断言文本不受 i18n 约束）：
+   .vsa2-mark 由编辑器页 ViewPlugin 的 Decoration.mark 挂到首字符——
+   绘制层断言读它的计算样式（rgb 值即「用户看到的东西」）；设置页样式
+   供挂载根/标题的计算样式断言。 */
+.vsa2-mark {
+  background-color: rgb(255, 0, 127);
+}
+
+.vsa2-settings-root {
+  border: 1px solid rgba(127, 127, 127, 0.45);
+  padding: 8px;
+}
+
+.vsa2-title {
+  color: rgb(0, 120, 215);
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.vsa2-logo {
+  width: 24px;
+  height: 24px;
+}
