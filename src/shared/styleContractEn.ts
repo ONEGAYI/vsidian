@@ -1487,8 +1487,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     }
   },
   "wikilink-suggest-status": {
-    "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open and 'index still updating (partial results)'; not confirmable, never writes to the document.",
-    "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building).",
+    "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open, 'index still updating (partial results)' and the pagination hint (#377 - 'N more, press ArrowDown to load more'); not confirmable, never writes to the document.",
+    "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building); appends a remaining-count row at the list tail when the match total is not exhausted (#377 load-more hint).",
     "dom": "Direct child rows of the container (not option semantics - placeholders are not confirmable).",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"

@@ -2283,3 +2283,22 @@ describe('默认编辑器守护消息协议（#323 设置页委托组）', () =>
     expect(isWebviewToHost({ kind: 'defaultEditor.state', status: 'none', viewType: null, label: null })).toBe(false)
   })
 })
+
+describe('isWebviewToHost / isHostToWebview：wikilink 查询分页字段（#377 T02）', () => {
+  it('wikilink.query 可选 offset：非负整数放行、负数与非数拒绝、缺省兼容', () => {
+    const base = { kind: 'wikilink.query', sessionId: 's1', docUri: 'file:///d/a.md', reqId: 1, generation: 1, query: '方' }
+    expect(isWebviewToHost(base)).toBe(true)
+    expect(isWebviewToHost({ ...base, offset: 50 })).toBe(true)
+    expect(isWebviewToHost({ ...base, offset: 0 })).toBe(true)
+    expect(isWebviewToHost({ ...base, offset: -1 })).toBe(false)
+    expect(isWebviewToHost({ ...base, offset: '50' })).toBe(false)
+  })
+  it('wikilink.query.result 可选 catalogGen：非负整数放行、负数与非数拒绝、缺省兼容', () => {
+    const base = { kind: 'wikilink.query.result', sessionId: 's1', docUri: 'file:///d/a.md', reqId: 1, generation: 1, status: 'ready', items: [], total: 0 }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, catalogGen: 7 })).toBe(true)
+    expect(isHostToWebview({ ...base, catalogGen: 0 })).toBe(true)
+    expect(isHostToWebview({ ...base, catalogGen: -1 })).toBe(false)
+    expect(isHostToWebview({ ...base, catalogGen: '7' })).toBe(false)
+  })
+})

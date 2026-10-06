@@ -58,6 +58,28 @@ function scanPortOf(fs: FakeFs): VaultIndexScanPort & { inaccessible: Set<string
       const prefix = rootFsPath.replace(/\\/g, '/').replace(/\/$/, '') + '/'
       return [...fs.files.keys()].filter((p) => p.startsWith(prefix) && /\.md$/i.test(p))
     },
+    async listAllFiles(rootFsPath: string, opts?: { skipDir?: (fsPath: string) => boolean }) {
+      // #377 T02 全文件清单：列根内全部文件（skipDir 剪枝；无失败目录）
+      const prefix = rootFsPath.replace(/\\/g, '/').replace(/\/$/, '') + '/'
+      const all = [...fs.files.keys()].filter((p) => p.startsWith(prefix))
+      if (!opts?.skipDir) {
+        return { files: all, failedDirs: [] }
+      }
+      const pruned = new Set<string>()
+      for (const p of all) {
+        let d = p.slice(0, p.lastIndexOf('/'))
+        while (d.length >= prefix.length) {
+          if (opts.skipDir(d)) {
+            pruned.add(d)
+          }
+          d = d.slice(0, d.lastIndexOf('/'))
+        }
+      }
+      return {
+        files: all.filter((p) => ![...pruned].some((d) => p.startsWith(`${d}/`))),
+        failedDirs: [],
+      }
+    },
     async readFileText(fsPath: string) {
       const key = fsPath.replace(/\\/g, '/')
       return inaccessible.has(key) ? null : (fs.files.get(key) ?? null)

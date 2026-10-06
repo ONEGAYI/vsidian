@@ -2388,6 +2388,11 @@ export class WebviewSyncController {
         this.live?.handleWikilinkQueryResult(message)
         break
       }
+      case 'wikilink.invalidate': {
+        // #377 T02 候选失效信号：主正文实例的候选会话自行去抖重查
+        this.live?.handleWikilinkInvalidate()
+        break
+      }
       case 'edit.ack': {
         // 同步状态机（C-2 基线推进 / ok:false 冲突暂停）随实例（P2-02）；
         // ack 失败附文的重置走实例 handleFullSync，阅读刷新等根联动经
@@ -9382,6 +9387,11 @@ export class WebviewSyncController {
           : null,
         activeText: suggestActive?.textContent ?? null,
         statusText: suggestStatus?.textContent ?? null,
+        // #377 T02：候选文件名序列（集成按名核对候选集合——分类过滤与
+        // 新资源出现的可断言依据）
+        names: [...suggestEl.querySelectorAll(`.${WIKILINK_SUGGEST_CLASS_NAMES.name}`)].map(
+          (el) => el.textContent ?? '',
+        ),
       }
       : undefined
     const quickBar = this.quickActionsEl

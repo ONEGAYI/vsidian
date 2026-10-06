@@ -667,6 +667,11 @@ export class LiveEditorInstance {
     this.wikilinkSuggest?.handleResult(message)
   }
 
+  /** 候选失效信号（#377 T02）：索引/清单变更——控制器去抖后重发当前查询 */
+  handleWikilinkInvalidate(): void {
+    this.wikilinkSuggest?.handleInvalidate()
+  }
+
   /** 显式关闭候选（模式切换等根时机；幂等） */
   closeWikilinkSuggest(): void {
     this.wikilinkSuggest?.close()

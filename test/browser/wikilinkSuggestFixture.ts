@@ -48,14 +48,20 @@ Object.assign(window, {
   queryCount() {
     return hostMessages.filter((m) => (m as { kind?: string }).kind === 'wikilink.query').length
   },
-  /** 以最新出站查询的 reqId/generation 回灌应答（宿主扮演） */
-  respondQuery(items: WikilinkCandidateItem[], opts: { updating?: boolean } = {}) {
+  /** 以最新出站查询的 reqId/generation 回灌应答（宿主扮演）。#377 T02 起
+   *  opts 可指定 total（命中总数——分页 more 状态）与 catalogGen（清单
+   *  代次——跨代次追加页守卫） */
+  respondQuery(
+    items: WikilinkCandidateItem[],
+    opts: { updating?: boolean; total?: number; catalogGen?: number } = {},
+  ) {
     const q = lastQuery()
     if (!q) throw new Error('缺少待应答的 wikilink.query')
     controller.handleHostMessage({
       kind: 'wikilink.query.result', sessionId: q.sessionId, docUri: q.docUri,
       reqId: q.reqId, generation: q.generation, status: 'ready',
-      updating: opts.updating === true, total: items.length, items,
+      updating: opts.updating === true, total: opts.total ?? items.length, items,
+      ...(opts.catalogGen !== undefined ? { catalogGen: opts.catalogGen } : {}),
     })
   },
   respondUnavailable(reason: 'no-workspace' | 'not-ready') {
@@ -99,6 +105,10 @@ Object.assign(window, {
       names: items.map((i) => i.querySelector('.vsidian-wikilink-suggest-name')?.textContent ?? ''),
       dirs: items.map((i) => i.querySelector('.vsidian-wikilink-suggest-dir')?.textContent ?? null),
     }
+  },
+  /** 注入候选失效信号（#377 T02 wikilink.invalidate——宿主索引/清单变更广播） */
+  sendInvalidate() {
+    controller.handleHostMessage({ kind: 'wikilink.invalidate' })
   },
   /** 多光标形态（两个折叠 range）：验证多 range 不接管 */
   setTwoCursors(a: number, b: number) {

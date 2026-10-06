@@ -35,6 +35,7 @@ export const zhCn: Record<MessageKey, string> = {
   'wikilinkSuggest.status.noWorkspace': '未打开文件夹——可继续手写链接',
   'wikilinkSuggest.status.notReady': '索引准备中——可继续手写链接',
   'wikilinkSuggest.status.updating': '索引仍在构建——当前为部分结果',
+  'wikilinkSuggest.status.more': '还有 {count} 项——按 ↓ 继续加载',
   // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
   'wikilinkSuggest.placeholder.heading': '输入小标题…',
   'wikilinkSuggest.placeholder.block': '输入块 ID…',

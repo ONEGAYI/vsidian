@@ -636,7 +636,15 @@ export type HostToWebview =
       reason?: 'no-workspace' | 'not-ready'
       items?: WikilinkCandidateItem[]
       total?: number
+      /** 清单代次（#377 T02）：本次查询所见的全文件清单代次——webview 拒收
+       *  跨代次的迟到追加页（清单已变时重新取首页，不拼接错位页） */
+      catalogGen?: number
     }
+  /** 双链联想候选失效信号（#377 T02）：索引/全文件清单变更（文件增删改名、
+   *  排除变化、清单代次推进）后宿主广播；候选会话在场的 webview 自行重新
+   *  发起当前查询（同查询新 reqId——结果按既有守卫整体替换）。无载荷，
+   *  触发即失效——与 backlinks/outlinks 快照推送同一 onChange 广播点 */
+  | { kind: 'wikilink.invalidate' }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
    *  （TextDocument.version，#224 变更刷新的版本基准）与 LF UTF-16 全文。
@@ -1548,9 +1556,19 @@ export type WebviewToHost =
    *  字段时由 webview 发起。query 为目标区光标左侧前缀（再触发时自动取
    *  左侧文本，不并右侧）；reqId 为实例内单调请求序号（应答配对），
    *  generation 为查询代次（查询文本或字段身份变化即递增——宿主原样回显，
-   *  webview 借此拒收迟到响应）。T01 复用现有索引 Markdown 文件表，仅
-   *  主正文接线（嵌入实例不经本消息出站） */
-  | { kind: 'wikilink.query'; sessionId: string; docUri: string; reqId: number; generation: number; query: string }
+   *  webview 借此拒收迟到响应）。#377 T02 起 offset 为分页起点（缺省 0，
+   *  首屏后继续加载——宿主按已定排序取 [offset, offset+limit)）。仅主正文
+   *  接线（嵌入实例不经本消息出站） */
+  | {
+    kind: 'wikilink.query'
+    sessionId: string
+    docUri: string
+    reqId: number
+    generation: number
+    query: string
+    /** 分页起点（#377 T02；缺省 0 = 首屏） */
+    offset?: number
+  }
   /** 反链条目跳转意图（#197）：点击面板条目 → 宿主打开来源文档（Vsidian
    *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
    *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
@@ -2265,6 +2283,9 @@ export interface PaintProbe {
     activeIndex: number | null
     activeText: string | null
     statusText: string | null
+    /** 候选文件名文本序列（#377 T02——集成断言按名核对候选集合；与
+     *  itemCount 同源，顺序一致；浮层不在场为 null） */
+    names: string[] | null
   }
 }
 
@@ -3040,7 +3061,9 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.wikilinkSuggest.activeIndex === undefined || v.wikilinkSuggest.activeIndex === null ||
         isNonNegativeInt(v.wikilinkSuggest.activeIndex)) &&
       (v.wikilinkSuggest.activeText === undefined || isNullOrString(v.wikilinkSuggest.activeText)) &&
-      (v.wikilinkSuggest.statusText === undefined || isNullOrString(v.wikilinkSuggest.statusText))
+      (v.wikilinkSuggest.statusText === undefined || isNullOrString(v.wikilinkSuggest.statusText)) &&
+      (v.wikilinkSuggest.names === undefined || v.wikilinkSuggest.names === null ||
+        (Array.isArray(v.wikilinkSuggest.names) && v.wikilinkSuggest.names.every(isString)))
     ))
   )
 }
@@ -3907,9 +3930,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'backlinks.get':
       return isString(v.sessionId) && isString(v.docUri)
     case 'wikilink.query':
-      // #376 T01 双链联想查询：会话身份 + 请求配对与代次 + 查询文本
+      // #376 T01 双链联想查询：会话身份 + 请求配对与代次 + 查询文本；
+      // #377 T02 起可选 offset（分页起点，缺省 0 = 首屏）
       return isString(v.sessionId) && isString(v.docUri) &&
-        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) && isString(v.query)
+        isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) && isString(v.query) &&
+        (v.offset === undefined || isNonNegativeInt(v.offset))
     case 'backlink.activate':
       return isString(v.sessionId) && isString(v.docUri) &&
         isString(v.sourceUri) && isNonNegativeInt(v.offset)
@@ -4458,7 +4483,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       )
     case 'wikilink.query.result':
       // #376 T01 双链联想查询结果：会话身份 + 请求配对与代次回显 + 真实
-      // 状态分态（ready 附候选与命中总数；unavailable 附原因）
+      // 状态分态（ready 附候选与命中总数；unavailable 附原因）；
+      // #377 T02 起可选 catalogGen（清单代次——分页守卫）
       return (
         isString(v.sessionId) && isString(v.docUri) &&
         isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
@@ -4466,8 +4492,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.updating === undefined || typeof v.updating === 'boolean') &&
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'not-ready') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkCandidateItem))) &&
-        (v.total === undefined || isNonNegativeInt(v.total))
+        (v.total === undefined || isNonNegativeInt(v.total)) &&
+        (v.catalogGen === undefined || isNonNegativeInt(v.catalogGen))
       )
+    case 'wikilink.invalidate':
+      // #377 T02 候选失效信号：无载荷广播（触发即失效）
+      return true
     case 'hover.result':
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
       // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起

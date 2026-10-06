@@ -102,6 +102,8 @@ vsidian/
     │   ├── tableCellEmbed.ts     # 表格格内嵌入三套区间映射
     │   ├── tableCells.ts         # 表格单元格边界、换行与转义
     │   ├── testDiagnostics.ts    # 测试传播诊断有界日志
+    │   ├── vaultFileCatalog.ts   # 全文件清单快照纯逻辑
+    │   ├── vaultFileCategory.ts  # 全文件清单分类声明
     │   ├── vaultIndexExclude.ts  # 索引排除模式纯逻辑单一事实源
     │   ├── vaultIndexModel.ts    # 引用索引内存模型纯逻辑
     │   ├── vaultIndexSchedule.ts # 索引维护调度纯逻辑与初值常量

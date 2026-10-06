@@ -39,6 +39,7 @@ export const en = {
   'wikilinkSuggest.status.noWorkspace': 'No folder open — type the link manually',
   'wikilinkSuggest.status.notReady': 'Index is being prepared — type the link manually',
   'wikilinkSuggest.status.updating': 'Index still updating — results are partial',
+  'wikilinkSuggest.status.more': '{count} more — press ↓ to load more',
   // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
   'wikilinkSuggest.placeholder.heading': 'Type a heading…',
   'wikilinkSuggest.placeholder.block': 'Type a block ID…',

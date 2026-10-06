@@ -92,6 +92,8 @@ interface SuggestResult {
   updating: boolean
   items: WikilinkCandidateItem[]
   total: number
+  /** 结果携带的清单代次（#377 T02；跨代次的追加页不拼接——重取首页） */
+  catalogGen: number
 }
 
 /** 字段身份全量比较（去重守卫用）：任何边界变化（如光标右侧闭围栏被删）
@@ -108,6 +110,12 @@ export class WikilinkSuggestController {
   /** 出站请求序号（实例内单调；应答配对键） */
   private reqSeq = 0
   private lastReqId = -1
+  /** 最近一次出站请求的分页起点（#377 T02；>0 时应答按追加页处理） */
+  private lastReqOffset = 0
+  /** 追加请求在途（moveActive 触底触发一次，应答前不重复发） */
+  private morePending = false
+  /** 失效信号去抖定时器（#377 T02 wikilink.invalidate） */
+  private invalidateTimer: ReturnType<typeof setTimeout> | undefined
   private result: SuggestResult | null = null
   /** 键盘高亮行（null = 无高亮；空查询初始即 null） */
   private activeIndex: number | null = null
@@ -147,6 +155,10 @@ export class WikilinkSuggestController {
 
   /** 实例释放（视图销毁随调用方；浮层 DOM 移除归本模块） */
   destroy(): void {
+    if (this.invalidateTimer !== undefined) {
+      clearTimeout(this.invalidateTimer)
+      this.invalidateTimer = undefined
+    }
     this.detachScrollListeners()
     this.removePopup()
     this.view = null
@@ -155,7 +167,9 @@ export class WikilinkSuggestController {
   }
 
   /** 查询结果入站（根路由）：reqId + generation + 会话三重守卫，任一
-   *  不符即迟到响应，拒收不改状态 */
+   *  不符即迟到响应，拒收不改状态。#377 T02 起区分首页/追加页：追加页
+   *  （请求 offset>0）拼接条目并保留手动高亮；清单代次与当前结果不一致
+   *  的追加页不拼接——按新代次重取首页（不复活旧清单条目） */
   handleResult(message: Extract<HostToWebview, { kind: 'wikilink.query.result' }>): void {
     if (!this.session || this.lastReqId < 0 || message.reqId !== this.lastReqId) {
       return
@@ -176,15 +190,38 @@ export class WikilinkSuggestController {
     if (message.status === 'unavailable') {
       this.result = {
         status: message.reason === 'not-ready' ? 'notReady' : 'noWorkspace',
-        updating: false, items: [], total: 0,
+        updating: false, items: [], total: 0, catalogGen: 0,
       }
+      this.morePending = false
     } else {
+      const pageItems = message.items ?? []
+      const pageGen = message.catalogGen ?? 0
+      const prev = this.result
+      if (this.lastReqOffset > 0 && prev !== null && prev.status === 'ready') {
+        if (prev.catalogGen !== pageGen) {
+          // 清单代次已变：追加页序位失效，重取首页（同查询同代次）
+          this.sendQuery(this.session.query, this.session.generation, 0)
+          return
+        }
+        this.result = {
+          status: 'ready',
+          updating: message.updating === true,
+          items: prev.items.concat(pageItems),
+          total: message.total ?? prev.total,
+          catalogGen: pageGen,
+        }
+        this.morePending = false
+        this.render()
+        return
+      }
       this.result = {
         status: 'ready',
         updating: message.updating === true,
-        items: message.items ?? [],
+        items: pageItems,
         total: message.total ?? 0,
+        catalogGen: pageGen,
       }
+      this.morePending = false
     }
     // 高亮规则：更新帧按身份找位（身份消失时空查询回无高亮、非空查询取
     // 首项）；新查询首帧执行初始规则（空查询无高亮、非空高亮首项）
@@ -199,6 +236,35 @@ export class WikilinkSuggestController {
     this.render()
   }
 
+  /**
+   * 候选失效信号（#377 T02，wikilink.invalidate）：索引/全文件清单变更后
+   * 宿主广播。会话在场时去抖 300ms 重发当前查询（同查询新 reqId，结果按
+   * 既有守卫整体替换——旧枚举/旧查询不得复活已删除身份）；无会话零动作。
+   * 标题/块占位阶段不出站（#378 T03 合并补守卫——占位无查询语义，出站
+   * 只会污染 result 状态），占位阶段零动作。notify 在扫描/核验期间高频
+   * 到达，去抖把重查合并为每 300ms 至多一次（查询为宿主内存同步执行，
+   * 单次费用低）。
+   */
+  handleInvalidate(): void {
+    if (!this.session || this.session.origin.stage !== 'file' ||
+      this.deps.isSuspended() || !this.deps.isLiveActive()) {
+      return
+    }
+    if (this.invalidateTimer !== undefined) {
+      clearTimeout(this.invalidateTimer)
+    }
+    this.invalidateTimer = setTimeout(() => {
+      this.invalidateTimer = undefined
+      const session = this.session
+      if (!session || session.origin.stage !== 'file' ||
+        this.deps.isSuspended() || !this.deps.isLiveActive()) {
+        return
+      }
+      this.morePending = false
+      this.sendQuery(session.query, session.generation, 0)
+    }, 300)
+  }
+
   /** 显式关闭（模式切换/暂停/实例收尾由调用方触发；幂等） */
   close(): void {
     if (!this.session && this.result === null && !this.popup) {
@@ -209,6 +275,12 @@ export class WikilinkSuggestController {
     this.activeIndex = null
     this.activeId = null
     this.lastReqId = -1
+    this.lastReqOffset = 0
+    this.morePending = false
+    if (this.invalidateTimer !== undefined) {
+      clearTimeout(this.invalidateTimer)
+      this.invalidateTimer = undefined
+    }
     this.detachScrollListeners()
     this.removePopup()
   }
@@ -270,7 +342,7 @@ export class WikilinkSuggestController {
     this.activeIndex = null
     this.activeId = null
     if (origin.stage === 'file') {
-      this.sendQuery(query, generation)
+      this.sendQuery(query, generation, 0)
     } else {
       this.lastReqId = -1 // 标题/块占位阶段不出站（真实候选归 T04/T05）
     }
@@ -330,13 +402,14 @@ export class WikilinkSuggestController {
       update.state.facet(EditorView.editable)
   }
 
-  private sendQuery(query: string, generation: number): void {
+  private sendQuery(query: string, generation: number, offset: number): void {
     const current = this.deps.getSession()
     if (!current) {
       return
     }
     const reqId = ++this.reqSeq
     this.lastReqId = reqId
+    this.lastReqOffset = offset
     this.deps.send({
       kind: 'wikilink.query',
       sessionId: current.sessionId,
@@ -344,6 +417,7 @@ export class WikilinkSuggestController {
       reqId,
       generation,
       query,
+      ...(offset > 0 ? { offset } : {}),
     })
   }
 
@@ -361,6 +435,16 @@ export class WikilinkSuggestController {
     }
     const count = this.result.items.length
     const from = this.activeIndex
+    // #377 T02 触底续页：高亮在末项且总数未尽时，↓ 触发下一页加载（同
+    // 查询同代次；应答追加，高亮保持）。仍在途时不重复发。
+    if (
+      delta > 0 && from === count - 1 && !this.morePending &&
+      this.result.total > count
+    ) {
+      this.morePending = true
+      this.sendQuery(this.session.query, this.session.generation, count)
+      return true
+    }
     this.activeIndex = from === null
       ? (delta > 0 ? 0 : count - 1)
       : Math.min(count - 1, Math.max(0, from + delta))
@@ -570,8 +654,13 @@ export class WikilinkSuggestController {
       for (let i = 0; i < result.items.length; i++) {
         popup.appendChild(this.buildItemRow(result.items[i]!, i === this.activeIndex))
       }
+      const remaining = result.total - result.items.length
       if (result.items.length === 0 && !result.updating) {
         popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.empty')))
+      }
+      if (remaining > 0) {
+        // 分页续载提示（#377 T02）：总数未尽时提示按 ↓ 继续（触底加载）
+        popup.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.more', { count: remaining })))
       }
       if (result.updating) {
         // 部分数据在场：可用项继续候选 + 明确标注仍在构建（不冒充完整）
