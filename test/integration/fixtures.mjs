@@ -881,6 +881,17 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'undo2.md'), UNDO2_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'undo3.md'), UNDO3_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'undo4.md'), UNDO4_DOC, 'utf8')
+  // V01（#348）附加组件历史分组验证：各文件初始文本固定互不重复——探针以
+  // 「末尾追加」构造互不重复的文本状态链，边界对账靠文本全等 + 版本推进
+  writeFileSync(path.join(wsDir, 'v01-abcd.md'), 'V01基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-merge.md'), 'V01合并基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-chain.md'), 'V01链基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-truncate.md'), 'V01截断基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-interleave.md'), 'V01交错基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-external.md'), 'V01外部基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-reload.md'), 'V01重载基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-ref-a.md'), '# V01 引用 A\n\n![[v01-ref-b]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-ref-b.md'), 'V01引用B基\n', 'utf8')
   writeFileSync(path.join(wsDir, 'ackorder.md'), ACKORDER_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'resync.md'), RESYNC_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'ime-escape.md'), IME_ESC_DOC, 'utf8')
