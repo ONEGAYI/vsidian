@@ -44,6 +44,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Feature | Description |
 | --- | --- |
 | Wikilinks & anchors | Five `[[wikilink]]` forms; `#heading` and `#^block-id` jumps land on the target, with a highlight flash on arrival |
+| Wikilink completion | Typing `[[]]` pops up file candidates (every common file type — images, PDFs, and more); `#` / `^` then list the target's headings and blocks; works in table cells and embedded editors too |
 | Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
 | Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable |
 | Image wikilink embeds | `![[image.png]]` embeds images that behave identically to plain Markdown image links — loading, failure hints, auto refresh, and the popup viewer are the same; hovering a wikilink that points to an image shows the image itself in the popup |
