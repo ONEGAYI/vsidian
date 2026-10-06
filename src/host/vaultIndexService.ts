@@ -63,7 +63,9 @@ import {
 import {
   defaultAliasOf,
   planWikilinkInsertPath,
+  prepareWikilinkQuery,
   rankWikilinkCandidates,
+  wikilinkFileCandidateSafe,
   type WikilinkCandidateFile,
 } from '../shared/wikilinkQuery'
 import {
@@ -1692,6 +1694,14 @@ export class VaultIndexService {
     if (!catalog) {
       return false
     }
+    // F15：清单枚举进行中不直写——运行中重扫窗口内到达的直写通道
+    // （verifyRoot 的清单比对、md 泵 rescanFile、rename 批）会被
+    // scanCatalog 完成时的整体覆盖吞掉（≤ 周期核验间隔才自愈）；改走
+    // catalogPendingEvents，由扫描收尾的既有重放循环按三态重新判定
+    if (state.catalogScanning) {
+      state.catalogPendingEvents.add(this.normKey(this.absOf(state, rel)))
+      return false
+    }
     const prev = catalog.get(rel)
     if (prev && prev.category === category && prev.mtimeMs === mtimeMs && prev.size === size) {
       return false
@@ -1712,12 +1722,19 @@ export class VaultIndexService {
 
   /** 清单条目移除（删除正证据路径）：移除即推进代次；**不广播**——deleted
    *  广播统一由调用方承担（rescanFile/verifyRoot/rename 批/catalogFileEvent
-   *  各自已有发布点，避免双发）。返回是否实际移除（调用方聚合 notify）。 */
+   *  各自已有发布点，避免双发）。返回是否实际移除（调用方聚合 notify）。
+   *  F15：清单枚举进行中不直写（同 applyCatalogUpsert）——扫描收尾的
+   *  整体覆盖会吞掉本移除；转 pending 由重放按 missing 正证据重新判定。 */
   private removeCatalogEntry(state: RootIndexState, rel: string): boolean {
     const catalog = state.catalog
-    if (!catalog || !catalog.delete(rel)) {
+    if (!catalog || !catalog.has(rel)) {
       return false
     }
+    if (state.catalogScanning) {
+      state.catalogPendingEvents.add(this.normKey(this.absOf(state, rel)))
+      return false
+    }
+    catalog.delete(rel)
     state.catalogGen++
     this.scheduleCatalogCommit(state)
     return true
@@ -1916,8 +1933,12 @@ export class VaultIndexService {
           this.scheduleCatalogCommit(state)
           catalogTouched = true
         }
-        touched = true
+        // F14：清单核验零变化不置位 touched——周期核验/焦点回归每 10 分钟
+        // 一次，无条件 touched 会触发全模型序列化提交（10 万档实测 3.72s）
+        // 与代际空转；仅在清单确有变化（catalogTouched）时合流 touched，
+        // 「确有变化时」的提交与广播行为不变
         if (catalogTouched) {
+          touched = true
           this.notify() // 清单核验变更：一次广播（聚合——不按条目数）
         }
       }
@@ -2351,7 +2372,9 @@ export class VaultIndexService {
    * 常用资源（Markdown/图片/PDF/音视频/可读文本——零 IO 后缀派生），按
    * mtime 新→旧（未知沉底）、稳定路径破同分；有查询允许 .pyc 等未知/编译
    * 类型，匹配分数优先、同分再 mtime、稳定路径破同分。total 为命中总数，
-   * items 取 [offset, offset+limit)（分页继续加载——排序在截取前全量完成）。
+   * items 自第 offset 个**可投递**候选（病态候选滑动跳过后）起取至多
+   * limit 条——items.length < limit 即已穷尽（分页终态判据；排序在截取
+   * 前全量完成）。
    *
    * 插入路径在宿主侧按来源文档目录计算并经 vaultLink 往返核对（核对失败
    * 的病态候选丢弃，不产出不可信路径）；别名 Markdown 去尾 .md、其余保留
@@ -2407,8 +2430,10 @@ export class VaultIndexService {
       }
     }
     // 空查询资格：仅常用资源（其他类型可被有查询命中——分页/排序共用同一
-    // 排序实现，过滤在排序前完成）
-    const preparedEmpty = query.trim() === ''
+    // 排序实现，过滤在排序前完成）。F10：判空与评分侧同源
+    // （prepareWikilinkQuery 的 normalized——单 `*`/引号等全符号查询在评分
+    // 侧为空查询，此处不得以 trim 口径分叉放开常用资源过滤）
+    const preparedEmpty = prepareWikilinkQuery(query).normalized === ''
     const pool = preparedEmpty
       ? files.filter((f) => {
         const rel = f.relPath
@@ -2419,29 +2444,45 @@ export class VaultIndexService {
         return isCommonVaultFileCategory(category)
       })
       : files
-    const ranked = rankWikilinkCandidates(pool, query, offset + Math.max(0, limit))
     const docDir = this.dirname(sourceFsPath)
     const items: WikilinkCandidateItem[] = []
-    for (const item of ranked.items.slice(Math.max(0, offset))) {
+    // F6：病态候选（insertPath 规划失败或写回往返失败）在页内丢弃须**补位**
+    // ——排名全量取得后自头部滑动跳过病态条目，从第 offset 个**可投递**
+    // 候选起凑满 limit 或穷尽（webview 续页的 offset 为已投递数，病态占位
+    // 会使排名偏移错位、续页重复/尾部空页死循环）。items.length < limit 即
+    // 穷尽信号（webview 以满页与否作终态判据）；total 保持命中总数，排序
+    // 契约不变（滑动只跳过、不重排）
+    const ranked = rankWikilinkCandidates(pool, query, pool.length)
+    const limitClamped = Math.max(0, limit)
+    let deliverableSeen = 0
+    for (const item of ranked.items) {
+      if (items.length >= limitClamped) {
+        break // 已凑满（offset 之前不可能凑满，deliverableSeen 已越过）
+      }
       const abs = this.absOf(state, item.relPath)
-      // 插入路径按来源文档目录计算并经 vaultLink 往返核对——核对失败的
-      // 病态候选丢弃，不产出与所选身份不一致的路径
+      // 插入路径按来源文档目录计算并经 vaultLink 往返核对 + F5 写回语法
+      // 往返核对——核对失败的病态候选丢弃，不产出与所选身份不一致或写入
+      // 即损坏引用的路径
       const insertPath = planWikilinkInsertPath(docDir, state.fsPath, this.opts.isWindowsHost, abs)
-      if (insertPath === null) {
+      const alias = defaultAliasOf(item.name, kindByRel.get(item.relPath) ?? 'asset')
+      if (insertPath === null || !wikilinkFileCandidateSafe(insertPath, alias)) {
         continue
       }
-      items.push({
-        id: abs,
-        name: item.name,
-        dir: item.dir,
-        relPath: item.relPath,
-        insertPath,
-        alias: defaultAliasOf(item.name, kindByRel.get(item.relPath) ?? 'asset'),
-        mtimeMs: item.mtimeMs,
-        score: item.score,
-        labelHighlights: item.labelHighlights,
-        dirHighlights: item.dirHighlights,
-      })
+      if (deliverableSeen >= Math.max(0, offset)) {
+        items.push({
+          id: abs,
+          name: item.name,
+          dir: item.dir,
+          relPath: item.relPath,
+          insertPath,
+          alias,
+          mtimeMs: item.mtimeMs,
+          score: item.score,
+          labelHighlights: item.labelHighlights,
+          dirHighlights: item.dirHighlights,
+        })
+      }
+      deliverableSeen++
     }
     return {
       status: 'ready',

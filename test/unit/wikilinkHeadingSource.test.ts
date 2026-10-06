@@ -161,3 +161,27 @@ describe('queryWikilinkHeadings：查询与别名', () => {
     }
   })
 })
+
+describe('queryWikilinkHeadings：F5 标题写回语法往返校验（不合法标题不入候选）', () => {
+  it('含 | / # / ^ 的标题被过滤，正常标题保留', async () => {
+    const h = harness()
+    h.existsPaths.set('/vault/项目/混合.md', '/vault/项目/混合.md')
+    h.diskDocs.set('/vault/项目/混合.md', {
+      text: [
+        '# 正常标题',
+        '# 带|竖线',
+        '# 带#井号',
+        '# 带^插入符',
+        '# ^开头块形',
+        '# 结尾正常',
+        '',
+      ].join('\n'),
+      version: 1,
+    })
+    const result = await queryWikilinkHeadings('混合.md', '', CTX, h.ports)
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') {
+      expect(result.items.map((i) => i.heading)).toEqual(['正常标题', '结尾正常'])
+    }
+  })
+})

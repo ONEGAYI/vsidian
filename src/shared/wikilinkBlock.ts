@@ -26,6 +26,7 @@ import {
   standaloneBlockIdAfterBlock,
   standaloneBlockIdOf,
 } from './blockId'
+import { frontmatterRange as frontmatterRangeOfText } from './markdownDoc'
 
 /** 显示文本片段上限（块首行 trim 后截断——候选行主文字） */
 const SNIPPET_MAX = 60
@@ -47,17 +48,20 @@ function strippedLines(text: string): string[] {
   return text.split('\n').map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
 }
 
-/** 文件头 frontmatter 区间（含首尾 --- 行的行索引闭区间）；无/未闭合 -1 */
-function frontmatterRange(lines: readonly string[]): { start: number; end: number } | null {
-  if (lines.length === 0 || lines[0]!.trim() !== '---') {
+/** 文件头 frontmatter 区间（含首尾围栏行的行索引闭区间）；无/未闭合 null。
+ *  F12：判定口径单一事实源为 markdownDoc.frontmatterRange（live 装饰与
+ *  阅读切块同一实现——`---` 与 `...` 双收尾、FM_SCAN_LIMIT 有界扫描、
+ *  未闭合不识别），此处只做 offset→行索引换算，不再维护本地第二实现
+ *  （本地版不认 `...` 收尾，会把 frontmatter 内容误入块候选，内层块
+ *  选中写坏 YAML） */
+function frontmatterRange(text: string): { start: number; end: number } | null {
+  const range = frontmatterRangeOfText(text)
+  if (range === null) {
     return null
   }
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i]!.trim() === '---') {
-      return { start: 0, end: i }
-    }
-  }
-  return null // 未闭合：不视为 frontmatter，按普通块处理
+  // 区间末（结束围栏行行尾）所在行即结束行索引；行首累计换算
+  const endLine = text.slice(0, range.end).split('\n').length - 1
+  return { start: 0, end: endLine }
 }
 
 /**
@@ -70,7 +74,7 @@ function frontmatterRange(lines: readonly string[]): { start: number; end: numbe
 export function enumerateReferableBlocks(text: string): WikilinkBlockEntry[] {
   const lines = strippedLines(text)
   const fences = scanFenceBlocks(lines)
-  const front = frontmatterRange(lines)
+  const front = frontmatterRange(text)
   const ranges: Array<{ start: number; end: number }> = []
   const seen = new Set<string>()
   const push = (start: number, end: number): void => {

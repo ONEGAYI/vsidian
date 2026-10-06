@@ -97,6 +97,21 @@ describe('enumerateReferableBlocks：块边界矩阵', () => {
     expect(summary(text)).toEqual(['1:2:---'])
   })
 
+  it('F12：`...` 收尾的 frontmatter 不进入块候选（与 markdownDoc 口径同源）', () => {
+    const text = '---\ntitle: x\n...\n\n正文段落\n'
+    expect(summary(text)).toEqual(['5:1:正文段落'])
+  })
+
+  it('F12：`...` 收尾 frontmatter 内层围栏/段落均不产生候选（选中写坏 YAML 的入口关闭）', () => {
+    const text = '---\nlayout: table\n```js\ncode: true\n```\n...\n\n正文段落\n'
+    expect(summary(text)).toEqual(['8:1:正文段落'])
+  })
+
+  it('F12：CRLF 形态的 `...` 收尾 frontmatter 同样跳过', () => {
+    const text = '---\r\ntitle: x\r\n...\r\n\r\n正文段落\r\n'
+    expect(summary(text)).toEqual(['5:1:正文段落'])
+  })
+
   it('CRLF 文本与 LF 同口径枚举', () => {
     const text = '段一\r\n\r\n段二\r\n'
     expect(summary(text)).toEqual(['1:1:段一', '3:1:段二'])

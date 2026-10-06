@@ -25,6 +25,7 @@
 // 本模块不依赖 vscode/DOM（node 单测直驱；宿主与 webview 双产物共用）。
 import * as path from 'node:path'
 import { planVaultLinkPath } from './vaultLink'
+import { parseWikilinkInner, scanWikilinksInLine } from './wikilink'
 
 /** 高亮区间（UTF-16 code unit 半开区间；对应原始文字偏移） */
 export interface WikilinkMatch {
@@ -593,6 +594,50 @@ export function planWikilinkInsertPath(
     ? hit.toLowerCase() === ops.resolve(targetAbs).toLowerCase()
     : hit === ops.resolve(targetAbs)
   return same ? insertPath : null
+}
+
+/**
+ * 文件候选写回往返校验（code-review F5）：`[[insertPath|alias]]` 须以完整
+ * 链接形态被扫描器（scanWikilinksInLine——内部 `[`/`]` 拒绝）与语义解析器
+ * （parseWikilinkInner）解析回**同一目标路径**（无锚点）。病态文件名——
+ * POSIX `a|b.md`（首个 `|` 被当别名分隔）、`a#b.md`（首个 `#` 被当锚点
+ * 标记）、路径含 `^`（裸 ^ 恒非法）、含 `[`/`]`（链接形态守卫拒绝）——
+ * 经确认写回后引用静默损坏，与 planWikilinkInsertPath 往返失败同型：不
+ * 入候选列表（insertPath 合法 ⟹ 路径各节无 `|` ⟹ 文件名与默认别名也无
+ * 裸 `|`，表格 pipeEscape 形态的裂格风险随之覆盖）。
+ */
+export function wikilinkFileCandidateSafe(insertPath: string, alias: string): boolean {
+  if (insertPath.trim() === '') {
+    return false
+  }
+  const inner = `${insertPath}|${alias}`
+  const occurrences = scanWikilinksInLine(`[[${inner}]]`)
+  if (occurrences.length !== 1) {
+    return false
+  }
+  const parsed = parseWikilinkInner(occurrences[0]!.inner)
+  return parsed !== null && parsed.path === insertPath.trim() &&
+    parsed.heading === null && parsed.blockId === null
+}
+
+/**
+ * 标题候选写回往返校验（code-review F5）：`[[目标#标题]]` 须解析回同一
+ * 标题（首个 `|` 被当别名分隔裂断标题、含 `#` 判多级标题非法、含 `^` 判
+ * 标题块组合非法、以 `^` 开头判块引用、含 `[`/`]` 链接形态守卫拒绝）——
+ * 不合法标题不入候选列表，写入侧（wikilinkField 编辑计划）无需再防。
+ */
+export function wikilinkHeadingCandidateSafe(heading: string): boolean {
+  const trimmed = heading.trim()
+  if (trimmed === '') {
+    return false
+  }
+  const occurrences = scanWikilinksInLine(`[[t#${heading}]]`)
+  if (occurrences.length !== 1) {
+    return false
+  }
+  const parsed = parseWikilinkInner(occurrences[0]!.inner)
+  return parsed !== null && parsed.path === 't' &&
+    parsed.heading === trimmed && parsed.blockId === null
 }
 
 //#endregion

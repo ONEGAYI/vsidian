@@ -10,6 +10,8 @@ import {
   prepareWikilinkQuery,
   rankWikilinkCandidates,
   scoreWikilinkItem,
+  wikilinkFileCandidateSafe,
+  wikilinkHeadingCandidateSafe,
   type WikilinkCandidateFile,
 } from '../../src/shared/wikilinkQuery'
 
@@ -203,5 +205,44 @@ describe('planWikilinkInsertPath（来源相对路径 + vaultLink 往返核对�
   it('越出根的目标（防御）返回 null', () => {
     expect(planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/elsewhere/方案.md'))
       .toBeNull()
+  })
+})
+
+describe('F5：候选写回语法往返校验（wikilinkFileCandidateSafe / wikilinkHeadingCandidateSafe）', () => {
+  it('正常路径/别名候选全部通过（含空格、Unicode、点号、.. 上行）', () => {
+    expect(wikilinkFileCandidateSafe('../资料/方案.md', '方案')).toBe(true)
+    expect(wikilinkFileCandidateSafe('a b 附件.PDF.pdf', 'a b 附件.PDF.pdf')).toBe(true)
+    expect(wikilinkFileCandidateSafe('子目录/说明.txt', '说明')).toBe(true)
+  })
+
+  it('文件名/路径含 | 写回即裂断——不安全（POSIX a|b.md）', () => {
+    expect(wikilinkFileCandidateSafe('a|b.md', 'a|b')).toBe(false)
+    expect(wikilinkFileCandidateSafe('dir/x|y.png', 'x|y.png')).toBe(false)
+  })
+
+  it('路径含 # 被当锚点标记——不安全；含 ^ 恒非法——不安全', () => {
+    expect(wikilinkFileCandidateSafe('a#b.md', 'a#b')).toBe(false)
+    expect(wikilinkFileCandidateSafe('a^b.md', 'a^b')).toBe(false)
+  })
+
+  it('路径含 [ 或 ] 链接形态守卫拒绝——不安全', () => {
+    expect(wikilinkFileCandidateSafe('a[b.md', 'a[b')).toBe(false)
+    expect(wikilinkFileCandidateSafe('a]b.md', 'a]b')).toBe(false)
+  })
+
+  it('空路径不安全（防御）', () => {
+    expect(wikilinkFileCandidateSafe('', 'x')).toBe(false)
+    expect(wikilinkFileCandidateSafe('  ', 'x')).toBe(false)
+  })
+
+  it('正常标题通过；含 | / # / ^ / 以 ^ 开头 / 含 [ ] 的标题不安全', () => {
+    expect(wikilinkHeadingCandidateSafe('预算')).toBe(true)
+    expect(wikilinkHeadingCandidateSafe('L2 / 子项：Q3')).toBe(true)
+    expect(wikilinkHeadingCandidateSafe('标|题')).toBe(false)
+    expect(wikilinkHeadingCandidateSafe('一级#二级')).toBe(false)
+    expect(wikilinkHeadingCandidateSafe('标^题')).toBe(false)
+    expect(wikilinkHeadingCandidateSafe('^intro')).toBe(false)
+    expect(wikilinkHeadingCandidateSafe('带[括]号')).toBe(false)
+    expect(wikilinkHeadingCandidateSafe('  ')).toBe(false)
   })
 })

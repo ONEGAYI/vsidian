@@ -13,7 +13,7 @@
 import * as path from 'node:path'
 import { resolveVaultLinkFile, type VaultLinkExistsPort, type VaultLinkResolveContext } from '../shared/vaultLink'
 import { classifyVaultFileCategory } from '../shared/vaultFileCategory'
-import { defaultAliasOf } from '../shared/wikilinkQuery'
+import { defaultAliasOf, wikilinkHeadingCandidateSafe } from '../shared/wikilinkQuery'
 import { enumerateAtxHeadings, filterWikilinkHeadings } from '../shared/wikilinkHeading'
 import type { WikilinkHeadingItem } from '../shared/protocol'
 
@@ -72,13 +72,18 @@ export async function queryWikilinkHeadings(
     }
   }
   const alias = defaultAliasOf(path.basename(targetFsPath), 'markdown')
-  const items = filterWikilinkHeadings(enumerateAtxHeadings(doc.text), query).map((entry) => ({
-    id: `${targetFsPath}#${entry.line}`,
-    heading: entry.text,
-    level: entry.level,
-    line: entry.line,
-    duplicate: entry.duplicate,
-    alias,
-  }))
+  // F5：标题写回语法往返校验——含 | / # / ^ / [ / ] 的标题经确认写回后
+  // 引用静默损坏或表格格内裂格（`[[t#标题]]` 解析不回同一标题），不入
+  // 候选列表（与文件候选 insertPath 往返失败丢弃同口径）
+  const items = filterWikilinkHeadings(enumerateAtxHeadings(doc.text), query)
+    .filter((entry) => wikilinkHeadingCandidateSafe(entry.text))
+    .map((entry) => ({
+      id: `${targetFsPath}#${entry.line}`,
+      heading: entry.text,
+      level: entry.level,
+      line: entry.line,
+      duplicate: entry.duplicate,
+      alias,
+    }))
   return { status: 'ready', targetFsPath, targetVersion: doc.version, items }
 }

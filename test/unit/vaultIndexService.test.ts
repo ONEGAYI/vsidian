@@ -2310,3 +2310,127 @@ describe('VaultIndexService：全文件清单（#377 T02）', () => {
     void init
   })
 })
+
+// ---- code-review 修复批次：F5/F6/F10/F14/F15（候选语法往返与分页、空查询
+// 口径、核验零变化、扫描窗口直写） ----
+
+describe('VaultIndexService：code-review 修复（F5/F6/F10/F14/F15）', () => {
+  it('F5+F6：文件名含语法字符的候选写回即损坏——不入列表且不占页位（补位）', async () => {
+    // POSIX 形态病态名在桩文件系统合法登记；mtime 控制排序（a|b.md 最前）
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/a|b.md': '# 病态\n',
+      'C:/vault/c1.md': '# C1\n',
+      'C:/vault/c2.md': '# C2\n',
+    })
+    fs.stats.set('C:/vault/a|b.md', { mtimeMs: 20_000, size: 5 })
+    fs.stats.set('C:/vault/c1.md', { mtimeMs: 5_000, size: 4 })
+    fs.stats.set('C:/vault/c2.md', { mtimeMs: 4_000, size: 4 })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 3_000, size: 4 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 病态占位补位：首页（limit 1）跳过 a|b.md 投递 c1.md
+    const page1 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 0, 1))
+    expect(page1.items.map((i) => i.relPath)).toEqual(['c1.md'])
+    // 续页 offset=1（已投递数）：投递 c2（旧实现的排名偏移会重复投递 c1）
+    const page2 = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 1, 1))
+    expect(page2.items.map((i) => i.relPath)).toEqual(['c2.md'])
+    // 病态全局不可达：无论怎么翻页都选不到（候选侧静默排除，不产出损坏引用）
+    const full = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 0, 50))
+    expect(full.items.map((i) => i.relPath)).toEqual(['c1.md', 'c2.md', 'a.md'])
+  })
+
+  it('F6：尾部病态——items.length < limit 即穷尽信号（webview 终态判据的宿主侧语义）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/c1.md': '# C1\n',
+      'C:/vault/z|尾病.md': '# 病态\n',
+    })
+    fs.stats.set('C:/vault/c1.md', { mtimeMs: 5_000, size: 4 })
+    fs.stats.set('C:/vault/z|尾病.md', { mtimeMs: 1_000, size: 4 })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 3_000, size: 4 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '', 0, 3))
+    expect(r.items).toHaveLength(2) // 3 < limit=3 的窗口内只投递 2 个（穷尽）
+    expect(r.items.map((i) => i.relPath)).toEqual(['c1.md', 'a.md'])
+  })
+
+  it('F10：全符号查询（单 *）与评分侧同源判空——按空查询口径只列常用资源', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/图.png': 'png',
+      'C:/vault/cache.pyc': 'pyc',
+    })
+    fs.stats.set('C:/vault/图.png', { mtimeMs: 2_000, size: 3 })
+    fs.stats.set('C:/vault/cache.pyc', { mtimeMs: 9_000, size: 99 })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_000, size: 4 })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 单 `*`：prepare 的 normalized 为空（通配符剥除）——空查询口径只列
+    // 常用资源（旧 trim 口径会把 other 类 cache.pyc 混入首位）
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '*'))
+    expect(r.items.map((i) => i.relPath)).toEqual(['图.png', 'a.md'])
+    expect(r.total).toBe(2)
+  })
+
+  it('F14：verifyNow 零变化不触发任何提交写盘（不为周期核验空转全模型序列化）', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n见 [[b]]。\n', 'C:/vault/b.md': '# B\n' })
+    const { service, storage } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(2_000) // 初始快照/清单提交落定
+    const writesBefore = storage.writes.length
+    await service.verifyNow()
+    await vi.advanceTimersByTimeAsync(2_000) // 若误排提交，防抖定时器在此落盘
+    expect(storage.writes.length).toBe(writesBefore) // 零变化 → 零写入
+    // 确有变化时行为不变：磁盘新增文件 → 清单 diff 非空 → 提交发生
+    fs.files.set('C:/vault/新图.png', 'png')
+    fs.stats.set('C:/vault/新图.png', { mtimeMs: 7_000, size: 3 })
+    await service.verifyNow()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(storage.writes.length).toBeGreaterThan(writesBefore)
+    expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '新图')).items)
+      .toHaveLength(1)
+  })
+
+  it('F15：清单枚举窗口内 verifyRoot 的直写转 pending 重放——不被完成时的整体覆盖吞掉', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n', 'C:/vault/x.png': 'png' })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 受控挂起：setExcludePatterns 触发重扫（fullScan → scanCatalog），
+    // scanCatalog 的逐文件 stat 挂在 gate 上（模拟大目录扫描窗口）
+    const gate = makeGate4Test()
+    const originalStat = scan.statFile.bind(scan)
+    let armed = true
+    scan.statFile = (async (p: string) => {
+      if (armed && p.endsWith('a.md')) {
+        armed = false
+        await gate.promise
+      }
+      return originalStat(p)
+    }) as typeof scan.statFile
+    const reapply = service.setExcludePatterns(['**/.git/**', '**/node_modules/**'])
+    await vi.advanceTimersByTimeAsync(0) // 推进至 scanCatalog 的 stat 挂起点
+    // 窗口内：新文件落盘（无 watcher 事件），verifyRoot 直写通道到达
+    //（verifyRoot 不检查 catalogScanning——F15 场景本体）
+    fs.files.set('C:/vault/窗口直写.png', 'png')
+    fs.stats.set('C:/vault/窗口直写.png', { mtimeMs: 8_000, size: 3 })
+    await service.verifyNow()
+    // 放行重扫：scanCatalog 收尾整体覆盖（旧枚举不含新文件）+ pending 重放
+    gate.resolve()
+    await reapply
+    await vi.advanceTimersByTimeAsync(1_000)
+    const r = candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '窗口直写'))
+    expect(r.items).toHaveLength(1) // 旧实现：直写被覆盖吞掉，候选查不到
+    expect(r.items[0]!.relPath).toBe('窗口直写.png')
+  })
+})
+
+/** 手动放行闸门（F15 用例） */
+function makeGate4Test(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
