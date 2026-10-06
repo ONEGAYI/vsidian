@@ -354,6 +354,12 @@ async function main() {
   }
 
   for (const [name, content] of outputs) {
+    // 内容一致（行尾归一后）则跳过写盘：autocrlf 检出为 CRLF 时无条件
+    // 重写 LF 会制造「status 干净、merge 拒绝」的幻影脏（#374 复盘候选 4）
+    if (!changed.includes(name)) {
+      console.log(`产物无变化，跳过写盘 ${name}`)
+      continue
+    }
     const target = path.join(root, name)
     mkdirSync(path.dirname(target), { recursive: true })
     writeFileSync(target, content, 'utf8')
