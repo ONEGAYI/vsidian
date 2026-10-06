@@ -42,7 +42,13 @@ const cacheDir = join(cacheRoot, hash)
 const cacheNm = join(cacheDir, 'node_modules')
 const link = join(target, 'node_modules')
 
-if (!existsSync(cacheNm)) {
+// 完整性哨兵：缓存目录在但内容空/残缺（.bin/vitest 是锁定 devDep 的必装
+// 产物）时视为未建，重建而不是误判幂等——实测空缓存目录曾让 junction
+// 悬空、后续 npm run 全部落空
+const cacheReady = () => existsSync(join(cacheNm, '.bin', 'vitest'))
+
+if (!cacheReady()) {
+  rmSync(cacheDir, { recursive: true, force: true })
   mkdirSync(cacheDir, { recursive: true })
   for (const f of ['package.json', 'package-lock.json']) {
     const src = readFileSync(join(target, f))
