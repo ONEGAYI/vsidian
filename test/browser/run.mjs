@@ -86,7 +86,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'pdfZoomCopyLinks',
   // #376（T01）双链文件联想候选：紧随 symbolInput（同输入族——真实键盘/IME
   // 驱动、宿主应答由夹具回灌、候选浮层与键位行为）
-  'wikilinkSuggest']
+  'wikilinkSuggest',
+  // V02（#349）附加组件页面 SDK：生产控制器 + 装载器原型（真实键盘/CDP
+  // IME 驱动首键与组合、绘制层标记、卸载与迟回执拒收、未授权入口拒绝）
+  'addonPageSdk']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
