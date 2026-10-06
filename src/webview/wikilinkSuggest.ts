@@ -251,6 +251,11 @@ export class WikilinkSuggestController {
       clearTimeout(this.invalidateTimer)
       this.invalidateTimer = undefined
     }
+    if (this.fileQueryTimer !== undefined) {
+      clearTimeout(this.fileQueryTimer)
+      this.fileQueryTimer = undefined
+    }
+    this.pendingFileQuery = undefined
     this.cancelPendingBlockAccept('closed')
     this.detachScrollListeners()
     this.removePopup()
@@ -291,6 +296,7 @@ export class WikilinkSuggestController {
     if (!this.resultAdmissible(message, 'file')) {
       return // 守卫不符即迟到/错位响应（五重守卫见 resultAdmissible）
     }
+    this.lastFileQueryCostMs = Date.now() - this.fileQuerySentAt
     // 同一查询的更新帧（此前已有该代次结果）：手动高亮按候选身份保留
     const sameQueryUpdate = this.result !== null
     const prevActiveId = this.activeId
@@ -311,8 +317,12 @@ export class WikilinkSuggestController {
       const prev = this.result
       if (this.lastReqOffset > 0 && prev !== null && prev.stage === 'file' && prev.status === 'ready') {
         if (prev.catalogGen !== pageGen) {
-          // 清单代次已变：追加页序位失效，重取首页（同查询同代次）
-          this.sendQuery(this.session.query, this.session.generation, 0)
+          // 清单代次已变：追加页序位失效，重取首页（同查询同代次）；
+          // session 此处非空（resultAdmissible 已守卫），局部收紧类型
+          const session = this.session
+          if (session !== null) {
+            this.sendQuery(session.query, session.generation, 0)
+          }
           return
         }
         // F6：追加页按候选 id 去重兜底（宿主滑动补位后不应重复；防御性
@@ -572,6 +582,11 @@ export class WikilinkSuggestController {
       clearTimeout(this.invalidateTimer)
       this.invalidateTimer = undefined
     }
+    if (this.fileQueryTimer !== undefined) {
+      clearTimeout(this.fileQueryTimer)
+      this.fileQueryTimer = undefined
+    }
+    this.pendingFileQuery = undefined
     this.detachScrollListeners()
     this.removePopup()
   }
@@ -747,7 +762,37 @@ export class WikilinkSuggestController {
       update.state.facet(EditorView.editable)
   }
 
+  /** 慢库自适应去抖（#385 10 万档调优）：上次文件查询回包耗时（含宿主
+   *  评分）超阈值时，逐字新查询经 trailing 去抖合并——打字风暴只评最新
+   *  词（10 万档单步 ~148ms 时六步序列只评停顿处）；快库（耗时 ≤40ms）
+   *  零去抖零延迟。触底续页（offset>0）与换代/关闭不受去抖（立即或丢弃） */
+  private fileQueryTimer: ReturnType<typeof setTimeout> | undefined
+  private pendingFileQuery: { query: string; generation: number } | undefined
+  private lastFileQueryCostMs = 0
+  private fileQuerySentAt = 0
+
   private sendQuery(query: string, generation: number, offset: number): void {
+    const debounceMs = this.lastFileQueryCostMs > 40 ? Math.min(this.lastFileQueryCostMs, 160) : 0
+    if (offset > 0 || debounceMs === 0) {
+      this.fireFileQuery(query, generation, offset)
+      return
+    }
+    this.pendingFileQuery = { query, generation }
+    if (this.fileQueryTimer !== undefined) {
+      clearTimeout(this.fileQueryTimer)
+    }
+    this.fileQueryTimer = setTimeout(() => {
+      this.fileQueryTimer = undefined
+      const pending = this.pendingFileQuery
+      this.pendingFileQuery = undefined
+      // 会话关闭或已换代（generation 过期）：丢弃不出站
+      if (pending !== undefined && this.session !== null && this.session.generation === pending.generation) {
+        this.fireFileQuery(pending.query, pending.generation, 0)
+      }
+    }, debounceMs)
+  }
+
+  private fireFileQuery(query: string, generation: number, offset: number): void {
     const current = this.deps.getSession()
     if (!current) {
       return
@@ -755,6 +800,7 @@ export class WikilinkSuggestController {
     const reqId = ++this.reqSeq
     this.lastReqId = reqId
     this.lastReqOffset = offset
+    this.fileQuerySentAt = Date.now()
     this.deps.send({
       kind: 'wikilink.query',
       sessionId: current.sessionId,

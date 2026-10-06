@@ -5,7 +5,7 @@
 // wikilink.query.result。浏览器层（wikilinkSuggest.mjs）用真实键盘/IME
 // 验证同一链路，本层覆盖矩阵广度。
 // @vitest-environment jsdom
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest'
 import { EditorSelection } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
@@ -1638,6 +1638,92 @@ describe('浮层定位与底部键提示条（2026-10-06 验收反馈）', () =>
       expect(hints.textContent).not.toContain(zhCn['wikilinkSuggest.hint.block'])
     } finally {
       controller.dispose()
+    }
+  })
+})
+
+describe('慢库自适应去抖（#385 10 万档调优）', () => {
+  it('快库零去抖：回包即时的库上连续输入每键立即出站', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      locate(controller, 3)
+      typeAt(view, 3, '案')
+      respond(controller, sent, [FANGAN])
+      const before = queries(sent).length
+      typeAt(view, 4, '书') // cost=0（Date 同步）→ 零去抖
+      expect(queries(sent).length).toBe(before + 1)
+      expect(lastQuery(sent)?.query).toBe('方案书')
+    } finally {
+      controller.dispose()
+    }
+  })
+})
+
+describe('慢库自适应去抖——fake timers 时序', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('慢库 trailing 合并：150ms 回包后连续两键只评最新词', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      locate(controller, 3)
+      typeAt(view, 3, '案')
+      // 慢库：150ms 后回包（cost=150 → 去抖窗口 150）
+      vi.advanceTimersByTime(150)
+      respond(controller, sent, [FANGAN])
+      const before = queries(sent).length
+      typeAt(view, 4, '书')
+      expect(queries(sent).length, '首键进去抖窗口，不立即出站').toBe(before)
+      vi.advanceTimersByTime(60) // 60ms < 150：第二键替换 pending 并重置窗口
+      typeAt(view, 5, '目')
+      expect(queries(sent).length, '窗口内第二键仍不出站').toBe(before)
+      vi.advanceTimersByTime(150)
+      expect(queries(sent).length, '窗口到期只出站一次').toBe(before + 1)
+      expect(lastQuery(sent)?.query, '只评最新词').toBe('方案书目')
+    } finally {
+      controller.dispose()
+      vi.runOnlyPendingTimers()
+    }
+  })
+
+  it('Esc 关闭后 pending 丢弃：窗口到期不再出站', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      locate(controller, 3)
+      typeAt(view, 3, '案')
+      vi.advanceTimersByTime(150)
+      respond(controller, sent, [FANGAN])
+      const before = queries(sent).length
+      typeAt(view, 4, '书')
+      press(view, 'Escape')
+      vi.advanceTimersByTime(300)
+      expect(queries(sent).length, '关闭后 pending 不再出站').toBe(before)
+    } finally {
+      controller.dispose()
+      vi.runOnlyPendingTimers()
+    }
+  })
+
+  it('窗口内重开（换代）后旧 pending 丢弃：新会话查询不受污染', () => {
+    const { controller, sent, view } = setup('[[方]]')
+    try {
+      locate(controller, 3)
+      typeAt(view, 3, '案')
+      vi.advanceTimersByTime(150)
+      respond(controller, sent, [FANGAN])
+      const before = queries(sent).length
+      typeAt(view, 4, '书') // 进去抖窗口
+      // 光标移出再回目标区重开（generation 递增）
+      locate(controller, 6)
+      locate(controller, 4)
+      typeAt(view, 4, '卷') // 新会话新查询（也进去抖窗口——cost 仍 150）
+      vi.advanceTimersByTime(400)
+      const qs = queries(sent).slice(before)
+      expect(qs.every((q) => q.query !== '方案书'), '旧代次 pending 不出站').toBe(true)
+      expect(lastQuery(sent)?.query).toBe('方案卷')
+    } finally {
+      controller.dispose()
+      vi.runOnlyPendingTimers()
     }
   })
 })
