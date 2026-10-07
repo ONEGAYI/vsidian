@@ -166,8 +166,29 @@ async function runPhase({ phase, executable, includeIds, governedIds }) {
     console.log(`[runRemoteSshAddons] 阶段 ${phase} 通过（报告：${reportPath}）`)
     return true
   } finally {
-    rmSync(`${wsDir}.code-workspace`, { force: true })
-    rmSync(wsDir, { recursive: true, force: true })
+    // 阶段工作区清理尽力而为（#367——Windows 句柄延迟释放：SSH server/
+    // 宿主退出竞态下 rmSync 报 EPERM/EBUSY，T18 重跑实测 R1 四用例全过
+    // 仍被清理异常判整轮失败）。临时目录位于系统 Temp，清理失败只留痕
+    // 不阻断矩阵结论（#211 teardown 噪声边界同精神）。
+    const cleanup = (target, recursive) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          rmSync(target, { recursive, force: true })
+          return
+        } catch (err) {
+          const code = err?.code
+          if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'ENOTEMPTY')) {
+            if (code !== undefined) {
+              console.warn(`[runRemoteSshAddons] 阶段工作区清理失败（${code}，保留 ${target} 由系统临时区回收）`)
+            }
+            return
+          }
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+        }
+      }
+    }
+    cleanup(`${wsDir}.code-workspace`, false)
+    cleanup(wsDir, true)
   }
 }
 
