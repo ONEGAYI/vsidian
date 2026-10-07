@@ -1657,9 +1657,14 @@ export class LiveEditorInstance {
       // 事务在暂缓窗口并入队尾同组段（组首 atomic 段未被外来写入打断的
       // 本地镜像 = 段仍在暂缓集且带组首来源），合成一笔出站 = 一条宿主
       // 历史项；组首 atomic 事务开新段
+      // 并入前提：队尾段带组首来源且与本次提交者同组件——跨组件
+      // joinPrevious 不并入（共享层「合并笔全部同组件」约束；无同组件
+      // 前项时走下方逐笔出站，由宿主闸门拒绝）
+      const lastSegment = this.deferredSegments.length > 0 ? this.deferredSegments[this.deferredSegments.length - 1] : undefined
       const mergeIntoPreviousSegment =
         origins !== undefined && origins.length === 1 && origins[0]!.undo === 'joinPrevious' &&
-        this.deferredSegments.length > 0
+        lastSegment?.origins !== undefined && lastSegment.origins.length > 0 &&
+        lastSegment.origins[0]!.addonId === origins[0]!.addonId
       // SDK 修饰事务（带来源）不并入用户输入段（不同撤回单位）：atomic
       // 强制开新段；joinPrevious 仅并入「同组队尾 SDK 段」（上方合并判定）
       if (this.deferredLocal && (segmentBoundary || origins !== undefined) && !mergeIntoPreviousSegment) {

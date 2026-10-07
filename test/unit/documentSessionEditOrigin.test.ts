@@ -428,6 +428,22 @@ describe('T06 数组 origin 与业务闸门', () => {
     expect(s.doc.applyCalls[0]!.origin).toEqual([head, joined])
   })
 
+  it('跨组件合并笔防御复核拒绝：伪造他组件 joinPrevious 并组整条拒（不写回不留归属）', async () => {
+    const attributed: AttributionRecord[] = []
+    const s = setup('abc\n', { onEditAttributed: (r) => attributed.push(r) })
+    await ready(s)
+    const head = { addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' as const }
+    const forged = { addonId: 'pub.other', opId: 'op-x', undo: 'joinPrevious' as const }
+    const req = originRequest(1, 1, [{ offset: 3, length: 0, text: 'X' }], head)
+    ;(req as { origin?: unknown }).origin = [head, forged]
+    await s.session.handleWebviewMessage(req, s.sessionId)
+    const ack = lastAck(s.sent)
+    expect(ack).toMatchObject({ kind: 'edit.ack', seq: 1, ok: false, reason: 'conflict', originRejection: 'history-boundary' })
+    expect(s.doc.content).toBe('abc\n')
+    expect(s.doc.applyCalls).toHaveLength(0)
+    expect(attributed).toHaveLength(0)
+  })
+
   it('闸门拒绝（history-boundary）：不写回、不留归属记录、ack 附带全文与业务标记', async () => {
     const attributed: AttributionRecord[] = []
     const gate = vi.fn(() => false)

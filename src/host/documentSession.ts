@@ -36,7 +36,7 @@ import {
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
-import { hasNetTextChange, parseEditOriginField, type EditOriginList, type EditOriginMeta } from '../shared/editOrigin'
+import { hasNetTextChange, isValidMergedOriginList, parseEditOriginField, type EditOriginList, type EditOriginMeta } from '../shared/editOrigin'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
 import type { RefImageContent, RefMarkdownContent, RefPdfContent, RefPdfNavSelector, RefTextContent } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
@@ -2110,6 +2110,22 @@ export class DocumentSession {
     // T06（#355）来源业务闸门（队列内、写回前）：joinPrevious 无可确认前项
     // 等业务拒绝在此拦截——不写回、不留来源记录、面板不进冲突暂停（业务
     // 声明错误 ≠ 同步冲突；ack 附带权威全文供 webview 回滚本地效果）
+    // 合并笔结构防御复核（数组多元素形态）：共享层约束「全部同组件、首项
+    //  atomic、其余 joinPrevious」由 webview 出站层构造保证，此处兜底防
+    // 伪造——非法整条拒绝（不写回、不留来源；通道复用 origin 业务拒绝
+    //  的 conflict ack + history-boundary，webview 侧映射为可辨认拒绝）
+    if (origins !== undefined && origins.length >= 2 && !isValidMergedOriginList(origins)) {
+      this.sendAck(panel, {
+        kind: 'edit.ack',
+        seq: message.seq,
+        ok: false,
+        reason: 'conflict',
+        version: this.doc.version,
+        text: this.newline.toLfText(this.doc.getText()),
+        originRejection: 'history-boundary',
+      })
+      return
+    }
     if (origins !== undefined && this.options.onOriginGate) {
       const gate = this.options.onOriginGate
       if (origins.some((origin) => !gate(origin))) {

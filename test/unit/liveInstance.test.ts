@@ -328,4 +328,40 @@ describe('T06 SDK 编辑面（#355）：快照/applyEdits/凭据结算', () => {
     expect((await promiseA).ok).toBe(true)
     expect((await promiseB).ok).toBe(true)
   })
+
+  it('跨组件 joinPrevious 不并入他组段：逐段独立出站（同组件约束）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    instance.view!.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    instance.view!.dispatch({ changes: { from: 5, insert: 'U' } })
+    const revA = instance.snapshotForAddon()!.revision
+    const promiseA = instance.applyAddonEdit({
+      request: { revision: revA, changes: [{ offset: 0, length: 0, text: 'A' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' }],
+    })
+    // 他组件 joinPrevious：不得并入 pub.addon 组首段
+    const revB = instance.snapshotForAddon()!.revision
+    const promiseB = instance.applyAddonEdit({
+      request: { revision: revB, changes: [{ offset: 1, length: 0, text: 'B' }] },
+      origins: [{ addonId: 'pub.other', opId: 'op-b', undo: 'joinPrevious' }],
+    })
+    instance.view!.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await new Promise((r) => setTimeout(r, 60))
+    const reqs = editRequests(sent)
+    expect(reqs[0]!.origin).toBeUndefined()
+    instance.handleEditAck({ kind: 'edit.ack', seq: reqs[0]!.seq, ok: true, version: 2 })
+    await new Promise((r) => setTimeout(r, 30))
+    // 段序串行：atomic 段先出站，ack 后 joinPrevious 段再出（两笔独立）
+    const first = editRequests(sent).filter((r) => r.origin !== undefined)
+    expect(first).toHaveLength(1)
+    expect(first[0]!.origin).toEqual({ addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' })
+    instance.handleEditAck({ kind: 'edit.ack', seq: first[0]!.seq, ok: true, version: 3 })
+    await new Promise((r) => setTimeout(r, 30))
+    const second = editRequests(sent).filter((r) => r.origin !== undefined)
+    expect(second).toHaveLength(2)
+    expect(second[1]!.origin).toEqual({ addonId: 'pub.other', opId: 'op-b', undo: 'joinPrevious' })
+    instance.handleEditAck({ kind: 'edit.ack', seq: second[1]!.seq, ok: true, version: 4 })
+    expect((await promiseA).ok).toBe(true)
+    expect((await promiseB).ok).toBe(true)
+  })
 })
