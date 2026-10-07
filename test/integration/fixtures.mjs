@@ -900,6 +900,13 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'v01-t03-group.md'), 'T03组基\n', 'utf8')
   writeFileSync(path.join(wsDir, 'v01-t03-ref-a.md'), '# T03 引用 A\n\n![[v01-t03-ref-b]]\n', 'utf8')
   writeFileSync(path.join(wsDir, 'v01-t03-ref-b.md'), 'T03引用B基\n', 'utf8')
+  // T09（#358）渲染提供者接管：内置 mermaid 围栏 + 附加语言围栏（夹具
+  // addon-t09 页面产物接管显示——绘制层断言经 view.state.paint.renderers）
+  writeFileSync(path.join(wsDir, 't09-render.md'), [
+    '# T09 渲染接管', '',
+    '```mermaid', 'flowchart TD', '  A --> B', '```', '',
+    '```t09draw', 'hello-draw', '```', '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'ackorder.md'), ACKORDER_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'resync.md'), RESYNC_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'ime-escape.md'), IME_ESC_DOC, 'utf8')

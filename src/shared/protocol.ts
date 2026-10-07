@@ -2417,6 +2417,25 @@ export interface LineGutterAlignment {
 export interface PaintProbe {
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
   toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
+  /** #358 T09 渲染提供者接管绘制观测：文档内图形容器的生效提供者与
+   *  绘制层证据（组件容器计算色/几何；内置 SVG 在场数）——「实际选中
+   *  内容」的断言面（非 DOM 存在性）。无图形容器为空数组（graphic 名
+   *  已被 #111 图形交互探针占用，此处命名 renderers） */
+  renderers?: {
+    containers: Array<{
+      language: string
+      /** 生效提供者（'builtin' 或 `${addonId}/${rendererId}`） */
+      provider: string
+      /** 挂载目标模式（live widget / 阅读块） */
+      mode: string
+      state: string | null
+      /** 组件渲染内容的计算背景色（内置容器为 null——SVG 在场由 builtinSvg 计） */
+      color: string | null
+      /** 组件渲染内容宽度（px；非零 = 真实布局） */
+      width: number
+    }>
+    builtinSvg: number
+  }
   /** 首个含文本行：首字符 rect 在视口内且 elementFromPoint 命中内容区。
    *  覆盖物（冲突暂停横幅、查找面板等绝对定位元素）遮挡首 8 行文本时同样
    *  返回 false——失败排障时先排除覆盖物再怀疑 CSP 样式失效 */
@@ -3289,6 +3308,14 @@ function isPaintProbe(v: unknown): v is PaintProbe {
   return (
     isObject(v) &&
     typeof v.textVisible === 'boolean' &&
+    (v.renderers === undefined || (isObject(v.renderers) &&
+      Array.isArray(v.renderers.containers) &&
+      v.renderers.containers.every((c: unknown) => isObject(c) &&
+        isString(c.language) && isString(c.provider) && isString(c.mode) &&
+        (c.state === null || isString(c.state)) &&
+        (c.color === null || isString(c.color)) &&
+        typeof c.width === 'number') &&
+      typeof v.renderers.builtinSvg === 'number')) &&
     isNullOrString(v.scrollerDisplay) &&
     isNullOrString(v.gutterUserSelect) &&
     (v.visibleLineNumbers === undefined || (Array.isArray(v.visibleLineNumbers) &&

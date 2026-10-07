@@ -209,6 +209,8 @@ import {
 import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
 import {
   GRAPHIC_LANG_ATTR,
+  GRAPHIC_MODE_ATTR,
+  GRAPHIC_PROVIDER_ATTR,
   MERMAID_CLASS_NAMES,
   MERMAID_CODE_ATTR,
   MERMAID_STATE_ATTR,
@@ -9702,6 +9704,26 @@ export class WebviewSyncController {
       ? this.readingContainer?.closest('#app')?.querySelector<HTMLElement>('.vsidian-reading-find-source')
       : null
     const findSourceCurrent = findSource?.querySelector<HTMLElement>('.vsidian-find-match-current')
+    // #358 T09 渲染提供者接管绘制观测：文档内图形容器逐个回报生效提供者
+    //（provider data 属性）、状态、组件渲染内容的计算色与几何（内置容器
+    // color null——SVG 在场由 builtinSvg 计）。绘制层断言面，非 DOM 存在性
+    const rendererScope = view.dom.closest('#app') ?? document
+    const rendererContainers = [...rendererScope.querySelectorAll<HTMLElement>(`[${GRAPHIC_LANG_ATTR}]`)]
+      .filter((el) => el.isConnected)
+      .map((el) => {
+        const box = el.querySelector<HTMLElement>('[data-t09-renderer]') ?? el.querySelector<HTMLElement>('.t09-box')
+        // 通用化：组件渲染内容的代表元素取首个带 provider 标记的子节点后代
+        const content = box ?? [...el.querySelectorAll<HTMLElement>('*')].find((child) => child.childElementCount === 0 && (child.textContent ?? '').trim() !== '') ?? null
+        const rect = content?.getBoundingClientRect()
+        return {
+          language: (el.getAttribute(GRAPHIC_LANG_ATTR) ?? '').trim(),
+          provider: el.getAttribute(GRAPHIC_PROVIDER_ATTR) ?? 'builtin',
+          mode: el.getAttribute(GRAPHIC_MODE_ATTR) ?? '',
+          state: el.getAttribute(MERMAID_STATE_ATTR),
+          color: content && content.closest(`[${GRAPHIC_PROVIDER_ATTR}]`) === el ? getComputedStyle(content).backgroundColor : null,
+          width: rect ? rect.width : 0,
+        }
+      })
     return {
       textVisible,
       scrollerDisplay: view.scrollDOM ? getComputedStyle(view.scrollDOM).display : null,
@@ -9747,6 +9769,10 @@ export class WebviewSyncController {
       hr,
       highlight,
       graphic,
+      renderers: {
+        containers: rendererContainers,
+        builtinSvg: rendererScope.querySelectorAll('.vsidian-mermaid svg').length,
+      },
       imageChrome,
       quickActions,
       code,

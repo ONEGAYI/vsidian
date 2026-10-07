@@ -12,6 +12,7 @@ import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
 import { addonT06Cases } from './addonT06Cases'
+import { addonT09Cases } from './addonT09Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17347,4 +17348,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
   // 断言面见 addonT06Cases.ts 头注）
   ...addonT06Cases,
+  // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
+  // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
+  ...addonT09Cases,
 ]
