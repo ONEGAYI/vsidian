@@ -252,15 +252,24 @@ export const addonT02Cases: Array<[string, () => Promise<void>]> = [
 
     // 用户关闭功能开关：运行贡献释放（desired 清空 → unload 推送）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: false })
-    await pollDiag('停用后装载面清空', async () => {
-      const probe = await editorProbe('lf.md')
-      return probe && !probe.active.some((entry) => entry.addonId === ADDON_ID) && probe.cssLinksActive === 0 ? probe : undefined
-    })
+    // 事件面先行采样（#367 修复：共享会话多组件并存成为常态——T06–T11
+    // 夹具与 T15 样例的通道短轮询会持续刷新 addonPageEvents 环形缓冲
+    //（最近 200 条），迟到采样可能把 t02 的 unload/unloaded 记录挤出；
+    // 停用后立即轮询，采到即固化到局部变量，后续断言不再依赖缓冲留存）
     const events = await pollDiag('卸载事件收敛', async () => {
       const all = await bridgeEvents()
       const unload = all.find((e) => e.panel === 'editor' && e.kind === 'directive.unload' && e.addonId === ADDON_ID)
       const unloaded = all.find((e) => e.panel === 'editor' && e.kind === 'outbound.unloaded' && e.addonId === ADDON_ID && e.ok === true)
       return unload && unloaded ? all : undefined
+    })
+    // 装载面清空（#367 修复：多组件常态下 cssLinksActive 汇总其他活跃
+    // 组件的授权样式表、不再归零——断言收敛为按组件观测：t02 退出
+    // active 且 history 留有 released 终结记录；样式表随 release 撤下
+    // 由装载器释放路径承担（addonPageLoader 单测钉住））
+    await pollDiag('停用后装载面清空', async () => {
+      const probe = await editorProbe('lf.md')
+      const released = probe?.history.some((h) => h.addonId === ADDON_ID && h.ended === 'released')
+      return probe && !probe.active.some((entry) => entry.addonId === ADDON_ID) && released ? probe : undefined
     })
     assert(events.some((e) => e.panel === 'editor' && e.kind === 'directive.unload'), '停用应推送 unload 指令')
 

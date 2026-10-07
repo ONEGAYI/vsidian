@@ -21,6 +21,7 @@ import {
   mergeRemoteExtensionEntries,
   readSshPhaseMarker,
   remoteSshMarketplaceUrl,
+  remoteSshPayloadKind,
   remoteSshProfileSettings,
   withRemoteArg,
   writeSshPhaseMarker,
@@ -61,6 +62,16 @@ test('marketplace 历史版本下载 URL：发布者/扩展/版本三段形态',
     remoteSshMarketplaceUrl('0.106.1'),
     'https://marketplace.visualstudio.com/_apis/public/gallery/publishers/ms-vscode-remote/vsextensions/remote-ssh/0.106.1/vspackage',
   )
+})
+
+test('remoteSshPayloadKind：vspackage 端点两种实际形态与坏载荷（#367——marketplace 行为漂移兼容）', () => {
+  // gzip vspackage（T17 实施时观测的形态）
+  assert.equal(remoteSshPayloadKind(Buffer.from([0x1f, 0x8b, 0x08, 0x00])), 'gzip')
+  // 未压缩 VSIX（zip，PK magic——2026-10-08 T18 重跑时 marketplace 直接返回）
+  assert.equal(remoteSshPayloadKind(Buffer.from([0x50, 0x4b, 0x03, 0x04])), 'zip')
+  assert.equal(remoteSshPayloadKind(Buffer.alloc(0)), 'unknown', '空载荷（下载损坏/半途）判 unknown')
+  assert.equal(remoteSshPayloadKind(Buffer.from([0x50, 0x4b])), 'unknown', '过短载荷不足以判 zip')
+  assert.equal(remoteSshPayloadKind(Buffer.from('PK\x03\x04'.split('').map(() => 0x00))), 'unknown', '全零四字节判 unknown')
 })
 
 test('SSH 阶段标记：写读往返、未知阶段拒绝、缺席读 null', () => {

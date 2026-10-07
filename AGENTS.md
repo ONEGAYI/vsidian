@@ -177,6 +177,7 @@ vsidian/
 │   │   ├── tooltip.md                           # 统一自绘悬停提示规格
 │   │   ├── vault-index-backlinks.md             # 引用索引与反链实施规格
 │   │   ├── viewport-width.md                    # 可读行宽与双模式列布局规格
+│   │   ├── vsidian-addons-coverage.md           # 29 用户故事覆盖映射
 │   │   ├── vsidian-addons-tickets/…             # 附加组件验证与实施票面
 │   │   ├── vsidian-addons.md                    # 附加组件接入与公开API规格草案
 │   │   ├── wikilink-completion-tickets/…        # 双链联想验证与实施票面

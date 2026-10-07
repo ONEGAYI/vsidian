@@ -23,7 +23,10 @@ import {
 } from './gen-sample.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const outDir = process.argv[2] ?? path.join(root, 'docs', 'perf', 'data')
+// 输出目录显式 resolve 为绝对路径：PERF_REPORT_DIR 经 env 传进扩展宿主，
+// 宿主进程 cwd 与启动器不保证一致（T18 实测：相对路径下测量全完成、
+// 末步报告 writeFileSync ENOENT——目录建在启动器 cwd，宿主侧相对解析落空）
+const outDir = path.resolve(process.argv[2] ?? path.join(root, 'docs', 'perf', 'data'))
 const SIZES = [
   { name: '1k', lines: 1_000 },
   { name: '10k', lines: 10_000 },
