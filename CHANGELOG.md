@@ -17,13 +17,20 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 ### 新增
 
-**围栏语言与跨分片高亮（#389）**
+**围栏语言与跨分片高亮（#389/#390）**
 
+- 新增 SPICE 网表、GNU Makefile、PHP 与 GraphQL 词法高亮和徽标；保留 SPICE 控制变量、Makefile 嵌套变量与 recipe、PHP 带/不带标签和 heredoc、GraphQL 跨行块字符串的词法差异
 - 新增 Tcl、VHDL、TOML、INI/properties、XML、Dockerfile、CMake、diff/patch，以及 C#、Kotlin、Swift、Dart、Ruby、Lua、R、Julia、SCSS、LESS、Protocol Buffers 的词法高亮与正文卡片徽标
 - INI section、diff 新增行与删除行提供明暗词类配色；Tcl 双引号字符串支持转义引号和跨行内容
 - 阅读与 Markdown 悬停/嵌入按完整围栏保留跨 60 行分片的注释和字符串状态；完整代码体超过 4096 行时统一回退纯文本，分片不能绕过上限
 - 在设置中切换卡片、高亮、行号或复制按钮后，已显示的正文阅读代码块立即更新，保留阅读位置、折叠和折行状态；Markdown 悬停与嵌入的高亮开关也立即生效
 - 新增代码与配置文本后缀可参与常用文件联想；无扩展名文件和 SQLite 数据库的分类保持不变
+
+**SQL 与 JSON 方言（#391）**
+
+- `pgsql`、`postgres`、`postgresql` 采用 PostgreSQL 高亮；MySQL 与 SQLite 使用独立方言，识别各自字符串、注释和引用标识符；`sql` 保持通用 SQL
+- 新增 JSONC 注释与尾逗号高亮；JSON5 另支持非引号属性、单引号与续行、十六进制和扩展数值，严格 `json` 行为不变
+- 新方言在 Live、阅读与 Markdown 引用中共用完整围栏上下文和超大代码块降级；`.jsonc`/`.json5` 为文本，`.sqlite`/`.db` 数据库仍不作为文本文件
 
 ## 0.11.0 - 2026-10-06
 

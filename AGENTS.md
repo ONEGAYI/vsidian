@@ -135,6 +135,7 @@ vsidian/
 │   │   ├── blockquote-accent-bar.md             # 引用块紫色提示边条规格
 │   │   ├── blockquote-table.md                  # 引用块内表格规格
 │   │   ├── code-block-card.md                   # 代码块卡片功能规格
+│   │   ├── code-language-sources.md             # 新词法来源许可与边界
 │   │   ├── context-menu.md                      # 统一右键菜单规格（正文全域接管）
 │   │   ├── css-snippets.md                      # CSS片段与样式兼容规格
 │   │   ├── default-editor-guard.md              # 默认编辑器守护规格

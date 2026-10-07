@@ -429,10 +429,10 @@ try {
 
   // ---- #389：语言扩展的真实文字绘制（生产色板，无测试 CSS 改写） ----
   const paintColors = {
-    light: { string: 'rgb(10, 48, 105)', keyword: 'rgb(175, 0, 219)',
+    light: { string: 'rgb(10, 48, 105)', string2: 'rgb(129, 31, 63)', number: 'rgb(9, 134, 88)', keyword: 'rgb(175, 0, 219)',
       comment: 'rgb(110, 119, 129)', meta: 'rgb(5, 80, 174)',
       inserted: 'rgb(34, 134, 58)', deleted: 'rgb(179, 29, 40)' },
-    dark: { string: 'rgb(165, 214, 255)', keyword: 'rgb(197, 134, 192)',
+    dark: { string: 'rgb(165, 214, 255)', string2: 'rgb(209, 105, 105)', number: 'rgb(181, 206, 168)', keyword: 'rgb(197, 134, 192)',
       comment: 'rgb(139, 148, 158)', meta: 'rgb(121, 192, 255)',
       inserted: 'rgb(133, 232, 157)', deleted: 'rgb(249, 117, 131)' },
   }
@@ -448,6 +448,14 @@ try {
     return paint
   }
   const languageCases = [
+    { info: 'ngspice title=paint', id: 'spice', label: 'SPICE', badge: 'SP', badgeColor: 'rgb(45, 140, 140)',
+      code: '.param gain=2', text: '.param', kind: 'keyword' },
+    { info: 'mk', id: 'makefile', label: 'Makefile', badge: 'MK', badgeColor: 'rgb(109, 128, 134)',
+      code: 'all:\n\t@echo "make recipe paint"', text: 'make recipe paint', kind: 'string' },
+    { info: 'php', id: 'php', label: 'PHP', badge: 'PHP', badgeColor: 'rgb(119, 123, 180)',
+      code: '$label = "plain PHP paint";', text: 'plain PHP paint', kind: 'string' },
+    { info: 'gql', id: 'graphql', label: 'GraphQL', badge: 'GQL', badgeColor: 'rgb(225, 0, 152)',
+      code: 'query PaintChip { chip { id } }', text: 'query', kind: 'keyword' },
     { info: 'TCL title=paint', id: 'tcl', label: 'Tcl', badge: 'Tcl', badgeColor: 'rgb(228, 204, 152)',
       code: 'set message "quoted Tcl paint"', text: 'quoted Tcl paint', kind: 'string' },
     { info: 'VHD', id: 'vhdl', label: 'VHDL', badge: 'VHD', badgeColor: 'rgb(173, 178, 203)',
@@ -456,6 +464,16 @@ try {
       code: '[paint_section]\ncolor=blue', text: '[paint_section]', kind: 'meta' },
     { info: 'patch', id: 'diff', label: 'Diff', badge: '+−', badgeColor: 'rgb(86, 138, 53)',
       code: '-removed_paint\n+added_paint', text: '+added_paint', kind: 'inserted' },
+    { info: 'PGSQL title=paint', id: 'postgresql', label: 'PostgreSQL', badge: 'PG', badgeColor: 'rgb(227, 140, 0)',
+      code: 'SELECT $tag$postgres -- paint$tag$;', text: 'postgres -- paint', kind: 'string' },
+    { info: 'MYSQL', id: 'mysql', label: 'MySQL', badge: 'My', badgeColor: 'rgb(227, 140, 0)',
+      code: 'SELECT `paint name`; # mysql paint', text: '# mysql paint', kind: 'comment' },
+    { info: 'SQLITE', id: 'sqlite', label: 'SQLite', badge: 'Lite', badgeColor: 'rgb(227, 140, 0)',
+      code: 'SELECT [sqlite paint] FROM records;', text: '[sqlite paint]', kind: 'string2' },
+    { info: 'JSONC', id: 'jsonc', label: 'JSONC', badge: '{c}', badgeColor: 'rgb(168, 185, 204)',
+      code: '{"key": 1, /* jsonc paint */}', text: 'jsonc paint', kind: 'comment' },
+    { info: 'JSON5', id: 'json5', label: 'JSON5', badge: '{5}', badgeColor: 'rgb(168, 185, 204)',
+      code: "{unquoted: +.5, label: 'json5 paint',}", text: '+.5', kind: 'number' },
   ]
   for (const theme of ['light', 'dark']) {
     await page.evaluate((theme) => {
@@ -471,7 +489,7 @@ try {
         await page.evaluate((mode) => window.setCodeMode(mode), mode)
         await page.evaluate((offset) => window.locateCode(offset), source.indexOf(language.text))
         const scope = `#app .vsidian-view-${mode}`
-        const label = `#389 ${theme}/${mode}/${language.id}`
+        const label = `#389/#391 ${theme}/${mode}/${language.id}`
         await assertTokenPaint(scope, `tok-${language.kind}`, language.text, paintColors[theme][language.kind], label)
         const header = `${scope} .vsidian-code-card-header[data-vsidian-code-lang="${language.id}"]`
         await page.locator(header).scrollIntoViewIfNeeded()
@@ -518,15 +536,25 @@ try {
   // 完整围栏上下文：第 65 行在第二片，首片开头的多行状态必须仍在。
   // 末尾加入足够多的段落，使定位离开后目标 DOM 确实卸载（不是隐藏）。
   const chunkCases = [
+    { info: 'gql', open: '"""paint_open', close: '"""\ntype Chip { id: ID! }',
+      marker: 'paint_graphql_after_sixty', kind: 'string' },
+    { info: 'php', open: '<?php /* paint_open', close: '*/ echo 1; ?>',
+      marker: 'paint_php_after_sixty', kind: 'comment' },
     { info: 'kotlin', open: '/* paint_open', close: '*/\nval after = 7',
       marker: 'paint_comment_after_sixty', kind: 'comment' },
     { info: 'toml', open: 'message = """paint_open', close: '"""',
       marker: 'paint_string_after_sixty', kind: 'string' },
+    { info: 'jsonc', open: '{ /* paint_open', close: '*/ "after": 2}',
+      marker: 'paint_jsonc_after_sixty', kind: 'comment' },
+    { info: 'json5', open: '{key: "paint_open\\', fill: '\\', close: 'closing", after: 2}',
+      marker: 'paint_json5_after_sixty', kind: 'string' },
+    { info: 'postgresql', open: 'SELECT $tag$paint_open', close: 'closing$tag$;',
+      marker: 'paint_postgres_after_sixty', kind: 'string' },
   ]
   for (const sample of chunkCases) {
     const source = ['Cross-chunk paint.', '', `\`\`\`${sample.info}`, sample.open,
-      ...Array.from({ length: 63 }, (_, i) => `context filler ${i + 2}`),
-      sample.marker, sample.close, '```', '',
+      ...Array.from({ length: 63 }, (_, i) => `context filler ${i + 2}${sample.fill ?? ""}`),
+      sample.marker + (sample.fill ?? ''), sample.close, '```', '',
       ...Array.from({ length: 160 }, (_, i) => `Distant paragraph ${i}.\n`),
       'far_remount_anchor'].join('\n')
     await page.evaluate((source) => window.initCode(source), source)
@@ -639,8 +667,15 @@ try {
     assert.equal(after.headers, 0, '#389 引用高亮切换仍保留无卡片工具条的原形态')
   }
 
+  for (const language of languageCases.filter((sample) => ['postgresql', 'mysql', 'sqlite', 'jsonc', 'json5'].includes(sample.id))) {
+    const source = `\`\`\`${language.info}\n${language.code}\n\`\`\``
+    await page.evaluate((source) => window.mountCodeReference(source, 0), source)
+    await assertTokenPaint('#code-reference-surface', `tok-${language.kind}`, language.text,
+      paintColors.dark[language.kind], `#391 Markdown reference/${language.id}`)
+  }
+
   assert.deepEqual(errors, [], '页面不得有脚本错误')
-  console.log('codeCardChrome: #189 + #190 + #191 + #389 断言通过（围栏真实对齐、折叠钮位置恒定、整卡悬停恒显、整条热区、折行开关、续行对齐与语言文字真实着色）')
+  console.log('codeCardChrome: #189 + #190 + #191 + #389 + #391 断言通过（围栏真实对齐、折叠钮位置恒定、整卡悬停恒显、整条热区、折行开关、续行对齐与语言文字真实着色）')
 } finally {
   await browser.close()
 }

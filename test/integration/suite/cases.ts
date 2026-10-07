@@ -7886,13 +7886,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('code-card.md') === diskBefore, '阅读卡片交互不得改写源文')
   }],
 
-  ['新增围栏语言：Tcl/VHDL/INI/diff 双模式文字真实着色（#389）', async () => {
+  ['新增围栏语言：现成与新增词法双模式文字真实着色（#389/#390）', async () => {
     const file = 'code-language-paint.md'
     await openWithEditor(file)
     await waitSessionReady(file)
     const uri = wsUri(file).toString()
     const diskBefore = await readDisk(file)
     const samples = [
+      { text: '.param', kind: 'keyword', label: 'SPICE',
+        light: 'rgb(175, 0, 219)', dark: 'rgb(197, 134, 192)' },
+      { text: 'make recipe paint', kind: 'string', label: 'Makefile',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+      { text: 'plain PHP paint', kind: 'string', label: 'PHP',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+      { text: 'query', kind: 'keyword', label: 'GraphQL',
+        light: 'rgb(175, 0, 219)', dark: 'rgb(197, 134, 192)' },
       { text: 'quoted Tcl paint', kind: 'string', label: 'Tcl',
         light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
       { text: 'entity', kind: 'keyword', label: 'VHDL',

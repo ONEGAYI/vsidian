@@ -16,6 +16,7 @@ import type { Parser } from '@lezer/common'
 import { StreamLanguage, type StreamParser } from '@codemirror/language'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
+import { jsonc, json5 } from './jsonDialects'
 import { html } from '@codemirror/lang-html'
 import { css } from '@codemirror/lang-css'
 import { python } from '@codemirror/lang-python'
@@ -23,7 +24,7 @@ import { cpp } from '@codemirror/lang-cpp'
 import { java } from '@codemirror/lang-java'
 import { go } from '@codemirror/lang-go'
 import { rust } from '@codemirror/lang-rust'
-import { sql } from '@codemirror/lang-sql'
+import { sql, PostgreSQL, MySQL, SQLite, SQLDialect } from '@codemirror/lang-sql'
 import { markdown } from '@codemirror/lang-markdown'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { powerShell } from '@codemirror/legacy-modes/mode/powershell'
@@ -46,6 +47,10 @@ import { lua } from '@codemirror/legacy-modes/mode/lua'
 import { r } from '@codemirror/legacy-modes/mode/r'
 import { julia } from '@codemirror/legacy-modes/mode/julia'
 import { sCSS, less } from '@codemirror/legacy-modes/mode/css'
+import { parsePhp, phpPlainParser } from './codeLanguages/php'
+import { graphql } from './codeLanguages/graphql'
+import { makefile } from './codeLanguages/makefile'
+import { spice } from './codeLanguages/spice'
 import { protobuf } from '@codemirror/legacy-modes/mode/protobuf'
 
 /** 超大围栏跳过着色的行数上限（降级纯文本；#85 性能文档记录） */
@@ -106,6 +111,8 @@ const PARSERS: Readonly<Record<string, Parser>> = {
   javascript: javascript({ typescript: true, jsx: true }).language.parser,
   typescript: javascript({ typescript: true, jsx: true }).language.parser,
   json: json().language.parser,
+  jsonc: StreamLanguage.define(jsonc).parser,
+  json5: StreamLanguage.define(json5).parser,
   html: html().language.parser,
   css: css().language.parser,
   python: python().language.parser,
@@ -115,6 +122,11 @@ const PARSERS: Readonly<Record<string, Parser>> = {
   go: go().language.parser,
   rust: rust().language.parser,
   sql: sql().language.parser,
+  postgresql: sql({ dialect: PostgreSQL }).language.parser,
+  mysql: sql({ dialect: MySQL }).language.parser,
+  // SQLite supports [quoted identifiers]; lang-sql 6.10.0 omits this one
+  // quote form. Keep its actual SQLite vocabulary and all other options.
+  sqlite: sql({ dialect: SQLDialect.define({ ...SQLite.spec, identifierQuotes: '`"[' }) }).language.parser,
   markdown: markdown().language.parser,
   shell: StreamLanguage.define(shell).parser,
   powershell: StreamLanguage.define(powerShell).parser,
@@ -146,6 +158,10 @@ const PARSERS: Readonly<Record<string, Parser>> = {
   julia: StreamLanguage.define(julia).parser,
   scss: StreamLanguage.define(sCSS).parser,
   less: StreamLanguage.define(less).parser,
+  php: phpPlainParser,
+  graphql: StreamLanguage.define(graphql).parser,
+  makefile: StreamLanguage.define(makefile).parser,
+  spice: StreamLanguage.define(spice).parser,
   protobuf: StreamLanguage.define(protobuf).parser,
 }
 
@@ -198,7 +214,7 @@ export function highlightCodeRanges(languageId: string | null, code: string): re
     return hit
   }
   stats.parserCalls += 1
-  const tree = PARSERS[languageId!]!.parse(code)
+  const tree = languageId === 'php' ? parsePhp(code) : PARSERS[languageId!]!.parse(code)
   const ranges: CodeTokenRange[] = []
   highlightTree(tree, [classHighlighter, functionClassHighlighter], (from, to, cls) => {
     if (to > from) {

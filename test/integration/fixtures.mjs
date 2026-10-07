@@ -214,6 +214,10 @@ const CODE_LANGUAGE_PAINT_DOC = [
   '```VHD', 'entity PaintChip is', 'end entity;', '```', '',
   '```properties', '[paint_section]', 'color=blue', '```', '',
   '```patch', '-removed_paint', '+added_paint', '```', '',
+  '```ngspice', '.param paint_gain=2', '```', '',
+  '```mk', 'all:', '\t@echo "make recipe paint"', '```', '',
+  '```php', '$label = "plain PHP paint";', '```', '',
+  '```gql', 'query PaintChip { chip { id } }', '```', '',
   'Language paint tail.',
 ].join('\n')
 const CODE_LANGUAGE_CHUNK_DOC = [

@@ -71,7 +71,7 @@ Vsidian 在 VSCode 里提供接近 Obsidian 的 Markdown 编辑体验。安装�
 | 代码块卡片 | 代码块收起为卡片：语言徽标、卡内行号、复制、折叠、阅读视图折行开关；语法配色跟随 VSCode 明暗主题 |
 | 图表与公式 | Mermaid 图表与 KaTeX 公式双视图渲染，图表可全屏弹窗缩放浏览并导出 SVG/PNG |
 
-支持的围栏语言与别名见[代码块语言清单](docs/specs/code-block-card.md#语法高亮)，包括 Tcl、VHDL、项目配置语言及 C#、Kotlin、Swift、Dart 等；正文、Markdown 悬停与嵌入共用词法高亮。
+支持的围栏语言与别名见[代码块语言清单](docs/specs/code-block-card.md#语法高亮)，包括 Tcl、VHDL、项目配置语言及 C#、Kotlin、Swift、Dart、SPICE、Makefile、PHP、GraphQL 等，还有独立 PostgreSQL/MySQL/SQLite 与 JSONC/JSON5 方言；正文、Markdown 悬停与嵌入共用词法高亮。
 
 ### 大纲
 

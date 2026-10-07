@@ -71,7 +71,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Code block cards | Fences collapse into cards with a language badge, line numbers, copy, fold, and a reading-view wrap toggle; syntax colors follow the VS Code theme |
 | Diagrams & math | Mermaid diagrams and KaTeX math render in both views; diagrams zoom in a full-screen popup and export as SVG/PNG |
 
-See the [fenced-language list](docs/specs/code-block-card.md#语法高亮) for supported languages and aliases, including Tcl, VHDL, project configuration languages, C#, Kotlin, Swift, and Dart. Main content and Markdown hover/embed views share the highlighting engine.
+See the [fenced-language list](docs/specs/code-block-card.md#语法高亮) for supported languages and aliases, including Tcl, VHDL, project configuration languages, C#, Kotlin, Swift, Dart, SPICE, Makefile, PHP, GraphQL, and distinct PostgreSQL/MySQL/SQLite and JSONC/JSON5 dialects. Main content and Markdown hover/embed views share the highlighting engine.
 
 ### Outline
 

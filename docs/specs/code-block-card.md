@@ -74,7 +74,9 @@
 | --- | --- | --- |
 | JavaScript | `@codemirror/lang-javascript` | `js`、`jsx`、`mjs`、`cjs` |
 | TypeScript | `@codemirror/lang-javascript`（TS 方言） | `ts`、`tsx` |
-| JSON | `@codemirror/lang-json` | — |
+| JSON | `@codemirror/lang-json`（保持严格 JSON） | — |
+| JSONC | 原创 StreamParser，JSON + 注释/尾逗号 | — |
+| JSON5 | 原创 StreamParser，JSON5 独立词法分支 | — |
 | HTML | `@codemirror/lang-html` | `htm` |
 | CSS | `@codemirror/lang-css` | — |
 | Python | `@codemirror/lang-python` | `py` |
@@ -85,7 +87,10 @@
 | Java | `@codemirror/lang-java` | — |
 | Go | `@codemirror/lang-go` | `golang` |
 | Rust | `@codemirror/lang-rust` | `rs` |
-| SQL | `@codemirror/lang-sql` | `pgsql`（方言按引擎支持映射） |
+| SQL | `@codemirror/lang-sql` StandardSQL | — |
+| PostgreSQL | 同包 PostgreSQL 方言 | `pgsql`、`postgres` |
+| MySQL | 同包 MySQL 方言 | — |
+| SQLite | 同包 SQLite 方言 + 方括号标识符兼容项 | — |
 | YAML | legacy-modes `yaml` | `yml` |
 | Markdown | `@codemirror/lang-markdown`（已随包依赖） | `md` |
 | Verilog | legacy-modes `verilog` | `systemverilog`、`sv` |
@@ -108,6 +113,10 @@
 | SCSS | legacy-modes `css.sCSS` | — |
 | LESS | legacy-modes `css.less` | — |
 | Protocol Buffers | legacy-modes `protobuf` | `proto` |
+| SPICE | 原创 ngspice/常见 HSPICE 网表 StreamParser | `sp`、`ngspice`、`hspice` |
+| Makefile | 原创 GNU make StreamParser | `make`、`mk` |
+| PHP | 官方 `@codemirror/lang-php` 6.0.2；带标签/HTML 与无标签分别选 Template/Program | — |
+| GraphQL | 原创查询/SDL StreamParser | `gql` |
 
 - **多词 info string**：语言路由取 info string 的**首个空白分隔词**（CommonMark 惯例）——`` ```js title=x `` 识别为 JavaScript，`` ```c++ `` 命中 C++ 别名。`mermaid` 是刻意例外：渲染管线对标签**全等匹配**，多词 info string 不命中渲染管线。
 - 无语言标记或 `text`/`plaintext`：卡片正常呈现，标签显示 `Plain text`，不着色。
@@ -115,11 +124,15 @@
 - **token 类名**：以 `@lezer/highlight` `classHighlighter` 的 `tok-*` 稳定词表（如 `tok-keyword`、`tok-string`）为基础；解析器已有的函数调用修饰标签经 `tagHighlighter` 叠加 `tok-function`，保留原 `tok-variableName` / `tok-propertyName` 类供旧片段命中。两视图共用；配套 CSS 色板以主题 class 区分明暗。
 - **配色**：内置明暗两套共享色板，基础取色自用户提供的 VS Code 明暗主题导出与 Python 逐词检查；函数调用色按用户选择改为与紫色关键词相配的暖黄（浅色 `#806000`、深色 `#DCDCAA`），不再沿用导出主题的紫色函数色。所有已注册语言复用同一 Lezer `tok-*` 类别配色，不承诺逐语言复刻 VS Code 语义 token（模块身份、只读变量等需要语言服务信息）。随现有明暗主题管线（`EditorView.darkTheme` facet + body class）自动切换。高对比档口径（评审 A-2 订正）：**深色高对比（dark+HC）**函数色覆盖为深色淡黄，**浅色高对比（light+HC，VS Code 1.77+）**回落浅色组暖黄（白底可读）；HC keyword 蓝为旧版既有行为（不分深浅），非本批承诺面。卡片外壳（背景、行号、标签、分隔线）继续走 `--vscode-*` 主题变量。
 - **新增词类配色（#389）**：INI section 的 `tok-meta` 为浅色 `#0550ae` / 深色 `#79c0ff`；diff `tok-inserted` 为浅色 `#22863a` / 深色 `#85e89d`，`tok-deleted` 为浅色 `#b31d28` / 深色 `#f97583`。INI 仅在 properties 模式内映射 section/key/value 到既有 meta/propertyName/string 词类，不改 Markdown 的 heading 外观；diff 新增/删除词类补色，现有 keyword/string/comment 等配色保持不变，裸 `.tok-*` 用户片段仍可覆写。
-- **文件后缀与围栏标签分离（#389）**：`CodeLanguageEntry.extensions` 显式维护可读文本后缀，不再从语言 id/别名派生。既有分类保留；新增语言只收真实文本后缀（如 `.cs`、`.kt`、`.jl`、`.proto`），`.sqlite`/`.sqlite3`/`.db` 仍归 other，未来增加 SQL 方言别名也不自动改文件分类。无扩展名的 `Dockerfile`、`Makefile` 仍归 other，不扩大发现规则。
+- **文件后缀与围栏标签分离（#389）**：`CodeLanguageEntry.extensions` 显式维护可读文本后缀，不再从语言 id/别名派生。既有分类保留；新增语言只收真实文本后缀（如 `.cs`、`.kt`、`.jl`、`.proto`），`.jsonc`/`.json5` 明确收录为文本，既有 `.sql`/`.pgsql` 保留；`.sqlite`/`.sqlite3`/`.db` 仍归 other，SQL 方言围栏标签不自动改文件分类。无扩展名的 `Dockerfile`、`Makefile` 仍归 other，不扩大发现规则。
 - **完整围栏上下文（#389）**：阅读侧 60 行挂载片共享完整围栏的数值边界；`createReadingBlockElement` 通过弱引用绑定文档及片偏移，正文与 Markdown hover/embed 走同一增强路径。先挂后片也从完整源码解析，再裁切到本片；文档编辑/刷新产生新的上下文。超过 4096 个代码体行先降级，再决定是否读取完整代码体，不能按每片行数绕过降级；未闭合围栏在 EOF 的尾部空行按原始 token 范围计入预算，不受块呈现裁尾影响。未超限围栏正文按共享身份最多缓存 64 项，token 仍复用既有 64 项 LRU；不在每个分片存放完整代码体。行号、每片复制、折叠与按视口挂载沿用现有语义。
 - **引用形态边界**：Markdown 悬停与嵌入复用 token 路径，但仍保持既有只读朴素代码块，不增加正文卡片工具条。高亮开关变化沿现有挂载对象就地刷新已挂载引用的 code token；不重新装载或解析整份引用，不重建图片、属性区监听或嵌套引用，滚动与属性区展开状态保留。非 Markdown 引用的宿主原生着色、Mermaid 渲染、#368 主题研究均不改。
 - **词法边界**：使用锁定 `@codemirror/legacy-modes` 6.5.4 的语言模式及 C#/Kotlin/Dart、SCSS/LESS 专用配置。Tcl 兼容层仅修正普通双引号（含转义引号、跨行字符串）被上游误标 comment 的分支，其余 token 仍交给官方模式；不承诺完整语言服务、补全、诊断或执行。
-- **操作与设置评估（#389）**：只扩展现有围栏渲染，无新增用户操作、设置或快捷键；卡片/高亮现有独立开关不变。
+- **SQL 方言（#391）**：`sql` 仍为 StandardSQL；`pgsql`/`postgres`/`postgresql` 独立路由 PostgreSQL，`mysql`/`sqlite` 分别采用锁定 `@codemirror/lang-sql` 6.10.0 的实际方言，缓存按独立语言 id 隔离。[上游定义](https://github.com/codemirror/lang-sql/blob/main/src/sql.ts)中 SQLite 的 `identifierQuotes` 只含反引号与双引号，本地通过 `SQLDialect.define({...SQLite.spec, identifierQuotes: ...})` 仅追加 `[`；其 tokenizer 已有 `[` → `]` 终止分支。按 [SQLite 官方引用规则](https://www.sqlite.org/lang_keywords.html)测试空格标识符及闭括号后的 `FROM`，保留原词表和其他配置，不声称覆盖所有服务端版本或容错引用规则。引用标识符沿用 `tok-string2`，无全局调色。
+- **JSON 方言（#391）**：`json` 继续使用未改动的官方 Lezer JSON。原创 `jsonDialects.ts` 只负责词法高亮：JSONC 接受双引号属性/字符串、JSON 十进制数、`//`/`/* */` 和尾逗号；JSON5 另识别 Unicode/`\uXXXX` IdentifierName 属性、单引号、转义换行、字符转义、带符号十六进制、前后小数点、正号与 Infinity/NaN。对象/数组上下文区分 propertyName 与 string/value；注释不丢失待冒号状态；JSONC 不把 JSON5 专属 key/string/number 着色为合法词类，数字按完整 atom 匹配避免合法前缀误着色。[VS Code JSONC 说明](https://code.visualstudio.com/docs/languages/json#_json-with-comments)与 [JSON5 1.0 规范](https://spec.json5.org/)是词法依据，非复制第三方实现，无新增依赖、运行时下载或执行入口。
+- **JSON 词法限制**：这些模式不是 JSON/JSON5 校验器；不诊断 schema、重复键、逗号/冒号完整性或数值范围，不把 JavaScript 表达式、binary/octal/BigInt/数字分隔符纳入 JSON5。Unicode 属性名按运行时 Unicode 字符类别识别，不冻结某个 Unicode 版本。不闭合注释可延续至 EOF；普通未转义换行结束字符串状态，仅 JSON5 转义物理换行保留跨行状态。既有 StreamLanguage 长行限制及完整围栏 4096 行预算保持。正反例、Unicode/转义、恶意外观文本与跨分片续行均经公开高亮/渲染接口测试。
+- **新增词法来源（#390）**：SPICE 控制变量、Makefile 嵌套引用/recipe、GraphQL 块字符串与 PHP tagged/plain 使用实测词法；来源、精确版本、许可和边界见[词法来源说明](code-language-sources.md)。PHP 的 heredoc 标签遗漏由小型 styleTags 适配补齐；不增加语言服务、运行时网络 grammar 或执行能力。
+- **操作与设置评估（#389/#390/#391）**：只扩展现有围栏渲染，无新增用户操作、设置或快捷键；卡片/高亮现有独立开关不变。
 - **语言徽标**：v1 为字形徽标（typographic badge）——等宽缩写 + 品牌近似色（`CODE_LANG_ICONS`），随头部标签显示，仅注册表内语言有徽标，未收录语言无徽标；矢量 logo 集为后续工单（体积与素材来源另行决策）。
 - **性能**：Live 侧高亮按块计算并缓存，编辑仅重算受影响块；呈现态与编辑态均保持高亮；大围栏（10 万行档）不阻塞输入。
 

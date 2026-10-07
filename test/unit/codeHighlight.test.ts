@@ -12,6 +12,7 @@ import {
 import { CODE_LANGUAGES } from '../../src/shared/codeLangs'
 import { resolveCodeLanguage } from '../../src/shared/codeLangs'
 import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
+import { SPECIAL_CODE_LANGUAGE_FIXTURES } from '../fixtures/specialCodeLanguages'
 
 const JS_SAMPLE = 'const x: number = 42; // hi\nfunction f() { return "s" }'
 
@@ -124,7 +125,7 @@ describe('跨行 token 切段（#83）', () => {
 })
 
 describe('ready-language real syntax (#389)', () => {
-  it.each(READY_CODE_LANGUAGE_FIXTURES)('$id routes aliases and emits exact lexical classes', (fixture) => {
+  it.each([...READY_CODE_LANGUAGE_FIXTURES, ...SPECIAL_CODE_LANGUAGE_FIXTURES])('$id routes aliases and emits exact lexical classes', (fixture) => {
     for (const alias of fixture.aliases) {
       expect(resolveCodeLanguage(`  ${alias.toUpperCase()} title=sample  `)).toEqual({ id: fixture.id, displayName: fixture.label })
     }
