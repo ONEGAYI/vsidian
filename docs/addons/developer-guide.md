@@ -150,5 +150,6 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 版本参考（生成产物） | `npm run gen:addonapi` 生成；`npm run check:addonapi` 校验新鲜度 |
 | 编译期消费 | `test/addonApi/publicApiConsumer.ts`（随 `npm run compile` 检查） |
 | 行为消费样例 | `test/fixtures/addon-v02/` 各夹具 |
+| 用户故事覆盖映射 | `docs/specs/vsidian-addons-coverage.md`（接口或验证变更时同步更新） |
 
 签名或语义调整必须同步：语义清单条目 → 重生成参考 → 消费样例与钉住断言 → 台账（如涉版本状态）。

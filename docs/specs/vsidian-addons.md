@@ -1,6 +1,6 @@
 # Vsidian 附加组件：接入与公开 API 规格草案
 
-状态：2026-10-05 整理的设计草案，尚未实施、未发布 SDK、未授权创建或发布独立示例仓库。已确认的产品与架构决定以 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 为准。
+状态：2026-10-05 整理的设计草案；**2026-10-08 随 #347 首版批次实施收口**——六组 API 已实现并以 `src/shared/addonApiCatalog.ts` 为语义清单与发行台账事实源（1.0.0 候选，未发行 SDK、未授权创建或发布独立示例仓库；维护纪律见 [developer-guide](../addons/developer-guide.md) 与 [addons-api-gate](addons-api-gate.md)）。已确认的产品与架构决定以 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 为准。
 
 本文将已确认决定组织为接口、实现和验证要求。表中的参考接口名称、注册字段及检查命令是设计提议，不是已有 API。Q28–Q30 已按「新安装的渲染组件自动替换」「非原子修饰随上次原子操作撤回」及「渲染接管依据实际组件停用状态」补充和修订，见第 9 节。编辑合并协议、模块装载与接口签名等仍须技术验证，本草案不据此宣布已具备实施条件。
 
@@ -277,11 +277,11 @@ Vsidian 不在自己的激活流程中等待依赖它的组件完成激活。VSC
 
 公开 API 的初始版本与 SDK 载体尚未冻结。API 编号独立于 Vsidian 本体；实验能力另行声明兼容要求。稳定 API 确需移除时，先发布弃用与替代方案，从实际发布日计算，至少两个后续 API 次版本且满 30 天，两项同时满足。
 
-### 7.2 拟定检查入口
+### 7.2 检查入口（2026-10-08 已实施）
 
-以下名称仅是实施提议，当前 package.json 没有这些命令。
+以下命令已在 package.json scripts 落地（另有 `check:addoncompat` 契约门禁与 CI job `addon-api-contract`，见 [addons-api-gate.md](addons-api-gate.md)）。
 
-| 拟定入口 | 检查责任 |
+| 入口 | 检查责任 |
 | --- | --- |
 | `gen:addonapi` | 生成版本对应的接口参考与索引 |
 | `check:addonapi:baseline` | 核对历史锚点和基线证据，先确认基线可信 |
@@ -293,7 +293,7 @@ Vsidian 不在自己的激活流程中等待依赖它的组件完成激活。VSC
 
 AGENTS 保留单一触发入口。新增或变更 API 时同时更新声明、语义清单、指南、样例和相关验证。落地触及 DOM、样式、渲染依赖或页面资源加载时，同时执行项目 style-contract 技能，API 门禁不代替样式门禁。
 
-CI 的新 job、远端必需检查配置与首次发行基线属于后续实施项，本草案不宣布已有门禁生效。
+CI job `addon-api-contract` 与 bootstrap 首版基线已随 #363 交付（本地与 CI 先基线复验后契约检查）；**仅剩远端必需检查配置属待授权项**，未配置前其失败不阻塞合并（见 [addons-api-gate.md](addons-api-gate.md)）。
 
 ## 8. 验证与完成条件
 

@@ -77,4 +77,6 @@
 
 ## 维护约定
 
+全矩阵复现命令（与 T18 票面证据同口径）：`npm run compile`、`npm run test:unit`、`npm run test:browser -- --no-reuse`、`npm run test:integration`、`npm run check:stylecontract`、`npm run check:addonapi`、`npm run check:addoncompat`；安装态与 SSH 线分别为 `node test/integration/runInstalledAddons.mjs`、`node test/integration/runRemoteSshAddons.mjs`（各票面载有前提）。
+
 本表随批次收口建立，此后接口或验证变更时由触碰对应面的票顺带更新（同 `addonApiCatalog.ts` 的维护纪律：改接口必经语义清单与本文）。29 项全绿的口径以 T18 全矩阵回归报告为准（`out/test/t18-*.log`，矩阵结论见票面 t18.md 回填）。
