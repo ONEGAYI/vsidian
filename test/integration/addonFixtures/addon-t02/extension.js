@@ -57,7 +57,8 @@ async function activate(context) {
         resources: ['dist/assets'],
       })
       setupCtx.settings.registerDefinitions([
-        { key: 't02.flag', type: 'boolean', default: true },
+        // #353 T04 起定义须带展示名（title）——形状校验矩阵见 shared/addonSettings
+        { key: 't02.flag', title: 'T02 flag', type: 'boolean', default: true },
       ])
       setupCtx.channel.handle('t02.settingsEcho', (payload) => {
         stats.settingsEchoCalls++

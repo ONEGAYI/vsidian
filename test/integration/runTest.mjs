@@ -61,8 +61,9 @@ const testCacheDir = path.join(root, '.vscode-test')
 // #350 T01 附加组件夹具（清单与实现见 test/integration/addonFixtures/）：
 // 兼容注册（addon-ok）、声明合法但不兼容（addon-incompatible）、激活失败
 // （addon-fail）；#351 T02 页面 SDK 夹具（addon-t02——页面产物由 V02
-// 构建桥生成后拷入其 dist/，构建产物不入库）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02'].map((name) =>
+// 构建桥生成后拷入其 dist/，构建产物不入库）；#353 T04 复杂设置夹具
+//（addon-t04——纯宿主 CJS，无页面产物；经公开 API 注册复杂定义与分层读写）
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
 // #351 T02：夹具组件页面产物构建（chrome114 IIFE + 静态红线——CM6 不
