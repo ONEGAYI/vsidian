@@ -9251,7 +9251,7 @@ export class WebviewSyncController {
         caretColor: null,
         // 组件按钮/面板不依赖正文 view（无 init 也可注册挂载）——早退路径
         // 同样上报（按钮挂载态与面板开态的集成断言不因无正文而缺字段）
-        ...(this.collectAddonUiPaint() ?? {}),
+        ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       }
     }
     // elementFromPoint/几何 rect 依赖真实布局：jsdom（单测宿主）无布局能力
@@ -9864,7 +9864,7 @@ export class WebviewSyncController {
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
       ...(wikilinkSuggest ? { wikilinkSuggest } : {}),
-      ...(this.collectAddonUiPaint() ?? {}),
+      ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),
     }
   }
@@ -10642,6 +10642,16 @@ function hitPaintedElement(
   } catch {
     return false
   }
+}
+
+/** #360 T11：collectPaint 的 addonUi 字段包裹（探针值 → paint.addonUi
+ *  嵌套形态；缺省时零字段——缺省不参与断言）。此前直接展开探针对象会把
+ *  五个字段平铺到 paint 顶层（协议守卫外的未知字段，宿主断言读不到
+ *  paint.addonUi）——集成诊断实测定位 */
+function wrapAddonUiPaint(
+  probe: PaintProbe['addonUi'],
+): { addonUi: PaintProbe['addonUi'] } | Record<string, never> {
+  return probe === undefined ? {} : { addonUi: probe }
 }
 
 /** 多候选绘制探针的代表元素选择（#105/#106）：返回首个真实命中

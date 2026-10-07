@@ -345,12 +345,8 @@ export const addonT11Cases: Array<[string, () => Promise<void>]> = [
     const parentFinal = await docText('p204-编辑嵌入.md')
     assert(parentFinal.text === parentBefore, '面板操作归 B——父文档 A 全程不变')
 
-    // 收尾：恢复 B 基态（撤两次按钮/面板写入）防跨用例污染
-    const targetDoc = await vscode.workspace.openTextDocument(wsUri('p204-编辑目标.md'))
-    if (targetDoc.isDirty) {
-      await targetDoc.save()
-    }
-    await vscode.workspace.fs.writeFile(wsUri('p204-编辑目标.md'), Buffer.from(targetBefore, 'utf8'))
+    // 收尾：B 的写入不回滚（fixtures.mjs 每轮重写盘面；writeFile 与 VSCode
+    // 持有的文档句柄冲突 EBUSY——本轮集成实测）
     await closeAllEditors()
     assert(targetAfter.text.includes('T11-BTN'), 'B 文本断言（保留证据）')
     console.log('[#360] 嵌入 B 焦点路由（按钮/面板 target 归 B、父 A 不变）通过')
@@ -369,11 +365,16 @@ export const addonT11Cases: Array<[string, () => Promise<void>]> = [
       return probe && probe.openPanelIds.includes(`${ADDON_ID}.notes`) ? probe : undefined
     })
 
-    // 1) 普通关闭：撤全部按钮与面板（本页闭环——不依赖宿主消息到达）
+    // 1) 普通关闭：撤全部按钮与面板（本页闭环——不依赖宿主消息到达）。
+    //    期望态本身是 paint.addonUi === undefined（零注册时探针缺省）——poll
+    //    完成判据须映射为哨兵 true，不能直接返回探针值（undefined 会被 poll
+    //    当作「未就绪」永远等待）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: false })
     await poll('停用后组件界面全撤', async () => {
       const probe = await addonUiPaint(file)
-      return probe === undefined || (probe.toolbarButtonIds.length === 0 && probe.openPanelIds.length === 0) ? probe : undefined
+      const cleared = probe === undefined ||
+        (probe.toolbarButtonIds.length === 0 && probe.openPanelIds.length === 0)
+      return cleared ? true : undefined
     })
     // 内置工具栏不受影响（chrome 探针仍命中——工具栏容器与内置按钮原样）
     const chromeProbe = (await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', wsUri(file).toString(), 0)) as
