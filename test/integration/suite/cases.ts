@@ -14,6 +14,7 @@ import { addonT05Cases } from './addonT05Cases'
 import { addonT06Cases } from './addonT06Cases'
 import { addonT07Cases } from './addonT07Cases'
 import { addonT10Cases } from './addonT10Cases'
+import { addonT11Cases } from './addonT11Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17363,4 +17364,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #359 T10：自己的命令、菜单与统一快捷键（夹具组件经公开 SDK 注册，
   // 断言面见 addonT10Cases.ts 头注）
   ...addonT10Cases,
+  // #360 T11：所属按钮、面板与视图界面贡献（夹具组件经公开 ui 面注册，
+  // 断言面见 addonT11Cases.ts 头注）
+  ...addonT11Cases,
 ]
