@@ -19,9 +19,11 @@ import { WebviewSyncController } from './syncController'
 import { AddonViewRegistry } from './addonViews'
 import { AddonBehaviorRuntime } from './addonBehaviors'
 import { AddonCommandsRuntime } from './addonCommands'
+import { AddonUiRuntime } from './addonUi'
 import { installAddonPageLoader } from './addonPageLoader'
 import { setAddonRenderersBridge } from './addonRenderers'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
+import { t } from '../shared/i18n'
 import { installTooltipCard } from './tooltipCard'
 import { isTrustedHostMessageSource } from './untrustedFrame'
 import { isHostToWebview, isWebviewToHost } from '../shared/protocol'
@@ -87,6 +89,19 @@ const addonRenderers = setAddonRenderersBridge((message) => {
     vscode.postMessage(message)
   }
 })
+// #360 T11 附加组件界面运行时（页面级一份）：SDK ui 面的操作后端——按钮/
+// 面板挂载、目标路由（当前活动视图句柄经装载器同源构造——bindHandleFactory
+// 在装载器安装后绑定，沿 bindOpIdAllocator 先例解装配环）与回收矩阵
+const addonUi = new AddonUiRuntime({
+  toolbarSlot: controller.addonToolbarSlot() ?? document.body,
+  panelDock: controller.addonPanelDock() ?? document.body,
+  currentMode: () => controller.viewModeNow(),
+  activeInstanceId: () => controller.addonActiveInstanceId(),
+  executeCommand: (commandId) => controller.runAddonCommand(commandId),
+  bindingHints: (commandId) => controller.addonEffectiveBindings(commandId),
+  panelCloseLabel: () => t('addonUi.panelClose'),
+  log: (detail) => console.warn(`[vsidian-addon-ui] ${detail}`),
+})
 const addonLoader = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView },
@@ -95,8 +110,11 @@ const addonLoader = installAddonPageLoader({
   addonBehaviors,
   addonCommands,
   addonRenderers,
+  addonUi,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
+addonUi.bindHandleFactory((addonId, instanceId) => addonLoader.buildViewHandle(addonId, instanceId))
+controller.attachAddonUi(addonUi)
 controller.attachAddonViews(addonViews)
 controller.attachAddonBehaviorDrive((input) => {
   void addonBehaviors.driveInput(input.instanceId, { userEvent: input.userEvent, inputText: input.inputText })

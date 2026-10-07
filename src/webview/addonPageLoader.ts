@@ -35,6 +35,7 @@ import type { AddonRenderersBridgeHandle } from './addonRenderers'
 import type { AddonViewsRuntime } from './addonViews'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
 import type { AddonCommandsRuntime } from './addonCommands'
+import type { AddonUiRuntime } from './addonUi'
 
 /** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
  *  会追加新条目，装载器按「本次装载期间注册 + 未消费」规则取用） */
@@ -88,6 +89,9 @@ export interface AddonPageLoaderEnv {
   /** T09（#358）渲染提供者桥（编辑器页由 main.ts 构造注入；省略时 SDK
    *  不提供 renderers 面——注册拒绝为 no-op 句柄） */
   addonRenderers?: Pick<AddonRenderersBridgeHandle, 'register' | 'disposeRenderer' | 'releaseGeneration'>
+  /** T11（#360）附加组件界面运行时（编辑器页由 main.ts 构造注入；省略时
+   *  SDK 不提供 ui 面，releaseLoad 时亦不做回收） */
+  addonUi?: AddonUiRuntime
   /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
    *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
   attachExtensions?: (extension: Extension[] | null) => void
@@ -109,6 +113,9 @@ export interface AddonPageLoaderHandle {
   load(manifest: AddonLoadManifest): Promise<AddonLoadOutcome>
   /** 直接卸载 */
   unload(addonId: string, generation: number): Promise<AddonUnloadOutcome>
+  /** T11（#360）按组件身份构造视图句柄（界面目标路由——与 views.get
+   *  同源：代次存活注入 + opId 分配；装载不在场或实例未注册 null） */
+  buildViewHandle(addonId: string, instanceId: string): AddonViewHandle | null
   /** 观测快照（宿主断言与测试的序列化面） */
   stats(): AddonLoaderStats
   /** 全量释放（页面卸载/测试收尾；每条按 released 走完整回收） */
@@ -227,42 +234,50 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     return matched
   }
 
+  /** 按组件身份构造视图句柄（views.get 与 T11 界面目标路由同源）：代次
+   *  存活注入 isReleased、opId 由本装载器分配（来源身份组件不可自报）。
+   *  组件装载不在场或实例未注册时 null */
+  const buildViewHandleFor = (addonId: string, generation: number, instanceId: string): AddonViewHandle | null => {
+    if (!env.addonViews) {
+      return null
+    }
+    const info = env.addonViews.infoOf(instanceId)
+    if (!info) {
+      return null
+    }
+    const isReleased = () => !active.has(addonId)
+    return {
+      info,
+      editor: {
+        getSnapshot: () => (isReleased()
+          ? { ok: false, reason: 'view-disposed' }
+          : env.addonViews!.snapshotOf(instanceId)),
+        applyEdits: (request) => {
+          if (isReleased()) {
+            // 组件已释放：其编辑请求不再有有效来源（僵尸写入拒绝，
+            // 与视图释放共用 view-disposed 拒绝类型——可辨认、不歧义）
+            return Promise.resolve({ ok: false, reason: 'view-disposed' as const })
+          }
+          return env.addonViews!.applyEdits({
+            addonId,
+            opId: `g${generation}-op${++opSeq}`,
+            instanceId,
+            request,
+          })
+        },
+        setSelection: (ranges) => !isReleased() && env.addonViews!.setSelectionOf(instanceId, ranges),
+        reveal: (offset) => !isReleased() && env.addonViews!.revealOf(instanceId, offset),
+      },
+    }
+  }
+
   const buildSdk = (loadRecord: ActiveLoad, manifest: AddonLoadManifest): VsidianAddonPageSdk => {
     const extensionParts: Extension[] = []
     const viewsFacet: AddonViewsFacet | undefined = env.addonViews
       ? {
           list: () => env.addonViews!.list(),
-          get: (instanceId: string) => {
-            const info = env.addonViews!.infoOf(instanceId)
-            if (!info) {
-              return null
-            }
-            const isReleased = () => !active.has(loadRecord.addonId)
-            const handle: AddonViewHandle = {
-              info,
-              editor: {
-                getSnapshot: () => (isReleased()
-                  ? { ok: false, reason: 'view-disposed' }
-                  : env.addonViews!.snapshotOf(instanceId)),
-                applyEdits: (request) => {
-                  if (isReleased()) {
-                    // 组件已释放：其编辑请求不再有有效来源（僵尸写入拒绝，
-                    // 与视图释放共用 view-disposed 拒绝类型——可辨认、不歧义）
-                    return Promise.resolve({ ok: false, reason: 'view-disposed' as const })
-                  }
-                  return env.addonViews!.applyEdits({
-                    addonId: loadRecord.addonId,
-                    opId: `g${loadRecord.generation}-op${++opSeq}`,
-                    instanceId,
-                    request,
-                  })
-                },
-                setSelection: (ranges) => !isReleased() && env.addonViews!.setSelectionOf(instanceId, ranges),
-                reveal: (offset) => !isReleased() && env.addonViews!.revealOf(instanceId, offset),
-              },
-            }
-            return handle
-          },
+          get: (instanceId: string) =>
+            buildViewHandleFor(loadRecord.addonId, loadRecord.generation, instanceId),
           onCreated: (callback) => env.addonViews!.onCreated(callback),
           onDisposed: (callback) => env.addonViews!.onDisposed(callback),
         }
@@ -336,6 +351,27 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             },
           }
         : {}),
+      // T11（#360）界面面：按钮/面板注册转发 runtime；目标句柄经
+      // buildViewHandleFor 与 views.get 同源构造（代次存活 + opId 注入）
+      ...(env.addonUi && page === 'editor' ? {
+        ui: {
+          registerButton: (def, onClick) => {
+            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+              return { ok: false, reason: 'released', dispose: () => {} }
+            }
+            return env.addonUi!.registerButton(loadRecord.addonId, loadRecord.generation, def, onClick)
+          },
+          registerPanel: (def) => {
+            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+              return {
+                ok: false, reason: 'released',
+                dispose: () => {}, open: () => false, close: () => false, isOpen: () => false,
+              }
+            }
+            return env.addonUi!.registerPanel(loadRecord.addonId, loadRecord.generation, def)
+          },
+        },
+      } : {}),
       registerExtension: (extension) => {
         if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
           return false
@@ -445,6 +481,14 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       env.addonRenderers?.releaseGeneration(loadRecord.addonId, loadRecord.generation)
     } catch {
       // 候选撤销异常不阻断其余回收
+    }
+    // T11（#360）界面贡献整组件回收（本页闭环）：撤按钮、关面板、清注册
+    if (env.addonUi) {
+      try {
+        env.addonUi.releaseAddon(loadRecord.addonId)
+      } catch {
+        // 回收异常不阻断其余释放路径
+      }
     }
     let disposals = 0
     for (const callback of loadRecord.disposeCallbacks.splice(0)) {
@@ -612,6 +656,15 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     handleDirective,
     load,
     unload,
+    /** T11（#360）按组件身份构造视图句柄（界面目标路由用——与 views.get
+     *  同源：代次存活注入 + opId 分配；装载不在场或实例未注册 null） */
+    buildViewHandle: (addonId: string, instanceId: string) => {
+      const record = active.get(addonId)
+      if (!record) {
+        return null
+      }
+      return buildViewHandleFor(addonId, record.generation, instanceId)
+    },
     stats: () => ({
       page,
       cm6Shared: env.cm6 !== undefined,

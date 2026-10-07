@@ -107,6 +107,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't10-addon', 'dist', 'editor.js'),
       note: 't10-addon 编辑器页',
     },
+    // #360 T11：界面贡献夹具组件（编辑器页——ui 面注册按钮/面板 + 负向
+    // 对照 + target 句柄真实业务；短轮询驱动与 T06/T10 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 't11Editor.ts'),
+      outfile: path.join(buildRoot, 't11-addon', 'dist', 'editor.js'),
+      note: 't11-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -180,6 +187,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t10Addon: {
       installDir: path.join(buildRoot, 't10-addon'),
       distDir: path.join(buildRoot, 't10-addon', 'dist'),
+    },
+    // #360 T11：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t11）
+    t11Addon: {
+      installDir: path.join(buildRoot, 't11-addon'),
+      distDir: path.join(buildRoot, 't11-addon', 'dist'),
     },
     outsideDir,
   }

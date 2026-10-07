@@ -868,6 +868,12 @@ export class LiveEditorInstance {
     this.addonBehaviorInstanceId = instanceId
   }
 
+  /** 实例的 addonViews 句柄键（注册前 undefined；#360 T11 界面回调的
+   *  目标路由经此把焦点嵌入解析为可寻址句柄 ID） */
+  addonInstanceId(): string | undefined {
+    return this.addonBehaviorInstanceId
+  }
+
   /**
    * 用户键入事务的链驱动检测（updateListener 逐事务调用）。门控次序与
    * 口径（票面：内核只读、IME、表格、Tab 等既有情境门控先于行为链）：

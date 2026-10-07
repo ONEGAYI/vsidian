@@ -188,6 +188,15 @@ SDK 载体建议是由主仓库生成声明、最小页面入口辅助代码和�
 - 停用/故障/代次释放：装载器 releaseLoad 在 webview 侧闭环整组件回收（命令+菜单+运行期表+空表上报）；宿主侧 runtime 状态对账回收 VSCode 命令与目录——不影响内置命令与菜单，不清用户键位。
 - 消费样例：夹具 `test/fixtures/addon-v02/addon/t10Editor.ts` 与集成/浏览器套件（`test/integration/suite/addonT10Cases.ts`、`test/browser/addonT10Commands.mjs`）。已实现部分仍是草案形状，不冒充已发布稳定 API。
 
+**已实施（T11 #360，2026-10-07）**。界面贡献形状随消费样例冻结如下，事实源 `src/shared/addonUi.ts`（形状与校验）+ `src/webview/addonUi.ts`（运行时：挂载/回收/目标路由）：
+
+- SDK 面（仅编辑器页；设置页为 undefined）：`ui.registerButton(def, onClick?)`——def 为 `{ id, label, slot?, mode?, order?, command?, iconText? }`（slot 白名单当前仅 `'toolbar'`，白名单外注册拒绝；label 自由文本承载 aria 与 `data-tooltip`；command 与 onClick 互斥且必具其一——挂接 T10 命令时点击经命令体系执行、键位徽章 `data-tooltip-keys` 取生效绑定，onClick 路径回调携当前活动视图句柄）；`ui.registerPanel(def)`——def 为 `{ id, title, mode?, mount(root, target), unmount?(root) }`，返回句柄含 `open()/close()/isOpen()`（dispose 后全部拒绝）。
+- 挂载点（样式界限落档 styleContract `addon-toolbar-slot` / `addon-panel-dock` 条目）：按钮唯一合法槽是工具栏左组尾部容器 `.vsidian-addon-toolbar-slot`（常驻 DOM、空态 `:empty` 零占位；按钮按 `data-addon-button="<命名空间ID>"` 定位）；面板唯一宿主是主编辑区尾部 dock `.vsidian-addon-panel-dock`，面板 chrome（标题栏/关闭按钮，平台 i18n）与 dock 样式归平台、内容根 `.vsidian-addon-panel-root` 内部样式归组件——不把内核容器或整编辑器交给作者接管。
+- 目标路由（T06 句柄语义）：onClick 与面板 `target()` 经平台注入**当前活动视图句柄**（焦点所在嵌入内部 Live → B，否则主正文 A——在引用 B 中操作归 B 不误改父 A）；句柄构造与 `views.get` 同源（装载器 `buildViewHandle`：代次存活注入 + opId 分配，组件释放后目标不可达）。
+- 回收矩阵：面板关闭（用户点关闭/组件 close）即容器移除、内容根脱挂——迟到结果结构上不可见；模式切换（applyModeDom 通知）撤挂不符按钮（注册保留、切回重挂）并强制关闭不符面板（不自动复活）；组件停用/故障/代次释放（装载器 releaseLoad）整组件回收（本页闭环）；视图释放随 webview 销毁自然回收。mount 异常面板回收并移除注册（不留半装配）；onClick/unmount 异常吞掉留痕（运行期回调异常不升级为全组件故障）。
+- 负向拒绝（普通 API 拒绝，可测试）：同名按钮/面板（duplicate-button/panel）、槽位白名单外（slot-unknown——内置界面/侧栏/设置框架不可挂）、动作二选一冲突或缺席（action-conflict/missing）、localId 含点（伪造身份）。
+- 消费样例：夹具 `test/fixtures/addon-v02/addon/t11Editor.ts` 与集成/浏览器套件（`test/integration/suite/addonT11Cases.ts` 五用例、`test/browser/addonT11Ui.mjs` 五场景）。已实现部分仍是草案形状，不冒充已发布稳定 API。
+
 ### 5.5 设置
 
 `settings.registerDefinitions` 接收可序列化的设置定义。值为 JSON 普通值、数组或对象；有限数、结构约束、默认值和必要展示信息由定义说明，不通过函数序列化校验器。

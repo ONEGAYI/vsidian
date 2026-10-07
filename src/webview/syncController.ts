@@ -482,6 +482,15 @@ export class WebviewSyncController {
   /** #359 T10 组件命令注册表（main.ts 构造注入；快捷键本地分支与宿主回发
    *  共用；缺省不路由 addon 命令） */
   private addonCommands: import('./addonCommands').AddonCommandsRuntime | undefined
+  /** #360 T11 附加组件界面运行时（main.ts 构造注入；模式切换通知与命令
+   *  按钮执行转发；缺省不挂载组件按钮/面板） */
+  private addonUi: import('./addonUi').AddonUiRuntime | undefined
+  /** #360 T11 工具栏附加组件槽容器（mount 时创建；平台持有——组件按钮
+   *  只进这个槽） */
+  private addonToolbarSlotEl: HTMLElement | undefined
+  /** #360 T11 面板 dock 容器（mount 时创建；平台持有——组件面板只进
+   *  这个 dock） */
+  private addonPanelDockEl: HTMLElement | undefined
   /** T07（#356）输入行为链驱动（main.ts 经 attachAddonBehaviorDrive 注入
    *  页面级 runtime；缺省 undefined——未装配行为面的环境零开销） */
   private driveAddonBehaviors: import('./liveInstance').LiveEditorInstanceDeps['driveAddonBehaviors']
@@ -1298,6 +1307,14 @@ export class WebviewSyncController {
     this.mainEl.appendChild(this.banner)
     this.mainEl.appendChild(this.liveWrapper)
     this.mainEl.appendChild(this.readingContainer)
+    // #360 T11 附加组件面板 dock（平台容器，常驻 DOM 供探针命中；空态
+    // CSS 零占位）：主编辑区尾部（正文之下）——组件面板只进这个 dock，
+    // 面板 chrome（标题栏/关闭按钮）与 dock 样式归平台，面板内容根内部
+    // 样式归组件（样式界限落档 styleContract addon-panel-dock 条目）
+    this.addonPanelDockEl = document.createElement('div')
+    this.addonPanelDockEl.className = 'vsidian-addon-panel-dock'
+    bindLocaleAttrs(this.addonPanelDockEl, 'addonUi.panelDockLabel')
+    this.mainEl.appendChild(this.addonPanelDockEl)
     this.bodyEl = document.createElement('div')
     this.bodyEl.className = 'vsidian-body'
     this.bodyEl.appendChild(this.mainEl)
@@ -2005,6 +2022,52 @@ export class WebviewSyncController {
    *  宿主 addonCommand.execute 回发两入口共用 runAddonCommand） */
   attachAddonCommands(registry: import('./addonCommands').AddonCommandsRuntime): void {
     this.addonCommands = registry
+  }
+
+  /** #360 T11：挂接附加组件界面运行时（main.ts mount 后构造注入；模式
+   *  切换经 applyModeDom 通知，命令按钮执行经 runAddonCommand 转发） */
+  attachAddonUi(runtime: import('./addonUi').AddonUiRuntime): void {
+    this.addonUi = runtime
+  }
+
+  /** #360 T11：附加组件挂载点容器访问器（mount 后在场；main.ts 构造
+   *  AddonUiRuntime 时取用——槽与 dock 由平台构造持有） */
+  addonToolbarSlot(): HTMLElement | undefined {
+    return this.addonToolbarSlotEl
+  }
+
+  addonPanelDock(): HTMLElement | undefined {
+    return this.addonPanelDockEl
+  }
+
+  /** #360 T11：当前活动视图实例 ID（界面回调的目标路由——焦点所在嵌入
+   *  内部 Live 的实例键（embed:…，在引用 B 中操作归 B）；无焦点嵌入时
+   *  主正文 'main'；视图均不在场 null）。与 actionTarget 同源判据（embed
+   *  取最内层焦点命中），ID 面向 addonViews 句柄解析 */
+  addonActiveInstanceId(): string | null {
+    const embedInstance = this.embedCards?.focusedLive()
+    if (embedInstance) {
+      const instanceId = embedInstance.addonInstanceId()
+      if (instanceId !== undefined && this.addonViews?.infoOf(instanceId) !== undefined) {
+        return instanceId
+      }
+    }
+    if (this.addonViews?.infoOf('main') !== undefined) {
+      return 'main'
+    }
+    return null
+  }
+
+  /** #360 T11：当前视图模式的只读投影（界面运行时注册与挂载判定用） */
+  viewModeNow(): 'live' | 'reading' {
+    return this.viewMode
+  }
+
+  /** #360 T11：组件命令的生效绑定（按钮键位徽章数据——与快速操作条
+   *  quickBindingHints 同源：宿主 keybindings.snapshot/changed 下发的
+   *  权威覆盖 + 运行期操作表默认值合并求值） */
+  addonEffectiveBindings(commandId: string): readonly string[] {
+    return getEffectiveBindings(this.keybindingOverrides, commandId)
   }
 
   /** #359 T10：执行附加组件命令——模式复核（命令声明的生效模式 vs 当前
@@ -3013,6 +3076,24 @@ export class WebviewSyncController {
         this.closeContextMenu()
         break
       }
+      case 'addonUi.test.buttonClick': {
+        // 测试钩子（#360 T11）：点击组件工具栏按钮（与用户点击同一处理器；
+        // buttonId 已由协议校验器限定为非空字符串，CSS.escape 防拼接值含
+        // 选择器元字符时 querySelector 抛错）
+        this.addonToolbarSlotEl
+          ?.querySelector<HTMLButtonElement>(`button[data-addon-button="${CSS.escape(message.buttonId)}"]`)
+          ?.click()
+        break
+      }
+      case 'addonUi.test.panelClose': {
+        // 测试钩子（#360 T11）：点击面板 chrome 关闭按钮（用户关闭路径——
+        // 平台回收与组件迟到写入不可见的验证入口）
+        this.addonPanelDockEl
+          ?.querySelector<HTMLButtonElement>(
+            `[data-addon-panel="${CSS.escape(message.panelId)}"] .vsidian-addon-panel-close`)
+          ?.click()
+        break
+      }
       case 'clipboard.read.result': {
         // #183 粘贴桥回包：reqId 陈旧即丢弃。消费即推进（不回退清零）——
         // 回退会让下一次粘贴复用旧 reqId，旧回包重放成为可能。P2-10：插入
@@ -3888,6 +3969,9 @@ export class WebviewSyncController {
     // P2-04：根面板模式切换联动嵌入卡片的内部模式继承（无手动覆盖的
     // 根级嵌入跟随；子卡级联）——在 viewMode 赋值后、容器显隐前通知
     this.embedCards?.notifyParentModeChanged()
+    // #360 T11：附加组件界面回收矩阵——模式不符的按钮撤挂（注册保留，
+    //  切回重挂）、不符面板强制关闭（挂载与监听回收）
+    this.addonUi?.applyMode(mode)
     // Live 悬停现场随模式切换作废（装饰 DOM 随重建脱树，补触发不得复活旧锚）
     this.lastLiveHover = null
     this.closeQuickHeadingMenu(false)
@@ -5084,6 +5168,14 @@ export class WebviewSyncController {
     this.sidebarToggleBtn = sidebarBtn
     bar.appendChild(settingsBtn)
     bar.appendChild(quickBtn)
+    // #360 T11 附加组件按钮槽（平台容器，常驻 DOM 供探针命中；空态 CSS
+    // 零占位）：插在左组尾部（快速操作之后）、右端组首（刷新按钮持有
+    // margin-left:auto 推靠）之前——组件按钮只进这个槽，不碰内置按钮位
+    const addonSlot = document.createElement('div')
+    addonSlot.className = 'vsidian-addon-toolbar-slot'
+    bindLocaleAttrs(addonSlot, 'addonUi.toolbarSlotLabel')
+    this.addonToolbarSlotEl = addonSlot
+    bar.appendChild(addonSlot)
     bar.appendChild(refreshBtn)
     bar.appendChild(viewBtn)
     bar.appendChild(sidebarBtn)
@@ -9215,6 +9307,9 @@ export class WebviewSyncController {
         gutterUserSelect: null,
         darkTheme: false,
         caretColor: null,
+        // 组件按钮/面板不依赖正文 view（无 init 也可注册挂载）——早退路径
+        // 同样上报（按钮挂载态与面板开态的集成断言不因无正文而缺字段）
+        ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       }
     }
     // elementFromPoint/几何 rect 依赖真实布局：jsdom（单测宿主）无布局能力
@@ -9851,7 +9946,38 @@ export class WebviewSyncController {
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
       ...(wikilinkSuggest ? { wikilinkSuggest } : {}),
+      ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),
+    }
+  }
+
+  /** #360 T11 附加组件界面绘制探针（paint.addonUi）：注册态/挂载态 ID
+   *  全集与绘制命中（elementFromPoint——样式注入失效时 DOM 在场但命中
+   *  失败）。jsdom 无布局恒 false，只作真宿主集成断言依据；无任何注册
+   *  （runtime 未装配或零注册）时 undefined——缺省不参与断言 */
+  private collectAddonUiPaint(): PaintProbe['addonUi'] | undefined {
+    const stats = this.addonUi?.stats()
+    if (stats === undefined || (stats.buttons.length === 0 && stats.panels.length === 0)) {
+      return undefined
+    }
+    const mountedIds = stats.buttons.filter((button) => button.mounted).map((button) => button.id)
+    const openIds = stats.panels.filter((panel) => panel.open).map((panel) => panel.id)
+    const firstButton = mountedIds.length > 0
+      ? this.addonToolbarSlotEl?.querySelector<HTMLElement>(
+        `button[data-addon-button="${CSS.escape(mountedIds[0]!)}"]`) ?? null
+      : null
+    const firstPanelRoot = openIds.length > 0
+      ? this.addonPanelDockEl?.querySelector<HTMLElement>(
+        `[data-addon-panel="${CSS.escape(openIds[0]!)}"] .vsidian-addon-panel-root`) ?? null
+      : null
+    return {
+      toolbarButtonIds: stats.buttons.map((button) => button.id),
+      mountedToolbarButtonIds: mountedIds,
+      openPanelIds: openIds,
+      buttonVisible: mountedIds.length > 0 ? hitPaintedElement(firstButton ?? undefined) : null,
+      panelBodyVisible: openIds.length > 0
+        ? hitPaintedElement(firstPanelRoot ?? undefined, firstPanelRoot ?? undefined)
+        : null,
     }
   }
 
@@ -10604,6 +10730,16 @@ function hitPaintedElement(
   } catch {
     return false
   }
+}
+
+/** #360 T11：collectPaint 的 addonUi 字段包裹（探针值 → paint.addonUi
+ *  嵌套形态；缺省时零字段——缺省不参与断言）。此前直接展开探针对象会把
+ *  五个字段平铺到 paint 顶层（协议守卫外的未知字段，宿主断言读不到
+ *  paint.addonUi）——集成诊断实测定位 */
+function wrapAddonUiPaint(
+  probe: PaintProbe['addonUi'],
+): { addonUi: PaintProbe['addonUi'] } | Record<string, never> {
+  return probe === undefined ? {} : { addonUi: probe }
 }
 
 /** 多候选绘制探针的代表元素选择（#105/#106）：返回首个真实命中

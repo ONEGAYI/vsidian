@@ -930,6 +930,11 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.openExtensionsView': '在 VSCode 管理扩展',
   'addons.openDetail': '扩展详情',
   'addons.officialBadge': '官方',
+  // #360 T11 附加组件界面贡献挂载点（平台 chrome 文案；组件自己的按钮
+  // 标题与面板标题是自由文本，不进本字典）
+  'addonUi.toolbarSlotLabel': '附加组件按钮',
+  'addonUi.panelDockLabel': '附加组件面板',
+  'addonUi.panelClose': '关闭面板',
   // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
   'addons.enable': '启用',
   'addons.disable': '停用',

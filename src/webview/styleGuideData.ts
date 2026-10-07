@@ -3407,6 +3407,56 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#208（2026-09-29）"
   },
   {
+    "id": "addon-toolbar-slot",
+    "domain": "chrome",
+    "category": "toolbar-banner",
+    "kind": "selector",
+    "target": ".vsidian-addon-toolbar-slot（内含 .vsidian-addon-toolbar-button；具体按钮按 button[data-addon-button=\"<组件ID>.<局部ID>\"] 定位）",
+    "purpose": "附加组件工具栏按钮槽（#360 T11）：Vsidian 附加组件往编辑器工具栏新增自己按钮的**唯一合法挂载点**——平台构造并持有容器，组件只能往槽内加自己的按钮，不接管内核容器或内置按钮位。按钮基础形态复用工具栏 button 结构选择器（透明底/悬停高亮），文字内容（iconText/label）放宽宽度。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "容器常驻 DOM（空态 :empty 零占位——无组件注册时不占空间）；按钮随组件注册挂载、随声明模式撤挂/重挂、随组件停用或故障整组件回收。按钮显示文本缺省取注册 label，iconText 可覆盖。",
+    "dom": "顶栏 .vsidian-toolbar 内 div，位于左侧组尾部（快速操作之后）、右端组首刷新按钮（持有 margin-left:auto 推靠）之前。",
+    "example": ".vsidian-addon-toolbar-slot {\n  gap: 4px;\n}\n\n/* 定位某组件的按钮 */\n.vsidian-addon-toolbar-button[data-addon-button=\"publisher.addon.stamp\"] {\n  color: var(--vscode-toolbar-foreground);\n}",
+    "obsidian": {
+      "counterpart": "无对应物（Obsidian 插件ribbon为独立栏；本槽是顶栏内分组）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」：chromeSelectors[\"addon-toolbar-slot\"] 探针命中（真宿主渲染验证）",
+      "jsdom runtime 单测（#360）：挂载归属/命名空间 data 属性/撤挂与重挂",
+      "浏览器与集成 T11 套件（#360）：按钮绘制命中与回收断言"
+    ],
+    "introduced": "#360（2026-10-07，T11）"
+  },
+  {
+    "id": "addon-panel-dock",
+    "domain": "chrome",
+    "category": "toolbar-banner",
+    "kind": "selector",
+    "target": ".vsidian-addon-panel-dock（面板宿主容器）/ .vsidian-addon-panel（单面板）/ .vsidian-addon-panel-header / .vsidian-addon-panel-title / .vsidian-addon-panel-close / .vsidian-addon-panel-body / .vsidian-addon-panel-root（组件内容根）",
+    "purpose": "附加组件面板 dock（#360 T11）：组件面板的**唯一合法宿主容器**——面板 chrome（标题栏/标题/关闭按钮）与 dock 样式归平台，内容根（.vsidian-addon-panel-root）内部样式归组件（组件经装载样式表自管）。不把内核容器或整编辑器交给作者接管；具体面板按 [data-addon-panel=\"<组件ID>.<局部ID>\"] 定位。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "dock 常驻 DOM（空态 :empty 零占位）；面板默认关闭，组件 open() 或用户关闭按钮切换；面板关闭即容器移除、内容根脱挂（组件迟到写入不可见）；声明模式不含当前模式的面板强制关闭。",
+    "dom": "主编辑区 .vsidian-main 尾部（正文容器之后）；面板 section 含 header（title span + close button）与 body（滚动容器，max-height 约束），body 内为组件内容根 div。",
+    "example": ".vsidian-addon-panel-body {\n  max-height: 320px;\n}\n\n/* 定位某组件的面板 */\n.vsidian-addon-panel[data-addon-panel=\"publisher.addon.notes\"] .vsidian-addon-panel-title {\n  color: var(--vscode-editor-foreground);\n}",
+    "obsidian": {
+      "counterpart": "无对应物（Obsidian 无 webview 内组件面板 dock）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」：chromeSelectors[\"addon-panel-dock\"] 探针命中（真宿主渲染验证）",
+      "jsdom runtime 单测（#360）：面板 chrome 形态/开闭生命周期/迟到结果脱挂",
+      "浏览器与集成 T11 套件（#360）：面板内容绘制命中与回收断言"
+    ],
+    "introduced": "#360（2026-10-07，T11）"
+  },
+  {
     "id": "mode-body",
     "domain": "chrome",
     "category": "toolbar-banner",
@@ -6113,6 +6163,22 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).",
     "obsidian": {
       "counterpart": "No counterpart"
+    }
+  },
+  "addon-toolbar-slot": {
+    "purpose": "Add-on toolbar button slot (#360 T11): the only legal mount point for Vsidian add-ons adding their own toolbar buttons — the platform constructs and owns the container; an add-on can only add its own buttons into the slot and never takes over kernel containers or built-in button positions. Button base shape reuses the toolbar button structural selector (transparent background / hover highlight); text content (iconText/label) widens the box.",
+    "states": "Persistent container DOM (empty state collapses via :empty — zero footprint with no registrations); buttons mount on add-on registration, unmount/remount with the declared mode, and are recycled wholesale when the add-on is disabled or faults. The button display text defaults to the registered label; iconText overrides it.",
+    "dom": "A div inside the top .vsidian-toolbar, at the tail of the left group (after quick actions) and before the right-end group head refresh button (which owns the margin-left:auto push rule).",
+    "obsidian": {
+      "counterpart": "No counterpart (the Obsidian plugin ribbon is a separate bar; this slot is an in-toolbar group)"
+    }
+  },
+  "addon-panel-dock": {
+    "purpose": "Add-on panel dock (#360 T11): the only legal host container for add-on panels — panel chrome (header/title/close button) and dock styling belong to the platform, while the content root (.vsidian-addon-panel-root) interior styling belongs to the add-on (managed via its loaded stylesheets). Kernel containers or the whole editor are never handed to authors; locate a specific panel via [data-addon-panel=\"<addonId>.<localId>\"].",
+    "states": "Persistent dock DOM (empty state collapses via :empty); panels default to closed, toggled by the add-on open() or the user close button; closing a panel removes its container and detaches the content root (late writes by the add-on stay invisible); a panel whose declared mode excludes the current mode is force-closed.",
+    "dom": "At the tail of the main editor area .vsidian-main (after the content containers); each panel section holds a header (title span + close button) and a body (scroll container, max-height constrained) whose child is the add-on content root div.",
+    "obsidian": {
+      "counterpart": "No counterpart (Obsidian has no in-webview add-on panel dock)"
     }
   },
   "skeleton": {

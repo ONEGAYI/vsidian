@@ -427,6 +427,13 @@ export type HostToWebview =
   | { kind: 'contextMenu.test.menuClick'; command: string }
   /** 测试钩子（#183）：关闭当前统一右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'contextMenu.test.menuClose' }
+  /** 测试钩子（#360 T11）：点击工具栏中 buttonId（data-addon-button 命名
+   *  空间 ID）对应的组件真实按钮（与用户点击同一处理器；宿主测试无法向
+   *  webview 派发真实鼠标事件，以此通道验证真实宿主内的按钮执行链） */
+  | { kind: 'addonUi.test.buttonClick'; buttonId: string }
+  /** 测试钩子（#360 T11）：点击面板 chrome 的关闭按钮（panelId 为
+   *  data-addon-panel 命名空间 ID；与用户点击同一处理器——平台回收路径） */
+  | { kind: 'addonUi.test.panelClose'; panelId: string }
   /** 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾（真实
    *  keydown 链路；须先经 menuClick command='rename' 进入重命名态） */
   | { kind: 'outline.test.renameKey'; text: string; key: 'enter' | 'escape' }
@@ -2726,6 +2733,21 @@ export interface PaintProbe {
      *  itemCount 同源，顺序一致；浮层不在场为 null） */
     names: string[] | null
   }
+  /** #360 T11 附加组件界面绘制：组件按钮/面板的注册态、挂载态（DOM
+   *  在场）与实际可见性（elementFromPoint 命中——样式注入失效时 DOM
+   *  在场但命中失败）。jsdom 无布局恒 false；无任何注册时缺省 */
+  addonUi?: {
+    /** 注册态按钮的命名空间 ID 全集（含模式不符撤挂的——回收断言面） */
+    toolbarButtonIds: string[]
+    /** 挂载态（DOM 在槽内）按钮 ID */
+    mountedToolbarButtonIds: string[]
+    /** 打开态面板 ID */
+    openPanelIds: string[]
+    /** 首个挂载按钮的绘制命中（无挂载按钮 null） */
+    buttonVisible: boolean | null
+    /** 首个打开面板内容根的绘制命中（无打开面板 null） */
+    panelBodyVisible: boolean | null
+  }
 }
 
 /** #32 排版一致性探针：正文基础排版四项样本（null = 元素缺失/不可读） */
@@ -3511,6 +3533,14 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.wikilinkSuggest.statusText === undefined || isNullOrString(v.wikilinkSuggest.statusText)) &&
       (v.wikilinkSuggest.names === undefined || v.wikilinkSuggest.names === null ||
         (Array.isArray(v.wikilinkSuggest.names) && v.wikilinkSuggest.names.every(isString)))
+    )) &&
+    (v.addonUi === undefined || (
+      isObject(v.addonUi) &&
+      Array.isArray(v.addonUi.toolbarButtonIds) && v.addonUi.toolbarButtonIds.every(isString) &&
+      Array.isArray(v.addonUi.mountedToolbarButtonIds) && v.addonUi.mountedToolbarButtonIds.every(isString) &&
+      Array.isArray(v.addonUi.openPanelIds) && v.addonUi.openPanelIds.every(isString) &&
+      (v.addonUi.buttonVisible === null || typeof v.addonUi.buttonVisible === 'boolean') &&
+      (v.addonUi.panelBodyVisible === null || typeof v.addonUi.panelBodyVisible === 'boolean')
     ))
   )
 }
@@ -4954,6 +4984,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return typeof v.command === 'string' && v.command.length > 0
     case 'contextMenu.test.menuClose':
       return true
+    case 'addonUi.test.buttonClick':
+      return typeof v.buttonId === 'string' && v.buttonId.length > 0
+    case 'addonUi.test.panelClose':
+      return typeof v.panelId === 'string' && v.panelId.length > 0
     case 'outline.test.renameKey':
       return isString(v.text) && (v.key === 'enter' || v.key === 'escape')
     case 'outline.test.drag':

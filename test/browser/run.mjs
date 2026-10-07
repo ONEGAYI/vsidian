@@ -105,7 +105,11 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 停用回收）紧随附加组件族
   'addonT10Commands',
   // #358 T09 渲染提供者自动接管：真实浏览器绘制层（接管/热切换/迟到结果/弹窗取图）
-  'addonRendererTakeover']
+  'addonRendererTakeover',
+  // #360 T11：组件按钮/面板与视图界面贡献（生产界面运行时装配——真实
+  // 点击经 target 句柄提交、悬停提示与键位徽章、面板开闭与迟到结果、
+  // 模式回收与卸载回收、内置工具栏不受影响）紧随附加组件族
+  'addonT11Ui']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
