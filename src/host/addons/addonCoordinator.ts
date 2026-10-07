@@ -214,6 +214,77 @@ export class AddonCoordinator {
     this.notifyChanged()
   }
 
+  /**
+   * #354 T05 故障手动重试（ADR「先释放旧代次」）：清「不自动重试」短路
+   * 并重新唤醒该组件。已注册的先经 registry.release 释放旧代次（贡献/
+   * 故障吸持随代次终结）；再调 extension.activate()——1.82.3 实证失败过的
+   * activate 会假成功，唤醒后状态如实呈现（awaiting-registration 等组件
+   * 重新注册，不虚报成功）。返回 'unknown' = 从未发现过该组件；
+   * 'host-unavailable' = 当前宿主查不到（不归因）。
+   */
+  async retry(addonId: string): Promise<'ok' | 'unknown' | 'host-unavailable'> {
+    if (this.disposed) {
+      return 'unknown'
+    }
+    await this.ports.ensureSelfApiPublished()
+    if (this.disposed) {
+      return 'unknown'
+    }
+    if (!this.records.has(addonId)) {
+      return 'unknown'
+    }
+    const extension = this.getAllExtensionsSnapshot().find((item) => item.id === addonId)
+    if (!extension) {
+      this.updateRecord(addonId, (prev) => ({
+        label: prev.label,
+        official: prev.official,
+        status: 'host-unavailable',
+        detail: undefined,
+        apiRange: undefined,
+      }))
+      this.notifyChanged()
+      return 'host-unavailable'
+    }
+    // 旧代次释放（runtime 记录随 hooks.onRemoved 移除；故障吸持解除）
+    this.registry.release(addonId)
+    // 重新唤醒（按 ID 合并在途唤醒；activation-failed 短路被本次手动意图越过）
+    if (!this.waking.has(addonId)) {
+      this.updateRecord(addonId, (prev) => ({
+        label: extension.label,
+        official: prev.official,
+        status: 'activating',
+        detail: undefined,
+        apiRange: undefined,
+      }))
+      const wake = Promise.resolve()
+        .then(() => extension.activate())
+        .then(
+          () => {
+            this.updateRecord(addonId, (prev) => ({
+              label: extension.label,
+              official: prev.official,
+              status: this.registry.has(addonId) ? 'registered' : 'awaiting-registration',
+            }))
+          },
+          (error: unknown) => {
+            this.updateRecord(addonId, (prev) => ({
+              label: extension.label,
+              official: prev.official,
+              status: 'activation-failed',
+              detail: error instanceof Error ? error.message : String(error),
+            }))
+          },
+        )
+        .finally(() => {
+          this.waking.delete(addonId)
+          this.notifyChanged()
+        })
+      this.waking.set(addonId, wake as Promise<void>)
+    }
+    this.notifyChanged()
+    return 'ok'
+  }
+
   /** 设置页状态列表（发现记录与注册表合并后的呈现载荷） */
   stateEntries(): readonly AddonStatusEntry[] {
     return [...this.records.entries()]
@@ -245,6 +316,11 @@ export class AddonCoordinator {
 
   private registryApiVersion(): string {
     return this.registryPorts().apiVersion
+  }
+
+  /** 当前扩展宿主快照（retry 的唤醒目标查找；扫描共用同一端口） */
+  private getAllExtensionsSnapshot(): readonly AddonExtensionLike[] {
+    return this.ports.getAllExtensions()
   }
 
   private registryExperimental(): Readonly<Record<string, string>> {

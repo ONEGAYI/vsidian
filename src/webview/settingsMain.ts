@@ -68,8 +68,15 @@ const defaultEditor = new DefaultEditorSection({ postMessage: (message) => vscod
 // #350 T01 附加组件：状态列表 + 市场搜索 + VSCode 扩展管理入口（状态
 // 权威在宿主，addons.state 推送回显；装载即拉取）。#351 T02 起分页含
 // 功能开关与组件设置页挂载区（挂载内容进 addonSettingsHost——装载器
-// mountRoot 的容器）
-const addons = new AddonSection({ postMessage: (message) => vscode.postMessage(message) }, addonSettingsHost)
+// mountRoot 的容器）。#354 T05 起向侧栏贡献核心/第三方两大组（组件状态
+// 推送后经 onSidebarChange 触发视图 refreshSidebar 重建侧栏——经中转
+// 函数接线，view 构造晚于分页实例）
+let refreshSidebar: () => void = () => {}
+const addons = new AddonSection(
+  { postMessage: (message) => vscode.postMessage(message) },
+  addonSettingsHost,
+  () => refreshSidebar(),
+)
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
@@ -78,6 +85,7 @@ const view = new SettingsPageView(
   [wordSegment],
   [defaultEditor],
 )
+refreshSidebar = () => view.refreshSidebar()
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })
 vscode.postMessage({ kind: 'keybindings.get' })

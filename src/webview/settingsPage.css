@@ -74,6 +74,31 @@ button:focus-visible, input:focus-visible {
   background: var(--vscode-list-activeSelectionBackground, #e0e4eb);
   border-color: var(--vscode-contrastActiveBorder, transparent);
 }
+/* #354 T05 侧栏三组结构：选项/核心组件/第三方组件大组——大组间视觉分隔，
+ * 组内子组（已启用/已停用）小标签；空态提示与故障徽章 */
+.vsidian-settings-nav-section { display: grid; gap: 6px; }
+.vsidian-settings-nav-section .vsidian-settings-nav-items { display: grid; gap: 6px; }
+.vsidian-settings-nav-group-label {
+  margin: 0; padding: 0 12px; color: var(--vscode-foreground, #333);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+}
+.vsidian-settings-nav-subgroup { display: grid; gap: 4px; }
+.vsidian-settings-nav-subgroup-label {
+  margin: 2px 0 0; padding: 0 12px; color: var(--vscode-descriptionForeground, #666);
+  font-size: 11px;
+}
+.vsidian-settings-nav-divider {
+  border: 0; margin: 10px 0;
+  border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border, #cbd0d8));
+}
+.vsidian-settings-nav-empty {
+  margin: 0; padding: 0 12px; color: var(--vscode-descriptionForeground, #666); font-size: 12px;
+}
+.vsidian-settings-nav-item-badge {
+  margin-left: auto; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  color: var(--vscode-statusBarItem-errorForeground, #fff);
+  background: var(--vscode-statusBarItem-errorBackground, #b8111b);
+}
 .vsidian-settings-list { max-width: 850px; }
 .vsidian-settings-heading { font-size: 24px; font-weight: 600; margin: 0 0 10px; }
 .vsidian-settings-subtitle { color: var(--vscode-descriptionForeground, #666); line-height: 1.7; margin: 0 0 28px; }
@@ -482,7 +507,12 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
   .vsidian-settings-sidebar { padding: 18px 20px; border-right: 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); overflow-y: visible; }
   .vsidian-settings-title { margin: 0 0 16px; }
   .vsidian-settings-nav-label { display: none; }
-  .vsidian-settings-nav { display: flex; flex-wrap: wrap; margin-top: 14px; }
+  .vsidian-settings-nav { display: flex; flex-wrap: wrap; margin-top: 14px; gap: 4px 10px; }
+  .vsidian-settings-nav-section { display: contents; }
+  .vsidian-settings-nav-section .vsidian-settings-nav-items { display: contents; }
+  .vsidian-settings-nav-subgroup { display: contents; }
+  .vsidian-settings-nav-divider { display: none; }
+  .vsidian-settings-nav-group-label, .vsidian-settings-nav-subgroup-label { width: 100%; padding: 0; }
   .vsidian-settings-nav-item { width: auto; flex: 1 1 auto; }
   .vsidian-settings-main { padding: 16px 24px 32px; }
   .vsidian-settings-subtitle { margin-bottom: 24px; }
@@ -554,6 +584,15 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-addons-scope-tab:disabled { opacity: 0.5; cursor: default; }
 .vsidian-addons-scope-hint { margin: 0; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-addons-fault-hint { margin: 0; color: var(--vscode-errorForeground, #f66); }
+/* #354 T05 故障排障块：状态 + 日志入口 + 手动重试（完整诊断归 T12） */
+.vsidian-addons-fault-troubleshoot {
+  display: grid; gap: 8px; padding: 12px 16px; margin: 0 0 4px;
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  border-radius: 10px;
+  background: var(--vscode-inputValidation-errorBackground, rgba(190, 17, 0, 0.08));
+}
+.vsidian-addons-fault-troubleshoot h4 { margin: 0; color: var(--vscode-errorForeground, #f66); font-size: 13px; }
+.vsidian-addons-fault-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .vsidian-addons-settings .vsidian-settings-group { gap: 8px; }
 .vsidian-addons-setting-item { display: flex; flex-direction: column; gap: 6px; }
 .vsidian-addons-source-badge { display: inline-block; margin-top: 2px; padding: 0 6px; min-height: 16px;

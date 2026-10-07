@@ -10,6 +10,7 @@ import { wikilinkEmbedCases } from './wikilinkEmbed'
 import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
+import { addonT05Cases } from './addonT05Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17339,4 +17340,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #353 T04 附加组件复杂设置：生产路径组（独立文件维护——夹具组件经
   // 公开 API 注册复杂定义与分层读写，断言面见 addonT04Cases.ts 头注）
   ...addonT04Cases,
+  // #354 T05 组件管理侧栏数据面、故障手动重试与 realpath 逃逸守卫（断言
+  // 面见 addonT05Cases.ts 头注）
+  ...addonT05Cases,
 ]

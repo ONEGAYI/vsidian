@@ -8,7 +8,7 @@
 // 缺省 N=1 保持原有单宿主行为与 integration-dev.log 报告名。
 // VSIDIAN_TEST_GROUP=all/core/sensitive：缺省全量；敏感组报告单独命名。
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
-import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, lstatSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -63,8 +63,21 @@ const testCacheDir = path.join(root, '.vscode-test')
 // （addon-fail）；#351 T02 页面 SDK 夹具（addon-t02——页面产物由 V02
 // 构建桥生成后拷入其 dist/，构建产物不入库）；#353 T04 复杂设置夹具
 //（addon-t04——纯宿主 CJS，无页面产物；经公开 API 注册复杂定义与分层读写）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04'].map((name) =>
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-escape'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
+
+// #354 T05 逃逸夹具装配：addon-escape/escape 在运行期创建为 junction，
+// 指向安装目录外的临时目录（Windows junction 与符号链接同语义且无需
+// 管理员权限；junction 不入库——git 会把 reparse point 当目录穿透跟踪
+// 外部内容）。运行结束随临时目录一并清理。
+const escapeLink = path.join(root, 'test', 'integration', 'addonFixtures', 'addon-escape', 'escape')
+const escapeTarget = mkdtempSync(path.join(tmpdir(), 'vsidian-escape-'))
+mkdirSync(escapeTarget, { recursive: true })
+writeFileSync(path.join(escapeTarget, 'settings.js'), '// escaped placeholder (must never load)\n')
+writeFileSync(path.join(escapeTarget, 'editor.js'), '// escaped placeholder (must never load)\n')
+rmSync(escapeLink, { force: true, recursive: true })
+symlinkSync(escapeTarget, escapeLink, 'junction')
+console.log(`[runTest] T05 逃逸 junction 已装配：${escapeLink} -> ${escapeTarget}`)
 
 // #351 T02：夹具组件页面产物构建（chrome114 IIFE + 静态红线——CM6 不
 // 重打包）；产物拷入 addon-t02/dist 供组件按相对入口登记（资源授权锚 =
@@ -160,6 +173,14 @@ try {
   console.error('[runTest] 运行失败', err)
   process.exitCode = 1
 } finally {
+  // #354 T05 逃逸 junction 清理：先删链接（rmSync 对 junction 只删链接
+  // 本身），再删外部临时目录
+  try {
+    rmSync(escapeLink, { force: true })
+    rmSync(escapeTarget, { recursive: true, force: true })
+  } catch {
+    console.error(`[runTest] 清理逃逸 junction 失败：${escapeLink}`)
+  }
   // workspace 文件随工作区目录一并清理（兄弟文件，cleanupTestDirs 只收目录）
   for (const wsFile of wsFiles) {
     try {

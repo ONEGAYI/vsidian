@@ -16,9 +16,13 @@ import {
   isValidSemverRange,
   satisfiesSemverRange,
 } from './semverRange'
+import { OFFICIAL_ADDON_REGISTRY, type OfficialAddonEntry } from './officialAddons'
 
 // 范围求值随身份声明一并暴露（兼容判定的公开消费面聚合在本模块）
 export { satisfiesSemverRange } from './semverRange'
+// #354 T05 官方登记表与判定再导出（消费面聚合在身份模块；事实源在 officialAddons）
+export { OFFICIAL_ADDON_REGISTRY, OFFICIAL_ADDON_EXTENSION_IDS } from './officialAddons'
+export type { OfficialAddonEntry } from './officialAddons'
 
 /** 私有身份声明字段名（package.json 顶层） */
 export const ADDON_MANIFEST_FIELD = 'vsidianAddon'
@@ -33,16 +37,10 @@ export const ADDON_IDENTITY_MANIFEST_VERSION = 1
  */
 export const ADDON_API_VERSION = '1.0.0'
 
-/**
- * 官方（核心）附加组件的扩展 ID 清单：主仓库维护，用于设置页来源分组。
- * 初版为空——清单结构即占位，登记新官方组件只改本表；第三方组件不能自行
- * 声明官方身份（keywords 不参与归属判定）。
- */
-export const OFFICIAL_ADDON_EXTENSION_IDS: readonly string[] = []
-
-/** 官方归属判定（唯一入口，来源限于上表） */
-export function isOfficialAddon(extensionId: string): boolean {
-  return OFFICIAL_ADDON_EXTENSION_IDS.includes(extensionId)
+/** 官方归属判定（唯一入口，来源限于官方登记表；registry 参数仅供测试
+ *  注入登记表形态——生产调用缺省用真实清单） */
+export function isOfficialAddon(extensionId: string, registry: readonly OfficialAddonEntry[] = OFFICIAL_ADDON_REGISTRY): boolean {
+  return registry.some((entry) => entry.extensionId === extensionId)
 }
 
 /** 合法身份声明形状 */

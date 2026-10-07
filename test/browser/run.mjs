@@ -93,7 +93,11 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #353（T04）附加组件基础设置区：生产设置页入口（真实键盘/点击驱动
   // 双标签作用范围、标量/数组/对象基础控件、清除覆盖与保存反馈；标签
   // 选中态与失败提示的绘制层断言）紧随 addonPageSdk（同附加组件族）
-  'addonSettings']
+  'addonSettings',
+  // #354 T05：侧栏三组与故障排障（绘制层断言）+ 开关热切换 IME 收尾
+  // （CDP composition 驱动，复用 addonPageSdkFixture 生产链路）
+  'addonSidebar',
+  'addonHotSwitch']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

@@ -21,7 +21,7 @@ import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import type { AddonStatusEntry } from '../shared/addonIdentity'
 import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
-import type { SettingsPageBridge, SettingsPageSection } from './settingsPageView'
+import type { SettingsPageBridge, SettingsPageSection, SettingsSidebarGroup } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
 
 type AddonsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.state' }>
@@ -31,9 +31,40 @@ type AddonSettingsAreaPayload = AddonSettingsStateMessage['addon'] extends infer
 /** 功能开关行的 data 键（与定义键空间区分——开关不是设置定义） */
 const ENABLED_KEY = '__enabled__'
 
+/** 侧栏组件条目定位键前缀（mount 的 focusEntry 形如 addon:<组件 ID>） */
+const SIDEBAR_ADDON_ENTRY_PREFIX = 'addon:'
+
 /** 全局搜索定位入口 id（list = 状态列表；manage = 搜索与管理入口组） */
 export const ADDONS_SECTION_LIST_ENTRY = 'list'
 export const ADDONS_SECTION_MANAGE_ENTRY = 'manage'
+
+/**
+ * #354 T05 侧栏大组分组数据（ADR-0012「侧栏结构」与「分组与故障状态」）：
+ * - 官方/第三方两大组恒在场（空清单呈现空态，结构不消失）；
+ * - 按用户功能开关归类已启用/已停用——开关值只在已注册组件上存在，
+ *   未注册（不兼容/唤醒失败等）不参与分组（状态列表仍呈现）；
+ * - 开关开启但故障暂停者留在已启用组并标注故障（不移入已停用）。
+ */
+export function addonSidebarGroups(addons: readonly AddonStatusEntry[]): readonly SettingsSidebarGroup[] {
+  const build = (official: boolean): SettingsSidebarGroup => {
+    const scoped = addons.filter((entry) => entry.official === official && typeof entry.enabled === 'boolean')
+    const of = (enabled: boolean) => scoped
+      .filter((entry) => entry.enabled === enabled)
+      .map((entry) => ({
+        id: `${SIDEBAR_ADDON_ENTRY_PREFIX}${entry.id}`,
+        title: entry.label,
+        ...(entry.fault !== undefined ? { faulted: true } : {}),
+      }))
+    return {
+      label: t(official ? 'addons.sidebarCoreAddons' : 'addons.sidebarThirdPartyAddons'),
+      subgroups: [
+        { label: t('addons.sidebarEnabledGroup'), entries: of(true) },
+        { label: t('addons.sidebarDisabledGroup'), entries: of(false) },
+      ],
+    }
+  }
+  return [build(true), build(false)]
+}
 
 /** 状态行可见文本（分组句；不兼容/失败携带原因原文） */
 export function addonStatusText(entry: AddonStatusEntry, apiVersion: string): string {
@@ -83,6 +114,9 @@ export class AddonSection implements SettingsPageSection {
   private scope: 'user' | 'workspace' = 'user'
   /** 数组/对象的未保存草稿（定义键 → 草稿值；推送保留，保存成功清除） */
   private drafts = new Map<string, unknown>()
+  /** #354 T05 侧栏条目定位的组件 ID（推送重渲染保持——定位高亮不因
+   *  settingsOpen 的应答回灌清失；下次定位或分页重挂载时更新） */
+  private locatedAddonId: string | undefined
   private parent: HTMLElement | undefined
 
   constructor(
@@ -90,6 +124,9 @@ export class AddonSection implements SettingsPageSection {
     /** #351 T02 组件设置页挂载宿主元素（settingsMain 创建的持久容器——
      *  装载器 mountRoot 挂进它；不随分页重渲染销毁，重渲染只移动节点） */
     private readonly addonSettingsHost?: HTMLElement,
+    /** #354 T05 侧栏大组数据变化回调（settingsMain 接视图 refreshSidebar；
+     *  addons.state 推送后触发侧栏重建，分页自身不直接改侧栏 DOM） */
+    private readonly onSidebarChange?: () => void,
   ) {}
 
   get entries() {
@@ -109,10 +146,26 @@ export class AddonSection implements SettingsPageSection {
 
   mount(parent: HTMLElement, focusEntry?: string): (() => void) | undefined {
     this.parent = parent
+    // #354 T05 侧栏组件条目定位（addon:<组件 ID>）：可配置（有定义或有
+    // 自己的设置页）时打开该组件基础设置区——停用组件仍可配置（ADR Q23）；
+    // 纯运行组件（两者皆无）只定位状态列表行，不强开设置区
+    const focusAddonId = focusAddonOf(focusEntry)
+    if (focusAddonId !== undefined) {
+      const entry = this.state?.addons.find((item) => item.id === focusAddonId)
+      if (entry && (entry.hasSettingsDefinitions || entry.hasSettingsPage)) {
+        this.send({ kind: 'addons.settingsOpen', addonId: focusAddonId })
+      }
+    }
     this.render(focusEntry)
     return () => {
       this.parent = undefined
     }
+  }
+
+  /** #354 T05 侧栏大组贡献：核心组件/第三方组件两大组（各分已启用/
+   *  已停用；分组规则见 addonSidebarGroups 头注——状态未到达时空态） */
+  sidebarGroups(): readonly SettingsSidebarGroup[] {
+    return addonSidebarGroups(this.state?.addons ?? [])
   }
 
   handleHostMessage(message: unknown): void {
@@ -122,6 +175,8 @@ export class AddonSection implements SettingsPageSection {
     if (message.kind === 'addons.state') {
       this.state = message
       this.render()
+      // #354 T05 组件状态变化 → 侧栏大组分组数据随之重建（视图刷新）
+      this.onSidebarChange?.()
       return
     }
     if (message.kind === 'addons.settingsState') {
@@ -161,11 +216,18 @@ export class AddonSection implements SettingsPageSection {
     }
     parent.replaceChildren()
     const state = this.state
+    // #354 T05 侧栏组件条目定位：显式携带 focusEntry 时更新定位意图，
+    // 状态推送的无参重渲染保持既有定位（locatedAddonId）
+    const explicitFocus = focusAddonOf(focusEntry)
+    if (explicitFocus !== undefined || focusEntry !== undefined) {
+      this.locatedAddonId = explicitFocus
+    }
+    const focusAddonId = this.locatedAddonId
 
     // ---- 状态列表（官方分组在前；列表未到达时显示读取中） ----
     const listWrap = document.createElement('div')
     listWrap.className = 'vsidian-addons-list'
-    if (focusEntry === ADDONS_SECTION_LIST_ENTRY) {
+    if (focusEntry === ADDONS_SECTION_LIST_ENTRY || focusAddonId !== undefined) {
       listWrap.classList.add('vsidian-settings-item-located')
     }
     if (!state) {
@@ -198,7 +260,7 @@ export class AddonSection implements SettingsPageSection {
         const groupContainer = document.createElement('div')
         groupContainer.className = 'vsidian-settings-group'
         for (const entry of group) {
-          groupContainer.append(this.renderEntry(entry, state.apiVersion))
+          groupContainer.append(this.renderEntry(entry, state.apiVersion, entry.id === focusAddonId))
         }
         listWrap.append(groupContainer)
       }
@@ -206,6 +268,8 @@ export class AddonSection implements SettingsPageSection {
     parent.append(listWrap)
     if (focusEntry === ADDONS_SECTION_LIST_ENTRY) {
       listWrap.scrollIntoView?.({ block: 'nearest' })
+    } else if (focusAddonId !== undefined) {
+      listWrap.querySelector('.vsidian-settings-item-located')?.scrollIntoView?.({ block: 'nearest' })
     }
 
     // ---- #353 T04 基础设置区（定义驱动；停用与故障后保留） ----
@@ -238,6 +302,10 @@ export class AddonSection implements SettingsPageSection {
       this.button(t('addons.openExtensionsView'), () => {
         this.send({ kind: 'addons.openExtensionsView' })
       }),
+      // #354 T05 日志入口（故障排障；无定义无设置页的故障组件也经此排障）
+      this.button(t('addons.openLogs'), () => {
+        this.send({ kind: 'addons.openLogs' })
+      }),
     )
     parent.append(actions)
 
@@ -251,10 +319,14 @@ export class AddonSection implements SettingsPageSection {
   }
 
   /** 单条组件行：显示名（+官方徽章）、状态句、功能开关、组件设置页入口
-   *  与 VSCode 扩展详情入口（#351 起开关与设置页入口按运行状态呈现） */
-  private renderEntry(entry: AddonStatusEntry, apiVersion: string): HTMLElement {
+   *  与 VSCode 扩展详情入口（#351 起开关与设置页入口按运行状态呈现；
+   *  #354 located = 侧栏条目定位高亮） */
+  private renderEntry(entry: AddonStatusEntry, apiVersion: string, located = false): HTMLElement {
     const item = document.createElement('div')
     item.className = 'vsidian-settings-item'
+    if (located) {
+      item.classList.add('vsidian-settings-item-located')
+    }
     const label = document.createElement('div')
     label.className = 'vsidian-settings-item-label'
     const copy = document.createElement('div')
@@ -292,6 +364,13 @@ export class AddonSection implements SettingsPageSection {
       buttons.append(this.button(t('addons.openSettingsPage'), () => {
         this.send({ kind: 'addons.openAddonPage', addonId: entry.id })
       }))
+    }
+    // #354 T05 故障排障：状态行手动重试（先释放旧代次再重新唤醒；结局经
+    // addons.state 推送回显）；日志入口在工具组与设置区排障块
+    if (entry.fault !== undefined) {
+      buttons.append(this.button(t('addons.retryFaulted'), () => {
+        this.send({ kind: 'addons.retry', addonId: entry.id })
+      }, 'vsidian-addons-retry'))
     }
     const detail = this.button(t('addons.openDetail'), () => {
       this.send({ kind: 'addons.openExtension', extensionId: entry.id })
@@ -349,12 +428,32 @@ export class AddonSection implements SettingsPageSection {
       area.append(hint)
     }
 
-    // 故障提示（自定义页撤下——基础控件保留）
+    // 故障排障块（#354 T05：状态呈现 + 日志入口 + 手动重试；完整诊断归
+    // T12——自定义页已撤下，已有定义时下方基础控件保留）
     if (payload.addon.faulted) {
-      const fault = document.createElement('p')
-      fault.className = 'vsidian-addons-fault-hint'
-      fault.textContent = `${t('addons.statusFaulted', { detail: payload.addon.faultReason ?? '' })} · ${t('addons.faultedSettingsHint')}`
-      area.append(fault)
+      const troubleshoot = document.createElement('div')
+      troubleshoot.className = 'vsidian-addons-fault-troubleshoot'
+      const faultTitle = document.createElement('h4')
+      faultTitle.className = 'vsidian-settings-group-title'
+      faultTitle.textContent = t('addons.faultTroubleshootTitle')
+      const reason = document.createElement('p')
+      reason.className = 'vsidian-addons-fault-hint'
+      reason.textContent = t('addons.statusFaulted', { detail: payload.addon.faultReason ?? '' })
+      const hint = document.createElement('p')
+      hint.className = 'vsidian-addons-fault-hint'
+      hint.textContent = t('addons.faultTroubleshootHint')
+      const faultActions = document.createElement('div')
+      faultActions.className = 'vsidian-addons-fault-actions'
+      faultActions.append(
+        this.button(t('addons.openLogs'), () => {
+          this.send({ kind: 'addons.openLogs' })
+        }),
+        this.button(t('addons.retryFaulted'), () => {
+          this.send({ kind: 'addons.retry', addonId: payload.addon!.addonId })
+        }, 'vsidian-addons-retry'),
+      )
+      troubleshoot.append(faultTitle, reason, hint, faultActions)
+      area.append(troubleshoot)
     }
 
     // 控件组：功能开关行 + 定义行
@@ -641,4 +740,12 @@ function objectDefault(def: Extract<AddonSettingDefinition, { type: 'object' }>)
     composed[field.key] = field.default
   }
   return composed
+}
+
+/** focusEntry 是否为侧栏组件条目定位（addon:<组件 ID>）；否则返回 undefined */
+function focusAddonOf(focusEntry: string | undefined): string | undefined {
+  if (focusEntry === undefined || !focusEntry.startsWith(SIDEBAR_ADDON_ENTRY_PREFIX)) {
+    return undefined
+  }
+  return focusEntry.slice(SIDEBAR_ADDON_ENTRY_PREFIX.length)
 }
