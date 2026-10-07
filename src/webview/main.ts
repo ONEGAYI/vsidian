@@ -13,6 +13,7 @@ import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
+import { AddonViewRegistry } from './addonViews'
 import { installAddonPageLoader } from './addonPageLoader'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
@@ -52,13 +53,18 @@ controller.mount(document.getElementById('app') ?? document.body, [
 
 // #351 T02 附加组件页面装载器（编辑器页）：mount 完成后安装——扩展挂载槽
 // 经 controller.reconfigureAddonExtensions 驱动 liveInstance 的 Compartment；
-// 出站消息（loaded/unloaded/faulted/channel.request）经消息桥回宿主路由
+// 出站消息（loaded/unloaded/faulted/channel.request）经消息桥回宿主路由。
+// T06（#355）：统一视图注册表（页面级一份）同时注入装载器（SDK views 面
+// 的操作后端）与控制器（主正文句柄随 init 注册/注销）
+const addonViews = new AddonViewRegistry()
 const addonLoader = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView },
   attachExtensions: (extensions) => controller.reconfigureAddonExtensions(extensions),
+  addonViews,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
+controller.attachAddonViews(addonViews)
 // 装载器观测挂进 view.state 探针（集成断言面：活跃代次/授权样式表/释放
 // 历史与拒收计数；宿主经 view.state.request 拉取）
 controller.attachAddonPageProbe(() => addonLoader.stats())

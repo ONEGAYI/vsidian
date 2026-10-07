@@ -107,6 +107,32 @@ export type AddonSnapshotResult =
   | { ok: true; snapshot: AddonEditorSnapshot }
   | { ok: false; reason: 'view-disposed' }
 
+/** 视图句柄的编辑面（view.editor.*）：目标从有效句柄取得；来源身份由
+ *  SDK 层注入（组件请求不携带），伪来源请求结构上不可表达 */
+export interface AddonViewEditorFacet {
+  getSnapshot(): AddonSnapshotResult
+  applyEdits(request: AddonApplyEditsRequest): Promise<AddonApplyEditsResult>
+  /** 设置选区（零文本变更：不出站、不造文本撤销项）；拒绝返回 false */
+  setSelection(ranges: AddonSelectionRange[]): boolean
+  /** 滚动定位（零文本变更；不移动光标）；拒绝返回 false */
+  reveal(offset: number): boolean
+}
+
+/** SDK views 面返回的视图句柄（info 快照 + 编辑面） */
+export interface AddonViewHandle {
+  readonly info: AddonViewInfo
+  readonly editor: AddonViewEditorFacet
+}
+
+/** SDK views 面（views.list / views.get / 变化订阅——设计 §5.1）。
+ *  仅编辑器页提供（设置页无编辑视图，views 为 undefined） */
+export interface AddonViewsFacet {
+  list(): readonly AddonViewInfo[]
+  get(instanceId: string): AddonViewHandle | null
+  onCreated(callback: (info: AddonViewInfo) => void): () => void
+  onDisposed(callback: (info: AddonViewInfo) => void): () => void
+}
+
 // ---- 守卫（SDK 请求入口与测试共用；非法请求不进入编辑管线） ----
 
 function isRecord(value: unknown): value is Record<string, unknown> {
