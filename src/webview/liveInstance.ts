@@ -901,7 +901,11 @@ export class LiveEditorInstance {
     if (this.composing || this.blankComposition !== null) {
       return
     }
-    if (state.field(tableRegionField, false)) {
+    // 网格编辑态判定用事务前状态：键入事务（docChanged）本身会把
+    // tableRegionField 清空（region 只跨非文档事务存活），updateListener
+    // 读当前 state 恒为空——「键入发生在网格内」的基准是键入前的 region
+    //（#123/#124 的 filter 阶段同基准：tr.startState）
+    if (tr.startState.field(tableRegionField, false)) {
       return
     }
     if (state.selection.ranges.some((range) => inCodeContext(state, range.from) || inCodeContext(state, range.to))) {

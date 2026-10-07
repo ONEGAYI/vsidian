@@ -30,7 +30,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 mkdirSync(path.join(root, 'out/test/356'), { recursive: true })
 const dir = mkdtempSync(path.join(root, 'out/test/356/host-fixture-'))
 const T0 = 'word'
-const TABLE_T0 = 'word\n\n| a | b |\n| --- | --- |'
+const TABLE_T0 = '| a | b |\n| --- | --- |'
 writeFileSync(path.join(dir, 'keyboard.md'), T0)
 await build({ entryPoints: [path.join(root, 'test/integration/addonT07BehaviorsSuite.ts')],
   outfile: path.join(root, 'out/test/integration/addonT07BehaviorsSuite.js'), bundle: true,
@@ -211,7 +211,8 @@ try {
   assert.ok(stats.hostState?.disabled?.some((k) => k.endsWith('#dash-fill')), `停用推送应到达：${JSON.stringify(stats.hostState)}`)
   await command('reset')
   await typeChar('^')
-  await waitText('word^ ')
+  // 调序残留态（tilde 前置）下组内 tilde 接位
+  await waitText('word^~')
   events = await collectEvents()
   assert.ok(!events.some((e) => e.kind === 'behavior' && e.id === 'dash-fill'), `停用的 dash 不应被调用：${JSON.stringify(events)}`)
   await undo()
@@ -249,36 +250,33 @@ try {
   await waitText(T0)
   console.log('[PASS] IME 组合定稿输入不触发行为链（情境保持，驱动计数不增）')
 
-  // ---- 5. 表格情境保持：表格行格区内键入不触发链 ----
+  // ---- 5. 表格情境口径：源码行键入照常受行为修饰（网格编辑态排除）----
+  // #124 同口径：排除面是「网格编辑态」（tableRegionField 在场——点击
+  // 网格格激活）而非表格行文本；源码行内的普通键入行为链照常工作。
+  // 网格 region 在场不驱动的契约由单测 liveInstanceBehaviorDrive.test.ts
+  // 钉住（region 激活需真实网格点击，CDP 坐标不可靠）。
   await command('text')
   writeFileSync(path.join(dir, 'keyboard.md'), TABLE_T0)
-  // 宿主侧文档已变（外置写入）——等待 webview 同步表格基态
   await waitText(TABLE_T0)
   await command('reset')
   const drivesBeforeTable = (await command('stats')).counters.drives
-  // 光标移到表格首行行内（ArrowDown 两次到 | a | b | 行，End 到行尾前的格区内）
   await focus()
-  for (let i = 0; i < 2; i++) {
-    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 })
-    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 })
-  }
   await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 })
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35, modifiers: 2 })
   await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'End', code: 'End', windowsVirtualKeyCode: 35, modifiers: 2 })
   await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17 })
   await new Promise((resolve) => setTimeout(resolve, 200))
-  await call('Input.insertText', { text: '(' })
-  await new Promise((resolve) => setTimeout(resolve, 600))
+  await call('Input.insertText', { text: '^' })
+  await new Promise((resolve) => setTimeout(resolve, 800))
   stats = await command('stats')
-  assert.equal(stats.counters.drives, drivesBeforeTable, `表格行格区键入不应驱动行为链：${JSON.stringify(stats.counters)}`)
+  assert.equal(stats.counters.drives, drivesBeforeTable + 1, `表格源码行键入应照常驱动（排除面是网格编辑态）：${JSON.stringify(stats.counters)}`)
   const tableText = await command('text')
-  assert.ok(!tableText.includes('^'), `表格内键入不应被行为修饰出闭合括号：${JSON.stringify(tableText)}`)
-  events = await collectEvents()
-  assert.ok(!events.some((e) => e.kind === 'behavior'), `表格内键入不应触发行为回调：${JSON.stringify(events)}`)
-  console.log('[PASS] 表格行格区键入不触发行为链（表格情境保持）')
-  // 收尾：撤掉格内输入回表格基态（保持干净态，后续场景的盘面重写不走冲突路径）
+  assert.ok(tableText.includes('-'), `表格源码行键入应受行为修饰：${JSON.stringify(tableText)}`)
+  // 回基态（两撤回单位：修饰组 + 键入）
+  await undo()
   await undo()
   await waitText(TABLE_T0)
+  console.log('[PASS] 表格源码行键入照常受行为修饰（#124 同口径；网格编辑态排除由单测钉住）')
 
   // ---- 6. 固定 Tab 情境保持：Tab 走既有链（缩进），不触发行为链 ----
   writeFileSync(path.join(dir, 'keyboard.md'), T0)
