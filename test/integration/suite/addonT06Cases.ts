@@ -196,8 +196,13 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
   ['附加组件 T06：公开 API 读取与多范围修饰（LF/CRLF、凭据、dirty/save，#355）', async () => {
     await ensureEnabled()
     await closeAllEditors()
-    await openEditorAndWait('lf.md')
-    await probePageReady('lf.md')
+    // 独立文档（lf/crlf 共享 fixture 会被前序用例改写——fixtures.mjs 已注明
+    // 早期坐标用例修改保存 crlf.md；基态自管才能稳定断言）
+    const lfFile = 't06-api.md'
+    const crlfFile = 't06-api-crlf.md'
+    const LF_BASE = '标题一\n正文 A 行\n正文 B 行\n'
+    const CRLF_BASE = '标题一\r\n正文 A 行\r\n正文 B 行\r\n'
+    await resetDocAndOpen(lfFile, LF_BASE)
 
     // views.list：主正文句柄（live、可编辑、目标 = 本面板文档）
     const listSeq = await queue('list')
@@ -230,14 +235,14 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
       reason?: string
     }
     assert(applied.ok === true, `原子修饰应成功，实际 ${JSON.stringify(applied)}`)
-    const after = await docText('lf.md')
+    const after = await docText(lfFile)
     assert(after.version === applied.credential!.version, `凭据 version 应与权威版本对位（${applied.credential!.version} vs ${after.version}）`)
     assert(after.text.startsWith('公开') && after.text.includes('收笔'), `多范围修饰应落盘（首尾替换），实际 ${JSON.stringify(after.text.slice(0, 6))}…`)
     assert(after.dirty === true, '修饰后宿主应 dirty')
 
     // 保存收敛 clean（宿主文本管线）
-    await (await vscode.workspace.openTextDocument(wsUri('lf.md'))).save()
-    const saved = await docText('lf.md')
+    await (await vscode.workspace.openTextDocument(wsUri(lfFile))).save()
+    const saved = await docText(lfFile)
     assert(saved.dirty === false, '保存后应 clean')
 
     // 选区与定位：零文本变更（版本不动、不造撤销项）
@@ -247,13 +252,11 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     const revSeq = await queue('reveal', { instanceId: 'main', offset: 4 })
     const revealed = (await collectOne(revSeq)) as { accepted: boolean }
     assert(revealed.accepted === true, 'reveal 应接受')
-    const settled = await docText('lf.md')
+    const settled = await docText(lfFile)
     assert(settled.version === saved.version, `选区/定位不得推进权威版本（${settled.version} vs ${saved.version}）`)
 
     // CRLF 文档：公开 LF 坐标经宿主适配器正确转换（行尾字节保持）
-    await closeAllEditors()
-    await openEditorAndWait('crlf.md')
-    await probePageReady('crlf.md')
+    await resetDocAndOpen(crlfFile, CRLF_BASE)
     const crlfSnapSeq = await queue('snapshot', { instanceId: 'main' })
     const crlfSnap = (await collectOne(crlfSnapSeq)) as { ok: boolean; snapshot: { text: string; revision: number } }
     assert(crlfSnap.ok === true && !crlfSnap.snapshot.text.includes('\r'), 'CRLF 文档快照应为 LF 形态（公开坐标）')
@@ -263,7 +266,7 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     })
     const crlfApplied = (await collectOne(crlfApplySeq)) as { ok: boolean; reason?: string }
     assert(crlfApplied.ok === true, `CRLF 修饰应成功，实际 ${JSON.stringify(crlfApplied)}`)
-    const crlfDoc = await docText('crlf.md')
+    const crlfDoc = await docText(crlfFile)
     assert(crlfDoc.text.startsWith('改题\r\n正文 A'), `CRLF 文档行尾应保持（LF 坐标替换「标题一」三字符），写入后实际 ${JSON.stringify(crlfDoc.text.slice(0, 8))}）`)
     await closeAllEditors()
     console.log('[#355] 公开 API 读取与多范围修饰通过（LF/CRLF、凭据对位、dirty/save、零文本操作不造历史）')
