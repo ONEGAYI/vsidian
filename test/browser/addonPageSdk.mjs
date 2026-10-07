@@ -106,8 +106,12 @@ async function scenario(name, run) {
   }
 }
 
-const loadAddon = (page, generation) =>
-  page.evaluate(([s, c, g]) => window.loadAddon(s, c, g), [scriptUrl, cssUrl, generation])
+// #354 T05 起装载前先驱动输入落定（宿主角色 ack + 暂缓集 flush 循环——
+// 生产中宿主持续 ack，输入落定后组件扩展才装配；夹具无自动循环）
+const loadAddon = async (page, generation) => {
+  await page.evaluate(() => window.settleInputs())
+  return page.evaluate(([s, c, g]) => window.loadAddon(s, c, g), [scriptUrl, cssUrl, generation])
+}
 const waitReports = async (page, topic, count = 1, timeoutMs = 8000) => {
   const deadline = Date.now() + timeoutMs
   for (;;) {
