@@ -1,8 +1,9 @@
-// V02（#349）页面 SDK 浏览器夹具：装配**生产** WebviewSyncController（与
-// symbolInputFixture 同口径——真实控制器 + 真实 CM6，按键只由浏览器键盘/
-// CDP IME 发起），并在页面内安装 V02 装载器原型：
-// - 编辑器扩展挂载槽 = extraExtensions 里的 Compartment（生产实现将在
-//   生产扩展列表加入该槽，见结论文档「放行边界」）；
+// #351 T02 页面 SDK 浏览器夹具：装配**生产** WebviewSyncController 与
+// **生产**装载器（src/webview/addonPageLoader——与生产 main.js 同源），
+// 按键只由浏览器键盘/CDP IME 发起：
+// - 编辑器扩展挂载槽 = 生产路径 controller.reconfigureAddonExtensions →
+//   liveInstance 扩展数组末尾的附加组件 Compartment 空槽（V02 放行结论
+//   的生产缺口已闭合，不再由夹具自建槽）；
 // - 装载器与夹具共享同一份 @codemirror/* 命名空间（页面 bundle 单实例）；
 // - 组件产物（.build/test-addon/dist）经本地 http 服务提供——装载器用
 //   真实 URL 驱动 <script>/<link>，与真宿主 asWebviewUri 地址同机制；
@@ -11,12 +12,11 @@
 import 'katex/dist/katex.min.css'
 import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
-import { Compartment } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from '../../src/webview/syncController'
-import { installAddonPageLoader, type AddonPageLoaderHandle } from '../fixtures/addon-v02/loader/pageAddonLoader'
-import type { AddonChannelOutcome, AddonLoadOutcome, AddonPageOutbound, AddonUnloadOutcome } from '../fixtures/addon-v02/loader/types'
+import { installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
+import type { AddonChannelOutcome, AddonLoadOutcome, AddonPageOutbound, AddonUnloadOutcome } from '../../src/shared/addonPage'
 import '../../src/webview/main.css'
 
 const hostMessages: unknown[] = []
@@ -31,23 +31,23 @@ const controller = new WebviewSyncController({
   setState() {},
 })
 
-/** 组件挂载槽：装载器经 attachExtensions 驱动 reconfigure */
-const addonSlot = new Compartment()
 const findView = () => EditorView.findFromDOM(document.querySelector('.cm-editor')!)
 
 const outbound: AddonPageOutbound[] = []
 const loader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView },
+  // 生产槽路径：装载器 → controller → liveInstance 的附加组件
+  // Compartment（与生产 main.ts 装载点同一装配）
   attachExtensions: (extension) => {
-    const view = findView()
-    if (!view) throw new Error('cm-editor 视图未就绪')
-    view.dispatch({ effects: addonSlot.reconfigure(extension ?? []) })
+    controller.reconfigureAddonExtensions(extension)
   },
   send: (message) => outbound.push(message),
 })
 
-controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap), addonSlot.of([])])
+// 生产装配：附加组件槽由 liveInstance 扩展数组自带（Compartment 空槽），
+// 夹具不再注入槽——与生产 main.ts 的 mount 参数形态一致
+controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
 
 /** 夹具扮演宿主：组件通道请求记录（测试脚本回执驱动） */
 const channelRequests: Array<{ requestId: string; topic: string; payload: unknown; addonId: string; generation: number }> = []
