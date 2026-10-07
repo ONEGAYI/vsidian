@@ -2337,3 +2337,47 @@ describe('isWebviewToHost / isHostToWebview：wikilink 标题查询（#379 T04�
     expect(isWebviewToHost({ ...base, items: [] } as never)).toBe(false)
   })
 })
+
+describe('isWebviewToHost / isHostToWebview：T08 行为冲突管理消息（#357）', () => {
+  const info = { addonId: 'pub.a', id: 'dash-fill', name: '破折填充', history: 'atomic' as const }
+
+  it('addon.behaviors.report：载荷形态、空表（全撤信号）与方向校验', () => {
+    const base = { kind: 'addon.behaviors.report', addonId: 'pub.a', generation: 2 }
+    expect(isWebviewToHost({ ...base, behaviors: [info] })).toBe(true)
+    expect(isWebviewToHost({ ...base, behaviors: [] })).toBe(true)
+    expect(isWebviewToHost({ ...base, behaviors: [{ ...info, name: '' }] })).toBe(false)
+    expect(isWebviewToHost({ ...base, behaviors: [{ ...info, history: 'merge' as never }] })).toBe(false)
+    expect(isWebviewToHost({ ...base, behaviors: 'x' as never })).toBe(false)
+    expect(isWebviewToHost({ ...base, generation: -1, behaviors: [] })).toBe(false)
+    expect(isWebviewToHost({ ...base, addonId: '', behaviors: [] })).toBe(false)
+    // 方向校验：宿主不发起
+    expect(isHostToWebview({ ...base, behaviors: [] } as never)).toBe(false)
+  })
+
+  it('addons.behaviorsGet / behaviorsSetDisabled / behaviorsSetOrder：载荷与方向校验', () => {
+    expect(isWebviewToHost({ kind: 'addons.behaviorsGet' })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: ['pub.a#x'], disabled: true })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: [], disabled: false })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: 'pub.a#x' as never, disabled: true })).toBe(false)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: [1] as never, disabled: true })).toBe(false)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: [], disabled: 'yes' as never })).toBe(false)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetOrder', order: ['pub.a#x', 'pub.b#y'] })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetOrder', order: [] })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetOrder', order: [null] as never })).toBe(false)
+    expect(isHostToWebview({ kind: 'addons.behaviorsGet' } as never)).toBe(false)
+  })
+
+  it('addons.behaviors：注册表 + 用户态 + notice 形态与方向校验', () => {
+    const base = { kind: 'addons.behaviors', behaviors: [info] }
+    expect(isHostToWebview({ ...base, state: null })).toBe(true)
+    expect(isHostToWebview({ ...base, state: { version: 1, order: ['pub.a#dash-fill'], disabled: [] } })).toBe(true)
+    expect(isHostToWebview({ ...base, state: null, notice: { kind: 'saved' } })).toBe(true)
+    expect(isHostToWebview({ ...base, state: null, notice: { kind: 'save-failed' } })).toBe(true)
+    expect(isHostToWebview({ ...base, state: null, notice: { kind: 'other' as never } })).toBe(false)
+    expect(isHostToWebview({ ...base, state: { version: 2, order: [], disabled: [] } as never })).toBe(false)
+    expect(isHostToWebview({ ...base, state: null, behaviors: [{ ...info, examples: 'x' }] })).toBe(false)
+    expect(isHostToWebview({ ...base, state: undefined as never })).toBe(false)
+    // 方向校验：webview 不发起
+    expect(isWebviewToHost({ ...base, state: null } as never)).toBe(false)
+  })
+})

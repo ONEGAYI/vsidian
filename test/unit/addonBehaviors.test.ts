@@ -10,11 +10,19 @@
 //   不重新开启用户已关闭的项——关闭记录跨重启保留）。
 // - 存储未知项保留（注册清单里没有的键不从存储剔除——展示状态而非
 //   丢配置）；坏形态回空不写回。
+//
+// T08（#357）追加：管理 UI 的展示全序（关闭项保位呈现）、调序落库的
+// 未知项保留合并（整组件停用期间的调序不丢该组件行为的位置配置）与
+// 上报载荷的序列化形态守卫（addonBehaviorInfoOf 产物经 webview → 宿主
+// 通道回灌时的信任边界）。
 import { describe, expect, it } from 'vitest'
 import {
   BEHAVIOR_LOCAL_ID_LIMIT,
   addonBehaviorFullKey,
   isAddonBehaviorRegistration,
+  mergeBehaviorOrderPreservingUnknown,
+  orderedAddonBehaviorKeys,
+  isAddonBehaviorInfo,
   parseAddonBehaviorStateStore,
   resolveAddonBehaviorOrder,
 } from '../../src/shared/addonBehaviors'
@@ -156,5 +164,99 @@ describe('T07 行为状态存储解析', () => {
     expect(store).not.toBeNull()
     expect(store!.order).toEqual([])
     expect(store!.disabled).toEqual([])
+  })
+})
+
+describe('T08 展示全序（关闭项保位呈现）', () => {
+  const keys = (suffixes: string[]) => suffixes.map((s) => `pub.a#${s}`)
+
+  it('关闭项保留在原位（管理列表要展示它，勾选态另呈），有效序仍剔除', () => {
+    const registered = keys(['a', 'b', 'c'])
+    const stored = parseAddonBehaviorStateStore({
+      version: 1, order: keys(['c', 'a', 'b']), disabled: keys(['a']),
+    })!
+    expect(orderedAddonBehaviorKeys(registered, stored)).toEqual(keys(['c', 'a', 'b']))
+    expect(resolveAddonBehaviorOrder(registered, stored)).toEqual(keys(['c', 'b']))
+  })
+
+  it('未列入用户序的注册项按默认序追加尾部（与有效序同口径）', () => {
+    const registered = keys(['x', 'y', 'z'])
+    const stored = parseAddonBehaviorStateStore({
+      version: 1, order: keys(['z']), disabled: [],
+    })!
+    expect(orderedAddonBehaviorKeys(registered, stored)).toEqual(keys(['z', 'x', 'y']))
+    expect(orderedAddonBehaviorKeys(registered, null)).toEqual(keys(['x', 'y', 'z']))
+  })
+})
+
+describe('T08 调序落库的未知项保留合并', () => {
+  it('可见项按新序写入；不可见键（组件停用/无面板）锚定到前一个可见键之后', () => {
+    const previous = ['pub.a#x', 'pub.gone#b', 'pub.a#y', 'pub.gone#c', 'pub.a#z']
+    const next = ['pub.a#y', 'pub.a#x', 'pub.a#z']
+    // gone#b 原锚在 a#x 后、gone#c 原锚在 a#z 前（即 a#y 后）——新序中随锚移动
+    expect(mergeBehaviorOrderPreservingUnknown(next, previous)).toEqual(
+      ['pub.a#y', 'pub.gone#c', 'pub.a#x', 'pub.gone#b', 'pub.a#z'],
+    )
+  })
+
+  it('首可见键之前的历史键保留在序列头部（原位在前缀）', () => {
+    const previous = ['pub.gone#head', 'pub.a#x']
+    expect(mergeBehaviorOrderPreservingUnknown(['pub.a#x'], previous))
+      .toEqual(['pub.gone#head', 'pub.a#x'])
+  })
+
+  it('新序重复键去重；历史为空数组时原样返回；不可见键在历史中重复只保留一次', () => {
+    expect(mergeBehaviorOrderPreservingUnknown(['a#x', 'a#x'], [])).toEqual(['a#x'])
+    expect(mergeBehaviorOrderPreservingUnknown(['a#x', 'a#y'], ['a#y', 'a#y'])).toEqual(['a#x', 'a#y'])
+    expect(mergeBehaviorOrderPreservingUnknown(['a#x'], ['g#k', 'g#k'])).toEqual(['g#k', 'a#x'])
+  })
+
+  it('组件停用期间调序不丢其位置：重新注册后回到锚定的相对位置', () => {
+    // 初始用户序：a#x、gone#b（锚 a#x 后）、a#y
+    const previous = ['pub.a#x', 'pub.gone#b', 'pub.a#y']
+    // gone 停用后管理列表只剩 a#x/a#y，用户把 a#y 提到最前
+    const merged = mergeBehaviorOrderPreservingUnknown(['pub.a#y', 'pub.a#x'], previous)
+    expect(merged).toEqual(['pub.a#y', 'pub.a#x', 'pub.gone#b'])
+    // gone 重新注册：resolveAddonBehaviorOrder 用户序含 gone#b（尾部追加段）
+    const registered = ['pub.gone#b', 'pub.a#x', 'pub.a#y']
+    const stored = parseAddonBehaviorStateStore({ version: 1, order: merged, disabled: [] })!
+    expect(resolveAddonBehaviorOrder(registered, stored)).toEqual(['pub.a#y', 'pub.a#x', 'pub.gone#b'])
+  })
+})
+
+describe('T08 行为信息序列化守卫（上报载荷信任边界）', () => {
+  const info = {
+    addonId: 'pub.a',
+    id: 'bracket-close',
+    name: '括号补全',
+    history: 'atomic' as const,
+  }
+
+  it('接受最小信息与完整信息（addonBehaviorInfoOf 产物往返）', () => {
+    expect(isAddonBehaviorInfo(info)).toBe(true)
+    expect(isAddonBehaviorInfo({
+      ...info,
+      description: '输入 ( 后补全 )',
+      examples: ['(|)'],
+      exclusiveGroup: 'fill',
+    })).toBe(true)
+  })
+
+  it('addonId/id/name 缺失或类型错误拒绝；history 非法值拒绝', () => {
+    for (const bad of [
+      { ...info, addonId: '' }, { ...info, id: 1 }, { ...info, name: '' },
+      { ...info, history: 'merge' as never }, { ...info, name: null as never },
+    ]) {
+      expect(isAddonBehaviorInfo(bad)).toBe(false)
+    }
+    expect(isAddonBehaviorInfo(null)).toBe(false)
+    expect(isAddonBehaviorInfo('x')).toBe(false)
+  })
+
+  it('说明/例子/独占组字段非法拒绝（与注册守卫同口径）', () => {
+    expect(isAddonBehaviorInfo({ ...info, description: 7 })).toBe(false)
+    expect(isAddonBehaviorInfo({ ...info, examples: 'x' })).toBe(false)
+    expect(isAddonBehaviorInfo({ ...info, examples: ['a', 1] })).toBe(false)
+    expect(isAddonBehaviorInfo({ ...info, exclusiveGroup: 'g 1' })).toBe(false)
   })
 })
