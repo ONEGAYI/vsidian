@@ -965,6 +965,18 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.openCustomPage': '打开自定义设置页',
   'addons.settingsEmpty': '该组件未注册设置定义',
   'addons.faultedSettingsHint': '组件故障暂停——自定义设置页已撤下，可先用基础控件修正参数，再从组件管理页手动重试',
+  /** #354 T05 侧栏三组结构（选项/核心组件/第三方组件）与故障排障入口 */
+  'settings.sidebarOptions': '选项',
+  'addons.sidebarCoreAddons': '核心组件',
+  'addons.sidebarThirdPartyAddons': '第三方组件',
+  'addons.sidebarEnabledGroup': '已启用',
+  'addons.sidebarDisabledGroup': '已停用',
+  'addons.sidebarFaultBadge': '故障暂停',
+  'addons.sidebarEmptyGroup': '暂无附加组件',
+  'addons.openLogs': '查看组件日志',
+  'addons.retryFaulted': '重试组件',
+  'addons.faultTroubleshootTitle': '组件故障暂停',
+  'addons.faultTroubleshootHint': '该组件在 Vsidian 中的全部注册功能已暂停，自定义设置页已撤下。已有设置定义时下方基础控件仍可修改参数；完整诊断信息将在后续版本提供。',
   /** #350 T01 附加组件：宿主输出通道名（安装态日志，标明组件 ID 与原因） */
   'host.addonsChannelName': 'Vsidian 附加组件',
 }

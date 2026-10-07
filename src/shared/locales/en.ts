@@ -1020,6 +1020,18 @@ export const en = {
   'addons.openCustomPage': 'Open custom settings page',
   'addons.settingsEmpty': 'This add-on registered no setting definitions',
   'addons.faultedSettingsHint': 'Add-on faulted (suspended) — the custom settings page is withdrawn; adjust parameters with the basic controls, then retry from the add-on list',
+  /** #354 T05 侧栏三组结构（选项/核心组件/第三方组件）与故障排障入口 */
+  'settings.sidebarOptions': 'Options',
+  'addons.sidebarCoreAddons': 'Core add-ons',
+  'addons.sidebarThirdPartyAddons': 'Third-party add-ons',
+  'addons.sidebarEnabledGroup': 'Enabled',
+  'addons.sidebarDisabledGroup': 'Disabled',
+  'addons.sidebarFaultBadge': 'Fault-paused',
+  'addons.sidebarEmptyGroup': 'No add-ons yet',
+  'addons.openLogs': 'View add-on logs',
+  'addons.retryFaulted': 'Retry add-on',
+  'addons.faultTroubleshootTitle': 'Add-on faulted',
+  'addons.faultTroubleshootHint': 'Running contributions of this add-on are suspended and its custom settings page is withdrawn. Basic controls below remain usable when definitions exist; full diagnostics arrive with later versions.',
   /** #350 T01 附加组件：宿主输出通道名（安装态日志，标明组件 ID 与原因） */
   'host.addonsChannelName': 'Vsidian Add-ons',
 } as const satisfies Record<string, string>

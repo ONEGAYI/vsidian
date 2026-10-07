@@ -27,7 +27,10 @@ function makeView(addonSettingsHost?: HTMLElement): {
 } {
   const sent: unknown[] = []
   const bridge = { postMessage: (m: unknown) => sent.push(m) }
-  const addons = new AddonSection(bridge, addonSettingsHost)
+  // #354 T05 侧栏联动中转（与生产 settingsMain 同构：分页经回调触发
+  // 视图 refreshSidebar 重建侧栏大组）
+  let refreshSidebar: () => void = () => {}
+  const addons = new AddonSection(bridge, addonSettingsHost, () => refreshSidebar())
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
@@ -36,6 +39,7 @@ function makeView(addonSettingsHost?: HTMLElement): {
       addons,
     ],
     [], [])
+  refreshSidebar = () => view.refreshSidebar()
   const parent = document.createElement('div')
   view.mount(parent)
   return {
@@ -375,5 +379,135 @@ describe('附加组件分页：组件设置页入口与挂载区（T02）', () =
     expect(harness.parent.querySelector('.vsidian-addons-addonpage')).toBeNull()
     expect(harness.parent.contains(host)).toBe(false)
     expect(host.contains(mounted)).toBe(true)
+  })
+})
+
+// ---- #354 T05：侧栏三组结构（选项 / 核心组件 / 第三方组件） ----
+
+describe('设置页侧栏三组结构（T05）', () => {
+  it('「选项」大组恒在场并收纳现有内置分页与「附加组件」管理分页', () => {
+    const harness = makeView()
+    const nav = harness.parent.querySelector('nav')
+    const optionsLabel = nav?.querySelector('.vsidian-settings-nav-group-label')
+    expect(optionsLabel?.textContent).toBe('选项')
+    const optionsSection = optionsLabel?.closest('.vsidian-settings-nav-section')
+    // 现有内置分页（常规/编辑器/快捷键/外观/文件与链接/实验性功能）与
+    // 「附加组件」管理分页都在「选项」大组内
+    const itemTexts = [...(optionsSection?.querySelectorAll('.vsidian-settings-nav-item') ?? [])].map((b) => b.textContent)
+    for (const expected of ['常规', '编辑器', '快捷键', '外观', '文件与链接', '实验性功能', '附加组件']) {
+      expect(itemTexts.some((text) => text?.includes(expected))).toBe(true)
+    }
+  })
+
+  it('核心/第三方两大组恒在场（空清单也不消失），官方与第三方组件归位准确', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'onegayi.core', label: 'Core', official: true, status: 'registered', enabled: true },
+      { id: 'a.third', label: 'Third', official: false, status: 'registered', enabled: true },
+    ]))
+    const labels = [...harness.parent.querySelectorAll('.vsidian-settings-nav-group-label')].map((el) => el.textContent)
+    expect(labels).toEqual(['选项', '核心组件', '第三方组件'])
+    const sections = [...harness.parent.querySelectorAll('.vsidian-settings-nav-section')]
+    const core = sections[1]
+    const third = sections[2]
+    expect(core?.textContent).toContain('Core')
+    expect(third?.textContent).toContain('Third')
+  })
+
+  it('大组间有视觉分隔元素', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([]))
+    // 三个大组 → 两条分隔（选项|核心、核心|第三方）
+    const dividers = harness.parent.querySelectorAll('.vsidian-settings-nav-divider')
+    expect(dividers.length).toBe(2)
+  })
+
+  it('已启用/已停用子组按用户功能开关归类；未注册组件不进侧栏分组', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'onegayi.core', label: 'CoreOn', official: true, status: 'registered', enabled: true },
+      { id: 'onegayi.off', label: 'CoreOff', official: true, status: 'registered', enabled: false },
+      { id: 'a.on', label: 'ThirdOn', official: false, status: 'registered', enabled: true },
+      { id: 'a.off', label: 'ThirdOff', official: false, status: 'registered', enabled: false },
+      // 未注册（无开关值）不参与已启用/已停用归类
+      { id: 'a.incompatible', label: 'Future', official: false, status: 'incompatible', apiRange: '^2.0.0' },
+    ]))
+    const sections = [...harness.parent.querySelectorAll('.vsidian-settings-nav-section')]
+    const coreSubgroups = [...(sections[1]?.querySelectorAll('.vsidian-settings-nav-subgroup') ?? [])]
+    const coreEnabled = coreSubgroups.find((g) => g.querySelector('.vsidian-settings-nav-subgroup-label')?.textContent === '已启用')
+    const coreDisabled = coreSubgroups.find((g) => g.querySelector('.vsidian-settings-nav-subgroup-label')?.textContent === '已停用')
+    expect(coreEnabled?.textContent).toContain('CoreOn')
+    expect(coreDisabled?.textContent).toContain('CoreOff')
+    const thirdSubgroups = [...(sections[2]?.querySelectorAll('.vsidian-settings-nav-subgroup') ?? [])]
+    const thirdEnabled = thirdSubgroups.find((g) => g.querySelector('.vsidian-settings-nav-subgroup-label')?.textContent === '已启用')
+    const thirdDisabled = thirdSubgroups.find((g) => g.querySelector('.vsidian-settings-nav-subgroup-label')?.textContent === '已停用')
+    expect(thirdEnabled?.textContent).toContain('ThirdOn')
+    expect(thirdDisabled?.textContent).toContain('ThirdOff')
+    const navText = harness.parent.querySelector('nav')?.textContent ?? ''
+    expect(navText).not.toContain('Future')
+  })
+
+  it('开关开启但故障暂停者留在已启用组并标注故障（不移入已停用）', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'a.faulted', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'enable 异常：boom' } },
+    ]))
+    const sections = [...harness.parent.querySelectorAll('.vsidian-settings-nav-section')]
+    const third = sections[2]
+    const subgroups = [...(third?.querySelectorAll('.vsidian-settings-nav-subgroup') ?? [])]
+    const enabledGroup = subgroups.find((g) => g.querySelector('.vsidian-settings-nav-subgroup-label')?.textContent === '已启用')
+    const disabledGroup = subgroups.find((g) => g.querySelector('.vsidian-settings-nav-subgroup-label')?.textContent === '已停用')
+    expect(enabledGroup?.textContent).toContain('Broken')
+    expect(enabledGroup?.textContent).toContain('故障暂停')
+    expect(disabledGroup?.textContent ?? '').not.toContain('Broken')
+  })
+
+  it('空清单时两大组呈现空态提示（分组结构不消失）', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([]))
+    const sections = [...harness.parent.querySelectorAll('.vsidian-settings-nav-section')]
+    expect(sections.length).toBe(3)
+    expect(sections[1]?.querySelector('.vsidian-settings-nav-empty')?.textContent).toContain('暂无')
+    expect(sections[2]?.querySelector('.vsidian-settings-nav-empty')?.textContent).toContain('暂无')
+  })
+
+  it('侧栏组件条目点击：进入附加组件分页、打开该组件设置区并定位列表行', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    const nav = harness.parent.querySelector('nav')
+    const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Demo'))
+    expect(item).toBeTruthy()
+    item!.click()
+    // 打开该组件基础设置区（停用后仍可配置——ADR Q23）
+    expect(harness.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: 'a.demo' })
+    // 列表行定位（located 类）
+    const list = harness.parent.querySelector('.vsidian-addons-list')
+    expect(list?.querySelector('.vsidian-settings-item-located .vsidian-settings-item-title')?.textContent).toContain('Demo')
+  })
+
+  it('无定义且无设置页的组件条目点击只定位列表行（不强开设置区）', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+    ]))
+    const nav = harness.parent.querySelector('nav')
+    const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Plain'))
+    item!.click()
+    expect(harness.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toEqual([])
+    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
+  })
+
+  it('addons.state 推送后侧栏随之重建（分组数据实时）', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([]))
+    let navText = harness.parent.querySelector('nav')?.textContent ?? ''
+    expect(navText).not.toContain('Later')
+    harness.dispatch(addonsState([
+      { id: 'a.later', label: 'Later', official: false, status: 'registered', enabled: true },
+    ]))
+    navText = harness.parent.querySelector('nav')?.textContent ?? ''
+    expect(navText).toContain('Later')
   })
 })

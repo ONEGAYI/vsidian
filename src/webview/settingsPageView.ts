@@ -20,6 +20,30 @@ import {
 
 export interface SettingsPageBridge { postMessage(message: unknown): void }
 
+/**
+ * 侧栏大组（#354 T05）：附加分页向设置页侧栏贡献「选项」之外的大组
+ * （附加组件的核心/第三方两组，各含已启用/已停用子组）。大组间由视图
+ * 统一插入视觉分隔；分组结构恒在场（空清单呈现空态，不消失）。
+ */
+export interface SettingsSidebarGroup {
+  /** 大组标题（已取词的显示文本） */
+  label: string
+  /** 大组内子组（如「已启用」「已停用」）；全部子组为空时视图呈现空态 */
+  subgroups: readonly {
+    label: string
+    entries: readonly SettingsSidebarEntry[]
+  }[]
+}
+
+/** 侧栏大组内条目（点击路由到 sectionId 分页并定位） */
+export interface SettingsSidebarEntry {
+  /** 条目定位键（作为所属分页 mount 的 focusEntry 透传） */
+  id: string
+  title: string
+  /** 故障暂停标注（#354 ADR：开关开启但故障暂停者留在已启用组并标注） */
+  faulted?: boolean
+}
+
 /** 已实现的附加分页才注册；分页自己的搜索不占用全局搜索框。 */
 export interface SettingsPageSection {
   id: string
@@ -34,6 +58,12 @@ export interface SettingsPageSection {
    *  用的 keyboard 槽位随之消失） */
   icon: 'keyboard' | 'editor' | 'palette' | 'folderCog' | 'blocks'
   entries: readonly { id: string; title: string; description?: string }[]
+  /**
+   * #354 T05 侧栏大组贡献（可选）：本分页向侧栏「选项」大组之外贡献
+   *  大组。视图渲染侧栏时拉取；贡献数据变化后由分页经构造注入的
+   * onSidebarChange 回调触发视图 refreshSidebar 重建（不自行改 DOM）。
+   */
+  sidebarGroups?(): readonly SettingsSidebarGroup[]
   /**
    * 附加分页内嵌标准设置行组（#332 设置重组）：每组由视图统一装配为 h3
    * 组容器 + 标准设置行（与本页 defs 同一渲染与依赖灰化链路，快照回推的
@@ -510,7 +540,44 @@ export class SettingsPageView {
     // #96 默认分组 = 首个分类（有常规定义时即「常规」）；active 指向已
     // 消失的分类时回落首个（定义表运行时可变：测试 fixture 注册/注销）
     const active = this.categories().find((c) => c.id === this.active) ?? this.categories()[0]
-    this.nav?.replaceChildren()
+    this.renderNav(active, query)
+    this.renderContent(focusEntry, query, active)
+    // 会话内恢复（面板关闭/隐藏重载后还原分页与滚动）：分页或搜索上下文
+    // 变化即上报 UI 态——同分页回显重渲染（开关回显、换包）不重复上报；
+    // 宿主在下次 settings.get 握手按记忆补发 focusSection{scroll, state}。
+    // 首帧回落默认页（active 未选）不上报：重开装载时首帧 render 先于
+    // settings.get 到达宿主，若上报会把宿主记忆覆盖成默认页，握手补发的
+    // 恢复就永远落回默认——只认用户真实所在（点过侧栏/搜索路由/滚动）的
+    // 分页；默认页内滚动仍经 scroll 事件上报（带上滚动值）。
+    // 切页上报携带新分页的 state 载荷（PR #346，captureState 产物）
+    if (contextChanged && this.active) this.reportUiState(true)
+  }
+
+  /**
+   * #354 T05 侧栏重建入口：分页贡献的大组数据变化（如附加组件状态推送）
+   * 后由分页经 onSidebarChange 触发；只重建侧栏导航，不影响主区与滚动。
+   * 装配口径：active 语义与 render 一致（回落首个分类；搜索态不标当前）。
+   */
+  refreshSidebar(): void {
+    const query = this.search?.value.trim().toLocaleLowerCase() ?? ''
+    const active = this.categories().find((c) => c.id === this.active) ?? this.categories()[0]
+    this.renderNav(active, query)
+  }
+
+  /** 侧栏导航装配（render 与 refreshSidebar 共用）。#354 T05 起结构为
+   *  「选项」大组（现有内建分组与附加管理分页）+ 各分页贡献的大组
+   *  （附加组件的核心/第三方两组，各含已启用/已停用子组），大组间插
+   *  入视觉分隔（ADR-0012「侧栏结构」）。 */
+  private renderNav(active: { id: string } | undefined, query: string): void {
+    const nav = this.nav
+    if (!nav) return
+    nav.replaceChildren()
+    // 「选项」大组：现有内建分组与附加分页（快捷键/外观/附加组件管理页
+    // 等——组件设置入口在下方大组，管理分页本身属选项）
+    const optionsSection = element('div', 'vsidian-settings-nav-section')
+    const optionsLabel = element('p', 'vsidian-settings-nav-group-label', t('settings.sidebarOptions'))
+    optionsSection.append(optionsLabel)
+    const categoriesNavHolder = element('div', 'vsidian-settings-nav-items')
     for (const category of this.categories()) {
       const button = element('button', 'vsidian-settings-nav-item')
       button.type = 'button'
@@ -522,18 +589,49 @@ export class SettingsPageView {
         this.render()
         this.nav?.querySelector<HTMLButtonElement>('[aria-current=page]')?.focus()
       })
-      this.nav?.append(button)
+      categoriesNavHolder.append(button)
     }
-    this.renderContent(focusEntry, query, active)
-    // 会话内恢复（面板关闭/隐藏重载后还原分页与滚动）：分页或搜索上下文
-    // 变化即上报 UI 态——同分页回显重渲染（开关回显、换包）不重复上报；
-    // 宿主在下次 settings.get 握手按记忆补发 focusSection{scroll, state}。
-    // 首帧回落默认页（active 未选）不上报：重开装载时首帧 render 先于
-    // settings.get 到达宿主，若上报会把宿主记忆覆盖成默认页，握手补发的
-    // 恢复就永远落回默认——只认用户真实所在（点过侧栏/搜索路由/滚动）的
-    // 分页；默认页内滚动仍经 scroll 事件上报（带上滚动值）。
-    // 切页上报携带新分页的 state 载荷（PR #346，captureState 产物）
-    if (contextChanged && this.active) this.reportUiState(true)
+    optionsSection.append(categoriesNavHolder)
+    nav.append(optionsSection)
+    // 分页贡献的大组（#354 T05：附加组件侧栏三组的后两组）
+    for (const section of this.sections) {
+      const groups = section.sidebarGroups?.() ?? []
+      for (const group of groups) {
+        nav.append(element('hr', 'vsidian-settings-nav-divider'))
+        const sectionEl = element('div', 'vsidian-settings-nav-section')
+        sectionEl.append(element('p', 'vsidian-settings-nav-group-label', group.label))
+        let renderedEntries = 0
+        for (const subgroup of group.subgroups) {
+          if (subgroup.entries.length === 0) continue
+          const subgroupEl = element('div', 'vsidian-settings-nav-subgroup')
+          subgroupEl.append(element('p', 'vsidian-settings-nav-subgroup-label', subgroup.label))
+          for (const entry of subgroup.entries) {
+            const button = element('button', 'vsidian-settings-nav-item')
+            button.type = 'button'
+            button.setAttribute('aria-current', !query && active?.id === section.id ? 'page' : 'false')
+            button.append(document.createTextNode(entry.title))
+            if (entry.faulted) {
+              const badge = element('span', 'vsidian-settings-nav-item-badge', t('addons.sidebarFaultBadge'))
+              button.append(badge)
+            }
+            button.addEventListener('click', () => {
+              this.active = section.id
+              if (this.search) this.search.value = ''
+              this.render(entry.id)
+              this.nav?.querySelector<HTMLButtonElement>('[aria-current=page]')?.focus()
+            })
+            subgroupEl.append(button)
+            renderedEntries++
+          }
+          sectionEl.append(subgroupEl)
+        }
+        if (renderedEntries === 0) {
+          // 空态：分组结构在场（ADR：不因空清单消失），提示暂无
+          sectionEl.append(element('p', 'vsidian-settings-nav-empty', t('addons.sidebarEmptyGroup')))
+        }
+        nav.append(sectionEl)
+      }
+    }
   }
 
   /** 会话内恢复上报：当前生效分页（active 未选时回落首个分类，与 render
