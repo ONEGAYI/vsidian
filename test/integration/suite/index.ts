@@ -9,11 +9,13 @@
 // 注入（与真实 webview.onDidReceiveMessage 同一入口），宿主侧行为全部真实。
 import * as vscode from 'vscode'
 import { cases } from './cases'
-import { selectIntegrationCases, SENSITIVE_CASES } from './caseSelection'
+import { selectIntegrationCases, SENSITIVE_CASES, sshMarkerCaseFilter } from './caseSelection'
 
 export async function run(): Promise<void> {
   const failures: string[] = []
-  const filter = process.env['VSIDIAN_TEST_CASES']
+  // #366 T17：本地 env 优先；SSH 远端会话读不到本地 env（远端 ext host
+  // 不继承），经工作区标记文件兜底（见 sshMarkerCaseFilter 注释）
+  const filter = process.env['VSIDIAN_TEST_CASES'] ?? sshMarkerCaseFilter()
   const { selected: sharded, group, shardLabel } = selectIntegrationCases(cases, {
     group: process.env['VSIDIAN_TEST_GROUP'],
     filter,

@@ -20,6 +20,7 @@ import { addonT11Cases } from './addonT11Cases'
 import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
+import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -113,9 +114,13 @@ const CMD = {
   addonsRescan: 'onegayi.vsidian._test.addonsRescan',
 }
 
-const wsDir = process.env['WORKSPACE_DIR'] ?? ''
+// #366 T17：本地 env 优先；SSH 远端会话读不到本地 env（远端 ext host 不
+// 继承），从 workspaceFolders 推导（vscode-remote uri 的 fsPath 即远端盘面
+// 路径，localhost 回环下与本地同路径）。本地会话行为不变。
+const wsDir = process.env['WORKSPACE_DIR']
+  ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? ''
 if (!wsDir) {
-  throw new Error('环境变量 WORKSPACE_DIR 未设置（应由 runTest.mjs 注入）')
+  throw new Error('工作区根不可得：WORKSPACE_DIR 未设置且无工作区文件夹（应由 runTest.mjs 注入或经 SSH 会话工作区推导）')
 }
 
 const LINKS_DOC_TEXT = [
@@ -17392,4 +17397,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // phaseGuard 自跳过非本阶段与非安装态会话，断言面见
   // addonT16InstalledCases.ts 头注）
   ...addonT16InstalledCases,
+  // #366 T17：Remote SSH 同宿主安装、资源与排障（runRemoteSshAddons.mjs
+  // 阶段矩阵——R1 全装载/R2 宿主不可见负向；用例体 sshGuard 自跳过非
+  // SSH 会话，发行态断言面见 addonT17RemoteSshCases.ts 头注）
+  ...addonT17RemoteSshCases,
 ]
