@@ -6,7 +6,8 @@
 // - dash-in-parens：完整括号对内侧（左邻 ( 且右邻 )）插入 -——独占组
 //   parens-fill，atomic
 // - space-in-parens：同位置条件插入空格——同独占组 parens-fill（组内
-//   按有效序首个适用者生效；跨组行为不受影响），atomic
+//   按有效序首个适用者生效；跨组行为不受影响），joinPrevious（演示
+//   非原子修饰随上次原子操作撤回——Q29 撤销粒度验收载体）
 //
 // 默认序（完整键字典序）：bracket-close → dash-in-parens → space-in-parens。
 // 键入 ( 的默认结果：( + ) + - → (-|)；调序（space 提前）后：( |)——
@@ -101,14 +102,14 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
       return result
     }
 
-  const registrations: Array<{ id: string; name: string; description?: string; examples?: string[]; exclusiveGroup?: string; plan: (ctx: AddonInputContext) => AddonBehaviorInputPlan | null }> = [
+  const registrations: Array<{ id: string; name: string; description?: string; examples?: string[]; exclusiveGroup?: string; history?: 'atomic' | 'joinPrevious'; plan: (ctx: AddonInputContext) => AddonBehaviorInputPlan | null }> = [
     { id: 'bracket-close', name: '括号补全', description: '键入 ( 后自动补出 )', examples: ['(|)'], plan: planBracketClose },
     {
       id: 'dash-in-parens', name: '括号内填充短划', exclusiveGroup: 'parens-fill',
       description: '空括号对内侧插入 -', plan: planDashInParens,
     },
     {
-      id: 'space-in-parens', name: '括号内空格整理', exclusiveGroup: 'parens-fill',
+      id: 'space-in-parens', name: '括号内空格整理', exclusiveGroup: 'parens-fill', history: 'joinPrevious',
       description: '空括号对内侧插入空格', plan: planSpaceInParens,
     },
   ]
@@ -123,6 +124,7 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
         ...(entry.description !== undefined ? { description: entry.description } : {}),
         ...(entry.examples !== undefined ? { examples: entry.examples } : {}),
         ...(entry.exclusiveGroup !== undefined ? { exclusiveGroup: entry.exclusiveGroup } : {}),
+        ...(entry.history !== undefined ? { history: entry.history } : {}),
         onInput: wrapReporter(entry.id, entry.plan),
       }),
     })
@@ -138,8 +140,14 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     })
   })
 
-  // 注册结局延迟上报（宿主收件箱就绪前的事件由通道超时吸收；注册结果
-  // 本身同步可得）
+  // 注册拒绝路径对照（票面「名称缺失拒绝」）：缺名称的注册应被拒
+  registerResults.push({
+    id: '<invalid-no-name>',
+    result: behaviors.register({ id: 'no-name', onInput: () => null } as never),
+  })
+
+  // 注册结局上报（宿主收件箱就绪前的事件由通道超时吸收；注册结果本身
+  // 同步可得）
   report({ kind: 'registered', results: registerResults })
 
   sdk.onDispose(() => {
