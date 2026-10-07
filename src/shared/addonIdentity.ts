@@ -199,4 +199,11 @@ export interface AddonStatusEntry {
   detail?: string
   /** 不兼容时携带的声明 api 范围（组句呈现） */
   apiRange?: string
+  /** #351 T02 运行状态（已注册组件附带）：用户偏好生效值（设置页开关
+   *  与「已启用/已停用」归类依据）；未注册组件缺省 */
+  enabled?: boolean
+  /** #351 T02 故障暂停（可归因异常原文——基础可观察，完整诊断归 T12） */
+  fault?: { reason: string }
+  /** #351 T02 设置页入口当前可装载（「打开设置页」入口可见性） */
+  hasSettingsPage?: boolean
 }

@@ -420,6 +420,12 @@ export class LiveEditorInstance {
   private tabEscapeOn = SYMBOL_TAB_ESCAPE_DEFAULT
   private readonly tabEscapeCompartment = new Compartment()
   private readonly darkCompartment = new Compartment()
+  /** #351 T02 附加组件扩展槽：V02 放行结论的生产缺口——附加组件的
+   *  CM6 扩展经本 Compartment 空槽接入（装载器 registerExtension →
+   *  reconfigureAddonExtensions 驱动；null 摘除）。置于扩展数组末尾：
+   *  附加组件扩展不参与内置 keymap/filter 的顺序竞争（keymap 正序、
+   *  filter 逆序——组件扩展靠后装配即不先于内置看到事务） */
+  private readonly addonExtensionCompartment = new Compartment()
   private hostDarkApplied: boolean | undefined
   /** #376 T01 双链联想会话（#381 T06 起主正文与内部 Live 实例都按
    *  deps.enableWikilinkSuggest 装配；关闭时为 null） */
@@ -2121,6 +2127,15 @@ export class LiveEditorInstance {
           }
         },
       })),
+      // #351 T02 附加组件扩展槽（数组末尾，见 addonExtensionCompartment 注释）
+      this.addonExtensionCompartment.of([]),
     ]
+  }
+
+  /** #351 T02：附加组件扩展槽重配（装载器 registerExtensions/释放驱动；
+   *  null = 摘除全部组件扩展。文档状态跨 reconfigure 保留——输入不落格
+   *  （V02 浏览器套件钉住的硬边界），未初始化实例为无操作） */
+  reconfigureAddonExtensions(extensions: Extension[] | null): void {
+    this.view?.dispatch({ effects: this.addonExtensionCompartment.reconfigure(extensions ?? []) })
   }
 }

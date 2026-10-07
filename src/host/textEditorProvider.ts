@@ -117,6 +117,7 @@ import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
+import type { AddonEditorBridge } from './addons/addonWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
 
@@ -378,8 +379,40 @@ export function createTextEditorProvider(
   /** #239 分词资源接线（jieba 下载/删除宿主权威；编辑器面板消费
    *  wordSegment.get 应答与 loadResult 转发、状态变更广播） */
   jieba?: JiebaWiring,
+  /** #351 T02 附加组件面板桥（页面装载指令路由 + 资源根 + 状态刷新）；
+   *  生产由 extension.ts 注入 createAddonWiring 产物的 editorBridge */
+  addons?: AddonEditorBridge,
 ): vscode.CustomTextEditorProvider & { dispose(): Promise<void> } {
   const sessions = new Map<string, SessionEntry>()
+  // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
+  // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
+  // 重赋可能触发 webview 资源状态重置，与 #128 片段目录同口径）+ 装载
+  // 指令幂等对账（desired 为准；面板 ready 亦各自重拉） ----
+  if (addons) {
+    let lastAddonRootsKey = ''
+    const refreshAddonPanels = (): void => {
+      const addonRoots = addons.editorResourceRoots()
+      const rootsKey = addonRoots.map((uri) => uri.toString()).sort().join('|')
+      const rootsChanged = rootsKey !== lastAddonRootsKey
+      lastAddonRootsKey = rootsKey
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          if (rootsChanged) {
+            panel.webview.options = {
+              enableScripts: true,
+              localResourceRoots: [
+                ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
+                ...addonRoots,
+              ],
+            }
+          }
+          addons.pushDirectives(sessionId, panel.webview)
+        }
+      }
+    }
+    const offAddonPanelsChanged = addons.onPanelsChanged(refreshAddonPanels)
+    context.subscriptions.push({ dispose: offAddonPanelsChanged })
+  }
   const diagnostics = new TestDiagnostics()
   // ---- #342（P3-10）外链元信息服务：provider 级单例（跨面板共享缓存与
   // 合并计数——同一 URL 的多个悬停请求只发一次网络请求）。设置开关关闭
@@ -3568,6 +3601,11 @@ export function createTextEditorProvider(
             }
           }
         }
+        // #351 T02 附加组件页面消息（装载器就绪/出站）：桥消费即终止下发
+        //（addon 指令不走会话消息管线——装载器是独立于控制器的页面级设施）
+        if (addons?.handlePanelMessage(sessionId, webviewPanel.webview, message)) {
+          return
+        }
         void entry.session.handleWebviewMessage(message, sessionId)
       }
       const messageSub = webviewPanel.webview.onDidReceiveMessage(panelMessageHandler)
@@ -3595,6 +3633,9 @@ export function createTextEditorProvider(
       const closeSub = webviewPanel.onDidDispose(() => {
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
+        // #351 T02：附加组件面板路由回收（视图关闭——页面装载器随 webview
+        // 消亡，宿主侧不再向该面板投递指令）
+        addons?.panelDisposed(sessionId)
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
@@ -3617,10 +3658,15 @@ export function createTextEditorProvider(
       // 不留整个扩展目录的默认可读面；#10 增补图片资源根（工作区文件
       // 经夹带 asWebviewUri 的地址需在许可面内——口径与路径白名单一致）；
       // #128 增补 CSS 片段目录（须在 html 赋值前设置——webview.options
-      // 是 html 装载时的资源许可面快照）
+      // 是 html 装载时的资源许可面快照）；#351 T02 增补附加组件页面目录
+      //（期望装载组件的入口/样式/资源子目录——隔离由资源服务按请求面板
+      // 的 localResourceRoots 包含性实现，V02 实测）
       webviewPanel.webview.options = {
         enableScripts: true,
-        localResourceRoots: editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+        localResourceRoots: [
+          ...editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+          ...addons?.editorResourceRoots() ?? [],
+        ],
       }
       // 快照取一次（#93 语言与 #292 可读行宽预注入共用）
       const settingsSnapshot = settings?.service.getSnapshot()

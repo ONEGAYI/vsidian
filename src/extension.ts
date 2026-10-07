@@ -114,6 +114,8 @@ export function activate(context: vscode.ExtensionContext): VsidianAddonExports 
   editorGuard.service.onStateChanged(() => settingsPage.notifyDefaultEditorChanged())
   // #350 T01 附加组件：协调器状态变化（发现/唤醒/注册）→ 设置页 addons.state 推送
   addons.onStateChanged(() => settingsPage.notifyAddonsChanged())
+  // #351 T02：运行生命周期变化（启停/故障/代次/注册贡献）→ 同款推送回显
+  addons.onRuntimeChanged(() => settingsPage.notifyAddonsChanged())
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,
@@ -121,7 +123,7 @@ export function activate(context: vscode.ExtensionContext): VsidianAddonExports 
     // #236 查找选项持久化：workspaceState（工作区级记忆——对齐 VSCode
     // storageService WORKSPACE 级口径；各工作区独立记忆）
     findOptions: createFindOptionsStore(context.workspaceState),
-  }, snippetService, vaultIndex, indexMaintenance, jieba)
+  }, snippetService, vaultIndex, indexMaintenance, jieba, addons.editorBridge)
   // F13：停用收尾接线（deactivate 返回其 Promise）
   providerDispose = () => provider.dispose()
   // #350 T01：启动附加组件发现协调（fire-and-forget，不阻塞激活返回）

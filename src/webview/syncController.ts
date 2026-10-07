@@ -1885,6 +1885,12 @@ export class WebviewSyncController {
     document.removeEventListener('visibilitychange', this.imageVisibilityEntry)
   }
 
+  /** #351 T02：附加组件扩展槽重配（转发给主正文 Live 实例；装载器的
+   *  attachExtensions 回调接这里——生产槽在 liveInstance extensions() 末尾） */
+  reconfigureAddonExtensions(extensions: Extension[] | null): void {
+    this.live?.reconfigureAddonExtensions(extensions)
+  }
+
   /** 宿主消息入口（window message 事件转发） */
   handleHostMessage(message: unknown): void {
     if (!isHostToWebview(message)) {

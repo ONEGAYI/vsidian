@@ -4,12 +4,20 @@
 // 优先于 defaultKeymap 的本地 no-op undo/redo 绑定）。
 // #93 i18n：首帧从 HTML 数据岛装配语言包（早于任何视图挂载，t() 首帧即
 // 就绪）；locale.changed 原子换包，编辑器文案消费方随 #94 迁移接入重渲染。
+// #351 T02：安装附加组件页面装载器（编辑器页）——共享 CM6 运行时注入本
+// 页 bundle 的模块命名空间（esbuild 单 bundle 去重，与生产控制器同一实例），
+// 扩展挂载槽为 liveInstance 的附加组件 Compartment 空槽；宿主装载指令经
+// addonPage.directive 到达，出站经 addonPage.outbound 桥回宿主。
 import { keymap } from '@codemirror/view'
+import * as cmState from '@codemirror/state'
+import * as cmView from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
+import { installAddonPageLoader } from './addonPageLoader'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
 import { isTrustedHostMessageSource } from './untrustedFrame'
+import { isHostToWebview } from '../shared/protocol'
 import './main.css'
 // #59 KaTeX 基础样式：esbuild 合并进 main.css，字体（仅 woff2）经 CSS url()
 // 产物化到 out/webview/assets/（CSP font-src 已放行 cspSource 域）
@@ -42,11 +50,29 @@ controller.mount(document.getElementById('app') ?? document.body, [
   keymap.of(defaultKeymap),
 ])
 
+// #351 T02 附加组件页面装载器（编辑器页）：mount 完成后安装——扩展挂载槽
+// 经 controller.reconfigureAddonExtensions 驱动 liveInstance 的 Compartment；
+// 出站消息（loaded/unloaded/faulted/channel.request）经消息桥回宿主路由
+const addonLoader = installAddonPageLoader({
+  page: 'editor',
+  cm6: { state: cmState, view: cmView },
+  attachExtensions: (extensions) => controller.reconfigureAddonExtensions(extensions),
+  send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
+})
+// 就绪上报（webview 重载后亦发）：宿主按期望装载清单幂等推送指令
+vscode.postMessage({ kind: 'addonPage.ready' })
+
 window.addEventListener('message', (event) => {
   // #343（P3-11）消息桥隔离：允许清单——来源非真宿主桥的 message 一律
   // 丢弃。原网页沙箱 iframe 及其嵌套帧、移除竞态的旧窗口引用全部落选
   //（判定依据与边界见 untrustedFrame 模块头）
   if (!isTrustedHostMessageSource(event.source, event.origin)) {
+    return
+  }
+  // #351 T02：附加组件装载指令（独立于控制器消息管线——装载器是页面级
+  // 设施，代次与释放由装载器自持）
+  if (isHostToWebview(event.data) && event.data.kind === 'addonPage.directive') {
+    addonLoader.handleDirective(event.data.directive)
     return
   }
   controller.handleHostMessage(event.data)

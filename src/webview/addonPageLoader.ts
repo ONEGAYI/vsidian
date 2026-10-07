@@ -1,0 +1,475 @@
+// #351 T02 附加组件页面装载器（生产实现，编辑器 main 与设置页 settings
+// 两入口各自安装）。形状由 V02 验证票（#349）收敛放行，机制边界：
+// - 独立 IIFE 经全局登记表暴露工厂（构建辅助工具的 defineAddonPage 写入，
+//   全局名与 sdk/ 构建桥同源约定），装载器核对入口身份后调用工厂注入
+//   页面 SDK；
+// - 共享 CM6 运行时经 experimental.cm6 注入**本页 bundle 的模块命名空间**
+//   （装载器由页面产物自身构造，不能是独立 bundle，否则 CM6 会是第二份
+//   运行时——安装点在 main.ts/settingsMain.ts，模块命名空间来自同 bundle
+//   的 import *）；
+// - 代次硬边界：旧代次卸载/故障指令不生效，旧工厂注册不接入新代次，
+//   迟到通道回执不回挂；
+// - 释放回收注册（扩展/挂载根）、监听（组件经 onDispose 自清）、消息
+//  （滞留请求以 released 终结，迟到回执丢弃）；重复释放无害。
+// 实现陷阱（V02 实证，勿改语义）：宿主侧事件乱序消费（loaded 与工厂内
+// 通道请求的到达顺序不保证）；隐藏即销毁的 webview 不可依赖隐藏面板存活。
+import type { Extension } from '@codemirror/state'
+import type {
+  AddonChannelOutcome,
+  AddonCm6Runtime,
+  AddonLoadFailureReason,
+  AddonLoadManifest,
+  AddonLoadOutcome,
+  AddonLoaderStats,
+  AddonPageDirective,
+  AddonPageKind,
+  AddonPageOutbound,
+  AddonPageRegistration,
+  AddonUnloadOutcome,
+  VsidianAddonPageSdk,
+} from '../shared/addonPage'
+
+/** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
+ *  会追加新条目，装载器按「本次装载期间注册 + 未消费」规则取用） */
+export const ADDON_PAGE_REGISTRY_GLOBAL = '__vsidianAddonPages'
+/** 装载器调用工厂前的 SDK 注入槽（构建桥 currentSdk() 的读取点） */
+export const ADDON_SDK_SLOT_GLOBAL = '__vsidianAddonSdk'
+
+type RegistrationBucket = AddonPageRegistration[]
+
+function registryBucket(globalScope: typeof globalThis): RegistrationBucket {
+  const holder = globalScope as typeof globalThis & { [key: string]: unknown }
+  const existing = holder[ADDON_PAGE_REGISTRY_GLOBAL]
+  if (!Array.isArray(existing)) {
+    holder[ADDON_PAGE_REGISTRY_GLOBAL] = [] as RegistrationBucket
+  }
+  return holder[ADDON_PAGE_REGISTRY_GLOBAL] as RegistrationBucket
+}
+
+interface PendingChannelRequest {
+  addonId: string
+  generation: number
+  settle: (outcome: AddonChannelOutcome) => void
+  settled: boolean
+  cancelTimer: () => void
+}
+
+interface ActiveLoad {
+  addonId: string
+  generation: number
+  startedAt: number
+  disposeCallbacks: Array<() => void>
+  mountRoots: HTMLElement[]
+  extensionsAttached: boolean
+  cssLinks: HTMLLinkElement[]
+}
+
+/** 装载器环境：脚本/样式装载与时器可注入（单元测试模拟授权与拒绝） */
+export interface AddonPageLoaderEnv {
+  page: AddonPageKind
+  /** 编辑器页共享运行时（与生产控制器同一实例；设置页省略） */
+  cm6?: AddonCm6Runtime
+  /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
+   *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
+  attachExtensions?: (extension: Extension[] | null) => void
+  /** 设置页挂载容器（缺省 document.body） */
+  mountContainer?: HTMLElement
+  send: (message: AddonPageOutbound) => void
+  /** 脚本装载注入点：缺省 DOM <script>（未授权地址被资源服务拒绝时 onerror） */
+  loadScript?: (uri: string) => Promise<{ ok: true } | { ok: false; error: string }>
+  /** 样式装载注入点：缺省 DOM <link>（onload=authorized / onerror=denied） */
+  loadCss?: (uri: string) => Promise<'authorized' | 'denied'>
+  now?: () => number
+  scheduleTimeout?: (callback: () => void, ms: number) => { cancel: () => void }
+}
+
+export interface AddonPageLoaderHandle {
+  /** 处理宿主指令（消息桥把 addonPage.directive 的内层转发到这里） */
+  handleDirective(directive: AddonPageDirective): void
+  /** 直接装载（单元测试入口；结局同时经 send 上报） */
+  load(manifest: AddonLoadManifest): Promise<AddonLoadOutcome>
+  /** 直接卸载 */
+  unload(addonId: string, generation: number): Promise<AddonUnloadOutcome>
+  /** 观测快照（宿主断言与测试的序列化面） */
+  stats(): AddonLoaderStats
+  /** 全量释放（页面卸载/测试收尾；每条按 released 走完整回收） */
+  disposeAll(): Promise<void>
+}
+
+const DEFAULT_CHANNEL_TIMEOUT_MS = 30_000
+
+interface ScriptLoadResult {
+  ok: boolean
+  error?: string
+}
+
+/** DOM <script> 装载：执行完毕后移除节点（代码已在登记表留厂，节点无需存续） */
+function domLoadScript(uri: string): Promise<ScriptLoadResult> {
+  return new Promise((resolve) => {
+    const script = document.createElement('script')
+    let settled = false
+    const finish = (result: ScriptLoadResult) => {
+      if (settled) return
+      settled = true
+      script.remove()
+      resolve(result)
+    }
+    script.addEventListener('load', () => finish({ ok: true }))
+    script.addEventListener('error', () => finish({ ok: false, error: `script onerror: ${uri}` }))
+    script.src = uri
+    document.head.appendChild(script)
+  })
+}
+
+/**
+ * DOM <link> 装载（装载器持有元素，释放时撤下）：
+ * onload = authorized（表已装载），onerror = denied（资源服务拒绝/404）。
+ * 本面只关心「表是否装上」，不读规则内容（跨源表本就不可读）。
+ */
+function domLoadCssLink(uri: string): Promise<{ status: 'authorized' | 'denied'; element: HTMLLinkElement }> {
+  return new Promise((resolve) => {
+    const link = document.createElement('link')
+    let settled = false
+    const finish = (status: 'authorized' | 'denied') => {
+      if (settled) return
+      settled = true
+      if (status === 'denied') link.remove()
+      resolve({ status, element: link })
+    }
+    link.addEventListener('load', () => finish('authorized'))
+    link.addEventListener('error', () => finish('denied'))
+    link.rel = 'stylesheet'
+    link.href = uri
+    document.head.appendChild(link)
+  })
+}
+
+/**
+ * 安装页面装载器（每页面一次；编辑器 main 与设置页 settings 各自调用）。
+ * 返回句柄供消息桥转发指令与读取观测；同一页面重复安装返回各自独立
+ * 句柄（不依赖单例语义）。
+ */
+export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoaderHandle {
+  const page = env.page
+  const now = env.now ?? (() => Date.now())
+  const scheduleTimeout =
+    env.scheduleTimeout ??
+    ((callback: () => void, ms: number) => {
+      const timer = setTimeout(callback, ms)
+      return { cancel: () => clearTimeout(timer) }
+    })
+  const loadScript = env.loadScript ?? domLoadScript
+  const bucket = registryBucket(globalThis)
+  /** 已消费（或已丢弃）的登记条目——同一工厂不得接入两个代次 */
+  const consumedRegistrations = new Set<AddonPageRegistration>()
+  const active = new Map<string, ActiveLoad>()
+  const pendingRequests = new Map<string, PendingChannelRequest>()
+  const history: AddonLoaderStats['history'] = []
+  const counters = {
+    staleUnloadRejected: 0,
+    lateChannelRepliesDropped: 0,
+    lateRegistrationsDropped: 0,
+    unsolicitedRegistrationsDropped: 0,
+    releasedChannelRequests: 0,
+    channelTimeouts: 0,
+  }
+  let nextRequestSeq = 0
+
+  /**
+   * 取「本次装载期间新注册且未消费」的首个条目；本次装载开始前的遗留
+   * 未消费条目（旧工厂）就地丢弃并计数——旧工厂注册不接入新代次。
+   * 返回 null = 本次装载期间没有任何登记（no-factory-registered）。
+   */
+  const takeFreshRegistration = (loadStartedAt: number): AddonPageRegistration | null => {
+    let matched: AddonPageRegistration | null = null
+    for (const entry of bucket) {
+      if (consumedRegistrations.has(entry)) continue
+      if (entry.registeredAt < loadStartedAt) {
+        consumedRegistrations.add(entry)
+        counters.lateRegistrationsDropped++
+        continue
+      }
+      if (matched === null) {
+        matched = entry
+      } else {
+        // 同批多余登记：丢弃（一次装载只接入一个工厂）
+        counters.unsolicitedRegistrationsDropped++
+      }
+      consumedRegistrations.add(entry)
+    }
+    return matched
+  }
+
+  const buildSdk = (loadRecord: ActiveLoad, manifest: AddonLoadManifest): VsidianAddonPageSdk => {
+    const extensionParts: Extension[] = []
+    const sdk: VsidianAddonPageSdk = {
+      addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
+      experimental: { cm6: env.cm6 },
+      registerExtension: (extension) => {
+        if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
+          return false
+        }
+        extensionParts.push(extension)
+        env.attachExtensions(extensionParts)
+        loadRecord.extensionsAttached = true
+        return true
+      },
+      mountRoot: () => {
+        if (!active.has(loadRecord.addonId) || page !== 'settings') {
+          return null
+        }
+        const root = document.createElement('div')
+        root.dataset.addonId = loadRecord.addonId
+        root.dataset.addonGeneration = String(loadRecord.generation)
+        ;(env.mountContainer ?? document.body).appendChild(root)
+        loadRecord.mountRoots.push(root)
+        return root
+      },
+      resourceUri: (relativePath) => {
+        if (!manifest.resourceBase) return null
+        if (
+          typeof relativePath !== 'string' || relativePath === '' || relativePath.startsWith('/') ||
+          /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(relativePath) || relativePath.split('/').includes('..')
+        ) {
+          return null
+        }
+        const base = manifest.resourceBase.endsWith('/') ? manifest.resourceBase : `${manifest.resourceBase}/`
+        return base + relativePath
+      },
+      channel: {
+        request: (topic, payload, opts) => {
+          if (!active.has(loadRecord.addonId)) {
+            counters.releasedChannelRequests++
+            return Promise.resolve({ ok: false as const, reason: 'released' as const })
+          }
+          const requestId = `${loadRecord.addonId}#${loadRecord.generation}#${nextRequestSeq++}`
+          return new Promise<AddonChannelOutcome>((resolve) => {
+            const entry: PendingChannelRequest = {
+              addonId: loadRecord.addonId,
+              generation: loadRecord.generation,
+              settled: false,
+              cancelTimer: () => {},
+              settle: (outcome) => {
+                if (entry.settled) return
+                entry.settled = true
+                entry.cancelTimer()
+                pendingRequests.delete(requestId)
+                resolve(outcome)
+              },
+            }
+            pendingRequests.set(requestId, entry)
+            entry.cancelTimer = scheduleTimeout(() => {
+              counters.channelTimeouts++
+              entry.settle({ ok: false, reason: 'timeout' })
+            }, opts?.timeoutMs ?? DEFAULT_CHANNEL_TIMEOUT_MS).cancel
+            env.send({
+              type: 'addon.channel.request',
+              addonId: loadRecord.addonId,
+              generation: loadRecord.generation,
+              requestId,
+              topic,
+              payload,
+            })
+          })
+        },
+      },
+      onDispose: (callback) => {
+        if (!active.has(loadRecord.addonId)) {
+          // 已终结代次的迟到登记：立即执行清理，不滞留（重复释放无害）
+          try {
+            callback()
+          } catch {
+            // 该代次已终结，清理回调异常不再升级为新故障
+          }
+          return
+        }
+        loadRecord.disposeCallbacks.push(callback)
+      },
+    }
+    return sdk
+  }
+
+  /**
+   * 完整释放路径（卸载/故障共用）：回调 → 扩展摘除 → 挂载根与授权样式
+   * 撤下 → 滞留请求以 released 终结 → 历史留痕。登记消费位保留（旧工厂
+   * 不得经再次装载接入新代次——takeFreshRegistration 的时间界已排除）。
+   */
+  const releaseLoad = (loadRecord: ActiveLoad, ended: 'released' | 'faulted', reason?: string): { disposals: number; releasedRequests: number } => {
+    active.delete(loadRecord.addonId)
+    let disposals = 0
+    for (const callback of loadRecord.disposeCallbacks.splice(0)) {
+      try {
+        callback()
+        disposals++
+      } catch {
+        // 清理回调异常不阻断其余回收
+      }
+    }
+    if (loadRecord.extensionsAttached) {
+      try {
+        env.attachExtensions?.(null)
+      } catch {
+        // 装配槽异常不阻断其余回收
+      }
+    }
+    for (const root of loadRecord.mountRoots.splice(0)) {
+      root.remove()
+    }
+    for (const link of loadRecord.cssLinks.splice(0)) {
+      link.remove()
+    }
+    let releasedRequests = 0
+    for (const entry of [...pendingRequests.values()]) {
+      if (entry.addonId === loadRecord.addonId && entry.generation === loadRecord.generation) {
+        releasedRequests++
+        entry.settle({ ok: false, reason: 'released' })
+      }
+    }
+    history.push({ addonId: loadRecord.addonId, generation: loadRecord.generation, ended, reason, disposals })
+    return { disposals, releasedRequests }
+  }
+
+  const load = async (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> => {
+    const fail = (reason: AddonLoadFailureReason, detail?: string): AddonLoadOutcome => {
+      history.push({ addonId: manifest.addonId, generation: manifest.generation, ended: 'load-failed', reason, detail })
+      const outcome: AddonLoadOutcome = { ok: false, reason, detail }
+      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+      return outcome
+    }
+
+    if (active.has(manifest.addonId)) {
+      // 对齐设计 §2.2：同一接入代次再次注册返回 AlreadyRegistered
+      const outcome: AddonLoadOutcome = { ok: false, reason: 'already-loaded' }
+      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+      return outcome
+    }
+    const loadStartedAt = now()
+
+    // 样式先行逐条装载（互不牵连：授权条目保留生效、拒绝条目只记录状态）
+    const cssOutcomes: Array<{ uri: string; status: 'authorized' | 'denied' }> = []
+    const cssLinks: HTMLLinkElement[] = []
+    const cssEntries = manifest.cssUris ?? []
+    if (cssEntries.length > 0) {
+      if (env.loadCss) {
+        const statuses = await Promise.all(cssEntries.map((uri) => env.loadCss!(uri)))
+        statuses.forEach((status, i) => cssOutcomes.push({ uri: cssEntries[i], status }))
+      } else {
+        const results = await Promise.all(cssEntries.map((uri) => domLoadCssLink(uri)))
+        for (const result of results) {
+          cssOutcomes.push({ uri: result.element.href, status: result.status })
+          if (result.status === 'authorized') cssLinks.push(result.element)
+        }
+      }
+    }
+
+    const script = await loadScript(manifest.scriptUri)
+    if (!script.ok) {
+      // 未授权脚本 = 整次拒绝：授权样式一并撤下，不留半装配状态
+      for (const link of cssLinks) link.remove()
+      return fail('script-load-failed', script.error)
+    }
+
+    const registered = takeFreshRegistration(loadStartedAt)
+    if (registered === null) {
+      for (const link of cssLinks) link.remove()
+      return fail('no-factory-registered')
+    }
+    if (registered.addonId !== manifest.addonId) {
+      for (const link of cssLinks) link.remove()
+      return fail('identity-mismatch', `registered=${registered.addonId}`)
+    }
+
+    const loadRecord: ActiveLoad = {
+      addonId: manifest.addonId,
+      generation: manifest.generation,
+      startedAt: loadStartedAt,
+      disposeCallbacks: [],
+      mountRoots: [],
+      extensionsAttached: false,
+      cssLinks,
+    }
+    active.set(manifest.addonId, loadRecord)
+    const sdk = buildSdk(loadRecord, manifest)
+    ;(globalThis as typeof globalThis & { [key: string]: unknown })[ADDON_SDK_SLOT_GLOBAL] = sdk
+    try {
+      registered.factory(sdk)
+    } catch (err) {
+      // 故障释放已留痕（releaseLoad 记 ended:'faulted'），此处只补装载结局
+      releaseLoad(loadRecord, 'faulted', `factory-error: ${String(err)}`)
+      env.send({ type: 'addon.faulted', addonId: manifest.addonId, generation: manifest.generation, reason: `factory-error: ${String(err)}` })
+      const outcome: AddonLoadOutcome = { ok: false, reason: 'factory-error', detail: String(err) }
+      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+      return outcome
+    }
+    const outcome: AddonLoadOutcome = { ok: true, css: cssOutcomes }
+    env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+    return outcome
+  }
+
+  const unload = (addonId: string, generation: number): Promise<AddonUnloadOutcome> => {
+    const record = active.get(addonId)
+    const finish = (outcome: AddonUnloadOutcome, disposals = 0, releasedRequests = 0): AddonUnloadOutcome => {
+      env.send({ type: 'addon.unloaded', addonId, generation, outcome, disposals, releasedRequests })
+      return outcome
+    }
+    if (!record) {
+      return Promise.resolve(finish({ ok: false, reason: 'not-loaded' }))
+    }
+    if (record.generation !== generation) {
+      // 旧代次指令不生效：当前装载保持原状（旧代次不得回收新代次）
+      counters.staleUnloadRejected++
+      return Promise.resolve(finish({ ok: false, reason: 'stale-generation' }))
+    }
+    const { disposals, releasedRequests } = releaseLoad(record, 'released')
+    return Promise.resolve(finish({ ok: true }, disposals, releasedRequests))
+  }
+
+  const handleDirective = (directive: AddonPageDirective): void => {
+    switch (directive.type) {
+      case 'addon.load':
+        void load(directive.manifest)
+        return
+      case 'addon.unload':
+        void unload(directive.addonId, directive.generation)
+        return
+      case 'addon.channel.reply': {
+        const entry = pendingRequests.get(directive.requestId)
+        if (!entry || entry.settled || entry.addonId !== directive.addonId || entry.generation !== directive.generation) {
+          // 迟到回执（请求已终结/代次不符）不回挂——旧代次结果不得接入
+          counters.lateChannelRepliesDropped++
+          return
+        }
+        entry.settle(directive.outcome)
+        return
+      }
+      case 'addon.fault': {
+        const record = active.get(directive.addonId)
+        if (!record || record.generation !== directive.generation) {
+          return
+        }
+        const reason = directive.reason ?? 'host-directed-fault'
+        releaseLoad(record, 'faulted', reason)
+        env.send({ type: 'addon.faulted', addonId: directive.addonId, generation: directive.generation, reason })
+        return
+      }
+    }
+  }
+
+  return {
+    handleDirective,
+    load,
+    unload,
+    stats: () => ({
+      page,
+      cm6Shared: env.cm6 !== undefined,
+      active: [...active.values()].map((record) => ({ addonId: record.addonId, generation: record.generation })),
+      history: [...history],
+      counters: { ...counters },
+    }),
+    disposeAll: async () => {
+      for (const record of [...active.values()]) {
+        releaseLoad(record, 'released')
+      }
+    },
+  }
+}

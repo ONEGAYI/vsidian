@@ -321,6 +321,22 @@ export function createSettingsPage(
         // 打开某组件的 VSCode 扩展详情页
         addons?.openExtension(message.extensionId)
         return
+      // ---- #351 T02：附加组件运行生命周期与页面装载 ----
+      case 'addons.setEnabled':
+        // 用户功能开关（用户默认层持久化；两生命周期同步——结果经
+        // notifyAddonsChanged 的 addons.state 推送回显）
+        if (current) {
+          addons?.handleSettingsMessage(current.webview, message)
+        }
+        return
+      case 'addons.openAddonPage':
+      case 'addons.closeAddonPage':
+      case 'addonPage.ready':
+      case 'addonPage.outbound':
+        if (current) {
+          addons?.handleSettingsMessage(current.webview, message)
+        }
+        return
       case 'index.setPatterns':
         // 结果（含被拒项回显）经 notifyIndexChanged 的 index.state 推送
         void index?.setPatterns(message.patterns)
@@ -389,8 +405,12 @@ export function createSettingsPage(
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
-        // C-7 同口径收紧：设置页只加载自身产物（out/webview/settings.js|css）
-        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'out')],
+        // C-7 同口径收紧：设置页只加载自身产物（out/webview/settings.js|css）；
+        // #351 T02 增补可打开组件设置页的资源目录（入口/样式/资源子目录）
+        localResourceRoots: [
+          vscode.Uri.joinPath(context.extensionUri, 'out'),
+          ...addons?.settingsResourceRoots() ?? [],
+        ],
       },
     )
     panel = created
@@ -399,6 +419,9 @@ export function createSettingsPage(
       context.extensionUri,
       hostLocale(service.getSnapshot()),
     )
+    // #351 T02：设置页面板在场标记（装载器就绪消息经 handleSettingsMessage
+    // 路由；指令推送由 wiring 的 runtime.onChanged 驱动）
+    addons?.attachSettingsPanel(created.webview)
     const messageSub = created.webview.onDidReceiveMessage(handleMessage)
     // retainContextWhenHidden 不开：面板切后台 webview 即释放重载。隐藏即
     // 重置 ready——stale-ready 窗口（webview 已卸载、重载握手未到）内
@@ -411,6 +434,8 @@ export function createSettingsPage(
     created.onDidDispose(() => {
       messageSub.dispose()
       viewStateSub.dispose()
+      // #351 T02：面板销毁——组件设置页装载意图终结（重开由用户重新打开）
+      addons?.settingsPanelDisposed()
       disposeSub()
     })
   }

@@ -514,3 +514,19 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-addons-actions button.vsidian-addons-primary:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
 .vsidian-addons-apiversion { min-height: 20px; margin: 8px 0 0;
   color: var(--vscode-descriptionForeground, #666); }
+/* ---- #351 T02 运行生命周期：组件行按钮组与组件设置页挂载区（内部样式，
+   非公开样式契约入口；挂载区本身无视觉限定——内容布局归组件自己的页
+   面产物） ---- */
+.vsidian-addons-entry-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.vsidian-addons-entry-actions button { min-height: 22px; padding: 2px 8px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-entry-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-addonpage { margin-top: 14px; }
+.vsidian-addons-addonpage-actions { display: flex; gap: 8px; padding: 6px 0; }
+.vsidian-addons-addonpage-actions button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-addonpage-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
