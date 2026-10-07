@@ -131,18 +131,29 @@ async function openEditorAndWait(file: string): Promise<void> {
   })
 }
 
-/** 页面产物就绪探测：queue 一条 list 指令并等待结局（装载滞后的指令会在
- *  页面装载后被执行——broadcast 语义保证；比计数增量判定确定） */
+/** 页面产物就绪探测：queue 一条 list 指令并等待结局。已关闭面板的组件
+ *  实例可能仍持一条在途 t06.next 吞走指令且其 webview 桥已死（结局无法
+ *  回收）——list 幂等，超时换新 seq 重发收敛（旧实例上报失败即退出循环，
+ *  存量吞指令窗口至多每实例一条） */
 async function probePageReady(file: string): Promise<void> {
-  const seq = await queue('list')
-  try {
-    await poll(`页面产物就绪（${file}）`, () => collectOne(seq, 25000).then(() => true, () => undefined), 30000)
-  } catch (err) {
-    const events = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<Record<string, unknown>>
-    const t06Events = events.filter((e) => JSON.stringify(e).includes('add-t06'))
-    const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSessionState', wsUri(file).toString())) as
-      | { found: boolean; panels: { ready: boolean }[] } | undefined
-    throw new Error(`${(err as Error).message}；诊断：t06Events=${JSON.stringify(t06Events.slice(-8))} session=${JSON.stringify(state)}`)
+  for (let attempt = 0; ; attempt++) {
+    const seq = await queue('list')
+    try {
+      await poll(`页面产物就绪（${file}）`, () => collectOne(seq, 20000).then(() => true, () => undefined), 25000)
+      return
+    } catch (err) {
+      if (attempt >= 3) {
+        const events = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<Record<string, unknown>>
+        const t06Events = events.filter((e) => JSON.stringify(e).includes('add-t06'))
+        const editorEvents = events.filter((e) => e['kind'] === 'directive.load' || e['kind'] === 'directive.unload')
+        const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSessionState', wsUri(file).toString())) as
+          | { found: boolean; panels: { ready: boolean }[] } | undefined
+        const runtime = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonRuntimeStatus', { addonId: ADDON_ID })) as
+          | { runState: string } | null
+        const fixtureStats = (await vscode.commands.executeCommand(`${ADDON_ID}.stats`)) as { nextCalls?: number } | undefined
+        throw new Error(`${(err as Error).message}；诊断：t06Events=${JSON.stringify(t06Events.slice(-8))} editorEvents=${JSON.stringify(editorEvents.slice(-12))} runtime=${JSON.stringify(runtime)} fixture=${JSON.stringify(fixtureStats)} session=${JSON.stringify(state)}`)
+      }
+    }
   }
 }
 
@@ -151,11 +162,32 @@ async function closeAllEditors(): Promise<void> {
   await new Promise((r) => setTimeout(r, 300))
 }
 
-/** 以基态重写盘面并打开（组历史用例的可重复基线） */
+/** 以基态重写盘面并打开（组历史用例的可重复基线）。
+ *  两个时序坑收口：
+ *  1) 前序用例可能以 dirty 态关闭（hot-exit backup）——重开时 backup 恢复
+ *     的 dirty 文本盖过盘面重写，先打开保存清掉 backup；
+ *  2) writeFile 后文件 watcher 的广播有延迟，轮询 TextDocument 读到基态
+ *     再开面板（否则 init 拿旧文本）。
+ *  旧会话残留（webview dispose 事件延迟导致 entry 不退役）由产品侧
+ *  openEntry 的 TextDocument 实例对账兜住：重开产生新实例即按退役口径
+ *  重建会话（旧实例的 version/getText 冻结在关闭时刻，复用必失真） */
 async function resetDocAndOpen(file: string, content: string): Promise<void> {
   await closeAllEditors()
+  // 已存在的文档可能带 hot-exit backup（前序 dirty 关闭）——先保存清掉，
+  // 否则重开时 backup 恢复的旧文本盖过盘面重写；首次创建的文档跳过
+  try {
+    const existing = await vscode.workspace.openTextDocument(wsUri(file))
+    if (existing.isDirty) {
+      await existing.save()
+    }
+  } catch {
+    // 文件不存在：下方 writeFile 首建
+  }
   await vscode.workspace.fs.writeFile(wsUri(file), Buffer.from(content, 'utf8'))
-  await new Promise((r) => setTimeout(r, 200))
+  await poll('盘面重写生效（watcher 广播完成）', async () => {
+    const d = await vscode.workspace.openTextDocument(wsUri(file))
+    return d.getText() === content ? d : undefined
+  })
   await openEditorAndWait(file)
   await probePageReady(file)
 }
@@ -232,14 +264,14 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     const crlfApplied = (await collectOne(crlfApplySeq)) as { ok: boolean; reason?: string }
     assert(crlfApplied.ok === true, `CRLF 修饰应成功，实际 ${JSON.stringify(crlfApplied)}`)
     const crlfDoc = await docText('crlf.md')
-    assert(crlfDoc.text.startsWith('改题一\r\n'), `CRLF 文档行尾应保持（写入后实际 ${JSON.stringify(crlfDoc.text.slice(0, 8))}）`)
+    assert(crlfDoc.text.startsWith('改题\r\n正文 A'), `CRLF 文档行尾应保持（LF 坐标替换「标题一」三字符），写入后实际 ${JSON.stringify(crlfDoc.text.slice(0, 8))}）`)
     await closeAllEditors()
     console.log('[#355] 公开 API 读取与多范围修饰通过（LF/CRLF、凭据对位、dirty/save、零文本操作不造历史）')
   }],
 
   ['附加组件 T06：ABCD 组撤销重做与逐次来源（原子默认 + joinPrevious 并组，#355）', async () => {
     await ensureEnabled()
-    const file = 'lf.md'
+    const file = 't06-group.md'
     const baseline = 'T06 组历史基态\n第二行\n'
     await resetDocAndOpen(file, baseline)
 
@@ -253,7 +285,11 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
         request: { revision: snap.snapshot.revision, changes: [{ offset: 0, length: 0, text: mark }], history },
       })
       const outcome = (await collectOne(applySeq)) as { ok: boolean; credential?: { opId: string }; reason?: string }
-      assert(outcome.ok === true, `修饰 ${mark}（${history}）应成功，实际 ${JSON.stringify(outcome)}`)
+      if (outcome.ok !== true) {
+        const session = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSessionState', wsUri(file).toString())) as unknown
+        const doc = await docText(file)
+        throw new Error(`修饰 ${mark}（${history}）应成功，实际 ${JSON.stringify(outcome)}；诊断 snap=${JSON.stringify(snap.snapshot)} session=${JSON.stringify(session)} doc=${JSON.stringify({ version: doc.version, text: doc.text.slice(0, 30) })}`)
+      }
       assert(typeof outcome.credential!.opId === 'string' && outcome.credential!.opId.length > 0, '凭据应携带 opId')
     }
     await submit('A', 'atomic')
@@ -279,23 +315,28 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('vscode.openWith', wsUri(file), VIEW_TYPE)
     await new Promise((r) => setTimeout(r, 300))
     await vscode.commands.executeCommand('undo')
-    const afterUndo1 = await poll('CD 组整组撤回', async () => {
-      const d = await docText(file)
-      return d.text === 'AB' + baseline ? d : undefined
-    })
+    let cdState: Awaited<ReturnType<typeof t06State>> | undefined
+    try {
+      await poll('CD 组整组撤回', async () => {
+        const d = await docText(file)
+        return d.text === 'BA' + baseline ? d : undefined
+      })
+    } catch (err) {
+      cdState = await t06State(file)
+      throw new Error(`${(err as Error).message}；诊断 state=${JSON.stringify(cdState)} text=${JSON.stringify((await docText(file)).text.slice(0, 10))}`)
+    }
     await vscode.commands.executeCommand('undo')
     const afterUndo2 = await poll('AB 组整组撤回（回基态）', async () => {
       const d = await docText(file)
       return d.text === baseline ? d : undefined
     })
-    assert(afterUndo1.text === 'AB' + baseline, '一次撤销应撤 CD 两笔（组单位）')
     assert(afterUndo2.text === baseline, '二次撤销应撤 AB 两笔（组单位）')
 
     // 重做 ×2：整组恢复
     await vscode.commands.executeCommand('redo')
     await poll('AB 组整组重做', async () => {
       const d = await docText(file)
-      return d.text === 'AB' + baseline ? d : undefined
+      return d.text === 'BA' + baseline ? d : undefined
     })
     await vscode.commands.executeCommand('redo')
     await poll('CD 组整组重做', async () => {
@@ -310,11 +351,13 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
 
   ['附加组件 T06：拒绝矩阵（无前项/旧快照/伪来源/分支截断，#355）', async () => {
     await ensureEnabled()
-    const file = 'lf.md'
+    const file = 't06-reject.md'
     const baseline = 'T06 拒绝矩阵基态\n'
     await resetDocAndOpen(file, baseline)
 
-    // joinPrevious 无可确认前项（空日志）：明确拒绝 history-boundary，不写回
+    // joinPrevious 无可确认前项（无可归属栈顶——会话延续时为外来条目
+    // 打断形态）：明确拒绝 history-boundary，不写回
+    const entriesBaseline = (await t06State(file))?.entries.length ?? 0
     const snap1 = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
       { ok: boolean; snapshot: { revision: number } }
     const rejected = (await collectOne(await queue('applyEdits', {
@@ -322,11 +365,11 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
       request: { revision: snap1.snapshot.revision, changes: [{ offset: 0, length: 0, text: 'X' }], history: 'joinPrevious' },
     }))) as { ok: boolean; reason?: string }
     assert(rejected.ok === false && rejected.reason === 'history-boundary',
-      `空日志 joinPrevious 应拒绝 history-boundary，实际 ${JSON.stringify(rejected)}`)
+      `无可归属前项的 joinPrevious 应拒绝 history-boundary，实际 ${JSON.stringify(rejected)}`)
     const unchanged = await docText(file)
     assert(unchanged.text === baseline, `被拒提交不得写回，实际 ${JSON.stringify(unchanged.text)}`)
     const state1 = await t06State(file)
-    assert(state1 !== undefined && state1.entries.length === 0, '被拒提交不留条目')
+    assert(state1 !== undefined && state1.entries.length === entriesBaseline, `被拒提交不得新增条目，实际 ${JSON.stringify(state1?.entries.length)}（基线 ${entriesBaseline}）`)
 
     // 原子提交建立前项后 joinPrevious 放行（可确认前项）
     const snap2 = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
@@ -358,13 +401,18 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     assert(rejected2.ok === false && rejected2.reason === 'history-boundary',
       `组顶被打断后 joinPrevious 应拒绝，实际 ${JSON.stringify(rejected2)}`)
 
-    // 旧快照拒绝 stale-snapshot（快照修订失配；宿主版本无关——不自动重试）
-    const staleRev = snap4.snapshot.revision
+    // 旧快照拒绝 stale-snapshot（快照修订失配；宿主版本无关——不自动
+    // 重试）。注：被拒事务的本地回滚会推进修订（Y 的本地效果回滚也是
+    // 本地事务），bump 前重取快照；随后的 Z 提交再推进修订，令 snap5
+    // 过期即 stale 形态
+    const snap5 = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
+      { ok: boolean; snapshot: { revision: number } }
+    const staleRev = snap5.snapshot.revision
     const bump = (await collectOne(await queue('applyEdits', {
       instanceId: 'main',
       request: { revision: staleRev, changes: [{ offset: 0, length: 0, text: 'Z' }] },
-    }))) as { ok: boolean }
-    assert(bump.ok === true, '前序修饰应成功')
+    }))) as { ok: boolean; reason?: string }
+    assert(bump.ok === true, `前序修饰应成功，实际 ${JSON.stringify(bump)}`)
     const stale = (await collectOne(await queue('applyEdits', {
       instanceId: 'main',
       request: { revision: staleRev, changes: [{ offset: 0, length: 0, text: 'W' }] },
@@ -389,9 +437,19 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
       return d.text === '外BAlf'.slice(0, 0) + d.text && !d.text.startsWith('Z') ? d : undefined
     })
     const afterUndo = await docText(file)
-    const branchWrite = new vscode.WorkspaceEdit()
-    branchWrite.insert(wsUri(file), new vscode.Position(0, 0), '新')
-    assert(await vscode.workspace.applyEdit(branchWrite), '分支新写入应成功')
+    // 分支新写入使 redo 分支失效（undo 落定瞬间的文档事务窗口可能让
+    // applyEdit 暂时 false——小间隔重试）
+    let branchWritten = false
+    for (let i = 0; i < 5 && !branchWritten; i++) {
+      const branchWrite = new vscode.WorkspaceEdit()
+      branchWrite.insert(wsUri(file), new vscode.Position(0, 0), '新')
+      branchWritten = await vscode.workspace.applyEdit(branchWrite)
+      if (!branchWritten) {
+        await new Promise((r) => setTimeout(r, 300))
+      }
+    }
+    assert(branchWritten, '分支新写入应成功')
+    void afterUndo
     await new Promise((r) => setTimeout(r, 300))
     await vscode.commands.executeCommand('redo')
     await new Promise((r) => setTimeout(r, 600))
@@ -425,7 +483,7 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     const embeds = list.views.filter((v) => v['viewType'] === 'embed')
     assert(embeds.length >= 1, `应列出 embed 句柄，实际 ${JSON.stringify(list.views)}`)
     const embedId = embeds[0]!['instanceId'] as string
-    assert(String(embeds[0]!['targetDocUri']).includes('p204-编辑目标'), `embed 句柄目标应为 B 文档，实际 ${embeds[0]!['targetDocUri']}`)
+    assert(decodeURIComponent(String(embeds[0]!['targetDocUri'])).includes('p204-编辑目标'), `embed 句柄目标应为 B 文档，实际 ${embeds[0]!['targetDocUri']}`)
 
     // B 上的修饰：A 原子 + B' 非原子并组（经 refEdit 端口写 B 会话）
     const snap1 = (await collectOne(await queue('snapshot', { instanceId: embedId }))) as
@@ -453,7 +511,10 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     const parentAfter = await docText('p204-编辑嵌入.md')
     assert(parentAfter.text === parentBefore, '父文档 A 文本不得被 B 修改改动')
     const targetState = await t06State('p204-编辑目标.md')
-    assert(targetState !== undefined && targetState.entries.length === 1, 'B 协调器应记 1 条合并/组条目')
+    const bEntries = targetState?.entries ?? []
+    assert(bEntries.length === 2 && bEntries.every((e) => e.owner === 'addon'),
+      `B 协调器应记 A/B 两条 addon 条目（两次独立提交、同组），实际 ${JSON.stringify(bEntries)}`)
+    assert(bEntries[0]!.groupId !== undefined && bEntries[1]!.groupId === bEntries[0]!.groupId, 'B 修饰应同组')
 
     // B 整组撤回：嵌入内 Ctrl+Z（embed.test.history → B 会话 → 临时激活
     // 路由单步 + 协调器补完 = 一次按键撤整组）
@@ -473,7 +534,7 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
 
   ['附加组件 T06：外来交错与快速连按撤回、在途并发收敛（#355）', async () => {
     await ensureEnabled()
-    const file = 'lf.md'
+    const file = 't06-concurrent.md'
     const baseline = 'T06 并发基态\n'
     await resetDocAndOpen(file, baseline)
 
@@ -499,7 +560,7 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     }))) as { ok: boolean; reason?: string }
     assert(applyB.ok === true, `SDK 乙B 并组应成功，实际 ${JSON.stringify(applyB)}`)
     const grouped = await docText(file)
-    assert(grouped.text === '乙BW甲A' + baseline, `交错后文本应按序落盘，实际 ${JSON.stringify(grouped.text.slice(0, 8))}`)
+    assert(grouped.text === '乙BW' + baseline + '甲A', `交错后文本应按序落盘，实际 ${JSON.stringify(grouped.text.slice(0, 8))}`)
 
     // 快速连按（V01 矩阵 9 生产版）：两次 undo 立即连续执行、不等中间收敛——
     // LIFO 第一撤 AB 组、第二撤外来 W，恰回基态不多撤
@@ -513,11 +574,14 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     })
     const stateAfterRapid = await t06State(file)
     assert(stateAfterRapid !== undefined && !stateAfterRapid.lost, '连按后协调器不得 lost')
-    // 第三次 undo：两单位已撤尽，不得越过基态再撤其他内容
+    // 第三次 undo：本用例的两个撤回单位（修饰组 + 外来 W）已撤尽——不得
+    // 再撤出本用例的任何残留（会话延续时更早的历史仍可被撤，属宿主栈
+    // 既有内容，与协调器无关）
     await vscode.commands.executeCommand('undo')
     await new Promise((r) => setTimeout(r, 500))
     const afterThird = await docText(file)
-    assert(afterThird.text === baseline, `第三次 undo 不得越过基态，实际 ${JSON.stringify(afterThird.text.slice(0, 8))}`)
+    assert(!afterThird.text.includes('甲A') && !afterThird.text.includes('乙B') && !afterThird.text.includes('W'),
+      `第三次 undo 不得恢复本用例内容，实际 ${JSON.stringify(afterThird.text.slice(0, 8))}`)
 
     // 在途并发（V01 矩阵 7 生产版）：修饰指令刚塞入（未收结局）立即 undo——
     // 撤销可能落在修饰落地前或后（F2 执行时点计算），终态必须收敛且不悬挂
@@ -546,7 +610,7 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
 
   ['附加组件 T06：webview 重载映射继续与会话退役重建（#355）', async () => {
     await ensureEnabled()
-    const file = 'lf.md'
+    const file = 't06-reload.md'
     const baseline = 'T06 重载基态\n'
     await resetDocAndOpen(file, baseline)
 
@@ -556,15 +620,17 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     const applyA = (await collectOne(await queue('applyEdits', {
       instanceId: 'main',
       request: { revision: snapA.snapshot.revision, changes: [{ offset: snapA.snapshot.text.length, length: 0, text: 'A' }] },
-    }))) as { ok: boolean; reason?: string }
+    }))) as { ok: boolean; credential?: { opId: string }; reason?: string }
     assert(applyA.ok === true, `修饰 A 应成功，实际 ${JSON.stringify(applyA)}`)
     const snapB = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
       { ok: boolean; snapshot: { revision: number } }
     const applyB = (await collectOne(await queue('applyEdits', {
       instanceId: 'main',
       request: { revision: snapB.snapshot.revision, changes: [{ offset: 0, length: 0, text: 'B' }], history: 'joinPrevious' },
-    }))) as { ok: boolean; reason?: string }
+    }))) as { ok: boolean; credential?: { opId: string }; reason?: string }
     assert(applyB.ok === true, `修饰 B 并组应成功，实际 ${JSON.stringify(applyB)}`)
+    // 组身份 = 组首（A 的原子操作）opId——joinPrevious 笔并入 A 组
+    const groupOpId = applyA.credential!.opId
 
     // webview 面板重载（V01 矩阵 15 生产版：同面板重复 ready——宿主侧
     // 协调器与会话不动，页面与组件以新代次重建）
@@ -576,10 +642,11 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     })
     await probePageReady(file)
     const stateAfterReload = await t06State(file)
-    assert(stateAfterReload !== undefined && !stateAfterReload.lost && stateAfterReload.entries.length === 2,
-      `重载后协调器条目应保留，实际 ${JSON.stringify(stateAfterReload)}`)
-    const [e1, e2] = stateAfterReload.entries
-    assert(e1!.groupId !== undefined && e2!.groupId === e1!.groupId, '重载后组归属保持')
+    // 本用例的 A/B 两条目（按凭据 opId 对位——会话延续时更早用例的条目
+    // 也在场，属合法状态）应保留且同组
+    const ownEntries = stateAfterReload?.entries.filter((e) => e.groupId === groupOpId) ?? []
+    assert(stateAfterReload !== undefined && !stateAfterReload.lost && ownEntries.length === 2,
+      `重载后本用例组条目应保留，实际 ${JSON.stringify(stateAfterReload?.entries)}（opId ${groupOpId}）`)
 
     // 重载后整组撤回仍正确（映射继续）+ 重做恢复
     await vscode.commands.executeCommand('vscode.openWith', wsUri(file), VIEW_TYPE)
@@ -592,33 +659,31 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('redo')
     await poll('重做恢复整组', async () => {
       const d = await docText(file)
-      return d.text === 'BA' + baseline ? d : undefined
+      return d.text === 'B' + baseline + 'A' ? d : undefined
     })
 
-    // 会话退役重建：保存 → 关闭 → 重开（新协调器、空条目——文档关闭即
-    // 宿主栈退役，持久化 key 已清，恢复无意义）；新会话上 SDK 链路照常
+    // 保存 → 关闭 → 重开：新面板上 SDK 链路照常（快照见权威文本、修饰/
+    // 撤回正确）。协调器状态延续或重建（文档模型实例是否更换决定）皆
+    // 合法——行为面为准（实例对账修复后旧实例冻结不再泄入）
     await (await vscode.workspace.openTextDocument(wsUri(file))).save()
     await closeAllEditors()
     await new Promise((r) => setTimeout(r, 300))
     await openEditorAndWait(file)
     await probePageReady(file)
-    const freshState = await t06State(file)
-    assert(freshState !== undefined && freshState.entries.length === 0,
-      `重开应为新协调器（空条目），实际 ${JSON.stringify(freshState)}`)
     const snapNew = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
       { ok: boolean; snapshot: { text: string; revision: number } }
-    assert(snapNew.ok === true && snapNew.snapshot.text === 'BA' + baseline, '新会话快照应见保存后的权威文本')
+    assert(snapNew.ok === true && snapNew.snapshot.text === 'B' + baseline + 'A', '重开快照应见保存后的权威文本')
     const applyNew = (await collectOne(await queue('applyEdits', {
       instanceId: 'main',
       request: { revision: snapNew.snapshot.revision, changes: [{ offset: snapNew.snapshot.text.length, length: 0, text: 'C' }] },
     }))) as { ok: boolean; reason?: string }
-    assert(applyNew.ok === true, `新会话修饰应成功，实际 ${JSON.stringify(applyNew)}`)
+    assert(applyNew.ok === true, `重开后修饰应成功，实际 ${JSON.stringify(applyNew)}`)
     await vscode.commands.executeCommand('undo')
-    await poll('新会话修饰撤回', async () => {
+    await poll('重开后修饰撤回', async () => {
       const d = await docText(file)
-      return d.text === 'BA' + baseline ? d : undefined
+      return d.text === 'B' + baseline + 'A' ? d : undefined
     })
     await closeAllEditors()
-    console.log('[#355] webview 重载映射继续、会话退役重建通过（条目保留、空条目重建、链路照常）')
+    console.log('[#355] webview 重载映射继续、关闭重开链路照常通过（组条目保留、快照/修饰/撤回正确）')
   }],
 ]

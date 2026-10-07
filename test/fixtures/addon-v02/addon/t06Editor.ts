@@ -1,12 +1,13 @@
 // #355 T06 测试组件编辑器页源码：消费公开 SDK 的 views 面完成真实视图/
 // 快照/提交/选区操作——集成用例的「外部测试组件经公开 API 消费」载体。
 //
-// 驱动协议（长轮询，宿主夹具 addon-t06 配对）：
-// - 挂载即循环 sdk.channel.request('t06.next')（长轮询取指令；宿主侧
-//   handler 挂起至用例经 t06.queue 塞入指令）；
+// 驱动协议（短轮询，宿主夹具 addon-t06 配对）：
+// - 挂载即循环 sdk.channel.request('t06.next')（立即返回：一条待发指令
+//   或 null；无指令小睡后重试——不做挂起式长轮询，面板可销毁的场景下
+//   挂起 resolver 会变成死 waiter 吞指令）；
 // - 每条指令 {seq, op, args} 执行一个 SDK 调用，结局经 't06.result' 上报
 //   （宿主收件箱，用例经 t06.collect 断言）；
-// - 释放/超时结束循环（released/timeout 由装载器本地终结）。
+// - released/超时结束循环（webview 销毁随页面消亡，无需显式退出）。
 //
 // 操作面（op）：
 // - list / created / disposed：views.list 与变化订阅的采样
@@ -84,13 +85,14 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
 
   void (async () => {
     while (!stopped) {
-      const reply = await sdk.channel.request('t06.next', {}, { timeoutMs: 55_000 })
+      const reply = await sdk.channel.request('t06.next', {}, { timeoutMs: 5_000 })
       if (reply.ok !== true) {
-        return // released / timeout：退出循环
+        return // released / timeout（宿主失联）：退出循环
       }
       const cmd = reply.result as T06Command | null
       if (cmd === null) {
-        continue // 本轮无指令（broadcast 空唤醒）：重新挂起长轮询
+        await new Promise((r) => setTimeout(r, 150)) // 本轮无指令：小睡后重试
+        continue
       }
       let outcome: unknown
       try {
@@ -98,7 +100,13 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
       } catch (err) {
         outcome = { ok: false, reason: `op-error:${String(err)}` }
       }
-      void sdk.channel.request('t06.result', { seq: cmd.seq, outcome })
+      // 上报失败即退出：面板关闭后 webview 桥死（postMessage 黑洞或
+      // released）——本实例继续轮询只会吞走新面板组件的指令且结局无法
+      // 回收（集成实测：旧面板实例残留轮询导致新面板 probe 超时）
+      const ack = await sdk.channel.request('t06.result', { seq: cmd.seq, outcome })
+      if (ack.ok !== true) {
+        return
+      }
     }
   })()
 })

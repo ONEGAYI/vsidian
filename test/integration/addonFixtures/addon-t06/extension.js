@@ -4,8 +4,10 @@
 // 装配、互不打包。
 //
 // 驱动协议（与页面产物 t06Editor.ts 配对）：
-// - run scope 通道 t06.next：长轮询取指令——handler 挂起（Promise）直至
-//   用例经 t06.queue 塞入；卸载代次后的滞留挂起由装载器超时终结；
+// - run scope 通道 t06.next：立即返回一条待发指令（无则 null——页面侧
+//   短轮询重试）。不做挂起式长轮询：webview 面板可销毁，挂起的 resolver
+//   会随页面死亡变成死 waiter 吞指令（实测：closeAllEditors 后新面板的
+//   组件永远收不到 queue 塞入的指令）；
 // - run scope 通道 t06.result：页面执行 SDK 操作的结局收件箱；
 // - 观测命令（contributes.commands 自动派生激活）：
 //   stats（通道计数）/ queue {op, args}（塞指令并返回序号）/
@@ -25,10 +27,8 @@ const stats = {
   lastRegisterResult: null,
 }
 
-/** 待发指令队列（seq 单调；用例塞入后立即唤醒挂起的长轮询） */
+/** 待发指令队列（seq 单调；页面短轮询取走即执行） */
 const pendingCommands = []
-/** t06.next 的挂起 resolver（页面长轮询在场时恰一个） */
-let nextWaiters = []
 /** 页面上报的执行结局（seq → outcome；collect 取走） */
 const results = []
 let seqCounter = 0
@@ -51,12 +51,7 @@ async function activate(context) {
       })
       enableCtx.channel.handle('t06.next', () => {
         stats.nextCalls++
-        if (pendingCommands.length > 0) {
-          return pendingCommands.shift()
-        }
-        return new Promise((resolve) => {
-          nextWaiters.push(resolve)
-        })
+        return pendingCommands.shift() ?? null
       })
       enableCtx.channel.handle('t06.result', (payload) => {
         stats.resultCalls++
@@ -69,10 +64,6 @@ async function activate(context) {
       })
       enableCtx.onDispose(() => {
         stats.disposeCount++
-        // 代次退役：唤醒挂起的长轮询（null = 页面循环退出）
-        for (const resolve of nextWaiters.splice(0)) {
-          resolve(null)
-        }
       })
     },
   }
@@ -83,12 +74,6 @@ async function activate(context) {
       const seq = ++seqCounter
       const command = { seq, op, ...(args !== undefined ? { args } : {}) }
       pendingCommands.push(command)
-      // 唤醒全部挂起的长轮询（旧 webview 销毁会留下死 waiter——shift 单个
-      // 可能恰好命中死者导致指令丢失；broadcast 让活 waiter 竞争取指令，
-      // 多余 waiter 收 null 重新挂起）
-      for (const resolve of nextWaiters.splice(0)) {
-        resolve(pendingCommands.shift() ?? null)
-      }
       return seq
     }),
     vscode.commands.registerCommand(`${SELF_ID}.collect`, async (timeoutMs = 15000) => {
@@ -104,9 +89,6 @@ async function activate(context) {
     vscode.commands.registerCommand(`${SELF_ID}.reset`, () => {
       pendingCommands.length = 0
       results.length = 0
-      for (const resolve of nextWaiters.splice(0)) {
-        resolve(null)
-      }
       return true
     }),
   )

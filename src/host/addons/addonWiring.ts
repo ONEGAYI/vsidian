@@ -28,6 +28,7 @@ import { isWebviewToHost } from '../../shared/protocol'
 import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from './addonRuntime'
+import { WebviewPanelBook, type PanelBookRecord } from './webviewPanelBook'
 import { t } from '../../shared/i18n'
 
 /** 本扩展自身 ID（附加组件建议声明对它的原生依赖） */
@@ -59,8 +60,9 @@ export interface AddonEditorBridge {
   editorResourceRoots(): vscode.Uri[]
   /** 面板消息路由（addonPage.*）；返回是否消费（消费后 provider 不再下发会话） */
   handlePanelMessage(sessionId: string, webview: vscode.Webview, message: unknown): boolean
-  /** 面板销毁（视图关闭——装载器随 webview 消亡，宿主侧路由回收） */
-  panelDisposed(sessionId: string): void
+  /** 面板销毁（视图关闭——装载器随 webview 消亡，宿主侧路由回收；
+   *  webview 参与身份对账：迟到的旧面板 dispose 不误删同名新面板 record） */
+  panelDisposed(sessionId: string, webview: vscode.Webview): void
   /** runtime 状态变化订阅（provider 刷新资源根并推送指令 diff） */
   onPanelsChanged(listener: () => void): () => void
   /** 按当前期望装载清单对某面板推送指令（幂等对账：desired 为准） */
@@ -341,12 +343,13 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   }
 
   // ---- 编辑器面板桥（#351）----
-  interface EditorPanelRecord {
-    webview: vscode.Webview
-    /** 本面板已推送的装载（addonId → generation；desired 对账用） */
-    pushed: Map<string, number>
-  }
-  const editorPanels = new Map<string, EditorPanelRecord>()
+  // #355 T06：面板 record 经 WebviewPanelBook 做 webview 身份对账——
+  // sessionId 是 session 内局部名（每会话都从 panel-1 起）跨会话重名，
+  // 旧面板 dispose 晚到时新面板的 ready/指令不得被死 record 劫持或误删
+  //（集成实测：装载指令投递到已销毁 webview 被吞，新面板永远等不到
+  // addon.load；对账语义同设置桥 ensureRecord 的单面板特例）
+  type EditorPanelRecord = PanelBookRecord<vscode.Webview>
+  const editorPanels = new WebviewPanelBook<vscode.Webview>()
   const panelListeners = new Set<() => void>()
 
   const pushEditorDirectives = (record: EditorPanelRecord): void => {
@@ -396,31 +399,27 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   const editorBridge: AddonEditorBridge = {
     editorResourceRoots: () => directiveRootsOf(runtime.desiredEditorLoads()),
     handlePanelMessage: (sessionId, webview, message) => {
+      // 身份对账：record 属于其他（已销毁）面板时按无 record 处理——
+      // 未注册面板首条消息即 addonPage.ready 时就地登记
       const record = editorPanels.get(sessionId)
-      if (!record) {
-        // 未注册面板（首条消息即 addonPage.ready 时就地登记）
+      if (!record || record.webview !== webview) {
         if (isWebviewToHost(message) && message.kind === 'addonPage.ready') {
-          const fresh: EditorPanelRecord = { webview, pushed: new Map() }
-          editorPanels.set(sessionId, fresh)
+          const fresh = editorPanels.settle(sessionId, webview)
           return handleEditorPanelMessage(fresh, message)
         }
         return false
       }
       return handleEditorPanelMessage(record, message)
     },
-    panelDisposed: (sessionId) => {
-      editorPanels.delete(sessionId)
+    panelDisposed: (sessionId, webview) => {
+      editorPanels.disposed(sessionId, webview)
     },
     onPanelsChanged: (listener) => {
       panelListeners.add(listener)
       return () => panelListeners.delete(listener)
     },
     pushDirectives: (sessionId, webview) => {
-      const record = editorPanels.get(sessionId) ?? { webview, pushed: new Map() }
-      if (!editorPanels.has(sessionId)) {
-        editorPanels.set(sessionId, record)
-      }
-      pushEditorDirectives(record)
+      pushEditorDirectives(editorPanels.settle(sessionId, webview))
     },
   }
 

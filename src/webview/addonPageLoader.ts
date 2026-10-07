@@ -180,6 +180,14 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
   }
   let nextRequestSeq = 0
 
+  // T06（#355）编辑提交的操作身份计数器：opId = 装载代次 + 序号（组件
+  // 不可自报——来源身份由 SDK 层注入，伪来源请求结构上不可表达）。
+  // 计数器为页面级（同一 webview 内多次装载共享递增，同页唯一）；跨面板
+  // （同组件多 webview 同时提交）同代次序号可能重名——协调器条目流的组
+  // 语义按连续段与声明归类、不按名匹配，重名无行为危害（仅诊断展示层
+  // 混淆），已知边界
+  let opSeq = 0
+
   /**
    * 取「本次装载期间新注册且未消费」的首个条目；本次装载开始前的遗留
    * 未消费条目（旧工厂）就地丢弃并计数——旧工厂注册不接入新代次。
@@ -207,9 +215,6 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
 
   const buildSdk = (loadRecord: ActiveLoad, manifest: AddonLoadManifest): VsidianAddonPageSdk => {
     const extensionParts: Extension[] = []
-    // T06（#355）编辑提交的操作身份计数器：opId = 装载代次 + 序号（组件
-    // 不可自报——来源身份由 SDK 层注入，伪来源请求结构上不可表达）
-    let opSeq = 0
     const viewsFacet: AddonViewsFacet | undefined = env.addonViews
       ? {
           list: () => env.addonViews!.list(),
