@@ -28,6 +28,8 @@ import type {
   AddonUnloadOutcome,
   VsidianAddonPageSdk,
 } from '../shared/addonPage'
+import type { AddonViewHandle, AddonViewsFacet } from '../shared/addonEditApi'
+import type { AddonViewsRuntime } from './addonViews'
 
 /** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
  *  会追加新条目，装载器按「本次装载期间注册 + 未消费」规则取用） */
@@ -69,6 +71,9 @@ export interface AddonPageLoaderEnv {
   page: AddonPageKind
   /** 编辑器页共享运行时（与生产控制器同一实例；设置页省略） */
   cm6?: AddonCm6Runtime
+  /** T06（#355）统一视图注册表的操作面（编辑器页由 main.ts 构造注入；
+   *  省略时 SDK 不提供 views 面） */
+  addonViews?: AddonViewsRuntime
   /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
    *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
   attachExtensions?: (extension: Extension[] | null) => void
@@ -175,6 +180,14 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
   }
   let nextRequestSeq = 0
 
+  // T06（#355）编辑提交的操作身份计数器：opId = 装载代次 + 序号（组件
+  // 不可自报——来源身份由 SDK 层注入，伪来源请求结构上不可表达）。
+  // 计数器为页面级（同一 webview 内多次装载共享递增，同页唯一）；跨面板
+  // （同组件多 webview 同时提交）同代次序号可能重名——协调器条目流的组
+  // 语义按连续段与声明归类、不按名匹配，重名无行为危害（仅诊断展示层
+  // 混淆），已知边界
+  let opSeq = 0
+
   /**
    * 取「本次装载期间新注册且未消费」的首个条目；本次装载开始前的遗留
    * 未消费条目（旧工厂）就地丢弃并计数——旧工厂注册不接入新代次。
@@ -202,9 +215,48 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
 
   const buildSdk = (loadRecord: ActiveLoad, manifest: AddonLoadManifest): VsidianAddonPageSdk => {
     const extensionParts: Extension[] = []
+    const viewsFacet: AddonViewsFacet | undefined = env.addonViews
+      ? {
+          list: () => env.addonViews!.list(),
+          get: (instanceId: string) => {
+            const info = env.addonViews!.infoOf(instanceId)
+            if (!info) {
+              return null
+            }
+            const isReleased = () => !active.has(loadRecord.addonId)
+            const handle: AddonViewHandle = {
+              info,
+              editor: {
+                getSnapshot: () => (isReleased()
+                  ? { ok: false, reason: 'view-disposed' }
+                  : env.addonViews!.snapshotOf(instanceId)),
+                applyEdits: (request) => {
+                  if (isReleased()) {
+                    // 组件已释放：其编辑请求不再有有效来源（僵尸写入拒绝，
+                    // 与视图释放共用 view-disposed 拒绝类型——可辨认、不歧义）
+                    return Promise.resolve({ ok: false, reason: 'view-disposed' as const })
+                  }
+                  return env.addonViews!.applyEdits({
+                    addonId: loadRecord.addonId,
+                    opId: `g${loadRecord.generation}-op${++opSeq}`,
+                    instanceId,
+                    request,
+                  })
+                },
+                setSelection: (ranges) => !isReleased() && env.addonViews!.setSelectionOf(instanceId, ranges),
+                reveal: (offset) => !isReleased() && env.addonViews!.revealOf(instanceId, offset),
+              },
+            }
+            return handle
+          },
+          onCreated: (callback) => env.addonViews!.onCreated(callback),
+          onDisposed: (callback) => env.addonViews!.onDisposed(callback),
+        }
+      : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
       experimental: { cm6: env.cm6 },
+      ...(viewsFacet ? { views: viewsFacet } : {}),
       registerExtension: (extension) => {
         if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
           return false

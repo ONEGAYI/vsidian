@@ -79,6 +79,12 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't02-addon', 'dist', 'settings.js'),
       note: 't02-addon 设置页',
     },
+    // #355 T06：统一视图编辑 API 夹具组件（编辑器页长轮询驱动消费）
+    {
+      entry: path.join(fixtureRoot, 'addon', 't06Editor.ts'),
+      outfile: path.join(buildRoot, 't06-addon', 'dist', 'editor.js'),
+      note: 't06-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -129,6 +135,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t02Addon: {
       installDir: path.join(buildRoot, 't02-addon'),
       distDir: t02Dist,
+    },
+    // #355 T06：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t06）
+    t06Addon: {
+      installDir: path.join(buildRoot, 't06-addon'),
+      distDir: path.join(buildRoot, 't06-addon', 'dist'),
     },
     outsideDir,
   }

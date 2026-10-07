@@ -8,6 +8,7 @@ vsidian/
 └── src/ # 扩展源码
     ├── extension.ts # 扩展激活入口
     ├── host/        # 宿主端实现
+    │   ├── addonHistoryCoordinator.ts    # 附加组件历史协调器
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
     │   ├── addons/                       # 附加组件宿主端实现
     │   │   ├── addonCoordinator.ts     # 附加组件发现协调与唤醒
@@ -68,6 +69,7 @@ vsidian/
     │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
     │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
+    │   ├── addonEditApi.ts         # 统一视图编辑API共享形状
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
@@ -140,6 +142,7 @@ vsidian/
         ├── addonPageLoader.ts          # 页面装载器生产实现
         ├── addonSettingsControls.ts    # 基础设置控件构造器
         ├── addonSettingsSection.ts     # 设置页附加组件分页
+        ├── addonViews.ts               # 页面级视图句柄注册表
         ├── anchorFlash.ts              # 跳转目标高亮装饰状态
         ├── appearanceSettings.ts       # 外观合并分页
         ├── backlinkGrouping.ts         # 反链面板分组排序过滤纯函数

@@ -62,8 +62,9 @@ const testCacheDir = path.join(root, '.vscode-test')
 // 兼容注册（addon-ok）、声明合法但不兼容（addon-incompatible）、激活失败
 // （addon-fail）；#351 T02 页面 SDK 夹具（addon-t02——页面产物由 V02
 // 构建桥生成后拷入其 dist/，构建产物不入库）；#353 T04 复杂设置夹具
-//（addon-t04——纯宿主 CJS，无页面产物；经公开 API 注册复杂定义与分层读写）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-escape'].map((name) =>
+//（addon-t04——纯宿主 CJS，无页面产物；经公开 API 注册复杂定义与分层读写）；
+// #355 T06 视图编辑夹具（addon-t06——页面产物经构建桥生成，长轮询协议）
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-t06', 'addon-escape'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
 // #354 T05 逃逸夹具装配：addon-escape/escape 在运行期创建为 junction，
@@ -81,10 +82,12 @@ console.log(`[runTest] T05 逃逸 junction 已装配：${escapeLink} -> ${escape
 
 // #351 T02：夹具组件页面产物构建（chrome114 IIFE + 静态红线——CM6 不
 // 重打包）；产物拷入 addon-t02/dist 供组件按相对入口登记（资源授权锚 =
-// 夹具安装目录）
-const t02Layout = (await buildTestAddons({ log: () => {} })).t02Addon
-cpSync(t02Layout.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t02', 'dist'), { recursive: true })
+// 夹具安装目录）。#355 T06 同构建桥生成 t06 页面产物并拷入其夹具目录
+const addonLayout = await buildTestAddons({ log: () => {} })
+cpSync(addonLayout.t02Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t02', 'dist'), { recursive: true })
 console.log('[runTest] T02 夹具组件页面产物已构建并拷入 addonFixtures/addon-t02/dist')
+cpSync(addonLayout.t06Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t06', 'dist'), { recursive: true })
+console.log('[runTest] T06 夹具组件页面产物已构建并拷入 addonFixtures/addon-t06/dist')
 const started = Date.now()
 try {
   // 所有宿主结束后再清理便携目录；若一片启动异常，也不能清理仍在运行的其他片。
@@ -135,6 +138,9 @@ try {
           ...(sharded ? { VSIDIAN_TEST_SHARD: `${shard}/${shardTotal}` } : {}),
         },
         reportPath: path.join(testCacheDir, reportName(shard)),
+        // #355：宿主超时可经环境变量放宽（全量套件新增慢用例——如 T06 的
+        // 基态轮询与整组撤回等待——默认 15 分钟不够时无需改代码）
+        timeoutMs: Number(process.env.VSIDIAN_ITEST_TIMEOUT_MS ?? '') * 1000 || 15 * 60_000,
       })
       console.log(`[runTest] 分片 ${shard}/${shardTotal} 宿主退出码 ${code}（耗时 ${((Date.now() - started) / 1000).toFixed(1)}s）`)
       return code

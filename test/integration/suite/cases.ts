@@ -11,6 +11,7 @@ import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
+import { addonT06Cases } from './addonT06Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17343,4 +17344,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #354 T05 组件管理侧栏数据面、故障手动重试与 realpath 逃逸守卫（断言
   // 面见 addonT05Cases.ts 头注）
   ...addonT05Cases,
+  // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
+  // 断言面见 addonT06Cases.ts 头注）
+  ...addonT06Cases,
 ]

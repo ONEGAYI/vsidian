@@ -1,0 +1,22 @@
+{
+  "name": "addon-t06",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T06 View Edit API)",
+  "description": "Integration fixture: Vsidian add-on consuming the public views/edit API on the editor page (T06, #355).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-t06.stats", "title": "Fixture T06: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-t06.queue", "title": "Fixture T06: queue a page command" },
+      { "command": "vsidian-test-fixture.addon-t06.collect", "title": "Fixture T06: collect page results" },
+      { "command": "vsidian-test-fixture.addon-t06.reset", "title": "Fixture T06: reset queues" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

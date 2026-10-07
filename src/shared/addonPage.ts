@@ -15,6 +15,7 @@
 //   服务按请求面板的许可面实现（1.82.3 桌面本地形态 URI 字符串跨面板相同）；
 // - 代次硬边界：旧工厂注册、旧消息、迟到结果不能接入新代次。
 import type { Extension } from '@codemirror/state'
+import type { AddonViewsFacet } from './addonEditApi'
 
 /** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。值为本页 bundle
  *  内的模块命名空间对象——装载器由页面产物自身构造，因此与生产控制器
@@ -32,12 +33,17 @@ export type AddonChannelOutcome =
   | { ok: false; reason: 'timeout' | 'released' | 'rejected' }
 
 /** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信
- *  生命周期；六组稳定能力的其余部分属后续票） */
+ *  生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与
+ *  文本提交；六组稳定能力的其余部分属后续票） */
 export interface VsidianAddonPageSdk {
   /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */
   readonly addon: { id: string; generation: number; page: AddonPageKind }
   /** 实验入口：CM6 共享运行时（仅编辑器页提供；设置页为 undefined） */
   readonly experimental: { readonly cm6?: AddonCm6Runtime }
+  /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、
+   *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子
+   *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */
+  readonly views?: AddonViewsFacet
   /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */
   registerExtension(extension: Extension): boolean
   /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */

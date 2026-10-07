@@ -290,6 +290,9 @@ export interface HoverPreviewContext {
    *  目标编辑端口/内部模式状态机/显式关闭链路与正文嵌入同源；缺省（未
    *  提供）浮窗保持纯 Reading 形态（chrome 隐藏） */
   mountPopupRoot?(args: HoverPopupRootMountArgs): { session: HoverPopupRootSession; content: RefContentMount } | null
+  /** T06（#355）浮层关闭通知（一切关闭路径的唯一收口 closeHoverPopup）：
+   *  根控制器据此注销悬停只读句柄；缺省不通知 */
+  onPopupClosed?(instanceId: string): void
 }
 
 interface HoverPopupState {
@@ -1418,6 +1421,9 @@ export function closeHoverPopup(): void {
     return
   }
   popup = null
+  // T06（#355）：关闭收口通知（悬停只读句柄注销——instanceId 取自关闭
+  // 前浮层，与打开时的注册配对；一切关闭路径都经过本函数）
+  context?.onPopupClosed?.(state.instanceId)
   // #342（P3-10）在途请求取消：loading 态关浮层（换目标/移出/Esc/域
   // 失效等一切关闭路径）发 hover.cancel——宿主中止外链抓取（同 URL 合并
   // 的最后消费者离开即断开底层连接）；markdown 读取不可中止，迟到回包由

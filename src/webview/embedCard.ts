@@ -277,6 +277,13 @@ export interface EmbedCardContext {
    *  内，A 的 toast 容器即 B 的会话面）；缺省静默跳过（无 toast 面的装配
    *  不阻塞确认） */
   notifyToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
+  /** T06（#355）统一视图注册表：嵌入内部 Live 实例创建/销毁时登记与注销
+   *  embed 句柄（函数形式——注册表由根在 attachAddonViews 注入，嵌入管理
+   *  器先于它创建；缺省/返回 undefined 时不注册，嵌入功能不受影响） */
+  addonViews?(): {
+    registerLive(entry: import('./addonViews').AddonLiveViewEntry): void
+    unregister(instanceId: string): void
+  } | undefined
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除）。
@@ -2016,6 +2023,16 @@ export class EmbedCardManager {
     })])
     const inst = created
     live.instance = inst
+    // T06（#355）embed 句柄注册：目标身份与实例均在场。instanceId 用
+    // hostId（稳定宿主身份，面板会话内唯一——同目标多 occurrence 各自
+    // 独立句柄；inner 是目标原文，同目标重复不可作身份）
+    this.context.addonViews?.()?.registerLive({
+      viewType: 'embed',
+      instanceId: `embed:${entry.hostId}`,
+      targetDocUri: live.docUri!,
+      mode: () => 'live',
+      instance: inst,
+    })
     // P2-11：补发最近设置快照（实例创建晚于面板装载——见 applySettings 注释）
     if (this.lastSettings !== undefined) {
       inst.applySettings(this.lastSettings)
@@ -2290,6 +2307,8 @@ export class EmbedCardManager {
     if (!live) {
       return
     }
+    // T06（#355）：embed 句柄注销（先于实例销毁——句柄操作此后拒绝）
+    this.context.addonViews?.()?.unregister(`embed:${entry.hostId}`)
     if (this.closeDialogBelongsTo(entry)) {
       this.closePendingDelete = null
       this.closeCloseDialog()

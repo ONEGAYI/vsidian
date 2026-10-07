@@ -47,3 +47,43 @@ export function isEditOriginMeta(v: unknown): v is EditOriginMeta {
 export function hasNetTextChange(changes: readonly { length: number; text: string }[]): boolean {
   return changes.some((c) => c.length > 0 || c.text.length > 0)
 }
+
+/** T06（#355）合并提交的来源列表：edit.request.origin 字段的数组形态。
+ *  仅「同组未提交合并」（技术方案 §6 表格第一行：原子修饰及随后非原子
+ *  修饰在页面出站层合成一笔）时出现——**首项恒为组首原子操作**，其后为
+ *  并入该组的 joinPrevious 修饰（逐次来源记录保留）。正常路径单笔提交
+ *  仍携带单值 EditOriginMeta（T03 形状不变） */
+export type EditOriginList = EditOriginMeta[]
+
+/** edit.request.origin 字段的解析结果：undefined = 缺省（旧调用）；
+ *  数组 = 归一化后的来源列表（单值也归一为单元素数组）；invalid = 在场
+ *  但形状非法（整条消息拒绝，协议层语义） */
+export type EditOriginFieldParse =
+  | { status: 'absent' }
+  | { status: 'ok'; origins: EditOriginList }
+  | { status: 'invalid' }
+
+export function parseEditOriginField(v: unknown): EditOriginFieldParse {
+  if (v === undefined) {
+    return { status: 'absent' }
+  }
+  if (isEditOriginMeta(v)) {
+    return { status: 'ok', origins: [v] }
+  }
+  if (Array.isArray(v) && v.length > 0 && v.every(isEditOriginMeta)) {
+    return { status: 'ok', origins: v as EditOriginList }
+  }
+  return { status: 'invalid' }
+}
+
+/** 归一化来源列表的约束校验（在形状合法之上）：全部同组件（不能冒充他组
+ *  合并）、首项 atomic（组首）且其余项 joinPrevious（并入者）——合并笔
+ *  由 webview 出站层构造，宿主侧防御性复核 */
+export function isValidMergedOriginList(origins: EditOriginList): boolean {
+  if (origins.length < 2) {
+    return false
+  }
+  const addonId = origins[0]!.addonId
+  return origins[0]!.undo === 'atomic' &&
+    origins.every((o, i) => o.addonId === addonId && (i === 0 ? true : o.undo === 'joinPrevious'))
+}

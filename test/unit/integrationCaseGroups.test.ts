@@ -176,6 +176,7 @@ function productionCases(): Array<[string, null]> {
     ['addonT02Cases', parseCaseArray('addonT02Cases.ts', 'addonT02Cases')],
     ['addonT04Cases', parseCaseArray('addonT04Cases.ts', 'addonT04Cases')],
     ['addonT05Cases', parseCaseArray('addonT05Cases.ts', 'addonT05Cases')],
+    ['addonT06Cases', parseCaseArray('addonT06Cases.ts', 'addonT06Cases')],
   ])
   const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
     ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)

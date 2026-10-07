@@ -458,6 +458,9 @@ export class WebviewSyncController {
   private pendingAddonExtensions: Extension[] | null | undefined = undefined
   /** #351 T02 附加组件装载器观测探针（main.ts 安装装载器后挂载；缺省不报） */
   private addonPageProbe: (() => import('../shared/addonPage').AddonLoaderStats) | undefined
+  /** T06（#355）统一视图注册表（main.ts 构造注入；init 后注册主正文句柄，
+   *  unmount 注销；缺省不注册） */
+  private addonViews: import('./addonViews').AddonViewRegistry | undefined
   private sessionId = ''
   private docUri = ''
   /** 实例存在前的持久化初值兜底（persistState 在 mount 前被调用时使用） */
@@ -1060,6 +1063,8 @@ export class WebviewSyncController {
       // 显式关闭链路与正文嵌入同源（同一 EmbedCardManager——票面「后续
       // 浮窗使用同一目标操作和结果」）
       mountPopupRoot: (args) => this.embedCards?.mountPopupRoot(args) ?? null,
+      // T06（#355）：浮层关闭收口 → 悬停只读句柄注销
+      onPopupClosed: (instanceId) => this.addonViews?.unregister(`hover:${instanceId}`),
     })
     // #299 跳转目标提示上下文：与悬停预览同源装配（session/send 同款）；
     // enabled 投影 hover.targetTip（缺省视为开），dispose 清空随会话
@@ -1104,6 +1109,9 @@ export class WebviewSyncController {
       // #381 T06 内部 Live 双链联想的轻提示通道（重复标题风险/块接受失败
       // 呈现）：与主正文共用根 toast 面（B 嵌入在 A 的 webview 内）
       notifyToast: (text, severity) => this.toast?.show(text, severity),
+      // T06（#355）：embed 句柄登记/注销（内部 Live 实例创建/销毁点；
+      // attachAddonViews 前装配时不注册——注册表随主正文句柄同一注入）
+      addonViews: () => this.addonViews,
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
@@ -1834,6 +1842,7 @@ export class WebviewSyncController {
     this.keybindingRouter.cancel()
     // P2-02：主正文实例销毁（flush 计时清零 + EditorView destroy，DOM
     // 随 destroy 移除）；根 chrome 各自独立释放
+    this.addonViews?.unregister('main')
     this.live?.destroy()
     this.live = undefined
     // #354 T05：实例终结时丢弃挂起的组件扩展重配意图——旧意图不作用于
@@ -1944,6 +1953,30 @@ export class WebviewSyncController {
     this.addonPageProbe = probe
   }
 
+  /** T06（#355）：挂接统一视图注册表（main.ts 构造后注入；主正文句柄随
+   *  init 注册——targetDocUri 就绪是注册前提） */
+  attachAddonViews(registry: import('./addonViews').AddonViewRegistry): void {
+    this.addonViews = registry
+    if (this.live && this.docUri) {
+      this.registerMainAddonView()
+    }
+  }
+
+  /** 主正文句柄注册（init/attach 时 docUri 与 live 实例均在场的时点） */
+  private registerMainAddonView(): void {
+    if (!this.addonViews || !this.live) {
+      return
+    }
+    const live = this.live
+    this.addonViews.registerLive({
+      viewType: 'main',
+      instanceId: 'main',
+      targetDocUri: this.docUri,
+      mode: () => this.viewMode,
+      instance: live,
+    })
+  }
+
   /** 宿主消息入口（window message 事件转发） */
   handleHostMessage(message: unknown): void {
     if (!isHostToWebview(message)) {
@@ -1966,6 +1999,9 @@ export class WebviewSyncController {
           restoreAnchor: true,
           source: 'init',
         })
+        // T06（#355）：主正文句柄注册（init 即目标就绪；重载后的重复 init
+        // 以新代旧——旧条目 onDisposed 后新条目 onCreated）
+        this.registerMainAddonView()
         // init 后主动回报一次视图状态（含持久化恢复的模式）：宿主的模式
         // 缓存尽早建立，重载场景（retainContextWhenHidden 关闭）不留窗口
         this.reportViewState()
@@ -2195,6 +2231,18 @@ export class WebviewSyncController {
         // 卡片同消息通道。消费者回报是否消费；两者均未命中才释放来源
         // 租约，避免未命中的浮层提前释放仍应交给卡片的成功回包。
         const consumed = notifyHoverResult(message) || this.embedCards?.notifyResult(message)
+        // T06（#355）悬停只读句柄注册：浮层成功消费 markdown/text 载荷
+        // 时登记（快照为读取到的目标文本；浮层关闭经 onPopupClosed 注销）
+        if (consumed && message.ok && this.addonViews &&
+            (message.contentKind === undefined || message.contentKind === 'markdown' || message.contentKind === 'text')) {
+          this.addonViews.registerReadonly({
+            viewType: 'hover',
+            instanceId: `hover:${message.instanceId}`,
+            targetDocUri: `file:///${message.target.fsPath.replace(/\\/g, '/')}`,
+            text: message.text,
+            version: message.version,
+          })
+        }
         this.diagnostics.record('hover.applied', { reqId: message.reqId, instanceId: message.instanceId,
           consumed: consumed === true })
         if (!consumed && message.ok && message.sourceLeaseId !== undefined && this.sessionId && this.docUri) {
