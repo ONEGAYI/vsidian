@@ -30,6 +30,7 @@ import type {
 } from '../shared/addonPage'
 import type { AddonViewHandle, AddonViewsFacet } from '../shared/addonEditApi'
 import type { AddonViewsRuntime } from './addonViews'
+import type { AddonCommandsRuntime } from './addonCommands'
 
 /** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
  *  会追加新条目，装载器按「本次装载期间注册 + 未消费」规则取用） */
@@ -74,6 +75,9 @@ export interface AddonPageLoaderEnv {
   /** T06（#355）统一视图注册表的操作面（编辑器页由 main.ts 构造注入；
    *  省略时 SDK 不提供 views 面） */
   addonViews?: AddonViewsRuntime
+  /** T10（#359）命令与菜单注册表（编辑器页由 main.ts 构造注入；省略时
+   *  SDK 不提供 commands/menus 面，releaseLoad 时亦不做回收） */
+  addonCommands?: AddonCommandsRuntime
   /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
    *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
   attachExtensions?: (extension: Extension[] | null) => void
@@ -257,6 +261,29 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
       experimental: { cm6: env.cm6 },
       ...(viewsFacet ? { views: viewsFacet } : {}),
+      ...(env.addonCommands && page === 'editor' ? {
+        commands: {
+          register: (def, handler) => {
+            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+              return { ok: false, reason: 'released', dispose: () => {} }
+            }
+            return env.addonCommands!.registerCommand(loadRecord.addonId, loadRecord.generation, def, handler)
+          },
+        },
+        menus: {
+          registerItem: (def) => {
+            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+              return { ok: false, reason: 'released', dispose: () => {} }
+            }
+            return env.addonCommands!.registerMenuItem(loadRecord.addonId, def, (commandId) => {
+              // 菜单执行回调只在装载在场时有效（释放后的菜单项随 cleanup
+              // 撤下——不会迟到；守卫是防御性复核）
+              if (!active.has(loadRecord.addonId)) return
+              env.addonCommands!.execute(commandId)
+            })
+          },
+        },
+      } : {}),
       registerExtension: (extension) => {
         if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
           return false
@@ -348,6 +375,15 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
    */
   const releaseLoad = (loadRecord: ActiveLoad, ended: 'released' | 'faulted', reason?: string): { disposals: number; releasedRequests: number } => {
     active.delete(loadRecord.addonId)
+    // T10（#359）命令与菜单整组件回收（本页闭环——不依赖宿主消息到达）：
+    // 撤命令、菜单与运行期操作表，并向宿主上报空表
+    if (env.addonCommands) {
+      try {
+        env.addonCommands.releaseAddon(loadRecord.addonId)
+      } catch {
+        // 回收异常不阻断其余释放路径
+      }
+    }
     let disposals = 0
     for (const callback of loadRecord.disposeCallbacks.splice(0)) {
       try {

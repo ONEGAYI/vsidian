@@ -1,0 +1,22 @@
+{
+  "name": "addon-t10",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T10 Commands & Menus)",
+  "description": "Integration fixture: Vsidian add-on consuming the public commands/menus SDK on the editor page (T10, #359).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-t10.stats", "title": "Fixture T10: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-t10.queue", "title": "Fixture T10: queue a page command" },
+      { "command": "vsidian-test-fixture.addon-t10.collect", "title": "Fixture T10: collect page results" },
+      { "command": "vsidian-test-fixture.addon-t10.reset", "title": "Fixture T10: reset queues" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

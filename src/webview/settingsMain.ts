@@ -18,6 +18,7 @@ import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot
 import { installTooltipCard } from './tooltipCard'
 import { isTrustedHostMessageSource } from './untrustedFrame'
 import { isHostToWebview } from '../shared/protocol'
+import { setRuntimeOperations } from '../shared/keybindings'
 import './settingsPage.css'
 
 declare function acquireVsCodeApi(): {
@@ -106,6 +107,10 @@ vscode.postMessage({ kind: 'addons.get' })
 // #353 T04 基础设置区状态：同「装载即拉取」模式（addons.settingsState
 // 应答；定义注册/成功保存/设置区开合后宿主推送回显）
 vscode.postMessage({ kind: 'addons.settingsGet' })
+// #359 T10 组件命令目录：同「装载即拉取」模式（addons.commandCatalog 应
+// 答；命令注册/撤销/停用回收后宿主推送）——快捷键分页据此合并展示组件
+// 命令（统一快捷键管理），目录更新经 setRuntimeOperations 进合并视图
+vscode.postMessage({ kind: 'addons.commandCatalogGet' })
 // #351 T02 装载器就绪上报（设置页 webview 安装装载器后与面板重载后各发
 // 一次）：宿主按当前期望装载清单幂等推送组件设置页指令（addon.load）
 vscode.postMessage({ kind: 'addonPage.ready' })
@@ -122,6 +127,22 @@ window.addEventListener('message', (event) => {
   // 代次与释放由装载器自持；指令只在 trusted 桥消息内到达）
   if (isHostToWebview(event.data) && event.data.kind === 'addonPage.directive') {
     addonLoader.handleDirective(event.data.directive)
+    return
+  }
+  // #359 T10 组件命令目录：合并视图更新 + 快捷键分页重渲染（设置页自身
+  // 不执行组件命令——命令回调在编辑器页；此处只承载统一键位管理展示）
+  if (isHostToWebview(event.data) && event.data.kind === 'addons.commandCatalog') {
+    setRuntimeOperations(event.data.commands.map((report) => ({
+      id: report.commandId,
+      command: report.commandId,
+      titleKey: 'command.find.title',
+      titleOverride: report.title,
+      addonId: report.addonId,
+      mode: report.mode,
+      writes: report.writes,
+      defaults: [...report.defaults],
+    })))
+    keybindings.handleCatalogChanged()
     return
   }
   view.handleHostMessage(event.data)

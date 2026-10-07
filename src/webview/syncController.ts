@@ -461,6 +461,9 @@ export class WebviewSyncController {
   /** T06（#355）统一视图注册表（main.ts 构造注入；init 后注册主正文句柄，
    *  unmount 注销；缺省不注册） */
   private addonViews: import('./addonViews').AddonViewRegistry | undefined
+  /** #359 T10 组件命令注册表（main.ts 构造注入；快捷键本地分支与宿主回发
+   *  共用；缺省不路由 addon 命令） */
+  private addonCommands: import('./addonCommands').AddonCommandsRuntime | undefined
   private sessionId = ''
   private docUri = ''
   /** 实例存在前的持久化初值兜底（persistState 在 mount 前被调用时使用） */
@@ -946,6 +949,11 @@ export class WebviewSyncController {
       else if (id === 'findSelectPrevious') { if (!embedBlocked()) this.runOccurrenceSelect('prev') }
       else if (id === 'findSkipCurrent') { if (!embedBlocked()) this.runOccurrenceSelect('skip') }
       else if (id === 'findAllOccurrences') { if (!embedBlocked()) this.runOccurrenceSelect('all') }
+      // #359 T10 附加组件命令：本地分支直执行（回调在本页，不出站宿主往返
+      // ——与词移动/选词族同款先例；router 已按命令声明的 mode/writes 过滤
+      // 路由，模式与写门控在此不重复）。命令面板入口经宿主 executeCommand
+      // → addonCommand.execute 回发与本入口共用 runAddonCommand
+      else if (this.addonCommands?.hasCommand(id)) this.runAddonCommand(id)
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -1962,6 +1970,30 @@ export class WebviewSyncController {
     }
   }
 
+  /** #359 T10：挂接组件命令注册表（main.ts 构造后注入；快捷键本地分支与
+   *  宿主 addonCommand.execute 回发两入口共用 runAddonCommand） */
+  attachAddonCommands(registry: import('./addonCommands').AddonCommandsRuntime): void {
+    this.addonCommands = registry
+  }
+
+  /** #359 T10：执行附加组件命令——模式复核（命令声明的生效模式 vs 当前
+   *  视图模式；快捷键路由已过滤，此处兜底宿主命令面板入口）后调组件回调。
+   *  回调异常由注册表吞掉留痕（键路由与宿主回发不因组件代码断链）。 */
+  runAddonCommand(commandId: string): boolean {
+    const registry = this.addonCommands
+    if (!registry) {
+      return false
+    }
+    const mode = registry.commandMode(commandId)
+    if (mode === undefined) {
+      return false
+    }
+    if (mode !== 'both' && mode !== this.viewMode) {
+      return false
+    }
+    return registry.execute(commandId) === 'executed'
+  }
+
   /** 主正文句柄注册（init/attach 时 docUri 与 live 实例均在场的时点） */
   private registerMainAddonView(): void {
     if (!this.addonViews || !this.live) {
@@ -2687,6 +2719,12 @@ export class WebviewSyncController {
           case 'findSkipCurrent': this.runOccurrenceSelect('skip'); break
           case 'findAllOccurrences': this.runOccurrenceSelect('all'); break
         }
+        break
+      case 'addonCommand.execute':
+        // #359 T10 组件命令执行转发（宿主命令面板入口：宿主 VSCode 命令
+        // → addonCommand.execute 回发；快捷键入口在 router 本地分支直达，
+        // 两入口共用 runAddonCommand——含命令声明生效模式的复核）
+        this.runAddonCommand(message.commandId)
         break
       case 'sidebar.test.click': {
         // 测试钩子（#53）：点击真实侧栏切换按钮（与用户点击同一处理器；
@@ -9507,6 +9545,11 @@ export class WebviewSyncController {
           separatorCount: contextMenuEl.querySelectorAll(
             `:scope > .${CONTEXT_MENU_CLASS_NAMES.separator}`).length,
           disabledCount: contextMenuEl.querySelectorAll('button:disabled').length,
+          // #359 T10：组件菜单项观测（data-vsidian-command 含点 = 命名空间
+          // 运行期项——集成断言组件簇在场/回收的绘制层证据）
+          addonCommands: [...new Set([...contextMenuEl.querySelectorAll<HTMLButtonElement>(
+            `button[data-vsidian-command]`)].map((button) => button.dataset['vsidianCommand'] ?? '')
+            .filter((command) => command.includes('.')))],
         }
       : undefined
     // #376 T01 双链联想候选绘制：document 级浮层（不在 #app 内），可见性

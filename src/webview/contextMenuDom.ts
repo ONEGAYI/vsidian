@@ -150,7 +150,8 @@ export function buildMenuDom(
     }
     const label = document.createElement('span')
     label.className = names.label
-    label.textContent = resolveLabel(def.labelKey)
+    // #359 T10：显式文字（附加组件项的自由文本）优先于字典键取词
+    label.textContent = def.label !== undefined ? def.label : resolveLabel(def.labelKey)
     btn.appendChild(label)
     if (def.hint !== undefined) {
       const hint = document.createElement('span')

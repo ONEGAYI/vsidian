@@ -179,6 +179,15 @@ SDK 载体建议是由主仓库生成声明、最小页面入口辅助代码和�
 
 菜单、按钮和面板通过所属注册句柄新增。稳定 ID 统一加组件命名空间；注册内置 ID、同名替换或修改别的组件贡献明确拒绝。设置页整体导航和内置菜单的归属仍由 Vsidian 管理。
 
+**已实施（T10 #359，2026-10-07）**。接口形状随消费样例冻结如下，事实源 `src/shared/addonCommands.ts`（形状与校验）+ `src/webview/addonCommands.ts`（编辑器页注册表）+ `src/host/addons/addonCommandService.ts`（宿主目录与命令面板命令）：
+
+- SDK 面（仅编辑器页；设置页为 undefined）：`commands.register(def, handler)`——def 为 `{ id, title, mode, writes?, defaultBindings? }`（title 是自由文本，不进 Vsidian 内置字典）；`menus.registerItem(def)`——def 为 `{ id, label, iconKey?, order?, command?, when?, enable? }`（iconKey 须在平台图标 key 表；when/enable 谓词输入为打开菜单时采集的结构化快照）。均返回 `{ ok, reason?, dispose }`。
+- 命名空间与拒绝：命名空间 ID 由平台注入（`<组件ID>.<局部ID>`），局部 ID 禁点号（含点即伪造跨组件/内置身份的尝试）——同名注册（duplicate-command）、Tab 默认绑定（tab-forbidden，#125 固定链）、菜单 label 空/iconKey 未登记等均为明确拒绝码（普通 API 拒绝不算故障）；不提供任何覆写/隐藏/接管内置菜单项的入口。
+- 统一快捷键管理：组件命令进 `KeybindingOperations` 合并视图（运行期操作表 `setRuntimeOperations`，与编译期内置表合并供冲突检查/生效绑定/路由/设置页全链消费）；键位与内置同一存储（键 = 命名空间 ID，存储净化保留含点键——组件不在场时用户绑定与显式清空不丢）；设置页快捷键分页合并展示（行名与描述标注组件 ID 归属）。三环境（编辑器 webview/设置页/宿主）各持运行期表，经 `addonCommands.report`（全量对账）与 `addons.commandCatalog`（目录推送）同步。
+- 执行链三入口共用组件回调：快捷键 router 本地分支（mode/writes 按声明过滤路由）；宿主命令面板（`vscode.commands` 注册 + 活动面板转发 `addonCommand.execute`，webview 复核声明模式）；组件菜单项点击（组件簇 `addon.<组件ID>` 追加内置三簇之后，handler 优先分派路径）。
+- 停用/故障/代次释放：装载器 releaseLoad 在 webview 侧闭环整组件回收（命令+菜单+运行期表+空表上报）；宿主侧 runtime 状态对账回收 VSCode 命令与目录——不影响内置命令与菜单，不清用户键位。
+- 消费样例：夹具 `test/fixtures/addon-v02/addon/t10Editor.ts` 与集成/浏览器套件（`test/integration/suite/addonT10Cases.ts`、`test/browser/addonT10Commands.mjs`）。已实现部分仍是草案形状，不冒充已发布稳定 API。
+
 ### 5.5 设置
 
 `settings.registerDefinitions` 接收可序列化的设置定义。值为 JSON 普通值、数组或对象；有限数、结构约束、默认值和必要展示信息由定义说明，不通过函数序列化校验器。

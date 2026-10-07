@@ -94,6 +94,9 @@ export interface MenuItemDescriptor {
   /** 组内排序键（稳定排序） */
   order: number
   labelKey: MessageKey
+  /** #359 T10 显式文字（附加组件菜单项的自由文本——组件文案不进 Vsidian
+   *  内置字典；渲染时优先于 labelKey 取词，内置表不用此字段） */
+  label?: string
   /** 命令标识（formatOperations id / 内建命令名 / 运行期自定义） */
   command: string
   /** 图标 key（须存在于 CONTEXT_MENU_ICON_KEYS；与 badge 互斥） */
@@ -368,6 +371,8 @@ export function __resetContextMenuRegistryForTest(): void {
 export interface RenderedMenuItem {
   id: string
   labelKey: MessageKey
+  /** #359 T10 显式文字（优先于 labelKey；附加组件项用） */
+  label?: string
   command: string
   /** 所属组（DOM 层在子菜单内按组边界落分隔线的判定键；顶级分组由 buildMenuModel 聚合） */
   group: string
@@ -414,6 +419,7 @@ function renderDef(
   const item: RenderedMenuItem = {
     id: def.id,
     labelKey: def.labelKey,
+    ...(def.label !== undefined ? { label: def.label } : {}),
     command: def.command,
     group: def.group,
     danger: def.danger === true,

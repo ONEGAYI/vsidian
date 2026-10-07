@@ -12,6 +12,7 @@ import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
 import { addonT06Cases } from './addonT06Cases'
+import { addonT10Cases } from './addonT10Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -892,12 +893,15 @@ interface ViewState {
       boxShadowValues: string[]
       borderLeftWidthValues: string[]
     } | null
-    /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据 */
+    /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据；
+     *  #359 T10 起补组件菜单项命令清单（命名空间运行期项——组件簇在场/
+     *  回收的绘制层证据） */
     contextMenu?: {
       visible: boolean
       display: string | null
       separatorCount: number
       disabledCount: number
+      addonCommands?: string[]
     }
     /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性、
      *  行计数与键盘高亮行/状态行文本（会话关闭时缺省）；#377 T02 起补
@@ -10327,14 +10331,19 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const clipboardText = () => vscode.env.clipboard.readText()
 
     // 1) 普通段打开菜单：绘制层断言（可见性 + 三簇两条分组线 + display）
+    //    #359 T10 起附加组件菜单项以独立组件簇追加（addon.<组件ID>，排内置
+    //    三簇之后）——全 suite 语境下夹具组件在场时分隔线数 = 2 + 组件簇数，
+    //    断言口径改为「至少两条且每多一条都来自组件簇」（内置三簇不因组件
+    //    注册被合并/拆分）
     await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('右键目标段落') })
     const normal = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
     const normalMenu = normal.paint!.contextMenu!
     assert(normalMenu.visible === true,
       `绘制层：菜单中心点应被命中（实际 ${JSON.stringify(normalMenu)}）`)
     assert(normalMenu.display !== 'none', '菜单应非 display:none')
-    assert(normalMenu.separatorCount === 2,
-      `三簇应恰两条分组线（实际 ${normalMenu.separatorCount}）`)
+    assert(normalMenu.separatorCount >= 2 &&
+      (normalMenu.separatorCount === 2 || (normalMenu.addonCommands ?? []).length > 0),
+      `内置三簇应有两条分组线；更多分隔线仅可来自附加组件簇（实际 ${normalMenu.separatorCount}，组件命令 ${JSON.stringify(normalMenu.addonCommands ?? [])}）`)
     // 无选区：仅剪切/复制置灰（cut/copy 两项）
     const normalDisabled = normalMenu.disabledCount
     assert(normalDisabled === 2, `无选区普通段：仅剪切/复制置灰（实际 ${normalDisabled}）`)
@@ -17347,4 +17356,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
   // 断言面见 addonT06Cases.ts 头注）
   ...addonT06Cases,
+  // #359 T10：自己的命令、菜单与统一快捷键（夹具组件经公开 SDK 注册，
+  // 断言面见 addonT10Cases.ts 头注）
+  ...addonT10Cases,
 ]

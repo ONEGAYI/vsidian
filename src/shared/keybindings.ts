@@ -202,6 +202,58 @@ export const KEYBINDING_OPERATIONS: readonly KeybindingOperation[] = [
 const byId = new Map(KEYBINDING_OPERATIONS.map((op) => [op.id, op]))
 export type KeybindingOverrides = Record<string, string[]>
 
+// ---- #359 T10 运行期操作层（附加组件命令）：编译期表之上的进程内扩展 ----
+// 组件命令经页面 SDK 注册（编辑器 webview）或宿主目录推送（设置页 webview /
+// 宿主侧）喂入本表；操作进入统一快捷键管理（冲突检查、生效绑定、路由与
+// 设置页全链消费合并视图 allKeybindingOperations()）。三环境（编辑器页、
+// 设置页、宿主）各持一份实例，由各自通道同步——本模块不做跨端广播。
+
+/** 运行期操作条目（附加组件命令；titleOverride 优先于 titleKey 取词——
+ *  组件文案是自由文本，不伪造 MessageKey 进内置字典） */
+export interface RuntimeKeybindingOperation extends KeybindingOperation {
+  /** 归属组件 ID（命名空间来源；设置页归属呈现用） */
+  readonly addonId: string
+  /** 组件提供的操作名（自由文本） */
+  readonly titleOverride: string
+}
+
+const runtimeOps = new Map<string, RuntimeKeybindingOperation>()
+
+/** 全量替换运行期操作表（幂等对账——目录推送与注册表同步的公共入口） */
+export function setRuntimeOperations(ops: readonly RuntimeKeybindingOperation[]): void {
+  runtimeOps.clear()
+  for (const op of ops) {
+    runtimeOps.set(op.id, op)
+  }
+}
+
+/** 当前运行期操作快照 */
+export function runtimeOperations(): readonly RuntimeKeybindingOperation[] {
+  return [...runtimeOps.values()]
+}
+
+/** 合并视图（编译期内置 + 运行期组件命令）：统一管理的单一读取面 */
+export function allKeybindingOperations(): readonly KeybindingOperation[] {
+  return [...KEYBINDING_OPERATIONS, ...runtimeOps.values()]
+}
+
+/** 测试钩子：还原运行期层 */
+export function __resetRuntimeOperationsForTest(): void {
+  runtimeOps.clear()
+}
+
+/** 合并视图的 id 查找（内置优先——命名空间 id 含点，与内置无点 id 不撞） */
+function operationById(id: string): KeybindingOperation | undefined {
+  return byId.get(id) ?? runtimeOps.get(id)
+}
+
+/** #359 T10：chord 是否含 Tab 键本体（含 chord 任一段）——Tab 属情境输入
+ *  固定链（#125：围栏越界 → 表格导航 → 行缩进），任何命令绑定 Tab 都会被
+ *  keybindingRouter 先于 CM6 keymap 拦截而破坏该链，注册期即拒。 */
+export function chordContainsTab(chord: string): boolean {
+  return chord.split(' ').some((step) => step.split('+').includes('tab'))
+}
+
 const modifiers = new Set(['ctrl', 'alt', 'shift', 'meta'])
 const keyAliases: Record<string, string> = {
   control: 'ctrl', cmd: 'meta', command: 'meta', option: 'alt', esc: 'escape',
@@ -227,12 +279,12 @@ export function normalizeChord(value: string): string | null {
 }
 
 export function isKeybindingOperationId(value: unknown): value is string {
-  return typeof value === 'string' && byId.has(value)
+  return typeof value === 'string' && (byId.has(value) || runtimeOps.has(value))
 }
 
 /** 缺键=跟随当前默认；空数组=明确禁用；非空=用户覆盖。 */
 export function getEffectiveBindings(overrides: KeybindingOverrides, operationId: string): readonly string[] {
-  const op = byId.get(operationId)
+  const op = operationById(operationId)
   if (!op) return []
   return Object.prototype.hasOwnProperty.call(overrides, operationId)
     ? overrides[operationId] : op.defaults
@@ -242,7 +294,11 @@ export function sanitizeStoredOverrides(stored: unknown): KeybindingOverrides {
   const result: KeybindingOverrides = {}
   if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return result
   for (const [id, value] of Object.entries(stored)) {
-    if (!byId.has(id) || !Array.isArray(value)) continue
+    // #359 T10：命名空间键（含点）即附加组件命令——组件不在场（停用/未装）
+    // 时也保留用户绑定与显式清空（「重启保留」契约）；无点未知键仍按垃圾
+    // 剔除（编译期表 + 运行期表均未知）
+    if (!byId.has(id) && !runtimeOps.has(id) && !id.includes('.')) continue
+    if (!Array.isArray(value)) continue
     const bindings = value.map((item) => typeof item === 'string' ? normalizeChord(item) : null)
     if (bindings.some((item) => !item) || new Set(bindings).size !== bindings.length) continue
     result[id] = bindings as string[]
@@ -258,10 +314,10 @@ function chordOverlap(a: string, b: string): boolean {
 }
 
 export function findBindingConflicts(overrides: KeybindingOverrides, operationId: string, chord: string): string[] {
-  const operation = byId.get(operationId)
+  const operation = operationById(operationId)
   const normalized = normalizeChord(chord)
   if (!operation || !normalized) return []
-  return KEYBINDING_OPERATIONS.filter((other) => other.id !== operationId &&
+  return allKeybindingOperations().filter((other) => other.id !== operationId &&
     modesOverlap(operation.mode, other.mode) &&
     getEffectiveBindings(overrides, other.id).some((binding) => chordOverlap(binding, normalized)))
     .map((other) => other.id)
@@ -280,12 +336,13 @@ export const KEYBINDING_FILTER_KINDS: readonly KeybindingFilterKind[] =
  */
 export function findConflictedOperationIds(overrides: KeybindingOverrides): Set<string> {
   const conflicted = new Set<string>()
-  for (let i = 0; i < KEYBINDING_OPERATIONS.length; i++) {
-    const source = KEYBINDING_OPERATIONS[i]
+  const operations = allKeybindingOperations()
+  for (let i = 0; i < operations.length; i++) {
+    const source = operations[i]
     const sourceBindings = getEffectiveBindings(overrides, source.id)
     if (!sourceBindings.length) continue
-    for (let j = i + 1; j < KEYBINDING_OPERATIONS.length; j++) {
-      const other = KEYBINDING_OPERATIONS[j]
+    for (let j = i + 1; j < operations.length; j++) {
+      const other = operations[j]
       if (!modesOverlap(source.mode, other.mode)) continue
       const otherBindings = getEffectiveBindings(overrides, other.id)
       if (sourceBindings.some((chord) => otherBindings.some((candidate) => chordOverlap(chord, candidate)))) {
@@ -317,7 +374,7 @@ export type BindingChangeResult = { ok: true; overrides: KeybindingOverrides } |
 
 export function applyBindingChange(overrides: KeybindingOverrides, operationId: string,
   bindings: readonly string[], replaceConflicts: boolean): BindingChangeResult {
-  if (!byId.has(operationId)) return { ok: false, reason: 'invalid', conflicts: [] }
+  if (!isKeybindingOperationId(operationId)) return { ok: false, reason: 'invalid', conflicts: [] }
   const normalized = bindings.map(normalizeChord)
   if (normalized.some((v) => !v) || new Set(normalized).size !== normalized.length ||
     normalized.some((a, index) => normalized.some((b, other) => index !== other && chordOverlap(a!, b!)))) {
@@ -339,8 +396,9 @@ export function resolveKeybinding(overrides: KeybindingOverrides, mode: 'live' |
   const normalized = normalizeChord(chord)
   if (!normalized) return { kind: 'none' }
   // 用户覆盖优先于后来加入/修改的默认值，升级不能让新默认抢走旧自定义。
+  const operations = allKeybindingOperations()
   for (const custom of [true, false]) {
-    for (const op of KEYBINDING_OPERATIONS) {
+    for (const op of operations) {
       if (Object.prototype.hasOwnProperty.call(overrides, op.id) !== custom ||
         (op.mode !== 'both' && op.mode !== mode) || (!allowWrites && op.writes)) continue
       for (const binding of getEffectiveBindings(overrides, op.id)) {

@@ -6,7 +6,7 @@
 // 筛选签（冲突/全部/已分配/由我分配/未分配）、每操作单行（键位牌在右、
 // 清空/恢复默认收进 ⋯ 菜单）、点 ＋ 原位变 ✓ 就地出现键位捕获签。
 import {
-  KEYBINDING_OPERATIONS, KEYBINDING_FILTER_KINDS, applyBindingChange,
+  KEYBINDING_FILTER_KINDS, allKeybindingOperations, applyBindingChange,
   findConflictedOperationIds, formatBindingLabel, getEffectiveBindings,
   operationMatchesFilter, type KeybindingFilterKind, type KeybindingOverrides,
 } from '../shared/keybindings'
@@ -16,10 +16,16 @@ import type { SettingsPageBridge, SettingsPageSection } from './settingsPageView
 import { keyStep } from './keybindingRouter'
 import { isHostToWebview } from '../shared/protocol'
 
-/** 冲突文案等的操作名取词（id 为运行时来源，未登记 id 回退显示 id 本身） */
+/** 冲突文案等的操作名取词（id 为运行时来源，未登记 id 回退显示 id 本身）。
+ *  #359 T10：合并视图（内置 + 组件命令）取操作名——组件命令用注册的自由
+ *  文本（titleOverride），内置走字典键 */
+function titleOf(op: { readonly titleKey: MessageKey; readonly titleOverride?: string }): string {
+  return op.titleOverride ?? t(op.titleKey)
+}
+
 function titleOfId(id: string): string {
-  const op = KEYBINDING_OPERATIONS.find((item) => item.id === id)
-  return op ? t(op.titleKey) : id
+  const op = allKeybindingOperations().find((item) => item.id === id)
+  return op ? titleOf(op) : id
 }
 
 /**
@@ -74,12 +80,19 @@ export class KeybindingSettingsSection implements SettingsPageSection {
   get title(): string { return t('keybindingSettings.title') }
   get description(): string { return t('keybindingSettings.description') }
   get entries() {
-    return KEYBINDING_OPERATIONS.map((op) => ({
-      id: op.id,
-      title: t(op.titleKey),
-      description: `${t(op.mode === 'both' ? 'keybindingSettings.modeBoth'
-        : op.mode === 'live' ? 'keybindingSettings.modeLive' : 'keybindingSettings.modeReading')} · ${op.command}`,
-    }))
+    // #359 T10：组件命令（运行期操作）一并进入分页条目——描述列以组件 ID
+    // 标注归属（命名空间即归属，无需额外文案）
+    return allKeybindingOperations().map((op) => {
+      const runtime = (op as { addonId?: string }).addonId
+      const modeText = t(op.mode === 'both' ? 'keybindingSettings.modeBoth'
+        : op.mode === 'live' ? 'keybindingSettings.modeLive' : 'keybindingSettings.modeReading')
+      const suffix = runtime !== undefined ? ` · ${op.command} · ${runtime}` : ` · ${op.command}`
+      return {
+        id: op.id,
+        title: titleOf(op),
+        description: `${modeText}${suffix}`,
+      }
+    })
   }
 
   private overrides: KeybindingOverrides = {}
@@ -195,6 +208,14 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       this.statusEl = undefined
       this.searchEl = undefined
     }
+  }
+
+  /** #359 T10：组件命令目录变化（addons.commandCatalog 推送/拉取应答后由
+   *  settingsMain 调用——setRuntimeOperations 已更新合并视图，此处重渲染
+   *  行列表与筛选签使组件命令立即可见） */
+  handleCatalogChanged(): void {
+    this.renderFilters()
+    this.renderRows()
   }
 
   handleHostMessage(message: unknown): void {
@@ -494,8 +515,10 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     let locatedRow: HTMLElement | undefined
     const conflicted = findConflictedOperationIds(this.overrides)
     const query = this.query.toLocaleLowerCase()
-    const filtered = KEYBINDING_OPERATIONS.filter((op) =>
-      t(op.titleKey).toLocaleLowerCase().includes(query) &&
+    // #359 T10：行列表消费合并视图（内置 + 组件命令——catalog 推送后
+    // setRuntimeOperations 更新，重渲染即呈现）；行名追加组件 ID 标注归属
+    const filtered = allKeybindingOperations().filter((op) =>
+      titleOf(op).toLocaleLowerCase().includes(query) &&
       operationMatchesFilter(this.overrides, op.id, this.filter, conflicted) &&
       (!this.keyQuery || getEffectiveBindings(this.overrides, op.id).some((binding) =>
         binding === this.keyQuery || binding.startsWith(`${this.keyQuery} `))))
@@ -508,9 +531,11 @@ export class KeybindingSettingsSection implements SettingsPageSection {
         locatedRow = row
       }
       const name = el('div', 'vsidian-keybindings-row-name')
-      name.append(el('strong', '', t(op.titleKey)),
+      const addonId = (op as { addonId?: string }).addonId
+      name.append(el('strong', '', titleOf(op)),
         el('span', 'vsidian-keybindings-mode', t(op.mode === 'both' ? 'keybindingSettings.modeLiveReading'
-          : op.mode === 'live' ? 'keybindingSettings.modeLive' : 'keybindingSettings.modeReading')))
+          : op.mode === 'live' ? 'keybindingSettings.modeLive' : 'keybindingSettings.modeReading')
+          + (addonId !== undefined ? ` · ${addonId}` : '')))
       row.append(name)
       const bindings = getEffectiveBindings(this.overrides, op.id)
       const controls = el('div', 'vsidian-keybindings-row-controls')

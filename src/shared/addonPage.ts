@@ -16,6 +16,12 @@
 // - 代次硬边界：旧工厂注册、旧消息、迟到结果不能接入新代次。
 import type { Extension } from '@codemirror/state'
 import type { AddonViewsFacet } from './addonEditApi'
+import type {
+  AddonCommandDefinition,
+  AddonCommandRegisterResult,
+  AddonMenuItemDefinition,
+} from './addonCommands'
+import type { MenuContextSnapshot } from './contextMenu'
 
 /** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。值为本页 bundle
  *  内的模块命名空间对象——装载器由页面产物自身构造，因此与生产控制器
@@ -24,6 +30,31 @@ export interface AddonCm6Runtime {
   readonly state: typeof import('@codemirror/state')
   readonly view: typeof import('@codemirror/view')
 }
+
+/** T10（#359）SDK 命令面（仅编辑器页）：注册自己的可绑定命令——操作进入
+ *  统一快捷键管理（冲突检查/绑定/清空/恢复），命令面板经宿主命令可达。
+ *  命名空间由平台注入（`<addonId>.<localId>`）；同名注册与非法形状明确
+ *  拒绝（普通 API 拒绝，不算故障）。 */
+export interface AddonSdkCommandsFacet {
+  register(def: AddonCommandDefinition, handler: () => void): AddonCommandRegisterResult & { dispose(): void }
+}
+
+/** T10（#359）SDK 菜单面（仅编辑器页）：新增自己的右键菜单项——组件簇
+ *  （addon.<组件 ID>）追加在内置三簇之后；label 自由文本、iconKey 须在
+ *  平台图标 key 表。不提供覆写/隐藏/接管内置菜单项的任何入口（ADR-0012
+ *  菜单边界）。 */
+export interface AddonSdkMenusFacet {
+  registerItem(def: AddonMenuItemDefinition): {
+    ok: boolean
+    reason?: string
+    /** 命名空间菜单项 ID（ok 时给出） */
+    id?: string
+    dispose(): void
+  }
+}
+
+/** 菜单谓词输入（when/enable 的结构化快照；与内核 MenuContextSnapshot 同源） */
+export type { MenuContextSnapshot }
 
 /** 通道请求结果：普通拒绝与组件异常分开（装载器只报协议性结束态；
  *  rejected = 宿主侧未注册 topic 或业务拒绝；timeout/released 由装载器
@@ -44,6 +75,10 @@ export interface VsidianAddonPageSdk {
    *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子
    *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */
   readonly views?: AddonViewsFacet
+  /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */
+  readonly commands?: AddonSdkCommandsFacet
+  /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */
+  readonly menus?: AddonSdkMenusFacet
   /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */
   registerExtension(extension: Extension): boolean
   /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */

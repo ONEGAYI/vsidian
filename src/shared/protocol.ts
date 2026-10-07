@@ -937,6 +937,14 @@ export type HostToWebview =
    *  目标面板的 asWebviewUri 铸造，资源许可面随指令同步刷新。webview 侧
    *  装载器安装后经 addonPage.ready 上报，宿主按 desired 幂等推送 */
   | { kind: 'addonPage.directive'; directive: import('./addonPage').AddonPageDirective }
+  /** #359 T10 组件命令目录（宿主 → webview）：当前全部在场组件命令表
+   *  （设置页快捷键分页合并展示与冲突检查的消费面；编辑器面板不消费）。
+   *  设置页经 addons.commandCatalogGet 拉取，宿主目录变化后主动推送 */
+  | { kind: 'addons.commandCatalog'; commands: import('./addonCommands').AddonCommandReport[] }
+  /** #359 T10 组件命令执行指令（宿主 → 编辑器 webview）：命令面板/宿主
+   *  侧命令入口转发到活动面板执行（webview 按命令声明的生效模式复核后
+   *  调组件回调；快捷键入口在 webview 本地分支直接执行不经本消息） */
+  | { kind: 'addonCommand.execute'; commandId: string }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -1929,6 +1937,14 @@ export type WebviewToHost =
   /** #351 T02 页面装载器出站消息（内层为 AddonPageOutbound：loaded/
    *  unloaded/faulted/channel.request）；宿主路由通道请求并回执 */
   | { kind: 'addonPage.outbound'; outbound: import('./addonPage').AddonPageOutbound }
+  /** #359 T10 组件命令表全量对账上报（编辑器 webview → 宿主）：sdk.commands
+   *  注册/撤销/整组件回收后各发一次该组件当前全表（空表 = 全撤）；宿主据
+   *  此注册命令面板命令并推送设置页目录。commands 为序列化安全的
+   *  AddonCommandReport 数组（无函数） */
+  | { kind: 'addonCommands.report'; addonId: string; generation: number; commands: import('./addonCommands').AddonCommandReport[] }
+  /** #359 T10 设置页拉取组件命令目录（宿主以 addons.commandCatalog 应答；
+   *  宿主目录变化时亦主动推送，webview 幂等对账） */
+  | { kind: 'addons.commandCatalogGet' }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -4392,6 +4408,23 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addonPage.outbound':
       // #351 T02 出站消息内层守卫（单一事实源在 shared/addonPage）
       return isAddonPageOutbound(v.outbound)
+    case 'addonCommands.report':
+      // #359 T10 组件命令表全量对账：形态守卫（命令 id 唯一性由 webview
+      // 注册表保证——同 localId 拒绝重复注册）
+      return (
+        isString(v.addonId) &&
+        isNonNegativeInt(v.generation) &&
+        Array.isArray(v.commands) &&
+        v.commands.every((entry) =>
+          isObject(entry) &&
+          isString(entry.commandId) && isString(entry.addonId) && isString(entry.localId) &&
+          isString(entry.title) &&
+          (entry.mode === 'live' || entry.mode === 'reading' || entry.mode === 'both') &&
+          typeof entry.writes === 'boolean' &&
+          Array.isArray(entry.defaults) && entry.defaults.every(isString))
+      )
+    case 'addons.commandCatalogGet':
+      return true
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
         (v.detail === undefined || isString(v.detail))
@@ -5254,6 +5287,19 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addonPage.directive':
       // #351 T02 装载指令内层守卫（单一事实源在 shared/addonPage）
       return isAddonPageDirective(v.directive)
+    case 'addons.commandCatalog':
+      // #359 T10 组件命令目录推送（形态与 addonCommands.report 内层同构）
+      return Array.isArray(v.commands) &&
+        v.commands.every((entry) =>
+          isObject(entry) &&
+          isString(entry.commandId) && isString(entry.addonId) && isString(entry.localId) &&
+          isString(entry.title) &&
+          (entry.mode === 'live' || entry.mode === 'reading' || entry.mode === 'both') &&
+          typeof entry.writes === 'boolean' &&
+          Array.isArray(entry.defaults) && entry.defaults.every(isString))
+    case 'addonCommand.execute':
+      // #359 T10 组件命令执行转发（命名空间命令 ID）
+      return isString(v.commandId)
     default:
       return false
   }

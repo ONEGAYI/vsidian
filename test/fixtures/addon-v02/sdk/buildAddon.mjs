@@ -85,6 +85,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't06-addon', 'dist', 'editor.js'),
       note: 't06-addon 编辑器页',
     },
+    // #359 T10：命令/菜单/快捷键夹具组件（编辑器页——commands/menus 面
+    // 注册 + 负向对照 + views 真实业务；短轮询驱动与 T06 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 't10Editor.ts'),
+      outfile: path.join(buildRoot, 't10-addon', 'dist', 'editor.js'),
+      note: 't10-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -140,6 +147,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t06Addon: {
       installDir: path.join(buildRoot, 't06-addon'),
       distDir: path.join(buildRoot, 't06-addon', 'dist'),
+    },
+    // #359 T10：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t10）
+    t10Addon: {
+      installDir: path.join(buildRoot, 't10-addon'),
+      distDir: path.join(buildRoot, 't10-addon', 'dist'),
     },
     outsideDir,
   }
