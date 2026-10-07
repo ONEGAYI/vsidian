@@ -2,8 +2,8 @@
 //
 // 生产消费链路：夹具组件 vsidian-test-fixture.addon-t07 经公开
 // registerAddon 注册编辑器页入口，其页面产物（构建桥 t07Editor.ts）经
-// 公开 SDK behaviors 面注册三个输入行为（bracket-close / dash-in-parens
-// / space-in-parens——后两者同独占组 parens-fill，space 声明
+// 公开 SDK behaviors 面注册三个输入行为（dash-fill / space-fill /
+// tilde-fill——后两者同独占组 fill，space 声明
 // joinPrevious）；行为回调与 onChanged 观察事件经 t07.event 收件箱回宿主
 // 断言。键入驱动经 _test.postToPanel 的 table.test.type（生产 CM6 事务，
 // userEvent 'input.type'——与真实键盘同一路径进入链驱动检测）；撤销经
@@ -12,7 +12,7 @@
 //
 // 覆盖票面验收：
 // - 括号处理与空格整理两个测试行为共同运行；名称缺失拒绝（夹具
-//   no-name 注册拒绝结果上报）而说明/例子缺失允许（bracket-close 带、
+//   no-name 注册拒绝结果上报）而说明/例子缺失允许（dash-fill 带、
 //   其余不带仍注册成功）。
 // - 默认序（完整键字典序）下后续行为读取前序修饰后的快照；独占组
 //   parens-fill 内按有效序首个适用者生效、其后同组不调回调（不恢复
@@ -33,9 +33,9 @@ const VIEW_TYPE = 'onegayi.vsidian.editor'
 const ADDON_ID = 'vsidian-test-fixture.addon-t07'
 const wsDir = process.env['WORKSPACE_DIR'] ?? ''
 
-const KEY_BRACKET = `${ADDON_ID}#bracket-close`
-const KEY_DASH = `${ADDON_ID}#dash-in-parens`
-const KEY_SPACE = `${ADDON_ID}#space-in-parens`
+const KEY_DASH = `${ADDON_ID}#dash-fill`
+const KEY_SPACE = `${ADDON_ID}#space-fill`
+const KEY_TILDE = `${ADDON_ID}#tilde-fill`
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -144,19 +144,30 @@ async function ensureEnabled(): Promise<void> {
   throw new Error('运行态未能恢复 enabled')
 }
 
-/** 以基态重写盘面并打开（行为链用例的可重复基线；T06 同款时序收口） */
+/** 以基态重写盘面并打开（行为链用例的可重复基线；T06 resetDocAndOpen
+ *  同款时序收口：hot-exit backup 先保存清掉 → writeFile 首建/重写 →
+ *  watcher 广播完成 → openWith → 面板就绪） */
 async function resetDocAndOpen(file: string, base: string): Promise<void> {
+  await closeAllEditors()
+  try {
+    const existing = await vscode.workspace.openTextDocument(wsUri(file))
+    if (existing.isDirty) {
+      await existing.save()
+    }
+  } catch {
+    // 文件不存在：下方 writeFile 首建
+  }
+  await vscode.workspace.fs.writeFile(wsUri(file), Buffer.from(base, 'utf8'))
+  await poll('盘面重写生效（watcher 广播完成）', async () => {
+    const d = await vscode.workspace.openTextDocument(wsUri(file))
+    return d.getText() === base ? d : undefined
+  })
   await vscode.commands.executeCommand('vscode.openWith', wsUri(file), VIEW_TYPE)
   await poll('面板就绪', async () => {
     const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSessionState', wsUri(file).toString())) as
       | { found: boolean; panels: { ready: boolean }[] }
     return state.found && state.panels.some((p) => p.ready) ? state : undefined
   })
-  const edit = new vscode.WorkspaceEdit()
-  edit.replace(wsUri(file), new vscode.Range(0, 0, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER), base)
-  await vscode.workspace.applyEdit(edit)
-  await vscode.workspace.saveAll(false)
-  await poll('基态落盘', async () => (await docText(file)) === base ? true : undefined)
 }
 
 /** 页面行为注册就绪探测（注册清单经 view.state 探针） */
@@ -174,7 +185,7 @@ async function typeAt(file: string, cursor: number, text: string): Promise<void>
   })
   await new Promise((r) => setTimeout(r, 100))
   await vscode.commands.executeCommand('onegayi.vsidian._test.postToPanel', wsUri(file).toString(), {
-    kind: 'table.test.type', text,
+    kind: 'table.test.domType', text,
   })
 }
 
@@ -192,7 +203,7 @@ async function closeAllEditors(): Promise<void> {
 /** 行为状态恢复默认（防跨用例污染；幂等） */
 async function resetBehaviorState(): Promise<void> {
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', { order: [] })
-  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_BRACKET, KEY_DASH, KEY_SPACE], disabled: false })
+  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE], disabled: false })
 }
 
 export const addonT07Cases: Array<[string, () => Promise<void>]> = [
@@ -205,46 +216,56 @@ export const addonT07Cases: Array<[string, () => Promise<void>]> = [
     await probeRegistrations(file)
 
     // 注册形状：名称缺失拒绝（no-name → invalid-registration）；
-    // 说明/例子缺失允许（dash/space 无 description 仍注册成功）
+    // 说明/例子允许缺省（space/tilde 无 examples 仍注册成功）
     const inbox = new EventInbox()
     const registered = await inbox.take((e) => e['kind'] === 'registered')
     const results = registered['results'] as Array<{ id: string; result: { ok: boolean; reason?: string } }>
     const byId = new Map(results.map((r) => [r.id, r.result]))
-    assert(byId.get('bracket-close')?.ok === true, `bracket-close 应注册成功：${JSON.stringify(results)}`)
-    assert(byId.get('dash-in-parens')?.ok === true, 'dash（无说明/例子）应注册成功')
-    assert(byId.get('space-in-parens')?.ok === true, 'space（无说明/例子）应注册成功')
+    assert(byId.get('dash-fill')?.ok === true, `dash-fill 应注册成功：${JSON.stringify(results)}`)
+    assert(byId.get('space-fill')?.ok === true, 'space（无说明/例子）应注册成功')
+    assert(byId.get('tilde-fill')?.ok === true, 'tilde（无说明/例子）应注册成功')
     assert(byId.get('<invalid-no-name>')?.ok === false && byId.get('<invalid-no-name>')?.reason === 'invalid-registration',
       `名称缺失应拒绝：${JSON.stringify(results)}`)
     await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
 
-    // 默认序（字典序 bracket → dash → space）链执行：键入 ( 后
-    // bracket 补 )，dash 见前序结果（快照含 )）插 -，space 同组被占不调
+    // 默认序（字典序 dash → space → tilde）链执行：键入 ^ 后 dash 插 -，
+    // space（组内先于 tilde 适用）读前序结果后再插空格，tilde 同组被占不调
     const chainInbox = new EventInbox()
-    await typeAt(file, 4, '(')
-    await poll('默认序修饰落地', async () => ((await docText(file)) === 'word(-)\n' ? true : undefined))
+    await typeAt(file, 4, '^')
+    try {
+      await poll('默认序修饰落地', async () => ((await docText(file)) === 'word^- \n' ? true : undefined))
+    } catch (err) {
+      const diagStats = await behaviorStats(file)
+      const diagEvents = await chainInbox.pull()
+      const text = await docText(file)
+      const paint = (await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', wsUri(file).toString(), 0)) as Record<string, unknown> | undefined
+      const history = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonHistory.t06State', wsUri(file).toString())) as unknown
+      throw new Error(`${(err as Error).message}；诊断：text=${JSON.stringify(text)} webviewText=${JSON.stringify(paint?.['text'])} stats=${JSON.stringify(diagStats)} history=${JSON.stringify(history)} events=${JSON.stringify(diagEvents)}`)
+    }
     const events = await chainInbox.settleAll()
     const behaviorEvents = events.filter((e) => e['kind'] === 'behavior') as BehaviorEvent[]
     const ids = behaviorEvents.map((e) => e['id'])
-    assert(ids.includes('bracket-close') && ids.includes('dash-in-parens'), `bracket 与 dash 应共同运行：${JSON.stringify(behaviorEvents)}`)
-    assert(!ids.includes('space-in-parens'), `独占组内 dash 适用后 space 不应被调用：${JSON.stringify(ids)}`)
-    const dashEvent = behaviorEvents.find((e) => e['id'] === 'dash-in-parens')
-    assert(String(dashEvent?.['snapshotText'] ?? '').includes(')') === true,
-      `dash 读到的快照应含 bracket 修饰结果（读取前序结果）：${JSON.stringify(dashEvent)}`)
+    assert(ids.includes('dash-fill') && ids.includes('space-fill'), `dash 与 space 应共同运行：${JSON.stringify(behaviorEvents)}`)
+    assert(!ids.includes('tilde-fill'), `独占组内 space 适用后 tilde 不应被调用：${JSON.stringify(ids)}`)
+    const spaceEvent = behaviorEvents.find((e) => e['id'] === 'space-fill')
+    assert(String(spaceEvent?.['snapshotText'] ?? '').includes('-') === true,
+      `space 读到的快照应含 dash 修饰结果（读取前序结果）：${JSON.stringify(spaceEvent)}`)
     assert(events.some((e) => e['kind'] === 'changed'), 'onChanged 观察事件应到达（通知分离）')
 
-    // 链观测：trace 两笔（bracket/dash 修饰提交），space 无
+    // 链观测：trace 两笔（dash/space 修饰提交），tilde 无
     const stats = await behaviorStats(file)
     const trace = stats?.trace ?? []
-    assert(trace.length >= 2 && trace[trace.length - 2]!.behaviorKey === KEY_BRACKET && trace[trace.length - 1]!.behaviorKey === KEY_DASH,
-      `轨迹应为 bracket→dash：${JSON.stringify(trace)}`)
+    assert(trace.length >= 2 && trace[trace.length - 2]!.behaviorKey === KEY_DASH && trace[trace.length - 1]!.behaviorKey === KEY_SPACE,
+      `轨迹应为 dash→space：${JSON.stringify(trace)}`)
     assert((stats?.counters.submitsRejected ?? 0) === 0 && (stats?.counters.callbackErrors ?? 0) === 0,
       `默认链不应有拒绝/回调异常：${JSON.stringify(stats?.counters)}`)
 
-    // 撤回单位（atomic 逐笔）：dash → bracket → 键入，3 次回基态
+    // 撤回单位：dash（atomic）+ space（joinPrevious 并入 dash 组）一次撤回，
+    // 再撤回键入——两次回基态
     await undoOnce(file)
+    await poll('joinPrevious 并组一次撤回', async () => ((await docText(file)) === 'word^\n' ? true : undefined))
     await undoOnce(file)
-    await undoOnce(file)
-    await poll('三次撤销回基态', async () => ((await docText(file)) === 'word\n' ? true : undefined))
+    await poll('撤回到键入前', async () => ((await docText(file)) === 'word\n' ? true : undefined))
     await resetBehaviorState()
   }],
 
@@ -256,57 +277,60 @@ export const addonT07Cases: Array<[string, () => Promise<void>]> = [
     await resetDocAndOpen(file, 'word\n')
     await probeRegistrations(file)
 
-    // 调序：space 提到最前（管理面等价入口写入 → 面板推送 → 即时生效）
+    // 调序：tilde 组内前置（管理面等价入口写入 → 面板推送 → 即时生效）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', {
-      order: [KEY_SPACE, KEY_BRACKET, KEY_DASH],
+      order: [KEY_TILDE, KEY_DASH, KEY_SPACE],
     })
     await poll('宿主状态推送到达', async () => {
       const stats = await behaviorStats(file)
-      return stats?.hostState?.order?.[0] === KEY_SPACE ? stats : undefined
+      return stats?.hostState?.order?.[0] === KEY_TILDE ? stats : undefined
     })
 
-    // 键入 (：bracket 补 )，space（组内先于 dash）插空格 → ( |)；dash 跳过
+    // 键入 ^：tilde（组内前置适用）插 ~，dash（组外）再插 -，space 组内
+    // 被占跳过 → word^~-（调整顺序导致可预期结果；组外行为不受组影响）
     const orderInbox = new EventInbox()
-    await typeAt(file, 4, '(')
-    await poll('调序后修饰落地', async () => ((await docText(file)) === 'word( )\n' ? true : undefined))
+    await typeAt(file, 4, '^')
+    await poll('调序后修饰落地', async () => ((await docText(file)) === 'word^~-\n' ? true : undefined))
     const events = await orderInbox.settleAll()
     const ids = (events.filter((e) => e['kind'] === 'behavior') as BehaviorEvent[]).map((e) => e['id'])
-    assert(ids.includes('space-in-parens') && !ids.includes('dash-in-parens'),
-      `调序后 space 应生效、dash 应被组内跳过：${JSON.stringify(ids)}`)
+    assert(ids.includes('tilde-fill') && ids.includes('dash-fill') && !ids.includes('space-fill'),
+      `调序后 tilde 与 dash 应共同运行、space 应被组内跳过：${JSON.stringify(ids)}`)
 
-    // joinPrevious 撤回粒度：space（非原子）并入 bracket（上次原子）一组
-    // 一次撤回；再撤一次回退键入
+    // atomic 撤回粒度（调序后两者均 atomic）：tilde → dash → 键入，3 次回基态
     await undoOnce(file)
-    await poll('joinPrevious 并组一次撤回', async () => ((await docText(file)) === 'word(\n' ? true : undefined))
     await undoOnce(file)
-    await poll('撤回到键入前', async () => ((await docText(file)) === 'word\n' ? true : undefined))
+    await undoOnce(file)
+    await poll('三次撤销回基态', async () => ((await docText(file)) === 'word\n' ? true : undefined))
 
-    // 单项关闭：关 bracket-close 后键入 ( 无任何修饰
-    await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_BRACKET], disabled: true })
+    // 单项关闭：关 dash 后键入 ^，组内 space（字典序先于 tilde）插空格
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH], disabled: true })
     await poll('关闭推送到达', async () => {
       const stats = await behaviorStats(file)
-      return stats?.hostState?.disabled?.includes(KEY_BRACKET) ? stats : undefined
+      return stats?.hostState?.disabled?.includes(KEY_DASH) ? stats : undefined
     })
     await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
     const disableInbox = new EventInbox()
-    await typeAt(file, 4, '(')
-    await poll('关闭后纯输入', async () => ((await docText(file)) === 'word(\n' ? true : undefined))
+    await typeAt(file, 4, '^')
+    // 调序残留态（tilde 前置）下组内首个适用者为 tilde（关闭 dash 后接位插 ~）
+    await poll('关闭 dash 后组内 tilde 接位', async () => ((await docText(file)) === 'word^~\n' ? true : undefined))
     const eventsAfterDisable = await disableInbox.settleAll()
-    assert(!eventsAfterDisable.some((e) => e['kind'] === 'behavior' && e['id'] === 'bracket-close'),
+    assert(!eventsAfterDisable.some((e) => e['kind'] === 'behavior' && e['id'] === 'dash-fill'),
       '关闭的行为不应被调用')
+    // 残留两个撤回单位（键入 + tilde atomic）：两次回基态
+    await undoOnce(file)
     await undoOnce(file)
     await poll('关闭场景回基态', async () => ((await docText(file)) === 'word\n' ? true : undefined))
 
-    // 重载面板后状态恢复：顺序（space 前置）与开关（bracket 关闭）保持
+    // 重载面板后状态恢复：顺序（tilde 前置）与开关（dash 关闭）保持
     await closeAllEditors()
     await resetDocAndOpen(file, 'word\n')
     await probeRegistrations(file)
     await poll('重载后宿主状态恢复', async () => {
       const stats = await behaviorStats(file)
-      return stats?.hostState?.order?.[0] === KEY_SPACE && stats.hostState.disabled.includes(KEY_BRACKET) ? stats : undefined
+      return stats?.hostState?.order?.[0] === KEY_TILDE && stats.hostState.disabled.includes(KEY_DASH) ? stats : undefined
     })
-    await typeAt(file, 4, '(')
-    await poll('重载后行为按恢复状态生效', async () => ((await docText(file)) === 'word(\n' ? true : undefined))
+    await typeAt(file, 4, '^')
+    await poll('重载后行为按恢复状态生效', async () => ((await docText(file)) === 'word^~\n' ? true : undefined))
     await resetBehaviorState()
   }],
 
@@ -320,7 +344,7 @@ export const addonT07Cases: Array<[string, () => Promise<void>]> = [
 
     // 全部关闭：输入仍达观察者（changed 事件），但零修饰零提交
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', {
-      keys: [KEY_BRACKET, KEY_DASH, KEY_SPACE], disabled: true,
+      keys: [KEY_DASH, KEY_SPACE, KEY_TILDE], disabled: true,
     })
     await poll('全关推送到达', async () => {
       const stats = await behaviorStats(file)

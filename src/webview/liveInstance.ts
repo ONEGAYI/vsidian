@@ -911,7 +911,18 @@ export class LiveEditorInstance {
     tr.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
       inputText += inserted.sliceString(0)
     })
-    this.deps.driveAddonBehaviors({ instanceId: this.addonBehaviorInstanceId, userEvent, inputText })
+    // 微任务延迟：链执行的首次 applyEdits 会在其 await 求值时**同步**
+    // dispatch 修饰事务（Promise executor 同步语义）——若在此处（键入
+    // 事务的 updateListener 同步段内）直接驱动，修饰事务会嵌套 dispatch
+    // 并**先于本次输入**进入出站管线（输入被 touches 暂缓、修饰以基态
+    // 坐标直发——反序错位，集成 diag1 实证）。微任务时点在当前 update
+    // flush 收尾之后：输入先记账出站，修饰按正确时序暂缓/投影。
+    const instanceId = this.addonBehaviorInstanceId
+    const userEventRef = userEvent
+    const inputTextRef = inputText
+    queueMicrotask(() => {
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef })
+    })
   }
 
   // ---- #376 T01 双链联想会话（根路由与模式切换消费） ----
