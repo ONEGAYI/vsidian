@@ -15,7 +15,7 @@
 // 缓冲）随本模块自 syncController 迁入，正文见各方法内注释；协议约定
 // webview 全程 LF 坐标。本票为准备性 expand 改造：不接入引用目标 B 的
 // 生产写端口，不引入独立 history（撤销权威仍在宿主 TextDocument）。
-import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, type Extension } from '@codemirror/state'
+import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, Transaction, type Extension } from '@codemirror/state'
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
 import type { DocumentChangeReason, HostToWebview, PasteHistory, PasteStage, SerChange, WebviewToHost } from '../shared/protocol'
@@ -56,7 +56,7 @@ import { anchorFlash } from './anchorFlash'
 import { codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
 import { frontmatterEditing } from './frontmatterEditing'
 import { liveLineNumbers } from './liveLineNumbers'
-import { symbolAutocomplete } from './symbolAutocomplete'
+import { inCodeContext, symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { multicursorExtensions } from './multicursor'
 import { listEditing } from './listEditing'
@@ -398,6 +398,10 @@ export interface LiveEditorInstanceDeps {
   /** #379 T04 双链联想的轻提示通道（重复标题风险提示等）：根 toast 面的
    *  注入点；缺省静默跳过（无 toast 面的装配不阻塞确认） */
   notifyToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
+  /** T07（#356）输入行为链驱动（页面级 runtime 的窄接口）：本实例检测到
+   *  通过内核情境门控的用户键入事务时调用；缺省不驱动（未装配行为面
+   *  的环境零开销）。instanceId 由注册方 setAddonBehaviorIdentity 告知 */
+  driveAddonBehaviors?(input: { instanceId: string; userEvent: string; inputText: string }): void
 }
 
 /**
@@ -472,6 +476,9 @@ export class LiveEditorInstance {
   /** T06（#355）SDK applyEdits 凭据路由（opId → 结算回调）：出站请求终态
    *  （ack ok/业务拒绝/失败）或释放（destroy/暂停）时逐 opId 恰好一次 */
   private readonly addonPending = new Map<string, AddonPendingResolver>()
+  /** T07（#356）行为链驱动的本实例身份（注册进 addonViews 时由注册方
+   *  告知；undefined = 未注册/未装配行为面，不驱动） */
+  private addonBehaviorInstanceId: string | undefined
   /** 发出后未收 ok ack 的请求 seq 集合（全部确认后未确认集清空） */
   private inFlight = new Set<number>()
   /** 未确认变更集：本地文档相对 baseVersion 权威文本的累积变更；
@@ -852,6 +859,74 @@ export class LiveEditorInstance {
     }
     view.dispatch({ effects: EditorView.scrollIntoView(offset, { y: 'center' }) })
     return true
+  }
+
+  // ---- T07（#356）附加组件输入行为链（内核情境门控后的驱动点） ----
+
+  /** 行为链驱动的实例身份（注册进 addonViews 时由注册方告知） */
+  setAddonBehaviorIdentity(instanceId: string): void {
+    this.addonBehaviorInstanceId = instanceId
+  }
+
+  /**
+   * 用户键入事务的链驱动检测（updateListener 逐事务调用）。门控次序与
+   * 口径（票面：内核只读、IME、表格、Tab 等既有情境门控先于行为链）：
+   * - 只读：非 Live/已销毁实例没有输入事务，天然不达此路径；
+   * - IME：组合期（composing/空白格组合缓冲在场）与 compose userEvent
+   *   事务不驱动——组合中间态不是行为输入（symbol-input「IME 组合期
+   *   时序」同口径，情境保持）；
+   * - 表格：tableRegionField 格区内的键入不驱动（格区归 tableEditing，
+   *   结构不被行为改写——#124「表格格区不接管」同口径）；
+   * - Tab：Tab 是 keymap 命令（fenceEscape/tableEditing/indentEditing
+   *   三段优先级），不是 input.type 事务，天然不驱动——不新增可绑定
+   *   命令绕过固定情境链；
+   * - 代码上下文：frontmatter/块级代码（inCodeContext，#123/#124 同
+   *   口径）排除——行为只作用于正文；
+   * - 程序化事务排除：外部同步（externalSync）与 SDK 修饰
+   *   （addonEditOriginTag）不触发（防第二写入口/递归）。
+   * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/delete/
+   * undo 不驱动）。
+   */
+  private maybeDriveAddonBehaviors(tr: Transaction, state: EditorState): void {
+    if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined || !tr.docChanged) {
+      return
+    }
+    if (tr.annotation(externalSync) || tr.annotation(addonEditOriginTag)) {
+      return
+    }
+    const userEvent = tr.annotation(Transaction.userEvent)
+    if (userEvent === undefined || !userEvent.startsWith('input.type') || userEvent.includes('.compose')) {
+      return
+    }
+    if (this.composing || this.blankComposition !== null) {
+      return
+    }
+    // 网格编辑态判定用事务前状态：键入事务（docChanged）本身会把
+    // tableRegionField 清空（region 只跨非文档事务存活），updateListener
+    // 读当前 state 恒为空——「键入发生在网格内」的基准是键入前的 region
+    //（#123/#124 的 filter 阶段同基准：tr.startState）
+    if (tr.startState.field(tableRegionField, false)) {
+      return
+    }
+    if (state.selection.ranges.some((range) => inCodeContext(state, range.from) || inCodeContext(state, range.to))) {
+      return
+    }
+    let inputText = ''
+    tr.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
+      inputText += inserted.sliceString(0)
+    })
+    // 微任务延迟：链执行的首次 applyEdits 会在其 await 求值时**同步**
+    // dispatch 修饰事务（Promise executor 同步语义）——若在此处（键入
+    // 事务的 updateListener 同步段内）直接驱动，修饰事务会嵌套 dispatch
+    // 并**先于本次输入**进入出站管线（输入被 touches 暂缓、修饰以基态
+    // 坐标直发——反序错位，集成 diag1 实证）。微任务时点在当前 update
+    // flush 收尾之后：输入先记账出站，修饰按正确时序暂缓/投影。
+    const instanceId = this.addonBehaviorInstanceId
+    const userEventRef = userEvent
+    const inputTextRef = inputText
+    queueMicrotask(() => {
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef })
+    })
   }
 
   // ---- #376 T01 双链联想会话（根路由与模式切换消费） ----
@@ -2311,6 +2386,8 @@ export class LiveEditorInstance {
           if (tr.docChanged) {
             this.docRevision += 1
           }
+          // T07（#356）输入行为链驱动检测（内核情境门控在检测内先行）
+          this.maybeDriveAddonBehaviors(tr, update.state)
           if (!tr.docChanged || tr.annotation(externalSync)) {
             continue
           }

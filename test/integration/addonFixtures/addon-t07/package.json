@@ -1,0 +1,21 @@
+{
+  "name": "addon-t07",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T07 Input Behaviors)",
+  "description": "Integration fixture: Vsidian add-on registering composable input behaviors on the editor page (T07, #356).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-t07.stats", "title": "Fixture T07: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-t07.collect", "title": "Fixture T07: collect behavior events" },
+      { "command": "vsidian-test-fixture.addon-t07.reset", "title": "Fixture T07: reset event inbox" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

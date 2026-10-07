@@ -29,7 +29,9 @@ import type {
   VsidianAddonPageSdk,
 } from '../shared/addonPage'
 import type { AddonViewHandle, AddonViewsFacet } from '../shared/addonEditApi'
+import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
 import type { AddonViewsRuntime } from './addonViews'
+import type { AddonBehaviorRuntime } from './addonBehaviors'
 import type { AddonCommandsRuntime } from './addonCommands'
 
 /** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
@@ -75,6 +77,9 @@ export interface AddonPageLoaderEnv {
   /** T06（#355）统一视图注册表的操作面（编辑器页由 main.ts 构造注入；
    *  省略时 SDK 不提供 views 面） */
   addonViews?: AddonViewsRuntime
+  /** T07（#356）输入行为 runtime（编辑器页由 main.ts 构造注入；省略时
+   *  SDK 不提供 behaviors 面） */
+  addonBehaviors?: AddonBehaviorRuntime
   /** T10（#359）命令与菜单注册表（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 commands/menus 面，releaseLoad 时亦不做回收） */
   addonCommands?: AddonCommandsRuntime
@@ -257,10 +262,25 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
           onDisposed: (callback) => env.addonViews!.onDisposed(callback),
         }
       : undefined
+    const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
+      ? {
+          register: (registration) => {
+            if (page !== 'editor') {
+              return { ok: false, reason: 'not-editor-page' }
+            }
+            if (!active.has(loadRecord.addonId)) {
+              return { ok: false, reason: 'released' }
+            }
+            return env.addonBehaviors!.register(loadRecord.addonId, loadRecord.generation, registration)
+          },
+          onChanged: (callback) => env.addonBehaviors!.onChanged(callback),
+        }
+      : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
       experimental: { cm6: env.cm6 },
       ...(viewsFacet ? { views: viewsFacet } : {}),
+      ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
           register: (def, handler) => {
@@ -375,6 +395,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
    */
   const releaseLoad = (loadRecord: ActiveLoad, ended: 'released' | 'faulted', reason?: string): { disposals: number; releasedRequests: number } => {
     active.delete(loadRecord.addonId)
+    // T07（#356）行为注册整组注销（opId 分配器随卸载解绑——释放后该组件
+    // 的行为不再有可注入来源，提交路径结构上不可用）
+    env.addonBehaviors?.unregisterAddon(loadRecord.addonId)
     // T10（#359）命令与菜单整组件回收（本页闭环——不依赖宿主消息到达）：
     // 撤命令、菜单与运行期操作表，并向宿主上报空表
     if (env.addonCommands) {
@@ -477,6 +500,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       cssLinks,
     }
     active.set(manifest.addonId, loadRecord)
+    // T07（#356）行为链提交的 opId 分配器随装载绑定（与 views.applyEdits
+    // 同源计数器；factory 执行前就位——工厂注册行为后链即可提交）
+    env.addonBehaviors?.bindOpIdAllocator(manifest.addonId, () => `g${manifest.generation}-op${++opSeq}`)
     const sdk = buildSdk(loadRecord, manifest)
     ;(globalThis as typeof globalThis & { [key: string]: unknown })[ADDON_SDK_SLOT_GLOBAL] = sdk
     try {

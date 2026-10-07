@@ -64,9 +64,10 @@ const testCacheDir = path.join(root, '.vscode-test')
 // 构建桥生成后拷入其 dist/，构建产物不入库）；#353 T04 复杂设置夹具
 //（addon-t04——纯宿主 CJS，无页面产物；经公开 API 注册复杂定义与分层读写）；
 // #355 T06 视图编辑夹具（addon-t06——页面产物经构建桥生成，长轮询协议）；
-// #359 T10 命令/菜单/快捷键夹具（addon-t10——页面产物经构建桥生成，
-// commands/menus 面注册 + 负向对照 + views 真实业务）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-t06', 'addon-t10', 'addon-escape'].map((name) =>
+// #356 T07 可组合输入行为夹具（addon-t07——页面产物经构建桥生成，
+// behaviors 面注册行为链）；#359 T10 命令/菜单/快捷键夹具（addon-t10——
+// 页面产物经构建桥生成，commands/menus 面注册 + 负向对照 + views 真实业务）
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-t06', 'addon-t07', 'addon-t10', 'addon-escape'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
 // #354 T05 逃逸夹具装配：addon-escape/escape 在运行期创建为 junction，
@@ -90,6 +91,8 @@ cpSync(addonLayout.t02Addon.distDir, path.join(root, 'test', 'integration', 'add
 console.log('[runTest] T02 夹具组件页面产物已构建并拷入 addonFixtures/addon-t02/dist')
 cpSync(addonLayout.t06Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t06', 'dist'), { recursive: true })
 console.log('[runTest] T06 夹具组件页面产物已构建并拷入 addonFixtures/addon-t06/dist')
+cpSync(addonLayout.t07Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t07', 'dist'), { recursive: true })
+console.log('[runTest] T07 夹具组件页面产物已构建并拷入 addonFixtures/addon-t07/dist')
 cpSync(addonLayout.t10Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t10', 'dist'), { recursive: true })
 console.log('[runTest] T10 夹具组件页面产物已构建并拷入 addonFixtures/addon-t10/dist')
 const started = Date.now()

@@ -14,6 +14,7 @@ import * as cmView from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
 import { AddonViewRegistry } from './addonViews'
+import { AddonBehaviorRuntime } from './addonBehaviors'
 import { AddonCommandsRuntime } from './addonCommands'
 import { installAddonPageLoader } from './addonPageLoader'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
@@ -56,8 +57,17 @@ controller.mount(document.getElementById('app') ?? document.body, [
 // 经 controller.reconfigureAddonExtensions 驱动 liveInstance 的 Compartment；
 // 出站消息（loaded/unloaded/faulted/channel.request）经消息桥回宿主路由。
 // T06（#355）：统一视图注册表（页面级一份）同时注入装载器（SDK views 面
-// 的操作后端）与控制器（主正文句柄随 init 注册/注销）
+// 的操作后端）与控制器（主正文句柄随 init 注册/注销）。
+// T07（#356）：输入行为 runtime（页面级一份）——behaviors 面的操作后端
+// （快照/提交走统一视图注册表；链驱动经 controller 注入主正文与嵌入实例），
+// 宿主状态（顺序覆盖/逐项开关）经 addon.behaviors.state 到达
 const addonViews = new AddonViewRegistry()
+const addonBehaviors = new AddonBehaviorRuntime({
+  snapshotOf: (instanceId) => addonViews.snapshotOf(instanceId),
+  applyEdit: (addonId, opId, instanceId, request) => addonViews.applyEdits({ addonId, opId, instanceId, request }),
+  log: (stage, addonId, detail) => console.warn(`[vsidian-addon-behavior] ${stage} ${addonId}: ${detail}`),
+})
+
 // #359 T10 组件命令/菜单注册表（页面级一份）：SDK commands/menus 面的操作
 // 后端；注册/撤销后全量对账上报宿主（宿主注册命令面板命令并推设置页目录）
 const addonCommands = new AddonCommandsRuntime({
@@ -68,14 +78,21 @@ const addonLoader = installAddonPageLoader({
   cm6: { state: cmState, view: cmView },
   attachExtensions: (extensions) => controller.reconfigureAddonExtensions(extensions),
   addonViews,
+  addonBehaviors,
   addonCommands,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
 controller.attachAddonViews(addonViews)
+controller.attachAddonBehaviorDrive((input) => {
+  void addonBehaviors.driveInput(input.instanceId, { userEvent: input.userEvent, inputText: input.inputText })
+})
 controller.attachAddonCommands(addonCommands)
 // 装载器观测挂进 view.state 探针（集成断言面：活跃代次/授权样式表/释放
 // 历史与拒收计数；宿主经 view.state.request 拉取）
 controller.attachAddonPageProbe(() => addonLoader.stats())
+// 行为 runtime 观测挂进 view.state 探针（T07 集成断言面：注册清单/宿主
+// 状态/链执行轨迹与计数；与装载器探针同面并列返回）
+controller.attachAddonBehaviorProbe(() => addonBehaviors.stats())
 // 就绪上报（webview 重载后亦发）：宿主按期望装载清单幂等推送指令
 vscode.postMessage({ kind: 'addonPage.ready' })
 
@@ -90,6 +107,12 @@ window.addEventListener('message', (event) => {
   // 设施，代次与释放由装载器自持）
   if (isHostToWebview(event.data) && event.data.kind === 'addonPage.directive') {
     addonLoader.handleDirective(event.data.directive)
+    return
+  }
+  // T07（#356）：输入行为状态下发（页面级 runtime 消费；null = 无用户
+  // 覆盖——默认序全开启）
+  if (isHostToWebview(event.data) && event.data.kind === 'addon.behaviors.state') {
+    addonBehaviors.applyHostState(event.data.state)
     return
   }
   controller.handleHostMessage(event.data)
