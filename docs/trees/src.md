@@ -73,6 +73,7 @@ vsidian/
     │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
     │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
+    │   ├── addonApiCatalog.ts      # 附加组件 API 语义清单与台账
     │   ├── addonBehaviors.ts       # 输入行为共享契约事实源
     │   ├── addonCommands.ts        # 附加组件命令/菜单共享形状与校验
     │   ├── addonEditApi.ts         # 统一视图编辑API共享形状
