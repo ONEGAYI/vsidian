@@ -188,6 +188,40 @@ describe('格式操作的文本契约', () => {
     expect(apply('标题\n----', 'heading3', 1).text).toBe('### 标题')
   })
 
+  it('空行按标题操作插入 mark 并把光标置于空格后（#393）', () => {
+    expect(apply('', 'heading2', 0)).toEqual({ text: '## ', selection: { anchor: 3 } })
+    expect(apply('正文\n\n正文', 'heading3', 3)).toEqual({ text: '正文\n### \n正文', selection: { anchor: 7 } })
+    // 纯空白行保留缩进口径（与非空行路径一致：indent 原样透传不截断）
+    expect(apply('  ', 'heading1', 1)).toEqual({ text: '  # ', selection: { anchor: 4 } })
+    // 非空行层级切换回归
+    expect(apply('## 标题', 'heading3', 5).text).toBe('### 标题')
+  })
+
+  it('空行按列表与引用操作插入前缀并把光标置于前缀后（#393 扩大范围）', () => {
+    expect(apply('', 'bulletList', 0)).toEqual({ text: '- ', selection: { anchor: 2 } })
+    expect(apply('', 'orderedList', 0)).toEqual({ text: '1. ', selection: { anchor: 3 } })
+    expect(apply('', 'taskList', 0)).toEqual({ text: '- [ ] ', selection: { anchor: 6 } })
+    expect(apply('', 'quote', 0)).toEqual({ text: '> ', selection: { anchor: 2 } })
+    // 纯空白行缩进透传与非空行路径一致
+    expect(apply('  ', 'quote', 1)).toEqual({ text: '  > ', selection: { anchor: 4 } })
+    // headingNone 是取消型操作：空行无可摘除，维持无反应
+    expect(apply('', 'headingNone', 0)).toEqual({ text: '', selection: null })
+  })
+
+  it('空行插入后再按一次恢复空行，两态闭环（#393）', () => {
+    expect(apply('- ', 'bulletList', 2).text).toBe('')
+    expect(apply('1. ', 'orderedList', 3).text).toBe('')
+    expect(apply('- [ ] ', 'taskList', 5).text).toBe('')
+    expect(apply('> ', 'quote', 2).text).toBe('')
+    expect(apply('## ', 'headingNone', 3).text).toBe('')
+    expect(apply('  - ', 'bulletList', 4).text).toBe('  ')
+  })
+
+  it('跨行选区中实质重叠的空行同样插入标题与列表前缀，无独立选区（#393）', () => {
+    expect(apply('正文\n\n尾', 'heading2', 0, 4)).toEqual({ text: '## 正文\n## \n尾' })
+    expect(apply('正文\n\n尾', 'bulletList', 0, 4)).toEqual({ text: '- 正文\n- \n尾' })
+  })
+
   it('显式选区围栏精确包裹，前后文独立成段且文首尾无多余空行', () => {
     expect(apply('前中文后', 'codeBlock', 1, 3).text).toBe('前\n\n```\n中文\n```\n\n后')
     expect(apply('文字', 'codeBlock', 0, 2).text).toBe('```\n文字\n```')

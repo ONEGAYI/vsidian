@@ -9,7 +9,18 @@ bootLocaleFromDocument()
 let saved: unknown
 const sent: unknown[] = []
 const controller = new WebviewSyncController({
-  postMessage(message) { sent.push(message) },
+  postMessage(message) {
+    sent.push(message)
+    // 生产宿主行为回环（commentToggleFixture 同口径）：快捷键出站
+    // keybindings.execute → 宿主门控后回发 format.command 驱动同一实现；
+    // fixture 无真实宿主，mock 为 format 类 id 直接回发（生产同驱动链）
+    if ((message as { kind?: string }).kind === 'keybindings.execute') {
+      const { id } = message as { id: string }
+      queueMicrotask(() => {
+        controller.handleHostMessage({ kind: 'format.command', op: id as never })
+      })
+    }
+  },
   getState<T>() { return saved as T | undefined },
   setState(state) { saved = state },
 })
