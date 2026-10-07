@@ -22,6 +22,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **统一右键菜单扩展约定（2026-09 菜单批次落档）**：新增或修改右键菜单项、簇、子菜单、覆写行为、安全降级矩阵或菜单图标接线前，必读 [docs/specs/context-menu.md](docs/specs/context-menu.md) 的「扩展约定（落档）」节——菜单项注册表与图标 key 表的两表同步、三步接入清单与「既有边界不得顺手放宽」清单（阅读/头区不接管、内置只隐藏不删、提示列只派生自键位注册表）均在其中。
 - **悬停提示扩展约定（#300 落档）**：新增或修改悬停提示（新控件、新浮层内按钮、键位徽章）前，必读 [docs/specs/tooltip.md](docs/specs/tooltip.md) 的「接管机制」节——悬停词唯一承载属性是 `data-tooltip`（原生 title 已退役，防回潮扫描拦截），文案经 `bindLocale` 家族或动态写属性，带快捷键的操作走 `data-tooltip-keys` 结构化键位徽章（内部 `\n` 分隔、不做文字缀尾），观感与出现延迟经 `--vsidian-tooltip-*` 公开变量（styleContract tooltip 类目）。
 - **引用块内表格扩展约定（#296 落档）**：新增或修改表格网格计划、行身份提取（`TableRowInfo`）、表格创建的容器前缀感知，或调整表格行前缀剥离口径（`parseTableDelimiter`/`tableRowCellsForColumns` 等调用点）前，必读 [docs/specs/blockquote-table.md](docs/specs/blockquote-table.md)——前缀语义单一口径、QuoteMark 放行边界（其余未知直接子节点仍整体降级）、结构编辑「补/消」前缀的既定决策与一期边界均在其中；台账外边界不得顺手改。
+- **附加组件公开 API 维护（#362 落档）**：新增或修改六组附加组件 API（发现与安装/页面 SDK/行为/设置/渲染提供者/命令菜单界面）的接口形状、语义、实验入口或发行状态前，必读 [docs/addons/developer-guide.md](docs/addons/developer-guide.md) 的「文档维护入口」节——语义清单与发行台账单一事实源在 `src/shared/addonApiCatalog.ts`（签名不手写第二份，条目指向各事实源模块的导出符号）；版本参考由 `npm run gen:addonapi` 生成、`npm run check:addonapi` 校验新鲜度（compile 链前置）；公开声明的编译期消费在 `test/addonApi/publicApiConsumer.ts`，导入面纪律由 `test/unit/addonApiSurface.test.ts` 钉住。签名/语义调整必须同步清单条目、重生成参考、更新消费样例与钉住断言；台账如实区分候选与已发布——未真正发行不得携带发布日期，实际发行是人工落账动作。规则依据 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)「文档与兼容维护」与[规格 §7](docs/specs/vsidian-addons.md)。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
 
 ## 公开样式契约：Agent 修改约束（项目技能 style-contract）
@@ -83,6 +84,10 @@ vsidian/
 ├── CLAUDE.md              # Claude 专属规则导入入口
 ├── CONTEXT.md             # 领域语言与产品边界事实源
 ├── docs/                  # 项目文档根
+│   ├── addons/     # 附加组件开发者文档
+│   │   ├── api-reference.md     # 公开 API 版本参考（生成）
+│   │   ├── developer-guide.md   # 附加组件开发指南
+│   │   └── example-repo-plan.md # 示例仓库准备说明
 │   ├── adr/        # 架构决策记录
 │   │   ├── 0001-vscode-186-remote-support.md                  # VSCode 兼容下界与远程支持决策
 │   │   ├── 0002-wikilink-on-demand-resolution.md              # 双链按需解析不建持久索引
@@ -195,6 +200,7 @@ vsidian/
 ├── scripts/               # 仓库工具脚本目录
 │   ├── checkStyleContract.mjs    # 历史契约兼容检查器 CLI
 │   ├── demoStyleContractGate.mjs # 契约门禁负向演示脚本
+│   ├── genAddonApiRef.mjs        # 附加组件 API 参考生成脚本
 │   ├── genNls.d.mts              # NLS 生成器类型声明
 │   ├── genNls.mjs                # manifest NLS 文件生成脚本
 │   ├── genStyleGuide.mjs         # 样式指南生成脚本
