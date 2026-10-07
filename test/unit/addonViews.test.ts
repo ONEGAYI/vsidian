@@ -220,6 +220,45 @@ describe('装载器 SDK views 面（生命周期边界）', () => {
     instance.destroy()
   })
 
+  it('同组件换代后旧代次句柄不复活：gen1 闭包句柄在 gen2 在场时仍拒绝', async () => {
+    const sent: WebviewToHost[] = []
+    const registry = new AddonViewRegistry()
+    const instance = mountLive(sent, 's1')
+    registry.registerLive({ viewType: 'main', instanceId: 'main', targetDocUri: 'file:///a.md', mode: () => 'live', instance })
+    const registrations: AddonPageRegistration[] = []
+    ;(globalThis as unknown as Record<string, unknown>)[ADDON_PAGE_REGISTRY_GLOBAL] = registrations
+    let sdkGen1: VsidianAddonPageSdk | undefined
+    let sdkGen2: VsidianAddonPageSdk | undefined
+    const handle = installAddonPageLoader({
+      page: 'editor',
+      addonViews: registry,
+      send: (message) => { sent.push(message as never) },
+      loadScript: () => Promise.resolve({ ok: true }),
+      loadCss: () => Promise.resolve('denied'),
+      now: () => 1_000,
+      scheduleTimeout: (callback) => ({ cancel: () => void callback }),
+    })
+    registrations.push({ addonId: 'pub.addon', factory: (sdk) => { sdkGen1 = sdk }, registeredAt: 1_000 })
+    await handle.load({ addonId: 'pub.addon', generation: 1, page: 'editor', scriptUri: 'https://x/a.js' })
+    // gen1 期间取句柄（组件闭包持有的形态——异步回调里迟用）
+    const stale = sdkGen1!.views!.get('main')
+    await handle.unload('pub.addon', 1)
+    registrations.push({ addonId: 'pub.addon', factory: (sdk) => { sdkGen2 = sdk }, registeredAt: 1_001 })
+    await handle.load({ addonId: 'pub.addon', generation: 2, page: 'editor', scriptUri: 'https://x/a.js' })
+    // 旧句柄不得因 gen2 在场而复活：在场比对（active.has）会让它复活，代次比对拒绝
+    expect(await stale!.editor.applyEdits({ revision: 0, changes: [{ offset: 0, length: 0, text: 'X' }] }))
+      .toEqual({ ok: false, reason: 'view-disposed' })
+    // gen2 新句柄正常（opId 前缀 g2）
+    const fresh = sdkGen2!.views!.get('main')
+    const revision = (fresh!.editor.getSnapshot() as { ok: true; snapshot: { revision: number } }).snapshot.revision
+    const promise = fresh!.editor.applyEdits({ revision, changes: [{ offset: 0, length: 0, text: 'Y' }] })
+    const req = sent.find((m) => m.kind === 'edit.request' && (m as { origin?: { opId?: string } }).origin?.opId?.startsWith('g2')) as Extract<WebviewToHost, { kind: 'edit.request' }>
+    expect(req.origin).toEqual({ addonId: 'pub.addon', opId: 'g2-op1', undo: 'atomic' })
+    instance.handleEditAck({ kind: 'edit.ack', seq: req.seq, ok: true, version: 2 })
+    expect(await promise).toEqual({ ok: true, credential: { opId: 'g2-op1', version: 2 } })
+    instance.destroy()
+  })
+
   it('无注册表注入（设置页装配）时 SDK 不提供 views 面', async () => {
     const sent: AddonPageOutbound[] = []
     const registrations: AddonPageRegistration[] = []

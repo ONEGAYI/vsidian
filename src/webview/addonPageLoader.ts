@@ -259,7 +259,12 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     if (!info) {
       return null
     }
-    const isReleased = () => !active.has(addonId)
+    // 代次比对而非在场比对：同组件 gen1→gen2 交替后，gen1 发放的旧句柄
+    // 不得复活（在场条目代次不等 = 旧代次已终结，提交拒绝）
+    const isReleased = () => {
+      const entry = active.get(addonId)
+      return entry === undefined || entry.generation !== generation
+    }
     return {
       info,
       editor: {
