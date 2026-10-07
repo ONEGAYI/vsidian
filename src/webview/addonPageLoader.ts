@@ -463,6 +463,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       page,
       cm6Shared: env.cm6 !== undefined,
       active: [...active.values()].map((record) => ({ addonId: record.addonId, generation: record.generation })),
+      cssLinksActive: [...active.values()].reduce((sum, record) => sum + record.cssLinks.length, 0),
       history: [...history],
       counters: { ...counters },
     }),

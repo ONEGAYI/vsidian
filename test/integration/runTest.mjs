@@ -8,12 +8,13 @@
 // 缺省 N=1 保持原有单宿主行为与 integration-dev.log 报告名。
 // VSIDIAN_TEST_GROUP=all/core/sensitive：缺省全量；敏感组报告单独命名。
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
+import { buildTestAddons } from '../fixtures/addon-v02/sdk/buildAddon.mjs'
 import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, evaluateHostReport, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -59,9 +60,17 @@ const portableDirs = []
 const testCacheDir = path.join(root, '.vscode-test')
 // #350 T01 附加组件夹具（清单与实现见 test/integration/addonFixtures/）：
 // 兼容注册（addon-ok）、声明合法但不兼容（addon-incompatible）、激活失败
-// （addon-fail）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail'].map((name) =>
+// （addon-fail）；#351 T02 页面 SDK 夹具（addon-t02——页面产物由 V02
+// 构建桥生成后拷入其 dist/，构建产物不入库）
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
+
+// #351 T02：夹具组件页面产物构建（chrome114 IIFE + 静态红线——CM6 不
+// 重打包）；产物拷入 addon-t02/dist 供组件按相对入口登记（资源授权锚 =
+// 夹具安装目录）
+const t02Layout = (await buildTestAddons({ log: () => {} })).t02Addon
+cpSync(t02Layout.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t02', 'dist'), { recursive: true })
+console.log('[runTest] T02 夹具组件页面产物已构建并拷入 addonFixtures/addon-t02/dist')
 const started = Date.now()
 try {
   // 所有宿主结束后再清理便携目录；若一片启动异常，也不能清理仍在运行的其他片。

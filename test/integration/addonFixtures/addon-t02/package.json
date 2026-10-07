@@ -1,0 +1,22 @@
+{
+  "name": "addon-t02",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T02 Page SDK)",
+  "description": "Integration fixture: Vsidian add-on consuming the page SDK on editor and own settings page (T02, #351).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-t02.stats", "title": "Fixture T02: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-t02.armEchoCrash", "title": "Fixture T02: arm echo handler crash" },
+      { "command": "vsidian-test-fixture.addon-t02.disposeCount", "title": "Fixture T02: run-scope dispose count" },
+      { "command": "vsidian-test-fixture.addon-t02.releaseAndReRegister", "title": "Fixture T02: release and re-register" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0", "experimental": { "cm6": "^1.0.0" } },
+  "main": "./extension.js"
+}

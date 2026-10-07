@@ -13,7 +13,7 @@ import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics
 import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
-import { isAddonPageDirective, isAddonPageOutbound } from './addonPage'
+import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -1319,6 +1319,9 @@ export type WebviewToHost =
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
        *  缺省为空数组） */
       liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
+      /** #351 T02 附加组件页面装载器观测（编辑器页装载器安装后才有值；
+       *  活跃代次/授权样式表/释放历史与拒收计数——旧 webview 缺省） */
+      addonPage?: import('./addonPage').AddonLoaderStats
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -3953,7 +3956,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
                   Number.isFinite(e.pdf.zoom) && e.pdf.zoom > 0)) &&
               (e.pdf.textLayerPages === undefined || isNonNegativeInt(e.pdf.textLayerPages)) &&
               (e.pdf.linkAnnotations === undefined || isNonNegativeInt(e.pdf.linkAnnotations))))))) &&
-        (v.typography === undefined || isTypographyProbe(v.typography))
+        (v.typography === undefined || isTypographyProbe(v.typography)) &&
+        // #351 T02 附加组件装载器观测（旧 webview 缺省；守卫单一事实源
+        // 在 shared/addonPage 的 isAddonLoaderStats）
+        (v.addonPage === undefined || isAddonLoaderStats(v.addonPage))
       )
     case 'reading.perf.report':
       return (

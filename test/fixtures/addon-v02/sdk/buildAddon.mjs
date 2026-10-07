@@ -39,6 +39,11 @@ const DENIED_JS = `// 越界对照脚本：执行即落标记（探针断言装�
 
 const DENIED_CSS = '/* 越界对照样式 */\n.vsa2-denied { color: rgb(255, 0, 0); }\n'
 
+/** #351 T02 夹具组件样式：编辑器页首字符标记（绘制层断言锚——计算色
+ *  rgb(0, 200, 120)，与 V02 的 rgb(255,0,127) 区分）与设置页标题 */
+const T02_EDITOR_CSS = '.t02-mark { background-color: rgb(0, 200, 120); }\n'
+const T02_SETTINGS_CSS = '.t02-settings-root .t02-title { color: rgb(0, 120, 200); }\n'
+
 /** 断言产物不含 CM6 运行时标记（组件未重打包共享运行时） */
 export function assertNoCm6Runtime(productPath) {
   const text = readFileSync(productPath, 'utf8')
@@ -63,6 +68,17 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 'throw-addon', 'dist', 'throw.js'),
       note: 'throw-addon（故障注入）',
     },
+    // #351 T02：生产路径集成夹具组件（编辑器页与自身设置页两个入口）
+    {
+      entry: path.join(fixtureRoot, 'addon', 't02Editor.ts'),
+      outfile: path.join(buildRoot, 't02-addon', 'dist', 'editor.js'),
+      note: 't02-addon 编辑器页',
+    },
+    {
+      entry: path.join(fixtureRoot, 'addon', 't02Settings.ts'),
+      outfile: path.join(buildRoot, 't02-addon', 'dist', 'settings.js'),
+      note: 't02-addon 设置页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -86,6 +102,12 @@ export async function buildTestAddons({ log = console.log } = {}) {
   mkdirSync(distDir, { recursive: true })
   writeFileSync(path.join(distDir, 'page.css'), readFileSync(path.join(fixtureRoot, 'addon', 'page.css')))
   writeFileSync(path.join(distDir, 'logo.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #351 T02 夹具组件资源：两页样式 + 资源子目录（resourceUri 锚）
+  const t02Dist = path.join(buildRoot, 't02-addon', 'dist')
+  mkdirSync(path.join(t02Dist, 'assets'), { recursive: true })
+  writeFileSync(path.join(t02Dist, 'editor.css'), T02_EDITOR_CSS)
+  writeFileSync(path.join(t02Dist, 'settings.css'), T02_SETTINGS_CSS)
+  writeFileSync(path.join(t02Dist, 'assets', 'logo.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   const outsideDir = path.join(buildRoot, 'outside')
   mkdirSync(outsideDir, { recursive: true })
   writeFileSync(path.join(outsideDir, 'denied.js'), DENIED_JS)
@@ -102,6 +124,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     throwAddon: {
       installDir: path.join(buildRoot, 'throw-addon'),
       entry: path.join(buildRoot, 'throw-addon', 'dist', 'throw.js'),
+    },
+    // #351 T02：集成夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t02）
+    t02Addon: {
+      installDir: path.join(buildRoot, 't02-addon'),
+      distDir: t02Dist,
     },
     outsideDir,
   }

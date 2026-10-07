@@ -157,6 +157,8 @@ export interface AddonLoaderStats {
   cm6Shared: boolean
   /** 活跃装载（按组件 ID） */
   active: Array<{ addonId: string; generation: number }>
+  /** 活跃装载持有的授权样式表数（释放撤下的观测面） */
+  cssLinksActive: number
   /** 历史终结记录（释放/故障/拒绝均留痕） */
   history: Array<{
     addonId: string
@@ -260,4 +262,29 @@ export function isAddonPageOutbound(value: unknown): value is AddonPageOutbound 
     default:
       return false
   }
+}
+
+/** 装载器观测快照守卫（view.state.addonPage 探针字段；集成断言面） */
+export function isAddonLoaderStats(value: unknown): value is AddonLoaderStats {
+  if (!isRecord(value)) return false
+  if (value.page !== 'editor' && value.page !== 'settings') return false
+  if (typeof value.cm6Shared !== 'boolean' || !Array.isArray(value.active) ||
+    typeof value.cssLinksActive !== 'number' || !Array.isArray(value.history) || !isRecord(value.counters)) {
+    return false
+  }
+  if (!value.active.every((entry) => isRecord(entry) && typeof entry.addonId === 'string' && typeof entry.generation === 'number')) {
+    return false
+  }
+  if (!value.history.every((entry) => isRecord(entry) && typeof entry.addonId === 'string' &&
+    typeof entry.generation === 'number' &&
+    (entry.ended === 'released' || entry.ended === 'faulted' || entry.ended === 'load-failed') &&
+    (entry.reason === undefined || typeof entry.reason === 'string') &&
+    (entry.detail === undefined || typeof entry.detail === 'string') &&
+    (entry.disposals === undefined || typeof entry.disposals === 'number'))) {
+    return false
+  }
+  const counters = value.counters as Record<string, unknown>
+  return ['staleUnloadRejected', 'lateChannelRepliesDropped', 'lateRegistrationsDropped',
+    'unsolicitedRegistrationsDropped', 'releasedChannelRequests', 'channelTimeouts']
+    .every((key) => typeof counters[key] === 'number')
 }

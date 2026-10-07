@@ -151,9 +151,10 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   // 注册表 + 运行生命周期：findExtension 核对「当前扩展宿主注册表中的记录」
   //（查不到 = 当前宿主不可用——不等于未安装或装错侧）；installDirOf 以
   // 扩展安装目录为资源授权锚（extensionUri.fsPath）
+  const preferenceStore = createPreferenceStore(context)
   const runtime = new AddonRuntime({
     apiVersion: ADDON_API_VERSION,
-    preferences: createPreferenceStore(context),
+    preferences: preferenceStore,
     installDirOf: (addonId) => vscode.extensions.getExtension(addonId)?.extensionUri.fsPath,
     log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
   })
@@ -250,12 +251,13 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   })
 
   /** 出站消息处理（loaded/faulted → runtime 故障；channel.request → 路由回执） */
-  const handleOutboundFor = (post: (directive: AddonPageDirective) => void) => (message: unknown): void => {
+  const handleOutboundFor = (panel: 'editor' | 'settings', post: (directive: AddonPageDirective) => void) => (message: unknown): void => {
     if (!isWebviewToHost(message) || message.kind !== 'addonPage.outbound') {
       return
     }
     const outbound = message.outbound
     if (outbound.type === 'addon.channel.request') {
+      recordEvent(panel, { kind: 'outbound.request', addonId: outbound.addonId, generation: outbound.generation, topic: outbound.topic })
       void runtime
         .dispatchChannelRequest(outbound.addonId, outbound.topic, outbound.payload)
         .then((outcome) => {
@@ -268,6 +270,25 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
           })
         })
       return
+    }
+    if (outbound.type === 'addon.loaded') {
+      recordEvent(panel, {
+        kind: 'outbound.loaded',
+        addonId: outbound.addonId,
+        generation: outbound.generation,
+        ok: outbound.outcome.ok,
+        ...(outbound.outcome.ok ? {} : { reason: outbound.outcome.reason }),
+      })
+    } else if (outbound.type === 'addon.unloaded') {
+      recordEvent(panel, {
+        kind: 'outbound.unloaded',
+        addonId: outbound.addonId,
+        generation: outbound.generation,
+        ok: outbound.outcome.ok,
+        ...(outbound.outcome.ok ? {} : { reason: outbound.outcome.reason }),
+      })
+    } else if (outbound.type === 'addon.faulted') {
+      recordEvent(panel, { kind: 'outbound.faulted', addonId: outbound.addonId, generation: outbound.generation, reason: outbound.reason })
     }
     runtime.handleOutbound(outbound)
   }
@@ -290,6 +311,35 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     return [...roots].map((dir) => vscode.Uri.file(dir))
   }
 
+  // ---- #351 T02 面板桥事件观测（集成断言面：指令推送与出站结局留痕；
+  //  最近 200 条，_test.addonPageEvents 读取/清空——仅测试钩子消费） ----
+  const addonPageEvents: Array<{ panel: 'editor' | 'settings'; kind: string; addonId: string; generation?: number; ok?: boolean; reason?: string; topic?: string }> = []
+  const recordEvent = (panel: 'editor' | 'settings', event: { kind: string; addonId: string; generation?: number; ok?: boolean; reason?: string; topic?: string }): void => {
+    addonPageEvents.push({ panel, ...event })
+    if (addonPageEvents.length > 200) {
+      addonPageEvents.splice(0, addonPageEvents.length - 200)
+    }
+  }
+  const directiveEventOf = (directive: AddonPageDirective): { kind: string; addonId: string; generation?: number } => {
+    switch (directive.type) {
+      case 'addon.load':
+        return { kind: 'directive.load', addonId: directive.manifest.addonId, generation: directive.manifest.generation }
+      case 'addon.unload':
+        return { kind: 'directive.unload', addonId: directive.addonId, generation: directive.generation }
+      default:
+        return { kind: `directive.${directive.type}`, addonId: directive.addonId, generation: directive.generation }
+    }
+  }
+
+  /** 面板指令投递（disposed webview 不炸状态机链路——记录后吞掉异常） */
+  const postDirective = (webview: vscode.Webview, directive: AddonPageDirective): void => {
+    try {
+      void webview.postMessage({ kind: 'addonPage.directive', directive }).then(undefined, () => {})
+    } catch {
+      // 面板已销毁：装载器随 webview 消亡，无需投递
+    }
+  }
+
   // ---- 编辑器面板桥（#351）----
   interface EditorPanelRecord {
     webview: vscode.Webview
@@ -305,7 +355,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     // 停用/故障/释放的组件：推送 unload（携带最后装载代次；装载器幂等）
     for (const [addonId, generation] of [...record.pushed.entries()]) {
       if (!desiredIds.has(addonId)) {
-        void record.webview.postMessage({ kind: 'addonPage.directive', directive: { type: 'addon.unload', addonId, generation } })
+        const directive: AddonPageDirective = { type: 'addon.unload', addonId, generation }
+        recordEvent('editor', directiveEventOf(directive))
+        postDirective(record.webview, directive)
         record.pushed.delete(addonId)
       }
     }
@@ -314,10 +366,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       if (pushed === plan.generation) {
         continue // 同代次已推送（webview 重载由 ready 重推）
       }
-      void record.webview.postMessage({
-        kind: 'addonPage.directive',
-        directive: { type: 'addon.load', manifest: buildManifest(record.webview, plan) },
-      })
+      const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, plan) }
+      recordEvent('editor', directiveEventOf(directive))
+      postDirective(record.webview, directive)
       record.pushed.set(plan.addonId, plan.generation)
     }
   }
@@ -327,12 +378,15 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       return false
     }
     if (message.kind === 'addonPage.ready') {
+      // webview 重载 = 新装载器生命周期的开始：对账基线归零后全量重推
+      //（同代次幂等重发；不归零会把重载误判为「已推送」而永远跳过）
+      record.pushed.clear()
       pushEditorDirectives(record)
       return true
     }
     if (message.kind === 'addonPage.outbound') {
-      handleOutboundFor((directive) => {
-        void record.webview.postMessage({ kind: 'addonPage.directive', directive })
+      handleOutboundFor('editor', (directive) => {
+        postDirective(record.webview, directive)
       })(message)
       return true
     }
@@ -381,10 +435,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     const desired = runtime.desiredSettingsLoad()
     if (desired === null) {
       if (record.pushed) {
-        void record.webview.postMessage({
-          kind: 'addonPage.directive',
-          directive: { type: 'addon.unload', addonId: record.pushed.addonId, generation: record.pushed.generation },
-        })
+        const directive: AddonPageDirective = { type: 'addon.unload', addonId: record.pushed.addonId, generation: record.pushed.generation }
+        recordEvent('settings', directiveEventOf(directive))
+        postDirective(record.webview, directive)
         record.pushed = null
       }
       return
@@ -392,10 +445,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     if (record.pushed && record.pushed.addonId === desired.addonId && record.pushed.generation === desired.generation) {
       return
     }
-    void record.webview.postMessage({
-      kind: 'addonPage.directive',
-      directive: { type: 'addon.load', manifest: buildManifest(record.webview, desired) },
-    })
+    const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, desired) }
+    recordEvent('settings', directiveEventOf(directive))
+    postDirective(record.webview, directive)
     record.pushed = { addonId: desired.addonId, generation: desired.generation }
   }
 
@@ -426,13 +478,16 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     }
     switch (message.kind) {
       case 'addonPage.ready': {
-        pushSettingsDirectives(ensureRecord())
+        const record = ensureRecord()
+        // 面板重载 = 新装载器：对账基线归零后全量重推（同编辑器面板语义）
+        record.pushed = null
+        pushSettingsDirectives(record)
         return true
       }
       case 'addonPage.outbound': {
         const record = ensureRecord()
-        handleOutboundFor((directive) => {
-          void record.webview.postMessage({ kind: 'addonPage.directive', directive })
+        handleOutboundFor('settings', (directive) => {
+          postDirective(record.webview, directive)
         })(message)
         return true
       }
@@ -519,6 +574,28 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       vscode.commands.registerCommand('onegayi.vsidian._test.addonReleaseGeneration', (args: { addonId: string }) => {
         registry.release(args.addonId)
         return true
+      }),
+      // #351 面板桥事件观测（指令推送与出站结局留痕；clear=true 清空）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonPageEvents', (args?: { clear?: boolean }) => {
+        const snapshot = [...addonPageEvents]
+        if (args?.clear) {
+          addonPageEvents.splice(0)
+        }
+        return snapshot
+      }),
+      // #351 打开/关闭组件设置页（设置页 UI 的宿主侧等价入口——面板须
+      // 已打开，装载意图变化由 runtime.onChanged 驱动推送）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonOpenSettingsPage', (args: { addonId: string }) =>
+        runtime.openSettingsPage(args.addonId)),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonCloseSettingsPage', () => {
+        runtime.closeSettingsPage()
+        return true
+      }),
+      // #351 启用偏好持久层快照（user/workspace 两层显式值——「停用选择
+      // 持久保留」的集成断言面；重启语义由单元测试「同 store 新实例」钉住）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonPreferences', () => {
+        const preferences = preferenceStore.read()
+        return { user: preferences.user, workspace: preferences.workspace }
       }),
     )
   }

@@ -59,6 +59,9 @@ const addonLoader = installAddonPageLoader({
   attachExtensions: (extensions) => controller.reconfigureAddonExtensions(extensions),
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
+// 装载器观测挂进 view.state 探针（集成断言面：活跃代次/授权样式表/释放
+// 历史与拒收计数；宿主经 view.state.request 拉取）
+controller.attachAddonPageProbe(() => addonLoader.stats())
 // 就绪上报（webview 重载后亦发）：宿主按期望装载清单幂等推送指令
 vscode.postMessage({ kind: 'addonPage.ready' })
 

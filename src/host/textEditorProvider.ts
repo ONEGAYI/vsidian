@@ -388,22 +388,37 @@ export function createTextEditorProvider(
   // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
   // 重赋可能触发 webview 资源状态重置，与 #128 片段目录同口径）+ 装载
   // 指令幂等对账（desired 为准；面板 ready 亦各自重拉） ----
+  // #351 T02 已授权附加组件资源根（只增不减口径——见下方块内注释）
+  const grantedAddonRoots: vscode.Uri[] = []
   if (addons) {
-    let lastAddonRootsKey = ''
+    // #351 T02 许可面只增不减：停用/故障使 desired 缩回时不收回已授
+    // 权的资源根——1.82.3 实测重赋 webview.options 会触发整页重载（装载
+    // 器随页面销毁重建、停用 unload 指令被投递到新装载器而落空），且
+    // ADR-0012 要求热切换「无需重开」。收回靠卸载指令（装载器释放贡献
+    // 与监听），不靠许可面缩容；已停用组件的页面代码随卸载不再运行，
+    // 许可面残留只影响未运行代码的静态可读性。
     const refreshAddonPanels = (): void => {
       const addonRoots = addons.editorResourceRoots()
-      const rootsKey = addonRoots.map((uri) => uri.toString()).sort().join('|')
-      const rootsChanged = rootsKey !== lastAddonRootsKey
-      lastAddonRootsKey = rootsKey
+      const known = new Set(grantedAddonRoots.map((uri) => uri.toString()))
+      const expanded = addonRoots.filter((uri) => !known.has(uri.toString()))
+      const rootsExpanded = expanded.length > 0
+      if (rootsExpanded) {
+        grantedAddonRoots.push(...expanded)
+      }
       for (const entry of sessions.values()) {
         for (const [sessionId, panel] of entry.panels) {
-          if (rootsChanged) {
-            panel.webview.options = {
-              enableScripts: true,
-              localResourceRoots: [
-                ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
-                ...addonRoots,
-              ],
+          if (rootsExpanded) {
+            try {
+              panel.webview.options = {
+                enableScripts: true,
+                localResourceRoots: [
+                  ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
+                  ...grantedAddonRoots,
+                ],
+              }
+            } catch {
+              // 面板销毁竞态（dispose 事件在途）：跳过许可面刷新——该面板
+              // 的装载器已随 webview 消亡，指令对账不再需要
             }
           }
           addons.pushDirectives(sessionId, panel.webview)
@@ -3667,6 +3682,15 @@ export function createTextEditorProvider(
           ...editorResourceRoots(context, document, snippets?.getState().directory ?? null),
           ...addons?.editorResourceRoots() ?? [],
         ],
+      }
+      // #351 T02 新面板初次授权即计入「已授面」：后续状态变化的许可面
+      // 刷新按只增不减口径（见 refreshAddonPanels 注释）
+      if (addons) {
+        for (const root of addons.editorResourceRoots()) {
+          if (!grantedAddonRoots.some((existing) => existing.toString() === root.toString())) {
+            grantedAddonRoots.push(root)
+          }
+        }
       }
       // 快照取一次（#93 语言与 #292 可读行宽预注入共用）
       const settingsSnapshot = settings?.service.getSnapshot()
