@@ -349,10 +349,23 @@ export function createSettingsPage(
       case 'addons.clearEnabledOverride':
       case 'addons.openAddonPage':
       case 'addons.closeAddonPage':
+      case 'addons.openLogs':
+      case 'addons.retry':
+      case 'addons.commandCatalogGet':
+      case 'addons.behaviorsSetDisabled':
+      case 'addons.behaviorsSetOrder':
       case 'addonPage.ready':
       case 'addonPage.outbound':
         if (current) {
           addons?.handleSettingsMessage(current.webview, message)
+        }
+        return
+      // ---- T08（#357）行为冲突管理载荷拉取（装载/重载的 ready 回填；权威
+      // 现算——目录变化与写操作后由 wiring 主动推送） ----
+      case 'addons.behaviorsGet':
+        if (addons) {
+          ready = true
+          void current?.webview.postMessage(addons.getBehaviorsState())
         }
         return
       case 'index.setPatterns':

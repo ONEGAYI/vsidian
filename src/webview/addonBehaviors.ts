@@ -34,6 +34,7 @@ import {
   isAddonBehaviorRegistration,
   resolveAddonBehaviorOrder,
   type AddonBehaviorChangeEvent,
+  type AddonBehaviorInfo,
   type AddonBehaviorInputPlan,
   type AddonBehaviorRegistration,
   type AddonBehaviorRuntimeStats,
@@ -59,6 +60,10 @@ export interface AddonBehaviorRuntimePorts {
   applyEdit(addonId: string, opId: string, instanceId: string, request: AddonApplyEditsRequest): Promise<AddonApplyEditsResult>
   /** 归因日志（阶段 + 组件 + 原因） */
   log(stage: string, addonId: string, detail: string): void
+  /** T08（#357）注册表全量对账上报（可选——main.ts 注入，单测可缺省）：
+   *  注册成功与整组件注销后各发一次该组件当前全表（空表 = 全撤信号），
+   *  宿主据此构建行为冲突管理目录。镜像 T10 addonCommands.report 形态。 */
+  report?(payload: { addonId: string; generation: number; behaviors: readonly AddonBehaviorInfo[] }): void
 }
 
 interface RegisteredBehavior {
@@ -100,17 +105,23 @@ export class AddonBehaviorRuntime {
       return { ok: false, reason: 'duplicate-id' }
     }
     this.behaviors.set(key, { addonId, generation, registration: input })
+    this.reportOf(addonId)
     return { ok: true, key }
   }
 
   /** 组件释放（卸载/故障）时整组注销（装载器 releaseLoad 驱动） */
   unregisterAddon(addonId: string): void {
+    let removed = false
     for (const [key, entry] of [...this.behaviors]) {
       if (entry.addonId === addonId) {
         this.behaviors.delete(key)
+        removed = true
       }
     }
     this.opIdAllocators.delete(addonId)
+    if (removed) {
+      this.reportOf(addonId)
+    }
   }
 
   /** 绑定该组件的 opId 分配器（装载器装载成功时注入；opId 体系与 T06
@@ -255,5 +266,21 @@ export class AddonBehaviorRuntime {
   /** 有效序（默认序 + 宿主覆盖；关闭项剔除） */
   private effectiveOrder(): string[] {
     return resolveAddonBehaviorOrder([...this.behaviors.keys()], this.hostState)
+  }
+
+  /** 该组件当前全表上报（空表 = 全撤信号；代次取该组件在场条目——空表
+   *  时无从取得，置 0 表示「不携带有效代次」，与 T10 reportOf 同口径） */
+  private reportOf(addonId: string): void {
+    const report = this.ports.report
+    if (report === undefined) {
+      return
+    }
+    const entries = [...this.behaviors.values()].filter((entry) => entry.addonId === addonId)
+    const generation = entries[0]?.generation ?? 0
+    report({
+      addonId,
+      generation,
+      behaviors: entries.map((entry) => addonBehaviorInfoOf(entry.addonId, entry.registration)),
+    })
   }
 }

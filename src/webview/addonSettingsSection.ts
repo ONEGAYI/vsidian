@@ -20,12 +20,18 @@
 import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import type { AddonStatusEntry } from '../shared/addonIdentity'
+import {
+  orderedAddonBehaviorKeys,
+  type AddonBehaviorInfo,
+  type AddonBehaviorStateStore,
+} from '../shared/addonBehaviors'
 import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
 import type { SettingsPageBridge, SettingsPageSection, SettingsSidebarGroup } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
 
 type AddonsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.state' }>
 type AddonSettingsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.settingsState' }>
+type AddonBehaviorsMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.behaviors' }>
 type AddonSettingsAreaPayload = AddonSettingsStateMessage['addon'] extends infer T ? T extends null ? never : NonNullable<T> : never
 
 /** 功能开关行的 data 键（与定义键空间区分——开关不是设置定义） */
@@ -34,9 +40,11 @@ const ENABLED_KEY = '__enabled__'
 /** 侧栏组件条目定位键前缀（mount 的 focusEntry 形如 addon:<组件 ID>） */
 const SIDEBAR_ADDON_ENTRY_PREFIX = 'addon:'
 
-/** 全局搜索定位入口 id（list = 状态列表；manage = 搜索与管理入口组） */
+/** 全局搜索定位入口 id（list = 状态列表；manage = 搜索与管理入口组；
+ *  behaviors = 行为冲突管理组——T08 #357） */
 export const ADDONS_SECTION_LIST_ENTRY = 'list'
 export const ADDONS_SECTION_MANAGE_ENTRY = 'manage'
+export const ADDONS_SECTION_BEHAVIORS_ENTRY = 'behaviors'
 
 /**
  * #354 T05 侧栏大组分组数据（ADR-0012「侧栏结构」与「分组与故障状态」）：
@@ -110,6 +118,8 @@ export class AddonSection implements SettingsPageSection {
   private state: AddonsStateMessage | undefined
   /** #353 T04 设置区载荷（addons.settingsState） */
   private settingsState: AddonSettingsStateMessage | undefined
+  /** T08（#357）行为冲突管理载荷（addons.behaviors；undefined = 未到达） */
+  private behaviorsState: AddonBehaviorsMessage | undefined
   /** 当前作用范围标签（本地 UI 态；推送重渲染保持） */
   private scope: 'user' | 'workspace' = 'user'
   /** 数组/对象的未保存草稿（定义键 → 草稿值；推送保留，保存成功清除） */
@@ -140,6 +150,11 @@ export class AddonSection implements SettingsPageSection {
         id: ADDONS_SECTION_MANAGE_ENTRY,
         title: t('addons.searchMarketplace'),
         description: t('addons.openExtensionsView'),
+      },
+      {
+        id: ADDONS_SECTION_BEHAVIORS_ENTRY,
+        title: t('addons.behaviorsGroupTitle'),
+        description: t('addons.behaviorsGroupHint'),
       },
     ]
   }
@@ -177,6 +192,13 @@ export class AddonSection implements SettingsPageSection {
       this.render()
       // #354 T05 组件状态变化 → 侧栏大组分组数据随之重建（视图刷新）
       this.onSidebarChange?.()
+      return
+    }
+    // T08（#357）行为冲突管理载荷：目录（注册表上报对账）与用户覆盖变化
+    // 都经此推送；notice 为最近一次写操作结局（常规推送缺省不残留）
+    if (message.kind === 'addons.behaviors') {
+      this.behaviorsState = message
+      this.render()
       return
     }
     if (message.kind === 'addons.settingsState') {
@@ -271,6 +293,10 @@ export class AddonSection implements SettingsPageSection {
     } else if (focusAddonId !== undefined) {
       listWrap.querySelector('.vsidian-settings-item-located')?.scrollIntoView?.({ block: 'nearest' })
     }
+
+    // ---- T08（#357）行为冲突管理（入口固定在本页：注册行为的调序与逐项
+    //  开关；目录未到达时呈现读取中，空目录呈现空态） ----
+    parent.append(this.renderBehaviorsArea(focusEntry))
 
     // ---- #353 T04 基础设置区（定义驱动；停用与故障后保留） ----
     const settingsArea = this.renderSettingsArea()
@@ -380,6 +406,165 @@ export class AddonSection implements SettingsPageSection {
     label.append(copy, buttons)
     item.append(label)
     return item
+  }
+
+  // ---- T08（#357）行为冲突管理 ----
+
+  /**
+   * 行为冲突管理组（入口固定）：管理单位是注册的具体行为（名称 + 所属
+   * 组件；说明/例子存在时按需展开）。行序按展示全序（关闭项保位呈现，
+   * orderedAddonBehaviorKeys——与链执行的有效序同口径）；单项开关与
+   * 调序经 addons.behaviorsSetDisabled/SetOrder 上送，结局由宿主推送
+   * addons.behaviors 权威回显。
+   */
+  private renderBehaviorsArea(focusEntry?: string): HTMLElement {
+    const area = document.createElement('section')
+    area.className = 'vsidian-addons-behaviors'
+    if (focusEntry === ADDONS_SECTION_BEHAVIORS_ENTRY) {
+      area.classList.add('vsidian-settings-item-located')
+    }
+    const title = document.createElement('h3')
+    title.className = 'vsidian-settings-group-title'
+    title.textContent = t('addons.behaviorsGroupTitle')
+    const hint = document.createElement('p')
+    hint.className = 'vsidian-addons-behaviors-hint'
+    hint.textContent = t('addons.behaviorsGroupHint')
+    area.append(title, hint)
+
+    const payload = this.behaviorsState
+    if (payload === undefined) {
+      const pending = document.createElement('p')
+      pending.className = 'vsidian-settings-empty'
+      pending.setAttribute('role', 'status')
+      pending.textContent = t('addons.behaviorsLoading')
+      area.append(pending)
+    } else if (payload.behaviors.length === 0) {
+      const empty = document.createElement('p')
+      empty.className = 'vsidian-settings-empty'
+      empty.textContent = t('addons.behaviorsEmpty')
+      area.append(empty)
+    } else {
+      const group = document.createElement('div')
+      group.className = 'vsidian-settings-group'
+      const disabledSet = new Set(payload.state === null ? [] : payload.state.disabled)
+      const store: AddonBehaviorStateStore | null = payload.state
+      const fullOrder = orderedAddonBehaviorKeys(payload.behaviors.map((entry) => `${entry.addonId}#${entry.id}`), store)
+      const byKey = new Map(payload.behaviors.map((entry) => [`${entry.addonId}#${entry.id}`, entry]))
+      fullOrder.forEach((key, index) => {
+        const behavior = byKey.get(key)
+        if (behavior !== undefined) {
+          group.append(this.renderBehaviorRow(behavior, fullOrder, index, disabledSet.has(key)))
+        }
+      })
+      area.append(group)
+      if (payload.notice !== undefined) {
+        const notice = document.createElement('p')
+        notice.className = `vsidian-addons-behaviors-notice vsidian-addons-behaviors-notice-${payload.notice.kind}`
+        notice.setAttribute('role', 'status')
+        notice.textContent = t(payload.notice.kind === 'saved' ? 'addons.behaviorsSavedNotice' : 'addons.behaviorsSaveFailedNotice')
+        area.append(notice)
+      }
+    }
+    if (focusEntry === ADDONS_SECTION_BEHAVIORS_ENTRY) {
+      area.scrollIntoView?.({ block: 'nearest' })
+    }
+    return area
+  }
+
+  /**
+   * 单条行为行：调序按钮（上移/下移——真实 button，Tab 可达 Enter/Space
+   * 原生激活；首末禁用）、名称、所属组件、状态徽章（单项关闭与整体停用/
+   * 故障互相区分）、单项开关（原生 checkbox）与说明/例子展开块。
+   */
+  private renderBehaviorRow(behavior: AddonBehaviorInfo, fullOrder: readonly string[], index: number, userDisabled: boolean): HTMLElement {
+    const key = `${behavior.addonId}#${behavior.id}`
+    const addonEntry = this.state?.addons.find((entry) => entry.id === behavior.addonId)
+    const item = document.createElement('div')
+    item.className = 'vsidian-addons-behaviors-row'
+    item.dataset.behaviorKey = key
+    const label = document.createElement('label')
+    label.className = 'vsidian-settings-item-label'
+    const copy = document.createElement('span')
+    copy.className = 'vsidian-settings-item-copy'
+    const title = document.createElement('span')
+    title.className = 'vsidian-settings-item-title'
+    title.textContent = behavior.name
+    const owner = document.createElement('span')
+    owner.className = 'vsidian-addons-behaviors-owner'
+    owner.textContent = t('addons.behaviorsOwnerLabel', { label: addonEntry?.label ?? behavior.addonId })
+    copy.append(title, owner)
+    // 状态徽章（互相区分）：单项关闭 = 用户逐项开关关闭（配置保留，可重开）；
+    // 组件已停用/故障暂停 = 整组件层面（行为行与单项配置仍在——配置不丢）
+    if (userDisabled) {
+      copy.append(this.behaviorBadge('addons.behaviorsItemDisabledBadge', 'off'))
+    }
+    if (addonEntry !== undefined && addonEntry.enabled === false) {
+      copy.append(this.behaviorBadge('addons.behaviorsAddonDisabledBadge', 'addon-off'))
+    }
+    if (addonEntry?.fault !== undefined) {
+      copy.append(this.behaviorBadge('addons.behaviorsFaultedBadge', 'faulted'))
+    }
+
+    // 调序按钮组（键盘可达；首行上移/末行下移禁用——边界不可越）
+    const orderControls = document.createElement('span')
+    orderControls.className = 'vsidian-addons-behaviors-order'
+    const move = (direction: 'up' | 'down', delta: number): HTMLButtonElement => {
+      const button = this.button(t(direction === 'up' ? 'addons.behaviorsMoveUpText' : 'addons.behaviorsMoveDownText'), () => {
+        const next = [...fullOrder]
+        const target = index + delta
+        ;[next[index], next[target]] = [next[target]!, next[index]!]
+        this.send({ kind: 'addons.behaviorsSetOrder', order: next })
+      }, 'vsidian-addons-behaviors-move')
+      button.dataset.behaviorMove = direction
+      button.setAttribute('aria-label', t(direction === 'up' ? 'addons.behaviorsMoveUpAria' : 'addons.behaviorsMoveDownAria', { name: behavior.name }))
+      button.disabled = direction === 'up' ? index === 0 : index === fullOrder.length - 1
+      return button
+    }
+    orderControls.append(move('up', -1), move('down', 1))
+
+    // 单项开关（勾选 = 开启；上送后由宿主权威推送回显）
+    const toggle = document.createElement('input')
+    toggle.type = 'checkbox'
+    toggle.className = 'vsidian-settings-checkbox'
+    toggle.checked = !userDisabled
+    toggle.dataset.behaviorKey = key
+    toggle.setAttribute('aria-label', t('addons.behaviorsToggleAria', { name: behavior.name }))
+    toggle.addEventListener('change', () => {
+      this.send({ kind: 'addons.behaviorsSetDisabled', keys: [key], disabled: !toggle.checked })
+    })
+    label.append(copy, orderControls, toggle)
+    item.append(label)
+
+    // 说明/例子（存在时按需展开——注册方不强制提供）
+    if (behavior.description !== undefined || behavior.examples !== undefined) {
+      const details = document.createElement('details')
+      details.className = 'vsidian-addons-behaviors-details'
+      const summary = document.createElement('summary')
+      summary.textContent = t('addons.behaviorsDetailsSummary')
+      details.append(summary)
+      if (behavior.description !== undefined) {
+        const desc = document.createElement('p')
+        desc.className = 'vsidian-addons-behaviors-description'
+        desc.textContent = behavior.description
+        details.append(desc)
+      }
+      if (behavior.examples !== undefined && behavior.examples.length > 0) {
+        const examples = document.createElement('p')
+        examples.className = 'vsidian-addons-behaviors-examples'
+        examples.textContent = t('addons.behaviorsExamplesLabel', { examples: behavior.examples.join('、') })
+        details.append(examples)
+      }
+      item.append(details)
+    }
+    return item
+  }
+
+  /** 行为状态徽章（kind 进类名——样式按状态区分） */
+  private behaviorBadge(key: 'addons.behaviorsItemDisabledBadge' | 'addons.behaviorsAddonDisabledBadge' | 'addons.behaviorsFaultedBadge', kind: string): HTMLElement {
+    const badge = document.createElement('span')
+    badge.className = `vsidian-addons-behaviors-badge vsidian-addons-behaviors-badge-${kind}`
+    badge.textContent = t(key)
+    return badge
   }
 
   // ---- #353 T04 基础设置区 ----

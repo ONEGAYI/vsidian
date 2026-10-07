@@ -13,6 +13,7 @@ import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
 import { addonT06Cases } from './addonT06Cases'
 import { addonT07Cases } from './addonT07Cases'
+import { addonT08Cases } from './addonT08Cases'
 import { addonT09Cases } from './addonT09Cases'
 import { addonT10Cases } from './addonT10Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -17361,6 +17362,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #356 T07：可组合输入行为与逐项注册状态（夹具组件经公开 behaviors 面
   // 注册行为链，断言面见 addonT07Cases.ts 头注）
   ...addonT07Cases,
+  // T08（#357）行为冲突管理：目录上报对账、真实设置页通道调序与单项
+  // 关闭、整体停用区分与恢复（断言面见 addonT08Cases.ts 头注）
+  ...addonT08Cases,
   // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
   // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
   ...addonT09Cases,

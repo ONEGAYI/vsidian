@@ -15,7 +15,7 @@ import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './ed
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './editOrigin'
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
-import { parseAddonBehaviorStateStore } from './addonBehaviors'
+import { isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
 import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
 
@@ -948,6 +948,17 @@ export type HostToWebview =
    *  （设置页快捷键分页合并展示与冲突检查的消费面；编辑器面板不消费）。
    *  设置页经 addons.commandCatalogGet 拉取，宿主目录变化后主动推送 */
   | { kind: 'addons.commandCatalog'; commands: import('./addonCommands').AddonCommandReport[] }
+  /** T08（#357）行为冲突管理载荷（宿主 → 设置页 webview）：behaviors 为
+   *  全部在场组件上报的注册行为表（AddonBehaviorInfo 数组，按完整键稳定
+   *  排序）；state 为用户覆盖（order/disabled，null = 无覆盖默认态）——
+   *  有效序由两端共用纯函数计算。notice 为最近一次写操作的结局提示（无
+   *  待呈现提示时缺省，常规推送不残留） */
+  | {
+    kind: 'addons.behaviors'
+    behaviors: import('./addonBehaviors').AddonBehaviorInfo[]
+    state: import('./addonBehaviors').AddonBehaviorStateStore | null
+    notice?: { kind: 'saved' | 'save-failed' }
+  }
   /** #359 T10 组件命令执行指令（宿主 → 编辑器 webview）：命令面板/宿主
    *  侧命令入口转发到活动面板执行（webview 按命令声明的生效模式复核后
    *  调组件回调；快捷键入口在 webview 本地分支直接执行不经本消息） */
@@ -1964,6 +1975,20 @@ export type WebviewToHost =
    *  装载代次内注册的可序列化声明集（空数组 = 全部撤销）；宿主按 addonId
    *  整组替换并重算生效表广播 */
   | { kind: 'addonRenderers.registered'; payload: import('./addonRenderers').AddonRenderersRegisteredPayload }
+  /** T08（#357）行为注册表全量对账上报（编辑器 webview → 宿主）：behaviors
+   *  注册成功与整组件注销（releaseLoad）后各发一次该组件当前全表（空表 =
+   *  全撤信号）；宿主据此构建行为冲突管理目录并推送设置页。behaviors 为
+   *  AddonBehaviorInfo 数组（序列化安全，无回调）。 */
+  | { kind: 'addon.behaviors.report'; addonId: string; generation: number; behaviors: import('./addonBehaviors').AddonBehaviorInfo[] }
+  /** T08（#357）设置页拉取行为冲突管理载荷（宿主以 addons.behaviors 应答；
+   *  注册表或用户状态变化时亦主动推送，webview 幂等对账） */
+  | { kind: 'addons.behaviorsGet' }
+  /** T08（#357）行为逐项开关写入（设置页 → 宿主；批量只动提及键）；写入
+   *  成功即推送全部活跃编辑器面板（热生效）并回推设置页权威态 */
+  | { kind: 'addons.behaviorsSetDisabled'; keys: string[]; disabled: boolean }
+  /** T08（#357）行为调序写入（设置页 → 宿主；order 为当前可见行为的完整
+   *  键新序——宿主与存储中不可见键锚定合并，配置不丢） */
+  | { kind: 'addons.behaviorsSetOrder'; order: string[] }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -4474,6 +4499,28 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addonRenderers.registered':
       // #358 T09 渲染候选上报内层守卫（单一事实源在 shared/addonRenderers）
       return isAddonRenderersRegisteredPayload(v.payload)
+    case 'addon.behaviors.report':
+      // T08（#357）行为注册表全量对账（形态守卫在 shared/addonBehaviors；
+      // 完整键唯一性由 webview 注册表保证——同 localId 拒绝重复注册）
+      return (
+        typeof v.addonId === 'string' &&
+        v.addonId.length > 0 &&
+        isNonNegativeInt(v.generation) &&
+        Array.isArray(v.behaviors) &&
+        v.behaviors.every((entry) => isAddonBehaviorInfo(entry))
+      )
+    case 'addons.behaviorsGet':
+      return true
+    case 'addons.behaviorsSetDisabled':
+      // T08（#357）逐项开关写入（批量只动提及键）
+      return (
+        Array.isArray(v.keys) &&
+        v.keys.every(isString) &&
+        typeof v.disabled === 'boolean'
+      )
+    case 'addons.behaviorsSetOrder':
+      // T08（#357）调序写入（当前可见行为完整键新序）
+      return Array.isArray(v.order) && v.order.every(isString)
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
         (v.detail === undefined || isString(v.detail))
@@ -5356,6 +5403,16 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addonRenderers.table':
       // #358 T09 生效表内层守卫（单一事实源在 shared/addonRenderers）
       return isAddonRenderersTablePayload(v.table)
+    case 'addons.behaviors':
+      // T08（#357）行为冲突管理载荷（注册表内层守卫在 shared/addonBehaviors；
+      // notice 为最近一次写操作结局，常规推送缺省不残留）
+      return (
+        Array.isArray(v.behaviors) &&
+        v.behaviors.every((entry) => isAddonBehaviorInfo(entry)) &&
+        (v.state === null || parseAddonBehaviorStateStore(v.state) !== null) &&
+        (v.notice === undefined ||
+          (isObject(v.notice) && (v.notice.kind === 'saved' || v.notice.kind === 'save-failed')))
+      )
     default:
       return false
   }

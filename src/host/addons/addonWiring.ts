@@ -36,6 +36,8 @@ import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from 
 import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type AddonSettingsLoadPlan } from './addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
 import { AddonBehaviorStateService } from './addonBehaviorStateService'
+import { AddonBehaviorCatalogService } from './addonBehaviorCatalogService'
+import { mergeBehaviorOrderPreservingUnknown } from '../../shared/addonBehaviors'
 import { AddonCommandService } from './addonCommandService'
 import { AddonRendererService, type AddonRendererPersistencePort } from './addonRendererService'
 import { isAddonRenderersRegisteredPayload } from '../../shared/addonRenderers'
@@ -89,6 +91,13 @@ export interface AddonPageWiring {
   getState(): { kind: 'addons.state' } & { apiVersion: string; draft: true; addons: readonly AddonStatusEntry[]; openAddonSettingsPage: string | null; openAddonSettings: string | null }
   /** #353 T04 addons.settingsState 消息载荷（基础设置区权威状态现算） */
   getSettingsState(): { kind: 'addons.settingsState' } & AddonSettingsStatePayload
+  /** T08（#357）addons.behaviors 消息载荷（行为冲突管理权威状态现算：
+   *  注册目录 + 用户覆盖 + 可选写操作 notice） */
+  getBehaviorsState(notice?: { kind: 'saved' | 'save-failed' }): { kind: 'addons.behaviors' } & {
+    behaviors: import('../../shared/addonBehaviors').AddonBehaviorInfo[]
+    state: import('../../shared/addonBehaviors').AddonBehaviorStateStore | null
+    notice?: { kind: 'saved' | 'save-failed' }
+  }
   /** 市场搜索（关键词仅搜索辅助：vsidian-addon） */
   openSearch(): void
   /** VSCode 扩展管理视图 */
@@ -264,6 +273,12 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     installDirOf: (addonId) => vscode.extensions.getExtension(addonId)?.extensionUri.fsPath,
     log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
   })
+  // T08（#357）行为注册目录：编辑器面板上报对账（runState 门控与 T10 命令
+  // 服务同口径）；停用/故障回收经下方 runtime.onChanged reconcile
+  const behaviorCatalog = new AddonBehaviorCatalogService({
+    runStateOf: (addonId) => runtime.runtimeStatus(addonId)?.runState,
+    log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
+  })
   const registry = new AddonRegistry(
     createDefaultRegistryPorts((id) => vscode.extensions.getExtension(id)),
     runtime.registryHooks(),
@@ -420,6 +435,25 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       hasWorkspace: hostHasWorkspace(),
       addon: open === null ? null : buildSettingsArea(open),
       openAddonSettingsPage: runtime.openSettingsAddonId() ?? null,
+    }
+  }
+
+  /** T08（#357）addons.behaviors 消息载荷（注册目录 + 用户覆盖 + 可选
+   *  写操作 notice；postBehaviorCatalog 推送与 settingsPage 拉取应答共用） */
+  const buildBehaviorsState = (notice?: { kind: 'saved' | 'save-failed' }): { kind: 'addons.behaviors' } & {
+    behaviors: import('../../shared/addonBehaviors').AddonBehaviorInfo[]
+    state: import('../../shared/addonBehaviors').AddonBehaviorStateStore | null
+    notice?: { kind: 'saved' | 'save-failed' }
+  } => {
+    const snapshot = behaviorStateService.snapshot()
+    const state = snapshot.order.length === 0 && snapshot.disabled.length === 0
+      ? null
+      : { version: 1 as const, order: snapshot.order, disabled: snapshot.disabled }
+    return {
+      kind: 'addons.behaviors',
+      behaviors: behaviorCatalog.catalog(),
+      state,
+      ...(notice !== undefined ? { notice } : {}),
     }
   }
 
@@ -582,6 +616,19 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       void webview.postMessage({ kind: 'addon.behaviors.state', state }).then(undefined, () => {})
     } catch {
       // 面板已销毁：下次对账（ready/状态变化）重推
+    }
+  }
+
+  /**
+   * T08（#357）行为冲突管理载荷下发（设置页消费：注册目录 + 用户覆盖 +
+   * 最近写操作 notice）。常规推送不带 notice（不残留旧结局）；面板销毁
+   * 静默容忍（重开经 addons.behaviorsGet 拉取权威态）。
+   */
+  const postBehaviorCatalog = (webview: vscode.Webview, notice?: { kind: 'saved' | 'save-failed' }): void => {
+    try {
+      void webview.postMessage(buildBehaviorsState(notice)).then(undefined, () => {})
+    } catch {
+      // 面板已销毁：下次装载经 addons.behaviorsGet 拉取
     }
   }
 
@@ -755,6 +802,18 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         topic: `commands:${message.commands.length}`,
       })
       commandService.syncReport(message.addonId, message.generation, message.commands)
+      return true
+    }
+    // T08（#357）行为注册表全量对账上报（行为 runtime 驱动；runState 门控
+    // 与整组件替换在目录服务内——空表即全撤信号）
+    if (message.kind === 'addon.behaviors.report') {
+      recordEvent('editor', {
+        kind: 'outbound.behaviorReport',
+        addonId: message.addonId,
+        generation: message.generation,
+        topic: `behaviors:${message.behaviors.length}`,
+      })
+      behaviorCatalog.syncReport(message.addonId, message.generation, message.behaviors)
       return true
     }
     return false
@@ -977,6 +1036,29 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         }
         return true
       }
+      // ---- T08（#357）行为冲突管理写入（设置页 UI 的正式通道；拉取由
+      // settingsPage 经 page.getBehaviorsState 直接应答，同 addons.get 模式） ----
+      case 'addons.behaviorsSetDisabled': {
+        // 逐项开关写入（批量只动提及键）：成功/失败都以权威态回推设置页
+        //（失败时勾选回弹——不虚报成功）；成功路径 behaviorStateService
+        // onChanged 的常规推送已覆盖编辑器面板与设置页
+        void behaviorStateService.setDisabled(message.keys, message.disabled).then((result) => {
+          postBehaviorCatalog(webview, result.ok ? { kind: 'saved' } : { kind: 'save-failed' })
+        })
+        return true
+      }
+      case 'addons.behaviorsSetOrder': {
+        // 调序写入：UI 只提交当前可见行为的新序——与存储中不可见键（组件
+        // 停用/无面板上报）锚定合并后落库，配置不丢（票面验收）
+        const merged = mergeBehaviorOrderPreservingUnknown(
+          message.order,
+          behaviorStateService.snapshot().order,
+        )
+        void behaviorStateService.setOrder(merged).then((result) => {
+          postBehaviorCatalog(webview, result.ok ? { kind: 'saved' } : { kind: 'save-failed' })
+        })
+        return true
+      }
       default:
         return false
     }
@@ -985,6 +1067,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   const page: AddonPageWiring = {
     getState,
     getSettingsState,
+    getBehaviorsState: (notice) => buildBehaviorsState(notice),
     openSearch: () => {
       // 关键词仅帮助市场寻找（vsidian-addon）；不代表接入协议或官方身份
       void vscode.commands.executeCommand('workbench.extensions.search', '@keyword:"vsidian-addon"')
@@ -1042,6 +1125,13 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   const offRuntimeChanged = runtime.onChanged(() => {
     // #359 T10：状态变化后对账命令目录（停用/故障/代次释放 → 整组件回收）
     reconcileCommandService()
+    // T08（#357）：状态变化后对账行为目录（停用/故障/代次释放 → 整组件
+    // 回收；编辑器面板全部关闭不清目录——设置页仍可管理最后已知注册面）
+    for (const addonId of behaviorCatalog.addonIds()) {
+      if (runtime.runtimeStatus(addonId)?.runState !== 'enabled') {
+        behaviorCatalog.releaseAddon(addonId)
+      }
+    }
     notifyAddonPanels()
   })
   // #359 T10：命令目录变化 → 设置页目录推送（快捷键分页合并展示对账）
@@ -1063,10 +1153,22 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   })
 
   // T07（#356）行为状态变化（排序/开关成功落库后）→ 全部活跃编辑器面板
-  // 即时推送（webview runtime applyHostState 即时生效——不经 CM6 装配）
+  // 即时推送（webview runtime applyHostState 即时生效——不经 CM6 装配）；
+  // T08（#357）起设置页同步回推权威态（管理列表勾选与次序回显）
   behaviorStateService.onChanged(() => {
     for (const record of [...editorPanels.values()]) {
       postBehaviorState(record.webview)
+    }
+    if (settingsPanel) {
+      postBehaviorCatalog(settingsPanel.webview)
+    }
+  })
+
+  // T08（#357）行为注册目录变化（上报对账/回收）→ 设置页推送（编辑器面板
+  // 不消费目录——链执行以本页 runtime 注册表为准）
+  const offBehaviorCatalogChanged = behaviorCatalog.onChanged(() => {
+    if (settingsPanel) {
+      postBehaviorCatalog(settingsPanel.webview)
     }
   })
 
@@ -1157,6 +1259,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         behaviorStateService.setDisabled(args.keys, args.disabled)),
       vscode.commands.registerCommand('onegayi.vsidian._test.addonBehaviorSetOrder', (args: { order: string[] }) =>
         behaviorStateService.setOrder(args.order)),
+      // T08（#357）行为注册目录快照（集成断言面：上报对账与停用回收）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonBehaviorCatalog', () =>
+        behaviorCatalog.catalog()),
       // #359 T10 组件命令目录与宿主命令观测（集成的断言面：目录快照 +
       //  事件留痕，clear=true 清空）
       vscode.commands.registerCommand('onegayi.vsidian._test.addonCommands', (args?: { clear?: boolean }) => {
@@ -1196,6 +1301,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     dispose: () => {
       offRuntimeChanged()
       offCommandCatalogChanged()
+      offBehaviorCatalogChanged()
       commandService.dispose()
       offRendererRuntimeChanged()
       runtime.dispose()

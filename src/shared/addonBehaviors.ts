@@ -236,10 +236,88 @@ export function resolveAddonBehaviorOrder(
   registeredKeys: readonly string[],
   store: AddonBehaviorStateStore | null,
 ): string[] {
+  const disabled = store === null ? new Set<string>() : new Set(store.disabled)
+  return orderedAddonBehaviorKeys(registeredKeys, store).filter((key) => !disabled.has(key))
+}
+
+/** T08（#357）展示全序：与 resolveAddonBehaviorOrder 同一口径，但**保留
+ * 关闭项在原位**——行为冲突管理列表要呈现已关闭的行为（勾选态另呈，
+ * 用户需要辨认与重新开启）；null store = 无覆盖（默认序全开启）。 */
+export function orderedAddonBehaviorKeys(
+  registeredKeys: readonly string[],
+  store: AddonBehaviorStateStore | null,
+): string[] {
   const registered = new Set(registeredKeys)
   const listed = store === null ? [] : store.order.filter((key) => registered.has(key))
   const listedSet = new Set(listed)
   const appended = registeredKeys.filter((key) => !listedSet.has(key)).sort()
-  const disabled = store === null ? new Set<string>() : new Set(store.disabled)
-  return [...listed, ...appended].filter((key) => !disabled.has(key))
+  return [...listed, ...appended]
+}
+
+/** T08（#357）调序落库的未知项保留合并：管理 UI 只提交当前可见（已注册）
+ * 行为的新序，本函数把存储中不可见的键（组件停用/无面板上报）按「锚定
+ * 到原序列中前一个可见键之后」的规则并回新序——整组件停用期间的其他
+ * 调序不丢该组件行为的位置配置，重新注册后回到锚定相对位（票面「整体
+ * 停用与单项关闭互相区分、配置不丢」的存储面）。 */
+export function mergeBehaviorOrderPreservingUnknown(
+  nextOrder: readonly string[],
+  previousOrder: readonly string[],
+): string[] {
+  const next = [...new Set(nextOrder)]
+  const nextSet = new Set(next)
+  // 不可见键按原序列锚点分组（null = 首个可见键之前）
+  const anchored = new Map<string | null, string[]>([[null, []]])
+  let anchor: string | null = null
+  for (const key of previousOrder) {
+    if (nextSet.has(key)) {
+      anchor = key
+      if (!anchored.has(anchor)) {
+        anchored.set(anchor, [])
+      }
+    } else if (anchored.get(anchor)!.includes(key)) {
+      continue // 历史重复只保留一次
+    } else {
+      anchored.get(anchor)!.push(key)
+    }
+  }
+  const merged: string[] = [...anchored.get(null)!]
+  for (const key of next) {
+    merged.push(key)
+    merged.push(...(anchored.get(key) ?? []))
+  }
+  return merged
+}
+
+/** T08（#357）行为信息序列化守卫：上报载荷（addon.behaviors.report 内层）
+ * 来自 webview，进宿主目录前先过形态（与注册守卫同口径；回调不在信息面，
+ * 无函数字段）。 */
+export function isAddonBehaviorInfo(v: unknown): v is AddonBehaviorInfo {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    return false
+  }
+  const candidate = v as Record<string, unknown>
+  if (typeof candidate.addonId !== 'string' || candidate.addonId.length === 0) {
+    return false
+  }
+  if (!isUsableLocalId(candidate.id)) {
+    return false
+  }
+  if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0 ||
+    candidate.name.length > BEHAVIOR_NAME_LIMIT) {
+    return false
+  }
+  if (candidate.description !== undefined &&
+    (typeof candidate.description !== 'string' || candidate.description.length > BEHAVIOR_DESCRIPTION_LIMIT)) {
+    return false
+  }
+  if (candidate.examples !== undefined) {
+    if (!Array.isArray(candidate.examples) || candidate.examples.length > BEHAVIOR_EXAMPLES_MAX ||
+      !candidate.examples.every((item) => typeof item === 'string' && item.length > 0 && item.length <= BEHAVIOR_EXAMPLE_LIMIT)) {
+      return false
+    }
+  }
+  if (candidate.exclusiveGroup !== undefined && !isUsableLocalId(candidate.exclusiveGroup)) {
+    return false
+  }
+  return candidate.history === 'atomic' || candidate.history === 'joinPrevious'
 }

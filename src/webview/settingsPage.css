@@ -633,3 +633,39 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
   color: var(--vscode-button-secondaryForeground, inherit);
   background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
 .vsidian-addons-custompage-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+
+/* ---- T08（#357）行为冲突管理：注册行为的调序与逐项开关（内部样式，
+   非公开样式契约入口；与 vsidian-addons-* 族同口径——全部内部类名，
+   不入 styleContract 清单） ---- */
+.vsidian-addons-behaviors { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.vsidian-addons-behaviors h3 { margin: 0; }
+.vsidian-addons-behaviors-hint { margin: 0; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-addons-behaviors .vsidian-settings-group { gap: 8px; }
+.vsidian-addons-behaviors-row { display: flex; flex-direction: column; gap: 4px; }
+.vsidian-addons-behaviors-row > label { align-items: center; }
+.vsidian-addons-behaviors-owner { display: block; margin-top: 2px;
+  color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
+.vsidian-addons-behaviors-order { display: inline-flex; gap: 4px; flex: none; }
+.vsidian-addons-behaviors-move { min-height: 22px; min-width: 40px; padding: 2px 8px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-behaviors-move:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-behaviors-move:disabled { opacity: 0.5; cursor: default; }
+.vsidian-addons-behaviors-badge { display: inline-block; margin-top: 4px; margin-right: 6px; padding: 0 6px; min-height: 16px;
+  border-radius: 999px; font-size: 11px; line-height: 16px; }
+.vsidian-addons-behaviors-badge-off { border: 1px solid var(--vscode-panel-border, #cbd0d8);
+  color: var(--vscode-descriptionForeground, #666); }
+.vsidian-addons-behaviors-badge-addon-off { border: 1px solid var(--vscode-panel-border, #cbd0d8);
+  color: var(--vscode-descriptionForeground, #666); background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-addons-behaviors-badge-faulted { border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  color: var(--vscode-errorForeground, #f66); }
+.vsidian-addons-behaviors-details { padding: 0 2px 4px; }
+.vsidian-addons-behaviors-details summary { cursor: pointer; color: var(--vscode-descriptionForeground, #666);
+  min-height: 22px; display: inline-flex; align-items: center; }
+.vsidian-addons-behaviors-details summary:focus-visible { outline: 1px solid var(--vscode-focusBorder, #2687d4); outline-offset: 1px; }
+.vsidian-addons-behaviors-description, .vsidian-addons-behaviors-examples { margin: 4px 0 0; color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
+.vsidian-addons-behaviors-examples code { padding: 0 4px; border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background, #f4f5f7)); }
+.vsidian-addons-behaviors-notice { margin: 0; min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-addons-behaviors-notice-save-failed { color: var(--vscode-errorForeground, #f66); }
