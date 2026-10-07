@@ -214,6 +214,7 @@ import {
   MERMAID_CLASS_NAMES,
   MERMAID_CODE_ATTR,
   MERMAID_STATE_ATTR,
+  dynamicRenderedFenceLanguageSnapshot,
   setDynamicRenderedFenceLanguages,
 } from '../shared/mermaid'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
@@ -9938,6 +9939,9 @@ export class WebviewSyncController {
       renderers: {
         containers: rendererContainers,
         builtinSvg: rendererScope.querySelectorAll('.vsidian-mermaid svg').length,
+        // #361 T12 诊断观测（非断言面）：webview 桥生效表与动态语言集快照
+        tableVersion: addonRenderersBridge()?.currentTable()?.version ?? null,
+        dynamicLanguages: [...dynamicRenderedFenceLanguageSnapshot()],
       },
       imageChrome,
       quickActions,

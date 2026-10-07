@@ -91,6 +91,8 @@ async function rendererTable(): Promise<RendererTable> {
 interface PaintRenderers {
   containers: Array<{ provider: string; language: string; width: number; state: string }>
   builtinSvg: number
+  tableVersion?: number | null
+  dynamicLanguages?: string[]
 }
 
 async function paintRenderers(file: string): Promise<PaintRenderers | undefined> {
@@ -169,15 +171,25 @@ async function openWithContributions(): Promise<void> {
     const probe = await paintRenderers('t12-fault.md')
     const hit = probe?.containers.find((c) => c.provider === `${ADDON_ID}/graph` && c.language === 't12graph' && c.width > 0 && c.state === 'rendered')
     return hit ? true : undefined
+  }, 30000).catch(async (err) => {
+    const probe = await paintRenderers('t12-fault.md')
+    throw new Error(`${err.message}；诊断：containers=${JSON.stringify(probe?.containers ?? null)} tableVersion=${JSON.stringify(probe?.tableVersion ?? undefined)} dynamicLanguages=${JSON.stringify(probe?.dynamicLanguages ?? undefined)}`)
   })
 }
 
-/** 重新触发 t12graph 围栏渲染（改写源码驱动重挂载） */
+/**
+ * 重新触发 t12graph 围栏渲染（经 WorkspaceEdit 全文替换——TextDocument
+ * 权威编辑经 session 写回链推送 webview，围栏区间变化驱动 widget 换新与
+ * mount 重跑；fs 直写只落盘不触发 webview 重挂载——T11 先例的 fs 写均
+ * 伴随面板重开，本组面板保持在场，须走编辑链）
+ */
 async function rewriteFenceSource(code: string): Promise<void> {
   const doc = await vscode.workspace.openTextDocument(wsUri('t12-fault.md'))
-  const text = doc.getText()
-  const next = text.replace('t12-source', code)
-  await vscode.workspace.fs.writeFile(wsUri('t12-fault.md'), Buffer.from(next, 'utf8'))
+  const next = doc.getText().replace('t12-source', code)
+  const edit = new vscode.WorkspaceEdit()
+  edit.replace(wsUri('t12-fault.md'), new vscode.Range(0, 0, doc.lineCount, 0), next)
+  const applied = await vscode.workspace.applyEdit(edit)
+  assert(applied, 'WorkspaceEdit 应被接受')
   await poll('盘面改写生效', async () => {
     const d = await vscode.workspace.openTextDocument(wsUri('t12-fault.md'))
     return d.getText() === next ? d : undefined

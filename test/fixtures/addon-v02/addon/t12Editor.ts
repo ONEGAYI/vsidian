@@ -187,12 +187,12 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
         if (outcome.reason === 'released') {
           return
         }
-        await new Promise((resolve) => setTimeout(resolve, 100))
+        await new Promise((resolve) => setTimeout(resolve, 1000))
         continue
       }
       const answer = outcome.result as { command: T12Command | null; arm: string | null } | null
       if (!answer) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
+        await new Promise((resolve) => setTimeout(resolve, 1000))
         continue
       }
       if (answer.arm !== armView) {

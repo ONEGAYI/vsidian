@@ -2492,6 +2492,10 @@ export interface PaintProbe {
       width: number
     }>
     builtinSvg: number
+    /** #361 T12 诊断观测：webview 桥生效表版本（null = 桥侧无表） */
+    tableVersion?: number | null
+    /** #361 T12 诊断观测：动态渲染型围栏语言集快照（发射判定的输入面） */
+    dynamicLanguages?: string[]
   }
   /** 首个含文本行：首字符 rect 在视口内且 elementFromPoint 命中内容区。
    *  覆盖物（冲突暂停横幅、查找面板等绝对定位元素）遮挡首 8 行文本时同样
