@@ -1,0 +1,26 @@
+{
+  "name": "vsidian-example-ui-command",
+  "publisher": "vsidian-example",
+  "displayName": "Vsidian Example: UI & Command",
+  "description": "Standalone example add-on for Vsidian: own commands, context menu entry, toolbar buttons, a stats panel, layered settings with a custom settings page (T15, #364).",
+  "version": "0.1.0",
+  "license": "MIT",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-example.ui-command.stats", "title": "Example UI: stats" },
+      { "command": "vsidian-example.ui-command.armUi", "title": "Example UI: arm UI contributions" },
+      { "command": "vsidian-example.ui-command.disarmUi", "title": "Example UI: disarm UI contributions" },
+      { "command": "vsidian-example.ui-command.armCrash", "title": "Example UI: arm crash injection" },
+      { "command": "vsidian-example.ui-command.releaseAndReRegister", "title": "Example UI: release and re-register" },
+      { "command": "vsidian-example.ui-command.collect", "title": "Example UI: collect events" },
+      { "command": "vsidian-example.ui-command.reset", "title": "Example UI: reset event inbox" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./dist/extension.js"
+}
