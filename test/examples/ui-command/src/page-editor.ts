@@ -230,21 +230,29 @@ defineAddonPage(ADDON_ID, async (sdk: VsidianAddonPageSdk) => {
       el.className = 'sample-ui-panel'
       const body = document.createElement('div')
       body.className = 'sample-ui-panel-body'
+      // 同步占位内容（面板内容根立即非空——可见性不依赖异步快照完成）
+      body.textContent = '…'
       el.append(body)
       panelBody = body
       void (async () => {
         const handle = target()
         if (!handle) {
           renderPanelBody({ chars: 0, lines: 0 }, null)
+          report({ kind: 'panelMounted', chars: 0, lines: 0, mode: '-' })
           return
         }
         const snapshot = await handle.editor.getSnapshot()
         if (!snapshot.ok) {
           renderPanelBody({ chars: 0, lines: 0 }, handle)
+          report({ kind: 'panelMounted', chars: 0, lines: 0, mode: handle.info.mode })
           return
         }
-        renderPanelBody(summarizeOf(snapshot.snapshot.text), handle)
-      })().catch(() => {})
+        const summary = summarizeOf(snapshot.snapshot.text)
+        renderPanelBody(summary, handle)
+        report({ kind: 'panelMounted', ...summary, mode: handle.info.mode, viewId: handle.info.instanceId })
+      })().catch(() => {
+        // 快照失败保持占位内容（面板内容根非空；下次 mount 重试）
+      })
     },
     unmount: () => {
       panelBody = null

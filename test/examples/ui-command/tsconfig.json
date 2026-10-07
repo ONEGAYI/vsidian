@@ -15,7 +15,7 @@
     "esModuleInterop": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": ["vscode"]
+    "types": ["node", "vscode"]
   },
   "include": ["src"]
 }

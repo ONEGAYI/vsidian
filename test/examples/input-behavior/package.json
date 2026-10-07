@@ -1,5 +1,5 @@
 {
-  "name": "vsidian-example-input-behavior",
+  "name": "input-behavior",
   "publisher": "vsidian-example",
   "displayName": "Vsidian Example: Input Behavior",
   "description": "Standalone example add-on for Vsidian: composable input behaviors (CJK/Latin smart spacing, paren completion, fullwidth punctuation) consuming only the public SDK (T15, #364).",

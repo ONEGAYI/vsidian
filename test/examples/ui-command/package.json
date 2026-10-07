@@ -1,5 +1,5 @@
 {
-  "name": "vsidian-example-ui-command",
+  "name": "ui-command",
   "publisher": "vsidian-example",
   "displayName": "Vsidian Example: UI & Command",
   "description": "Standalone example add-on for Vsidian: own commands, context menu entry, toolbar buttons, a stats panel, layered settings with a custom settings page (T15, #364).",

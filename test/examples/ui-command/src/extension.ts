@@ -1,7 +1,7 @@
 // #364 T15 界面样例——宿主入口（独立扩展的 extension.ts）。
 //
 // 消费面（全部经公开路径）：
-// - setup（T04/T05 复杂设置）：五条设置定义覆盖三形态（enum 标量 /
+// - setup（T04/T05 复杂设置）：四条设置定义覆盖三形态（enum 标量 /
 //   boolean / 对象字段表 / 字符串数组）+ registerPage 登记自己的设置页
 //   （dist/settings.js——普通停用后仍可配置）+ 设置通信通道（设置页与
 //   编辑器页共用读取，写入经公开 settings.update 按批校验）；
@@ -143,7 +143,7 @@ function registerSelf(definition: AddonDefinition): { ok: boolean; reason?: stri
   return stats.lastRegisterResult
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+async function activate(context: vscode.ExtensionContext): Promise<void> {
   stats.activateCount++
   const m = pickMessages(vscode.env.language)
   const ext = vscode.extensions.getExtension(HOST_ID)
@@ -203,4 +203,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   )
 }
 
-export function deactivate(): void {}
+function deactivate(): void {}
+
+// VSCode 扩展宿主契约：activate/deactivate 经 module.exports 公布。不用
+// ESM export——esbuild CJS bundle 会把无 bundle 内消费者的入口导出消除为
+// 死代码（0&&module.exports=...），显式赋值是可靠保留形态。
+module.exports = { activate, deactivate }

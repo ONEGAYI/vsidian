@@ -1,5 +1,5 @@
 {
-  "name": "vsidian-example-renderer",
+  "name": "renderer",
   "publisher": "vsidian-example",
   "displayName": "Vsidian Example: Renderer",
   "description": "Standalone example add-on for Vsidian: renderer providers taking over the built-in mermaid language and a plain language with user preference, fault downgrade and self-handled bugs (T15, #364).",

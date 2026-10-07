@@ -913,6 +913,25 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '正文一段', '',
     '```t12graph', 't12-source', '```', '',
   ].join('\n'), 'utf8')
+  // #364 T15 输入样例：中英文混排基线（样例行为链在中文与拉丁/半角标点
+  // 间修饰——键入驱动经 table.test.domType，断言面为文档文本）
+  writeFileSync(path.join(wsDir, 't15-input.md'), [
+    '# T15 输入样例', '',
+    '中文对照行', '',
+  ].join('\n'), 'utf8')
+  // #364 T15 渲染样例：内置 mermaid 围栏（样例接管语言）+ sampleflow
+  // 围栏（普通语言——双候选确定性选择与用户首选的断言面）
+  writeFileSync(path.join(wsDir, 't15-render.md'), [
+    '# T15 渲染样例', '',
+    '```mermaid', 'flowchart TD', '  A --> B', '```', '',
+    '```sampleflow', 'step-one', 'step-two', '```', '',
+  ].join('\n'), 'utf8')
+  // #364 T15 界面样例：普通正文（命令插入时间戳、面板统计的驱动文档）
+  writeFileSync(path.join(wsDir, 't15-ui.md'), [
+    '# T15 界面样例', '',
+    '正文一段。', '',
+    '正文二段。', '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'ackorder.md'), ACKORDER_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'resync.md'), RESYNC_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'ime-escape.md'), IME_ESC_DOC, 'utf8')

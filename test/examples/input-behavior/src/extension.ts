@@ -96,7 +96,7 @@ function registerSelf(definition: AddonDefinition): { ok: boolean; reason?: stri
   return stats.lastRegisterResult
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+async function activate(context: vscode.ExtensionContext): Promise<void> {
   stats.activateCount++
   const m = pickMessages(vscode.env.language)
   const ext = vscode.extensions.getExtension(HOST_ID)
@@ -142,4 +142,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   )
 }
 
-export function deactivate(): void {}
+function deactivate(): void {}
+
+// VSCode 扩展宿主契约：activate/deactivate 经 module.exports 公布。不用
+// ESM export——esbuild CJS bundle 会把无 bundle 内消费者的入口导出消除为
+// 死代码（0&&module.exports=...），显式赋值是可靠保留形态。
+module.exports = { activate, deactivate }

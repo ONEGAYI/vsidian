@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
 import { buildTestAddons } from '../fixtures/addon-v02/sdk/buildAddon.mjs'
+import { buildAllExamples, EXAMPLE_PROJECTS } from '../examples/tools/buildLib.mjs'
 import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, evaluateHostReport, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -73,6 +74,13 @@ const testCacheDir = path.join(root, '.vscode-test')
 const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-t06', 'addon-t07', 'addon-t09', 'addon-t10', 'addon-t11', 'addon-t12', 'addon-escape'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
+// #364 T15 三套独立消费样例（test/examples/——独立 VSCode 扩展工程，产物
+// 由共享构建库生成到各工程 dist/）：以附加 development path 装载，供集成
+// 用例断言「独立工程经公开接入从安装/注册到可见结果」。样例页面的贡献
+// 注册默认惰性（VSIDIAN_TEST_HOOKS 会话判据，见各工程 extension.ts 头注）
+// ——不毒化共享套件的其他用例；T15 用例经样例自己的 arm 命令按需放行。
+const ADDON_EXAMPLE_PATHS = EXAMPLE_PROJECTS.map((name) => path.join(root, 'test', 'examples', name))
+
 // #354 T05 逃逸夹具装配：addon-escape/escape 在运行期创建为 junction，
 // 指向安装目录外的临时目录（Windows junction 与符号链接同语义且无需
 // 管理员权限；junction 不入库——git 会把 reparse point 当目录穿透跟踪
@@ -104,6 +112,10 @@ cpSync(addonLayout.t11Addon.distDir, path.join(root, 'test', 'integration', 'add
 console.log('[runTest] T11 夹具组件页面产物已构建并拷入 addonFixtures/addon-t11/dist')
 cpSync(addonLayout.t12Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t12', 'dist'), { recursive: true })
 console.log('[runTest] T12 夹具组件页面产物已构建并拷入 addonFixtures/addon-t12/dist')
+// #364 T15：三套独立消费样例构建（页面 IIFE + 宿主 CJS + 产物扫描——
+// 构建通过即扫描通过；产物在各工程 dist/，git 忽略不入库）
+await buildAllExamples({ log: () => {} })
+console.log('[runTest] T15 样例工程已构建（test/examples/*/dist——三工程产物扫描通过）')
 const started = Date.now()
 try {
   // 所有宿主结束后再清理便携目录；若一片启动异常，也不能清理仍在运行的其他片。
@@ -133,8 +145,9 @@ try {
         userDataDir: portable.userDataDir,
         disableExtensions: true,
         // #350 T01 附加组件夹具：以附加 development path 装载——与被测扩
-        // 展同宿主，供集成用例断言发现、兼容检查、唤醒与状态呈现
-        extraExtensionPaths: ADDON_FIXTURE_PATHS,
+        // 展同宿主，供集成用例断言发现、兼容检查、唤醒与状态呈现；
+        // #364 T15：独立样例工程同通道装载（公开接入端到端的装配面）
+        extraExtensionPaths: [...ADDON_FIXTURE_PATHS, ...ADDON_EXAMPLE_PATHS],
       })
       // CI 的 xvfb 虚拟显示无 GPU，Electron GPU 进程反复崩溃会拖垮 webview 面板
       if (process.env.CI) {

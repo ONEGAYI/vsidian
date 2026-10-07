@@ -88,7 +88,7 @@ defineAddonPage(ADDON_ID, async (sdk: VsidianAddonPageSdk) => {
   /** 主选区光标（快照 head） */
   const cursorOf = (ctx: AddonInputContext): number => ctx.snapshot.selections[0]?.head ?? 0
 
-  // ---- 行为 1：中英文之间自动空格（atomic——显式声明） ----
+  // ---- 行为 1：中英文之间自动空格（atomic——显式声明独立撤回边界） ----
   const smartSpace = behaviors.register({
     id: 'cjk-latin-space',
     name: m.behaviorSmartSpace,
@@ -100,21 +100,29 @@ defineAddonPage(ADDON_ID, async (sdk: VsidianAddonPageSdk) => {
         return null
       }
       const head = cursorOf(ctx)
-      if (head === 0) {
+      // 输入点 = 净插入文本之前（快照已含本次输入）；「前一字符」取输入点
+      // 之前的字符——不是刚输入的字符本身
+      const pos = head - ctx.inputText.length
+      if (pos < 1) {
         return null
       }
-      // 快照已含本次输入：…中a| → 在「中」与「a」之间插空格，光标随之后移
-      if (!CJK_CHAR.test(ctx.snapshot.text[head - 1])) {
+      if (!CJK_CHAR.test(ctx.snapshot.text[pos - 1])) {
         return null
       }
+      // …文 a| → 在「文」与「a」之间插空格，光标随之后移
       return {
-        changes: [{ offset: head - 1, length: 0, text: ' ' }],
+        changes: [{ offset: pos, length: 0, text: ' ' }],
         selection: { anchor: head + 1, head: head + 1 },
       }
     },
   })
 
-  // ---- 行为 2：中文后半角标点全角化（缺省 atomic——不写 history 字段） ----
+  // ---- 行为 2：中文后半角标点全角化（缺省 atomic——独立撤回边界） ----
+  // 注：本行为不声明 joinPrevious——非原子的并组目标须是**同链前序的
+  // SDK 原子修饰**（T07 夹具模式：atomic 修饰段在前、joinPrevious 并入）；
+  // 本行为独立处理键入（无前序原子修饰），声明 joinPrevious 会被
+  // history-boundary 拒绝（无可并入前项）。非原子声明由行为 3
+  // paren-close 展示（注册形态）。
   const fullwidthPunct = behaviors.register({
     id: 'cjk-fullwidth-punct',
     name: m.behaviorFullwidthPunct,
@@ -126,12 +134,13 @@ defineAddonPage(ADDON_ID, async (sdk: VsidianAddonPageSdk) => {
         return null
       }
       const head = cursorOf(ctx)
-      if (head === 0 || !CJK_CHAR.test(ctx.snapshot.text[head - 1])) {
+      const pos = head - ctx.inputText.length
+      if (pos < 1 || !CJK_CHAR.test(ctx.snapshot.text[pos - 1])) {
         return null
       }
       // 替换刚输入的半角标点（长度 1 → 1），光标原位
       return {
-        changes: [{ offset: head - 1, length: 1, text: fullwidth }],
+        changes: [{ offset: pos, length: 1, text: fullwidth }],
         selection: { anchor: head, head },
       }
     },

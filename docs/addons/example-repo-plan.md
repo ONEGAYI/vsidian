@@ -1,6 +1,8 @@
 # 独立示例附加组件仓库：准备说明
 
-状态：**准备文档（2026-10-08，随 T13 #362 建立）**。本文是「独立示例仓库建起来时照抄执行」的清单——**当前不创建、不发布任何外部仓库、包或 Wiki**（ADR-0012「文档分发」：独立示例仓库的名称、创建和发布待后续安排，未授权当前创建）。Wiki 只作为展示入口，不取代主仓库事实源。
+状态：**准备文档（2026-10-08，随 T13 #362 建立；2026-10-08 随 T15 #364 落地主仓库内预演）**。本文是「独立示例仓库建起来时照抄执行」的清单——**当前不创建、不发布任何外部仓库、包或 Wiki**（ADR-0012「文档分发」：独立示例仓库的名称、创建和发布待后续安排，未授权当前创建）。Wiki 只作为展示入口，不取代主仓库事实源。
+
+> T15（#364）已在主仓库内落地三套独立消费样例（`test/examples/`——输入/渲染/界面，独立扩展工程形态，经公开 SDK 构建与验证）。本仓库建仓时的**首选路径是复制该目录**（可执行清单见 [test/examples/README 的「复制到独立仓库」](../../test/examples/README.md)）；下文的原始规划（从测试夹具摘除驱动协议）保留作为来源说明。
 
 ## 1. 定位与边界
 
@@ -33,7 +35,7 @@ vsidian-addon-examples/        # 名称待定，创建前需用户授权
 | SDK 类型声明 | `test/fixtures/addon-v02/sdk/vsidian-addon-sdk.d.ts` | 复制并把 `VsidianAddonPageSdk` 的导入指向随仓库 vendor 的声明快照（见 2.3） |
 | 页面 SDK 完整声明 | `src/shared/addonPage.ts` 及其依赖（`addonEditApi.ts`、`addonBehaviors.ts`、`addonSettings.ts`、`addonRenderers.ts`、`addonCommands.ts`、`addonUi.ts`） | vendor 快照（仅类型与纯守卫，无 vscode/DOM 依赖，可整目录复制） |
 | 宿主侧声明 | `src/host/addons/addonRegistry.ts`、`addonWiring.ts` 的类型（type-only 消费） | vendor 快照或自写最小声明（`registerAddon` 形状） |
-| 构建脚本范式 | `test/fixtures/addon-v02/sdk/buildAddon.mjs`（chrome114 目标、CM6 标记断言） | 参考改写 |
+| 构建脚本范式 | `test/fixtures/addon-v02/sdk/buildAddon.mjs`（chrome114 目标、CM6 标记断言） | 已由 T15 的 `test/examples/tools/buildLib.mjs` 取代为可复制形态（页面 IIFE + 宿主 CJS + 产物扫描）——复制该文件 |
 | 样例源码 | `test/fixtures/addon-v02/addon/t07Editor.ts`、`t09Renderer.ts`、`t10Editor.ts`、`t11Editor.ts`、`t02Editor.ts`、`t02Settings.ts` | 摘除测试驱动协议（宿主夹具短轮询），保留业务注册部分 |
 
 ### 2.3 声明快照的维护约定
