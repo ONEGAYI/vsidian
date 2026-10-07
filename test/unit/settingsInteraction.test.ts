@@ -7,15 +7,29 @@
 // - 工具栏「设置」按钮：点击发送 settings.open（打开宿主级设置页面板）
 // - 宿主侧 documentSession 对 settings.open/get 的处理（PanelPort 注入，
 //   与 link.activate 同模式：真实 webview 消息与测试注入共用同一入口）
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { DocumentSession, type HostDocumentPort, type PanelPort } from '../../src/host/documentSession'
 import type { HostToWebview, SettingsPayload, WebviewToHost } from '../../src/shared/protocol'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
+import { splitReadingBlocks } from '../../src/webview/readingBlocks'
+import { createReadingBlockElement } from '../../src/webview/readingView'
+import { mountRefContentBlock } from '../../src/webview/refReadingContent'
+import { getRefReadingBlockCacheStats } from '../../src/webview/refContentInstance'
+import { closeHoverPopup, openHoverPopupFor, setHoverPreviewContext } from '../../src/webview/hoverPopup'
 
 // #94 起文案经 t() 取词：装配生产中文包，断言与字典同源
 installLocale('zh-cn', zhCn)
+
+// jsdom has no range layout. These controller tests inspect DOM/state only;
+// browser coverage verifies actual painting with the real layout engine.
+if (Range.prototype.getClientRects === undefined) {
+  Range.prototype.getClientRects = () => Object.assign(new Array<DOMRect>(), { item: () => null })
+}
+if (Range.prototype.getBoundingClientRect === undefined) {
+  Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0)
+}
 
 const DOC_URI = 'file:///d%3A/notes/a.md'
 
@@ -185,5 +199,136 @@ describe('宿主侧 documentSession 的设置消息处理（#33，与注入路�
     )
     expect(opened).toHaveLength(0)
     expect(sent.filter((m) => m.kind === 'settings.snapshot')).toHaveLength(0)
+  })
+})
+
+describe('mounted reading code-card settings (#389)', () => {
+  it('refreshes only changed card settings in place while preserving source, fold, wrap and scroll state', () => {
+    const { bridge, sent } = makeBridge()
+    const parent = document.createElement('div')
+    const c = new WebviewSyncController(bridge)
+    c.mount(parent)
+    const source = 'Intro\n\n```tcl\nset value "quoted"\nputs $value\n```\n\n```ini\n[board]\nclock=1\n```'
+    c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: source })
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const reading = parent.querySelector<HTMLElement>('.vsidian-view-reading')!
+    const blocks = [...reading.querySelectorAll<HTMLElement>(':scope > .vsidian-reading-code-block')]
+    const first = blocks[0]!
+    const second = blocks[1]!
+    const refSource = '```tcl\nputs "reference"\n```'
+    const reference = createReadingBlockElement(splitReadingBlocks(refSource)[0]!, refSource)
+    mountRefContentBlock(reference, { images: null, codeHighlight: true, fm: null })
+    reading.querySelector(':scope > .vsidian-reading-paragraph')!.appendChild(reference)
+    const snapshot = () => {
+      c.handleHostMessage({ kind: 'view.state.request' })
+      return sent.filter((m): m is Extract<WebviewToHost, { kind: 'view.state' }> => m.kind === 'view.state').at(-1)!
+    }
+    const before = snapshot()
+    const apply = (kind: 'settings.snapshot' | 'settings.changed', values: SettingsPayload) => c.handleHostMessage({ kind, values })
+    try {
+      expect(first.querySelector('.tok-string')?.textContent).toBe('"quoted"')
+      ;(first.querySelector('.vsidian-code-card-wrap') as HTMLButtonElement).click()
+      ;(second.querySelector('.vsidian-code-card-fold') as HTMLButtonElement).click()
+      reading.scrollTop = 37
+      apply('settings.snapshot', { 'codeblock.highlight': false })
+      expect(first.querySelectorAll('[class*="tok-"]')).toHaveLength(0)
+      expect(first.querySelector('code')?.textContent).toContain('set value "quoted"')
+      expect(second.classList.contains('vsidian-code-card-folded')).toBe(true)
+      expect(reading.classList.contains('vsidian-reading-nowrap')).toBe(true)
+      expect(reading.scrollTop).toBe(37)
+      expect(reading.querySelector(':scope > .vsidian-reading-code-block')).toBe(first)
+
+      apply('settings.changed', { 'codeblock.highlight': true, 'codeblock.card': false })
+      expect(first.querySelector('.vsidian-code-card-header')).toBeNull()
+      expect(first.querySelector('.tok-string')?.textContent).toBe('"quoted"')
+      expect(first.querySelector('code')?.textContent).toBe('set value "quoted"\nputs $value')
+      apply('settings.snapshot', { 'codeblock.highlight': true, 'codeblock.card': true })
+      expect(first.querySelector('.vsidian-code-card-header')).not.toBeNull()
+      expect(second.classList.contains('vsidian-code-card-folded')).toBe(true)
+      apply('settings.changed', { 'codeblock.lineNumbers': false, 'codeblock.copyButton': false })
+      expect(first.querySelector('.vsidian-code-card-linenumber')).toBeNull()
+      expect(first.querySelector('.vsidian-code-card-copy')).toBeNull()
+      expect(second.classList.contains('vsidian-code-card-folded')).toBe(true)
+      const header = first.querySelector('.vsidian-code-card-header')
+      apply('settings.changed', { 'codeblock.lineNumbers': false, 'codeblock.copyButton': false, 'editor.lineNumbers': false })
+      expect(first.querySelector('.vsidian-code-card-header')).toBe(header)
+      expect(reference.querySelector('.vsidian-code-card-header')).toBeNull()
+      expect(reference.querySelector('code')?.textContent).toBe('puts "reference"')
+      const after = snapshot()
+      expect(after.readingParseCount).toBe(before.readingParseCount)
+      expect(c.getView()!.state.doc.toString()).toBe(source)
+      expect(sent.some((m) => m.kind === 'edit.request')).toBe(false)
+      expect(reading.classList.contains('vsidian-reading-nowrap')).toBe(true)
+    } finally {
+      c.dispose()
+    }
+  })
+})
+
+
+describe('mounted Markdown reference highlight settings (#389)', () => {
+  it.each(['embed', 'hover', 'standalone-hover'])('%s refreshes only code tokens without remounting resources or changing state', (kind) => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('vsidian-embed-card-scroll') || this.classList.contains('vsidian-hover-popup-scroll') ? 400 : 0
+    })
+    const { bridge, sent } = makeBridge()
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const c = new WebviewSyncController(bridge)
+    c.mount(parent)
+    const source = kind === 'embed' ? '![[Reference]]' : '[[Reference]]'
+    c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: source })
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    let highlight = true
+    if (kind === 'standalone-hover') {
+      setHoverPreviewContext({ session: () => ({ sessionId: 's1', docUri: DOC_URI }),
+        send: (message) => sent.push(message), codeHighlight: () => highlight })
+    }
+    try {
+      if (kind !== 'embed') {
+        const anchor = parent.querySelector<HTMLElement>('.vsidian-view-reading .vsidian-wikilink')!
+        openHoverPopupFor(anchor, { target: 'Reference', sourceStart: 0, sourceEnd: source.length })
+      }
+      const req = sent.find((message): message is Extract<WebviewToHost, { kind: 'hover.request' }> => message.kind === 'hover.request')!
+      expect(req).toBeDefined()
+      const text = '---\ntitle: Reference\n---\n\n![asset](asset.png)\n\n```tcl\nputs "reference"\n```'
+      c.handleHostMessage({ kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+        target: { fsPath: `D:/notes/${kind}.md`, relPath: `${kind}.md` }, version: 1, text,
+        range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+      const container = document.querySelector<HTMLElement>(kind === 'embed' ? '.vsidian-embed-card' : '.vsidian-hover-popup')!
+      const code = container.querySelector<HTMLElement>('pre > code')!
+      expect(code.querySelector('.tok-string')?.textContent).toBe('"reference"')
+      const image = container.querySelector('img')
+      const fmButton = container.querySelector<HTMLButtonElement>('.vsidian-hover-fm-toggle')!
+      fmButton.click()
+      const scroll = container.querySelector<HTMLElement>(kind === 'embed' ? '.vsidian-embed-card-scroll' : '.vsidian-hover-popup-scroll')!
+      scroll.scrollTop = 17
+      const before = getRefReadingBlockCacheStats().parses
+      const imageRequests = sent.filter((message) => message.kind === 'image.request').length
+      const hoverRequests = sent.filter((message) => message.kind === 'hover.request').length
+      highlight = false
+      c.handleHostMessage({ kind: 'settings.snapshot', values: { 'codeblock.highlight': false } })
+      expect(code.querySelectorAll('[class*="tok-"]')).toHaveLength(0)
+      expect(code.textContent).toBe('puts "reference"')
+      highlight = true
+      c.handleHostMessage({ kind: 'settings.changed', values: { 'codeblock.highlight': true } })
+      expect(code.querySelector('.tok-string')?.textContent).toBe('"reference"')
+      expect(container.querySelector('pre > code')).toBe(code)
+      expect(container.querySelector('img')).toBe(image)
+      expect(container.querySelector('.vsidian-hover-fm-toggle')).toBe(fmButton)
+      expect(fmButton.getAttribute('aria-expanded')).toBe('true')
+      expect(scroll.scrollTop).toBe(17)
+      expect(container.querySelector('.vsidian-code-card-header')).toBeNull()
+      expect(getRefReadingBlockCacheStats().parses).toBe(before)
+      expect(sent.filter((message) => message.kind === 'image.request')).toHaveLength(imageRequests)
+      expect(sent.filter((message) => message.kind === 'hover.request')).toHaveLength(hoverRequests)
+      expect(sent.some((message) => message.kind === 'edit.request')).toBe(false)
+      expect(c.getView()!.state.doc.toString()).toBe(source)
+    } finally {
+      closeHoverPopup()
+      c.dispose()
+      parent.remove()
+      vi.restoreAllMocks()
+    }
   })
 })

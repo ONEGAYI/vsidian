@@ -826,7 +826,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'tok-tokens': {
     purpose:
-      'Syntax highlight token spans; both views share the same class names and dark/light palettes (colors taken from Dark+/Light+, not Obsidian theme variables); the Prism original names .token-* are not provided (see limit-prism-tokens).',
+      'Syntax highlight token spans; both views share stable class names and light/dark palettes. INI sections/keys/values use the existing tok-meta/tok-propertyName/tok-string palette through a mode-specific token adapter; diff additions/deletions use tok-inserted/tok-deleted, with light/dark colors. Existing function tags add tok-function without removing variable/property classes (shared token colors, not per-language semantic highlighting or Obsidian theme variables); the Prism original names .token-* are not provided (see limit-prism-tokens).',
     dom: 'Token spans inside code content (a live mark decoration / reading in-card line spans).',
     obsidian: { counterpart: '.token-* (the Prism vocabulary direction) / the .cm-* token family' },
   },

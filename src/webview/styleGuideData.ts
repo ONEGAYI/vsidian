@@ -3021,7 +3021,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": "tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）",
-    "purpose": "语法高亮 token span，两视图及已注册语言共用同一类名与明暗色板；解析器已有函数标签时在旧变量/属性类上叠加 tok-function（基础色取自 VS Code 主题导出与逐词检查，函数色为用户选择的暖黄，非语义 token 逐语言复刻，也非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
+    "purpose": "语法高亮 token span，两视图及已注册语言共用同一类名与明暗色板；INI section/key/value 通过该模式的词类适配 使用既有 tok-meta / tok-propertyName / tok-string，diff 新增/删除使用 tok-inserted / tok-deleted，并提供明暗配色；解析器已有函数标签时在旧变量/属性类上叠加 tok-function（基础色取自 VS Code 主题导出与逐词检查，函数色为用户选择的暖黄，非语义 token 逐语言复刻，也非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
     "views": [
       "live",
       "reading"
@@ -3034,6 +3034,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "codeHighlight 单元：词表契约（tok-* 两端共用）",
+      "codeCardPaintCssContract 与 codeCardChrome（#389）：新增词类明暗颜色与真实可见 token",
       "集成「界面域样式契约」（#133）：chromeSelectors[\"tok-tokens-live\"/\"tok-tokens-reading\"] 探针命中"
     ],
     "introduced": "#83（2026-09-26）"
@@ -5990,7 +5991,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "tok-tokens": {
-    "purpose": "Syntax highlight token spans; both views share the same class names and dark/light palettes (colors taken from Dark+/Light+, not Obsidian theme variables); the Prism original names .token-* are not provided (see limit-prism-tokens).",
+    "purpose": "Syntax highlight token spans; both views share stable class names and light/dark palettes. INI sections/keys/values use the existing tok-meta/tok-propertyName/tok-string palette through a mode-specific token adapter; diff additions/deletions use tok-inserted/tok-deleted, with light/dark colors. Existing function tags add tok-function without removing variable/property classes (shared token colors, not per-language semantic highlighting or Obsidian theme variables); the Prism original names .token-* are not provided (see limit-prism-tokens).",
     "dom": "Token spans inside code content (a live mark decoration / reading in-card line spans).",
     "obsidian": {
       "counterpart": ".token-* (the Prism vocabulary direction) / the .cm-* token family"

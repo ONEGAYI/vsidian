@@ -2,6 +2,7 @@
 // vaultFileCategory）——空查询资格按路径后缀派生，零 IO；.pyc 等未知类型
 // 显式落入 other（仅记名、mtime 未知沉底），不进空查询但可被有查询命中。
 import { describe, expect, it } from 'vitest'
+import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
 import {
   classifyVaultFileCategory,
   isCommonVaultFileCategory,
@@ -69,5 +70,16 @@ describe('isCommonVaultFileCategory（空查询资格）', () => {
 
   it('other 不是常用资源（空查询不列；仅记名可被有查询命中）', () => {
     expect(isCommonVaultFileCategory('other')).toBe(false)
+  })
+})
+
+describe('ready-language file extensions (#389)', () => {
+  it.each(READY_CODE_LANGUAGE_FIXTURES)('$id classifies explicit text extensions', ({ extensions }) => {
+    for (const ext of extensions) expect(classifyVaultFileCategory(`sample.${ext.toUpperCase()}`)).toBe('text')
+  })
+  it('fence aliases cannot classify database or extensionless files as text', () => {
+    for (const path of ['data.sqlite', 'data.db', 'data.sqlite3', 'sample.docker', 'sample.csharp', 'sample.kotlin', 'sample.protobuf', 'Dockerfile', 'Makefile', 'LICENSE']) {
+      expect(classifyVaultFileCategory(path)).toBe('other')
+    }
   })
 })

@@ -2337,3 +2337,21 @@ describe('isWebviewToHost / isHostToWebview：wikilink 标题查询（#379 T04�
     expect(isWebviewToHost({ ...base, items: [] } as never)).toBe(false)
   })
 })
+
+it('view.state.paint.code accepts bounded token paint samples and rejects malformed observations (#389)', () => {
+  const token = { text: 'puts', classes: 'tok-keyword', color: 'rgb(175, 0, 219)', visible: true }
+  const base = {
+    kind: 'view.state', text: 'puts', docLength: 4, lineCount: 1, renderedLines: 1,
+    paint: {
+      textVisible: true, scrollerDisplay: 'block', gutterUserSelect: null, darkTheme: false, caretColor: null,
+      code: { visible: true, display: 'flex', label: 'Tcl', headerCount: 1, cardLineCount: 1, tokenPaint: [token] },
+    },
+  }
+  const withSamples = (tokenPaint: unknown) => ({ ...base, paint: { ...base.paint, code: { ...base.paint.code, tokenPaint } } })
+  expect(isWebviewToHost(base)).toBe(true)
+  expect(isWebviewToHost(withSamples(Array.from({ length: 64 }, () => token)))).toBe(true)
+  expect(isWebviewToHost(withSamples(Array.from({ length: 65 }, () => token)))).toBe(false)
+  for (const bad of [null, 'paint', [{ ...token, visible: 'true' }], [{ ...token, color: 42 }], [{ ...token, classes: null }], [{ ...token, text: 'x'.repeat(161) }]]) {
+    expect(isWebviewToHost(withSamples(bad))).toBe(false)
+  }
+})

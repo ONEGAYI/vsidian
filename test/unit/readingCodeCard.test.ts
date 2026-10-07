@@ -18,6 +18,11 @@ import {
   isReadingCodeBlock,
 } from '../../src/webview/readingCodeCard'
 import { CODE_CARD_CLASS_NAMES } from '../../src/webview/liveCodeCard'
+import { splitReadingBlocks } from '../../src/webview/readingBlocks'
+import { createReadingBlockElement } from '../../src/webview/readingView'
+import { mountRefContentBlock } from '../../src/webview/refReadingContent'
+import { getHighlightStats } from '../../src/webview/codeHighlight'
+import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
 
 const CODE = 'const a = 1;\nfunction hi() {'
 
@@ -313,5 +318,111 @@ describe('折行开关与窜行修复（#191）', () => {
     const block = makeBlock('js')
     decorate(block, { config: { card: false, lineNumbers: false, copyButton: false, highlight: true }, onWrapToggle: () => {} })
     expect(block.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)).toBeNull()
+  })
+})
+
+describe('complete-fence highlighting across reading chunks (#389)', () => {
+  it('mounts a later chunk first with the same multiline-comment context, then remounts it', () => {
+    const source = ['```js', '/* opening', ...Array.from({ length: 75 }, (_, i) => `comment ${i}`), '*/ const done = 1', '```'].join('\n')
+    const blocks = splitReadingBlocks(source)
+    expect(blocks).toHaveLength(2)
+    for (let mount = 0; mount < 2; mount++) {
+      const el = createReadingBlockElement(blocks[1]!, source)
+      decorate(el)
+      expect(el.querySelector('.tok-comment')?.textContent).toBe('comment 58')
+      expect([...el.querySelectorAll('.tok-keyword')].map((n) => n.textContent)).toContain('const')
+      expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)?.textContent).toBe('60')
+    }
+  })
+})
+
+
+describe('complete-fence guards and reference reuse (#389)', () => {
+  const mountReference = (el: HTMLElement) => mountRefContentBlock(el, { images: null, codeHighlight: true, fm: null })
+
+  it.each([4096, 4097])('%i full code lines use the same guard in reading and Markdown hover/embed', (count) => {
+    const source = ['```js', ...Array.from({ length: count }, (_, i) => `const guard${count}_${i} = ${i}`), '```'].join('\n')
+    const blocks = splitReadingBlocks(source)
+    const before = getHighlightStats().parserCalls
+    // Later-first and out-of-order mounting must not assume earlier chunks ran.
+    for (const index of [blocks.length - 1, 1, 0]) {
+      for (const mount of [decorate, mountReference]) {
+        const el = createReadingBlockElement(blocks[index]!, source)
+        mount(el)
+        expect(el.querySelectorAll('.tok-keyword').length > 0).toBe(count === 4096)
+      }
+    }
+    expect(getHighlightStats().parserCalls - before).toBe(count === 4096 ? 1 : 0)
+  })
+
+  it.each(['tcl', 'toml'])('%s multiline strings survive later-first reference mounts and edited refreshes', (language) => {
+    const first = language === 'tcl' ? 'puts "opening' : 'name = """opening'
+    const last = language === 'tcl' ? 'closing"' : 'closing"""'
+    const code = [first, ...Array.from({ length: 75 }, (_, i) => `quoted ${i}`), last].join('\n')
+    const source = `\`\`\`${language}\n${code}\n\`\`\``
+    const blocks = splitReadingBlocks(source)
+    const el = createReadingBlockElement(blocks[1]!, source)
+    mountReference(el)
+    expect(el.querySelector('.tok-string')?.textContent).toBe('quoted 58')
+    expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.header}`)).toBeNull()
+    // A new document snapshot owns fresh context; stale lexical state cannot leak.
+    const updated = source.replace(first, '# opening')
+    const refreshed = createReadingBlockElement(splitReadingBlocks(updated)[1]!, updated)
+    mountReference(refreshed)
+    expect(refreshed.querySelector('.tok-string')?.textContent).not.toBe('quoted 58')
+  })
+
+  it('preserves per-chunk copy and raw text while settings are toggled', () => {
+    const source = ['```js', '/* opening', ...Array.from({ length: 75 }, (_, i) => `chunk ${i}`), '*/', '```'].join('\n')
+    const el = createReadingBlockElement(splitReadingBlocks(source)[1]!, source)
+    const expected = el.querySelector('code')!.textContent!.replace(/\n$/, '')
+    let copied = ''
+    decorate(el, { onCopy: (code) => { copied = code } })
+    ;(el.querySelector(`.${CODE_CARD_CLASS_NAMES.copy}`) as HTMLButtonElement).click()
+    expect(copied).toBe(expected)
+    decorate(el, { config: { card: false, highlight: false, lineNumbers: false, copyButton: false } })
+    expect(el.querySelector('code')!.textContent).toBe(expected)
+    expect(el.querySelector('[class*="tok-"]')).toBeNull()
+    decorate(el, { config: { card: false, highlight: true, lineNumbers: false, copyButton: false } })
+    expect(el.querySelector('code')!.textContent).toBe(expected)
+    expect(el.querySelector('.tok-comment')?.textContent).toBe('chunk 58')
+  })
+})
+
+describe('ready-language reading and reference content (#389)', () => {
+  it.each(READY_CODE_LANGUAGE_FIXTURES)('$id keeps real tokens in reading and the shared Markdown hover/embed path', (fixture) => {
+    const source = `\`\`\`${fixture.aliases.at(-1)!.toUpperCase()} title=sample\n${fixture.code}\n\`\`\``
+    const block = splitReadingBlocks(source)[0]!
+    const el = createReadingBlockElement(block, source)
+    decorate(el)
+    expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.headerLabel}`)?.textContent).toBe(fixture.badge + fixture.label)
+    expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.headerIcon}`)?.textContent).toBe(fixture.badge)
+    const ref = createReadingBlockElement(block, source)
+    mountRefContentBlock(ref, { images: null, codeHighlight: true, fm: null })
+    expect(ref.querySelector(`.${CODE_CARD_CLASS_NAMES.header}`)).toBeNull()
+    for (const target of [el, ref]) {
+      for (const [word, cls] of fixture.tokens) {
+        expect([...target.querySelectorAll(`.${cls}`)].some((node) => node.textContent === word), `${fixture.id}: ${word}`).toBe(true)
+      }
+    }
+    expect(ref.querySelector('code')!.textContent).toBe(fixture.code)
+  })
+})
+
+describe('unclosed complete-fence budget at EOF (#389)', () => {
+  it('counts trailing empty lines before rendering trim for both reading cards and Markdown references', () => {
+    const source = ['```js', ...Array(4096).fill('const eofOverflow = 1'), '', ''].join('\n')
+    const blocks = splitReadingBlocks(source)
+    const before = getHighlightStats().parserCalls
+    for (const mount of [
+      decorate,
+      (el: HTMLElement) => mountRefContentBlock(el, { images: null, codeHighlight: true, fm: null }),
+    ]) {
+      const el = createReadingBlockElement(blocks[1]!, source)
+      mount(el)
+      expect(el.querySelectorAll('[class*="tok-"]')).toHaveLength(0)
+      expect(el.querySelector('code')!.textContent).toContain('const eofOverflow = 1')
+    }
+    expect(getHighlightStats().parserCalls).toBe(before)
   })
 })

@@ -89,16 +89,52 @@
 | YAML | legacy-modes `yaml` | `yml` |
 | Markdown | `@codemirror/lang-markdown`（已随包依赖） | `md` |
 | Verilog | legacy-modes `verilog` | `systemverilog`、`sv` |
+| Tcl | legacy-modes `tcl` + 双引号字符串兼容层（6.5.4 上游缺陷修补） | — |
+| VHDL | legacy-modes `vhdl` | `vhd` |
+| TOML | legacy-modes `toml` | — |
+| INI / properties | legacy-modes `properties`（含 section） | `properties` |
+| XML | legacy-modes `xml` | — |
+| Dockerfile | legacy-modes `dockerfile` | `docker` |
+| CMake | legacy-modes `cmake` | — |
+| Diff | legacy-modes `diff` | `patch` |
+| C# | legacy-modes `clike.csharp` | `c#`、`cs` |
+| Kotlin | legacy-modes `clike.kotlin` | `kt`、`kts` |
+| Swift | legacy-modes `swift` | — |
+| Dart | legacy-modes `clike.dart` | — |
+| Ruby | legacy-modes `ruby` | `rb` |
+| Lua | legacy-modes `lua` | — |
+| R | legacy-modes `r` | — |
+| Julia | legacy-modes `julia` | `jl` |
+| SCSS | legacy-modes `css.sCSS` | — |
+| LESS | legacy-modes `css.less` | — |
+| Protocol Buffers | legacy-modes `protobuf` | `proto` |
 
 - **多词 info string**：语言路由取 info string 的**首个空白分隔词**（CommonMark 惯例）——`` ```js title=x `` 识别为 JavaScript，`` ```c++ `` 命中 C++ 别名。`mermaid` 是刻意例外：渲染管线对标签**全等匹配**，多词 info string 不命中渲染管线。
 - 无语言标记或 `text`/`plaintext`：卡片正常呈现，标签显示 `Plain text`，不着色。
 - **未识别语言**：回退纯文本（卡片与行号仍在）。
 - **token 类名**：以 `@lezer/highlight` `classHighlighter` 的 `tok-*` 稳定词表（如 `tok-keyword`、`tok-string`）为基础；解析器已有的函数调用修饰标签经 `tagHighlighter` 叠加 `tok-function`，保留原 `tok-variableName` / `tok-propertyName` 类供旧片段命中。两视图共用；配套 CSS 色板以主题 class 区分明暗。
 - **配色**：内置明暗两套共享色板，基础取色自用户提供的 VS Code 明暗主题导出与 Python 逐词检查；函数调用色按用户选择改为与紫色关键词相配的暖黄（浅色 `#806000`、深色 `#DCDCAA`），不再沿用导出主题的紫色函数色。所有已注册语言复用同一 Lezer `tok-*` 类别配色，不承诺逐语言复刻 VS Code 语义 token（模块身份、只读变量等需要语言服务信息）。随现有明暗主题管线（`EditorView.darkTheme` facet + body class）自动切换。高对比档口径（评审 A-2 订正）：**深色高对比（dark+HC）**函数色覆盖为深色淡黄，**浅色高对比（light+HC，VS Code 1.77+）**回落浅色组暖黄（白底可读）；HC keyword 蓝为旧版既有行为（不分深浅），非本批承诺面。卡片外壳（背景、行号、标签、分隔线）继续走 `--vscode-*` 主题变量。
+- **新增词类配色（#389）**：INI section 的 `tok-meta` 为浅色 `#0550ae` / 深色 `#79c0ff`；diff `tok-inserted` 为浅色 `#22863a` / 深色 `#85e89d`，`tok-deleted` 为浅色 `#b31d28` / 深色 `#f97583`。INI 仅在 properties 模式内映射 section/key/value 到既有 meta/propertyName/string 词类，不改 Markdown 的 heading 外观；diff 新增/删除词类补色，现有 keyword/string/comment 等配色保持不变，裸 `.tok-*` 用户片段仍可覆写。
+- **文件后缀与围栏标签分离（#389）**：`CodeLanguageEntry.extensions` 显式维护可读文本后缀，不再从语言 id/别名派生。既有分类保留；新增语言只收真实文本后缀（如 `.cs`、`.kt`、`.jl`、`.proto`），`.sqlite`/`.sqlite3`/`.db` 仍归 other，未来增加 SQL 方言别名也不自动改文件分类。无扩展名的 `Dockerfile`、`Makefile` 仍归 other，不扩大发现规则。
+- **完整围栏上下文（#389）**：阅读侧 60 行挂载片共享完整围栏的数值边界；`createReadingBlockElement` 通过弱引用绑定文档及片偏移，正文与 Markdown hover/embed 走同一增强路径。先挂后片也从完整源码解析，再裁切到本片；文档编辑/刷新产生新的上下文。超过 4096 个代码体行先降级，再决定是否读取完整代码体，不能按每片行数绕过降级；未闭合围栏在 EOF 的尾部空行按原始 token 范围计入预算，不受块呈现裁尾影响。未超限围栏正文按共享身份最多缓存 64 项，token 仍复用既有 64 项 LRU；不在每个分片存放完整代码体。行号、每片复制、折叠与按视口挂载沿用现有语义。
+- **引用形态边界**：Markdown 悬停与嵌入复用 token 路径，但仍保持既有只读朴素代码块，不增加正文卡片工具条。高亮开关变化沿现有挂载对象就地刷新已挂载引用的 code token；不重新装载或解析整份引用，不重建图片、属性区监听或嵌套引用，滚动与属性区展开状态保留。非 Markdown 引用的宿主原生着色、Mermaid 渲染、#368 主题研究均不改。
+- **词法边界**：使用锁定 `@codemirror/legacy-modes` 6.5.4 的语言模式及 C#/Kotlin/Dart、SCSS/LESS 专用配置。Tcl 兼容层仅修正普通双引号（含转义引号、跨行字符串）被上游误标 comment 的分支，其余 token 仍交给官方模式；不承诺完整语言服务、补全、诊断或执行。
+- **操作与设置评估（#389）**：只扩展现有围栏渲染，无新增用户操作、设置或快捷键；卡片/高亮现有独立开关不变。
 - **语言徽标**：v1 为字形徽标（typographic badge）——等宽缩写 + 品牌近似色（`CODE_LANG_ICONS`），随头部标签显示，仅注册表内语言有徽标，未收录语言无徽标；矢量 logo 集为后续工单（体积与素材来源另行决策）。
 - **性能**：Live 侧高亮按块计算并缓存，编辑仅重算受影响块；呈现态与编辑态均保持高亮；大围栏（10 万行档）不阻塞输入。
 
 **体积红线**：语言包解包合计约 430 KB（`@codemirror/language` 已随 lang-markdown 在包内，不额外增），legacy-modes 按模式 tree-shake。**实测（#85）**：main.js 增至约 2.4 MB（语言包增量约 1.6 MB，预估的 0.4–0.5 MB 偏低——Lezer 解析表 minify 后仍大于解包体积占比的直觉）；VSIX 解压总量 4551 KB，单文件警告线 3 MB 未触线，总量距旧警告线 4.5 MB 余量仅约 57 KB——**用户决策（#85 验收）总量警告/上限各上调 1 MB 至 5.5 / 6.5 MB**，无需独立懒加载产物。后续增补语言包前仍需先核对总量余量（新警告线下约 1.06 MB）。
+
+
+### #389 本地验证与体积记录（2026-10-07，未发布候选）
+
+- 对照基线：v0.11.0 / `c16349acade8b17f2ebc1ec91c9de8c3746c3010`。19 项新增语言均使用已锁定官方模式，无新增依赖或运行时 grammar 下载。Tcl 字符串、INI 词类映射与 EOF 未闭合围栏预算均保留目标先红后绿证据。
+- 最终本地 `compile`（含类型检查）通过；Vitest 全量 292 文件 / 6,643 测试通过，356.08 秒，退出码 0。Node 启动器/打包/浏览器调度/历史样式契约共 115 通过、6 项既有平台跳过、0 失败；严格文件树检查通过。日志为 `out/test/t01-complete-*.log`，含退出码。
+- 历史样式基线复验通过（v0.4.0 / `75c3df7`）；候选八项契约检查零失败，保留旧 tok 类和全部既有颜色，只有 diff 新增/删除词类补色。0.10.0 / 0.11.0 发布快照尚未固化的既有提示仍记录，不改基线或门禁。
+- 生产 Chromium `codeCardChrome` 正式完整套件通过，34.44 秒（`run-TYM7co` / `out/test/t01-reference-hot-toggle-browser.log`）：明暗主题真实文字/徽标颜色、模式切换、正文设置热更、跨 60 行词法状态、实际卸载重挂、4096/4097 边界、Markdown 引用与其已挂载高亮开关，未删断言或跳段。
+- 已知测试环境日志：未改动的 suspendResume、lineNumbers、liveMath、liveMermaid、livePaintProbe 五文件会由 CodeMirror 捕获并记录 jsdom 缺少 Range.getClientRects 的测量错误；干净基线独立重跑 102 测试，逐文件计数同为 22/9/3/3/2，均退出 0，无未处理异常。新增设置回归使用本项目既有的零布局 shim，真实可见性另由 Chromium 证明。
+- 精确生产体积：main.js 从 **2,144,296 B → 2,240,210 B**（+95,914 B，+4.47%）；实际 VSIX 解压总量从 **12,204,046 B → 12,304,446 B**（+100,400 B，+0.82%），仍为 314 文件。`inspectVsixEntries` 零错误、零警告；单文件低于 3 MiB 警告 / 4 MiB 上限，总量低于 13 MiB 警告 / 13.5 MiB 上限。本票无需新增懒加载产物，不调整阈值。
+- **待验**：新增真实 VS Code 宿主集成用例与全部 browser 套件仍等待 draft PR 的 CI 执行；本地定向 Chromium 成功不等同真实宿主、全 browser 或远端完整验收通过。未关闭门禁、未合并或发布版本。
 
 ## 渲染型围栏（mermaid）
 
@@ -121,7 +157,7 @@
 | `codeblock.copyButton` | boolean | `true` | 复制按钮（依附卡片） |
 | `codeblock.highlight` | boolean | `true` | 语法高亮独立开关：卡片关闭时朴素围栏仍可着色 |
 
-设置页可切换、即时生效（Compartment 热重配）、重开回显；阅读视图随同一设置联动。
+设置页可切换、即时生效（Compartment 热重配）、重开回显；主阅读视图随同一设置联动。#389 修复已挂载正文阅读卡片的设置回填：仅 card/highlight/lineNumbers/copyButton 的实际配置变化会原地增强直接挂载块，不重解析 Markdown；保留滚动、折叠、折行和源文，不把嵌套的朴素引用代码块升级成卡片。引用高亮通过原有挂载对象同步就地刷新，始终保持朴素形态。
 
 ## 阅读视图
 

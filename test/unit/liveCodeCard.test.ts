@@ -28,6 +28,7 @@ import {
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { mermaidFencesField } from '../../src/webview/liveMermaid'
 import { resolveCodeLanguage, codeInfoFirstWord } from '../../src/shared/codeLangs'
+import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
 
 interface Item {
   from: number
@@ -834,5 +835,20 @@ describe('头部按钮区与热区（#190）', () => {
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clicks).not.toHaveBeenCalled()
     expect(mousedowns).not.toHaveBeenCalled()
+  })
+})
+
+describe('ready-language Live headers and marks (#389)', () => {
+  it.each(READY_CODE_LANGUAGE_FIXTURES)('$id shows its own badge, label and lexical marks', (fixture) => {
+    const text = `intro\n\n\`\`\`${fixture.aliases.at(-1)} title=sample\n${fixture.code}\n\`\`\``
+    const items = decos(text, 0)
+    const widget = items.find((i) => i.widget)?.widget
+    expect(widget?.label).toBe(fixture.label)
+    expect(widget?.languageId).toBe(fixture.id)
+    const header = widget!.toDOM()
+    expect(header.querySelector(`.${CODE_CARD_CLASS_NAMES.headerIcon}`)?.textContent).toBe(fixture.badge)
+    for (const [word, cls] of fixture.tokens) {
+      expect(items.some((item) => text.slice(item.from, item.to) === word && item.cls?.split(' ').includes(cls)), `${fixture.id}: ${word}`).toBe(true)
+    }
   })
 })

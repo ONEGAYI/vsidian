@@ -15,28 +15,48 @@ export interface CodeLanguageEntry {
   displayName: string
   /** 别名（info string 匹配用，小写；不含 id 本身） */
   aliases: readonly string[]
+  /** 显式文本文件后缀；围栏别名不自动取得文件分类资格 */
+  extensions: readonly string[]
 }
 
-/** 注册表语言（17 项 + 独立纯文本条目 text，规格「语言注册表」表；
- *  语法来源 #83 接线） */
+/** 注册表语言；既有后缀保留历史分类，新语言只显式收录文本后缀。 */
 export const CODE_LANGUAGES: readonly CodeLanguageEntry[] = [
-  { id: 'javascript', displayName: 'JavaScript', aliases: ['js', 'jsx', 'mjs', 'cjs'] },
-  { id: 'typescript', displayName: 'TypeScript', aliases: ['ts', 'tsx'] },
-  { id: 'json', displayName: 'JSON', aliases: [] },
-  { id: 'html', displayName: 'HTML', aliases: ['htm'] },
-  { id: 'css', displayName: 'CSS', aliases: [] },
-  { id: 'python', displayName: 'Python', aliases: ['py'] },
-  { id: 'shell', displayName: 'Shell', aliases: ['sh', 'bash', 'zsh'] },
-  { id: 'powershell', displayName: 'PowerShell', aliases: ['ps1', 'pwsh'] },
-  { id: 'c', displayName: 'C', aliases: [] },
-  { id: 'cpp', displayName: 'C++', aliases: ['cc', 'c++'] },
-  { id: 'java', displayName: 'Java', aliases: [] },
-  { id: 'go', displayName: 'Go', aliases: ['golang'] },
-  { id: 'rust', displayName: 'Rust', aliases: ['rs'] },
-  { id: 'sql', displayName: 'SQL', aliases: ['pgsql'] },
-  { id: 'yaml', displayName: 'YAML', aliases: ['yml'] },
-  { id: 'markdown', displayName: 'Markdown', aliases: ['md'] },
-  { id: 'verilog', displayName: 'Verilog', aliases: ['systemverilog', 'sv'] },
+  { id: 'javascript', displayName: 'JavaScript', aliases: ['js', 'jsx', 'mjs', 'cjs'], extensions: ['javascript', 'js', 'jsx', 'mjs', 'cjs'] },
+  { id: 'typescript', displayName: 'TypeScript', aliases: ['ts', 'tsx'], extensions: ['typescript', 'ts', 'tsx'] },
+  { id: 'json', displayName: 'JSON', aliases: [], extensions: ['json'] },
+  { id: 'html', displayName: 'HTML', aliases: ['htm'], extensions: ['html', 'htm'] },
+  { id: 'css', displayName: 'CSS', aliases: [], extensions: ['css'] },
+  { id: 'python', displayName: 'Python', aliases: ['py'], extensions: ['python', 'py'] },
+  { id: 'shell', displayName: 'Shell', aliases: ['sh', 'bash', 'zsh'], extensions: ['shell', 'sh', 'bash', 'zsh'] },
+  { id: 'powershell', displayName: 'PowerShell', aliases: ['ps1', 'pwsh'], extensions: ['powershell', 'ps1', 'pwsh'] },
+  { id: 'c', displayName: 'C', aliases: [], extensions: ['c'] },
+  { id: 'cpp', displayName: 'C++', aliases: ['cc', 'c++'], extensions: ['cpp', 'cc', 'c++'] },
+  { id: 'java', displayName: 'Java', aliases: [], extensions: ['java'] },
+  { id: 'go', displayName: 'Go', aliases: ['golang'], extensions: ['go', 'golang'] },
+  { id: 'rust', displayName: 'Rust', aliases: ['rs'], extensions: ['rust', 'rs'] },
+  { id: 'sql', displayName: 'SQL', aliases: ['pgsql'], extensions: ['sql', 'pgsql'] },
+  { id: 'yaml', displayName: 'YAML', aliases: ['yml'], extensions: ['yaml', 'yml'] },
+  { id: 'markdown', displayName: 'Markdown', aliases: ['md'], extensions: ['markdown', 'md'] },
+  { id: 'verilog', displayName: 'Verilog', aliases: ['systemverilog', 'sv'], extensions: ['verilog', 'systemverilog', 'sv'] },
+  { id: 'tcl', displayName: 'Tcl', aliases: [], extensions: ['tcl', 'tk'] },
+  { id: 'vhdl', displayName: 'VHDL', aliases: ['vhd'], extensions: ['vhdl', 'vhd'] },
+  { id: 'toml', displayName: 'TOML', aliases: [], extensions: ['toml'] },
+  { id: 'ini', displayName: 'INI', aliases: ['properties'], extensions: ['ini', 'properties'] },
+  { id: 'xml', displayName: 'XML', aliases: [], extensions: ['xml', 'xsd', 'xsl', 'xslt'] },
+  { id: 'dockerfile', displayName: 'Dockerfile', aliases: ['docker'], extensions: ['dockerfile'] },
+  { id: 'cmake', displayName: 'CMake', aliases: [], extensions: ['cmake'] },
+  { id: 'diff', displayName: 'Diff', aliases: ['patch'], extensions: ['diff', 'patch'] },
+  { id: 'csharp', displayName: 'C#', aliases: ['c#', 'cs'], extensions: ['cs'] },
+  { id: 'kotlin', displayName: 'Kotlin', aliases: ['kt', 'kts'], extensions: ['kt', 'kts'] },
+  { id: 'swift', displayName: 'Swift', aliases: [], extensions: ['swift'] },
+  { id: 'dart', displayName: 'Dart', aliases: [], extensions: ['dart'] },
+  { id: 'ruby', displayName: 'Ruby', aliases: ['rb'], extensions: ['rb', 'rbw'] },
+  { id: 'lua', displayName: 'Lua', aliases: [], extensions: ['lua'] },
+  { id: 'r', displayName: 'R', aliases: [], extensions: ['r'] },
+  { id: 'julia', displayName: 'Julia', aliases: ['jl'], extensions: ['jl'] },
+  { id: 'scss', displayName: 'SCSS', aliases: [], extensions: ['scss'] },
+  { id: 'less', displayName: 'LESS', aliases: [], extensions: ['less'] },
+  { id: 'protobuf', displayName: 'Protocol Buffers', aliases: ['proto'], extensions: ['proto'] },
 ]
 
 /** 纯文本语言（无语言标记 / text / plaintext）的注册表内表示 */
@@ -44,6 +64,7 @@ export const PLAIN_TEXT_LANGUAGE: CodeLanguageEntry = {
   id: 'text',
   displayName: 'Plain text',
   aliases: ['plaintext', 'txt'],
+  extensions: ['plaintext', 'txt'],
 }
 
 export interface ResolvedCodeLanguage {

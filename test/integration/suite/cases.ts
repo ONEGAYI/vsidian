@@ -867,6 +867,8 @@ interface ViewState {
       foldedCount?: number
       /** #83 视口内 tok-* token 元素数 */
       tokenCount?: number
+      /** #389 真实 token 文字绘制样本（有界；颜色与命中可见性独立断言） */
+      tokenPaint?: Array<{ text: string; classes: string; color: string; visible: boolean }>
       /** 全部头部语言标签序列（DOM 顺序；渲染型围栏的 Mermaid 标签断言） */
       labels?: string[]
     }
@@ -7882,6 +7884,112 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('code-card.md', (v) =>
       v.paint?.code?.foldedCount === 0 && v.paint.code.cardLineCount === 7, 0, 60000)
     assert(await readDisk('code-card.md') === diskBefore, '阅读卡片交互不得改写源文')
+  }],
+
+  ['新增围栏语言：Tcl/VHDL/INI/diff 双模式文字真实着色（#389）', async () => {
+    const file = 'code-language-paint.md'
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    const uri = wsUri(file).toString()
+    const diskBefore = await readDisk(file)
+    const samples = [
+      { text: 'quoted Tcl paint', kind: 'string', label: 'Tcl',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+      { text: 'entity', kind: 'keyword', label: 'VHDL',
+        light: 'rgb(175, 0, 219)', dark: 'rgb(197, 134, 192)' },
+      { text: '[paint_section]', kind: 'meta', label: 'INI',
+        light: 'rgb(5, 80, 174)', dark: 'rgb(121, 192, 255)' },
+      { text: '-removed_paint', kind: 'deleted', label: 'Diff',
+        light: 'rgb(179, 29, 40)', dark: 'rgb(249, 117, 131)' },
+      { text: '+added_paint', kind: 'inserted', label: 'Diff',
+        light: 'rgb(34, 134, 58)', dark: 'rgb(133, 232, 157)' },
+    ]
+    for (const mode of ['live', 'reading', 'live'] as const) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode })
+      const colors = new Map<string, string>()
+      for (const sample of samples) {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'view.locate', offset: diskBefore.indexOf(sample.text),
+        })
+        const matches = (v: ViewState) => v.paint?.code?.tokenPaint?.find((token) =>
+          token.text.includes(sample.text) && token.classes.split(/\s+/).includes(`tok-${sample.kind}`) &&
+          token.visible && token.color === (v.paint?.darkTheme ? sample.dark : sample.light))
+        const state = await waitViewState(file, (v) => v.viewMode === mode && matches(v) !== undefined)
+        const token = matches(state)!
+        assert(token.visible, `${mode} ${sample.label} 目标文字必须真正绘制，不能只存在 tok span`)
+        assert(token.color === (state.paint?.darkTheme ? sample.dark : sample.light),
+          `${mode} ${sample.label} 应使用生产色板：${JSON.stringify(token)}`)
+        assert(state.paint?.code?.labels?.includes(sample.label) === true,
+          `${mode} 首词/别名应显示 ${sample.label} 标签：${JSON.stringify(state.paint?.code?.labels)}`)
+        colors.set(sample.kind, token.color)
+      }
+      assert(colors.get('inserted') !== colors.get('deleted'), `${mode} diff 增删文字应显示不同颜色`)
+    }
+    assert(await readDisk(file) === diskBefore, '语言高亮及模式切换不得改写磁盘源文')
+    const session = await vscode.commands.executeCommand(CMD.sessionState, uri) as SessionState
+    assert(session.appliedEdits === 0, '语言高亮与模式切换不产生正文写回')
+  }],
+
+  ['新增围栏语言：跨 60 行上下文、重挂载及编辑刷新仍真实着色（#389）', async () => {
+    const file = 'code-language-chunk.md'
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    const uri = wsUri(file).toString()
+    const diskBefore = await readDisk(file)
+    const doc = await vscode.workspace.openTextDocument(wsUri(file))
+    const samples = [
+      { text: 'paint_comment_after_sixty', kind: 'comment',
+        light: 'rgb(110, 119, 129)', dark: 'rgb(139, 148, 158)' },
+      { text: 'paint_string_after_sixty', kind: 'string',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+    ]
+    const expectToken = async (mode: 'live' | 'reading', sample: typeof samples[number], text = sample.text) => {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'view.locate', offset: doc.getText().indexOf(text),
+      })
+      const state = await waitViewState(file, (v) => v.viewMode === mode &&
+        v.paint?.code?.tokenPaint?.some((token) => token.visible && token.text.includes(text) &&
+          token.classes.split(/\s+/).includes(`tok-${sample.kind}`) &&
+          token.color === (v.paint?.darkTheme ? sample.dark : sample.light)) === true)
+      assert(state.paint?.code?.lineNumberTexts?.includes('65') === true,
+        `${mode} 跨片目标应保留第 65 行行号：${JSON.stringify(state.paint?.code?.lineNumberTexts)}`)
+      return state
+    }
+    for (const mode of ['live', 'reading', 'live'] as const) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode })
+      for (const sample of samples) {
+        const before = await expectToken(mode, sample)
+        if (mode !== 'reading') continue
+        assert(before.readingVirtualized === true, '跨片回归必须覆盖真实虚拟挂载路径')
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'view.locate', offset: diskBefore.indexOf('far_remount_anchor'),
+        })
+        await waitViewState(file, (v) => v.viewMode === 'reading' &&
+          (v.readingScrollTopPx ?? 0) > (before.readingScrollTopPx ?? 0) + 1000 &&
+          !v.paint?.code?.tokenPaint?.some((token) => token.text.includes(sample.text)))
+        const remounted = await expectToken(mode, sample)
+        assert(remounted.readingParseCount === before.readingParseCount,
+          '离开/返回围栏不得重新解析 Markdown 全文')
+      }
+    }
+    // 编辑跨片注释体后仍以完整围栏重算；新文字必须真正上色，旧快照不够。
+    const marker = samples[0]!.text
+    const refreshed = `${marker}_refreshed`
+    const offset = doc.getText().indexOf(marker)
+    const edit = new vscode.WorkspaceEdit()
+    edit.replace(doc.uri, new vscode.Range(doc.positionAt(offset), doc.positionAt(offset + marker.length)), refreshed)
+    try {
+      assert(await vscode.workspace.applyEdit(edit), '外部正文编辑应写入权威 buffer')
+      await waitViewState(file, (v) => v.text.includes(refreshed))
+      await expectToken('live', samples[0]!, refreshed)
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+      await expectToken('reading', samples[0]!, refreshed)
+      assert(await readDisk(file) === diskBefore, '绘制与未保存编辑不得擅自落盘')
+    } finally {
+      const restore = new vscode.WorkspaceEdit()
+      restore.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), diskBefore)
+      assert(await vscode.workspace.applyEdit(restore), '恢复独立夹具 buffer')
+    }
   }],
 
   // ---- 工单 #106：分割线渲染态与插入操作 ----

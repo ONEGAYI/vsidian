@@ -119,21 +119,27 @@ export function mountRefContentBlock(
   // #220 代码高亮：朴素形态（card=false——无头部/行号/按钮；token span
   // 直接注入 code）。卡片工具条不进引用内容：复制按钮的会话语义
   // （codeblock.copy 按面板文档 EOL 归一）与折叠/折行的全局联动属主视图行为
+  refreshRefCodeHighlight(el, opts.codeHighlight)
+  if (opts.fm) {
+    applyRefFmSection(el, opts.fm, opts.onDispose)
+  }
+}
+
+/** Recolor an already mounted Markdown code block without touching resources,
+ * frontmatter listeners, nested references or the bare reference presentation. */
+export function refreshRefCodeHighlight(el: HTMLElement, highlight: boolean): void {
   if (isReadingCodeBlock(el)) {
     decorateReadingCodeCard(el, {
       config: {
         card: false,
         lineNumbers: false,
         copyButton: false,
-        highlight: opts.codeHighlight,
+        highlight,
       },
       folded: false,
       onCopy: () => undefined,
       onFoldToggle: () => undefined,
     })
-  }
-  if (opts.fm) {
-    applyRefFmSection(el, opts.fm, opts.onDispose)
   }
 }
 

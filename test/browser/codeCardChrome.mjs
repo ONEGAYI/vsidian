@@ -1,4 +1,4 @@
-// 代码块卡片绘制层回归（#189/#190/#191）：真实 Chromium + 生产控制器 +
+// 代码块卡片绘制层回归（#189/#190/#191/#389）：真实 Chromium + 生产控制器 +
 // 产物 CSS，断言用户看到的几何与按钮态（AGENTS 视觉层断言，不做 DOM
 // 存在性检查）：
 // - #189：编辑态围栏符号与代码文本列同 x（真实对齐，2ch/3ch 两档列宽）；
@@ -427,8 +427,220 @@ try {
   assert(Math.abs(((liveWrap.lnLeft ?? -1) - liveWrap.lineLeft) - 8) < 1,
     `#191 Live 首行行号左缘应距行左缘 8px：${liveWrap.lnLeft} vs ${liveWrap.lineLeft}`)
 
+  // ---- #389：语言扩展的真实文字绘制（生产色板，无测试 CSS 改写） ----
+  const paintColors = {
+    light: { string: 'rgb(10, 48, 105)', keyword: 'rgb(175, 0, 219)',
+      comment: 'rgb(110, 119, 129)', meta: 'rgb(5, 80, 174)',
+      inserted: 'rgb(34, 134, 58)', deleted: 'rgb(179, 29, 40)' },
+    dark: { string: 'rgb(165, 214, 255)', keyword: 'rgb(197, 134, 192)',
+      comment: 'rgb(139, 148, 158)', meta: 'rgb(121, 192, 255)',
+      inserted: 'rgb(133, 232, 157)', deleted: 'rgb(249, 117, 131)' },
+  }
+  const assertTokenPaint = async (scope, tokenClass, text, color, label) => {
+    const selector = `${scope} .${tokenClass}`
+    await page.waitForFunction(({ selector, text, color }) => {
+      const paint = window.codePaint(selector, text)
+      return paint?.visible === true && paint.color === color
+    }, { selector, text, color })
+    const paint = await page.evaluate(({ selector, text }) => window.codePaint(selector, text), { selector, text })
+    assert.equal(paint?.visible, true, `${label}：目标文字应实际可见并命中绘制层`)
+    assert.equal(paint?.color, color, `${label}：目标文字应使用生产词类色`)
+    return paint
+  }
+  const languageCases = [
+    { info: 'TCL title=paint', id: 'tcl', label: 'Tcl', badge: 'Tcl', badgeColor: 'rgb(228, 204, 152)',
+      code: 'set message "quoted Tcl paint"', text: 'quoted Tcl paint', kind: 'string' },
+    { info: 'VHD', id: 'vhdl', label: 'VHDL', badge: 'VHD', badgeColor: 'rgb(173, 178, 203)',
+      code: 'entity PaintChip is\nend entity;', text: 'entity', kind: 'keyword' },
+    { info: 'properties', id: 'ini', label: 'INI', badge: 'INI', badgeColor: 'rgb(109, 128, 134)',
+      code: '[paint_section]\ncolor=blue', text: '[paint_section]', kind: 'meta' },
+    { info: 'patch', id: 'diff', label: 'Diff', badge: '+−', badgeColor: 'rgb(86, 138, 53)',
+      code: '-removed_paint\n+added_paint', text: '+added_paint', kind: 'inserted' },
+  ]
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => {
+      document.body.classList.toggle('vscode-dark', theme === 'dark')
+      document.body.classList.toggle('vscode-light', theme === 'light')
+      document.body.style.setProperty('--vscode-editor-foreground', theme === 'dark' ? '#d4d4d4' : '#1f2328')
+      document.body.style.setProperty('--vscode-editor-background', theme === 'dark' ? '#1e1e1e' : '#ffffff')
+    }, theme)
+    for (const language of languageCases) {
+      const source = ['Language paint.', '', `\`\`\`${language.info}`, language.code, '```', '', 'Tail.'].join('\n')
+      await page.evaluate((source) => window.initCode(source), source)
+      for (const mode of ['live', 'reading', 'live']) {
+        await page.evaluate((mode) => window.setCodeMode(mode), mode)
+        await page.evaluate((offset) => window.locateCode(offset), source.indexOf(language.text))
+        const scope = `#app .vsidian-view-${mode}`
+        const label = `#389 ${theme}/${mode}/${language.id}`
+        await assertTokenPaint(scope, `tok-${language.kind}`, language.text, paintColors[theme][language.kind], label)
+        const header = `${scope} .vsidian-code-card-header[data-vsidian-code-lang="${language.id}"]`
+        await page.locator(header).scrollIntoViewIfNeeded()
+        const badge = await page.evaluate(({ header, badge }) =>
+          window.codePaint(`${header} .vsidian-code-card-header-icon`, badge), { header, badge: language.badge })
+        assert.equal(badge?.visible, true, `${label}：语言字形徽标应实际绘制`)
+        assert.equal(badge?.color, language.badgeColor, `${label}：徽标应使用对应语言色`)
+        assert.equal(await page.locator(`${header} .vsidian-code-card-header-label`).evaluate((el) =>
+          el.lastChild?.textContent), language.label, `${label}：首词/别名应显示规范标签`)
+        if (language.id === 'diff') {
+          const removed = await assertTokenPaint(scope, 'tok-deleted', '-removed_paint', paintColors[theme].deleted, label)
+          const added = await assertTokenPaint(scope, 'tok-inserted', '+added_paint', paintColors[theme].inserted, label)
+          assert.notEqual(removed.color, added.color, `${label}：增删文本必须肉眼可区分`)
+        }
+      }
+    }
+  }
+
+  // 新语言仍遵守既有两个独立开关：禁高亮仍可读，关卡片仍保留高亮。
+  const settingsSource = '```tcl\nset message "settings Tcl paint"\n```'
+  await page.evaluate((source) => window.initCode(source), settingsSource)
+  for (const mode of ['live', 'reading']) {
+    await page.evaluate((mode) => window.setCodeMode(mode), mode)
+    await page.evaluate((offset) => window.locateCode(offset), settingsSource.indexOf('settings Tcl paint'))
+    const scope = `#app .vsidian-view-${mode}`
+    await page.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.snapshot',
+      values: { 'codeblock.card': true, 'codeblock.highlight': false } }))
+    const rawSelector = `${scope} ${mode === 'live' ? '.cm-line' : '.vsidian-reading-code-line'}`
+    await page.waitForFunction(({ rawSelector, scope }) =>
+      window.codePaint(rawSelector, 'settings Tcl paint')?.visible === true &&
+      document.querySelectorAll(`${scope} [class*="tok-"]`).length === 0, { rawSelector, scope })
+    await page.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.snapshot',
+      values: { 'codeblock.card': false, 'codeblock.highlight': true } }))
+    await assertTokenPaint(scope, 'tok-string', 'settings Tcl paint', paintColors.dark.string,
+      `#389 ${mode} 关闭卡片仍真实高亮`)
+    assert.equal(await page.locator(`${scope} .vsidian-code-card-header`).count(), 0,
+      '#389 关闭卡片后不得残留工具条')
+    await page.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.snapshot',
+      values: { 'codeblock.card': true, 'codeblock.highlight': true } }))
+    await assertTokenPaint(scope, 'tok-string', 'settings Tcl paint', paintColors.dark.string,
+      `#389 ${mode} 设置恢复后真实高亮`)
+  }
+
+  // 完整围栏上下文：第 65 行在第二片，首片开头的多行状态必须仍在。
+  // 末尾加入足够多的段落，使定位离开后目标 DOM 确实卸载（不是隐藏）。
+  const chunkCases = [
+    { info: 'kotlin', open: '/* paint_open', close: '*/\nval after = 7',
+      marker: 'paint_comment_after_sixty', kind: 'comment' },
+    { info: 'toml', open: 'message = """paint_open', close: '"""',
+      marker: 'paint_string_after_sixty', kind: 'string' },
+  ]
+  for (const sample of chunkCases) {
+    const source = ['Cross-chunk paint.', '', `\`\`\`${sample.info}`, sample.open,
+      ...Array.from({ length: 63 }, (_, i) => `context filler ${i + 2}`),
+      sample.marker, sample.close, '```', '',
+      ...Array.from({ length: 160 }, (_, i) => `Distant paragraph ${i}.\n`),
+      'far_remount_anchor'].join('\n')
+    await page.evaluate((source) => window.initCode(source), source)
+    for (const mode of ['live', 'reading', 'live']) {
+      await page.evaluate((mode) => window.setCodeMode(mode), mode)
+      await page.evaluate((offset) => window.locateCode(offset), source.indexOf(sample.marker))
+      const paint = await assertTokenPaint(`#app .vsidian-view-${mode}`, `tok-${sample.kind}`,
+        sample.marker, paintColors.dark[sample.kind], `#389 ${mode} 跨片 ${sample.info}`)
+      assert.equal(paint.lineNumber, '65', '#389 跨片仍保持原文第 65 行行号')
+      if (mode === 'reading') {
+        await page.evaluate((marker) => {
+          window.previousCodeToken = [...document.querySelectorAll('.vsidian-view-reading [class*="tok-"]')]
+            .find((el) => el.textContent.includes(marker))
+        }, sample.marker)
+        await page.evaluate((offset) => window.locateCode(offset), source.indexOf('far_remount_anchor'))
+        await page.waitForFunction(() => window.previousCodeToken && !window.previousCodeToken.isConnected)
+        await page.evaluate((offset) => window.locateCode(offset), source.indexOf(sample.marker))
+        const remounted = await assertTokenPaint('#app .vsidian-view-reading', `tok-${sample.kind}`,
+          sample.marker, paintColors.dark[sample.kind], `#389 重挂 ${sample.info}`)
+        assert.equal(remounted.lineNumber, '65', '#389 重挂后行号不得重置')
+      }
+    }
+    assert.equal(await page.evaluate(() => window.controller.getView().state.doc.toString()), source,
+      '#389 模式切换与视口回收不得改写围栏源码')
+  }
+
+  // 整块 4096/4097 边界：第二片不得因仅看到 60 行而绕过降级。
+  for (const lineCount of [4096, 4097]) {
+    const body = Array.from({ length: lineCount }, (_, i) =>
+      i === 64 ? 'set message "paint_limit_after_sixty"' : `# limit filler ${i + 1}`)
+    const source = ['```tcl', ...body, '```'].join('\n')
+    await page.evaluate((source) => window.initCode(source), source)
+    for (const mode of ['live', 'reading']) {
+      await page.evaluate((mode) => window.setCodeMode(mode), mode)
+      await page.evaluate((offset) => window.locateCode(offset), source.indexOf('paint_limit_after_sixty'))
+      const scope = `#app .vsidian-view-${mode}`
+      if (lineCount === 4096) {
+        const paint = await assertTokenPaint(scope, 'tok-string', 'paint_limit_after_sixty',
+          paintColors.dark.string, `#389 ${mode} 4096 行边界`)
+        assert.equal(paint.lineNumber, '65', '#389 边界内着色保持原行号')
+      } else {
+        const selector = `${scope} ${mode === 'live' ? '.cm-line' : '.vsidian-reading-code-line'}`
+        await page.waitForFunction(({ selector, scope }) => {
+          const raw = window.codePaint(selector, 'paint_limit_after_sixty')
+          return raw?.visible === true && raw.color === 'rgb(212, 212, 212)' &&
+            document.querySelectorAll(`${scope} [class*="tok-"]`).length === 0
+        }, { selector, scope })
+        const raw = await page.evaluate((selector) =>
+          window.codePaint(selector, 'paint_limit_after_sixty'), selector)
+        assert.equal(raw.lineNumber, '65', '#389 降级仍显示原文与原行号')
+      }
+    }
+    assert.equal(await page.evaluate(() => window.controller.getView().state.doc.toString()), source,
+      '#389 超大围栏高亮降级不得删改源码')
+  }
+
+  // Markdown hover/embed 的共用 RefContentInstance 装配：朴素 code 路径也
+  // 必须读取整块上下文。这里不伪造 token DOM，也不复制阅读增强逻辑。
+  const refSource = ['```toml', 'message = """paint_open',
+    ...Array.from({ length: 63 }, (_, i) => `reference filler ${i + 2}`),
+    'paint_reference_after_sixty', '"""', '```'].join('\n')
+  for (let mount = 0; mount < 2; mount++) {
+    await page.evaluate(({ source, offset }) => window.mountCodeReference(source, offset),
+      { source: refSource, offset: refSource.indexOf('paint_reference_after_sixty') })
+    await assertTokenPaint('#code-reference-surface', 'tok-string', 'paint_reference_after_sixty',
+      paintColors.dark.string, `#389 Markdown 引用 ${mount === 0 ? '首次挂载' : '重新挂载'}`)
+  }
+
+  // 已挂载引用的高亮开关：只改变 token 子节点，不能用重挂整篇恢复颜色。
+  // 控制器到 hover/embed 的路由由控制器单测覆盖；这里直驱同一 mount 刷新口，
+  // 验证生产朴素 code 的实际绘制，以及用户正在阅读的位置和节点不变。
+  const referenceBefore = await page.evaluate(() => {
+    const surface = document.getElementById('code-reference-surface')
+    const code = [...surface.querySelectorAll('pre > code')]
+      .find((el) => el.textContent.includes('paint_reference_after_sixty'))
+    const block = code.closest('.vsidian-reading-block')
+    window.referencePaintBefore = { surface, code, block, pre: code.parentElement,
+      text: code.textContent, scrollTop: surface.scrollTop }
+    return { scrollTop: surface.scrollTop,
+      color: window.codePaint('#code-reference-surface .tok-string', 'paint_reference_after_sixty')?.color }
+  })
+  assert.ok(referenceBefore.scrollTop > 0, '#389 引用热切换必须覆盖已滚动到后片的阅读位置')
+  for (const enabled of [false, true]) {
+    await page.evaluate((enabled) => window.setCodeReferenceHighlight(enabled), enabled)
+    if (enabled) {
+      await assertTokenPaint('#code-reference-surface', 'tok-string', 'paint_reference_after_sixty',
+        referenceBefore.color, '#389 引用原地恢复高亮应还原原词类色')
+    } else {
+      await page.waitForFunction(() => {
+        const paint = window.codePaint('#code-reference-surface pre > code', 'paint_reference_after_sixty')
+        return paint?.visible === true && paint.color === 'rgb(212, 212, 212)' &&
+          document.querySelectorAll('#code-reference-surface [class*="tok-"]').length === 0
+      })
+    }
+    const after = await page.evaluate(() => {
+      const before = window.referencePaintBefore
+      const surface = document.getElementById('code-reference-surface')
+      const code = [...surface.querySelectorAll('pre > code')]
+        .find((el) => el.textContent.includes('paint_reference_after_sixty'))
+      return { sameSurface: surface === before.surface, sameCode: code === before.code,
+        samePre: code?.parentElement === before.pre,
+        sameBlock: code?.closest('.vsidian-reading-block') === before.block,
+        sameText: code?.textContent === before.text, scrollDelta: surface.scrollTop - before.scrollTop,
+        headers: surface.querySelectorAll('.vsidian-code-card-header').length }
+    })
+    assert.ok(after.sameSurface && after.sameBlock && after.samePre && after.sameCode,
+      `#389 引用开关不得重挂 surface/block/pre/code：${JSON.stringify(after)}`)
+    assert.ok(after.sameText, '#389 引用开关不得改写朴素代码原文')
+    assert.ok(Math.abs(after.scrollDelta) < 1, `#389 引用开关不得改变滚动位置：${after.scrollDelta}`)
+    assert.equal(after.headers, 0, '#389 引用高亮切换仍保留无卡片工具条的原形态')
+  }
+
   assert.deepEqual(errors, [], '页面不得有脚本错误')
-  console.log('codeCardChrome: #189 + #190 + #191 断言通过（围栏真实对齐、折叠钮位置恒定、整卡悬停恒显、整条热区、折行开关与续行对齐）')
+  console.log('codeCardChrome: #189 + #190 + #191 + #389 断言通过（围栏真实对齐、折叠钮位置恒定、整卡悬停恒显、整条热区、折行开关、续行对齐与语言文字真实着色）')
 } finally {
   await browser.close()
 }
