@@ -27,11 +27,16 @@ interface ReportCall {
 function makeRuntime() {
   const reports: ReportCall[] = []
   const logs: string[] = []
+  const faults: Array<{ addonId: string; stage: string; detail: string }> = []
   const runtime = new AddonCommandsRuntime({
     report: (payload) => reports.push({ ...payload, commands: [...payload.commands] }),
     log: (detail) => logs.push(detail),
+    reportFault: (addonId, stage, detail) => {
+      faults.push({ addonId, stage, detail })
+      return true
+    },
   })
-  return { runtime, reports, logs }
+  return { runtime, reports, logs, faults }
 }
 
 describe('T10 webview 命令注册表', () => {
@@ -168,5 +173,38 @@ describe('T10 webview 菜单注册表', () => {
     // 内置三簇原样
     const groups = buildContextMenuModel({ zone: 'normal', hasSelection: false, blockTarget: null, line: { headingLevel: null, listKind: null, quoted: false, hasText: true } })
     expect(groups.map((g) => g.id)).toEqual(['link', 'blockFormat', 'clipboard'])
+  })
+})
+
+describe('T12 命令回调异常升级为全组件故障', () => {
+  beforeEach(() => {
+    __resetRuntimeOperationsForTest()
+    __resetContextMenuRegistryForTest()
+  })
+  afterEach(() => {
+    __resetRuntimeOperationsForTest()
+    __resetContextMenuRegistryForTest()
+  })
+
+  it('执行回调抛出未捕获异常 → 归因上报（组件/命令/原因）且执行链不炸', () => {
+    const { runtime, faults, logs } = makeRuntime()
+    runtime.registerCommand(ADDON, 1, { id: 'boom', title: '故障命令', mode: 'both' }, () => {
+      throw new Error('command boom')
+    })
+    // 重复注册的明确拒绝（负向：API 合理拒绝不触发故障上报）
+    runtime.registerCommand(ADDON, 1, { id: 'boom', title: '同名', mode: 'both' }, () => {})
+    expect(runtime.execute(`${ADDON}.boom`)).toBe('executed')
+    expect(faults).toEqual([
+      { addonId: ADDON, stage: 'command-handler', detail: `${ADDON}.boom: Error: command boom` },
+    ])
+    expect(logs.some((line) => line.includes('handler error'))).toBe(true)
+  })
+
+  it('负向对照：正常执行与拒绝路径零故障上报', () => {
+    const { runtime, faults } = makeRuntime()
+    runtime.registerCommand(ADDON, 1, { id: 'ok', title: '正常', mode: 'both' }, () => {})
+    expect(runtime.execute(`${ADDON}.ok`)).toBe('executed')
+    expect(runtime.execute('unknown.command')).toBe('unknown')
+    expect(faults).toEqual([])
   })
 })

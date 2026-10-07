@@ -14,6 +14,12 @@
 // GRAPHIC_PROVIDER_ATTR 所有权标记：接管切换先释放旧提供者、换新容器
 // 挂载（旧容器脱离文档——旧代次迟到结果写入脱离节点，不回潮）。
 //
+// T12（#361）故障升级：生效组件提供者的 mount 抛出未捕获异常时上报
+// 全组件故障（bindAddonFaultReporter 注入的装载器上报槽——宿主裁决后
+// 整组件回收、生效表重算回内置，即「整组件故障降级停用后内置可接管」
+// 一档）；自处理渲染失败（组件捕获自己的异常或仅输出错误内容）不上
+// 报——仍运行的渲染 bug 不伪造停用状态（ADR-0012 Q30）。
+//
 // 接入清单（新增**内置**图形化渲染语言的三步）：
 // 1. shared/mermaid.ts 的 RENDERED_FENCE_LABELS 登记语言显示名；
 // 2. 本表登记 { renderInto, renderSvg }（renderInto 负责容器内渲染与
@@ -60,6 +66,25 @@ const registry = new Map<string, GraphicRenderer>([
 /** 语言（trim 后 info）→ 内置渲染管线；未登记返回 undefined（调用方降级） */
 export function graphicRendererFor(language: string): GraphicRenderer | undefined {
   return registry.get(language.trim())
+}
+
+// ---- T12（#361）渲染回调故障上报槽（main.ts 在装载器安装后绑定） ----
+
+/** 组件回调异常的升级入口（装载器 reportRuntimeFault 的模块级转发） */
+let addonFaultReporter: ((addonId: string, stage: string, detail: string) => boolean) | undefined
+
+/** 绑定/解绑上报槽（main.ts 装配；undefined 复位供测试隔离） */
+export function bindAddonFaultReporter(
+  reporter: ((addonId: string, stage: string, detail: string) => boolean) | undefined,
+): void {
+  addonFaultReporter = reporter
+}
+
+/** 生效提供者 mount 的可归因异常上报（组件 + 提供者 + 原因） */
+function reportRendererFault(providerId: string, err: unknown): void {
+  const separator = providerId.indexOf('/')
+  const addonId = separator > 0 ? providerId.slice(0, separator) : providerId
+  addonFaultReporter?.(addonId, 'renderer-mount', `${providerId}: ${String(err)}`)
 }
 
 /** 已登记内置语言清单（观测与契约测试） */
@@ -119,7 +144,12 @@ function addonRegistrationAsGraphicRenderer(
   return {
     renderInto(container: HTMLElement, code: string): void {
       container.setAttribute(GRAPHIC_PROVIDER_ATTR, providerId)
-      registration.mount(container, code, { language, mode })
+      try {
+        registration.mount(container, code, { language, mode })
+      } catch (err) {
+        // T12：可归因挂载异常上报全组件故障；弹窗调用链不外溢
+        reportRendererFault(providerId, err)
+      }
     },
     async renderSvg(code: string): Promise<MermaidSvgResult> {
       if (registration.exportSvg) {
@@ -172,12 +202,14 @@ export function renderGraphicIntoContainer(container: HTMLElement, code: string,
       resolved.registration.mount(container, code, { language: lang, mode })
       // mount 是同步入口：返回即视为本次挂载完成，容器状态交平台标记
       //（chrome 按钮组与既有 CSS 的 rendered 态选择器因此对组件容器同样
-      //  生效）。mount 抛错不自动接管（Q30：仍运行的渲染 bug 归组件）——
-      //  容器停留 error 态，生效者不变。
+      //  生效）。mount 抛出未捕获异常 → T12 上报全组件故障（停用后内置
+      //  按规则接管）；容器即时停留 error 态，停用与接管由宿主链路完成
+      //  ——自处理失败（组件自行 catch）不上报、生效者不变（Q30）。
       container.setAttribute(MERMAID_STATE_ATTR, 'rendered')
     } catch (err) {
       container.setAttribute(MERMAID_STATE_ATTR, 'error')
-      console.warn(`[vsidian] 渲染提供者 ${resolved.providerId} mount 异常（不自动接管）：`, err)
+      console.warn(`[vsidian] 渲染提供者 ${resolved.providerId} mount 异常（已上报全组件故障）：`, err)
+      reportRendererFault(resolved.providerId, err)
     }
     return
   }

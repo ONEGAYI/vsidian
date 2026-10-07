@@ -212,8 +212,11 @@ export function installAddonRenderersBridge(
         // 同代次同局部 ID 重复注册：拒绝（首个保留）
         return false
       }
-      entry.providers.set(spec.rendererId, spec)
+      // T12（#361）修复：变更前快照必须在 local 写入**之前**取——放之后
+      // 取会与 after 恒等（changed 恒空），本地候选变化的热切换通知被吞；
+      // 表先于装载到达（面板重开直发）时无广播兜底，发射 gate 永不重评估
       const before = resolutionSnapshot()
+      entry.providers.set(spec.rendererId, spec)
       report(addonId)
       notifyResolutionChange(before)
       return true
@@ -223,8 +226,9 @@ export function installAddonRenderersBridge(
       if (!entry || entry.generation !== generation) {
         return
       }
-      if (entry.providers.delete(rendererId)) {
+      if (entry.providers.has(rendererId)) {
         const before = resolutionSnapshot()
+        entry.providers.delete(rendererId)
         report(addonId)
         notifyResolutionChange(before)
       }
@@ -234,8 +238,8 @@ export function installAddonRenderersBridge(
       if (!entry || entry.generation !== generation) {
         return
       }
-      local.delete(addonId)
       const before = resolutionSnapshot()
+      local.delete(addonId)
       report(addonId)
       notifyResolutionChange(before)
     },

@@ -458,3 +458,82 @@ describe('T02 设置页装载意图与代次边界', () => {
     expect(again).toBe(first)
   })
 })
+
+describe('T12 设置变化回调异常升级为全组件故障', () => {
+  /** 局部 harness：暴露设置服务（变化触发面）与日志 */
+  function settingsHarness() {
+    const store = memoryStore()
+    const logs: string[] = []
+    const settingsPersistence: AddonSettingsPersistencePort = { hasWorkspace: true, read: () => undefined, write: async () => true }
+    const settingsService = new AddonSettingsService(settingsPersistence)
+    const runtime = new AddonRuntime({
+      apiVersion: ADDON_API_VERSION,
+      preferences: store,
+      settings: settingsService,
+      installDirOf: () => INSTALL,
+      log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
+    })
+    const extensions = [{ id: 'fixture.demo', packageJSON: { name: 'demo', publisher: 'fixture', vsidianAddon: { manifestVersion: 1, api: '^1.0.0' } } }]
+    const registry = new AddonRegistry(
+      {
+        apiVersion: ADDON_API_VERSION,
+        experimental: {},
+        officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
+        findExtension: (id) => extensions.find((extension) => extension.id === id),
+      },
+      runtime.registryHooks(),
+    )
+    return {
+      registry,
+      runtime,
+      settingsService,
+      logs,
+      register: (definition: import('../../src/host/addons/addonRegistry').AddonDefinition) =>
+        registry.register({ id: 'fixture.demo' }, definition),
+    }
+  }
+
+  it('组件设置变化监听器抛出未捕获异常 → 全组件暂停且通知循环不炸（其他监听者仍投递）', async () => {
+    const h = settingsHarness()
+    const received: number[] = []
+    let listenerCalls = 0
+    h.register({
+      setup(context) {
+        context.settings.registerDefinitions([{ key: 'demo.flag', title: 'Demo flag', type: 'boolean', default: true }])
+        context.settings.onChanged(() => {
+          listenerCalls++
+          throw new Error('listener boom')
+        })
+      },
+      enable() {},
+    })
+    // 平台侧另一个监听者（其他组件或宿主观察者——通知循环必须继续）
+    h.settingsService.onChanged(() => received.push(1))
+    const result = await h.settingsService.update('fixture.demo', 'user', { 'demo.flag': false })
+    expect(result.ok).toBe(true)
+    // 升级：设置回调异常 → 全组件故障暂停
+    expect(h.runtime.runtimeStatus('fixture.demo')).toMatchObject({ runState: 'faulted' })
+    expect(h.runtime.runtimeStatus('fixture.demo')!.faultReason).toContain('listener boom')
+    // 通知循环不炸：平台监听者照常收到
+    expect(listenerCalls).toBe(1)
+    expect(received).toEqual([1])
+    // 诊断日志：阶段结构化（fault/settings-listener）
+    expect(h.logs.some((entry) => entry.startsWith('fault/settings-listener:fixture.demo:'))).toBe(true)
+  })
+
+  it('负向对照：设置写入被拒（无效键）不产生故障；正常监听不异常则运行态保持', async () => {
+    const h = settingsHarness()
+    h.register({
+      setup(context) {
+        context.settings.registerDefinitions([{ key: 'demo.flag', title: 'Demo flag', type: 'boolean', default: true }])
+        context.settings.onChanged(() => { /* 正常 */ })
+      },
+      enable() {},
+    })
+    const rejected = await h.settingsService.update('fixture.demo', 'user', { 'demo.unknown': 1 })
+    expect(rejected.ok).toBe(false)
+    const ok = await h.settingsService.update('fixture.demo', 'user', { 'demo.flag': false })
+    expect(ok.ok).toBe(true)
+    expect(h.runtime.runtimeStatus('fixture.demo')!.runState).toBe('enabled')
+  })
+})

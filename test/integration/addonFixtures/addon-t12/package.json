@@ -1,0 +1,26 @@
+{
+  "name": "addon-t12",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T12 Diagnostics & Fault Pause)",
+  "description": "Integration fixture: Vsidian add-on for attributable fault injection (behavior/command/button/renderer/enable), self-handled render failure contrast, and manual retry recovery (T12, #361).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-t12.stats", "title": "Fixture T12: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-t12.queue", "title": "Fixture T12: queue a page command" },
+      { "command": "vsidian-test-fixture.addon-t12.collect", "title": "Fixture T12: collect page results" },
+      { "command": "vsidian-test-fixture.addon-t12.reset", "title": "Fixture T12: reset queues" },
+      { "command": "vsidian-test-fixture.addon-t12.setArm", "title": "Fixture T12: set fault arm" },
+      { "command": "vsidian-test-fixture.addon-t12.clearArm", "title": "Fixture T12: clear fault arm" },
+      { "command": "vsidian-test-fixture.addon-t12.setContrib", "title": "Fixture T12: toggle contributions" },
+      { "command": "vsidian-test-fixture.addon-t12.releaseAndReRegister", "title": "Fixture T12: release and re-register" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

@@ -16,8 +16,12 @@
 //   Compartment 装配——组合期注册的边界见 T05 未决事项，与本面无关）。
 //
 // 链的容错口径：
-// - 行为回调异常：记日志跳过该行为，链继续（不升级为组件故障暂停——
-//   ADR 异常恢复的完整触发面属后续票；此处可归因留痕）。
+// - 行为回调异常：记日志留痕并**升级为全组件故障**（T12 #361：reportFault
+//   端口上报宿主裁决，ADR「可捕获且可归因的回调异常按已确认规则暂停
+//   组件」）；上报后跳过该行为，链继续——其他组件不受本次故障牵连，
+//   本组件贡献由宿主 faultRecord 后的 unload 指令整体回收。
+// - 观察者（onChanged）异常：只计数留痕不升级（通知面不是原操作的第二
+//   写入口，T07 通知分离口径保持）。
 // - 提交拒绝（stale-snapshot/conflict 等）：记轨迹，链继续（下一个行为
 //   重新取快照，适用条件重新判断）。
 // - 快照不可得（实例销毁）：终止整链。
@@ -60,6 +64,9 @@ export interface AddonBehaviorRuntimePorts {
   applyEdit(addonId: string, opId: string, instanceId: string, request: AddonApplyEditsRequest): Promise<AddonApplyEditsResult>
   /** 归因日志（阶段 + 组件 + 原因） */
   log(stage: string, addonId: string, detail: string): void
+  /** T12（#361）可归因回调异常升级上报（main.ts 注入装载器的
+   *  reportRuntimeFault；缺省仅留痕不升级——旧装配不受影响） */
+  reportFault?(addonId: string, stage: string, detail: string): boolean
   /** T08（#357）注册表全量对账上报（可选——main.ts 注入，单测可缺省）：
    *  注册成功与整组件注销后各发一次该组件当前全表（空表 = 全撤信号），
    *  宿主据此构建行为冲突管理目录。镜像 T10 addonCommands.report 形态。 */
@@ -201,6 +208,10 @@ export class AddonBehaviorRuntime {
         } catch (err) {
           this.counters.callbackErrors++
           this.ports.log('behavior-callback-error', entry.addonId, `${entry.registration.id}: ${String(err)}`)
+          // T12（#361）：可归因回调异常升级为全组件故障上报（组件 + 行为
+          // ID + 原因）；链继续——其他组件不受牵连，本组件贡献由宿主
+          // faultRecord 后的 unload 指令整体回收
+          this.ports.reportFault?.(entry.addonId, 'behavior-onInput', `${entry.registration.id}: ${String(err)}`)
           continue
         }
         if (plan === null || plan === undefined) {

@@ -60,10 +60,15 @@ function makeEnv() {
     panelCloseLabel: () => '关闭面板',
     log: () => {},
   }
+  const faults: Array<{ addonId: string; stage: string; detail: string }> = []
+  ;(env as AddonUiRuntimeEnv & { reportFault?: unknown }).reportFault = (addonId: string, stage: string, detail: string) => {
+    faults.push({ addonId, stage, detail })
+    return true
+  }
   const runtime = new AddonUiRuntime(env)
   runtime.bindHandleFactory((_addonId, instanceId) =>
     state.activeId === instanceId ? makeHandle(instanceId) : null)
-  return { runtime, toolbarSlot, panelDock, state }
+  return { runtime, toolbarSlot, panelDock, state, faults }
 }
 
 describe('T11 webview 界面运行时：按钮', () => {
@@ -336,5 +341,59 @@ describe('T11 webview 界面运行时：整组件回收与观测', () => {
     expect(stats.buttons[0]!.mounted).toBe(true)
     expect(stats.buttons[1]!.mounted).toBe(false)
     expect(stats.panels).toEqual([{ id: `${ADDON}.p1`, addonId: ADDON, open: true }])
+  })
+})
+
+describe('T12 界面回调异常升级为全组件故障', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('按钮 onClick 抛出未捕获异常 → 归因上报（组件/按钮/原因），点击链不炸', () => {
+    const { runtime, toolbarSlot, faults } = makeEnv()
+    runtime.registerButton(ADDON, 1, { id: 'boomBtn', label: 'Boom' }, () => {
+      throw new Error('button boom')
+    })
+    const btn = toolbarSlot.querySelector('button')!
+    expect(() => btn.click()).not.toThrow()
+    expect(faults).toEqual([
+      { addonId: ADDON, stage: 'ui-button-onClick', detail: `${ADDON}.boomBtn: Error: button boom` },
+    ])
+  })
+
+  it('面板 mount 抛出未捕获异常 → 归因上报且面板回收（不留半装配）', () => {
+    const { runtime, faults } = makeEnv()
+    const panel = runtime.registerPanel(ADDON, 1, {
+      id: 'boomPanel', title: 'Boom',
+      mount: () => {
+        throw new Error('mount boom')
+      },
+    })
+    expect(panel.ok).toBe(true)
+    expect(panel.open()).toBe(false)  // mount 异常：open 以失败收口并回收
+    expect(runtime.stats().panels).toEqual([])  // mount 异常：注册移除（不留半装配）
+    expect(faults).toEqual([
+      { addonId: ADDON, stage: 'ui-panel-mount', detail: `${ADDON}.boomPanel: Error: mount boom` },
+    ])
+  })
+
+  it('负向对照：unmount 清理回调异常不升级（代次终结路径的既有先例），正常路径零上报', () => {
+    const { runtime, faults, state } = makeEnv()
+    let unmountCalls = 0
+    const panel = runtime.registerPanel(ADDON, 1, {
+      id: 'p', title: 'P', mode: 'live',
+      mount: () => {},
+      unmount: () => {
+        unmountCalls++
+        throw new Error('unmount boom')
+      },
+    })
+    panel.open()
+    state.mode = 'reading'  // 模式切换触发强制关闭（unmount 执行路径）
+    runtime.applyMode('reading')
+    expect(unmountCalls).toBeGreaterThanOrEqual(1)
+    expect(() => panel.close()).not.toThrow()
+    runtime.registerButton(ADDON, 1, { id: 'okBtn', label: 'OK' }, () => {})
+    expect(faults).toEqual([])
   })
 })

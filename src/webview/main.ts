@@ -22,6 +22,7 @@ import { AddonCommandsRuntime } from './addonCommands'
 import { AddonUiRuntime } from './addonUi'
 import { installAddonPageLoader } from './addonPageLoader'
 import { setAddonRenderersBridge } from './addonRenderers'
+import { bindAddonFaultReporter } from './graphicRenderers'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { t } from '../shared/i18n'
 import { installTooltipCard } from './tooltipCard'
@@ -68,18 +69,24 @@ controller.mount(document.getElementById('app') ?? document.body, [
 // （快照/提交走统一视图注册表；链驱动经 controller 注入主正文与嵌入实例），
 // 宿主状态（顺序覆盖/逐项开关）经 addon.behaviors.state 到达。
 // T08（#357）：注册表变化后全量对账上报宿主（行为冲突管理目录的数据源）
+// T12（#361）：各 runtime 的可归因回调异常经 faultReporter 槽升级上报
+// （构造先于装载器——闭包转发到装载器安装后绑定的目标，沿 bindHandleFactory
+// 先例解装配环；上报只经宿主裁决，本页回收由 unload 指令对账）
+let reportAddonRuntimeFault: (addonId: string, stage: string, detail: string) => boolean = () => false
 const addonViews = new AddonViewRegistry()
 const addonBehaviors = new AddonBehaviorRuntime({
   snapshotOf: (instanceId) => addonViews.snapshotOf(instanceId),
   applyEdit: (addonId, opId, instanceId, request) => addonViews.applyEdits({ addonId, opId, instanceId, request }),
   log: (stage, addonId, detail) => console.warn(`[vsidian-addon-behavior] ${stage} ${addonId}: ${detail}`),
   report: (payload) => vscode.postMessage({ kind: 'addon.behaviors.report', ...payload }),
+  reportFault: (addonId, stage, detail) => reportAddonRuntimeFault(addonId, stage, detail),
 })
 
 // #359 T10 组件命令/菜单注册表（页面级一份）：SDK commands/menus 面的操作
 // 后端；注册/撤销后全量对账上报宿主（宿主注册命令面板命令并推设置页目录）
 const addonCommands = new AddonCommandsRuntime({
   report: (payload) => vscode.postMessage({ kind: 'addonCommands.report', ...payload }),
+  reportFault: (addonId, stage, detail) => reportAddonRuntimeFault(addonId, stage, detail),
 })
 
 // T09（#358）：渲染提供者桥先于装载器装配（SDK renderers 面后端），候选
@@ -101,6 +108,7 @@ const addonUi = new AddonUiRuntime({
   bindingHints: (commandId) => controller.addonEffectiveBindings(commandId),
   panelCloseLabel: () => t('addonUi.panelClose'),
   log: (detail) => console.warn(`[vsidian-addon-ui] ${detail}`),
+  reportFault: (addonId, stage, detail) => reportAddonRuntimeFault(addonId, stage, detail),
 })
 const addonLoader = installAddonPageLoader({
   page: 'editor',
@@ -113,6 +121,10 @@ const addonLoader = installAddonPageLoader({
   addonUi,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
+// T12（#361）：故障上报槽接线（装载器在场后升级生效）——各 runtime 与
+// 渲染提供者挂载异常统一经装载器上报宿主裁决
+reportAddonRuntimeFault = (addonId, stage, detail) => addonLoader.reportRuntimeFault(addonId, stage, detail)
+bindAddonFaultReporter(reportAddonRuntimeFault)
 addonUi.bindHandleFactory((addonId, instanceId) => addonLoader.buildViewHandle(addonId, instanceId))
 controller.attachAddonUi(addonUi)
 controller.attachAddonViews(addonViews)

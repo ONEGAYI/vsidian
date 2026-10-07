@@ -33,12 +33,15 @@ interface RuntimeHarness {
   advanceTo: (text: string) => void
   rejectNext: (reason: 'stale-snapshot' | 'conflict' | 'suspended' | 'view-disposed' | 'read-only') => void
   logs: string[]
+  /** T12 故障升级上报收件（reportFault 端口） */
+  faults: Array<{ addonId: string; stage: string; detail: string }>
 }
 
 function createHarness(initialText = 'x'): RuntimeHarness {
   const snapshots: Array<{ text: string; revision: number }> = []
   const submits: RuntimeHarness['submits'] = []
   const logs: string[] = []
+  const faults: RuntimeHarness['faults'] = []
   let text = initialText
   let revision = 1
   let nextRejection: AddonApplyEditsResult | null = null
@@ -64,6 +67,10 @@ function createHarness(initialText = 'x'): RuntimeHarness {
         return Promise.resolve({ ok: true, credential: { opId, version: 3 } })
       },
       log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
+      reportFault: (addonId, stage, detail) => {
+        faults.push({ addonId, stage, detail })
+        return true
+      },
     }),
     snapshots, submits,
     advanceTo: (next) => {
@@ -74,6 +81,7 @@ function createHarness(initialText = 'x'): RuntimeHarness {
       nextRejection = { ok: false, reason }
     },
     logs,
+    faults,
   }
   // 预绑测试组件的 opId 分配器（装载器装载成功时注入；opId 体系同 T06）
   for (const addonId of ['pub.a', 'pub.b']) {
@@ -405,5 +413,52 @@ describe('T08 注册表全量对账上报', () => {
     })
     expect(runtime.register('pub.a', 1, registration({ id: 'x', name: 'X' }))).toEqual({ ok: true, key: 'pub.a#x' })
     runtime.unregisterAddon('pub.a')
+  })
+})
+
+describe('T12 行为回调异常升级为全组件故障', () => {
+  it('onInput 抛出未捕获异常 → 归因上报（组件/行为/原因）且链继续（其他组件不受牵连）', async () => {
+    const h = createHarness('word')
+    h.runtime.register('pub.a', 1, registration({
+      id: 'boom', name: '故障行为',
+      onInput: () => {
+        throw new Error('behavior boom')
+      },
+    }))
+    h.runtime.register('pub.b', 1, registration({ id: 'ok', name: '正常', onInput: () => plan('B') }))
+    await h.runtime.driveInput('main', { userEvent: 'input.type', inputText: 'k' })
+    // 升级上报：组件 ID + 阶段 + 行为 ID + 原因（宿主据此全组件暂停）
+    expect(h.faults).toEqual([
+      { addonId: 'pub.a', stage: 'behavior-onInput', detail: 'boom: Error: behavior boom' },
+    ])
+    // 留痕日志仍在（诊断通道不因升级而丢）
+    expect(h.logs.some((entry) => entry.startsWith('behavior-callback-error:pub.a:'))).toBe(true)
+    // 链继续：其他组件行为照常修饰（验收「其他组件和内置功能仍可用」）
+    expect(h.submits.map((s) => s.addonId)).toEqual(['pub.b'])
+  })
+
+  it('观察者（onChanged）异常只计数留痕不升级——通知面不是故障暂停的触发面', async () => {
+    const h = createHarness('word')
+    h.runtime.onChanged(() => {
+      throw new Error('observer boom')
+    })
+    await h.runtime.driveInput('main', { userEvent: 'input.type', inputText: 'k' })
+    expect(h.faults).toEqual([])
+    expect(h.runtime.stats().counters.observerErrors).toBe(1)
+  })
+
+  it('未注入 reportFault 口（可选）时异常仅留痕不升级——旧装配不受影响', async () => {
+    const runtime = new AddonBehaviorRuntime({
+      snapshotOf: (): AddonSnapshotResult => ({ ok: false, reason: 'view-disposed' }),
+      applyEdit: () => Promise.resolve({ ok: false, reason: 'read-only' } as AddonApplyEditsResult),
+      log: () => {},
+    })
+    runtime.register('pub.a', 1, registration({
+      id: 'boom', name: '故障',
+      onInput: () => {
+        throw new Error('silent')
+      },
+    }))
+    await expect(runtime.driveInput('main', { userEvent: 'input.type', inputText: 'k' })).resolves.toBeUndefined()
   })
 })
