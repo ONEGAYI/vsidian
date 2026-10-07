@@ -13,9 +13,10 @@
 // - 本模块不做 DOM/CM6 装饰（纯区间计算），node 单测直驱
 import { classHighlighter, highlightTree, tagHighlighter, tags } from '@lezer/highlight'
 import type { Parser } from '@lezer/common'
-import { StreamLanguage } from '@codemirror/language'
+import { StreamLanguage, type StreamParser } from '@codemirror/language'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
+import { jsonc, json5 } from './jsonDialects'
 import { html } from '@codemirror/lang-html'
 import { css } from '@codemirror/lang-css'
 import { python } from '@codemirror/lang-python'
@@ -23,12 +24,34 @@ import { cpp } from '@codemirror/lang-cpp'
 import { java } from '@codemirror/lang-java'
 import { go } from '@codemirror/lang-go'
 import { rust } from '@codemirror/lang-rust'
-import { sql } from '@codemirror/lang-sql'
+import { sql, PostgreSQL, MySQL, SQLite, SQLDialect } from '@codemirror/lang-sql'
 import { markdown } from '@codemirror/lang-markdown'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { powerShell } from '@codemirror/legacy-modes/mode/powershell'
 import { yaml } from '@codemirror/legacy-modes/mode/yaml'
 import { verilog } from '@codemirror/legacy-modes/mode/verilog'
+import { tcl } from '@codemirror/legacy-modes/mode/tcl'
+import { vhdl } from '@codemirror/legacy-modes/mode/vhdl'
+
+import { toml } from '@codemirror/legacy-modes/mode/toml'
+import { properties } from '@codemirror/legacy-modes/mode/properties'
+import { xml } from '@codemirror/legacy-modes/mode/xml'
+import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
+import { cmake } from '@codemirror/legacy-modes/mode/cmake'
+import { diff } from '@codemirror/legacy-modes/mode/diff'
+
+import { csharp, kotlin, dart } from '@codemirror/legacy-modes/mode/clike'
+import { swift } from '@codemirror/legacy-modes/mode/swift'
+import { ruby } from '@codemirror/legacy-modes/mode/ruby'
+import { lua } from '@codemirror/legacy-modes/mode/lua'
+import { r } from '@codemirror/legacy-modes/mode/r'
+import { julia } from '@codemirror/legacy-modes/mode/julia'
+import { sCSS, less } from '@codemirror/legacy-modes/mode/css'
+import { parsePhp, phpPlainParser } from './codeLanguages/php'
+import { graphql } from './codeLanguages/graphql'
+import { makefile } from './codeLanguages/makefile'
+import { spice } from './codeLanguages/spice'
+import { protobuf } from '@codemirror/legacy-modes/mode/protobuf'
 
 /** 超大围栏跳过着色的行数上限（降级纯文本；#85 性能文档记录） */
 export const HIGHLIGHT_MAX_LINES = 4096
@@ -43,12 +66,53 @@ export interface CodeTokenRange {
   cls: string
 }
 
+// legacy-modes 6.5.4 Tcl tokenBase labels ordinary double-quoted text as
+// comments. Adapt only that state: preserve its commands/variables/comments and
+// resume the official tokenizer after a closing quote. Its state is a flat
+// record (tokenize, beforeParams, inParams); copy it for StreamLanguage snapshots.
+interface TclQuotedState {
+  inner: { tokenize: unknown }
+  baseTokenizer: unknown
+  quoted: boolean
+}
+const tclWithQuotedStrings: StreamParser<TclQuotedState> = {
+  name: 'tcl',
+  languageData: tcl.languageData,
+  startState(indentUnit) {
+    const inner = tcl.startState!(indentUnit) as TclQuotedState['inner']
+    return { inner, baseTokenizer: inner.tokenize, quoted: false }
+  },
+  copyState(state) {
+    return { ...state, inner: { ...state.inner } }
+  },
+  token(stream, state) {
+    if (!state.quoted && state.inner.tokenize === state.baseTokenizer && stream.peek() === '"') {
+      stream.next()
+      state.quoted = true
+    } else if (!state.quoted) {
+      return tcl.token(stream, state.inner)
+    }
+    let escaped = false
+    while (!stream.eol()) {
+      const ch = stream.next()
+      if (ch === '"' && !escaped) {
+        state.quoted = false
+        break
+      }
+      escaped = ch === '\\' && !escaped
+    }
+    return 'string'
+  },
+}
+
 // 语言 id → Parser。TS 方言 parser 覆盖 js/jsx/ts/tsx（超集；方言差异由
 // 词表吸收，注册表别名统一路由）。html 内嵌 css/js 由嵌套解析器承担。
 const PARSERS: Readonly<Record<string, Parser>> = {
   javascript: javascript({ typescript: true, jsx: true }).language.parser,
   typescript: javascript({ typescript: true, jsx: true }).language.parser,
   json: json().language.parser,
+  jsonc: StreamLanguage.define(jsonc).parser,
+  json5: StreamLanguage.define(json5).parser,
   html: html().language.parser,
   css: css().language.parser,
   python: python().language.parser,
@@ -58,11 +122,47 @@ const PARSERS: Readonly<Record<string, Parser>> = {
   go: go().language.parser,
   rust: rust().language.parser,
   sql: sql().language.parser,
+  postgresql: sql({ dialect: PostgreSQL }).language.parser,
+  mysql: sql({ dialect: MySQL }).language.parser,
+  // SQLite supports [quoted identifiers]; lang-sql 6.10.0 omits this one
+  // quote form. Keep its actual SQLite vocabulary and all other options.
+  sqlite: sql({ dialect: SQLDialect.define({ ...SQLite.spec, identifierQuotes: '`"[' }) }).language.parser,
   markdown: markdown().language.parser,
   shell: StreamLanguage.define(shell).parser,
   powershell: StreamLanguage.define(powerShell).parser,
   yaml: StreamLanguage.define(yaml).parser,
   verilog: StreamLanguage.define(verilog).parser,
+  tcl: StreamLanguage.define(tclWithQuotedStrings).parser,
+  vhdl: StreamLanguage.define(vhdl).parser,
+  toml: StreamLanguage.define(toml).parser,
+  ini: StreamLanguage.define({
+    ...properties,
+    // Map this legacy mode's section/key/value styles onto the existing palette;
+    // do not recolor Markdown's headings or other languages' definitions.
+    token(stream, state) {
+      const token = properties.token(stream, state)
+      return token === 'header' ? 'meta' : token === 'def' ? 'propertyName' : token === 'quote' ? 'string' : token
+    },
+  }).parser,
+  xml: StreamLanguage.define(xml).parser,
+  dockerfile: StreamLanguage.define(dockerFile).parser,
+  cmake: StreamLanguage.define(cmake).parser,
+  diff: StreamLanguage.define(diff).parser,
+  csharp: StreamLanguage.define(csharp).parser,
+  kotlin: StreamLanguage.define(kotlin).parser,
+  swift: StreamLanguage.define(swift).parser,
+  dart: StreamLanguage.define(dart).parser,
+  ruby: StreamLanguage.define(ruby).parser,
+  lua: StreamLanguage.define(lua).parser,
+  r: StreamLanguage.define(r).parser,
+  julia: StreamLanguage.define(julia).parser,
+  scss: StreamLanguage.define(sCSS).parser,
+  less: StreamLanguage.define(less).parser,
+  php: phpPlainParser,
+  graphql: StreamLanguage.define(graphql).parser,
+  makefile: StreamLanguage.define(makefile).parser,
+  spice: StreamLanguage.define(spice).parser,
+  protobuf: StreamLanguage.define(protobuf).parser,
 }
 
 // 仅对解析器已提供的函数调用标签追加类名；这是显式的共享函数色设计，
@@ -114,7 +214,7 @@ export function highlightCodeRanges(languageId: string | null, code: string): re
     return hit
   }
   stats.parserCalls += 1
-  const tree = PARSERS[languageId!]!.parse(code)
+  const tree = languageId === 'php' ? parsePhp(code) : PARSERS[languageId!]!.parse(code)
   const ranges: CodeTokenRange[] = []
   highlightTree(tree, [classHighlighter, functionClassHighlighter], (from, to, cls) => {
     if (to > from) {

@@ -22,6 +22,7 @@ vsidian/
         ├── 2026-10-ref-expansion-244.md               # 递归引用驻留实测
         ├── 2026-10-ref-phase15-249.md                 # 1.5 期收口资源实测汇总（#249）
         ├── 2026-10-ref-phase2-291.md                  # 二期引用性能收口报告
+        ├── 2026-10-special-code-languages.md          # 新词法验证与包体记录
         ├── 2026-10-table-height-opt.md                # 多列表格高度优化实测报告
         ├── 2026-10-wikilink-completion-capacity.md    # 双链联想容量与费用基准解读（#382）
         └── data/                                      # 性能探针原始报告数据

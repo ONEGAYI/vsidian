@@ -18,6 +18,7 @@
 //   （checkbox 启用，#9 点击/键盘切换走 syncController 的出站链路）
 // - 类名映射 Obsidian 同款选择器，见 docs/design/obsidian-selector-map.md
 import { splitReadingBlocks, type ReadingBlock } from './readingBlocks'
+import { bindReadingCodeContext } from './readingCodeCard'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { convertTaskItems, sanitizeReadingDom } from './readingMarkdown'
 import type { ImageResourceManager } from './imageResource'
@@ -122,6 +123,7 @@ export function createReadingBlockElement(block: ReadingBlock, text: string): HT
   el.dataset['vsidianSrcEnd'] = String(block.end)
   el.innerHTML = block.html
   sanitizeReadingDom(el)
+  bindReadingCodeContext(el, text, block.codeContext)
   if (block.kind === 'list') {
     convertTaskItems(el, text)
   }

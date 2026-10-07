@@ -51,6 +51,13 @@ export type ReadingBlockKind =
   | 'mermaid'
   | 'embed'
 
+/** 完整围栏的代码体坐标；同一围栏的所有分片共享，不存逐片全文。 */
+export interface ReadingCodeFence {
+  from: number
+  to: number
+  totalLines: number
+}
+
 /** 一个阅读块：源文本的 [start, end) 区间、渲染身份与内部 HTML */
 export interface ReadingBlock {
   kind: ReadingBlockKind
@@ -69,6 +76,8 @@ export interface ReadingBlock {
   references?: ReadonlySet<string>
   /** 渲染器接受且隐藏的引用定义区间；同名非法定义不在其中。 */
   referenceDefinitions?: readonly { from: number; to: number }[]
+  /** 分片高亮上下文：完整围栏界限 + 本片正文首字符（均为全文坐标）。 */
+  codeContext?: { fence: ReadingCodeFence; from: number }
 }
 
 /** 超过该行数的围栏代码块按行细分为多个挂载单位（#7 超大单块缓解） */
@@ -370,6 +379,15 @@ function pushBlock(
       const hasClose = text.slice(env.lineStarts[endLine] ?? 0, end).trimStart().startsWith(opener.markup)
       // 跨片行号契约：整块内容行数（围栏体 = 开闭围栏行之间；未闭合无尾行）
       const totalContentLines = fenceLines - 1 - (hasClose ? 1 : 0)
+      // Highlighting budgets use the original token extent, not the generic
+      // rendered-block trim above: empty lines at an unclosed fence's EOF still
+      // count. Keep the existing chunk, line-number and copy boundaries intact.
+      const sourceEndLine = baseLine + map[1] - 1
+      const fence: ReadingCodeFence = {
+        from: (env.lineEnds[startLine] ?? start) + 1,
+        to: hasClose ? Math.max(start, (env.lineStarts[endLine] ?? end) - 1) : (env.lineEnds[sourceEndLine] ?? end),
+        totalLines: sourceEndLine - startLine - (hasClose ? 1 : 0),
+      }
       for (let l = startLine; l <= endLine; l += FENCE_CHUNK_LINES) {
         const chunkEnd = Math.min(l + FENCE_CHUNK_LINES - 1, endLine)
         const cs = env.lineStarts[l] ?? start
@@ -384,6 +402,7 @@ function pushBlock(
           start: cs,
           end: ce,
           html: fenceChunkHtml(text, contentFrom, contentTo, info, chunkStartLine, totalContentLines),
+          codeContext: { fence, from: contentFrom },
         })
       }
       return

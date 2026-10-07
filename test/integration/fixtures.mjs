@@ -207,6 +207,30 @@ const CODE_CARD_DOC = [
   '结尾段落。',
   '',
 ].join('\n')
+// #389 新语言绘制样例：独立文件避免既有代码卡片数量/行号断言漂移。
+const CODE_LANGUAGE_PAINT_DOC = [
+  'Language paint.', '',
+  '```TCL title=paint', 'set message "quoted Tcl paint"', '```', '',
+  '```VHD', 'entity PaintChip is', 'end entity;', '```', '',
+  '```properties', '[paint_section]', 'color=blue', '```', '',
+  '```patch', '-removed_paint', '+added_paint', '```', '',
+  '```ngspice', '.param paint_gain=2', '```', '',
+  '```mk', 'all:', '\t@echo "make recipe paint"', '```', '',
+  '```php', '$label = "plain PHP paint";', '```', '',
+  '```gql', 'query PaintChip { chip { id } }', '```', '',
+  'Language paint tail.',
+].join('\n')
+const CODE_LANGUAGE_CHUNK_DOC = [
+  'Cross-chunk paint.', '',
+  '```kotlin', '/* paint_open',
+  ...Array.from({ length: 63 }, (_, i) => `comment filler ${i + 2}`),
+  'paint_comment_after_sixty', '*/', 'val after = 7', '```', '',
+  '```toml', 'message = """paint_open',
+  ...Array.from({ length: 63 }, (_, i) => `string filler ${i + 2}`),
+  'paint_string_after_sixty', '"""', '```', '',
+  ...Array.from({ length: 160 }, (_, i) => `Distant paragraph ${i}.\n`),
+  'far_remount_anchor',
+].join('\n')
 // #9 任务勾选样例：含重复任务行（定位安全验证）与已勾选项
 const TASK_DOC = [
   '# 任务清单标题',
@@ -918,6 +942,8 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'mermaid-edge.md'), MERMAID_EDGE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'hr.md'), HR_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'code-card.md'), CODE_CARD_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'code-language-paint.md'), CODE_LANGUAGE_PAINT_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'code-language-chunk.md'), CODE_LANGUAGE_CHUNK_DOC, 'utf8')
   // #60 图表密集性能样例（generateMermaidDenseSample 可选注入；缺省跳过）
   if (generateMermaidDenseSample) {
     writeFileSync(path.join(wsDir, 'perf-mermaid.md'), generateMermaidDenseSample(), 'utf8')

@@ -28,6 +28,9 @@ import {
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { mermaidFencesField } from '../../src/webview/liveMermaid'
 import { resolveCodeLanguage, codeInfoFirstWord } from '../../src/shared/codeLangs'
+import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
+import { DIALECT_CODE_FIXTURES } from '../fixtures/codeDialects'
+import { SPECIAL_CODE_LANGUAGE_FIXTURES, SPECIAL_CONTEXT_FIXTURES } from '../fixtures/specialCodeLanguages'
 
 interface Item {
   from: number
@@ -834,5 +837,42 @@ describe('头部按钮区与热区（#190）', () => {
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clicks).not.toHaveBeenCalled()
     expect(mousedowns).not.toHaveBeenCalled()
+  })
+})
+
+describe('ready-language Live headers and marks (#389)', () => {
+  it.each([...READY_CODE_LANGUAGE_FIXTURES, ...DIALECT_CODE_FIXTURES, ...SPECIAL_CODE_LANGUAGE_FIXTURES])('$id shows its own badge, label and lexical marks', (fixture) => {
+    const text = `intro\n\n\`\`\`${fixture.aliases.at(-1)} title=sample\n${fixture.code}\n\`\`\``
+    const items = decos(text, 0)
+    const widget = items.find((i) => i.widget)?.widget
+    expect(widget?.label).toBe(fixture.label)
+    expect(widget?.languageId).toBe(fixture.id)
+    const header = widget!.toDOM()
+    expect(header.querySelector(`.${CODE_CARD_CLASS_NAMES.headerIcon}`)?.textContent).toBe(fixture.badge)
+    for (const [word, cls] of fixture.tokens) {
+      expect(items.some((item) => text.slice(item.from, item.to) === word && item.cls?.split(' ').includes(cls)), `${fixture.id}: ${word}`).toBe(true)
+    }
+  })
+})
+
+describe('dialect Live complete-fence budget (#391)', () => {
+  it.each(['jsonc', 'json5', 'postgresql'])('%s uses the 4096/4097 guard without changing card or raw text', (language) => {
+    for (const count of [4096, 4097]) {
+      const code = ['/* live budget', ...Array.from({ length: count - 2 }, (_, i) => `live dialect ${i}`), '*/'].join('\n')
+      const source = `intro\n\n\`\`\`${language}\n${code}\n\`\`\``
+      const items = decos(source, 0)
+      expect(items.some((item) => item.cls?.includes('tok-comment'))).toBe(count === 4096)
+      expect(items.find((item) => item.widget)?.widget?.languageId).toBe(language)
+    }
+  })
+})
+
+describe('special-language Live continuity (#390)', () => {
+  it.each(SPECIAL_CONTEXT_FIXTURES)('$id retains its complete-fence context beyond line 60', (fixture) => {
+    const code = [fixture.first, ...Array.from({ length: 75 }, (_, i) => fixture.body(i)), fixture.last].join('\n')
+    const source = `intro\n\n\`\`\`${fixture.id}\n${code}\n\`\`\``
+    const position = source.indexOf(fixture.marker)
+    const items = decos(source, 0)
+    expect(items.some((item) => item.from <= position && item.to >= position + fixture.word.length && item.cls?.split(' ').includes(fixture.cls))).toBe(true)
   })
 })

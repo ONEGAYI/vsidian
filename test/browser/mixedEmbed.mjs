@@ -77,6 +77,13 @@ const browser = await chromium.launch({ headless: true,
 let passed = 0
 try {
   const page = await browser.newPage({ viewport: { width: 900, height: 900 } })
+  // 本套件验证图片 alt 内嵌入字面量，不依赖外网。真实图片加载失败会按
+  // 产品契约把 alt 改为重试提示，故在导航前固定此资源的成功响应。
+  await page.route('https://e.example/i.png', (route) => route.fulfill({
+    status: 200,
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>',
+  }))
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
@@ -282,6 +289,11 @@ try {
   console.log('[混排嵌入][PASS] 链接域占位保持；表格格内升级 td 宿主且不拆表（#248）')
 
   // ---- 场景 D2：图片 alt 域内字面量不牵连同块（终审 P1-1：不整块降级） ----
+  await page.waitForFunction(() => {
+    const image = document.querySelector('#app img[data-vsidian-img-src="https://e.example/i.png"]')
+    return image instanceof HTMLImageElement && image.dataset.vsidianImgState === 'loaded'
+      && image.complete && image.naturalWidth > 0
+  })
   const altEvidence = await page.evaluate(() => {
       const imgs = Array.from(document.querySelectorAll('#app img'))
         .filter((el) => !el.classList.contains('cm-widgetBuffer')

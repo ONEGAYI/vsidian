@@ -12,7 +12,8 @@
 // - 两者皆关：不触碰（朴素 markdown-it 产物）
 // 折叠（card 开启时）：块级类切换隐藏 pre（视图态由调用方持有集合）。
 import { resolveCodeLanguage } from '../shared/codeLangs'
-import { hasHighlightEngine, highlightCodeRanges, splitRangeAtLineBreaks } from './codeHighlight'
+import { HIGHLIGHT_CACHE_LIMIT, HIGHLIGHT_MAX_LINES, hasHighlightEngine, highlightCodeRanges, splitRangeAtLineBreaks, type CodeTokenRange } from './codeHighlight'
+import type { ReadingBlock, ReadingCodeFence } from './readingBlocks'
 import {
   CODE_CARD_CLASS_NAMES,
   appendLanguageBadge,
@@ -21,6 +22,38 @@ import {
   buildWrapButton,
 } from './liveCodeCard'
 import type { CodeCardConfig } from './liveCodeCard'
+
+// DOM bindings are weak: unmounted chunks never keep their document alive.
+// Only bounds are copied per chunk. Keep at most 64 complete fence bodies, shared
+// across mounts, so later chunks neither parse in isolation nor copy full bodies.
+const codeContexts = new WeakMap<HTMLElement, { text: string; slice: NonNullable<ReadingBlock['codeContext']> }>()
+const fenceSources = new Map<ReadingCodeFence, string>()
+
+/** Both main reading and Markdown references use createReadingBlockElement. */
+export function bindReadingCodeContext(block: HTMLElement, text: string, slice: ReadingBlock['codeContext']): void {
+  if (slice) codeContexts.set(block, { text, slice })
+}
+
+function readingTokenRanges(block: HTMLElement, languageId: string, code: string): readonly CodeTokenRange[] {
+  const context = codeContexts.get(block)
+  if (!context) return highlightCodeRanges(languageId, code)
+  const { text, slice } = context
+  const { fence } = slice
+  // Check the complete fence before allocating its body, including later-first mounts.
+  if (fence.totalLines > HIGHLIGHT_MAX_LINES) return []
+  let source = fenceSources.get(fence)
+  if (source === undefined) source = text.slice(fence.from, fence.to)
+  fenceSources.delete(fence)
+  fenceSources.set(fence, source)
+  while (fenceSources.size > HIGHLIGHT_CACHE_LIMIT) {
+    fenceSources.delete(fenceSources.keys().next().value!)
+  }
+  const offset = slice.from - fence.from
+  const end = offset + code.length
+  return highlightCodeRanges(languageId, source)
+    .filter((token) => token.to > offset && token.from < end)
+    .map((token) => ({ from: Math.max(token.from, offset) - offset, to: Math.min(token.to, end) - offset, cls: token.cls }))
+}
 
 /** 首次增强时记录源码原文与 info string（重增强从 data 属性取，避免读
  *  被 token span 改写后的 DOM） */
@@ -99,7 +132,7 @@ export function decorateReadingCodeCard(block: HTMLElement, opts: ReadingCodeCar
   const trimmed = info.trim()
   const label = lang?.displayName ?? (trimmed === '' ? 'Plain text' : trimmed)
   const tokens = opts.config.highlight && lang && hasHighlightEngine(lang.id)
-    ? highlightCodeRanges(lang.id, code)
+    ? readingTokenRanges(block, lang.id, code)
     : []
 
   // 清旧结构（重增强幂等）

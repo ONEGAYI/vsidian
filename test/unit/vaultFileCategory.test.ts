@@ -2,6 +2,8 @@
 // vaultFileCategory）——空查询资格按路径后缀派生，零 IO；.pyc 等未知类型
 // 显式落入 other（仅记名、mtime 未知沉底），不进空查询但可被有查询命中。
 import { describe, expect, it } from 'vitest'
+import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
+import { SPECIAL_CODE_LANGUAGE_FIXTURES } from '../fixtures/specialCodeLanguages'
 import {
   classifyVaultFileCategory,
   isCommonVaultFileCategory,
@@ -33,7 +35,7 @@ describe('classifyVaultFileCategory', () => {
   })
 
   it('可读文本：集中后缀清单命中（txt/csv/log/代码与配置后缀）', () => {
-    for (const ext of ['txt', 'csv', 'log', 'json', 'ts', 'py', 'yaml', 'yml', 'toml', 'ini', 'xml', 'sh']) {
+    for (const ext of ['txt', 'csv', 'log', 'json', 'jsonc', 'json5', 'sql', 'pgsql', 'ts', 'py', 'yaml', 'yml', 'toml', 'ini', 'xml', 'sh']) {
       expect(classifyVaultFileCategory(`x.${ext}`)).toBe('text')
     }
   })
@@ -69,5 +71,16 @@ describe('isCommonVaultFileCategory（空查询资格）', () => {
 
   it('other 不是常用资源（空查询不列；仅记名可被有查询命中）', () => {
     expect(isCommonVaultFileCategory('other')).toBe(false)
+  })
+})
+
+describe('ready-language file extensions (#389)', () => {
+  it.each([...READY_CODE_LANGUAGE_FIXTURES, ...SPECIAL_CODE_LANGUAGE_FIXTURES])('$id classifies explicit text extensions', ({ extensions }) => {
+    for (const ext of extensions) expect(classifyVaultFileCategory(`sample.${ext.toUpperCase()}`)).toBe('text')
+  })
+  it('fence aliases cannot classify database or extensionless files as text', () => {
+    for (const path of ['data.sqlite', 'data.db', 'data.sqlite3', 'sample.postgresql', 'sample.postgres', 'sample.mysql', 'sample.docker', 'sample.csharp', 'sample.kotlin', 'sample.protobuf', 'sample.ngspice', 'sample.hspice', 'sample.make', 'sample.makefile', 'data.raw', 'Dockerfile', 'Makefile', 'LICENSE']) {
+      expect(classifyVaultFileCategory(path)).toBe('other')
+    }
   })
 })

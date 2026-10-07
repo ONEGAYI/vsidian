@@ -1614,6 +1614,12 @@ function teardownWebView(state: HoverPopupState): void {
   state.webFallbackBtn.style.display = 'none'
 }
 
+/** Standalone popup mounts are not owned by the embed manager. Managed popup
+ * roots are refreshed there once, alongside the other existing reference mounts. */
+export function notifyHoverCodeHighlight(): void {
+  if (popup?.root === null) popup.content.refreshCodeHighlight()
+}
+
 /** #343（P3-11）外链设置变更联动（syncController 的 settings.snapshot/
  *  changed 到达时转发）：总开关关闭或形态切回 card 时销毁在场 iframe、
  *  就地退回卡片（不关闭浮层、不改写设置）；其余变更与卡片形态不动。

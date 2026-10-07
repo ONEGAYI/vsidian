@@ -129,6 +129,11 @@ vsidian/
         ├── clipboardPaste.ts           # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts            # 卡片共享状态中立模块
         ├── codeHighlight.ts            # 语法高亮引擎装配与缓存
+        ├── codeLanguages/              # 原创与适配语言词法
+        │   ├── graphql.ts  # GraphQL查询与SDL词法
+        │   ├── makefile.ts # GNU Makefile词法
+        │   ├── php.ts      # PHP顶层选择与标签适配
+        │   └── spice.ts    # SPICE网表词法
         ├── contextMenuDom.ts           # 统一菜单 DOM 装配与子菜单翻转
         ├── css.d.ts                    # CSS 导入类型声明
         ├── cssSnippetSettings.ts       # 外观页 CSS 片段页签体
@@ -158,6 +163,7 @@ vsidian/
         ├── imageVerifyScheduler.ts     # webview 周期核验定时器调度
         ├── indentEditing.ts            # Tab 通用行缩进处理器（#120）
         ├── indexMaintenanceSettings.ts # 设置页索引维护分页
+        ├── jsonDialects.ts             # JSONC与JSON5词法模式
         ├── keybindingRouter.ts         # 编辑器按键分发器
         ├── keybindingSettings.ts       # 快捷键设置分页
         ├── listEditing.ts              # Enter 延续与退格清层（#119）

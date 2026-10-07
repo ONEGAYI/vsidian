@@ -7,7 +7,7 @@
 // 声明和后缀，集中维护」）：
 // - image：与图片管线扩展清单同源（IMAGE_WATCH_GLOB_SEGMENTS——一处
 //   声明多处生效，不建第二份图片扩展表）；
-// - text：集中后缀清单 = 通用文本/配置后缀 + 代码语言注册表的 id 与别名
+// - text：集中后缀清单 = 通用文本/配置后缀 + 代码语言注册表显式声明的文件后缀
 //   （CODE_LANGUAGES / PLAIN_TEXT_LANGUAGE——文本语言分类的既有声明）；
 // - audio/video：本模块新声明的集中清单（仓库此前无音视频扩展声明）；
 // - markdown/pdf：单扩展名直判。
@@ -40,11 +40,11 @@ const GENERIC_TEXT_EXTENSIONS: readonly string[] = [
   'txt', 'csv', 'log', 'toml', 'ini', 'xml', 'rst', 'adoc',
 ]
 
-/** 可读文本扩展集合：通用清单 ∪ 代码语言注册表 id/别名（现有声明同源） */
+/** 可读文本扩展集合：通用清单 ∪ 代码语言注册表显式后缀（与围栏别名分开） */
 const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
   ...GENERIC_TEXT_EXTENSIONS,
-  ...PLAIN_TEXT_LANGUAGE.aliases, // plaintext、txt
-  ...CODE_LANGUAGES.flatMap((lang) => [lang.id, ...lang.aliases]),
+  ...PLAIN_TEXT_LANGUAGE.extensions,
+  ...CODE_LANGUAGES.flatMap((lang) => lang.extensions),
 ])
 
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(IMAGE_WATCH_GLOB_SEGMENTS)
