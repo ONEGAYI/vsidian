@@ -168,7 +168,17 @@ export function renderGraphicIntoContainer(container: HTMLElement, code: string,
   if (resolved?.kind === 'addon') {
     container.setAttribute(GRAPHIC_PROVIDER_ATTR, resolved.providerId)
     container.setAttribute(MERMAID_STATE_ATTR, 'pending')
-    resolved.registration.mount(container, code, { language: lang, mode })
+    try {
+      resolved.registration.mount(container, code, { language: lang, mode })
+      // mount 是同步入口：返回即视为本次挂载完成，容器状态交平台标记
+      //（chrome 按钮组与既有 CSS 的 rendered 态选择器因此对组件容器同样
+      //  生效）。mount 抛错不自动接管（Q30：仍运行的渲染 bug 归组件）——
+      //  容器停留 error 态，生效者不变。
+      container.setAttribute(MERMAID_STATE_ATTR, 'rendered')
+    } catch (err) {
+      container.setAttribute(MERMAID_STATE_ATTR, 'error')
+      console.warn(`[vsidian] 渲染提供者 ${resolved.providerId} mount 异常（不自动接管）：`, err)
+    }
     return
   }
   const builtin = graphicRendererFor(lang)

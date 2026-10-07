@@ -97,7 +97,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #354 T05：侧栏三组与故障排障（绘制层断言）+ 开关热切换 IME 收尾
   // （CDP composition 驱动，复用 addonPageSdkFixture 生产链路）
   'addonSidebar',
-  'addonHotSwitch']
+  'addonHotSwitch',
+  // #358 T09 渲染提供者自动接管：真实浏览器绘制层（接管/热切换/迟到结果/弹窗取图）
+  'addonRendererTakeover']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

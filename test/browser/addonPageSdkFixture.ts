@@ -16,6 +16,9 @@ import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
+import { setAddonRenderersBridge, type AddonRenderersOutboundMessage } from '../../src/webview/addonRenderers'
+import { AddonRendererService } from '../../src/host/addons/addonRendererService'
+import type { AddonRendererStoreV1 } from '../../src/shared/addonRenderers'
 import type { AddonChannelOutcome, AddonLoadOutcome, AddonPageOutbound, AddonUnloadOutcome } from '../../src/shared/addonPage'
 import '../../src/webview/main.css'
 
@@ -34,6 +37,11 @@ const controller = new WebviewSyncController({
 const findView = () => EditorView.findFromDOM(document.querySelector('.cm-editor')!)
 
 const outbound: AddonPageOutbound[] = []
+// #358 T09 渲染提供者桥（与生产 main.ts 同款装配：先桥后装载器，SDK
+// renderers 面后端；候选上报进宿主角色收件箱，测试脚本经 hostRendererStep
+// 消费）
+const rendererOutbox: AddonRenderersOutboundMessage[] = []
+const addonRenderers = setAddonRenderersBridge((message) => rendererOutbox.push(message))
 const loader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView },
@@ -43,11 +51,29 @@ const loader: AddonPageLoaderHandle = installAddonPageLoader({
     controller.reconfigureAddonExtensions(extension)
   },
   send: (message) => outbound.push(message),
+  addonRenderers,
 })
+// #358 T09：控制器订阅生效表变化（热切换：动态语言集/所有权扫描/live
+// 效应/阅读重渲染——生产 attachAddonRenderers 同款）
+controller.attachAddonRenderers()
 
 // 生产装配：附加组件槽由 liveInstance 扩展数组自带（Compartment 空槽），
 // 夹具不再注入槽——与生产 main.ts 的 mount 参数形态一致
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+
+// #358 T09 宿主角色：真实渲染服务实例（内存持久层——批次幂等/首选/选择
+// 纯逻辑与生产同一实现；测试脚本经 hostRendererStep 驱动）
+let rendererStoreData: unknown
+const rendererHost = new AddonRendererService({
+  persistence: {
+    read: () => rendererStoreData,
+    write: async (value) => {
+      rendererStoreData = value
+      return true
+    },
+  },
+  log: () => {},
+})
 
 /** 夹具扮演宿主：组件通道请求记录（测试脚本回执驱动） */
 const channelRequests: Array<{ requestId: string; topic: string; payload: unknown; addonId: string; generation: number }> = []
@@ -177,6 +203,67 @@ Object.assign(window, {
    *  （esbuild 单实例去重）。跨实例兼容性由功能断言承担——若组件自带
    *  第二份 CM6，其 StateField/装饰无法接入本页视图（field 查询抛错、
    *  标记不绘制），套件的 pageerror 监听与绘制断言会暴露。 */
+  /** #358 T09 宿主角色渲染表步进：消费候选上报（真实 AddonRendererService
+   *  纯逻辑：批次分配/首选/确定性选择），按可用组件集求表并下发本页桥；
+   *  返回表 JSON（测试脚本断言生效者）。preferred 传 null 清除该语言首选 */
+  hostRendererStep(availableAddonIds: string[], preferred?: Array<[string, string | null]>): {
+    version: number
+    languages: Array<{ language: string; effective: string; source: string }>
+    store: AddonRendererStoreV1
+  } {
+    for (const message of rendererOutbox.splice(0)) {
+      rendererHost.registerProviders(message.payload.addonId, message.payload.providers)
+    }
+    if (preferred) {
+      for (const [language, provider] of preferred) {
+        rendererHost.setPreferred(language, provider)
+      }
+    }
+    const table = rendererHost.effectiveTable((addonId) => availableAddonIds.includes(addonId))
+    addonRenderers.applyTable(table)
+    return { version: table.version, languages: [...table.languages], store: rendererHost.snapshot(() => true).store }
+  },
+  /** #358 T09 渲染容器观测（绘制层断言锚）：文档内 t09-box 的提供者/语言/
+   *  模式/文本与计算背景色 + 内置 mermaid svg 在场数 */
+  rendererPaintInfo() {
+    const boxes = [...document.querySelectorAll<HTMLElement>('.t09-box')]
+    return {
+      boxes: boxes.filter((el) => el.isConnected).map((el) => ({
+        renderer: el.getAttribute('data-t09-renderer'),
+        language: el.getAttribute('data-t09-language'),
+        mode: el.getAttribute('data-t09-mode'),
+        text: el.textContent ?? '',
+        color: getComputedStyle(el).backgroundColor,
+        width: el.getBoundingClientRect().width,
+      })),
+      lateMarks: document.querySelectorAll('[data-t09-late]').length,
+      releasedMarks: document.querySelectorAll('[data-t09-released]').length,
+      builtinSvg: document.querySelectorAll('.vsidian-mermaid svg').length,
+      mermaidStates: [...document.querySelectorAll<HTMLElement>('.vsidian-mermaid')].map((el) => el.getAttribute('data-vsidian-mermaid-state')),
+    }
+  },
+  /** #358 T09 装载 T09 渲染夹具组件（addonId 与页面工厂声明一致） */
+  async loadRendererAddon(scriptUri: string, cssUri: string | null, generation: number): Promise<AddonLoadOutcome> {
+    collectOutbound()
+    const outcome = await loader.load({
+      addonId: 'vsidian-test-fixture.addon-t09',
+      generation,
+      page: 'editor',
+      scriptUri,
+      cssUris: cssUri ? [cssUri] : [],
+    })
+    collectOutbound()
+    return outcome
+  },
+  /** #358 T09 光标落位（呈现态发射前提——移出围栏） */
+  focusEditorAt(offset: number) {
+    const view = findView()
+    view?.dispatch({ selection: { anchor: offset } })
+  },
+  /** #358 T09 模式切换（宿主 view.mode.set 同款消息路径） */
+  switchMode(mode: 'live' | 'reading') {
+    controller.handleHostMessage({ kind: 'view.mode.set', mode })
+  },
   runtimeIdentity() {
     const stats = loader.stats()
     return {
