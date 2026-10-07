@@ -15,13 +15,14 @@
 //   服务按请求面板的许可面实现（1.82.3 桌面本地形态 URI 字符串跨面板相同）；
 // - 代次硬边界：旧工厂注册、旧消息、迟到结果不能接入新代次。
 import type { Extension } from '@codemirror/state'
-import type { AddonViewsFacet } from './addonEditApi'
+import type { AddonViewHandle, AddonViewsFacet } from './addonEditApi'
 import type { AddonBehaviorsFacet } from './addonBehaviors'
 import type {
   AddonCommandDefinition,
   AddonCommandRegisterResult,
   AddonMenuItemDefinition,
 } from './addonCommands'
+import type { AddonUiButtonDefinition, AddonUiPanelDefinition } from './addonUi'
 import type { MenuContextSnapshot } from './contextMenu'
 
 /** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。值为本页 bundle
@@ -38,6 +39,37 @@ export interface AddonCm6Runtime {
  *  拒绝（普通 API 拒绝，不算故障）。 */
 export interface AddonSdkCommandsFacet {
   register(def: AddonCommandDefinition, handler: () => void): AddonCommandRegisterResult & { dispose(): void }
+}
+
+/** T11（#360）SDK 界面面（仅编辑器页）：往**平台预定义挂载点**新增自己
+ *  的工具栏按钮与面板——不把内核容器、内置界面、菜单或设置框架交给作者
+ *  接管（按钮槽位白名单、面板 dock 唯一宿主）。按钮动作二选一：挂接 T10
+ *  已注册命令或自带回调（携当前活动视图句柄——T06 语义，在引用 B 中操作
+ *  归 B 不误改父 A）；面板 mount/unmount 管内容根生命周期。随所属视图
+ *  模式切换与组件退出完整回收（停用/故障/代次释放本页闭环）。 */
+export interface AddonSdkUiFacet {
+  /** 注册工具栏按钮（slot 缺省 toolbar——白名单外值拒绝） */
+  registerButton(
+    def: AddonUiButtonDefinition,
+    onClick?: (target: AddonViewHandle | null) => void,
+  ): {
+    ok: boolean
+    reason?: string
+    /** 命名空间按钮 ID（ok 时给出） */
+    id?: string
+    dispose(): void
+  }
+  /** 注册面板（默认关闭；返回句柄含开闭控制——dispose 后全部拒绝） */
+  registerPanel(def: AddonUiPanelDefinition): {
+    ok: boolean
+    reason?: string
+    /** 命名空间面板 ID（ok 时给出） */
+    id?: string
+    dispose(): void
+    open(): boolean
+    close(): boolean
+    isOpen(): boolean
+  }
 }
 
 /** T10（#359）SDK 菜单面（仅编辑器页）：新增自己的右键菜单项——组件簇
@@ -86,6 +118,9 @@ export interface VsidianAddonPageSdk {
   readonly commands?: AddonSdkCommandsFacet
   /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */
   readonly menus?: AddonSdkMenusFacet
+  /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与
+   *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */
+  readonly ui?: AddonSdkUiFacet
   /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */
   registerExtension(extension: Extension): boolean
   /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */

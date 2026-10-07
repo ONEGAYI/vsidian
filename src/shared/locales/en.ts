@@ -985,6 +985,11 @@ export const en = {
   'addons.openExtensionsView': 'Manage extensions in VSCode',
   'addons.openDetail': 'Extension details',
   'addons.officialBadge': 'Official',
+  // #360 T11: add-on UI contribution mount points (platform chrome text; the
+  // add-on's own button labels and panel titles are free text from the add-on)
+  'addonUi.toolbarSlotLabel': 'Add-on buttons',
+  'addonUi.panelDockLabel': 'Add-on panels',
+  'addonUi.panelClose': 'Close panel',
   // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
   'addons.enable': 'Enable',
   'addons.disable': 'Disable',

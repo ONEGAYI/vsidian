@@ -48,9 +48,9 @@ describe('T11 按钮注册形状校验', () => {
   })
 
   it('槽位白名单：只有 toolbar 合法——侧栏/内置界面/设置框架等明确拒绝（负向可测试）', () => {
-    expect(addonUiButtonProblem({ id: 'b', label: 'x', slot: 'sidebar', command: 'c' }, noClick)).toBe('slot-unknown')
-    expect(addonUiButtonProblem({ id: 'b', label: 'x', slot: 'builtin-menu', command: 'c' }, noClick)).toBe('slot-unknown')
-    expect(addonUiButtonProblem({ id: 'b', label: 'x', slot: 'settings', command: 'c' }, noClick)).toBe('slot-unknown')
+    expect(addonUiButtonProblem({ id: 'b', label: 'x', slot: 'sidebar' as never, command: 'c' }, noClick)).toBe('slot-unknown')
+    expect(addonUiButtonProblem({ id: 'b', label: 'x', slot: 'builtin-menu' as never, command: 'c' }, noClick)).toBe('slot-unknown')
+    expect(addonUiButtonProblem({ id: 'b', label: 'x', slot: 'settings' as never, command: 'c' }, noClick)).toBe('slot-unknown')
     expect(ADDON_UI_BUTTON_SLOTS).toEqual(['toolbar'])
   })
 
@@ -85,13 +85,14 @@ describe('T11 按钮注册形状校验', () => {
 
   it('按钮命名空间 ID 不撞任何内置菜单/设置框架身份（结构免疫）', () => {
     const builtinIds = new Set<string>()
-    const walk = (defs: readonly { id: string; children?: readonly { id: string; children?: readonly object[] }[] }[]): void => {
+    type MenuLike = { id: string; children?: readonly MenuLike[] }
+    const walk = (defs: readonly MenuLike[]): void => {
       for (const def of defs) {
         builtinIds.add(def.id)
         if (def.children) walk(def.children)
       }
     }
-    walk(CONTEXT_MENU_ITEMS)
+    walk(CONTEXT_MENU_ITEMS as readonly MenuLike[])
     // localId 禁点 + 平台前缀注入：组件传任何 localId 都不可能命中内置 id
     for (const builtin of builtinIds) {
       const firstSegment = builtin.split('.')[0]!
