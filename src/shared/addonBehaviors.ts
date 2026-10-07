@@ -148,6 +148,51 @@ export function addonBehaviorInfoOf(addonId: string, registration: AddonBehavior
   }
 }
 
+/** onChanged 观察事件（通知分离面：只读观察，无修饰权——技术方案 §5.2
+ *  「通知监听与输入修饰回调分别注册」） */
+export interface AddonBehaviorChangeEvent {
+  readonly userEvent: string
+  readonly inputText: string
+  readonly snapshot: AddonEditorSnapshot
+}
+
+/** 注册结果（SDK behaviors.register 的返回） */
+export type AddonBehaviorRegisterResult =
+  | { ok: true; key: string }
+  | { ok: false; reason: 'invalid-registration' | 'duplicate-id' | 'not-editor-page' | 'released' }
+
+/** SDK behaviors 面（仅编辑器页提供；设置页为 undefined）。register 与
+ *  onChanged 分开注册——onChanged 不是原输入链的第二写入口 */
+export interface AddonBehaviorsFacet {
+  /** 登记输入行为（稳定局部 ID + 必填名称 + 可选说明/例子/独占组/撤回
+   *  声明 + 业务回调）；名称缺失拒绝，说明/例子缺失允许 */
+  register(registration: AddonBehaviorRegistration): AddonBehaviorRegisterResult
+  /** 观察用户输入（只读事件；不进入修饰链） */
+  onChanged(callback: (event: AddonBehaviorChangeEvent) => void): () => void
+}
+
+/** 链执行轨迹条目（观测/断言面） */
+export interface AddonBehaviorTraceEntry {
+  behaviorKey: string
+  opId: string
+  outcome: 'ok' | string
+}
+
+/** runtime 观测快照（view.state 探针与测试断言面） */
+export interface AddonBehaviorRuntimeStats {
+  registrations: AddonBehaviorInfo[]
+  hostState: { order: readonly string[]; disabled: readonly string[] } | null
+  counters: {
+    drives: number
+    drivesSkippedWhileRunning: number
+    callbackErrors: number
+    observerErrors: number
+    invalidPlans: number
+    submitsRejected: number
+  }
+  trace: AddonBehaviorTraceEntry[]
+}
+
 // ---- 状态存储（宿主持久层 ↔ webview 下发的同构形态） ----
 
 /** 行为顺序与逐项开关的持久存储（version 1 冻结）。

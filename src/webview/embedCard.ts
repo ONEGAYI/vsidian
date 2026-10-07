@@ -284,6 +284,9 @@ export interface EmbedCardContext {
     registerLive(entry: import('./addonViews').AddonLiveViewEntry): void
     unregister(instanceId: string): void
   } | undefined
+  /** T07（#356）输入行为链驱动（根注入页面级 runtime 的窄接口；嵌入内
+   *  键入同样驱动——缺省不驱动） */
+  driveAddonBehaviors?(input: { instanceId: string; userEvent: string; inputText: string }): void
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除）。
@@ -1894,6 +1897,8 @@ export class EmbedCardManager {
       // #381 T06 轻提示（重复标题风险/块接受失败）：经根 toast 面呈现
       //（B 嵌入在 A 的 webview 内，toast 通道即 B 的会话面）
       notifyToast: (text, severity) => this.context.notifyToast?.(text, severity),
+      // T07（#356）输入行为链驱动（嵌入实例经根 context 接页面级 runtime）
+      driveAddonBehaviors: (input) => this.context.driveAddonBehaviors?.(input),
       onSuspendedChange: () => {
         if (instanceLive.instance) {
           instanceLive.suspended = instanceLive.instance.isSuspended
@@ -2033,6 +2038,9 @@ export class EmbedCardManager {
       mode: () => 'live',
       instance: inst,
     })
+    // T07（#356）行为链驱动的实例身份（与 addonViews 句柄同 ID；嵌入内
+    // 键入同样驱动行为链——适用输入行为不分实例）
+    inst.setAddonBehaviorIdentity(`embed:${entry.hostId}`)
     // P2-11：补发最近设置快照（实例创建晚于面板装载——见 applySettings 注释）
     if (this.lastSettings !== undefined) {
       inst.applySettings(this.lastSettings)

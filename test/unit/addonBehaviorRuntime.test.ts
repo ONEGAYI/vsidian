@@ -31,7 +31,7 @@ interface RuntimeHarness {
   submits: Array<{ addonId: string; opId: string; request: AddonApplyEditsRequest }>
   /** 推进文档状态（模拟前序修饰落地） */
   advanceTo: (text: string) => void
-  rejectNext: (reason: AddonApplyEditsResult extends { ok: false; reason: infer R } ? R : never) => void
+  rejectNext: (reason: 'stale-snapshot' | 'conflict' | 'suspended' | 'view-disposed' | 'read-only') => void
   logs: string[]
 }
 

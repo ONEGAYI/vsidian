@@ -33,10 +33,12 @@ import {
   addonBehaviorInfoOf,
   isAddonBehaviorRegistration,
   resolveAddonBehaviorOrder,
-  type AddonBehaviorInfo,
+  type AddonBehaviorChangeEvent,
   type AddonBehaviorInputPlan,
   type AddonBehaviorRegistration,
+  type AddonBehaviorRuntimeStats,
   type AddonBehaviorStateStore,
+  type AddonBehaviorTraceEntry,
   type AddonInputContext,
 } from '../shared/addonBehaviors'
 
@@ -59,39 +61,10 @@ export interface AddonBehaviorRuntimePorts {
   log(stage: string, addonId: string, detail: string): void
 }
 
-/** onChanged 观察事件（通知分离面：只读观察，无修饰权） */
-export interface AddonBehaviorChangeEvent {
-  readonly userEvent: string
-  readonly inputText: string
-  readonly snapshot: import('../shared/addonEditApi').AddonEditorSnapshot
-}
-
 interface RegisteredBehavior {
   addonId: string
   generation: number
   registration: AddonBehaviorRegistration
-}
-
-/** 链执行轨迹条目（观测/断言面） */
-export interface AddonBehaviorTraceEntry {
-  behaviorKey: string
-  opId: string
-  outcome: 'ok' | string
-}
-
-/** 观测快照（view.state 探针与测试断言面） */
-export interface AddonBehaviorRuntimeStats {
-  registrations: AddonBehaviorInfo[]
-  hostState: { order: readonly string[]; disabled: readonly string[] } | null
-  counters: {
-    drives: number
-    drivesSkippedWhileRunning: number
-    callbackErrors: number
-    observerErrors: number
-    invalidPlans: number
-    submitsRejected: number
-  }
-  trace: AddonBehaviorTraceEntry[]
 }
 
 const TRACE_LIMIT = 64

@@ -458,9 +458,15 @@ export class WebviewSyncController {
   private pendingAddonExtensions: Extension[] | null | undefined = undefined
   /** #351 T02 附加组件装载器观测探针（main.ts 安装装载器后挂载；缺省不报） */
   private addonPageProbe: (() => import('../shared/addonPage').AddonLoaderStats) | undefined
+  /** T07（#356）输入行为 runtime 观测探针（main.ts 构造 runtime 后挂载；
+   *  缺省不报） */
+  private addonBehaviorProbe: (() => import('../shared/addonBehaviors').AddonBehaviorRuntimeStats) | undefined
   /** T06（#355）统一视图注册表（main.ts 构造注入；init 后注册主正文句柄，
    *  unmount 注销；缺省不注册） */
   private addonViews: import('./addonViews').AddonViewRegistry | undefined
+  /** T07（#356）输入行为链驱动（main.ts 经 attachAddonBehaviorDrive 注入
+   *  页面级 runtime；缺省 undefined——未装配行为面的环境零开销） */
+  private driveAddonBehaviors: import('./liveInstance').LiveEditorInstanceDeps['driveAddonBehaviors']
   private sessionId = ''
   private docUri = ''
   /** 实例存在前的持久化初值兜底（persistState 在 mount 前被调用时使用） */
@@ -1112,6 +1118,8 @@ export class WebviewSyncController {
       // T06（#355）：embed 句柄登记/注销（内部 Live 实例创建/销毁点；
       // attachAddonViews 前装配时不注册——注册表随主正文句柄同一注入）
       addonViews: () => this.addonViews,
+      // T07（#356）：嵌入内键入的输入行为链驱动（与主正文同一 runtime）
+      driveAddonBehaviors: (input) => this.driveAddonBehaviors?.(input),
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
@@ -1592,6 +1600,8 @@ export class WebviewSyncController {
       onHistoryIntent: () => this.invalidatePasteFeedback(),
       // #314 原生 HTML 粘贴接管（实例 paste domEventHandler → 转换管线）
       onRichPasteHtml: ({ view, html, text }) => this.handleRichPasteHtml(view, html, text),
+      // T07（#356）输入行为链驱动（attachAddonBehaviorDrive 注入的窄接口）
+      driveAddonBehaviors: (input) => this.driveAddonBehaviors?.(input),
       onViewUpdate: (update) => {
         // #314：本地非粘贴事务作废未落定的 rich 反馈（对齐 main 版
         // updateListener 的 recordingPasteStage 豁免——粘贴 dispatch 由
@@ -1953,6 +1963,12 @@ export class WebviewSyncController {
     this.addonPageProbe = probe
   }
 
+  /** T07（#356）：输入行为 runtime 观测探针挂载（main.ts 构造后调用；
+   *  view.state 回报时附带——注册清单/宿主状态/链执行轨迹与计数） */
+  attachAddonBehaviorProbe(probe: () => import('../shared/addonBehaviors').AddonBehaviorRuntimeStats): void {
+    this.addonBehaviorProbe = probe
+  }
+
   /** T06（#355）：挂接统一视图注册表（main.ts 构造后注入；主正文句柄随
    *  init 注册——targetDocUri 就绪是注册前提） */
   attachAddonViews(registry: import('./addonViews').AddonViewRegistry): void {
@@ -1960,6 +1976,13 @@ export class WebviewSyncController {
     if (this.live && this.docUri) {
       this.registerMainAddonView()
     }
+  }
+
+  /** T07（#356）：挂接输入行为链驱动（main.ts 构造 runtime 后注入；
+   *  已创建的主正文实例即刻接上，之后的实例经 liveInstanceDeps 透传） */
+  attachAddonBehaviorDrive(drive: import('./liveInstance').LiveEditorInstanceDeps['driveAddonBehaviors']): void {
+    this.driveAddonBehaviors = drive
+    this.live?.setAddonBehaviorIdentity('main')
   }
 
   /** 主正文句柄注册（init/attach 时 docUri 与 live 实例均在场的时点） */
@@ -1975,6 +1998,8 @@ export class WebviewSyncController {
       mode: () => this.viewMode,
       instance: live,
     })
+    // T07（#356）行为链驱动的实例身份（与 addonViews 句柄同 ID）
+    live.setAddonBehaviorIdentity('main')
   }
 
   /** 宿主消息入口（window message 事件转发） */
@@ -3513,6 +3538,9 @@ export class WebviewSyncController {
       paint: this.collectPaint(),
       // #351 T02 附加组件装载器观测（装载器未安装时缺省——旧 webview 兼容）
       addonPage: this.addonPageProbe?.(),
+      // T07（#356）输入行为 runtime 观测（未装配时缺省）：注册清单/宿主
+      // 状态/链执行轨迹与计数——集成断言面
+      addonBehaviors: this.addonBehaviorProbe?.(),
       // #53 右侧栏观测（布局态与绘制层证据）
       sidebar: this.collectSidebar(),
       // #54 大纲观测（面板态、绘制层证据与全文标题序列）

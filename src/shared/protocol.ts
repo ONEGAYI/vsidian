@@ -15,6 +15,7 @@ import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './ed
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './editOrigin'
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
+import { parseAddonBehaviorStateStore } from './addonBehaviors'
 import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -937,6 +938,11 @@ export type HostToWebview =
    *  目标面板的 asWebviewUri 铸造，资源许可面随指令同步刷新。webview 侧
    *  装载器安装后经 addonPage.ready 上报，宿主按 desired 幂等推送 */
   | { kind: 'addonPage.directive'; directive: import('./addonPage').AddonPageDirective }
+  /** T07（#356）输入行为状态下发（宿主 → 编辑器 webview）：行为顺序
+   *  覆盖与逐项开关的持久状态（shared/addonBehaviors 的 state 形态）。
+   *  webview 重载（addonPage.ready）与宿主状态变化时推送；null = 无
+   *  用户覆盖（全新默认态） */
+  | { kind: 'addon.behaviors.state'; state: import('./addonBehaviors').AddonBehaviorStateStore | null }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -1402,6 +1408,9 @@ export type WebviewToHost =
       /** #351 T02 附加组件页面装载器观测（编辑器页装载器安装后才有值；
        *  活跃代次/授权样式表/释放历史与拒收计数——旧 webview 缺省） */
       addonPage?: import('./addonPage').AddonLoaderStats
+      /** T07（#356）输入行为 runtime 观测（编辑器页装配后才有值）：
+       *  注册清单/宿主状态/链执行轨迹与计数——旧 webview 缺省 */
+      addonBehaviors?: import('./addonBehaviors').AddonBehaviorRuntimeStats
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -5254,6 +5263,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addonPage.directive':
       // #351 T02 装载指令内层守卫（单一事实源在 shared/addonPage）
       return isAddonPageDirective(v.directive)
+    case 'addon.behaviors.state':
+      // T07（#356）行为状态内层守卫（单一事实源在 shared/addonBehaviors；
+      // null = 无用户覆盖）
+      return v.state === null || parseAddonBehaviorStateStore(v.state) !== null
     default:
       return false
   }
