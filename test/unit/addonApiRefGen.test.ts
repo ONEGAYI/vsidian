@@ -107,7 +107,11 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
   })
 
   it('未知分组、重复条目 ID、越界签名源与空分组被拒绝', () => {
-    const groups: AddonApiGroup[] = [...ADDON_API_GROUPS, { id: 'extra', title: '越界组', scope: 'x', order: 99 }]
+    // 故意构造运行时非法数据测校验器——经 unknown 断言绕过编译期类型约束
+    const groups: AddonApiGroup[] = [
+      ...ADDON_API_GROUPS,
+      { id: 'extra', title: '越界组', scope: 'x', order: 99 } as unknown as AddonApiGroup,
+    ]
     expect(
       validateAddonApiCatalog(groups, ADDON_API_ENTRIES, ADDON_API_RELEASES).some((p) => p.includes('没有条目')),
     ).toBe(true)
