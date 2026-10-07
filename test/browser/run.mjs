@@ -109,7 +109,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #360 T11：组件按钮/面板与视图界面贡献（生产界面运行时装配——真实
   // 点击经 target 句柄提交、悬停提示与键位徽章、面板开闭与迟到结果、
   // 模式回收与卸载回收、内置工具栏不受影响）紧随附加组件族
-  'addonT11Ui']
+  'addonT11Ui',
+  // #361 T12：输入回调故障升级全组件暂停与手动恢复（生产行为链装配——
+  // 真实键入 ^ 触发行为故障、暂停后输入仍可用、重试后修饰回归）
+  'addonT12FaultPause']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

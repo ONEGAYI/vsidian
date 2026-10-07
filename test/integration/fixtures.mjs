@@ -912,8 +912,7 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '# T12 故障暂停', '',
     '正文一段', '',
     '```t12graph', 't12-source', '```', '',
-  ].join('
-'), 'utf8')
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'ackorder.md'), ACKORDER_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'resync.md'), RESYNC_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'ime-escape.md'), IME_ESC_DOC, 'utf8')
