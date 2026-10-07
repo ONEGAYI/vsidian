@@ -530,3 +530,67 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
   color: var(--vscode-button-secondaryForeground, inherit);
   background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
 .vsidian-addons-addonpage-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+
+/* ---- #353 T04 基础设置区：双标签作用范围 + 平台基础控件 + 保存反馈
+   （内部样式，非公开样式契约入口；与 #350/#351 的 vsidian-addons-* 族
+   同口径——全部内部类名，不入 styleContract 清单） ---- */
+.vsidian-addons-settings { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.vsidian-addons-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vsidian-addons-settings-head h3 { margin: 0; }
+.vsidian-addons-settings-head button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-settings-head button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-scope-tabs { display: inline-flex; gap: 4px; padding: 3px;
+  border: 1px solid var(--vscode-panel-border, #cbd0d8); border-radius: 8px;
+  width: fit-content; }
+.vsidian-addons-scope-tab { min-height: 24px; padding: 2px 12px; border: none; border-radius: 6px;
+  color: var(--vscode-descriptionForeground, #666); background: transparent; cursor: pointer; }
+.vsidian-addons-scope-tab[aria-selected='true'] {
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+  background: var(--vscode-list-activeSelectionBackground, #0060c0); }
+.vsidian-addons-scope-tab[aria-selected='true']:focus-visible { outline: 1px solid var(--vscode-focusBorder, #2687d4); outline-offset: 1px; }
+.vsidian-addons-scope-tab:disabled { opacity: 0.5; cursor: default; }
+.vsidian-addons-scope-hint { margin: 0; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-addons-fault-hint { margin: 0; color: var(--vscode-errorForeground, #f66); }
+.vsidian-addons-settings .vsidian-settings-group { gap: 8px; }
+.vsidian-addons-setting-item { display: flex; flex-direction: column; gap: 6px; }
+.vsidian-addons-source-badge { display: inline-block; margin-top: 2px; padding: 0 6px; min-height: 16px;
+  border: 1px solid var(--vscode-panel-border, #cbd0d8); border-radius: 999px;
+  color: var(--vscode-descriptionForeground, #666); font-size: 11px; line-height: 16px; }
+.vsidian-addons-array { display: flex; flex-direction: column; gap: 6px; }
+.vsidian-addons-array-rows { display: flex; flex-direction: column; gap: 4px; }
+.vsidian-addons-array-row { display: flex; align-items: center; gap: 6px; }
+.vsidian-addons-array-row > input, .vsidian-addons-array-row > select { flex: 1; min-height: 24px; }
+.vsidian-addons-array-remove { min-height: 22px; padding: 2px 8px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-array-remove:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-array-actions, .vsidian-addons-object-actions { display: flex; gap: 8px; }
+.vsidian-addons-array-actions button, .vsidian-addons-object-actions button { min-height: 24px; padding: 2px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-array-actions button:hover, .vsidian-addons-object-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-array-save, .vsidian-addons-object-save {
+  color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4); border-color: transparent; }
+.vsidian-addons-array-save:hover, .vsidian-addons-object-save:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
+.vsidian-addons-object-fields { display: flex; flex-direction: column; gap: 4px; }
+.vsidian-addons-object-field { display: flex; align-items: center; gap: 8px; }
+.vsidian-addons-object-field > input, .vsidian-addons-object-field > select { flex: 1; min-height: 24px; }
+.vsidian-addons-object-field-name { flex: none; min-width: 96px; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-addons-clear-override { align-self: flex-start; min-height: 22px; padding: 2px 8px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-clear-override:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-settings-notice { margin: 0; min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-addons-settings-notice-save-failed { color: var(--vscode-errorForeground, #f66); }
+.vsidian-addons-custompage-actions { display: flex; gap: 8px; }
+.vsidian-addons-custompage-actions button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-custompage-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }

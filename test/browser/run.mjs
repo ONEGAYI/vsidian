@@ -89,7 +89,11 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'wikilinkSuggest',
   // V02（#349）附加组件页面 SDK：生产控制器 + 装载器原型（真实键盘/CDP
   // IME 驱动首键与组合、绘制层标记、卸载与迟回执拒收、未授权入口拒绝）
-  'addonPageSdk']
+  'addonPageSdk',
+  // #353（T04）附加组件基础设置区：生产设置页入口（真实键盘/点击驱动
+  // 双标签作用范围、标量/数组/对象基础控件、清除覆盖与保存反馈；标签
+  // 选中态与失败提示的绘制层断言）紧随 addonPageSdk（同附加组件族）
+  'addonSettings']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

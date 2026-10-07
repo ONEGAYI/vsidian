@@ -115,6 +115,12 @@ export interface SettingsPageHandle {
    */
   notifyAddonsChanged(): void
   /**
+   * #353 T04 基础设置区：设置区状态变化（成功保存/定义注册/开合）后向
+   * 已开设置页发 addons.settingsState（面板未开时 no-op——重开经
+   * addons.settingsGet 重新拉取）
+   */
+  notifyAddonSettingsChanged(): void
+  /**
    * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
    * 面板未 ready 时在握手完成后补发（webview 装载是异步的）。
    * #231：entry 可选——分页内进一步定位的条目 id（外观分页按条目归属
@@ -309,6 +315,13 @@ export function createSettingsPage(
           void current?.webview.postMessage(addons.getState())
         }
         return
+      case 'addons.settingsGet':
+        // #353 T04 基础设置区状态拉取（装载/重载的 ready 回填；权威现算）
+        if (addons) {
+          ready = true
+          void current?.webview.postMessage(addons.getSettingsState())
+        }
+        return
       case 'addons.openSearch':
         // 市场搜索入口（关键词仅搜索辅助）；结果在 VSCode 扩展视图呈现
         addons?.openSearch()
@@ -323,12 +336,17 @@ export function createSettingsPage(
         return
       // ---- #351 T02：附加组件运行生命周期与页面装载 ----
       case 'addons.setEnabled':
-        // 用户功能开关（用户默认层持久化；两生命周期同步——结果经
-        // notifyAddonsChanged 的 addons.state 推送回显）
+        // 用户功能开关（#353 T04 起可选 scope——缺省 user 保持 T02 语义；
+        // 两生命周期同步，结果经 addons.state / addons.settingsState 推送回显）
         if (current) {
           addons?.handleSettingsMessage(current.webview, message)
         }
         return
+      case 'addons.settingsOpen':
+      case 'addons.settingsClose':
+      case 'addons.settingsUpdate':
+      case 'addons.settingsClearOverride':
+      case 'addons.clearEnabledOverride':
       case 'addons.openAddonPage':
       case 'addons.closeAddonPage':
       case 'addonPage.ready':
@@ -532,6 +550,13 @@ export function createSettingsPage(
         return
       }
       void panel.webview.postMessage(addons.getState())
+    },
+    // #353 T04 基础设置区状态推送（设置变化/开合 → extension.ts 接线）
+    notifyAddonSettingsChanged: () => {
+      if (!panel || !addons) {
+        return
+      }
+      void panel.webview.postMessage(addons.getSettingsState())
     },
   }
 }

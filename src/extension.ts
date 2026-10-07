@@ -116,6 +116,10 @@ export function activate(context: vscode.ExtensionContext): VsidianAddonExports 
   addons.onStateChanged(() => settingsPage.notifyAddonsChanged())
   // #351 T02：运行生命周期变化（启停/故障/代次/注册贡献）→ 同款推送回显
   addons.onRuntimeChanged(() => settingsPage.notifyAddonsChanged())
+  // #353 T04：基础设置区状态随运行态变化（开合/故障/定义注册）推送；
+  // 设置变化（成功保存后）→ 同款推送（变化事件只在持久化成功后到达）
+  addons.onRuntimeChanged(() => settingsPage.notifyAddonSettingsChanged())
+  addons.onSettingsChanged(() => settingsPage.notifyAddonSettingsChanged())
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,

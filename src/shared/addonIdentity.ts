@@ -206,4 +206,7 @@ export interface AddonStatusEntry {
   fault?: { reason: string }
   /** #351 T02 设置页入口当前可装载（「打开设置页」入口可见性） */
   hasSettingsPage?: boolean
+  /** #353 T04 已注册设置定义（「基础设置」入口可见性；故障暂停时定义
+   *  保留——入口仍在，平台基础控件可用） */
+  hasSettingsDefinitions?: boolean
 }

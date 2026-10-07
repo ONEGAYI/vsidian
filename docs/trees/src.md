@@ -10,11 +10,12 @@ vsidian/
     ├── host/        # 宿主端实现
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
     │   ├── addons/                       # 附加组件宿主端实现
-    │   │   ├── addonCoordinator.ts  # 附加组件发现协调与唤醒
-    │   │   ├── addonPageRegistry.ts # 页面入口登记校验
-    │   │   ├── addonRegistry.ts     # 附加组件注册表校验链
-    │   │   ├── addonRuntime.ts      # 运行生命周期状态机
-    │   │   └── addonWiring.ts       # 宿主装配与面板桥
+    │   │   ├── addonCoordinator.ts     # 附加组件发现协调与唤醒
+    │   │   ├── addonPageRegistry.ts    # 页面入口登记校验
+    │   │   ├── addonRegistry.ts        # 附加组件注册表校验链
+    │   │   ├── addonRuntime.ts         # 运行生命周期状态机
+    │   │   ├── addonSettingsService.ts # 附加组件设置服务
+    │   │   └── addonWiring.ts          # 宿主装配与面板桥
     │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
     │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
     │   ├── diagramExportHost.ts          # 宿主图表导出执行壳
@@ -69,6 +70,7 @@ vsidian/
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
+    │   ├── addonSettings.ts        # 复杂设置共享模型
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts        # 变更重定位纯函数
     │   ├── chromeContract.ts       # 界面域样式契约探针表
@@ -134,6 +136,7 @@ vsidian/
     │   └── wordSegment.ts          # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
         ├── addonPageLoader.ts          # 页面装载器生产实现
+        ├── addonSettingsControls.ts    # 基础设置控件构造器
         ├── addonSettingsSection.ts     # 设置页附加组件分页
         ├── anchorFlash.ts              # 跳转目标高亮装饰状态
         ├── appearanceSettings.ts       # 外观合并分页

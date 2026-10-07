@@ -9,6 +9,7 @@ import { wikilinkBlockCases } from './wikilinkBlock'
 import { wikilinkEmbedCases } from './wikilinkEmbed'
 import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
+import { addonT04Cases } from './addonT04Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17335,4 +17336,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #351 T02 附加组件页面 SDK 与两生命周期：生产路径组（独立文件维护——
   // 生产编辑器/设置页面板装载夹具组件，断言面见 addonT02Cases.ts 头注）
   ...addonT02Cases,
+  // #353 T04 附加组件复杂设置：生产路径组（独立文件维护——夹具组件经
+  // 公开 API 注册复杂定义与分层读写，断言面见 addonT04Cases.ts 头注）
+  ...addonT04Cases,
 ]
