@@ -39,14 +39,15 @@ try {
     await page.addScriptTag({ path: output })
     await page.evaluate(() => window.initDoc('# 标题\n\n正文段。'))
 
-    // ---- DOM 序：齿轮、✎、刷新嵌入资源、双态切换、侧栏 ----
+    // ---- DOM 序：齿轮、✎、附加组件槽（#360 T11，常驻空槽）、刷新嵌入资源、双态切换、侧栏 ----
     assert.deepEqual(await page.evaluate(() => window.toolbarOrder()), [
       'vsidian-settings-toggle',
       'vsidian-quick-toggle',
+      'vsidian-addon-toolbar-slot',
       'vsidian-refresh-toggle',
       'vsidian-view-toggle',
       'vsidian-sidebar-toggle',
-    ], '按钮序应为 齿轮、快速操作、刷新嵌入资源、双态切换、侧栏')
+    ], '按钮序应为 齿轮、快速操作、附加组件槽、刷新嵌入资源、双态切换、侧栏')
 
     // ---- 绘制层可见性与图标随态（live：edit 可见、book 隐藏）----
     await page.waitForSelector('.vsidian-view-toggle')
