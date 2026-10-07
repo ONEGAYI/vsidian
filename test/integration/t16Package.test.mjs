@@ -78,6 +78,15 @@ test('组件 VSIX 条目断言：样例形态要求宿主/页面/样式随包，
     ['extension.vsixmanifest', 'extension/package.json'],
     { hostOnly: true },
   ), [])
+  // addon-fail：根级宿主入口形态（main 指根级 extension.js）
+  assert.deepEqual(auditAddonVsixEntries(
+    ['extension.vsixmanifest', 'extension/package.json', 'extension/extension.js'],
+    { hostOnly: true, hostEntry: 'extension/extension.js' },
+  ), [])
+  assert.equal(auditAddonVsixEntries(
+    ['extension.vsixmanifest', 'extension/package.json'],
+    { hostOnly: true, hostEntry: 'extension/extension.js' },
+  ).length, 1, '根级宿主入口缺失报一条')
 })
 
 test('阶段环境拼装：未知阶段拒绝；发行态阶段返回钩子删除标记，测试态显式置 1', () => {

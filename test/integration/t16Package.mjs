@@ -64,10 +64,12 @@ export function auditMainVsixEntries(entries) {
 
 /** 纯逻辑：组件 VSIX 条目断言（样例=宿主+页面+样式随包；负向夹具=清单即可）
  * @param {string[]} entries VSIX 条目清单
- * @param {{ pages?: string[], css?: string[], hostOnly?: boolean }} expect
+ * @param {{ pages?: string[], css?: string[], hostOnly?: boolean, hostEntry?: string }} expect
  * - pages：页面产物相对路径（如 ['extension/dist/editor.js']）
  * - css：随包样式（如 ['extension/dist/editor.css']）
- * - hostOnly：true = 只要求清单与宿主入口（addon-incompatible 无产物形态） */
+ * - hostOnly：true = 只要求清单（addon-incompatible 无产物形态）
+ * - hostEntry：根级宿主入口（如 addon-fail 的 'extension/extension.js'
+ *   ——main 指根级文件而非 dist 产物的夹具形态） */
 export function auditAddonVsixEntries(entries, expect) {
   const normalized = entries.map((entry) => entry.replace(/\\/g, '/').replace(/^\.\//, '')?.trim()).filter(Boolean)
   const violations = []
@@ -76,6 +78,11 @@ export function auditAddonVsixEntries(entries, expect) {
   }
   if (!expect.hostOnly && !normalized.includes('extension/dist/extension.js')) {
     violations.push('组件包缺少宿主产物 extension/dist/extension.js')
+  }
+  for (const hostEntry of expect.hostEntry ? [expect.hostEntry] : []) {
+    if (!normalized.includes(hostEntry)) {
+      violations.push(`组件包缺少宿主入口 ${hostEntry}`)
+    }
   }
   for (const page of expect.pages ?? []) {
     if (!normalized.includes(page)) {
@@ -152,7 +159,7 @@ export async function packageExtensionVsix({ srcDir, outVsix, versionOverride, e
     manifest.version = versionOverride
     writeFileSync(path.join(staging, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
   }
-  const code = await runCommand('npx', ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '-o', outVsix], {
+  const { code } = await runCommand('npx', ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '-o', outVsix], {
     cwd: staging,
     stdio,
   })
@@ -165,7 +172,7 @@ export async function packageExtensionVsix({ srcDir, outVsix, versionOverride, e
 
 /** 主 VSIX 打包（仓库根为 cwd——.vscodeignore 与 prepublish 链路按仓库惯例） */
 export async function packageMainVsix({ root, outVsix, stdio = 'inherit' }) {
-  const code = await runCommand('npx', ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '-o', outVsix], {
+  const { code } = await runCommand('npx', ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '-o', outVsix], {
     cwd: root,
     stdio,
   })
@@ -197,7 +204,7 @@ export async function installExtension({ cliPath, vsix, extensionsDir, userDataD
     args.push('--force')
   }
   const shell = process.platform === 'win32'
-  const code = await runCommand(cliPath, args, { shell, stdio })
+  const { code } = await runCommand(cliPath, args, { shell, stdio })
   if (code !== 0) {
     throw new Error(`扩展安装失败（退出码 ${code}）：${vsix}`)
   }
@@ -219,6 +226,7 @@ export function writeDevAnchor(dir) {
   return dir
 }
 
+
 /** 通配展开安装目录下的扩展解压目录（publisher.name-<version> 形态） */
 export function installedExtensionDir(extensionsDir, extensionId) {
   const prefix = `${extensionId.toLowerCase()}-`
@@ -229,15 +237,19 @@ export function installedExtensionDir(extensionsDir, extensionId) {
   return { dir: path.join(extensionsDir, hit[hit.length - 1]), count: hit.length }
 }
 
-/** 子进程封装：capture 时收集 stdout，否则透传；shell 语义与 runInstalled 先例一致 */
+/** 子进程封装：capture 时收集 stdout，否则透传；Windows 下命令解析器
+ * （npx / code.cmd）须经 shell 找到（spawn 直调 ENOENT），shell 模式参数
+ * 统一加引号防路径空格断裂（runInstalled 先例同口径） */
 function runCommand(command, args, { cwd, shell = false, stdio = 'inherit', capture = false } = {}) {
+  const useShell = shell || (process.platform === 'win32' && !/[\/]/.test(command))
+  const finalArgs = useShell && !shell ? args.map((a) => `"${a}"`) : args
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(useShell ? command : command, finalArgs, {
       cwd,
-      shell,
+      shell: useShell,
       env: process.env,
       stdio: capture ? ['ignore', 'pipe', 'inherit'] : stdio,
-      windowsHide: shell,
+      windowsHide: useShell,
     })
     let stdout = ''
     if (capture) {

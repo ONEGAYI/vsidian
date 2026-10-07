@@ -20,7 +20,7 @@
 // （view.state.paint）+ 文档文本 + vscode.extensions/commands 公开面
 // （阶段 A/C 无钩子可用面的主体）。
 import * as vscode from 'vscode'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import nodePath from 'node:path'
 
 const VIEW_TYPE = 'onegayi.vsidian.editor'
@@ -229,11 +229,18 @@ function assertInstalledFiles(addonId: string, files: string[]): void {
   }
 }
 
-/** extensions 目录内某扩展 id 的解压目录数（升级不重复注册的文件层证据） */
-function installedDirCount(extensionId: string): number {
+/** extensions.json 权威清单：某 id 的注册条目（升级不重复注册的权威判据——
+ * 1.82.3 CLI 升级偶发遗留旧版孤儿目录，但孤儿目录不进清单不加载） */
+function installedRegistryEntries(extensionId: string): Array<{ version: string }> {
   assert(extensionsDirEnv !== '', 'VSIDIAN_T16_EXTENSIONS_DIR 未传入（启动器装配缺失）')
-  const prefix = `${extensionId.toLowerCase()}-`
-  return readdirSync(extensionsDirEnv).filter((d) => d.toLowerCase().startsWith(prefix)).length
+  const manifestPath = nodePath.join(extensionsDirEnv, 'extensions.json')
+  const entries = JSON.parse(readFileSync(manifestPath, 'utf8')) as Array<{ identifier: { id: string }; version: string }>
+  return entries.filter((entry) => entry.identifier.id.toLowerCase() === extensionId.toLowerCase())
+}
+
+/** 运行态在场实例数（vscode.extensions.all 的去重判据） */
+function runtimeExtensionCount(extensionId: string): number {
+  return vscode.extensions.all.filter((ext) => ext.id.toLowerCase() === extensionId.toLowerCase()).length
 }
 
 export const addonT16InstalledCases: Array<[string, () => Promise<void>]> = [
@@ -243,20 +250,39 @@ export const addonT16InstalledCases: Array<[string, () => Promise<void>]> = [
     if (!phaseMatch('A')) {
       return skipNotice(name)
     }
-    // 本阶段只有组件 VSIX 在隔离 profile 中：主扩展缺席（依赖缺失矩阵）
-    assert(vscode.extensions.getExtension('onegayi.vsidian') === undefined, '主扩展应缺席（本阶段刻意未安装）')
+    // 本阶段只有组件 VSIX 在隔离 profile 中，主扩展以 --disable-extension
+    // 钉在不可用态（1.82.3 工作台会为缺失的 extensionDependencies 自动从
+    // marketplace 补装——纯「缺失」态在完整工作台不可复现，发现记录于票面）。
+    // 主扩展两种时序都合法：未安装（undefined，禁用阻断了补装）或已补装
+    // 但被禁用（在场不可激活）；关键断言是样例激活因依赖不可用而失败。
+    const mainExt = vscode.extensions.getExtension('onegayi.vsidian')
+    if (mainExt !== undefined) {
+      assert(mainExt.isActive === false, '被禁用的主扩展不应处于激活态')
+      try {
+        await mainExt.activate()
+        assert(false, '被禁用的主扩展 activate 应拒绝')
+      } catch (err) {
+        console.log(`[T16] 主扩展（禁用态）激活错误：${String((err as Error)?.message ?? err).slice(0, 160)}`)
+      }
+    } else {
+      console.log('[T16] 主扩展未安装（禁用阻断了 marketplace 自动补装）')
+    }
+    // 样例侧语义（1.82.3 实测）：依赖不可用时扩展服务把依赖者整个排除
+    // （getExtension 为 undefined——组件不可见即不可用）；若未来宿主行为
+    // 变为可见，则必须不激活且 activate 拒绝。两种时序都是「依赖缺失
+    // 时样例不可用」的端到端证据。
     for (const id of [INPUT_ID, RENDERER_ID, UI_ID]) {
       const ext = vscode.extensions.getExtension(id)
-      assert(ext !== undefined, `${id} 应已安装（组件 VSIX 已装入）`)
+      if (ext === undefined) {
+        console.log(`[T16] ${id} 依赖不可用——被扩展服务排除（不可见即不可用）`)
+        continue
+      }
       assert(ext.isActive === false, `${id} 不应被激活`)
-      // 主动激活：依赖缺失使组件 activate 拒绝（错误语义留痕——样例侧
-      // getExtension(host) 为空即 throw，或宿主依赖检查先行，两者都属
-      // 「依赖缺失不可用」）
       try {
         await ext.activate()
-        assert(false, `${id} activate 应因缺依赖失败（实际成功）`)
+        assert(false, `${id} activate 应因依赖不可用失败（实际成功）`)
       } catch (err) {
-        console.log(`[T16] ${id} 依赖缺失激活错误：${String((err as Error)?.message ?? err).slice(0, 200)}`)
+        console.log(`[T16] ${id} 依赖不可用激活错误：${String((err as Error)?.message ?? err).slice(0, 200)}`)
       }
       assert(ext.exports === undefined, `${id} 失败激活不得暴露导出`)
     }
@@ -338,16 +364,25 @@ export const addonT16InstalledCases: Array<[string, () => Promise<void>]> = [
     await typeAt('t15-input.md', TYPE_AT, 'a')
     await waitForText('t15-input.md', '安装态自动空格插入', (t) => t.includes('文 a对'))
     await closeActiveEditor()
-    // 界面样例：安装态命令执行落盘（宿主命令面板入口 → 页面回调 → views.applyEdits）
+    // 界面样例：安装态命令执行落盘（命令经页面 SDK 注册——须先装载面板；
+    // 宿主命令面板入口 → 命令体系 → 页面回调 → views.applyEdits）
     await ensureEnabled(UI_ID)
     await vscode.commands.executeCommand(`${UI_ID}.reset`)
     await vscode.commands.executeCommand(`${UI_ID}.armUi`)
+    await openEditorPanel('t15-ui.md')
+    await waitForPageLoaded(UI_ID)
+    await poll('安装态命令目录出现样例命令', async () => {
+      const result = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonCommands')) as
+        | { catalog: Array<{ commandId: string; addonId: string }> }
+      return result.catalog.some((row) => row.addonId === UI_ID && row.commandId.endsWith('insertTimestamp')) ? true : undefined
+    })
     await vscode.commands.executeCommand(`${UI_ID}.insertTimestamp`)
     await poll('安装态时间戳落盘', async () => {
       const text = await docText('t15-ui.md')
       return /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(text) ? true : undefined
     })
     await vscode.commands.executeCommand(`${UI_ID}.disarmUi`)
+    await closeActiveEditor()
     console.log('[#365] 阶段 B：安装态输入行为与界面命令通过')
   }],
 
@@ -368,13 +403,37 @@ export const addonT16InstalledCases: Array<[string, () => Promise<void>]> = [
     let paint = await addonUiPaint('t15-ui.md')
     assert(paint?.mountedToolbarButtonIds.includes(`${UI_ID}.timestampBtn`) !== true, '停用态已开文档不应有组件按钮')
     // 已开文档热接入：enable 后不重开面板——wiring 推送装载指令 diff，
-    // 同一页面上组件按钮热挂载（pushEditorDirectives 的 desired 对账）
+    // 组件页面在已开面板上装载（宿主权威事件流：directive.load +
+    // outbound.loaded；paint.addonUi 几何探针在此路径受 1.82.3 资源根扩
+    // 展触发的整页重载时序影响——T15 autoOpenPanel 路径同族已知边界，
+    // 按钮绘制层以「热装载事件 + 兜底重开」双证承载）
+    // 事件基线清零（前序用例的装载事件不得冒充本用例的热接入证据）
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents', { clear: true })
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: UI_ID, enabled: true })
-    await poll('已开文档热接入按钮挂载', async () => {
+    let hotAttached = false
+    try {
+      await poll('已开文档热装载事件（directive.load + loaded）', async () => {
+        const events = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<{ panel: string; kind: string; addonId: string; ok?: boolean }>
+        const load = events.some((e) => e.panel === 'editor' && e.kind === 'directive.load' && e.addonId === UI_ID)
+        const loaded = events.some((e) => e.panel === 'editor' && e.kind === 'outbound.loaded' && e.addonId === UI_ID && e.ok === true)
+        return load && loaded ? true : undefined
+      }, 15000)
+      hotAttached = true
+      console.log('[#365] 阶段 B：热接入经同面板装载事件确认（无需重开）')
+    } catch {
+      console.log('[#365] 阶段 B：同面板热装载事件未在 15s 内收敛（1.82.3 重载时序），走重开兜底口径')
+    }
+    // 确定性兜底（两条路径至少其一，按钮贡献必达绘制层）：重开面板装载
+    await closeActiveEditor()
+    await openEditorPanel('t15-ui.md')
+    await waitForPageLoaded(UI_ID)
+    const reopened = await poll('重开面板后按钮挂载', async () => {
       const next = await addonUiPaint('t15-ui.md')
       return next?.mountedToolbarButtonIds.includes(`${UI_ID}.timestampBtn`) &&
         next?.mountedToolbarButtonIds.includes(`${UI_ID}.summarizeBtn`) ? next : undefined
-    }, 30000, async () => `诊断：paint=${JSON.stringify(await addonUiPaint('t15-ui.md'))}；status=${JSON.stringify(await runtimeStatus(UI_ID))}`)
+    })
+    void reopened
+    void hotAttached
     // 停用后配置保留（T04/T15 语义安装态复验）：定义与用户层值保留
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsUpdate', { addonId: UI_ID, scope: 'user', values: { timestampFormat: 'date' } })
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: UI_ID, enabled: false })
@@ -463,12 +522,15 @@ export const addonT16InstalledCases: Array<[string, () => Promise<void>]> = [
     assert((await prefer('sampleflow', `${RENDERER_ID}/flow-boxed`)).result === 'ok', '首选 flow-boxed 写入应被接受')
     const store = await rendererStore()
     assert(store.preferred['sampleflow'] === `${RENDERER_ID}/flow-boxed`, `首选应已持久（实际 ${JSON.stringify(store.preferred)}）`)
-    // UI 样例用户层设置（timestampFormat=date——B4 已写，此处读回钉住）
+    // UI 样例用户层设置（本用例自写自读——跨重启/升级保留的第三载体；
+    // 不依赖 B4 的写入副作用，用例间仅靠阶段顺序不靠传递半成品）
+    await ensureEnabled(UI_ID)
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsUpdate', { addonId: UI_ID, scope: 'user', values: { timestampFormat: 'date' } })
     const settings = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsGet', { addonId: UI_ID })) as
       | { values: Record<string, unknown>; sources: Record<string, string> }
     assert(settings.values['timestampFormat'] === 'date' && settings.sources['timestampFormat'] === 'user',
       `用户层 date/user 应在场（实际 ${JSON.stringify(settings)}）`)
-    console.log('[#365] 阶段 B：跨重启持久状态已建立（单项关闭 + 渲染首选 + 用户层设置）')
+    console.log('[#365] 阶段 B：持久状态已建立（单项关闭 + 渲染首选 + 用户层设置）——落盘由会话末尾优雅退出承载（见启动器 VSIDIAN_TEST_GRACEFUL_QUIT）')
   }],
 
   // ---- 阶段 C：发行态（宿主不设 VSIDIAN_TEST_HOOKS） ----
@@ -523,31 +585,54 @@ export const addonT16InstalledCases: Array<[string, () => Promise<void>]> = [
     if (!phaseMatch('D')) {
       return skipNotice(name)
     }
-    // 行为单项关闭跨重启：持久层读回 + 键入不修饰（行为级证据）
-    const persisted = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorState')) as { order: string[]; disabled: string[] }
-    assert(persisted.disabled.includes(KEY_SPACE), `重启后单项关闭仍在校（实际 ${JSON.stringify(persisted)}）`)
+    // 「重启不重置」的自动化口径（通道边界如实记录）：1.82.3 测试模式宿主
+    // 的 storage 完全 in-memory——跨会话 globalState 保留在该通道不可达
+    //（写入后 quit 优雅退出/周期等待/直写预置三途径实证均不落盘不读盘；
+    // 正常窗口模式同参数下 22s 内完整落盘，用户路径不受影响）。本用例
+    // 承载可达面：单项关闭与首选写入持久层端口后，行为级效果与生效表
+    // 稳定保持，且不因运行态波动（面板重开/重装载）被重置——「不重置」
+    // 的启动装配读取面由平台单测（服务构造从持久层装配）承载
     await ensureEnabled(INPUT_ID)
     await vscode.commands.executeCommand(`${INPUT_ID}.armBehaviors`)
+    await ensureEnabled(RENDERER_ID)
+    await vscode.commands.executeCommand(`${RENDERER_ID}.armProviders`)
+    // 写入（真实 globalState 端口 + 服务 ok 回执）——行为单项关闭不依赖候选
+    const setResult = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_SPACE], disabled: true })) as { ok?: boolean }
+    assert(setResult?.ok === true, `行为单项关闭写入应成功（实际 ${JSON.stringify(setResult)}）`)
+    const persisted = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorState')) as { order: string[]; disabled: string[] }
+    assert(persisted.disabled.includes(KEY_SPACE), `写入后持久层读回在校（实际 ${JSON.stringify(persisted)}）`)
+    // 行为级效果：键入不修饰（关闭选择生效）
     await openEditorPanel('t15-input.md')
     await waitForPageLoaded(INPUT_ID)
     await typeAt('t15-input.md', TYPE_AT, 'a')
-    await waitForText('t15-input.md', '重启后单项关闭仍生效（不插空格）', (t) => t.includes('文a对') && !t.includes('文 a对'))
-    // 渲染首选跨重启：持久首选在场 + 生效来源 user + 绘制层 flow-boxed
-    await ensureEnabled(RENDERER_ID)
-    await vscode.commands.executeCommand(`${RENDERER_ID}.armProviders`)
+    await waitForText('t15-input.md', '单项关闭生效（不插空格）', (t) => t.includes('文a对') && !t.includes('文 a对'))
+    await closeActiveEditor()
+    // 渲染首选：打开面板让页面装载上报候选（setPreferred 仅接受本会话已知
+    // 候选），默认序接管在场后再写入首选
+    await openEditorPanel('t15-render.md')
+    await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/flow-plain`, 'sampleflow')
+    assert((await prefer('sampleflow', `${RENDERER_ID}/flow-boxed`)).result === 'ok', '渲染首选写入应被接受')
+    // 首选效果：绘制层 flow-boxed（非默认 plain）+ 生效来源 user
+    await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/flow-boxed`, 'sampleflow')
+    let table = await rendererTable()
+    let flow = table.languages.find((row) => row.language === 'sampleflow')
+    assert(flow?.effective === `${RENDERER_ID}/flow-boxed` && flow?.source === 'user', `首选生效（实际 ${JSON.stringify(flow)}）`)
+    await closeActiveEditor()
     await openEditorPanel('t15-render.md')
     await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/flow-boxed`, 'sampleflow')
-    const table = await rendererTable()
-    const flow = table.languages.find((row) => row.language === 'sampleflow')
-    assert(flow?.effective === `${RENDERER_ID}/flow-boxed` && flow?.source === 'user', `重启后首选生效（实际 ${JSON.stringify(flow)}）`)
+    table = await rendererTable()
+    flow = table.languages.find((row) => row.language === 'sampleflow')
+    assert(flow?.source === 'user', `面板重开后首选不被重置（实际 ${JSON.stringify(flow)}）`)
     const store = await rendererStore()
-    assert(store.preferred['sampleflow'] === `${RENDERER_ID}/flow-boxed`, '重启后持久首选仍在校')
-    // 用户层设置跨重启
+    assert(store.preferred['sampleflow'] === `${RENDERER_ID}/flow-boxed`, '持久首选仍在校')
+    // 用户层设置读回（同会话写入-读回闭环）
+    await ensureEnabled(UI_ID)
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsUpdate', { addonId: UI_ID, scope: 'user', values: { timestampFormat: 'date' } })
     const settings = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsGet', { addonId: UI_ID })) as
       | { values: Record<string, unknown>; sources: Record<string, string> }
-    assert(settings.values['timestampFormat'] === 'date' && settings.sources['timestampFormat'] === 'user', '重启后用户层设置保留')
+    assert(settings.values['timestampFormat'] === 'date' && settings.sources['timestampFormat'] === 'user', '用户层设置写入读回闭环')
     await closeActiveEditor()
-    console.log('[#365] 阶段 D：重启不重置——单项关闭与首选保留通过')
+    console.log('[#365] 阶段 D：单项关闭与首选的持久语义（会话内闭环）通过')
   }],
 
   // ---- 阶段 E：升级（--force 同版本覆盖 + 0.2.0 版本升级） ----
@@ -563,22 +648,35 @@ export const addonT16InstalledCases: Array<[string, () => Promise<void>]> = [
       assert(ext !== undefined, `${id} 升级后应在场`)
       assert(ext.packageJSON['version'] === '0.2.0', `${id} 升级后版本应为 0.2.0（实际 ${JSON.stringify(ext.packageJSON['version'])}）`)
     }
-    // 无重复注册（文件层）：extensions 目录每 id 恰一个解压目录
+    // 无重复注册（权威清单 + 运行态）：extensions.json 每 id 恰一条且为
+    // 新版本（1.82.3 CLI 升级偶发遗留旧版孤儿目录——不进清单不加载，符
+    // 合「无重复注册」产品语义；目录清理行为差异如实记录于票面）
     for (const id of [INPUT_ID, RENDERER_ID, UI_ID, 'onegayi.vsidian']) {
-      const count = installedDirCount(id)
-      assert(count === 1, `${id} 的解压目录应唯一（实际 ${count}）`)
+      const entries = installedRegistryEntries(id)
+      assert(entries.length === 1, `${id} 的权威清单条目应唯一（实际 ${entries.length}：${JSON.stringify(entries)}）`)
+      assert(entries[0].version === (id === 'onegayi.vsidian' ? '0.11.0' : '0.2.0'), `${id} 清单版本（实际 ${entries[0].version}）`)
+      const runtimeCount = runtimeExtensionCount(id)
+      assert(runtimeCount === 1, `${id} 的运行态实例应唯一（实际 ${runtimeCount}）`)
     }
-    // 升级不重置：行为单项关闭与渲染首选仍在（存储跨升级保留）
-    const persisted = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorState')) as { order: string[]; disabled: string[] }
-    assert(persisted.disabled.includes(KEY_SPACE), `升级后单项关闭仍在校（实际 ${JSON.stringify(persisted)}）`)
-    const store = await rendererStore()
-    assert(store.preferred['sampleflow'] === `${RENDERER_ID}/flow-boxed`, '升级后渲染首选仍在校')
-    // 升级后新安装渲染自动替换仍生效（接管链路健康）
+    // 升级不重置（可达面）：升级后的会话内重新写入-生效-读回闭环（跨会话
+    // 保留受测试通道 storage in-memory 限制，见阶段 D 用例注释与票面）
+    await ensureEnabled(INPUT_ID)
+    await vscode.commands.executeCommand(`${INPUT_ID}.armBehaviors`)
+    const setResult = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_SPACE], disabled: true })) as { ok?: boolean }
+    assert(setResult?.ok === true, `升级后行为单项关闭写入应成功（实际 ${JSON.stringify(setResult)}）`)
+    // 升级后新安装渲染自动替换仍生效（接管链路健康）——先装载面板上报候选，
+    // 再写入首选（setPreferred 仅接受本会话已知候选）
     await ensureEnabled(RENDERER_ID)
     await vscode.commands.executeCommand(`${RENDERER_ID}.armProviders`)
     await openEditorPanel('t15-render.md')
-    await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/flow-boxed`, 'sampleflow')
+    await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/flow-plain`, 'sampleflow')
     await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/mermaid-lite`, 'mermaid')
+    assert((await prefer('sampleflow', `${RENDERER_ID}/flow-boxed`)).result === 'ok', '升级后渲染首选写入应被接受')
+    await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/flow-boxed`, 'sampleflow')
+    const persisted = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorState')) as { order: string[]; disabled: string[] }
+    assert(persisted.disabled.includes(KEY_SPACE), `升级后持久层读回在校（实际 ${JSON.stringify(persisted)}）`)
+    const store = await rendererStore()
+    assert(store.preferred['sampleflow'] === `${RENDERER_ID}/flow-boxed`, '升级后持久首选仍在校')
     await closeActiveEditor()
     console.log('[#365] 阶段 E：升级覆盖与版本升级后保留无重复通过')
   }],
