@@ -35,6 +35,7 @@ import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type AddonSettingsLoadPlan } from './addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
+import { AddonBehaviorStateService } from './addonBehaviorStateService'
 import { createAddonRealpathGuard } from './addonRealpathGuard'
 import { t } from '../../shared/i18n'
 
@@ -212,6 +213,20 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     log(`addon ${addonId} settings ${stage}: ${detail}`)
   }
   const settingsService = new AddonSettingsService(createSettingsPersistence(context), settingsLog)
+  // T07（#356）行为顺序与逐项开关：宿主侧持久化（globalState 单层——存储
+  // 决策见 shared/addonBehaviors；变化推送下方 wiring 内接线）
+  const ADDON_BEHAVIOR_STATE_KEY = 'vsidian.addonBehaviors.state.v1'
+  const behaviorStateService = new AddonBehaviorStateService({
+    read: () => context.globalState.get(ADDON_BEHAVIOR_STATE_KEY),
+    write: async (value) => {
+      try {
+        await context.globalState.update(ADDON_BEHAVIOR_STATE_KEY, value)
+        return true
+      } catch {
+        return false
+      }
+    },
+  })
   const runtime = new AddonRuntime({
     apiVersion: ADDON_API_VERSION,
     preferences: preferenceStore,
@@ -504,6 +519,19 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     }
   }
 
+  /** T07（#356）行为状态下发（顺序覆盖 + 逐项开关；面板销毁静默容忍） */
+  const postBehaviorState = (webview: vscode.Webview): void => {
+    try {
+      const snapshot = behaviorStateService.snapshot()
+      const state = snapshot.order.length === 0 && snapshot.disabled.length === 0
+        ? null
+        : { version: 1 as const, order: snapshot.order, disabled: snapshot.disabled }
+      void webview.postMessage({ kind: 'addon.behaviors.state', state }).then(undefined, () => {})
+    } catch {
+      // 面板已销毁：下次对账（ready/状态变化）重推
+    }
+  }
+
   // ---- 编辑器面板桥（#351）----
   interface EditorPanelRecord {
     webview: vscode.Webview
@@ -516,6 +544,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   const panelListeners = new Set<() => void>()
 
   const pushEditorDirectives = (record: EditorPanelRecord): void => {
+    // T07（#356）行为状态下发（随装载指令对账同拍：ready/状态变化/显式
+    // pushDirectives 都经此处；null = 无用户覆盖——默认序全开启）
+    postBehaviorState(record.webview)
     const desired = runtime.desiredEditorLoads()
     const desiredIds = new Set(desired.map((plan) => plan.addonId))
     // 停用/故障/释放的组件：推送 unload（携带最后装载代次；装载器幂等）
@@ -868,6 +899,14 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     notifyAddonPanels()
   })
 
+  // T07（#356）行为状态变化（排序/开关成功落库后）→ 全部活跃编辑器面板
+  // 即时推送（webview runtime applyHostState 即时生效——不经 CM6 装配）
+  behaviorStateService.onChanged(() => {
+    for (const record of [...editorPanels.values()]) {
+      postBehaviorState(record.webview)
+    }
+  })
+
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1
   //  时注册（判据与 textEditorProvider / editorGuardWiring 门控块一致），
   //  生产 VSIX 与常规 F5 开发不暴露 ----
@@ -945,6 +984,16 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       // 并重新唤醒；activation-failed 短路被手动意图越过）
       vscode.commands.registerCommand('onegayi.vsidian._test.addonRetry', (args: { addonId: string }) =>
         coordinator.retry(args.addonId)),
+      // ---- T07（#356）行为状态（排序/开关）的宿主侧读写面：管理 UI 的
+      // 等价入口（完整 UI 属 T08）；写入成功即推送全部活跃编辑器面板 ----
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonBehaviorState', () => {
+        const snapshot = behaviorStateService.snapshot()
+        return { order: [...snapshot.order], disabled: [...snapshot.disabled] }
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', (args: { keys: string[]; disabled: boolean }) =>
+        behaviorStateService.setDisabled(args.keys, args.disabled)),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonBehaviorSetOrder', (args: { order: string[] }) =>
+        behaviorStateService.setOrder(args.order)),
     )
   }
 
