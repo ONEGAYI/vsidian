@@ -12,6 +12,7 @@ vsidian/
     │   ├── addons/                       # 附加组件宿主端实现
     │   │   ├── addonCoordinator.ts     # 附加组件发现协调与唤醒
     │   │   ├── addonPageRegistry.ts    # 页面入口登记校验
+    │   │   ├── addonRealpathGuard.ts   # realpath 逃逸守卫
     │   │   ├── addonRegistry.ts        # 附加组件注册表校验链
     │   │   ├── addonRuntime.ts         # 运行生命周期状态机
     │   │   ├── addonSettingsService.ts # 附加组件设置服务
@@ -102,6 +103,7 @@ vsidian/
     │   ├── mermaid.ts              # Mermaid 围栏形态学（#60）
     │   ├── newline.ts              # CRLF/LF 换行协调器
     │   ├── obsidianAlias.ts        # Obsidian 别名桥实现同源表
+    │   ├── officialAddons.ts       # 官方组件登记表事实源
     │   ├── pdfNav.ts               # PDF 导航锚点解析纯逻辑
     │   ├── protocol.ts             # 消息协议单一事实源
     │   ├── refContent.ts           # 引用内容类型分派共享内核（#333）
