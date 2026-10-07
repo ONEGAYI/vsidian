@@ -114,6 +114,9 @@ export class AddonSection implements SettingsPageSection {
   private scope: 'user' | 'workspace' = 'user'
   /** 数组/对象的未保存草稿（定义键 → 草稿值；推送保留，保存成功清除） */
   private drafts = new Map<string, unknown>()
+  /** #354 T05 侧栏条目定位的组件 ID（推送重渲染保持——定位高亮不因
+   *  settingsOpen 的应答回灌清失；下次定位或分页重挂载时更新） */
+  private locatedAddonId: string | undefined
   private parent: HTMLElement | undefined
 
   constructor(
@@ -213,8 +216,13 @@ export class AddonSection implements SettingsPageSection {
     }
     parent.replaceChildren()
     const state = this.state
-    // #354 T05 侧栏组件条目定位：列表行 located + 滚动入视
-    const focusAddonId = focusAddonOf(focusEntry)
+    // #354 T05 侧栏组件条目定位：显式携带 focusEntry 时更新定位意图，
+    // 状态推送的无参重渲染保持既有定位（locatedAddonId）
+    const explicitFocus = focusAddonOf(focusEntry)
+    if (explicitFocus !== undefined || focusEntry !== undefined) {
+      this.locatedAddonId = explicitFocus
+    }
+    const focusAddonId = this.locatedAddonId
 
     // ---- 状态列表（官方分组在前；列表未到达时显示读取中） ----
     const listWrap = document.createElement('div')

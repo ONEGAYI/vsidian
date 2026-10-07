@@ -1913,7 +1913,22 @@ export class WebviewSyncController {
     this.live?.reconfigureAddonExtensions(extensions)
   }
 
-  /** #354 T05：冲刷挂起的组件扩展重配意图（输入落定回调；只执行最新） */
+  /** #354 T05：本地输入在途观测（IME 组合/提交未完成的只读透出——
+   *  附加组件热切换守卫的诊断面；无 live 实例时 false） */
+  hasPendingLocalInput(): boolean {
+    return this.live?.hasPendingLocalInput() ?? false
+  }
+
+  /** #354 T05：组件扩展重配挂起观测（true = 有意图等待输入落定冲刷） */
+  get hasPendingAddonReconfigure(): boolean {
+    return this.pendingAddonExtensions !== undefined
+  }
+
+  /** #354 T05：冲刷挂起的组件扩展重配意图（输入落定回调；只执行最新）。
+   *  同步执行——jsdom 组合链端到端与浏览器 IME 场景（addonHotSwitch）已
+   *  验证 ack 收敛栈内重配可靠；浏览器「组合后装配失效」边界（摘除方向
+   *  正常、装配方向不生效）在 CM6 组合 DOM 层，与此处无关（见 T05 未决
+   *  事项）。 */
   private flushPendingAddonExtensions(): void {
     if (this.pendingAddonExtensions === undefined) {
       return

@@ -69,6 +69,21 @@ Object.assign(window, {
   initDoc(text: string) {
     controller.handleHostMessage({ kind: 'init', sessionId: 'v02-addon', docUri: 'file:///v02-addon.md', version: 1, text })
   },
+  /** #354 T05 宿主角色 ack：确认全部未确认的 edit.request（ok，version =
+   *  base + 1，逐条）——热切换落定链（onLocalInputSettled 冲刷挂起的组件
+   *  扩展重配）在浏览器场景的驱动入口；组合链可能产生多条在途请求 */
+  ackPendingEdits() {
+    const requests = hostMessages.filter(
+      (message): message is { kind: 'edit.request'; seq: number; baseVersion: number } =>
+        typeof message === 'object' && message !== null && (message as { kind?: string }).kind === 'edit.request',
+    )
+    let last: number | null = null
+    for (const request of requests) {
+      controller.handleHostMessage({ kind: 'edit.ack', seq: request.seq, ok: true, version: request.baseVersion + 1 })
+      last = request.seq
+    }
+    return last
+  },
   async loadAddon(scriptUri: string, cssUri: string | null, generation: number): Promise<AddonLoadOutcome> {
     collectOutbound()
     const outcome = await loader.load({
@@ -107,6 +122,14 @@ Object.assign(window, {
     const view = findView()!
     const main = view.state.selection.main
     return { text: view.state.doc.toString(), head: main.head, from: main.from, to: main.to }
+  },
+  /** #354 T05 本地输入在途观测（守卫谓词透出——热切换收尾的诊断面） */
+  pendingInput(): boolean {
+    return controller.hasPendingLocalInput()
+  },
+  /** #354 T05 组件扩展重配挂起观测（true = 有意图等待落定冲刷） */
+  pendingReconfigure(): boolean {
+    return controller.hasPendingAddonReconfigure
   },
   /** 首字符标记的绘制层观测：元素计数 + 计算样式 + 几何 + 文本 */
   markInfo() {

@@ -18,6 +18,7 @@
 // - 日常安装态日志写入 VSCode 输出通道（标明组件 ID、阶段与原因）。
 import * as vscode from 'vscode'
 import path from 'node:path'
+import { realpath as fsRealpath } from 'node:fs/promises'
 import {
   ADDON_API_VERSION,
   type AddonRegistrationResult,
@@ -32,8 +33,9 @@ import type { AddonSettingsStatePayload, AddonSettingsAreaPayload } from '../../
 import { isWebviewToHost } from '../../shared/protocol'
 import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
-import { AddonRuntime, type AddonPreferenceStore } from './addonRuntime'
+import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type AddonSettingsLoadPlan } from './addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
+import { createAddonRealpathGuard } from './addonRealpathGuard'
 import { t } from '../../shared/i18n'
 
 /** 本扩展自身 ID（附加组件建议声明对它的原生依赖） */
@@ -437,7 +439,40 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         roots.add(path.resolve(plan.resourceBaseFsPath))
       }
     }
-    return [...roots].map((dir) => vscode.Uri.file(dir))
+    // #354 T05 realpath 逃逸目录不进资源许可面（已判逃逸的计划目录全撤）
+    return [...roots]
+      .filter((dir) => !realpathEscapeRoots.has(dir))
+      .map((dir) => vscode.Uri.file(dir))
+  }
+
+  // ---- #354 T05 realpath 符号链接逃逸守卫（V02 未验项收口） ----
+  // 词法包含性（addonPageRegistry 第一层）挡不住「安装目录内符号链接指向
+  // 目录外」；装载意图（addon.load 推送）前对入口/样式/资源基址取真实
+  // 路径复核，任一逃逸整计划拒绝（组件页面代码不装载）。已判逃逸的目录
+  // 同步从资源许可面排除。
+  const realpathGuard = createAddonRealpathGuard(
+    { realpath: (fsPath) => fsRealpath(fsPath) },
+    (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
+  )
+  /** 已判逃逸计划的目录级排除表（资源根授权排除用；词法路径） */
+  const realpathEscapeRoots = new Set<string>()
+  const blockEscapePlanRoots = (plan: { entryFsPath: string; cssFsPaths: readonly string[]; resourceBaseFsPath: string | null }): void => {
+    realpathEscapeRoots.add(path.dirname(path.resolve(plan.entryFsPath)))
+    for (const css of plan.cssFsPaths) {
+      realpathEscapeRoots.add(path.dirname(path.resolve(css)))
+    }
+    if (plan.resourceBaseFsPath !== null) {
+      realpathEscapeRoots.add(path.resolve(plan.resourceBaseFsPath))
+    }
+  }
+  /** 面板刷新触发（验证完成/escape 登记后由装载门控链调用） */
+  const notifyAddonPanels = (): void => {
+    for (const listener of [...panelListeners]) {
+      listener()
+    }
+    if (settingsPanel) {
+      pushSettingsDirectives(settingsPanel)
+    }
   }
 
   // ---- #351 T02 面板桥事件观测（集成断言面：指令推送与出站结局留痕；
@@ -474,6 +509,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     webview: vscode.Webview
     /** 本面板已推送的装载（addonId → generation；desired 对账用） */
     pushed: Map<string, number>
+    /** #354 T05 realpath 验证在途的装载（addonId → generation；去重用） */
+    pendingVerify: Map<string, number>
   }
   const editorPanels = new Map<string, EditorPanelRecord>()
   const panelListeners = new Set<() => void>()
@@ -495,11 +532,55 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       if (pushed === plan.generation) {
         continue // 同代次已推送（webview 重载由 ready 重推）
       }
-      const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, plan) }
-      recordEvent('editor', directiveEventOf(directive))
-      postDirective(record.webview, directive)
-      record.pushed.set(plan.addonId, plan.generation)
+      void postEditorLoadIfVerified(record, plan)
     }
+  }
+
+  /**
+   * #354 T05 realpath 装载门控：addon.load 推送前对计划路径取真实路径
+   * 复核（逃逸 = 符号链接指向组件安装目录外）。验证在途按 addonId+代次
+   * 去重；escape 整计划拒绝（不装载、不授权资源根）并登记目录排除表；
+   * 验证通过才推送装载指令（面板 ready 重推与状态变化重推走缓存，幂等）。
+   */
+  const postEditorLoadIfVerified = async (record: EditorPanelRecord, plan: AddonEditorLoadPlan): Promise<void> => {
+    if (record.pushed.get(plan.addonId) === plan.generation) return
+    if (record.pendingVerify.get(plan.addonId) === plan.generation) return
+    // 已判逃逸的入口/样式/资源基址：直接拒绝（免文件系统复核）
+    if (
+      realpathGuard.isEscapedDir(plan.entryFsPath) ||
+      plan.cssFsPaths.some((css) => realpathGuard.isEscapedDir(css)) ||
+      (plan.resourceBaseFsPath !== null && realpathGuard.isEscapedDir(plan.resourceBaseFsPath))
+    ) {
+      recordEvent('editor', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
+      return
+    }
+    record.pendingVerify.set(plan.addonId, plan.generation)
+    const verdict = await verifyLoadPlan(plan)
+    record.pendingVerify.delete(plan.addonId)
+    if (verdict === 'escape') {
+      blockEscapePlanRoots(plan)
+      recordEvent('editor', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
+      return
+    }
+    if (record.pushed.get(plan.addonId) === plan.generation) return
+    const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, plan) }
+    recordEvent('editor', directiveEventOf(directive))
+    postDirective(record.webview, directive)
+    record.pushed.set(plan.addonId, plan.generation)
+  }
+
+  /** realpath 守卫的统一装载计划输入（安装目录锚从扩展注册表解析） */
+  const verifyLoadPlan = (plan: { addonId: string; entryFsPath: string; cssFsPaths: readonly string[]; resourceBaseFsPath: string | null }): Promise<'ok' | 'escape'> => {
+    const installDir = vscode.extensions.getExtension(plan.addonId)?.extensionUri.fsPath
+    if (installDir === undefined) {
+      return Promise.resolve('escape')
+    }
+    return realpathGuard.verifyPlan({
+      addonId: plan.addonId,
+      installDir,
+      fileFsPaths: [plan.entryFsPath, ...plan.cssFsPaths],
+      dirFsPaths: [plan.resourceBaseFsPath],
+    })
   }
 
   const handleEditorPanelMessage = (record: EditorPanelRecord, message: unknown): boolean => {
@@ -510,6 +591,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       // webview 重载 = 新装载器生命周期的开始：对账基线归零后全量重推
       //（同代次幂等重发；不归零会把重载误判为「已推送」而永远跳过）
       record.pushed.clear()
+      record.pendingVerify.clear()
       pushEditorDirectives(record)
       return true
     }
@@ -529,7 +611,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       if (!record) {
         // 未注册面板（首条消息即 addonPage.ready 时就地登记）
         if (isWebviewToHost(message) && message.kind === 'addonPage.ready') {
-          const fresh: EditorPanelRecord = { webview, pushed: new Map() }
+          const fresh: EditorPanelRecord = { webview, pushed: new Map(), pendingVerify: new Map() }
           editorPanels.set(sessionId, fresh)
           return handleEditorPanelMessage(fresh, message)
         }
@@ -545,7 +627,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       return () => panelListeners.delete(listener)
     },
     pushDirectives: (sessionId, webview) => {
-      const record = editorPanels.get(sessionId) ?? { webview, pushed: new Map() }
+      const record = editorPanels.get(sessionId) ?? { webview, pushed: new Map(), pendingVerify: new Map() }
       if (!editorPanels.has(sessionId)) {
         editorPanels.set(sessionId, record)
       }
@@ -557,6 +639,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   interface SettingsPanelRecord {
     webview: vscode.Webview
     pushed: { addonId: string; generation: number } | null
+    /** #354 T05 realpath 验证在途（null = 无） */
+    pendingVerify: { addonId: string; generation: number } | null
   }
   let settingsPanel: SettingsPanelRecord | undefined
 
@@ -574,10 +658,35 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     if (record.pushed && record.pushed.addonId === desired.addonId && record.pushed.generation === desired.generation) {
       return
     }
-    const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, desired) }
+    // #354 T05 realpath 装载门控（同编辑器面板：逃逸计划不装载）
+    void postSettingsLoadIfVerified(record, desired)
+  }
+
+  /** #354 T05 设置面板的 realpath 门控推送（验证在途去重；escape 拒绝并登记目录排除） */
+  const postSettingsLoadIfVerified = async (record: SettingsPanelRecord, plan: AddonSettingsLoadPlan): Promise<void> => {
+    if (record.pushed?.addonId === plan.addonId && record.pushed.generation === plan.generation) return
+    if (record.pendingVerify?.addonId === plan.addonId && record.pendingVerify.generation === plan.generation) return
+    if (
+      realpathGuard.isEscapedDir(plan.entryFsPath) ||
+      plan.cssFsPaths.some((css) => realpathGuard.isEscapedDir(css)) ||
+      (plan.resourceBaseFsPath !== null && realpathGuard.isEscapedDir(plan.resourceBaseFsPath))
+    ) {
+      recordEvent('settings', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
+      return
+    }
+    record.pendingVerify = { addonId: plan.addonId, generation: plan.generation }
+    const verdict = await verifyLoadPlan(plan)
+    record.pendingVerify = null
+    if (verdict === 'escape') {
+      blockEscapePlanRoots(plan)
+      recordEvent('settings', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
+      return
+    }
+    if (record.pushed?.addonId === plan.addonId && record.pushed.generation === plan.generation) return
+    const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, plan) }
     recordEvent('settings', directiveEventOf(directive))
     postDirective(record.webview, directive)
-    record.pushed = { addonId: desired.addonId, generation: desired.generation }
+    record.pushed = { addonId: plan.addonId, generation: plan.generation }
   }
 
   /** 全部可打开设置页的组件资源根（面板 open 时并入许可面——避免运行中
@@ -601,7 +710,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     }
     const ensureRecord = (): SettingsPanelRecord => {
       if (!settingsPanel || settingsPanel.webview !== webview) {
-        settingsPanel = { webview, pushed: null }
+        settingsPanel = { webview, pushed: null, pendingVerify: null }
       }
       return settingsPanel
     }
@@ -721,7 +830,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     retryFaulted: (addonId) => coordinator.retry(addonId),
     settingsResourceRoots: settingsCapableRoots,
     attachSettingsPanel: (webview) => {
-      settingsPanel = { webview, pushed: null }
+      settingsPanel = { webview, pushed: null, pendingVerify: null }
     },
     settingsPanelDisposed: () => {
       settingsPanel = undefined
@@ -756,12 +865,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   //  刷新资源根并推送指令；设置页：此处直推 + addons.state 推送经
   //  extension.ts 的 onRuntimeChanged 接线） ----
   const offRuntimeChanged = runtime.onChanged(() => {
-    for (const listener of [...panelListeners]) {
-      listener()
-    }
-    if (settingsPanel) {
-      pushSettingsDirectives(settingsPanel)
-    }
+    notifyAddonPanels()
   })
 
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1

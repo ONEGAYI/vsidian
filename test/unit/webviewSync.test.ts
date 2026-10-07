@@ -1225,6 +1225,32 @@ describe('附加组件扩展热切换安全收尾（T05）', () => {
     c.dispose()
   })
 
+  it('IME 组合链端到端：组合中挂起，组合结束落定后装配（浏览器场景同型）', async () => {
+    const { bridge } = makeBridge()
+    const c = mount(bridge)
+    init(c, 'abcdef', 3)
+    const view = c.getView()!
+    const content = view.contentDOM
+    // 组合开始（DOM compositionstart——liveInstance 组合态跟踪入口）
+    content.dispatchEvent(new CompositionEvent('compositionstart'))
+    // 组合中装载（开关启用）：挂起
+    c.reconfigureAddonExtensions(markerExtension)
+    expect(view.state.field(markerField, false)).toBeUndefined()
+    // 组合中的本地事务（暂缓累积——不发 edit.request）
+    view.dispatch({ changes: { from: 3, insert: '组' }, userEvent: 'input.type.composition' })
+    // 组合结束
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '组' }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    // 落定链：flush 定时器把暂缓集发出（inFlight）→ 宿主 ack → 冲刷
+    const sent = (bridge.postMessage as unknown as (m: unknown) => void) && undefined
+    void sent
+    c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 4 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(view.state.field(markerField, false)).toBe(0)
+    expect(view.state.doc.toString()).toBe('abc组def')
+    c.dispose()
+  })
+
   it('无在途输入时立即重配（无谓挂起不引入延迟）', () => {
     const { bridge } = makeBridge()
     const c = mount(bridge)

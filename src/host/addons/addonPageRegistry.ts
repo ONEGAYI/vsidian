@@ -42,8 +42,10 @@ function isContainedRelative(input: string): boolean {
   return !segments.includes('..')
 }
 
-/** 解析后的 fsPath 是否仍位于基准目录内（规范化后的前缀包含判断） */
-function isWithin(baseFsPath: string, candidateFsPath: string): boolean {
+/** 解析后的 fsPath 是否仍位于基准目录内（规范化后的前缀包含判断）。
+ *  #354 T05 起导出：realpath 守卫（addonRealpathGuard）对真实路径复用
+ *  同一包含性口径——词法层与真实路径层不各造判断。 */
+export function isWithin(baseFsPath: string, candidateFsPath: string): boolean {
   const base = path.resolve(baseFsPath) + path.sep
   const candidate = path.resolve(candidateFsPath)
   return candidate === path.resolve(baseFsPath) || candidate.startsWith(base)
