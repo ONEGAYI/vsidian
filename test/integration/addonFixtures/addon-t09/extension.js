@@ -26,6 +26,10 @@ const stats = {
 }
 
 let armCrash = false
+// 渲染候选放行（默认拒绝）：集成/浏览器宿主是共享会话，未放行时页面
+// 装载保持惰性（零候选上报、生效表零变化——不毒化其他用例的 mermaid/
+// 阅读解析断言）；T09 用例经命令显式开启，用毕关闭
+let providersAllowed = false
 let releaseHandle = null
 let definition = null
 let hostApi = null
@@ -38,10 +42,14 @@ function buildDefinition() {
     },
     enable(enableCtx) {
       stats.enableCount++
+      // 编辑器页入口不带 css：集成断言不依赖 .t09-box 样式（provider/
+      // width/rendered 态），而 T02「停用后 cssLinksActive===0」断言假设
+      // 面板内带 CSS 的夹具唯一——本组件带 CSS 会常驻面板打破该假设
+      //（计算色 rgb(9,96,246) 断言在浏览器套件，走其独立 CSS 装载通道）
       enableCtx.pages.registerEditor({
         entry: 'dist/editor.js',
-        css: ['dist/editor.css'],
       })
+      enableCtx.channel.handle('t09.providersAllowed', () => ({ allowed: providersAllowed }))
       enableCtx.channel.handle('t09.echo', () => {
         stats.echoCalls++
         if (armCrash) {
@@ -105,6 +113,15 @@ register('vsidian-test-fixture.addon-t09.stats', () => ({ ...stats, armCrash }))
 register('vsidian-test-fixture.addon-t09.armCrash', () => {
   armCrash = true
   return { ok: true }
+})
+// 渲染候选放行开关（T09 用例按需；页面装载时经通道询问）
+register('vsidian-test-fixture.addon-t09.armProviders', () => {
+  providersAllowed = true
+  return { ok: true, allowed: providersAllowed }
+})
+register('vsidian-test-fixture.addon-t09.disarmProviders', () => {
+  providersAllowed = false
+  return { ok: true, allowed: providersAllowed }
 })
 // 手动重试的组件侧配合：释放旧代次（宿主 retry 已释放注册记录时为
 // no-op）后以同一 definition 重新接入（T01 实证：激活失败过的 activate()

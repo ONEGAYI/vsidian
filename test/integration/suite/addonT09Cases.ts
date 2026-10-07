@@ -28,7 +28,7 @@ function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
 }
 
-async function poll<T>(label: string, fn: () => T | undefined | Promise<T | undefined>, timeoutMs = 30000): Promise<T> {
+async function poll<T>(label: string, fn: () => T | undefined | Promise<T | undefined>, timeoutMs = 30000, diagnose?: () => Promise<string>): Promise<T> {
   const start = Date.now()
   for (;;) {
     const value = await fn()
@@ -36,7 +36,8 @@ async function poll<T>(label: string, fn: () => T | undefined | Promise<T | unde
       return value
     }
     if (Date.now() - start > timeoutMs) {
-      throw new Error(`等待超时：${label}`)
+      const detail = diagnose ? await diagnose().catch(() => '诊断失败') : ''
+      throw new Error(`等待超时：${label}${detail ? `；${detail}` : ''}`)
     }
     await new Promise((r) => setTimeout(r, 150))
   }
@@ -88,6 +89,16 @@ async function waitForProviderPaint(file: string, provider: string, language: st
   })
 }
 
+/** 放行夹具组件的渲染候选注册（页面装载时经通道询问；默认惰性——
+ *  共享宿主会话中不毒化其他用例的 mermaid/阅读解析断言） */
+async function armProviders(): Promise<void> {
+  await vscode.commands.executeCommand(`${ADDON_ID}.armProviders`)
+}
+
+async function disarmProviders(): Promise<void> {
+  await vscode.commands.executeCommand(`${ADDON_ID}.disarmProviders`)
+}
+
 async function openEditorPanel(file: string): Promise<void> {
   await vscode.commands.executeCommand('vscode.openWith', wsUri(file), VIEW_TYPE)
   await poll('编辑器面板就绪', async () => {
@@ -120,6 +131,7 @@ async function closePanel(file: string): Promise<void> {
 
 export const addonT09Cases: Array<[string, () => Promise<void>]> = [
   ['附加组件 T09：安装无额外选择即接管内置 Mermaid 与普通语言（绘制层，#358）', async () => {
+    await armProviders()
     await openEditorPanel('t09-render.md')
     await waitForAddonTakeoverReady()
     // 生效表：新安装批次默认序——mermaid-alt 接管内置 mermaid、同批
@@ -137,10 +149,12 @@ export const addonT09Cases: Array<[string, () => Promise<void>]> = [
     const probe = await paintRenderers('t09-render.md')
     assert((probe?.builtinSvg ?? 0) === 0, '内置 mermaid SVG 应被组件接管替换')
     console.log('[#358] 安装自动接管通过（内置 Mermaid 与普通语言、绘制层断言）')
+    await disarmProviders()
     await closePanel('t09-render.md')
   }],
 
   ['附加组件 T09：同批确定性默认序与用户调整（改 alpha/回默认/改回内置，#358）', async () => {
+    await armProviders()
     await openEditorPanel('t09-render.md')
     await waitForAddonTakeoverReady()
     await waitForProviderPaint('t09-render.md', `${ADDON_ID}/draw-beta`, 't09draw')
@@ -166,10 +180,12 @@ export const addonT09Cases: Array<[string, () => Promise<void>]> = [
     // 清理：mermaid 首选清除（不残留到后续用例）
     await prefer('mermaid', null)
     console.log('[#358] 同批确定性默认序与用户调整通过（含改回内置）')
+    await disarmProviders()
     await closePanel('t09-render.md')
   }],
 
   ['附加组件 T09：Q30 正常停用内置接管与恢复按原选择（首选保留，#358）', async () => {
+    await armProviders()
     await openEditorPanel('t09-render.md')
     await waitForAddonTakeoverReady()
     // 建立用户首选：mermaid-alt（恢复后应按原选择显示）
@@ -192,10 +208,12 @@ export const addonT09Cases: Array<[string, () => Promise<void>]> = [
     const table = await rendererTable()
     assert(table.languages.find((row) => row.language === 'mermaid')?.source === 'user', '恢复后按原选择（user 来源）')
     console.log('[#358] Q30 正常停用与恢复通过（内置接管、首选保留、原选择恢复）')
+    await disarmProviders()
     await closePanel('t09-render.md')
   }],
 
   ['附加组件 T09：Q30 整组件故障停用内置接管与手动恢复（#358）', async () => {
+    await armProviders()
     await openEditorPanel('t09-render.md')
     await waitForAddonTakeoverReady()
     await waitForProviderPaint('t09-render.md', `${ADDON_ID}/mermaid-alt`, 'mermaid')
@@ -231,23 +249,33 @@ export const addonT09Cases: Array<[string, () => Promise<void>]> = [
     })
     await waitForProviderPaint('t09-render.md', `${ADDON_ID}/mermaid-alt`, 'mermaid')
     console.log('[#358] Q30 整组件故障停用与手动恢复通过')
+    await disarmProviders()
     await closePanel('t09-render.md')
   }],
 
   ['附加组件 T09：重复上报批次幂等与首选持久（重启/升级语义的宿主侧证据，#358）', async () => {
+    await armProviders()
     await openEditorPanel('t09-render.md')
     await waitForAddonTakeoverReady()
     await waitForProviderPaint('t09-render.md', `${ADDON_ID}/draw-beta`, 't09draw')
     const storeBefore = await rendererStore()
     const batch = storeBefore.batches[ADDON_ID]
     assert(typeof batch === 'number' && batch >= 1, '新安装组件应有已记录批次')
-    // 建立首选后重复触发装载代次（面板重开 = 页面重新上报同一组件候选）
+    // 建立首选后重复触发装载代次（面板重开 = 页面重新上报同一组件候选）。
+    // 放行须保持开启：重开装载必须真正重新注册候选，批次幂等路径才被
+    // 触发（disarm 提前会让页面按设计惰性——装载完成但零候选上报，接管
+    // 不恢复）；收尾统一 disarm 防止毒化后续用例
     await prefer('t09draw', `${ADDON_ID}/draw-alpha`)
     await closePanel('t09-render.md')
     await openEditorPanel('t09-render.md')
     await poll('重开后组件重新接管（同批次）', async () => {
       const probe = await paintRenderers('t09-render.md')
       return probe?.containers.some((c) => c.provider === `${ADDON_ID}/draw-alpha` && c.language === 't09draw') ? true : undefined
+    }, 30000, async () => {
+      const table = await rendererTable()
+      const status = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonRuntimeStatus', { addonId: ADDON_ID })) as { runState: string } | null
+      const allEvents = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<{ kind: string; addonId: string; ok?: boolean; topic?: string }>
+      return `诊断：表=${JSON.stringify(table.languages)}；状态=${status?.runState ?? 'null'}；t09事件=${allEvents.filter((e) => e.addonId === ADDON_ID).map((e) => `${e.kind}:${e.ok ?? ''}:${e.topic ?? ''}`).join(',')}；近20事件=${allEvents.slice(-20).map((e) => `${e.addonId}/${e.kind}`).join(',')}；绘制=${JSON.stringify(await paintRenderers('t09-render.md'))}`
     })
     const storeAfter = await rendererStore()
     assert(storeAfter.batches[ADDON_ID] === batch, '重复上报（升级/重启同组件）不改写批次')
@@ -255,6 +283,7 @@ export const addonT09Cases: Array<[string, () => Promise<void>]> = [
     // 清理：清除本用例建立的首选
     await prefer('t09draw', null)
     console.log('[#358] 批次幂等与首选持久通过')
+    await disarmProviders()
     await closePanel('t09-render.md')
   }],
 ]

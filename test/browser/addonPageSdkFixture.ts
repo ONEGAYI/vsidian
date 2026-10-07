@@ -57,6 +57,19 @@ const loader: AddonPageLoaderHandle = installAddonPageLoader({
 // 效应/阅读重渲染——生产 attachAddonRenderers 同款）
 controller.attachAddonRenderers()
 
+/** 宿主回执直发（window API 与内部放行共用；可任意迟到——装载器拒收
+ *  旧代次/已终结请求） */
+function replyChannelRequestDirect(requestId: string, outcome: AddonChannelOutcome): void {
+  const [addonId, generation] = requestId.split('#')
+  loader.handleDirective({
+    type: 'addon.channel.reply',
+    addonId,
+    generation: Number(generation),
+    requestId,
+    outcome,
+  })
+}
+
 // 生产装配：附加组件槽由 liveInstance 扩展数组自带（Compartment 空槽），
 // 夹具不再注入槽——与生产 main.ts 的 mount 参数形态一致
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
@@ -159,14 +172,7 @@ Object.assign(window, {
   },
   /** 宿主回执（可任意迟到——装载器负责拒收旧代次/已终结请求） */
   replyChannelRequest(requestId: string, outcome: AddonChannelOutcome) {
-    const [addonId, generation] = requestId.split('#')
-    loader.handleDirective({
-      type: 'addon.channel.reply',
-      addonId,
-      generation: Number(generation),
-      requestId,
-      outcome,
-    })
+    replyChannelRequestDirect(requestId, outcome)
   },
   readEditor() {
     const view = findView()!
@@ -254,6 +260,18 @@ Object.assign(window, {
     })
     collectOutbound()
     return outcome
+  },
+  /** #358 T09 放行夹具组件的渲染候选注册（页面装载时经通道询问——本
+   *  夹具页面默认惰性，不毒化共享浏览器会话的其他断言） */
+  grantRendererProviders(): number {
+    let granted = 0
+    for (const request of channelRequests.splice(0)) {
+      if (request.topic === 't09.providersAllowed') {
+        replyChannelRequestDirect(request.requestId, { ok: true, result: { allowed: true } })
+        granted += 1
+      }
+    }
+    return granted
   },
   /** #358 T09 光标落位（呈现态发射前提——移出围栏） */
   focusEditorAt(offset: number) {

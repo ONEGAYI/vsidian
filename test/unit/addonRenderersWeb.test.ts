@@ -123,14 +123,17 @@ describe('生效代次（epoch）与热切换通知', () => {
     const bridge = installAddonRenderersBridge(() => {})
     expect(bridge.applyTable(tableOf([{ language: 'a', effective: 'pub.a/r1' }, { language: 'b', effective: 'none' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['a'] }]))).toBe(true)
     expect(bridge.epochOf('a')).toBe(1)
-    expect(bridge.epochOf('b')).toBe(1)
+    // 首表 none/builtin 行与空表默认态（普通代码块/内置管线）零显示差异
+    //——不递增（否则每个新面板装载都多一次无意义热切换）
+    expect(bridge.epochOf('b')).toBe(0)
     // 同 version 重放：跳过
     expect(bridge.applyTable(tableOf([{ language: 'a', effective: 'pub.a/r1' }, { language: 'b', effective: 'none' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['a'] }]))).toBe(false)
     expect(bridge.epochOf('a')).toBe(1)
     // 只换 b 的生效者：a 的 epoch 不动
     bridge.applyTable(tableOf([{ language: 'a', effective: 'pub.a/r1' }, { language: 'b', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['a', 'b'] }], 2))
     expect(bridge.epochOf('a')).toBe(1)
-    expect(bridge.epochOf('b')).toBe(2)
+    // b：none（首表零递增）→ 组件，一次真变化 = 1
+    expect(bridge.epochOf('b')).toBe(1)
     // a 消失（语言撤下）：递增
     bridge.applyTable(tableOf([{ language: 'b', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['b'] }], 3))
     expect(bridge.epochOf('a')).toBe(2)
@@ -140,10 +143,12 @@ describe('生效代次（epoch）与热切换通知', () => {
     const bridge = installAddonRenderersBridge(() => {})
     const changes: string[][] = []
     bridge.onTableChanged((change) => changes.push([...change.changedLanguages]))
+    // 首表 builtin 行 = 空表默认态零差异：通知载荷空清单（消费方
+    // syncController 以空清单 + 动态集未变拦截，不触发重渲染）
     bridge.applyTable(tableOf([{ language: 'mermaid', effective: 'builtin' }]))
     bridge.applyTable(tableOf([{ language: 'mermaid', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['mermaid'] }], 2))
     bridge.applyTable(tableOf([{ language: 'mermaid', effective: 'builtin' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['mermaid'] }], 3))
-    expect(changes).toEqual([['mermaid'], ['mermaid'], ['mermaid']])
+    expect(changes).toEqual([[], ['mermaid'], ['mermaid']])
   })
 
   it('渲染型围栏语言集：内置 ∪ 可用组件语言；none 不计入；标签取生效声明', () => {

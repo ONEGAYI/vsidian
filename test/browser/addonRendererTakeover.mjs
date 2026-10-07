@@ -124,6 +124,9 @@ await scenario('安装自动接管：内置 Mermaid 替换 + 普通语言渲染 
   // 装载组件 + 宿主求表（新安装批次 1 → 默认序末位生效）
   const loaded = await page.evaluate(([script, css]) => window.loadRendererAddon(script, css, 1), [addonScriptUrl, addonCssUrl])
   assert.equal(loaded.ok, true, '组件装载应成功')
+  // 页面装载即询问候选放行（默认惰性）——宿主角色放行后注册候选
+  const granted = await page.evaluate(() => window.grantRendererProviders())
+  assert.equal(granted, 1, '页面应发出候选放行询问')
   const table = await page.evaluate((available) => window.hostRendererStep(available), [ADDON_ID])
   const mermaidRow = table.languages.find((row) => row.language === 'mermaid')
   const drawRow = table.languages.find((row) => row.language === 't09draw')
@@ -147,6 +150,7 @@ await scenario('安装自动接管：内置 Mermaid 替换 + 普通语言渲染 
 // ---- 场景 2：阅读模式按支持模式执行（mode=reading 挂载） ----
 await scenario('阅读视图：生效提供者按 reading 模式挂载', async (page) => {
   await page.evaluate(([script, css]) => window.loadRendererAddon(script, css, 1), [addonScriptUrl, addonCssUrl])
+  await page.evaluate(() => window.grantRendererProviders())
   await page.evaluate((available) => window.hostRendererStep(available), [ADDON_ID])
   await waitForBoxCount(page, 2)
   // 切阅读模式（宿主 view.mode.set 同款消息路径；live 侧 CM6 隐藏但
@@ -165,6 +169,7 @@ await scenario('阅读视图：生效提供者按 reading 模式挂载', async (
 // ---- 场景 3：用户按需调整与改回内置（热切换） ----
 await scenario('用户调整：draw 切 alpha 再回默认；mermaid 改回内置', async (page) => {
   await page.evaluate(([script, css]) => window.loadRendererAddon(script, css, 1), [addonScriptUrl, addonCssUrl])
+  await page.evaluate(() => window.grantRendererProviders())
   await page.evaluate((available) => window.hostRendererStep(available), [ADDON_ID])
   await waitForBoxCount(page, 2)
 
@@ -196,6 +201,7 @@ await scenario('用户调整：draw 切 alpha 再回默认；mermaid 改回内�
 // ---- 场景 4：Q30① 正常停用 → 内置接管（普通语言回落代码块）；恢复 → 原选择 ----
 await scenario('停用内置接管与恢复：mermaid 回内置、t09draw 回代码块、恢复按原选择', async (page) => {
   await page.evaluate(([script, css]) => window.loadRendererAddon(script, css, 1), [addonScriptUrl, addonCssUrl])
+  await page.evaluate(() => window.grantRendererProviders())
   await page.evaluate((available) => window.hostRendererStep(available), [ADDON_ID])
   await waitForBoxCount(page, 2)
   // 用户显式首选 draw-alpha（恢复后应按原选择显示——首选保留语义）
@@ -223,6 +229,7 @@ await scenario('停用内置接管与恢复：mermaid 回内置、t09draw 回代
 // ---- 场景 5：旧代次迟到异步结果不回潮（不覆盖恢复内容） ----
 await scenario('迟到结果不回潮：接管后立即停用，延迟写入不进文档', async (page) => {
   await page.evaluate(([script, css]) => window.loadRendererAddon(script, css, 1), [addonScriptUrl, addonCssUrl])
+  await page.evaluate(() => window.grantRendererProviders())
   await page.evaluate((available) => window.hostRendererStep(available), [ADDON_ID])
   await waitForBoxCount(page, 2)
   // mermaid-alt 的 mount 已调度 400ms 延迟写入（data-t09-late）——立即停用
@@ -238,6 +245,7 @@ await scenario('迟到结果不回潮：接管后立即停用，延迟写入不�
 // ---- 场景 6：图形弹窗经生效提供者取图（导出能力链路） ----
 await scenario('弹窗取图走生效提供者：draw-beta 的 svg 导出产物装载', async (page) => {
   await page.evaluate(([script, css]) => window.loadRendererAddon(script, css, 1), [addonScriptUrl, addonCssUrl])
+  await page.evaluate(() => window.grantRendererProviders())
   await page.evaluate((available) => window.hostRendererStep(available), [ADDON_ID])
   await waitForBoxCount(page, 2)
   const frame = page.locator('.vsidian-graphic-frame').nth(1)

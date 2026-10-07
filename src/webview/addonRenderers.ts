@@ -117,6 +117,74 @@ export function installAddonRenderersBridge(
     send({ kind: 'addonRenderers.registered', payload: { addonId, providers } })
   }
 
+  /** 本地候选变化后的生效解析快照（`语言#模式` → resolve 结果） */
+  const resolutionSnapshot = (): Map<string, string> => {
+    const out = new Map<string, string>()
+    for (const entry of table?.languages ?? []) {
+      const live = resolveOf(entry.language, 'live') ?? entry.effective
+      const reading = resolveOf(entry.language, 'reading') ?? entry.effective
+      out.set(`${entry.language}#live`, live)
+      out.set(`${entry.language}#reading`, reading)
+    }
+    return out
+  }
+
+  const resolveOf = (language: string, mode: AddonRendererMode): string | undefined => {
+    const effective = table?.languages.find((entry) => entry.language === language)?.effective
+    if (effective === undefined) {
+      return undefined
+    }
+    if (effective === 'builtin' || effective === 'none') {
+      return effective
+    }
+    const separator = effective.indexOf('/')
+    const addonId = separator > 0 ? effective.slice(0, separator) : ''
+    const rendererId = separator > 0 ? effective.slice(separator + 1) : ''
+    const registration = addonId !== '' ? local.get(addonId)?.providers.get(rendererId) : undefined
+    if (!registration || !registration.modes.includes(mode)) {
+      return 'builtin'
+    }
+    return effective
+  }
+
+  /**
+   * 本地候选变化（register/dispose/release）后的解析变化通知：宿主生效表
+   * 权威**哪个提供者生效**，本页**该提供者是否可执行**——后者变化（页面
+   * 装载完成、代次释放）不改变宿主表版本，但会改变本页实际显示（如面板
+   * 重开：表已到位、页面注册晚到——不通知则停留内置显示）。与 applyTable
+   * 共用同一条热切换通知路径（epoch 递增 + changedLanguages）。等值零通知。
+   */
+  const notifyResolutionChange = (before: Map<string, string>): void => {
+    const after = resolutionSnapshot()
+    const changed: string[] = []
+    for (const [key, value] of after) {
+      if (before.get(key) !== value) {
+        const language = key.slice(0, key.lastIndexOf('#'))
+        if (!changed.includes(language)) {
+          changed.push(language)
+        }
+      }
+    }
+    for (const key of before.keys()) {
+      if (!after.has(key)) {
+        const language = key.slice(0, key.lastIndexOf('#'))
+        if (!changed.includes(language)) {
+          changed.push(language)
+        }
+      }
+    }
+    if (changed.length === 0 || !table) {
+      return
+    }
+    for (const language of changed) {
+      epochs.set(language, (epochs.get(language) ?? 0) + 1)
+    }
+    const change: AddonRenderersTableChange = { table, changedLanguages: changed }
+    for (const listener of [...listeners]) {
+      listener(change)
+    }
+  }
+
   const generationEntry = (addonId: string, generation: number): GenerationProviders => {
     const existing = local.get(addonId)
     if (existing && existing.generation === generation) {
@@ -145,7 +213,9 @@ export function installAddonRenderersBridge(
         return false
       }
       entry.providers.set(spec.rendererId, spec)
+      const before = resolutionSnapshot()
       report(addonId)
+      notifyResolutionChange(before)
       return true
     },
     disposeRenderer(addonId, generation, rendererId) {
@@ -154,7 +224,9 @@ export function installAddonRenderersBridge(
         return
       }
       if (entry.providers.delete(rendererId)) {
+        const before = resolutionSnapshot()
         report(addonId)
+        notifyResolutionChange(before)
       }
     },
     releaseGeneration(addonId, generation) {
@@ -163,7 +235,9 @@ export function installAddonRenderersBridge(
         return
       }
       local.delete(addonId)
+      const before = resolutionSnapshot()
       report(addonId)
+      notifyResolutionChange(before)
     },
     applyTable(payload) {
       if (!isAddonRenderersTablePayload(payload)) {
@@ -191,8 +265,15 @@ export function installAddonRenderersBridge(
           markChanged(removed)
         }
       } else {
+        // 首次应用：此前页面按「空表默认态」解析（内置管线/普通代码块），
+        // builtin/none 行与该基线零显示差异——不通知（否则每个新面板装载
+        // 后都多一次无意义热切换：阅读整篇重渲染，#7/#14 解析计数被打破）；
+        // 组件接管行才可能改变显示（已装载 → addon；未装载 → 装载完成的
+        // register 路径会精确通知）
         for (const entry of payload.languages) {
-          markChanged(entry.language)
+          if (entry.effective !== 'builtin' && entry.effective !== 'none') {
+            markChanged(entry.language)
+          }
         }
       }
       table = payload

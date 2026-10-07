@@ -16,10 +16,22 @@ import type { VsidianAddonPageSdk } from '../../../../src/shared/addonPage'
 /** 本组件声明的扩展 ID（装载器按此核对入口身份） */
 const ADDON_ID = 'vsidian-test-fixture.addon-t09'
 
-defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
+defineAddonPage(ADDON_ID, async (sdk: VsidianAddonPageSdk) => {
   const renderers = sdk.renderers
   if (!renderers) {
     throw new Error('编辑器页 SDK 缺少 renderers 面')
+  }
+
+  // 集成/浏览器宿主是**共享会话**：本夹具默认不注册任何候选（生效表零
+  // 变化——否则全suite的 mermaid/阅读解析用例被本组件毒化）。宿主侧
+  // armProviders 命令显式放行后才注册（T09 用例按需开启，用毕 disarm）；
+  // 未放行时本页装载保持惰性（等价 T02/T06 夹具的加性贡献）。
+  const permission = await sdk.channel.request('t09.providersAllowed', null)
+  const allowed = permission.ok === true &&
+    typeof (permission.result as { allowed?: unknown } | null)?.allowed === 'boolean' &&
+    (permission.result as { allowed: boolean }).allowed === true
+  if (!allowed) {
+    return
   }
 
   /** 容器内挂载：清空后落 t09-box（携带提供者 ID 与源码——绘制层断言锚） */
