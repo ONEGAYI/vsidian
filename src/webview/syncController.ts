@@ -9545,6 +9545,11 @@ export class WebviewSyncController {
           separatorCount: contextMenuEl.querySelectorAll(
             `:scope > .${CONTEXT_MENU_CLASS_NAMES.separator}`).length,
           disabledCount: contextMenuEl.querySelectorAll('button:disabled').length,
+          // #359 T10：组件菜单项观测（data-vsidian-command 含点 = 命名空间
+          // 运行期项——集成断言组件簇在场/回收的绘制层证据）
+          addonCommands: [...new Set([...contextMenuEl.querySelectorAll<HTMLButtonElement>(
+            `button[data-vsidian-command]`)].map((button) => button.dataset['vsidianCommand'] ?? '')
+            .filter((command) => command.includes('.')))],
         }
       : undefined
     // #376 T01 双链联想候选绘制：document 级浮层（不在 #app 内），可见性
