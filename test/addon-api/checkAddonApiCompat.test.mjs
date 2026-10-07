@@ -220,6 +220,21 @@ test('候选版本不计入次版本跨度（未发行不伪造历程）', () =>
   )
 })
 
+test('移除版本自身不计入次版本跨度（等待期不能由执行移除的版本自己充当）', () => {
+  const releases = [
+    { version: '1.0.0', status: 'released', releasedAt: '2026-01-01', summary: 'a', experimental: [] },
+    { version: '1.1.0', status: 'deprecated', releasedAt: '2026-01-02', summary: '弃用', experimental: [] },
+    { version: '1.2.0', status: 'released', releasedAt: '2026-01-15', summary: 'b', experimental: [] },
+    { version: '1.3.0', status: 'removed', releasedAt: '2026-02-20', summary: 'c', experimental: [] },
+  ]
+  const failures = validateRemovalDeadlines(releases, '2026-02-20', CTX)
+  assert.ok(!failures.some((f) => f.code === 'removal-too-early'), '天数 49 已满足')
+  assert.ok(
+    failures.some((f) => f.code === 'removal-minor-span-insufficient'),
+    '弃用后仅 1.2.0 一个后续次版本（1.3.0 是移除版本自身，不计入）',
+  )
+})
+
 test('双门槛同时满足时移除放行（>= 30 天且 >= 2 个后续已发行次版本）', () => {
   const releases = [
     { version: '1.0.0', status: 'released', releasedAt: '2026-01-01', summary: 'a', experimental: [] },

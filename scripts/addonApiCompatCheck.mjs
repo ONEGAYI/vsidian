@@ -515,6 +515,7 @@ export function validateRemovalDeadlines(releases, now, ctx) {
     const minorsAfter = new Set()
     for (const x of releasedRecords) {
       if (compareSemver(x.version, dep.version) <= 0) continue
+      if (x.version === r.version) continue // 移除版本自身不计入——等待期不能由执行移除的版本自己充当
       const [xMajor, xMinor] = x.version.split('.').map(Number)
       if (xMajor === depMajor && xMinor > depMinor) minorsAfter.add(xMinor)
     }

@@ -36,6 +36,7 @@ async function main() {
     const anchorRef = argValue('--anchor')
     const mode = argValue('--mode') ?? 'bootstrap'
     const apiVersion = argValue('--api-version')
+    const baselineVersion = argValue('--baseline-version')
     const out = argValue('--out') ?? (mode === 'release' ? path.join(SELF_ROOT, 'test/addon-api', `baseline-api-${apiVersion}.json`) : BASELINE_PATH)
     // 已存在的基线文件复用其完整性清单（重锚定不丢手工维护的清单）
     let guardManifest = DEFAULT_GUARD_MANIFEST
@@ -47,7 +48,7 @@ async function main() {
         // 既有文件不可解析时用兜底清单
       }
     }
-    const baseline = await emitAddonApiBaseline({ gitAccess: realGitAccess(root), mode, anchorRef, apiVersion, guardManifest })
+    const baseline = await emitAddonApiBaseline({ gitAccess: realGitAccess(root), mode, anchorRef, apiVersion, baselineVersion, guardManifest })
     writeFileSync(out, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8')
     console.log(`已发射基线：${path.relative(SELF_ROOT, out)}`)
     console.log(`  模式：${baseline.meta.mode}；锚点：${baseline.meta.anchor.kind} ${baseline.meta.anchor.sha.slice(0, 7)}（${baseline.meta.anchor.tag ?? baseline.meta.anchor.ref ?? ''}）`)
