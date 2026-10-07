@@ -20,6 +20,9 @@ vi.mock('../integration/suite/cases', () => ({ cases: fixture.cases }))
 vi.mock('vscode', () => ({
   extensions: { getExtension: () => ({ isActive: true }) },
   commands: {
+    // #365 T16：suite 入口以 getCommands 探测 _test 钩子在场（发行态会话
+    // 跳过测试前置重置）——mock 与开发会话同判（钩子在场）
+    getCommands: async () => ['onegayi.vsidian._test.resetLastMode'],
     executeCommand: async (command: string) => {
       if (command.endsWith('.getLastMode')) return 'live'
       if (command.endsWith('.getSettings')) return {
@@ -186,6 +189,7 @@ function productionCases(): Array<[string, null]> {
     ['addonT15InputCases', parseCaseArray('addonT15Cases.ts', 'addonT15InputCases')],
     ['addonT15RendererCases', parseCaseArray('addonT15Cases.ts', 'addonT15RendererCases')],
     ['addonT15UiCases', parseCaseArray('addonT15Cases.ts', 'addonT15UiCases')],
+    ['addonT16InstalledCases', parseCaseArray('addonT16InstalledCases.ts', 'addonT16InstalledCases')],
   ])
   const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
     ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
