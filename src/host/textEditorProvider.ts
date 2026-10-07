@@ -117,6 +117,7 @@ import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
+import type { AddonEditorBridge } from './addons/addonWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
 
@@ -378,8 +379,55 @@ export function createTextEditorProvider(
   /** #239 分词资源接线（jieba 下载/删除宿主权威；编辑器面板消费
    *  wordSegment.get 应答与 loadResult 转发、状态变更广播） */
   jieba?: JiebaWiring,
+  /** #351 T02 附加组件面板桥（页面装载指令路由 + 资源根 + 状态刷新）；
+   *  生产由 extension.ts 注入 createAddonWiring 产物的 editorBridge */
+  addons?: AddonEditorBridge,
 ): vscode.CustomTextEditorProvider & { dispose(): Promise<void> } {
   const sessions = new Map<string, SessionEntry>()
+  // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
+  // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
+  // 重赋可能触发 webview 资源状态重置，与 #128 片段目录同口径）+ 装载
+  // 指令幂等对账（desired 为准；面板 ready 亦各自重拉） ----
+  // #351 T02 已授权附加组件资源根（只增不减口径——见下方块内注释）
+  const grantedAddonRoots: vscode.Uri[] = []
+  if (addons) {
+    // #351 T02 许可面只增不减：停用/故障使 desired 缩回时不收回已授
+    // 权的资源根——1.82.3 实测重赋 webview.options 会触发整页重载（装载
+    // 器随页面销毁重建、停用 unload 指令被投递到新装载器而落空），且
+    // ADR-0012 要求热切换「无需重开」。收回靠卸载指令（装载器释放贡献
+    // 与监听），不靠许可面缩容；已停用组件的页面代码随卸载不再运行，
+    // 许可面残留只影响未运行代码的静态可读性。
+    const refreshAddonPanels = (): void => {
+      const addonRoots = addons.editorResourceRoots()
+      const known = new Set(grantedAddonRoots.map((uri) => uri.toString()))
+      const expanded = addonRoots.filter((uri) => !known.has(uri.toString()))
+      const rootsExpanded = expanded.length > 0
+      if (rootsExpanded) {
+        grantedAddonRoots.push(...expanded)
+      }
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          if (rootsExpanded) {
+            try {
+              panel.webview.options = {
+                enableScripts: true,
+                localResourceRoots: [
+                  ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
+                  ...grantedAddonRoots,
+                ],
+              }
+            } catch {
+              // 面板销毁竞态（dispose 事件在途）：跳过许可面刷新——该面板
+              // 的装载器已随 webview 消亡，指令对账不再需要
+            }
+          }
+          addons.pushDirectives(sessionId, panel.webview)
+        }
+      }
+    }
+    const offAddonPanelsChanged = addons.onPanelsChanged(refreshAddonPanels)
+    context.subscriptions.push({ dispose: offAddonPanelsChanged })
+  }
   const diagnostics = new TestDiagnostics()
   // ---- #342（P3-10）外链元信息服务：provider 级单例（跨面板共享缓存与
   // 合并计数——同一 URL 的多个悬停请求只发一次网络请求）。设置开关关闭
@@ -3668,6 +3716,11 @@ export function createTextEditorProvider(
             }
           }
         }
+        // #351 T02 附加组件页面消息（装载器就绪/出站）：桥消费即终止下发
+        //（addon 指令不走会话消息管线——装载器是独立于控制器的页面级设施）
+        if (addons?.handlePanelMessage(sessionId, webviewPanel.webview, message)) {
+          return
+        }
         void entry.session.handleWebviewMessage(message, sessionId)
       }
       const messageSub = webviewPanel.webview.onDidReceiveMessage(panelMessageHandler)
@@ -3695,6 +3748,9 @@ export function createTextEditorProvider(
       const closeSub = webviewPanel.onDidDispose(() => {
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
+        // #351 T02：附加组件面板路由回收（视图关闭——页面装载器随 webview
+        // 消亡，宿主侧不再向该面板投递指令）
+        addons?.panelDisposed(sessionId)
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
@@ -3717,10 +3773,24 @@ export function createTextEditorProvider(
       // 不留整个扩展目录的默认可读面；#10 增补图片资源根（工作区文件
       // 经夹带 asWebviewUri 的地址需在许可面内——口径与路径白名单一致）；
       // #128 增补 CSS 片段目录（须在 html 赋值前设置——webview.options
-      // 是 html 装载时的资源许可面快照）
+      // 是 html 装载时的资源许可面快照）；#351 T02 增补附加组件页面目录
+      //（期望装载组件的入口/样式/资源子目录——隔离由资源服务按请求面板
+      // 的 localResourceRoots 包含性实现，V02 实测）
       webviewPanel.webview.options = {
         enableScripts: true,
-        localResourceRoots: editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+        localResourceRoots: [
+          ...editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+          ...addons?.editorResourceRoots() ?? [],
+        ],
+      }
+      // #351 T02 新面板初次授权即计入「已授面」：后续状态变化的许可面
+      // 刷新按只增不减口径（见 refreshAddonPanels 注释）
+      if (addons) {
+        for (const root of addons.editorResourceRoots()) {
+          if (!grantedAddonRoots.some((existing) => existing.toString() === root.toString())) {
+            grantedAddonRoots.push(root)
+          }
+        }
       }
       // 快照取一次（#93 语言与 #292 可读行宽预注入共用）
       const settingsSnapshot = settings?.service.getSnapshot()

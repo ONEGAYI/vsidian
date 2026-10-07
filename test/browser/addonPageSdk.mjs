@@ -1,6 +1,9 @@
-// V02（#349）页面 SDK 浏览器回归：生产构建方式下的 CM6 输入与绘制。
-// 夹具（addonPageSdkFixture.ts）装配生产 WebviewSyncController + 装载器原型；
-// 组件产物经本地 http 服务以真实 URL 装载（与 asWebviewUri 地址同机制）。
+// #351 T02 页面 SDK 浏览器回归：生产构建方式下的 CM6 输入与绘制。
+// 夹具（addonPageSdkFixture.ts）装配生产 WebviewSyncController + **生产
+// 装载器**（src/webview/addonPageLoader）+ 生产槽路径
+// （controller.reconfigureAddonExtensions → liveInstance 附加组件
+// Compartment）；组件产物经本地 http 服务以真实 URL 装载（与
+// asWebviewUri 地址同机制）。场景断言形态承接 V02（#349）。
 // 场景：
 // 1. 产物静态红线：组件 bundle 不含 CM6 运行时标记（构建桥第二道防线）；
 // 2. 首键不丢：init 后立即真实键盘输入（不等组件装载），装载后组件的
@@ -33,7 +36,7 @@ for (const marker of CM6_RUNTIME_MARKERS) {
   assert.ok(!product.includes(marker), `组件产物不得含 CM6 运行时标记（${marker}）`)
 }
 const addonBytes = (await stat(layout.testAddon.entry)).size
-console.log(`[V02][ok] 组件产物 ${layout.testAddon.entry}（${addonBytes} B，无 CM6 标记）`)
+console.log(`[T02][ok] 组件产物 ${layout.testAddon.entry}（${addonBytes} B，无 CM6 标记）`)
 
 // ---- 1. 夹具构建（katex 裸导入与字体裁剪同 symbolInput 口径） ----
 const katexFontStrip = {
@@ -93,10 +96,10 @@ async function scenario(name, run) {
     await run(page)
     assert.deepEqual(errors, [], `${name} 页面错误`)
     passed++
-    console.log(`[V02][PASS] ${name}`)
+    console.log(`[T02][PASS] ${name}`)
   } catch (error) {
     failed++
-    console.log(`[V02][FAIL] ${name}: ${error.message}`)
+    console.log(`[T02][FAIL] ${name}: ${error.message}`)
     throw error
   } finally {
     await page.close()

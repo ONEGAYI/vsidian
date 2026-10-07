@@ -453,6 +453,8 @@ export class WebviewSyncController {
    *  设置页）、全局消息接收与命令分派。view 经下方 getter 透出（既有
    *  根特性代码的只读消费面不变） */
   private live: LiveEditorInstance | undefined
+  /** #351 T02 附加组件装载器观测探针（main.ts 安装装载器后挂载；缺省不报） */
+  private addonPageProbe: (() => import('../shared/addonPage').AddonLoaderStats) | undefined
   private sessionId = ''
   private docUri = ''
   /** 实例存在前的持久化初值兜底（persistState 在 mount 前被调用时使用） */
@@ -1883,6 +1885,18 @@ export class WebviewSyncController {
     this.imageVerify?.dispose()
     this.imageVerify = undefined
     document.removeEventListener('visibilitychange', this.imageVisibilityEntry)
+  }
+
+  /** #351 T02：附加组件扩展槽重配（转发给主正文 Live 实例；装载器的
+   *  attachExtensions 回调接这里——生产槽在 liveInstance extensions() 末尾） */
+  reconfigureAddonExtensions(extensions: Extension[] | null): void {
+    this.live?.reconfigureAddonExtensions(extensions)
+  }
+
+  /** #351 T02：附加组件装载器观测探针挂载（main.ts 安装装载器后调用；
+   *  view.state 回报时附带——活跃代次/授权样式表/释放历史与拒收计数） */
+  attachAddonPageProbe(probe: () => import('../shared/addonPage').AddonLoaderStats): void {
+    this.addonPageProbe = probe
   }
 
   /** 宿主消息入口（window message 事件转发） */
@@ -3404,6 +3418,8 @@ export class WebviewSyncController {
       lineGutter: this.collectLineGutter(),
       // 绘制层探针（P0 回归）：正文可见性 / CM6 注入样式存活 / 行号禁选
       paint: this.collectPaint(),
+      // #351 T02 附加组件装载器观测（装载器未安装时缺省——旧 webview 兼容）
+      addonPage: this.addonPageProbe?.(),
       // #53 右侧栏观测（布局态与绘制层证据）
       sidebar: this.collectSidebar(),
       // #54 大纲观测（面板态、绘制层证据与全文标题序列）

@@ -1,11 +1,14 @@
-// 「附加组件」设置分页（#350 T01）：组件状态列表（官方/第三方分组）+
-// 市场搜索入口 + VSCode 扩展管理入口。接入现有 Vsidian 自有设置页
-// （SettingsPageSection），不新建页面体系。
+// 「附加组件」设置分页（#350 T01 / #351 T02）：组件状态列表（官方/第三方
+// 分组）+ 功能开关与组件设置页挂载区（T02 两生命周期入口）+ 市场搜索入口
+// + VSCode 扩展管理入口。接入现有 Vsidian 自有设置页（SettingsPageSection），
+// 不新建页面体系。
 //
 // 边界（票面）：安装、卸载与整个扩展的禁用继续由 VSCode 管理——本分页
 // 只呈现状态并提供 VSCode 入口；市场关键词（vsidian-addon）仅帮助寻找，
 // 不代表接入协议或官方身份。API 版本行保持草案标注（draft 恒真），不把
-// 声明能力冒充已发布稳定 API。
+// 声明能力冒充已发布稳定 API。#351 起：开关只切换运行贡献（enable 生命
+// 周期），停用后设置能力保留（打开组件设置页仍可用）；故障暂停撤下组件
+// 设置页代码（hasSettingsPage=false）并显示原因——状态句呈现「故障暂停」。
 //
 // 状态权威在宿主（addons.state 推送回显；装载经 addons.get 拉取）；页面
 // 不自行推断。文案一律 t() 取词（addons.* 词条）。
@@ -40,6 +43,20 @@ export function addonStatusText(entry: AddonStatusEntry, apiVersion: string): st
   }
 }
 
+/** 运行生命周期状态句（#351；未注册组件无运行状态——返回 null 不占位） */
+export function addonRuntimeText(entry: AddonStatusEntry): string | null {
+  if (entry.fault !== undefined) {
+    return t('addons.statusFaulted', { detail: entry.fault.reason })
+  }
+  if (entry.enabled === true) {
+    return t('addons.statusEnabledRuntime')
+  }
+  if (entry.enabled === false) {
+    return t('addons.statusDisabled')
+  }
+  return null
+}
+
 export class AddonSection implements SettingsPageSection {
   readonly id = 'addons'
   /** 四块拼贴字形（附加组件 = 独立扩展模块的组合意象） */
@@ -50,7 +67,12 @@ export class AddonSection implements SettingsPageSection {
   private state: AddonsStateMessage | undefined
   private parent: HTMLElement | undefined
 
-  constructor(private readonly bridge: SettingsPageBridge) {}
+  constructor(
+    private readonly bridge: SettingsPageBridge,
+    /** #351 T02 组件设置页挂载宿主元素（settingsMain 创建的持久容器——
+     *  装载器 mountRoot 挂进它；不随分页重渲染销毁，重渲染只移动节点） */
+    private readonly addonSettingsHost?: HTMLElement,
+  ) {}
 
   get entries() {
     return [
@@ -150,6 +172,27 @@ export class AddonSection implements SettingsPageSection {
       listWrap.scrollIntoView?.({ block: 'nearest' })
     }
 
+    // ---- #351 T02 当前打开的组件设置页挂载区（host 持久元素随渲染移动；
+    //  分页切换/状态推送不清空组件挂载内容——面板销毁才终结装载） ----
+    if (state && this.addonSettingsHost) {
+      const openId = state.openAddonSettingsPage ?? null
+      const openEntry = openId === null ? undefined : state.addons.find((entry) => entry.id === openId)
+      if (openEntry) {
+        const wrap = document.createElement('div')
+        wrap.className = 'vsidian-addons-addonpage'
+        const heading = document.createElement('h3')
+        heading.className = 'vsidian-settings-group-title'
+        heading.textContent = t('addons.addonSettingsTitle', { label: openEntry.label })
+        const closeRow = document.createElement('div')
+        closeRow.className = 'vsidian-addons-addonpage-actions'
+        closeRow.append(this.button(t('addons.closeSettingsPage'), () => {
+          this.send({ kind: 'addons.closeAddonPage' })
+        }))
+        wrap.append(heading, closeRow, this.addonSettingsHost)
+        parent.append(wrap)
+      }
+    }
+
     // ---- 工具组：市场搜索 + VSCode 扩展管理（安装/禁用由 VSCode 管理） ----
     const actions = document.createElement('div')
     actions.className = 'vsidian-addons-actions'
@@ -176,28 +219,48 @@ export class AddonSection implements SettingsPageSection {
     }
   }
 
-  /** 单条组件行：显示名（+官方徽章）、状态句与 VSCode 扩展详情入口 */
+  /** 单条组件行：显示名（+官方徽章）、状态句、功能开关、组件设置页入口
+   *  与 VSCode 扩展详情入口（#351 起开关与设置页入口按运行状态呈现） */
   private renderEntry(entry: AddonStatusEntry, apiVersion: string): HTMLElement {
     const item = document.createElement('div')
     item.className = 'vsidian-settings-item'
     const label = document.createElement('div')
     label.className = 'vsidian-settings-item-label'
-    const copy = document.createElement('span')
+    const copy = document.createElement('div')
     copy.className = 'vsidian-settings-item-copy'
     const title = document.createElement('span')
     title.className = 'vsidian-settings-item-title'
     title.textContent = entry.official
       ? `${entry.label} · ${t('addons.officialBadge')}`
       : entry.label
+    const runtimeText = addonRuntimeText(entry)
     const desc = document.createElement('span')
     desc.className = 'vsidian-settings-item-description'
-    desc.textContent = `${entry.id} — ${addonStatusText(entry, apiVersion)}`
+    const statusSentence = `${entry.id} — ${addonStatusText(entry, apiVersion)}`
+    desc.textContent = runtimeText === null ? statusSentence : `${statusSentence} · ${runtimeText}`
     copy.append(title, desc)
+    const buttons = document.createElement('div')
+    buttons.className = 'vsidian-addons-entry-actions'
+    // #351 功能开关：切换运行生命周期（停用保留设置能力——结果经
+    // addons.state 推送回显，页面不自行推断）
+    if (entry.enabled !== undefined) {
+      buttons.append(this.button(entry.enabled ? t('addons.disable') : t('addons.enable'), () => {
+        this.send({ kind: 'addons.setEnabled', addonId: entry.id, enabled: !entry.enabled })
+      }))
+    }
+    // #351 组件设置页入口：hasSettingsPage 由宿主按运行状态给出（故障
+    // 暂停撤下——不可打开时入口消失而非禁用占位）
+    if (entry.hasSettingsPage) {
+      buttons.append(this.button(t('addons.openSettingsPage'), () => {
+        this.send({ kind: 'addons.openAddonPage', addonId: entry.id })
+      }))
+    }
     const detail = this.button(t('addons.openDetail'), () => {
       this.send({ kind: 'addons.openExtension', extensionId: entry.id })
     })
     detail.setAttribute('aria-label', t('addons.openDetail'))
-    label.append(copy, detail)
+    buttons.append(detail)
+    label.append(copy, buttons)
     item.append(label)
     return item
   }

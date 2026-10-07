@@ -985,6 +985,15 @@ export const en = {
   'addons.openExtensionsView': 'Manage extensions in VSCode',
   'addons.openDetail': 'Extension details',
   'addons.officialBadge': 'Official',
+  // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
+  'addons.enable': 'Enable',
+  'addons.disable': 'Disable',
+  'addons.openSettingsPage': 'Open add-on settings page',
+  'addons.closeSettingsPage': 'Close add-on settings page',
+  'addons.addonSettingsTitle': 'Add-on settings: {label}',
+  'addons.statusEnabledRuntime': 'Enabled',
+  'addons.statusDisabled': 'Disabled',
+  'addons.statusFaulted': 'Faulted (suspended): {detail}',
   /** #350 T01 附加组件：宿主输出通道名（安装态日志，标明组件 ID 与原因） */
   'host.addonsChannelName': 'Vsidian Add-ons',
 } as const satisfies Record<string, string>

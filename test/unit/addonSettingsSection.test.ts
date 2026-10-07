@@ -18,7 +18,7 @@ import { AddonSection, ADDONS_SECTION_LIST_ENTRY, ADDONS_SECTION_MANAGE_ENTRY } 
 
 installLocale('zh-cn', zhCn)
 
-function makeView(): {
+function makeView(addonSettingsHost?: HTMLElement): {
   view: SettingsPageView
   addons: AddonSection
   dispatch(message: unknown): void
@@ -27,7 +27,7 @@ function makeView(): {
 } {
   const sent: unknown[] = []
   const bridge = { postMessage: (m: unknown) => sent.push(m) }
-  const addons = new AddonSection(bridge)
+  const addons = new AddonSection(bridge, addonSettingsHost)
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
@@ -48,12 +48,16 @@ function makeView(): {
 }
 
 /** 构造 addons.state 消息（先经协议守卫验证载荷形态，再进分页） */
-function addonsState(addons: HostToWebview extends never ? never : Array<Record<string, unknown>>): HostToWebview {
+function addonsState(
+  addons: HostToWebview extends never ? never : Array<Record<string, unknown>>,
+  openAddonSettingsPage?: string | null,
+): HostToWebview {
   const message = {
     kind: 'addons.state',
     apiVersion: '1.0.0',
     draft: true,
     addons,
+    ...(openAddonSettingsPage !== undefined ? { openAddonSettingsPage } : {}),
   }
   if (!isHostToWebview(message)) {
     throw new Error('addons.state 载荷未通过协议守卫')
@@ -231,5 +235,145 @@ describe('附加组件分页入口与消息上送', () => {
     expect(manage).toBeTruthy()
     expect(ADDONS_SECTION_LIST_ENTRY).toBe('list')
     expect(ADDONS_SECTION_MANAGE_ENTRY).toBe('manage')
+  })
+})
+
+// ---- #351 T02：运行生命周期（功能开关 / 组件设置页挂载区 / 故障态） ----
+
+describe('附加组件分页：功能开关与运行状态（T02）', () => {
+  it('已启用组件显示「停用」按钮与「已启用」状态句；点击上送 setEnabled(false)', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true },
+    ]))
+    const text = visibleText(harness.parent)
+    expect(text).toContain('已启用')
+    const disable = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '停用')
+    expect(disable).toBeTruthy()
+    disable!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.setEnabled', addonId: 'fixture.demo', enabled: false })
+  })
+
+  it('已停用组件显示「启用」按钮与「已停用」状态句；点击上送 setEnabled(true)', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: false },
+    ]))
+    expect(visibleText(harness.parent)).toContain('已停用')
+    const enable = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '启用')
+    expect(enable).toBeTruthy()
+    enable!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.setEnabled', addonId: 'fixture.demo', enabled: true })
+  })
+
+  it('未注册组件（无 enabled 字段）不显示开关与运行状态句', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.old', label: 'Old', official: false, status: 'registered' },
+    ]))
+    const buttons = [...harness.parent.querySelectorAll('button')].map((b) => b.textContent)
+    expect(buttons).not.toContain('启用')
+    expect(buttons).not.toContain('停用')
+    expect(visibleText(harness.parent)).not.toContain('已启用')
+    expect(visibleText(harness.parent)).not.toContain('已停用')
+  })
+
+  it('故障暂停：状态句显示原因原文，偏好状态仍呈现，开关照常可用', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, fault: { reason: 'enable 异常：boom' } },
+    ]))
+    const text = visibleText(harness.parent)
+    expect(text).toContain('故障暂停')
+    expect(text).toContain('enable 异常：boom')
+    // 偏好保留（enabled=true——用户未关闭），开关照常
+    expect([...harness.parent.querySelectorAll('button')].some((b) => b.textContent === '停用')).toBe(true)
+  })
+})
+
+describe('附加组件分页：组件设置页入口与挂载区（T02）', () => {
+  it('hasSettingsPage 时显示「打开组件设置页」按钮；点击上送 openAddonPage', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ]))
+    const open = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '打开组件设置页')
+    expect(open).toBeTruthy()
+    open!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.openAddonPage', addonId: 'fixture.demo' })
+  })
+
+  it('无设置页或故障暂停时不显示打开入口', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.none', label: 'None', official: false, status: 'registered', enabled: true },
+      { id: 'fixture.faulted', label: 'Faulted', official: false, status: 'registered', enabled: true, fault: { reason: 'x' }, hasSettingsPage: false },
+    ]))
+    const buttons = [...harness.parent.querySelectorAll('button')].map((b) => b.textContent)
+    expect(buttons).not.toContain('打开组件设置页')
+  })
+
+  it('openAddonSettingsPage 时渲染挂载区（标题 + 关闭按钮 + host 移入分页）', () => {
+    const host = document.createElement('div')
+    const mounted = document.createElement('button')
+    mounted.textContent = '组件内容'
+    host.appendChild(mounted)
+    const harness = makeView(host)
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], 'fixture.demo'))
+    const wrap = harness.parent.querySelector('.vsidian-addons-addonpage')
+    expect(wrap).toBeTruthy()
+    expect(wrap!.textContent).toContain('组件设置页：Demo')
+    // host（含组件挂载内容）被移入分页，子树保留
+    expect(wrap!.contains(host)).toBe(true)
+    expect(wrap!.contains(mounted)).toBe(true)
+    const close = [...wrap!.querySelectorAll('button')].find((b) => b.textContent === '关闭组件设置页')
+    expect(close).toBeTruthy()
+    close!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.closeAddonPage' })
+  })
+
+  it('状态推送重渲染只移动 host 节点，不清空组件挂载内容', () => {
+    const host = document.createElement('div')
+    const mounted = document.createElement('span')
+    mounted.textContent = '组件内容'
+    host.appendChild(mounted)
+    const harness = makeView(host)
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], 'fixture.demo'))
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], 'fixture.demo'))
+    const wrap = harness.parent.querySelector('.vsidian-addons-addonpage')
+    expect(wrap).toBeTruthy()
+    expect(wrap!.contains(mounted)).toBe(true)
+  })
+
+  it('openAddonSettingsPage 终结（null）后挂载区消失，host 移出分页但内容保留', () => {
+    const host = document.createElement('div')
+    const mounted = document.createElement('span')
+    mounted.textContent = '组件内容'
+    host.appendChild(mounted)
+    const harness = makeView(host)
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], 'fixture.demo'))
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], null))
+    expect(harness.parent.querySelector('.vsidian-addons-addonpage')).toBeNull()
+    expect(harness.parent.contains(host)).toBe(false)
+    expect(host.contains(mounted)).toBe(true)
   })
 })

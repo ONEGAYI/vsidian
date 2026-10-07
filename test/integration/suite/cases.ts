@@ -8,6 +8,7 @@ import { probe375Cases } from './probe375'
 import { wikilinkBlockCases } from './wikilinkBlock'
 import { wikilinkEmbedCases } from './wikilinkEmbed'
 import { addonHistoryCases } from './addonHistoryCases'
+import { addonT02Cases } from './addonT02Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17331,4 +17332,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // V01（#348）附加组件历史分组：真宿主验证组（独立文件维护，探针经
   // _test.addonHistory.* 走真实 edit.request/ack/history.request 管线）
   ...addonHistoryCases,
+  // #351 T02 附加组件页面 SDK 与两生命周期：生产路径组（独立文件维护——
+  // 生产编辑器/设置页面板装载夹具组件，断言面见 addonT02Cases.ts 头注）
+  ...addonT02Cases,
 ]

@@ -255,20 +255,23 @@ describe('变化处理与合并', () => {
     expect(harness.coordinator.stateEntries()[0].status).toBe('registered')
   })
 
-  it('重复 rescan 幂等：已注册组件不再唤醒，setup 不重跑', async () => {
-    let setupCount = 0
+  it('重复 rescan 幂等：已注册组件不再唤醒，接入回调不重跑', async () => {
+    // T02 起接入回调经 hooks 桥由 runtime 驱动——这里以注册成功计数钉住
+    // 「同一接入代次只接受一次注册」（already-registered 拒绝重跑）
+    let acceptCount = 0
     const addon = makeFake({
       id: 'fixture.addon-ok',
       packageJSON: { displayName: 'Sample', ...OK_DECLARATION },
       activate: vi.fn(async () => {
-        void harness.registry.register({ id: 'fixture.addon-ok' }, { setup() { setupCount++ } })
+        acceptCount++
+        void harness.registry.register({ id: 'fixture.addon-ok' }, {})
       }),
     })
     const harness = makeHarness([addon])
     harness.coordinator.start()
     await settle()
     await harness.coordinator.rescan()
-    expect(setupCount).toBe(1)
+    expect(acceptCount).toBe(1)
     expect(addon.activate).toHaveBeenCalledTimes(1)
     expect(harness.coordinator.stateEntries()[0].status).toBe('registered')
   })

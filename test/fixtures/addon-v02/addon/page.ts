@@ -16,7 +16,9 @@
 import { defineAddonPage } from 'vsidian-addon-sdk'
 import type { Extension } from '@codemirror/state'
 import type { DecorationSet, EditorView as EditorViewOf } from '@codemirror/view'
-import type { VsidianAddonPageSdk } from '../loader/types'
+// #351 T02 起类型与生产契约同源（src/shared/addonPage）；V02 夹具原型
+// loader/types.ts 仅存档供 addonV02Probe 历史探针复跑
+import type { VsidianAddonPageSdk } from '../../../../src/shared/addonPage'
 
 /** 本组件声明的扩展 ID（装载器按此核对入口身份） */
 const ADDON_ID = 'onegayi.vsidian-test-addon'

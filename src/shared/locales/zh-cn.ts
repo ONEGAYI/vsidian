@@ -930,6 +930,15 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.openExtensionsView': '在 VSCode 管理扩展',
   'addons.openDetail': '扩展详情',
   'addons.officialBadge': '官方',
+  // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
+  'addons.enable': '启用',
+  'addons.disable': '停用',
+  'addons.openSettingsPage': '打开组件设置页',
+  'addons.closeSettingsPage': '关闭组件设置页',
+  'addons.addonSettingsTitle': '组件设置页：{label}',
+  'addons.statusEnabledRuntime': '已启用',
+  'addons.statusDisabled': '已停用',
+  'addons.statusFaulted': '故障暂停：{detail}',
   /** #350 T01 附加组件：宿主输出通道名（安装态日志，标明组件 ID 与原因） */
   'host.addonsChannelName': 'Vsidian 附加组件',
 }

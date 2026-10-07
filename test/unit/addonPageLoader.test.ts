@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-// V02（#349）页面装载器原型的释放矩阵与代次拒收单元测试。
+// #351 T02 生产页面装载器的释放矩阵与代次拒收单元测试（断言形状自 V02
+// 验证件 #349 移植——装载器已并入生产 src/webview/addonPageLoader，本文件
+// 改为消费生产实现；fixtures 内的原型仅供 addonV02Probe 历史探针复跑）。
 // 覆盖票面验收「重复接入、关闭、故障、恢复和迟到消息矩阵可重放」中
 // 可在纯逻辑层钉住的部分；授权/拒绝的资源服务对照与真实键盘/IME 属
-// 集成探针与浏览器套件（研究记录留证）。
+// 集成与浏览器套件（研究记录留证）。
 // 脚本/样式装载与时钟全部注入——DOM <script>/<link> 默认路径在真宿主
 // 与 Chromium 内验证（jsdom 不取资源，onload/onerror 不可靠）。
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -13,14 +15,14 @@ import {
   installAddonPageLoader,
   type AddonPageLoaderEnv,
   type AddonPageLoaderHandle,
-} from '../fixtures/addon-v02/loader/pageAddonLoader'
+} from '../../src/webview/addonPageLoader'
 import type {
   AddonCm6Runtime,
   AddonLoadManifest,
   AddonPageOutbound,
   AddonPageRegistration,
   VsidianAddonPageSdk,
-} from '../fixtures/addon-v02/loader/types'
+} from '../../src/shared/addonPage'
 
 /** 测试用共享 CM6 运行时：直接引用页面 bundle 内同一份模块命名空间
  *  （单元测试进程内 import 即「本页运行时」） */
@@ -107,7 +109,7 @@ beforeEach(() => {
   ;(globalThis as unknown as Record<string, unknown>)[ADDON_PAGE_REGISTRY_GLOBAL] = []
 })
 
-describe('V02 页面装载器：装载与身份', () => {
+describe('T02 生产装载器：装载与身份', () => {
   it('授权脚本 + 身份相符 → 工厂收到 SDK（cm6 为页面注入的同一运行时）', async () => {
     const h = harness()
     let received = false
@@ -184,7 +186,7 @@ describe('V02 页面装载器：装载与身份', () => {
   })
 })
 
-describe('V02 页面装载器：代次硬边界', () => {
+describe('T02 生产装载器：代次硬边界', () => {
   it('旧代次卸载指令不生效：装载保持原状且计数拒绝', async () => {
     const h = harness()
     registerFactory(h, () => {})
@@ -264,7 +266,7 @@ describe('V02 页面装载器：代次硬边界', () => {
   })
 })
 
-describe('V02 页面装载器：真实 CM6 扩展接入与释放', () => {
+describe('T02 生产装载器：真实 CM6 扩展接入与释放', () => {
   it('registerExtension 经装配槽挂载真实 StateField；卸载后摘除且文档不变', async () => {
     const sent: AddonPageOutbound[] = []
     const registrations: AddonPageRegistration[] = []
@@ -318,7 +320,7 @@ describe('V02 页面装载器：真实 CM6 扩展接入与释放', () => {
   })
 })
 
-describe('V02 页面装载器：释放矩阵其余路径', () => {
+describe('T02 生产装载器：释放矩阵其余路径', () => {
   it('故障指令释放：回调执行、历史记为 faulted、扩展槽摘除、旧请求 released', async () => {
     const h = harness()
     const disposals: string[] = []
@@ -389,7 +391,7 @@ describe('V02 页面装载器：释放矩阵其余路径', () => {
   })
 })
 
-describe('V02 页面装载器：设置页与资源地址', () => {
+describe('T02 生产装载器：设置页与资源地址', () => {
   it('设置页：mountRoot 在容器内创建、卸载后从 DOM 移除、cm6 不注入', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)

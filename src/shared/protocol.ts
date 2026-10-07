@@ -14,6 +14,7 @@ import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type Ref
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 import { isEditOriginMeta, type EditOriginMeta } from './editOrigin'
+import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -921,6 +922,11 @@ export type HostToWebview =
    *  恒为 true——API 形状仍是草案，未发布。设置页经 addons.get 拉取；
    *  协调器状态变化后经 notifyAddonsChanged 推送 */
   | { kind: 'addons.state' } & AddonsStatePayload
+  /** #351 T02 附加组件装载指令（宿主 → 编辑器/设置页 webview）：内层为
+   *  AddonPageDirective（addon.load/unload/fault/channel.reply）；URI 已按
+   *  目标面板的 asWebviewUri 铸造，资源许可面随指令同步刷新。webview 侧
+   *  装载器安装后经 addonPage.ready 上报，宿主按 desired 幂等推送 */
+  | { kind: 'addonPage.directive'; directive: import('./addonPage').AddonPageDirective }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -931,6 +937,9 @@ export interface AddonsStatePayload {
   draft: true
   /** 发现/注册协调合并后的组件状态列表（官方在前，其余按 ID 排序） */
   addons: readonly AddonStatusEntry[]
+  /** #351 T02 当前打开的组件设置页（组件 ID；无打开项为 null——权威在
+   *  宿主 runtime，面板销毁/关闭/故障后终结；设置页分页据此渲染挂载区） */
+  openAddonSettingsPage?: string | null
 }
 
 /** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
@@ -1315,6 +1324,9 @@ export type WebviewToHost =
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
        *  缺省为空数组） */
       liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
+      /** #351 T02 附加组件页面装载器观测（编辑器页装载器安装后才有值；
+       *  活跃代次/授权样式表/释放历史与拒收计数——旧 webview 缺省） */
+      addonPage?: import('./addonPage').AddonLoaderStats
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -1799,6 +1811,13 @@ export type WebviewToHost =
   /** #350 T01 附加组件状态拉取（设置页「附加组件」分页装载/重载时）：
    *  宿主以 addons.state 应答；协调器状态变化后亦经同款消息推送 */
   | { kind: 'addons.get' }
+  /** #351 T02 用户功能开关（设置页「附加组件」分页）：写用户默认层并按
+   *  两生命周期同步——关闭释放运行贡献但保留设置能力；持久保留用户选择 */
+  | { kind: 'addons.setEnabled'; addonId: string; enabled: boolean }
+  /** #351 T02 打开某组件自己的设置页（设置面板装载其页面产物） */
+  | { kind: 'addons.openAddonPage'; addonId: string }
+  /** #351 T02 关闭当前组件设置页（分页切换；面板销毁另有销毁路径） */
+  | { kind: 'addons.closeAddonPage' }
   /** #350 T01 在 VSCode 市场搜索附加组件（关键词 vsidian-addon 仅搜索
    *  辅助）：宿主执行 workbench.extensions.search 打开扩展视图搜索 */
   | { kind: 'addons.openSearch' }
@@ -1807,6 +1826,12 @@ export type WebviewToHost =
   | { kind: 'addons.openExtensionsView' }
   /** #350 T01 打开某组件在 VSCode 的扩展详情页（VSCode 管理入口） */
   | { kind: 'addons.openExtension'; extensionId: string }
+  /** #351 T02 页面装载器就绪上报（编辑器/设置页 webview 安装装载器后与
+   *  webview 重载后各发一次）：宿主按当前期望装载清单幂等推送指令 */
+  | { kind: 'addonPage.ready' }
+  /** #351 T02 页面装载器出站消息（内层为 AddonPageOutbound：loaded/
+   *  unloaded/faulted/channel.request）；宿主路由通道请求并回执 */
+  | { kind: 'addonPage.outbound'; outbound: import('./addonPage').AddonPageOutbound }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -3938,7 +3963,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
                   Number.isFinite(e.pdf.zoom) && e.pdf.zoom > 0)) &&
               (e.pdf.textLayerPages === undefined || isNonNegativeInt(e.pdf.textLayerPages)) &&
               (e.pdf.linkAnnotations === undefined || isNonNegativeInt(e.pdf.linkAnnotations))))))) &&
-        (v.typography === undefined || isTypographyProbe(v.typography))
+        (v.typography === undefined || isTypographyProbe(v.typography)) &&
+        // #351 T02 附加组件装载器观测（旧 webview 缺省；守卫单一事实源
+        // 在 shared/addonPage 的 isAddonLoaderStats）
+        (v.addonPage === undefined || isAddonLoaderStats(v.addonPage))
       )
     case 'reading.perf.report':
       return (
@@ -4228,9 +4256,19 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addons.get':
     case 'addons.openSearch':
     case 'addons.openExtensionsView':
+    case 'addons.closeAddonPage':
+    case 'addonPage.ready':
       return true
     case 'addons.openExtension':
       return isString(v.extensionId)
+    case 'addons.setEnabled':
+      // #351 T02 功能开关：组件 ID + 布尔
+      return isString(v.addonId) && typeof v.enabled === 'boolean'
+    case 'addons.openAddonPage':
+      return isString(v.addonId)
+    case 'addonPage.outbound':
+      // #351 T02 出站消息内层守卫（单一事实源在 shared/addonPage）
+      return isAddonPageOutbound(v.outbound)
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
         (v.detail === undefined || isString(v.detail))
@@ -5061,8 +5099,13 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         isString(v.apiVersion) &&
         v.draft === true &&
         Array.isArray(v.addons) &&
-        v.addons.every(isAddonStatusEntry)
+        v.addons.every(isAddonStatusEntry) &&
+        // #351 T02 当前打开的组件设置页（可选字段；旧载荷缺省容忍）
+        (v.openAddonSettingsPage === undefined || v.openAddonSettingsPage === null || isString(v.openAddonSettingsPage))
       )
+    case 'addonPage.directive':
+      // #351 T02 装载指令内层守卫（单一事实源在 shared/addonPage）
+      return isAddonPageDirective(v.directive)
     default:
       return false
   }
@@ -5116,7 +5159,11 @@ function isAddonStatusEntry(v: unknown): v is AddonStatusEntry {
     typeof v.official === 'boolean' &&
     isAddonStatusKind(v.status) &&
     (v.detail === undefined || isString(v.detail)) &&
-    (v.apiRange === undefined || isString(v.apiRange))
+    (v.apiRange === undefined || isString(v.apiRange)) &&
+    // #351 T02 运行状态可选字段（已注册组件附带；旧载荷缺省容忍）
+    (v.enabled === undefined || typeof v.enabled === 'boolean') &&
+    (v.fault === undefined || (isObject(v.fault) && isString(v.fault.reason))) &&
+    (v.hasSettingsPage === undefined || typeof v.hasSettingsPage === 'boolean')
   )
 }
 
