@@ -312,7 +312,6 @@ export const addonT11Cases: Array<[string, () => Promise<void>]> = [
     })
     const parentUri = wsUri('p204-编辑嵌入.md').toString()
     const parentBefore = (await docText('p204-编辑嵌入.md')).text
-    const targetBefore = (await docText('p204-编辑目标.md')).text
 
     // 1) 聚焦嵌入 B（embed.test.focus——真实焦点落 B 的内部 Live）
     await vscode.commands.executeCommand('onegayi.vsidian._test.postToPanel', parentUri, {
