@@ -123,6 +123,9 @@ try {
           ...(sharded ? { VSIDIAN_TEST_SHARD: `${shard}/${shardTotal}` } : {}),
         },
         reportPath: path.join(testCacheDir, reportName(shard)),
+        // #355：宿主超时可经环境变量放宽（全量套件新增慢用例——如 T06 的
+        // 基态轮询与整组撤回等待——默认 15 分钟不够时无需改代码）
+        timeoutMs: Number(process.env.VSIDIAN_ITEST_TIMEOUT_MS ?? '') * 1000 || 15 * 60_000,
       })
       console.log(`[runTest] 分片 ${shard}/${shardTotal} 宿主退出码 ${code}（耗时 ${((Date.now() - started) / 1000).toFixed(1)}s）`)
       return code
