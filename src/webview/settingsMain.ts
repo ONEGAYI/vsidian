@@ -111,6 +111,9 @@ vscode.postMessage({ kind: 'addons.settingsGet' })
 // 答；命令注册/撤销/停用回收后宿主推送）——快捷键分页据此合并展示组件
 // 命令（统一快捷键管理），目录更新经 setRuntimeOperations 进合并视图
 vscode.postMessage({ kind: 'addons.commandCatalogGet' })
+// T08（#357）行为冲突管理载荷：同「装载即拉取」模式（addons.behaviorsGet
+// 应答；注册表对账/回收与用户状态写入后宿主推送 addons.behaviors）
+vscode.postMessage({ kind: 'addons.behaviorsGet' })
 // #351 T02 装载器就绪上报（设置页 webview 安装装载器后与面板重载后各发
 // 一次）：宿主按当前期望装载清单幂等推送组件设置页指令（addon.load）
 vscode.postMessage({ kind: 'addonPage.ready' })
