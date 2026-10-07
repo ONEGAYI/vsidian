@@ -121,6 +121,8 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 
 夹具的驱动协议是「宿主夹具 ↔ 页面短轮询」（各文件头注有说明），真实业务里组件自行决定调用时机。
 
+**独立消费样例（T15，2026-10-08 起）**：`test/examples/` 另有三套完整独立扩展工程（输入/渲染/界面——`input-behavior`、`renderer`、`ui-command`），只使用公开 SDK、可独立构建，是「从零写一个组件」的最佳参考（比测试夹具更贴近真实业务形态：无短轮询驱动协议、有自己的设置与 i18n 字典、共享构建脚本与产物扫描）。构建与复制清单见 [test/examples/README](../../test/examples/README.md)。
+
 ## 5. 调试
 
 调试复用 VSCode 工具，不另建开发者控制台：

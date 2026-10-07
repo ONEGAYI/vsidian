@@ -1,0 +1,29 @@
+/* #364 T15 渲染样例——渲染容器样式（构建时拷入 dist/，随装载登记注入） */
+.sample-render-box {
+  border-left: 3px solid rgb(9, 96, 246);
+  padding: 4px 10px;
+  font-family: monospace;
+  background: rgba(9, 96, 246, 0.08);
+}
+
+.sample-render-box[data-sample-theme='boxed'] {
+  background: rgba(9, 96, 246, 0.16);
+  border-radius: 4px;
+}
+
+.sample-render-title {
+  color: rgb(9, 96, 246);
+  font-weight: 600;
+}
+
+.sample-render-source {
+  opacity: 0.8;
+}
+
+/* 自处理降级占位（flow-buggy 的自身 bug 展示——非组件故障） */
+.sample-self-handled {
+  border-left: 3px dashed rgb(200, 120, 0);
+  color: rgb(200, 120, 0);
+  padding: 4px 10px;
+  font-family: monospace;
+}
