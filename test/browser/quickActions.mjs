@@ -119,6 +119,39 @@ try {
     await page.keyboard.press('Enter')
     assert.ok((await page.evaluate(() => window.quickText())).startsWith('## '),
       '标题菜单应支持方向键选择并由 Enter 写回')
+    // #393：空行按真实键位 ctrl+2 插入标题 mark，光标落在尾随空格之后
+    await page.evaluate(() => window.initQuick('正文\n\n正文'))
+    await page.evaluate(() => {
+      const view = window.controller.getView()
+      view.dispatch({ selection: { anchor: 3 } })
+      view.focus()
+    })
+    const editBefore = await page.evaluate(() =>
+      window.quickSent().filter((m) => m.kind === 'edit.request').length)
+    await page.keyboard.press('Control+2')
+    assert.equal(await page.evaluate(() => window.quickText()), '正文\n## \n正文',
+      '空行按 ctrl+2 应插入二级标题 mark')
+    assert.deepEqual(await page.evaluate(() => {
+      const main = window.controller.getView().state.selection.main
+      return { anchor: main.anchor, head: main.head }
+    }), { anchor: 6, head: 6 }, '光标应置于 mark 尾随空格之后（## |）')
+    assert.equal(await page.evaluate(() =>
+      window.quickSent().filter((m) => m.kind === 'edit.request').length), editBefore + 1,
+      '空行插入应走标准出站写回链路')
+    // #393 扩大范围：空行按引用操作（按钮路径）插入前缀，光标置于前缀后
+    await page.evaluate(() => window.initQuick('正文\n\n正文'))
+    await page.evaluate(() => {
+      const view = window.controller.getView()
+      view.dispatch({ selection: { anchor: 3 } })
+      view.focus()
+    })
+    await page.locator('[data-op="quote"]').click()
+    assert.equal(await page.evaluate(() => window.quickText()), '正文\n> \n正文',
+      '空行按引用操作应插入引用前缀')
+    assert.deepEqual(await page.evaluate(() => {
+      const main = window.controller.getView().state.selection.main
+      return { anchor: main.anchor, head: main.head }
+    }), { anchor: 5, head: 5 }, '光标应置于引用前缀之后（> |）')
     await page.evaluate(() => {
       window.initQuick('## 标题\n正文')
       window.controller.getView().dispatch({ selection: { anchor: 4 } })

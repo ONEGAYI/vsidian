@@ -407,6 +407,9 @@ function inlinePlan(text: string, op: FormatOperationId, range: FormatSelection,
 
 function linePlan(text: string, op: FormatOperationId, range: FormatSelection): FormatPlan | null {
   const lines: FormatChange[] = []
+  // 空行插入前缀的产物光标（#393）：仅单光标形态给出（`## |`、`- |`）；
+  // 跨行选区不携带独立选区，光标经变更映射——与既有行级操作口径一致
+  let emptyPrefixAnchor: number | null = null
   let start = text.lastIndexOf('\n', range.from - 1) + 1
   while (start <= range.to) {
     const eol = text.indexOf('\n', start)
@@ -435,12 +438,30 @@ function linePlan(text: string, op: FormatOperationId, range: FormatSelection): 
         else if (op === 'quote') next = indent +
           (/^>\s?/u.test(body) ? clean : '> ' + clean)
         if (next !== line) lines.push({ from: start, to: end, insert: next })
+      } else {
+        // 空行插入（#393）：标题与列表/引用统一插入对应前缀、光标置于
+        // 前缀之后；缩进透传与非空行路径一致，不做截断特判。前缀行
+        // （如 `- `）trim 非空，再按一次落回上方非空行取消路径——两态
+        // 闭环天然成立。headingNone 为取消型操作，空行无可摘除，不插入
+        const prefix = op === 'bulletList' ? '- '
+          : op === 'orderedList' ? '1. '
+          : op === 'taskList' ? '- [ ] '
+          : op === 'quote' ? '> '
+          : op.startsWith('heading') && op !== 'headingNone' ? '#'.repeat(Number(op.slice(7))) + ' '
+          : null
+        if (prefix !== null) {
+          const indent = /^\s*/u.exec(line)![0]
+          lines.push({ from: start, to: end, insert: indent + prefix })
+          if (range.from === range.to) emptyPrefixAnchor = start + indent.length + prefix.length
+        }
       }
     }
     if (eol < 0 || eol >= range.to) break
     start = eol + 1
   }
-  return lines.length ? { changes: lines } : null
+  if (!lines.length) return null
+  return emptyPrefixAnchor === null ? { changes: lines }
+    : { changes: lines, selection: { anchor: emptyPrefixAnchor } }
 }
 
 function fencePlan(text: string, op: 'codeBlock' | 'blockMath', range: FormatSelection, root: SyntaxNode): FormatPlan | null {
