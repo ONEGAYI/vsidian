@@ -67,6 +67,9 @@ export interface AddonCommandsRuntimeEnv {
   report: (payload: { addonId: string; generation: number; commands: readonly AddonCommandReport[] }) => void
   /** 归因日志（拒绝与执行异常留痕；缺省 console） */
   log?: (detail: string) => void
+  /** T12（#361）可归因执行回调异常升级上报（main.ts 注入装载器的
+   *  reportRuntimeFault；缺省仅留痕不升级——旧装配不受影响） */
+  reportFault?: (addonId: string, stage: string, detail: string) => boolean
 }
 
 export class AddonCommandsRuntime {
@@ -188,9 +191,11 @@ export class AddonCommandsRuntime {
     try {
       entry.handler()
     } catch (err) {
-      // 回调异常不外溢（键路由/宿主回发不因组件代码抛错断链）；组件代码
-      // 的可归因故障经装载器工厂路径与宿主 runtime 承担，此处仅留痕
+      // 回调异常不外溢（键路由/宿主回发不因组件代码抛错断链）
       this.env.log?.(`addon ${entry.addonId} command ${commandId} handler error: ${String(err)}`)
+      // T12（#361）：可归因执行回调异常升级为全组件故障上报（组件 +
+      // 命令 ID + 原因）——宿主 faultRecord 后经指令对账整组件回收
+      this.env.reportFault?.(entry.addonId, 'command-handler', `${commandId}: ${String(err)}`)
     }
     return 'executed'
   }

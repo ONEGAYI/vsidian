@@ -186,6 +186,76 @@ describe('T02 生产装载器：装载与身份', () => {
   })
 })
 
+describe('T12 运行期故障上报：reportRuntimeFault（上报与回收分离）', () => {
+  it('活跃装载上报 faulted（stage 与 detail 拼进 reason）且保持在场（本页回收等宿主指令）', async () => {
+    const h = harness()
+    registerFactory(h, () => {})
+    await h.handle.load(manifest())
+    const reported = h.handle.reportRuntimeFault(ADDON_ID, 'renderer-mount', 'r1#graph: Error: boom')
+    expect(reported).toBe(true)
+    // 上报消息形态：宿主 handleOutbound 的 faulted 路由直接消费
+    const faulted = h.sent.find((message) => message.type === 'addon.faulted')
+    expect(faulted).toMatchObject({
+      type: 'addon.faulted',
+      addonId: ADDON_ID,
+      generation: 1,
+      reason: 'renderer-mount: r1#graph: Error: boom',
+    })
+    // 保持在场：装载器不做本页同步回收（宿主 faultRecord 后经 unload
+    // 指令对账——避免组件回调栈内同步触发渲染热切换重入 CM6）
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+  })
+
+  it('同代次上报去重：已上报后的重复异常丢弃（不重复打扰宿主）', async () => {
+    const h = harness()
+    registerFactory(h, () => {})
+    await h.handle.load(manifest())
+    expect(h.handle.reportRuntimeFault(ADDON_ID, 'behavior-onInput', 'a: Error: 1st')).toBe(true)
+    expect(h.handle.reportRuntimeFault(ADDON_ID, 'command-handler', 'b: Error: 2nd')).toBe(false)
+    const faults = h.sent.filter((message) => message.type === 'addon.faulted')
+    expect(faults).toHaveLength(1)
+    expect(faults[0]).toMatchObject({ reason: 'behavior-onInput: a: Error: 1st' })
+  })
+
+  it('不在场的上报返回 false（未装载或已卸载——无处归因）', async () => {
+    const h = harness()
+    expect(h.handle.reportRuntimeFault(ADDON_ID, 'behavior-onInput', 'x')).toBe(false)
+    registerFactory(h, () => {})
+    await h.handle.load(manifest())
+    await h.handle.unload(ADDON_ID, 1)
+    expect(h.handle.reportRuntimeFault(ADDON_ID, 'behavior-onInput', 'x')).toBe(false)
+  })
+
+  it('上报后宿主 unload 指令照常回收：完整释放路径（history released）', async () => {
+    const h = harness()
+    const disposals: string[] = []
+    registerFactory(h, (sdk) => {
+      sdk.onDispose(() => disposals.push('cb'))
+    })
+    await h.handle.load(manifest())
+    h.handle.reportRuntimeFault(ADDON_ID, 'ui-button-onClick', 'btn: Error: boom')
+    const outcome = await h.handle.unload(ADDON_ID, 1)
+    expect(outcome).toEqual({ ok: true })
+    expect(h.handle.stats().active).toEqual([])
+    expect(h.handle.stats().history.at(-1)).toMatchObject({ ended: 'released' })
+    expect(disposals).toEqual(['cb'])
+    // 卸载后上报通道关闭（返回 false——代次已终结）
+    expect(h.handle.reportRuntimeFault(ADDON_ID, 'behavior-onInput', 'late')).toBe(false)
+  })
+
+  it('新代次重新装载后可再次上报（去重不跨代次）', async () => {
+    const h = harness()
+    registerFactory(h, () => {})
+    await h.handle.load(manifest({ generation: 1 }))
+    h.handle.reportRuntimeFault(ADDON_ID, 'behavior-onInput', 'a: Error: 1st')
+    await h.handle.unload(ADDON_ID, 1)
+    registerFactory(h, () => {}, ADDON_ID, h.now() + 1)
+    await h.handle.load(manifest({ generation: 2 }))
+    expect(h.handle.reportRuntimeFault(ADDON_ID, 'command-handler', 'b: Error: 2nd')).toBe(true)
+    expect(h.sent.filter((message) => message.type === 'addon.faulted')).toHaveLength(2)
+  })
+})
+
 describe('T02 生产装载器：代次硬边界', () => {
   it('旧代次卸载指令不生效：装载保持原状且计数拒绝', async () => {
     const h = harness()

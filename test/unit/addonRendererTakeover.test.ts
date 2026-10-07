@@ -18,6 +18,7 @@ import {
   setDynamicRenderedFenceLanguages,
 } from '../../src/shared/mermaid'
 import {
+  bindAddonFaultReporter,
   effectiveGraphicRendererFor,
   hasEffectiveGraphicRenderer,
   remountChangedGraphicBlocks,
@@ -265,5 +266,100 @@ describe('内置 mermaid 扫描跳过组件容器', () => {
     expect(builtinOwned.querySelector('svg')?.getAttribute('data-builtin')).not.toBeUndefined()
     setMermaidDarkTheme(false)
     __resetMermaidRenderStateForTest()
+  })
+})
+
+describe('T12 渲染 mount 异常升级为全组件故障上报', () => {
+  /** 故障上报收件（模块级注入槽——main.ts 在装载器安装后绑定） */
+  function bindFaultSpy() {
+    const faults: Array<{ addonId: string; stage: string; detail: string }> = []
+    bindAddonFaultReporter((addonId, stage, detail) => {
+      faults.push({ addonId, stage, detail })
+      return true
+    })
+    return faults
+  }
+
+  it('生效提供者 mount 抛出未捕获异常 → 归因上报（组件/提供者/原因）且容器停留 error 态', () => {
+    const faults = bindFaultSpy()
+    const { bridge } = harness()
+    bridge.register('pub.a', 1, specOf('r1', ['t12graph'], {
+      mount: () => {
+        throw new Error('mount boom')
+      },
+    }))
+    bridge.applyTable(table([{ language: 't12graph', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['t12graph'] }]))
+    const container = document.createElement('div')
+    renderGraphicIntoContainer(container, 'X', 't12graph', 'live')
+    expect(faults).toEqual([
+      { addonId: 'pub.a', stage: 'renderer-mount', detail: 'pub.a/r1: Error: mount boom' },
+    ])
+    // 容器即时反馈保持 T09 口径（error 态）；停用与内置接管由宿主链路完成
+    expect(container.getAttribute(MERMAID_STATE_ATTR)).toBe('error')
+  })
+
+  it('自处理渲染失败（组件捕获自己的异常画降级内容）→ 不上报：仍运行的 bug 不伪造停用（Q30 负向对照）', () => {
+    const faults = bindFaultSpy()
+    const { bridge } = harness()
+    bridge.register('pub.a', 1, specOf('r1', ['t12graph'], {
+      mount: (container) => {
+        try {
+          throw new Error('self-handled')
+        } catch {
+          ;(container as HTMLElement).dataset['content'] = 'DEGRADED'
+        }
+      },
+    }))
+    bridge.applyTable(table([{ language: 't12graph', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['t12graph'] }]))
+    const container = document.createElement('div')
+    expect(() => renderGraphicIntoContainer(container, 'X', 't12graph', 'live')).not.toThrow()
+    expect(faults).toEqual([])
+    expect(container.dataset['content']).toBe('DEGRADED')
+    expect(container.getAttribute(MERMAID_STATE_ATTR)).toBe('rendered')
+  })
+
+  it('导出（exportSvg）异常返回失败结果不升级——导出失败是业务结局（T09 既定边界）', async () => {
+    const faults = bindFaultSpy()
+    const { bridge } = harness()
+    bridge.register('pub.a', 1, specOf('r1', ['t12graph'], {
+      exportSvg: async () => {
+        throw new Error('export boom')
+      },
+    }))
+    bridge.applyTable(table([{ language: 't12graph', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['t12graph'] }]))
+    const result = await effectiveGraphicRendererFor('t12graph', 'live')!.renderSvg('X')
+    expect(result).toEqual({ ok: false, message: 'Error: export boom' })
+    expect(faults).toEqual([])
+  })
+
+  it('弹窗路径（GraphicRenderer.renderInto）mount 异常同样上报且不外溢', () => {
+    const faults = bindFaultSpy()
+    const { bridge } = harness()
+    bridge.register('pub.a', 1, specOf('r1', ['t12graph'], {
+      mount: () => {
+        throw new Error('popup mount boom')
+      },
+    }))
+    bridge.applyTable(table([{ language: 't12graph', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['t12graph'] }]))
+    const renderer = effectiveGraphicRendererFor('t12graph', 'live')!
+    const container = document.createElement('div')
+    expect(() => renderer.renderInto(container, 'X')).not.toThrow()
+    expect(faults).toEqual([
+      { addonId: 'pub.a', stage: 'renderer-mount', detail: 'pub.a/r1: Error: popup mount boom' },
+    ])
+  })
+
+  it('未绑定上报槽（旧装配）不炸——异常本地留痕保持 T09 容器口径', () => {
+    bindAddonFaultReporter(undefined)
+    const { bridge } = harness()
+    bridge.register('pub.a', 1, specOf('r1', ['t12graph'], {
+      mount: () => {
+        throw new Error('no reporter')
+      },
+    }))
+    bridge.applyTable(table([{ language: 't12graph', effective: 'pub.a/r1' }], [{ addonId: 'pub.a', rendererId: 'r1', languages: ['t12graph'] }]))
+    const container = document.createElement('div')
+    expect(() => renderGraphicIntoContainer(container, 'X', 't12graph', 'live')).not.toThrow()
+    expect(container.getAttribute(MERMAID_STATE_ATTR)).toBe('error')
   })
 })

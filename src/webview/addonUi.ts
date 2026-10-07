@@ -15,9 +15,10 @@
 // - 迟到结果：面板关闭即容器移除、内容根脱挂——组件迟到的 DOM 写入结构
 //   上不可见；
 // - 异常边界：onClick/mount/unmount 异常本地吞掉留痕（键路由与用户交互
-//   不因组件代码断链）；mount 异常面板回收并移除注册（不留半装配——
-//   ADR「异常恢复」的界面侧子集）；全组件故障暂停仍由装载器工厂路径与
-//   宿主 runtime 承担，运行期回调异常不升级。
+//   不因组件代码断链）；mount 异常面板回收并移除注册（不留半装配）；
+//   T12（#361）起 onClick/mount 的可归因异常升级上报全组件故障
+//   （reportFault——宿主裁决后整组件回收），unmount 清理回调异常不升级
+//   （代次终结路径的既有先例）。
 import {
   addonUiButtonProblem,
   addonUiPanelProblem,
@@ -48,6 +49,9 @@ export interface AddonUiRuntimeEnv {
   panelCloseLabel(): string
   /** 归因日志（拒绝与回调异常留痕） */
   log?: (detail: string) => void
+  /** T12（#361）可归因回调异常升级上报（main.ts 注入装载器的
+   *  reportRuntimeFault；缺省仅留痕不升级——旧装配不受影响） */
+  reportFault?: (addonId: string, stage: string, detail: string) => boolean
 }
 
 /** SDK 按钮注册返回句柄 */
@@ -338,9 +342,11 @@ export class AddonUiRuntime {
     try {
       entry.onClick?.(this.resolveTargetFor(entry.addonId))
     } catch (err) {
-      // 组件回调异常不外溢（不阻断平台交互链）；可归因故障升级归装载器
-      // 工厂路径与宿主 runtime
+      // 组件回调异常不外溢（不阻断平台交互链）
       this.env.log?.(`addon ${entry.addonId} ui-button ${entry.buttonId} onClick error: ${String(err)}`)
+      // T12（#361）：可归因回调异常升级为全组件故障上报（组件 + 按钮
+      // ID + 原因）——宿主 faultRecord 后经指令对账整组件回收
+      this.env.reportFault?.(entry.addonId, 'ui-button-onClick', `${entry.buttonId}: ${String(err)}`)
     }
   }
 
@@ -399,6 +405,9 @@ export class AddonUiRuntime {
     } catch (err) {
       // mount 异常：面板回收不留半装配，注册移除（重复释放无害）
       this.env.log?.(`addon ${entry.addonId} ui-panel ${entry.panelId} mount error: ${String(err)}`)
+      // T12（#361）：可归因挂载异常升级为全组件故障上报（组件 + 面板
+      // ID + 原因）——本面板先回收，组件整体贡献由宿主指令对账收口
+      this.env.reportFault?.(entry.addonId, 'ui-panel-mount', `${entry.panelId}: ${String(err)}`)
       this.closePanel(entry)
       if (this.panels.get(entry.panelId) === entry) {
         this.panels.delete(entry.panelId)

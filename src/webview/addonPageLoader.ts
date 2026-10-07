@@ -11,6 +11,9 @@
 //   迟到通道回执不回挂；
 // - 释放回收注册（扩展/挂载根）、监听（组件经 onDispose 自清）、消息
 //  （滞留请求以 released 终结，迟到回执丢弃）；重复释放无害。
+// - T12（#361）运行期故障上报（reportRuntimeFault）：组件回调异常经各
+//   runtime 上报宿主裁决，本页回收由宿主 unload 指令对账（上报与回收
+//   分离——不在组件回调栈内同步触发热切换）。
 // 实现陷阱（V02 实证，勿改语义）：宿主侧事件乱序消费（loaded 与工厂内
 // 通道请求的到达顺序不保证）；隐藏即销毁的 webview 不可依赖隐藏面板存活。
 import type { Extension } from '@codemirror/state'
@@ -70,6 +73,8 @@ interface ActiveLoad {
   mountRoots: HTMLElement[]
   extensionsAttached: boolean
   cssLinks: HTMLLinkElement[]
+  /** T12 运行期故障已上报（同代次去重——回收指令到达前的重复异常丢弃） */
+  faultReported: boolean
 }
 
 /** 装载器环境：脚本/样式装载与时器可注入（单元测试模拟授权与拒绝） */
@@ -113,6 +118,15 @@ export interface AddonPageLoaderHandle {
   load(manifest: AddonLoadManifest): Promise<AddonLoadOutcome>
   /** 直接卸载 */
   unload(addonId: string, generation: number): Promise<AddonUnloadOutcome>
+  /**
+   * T12（#361）运行期故障上报：组件回调（输入/渲染/操作等）抛出可归因
+   * 异常时由各 runtime 调用。**只上报、不本页回收**——宿主 faultRecord
+   * 全组件暂停后经既有 unload 指令对账完成本页释放（异步时序：组件回调
+   * 栈可能处于 CM6 布局期，同步回收会触发渲染热切换重入）。同代次去重
+   * （回收指令到达前的重复异常只报首次）。返回 false = 无活跃装载可
+   * 归因（未装载/已释放），调用方按普通留痕处理。
+   */
+  reportRuntimeFault(addonId: string, stage: string, detail: string): boolean
   /** T11（#360）按组件身份构造视图句柄（界面目标路由——与 views.get
    *  同源：代次存活注入 + opId 分配；装载不在场或实例未注册 null） */
   buildViewHandle(addonId: string, instanceId: string): AddonViewHandle | null
@@ -581,6 +595,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       mountRoots: [],
       extensionsAttached: false,
       cssLinks,
+      faultReported: false,
     }
     active.set(manifest.addonId, loadRecord)
     // T07（#356）行为链提交的 opId 分配器随装载绑定（与 views.applyEdits
@@ -656,6 +671,22 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     handleDirective,
     load,
     unload,
+    /** T12（#361）运行期故障上报：只上报宿主裁决（stage 与 detail 拼进
+     *  reason）；本页回收由宿主 faultRecord 后的 unload 指令驱动 */
+    reportRuntimeFault: (addonId: string, stage: string, detail: string): boolean => {
+      const record = active.get(addonId)
+      if (!record || record.faultReported) {
+        return false
+      }
+      record.faultReported = true
+      env.send({
+        type: 'addon.faulted',
+        addonId,
+        generation: record.generation,
+        reason: `${stage}: ${detail}`,
+      })
+      return true
+    },
     /** T11（#360）按组件身份构造视图句柄（界面目标路由用——与 views.get
      *  同源：代次存活注入 + opId 分配；装载不在场或实例未注册 null） */
     buildViewHandle: (addonId: string, instanceId: string) => {

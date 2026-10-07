@@ -10,7 +10,10 @@
 //   暂停该组件**全部**注册贡献（运行贡献释放、设置页代码撤下、setup
 //   通道注销），保留设置定义、启用偏好与故障原因（状态可观察；完整
 //   诊断形态归 T12）。页面侧故障（装载器 factory-error/faulted 上报）
-//   同样触发暂停。
+//   同样触发暂停。T12（#361）补全：webview 运行期回调异常（行为/命令/
+//   界面/渲染挂载）经装载器 addon.faulted 上报进 faultRecord；设置变化
+//   监听器异常在宿主侧就地捕获升级；故障日志带阶段（fault/<stage>，
+//   组件 + 阶段 + 行为或视图标识 + 原因——OutputChannel 单一通道）。
 // - 通道只传 JSON：回执经结构化克隆防线（函数/DOM 引用拒绝并归因）；
 //   未注册 topic 协议性拒绝（不算故障）；同名 topic 重复注册拒绝。
 // - 装载意图（面板桥消费）：desiredEditorLoads / desiredSettingsLoad 输出
@@ -294,14 +297,14 @@ export class AddonRuntime {
     if (message.type === 'addon.loaded' && !message.outcome.ok && message.outcome.reason === 'factory-error') {
       const record = this.records.get(message.addonId)
       if (record) {
-        this.faultRecord(record, `页面工厂异常：${message.outcome.detail ?? 'unknown'}`)
+        this.faultRecord(record, `页面工厂异常：${message.outcome.detail ?? 'unknown'}`, 'page-factory')
       }
       return
     }
     if (message.type === 'addon.faulted') {
       const record = this.records.get(message.addonId)
       if (record) {
-        this.faultRecord(record, message.reason)
+        this.faultRecord(record, message.reason, 'page-reported')
       }
       return
     }
@@ -325,14 +328,14 @@ export class AddonRuntime {
     try {
       result = await handler(payload)
     } catch (err) {
-      this.faultRecord(record, `通道回调异常（${topic}）：${String(err)}`)
+      this.faultRecord(record, `通道回调异常（${topic}）：${String(err)}`, 'channel-callback')
       return { ok: false, reason: 'rejected' }
     }
     try {
       // JSON 防线：函数/DOM/内部控制器不可结构化克隆——拒绝回执并归因
       return { ok: true, result: structuredClone(result) }
     } catch {
-      this.faultRecord(record, `通道回执不可序列化（${topic}）——通信只传 JSON 数据`)
+      this.faultRecord(record, `通道回执不可序列化（${topic}）——通信只传 JSON 数据`, 'channel-serialization')
       return { ok: false, reason: 'rejected' }
     }
   }
@@ -401,7 +404,7 @@ export class AddonRuntime {
     try {
       definition.setup?.(this.buildSetupContext(addonId, record))
     } catch (err) {
-      this.faultRecord(record, `setup 异常：${String(err)}`)
+      this.faultRecord(record, `setup 异常：${String(err)}`, 'setup')
       return
     }
     this.syncRunState(record)
@@ -484,7 +487,13 @@ export class AddonRuntime {
           const off = settings.onChanged((change) => {
             // 只投递本组件的变化；组件代码暂停/释放后停投（订阅随代次失效）
             if (change.addonId !== addonId || !this.isLive(record, addonId)) return
-            listener({ scope: change.scope, keys: change.keys })
+            try {
+              listener({ scope: change.scope, keys: change.keys })
+            } catch (err) {
+              // T12（#361）：设置变化回调异常升级为全组件故障（可归因）；
+              // 就地捕获保证设置服务通知循环不炸（其他监听者继续投递）
+              this.faultRecord(record, `设置变化回调异常：${String(err)}`, 'settings-listener')
+            }
           })
           return { dispose: off }
         },
@@ -608,7 +617,7 @@ export class AddonRuntime {
     } catch (err) {
       // 半初始化回收：已收集贡献（含清理回调）释放后转故障
       this.releaseRun(record)
-      this.faultRecord(record, `enable 异常：${String(err)}`)
+      this.faultRecord(record, `enable 异常：${String(err)}`, 'enable')
       return
     }
     if (run.editorPages.length > 0) {
@@ -623,9 +632,10 @@ export class AddonRuntime {
     this.notify()
   }
 
-  private faultRecord(record: RuntimeRecord, reason: string): void {
+  private faultRecord(record: RuntimeRecord, reason: string, stage = 'fault'): void {
     // 全部注册贡献暂停：运行贡献释放 + setup 通道注销 + 设置页装载撤下；
-    // 保留设置定义、启用偏好与故障原因（状态可观察）
+    // 保留设置定义、启用偏好与故障原因（状态可观察）。日志带阶段
+    //（T12 诊断：fault/<stage>——组件 + 阶段 + 原因，OutputChannel 单一通道）
     this.releaseRun(record)
     record.setupHandlers.clear()
     record.runState = 'faulted'
@@ -633,7 +643,7 @@ export class AddonRuntime {
     if (this.settingsOpenAddon !== undefined && this.records.get(this.settingsOpenAddon) === record) {
       this.settingsOpenAddon = undefined
     }
-    this.ports.log('fault', this.entryOf(record), reason)
+    this.ports.log(`fault/${stage}`, this.entryOf(record), reason)
     this.notify()
   }
 
