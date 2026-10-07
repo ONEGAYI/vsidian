@@ -20,7 +20,7 @@
 //   （ignoreFocusOut:true 永不超时），无人值守会话挂死——profile 必须预置；
 // - 缺 remote.SSH.confirmFingerprint=false 时首连指纹确认同样挂起。
 import { spawn } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 /** 与 1.82.3 兼容的 Remote-SSH 版本（engine ^1.82.0-insider；更高版引擎抬高不可装） */
@@ -225,27 +225,76 @@ export function mirrorExtensionsToRemoteServer({ serverExtensionsDir, localExten
 
 /**
  * 确保 Remote-SSH VSIX 在缓存目录在场（缺席则从 marketplace 下载
- * vspackage——gzip 内容——解压为 VSIX）。网络与 marketplace 是外部依赖，
- * 失败抛错由启动者决定降级（票面：无真实 SSH 环境时记录外部阻塞）。
+ * vspackage——gzip 或未压缩 VSIX 两种实测形态，按 magic 分流）。缓存以
+ * zip magic 校验有效性——解压失败残留的 0 字节 .vsix 不再永久命中。
+ * 网络与 marketplace 是外部依赖，失败抛错由启动者决定降级（票面：无
+ * 真实 SSH 环境时记录外部阻塞）。
  * @param {{ cacheDir: string, version?: string, log?: (msg: string) => void }} input
  */
 export async function ensureRemoteSshVsix({ cacheDir, version = REMOTE_SSH_COMPAT_VERSION, log = () => {} }) {
+  const readHead = (file) => {
+    try {
+      return readFileSync(file).subarray(0, 4)
+    } catch {
+      return Buffer.alloc(0)
+    }
+  }
   mkdirSync(cacheDir, { recursive: true })
   const vsix = path.join(cacheDir, `remote-ssh-${version}.vsix`)
-  if (existsSync(vsix)) {
+  if (remoteSshPayloadKind(readHead(vsix)) === 'zip') {
     return vsix
+  }
+  if (existsSync(vsix)) {
+    log(`[T17] 缓存 ${path.basename(vsix)} 非 zip 形态（残留坏缓存），重新下载`)
+    rmSync(vsix, { force: true })
   }
   const raw = path.join(cacheDir, `remote-ssh-${version}.vspackage`)
   log(`[T17] 下载 Remote-SSH ${version}（marketplace 历史版本端点）`)
   await downloadToFile(remoteSshMarketplaceUrl(version), raw)
-  const { code } = await runCommand('python', ['-c', `import gzip,shutil,sys
+  let code = 0
+  try {
+    const payload = readFileSync(raw)
+    const kind = remoteSshPayloadKind(payload.subarray(0, 4))
+    if (kind === 'gzip') {
+      const result = await runCommand('python', ['-c', `import gzip,shutil,sys
 with gzip.open(sys.argv[1],'rb') as fin, open(sys.argv[2],'wb') as fout:
     shutil.copyfileobj(fin,fout)`, raw, vsix], { capture: false })
-  rmSync(raw, { force: true })
-  if (code !== 0 || !existsSync(vsix)) {
+      code = result.code
+    } else if (kind === 'zip') {
+      // 端点直接返回未压缩 VSIX（2026-10-08 T18 重跑实测形态）：改名即可用
+      renameSync(raw, vsix)
+    } else {
+      throw new Error(`下载载荷形态未知（magic ${payload.subarray(0, 4).toString('hex')}，长度 ${payload.length}）——疑似半途下载或端点变更`)
+    }
+  } finally {
+    rmSync(raw, { force: true })
+  }
+  if (code !== 0 || remoteSshPayloadKind(readHead(vsix)) !== 'zip') {
     throw new Error(`Remote-SSH VSIX 解压失败（退出码 ${code}）`)
   }
   return vsix
+}
+
+/**
+ * marketplace vspackage 端点载荷形态判定（#367——端点行为漂移兼容）：
+ * 同一 URL 实测返回两种形态——gzip 压缩的 vspackage（T17 实施时观测）
+ * 或未压缩 VSIX（zip，PK magic；T18 重跑时观测）。按 magic 分流，避免
+ * 把 zip 载荷喂给 gzip 解压器（BadGzipFile）。坏载荷（空/过短/未知
+ * magic）判 'unknown' 由调用方按下载损坏处理。
+ * @param {Buffer} buffer 下载内容（至少 4 字节可判）
+ * @returns {'gzip' | 'zip' | 'unknown'}
+ */
+export function remoteSshPayloadKind(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) {
+    return 'unknown'
+  }
+  if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    return 'gzip'
+  }
+  if (buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04) {
+    return 'zip'
+  }
+  return 'unknown'
 }
 
 /** 简单 HTTPS 下载（Node 内建 fetch；VSIX ~700KB，无需流式进度） */
