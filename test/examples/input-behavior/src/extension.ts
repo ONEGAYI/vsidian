@@ -84,6 +84,18 @@ function buildDefinition(m: ExampleMessages): AddonDefinition {
   }
 }
 
+/** #366 T17：宿主观测自报——stats 在哪个扩展宿主执行，就读哪个宿主的
+ * 清单（本样例代码运行的宿主）。SSH 远端会话里经命令路由消费，是「宿主
+ * 代码同远端运行、同宿主接入」的端到端证据面 */
+function hostObservation() {
+  const self = vscode.extensions.getExtension(SELF_ID)
+  return {
+    remoteName: vscode.env.remoteName ?? null,
+    mainExtensionVisible: !!vscode.extensions.getExtension(HOST_ID),
+    selfExtensionUriScheme: self?.extensionUri.scheme ?? null,
+  }
+}
+
 function registerSelf(definition: AddonDefinition): { ok: boolean; reason?: string } {
   if (!hostApi) {
     throw new Error(`${SELF_ID}: host API not resolved yet`)
@@ -110,6 +122,7 @@ async function activate(context: vscode.ExtensionContext): Promise<void> {
       ...stats,
       behaviorsAllowed,
       eventsDepth: events.length,
+      host: hostObservation(),
     })),
     vscode.commands.registerCommand(`${SELF_ID}.armBehaviors`, () => {
       behaviorsAllowed = true
