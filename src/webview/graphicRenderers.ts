@@ -326,8 +326,14 @@ export function refreshAddonGraphicBlocks(root: ParentNode): void {
     const code = el.getAttribute(MERMAID_CODE_ATTR) ?? ''
     const mode: AddonRendererMode = el.getAttribute(GRAPHIC_MODE_ATTR) === 'live' ? 'live' : 'reading'
     if (registration.refresh) {
-      registration.refresh(el, code, { language, mode })
-      continue
+      try {
+        registration.refresh(el, code, { language, mode })
+        continue
+      } catch (err) {
+        // 组件 refresh 抛错不中断本轮其余容器的主题联动（对齐 mount 的
+        // 捕获+上报处理）；退化为整容器重挂保内容新鲜
+        reportRendererFault(providerId, err)
+      }
     }
     remountGraphicContainer(el, mode)
   }

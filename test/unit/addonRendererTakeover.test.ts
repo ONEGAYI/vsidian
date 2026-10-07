@@ -24,6 +24,7 @@ import {
   remountChangedGraphicBlocks,
   remountGraphicContainer,
   renderGraphicIntoContainer,
+  refreshAddonGraphicBlocks,
 } from '../../src/webview/graphicRenderers'
 import { buildMermaidDecorationRanges, mermaidFencesField } from '../../src/webview/liveMermaid'
 import { setAddonRenderersBridge, type AddonRenderersBridgeHandle, type AddonRenderersOutboundMessage } from '../../src/webview/addonRenderers'
@@ -232,6 +233,43 @@ describe('容器所有权热切换（旧结果不回潮）', () => {
     old.textContent = 'stale-late-result'
     expect(stale.textContent).not.toBe('stale-late-result')
     expect(old.isConnected).toBe(false)
+  })
+})
+
+describe('主题联动 refresh（组件回调异常隔离）', () => {
+  it('refresh 抛错不中断其余容器：退化重挂保内容、健康容器照常联动', () => {
+    document.body.innerHTML = ''
+    const { bridge } = harness()
+    const log: MountRecord[] = []
+    bridge.register('pub.a', 1, recordingSpec('r1', ['draw'], log, {
+      refresh: () => { throw new Error('boom') },
+    }))
+    bridge.register('pub.a', 1, recordingSpec('r2', ['flow'], log))
+    bridge.applyTable(table([
+      { language: 'draw', effective: 'pub.a/r1' },
+      { language: 'flow', effective: 'pub.a/r2' },
+    ], [
+      { addonId: 'pub.a', rendererId: 'r1', languages: ['draw'] },
+      { addonId: 'pub.a', rendererId: 'r2', languages: ['flow'] },
+    ]))
+    const mk = (lang: string, provider: string) => {
+      const el = document.createElement('div')
+      el.className = MERMAID_CLASS_NAMES.diagram
+      el.setAttribute(GRAPHIC_LANG_ATTR, lang)
+      el.setAttribute(MERMAID_CODE_ATTR, 'X')
+      el.setAttribute(GRAPHIC_MODE_ATTR, 'reading')
+      el.setAttribute(MERMAID_STATE_ATTR, 'rendered')
+      el.setAttribute(GRAPHIC_PROVIDER_ATTR, provider)
+      document.body.appendChild(el)
+      return el
+    }
+    const broken = mk('draw', 'pub.a/r1')
+    const healthy = mk('flow', 'pub.a/r2')
+    expect(() => refreshAddonGraphicBlocks(document.body)).not.toThrow()
+    // 抛错容器：release 旧容器 → 换新 → 组件 mount 重建；健康容器：refresh 照常
+    expect(log.map((e) => e.event)).toEqual(['release', 'mount', 'refresh'])
+    expect(broken.isConnected).toBe(false)
+    expect(healthy.isConnected).toBe(true)
   })
 })
 
