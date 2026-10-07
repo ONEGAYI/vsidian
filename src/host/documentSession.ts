@@ -427,7 +427,7 @@ export class DocumentSession {
   private readonly confirmedEchoes: { version: number; changes: SerChange[] }[] = []
   /** 归属记账数据源：version → 组首来源（合并笔的 joined 不入查询面——
    *  单版本单组身份；完整列表经 onEditAttributed 传递） */
-  private readonly attributed: { version: number; seq: number; sessionId: string; origin: EditOriginMeta }[] = []
+  private readonly attributed: { version: number; seq: number; sessionId: string; origin: EditOriginMeta; joined?: EditOriginMeta[] }[] = []
   /** #48 已应用未确认窗口的外部广播暂存：面板 pending 存在已应用未确认
    *  条目时，外部增量的坐标参考系（权威文本已含该编辑）与 webview 的
    *  ackedChain（不含）不一致——先行广播会让 webview 逆穿 unconfirmed
@@ -2412,7 +2412,13 @@ export class DocumentSession {
       origin: originHead,
       ...(pending.origin!.length > 1 ? { joined: pending.origin!.slice(1) } : {}),
     }
-    this.attributed.push({ version, seq: pending.seq, sessionId: panel.sessionId, origin: originHead })
+    this.attributed.push({
+      version,
+      seq: pending.seq,
+      sessionId: panel.sessionId,
+      origin: originHead,
+      ...(pending.origin!.length > 1 ? { joined: pending.origin!.slice(1) } : {}),
+    })
     while (this.attributed.length > VERSION_LOG_LIMIT) {
       this.attributed.shift()
     }
@@ -2421,7 +2427,7 @@ export class DocumentSession {
 
   /** T03（#352）按落定版本查询来源归属（未携带 origin 的版本返回
    *  undefined——外来条目；重放不重复计入：同版本只登记一次） */
-  editOriginAtVersion(version: number): { seq: number; sessionId: string; origin: EditOriginMeta } | undefined {
+  editOriginAtVersion(version: number): { seq: number; sessionId: string; origin: EditOriginMeta; joined?: EditOriginMeta[] } | undefined {
     return this.attributed.find((e) => e.version === version)
   }
 
