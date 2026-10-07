@@ -1,0 +1,21 @@
+// 样例独立工程的类型检查配置（复制到独立仓库后使用；主仓库内由仓库根
+// tsconfig 统一检查——include "test" 覆盖本目录，两套配置语义一致）。
+// 独立仓库需要 devDependencies：typescript、@types/vscode（见 README）。
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "types": ["vscode"]
+  },
+  "include": ["src"]
+}

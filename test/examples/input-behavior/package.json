@@ -1,0 +1,24 @@
+{
+  "name": "vsidian-example-input-behavior",
+  "publisher": "vsidian-example",
+  "displayName": "Vsidian Example: Input Behavior",
+  "description": "Standalone example add-on for Vsidian: composable input behaviors (CJK/Latin smart spacing, paren completion, fullwidth punctuation) consuming only the public SDK (T15, #364).",
+  "version": "0.1.0",
+  "license": "MIT",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-example.input-behavior.stats", "title": "Example Input: stats" },
+      { "command": "vsidian-example.input-behavior.armBehaviors", "title": "Example Input: arm behaviors" },
+      { "command": "vsidian-example.input-behavior.disarmBehaviors", "title": "Example Input: disarm behaviors" },
+      { "command": "vsidian-example.input-behavior.collect", "title": "Example Input: collect behavior events" },
+      { "command": "vsidian-example.input-behavior.reset", "title": "Example Input: reset event inbox" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./dist/extension.js"
+}
