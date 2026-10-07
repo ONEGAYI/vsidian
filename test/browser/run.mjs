@@ -101,7 +101,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #359 T10：组件命令/菜单/统一快捷键（生产命令注册表装配——真实键盘
   // 默认绑定/绑定/清空、真实右键组件簇菜单与点击执行、宿主转发路径、
   // 停用回收）紧随附加组件族
-  'addonT10Commands']
+  'addonT10Commands',
+  // #358 T09 渲染提供者自动接管：真实浏览器绘制层（接管/热切换/迟到结果/弹窗取图）
+  'addonRendererTakeover']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

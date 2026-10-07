@@ -37,6 +37,8 @@ import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
 import { AddonBehaviorStateService } from './addonBehaviorStateService'
 import { AddonCommandService } from './addonCommandService'
+import { AddonRendererService, type AddonRendererPersistencePort } from './addonRendererService'
+import { isAddonRenderersRegisteredPayload } from '../../shared/addonRenderers'
 import { createAddonRealpathGuard } from './addonRealpathGuard'
 import { t } from '../../shared/i18n'
 import type { AddonCommandReport } from '../../shared/addonCommands'
@@ -157,6 +159,10 @@ const PREFERENCE_KEY = 'vsidian.addons.enabled'
 /** #353 T04 组件设置值持久层键（结构 version 1 冻结——shared/addonSettings） */
 const ADDON_SETTINGS_KEY = 'vsidian.addons.settings'
 
+/** #358 T09 渲染提供者存储持久层键（发现批次与用户首选；结构 version 1
+ *  冻结——shared/addonRenderers；globalState 用户层，跨窗口幂等） */
+const ADDON_RENDERERS_KEY = 'vsidian.addons.renderers'
+
 /** #353 T04 无工作区判定：文件夹或多根工作区任一在场（空窗口 false） */
 function hostHasWorkspace(): boolean {
   return vscode.workspace.workspaceFolders !== undefined || vscode.workspace.workspaceFile !== undefined
@@ -233,6 +239,23 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         return false
       }
     },
+  })
+  // #358 T09 渲染提供者服务（候选登记/发现批次/用户首选/生效表——可用性
+  // 谓词按 runtime 状态在求表时注入，停用与整组件故障即候选不可用）
+  const rendererPersistence: AddonRendererPersistencePort = {
+    read: () => context.globalState.get(ADDON_RENDERERS_KEY),
+    write: async (value) => {
+      try {
+        await context.globalState.update(ADDON_RENDERERS_KEY, value)
+        return true
+      } catch {
+        return false
+      }
+    },
+  }
+  const rendererService = new AddonRendererService({
+    persistence: rendererPersistence,
+    log: (stage, detail) => log(`addons ${stage}: ${detail}`),
   })
   const runtime = new AddonRuntime({
     apiVersion: ADDON_API_VERSION,
@@ -644,6 +667,60 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     })
   }
 
+  // ---- #358 T09 渲染提供者生效表广播（编辑器面板全域推送） ----
+
+  /** 可用性谓词：registered 且启用且未故障（runState 'enabled'——页面在途
+   *  装载不算不可用，本页未就绪时 webview 侧回内置显示） */
+  const rendererAvailability = (addonId: string): boolean => {
+    const status = runtime.runtimeStatus(addonId)
+    return status !== undefined && status.runState === 'enabled'
+  }
+
+  let lastRendererTableVersion = 0
+  /** 重算生效表并按需广播（内容变化才推送——等值幂等；面板 ready 重推
+   *  由 pushRendererTableTo 直发承担） */
+  const refreshRendererTable = (): void => {
+    const table = rendererService.effectiveTable(rendererAvailability)
+    if (table.version === lastRendererTableVersion) {
+      return
+    }
+    lastRendererTableVersion = table.version
+    const payload = { kind: 'addonRenderers.table' as const, table }
+    for (const record of editorPanels.values()) {
+      recordEvent('editor', { kind: 'renderers.table', addonId: '*', generation: table.version })
+      try {
+        void record.webview.postMessage(payload).then(undefined, () => {})
+      } catch {
+        // 面板已销毁：随 panelDisposed 回收
+      }
+    }
+  }
+
+  /** 面板 ready / 状态重推时直发当前表（同版本幂等——webview 等值跳过） */
+  const pushRendererTableTo = (record: EditorPanelRecord): void => {
+    const table = rendererService.effectiveTable(rendererAvailability)
+    try {
+      void record.webview.postMessage({ kind: 'addonRenderers.table', table }).then(undefined, () => {})
+    } catch {
+      // 面板已销毁
+    }
+  }
+
+  /** webview 候选上报路由（addonRenderers.registered）：按 addonId 整组
+   *  替换候选（发现批次幂等分配并持久化），重算广播 */
+  const handleRendererRegistered = (message: { payload: unknown }): boolean => {
+    if (!isAddonRenderersRegisteredPayload(message.payload)) {
+      return false
+    }
+    rendererService.registerProviders(message.payload.addonId, message.payload.providers)
+    refreshRendererTable()
+    return true
+  }
+
+  // 候选/首选变化与 runtime 状态变化（启停/故障/恢复→可用性变化）都重算表
+  rendererService.onChanged(() => refreshRendererTable())
+  const offRendererRuntimeChanged = runtime.onChanged(() => refreshRendererTable())
+
   const handleEditorPanelMessage = (record: EditorPanelRecord, message: unknown): boolean => {
     if (!isWebviewToHost(message)) {
       return false
@@ -654,6 +731,12 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       record.pushed.clear()
       record.pendingVerify.clear()
       pushEditorDirectives(record)
+      // #358 T09：渲染生效表随 ready 直发（webview 重载后桥状态归零）
+      pushRendererTableTo(record)
+      return true
+    }
+    if (message.kind === 'addonRenderers.registered') {
+      handleRendererRegistered(message)
       return true
     }
     if (message.kind === 'addonPage.outbound') {
@@ -1081,6 +1164,17 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         const events = args?.clear ? addonPageEvents.splice(0) : []
         return { catalog: snapshot, ...(args?.clear ? { events } : {}) }
       }),
+      // ---- #358 T09 渲染提供者（集成的宿主侧断言面；用户调整 UI 入口归
+      //  后续设置页票据——机制面经钩子先行验证） ----
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonRendererTable', () =>
+        rendererService.effectiveTable(rendererAvailability)),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonRendererPrefer', (args: { language: string; provider: string | null }) => {
+        const result = rendererService.setPreferred(args.language, args.provider)
+        refreshRendererTable()
+        return { result, table: rendererService.effectiveTable(rendererAvailability) }
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonRendererStore', () =>
+        rendererService.snapshot(rendererAvailability).store),
     )
   }
 
@@ -1103,6 +1197,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       offRuntimeChanged()
       offCommandCatalogChanged()
       commandService.dispose()
+      offRendererRuntimeChanged()
       runtime.dispose()
       coordinator.dispose()
     },

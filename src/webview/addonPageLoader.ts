@@ -30,6 +30,8 @@ import type {
 } from '../shared/addonPage'
 import type { AddonViewHandle, AddonViewsFacet } from '../shared/addonEditApi'
 import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
+import type { AddonRendererRegistration } from '../shared/addonRenderers'
+import type { AddonRenderersBridgeHandle } from './addonRenderers'
 import type { AddonViewsRuntime } from './addonViews'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
 import type { AddonCommandsRuntime } from './addonCommands'
@@ -83,6 +85,9 @@ export interface AddonPageLoaderEnv {
   /** T10（#359）命令与菜单注册表（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 commands/menus 面，releaseLoad 时亦不做回收） */
   addonCommands?: AddonCommandsRuntime
+  /** T09（#358）渲染提供者桥（编辑器页由 main.ts 构造注入；省略时 SDK
+   *  不提供 renderers 面——注册拒绝为 no-op 句柄） */
+  addonRenderers?: Pick<AddonRenderersBridgeHandle, 'register' | 'disposeRenderer' | 'releaseGeneration'>
   /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
    *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
   attachExtensions?: (extension: Extension[] | null) => void
@@ -304,6 +309,33 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
           },
         },
       } : {}),
+      // T09（#358）渲染提供者面（仅编辑器页且桥在场；其余页面 undefined）
+      ...(page === 'editor' && env.addonRenderers
+        ? {
+            renderers: {
+              register: (spec: AddonRendererRegistration) => {
+                const bridge = env.addonRenderers!
+                if (!active.has(loadRecord.addonId)) {
+                  // 已终结代次的迟到注册：no-op 句柄（不接入新代次）
+                  return { dispose: () => {} }
+                }
+                const accepted = bridge.register(loadRecord.addonId, loadRecord.generation, spec)
+                if (!accepted) {
+                  return { dispose: () => {} }
+                }
+                const rendererId = spec.rendererId
+                return {
+                  dispose: () => {
+                    if (!active.has(loadRecord.addonId)) {
+                      return
+                    }
+                    bridge.disposeRenderer(loadRecord.addonId, loadRecord.generation, rendererId)
+                  },
+                }
+              },
+            },
+          }
+        : {}),
       registerExtension: (extension) => {
         if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
           return false
@@ -406,6 +438,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       } catch {
         // 回收异常不阻断其余释放路径
       }
+    }
+    // T09（#358）：本页该组件的渲染候选整体撤销（代次硬边界——候选不跨
+    // 代次存活；桥上报空集，宿主据此重算生效表）
+    try {
+      env.addonRenderers?.releaseGeneration(loadRecord.addonId, loadRecord.generation)
+    } catch {
+      // 候选撤销异常不阻断其余回收
     }
     let disposals = 0
     for (const callback of loadRecord.disposeCallbacks.splice(0)) {

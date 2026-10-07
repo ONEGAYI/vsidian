@@ -42,6 +42,9 @@ const DENIED_CSS = '/* 越界对照样式 */\n.vsa2-denied { color: rgb(255, 0, 
 /** #351 T02 夹具组件样式：编辑器页首字符标记（绘制层断言锚——计算色
  *  rgb(0, 200, 120)，与 V02 的 rgb(255,0,127) 区分）与设置页标题 */
 const T02_EDITOR_CSS = '.t02-mark { background-color: rgb(0, 200, 120); }\n'
+/** #358 T09 夹具组件样式：渲染器容器内 t09-box（绘制层断言锚——计算色
+ *  rgb(9, 96, 246)，与 t02 标记色区分） */
+const T09_EDITOR_CSS = '.t09-box { background-color: rgb(9, 96, 246); color: rgb(255, 255, 255); padding: 4px 8px; display: inline-block; }\n'
 const T02_SETTINGS_CSS = '.t02-settings-root .t02-title { color: rgb(0, 120, 200); }\n'
 
 /** 断言产物不含 CM6 运行时标记（组件未重打包共享运行时） */
@@ -91,12 +94,19 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't07-addon', 'dist', 'editor.js'),
       note: 't07-addon 编辑器页',
     },
+    // #358 T09：渲染提供者夹具组件（编辑器页 renderers.register 消费）
+    {
+      entry: path.join(fixtureRoot, 'addon', 't09Renderer.ts'),
+      outfile: path.join(buildRoot, 't09-addon', 'dist', 'editor.js'),
+      note: 't09-addon 编辑器页',
+    },
     // #359 T10：命令/菜单/快捷键夹具组件（编辑器页——commands/menus 面
     // 注册 + 负向对照 + views 真实业务；短轮询驱动与 T06 同款）
     {
       entry: path.join(fixtureRoot, 'addon', 't10Editor.ts'),
       outfile: path.join(buildRoot, 't10-addon', 'dist', 'editor.js'),
       note: 't10-addon 编辑器页',
+    },
     },
   ]
   for (const target of targets) {
@@ -123,6 +133,9 @@ export async function buildTestAddons({ log = console.log } = {}) {
   writeFileSync(path.join(distDir, 'logo.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #351 T02 夹具组件资源：两页样式 + 资源子目录（resourceUri 锚）
   const t02Dist = path.join(buildRoot, 't02-addon', 'dist')
+  const t09Dist = path.join(buildRoot, 't09-addon', 'dist')
+  mkdirSync(t09Dist, { recursive: true })
+  writeFileSync(path.join(t09Dist, 'editor.css'), T09_EDITOR_CSS)
   mkdirSync(path.join(t02Dist, 'assets'), { recursive: true })
   writeFileSync(path.join(t02Dist, 'editor.css'), T02_EDITOR_CSS)
   writeFileSync(path.join(t02Dist, 'settings.css'), T02_SETTINGS_CSS)
@@ -159,10 +172,16 @@ export async function buildTestAddons({ log = console.log } = {}) {
       installDir: path.join(buildRoot, 't07-addon'),
       distDir: path.join(buildRoot, 't07-addon', 'dist'),
     },
+    // #358 T09：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t09）
+    t09Addon: {
+      installDir: path.join(buildRoot, 't09-addon'),
+      distDir: path.join(buildRoot, 't09-addon', 'dist'),
+    },
     // #359 T10：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t10）
     t10Addon: {
       installDir: path.join(buildRoot, 't10-addon'),
       distDir: path.join(buildRoot, 't10-addon', 'dist'),
+    },
     },
     outsideDir,
   }

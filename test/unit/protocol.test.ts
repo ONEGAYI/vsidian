@@ -2337,3 +2337,40 @@ describe('isWebviewToHost / isHostToWebview：wikilink 标题查询（#379 T04�
     expect(isWebviewToHost({ ...base, items: [] } as never)).toBe(false)
   })
 })
+
+describe('addonRenderers 消息守卫（#358 T09）', () => {
+  it('addonRenderers.registered：合法候选上报接受，缺名称/空语言拒绝', () => {
+    const okMessage = {
+      kind: 'addonRenderers.registered' as const,
+      payload: {
+        addonId: 'pub.a',
+        providers: [
+          { rendererId: 'r1', label: 'R1', languages: ['mermaid', 'draw'], modes: ['live', 'reading'], exportFormats: ['svg'] },
+        ],
+      },
+    }
+    expect(isWebviewToHost(okMessage)).toBe(true)
+    expect(isWebviewToHost({ ...okMessage, payload: { addonId: 'pub.a', providers: [{ rendererId: 'r1', label: '', languages: ['x'], modes: ['live'], exportFormats: [] }] } })).toBe(false)
+    expect(isWebviewToHost({ ...okMessage, payload: { addonId: 'pub.a', providers: [{ rendererId: 'r1', label: 'R1', languages: [], modes: ['live'], exportFormats: [] }] } })).toBe(false)
+    expect(isWebviewToHost({ ...okMessage, payload: { addonId: '', providers: [] } })).toBe(false)
+  })
+
+  it('addonRenderers.table：生效表广播接受，版本非整数/来源非法拒绝', () => {
+    const tableMessage = {
+      kind: 'addonRenderers.table' as const,
+      table: {
+        version: 3,
+        providers: [
+          { addonId: 'pub.a', rendererId: 'r1', providerId: 'pub.a/r1', label: 'R1', languages: ['mermaid'], modes: ['live'], exportFormats: [] },
+        ],
+        languages: [
+          { language: 'mermaid', effective: 'pub.a/r1', source: 'auto' as const },
+          { language: 'draw', effective: 'none', source: 'user' as const },
+        ],
+      },
+    }
+    expect(isHostToWebview(tableMessage)).toBe(true)
+    expect(isHostToWebview({ kind: 'addonRenderers.table', table: { ...tableMessage.table, version: 1.5 } })).toBe(false)
+    expect(isHostToWebview({ kind: 'addonRenderers.table', table: { ...tableMessage.table, languages: [{ language: 'mermaid', effective: 'pub.a/r1', source: 'system' }] } })).toBe(false)
+  })
+})

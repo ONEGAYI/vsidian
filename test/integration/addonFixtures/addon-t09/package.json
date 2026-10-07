@@ -1,0 +1,20 @@
+{
+  "name": "addon-t09",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T09 Renderers)",
+  "description": "Integration fixture: Vsidian add-on registering code-block renderer providers via the page SDK renderers facet (T09, #358).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-t09.stats", "title": "Fixture T09: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-t09.armCrash", "title": "Fixture T09: arm echo handler crash" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

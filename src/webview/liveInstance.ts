@@ -49,7 +49,7 @@ import {
 import { liveDecorationsField, livePreviewDecorations, tableCompositionSettled, tableContainerRenderFacet } from './liveDecorations'
 import { createLinkInteractions } from './liveLinks'
 import { liveMath } from './liveMath'
-import { liveMermaid } from './liveMermaid'
+import { liveMermaid, rendererLanguagesChanged } from './liveMermaid'
 import { liveEmbed } from './liveEmbed'
 import { liveBlockId } from './liveBlockId'
 import { anchorFlash } from './anchorFlash'
@@ -999,6 +999,13 @@ export class LiveEditorInstance {
     this.view.dispatch({
       effects: this.darkCompartment.reconfigure(EditorView.darkTheme.of(dark)),
     })
+  }
+
+  /** #358 T09 生效渲染提供者变化（附加组件接管/交还）：派发围栏表全量
+   *  重扫 + 装饰重建效应（装饰实例缓存在字段更新路径清空——widget 换新
+   *  DOM，旧提供者容器随旧 widget 退场，迟到结果写脱离节点不回潮） */
+  applyRendererLanguagesChanged(): void {
+    this.view?.dispatch({ effects: rendererLanguagesChanged.of(null) })
   }
 
   private applyLineNumbersSetting(): void {

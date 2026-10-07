@@ -40,12 +40,54 @@ export const MERMAID_STATE_ATTR = 'data-vsidian-mermaid-state'
 /** 容器 data 属性：图形化渲染语言（#111 阅读容器标注，按钮组与弹窗消费） */
 export const GRAPHIC_LANG_ATTR = 'data-vsidian-graphic-lang'
 
+/** 容器 data 属性：当前生效渲染提供者（#358 T09——'builtin' 或
+ *  `${addonId}/${rendererId}`；容器所有权观测，接管切换的释放与重挂依据；
+ *  内部观测属性，非公开样式契约入口） */
+export const GRAPHIC_PROVIDER_ATTR = 'data-vsidian-graphic-provider'
+
+/** 容器 data 属性：挂载时的目标视图模式（'live' | 'reading'——热切换
+ *  全文档扫描重派发时恢复挂载上下文用；内部观测属性） */
+export const GRAPHIC_MODE_ATTR = 'data-vsidian-graphic-mode'
+
+/**
+ * #358 T09 动态渲染型围栏语言集：附加组件渲染提供者按生效表声明的语言
+ * （webview 侧经 setDynamicRenderedFenceLanguages 维护；默认空 = 仅内置
+ * 注册表判定）。fence 判定口径与 RENDERED_FENCE_LABELS 一致：trim 后
+ * 全等、大小写敏感。共享侧保持纯逻辑（node 单测直驱），动态集由 webview
+ * 装配层写入——宿主产物不消费该状态。
+ */
+let dynamicRenderedFenceLanguages: ReadonlySet<string> = new Set<string>()
+
+/** 更新动态语言集；返回是否有变化（变化时调用方负责触发 fence 表重扫） */
+export function setDynamicRenderedFenceLanguages(languages: Iterable<string>): boolean {
+  const next = new Set<string>()
+  for (const language of languages) {
+    const trimmed = language.trim()
+    if (trimmed !== '') {
+      next.add(trimmed)
+    }
+  }
+  if (next.size === dynamicRenderedFenceLanguages.size &&
+      [...next].every((lang) => dynamicRenderedFenceLanguages.has(lang))) {
+    return false
+  }
+  dynamicRenderedFenceLanguages = next
+  return true
+}
+
+/** 动态语言集快照（测试与探针） */
+export function dynamicRenderedFenceLanguageSnapshot(): ReadonlySet<string> {
+  return dynamicRenderedFenceLanguages
+}
+
 /** info string 是否标记渲染型围栏（trim 后全等、大小写敏感；判定源 =
- *  RENDERED_FENCE_LABELS 注册表——#111 起为图形化代码块注册表的共享侧
- *  事实源，webview 侧管线注册表见 graphicRenderers.ts，两侧键集一致性
- *  由契约测试钉住）。当前仅 mermaid；新增图形化渲染语言在此登记 */
+ *  RENDERED_FENCE_LABELS 注册表 ∪ #358 T09 附加组件动态语言集——内置
+ *  注册表仍是内置提供者的支持语言事实源，webview 侧管线注册表见
+ *  graphicRenderers.ts，两侧键集一致性由契约测试钉住）。当前内置仅
+ *  mermaid；附加组件渲染语言经生效表计入动态集 */
 export function isRenderedFenceInfo(info: string): boolean {
-  return Object.prototype.hasOwnProperty.call(RENDERED_FENCE_LABELS, info.trim())
+  const trimmed = info.trim()
+  return Object.prototype.hasOwnProperty.call(RENDERED_FENCE_LABELS, trimmed) || dynamicRenderedFenceLanguages.has(trimmed)
 }
 
 /**

@@ -19,12 +19,12 @@
 // 抑制边界：frontmatter 内围栏不渲染（源码降级）；伪围栏（外层长围栏内、
 // 缩进 ≥4 视觉列）由围栏状态机天然不产出。已知差异（shared/mermaid.ts
 // 头注释）：引用行（> ```mermaid）live 不识别、阅读渲染——降级方向安全。
-import { RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
+import { RangeSet, StateEffect, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { codeCardFoldField } from './codeCardState'
-import { graphicRendererFor } from './graphicRenderers'
+import { hasEffectiveGraphicRenderer, effectiveGraphicSvgExport, renderGraphicIntoContainer } from './graphicRenderers'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
 import { openGraphicPopup } from './diagramPopup'
 import {
@@ -56,6 +56,12 @@ export const MERMAID_DECO_CACHE_LIMIT = 64
 
 // ---- widget 与装饰实例缓存 ----
 
+/** #358 T09 生效渲染提供者变化（围栏语言集或语言生效者变更）：围栏表
+ *  全量重扫 + 装饰重建 + 装饰实例缓存清空（换 widget DOM → 旧容器脱离
+ *  文档，旧提供者迟到结果不回潮）。由 syncController 在生效表热切换时
+ *  向主视图与嵌入内部 Live 派发。 */
+export const rendererLanguagesChanged = StateEffect.define<null>()
+
 /**
  * live Mermaid widget（#111 起为图形化代码块通用形态）：光标在围栏外时
  * 把整个围栏替换为「frame（定位宿主）+ 内层渲染容器 + 右上角按钮组」。
@@ -63,6 +69,8 @@ export const MERMAID_DECO_CACHE_LIMIT = 64
  * 禁点击进编辑（规格契约 2）：widget 吞掉指向图形的鼠标事件，编辑入口
  * 收敛到 edit 按钮（派发选区进围栏，触发既有源码显形管线）；键盘移入
  * 围栏不受影响（装饰按选区重建，与鼠标事件无关）。
+ * #358 T09：渲染分派走生效提供者（附加组件优先、内置兜底），弹窗随
+ * 来源视图模式取同一生效者。
  */
 export class LiveMermaidWidget extends WidgetType {
   constructor(
@@ -103,13 +111,16 @@ export class LiveMermaidWidget extends WidgetType {
           // P2-10：弹窗按本 widget 所属编辑器的全文刷新（嵌入内部 Live 的
           // 图形块归 B，不读主正文）；视图已脱挂（极端时序）时回落全局源
           const view = EditorView.findFromDOM(frame)
-          openGraphicPopup(this.language, this.code, view
-            ? { docSource: () => view.state.doc.toString() }
-            : undefined)
+          openGraphicPopup(this.language, this.code, {
+            mode: 'live',
+            ...(view ? { docSource: () => view.state.doc.toString() } : {}),
+          })
         },
+        // #358 T09：生效提供者无 svg 取图能力时不装弹窗按钮
+        popupEnabled: effectiveGraphicSvgExport(this.language, 'live'),
       }),
     )
-    graphicRendererFor(this.language)?.renderInto(inner, this.code)
+    renderGraphicIntoContainer(inner, this.code, this.language, 'live')
     return frame
   }
 
@@ -143,6 +154,12 @@ export function mermaidWidgetDeco(
     decoCache.delete(oldest)
   }
   return deco
+}
+
+/** #358 T09 生效提供者热切换：清空装饰实例缓存（widget 重建换新 DOM——
+ *  旧容器的旧提供者内容随 widget 销毁退场，迟到结果写脱离节点） */
+export function clearMermaidWidgetDecoCache(): void {
+  decoCache.clear()
 }
 
 // ---- 围栏表（StateField 增量维护） ----
@@ -285,13 +302,18 @@ function rebuildFences(prev: MermaidFenceTable, tr: Transaction): MermaidFenceTa
   return { spans: out, trailingOpenStart }
 }
 
-/** 全文档围栏表（#60）：docChanged 时增量重建；选区/视口变化零成本 */
+/** 全文档围栏表（#60）：docChanged 时增量重建；选区/视口变化零成本；
+ *  #358 T09 生效提供者变化（渲染型围栏语言集变更）时全量重扫 */
 export const mermaidFencesField = StateField.define<MermaidFenceTable>({
   create(state) {
     const scan = scanFencesDetailed(docLines(state.doc), 0)
     return { spans: scan.spans, trailingOpenStart: scan.open?.from ?? null }
   },
   update(value, tr) {
+    if (tr.effects.some((effect) => effect.is(rendererLanguagesChanged))) {
+      const scan = scanFencesDetailed(docLines(tr.state.doc), 0)
+      return { spans: scan.spans, trailingOpenStart: scan.open?.from ?? null }
+    }
     if (!tr.docChanged) {
       return value
     }
@@ -318,9 +340,10 @@ export function buildMermaidDecorationRanges(
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const fence of fences) {
-    // #111 注册表：仅发射 webview 侧有渲染管线的渲染型围栏（共享侧
-    // RENDERED_FENCE_LABELS 登记但管线缺失的语言稳定降级为源码+卡片）
-    if (!fence.rendered || !graphicRendererFor(fence.info.trim())) {
+    // #111 注册表（#358 T09 起为生效提供者判定）：仅发射当前生效管线
+    // 可用的渲染型围栏（内置标签在但无任何可用管线的语言稳定降级为
+    // 源码+卡片）
+    if (!fence.rendered || !hasEffectiveGraphicRenderer(fence.info.trim(), 'live')) {
       continue
     }
     if (fm && fence.from < fm.end) {
@@ -343,7 +366,9 @@ export function buildMermaidDecorationRanges(
 /** 跨行块装饰（StateField，#60）：CM6 约束——跨行 replace 只能由 field
  *  提供；widget DOM 由 CM6 按视口惰性创建（屏外不物化）。
  *  折叠态联动（渲染型围栏接入卡片）：codeCardFoldField 变化时重建，
- *  折叠收起的围栏让位给卡片收起形态。 */
+ *  折叠收起的围栏让位给卡片收起形态。#358 T09：生效提供者变化
+ *  （rendererLanguagesChanged）或围栏表引用变化时重建——发射 gate 依
+ *  赖生效管线，提供者接管/交还即热切换。 */
 export const mermaidDecorations = StateField.define<DecorationSet>({
   create(state) {
     const field = state.field(liveDecorationsField, false)
@@ -366,7 +391,14 @@ export const mermaidDecorations = StateField.define<DecorationSet>({
     // selection 判定选区变化（liveDecorationsField/liveMath 同款口径）；
     // #251 命中集变化（hitRevealField 值引用）同列重建触发
     const foldChanged = tr.startState.field(codeCardFoldField, false) !== tr.state.field(codeCardFoldField, false)
-    if (!tr.docChanged && tr.selection === undefined && !foldChanged &&
+    const renderersChanged = tr.effects.some((effect) => effect.is(rendererLanguagesChanged))
+    if (renderersChanged) {
+      // 热切换换 widget DOM 的前提：装饰实例缓存清空（否则重建仍引用旧
+      // widget 实例，CM6 保留旧 DOM，旧提供者内容滞留）
+      clearMermaidWidgetDecoCache()
+    }
+    const fencesChanged = tr.startState.field(mermaidFencesField, false) !== tr.state.field(mermaidFencesField, false)
+    if (!tr.docChanged && tr.selection === undefined && !foldChanged && !renderersChanged && !fencesChanged &&
         tr.startState.field(hitRevealField, false) === tr.state.field(hitRevealField, false)) {
       return value
     }

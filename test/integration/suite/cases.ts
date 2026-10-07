@@ -13,6 +13,7 @@ import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
 import { addonT06Cases } from './addonT06Cases'
 import { addonT07Cases } from './addonT07Cases'
+import { addonT09Cases } from './addonT09Cases'
 import { addonT10Cases } from './addonT10Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
@@ -17360,6 +17361,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #356 T07：可组合输入行为与逐项注册状态（夹具组件经公开 behaviors 面
   // 注册行为链，断言面见 addonT07Cases.ts 头注）
   ...addonT07Cases,
+  // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
+  // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
+  ...addonT09Cases,
   // #359 T10：自己的命令、菜单与统一快捷键（夹具组件经公开 SDK 注册，
   // 断言面见 addonT10Cases.ts 头注）
   ...addonT10Cases,

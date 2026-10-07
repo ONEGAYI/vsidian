@@ -17,6 +17,7 @@ vsidian/
     │   │   ├── addonPageRegistry.ts         # 页面入口登记校验
     │   │   ├── addonRealpathGuard.ts        # realpath 逃逸守卫
     │   │   ├── addonRegistry.ts             # 附加组件注册表校验链
+    │   │   ├── addonRendererService.ts      # 宿主渲染服务
     │   │   ├── addonRuntime.ts              # 运行生命周期状态机
     │   │   ├── addonSettingsService.ts      # 附加组件设置服务
     │   │   └── addonWiring.ts               # 宿主装配与面板桥
@@ -77,6 +78,7 @@ vsidian/
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
+    │   ├── addonRenderers.ts       # 渲染提供者共享契约
     │   ├── addonSettings.ts        # 复杂设置共享模型
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts        # 变更重定位纯函数
@@ -146,6 +148,7 @@ vsidian/
         ├── addonBehaviors.ts           # 输入行为页面级链执行
         ├── addonCommands.ts            # 编辑器页命令/菜单注册表运行时
         ├── addonPageLoader.ts          # 页面装载器生产实现
+        ├── addonRenderers.ts           # webview 渲染桥
         ├── addonSettingsControls.ts    # 基础设置控件构造器
         ├── addonSettingsSection.ts     # 设置页附加组件分页
         ├── addonViews.ts               # 页面级视图句柄注册表

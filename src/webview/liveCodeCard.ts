@@ -28,7 +28,7 @@ import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { mermaidFencesField } from './liveMermaid'
 import { RENDERED_FENCE_LABELS, type FenceSpan } from '../shared/mermaid'
-import { graphicRendererFor } from './graphicRenderers'
+import { effectiveGraphicLabel, hasEffectiveGraphicRenderer } from './graphicRenderers'
 import { resolveCodeLanguage } from '../shared/codeLangs'
 import { hasHighlightEngine, highlightCodeRanges, splitRangeAtLineBreaks } from './codeHighlight'
 import { t } from '../shared/i18n'
@@ -493,10 +493,10 @@ export function buildCodeCardDecorations(
     // 折叠收起（#82）：光标在块内时临时展开；收起态无复制按钮（规格）。
     // 折叠只在卡片开启时呈现（朴素围栏无头部可挂 chevron）
     const isFolded = config.card && folded.has(fence.from) && !editing
-    // 渲染型围栏（当前仅 mermaid，标签见 shared/mermaid 的
-    // RENDERED_FENCE_LABELS）：呈现态展开让位专属渲染管线（SVG replace），
-    // 卡片零发射；编辑态与折叠收起态走通用卡片路径
-    if (fence.rendered && graphicRendererFor(fence.info.trim()) && !editing && !isFolded) {
+    // 渲染型围栏（内置见 RENDERED_FENCE_LABELS；#358 T09 起含附加组件
+    // 生效语言——按 live 模式生效管线判定）：呈现态展开让位专属渲染管线
+    // （SVG replace），卡片零发射；编辑态与折叠收起态走通用卡片路径
+    if (fence.rendered && hasEffectiveGraphicRenderer(fence.info.trim(), 'live') && !editing && !isFolded) {
       continue
     }
     const openLine = doc.lineAt(fence.from)
@@ -526,9 +526,10 @@ export function buildCodeCardDecorations(
     }
     const trimmed = fence.info.trim()
     // 渲染型围栏（mermaid）不在 codeLangs 注册表（无语法高亮语义），
-    // 标签从 RENDERED_FENCE_LABELS 取；其余未知语言原样显示 info
+    // 标签从生效显示名取（#358 T09：附加组件语言取其声明，内置语言取
+    // RENDERED_FENCE_LABELS）；其余未知语言原样显示 info
     const label = lang?.displayName
-      ?? (trimmed === '' ? 'Plain text' : RENDERED_FENCE_LABELS[trimmed] ?? trimmed)
+      ?? (trimmed === '' ? 'Plain text' : effectiveGraphicLabel(trimmed) ?? RENDERED_FENCE_LABELS[trimmed] ?? trimmed)
     // 复制按钮两态常驻（编辑态同样发射——渲染型围栏只有编辑态卡片）；
     // 收起态不发射（规格）
     const copy = config.copyButton && !isFolded

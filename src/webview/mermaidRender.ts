@@ -29,7 +29,7 @@
 // 渲染会命中旧主题缓存条目，容器永久滞留旧主题（主题竞态修复）。暗色取值
 // 经 mermaidTheme 以 --vscode-* 色板对齐正文（#110）；初始明暗态由
 // syncController mount 时播种（observer 只覆盖运行中的变化）。
-import { MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
+import { GRAPHIC_PROVIDER_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { t } from '../shared/i18n'
 import { buildDarkMermaidThemeVariables, resolveVscodeMermaidPalette } from './mermaidTheme'
 
@@ -68,6 +68,14 @@ let instanceSeq = 0
 const cache = new Map<string, CacheEntry>()
 /** 渲染串行队列：一屏多图逐个渲染，避免并行 render 的主线程长任务风暴 */
 let renderQueue: Promise<unknown> = Promise.resolve()
+
+
+/** #358 T09 该容器是否由附加组件渲染提供者所有（内置重渲扫描跳过；
+ *  附加组件容器经 graphicRenderers.refreshAddonGraphicBlocks 联动） */
+function isAddonOwned(el: HTMLElement): boolean {
+  const provider = el.getAttribute(GRAPHIC_PROVIDER_ATTR)
+  return provider !== null && provider !== 'builtin'
+}
 
 // ---- 懒加载 ----
 
@@ -370,6 +378,9 @@ export function setMermaidDarkTheme(next: boolean): void {
   for (const el of Array.from(
     document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS_NAMES.diagram}[${MERMAID_CODE_ATTR}]`),
   )) {
+    if (isAddonOwned(el)) {
+      continue // #358 T09：附加组件所有的容器不归 mermaid 管线重渲
+    }
     const code = el.getAttribute(MERMAID_CODE_ATTR)
     if (code !== null) {
       renderMermaidInto(el, code)
@@ -390,6 +401,9 @@ export function refreshMermaidErrorLocale(root: ParentNode): void {
   for (const el of Array.from(
     root.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS_NAMES.diagram}[${MERMAID_CODE_ATTR}]`),
   )) {
+    if (isAddonOwned(el)) {
+      continue // #358 T09：附加组件所有的容器不归 mermaid 管线重渲
+    }
     if (el.getAttribute(MERMAID_STATE_ATTR) === 'error') {
       renderMermaidInto(el, el.getAttribute(MERMAID_CODE_ATTR)!)
     }
@@ -418,6 +432,9 @@ export function resetMermaidLoadFailure(): void {
   for (const el of Array.from(
     document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS_NAMES.diagram}[${MERMAID_CODE_ATTR}]`),
   )) {
+    if (isAddonOwned(el)) {
+      continue // #358 T09：附加组件所有的容器不归 mermaid 管线重渲
+    }
     if (el.getAttribute(MERMAID_STATE_ATTR) === 'error') {
       renderMermaidInto(el, el.getAttribute(MERMAID_CODE_ATTR)!)
     }
