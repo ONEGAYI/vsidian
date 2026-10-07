@@ -347,3 +347,63 @@ describe('T07 观测面', () => {
     ])
   })
 })
+
+describe('T08 注册表全量对账上报', () => {
+  function reportHarness() {
+    const reports: Array<{ addonId: string; generation: number; behaviors: unknown[] }> = []
+    const runtime = new AddonBehaviorRuntime({
+      snapshotOf: (): AddonSnapshotResult => ({ ok: false, reason: 'view-disposed' }),
+      applyEdit: () => Promise.resolve({ ok: false, reason: 'read-only' } as AddonApplyEditsResult),
+      log: () => {},
+      report: (payload) => reports.push({ ...payload, behaviors: [...payload.behaviors] }),
+    })
+    return { runtime, reports }
+  }
+
+  it('注册成功后上报该组件当前全表（含名称等元数据，无回调）', () => {
+    const { runtime, reports } = reportHarness()
+    runtime.register('pub.a', 3, registration({ id: 'dash', name: '破折填充', description: '输入 - 补全', examples: ['- |'] }))
+    expect(reports).toHaveLength(1)
+    expect(reports[0]!.addonId).toBe('pub.a')
+    expect(reports[0]!.generation).toBe(3)
+    expect(reports[0]!.behaviors).toEqual([
+      expect.objectContaining({ addonId: 'pub.a', id: 'dash', name: '破折填充', description: '输入 - 补全', examples: ['- |'] }),
+    ])
+    // 同组件第二条注册：全表重报（两条在场）
+    runtime.register('pub.a', 3, registration({ id: 'space', name: '空格整理' }))
+    expect(reports).toHaveLength(2)
+    expect(reports[1]!.behaviors).toHaveLength(2)
+  })
+
+  it('拒绝面不上报（invalid-registration / duplicate-id 维持原表）', () => {
+    const { runtime, reports } = reportHarness()
+    runtime.register('pub.a', 1, registration({ id: 'ok', name: 'A' }))
+    expect(reports).toHaveLength(1)
+    expect(runtime.register('pub.a', 1, registration({ id: 'ok', name: '同名' }))).toEqual({ ok: false, reason: 'duplicate-id' })
+    expect(runtime.register('pub.a', 1, { id: 'no-callback' } as never)).toEqual({ ok: false, reason: 'invalid-registration' })
+    expect(reports).toHaveLength(1)
+  })
+
+  it('注销组件上报空表（全撤信号；代次回 0——空表不携带有效代次）', () => {
+    const { runtime, reports } = reportHarness()
+    runtime.register('pub.a', 2, registration({ id: 'x', name: 'X' }))
+    runtime.unregisterAddon('pub.a')
+    expect(reports).toHaveLength(2)
+    expect(reports[1]!.addonId).toBe('pub.a')
+    expect(reports[1]!.generation).toBe(0)
+    expect(reports[1]!.behaviors).toEqual([])
+    // 无在册行为时再次注销不重报
+    runtime.unregisterAddon('pub.a')
+    expect(reports).toHaveLength(2)
+  })
+
+  it('未注入 report 口（可选）时静默不报——旧装配不受影响', () => {
+    const runtime = new AddonBehaviorRuntime({
+      snapshotOf: (): AddonSnapshotResult => ({ ok: false, reason: 'view-disposed' }),
+      applyEdit: () => Promise.resolve({ ok: false, reason: 'read-only' } as AddonApplyEditsResult),
+      log: () => {},
+    })
+    expect(runtime.register('pub.a', 1, registration({ id: 'x', name: 'X' }))).toEqual({ ok: true, key: 'pub.a#x' })
+    runtime.unregisterAddon('pub.a')
+  })
+})

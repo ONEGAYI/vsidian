@@ -60,12 +60,14 @@ controller.mount(document.getElementById('app') ?? document.body, [
 // 的操作后端）与控制器（主正文句柄随 init 注册/注销）。
 // T07（#356）：输入行为 runtime（页面级一份）——behaviors 面的操作后端
 // （快照/提交走统一视图注册表；链驱动经 controller 注入主正文与嵌入实例），
-// 宿主状态（顺序覆盖/逐项开关）经 addon.behaviors.state 到达
+// 宿主状态（顺序覆盖/逐项开关）经 addon.behaviors.state 到达。
+// T08（#357）：注册表变化后全量对账上报宿主（行为冲突管理目录的数据源）
 const addonViews = new AddonViewRegistry()
 const addonBehaviors = new AddonBehaviorRuntime({
   snapshotOf: (instanceId) => addonViews.snapshotOf(instanceId),
   applyEdit: (addonId, opId, instanceId, request) => addonViews.applyEdits({ addonId, opId, instanceId, request }),
   log: (stage, addonId, detail) => console.warn(`[vsidian-addon-behavior] ${stage} ${addonId}: ${detail}`),
+  report: (payload) => vscode.postMessage({ kind: 'addon.behaviors.report', ...payload }),
 })
 
 // #359 T10 组件命令/菜单注册表（页面级一份）：SDK commands/menus 面的操作
