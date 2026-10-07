@@ -19,6 +19,7 @@ import { addonT10Cases } from './addonT10Cases'
 import { addonT11Cases } from './addonT11Cases'
 import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
+import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17386,4 +17387,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   ...addonT15InputCases,
   ...addonT15RendererCases,
   ...addonT15UiCases,
+  // #365 T16：双 VSIX 安装态、重启与升级回归（runInstalledAddons.mjs 阶段
+  // 矩阵——A 依赖缺失/B 补装全矩阵/C 发行态/D 重启保留/E 升级；用例体
+  // phaseGuard 自跳过非本阶段与非安装态会话，断言面见
+  // addonT16InstalledCases.ts 头注）
+  ...addonT16InstalledCases,
 ]
