@@ -143,6 +143,14 @@ SDK 载体建议是由主仓库生成声明、最小页面入口辅助代码和�
 
 目标从有效视图句柄取得，来源由 SDK 的组件和行为上下文添加，作者不能把请求伪装成另一组件。公开坐标沿用 UTF-16 偏移，页面文本采用 LF；宿主适配器继续负责行尾转换。
 
+**已实施（T06 #355）**。接口名称、错误类型与提交凭据随消费样例冻结如下，事实源 `src/shared/addonEditApi.ts`：
+
+- 句柄面：`views.list() / get(instanceId) / onCreated / onDisposed`；句柄 `info`（`instanceId`、`viewType: "main" | "embed" | "hover"`、`targetDocUri`、`mode: "live" | "reading"`、`editable`）+ 编辑面 `editor.getSnapshot() / applyEdits(request) / setSelection(ranges) / reveal(offset)`。embed 句柄身份为宿主 occurrence 序号（同目标多处嵌入各自独立句柄）；hover 句柄只读（写入拒 `read-only`）。仅编辑器页提供 views 面（设置页为 `undefined`）。
+- 快照：`{ text, selections, version, revision }`——LF 文本、多选区、权威文档版本、快照修订标记（本地输入与外部同步都推进修订，覆盖页面未确认输入窗口）。
+- 提交凭据：`{ opId, version }`——`opId` 由 SDK 按装载代次生成（`g<代次>-op<N>`，作者请求结构上不携带身份），`version` 与 `edit.ack` 同源。
+- 拒绝类型（八种可辨认拒绝）：`view-disposed` / `read-only` / `suspended`（含冲突暂停与空白格组合缓冲在场——组合期来源会丢失，保守拒绝可重试）/ `stale-snapshot` / `history-boundary`（HistoryBoundaryUnavailable 语义）/ `conflict` / `error` / `invalid-request`。
+- 生产实现：注册表 `src/webview/addonViews.ts`、Live 编辑面 `src/webview/liveInstance.ts`（快照修订、原子事务、凭据路由、`joinPrevious` 暂缓窗口合并为数组 origin 一笔出站）；消费样例 `test/fixtures/addon-v02/addon/t06Editor.ts` 与集成/键盘套件（`test/integration/suite/addonT06Cases.ts`、`test/browser/addonT06EditHost.mjs`）。
+
 ### 5.2 输入行为
 
 `behaviors.register` 登记稳定局部 ID、必填名称、可选说明和例子，以及业务处理回调。局部 ID 与组件 ID 共同组成持久身份，不以显示名作为存储键。
@@ -215,6 +223,13 @@ VSCode 1.82.3 的 `WorkspaceEdit` 会建立并关闭一条原生历史项，不�
 
 探针用了独立测试组件和固定、互不重复的文本状态。生产实现不能依赖这种简化匹配，必须接入现有版本、增量和确认管线。上述测试完成前，不发布已经满足完整历史契约的声明。
 
+**历史协调已实施（T06 #355，T03 #352 接入点先行）**。生产协调器 `src/host/addonHistoryCoordinator.ts`（per 目标文档，纯逻辑 + 端口注入）：
+
+- 条目流重建：ack 版本对位链（缺口/超前即 `mapping-lost`）+ 归属对位（atomic 开组、joinPrevious 并组、合并笔逐次来源保留、外来写入单步单位）。
+- `joinPrevious` 业务闸门四种拒绝形态（空日志、仅外来、组顶被打断、映射失配）——atomic 恒放行；拒绝经 `edit.ack` 的 `originRejection: "history-boundary"` 业务标记回传，不进冲突暂停。
+- 外部回流补完（F3 前置检查 + F4 版本吸收）、旧区深度镜像、组执行中断按实际吸收推进；持久化快照（workspaceState + 文本指纹）重启恢复，文本不一致保守 lost（F5：拒绝分组协调 ≠ 历史为空）。F1（脏目标不关闭临时标签）已随 T03 `closeTempTextTabsIfClean` 固化。
+- 验证（V01 矩阵生产版，非探针）：集成 `test/integration/suite/addonT06Cases.ts` 六用例（ABCD 组/拒绝矩阵/引用 B/外来交错与连按与在途并发/webview 重载与会话退役）+ 键盘 CDP `test/browser/addonT06EditHost.mjs` 六场景（真实键盘/IME 驱动生产控制器，修饰提交经公开 SDK）+ 单测契约（协调器 16 项、Live 实例 8 项、documentSession 4 项）。扩展宿主真重启不可测试进程内重放（V01 同等限制），持久化恢复语义由协调器单测承载。
+
 ## 7. 管理状态与持久化
 
 运行状态和用户偏好分别记录：
@@ -256,7 +271,7 @@ AGENTS 只保留触发入口，正文留在规格和技术方案。正式门禁�
 
 1. 发现、兼容和轻量注册，公开声明及输入／渲染／界面三类消费样例。（T01 #350 已落地发现/兼容/轻量注册与夹具消费样例；公开声明文档与三类正式消费样例待后续票。）
 2. 编辑器页与设置页的资源、工厂装配、普通停用和故障释放；补资源拒绝对照及实际 CM6 扩展接入。
-3. 输入行为、权威写回和历史协调；覆盖 IME、连续操作、引用 B、原生入口、失败和重载。
+3. 输入行为、权威写回和历史协调；覆盖 IME、连续操作、引用 B、原生入口、失败和重载。（权威写回与历史协调已由 T06 #355 实施——统一视图编辑 API + 生产历史协调器，V01 矩阵生产版验证；输入行为调度属 T07。）
 4. 渲染自动接管、已开文档热切换及首选恢复，设置分组、作用范围和行为冲突管理。
 5. Remote SSH、安装态双 VSIX、可信历史基线和兼容门禁；整理人工验收记录。
 
