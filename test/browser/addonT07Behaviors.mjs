@@ -3,17 +3,22 @@
 // 键盘事件经 Input.dispatchKeyEvent/insertText 原生派发，IME 组合经
 // Input.imeSetComposition 真实驱动 compositionstart..compositionend。
 // 行为链由 addon-t07 夹具组件经公开 SDK behaviors.register 注册
-// （bracket-close / dash-in-parens / space-in-parens——后两者同独占组），
+// （dash-fill / space-fill / tilde-fill——后两者同独占组 fill；行为族
+// 判定只依赖 inputText 键入 ^，重设计缘由见 t07Editor.ts 头注），
 // 调序与单项停用经宿主行为状态钩子（管理面等价入口）。
 // 宿主伴随套件：test/integration/addonT07BehaviorsSuite.ts。
 // 场景：
-// 1. 真实键盘键入 ( 触发默认序链（bracket 补 )、dash 填充、space 同组
-//    跳过）——文本、事件与轨迹三面一致；真实 Ctrl+Z 按 atomic 单位逐笔回退；
-// 2. 调序（space 前置）后 space 生效 dash 跳过；joinPrevious（space）与
-//    bracket 原子修饰一次撤回、再撤撤键入；
-// 3. 单项停用（关 bracket）后键入零修饰；行为状态重开后恢复默认；
+// 1. 真实键盘键入 ^ 触发默认序链（dash 插 -、space 组内先适用插空格
+//    并读取前序修饰后的快照、tilde 同组跳过）——文本、事件与轨迹三面
+//    一致；joinPrevious（space）并入 dash 原子修饰一次撤回、再撤撤键入；
+// 2. 调序（tilde 前置）后 tilde 与组外 dash 共同运行、space 被组内
+//    跳过；调序后均 atomic，三次 Ctrl+Z 逐笔回退；
+// 3. 单项停用（关 dash）后组内接位者生效；恢复默认（幂等写回）后
+//    默认链回归；
 // 4. IME 情境保持：组合定稿输入不触发行为链（驱动计数不增、零修饰）；
-// 5. 表格情境保持：表格行（tableRegionField 格区）内键入不触发链；
+// 5. 表格情境口径：源码行内键入照常驱动与受修饰（#124 同口径——排除
+//    面是网格编辑态 tableRegionField 而非表格行文本；网格 region 在场
+//    不驱动由单测 liveInstanceBehaviorDrive 钉住）；
 // 6. 固定 Tab 情境保持：Tab 键走缩进/越界链（非 input.type），不触发
 //    行为链且 Tab 语义保持。
 import assert from 'node:assert/strict'
