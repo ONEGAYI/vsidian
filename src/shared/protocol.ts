@@ -1908,6 +1908,12 @@ export type WebviewToHost =
   | { kind: 'addons.openExtensionsView' }
   /** #350 T01 打开某组件在 VSCode 的扩展详情页（VSCode 管理入口） */
   | { kind: 'addons.openExtension'; extensionId: string }
+  /** #354 T05 打开附加组件日志输出通道（故障排障入口——安装态日志标明
+   *  组件 ID、阶段与原因；完整诊断形态归 T12） */
+  | { kind: 'addons.openLogs' }
+  /** #354 T05 故障手动重试（先释放旧代次再重新唤醒；结果经 addons.state
+   *  推送回显——激活失败过的 activate 假成功时如实呈现等待注册） */
+  | { kind: 'addons.retry'; addonId: string }
   /** #351 T02 页面装载器就绪上报（编辑器/设置页 webview 安装装载器后与
    *  webview 重载后各发一次）：宿主按当前期望装载清单幂等推送指令 */
   | { kind: 'addonPage.ready' }
@@ -4341,10 +4347,14 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addons.openSearch':
     case 'addons.openExtensionsView':
     case 'addons.closeAddonPage':
+    case 'addons.openLogs':
     case 'addonPage.ready':
       return true
     case 'addons.openExtension':
       return isString(v.extensionId)
+    case 'addons.retry':
+      // #354 T05 故障手动重试（组件 ID）
+      return isString(v.addonId)
     case 'addons.setEnabled':
       // #351 T02 功能开关：组件 ID + 布尔；#353 T04 可选作用范围层
       return (

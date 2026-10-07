@@ -294,6 +294,10 @@ export class AddonSection implements SettingsPageSection {
       this.button(t('addons.openExtensionsView'), () => {
         this.send({ kind: 'addons.openExtensionsView' })
       }),
+      // #354 T05 日志入口（故障排障；无定义无设置页的故障组件也经此排障）
+      this.button(t('addons.openLogs'), () => {
+        this.send({ kind: 'addons.openLogs' })
+      }),
     )
     parent.append(actions)
 
@@ -353,6 +357,13 @@ export class AddonSection implements SettingsPageSection {
         this.send({ kind: 'addons.openAddonPage', addonId: entry.id })
       }))
     }
+    // #354 T05 故障排障：状态行手动重试（先释放旧代次再重新唤醒；结局经
+    // addons.state 推送回显）；日志入口在工具组与设置区排障块
+    if (entry.fault !== undefined) {
+      buttons.append(this.button(t('addons.retryFaulted'), () => {
+        this.send({ kind: 'addons.retry', addonId: entry.id })
+      }, 'vsidian-addons-retry'))
+    }
     const detail = this.button(t('addons.openDetail'), () => {
       this.send({ kind: 'addons.openExtension', extensionId: entry.id })
     })
@@ -409,12 +420,32 @@ export class AddonSection implements SettingsPageSection {
       area.append(hint)
     }
 
-    // 故障提示（自定义页撤下——基础控件保留）
+    // 故障排障块（#354 T05：状态呈现 + 日志入口 + 手动重试；完整诊断归
+    // T12——自定义页已撤下，已有定义时下方基础控件保留）
     if (payload.addon.faulted) {
-      const fault = document.createElement('p')
-      fault.className = 'vsidian-addons-fault-hint'
-      fault.textContent = `${t('addons.statusFaulted', { detail: payload.addon.faultReason ?? '' })} · ${t('addons.faultedSettingsHint')}`
-      area.append(fault)
+      const troubleshoot = document.createElement('div')
+      troubleshoot.className = 'vsidian-addons-fault-troubleshoot'
+      const faultTitle = document.createElement('h4')
+      faultTitle.className = 'vsidian-settings-group-title'
+      faultTitle.textContent = t('addons.faultTroubleshootTitle')
+      const reason = document.createElement('p')
+      reason.className = 'vsidian-addons-fault-hint'
+      reason.textContent = t('addons.statusFaulted', { detail: payload.addon.faultReason ?? '' })
+      const hint = document.createElement('p')
+      hint.className = 'vsidian-addons-fault-hint'
+      hint.textContent = t('addons.faultTroubleshootHint')
+      const faultActions = document.createElement('div')
+      faultActions.className = 'vsidian-addons-fault-actions'
+      faultActions.append(
+        this.button(t('addons.openLogs'), () => {
+          this.send({ kind: 'addons.openLogs' })
+        }),
+        this.button(t('addons.retryFaulted'), () => {
+          this.send({ kind: 'addons.retry', addonId: payload.addon!.addonId })
+        }, 'vsidian-addons-retry'),
+      )
+      troubleshoot.append(faultTitle, reason, hint, faultActions)
+      area.append(troubleshoot)
     }
 
     // 控件组：功能开关行 + 定义行

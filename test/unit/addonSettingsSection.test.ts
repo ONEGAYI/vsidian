@@ -511,3 +511,74 @@ describe('设置页侧栏三组结构（T05）', () => {
     expect(navText).toContain('Later')
   })
 })
+
+// ---- #354 T05：故障排障入口（日志 + 手动重试；完整诊断归 T12） ----
+
+describe('故障排障入口（T05）', () => {
+  it('故障状态行提供「重试组件」按钮；点击上送 addons.retry', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'a.broken', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'enable 异常：boom' } },
+    ]))
+    const retry = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '重试组件')
+    expect(retry).toBeTruthy()
+    retry!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.retry', addonId: 'a.broken' })
+  })
+
+  it('非故障组件行不提供重试按钮', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'a.ok', label: 'Ok', official: false, status: 'registered', enabled: true },
+    ]))
+    expect([...harness.parent.querySelectorAll('button')].some((b) => b.textContent === '重试组件')).toBe(false)
+  })
+
+  it('工具组提供「查看组件日志」入口；点击上送 addons.openLogs', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([]))
+    const logs = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '查看组件日志')
+    expect(logs).toBeTruthy()
+    logs!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.openLogs' })
+  })
+
+  it('设置区故障态呈现排障块：标题、提示、原因、日志与重试入口', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'a.broken', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'setup 异常：bad' }, hasSettingsDefinitions: true },
+    ]))
+    // 打开设置区（宿主推送 addons.settingsState）
+    const settingsState = {
+      kind: 'addons.settingsState',
+      apiVersion: '1.0.0',
+      draft: true,
+      open: 'a.broken',
+      hasWorkspace: false,
+      addon: {
+        addonId: 'a.broken',
+        label: 'Broken',
+        faulted: true,
+        faultReason: 'setup 异常：bad',
+        hasCustomPage: false,
+        enabled: { effective: true, userExplicit: true, workspaceExplicit: null, source: 'user' },
+        definitions: [],
+        values: {},
+      },
+      openAddonSettingsPage: null,
+    }
+    harness.dispatch(settingsState)
+    const troubleshoot = harness.parent.querySelector('.vsidian-addons-fault-troubleshoot')
+    expect(troubleshoot).toBeTruthy()
+    const text = troubleshoot!.textContent ?? ''
+    expect(text).toContain('组件故障暂停')
+    expect(text).toContain('setup 异常：bad')
+    const buttons = [...troubleshoot!.querySelectorAll('button')].map((b) => b.textContent)
+    expect(buttons).toContain('查看组件日志')
+    expect(buttons).toContain('重试组件')
+  })
+})

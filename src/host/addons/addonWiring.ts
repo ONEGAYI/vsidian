@@ -85,6 +85,10 @@ export interface AddonPageWiring {
   openExtensionsView(): void
   /** 某组件的 VSCode 扩展详情页 */
   openExtension(extensionId: string): void
+  /** #354 T05 打开附加组件日志输出通道（故障排障入口） */
+  openLogs(): void
+  /** #354 T05 故障手动重试（先释放旧代次再重新唤醒；状态经推送回显） */
+  retryFaulted(addonId: string): Promise<'ok' | 'unknown' | 'host-unavailable'>
   // ---- #351 T02 ----
   /** 设置页面板资源根（全部可打开组件的页面目录；面板 open 时并入） */
   settingsResourceRoots(): vscode.Uri[]
@@ -682,6 +686,15 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         }
         return true
       }
+      // ---- #354 T05 故障排障入口（日志 + 手动重试；状态经推送回显） ----
+      case 'addons.openLogs': {
+        channel.show()
+        return true
+      }
+      case 'addons.retry': {
+        void coordinator.retry(message.addonId)
+        return true
+      }
       default:
         return false
     }
@@ -700,6 +713,12 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     openExtension: (extensionId) => {
       void vscode.commands.executeCommand('extension.open', extensionId)
     },
+    // #354 T05 故障排障入口：日志输出通道（安装态日志标明组件 ID/阶段/原因）
+    openLogs: () => {
+      channel.show()
+    },
+    // #354 T05 故障手动重试：释放旧代次 + 重新唤醒（协调器如实呈现结局）
+    retryFaulted: (addonId) => coordinator.retry(addonId),
     settingsResourceRoots: settingsCapableRoots,
     attachSettingsPanel: (webview) => {
       settingsPanel = { webview, pushed: null }
@@ -818,6 +837,10 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         const result = runtime.clearEnabledOverride(args.addonId)
         return { result, state: getState() }
       }),
+      // #354 T05 故障手动重试（设置页 UI 的宿主侧等价入口——释放旧代次
+      // 并重新唤醒；activation-failed 短路被手动意图越过）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonRetry', (args: { addonId: string }) =>
+        coordinator.retry(args.addonId)),
     )
   }
 

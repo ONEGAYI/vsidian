@@ -309,3 +309,86 @@ describe('变化处理与合并', () => {
     expect(listener).toHaveBeenCalled()
   })
 })
+
+// ---- #354 T05：故障手动重试（先释放旧代次，再重新唤醒） ----
+
+describe('故障手动重试（T05）', () => {
+  it('重试释放旧代次并重新唤醒：已注册组件回 activating/awaiting-registration', async () => {
+    const addon = makeFake({
+      id: 'fixture.retry-me',
+      packageJSON: { displayName: 'Retry', ...OK_DECLARATION },
+      isActive: true,
+      activate: vi.fn(async () => undefined),
+    })
+    const harness = makeHarness([addon])
+    harness.coordinator.start()
+    await settle()
+    // 已激活且未注册 → awaiting-registration（原生路径先到）
+    expect(harness.coordinator.stateEntries()[0].status).toBe('awaiting-registration')
+    // 手动重试：状态清零回到 activating（重新走唤醒链——虽然 activate 已
+    // 幂等缓存，唤醒后如实呈现等待组件注册）
+    const result = await harness.coordinator.retry('fixture.retry-me')
+    expect(result).toBe('ok')
+    await settle()
+    expect(addon.activate).toHaveBeenCalled()
+    const entry = harness.coordinator.stateEntries()[0]
+    expect(['registered', 'awaiting-registration', 'activating']).toContain(entry.status)
+  })
+
+  it('重试已注册组件先经 registry.release（旧代次贡献释放）', async () => {
+    const addon = makeFake({
+      id: 'fixture.registered',
+      packageJSON: { displayName: 'Reg', ...OK_DECLARATION },
+      activate: vi.fn(async () => undefined),
+    })
+    const harness = makeHarness([addon])
+    harness.coordinator.start()
+    await settle()
+    // 组件代码注册（模拟经公开入口）
+    harness.registry.register({ id: 'fixture.registered' }, {})
+    expect(harness.registry.has('fixture.registered')).toBe(true)
+    const released: string[] = []
+    harness.registry.onChanged((addonId) => released.push(addonId))
+    await harness.coordinator.retry('fixture.registered')
+    expect(released).toContain('fixture.registered')
+    expect(harness.registry.has('fixture.registered')).toBe(false)
+  })
+
+  it('未知组件重试返回 unknown（不动状态）', async () => {
+    const harness = makeHarness([])
+    harness.coordinator.start()
+    await settle()
+    const result = await harness.coordinator.retry('fixture.never-seen')
+    expect(result).toBe('unknown')
+  })
+
+  it('激活失败过的组件可手动重试（绕过「不自动重试」短路——activate 假成功如实呈现）', async () => {
+    let calls = 0
+    const addon = makeFake({
+      id: 'fixture.boom',
+      packageJSON: { displayName: 'Boom', ...OK_DECLARATION },
+      activate: vi.fn(async () => {
+        calls++
+        if (calls === 1) {
+          throw new Error('first boot failed')
+        }
+        // 1.82.3 实证：失败后的再 activate() 假成功（resolve 不重抛）
+        return undefined
+      }),
+    })
+    const harness = makeHarness([addon])
+    harness.coordinator.start()
+    await settle()
+    expect(harness.coordinator.stateEntries()[0].status).toBe('activation-failed')
+    // 清单变化不自动重试（T01 短路）——重试必须走手动入口
+    harness.emitChange()
+    await settle()
+    expect(addon.activate).toHaveBeenCalledTimes(1)
+    const result = await harness.coordinator.retry('fixture.boom')
+    expect(result).toBe('ok')
+    await settle()
+    expect(addon.activate).toHaveBeenCalledTimes(2)
+    // 假成功如实呈现：唤醒后等组件注册（不虚报成功注册）
+    expect(harness.coordinator.stateEntries()[0].status).toBe('awaiting-registration')
+  })
+})
