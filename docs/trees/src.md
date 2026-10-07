@@ -78,6 +78,7 @@ vsidian/
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
     │   ├── addonSettings.ts        # 复杂设置共享模型
+    │   ├── addonUi.ts              # 附加组件界面贡献共享形状与校验
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts        # 变更重定位纯函数
     │   ├── chromeContract.ts       # 界面域样式契约探针表
@@ -148,6 +149,7 @@ vsidian/
         ├── addonPageLoader.ts          # 页面装载器生产实现
         ├── addonSettingsControls.ts    # 基础设置控件构造器
         ├── addonSettingsSection.ts     # 设置页附加组件分页
+        ├── addonUi.ts                  # 编辑器页界面贡献运行时
         ├── addonViews.ts               # 页面级视图句柄注册表
         ├── anchorFlash.ts              # 跳转目标高亮装饰状态
         ├── appearanceSettings.ts       # 外观合并分页
