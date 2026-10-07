@@ -107,7 +107,6 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't10-addon', 'dist', 'editor.js'),
       note: 't10-addon 编辑器页',
     },
-    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -181,7 +180,6 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t10Addon: {
       installDir: path.join(buildRoot, 't10-addon'),
       distDir: path.join(buildRoot, 't10-addon', 'dist'),
-    },
     },
     outsideDir,
   }
