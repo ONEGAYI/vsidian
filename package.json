@@ -510,6 +510,7 @@
     "test:browser": "node test/browser/run.mjs",
     "test:keybindings-host": "node test/browser/keybindingsHost.mjs",
     "test:addon-history-host": "node test/browser/addonHistoryHost.mjs",
+    "test:addon-t06-host": "node test/browser/addonT06EditHost.mjs",
     "test:text-appearance": "node esbuild.mjs && node test/integration/runTextAppearance.mjs",
     "check:stylecontract": "node scripts/checkStyleContract.mjs",
     "check:stylecontract:baseline": "node scripts/checkStyleContract.mjs --verify-baseline",

@@ -16,10 +16,19 @@
 //   （stale-snapshot）、伪来源（来源由 SDK 注入——条目归属对位）。
 // - 引用 B（嵌入内部 Live）：B 上的修饰经 embed 句柄提交、组撤回沿
 //   临时激活路由，A 全程不动（父子隔离）。
+// - 外来写入与修饰组交错、快速连按 undo 按单位推进、在途并发收敛不
+//   lost（V01 矩阵 7/8/9 生产版）。
+// - webview 面板重载后协调器条目与组归属保留、整组撤回/重做照常
+// （V01 矩阵 15 生产版）；会话退役重开为新协调器（空条目），新会话
+//   SDK 链路照常。
 //
-// 已知边界（如实声明，不以集成冒充）：真实 IME 键盘与悬停浮层的只读
-// 句柄属浏览器/交互套件；「webview 输入管线 origin 透传」由既有浏览器
-// 全量回归钉住（本票不改输入行为，仅新增透传）。
+// 已知边界（如实声明，不以集成冒充）：真实 IME 键盘与组合期行为由
+// test:addon-t06-host（test/browser/addonT06EditHost.mjs——独立桌面
+// CDP：真实键盘/IME 驱动生产控制器，修饰提交经本夹具组件的公开 SDK
+// views.applyEdits，V01 矩阵 17-20/9 生产版）承载；扩展宿主真重启
+// （reloadWindow 终止测试进程）不可集成内重放，协调器持久化快照恢复
+// 与保守 lost 由单测 addonHistoryCoordinator.test.ts 覆盖（V01 同等
+// 限制）；悬停浮层只读句柄拒绝矩阵由单测 addonViews.test.ts 覆盖。
 import * as vscode from 'vscode'
 
 const VIEW_TYPE = 'onegayi.vsidian.editor'
@@ -460,5 +469,156 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     assert(parentFinal.text === parentBefore, 'B 撤回全程父文档 A 不得变化')
     await closeAllEditors()
     console.log('[#355] 引用 B 修饰与整组撤回通过（embed 句柄、临时激活路由、父子隔离）')
+  }],
+
+  ['附加组件 T06：外来交错与快速连按撤回、在途并发收敛（#355）', async () => {
+    await ensureEnabled()
+    const file = 'lf.md'
+    const baseline = 'T06 并发基态\n'
+    await resetDocAndOpen(file, baseline)
+
+    // 外来写入 W（独立单步单位）先落地，随后 SDK 修饰组（V01 矩阵 8 生产版：
+    // 外来与修饰组交错，各自独立撤回单位）
+    const foreign = new vscode.WorkspaceEdit()
+    foreign.insert(wsUri(file), new vscode.Position(0, 0), 'W')
+    assert(await vscode.workspace.applyEdit(foreign), '外来写入应成功')
+    await new Promise((r) => setTimeout(r, 400))
+    const snapA = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
+      { ok: boolean; snapshot: { text: string; revision: number } }
+    assert(snapA.ok === true && snapA.snapshot.text.startsWith('W'), `外来写入应入快照，实际 ${JSON.stringify(snapA.snapshot.text.slice(0, 6))}`)
+    const applyA = (await collectOne(await queue('applyEdits', {
+      instanceId: 'main',
+      request: { revision: snapA.snapshot.revision, changes: [{ offset: snapA.snapshot.text.length, length: 0, text: '甲A' }] },
+    }))) as { ok: boolean; reason?: string }
+    assert(applyA.ok === true, `SDK 甲A 应成功，实际 ${JSON.stringify(applyA)}`)
+    const snapB = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
+      { ok: boolean; snapshot: { revision: number } }
+    const applyB = (await collectOne(await queue('applyEdits', {
+      instanceId: 'main',
+      request: { revision: snapB.snapshot.revision, changes: [{ offset: 0, length: 0, text: '乙B' }], history: 'joinPrevious' },
+    }))) as { ok: boolean; reason?: string }
+    assert(applyB.ok === true, `SDK 乙B 并组应成功，实际 ${JSON.stringify(applyB)}`)
+    const grouped = await docText(file)
+    assert(grouped.text === '乙BW甲A' + baseline, `交错后文本应按序落盘，实际 ${JSON.stringify(grouped.text.slice(0, 8))}`)
+
+    // 快速连按（V01 矩阵 9 生产版）：两次 undo 立即连续执行、不等中间收敛——
+    // LIFO 第一撤 AB 组、第二撤外来 W，恰回基态不多撤
+    await vscode.commands.executeCommand('vscode.openWith', wsUri(file), VIEW_TYPE)
+    await new Promise((r) => setTimeout(r, 300))
+    await vscode.commands.executeCommand('undo')
+    await vscode.commands.executeCommand('undo')
+    await poll('连按两撤收敛回基态', async () => {
+      const d = await docText(file)
+      return d.text === baseline ? d : undefined
+    })
+    const stateAfterRapid = await t06State(file)
+    assert(stateAfterRapid !== undefined && !stateAfterRapid.lost, '连按后协调器不得 lost')
+    // 第三次 undo：两单位已撤尽，不得越过基态再撤其他内容
+    await vscode.commands.executeCommand('undo')
+    await new Promise((r) => setTimeout(r, 500))
+    const afterThird = await docText(file)
+    assert(afterThird.text === baseline, `第三次 undo 不得越过基态，实际 ${JSON.stringify(afterThird.text.slice(0, 8))}`)
+
+    // 在途并发（V01 矩阵 7 生产版）：修饰指令刚塞入（未收结局）立即 undo——
+    // 撤销可能落在修饰落地前或后（F2 执行时点计算），终态必须收敛且不悬挂
+    const snapX = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
+      { ok: boolean; snapshot: { text: string; revision: number } }
+    const inFlightSeq = await queue('applyEdits', {
+      instanceId: 'main',
+      request: { revision: snapX.snapshot.revision, changes: [{ offset: snapX.snapshot.text.length, length: 0, text: 'X' }] },
+    })
+    await vscode.commands.executeCommand('undo')
+    const inFlightOutcome = await collectOne(inFlightSeq)
+    assert(inFlightOutcome !== undefined && (inFlightOutcome['ok'] === true || inFlightOutcome['ok'] === false),
+      `在途指令必须有终态结局（成功或可辨认拒绝），实际 ${JSON.stringify(inFlightOutcome)}`)
+    // 收敛：修饰若已落地则再撤一步；至多两次 undo 内回基态
+    for (let i = 0; i < 2 && (await docText(file)).text !== baseline; i++) {
+      await vscode.commands.executeCommand('undo')
+      await new Promise((r) => setTimeout(r, 400))
+    }
+    const converged = await docText(file)
+    assert(converged.text === baseline, `在途并发应收敛回基态，实际 ${JSON.stringify(converged.text.slice(0, 8))}`)
+    const stateAfterRace = await t06State(file)
+    assert(stateAfterRace !== undefined && !stateAfterRace.lost, '在途并发后协调器不得 lost')
+    await closeAllEditors()
+    console.log('[#355] 外来交错、快速连按与在途并发通过（单位推进、收敛、不 lost）')
+  }],
+
+  ['附加组件 T06：webview 重载映射继续与会话退役重建（#355）', async () => {
+    await ensureEnabled()
+    const file = 'lf.md'
+    const baseline = 'T06 重载基态\n'
+    await resetDocAndOpen(file, baseline)
+
+    // SDK 修饰组（A 原子 + B 并组）
+    const snapA = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
+      { ok: boolean; snapshot: { text: string; revision: number } }
+    const applyA = (await collectOne(await queue('applyEdits', {
+      instanceId: 'main',
+      request: { revision: snapA.snapshot.revision, changes: [{ offset: snapA.snapshot.text.length, length: 0, text: 'A' }] },
+    }))) as { ok: boolean; reason?: string }
+    assert(applyA.ok === true, `修饰 A 应成功，实际 ${JSON.stringify(applyA)}`)
+    const snapB = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
+      { ok: boolean; snapshot: { revision: number } }
+    const applyB = (await collectOne(await queue('applyEdits', {
+      instanceId: 'main',
+      request: { revision: snapB.snapshot.revision, changes: [{ offset: 0, length: 0, text: 'B' }], history: 'joinPrevious' },
+    }))) as { ok: boolean; reason?: string }
+    assert(applyB.ok === true, `修饰 B 并组应成功，实际 ${JSON.stringify(applyB)}`)
+
+    // webview 面板重载（V01 矩阵 15 生产版：同面板重复 ready——宿主侧
+    // 协调器与会话不动，页面与组件以新代次重建）
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    await poll('重载后面板就绪', async () => {
+      const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSessionState', wsUri(file).toString())) as
+        | { found: boolean; panels: { ready: boolean }[] }
+      return state.found && state.panels.some((panel) => panel.ready) ? state : undefined
+    })
+    await probePageReady(file)
+    const stateAfterReload = await t06State(file)
+    assert(stateAfterReload !== undefined && !stateAfterReload.lost && stateAfterReload.entries.length === 2,
+      `重载后协调器条目应保留，实际 ${JSON.stringify(stateAfterReload)}`)
+    const [e1, e2] = stateAfterReload.entries
+    assert(e1!.groupId !== undefined && e2!.groupId === e1!.groupId, '重载后组归属保持')
+
+    // 重载后整组撤回仍正确（映射继续）+ 重做恢复
+    await vscode.commands.executeCommand('vscode.openWith', wsUri(file), VIEW_TYPE)
+    await new Promise((r) => setTimeout(r, 300))
+    await vscode.commands.executeCommand('undo')
+    await poll('重载后整组撤回', async () => {
+      const d = await docText(file)
+      return d.text === baseline ? d : undefined
+    })
+    await vscode.commands.executeCommand('redo')
+    await poll('重做恢复整组', async () => {
+      const d = await docText(file)
+      return d.text === 'BA' + baseline ? d : undefined
+    })
+
+    // 会话退役重建：保存 → 关闭 → 重开（新协调器、空条目——文档关闭即
+    // 宿主栈退役，持久化 key 已清，恢复无意义）；新会话上 SDK 链路照常
+    await (await vscode.workspace.openTextDocument(wsUri(file))).save()
+    await closeAllEditors()
+    await new Promise((r) => setTimeout(r, 300))
+    await openEditorAndWait(file)
+    await probePageReady(file)
+    const freshState = await t06State(file)
+    assert(freshState !== undefined && freshState.entries.length === 0,
+      `重开应为新协调器（空条目），实际 ${JSON.stringify(freshState)}`)
+    const snapNew = (await collectOne(await queue('snapshot', { instanceId: 'main' }))) as
+      { ok: boolean; snapshot: { text: string; revision: number } }
+    assert(snapNew.ok === true && snapNew.snapshot.text === 'BA' + baseline, '新会话快照应见保存后的权威文本')
+    const applyNew = (await collectOne(await queue('applyEdits', {
+      instanceId: 'main',
+      request: { revision: snapNew.snapshot.revision, changes: [{ offset: snapNew.snapshot.text.length, length: 0, text: 'C' }] },
+    }))) as { ok: boolean; reason?: string }
+    assert(applyNew.ok === true, `新会话修饰应成功，实际 ${JSON.stringify(applyNew)}`)
+    await vscode.commands.executeCommand('undo')
+    await poll('新会话修饰撤回', async () => {
+      const d = await docText(file)
+      return d.text === 'BA' + baseline ? d : undefined
+    })
+    await closeAllEditors()
+    console.log('[#355] webview 重载映射继续、会话退役重建通过（条目保留、空条目重建、链路照常）')
   }],
 ]
