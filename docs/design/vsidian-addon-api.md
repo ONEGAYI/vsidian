@@ -2,7 +2,7 @@
 
 状态：2026-10-05 的第一版技术提议。产品规则以 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 和[规格](../specs/vsidian-addons.md)为准；本文收敛实现路线，尚未发布 SDK。字段、接口名称与首个 API 版本仍须随公开声明和消费样例冻结。
 
-**实施进度**：T01（#350，2026-10-07）已将第 2 节的身份发现、兼容检查与轻量注册接入生产路径（`src/shared/addonIdentity.ts`、`src/host/addons/`、设置页「附加组件」分页），并携带三个测试夹具扩展（`test/integration/addonFixtures/`）作为消费样例；真宿主集成测试覆盖两条激活路径、重复注册与清单刷新。`registerAddon` 当前仅含 `setup` 轻量接入回调，运行能力（enable、页面入口、通信）属 T02+；已实现部分仍是草案形状，不冒充已发布稳定 API。
+**实施进度**：T01（#350，2026-10-07）已将第 2 节的身份发现、兼容检查与轻量注册接入生产路径（`src/shared/addonIdentity.ts`、`src/host/addons/`、设置页「附加组件」分页），并携带三个测试夹具扩展（`test/integration/addonFixtures/`）作为消费样例；真宿主集成测试覆盖两条激活路径、重复注册与清单刷新。T02（#351，2026-10-07）已将第 3、4 节的两生命周期与页面装载接入生产：`registerAddon` 含 `setup`/`enable` 与页面入口注册（`settings.registerPage`/`pages.registerEditor`）形状，运行生命周期由 `src/host/addons/addonRuntime.ts` 驱动（普通关闭释放运行贡献保留设置能力、偏好持久、可归因异常全组件暂停）；页面 SDK 与装载协议契约在 `src/shared/addonPage.ts`，生产装载器 `src/webview/addonPageLoader.ts` 并入 main/settings 两入口，编辑器扩展挂载槽为 `liveInstance` 扩展数组末尾的 Compartment（V02 放行结论的生产缺口已闭合）；实验入口表登记 `cm6@1.0.0`。设置页分页新增功能开关与组件设置页挂载区。验证：单元（生命周期/装载器/登记校验/设置页 UI）、浏览器生产路径（`test:browser` 的 addonPageSdk 套件——真实键盘/IME/绘制层）与真宿主集成（`test/integration/suite/addonT02Cases.ts`——生产编辑器/设置页面板装载夹具组件）。宿主侧 realpath 符号链接校验仍归 T05。已实现部分仍是草案形状，不冒充已发布稳定 API。
 
 **安装后即可使用，作者通过代码注册能力**。清单负责识别与兼容，Vsidian 负责生命周期、设置和行为协调。输入与渲染代码在页面运行，宿主端保留权威文本和持久化能力。
 

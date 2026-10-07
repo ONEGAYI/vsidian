@@ -112,6 +112,7 @@ vsidian/
 │   ├── perf/…      # 性能实测数据与测量工具说明
 │   ├── research/   # 技术调研报告
 │   │   ├── data/                                  # 探针证据数据目录
+│   │   │   ├── addon-v02-probe-results.json        # V02 探针证据 JSON
 │   │   │   ├── appearance-probe-dark-custom.json   # 外观探针暗色轮证据
 │   │   │   └── appearance-probe-light-default.json # 外观探针亮色轮证据
 │   │   ├── obsidian-live-preview-editor.md        # Obsidian 技术栈与选型调研
@@ -123,6 +124,7 @@ vsidian/
 │   │   ├── vscode-quick-open-matching.md          # Ctrl+P 文件匹配源码核查
 │   │   ├── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
 │   │   ├── vsidian-addons-v01-history-probe.md    # V01历史分组验证报告
+│   │   ├── vsidian-addons-v02-page-sdk-probe.md   # V02 页面 SDK 探针报告
 │   │   └── wikilink-completion-v01-probe.md       # V01 补 ID 与尽力撤销探针报告
 │   ├── specs/      # 产品规格
 │   │   ├── anchor-navigation.md                 # 锚点跳转规格（标题/块引用/复制块链接）
