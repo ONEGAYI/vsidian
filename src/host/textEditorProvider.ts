@@ -1583,30 +1583,7 @@ export function createTextEditorProvider(
     const key = doc.uri.toString()
     let entry = sessions.get(key)
     if (entry) {
-      if (entry.doc === doc) {
-        return entry
-      }
-      // #355 T06：文档模型重开产生新 TextDocument 实例（dirty 关闭→
-      // backup→重开，或外部工具重写触发重载）——旧实例的 version/getText
-      // 冻结在关闭时刻，会话端口继续读旧实例会使 init 文本与版本对位
-      // 全部失真（集成实测：webview init 旧文本、权威版本错位即恒
-      // conflict）。会话端口闭包绑定旧实例无法安全迁移（versionLog 的
-      // 版本连续性不可跨实例验证），按退役口径整体重建。旧 entry 若仍有
-      // 面板记账（webview dispose 事件延迟），其面板已随 tab 关闭不可
-      // 交互，孤儿化安全；新面板挂新 entry。
-      for (const binding of refPorts.releaseTarget(key)) {
-        sessions.get(binding.panelDocUri)?.session.postToPanel(binding.panelSessionId, {
-          kind: 'refEdit.push',
-          portId: binding.portId,
-          fsPath: binding.fsPath,
-          message: { kind: 'session.suspended', version: entry.doc.version, reason: 'host-error' },
-        })
-      }
-      entry.session.dispose()
-      entry.flushHistorySnapshot?.()
-      void context.workspaceState.update(`vsidian.addonHistory.${key}`, undefined)
-      sessions.delete(key)
-      void blockIdCoordinator.disposeOrigin(key)
+      return entry
     }
     const fresh: SessionEntry = { session: undefined as never, doc, panels: new Map(), appliedEdits: 0, linkLog: [] }
     // T06（#355）历史协调器：条目流重建/归属闸门/外部回流补完/持久化恢复。
@@ -3845,9 +3822,8 @@ export function createTextEditorProvider(
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
         // #351 T02：附加组件面板路由回收（视图关闭——页面装载器随 webview
-        // 消亡，宿主侧不再向该面板投递指令）；#355 T06：携带 webview 身份——
-        // sessionId 跨会话重名，迟到的旧面板 dispose 不误删新面板 record
-        addons?.panelDisposed(sessionId, webviewPanel.webview)
+        // 消亡，宿主侧不再向该面板投递指令）
+        addons?.panelDisposed(sessionId)
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
