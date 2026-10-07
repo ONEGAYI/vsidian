@@ -28,6 +28,9 @@ export const SCAN_EXCLUDED_PREFIXES = [
   // 公开样式契约清单与其生成数据（#132）：指南文档数据源，不是 UI 文案
   'src/shared/styleContract.ts',
   'src/webview/styleGuideData.ts',
+  // 附加组件公开 API 语义清单与发行台账（#362 T13）：版本参考的文档数据源
+  // （中文为准），不是界面文案，不进任何 webview bundle（仅生成器与测试消费）
+  'src/shared/addonApiCatalog.ts',
 ] as const
 
 /** 汉字判定正则（仅汉字，全角标点不算）：扫描器与依赖同一口径的测试
