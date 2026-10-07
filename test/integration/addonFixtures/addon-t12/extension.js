@@ -60,6 +60,13 @@ function buildDefinition() {
       if (arm === 'enable') {
         throw new Error('T12 enable boom (armed)')
       }
+      // 防毒化门控（页面层）：未放行时不注册编辑器页入口——共享会话的
+      // 其他用例面板完全不装载本组件页面（零脚本装载、零轮询通道、
+      // 零装载事件，与基线时序一致）；放行后经 releaseAndReRegister
+      // 重新 enable 生效
+      if (!contribAllowed) {
+        return
+      }
       enableCtx.pages.registerEditor({
         entry: 'dist/editor.js',
         css: ['dist/editor.css'],

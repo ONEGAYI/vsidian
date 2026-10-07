@@ -122,13 +122,13 @@ async function openEditorPanel(file: string): Promise<void> {
 async function ensureContribEnabled(): Promise<void> {
   await vscode.commands.executeCommand(`${ADDON_ID}.setContrib`, true)
   await vscode.commands.executeCommand(`${ADDON_ID}.clearArm`)
-  let status = await runtimeStatus(ADDON_ID)
+  const status = await runtimeStatus(ADDON_ID)
   if (status?.runState === 'faulted') {
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonRetry', { addonId: ADDON_ID })
   }
-  if (status?.runState !== 'enabled') {
-    await vscode.commands.executeCommand(`${ADDON_ID}.releaseAndReRegister`)
-  }
+  // 放行后必须重接入：页面入口的注册在 enable 内（防毒化门控——未放行
+  // 的 enable 不 registerEditor），已 enabled 的旧代次不重跑 enable
+  await vscode.commands.executeCommand(`${ADDON_ID}.releaseAndReRegister`)
   await poll('夹具组件 enabled', async () => {
     const next = await runtimeStatus(ADDON_ID)
     return next?.runState === 'enabled' ? next : undefined
