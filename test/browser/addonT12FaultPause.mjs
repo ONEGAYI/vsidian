@@ -43,9 +43,12 @@ const args = buildTestHostArgs({ workspaceDir: dir,
   userDataDir: path.join(dir, 'user-data'), disableExtensions: true,
   extraExtensionPaths: [path.join(root, 'test/integration/addonFixtures/addon-t12')] })
 args.push(`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1')
-console.log(`[T12 键盘宿主] 独立桌面，回环 CDP 端口 ${port}，fixture ${dir}；测试宿主：${executable}${overrideExecutable ? '（VSIDIAN_TEST_VSCODE_PATH 覆盖）' : ''}`)
+// 宿主模式：Windows 默认独立桌面（不抢前台）；VSIDIAN_TEST_HOST_MODE=
+// foreground 时前台直启（独立桌面 HiddenDesktopHost 不可用环境的回退）
+const hostMode = process.env.VSIDIAN_TEST_HOST_MODE === 'foreground' ? 'foreground' : 'desktop'
+console.log(`[T12 键盘宿主] ${hostMode === 'desktop' ? '独立桌面' : '前台直启'}，回环 CDP 端口 ${port}，fixture ${dir}；测试宿主：${executable}${overrideExecutable ? '（VSIDIAN_TEST_VSCODE_PATH 覆盖）' : ''}`)
 const host = runTestHost({ executable, args, env: { ...process.env, WORKSPACE_DIR: dir,
-  VSIDIAN_TEST_HOOKS: '1' }, mode: 'desktop', timeoutMs: 420000,
+  VSIDIAN_TEST_HOOKS: '1' }, mode: hostMode, timeoutMs: 420000,
   reportPath: path.join(root, '.vscode-test/addon-t12-fault-pause.log') })
 let socket
 try {
@@ -167,6 +170,22 @@ try {
   }
   /** 真实键入（Input.insertText 走生产输入路径，userEvent input.type） */
   async function typeChar(text) { await focus(); await docEnd(); await call('Input.insertText', { text }) }
+  async function undo() {
+    await focus()
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 })
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: 2 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: 2 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17 })
+  }
+  /** 回基态（undo 序列——dirty 文档的外部改写不会被 VSCode 自动重载，
+   *  撤回比 closeAllEditors+重开轻；上限防御后仍不符则硬断言） */
+  async function resetToBase() {
+    for (let i = 0; i < 6 && (await command('text')) !== T0; i++) {
+      await undo()
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    }
+    assert.equal(await command('text'), T0)
+  }
 
   // ---- 1. 贡献放行并重装载：真实键入 ^ 触发行为修饰 ----
   await command('setContrib', { on: true })
@@ -178,8 +197,7 @@ try {
   console.log('[PASS] 贡献放行后真实键入触发行为修饰（^ → -T12-）')
 
   // ---- 2. arm=behavior：真实键入 ^ → 行为回调抛异常 → 全组件暂停 ----
-  writeFileSync(path.join(dir, 'keyboard.md'), T0)
-  await waitText(T0)
+  await resetToBase()
   await command('setArm', { arm: 'behavior' })
   await waitArmAck('behavior')
   await typeChar('^')
@@ -198,8 +216,7 @@ try {
   console.log('[PASS] 故障暂停后编辑器仍可用（普通输入不受影响）')
 
   // ---- 4. 清 arm + 手动重试 + 重接入：行为恢复（不自动重试） ----
-  writeFileSync(path.join(dir, 'keyboard.md'), T0)
-  await waitText(T0)
+  await resetToBase()
   await command('setArm', { arm: null })
   const retry = await command('retry')
   assert.equal(retry, 'ok', `手动重试应受理（实际 ${JSON.stringify(retry)}）`)
