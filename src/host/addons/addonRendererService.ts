@@ -82,6 +82,11 @@ export class AddonRendererService {
     this.refreshTableAndNotify()
   }
 
+  /** 当前登记候选的组件 ID 集（对账清表用——wiring reconcile 消费） */
+  knownProviderAddonIds(): string[] {
+    return [...this.candidates.keys()]
+  }
+
   /** 代次终结（registry release）：该组件候选整体撤销 */
   clearProviders(addonId: string): void {
     if (!this.candidates.has(addonId)) {

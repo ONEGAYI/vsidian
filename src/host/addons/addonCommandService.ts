@@ -50,8 +50,9 @@ export class AddonCommandService {
     }
     const seen = new Set<string>()
     for (const command of commands) {
-      if (command.commandId !== `${command.addonId}.${command.localId}`) {
-        // 命名空间不一致：整批拒绝（协议守卫已过滤形态，此处兜底归属）
+      if (command.addonId !== addonId || command.commandId !== `${command.addonId}.${command.localId}`) {
+        // 命名空间不一致或条目归属他组件（伪造归属）：整批拒绝（协议
+        // 守卫已过滤形态，此处兜底归属自洽）
         this.ports.log('commands-report-rejected', addonId, `namespace mismatch: ${command.commandId}`)
         return
       }

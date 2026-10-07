@@ -1132,6 +1132,13 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         behaviorCatalog.releaseAddon(addonId)
       }
     }
+    // T09 候选表对账：非 enabled（停用/故障/代次终结）清空该组件渲染
+    // 候选（可用性谓词本就使其不生效，此处清表避免候选残留至会话结束）
+    for (const addonId of rendererService.knownProviderAddonIds()) {
+      if (runtime.runtimeStatus(addonId)?.runState !== 'enabled') {
+        rendererService.clearProviders(addonId)
+      }
+    }
     notifyAddonPanels()
   })
   // #359 T10：命令目录变化 → 设置页目录推送（快捷键分页合并展示对账）
