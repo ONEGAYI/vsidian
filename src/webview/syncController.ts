@@ -453,6 +453,9 @@ export class WebviewSyncController {
    *  设置页）、全局消息接收与命令分派。view 经下方 getter 透出（既有
    *  根特性代码的只读消费面不变） */
   private live: LiveEditorInstance | undefined
+  /** #354 T05 附加组件扩展重配的挂起意图（输入在途时暂存，落定冲刷；
+   *  undefined = 无挂起——null 与 []（摘除/空）是有效挂起值） */
+  private pendingAddonExtensions: Extension[] | null | undefined = undefined
   /** #351 T02 附加组件装载器观测探针（main.ts 安装装载器后挂载；缺省不报） */
   private addonPageProbe: (() => import('../shared/addonPage').AddonLoaderStats) | undefined
   private sessionId = ''
@@ -1519,6 +1522,11 @@ export class WebviewSyncController {
       send: (message) => {
         this.bridge.postMessage(message)
       },
+      // #354 T05 热切换安全收尾：本地输入落定（IME 组合结束/提交 ack/暂缓
+      // 发出）后冲刷挂起的组件扩展重配意图
+      onLocalInputSettled: () => {
+        this.flushPendingAddonExtensions()
+      },
       persistState: () => this.persistState(),
       images: this.images!,
       isLiveActive: () => this.viewMode === 'live',
@@ -1828,6 +1836,9 @@ export class WebviewSyncController {
     // 随 destroy 移除）；根 chrome 各自独立释放
     this.live?.destroy()
     this.live = undefined
+    // #354 T05：实例终结时丢弃挂起的组件扩展重配意图——旧意图不作用于
+    // 后续新实例（新实例的组件扩展装配由装载器/宿主指令另行对账）
+    this.pendingAddonExtensions = undefined
     this.banner?.remove()
     this.banner = undefined
     this.toolbar?.remove()
@@ -1888,9 +1899,28 @@ export class WebviewSyncController {
   }
 
   /** #351 T02：附加组件扩展槽重配（转发给主正文 Live 实例；装载器的
-   *  attachExtensions 回调接这里——生产槽在 liveInstance extensions() 末尾） */
+   *  attachExtensions 回调接这里——生产槽在 liveInstance extensions() 末尾）。
+   *  #354 T05 热切换安全收尾：IME 组合或编辑提交未完成（本地输入在途，
+   *  hasPendingLocalInput）时不立即重配——暂存最新意图，输入落定
+   *  （onLocalInputSettled → flushPendingAddonExtensions）后冲刷执行；
+   *  组合输入与在途提交不因切换丢失，文档状态跨 reconfigure 保留 */
   reconfigureAddonExtensions(extensions: Extension[] | null): void {
+    if (this.live?.hasPendingLocalInput()) {
+      this.pendingAddonExtensions = extensions
+      return
+    }
+    this.pendingAddonExtensions = undefined
     this.live?.reconfigureAddonExtensions(extensions)
+  }
+
+  /** #354 T05：冲刷挂起的组件扩展重配意图（输入落定回调；只执行最新） */
+  private flushPendingAddonExtensions(): void {
+    if (this.pendingAddonExtensions === undefined) {
+      return
+    }
+    const pending = this.pendingAddonExtensions
+    this.pendingAddonExtensions = undefined
+    this.live?.reconfigureAddonExtensions(pending)
   }
 
   /** #351 T02：附加组件装载器观测探针挂载（main.ts 安装装载器后调用；
