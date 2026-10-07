@@ -98,6 +98,8 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // （CDP composition 驱动，复用 addonPageSdkFixture 生产链路）
   'addonSidebar',
   'addonHotSwitch',
+  // T08（#357）：行为冲突管理（注册行为调序/逐项开关——真实键盘 + 绘制层）
+  'addonT08BehaviorsManage',
   // #359 T10：组件命令/菜单/统一快捷键（生产命令注册表装配——真实键盘
   // 默认绑定/绑定/清空、真实右键组件簇菜单与点击执行、宿主转发路径、
   // 停用回收）紧随附加组件族
