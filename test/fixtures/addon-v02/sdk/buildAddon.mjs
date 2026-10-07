@@ -85,6 +85,12 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't06-addon', 'dist', 'editor.js'),
       note: 't06-addon 编辑器页',
     },
+    // #356 T07：可组合输入行为夹具组件（编辑器页行为注册 + 事件上报）
+    {
+      entry: path.join(fixtureRoot, 'addon', 't07Editor.ts'),
+      outfile: path.join(buildRoot, 't07-addon', 'dist', 'editor.js'),
+      note: 't07-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -140,6 +146,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t06Addon: {
       installDir: path.join(buildRoot, 't06-addon'),
       distDir: path.join(buildRoot, 't06-addon', 'dist'),
+    },
+    // #356 T07：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t07）
+    t07Addon: {
+      installDir: path.join(buildRoot, 't07-addon'),
+      distDir: path.join(buildRoot, 't07-addon', 'dist'),
     },
     outsideDir,
   }
