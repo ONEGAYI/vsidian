@@ -19,6 +19,8 @@ import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec,
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
 import type { DocumentChangeReason, HostToWebview, PasteHistory, PasteStage, SerChange, WebviewToHost } from '../shared/protocol'
+import type { AddonApplyEditsResult, AddonEditorSnapshot, AddonSelectionRange } from '../shared/addonEditApi'
+import type { EditOriginMeta } from '../shared/editOrigin'
 import {
   CODEBLOCK_CARD_DEFAULT,
   CODEBLOCK_CARD_KEY,
@@ -76,6 +78,21 @@ import { createWikilinkSuggest, type WikilinkSuggestController } from './wikilin
  *  P2-02 起随同步机制本体迁入本模块；symbolAutocomplete /
  *  frontmatterEditing / perfProbe 经 re-export 或直连消费同一实例 */
 export const externalSync = Annotation.define<boolean>()
+
+/** T06（#355）附加组件修饰事务标记：applyAddonEdit 派发的事务携带，
+ *  出站管线（recordLocalChangeSet）读它把来源元数据附加到 edit.request
+ *  的 origin 字段（单笔单值 / 同组未提交合并数组）。来源身份由 SDK 注入
+ *  （addonId/opId），作者请求不可携带——不能冒充其他组件 */
+export const addonEditOriginTag = Annotation.define<{ origins: EditOriginMeta[] }>()
+
+/** T06（#355）SDK applyEdits 实例侧实现——事务净插入长度（选区边界校验） */
+function totalInserted(changes: readonly { text: string }[]): number {
+  return changes.reduce((sum, c) => sum + c.text.length, 0)
+}
+
+/** T06（#355）SDK applyEdits 的提交凭据路由：opId → 结算回调。出站请求
+ *  确认（ack ok / 业务拒绝 / 失败 / 释放）时逐 opId 恰好结算一次 */
+type AddonPendingResolver = (result: AddonApplyEditsResult) => void
 
 /** #153 撤销分段停顿阈值（ms）：连续输入停顿达到该时长，或用户主动移
  *  光标（点击 / 方向键选区移动），下一笔输入即开新撤销段——每段独立一笔
@@ -447,6 +464,14 @@ export class LiveEditorInstance {
   /** 暂停写回：保留本地文本、忽略外部增量、不再发送 edit.request */
   private suspended = false
   private conflictRevision: number
+  /** T06（#355）快照修订标记：页面文档代次计数——本地输入与外部同步
+   *  （增量/全文重置）都推进。getSnapshot 返回当前值；applyEdits 请求
+   *  携带快照值，执行时点失配即拒绝 stale-snapshot（覆盖「宿主版本未变
+   *  但页面有未确认输入」窗口——设计 §5.1 修订标记不能只看宿主版本） */
+  private docRevision = 0
+  /** T06（#355）SDK applyEdits 凭据路由（opId → 结算回调）：出站请求终态
+   *  （ack ok/业务拒绝/失败）或释放（destroy/暂停）时逐 opId 恰好一次 */
+  private readonly addonPending = new Map<string, AddonPendingResolver>()
   /** 发出后未收 ok ack 的请求 seq 集合（全部确认后未确认集清空） */
   private inFlight = new Set<number>()
   /** 未确认变更集：本地文档相对 baseVersion 权威文本的累积变更；
@@ -455,8 +480,9 @@ export class LiveEditorInstance {
   /** 已发出未确认事务（FIFO）：坐标为发出时逆穿未确认集的 baseVersion 系
    *  投影（C-2），ack ok 后按序剥离复合进已确认链。#314 粘贴元数据
    *  （paste 协议字段 / plainPasteFeedback 本地反馈 ID）随事务携带：
-   *  ack 剥离前回读驱动根的反馈落定 */
-  private sentTxns: { seq: number; changes: SerChange[]; paste?: PasteStage; plainPasteFeedback?: string }[] = []
+   *  ack 剥离前回读驱动根的反馈落定。T06（#355）origins：SDK applyEdits
+   *  事务的来源列表（凭据路由按 opId 结算） */
+  private sentTxns: { seq: number; changes: SerChange[]; paste?: PasteStage; plainPasteFeedback?: string; origins?: EditOriginMeta[] }[] = []
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
@@ -465,8 +491,10 @@ export class LiveEditorInstance {
    *  该段开始时的本地文档；sendDeferredLocal 每次只出站队首段（余段留守
    *  暂缓集），队首段 ack 收敛后依次出站——每段一笔 edit.request = 一条
    *  宿主 undo 记录。重置与 deferredLocal 同步。#314 粘贴元数据随段携带
-   *  （段出站时附到 sentTxns 与 edit.request） */
-  private deferredSegments: { changes: ChangeSet; paste?: PasteStage; plainPasteFeedback?: string }[] = []
+   *  （段出站时附到 sentTxns 与 edit.request）。T06（#355）origins 随段
+   *  携带；同组段在此合并（原子段 + 并入的 joinPrevious 段拼接来源列表
+   *  出站 = 一条宿主历史项，逐次来源保留） */
+  private deferredSegments: { changes: ChangeSet; paste?: PasteStage; plainPasteFeedback?: string; origins?: EditOriginMeta[] }[] = []
   /** #153 撤销分段：最近一笔本地输入（含组合候选事务）的时间戳；null
    *  表示尚无本地输入（不启动停顿计时）。停顿判定是惰性的——只在下一笔
    *  输入/组合开始时回看间隔，不设分段定时器 */
@@ -669,12 +697,161 @@ export class LiveEditorInstance {
       clearTimeout(this.flushTimer)
       this.flushTimer = undefined
     }
+    // T06（#355）实例销毁：全部在途 SDK 凭据以 view-disposed 终结（不泄漏
+    // pending Promise；之后到达的 ack 无可结算对象）
+    this.settleAllAddonPending('view-disposed')
     this.wikilinkSuggest?.destroy()
     if (this.view) {
       unregisterImagePopupSource(this.view)
     }
     this.view?.destroy()
     this.view = undefined
+  }
+
+  // ---- T06（#355）附加组件统一视图编辑面（SDK views 的实例侧实现） ----
+
+  /** seq → 来源列表（ack 结算路由；仅 SDK 事务携带。暂停清理后查不到，
+   *  对应凭据已在 enterSuspended 以 suspended 结算——幂等不重复） */
+  private originsOfSeq(seq: number): EditOriginMeta[] | undefined {
+    return this.sentTxns.find((t) => t.seq === seq)?.origins
+  }
+
+  /** 逐 opId 恰好一次结算（重复/未知 opId 静默丢弃） */
+  private settleAddonOrigin(opId: string, result: AddonApplyEditsResult): void {
+    const resolve = this.addonPending.get(opId)
+    if (resolve !== undefined) {
+      this.addonPending.delete(opId)
+      resolve(result)
+    }
+  }
+
+  /** 全部在途凭据终结（destroy / 暂停） */
+  private settleAllAddonPending(reason: 'view-disposed' | 'suspended' | 'conflict'): void {
+    for (const opId of [...this.addonPending.keys()]) {
+      this.settleAddonOrigin(opId, { ok: false, reason })
+    }
+  }
+
+  /** 快照修订标记（getSnapshot 的 revision 源） */
+  addonDocRevision(): number {
+    return this.docRevision
+  }
+
+  /** SDK getSnapshot：文本（含页面未确认输入）、多选区、权威版本与修订
+   *  标记（UTF-16/LF）。视图不在场（reading/销毁）返回 null */
+  snapshotForAddon(): AddonEditorSnapshot | null {
+    const view = this.view
+    if (!view) {
+      return null
+    }
+    return {
+      text: view.state.doc.toString(),
+      selections: view.state.selection.ranges.map((r) => ({ anchor: r.anchor, head: r.head })),
+      version: this.baseVersion,
+      revision: this.docRevision,
+    }
+  }
+
+  /** SDK applyEdits 实例侧执行：快照校验 → 本地原子事务（changes + 可选
+   *  selection + 来源标记）→ 出站管线携带 origin → 凭据在 ack 终态结算。
+   *  来源列表由 SDK 层构造注入（首项 = 本次提交声明：atomic 或单笔
+   *  joinPrevious；合并并入发生在暂缓窗口的段拼接）。 */
+  applyAddonEdit(input: {
+    request: { revision: number; changes: SerChange[]; selection?: AddonSelectionRange }
+    origins: EditOriginMeta[]
+  }): Promise<AddonApplyEditsResult> {
+    const view = this.view
+    if (!view) {
+      return Promise.resolve({ ok: false, reason: 'view-disposed' })
+    }
+    if (this.suspended) {
+      return Promise.resolve({ ok: false, reason: 'suspended' })
+    }
+    // 空白格组合缓冲在场：程序化写入会被组合缓冲吸收（来源丢失）——
+    // 保守拒绝（组合结束后可重试；已知边界，不静默错位）
+    if (this.blankComposition !== null) {
+      return Promise.resolve({ ok: false, reason: 'suspended' })
+    }
+    // 快照修订失配（旧快照）：明确拒绝，不自动重定位重试（设计 §5.1：
+    // 内核输入重定位与 API 旧快照拒绝是两件事，不混成任意自动重试）
+    if (input.request.revision !== this.docRevision) {
+      return Promise.resolve({ ok: false, reason: 'stale-snapshot' })
+    }
+    // 变更边界校验（非法请求不进 CM6 事务——dispatch 会抛出而非拒绝）
+    const docLength = view.state.doc.length
+    for (const c of input.request.changes) {
+      if (c.offset < 0 || c.length < 0 || c.offset + c.length > docLength) {
+        return Promise.resolve({ ok: false, reason: 'invalid-request' })
+      }
+    }
+    if (input.request.selection !== undefined) {
+      const growth = totalInserted(input.request.changes) - input.request.changes.reduce((sum, c) => sum + c.length, 0)
+      const maxPos = Math.max(input.request.selection.anchor, input.request.selection.head)
+      if (maxPos > docLength + growth) {
+        return Promise.resolve({ ok: false, reason: 'invalid-request' })
+      }
+    }
+    const netChanged = input.request.changes.some((c) => c.length > 0 || c.text.length > 0)
+    if (!netChanged) {
+      // 零文本变更：选区类操作——本地原子应用（可选 selection 事务）、不
+      // 出站、不造文本撤销项，凭据以当前基线签发（宿主无对应条目）
+      if (input.request.selection !== undefined) {
+        view.dispatch({
+          selection: EditorSelection.single(input.request.selection.anchor, input.request.selection.head),
+          annotations: addonEditOriginTag.of({ origins: input.origins }),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        credential: { opId: input.origins[0]!.opId, version: this.baseVersion },
+      })
+    }
+    return new Promise<AddonApplyEditsResult>((resolve) => {
+      for (const o of input.origins) {
+        this.addonPending.set(o.opId, resolve)
+      }
+      const changes = input.request.changes.map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text }))
+      view.dispatch({
+        changes,
+        ...(input.request.selection !== undefined
+          ? { selection: EditorSelection.single(input.request.selection.anchor, input.request.selection.head) }
+          : {}),
+        annotations: addonEditOriginTag.of({ origins: input.origins }),
+      })
+    })
+  }
+
+  /** SDK setSelection：本地选区事务（零文本变更，不出发站、不造撤销项）；
+   *  返回是否接受（视图不在场或暂停拒绝） */
+  setSelectionForAddon(ranges: AddonSelectionRange[]): boolean {
+    const view = this.view
+    if (!view || this.suspended || ranges.length === 0) {
+      return false
+    }
+    const docLength = view.state.doc.length
+    for (const r of ranges) {
+      if (Math.max(r.anchor, r.head) > docLength) {
+        return false
+      }
+    }
+    view.dispatch({ selection: EditorSelection.create(
+      ranges.map((r) => EditorSelection.range(r.anchor, r.head)),
+      0,
+    ) })
+    return true
+  }
+
+  /** SDK reveal：滚动定位（零文本变更；不移动光标——只读定位语义） */
+  revealForAddon(offset: number): boolean {
+    const view = this.view
+    if (!view) {
+      return false
+    }
+    if (offset < 0 || offset > view.state.doc.length) {
+      return false
+    }
+    view.dispatch({ effects: EditorView.scrollIntoView(offset, { y: 'center' }) })
+    return true
   }
 
   // ---- #376 T01 双链联想会话（根路由与模式切换消费） ----
@@ -883,12 +1060,34 @@ export class LiveEditorInstance {
 
   /** edit.ack（ok 推进基线；fail 保留文本进暂停，干净时以附文重置） */
   handleEditAck(message: Extract<HostToWebview, { kind: 'edit.ack' }>): void {
+    // T06（#355）SDK 凭据结算先行：暂停态的迟到 ack 也须终结 pending
+    // Promise（出站在暂停前已发生；宿主可能已发出失败 ack）
+    if (!message.ok) {
+      const originsOfSeq = this.originsOfSeq(message.seq)
+      if (originsOfSeq !== undefined) {
+        const reason: 'history-boundary' | 'error' | 'conflict' =
+          message.originRejection === 'history-boundary' ? 'history-boundary' :
+          message.reason === 'error' ? 'error' : 'conflict'
+        for (const o of originsOfSeq) {
+          this.settleAddonOrigin(o.opId, { ok: false, reason })
+        }
+      }
+    }
     if (this.suspended) {
       // 暂停态：写回已停，任何 ack 结果都不再改变本地状态
       return
     }
     if (message.ok) {
       this.inFlight.delete(message.seq)
+      {
+        // T06（#355）SDK 凭据结算：version 与 ack 同源（宿主确认后的凭据）
+        const originsOfSeq = this.originsOfSeq(message.seq)
+        if (originsOfSeq !== undefined) {
+          for (const o of originsOfSeq) {
+            this.settleAddonOrigin(o.opId, { ok: true, credential: { opId: o.opId, version: message.version } })
+          }
+        }
+      }
       // #314 粘贴元数据回读：剥离已确认队列**之前**找本事务（confirmSentTxn
       //  会 splice 掉），根据此标记 pasteFeedback 落定（时机对齐 main 版
       //  ok 分支开头；无元数据的事务零回调）
@@ -923,8 +1122,31 @@ export class LiveEditorInstance {
       // 新请求会留在 inFlight，下方释放自会判定继续等待）——此刻撤销
       // 意图可安全发出
       this.releasePendingHistory()
-      // P2-05：ack 收敛可能清空在途输入（触发挂起意图重新检查最新 dirty）
+      // P2-05：ack 收敛可能清空在途输入（触发挂起意图重新检查 dirty）
       this.notifyInputSettle()
+      return
+    }
+    // T06（#355）业务拒绝（joinPrevious 无可确认前项）：面板不进冲突暂停
+    // ——业务声明错误 ≠ 同步冲突。无其他叠加输入时以权威全文重置（回滚
+    // 被拒事务的本地效果）；有叠加输入（其他在途/暂缓/组合）时保留输入
+    // 走暂停（用户输入优先）
+    if (message.originRejection === 'history-boundary') {
+      this.inFlight.delete(message.seq)
+      this.sentTxns = this.sentTxns.filter((t) => t.seq !== message.seq)
+      const hasOther =
+        this.inFlight.size > 0 || this.deferredLocal !== null || this.composing ||
+        this.blankComposition !== null || this.hasBufferedSync()
+      if (!hasOther) {
+        this.unconfirmed = null
+        this.ackedChain = null
+        this.sentTxns = []
+        if (typeof message.text === 'string') {
+          this.handleFullSync(message.version, message.text, { source: 'ack-fail' })
+        }
+        this.notifyInputSettle()
+        return
+      }
+      this.enterSuspended()
       return
     }
     // ok:false（conflict/error）：本地有未确认输入时保留文本并暂停；
@@ -1043,6 +1265,9 @@ export class LiveEditorInstance {
     const hasUnconfirmed =
       this.unconfirmed !== null || this.inFlight.size > 0 || this.deferredLocal !== null || this.composing
     this.suspended = true
+    // T06（#355）在途 SDK 凭据以 suspended 终结（暂停后 ack 结果不再改变
+    // 本地状态；宿主的拒绝 ack 到达时幂等不重复结算）
+    this.settleAllAddonPending('suspended')
     this.wikilinkSuggest?.close()
     this.deps.onSuspendedChange?.(true)
     if (hasUnconfirmed) {
@@ -1307,9 +1532,20 @@ export class LiveEditorInstance {
     }
   }
 
-  /** 普通事务与空白格组合净变更共用同一出站/未确认坐标链。 */
-  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[]): void {
+  /** 普通事务与空白格组合净变更共用同一出站/未确认坐标链。
+   *  T06（#355）origins：SDK applyEdits 事务（addonEditOriginTag）的来源
+   *  列表随事务传入；暂缓窗口内 joinPrevious 并入同组队尾段（合并笔），
+   *  正常路径逐笔出站（各自成条目、同组连续撤回）。 */
+  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[], origins?: EditOriginMeta[]): void {
     if (changes.length === 0 || !this.sessionId) {
+      if (origins !== undefined) {
+        // 无净文本变更的 SDK 请求不进文本管线（纯选区语义，不造文本
+        // 历史）：逐 opId 以当前基线版本签发凭据；本地派发时 selection-only
+        // 事务本就不触发本方法，此为防御分支
+        for (const o of origins) {
+          this.settleAddonOrigin(o.opId, { ok: true, credential: { opId: o.opId, version: this.baseVersion } })
+        }
+      }
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
     }
@@ -1329,16 +1565,38 @@ export class LiveEditorInstance {
     if (this.composing || this.deferredLocal || (
       this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
     )) {
-      if (this.deferredLocal && segmentBoundary) {
+      // T06（#355）同组未提交合并（技术方案 §6 表格第一行）：joinPrevious
+      // 事务在暂缓窗口并入队尾同组段（组首 atomic 段未被外来写入打断的
+      // 本地镜像 = 段仍在暂缓集且带组首来源），合成一笔出站 = 一条宿主
+      // 历史项；组首 atomic 事务开新段
+      const mergeIntoPreviousSegment =
+        origins !== undefined && origins.length === 1 && origins[0]!.undo === 'joinPrevious' &&
+        this.deferredSegments.length > 0
+      // SDK 修饰事务（带来源）不并入用户输入段（不同撤回单位）：atomic
+      // 强制开新段；joinPrevious 仅并入「同组队尾 SDK 段」（上方合并判定）
+      if (this.deferredLocal && (segmentBoundary || origins !== undefined) && !mergeIntoPreviousSegment) {
         // #153：分段边界落地——本笔开新撤销段（切分点落在字符边界，两段
         // 定义域依次衔接，出站坐标由 sendDeferredLocal 依次映射）
-        this.deferredSegments.push({ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
+        this.deferredSegments.push({ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}), ...(origins ? { origins } : {}) })
       } else if (this.deferredSegments.length > 0) {
         const last = this.deferredSegments.length - 1
         const segment = this.deferredSegments[last]!
-        this.deferredSegments[last] = { ...segment, changes: segment.changes.compose(changeSet) }
+        if (mergeIntoPreviousSegment && segment.origins !== undefined) {
+          // 并入：来源列表拼接（首项仍为组首 atomic）；变更复合
+          this.deferredSegments[last] = {
+            ...segment,
+            changes: segment.changes.compose(changeSet),
+            origins: [...segment.origins, ...origins!],
+          }
+        } else if (mergeIntoPreviousSegment) {
+          // 队尾段无来源（用户输入段）：joinPrevious 无本地可并入前项——
+          // 逐笔出站（宿主闸门按真实栈顶判定归属）
+          this.deferredSegments.push({ changes: changeSet, ...(origins ? { origins } : {}) })
+        } else {
+          this.deferredSegments[last] = { ...segment, changes: segment.changes.compose(changeSet) }
+        }
       } else {
-        this.deferredSegments = [{ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) }]
+        this.deferredSegments = [{ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}), ...(origins ? { origins } : {}) }]
       }
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
@@ -1348,7 +1606,7 @@ export class LiveEditorInstance {
       }
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       // 组合期间不逐笔上报全文快照（#49）：组合中的候选事务一律暂缓
-      // （#123 起含首笔——首笔立即出站会让组合结束点的符号补全成为第二
+      //（#123 起含首笔——首笔立即出站会让组合结束点的符号补全成为第二
       // 笔，破坏「一次补全一笔事务」），逐笔 conflict.report 意味着大文档
       // 下每个候选都全文序列化 + postMessage。组合结束 flush 后
       // deferredLocal 经 sendDeferredLocal 以单笔 edit.request 出站、文本
@@ -1368,11 +1626,14 @@ export class LiveEditorInstance {
     this.seq += 1
     this.deps.persistState()
     this.inFlight.add(this.seq)
-    this.sentTxns.push({ seq: this.seq, changes: baseChanges, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
+    const originField = origins === undefined ? {} :
+      origins.length === 1 ? { origin: origins[0] } : { origin: origins }
+    this.sentTxns.push({ seq: this.seq, changes: baseChanges, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}), ...(origins ? { origins } : {}) })
     this.deps.send({
       kind: 'edit.request', sessionId: this.sessionId, docUri: this.docUri,
       seq: this.seq, baseVersion: this.baseVersion, changes: baseChanges,
       ...(paste ? { paste } : {}),
+      ...originField,
     })
     // P2-05：在途请求 = 输入挂起态——置位 settle 检测（ack 收敛时翻转通知）
     this.notifyInputSettle()
@@ -1451,7 +1712,9 @@ export class LiveEditorInstance {
       this.seq += 1
       this.deps.persistState()
       this.inFlight.add(this.seq)
-      this.sentTxns.push({ seq: this.seq, changes, ...(segment.paste ? { paste: segment.paste } : {}), ...(segment.plainPasteFeedback ? { plainPasteFeedback: segment.plainPasteFeedback } : {}) })
+      this.sentTxns.push({ seq: this.seq, changes, ...(segment.paste ? { paste: segment.paste } : {}), ...(segment.plainPasteFeedback ? { plainPasteFeedback: segment.plainPasteFeedback } : {}), ...(segment.origins ? { origins: segment.origins } : {}) })
+      const originField = segment.origins === undefined ? {} :
+        segment.origins.length === 1 ? { origin: segment.origins[0] } : { origin: segment.origins }
       this.deps.send({
         kind: 'edit.request',
         sessionId: this.sessionId,
@@ -1460,6 +1723,7 @@ export class LiveEditorInstance {
         baseVersion: this.baseVersion,
         changes,
         ...(segment.paste ? { paste: segment.paste } : {}),
+        ...originField,
       })
       return
     }
@@ -2039,9 +2303,14 @@ export class LiveEditorInstance {
       ...extraExtensions,
       EditorView.updateListener.of((update) => {
         // 根特性的事务旁路观测先行（快速操作条/模式锚点/查找/大纲），
-        // 与原单 listener 内「根联动在前、同步簿记在后」的次序一致
+        // 与原 updateListener 内「根联动在前、同步簿记在后」的次序一致
         this.deps.onViewUpdate?.(update)
         for (const tr of update.transactions) {
+          // T06（#355）快照修订标记：文档代次推进（本地输入与外部同步
+          // 都算——页面文本任何变化都让旧快照失效）
+          if (tr.docChanged) {
+            this.docRevision += 1
+          }
           if (!tr.docChanged || tr.annotation(externalSync)) {
             continue
           }
@@ -2067,7 +2336,9 @@ export class LiveEditorInstance {
               text: inserted.sliceString(0, inserted.length),
             })
           })
-          this.recordLocalChangeSet(tr.changes, changes)
+          // T06（#355）SDK 修饰事务：来源列表随事务透传出站
+          const addonTag = tr.annotation(addonEditOriginTag)
+          this.recordLocalChangeSet(tr.changes, changes, addonTag?.origins)
         }
       }),
       // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
