@@ -26,7 +26,6 @@ import {
   resolveAddonSettingLayer,
   serializeAddonSettingsStore,
   parseAddonSettingsStore,
-  addonSettingDefault,
   type AddonSettingDefinition,
   type AddonSettingSource,
   type AddonSettingValue,
@@ -48,7 +47,7 @@ export type AddonSettingsLogPort = (stage: string, addonId: string, detail: stri
 /** update / clearWorkspaceOverride 的结果（失败不虚报） */
 export type AddonSettingsUpdateResult =
   | { ok: true }
-  | { ok: false; reason: 'unknown-key' | 'invalid-value' | 'no-workspace' | 'store-write-failed'; invalidKeys?: readonly string[] }
+  | { ok: false; reason: 'unknown-key' | 'invalid-value' | 'no-workspace' | 'store-write-failed' | 'rejected'; invalidKeys?: readonly string[] }
 
 /** 变化事件载荷（只在持久化成功后发出） */
 export interface AddonSettingsChange {
@@ -277,13 +276,4 @@ function safeKeyOf(def: unknown): string {
     return typeof key === 'string' ? key : '<non-string-key>'
   }
   return '<non-object>'
-}
-
-/** 出厂值快照辅助（设置页「恢复出厂」不做——此导出仅供测试与观测对齐默认值） */
-export function addonSettingsDefaults(addonId: string, defs: readonly AddonSettingDefinition[]): Record<string, AddonSettingValue> {
-  const values: Record<string, AddonSettingValue> = {}
-  for (const def of defs) {
-    values[def.key] = addonSettingDefault(def)
-  }
-  return values
 }

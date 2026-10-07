@@ -172,20 +172,24 @@ export function isAddonSettingDefinition(value: unknown): value is AddonSettingD
       const seenKeys = new Set<string>()
       for (const field of value.fields) {
         if (!isRecord(field)) return false
+        // 先取 base 字段（isRecord 收窄下可访问），再做标量项形状判定
+        const fieldKey = field.key as string
+        const fieldDefault = field.default
         if (!definitionBaseValid(field)) return false
         if (!isAddonScalarItemSpec(field)) return false
-        if (seenKeys.has(field.key as string)) return false
-        seenKeys.add(field.key as string)
-        if (!addonScalarValueMatchesSpec(field.default, field as AddonScalarItemSpec)) return false
+        if (seenKeys.has(fieldKey)) return false
+        seenKeys.add(fieldKey)
+        if (!addonScalarValueMatchesSpec(fieldDefault, field as AddonScalarItemSpec)) return false
       }
       if (value.default === undefined) return true
       if (!isRecord(value.default)) return false
+      const objectDefault = value.default as Record<string, unknown>
       const fieldKeys = new Set(value.fields.map((field) => (field as Record<string, unknown>).key as string))
-      const defaultKeys = Object.keys(value.default)
+      const defaultKeys = Object.keys(objectDefault)
       if (defaultKeys.length !== fieldKeys.size || !defaultKeys.every((key) => fieldKeys.has(key))) return false
       return value.fields.every((field) => {
         const record = field as Record<string, unknown>
-        return addonScalarValueMatchesSpec(value.default![record.key as string], field as AddonScalarItemSpec)
+        return addonScalarValueMatchesSpec(objectDefault[record.key as string], field as AddonScalarItemSpec)
       })
     }
     default:
@@ -255,10 +259,10 @@ export function resolveAddonSettingLayer(
   workspaceValue: unknown,
 ): { value: AddonSettingValue; source: AddonSettingSource } {
   if (workspaceValue !== undefined && addonSettingValueMatches(def, workspaceValue)) {
-    return { value: workspaceValue, source: 'workspace' }
+    return { value: workspaceValue as AddonSettingValue, source: 'workspace' }
   }
   if (userValue !== undefined && addonSettingValueMatches(def, userValue)) {
-    return { value: userValue, source: 'user' }
+    return { value: userValue as AddonSettingValue, source: 'user' }
   }
   return { value: addonSettingDefault(def), source: 'default' }
 }

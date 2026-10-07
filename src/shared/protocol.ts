@@ -15,6 +15,7 @@ import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './ed
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 import { isEditOriginMeta, type EditOriginMeta } from './editOrigin'
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
+import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -922,6 +923,9 @@ export type HostToWebview =
    *  恒为 true——API 形状仍是草案，未发布。设置页经 addons.get 拉取；
    *  协调器状态变化后经 notifyAddonsChanged 推送 */
   | { kind: 'addons.state' } & AddonsStatePayload
+  /** #353 T04 附加组件基础设置区载荷（宿主权威）：设置页经
+   *  addons.settingsGet 拉取；定义注册/成功保存/设置区开合后推送 */
+  | { kind: 'addons.settingsState' } & AddonSettingsStatePayload
   /** #351 T02 附加组件装载指令（宿主 → 编辑器/设置页 webview）：内层为
    *  AddonPageDirective（addon.load/unload/fault/channel.reply）；URI 已按
    *  目标面板的 asWebviewUri 铸造，资源许可面随指令同步刷新。webview 侧
@@ -940,6 +944,68 @@ export interface AddonsStatePayload {
   /** #351 T02 当前打开的组件设置页（组件 ID；无打开项为 null——权威在
    *  宿主 runtime，面板销毁/关闭/故障后终结；设置页分页据此渲染挂载区） */
   openAddonSettingsPage?: string | null
+  /** #353 T04 基础设置区当前打开的组件（组件 ID；无打开项为 null——
+   *  定义驱动的平台控件区，停用与故障后保留） */
+  openAddonSettings?: string | null
+}
+
+/** #353 T04 单组件设置区载荷（定义 + 两层值与来源 + 开关两层） */
+export interface AddonSettingsAreaPayload {
+  addonId: string
+  /** 展示名（displayName 回退 id） */
+  label: string
+  /** 故障暂停（自定义页撤下；定义与基础控件保留） */
+  faulted: boolean
+  faultReason?: string
+  /** 自定义设置页可装载（已登记入口且非 faulted） */
+  hasCustomPage: boolean
+  /** 功能开关两层显式与生效（ADR Q21：开关同样支持两层） */
+  enabled: {
+    effective: boolean
+    /** 用户默认层显式值（null = 未写过） */
+    userExplicit: boolean | null
+    /** 工作区层显式值（null = 未覆盖）；无工作区恒 null */
+    workspaceExplicit: boolean | null
+    /** 生效来源（default = 无显式偏好，默认启用） */
+    source: 'default' | 'user' | 'workspace'
+  }
+  /** 平台基础控件数据源（注册序；shape 单一事实源 shared/addonSettings） */
+  definitions: readonly import('./addonSettings').AddonSettingDefinition[]
+  /** 定义键 → 生效值 / 两层显式值（仅当显式且通过当前定义校验时下发）/
+   *  生效来源 */
+  values: Readonly<Record<string, {
+    effective: import('./addonSettings').AddonSettingValue
+    user?: import('./addonSettings').AddonSettingValue
+    workspace?: import('./addonSettings').AddonSettingValue
+    source: import('./addonSettings').AddonSettingSource
+  }>>
+}
+
+/** #353 T04 附加组件基础设置区载荷（addons.settingsState 消息体） */
+export interface AddonSettingsStatePayload {
+  /** 宿主当前提供的稳定 API 版本（首个候选 1.0.0） */
+  apiVersion: string
+  /** API 形状仍是草案、未发布——呈现层据此标注，不冒充已发布契约 */
+  draft: true
+  /** 设置区当前打开的组件（无打开项为 null） */
+  open: string | null
+  /** 是否存在工作区（无工作区时「当前工作区」标签禁用） */
+  hasWorkspace: boolean
+  /** 打开组件的设置区载荷（open 非 null 且组件在场；已注销为 null） */
+  addon: AddonSettingsAreaPayload | null
+  /** #351 T02 当前装载的组件自定义设置页（挂载区可见性——设置区内） */
+  openAddonSettingsPage?: string | null
+  /**
+   * 操作结局提示：保存/清除的应答推送携带（失败不虚报的 UI 依据——
+   * 页面据 kind 组句显示）；常规状态推送不带（页面清空提示）
+   */
+  notice?: {
+    kind: 'saved' | 'save-failed'
+    /** save-failed 的原因码（页面 i18n 组句；rejected = 代次已终结的迟到调用） */
+    reason?: 'unknown-key' | 'invalid-value' | 'no-workspace' | 'store-write-failed' | 'rejected'
+    keys?: readonly string[]
+    scope?: 'user' | 'workspace'
+  }
 }
 
 /** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
@@ -1811,9 +1877,25 @@ export type WebviewToHost =
   /** #350 T01 附加组件状态拉取（设置页「附加组件」分页装载/重载时）：
    *  宿主以 addons.state 应答；协调器状态变化后亦经同款消息推送 */
   | { kind: 'addons.get' }
+  /** #353 T04 附加组件基础设置区状态拉取（装载/重载时）：宿主以
+   *  addons.settingsState 应答；定义注册与成功保存后亦推送 */
+  | { kind: 'addons.settingsGet' }
+  /** #353 T04 打开某组件的基础设置区（平台定义驱动；停用与故障保留） */
+  | { kind: 'addons.settingsOpen'; addonId: string }
+  /** #353 T04 关闭基础设置区 */
+  | { kind: 'addons.settingsClose' }
+  /** #353 T04 设置按批写入（scope = 标签选中的作用范围；批内任一键
+   *  非法整批拒绝——结果经 addons.settingsState 推送回显，失败带原因） */
+  | { kind: 'addons.settingsUpdate'; addonId: string; scope: 'user' | 'workspace'; values: Record<string, unknown> }
+  /** #353 T04 清除工作区对某设置键的覆盖（恢复继承用户默认） */
+  | { kind: 'addons.settingsClearOverride'; addonId: string; key: string }
   /** #351 T02 用户功能开关（设置页「附加组件」分页）：写用户默认层并按
-   *  两生命周期同步——关闭释放运行贡献但保留设置能力；持久保留用户选择 */
-  | { kind: 'addons.setEnabled'; addonId: string; enabled: boolean }
+   *  两生命周期同步——关闭释放运行贡献但保留设置能力；持久保留用户选择。
+   *  #353 T04 起可选 scope：写入哪一层（缺省 'user' 保持 T02 语义；
+   *  设置区内的开关行随当前作用范围标签发送） */
+  | { kind: 'addons.setEnabled'; addonId: string; enabled: boolean; scope?: 'user' | 'workspace' }
+  /** #353 T04 清除工作区对功能开关的覆盖（恢复继承用户默认层） */
+  | { kind: 'addons.clearEnabledOverride'; addonId: string }
   /** #351 T02 打开某组件自己的设置页（设置面板装载其页面产物） */
   | { kind: 'addons.openAddonPage'; addonId: string }
   /** #351 T02 关闭当前组件设置页（分页切换；面板销毁另有销毁路径） */
@@ -4254,6 +4336,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'defaultEditor.get':
     case 'defaultEditor.fix':
     case 'addons.get':
+    case 'addons.settingsGet':
+    case 'addons.settingsClose':
     case 'addons.openSearch':
     case 'addons.openExtensionsView':
     case 'addons.closeAddonPage':
@@ -4262,10 +4346,28 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addons.openExtension':
       return isString(v.extensionId)
     case 'addons.setEnabled':
-      // #351 T02 功能开关：组件 ID + 布尔
-      return isString(v.addonId) && typeof v.enabled === 'boolean'
-    case 'addons.openAddonPage':
+      // #351 T02 功能开关：组件 ID + 布尔；#353 T04 可选作用范围层
+      return (
+        isString(v.addonId) &&
+        typeof v.enabled === 'boolean' &&
+        (v.scope === undefined || v.scope === 'user' || v.scope === 'workspace')
+      )
+    case 'addons.clearEnabledOverride':
+      // #353 T04 清除功能开关的工作区覆盖
       return isString(v.addonId)
+    case 'addons.openAddonPage':
+    case 'addons.settingsOpen':
+      return isString(v.addonId)
+    case 'addons.settingsUpdate':
+      // #353 T04 按批写入（载荷键值形态由宿主按定义校验，协议只守卫框架）
+      return (
+        isString(v.addonId) &&
+        (v.scope === 'user' || v.scope === 'workspace') &&
+        isObject(v.values)
+      )
+    case 'addons.settingsClearOverride':
+      // #353 T04 清除某设置键的工作区覆盖
+      return isString(v.addonId) && isString(v.key)
     case 'addonPage.outbound':
       // #351 T02 出站消息内层守卫（单一事实源在 shared/addonPage）
       return isAddonPageOutbound(v.outbound)
@@ -5101,7 +5203,30 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         Array.isArray(v.addons) &&
         v.addons.every(isAddonStatusEntry) &&
         // #351 T02 当前打开的组件设置页（可选字段；旧载荷缺省容忍）
-        (v.openAddonSettingsPage === undefined || v.openAddonSettingsPage === null || isString(v.openAddonSettingsPage))
+        (v.openAddonSettingsPage === undefined || v.openAddonSettingsPage === null || isString(v.openAddonSettingsPage)) &&
+        // #353 T04 基础设置区当前打开的组件（可选字段；旧载荷缺省容忍）
+        (v.openAddonSettings === undefined || v.openAddonSettings === null || isString(v.openAddonSettings))
+      )
+    case 'addons.settingsState':
+      // #353 T04 基础设置区载荷（定义与两层值形态由 isAddonSettingsArea 守卫）
+      return (
+        isString(v.apiVersion) &&
+        v.draft === true &&
+        (v.open === null || isString(v.open)) &&
+        typeof v.hasWorkspace === 'boolean' &&
+        (v.addon === null || isAddonSettingsArea(v.addon)) &&
+        (v.openAddonSettingsPage === undefined || v.openAddonSettingsPage === null || isString(v.openAddonSettingsPage)) &&
+        (v.notice === undefined ||
+          (isObject(v.notice) &&
+            (v.notice.kind === 'saved' || v.notice.kind === 'save-failed') &&
+            (v.notice.reason === undefined ||
+              v.notice.reason === 'unknown-key' ||
+              v.notice.reason === 'invalid-value' ||
+              v.notice.reason === 'no-workspace' ||
+              v.notice.reason === 'store-write-failed' ||
+              v.notice.reason === 'rejected') &&
+            (v.notice.keys === undefined || (Array.isArray(v.notice.keys) && v.notice.keys.every(isString))) &&
+            (v.notice.scope === undefined || v.notice.scope === 'user' || v.notice.scope === 'workspace')))
       )
     case 'addonPage.directive':
       // #351 T02 装载指令内层守卫（单一事实源在 shared/addonPage）
@@ -5163,7 +5288,39 @@ function isAddonStatusEntry(v: unknown): v is AddonStatusEntry {
     // #351 T02 运行状态可选字段（已注册组件附带；旧载荷缺省容忍）
     (v.enabled === undefined || typeof v.enabled === 'boolean') &&
     (v.fault === undefined || (isObject(v.fault) && isString(v.fault.reason))) &&
-    (v.hasSettingsPage === undefined || typeof v.hasSettingsPage === 'boolean')
+    (v.hasSettingsPage === undefined || typeof v.hasSettingsPage === 'boolean') &&
+    (v.hasSettingsDefinitions === undefined || typeof v.hasSettingsDefinitions === 'boolean')
+  )
+}
+
+/** #353 T04 单组件设置区载荷守卫（定义形态与值形态的单一事实源在
+ *  shared/addonSettings 的同名守卫） */
+function isAddonSettingsArea(v: unknown): v is AddonSettingsAreaPayload {
+  if (!isObject(v)) {
+    return false
+  }
+  const enabled = v.enabled as { effective?: unknown; userExplicit?: unknown; workspaceExplicit?: unknown; source?: unknown } | undefined
+  return (
+    isString(v.addonId) &&
+    isString(v.label) &&
+    typeof v.faulted === 'boolean' &&
+    (v.faultReason === undefined || isString(v.faultReason)) &&
+    typeof v.hasCustomPage === 'boolean' &&
+    isObject(enabled) &&
+    typeof enabled.effective === 'boolean' &&
+    (enabled.userExplicit === null || typeof enabled.userExplicit === 'boolean') &&
+    (enabled.workspaceExplicit === null || typeof enabled.workspaceExplicit === 'boolean') &&
+    (enabled.source === 'default' || enabled.source === 'user' || enabled.source === 'workspace') &&
+    Array.isArray(v.definitions) &&
+    (v.definitions as unknown[]).every(isAddonSettingDefinition) &&
+    isObject(v.values) &&
+    Object.values(v.values as Record<string, unknown>).every((entry) => {
+      if (!isObject(entry)) return false
+      if (!('effective' in entry) || !isAddonSettingStoredValue(entry.effective)) return false
+      if (entry.user !== undefined && !isAddonSettingStoredValue(entry.user)) return false
+      if (entry.workspace !== undefined && !isAddonSettingStoredValue(entry.workspace)) return false
+      return entry.source === 'default' || entry.source === 'user' || entry.source === 'workspace'
+    })
   )
 }
 

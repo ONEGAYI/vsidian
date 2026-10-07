@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest'
 import { AddonRegistry } from '../../src/host/addons/addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from '../../src/host/addons/addonRuntime'
+import { AddonSettingsService, type AddonSettingsPersistencePort } from '../../src/host/addons/addonSettingsService'
 import { ADDON_API_VERSION, OFFICIAL_ADDON_EXTENSION_IDS } from '../../src/shared/addonIdentity'
 
 const INSTALL = process.platform === 'win32' ? 'C:\\addons\\demo-addon' : '/addons/demo-addon'
@@ -20,6 +21,7 @@ const INSTALL = process.platform === 'win32' ? 'C:\\addons\\demo-addon' : '/addo
 function memoryStore(initial: { user?: Record<string, boolean>; workspace?: Record<string, boolean> | null } = {}): AddonPreferenceStore & { user: Record<string, boolean>; workspace: Record<string, boolean> | null } {
   const state = { user: { ...initial.user }, workspace: initial.workspace === undefined ? null : { ...initial.workspace } }
   return {
+    hasWorkspace: true,
     get user() { return state.user },
     get workspace() { return state.workspace },
     read: () => ({ user: { ...state.user }, workspace: state.workspace === null ? null : { ...state.workspace } }),
@@ -46,9 +48,16 @@ function harness(options: { store?: ReturnType<typeof memoryStore>; installDirs?
   const store = options.store ?? memoryStore()
   const logs: string[] = []
   const installDirs = options.installDirs ?? { 'fixture.demo': INSTALL }
+  // #353 T04 起 settings 为 runtime 必需端口（内存持久层）
+  const settingsPersistence: AddonSettingsPersistencePort = {
+    hasWorkspace: true,
+    read: () => undefined,
+    write: async () => true,
+  }
   const runtime = new AddonRuntime({
     apiVersion: ADDON_API_VERSION,
     preferences: store,
+    settings: new AddonSettingsService(settingsPersistence),
     installDirOf: (addonId) => installDirs[addonId],
     log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
   })
@@ -86,7 +95,7 @@ describe('T02 运行生命周期：注册与两阶段装配', () => {
         calls.push('setup')
         expect(context.addonId).toBe('fixture.demo')
         context.settings.registerPage(SETTINGS_ENTRY)
-        context.settings.registerDefinitions([{ key: 'demo.flag', type: 'boolean', default: true }])
+        context.settings.registerDefinitions([{ key: 'demo.flag', title: 'Demo flag', type: 'boolean', default: true }])
       },
       enable(context) {
         calls.push('enable')
@@ -240,7 +249,7 @@ describe('T02 故障暂停：可归因异常暂停全部注册贡献', () => {
     h.register({
       setup(context) {
         context.settings.registerPage(SETTINGS_ENTRY)
-        context.settings.registerDefinitions([{ key: 'demo.flag', type: 'boolean', default: true }])
+        context.settings.registerDefinitions([{ key: 'demo.flag', title: 'Demo flag', type: 'boolean', default: true }])
         context.channel.handle('t02.setupEcho', () => 'ok')
       },
       enable(context) {

@@ -26,15 +26,19 @@ import type {
   AddonSetupContext,
 } from './addonRegistry'
 import { resolveAddonPageEntry } from './addonPageRegistry'
+import type { AddonSettingsService } from './addonSettingsService'
 
 /** 登记成功的解析臂（settingsPages/editorPages 只收成功条目） */
 type ResolvedPageEntry = import('./addonPageRegistry').AddonPageEntryResolution & { ok: true }
 import type { AddonChannelOutcome, AddonPageDirective, AddonPageOutbound } from '../../shared/addonPage'
 
 /** 启用偏好持久层（vscode 层实现：user 层 = globalState，workspace 层 =
- *  workspaceState；具体存储格式 T04 冻结，本端口是读写面） */
+ *  workspaceState；#353 T04 起显式暴露 hasWorkspace——read().workspace 为
+ *  null 只代表「无层值」，不再兼作无工作区判据） */
 export interface AddonPreferenceStore {
-  /** 两层显式偏好快照（workspace 为 null = 无工作区层） */
+  /** 是否存在工作区（文件夹或多根工作区；空窗口为 false） */
+  readonly hasWorkspace: boolean
+  /** 两层显式偏好快照（workspace 为 null = 该层无值） */
   read(): { user: Record<string, boolean>; workspace: Record<string, boolean> | null }
   /** 覆写一层（值 undefined 表示移除该键——恢复默认） */
   write(scope: 'user' | 'workspace', values: Record<string, boolean | undefined>): void
@@ -43,6 +47,8 @@ export interface AddonPreferenceStore {
 export interface AddonRuntimePorts {
   apiVersion: string
   preferences: AddonPreferenceStore
+  /** #353 T04 设置服务（定义注册/按批读写/变化事件——平台权威） */
+  settings: AddonSettingsService
   /** 组件安装目录（fsPath；解析不到时页面入口登记拒绝——资源授权无锚） */
   installDirOf(addonId: string): string | undefined
   /** 归因日志（写 VSCode 输出通道：组件 ID + 阶段 + 原因） */
@@ -110,6 +116,8 @@ export class AddonRuntime {
   private readonly listeners = new Set<() => void>()
   /** 当前打开的组件设置页（单设置页面板） */
   private settingsOpenAddon: string | undefined
+  /** #353 T04 基础设置区当前打开的组件（定义驱动的平台控件区） */
+  private settingsAreaAddon: string | undefined
 
   constructor(private readonly ports: AddonRuntimePorts) {}
 
@@ -123,15 +131,46 @@ export class AddonRuntime {
 
   // ---- 用户功能开关（普通关闭：释放运行贡献、保留设置能力） ----
 
-  /** 写入启用偏好（user 层；workspace 覆盖层的 UI 入口属 T04）并同步运行态 */
+  /** 写入启用偏好（user 层；T02 语义保持）并同步运行态 */
   setUserEnabled(addonId: string, enabled: boolean): void {
+    this.setEnabledScope(addonId, 'user', enabled)
+  }
+
+  /**
+   * #353 T04 分层开关写入（ADR Q21：功能开关同样支持两层作用范围）。
+   * 返回 'no-workspace' = 无工作区时写 workspace 层被拒（其余路径写入
+   * 并同步运行态）。
+   */
+  setEnabledScope(addonId: string, scope: 'user' | 'workspace', enabled: boolean): 'ok' | 'no-workspace' {
+    if (scope === 'workspace' && !this.ports.preferences.hasWorkspace) {
+      return 'no-workspace'
+    }
     const current = this.ports.preferences.read()
-    this.ports.preferences.write('user', { ...current.user, [addonId]: enabled })
+    if (scope === 'workspace') {
+      this.ports.preferences.write('workspace', { ...(current.workspace ?? {}), [addonId]: enabled })
+    } else {
+      this.ports.preferences.write('user', { ...current.user, [addonId]: enabled })
+    }
     const record = this.records.get(addonId)
     if (record) {
       this.syncRunState(record)
     }
     this.notify()
+    return 'ok'
+  }
+
+  /** #353 T04 清除工作区对功能开关的覆盖（恢复继承用户默认层） */
+  clearEnabledOverride(addonId: string): 'ok' | 'no-workspace' {
+    if (!this.ports.preferences.hasWorkspace) {
+      return 'no-workspace'
+    }
+    this.ports.preferences.write('workspace', { [addonId]: undefined })
+    const record = this.records.get(addonId)
+    if (record) {
+      this.syncRunState(record)
+    }
+    this.notify()
+    return 'ok'
   }
 
   /** 生效启用判定：workspace 显式 > user 显式 > 默认启用（ADR 默认状态） */
@@ -187,6 +226,36 @@ export class AddonRuntime {
     if (this.settingsOpenAddon === undefined) return
     this.settingsOpenAddon = undefined
     this.notify()
+  }
+
+  // ---- #353 T04 基础设置区（平台定义驱动；停用与故障后保留） ----
+
+  /**
+   * 打开某组件的基础设置区（双标签作用范围 + 平台基础控件 + 自定义页
+   * 入口）。有设置定义或有设置页入口即可打开；故障暂停时定义仍在
+   * （ADR Q23：已有定义时平台供基础控件供用户修正参数）——仅「无定义
+   * 且无自定义页」或未注册拒绝。
+   */
+  openSettingsArea(addonId: string): 'ok' | 'not-registered' | 'no-definitions' {
+    const record = this.records.get(addonId)
+    if (!record) return 'not-registered'
+    const hasDefinitions = this.ports.settings.hasDefinitions(addonId)
+    if (!hasDefinitions && record.settingsPages.length === 0) return 'no-definitions'
+    this.settingsAreaAddon = addonId
+    this.notify()
+    return 'ok'
+  }
+
+  /** 关闭基础设置区（重复关闭无害） */
+  closeSettingsArea(): void {
+    if (this.settingsAreaAddon === undefined) return
+    this.settingsAreaAddon = undefined
+    this.notify()
+  }
+
+  /** 基础设置区当前打开的组件 ID（无打开项为 undefined） */
+  settingsAreaAddonId(): string | undefined {
+    return this.settingsAreaAddon
   }
 
   /** 设置页面板销毁（retainContextWhenHidden 关闭——隐藏即释放）：终结装载意图 */
@@ -326,6 +395,9 @@ export class AddonRuntime {
       settingsGeneration: 0,
     }
     this.records.set(addonId, record)
+    // #353 T04 新 setup 代次：定义集先清空（setup 内 registerDefinitions 重新
+    // 收集；普通升级不重置存储值——服务侧仅替换定义表）
+    this.ports.settings.clearDefinitions(addonId)
     try {
       definition.setup?.(this.buildSetupContext(addonId, record))
     } catch (err) {
@@ -341,6 +413,7 @@ export class AddonRuntime {
   }
 
   private buildSetupContext(addonId: string, record: RuntimeRecord): AddonSetupContext {
+    const settings = this.ports.settings
     return {
       addonId,
       apiVersion: this.ports.apiVersion,
@@ -374,13 +447,46 @@ export class AddonRuntime {
             this.ports.log('definitions-rejected', addonId, 'definitions not serializable')
             return NOOP_HANDLE
           }
+          // #353 T04：可序列化防线后进服务形状校验（非法整批拒绝并归因）
+          const registered = settings.registerDefinitions(addonId, stored as unknown[])
+          if (!registered.ok) {
+            this.ports.log('definitions-rejected', addonId, registered.detail ?? registered.reason)
+            return NOOP_HANDLE
+          }
           record.collectedDefinitions.push(...(stored as unknown[]))
           return {
             dispose: () => {
-              const index = record.collectedDefinitions.indexOf(stored)
-              if (index >= 0) record.collectedDefinitions.splice(index, 1)
+              const first = record.collectedDefinitions.indexOf(stored)
+              if (first >= 0) record.collectedDefinitions.splice(first, 1)
             },
           }
+        },
+        // ---- #353 T04 读写与事件（技术方案 5.5；平台权威在服务） ----
+        get: () => {
+          const snapshot = settings.effectiveSnapshot(addonId)
+          return { values: snapshot.values, sources: snapshot.sources }
+        },
+        getSource: (key) => settings.sourceOf(addonId, key),
+        update: (scope, patch) => {
+          if (!this.isLive(record, addonId)) {
+            // 迟到调用（已释放/故障暂停的代次）：协议性拒绝，不算故障
+            return Promise.resolve({ ok: false, reason: 'rejected' } as const)
+          }
+          return settings.update(addonId, scope, patch)
+        },
+        clearWorkspaceOverride: (key) => {
+          if (!this.isLive(record, addonId)) {
+            return Promise.resolve({ ok: false, reason: 'rejected' } as const)
+          }
+          return settings.clearWorkspaceOverride(addonId, key)
+        },
+        onChanged: (listener) => {
+          const off = settings.onChanged((change) => {
+            // 只投递本组件的变化；组件代码暂停/释放后停投（订阅随代次失效）
+            if (change.addonId !== addonId || !this.isLive(record, addonId)) return
+            listener({ scope: change.scope, keys: change.keys })
+          })
+          return { dispose: off }
         },
       },
       channel: this.buildChannelRegistry(addonId, record, 'setup', record.setupHandlers),
@@ -551,6 +657,10 @@ export class AddonRuntime {
     this.releaseRun(record)
     if (this.settingsOpenAddon === addonId) {
       this.settingsOpenAddon = undefined
+    }
+    // #353 T04 设置区随代次关闭（数据面由 addons.settingsState 推送对齐）
+    if (this.settingsAreaAddon === addonId) {
+      this.settingsAreaAddon = undefined
     }
     this.records.delete(addonId)
     this.notify()

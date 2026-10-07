@@ -20,6 +20,8 @@ import {
   type AddonRegistrationResult,
 } from '../../shared/addonIdentity'
 import type { AddonPageEntryInput } from './addonPageRegistry'
+import type { AddonSettingsUpdateResult } from './addonSettingsService'
+import type { AddonSettingSource, AddonSettingValue } from '../../shared/addonSettings'
 
 /** 注册表宿主端口（vscode 层注入） */
 export interface AddonRegistryPorts {
@@ -38,15 +40,44 @@ export interface AddonRegistrationHandle {
   dispose(): void
 }
 
+/** 设置读取快照（settings.get() 的结果：生效值与来源） */
+export interface AddonSettingsGetSnapshot {
+  readonly values: Readonly<Record<string, AddonSettingValue>>
+  readonly sources: Readonly<Record<string, AddonSettingSource>>
+}
+
+/** 设置变化事件（settings.onChanged 的载荷） */
+export interface AddonSettingsChangeEventData {
+  readonly scope: 'user' | 'workspace'
+  readonly keys: readonly string[]
+}
+
+/**
+ * 设置能力面（setup 生命周期常驻——普通停用后保留；技术方案 5.5 形状）。
+ * T02 先立 registerPage/registerDefinitions；T04 起接入读写与事件。
+ */
+export interface AddonSettingsContextApi {
+  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */
+  registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle
+  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings） */
+  registerDefinitions(defs: readonly unknown[]): AddonRegistrationHandle
+  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */
+  get(): AddonSettingsGetSnapshot
+  /** 单键来源（未定义键为 undefined） */
+  getSource(key: string): AddonSettingSource | undefined
+  /** 按批校验并保存到指定层（失败不虚报；变化事件只在持久化成功后发出） */
+  update(scope: 'user' | 'workspace', patch: Record<string, unknown>): Promise<AddonSettingsUpdateResult>
+  /** 清除工作区对某键的覆盖（恢复继承用户默认，不是恢复出厂值） */
+  clearWorkspaceOverride(key: string): Promise<AddonSettingsUpdateResult>
+  /** 订阅成功保存后的变化（所属组件设置生命周期内有效） */
+  onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle
+}
+
 /** 轻量接入上下文（setup 生命周期：设置定义 + 自己的设置入口 + 设置通信。
  *  普通功能停用后保留；故障暂停时回收组件代码——迟到注册被拒） */
 export interface AddonSetupContext extends AddonRegistrationContext {
-  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */
-  readonly settings: {
-    registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle
-    /** 设置定义收集（可序列化定义；呈现与读写属 T04，本票先保留数据通道） */
-    registerDefinitions(defs: readonly unknown[]): AddonRegistrationHandle
-  }
+  /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */
+  readonly settings: AddonSettingsContextApi
   /** 设置生命周期通道（归 setup 所在的生命周期） */
   readonly channel: AddonChannelRegistry
 }

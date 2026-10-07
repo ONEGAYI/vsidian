@@ -24,10 +24,16 @@ import {
   type AddonStatusEntry,
 } from '../../shared/addonIdentity'
 import { type AddonPageDirective, type AddonLoadManifest } from '../../shared/addonPage'
+import {
+  addonSettingValueMatches,
+  resolveAddonSettingLayer,
+} from '../../shared/addonSettings'
+import type { AddonSettingsStatePayload, AddonSettingsAreaPayload } from '../../shared/protocol'
 import { isWebviewToHost } from '../../shared/protocol'
 import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from './addonRuntime'
+import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
 import { t } from '../../shared/i18n'
 
 /** 本扩展自身 ID（附加组件建议声明对它的原生依赖） */
@@ -70,7 +76,9 @@ export interface AddonEditorBridge {
 /** 设置页面板接线（settingsPage 消费） */
 export interface AddonPageWiring {
   /** addons.state 消息载荷（宿主权威状态现算；合并运行生命周期状态） */
-  getState(): { kind: 'addons.state' } & { apiVersion: string; draft: true; addons: readonly AddonStatusEntry[]; openAddonSettingsPage: string | null }
+  getState(): { kind: 'addons.state' } & { apiVersion: string; draft: true; addons: readonly AddonStatusEntry[]; openAddonSettingsPage: string | null; openAddonSettings: string | null }
+  /** #353 T04 addons.settingsState 消息载荷（基础设置区权威状态现算） */
+  getSettingsState(): { kind: 'addons.settingsState' } & AddonSettingsStatePayload
   /** 市场搜索（关键词仅搜索辅助：vsidian-addon） */
   openSearch(): void
   /** VSCode 扩展管理视图 */
@@ -84,10 +92,20 @@ export interface AddonPageWiring {
   attachSettingsPanel(webview: vscode.Webview): void
   /** 设置页面板销毁（隐藏即释放——装载意图终结） */
   settingsPanelDisposed(): void
-  /** 设置页面板消息路由（addonPage.* 与 addons.setEnabled/openAddonPage/closeAddonPage） */
+  /** 设置页面板消息路由（addonPage.* 与 addons.* 设置族） */
   handleSettingsMessage(webview: vscode.Webview, message: unknown): boolean
   /** 手动打开组件设置页（设置页面板不在场时由调用方先 open） */
   openAddonSettingsPage(addonId: string): 'ok' | 'not-registered' | 'faulted' | 'no-settings-page'
+  /** #353 T04 手动打开基础设置区（测试钩子与集成的宿主侧等价入口） */
+  openSettingsArea(addonId: string): 'ok' | 'not-registered' | 'no-definitions'
+  /** #353 T04 设置服务快照（测试钩子与集成的观测面） */
+  settingsServiceSnapshot(): {
+    definitions: Readonly<Record<string, readonly unknown[]>>
+    userValues: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+    workspaceValues: Readonly<Record<string, Readonly<Record<string, unknown>>>> | null
+    hasWorkspace: boolean
+    settingsAreaOpen: string | undefined
+  }
 }
 
 export interface AddonWiring {
@@ -104,6 +122,9 @@ export interface AddonWiring {
   /** 运行生命周期状态变化订阅（启停/故障/注册/代次——同上接 addons.state
    *  推送；#351） */
   onRuntimeChanged(listener: () => void): () => void
+  /** #353 T04 设置变化订阅（成功保存后——接设置页 addons.settingsState
+   *  常规推送；变化事件只在持久化成功后到达此处） */
+  onSettingsChanged(listener: () => void): () => void
   /** 停用收尾（context.subscriptions 驱动） */
   dispose(): void
 }
@@ -115,8 +136,17 @@ function extensionLabel(packageJSON: unknown, id: string): string {
 }
 
 /** 启用偏好持久层键（user = globalState / workspace = workspaceState；
- *  存储格式与 T04 的作用范围 UI 对齐预留——本票钉住持久行为） */
+ *  #353 T04 起端口显式暴露 hasWorkspace——read().workspace 为 null 只代表
+ *  该层无值） */
 const PREFERENCE_KEY = 'vsidian.addons.enabled'
+
+/** #353 T04 组件设置值持久层键（结构 version 1 冻结——shared/addonSettings） */
+const ADDON_SETTINGS_KEY = 'vsidian.addons.settings'
+
+/** #353 T04 无工作区判定：文件夹或多根工作区任一在场（空窗口 false） */
+function hostHasWorkspace(): boolean {
+  return vscode.workspace.workspaceFolders !== undefined || vscode.workspace.workspaceFile !== undefined
+}
 
 function createPreferenceStore(context: vscode.ExtensionContext): AddonPreferenceStore {
   const readScope = (scope: 'user' | 'workspace'): Record<string, boolean> | null => {
@@ -125,6 +155,7 @@ function createPreferenceStore(context: vscode.ExtensionContext): AddonPreferenc
     return value && typeof value === 'object' ? value : null
   }
   return {
+    hasWorkspace: hostHasWorkspace(),
     read: () => ({ user: readScope('user') ?? {}, workspace: readScope('workspace') }),
     write: (scope, values) => {
       const store = scope === 'user' ? context.globalState : context.workspaceState
@@ -142,6 +173,24 @@ function createPreferenceStore(context: vscode.ExtensionContext): AddonPreferenc
   }
 }
 
+/** #353 T04 组件设置值持久层（user = globalState / workspace = workspaceState） */
+function createSettingsPersistence(context: vscode.ExtensionContext): AddonSettingsPersistencePort {
+  return {
+    get hasWorkspace() {
+      return hostHasWorkspace()
+    },
+    read: (scope) => (scope === 'user' ? context.globalState : context.workspaceState).get(ADDON_SETTINGS_KEY),
+    write: async (scope, value) => {
+      try {
+        await (scope === 'user' ? context.globalState : context.workspaceState).update(ADDON_SETTINGS_KEY, value)
+        return true
+      } catch (err) {
+        return false
+      }
+    },
+  }
+}
+
 export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring {
   const channel = vscode.window.createOutputChannel(t('host.addonsChannelName'))
   const log = (message: string): void => {
@@ -151,10 +200,16 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   // 注册表 + 运行生命周期：findExtension 核对「当前扩展宿主注册表中的记录」
   //（查不到 = 当前宿主不可用——不等于未安装或装错侧）；installDirOf 以
   // 扩展安装目录为资源授权锚（extensionUri.fsPath）
+  // #353 T04：设置服务（定义注册/按批读写/变化事件）随 runtime 装配
   const preferenceStore = createPreferenceStore(context)
+  const settingsLog = (stage: string, addonId: string, detail: string): void => {
+    log(`addon ${addonId} settings ${stage}: ${detail}`)
+  }
+  const settingsService = new AddonSettingsService(createSettingsPersistence(context), settingsLog)
   const runtime = new AddonRuntime({
     apiVersion: ADDON_API_VERSION,
     preferences: preferenceStore,
+    settings: settingsService,
     installDirOf: (addonId) => vscode.extensions.getExtension(addonId)?.extensionUri.fsPath,
     log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
   })
@@ -222,6 +277,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       ...entry,
       enabled: status.enabled,
       hasSettingsPage: status.hasSettingsPage,
+      // #353 T04 定义保留（故障暂停仍在——基础控件可用）
+      hasSettingsDefinitions: settingsService.hasDefinitions(entry.id),
       ...(status.faultReason !== undefined ? { fault: { reason: status.faultReason } } : {}),
     }
   }
@@ -233,7 +290,75 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     addons: [...coordinator.stateEntries()].map(mergeRuntimeStatus),
     // #351 T02 当前打开的组件设置页（权威在 runtime；设置页分页挂载区依据）
     openAddonSettingsPage: runtime.openSettingsAddonId() ?? null,
+    // #353 T04 基础设置区当前打开的组件（定义驱动平台控件区）
+    openAddonSettings: runtime.settingsAreaAddonId() ?? null,
   })
+
+  // ---- #353 T04 基础设置区载荷（addons.settingsState） ----
+
+  /** 构造单组件设置区载荷（层显式值仅当通过当前定义校验时下发——UI 不显示漂移值） */
+  const buildSettingsArea = (addonId: string): AddonSettingsAreaPayload | null => {
+    const entry = coordinator.stateEntries().find((item) => item.id === addonId)
+    if (!entry) return null
+    const status = runtime.runtimeStatus(addonId)
+    const snapshot = settingsService.effectiveSnapshot(addonId)
+    const definitions = settingsService.definitionsOf(addonId)
+    const values: Record<string, AddonSettingsAreaPayload['values'][string]> = {}
+    for (const def of definitions) {
+      const userValue = snapshot.userValues[def.key]
+      const workspaceValue = snapshot.workspaceValues?.[def.key]
+      const resolved = resolveAddonSettingLayer(def, userValue, workspaceValue)
+      values[def.key] = {
+        effective: resolved.value,
+        ...(userValue !== undefined && addonSettingValueMatches(def, userValue) ? { user: userValue } : {}),
+        ...(workspaceValue !== undefined && addonSettingValueMatches(def, workspaceValue) ? { workspace: workspaceValue } : {}),
+        source: resolved.source,
+      }
+    }
+    const preferences = preferenceStore.read()
+    const userExplicit = addonId in preferences.user ? preferences.user[addonId] : null
+    const workspaceExplicit = preferences.workspace !== null && addonId in preferences.workspace ? preferences.workspace[addonId] : null
+    const source = workspaceExplicit !== null ? 'workspace' : userExplicit !== null ? 'user' : 'default'
+    return {
+      addonId,
+      label: entry.label,
+      faulted: status?.runState === 'faulted',
+      ...(status?.faultReason !== undefined ? { faultReason: status.faultReason } : {}),
+      hasCustomPage: status?.hasSettingsPage === true,
+      enabled: {
+        effective: runtime.effectiveEnabled(addonId),
+        userExplicit,
+        workspaceExplicit,
+        source,
+      },
+      definitions,
+      values,
+    }
+  }
+
+  const getSettingsState = (): { kind: 'addons.settingsState' } & AddonSettingsStatePayload => {
+    const open = runtime.settingsAreaAddonId() ?? null
+    return {
+      kind: 'addons.settingsState',
+      apiVersion: ADDON_API_VERSION,
+      draft: true,
+      open,
+      hasWorkspace: hostHasWorkspace(),
+      addon: open === null ? null : buildSettingsArea(open),
+      openAddonSettingsPage: runtime.openSettingsAddonId() ?? null,
+    }
+  }
+
+  /** 设置区保存/清除操作的应答推送（带操作结局提示——失败不虚报） */
+  const postSettingsState = (webview: vscode.Webview, notice?: AddonSettingsStatePayload['notice']): void => {
+    const state = getSettingsState()
+    const payload = notice === undefined ? state : { ...state, notice }
+    try {
+      void webview.postMessage(payload).then(undefined, () => {})
+    } catch {
+      // 面板已销毁：下次装载经 addons.settingsGet 拉取权威状态
+    }
+  }
 
   // ---- 面板桥公共：manifest 铸造（各面板自己的 asWebviewUri）与回执 ----
   const buildManifest = (
@@ -492,7 +617,53 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         return true
       }
       case 'addons.setEnabled': {
-        runtime.setUserEnabled(message.addonId, message.enabled)
+        // #351 T02 功能开关；#353 T04 起可选 scope（缺省 user 保持语义）
+        runtime.setEnabledScope(message.addonId, message.scope ?? 'user', message.enabled)
+        postSettingsState(webview)
+        return true
+      }
+      case 'addons.clearEnabledOverride': {
+        // #353 T04 清除功能开关的工作区覆盖
+        runtime.clearEnabledOverride(message.addonId)
+        postSettingsState(webview)
+        return true
+      }
+      // ---- #353 T04 基础设置区：开合与按批写入 ----
+      case 'addons.settingsOpen': {
+        runtime.openSettingsArea(message.addonId)
+        postSettingsState(webview)
+        return true
+      }
+      case 'addons.settingsClose': {
+        runtime.closeSettingsArea()
+        postSettingsState(webview)
+        return true
+      }
+      case 'addons.settingsUpdate': {
+        // 按批写入：结果应答推送（失败带原因码——不虚报）；成功后服务
+        // onChanged 的常规推送由 extension.ts 接线补发（不带 notice）
+        void settingsService.update(message.addonId, message.scope, message.values).then((result: AddonSettingsUpdateResult) => {
+          if (result.ok) {
+            postSettingsState(webview, { kind: 'saved', scope: message.scope, keys: Object.keys(message.values) })
+          } else {
+            postSettingsState(webview, {
+              kind: 'save-failed',
+              reason: result.reason,
+              ...(result.invalidKeys !== undefined ? { keys: result.invalidKeys } : {}),
+              scope: message.scope,
+            })
+          }
+        })
+        return true
+      }
+      case 'addons.settingsClearOverride': {
+        void settingsService.clearWorkspaceOverride(message.addonId, message.key).then((result: AddonSettingsUpdateResult) => {
+          if (result.ok) {
+            postSettingsState(webview, { kind: 'saved', keys: [message.key] })
+          } else {
+            postSettingsState(webview, { kind: 'save-failed', ...(result.reason !== 'no-workspace' ? { reason: result.reason } : {}), keys: [message.key] })
+          }
+        })
         return true
       }
       case 'addons.openAddonPage': {
@@ -518,6 +689,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
 
   const page: AddonPageWiring = {
     getState,
+    getSettingsState,
     openSearch: () => {
       // 关键词仅帮助市场寻找（vsidian-addon）；不代表接入协议或官方身份
       void vscode.commands.executeCommand('workbench.extensions.search', '@keyword:"vsidian-addon"')
@@ -538,6 +710,27 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     },
     handleSettingsMessage,
     openAddonSettingsPage: (addonId) => runtime.openSettingsPage(addonId),
+    openSettingsArea: (addonId) => runtime.openSettingsArea(addonId),
+    settingsServiceSnapshot: () => {
+      const definitions: Record<string, readonly unknown[]> = {}
+      const userValues: Record<string, Readonly<Record<string, unknown>>> = {}
+      const workspaceValues: Record<string, Readonly<Record<string, unknown>>> | null = hostHasWorkspace() ? {} : null
+      for (const entry of coordinator.stateEntries()) {
+        definitions[entry.id] = settingsService.definitionsOf(entry.id)
+        const snapshot = settingsService.effectiveSnapshot(entry.id)
+        userValues[entry.id] = snapshot.userValues
+        if (workspaceValues !== null) {
+          workspaceValues[entry.id] = snapshot.workspaceValues ?? {}
+        }
+      }
+      return {
+        definitions,
+        userValues,
+        workspaceValues,
+        hasWorkspace: hostHasWorkspace(),
+        settingsAreaOpen: runtime.settingsAreaAddonId(),
+      }
+    },
   }
 
   // ---- runtime 状态变化 → 面板刷新（编辑器：provider 订阅 onPanelsChanged
@@ -597,6 +790,34 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         const preferences = preferenceStore.read()
         return { user: preferences.user, workspace: preferences.workspace }
       }),
+      // ---- #353 T04 设置服务与基础设置区（集成的宿主侧断言面） ----
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonSettingsState', () => page.settingsServiceSnapshot()),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonSettingsGet', (args: { addonId: string }) => {
+        const snapshot = settingsService.effectiveSnapshot(args.addonId)
+        return { values: snapshot.values, sources: snapshot.sources, userValues: snapshot.userValues, workspaceValues: snapshot.workspaceValues }
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonSettingsUpdate', (args: { addonId: string; scope: 'user' | 'workspace'; values: Record<string, unknown> }) =>
+        settingsService.update(args.addonId, args.scope, args.values)),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonSettingsClearOverride', (args: { addonId: string; key: string }) =>
+        settingsService.clearWorkspaceOverride(args.addonId, args.key)),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonSettingsArea', (args?: { addonId?: string }) => {
+        if (args?.addonId !== undefined) {
+          return { open: runtime.openSettingsArea(args.addonId), settingsAreaOpen: runtime.settingsAreaAddonId() ?? null }
+        }
+        return { settingsAreaOpen: runtime.settingsAreaAddonId() ?? null }
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonSettingsCloseArea', () => {
+        runtime.closeSettingsArea()
+        return true
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonSetEnabledScope', (args: { addonId: string; scope: 'user' | 'workspace'; enabled: boolean }) => {
+        const result = runtime.setEnabledScope(args.addonId, args.scope, args.enabled)
+        return { result, state: getState() }
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonClearEnabledOverride', (args: { addonId: string }) => {
+        const result = runtime.clearEnabledOverride(args.addonId)
+        return { result, state: getState() }
+      }),
     )
   }
 
@@ -613,6 +834,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       // 订阅期与 wiring 同生命周期（extension.ts 均不退订——由 dispose 收口）
       return off
     },
+    // #353 T04：设置变化（成功保存后）→ 设置页 addons.settingsState 常规推送
+    onSettingsChanged: (listener) => settingsService.onChanged(() => listener()),
     dispose: () => {
       offRuntimeChanged()
       runtime.dispose()
