@@ -82,33 +82,39 @@ try {
       socket.send(JSON.stringify({ id, method, params }))
     })
   }
-  let found = false
   let contextId
-  for (const target of targets.filter((item) => item.webSocketDebuggerUrl)) {
-    await connect(target)
-    const tree = await call('Page.getFrameTree').catch(() => null)
-    const frames = []
-    function collect(node) {
-      if (!node) return
-      frames.push(node.frame)
-      for (const child of node.childFrames ?? []) collect(child)
-    }
-    collect(tree?.frameTree)
-    for (const frame of frames) {
-      const world = await call('Page.createIsolatedWorld', { frameId: frame.id }).catch(() => null)
-      if (!world) continue
-      const probe = await call('Runtime.evaluate', {
-        contextId: world.executionContextId,
-        expression: 'Boolean(document.querySelector(".cm-content"))', returnByValue: true,
-      }).catch(() => null)
-      if (probe?.result?.value === true) {
-        found = true; contextId = world.executionContextId; break
+  /** （重）定位 Vsidian webview 的 frame 并建 isolatedWorld——组件重接入
+   *  的装载时序下 webview 可能重建（context 失效），失效时重找 */
+  async function reinitContext() {
+    contextId = undefined
+    const list = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json())
+    for (const target of list.filter((item) => item.webSocketDebuggerUrl)) {
+      await connect(target)
+      const tree = await call('Page.getFrameTree').catch(() => null)
+      const frames = []
+      function collect(node) {
+        if (!node) return
+        frames.push(node.frame)
+        for (const child of node.childFrames ?? []) collect(child)
       }
+      collect(tree?.frameTree)
+      for (const frame of frames) {
+        const world = await call('Page.createIsolatedWorld', { frameId: frame.id }).catch(() => null)
+        if (!world) continue
+        const probe = await call('Runtime.evaluate', {
+          contextId: world.executionContextId,
+          expression: 'Boolean(document.querySelector(".cm-content"))', returnByValue: true,
+        }).catch(() => null)
+        if (probe?.result?.value === true) {
+          contextId = world.executionContextId
+          return
+        }
+      }
+      socket.close()
     }
-    if (found) break
-    socket.close()
   }
-  assert(found, 'CDP 未找到 Vsidian webview 的 .cm-content')
+  await reinitContext()
+  assert(contextId !== undefined, 'CDP 未找到 Vsidian webview 的 .cm-content')
   let requestId = 0
   async function command(action, details = {}) {
     const id = ++requestId
@@ -159,7 +165,14 @@ try {
     assert.fail(`行为目录应${expected ? '含' : '不含'} inject-mark（实际 ${JSON.stringify(last)}）`)
   }
   async function focus() {
-    await call('Runtime.evaluate', { contextId, expression: 'document.querySelector(".cm-content").focus()' })
+    try {
+      await call('Runtime.evaluate', { contextId, expression: 'document.querySelector(".cm-content").focus()' })
+    } catch {
+      // webview 重建（context 失效）——重找 frame/world 后重试
+      await reinitContext()
+      assert(contextId !== undefined, 'webview 重建后未能重新定位 .cm-content')
+      await call('Runtime.evaluate', { contextId, expression: 'document.querySelector(".cm-content").focus()' })
+    }
   }
   async function docEnd() {
     await focus()
@@ -193,7 +206,12 @@ try {
   await waitStatus('enabled')
   await waitBehavior(true)
   await typeChar('^')
-  await waitText('word^-T12-')
+  try {
+    await waitText('word^-T12-')
+  } catch (err) {
+    const stats = await command('behaviorStats')
+    throw new Error(`${err.message}；行为探针=${JSON.stringify(stats?.['addonBehaviors'] ?? null)?.slice(0, 600)}`)
+  }
   console.log('[PASS] 贡献放行后真实键入触发行为修饰（^ → -T12-）')
 
   // ---- 2. arm=behavior：真实键入 ^ → 行为回调抛异常 → 全组件暂停 ----

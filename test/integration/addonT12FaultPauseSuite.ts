@@ -68,6 +68,9 @@ export async function run(): Promise<void> {
         case 'behaviorCatalog':
           result = await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorCatalog')
           break
+        case 'behaviorStats':
+          result = await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', uri.toString(), 0)
+          break
         case 'setArm':
           result = await vscode.commands.executeCommand(`${ADDON_ID}.setArm`, message.arm ?? null)
           break
