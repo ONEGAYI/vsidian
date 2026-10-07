@@ -204,8 +204,9 @@ describe('格式操作的文本契约', () => {
     expect(apply('', 'quote', 0)).toEqual({ text: '> ', selection: { anchor: 2 } })
     // 纯空白行缩进透传与非空行路径一致
     expect(apply('  ', 'quote', 1)).toEqual({ text: '  > ', selection: { anchor: 4 } })
-    // headingNone 是取消型操作：空行无可摘除，维持无反应
+    // 取消型操作空行无可作用对象，维持无反应（#393 审查 D1 钉住）
     expect(apply('', 'headingNone', 0)).toEqual({ text: '', selection: null })
+    expect(apply('', 'clearInline', 0)).toEqual({ text: '', selection: null })
   })
 
   it('空行插入后再按一次恢复空行，两态闭环（#393）', () => {
@@ -445,6 +446,15 @@ describe('多 range 逐段规划（#240）', () => {
     ])
     // 非空选区包裹无独立产物选区（null = 保持原选区语义，调用方映射原 range）
     expect(plan!.selections).toEqual([null, null])
+  })
+
+  it('结构性操作主 range 为空行：仅主 range 插入并携带产物选区（#393 审查 D2）', () => {
+    // planOnlyIndex=0（主 range 空行 from 2）：其余 range 跳过（selections
+    // 记 null）；空行插入的产物 anchor 为终文坐标，deltaBefore=0 直落
+    const plan = planFormatOperationRanges('a\n\nb', 'heading2',
+      [{ from: 2, to: 2 }, { from: 0, to: 0 }], 'toggle', 0)
+    expect(plan!.changes).toEqual([{ from: 2, to: 2, insert: '## ' }])
+    expect(plan!.selections).toEqual([{ anchor: 5 }, null])
   })
 
   it('两空光标各自扩词包裹：产物选区各自给出（原文坐标，互不加 delta）', () => {
