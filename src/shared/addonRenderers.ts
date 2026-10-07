@@ -71,6 +71,19 @@ export function rendererProviderId(addonId: string, rendererId: string): string 
   return `${addonId}/${rendererId}`
 }
 
+/** 声明 → 候选（补归属与稳定 ID；语言 trim 归一） */
+export function addonRendererCandidateOf(addonId: string, info: AddonRendererProviderInfo): AddonRendererCandidate {
+  return {
+    addonId,
+    rendererId: info.rendererId,
+    providerId: rendererProviderId(addonId, info.rendererId),
+    label: info.label,
+    languages: info.languages.map((l) => normalizeRendererLanguage(l)),
+    modes: info.modes,
+    exportFormats: info.exportFormats,
+  }
+}
+
 /** 内置图形语言集（RENDERED_FENCE_LABELS 键集 = 内置提供者的支持语言） */
 export function builtinRendererLanguages(): readonly string[] {
   return Object.keys(RENDERED_FENCE_LABELS)
