@@ -289,6 +289,10 @@ export const addonT12Cases: Array<[string, () => Promise<void>]> = [
       return table.languages.find((row) => row.language === 't12graph')?.source === 'user' ? true : undefined
     })
     void pageEvents(true)
+    // mermaid 行基线（共享宿主的生效表跨用例保留——T09 用例可能留下接管
+    // 残留；「内置不受影响」断言按「故障不改变该行」对比，不假定 builtin）
+    const tableBefore = await rendererTable()
+    const mermaidBefore = tableBefore.languages.find((row) => row.language === 'mermaid')?.effective
 
     // 注入渲染挂载故障并触发（改写围栏源码 → 新容器 mount → 未捕获异常）
     await vscode.commands.executeCommand(`${ADDON_ID}.setArm`, 'render-mount')
@@ -332,7 +336,8 @@ export const addonT12Cases: Array<[string, () => Promise<void>]> = [
     const t02 = await runtimeStatus(T02_ID)
     assert(t02 === null || t02.runState === 'enabled' || t02.runState === 'idle', `t02 不受牵连（实际 ${JSON.stringify(t02)}）`)
     const tableNow = await rendererTable()
-    assert(tableNow.languages.find((row) => row.language === 'mermaid')?.effective === 'builtin', '内置 mermaid 原样生效')
+    assert(tableNow.languages.find((row) => row.language === 'mermaid')?.effective === mermaidBefore,
+      `t12 故障不得改变 mermaid 生效行（基线 ${JSON.stringify(mermaidBefore)}，实际 ${JSON.stringify(tableNow.languages.find((row) => row.language === 'mermaid')?.effective)}）`)
 
     // 故障期间滞留通道请求被拒（setup/run 通道已注销——旧消息不回挂）
     const stale = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonChannelRequest', { addonId: ADDON_ID, topic: 't12.next', payload: null })) as { ok: boolean; reason?: string }
