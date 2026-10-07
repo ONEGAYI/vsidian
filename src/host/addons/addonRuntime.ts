@@ -116,6 +116,9 @@ const NOOP_HANDLE: AddonRegistrationHandle = { dispose: () => {} }
 
 export class AddonRuntime {
   private readonly records = new Map<string, RuntimeRecord>()
+  /** 组件代次高水位（release 后保留）：重注册不回卷——代次在组件历史内
+   *  单调，旧代次在途消息（fault/factory-error）不与新 record 撞号 */
+  private readonly generationHighWater = new Map<string, { editor: number; settings: number }>()
   private readonly listeners = new Set<() => void>()
   /** 当前打开的组件设置页（单设置页面板） */
   private settingsOpenAddon: string | undefined
@@ -294,16 +297,23 @@ export class AddonRuntime {
   // ---- webview 出站消息（面板桥转发） ----
 
   handleOutbound(message: AddonPageOutbound): void {
+    // 代次硬边界：故障与工厂异常记账须消息代次与当前任一面（编辑器/设置）
+    // 的在场代次一致——停用再启用换代后，在途旧代次消息到达时不得把无辜
+    // 新代次打成 faulted（对齐装载器「迟到消息不接入新代次」的声明）
+    const generationCurrent = (addonId: string, generation: number): boolean => {
+      const record = this.records.get(addonId)
+      return !!record && (generation === record.editorGeneration || generation === record.settingsGeneration)
+    }
     if (message.type === 'addon.loaded' && !message.outcome.ok && message.outcome.reason === 'factory-error') {
-      const record = this.records.get(message.addonId)
-      if (record) {
+      if (generationCurrent(message.addonId, message.generation)) {
+        const record = this.records.get(message.addonId)!
         this.faultRecord(record, `页面工厂异常：${message.outcome.detail ?? 'unknown'}`, 'page-factory')
       }
       return
     }
     if (message.type === 'addon.faulted') {
-      const record = this.records.get(message.addonId)
-      if (record) {
+      if (generationCurrent(message.addonId, message.generation)) {
+        const record = this.records.get(message.addonId)!
         this.faultRecord(record, message.reason, 'page-reported')
       }
       return
@@ -394,8 +404,8 @@ export class AddonRuntime {
       run: null,
       runState: 'idle',
       faultReason: undefined,
-      editorGeneration: 0,
-      settingsGeneration: 0,
+      editorGeneration: this.generationHighWater.get(addonId)?.editor ?? 0,
+      settingsGeneration: this.generationHighWater.get(addonId)?.settings ?? 0,
     }
     this.records.set(addonId, record)
     // #353 T04 新 setup 代次：定义集先清空（setup 内 registerDefinitions 重新
@@ -672,6 +682,7 @@ export class AddonRuntime {
     if (this.settingsAreaAddon === addonId) {
       this.settingsAreaAddon = undefined
     }
+    this.generationHighWater.set(addonId, { editor: record.editorGeneration, settings: record.settingsGeneration })
     this.records.delete(addonId)
     this.notify()
   }

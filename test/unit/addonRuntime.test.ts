@@ -189,10 +189,11 @@ describe('T02 运行生命周期：手动停用与持久化', () => {
     })
     expect(reEnabled).toBe(false)
     expect(h.runtime.runtimeStatus('fixture.demo')).toMatchObject({ enabled: false, runState: 'idle' })
-    // 用户重新打开开关：enable 装配、代次从头计数（新代次）
+    // 用户重新打开开关：enable 装配、新代次（高水位起算不回卷）
     h.runtime.setUserEnabled('fixture.demo', true)
     expect(reEnabled).toBe(true)
-    expect(h.runtime.desiredEditorLoads()[0]).toMatchObject({ generation: 1 })
+    // 高水位起算：重启用代次 > 首启用（旧代次在途消息不撞号）
+    expect(h.runtime.desiredEditorLoads()[0]).toMatchObject({ generation: 2 })
   })
 
   it('停用后重新启用（不经 release）：enable 重跑且代次递增', async () => {
@@ -303,6 +304,24 @@ describe('T02 故障暂停：可归因异常暂停全部注册贡献', () => {
     expect(h.runtime.runtimeStatus('fixture.demo')).toMatchObject({ runState: 'faulted' })
     expect(h.runtime.runtimeStatus('fixture.demo')?.faultReason).toContain('page boom')
     expect(h.runtime.desiredEditorLoads()).toEqual([])
+  })
+
+  it('迟到旧代次故障不回潮：换代后 gen1 在途 fault 到达不打 faulted 无辜 gen2', () => {
+    const h = harness()
+    h.register({ enable(context) { context.pages.registerEditor(EDITOR_ENTRY) } })
+    // 换代：释放 gen1 → 重新注册进入 gen2
+    h.registry.release('fixture.demo')
+    h.register({ enable(context) { context.pages.registerEditor(EDITOR_ENTRY) } })
+    expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('enabled')
+    const gen2 = h.runtime.desiredEditorLoads()[0]!.generation
+    expect(gen2).toBeGreaterThan(1)
+    // gen1 在途 fault 到达：代次不符，不得把 gen2 记成故障（贡献保持）
+    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: 1, reason: 'late fault' })
+    expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('enabled')
+    expect(h.runtime.desiredEditorLoads()).toHaveLength(1)
+    // 当前代次 fault 正常记账（校验收紧不误伤正路）
+    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: gen2, reason: 'current fault' })
+    expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('faulted')
   })
 
   it('通道回调抛错 → rejected 回执 + fault 暂停', async () => {
