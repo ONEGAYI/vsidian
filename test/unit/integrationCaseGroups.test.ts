@@ -174,6 +174,7 @@ function productionCases(): Array<[string, null]> {
     ['wikilinkEmbedCases', parseCaseArray('wikilinkEmbed.ts', 'wikilinkEmbedCases')],
     ['addonHistoryCases', parseCaseArray('addonHistoryCases.ts', 'addonHistoryCases')],
     ['addonT02Cases', parseCaseArray('addonT02Cases.ts', 'addonT02Cases')],
+    ['addonT06Cases', parseCaseArray('addonT06Cases.ts', 'addonT06Cases')],
   ])
   const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
     ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)

@@ -62,15 +62,17 @@ const testCacheDir = path.join(root, '.vscode-test')
 // 兼容注册（addon-ok）、声明合法但不兼容（addon-incompatible）、激活失败
 // （addon-fail）；#351 T02 页面 SDK 夹具（addon-t02——页面产物由 V02
 // 构建桥生成后拷入其 dist/，构建产物不入库）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02'].map((name) =>
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t06'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
 // #351 T02：夹具组件页面产物构建（chrome114 IIFE + 静态红线——CM6 不
 // 重打包）；产物拷入 addon-t02/dist 供组件按相对入口登记（资源授权锚 =
-// 夹具安装目录）
-const t02Layout = (await buildTestAddons({ log: () => {} })).t02Addon
-cpSync(t02Layout.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t02', 'dist'), { recursive: true })
+// 夹具安装目录）。#355 T06 同构建桥生成 t06 页面产物并拷入其夹具目录
+const addonLayout = await buildTestAddons({ log: () => {} })
+cpSync(addonLayout.t02Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t02', 'dist'), { recursive: true })
 console.log('[runTest] T02 夹具组件页面产物已构建并拷入 addonFixtures/addon-t02/dist')
+cpSync(addonLayout.t06Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t06', 'dist'), { recursive: true })
+console.log('[runTest] T06 夹具组件页面产物已构建并拷入 addonFixtures/addon-t06/dist')
 const started = Date.now()
 try {
   // 所有宿主结束后再清理便携目录；若一片启动异常，也不能清理仍在运行的其他片。

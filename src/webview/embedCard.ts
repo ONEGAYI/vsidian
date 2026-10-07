@@ -2023,12 +2023,12 @@ export class EmbedCardManager {
     })])
     const inst = created
     live.instance = inst
-    // T06（#355）embed 句柄注册：目标身份与实例均在场（instanceId 沿用
-    // occurrence 语义键——跨开合与重建稳定，与 hover.watch/refEdit.bind
-    // 的身份同源）
+    // T06（#355）embed 句柄注册：目标身份与实例均在场。instanceId 用
+    // hostId（稳定宿主身份，面板会话内唯一——同目标多 occurrence 各自
+    // 独立句柄；inner 是目标原文，同目标重复不可作身份）
     this.context.addonViews?.()?.registerLive({
       viewType: 'embed',
-      instanceId: `embed:${entry.inner}`,
+      instanceId: `embed:${entry.hostId}`,
       targetDocUri: live.docUri!,
       mode: () => 'live',
       instance: inst,
@@ -2308,7 +2308,7 @@ export class EmbedCardManager {
       return
     }
     // T06（#355）：embed 句柄注销（先于实例销毁——句柄操作此后拒绝）
-    this.context.addonViews?.()?.unregister(`embed:${entry.inner}`)
+    this.context.addonViews?.()?.unregister(`embed:${entry.hostId}`)
     if (this.closeDialogBelongsTo(entry)) {
       this.closePendingDelete = null
       this.closeCloseDialog()
