@@ -11,6 +11,7 @@ vsidian/
     │   ├── addonHistoryCoordinator.ts    # 附加组件历史协调器
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
     │   ├── addons/                       # 附加组件宿主端实现
+    │   │   ├── addonCommandService.ts  # 宿主命令目录服务与命令面板注册
     │   │   ├── addonCoordinator.ts     # 附加组件发现协调与唤醒
     │   │   ├── addonPageRegistry.ts    # 页面入口登记校验
     │   │   ├── addonRealpathGuard.ts   # realpath 逃逸守卫
@@ -69,6 +70,7 @@ vsidian/
     │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
     │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
+    │   ├── addonCommands.ts        # 附加组件命令/菜单共享形状与校验
     │   ├── addonEditApi.ts         # 统一视图编辑API共享形状
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
@@ -139,6 +141,7 @@ vsidian/
     │   ├── wikilinkQuery.ts        # 双链联想查询评分移植
     │   └── wordSegment.ts          # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
+        ├── addonCommands.ts            # 编辑器页命令/菜单注册表运行时
         ├── addonPageLoader.ts          # 页面装载器生产实现
         ├── addonSettingsControls.ts    # 基础设置控件构造器
         ├── addonSettingsSection.ts     # 设置页附加组件分页
