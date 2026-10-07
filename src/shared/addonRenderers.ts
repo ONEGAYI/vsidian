@@ -46,6 +46,37 @@ export interface AddonRendererCandidate extends AddonRendererProviderInfo {
   providerId: string
 }
 
+/** 渲染挂载上下文（mount/refresh/release 回调入参；页面端执行） */
+export interface AddonRendererMountContext {
+  language: string
+  /** 目标视图模式（组件未支持的模式不会收到调用） */
+  mode: AddonRendererMode
+}
+
+/**
+ * 组件页面代码注册渲染提供者的完整形状（技术方案 5.3「renderers.register」
+ * 的候选草案）。回调留在 webview 内执行——桥只把可序列化声明
+ * （AddonRendererProviderInfo）上报宿主参与选择；宿主的生效表广播回来后
+ * 才对挂载生效（顺序由宿主决定，不靠脚本装载竞速）。
+ */
+export interface AddonRendererRegistration extends AddonRendererProviderInfo {
+  /** 容器内挂载（同步入口；异步装载由组件自行管理，结果只进本容器——
+   *  平台保证容器不跨生效代次复用，旧代次容器退场即与组件代码无关） */
+  mount(container: HTMLElement, code: string, ctx: AddonRendererMountContext): void
+  /** 就地刷新（热切换重派发等；缺省走 release + mount） */
+  refresh?(container: HTMLElement, code: string, ctx: AddonRendererMountContext): void
+  /** 释放（接管切换、容器退场、停用或故障；重复释放无害） */
+  release?(container: HTMLElement, ctx: AddonRendererMountContext): void
+  /** 取导出 SVG 字符串（exportFormats 含 'svg' 时必须提供；弹窗与导出共用） */
+  exportSvg?(code: string, language: string): Promise<string>
+}
+
+/** SDK renderers 面（仅编辑器页提供）：登记提供者，返回释放句柄 */
+export interface AddonRenderersFacet {
+  /** 声明非法或代次已终结时拒绝（no-op 句柄；不构成组件故障） */
+  register(spec: AddonRendererRegistration): { dispose(): void }
+}
+
 /** 发现批次与用户首选的持久化形状（v1 冻结 fail-safe） */
 export interface AddonRendererStoreV1 {
   version: 1
