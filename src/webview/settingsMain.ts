@@ -95,6 +95,9 @@ vscode.postMessage({ kind: 'defaultEditor.get' })
 // #350 T01 附加组件状态：同「装载即拉取」模式（addons.state 应答；发现/
 // 唤醒/注册变化后宿主经协调器 onStateChanged 推送）
 vscode.postMessage({ kind: 'addons.get' })
+// #353 T04 基础设置区状态：同「装载即拉取」模式（addons.settingsState
+// 应答；定义注册/成功保存/设置区开合后宿主推送回显）
+vscode.postMessage({ kind: 'addons.settingsGet' })
 // #351 T02 装载器就绪上报（设置页 webview 安装装载器后与面板重载后各发
 // 一次）：宿主按当前期望装载清单幂等推送组件设置页指令（addon.load）
 vscode.postMessage({ kind: 'addonPage.ready' })
