@@ -554,6 +554,54 @@ describe('确认与光标位置（文件字段整体替换）', () => {
 })
 
 describe('异步列表更新按候选身份保留手动高亮', () => {
+  it('空查询 watcher 失效重排：保留已高亮身份，下一次 ↓ 选当前列表下一身份且不移动正文光标', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    let fixture: ReturnType<typeof setup> | undefined
+    try {
+      fixture = setup('[[]]')
+      const { controller, sent, view } = fixture
+      const activeName = () => document.querySelector(ACTIVE)
+        ?.querySelector('.vsidian-wikilink-suggest-name')?.textContent
+      locate(controller, 2)
+      typeAt(view, 2, 'x')
+      deleteAt(view, 2, 3)
+      expect(lastQuery(sent)?.query).toBe('')
+      respond(controller, sent, [FANGAN, TONGZHI])
+      expect(popupState().activeIndex).toBe(null)
+      const headBefore = view.state.selection.main.head
+      // 与真宿主一致的公开按键消息，走生产 keydown/keymap 链路。
+      controller.handleHostMessage({ kind: 'table.test.key', key: 'down' })
+      expect(popupState().activeIndex).toBe(0)
+      expect(activeName()).toBe('方案.md')
+
+      const beforeRefresh = lastQuery(sent)!
+      controller.handleHostMessage({ kind: 'wikilink.invalidate' })
+      vi.advanceTimersByTime(300)
+      const refreshedQuery = lastQuery(sent)!
+      expect(refreshedQuery.reqId).toBeGreaterThan(beforeRefresh.reqId)
+      expect(refreshedQuery.generation).toBe(beforeRefresh.generation)
+      expect(refreshedQuery.query).toBe('')
+      const newer: WikilinkCandidateItem = {
+        ...FANGAN, id: 'C:\\vault\\新增.md', name: '新增.md', dir: '', relPath: '新增.md',
+        insertPath: '../新增.md', alias: '新增', mtimeMs: 3000,
+      }
+      respond(controller, sent, [newer, FANGAN, TONGZHI])
+      // 插到首部后原身份移到索引 1；不能把固定位置当作高亮身份。
+      expect(popupState().activeIndex).toBe(1)
+      expect(activeName()).toBe('方案.md')
+      controller.handleHostMessage({ kind: 'table.test.key', key: 'down' })
+      expect(popupState().activeIndex).toBe(2)
+      expect(activeName()).toBe('通知.md')
+      expect(view.state.selection.main.head).toBe(headBefore)
+      controller.handleHostMessage({ kind: 'table.test.key', key: 'enter' })
+      expect(view.state.doc.toString()).toBe('[[../通知.md|通知]]')
+      expect(popupState().open).toBe(false)
+    } finally {
+      fixture?.controller.dispose()
+      vi.useRealTimers()
+    }
+  })
+
   it('同查询更新帧：手动高亮按 id 保留；身份消失时空查询回无高亮、非空取首项', () => {
     const { controller, sent, view } = setup('[[]]')
     try {

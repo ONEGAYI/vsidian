@@ -2057,6 +2057,48 @@ function candidatesOf(r: ReturnType<VaultIndexService['queryWikilinkFileCandidat
 }
 
 describe('VaultIndexService：全文件清单（#377 T02）', () => {
+  it('独立来源根：其他根 watcher 重排不改变本根候选身份/顺序与来源相对路径（#376 fixture 边界）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/b.md': '# B\n',
+      'C:/vault/c.pdf': 'pdf',
+      'C:/t01/联想目录/联想来源.md': '来源正文\n',
+      'C:/t01/联想目录/同目录目标.md': '# 同目录标题\n',
+      'C:/t01/子目录目标.md': '子目录目标正文\n',
+    })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 300, size: 4 })
+    fs.stats.set('C:/vault/b.md', { mtimeMs: 200, size: 4 })
+    fs.stats.set('C:/vault/c.pdf', { mtimeMs: 100, size: 3 })
+    const { service, scan } = makeService(fs)
+    try {
+      await service.initialize([
+        { fsPath: 'C:/vault', uri: 'file:///c%3A/vault' },
+        { fsPath: 'C:/t01', uri: 'file:///c%3A/t01' },
+      ])
+      const source = 'C:/t01/联想目录/联想来源.md'
+      const isolatedBefore = candidatesOf(service.queryWikilinkFileCandidates(source, ''))
+      expect(isolatedBefore.items.map((item) => item.name).sort()).toEqual(
+        ['同目录目标.md', '子目录目标.md', '联想来源.md'])
+      expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '')).items
+        .map((item) => item.name)).toEqual(['a.md', 'b.md', 'c.pdf'])
+
+      // 对应其他宿主用例留下的资源 watcher 更新：外根排序真实变化，
+      // 不是禁用失效广播或把刷新假装成静态数据。
+      fs.stats.set('C:/vault/c.pdf', { mtimeMs: 400, size: 3 })
+      scan.emit('C:/vault/c.pdf')
+      await vi.advanceTimersByTimeAsync(800)
+      expect(candidatesOf(service.queryWikilinkFileCandidates('C:/vault/a.md', '')).items
+        .map((item) => item.name)).toEqual(['c.pdf', 'a.md', 'b.md'])
+      expect(candidatesOf(service.queryWikilinkFileCandidates(source, ''))).toEqual(isolatedBefore)
+      expect(candidatesOf(service.queryWikilinkFileCandidates(source, '同目')).items
+        .map((item) => item.insertPath)).toEqual(['同目录目标.md'])
+      expect(candidatesOf(service.queryWikilinkFileCandidates(source, '子目')).items
+        .map((item) => item.insertPath)).toEqual(['../子目录目标.md'])
+    } finally {
+      service.dispose()
+    }
+  })
+
   it('全文件登记：所有未排除文件入清单并落盘 catalog.json；常用资源取真实 mtime，未知类型仅记名 mtime=0', async () => {
     const fs = makeFs({
       'C:/vault/a.md': '# A\n',

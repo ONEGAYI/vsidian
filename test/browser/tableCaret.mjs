@@ -1,6 +1,7 @@
 // 使用浏览器原生按键与组合输入，避免 dispatchEvent/execCommand 遗漏事件顺序。
 // 默认使用 Playwright Chromium；可设 VSIDIAN_TEST_BROWSER_CHANNEL=msedge。
 import assert from 'node:assert/strict'
+import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFile } from 'node:fs/promises'
@@ -35,10 +36,51 @@ const katexMinJs = {
 await build({ entryPoints: [path.join(root, 'test/browser/tableCaretFixture.ts')],
   bundle: true, outfile: bundle, format: 'iife',
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]', plugins: [katexFontStrip, katexMinJs] })
+
+// 保留每场景独立页面/上下文，仅避免反复把整个 bundle 当内联脚本文本传输。
+// 只服务本轮构建的一个固定文件；请求路径不参与文件系统路径拼接，不启用缓存。
+async function startFixtureScriptServer() {
+  const server = http.createServer(async (req, res) => {
+    if (req.method !== 'GET' || req.url !== '/tableCaret.js') {
+      res.writeHead(404)
+      res.end('not found')
+      return
+    }
+    try {
+      const data = await readFile(bundle)
+      res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' })
+      res.end(data)
+    } catch {
+      res.writeHead(500)
+      res.end('fixture unavailable')
+    }
+  })
+  let closing
+  const close = () => closing ??= new Promise((resolve) => {
+    server.close(() => resolve())
+    server.closeAllConnections()
+  })
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+  } catch (error) {
+    await close()
+    throw error
+  }
+  return { url: `http://127.0.0.1:${server.address().port}/tableCaret.js`, close }
+}
+
 const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 let passed = 0
+let fixtureScript
 try {
+  fixtureScript = await startFixtureScriptServer()
   for (const row of process.argv.includes('--navigation-only') ? [] : [0, 1]) for (const mode of ['english', 'ime']) {
     for (const deletion of ['backspace', 'delete', 'selection', 'empty-source']) {
       const page = await browser.newPage()
@@ -47,7 +89,7 @@ try {
       try {
         await page.setContent('<div id="app"></div>')
         await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
-        await page.addScriptTag({ path: bundle })
+        await page.addScriptTag({ url: fixtureScript.url })
         await page.evaluate((empty) => window.initTable(`| 带 |${empty ? '' : 'middle'}| 送 |\n| --- | --- | --- |\n| 左 |${empty ? '' : 'middle'}| 右 |\n`), deletion === 'empty-source')
         const cell = page.locator('.vsidian-table-grid-row').nth(row).locator('.vsidian-table-grid-cell').nth(1)
         await cell.click()
@@ -161,7 +203,7 @@ try {
     try {
       await page.setContent('<div id="app"></div>')
       await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
-      await page.addScriptTag({ path: bundle })
+      await page.addScriptTag({ url: fixtureScript.url })
       let source = 'BEFORE\n\n| H1 | H2 |\n| --- | --- |\n| B1 | B2 |\n| C1 | C2 |\n\nAFTER'
       if (scenario === 'horizontal-wrap-empty') source = source.replace('| B1 | B2 |', '| | |')
       if (scenario === 'vertical-empty') source = source.replace(' B2 ', ' ')
@@ -612,7 +654,7 @@ try {
           try {
             await reopened.setContent('<div id="app"></div>')
             await reopened.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
-            await reopened.addScriptTag({ path: bundle })
+            await reopened.addScriptTag({ url: fixtureScript.url })
             await reopened.evaluate(text => {
               window.initTable(text)
               window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
@@ -1137,7 +1179,7 @@ try {
     try {
       await page.setContent('<div id="app"></div>')
       await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
-      await page.addScriptTag({ path: bundle })
+      await page.addScriptTag({ url: fixtureScript.url })
       const cellText = scenario === 'wikilink' ? '三[[a b]]'
         : scenario === 'image' ? '三![alt 图](a.png)' : '三$x$'
       const source = `| 甲 | 乙 |\n| --- | --- |\n| 一 | 二 |\n| ${cellText} | 四 |`
@@ -1200,7 +1242,7 @@ try {
     try {
       await page.setContent('<div id="app"></div>')
       await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
-      await page.addScriptTag({ path: bundle })
+      await page.addScriptTag({ url: fixtureScript.url })
       const source = '价格 $x^2$ 元\n\n$$\nE=mc^2\n$$\n\n花费 $5，合计 $10\n\n$a$ 与 $b$'
       await page.evaluate((text) => window.initTable(text), source)
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
@@ -1364,14 +1406,15 @@ try {
   if (mathFailures.length) throw new AggregateError(mathFailures, '公式输入回归失败')
   if (navigationFailures.length) throw new AggregateError(navigationFailures, '表格方向键导航回归失败')
   console.log(`[原生输入] ${passed} 项通过`)
-} finally { await browser.close() }
+} finally {
+  try { await browser.close() } finally { await fixtureScript?.close() }
+}
 
 // ---- #60 Mermaid 渲染回归（文件末尾追加段；独立浏览器实例 + 复刻 webview CSP 的页面）----
 // 关键验证目标：mermaid 独立产物经懒加载链路（URI 注入 → 按需 <script>）在
 // 与宿主 webview 同款的 CSP（无 unsafe-eval、script-src 'self'+nonce）下真实
 // 渲染；live/阅读双模式、源码编辑重渲染、无效语法降级、同源多图 id 唯一、
 // 图内链接不跳转、明暗主题重渲染。真实 mermaid 11.12.2，非 mock。
-import http from 'node:http'
 
 const mermaidArtifact = artifactPath(root, 'mermaid.js')
 await build({
@@ -1653,14 +1696,16 @@ console.log(`[原生输入] mermaid ${mermaidPassed} 项通过`)
     channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
   const cardFailures = []
   let cardPassed = 0
+  let cardFixtureScript
   try {
+    cardFixtureScript = await startFixtureScriptServer()
     const page = await cardBrowser.newPage()
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
     try {
       await page.setContent('<div id="app"></div>')
       await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
-      await page.addScriptTag({ path: bundle })
+      await page.addScriptTag({ url: cardFixtureScript.url })
       const CODE_DOC = ['前文', '', '```js', 'const a = 1;', '```', '', '后文', ''].join('\n')
       await page.evaluate((text) => window.initTable(text), CODE_DOC)
       const states = () => page.evaluate(() => ({
@@ -1788,14 +1833,22 @@ console.log(`[原生输入] mermaid ${mermaidPassed} 项通过`)
         document.querySelectorAll('.cm-line.vsidian-code-card-line').length === 0)
       await page.locator('.cm-content .cm-line', { hasText: '前文' }).first().click()
       await page.keyboard.press('End')
+      // Down 只到块前空行；继续 Down 会跨过隐藏块。Right 才进入围栏起点。
       await page.keyboard.press('ArrowDown')
+      await page.keyboard.press('ArrowRight')
+      const enteredFold = await page.evaluate(() => window.readEditor())
+      assert.equal(enteredFold.head, CODE_DOC.indexOf('```js'), '键盘进入折叠块须到开围栏源位置')
+      assert.equal(enteredFold.line, 3, '键盘进入折叠块须到第 3 行开围栏')
       await page.waitForFunction(() =>
         document.querySelectorAll('.cm-line.vsidian-code-card-line').length === 3,
-        null, { timeout: 5000 }).catch(() => undefined)
+        null, { timeout: 5000 })
       for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowDown')
       await page.waitForFunction(() =>
         document.querySelectorAll('.cm-line.vsidian-code-card-line').length === 0,
         null, { timeout: 5000 })
+      const leftFold = await page.evaluate(() => window.readEditor())
+      assert.equal(leftFold.head, CODE_DOC.length + 1, '键盘离开折叠块须到文末（含新增的 x）')
+      assert.equal(leftFold.line, 8, '键盘离开折叠块须到第 8 行末尾空行')
       const finalFold = await states()
       assert.equal(finalFold.headers.length, 1, '折叠往返后头部保留')
 
@@ -1812,7 +1865,7 @@ console.log(`[原生输入] mermaid ${mermaidPassed} 项通过`)
     cardFailures.push(error)
     console.error(`[原生输入][FAIL] code-card/caret-in-out: ${error.message}`)
   } finally {
-    await cardBrowser.close()
+    try { await cardBrowser.close() } finally { await cardFixtureScript?.close() }
   }
   if (cardFailures.length) throw new AggregateError(cardFailures, '代码块卡片回归失败')
   console.log(`[原生输入] code-card ${cardPassed} 项通过`)
