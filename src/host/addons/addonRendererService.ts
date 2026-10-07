@@ -210,7 +210,7 @@ export class AddonRendererService {
   private async persist(): Promise<void> {
     const ok = await this.ports.persistence.write(this.store)
     if (!ok) {
-      this.ports.log('renderers-persist-failed', '生效表批次或首选写入持久层失败')
+      this.ports.log('renderers-persist-failed', 'globalState write rejected')
     }
   }
 }

@@ -3143,6 +3143,14 @@ export class EmbedCardManager {
     }
   }
 
+  /** #358 T09 生效渲染提供者变化转发（嵌入内部 Live 各自重扫围栏表并
+   *  重建装饰——与明暗热跟随同款传播路径） */
+  applyRendererLanguagesChanged(): void {
+    for (const entry of this.entries.values()) {
+      entry.live?.instance?.applyRendererLanguagesChanged()
+    }
+  }
+
   /** probe 的 scope 字段取值：markdown 装载报区间形态，pdf／未装载报空
    *  （#338 联合收宽——pdf 无文本坐标，形态区分走 probe 的 pdf 字段） */
   private probeScopeOf(loaded: EmbedLoaded | null): 'full' | 'heading' | 'block' | '' {

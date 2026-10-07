@@ -155,7 +155,14 @@ import {
   setDiagramExportSender,
   setDiagramPopupDocSource,
 } from './diagramPopup'
-import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
+import {
+  effectiveGraphicSvgExport,
+  hasEffectiveGraphicRenderer,
+  refreshAddonGraphicBlocks,
+  remountChangedGraphicBlocks,
+  renderGraphicBlockInto,
+} from './graphicRenderers'
+import { addonRenderersBridge, type AddonRenderersTableChange } from './addonRenderers'
 import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome, markImageFrameSized, wrapGraphicFrame } from './graphicBlockChrome'
 import {
   closeImagePopup,
@@ -200,7 +207,13 @@ import {
   targetTipProbe,
 } from './targetTip'
 import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
-import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
+import {
+  GRAPHIC_LANG_ATTR,
+  MERMAID_CLASS_NAMES,
+  MERMAID_CODE_ATTR,
+  MERMAID_STATE_ATTR,
+  setDynamicRenderedFenceLanguages,
+} from '../shared/mermaid'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { runPerfProbe } from './perfProbe'
@@ -1960,6 +1973,49 @@ export class WebviewSyncController {
     if (this.live && this.docUri) {
       this.registerMainAddonView()
     }
+  }
+
+  /**
+   * #358 T09 挂接渲染提供者桥（main.ts 装桥后调用）：生效表变化时执行
+   * 已开文档热切换——
+   * 1. 围栏语言集写入 shared 动态集（fence 判定口径：live 围栏表重扫、
+   *    阅读切块、右键菜单分类随之生效）；
+   * 2. 全文档容器所有权扫描：生效者已变的容器释放旧提供者、换新容器按
+   *    当前生效者重挂（兜住嵌入阅读内容等不随 3/4 重建的容器；旧容器
+   *    脱离文档——旧代次迟到结果不回潮）；
+   * 3. live 装饰重建（主视图 + 嵌入内部 Live：装饰实例缓存清空、widget
+   *    换新 DOM 挂载新提供者）；
+   * 4. 阅读主文档整篇重渲染（块种类随语言集变化的权威重建路径）。
+   * 2/3/4 对同一容器可能形成两次挂载（扫描先重挂、重建再换新）——热切换
+   * 是罕见事件，正确性优先（新鲜内容、无旧结果回潮）；提供者 release
+   * 为尽力通知（widget 视口回收本就无销毁回调，属 CM6 已知边界）。
+   */
+  attachAddonRenderers(): void {
+    const bridge = addonRenderersBridge()
+    if (!bridge || this.addonRenderersAttached) {
+      return
+    }
+    this.addonRenderersAttached = true
+    // 装配即同步一次语言集（宿主表先于控制器挂接到达时兜住 fence 判定）
+    setDynamicRenderedFenceLanguages(bridge.renderedFenceLanguages())
+    bridge.onTableChanged((change) => this.onAddonRenderersTableChanged(change))
+  }
+
+  private addonRenderersAttached = false
+
+  private onAddonRenderersTableChanged(change: AddonRenderersTableChange): void {
+    const bridge = addonRenderersBridge()
+    if (!bridge) {
+      return
+    }
+    const languagesChanged = setDynamicRenderedFenceLanguages(bridge.renderedFenceLanguages())
+    if (change.changedLanguages.length === 0 && !languagesChanged) {
+      return
+    }
+    remountChangedGraphicBlocks(document.body ?? document)
+    this.live?.applyRendererLanguagesChanged()
+    this.embedCards?.applyRendererLanguagesChanged()
+    this.refreshReading()
   }
 
   /** 主正文句柄注册（init/attach 时 docUri 与 live 实例均在场的时点） */
@@ -10164,14 +10220,16 @@ export class WebviewSyncController {
         continue
       }
       const language = (inner.getAttribute(GRAPHIC_LANG_ATTR) ?? 'mermaid').trim()
-      if (!graphicRendererFor(language)) {
+      if (!hasEffectiveGraphicRenderer(language, 'reading')) {
         continue
       }
       const code = inner.getAttribute(MERMAID_CODE_ATTR) ?? ''
       wrapGraphicFrame(inner, {
         onPopup: () => {
-          openGraphicPopup(language, code)
+          openGraphicPopup(language, code, { mode: 'reading' })
         },
+        // #358 T09：生效提供者无 svg 取图能力时不装弹窗按钮
+        popupEnabled: effectiveGraphicSvgExport(language, 'reading'),
       })
     }
   }
@@ -10243,6 +10301,10 @@ export class WebviewSyncController {
     this.live?.applyDarkTheme(dark)
     // P2-04：嵌入内部 Live 实例的明暗热跟随
     this.embedCards?.applyDarkTheme(dark)
+    // #358 T09：附加组件渲染容器明暗联动（内置 mermaid 扫描已跳过组件
+    // 容器——refresh 回调就地刷新，未提供则换新容器重挂；全文档一次扫描
+    // 覆盖 live widget、阅读主文与嵌入内容）
+    refreshAddonGraphicBlocks(document.body ?? document)
   }
 
 }

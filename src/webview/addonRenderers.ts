@@ -77,6 +77,8 @@ export interface AddonRenderersBridgeHandle {
    * 'none'（内置是否有管线由调用方 graphicRenderers 判定——本桥不依赖它）
    */
   resolve(language: string, mode: AddonRendererMode): EffectiveRendererResolution
+  /** 按稳定身份取本页已装载的注册（热切换释放与刷新联动用；无则 undefined） */
+  registrationOf(addonId: string, rendererId: string): AddonRendererRegistration | undefined
 }
 
 /** 生效解析结果：'addon' = 组件管线（含回调）；'builtin' = 用内置注册表
@@ -277,6 +279,9 @@ export function installAddonRenderersBridge(
         return { kind: 'builtin' }
       }
       return { kind: 'addon', registration, providerId: rendererProviderId(addonId, registration.rendererId) }
+    },
+    registrationOf(addonId, rendererId) {
+      return local.get(addonId)?.providers.get(rendererId)
     },
   }
 }
