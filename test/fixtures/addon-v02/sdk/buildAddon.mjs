@@ -46,6 +46,9 @@ const T02_EDITOR_CSS = '.t02-mark { background-color: rgb(0, 200, 120); }\n'
  *  rgb(9, 96, 246)，与 t02 标记色区分） */
 const T09_EDITOR_CSS = '.t09-box { background-color: rgb(9, 96, 246); color: rgb(255, 255, 255); padding: 4px 8px; display: inline-block; }\n'
 const T02_SETTINGS_CSS = '.t02-settings-root .t02-title { color: rgb(0, 120, 200); }\n'
+/** #361 T12 夹具组件样式：渲染器容器内 t12-box（绘制层断言锚——计算色
+ * rgb(12, 200, 96)，与 t02/t09 标记色区分） */
+const T12_EDITOR_CSS = '.t12-box { background-color: rgb(12, 200, 96); color: rgb(255, 255, 255); padding: 4px 8px; display: inline-block; }\n'
 
 /** 断言产物不含 CM6 运行时标记（组件未重打包共享运行时） */
 export function assertNoCm6Runtime(productPath) {
@@ -114,6 +117,14 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't11-addon', 'dist', 'editor.js'),
       note: 't11-addon 编辑器页',
     },
+    // #361 T12：诊断与全组件故障暂停夹具组件（编辑器页——行为/命令/
+    // 按钮/渲染器四通道故障注入 + 自处理渲染失败负向对照 + arm 视图
+    // 短轮询；许可门控防共享会话毒化）
+    {
+      entry: path.join(fixtureRoot, 'addon', 't12Editor.ts'),
+      outfile: path.join(buildRoot, 't12-addon', 'dist', 'editor.js'),
+      note: 't12-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -146,6 +157,10 @@ export async function buildTestAddons({ log = console.log } = {}) {
   writeFileSync(path.join(t02Dist, 'editor.css'), T02_EDITOR_CSS)
   writeFileSync(path.join(t02Dist, 'settings.css'), T02_SETTINGS_CSS)
   writeFileSync(path.join(t02Dist, 'assets', 'logo.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #361 T12 夹具组件样式（绘制层断言锚）
+  const t12Dist = path.join(buildRoot, 't12-addon', 'dist')
+  mkdirSync(t12Dist, { recursive: true })
+  writeFileSync(path.join(t12Dist, 'editor.css'), T12_EDITOR_CSS)
   const outsideDir = path.join(buildRoot, 'outside')
   mkdirSync(outsideDir, { recursive: true })
   writeFileSync(path.join(outsideDir, 'denied.js'), DENIED_JS)
@@ -192,6 +207,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t11Addon: {
       installDir: path.join(buildRoot, 't11-addon'),
       distDir: path.join(buildRoot, 't11-addon', 'dist'),
+    },
+    // #361 T12：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t12）
+    t12Addon: {
+      installDir: path.join(buildRoot, 't12-addon'),
+      distDir: path.join(buildRoot, 't12-addon', 'dist'),
     },
     outsideDir,
   }

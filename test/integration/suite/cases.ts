@@ -17,6 +17,7 @@ import { addonT08Cases } from './addonT08Cases'
 import { addonT09Cases } from './addonT09Cases'
 import { addonT10Cases } from './addonT10Cases'
 import { addonT11Cases } from './addonT11Cases'
+import { addonT12Cases } from './addonT12Cases'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -17375,4 +17376,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #360 T11：所属按钮、面板与视图界面贡献（夹具组件经公开 ui 面注册，
   // 断言面见 addonT11Cases.ts 头注）
   ...addonT11Cases,
+  // #361 T12：诊断、全组件故障暂停与手动恢复（四态负向对照、贡献全撤
+  // 与首选恢复，断言面见 addonT12Cases.ts 头注）
+  ...addonT12Cases,
 ]
