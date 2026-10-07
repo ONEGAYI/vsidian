@@ -4623,6 +4623,23 @@ export function createTextEditorProvider(
     }))
   }
 
+  // ---- #359 T10 附加组件命令：宿主命令（addonCommandService 注册）执行时
+  //  经 addonWiring 的面板桥把 addonCommand.execute 转发到活动 Vsidian 面板
+  //  ——webview 按命令声明的生效模式复核后调组件回调（判定口径与上方
+  //  UI_OPERATIONS 循环一致：活动 + ready 面板）----
+  addons?.setActivePanelForwarder((commandId) => {
+    for (const entry of sessions.values()) {
+      for (const [sessionId, panel] of entry.panels) {
+        if (panel.active && entry.session.getInfo().panels.some((p) =>
+          p.sessionId === sessionId && p.ready)) {
+          entry.session.postToPanel(sessionId, { kind: 'addonCommand.execute', commandId })
+          return true
+        }
+      }
+    }
+    return false
+  })
+
   // #318 外部搜索导航定位恢复——显式触发（命令面板可达；键位注册表已
   // 登记、默认未绑定，见 docs/specs/keybindings.md 与 docs/specs/search-reveal.md）。
   // 成功落位由 view.locate 通道的 flash 高亮呈现；失败按结果分型通知：

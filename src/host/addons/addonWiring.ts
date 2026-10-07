@@ -35,8 +35,10 @@ import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type AddonSettingsLoadPlan } from './addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
+import { AddonCommandService } from './addonCommandService'
 import { createAddonRealpathGuard } from './addonRealpathGuard'
 import { t } from '../../shared/i18n'
+import type { AddonCommandReport } from '../../shared/addonCommands'
 
 /** 本扩展自身 ID（附加组件建议声明对它的原生依赖） */
 export const VSIDIAN_EXTENSION_ID = 'onegayi.vsidian'
@@ -65,7 +67,7 @@ export interface VsidianAddonExports {
 export interface AddonEditorBridge {
   /** 期望装载组件的资源根（编辑器面板 localResourceRoots 增量；目录去重） */
   editorResourceRoots(): vscode.Uri[]
-  /** 面板消息路由（addonPage.*）；返回是否消费（消费后 provider 不再下发会话） */
+  /** 面板消息路由（addonPage.* 与 addonCommands.report）；返回是否消费（消费后 provider 不再下发会话） */
   handlePanelMessage(sessionId: string, webview: vscode.Webview, message: unknown): boolean
   /** 面板销毁（视图关闭——装载器随 webview 消亡，宿主侧路由回收） */
   panelDisposed(sessionId: string): void
@@ -73,6 +75,9 @@ export interface AddonEditorBridge {
   onPanelsChanged(listener: () => void): () => void
   /** 按当前期望装载清单对某面板推送指令（幂等对账：desired 为准） */
   pushDirectives(sessionId: string, webview: vscode.Webview): void
+  /** #359 T10 活动面板投递注入（provider 装配后调用：宿主组件命令执行
+   *  转发 addonCommand.execute 到活动 Vsidian 编辑器面板；返回是否投递） */
+  setActivePanelForwarder(fn: (commandId: string) => boolean): void
 }
 
 /** 设置页面板接线（settingsPage 消费） */
@@ -104,7 +109,7 @@ export interface AddonPageWiring {
   openAddonSettingsPage(addonId: string): 'ok' | 'not-registered' | 'faulted' | 'no-settings-page'
   /** #353 T04 手动打开基础设置区（测试钩子与集成的宿主侧等价入口） */
   openSettingsArea(addonId: string): 'ok' | 'not-registered' | 'no-definitions'
-  /** #353 T04 设置服务快照（测试钩子与集成的观测面） */
+  /** #353 T04 设置服务与 #359 T10 命令服务观测（测试钩子与集成的断言面） */
   settingsServiceSnapshot(): {
     definitions: Readonly<Record<string, readonly unknown[]>>
     userValues: Readonly<Record<string, Readonly<Record<string, unknown>>>>
@@ -112,6 +117,8 @@ export interface AddonPageWiring {
     hasWorkspace: boolean
     settingsAreaOpen: string | undefined
   }
+  /** #359 T10 组件命令目录（设置页拉取；全部在场组件命令） */
+  commandCatalog(): readonly AddonCommandReport[]
 }
 
 export interface AddonWiring {
@@ -223,6 +230,29 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     createDefaultRegistryPorts((id) => vscode.extensions.getExtension(id)),
     runtime.registryHooks(),
   )
+
+  // ---- #359 T10 组件命令宿主服务：上报门控、命令面板命令注册、目录与
+  // 键位运行期表同步、停用/故障回收 ----
+  let activePanelForwarder: ((commandId: string) => boolean) | undefined
+  const commandService = new AddonCommandService({
+    registerHostCommand: (commandId, run) => {
+      const disposable = vscode.commands.registerCommand(commandId, run)
+      context.subscriptions.push(disposable)
+      return disposable
+    },
+    runStateOf: (addonId) => runtime.runtimeStatus(addonId)?.runState,
+    forwardToActivePanel: (commandId) => activePanelForwarder?.(commandId) ?? false,
+    log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
+  })
+  // runtime 状态变化（停用/故障/代次释放）→ 命令目录对账回收：目录内任一
+  // 组件 runState 离开 enabled 即整组件回收（VSCode 命令注销 + 目录清空）
+  const reconcileCommandService = (): void => {
+    for (const report of commandService.catalog()) {
+      if (runtime.runtimeStatus(report.addonId)?.runState !== 'enabled') {
+        commandService.releaseAddon(report.addonId)
+      }
+    }
+  }
 
   const toExtensionLike = (extension: vscode.Extension<unknown>): AddonExtensionLike => ({
     id: extension.id,
@@ -601,6 +631,18 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       })(message)
       return true
     }
+    // #359 T10 组件命令表全量对账上报（装载器命令注册表驱动；状态门控
+    // 与归属复核在服务内——非 enabled 的迟到上报被忽略并留痕）
+    if (message.kind === 'addonCommands.report') {
+      recordEvent('editor', {
+        kind: 'outbound.commandReport',
+        addonId: message.addonId,
+        generation: message.generation,
+        topic: `commands:${message.commands.length}`,
+      })
+      commandService.syncReport(message.addonId, message.generation, message.commands)
+      return true
+    }
     return false
   }
 
@@ -632,6 +674,10 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         editorPanels.set(sessionId, record)
       }
       pushEditorDirectives(record)
+    },
+    // #359 T10：provider 装配后注入活动面板投递（宿主命令执行转发）
+    setActivePanelForwarder: (fn) => {
+      activePanelForwarder = fn
     },
   }
 
@@ -804,6 +850,19 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         void coordinator.retry(message.addonId)
         return true
       }
+      // ---- #359 T10 组件命令目录（设置页拉取；变化后主动推送同形态） ----
+      case 'addons.commandCatalogGet': {
+        const record = ensureRecord()
+        try {
+          void record.webview.postMessage({
+            kind: 'addons.commandCatalog',
+            commands: commandService.catalog(),
+          }).then(undefined, () => {})
+        } catch {
+          // 面板已销毁：忽略（下次装载再拉取）
+        }
+        return true
+      }
       default:
         return false
     }
@@ -859,13 +918,34 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         settingsAreaOpen: runtime.settingsAreaAddonId(),
       }
     },
+    // #359 T10 组件命令目录（测试钩子与集成的断言面）
+    commandCatalog: () => commandService.catalog(),
   }
 
   // ---- runtime 状态变化 → 面板刷新（编辑器：provider 订阅 onPanelsChanged
   //  刷新资源根并推送指令；设置页：此处直推 + addons.state 推送经
-  //  extension.ts 的 onRuntimeChanged 接线） ----
+  //  extension.ts 的 onRuntimeChanged 接线）----
   const offRuntimeChanged = runtime.onChanged(() => {
+    // #359 T10：状态变化后对账命令目录（停用/故障/代次释放 → 整组件回收）
+    reconcileCommandService()
     notifyAddonPanels()
+  })
+  // #359 T10：命令目录变化 → 设置页目录推送（快捷键分页合并展示对账）
+  const postCommandCatalog = (): void => {
+    if (!settingsPanel) {
+      return
+    }
+    try {
+      void settingsPanel.webview.postMessage({
+        kind: 'addons.commandCatalog',
+        commands: commandService.catalog(),
+      }).then(undefined, () => {})
+    } catch {
+      // 面板已销毁：下次装载经 addons.commandCatalogGet 拉取权威目录
+    }
+  }
+  const offCommandCatalogChanged = commandService.onChanged(() => {
+    postCommandCatalog()
   })
 
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1
@@ -945,6 +1025,13 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       // 并重新唤醒；activation-failed 短路被手动意图越过）
       vscode.commands.registerCommand('onegayi.vsidian._test.addonRetry', (args: { addonId: string }) =>
         coordinator.retry(args.addonId)),
+      // #359 T10 组件命令目录与宿主命令观测（集成的断言面：目录快照 +
+      //  事件留痕，clear=true 清空）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonCommands', (args?: { clear?: boolean }) => {
+        const snapshot = [...commandService.catalog()]
+        const events = args?.clear ? addonPageEvents.splice(0) : []
+        return { catalog: snapshot, ...(args?.clear ? { events } : {}) }
+      }),
     )
   }
 
@@ -965,6 +1052,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     onSettingsChanged: (listener) => settingsService.onChanged(() => listener()),
     dispose: () => {
       offRuntimeChanged()
+      offCommandCatalogChanged()
+      commandService.dispose()
       runtime.dispose()
       coordinator.dispose()
     },
