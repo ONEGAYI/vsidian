@@ -8,6 +8,9 @@
 // 页 bundle 的模块命名空间（esbuild 单 bundle 去重，与生产控制器同一实例），
 // 扩展挂载槽为 liveInstance 的附加组件 Compartment 空槽；宿主装载指令经
 // addonPage.directive 到达，出站经 addonPage.outbound 桥回宿主。
+// #358 T09：渲染提供者桥与装载器同页装配——SDK renderers 面的候选经桥
+// 上报宿主（addonRenderers.registered），宿主生效表广播（addonRenderers.
+// table）到达即热切换已开文档；控制器订阅生效表变化执行正文重派发。
 import { keymap } from '@codemirror/view'
 import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
@@ -15,10 +18,11 @@ import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
 import { AddonViewRegistry } from './addonViews'
 import { installAddonPageLoader } from './addonPageLoader'
+import { setAddonRenderersBridge } from './addonRenderers'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
 import { isTrustedHostMessageSource } from './untrustedFrame'
-import { isHostToWebview } from '../shared/protocol'
+import { isHostToWebview, isWebviewToHost } from '../shared/protocol'
 import './main.css'
 // #59 KaTeX 基础样式：esbuild 合并进 main.css，字体（仅 woff2）经 CSS url()
 // 产物化到 out/webview/assets/（CSP font-src 已放行 cspSource 域）
@@ -56,14 +60,26 @@ controller.mount(document.getElementById('app') ?? document.body, [
 // 出站消息（loaded/unloaded/faulted/channel.request）经消息桥回宿主路由。
 // T06（#355）：统一视图注册表（页面级一份）同时注入装载器（SDK views 面
 // 的操作后端）与控制器（主正文句柄随 init 注册/注销）
+// T09（#358）：渲染提供者桥先于装载器装配（SDK renderers 面后端），候选
+// 上报与控制器热切换订阅同一桥实例
 const addonViews = new AddonViewRegistry()
+const addonRenderers = setAddonRenderersBridge((message) => {
+  if (isWebviewToHost(message)) {
+    vscode.postMessage(message)
+  }
+})
 const addonLoader = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView },
   attachExtensions: (extensions) => controller.reconfigureAddonExtensions(extensions),
   addonViews,
+  addonRenderers,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
+controller.attachAddonViews(addonViews)
+// T09（#358）：控制器订阅生效表变化（已开文档热切换：动态语言集、容器
+// 所有权扫描、live 效应派发、阅读整篇重渲染）
+controller.attachAddonRenderers()
 controller.attachAddonViews(addonViews)
 // 装载器观测挂进 view.state 探针（集成断言面：活跃代次/授权样式表/释放
 // 历史与拒收计数；宿主经 view.state.request 拉取）
@@ -82,6 +98,11 @@ window.addEventListener('message', (event) => {
   // 设施，代次与释放由装载器自持）
   if (isHostToWebview(event.data) && event.data.kind === 'addonPage.directive') {
     addonLoader.handleDirective(event.data.directive)
+    return
+  }
+  // #358 T09：宿主渲染提供者生效表广播（等值跳过；变化即热切换）
+  if (isHostToWebview(event.data) && event.data.kind === 'addonRenderers.table') {
+    addonRenderers.applyTable(event.data.table)
     return
   }
   controller.handleHostMessage(event.data)

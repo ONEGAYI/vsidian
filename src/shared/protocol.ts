@@ -15,6 +15,7 @@ import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './ed
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './editOrigin'
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
+import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
 import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -937,6 +938,11 @@ export type HostToWebview =
    *  目标面板的 asWebviewUri 铸造，资源许可面随指令同步刷新。webview 侧
    *  装载器安装后经 addonPage.ready 上报，宿主按 desired 幂等推送 */
   | { kind: 'addonPage.directive'; directive: import('./addonPage').AddonPageDirective }
+  /** #358 T09 渲染提供者生效表（宿主 → 编辑器 webview，广播）：候选与
+   *  逐语言生效提供者的权威判定（确定性默认序 + 用户首选；形态与守卫
+   *  的单一事实源在 shared/addonRenderers）。面板 ready 与表内容变化时
+   *  幂等推送；webview 等值跳过 */
+  | { kind: 'addonRenderers.table'; table: import('./addonRenderers').AddonRenderersTablePayload }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -1929,6 +1935,10 @@ export type WebviewToHost =
   /** #351 T02 页面装载器出站消息（内层为 AddonPageOutbound：loaded/
    *  unloaded/faulted/channel.request）；宿主路由通道请求并回执 */
   | { kind: 'addonPage.outbound'; outbound: import('./addonPage').AddonPageOutbound }
+  /** #358 T09 渲染提供者候选上报（编辑器 webview → 宿主）：某组件当前
+   *  装载代次内注册的可序列化声明集（空数组 = 全部撤销）；宿主按 addonId
+   *  整组替换并重算生效表广播 */
+  | { kind: 'addonRenderers.registered'; payload: import('./addonRenderers').AddonRenderersRegisteredPayload }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -4392,6 +4402,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addonPage.outbound':
       // #351 T02 出站消息内层守卫（单一事实源在 shared/addonPage）
       return isAddonPageOutbound(v.outbound)
+    case 'addonRenderers.registered':
+      // #358 T09 渲染候选上报内层守卫（单一事实源在 shared/addonRenderers）
+      return isAddonRenderersRegisteredPayload(v.payload)
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
         (v.detail === undefined || isString(v.detail))
@@ -5254,6 +5267,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addonPage.directive':
       // #351 T02 装载指令内层守卫（单一事实源在 shared/addonPage）
       return isAddonPageDirective(v.directive)
+    case 'addonRenderers.table':
+      // #358 T09 生效表内层守卫（单一事实源在 shared/addonRenderers）
+      return isAddonRenderersTablePayload(v.table)
     default:
       return false
   }
