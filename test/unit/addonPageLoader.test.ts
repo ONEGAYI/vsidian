@@ -7,7 +7,7 @@
 // 集成与浏览器套件（研究记录留证）。
 // 脚本/样式装载与时钟全部注入——DOM <script>/<link> 默认路径在真宿主
 // 与 Chromium 内验证（jsdom 不取资源，onload/onerror 不可靠）。
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Compartment, EditorState, StateField, type Extension, type StateField as StateFieldType } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
@@ -155,6 +155,26 @@ describe('T02 生产装载器：装载与身份', () => {
     const outcome = await h.handle.load(manifest({ scriptUri: 'https://page.test/denied.js' }))
     expect(outcome).toEqual({ ok: false, reason: 'script-load-failed', detail: 'script onerror: denied' })
     expect(h.handle.stats().active).toEqual([])
+  })
+
+  it('样式表 DOM 路径：授权 link 真实入 document，卸载随 release 撤下（评审补漏）', async () => {
+    // 不注入 loadCss 桩——走 domLoadCssLink 分支（jsdom 不取资源，手动
+    // 派发 load 事件完成授权结算；释放路径的 link.remove 因此真实执行）
+    const h = harness({ loadCss: undefined })
+    registerFactory(h, () => {})
+    const uri = 'https://page.test/addon.css'
+    const pending = h.handle.load(manifest({ cssUris: [uri] }))
+    const link = await vi.waitFor(() => {
+      const el = document.head.querySelector(`link[href="${uri}"]`)
+      if (!el) throw new Error('link 未入 head')
+      return el as HTMLLinkElement
+    })
+    link.dispatchEvent(new window.Event('load'))
+    const outcome = await pending
+    expect(outcome.ok).toBe(true)
+    expect(document.head.querySelector(`link[href="${uri}"]`)).not.toBeNull()
+    await h.handle.unload(ADDON_ID, 1)
+    expect(document.head.querySelector(`link[href="${uri}"]`)).toBeNull()
   })
 
   it('样式逐条独立：授权与拒绝并存时整体装载仍成功且结局逐条记录', async () => {
