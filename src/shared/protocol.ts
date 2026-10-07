@@ -13,7 +13,7 @@ import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics
 import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
-import { isEditOriginMeta, type EditOriginMeta } from './editOrigin'
+import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './editOrigin'
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -61,7 +61,13 @@ export type HostToWebview =
    *  宿主已保留该请求的输入并暂停面板写回；error = 写回通道失败（applyEdit）。
    *  两者均附权威全文：webview 无未确认输入时重置装载，有则保留本地输入。 */
   | { kind: 'edit.ack'; seq: number; ok: true; version: number }
-  | { kind: 'edit.ack'; seq: number; ok: false; reason: 'conflict' | 'error'; version: number; text?: string }
+  | { kind: 'edit.ack'; seq: number; ok: false; reason: 'conflict' | 'error'; version: number; text?: string
+      /** T06（#355）来源提交的业务拒绝标记：origin 携带 joinPrevious 但宿主
+       *  无法确认同目标前项（HistoryBoundaryUnavailable——空日志/仅外来
+       *  写入/组顶被打断/映射失配）时随 conflict ack 附带；reason 保持
+       *  既有枚举（旧 webview 忽略附加字段），webview 侧 applyEdits 凭据
+       *  路由据此映射为 history-boundary 拒绝 */
+      originRejection?: 'history-boundary' }
   /** 权威文档发生变更：变更增量（同指变更前文档） */
   | { kind: 'doc.changed'; version: number; changes: SerChange[]; origin: 'external'; reason?: DocumentChangeReason; paste?: PasteHistory }
   /** 全文重同步（应 sync.request 或宿主主动）：webview 以全文重置本地文档；
@@ -1001,8 +1007,11 @@ export type WebviewToHost =
       paste?: PasteStage
       /** T03（#352）可选来源与原子操作归属元数据：公开编辑 API（T06）的
        *  提交通道携带；旧调用缺省不携带，行为不变。经真实写回/回流确认后
-       *  由宿主按 ack version 对位归属（DocumentSession.onEditAttributed） */
-      origin?: EditOriginMeta
+       *  由宿主按 ack version 对位归属（DocumentSession.onEditAttributed）。
+       *  T06（#355）起接受数组形态（EditOriginList）：仅「同组未提交合并」
+       *  ——原子修饰与随后并入的 joinPrevious 修饰在页面出站层合成一笔
+       *  WorkspaceEdit 时出现，首项恒为组首原子操作，逐次来源记录保留 */
+      origin?: EditOriginMeta | EditOriginList
     }
   /** 撤销/重做请求：作用于宿主 TextDocument 权威历史（探索笔记 03 §4） */
   | { kind: 'history.request'; op: 'undo' | 'redo' }
@@ -3657,8 +3666,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isNonNegativeInt(v.baseVersion) &&
         isSerChangeArray(v.changes) &&
         (v.paste === undefined || isPasteStage(v.paste)) &&
-        // T03（#352）可选来源元数据：在场即须形状合法，非法整条拒绝
-        (v.origin === undefined || isEditOriginMeta(v.origin))
+        // T03（#352）可选来源元数据：在场即须形状合法，非法整条拒绝。
+        // T06（#355）接受数组形态（同组未提交合并笔，逐项校验）
+        (v.origin === undefined || isEditOriginMeta(v.origin) ||
+          (Array.isArray(v.origin) && v.origin.length > 0 && v.origin.every(isEditOriginMeta)))
       )
     case 'history.request':
       return v.op === 'undo' || v.op === 'redo'
@@ -4322,7 +4333,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       if (v.ok === false) {
         return (
           (v.reason === 'conflict' || v.reason === 'error') &&
-          (v.text === undefined || isString(v.text))
+          (v.text === undefined || isString(v.text)) &&
+          // T06（#355）可选业务拒绝标记（仅 history-boundary）
+          (v.originRejection === undefined || v.originRejection === 'history-boundary')
         )
       }
       return false

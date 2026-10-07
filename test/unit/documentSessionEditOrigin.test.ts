@@ -12,7 +12,7 @@
 // - 旧调用（无 origin）行为契约等价：onEditAttributed 不触发。
 // - 组历史窄适配点 runHistorySteps：会话队列串行、origin 透传、
 //   端口缺省时明确 route-unavailable。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { DocumentSession, type HostDocumentPort, type PanelPort } from '../../src/host/documentSession'
 import { isEditOriginMeta, type EditOriginMeta } from '../../src/shared/editOrigin'
 import { isWebviewToHost } from '../../src/shared/protocol'
@@ -101,15 +101,17 @@ interface AttributionRecord {
   version: number
   changes: SerChange[]
   origin: EditOriginMeta
+  joined?: EditOriginMeta[]
 }
 
-function setup(text = 'abc\n', opts?: { eol?: 1 | 2; onEditAttributed?: (record: AttributionRecord) => void }) {
+function setup(text = 'abc\n', opts?: { eol?: 1 | 2; onEditAttributed?: (record: AttributionRecord) => void; onOriginGate?: (origin: EditOriginMeta) => boolean }) {
   const doc = new FakeDoc(text)
   if (opts?.eol) doc.eol = opts.eol
   const session = new DocumentSession(doc, {
     docUri: DOC_URI,
     isWindowsHost: true,
     ...(opts?.onEditAttributed ? { onEditAttributed: opts.onEditAttributed } : {}),
+    ...(opts?.onOriginGate ? { onOriginGate: opts.onOriginGate } : {}),
   })
   doc.onDocChanged((changes, version) => session.handleDocChanged(changes, version))
   const sent: HostToWebview[] = []
@@ -387,5 +389,83 @@ describe('T03 组历史窄适配点 runHistorySteps', () => {
     s.doc.groupResult = { executedSteps: 1, aborted: 'version-mismatch' }
     const result = await s.session.runHistorySteps('undo', 3)
     expect(result).toEqual({ executedSteps: 1, aborted: 'version-mismatch' })
+  })
+})
+
+describe('T06 数组 origin 与业务闸门', () => {
+  it('数组 origin 通过协议校验；非法数组（空/部分非法）整条消息拒绝', () => {
+    const merged = [
+      { addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' as const },
+      { addonId: 'pub.addon', opId: 'op-b', undo: 'joinPrevious' as const },
+    ]
+    const req = originRequest(1, 1, [{ offset: 0, length: 0, text: 'x' }], merged[0]!)
+    ;(req as { origin?: unknown }).origin = merged
+    expect(isWebviewToHost(req)).toBe(true)
+    const emptyArr = originRequest(1, 1, [], merged[0]!)
+    ;(emptyArr as { origin?: unknown }).origin = []
+    expect(isWebviewToHost(emptyArr)).toBe(false)
+    const badArr = originRequest(1, 1, [], merged[0]!)
+    ;(badArr as { origin?: unknown }).origin = [merged[0]!, { addonId: 'x', opId: 2, undo: 'joinPrevious' }]
+    expect(isWebviewToHost(badArr)).toBe(false)
+  })
+
+  it('合并笔归属：origin 为组首、joined 携带并入来源；editOriginAtVersion 返回组首', async () => {
+    const attributed: AttributionRecord[] = []
+    const s = setup('abc\n', { onEditAttributed: (r) => attributed.push(r) })
+    await ready(s)
+    const head = { addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' as const }
+    const joined = { addonId: 'pub.addon', opId: 'op-b', undo: 'joinPrevious' as const }
+    const req = originRequest(1, 1, [{ offset: 3, length: 0, text: 'X' }], head)
+    ;(req as { origin?: unknown }).origin = [head, joined]
+    await s.session.handleWebviewMessage(req, s.sessionId)
+    const ack = lastAck(s.sent)
+    expect(ack.ok).toBe(true)
+    expect(attributed.length).toBe(1)
+    expect(attributed[0]!.origin).toEqual(head)
+    expect(attributed[0]!.joined).toEqual([joined])
+    expect(s.session.editOriginAtVersion(ack.ok ? ack.version : 0)?.origin).toEqual(head)
+    // applyChanges 透传数组形态
+    expect(s.doc.applyCalls[0]!.origin).toEqual([head, joined])
+  })
+
+  it('闸门拒绝（history-boundary）：不写回、不留归属记录、ack 附带全文与业务标记', async () => {
+    const attributed: AttributionRecord[] = []
+    const gate = vi.fn(() => false)
+    const s = setup('abc\n', { onEditAttributed: (r) => attributed.push(r), onOriginGate: gate })
+    await ready(s)
+    const origin: EditOriginMeta = { addonId: 'pub.addon', opId: 'op-x', undo: 'joinPrevious' }
+    const before = s.doc.version
+    await s.session.handleWebviewMessage(originRequest(1, 1, [{ offset: 0, length: 0, text: 'X' }], origin), s.sessionId)
+    const ack = lastAck(s.sent)
+    expect(ack.ok).toBe(false)
+    if (!ack.ok) {
+      expect(ack.reason).toBe('conflict')
+      expect(ack.originRejection).toBe('history-boundary')
+      expect(ack.text).toBe('abc\n')
+    }
+    expect(gate).toHaveBeenCalledWith(origin)
+    expect(s.doc.version).toBe(before)
+    expect(s.doc.applyCalls.length).toBe(0)
+    expect(attributed.length).toBe(0)
+    expect(s.session.editOriginAtVersion(before + 1)).toBeUndefined()
+  })
+
+  it('闸门放行 atomic：正常写回与归属不受影响；无闸门时 joinPrevious 也放行（旧契约）', async () => {
+    const gateAtomic = vi.fn((o: EditOriginMeta) => o.undo === 'atomic')
+    const s1 = setup('abc\n', { onOriginGate: gateAtomic })
+    await ready(s1)
+    await s1.session.handleWebviewMessage(
+      originRequest(1, 1, [{ offset: 3, length: 0, text: 'X' }], { addonId: 'p.a', opId: 'o1', undo: 'atomic' }),
+      s1.sessionId,
+    )
+    expect(lastAck(s1.sent).ok).toBe(true)
+    // 无闸门：joinPrevious 直通（闸门是 T06 生产装配，非会话缺省）
+    const s2 = setup('abc\n')
+    await ready(s2)
+    await s2.session.handleWebviewMessage(
+      originRequest(1, 1, [{ offset: 3, length: 0, text: 'Y' }], { addonId: 'p.a', opId: 'o2', undo: 'joinPrevious' }),
+      s2.sessionId,
+    )
+    expect(lastAck(s2.sent).ok).toBe(true)
   })
 })

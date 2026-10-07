@@ -36,7 +36,7 @@ import {
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
-import { hasNetTextChange, type EditOriginMeta } from '../shared/editOrigin'
+import { hasNetTextChange, parseEditOriginField, type EditOriginList, type EditOriginMeta } from '../shared/editOrigin'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
 import type { RefImageContent, RefMarkdownContent, RefPdfContent, RefPdfNavSelector, RefTextContent } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
@@ -68,8 +68,9 @@ export interface HostDocumentPort {
   getText(): string
   /** 应用一组全文偏移变更；返回是否成功。T03（#352）起可选 origin：
    *  携带来源元数据的提交经写回层透传（vscode 层按需记账）；缺省
-   *  （旧调用）为 undefined，语义不变 */
-  applyChanges(changes: SerChange[], origin?: EditOriginMeta): Promise<boolean>
+   *  （旧调用）为 undefined，语义不变。T06（#355）起接受数组形态
+   *  （同组未提交合并笔，首项组首） */
+  applyChanges(changes: SerChange[], origin?: EditOriginMeta | EditOriginList): Promise<boolean>
   /** 对权威文档执行宿主撤销（undoRedoService 文本栈）；返回是否执行。
    *  P2-04（#281）起 origin（请求面板的来源身份）：嵌入目标端口的请求
    *  经 provider 实现「临时激活 B → 全局 undo → 重显来源面板」的 P2-01
@@ -88,7 +89,10 @@ export interface HostDocumentPort {
 
 /** T03（#352）来源归属确认记录：带 origin 的编辑经真实写回/回流确认后
  *  恰好触发一次（onEditAttributed）。version 与该笔 edit.ack(ok) 同源——
- *  历史协调（T06）据此把宿主历史条目与来源/原子组对位，不依赖文本全等 */
+ *  历史协调（T06）据此把宿主历史条目与来源/原子组对位，不依赖文本全等。
+ *  T06（#355）起 origin 恒为组首（单笔提交即该笔自身）；合并提交（同组
+ *  未提交的原子 + 随后 joinPrevious 并为一笔 WorkspaceEdit）时 joined 携
+ *  带并入该笔的其余来源——逐次来源记录保留 */
 export interface EditAttributionRecord {
   docUri: string
   sessionId: string
@@ -97,6 +101,8 @@ export interface EditAttributionRecord {
   /** 落定变更（LF 坐标，与 doc.changed 广播同款） */
   changes: SerChange[]
   origin: EditOriginMeta
+  /** 合并笔并入的其余来源（无合并时缺省） */
+  joined?: EditOriginMeta[]
 }
 
 /** 面板发送通道 */
@@ -251,6 +257,12 @@ export interface DocumentSessionOptions {
    *  全等对账。生产暂不装配（T06 接线）；测试钩子经 VSIDIAN_TEST_HOOKS
    *  消费 */
   onEditAttributed?: (record: EditAttributionRecord) => void
+  /** T06（#355）来源提交业务闸门：携带 origin 的写回请求在进入权威写回
+   *  之前按来源逐项询问（队列内、applyChanges 前）。返回 false 时该请求
+   *  以 conflict ack + originRejection: 'history-boundary' 拒绝——不写回、
+   *  不留来源记录。生产由 provider 注入（历史协调器的 joinPrevious 归属
+   *  判定）；未注入时不设闸（旧调用行为不变） */
+  onOriginGate?: (origin: EditOriginMeta) => boolean
   /** #201 周期核验端口：image.verify 的 items 透传给 provider 协调器
    *  （stat + 版本表决策 + 失效回调走 invalidateImagesByFsPath）。
    *  会话侧只做会话守卫与串行合并（并发有界）；未注入时 verify 静默
@@ -272,9 +284,10 @@ interface PendingEdit {
   changes: SerChange[]
   confirmed: boolean
   paste?: PasteHistory
-  /** T03（#352）可选来源元数据：确认成功时触发归属（onEditAttributed）；
-   *  失败路径不产生归属记录 */
-  origin?: EditOriginMeta
+  /** T03（#352）/T06（#355）来源元数据（归一化为列表：单笔为单元素，
+   *  合并笔首项为组首原子、余项为并入的 joinPrevious——逐次来源保留）：
+   *  确认成功时触发归属（onEditAttributed）；失败路径不产生归属记录 */
+  origin?: EditOriginList
 }
 
 interface PanelEntry {
@@ -412,8 +425,8 @@ export class DocumentSession {
   /** 兜底确认记录（C-4）：applyEdit resolve 后回流迟到时，回流到达按
    *  (version, changes) 匹配识别为自家确认，不作为外部变更重复广播 */
   private readonly confirmedEchoes: { version: number; changes: SerChange[] }[] = []
-  /** T03（#352）来源归属登记（version → 请求身份 + origin；有界）：
-   *  editOriginAtVersion 的查询数据源 */
+  /** 归属记账数据源：version → 组首来源（合并笔的 joined 不入查询面——
+   *  单版本单组身份；完整列表经 onEditAttributed 传递） */
   private readonly attributed: { version: number; seq: number; sessionId: string; origin: EditOriginMeta }[] = []
   /** #48 已应用未确认窗口的外部广播暂存：面板 pending 存在已应用未确认
    *  条目时，外部增量的坐标参考系（权威文本已含该编辑）与 webview 的
@@ -2086,9 +2099,31 @@ export class DocumentSession {
     // 请求不写回、不造宿主历史项、不留来源记录——直接以当前版本确认。
     // 无 origin 的空请求保持既有行为（webview 出站前已过滤空变更，此处
     // 防御性维持原路径，契约等价）
-    if (message.origin !== undefined && !hasNetTextChange(message.changes)) {
+    // T06（#355）origin 归一化为列表（单值/数组同构处理）
+    const parsedOrigin = parseEditOriginField(message.origin)
+    const origins: EditOriginList | undefined =
+      parsedOrigin.status === 'ok' ? parsedOrigin.origins : undefined
+    if (origins !== undefined && !hasNetTextChange(message.changes)) {
       this.sendAck(panel, { kind: 'edit.ack', seq: message.seq, ok: true, version: this.doc.version })
       return
+    }
+    // T06（#355）来源业务闸门（队列内、写回前）：joinPrevious 无可确认前项
+    // 等业务拒绝在此拦截——不写回、不留来源记录、面板不进冲突暂停（业务
+    // 声明错误 ≠ 同步冲突；ack 附带权威全文供 webview 回滚本地效果）
+    if (origins !== undefined && this.options.onOriginGate) {
+      const gate = this.options.onOriginGate
+      if (origins.some((origin) => !gate(origin))) {
+        this.sendAck(panel, {
+          kind: 'edit.ack',
+          seq: message.seq,
+          ok: false,
+          reason: 'conflict',
+          version: this.doc.version,
+          text: this.newline.toLfText(this.doc.getText()),
+          originRejection: 'history-boundary',
+        })
+        return
+      }
     }
     let mapped: SerChange[] | null
     if (message.baseVersion === this.doc.version) {
@@ -2125,12 +2160,17 @@ export class DocumentSession {
     }
     const pending: PendingEdit = { seq: message.seq, changes: mapped, confirmed: false,
       ...(message.paste ? { paste: { ...message.paste, sessionId: panel.sessionId } } : {}),
-      ...(message.origin !== undefined ? { origin: message.origin } : {}) }
+      ...(origins !== undefined ? { origin: origins } : {}) }
     panel.pending.push(pending)
     // #52：快照 apply 前版本——兜底确认时据此推导 E 实际落地的权威版本
     //（apply 窗口内到达的外部增量会把 doc.version 推进到高于 E 的值）
     const versionBeforeApply = this.doc.version
-    const ok = await this.doc.applyChanges(mapped, message.origin)
+    const ok = await this.doc.applyChanges(
+      mapped,
+      origins !== undefined
+        ? (origins.length === 1 ? origins[0] : origins)
+        : undefined,
+    )
     const entry = panel.pending.find((p) => p === pending)
     if (!entry) {
       // 已被其他路径处理（resumePanel 清空 pending 等）。apply 失败时该编辑
@@ -2353,22 +2393,26 @@ export class DocumentSession {
     this.flushPendingExternal()
   }
 
-  /** T03（#352）归属记账：回调通知 + 按版本登记（有界，与版本日志同窗） */
+  /** T03（#352）/T06（#355）归属记账：回调通知（origin 为组首，合并笔
+   *  joined 携带并入来源——逐次记录保留）+ 按版本登记组首（有界，与
+   *  版本日志同窗） */
   private noteAttribution(
     panel: PanelEntry,
     pending: PendingEdit,
     version: number,
     lfChanges: SerChange[],
   ): void {
+    const originHead = pending.origin![0]!
     const record: EditAttributionRecord = {
       docUri: this.docUri,
       sessionId: panel.sessionId,
       seq: pending.seq,
       version,
       changes: lfChanges,
-      origin: pending.origin!,
+      origin: originHead,
+      ...(pending.origin!.length > 1 ? { joined: pending.origin!.slice(1) } : {}),
     }
-    this.attributed.push({ version, seq: pending.seq, sessionId: panel.sessionId, origin: pending.origin! })
+    this.attributed.push({ version, seq: pending.seq, sessionId: panel.sessionId, origin: originHead })
     while (this.attributed.length > VERSION_LOG_LIMIT) {
       this.attributed.shift()
     }
