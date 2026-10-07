@@ -52,7 +52,6 @@ function makeEnv() {
     panelDock,
     currentMode: () => state.mode,
     activeInstanceId: () => state.activeId,
-    makeHandle: (_addonId, instanceId) => (state.activeId === instanceId ? makeHandle(instanceId) : null),
     executeCommand: (commandId) => {
       state.executed.push(commandId)
       return true
@@ -62,6 +61,8 @@ function makeEnv() {
     log: () => {},
   }
   const runtime = new AddonUiRuntime(env)
+  runtime.bindHandleFactory((_addonId, instanceId) =>
+    state.activeId === instanceId ? makeHandle(instanceId) : null)
   return { runtime, toolbarSlot, panelDock, state }
 }
 
@@ -149,6 +150,26 @@ describe('T11 webview 界面运行时：按钮', () => {
     const buttons = toolbarSlot.querySelectorAll('button')
     expect(() => buttons[0]!.click()).not.toThrow()
     expect(() => buttons[1]!.click()).not.toThrow()
+  })
+
+  it('句柄工厂未绑定（装载器未安装）：目标回 null，不造句柄', () => {
+    document.body.innerHTML = ''
+    const toolbarSlot = document.createElement('div')
+    const panelDock = document.createElement('div')
+    document.body.append(toolbarSlot, panelDock)
+    const runtime = new AddonUiRuntime({
+      toolbarSlot,
+      panelDock,
+      currentMode: () => 'live',
+      activeInstanceId: () => 'main',
+      executeCommand: () => true,
+      bindingHints: () => [],
+      panelCloseLabel: () => '关闭面板',
+    })
+    const seen: unknown[] = []
+    runtime.registerButton(ADDON, 1, { id: 'x', label: 'X' }, (target) => seen.push(target))
+    toolbarSlot.querySelector('button')!.click()
+    expect(seen).toEqual([null])
   })
 
   it('声明模式：注册时模式不符不挂载；applyMode 撤挂与重挂', () => {

@@ -40,9 +40,6 @@ export interface AddonUiRuntimeEnv {
   /** 当前活动视图实例 ID（焦点嵌入内部 Live → embed 键；否则 'main'；
    *  无可用视图 null） */
   activeInstanceId(): string | null
-  /** 按组件身份构造视图句柄（装载器同源构造——含代次存活与 opId 分配；
-   *  实例不在场 null） */
-  makeHandle(addonId: string, instanceId: string): AddonViewHandle | null
   /** 命令路径执行（controller.runAddonCommand——模式复核后的组件回调） */
   executeCommand(commandId: string): boolean
   /** 挂接命令的生效绑定（键位徽章数据；空数组 = 未绑定） */
@@ -111,8 +108,17 @@ export class AddonUiRuntime {
   private readonly buttons = new Map<string, ButtonEntry>()
   private readonly panels = new Map<string, PanelEntry>()
   private letSeq = 0
+  /** 视图句柄工厂（main.ts 在装载器安装后绑定——与 views 面同源构造，
+   *  含代次存活与 opId 分配；未绑定时目标不可达，回 null） */
+  private makeHandleFn: ((addonId: string, instanceId: string) => AddonViewHandle | null) | undefined
 
   constructor(private readonly env: AddonUiRuntimeEnv) {}
+
+  /** 绑定视图句柄工厂（装载器安装后调用；沿 addonBehaviors.bindOpIdAllocator
+   *  先例——解决「runtime 进装载器 env、句柄构造依赖装载器」的装配环） */
+  bindHandleFactory(make: (addonId: string, instanceId: string) => AddonViewHandle | null): void {
+    this.makeHandleFn = make
+  }
 
   /** SDK ui.registerButton 后端：校验 → 存管 → 模式匹配即挂载 */
   registerButton(
@@ -340,10 +346,10 @@ export class AddonUiRuntime {
 
   private resolveTargetFor(addonId: string): AddonViewHandle | null {
     const instanceId = this.env.activeInstanceId()
-    if (instanceId === null) {
+    if (instanceId === null || this.makeHandleFn === undefined) {
       return null
     }
-    return this.env.makeHandle(addonId, instanceId)
+    return this.makeHandleFn(addonId, instanceId)
   }
 
   // ---- 面板开闭 ----
