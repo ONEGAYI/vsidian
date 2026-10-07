@@ -426,6 +426,13 @@ export type HostToWebview =
   | { kind: 'contextMenu.test.menuClick'; command: string }
   /** 测试钩子（#183）：关闭当前统一右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'contextMenu.test.menuClose' }
+  /** 测试钩子（#360 T11）：点击工具栏中 buttonId（data-addon-button 命名
+   *  空间 ID）对应的组件真实按钮（与用户点击同一处理器；宿主测试无法向
+   *  webview 派发真实鼠标事件，以此通道验证真实宿主内的按钮执行链） */
+  | { kind: 'addonUi.test.buttonClick'; buttonId: string }
+  /** 测试钩子（#360 T11）：点击面板 chrome 的关闭按钮（panelId 为
+   *  data-addon-panel 命名空间 ID；与用户点击同一处理器——平台回收路径） */
+  | { kind: 'addonUi.test.panelClose'; panelId: string }
   /** 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾（真实
    *  keydown 链路；须先经 menuClick command='rename' 进入重命名态） */
   | { kind: 'outline.test.renameKey'; text: string; key: 'enter' | 'escape' }
@@ -4890,6 +4897,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return typeof v.command === 'string' && v.command.length > 0
     case 'contextMenu.test.menuClose':
       return true
+    case 'addonUi.test.buttonClick':
+      return typeof v.buttonId === 'string' && v.buttonId.length > 0
+    case 'addonUi.test.panelClose':
+      return typeof v.panelId === 'string' && v.panelId.length > 0
     case 'outline.test.renameKey':
       return isString(v.text) && (v.key === 'enter' || v.key === 'escape')
     case 'outline.test.drag':

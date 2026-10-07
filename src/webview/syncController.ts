@@ -3018,6 +3018,24 @@ export class WebviewSyncController {
         this.closeContextMenu()
         break
       }
+      case 'addonUi.test.buttonClick': {
+        // 测试钩子（#360 T11）：点击组件工具栏按钮（与用户点击同一处理器；
+        // buttonId 已由协议校验器限定为非空字符串，CSS.escape 防拼接值含
+        // 选择器元字符时 querySelector 抛错）
+        this.addonToolbarSlotEl
+          ?.querySelector<HTMLButtonElement>(`button[data-addon-button="${CSS.escape(message.buttonId)}"]`)
+          ?.click()
+        break
+      }
+      case 'addonUi.test.panelClose': {
+        // 测试钩子（#360 T11）：点击面板 chrome 关闭按钮（用户关闭路径——
+        // 平台回收与组件迟到写入不可见的验证入口）
+        this.addonPanelDockEl
+          ?.querySelector<HTMLButtonElement>(
+            `[data-addon-panel="${CSS.escape(message.panelId)}"] .vsidian-addon-panel-close`)
+          ?.click()
+        break
+      }
       case 'clipboard.read.result': {
         // #183 粘贴桥回包：reqId 陈旧即丢弃。消费即推进（不回退清零）——
         // 回退会让下一次粘贴复用旧 reqId，旧回包重放成为可能。P2-10：插入
