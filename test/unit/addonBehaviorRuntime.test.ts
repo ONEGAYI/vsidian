@@ -31,6 +31,8 @@ interface RuntimeHarness {
   submits: Array<{ addonId: string; opId: string; request: AddonApplyEditsRequest }>
   /** 推进文档状态（模拟前序修饰落地） */
   advanceTo: (text: string) => void
+  /** 覆盖 docUriOf 端口返回（#407：模拟实例不在注册表） */
+  setDocUri: (uri: string | undefined) => void
   rejectNext: (reason: 'stale-snapshot' | 'conflict' | 'suspended' | 'view-disposed' | 'read-only') => void
   logs: string[]
   /** T12 故障升级上报收件（reportFault 端口） */
@@ -44,6 +46,7 @@ function createHarness(initialText = 'x'): RuntimeHarness {
   const faults: RuntimeHarness['faults'] = []
   let text = initialText
   let revision = 1
+  let docUri: string | undefined = 'file:///vault/note.md'
   let nextRejection: AddonApplyEditsResult | null = null
   const opSeq: Record<string, number> = {}
   const harness: RuntimeHarness = {
@@ -53,6 +56,7 @@ function createHarness(initialText = 'x'): RuntimeHarness {
         snapshots.push(snapshot)
         return { ok: true, snapshot }
       },
+      docUriOf: () => docUri,
       applyEdit: (addonId, opId, _instanceId, request) => {
         submits.push({ addonId, opId, request })
         if (nextRejection !== null) {
@@ -76,6 +80,9 @@ function createHarness(initialText = 'x'): RuntimeHarness {
     advanceTo: (next) => {
       text = next
       revision += 1
+    },
+    setDocUri: (uri) => {
+      docUri = uri
     },
     rejectNext: (reason) => {
       nextRejection = { ok: false, reason }
@@ -173,6 +180,7 @@ describe('T07 链执行：组合语义与前序结果', () => {
       snapshotOf: () => (broken ? { ok: false, reason: 'view-disposed' } : {
         ok: true, snapshot: { text: 'word', selections: [], version: 1, revision: 1 },
       }),
+      docUriOf: () => 'file:///vault/note.md',
       applyEdit: (_a, opId) => {
         applyCalls++
         return Promise.resolve({ ok: true, credential: { opId, version: 1 } })
@@ -202,6 +210,7 @@ describe('T07 链执行：组合语义与前序结果', () => {
         ok: true,
         snapshot: { text: 'word', selections: [], version: 1, revision: 1 },
       }),
+      docUriOf: () => 'file:///vault/note.md',
       applyEdit: (_addonId, opId) => new Promise<{ ok: true; credential: { opId: string; version: number } }>((resolve) => {
         releaseSubmit = () => resolve({ ok: true, credential: { opId, version: 1 } })
       }),
@@ -325,6 +334,37 @@ describe('T07 通知分离', () => {
     expect(h.submits.length).toBe(0)
   })
 
+  it('#407 行为上下文与观察事件携带 docUri（目标文档 URI，与 views 句柄同源）', async () => {
+    const h = createHarness('word')
+    const seen: Array<string | undefined> = []
+    h.runtime.register('pub.a', 1, registration({
+      id: 'doc-watch', name: '文档感知',
+      onInput: (ctx) => {
+        seen.push(ctx.docUri)
+        return null
+      },
+    }))
+    const observed: Array<string | undefined> = []
+    h.runtime.onChanged((event) => {
+      observed.push(event.docUri)
+    })
+    await h.runtime.driveInput('main', { userEvent: 'input.type', inputText: 'k' })
+    expect(seen).toEqual(['file:///vault/note.md'])
+    expect(observed).toEqual(['file:///vault/note.md'])
+  })
+
+  it('#407 docUri 不可得（实例不在注册表）时不驱动：零观察事件、零回调', async () => {
+    const h = createHarness('word')
+    h.setDocUri(undefined)
+    let called = 0
+    h.runtime.register('pub.a', 1, registration({ id: 'x', name: 'X', onInput: () => { called++; return null } }))
+    const observed: number[] = []
+    h.runtime.onChanged(() => observed.push(1))
+    await h.runtime.driveInput('main', { userEvent: 'input.type', inputText: 'k' })
+    expect(called).toBe(0)
+    expect(observed).toEqual([])
+  })
+
   it('观察者异常不影响链执行', async () => {
     const h = createHarness('word')
     h.runtime.onChanged(() => { throw new Error('observer crashed') })
@@ -364,6 +404,7 @@ describe('T08 注册表全量对账上报', () => {
       applyEdit: () => Promise.resolve({ ok: false, reason: 'read-only' } as AddonApplyEditsResult),
       log: () => {},
       report: (payload) => reports.push({ ...payload, behaviors: [...payload.behaviors] }),
+      docUriOf: () => 'file:///vault/note.md',
     })
     return { runtime, reports }
   }
@@ -410,6 +451,7 @@ describe('T08 注册表全量对账上报', () => {
       snapshotOf: (): AddonSnapshotResult => ({ ok: false, reason: 'view-disposed' }),
       applyEdit: () => Promise.resolve({ ok: false, reason: 'read-only' } as AddonApplyEditsResult),
       log: () => {},
+      docUriOf: () => 'file:///vault/note.md',
     })
     expect(runtime.register('pub.a', 1, registration({ id: 'x', name: 'X' }))).toEqual({ ok: true, key: 'pub.a#x' })
     runtime.unregisterAddon('pub.a')
@@ -452,6 +494,7 @@ describe('T12 行为回调异常升级为全组件故障', () => {
       snapshotOf: (): AddonSnapshotResult => ({ ok: false, reason: 'view-disposed' }),
       applyEdit: () => Promise.resolve({ ok: false, reason: 'read-only' } as AddonApplyEditsResult),
       log: () => {},
+      docUriOf: () => 'file:///vault/note.md',
     })
     runtime.register('pub.a', 1, registration({
       id: 'boom', name: '故障',

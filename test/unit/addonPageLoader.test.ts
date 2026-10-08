@@ -782,6 +782,7 @@ describe('#395 P3 追加：SDK 守卫记录身份统一收紧（旧代次句柄�
       snapshotOf: () => ({ ok: false, reason: 'view-disposed' }),
       applyEdit: async () => ({ ok: false, reason: 'view-disposed' }),
       log: () => {},
+      docUriOf: () => 'file:///vault/note.md',
     })
     const ui = new AddonUiRuntime({
       toolbarSlot: document.createElement('div'),

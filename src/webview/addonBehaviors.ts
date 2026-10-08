@@ -60,6 +60,9 @@ function isUsablePlan(v: unknown): v is AddonBehaviorInputPlan {
 export interface AddonBehaviorRuntimePorts {
   /** 实例快照（链每步重新取——含前序修饰结果） */
   snapshotOf(instanceId: string): AddonSnapshotResult
+  /** #407 实例的目标文档 URI（与 views 句柄 targetDocUri 同源；实例不在
+   *  注册表时 undefined——该驱动按实例已释放处理，不投观察不调回调） */
+  docUriOf(instanceId: string): string | undefined
   /** 修饰提交（T06 applyEdits 管线；来源身份由本 runtime 注入） */
   applyEdit(addonId: string, opId: string, instanceId: string, request: AddonApplyEditsRequest): Promise<AddonApplyEditsResult>
   /** 归因日志（阶段 + 组件 + 原因） */
@@ -159,13 +162,19 @@ export class AddonBehaviorRuntime {
    */
   async driveInput(instanceId: string, input: { userEvent: string; inputText: string }): Promise<void> {
     this.counters.drives++
+    // #407 docUri 先行解析：实例不在注册表（undefined）= 实例已释放，
+    // 整次驱动不投观察不调回调（快照同判的提前短路）
+    const docUri = this.ports.docUriOf(instanceId)
+    if (docUri === undefined) {
+      return
+    }
     // 观察者先行投递（即使无行为注册——通知与修饰分离）
     if (this.changeListeners.size > 0) {
       const snapshotResult = this.ports.snapshotOf(instanceId)
       if (snapshotResult.ok) {
         for (const listener of [...this.changeListeners]) {
           try {
-            listener({ userEvent: input.userEvent, inputText: input.inputText, snapshot: snapshotResult.snapshot })
+            listener({ userEvent: input.userEvent, inputText: input.inputText, snapshot: snapshotResult.snapshot, docUri })
           } catch {
             this.counters.observerErrors++
           }
@@ -201,6 +210,7 @@ export class AddonBehaviorRuntime {
           userEvent: input.userEvent,
           inputText: input.inputText,
           snapshot: snapshotResult.snapshot,
+          docUri,
         }
         let plan: AddonBehaviorInputPlan | null | undefined
         try {

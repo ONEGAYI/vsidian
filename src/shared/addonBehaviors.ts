@@ -46,6 +46,11 @@ export interface AddonInputContext {
   /** 行为读取时点的当前快照——已含本次输入与**前序行为的修饰结果**
    *  （后续行为读取前序结果）；输入点从快照选区读取 */
   readonly snapshot: AddonEditorSnapshot
+  /** 本次驱动所属视图的目标文档 URI（#407，与该实例 views 句柄的
+   *  targetDocUri 同源：main = 面板文档，embed = 引用目标文档——在
+   *  引用 B 内触发时是 B 的 URI，不是宿主文档 A；文件排除类规则据此
+   *  判定「我正在哪个文件里被触发」） */
+  readonly docUri: string
 }
 
 /** 文本修饰计划（行为返回；提交与身份注入由平台完成——行为不能直接
@@ -154,6 +159,8 @@ export interface AddonBehaviorChangeEvent {
   readonly userEvent: string
   readonly inputText: string
   readonly snapshot: AddonEditorSnapshot
+  /** 本次驱动所属视图的目标文档 URI（#407，与 AddonInputContext.docUri 同源） */
+  readonly docUri: string
 }
 
 /** 注册结果（SDK behaviors.register 的返回） */

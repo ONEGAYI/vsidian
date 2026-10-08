@@ -77,6 +77,7 @@ let reportAddonRuntimeFault: (addonId: string, stage: string, detail: string) =>
 const addonViews = new AddonViewRegistry()
 const addonBehaviors = new AddonBehaviorRuntime({
   snapshotOf: (instanceId) => addonViews.snapshotOf(instanceId),
+  docUriOf: (instanceId) => addonViews.infoOf(instanceId)?.targetDocUri,
   applyEdit: (addonId, opId, instanceId, request) => addonViews.applyEdits({ addonId, opId, instanceId, request }),
   log: (stage, addonId, detail) => console.warn(`[vsidian-addon-behavior] ${stage} ${addonId}: ${detail}`),
   report: (payload) => vscode.postMessage({ kind: 'addon.behaviors.report', ...payload }),

@@ -60,6 +60,7 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
         id,
         userEvent: ctx.userEvent,
         inputText: ctx.inputText,
+        docUri: ctx.docUri,
         snapshotText: ctx.snapshot.text,
         cursor: cursorOf(ctx),
         planned: result !== null,
@@ -98,6 +99,7 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
   behaviors.onChanged((event) => {
     report({
       kind: 'changed',
+      docUri: event.docUri,
       userEvent: event.userEvent,
       inputText: event.inputText,
       snapshotText: event.snapshot.text,
