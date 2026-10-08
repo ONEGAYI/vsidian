@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AddonRegistry,
   ADDON_EXPERIMENTAL_CM6_VERSION,
+  ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION,
   createDefaultRegistryPorts,
   type AddonDefinition,
   type AddonRegistryHooks,
@@ -116,6 +117,36 @@ describe('附加组件注册入口校验链', () => {
     const ledger = ADDON_API_RELEASES[0]?.experimental.find((entry) => entry.entry === 'cm6')
     expect(ports.experimental.cm6).toBe(ADDON_EXPERIMENTAL_CM6_VERSION)
     expect(ledger?.version).toBe(ADDON_EXPERIMENTAL_CM6_VERSION)
+  })
+
+  it('#410 生产默认端口的 headingFold 实验版本与发行台账一致（两处事实源防漂移）', () => {
+    const ports = createDefaultRegistryPorts(() => undefined)
+    const ledger = ADDON_API_RELEASES[0]?.experimental.find((entry) => entry.entry === 'headingFold')
+    expect(ports.experimental.headingFold).toBe(ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION)
+    expect(ledger?.version).toBe(ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION)
+  })
+
+  it('#410 声明 headingFold 实验入口且范围匹配 → 兼容通过；版本不符拒绝', () => {
+    const registry = new AddonRegistry({
+      apiVersion: ADDON_API_VERSION,
+      experimental: { headingFold: '1.0.0' },
+      officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
+      findExtension: (id) => (id === 'fixture.fold'
+        ? { packageJSON: { vsidianAddon: { manifestVersion: 1, api: '^1.0.0', experimental: { headingFold: '^1.0.0' } } } }
+        : undefined),
+    })
+    expect(registry.register({ id: 'fixture.fold' }, {}).ok).toBe(true)
+    const strictRegistry = new AddonRegistry({
+      apiVersion: ADDON_API_VERSION,
+      experimental: { headingFold: '1.0.0' },
+      officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
+      findExtension: (id) => (id === 'fixture.fold2'
+        ? { packageJSON: { vsidianAddon: { manifestVersion: 1, api: '^1.0.0', experimental: { headingFold: '^2.0.0' } } } }
+        : undefined),
+    })
+    // register 层统一包装 incompatible-api + detail（experimental 拒绝的
+    // entry 点名在 checkAddonCompatibility 层——见 addonIdentity.test.ts）
+    expect(strictRegistry.register({ id: 'fixture.fold2' }, {})).toMatchObject({ ok: false, reason: 'incompatible-api' })
   })
 })
 

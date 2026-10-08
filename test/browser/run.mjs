@@ -122,7 +122,11 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #415（#409 T04）标题折叠落点展开：view.locate 通道（锚点/搜索/双链/
   // 大纲点击共同汇聚）、查找面板真实键盘命中折叠区自动展开、双模式往返
   // 存续与 modeAnchor 落隐藏区回切展开——全程零写回
-  'headingFoldReveal']
+  'headingFoldReveal',
+  // #410 附加组件折叠 API：experimental.headingFold 消费（生产控制器 +
+  // 装载器 + views 注册表；折叠夹具组件经公开 SDK 查询/命令、paint 探针
+  // 绘制层断言、零写回与卸载回收）紧随标题折叠族
+  'addonHeadingFold']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

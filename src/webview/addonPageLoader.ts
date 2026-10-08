@@ -33,6 +33,7 @@ import type {
   VsidianAddonPageSdk,
 } from '../shared/addonPage'
 import type { AddonViewHandle, AddonViewsFacet } from '../shared/addonEditApi'
+import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
 import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
@@ -357,6 +358,29 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
           onDisposed: (callback) => env.addonViews!.onDisposed(callback),
         }
       : undefined
+    // #410 标题折叠实验入口（仅编辑器页 + 视图注册表在场提供；对齐 cm6
+    // 的「入口键恒在、内容按页给」形态）。方法过 isLoadActive 守卫：已
+    // 终结代次的迟到折叠请求/查询拒绝 view-disposed（僵尸调用不落视图）。
+    const headingFoldFacet: AddonHeadingFoldFacet | undefined =
+      page === 'editor' && env.addonViews
+        ? {
+            folds: (instanceId) => (isLoadActive(loadRecord)
+              ? env.addonViews!.headingFoldsOf(instanceId)
+              : { ok: false, reason: 'view-disposed' }),
+            foldable: (instanceId) => (isLoadActive(loadRecord)
+              ? env.addonViews!.foldableHeadingSpansOf(instanceId)
+              : { ok: false, reason: 'view-disposed' }),
+            apply: (instanceId, operation, options) => (isLoadActive(loadRecord)
+              ? env.addonViews!.applyHeadingFoldOf(instanceId, operation, options)
+              : { ok: false, reason: 'view-disposed' }),
+            foldAt: (instanceId, keys) => (isLoadActive(loadRecord)
+              ? env.addonViews!.foldAtOf(instanceId, keys)
+              : { ok: false, reason: 'view-disposed' }),
+            unfoldAt: (instanceId, keys) => (isLoadActive(loadRecord)
+              ? env.addonViews!.unfoldAtOf(instanceId, keys)
+              : { ok: false, reason: 'view-disposed' }),
+          }
+        : undefined
     const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
       ? {
           register: (registration) => {
@@ -373,7 +397,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
-      experimental: { cm6: env.cm6 },
+      experimental: { cm6: env.cm6, headingFold: headingFoldFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
