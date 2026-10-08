@@ -4362,6 +4362,17 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   margin: 0;
   border-radius: 0 0 6px 6px;
   background-color: transparent;
+  /* 2026-10-08 观感调整：阅读卡片代码区横向内边距加倍（12 → 24px，
+     上下 8px 保持）——行号退场后文本直接从内边距起笔，加宽呼吸感；
+     朴素形态（卡片关闭）与 Live 不受影响 */
+  padding: 8px 24px;
+}
+
+/* 阅读卡片头部横带左右同步 24px（与代码区内边距同列起笔；上下 5px/4px
+   与两视图共享基础规则保持——只覆盖横向） */
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-header {
+  padding-left: 24px;
+  padding-right: 24px;
 }
 
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line {
