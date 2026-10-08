@@ -9883,7 +9883,8 @@ export class WebviewSyncController {
         cardLineCount: codeScope
           ? codeScope.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.line}`).length
           : 0,
-        // #80 卡内行号文本序列（视口内；关闭行号子开关后为空数组）
+        // #80 卡内行号文本序列（视口内；关闭行号子开关后为空数组；
+        // 阅读视图 2026-10 起不发射卡内行号，恒为空数组）
         lineNumberTexts: codeScope
           ? [...codeScope.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)]
             .map((el) => el.textContent ?? '')

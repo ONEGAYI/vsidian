@@ -3062,7 +3062,7 @@
       "category": "code-card",
       "kind": "selector",
       "target": ".vsidian-code-card-wrap（+ -off 修饰，仅阅读侧发射）",
-      "purpose": "折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（行号列 sticky 钉左、头部固定）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。",
+      "purpose": "折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（头部横带在 pre 外固定不随滚动；行号列 sticky 钉左已随 2026-10 阅读侧卡内行号退场移除）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。",
       "views": [
         "reading"
       ],
@@ -3075,7 +3075,7 @@
       },
       "verification": [
         "codeCardPaintCssContract：进卡即显显隐体系与 -off filter 弱化",
-        "浏览器 codeCardChrome：折行/nowrap 几何、sticky 行号与联动断言",
+        "浏览器 codeCardChrome：折行/nowrap 几何（横向滚动、头部不随滚动）与联动断言",
         "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-wrap-reading\"] 探针命中"
       ],
       "introduced": "#191（2026-09-28）"

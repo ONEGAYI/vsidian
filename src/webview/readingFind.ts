@@ -20,7 +20,7 @@ const hiddenMarks = new Set([
   'CodeMark', 'CodeInfo', 'ListMark', 'QuoteMark', 'TaskMarker', 'TableDelimiter', 'LinkTitle',
 ])
 const ignoredText = 'button, svg, .katex, .vsidian-mermaid, .vsidian-embed-card, ' +
-  '.vsidian-code-card-header, .vsidian-code-card-linenumber'
+  '.vsidian-code-card-header'
 
 function sourceProjection(block: ReadingBlock, fullText: string): Projection {
   const cached = projections.get(block)
