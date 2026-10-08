@@ -12,12 +12,22 @@
 //   结果不能接入新代次。
 import type { Extension } from '@codemirror/state'
 
+/** #406 language 语法树读取子集（与生产 src/shared/addonPage.ts 的
+ *  AddonCm6LanguageRuntime 同形——原型保持自包含，形状变更两处同步）：
+ *  只纳入「读树」函数，注册类成员（LRLanguage/foldGutter 等）不暴露。 */
+export interface AddonCm6LanguageRuntime {
+  readonly syntaxTree: (typeof import('@codemirror/language'))['syntaxTree']
+  readonly ensureSyntaxTree: (typeof import('@codemirror/language'))['ensureSyntaxTree']
+  readonly syntaxTreeAvailable: (typeof import('@codemirror/language'))['syntaxTreeAvailable']
+}
+
 /** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。
  *  值为本页 bundle 内的模块命名空间对象——装载器由页面产物自身构造，
  *  因此与生产控制器共享同一份实例（构造器身份一致的机制来源）。 */
 export interface AddonCm6Runtime {
   readonly state: typeof import('@codemirror/state')
   readonly view: typeof import('@codemirror/view')
+  readonly language: AddonCm6LanguageRuntime
 }
 
 /** 通道请求结果：普通拒绝与组件异常分开（装载器只报协议性结束态） */

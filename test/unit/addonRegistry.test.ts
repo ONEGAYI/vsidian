@@ -5,8 +5,15 @@
 // T02 起 setup/enable 生命周期经 hooks 桥交给 AddonRuntime 驱动（本文件
 // 以记录 hooks 钉住联动契约；生命周期行为本身见 addonRuntime.test.ts）。
 import { describe, expect, it } from 'vitest'
-import { AddonRegistry, type AddonDefinition, type AddonRegistryHooks } from '../../src/host/addons/addonRegistry'
+import {
+  AddonRegistry,
+  ADDON_EXPERIMENTAL_CM6_VERSION,
+  createDefaultRegistryPorts,
+  type AddonDefinition,
+  type AddonRegistryHooks,
+} from '../../src/host/addons/addonRegistry'
 import { ADDON_API_VERSION, OFFICIAL_ADDON_EXTENSION_IDS } from '../../src/shared/addonIdentity'
+import { ADDON_API_RELEASES } from '../../src/shared/addonApiCatalog'
 
 interface FakeExtension {
   id: string
@@ -102,6 +109,13 @@ describe('附加组件注册入口校验链', () => {
         : undefined),
     })
     expect(registry.register({ id: 'fixture.cm6' }, {}).ok).toBe(true)
+  })
+
+  it('#406 生产默认端口的 cm6 实验版本与发行台账一致（两处事实源防漂移）', () => {
+    const ports = createDefaultRegistryPorts(() => undefined)
+    const ledger = ADDON_API_RELEASES[0]?.experimental.find((entry) => entry.entry === 'cm6')
+    expect(ports.experimental.cm6).toBe(ADDON_EXPERIMENTAL_CM6_VERSION)
+    expect(ledger?.version).toBe(ADDON_EXPERIMENTAL_CM6_VERSION)
   })
 })
 

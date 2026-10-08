@@ -71,6 +71,8 @@ export interface AddonApiSemantics {
   readonly history?: string
   /** 自动渲染/接管规则（渲染类条目） */
   readonly autoRules?: string
+  /** 暴露面裁剪口径（实验入口的最小集合边界，#406 起） */
+  readonly language?: string
 }
 
 /** 单个公开接口条目（参考文档的一节） */
@@ -504,17 +506,18 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonPage.ts',
-        symbols: ['AddonCm6Runtime'],
+        symbols: ['AddonCm6Runtime', 'AddonCm6LanguageRuntime'],
       },
     ],
     purpose:
-      '页面 bundle 自构造的 CM6 模块命名空间（state 与 view），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension。',
+      '页面 bundle 自构造的 CM6 模块命名空间（state 与 view）与语法树读取子集（language，#406 起），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension 与做基于语法树的行类型判定。',
     semantics: {
       lifecycle: '仅编辑器页提供（设置页 undefined）；使用前须在清单 experimental 声明 cm6 兼容范围，且范围含宿主提供的入口版本才判兼容。',
+      language: 'language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。',
       errors: '宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。',
     },
     verification: ['test/unit/addonPageLoader.test.ts', 'test/browser/addonPageSdk.mjs'],
-    introduced: '#349（V02）、#351（T02 登记候选版本）',
+    introduced: '#349（V02）、#351（T02 登记候选版本）、#406（language 语法树子集）',
   },
   {
     id: 'channel',
@@ -782,9 +785,9 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
     experimental: [
       {
         entry: 'cm6',
-        version: '1.0.0',
+        version: '1.1.0',
         status: 'candidate',
-        note: '页面共享 CM6 运行时（experimental.cm6）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
+        note: '页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
       },
     ],
   },

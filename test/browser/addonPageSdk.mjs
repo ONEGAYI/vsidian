@@ -183,7 +183,7 @@ await scenario('绘制层——组件标记的计算背景色与几何（page.cs
   await page.evaluate(() => window.initDoc('paint'))
   await page.click('.cm-content')
   await loadAddon(page, 1)
-  await waitReports(page, 'addon.state')
+  const stateReports = await waitReports(page, 'addon.state')
   const mark = await page.evaluate(() => window.markInfo())
   assert.equal(mark.count, 1)
   assert.equal(mark.color, 'rgb(255, 0, 127)', '组件样式的计算背景色（用户可见）')
@@ -192,6 +192,9 @@ await scenario('绘制层——组件标记的计算背景色与几何（page.cs
   assert.equal(identity.cm6Shared, true, '装载器注入了页面共享运行时')
   assert.ok(String(identity.stateFieldConstructor).includes('StateField'), `StateField 构造器身份：${identity.stateFieldConstructor}`)
   assert.ok(String(identity.viewConstructor).includes('EditorView'), `EditorView 构造器身份：${identity.viewConstructor}`)
+  // #406 language 语法树子集：页面 bundle 侧函数在场，组件侧真实调用并上报
+  assert.ok(!String(identity.languageSyntaxTreeFn).includes('missing'), `syntaxTree 函数在场：${identity.languageSyntaxTreeFn}`)
+  assert.equal(stateReports.at(-1)?.payload?.syntaxTreeRoot, 'Document', '组件经 cm6.language.syntaxTree 读到 markdown 树根（生产控制器同一实例）')
 })
 
 // ---- 场景 7：卸载、迟回执拒收与手动恢复 ----

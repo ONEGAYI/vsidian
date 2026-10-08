@@ -82,6 +82,9 @@ function buildEditorExtension(sdk: VsidianAddonPageSdk): void {
       docLength: length,
       markText: length > 0 ? view.state.doc.sliceString(0, 1) : '',
       hasCm6: true,
+      // #406 language 子集消费证据：syntaxTree 在生产状态上真实可调
+      // （Live 编辑器配置 markdown 语言——树根节点名经上报断言）
+      syntaxTreeRoot: cm6.language.syntaxTree(view.state)?.type.name ?? null,
     })
   }
 

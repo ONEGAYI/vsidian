@@ -14,13 +14,14 @@
 import { keymap } from '@codemirror/view'
 import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
+import * as cmLanguage from '@codemirror/language'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
 import { AddonViewRegistry } from './addonViews'
 import { AddonBehaviorRuntime } from './addonBehaviors'
 import { AddonCommandsRuntime } from './addonCommands'
 import { AddonUiRuntime } from './addonUi'
-import { installAddonPageLoader } from './addonPageLoader'
+import { addonCm6LanguageSubset, installAddonPageLoader } from './addonPageLoader'
 import { setAddonRenderersBridge } from './addonRenderers'
 import { bindAddonFaultReporter } from './graphicRenderers'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
@@ -112,7 +113,7 @@ const addonUi = new AddonUiRuntime({
 })
 const addonLoader = installAddonPageLoader({
   page: 'editor',
-  cm6: { state: cmState, view: cmView },
+  cm6: { state: cmState, view: cmView, language: addonCm6LanguageSubset(cmLanguage) },
   attachExtensions: (extensions) => controller.reconfigureAddonExtensions(extensions),
   addonViews,
   addonBehaviors,

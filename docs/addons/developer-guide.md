@@ -80,6 +80,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - 构建桥是 esbuild 插件：解析期注入 `vsidian-addon-sdk` shim（**不是真实 npm 包**——SDK 载体未发布，当前从主仓库测试夹具复制，见[示例仓库准备](example-repo-plan.md)）。
 - 构建目标 chrome114（对齐下界宿主 1.82.3 = Electron 25）。
 - **CM6 红线**：构建桥拒绝 `@codemirror/*` 值导入；共享 CM6 运行时须经 `sdk.experimental.cm6` 取得（该入口须在清单 `experimental` 声明）。产物含 CM6 运行时标记串即构建失败（双防线）。
+- **cm6 暴露面**：`state` 与 `view` 是整模块命名空间（构造 StateField/ViewPlugin 等值对象）；`language` 是**语法树读取子集**（`syntaxTree` / `ensureSyntaxTree` / `syntaxTreeAvailable`，#406 起 1.1.0）——`LRLanguage`、`foldGutter`、`indentUnit` 等注册类成员不暴露，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 `import type` 消费（构建桥允许 type-only）。
 - 装载器核对入口身份后调用工厂注入 SDK；组件只登记安装目录内的相对入口与资源子目录，越界路径被资源服务拒绝。
 - 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge) 与 [`page-load-protocol`](api-reference.md#page-load-protocol) 条目。
 

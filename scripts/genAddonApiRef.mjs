@@ -225,6 +225,7 @@ function renderEntry(entry, signatures) {
     sem.errors ? `- **错误与拒绝**：${sem.errors}` : null,
     sem.history ? `- **历史与撤回**：${sem.history}` : null,
     sem.autoRules ? `- **自动规则**：${sem.autoRules}` : null,
+    sem.language ? `- **暴露面裁剪**：${sem.language}` : null,
   ].filter(Boolean)
 
   const signatureBlocks = entry.signatures

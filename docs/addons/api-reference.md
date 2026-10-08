@@ -16,7 +16,7 @@
 
 | 入口 | 版本 | 状态 | 实际发布日期 | 兼容边界 |
 | --- | --- | --- | --- | --- |
-| `cm6` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 页面共享 CM6 运行时（experimental.cm6）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
+| `cm6` | 1.1.0 | 候选（未发行） | —（未发行不携带日期） | 页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 
 ### 稳定 API 移除规则
 
@@ -675,24 +675,37 @@ export interface AddonEditCredential {
 
 ### `cm6-experimental` 实验入口：共享 CM6 运行时（experimental.cm6）
 
-**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#349（V02）、#351（T02 登记候选版本）
+**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#349（V02）、#351（T02 登记候选版本）、#406（language 语法树子集）
 > **实验入口**：清单 `experimental` 声明名 `cm6`——兼容边界见上方实验入口兼容清单。
 
-**目标**：页面 bundle 自构造的 CM6 模块命名空间（state 与 view），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension。
+**目标**：页面 bundle 自构造的 CM6 模块命名空间（state 与 view）与语法树读取子集（language，#406 起），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension 与做基于语法树的行类型判定。
 
 语义要点：
 - **生命周期**：仅编辑器页提供（设置页 undefined）；使用前须在清单 experimental 声明 cm6 兼容范围，且范围含宿主提供的入口版本才判兼容。
 - **错误与拒绝**：宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。
+- **暴露面裁剪**：language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。
 
 签名事实源：`src/shared/addonPage.ts`
 
 ```ts
 /** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。值为本页 bundle
  *  内的模块命名空间对象——装载器由页面产物自身构造，因此与生产控制器
- *  共享同一份实例（构造器身份一致的机制来源）。 */
+ *  共享同一份实例（构造器身份一致的机制来源）。language 是语法树读取
+ *  函数子集（#406），非整模块命名空间。 */
 export interface AddonCm6Runtime {
   readonly state: typeof import('@codemirror/state')
   readonly view: typeof import('@codemirror/view')
+  readonly language: AddonCm6LanguageRuntime
+}
+
+/** #406 language 语法树读取子集（@codemirror/language 的最小暴露面）：
+ *  只纳入「读树」函数——LRLanguage/foldGutter/indentUnit 等注册类成员不
+ *  暴露（addon 不应借实验入口注册语言或改全局语言配置）；树与节点的
+ *  类型消费经 type-only 导入（构建桥允许），无需值暴露。 */
+export interface AddonCm6LanguageRuntime {
+  readonly syntaxTree: (typeof import('@codemirror/language'))['syntaxTree']
+  readonly ensureSyntaxTree: (typeof import('@codemirror/language'))['ensureSyntaxTree']
+  readonly syntaxTreeAvailable: (typeof import('@codemirror/language'))['syntaxTreeAvailable']
 }
 ```
 

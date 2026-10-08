@@ -10,6 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Compartment, EditorState, StateField, type Extension, type StateField as StateFieldType } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
+import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 import { AddonBehaviorRuntime } from '../../src/webview/addonBehaviors'
 import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
@@ -32,7 +33,11 @@ import type {
 
 /** 测试用共享 CM6 运行时：直接引用页面 bundle 内同一份模块命名空间
  *  （单元测试进程内 import 即「本页运行时」） */
-const cm6: AddonCm6Runtime = { state: await import('@codemirror/state'), view: await import('@codemirror/view') }
+const cm6: AddonCm6Runtime = {
+  state: await import('@codemirror/state'),
+  view: await import('@codemirror/view'),
+  language: { syntaxTree, ensureSyntaxTree, syntaxTreeAvailable },
+}
 
 const ADDON_ID = 'onegayi.vsidian-test-addon'
 
@@ -130,6 +135,22 @@ describe('T02 生产装载器：装载与身份', () => {
     expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
     expect(h.handle.stats().cm6Shared).toBe(true)
     expect(h.sent.at(-1)).toMatchObject({ type: 'addon.loaded', outcome: { ok: true } })
+  })
+
+  it('#406 cm6.language 语法树子集：工厂收到与页面注入同一批函数且可调用', async () => {
+    const h = harness()
+    let received: VsidianAddonPageSdk | undefined
+    registerFactory(h, (sdk) => {
+      received = sdk
+    })
+    await h.handle.load(manifest())
+    const lang = received?.experimental.cm6?.language
+    expect(lang?.syntaxTree).toBe(syntaxTree)
+    expect(lang?.ensureSyntaxTree).toBe(ensureSyntaxTree)
+    expect(lang?.syntaxTreeAvailable).toBe(syntaxTreeAvailable)
+    // 无语言配置的状态上同步读取不抛错（证明函数身份真实可执行）
+    expect(typeof lang?.syntaxTree?.(EditorState.create())).toBe('object')
+    expect(lang?.syntaxTreeAvailable?.(EditorState.create())).toBe(false)
   })
 
   it('同一接入代次重复装载 → already-loaded（对齐设计的 AlreadyRegistered 语义）', async () => {
