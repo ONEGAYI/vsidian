@@ -491,6 +491,8 @@ export type AddonPageOutbound =
       type: 'addon.loaded'
       addonId: string
       generation: number
+      /** 发出消息的页面种类（宿主按面对比代次——编辑器/设置两计数器独立） */
+      page: AddonPageKind
       outcome: AddonLoadOutcome
     }
   | {
@@ -506,12 +508,14 @@ export type AddonPageOutbound =
       type: 'addon.faulted'
       addonId: string
       generation: number
+      page: AddonPageKind
       reason: string
     }
   | {
       type: 'addon.channel.request'
       addonId: string
       generation: number
+      page: AddonPageKind
       requestId: string
       topic: string
       payload: unknown
