@@ -26,7 +26,12 @@ if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
 }
 
-interface DriveCall { instanceId: string; userEvent: string; inputText: string }
+interface DriveCall {
+  instanceId: string
+  userEvent: string
+  inputText: string
+  replaced: { from: number; to: number; text: string } | null
+}
 
 function makeDeps(sent: WebviewToHost[], drives: DriveCall[]): LiveEditorInstanceDeps {
   return {
@@ -75,7 +80,7 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     view.dispatch({ changes: { from: 4, insert: '^' }, userEvent: 'input.type' })
     expect(drives).toEqual([]) // 键入事务的 updateListener 同步段内不驱动
     await flushMicrotasks()
-    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: '^' }])
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: '^', replaced: null }])
   })
 
   it('IME：组合中间态与定稿事务不驱动；compositionend 后微任务补定稿驱动（#399）', async () => {
@@ -97,7 +102,48 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     content.dispatchEvent(new CompositionEvent('compositionend', { data: '你好' }))
     expect(drives).toEqual([]) // 同步段零驱动（微任务模式）
     await flushMicrotasks()
-    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你好' }])
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你好', replaced: null }])
+  })
+
+  it('#400 delete 事务驱动：inputText 空、replaced 携带被删文本（事务前坐标）', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    // 退格删除 'd'（word 的 [3,4)，backward）：userEvent delete.backward
+    view.dispatch({ changes: { from: 3, to: 4 }, userEvent: 'delete.backward' })
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'delete.backward', inputText: '', replaced: { from: 3, to: 4, text: 'd' } }])
+  })
+
+  it('#400 delete 白名单外（delete.dedent 缩进命令族）不驱动', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    view.dispatch({ changes: { from: 0, to: 2 }, userEvent: 'delete.dedent' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('#401 键入替换选区：replaced 携带被替换的选区文本', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 0, head: 4 } })
+    view.dispatch({ changes: { from: 0, to: 4, insert: 'x' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: 'x', replaced: { from: 0, to: 4, text: 'word' } }])
+  })
+
+  it('#400 行为修饰的删除事务（addonEditOriginTag）不重入驱动', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    view.dispatch({
+      changes: { from: 3, to: 4 },
+      userEvent: 'delete.backward',
+      annotations: addonEditOriginTag.of({ origins: [{ addonId: 'pub.x', opId: 'g1-op1', undo: 'atomic' }] }),
+    })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
   })
 
   it('IME 定稿补驱动门控：取消（空 data）、代码上下文不驱动', async () => {
@@ -153,12 +199,12 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([])
   })
 
-  it('非 input.type userEvent（delete/paste/keymap 派生）不驱动', async () => {
+  it('白名单外 userEvent（paste/drop/程序化）不驱动——#400 起 delete 白名单内除外', async () => {
     const { instance, drives } = setup('word\n')
     const view = instance.getView()!
-    view.dispatch({ changes: { from: 4, to: 5 }, userEvent: 'delete.backward' })
     view.dispatch({ changes: { from: 4, insert: 'P' }, userEvent: 'input.paste' })
     view.dispatch({ changes: { from: 5, insert: 'K' } }) // 无 userEvent（程序化）
+    view.dispatch({ changes: { from: 0, to: 1 }, userEvent: 'input.drop' })
     await flushMicrotasks()
     expect(drives).toEqual([])
   })

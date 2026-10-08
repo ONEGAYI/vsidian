@@ -45,6 +45,7 @@ import {
   type AddonBehaviorStateStore,
   type AddonBehaviorTraceEntry,
   type AddonInputContext,
+  type AddonReplacedRange,
 } from '../shared/addonBehaviors'
 
 /** 输入修饰计划守卫（非法形态不进提交管线——SerChange 形状由
@@ -160,7 +161,7 @@ export class AddonBehaviorRuntime {
    * 情境）由调用方在 liveInstance 侧先行判定——本方法只处理已放行的
    * 用户输入。fire-and-forget（返回 Promise 仅供测试同步）。
    */
-  async driveInput(instanceId: string, input: { userEvent: string; inputText: string }): Promise<void> {
+  async driveInput(instanceId: string, input: { userEvent: string; inputText: string; replaced?: AddonReplacedRange | null }): Promise<void> {
     this.counters.drives++
     // #407 docUri 先行解析：实例不在注册表（undefined）= 实例已释放，
     // 整次驱动不投观察不调回调（快照同判的提前短路）
@@ -174,7 +175,7 @@ export class AddonBehaviorRuntime {
       if (snapshotResult.ok) {
         for (const listener of [...this.changeListeners]) {
           try {
-            listener({ userEvent: input.userEvent, inputText: input.inputText, snapshot: snapshotResult.snapshot, docUri })
+            listener({ userEvent: input.userEvent, inputText: input.inputText, replaced: input.replaced ?? null, snapshot: snapshotResult.snapshot, docUri })
           } catch {
             this.counters.observerErrors++
           }
@@ -209,6 +210,7 @@ export class AddonBehaviorRuntime {
         const context: AddonInputContext = {
           userEvent: input.userEvent,
           inputText: input.inputText,
+          replaced: input.replaced ?? null,
           snapshot: snapshotResult.snapshot,
           docUri,
         }

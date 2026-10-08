@@ -85,6 +85,17 @@ export const externalSync = Annotation.define<boolean>()
  *  （addonId/opId），作者请求不可携带——不能冒充其他组件 */
 export const addonEditOriginTag = Annotation.define<{ origins: EditOriginMeta[] }>()
 
+/** #400 行为链驱动的 delete userEvent 白名单：字符/选区/行删除（用户
+ *  删除意图）；delete.dedent（Shift+Tab 降缩进）属缩进命令族、Tab 家族
+ *  情境链语义（不新增可绑定命令绕过），不纳入 */
+const ADDON_BEHAVIOR_DELETE_USER_EVENTS: ReadonlySet<string> = new Set([
+  'delete.backward',
+  'delete.forward',
+  'delete.selection',
+  'delete.cut',
+  'delete.line',
+])
+
 /** T06（#355）SDK applyEdits 实例侧实现——事务净插入长度（选区边界校验） */
 function totalInserted(changes: readonly { text: string }[]): number {
   return changes.reduce((sum, c) => sum + c.text.length, 0)
@@ -399,9 +410,15 @@ export interface LiveEditorInstanceDeps {
    *  注入点；缺省静默跳过（无 toast 面的装配不阻塞确认） */
   notifyToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
   /** T07（#356）输入行为链驱动（页面级 runtime 的窄接口）：本实例检测到
-   *  通过内核情境门控的用户键入事务时调用；缺省不驱动（未装配行为面
-   *  的环境零开销）。instanceId 由注册方 setAddonBehaviorIdentity 告知 */
-  driveAddonBehaviors?(input: { instanceId: string; userEvent: string; inputText: string }): void
+   *  通过内核情境门控的用户键入/删除事务时调用（#400 起纳入 delete 白
+   *  名单事务；#401 起携带替换/删除侧）；缺省不驱动（未装配行为面的
+   *  环境零开销）。instanceId 由注册方 setAddonBehaviorIdentity 告知 */
+  driveAddonBehaviors?(input: {
+    instanceId: string
+    userEvent: string
+    inputText: string
+    replaced: import('../shared/addonBehaviors').AddonReplacedRange | null
+  }): void
 }
 
 /**
@@ -903,7 +920,7 @@ export class LiveEditorInstance {
       return
     }
     const userEvent = tr.annotation(Transaction.userEvent)
-    if (userEvent === undefined || !userEvent.startsWith('input.type') || userEvent.includes('.compose')) {
+    if (userEvent === undefined || !(userEvent.startsWith('input.type') || ADDON_BEHAVIOR_DELETE_USER_EVENTS.has(userEvent)) || userEvent.includes('.compose')) {
       return
     }
     if (this.composing || this.blankComposition !== null) {
@@ -920,9 +937,18 @@ export class LiveEditorInstance {
       return
     }
     let inputText = ''
-    tr.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
+    let replacedFrom = -1
+    let replacedTo = -1
+    let replacedText = ''
+    tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
       inputText += inserted.sliceString(0)
+      if (toA > fromA) {
+        replacedFrom = replacedFrom < 0 ? fromA : Math.min(replacedFrom, fromA)
+        replacedTo = Math.max(replacedTo, toA)
+        replacedText += tr.startState.doc.sliceString(fromA, toA)
+      }
     })
+    const replaced = replacedFrom < 0 ? null : { from: replacedFrom, to: replacedTo, text: replacedText }
     // 微任务延迟：链执行的首次 applyEdits 会在其 await 求值时**同步**
     // dispatch 修饰事务（Promise executor 同步语义）——若在此处（键入
     // 事务的 updateListener 同步段内）直接驱动，修饰事务会嵌套 dispatch
@@ -932,8 +958,9 @@ export class LiveEditorInstance {
     const instanceId = this.addonBehaviorInstanceId
     const userEventRef = userEvent
     const inputTextRef = inputText
+    const replacedRef = replaced
     queueMicrotask(() => {
-      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef })
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef, replaced: replacedRef })
     })
   }
 
@@ -963,7 +990,7 @@ export class LiveEditorInstance {
     }
     const instanceId = this.addonBehaviorInstanceId
     queueMicrotask(() => {
-      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: 'input.type.compose', inputText: committedText })
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: 'input.type.compose', inputText: committedText, replaced: null })
     })
   }
 

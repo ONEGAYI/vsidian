@@ -266,6 +266,25 @@ try {
   await waitText(T0)
   console.log('[PASS] IME 候选期不驱动、组合定稿驱动行为链（inputText 含定稿文本，#399）')
 
+  // ---- 4.5 #400：真实退格驱动行为链，replaced 携带被删文本 ----
+  await command('reset')
+  const drivesBeforeDel = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+  await waitText('wor')
+  events = await collectEvents()
+  const delBehaviors = events.filter((e) => e.kind === 'behavior')
+  assert.ok(delBehaviors.length > 0, `退格应触发行为回调：${JSON.stringify(events)}`)
+  assert.ok(delBehaviors.every((e) => e.inputText === '' && e.replaced?.text === 'd' && e.replaced.from === 3),
+    `删除上下文 inputText 空、replaced 为被删文本（事务前坐标）：${JSON.stringify(delBehaviors)}`)
+  assert.ok(events.some((e) => e.kind === 'changed' && e.replaced?.text === 'd'), `onChanged 观察携带被删文本：${JSON.stringify(events)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeDel + 1, `退格驱动恰好一次：${JSON.stringify(stats.counters)}`)
+  await undo()
+  await waitText(T0)
+  console.log('[PASS] 真实退格驱动行为链（inputText 空、replaced 携带被删文本，#400）')
+
   // ---- 5. 表格情境口径：源码行键入照常受行为修饰（网格编辑态排除）----
   // #124 同口径：排除面是「网格编辑态」（tableRegionField 在场——点击
   // 网格格激活）而非表格行文本；源码行内的普通键入行为链照常工作。

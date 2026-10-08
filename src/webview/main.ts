@@ -131,7 +131,11 @@ addonUi.bindHandleFactory((addonId, instanceId) => addonLoader.buildViewHandle(a
 controller.attachAddonUi(addonUi)
 controller.attachAddonViews(addonViews)
 controller.attachAddonBehaviorDrive((input) => {
-  void addonBehaviors.driveInput(input.instanceId, { userEvent: input.userEvent, inputText: input.inputText })
+  void addonBehaviors.driveInput(input.instanceId, {
+    userEvent: input.userEvent,
+    inputText: input.inputText,
+    replaced: input.replaced,
+  })
 })
 controller.attachAddonCommands(addonCommands)
 // T09（#358）：控制器订阅生效表变化（已开文档热切换：动态语言集、容器
