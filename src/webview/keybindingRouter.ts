@@ -10,6 +10,15 @@ export function keyStep(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' 
     '-': 'minus', Subtract: 'minus',
     ',': 'comma', '.': 'period', '/': 'slash',
     '\\': 'backslash', ';': 'semicolon', "'": 'quote', '[': 'bracketleft', ']': 'bracketright',
+    // #413（#409 T02）shift 上档符号 → 物理键名：美式布局下 Shift 把符号键
+    // 换成上档字符（Ctrl+Shift+[ 的实际事件字符是 `{`），validKey 白名单
+    // 只有物理键名——上档字符折回物理键，修饰键由 event.shiftKey 携带。
+    // 盘点口径 = validKey 白名单的符号键逐个补全上档形态（`+`→equal 既有），
+    // 数字键上档（!@#$%^&*()）不映射——数字族非「符号键」且无默认绑定消费，
+    // 留待实需增量；非美式布局不做物理键换算（既有键位模型边界）。
+    // 设置页键位捕获同用 keyStep，同源受益。
+    '{': 'bracketleft', '}': 'bracketright', '_': 'minus', '<': 'comma',
+    '>': 'period', '?': 'slash', '|': 'backslash', ':': 'semicolon', '"': 'quote',
   }
   const key = aliases[event.key] ?? event.key.toLowerCase()
   return normalizeChord(`${event.ctrlKey ? 'ctrl+' : ''}${event.altKey ? 'alt+' : ''}${event.shiftKey ? 'shift+' : ''}${event.metaKey ? 'meta+' : ''}${key}`)

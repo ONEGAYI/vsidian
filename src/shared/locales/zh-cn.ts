@@ -851,6 +851,12 @@ export const zhCn: Record<MessageKey, string> = {
   'command.find.selectPrevious.title': '选上一处相同词',
   'command.find.skipCurrent.title': '跳过当前，选下一处相同词',
   'command.find.allOccurrences.title': '选中全部相同词',
+  // ---- #413（#409 T02）标题折叠五操作（操作注册表 titleKey） ----
+  'command.heading.fold.title': '折叠标题节',
+  'command.heading.unfold.title': '展开标题节',
+  'command.heading.toggleFold.title': '折叠/展开切换标题节',
+  'command.heading.foldAll.title': '折叠全部标题节',
+  'command.heading.unfoldAll.title': '展开全部标题节',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': '分词引擎',
   'setting.wordSegmentEngine.description': 'Ctrl+左/右箭头按词移动时对连续中文段的切分引擎。英文与数字段始终沿用内置分组语义。',

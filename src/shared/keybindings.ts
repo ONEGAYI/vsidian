@@ -183,6 +183,25 @@ export const UI_OPERATIONS = [
   { id: 'findSelectPrevious', command: 'onegayi.vsidian.find.selectPrevious', titleKey: 'command.find.selectPrevious.title', mode: 'live', writes: true, defaults: [] },
   { id: 'findSkipCurrent', command: 'onegayi.vsidian.find.skipCurrent', titleKey: 'command.find.skipCurrent.title', mode: 'live', writes: true, defaults: ['ctrl+k ctrl+d'] },
   { id: 'findAllOccurrences', command: 'onegayi.vsidian.find.allOccurrences', titleKey: 'command.find.allOccurrences.title', mode: 'live', writes: true, defaults: ['ctrl+shift+l'] },
+  // #413（#409 T02）标题折叠五操作：Live 编辑器视图态（writes: false——
+  // 折叠零写回不改选区语义上的「文档写」，与 outlineCollapseAll 同口径），
+  // 无 Live 正文实例/无目标即静默。默认键对齐宿主 VSCode 惯例
+  //（editor.fold/unfold/toggleFold/foldAll/unfoldAll 的 Win 与 mac 键位族，
+  // mac 形态与 find 的 meta+f 同款双登记；修饰键序按 normalizeChord 规范
+  // 形态 ctrl→alt→shift→meta 书写——存储默认不再次归一，非规范序永不
+  // 匹配事件派生串）。键位所有权归注册表，不经 CM6 keymap；执行装配在
+  // keybindingRouter document 捕获层本地分支 + 命令面板经本表注册循环
+  // 回发 ui.command，两入口共用同一执行实现（syncController.
+  // runHeadingFoldCommand → headingFold effect 直驱）。Ctrl+Shift+[ / ]
+  // 依赖 keyStep 的 shift 上档符号映射（美式布局事件字符 { } 折回
+  // bracketleft/right）。冲突核对（2026-10-09 #240 收口形态复核）：与
+  // 全部注册表默认零占用；Ctrl+K 弦与既有唯一弦 ctrl+k ctrl+d 首段重叠
+  // 不冲突（整串精确匹配），结论由单测钉住。
+  { id: 'headingFold', command: 'onegayi.vsidian.heading.fold', titleKey: 'command.heading.fold.title', mode: 'live', writes: false, defaults: ['ctrl+shift+bracketleft', 'alt+meta+bracketleft'] },
+  { id: 'headingUnfold', command: 'onegayi.vsidian.heading.unfold', titleKey: 'command.heading.unfold.title', mode: 'live', writes: false, defaults: ['ctrl+shift+bracketright', 'alt+meta+bracketright'] },
+  { id: 'headingToggleFold', command: 'onegayi.vsidian.heading.toggleFold', titleKey: 'command.heading.toggleFold.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+l', 'meta+k meta+l'] },
+  { id: 'headingFoldAll', command: 'onegayi.vsidian.heading.foldAll', titleKey: 'command.heading.foldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+0', 'meta+k meta+0'] },
+  { id: 'headingUnfoldAll', command: 'onegayi.vsidian.heading.unfoldAll', titleKey: 'command.heading.unfoldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+j', 'meta+k meta+j'] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {
@@ -412,5 +431,9 @@ export function resolveKeybinding(overrides: KeybindingOverrides, mode: 'live' |
 
 export function formatBindingLabel(chord: string): string {
   return chord.split(' ').map((step) => step.split('+').map((part) =>
-    ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Win', escape: 'Esc', space: 'Space' })[part] ?? part.toUpperCase()).join('+')).join(' ')
+    // #413：符号物理键名渲染为字符形态（bracketleft → [），设置页标签与
+    // 捕获框不出现 BRACKETLEFT 式大写名；与 keyStep 别名同一份键名词表
+    ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Win', escape: 'Esc', space: 'Space',
+      minus: '-', equal: '=', comma: ',', period: '.', slash: '/', backslash: '\\',
+      semicolon: ';', quote: "'", bracketleft: '[', bracketright: ']' })[part] ?? part.toUpperCase()).join('+')).join(' ')
 }

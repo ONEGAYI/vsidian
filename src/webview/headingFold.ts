@@ -1,7 +1,8 @@
 // Live 正文标题折叠本体（#412 T01，规格 docs/specs/heading-fold.md）：
 // StateField 承载折叠键集合 + effect 驱动 + 消费点增量树直查的区间派生
-// + 隐藏装饰 + 光标迁移。本票无 UI 无键位（T02/T03/T04 在其上生长，
-// #410 API 只消费派生视图）。
+// + 隐藏装饰 + 光标迁移 + 五操作执行体（#413 T02：键位与命令面板双入口
+// 共用）。gutter 箭头/省略号 UI 与落点展开联动由 T03/T04 在其上生长，
+// #410 API 只消费派生视图。
 //
 // 折叠语义（规格「二、折叠本体与坐标生命周期」）：
 // - 折叠是**视图态**：零写回、不 dirty、不进撤销栈、不跨会话持久化
@@ -475,4 +476,75 @@ export function setHeadingFolds(view: EditorView, next: ReadonlySet<number>): vo
     }
   }
   view.dispatch(spec)
+}
+
+// ---- T02（#413）：五操作执行体（键位本地分支与 ui.command 共用） ----
+
+/** 标题折叠操作 id（#413 五操作；与 keybindings.ts UI_OPERATIONS 的
+ *  heading* 条目同一词表——命令面板经 ui.command 回发 op，键位路由
+ *  execute(id)，两入口都汇到本执行体） */
+export type HeadingFoldOperationId =
+  | 'headingFold' | 'headingUnfold' | 'headingToggleFold' | 'headingFoldAll' | 'headingUnfoldAll'
+
+/**
+ * 五操作执行体（规格「三、折叠与光标/选区」的操作语义）：目标解析 →
+ * 与当前键集合并 → effect 直驱（setHeadingFolds，含光标迁移）。无目标
+ * 静默 no-op（不 dispatch）。全程零写回——折叠是视图态，执行域的目标
+ * 可用性门控（Live 实例在场/可编辑）由调用方（syncController）经焦点
+ * 分派解析后保证，本函数只认传入的 view。
+ */
+export function applyHeadingFoldOperation(view: EditorView, op: HeadingFoldOperationId): void {
+  const state = view.state
+  const keys = state.field(headingFoldField, false)
+  if (!keys) {
+    return
+  }
+  const tree = state.field(liveDecorationsField, false)?.tree
+  const headings = collectHeadings(state.doc, tree)
+  switch (op) {
+    case 'headingFold': {
+      // 辖域可折叠且未折叠 → 折之；已折叠 → 上溯最近未折叠祖先（逐层外扩）
+      const targets = resolveHeadingFoldTargets(headings, keys, state.doc, state.selection)
+      if (!targets.length) return
+      const next = new Set(keys)
+      for (const key of targets) next.add(key)
+      setHeadingFolds(view, next)
+      return
+    }
+    case 'headingUnfold': {
+      // 辖域已折叠 → 展之；否则展开包含光标的最深已折叠区间；再无 → 静默
+      const targets = resolveHeadingUnfoldTargets(headings, keys, state.doc, state.selection)
+      if (!targets.length) return
+      const next = new Set(keys)
+      for (const key of targets) next.delete(key)
+      setHeadingFolds(view, next)
+      return
+    }
+    case 'headingToggleFold': {
+      // 辖域标题两态取反（不外扩）；辖域不可折叠 → 无目标
+      const targets = resolveHeadingToggleTargets(headings, state.doc, state.selection)
+      if (!targets.length) return
+      const next = new Set(keys)
+      for (const key of targets) {
+        if (!next.delete(key)) next.add(key)
+      }
+      setHeadingFolds(view, next)
+      return
+    }
+    case 'headingFoldAll': {
+      // 全部可折叠标题（空节/纯空白节排除）
+      const spans = foldableHeadingSpans(headings, state.doc)
+      if (!spans.length) return
+      const next = new Set(keys)
+      for (const span of spans) next.add(span.key)
+      setHeadingFolds(view, next)
+      return
+    }
+    case 'headingUnfoldAll': {
+      // 清空折叠集（无折叠零事务）
+      if (keys.size === 0) return
+      setHeadingFolds(view, EMPTY_FOLD)
+      return
+    }
+  }
 }

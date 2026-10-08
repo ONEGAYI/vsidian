@@ -8,12 +8,23 @@
 // 双入口形态），对拍单测见「collectHeadings 一致性」节。
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
+
+// jsdom 无布局：为 CM6 的视口测量（measureTextSize → Range.getClientRects）
+// 提供零值 polyfill（#413 用例经真实 EditorView 驱动折叠事务触发测量），
+// 真宿主 Chromium 有真实实现（compositionBuffer.test.ts 同款先例）
+if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined) {
+  ;(Range.prototype as unknown as { getClientRects(): DOMRectList }).getClientRects =
+    () => [] as unknown as DOMRectList
+  ;(Range.prototype as unknown as { getBoundingClientRect(): DOMRect }).getBoundingClientRect =
+    () => new DOMRect(0, 0, 0, 0)
+}
 import { EditorSelection, EditorState } from '@codemirror/state'
-import type { DecorationSet } from '@codemirror/view'
+import { EditorView, type DecorationSet } from '@codemirror/view'
 import { externalSync } from '../../src/webview/liveInstance'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { extractOutline } from '../../src/webview/outline'
 import {
+  applyHeadingFoldOperation,
   collectHeadings,
   effectiveHeadingFolds,
   enclosingHeading,
@@ -485,5 +496,67 @@ describe('effect 驱动（无 DOM-only 路径）', () => {
     expect(setEff.is(headingFoldSet)).toBe(true)
     const toggleEff = headingFoldToggle.of(1)
     expect(toggleEff.is(headingFoldToggle)).toBe(true)
+  })
+})
+
+// ---- T02（#413）：五操作执行体（applyHeadingFoldOperation）----
+// 双入口（键位本地分支与 ui.command 回发）共用同一执行实现的契约钉住：
+// 操作语义落 effect（headingFoldSet），零写回；无目标静默（不 dispatch）。
+describe('applyHeadingFoldOperation（T02 五操作执行体）', () => {
+  // 跨级辖域：T2（##）是 T1（#）的子节——T1 节 [标题行尾, T3 行首) 覆盖
+  // T2；T3（#）与 T1 同级，T1 节终止于 T3 行首
+  const DOC = '# T1\n\nalpha\n\n## T2\n\nbeta\n\n# T3\n\ngamma\n'
+  const T1 = 0
+  const T2 = DOC.indexOf('## T2')
+  const T3 = DOC.indexOf('# T3')
+
+  function viewOf(doc: string, cursor: number): EditorView {
+    const state = foldState(doc, [cursor])
+    return new EditorView({ state, parent: document.body })
+  }
+
+  it('折叠 → 再按外扩；展开取辖域；切换取反：全程零写回', () => {
+    const view = viewOf(DOC, DOC.indexOf('beta'))
+    applyHeadingFoldOperation(view, 'headingFold')
+    expect([...view.state.field(headingFoldField)]).toEqual([T2])
+    // 光标迁移：beta 在 T2 隐藏区 → 迁到标题行行尾
+    expect(view.state.selection.main.head).toBe(T2 + 5)
+    applyHeadingFoldOperation(view, 'headingFold')
+    expect([...view.state.field(headingFoldField)].sort((a, b) => a - b)).toEqual([T1, T2])
+    // 外扩折叠把光标迁到 T1 标题行行尾 → 辖域 = T1，展开 T1（内层 T2 保持）
+    expect(view.state.selection.main.head).toBe(T1 + 4)
+    applyHeadingFoldOperation(view, 'headingUnfold')
+    expect([...view.state.field(headingFoldField)]).toEqual([T2])
+    applyHeadingFoldOperation(view, 'headingToggleFold')
+    expect([...view.state.field(headingFoldField)].sort((a, b) => a - b)).toEqual([T1, T2])
+    applyHeadingFoldOperation(view, 'headingToggleFold')
+    expect([...view.state.field(headingFoldField)]).toEqual([T2])
+    applyHeadingFoldOperation(view, 'headingFoldAll')
+    expect([...view.state.field(headingFoldField)].sort((a, b) => a - b)).toEqual([T1, T2, T3])
+    applyHeadingFoldOperation(view, 'headingUnfoldAll')
+    expect([...view.state.field(headingFoldField)]).toEqual([])
+    // 零写回：文档全程未变
+    expect(view.state.doc.toString()).toBe(DOC)
+    view.destroy()
+  })
+
+  it('无目标静默：首个标题之前折叠/切换 no-op（不 dispatch、键集引用不变）', () => {
+    const view = viewOf('前置正文\n\n# T1\n\n正文\n', 0)
+    const before = view.state.field(headingFoldField)
+    applyHeadingFoldOperation(view, 'headingFold')
+    applyHeadingFoldOperation(view, 'headingUnfold')
+    applyHeadingFoldOperation(view, 'headingToggleFold')
+    expect(view.state.field(headingFoldField)).toBe(before)
+    view.destroy()
+  })
+
+  it('foldAll 目标 = 全部可折叠标题（同级相邻空节排除）', () => {
+    // T1 与 T2 同级相邻：T1 节 [行尾, T2 行首) 仅一个换行 → 不可折叠；
+    // T2 节含 beta → 可折叠——foldAll 只含 T2
+    const doc = '# T1\n# T2\n\nbeta\n'
+    const view = viewOf(doc, doc.indexOf('beta'))
+    applyHeadingFoldOperation(view, 'headingFoldAll')
+    expect([...view.state.field(headingFoldField)]).toEqual([doc.indexOf('# T2')])
+    view.destroy()
   })
 })

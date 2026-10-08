@@ -906,6 +906,12 @@ export const en = {
   'command.find.selectPrevious.title': 'Select Previous Occurrence',
   'command.find.skipCurrent.title': 'Skip and Select Next Occurrence',
   'command.find.allOccurrences.title': 'Select All Occurrences',
+  // ---- #413（#409 T02）标题折叠五操作（操作注册表 titleKey） ----
+  'command.heading.fold.title': 'Fold Heading Section',
+  'command.heading.unfold.title': 'Unfold Heading Section',
+  'command.heading.toggleFold.title': 'Toggle Fold of Heading Section',
+  'command.heading.foldAll.title': 'Fold All Heading Sections',
+  'command.heading.unfoldAll.title': 'Unfold All Heading Sections',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': 'Word segmentation engine',
   'setting.wordSegmentEngine.description': 'Engine used to split continuous CJK text for word-wise Ctrl+Left/Right motion. Latin and digit runs always keep the built-in group semantics.',

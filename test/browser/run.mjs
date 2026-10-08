@@ -109,7 +109,12 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #360 T11：组件按钮/面板与视图界面贡献（生产界面运行时装配——真实
   // 点击经 target 句柄提交、悬停提示与键位徽章、面板开闭与迟到结果、
   // 模式回收与卸载回收、内置工具栏不受影响）紧随附加组件族
-  'addonT11Ui']
+  'addonT11Ui',
+  // #413（#409 T02）标题折叠键位：注册表五操作默认键真实路由——美式
+  // 布局 Ctrl+Shift+[ / ]（事件字符 { }，keyStep shift 上档符号映射的
+  // 端到端验证）、Ctrl+K 弦族、零写回与阅读模式不接管（绘制层断言属
+  // #414 T03 paint 探针）
+  'headingFoldKeys']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

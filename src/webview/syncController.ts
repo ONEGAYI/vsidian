@@ -41,6 +41,7 @@ import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
 import { PDF_ZOOM_STEP } from './pdfRender'
 import { KeybindingRouter, keyStep } from './keybindingRouter'
+import { applyHeadingFoldOperation, type HeadingFoldOperationId } from './headingFold'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
 import { ToastChannel } from './toast'
@@ -981,6 +982,15 @@ export class WebviewSyncController {
       else if (id === 'findSelectPrevious') { if (!embedBlocked()) this.runOccurrenceSelect('prev') }
       else if (id === 'findSkipCurrent') { if (!embedBlocked()) this.runOccurrenceSelect('skip') }
       else if (id === 'findAllOccurrences') { if (!embedBlocked()) this.runOccurrenceSelect('all') }
+      // #413（#409 T02）标题折叠五操作：本地分支直执行（折叠是视图态零
+      // 写回，不出站宿主往返；命令面板经 ui.command 回发入口共用
+      // runHeadingFoldCommand）。router 已按注册表 mode: live 过滤路由；
+      // 焦点分派走 actionTarget（P2-10：焦点在嵌入内部 Live 时折叠落 B，
+      // 不设 embedBlocked——折叠按焦点实例各自独立，非主文面板会话命令）
+      else if (id === 'headingFold' || id === 'headingUnfold' || id === 'headingToggleFold' ||
+        id === 'headingFoldAll' || id === 'headingUnfoldAll') {
+        this.runHeadingFoldCommand(id)
+      }
       // #359 T10 附加组件命令：本地分支直执行（回调在本页，不出站宿主往返
       // ——与词移动/选词族同款先例；router 已按命令声明的 mode/writes 过滤
       // 路由，模式与写门控在此不重复）。命令面板入口经宿主 executeCommand
@@ -2884,6 +2894,15 @@ export class WebviewSyncController {
           case 'findSelectPrevious': this.runOccurrenceSelect('prev'); break
           case 'findSkipCurrent': this.runOccurrenceSelect('skip'); break
           case 'findAllOccurrences': this.runOccurrenceSelect('all'); break
+          // #413（#409 T02）标题折叠五操作：命令面板入口（快捷键走 router
+          // 本地分支直达），两入口共用 runHeadingFoldCommand——执行域按
+          // 焦点实例解析目标（actionTarget），阅读模式/无可编辑 Live 实例
+          // 时静默（生效模式由 targetEditable 保证）
+          case 'headingFold': this.runHeadingFoldCommand('headingFold'); break
+          case 'headingUnfold': this.runHeadingFoldCommand('headingUnfold'); break
+          case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
+          case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
+          case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
         }
         break
       case 'addonCommand.execute':
@@ -9132,6 +9151,20 @@ export class WebviewSyncController {
     if (resolved && this.targetEditable(resolved.view, resolved.embed)) {
       command(resolved.view)
     }
+  }
+
+  /** #413（#409 T02）标题折叠五操作执行口：键位本地分支（router execute
+   *  回调）与命令面板（ui.command 回发）共用。目标解析按 P2-10 焦点分派
+   *  （焦点在嵌入内部 Live 时折叠落 B——StateField 随实例，折叠态各自
+   *  独立）；门控 targetEditable（主文 Live 态/实例未暂停），无目标或
+   *  阅读模式静默 no-op。执行体在 headingFold.applyHeadingFoldOperation
+   *  （effect 直驱零写回，无 DOM-only 路径） */
+  private runHeadingFoldCommand(op: HeadingFoldOperationId): void {
+    const resolved = this.actionTarget()
+    if (!resolved || !this.targetEditable(resolved.view, resolved.embed)) {
+      return
+    }
+    applyHeadingFoldOperation(resolved.view, op)
   }
 
   /**

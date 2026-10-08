@@ -477,6 +477,31 @@
         "command": "onegayi.vsidian.find.allOccurrences",
         "title": "%command.find.allOccurrences.title%",
         "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.heading.fold",
+        "title": "%command.heading.fold.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.heading.unfold",
+        "title": "%command.heading.unfold.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.heading.toggleFold",
+        "title": "%command.heading.toggleFold.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.heading.foldAll",
+        "title": "%command.heading.foldAll.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.heading.unfoldAll",
+        "title": "%command.heading.unfoldAll.title%",
+        "category": "Vsidian"
       }
     ],
     "menus": {
