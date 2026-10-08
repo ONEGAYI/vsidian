@@ -9,10 +9,11 @@
 // 器原始消息（kind:'ready' 等）。
 import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
+import * as cmLanguage from '@codemirror/language'
 import { Compartment } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 import { WebviewSyncController } from '../../../src/webview/syncController'
+import { addonCm6LanguageSubset } from '../../../src/webview/addonPageLoader'
 import { installAddonPageLoader, type AddonPageLoaderHandle } from '../../fixtures/addon-v02/loader/pageAddonLoader'
 import type { AddonPageDirective } from '../../fixtures/addon-v02/loader/types'
 import '../../../src/webview/main.css'
@@ -35,8 +36,9 @@ const findView = () => {
 const loader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'editor',
   // 共享运行时 = 本页 bundle 的模块命名空间（与生产控制器同一实例）；
-  // language 为 #406 的语法树读取子集（与生产裁剪口径一致的函数集）
-  cm6: { state: cmState, view: cmView, language: { syntaxTree, ensureSyntaxTree, syntaxTreeAvailable } },
+  // language 经生产 addonCm6LanguageSubset 裁剪（#406 单一事实源，暴露
+  // 集合调整只改该函数）
+  cm6: { state: cmState, view: cmView, language: addonCm6LanguageSubset(cmLanguage) },
   attachExtensions: (extension) => {
     const view = findView()
     view.dispatch({ effects: addonSlot.reconfigure(extension ?? []) })

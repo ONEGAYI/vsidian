@@ -7,7 +7,7 @@
 //   复用 shared 单一事实源，越界在 IO 之前拒绝）。
 // - 单文件上限（ADDON_STORAGE_FILE_LIMIT_BYTES）在 writeFile 入口拦截。
 // - watcher 惰性创建、多订阅共享底层、全退订或 release 时注销；变化
-//   回调只回相对路径。
+//   回调回相对路径与变化类型（change/delete）。
 // - 卸载清理策略：release 只注销 watcher，文件数据保留（组件停用/故障/
 //   扩展卸载都不自动删——随 Vsidian 本体卸载整体清除；见 shared 头注释）。
 import {
@@ -20,7 +20,8 @@ import {
 } from '../../shared/addonStorage'
 
 /** 文件系统端口（vscode 层实现 = vscode.workspace.fs；路径为正斜杠
- * 归一后的绝对文件系统路径；FileType 沿用 vscode 枚举数值：1=目录 0=文件） */
+ * 归一后的绝对文件系统路径；FileType 沿用 vscode 枚举数值——File=1、
+ * Directory=2，与下方 FILE_TYPE 常量对齐） */
 export interface AddonStorageFsPort {
   readFile(path: string): Promise<Uint8Array>
   writeFile(path: string, content: Uint8Array): Promise<void>
@@ -89,7 +90,7 @@ export class AddonStorageService {
   private subscribe(
     addonId: string,
     root: string,
-    callback: (relativePath: string) => void,
+    callback: (relativePath: string, kind: 'change' | 'delete') => void,
   ): { dispose(): void } {
     let state = this.watchers.get(addonId)
     if (!state) {

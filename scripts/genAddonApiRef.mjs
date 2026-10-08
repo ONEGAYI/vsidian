@@ -226,6 +226,7 @@ function renderEntry(entry, signatures) {
     sem.history ? `- **历史与撤回**：${sem.history}` : null,
     sem.autoRules ? `- **自动规则**：${sem.autoRules}` : null,
     sem.language ? `- **暴露面裁剪**：${sem.language}` : null,
+    sem.keymap ? `- **按键优先级**：${sem.keymap}` : null,
   ].filter(Boolean)
 
   const signatureBlocks = entry.signatures

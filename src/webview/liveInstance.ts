@@ -549,6 +549,11 @@ export class LiveEditorInstance {
   /** 空白格或矩形区域的组合暂缓：宿主只接收结束后的净变更。 */
   private blankComposition: { startState: EditorState; changes: ChangeSet | null; region?: TableRegion } | null = null
   private compositionCommittedText: string | null = null
+  /** 组合开始点处于表格格区（#124 口径：格区归表格管线，行为链不驱动）。
+   *  定稿 compose 事务会清空 tableRegionField，compositionend 时刻事后查
+   *  在场状态恒为空——须在组合开始（compositionstart）时刻留存，键入路径
+   *  用 tr.startState 同基准。 */
+  private compositionInTableRegion = false
   /** 组合期间到达、待 flush 的外部增量（按到达序） */
   private pendingExternal: BufferedIncremental[] = []
   /** 组合期间到达、待 flush 的全文消息（覆盖增量形态）。source 记录来源
@@ -909,8 +914,9 @@ export class LiveEditorInstance {
    *   口径）排除——行为只作用于正文；
    * - 程序化事务排除：外部同步（externalSync）与 SDK 修饰
    *   （addonEditOriginTag）不触发（防第二写入口/递归）。
-   * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/delete/
-   * undo 不驱动）。
+   * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/undo 不
+   * 驱动）+ delete 白名单（backward/forward/selection/cut/line——#400；
+   * paste/drop/undo 与 dedent 等命令族删除仍不驱动）。
    */
   private maybeDriveAddonBehaviors(tr: Transaction, state: EditorState): void {
     if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined || !tr.docChanged) {
@@ -970,14 +976,18 @@ export class LiveEditorInstance {
    * 实证注释），这里以净定稿文本（event.data）补一次驱动，userEvent 标
    * 'input.type.compose'（行为可据此区分普通键入与 IME 定稿）。
    * 门控对齐键入路径的既有情境：空白格/网格组合（blankComposition 在场
-   * ——净输入归表格管线规范化）、代码上下文（定稿落点判 inCodeContext）、
-   * 取消组合（data 为空）。外部同步与 SDK 修饰不经此路径。
+   * ——净输入归表格管线规范化）、表格格区（组合开始点标记——定稿事务
+   * 已清空 region，开始时刻留存，#124「格区不接管」口径）、代码上下文
+   * （定稿落点判 inCodeContext；多选区时只查主选区 head 与 head-1，
+   * 是键入路径「全部选区双端」的近似——IME 定稿在多选区下极罕见，
+   * 取主落点已覆盖现实输入形态）、取消组合（data 为空）。外部同步与
+   * SDK 修饰不经此路径。
    */
   private maybeDriveAddonBehaviorsForComposeCommit(committedText: string): void {
     if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined) {
       return
     }
-    if (committedText === '' || this.composing || this.blankComposition !== null) {
+    if (committedText === '' || this.composing || this.blankComposition !== null || this.compositionInTableRegion) {
       return
     }
     const state = this.view?.state
@@ -2528,6 +2538,9 @@ export class LiveEditorInstance {
           // 停顿回看在 captureCompositionStart（捕获阶段）已完成——到达
           // 冒泡 handler 时 composing 已置 true，此处只保留既有标记逻辑
           this.composing = true
+          // 组合开始点的格区标记（定稿补驱动门控用，见字段注释；初始值
+          // 为 null 非.undefined，用真值判定与键入路径同口径）
+          this.compositionInTableRegion = Boolean(this.view?.state.field(tableRegionField, false))
           this.beginBlankComposition()
         },
         compositionupdate: () => {
@@ -2536,6 +2549,7 @@ export class LiveEditorInstance {
           if (!this.composing) {
             this.markPauseBoundary()
             this.composing = true
+            this.compositionInTableRegion = Boolean(this.view?.state.field(tableRegionField, false))
           }
           this.beginBlankComposition()
           // P2-05：组合开始 = 输入挂起态——置位 settle 检测
@@ -2551,6 +2565,7 @@ export class LiveEditorInstance {
           // 拦截——故定稿不能靠事务路径驱动，在 compositionend 钩子补一次
           // （与 #123 补全/#124 包裹的「定稿后微任务处理」同模式）。
           this.maybeDriveAddonBehaviorsForComposeCommit(event.data || '')
+          this.compositionInTableRegion = false
         },
         // #153：用户主动移光标开新撤销段（点击 / 导航键选区移动）；纯输入
         // 导致的光标后移不在此列（不派发 DOM 事件信号）

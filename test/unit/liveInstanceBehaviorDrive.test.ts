@@ -16,7 +16,7 @@
 // - 未装配驱动（deps 缺省）或未设身份（setAddonBehaviorIdentity 未调）
 //   时零驱动。
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Transaction } from '@codemirror/state'
+import { EditorSelection, Transaction } from '@codemirror/state'
 import { LiveEditorInstance, externalSync, addonEditOriginTag, type LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
 import { setTableRegion } from '../../src/webview/tableRegionSelection'
 import { ImageResourceManager } from '../../src/webview/imageResource'
@@ -133,6 +133,24 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: 'x', replaced: { from: 0, to: 4, text: 'word' } }])
   })
 
+  it('#401 多选区替换：replaced 取删除区间最小包围、文本按区间序拼接', async () => {
+    const { instance, drives } = setup('one two\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: EditorSelection.create([EditorSelection.range(0, 3), EditorSelection.range(4, 7)], 0) })
+    view.dispatch({
+      changes: [
+        { from: 0, to: 3, insert: 'X' },
+        { from: 4, to: 7, insert: 'Y' },
+      ],
+      userEvent: 'input.type',
+    })
+    await flushMicrotasks()
+    expect(drives).toEqual([{
+      instanceId: 'main', userEvent: 'input.type', inputText: 'XY',
+      replaced: { from: 0, to: 7, text: 'onetwo' },
+    }])
+  })
+
   it('#400 行为修饰的删除事务（addonEditOriginTag）不重入驱动', async () => {
     const { instance, drives } = setup('word\n')
     const view = instance.getView()!
@@ -157,6 +175,24 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     // 代码上下文（定稿落点在围栏代码块内）：不驱动
     view.dispatch({ selection: { anchor: 12 } })
     content.dispatchEvent(new CompositionEvent('compositionend', { data: 'x' }))
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('IME 定稿补驱动门控：表格格区内选区替换式组合不驱动（#124 格区口径）', async () => {
+    const { instance, drives } = setup('| a | b |\n| --- | --- |\n')
+    const view = instance.getView()!
+    const content = view.contentDOM
+    // 格区激活 + 非空选区开始组合：beginBlankComposition 对非空选区不建立
+    // （blankComposition 为 null），定稿补驱动须由「组合开始点处于格区」
+    // 标记拦截——定稿事务已清空 tableRegionField，事后查在场状态查不到
+    view.dispatch({ effects: setTableRegion.of({
+      tableFrom: 0, rowFrom: 0, rowTo: 0, columnFrom: 0, columnTo: 1,
+    }) })
+    view.dispatch({ selection: { anchor: 2, head: 3 } })
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    view.dispatch({ changes: { from: 2, to: 3, insert: '你' }, userEvent: 'input.type.compose' })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '你' }))
     await flushMicrotasks()
     expect(drives).toEqual([])
   })

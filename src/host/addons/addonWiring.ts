@@ -291,6 +291,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         new vscode.RelativePattern(base, '**/*'),
       )
       const rel = (uri: vscode.Uri): string => uri.path.slice(base.path.length + 1)
+      // 新建文件归并为 change（组件收到即可读；「删旧建新」式替换两侧
+      // 事件齐全，不漏新文件就位）
+      watcher.onDidCreate((uri) => onEvent('change', rel(uri)))
       watcher.onDidChange((uri) => onEvent('change', rel(uri)))
       watcher.onDidDelete((uri) => onEvent('delete', rel(uri)))
       return watcher

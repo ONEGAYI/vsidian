@@ -71,7 +71,7 @@ function harness(options: { preference?: ReturnType<typeof memoryPreference> | A
     apiVersion: ADDON_API_VERSION,
     preferences,
     settings,
-storage: new AddonStorageService({
+    storage: new AddonStorageService({
       baseDir: '/test/addons',
       uriOf: (addonId) => `file:///test/addons/${addonId}`,
       fs: {

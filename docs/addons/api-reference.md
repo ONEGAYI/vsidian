@@ -690,6 +690,7 @@ export interface AddonEditCredential {
 - **生命周期**：仅编辑器页提供（设置页 undefined）；使用前须在清单 experimental 声明 cm6 兼容范围，且范围含宿主提供的入口版本才判兼容。
 - **错误与拒绝**：宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。
 - **暴露面裁剪**：language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。已知边界：live 编辑器的 markdown 语法树是内核私有增量解析（不经 @codemirror/language 的 language facet 装配），syntaxTree 在 live 状态上恒为未解析空树——行类型判定类需求不能依赖本入口，平台级树查询能力另行评估。
+- **按键优先级**：#402 按键拦截优先级契约（实验层）：扩展槽为平台扩展数组末位——普通 keymap 在平台情境链（Tab 三段/列表续行等）不处理时落空接手；Prec.high 为抢先层（可替代平台键位，返回 false 落穿）；撤销/重做（Mod-z / Shift-Mod-z / Mod-y）是 Prec.highest 的平台保留键闸、在扩展序上先于附加组件槽——addon 用 Prec.highest 也不可越过；Esc 与宿主级快捷键不开放抢先；多组件同层按装载顺序仲裁；实验层 keymap 不进统一快捷键管理，用户关闭 = 停用组件。
 
 签名事实源：`src/shared/addonPage.ts`
 
@@ -974,7 +975,7 @@ export function mergeBehaviorOrderPreservingUnknown(
 语义要点：
 - **适用模式**：仅宿主端（编辑器/设置页面不直接提供——经组件通道桥接）。
 - **坐标与数据形状**：相对路径为正斜杠形态，先过 isSafeAddonStoragePath 守卫（越界/非法一律 invalid-path 拒绝——普通 API 拒绝不算故障）；文件内容按 UTF-8 文本读写。
-- **生命周期**：目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件代次终结时平台统一注销。
+- **生命周期**：目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件停用/故障/代次终结时平台统一注销；onDidChangeFile 回调回 (相对路径, change|delete)，change 含改写与新建。
 - **错误与拒绝**：invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因）——可辨认拒绝，不抛出。
 
 签名事实源：`src/shared/addonStorage.ts`
@@ -994,9 +995,10 @@ export interface AddonStorageFacet {
   list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>
   /** 删文件（不删目录——目录生命周期归卸载策略） */
   deleteFile(relativePath: string): Promise<AddonStorageResult<null>>
-  /** 订阅目录内文件变化（外部同步工具改写后自动重载的支撑面）；
-   * 返回取消函数；组件生命周期结束时平台统一注销 watcher */
-  onDidChangeFile(callback: (relativePath: string) => void): AddonStorageWatchHandle
+  /** 订阅目录内文件变化（外部同步工具改写/新建文件后自动重载的支撑面）；
+   * 回调回相对路径与变化类型（change = 改写或新建，delete = 删除）；
+   * 返回取消函数；组件停用/故障/代次终结时平台统一注销 watcher */
+  onDidChangeFile(callback: (relativePath: string, kind: 'change' | 'delete') => void): AddonStorageWatchHandle
 }
 
 export type AddonStorageResult<T> =
@@ -1018,9 +1020,10 @@ export interface AddonStorageEntryInfo {
 export type AddonStorageRejection = 'invalid-path' | 'too-large' | 'error'
 
 /** 相对路径守卫：正斜杠相对路径，段非空且不为 `.`/`..`，无反斜杠、
- * 无盘符/协议头、长度有界。拒绝一切可逃出组件目录的字面形态（编码
- * 变形由宿主侧 URI join 后的包含性判定兜底——本守卫是防呆层，与
- * resourceUri 的分层口径一致）。 */
+ * 无盘符/协议头、长度有界。字面守卫是唯一防线：`%xx` 编码形态按字面
+ * 目录名处理（Uri.file 不解码、`%2e%2e` 不构成 `..` 逃逸）；数据目录
+ * 隔离是 API 卫生而非安全边界——组件本体是宿主侧扩展、本就握有完整
+ * vscode.workspace.fs，无更高权限可越。 */
 export function isSafeAddonStoragePath(relativePath: string): boolean {
   if (relativePath.length === 0 || relativePath.length > 512) {
     return false
@@ -1086,7 +1089,7 @@ export class AddonStorageService {
   private subscribe(
     addonId: string,
     root: string,
-    callback: (relativePath: string) => void,
+    callback: (relativePath: string, kind: 'change' | 'delete') => void,
   ): { dispose(): void } {
     let state = this.watchers.get(addonId)
     if (!state) {
@@ -1125,7 +1128,8 @@ export class AddonStorageService {
 }
 
 /** 文件系统端口（vscode 层实现 = vscode.workspace.fs；路径为正斜杠
- * 归一后的绝对文件系统路径；FileType 沿用 vscode 枚举数值：1=目录 0=文件） */
+ * 归一后的绝对文件系统路径；FileType 沿用 vscode 枚举数值——File=1、
+ * Directory=2，与下方 FILE_TYPE 常量对齐） */
 export interface AddonStorageFsPort {
   readFile(path: string): Promise<Uint8Array>
   writeFile(path: string, content: Uint8Array): Promise<void>

@@ -664,6 +664,10 @@ export class AddonRuntime {
 
   private disableAddon(record: RuntimeRecord): void {
     this.releaseRun(record)
+    // #404 停用注销数据目录 watcher：组件代码不受平台约束（订阅后可能不
+    // dispose），不注销则停用后回调仍被触发、重启用后新旧回调重复派发；
+    // release 幂等，重订阅自动重建 watcher
+    this.ports.storage.release(this.entryOf(record))
     record.runState = 'disabled'
     this.notify()
   }
@@ -674,6 +678,8 @@ export class AddonRuntime {
     //（T12 诊断：fault/<stage>——组件 + 阶段 + 原因，OutputChannel 单一通道）
     this.releaseRun(record)
     record.setupHandlers.clear()
+    // #404 故障同停用口径注销数据目录 watcher（见 disableAddon 注释）
+    this.ports.storage.release(this.entryOf(record))
     record.runState = 'faulted'
     record.faultReason = reason
     if (this.settingsOpenAddon !== undefined && this.records.get(this.settingsOpenAddon) === record) {

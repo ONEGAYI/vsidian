@@ -37,9 +37,10 @@ export interface AddonStorageWatchHandle {
 }
 
 /** 相对路径守卫：正斜杠相对路径，段非空且不为 `.`/`..`，无反斜杠、
- * 无盘符/协议头、长度有界。拒绝一切可逃出组件目录的字面形态（编码
- * 变形由宿主侧 URI join 后的包含性判定兜底——本守卫是防呆层，与
- * resourceUri 的分层口径一致）。 */
+ * 无盘符/协议头、长度有界。字面守卫是唯一防线：`%xx` 编码形态按字面
+ * 目录名处理（Uri.file 不解码、`%2e%2e` 不构成 `..` 逃逸）；数据目录
+ * 隔离是 API 卫生而非安全边界——组件本体是宿主侧扩展、本就握有完整
+ * vscode.workspace.fs，无更高权限可越。 */
 export function isSafeAddonStoragePath(relativePath: string): boolean {
   if (relativePath.length === 0 || relativePath.length > 512) {
     return false
@@ -72,7 +73,8 @@ export interface AddonStorageFacet {
   list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>
   /** 删文件（不删目录——目录生命周期归卸载策略） */
   deleteFile(relativePath: string): Promise<AddonStorageResult<null>>
-  /** 订阅目录内文件变化（外部同步工具改写后自动重载的支撑面）；
-   * 返回取消函数；组件生命周期结束时平台统一注销 watcher */
-  onDidChangeFile(callback: (relativePath: string) => void): AddonStorageWatchHandle
+  /** 订阅目录内文件变化（外部同步工具改写/新建文件后自动重载的支撑面）；
+   * 回调回相对路径与变化类型（change = 改写或新建，delete = 删除）；
+   * 返回取消函数；组件停用/故障/代次终结时平台统一注销 watcher */
+  onDidChangeFile(callback: (relativePath: string, kind: 'change' | 'delete') => void): AddonStorageWatchHandle
 }

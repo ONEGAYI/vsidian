@@ -217,6 +217,8 @@ export type StorageSurface = Pick<
   'uri' | 'readFile' | 'writeFile' | 'list' | 'deleteFile' | 'onDidChangeFile'
 >
 export const storageRejectionsPinned: Equals<AddonStorageRejection, 'invalid-path' | 'too-large' | 'error'> = true
+/** onDidChangeFile 回调两参契约（相对路径, 变化类型）——删参/收窄 kind 即编译失败 */
+export const storageWatchKindPinned: Equals<Parameters<Parameters<AddonStorageFacet['onDidChangeFile']>[0]>[1], 'change' | 'delete'> = true
 
 /** 设置定义到值的组合 */
 export type SettingShapes = {
