@@ -33,7 +33,7 @@ import type { AddonSettingsService } from './addonSettingsService'
 
 /** 登记成功的解析臂（settingsPages/editorPages 只收成功条目） */
 type ResolvedPageEntry = import('./addonPageRegistry').AddonPageEntryResolution & { ok: true }
-import type { AddonChannelOutcome, AddonPageDirective, AddonPageOutbound } from '../../shared/addonPage'
+import type { AddonChannelOutcome, AddonPageDirective, AddonPageKind, AddonPageOutbound } from '../../shared/addonPage'
 
 /** 启用偏好持久层（vscode 层实现：user 层 = globalState，workspace 层 =
  *  workspaceState；#353 T04 起显式暴露 hasWorkspace——read().workspace 为
@@ -297,22 +297,25 @@ export class AddonRuntime {
   // ---- webview 出站消息（面板桥转发） ----
 
   handleOutbound(message: AddonPageOutbound): void {
-    // 代次硬边界：故障与工厂异常记账须消息代次与当前任一面（编辑器/设置）
-    // 的在场代次一致——停用再启用换代后，在途旧代次消息到达时不得把无辜
-    // 新代次打成 faulted（对齐装载器「迟到消息不接入新代次」的声明）
-    const generationCurrent = (addonId: string, generation: number): boolean => {
+    // 代次硬边界：故障与工厂异常记账须消息代次与其**所属面**（编辑器/
+    // 设置——消息自带 page）的当前代次一致。停用再启用换代后，在途旧
+    // 代次消息到达时不得把无辜新代次打成 faulted（对齐装载器「迟到消息
+    // 不接入新代次」的声明）。按面比对：跨面 OR 比对会让高水位恢复的
+    // 幽灵计数器（重注册后设置面恢复旧值而设置页未开）重新撞号。
+    const generationCurrentOnPage = (addonId: string, generation: number, page: AddonPageKind): boolean => {
       const record = this.records.get(addonId)
-      return !!record && (generation === record.editorGeneration || generation === record.settingsGeneration)
+      if (!record) return false
+      return page === 'editor' ? generation === record.editorGeneration : generation === record.settingsGeneration
     }
     if (message.type === 'addon.loaded' && !message.outcome.ok && message.outcome.reason === 'factory-error') {
-      if (generationCurrent(message.addonId, message.generation)) {
+      if (generationCurrentOnPage(message.addonId, message.generation, message.page)) {
         const record = this.records.get(message.addonId)!
         this.faultRecord(record, `页面工厂异常：${message.outcome.detail ?? 'unknown'}`, 'page-factory')
       }
       return
     }
     if (message.type === 'addon.faulted') {
-      if (generationCurrent(message.addonId, message.generation)) {
+      if (generationCurrentOnPage(message.addonId, message.generation, message.page)) {
         const record = this.records.get(message.addonId)!
         this.faultRecord(record, message.reason, 'page-reported')
       }
@@ -324,11 +327,25 @@ export class AddonRuntime {
 
   // ---- 通道（页面 → 宿主 JSON 请求的路由） ----
 
-  /** 路由通道请求：run scope 优先、setup scope 兜底（停用后仍服务设置页） */
-  async dispatchChannelRequest(addonId: string, topic: string, payload: unknown): Promise<AddonChannelOutcome> {
+  /** 路由通道请求：run scope 优先、setup scope 兜底（停用后仍服务设置页）。
+   *  from 提供时（页面桥转发的 webview 请求）先校验代次：旧代次页面的
+   *  在途请求不得在新 record 上执行 handler 副作用；宿主内部直调
+   *  （设置页面板通道）不经页面消息，无代次可比，省略 from。 */
+  async dispatchChannelRequest(
+    addonId: string,
+    topic: string,
+    payload: unknown,
+    from?: { generation: number; page: AddonPageKind },
+  ): Promise<AddonChannelOutcome> {
     const record = this.records.get(addonId)
     if (!record || record.runState === 'faulted') {
       return { ok: false, reason: 'rejected' }
+    }
+    if (from !== undefined) {
+      const current = from.page === 'editor' ? record.editorGeneration : record.settingsGeneration
+      if (from.generation !== current) {
+        return { ok: false, reason: 'rejected' }
+      }
     }
     const handler = record.run?.handlers.get(topic) ?? record.setupHandlers.get(topic)
     if (!handler) {

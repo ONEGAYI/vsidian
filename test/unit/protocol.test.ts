@@ -2418,3 +2418,40 @@ describe('isWebviewToHost / isHostToWebview：T08 行为冲突管理消息（#35
     expect(isWebviewToHost({ ...base, state: null } as never)).toBe(false)
   })
 })
+
+describe('addonPage.outbound 守卫：出站消息页面种类字段（评审 R2）', () => {
+  // 代次按面比对依赖消息自带 page——缺字段或非法值整条拒绝（守卫层
+  // 先于 runtime.handleOutbound 拦下，不进代次比对）
+  const wrapped = (outbound: Record<string, unknown>) => ({ kind: 'addonPage.outbound' as const, outbound })
+
+  it('faulted/loaded/channel.request 带 page 通过；缺 page 或非法 page 拒绝', () => {
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.faulted', addonId: 'pub.a', generation: 1, page: 'editor', reason: 'boom',
+    }))).toBe(true)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.faulted', addonId: 'pub.a', generation: 1, reason: 'boom',
+    }))).toBe(false)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.faulted', addonId: 'pub.a', generation: 1, page: 'webview', reason: 'boom',
+    }))).toBe(false)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.channel.request', addonId: 'pub.a', generation: 1, page: 'settings', requestId: 'r1', topic: 't', payload: null,
+    }))).toBe(true)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.channel.request', addonId: 'pub.a', generation: 1, requestId: 'r1', topic: 't', payload: null,
+    }))).toBe(false)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.loaded', addonId: 'pub.a', generation: 1, page: 'editor', outcome: { ok: true, css: [] },
+    }))).toBe(true)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.loaded', addonId: 'pub.a', generation: 1, outcome: { ok: true, css: [] },
+    }))).toBe(false)
+  })
+
+  it('unloaded 不要求 page（宿主对其无代次记账，权威在装载器侧）', () => {
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.unloaded', addonId: 'pub.a', generation: 1,
+      outcome: { ok: true }, disposals: 0, releasedRequests: 0,
+    }))).toBe(true)
+  })
+})

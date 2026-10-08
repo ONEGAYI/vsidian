@@ -213,6 +213,8 @@ export type AddonPageOutbound =
       type: 'addon.loaded'
       addonId: string
       generation: number
+      /** 发出消息的页面种类（宿主按面对比代次——编辑器/设置两计数器独立） */
+      page: AddonPageKind
       outcome: AddonLoadOutcome
     }
   | {
@@ -228,12 +230,14 @@ export type AddonPageOutbound =
       type: 'addon.faulted'
       addonId: string
       generation: number
+      page: AddonPageKind
       reason: string
     }
   | {
       type: 'addon.channel.request'
       addonId: string
       generation: number
+      page: AddonPageKind
       requestId: string
       topic: string
       payload: unknown
@@ -334,19 +338,20 @@ export function isAddonPageDirective(value: unknown): value is AddonPageDirectiv
 /** 页面 → 宿主出站消息守卫（addonPage.outbound 消息体内层） */
 export function isAddonPageOutbound(value: unknown): value is AddonPageOutbound {
   if (!isRecord(value) || typeof value.type !== 'string') return false
+  const pageValid = value.page === 'editor' || value.page === 'settings'
   switch (value.type) {
     case 'addon.loaded':
-      return typeof value.addonId === 'string' && typeof value.generation === 'number' &&
+      return pageValid && typeof value.addonId === 'string' && typeof value.generation === 'number' &&
         isAddonLoadOutcome(value.outcome)
     case 'addon.unloaded':
       return typeof value.addonId === 'string' && typeof value.generation === 'number' &&
         isAddonUnloadOutcome(value.outcome) && typeof value.disposals === 'number' &&
         typeof value.releasedRequests === 'number'
     case 'addon.faulted':
-      return typeof value.addonId === 'string' && typeof value.generation === 'number' &&
+      return pageValid && typeof value.addonId === 'string' && typeof value.generation === 'number' &&
         typeof value.reason === 'string'
     case 'addon.channel.request':
-      return typeof value.addonId === 'string' && typeof value.generation === 'number' &&
+      return pageValid && typeof value.addonId === 'string' && typeof value.generation === 'number' &&
         typeof value.requestId === 'string' && typeof value.topic === 'string' && 'payload' in value
     default:
       return false

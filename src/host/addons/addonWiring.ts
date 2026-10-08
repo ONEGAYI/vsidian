@@ -492,7 +492,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     if (outbound.type === 'addon.channel.request') {
       recordEvent(panel, { kind: 'outbound.request', addonId: outbound.addonId, generation: outbound.generation, topic: outbound.topic })
       void runtime
-        .dispatchChannelRequest(outbound.addonId, outbound.topic, outbound.payload)
+        .dispatchChannelRequest(outbound.addonId, outbound.topic, outbound.payload, { generation: outbound.generation, page: outbound.page })
         .then((outcome) => {
           post({
             type: 'addon.channel.reply',

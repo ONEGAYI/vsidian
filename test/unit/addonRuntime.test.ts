@@ -298,6 +298,7 @@ describe('T02 故障暂停：可归因异常暂停全部注册贡献', () => {
       type: 'addon.loaded',
       addonId: 'fixture.demo',
       generation: 1,
+      page: 'editor',
       outcome: { ok: false, reason: 'factory-error', detail: 'Error: page boom' },
     })
     expect(events).toEqual(['cleanup'])
@@ -316,12 +317,64 @@ describe('T02 故障暂停：可归因异常暂停全部注册贡献', () => {
     const gen2 = h.runtime.desiredEditorLoads()[0]!.generation
     expect(gen2).toBeGreaterThan(1)
     // gen1 在途 fault 到达：代次不符，不得把 gen2 记成故障（贡献保持）
-    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: 1, reason: 'late fault' })
+    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: 1, page: 'editor', reason: 'late fault' })
     expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('enabled')
     expect(h.runtime.desiredEditorLoads()).toHaveLength(1)
     // 当前代次 fault 正常记账（校验收紧不误伤正路）
-    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: gen2, reason: 'current fault' })
+    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: gen2, page: 'editor', reason: 'current fault' })
     expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('faulted')
+  })
+
+  it('幽灵撞号：重注册后设置面恢复旧计数器，旧编辑器代次 fault 不误伤新代次（按面比对）', () => {
+    const h = harness()
+    // 编辑器 gen1 + 开过一次设置页（settings gen1）后释放：高水位 {editor:1, settings:1}
+    h.register({
+      setup(context) { context.settings.registerPage(SETTINGS_ENTRY) },
+      enable(context) { context.pages.registerEditor(EDITOR_ENTRY) },
+    })
+    expect(h.runtime.openSettingsPage('fixture.demo')).toBe('ok')
+    h.registry.release('fixture.demo')
+    // 重注册：editor 从高水位续计为 2，settings 幽灵恢复为 1（设置页未开）
+    h.register({
+      setup(context) { context.settings.registerPage(SETTINGS_ENTRY) },
+      enable(context) { context.pages.registerEditor(EDITOR_ENTRY) },
+    })
+    const gen2 = h.runtime.desiredEditorLoads()[0]!.generation
+    expect(gen2).toBe(2)
+    // 旧编辑器面 gen1 在途 fault：数值恰与幽灵 settings 计数器相等——按面
+    // 比对不得接入（跨面 OR 比对会把无辜 gen2 打成 faulted）
+    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: 1, page: 'editor', reason: 'late editor fault' })
+    expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('enabled')
+    expect(h.runtime.desiredEditorLoads()).toHaveLength(1)
+    // 对照：当前编辑器代次 fault 照常记账
+    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: gen2, page: 'editor', reason: 'current fault' })
+    expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('faulted')
+  })
+
+  it('通道请求旧代次拒绝：handler 副作用不执行，当前代次照常', async () => {
+    const h = harness()
+    let ran = 0
+    const registerWithTopic = () =>
+      h.register({
+        enable(context) {
+          context.pages.registerEditor(EDITOR_ENTRY)
+          context.channel.handle('rev.topic', () => { ran++; return { done: true } })
+        },
+      })
+    registerWithTopic()
+    const gen1 = h.runtime.desiredEditorLoads()[0]!.generation
+    h.registry.release('fixture.demo')
+    registerWithTopic()
+    const gen2 = h.runtime.desiredEditorLoads()[0]!.generation
+    expect(gen2).toBeGreaterThan(gen1)
+    // 旧代次在途请求：拒绝且 handler 不执行
+    const stale = await h.runtime.dispatchChannelRequest('fixture.demo', 'rev.topic', {}, { generation: gen1, page: 'editor' })
+    expect(stale).toEqual({ ok: false, reason: 'rejected' })
+    expect(ran).toBe(0)
+    // 当前代次照常执行
+    const fresh = await h.runtime.dispatchChannelRequest('fixture.demo', 'rev.topic', {}, { generation: gen2, page: 'editor' })
+    expect(fresh).toEqual({ ok: true, result: { done: true } })
+    expect(ran).toBe(1)
   })
 
   it('通道回调抛错 → rejected 回执 + fault 暂停', async () => {
@@ -340,7 +393,7 @@ describe('T02 故障暂停：可归因异常暂停全部注册贡献', () => {
   it('故障后手动重新接入：release 旧代次 + 重新注册恢复（偏好保留）', () => {
     const h = harness()
     h.register({ enable(context) { context.pages.registerEditor(EDITOR_ENTRY) } })
-    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: 1, reason: 'page fault' })
+    h.runtime.handleOutbound({ type: 'addon.faulted', addonId: 'fixture.demo', generation: 1, page: 'editor', reason: 'page fault' })
     expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('faulted')
     // 手动重试入口（T05/T06 UI 消费）：release 旧代次 → 组件重新注册
     h.registry.release('fixture.demo')

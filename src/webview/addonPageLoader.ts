@@ -466,6 +466,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
               type: 'addon.channel.request',
               addonId: loadRecord.addonId,
               generation: loadRecord.generation,
+              page,
               requestId,
               topic,
               payload,
@@ -562,14 +563,14 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     const fail = (reason: AddonLoadFailureReason, detail?: string): AddonLoadOutcome => {
       history.push({ addonId: manifest.addonId, generation: manifest.generation, ended: 'load-failed', reason, detail })
       const outcome: AddonLoadOutcome = { ok: false, reason, detail }
-      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, page, outcome })
       return outcome
     }
 
     if (active.has(manifest.addonId)) {
       // 对齐设计 §2.2：同一接入代次再次注册返回 AlreadyRegistered
       const outcome: AddonLoadOutcome = { ok: false, reason: 'already-loaded' }
-      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, page, outcome })
       return outcome
     }
     const loadStartedAt = now()
@@ -630,13 +631,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     } catch (err) {
       // 故障释放已留痕（releaseLoad 记 ended:'faulted'），此处只补装载结局
       releaseLoad(loadRecord, 'faulted', `factory-error: ${String(err)}`)
-      env.send({ type: 'addon.faulted', addonId: manifest.addonId, generation: manifest.generation, reason: `factory-error: ${String(err)}` })
+      env.send({ type: 'addon.faulted', addonId: manifest.addonId, generation: manifest.generation, page, reason: `factory-error: ${String(err)}` })
       const outcome: AddonLoadOutcome = { ok: false, reason: 'factory-error', detail: String(err) }
-      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+      env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, page, outcome })
       return outcome
     }
     const outcome: AddonLoadOutcome = { ok: true, css: cssOutcomes }
-    env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, outcome })
+    env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, page, outcome })
     return outcome
   }
 
@@ -683,7 +684,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         }
         const reason = directive.reason ?? 'host-directed-fault'
         releaseLoad(record, 'faulted', reason)
-        env.send({ type: 'addon.faulted', addonId: directive.addonId, generation: directive.generation, reason })
+        env.send({ type: 'addon.faulted', addonId: directive.addonId, generation: directive.generation, page, reason })
         return
       }
     }
@@ -705,6 +706,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         type: 'addon.faulted',
         addonId,
         generation: record.generation,
+        page,
         reason: `${stage}: ${detail}`,
       })
       return true
