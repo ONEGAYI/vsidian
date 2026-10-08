@@ -148,6 +148,7 @@ export const STYLE_CONTRACT_CATEGORIES: readonly StyleContractCategory[] = [
   { id: 'toast', domain: 'chrome', title: '轻提示', titleKey: 'styleRef.category.toast', order: 16 },
   { id: 'rich-paste', domain: 'chrome', title: '粘贴询问', titleKey: 'styleRef.category.richPaste', order: 17 },
   { id: 'wikilink-suggest', domain: 'chrome', title: '双链联想候选', titleKey: 'styleRef.category.wikilinkSuggest', order: 18 },
+  { id: 'heading-fold', domain: 'chrome', title: '标题折叠', titleKey: 'styleRef.category.headingFold', order: 19 },
 ]
 
 /** 类目按 ID 索引（消费方查找用） */
@@ -3961,6 +3962,152 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
       "单元 wikilinkSuggestSession：阶段裁剪矩阵与容器末尾结构"
     ],
     "introduced": "#374（2026-10-06）"
+  },
+  {
+    "id": "fold-gutter",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-fold-gutter",
+    "purpose": "标题折叠箭头的承载列（#414 T03）：CM6 自定义 gutter，常驻零宽（marker 绝对定位脱流，不参与 .cm-gutters 流内宽度分配）——悬停显隐与折叠态常显均零布局位移，可读行宽档 [.cm-gutters + 间距 + .cm-content] 整组居中契约不受影响。行号列开/关两态箭头均伸入行号列与正文之间的既有间距区定位。",
+    "views": ["live"],
+    "dom": ".cm-gutters 内末位列（行号列之后）；行格子 .cm-gutterElement 承载箭头按钮。",
+    "example": ".vsidian-fold-gutter { overflow: visible; }",
+    "obsidian": { "counterpart": "无（Obsidian 折叠控件随其编辑器主题，无公开定制接口）", "support": "none" },
+    "verification": [
+      "单元 headingFoldCssContract：列 overflow 放行与格定位上下文",
+      "浏览器 headingFoldUi：行号开/关两态箭头定位与折叠前后正文列位置不变",
+    ],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "fold-arrow",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-fold-arrow",
+    "purpose": "gutter 折叠箭头按钮（#414 T03）：可折叠标题行 gutter 位置的折叠入口——向下箭头（点击折叠）；默认 visibility: hidden（未悬停零干扰、不可点击，VSCode alwaysShowFoldControls 关策略），悬停编辑器左缘武装显现（.vsidian-fold-hover）或折叠态常显（.vsidian-fold-arrow-collapsed）。可访问形态对齐代码卡 buildFoldButton：aria-label + aria-expanded + data-tooltip 悬停词，键位徽章走 data-tooltip-keys 结构化通道。",
+    "views": ["live"],
+    "states": "未折叠：悬停武装类下显现（向下箭头，点击折叠）；已折叠：常显 + 右向（-collapsed 修饰，点击展开）。显隐经 visibility（不触发布局）。",
+    "dom": ".vsidian-fold-gutter 行格内 button，绝对定位（left: 100% 伸入间距区、垂直居中行块）；SVG chevron 与代码卡折叠钮同款笔画。",
+    "example": ".vsidian-fold-arrow { color: var(--vsidian-fold-arrow-color); width: var(--vsidian-fold-arrow-width); }",
+    "obsidian": { "counterpart": "无（Obsidian 折叠控件无公开定制接口）", "support": "none" },
+    "verification": [
+      "单元 headingFoldCssContract：绝对定位 + 默认隐藏 + 变量引用",
+      "单元 headingFold（T03）：marker DOM 两态形态与可访问属性",
+      "浏览器 headingFoldUi：悬停显现/移开消失、真实点击折叠/展开（绘制层）",
+    ],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "fold-arrow-collapsed",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-fold-arrow-collapsed",
+    "purpose": "箭头折叠态修饰类（#414 T03）：已折叠标题的箭头常显（不依赖悬停武装）且指向右侧（chevron 旋转 -90deg），点击展开——「已折叠」的常驻可发现入口。",
+    "views": ["live"],
+    "states": "折叠态常显；展开即撤除。",
+    "dom": ".vsidian-fold-arrow 的修饰类（同一 button）。",
+    "example": ".vsidian-fold-arrow-collapsed { visibility: visible; }",
+    "obsidian": { "counterpart": "无", "support": "none" },
+    "verification": [
+      "单元 headingFoldCssContract：常显规则",
+      "浏览器 headingFoldUi：折叠后箭头常显可点展开",
+    ],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "fold-hover",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-fold-hover",
+    "purpose": "悬停显现武装类（#414 T03）：指针位于正文列左缘以左（行号列 + 间距区，行号开/关两态同判）时挂于 .cm-editor，驱动未折叠箭头 visibility 显现；移出编辑器解除。VSCode 折叠控件默认策略的显现开关。",
+    "views": ["live"],
+    "states": "指针移动实时翻转（foldHoverArmed 纯函数判定）；折叠态箭头不依赖本类。",
+    "dom": ".cm-editor 容器修饰类。",
+    "example": ".cm-editor.vsidian-fold-hover .vsidian-fold-gutter .vsidian-fold-arrow { visibility: visible; }",
+    "obsidian": { "counterpart": "无", "support": "none" },
+    "verification": [
+      "单元 headingFold（T03）：foldHoverArmed 边界判定",
+      "浏览器 headingFoldUi：真实指针移动驱动显现/移开消失、零位移",
+    ],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "fold-ellipsis",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-fold-ellipsis",
+    "purpose": "折叠态省略号占位（#414 T03）：折叠区间 Decoration.replace 的占位 widget（VSCode 折叠 `...` 预览标记、Obsidian `⋯` 同款），行尾常驻「此处有被折叠内容」提示，点击展开该节。与常显箭头分工：箭头在 gutter（结构操作心智），省略号在行内（内容提示心智）。可访问形态同箭头（aria-expanded=false + 悬停词 + 键位徽章）。",
+    "views": ["live"],
+    "states": "折叠态在标题行行尾物化；展开随装饰撤除。",
+    "dom": "标题行 .cm-line 内 button（replace widget 物化，吞事件——CM6 不当正文点击）。",
+    "example": ".vsidian-fold-ellipsis { color: var(--vsidian-fold-ellipsis-color); }",
+    "obsidian": { "counterpart": "无（Obsidian 折叠省略号为编辑器内建呈现）", "support": "none" },
+    "verification": [
+      "单元 headingFold（T03）：widget DOM 形态与点击派发 effect",
+      "浏览器 headingFoldUi：省略号可见与点击展开（绘制层）",
+    ],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "var-fold-arrow-color",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "variable",
+    "target": "--vsidian-fold-arrow-color",
+    "purpose": "箭头颜色（#414 T03）：默认随行号前景族（gutter 区观感同源）；明暗主题随宿主变量自适应。",
+    "views": ["live"],
+    "dom": "定义于 #app。",
+    "example": "#app { --vsidian-fold-arrow-color: …; }",
+    "obsidian": { "counterpart": "无", "support": "none" },
+    "verification": ["单元 headingFoldCssContract：#app 块定义与箭头规则引用", "浏览器 headingFoldUi：明暗主题计算色跟随"],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "var-fold-arrow-hover-color",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "variable",
+    "target": "--vsidian-fold-arrow-hover-color",
+    "purpose": "箭头悬停反馈色（#414 T03）：默认随行号 active 前景族，悬停可点性的即时确认。",
+    "views": ["live"],
+    "dom": "定义于 #app。",
+    "example": "#app { --vsidian-fold-arrow-hover-color: …; }",
+    "obsidian": { "counterpart": "无", "support": "none" },
+    "verification": ["单元 headingFoldCssContract：#app 块定义与 :hover 规则引用"],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "var-fold-arrow-width",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "variable",
+    "target": "--vsidian-fold-arrow-width",
+    "purpose": "箭头区宽（#414 T03）：绝对定位按钮的占位宽（默认 16px）——箭头伸入行号列与正文间距区（ln-gap + content padding 基线），不影响流内宽度分配。",
+    "views": ["live"],
+    "dom": "定义于 #app。",
+    "example": "#app { --vsidian-fold-arrow-width: 20px; }",
+    "obsidian": { "counterpart": "无", "support": "none" },
+    "verification": ["单元 headingFoldCssContract：#app 块定义与按钮 width 引用", "浏览器 headingFoldUi：箭头不与行号数字、正文重叠"],
+    "introduced": "#414（2026-10-08）"
+  },
+  {
+    "id": "var-fold-ellipsis-color",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "variable",
+    "target": "--vsidian-fold-ellipsis-color",
+    "purpose": "省略号占位颜色（#414 T03）：默认随宿主描述性前景（弱化、不与正文争夺注意力）。",
+    "views": ["live"],
+    "dom": "定义于 #app。",
+    "example": "#app { --vsidian-fold-ellipsis-color: …; }",
+    "obsidian": { "counterpart": "无", "support": "none" },
+    "verification": ["单元 headingFoldCssContract：#app 块定义与占位规则引用"],
+    "introduced": "#414（2026-10-08）"
   },
 ]
 

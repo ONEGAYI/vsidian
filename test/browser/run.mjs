@@ -114,7 +114,11 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 布局 Ctrl+Shift+[ / ]（事件字符 { }，keyStep shift 上档符号映射的
   // 端到端验证）、Ctrl+K 弦族、零写回与阅读模式不接管（绘制层断言属
   // #414 T03 paint 探针）
-  'headingFoldKeys']
+  'headingFoldKeys',
+  // #414（#409 T03）标题折叠 UI：真实鼠标驱动 gutter 箭头（悬停显现/
+  // 折叠态常显/行号两态定位）与省略号占位——paint 探针绘制层断言、零
+  // 布局位移、明暗主题与双实例独立折叠态
+  'headingFoldUi']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

@@ -41,7 +41,12 @@ import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
 import { PDF_ZOOM_STEP } from './pdfRender'
 import { KeybindingRouter, keyStep } from './keybindingRouter'
-import { applyHeadingFoldOperation, type HeadingFoldOperationId } from './headingFold'
+import {
+  applyHeadingFoldOperation,
+  collectHeadingFoldPaint,
+  setHeadingFoldBindingHints,
+  type HeadingFoldOperationId,
+} from './headingFold'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
 import { ToastChannel } from './toast'
@@ -2226,6 +2231,9 @@ export class WebviewSyncController {
         this.keybindingRouter.update(overrides)
         this.keybindingOverrides = overrides
         this.setQuickActionBindingHints((id) => getEffectiveBindings(overrides, id))
+        // #414 T03 折叠箭头/省略号的键位徽章数据源（同 quickBindingHints
+        // 源注入：widget 与 marker 物化时读取）
+        setHeadingFoldBindingHints((op) => getEffectiveBindings(overrides, op))
         break
       }
       case 'settings.snapshot':
@@ -10024,6 +10032,8 @@ export class WebviewSyncController {
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
       ...(wikilinkSuggest ? { wikilinkSuggest } : {}),
+      // #414 T03 标题折叠 UI 绘制观测（折叠区间数/省略号/箭头/悬停武装）
+      headingFold: collectHeadingFoldPaint(view),
       ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),
     }

@@ -23,20 +23,28 @@ import { EditorView, type DecorationSet } from '@codemirror/view'
 import { externalSync } from '../../src/webview/liveInstance'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { extractOutline } from '../../src/webview/outline'
+import { installLocale } from '../../src/shared/i18n'
 import {
   applyHeadingFoldOperation,
+  buildHeadingFoldArrowMarker,
   collectHeadings,
+  collectHeadingFoldPaint,
   effectiveHeadingFolds,
   enclosingHeading,
+  foldHoverArmed,
+  headingFoldArrowStates,
   headingFoldDecorations,
   headingFoldField,
+  headingFoldGutterExtension,
   headingFoldSet,
   headingFoldToggle,
+  HeadingFoldEllipsisWidget,
   foldableHeadingSpans,
   migrateSelectionForFold,
   resolveHeadingFoldTargets,
   resolveHeadingToggleTargets,
   resolveHeadingUnfoldTargets,
+  setHeadingFoldBindingHints,
 } from '../../src/webview/headingFold'
 
 /** 最小装配：折叠本体 + 装饰 + 增量树源（liveDecorationsField；装饰与
@@ -560,3 +568,154 @@ describe('applyHeadingFoldOperation（T02 五操作执行体）', () => {
     view.destroy()
   })
 })
+
+// ---- T03（#414）：省略号占位 widget 与 gutter 折叠箭头 ----
+// 票面交付：折叠态标题行行尾 ⋯ 占位（Decoration.replace({widget})，点击
+// 展开）、gutter 箭头（悬停显现/折叠态常显）、可访问形态与探针数据。
+// 绘制层可见性断言归浏览器套件 headingFoldUi（jsdom 无布局，探针 visible
+// 类字段不作依据）；此处钉住 widget 形态、箭头态集合、悬停判定纯函数与
+// 探针的结构性字段。
+
+describe('T03：省略号占位 widget（headingFoldDecorations 升级）', () => {
+  it('折叠发射带 widget 的 replace（HeadingFoldEllipsisWidget，区间语义不变）', () => {
+    let state = foldState('# A\nbody\nmore\n')
+    state = fold(state, [0])
+    const decos: Array<{ from: number; to: number; widget: unknown }> = []
+    state.field(headingFoldDecorations).between(0, Number.MAX_SAFE_INTEGER, (from, to, deco) => {
+      decos.push({ from, to, widget: deco.spec.widget })
+    })
+    expect(decos.length).toBe(1)
+    expect(decos[0]!.from).toBe(3)
+    expect(decos[0]!.to).toBe(state.doc.length)
+    expect(decos[0]!.widget).toBeInstanceOf(HeadingFoldEllipsisWidget)
+    // 效果语义不变：T01 的零宽隐藏升级为带占位，区间仍 = 标题块行尾到节末
+  })
+
+  it('widget eq 按 key 判等（同 key 复用 DOM、异 key 重绘）', () => {
+    expect(new HeadingFoldEllipsisWidget(0).eq(new HeadingFoldEllipsisWidget(0))).toBe(true)
+    expect(new HeadingFoldEllipsisWidget(0).eq(new HeadingFoldEllipsisWidget(5))).toBe(false)
+  })
+
+  it('widget DOM 形态：button + ⋯ 文字 + aria/tooltip 双语词（buildFoldButton 同口径）', () => {
+    installLocale('test', {
+      'headingfold.fold': '折叠此节',
+      'headingfold.unfold': '展开此节',
+    })
+    const dom = new HeadingFoldEllipsisWidget(0).toDOM(null as never)
+    expect(dom.tagName).toBe('BUTTON')
+    expect(dom.className).toBe('vsidian-fold-ellipsis')
+    expect(dom.getAttribute('aria-expanded')).toBe('false') // 折叠态：内容收起
+    expect(dom.getAttribute('aria-label')).toBe('展开此节')
+    expect(dom.getAttribute('data-tooltip')).toBe('展开此节')
+    expect(dom.textContent).toContain('⋯')
+    installLocale('test', {})
+  })
+
+  it('widget 点击派发 headingFoldToggle（effect 直驱，无 DOM-only 状态改动）', () => {
+    const view = viewOfT03('# A\nbody\n', 6)
+    const dom = new HeadingFoldEllipsisWidget(0).toDOM(view)
+    ;(dom as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect([...view.state.field(headingFoldField)]).toEqual([0])
+    // 再点（新 widget，同 key）：展开
+    const dom2 = new HeadingFoldEllipsisWidget(0).toDOM(view)
+    ;(dom2 as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect([...view.state.field(headingFoldField)]).toEqual([])
+    view.destroy()
+  })
+})
+
+describe('T03：gutter 箭头态集合（headingFoldArrowStates 纯函数）', () => {
+  const DOC = '# T1\n\nalpha\n\n## T2\n\nbeta\n\n# T3\n\ngamma\n\n# Empty\n# Blank\n   \n'
+  // T1/T2/T3 可折叠；Empty 与 Blank 相邻（Empty 节仅空白）不可折叠
+
+  it('可折叠标题行 → 未折叠箭头；已折叠 → 折叠态箭头；空节不产生箭头', () => {
+    const doc = DOC
+    const state = EditorState.create({ doc })
+    const headings = collectHeadings(state.doc)
+    const states = headingFoldArrowStates(headings, new Set([doc.indexOf('## T2')]), state.doc)
+    expect(states).toEqual([
+      { lineFrom: 0, folded: false },                   // T1
+      { lineFrom: doc.indexOf('## T2'), folded: true }, // T2（折叠态常显）
+      { lineFrom: doc.indexOf('# T3'), folded: false }, // T3
+    ])
+  })
+
+  it('全展开：全部可折叠行为未折叠态', () => {
+    const state = EditorState.create({ doc: DOC })
+    const states = headingFoldArrowStates(collectHeadings(state.doc), new Set(), state.doc)
+    expect(states.every((s) => s.folded === false)).toBe(true)
+    expect(states.length).toBe(3)
+  })
+
+  it('箭头 marker DOM：折叠态右向修饰类 + aria/tooltip 两态词 + 键位徽章属性', () => {
+    installLocale('test', {
+      'headingfold.fold': '折叠此节',
+      'headingfold.unfold': '展开此节',
+    })
+    setHeadingFoldBindingHints((op) => (op === 'headingUnfold' ? ['ctrl+shift+]'] : ['ctrl+shift+[']))
+    const unfolded = buildHeadingFoldArrowMarker(false).toDOM!(null as never) as HTMLElement
+    expect(unfolded.tagName).toBe('BUTTON')
+    expect(unfolded.className).toBe('vsidian-fold-arrow')
+    expect(unfolded.getAttribute('aria-expanded')).toBe('true')
+    expect(unfolded.getAttribute('aria-label')).toBe('折叠此节')
+    expect(unfolded.getAttribute('data-tooltip')).toBe('折叠此节')
+    expect(unfolded.getAttribute('data-tooltip-keys')).toBe('ctrl+shift+[')
+    const folded = buildHeadingFoldArrowMarker(true).toDOM!(null as never) as HTMLElement
+    expect(folded.className).toContain('vsidian-fold-arrow-collapsed')
+    expect(folded.getAttribute('aria-expanded')).toBe('false')
+    expect(folded.getAttribute('aria-label')).toBe('展开此节')
+    expect(folded.getAttribute('data-tooltip-keys')).toBe('ctrl+shift+]')
+    setHeadingFoldBindingHints(() => [])
+    installLocale('test', {})
+  })
+
+  it('无绑定时省略号与箭头均不写 data-tooltip-keys（无徽章）', () => {
+    installLocale('test', { 'headingfold.fold': '折叠此节', 'headingfold.unfold': '展开此节' })
+    const unfolded = buildHeadingFoldArrowMarker(false).toDOM!(null as never) as HTMLElement
+    expect(unfolded.hasAttribute('data-tooltip-keys')).toBe(false)
+    installLocale('test', {})
+  })
+})
+
+describe('T03：悬停显现判定（foldHoverArmed 纯函数）', () => {
+  it('指针在正文列左缘以左 → 武装；箭头带整体属武装区（停在箭头上保持武装）', () => {
+    expect(foldHoverArmed(10, 100)).toBe(true)
+    expect(foldHoverArmed(99, 100)).toBe(true)
+    expect(foldHoverArmed(100, 100)).toBe(false) // 恰在左缘：不武装
+    expect(foldHoverArmed(150, 100)).toBe(false)
+  })
+})
+
+describe('T03：paint 探针数据（collectHeadingFoldPaint 结构性字段）', () => {
+  it('无折叠：foldCount 0、可折叠行计数、箭头字段缺省态', () => {
+    const view = viewOfT03('# A\nbody\n\n# B\nmore\n', 0)
+    const probe = collectHeadingFoldPaint(view)
+    expect(probe.foldCount).toBe(0)
+    expect(probe.foldableArrowCount).toBe(2)
+    expect(probe.ellipsisText).toBeNull()
+    view.destroy()
+  })
+
+  it('折叠后：foldCount、省略号文字、折叠态箭头与悬停武装字段', () => {
+    const view = viewOfT03('# A\nbody\n\n# B\nmore\n', 0)
+    view.dispatch({ effects: headingFoldToggle.of(0) })
+    const probe = collectHeadingFoldPaint(view)
+    expect(probe.foldCount).toBe(1)
+    expect(probe.ellipsisText).toContain('⋯')
+    expect(probe.arrowCollapsed).toBe(true)
+    expect(probe.hoverArmed).toBe(false) // jsdom 未派发指针事件
+    view.destroy()
+  })
+})
+
+/** T03 装配视图：折叠本体 + 装饰（含省略号 widget）+ 箭头 gutter + 悬停插件 */
+function viewOfT03(doc: string, cursor: number): EditorView {
+  const state = EditorState.create({
+    doc,
+    extensions: [
+      headingFoldField, headingFoldDecorations, headingFoldGutterExtension, liveDecorationsField,
+    ],
+    selection: EditorSelection.cursor(cursor),
+  })
+  return new EditorView({ state, parent: document.body })
+}

@@ -2471,9 +2471,35 @@ export interface LineGutterAlignment {
  * 存活于该缺陷之上，故补此探针断言绘制层。
  * jsdom 无布局能力（rect 恒 0），textVisible 恒 false，不作单测断言依据。
  */
+/** #414 T03 标题折叠 UI 绘制观测（采集实体 src/webview/headingFold.ts
+ *  的 collectHeadingFoldPaint）：折叠区间数、省略号占位与常显箭头的
+ *  绘制态、可折叠行箭头计数与悬停武装态。jsdom 无布局（rect 恒 0），
+ *  visible 类字段恒 false，只作真宿主/浏览器断言依据。 */
+export interface HeadingFoldPaintProbe {
+  /** 有效折叠区间数（派生视图口径） */
+  foldCount: number
+  /** 首折叠区间省略号占位绘制态（中心点 elementFromPoint 命中） */
+  ellipsisVisible: boolean
+  /** 省略号文字（'⋯'；不在场为 null） */
+  ellipsisText: string | null
+  /** 首折叠区间常显箭头绘制态（中心点命中；无折叠箭头为 false） */
+  arrowVisible: boolean
+  /** 首折叠区间箭头是否在场（折叠态常显右向；无折叠为 false） */
+  arrowCollapsed: boolean
+  /** 可折叠标题行箭头计数（悬停显现族总量，marker 恒构建） */
+  foldableArrowCount: number
+  /** 悬停武装态（指针位于正文列左缘以左时编辑器挂 vsidian-fold-hover 类） */
+  hoverArmed: boolean
+  /** 首折叠区间隐藏区首个非空行文本是否仍被绘制（不可见断言面：折叠后
+   *  应 false；无折叠为 null） */
+  hiddenLinePainted: boolean | null
+}
+
 export interface PaintProbe {
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
   toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
+  /** #414 T03 标题折叠 UI 绘制观测（无 Live 视图时缺省） */
+  headingFold?: HeadingFoldPaintProbe
   /** #358 T09 渲染提供者接管绘制观测：文档内图形容器的生效提供者与
    *  绘制层证据（组件容器计算色/几何；内置 SVG 在场数）——「实际选中
    *  内容」的断言面（非 DOM 存在性）。无图形容器为空数组（graphic 名
@@ -3386,6 +3412,15 @@ function isPaintProbe(v: unknown): v is PaintProbe {
   return (
     isObject(v) &&
     typeof v.textVisible === 'boolean' &&
+    (v.headingFold === undefined || (isObject(v.headingFold) &&
+      typeof v.headingFold.foldCount === 'number' &&
+      typeof v.headingFold.ellipsisVisible === 'boolean' &&
+      (v.headingFold.ellipsisText === null || isString(v.headingFold.ellipsisText)) &&
+      typeof v.headingFold.arrowVisible === 'boolean' &&
+      (v.headingFold.arrowCollapsed === null || typeof v.headingFold.arrowCollapsed === 'boolean') &&
+      typeof v.headingFold.foldableArrowCount === 'number' &&
+      typeof v.headingFold.hoverArmed === 'boolean' &&
+      (v.headingFold.hiddenLinePainted === null || typeof v.headingFold.hiddenLinePainted === 'boolean'))) &&
     (v.renderers === undefined || (isObject(v.renderers) &&
       Array.isArray(v.renderers.containers) &&
       v.renderers.containers.every((c: unknown) => isObject(c) &&

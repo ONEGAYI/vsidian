@@ -1,8 +1,8 @@
 // Live 正文标题折叠本体（#412 T01，规格 docs/specs/heading-fold.md）：
 // StateField 承载折叠键集合 + effect 驱动 + 消费点增量树直查的区间派生
 // + 隐藏装饰 + 光标迁移 + 五操作执行体（#413 T02：键位与命令面板双入口
-// 共用）。gutter 箭头/省略号 UI 与落点展开联动由 T03/T04 在其上生长，
-// #410 API 只消费派生视图。
+// 共用）+ gutter 折叠箭头与省略号占位 UI（#414 T03）。落点展开联动由
+// T04 在其上生长，#410 API 只消费派生视图。
 //
 // 折叠语义（规格「二、折叠本体与坐标生命周期」）：
 // - 折叠是**视图态**：零写回、不 dirty、不进撤销栈、不跨会话持久化
@@ -31,9 +31,12 @@
 // StateEffect + dispatch，无 DOM-only 路径——API 编程触发与用户触发同链路。
 // 查询一律 (field, doc) 纯函数派生，不依赖控制器/UI 在场。
 import { EditorSelection, RangeSet, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
-import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
+import { Decoration, EditorView, GutterMarker, ViewPlugin, WidgetType, gutter, type DecorationSet } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { liveDecorationsField } from './liveDecorations'
+import { t } from '../shared/i18n'
+import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
+import type { HeadingFoldPaintProbe } from '../shared/protocol'
 import {
   FM_SCAN_LIMIT,
   docInput,
@@ -408,18 +411,60 @@ export const headingFoldField = StateField.define<ReadonlySet<number>>({
   },
 })
 
-// ---- 隐藏装饰 ----
+// ---- 隐藏装饰（T03 起带省略号占位 widget） ----
 
-/** 隐藏区间装饰实例（共享单例保证 RangeSet.eq 结构比较稳定；零宽无
- *  widget——T01 省略号占位先零宽，T03 补 widget） */
-const FOLD_HIDE_DECO = Decoration.replace({})
+/**
+ * 折叠态省略号占位 widget（#414 T03，规格「交互入口」节补充形态）：
+ * 隐藏区间的常驻「此处有被折叠内容」提示（VSCode 折叠 `...` 预览标记、
+ * Obsidian 折叠标题 `⋯` 同款），点击即展开该节。与 gutter 常显箭头分工：
+ * 箭头在 gutter（结构操作心智），省略号在行内（内容提示心智）。
+ * 可访问形态对齐代码卡 buildFoldButton 先例：aria-label + aria-expanded +
+ * data-tooltip 悬停词 + data-tooltip-keys 结构化键位徽章。eq 按 key 判等
+ * （装饰重建产新实例时同 key 复用既有 DOM）。
+ */
+export class HeadingFoldEllipsisWidget extends WidgetType {
+  constructor(readonly key: number) {
+    super()
+  }
+
+  override eq(other: HeadingFoldEllipsisWidget): boolean {
+    return other instanceof HeadingFoldEllipsisWidget && other.key === this.key
+  }
+
+  override toDOM(view: EditorView): HTMLElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'vsidian-fold-ellipsis'
+    btn.setAttribute('aria-label', t('headingfold.unfold'))
+    btn.setAttribute('aria-expanded', 'false') // 折叠态：内容收起
+    btn.setAttribute('data-tooltip', t('headingfold.unfold'))
+    applyFoldBindingHint(btn, 'headingUnfold')
+    btn.textContent = '⋯'
+    // #190/#414 同口径：防 CM6 落选区（replace widget 行内场景）
+    btn.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+    })
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation()
+      view.dispatch({ effects: headingFoldToggle.of(this.key) })
+    })
+    return btn
+  }
+
+  /** 吞事件（liveEmbed 宿主同先例）：widget 内交互自处理，CM6 不当正文点击 */
+  override ignoreEvent(): boolean {
+    return true
+  }
+}
 
 /**
  * 折叠隐藏装饰构建（纯 (state) 派生）：键集为空零成本直返；非空时经
  * 消费点增量树直查派生有效折叠区间，逐区间发射多行 Decoration.replace
- * （标题块保持可见，隐藏区间 = 标题块行尾到节末，含中间空行）。被隐藏
- * 区间内的其他装饰（表格、代码卡、Mermaid 等）随 replace 覆盖一并不可
- * 见。树来源 liveDecorationsField（未装配时全量解析防御）。
+ * 带省略号占位 widget（标题块保持可见，隐藏区间 = 标题块行尾到节末，
+ * 含中间空行）。被隐藏区间内的其他装饰（表格、代码卡、Mermaid 等）随
+ * replace 覆盖一并不可见。树来源 liveDecorationsField（未装配时全量解析
+ * 防御）。
  */
 function buildHeadingFoldDecos(state: import('@codemirror/state').EditorState): DecorationSet {
   const keys = state.field(headingFoldField, false)
@@ -431,7 +476,10 @@ function buildHeadingFoldDecos(state: import('@codemirror/state').EditorState): 
   if (folds.length === 0) {
     return RangeSet.empty
   }
-  return RangeSet.of(folds.map((f) => FOLD_HIDE_DECO.range(f.hideFrom, f.hideTo)), true)
+  return RangeSet.of(
+    folds.map((f) => Decoration.replace({ widget: new HeadingFoldEllipsisWidget(f.key) }).range(f.hideFrom, f.hideTo)),
+    true,
+  )
 }
 
 /**
@@ -454,8 +502,8 @@ export const headingFoldDecorations = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
-/** 标题折叠扩展装配（liveInstance 扩展组消费） */
-export const headingFoldExtension: Extension = [headingFoldField, headingFoldDecorations]
+/** 标题折叠扩展装配（liveInstance 扩展组消费；T03 起含箭头与悬停显现，
+ *  总装配见文件末尾——箭头扩展定义于 T03 节） */
 
 /**
  * 折叠集应用入口（effect 直驱 + 光标迁移；键位/箭头/API 编程触发共用）：
@@ -548,3 +596,305 @@ export function applyHeadingFoldOperation(view: EditorView, op: HeadingFoldOpera
     }
   }
 }
+
+// ---- T03（#414）：gutter 折叠箭头与悬停显现 ----
+// 规格「四、交互入口」推荐定案：悬停编辑器左缘时可折叠标题行 gutter 位
+// 置显示向下箭头（点击折叠）；已折叠标题箭头常显且指向右侧（点击展开）。
+// 悬停显现 + 折叠态常显 = VSCode 默认策略（alwaysShowFoldControls 关）。
+//
+// 零布局位移实现（硬约束）：箭头是自定义 gutter 列（`gutter()` API）内
+// **绝对定位脱流**的 marker 元素——不参与 .cm-gutters 流内宽度分配（列
+// 宽恒 0），不推动正文列；可读行宽档 [.cm-gutters + 间距 + .cm-content]
+// 整组居中契约不受影响（viewport-width.md「实施落档」）。marker 伸出到
+// 行号列与正文列之间的既有间距区（ln-gap + content padding），行号列
+// 开/关两态均落在同一间距区，定位一致。
+
+/** 编辑器武装修饰类（悬停左缘时挂 .cm-editor，驱动未折叠箭头显现） */
+export const HEADING_FOLD_HOVER_CLASS = 'vsidian-fold-hover'
+
+/**
+ * 悬停显现判定（纯函数）：指针在正文列左缘以左（行号列 + 间距区 +
+ * 箭头带——箭头以 right:100% 伸入列右缘左侧，全带在正文左缘之左）即
+ * 武装，覆盖行号开/关两态。恰在左缘不武装（正文文本区不触发）。鼠标
+ * 停在已显现的箭头上天然保持武装（箭头带整体属武装区）。
+ */
+export function foldHoverArmed(clientX: number, contentLeft: number): boolean {
+  return clientX < contentLeft
+}
+
+/**
+ * 箭头态集合（纯 (headings, foldKeys, doc) 函数）：全部可折叠标题行 →
+ * 折叠态标记。不可折叠标题（空节/纯空白节，可折叠判定驱动）不产生箭头；
+ * 已折叠键必属可折叠集（派生视图过滤语义），folded 即常显右向箭头。
+ */
+export function headingFoldArrowStates(
+  headings: readonly HeadingInfo[],
+  foldKeys: ReadonlySet<number>,
+  doc: Text,
+): Array<{ lineFrom: number; folded: boolean }> {
+  return foldableHeadingSpans(headings, doc).map((span) => ({
+    lineFrom: span.key,
+    folded: foldKeys.has(span.key),
+  }))
+}
+
+/** 键位徽章数据源（syncController 经宿主 keybindings 快照注入；缺省空 = 无徽章） */
+let foldBindingHints: (op: 'headingFold' | 'headingUnfold') => readonly string[] = () => []
+
+/** 注入折叠/展开操作的生效绑定（data-tooltip-keys 徽章数据——与快速
+ *  操作条 quickBindingHints 同源：宿主 keybindings.snapshot/changed 下发） */
+export function setHeadingFoldBindingHints(
+  resolve: (op: 'headingFold' | 'headingUnfold') => readonly string[],
+): void {
+  foldBindingHints = resolve
+}
+
+/** 悬停词 + 结构化键位徽章（tooltip.md「接管机制」节：不做文字缀尾） */
+function applyFoldBindingHint(btn: HTMLElement, op: 'headingFold' | 'headingUnfold'): void {
+  const bindings = foldBindingHints(op)
+  if (bindings.length > 0) {
+    btn.setAttribute('data-tooltip-keys', bindings.join(TOOLTIP_KEYS_SEPARATOR))
+  }
+}
+
+/** 箭头 marker（官方 FoldMarker 同形态，两态双实例共享） */
+class HeadingFoldArrowMarker extends GutterMarker {
+  constructor(readonly folded: boolean) {
+    super()
+  }
+
+  override eq(other: HeadingFoldArrowMarker): boolean {
+    return other instanceof HeadingFoldArrowMarker && other.folded === this.folded
+  }
+
+  override toDOM(): HTMLElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = this.folded
+      ? 'vsidian-fold-arrow vsidian-fold-arrow-collapsed'
+      : 'vsidian-fold-arrow'
+    // aria-expanded 反映当前内容态（对齐 buildFoldButton：折叠中 = false）
+    btn.setAttribute('aria-expanded', this.folded ? 'false' : 'true')
+    const word = this.folded ? 'headingfold.unfold' : 'headingfold.fold'
+    btn.setAttribute('aria-label', t(word))
+    btn.setAttribute('data-tooltip', t(word))
+    applyFoldBindingHint(btn, this.folded ? 'headingUnfold' : 'headingFold')
+    // 图标与代码卡 chevron 同款笔画；折叠态转向由 CSS 修饰类旋转（右向）
+    btn.innerHTML =
+      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg>'
+    return btn
+  }
+}
+
+const FOLD_ARROW_UNFOLDED = new HeadingFoldArrowMarker(false)
+const FOLD_ARROW_FOLDED = new HeadingFoldArrowMarker(true)
+
+/** 箭头 marker 工厂（测试与探针观测面；态集合 → RangeSet 的桥） */
+export function buildHeadingFoldArrowMarker(folded: boolean): GutterMarker {
+  return folded ? FOLD_ARROW_FOLDED : FOLD_ARROW_UNFOLDED
+}
+
+/** 箭头 markers 维护（官方 foldGutter 的 markers ViewPlugin 同形态）：
+ *  全文档可折叠标题集（滚动零重算——RangeSet 由 gutter 按视口自行渲染）；
+ *  重建触发 = docChanged / 折叠集变化 / 增量树变化。 */
+const headingFoldArrowsPlugin = ViewPlugin.fromClass(
+  class {
+    markers: RangeSet<GutterMarker>
+
+    constructor(view: EditorView) {
+      this.markers = this.build(view.state)
+    }
+
+    update(update: import('@codemirror/view').ViewUpdate): void {
+      const foldChanged =
+        update.startState.field(headingFoldField, false) !== update.state.field(headingFoldField, false)
+      const treeChanged =
+        update.startState.field(liveDecorationsField, false)?.tree !==
+        update.state.field(liveDecorationsField, false)?.tree
+      if (!update.docChanged && !foldChanged && !treeChanged) {
+        return
+      }
+      this.markers = this.build(update.state)
+    }
+
+    build(state: import('@codemirror/state').EditorState): RangeSet<GutterMarker> {
+      const keys = state.field(headingFoldField, false) ?? new Set<number>()
+      const tree = state.field(liveDecorationsField, false)?.tree
+      const states = headingFoldArrowStates(collectHeadings(state.doc, tree), keys, state.doc)
+      if (states.length === 0) {
+        return RangeSet.empty as RangeSet<GutterMarker>
+      }
+      return RangeSet.of(
+        states.map((s) => buildHeadingFoldArrowMarker(s.folded).range(s.lineFrom)),
+        true,
+      ) as RangeSet<GutterMarker>
+    }
+  },
+)
+
+/** 悬停显现插件：指针位于正文列左缘以左 → 编辑器容器挂武装修饰类（CSS
+ *  驱动未折叠箭头 visibility；折叠态常显不依赖本类）。移出编辑器即解除。
+ *  事件自绑于 view.dom（.cm-editor 整域，含行号列与间距区）——CM6
+ *  ViewPlugin 的 eventHandlers 通道注册在 contentDOM 上，不覆盖 gutter
+ *  区的指针移动，武装判定反而收不到事件，故不走该通道。 */
+const headingFoldHoverPlugin = ViewPlugin.fromClass(
+  class {
+    armed = false
+
+    private readonly onPointerMove = (event: PointerEvent): void => {
+      try {
+        this.setArmed(this.view, foldHoverArmed(event.clientX, this.view.contentDOM.getBoundingClientRect().left))
+      } catch {
+        // jsdom 无布局：保持现态
+      }
+    }
+
+    private readonly onPointerLeave = (): void => {
+      this.setArmed(this.view, false)
+    }
+
+    constructor(private readonly view: EditorView) {
+      view.dom.addEventListener('pointermove', this.onPointerMove)
+      view.dom.addEventListener('pointerleave', this.onPointerLeave)
+    }
+
+    setArmed(view: EditorView, armed: boolean): void {
+      if (this.armed === armed) {
+        return
+      }
+      this.armed = armed
+      view.dom.classList.toggle(HEADING_FOLD_HOVER_CLASS, armed)
+    }
+
+    destroy(): void {
+      this.view.dom.removeEventListener('pointermove', this.onPointerMove)
+      this.view.dom.removeEventListener('pointerleave', this.onPointerLeave)
+      this.view.dom.classList.remove(HEADING_FOLD_HOVER_CLASS)
+    }
+  },
+)
+
+/** 箭头 gutter（零宽列 + 绝对定位 marker；点击经坐标语义按行解析）：
+ *  0 宽列收不到点击，命中只能落在可见箭头按钮上（未悬停的 hidden 按钮
+ *  不可点击）——天然满足「未悬停不误触发」。 */
+const headingFoldGutter = gutter({
+  class: 'vsidian-fold-gutter',
+  markers(view) {
+    return view.plugin(headingFoldArrowsPlugin)?.markers ?? (RangeSet.empty as RangeSet<GutterMarker>)
+  },
+  domEventHandlers: {
+    click: (view, line, event) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.vsidian-fold-arrow')) {
+        return false
+      }
+      const from = line.from
+      const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
+      const tree = view.state.field(liveDecorationsField, false)?.tree
+      const hit = headingFoldArrowStates(collectHeadings(view.state.doc, tree), keys, view.state.doc)
+        .some((s) => s.lineFrom === from)
+      if (!hit) {
+        return false
+      }
+      // effect 直驱（规格纪律：与键位/API 编程触发同链路）；折叠含光标时
+      // 的选区迁移由 setHeadingFolds 承担——箭头路径走 toggle 单键翻转
+      view.dispatch({ effects: headingFoldToggle.of(from) })
+      return true
+    },
+  },
+})
+
+/** 箭头与悬停扩展（headingFoldExtension 并入，全部 Live 实例含嵌入共享） */
+export const headingFoldGutterExtension: Extension = [
+  headingFoldArrowsPlugin,
+  headingFoldHoverPlugin,
+  headingFoldGutter,
+]
+
+// ---- T03（#414）：paint 探针折叠观测 ----
+
+/** 元素中心点 elementFromPoint 命中自身（paintedWithVisibleBackground /
+ *  paintedLineNumbers 同口径；jsdom 无布局恒 false，只作真宿主断言依据） */
+function hitPainted(el: HTMLElement): boolean {
+  try {
+    const rect = el.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) {
+      return false
+    }
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+    return !!hit && (hit === el || el.contains(hit))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 标题折叠 UI 绘制观测（view.state.paint 探针族的 headingFold 字段采集
+ * 体，协议 PaintProbe.headingFold）：折叠区间数、省略号/常显箭头绘制态、
+ * 可折叠行箭头计数与悬停武装态。jsdom 无布局（rect 恒 0），visible 类
+ * 字段恒 false，只作真宿主/浏览器断言依据；结构性字段（计数/文字/类
+ * 判定）jsdom 可断言。
+ */
+export function collectHeadingFoldPaint(view: EditorView): HeadingFoldPaintProbe {
+  const state = view.state
+  const keys = state.field(headingFoldField, false) ?? new Set<number>()
+  const tree = state.field(liveDecorationsField, false)?.tree
+  const headings = collectHeadings(state.doc, tree)
+  const folds = effectiveHeadingFolds(keys, headings, state.doc)
+  const arrowStates = headingFoldArrowStates(headings, keys, state.doc)
+
+  // 票面口径：箭头绘制态取**首折叠区间**的箭头（折叠态常显右向）——
+  // DOM 首箭头未必属折叠区间；无折叠时两字段缺省（false / null）
+  const firstFoldedArrow = view.dom.querySelector<HTMLElement>(
+    '.vsidian-fold-gutter .vsidian-fold-arrow.vsidian-fold-arrow-collapsed',
+  )
+  const ellipsisEl = view.contentDOM.querySelector<HTMLElement>('.vsidian-fold-ellipsis')
+
+  // 隐藏区首个非空行文本是否仍被绘制（「折叠内容不可见」断言面：折叠后
+  // 该行无 DOM，coordsAtPos 落点命中省略号而非隐藏文本）
+  let hiddenLinePainted: boolean | null = null
+  if (folds.length > 0) {
+    const f = folds[0]!
+    let pos = f.hideFrom + 1
+    while (pos < f.hideTo) {
+      const line = state.doc.lineAt(pos)
+      if (line.text.trim() !== '') {
+        try {
+          const coords = view.coordsAtPos(Math.min(line.from + 1, line.to))
+          if (coords) {
+            const hit = document.elementFromPoint((coords.left + coords.right) / 2, (coords.top + coords.bottom) / 2)
+            hiddenLinePainted =
+              !!hit && hit.textContent != null && hit.textContent.includes(line.text.trim())
+          } else {
+            hiddenLinePainted = false
+          }
+        } catch {
+          hiddenLinePainted = false
+        }
+        break
+      }
+      pos = line.to + 1
+    }
+    if (hiddenLinePainted === null) {
+      hiddenLinePainted = false // 隐藏区全空白：无文本行可证，记不可见
+    }
+  }
+
+  return {
+    foldCount: folds.length,
+    ellipsisVisible: !!ellipsisEl && hitPainted(ellipsisEl),
+    ellipsisText: ellipsisEl ? ellipsisEl.textContent : null,
+    arrowVisible: !!firstFoldedArrow && hitPainted(firstFoldedArrow),
+    arrowCollapsed: firstFoldedArrow != null,
+    foldableArrowCount: arrowStates.length,
+    hoverArmed: view.dom.classList.contains(HEADING_FOLD_HOVER_CLASS),
+    hiddenLinePainted,
+  }
+}
+
+/** 标题折叠扩展总装配（liveInstance 扩展组消费；T03 起含箭头与悬停显现） */
+export const headingFoldExtension: Extension = [
+  headingFoldField,
+  headingFoldDecorations,
+  headingFoldGutterExtension,
+]

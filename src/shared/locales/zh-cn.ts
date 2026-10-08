@@ -28,6 +28,7 @@ export const zhCn: Record<MessageKey, string> = {
   'toast.pasteTextOnly': '已粘贴文本，未粘贴图片；如需图片，请使用{paste}',
   'styleRef.category.toast': '轻提示',
   'styleRef.category.wikilinkSuggest': '双链联想候选',
+  'styleRef.category.headingFold': '标题折叠',
   // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
   'wikilinkSuggest.list.ariaLabel': '双链联想候选',
   'wikilinkSuggest.status.loading': '正在搜索文件…',
@@ -857,6 +858,9 @@ export const zhCn: Record<MessageKey, string> = {
   'command.heading.toggleFold.title': '折叠/展开切换标题节',
   'command.heading.foldAll.title': '折叠全部标题节',
   'command.heading.unfoldAll.title': '展开全部标题节',
+  // ---- #414（#409 T03）折叠 UI 悬停词（箭头/省略号可访问形态） ----
+  'headingfold.fold': '折叠此节',
+  'headingfold.unfold': '展开此节',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': '分词引擎',
   'setting.wordSegmentEngine.description': 'Ctrl+左/右箭头按词移动时对连续中文段的切分引擎。英文与数字段始终沿用内置分组语义。',

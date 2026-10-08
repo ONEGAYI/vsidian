@@ -137,6 +137,7 @@ vsidian/
 │   │   ├── appearance-merge.md                  # 外观合并分页规格
 │   │   ├── batch-2026-09-menu.md                # 右键菜单批次总览与决策回执
 │   │   ├── batch-2026-09.md                     # 2026-09 开票批次总览
+│   │   ├── batch-2026-10-heading-fold.md        # 标题折叠批次索引
 │   │   ├── batch-2026-10-settings-sections.md   # 2026-10 设置页批次实施树
 │   │   ├── batch-2026-10-vscode-ops.md          # 2026-10 编辑器操作批次实施树
 │   │   ├── batch-2026-10-vsidian-addons.md      # 附加组件验证与实施批次索引
@@ -150,6 +151,7 @@ vsidian/
 │   │   ├── default-editor-guard.md              # 默认编辑器守护规格
 │   │   ├── frontmatter-table.md                 # frontmatter 表格化规格
 │   │   ├── graphic-code-block-interaction.md    # 图形化代码块交互规格
+│   │   ├── heading-fold.md                      # 正文标题折叠实施规格
 │   │   ├── hover-embed-phase2-tickets/…         # 二期票据正文与依赖
 │   │   ├── hover-embed-phase3-tickets/…         # 三期票据正文与依赖
 │   │   ├── hover-preview-embed.md               # 悬停预览与文档嵌入规格

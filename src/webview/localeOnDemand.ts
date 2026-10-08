@@ -65,6 +65,14 @@ export function refreshOnDemandControlLocale(root: ParentNode): void {
     t(btn.classList.contains(FM_CARD_CLASS_NAMES.foldCollapsed)
       ? 'frontmatter.expand'
       : 'frontmatter.collapse'))
+  // 标题折叠 UI（#414 T03，gutter 箭头与省略号占位）：两态词按折叠修饰类
+  // 判定（折叠态提示「展开」）；aria-expanded 与键位徽章属性（data-tooltip-
+  // keys）语言无关，不动
+  rewriteButtonLocale(root, '.vsidian-fold-arrow', (btn) =>
+    t(btn.classList.contains('vsidian-fold-arrow-collapsed')
+      ? 'headingfold.unfold'
+      : 'headingfold.fold'))
+  rewriteButtonLocale(root, '.vsidian-fold-ellipsis', () => t('headingfold.unfold'))
   // 图形化块按钮组（buildGraphicChrome）：edit（仅实时预览装配）与 popup
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.edit}`, () => t('graphic.editSource'))
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.popup}`, () => t('graphic.popup'))

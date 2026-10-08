@@ -187,7 +187,7 @@ vsidian/
         ├── frontmatterPopover.ts       # frontmatter 属性编辑浮层
         ├── graphicBlockChrome.ts       # 图形化块右上角按钮组
         ├── graphicRenderers.ts         # 图形化渲染器注册表
-        ├── headingFold.ts              # 标题折叠本体与隐藏装饰（#412）
+        ├── headingFold.ts              # 标题折叠本体、箭头与省略号 UI
         ├── hitReveal.ts                # 命中显形活跃命中集单一事实源
         ├── hoverPopup.ts               # 悬停预览浮层单例
         ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数
