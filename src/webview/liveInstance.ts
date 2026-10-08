@@ -1658,8 +1658,12 @@ export class LiveEditorInstance {
       // 本地镜像 = 段仍在暂缓集且带组首来源），合成一笔出站 = 一条宿主
       // 历史项；组首 atomic 事务开新段
       // 并入前提：队尾段带组首来源且与本次提交者同组件——跨组件
-      // joinPrevious 不并入（共享层「合并笔全部同组件」约束；无同组件
-      // 前项时走下方逐笔出站，由宿主闸门拒绝）
+      // joinPrevious 不并入（共享层「合并笔全部同组件」是传输形态约束：
+      // 组件无权把他人来源打包进自己的一笔），走下方逐笔出站。宿主闸门
+      // 不按组件拒绝：按 Q29「非原子修饰与同一目标文档的上次原子操作
+      // 一起撤回」不限同组件，跨组件单笔归组是规格语义（协调器
+      // classifyAddonEntry 归入栈顶组，见 addonHistoryCoordinator 正向
+      // 钉住用例）
       const lastSegment = this.deferredSegments.length > 0 ? this.deferredSegments[this.deferredSegments.length - 1] : undefined
       const mergeIntoPreviousSegment =
         origins !== undefined && origins.length === 1 && origins[0]!.undo === 'joinPrevious' &&

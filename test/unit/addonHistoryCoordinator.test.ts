@@ -100,6 +100,37 @@ describe('版本对位与条目流', () => {
     expect(state.entries[0]).toMatchObject({ owner: 'addon', groupId: 'op-a', atomic: true, joinedOpIds: ['op-b'] })
   })
 
+  it('跨组件单笔 joinPrevious 归入上次原子组（Q29：随上次原子操作撤回，不限同作者）', async () => {
+    // 「合并笔全部同组件」是传输形态约束（组件无权打包他人来源），跨
+    // 组件单笔逐笔出站后按 Q29 归组——闸门不按组件拒绝，宿主语义与
+    // liveInstance 逐笔出站注释同源（评审 R5 正向钉住，防误改为按组件拒）
+    const h = harness({ version: 0 })
+    const otherAddonAtomic: EditOriginMeta = { addonId: 'pub.addon-a', opId: 'op-a', undo: 'atomic' }
+    const thisAddonJoin: EditOriginMeta = { addonId: 'pub.addon-b', opId: 'op-b', undo: 'joinPrevious' }
+    h.attribute(1, otherAddonAtomic)
+    h.attribute(2, thisAddonJoin)
+    forward(h, 1)
+    // 闸门放行：栈顶是 addon 条目即归组（不按组件拒）
+    expect(h.coord.gateSubmit(thisAddonJoin)).toBe(true)
+    forward(h, 2)
+    const state = h.coord.observe()
+    expect(state.entries[1]).toMatchObject({ version: 2, owner: 'addon', groupId: 'op-a' })
+    // 一次 undo 撤回同组两步：外部撤掉组尾（回流版本 3）→ 协调器补完
+    // 组首（版本 4，自驱吸收）
+    let nextVersion = 3
+    h.runHistorySteps.mockImplementation(async (op: 'undo' | 'redo', steps: number) => {
+      for (let i = 0; i < steps; i++) {
+        h.coord.observeChange({ version: nextVersion, reason: op })
+        nextVersion += 1
+      }
+      return { executedSteps: steps }
+    })
+    backflow(h, nextVersion++, 'undo')
+    await settle()
+    expect(h.runHistorySteps).toHaveBeenCalledWith('undo', 1)
+    expect(h.coord.observe().applied).toBe(0)
+  })
+
   it('迟到归属兜底矫正（兜底确认路径先记 foreign 后归位）', () => {
     const h = harness({ version: 0 })
     forward(h, 1) // attribution 未登记 → foreign
