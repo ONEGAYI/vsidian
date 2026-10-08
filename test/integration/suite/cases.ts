@@ -7882,8 +7882,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(reading.paint?.code?.label === 'JavaScript',
       `阅读首块标签应为 JavaScript，实际 ${String(reading.paint?.code?.label)}`)
     const ln = reading.paint?.code?.lineNumberTexts
-    assert(Array.isArray(ln) && ln.slice(0, 4).join(',') === '1,2,3,4',
-      `阅读 js 块卡内行号应为 1..4，实际 ${JSON.stringify(ln)}`)
+    // 卡内行号 2026-10 起阅读侧不再发射（codeblock.lineNumbers 仅 Live）
+    assert(Array.isArray(ln) && ln.length === 0,
+      `阅读侧不应有卡内行号，实际 ${JSON.stringify(ln)}`)
     assert((reading.paint?.code?.tokenCount ?? 0) > 0, '阅读侧应有 tok 着色（与 Live 同词表）')
     assert((reading.paint?.code?.copyCount ?? 0) === 4, '阅读侧复制按钮在场')
     assert((reading.paint?.code?.cardLineCount ?? 0) === 7,
@@ -7983,8 +7984,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
         v.paint?.code?.tokenPaint?.some((token) => token.visible && token.text.includes(text) &&
           token.classes.split(/\s+/).includes(`tok-${sample.kind}`) &&
           token.color === (v.paint?.darkTheme ? sample.dark : sample.light)) === true)
-      assert(state.paint?.code?.lineNumberTexts?.includes('65') === true,
-        `${mode} 跨片目标应保留第 65 行行号：${JSON.stringify(state.paint?.code?.lineNumberTexts)}`)
+      if (mode === 'live') {
+        assert(state.paint?.code?.lineNumberTexts?.includes('65') === true,
+          `live 跨片目标应保留第 65 行行号：${JSON.stringify(state.paint?.code?.lineNumberTexts)}`)
+      } else {
+        // 阅读侧 2026-10 起不发射卡内行号（跨片上下文由 token 着色验证）
+        assert((state.paint?.code?.lineNumberTexts?.length ?? 0) === 0,
+          `阅读侧不应有卡内行号：${JSON.stringify(state.paint?.code?.lineNumberTexts)}`)
+      }
       return state
     }
     for (const mode of ['live', 'reading', 'live'] as const) {

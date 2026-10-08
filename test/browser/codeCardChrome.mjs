@@ -296,16 +296,15 @@ try {
     return line ? window.lineWrapMetrics(line) : null
   }, scope)
 
-  // (a-reading) 折行态（默认）：长行续行首字符与代码文本列对齐（悬挂缩进），
-  // 不窜入卡内行号区；行号左缘距行左缘 8px（8+16 重分配，列总占不变）
+  // (a-reading) 折行态（默认）：卡内行号 2026-10 起阅读侧不再发射——续行与
+  // 首行同 x 顶格对齐（无行号区可窜、无悬挂缩进），全文无行号节点
   const readWrap = await longLineMetrics('.vsidian-reading-code-line')
   assert.ok(readWrap, '阅读长行应折出续行（127 字符 > 视口可用宽）')
   assert(Math.abs(readWrap.contX - readWrap.firstX) < 1,
-    `#191 阅读续行首字符应与文本列对齐：续行 ${readWrap.contX} vs 首行 ${readWrap.firstX}`)
-  assert.ok(readWrap.lnRight !== null && readWrap.contX > readWrap.lnRight + 15,
-    `#191 阅读续行不得窜入行号区：续行 x ${readWrap.contX} 应 > 行号右缘+15（${readWrap.lnRight}）`)
-  assert(Math.abs(((readWrap.lnLeft ?? -1) - readWrap.lineLeft) - 8) < 1,
-    `#191 阅读首行行号左缘应距行左缘 8px：${readWrap.lnLeft} vs ${readWrap.lineLeft}`)
+    `#191 阅读续行首字符应与首行同 x（行号退场后顶格对齐）：续行 ${readWrap.contX} vs 首行 ${readWrap.firstX}`)
+  assert.equal(await page.evaluate(() =>
+    document.querySelectorAll('.vsidian-view-reading .vsidian-code-card-linenumber').length),
+  0, '阅读侧不得发射卡内行号（2026-10 退场，codeblock.lineNumbers 仅 Live）')
 
   // (b/d) 阅读关闭折行：点击任一块折行钮 → 容器类 + 全部已挂载块（含
   // 大围栏各片）pre 同时进入 nowrap；不触发热区折叠。折行钮与复制钮同口径
@@ -351,33 +350,25 @@ try {
     0, '#191 点击折行钮不得触发热区折叠')
   assert.equal(await longCardLineCount(), linesBefore, '#191 折行切换不改卡片行数')
 
-  // (b-geometry) 长行卡片横向滚动：scrollWidth > clientWidth；滚动后行号
-  // sticky 钉左（x 不变）、头部不随滚动；遮罩两层合成不透明（卡片色叠
-  // 不透明编辑器底色，backgroundImage 在场 + backgroundColor alpha=1）
+  // (b-geometry) 长行卡片横向滚动：scrollWidth > clientWidth；头部不随滚动。
+  // 行号 sticky 钉左与遮罩已随 2026-10 阅读侧行号退场移除（无行号可钉）
   const scrollGeom = await page.evaluate(() => {
     const line = [...document.querySelectorAll('.vsidian-reading-code-line')]
       .find((el) => el.textContent.includes('wrapLongLine'))
     const pre = line ? line.closest('pre') : null
     const card = line ? line.closest('.vsidian-reading-code-card') : null
-    const ln = line ? line.querySelector('.vsidian-code-card-linenumber') : null
     const header = card ? card.querySelector('.vsidian-code-card-header') : null
-    if (!pre || !ln || !header) {
+    if (!pre || !header) {
       return null
     }
-    const lnX0 = ln.getBoundingClientRect().x
     const headerX0 = header.getBoundingClientRect().x
-    const style = getComputedStyle(ln)
     const before = { scrollWidth: pre.scrollWidth, clientWidth: pre.clientWidth, overflowX: getComputedStyle(pre).overflowX }
     pre.scrollLeft = 9999
     return {
       ...before,
       scrolled: pre.scrollLeft,
-      lnX1: ln.getBoundingClientRect().x,
       headerX1: header.getBoundingClientRect().x,
-      lnX0,
       headerX0,
-      maskImage: style.backgroundImage,
-      maskColor: style.backgroundColor,
     }
   })
   assert.ok(scrollGeom, '长行卡片几何应可采样')
@@ -385,15 +376,8 @@ try {
   assert.ok(scrollGeom.scrollWidth > scrollGeom.clientWidth,
     `#191 长行应出现横向滚动（scrollWidth ${scrollGeom.scrollWidth} > clientWidth ${scrollGeom.clientWidth}）`)
   assert.ok(scrollGeom.scrolled > 0, '横向滚动应已发生位移')
-  assert(Math.abs(scrollGeom.lnX1 - scrollGeom.lnX0) < 1,
-    `#191 滚动后行号 sticky 钉左（x 不变）：${scrollGeom.lnX0} → ${scrollGeom.lnX1}`)
   assert(Math.abs(scrollGeom.headerX1 - scrollGeom.headerX0) < 1,
     `#191 头部横带不随横向滚动：${scrollGeom.headerX0} → ${scrollGeom.headerX1}`)
-  assert.notEqual(scrollGeom.maskImage, 'none',
-    `#191 行号遮罩卡片色层应在场：${scrollGeom.maskImage}`)
-  const maskAlpha = /rgba?\(\d+, \d+, \d+(?:, ([\d.]+))?\)/.exec(scrollGeom.maskColor)
-  assert.ok(maskAlpha && (maskAlpha[1] === undefined || Number(maskAlpha[1]) === 1),
-    `#191 遮罩底层应为不透明色：${scrollGeom.maskColor}`)
 
   // (c-restore) 再点恢复折行：全部块回 pre-wrap；恢复后长行续行仍对齐
   // （验收「再开启恢复折行且续行对齐」）；折行钮进卡即显——鼠标仍在卡内，
@@ -563,7 +547,13 @@ try {
       await page.evaluate((offset) => window.locateCode(offset), source.indexOf(sample.marker))
       const paint = await assertTokenPaint(`#app .vsidian-view-${mode}`, `tok-${sample.kind}`,
         sample.marker, paintColors.dark[sample.kind], `#389 ${mode} 跨片 ${sample.info}`)
-      assert.equal(paint.lineNumber, '65', '#389 跨片仍保持原文第 65 行行号')
+      // 卡内行号 2026-10 起仅 Live：跨片定位以行号锚定时只在 live 断言，
+      // reading 侧断言行号缺席（跨片上下文本身由 token 着色验证）
+      if (mode === 'live') {
+        assert.equal(paint.lineNumber, '65', '#389 跨片仍保持原文第 65 行行号')
+      } else {
+        assert.equal(paint.lineNumber, null, '#389 阅读侧无卡内行号（2026-10 退场）')
+      }
       if (mode === 'reading') {
         await page.evaluate((marker) => {
           window.previousCodeToken = [...document.querySelectorAll('.vsidian-view-reading [class*="tok-"]')]
@@ -574,7 +564,7 @@ try {
         await page.evaluate((offset) => window.locateCode(offset), source.indexOf(sample.marker))
         const remounted = await assertTokenPaint('#app .vsidian-view-reading', `tok-${sample.kind}`,
           sample.marker, paintColors.dark[sample.kind], `#389 重挂 ${sample.info}`)
-        assert.equal(remounted.lineNumber, '65', '#389 重挂后行号不得重置')
+        assert.equal(remounted.lineNumber, null, '#389 阅读侧重挂后同样无卡内行号')
       }
     }
     assert.equal(await page.evaluate(() => window.controller.getView().state.doc.toString()), source,
@@ -594,7 +584,11 @@ try {
       if (lineCount === 4096) {
         const paint = await assertTokenPaint(scope, 'tok-string', 'paint_limit_after_sixty',
           paintColors.dark.string, `#389 ${mode} 4096 行边界`)
-        assert.equal(paint.lineNumber, '65', '#389 边界内着色保持原行号')
+        if (mode === 'live') {
+          assert.equal(paint.lineNumber, '65', '#389 边界内着色保持原行号')
+        } else {
+          assert.equal(paint.lineNumber, null, '#389 阅读侧边界内无卡内行号')
+        }
       } else {
         const selector = `${scope} ${mode === 'live' ? '.cm-line' : '.vsidian-reading-code-line'}`
         await page.waitForFunction(({ selector, scope }) => {
@@ -604,7 +598,11 @@ try {
         }, { selector, scope })
         const raw = await page.evaluate((selector) =>
           window.codePaint(selector, 'paint_limit_after_sixty'), selector)
-        assert.equal(raw.lineNumber, '65', '#389 降级仍显示原文与原行号')
+        if (mode === 'live') {
+          assert.equal(raw.lineNumber, '65', '#389 降级仍显示原文与原行号')
+        } else {
+          assert.equal(raw.lineNumber, null, '#389 阅读侧降级同样无卡内行号')
+        }
       }
     }
     assert.equal(await page.evaluate(() => window.controller.getView().state.doc.toString()), source,

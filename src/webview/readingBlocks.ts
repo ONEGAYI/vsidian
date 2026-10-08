@@ -154,26 +154,21 @@ function degradeQuoteTableHtml(html: string, sourceText: string): string {
 }
 
 /**
- * 围栏 chunk 的内部 HTML（转义源码 + 语言类 + 跨片行号契约 data 属性）。
+ * 围栏 chunk 的内部 HTML（转义源码 + 语言类）。
  * 语言类取 info 首词（codeInfoFirstWord——与 resolveCodeLanguage 同语义，
  * 两视图同路由：```js title=x → language-js），再剔除类名不安全字符
  * （保持 readingCodeCard 的 language-([\w#+.-]+) 正则可提取，如 c++）。
- * startLine/totalLines 供 readingCodeCard 跨片连续编号（片首行在围栏体内
- * 的 0 基行号 / 整块内容行数）。
  */
 function fenceChunkHtml(
   text: string,
   from: number,
   to: number,
   info: string,
-  startLine: number,
-  totalLines: number,
 ): string {
   const lang = codeInfoFirstWord(info).replace(/[^\w#+.-]/g, '')
   const cls = lang ? ` class="language-${lang}"` : ''
   return (
-    `<pre data-vsidian-code-start="${startLine}" data-vsidian-code-total="${totalLines}">` +
-    `<code${cls}>${escapeHtml(text.slice(from, to))}</code></pre>`
+    `<pre><code${cls}>${escapeHtml(text.slice(from, to))}</code></pre>`
   )
 }
 
@@ -377,11 +372,9 @@ function pushBlock(
       // 按行细分：每片 ≤ FENCE_CHUNK_LINES 行；首片含开围栏行、末片含闭围栏行
       const info = opener.info ?? ''
       const hasClose = text.slice(env.lineStarts[endLine] ?? 0, end).trimStart().startsWith(opener.markup)
-      // 跨片行号契约：整块内容行数（围栏体 = 开闭围栏行之间；未闭合无尾行）
-      const totalContentLines = fenceLines - 1 - (hasClose ? 1 : 0)
       // Highlighting budgets use the original token extent, not the generic
       // rendered-block trim above: empty lines at an unclosed fence's EOF still
-      // count. Keep the existing chunk, line-number and copy boundaries intact.
+      // count. Keep the existing chunk and copy boundaries intact.
       const sourceEndLine = baseLine + map[1] - 1
       const fence: ReadingCodeFence = {
         from: (env.lineEnds[startLine] ?? start) + 1,
@@ -395,13 +388,11 @@ function pushBlock(
         // 内容行去掉围栏标记行（首片去首行、末片去尾行）
         const contentFrom = l === startLine ? (env.lineEnds[l] ?? cs) + 1 : cs
         const contentTo = chunkEnd === endLine && hasClose ? (env.lineStarts[chunkEnd] ?? ce) : ce
-        // 片首内容行在围栏体内的 0 基行号（首片跳过开围栏行 → 从 0 起）
-        const chunkStartLine = l === startLine ? 0 : l - startLine - 1
         blocks.push({
           kind: 'code-block',
           start: cs,
           end: ce,
-          html: fenceChunkHtml(text, contentFrom, contentTo, info, chunkStartLine, totalContentLines),
+          html: fenceChunkHtml(text, contentFrom, contentTo, info),
           codeContext: { fence, from: contentFrom },
         })
       }

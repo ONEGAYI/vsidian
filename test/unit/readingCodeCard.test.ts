@@ -31,17 +31,11 @@ const CODE = 'const a = 1;\nfunction hi() {'
 function makeBlock(
   info = 'js',
   code = CODE,
-  chunk?: { start: number; total: number },
 ): HTMLElement {
   const block = document.createElement('div')
   block.className = 'vsidian-reading-block vsidian-reading-code-block'
   block.dataset['vsidianSrcStart'] = '0'
   const pre = document.createElement('pre')
-  if (chunk) {
-    // 大围栏分块（FENCE_CHUNK_LINES）片的跨片行号契约（readingBlocks 落位）
-    pre.setAttribute('data-vsidian-code-start', String(chunk.start))
-    pre.setAttribute('data-vsidian-code-total', String(chunk.total))
-  }
   const codeEl = document.createElement('code')
   codeEl.className = info ? `language-${info}` : ''
   codeEl.textContent = code
@@ -52,7 +46,7 @@ function makeBlock(
 
 function decorate(block: HTMLElement, over: Partial<Parameters<typeof decorateReadingCodeCard>[1]> = {}) {
   decorateReadingCodeCard(block, {
-    config: { card: true, lineNumbers: true, copyButton: true, highlight: true },
+    config: { card: true, copyButton: true, highlight: true },
     folded: false,
     onCopy: () => {},
     onFoldToggle: () => {},
@@ -61,7 +55,7 @@ function decorate(block: HTMLElement, over: Partial<Parameters<typeof decorateRe
 }
 
 describe('阅读代码块卡片（#84）', () => {
-  it('卡片 + 高亮：头部（徽标/标签/折叠/复制）、行结构与行号、tok 着色齐备', () => {
+  it('卡片 + 高亮：头部（徽标/标签/折叠/复制）、行结构与 tok 着色齐备，卡内行号不发射', () => {
     const block = makeBlock('js')
     decorate(block)
     expect(block.classList.contains(READING_CODE_CARD_CLASS)).toBe(true)
@@ -74,8 +68,8 @@ describe('阅读代码块卡片（#84）', () => {
     expect(header.querySelector(`.${CODE_CARD_CLASS_NAMES.copy}`)).not.toBeNull()
     const rows = block.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)
     expect(rows).toHaveLength(2)
-    const numbers = block.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)
-    expect([...numbers].map((n) => n.textContent)).toEqual(['1', '2'])
+    // 卡内行号 2026-10 起阅读侧不再发射（与设置开关无关，codeblock.lineNumbers 仅 Live）
+    expect(block.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)).toHaveLength(0)
     expect(block.querySelectorAll('[class*="tok-"]').length).toBeGreaterThan(0)
     expect(block.querySelector('code')!.getAttribute('data-vsidian-code-src')).toBe(CODE)
   })
@@ -84,16 +78,13 @@ describe('阅读代码块卡片（#84）', () => {
     const block = makeBlock('js')
     decorate(block)
     const rows = [...block.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)]
-    const text = rows.map((r) => {
-      const spans = [...r.children].filter((c) => !c.classList.contains(CODE_CARD_CLASS_NAMES.linenumber))
-      return spans.map((s) => s.textContent).join('')
-    }).join('\n')
+    const text = rows.map((r) => [...r.children].map((s) => s.textContent).join('')).join('\n')
     expect(text).toBe(CODE)
   })
 
   it('朴素形态（仅高亮）：无卡片结构，code 内直接注入 token span', () => {
     const block = makeBlock('js')
-    decorate(block, { config: { card: false, lineNumbers: false, copyButton: false, highlight: true } })
+    decorate(block, { config: { card: false, copyButton: false, highlight: true } })
     expect(block.querySelector(`.${CODE_CARD_CLASS_NAMES.header}`)).toBeNull()
     expect(block.classList.contains(READING_CODE_CARD_CLASS)).toBe(false)
     const codeEl = block.querySelector('code')!
@@ -103,15 +94,15 @@ describe('阅读代码块卡片（#84）', () => {
 
   it('两者皆关：不触碰（朴素 markdown-it 产物）', () => {
     const block = makeBlock('js')
-    decorate(block, { config: { card: false, lineNumbers: false, copyButton: false, highlight: false } })
+    decorate(block, { config: { card: false, copyButton: false, highlight: false } })
     expect(block.querySelector('code')!.textContent).toBe(CODE)
     expect(block.querySelector(`.${CODE_CARD_CLASS_NAMES.header}`)).toBeNull()
     expect(block.querySelectorAll('[class*="tok-"]')).toHaveLength(0)
   })
 
-  it('行号子开关关闭：行结构保留但无行号', () => {
+  it('卡内行号不再发射（codeblock.lineNumbers 仅 Live；行结构保留）', () => {
     const block = makeBlock('js')
-    decorate(block, { config: { card: true, lineNumbers: false, copyButton: true, highlight: true } })
+    decorate(block)
     expect(block.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)).toHaveLength(2)
     expect(block.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)).toHaveLength(0)
   })
@@ -177,29 +168,17 @@ describe('阅读代码块卡片（#84）', () => {
     expect(isReadingCodeBlock(para)).toBe(false)
   })
 
-  it('大围栏分块行号连续：片携带 start/total → 行号 1..60 与 61..120、列宽一致按整块 3 位', () => {
+  it('大围栏分块（两片）：行结构与内容完整、卡内行号不发射', () => {
     // 模拟 readingBlocks 60 行分块产物：120 行围栏切成两片，各 60 内容行
     const lines60 = Array.from({ length: 60 }, (_, i) => `line-${i}`).join('\n')
-    const first = makeBlock('js', lines60, { start: 0, total: 120 })
-    const second = makeBlock('js', lines60, { start: 60, total: 120 })
+    const first = makeBlock('js', lines60)
+    const second = makeBlock('js', lines60)
     decorate(first)
     decorate(second)
-    const numsOf = (b: HTMLElement) =>
-      [...b.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)].map((n) => n.textContent)
-    expect(numsOf(first)).toEqual(Array.from({ length: 60 }, (_, i) => String(i + 1)))
-    expect(numsOf(second)).toEqual(Array.from({ length: 60 }, (_, i) => String(61 + i)))
-    // 两片列宽一致：按整块 total（120 → 3 位）而非片行数（60 → 2 位）
-    const widths = [...first.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`), ...second.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)]
-      .map((n) => (n as HTMLElement).style.width)
-    expect(new Set(widths)).toEqual(new Set(['3ch']))
-  })
-
-  it('无分块 data 属性时回退现行为：每片独立从 1 编号、列宽按片行数（幂等兼容旧 DOM）', () => {
-    const block = makeBlock('js', 'a\nb\nc')
-    decorate(block)
-    const nums = [...block.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)]
-    expect(nums.map((n) => n.textContent)).toEqual(['1', '2', '3'])
-    expect((nums[0] as HTMLElement).style.width).toBe('2ch')
+    expect(first.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)).toHaveLength(60)
+    expect(second.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)).toHaveLength(60)
+    expect(first.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)).toHaveLength(0)
+    expect(second.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)).toHaveLength(0)
   })
 
   it('c++ 片块类提取后命中 cpp（类名正则可提取 + 注册表别名路由一致）', () => {
@@ -301,24 +280,18 @@ describe('折行开关与窜行修复（#191）', () => {
     expect(offBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('行内联 --vsidian-code-indent 与行号列宽同源：值 = calc(列宽ch + 24px)；行号关闭不注入（回落 CSS 缺省）', () => {
+  it('行不注入 --vsidian-code-indent（悬挂缩进随卡内行号一并退场，回落 CSS 缺省 0px）', () => {
     const block = makeBlock('js')
     decorate(block)
     const rows = [...block.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)] as HTMLElement[]
     expect(rows).toHaveLength(2)
-    // 2 行块 → 列宽 2ch → 缩进 calc(2ch + 24px)（与 ln.style.width 同处同源）
-    expect(rows[0]!.style.getPropertyValue('--vsidian-code-indent')).toBe('calc(2ch + 24px)')
-    expect(rows[1]!.style.getPropertyValue('--vsidian-code-indent')).toBe('calc(2ch + 24px)')
-
-    const noLn = makeBlock('js')
-    decorate(noLn, { config: { card: true, lineNumbers: false, copyButton: true, highlight: true } })
-    const noLnRows = [...noLn.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)] as HTMLElement[]
-    expect(noLnRows[0]!.style.getPropertyValue('--vsidian-code-indent')).toBe('')
+    expect(rows[0]!.style.getPropertyValue('--vsidian-code-indent')).toBe('')
+    expect(rows[1]!.style.getPropertyValue('--vsidian-code-indent')).toBe('')
   })
 
   it('朴素形态无折行钮（无头部可挂）', () => {
     const block = makeBlock('js')
-    decorate(block, { config: { card: false, lineNumbers: false, copyButton: false, highlight: true }, onWrapToggle: () => {} })
+    decorate(block, { config: { card: false, copyButton: false, highlight: true }, onWrapToggle: () => {} })
     expect(block.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)).toBeNull()
   })
 })
@@ -333,7 +306,7 @@ describe('complete-fence highlighting across reading chunks (#389)', () => {
       decorate(el)
       expect(el.querySelector('.tok-comment')?.textContent).toBe('comment 58')
       expect([...el.querySelectorAll('.tok-keyword')].map((n) => n.textContent)).toContain('const')
-      expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)?.textContent).toBe('60')
+      expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)).toBeNull()
     }
   })
 })
@@ -382,10 +355,10 @@ describe('complete-fence guards and reference reuse (#389)', () => {
     decorate(el, { onCopy: (code) => { copied = code } })
     ;(el.querySelector(`.${CODE_CARD_CLASS_NAMES.copy}`) as HTMLButtonElement).click()
     expect(copied).toBe(expected)
-    decorate(el, { config: { card: false, highlight: false, lineNumbers: false, copyButton: false } })
+    decorate(el, { config: { card: false, highlight: false, copyButton: false } })
     expect(el.querySelector('code')!.textContent).toBe(expected)
     expect(el.querySelector('[class*="tok-"]')).toBeNull()
-    decorate(el, { config: { card: false, highlight: true, lineNumbers: false, copyButton: false } })
+    decorate(el, { config: { card: false, highlight: true, copyButton: false } })
     expect(el.querySelector('code')!.textContent).toBe(expected)
     expect(el.querySelector('.tok-comment')?.textContent).toBe('chunk 58')
   })
@@ -449,7 +422,7 @@ describe('dialect complete-fence context (#391)', () => {
         expect(el.querySelector(`.${sample.cls}`)?.textContent).toContain('dialect line 58')
         if (reference) expect(el.querySelector('code')!.textContent).toBe(expected)
         else {
-          expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)?.textContent).toBe('60')
+          expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)).toBeNull()
           ;(el.querySelector(`.${CODE_CARD_CLASS_NAMES.copy}`) as HTMLButtonElement).click()
           expect(copied).toBe(expected)
         }
@@ -488,12 +461,8 @@ describe('special-language complete contexts (#390)', () => {
         expect([...el.querySelectorAll(`.${fixture.cls}`)].some((node) => node.textContent!.includes(fixture.word))).toBe(true)
         const lines = [...el.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)]
         if (lines.length) {
-          expect(lines.map((line) => {
-            const copy = line.cloneNode(true) as HTMLElement
-            copy.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)?.remove()
-            return copy.textContent
-          }).join('\n')).toBe(raw)
-          expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)?.textContent).toBe('60')
+          expect(lines.map((line) => line.textContent).join('\n')).toBe(raw)
+          expect(el.querySelector(`.${CODE_CARD_CLASS_NAMES.linenumber}`)).toBeNull()
         } else expect(el.querySelector('code')!.textContent).toBe(raw)
       }
     }

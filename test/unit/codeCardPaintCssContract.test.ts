@@ -163,10 +163,9 @@ describe('折行窜行修复与折行开关（#191）', () => {
       .toMatch(/text-indent:\s*0/)
   })
 
-  it('阅读行悬挂缩进：与 live 同式（变量由行内联注入，行号关闭回落 0px）', () => {
+  it('阅读行无悬挂缩进两式（2026-10 卡内行号退场：行号区与 --vsidian-code-indent 注入一并移除）', () => {
     const line = rule('#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line')
-    expect(line).toMatch(/padding-left:\s*var\(--vsidian-code-indent,\s*0px\)/)
-    expect(line).toMatch(/text-indent:\s*calc\(-1 \* var\(--vsidian-code-indent,\s*0px\)\)/)
+    expect(line).not.toMatch(/--vsidian-code-indent/)
   })
 
   it('阅读关闭折行：pre 横向滚动（white-space: pre + overflow-x: auto，容器状态类门控）', () => {
@@ -175,23 +174,15 @@ describe('折行窜行修复与折行开关（#191）', () => {
     expect(pre).toMatch(/overflow-x:\s*auto/)
   })
 
-  it('阅读关闭折行：行盒随内容延展（sticky 行号有全行吸附范围）', () => {
-    const line = rule('#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line')
-    expect(line).toMatch(/width:\s*max-content/)
-    expect(line).toMatch(/min-width:\s*100%/)
-  })
-
-  it('阅读关闭折行：行号 sticky 钉左 + 不透明合成遮罩（卡片色叠不透明编辑器底色）；边距 8+16 收进 padding（margin 在盒外遮不住内容）', () => {
-    const ln = rule('#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-linenumber')
-    expect(ln).toMatch(/position:\s*sticky/)
-    expect(ln).toMatch(/left:\s*0/)
-    expect(ln).toMatch(/margin-left:\s*0/)
-    expect(ln).toMatch(/margin-right:\s*0/)
-    expect(ln).toMatch(/padding-left:\s*8px/)
-    expect(ln).toMatch(/padding-right:\s*16px/)
-    // 上层卡片底色（可半透明）叠下层不透明编辑器底色——遮住横向滑过的文本
-    expect(ln).toMatch(/background-image:\s*linear-gradient\(var\(--vsidian-code-card-background/)
-    expect(ln).toMatch(/background-color:\s*var\(--vscode-editor-background/)
+  it('阅读关闭折行无行号专属规则（2026-10 卡内行号退场：sticky 钉左、遮罩与行盒延展规则一并移除）', () => {
+    const blocks = css.match(/[^{}]+\{[^{}]*\}/g) ?? []
+    const gone = [
+      '#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line',
+      '#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-linenumber',
+    ]
+    for (const selector of gone) {
+      expect(blocks.some((block) => block.split('{')[0]?.trim().endsWith(selector)), selector).toBe(false)
+    }
   })
 
   it('折行钮与复制钮同口径进卡即显：默认隐藏、三处显现组（header hover/focus、live reveal、阅读块容器 hover）；-off 经 filter 弱化（与显隐 opacity 正交）', () => {
@@ -213,6 +204,16 @@ describe('折行窜行修复与折行开关（#191）', () => {
         /opacity:\s*1/.test(b.split('{')[1] ?? ''))
       expect(hits, `显现规则 ${sel}（opacity 1）应存在`).toHaveLength(1)
     }
+  })
+  it('阅读卡片内边距横向加倍（左右 24px，上下 8px 保持；头部横带左右同步 24px）', () => {
+    const pre = rule('#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card > pre')
+    expect(pre).toMatch(/padding:\s*8px 24px/)
+    const header = rule('#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-header')
+    expect(header).toMatch(/padding-left:\s*24px/)
+    expect(header).toMatch(/padding-right:\s*24px/)
+    // 阅读朴素形态（卡片关闭）与两视图共享的头部基础规则不受影响
+    expect(rule('#app .vsidian-view-reading .vsidian-reading-block pre')).toMatch(/padding:\s*8px 12px/)
+    expect(rule('#app .vsidian-code-card-header')).toMatch(/padding:\s*5px 12px 4px/)
   })
 })
 

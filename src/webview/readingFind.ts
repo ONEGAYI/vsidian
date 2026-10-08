@@ -20,7 +20,7 @@ const hiddenMarks = new Set([
   'CodeMark', 'CodeInfo', 'ListMark', 'QuoteMark', 'TaskMarker', 'TableDelimiter', 'LinkTitle',
 ])
 const ignoredText = 'button, svg, .katex, .vsidian-mermaid, .vsidian-embed-card, ' +
-  '.vsidian-code-card-header, .vsidian-code-card-linenumber'
+  '.vsidian-code-card-header'
 
 function sourceProjection(block: ReadingBlock, fullText: string): Projection {
   const cached = projections.get(block)
@@ -34,8 +34,11 @@ function sourceProjection(block: ReadingBlock, fullText: string): Projection {
     holder.innerHTML = block.html
     const pre = holder.querySelector('pre')
     const code = (pre?.textContent ?? '').replace(/\n$/, '')
-    // 后续分片从正文起始，字面围栏不能重新解释为开围栏。
-    const continued = Number(pre?.dataset['vsidianCodeStart'] ?? 0) > 0
+    // 后续分片从正文起始，字面围栏不能重新解释为开围栏。续片判定改由
+    // codeContext 承担（2026-10 行号 data 属性退场）：分片块的 from 落在
+    // 片首行首即续片——首片片首是开围栏行，from 恒大于 block.start；
+    // 未分块的普通代码块无 codeContext，走正常解析
+    const continued = block.codeContext ? block.codeContext.from <= block.start : false
     const first = continued ? null : markdownTreeParser.parse(source).topNode.firstChild
     const codeText = block.kind === 'code-block' && first?.name === 'FencedCode' ? first.getChild('CodeText') : null
     const from = continued ? 0 : codeText?.from ?? source.indexOf(code)

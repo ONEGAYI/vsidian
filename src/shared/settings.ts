@@ -153,7 +153,8 @@ export const CODEBLOCK_CARD_DEFAULT = true
 
 /**
  * #80「卡内行号」子开关：卡片内代码行行首的块内行号（每块从 1 起、围栏
- * 行不占号）。依附卡片总开关——卡片关闭时本项无效。
+ * 行不占号）。依附卡片总开关——卡片关闭时本项无效。仅实时预览（Live）
+ * 生效：阅读视图 2026-10 起不发射卡内行号，该键对阅读侧无操作。
  */
 export const CODEBLOCK_LINE_NUMBERS_KEY = 'codeblock.lineNumbers'
 export const CODEBLOCK_LINE_NUMBERS_DEFAULT = true

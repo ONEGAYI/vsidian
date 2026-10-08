@@ -245,6 +245,8 @@ describe('mounted reading code-card settings (#389)', () => {
       apply('settings.snapshot', { 'codeblock.highlight': true, 'codeblock.card': true })
       expect(first.querySelector('.vsidian-code-card-header')).not.toBeNull()
       expect(second.classList.contains('vsidian-code-card-folded')).toBe(true)
+      // 卡内行号 2026-10 起阅读侧不发射：设置开启（默认）也无行号节点
+      expect(first.querySelector('.vsidian-code-card-linenumber')).toBeNull()
       apply('settings.changed', { 'codeblock.lineNumbers': false, 'codeblock.copyButton': false })
       expect(first.querySelector('.vsidian-code-card-linenumber')).toBeNull()
       expect(first.querySelector('.vsidian-code-card-copy')).toBeNull()

@@ -186,7 +186,7 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.codeblockCard.title': '代码块卡片',
   'setting.codeblockCard.description': '围栏代码块在光标离开时收起为卡片：隐藏围栏标记，显示语言头部横带。关闭后回到朴素源码围栏外观。',
   'setting.codeblockLineNumbers.title': '卡内行号',
-  'setting.codeblockLineNumbers.description': '卡片内代码行行首显示块内行号（每块从 1 起，围栏行不占号）。需开启「代码块卡片」。',
+  'setting.codeblockLineNumbers.description': '实时预览的卡片内代码行行首显示块内行号（每块从 1 起，围栏行不占号）。阅读视图不显示卡内行号。需开启「代码块卡片」。',
   'setting.codeblockCopyButton.title': '复制按钮',
   'setting.codeblockCopyButton.description': '卡片头部悬停显示复制按钮，点击复制整块代码（不含围栏行）。需开启「代码块卡片」。',
   'setting.codeblockHighlight.title': '语法高亮',

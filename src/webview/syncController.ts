@@ -2233,9 +2233,10 @@ export class WebviewSyncController {
         if (previousCodeCard && nextCodeCard && (
           previousCodeCard.card !== nextCodeCard.card ||
           previousCodeCard.highlight !== nextCodeCard.highlight ||
-          previousCodeCard.lineNumbers !== nextCodeCard.lineNumbers ||
           previousCodeCard.copyButton !== nextCodeCard.copyButton
         )) {
+          // lineNumbers 不参与比较：阅读侧不发射卡内行号（仅 Live），其变更
+          // 由 liveInstance.applySettings 的 Compartment 热重配独自消化
           // Reuse mounted DOM; keep the reading viewport, fold/wrap state and
           // Markdown parse intact. Unrelated settings do not rebuild cards.
           this.decorateMountedReadingCodeCards()
@@ -9210,8 +9211,10 @@ export class WebviewSyncController {
     }
     const srcStart = Number(block.dataset['vsidianSrcStart'] ?? '-1')
     decorateReadingCodeCard(block, {
+      // 阅读侧不发射卡内行号（codeblock.lineNumbers 仅 Live 生效，
+      // 2026-10 起与引用内容先例统一），此处仅复用 card/copy/highlight 三键
       config: this.live?.codeCardConfigSnapshot ?? {
-        card: true, lineNumbers: true, copyButton: true, highlight: true,
+        card: true, copyButton: true, highlight: true,
       },
       folded: this.readingCodeFold.has(srcStart),
       onCopy: (code) => this.postCodeCopy(code),
@@ -9880,7 +9883,8 @@ export class WebviewSyncController {
         cardLineCount: codeScope
           ? codeScope.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.line}`).length
           : 0,
-        // #80 卡内行号文本序列（视口内；关闭行号子开关后为空数组）
+        // #80 卡内行号文本序列（视口内；关闭行号子开关后为空数组；
+        // 阅读视图 2026-10 起不发射卡内行号，恒为空数组）
         lineNumberTexts: codeScope
           ? [...codeScope.querySelectorAll(`.${CODE_CARD_CLASS_NAMES.linenumber}`)]
             .map((el) => el.textContent ?? '')

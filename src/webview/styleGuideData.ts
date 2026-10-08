@@ -2974,7 +2974,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-wrap（+ -off 修饰，仅阅读侧发射）",
-    "purpose": "折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（行号列 sticky 钉左、头部固定）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。",
+    "purpose": "折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（头部横带在 pre 外固定不随滚动；行号列 sticky 钉左已随 2026-10 阅读侧卡内行号退场移除）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。",
     "views": [
       "reading"
     ],
@@ -2987,7 +2987,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "codeCardPaintCssContract：进卡即显显隐体系与 -off filter 弱化",
-      "浏览器 codeCardChrome：折行/nowrap 几何、sticky 行号与联动断言",
+      "浏览器 codeCardChrome：折行/nowrap 几何（横向滚动、头部不随滚动）与联动断言",
       "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-wrap-reading\"] 探针命中"
     ],
     "introduced": "#191（2026-09-28）"
@@ -2998,12 +2998,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-linenumber",
-    "purpose": "卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。",
+    "purpose": "卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget；与文档行号槽（源文件行号）两列并存互不遮挡。阅读视图 2026-10 起不再发射卡内行号（用户产品决策，与引用内容先例统一），本选择器自该版本起仅命中实时预览。",
     "views": [
-      "live",
-      "reading"
+      "live"
     ],
-    "dom": "卡片代码行首（live widget / 阅读 span）。",
+    "dom": "卡片代码行首（live widget）。",
     "example": ".vsidian-code-card-linenumber {\n  color: var(--vscode-descriptionForeground);\n}",
     "obsidian": {
       "counterpart": ".code-styler-line-number（方向）",
@@ -3011,7 +3010,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "lineNumberCssContract：两列并存",
-      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-linenumber-live\"/\"live-code-card-linenumber-reading\"] 探针命中"
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-linenumber-live\"] 探针命中"
     ],
     "introduced": "#79（2026-09-26）"
   },
@@ -6026,7 +6025,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-code-card-wrap": {
-    "purpose": "The word-wrap toggle (#191): one click toggles auto word wrap for all reading-view code blocks at once — on is the current pre-wrap wrapping, off makes the code area scroll horizontally (the line-number column sticks to the left edge, the header stays fixed); -off is the wrapped-off modifier (weakened via filter: opacity(0.4), orthogonal to the show/hide opacity). Reading-card header only: live view always wraps (CM6 wrapping is an editor-level facet and cannot be turned off per block). A view state, not persisted and with no setting (same semantics as the fold chevron).",
+    "purpose": "The word-wrap toggle (#191): one click toggles auto word wrap for all reading-view code blocks at once — on is the current pre-wrap wrapping, off makes the code area scroll horizontally (the header band sits outside the pre and never scrolls; the sticky line-number column was removed in 2026-10 together with reading-view in-card line numbers); -off is the wrapped-off modifier (weakened via filter: opacity(0.4), orthogonal to the show/hide opacity). Reading-card header only: live view always wraps (CM6 wrapping is an editor-level facet and cannot be turned off per block). A view state, not persisted and with no setting (same semantics as the fold chevron).",
     "states": "Wrapping on (default) / off (-off, the title offers to turn it back on); revealed on card hover like the copy button (hidden by default); not emitted in the collapsed state.",
     "dom": "The leftmost slot of the header button area ([wrap] [copy] [fold]).",
     "obsidian": {
@@ -6034,8 +6033,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-code-card-linenumber": {
-    "purpose": "In-card line numbers (each block starts at 1, fence lines take no number; numbering continues across the split chunks of a large fence); a line-start widget in live view and a line span in reading view (same class name); coexists with the document line-number gutter (source file line numbers) as two separate columns that do not overlap.",
-    "dom": "At the start of the card's code lines (a live widget / a reading span).",
+    "purpose": "In-card line numbers (each block starts at 1, fence lines take no number; numbering continues across the split chunks of a large fence); a line-start widget in live view; coexists with the document line-number gutter (source file line numbers) as two separate columns that do not overlap. Reading view stopped emitting in-card line numbers in 2026-10 (user product decision, unified with the reference-content precedent); since then this selector only matches live preview.",
+    "dom": "At the start of the card's code lines (a live widget).",
     "obsidian": {
       "counterpart": ".code-styler-line-number (direction)"
     }

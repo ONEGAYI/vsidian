@@ -65,7 +65,7 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'tok-tokens-live', selector: '#app .vsidian-view-live .vsidian-code-card-line .tok-keyword', expected: 'rgb(215, 0, 1)' },
   { id: 'reading-code-card', selector: '#app .vsidian-view-reading .vsidian-reading-code-card', expected: 'rgb(216, 0, 1)' },
   { id: 'live-code-card-line-reading', selector: '#app .vsidian-view-reading .vsidian-code-card-line', expected: 'rgb(217, 0, 1)' },
-  { id: 'live-code-card-linenumber-reading', selector: '#app .vsidian-view-reading .vsidian-code-card-linenumber', expected: 'rgb(218, 0, 1)' },
+  // live-code-card-linenumber 无 reading 探针：阅读侧 2026-10 起不发射卡内行号
   { id: 'tok-tokens-reading', selector: '#app .vsidian-view-reading .vsidian-reading-code-card .tok-keyword', expected: 'rgb(219, 0, 1)' },
   // ---- 大纲面板（侧栏；DOM 常驻，显隐由 CSS 类控制，探针不受影响） ----
   { id: 'outline-item', selector: '#app .vsidian-sidebar .vsidian-outline-item.vsidian-outline-level-1', expected: 'rgb(220, 0, 1)' },

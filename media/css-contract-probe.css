@@ -350,11 +350,6 @@
   --vsidian-chrome-probe: rgb(217, 0, 1);
 }
 
-/* 阅读卡内行号 */
-#app .vsidian-view-reading .vsidian-code-card-linenumber {
-  --vsidian-chrome-probe: rgb(218, 0, 1);
-}
-
 /* 阅读语法高亮 token */
 #app .vsidian-view-reading .vsidian-reading-code-card .tok-keyword {
   --vsidian-chrome-probe: rgb(219, 0, 1);

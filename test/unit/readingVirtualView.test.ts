@@ -68,7 +68,9 @@ describe('阅读查找：源区间映射到可见文字', () => {
   it('长代码块后续分片的字面围栏仍按代码正文高亮', () => {
     const text = '````js\n' + Array(59).fill('plain').join('\n') + '\n```\nhit\n````'
     const { container, view } = setupFind(text, '```', 1)
-    expect(container.querySelector('pre[data-vsidian-code-start="59"] .vsidian-find-match-current')?.textContent).toBe('```')
+    // 60 行阈值切两片：后续分片是第二个代码块（行号 data 属性已随 2026-10
+    // 卡内行号退场移除，改按分片序定位）
+    expect(container.querySelector('.vsidian-reading-code-block pre .vsidian-find-match-current')?.textContent).toBe('```')
     view.dispose()
   })
 

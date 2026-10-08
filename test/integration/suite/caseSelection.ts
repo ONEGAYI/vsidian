@@ -18,16 +18,16 @@ export const SENSITIVE_CASES = [
     evidence: 'https://github.com/ONEGAYI/vsidian/actions/runs/36864132224',
   },
   {
-    name: '嵌入：Live 挂载与源码显隐——IME 编辑撤销闭环与双零 dirty（#223）',
-    issue: '#272 / #223',
-    reason: '缺失卡终态采样缺口已修复，待同提交多次 CI 验证后恢复 core。',
-    evidence: 'https://github.com/ONEGAYI/vsidian/actions/runs/36875022608/attempts/2',
+    name: '附加组件 T07：调序与单项关闭即时生效、joinPrevious 并组撤回与重载恢复，#356',
+    issue: '#356',
+    reason: '近 30 个 CI run 中 6 次失败（约 20%），跨 shard 2/3/4 分布、本地单跑稳定通过——CI 环境时序敏感，根因未定。',
+    evidence: 'https://github.com/ONEGAYI/vsidian/actions/runs/37724661505',
   },
   {
-    name: '递归：真宿主直接来源、三层、设置热更与未保存刷新（#244）',
-    issue: '#272 / #244',
-    reason: '隐藏 Live 根重复卡误采已修复，待同提交多次 CI 验证后恢复 core。',
-    evidence: 'https://github.com/ONEGAYI/vsidian/issues/272',
+    name: '附加组件 T15：渲染样例停用降级、故障恢复与自处理缺陷对照（#364）',
+    issue: '#364',
+    reason: '近 30 个 CI run 中 6 次失败（约 20%），mermaid 容器绘制等待超时、本地单跑稳定通过——CI 环境时序敏感，根因未定。',
+    evidence: 'https://github.com/ONEGAYI/vsidian/actions/runs/37724661505',
   },
 ] as const
 

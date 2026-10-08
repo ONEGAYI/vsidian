@@ -7,8 +7,8 @@ const fixture = vi.hoisted(() => {
   const sensitive = [
     'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     '索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）',
-    '嵌入：Live 挂载与源码显隐——IME 编辑撤销闭环与双零 dirty（#223）',
-    '递归：真宿主直接来源、三层、设置热更与未保存刷新（#244）',
+    '附加组件 T07：调序与单项关闭即时生效、joinPrevious 并组撤回与重载恢复，#356',
+    '附加组件 T15：渲染样例停用降级、故障恢复与自处理缺陷对照（#364）',
   ]
   const names = ['普通甲', sensitive[0]!, '普通乙', sensitive[1]!, '普通丙', sensitive[2]!, '普通丁', sensitive[3]!]
   const executed: string[] = []
@@ -93,8 +93,9 @@ it('移出敏感用例后仍按原来的位置切片，不重新分配普通用�
 })
 
 it('明确指定的用例不属于当前组时拒绝空通过', async () => {
+  // #244 已移回 core（2026-10-08 调组），本断言改用仍在 sensitive 的 #129
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
-  vi.stubEnv('VSIDIAN_TEST_CASES', '#244')
+  vi.stubEnv('VSIDIAN_TEST_CASES', '#129')
   await expect(runSuite()).rejects.toThrow(/未命中.*core/)
   expect(fixture.executed).toEqual([])
 })
@@ -237,6 +238,9 @@ it('四个 core 分片与第五组无交集、无漏项，其他同领域用例�
   expect(core).toContain('Live 视口源锚点：Mermaid 围栏附近切标签页后中心行与光标保持')
   expect(core).toContain('搜索定位恢复（#318）：显式命令矩阵——首次/重复/多匹配/CRLF/剪贴板恢复')
   expect(core).toContain('搜索定位打开提示（#318）：首次激活提示/会话去重/设置门控')
+  // 2026-10-08 调组：#223/#244 采样修复落地 + sensitive 25 次 CI 全过，移回 core
+  expect(core).toContain('嵌入：Live 挂载与源码显隐——IME 编辑撤销闭环与双零 dirty（#223）')
+  expect(core).toContain('递归：真宿主直接来源、三层、设置热更与未保存刷新（#244）')
   for (let shard = 1; shard <= 4; shard++) {
     const legacy = selectIntegrationCases(all, { shard: `${shard}/4` }).selected.map(([name]) => name)
     const actual = selectIntegrationCases(all, { group: 'core', shard: `${shard}/4` }).selected.map(([name]) => name)
