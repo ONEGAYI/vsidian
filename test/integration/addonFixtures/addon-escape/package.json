@@ -1,0 +1,19 @@
+{
+  "name": "addon-escape",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T05 realpath escape)",
+  "description": "Integration fixture: registers page entries that lexically stay inside the install dir but resolve (via junction) outside it (T05, #354).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-escape.stats", "title": "Fixture T05: escape add-on stats" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

@@ -20,9 +20,13 @@ const CMD = {
   injectMessage: 'onegayi.vsidian._test.injectWebviewMessage',
 } as const
 
-const wsDir = process.env['WORKSPACE_DIR'] ?? ''
+// #366 T17：本地 env 优先；SSH 远端会话读不到本地 env（远端 ext host 不
+// 继承），从 workspaceFolders 推导（vscode-remote uri 的 fsPath 即远端盘面
+// 路径，localhost 回环下与本地同路径）。本地会话行为不变。
+const wsDir = process.env['WORKSPACE_DIR']
+  ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? ''
 if (!wsDir) {
-  throw new Error('环境变量 WORKSPACE_DIR 未设置（应由 runTest.mjs 注入）')
+  throw new Error('工作区根不可得：WORKSPACE_DIR 未设置且无工作区文件夹（应由 runTest.mjs 注入或经 SSH 会话工作区推导）')
 }
 
 const wsUri = (name: string): vscode.Uri => vscode.Uri.file(`${wsDir}/${name}`)

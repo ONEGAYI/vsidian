@@ -9,11 +9,13 @@
 // 注入（与真实 webview.onDidReceiveMessage 同一入口），宿主侧行为全部真实。
 import * as vscode from 'vscode'
 import { cases } from './cases'
-import { selectIntegrationCases, SENSITIVE_CASES } from './caseSelection'
+import { selectIntegrationCases, SENSITIVE_CASES, sshMarkerCaseFilter } from './caseSelection'
 
 export async function run(): Promise<void> {
   const failures: string[] = []
-  const filter = process.env['VSIDIAN_TEST_CASES']
+  // #366 T17：本地 env 优先；SSH 远端会话读不到本地 env（远端 ext host
+  // 不继承），经工作区标记文件兜底（见 sshMarkerCaseFilter 注释）
+  const filter = process.env['VSIDIAN_TEST_CASES'] ?? sshMarkerCaseFilter()
   const { selected: sharded, group, shardLabel } = selectIntegrationCases(cases, {
     group: process.env['VSIDIAN_TEST_GROUP'],
     filter,
@@ -25,7 +27,13 @@ export async function run(): Promise<void> {
   if (ext && !ext.isActive) {
     await ext.activate()
   }
-  console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项（分组 ${group}）${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}`)
+  // #365 T16：钩子在场景测（发行态会话不设 VSIDIAN_TEST_HOOKS——钩子缺席
+  // 本身是用例断言面；依赖缺失阶段主扩展干脆缺席）。探测一次而非逐条
+  // try/catch：缺席会话跳过全部 _test.* 前置重置（这些重置只在测试会话
+  // 有意义），finally 的 closeAllEditors 是宿主内置命令，不受影响。
+  const hooksReady = ext !== undefined
+    && (await vscode.commands.getCommands()).includes('onegayi.vsidian._test.resetLastMode')
+  console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项（分组 ${group}）${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}${hooksReady ? '' : '（_test 钩子缺席——跳过测试前置重置）'}`)
   let done = 0
   for (const [name, fn] of sharded) {
     const diagnose = SENSITIVE_CASES.some((entry) => entry.name === name)
@@ -37,111 +45,119 @@ export async function run(): Promise<void> {
     const caseStarted = Date.now()
     done++
     try {
-      // #38：全局模式记忆（globalState）在同一集成进程内跨用例共享——
-      // reading 记忆会让后续用例的新面板被恢复成阅读模式、source 记忆会
-      // 把默认/显式打开弹回原生编辑器。每用例前重置为无历史基线。
-      // 1.86.2 的 globalStorage 写入存在迟到回翻（前序用例的旧值广播滞后
-      // 到达会把刚校验过的新值翻回，resetLastMode 注释记录过同类现象；
-      // 实测残留 source 会让下一用例的 openWith 被弹回成原生编辑器、残留
-      // reading 会让依赖 live 视图的断言等不到）：读回校验后加稳定窗复查，
-      // 两轮都为 live 才放行
-      for (let attempt = 0; ; attempt++) {
-        await vscode.commands.executeCommand('onegayi.vsidian._test.resetLastMode')
-        const settled = async (): Promise<boolean> => {
-          const first = (await vscode.commands.executeCommand(
-            'onegayi.vsidian._test.getLastMode')) as string | undefined
-          if (first !== 'live') {
-            return false
-          }
-          await new Promise((r) => setTimeout(r, 250))
-          const second = (await vscode.commands.executeCommand(
-            'onegayi.vsidian._test.getLastMode')) as string | undefined
-          return second === 'live'
-        }
-        if (await settled() || attempt >= 10) {
-          if (attempt >= 10) {
-            // 放弃时不静默：真实回归（某路径反复写回非 live 值）会被吞成
-            // 后续用例的莫名失败，留痕把归因窗口缩短到本用例
-            const final = (await vscode.commands.executeCommand(
+      if (hooksReady) {
+        // #38：全局模式记忆（globalState）在同一集成进程内跨用例共享——
+        // reading 记忆会让后续用例的新面板被恢复成阅读模式、source 记忆会
+        // 把默认/显式打开弹回原生编辑器。每用例前重置为无历史基线。
+        // 1.86.2 的 globalStorage 写入存在迟到回翻（前序用例的旧值广播滞后
+        // 到达会把刚校验过的新值翻回，resetLastMode 注释记录过同类现象；
+        // 实测残留 source 会让下一用例的 openWith 被弹回成原生编辑器、残留
+        // reading 会让依赖 live 视图的断言等不到）：读回校验后加稳定窗复查，
+        // 两轮都为 live 才放行
+        for (let attempt = 0; ; attempt++) {
+          await vscode.commands.executeCommand('onegayi.vsidian._test.resetLastMode')
+          const settled = async (): Promise<boolean> => {
+            const first = (await vscode.commands.executeCommand(
               'onegayi.vsidian._test.getLastMode')) as string | undefined
-            console.warn(
-              `[集成测试][WARN] 记忆重置 10 次未稳定为 live（最终读值 ${String(final)}），放行用例「${name}」`,
-            )
+            if (first !== 'live') {
+              return false
+            }
+            await new Promise((r) => setTimeout(r, 250))
+            const second = (await vscode.commands.executeCommand(
+              'onegayi.vsidian._test.getLastMode')) as string | undefined
+            return second === 'live'
           }
-          break
-        }
-        await new Promise((r) => setTimeout(r, 50))
-      }
-      // #38 合并 main 后新增：每用例前重置设置键到默认（lineNumbers 开、
-      // fixture 键清理）。设置 globalState 与模式记忆同层，同样存在 1.86.2
-      // storage 迟到回翻（见 cases.ts 的 waitSettings 注释）——用例中断会在
-      // "行号已关"状态留下残留，跨用例污染后续行号断言，读回校验后放行。
-      // #96 起语言偏好并入重置面：显式语言残留会污染后续用例的标题断言
-      // （settings.pageTitle 随生效语言）与宿主装配
-      for (let attempt = 0; ; attempt++) {
-        await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', {
-          'editor.lineNumbers': true,
-          'general.language': 'auto',
-          // #322 默认编辑器守护开关（残留 false 会让后续守护用例的提示
-          // 语义被关闭）
-          'general.defaultEditorGuard': true,
-          // #318 搜索定位打开提示（默认关，2026-10-04 用户裁定——重置面
-          // 跟随默认值；提示用例自行显式开启，残留 true 不外溢）
-          'editor.searchRevealHint': false,
-          // #161 图片粘贴三键并入重置面：pasteLocation/pasteSubpath 残留会
-          // 让后续粘贴用例落盘到错误位置（paste 总开关残留 false 则整链
-          // 静默失效）
-          'image.paste': true,
-          'image.pasteLocation': 'same-dir',
-          'image.pasteSubpath': 'assets',
-        })
-        const readBack = (await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getSettings')) as Record<string, unknown>
-        if ((readBack['editor.lineNumbers'] === true && readBack['general.language'] === 'auto' &&
-          readBack['image.pasteLocation'] === 'same-dir' && readBack['image.pasteSubpath'] === 'assets') || attempt >= 10) {
-          if (attempt >= 10) {
-            console.warn(
-              `[集成测试][WARN] 设置重置未稳定（lineNumbers=true / language=auto，最终 ${String(readBack['editor.lineNumbers'])} / ${String(readBack['general.language'])}），放行用例「${name}」`,
-            )
+          if (await settled() || attempt >= 10) {
+            if (attempt >= 10) {
+              // 放弃时不静默：真实回归（某路径反复写回非 live 值）会被吞成
+              // 后续用例的莫名失败，留痕把归因窗口缩短到本用例
+              const final = (await vscode.commands.executeCommand(
+                'onegayi.vsidian._test.getLastMode')) as string | undefined
+              console.warn(
+                `[集成测试][WARN] 记忆重置 10 次未稳定为 live（最终读值 ${String(final)}），放行用例「${name}」`,
+              )
+            }
+            break
           }
-          break
+          await new Promise((r) => setTimeout(r, 50))
         }
-        await new Promise((r) => setTimeout(r, 100))
       }
-      // #128 CSS 片段状态重置（与设置同层的 globalState 迟到回翻风险面）：用例
-      // 间残留目录会让后续用例的样式面板装载无关片段、污染 cssProbe 断言
-      for (let attempt = 0; ; attempt++) {
-        await vscode.commands.executeCommand('onegayi.vsidian._test.setSnippetDirectory', null)
-        const snippet = (await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getSnippetState')) as { directory?: string | null; entries?: unknown[] }
-        if ((snippet.directory == null && (snippet.entries?.length ?? 0) === 0) || attempt >= 10) {
-          if (attempt >= 10) {
-            console.warn(
-              `[集成测试][WARN] 片段状态重置未稳定（directory=${String(snippet.directory)}），放行用例「${name}」`,
-            )
+      if (hooksReady) {
+        // #38 合并 main 后新增：每用例前重置设置键到默认（lineNumbers 开、
+        // fixture 键清理）。设置 globalState 与模式记忆同层，同样存在 1.86.2
+        // storage 迟到回翻（见 cases.ts 的 waitSettings 注释）——用例中断会在
+        // "行号已关"状态留下残留，跨用例污染后续行号断言，读回校验后放行。
+        // #96 起语言偏好并入重置面：显式语言残留会污染后续用例的标题断言
+        // （settings.pageTitle 随生效语言）与宿主装配
+        for (let attempt = 0; ; attempt++) {
+          await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', {
+            'editor.lineNumbers': true,
+            'general.language': 'auto',
+            // #322 默认编辑器守护开关（残留 false 会让后续守护用例的提示
+            // 语义被关闭）
+            'general.defaultEditorGuard': true,
+            // #318 搜索定位打开提示（默认关，2026-10-04 用户裁定——重置面
+            // 跟随默认值；提示用例自行显式开启，残留 true 不外溢）
+            'editor.searchRevealHint': false,
+            // #161 图片粘贴三键并入重置面：pasteLocation/pasteSubpath 残留会
+            // 让后续粘贴用例落盘到错误位置（paste 总开关残留 false 则整链
+            // 静默失效）
+            'image.paste': true,
+            'image.pasteLocation': 'same-dir',
+            'image.pasteSubpath': 'assets',
+          })
+          const readBack = (await vscode.commands.executeCommand(
+            'onegayi.vsidian._test.getSettings')) as Record<string, unknown>
+          if ((readBack['editor.lineNumbers'] === true && readBack['general.language'] === 'auto' &&
+            readBack['image.pasteLocation'] === 'same-dir' && readBack['image.pasteSubpath'] === 'assets') || attempt >= 10) {
+            if (attempt >= 10) {
+              console.warn(
+                `[集成测试][WARN] 设置重置未稳定（lineNumbers=true / language=auto，最终 ${String(readBack['editor.lineNumbers'])} / ${String(readBack['general.language'])}），放行用例「${name}」`,
+              )
+            }
+            break
           }
-          break
+          await new Promise((r) => setTimeout(r, 100))
         }
-        await new Promise((r) => setTimeout(r, 100))
       }
-      // #322 守护面重置（globalState 与设置同层）：版本锁与拒绝记录跨用例
-      // 共享会让「首装检测」类断言被前序写锁污染——每用例前清空（读回校验
-      // + 重试，与设置重置同一防护口径）
-      for (let attempt = 0; ; attempt++) {
-        await vscode.commands.executeCommand('onegayi.vsidian._test.resetEditorGuardState')
-        const guard = (await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getEditorGuardState')) as { versionLock?: string | null; rejections?: string[] }
-        if ((guard.versionLock == null && (guard.rejections?.length ?? 0) === 0) || attempt >= 10) {
-          if (attempt >= 10) {
-            console.warn(
-              `[集成测试][WARN] 守护状态重置未稳定（versionLock=${String(guard.versionLock)}），放行用例「${name}」`,
-            )
+      if (hooksReady) {
+        // #128 CSS 片段状态重置（与设置同层的 globalState 迟到回翻风险面）：用例
+        // 间残留目录会让后续用例的样式面板装载无关片段、污染 cssProbe 断言
+        for (let attempt = 0; ; attempt++) {
+          await vscode.commands.executeCommand('onegayi.vsidian._test.setSnippetDirectory', null)
+          const snippet = (await vscode.commands.executeCommand(
+            'onegayi.vsidian._test.getSnippetState')) as { directory?: string | null; entries?: unknown[] }
+          if ((snippet.directory == null && (snippet.entries?.length ?? 0) === 0) || attempt >= 10) {
+            if (attempt >= 10) {
+              console.warn(
+                `[集成测试][WARN] 片段状态重置未稳定（directory=${String(snippet.directory)}），放行用例「${name}」`,
+              )
+            }
+            break
           }
-          break
+          await new Promise((r) => setTimeout(r, 100))
         }
-        await new Promise((r) => setTimeout(r, 100))
       }
-      await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', diagnose)
+      if (hooksReady) {
+        // #322 守护面重置（globalState 与设置同层）：版本锁与拒绝记录跨用例
+        // 共享会让「首装检测」类断言被前序写锁污染——每用例前清空（读回校验
+        // + 重试，与设置重置同一防护口径）
+        for (let attempt = 0; ; attempt++) {
+          await vscode.commands.executeCommand('onegayi.vsidian._test.resetEditorGuardState')
+          const guard = (await vscode.commands.executeCommand(
+            'onegayi.vsidian._test.getEditorGuardState')) as { versionLock?: string | null; rejections?: string[] }
+          if ((guard.versionLock == null && (guard.rejections?.length ?? 0) === 0) || attempt >= 10) {
+            if (attempt >= 10) {
+              console.warn(
+                `[集成测试][WARN] 守护状态重置未稳定（versionLock=${String(guard.versionLock)}），放行用例「${name}」`,
+              )
+            }
+            break
+          }
+          await new Promise((r) => setTimeout(r, 100))
+        }
+        await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', diagnose)
+      }
       await fn()
       console.log(`[集成测试][PASS] ${name}`)
     } catch (err) {
@@ -157,7 +173,9 @@ export async function run(): Promise<void> {
       }
     } finally {
       try {
-        await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', false)
+        if (hooksReady) {
+          await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', false)
+        }
         // closeAllEditors 偶发遗留 custom tab（webview 销毁时序）：残留的
         // 死面板会被后续用例的 openWith 重显成永不就绪状态（用例注记录过
         // 该陷阱），显式逐个关闭并复核，最多重试 5 轮

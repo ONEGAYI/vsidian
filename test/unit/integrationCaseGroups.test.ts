@@ -20,6 +20,9 @@ vi.mock('../integration/suite/cases', () => ({ cases: fixture.cases }))
 vi.mock('vscode', () => ({
   extensions: { getExtension: () => ({ isActive: true }) },
   commands: {
+    // #365 T16：suite 入口以 getCommands 探测 _test 钩子在场（发行态会话
+    // 跳过测试前置重置）——mock 与开发会话同判（钩子在场）
+    getCommands: async () => ['onegayi.vsidian._test.resetLastMode'],
     executeCommand: async (command: string) => {
       if (command.endsWith('.getLastMode')) return 'live'
       if (command.endsWith('.getSettings')) return {
@@ -172,6 +175,22 @@ function productionCases(): Array<[string, null]> {
     ['probe375Cases', parseCaseArray('probe375.ts', 'probe375Cases')],
     ['wikilinkBlockCases', parseCaseArray('wikilinkBlock.ts', 'wikilinkBlockCases')],
     ['wikilinkEmbedCases', parseCaseArray('wikilinkEmbed.ts', 'wikilinkEmbedCases')],
+    ['addonHistoryCases', parseCaseArray('addonHistoryCases.ts', 'addonHistoryCases')],
+    ['addonT02Cases', parseCaseArray('addonT02Cases.ts', 'addonT02Cases')],
+    ['addonT04Cases', parseCaseArray('addonT04Cases.ts', 'addonT04Cases')],
+    ['addonT05Cases', parseCaseArray('addonT05Cases.ts', 'addonT05Cases')],
+    ['addonT06Cases', parseCaseArray('addonT06Cases.ts', 'addonT06Cases')],
+    ['addonT07Cases', parseCaseArray('addonT07Cases.ts', 'addonT07Cases')],
+    ['addonT08Cases', parseCaseArray('addonT08Cases.ts', 'addonT08Cases')],
+    ['addonT09Cases', parseCaseArray('addonT09Cases.ts', 'addonT09Cases')],
+    ['addonT10Cases', parseCaseArray('addonT10Cases.ts', 'addonT10Cases')],
+    ['addonT11Cases', parseCaseArray('addonT11Cases.ts', 'addonT11Cases')],
+    ['addonT12Cases', parseCaseArray('addonT12Cases.ts', 'addonT12Cases')],
+    ['addonT15InputCases', parseCaseArray('addonT15Cases.ts', 'addonT15InputCases')],
+    ['addonT15RendererCases', parseCaseArray('addonT15Cases.ts', 'addonT15RendererCases')],
+    ['addonT15UiCases', parseCaseArray('addonT15Cases.ts', 'addonT15UiCases')],
+    ['addonT16InstalledCases', parseCaseArray('addonT16InstalledCases.ts', 'addonT16InstalledCases')],
+    ['addonT17RemoteSshCases', parseCaseArray('addonT17RemoteSshCases.ts', 'addonT17RemoteSshCases')],
   ])
   const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
     ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)

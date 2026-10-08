@@ -33,3 +33,9 @@ logs-203/
 
 # 其他 agent 工具的本地附件（不入库）
 .codex-remote-attachments/
+
+# V02 附加组件探针的运行时构建产物（test/fixtures/addon-v02）
+test/fixtures/addon-v02/.build/
+
+# #354 T05 集成逃逸夹具：运行期创建的 junction（指向临时目录，不入库）
+test/integration/addonFixtures/addon-escape/escape/

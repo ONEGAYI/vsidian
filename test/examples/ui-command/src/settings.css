@@ -1,0 +1,42 @@
+/* #364 T15 界面样例——自有设置页内容样式（构建时拷入 dist/） */
+.sample-ui-settings-root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.sample-ui-settings-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.sample-ui-settings-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sample-ui-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sample-ui-settings-name {
+  min-width: 180px;
+  opacity: 0.85;
+}
+
+.sample-ui-settings-status {
+  min-height: 1.2em;
+  opacity: 0.85;
+}
+
+.sample-ui-settings-status[data-sample-settings-status='saved'] {
+  color: rgb(9, 150, 96);
+}
+
+.sample-ui-settings-status[data-sample-settings-status='failed'] {
+  color: rgb(200, 60, 40);
+}

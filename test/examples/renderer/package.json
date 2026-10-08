@@ -1,0 +1,24 @@
+{
+  "name": "renderer",
+  "publisher": "vsidian-example",
+  "displayName": "Vsidian Example: Renderer",
+  "description": "Standalone example add-on for Vsidian: renderer providers taking over the built-in mermaid language and a plain language with user preference, fault downgrade and self-handled bugs (T15, #364).",
+  "version": "0.1.0",
+  "license": "MIT",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-example.renderer.stats", "title": "Example Renderer: stats" },
+      { "command": "vsidian-example.renderer.armProviders", "title": "Example Renderer: arm providers" },
+      { "command": "vsidian-example.renderer.disarmProviders", "title": "Example Renderer: disarm providers" },
+      { "command": "vsidian-example.renderer.armCrash", "title": "Example Renderer: arm crash injection" },
+      { "command": "vsidian-example.renderer.releaseAndReRegister", "title": "Example Renderer: release and re-register" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./dist/extension.js"
+}

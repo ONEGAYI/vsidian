@@ -1286,7 +1286,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（121 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（123 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1910,7 +1910,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：清单即边界：第三方渲染器私有 DOM 不提升为稳定接口</p>
       <p class="life">引入：#133（2026-09-27，随界面域核实落档）</p>
     </article>
-    <h2>界面域 · 工具栏与横幅（6）</h2>
+    <h2>界面域 · 工具栏与横幅（8）</h2>
     <article class="entry" id="suspend-banner">
       <h3><code>.vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）</code><span class="eid">suspend-banner</span></h3>
       <p class="purpose">写回冲突暂停横幅（本项目自有 UI）：暂停态顶栏提示 + 恢复按钮。</p>
@@ -1966,6 +1966,44 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;toolbar-refresh&quot;] 探针命中（真宿主渲染验证）；jsdom 控制器单测（#208）：按钮在场、点击出站 refresh.request；浏览器套件（#208）：右端组几何绘制断言（中点右侧、与双态切换以工具栏 gap 紧邻）</p>
       <p class="life">引入：#208（2026-09-29）</p>
+    </article>
+    <article class="entry" id="addon-toolbar-slot">
+      <h3><code>.vsidian-addon-toolbar-slot（内含 .vsidian-addon-toolbar-button；具体按钮按 button[data-addon-button=&quot;&lt;组件ID&gt;.&lt;局部ID&gt;&quot;] 定位）</code><span class="eid">addon-toolbar-slot</span></h3>
+      <p class="purpose">附加组件工具栏按钮槽（#360 T11）：Vsidian 附加组件往编辑器工具栏新增自己按钮的**唯一合法挂载点**——平台构造并持有容器，组件只能往槽内加自己的按钮，不接管内核容器或内置按钮位。按钮基础形态复用工具栏 button 结构选择器（透明底/悬停高亮），文字内容（iconText/label）放宽宽度。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：容器常驻 DOM（空态 :empty 零占位——无组件注册时不占空间）；按钮随组件注册挂载、随声明模式撤挂/重挂、随组件停用或故障整组件回收。按钮显示文本缺省取注册 label，iconText 可覆盖。</p>
+      <p class="obsidian">Obsidian 对应：无对应物（Obsidian 插件ribbon为独立栏；本槽是顶栏内分组）</p>
+
+      <p class="dom">DOM 关系：顶栏 .vsidian-toolbar 内 div，位于左侧组尾部（快速操作之后）、右端组首刷新按钮（持有 margin-left:auto 推靠）之前。</p>
+      <pre><code>.vsidian-addon-toolbar-slot {
+  gap: 4px;
+}
+
+/* 定位某组件的按钮 */
+.vsidian-addon-toolbar-button[data-addon-button=&quot;publisher.addon.stamp&quot;] {
+  color: var(--vscode-toolbar-foreground);
+}</code></pre>
+      <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;addon-toolbar-slot&quot;] 探针命中（真宿主渲染验证）；jsdom runtime 单测（#360）：挂载归属/命名空间 data 属性/撤挂与重挂；浏览器与集成 T11 套件（#360）：按钮绘制命中与回收断言</p>
+      <p class="life">引入：#360（2026-10-07，T11）</p>
+    </article>
+    <article class="entry" id="addon-panel-dock">
+      <h3><code>.vsidian-addon-panel-dock（面板宿主容器）/ .vsidian-addon-panel（单面板）/ .vsidian-addon-panel-header / .vsidian-addon-panel-title / .vsidian-addon-panel-close / .vsidian-addon-panel-body / .vsidian-addon-panel-root（组件内容根）</code><span class="eid">addon-panel-dock</span></h3>
+      <p class="purpose">附加组件面板 dock（#360 T11）：组件面板的**唯一合法宿主容器**——面板 chrome（标题栏/标题/关闭按钮）与 dock 样式归平台，内容根（.vsidian-addon-panel-root）内部样式归组件（组件经装载样式表自管）。不把内核容器或整编辑器交给作者接管；具体面板按 [data-addon-panel=&quot;&lt;组件ID&gt;.&lt;局部ID&gt;&quot;] 定位。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：dock 常驻 DOM（空态 :empty 零占位）；面板默认关闭，组件 open() 或用户关闭按钮切换；面板关闭即容器移除、内容根脱挂（组件迟到写入不可见）；声明模式不含当前模式的面板强制关闭。</p>
+      <p class="obsidian">Obsidian 对应：无对应物（Obsidian 无 webview 内组件面板 dock）</p>
+
+      <p class="dom">DOM 关系：主编辑区 .vsidian-main 尾部（正文容器之后）；面板 section 含 header（title span + close button）与 body（滚动容器，max-height 约束），body 内为组件内容根 div。</p>
+      <pre><code>.vsidian-addon-panel-body {
+  max-height: 320px;
+}
+
+/* 定位某组件的面板 */
+.vsidian-addon-panel[data-addon-panel=&quot;publisher.addon.notes&quot;] .vsidian-addon-panel-title {
+  color: var(--vscode-editor-foreground);
+}</code></pre>
+      <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;addon-panel-dock&quot;] 探针命中（真宿主渲染验证）；jsdom runtime 单测（#360）：面板 chrome 形态/开闭生命周期/迟到结果脱挂；浏览器与集成 T11 套件（#360）：面板内容绘制命中与回收断言</p>
+      <p class="life">引入：#360（2026-10-07，T11）</p>
     </article>
     <article class="entry" id="mode-body">
       <h3><code>布局根模式类 .vsidian-body.vsidian-mode-live / .vsidian-body.vsidian-mode-reading（互斥，两态必居其一）</code><span class="eid">mode-body</span></h3>

@@ -496,3 +496,14 @@
 #app .vsidian-occurrence-bar {
   --vsidian-chrome-probe: rgb(247, 0, 1);
 }
+
+/* ---- #360 T11 附加组件挂载点（平台容器常驻 DOM、空态 :empty 零占位——
+      display:none 不影响探针级联读取；与 chromeContract.ts 同步顺延
+      248-249） ---- */
+#app .vsidian-toolbar .vsidian-addon-toolbar-slot {
+  --vsidian-chrome-probe: rgb(248, 0, 1);
+}
+
+#app .vsidian-main .vsidian-addon-panel-dock {
+  --vsidian-chrome-probe: rgb(249, 0, 1);
+}

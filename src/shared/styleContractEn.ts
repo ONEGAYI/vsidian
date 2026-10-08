@@ -948,6 +948,26 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).',
     obsidian: { counterpart: 'No counterpart' },
   },
+  // #360 T11 add-on UI contribution mount points (platform-owned containers;
+  // add-on button/panel content styling belongs to the add-on)
+  'addon-toolbar-slot': {
+    purpose:
+      'Add-on toolbar button slot (#360 T11): the only legal mount point for Vsidian add-ons adding their own toolbar buttons — the platform constructs and owns the container; an add-on can only add its own buttons into the slot and never takes over kernel containers or built-in button positions. Button base shape reuses the toolbar button structural selector (transparent background / hover highlight); text content (iconText/label) widens the box.',
+    states:
+      'Persistent container DOM (empty state collapses via :empty — zero footprint with no registrations); buttons mount on add-on registration, unmount/remount with the declared mode, and are recycled wholesale when the add-on is disabled or faults. The button display text defaults to the registered label; iconText overrides it.',
+    dom:
+      'A div inside the top .vsidian-toolbar, at the tail of the left group (after quick actions) and before the right-end group head refresh button (which owns the margin-left:auto push rule).',
+    obsidian: { counterpart: 'No counterpart (the Obsidian plugin ribbon is a separate bar; this slot is an in-toolbar group)' },
+  },
+  'addon-panel-dock': {
+    purpose:
+      'Add-on panel dock (#360 T11): the only legal host container for add-on panels — panel chrome (header/title/close button) and dock styling belong to the platform, while the content root (.vsidian-addon-panel-root) interior styling belongs to the add-on (managed via its loaded stylesheets). Kernel containers or the whole editor are never handed to authors; locate a specific panel via [data-addon-panel="<addonId>.<localId>"].',
+    states:
+      'Persistent dock DOM (empty state collapses via :empty); panels default to closed, toggled by the add-on open() or the user close button; closing a panel removes its container and detaches the content root (late writes by the add-on stay invisible); a panel whose declared mode excludes the current mode is force-closed.',
+    dom:
+      'At the tail of the main editor area .vsidian-main (after the content containers); each panel section holds a header (title span + close button) and a body (scroll container, max-height constrained) whose child is the add-on content root div.',
+    obsidian: { counterpart: 'No counterpart (Obsidian has no in-webview add-on panel dock)' },
+  },
   'skeleton': {
     purpose:
       'Loading skeleton overlay for the editor initial open (#292): rendered with the initial HTML immediately, covering both the script-load and content-ready windows; after mount it is re-parented as an overlay inside the main editor area below the toolbar, and removed after the first content frame following the shimmer cycle-completion rule. Default background follows the editor background variable; the skeleton never intercepts pointer events.',

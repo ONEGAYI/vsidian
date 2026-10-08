@@ -1,6 +1,8 @@
 # Vsidian 附加组件：接口与装载技术方案
 
-状态：2026-10-05 的第一版技术提议。产品规则以 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 和[规格](../specs/vsidian-addons.md)为准；本文收敛实现路线，尚未发布 SDK，也未接入生产代码。字段、接口名称与首个 API 版本仍须随公开声明和消费样例冻结。
+状态：2026-10-05 的第一版技术提议。产品规则以 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 和[规格](../specs/vsidian-addons.md)为准；本文收敛实现路线，尚未发布 SDK。字段、接口名称与首个 API 版本仍须随公开声明和消费样例冻结。
+
+**实施进度**：T01（#350，2026-10-07）已将第 2 节的身份发现、兼容检查与轻量注册接入生产路径（`src/shared/addonIdentity.ts`、`src/host/addons/`、设置页「附加组件」分页），并携带三个测试夹具扩展（`test/integration/addonFixtures/`）作为消费样例；真宿主集成测试覆盖两条激活路径、重复注册与清单刷新。T02（#351，2026-10-07）已将第 3、4 节的两生命周期与页面装载接入生产：`registerAddon` 含 `setup`/`enable` 与页面入口注册（`settings.registerPage`/`pages.registerEditor`）形状，运行生命周期由 `src/host/addons/addonRuntime.ts` 驱动（普通关闭释放运行贡献保留设置能力、偏好持久、可归因异常全组件暂停）；页面 SDK 与装载协议契约在 `src/shared/addonPage.ts`，生产装载器 `src/webview/addonPageLoader.ts` 并入 main/settings 两入口，编辑器扩展挂载槽为 `liveInstance` 扩展数组末尾的 Compartment（V02 放行结论的生产缺口已闭合）；实验入口表登记 `cm6@1.0.0`。设置页分页新增功能开关与组件设置页挂载区。验证：单元（生命周期/装载器/登记校验/设置页 UI）、浏览器生产路径（`test:browser` 的 addonPageSdk 套件——真实键盘/IME/绘制层）与真宿主集成（`test/integration/suite/addonT02Cases.ts`——生产编辑器/设置页面板装载夹具组件）。T04（#353，2026-10-07）已将第 5.5 节的设置能力面接入生产：复杂设置定义（标量/数组/对象一层结构）经 `settings.registerDefinitions` 按组件隔离注册（`src/shared/addonSettings.ts` 形状校验矩阵），`src/host/addons/addonSettingsService.ts` 承担按批原子保存与用户默认/工作区两层持久化（存储 v1 冻结 fail-safe；变化事件只在持久化成功后发出），setup context 暴露 `get/getSource/update/clearWorkspaceOverride/onChanged`；设置页「附加组件」分页新增平台基础设置区（双标签作用范围、标量/数组重复项/对象字段基础控件、逐项「使用用户默认」清覆盖、失败不虚报反馈——`src/webview/addonSettingsSection.ts`），功能开关同样支持两层；消费样例为夹具 `addon-t04`（`test/integration/suite/addonT04Cases.ts` 六用例）。验证：单元 69 例（模型/服务/runtime/设置区 UI）+ 浏览器 addonSettings 套件（真实键盘与绘制层）+ 真宿主六用例。宿主侧 realpath 符号链接校验仍归 T05；侧栏三分组与自定义页完整呈现归 T05。已实现部分仍是草案形状，不冒充已发布稳定 API。
 
 **安装后即可使用，作者通过代码注册能力**。清单负责识别与兼容，Vsidian 负责生命周期、设置和行为协调。输入与渲染代码在页面运行，宿主端保留权威文本和持久化能力。
 
@@ -40,6 +42,8 @@ IIFE 指执行后注册入口的独立浏览器脚本。组件仍可用 TypeScri
 
 这是提议格式，`1.0.0` 是首个稳定 API 的候选版本，当前不存在该公开 API。实验能力需要时另加 `experimental` 兼容声明；具体实验版本标记随入口冻结。
 
+**T01 实施落点（#350）**：上述清单形状已由 `src/shared/addonIdentity.ts` 解析校验（`manifestVersion: 1`、`api` 范围、可选 `experimental` 表；范围求值子集见同仓 `semverRange.ts`）。宿主实验入口表当前为空——任何 `experimental` 声明都判不兼容，如实反映实验入口未发布。官方清单为 `OFFICIAL_ADDON_EXTENSION_IDS`（初版空，登记新官方组件只改该表）。消费样例即测试夹具 `test/integration/addonFixtures/addon-ok`（声明 + 依赖 + 代码注册）。
+
 | 字段或身份 | 责任 |
 | --- | --- |
 | VSCode `Extension.id` | 唯一组件 ID，沿用 `publisher.name`；不在私有清单重复维护 |
@@ -64,6 +68,8 @@ Vsidian 的 `activate()` 构造并返回宿主 API。发现协调任务等待自
 同一接入代次再次注册时返回 `AlreadyRegistered`，不重复调用接入回调。手动重试先释放旧代次，再创建新代次；原生 `activate()` 的缓存不能代替这层注册管理。
 
 首版只接受当前宿主可调用的组件。未发现时显示「当前宿主不可用」并提供 VSCode 管理入口，不能仅凭查询为空判断未安装或装错侧。
+
+**T01 实施落点（#350）**：上述顺序由 `src/host/addons/addonCoordinator.ts` 实现——`start()` 同步返回（先订阅 `extensions.onDidChange` 再发起扫描；扫描先等自身 API 公布，不被自身 `activate()` 等待），按组件 ID 合并在途唤醒；`src/host/addons/addonRegistry.ts` 承担注册校验链与 `AlreadyRegistered`。真宿主实证补充两点 VSCode 1.82.3 语义（已钉入实现与测试）：其一，`Extension.isActive` 表示「已尝试激活」而非「激活成功」——激活失败的扩展 `isActive` 仍为 `true`，协调器须按自身记录短路而不是信 `isActive`；其二，对激活失败过的扩展再次 `activate()` 会假成功（resolve 而非重抛），故不自动重试故障组件（ADR 已确认方向），重试走后续票的手动入口（先释放旧代次）。
 
 ## 3. 公开接口与两种生命周期
 
@@ -137,6 +143,14 @@ SDK 载体建议是由主仓库生成声明、最小页面入口辅助代码和�
 
 目标从有效视图句柄取得，来源由 SDK 的组件和行为上下文添加，作者不能把请求伪装成另一组件。公开坐标沿用 UTF-16 偏移，页面文本采用 LF；宿主适配器继续负责行尾转换。
 
+**已实施（T06 #355）**。接口名称、错误类型与提交凭据随消费样例冻结如下，事实源 `src/shared/addonEditApi.ts`：
+
+- 句柄面：`views.list() / get(instanceId) / onCreated / onDisposed`；句柄 `info`（`instanceId`、`viewType: "main" | "embed" | "hover"`、`targetDocUri`、`mode: "live" | "reading"`、`editable`）+ 编辑面 `editor.getSnapshot() / applyEdits(request) / setSelection(ranges) / reveal(offset)`。embed 句柄身份为宿主 occurrence 序号（同目标多处嵌入各自独立句柄）；hover 句柄只读（写入拒 `read-only`）。仅编辑器页提供 views 面（设置页为 `undefined`）。
+- 快照：`{ text, selections, version, revision }`——LF 文本、多选区、权威文档版本、快照修订标记（本地输入与外部同步都推进修订，覆盖页面未确认输入窗口）。
+- 提交凭据：`{ opId, version }`——`opId` 由 SDK 按装载代次生成（`g<代次>-op<N>`，作者请求结构上不携带身份），`version` 与 `edit.ack` 同源。
+- 拒绝类型（八种可辨认拒绝）：`view-disposed` / `read-only` / `suspended`（含冲突暂停与空白格组合缓冲在场——组合期来源会丢失，保守拒绝可重试）/ `stale-snapshot` / `history-boundary`（HistoryBoundaryUnavailable 语义）/ `conflict` / `error` / `invalid-request`。
+- 生产实现：注册表 `src/webview/addonViews.ts`、Live 编辑面 `src/webview/liveInstance.ts`（快照修订、原子事务、凭据路由、`joinPrevious` 暂缓窗口合并为数组 origin 一笔出站）；消费样例 `test/fixtures/addon-v02/addon/t06Editor.ts` 与集成/键盘套件（`test/integration/suite/addonT06Cases.ts`、`test/browser/addonT06EditHost.mjs`）。
+
 ### 5.2 输入行为
 
 `behaviors.register` 登记稳定局部 ID、必填名称、可选说明和例子，以及业务处理回调。局部 ID 与组件 ID 共同组成持久身份，不以显示名作为存储键。
@@ -164,6 +178,24 @@ SDK 载体建议是由主仓库生成声明、最小页面入口辅助代码和�
 `commands.register` 提供名称、回调、作用模式及可选默认绑定。每个面向用户的操作都登记到统一快捷键管理，允许默认未绑定。
 
 菜单、按钮和面板通过所属注册句柄新增。稳定 ID 统一加组件命名空间；注册内置 ID、同名替换或修改别的组件贡献明确拒绝。设置页整体导航和内置菜单的归属仍由 Vsidian 管理。
+
+**已实施（T10 #359，2026-10-07）**。接口形状随消费样例冻结如下，事实源 `src/shared/addonCommands.ts`（形状与校验）+ `src/webview/addonCommands.ts`（编辑器页注册表）+ `src/host/addons/addonCommandService.ts`（宿主目录与命令面板命令）：
+
+- SDK 面（仅编辑器页；设置页为 undefined）：`commands.register(def, handler)`——def 为 `{ id, title, mode, writes?, defaultBindings? }`（title 是自由文本，不进 Vsidian 内置字典）；`menus.registerItem(def)`——def 为 `{ id, label, iconKey?, order?, command?, when?, enable? }`（iconKey 须在平台图标 key 表；when/enable 谓词输入为打开菜单时采集的结构化快照）。均返回 `{ ok, reason?, dispose }`。
+- 命名空间与拒绝：命名空间 ID 由平台注入（`<组件ID>.<局部ID>`），局部 ID 禁点号（含点即伪造跨组件/内置身份的尝试）——同名注册（duplicate-command）、Tab 默认绑定（tab-forbidden，#125 固定链）、菜单 label 空/iconKey 未登记等均为明确拒绝码（普通 API 拒绝不算故障）；不提供任何覆写/隐藏/接管内置菜单项的入口。
+- 统一快捷键管理：组件命令进 `KeybindingOperations` 合并视图（运行期操作表 `setRuntimeOperations`，与编译期内置表合并供冲突检查/生效绑定/路由/设置页全链消费）；键位与内置同一存储（键 = 命名空间 ID，存储净化保留含点键——组件不在场时用户绑定与显式清空不丢）；设置页快捷键分页合并展示（行名与描述标注组件 ID 归属）。三环境（编辑器 webview/设置页/宿主）各持运行期表，经 `addonCommands.report`（全量对账）与 `addons.commandCatalog`（目录推送）同步。
+- 执行链三入口共用组件回调：快捷键 router 本地分支（mode/writes 按声明过滤路由）；宿主命令面板（`vscode.commands` 注册 + 活动面板转发 `addonCommand.execute`，webview 复核声明模式）；组件菜单项点击（组件簇 `addon.<组件ID>` 追加内置三簇之后，handler 优先分派路径）。
+- 停用/故障/代次释放：装载器 releaseLoad 在 webview 侧闭环整组件回收（命令+菜单+运行期表+空表上报）；宿主侧 runtime 状态对账回收 VSCode 命令与目录——不影响内置命令与菜单，不清用户键位。
+- 消费样例：夹具 `test/fixtures/addon-v02/addon/t10Editor.ts` 与集成/浏览器套件（`test/integration/suite/addonT10Cases.ts`、`test/browser/addonT10Commands.mjs`）。已实现部分仍是草案形状，不冒充已发布稳定 API。
+
+**已实施（T11 #360，2026-10-07）**。界面贡献形状随消费样例冻结如下，事实源 `src/shared/addonUi.ts`（形状与校验）+ `src/webview/addonUi.ts`（运行时：挂载/回收/目标路由）：
+
+- SDK 面（仅编辑器页；设置页为 undefined）：`ui.registerButton(def, onClick?)`——def 为 `{ id, label, slot?, mode?, order?, command?, iconText? }`（slot 白名单当前仅 `'toolbar'`，白名单外注册拒绝；label 自由文本承载 aria 与 `data-tooltip`；command 与 onClick 互斥且必具其一——挂接 T10 命令时点击经命令体系执行、键位徽章 `data-tooltip-keys` 取生效绑定，onClick 路径回调携当前活动视图句柄）；`ui.registerPanel(def)`——def 为 `{ id, title, mode?, mount(root, target), unmount?(root) }`，返回句柄含 `open()/close()/isOpen()`（dispose 后全部拒绝）。
+- 挂载点（样式界限落档 styleContract `addon-toolbar-slot` / `addon-panel-dock` 条目）：按钮唯一合法槽是工具栏左组尾部容器 `.vsidian-addon-toolbar-slot`（常驻 DOM、空态 `:empty` 零占位；按钮按 `data-addon-button="<命名空间ID>"` 定位）；面板唯一宿主是主编辑区尾部 dock `.vsidian-addon-panel-dock`，面板 chrome（标题栏/关闭按钮，平台 i18n）与 dock 样式归平台、内容根 `.vsidian-addon-panel-root` 内部样式归组件——不把内核容器或整编辑器交给作者接管。
+- 目标路由（T06 句柄语义）：onClick 与面板 `target()` 经平台注入**当前活动视图句柄**（焦点所在嵌入内部 Live → B，否则主正文 A——在引用 B 中操作归 B 不误改父 A）；句柄构造与 `views.get` 同源（装载器 `buildViewHandle`：代次存活注入 + opId 分配，组件释放后目标不可达）。
+- 回收矩阵：面板关闭（用户点关闭/组件 close）即容器移除、内容根脱挂——迟到结果结构上不可见；模式切换（applyModeDom 通知）撤挂不符按钮（注册保留、切回重挂）并强制关闭不符面板（不自动复活）；组件停用/故障/代次释放（装载器 releaseLoad）整组件回收（本页闭环）；视图释放随 webview 销毁自然回收。mount 异常面板回收并移除注册（不留半装配）；onClick/unmount 异常吞掉留痕（运行期回调异常不升级为全组件故障）。
+- 负向拒绝（普通 API 拒绝，可测试）：同名按钮/面板（duplicate-button/panel）、槽位白名单外（slot-unknown——内置界面/侧栏/设置框架不可挂）、动作二选一冲突或缺席（action-conflict/missing）、localId 含点（伪造身份）。
+- 消费样例：夹具 `test/fixtures/addon-v02/addon/t11Editor.ts` 与集成/浏览器套件（`test/integration/suite/addonT11Cases.ts` 五用例、`test/browser/addonT11Ui.mjs` 五场景）。已实现部分仍是草案形状，不冒充已发布稳定 API。
 
 ### 5.5 设置
 
@@ -209,6 +241,13 @@ VSCode 1.82.3 的 `WorkspaceEdit` 会建立并关闭一条原生历史项，不�
 
 探针用了独立测试组件和固定、互不重复的文本状态。生产实现不能依赖这种简化匹配，必须接入现有版本、增量和确认管线。上述测试完成前，不发布已经满足完整历史契约的声明。
 
+**历史协调已实施（T06 #355，T03 #352 接入点先行）**。生产协调器 `src/host/addonHistoryCoordinator.ts`（per 目标文档，纯逻辑 + 端口注入）：
+
+- 条目流重建：ack 版本对位链（缺口/超前即 `mapping-lost`）+ 归属对位（atomic 开组、joinPrevious 并组、合并笔逐次来源保留、外来写入单步单位）。
+- `joinPrevious` 业务闸门四种拒绝形态（空日志、仅外来、组顶被打断、映射失配）——atomic 恒放行；拒绝经 `edit.ack` 的 `originRejection: "history-boundary"` 业务标记回传，不进冲突暂停。
+- 外部回流补完（F3 前置检查 + F4 版本吸收）、旧区深度镜像、组执行中断按实际吸收推进；持久化快照（workspaceState + 文本指纹）重启恢复，文本不一致保守 lost（F5：拒绝分组协调 ≠ 历史为空）。F1（脏目标不关闭临时标签）已随 T03 `closeTempTextTabsIfClean` 固化。
+- 验证（V01 矩阵生产版，非探针）：集成 `test/integration/suite/addonT06Cases.ts` 六用例（ABCD 组/拒绝矩阵/引用 B/外来交错与连按与在途并发/webview 重载与会话退役）+ 键盘 CDP `test/browser/addonT06EditHost.mjs` 六场景（真实键盘/IME 驱动生产控制器，修饰提交经公开 SDK）+ 单测契约（协调器 16 项、Live 实例 8 项、documentSession 4 项）。扩展宿主真重启不可测试进程内重放（V01 同等限制），持久化恢复语义由协调器单测承载。
+
 ## 7. 管理状态与持久化
 
 运行状态和用户偏好分别记录：
@@ -248,9 +287,9 @@ AGENTS 只保留触发入口，正文留在规格和技术方案。正式门禁�
 
 后续按以下顺序接入生产，前一步的公开消费路径通过后再展开下一步：
 
-1. 发现、兼容和轻量注册，公开声明及输入／渲染／界面三类消费样例。
+1. 发现、兼容和轻量注册，公开声明及输入／渲染／界面三类消费样例。（T01 #350 已落地发现/兼容/轻量注册与夹具消费样例；公开声明文档与三类正式消费样例待后续票。）
 2. 编辑器页与设置页的资源、工厂装配、普通停用和故障释放；补资源拒绝对照及实际 CM6 扩展接入。
-3. 输入行为、权威写回和历史协调；覆盖 IME、连续操作、引用 B、原生入口、失败和重载。
+3. 输入行为、权威写回和历史协调；覆盖 IME、连续操作、引用 B、原生入口、失败和重载。（权威写回与历史协调已由 T06 #355 实施——统一视图编辑 API + 生产历史协调器，V01 矩阵生产版验证；输入行为调度属 T07。）
 4. 渲染自动接管、已开文档热切换及首选恢复，设置分组、作用范围和行为冲突管理。
 5. Remote SSH、安装态双 VSIX、可信历史基线和兼容门禁；整理人工验收记录。
 

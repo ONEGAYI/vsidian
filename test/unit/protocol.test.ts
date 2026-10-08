@@ -2338,6 +2338,124 @@ describe('isWebviewToHost / isHostToWebview：wikilink 标题查询（#379 T04�
   })
 })
 
+describe('addonRenderers 消息守卫（#358 T09）', () => {
+  it('addonRenderers.registered：合法候选上报接受，缺名称/空语言拒绝', () => {
+    const okMessage = {
+      kind: 'addonRenderers.registered' as const,
+      payload: {
+        addonId: 'pub.a',
+        providers: [
+          { rendererId: 'r1', label: 'R1', languages: ['mermaid', 'draw'], modes: ['live', 'reading'], exportFormats: ['svg'] },
+        ],
+      },
+    }
+    expect(isWebviewToHost(okMessage)).toBe(true)
+    expect(isWebviewToHost({ ...okMessage, payload: { addonId: 'pub.a', providers: [{ rendererId: 'r1', label: '', languages: ['x'], modes: ['live'], exportFormats: [] }] } })).toBe(false)
+    expect(isWebviewToHost({ ...okMessage, payload: { addonId: 'pub.a', providers: [{ rendererId: 'r1', label: 'R1', languages: [], modes: ['live'], exportFormats: [] }] } })).toBe(false)
+    expect(isWebviewToHost({ ...okMessage, payload: { addonId: '', providers: [] } })).toBe(false)
+  })
+
+  it('addonRenderers.table：生效表广播接受，版本非整数/来源非法拒绝', () => {
+    const tableMessage = {
+      kind: 'addonRenderers.table' as const,
+      table: {
+        version: 3,
+        providers: [
+          { addonId: 'pub.a', rendererId: 'r1', providerId: 'pub.a/r1', label: 'R1', languages: ['mermaid'], modes: ['live'], exportFormats: [] },
+        ],
+        languages: [
+          { language: 'mermaid', effective: 'pub.a/r1', source: 'auto' as const },
+          { language: 'draw', effective: 'none', source: 'user' as const },
+        ],
+      },
+    }
+    expect(isHostToWebview(tableMessage)).toBe(true)
+    expect(isHostToWebview({ kind: 'addonRenderers.table', table: { ...tableMessage.table, version: 1.5 } })).toBe(false)
+    expect(isHostToWebview({ kind: 'addonRenderers.table', table: { ...tableMessage.table, languages: [{ language: 'mermaid', effective: 'pub.a/r1', source: 'system' }] } })).toBe(false)
+  })
+})
+
+describe('isWebviewToHost / isHostToWebview：T08 行为冲突管理消息（#357）', () => {
+  const info = { addonId: 'pub.a', id: 'dash-fill', name: '破折填充', history: 'atomic' as const }
+
+  it('addon.behaviors.report：载荷形态、空表（全撤信号）与方向校验', () => {
+    const base = { kind: 'addon.behaviors.report', addonId: 'pub.a', generation: 2 }
+    expect(isWebviewToHost({ ...base, behaviors: [info] })).toBe(true)
+    expect(isWebviewToHost({ ...base, behaviors: [] })).toBe(true)
+    expect(isWebviewToHost({ ...base, behaviors: [{ ...info, name: '' }] })).toBe(false)
+    expect(isWebviewToHost({ ...base, behaviors: [{ ...info, history: 'merge' as never }] })).toBe(false)
+    expect(isWebviewToHost({ ...base, behaviors: 'x' as never })).toBe(false)
+    expect(isWebviewToHost({ ...base, generation: -1, behaviors: [] })).toBe(false)
+    expect(isWebviewToHost({ ...base, addonId: '', behaviors: [] })).toBe(false)
+    // 方向校验：宿主不发起
+    expect(isHostToWebview({ ...base, behaviors: [] } as never)).toBe(false)
+  })
+
+  it('addons.behaviorsGet / behaviorsSetDisabled / behaviorsSetOrder：载荷与方向校验', () => {
+    expect(isWebviewToHost({ kind: 'addons.behaviorsGet' })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: ['pub.a#x'], disabled: true })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: [], disabled: false })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: 'pub.a#x' as never, disabled: true })).toBe(false)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: [1] as never, disabled: true })).toBe(false)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetDisabled', keys: [], disabled: 'yes' as never })).toBe(false)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetOrder', order: ['pub.a#x', 'pub.b#y'] })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetOrder', order: [] })).toBe(true)
+    expect(isWebviewToHost({ kind: 'addons.behaviorsSetOrder', order: [null] as never })).toBe(false)
+    expect(isHostToWebview({ kind: 'addons.behaviorsGet' } as never)).toBe(false)
+  })
+
+  it('addons.behaviors：注册表 + 用户态 + notice 形态与方向校验', () => {
+    const base = { kind: 'addons.behaviors', behaviors: [info] }
+    expect(isHostToWebview({ ...base, state: null })).toBe(true)
+    expect(isHostToWebview({ ...base, state: { version: 1, order: ['pub.a#dash-fill'], disabled: [] } })).toBe(true)
+    expect(isHostToWebview({ ...base, state: null, notice: { kind: 'saved' } })).toBe(true)
+    expect(isHostToWebview({ ...base, state: null, notice: { kind: 'save-failed' } })).toBe(true)
+    expect(isHostToWebview({ ...base, state: null, notice: { kind: 'other' as never } })).toBe(false)
+    expect(isHostToWebview({ ...base, state: { version: 2, order: [], disabled: [] } as never })).toBe(false)
+    expect(isHostToWebview({ ...base, state: null, behaviors: [{ ...info, examples: 'x' }] })).toBe(false)
+    expect(isHostToWebview({ ...base, state: undefined as never })).toBe(false)
+    // 方向校验：webview 不发起
+    expect(isWebviewToHost({ ...base, state: null } as never)).toBe(false)
+  })
+})
+
+describe('addonPage.outbound 守卫：出站消息页面种类字段（评审 R2）', () => {
+  // 代次按面比对依赖消息自带 page——缺字段或非法值整条拒绝（守卫层
+  // 先于 runtime.handleOutbound 拦下，不进代次比对）
+  const wrapped = (outbound: Record<string, unknown>) => ({ kind: 'addonPage.outbound' as const, outbound })
+
+  it('faulted/loaded/channel.request 带 page 通过；缺 page 或非法 page 拒绝', () => {
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.faulted', addonId: 'pub.a', generation: 1, page: 'editor', reason: 'boom',
+    }))).toBe(true)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.faulted', addonId: 'pub.a', generation: 1, reason: 'boom',
+    }))).toBe(false)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.faulted', addonId: 'pub.a', generation: 1, page: 'webview', reason: 'boom',
+    }))).toBe(false)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.channel.request', addonId: 'pub.a', generation: 1, page: 'settings', requestId: 'r1', topic: 't', payload: null,
+    }))).toBe(true)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.channel.request', addonId: 'pub.a', generation: 1, requestId: 'r1', topic: 't', payload: null,
+    }))).toBe(false)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.loaded', addonId: 'pub.a', generation: 1, page: 'editor', outcome: { ok: true, css: [] },
+    }))).toBe(true)
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.loaded', addonId: 'pub.a', generation: 1, outcome: { ok: true, css: [] },
+    }))).toBe(false)
+  })
+
+  it('unloaded 不要求 page（宿主对其无代次记账，权威在装载器侧）', () => {
+    expect(isWebviewToHost(wrapped({
+      type: 'addon.unloaded', addonId: 'pub.a', generation: 1,
+      outcome: { ok: true }, disposals: 0, releasedRequests: 0,
+    }))).toBe(true)
+  })
+})
+
 it('view.state.paint.code accepts bounded token paint samples and rejects malformed observations (#389)', () => {
   const token = { text: 'puts', classes: 'tok-keyword', color: 'rgb(175, 0, 219)', visible: true }
   const base = {

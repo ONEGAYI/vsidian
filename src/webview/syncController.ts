@@ -155,7 +155,14 @@ import {
   setDiagramExportSender,
   setDiagramPopupDocSource,
 } from './diagramPopup'
-import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
+import {
+  effectiveGraphicSvgExport,
+  hasEffectiveGraphicRenderer,
+  refreshAddonGraphicBlocks,
+  remountChangedGraphicBlocks,
+  renderGraphicBlockInto,
+} from './graphicRenderers'
+import { addonRenderersBridge, type AddonRenderersTableChange } from './addonRenderers'
 import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome, markImageFrameSized, wrapGraphicFrame } from './graphicBlockChrome'
 import {
   closeImagePopup,
@@ -201,7 +208,16 @@ import {
   targetTipProbe,
 } from './targetTip'
 import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
-import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
+import {
+  GRAPHIC_LANG_ATTR,
+  GRAPHIC_MODE_ATTR,
+  GRAPHIC_PROVIDER_ATTR,
+  MERMAID_CLASS_NAMES,
+  MERMAID_CODE_ATTR,
+  MERMAID_STATE_ATTR,
+  dynamicRenderedFenceLanguageSnapshot,
+  setDynamicRenderedFenceLanguages,
+} from '../shared/mermaid'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { runPerfProbe } from './perfProbe'
@@ -454,6 +470,32 @@ export class WebviewSyncController {
    *  设置页）、全局消息接收与命令分派。view 经下方 getter 透出（既有
    *  根特性代码的只读消费面不变） */
   private live: LiveEditorInstance | undefined
+  /** #354 T05 附加组件扩展重配的挂起意图（输入在途时暂存，落定冲刷；
+   *  undefined = 无挂起——null 与 []（摘除/空）是有效挂起值） */
+  private pendingAddonExtensions: Extension[] | null | undefined = undefined
+  /** #351 T02 附加组件装载器观测探针（main.ts 安装装载器后挂载；缺省不报） */
+  private addonPageProbe: (() => import('../shared/addonPage').AddonLoaderStats) | undefined
+  /** T07（#356）输入行为 runtime 观测探针（main.ts 构造 runtime 后挂载；
+   *  缺省不报） */
+  private addonBehaviorProbe: (() => import('../shared/addonBehaviors').AddonBehaviorRuntimeStats) | undefined
+  /** T06（#355）统一视图注册表（main.ts 构造注入；init 后注册主正文句柄，
+   *  unmount 注销；缺省不注册） */
+  private addonViews: import('./addonViews').AddonViewRegistry | undefined
+  /** #359 T10 组件命令注册表（main.ts 构造注入；快捷键本地分支与宿主回发
+   *  共用；缺省不路由 addon 命令） */
+  private addonCommands: import('./addonCommands').AddonCommandsRuntime | undefined
+  /** #360 T11 附加组件界面运行时（main.ts 构造注入；模式切换通知与命令
+   *  按钮执行转发；缺省不挂载组件按钮/面板） */
+  private addonUi: import('./addonUi').AddonUiRuntime | undefined
+  /** #360 T11 工具栏附加组件槽容器（mount 时创建；平台持有——组件按钮
+   *  只进这个槽） */
+  private addonToolbarSlotEl: HTMLElement | undefined
+  /** #360 T11 面板 dock 容器（mount 时创建；平台持有——组件面板只进
+   *  这个 dock） */
+  private addonPanelDockEl: HTMLElement | undefined
+  /** T07（#356）输入行为链驱动（main.ts 经 attachAddonBehaviorDrive 注入
+   *  页面级 runtime；缺省 undefined——未装配行为面的环境零开销） */
+  private driveAddonBehaviors: import('./liveInstance').LiveEditorInstanceDeps['driveAddonBehaviors']
   private sessionId = ''
   private docUri = ''
   /** 实例存在前的持久化初值兜底（persistState 在 mount 前被调用时使用） */
@@ -939,6 +981,11 @@ export class WebviewSyncController {
       else if (id === 'findSelectPrevious') { if (!embedBlocked()) this.runOccurrenceSelect('prev') }
       else if (id === 'findSkipCurrent') { if (!embedBlocked()) this.runOccurrenceSelect('skip') }
       else if (id === 'findAllOccurrences') { if (!embedBlocked()) this.runOccurrenceSelect('all') }
+      // #359 T10 附加组件命令：本地分支直执行（回调在本页，不出站宿主往返
+      // ——与词移动/选词族同款先例；router 已按命令声明的 mode/writes 过滤
+      // 路由，模式与写门控在此不重复）。命令面板入口经宿主 executeCommand
+      // → addonCommand.execute 回发与本入口共用 runAddonCommand
+      else if (this.addonCommands?.hasCommand(id)) this.runAddonCommand(id)
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -1056,6 +1103,8 @@ export class WebviewSyncController {
       // 显式关闭链路与正文嵌入同源（同一 EmbedCardManager——票面「后续
       // 浮窗使用同一目标操作和结果」）
       mountPopupRoot: (args) => this.embedCards?.mountPopupRoot(args) ?? null,
+      // T06（#355）：浮层关闭收口 → 悬停只读句柄注销
+      onPopupClosed: (instanceId) => this.addonViews?.unregister(`hover:${instanceId}`),
     })
     // #299 跳转目标提示上下文：与悬停预览同源装配（session/send 同款）；
     // enabled 投影 hover.targetTip（缺省视为开），dispose 清空随会话
@@ -1100,6 +1149,11 @@ export class WebviewSyncController {
       // #381 T06 内部 Live 双链联想的轻提示通道（重复标题风险/块接受失败
       // 呈现）：与主正文共用根 toast 面（B 嵌入在 A 的 webview 内）
       notifyToast: (text, severity) => this.toast?.show(text, severity),
+      // T06（#355）：embed 句柄登记/注销（内部 Live 实例创建/销毁点；
+      // attachAddonViews 前装配时不注册——注册表随主正文句柄同一注入）
+      addonViews: () => this.addonViews,
+      // T07（#356）：嵌入内键入的输入行为链驱动（与主正文同一 runtime）
+      driveAddonBehaviors: (input) => this.driveAddonBehaviors?.(input),
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
@@ -1255,6 +1309,14 @@ export class WebviewSyncController {
     this.mainEl.appendChild(this.banner)
     this.mainEl.appendChild(this.liveWrapper)
     this.mainEl.appendChild(this.readingContainer)
+    // #360 T11 附加组件面板 dock（平台容器，常驻 DOM 供探针命中；空态
+    // CSS 零占位）：主编辑区尾部（正文之下）——组件面板只进这个 dock，
+    // 面板 chrome（标题栏/关闭按钮）与 dock 样式归平台，面板内容根内部
+    // 样式归组件（样式界限落档 styleContract addon-panel-dock 条目）
+    this.addonPanelDockEl = document.createElement('div')
+    this.addonPanelDockEl.className = 'vsidian-addon-panel-dock'
+    bindLocaleAttrs(this.addonPanelDockEl, 'addonUi.panelDockLabel')
+    this.mainEl.appendChild(this.addonPanelDockEl)
     this.bodyEl = document.createElement('div')
     this.bodyEl.className = 'vsidian-body'
     this.bodyEl.appendChild(this.mainEl)
@@ -1518,6 +1580,11 @@ export class WebviewSyncController {
       send: (message) => {
         this.bridge.postMessage(message)
       },
+      // #354 T05 热切换安全收尾：本地输入落定（IME 组合结束/提交 ack/暂缓
+      // 发出）后冲刷挂起的组件扩展重配意图
+      onLocalInputSettled: () => {
+        this.flushPendingAddonExtensions()
+      },
       persistState: () => this.persistState(),
       images: this.images!,
       isLiveActive: () => this.viewMode === 'live',
@@ -1575,6 +1642,8 @@ export class WebviewSyncController {
       onHistoryIntent: () => this.invalidatePasteFeedback(),
       // #314 原生 HTML 粘贴接管（实例 paste domEventHandler → 转换管线）
       onRichPasteHtml: ({ view, html, text }) => this.handleRichPasteHtml(view, html, text),
+      // T07（#356）输入行为链驱动（attachAddonBehaviorDrive 注入的窄接口）
+      driveAddonBehaviors: (input) => this.driveAddonBehaviors?.(input),
       onViewUpdate: (update) => {
         // #314：本地非粘贴事务作废未落定的 rich 反馈（对齐 main 版
         // updateListener 的 recordingPasteStage 豁免——粘贴 dispatch 由
@@ -1825,8 +1894,12 @@ export class WebviewSyncController {
     this.keybindingRouter.cancel()
     // P2-02：主正文实例销毁（flush 计时清零 + EditorView destroy，DOM
     // 随 destroy 移除）；根 chrome 各自独立释放
+    this.addonViews?.unregister('main')
     this.live?.destroy()
     this.live = undefined
+    // #354 T05：实例终结时丢弃挂起的组件扩展重配意图——旧意图不作用于
+    // 后续新实例（新实例的组件扩展装配由装载器/宿主指令另行对账）
+    this.pendingAddonExtensions = undefined
     this.banner?.remove()
     this.banner = undefined
     this.toolbar?.remove()
@@ -1886,6 +1959,204 @@ export class WebviewSyncController {
     document.removeEventListener('visibilitychange', this.imageVisibilityEntry)
   }
 
+  /** #351 T02：附加组件扩展槽重配（转发给主正文 Live 实例；装载器的
+   *  attachExtensions 回调接这里——生产槽在 liveInstance extensions() 末尾）。
+   *  #354 T05 热切换安全收尾：IME 组合或编辑提交未完成（本地输入在途，
+   *  hasPendingLocalInput）时不立即重配——暂存最新意图，输入落定
+   *  （onLocalInputSettled → flushPendingAddonExtensions）后冲刷执行；
+   *  组合输入与在途提交不因切换丢失，文档状态跨 reconfigure 保留 */
+  reconfigureAddonExtensions(extensions: Extension[] | null): void {
+    if (this.live?.hasPendingLocalInput()) {
+      this.pendingAddonExtensions = extensions
+      return
+    }
+    this.pendingAddonExtensions = undefined
+    this.live?.reconfigureAddonExtensions(extensions)
+  }
+
+  /** #354 T05：本地输入在途观测（IME 组合/提交未完成的只读透出——
+   *  附加组件热切换守卫的诊断面；无 live 实例时 false） */
+  hasPendingLocalInput(): boolean {
+    return this.live?.hasPendingLocalInput() ?? false
+  }
+
+  /** #354 T05：组件扩展重配挂起观测（true = 有意图等待输入落定冲刷） */
+  get hasPendingAddonReconfigure(): boolean {
+    return this.pendingAddonExtensions !== undefined
+  }
+
+  /** #354 T05：冲刷挂起的组件扩展重配意图（输入落定回调；只执行最新）。
+   *  同步执行——jsdom 组合链端到端与浏览器 IME 场景（addonHotSwitch）已
+   *  验证 ack 收敛栈内重配可靠；浏览器「组合后装配失效」边界（摘除方向
+   *  正常、装配方向不生效）在 CM6 组合 DOM 层，与此处无关（见 T05 未决
+   *  事项）。 */
+  private flushPendingAddonExtensions(): void {
+    if (this.pendingAddonExtensions === undefined) {
+      return
+    }
+    const pending = this.pendingAddonExtensions
+    this.pendingAddonExtensions = undefined
+    this.live?.reconfigureAddonExtensions(pending)
+  }
+
+  /** #351 T02：附加组件装载器观测探针挂载（main.ts 安装装载器后调用；
+   *  view.state 回报时附带——活跃代次/授权样式表/释放历史与拒收计数） */
+  attachAddonPageProbe(probe: () => import('../shared/addonPage').AddonLoaderStats): void {
+    this.addonPageProbe = probe
+  }
+
+  /** T07（#356）：输入行为 runtime 观测探针挂载（main.ts 构造后调用；
+   *  view.state 回报时附带——注册清单/宿主状态/链执行轨迹与计数） */
+  attachAddonBehaviorProbe(probe: () => import('../shared/addonBehaviors').AddonBehaviorRuntimeStats): void {
+    this.addonBehaviorProbe = probe
+  }
+
+  /** T06（#355）：挂接统一视图注册表（main.ts 构造后注入；主正文句柄随
+   *  init 注册——targetDocUri 就绪是注册前提） */
+  attachAddonViews(registry: import('./addonViews').AddonViewRegistry): void {
+    this.addonViews = registry
+    if (this.live && this.docUri) {
+      this.registerMainAddonView()
+    }
+  }
+
+  /** #359 T10：挂接组件命令注册表（main.ts 构造后注入；快捷键本地分支与
+   *  宿主 addonCommand.execute 回发两入口共用 runAddonCommand） */
+  attachAddonCommands(registry: import('./addonCommands').AddonCommandsRuntime): void {
+    this.addonCommands = registry
+  }
+
+  /** #360 T11：挂接附加组件界面运行时（main.ts mount 后构造注入；模式
+   *  切换经 applyModeDom 通知，命令按钮执行经 runAddonCommand 转发） */
+  attachAddonUi(runtime: import('./addonUi').AddonUiRuntime): void {
+    this.addonUi = runtime
+  }
+
+  /** #360 T11：附加组件挂载点容器访问器（mount 后在场；main.ts 构造
+   *  AddonUiRuntime 时取用——槽与 dock 由平台构造持有） */
+  addonToolbarSlot(): HTMLElement | undefined {
+    return this.addonToolbarSlotEl
+  }
+
+  addonPanelDock(): HTMLElement | undefined {
+    return this.addonPanelDockEl
+  }
+
+  /** #360 T11：当前活动视图实例 ID（界面回调的目标路由——焦点所在嵌入
+   *  内部 Live 的实例键（embed:…，在引用 B 中操作归 B）；无焦点嵌入时
+   *  主正文 'main'；视图均不在场 null）。与 actionTarget 同源判据（embed
+   *  取最内层焦点命中），ID 面向 addonViews 句柄解析 */
+  addonActiveInstanceId(): string | null {
+    const embedInstance = this.embedCards?.focusedLive()
+    if (embedInstance) {
+      const instanceId = embedInstance.addonInstanceId()
+      if (instanceId !== undefined && this.addonViews?.infoOf(instanceId) !== undefined) {
+        return instanceId
+      }
+    }
+    if (this.addonViews?.infoOf('main') !== undefined) {
+      return 'main'
+    }
+    return null
+  }
+
+  /** #360 T11：当前视图模式的只读投影（界面运行时注册与挂载判定用） */
+  viewModeNow(): 'live' | 'reading' {
+    return this.viewMode
+  }
+
+  /** #360 T11：组件命令的生效绑定（按钮键位徽章数据——与快速操作条
+   *  quickBindingHints 同源：宿主 keybindings.snapshot/changed 下发的
+   *  权威覆盖 + 运行期操作表默认值合并求值） */
+  addonEffectiveBindings(commandId: string): readonly string[] {
+    return getEffectiveBindings(this.keybindingOverrides, commandId)
+  }
+
+  /** #359 T10：执行附加组件命令——模式复核（命令声明的生效模式 vs 当前
+   *  视图模式；快捷键路由已过滤，此处兜底宿主命令面板入口）后调组件回调。
+   *  回调异常由注册表吞掉留痕（键路由与宿主回发不因组件代码断链）。 */
+  runAddonCommand(commandId: string): boolean {
+    const registry = this.addonCommands
+    if (!registry) {
+      return false
+    }
+    const mode = registry.commandMode(commandId)
+    if (mode === undefined) {
+      return false
+    }
+    if (mode !== 'both' && mode !== this.viewMode) {
+      return false
+    }
+    return registry.execute(commandId) === 'executed'
+  }
+
+  /** T07（#356）：挂接输入行为链驱动（main.ts 构造 runtime 后注入；
+   *  已创建的主正文实例即刻接上，之后的实例经 liveInstanceDeps 透传） */
+  attachAddonBehaviorDrive(drive: import('./liveInstance').LiveEditorInstanceDeps['driveAddonBehaviors']): void {
+    this.driveAddonBehaviors = drive
+    this.live?.setAddonBehaviorIdentity('main')
+  }
+
+  /**
+   * #358 T09 挂接渲染提供者桥（main.ts 装桥后调用）：生效表变化时执行
+   * 已开文档热切换——
+   * 1. 围栏语言集写入 shared 动态集（fence 判定口径：live 围栏表重扫、
+   *    阅读切块、右键菜单分类随之生效）；
+   * 2. 全文档容器所有权扫描：生效者已变的容器释放旧提供者、换新容器按
+   *    当前生效者重挂（兜住嵌入阅读内容等不随 3/4 重建的容器；旧容器
+   *    脱离文档——旧代次迟到结果不回潮）；
+   * 3. live 装饰重建（主视图 + 嵌入内部 Live：装饰实例缓存清空、widget
+   *    换新 DOM 挂载新提供者）；
+   * 4. 阅读主文档整篇重渲染（块种类随语言集变化的权威重建路径）。
+   * 2/3/4 对同一容器可能形成两次挂载（扫描先重挂、重建再换新）——热切换
+   * 是罕见事件，正确性优先（新鲜内容、无旧结果回潮）；提供者 release
+   * 为尽力通知（widget 视口回收本就无销毁回调，属 CM6 已知边界）。
+   */
+  attachAddonRenderers(): void {
+    const bridge = addonRenderersBridge()
+    if (!bridge || this.addonRenderersAttached) {
+      return
+    }
+    this.addonRenderersAttached = true
+    // 装配即同步一次语言集（宿主表先于控制器挂接到达时兜住 fence 判定）
+    setDynamicRenderedFenceLanguages(bridge.renderedFenceLanguages())
+    bridge.onTableChanged((change) => this.onAddonRenderersTableChanged(change))
+  }
+
+  private addonRenderersAttached = false
+
+  private onAddonRenderersTableChanged(change: AddonRenderersTableChange): void {
+    const bridge = addonRenderersBridge()
+    if (!bridge) {
+      return
+    }
+    const languagesChanged = setDynamicRenderedFenceLanguages(bridge.renderedFenceLanguages())
+    if (change.changedLanguages.length === 0 && !languagesChanged) {
+      return
+    }
+    remountChangedGraphicBlocks(document.body ?? document)
+    this.live?.applyRendererLanguagesChanged()
+    this.embedCards?.applyRendererLanguagesChanged()
+    this.refreshReading()
+  }
+
+  /** 主正文句柄注册（init/attach 时 docUri 与 live 实例均在场的时点） */
+  private registerMainAddonView(): void {
+    if (!this.addonViews || !this.live) {
+      return
+    }
+    const live = this.live
+    this.addonViews.registerLive({
+      viewType: 'main',
+      instanceId: 'main',
+      targetDocUri: this.docUri,
+      mode: () => this.viewMode,
+      instance: live,
+    })
+    // T07（#356）行为链驱动的实例身份（与 addonViews 句柄同 ID）
+    live.setAddonBehaviorIdentity('main')
+  }
+
   /** 宿主消息入口（window message 事件转发） */
   handleHostMessage(message: unknown): void {
     if (!isHostToWebview(message)) {
@@ -1908,6 +2179,9 @@ export class WebviewSyncController {
           restoreAnchor: true,
           source: 'init',
         })
+        // T06（#355）：主正文句柄注册（init 即目标就绪；重载后的重复 init
+        // 以新代旧——旧条目 onDisposed 后新条目 onCreated）
+        this.registerMainAddonView()
         // init 后主动回报一次视图状态（含持久化恢复的模式）：宿主的模式
         // 缓存尽早建立，重载场景（retainContextWhenHidden 关闭）不留窗口
         this.reportViewState()
@@ -2154,6 +2428,18 @@ export class WebviewSyncController {
         // 卡片同消息通道。消费者回报是否消费；两者均未命中才释放来源
         // 租约，避免未命中的浮层提前释放仍应交给卡片的成功回包。
         const consumed = notifyHoverResult(message) || this.embedCards?.notifyResult(message)
+        // T06（#355）悬停只读句柄注册：浮层成功消费 markdown/text 载荷
+        // 时登记（快照为读取到的目标文本；浮层关闭经 onPopupClosed 注销）
+        if (consumed && message.ok && this.addonViews &&
+            (message.contentKind === undefined || message.contentKind === 'markdown' || message.contentKind === 'text')) {
+          this.addonViews.registerReadonly({
+            viewType: 'hover',
+            instanceId: `hover:${message.instanceId}`,
+            targetDocUri: `file:///${message.target.fsPath.replace(/\\/g, '/')}`,
+            text: message.text,
+            version: message.version,
+          })
+        }
         this.diagnostics.record('hover.applied', { reqId: message.reqId, instanceId: message.instanceId,
           consumed: consumed === true })
         if (!consumed && message.ok && message.sourceLeaseId !== undefined && this.sessionId && this.docUri) {
@@ -2599,6 +2885,12 @@ export class WebviewSyncController {
           case 'findAllOccurrences': this.runOccurrenceSelect('all'); break
         }
         break
+      case 'addonCommand.execute':
+        // #359 T10 组件命令执行转发（宿主命令面板入口：宿主 VSCode 命令
+        // → addonCommand.execute 回发；快捷键入口在 router 本地分支直达，
+        // 两入口共用 runAddonCommand——含命令声明生效模式的复核）
+        this.runAddonCommand(message.commandId)
+        break
       case 'sidebar.test.click': {
         // 测试钩子（#53）：点击真实侧栏切换按钮（与用户点击同一处理器；
         // 纯视图状态翻转，零写回）
@@ -2801,6 +3093,24 @@ export class WebviewSyncController {
       case 'contextMenu.test.menuClose': {
         // 测试钩子（#183）：关闭当前统一菜单（等价 Esc/外点路径）
         this.closeContextMenu()
+        break
+      }
+      case 'addonUi.test.buttonClick': {
+        // 测试钩子（#360 T11）：点击组件工具栏按钮（与用户点击同一处理器；
+        // buttonId 已由协议校验器限定为非空字符串，CSS.escape 防拼接值含
+        // 选择器元字符时 querySelector 抛错）
+        this.addonToolbarSlotEl
+          ?.querySelector<HTMLButtonElement>(`button[data-addon-button="${CSS.escape(message.buttonId)}"]`)
+          ?.click()
+        break
+      }
+      case 'addonUi.test.panelClose': {
+        // 测试钩子（#360 T11）：点击面板 chrome 关闭按钮（用户关闭路径——
+        // 平台回收与组件迟到写入不可见的验证入口）
+        this.addonPanelDockEl
+          ?.querySelector<HTMLButtonElement>(
+            `[data-addon-panel="${CSS.escape(message.panelId)}"] .vsidian-addon-panel-close`)
+          ?.click()
         break
       }
       case 'clipboard.read.result': {
@@ -3422,6 +3732,11 @@ export class WebviewSyncController {
       lineGutter: this.collectLineGutter(),
       // 绘制层探针（P0 回归）：正文可见性 / CM6 注入样式存活 / 行号禁选
       paint: this.collectPaint(),
+      // #351 T02 附加组件装载器观测（装载器未安装时缺省——旧 webview 兼容）
+      addonPage: this.addonPageProbe?.(),
+      // T07（#356）输入行为 runtime 观测（未装配时缺省）：注册清单/宿主
+      // 状态/链执行轨迹与计数——集成断言面
+      addonBehaviors: this.addonBehaviorProbe?.(),
       // #53 右侧栏观测（布局态与绘制层证据）
       sidebar: this.collectSidebar(),
       // #54 大纲观测（面板态、绘制层证据与全文标题序列）
@@ -3673,6 +3988,9 @@ export class WebviewSyncController {
     // P2-04：根面板模式切换联动嵌入卡片的内部模式继承（无手动覆盖的
     // 根级嵌入跟随；子卡级联）——在 viewMode 赋值后、容器显隐前通知
     this.embedCards?.notifyParentModeChanged()
+    // #360 T11：附加组件界面回收矩阵——模式不符的按钮撤挂（注册保留，
+    //  切回重挂）、不符面板强制关闭（挂载与监听回收）
+    this.addonUi?.applyMode(mode)
     // Live 悬停现场随模式切换作废（装饰 DOM 随重建脱树，补触发不得复活旧锚）
     this.lastLiveHover = null
     this.closeQuickHeadingMenu(false)
@@ -4869,6 +5187,14 @@ export class WebviewSyncController {
     this.sidebarToggleBtn = sidebarBtn
     bar.appendChild(settingsBtn)
     bar.appendChild(quickBtn)
+    // #360 T11 附加组件按钮槽（平台容器，常驻 DOM 供探针命中；空态 CSS
+    // 零占位）：插在左组尾部（快速操作之后）、右端组首（刷新按钮持有
+    // margin-left:auto 推靠）之前——组件按钮只进这个槽，不碰内置按钮位
+    const addonSlot = document.createElement('div')
+    addonSlot.className = 'vsidian-addon-toolbar-slot'
+    bindLocaleAttrs(addonSlot, 'addonUi.toolbarSlotLabel')
+    this.addonToolbarSlotEl = addonSlot
+    bar.appendChild(addonSlot)
     bar.appendChild(refreshBtn)
     bar.appendChild(viewBtn)
     bar.appendChild(sidebarBtn)
@@ -9000,6 +9326,9 @@ export class WebviewSyncController {
         gutterUserSelect: null,
         darkTheme: false,
         caretColor: null,
+        // 组件按钮/面板不依赖正文 view（无 init 也可注册挂载）——早退路径
+        // 同样上报（按钮挂载态与面板开态的集成断言不因无正文而缺字段）
+        ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       }
     }
     // elementFromPoint/几何 rect 依赖真实布局：jsdom（单测宿主）无布局能力
@@ -9416,6 +9745,11 @@ export class WebviewSyncController {
           separatorCount: contextMenuEl.querySelectorAll(
             `:scope > .${CONTEXT_MENU_CLASS_NAMES.separator}`).length,
           disabledCount: contextMenuEl.querySelectorAll('button:disabled').length,
+          // #359 T10：组件菜单项观测（data-vsidian-command 含点 = 命名空间
+          // 运行期项——集成断言组件簇在场/回收的绘制层证据）
+          addonCommands: [...new Set([...contextMenuEl.querySelectorAll<HTMLButtonElement>(
+            `button[data-vsidian-command]`)].map((button) => button.dataset['vsidianCommand'] ?? '')
+            .filter((command) => command.includes('.')))],
         }
       : undefined
     // #376 T01 双链联想候选绘制：document 级浮层（不在 #app 内），可见性
@@ -9574,6 +9908,26 @@ export class WebviewSyncController {
       ? this.readingContainer?.closest('#app')?.querySelector<HTMLElement>('.vsidian-reading-find-source')
       : null
     const findSourceCurrent = findSource?.querySelector<HTMLElement>('.vsidian-find-match-current')
+    // #358 T09 渲染提供者接管绘制观测：文档内图形容器逐个回报生效提供者
+    //（provider data 属性）、状态、组件渲染内容的计算色与几何（内置容器
+    // color null——SVG 在场由 builtinSvg 计）。绘制层断言面，非 DOM 存在性
+    const rendererScope = view.dom.closest('#app') ?? document
+    const rendererContainers = [...rendererScope.querySelectorAll<HTMLElement>(`[${GRAPHIC_LANG_ATTR}]`)]
+      .filter((el) => el.isConnected)
+      .map((el) => {
+        const box = el.querySelector<HTMLElement>('[data-t09-renderer]') ?? el.querySelector<HTMLElement>('.t09-box')
+        // 通用化：组件渲染内容的代表元素取首个带 provider 标记的子节点后代
+        const content = box ?? [...el.querySelectorAll<HTMLElement>('*')].find((child) => child.childElementCount === 0 && (child.textContent ?? '').trim() !== '') ?? null
+        const rect = content?.getBoundingClientRect()
+        return {
+          language: (el.getAttribute(GRAPHIC_LANG_ATTR) ?? '').trim(),
+          provider: el.getAttribute(GRAPHIC_PROVIDER_ATTR) ?? 'builtin',
+          mode: el.getAttribute(GRAPHIC_MODE_ATTR) ?? '',
+          state: el.getAttribute(MERMAID_STATE_ATTR),
+          color: content && content.closest(`[${GRAPHIC_PROVIDER_ATTR}]`) === el ? getComputedStyle(content).backgroundColor : null,
+          width: rect ? rect.width : 0,
+        }
+      })
     return {
       textVisible,
       scrollerDisplay: view.scrollDOM ? getComputedStyle(view.scrollDOM).display : null,
@@ -9619,6 +9973,13 @@ export class WebviewSyncController {
       hr,
       highlight,
       graphic,
+      renderers: {
+        containers: rendererContainers,
+        builtinSvg: rendererScope.querySelectorAll('.vsidian-mermaid svg').length,
+        // #361 T12 诊断观测（非断言面）：webview 桥生效表与动态语言集快照
+        tableVersion: addonRenderersBridge()?.currentTable()?.version ?? null,
+        dynamicLanguages: [...dynamicRenderedFenceLanguageSnapshot()],
+      },
       imageChrome,
       quickActions,
       code,
@@ -9626,7 +9987,38 @@ export class WebviewSyncController {
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
       ...(wikilinkSuggest ? { wikilinkSuggest } : {}),
+      ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),
+    }
+  }
+
+  /** #360 T11 附加组件界面绘制探针（paint.addonUi）：注册态/挂载态 ID
+   *  全集与绘制命中（elementFromPoint——样式注入失效时 DOM 在场但命中
+   *  失败）。jsdom 无布局恒 false，只作真宿主集成断言依据；无任何注册
+   *  （runtime 未装配或零注册）时 undefined——缺省不参与断言 */
+  private collectAddonUiPaint(): PaintProbe['addonUi'] | undefined {
+    const stats = this.addonUi?.stats()
+    if (stats === undefined || (stats.buttons.length === 0 && stats.panels.length === 0)) {
+      return undefined
+    }
+    const mountedIds = stats.buttons.filter((button) => button.mounted).map((button) => button.id)
+    const openIds = stats.panels.filter((panel) => panel.open).map((panel) => panel.id)
+    const firstButton = mountedIds.length > 0
+      ? this.addonToolbarSlotEl?.querySelector<HTMLElement>(
+        `button[data-addon-button="${CSS.escape(mountedIds[0]!)}"]`) ?? null
+      : null
+    const firstPanelRoot = openIds.length > 0
+      ? this.addonPanelDockEl?.querySelector<HTMLElement>(
+        `[data-addon-panel="${CSS.escape(openIds[0]!)}"] .vsidian-addon-panel-root`) ?? null
+      : null
+    return {
+      toolbarButtonIds: stats.buttons.map((button) => button.id),
+      mountedToolbarButtonIds: mountedIds,
+      openPanelIds: openIds,
+      buttonVisible: mountedIds.length > 0 ? hitPaintedElement(firstButton ?? undefined) : null,
+      panelBodyVisible: openIds.length > 0
+        ? hitPaintedElement(firstPanelRoot ?? undefined, firstPanelRoot ?? undefined)
+        : null,
     }
   }
 
@@ -10092,14 +10484,16 @@ export class WebviewSyncController {
         continue
       }
       const language = (inner.getAttribute(GRAPHIC_LANG_ATTR) ?? 'mermaid').trim()
-      if (!graphicRendererFor(language)) {
+      if (!hasEffectiveGraphicRenderer(language, 'reading')) {
         continue
       }
       const code = inner.getAttribute(MERMAID_CODE_ATTR) ?? ''
       wrapGraphicFrame(inner, {
         onPopup: () => {
-          openGraphicPopup(language, code)
+          openGraphicPopup(language, code, { mode: 'reading' })
         },
+        // #358 T09：生效提供者无 svg 取图能力时不装弹窗按钮
+        popupEnabled: effectiveGraphicSvgExport(language, 'reading'),
       })
     }
   }
@@ -10171,6 +10565,10 @@ export class WebviewSyncController {
     this.live?.applyDarkTheme(dark)
     // P2-04：嵌入内部 Live 实例的明暗热跟随
     this.embedCards?.applyDarkTheme(dark)
+    // #358 T09：附加组件渲染容器明暗联动（内置 mermaid 扫描已跳过组件
+    // 容器——refresh 回调就地刷新，未提供则换新容器重挂；全文档一次扫描
+    // 覆盖 live widget、阅读主文与嵌入内容）
+    refreshAddonGraphicBlocks(document.body ?? document)
   }
 
 }
@@ -10373,6 +10771,16 @@ function hitPaintedElement(
   } catch {
     return false
   }
+}
+
+/** #360 T11：collectPaint 的 addonUi 字段包裹（探针值 → paint.addonUi
+ *  嵌套形态；缺省时零字段——缺省不参与断言）。此前直接展开探针对象会把
+ *  五个字段平铺到 paint 顶层（协议守卫外的未知字段，宿主断言读不到
+ *  paint.addonUi）——集成诊断实测定位 */
+function wrapAddonUiPaint(
+  probe: PaintProbe['addonUi'],
+): { addonUi: PaintProbe['addonUi'] } | Record<string, never> {
+  return probe === undefined ? {} : { addonUi: probe }
 }
 
 /** 多候选绘制探针的代表元素选择（#105/#106）：返回首个真实命中

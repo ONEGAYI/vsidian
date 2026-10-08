@@ -1,0 +1,20 @@
+{
+  "name": "addon-ok",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (OK)",
+  "description": "Integration fixture: a compatible Vsidian add-on (T01, #350).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-ok.stats", "title": "Fixture: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-ok.registerAgain", "title": "Fixture: register add-on again" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

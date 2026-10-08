@@ -9,7 +9,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - 通用工程规范（提交规范、TDD、文件树维护）遵循工程根 `D:\CODE\Project\AGENTS.md`，此处不重复展开。
 - **CI 敏感期处置（用户授权，2026-10-01）**：纯文档提交（规格、CHANGELOG 等）直推 main，不走 PR；CI 因 #272 已知抖动族挂红不重跑不回滚。代码变更不受豁免，合并仍以该提交全绿为准。至 #272 根治为止。
 - **插件设置入口**：Vsidian 面向用户的设置统一在扩展自己的设置页面展示与修改，不复用 VSCode 统一设置中心作为设置界面。后续新增设置项时，同步纳入该页面，并验证设置持久化、重新打开后的回显及变更生效。
-- **Vsidian 附加组件公开 API**（2026-10-04 设计方向）：设计或修改附加组件的发现与调用机制、公开 API、配套文档及兼容检查前，必读 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)。API 文档与 CSS 样式契约同等维护；声明、契约与版本文档以主仓库为事实源，另提供独立示例仓库，文档不要求随 Vsidian VSIX 分发。API 分稳定接口和显式实验入口；发现与安装经 VSCode，具体设置在 Vsidian 自有设置页汇总。接口与兼容检查的设计草案见 [附加组件规格](docs/specs/vsidian-addons.md)，装载、SDK 和宿主历史协调提议及最小探针范围见[技术方案](docs/design/vsidian-addon-api.md)。API 与门禁尚未实施，不将本约定、草案或探针当作已发布契约。
+- **Vsidian 附加组件公开 API**（2026-10-04 设计方向）：设计或修改附加组件的发现与调用机制、公开 API、配套文档及兼容检查前，必读 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)。API 文档与 CSS 样式契约同等维护；声明、契约与版本文档以主仓库为事实源，另提供独立示例仓库，文档不要求随 Vsidian VSIX 分发。API 分稳定接口和显式实验入口；发现与安装经 VSCode，具体设置在 Vsidian 自有设置页汇总。接口与兼容检查的设计草案见 [附加组件规格](docs/specs/vsidian-addons.md)，装载、SDK 和宿主历史协调提议及最小探针范围见[技术方案](docs/design/vsidian-addon-api.md)。API 已随 #347 首版批次实施但**仍为 1.0.0 候选、未对外发行**，不将本约定当作已发布契约；实施与门禁的维护纪律见下条（#362/#363 落档）。
 - **操作与快捷键注册**：快捷键管理覆盖项目全部面向用户的可绑定操作。每次新增或修改操作，都必须评估并记录是否提供快捷键入口、默认绑定（允许默认未绑定）及生效模式；不能仅因操作不常驻工具栏就省略快捷键入口。写操作快捷键仅在 Live 编辑正文时覆盖宿主绑定，不接管源码模式或设置页输入；注册模型须支持未来其他操作按需覆盖 Live、阅读或双模式。绑定支持显式清空、单项恢复默认与全部恢复默认；清空不能因重启或升级自动恢复。插件内部冲突按键位及生效范围是否重叠判定。
 - **图形化代码块扩展约定（#111 落档）**：新增或修改「渲染成图形的围栏代码块」的语言支持、按钮组、图表弹窗或导出行为前，必读 [docs/specs/graphic-code-block-interaction.md](docs/specs/graphic-code-block-interaction.md) 的「扩展约定（落档）」节——注册表两表（`RENDERED_FENCE_LABELS` 与 `graphicRenderers.ts`）必须同步登记，三步接入清单与降级边界在其中。
 - **符号输入与行内围栏扩展约定（#103/#107/#123/#124/#125 落档）**：新增符号对、新增成对行内标记操作（粗体/斜体/删除线/行内代码类）、调整选区包裹、Tab 越界、IME 组合期输入行为或 CM6 扩展装配顺序前，必读 [docs/specs/symbol-input.md](docs/specs/symbol-input.md)——注册表驱动路径、装配顺序陷阱、「既有边界不得顺手放宽」清单与测试惯例均在其中。
@@ -22,6 +22,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **统一右键菜单扩展约定（2026-09 菜单批次落档）**：新增或修改右键菜单项、簇、子菜单、覆写行为、安全降级矩阵或菜单图标接线前，必读 [docs/specs/context-menu.md](docs/specs/context-menu.md) 的「扩展约定（落档）」节——菜单项注册表与图标 key 表的两表同步、三步接入清单与「既有边界不得顺手放宽」清单（阅读/头区不接管、内置只隐藏不删、提示列只派生自键位注册表）均在其中。
 - **悬停提示扩展约定（#300 落档）**：新增或修改悬停提示（新控件、新浮层内按钮、键位徽章）前，必读 [docs/specs/tooltip.md](docs/specs/tooltip.md) 的「接管机制」节——悬停词唯一承载属性是 `data-tooltip`（原生 title 已退役，防回潮扫描拦截），文案经 `bindLocale` 家族或动态写属性，带快捷键的操作走 `data-tooltip-keys` 结构化键位徽章（内部 `\n` 分隔、不做文字缀尾），观感与出现延迟经 `--vsidian-tooltip-*` 公开变量（styleContract tooltip 类目）。
 - **引用块内表格扩展约定（#296 落档）**：新增或修改表格网格计划、行身份提取（`TableRowInfo`）、表格创建的容器前缀感知，或调整表格行前缀剥离口径（`parseTableDelimiter`/`tableRowCellsForColumns` 等调用点）前，必读 [docs/specs/blockquote-table.md](docs/specs/blockquote-table.md)——前缀语义单一口径、QuoteMark 放行边界（其余未知直接子节点仍整体降级）、结构编辑「补/消」前缀的既定决策与一期边界均在其中；台账外边界不得顺手改。
+- **附加组件公开 API 维护（#362/#363 落档）**：新增或修改六组附加组件 API（发现与安装/页面 SDK/行为/设置/渲染提供者/命令菜单界面）的接口形状、语义、实验入口或发行状态前，必读 [docs/addons/developer-guide.md](docs/addons/developer-guide.md) 的「文档维护入口」节——语义清单与发行台账单一事实源在 `src/shared/addonApiCatalog.ts`（签名不手写第二份，条目指向各事实源模块的导出符号）；版本参考由 `npm run gen:addonapi` 生成、`npm run check:addonapi` 校验新鲜度（compile 链前置）；公开声明的编译期消费在 `test/addonApi/publicApiConsumer.ts`，导入面纪律由 `test/unit/addonApiSurface.test.ts` 钉住。签名/语义调整必须同步清单条目、重生成参考、更新消费样例与钉住断言；台账如实区分候选与已发布——未真正发行不得携带发布日期，实际发行是人工落账动作。**契约门禁（#363 T14）**：接口/语义/签名/台账的历史兼容由 `npm run check:addoncompat` 对照 git 锚定基线（`test/addon-api/baseline-bootstrap-1.json`）校验，CI job `addon-api-contract` 先跑 `npm run check:addonapi:baseline` 复验基线可信再跑契约检查；改检查器、基线、清单或门禁工作流前必读 [docs/specs/addons-api-gate.md](docs/specs/addons-api-gate.md)——基线重锚定与发行落账是 `--emit-baseline` 显式动作，须随变更同 PR 提交并独立说明理由。规则依据 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)「文档与兼容维护」与[规格 §7](docs/specs/vsidian-addons.md)。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
 
 ## 公开样式契约：Agent 修改约束（项目技能 style-contract）
@@ -83,6 +84,10 @@ vsidian/
 ├── CLAUDE.md              # Claude 专属规则导入入口
 ├── CONTEXT.md             # 领域语言与产品边界事实源
 ├── docs/                  # 项目文档根
+│   ├── addons/     # 附加组件开发者文档
+│   │   ├── api-reference.md     # 公开 API 版本参考（生成）
+│   │   ├── developer-guide.md   # 附加组件开发指南
+│   │   └── example-repo-plan.md # 示例仓库准备说明
 │   ├── adr/        # 架构决策记录
 │   │   ├── 0001-vscode-186-remote-support.md                  # VSCode 兼容下界与远程支持决策
 │   │   ├── 0002-wikilink-on-demand-resolution.md              # 双链按需解析不建持久索引
@@ -112,6 +117,7 @@ vsidian/
 │   ├── perf/…      # 性能实测数据与测量工具说明
 │   ├── research/   # 技术调研报告
 │   │   ├── data/                                  # 探针证据数据目录
+│   │   │   ├── addon-v02-probe-results.json        # V02 探针证据数据
 │   │   │   ├── appearance-probe-dark-custom.json   # 外观探针暗色轮证据
 │   │   │   └── appearance-probe-light-default.json # 外观探针亮色轮证据
 │   │   ├── obsidian-live-preview-editor.md        # Obsidian 技术栈与选型调研
@@ -122,8 +128,11 @@ vsidian/
 │   │   ├── vscode-native-text-appearance-probe.md # 原生文字外观复用探针报告
 │   │   ├── vscode-quick-open-matching.md          # Ctrl+P 文件匹配源码核查
 │   │   ├── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
+│   │   ├── vsidian-addons-v01-history-probe.md    # V01历史分组验证报告
+│   │   ├── vsidian-addons-v02-page-sdk-probe.md   # V02 页面 SDK 探针结论
 │   │   └── wikilink-completion-v01-probe.md       # V01 补 ID 与尽力撤销探针报告
 │   ├── specs/      # 产品规格
+│   │   ├── addons-api-gate.md                   # API 契约门禁 CI 接线规格
 │   │   ├── anchor-navigation.md                 # 锚点跳转规格（标题/块引用/复制块链接）
 │   │   ├── appearance-merge.md                  # 外观合并分页规格
 │   │   ├── batch-2026-09-menu.md                # 右键菜单批次总览与决策回执
@@ -169,6 +178,7 @@ vsidian/
 │   │   ├── tooltip.md                           # 统一自绘悬停提示规格
 │   │   ├── vault-index-backlinks.md             # 引用索引与反链实施规格
 │   │   ├── viewport-width.md                    # 可读行宽与双模式列布局规格
+│   │   ├── vsidian-addons-coverage.md           # 29 用户故事覆盖映射
 │   │   ├── vsidian-addons-tickets/…             # 附加组件验证与实施票面
 │   │   ├── vsidian-addons.md                    # 附加组件接入与公开API规格草案
 │   │   ├── wikilink-completion-tickets/…        # 双链联想验证与实施票面
@@ -191,8 +201,12 @@ vsidian/
 ├── README.en.md           # 英文版 README，与中文版互指
 ├── README.md              # 项目门面说明
 ├── scripts/               # 仓库工具脚本目录
+│   ├── addonApiCompatCheck.mjs   # API 契约门禁纯逻辑模块
+│   ├── checkAddonApiCompat.mjs   # API 契约门禁 CLI
 │   ├── checkStyleContract.mjs    # 历史契约兼容检查器 CLI
+│   ├── demoAddonApiGate.mjs      # API 门禁负向演示脚本
 │   ├── demoStyleContractGate.mjs # 契约门禁负向演示脚本
+│   ├── genAddonApiRef.mjs        # 附加组件 API 参考生成脚本
 │   ├── genNls.d.mts              # NLS 生成器类型声明
 │   ├── genNls.mjs                # manifest NLS 文件生成脚本
 │   ├── genStyleGuide.mjs         # 样式指南生成脚本

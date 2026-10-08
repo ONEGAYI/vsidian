@@ -1,0 +1,16 @@
+/* #364 T15 界面样例——编辑器页贡献样式（面板内容根；构建时拷入 dist/） */
+.sample-ui-panel {
+  font-family: monospace;
+  padding: 6px 10px;
+}
+
+.sample-ui-panel-row {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.sample-ui-panel-label {
+  color: rgb(9, 96, 246);
+  font-weight: 600;
+}

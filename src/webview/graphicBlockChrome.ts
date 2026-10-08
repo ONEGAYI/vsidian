@@ -22,6 +22,9 @@ export interface GraphicChromeActions {
   onEdit?: () => void
   /** 弹窗预览（打开图表弹窗） */
   onPopup: () => void
+  /** #358 T09 弹窗按钮装配位（缺省 true）：生效提供者声明无 svg 取图
+   *  能力时不装 popup 按钮（弹窗内容无从取得——按钮不虚设） */
+  popupEnabled?: boolean
 }
 
 function buildChromeButton(
@@ -60,7 +63,7 @@ const POPUP_ICON =
   '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"></rect>' +
   '<path d="M6 2.5v3M2.5 6h3"></path><path d="M9.5 13.5v-3M13.5 9.5h-3"></path></svg>'
 
-/** 按钮组 DOM：edit（可选，居左）+ popup（居右） */
+/** 按钮组 DOM：edit（可选，居左）+ popup（居右；popupEnabled=false 时省略） */
 export function buildGraphicChrome(actions: GraphicChromeActions): HTMLElement {
   const chrome = document.createElement('div')
   chrome.className = GRAPHIC_CHROME_CLASS_NAMES.chrome
@@ -70,9 +73,11 @@ export function buildGraphicChrome(actions: GraphicChromeActions): HTMLElement {
       buildChromeButton(GRAPHIC_CHROME_CLASS_NAMES.edit, 'graphic.editSource', EDIT_ICON, actions.onEdit),
     )
   }
-  chrome.appendChild(
-    buildChromeButton(GRAPHIC_CHROME_CLASS_NAMES.popup, 'graphic.popup', POPUP_ICON, actions.onPopup),
-  )
+  if (actions.popupEnabled !== false) {
+    chrome.appendChild(
+      buildChromeButton(GRAPHIC_CHROME_CLASS_NAMES.popup, 'graphic.popup', POPUP_ICON, actions.onPopup),
+    )
+  }
   return chrome
 }
 

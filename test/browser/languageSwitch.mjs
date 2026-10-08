@@ -102,10 +102,18 @@ try {
 
   // 全程只上送 settings.set（换包由宿主 locale.changed 驱动，非 webview 自取；
   // wordSegment.get 是 #239 中文分词页签的 init 状态查询，属合法后台通道；
-  // defaultEditor.get 是 #323 默认编辑器状态行的 init 状态查询，同属合法后台通道）
+  // defaultEditor.get 是 #323 默认编辑器状态行的 init 状态查询，同属合法后台通道；
+  // addons.get 是 #350 附加组件分页的 init 状态拉取，属合法后台通道；
+  // addons.settingsGet 是 #353 附加组件基础设置区的 init 状态拉取，同上；
+  // addonPage.ready 是 #351 T02 装载器就绪上报（设置页 webview 装载即发，
+  // 同属合法后台通道——T02 时未全量跑本套件，欠账随本轮补登记）；
+  // addons.commandCatalogGet 是 #359 T10 组件命令目录的 init 拉取（设置页
+  // 快捷键分页合并展示组件命令），同属合法后台通道；
+  // addons.behaviorsGet 是 T08（#357）行为冲突管理载荷的 init 拉取，同上
   assert.deepEqual(
     (await page.evaluate(() => window.sent.filter((m) => m.kind !== 'settings.get' && m.kind !== 'keybindings.get' && m.kind !== 'snippets.get' &&
-      m.kind !== 'wordSegment.get' && m.kind !== 'index.get' && m.kind !== 'defaultEditor.get')))
+      m.kind !== 'wordSegment.get' && m.kind !== 'index.get' && m.kind !== 'defaultEditor.get' && m.kind !== 'addons.get' &&
+      m.kind !== 'addons.settingsGet' && m.kind !== 'addonPage.ready' && m.kind !== 'addons.commandCatalogGet' && m.kind !== 'addons.behaviorsGet')))
       .map((m) => m.values['general.language']),
     ['en', 'zh-cn', 'auto'],
   )

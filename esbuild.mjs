@@ -270,6 +270,46 @@ if (!production) {
     sourcemap: true,
     logLevel: 'info',
   })
+  // V02（#349）附加组件页面 SDK 探针三产物（研究票，不进 VSIX）：
+  // - suite：宿主侧套件（node18/cjs，复用生产 editorCsp 纯逻辑与
+  //   探针登记校验）
+  // - editor：编辑器型 webview 主（生产 WebviewSyncController + 装载器
+  //   原型；chrome114 对齐下界宿主 Electron 25/Chromium 114）
+  // - settings：设置页型 webview 主（装载器原型的设置页形态，无 CM6）
+  targets.push({
+    entryPoints: ['test/integration/addonV02Probe/suite.ts'],
+    outfile: 'out/test/integration/addonV02/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/addonV02Probe/editorMain.ts'],
+    outfile: 'out/test/integration/addonV02/editor.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    // main.css 链引用 quick-actions 的 svg 资产（与生产 webviewBase 同 loader）
+    loader: { '.woff2': 'file', '.svg': 'file' },
+    assetNames: 'assets/[name]',
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/addonV02Probe/settingsMain.ts'],
+    outfile: 'out/test/integration/addonV02/settings.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    logLevel: 'info',
+  })
 }
 
 async function main() {

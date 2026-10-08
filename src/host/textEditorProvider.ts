@@ -10,7 +10,9 @@ import { randomUUID } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
+import { AddonHistoryCoordinator, type AddonHistorySnapshotData } from './addonHistoryCoordinator'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
+import { AddonHistoryProbeHub } from './addonHistoryProbe'
 import { WebLinkMetaService } from './webLinkMetaService'
 import { resolveProxyConfig, type ProxyDecision } from './proxyAgent'
 import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type HoverExternalShapeMode } from '../shared/settings'
@@ -116,6 +118,7 @@ import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
+import type { AddonEditorBridge } from './addons/addonWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
 
@@ -241,6 +244,12 @@ interface SessionEntry {
   appliedEdits: number
   /** #10/#11 链接跳转执行日志（容量有界） */
   linkLog: Array<LinkLogEntry | WikilinkLogEntry>
+  /** T06（#355）历史协调器（附加组件修饰的分组撤回/重做；每目标一份） */
+  historyCoordinator?: AddonHistoryCoordinator
+  /** T06：协调器快照防抖保存（回流后调度） */
+  scheduleHistorySnapshot?: () => void
+  /** T06：协调器快照立即落盘（会话退役时 flush 防抖窗口） */
+  flushHistorySnapshot?: () => void
 }
 
 /** 文档的资源根（#10）：图片 webview 资源许可面 = 工作区文件夹根
@@ -377,8 +386,55 @@ export function createTextEditorProvider(
   /** #239 分词资源接线（jieba 下载/删除宿主权威；编辑器面板消费
    *  wordSegment.get 应答与 loadResult 转发、状态变更广播） */
   jieba?: JiebaWiring,
+  /** #351 T02 附加组件面板桥（页面装载指令路由 + 资源根 + 状态刷新）；
+   *  生产由 extension.ts 注入 createAddonWiring 产物的 editorBridge */
+  addons?: AddonEditorBridge,
 ): vscode.CustomTextEditorProvider & { dispose(): Promise<void> } {
   const sessions = new Map<string, SessionEntry>()
+  // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
+  // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
+  // 重赋可能触发 webview 资源状态重置，与 #128 片段目录同口径）+ 装载
+  // 指令幂等对账（desired 为准；面板 ready 亦各自重拉） ----
+  // #351 T02 已授权附加组件资源根（只增不减口径——见下方块内注释）
+  const grantedAddonRoots: vscode.Uri[] = []
+  if (addons) {
+    // #351 T02 许可面只增不减：停用/故障使 desired 缩回时不收回已授
+    // 权的资源根——1.82.3 实测重赋 webview.options 会触发整页重载（装载
+    // 器随页面销毁重建、停用 unload 指令被投递到新装载器而落空），且
+    // ADR-0012 要求热切换「无需重开」。收回靠卸载指令（装载器释放贡献
+    // 与监听），不靠许可面缩容；已停用组件的页面代码随卸载不再运行，
+    // 许可面残留只影响未运行代码的静态可读性。
+    const refreshAddonPanels = (): void => {
+      const addonRoots = addons.editorResourceRoots()
+      const known = new Set(grantedAddonRoots.map((uri) => uri.toString()))
+      const expanded = addonRoots.filter((uri) => !known.has(uri.toString()))
+      const rootsExpanded = expanded.length > 0
+      if (rootsExpanded) {
+        grantedAddonRoots.push(...expanded)
+      }
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          if (rootsExpanded) {
+            try {
+              panel.webview.options = {
+                enableScripts: true,
+                localResourceRoots: [
+                  ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
+                  ...grantedAddonRoots,
+                ],
+              }
+            } catch {
+              // 面板销毁竞态（dispose 事件在途）：跳过许可面刷新——该面板
+              // 的装载器已随 webview 消亡，指令对账不再需要
+            }
+          }
+          addons.pushDirectives(sessionId, panel.webview)
+        }
+      }
+    }
+    const offAddonPanelsChanged = addons.onPanelsChanged(refreshAddonPanels)
+    context.subscriptions.push({ dispose: offAddonPanelsChanged })
+  }
   const diagnostics = new TestDiagnostics()
   // ---- #342（P3-10）外链元信息服务：provider 级单例（跨面板共享缓存与
   // 合并计数——同一 URL 的多个悬停请求只发一次网络请求）。设置开关关闭
@@ -448,6 +504,32 @@ export function createTextEditorProvider(
   let refEditBindSuspend: Promise<void> | null = null
   let refEditBindSuspendRelease: (() => void) | null = null
   let refEditBindSuspendHits = 0
+
+  // ---- V01（#348）附加组件历史分组探针（实验件；VSIDIAN_TEST_HOOKS 门控，
+  // 未 attach 的目标端口纯透传，生产/常规开发零行为差异；命令注册见
+  // _test.addonHistory.* 块）----
+  const addonHistoryHub = process.env.VSIDIAN_TEST_HOOKS === '1'
+    ? new AddonHistoryProbeHub({
+      viewType: VIEW_TYPE,
+      ensureSession: async (uriStr) => {
+        const uri = vscode.Uri.parse(uriStr)
+        let entry = sessions.get(uriStr)
+        if (!entry) {
+          let doc: vscode.TextDocument
+          try {
+            doc = await vscode.workspace.openTextDocument(uri)
+          } catch {
+            return undefined
+          }
+          entry = openEntry(doc)
+        }
+        return { session: entry.session, doc: entry.doc }
+      },
+      isActiveCustomEditor: (uriStr) =>
+        isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, uriStr),
+      hasSourcePanels: (uriStr) => (sessions.get(uriStr)?.panels.size ?? 0) > 0,
+    })
+    : undefined
 
   /** 释放一个目标端口：B 会话 detach 虚拟面板；B 无面板时释放会话 */
   const releaseRefPort = (portId: string): void => {
@@ -592,6 +674,31 @@ export function createTextEditorProvider(
    *  .md 会落回本扩展 custom editor）→ 全局 undo/redo → 重显来源面板 A →
    *  收掉 B 预览标签（只收 isPreview 的——用户已开的钉住文本标签不动）。
    *  标签栏短暂切换与键盘焦点离开 A 是已接受的可见代价。 */
+  /** T03（#352，V01 F1 实测）：1.82.3 的 tabGroups.close 关闭**脏**文本标签
+   *  会静默丢弃未保存修改（版本 +1、文本回落盘面，无提示）。收口只允许在
+   *  目标非脏时执行；脏态保留临时标签（激活态已恢复来源 A），否则引用 B 的
+   *  撤销/重做会静默丢用户可见内容。 */
+  const closeTempTextTabsIfClean = async (
+    bDoc: vscode.TextDocument,
+    tabsBefore: Set<vscode.Tab>,
+  ): Promise<boolean> => {
+    if (bDoc.isDirty) {
+      return false // 脏态不关（F1）：标签留给用户，不丢弃未保存修改
+    }
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (
+          tab.input instanceof vscode.TabInputText &&
+          tab.input.uri.toString() === bDoc.uri.toString() &&
+          !tabsBefore.has(tab)
+        ) {
+          await vscode.window.tabGroups.close(tab)
+        }
+      }
+    }
+    return true
+  }
+
   const historyViaTempActivation = async (
     bDoc: vscode.TextDocument,
     originUri: vscode.Uri,
@@ -618,20 +725,70 @@ export function createTextEditorProvider(
           // 来源面板关闭竞态：保留当前激活态
         }
       }
-      for (const group of vscode.window.tabGroups.all) {
-        for (const tab of group.tabs) {
-          if (
-            tab.input instanceof vscode.TabInputText &&
-            tab.input.uri.toString() === bDoc.uri.toString() &&
-            !tabsBefore.has(tab)
-          ) {
-            await vscode.window.tabGroups.close(tab)
-          }
-        }
-      }
+      // F1 修复（V01 实测）：撤销/重做后 B 仍 dirty（撤回未到保存点、或重做
+      // 恢复了修改）时关闭临时标签会静默丢弃修改——脏态跳过收口
+      await closeTempTextTabsIfClean(bDoc, tabsBefore)
       return executed
     } catch {
       return false
+    }
+  }
+
+  /** T03（#352）组历史核心执行器：连续执行 steps 个原生 undo/redo 步骤，
+   *  每步执行前快照版本、执行后核对版本恰 +1（V01 F2「计划在执行时点计算」
+   *  与 F4「预期版本对位」的生产形态——不依赖文本全等对账）；命令失败或
+   *  版本失配即中止剩余步骤（V01 探针 runSteps 的生产迁移，核对口径收敛为
+   *  版本推进）。 */
+  const runHistoryStepsCore = async (
+    doc: vscode.TextDocument,
+    op: 'undo' | 'redo',
+    steps: number,
+  ): Promise<{ executedSteps: number; aborted?: 'version-mismatch' }> => {
+    let executed = 0
+    for (let i = 0; i < steps; i++) {
+      const beforeVersion = doc.version
+      const ran = await vscode.commands.executeCommand(op).then(() => true, () => false)
+      if (!ran) {
+        break
+      }
+      // 等待该步回流落定（版本恰 +1；超时视为失配——栈空/命令无效果）
+      const settled = await waitForDocVersion(doc, beforeVersion + 1, 4000)
+      if (!settled) {
+        return { executedSteps: executed, aborted: 'version-mismatch' }
+      }
+      executed += 1
+    }
+    return { executedSteps: executed }
+  }
+
+  /** T03（#352）引用 B 的组历史路由（窄适配点）：一次临时激活执行整组、
+   *  结束后才恢复来源 A（票面口径），叠加 F1 的脏态收口禁丢边界。失败不
+   *  回滚 B（与既有单步路由同语义）。 */
+  const historyGroupViaTempActivation = async (
+    bDoc: vscode.TextDocument,
+    originUri: vscode.Uri,
+    op: 'undo' | 'redo',
+    steps: number,
+  ): Promise<{ executedSteps: number; aborted?: 'version-mismatch' }> => {
+    try {
+      const tabsBefore = new Set(
+        vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) =>
+          t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === bDoc.uri.toString()))
+      await vscode.window.showTextDocument(bDoc, { preview: true })
+      const result = await runHistoryStepsCore(bDoc, op, steps)
+      if (sessions.get(originUri.toString())?.panels.size) {
+        try {
+          await vscode.commands.executeCommand('vscode.openWith', originUri, VIEW_TYPE)
+        } catch {
+          // 来源面板关闭竞态：保留当前激活态
+        }
+      }
+      // F1：整组完成后 B 仍 dirty 时保留临时标签（收口禁丢）
+      await closeTempTextTabsIfClean(bDoc, tabsBefore)
+      return result
+    } catch {
+      return { executedSteps: 0 }
     }
   }
 
@@ -1429,6 +1586,60 @@ export function createTextEditorProvider(
       return entry
     }
     const fresh: SessionEntry = { session: undefined as never, doc, panels: new Map(), appliedEdits: 0, linkLog: [] }
+    // T06（#355）历史协调器：条目流重建/归属闸门/外部回流补完/持久化恢复。
+    // 端口闭包引用 fresh.session（首次调用在 session 构造完成后——回流/
+    // 提交都在其后）；持久化快照存 workspaceState（保存态文本指纹对账）
+    const historyStateKey = `vsidian.addonHistory.${key}`
+    const coordinator = new AddonHistoryCoordinator(
+      {
+        // T06（#355）补完的组历史路由：目标文档有引用绑定来源面板（B 场
+        // 景）时携带 origin 走临时激活路由（一次激活执行整组、恢复来源
+        // A、F1 脏态收口）；主文档（无绑定）不传 origin，由 undoGroup 按
+        // 活动 custom editor 直连执行
+        runHistorySteps: (op, steps) => {
+          const sources = refPorts.byTarget(doc.uri.fsPath)
+          return fresh.session.runHistorySteps(op, steps,
+            sources.length > 0 ? { docUri: sources[0]!.panelDocUri } : undefined)
+        },
+        originAt: (version) => {
+          const hit = fresh.session.editOriginAtVersion(version)
+          return hit ? { origin: hit.origin, ...(hit.joined ? { joined: hit.joined } : {}) } : undefined
+        },
+      },
+      {
+        version: doc.version,
+        restore: context.workspaceState.get<AddonHistorySnapshotData>(historyStateKey),
+        initialText: doc.getText(),
+      },
+    )
+    fresh.historyCoordinator = coordinator
+    fresh.scheduleHistorySnapshot = () => persistHistorySnapshot()
+    fresh.flushHistorySnapshot = () => flushHistorySnapshot()
+    // T06（#355）协调器快照持久化：防抖合并（每次回流的 getText+指纹是
+    // O(n)，用户连续输入不逐键落盘；面板/会话退役时立即 flush）
+    let historySaveTimer: ReturnType<typeof setTimeout> | undefined
+    const persistHistorySnapshot = (): void => {
+      if (historySaveTimer !== undefined) {
+        clearTimeout(historySaveTimer)
+      }
+      historySaveTimer = setTimeout(() => {
+        historySaveTimer = undefined
+        void context.workspaceState.update(
+          historyStateKey,
+          coordinator.serialize(doc.version, doc.getText()),
+        )
+      }, 500)
+    }
+    const flushHistorySnapshot = (): void => {
+      if (historySaveTimer !== undefined) {
+        clearTimeout(historySaveTimer)
+        historySaveTimer = undefined
+      }
+      void context.workspaceState.update(
+        historyStateKey,
+        coordinator.serialize(doc.version, doc.getText()),
+      )
+    }
     const port: HostDocumentPort = {
       get version() {
         return doc.version
@@ -1478,12 +1689,47 @@ export function createTextEditorProvider(
         }
         return historyViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'redo')
       },
+      // T03（#352）组历史入口（窄适配点）：活动 custom editor 场景直接整组
+      // 执行（每步版本核对）；引用 B 场景走组临时激活路由（一次激活执行
+      // 整组、恢复来源 A、F1 脏态收口禁丢）。其余场景明确 route-unavailable
+      // （不撤销其他文档、不降级语义）
+      undoGroup: async (steps: number, origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return runHistoryStepsCore(doc, 'undo', steps)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
+          return { executedSteps: 0, aborted: 'route-unavailable' as const }
+        }
+        return historyGroupViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'undo', steps)
+      },
+      redoGroup: async (steps: number, origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return runHistoryStepsCore(doc, 'redo', steps)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
+          return { executedSteps: 0, aborted: 'route-unavailable' as const }
+        }
+        return historyGroupViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'redo', steps)
+      },
     }
     // #201 图片周期核验与失效：会话按自身 linkCtx 解析图源目标（同一 src
     // 在不同文档指向不同文件——目标解析必须按文档）；决策与版本表在协调器
-    fresh.session = new DocumentSession(port, {
+    // V01（#348）：TEST_HOOKS 下经历史分组探针包装（未 attach 目标纯透传）
+    const sessionPort = addonHistoryHub ? addonHistoryHub.wrapPort(port, doc) : port
+    fresh.session = new DocumentSession(sessionPort, {
       docUri: key,
       rootFsPath: doc.uri.fsPath,
+      // T03（#352）归属确认接线：T06 起生产消费——历史协调器按 ack version
+      // 对位来源（迟到归属兜底）；TEST_HOOKS 下同时喂探针 hub（验证工件
+      // 与生产协调器并存，互不替代）。addon 提交后持久化快照（保存态
+      // 指纹；外来输入不触发——崩溃丢失导致恢复保守 lost，可接受边界）
+      onEditAttributed: (record) => {
+        coordinator.noteAttribution(record.version, record.origin, record.joined)
+        addonHistoryHub?.noteAttribution(key, record)
+        persistHistorySnapshot()
+      },
+      // T06（#355）joinPrevious 业务闸门（协调器归属判定：无可确认前项拒绝）
+      onOriginGate: (origin) => coordinator.gateSubmit(origin),
       getEmbedDepthLimit: () => {
         const value = settings?.service.getSnapshot()[EMBED_MAX_DEPTH_KEY]
         return typeof value === 'number' ? value : EMBED_MAX_DEPTH_DEFAULT
@@ -1535,9 +1781,13 @@ export function createTextEditorProvider(
         })
       }
       entry.session.dispose()
+      // T06（#355）：会话退役——快照立即落盘后清 key（文档关闭即宿主撤销
+      // 栈随文档退役，条目恢复无意义；留 key 反而让下次打开误恢复）
+      entry.flushHistorySnapshot?.()
+      void context.workspaceState.update(`vsidian.addonHistory.${uri.toString()}`, undefined)
       sessions.delete(uri.toString())
       // #380 T05：来源会话退役——未落地的补 ID pending 尽力收尾撤回
-      //（V01 场景 6/7 收尾）；已落地记录按 origin-closed 保留标记
+      //（V01 场景 6/7 收口）；已落地记录按 origin-closed 保留标记
       void blockIdCoordinator.disposeOrigin(uri.toString())
     }
   }
@@ -3539,6 +3789,11 @@ export function createTextEditorProvider(
             }
           }
         }
+        // #351 T02 附加组件页面消息（装载器就绪/出站）：桥消费即终止下发
+        //（addon 指令不走会话消息管线——装载器是独立于控制器的页面级设施）
+        if (addons?.handlePanelMessage(sessionId, webviewPanel.webview, message)) {
+          return
+        }
         void entry.session.handleWebviewMessage(message, sessionId)
       }
       const messageSub = webviewPanel.webview.onDidReceiveMessage(panelMessageHandler)
@@ -3566,6 +3821,9 @@ export function createTextEditorProvider(
       const closeSub = webviewPanel.onDidDispose(() => {
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
+        // #351 T02：附加组件面板路由回收（视图关闭——页面装载器随 webview
+        // 消亡，宿主侧不再向该面板投递指令）
+        addons?.panelDisposed(sessionId)
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
@@ -3588,10 +3846,24 @@ export function createTextEditorProvider(
       // 不留整个扩展目录的默认可读面；#10 增补图片资源根（工作区文件
       // 经夹带 asWebviewUri 的地址需在许可面内——口径与路径白名单一致）；
       // #128 增补 CSS 片段目录（须在 html 赋值前设置——webview.options
-      // 是 html 装载时的资源许可面快照）
+      // 是 html 装载时的资源许可面快照）；#351 T02 增补附加组件页面目录
+      //（期望装载组件的入口/样式/资源子目录——隔离由资源服务按请求面板
+      // 的 localResourceRoots 包含性实现，V02 实测）
       webviewPanel.webview.options = {
         enableScripts: true,
-        localResourceRoots: editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+        localResourceRoots: [
+          ...editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+          ...addons?.editorResourceRoots() ?? [],
+        ],
+      }
+      // #351 T02 新面板初次授权即计入「已授面」：后续状态变化的许可面
+      // 刷新按只增不减口径（见 refreshAddonPanels 注释）
+      if (addons) {
+        for (const root of addons.editorResourceRoots()) {
+          if (!grantedAddonRoots.some((existing) => existing.toString() === root.toString())) {
+            grantedAddonRoots.push(root)
+          }
+        }
       }
       // 快照取一次（#93 语言与 #292 可读行宽预注入共用）
       const settingsSnapshot = settings?.service.getSnapshot()
@@ -3706,6 +3978,15 @@ export function createTextEditorProvider(
         event.document.version,
         event.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : event.reason === vscode.TextDocumentChangeReason.Redo ? 'redo' : undefined,
       )
+      // T06（#355）历史协调器回流观察（在会话回流匹配之后——归属登记已
+      // 就位；contentChanges 为空的 dirty-state 事件不喂）+ 快照防抖保存
+      if (event.contentChanges.length > 0 && entry.historyCoordinator) {
+        entry.historyCoordinator.observeChange({
+          version: event.document.version,
+          reason: event.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : event.reason === vscode.TextDocumentChangeReason.Redo ? 'redo' : undefined,
+        })
+        entry.scheduleHistorySnapshot?.()
+      }
       // #380 T05：来源权威文本变更 → 块 ID 协调器单调刷新「曾引用」观察
       //（undo 撤掉链接的翻转判定基准；手动删除链接不触发撤回）
       if (event.contentChanges.length > 0) {
@@ -3857,11 +4138,16 @@ export function createTextEditorProvider(
         for (const [sessionId, panel] of entry.panels) {
           // 换目录后已开面板的资源许可面同步刷新：webview.options 可在运行
           // 期重新赋值，资源服务按请求时点的 roots 校验（集成用例覆盖
-          // 「换目录后旧面板能加载新目录资源」）
+          // 「换目录后旧面板能加载新目录资源」）。附加组件授权根一并拼
+          // 回——与建面板/refreshAddonPanels 两处同口径，否则换目录后
+          // 面板重载时组件脚本被资源服务拒绝且不会自动恢复
           if (directoryChanged) {
             panel.webview.options = {
               enableScripts: true,
-              localResourceRoots: editorResourceRoots(context, entry.doc, state.directory),
+              localResourceRoots: [
+                ...editorResourceRoots(context, entry.doc, state.directory),
+                ...grantedAddonRoots,
+              ],
             }
           }
           if (entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready)) {
@@ -4342,6 +4628,23 @@ export function createTextEditorProvider(
     }))
   }
 
+  // ---- #359 T10 附加组件命令：宿主命令（addonCommandService 注册）执行时
+  //  经 addonWiring 的面板桥把 addonCommand.execute 转发到活动 Vsidian 面板
+  //  ——webview 按命令声明的生效模式复核后调组件回调（判定口径与上方
+  //  UI_OPERATIONS 循环一致：活动 + ready 面板）----
+  addons?.setActivePanelForwarder((commandId) => {
+    for (const entry of sessions.values()) {
+      for (const [sessionId, panel] of entry.panels) {
+        if (panel.active && entry.session.getInfo().panels.some((p) =>
+          p.sessionId === sessionId && p.ready)) {
+          entry.session.postToPanel(sessionId, { kind: 'addonCommand.execute', commandId })
+          return true
+        }
+      }
+    }
+    return false
+  })
+
   // #318 外部搜索导航定位恢复——显式触发（命令面板可达；键位注册表已
   // 登记、默认未绑定，见 docs/specs/keybindings.md 与 docs/specs/search-reveal.md）。
   // 成功落位由 view.locate 通道的 flash 高亮呈现；失败按结果分型通知：
@@ -4356,6 +4659,9 @@ export function createTextEditorProvider(
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时
   // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露 ----
   if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+    // V01（#348）历史分组探针：文档事件路由启动 + 随 context 释放
+    addonHistoryHub?.start()
+    context.subscriptions.push({ dispose: () => addonHistoryHub?.dispose() })
     context.subscriptions.push(
       vscode.commands.registerCommand('onegayi.vsidian._test.setDiagnostics', (enabled: boolean) => {
         diagnostics.reset(enabled === true)
@@ -4571,6 +4877,101 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.getConflictTempUris',
       () => [...conflictTempUris],
     ),
+    ...(addonHistoryHub ? [
+      vscode.commands.registerCommand(
+        // V01（#348）历史分组探针：attach 激活目标包装（虚拟面板走真实
+        // edit.request/ack 链路）；state/submit/history/reset/snapshot 族
+        // 见下——探针实现与边界见 src/host/addonHistoryProbe.ts 头注
+        'onegayi.vsidian._test.addonHistory.attach',
+        (uriStr: string) => addonHistoryHub.attach(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.state',
+        (uriStr: string) => addonHistoryHub.state(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.submit',
+        (uriStr: string, input: { opId: string; atomic: boolean; changes: Array<{ offset: number; length: number; text: string }>; refOriginUri?: string }) =>
+          addonHistoryHub.submit(uriStr, input),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.history',
+        (uriStr: string, op: 'undo' | 'redo', refOriginUri?: string) =>
+          addonHistoryHub.history(uriStr, op, refOriginUri),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.externalWrite',
+        (uriStr: string, text: string) => addonHistoryHub.externalWrite(uriStr, text),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.nativeHistory',
+        (uriStr: string, op: 'undo' | 'redo') => addonHistoryHub.nativeHistory(uriStr, op),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.snapshot',
+        (uriStr: string) => addonHistoryHub.snapshot(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.restore',
+        (uriStr: string, snap: unknown) => addonHistoryHub.restore(uriStr, snap),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.reset',
+        (uriStr: string) => addonHistoryHub.resetMapping(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.rebuild',
+        (uriStr: string) => addonHistoryHub.rebuildMapping(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        // T03（#352）生产归属记录观测：onEditAttributed 的消费侧证据
+        //（失败/重放不产生记录；version 与 edit.ack(ok) 同源）
+        'onegayi.vsidian._test.addonHistory.t03Attributions',
+        (uriStr: string) => addonHistoryHub.attributions(uriStr),
+      ),
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.addonHistory.t03GroupHistory',
+        (uriStr: string, op: 'undo' | 'redo', steps: number, refOriginUri?: string) =>
+          addonHistoryHub.t03GroupHistory(uriStr, op, steps, refOriginUri),
+      ),
+      vscode.commands.registerCommand(
+        // T03（#352）真实管线直通提交：ack 形态观测（纯选区/失败/正常确认）
+        'onegayi.vsidian._test.addonHistory.t03Submit',
+        (uriStr: string, input: { changes: Array<{ offset: number; length: number; text: string }>; origin?: { addonId: string; opId: string; undo: 'atomic' | 'joinPrevious' }; refOriginUri?: string }) =>
+          addonHistoryHub.t03Submit(uriStr, input),
+      ),
+      vscode.commands.registerCommand(
+        // T06（#355）生产历史协调器状态观测（条目流/应用指针/lost——
+        // 集成断言面：分组归属与补完的生产证据）
+        'onegayi.vsidian._test.addonHistory.t06State',
+        (uriStr: string) => {
+          const entry = findEntry(vscode.Uri.parse(uriStr))
+          if (!entry?.historyCoordinator) {
+            return undefined
+          }
+          const state = entry.historyCoordinator.observe()
+          return {
+            lost: state.lost,
+            applied: state.applied,
+            entries: state.entries.map((e) => ({
+              version: e.version,
+              owner: e.owner,
+              ...(e.groupId !== undefined ? { groupId: e.groupId } : {}),
+              ...(e.atomic !== undefined ? { atomic: e.atomic } : {}),
+              ...(e.joinedOpIds !== undefined ? { joinedOpIds: e.joinedOpIds } : {}),
+            })),
+          }
+        },
+      ),
+      vscode.commands.registerCommand(
+        // T06（#355）joinPrevious 业务闸门的生产观测（四种拒绝形态对位）
+        'onegayi.vsidian._test.addonHistory.t06Gate',
+        (uriStr: string, origin: { addonId: string; opId: string; undo: 'atomic' | 'joinPrevious' }) => {
+          const entry = findEntry(vscode.Uri.parse(uriStr))
+          return entry?.historyCoordinator?.gateSubmit(origin) ?? false
+        },
+      ),
+    ] : []),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.requestViewState',
       async (uriStr: string, panelIndex = 0) => {
@@ -4873,8 +5274,20 @@ function isBlockIdFragment(fragment: string): boolean {
  *  避免以注入形态建立 URI 与真实文档/面板身份漂移（集成实测教训）；
  *  远程 POSIX 宿主 stat 严格命中即真实路径，原样返回。#197 引用索引
  *  落地后可换传索引查询（索引持磁盘真实路径，直接返回）。 */
-async function statFileRealPath(fsPath: string): Promise<string | null> {
-  const uri = vscode.Uri.file(fsPath)
+/** T03（#352）等待权威文档到达预期版本（组历史每步核对用）：轮询读取
+ *  + 超时（V01 探针 waitDocState 的生产等价物，核对口径收敛为版本推进） */
+async function waitForDocVersion(doc: vscode.TextDocument, version: number, timeoutMs: number): Promise<boolean> {
+  const until = Date.now() + timeoutMs
+  while (Date.now() < until) {
+    if (doc.version >= version) {
+      return true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40))
+  }
+  return doc.version >= version
+}
+
+async function statFileRealPath(fsPath: string): Promise<string | null> {  const uri = vscode.Uri.file(fsPath)
   try {
     const st = await vscode.workspace.fs.stat(uri)
     if ((st.type & vscode.FileType.File) === 0) {

@@ -18,6 +18,14 @@
 # unit / integration——把 style-contract 加入必需名单需仓库 admin 权限与
 # 用户授权，操作步骤见 docs/specs/style-contract-gate.md；名单更新前，
 # 其失败只显示在 PR 状态区，不阻塞合并（不得表述为已阻止合并）。
+# addon-api-contract（#363 T14）为附加组件公开 API 契约门禁（checkAddonApiCompat
+# 的 CI 接线），与 style-contract 同序同型：可信基线复验先于契约检查
+# （--verify-baseline 从 git 对象复验 bootstrap 基线锚点 abcbfdd7——候选
+# 篡改基线在契约检查之前即失败）。bootstrap 基线锚定的是集成分支提交
+# （非发行 tag）：合并采用 merge commit（非 squash），fetch-depth: 0 下对象
+# 恒可达。远端必需检查**待授权未配置**——操作步骤与诚实边界见
+# docs/specs/addons-api-gate.md，配置前其失败不阻塞合并。报告无论成败均
+# 上传（if: always()，名称带 attempt 号防 rerun 覆盖）。
 # 步骤序是防线核心（先证检查器可信，再信检查结果）：
 #   1. --verify-baseline 从 git 对象（v0.4.0 tag 固定 SHA）复验候选基线
 #      文件——候选篡改历史基线在契约检查之前即失败；
@@ -110,6 +118,62 @@ jobs:
         with:
           name: style-contract-report
           path: out/test/style-contract-report.json
+          if-no-files-found: warn
+
+  # #363 T14 附加组件 API 契约门禁：步骤序与 style-contract 同型——
+  # 先证检查器可信（git 锚定基线复验），再信检查结果（全量契约检查）。
+  addon-api-contract:
+    name: addon-api-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # verify-baseline 需从 git 对象读 bootstrap 基线锚点（集成分支提交
+          # abcbfdd7）的清单与签名源原文；浅克隆缺对象——锚点不可达必须
+          # 失败而非降级（fail-closed，票面验收口径）
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 复验 API 基线与 git 锚定内容一致
+        # 先证检查器可信：候选改 test/addon-api/baseline-bootstrap-1.json
+        # （抹历史承诺）或锚点对象不可达（浅克隆）在此拦截，失败时后续
+        # 契约检查不再执行
+        run: npm run check:addonapi:baseline
+      - name: 暴露检查器与基线相对 PR 基点的变更（供独立审查）
+        # 变更不失败（合法演进路径：显式重锚定 / 首个发行落账），但统计写入
+        # step summary：PR 评审在 Summary 页一眼可见「检查器/基线/门禁工作流
+        # 被本 PR 修改」，须在 PR 描述独立列出理由与保护效果（AGENTS 约定）
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.sha }}"
+          {
+            echo "## 检查器与基线变更审查（addon-api-contract）"
+            echo "对比基点：\`$BASE\`（push(main) 时即 HEAD，diff 恒为空）"
+            echo '```diff'
+            git diff --stat "$BASE"...HEAD -- \
+              scripts/checkAddonApiCompat.mjs scripts/addonApiCompatCheck.mjs \
+              scripts/genAddonApiRef.mjs src/shared/addonApiCatalog.ts \
+              test/addon-api/ docs/addons/ .github/workflows/ci.yml
+            echo '```'
+            echo '以上文件若出现在本 PR 的变更中，须在 PR 描述独立列出理由与保护效果（AGENTS「附加组件公开 API 维护」）；基线重锚定与发行落账是显式动作（--emit-baseline）。'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 附加组件 API 契约兼容检查
+        # 再信检查结果：类型+语义双检查、台账历史与双门槛弃用期限、API 版本
+        # 绑定、参考新鲜度与完整性清单，失败即 job 失败（报告由后续步骤保留）
+        run: npm run check:addoncompat
+      - name: 保存契约检查报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          # 名称带 attempt 号：rerun 后新 attempt 同名上传会覆盖旧报告（#164
+          # 先例），按 attempt 分名保留失败现场
+          name: addon-api-contract-report-a${{ github.run_attempt }}
+          path: out/test/addon-api-compat-report.json
           if-no-files-found: warn
 
   integration_shard:

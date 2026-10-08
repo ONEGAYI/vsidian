@@ -642,6 +642,104 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   margin-left: auto;
 }
 
+/* #360 T11 附加组件挂载点（平台容器与面板 chrome 样式归平台；组件按钮
+   与面板内容根的内部样式归组件——组件经装载样式表自管。契约条目
+   addon-toolbar-slot / addon-panel-dock，见 src/shared/styleContract.ts） */
+.vsidian-toolbar .vsidian-addon-toolbar-slot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.vsidian-toolbar .vsidian-addon-toolbar-slot:empty {
+  display: none;
+}
+
+/* 组件按钮复用工具栏 button 结构形态（透明底/悬停高亮）；文字内容放宽
+   宽度与内边距（iconText/label 可为短文字，不强制图标方形） */
+.vsidian-toolbar .vsidian-addon-toolbar-slot .vsidian-addon-toolbar-button {
+  width: auto;
+  min-width: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 面板 dock：主编辑区尾部（正文之下），空态零占位（常驻 DOM 供探针
+   命中——契约探针按类名定位，空容器 display:none 不影响探针规则级联
+   读取，同 find-panel 常驻先例） */
+.vsidian-main > .vsidian-addon-panel-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.vsidian-main > .vsidian-addon-panel-dock:empty {
+  display: none;
+}
+
+.vsidian-addon-panel {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  margin: 0 6px 6px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+}
+
+.vsidian-addon-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
+
+.vsidian-addon-panel-title {
+  flex: 1 1 auto;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vsidian-addon-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+}
+
+.vsidian-addon-panel-close:hover,
+.vsidian-addon-panel-close:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.16));
+  outline: none;
+}
+
+/* 内容根容器：max-height 约束面板高度（滚动归 body；组件内容根不设高，
+   组件可在内部自管布局） */
+.vsidian-addon-panel-body {
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px 8px;
+}
+
+.vsidian-addon-panel-root {
+  display: block;
+}
+
 /* #141 双态视图切换按钮图标显隐：两图标常驻 DOM，显隐唯一来源是 body
    模式类（vsidian-mode-live / vsidian-mode-reading）的这两条规则——样式
    失效时两图标同显，浏览器绘制断言据此暴露（侧栏两态图标同款哲学） */

@@ -1,0 +1,23 @@
+{
+  "name": "addon-t04",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T04 Settings)",
+  "description": "Integration fixture: Vsidian add-on consuming complex settings definitions and the scoped settings API (T04, #353).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-t04.stats", "title": "Fixture T04: add-on settings stats" },
+      { "command": "vsidian-test-fixture.addon-t04.updateFromAddon", "title": "Fixture T04: update settings via public API" },
+      { "command": "vsidian-test-fixture.addon-t04.badPatch", "title": "Fixture T04: send invalid patch via public API" },
+      { "command": "vsidian-test-fixture.addon-t04.clearOverrideFromAddon", "title": "Fixture T04: clear workspace override via public API" },
+      { "command": "vsidian-test-fixture.addon-t04.releaseAndReRegister", "title": "Fixture T04: release and re-register (definition replace)" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

@@ -1,5 +1,9 @@
 // 敏感组是有证据的临时归组，不表示已排除产品缺陷；完整名称精确匹配。
 // 恢复强制检查时从此表移除，证据与处置边界见 integration-test-groups.md。
+import { readFileSync } from 'node:fs'
+import * as path from 'node:path'
+import * as vscode from 'vscode'
+
 export const SENSITIVE_CASES = [
   {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
@@ -31,6 +35,28 @@ export interface CaseSelectionOptions {
   group?: string
   filter?: string
   shard?: string
+}
+
+/** #366 T17：SSH 远端会话的用例筛选兜底通道。远端 ext host 不继承本地
+ * env（VSIDIAN_TEST_CASES 经 process.env 传不进 SSH 会话——server 进程
+ * env 来自远端登录 shell），阶段变量与筛选经工作区标记文件传递（与
+ * test/integration/t17RemoteSsh.mjs 的 writeSshPhaseMarker 同一文件、
+ * 同一字段语义）。本地会话 env 优先，缺席且标记文件在场时才兜底；标记
+ * 损坏/无工作区返回 undefined（回到全量语义，不静默扩大筛选面）。 */
+export function sshMarkerCaseFilter(readFile: (p: string) => string = (p) => readFileSync(p, 'utf8'),
+  folders: readonly { uri: vscode.Uri }[] = vscode.workspace.workspaceFolders ?? []): string | undefined {
+  const root = folders[0]?.uri.fsPath
+  if (!root) {
+    return undefined
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFile(path.join(root, '.vsidian-t17-ssh.json')))
+  } catch {
+    return undefined
+  }
+  const filter = (parsed as { caseFilter?: unknown } | null)?.caseFilter
+  return typeof filter === 'string' && filter !== '' ? filter : undefined
 }
 
 /** 保留既有筛选与切片语义，分组只决定用例是否执行，不修改断言。 */

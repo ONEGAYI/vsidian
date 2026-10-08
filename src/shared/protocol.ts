@@ -12,6 +12,12 @@ import { sanitizeFindOptions, type FindOptions } from './findOptions'
 import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
 import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
+import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
+import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './editOrigin'
+import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
+import { isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
+import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
+import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -58,7 +64,13 @@ export type HostToWebview =
    *  宿主已保留该请求的输入并暂停面板写回；error = 写回通道失败（applyEdit）。
    *  两者均附权威全文：webview 无未确认输入时重置装载，有则保留本地输入。 */
   | { kind: 'edit.ack'; seq: number; ok: true; version: number }
-  | { kind: 'edit.ack'; seq: number; ok: false; reason: 'conflict' | 'error'; version: number; text?: string }
+  | { kind: 'edit.ack'; seq: number; ok: false; reason: 'conflict' | 'error'; version: number; text?: string
+      /** T06（#355）来源提交的业务拒绝标记：origin 携带 joinPrevious 但宿主
+       *  无法确认同目标前项（HistoryBoundaryUnavailable——空日志/仅外来
+       *  写入/组顶被打断/映射失配）时随 conflict ack 附带；reason 保持
+       *  既有枚举（旧 webview 忽略附加字段），webview 侧 applyEdits 凭据
+       *  路由据此映射为 history-boundary 拒绝 */
+      originRejection?: 'history-boundary' }
   /** 权威文档发生变更：变更增量（同指变更前文档） */
   | { kind: 'doc.changed'; version: number; changes: SerChange[]; origin: 'external'; reason?: DocumentChangeReason; paste?: PasteHistory }
   /** 全文重同步（应 sync.request 或宿主主动）：webview 以全文重置本地文档；
@@ -415,6 +427,13 @@ export type HostToWebview =
   | { kind: 'contextMenu.test.menuClick'; command: string }
   /** 测试钩子（#183）：关闭当前统一右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'contextMenu.test.menuClose' }
+  /** 测试钩子（#360 T11）：点击工具栏中 buttonId（data-addon-button 命名
+   *  空间 ID）对应的组件真实按钮（与用户点击同一处理器；宿主测试无法向
+   *  webview 派发真实鼠标事件，以此通道验证真实宿主内的按钮执行链） */
+  | { kind: 'addonUi.test.buttonClick'; buttonId: string }
+  /** 测试钩子（#360 T11）：点击面板 chrome 的关闭按钮（panelId 为
+   *  data-addon-panel 命名空间 ID；与用户点击同一处理器——平台回收路径） */
+  | { kind: 'addonUi.test.panelClose'; panelId: string }
   /** 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾（真实
    *  keydown 链路；须先经 menuClick command='rename' 进入重命名态） */
   | { kind: 'outline.test.renameKey'; text: string; key: 'enter' | 'escape' }
@@ -914,6 +933,124 @@ export type HostToWebview =
    *  （associations 配置变更、fixNow 修复）后经 notifyDefaultEditorChanged
    *  推送。守护开关值不经本消息（随 settings.snapshot/changed 回显）。 */
   | { kind: 'defaultEditor.state' } & DefaultEditorDisplayState
+  /** #350 T01 附加组件状态（宿主权威）：设置页「附加组件」分页消费；
+   *  apiVersion 为宿主当前提供的稳定 API 版本（首个候选 1.0.0）；draft
+   *  恒为 true——API 形状仍是草案，未发布。设置页经 addons.get 拉取；
+   *  协调器状态变化后经 notifyAddonsChanged 推送 */
+  | { kind: 'addons.state' } & AddonsStatePayload
+  /** #353 T04 附加组件基础设置区载荷（宿主权威）：设置页经
+   *  addons.settingsGet 拉取；定义注册/成功保存/设置区开合后推送 */
+  | { kind: 'addons.settingsState' } & AddonSettingsStatePayload
+  /** #351 T02 附加组件装载指令（宿主 → 编辑器/设置页 webview）：内层为
+   *  AddonPageDirective（addon.load/unload/fault/channel.reply）；URI 已按
+   *  目标面板的 asWebviewUri 铸造，资源许可面随指令同步刷新。webview 侧
+   *  装载器安装后经 addonPage.ready 上报，宿主按 desired 幂等推送 */
+  | { kind: 'addonPage.directive'; directive: import('./addonPage').AddonPageDirective }
+  /** T07（#356）输入行为状态下发（宿主 → 编辑器 webview）：行为顺序
+   *  覆盖与逐项开关的持久状态（shared/addonBehaviors 的 state 形态）。
+   *  webview 重载（addonPage.ready）与宿主状态变化时推送；null = 无
+   *  用户覆盖（全新默认态） */
+  | { kind: 'addon.behaviors.state'; state: import('./addonBehaviors').AddonBehaviorStateStore | null }
+  /** #359 T10 组件命令目录（宿主 → webview）：当前全部在场组件命令表
+   *  （设置页快捷键分页合并展示与冲突检查的消费面；编辑器面板不消费）。
+   *  设置页经 addons.commandCatalogGet 拉取，宿主目录变化后主动推送 */
+  | { kind: 'addons.commandCatalog'; commands: import('./addonCommands').AddonCommandReport[] }
+  /** T08（#357）行为冲突管理载荷（宿主 → 设置页 webview）：behaviors 为
+   *  全部在场组件上报的注册行为表（AddonBehaviorInfo 数组，按完整键稳定
+   *  排序）；state 为用户覆盖（order/disabled，null = 无覆盖默认态）——
+   *  有效序由两端共用纯函数计算。notice 为最近一次写操作的结局提示（无
+   *  待呈现提示时缺省，常规推送不残留） */
+  | {
+    kind: 'addons.behaviors'
+    behaviors: import('./addonBehaviors').AddonBehaviorInfo[]
+    state: import('./addonBehaviors').AddonBehaviorStateStore | null
+    notice?: { kind: 'saved' | 'save-failed' }
+  }
+  /** #359 T10 组件命令执行指令（宿主 → 编辑器 webview）：命令面板/宿主
+   *  侧命令入口转发到活动面板执行（webview 按命令声明的生效模式复核后
+   *  调组件回调；快捷键入口在 webview 本地分支直接执行不经本消息） */
+  | { kind: 'addonCommand.execute'; commandId: string }
+  /** #358 T09 渲染提供者生效表（宿主 → 编辑器 webview，广播）：候选与
+   *  逐语言生效提供者的权威判定（确定性默认序 + 用户首选；形态与守卫
+   *  的单一事实源在 shared/addonRenderers）。面板 ready 与表内容变化时
+   *  幂等推送；webview 等值跳过 */
+  | { kind: 'addonRenderers.table'; table: import('./addonRenderers').AddonRenderersTablePayload }
+
+/** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
+ * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
+export interface AddonsStatePayload {
+  /** 宿主当前提供的稳定 API 版本（首个候选 1.0.0） */
+  apiVersion: string
+  /** API 形状仍是草案、未发布——呈现层据此标注，不冒充已发布契约 */
+  draft: true
+  /** 发现/注册协调合并后的组件状态列表（官方在前，其余按 ID 排序） */
+  addons: readonly AddonStatusEntry[]
+  /** #351 T02 当前打开的组件设置页（组件 ID；无打开项为 null——权威在
+   *  宿主 runtime，面板销毁/关闭/故障后终结；设置页分页据此渲染挂载区） */
+  openAddonSettingsPage?: string | null
+  /** #353 T04 基础设置区当前打开的组件（组件 ID；无打开项为 null——
+   *  定义驱动的平台控件区，停用与故障后保留） */
+  openAddonSettings?: string | null
+}
+
+/** #353 T04 单组件设置区载荷（定义 + 两层值与来源 + 开关两层） */
+export interface AddonSettingsAreaPayload {
+  addonId: string
+  /** 展示名（displayName 回退 id） */
+  label: string
+  /** 故障暂停（自定义页撤下；定义与基础控件保留） */
+  faulted: boolean
+  faultReason?: string
+  /** 自定义设置页可装载（已登记入口且非 faulted） */
+  hasCustomPage: boolean
+  /** 功能开关两层显式与生效（ADR Q21：开关同样支持两层） */
+  enabled: {
+    effective: boolean
+    /** 用户默认层显式值（null = 未写过） */
+    userExplicit: boolean | null
+    /** 工作区层显式值（null = 未覆盖）；无工作区恒 null */
+    workspaceExplicit: boolean | null
+    /** 生效来源（default = 无显式偏好，默认启用） */
+    source: 'default' | 'user' | 'workspace'
+  }
+  /** 平台基础控件数据源（注册序；shape 单一事实源 shared/addonSettings） */
+  definitions: readonly import('./addonSettings').AddonSettingDefinition[]
+  /** 定义键 → 生效值 / 两层显式值（仅当显式且通过当前定义校验时下发）/
+   *  生效来源 */
+  values: Readonly<Record<string, {
+    effective: import('./addonSettings').AddonSettingValue
+    user?: import('./addonSettings').AddonSettingValue
+    workspace?: import('./addonSettings').AddonSettingValue
+    source: import('./addonSettings').AddonSettingSource
+  }>>
+}
+
+/** #353 T04 附加组件基础设置区载荷（addons.settingsState 消息体） */
+export interface AddonSettingsStatePayload {
+  /** 宿主当前提供的稳定 API 版本（首个候选 1.0.0） */
+  apiVersion: string
+  /** API 形状仍是草案、未发布——呈现层据此标注，不冒充已发布契约 */
+  draft: true
+  /** 设置区当前打开的组件（无打开项为 null） */
+  open: string | null
+  /** 是否存在工作区（无工作区时「当前工作区」标签禁用） */
+  hasWorkspace: boolean
+  /** 打开组件的设置区载荷（open 非 null 且组件在场；已注销为 null） */
+  addon: AddonSettingsAreaPayload | null
+  /** #351 T02 当前装载的组件自定义设置页（挂载区可见性——设置区内） */
+  openAddonSettingsPage?: string | null
+  /**
+   * 操作结局提示：保存/清除的应答推送携带（失败不虚报的 UI 依据——
+   * 页面据 kind 组句显示）；常规状态推送不带（页面清空提示）
+   */
+  notice?: {
+    kind: 'saved' | 'save-failed'
+    /** save-failed 的原因码（页面 i18n 组句；rejected = 代次已终结的迟到调用） */
+    reason?: 'unknown-key' | 'invalid-value' | 'no-workspace' | 'store-write-failed' | 'rejected'
+    keys?: readonly string[]
+    scope?: 'user' | 'workspace'
+  }
+}
 
 /** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
  *  面板 send 出站的编辑通道子集——与根面板同构的同步语义（init 装载 /
@@ -972,6 +1109,13 @@ export type WebviewToHost =
       baseVersion: number
       changes: SerChange[]
       paste?: PasteStage
+      /** T03（#352）可选来源与原子操作归属元数据：公开编辑 API（T06）的
+       *  提交通道携带；旧调用缺省不携带，行为不变。经真实写回/回流确认后
+       *  由宿主按 ack version 对位归属（DocumentSession.onEditAttributed）。
+       *  T06（#355）起接受数组形态（EditOriginList）：仅「同组未提交合并」
+       *  ——原子修饰与随后并入的 joinPrevious 修饰在页面出站层合成一笔
+       *  WorkspaceEdit 时出现，首项恒为组首原子操作，逐次来源记录保留 */
+      origin?: EditOriginMeta | EditOriginList
     }
   /** 撤销/重做请求：作用于宿主 TextDocument 权威历史（探索笔记 03 §4） */
   | { kind: 'history.request'; op: 'undo' | 'redo' }
@@ -1293,6 +1437,12 @@ export type WebviewToHost =
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
        *  缺省为空数组） */
       liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
+      /** #351 T02 附加组件页面装载器观测（编辑器页装载器安装后才有值；
+       *  活跃代次/授权样式表/释放历史与拒收计数——旧 webview 缺省） */
+      addonPage?: import('./addonPage').AddonLoaderStats
+      /** T07（#356）输入行为 runtime 观测（编辑器页装配后才有值）：
+       *  注册清单/宿主状态/链执行轨迹与计数——旧 webview 缺省 */
+      addonBehaviors?: import('./addonBehaviors').AddonBehaviorRuntimeStats
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -1774,6 +1924,78 @@ export type WebviewToHost =
    *  引导）；结果经 defaultEditor.state 推送（状态行更新为 Vsidian）与宿主
    *  通知呈现，不逐次应答 */
   | { kind: 'defaultEditor.fix' }
+  /** #350 T01 附加组件状态拉取（设置页「附加组件」分页装载/重载时）：
+   *  宿主以 addons.state 应答；协调器状态变化后亦经同款消息推送 */
+  | { kind: 'addons.get' }
+  /** #353 T04 附加组件基础设置区状态拉取（装载/重载时）：宿主以
+   *  addons.settingsState 应答；定义注册与成功保存后亦推送 */
+  | { kind: 'addons.settingsGet' }
+  /** #353 T04 打开某组件的基础设置区（平台定义驱动；停用与故障保留） */
+  | { kind: 'addons.settingsOpen'; addonId: string }
+  /** #353 T04 关闭基础设置区 */
+  | { kind: 'addons.settingsClose' }
+  /** #353 T04 设置按批写入（scope = 标签选中的作用范围；批内任一键
+   *  非法整批拒绝——结果经 addons.settingsState 推送回显，失败带原因） */
+  | { kind: 'addons.settingsUpdate'; addonId: string; scope: 'user' | 'workspace'; values: Record<string, unknown> }
+  /** #353 T04 清除工作区对某设置键的覆盖（恢复继承用户默认） */
+  | { kind: 'addons.settingsClearOverride'; addonId: string; key: string }
+  /** #351 T02 用户功能开关（设置页「附加组件」分页）：写用户默认层并按
+   *  两生命周期同步——关闭释放运行贡献但保留设置能力；持久保留用户选择。
+   *  #353 T04 起可选 scope：写入哪一层（缺省 'user' 保持 T02 语义；
+   *  设置区内的开关行随当前作用范围标签发送） */
+  | { kind: 'addons.setEnabled'; addonId: string; enabled: boolean; scope?: 'user' | 'workspace' }
+  /** #353 T04 清除工作区对功能开关的覆盖（恢复继承用户默认层） */
+  | { kind: 'addons.clearEnabledOverride'; addonId: string }
+  /** #351 T02 打开某组件自己的设置页（设置面板装载其页面产物） */
+  | { kind: 'addons.openAddonPage'; addonId: string }
+  /** #351 T02 关闭当前组件设置页（分页切换；面板销毁另有销毁路径） */
+  | { kind: 'addons.closeAddonPage' }
+  /** #350 T01 在 VSCode 市场搜索附加组件（关键词 vsidian-addon 仅搜索
+   *  辅助）：宿主执行 workbench.extensions.search 打开扩展视图搜索 */
+  | { kind: 'addons.openSearch' }
+  /** #350 T01 打开 VSCode 扩展管理视图（安装/卸载/整扩展禁用继续由
+   *  VSCode 管理——本插件不建内部安装器） */
+  | { kind: 'addons.openExtensionsView' }
+  /** #350 T01 打开某组件在 VSCode 的扩展详情页（VSCode 管理入口） */
+  | { kind: 'addons.openExtension'; extensionId: string }
+  /** #354 T05 打开附加组件日志输出通道（故障排障入口——安装态日志标明
+   *  组件 ID、阶段与原因；完整诊断形态归 T12） */
+  | { kind: 'addons.openLogs' }
+  /** #354 T05 故障手动重试（先释放旧代次再重新唤醒；结果经 addons.state
+   *  推送回显——激活失败过的 activate 假成功时如实呈现等待注册） */
+  | { kind: 'addons.retry'; addonId: string }
+  /** #351 T02 页面装载器就绪上报（编辑器/设置页 webview 安装装载器后与
+   *  webview 重载后各发一次）：宿主按当前期望装载清单幂等推送指令 */
+  | { kind: 'addonPage.ready' }
+  /** #351 T02 页面装载器出站消息（内层为 AddonPageOutbound：loaded/
+   *  unloaded/faulted/channel.request）；宿主路由通道请求并回执 */
+  | { kind: 'addonPage.outbound'; outbound: import('./addonPage').AddonPageOutbound }
+  /** #359 T10 组件命令表全量对账上报（编辑器 webview → 宿主）：sdk.commands
+   *  注册/撤销/整组件回收后各发一次该组件当前全表（空表 = 全撤）；宿主据
+   *  此注册命令面板命令并推送设置页目录。commands 为序列化安全的
+   *  AddonCommandReport 数组（无函数） */
+  | { kind: 'addonCommands.report'; addonId: string; generation: number; commands: import('./addonCommands').AddonCommandReport[] }
+  /** #359 T10 设置页拉取组件命令目录（宿主以 addons.commandCatalog 应答；
+   *  宿主目录变化时亦主动推送，webview 幂等对账） */
+  | { kind: 'addons.commandCatalogGet' }
+  /** #358 T09 渲染提供者候选上报（编辑器 webview → 宿主）：某组件当前
+   *  装载代次内注册的可序列化声明集（空数组 = 全部撤销）；宿主按 addonId
+   *  整组替换并重算生效表广播 */
+  | { kind: 'addonRenderers.registered'; payload: import('./addonRenderers').AddonRenderersRegisteredPayload }
+  /** T08（#357）行为注册表全量对账上报（编辑器 webview → 宿主）：behaviors
+   *  注册成功与整组件注销（releaseLoad）后各发一次该组件当前全表（空表 =
+   *  全撤信号）；宿主据此构建行为冲突管理目录并推送设置页。behaviors 为
+   *  AddonBehaviorInfo 数组（序列化安全，无回调）。 */
+  | { kind: 'addon.behaviors.report'; addonId: string; generation: number; behaviors: import('./addonBehaviors').AddonBehaviorInfo[] }
+  /** T08（#357）设置页拉取行为冲突管理载荷（宿主以 addons.behaviors 应答；
+   *  注册表或用户状态变化时亦主动推送，webview 幂等对账） */
+  | { kind: 'addons.behaviorsGet' }
+  /** T08（#357）行为逐项开关写入（设置页 → 宿主；批量只动提及键）；写入
+   *  成功即推送全部活跃编辑器面板（热生效）并回推设置页权威态 */
+  | { kind: 'addons.behaviorsSetDisabled'; keys: string[]; disabled: boolean }
+  /** T08（#357）行为调序写入（设置页 → 宿主；order 为当前可见行为的完整
+   *  键新序——宿主与存储中不可见键锚定合并，配置不丢） */
+  | { kind: 'addons.behaviorsSetOrder'; order: string[] }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -2252,6 +2474,29 @@ export interface LineGutterAlignment {
 export interface PaintProbe {
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
   toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
+  /** #358 T09 渲染提供者接管绘制观测：文档内图形容器的生效提供者与
+   *  绘制层证据（组件容器计算色/几何；内置 SVG 在场数）——「实际选中
+   *  内容」的断言面（非 DOM 存在性）。无图形容器为空数组（graphic 名
+   *  已被 #111 图形交互探针占用，此处命名 renderers） */
+  renderers?: {
+    containers: Array<{
+      language: string
+      /** 生效提供者（'builtin' 或 `${addonId}/${rendererId}`） */
+      provider: string
+      /** 挂载目标模式（live widget / 阅读块） */
+      mode: string
+      state: string | null
+      /** 组件渲染内容的计算背景色（内置容器为 null——SVG 在场由 builtinSvg 计） */
+      color: string | null
+      /** 组件渲染内容宽度（px；非零 = 真实布局） */
+      width: number
+    }>
+    builtinSvg: number
+    /** #361 T12 诊断观测：webview 桥生效表版本（null = 桥侧无表） */
+    tableVersion?: number | null
+    /** #361 T12 诊断观测：动态渲染型围栏语言集快照（发射判定的输入面） */
+    dynamicLanguages?: string[]
+  }
   /** 首个含文本行：首字符 rect 在视口内且 elementFromPoint 命中内容区。
    *  覆盖物（冲突暂停横幅、查找面板等绝对定位元素）遮挡首 8 行文本时同样
    *  返回 false——失败排障时先排除覆盖物再怀疑 CSP 样式失效 */
@@ -2493,6 +2738,21 @@ export interface PaintProbe {
     /** 候选文件名文本序列（#377 T02——集成断言按名核对候选集合；与
      *  itemCount 同源，顺序一致；浮层不在场为 null） */
     names: string[] | null
+  }
+  /** #360 T11 附加组件界面绘制：组件按钮/面板的注册态、挂载态（DOM
+   *  在场）与实际可见性（elementFromPoint 命中——样式注入失效时 DOM
+   *  在场但命中失败）。jsdom 无布局恒 false；无任何注册时缺省 */
+  addonUi?: {
+    /** 注册态按钮的命名空间 ID 全集（含模式不符撤挂的——回收断言面） */
+    toolbarButtonIds: string[]
+    /** 挂载态（DOM 在槽内）按钮 ID */
+    mountedToolbarButtonIds: string[]
+    /** 打开态面板 ID */
+    openPanelIds: string[]
+    /** 首个挂载按钮的绘制命中（无挂载按钮 null） */
+    buttonVisible: boolean | null
+    /** 首个打开面板内容根的绘制命中（无打开面板 null） */
+    panelBodyVisible: boolean | null
   }
 }
 
@@ -3126,6 +3386,14 @@ function isPaintProbe(v: unknown): v is PaintProbe {
   return (
     isObject(v) &&
     typeof v.textVisible === 'boolean' &&
+    (v.renderers === undefined || (isObject(v.renderers) &&
+      Array.isArray(v.renderers.containers) &&
+      v.renderers.containers.every((c: unknown) => isObject(c) &&
+        isString(c.language) && isString(c.provider) && isString(c.mode) &&
+        (c.state === null || isString(c.state)) &&
+        (c.color === null || isString(c.color)) &&
+        typeof c.width === 'number') &&
+      typeof v.renderers.builtinSvg === 'number')) &&
     isNullOrString(v.scrollerDisplay) &&
     isNullOrString(v.gutterUserSelect) &&
     (v.visibleLineNumbers === undefined || (Array.isArray(v.visibleLineNumbers) &&
@@ -3277,6 +3545,14 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.wikilinkSuggest.statusText === undefined || isNullOrString(v.wikilinkSuggest.statusText)) &&
       (v.wikilinkSuggest.names === undefined || v.wikilinkSuggest.names === null ||
         (Array.isArray(v.wikilinkSuggest.names) && v.wikilinkSuggest.names.every(isString)))
+    )) &&
+    (v.addonUi === undefined || (
+      isObject(v.addonUi) &&
+      Array.isArray(v.addonUi.toolbarButtonIds) && v.addonUi.toolbarButtonIds.every(isString) &&
+      Array.isArray(v.addonUi.mountedToolbarButtonIds) && v.addonUi.mountedToolbarButtonIds.every(isString) &&
+      Array.isArray(v.addonUi.openPanelIds) && v.addonUi.openPanelIds.every(isString) &&
+      (v.addonUi.buttonVisible === null || typeof v.addonUi.buttonVisible === 'boolean') &&
+      (v.addonUi.panelBodyVisible === null || typeof v.addonUi.panelBodyVisible === 'boolean')
     ))
   )
 }
@@ -3606,7 +3882,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isPositiveInt(v.seq) &&
         isNonNegativeInt(v.baseVersion) &&
         isSerChangeArray(v.changes) &&
-        (v.paste === undefined || isPasteStage(v.paste))
+        (v.paste === undefined || isPasteStage(v.paste)) &&
+        // T03（#352）可选来源元数据：在场即须形状合法，非法整条拒绝。
+        // T06（#355）接受数组形态（同组未提交合并笔，逐项校验）
+        (v.origin === undefined || isEditOriginMeta(v.origin) ||
+          (Array.isArray(v.origin) && v.origin.length > 0 && v.origin.every(isEditOriginMeta)))
       )
     case 'history.request':
       return v.op === 'undo' || v.op === 'redo'
@@ -3911,7 +4191,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
                   Number.isFinite(e.pdf.zoom) && e.pdf.zoom > 0)) &&
               (e.pdf.textLayerPages === undefined || isNonNegativeInt(e.pdf.textLayerPages)) &&
               (e.pdf.linkAnnotations === undefined || isNonNegativeInt(e.pdf.linkAnnotations))))))) &&
-        (v.typography === undefined || isTypographyProbe(v.typography))
+        (v.typography === undefined || isTypographyProbe(v.typography)) &&
+        // #351 T02 附加组件装载器观测（旧 webview 缺省；守卫单一事实源
+        // 在 shared/addonPage 的 isAddonLoaderStats）
+        (v.addonPage === undefined || isAddonLoaderStats(v.addonPage))
       )
     case 'reading.perf.report':
       return (
@@ -4198,7 +4481,88 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'wordSegment.delete':
     case 'defaultEditor.get':
     case 'defaultEditor.fix':
+    case 'addons.get':
+    case 'addons.settingsGet':
+    case 'addons.settingsClose':
+    case 'addons.openSearch':
+    case 'addons.openExtensionsView':
+    case 'addons.closeAddonPage':
+    case 'addons.openLogs':
+    case 'addonPage.ready':
       return true
+    case 'addons.openExtension':
+      return isString(v.extensionId)
+    case 'addons.retry':
+      // #354 T05 故障手动重试（组件 ID）
+      return isString(v.addonId)
+    case 'addons.setEnabled':
+      // #351 T02 功能开关：组件 ID + 布尔；#353 T04 可选作用范围层
+      return (
+        isString(v.addonId) &&
+        typeof v.enabled === 'boolean' &&
+        (v.scope === undefined || v.scope === 'user' || v.scope === 'workspace')
+      )
+    case 'addons.clearEnabledOverride':
+      // #353 T04 清除功能开关的工作区覆盖
+      return isString(v.addonId)
+    case 'addons.openAddonPage':
+    case 'addons.settingsOpen':
+      return isString(v.addonId)
+    case 'addons.settingsUpdate':
+      // #353 T04 按批写入（载荷键值形态由宿主按定义校验，协议只守卫框架）
+      return (
+        isString(v.addonId) &&
+        (v.scope === 'user' || v.scope === 'workspace') &&
+        isObject(v.values)
+      )
+    case 'addons.settingsClearOverride':
+      // #353 T04 清除某设置键的工作区覆盖
+      return isString(v.addonId) && isString(v.key)
+    case 'addonPage.outbound':
+      // #351 T02 出站消息内层守卫（单一事实源在 shared/addonPage）
+      return isAddonPageOutbound(v.outbound)
+    case 'addonCommands.report':
+      // #359 T10 组件命令表全量对账：形态守卫（命令 id 唯一性由 webview
+      // 注册表保证——同 localId 拒绝重复注册）
+      return (
+        isString(v.addonId) &&
+        isNonNegativeInt(v.generation) &&
+        Array.isArray(v.commands) &&
+        v.commands.every((entry) =>
+          isObject(entry) &&
+          isString(entry.commandId) && isString(entry.addonId) && isString(entry.localId) &&
+          isString(entry.title) &&
+          (entry.mode === 'live' || entry.mode === 'reading' || entry.mode === 'both') &&
+          typeof entry.writes === 'boolean' &&
+          Array.isArray(entry.defaults) && entry.defaults.every(isString))
+      )
+    case 'addons.commandCatalogGet':
+      return true
+    case 'addonRenderers.registered':
+      // #358 T09 渲染候选上报内层守卫（单一事实源在 shared/addonRenderers）
+      return isAddonRenderersRegisteredPayload(v.payload)
+    case 'addon.behaviors.report':
+      // T08（#357）行为注册表全量对账（形态守卫在 shared/addonBehaviors；
+      // 完整键唯一性由 webview 注册表保证——同 localId 拒绝重复注册）
+      return (
+        typeof v.addonId === 'string' &&
+        v.addonId.length > 0 &&
+        isNonNegativeInt(v.generation) &&
+        Array.isArray(v.behaviors) &&
+        v.behaviors.every((entry) => isAddonBehaviorInfo(entry))
+      )
+    case 'addons.behaviorsGet':
+      return true
+    case 'addons.behaviorsSetDisabled':
+      // T08（#357）逐项开关写入（批量只动提及键）
+      return (
+        Array.isArray(v.keys) &&
+        v.keys.every(isString) &&
+        typeof v.disabled === 'boolean'
+      )
+    case 'addons.behaviorsSetOrder':
+      // T08（#357）调序写入（当前可见行为完整键新序）
+      return Array.isArray(v.order) && v.order.every(isString)
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
         (v.detail === undefined || isString(v.detail))
@@ -4252,7 +4616,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       if (v.ok === false) {
         return (
           (v.reason === 'conflict' || v.reason === 'error') &&
-          (v.text === undefined || isString(v.text))
+          (v.text === undefined || isString(v.text)) &&
+          // T06（#355）可选业务拒绝标记（仅 history-boundary）
+          (v.originRejection === undefined || v.originRejection === 'history-boundary')
         )
       }
       return false
@@ -4630,6 +4996,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return typeof v.command === 'string' && v.command.length > 0
     case 'contextMenu.test.menuClose':
       return true
+    case 'addonUi.test.buttonClick':
+      return typeof v.buttonId === 'string' && v.buttonId.length > 0
+    case 'addonUi.test.panelClose':
+      return typeof v.panelId === 'string' && v.panelId.length > 0
     case 'outline.test.renameKey':
       return isString(v.text) && (v.key === 'enter' || v.key === 'escape')
     case 'outline.test.drag':
@@ -5022,6 +5392,73 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.viewType === null || isString(v.viewType)) &&
         (v.label === null || isString(v.label))
       )
+    case 'addons.state':
+      // #350 T01 附加组件状态：apiVersion/draft 恒真标记 + 列表条目形态
+      // （AddonStatusEntry 单一事实源在 shared/addonIdentity）
+      return (
+        isString(v.apiVersion) &&
+        v.draft === true &&
+        Array.isArray(v.addons) &&
+        v.addons.every(isAddonStatusEntry) &&
+        // #351 T02 当前打开的组件设置页（可选字段；旧载荷缺省容忍）
+        (v.openAddonSettingsPage === undefined || v.openAddonSettingsPage === null || isString(v.openAddonSettingsPage)) &&
+        // #353 T04 基础设置区当前打开的组件（可选字段；旧载荷缺省容忍）
+        (v.openAddonSettings === undefined || v.openAddonSettings === null || isString(v.openAddonSettings))
+      )
+    case 'addons.settingsState':
+      // #353 T04 基础设置区载荷（定义与两层值形态由 isAddonSettingsArea 守卫）
+      return (
+        isString(v.apiVersion) &&
+        v.draft === true &&
+        (v.open === null || isString(v.open)) &&
+        typeof v.hasWorkspace === 'boolean' &&
+        (v.addon === null || isAddonSettingsArea(v.addon)) &&
+        (v.openAddonSettingsPage === undefined || v.openAddonSettingsPage === null || isString(v.openAddonSettingsPage)) &&
+        (v.notice === undefined ||
+          (isObject(v.notice) &&
+            (v.notice.kind === 'saved' || v.notice.kind === 'save-failed') &&
+            (v.notice.reason === undefined ||
+              v.notice.reason === 'unknown-key' ||
+              v.notice.reason === 'invalid-value' ||
+              v.notice.reason === 'no-workspace' ||
+              v.notice.reason === 'store-write-failed' ||
+              v.notice.reason === 'rejected') &&
+            (v.notice.keys === undefined || (Array.isArray(v.notice.keys) && v.notice.keys.every(isString))) &&
+            (v.notice.scope === undefined || v.notice.scope === 'user' || v.notice.scope === 'workspace')))
+      )
+    case 'addonPage.directive':
+      // #351 T02 装载指令内层守卫（单一事实源在 shared/addonPage）
+      return isAddonPageDirective(v.directive)
+    case 'addon.behaviors.state':
+      // T07（#356）行为状态内层守卫（单一事实源在 shared/addonBehaviors；
+      // null = 无用户覆盖）
+      return v.state === null || parseAddonBehaviorStateStore(v.state) !== null
+    case 'addons.commandCatalog':
+      // #359 T10 组件命令目录推送（形态与 addonCommands.report 内层同构）
+      return Array.isArray(v.commands) &&
+        v.commands.every((entry) =>
+          isObject(entry) &&
+          isString(entry.commandId) && isString(entry.addonId) && isString(entry.localId) &&
+          isString(entry.title) &&
+          (entry.mode === 'live' || entry.mode === 'reading' || entry.mode === 'both') &&
+          typeof entry.writes === 'boolean' &&
+          Array.isArray(entry.defaults) && entry.defaults.every(isString))
+    case 'addonCommand.execute':
+      // #359 T10 组件命令执行转发（命名空间命令 ID）
+      return isString(v.commandId)
+    case 'addonRenderers.table':
+      // #358 T09 生效表内层守卫（单一事实源在 shared/addonRenderers）
+      return isAddonRenderersTablePayload(v.table)
+    case 'addons.behaviors':
+      // T08（#357）行为冲突管理载荷（注册表内层守卫在 shared/addonBehaviors；
+      // notice 为最近一次写操作结局，常规推送缺省不残留）
+      return (
+        Array.isArray(v.behaviors) &&
+        v.behaviors.every((entry) => isAddonBehaviorInfo(entry)) &&
+        (v.state === null || parseAddonBehaviorStateStore(v.state) !== null) &&
+        (v.notice === undefined ||
+          (isObject(v.notice) && (v.notice.kind === 'saved' || v.notice.kind === 'save-failed')))
+      )
     default:
       return false
   }
@@ -5053,6 +5490,66 @@ const DEFAULT_EDITOR_DISPLAY_STATUSES = ['vsidian', 'builtin', 'other', 'none'] 
 function isDefaultEditorDisplayStatus(v: unknown): v is DefaultEditorDisplayStatus {
   return typeof v === 'string' &&
     (DEFAULT_EDITOR_DISPLAY_STATUSES as readonly string[]).includes(v)
+}
+
+/** #350 T01 附加组件状态条目形态守卫（单一事实源 shared/addonIdentity） */
+const ADDON_STATUS_KINDS: readonly AddonStatusKind[] = [
+  'registered', 'activating', 'awaiting-registration', 'incompatible',
+  'activation-failed', 'host-unavailable', 'invalid-declaration',
+]
+
+function isAddonStatusKind(v: unknown): v is AddonStatusKind {
+  return typeof v === 'string' && (ADDON_STATUS_KINDS as readonly string[]).includes(v)
+}
+
+function isAddonStatusEntry(v: unknown): v is AddonStatusEntry {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    isString(v.id) &&
+    isString(v.label) &&
+    typeof v.official === 'boolean' &&
+    isAddonStatusKind(v.status) &&
+    (v.detail === undefined || isString(v.detail)) &&
+    (v.apiRange === undefined || isString(v.apiRange)) &&
+    // #351 T02 运行状态可选字段（已注册组件附带；旧载荷缺省容忍）
+    (v.enabled === undefined || typeof v.enabled === 'boolean') &&
+    (v.fault === undefined || (isObject(v.fault) && isString(v.fault.reason))) &&
+    (v.hasSettingsPage === undefined || typeof v.hasSettingsPage === 'boolean') &&
+    (v.hasSettingsDefinitions === undefined || typeof v.hasSettingsDefinitions === 'boolean')
+  )
+}
+
+/** #353 T04 单组件设置区载荷守卫（定义形态与值形态的单一事实源在
+ *  shared/addonSettings 的同名守卫） */
+function isAddonSettingsArea(v: unknown): v is AddonSettingsAreaPayload {
+  if (!isObject(v)) {
+    return false
+  }
+  const enabled = v.enabled as { effective?: unknown; userExplicit?: unknown; workspaceExplicit?: unknown; source?: unknown } | undefined
+  return (
+    isString(v.addonId) &&
+    isString(v.label) &&
+    typeof v.faulted === 'boolean' &&
+    (v.faultReason === undefined || isString(v.faultReason)) &&
+    typeof v.hasCustomPage === 'boolean' &&
+    isObject(enabled) &&
+    typeof enabled.effective === 'boolean' &&
+    (enabled.userExplicit === null || typeof enabled.userExplicit === 'boolean') &&
+    (enabled.workspaceExplicit === null || typeof enabled.workspaceExplicit === 'boolean') &&
+    (enabled.source === 'default' || enabled.source === 'user' || enabled.source === 'workspace') &&
+    Array.isArray(v.definitions) &&
+    (v.definitions as unknown[]).every(isAddonSettingDefinition) &&
+    isObject(v.values) &&
+    Object.values(v.values as Record<string, unknown>).every((entry) => {
+      if (!isObject(entry)) return false
+      if (!('effective' in entry) || !isAddonSettingStoredValue(entry.effective)) return false
+      if (entry.user !== undefined && !isAddonSettingStoredValue(entry.user)) return false
+      if (entry.workspace !== undefined && !isAddonSettingStoredValue(entry.workspace)) return false
+      return entry.source === 'default' || entry.source === 'user' || entry.source === 'workspace'
+    })
+  )
 }
 
 /** #197 反链条目载荷形态守卫（新字段可选：旧宿主快照缺省容忍） */

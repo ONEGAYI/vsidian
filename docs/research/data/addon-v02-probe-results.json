@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "name": "宿主登记校验——入口/资源越界被拒",
+      "ok": true,
+      "detail": "越界拒绝 4/4（escape-entry）"
+    },
+    {
+      "name": "编辑器页——授权装载：脚本/样式/扩展接入与绘制层",
+      "ok": true,
+      "detail": "标记 授@rgb(255, 0, 127)，越界样式拒绝对照成立"
+    },
+    {
+      "name": "编辑器页——未授权脚本拒绝（资源服务）",
+      "ok": true,
+      "detail": "script-load-failed（localResourceRoots 包含性拒绝）"
+    },
+    {
+      "name": "编辑器页——身份不匹配与重复装载拒绝",
+      "ok": true,
+      "detail": "identity-mismatch + already-loaded"
+    },
+    {
+      "name": "编辑器页——故障组件完整释放（工厂抛错）",
+      "ok": true,
+      "detail": "factory-error → 完整释放"
+    },
+    {
+      "name": "编辑器页——停用释放矩阵与迟到回执拒收",
+      "ok": true,
+      "detail": "disposals=1，迟回执拒收，监听自清"
+    },
+    {
+      "name": "编辑器页——手动恢复与旧代次卸载拒收",
+      "ok": true,
+      "detail": "恢复 gen2 → stale gen1 拒收 → 收尾卸载"
+    },
+    {
+      "name": "设置页——跨页授权对照：未登记资源根的面板被拒",
+      "ok": true,
+      "detail": "受限面板装载被拒（URI 字符串相同，隔离由 per-webview localResourceRoots 实现）"
+    },
+    {
+      "name": "设置页——授权装载：挂载根/样式/授权图片与越界图片对照",
+      "ok": true,
+      "detail": "logo=授权/denied=拒绝，标题色 rgb(0, 120, 215)"
+    },
+    {
+      "name": "设置页——释放：挂载根移除与迟到回执拒收",
+      "ok": true,
+      "detail": "挂载根随卸载移除"
+    },
+    {
+      "name": "视图关闭——面板销毁即回收（宿主侧无残留路由）",
+      "ok": true,
+      "detail": "面板销毁，页面装载器随之消亡"
+    }
+  ],
+  "userAgent": {
+    "editor": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.82.3 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36",
+    "settings": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.82.3 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36"
+  },
+  "hostInfo": {
+    "vscodeVersion": "1.82.3",
+    "executedAt": "2026-10-06T19:14:09.357Z",
+    "evidenceNote": "V02 页面 SDK 探针（#349）：资源授权/拒绝对照、共享 CM6、代次与释放矩阵"
+  }
+}

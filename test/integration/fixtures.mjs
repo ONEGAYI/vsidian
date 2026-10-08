@@ -905,6 +905,57 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'undo2.md'), UNDO2_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'undo3.md'), UNDO3_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'undo4.md'), UNDO4_DOC, 'utf8')
+  // V01（#348）附加组件历史分组验证：各文件初始文本固定互不重复——探针以
+  // 「末尾追加」构造互不重复的文本状态链，边界对账靠文本全等 + 版本推进
+  writeFileSync(path.join(wsDir, 'v01-abcd.md'), 'V01基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-merge.md'), 'V01合并基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-chain.md'), 'V01链基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-truncate.md'), 'V01截断基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-interleave.md'), 'V01交错基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-external.md'), 'V01外部基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-reload.md'), 'V01重载基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-ref-a.md'), '# V01 引用 A\n\n![[v01-ref-b]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-ref-b.md'), 'V01引用B基\n', 'utf8')
+  // T03（#352）编辑来源与宿主历史接入点：来源归属（origin 归属/纯选区/
+  // 隔离对照）、root 组历史、引用 B 组路由 + F1 脏态收口（保存点交错构造
+  // undo 后仍 dirty 的场景）
+  writeFileSync(path.join(wsDir, 'v01-t03-origin.md'), 'T03来源基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-iso.md'), 'T03隔离基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-group.md'), 'T03组基\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-ref-a.md'), '# T03 引用 A\n\n![[v01-t03-ref-b]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'v01-t03-ref-b.md'), 'T03引用B基\n', 'utf8')
+  // T09（#358）渲染提供者接管：内置 mermaid 围栏 + 附加语言围栏（夹具
+  // addon-t09 页面产物接管显示——绘制层断言经 view.state.paint.renderers）
+  writeFileSync(path.join(wsDir, 't09-render.md'), [
+    '# T09 渲染接管', '',
+    '```mermaid', 'flowchart TD', '  A --> B', '```', '',
+    '```t09draw', 'hello-draw', '```', '',
+  ].join('\n'), 'utf8')
+  // #361 T12 故障暂停与恢复：t12graph 围栏（t12 夹具渲染器的接管语言）
+  writeFileSync(path.join(wsDir, 't12-fault.md'), [
+    '# T12 故障暂停', '',
+    '正文一段', '',
+    '```t12graph', 't12-source', '```', '',
+  ].join('\n'), 'utf8')
+  // #364 T15 输入样例：中英文混排基线（样例行为链在中文与拉丁/半角标点
+  // 间修饰——键入驱动经 table.test.domType，断言面为文档文本）
+  writeFileSync(path.join(wsDir, 't15-input.md'), [
+    '# T15 输入样例', '',
+    '中文对照行', '',
+  ].join('\n'), 'utf8')
+  // #364 T15 渲染样例：内置 mermaid 围栏（样例接管语言）+ sampleflow
+  // 围栏（普通语言——双候选确定性选择与用户首选的断言面）
+  writeFileSync(path.join(wsDir, 't15-render.md'), [
+    '# T15 渲染样例', '',
+    '```mermaid', 'flowchart TD', '  A --> B', '```', '',
+    '```sampleflow', 'step-one', 'step-two', '```', '',
+  ].join('\n'), 'utf8')
+  // #364 T15 界面样例：普通正文（命令插入时间戳、面板统计的驱动文档）
+  writeFileSync(path.join(wsDir, 't15-ui.md'), [
+    '# T15 界面样例', '',
+    '正文一段。', '',
+    '正文二段。', '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'ackorder.md'), ACKORDER_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'resync.md'), RESYNC_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'ime-escape.md'), IME_ESC_DOC, 'utf8')

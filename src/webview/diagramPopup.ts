@@ -8,7 +8,8 @@
 import { t } from '../shared/i18n'
 import { locateGraphicFenceCode } from '../shared/mermaid'
 import { claimPopup, releasePopup } from './popupMutex'
-import { graphicRendererFor } from './graphicRenderers'
+import { effectiveGraphicRendererFor, effectiveGraphicSvgExport } from './graphicRenderers'
+import type { AddonRendererMode } from '../shared/addonRenderers'
 import {
   rasterizeDiagramPng,
   readSvgIntrinsicSize,
@@ -95,6 +96,8 @@ interface PopupState {
   zoomLabel: HTMLElement
   language: string
   code: string
+  /** #358 T09 来源视图模式（弹窗取图走该模式下的生效提供者） */
+  mode: AddonRendererMode
   /** P2-10（#287）实例文档源（打开时捕获的调用方编辑器——嵌入内部 Live
    *  的图形块弹窗刷新按 B 全文重定位；缺省回落全局 docSource（主正文）） */
   instanceDocSource: (() => string | null) | null
@@ -190,7 +193,7 @@ const TB_ICON = {
 
 async function loadSnapshot(p: PopupState): Promise<void> {
   const seq = ++p.loadSeq
-  const renderer = graphicRendererFor(p.language)
+  const renderer = effectiveGraphicRendererFor(p.language, p.mode)
   const result = renderer
     ? await renderer.renderSvg(p.code)
     : { ok: false as const, message: t('decor.mermaidUnavailable') }
@@ -296,15 +299,18 @@ async function exportPng(p: PopupState): Promise<void> {
 /** 打开图表弹窗（单例：再次打开先关闭旧的；#212 起经 popupMutex 与图片
  *  弹窗互斥——同时只允许一个弹窗实例）。P2-10：opts.docSource 为打开时
  *  捕获的实例文档源（嵌入内部 Live 的图形块按 B 全文刷新；缺省回落全局
- *  主正文源——阅读侧与主正文调用方不变） */
+ *  主正文源——阅读侧与主正文调用方不变）。#358 T09：opts.mode 为来源
+ *  视图模式（缺省 reading），取图走该模式的生效提供者；生效提供者无
+ *  svg 取图能力时不打开（弹窗按钮在挂载侧同样按能力装配）。 */
 export function openGraphicPopup(
   language: string,
   code: string,
-  opts: { docSource?: () => string | null } = {},
+  opts: { docSource?: () => string | null; mode?: AddonRendererMode } = {},
 ): void {
   closeDiagramPopup()
-  const renderer = graphicRendererFor(language)
-  if (!renderer) {
+  const mode: AddonRendererMode = opts.mode ?? 'reading'
+  const renderer = effectiveGraphicRendererFor(language, mode)
+  if (!renderer || !effectiveGraphicSvgExport(language, mode)) {
     return
   }
   // claim 在管线命中之后：早退路径不占用弹窗互斥位（claim 与弹窗实际
@@ -337,6 +343,7 @@ export function openGraphicPopup(
     zoomLabel,
     language: language.trim(),
     code,
+    mode,
     instanceDocSource: opts.docSource ?? null,
     svg: null,
     intrinsic: POPUP_FALLBACK_SIZE,

@@ -150,3 +150,218 @@ describe('主正文走新入口：根 chrome 单份、输入不双重消费（#2
     c.dispose()
   })
 })
+
+
+describe('T06 SDK 编辑面（#355）：快照/applyEdits/凭据结算', () => {
+  it('快照含文本/多选区/版本/修订标记；输入与外部同步都推进修订', () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    const snap0 = instance.snapshotForAddon()!
+    expect(snap0.text).toBe('alpha')
+    expect(snap0.version).toBe(1)
+    expect(snap0.revision).toBeGreaterThan(0)
+
+    instance.view!.dispatch({ selection: { anchor: 1, head: 3 } })
+    instance.view!.dispatch({ changes: { from: 5, insert: 'X' } })
+    const snap1 = instance.snapshotForAddon()!
+    expect(snap1.text).toBe('alphaX')
+    expect(snap1.revision).toBe(snap0.revision + 1)
+    expect(snap1.selections[0]).toEqual({ anchor: 1, head: 3 })
+
+    instance.handleDocChanged({ kind: 'doc.changed', version: 2, origin: 'external', changes: [{ offset: 0, length: 0, text: 'Z' }] })
+    const snap2 = instance.snapshotForAddon()!
+    expect(snap2.text).toBe('ZalphaX')
+    expect(snap2.revision).toBe(snap1.revision + 1)
+  })
+
+  it('applyEdits 原子事务：出站携带 origin、ack ok 结算凭据（version 对位）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    const revision = instance.snapshotForAddon()!.revision
+    const promise = instance.applyAddonEdit({
+      request: { revision, changes: [{ offset: 0, length: 0, text: 'Hi ' }], selection: { anchor: 3, head: 3 } },
+      origins: [{ addonId: 'pub.addon', opId: 'op-1', undo: 'atomic' }],
+    })
+    const reqs = editRequests(sent)
+    expect(reqs).toHaveLength(1)
+    expect(reqs[0]!.origin).toEqual({ addonId: 'pub.addon', opId: 'op-1', undo: 'atomic' })
+    expect(instance.view!.state.doc.toString()).toBe('Hi alpha')
+    expect(instance.view!.state.selection.main.head).toBe(3)
+    instance.handleEditAck({ kind: 'edit.ack', seq: reqs[0]!.seq, ok: true, version: 2 })
+    const result = await promise
+    expect(result).toEqual({ ok: true, credential: { opId: 'op-1', version: 2 } })
+  })
+
+  it('多范围一笔 = 一笔 edit.request（一个 origin）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'abcdef')
+    const revision = instance.snapshotForAddon()!.revision
+    const promise = instance.applyAddonEdit({
+      request: { revision, changes: [{ offset: 0, length: 1, text: 'X' }, { offset: 5, length: 1, text: 'Y' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-m', undo: 'atomic' }],
+    })
+    const reqs = editRequests(sent)
+    expect(reqs).toHaveLength(1)
+    expect(reqs[0]!.changes).toHaveLength(2)
+    instance.handleEditAck({ kind: 'edit.ack', seq: reqs[0]!.seq, ok: true, version: 2 })
+    expect((await promise).ok).toBe(true)
+  })
+
+  it('旧快照拒绝 stale-snapshot；非法边界拒绝 invalid-request；零变更直接凭据', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    const stale = instance.snapshotForAddon()!.revision
+    instance.view!.dispatch({ changes: { from: 0, insert: 'u' } })
+    const req0 = editRequests(sent)[0]!
+    instance.handleEditAck({ kind: 'edit.ack', seq: req0.seq, ok: true, version: 2 })
+    const staleResult = await instance.applyAddonEdit({
+      request: { revision: stale, changes: [{ offset: 0, length: 0, text: 'x' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-s', undo: 'atomic' }],
+    })
+    expect(staleResult).toEqual({ ok: false, reason: 'stale-snapshot' })
+
+    const revision = instance.snapshotForAddon()!.revision
+    const bad = await instance.applyAddonEdit({
+      request: { revision, changes: [{ offset: 99, length: 0, text: 'x' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-b', undo: 'atomic' }],
+    })
+    expect(bad).toEqual({ ok: false, reason: 'invalid-request' })
+    expect(editRequests(sent)).toHaveLength(1)
+
+    const zero = await instance.applyAddonEdit({
+      request: { revision, changes: [], selection: { anchor: 1, head: 1 } },
+      origins: [{ addonId: 'pub.addon', opId: 'op-z', undo: 'atomic' }],
+    })
+    expect(zero.ok).toBe(true)
+    expect(editRequests(sent)).toHaveLength(1) // 零文本变更不出站
+    expect(instance.view!.state.selection.main.head).toBe(1)
+  })
+
+  it('业务拒绝（history-boundary）：凭据拒绝、本地回滚、不进暂停', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    const revision = instance.snapshotForAddon()!.revision
+    const promise = instance.applyAddonEdit({
+      request: { revision, changes: [{ offset: 0, length: 0, text: 'X' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-h', undo: 'joinPrevious' }],
+    })
+    const req = editRequests(sent)[0]!
+    instance.handleEditAck({
+      kind: 'edit.ack', seq: req.seq, ok: false, reason: 'conflict', version: 1, text: 'alpha',
+      originRejection: 'history-boundary',
+    })
+    expect(await promise).toEqual({ ok: false, reason: 'history-boundary' })
+    expect(instance.view!.state.doc.toString()).toBe('alpha')
+    instance.view!.dispatch({ changes: { from: 5, insert: '!' } })
+    expect(editRequests(sent)).toHaveLength(2)
+  })
+
+  it('暂停拒绝 applyEdits（suspended）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    instance.view!.dispatch({ changes: { from: 5, insert: 'X' } })
+    const req0 = editRequests(sent)[0]!
+    instance.handleEditAck({ kind: 'edit.ack', seq: req0.seq, ok: false, reason: 'conflict', version: 1, text: 'alphaX' })
+    const revision = instance.snapshotForAddon()!.revision
+    const rejected = await instance.applyAddonEdit({
+      request: { revision, changes: [{ offset: 0, length: 0, text: 'Y' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-p', undo: 'atomic' }],
+    })
+    expect(rejected).toEqual({ ok: false, reason: 'suspended' })
+    instance.destroy()
+    expect(instance.snapshotForAddon()).toBeNull()
+  })
+
+  it('destroy 终结在途凭据；setSelection/reveal 零出站', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    const revision = instance.snapshotForAddon()!.revision
+    const promise = instance.applyAddonEdit({
+      request: { revision, changes: [{ offset: 0, length: 0, text: 'X' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-d', undo: 'atomic' }],
+    })
+    instance.destroy()
+    expect(await promise).toEqual({ ok: false, reason: 'view-disposed' })
+
+    const { instance: alive } = mountInstance(sent, 'sess-b', 'beta')
+    expect(alive.setSelectionForAddon([{ anchor: 2, head: 2 }])).toBe(true)
+    expect(alive.setSelectionForAddon([{ anchor: 99, head: 99 }])).toBe(false)
+    expect(alive.revealForAddon(2)).toBe(true)
+    expect(alive.revealForAddon(-1)).toBe(false)
+    expect(editRequests(sent).filter((r) => r.sessionId === 'sess-b')).toHaveLength(0)
+  })
+
+  it('暂缓窗口的同组未提交合并：atomic 开新段、joinPrevious 并入同段成一笔数组 origin', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    // 制造暂缓窗口：组合中输入（暂缓集非空、deferredLocal 在场）
+    instance.view!.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    instance.view!.dispatch({ changes: { from: 5, insert: 'U' } })
+    // SDK atomic 提交落在暂缓段（不并入用户输入段）
+    const revA = instance.snapshotForAddon()!.revision
+    const promiseA = instance.applyAddonEdit({
+      request: { revision: revA, changes: [{ offset: 0, length: 0, text: 'A' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' }],
+    })
+    // SDK joinPrevious 提交：并入同组段（合并笔）
+    const revB = instance.snapshotForAddon()!.revision
+    const promiseB = instance.applyAddonEdit({
+      request: { revision: revB, changes: [{ offset: 1, length: 0, text: 'B' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-b', undo: 'joinPrevious' }],
+    })
+    expect(editRequests(sent)).toHaveLength(0) // 暂缓窗口：都未出站
+    // 组合结束 → flush：段序出站（队首用户段先出，ack 后合并段出站）
+    instance.view!.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await new Promise((r) => setTimeout(r, 60))
+    const reqs = editRequests(sent)
+    expect(reqs.length).toBeGreaterThanOrEqual(1)
+    expect(reqs[0]!.origin).toBeUndefined() // 组合期用户输入段（无来源）
+    instance.handleEditAck({ kind: 'edit.ack', seq: reqs[0]!.seq, ok: true, version: 2 })
+    await new Promise((r) => setTimeout(r, 30))
+    const merged = editRequests(sent).find((r) => Array.isArray(r.origin))
+    expect(merged).toBeDefined()
+    expect(merged!.origin).toEqual([
+      { addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' },
+      { addonId: 'pub.addon', opId: 'op-b', undo: 'joinPrevious' },
+    ])
+    instance.handleEditAck({ kind: 'edit.ack', seq: merged!.seq, ok: true, version: 3 })
+    expect((await promiseA).ok).toBe(true)
+    expect((await promiseB).ok).toBe(true)
+  })
+
+  it('跨组件 joinPrevious 不并入他组段：逐段独立出站（同组件约束）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'alpha')
+    instance.view!.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+    instance.view!.dispatch({ changes: { from: 5, insert: 'U' } })
+    const revA = instance.snapshotForAddon()!.revision
+    const promiseA = instance.applyAddonEdit({
+      request: { revision: revA, changes: [{ offset: 0, length: 0, text: 'A' }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' }],
+    })
+    // 他组件 joinPrevious：不得并入 pub.addon 组首段
+    const revB = instance.snapshotForAddon()!.revision
+    const promiseB = instance.applyAddonEdit({
+      request: { revision: revB, changes: [{ offset: 1, length: 0, text: 'B' }] },
+      origins: [{ addonId: 'pub.other', opId: 'op-b', undo: 'joinPrevious' }],
+    })
+    instance.view!.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
+    await new Promise((r) => setTimeout(r, 60))
+    const reqs = editRequests(sent)
+    expect(reqs[0]!.origin).toBeUndefined()
+    instance.handleEditAck({ kind: 'edit.ack', seq: reqs[0]!.seq, ok: true, version: 2 })
+    await new Promise((r) => setTimeout(r, 30))
+    // 段序串行：atomic 段先出站，ack 后 joinPrevious 段再出（两笔独立）
+    const first = editRequests(sent).filter((r) => r.origin !== undefined)
+    expect(first).toHaveLength(1)
+    expect(first[0]!.origin).toEqual({ addonId: 'pub.addon', opId: 'op-a', undo: 'atomic' })
+    instance.handleEditAck({ kind: 'edit.ack', seq: first[0]!.seq, ok: true, version: 3 })
+    await new Promise((r) => setTimeout(r, 30))
+    const second = editRequests(sent).filter((r) => r.origin !== undefined)
+    expect(second).toHaveLength(2)
+    expect(second[1]!.origin).toEqual({ addonId: 'pub.other', opId: 'op-b', undo: 'joinPrevious' })
+    instance.handleEditAck({ kind: 'edit.ack', seq: second[1]!.seq, ok: true, version: 4 })
+    expect((await promiseA).ok).toBe(true)
+    expect((await promiseB).ok).toBe(true)
+  })
+})

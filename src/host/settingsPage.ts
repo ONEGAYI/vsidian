@@ -24,6 +24,7 @@ import type { CssSnippetState } from '../shared/cssSnippets'
 import type { IndexStateMessage } from './vaultIndexMaintenance'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import type { EditorGuardWiring } from './editorGuardWiring'
+import type { AddonPageWiring } from './addons/addonWiring'
 
 /** #128 CSS 片段管理接线（extension.ts 注入）：设置页面板的片段消息处理
  *  与状态推送。目录选择对话框（chooseDirectory）经回调进宿主 vscode 层——
@@ -109,6 +110,17 @@ export interface SettingsPageHandle {
    */
   notifyDefaultEditorChanged(): void
   /**
+   * #350 T01 附加组件：协调器状态变化后向已开设置页发 addons.state
+   * （面板未开时 no-op——重开经 addons.get 重新拉取权威状态回显）
+   */
+  notifyAddonsChanged(): void
+  /**
+   * #353 T04 基础设置区：设置区状态变化（成功保存/定义注册/开合）后向
+   * 已开设置页发 addons.settingsState（面板未开时 no-op——重开经
+   * addons.settingsGet 重新拉取）
+   */
+  notifyAddonSettingsChanged(): void
+  /**
    * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
    * 面板未 ready 时在握手完成后补发（webview 装载是异步的）。
    * #231：entry 可选——分页内进一步定位的条目 id（外观分页按条目归属
@@ -133,6 +145,9 @@ export function createSettingsPage(
   /** #323 默认编辑器守护接线（extension.ts 注入 createEditorGuardWiring
    *  产物）：设置页常规页「默认编辑器」委托组的状态拉取与手动改回 */
   editorGuard?: EditorGuardWiring,
+  /** #350 T01 附加组件接线（extension.ts 注入 createAddonWiring 产物）：
+   *  设置页「附加组件」分页的状态拉取与 VSCode 管理入口 */
+  addons?: AddonPageWiring,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
@@ -293,6 +308,66 @@ export function createSettingsPage(
         // 结果经 defaultEditor.state 推送与宿主通知呈现，不逐次应答
         void editorGuard?.fixNow()
         return
+      case 'addons.get':
+        // #350 T01 附加组件状态拉取（设置页装载/重载的 ready 回填）
+        if (addons) {
+          ready = true
+          void current?.webview.postMessage(addons.getState())
+        }
+        return
+      case 'addons.settingsGet':
+        // #353 T04 基础设置区状态拉取（装载/重载的 ready 回填；权威现算）
+        if (addons) {
+          ready = true
+          void current?.webview.postMessage(addons.getSettingsState())
+        }
+        return
+      case 'addons.openSearch':
+        // 市场搜索入口（关键词仅搜索辅助）；结果在 VSCode 扩展视图呈现
+        addons?.openSearch()
+        return
+      case 'addons.openExtensionsView':
+        // VSCode 扩展管理入口（安装/卸载/整扩展禁用由 VSCode 管理）
+        addons?.openExtensionsView()
+        return
+      case 'addons.openExtension':
+        // 打开某组件的 VSCode 扩展详情页
+        addons?.openExtension(message.extensionId)
+        return
+      // ---- #351 T02：附加组件运行生命周期与页面装载 ----
+      case 'addons.setEnabled':
+        // 用户功能开关（#353 T04 起可选 scope——缺省 user 保持 T02 语义；
+        // 两生命周期同步，结果经 addons.state / addons.settingsState 推送回显）
+        if (current) {
+          addons?.handleSettingsMessage(current.webview, message)
+        }
+        return
+      case 'addons.settingsOpen':
+      case 'addons.settingsClose':
+      case 'addons.settingsUpdate':
+      case 'addons.settingsClearOverride':
+      case 'addons.clearEnabledOverride':
+      case 'addons.openAddonPage':
+      case 'addons.closeAddonPage':
+      case 'addons.openLogs':
+      case 'addons.retry':
+      case 'addons.commandCatalogGet':
+      case 'addons.behaviorsSetDisabled':
+      case 'addons.behaviorsSetOrder':
+      case 'addonPage.ready':
+      case 'addonPage.outbound':
+        if (current) {
+          addons?.handleSettingsMessage(current.webview, message)
+        }
+        return
+      // ---- T08（#357）行为冲突管理载荷拉取（装载/重载的 ready 回填；权威
+      // 现算——目录变化与写操作后由 wiring 主动推送） ----
+      case 'addons.behaviorsGet':
+        if (addons) {
+          ready = true
+          void current?.webview.postMessage(addons.getBehaviorsState())
+        }
+        return
       case 'index.setPatterns':
         // 结果（含被拒项回显）经 notifyIndexChanged 的 index.state 推送
         void index?.setPatterns(message.patterns)
@@ -361,8 +436,12 @@ export function createSettingsPage(
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
-        // C-7 同口径收紧：设置页只加载自身产物（out/webview/settings.js|css）
-        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'out')],
+        // C-7 同口径收紧：设置页只加载自身产物（out/webview/settings.js|css）；
+        // #351 T02 增补可打开组件设置页的资源目录（入口/样式/资源子目录）
+        localResourceRoots: [
+          vscode.Uri.joinPath(context.extensionUri, 'out'),
+          ...addons?.settingsResourceRoots() ?? [],
+        ],
       },
     )
     panel = created
@@ -371,6 +450,9 @@ export function createSettingsPage(
       context.extensionUri,
       hostLocale(service.getSnapshot()),
     )
+    // #351 T02：设置页面板在场标记（装载器就绪消息经 handleSettingsMessage
+    // 路由；指令推送由 wiring 的 runtime.onChanged 驱动）
+    addons?.attachSettingsPanel(created.webview)
     const messageSub = created.webview.onDidReceiveMessage(handleMessage)
     // retainContextWhenHidden 不开：面板切后台 webview 即释放重载。隐藏即
     // 重置 ready——stale-ready 窗口（webview 已卸载、重载握手未到）内
@@ -383,6 +465,8 @@ export function createSettingsPage(
     created.onDidDispose(() => {
       messageSub.dispose()
       viewStateSub.dispose()
+      // #351 T02：面板销毁——组件设置页装载意图终结（重开由用户重新打开）
+      addons?.settingsPanelDisposed()
       disposeSub()
     })
   }
@@ -471,6 +555,21 @@ export function createSettingsPage(
         kind: 'defaultEditor.state',
         ...editorGuard.stateFor(),
       })
+    },
+    // #350 T01 附加组件状态推送（协调器 onStateChanged → extension.ts 接线）：
+    // 面板未开时 no-op（重开经 addons.get 重新拉取）
+    notifyAddonsChanged: () => {
+      if (!panel || !addons) {
+        return
+      }
+      void panel.webview.postMessage(addons.getState())
+    },
+    // #353 T04 基础设置区状态推送（设置变化/开合 → extension.ts 接线）
+    notifyAddonSettingsChanged: () => {
+      if (!panel || !addons) {
+        return
+      }
+      void panel.webview.postMessage(addons.getSettingsState())
     },
   }
 }

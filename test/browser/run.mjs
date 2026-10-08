@@ -86,7 +86,30 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'pdfZoomCopyLinks',
   // #376（T01）双链文件联想候选：紧随 symbolInput（同输入族——真实键盘/IME
   // 驱动、宿主应答由夹具回灌、候选浮层与键位行为）
-  'wikilinkSuggest']
+  'wikilinkSuggest',
+  // V02（#349）附加组件页面 SDK：生产控制器 + 装载器原型（真实键盘/CDP
+  // IME 驱动首键与组合、绘制层标记、卸载与迟回执拒收、未授权入口拒绝）
+  'addonPageSdk',
+  // #353（T04）附加组件基础设置区：生产设置页入口（真实键盘/点击驱动
+  // 双标签作用范围、标量/数组/对象基础控件、清除覆盖与保存反馈；标签
+  // 选中态与失败提示的绘制层断言）紧随 addonPageSdk（同附加组件族）
+  'addonSettings',
+  // #354 T05：侧栏三组与故障排障（绘制层断言）+ 开关热切换 IME 收尾
+  // （CDP composition 驱动，复用 addonPageSdkFixture 生产链路）
+  'addonSidebar',
+  'addonHotSwitch',
+  // T08（#357）：行为冲突管理（注册行为调序/逐项开关——真实键盘 + 绘制层）
+  'addonT08BehaviorsManage',
+  // #359 T10：组件命令/菜单/统一快捷键（生产命令注册表装配——真实键盘
+  // 默认绑定/绑定/清空、真实右键组件簇菜单与点击执行、宿主转发路径、
+  // 停用回收）紧随附加组件族
+  'addonT10Commands',
+  // #358 T09 渲染提供者自动接管：真实浏览器绘制层（接管/热切换/迟到结果/弹窗取图）
+  'addonRendererTakeover',
+  // #360 T11：组件按钮/面板与视图界面贡献（生产界面运行时装配——真实
+  // 点击经 target 句柄提交、悬停提示与键位徽章、面板开闭与迟到结果、
+  // 模式回收与卸载回收、内置工具栏不受影响）紧随附加组件族
+  'addonT11Ui']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

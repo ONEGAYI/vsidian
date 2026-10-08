@@ -305,6 +305,8 @@ try {
       return {
         imgCount: imgs.length,
         imgAlt: imgs[0]?.getAttribute('alt') ?? '',
+        imgState: imgs[0]?.closest('[data-vsidian-img-state]')?.getAttribute('data-vsidian-img-state')
+          ?? imgs[0]?.getAttribute('data-vsidian-img-state') ?? '',
         paraText: (para?.textContent ?? '').trim(),
         hostIsMixed: host instanceof HTMLElement && host.classList.contains('vsidian-reading-embed-mixed'),
         hostInner: host instanceof HTMLElement ? host.dataset['vsidianEmbedInner'] ?? '' : '',
@@ -312,8 +314,13 @@ try {
       }
     })
   assert.equal(altEvidence.imgCount, 1, `图片 alt 域段渲染为 img（实际 ${altEvidence.imgCount}）`)
-  assert.ok(altEvidence.imgAlt.includes('替代') && altEvidence.imgAlt.includes('文字'),
-    `alt 属性携带替代文字（实际 ${altEvidence.imgAlt}）`)
+  // 远程占位图必然加载失败；失败回传快时产品按 imageResource 契约将 alt
+  // 改写为失败提示（原 alt 存内部记录，见 applyErrorAlt）。两种终态都证明
+  // img 属性通道正常呈现——不依赖失败回传时机（对代理/DNS 环境不敏感）。
+  const altIntact = altEvidence.imgAlt.includes('替代') && altEvidence.imgAlt.includes('文字')
+  const errorUiApplied = altEvidence.imgState === 'error' && altEvidence.imgAlt.includes('图片加载失败')
+  assert.ok(altIntact || errorUiApplied,
+    `alt 属性两种终态其一（原文字或失败提示，实际 alt=${altEvidence.imgAlt} state=${altEvidence.imgState}）`)
   assert.ok(altEvidence.paraText.startsWith('图片 alt'), `拆段前文保留（实际 ${altEvidence.paraText}）`)
   assert.ok(altEvidence.hostIsMixed, '同段随文位提升为流内宿主（不牵连降级）')
   assert.equal(altEvidence.hostInner, '乙笔记', `随文位宿主 inner（实际 ${altEvidence.hostInner}）`)

@@ -114,4 +114,10 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   // ---- 查找选项条（#238；DOM 常驻、显隐由 -open 类控制，探针不受影响；
   //      三按钮点亮/切换/淡出由浏览器 occurrence 套件按行为路径验证） ----
   { id: 'find-options-bar', selector: '#app .vsidian-occurrence-bar', expected: 'rgb(247, 0, 1)' },
+  // ---- #360 T11 附加组件挂载点（平台容器常驻 DOM、空态 :empty 零占位——
+  //      display:none 不影响探针级联读取，同 find-panel 常驻先例；组件按钮
+  //      与面板内容为动态挂载，不伪造静态探针，由浏览器/集成 T11 套件按
+  //      行为路径验证） ----
+  { id: 'addon-toolbar-slot', selector: '#app .vsidian-toolbar .vsidian-addon-toolbar-slot', expected: 'rgb(248, 0, 1)' },
+  { id: 'addon-panel-dock', selector: '#app .vsidian-main .vsidian-addon-panel-dock', expected: 'rgb(249, 0, 1)' },
 ]

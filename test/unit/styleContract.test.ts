@@ -379,7 +379,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'code-card': 11,
   outline: 19,
   'chrome-limits': 4,
-  'toolbar-banner': 6,
+  'toolbar-banner': 8,
   frontmatter: 6,
   'context-menu': 1,
   backlinks: 4,

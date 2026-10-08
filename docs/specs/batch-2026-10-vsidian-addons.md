@@ -1,6 +1,6 @@
 # plan: Vsidian 附加组件首版——验证、SDK、组件管理与 API 治理
 
-状态：2026-10-05，已开票，实施待启动。总览记录完整批次；不作为可认领代码票。
+状态：2026-10-08，**全部子票实施完毕，T18 收口完成自动化矩阵**——compile / 全量单测 / 浏览器全量（--no-reuse）/ 开发态集成全量 / 安装态五阶段 / Remote SSH 两阶段 / 两契约门禁（含双 baseline 锚定）全绿，证据见各票回填与 T18 票面。**整体验收未结**：人工清单 A59–A66（含真机 IME/物理输入/观感/真实重启/真实远程）待用户执行；未关闭原研究票 #18 与本总览。总览记录完整批次；不作为可认领代码票。
 
 Blocked by: 无硬性依赖；本总览按下列子票和验证门槛跟踪。
 
@@ -38,32 +38,34 @@ Blocked by: 无硬性依赖；本总览按下列子票和验证门槛跟踪。
 
 ## 票据清单与依赖
 
-| 代码 | Issue | 类型与交付 | Blocked by | 初始状态 |
+| 代码 | Issue | 类型与交付 | Blocked by | 状态（2026-10-08） |
 | --- | --- | --- | --- | --- |
-| V01 | [#348](https://github.com/ONEGAYI/vsidian/issues/348) | 验证：原子历史分组、并发与引用目标验证 | 无 | ready-for-agent |
-| V02 | [#349](https://github.com/ONEGAYI/vsidian/issues/349) | 验证：页面 SDK、共享 CM6 与资源释放验证 | 无 | ready-for-agent |
-| T01 | [#350](https://github.com/ONEGAYI/vsidian/issues/350) | 实施：身份发现、兼容检查与轻量注册 | 无 | ready-for-agent |
-| T02 | [#351](https://github.com/ONEGAYI/vsidian/issues/351) | 实施：页面 SDK、两端通信与贡献生命周期 | #349、#350 | 待前置 |
-| T03 | [#352](https://github.com/ONEGAYI/vsidian/issues/352) | 准备重构：编辑来源与宿主历史接入点 | #348 | 待前置 |
-| T04 | [#353](https://github.com/ONEGAYI/vsidian/issues/353) | 实施：复杂设置定义与用户默认/工作区覆盖 | #351 | 待前置 |
-| T05 | [#354](https://github.com/ONEGAYI/vsidian/issues/354) | 实施：组件管理侧栏、自定义设置页与功能开关 | #353 | 待前置 |
-| T06 | [#355](https://github.com/ONEGAYI/vsidian/issues/355) | 实施：统一视图编辑 API 与原子修饰历史 | #351、#352 | 待前置 |
-| T07 | [#356](https://github.com/ONEGAYI/vsidian/issues/356) | 实施：可组合输入行为与逐项注册状态 | #355、#353 | 待前置 |
-| T08 | [#357](https://github.com/ONEGAYI/vsidian/issues/357) | 实施：行为冲突管理、调序与部分关闭 | #354、#356 | 待前置 |
-| T09 | [#358](https://github.com/ONEGAYI/vsidian/issues/358) | 实施：代码块自动接管、多提供者与内置恢复 | #354、#355 | 待前置 |
-| T10 | [#359](https://github.com/ONEGAYI/vsidian/issues/359) | 实施：自己的命令、菜单与统一快捷键 | #354、#355 | 待前置 |
-| T11 | [#360](https://github.com/ONEGAYI/vsidian/issues/360) | 实施：所属按钮、面板与视图界面贡献 | #359 | 待前置 |
-| T12 | [#361](https://github.com/ONEGAYI/vsidian/issues/361) | 实施：诊断、全组件故障暂停与手动恢复 | #357、#358、#360 | 待前置 |
-| T13 | [#362](https://github.com/ONEGAYI/vsidian/issues/362) | 实施：公开声明、版本参考与开发指南事实源 | #361 | 待前置 |
-| T14 | [#363](https://github.com/ONEGAYI/vsidian/issues/363) | 实施：可信历史基线、兼容门禁与负向演示 | #362 | 待前置 |
-| T15 | [#364](https://github.com/ONEGAYI/vsidian/issues/364) | 实施：输入、渲染、界面三类独立消费样例 | #362 | 待前置 |
-| T16 | [#365](https://github.com/ONEGAYI/vsidian/issues/365) | 实施：双 VSIX 安装态、重启与升级回归 | #363、#364 | 待前置 |
-| T17 | [#366](https://github.com/ONEGAYI/vsidian/issues/366) | 实施：Remote SSH 同宿主安装、资源与排障 | #365 | 待前置 |
-| T18 | [#367](https://github.com/ONEGAYI/vsidian/issues/367) | 实施收口：公开接入回归、契约与人工验收收口 | #357、#361、#363、#365、#366 | 待前置 |
+| V01 | [#348](https://github.com/ONEGAYI/vsidian/issues/348) | 验证：原子历史分组、并发与引用目标验证 | 无 | 已验证通过（20/20），待用户验收 |
+| V02 | [#349](https://github.com/ONEGAYI/vsidian/issues/349) | 验证：页面 SDK、共享 CM6 与资源释放验证 | 无 | 已验证通过，待用户验收 |
+| T01 | [#350](https://github.com/ONEGAYI/vsidian/issues/350) | 实施：身份发现、兼容检查与轻量注册 | 无 | 已实施，待用户验收 |
+| T02 | [#351](https://github.com/ONEGAYI/vsidian/issues/351) | 实施：页面 SDK、两端通信与贡献生命周期 | #349、#350 | 已实施，待用户验收 |
+| T03 | [#352](https://github.com/ONEGAYI/vsidian/issues/352) | 准备重构：编辑来源与宿主历史接入点 | #348 | 已实施，待用户验收 |
+| T04 | [#353](https://github.com/ONEGAYI/vsidian/issues/353) | 实施：复杂设置定义与用户默认/工作区覆盖 | #351 | 已实施，待用户验收 |
+| T05 | [#354](https://github.com/ONEGAYI/vsidian/issues/354) | 实施：组件管理侧栏、自定义设置页与功能开关 | #353 | 已实施，待用户验收 |
+| T06 | [#355](https://github.com/ONEGAYI/vsidian/issues/355) | 实施：统一视图编辑 API 与原子修饰历史 | #351、#352 | 已实施，待用户验收 |
+| T07 | [#356](https://github.com/ONEGAYI/vsidian/issues/356) | 实施：可组合输入行为与逐项注册状态 | #355、#353 | 已实施，待用户验收 |
+| T08 | [#357](https://github.com/ONEGAYI/vsidian/issues/357) | 实施：行为冲突管理、调序与部分关闭 | #354、#356 | 已实施，待用户验收 |
+| T09 | [#358](https://github.com/ONEGAYI/vsidian/issues/358) | 实施：代码块自动接管、多提供者与内置恢复 | #354、#355 | 已实施，待用户验收 |
+| T10 | [#359](https://github.com/ONEGAYI/vsidian/issues/359) | 实施：自己的命令、菜单与统一快捷键 | #354、#355 | 已实施，待用户验收 |
+| T11 | [#360](https://github.com/ONEGAYI/vsidian/issues/360) | 实施：所属按钮、面板与视图界面贡献 | #359 | 已实施，待用户验收 |
+| T12 | [#361](https://github.com/ONEGAYI/vsidian/issues/361) | 实施：诊断、全组件故障暂停与手动恢复 | #357、#358、#360 | 已实施，待用户验收 |
+| T13 | [#362](https://github.com/ONEGAYI/vsidian/issues/362) | 实施：公开声明、版本参考与开发指南事实源 | #361 | 已实施，待用户验收 |
+| T14 | [#363](https://github.com/ONEGAYI/vsidian/issues/363) | 实施：可信历史基线、兼容门禁与负向演示 | #362 | 已实施，远端必需检查待授权 |
+| T15 | [#364](https://github.com/ONEGAYI/vsidian/issues/364) | 实施：输入、渲染、界面三类独立消费样例 | #362 | 已实施，待用户验收 |
+| T16 | [#365](https://github.com/ONEGAYI/vsidian/issues/365) | 实施：双 VSIX 安装态、重启与升级回归 | #363、#364 | 已实施，跨会话面转人工（A62） |
+| T17 | [#366](https://github.com/ONEGAYI/vsidian/issues/366) | 实施：Remote SSH 同宿主安装、资源与排障 | #365 | 已实施，发行态设置写入通道未验项保留 |
+| T18 | [#367](https://github.com/ONEGAYI/vsidian/issues/367) | 实施收口：公开接入回归、契约与人工验收收口 | #357、#361、#363、#365、#366 | 已收口（自动化矩阵全绿），人工清单 A59–A66 待用户执行 |
 
 依赖是开始实施的门槛，所有票在本轮开齐。准备重构 T03 采用扩展/局部迁移方式，不混入公开编辑业务。总览不标 ready，子票解除依赖后再按实际放行结果更新标签。
 
 ## 用户故事覆盖
+
+下表是子票对应关系的简表；**逐故事到公开接口条目与验证用例的完整映射、未验项与限制见 [vsidian-addons-coverage.md](vsidian-addons-coverage.md)（T18 收口建立）**——每个已确认规则对应实际公开接入路径（消费样例/浏览器 host 套件/真宿主），不以内部 mock 代替验收。
 
 | 编号 | 用户结果 | 对应子票 |
 | --- | --- | --- |
@@ -99,10 +101,10 @@ Blocked by: 无硬性依赖；本总览按下列子票和验证门槛跟踪。
 
 ## 批次完成条件
 
-- [ ] 六组能力通过三个公开消费样例，文档、声明、版本及兼容检查齐备。
-- [ ] 权威文本/历史、IME/目标归属、正常关闭/故障恢复及自动渲染按已确认规则验证。
-- [ ] 本地安装态和真实 Remote 有证据，包内容及测试钩子符合发布态边界。
-- [ ] API 与样式门禁、人工待验清单和未验限制如实交付；自动通过不代表用户已验收。
+- [x] 六组能力通过三个公开消费样例，文档、声明、版本及兼容检查齐备。（`test/examples/` 三工程经公开面端到端；语义清单 `src/shared/addonApiCatalog.ts` 22 条目；参考与指南 `docs/addons/`；两门禁 + 双 baseline 全绿——T18 复核）
+- [x] 权威文本/历史、IME/目标归属、正常关闭/故障恢复及自动渲染按已确认规则验证。（V01/V02 探针 + 浏览器 host 套件 + 真宿主/安装态/SSH 矩阵；跨会话保留与真机 IME 面转人工清单——A62/A63）
+- [x] 本地安装态和真实 Remote 有证据，包内容及测试钩子符合发布态边界。（T16 五阶段 + T17 两阶段 + T18 重跑全绿；主 VSIX 排除面与发行态钩子缺席有双道断言）
+- [x] API 与样式门禁、人工待验清单和未验限制如实交付；自动通过不代表用户已验收。（人工清单 A59–A66 待用户执行；未验项见 [覆盖映射末节](vsidian-addons-coverage.md)）
 
 ## 范围外
 

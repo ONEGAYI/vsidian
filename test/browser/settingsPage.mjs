@@ -413,14 +413,15 @@ try {
     assert.equal(calloutPaint.radius, '8px')
     assert.notEqual(calloutPaint.bg, 'rgba(0, 0, 0, 0)', 'callout 应有可辨色底')
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-css-snippets.png`) })
-    // #264 中文分词并入编辑器页：侧栏六项无分词入口（#332 起「文件与链接」
+    // #264 中文分词并入编辑器页：侧栏不再有分词入口（#332 起「文件与链接」
     // 居实验性之前）；编辑器页尾二级组「中文分词」承载引擎/下载源与资源
-    // 管理（可见性断言落用户看到的东西）
+    // 管理（可见性断言落用户看到的东西）。#350 起尾项为「附加组件」分页
     assert.deepEqual(await page.locator('.vsidian-settings-nav-item').allInnerTexts(),
       [zhCn['settings.generalSection'], zhCn['settings.editorCategory'],
         zhCn['settings.filesLinksSection'], zhCn['settings.experimentalSection'],
-        zhCn['keybindingSettings.title'], zhCn['appearance.title']],
-      '侧栏应为六项（#332 文件与链接居实验性之前）且不再有中文分词入口')
+        zhCn['keybindingSettings.title'], zhCn['appearance.title'],
+        zhCn['settings.addonsSection']],
+      '侧栏应为七项（#332 文件与链接居实验性之前、#350 附加组件居尾）且不再有中文分词入口')
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     const wordsegGroup = page.locator('.vsidian-settings-group').filter({
       has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['wordSegment.title'] }) })

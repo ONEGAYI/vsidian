@@ -7,6 +7,20 @@ import { probe278Cases } from './probe278'
 import { probe375Cases } from './probe375'
 import { wikilinkBlockCases } from './wikilinkBlock'
 import { wikilinkEmbedCases } from './wikilinkEmbed'
+import { addonHistoryCases } from './addonHistoryCases'
+import { addonT02Cases } from './addonT02Cases'
+import { addonT04Cases } from './addonT04Cases'
+import { addonT05Cases } from './addonT05Cases'
+import { addonT06Cases } from './addonT06Cases'
+import { addonT07Cases } from './addonT07Cases'
+import { addonT08Cases } from './addonT08Cases'
+import { addonT09Cases } from './addonT09Cases'
+import { addonT10Cases } from './addonT10Cases'
+import { addonT11Cases } from './addonT11Cases'
+import { addonT12Cases } from './addonT12Cases'
+import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
+import { addonT16InstalledCases } from './addonT16InstalledCases'
+import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -95,11 +109,18 @@ const CMD = {
   getKeybindings: 'onegayi.vsidian._test.getKeybindings',
   setKeybindings: 'onegayi.vsidian._test.setKeybindings',
   resetKeybindings: 'onegayi.vsidian._test.resetKeybindings',
+  // #350 T01 附加组件：状态载荷观测与手动重扫（重复请求幂等断言面）
+  getAddonsState: 'onegayi.vsidian._test.getAddonsState',
+  addonsRescan: 'onegayi.vsidian._test.addonsRescan',
 }
 
-const wsDir = process.env['WORKSPACE_DIR'] ?? ''
+// #366 T17：本地 env 优先；SSH 远端会话读不到本地 env（远端 ext host 不
+// 继承），从 workspaceFolders 推导（vscode-remote uri 的 fsPath 即远端盘面
+// 路径，localhost 回环下与本地同路径）。本地会话行为不变。
+const wsDir = process.env['WORKSPACE_DIR']
+  ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? ''
 if (!wsDir) {
-  throw new Error('环境变量 WORKSPACE_DIR 未设置（应由 runTest.mjs 注入）')
+  throw new Error('工作区根不可得：WORKSPACE_DIR 未设置且无工作区文件夹（应由 runTest.mjs 注入或经 SSH 会话工作区推导）')
 }
 
 const LINKS_DOC_TEXT = [
@@ -886,12 +907,15 @@ interface ViewState {
       boxShadowValues: string[]
       borderLeftWidthValues: string[]
     } | null
-    /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据 */
+    /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据；
+     *  #359 T10 起补组件菜单项命令清单（命名空间运行期项——组件簇在场/
+     *  回收的绘制层证据） */
     contextMenu?: {
       visible: boolean
       display: string | null
       separatorCount: number
       disabledCount: number
+      addonCommands?: string[]
     }
     /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性、
      *  行计数与键盘高亮行/状态行文本（会话关闭时缺省）；#377 T02 起补
@@ -10435,14 +10459,19 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const clipboardText = () => vscode.env.clipboard.readText()
 
     // 1) 普通段打开菜单：绘制层断言（可见性 + 三簇两条分组线 + display）
+    //    #359 T10 起附加组件菜单项以独立组件簇追加（addon.<组件ID>，排内置
+    //    三簇之后）——全 suite 语境下夹具组件在场时分隔线数 = 2 + 组件簇数，
+    //    断言口径改为「至少两条且每多一条都来自组件簇」（内置三簇不因组件
+    //    注册被合并/拆分）
     await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('右键目标段落') })
     const normal = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
     const normalMenu = normal.paint!.contextMenu!
     assert(normalMenu.visible === true,
       `绘制层：菜单中心点应被命中（实际 ${JSON.stringify(normalMenu)}）`)
     assert(normalMenu.display !== 'none', '菜单应非 display:none')
-    assert(normalMenu.separatorCount === 2,
-      `三簇应恰两条分组线（实际 ${normalMenu.separatorCount}）`)
+    assert(normalMenu.separatorCount >= 2 &&
+      (normalMenu.separatorCount === 2 || (normalMenu.addonCommands ?? []).length > 0),
+      `内置三簇应有两条分组线；更多分隔线仅可来自附加组件簇（实际 ${normalMenu.separatorCount}，组件命令 ${JSON.stringify(normalMenu.addonCommands ?? [])}）`)
     // 无选区：仅剪切/复制置灰（cut/copy 两项）
     const normalDisabled = normalMenu.disabledCount
     assert(normalDisabled === 2, `无选区普通段：仅剪切/复制置灰（实际 ${normalDisabled}）`)
@@ -17384,4 +17413,177 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await poll('来源清回基线', () => doc.getText() === '来源正文\n' ? true : undefined)
     await doc.save()
   }],
+
+  // ---- #350 T01：附加组件身份发现、兼容检查与轻量注册 ---- 夹具扩展由
+  // runTest.mjs 以附加 --extensionDevelopmentPath 装载（addon-ok 兼容注册 /
+  // addon-incompatible 声明合法但不兼容 / addon-fail 激活即抛错）。呈现面
+  // 的用户可见文本由 vitest jsdom 套件钉住（addonSettingsSection.test.ts，
+  // 与生产 settingsMain 同构装配）；此处断言真宿主侧「协调器算出的状态」
+  // 「两条激活路径只注册一次」「重复注册与清单刷新幂等」与设置页消息通道。
+
+  ['附加组件：身份发现、兼容检查与两条激活路径（#350）', async () => {
+    // API 在注册前可访问：自身激活完成后 exports 已公布（依赖等待语义）
+    const host = vscode.extensions.getExtension(EXT_ID)
+    assert(host, '被测扩展须在场')
+    const exports = (await host.activate()) as
+      | { apiVersion: string; registerAddon: (owner: unknown, definition?: unknown) => unknown }
+      | undefined
+    assert(exports && exports.apiVersion === '1.0.0',
+      `导出 API 应含 apiVersion 1.0.0，实际 ${JSON.stringify(exports && exports.apiVersion)}`)
+    assert(typeof exports!.registerAddon === 'function', '导出 API 应含 registerAddon 函数')
+
+    // 路径一（VSCode 原生激活）：contributes.commands 自动派生激活事件，
+    // 命令执行即激活组件（依赖先激活 Vsidian，组件激活中注册）
+    const stats = (await vscode.commands.executeCommand(
+      'vsidian-test-fixture.addon-ok.stats')) as {
+        activateCount: number; registerCount: number; setupCount: number
+        lastRegisterResult: { ok: boolean } | null; apiVersionAtRegister: string | null
+      }
+    assert(stats.activateCount === 1, `夹具应恰被激活一次，实际 ${stats.activateCount}`)
+    assert(stats.registerCount === 1, `夹具应恰注册一次（两路径共用幂等 activate），实际 ${stats.registerCount}`)
+    assert(stats.setupCount === 1, `setup 应恰执行一次，实际 ${stats.setupCount}`)
+    assert(stats.lastRegisterResult?.ok === true, `首次注册应成功，实际 ${JSON.stringify(stats.lastRegisterResult)}`)
+    assert(stats.apiVersionAtRegister === '1.0.0', `注册时 API 应可访问（版本随行），实际 ${String(stats.apiVersionAtRegister)}`)
+
+    // 路径二（Vsidian 主动唤醒）与状态判定：轮询协调器状态收敛
+    const state = async () =>
+      (await vscode.commands.executeCommand(CMD.getAddonsState)) as {
+        apiVersion: string; draft: boolean
+        addons: Array<{ id: string; label: string; official: boolean; status: string; detail?: string; apiRange?: string }>
+      }
+    await poll('不兼容夹具状态收敛', async () => {
+      const s = await state()
+      return s.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-incompatible')
+        ?.status === 'incompatible' ? s : undefined
+    })
+    await poll('激活失败夹具状态收敛', async () => {
+      const s = await state()
+      const entry = s.addons.find((item) => item.id === 'vsidian-test-fixture.addon-fail')
+      return entry?.status === 'activation-failed' && typeof entry.detail === 'string' &&
+        entry.detail.includes('intentional activation failure') ? s : undefined
+    })
+    const settled = await state()
+    const ok = settled.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-ok')
+    assert(ok?.status === 'registered', `兼容夹具应为 registered，实际 ${JSON.stringify(ok)}`)
+    const incompatible = settled.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-incompatible')
+    assert(incompatible?.apiRange === '^2.0.0', `不兼容状态应携带声明范围，实际 ${JSON.stringify(incompatible)}`)
+    assert(settled.apiVersion === '1.0.0' && settled.draft === true,
+      `载荷应含候选版本与草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
+
+    // 普通扩展不入列表：内置扩展（vscode.* / ms-*）无身份声明，一律不在场
+    for (const entry of settled.addons) {
+      assert(!entry.id.startsWith('vscode.') && !entry.id.startsWith('ms-'),
+        `普通扩展不得入组件列表，实际含 ${entry.id}`)
+    }
+    // 官方清单初版为空：全部归第三方
+    assert(settled.addons.every((entry) => entry.official === false), '官方清单为空时全部应为第三方')
+    console.log('[#350] 身份发现、兼容检查与两条激活路径通过（夹具 3 个：ok/incompatible/fail）')
+  }],
+
+  ['附加组件：重复注册与清单刷新幂等（#350）', async () => {
+    const stats = async () =>
+      (await vscode.commands.executeCommand('vsidian-test-fixture.addon-ok.stats')) as {
+        registerCount: number; setupCount: number
+        lastRegisterResult: { ok: boolean; reason?: string } | null
+      }
+    const before = await stats()
+    assert(before.setupCount === 1, `前置：setup 应恰一次，实际 ${before.setupCount}`)
+    // 显式重复注册：同一接入代次返回 already-registered，setup 不重跑
+    const again = (await vscode.commands.executeCommand(
+      'vsidian-test-fixture.addon-ok.registerAgain')) as { ok: boolean; reason?: string }
+    assert(again.ok === false && again.reason === 'already-registered',
+      `重复注册应返回 already-registered，实际 ${JSON.stringify(again)}`)
+    const afterRegister = await stats()
+    assert(afterRegister.setupCount === 1, `重复注册不得重跑 setup，实际 ${afterRegister.setupCount}`)
+    // 清单刷新（重复扫描请求）：不重复唤醒、不重复注册
+    await vscode.commands.executeCommand(CMD.addonsRescan)
+    await vscode.commands.executeCommand(CMD.addonsRescan)
+    const afterRescan = await stats()
+    assert(afterRescan.setupCount === 1 && afterRescan.registerCount === afterRegister.registerCount,
+      `重扫不得重复注册（register ${afterRescan.registerCount} / setup ${afterRescan.setupCount}）`)
+    const state = (await vscode.commands.executeCommand(CMD.getAddonsState)) as {
+      addons: Array<{ id: string; status: string }>
+    }
+    const ok = state.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-ok')
+    assert(ok?.status === 'registered', `重扫后应仍为 registered，实际 ${JSON.stringify(ok)}`)
+    console.log('[#350] 重复注册与清单刷新幂等通过')
+  }],
+
+  ['附加组件：设置页状态区载荷与入口通道（#350）', async () => {
+    const state = (await vscode.commands.executeCommand(CMD.getAddonsState)) as {
+      apiVersion: string; draft: boolean
+      addons: Array<{ id: string; label: string; status: string; official: boolean }>
+    }
+    // 载荷三态齐备（呈现面文本由 jsdom 套件钉住）
+    const byId = new Map(state.addons.map((entry) => [entry.id, entry.status]))
+    assert(byId.get('vsidian-test-fixture.addon-ok') === 'registered',
+      `载荷应含 registered 状态，实际 ${JSON.stringify(state.addons)}`)
+    assert(byId.get('vsidian-test-fixture.addon-incompatible') === 'incompatible',
+      `载荷应含 incompatible 状态，实际 ${JSON.stringify(state.addons)}`)
+    assert(byId.get('vsidian-test-fixture.addon-fail') === 'activation-failed',
+      `载荷应含 activation-failed 状态，实际 ${JSON.stringify(state.addons)}`)
+    assert(state.addons.every((entry) => typeof entry.label === 'string' && entry.label.length > 0),
+      '每条载荷应携带展示名（displayName 或 id 回退）')
+
+    // 打开真实设置页面板，经正式消息通道拉取状态（webview 装载回填链路）
+    await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+    await poll('设置页打开并就绪', async () => {
+      const info = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { open: boolean; ready: boolean } | undefined
+      return info?.open && info.ready ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'addons.get' })
+    // 市场搜索入口通道走通（打开 VSCode 扩展视图搜索——安装管理仍归 VSCode）
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'addons.openSearch' })
+    await vscode.commands.executeCommand(CMD.closeSettingsPage)
+    console.log('[#350] 设置页状态区载荷与入口通道通过')
+  }],
+  // V01（#348）附加组件历史分组：真宿主验证组（独立文件维护，探针经
+  // _test.addonHistory.* 走真实 edit.request/ack/history.request 管线）
+  ...addonHistoryCases,
+  // #351 T02 附加组件页面 SDK 与两生命周期：生产路径组（独立文件维护——
+  // 生产编辑器/设置页面板装载夹具组件，断言面见 addonT02Cases.ts 头注）
+  ...addonT02Cases,
+  // #353 T04 附加组件复杂设置：生产路径组（独立文件维护——夹具组件经
+  // 公开 API 注册复杂定义与分层读写，断言面见 addonT04Cases.ts 头注）
+  ...addonT04Cases,
+  // #354 T05 组件管理侧栏数据面、故障手动重试与 realpath 逃逸守卫（断言
+  // 面见 addonT05Cases.ts 头注）
+  ...addonT05Cases,
+  // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
+  // 断言面见 addonT06Cases.ts 头注）
+  ...addonT06Cases,
+  // #356 T07：可组合输入行为与逐项注册状态（夹具组件经公开 behaviors 面
+  // 注册行为链，断言面见 addonT07Cases.ts 头注）
+  ...addonT07Cases,
+  // T08（#357）行为冲突管理：目录上报对账、真实设置页通道调序与单项
+  // 关闭、整体停用区分与恢复（断言面见 addonT08Cases.ts 头注）
+  ...addonT08Cases,
+  // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
+  // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
+  ...addonT09Cases,
+  // #359 T10：自己的命令、菜单与统一快捷键（夹具组件经公开 SDK 注册，
+  // 断言面见 addonT10Cases.ts 头注）
+  ...addonT10Cases,
+  // #360 T11：所属按钮、面板与视图界面贡献（夹具组件经公开 ui 面注册，
+  // 断言面见 addonT11Cases.ts 头注）
+  ...addonT11Cases,
+  // #361 T12：诊断、全组件故障暂停与手动恢复（四态负向对照、贡献全撤
+  // 与首选恢复，断言面见 addonT12Cases.ts 头注）
+  ...addonT12Cases,
+  // #364 T15：三套独立消费样例（test/examples/ 独立工程形态，经公开接入
+  // 从安装/注册到可见结果——检验 API 不只为单一需求服务，断言面见
+  // addonT15Cases.ts 头注）
+  ...addonT15InputCases,
+  ...addonT15RendererCases,
+  ...addonT15UiCases,
+  // #365 T16：双 VSIX 安装态、重启与升级回归（runInstalledAddons.mjs 阶段
+  // 矩阵——A 依赖缺失/B 补装全矩阵/C 发行态/D 重启保留/E 升级；用例体
+  // phaseGuard 自跳过非本阶段与非安装态会话，断言面见
+  // addonT16InstalledCases.ts 头注）
+  ...addonT16InstalledCases,
+  // #366 T17：Remote SSH 同宿主安装、资源与排障（runRemoteSshAddons.mjs
+  // 阶段矩阵——R1 全装载/R2 宿主不可见负向；用例体 sshGuard 自跳过非
+  // SSH 会话，发行态断言面见 addonT17RemoteSshCases.ts 头注）
+  ...addonT17RemoteSshCases,
 ]

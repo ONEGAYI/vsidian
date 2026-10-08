@@ -7,6 +7,7 @@
 // - seq 经 bridge.setState 持久化，webview 重载后继续编号（宿主按 seq 去重）
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
+import { StateField, type Extension } from '@codemirror/state'
 import { __resetMermaidRenderStateForTest, mermaidDarkTheme } from '../../src/webview/mermaidRender'
 import { DocumentSession, type HostDocumentPort } from '../../src/host/documentSession'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
@@ -1178,4 +1179,100 @@ it.each(['heading', 'block'] as const)('#245/P2-03 悬停 B 的 %s 引用全文�
     anchor.remove()
     height.mockRestore()
   }
+})
+
+
+// ---- #354 T05：附加组件扩展热切换安全收尾 ----
+// IME 组合或编辑提交未完成（本地输入在途）时不立即重配组件扩展——
+// 暂存最新意图，输入落定（onLocalInputSettled）后冲刷执行。
+
+describe('附加组件扩展热切换安全收尾（T05）', () => {
+  /** 观测扩展是否已装配：StateField 在场 = 扩展槽含该扩展 */
+  const markerField = StateField.define<number>({ create: () => 0, update: (value) => value })
+  const markerExtension: Extension[] = [markerField]
+
+  it('编辑提交未完成时挂起重配，ack 落定后冲刷执行（组合输入与提交不丢）', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    init(c, 'abcdef', 3)
+    const view = c.getView()!
+    // 本地输入产生未 ack 的 edit.request（编辑提交未完成）
+    view.dispatch({ changes: { from: 3, insert: '中文' } })
+    expect(sent.at(-1)).toMatchObject({ kind: 'edit.request', seq: 1 })
+    // 切换到达：挂起（不立即重配——组合/提交中的 reconfigure 会打断输入）
+    c.reconfigureAddonExtensions(markerExtension)
+    expect(view.state.field(markerField, false)).toBeUndefined()
+    // 落定前文档与在途请求不受影响
+    expect(view.state.doc.toString()).toBe('abc中文def')
+    // 宿主 ack：输入落定 → 挂起意图冲刷，扩展生效
+    c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 4 })
+    expect(view.state.field(markerField, false)).toBe(0)
+    expect(view.state.doc.toString()).toBe('abc中文def')
+    c.dispose()
+  })
+
+  it('挂起期间多次切换只保留最新意图（null 摘除也落定后执行）', () => {
+    const { bridge } = makeBridge()
+    const c = mount(bridge)
+    init(c, 'abcdef', 3)
+    const view = c.getView()!
+    view.dispatch({ changes: { from: 3, insert: 'x' } })
+    // 第一次切换（装配）随后被第二次（摘除）覆盖——只执行最新
+    c.reconfigureAddonExtensions(markerExtension)
+    c.reconfigureAddonExtensions(null)
+    c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 4 })
+    expect(view.state.field(markerField, false)).toBeUndefined()
+    c.dispose()
+  })
+
+  it('IME 组合链端到端：组合中挂起，组合结束落定后装配（浏览器场景同型）', async () => {
+    const { bridge } = makeBridge()
+    const c = mount(bridge)
+    init(c, 'abcdef', 3)
+    const view = c.getView()!
+    const content = view.contentDOM
+    // 组合开始（DOM compositionstart——liveInstance 组合态跟踪入口）
+    content.dispatchEvent(new CompositionEvent('compositionstart'))
+    // 组合中装载（开关启用）：挂起
+    c.reconfigureAddonExtensions(markerExtension)
+    expect(view.state.field(markerField, false)).toBeUndefined()
+    // 组合中的本地事务（暂缓累积——不发 edit.request）
+    view.dispatch({ changes: { from: 3, insert: '组' }, userEvent: 'input.type.composition' })
+    // 组合结束
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '组' }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    // 落定链：flush 定时器把暂缓集发出（inFlight）→ 宿主 ack → 冲刷
+    const sent = (bridge.postMessage as unknown as (m: unknown) => void) && undefined
+    void sent
+    c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 4 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(view.state.field(markerField, false)).toBe(0)
+    expect(view.state.doc.toString()).toBe('abc组def')
+    c.dispose()
+  })
+
+  it('无在途输入时立即重配（无谓挂起不引入延迟）', () => {
+    const { bridge } = makeBridge()
+    const c = mount(bridge)
+    init(c, 'abcdef', 3)
+    const view = c.getView()!
+    c.reconfigureAddonExtensions(markerExtension)
+    expect(view.state.field(markerField, false)).toBe(0)
+    c.dispose()
+  })
+
+  it('挂起意图作用于最新请求：落定后再次切换不残留旧意图', () => {
+    const { bridge } = makeBridge()
+    const c = mount(bridge)
+    init(c, 'abcdef', 3)
+    const view = c.getView()!
+    view.dispatch({ changes: { from: 3, insert: 'x' } })
+    c.reconfigureAddonExtensions(markerExtension)
+    c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 4 })
+    expect(view.state.field(markerField, false)).toBe(0)
+    // 落定后的切换走直通路径（不再挂起）
+    c.reconfigureAddonExtensions(null)
+    expect(view.state.field(markerField, false)).toBeUndefined()
+    c.dispose()
+  })
 })
