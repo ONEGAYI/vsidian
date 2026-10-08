@@ -4138,11 +4138,16 @@ export function createTextEditorProvider(
         for (const [sessionId, panel] of entry.panels) {
           // 换目录后已开面板的资源许可面同步刷新：webview.options 可在运行
           // 期重新赋值，资源服务按请求时点的 roots 校验（集成用例覆盖
-          // 「换目录后旧面板能加载新目录资源」）
+          // 「换目录后旧面板能加载新目录资源」）。附加组件授权根一并拼
+          // 回——与建面板/refreshAddonPanels 两处同口径，否则换目录后
+          // 面板重载时组件脚本被资源服务拒绝且不会自动恢复
           if (directoryChanged) {
             panel.webview.options = {
               enableScripts: true,
-              localResourceRoots: editorResourceRoots(context, entry.doc, state.directory),
+              localResourceRoots: [
+                ...editorResourceRoots(context, entry.doc, state.directory),
+                ...grantedAddonRoots,
+              ],
             }
           }
           if (entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready)) {
