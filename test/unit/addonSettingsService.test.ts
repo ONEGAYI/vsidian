@@ -334,3 +334,68 @@ describe('T04 设置服务：无效持久层值与定义缺失的组合', () => 
     expect(logs.some((line) => line.startsWith('store-write-failed:a.demo'))).toBe(true)
   })
 })
+
+describe('#395 P3 设置回写等值短路（同值不落盘不发事件）', () => {
+  /** 带写调用计数的持久层（memoryPersistence 外包一层计数） */
+  function countingPersistence(): ReturnType<typeof memoryPersistence> & { writeCalls: () => number } {
+    const port = memoryPersistence()
+    let calls = 0
+    const inner = port.write.bind(port)
+    port.write = async (scope, value) => {
+      calls++
+      return inner(scope, value)
+    }
+    return Object.assign(port, { writeCalls: () => calls })
+  }
+
+  it('同值 update：返回 ok、不写持久层、不发 onChanged（回写环路不再无限写盘）', async () => {
+    const port = countingPersistence()
+    const service = new AddonSettingsService(port)
+    service.registerDefinitions('a.demo', DEFS)
+    const changes: string[] = []
+    service.onChanged((change) => changes.push(change.keys.join(',')))
+    await service.update('a.demo', 'user', { threshold: 55 })
+    expect(port.writeCalls()).toBe(1)
+    expect(changes).toEqual(['threshold'])
+    // 组件在 onChanged 里回写同值的环路：第二次起等值短路
+    await service.update('a.demo', 'user', { threshold: 55 })
+    expect(await service.update('a.demo', 'user', { threshold: 55 })).toEqual({ ok: true })
+    expect(port.writeCalls()).toBe(1)
+    expect(changes).toEqual(['threshold'])
+    expect(service.effectiveSnapshot('a.demo').values['threshold']).toBe(55)
+  })
+
+  it('嵌套对象同值（JSON 视角深等值）同样短路；空补丁不产生落盘与事件', async () => {
+    const port = countingPersistence()
+    const service = new AddonSettingsService(port)
+    service.registerDefinitions('a.demo', DEFS)
+    const changes: number[] = []
+    service.onChanged(() => changes.push(changes.length))
+    await service.update('a.demo', 'user', { limits: { name: 'demo', count: 3 } })
+    expect(port.writeCalls()).toBe(1)
+    // 与存储值深等值的对象再写：短路
+    await service.update('a.demo', 'user', { limits: { name: 'demo', count: 3 } })
+    expect(port.writeCalls()).toBe(1)
+    // 空补丁：无键可变，等值短路
+    await service.update('a.demo', 'user', {})
+    expect(port.writeCalls()).toBe(1)
+    expect(changes).toHaveLength(1)
+  })
+
+  it('真值变化照常落盘与广播（短路与写失败互不干扰）', async () => {
+    const port = countingPersistence()
+    const service = new AddonSettingsService(port)
+    service.registerDefinitions('a.demo', DEFS)
+    const changes: Array<Record<string, unknown>> = []
+    service.onChanged((change) => changes.push({ keys: change.keys, scope: change.scope }))
+    await service.update('a.demo', 'user', { threshold: 55 })
+    await service.update('a.demo', 'user', { threshold: 60 })
+    expect(port.writeCalls()).toBe(2)
+    expect(changes).toHaveLength(2)
+    expect(service.effectiveSnapshot('a.demo').values['threshold']).toBe(60)
+    // 短路不吞失败路径：真变化 + 落盘失败仍报失败
+    port.fail = 'user'
+    expect(await service.update('a.demo', 'user', { threshold: 70 })).toEqual({ ok: false, reason: 'store-write-failed' })
+    expect(service.effectiveSnapshot('a.demo').values['threshold']).toBe(60)
+  })
+})
