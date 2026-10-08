@@ -402,7 +402,9 @@ export interface VsidianAddonPageSdk {
   /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */
   mountRoot(): HTMLElement | null
   /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；
-   *  越出资源子目录的相对路径返回 null——组件不得自造越界地址） */
+   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面
+   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；
+   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */
   resourceUri(relativePath: string): string | null
   /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */
   readonly channel: {

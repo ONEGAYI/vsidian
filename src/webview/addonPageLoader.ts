@@ -453,6 +453,10 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       },
       resourceUri: (relativePath) => {
         if (!manifest.resourceBase) return null
+        // #395 P3：字面形态拦截是防呆层而非安全边界——只拦字面 `..`，
+        // 编码变形（%2e%2e）与同 realm 直连 webview URI 不在本层防线内；
+        // 有效边界是本 webview 的 localResourceRoots 包含性与宿主侧
+        // realpath 符号链接守卫（ADR-0012：不构成安全沙箱）
         if (
           typeof relativePath !== 'string' || relativePath === '' || relativePath.startsWith('/') ||
           /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(relativePath) || relativePath.split('/').includes('..')
