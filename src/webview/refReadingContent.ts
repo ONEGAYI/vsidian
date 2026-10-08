@@ -132,7 +132,6 @@ export function refreshRefCodeHighlight(el: HTMLElement, highlight: boolean): vo
     decorateReadingCodeCard(el, {
       config: {
         card: false,
-        lineNumbers: false,
         copyButton: false,
         highlight,
       },

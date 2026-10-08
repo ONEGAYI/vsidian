@@ -1546,16 +1546,16 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="live-code-card-linenumber">
       <h3><code>.vsidian-code-card-linenumber</code><span class="eid">live-code-card-linenumber</span></h3>
-      <p class="purpose">卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。</p>
-      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+      <p class="purpose">卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget；与文档行号槽（源文件行号）两列并存互不遮挡。阅读视图 2026-10 起不再发射卡内行号（用户产品决策，与引用内容先例统一），本选择器自该版本起仅命中实时预览。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
 
       <p class="obsidian">Obsidian 对应：.code-styler-line-number（方向）</p>
 
-      <p class="dom">DOM 关系：卡片代码行首（live widget / 阅读 span）。</p>
+      <p class="dom">DOM 关系：卡片代码行首（live widget）。</p>
       <pre><code>.vsidian-code-card-linenumber {
   color: var(--vscode-descriptionForeground);
 }</code></pre>
-      <p class="verify">验证：lineNumberCssContract：两列并存；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-linenumber-live&quot;/&quot;live-code-card-linenumber-reading&quot;] 探针命中</p>
+      <p class="verify">验证：lineNumberCssContract：两列并存；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-linenumber-live&quot;] 探针命中</p>
       <p class="life">引入：#79（2026-09-26）</p>
     </article>
     <article class="entry" id="tok-tokens">

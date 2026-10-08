@@ -2998,12 +2998,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-linenumber",
-    "purpose": "卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。",
+    "purpose": "卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget；与文档行号槽（源文件行号）两列并存互不遮挡。阅读视图 2026-10 起不再发射卡内行号（用户产品决策，与引用内容先例统一），本选择器自该版本起仅命中实时预览。",
     "views": [
-      "live",
-      "reading"
+      "live"
     ],
-    "dom": "卡片代码行首（live widget / 阅读 span）。",
+    "dom": "卡片代码行首（live widget）。",
     "example": ".vsidian-code-card-linenumber {\n  color: var(--vscode-descriptionForeground);\n}",
     "obsidian": {
       "counterpart": ".code-styler-line-number（方向）",
@@ -3011,7 +3010,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "lineNumberCssContract：两列并存",
-      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-linenumber-live\"/\"live-code-card-linenumber-reading\"] 探针命中"
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-linenumber-live\"] 探针命中"
     ],
     "introduced": "#79（2026-09-26）"
   },
@@ -6034,8 +6033,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-code-card-linenumber": {
-    "purpose": "In-card line numbers (each block starts at 1, fence lines take no number; numbering continues across the split chunks of a large fence); a line-start widget in live view and a line span in reading view (same class name); coexists with the document line-number gutter (source file line numbers) as two separate columns that do not overlap.",
-    "dom": "At the start of the card's code lines (a live widget / a reading span).",
+    "purpose": "In-card line numbers (each block starts at 1, fence lines take no number; numbering continues across the split chunks of a large fence); a line-start widget in live view; coexists with the document line-number gutter (source file line numbers) as two separate columns that do not overlap. Reading view stopped emitting in-card line numbers in 2026-10 (user product decision, unified with the reference-content precedent); since then this selector only matches live preview.",
+    "dom": "At the start of the card's code lines (a live widget).",
     "obsidian": {
       "counterpart": ".code-styler-line-number (direction)"
     }

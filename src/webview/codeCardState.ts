@@ -16,7 +16,8 @@ import { Facet, StateEffect, StateField } from '@codemirror/state'
 export interface CodeCardConfig {
   /** 卡片总开关（codeblock.card）：关闭回到朴素围栏源码外观 */
   card: boolean
-  /** 卡内行号（codeblock.lineNumbers，#80） */
+  /** 卡内行号（codeblock.lineNumbers，#80；仅 Live 生效——阅读侧 2026-10
+   *  起不发射卡内行号，该键对阅读视图无操作） */
   lineNumbers: boolean
   /** 复制按钮（codeblock.copyButton，#81） */
   copyButton: boolean

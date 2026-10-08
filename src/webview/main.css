@@ -4367,44 +4367,15 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line {
   display: block;
   min-height: 1.5em;
-  /* #191 悬挂缩进修复折行窜行（与 live 同式）：行内联注入
-     --vsidian-code-indent（值 = 行号列宽 + 24px，行号开启时注入；关闭回
-     落 0px 两式无操作）——首行完全原位，续行对齐文本列不入行号区 */
-  padding-left: var(--vsidian-code-indent, 0px);
-  text-indent: calc(-1 * var(--vsidian-code-indent, 0px));
 }
 
 /* ---- #191 阅读关闭折行：容器级状态类（挂在阅读容器上，仅关闭时添加；
-   内部交互态类，不入公开样式契约）——pre 横向滚动、行号列 sticky 钉左、
-   头部横带不受滚动影响（在 pre 外）。大围栏 60 行分片各有独立 pre，
-   滚动条按片出现（不做跨片聚合）。---- */
+   内部交互态类，不入公开样式契约）——pre 横向滚动、头部横带不受滚动影响
+   （在 pre 外）。大围栏 60 行分片各有独立 pre，滚动条按片出现（不做跨片
+   聚合）。卡内行号 2026-10 起阅读侧不再发射，无 sticky 行号列与悬挂缩进。---- */
 #app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card > pre {
   white-space: pre;
   overflow-x: auto;
-}
-
-/* 行盒随内容延展：sticky 行号才有全行吸附范围（行盒宽度默认只有 pre 视
-   口宽，长行文本溢出不扩盒，行号会被推出吸附矩形）；min-width: 100% 保
-   证短行行盒至少占满 pre 视口（行号始终贴左缘） */
-#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line {
-  width: max-content;
-  min-width: 100%;
-}
-
-/* sticky 行号：钉在滚动视口左缘不随横向滚动滑走。遮罩背景两层合成——
-   上层卡片底色（可半透明的 --vsidian-code-card-background），下层不透
-   明编辑器底色（body 背景同源，真实主题中恒不透明），合成结果不透明，
-   遮住横向滑过的文本；基态的 8+16 边距整体收进 padding（margin 在盒外
-   遮不住内容；左缘 8px 同入遮罩，盒总占恒为列宽 + 24px） */
-#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-linenumber {
-  position: sticky;
-  left: 0;
-  margin-left: 0;
-  margin-right: 0;
-  padding-left: 8px;
-  padding-right: 16px;
-  background-image: linear-gradient(var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12)), var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12)));
-  background-color: var(--vscode-editor-background, #1e1e1e);
 }
 
 /* 收起态：代码体隐藏，仅留头部横带（视图态，不持久化） */

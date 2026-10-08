@@ -125,10 +125,10 @@ describe('chromeContract 数据纠错钉（#133 核实依据）', () => {
     }
   })
 
-  it('阅读侧同发射类在 readingCodeCard/readingMarkdown 在场（views 修正的依据）', () => {
+  it('阅读侧发射类在场：readingCodeCard 仅行结构（2026-10 起卡内行号不发射），readingMarkdown 双类在（views 修正的依据）', () => {
     const card = readRepo('src/webview/readingCodeCard.ts')
     expect(card).toContain("CODE_CARD_CLASS_NAMES.line")
-    expect(card).toContain("CODE_CARD_CLASS_NAMES.linenumber")
+    expect(card).not.toContain("CODE_CARD_CLASS_NAMES.linenumber")
     const math = readRepo('src/webview/readingMarkdown.ts')
     expect(math).toContain('${MATH_CLASS_NAMES.math}')
     expect(math).toContain('${MATH_CLASS_NAMES.mathBlock}')

@@ -820,8 +820,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'live-code-card-linenumber': {
     purpose:
-      'In-card line numbers (each block starts at 1, fence lines take no number; numbering continues across the split chunks of a large fence); a line-start widget in live view and a line span in reading view (same class name); coexists with the document line-number gutter (source file line numbers) as two separate columns that do not overlap.',
-    dom: "At the start of the card's code lines (a live widget / a reading span).",
+      'In-card line numbers (each block starts at 1, fence lines take no number; numbering continues across the split chunks of a large fence); a line-start widget in live view; coexists with the document line-number gutter (source file line numbers) as two separate columns that do not overlap. Reading view stopped emitting in-card line numbers in 2026-10 (user product decision, unified with the reference-content precedent); since then this selector only matches live preview.',
+    dom: "At the start of the card's code lines (a live widget).",
     obsidian: { counterpart: '.code-styler-line-number (direction)' },
   },
   'tok-tokens': {

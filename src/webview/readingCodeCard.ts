@@ -1,15 +1,16 @@
 // 阅读视图代码块卡片（工单 #84，规格 docs/specs/code-block-card.md）：
 // 挂载钩子内把朴素 `<pre><code class="language-x">` 增强为与 Live 相同的
-// 卡片契约——头部横带（徽标 + 语言标签 + 折叠 + 复制）、卡内行号（每块
-// 从 1、大围栏分块跨片连续、与 Live 同类名）、tok-* 语法着色（与 Live 共用
-// codeHighlight 引擎与色板）。与阅读虚拟化协同：块卸载随 DOM 丢弃，重挂载从
-// data 属性的源码原文重新增强（幂等）。
+// 卡片契约——头部横带（徽标 + 语言标签 + 折叠 + 复制）、tok-* 语法着色
+// （与 Live 共用 codeHighlight 引擎与色板）。与阅读虚拟化协同：块卸载随
+// DOM 丢弃，重挂载从 data 属性的源码原文重新增强（幂等）。
 //
 // 形态矩阵（与设置开关对齐）：
-// - card + highlight：卡片 + 行号 + token 着色
-// - card 仅：卡片 + 行号（不着色）
+// - card + highlight：卡片 + token 着色
+// - card 仅：卡片（不着色）
 // - highlight 仅：朴素 pre/code 内直接注入 token span（无卡片结构）
 // - 两者皆关：不触碰（朴素 markdown-it 产物）
+// 卡内行号 2026-10 起阅读侧不再发射（codeblock.lineNumbers 仅 Live 生效，
+// 与引用内容先例统一——行号/悬挂缩进/sticky 列一并退场）。
 // 折叠（card 开启时）：块级类切换隐藏 pre（视图态由调用方持有集合）。
 import { resolveCodeLanguage } from '../shared/codeLangs'
 import { HIGHLIGHT_CACHE_LIMIT, HIGHLIGHT_MAX_LINES, hasHighlightEngine, highlightCodeRanges, splitRangeAtLineBreaks, type CodeTokenRange } from './codeHighlight'
@@ -60,40 +61,18 @@ function readingTokenRanges(block: HTMLElement, languageId: string, code: string
 const CODE_SRC_ATTR = 'data-vsidian-code-src'
 const CODE_INFO_ATTR = 'data-vsidian-code-info'
 
-/**
- * 大围栏分块（FENCE_CHUNK_LINES）的跨片行号契约：readingBlocks 在分片
- * `<pre>` 上落位片首行 0 基行号（data-vsidian-code-start）与整块内容行数
- * （data-vsidian-code-total）。增强过程不改写 pre 的属性，重读与首捕快照
- * 等价；无属性（未分块 / 旧 DOM）时回退每片独立编号（start=0、
- * total=片行数）保持幂等。
- */
-const CODE_CHUNK_START_ATTR = 'data-vsidian-code-start'
-const CODE_CHUNK_TOTAL_ATTR = 'data-vsidian-code-total'
-
-/** 片首行 0 基行号（非法/缺失回退 0） */
-function chunkStartLineOf(codeEl: HTMLElement): number {
-  const raw = codeEl.parentElement?.getAttribute(CODE_CHUNK_START_ATTR)
-  return typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : 0
-}
-
-/** 整块内容行数（非法/缺失回退片行数） */
-function chunkTotalLinesOf(codeEl: HTMLElement, fallback: number): number {
-  const raw = codeEl.parentElement?.getAttribute(CODE_CHUNK_TOTAL_ATTR)
-  return typeof raw === 'string' && /^\d+$/.test(raw) && Number(raw) > 0 ? Number(raw) : fallback
-}
-
 /** 阅读卡片块级类（选择器映射表登记：vsidian-reading-code-block 的卡片化外壳） */
 export const READING_CODE_CARD_CLASS = 'vsidian-reading-code-card'
 /** 阅读卡片收起态块级修饰（pre 隐藏；头部保留） */
 export const READING_CODE_CARD_FOLDED_CLASS = 'vsidian-code-card-folded'
-/** 阅读代码行（行号 + 文本，卡片形态的行结构） */
+/** 阅读代码行（文本，卡片形态的行结构） */
 export const READING_CODE_LINE_CLASS = 'vsidian-reading-code-line'
 /** #191 阅读关闭折行的容器级状态类（挂在阅读容器上，仅关闭时添加；
- *  内部交互态类，不入公开样式契约——门控 pre 横向滚动与 sticky 行号） */
+ *  内部交互态类，不入公开样式契约——门控 pre 横向滚动） */
 export const READING_CODE_NOWRAP_CLASS = 'vsidian-reading-nowrap'
 
 export interface ReadingCodeCardOptions {
-  config: Pick<CodeCardConfig, 'card' | 'lineNumbers' | 'copyButton' | 'highlight'>
+  config: Pick<CodeCardConfig, 'card' | 'copyButton' | 'highlight'>
   folded: boolean
   onCopy: (code: string) => void
   onFoldToggle: () => void
@@ -145,7 +124,7 @@ export function decorateReadingCodeCard(block: HTMLElement, opts: ReadingCodeCar
     return
   }
 
-  // 卡片形态：头部 + 行结构（行号 + token）
+  // 卡片形态：头部 + 行结构（token；卡内行号已随 2026-10 阅读侧退场移除）
   block.classList.add(READING_CODE_CARD_CLASS)
   if (opts.folded) {
     block.classList.add(READING_CODE_CARD_FOLDED_CLASS)
@@ -187,31 +166,11 @@ export function decorateReadingCodeCard(block: HTMLElement, opts: ReadingCodeCar
     return
   }
   const lines = code === '' ? [] : code.split('\n')
-  // 跨片行号（大围栏分块）：值 = 片首行 + 块内序号（1 基），列宽按整块
-  // 内容行数对齐——两片列宽一致、行号跨片连续（规格 code-block-card.md）
-  const startLine = chunkStartLineOf(codeEl)
-  const totalLines = chunkTotalLinesOf(codeEl, lines.length)
-  const widthCh = Math.max(2, String(totalLines).length)
-  // #191 悬挂缩进的列宽基准：与 Live 同一公式（行号列宽 + 24px 间距），
-  // 行号开启时逐行内联注入（与 ln.style.width 同处同源）；行号关闭不注入
-  // （CSS var 回落 0px，两式自动无操作——已知限制：该态续行无悬挂）
-  const indent = opts.config.lineNumbers ? `calc(${widthCh}ch + 24px)` : null
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
     const row = document.createElement('span')
     // 行类与 Live 同名（paint 探针 cardLineCount 跨视图同口径）
     row.className = `${READING_CODE_LINE_CLASS} ${CODE_CARD_CLASS_NAMES.line}`
-    if (indent !== null) {
-      row.style.setProperty('--vsidian-code-indent', indent)
-    }
-    if (opts.config.lineNumbers) {
-      const ln = document.createElement('span')
-      ln.className = CODE_CARD_CLASS_NAMES.linenumber
-      ln.textContent = String(startLine + i + 1)
-      ln.style.width = `${widthCh}ch`
-      ln.setAttribute('aria-hidden', 'true')
-      row.appendChild(ln)
-    }
     const text = document.createElement('span')
     appendTokenizedText(text, tokens, lineOffsets(lines, i), line)
     row.appendChild(text)

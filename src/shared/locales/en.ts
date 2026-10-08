@@ -208,7 +208,7 @@ export const en = {
   'setting.codeblockCard.title': 'Code block card',
   'setting.codeblockCard.description': 'Collapse a fenced code block into a card when the cursor leaves it: hide the fence markers and show a language header bar. Turn off to restore the plain source fence look.',
   'setting.codeblockLineNumbers.title': 'Line numbers inside cards',
-  'setting.codeblockLineNumbers.description': 'Show per-block line numbers at the start of each line inside the card (counting from 1 per block; fence lines excluded). Requires "Code block card".',
+  'setting.codeblockLineNumbers.description': 'Show per-block line numbers at the start of each line inside live-preview cards (counting from 1 per block; fence lines excluded). Reading view never shows in-card line numbers. Requires "Code block card".',
   'setting.codeblockCopyButton.title': 'Copy button',
   'setting.codeblockCopyButton.description': 'Show a copy button on the card header on hover; click to copy the whole block (without fence lines). Requires "Code block card".',
   'setting.codeblockHighlight.title': 'Syntax highlighting',
