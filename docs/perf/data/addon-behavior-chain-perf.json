@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "ticket": "#395 P3 评审项 5（行为链每键全文档快照成本测量——只测量不优化）",
+    "date": "2026-10-08",
+    "node": "v24.15.0",
+    "behaviors": 100,
+    "rounds": 50,
+    "methods": [
+      "esbuild 即时编译 src/webview/addonBehaviors.ts（生产链执行器，单一事实源）",
+      "快照桩为逐行 join + 对象组装近似（O(行数) 构造；V8 rope 惰性与 CM6 内部行为常数有差，量级同型）",
+      "applyEdit 桩不做 stale 校验与文本重写，偶数序行为每键真实提交（await 调度走通）——满链最重路径",
+      "奇数序行为返回 null 跳过——混合形态；纯 Node 直跑非宿主进程内"
+    ],
+    "conclusion": "快照占链耗时 77%–95%，但绝对量小：现实行为数（个位数）× 1MB 文档的每键链成本 ≈1ms 量级（100 行为 × 1MB 极端档才到 ~22ms，触发条件不现实——需 100 个启用行为同时注册且文档 1MB）。结论：无需单快照共享——单快照共享须改「后续行为读前序结果」的机制（现状靠逐行为重取表达，共享要做增量快照），复杂度与收益不匹配。重测入口：node test/perf/addonBehaviorChainPerf.mjs"
+  },
+  "sizes": {
+    "10240": {
+      "docKB": 10,
+      "chainMedianMs": 1.021,
+      "chainP90Ms": 1.163,
+      "snapshotCallsPerDrive": 100,
+      "applyCallsPerDrive": 50,
+      "perBehaviorSnapshotMedianMs": 0.0095,
+      "hundredSnapshotEquivalentMs": 0.95,
+      "snapshotShareOfChain": 0.93
+    },
+    "102400": {
+      "docKB": 100,
+      "chainMedianMs": 4.508,
+      "chainP90Ms": 5.188,
+      "snapshotCallsPerDrive": 100,
+      "applyCallsPerDrive": 50,
+      "perBehaviorSnapshotMedianMs": 0.0352,
+      "hundredSnapshotEquivalentMs": 3.52,
+      "snapshotShareOfChain": 0.781
+    },
+    "1048576": {
+      "docKB": 1024,
+      "chainMedianMs": 22.47,
+      "chainP90Ms": 23.368,
+      "snapshotCallsPerDrive": 100,
+      "applyCallsPerDrive": 50,
+      "perBehaviorSnapshotMedianMs": 0.1747,
+      "hundredSnapshotEquivalentMs": 17.47,
+      "snapshotShareOfChain": 0.777
+    }
+  }
+}
