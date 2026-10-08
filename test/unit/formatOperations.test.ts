@@ -188,6 +188,41 @@ describe('格式操作的文本契约', () => {
     expect(apply('标题\n----', 'heading3', 1).text).toBe('### 标题')
   })
 
+  it('空行按标题操作插入 mark 并把光标置于空格后（#393）', () => {
+    expect(apply('', 'heading2', 0)).toEqual({ text: '## ', selection: { anchor: 3 } })
+    expect(apply('正文\n\n正文', 'heading3', 3)).toEqual({ text: '正文\n### \n正文', selection: { anchor: 7 } })
+    // 纯空白行保留缩进口径（与非空行路径一致：indent 原样透传不截断）
+    expect(apply('  ', 'heading1', 1)).toEqual({ text: '  # ', selection: { anchor: 4 } })
+    // 非空行层级切换回归
+    expect(apply('## 标题', 'heading3', 5).text).toBe('### 标题')
+  })
+
+  it('空行按列表与引用操作插入前缀并把光标置于前缀后（#393 扩大范围）', () => {
+    expect(apply('', 'bulletList', 0)).toEqual({ text: '- ', selection: { anchor: 2 } })
+    expect(apply('', 'orderedList', 0)).toEqual({ text: '1. ', selection: { anchor: 3 } })
+    expect(apply('', 'taskList', 0)).toEqual({ text: '- [ ] ', selection: { anchor: 6 } })
+    expect(apply('', 'quote', 0)).toEqual({ text: '> ', selection: { anchor: 2 } })
+    // 纯空白行缩进透传与非空行路径一致
+    expect(apply('  ', 'quote', 1)).toEqual({ text: '  > ', selection: { anchor: 4 } })
+    // 取消型操作空行无可作用对象，维持无反应（#393 审查 D1 钉住）
+    expect(apply('', 'headingNone', 0)).toEqual({ text: '', selection: null })
+    expect(apply('', 'clearInline', 0)).toEqual({ text: '', selection: null })
+  })
+
+  it('空行插入后再按一次恢复空行，两态闭环（#393）', () => {
+    expect(apply('- ', 'bulletList', 2).text).toBe('')
+    expect(apply('1. ', 'orderedList', 3).text).toBe('')
+    expect(apply('- [ ] ', 'taskList', 5).text).toBe('')
+    expect(apply('> ', 'quote', 2).text).toBe('')
+    expect(apply('## ', 'headingNone', 3).text).toBe('')
+    expect(apply('  - ', 'bulletList', 4).text).toBe('  ')
+  })
+
+  it('跨行选区中实质重叠的空行同样插入标题与列表前缀，无独立选区（#393）', () => {
+    expect(apply('正文\n\n尾', 'heading2', 0, 4)).toEqual({ text: '## 正文\n## \n尾' })
+    expect(apply('正文\n\n尾', 'bulletList', 0, 4)).toEqual({ text: '- 正文\n- \n尾' })
+  })
+
   it('显式选区围栏精确包裹，前后文独立成段且文首尾无多余空行', () => {
     expect(apply('前中文后', 'codeBlock', 1, 3).text).toBe('前\n\n```\n中文\n```\n\n后')
     expect(apply('文字', 'codeBlock', 0, 2).text).toBe('```\n文字\n```')
@@ -411,6 +446,15 @@ describe('多 range 逐段规划（#240）', () => {
     ])
     // 非空选区包裹无独立产物选区（null = 保持原选区语义，调用方映射原 range）
     expect(plan!.selections).toEqual([null, null])
+  })
+
+  it('结构性操作主 range 为空行：仅主 range 插入并携带产物选区（#393 审查 D2）', () => {
+    // planOnlyIndex=0（主 range 空行 from 2）：其余 range 跳过（selections
+    // 记 null）；空行插入的产物 anchor 为终文坐标，deltaBefore=0 直落
+    const plan = planFormatOperationRanges('a\n\nb', 'heading2',
+      [{ from: 2, to: 2 }, { from: 0, to: 0 }], 'toggle', 0)
+    expect(plan!.changes).toEqual([{ from: 2, to: 2, insert: '## ' }])
+    expect(plan!.selections).toEqual([{ anchor: 5 }, null])
   })
 
   it('两空光标各自扩词包裹：产物选区各自给出（原文坐标，互不加 delta）', () => {

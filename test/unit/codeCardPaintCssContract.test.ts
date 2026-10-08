@@ -215,3 +215,16 @@ describe('折行窜行修复与折行开关（#191）', () => {
     }
   })
 })
+
+describe('ready-language visible lexical colors (#389)', () => {
+  it('does not recolor the existing Markdown heading class', () => {
+    expect(css).not.toMatch(/(?:^|\n)(?::where\([^)]*\) )?\.tok-heading\s*\{/)
+  })
+  it.each([
+    ['inserted', '#22863a', '#85e89d'],
+    ['deleted', '#b31d28', '#f97583'],
+  ])('%s has distinct light and dark paint without changing existing token colors', (kind, light, dark) => {
+    expect(css).toContain(`.tok-${kind} { color: ${light}; }`)
+    expect(css).toContain(`:where(body.vscode-dark) .tok-${kind} { color: ${dark}; }`)
+  })
+})

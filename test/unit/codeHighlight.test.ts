@@ -10,6 +10,9 @@ import {
   splitRangeAtLineBreaks,
 } from '../../src/webview/codeHighlight'
 import { CODE_LANGUAGES } from '../../src/shared/codeLangs'
+import { resolveCodeLanguage } from '../../src/shared/codeLangs'
+import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
+import { SPECIAL_CODE_LANGUAGE_FIXTURES } from '../fixtures/specialCodeLanguages'
 
 const JS_SAMPLE = 'const x: number = 42; // hi\nfunction f() { return "s" }'
 
@@ -118,5 +121,34 @@ describe('跨行 token 切段（#83）', () => {
       { from: 0, to: 6 },
       { from: 7, to: 13 },
     ])
+  })
+})
+
+describe('ready-language real syntax (#389)', () => {
+  it.each([...READY_CODE_LANGUAGE_FIXTURES, ...SPECIAL_CODE_LANGUAGE_FIXTURES])('$id routes aliases and emits exact lexical classes', (fixture) => {
+    for (const alias of fixture.aliases) {
+      expect(resolveCodeLanguage(`  ${alias.toUpperCase()} title=sample  `)).toEqual({ id: fixture.id, displayName: fixture.label })
+    }
+    const ranges = highlightCodeRanges(fixture.id, fixture.code)
+    for (const [word, cls] of fixture.tokens) {
+      expect(ranges.some((r) => fixture.code.slice(r.from, r.to) === word && r.cls.split(' ').includes(cls)), `${fixture.id}: ${word} → ${cls}`).toBe(true)
+    }
+  })
+})
+
+describe('Tcl quoted strings (#389)', () => {
+  it('keeps quoted text, escaped quotes and multiline strings out of comments', () => {
+    const code = 'puts "hello # quoted"\nputs "a \\"quote\\""\nputs "multi\nline"\n# real comment\nputs $period'
+    const ranges = highlightCodeRanges('tcl', code)
+    const clsAt = (word: string) => {
+      const from = code.indexOf(word)
+      return ranges.find((r) => r.from <= from && r.to >= from + word.length)?.cls
+    }
+    expect(clsAt('hello # quoted')).toBe('tok-string')
+    expect(clsAt('quote')).toBe('tok-string')
+    expect(clsAt('multi')).toBe('tok-string')
+    expect(clsAt('line')).toBe('tok-string')
+    expect(clsAt('# real comment')).toBe('tok-comment')
+    expect(clsAt('$period')).toBe('tok-variableName')
   })
 })

@@ -192,6 +192,7 @@ import {
   notifyHoverWatchRejected,
   notifyAppearanceChanged,
   notifyHoverExternalSettings,
+  notifyHoverCodeHighlight,
   openHoverPopupForKeyboard,
   setHoverPreviewContext,
   type HoverPopupTargetSpec,
@@ -2218,15 +2219,31 @@ export class WebviewSyncController {
         break
       }
       case 'settings.snapshot':
-      case 'settings.changed':
+      case 'settings.changed': {
         // 设置快照与变更广播共用同一处理（#33）：snapshot 为设置页请求-
         // 响应与编辑器拉取的回填，changed 为保存成功的全量广播；缓存后由
         // 消费方按需读取关心的键。Live 扩展组（行号/表格网格/代码卡片/
         // 符号三组/多光标）的 Compartment 热重配随实例（P2-02 迁入，
         // 缺键回默认、非法形态忽略）；根侧设置（可读行宽/嵌入限高/分词
         // 引擎）仍在下方处理
+        const previousCodeCard = this.live?.codeCardConfigSnapshot
         this.settings = message.values
         this.live?.applySettings(message.values)
+        const nextCodeCard = this.live?.codeCardConfigSnapshot
+        if (previousCodeCard && nextCodeCard && (
+          previousCodeCard.card !== nextCodeCard.card ||
+          previousCodeCard.highlight !== nextCodeCard.highlight ||
+          previousCodeCard.lineNumbers !== nextCodeCard.lineNumbers ||
+          previousCodeCard.copyButton !== nextCodeCard.copyButton
+        )) {
+          // Reuse mounted DOM; keep the reading viewport, fold/wrap state and
+          // Markdown parse intact. Unrelated settings do not rebuild cards.
+          this.decorateMountedReadingCodeCards()
+          if (previousCodeCard.highlight !== nextCodeCard.highlight) {
+            this.embedCards?.refreshCodeHighlight()
+            notifyHoverCodeHighlight()
+          }
+        }
         // P2-04：嵌入内部 Live 实例的设置热重配（Live 扩展组随实例）
         this.embedCards?.applySettings(message.values)
         this.applyReadableLineWidthSetting()
@@ -2237,6 +2254,7 @@ export class WebviewSyncController {
         // 在场原网页 iframe、就地退回卡片（缺键 = 无关变更不动作）
         notifyHoverExternalSettings(message.values)
         break
+      }
       case 'wordSegment.state': {
         // #239 jieba 资源状态（宿主下载/删除后推送）：资源 URI 变化驱动
         // wordMotion 重新评估加载；引擎选择仍在 settings 快照（两通道汇流）
@@ -9231,7 +9249,7 @@ export class WebviewSyncController {
     // #191 顺路补挂折行容器类（幂等；容器重建/模式切换后状态不丢）
     this.applyReadingCodeWrap()
     this.readingContainer
-      ?.querySelectorAll<HTMLElement>('.vsidian-reading-block')
+      ?.querySelectorAll<HTMLElement>(':scope > .vsidian-reading-block')
       .forEach((el) => this.decorateReadingCodeCardBlock(el))
   }
 
@@ -9809,9 +9827,27 @@ export class WebviewSyncController {
     }
     const codeCardDisplay = cardHeader ? getComputedStyle(cardHeader).display : null
     // #83 tok-* token 元素计数（卡片关闭仅高亮时 code 节由 token 驱动存在）
-    const tokenCount = codeScope
-      ? codeScope.querySelectorAll('[class*="tok-"]').length
-      : 0
+    const tokenElements = codeScope?.querySelectorAll<HTMLElement>('[class*="tok-"]') ?? []
+    const tokenCount = tokenElements.length
+    // #389 passive view-state snapshot (also emitted on init/mode changes):
+    // inspect mounted token elements, retaining at most 64 viewport observations
+    // of 160 characters each. No whole-document parse; the scan is DOM-scoped.
+    const tokenPaint: Array<{ text: string; classes: string; color: string; visible: boolean }> = []
+    for (const token of tokenElements) {
+      if (tokenPaint.length >= 64) break
+      const rect = token.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.top >= window.innerHeight ||
+        rect.right <= 0 || rect.left >= window.innerWidth) continue
+      const color = getComputedStyle(token).color
+      let visible = hitPaintedElement(token) && color !== '' && color !== 'transparent' &&
+        !/rgba\([^)]*,\s*0(?:\.0+)?\s*\)/.test(color)
+      for (let ancestor: HTMLElement | null = token; visible && ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor)
+        visible = style.display !== 'none' && style.visibility !== 'hidden' &&
+          style.visibility !== 'collapse' && style.opacity !== '0'
+      }
+      tokenPaint.push({ text: (token.textContent ?? '').slice(0, 160), classes: token.className, color, visible })
+    }
     // frontmatter 卡片绘制探针（折叠链路断言）：当前激活视图取卡片行数与
     // 折叠/编辑控件在场数（收起态 rowCount 归零、editCount 归零、collapsed
     // chevron 在场——与代码卡 foldedCount 同口径）。rowCount 取**绘制层
@@ -9861,6 +9897,7 @@ export class WebviewSyncController {
           : 0,
         // #83 视口内 tok-* token 元素数
         tokenCount,
+        tokenPaint,
         // 全部头部语言标签序列（DOM 顺序；断言渲染型围栏的 Mermaid 标签）
         labels: cardHeaders
           .map((h) => h.querySelector(`.${CODE_CARD_CLASS_NAMES.headerLabel}`)?.lastChild?.textContent ?? '')

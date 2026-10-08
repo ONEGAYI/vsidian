@@ -2689,6 +2689,8 @@ export interface PaintProbe {
     foldedCount?: number
     /** #83 视口内 tok-* token 元素数（高亮关闭或无引擎语言为 0） */
     tokenCount?: number
+    /** #389 bounded paint observation on the existing passive view-state snapshot. */
+    tokenPaint?: Array<{ text: string; classes: string; color: string; visible: boolean }>
     /** 全部头部语言标签序列（DOM 顺序；渲染型围栏接入后断言 Mermaid 标签在场） */
     labels?: string[]
   }
@@ -3502,6 +3504,12 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.code.copyCount === undefined || isNonNegativeInt(v.code.copyCount)) &&
       (v.code.foldedCount === undefined || isNonNegativeInt(v.code.foldedCount)) &&
       (v.code.tokenCount === undefined || isNonNegativeInt(v.code.tokenCount)) &&
+      (v.code.tokenPaint === undefined || (
+        Array.isArray(v.code.tokenPaint) && v.code.tokenPaint.length <= 64 &&
+        v.code.tokenPaint.every((token) => isObject(token) &&
+          typeof token.text === 'string' && token.text.length <= 160 &&
+          isString(token.classes) && isString(token.color) && typeof token.visible === 'boolean')
+      )) &&
       (v.code.labels === undefined ||
         (Array.isArray(v.code.labels) && v.code.labels.every(isString)))
     )) &&

@@ -4311,6 +4311,8 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 .tok-comment { color: #6e7781; }
 .tok-meta { color: #0550ae; }
 .tok-number { color: #098658; }
+.tok-inserted { color: #22863a; }
+.tok-deleted { color: #b31d28; }
 .tok-typeName,
 .tok-className,
 .tok-namespace { color: #267f99; }
@@ -4330,6 +4332,8 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 :where(body.vscode-dark) .tok-comment { color: #8b949e; }
 :where(body.vscode-dark) .tok-meta { color: #79c0ff; }
 :where(body.vscode-dark) .tok-number { color: #b5cea8; }
+:where(body.vscode-dark) .tok-inserted { color: #85e89d; }
+:where(body.vscode-dark) .tok-deleted { color: #f97583; }
 :where(body.vscode-dark) .tok-typeName,
 :where(body.vscode-dark) .tok-className,
 :where(body.vscode-dark) .tok-namespace { color: #4ec9b0; }

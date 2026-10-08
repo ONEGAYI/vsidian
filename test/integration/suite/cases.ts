@@ -21,7 +21,7 @@ import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
 import * as nodePath from 'node:path'
@@ -888,6 +888,8 @@ interface ViewState {
       foldedCount?: number
       /** #83 视口内 tok-* token 元素数 */
       tokenCount?: number
+      /** #389 真实 token 文字绘制样本（有界；颜色与命中可见性独立断言） */
+      tokenPaint?: Array<{ text: string; classes: string; color: string; visible: boolean }>
       /** 全部头部语言标签序列（DOM 顺序；渲染型围栏的 Mermaid 标签断言） */
       labels?: string[]
     }
@@ -7906,6 +7908,120 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('code-card.md', (v) =>
       v.paint?.code?.foldedCount === 0 && v.paint.code.cardLineCount === 7, 0, 60000)
     assert(await readDisk('code-card.md') === diskBefore, '阅读卡片交互不得改写源文')
+  }],
+
+  ['新增围栏语言：现成与新增词法双模式文字真实着色（#389/#390）', async () => {
+    const file = 'code-language-paint.md'
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    const uri = wsUri(file).toString()
+    const diskBefore = await readDisk(file)
+    const samples = [
+      { text: '.param', kind: 'keyword', label: 'SPICE',
+        light: 'rgb(175, 0, 219)', dark: 'rgb(197, 134, 192)' },
+      { text: 'make recipe paint', kind: 'string', label: 'Makefile',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+      { text: 'plain PHP paint', kind: 'string', label: 'PHP',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+      { text: 'query', kind: 'keyword', label: 'GraphQL',
+        light: 'rgb(175, 0, 219)', dark: 'rgb(197, 134, 192)' },
+      { text: 'quoted Tcl paint', kind: 'string', label: 'Tcl',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+      { text: 'entity', kind: 'keyword', label: 'VHDL',
+        light: 'rgb(175, 0, 219)', dark: 'rgb(197, 134, 192)' },
+      { text: '[paint_section]', kind: 'meta', label: 'INI',
+        light: 'rgb(5, 80, 174)', dark: 'rgb(121, 192, 255)' },
+      { text: '-removed_paint', kind: 'deleted', label: 'Diff',
+        light: 'rgb(179, 29, 40)', dark: 'rgb(249, 117, 131)' },
+      { text: '+added_paint', kind: 'inserted', label: 'Diff',
+        light: 'rgb(34, 134, 58)', dark: 'rgb(133, 232, 157)' },
+    ]
+    for (const mode of ['live', 'reading', 'live'] as const) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode })
+      const colors = new Map<string, string>()
+      for (const sample of samples) {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'view.locate', offset: diskBefore.indexOf(sample.text),
+        })
+        const matches = (v: ViewState) => v.paint?.code?.tokenPaint?.find((token) =>
+          token.text.includes(sample.text) && token.classes.split(/\s+/).includes(`tok-${sample.kind}`) &&
+          token.visible && token.color === (v.paint?.darkTheme ? sample.dark : sample.light))
+        const state = await waitViewState(file, (v) => v.viewMode === mode && matches(v) !== undefined)
+        const token = matches(state)!
+        assert(token.visible, `${mode} ${sample.label} 目标文字必须真正绘制，不能只存在 tok span`)
+        assert(token.color === (state.paint?.darkTheme ? sample.dark : sample.light),
+          `${mode} ${sample.label} 应使用生产色板：${JSON.stringify(token)}`)
+        assert(state.paint?.code?.labels?.includes(sample.label) === true,
+          `${mode} 首词/别名应显示 ${sample.label} 标签：${JSON.stringify(state.paint?.code?.labels)}`)
+        colors.set(sample.kind, token.color)
+      }
+      assert(colors.get('inserted') !== colors.get('deleted'), `${mode} diff 增删文字应显示不同颜色`)
+    }
+    assert(await readDisk(file) === diskBefore, '语言高亮及模式切换不得改写磁盘源文')
+    const session = await vscode.commands.executeCommand(CMD.sessionState, uri) as SessionState
+    assert(session.appliedEdits === 0, '语言高亮与模式切换不产生正文写回')
+  }],
+
+  ['新增围栏语言：跨 60 行上下文、重挂载及编辑刷新仍真实着色（#389）', async () => {
+    const file = 'code-language-chunk.md'
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    const uri = wsUri(file).toString()
+    const diskBefore = await readDisk(file)
+    const doc = await vscode.workspace.openTextDocument(wsUri(file))
+    const samples = [
+      { text: 'paint_comment_after_sixty', kind: 'comment',
+        light: 'rgb(110, 119, 129)', dark: 'rgb(139, 148, 158)' },
+      { text: 'paint_string_after_sixty', kind: 'string',
+        light: 'rgb(10, 48, 105)', dark: 'rgb(165, 214, 255)' },
+    ]
+    const expectToken = async (mode: 'live' | 'reading', sample: typeof samples[number], text = sample.text) => {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'view.locate', offset: doc.getText().indexOf(text),
+      })
+      const state = await waitViewState(file, (v) => v.viewMode === mode &&
+        v.paint?.code?.tokenPaint?.some((token) => token.visible && token.text.includes(text) &&
+          token.classes.split(/\s+/).includes(`tok-${sample.kind}`) &&
+          token.color === (v.paint?.darkTheme ? sample.dark : sample.light)) === true)
+      assert(state.paint?.code?.lineNumberTexts?.includes('65') === true,
+        `${mode} 跨片目标应保留第 65 行行号：${JSON.stringify(state.paint?.code?.lineNumberTexts)}`)
+      return state
+    }
+    for (const mode of ['live', 'reading', 'live'] as const) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode })
+      for (const sample of samples) {
+        const before = await expectToken(mode, sample)
+        if (mode !== 'reading') continue
+        assert(before.readingVirtualized === true, '跨片回归必须覆盖真实虚拟挂载路径')
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'view.locate', offset: diskBefore.indexOf('far_remount_anchor'),
+        })
+        await waitViewState(file, (v) => v.viewMode === 'reading' &&
+          (v.readingScrollTopPx ?? 0) > (before.readingScrollTopPx ?? 0) + 1000 &&
+          !v.paint?.code?.tokenPaint?.some((token) => token.text.includes(sample.text)))
+        const remounted = await expectToken(mode, sample)
+        assert(remounted.readingParseCount === before.readingParseCount,
+          '离开/返回围栏不得重新解析 Markdown 全文')
+      }
+    }
+    // 编辑跨片注释体后仍以完整围栏重算；新文字必须真正上色，旧快照不够。
+    const marker = samples[0]!.text
+    const refreshed = `${marker}_refreshed`
+    const offset = doc.getText().indexOf(marker)
+    const edit = new vscode.WorkspaceEdit()
+    edit.replace(doc.uri, new vscode.Range(doc.positionAt(offset), doc.positionAt(offset + marker.length)), refreshed)
+    try {
+      assert(await vscode.workspace.applyEdit(edit), '外部正文编辑应写入权威 buffer')
+      await waitViewState(file, (v) => v.text.includes(refreshed))
+      await expectToken('live', samples[0]!, refreshed)
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+      await expectToken('reading', samples[0]!, refreshed)
+      assert(await readDisk(file) === diskBefore, '绘制与未保存编辑不得擅自落盘')
+    } finally {
+      const restore = new vscode.WorkspaceEdit()
+      restore.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), diskBefore)
+      assert(await vscode.workspace.applyEdit(restore), '恢复独立夹具 buffer')
+    }
   }],
 
   // ---- 工单 #106：分割线渲染态与插入操作 ----
@@ -16586,83 +16702,152 @@ export const cases: Array<[string, () => Promise<void>]> = [
   }],
   // ---- #376 T01 双链联想：新建闭合双链出候选、来源相对路径插入、dirty/撤销与绘制层断言 ----
   ['双链联想：新建闭合双链出候选、按来源相对路径插入与撤销（#376 T01）', async () => {
-    await waitRenameIndexReady()
-    await openWithEditor('联想目录/联想来源.md')
-    await waitSessionReady('联想目录/联想来源.md')
-    const uri = wsUri('联想目录/联想来源.md').toString()
-    const doc = await vscode.workspace.openTextDocument(wsUri('联想目录/联想来源.md'))
-    assert(doc.getText() === '来源正文\n', '双链联想 fixture 初始文本不符')
+    // 本例验证同一来源根内的固定键盘/插入闭环。共享大 fixture 中其他用例的
+    // watcher 更新可能重排空查询；这与按候选身份保留高亮的产品契约相容，
+    // 却不适合作为固定 0→1 位置断言的前提。独立根隔离此干扰可能性，
+    // 不据此断言既往 CI 的未采样根因；刷新重排另由公开消息链路单测覆盖。
+    const fixtureDir = await mkdtemp(`${wsDir}-wikilink-t01-`)
+    const fixtureRoot = vscode.Uri.file(fixtureDir)
+    const source = vscode.Uri.joinPath(fixtureRoot, '联想目录', '联想来源.md')
+    const uri = source.toString()
+    let fixtureDoc: vscode.TextDocument | undefined
+    const indexState = async () => (await vscode.commands.executeCommand(
+      'onegayi.vsidian._test.getVaultIndexState')) as {
+        roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean;
+          catalogScanning: boolean; catalogComplete: boolean; catalogFileCount: number }>
+      }
+    try {
+      // 全部盘面先写好，再登记新根；本例按键期间不修改候选文件的磁盘元数据。
+      await mkdir(nodePath.join(fixtureDir, '联想目录'), { recursive: true })
+      await writeFile(source.fsPath, '来源正文\n', 'utf8')
+      await writeFile(nodePath.join(fixtureDir, '联想目录', '同目录目标.md'),
+        '# 同目录标题\n\n同目录目标正文\n', 'utf8')
+      await writeFile(nodePath.join(fixtureDir, '子目录目标.md'), '子目录目标正文\n', 'utf8')
+      assert(vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders?.length ?? 0, 0,
+        { uri: fixtureRoot }), '应接受 T01 独立 fixture 根')
+      await poll('T01 独立来源根清单就绪', async () => {
+        const root = (await indexState()).roots.find((r) => normFsPath(r.fsPath) === normFsPath(fixtureDir))
+        return root?.hasData && !root.scanning && !root.catalogScanning && root.catalogComplete &&
+          root.catalogFileCount === 3 ? true : undefined
+      })
+      await vscode.commands.executeCommand('vscode.openWith', source, VIEW_TYPE)
+      await poll('T01 独立来源会话就绪', async () => {
+        const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState | undefined
+        return state?.found && state.panels.some((p) => p.ready) ? state : undefined
+      })
+      const doc = await vscode.workspace.openTextDocument(source)
+      fixtureDoc = doc
+      assert(doc.getText() === '来源正文\n', '双链联想 fixture 初始文本不符')
 
-    const typeText = async (text: string) => {
-      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text })
+      const typeText = async (text: string) => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text })
+      }
+      const pressKey = async (key: 'down' | 'up' | 'escape' | 'enter' | 'backspace') => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key })
+      }
+      const suggestPaint = async (): Promise<
+        NonNullable<NonNullable<ViewState['paint']>['wikilinkSuggest']> | undefined
+      > => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
+        return v.paint?.wikilinkSuggest
+      }
+
+      // 光标到正文末（LF 坐标 4 = 尾随换行前），真实 DOM 输入两个 [——
+      // 既有成对补全形成 [[]] 并把光标留在中间，联想会话开启（空查询）
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 5 })
+      await typeText('[')
+      await typeText('[')
+      // 绘制层断言（验收硬约束）：空查询不高亮、候选真实可见（elementFromPoint 命中）
+      const emptySuggest = await poll('空查询候选浮层开启且绘制', async () => {
+        const s = await suggestPaint()
+        return s && s.itemCount > 0 && s.activeIndex === null && s.visible ? s : undefined
+      })
+      assert(emptySuggest!.itemCount >= 3, `空查询应列出全部 Markdown 候选，实际 ${emptySuggest!.itemCount}`)
+      const candidateNames = emptySuggest.names ?? []
+      assert(candidateNames.length === 3 &&
+        ['联想来源.md', '同目录目标.md', '子目录目标.md'].every((name) => candidateNames.includes(name)),
+        `候选须恰为独立来源根的三个文件，不混入其他根：${JSON.stringify(candidateNames)}`)
+
+      // 方向键移动高亮且不移动正文光标
+      const headBefore = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
+      await pressKey('down')
+      const firstActive = await poll('↓ 高亮首项', async () => {
+        const s = await suggestPaint()
+        return s?.activeIndex === 0 ? s : undefined
+      })
+      assert(firstActive.names?.[0] === candidateNames[0] && firstActive.activeText?.includes(candidateNames[0]!),
+        '第一次 ↓ 须高亮独立候选列表首项的真实身份')
+      await pressKey('down')
+      const secondActive = await poll('↓ 高亮第二项', async () => {
+        const s = await suggestPaint()
+        return s?.activeIndex === 1 ? s : undefined
+      })
+      assert(secondActive.names?.[1] === candidateNames[1] && secondActive.activeText?.includes(candidateNames[1]!),
+        '第二次 ↓ 须高亮独立候选列表第二项的真实身份')
+      const headAfter = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
+      assert(headBefore !== undefined && headBefore === headAfter, '方向键不应移动正文光标')
+
+      // Esc 关闭（候选会话先于其他 Esc 链路消费一次）
+      await pressKey('escape')
+      await poll('Esc 关闭候选', async () => (await suggestPaint()) === undefined ? true : undefined)
+
+      // 同目录目标：查询自动高亮首项 → Enter 确认 → 相对路径 + 默认别名一笔写回
+      await typeText('同')
+      await typeText('目')
+      await poll('同目录查询自动高亮首项', async () => {
+        const s = await suggestPaint()
+        return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
+      })
+      await pressKey('enter')
+      const afterSame = '来源正文\n[[同目录目标.md|同目录目标]]'
+      await poll('同目录目标按相对路径插入', () => doc.getText() === afterSame ? true : undefined)
+      assert(doc.isDirty, '确认插入后文档应 dirty')
+      await poll('确认后候选关闭', async () => (await suggestPaint()) === undefined ? true : undefined)
+
+      // 撤销：确认是一笔宿主撤销记录，撤销恢复确认前文本
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+      await poll('撤销恢复确认前文本', () => doc.getText() === '来源正文\n[[同目]]' ? true : undefined)
+
+      // 子目录目标：清空字段后查询「子目」→ Enter 插入 .. 上行相对路径
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 9 })
+      await pressKey('backspace')
+      await pressKey('backspace')
+      await typeText('子')
+      await typeText('目')
+      await poll('子目录查询自动高亮首项', async () => {
+        const s = await suggestPaint()
+        return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
+      })
+      await pressKey('enter')
+      const afterNested = '来源正文\n[[../子目录目标.md|子目录目标]]'
+      await poll('子目录目标按 .. 上行相对路径插入', () => doc.getText() === afterNested ? true : undefined)
+      assert(doc.isDirty, '第二次确认后文档仍应 dirty')
+      await doc.save()
+    } finally {
+      try {
+        // 仅收尾本例的临时文档；失败路径也不留下 dirty 标签或根登记污染后续用例。
+        if (fixtureDoc?.isDirty) assert(await fixtureDoc.save(), '应保存待清理的 T01 临时文档')
+        const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => {
+          const input = tab.input
+          return (input instanceof vscode.TabInputCustom || input instanceof vscode.TabInputText) &&
+            input.uri.toString() === uri
+        })
+        if (tabs.length > 0) assert(await vscode.window.tabGroups.close(tabs, true), '应关闭 T01 临时文档标签')
+      } finally {
+        let removalRequested = false
+        await poll('T01 独立 fixture 根移除', async () => {
+          const at = (vscode.workspace.workspaceFolders ?? []).findIndex((folder) =>
+            normFsPath(folder.uri.fsPath) === normFsPath(fixtureDir))
+          if (at >= 0) {
+            if (!removalRequested) removalRequested = vscode.workspace.updateWorkspaceFolders(at, 1)
+            return undefined
+          }
+          return (await indexState()).roots.every((r) => normFsPath(r.fsPath) !== normFsPath(fixtureDir))
+            ? true : undefined
+        })
+        await rm(fixtureDir, { recursive: true, force: true })
+      }
     }
-    const pressKey = async (key: 'down' | 'up' | 'escape' | 'enter' | 'backspace') => {
-      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key })
-    }
-    const suggestPaint = async (): Promise<
-      NonNullable<NonNullable<ViewState['paint']>['wikilinkSuggest']> | undefined
-    > => {
-      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
-      return v.paint?.wikilinkSuggest
-    }
-
-    // 光标到正文末（LF 坐标 4 = 尾随换行前），真实 DOM 输入两个 [——
-    // 既有成对补全形成 [[]] 并把光标留在中间，联想会话开启（空查询）
-    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 5 })
-    await typeText('[')
-    await typeText('[')
-    // 绘制层断言（验收硬约束）：空查询不高亮、候选真实可见（elementFromPoint 命中）
-    const emptySuggest = await poll('空查询候选浮层开启且绘制', async () => {
-      const s = await suggestPaint()
-      return s && s.itemCount > 0 && s.activeIndex === null && s.visible ? s : undefined
-    })
-    assert(emptySuggest!.itemCount >= 3, `空查询应列出全部 Markdown 候选，实际 ${emptySuggest!.itemCount}`)
-
-    // 方向键移动高亮且不移动正文光标
-    const headBefore = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
-    await pressKey('down')
-    await poll('↓ 高亮首项', async () => (await suggestPaint())?.activeIndex === 0 ? true : undefined)
-    await pressKey('down')
-    await poll('↓ 高亮第二项', async () => (await suggestPaint())?.activeIndex === 1 ? true : undefined)
-    const headAfter = ((await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState).selectionHead
-    assert(headBefore !== undefined && headBefore === headAfter, '方向键不应移动正文光标')
-
-    // Esc 关闭（候选会话先于其他 Esc 链路消费一次）
-    await pressKey('escape')
-    await poll('Esc 关闭候选', async () => (await suggestPaint()) === undefined ? true : undefined)
-
-    // 同目录目标：查询自动高亮首项 → Enter 确认 → 相对路径 + 默认别名一笔写回
-    await typeText('同')
-    await typeText('目')
-    await poll('同目录查询自动高亮首项', async () => {
-      const s = await suggestPaint()
-      return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
-    })
-    await pressKey('enter')
-    const afterSame = '来源正文\n[[同目录目标.md|同目录目标]]'
-    await poll('同目录目标按相对路径插入', () => doc.getText() === afterSame ? true : undefined)
-    assert(doc.isDirty, '确认插入后文档应 dirty')
-    await poll('确认后候选关闭', async () => (await suggestPaint()) === undefined ? true : undefined)
-
-    // 撤销：确认是一笔宿主撤销记录，撤销恢复确认前文本
-    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
-    await poll('撤销恢复确认前文本', () => doc.getText() === '来源正文\n[[同目]]' ? true : undefined)
-
-    // 子目录目标：清空字段后查询「子目」→ Enter 插入 .. 上行相对路径
-    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 9 })
-    await pressKey('backspace')
-    await pressKey('backspace')
-    await typeText('子')
-    await typeText('目')
-    await poll('子目录查询自动高亮首项', async () => {
-      const s = await suggestPaint()
-      return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
-    })
-    await pressKey('enter')
-    const afterNested = '来源正文\n[[../子目录目标.md|子目录目标]]'
-    await poll('子目录目标按 .. 上行相对路径插入', () => doc.getText() === afterNested ? true : undefined)
-    assert(doc.isDirty, '第二次确认后文档仍应 dirty')
-    await doc.save()
   }],
 
   // ---- #385 V7 目录链接：junction/symlink 目录不跟随，归属只认真实路径 ----

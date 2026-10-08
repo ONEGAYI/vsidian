@@ -301,30 +301,28 @@ try {
   }
 
   // ---- 场景 F：卡内真实指针拖选不启动父矩形格区选取（交互隔离） ----
-  const shortLayout = await page2.evaluate(() => {
+  // 先等对照行滚入视口并稳定，再在同一布局快照中读取卡与格坐标。
+  // scrollIntoView 后立即读取卡、稍后只刷新格坐标会混用两个滚动位置。
+  const plainRow2 = page2.locator('.vsidian-table-grid-row').filter({ hasText: '无嵌入行甲' })
+  await plainRow2.scrollIntoViewIfNeeded({ timeout: 4000 })
+  const layout = await page2.evaluate(() => {
     const rows = [...document.querySelectorAll('.vsidian-table-grid-row')]
     const yiCard = [...document.querySelectorAll('.vsidian-live-embed')]
       .find((h) => (h.textContent ?? '').includes('乙笔记标题'))
     const plainRow = rows.find((r) => (r.textContent ?? '').includes('无嵌入行甲'))
-    plainRow?.scrollIntoView({ block: 'center' })
     const cells = plainRow?.querySelectorAll(':scope > .vsidian-table-grid-cell')
     const a = cells?.[0]?.getBoundingClientRect()
     const b = cells?.[1]?.getBoundingClientRect()
     const card = yiCard?.getBoundingClientRect()
-    return { card, a, b, rowsTotal: rows.length }
+    const cardHit = card && document.elementFromPoint(card.x + 24, card.y + 18)
+    const bHit = b && document.elementFromPoint(b.x + 12, b.y + b.height / 2)
+    return { card, a, b, cardHit: !!cardHit && yiCard.contains(cardHit),
+      bHit: !!bHit && bHit.closest('.vsidian-table-grid-cell') === cells[1] }
   })
-  await page2.waitForTimeout(60)
-  const shortLayout2 = await page2.evaluate(() => {
-    const rows = [...document.querySelectorAll('.vsidian-table-grid-row')]
-    const plainRow = rows.find((r) => (r.textContent ?? '').includes('无嵌入行甲'))
-    const cells = plainRow?.querySelectorAll(':scope > .vsidian-table-grid-cell')
-    return { a: cells?.[0]?.getBoundingClientRect() ?? null,
-      b: cells?.[1]?.getBoundingClientRect() ?? null }
-  })
-  const layout = { ...shortLayout, ...shortLayout2 }
   assert.ok(layout.card, '短布局：乙卡在场')
   assert.ok(layout.a && layout.b, '对照格在场')
   assert.ok(layout.b.y > 0 && layout.b.y < 600, `对照行在视口内（y=${layout.b.y}）`)
+  assert.ok(layout.cardHit && layout.bHit, 'F1 起点命中乙卡、终点命中普通对照格')
   // F1：卡内按下、拖到对照行邻格、松开——不建立矩形格区（交互隔离）
   await page2.mouse.move(layout.card.x + 24, layout.card.y + 18)
   await page2.mouse.down()
@@ -338,14 +336,25 @@ try {
   assert.equal(afterCardDrag.regionCells, 0, '卡内开始的拖选不启动父矩形格区选取')
   assert.equal(afterCardDrag.edits, 0, '卡内交互零写回')
   // F2：对照——普通格间拖选建立矩形格区（既有表格契约不回归）
-  // #324：固定 120ms sleep 在 CI 慢机上偶发早于 region 建立（run 37105138656
-  // 两轮 F2 失败、第三次 rerun 全绿），改为轮询「region 已建立」；steps 加大
-  // 使路径事件更密。本例同时是 F1 的拖选自检前置：F1 断言 0 格区无法区分
-  // 「隔离正确」与「拖选本轮未生效」，此处恒 0 超时即自检失败——报错先疑
-  // 拖选驱动本轮未生效（环境时序），再疑隔离逻辑扩散到普通格（契约回归）
-  await page2.mouse.move(layout.a.x + 14, layout.a.y + layout.a.height / 2)
+  // F1 的原生选区同步可能驱动嵌入显隐与外层滚动；旧坐标会落到上一
+  // 嵌入行或其下方 spacer，无法靠等待 region 修复。每次手势重新测量，
+  // 并确认起终点仍命中指定普通格；保留真实拖选与 2 格自检。
+  await plainRow2.scrollIntoViewIfNeeded({ timeout: 4000 })
+  const plainLayout = await page2.evaluate(() => {
+    const row = [...document.querySelectorAll('.vsidian-table-grid-row')]
+      .find((r) => (r.textContent ?? '').includes('无嵌入行甲'))
+    const cells = row?.querySelectorAll(':scope > .vsidian-table-grid-cell')
+    const a = cells?.[0]?.getBoundingClientRect()
+    const b = cells?.[1]?.getBoundingClientRect()
+    if (!a || !b) return null
+    return { a, b,
+      aHit: document.elementFromPoint(a.x + 14, a.y + a.height / 2)?.closest('.vsidian-table-grid-cell') === cells[0],
+      bHit: document.elementFromPoint(b.x + 12, b.y + b.height / 2)?.closest('.vsidian-table-grid-cell') === cells[1] }
+  })
+  assert.ok(plainLayout?.aHit && plainLayout?.bHit, 'F2 起终点命中普通对照行的相邻两格')
+  await page2.mouse.move(plainLayout.a.x + 14, plainLayout.a.y + plainLayout.a.height / 2)
   await page2.mouse.down()
-  await page2.mouse.move(layout.b.x + 12, layout.b.y + layout.b.height / 2, { steps: 8 })
+  await page2.mouse.move(plainLayout.b.x + 12, plainLayout.b.y + plainLayout.b.height / 2, { steps: 8 })
   await page2.mouse.up()
   const afterPlainDrag = await waitFor(() => page2.evaluate(() => {
     const cells = document.querySelectorAll('.vsidian-table-region-cell').length

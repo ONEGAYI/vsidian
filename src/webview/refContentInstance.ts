@@ -15,7 +15,7 @@ import type { ReadingBlock } from './readingBlocks'
 import { splitReadingBlocks } from './readingBlocks'
 import { createReadingBlockElement } from './readingView'
 import { VirtualReadingView, type ReadingViewStats } from './readingVirtualView'
-import { createSourcedImageManager, mountRefContentBlock } from './refReadingContent'
+import { createSourcedImageManager, mountRefContentBlock, refreshRefCodeHighlight } from './refReadingContent'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { TextRefView } from './textRefView'
 import type { ImageResourceManager } from './imageResource'
@@ -473,6 +473,13 @@ export class RefContentMount {
     return this.textView?.getStats() ?? null
   }
   updateNow(): void { this.view?.updateNow(); this.textView?.updateNow() }
+
+  /** Settings refresh only mounted Markdown code tokens; never remount content. */
+  refreshCodeHighlight(): void {
+    if (this.released) return
+    const highlight = this.options.codeHighlight()
+    for (const el of this.blocks.keys()) refreshRefCodeHighlight(el, highlight)
+  }
 
   onDispose(cleanup: () => void): void {
     if (this.released) cleanup()

@@ -3133,6 +3133,11 @@ export class EmbedCardManager {
     }
   }
 
+  /** Recolor existing Reading mounts, including manager-owned popup roots. */
+  refreshCodeHighlight(): void {
+    for (const handle of this.active.values()) handle.content.refreshCodeHighlight()
+  }
+
   /** 设置热更转发（Live 扩展组 Compartment 重配随实例） */
   applySettings(values: SettingsPayload | undefined): void {
     // P2-11：留存最近快照——实例创建晚于面板装载（settings.snapshot 在

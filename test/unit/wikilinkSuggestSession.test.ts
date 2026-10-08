@@ -174,13 +174,19 @@ beforeEach(() => {
 })
 
 describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
-  it('[[Aa|B]]：目标区输入查光标左侧；Esc 后纯移动不重开；编辑 B 不触发；返回目标区修改才重开', () => {
-    const { controller, sent, view } = setup('[[Aa|B]]')
+  it.each([0, 80])('[[Aa|B]]：目标区输入查光标左侧；Esc 后纯移动不重开；编辑 B 不触发；返回目标区修改才重开（回包 %ims）', (responseTime) => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(0)
+    let fixture: ReturnType<typeof setup> | undefined
     try {
+      fixture = setup('[[Aa|B]]')
+      const { controller, sent, view } = fixture
       // 目标区 A 与 a 之间输入 x：查询 = 左侧 A（含新输入）
       locate(controller, 3)
       typeAt(view, 3, 'x')
       expect(lastQuery(sent)?.query).toBe('Ax')
+      // 回包耗时决定下一次文件查询是否去抖；固定快/慢两路，不依赖 CI 负载。
+      vi.setSystemTime(responseTime)
       respond(controller, sent, [FANGAN])
       expect(popupState().open).toBe(true)
 
@@ -190,21 +196,25 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
       const count = queries(sent).length
       locate(controller, 4)
       locate(controller, 2)
+      vi.advanceTimersByTime(responseTime)
       expect(queries(sent).length).toBe(count)
 
       // 显示文字 B 内输入：不触发（候选不重开、文本照常编辑）
       locate(controller, 6)
       typeAt(view, 6, 'y')
+      vi.advanceTimersByTime(responseTime)
       expect(queries(sent).length).toBe(count)
       expect(view.state.doc.toString()).toBe('[[Axa|yB]]')
 
       // 返回目标区并删除才重开；查询仍为光标左侧
       locate(controller, 6) // a 之后（| 前）
       deleteAt(view, 5, 6)
+      vi.advanceTimersByTime(responseTime)
       expect(lastQuery(sent)?.query).toBe('Axa')
       expect(queries(sent).length).toBe(count + 1)
     } finally {
-      controller.dispose()
+      fixture?.controller.dispose()
+      vi.useRealTimers()
     }
   })
 
@@ -544,6 +554,54 @@ describe('确认与光标位置（文件字段整体替换）', () => {
 })
 
 describe('异步列表更新按候选身份保留手动高亮', () => {
+  it('空查询 watcher 失效重排：保留已高亮身份，下一次 ↓ 选当前列表下一身份且不移动正文光标', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    let fixture: ReturnType<typeof setup> | undefined
+    try {
+      fixture = setup('[[]]')
+      const { controller, sent, view } = fixture
+      const activeName = () => document.querySelector(ACTIVE)
+        ?.querySelector('.vsidian-wikilink-suggest-name')?.textContent
+      locate(controller, 2)
+      typeAt(view, 2, 'x')
+      deleteAt(view, 2, 3)
+      expect(lastQuery(sent)?.query).toBe('')
+      respond(controller, sent, [FANGAN, TONGZHI])
+      expect(popupState().activeIndex).toBe(null)
+      const headBefore = view.state.selection.main.head
+      // 与真宿主一致的公开按键消息，走生产 keydown/keymap 链路。
+      controller.handleHostMessage({ kind: 'table.test.key', key: 'down' })
+      expect(popupState().activeIndex).toBe(0)
+      expect(activeName()).toBe('方案.md')
+
+      const beforeRefresh = lastQuery(sent)!
+      controller.handleHostMessage({ kind: 'wikilink.invalidate' })
+      vi.advanceTimersByTime(300)
+      const refreshedQuery = lastQuery(sent)!
+      expect(refreshedQuery.reqId).toBeGreaterThan(beforeRefresh.reqId)
+      expect(refreshedQuery.generation).toBe(beforeRefresh.generation)
+      expect(refreshedQuery.query).toBe('')
+      const newer: WikilinkCandidateItem = {
+        ...FANGAN, id: 'C:\\vault\\新增.md', name: '新增.md', dir: '', relPath: '新增.md',
+        insertPath: '../新增.md', alias: '新增', mtimeMs: 3000,
+      }
+      respond(controller, sent, [newer, FANGAN, TONGZHI])
+      // 插到首部后原身份移到索引 1；不能把固定位置当作高亮身份。
+      expect(popupState().activeIndex).toBe(1)
+      expect(activeName()).toBe('方案.md')
+      controller.handleHostMessage({ kind: 'table.test.key', key: 'down' })
+      expect(popupState().activeIndex).toBe(2)
+      expect(activeName()).toBe('通知.md')
+      expect(view.state.selection.main.head).toBe(headBefore)
+      controller.handleHostMessage({ kind: 'table.test.key', key: 'enter' })
+      expect(view.state.doc.toString()).toBe('[[../通知.md|通知]]')
+      expect(popupState().open).toBe(false)
+    } finally {
+      fixture?.controller.dispose()
+      vi.useRealTimers()
+    }
+  })
+
   it('同查询更新帧：手动高亮按 id 保留；身份消失时空查询回无高亮、非空取首项', () => {
     const { controller, sent, view } = setup('[[]]')
     try {
@@ -1644,17 +1702,21 @@ describe('浮层定位与底部键提示条（2026-10-06 验收反馈）', () =>
 
 describe('慢库自适应去抖（#385 10 万档调优）', () => {
   it('快库零去抖：回包即时的库上连续输入每键立即出站', () => {
-    const { controller, sent, view } = setup('[[方]]')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    let fixture: ReturnType<typeof setup> | undefined
     try {
+      fixture = setup('[[方]]')
+      const { controller, sent, view } = fixture
       locate(controller, 3)
       typeAt(view, 3, '案')
       respond(controller, sent, [FANGAN])
       const before = queries(sent).length
-      typeAt(view, 4, '书') // cost=0（Date 同步）→ 零去抖
+      typeAt(view, 4, '书') // cost=0（Date 固定）→ 零去抖
       expect(queries(sent).length).toBe(before + 1)
       expect(lastQuery(sent)?.query).toBe('方案书')
     } finally {
-      controller.dispose()
+      fixture?.controller.dispose()
+      vi.useRealTimers()
     }
   })
 })
