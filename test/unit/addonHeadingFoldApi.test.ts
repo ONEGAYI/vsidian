@@ -151,6 +151,32 @@ describe('查询面：folds / foldable', () => {
     h.instance.destroy()
   })
 
+  it('foldable 返回值变异不污染共享缓存（防御性拷贝，rl2 第 2 轮复核 P1）', async () => {
+    const h = mountHarness()
+    await load(h)
+    const facet = h.sdk()!.experimental.headingFold!
+    const first = facet.foldable('main')
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    // 第三方滥用：改写首项 key、追加脏项（readonly 仅类型层，运行时可变）——
+    // 若实现直通 foldableSpansCached 共享数组，变异即污染缓存
+    const mutable = first.spans as { key: number; level: number; hideFrom: number; hideTo: number }[]
+    mutable[0] = { ...mutable[0], key: 9999 }
+    mutable.push({ key: 8888, level: 1, hideFrom: 0, hideTo: 1 })
+    // 再次查询不受污染：返回真实标题区间
+    const second = facet.foldable('main')
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.spans.map((s) => s.key)).toEqual([T1_KEY, T2_KEY, BLANK_KEY])
+    // 下游证据：foldAll 消费同一缓存，仅折叠三个真实标题（污染态会并入 4 键）
+    expect(facet.apply('main', 'foldAll')).toEqual({ ok: true, applied: 3 })
+    const folds = facet.folds('main')
+    expect(folds.ok).toBe(true)
+    if (!folds.ok) return
+    expect(folds.spans.map((s) => s.key)).toEqual([T1_KEY, T2_KEY, BLANK_KEY])
+    h.instance.destroy()
+  })
+
   it('folds 初始为空；foldAt 后返回有效折叠派生视图（区间语义与本体一致）', async () => {
     const h = mountHarness()
     await load(h)

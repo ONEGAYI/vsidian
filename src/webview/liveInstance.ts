@@ -941,14 +941,16 @@ export class LiveEditorInstance {
   }
 
   /** 实例侧全部可折叠标题区间（空节/纯空白节排除；共享缓存路径——与
-   *  箭头插件/foldAll 同一 doc 版本共享一次派生） */
+   *  箭头插件/foldAll 同一 doc 版本共享一次派生）。返回前逐项拷贝：
+   *  附加组件侧变异不得污染 foldableCache（同 doc 版本内箭头/foldAll
+   *  连带消费脏数据，rl2 第 2 轮复核 P1） */
   foldableHeadingSpansForAddon(): readonly AddonHeadingFoldSpan[] | null {
     const view = this.view
     if (!view) {
       return null
     }
     const tree = view.state.field(liveDecorationsField, false)?.tree
-    return foldableSpansCached(view.state.doc, tree)
+    return foldableSpansCached(view.state.doc, tree).map((span) => ({ ...span }))
   }
 
   /** 五操作执行：直传本体执行体（选区驱动三操作 + 全文档两操作）；
