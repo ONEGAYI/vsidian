@@ -22,6 +22,7 @@ import {
 import type { AddonPageEntryInput } from './addonPageRegistry'
 import type { AddonSettingsUpdateResult } from './addonSettingsService'
 import type { AddonSettingSource, AddonSettingValue } from '../../shared/addonSettings'
+import type { AddonStorageFacet } from '../../shared/addonStorage'
 
 /** 注册表宿主端口（vscode 层注入） */
 export interface AddonRegistryPorts {
@@ -78,6 +79,9 @@ export interface AddonSettingsContextApi {
 export interface AddonSetupContext extends AddonRegistrationContext {
   /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */
   readonly settings: AddonSettingsContextApi
+  /** #404 组件数据目录（globalStorage 语义的隔离可写目录 + 文件监听；
+   *  富结构数据（规则对象等）归本面，不并入设置存储的一层边界） */
+  readonly storage: AddonStorageFacet
   /** 设置生命周期通道（归 setup 所在的生命周期） */
   readonly channel: AddonChannelRegistry
 }
@@ -90,6 +94,8 @@ export interface AddonEnableContext extends AddonRegistrationContext {
   readonly pages: {
     registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle
   }
+  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */
+  readonly storage: AddonStorageFacet
   /** 运行生命周期通道（停用即注销） */
   readonly channel: AddonChannelRegistry
   /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */

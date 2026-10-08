@@ -547,6 +547,33 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     verification: ['test/unit/addonPageLoader.test.ts', 'test/browser/addonPageSdk.mjs'],
     introduced: '#351（T02）',
   },
+  {
+    id: 'addon-storage',
+    group: 'settings',
+    title: '组件数据目录与文件监听',
+    layer: 'stable-candidate',
+    endpoints: ['host'],
+    signatures: [
+      {
+        module: 'src/shared/addonStorage.ts',
+        symbols: ['AddonStorageFacet', 'AddonStorageResult', 'AddonStorageListResult', 'AddonStorageEntryInfo', 'AddonStorageRejection', 'isSafeAddonStoragePath', 'ADDON_STORAGE_FILE_LIMIT_BYTES'],
+      },
+      {
+        module: 'src/host/addons/addonStorageService.ts',
+        symbols: ['AddonStorageService', 'AddonStorageFsPort'],
+      },
+    ],
+    purpose:
+      '每组件一个安装目录外的隔离可写数据目录（globalStorage 语义）与目录内文件监听：富结构数据（规则对象等，超出设置存储一层嵌套边界）自由读写，外部同步工具改写文件后自动重载。宿主侧 setup/enable 上下文同形状；页面侧组件经自己的 channel topic 桥接宿主读写。',
+    semantics: {
+      modes: '仅宿主端（编辑器/设置页面不直接提供——经组件通道桥接）。',
+      coordinates: '相对路径为正斜杠形态，先过 isSafeAddonStoragePath 守卫（越界/非法一律 invalid-path 拒绝——普通 API 拒绝不算故障）；文件内容按 UTF-8 文本读写。',
+      lifecycle: '目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件代次终结时平台统一注销。',
+      errors: 'invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因）——可辨认拒绝，不抛出。',
+    },
+    verification: ['test/unit/addonStorage.test.ts'],
+    introduced: '#404',
+  },
   // ---- ③ 输入行为 ----
   {
     id: 'behaviors-register',

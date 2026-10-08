@@ -54,6 +54,7 @@ import type {
   AddonSettingSource,
   AddonSettingValue,
 } from '../../src/shared/addonSettings'
+import type { AddonStorageFacet, AddonStorageRejection } from '../../src/shared/addonStorage'
 import type {
   AddonRendererRegistration,
   AddonRenderersFacet,
@@ -209,6 +210,13 @@ export type BehaviorShapes = {
   registration: AddonBehaviorRegistration
   changeEvent: AddonBehaviorChangeEvent
 }
+
+/** #404 组件数据目录面（读写监听六入口 + 拒绝码钉住） */
+export type StorageSurface = Pick<
+  AddonStorageFacet,
+  'uri' | 'readFile' | 'writeFile' | 'list' | 'deleteFile' | 'onDidChangeFile'
+>
+export const storageRejectionsPinned: Equals<AddonStorageRejection, 'invalid-path' | 'too-large' | 'error'> = true
 
 /** 设置定义到值的组合 */
 export type SettingShapes = {

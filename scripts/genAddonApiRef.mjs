@@ -55,7 +55,7 @@ export function extractSymbolDeclarations(fileText, fileName, wantedSymbols) {
   const sf = ts.createSourceFile(fileName, fileText, ts.ScriptTarget.Latest, true)
   const visit = (node) => {
     let name = null
-    if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isFunctionDeclaration(node)) {
+    if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) {
       name = node.name?.text ?? null
     } else if (ts.isVariableStatement(node)) {
       const decl = node.declarationList.declarations[0]

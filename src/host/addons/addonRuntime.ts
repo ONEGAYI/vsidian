@@ -30,6 +30,7 @@ import type {
 } from './addonRegistry'
 import { resolveAddonPageEntry } from './addonPageRegistry'
 import type { AddonSettingsService } from './addonSettingsService'
+import { AddonStorageService } from './addonStorageService'
 
 /** 登记成功的解析臂（settingsPages/editorPages 只收成功条目） */
 type ResolvedPageEntry = import('./addonPageRegistry').AddonPageEntryResolution & { ok: true }
@@ -52,6 +53,8 @@ export interface AddonRuntimePorts {
   preferences: AddonPreferenceStore
   /** #353 T04 设置服务（定义注册/按批读写/变化事件——平台权威） */
   settings: AddonSettingsService
+  /** #404 组件数据目录服务（隔离可写目录 + 文件监听） */
+  storage: AddonStorageService
   /** 组件安装目录（fsPath；解析不到时页面入口登记拒绝——资源授权无锚） */
   installDirOf(addonId: string): string | undefined
   /** 归因日志（写 VSCode 输出通道：组件 ID + 阶段 + 原因） */
@@ -451,6 +454,7 @@ export class AddonRuntime {
     return {
       addonId,
       apiVersion: this.ports.apiVersion,
+      storage: this.ports.storage.storageFor(addonId),
       settings: {
         registerPage: (entry) => {
           if (!this.isLive(record, addonId)) {
@@ -566,6 +570,7 @@ export class AddonRuntime {
     return {
       addonId,
       apiVersion: this.ports.apiVersion,
+      storage: this.ports.storage.storageFor(addonId),
       pages: {
         registerEditor: (entry) => {
           if (!this.isLive(record, addonId) || record.run !== run) {
@@ -696,6 +701,9 @@ export class AddonRuntime {
     const record = this.records.get(addonId)
     if (!record) return
     this.releaseRun(record)
+    // #404 组件记录移除：注销数据目录 watcher（文件数据保留——卸载
+    // 清理策略见 shared/addonStorage.ts 头注释）
+    this.ports.storage.release(addonId)
     if (this.settingsOpenAddon === addonId) {
       this.settingsOpenAddon = undefined
     }
