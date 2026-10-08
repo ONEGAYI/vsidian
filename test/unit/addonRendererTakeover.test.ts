@@ -271,6 +271,44 @@ describe('主题联动 refresh（组件回调异常隔离）', () => {
     expect(broken.isConnected).toBe(false)
     expect(healthy.isConnected).toBe(true)
   })
+
+  it('release 回调抛错不中断联动：兜底重挂照常换新、健康容器照常 refresh（评审 R3）', () => {
+    document.body.innerHTML = ''
+    const { bridge } = harness()
+    const log: MountRecord[] = []
+    bridge.register('pub.a', 1, recordingSpec('r1', ['draw'], log, {
+      refresh: undefined,
+      release: (container, ctx) => {
+        log.push({ event: 'release', container, code: '', language: ctx.language, mode: ctx.mode })
+        throw new Error('release boom')
+      },
+    }))
+    bridge.register('pub.a', 1, recordingSpec('r2', ['flow'], log))
+    bridge.applyTable(table([
+      { language: 'draw', effective: 'pub.a/r1' },
+      { language: 'flow', effective: 'pub.a/r2' },
+    ], [
+      { addonId: 'pub.a', rendererId: 'r1', languages: ['draw'] },
+      { addonId: 'pub.a', rendererId: 'r2', languages: ['flow'] },
+    ]))
+    const mk = (lang: string, provider: string) => {
+      const el = document.createElement('div')
+      el.className = MERMAID_CLASS_NAMES.diagram
+      el.setAttribute(GRAPHIC_LANG_ATTR, lang)
+      el.setAttribute(MERMAID_CODE_ATTR, 'X')
+      el.setAttribute(GRAPHIC_MODE_ATTR, 'reading')
+      el.setAttribute(GRAPHIC_PROVIDER_ATTR, provider)
+      document.body.appendChild(el)
+      return el
+    }
+    const broken = mk('draw', 'pub.a/r1')
+    const healthy = mk('flow', 'pub.a/r2')
+    // release 抛错不得外溢到主题联动调用方，也不得中断其余容器
+    expect(() => refreshAddonGraphicBlocks(document.body)).not.toThrow()
+    expect(log.map((e) => e.event)).toEqual(['release', 'mount', 'refresh'])
+    expect(broken.isConnected).toBe(false)
+    expect(healthy.isConnected).toBe(true)
+  })
 })
 
 describe('内置 mermaid 扫描跳过组件容器', () => {

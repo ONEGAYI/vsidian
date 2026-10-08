@@ -166,7 +166,10 @@ function addonRegistrationAsGraphicRenderer(
 
 // ---- 挂载与所有权（#358 T09） ----
 
-/** 释放容器当前的附加组件所有者（内置无释放语义）；重复释放无害 */
+/** 释放容器当前的附加组件所有者（内置无释放语义）；重复释放无害。
+ *  release 与 mount/refresh 同为组件回调，异常同等隔离（上报 + 不中断
+ *  本轮其余容器的联动/热切换）——劣质组件 refresh 抛错后走兜底重挂的
+ *  release 是高概率连带抛错点 */
 function releaseOwner(container: HTMLElement): void {
   const providerId = container.getAttribute(GRAPHIC_PROVIDER_ATTR)
   if (!providerId || providerId === 'builtin') {
@@ -177,10 +180,14 @@ function releaseOwner(container: HTMLElement): void {
     ? addonRenderersBridge()?.registrationOf(providerId.slice(0, separator), providerId.slice(separator + 1))
     : undefined
   container.removeAttribute(GRAPHIC_PROVIDER_ATTR)
-  registration?.release?.(container, {
-    language: (container.getAttribute(GRAPHIC_LANG_ATTR) ?? '').trim(),
-    mode: (container.getAttribute(GRAPHIC_MODE_ATTR) === 'live' ? 'live' : 'reading') as AddonRendererMode,
-  })
+  try {
+    registration?.release?.(container, {
+      language: (container.getAttribute(GRAPHIC_LANG_ATTR) ?? '').trim(),
+      mode: (container.getAttribute(GRAPHIC_MODE_ATTR) === 'live' ? 'live' : 'reading') as AddonRendererMode,
+    })
+  } catch (err) {
+    reportRendererFault(providerId, err)
+  }
 }
 
 /**
