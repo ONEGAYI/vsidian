@@ -46,13 +46,11 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     const length = view.state.field(docLength, false) ?? -1
     if (length === lastReported) return
     lastReported = length
-    // #406 language 子集消费证据：syntaxTree 在生产状态上真实可调
-    // （markdown 语言配置下树根为 Document 节点；无语言时也是树对象）
-    const tree = cm6.language.syntaxTree(view.state)
+    // #406 language 子集消费证据：函数源文本前缀（同一性证据，见 V02 组件同款注释）
     void sdk.channel.request('t02.docState', {
       docLength: length,
       markColor: markColor(view),
-      syntaxTreeRoot: tree?.type.name ?? null,
+      syntaxTreeFn: String(cm6.language.syntaxTree).slice(0, 48),
     })
   }
   // 装饰 DOM 在装载器 reconfigure 后的下一帧才绘制——挂载即读计算色

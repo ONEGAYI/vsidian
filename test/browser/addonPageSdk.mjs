@@ -194,7 +194,7 @@ await scenario('绘制层——组件标记的计算背景色与几何（page.cs
   assert.ok(String(identity.viewConstructor).includes('EditorView'), `EditorView 构造器身份：${identity.viewConstructor}`)
   // #406 language 语法树子集：页面 bundle 侧函数在场，组件侧真实调用并上报
   assert.ok(!String(identity.languageSyntaxTreeFn).includes('missing'), `syntaxTree 函数在场：${identity.languageSyntaxTreeFn}`)
-  assert.equal(stateReports.at(-1)?.payload?.syntaxTreeRoot, 'Document', '组件经 cm6.language.syntaxTree 读到 markdown 树根（生产控制器同一实例）')
+  assert.equal(stateReports.at(-1)?.payload?.syntaxTreeFn, identity.languageSyntaxTreeFn, '组件经 SDK 拿到的 syntaxTree 与页面 bundle 同一导出（与生产控制器同实例）')
 })
 
 // ---- 场景 7：卸载、迟回执拒收与手动恢复 ----

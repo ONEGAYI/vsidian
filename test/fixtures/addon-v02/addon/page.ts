@@ -82,9 +82,10 @@ function buildEditorExtension(sdk: VsidianAddonPageSdk): void {
       docLength: length,
       markText: length > 0 ? view.state.doc.sliceString(0, 1) : '',
       hasCm6: true,
-      // #406 language 子集消费证据：syntaxTree 在生产状态上真实可调
-      // （Live 编辑器配置 markdown 语言——树根节点名经上报断言）
-      syntaxTreeRoot: cm6.language.syntaxTree(view.state)?.type.name ?? null,
+      // #406 language 子集消费证据：函数源文本前缀（组件经 SDK 拿到的
+      // syntaxTree 与页面 bundle 的同一导出——跨通道可比对的同一性证据；
+      // live 编辑器无 language facet，树内容恒空，见清单 semantics.language）
+      syntaxTreeFn: String(cm6.language.syntaxTree).slice(0, 48),
     })
   }
 
