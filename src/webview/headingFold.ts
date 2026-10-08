@@ -1,0 +1,478 @@
+// Live 正文标题折叠本体（#412 T01，规格 docs/specs/heading-fold.md）：
+// StateField 承载折叠键集合 + effect 驱动 + 消费点增量树直查的区间派生
+// + 隐藏装饰 + 光标迁移。本票无 UI 无键位（T02/T03/T04 在其上生长，
+// #410 API 只消费派生视图）。
+//
+// 折叠语义（规格「二、折叠本体与坐标生命周期」）：
+// - 折叠是**视图态**：零写回、不 dirty、不进撤销栈、不跨会话持久化
+//   （形态对齐 codeCardFoldField——值按「已折叠标题行行首位置」标识，
+//   docChanged 时随 ChangeSet 映射 mapPos(pos, 1)）。
+// - update 只做位置映射、不做修剪：脱靶键（删除标题行/拆行后落在非标题
+//   行首的残留）经派生视图过滤，天然无行为——原始键集不对外（含 API 面）。
+// - 全文替换（init / doc.resync 的「覆盖全文档的变更」）显式清空——重开
+//   等价语义，不依赖映射落点的隐式失效。
+// - 撤销恢复被删标题回到未折叠：撤销栈归宿主文本管线，webview 侧收到
+//   的是回流增量（externalSync 事务），键已在删除时脱靶——既定架构边界，
+//   不为此引入本地撤销栈。
+//
+// 标题表派生选**路线 2**（票面保留的两路线之一）：消费点经增量树直查
+// （extractOutline 双入口形态——liveDecorationsField 维护的树传入复用，
+// 省略时全量解析），不建 mermaidFencesField 式增量标题表。理由：
+// - 标题口径单一事实源是语法树节点（headingLevelOf + frontmatter 排除），
+//   增量树已由 liveDecorationsField 随每笔事务增量维护，直查不重复解析、
+//   无「每次 docChanged 全文档重扫」；
+// - 折叠集为空的常规编辑零成本（装饰重建先判键集空即返回），增量表的
+//   每击键全表 mapPos 反而是常驻开销；
+// - 块级剪枝遍历（只下降容器块节点）把直查成本压到 O(块节点数)，与
+//   extractOutline 的语义等价由对拍单测钉住（含容器白名单完整性）。
+//
+// effect 驱动纪律（规格「八、附加组件开放面预留」）：折叠/展开一律
+// StateEffect + dispatch，无 DOM-only 路径——API 编程触发与用户触发同链路。
+// 查询一律 (field, doc) 纯函数派生，不依赖控制器/UI 在场。
+import { EditorSelection, RangeSet, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
+import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
+import type { SyntaxNode, Tree } from '@lezer/common'
+import { liveDecorationsField } from './liveDecorations'
+import {
+  FM_SCAN_LIMIT,
+  docInput,
+  frontmatterRange,
+  headingLevelOf,
+  markdownTreeParser,
+} from '../shared/markdownDoc'
+
+/** 能包含标题的容器块节点名（块级剪枝遍历的下降白名单：其余块节点——
+ *  段落/围栏/表格/水平线等——不产标题节点，不下降；白名单完整性由与
+ *  extractOutline 的对拍单测钉住） */
+const HEADING_CONTAINER_NAMES = new Set(['Blockquote', 'BulletList', 'OrderedList', 'ListItem'])
+
+/** 标题表条目：折叠派生消费的最小形态（extractOutline 的轻量子集） */
+export interface HeadingInfo {
+  /** 折叠键：标题起始行行首 offset（ATX = `#` 行行首；Setext = 内容首行行首） */
+  key: number
+  /** 标题级别（ATX 1–6 / Setext 1–2，headingLevelOf 单一事实源） */
+  level: number
+  /** 标题块行尾（ATX = 标题行行尾；Setext = 下划线行行尾）——隐藏区间起点 */
+  visibleTo: number
+}
+
+/** 有效折叠区间（派生视图产出；纯 (keys, headings, doc) 函数） */
+export interface HeadingFoldSpan {
+  /** 折叠键（标题起始行行首） */
+  key: number
+  /** 标题级别 */
+  level: number
+  /** 隐藏区间起点：标题块行尾（标题行保持可见） */
+  hideFrom: number
+  /** 隐藏区间终点：下一级别 ≤ level 的标题行行首，或文档末尾 */
+  hideTo: number
+}
+
+// ---- 标题提取（消费点直查，路线 2） ----
+
+/**
+ * 标题序列提取（extractOutline 双入口形态）：tree 传入时直接取用
+ * （liveDecorationsField 维护的增量树，与 doc 须同一 state），省略时
+ * 全量解析。标题口径 = headingLevelOf + frontmatter 头块排除（与大纲
+ * 提取同判定）；代码围栏内不产标题节点，天然排除。块级剪枝遍历：只
+ * 下降容器块（引用/列表），标题节点与叶子块不进入——遍历成本 O(块级
+ * 节点数)，不随行内标记数量增长。
+ */
+export function collectHeadings(doc: Text, tree?: Tree): HeadingInfo[] {
+  const parsed: Tree = tree ?? markdownTreeParser.parse(docInput(doc))
+  const fm = frontmatterRange(doc.sliceString(0, Math.min(doc.length, FM_SCAN_LIMIT)))
+  const fmEnd = fm ? fm.end : 0
+  const out: HeadingInfo[] = []
+  const descend = (node: SyntaxNode): void => {
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      if (child.to <= fmEnd) {
+        continue // 完全在头块内：不产条目（头块按源码呈现）
+      }
+      const level = headingLevelOf(child.name)
+      if (level !== null) {
+        if (child.from >= fmEnd) {
+          out.push({
+            key: doc.lineAt(child.from).from,
+            level,
+            // 标题块行尾：ATX 节点 to 在标题行内、Setext 在下划线行内，
+            // 取所在行行尾即标题块可见末尾（extractOutline headingTo 同口径）
+            visibleTo: doc.lineAt(child.to).to,
+          })
+        }
+        continue // 标题节点的子节点（HeaderMark/Inline）不产标题
+      }
+      if (HEADING_CONTAINER_NAMES.has(child.name) || child.from < fmEnd) {
+        descend(child) // 容器块，或与头块相交（内部仍可能有头块后内容）
+      }
+    }
+  }
+  descend(parsed.topNode)
+  return out
+}
+
+// ---- 区间派生（纯函数） ----
+
+/**
+ * 全部标题的节区间 join（不判可折叠）：spans[i] 与 headings[i] 对齐，
+ * 按文档序产出。节末 = 右侧第一个级别 ≤ 自身的标题行首（单调栈自后向
+ * 前一趟），文档内无此类标题则到文档末尾——跨级辖域与大纲父子结构
+ * outlineCollapseFacts 同构（正文折叠不消费大纲索引）。
+ */
+function headingSpansOf(headings: readonly HeadingInfo[], docLength: number): HeadingFoldSpan[] {
+  const spans: HeadingFoldSpan[] = new Array(headings.length)
+  const stack: number[] = [] // 索引栈，自底向顶级别递增（右侧「更浅候选」）
+  for (let i = headings.length - 1; i >= 0; i--) {
+    const h = headings[i]!
+    while (stack.length > 0 && headings[stack[stack.length - 1]!]!.level > h.level) {
+      stack.pop()
+    }
+    const next = stack.length > 0 ? headings[stack[stack.length - 1]!]! : null
+    spans[i] = {
+      key: h.key,
+      level: h.level,
+      hideFrom: h.visibleTo,
+      hideTo: next ? next.key : docLength,
+    }
+    stack.push(i)
+  }
+  return spans
+}
+
+/** [from, to) 内存在至少一个非空白字符（可折叠判定核心；逐行扫避免大区间整段复制） */
+function rangeHasNonSpace(doc: Text, from: number, to: number): boolean {
+  let pos = from
+  while (pos < to) {
+    const line = doc.lineAt(pos)
+    if (doc.sliceString(Math.max(line.from, pos), Math.min(line.to, to)).trim() !== '') {
+      return true
+    }
+    pos = line.to + 1
+  }
+  return false
+}
+
+/**
+ * 全部可折叠标题区间（foldAll 的目标全集；纯派生）：隐藏区间内存在至少
+ * 一个非空白字符才可折叠——相邻标题（区间为空或仅空白）不可折叠。
+ */
+export function foldableHeadingSpans(headings: readonly HeadingInfo[], doc: Text): HeadingFoldSpan[] {
+  return headingSpansOf(headings, doc.length).filter((s) => rangeHasNonSpace(doc, s.hideFrom, s.hideTo))
+}
+
+/**
+ * 有效折叠派生视图（#410 API 面唯一查询口径）：折叠键 ∩ 可折叠标题键，
+ * 逐键 join 结构区间。原始键集不对外——脱靶键（不在可折叠标题行行首的
+ * 残留）经此过滤天然无行为。
+ */
+export function effectiveHeadingFolds(
+  foldKeys: ReadonlySet<number>,
+  headings: readonly HeadingInfo[],
+  doc: Text,
+): HeadingFoldSpan[] {
+  const out: HeadingFoldSpan[] = []
+  for (const span of headingSpansOf(headings, doc.length)) {
+    if (foldKeys.has(span.key) && rangeHasNonSpace(doc, span.hideFrom, span.hideTo)) {
+      out.push(span)
+    }
+  }
+  return out
+}
+
+// ---- 折叠目标解析（辖域标题，规格「三、折叠与光标/选区」） ----
+
+/** 辖域标题：光标所在行是标题行 → 该标题；否则向上最近标题（任意级别）。
+ *  统一公式 = 最后一个 key ≤ pos 的标题（标题行内命中自身、正文区命中
+ *  上方最近）。首个标题之前返回 null。 */
+export function enclosingHeading(headings: readonly HeadingInfo[], pos: number): HeadingInfo | null {
+  const idx = enclosingHeadingIdx(headings, pos)
+  return idx >= 0 ? headings[idx]! : null
+}
+
+/** enclosingHeading 的索引形态（解析函数内部复用；-1 无辖域） */
+function enclosingHeadingIdx(headings: readonly HeadingInfo[], pos: number): number {
+  let lo = 0
+  let hi = headings.length - 1
+  let ans = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (headings[mid]!.key <= pos) {
+      ans = mid
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+  return ans
+}
+
+/**
+ * 折叠目标解析：从 startIdx（辖域）沿祖先链自近及远，找第一个「可折叠
+ * 且未折叠」的标题——辖域未折叠即辖域自身；已折叠则逐层外扩（VSCode
+ * 语义）。无 → null（静默 no-op）。祖先链 = 前方级别严格更浅的标题
+ * （跨级自然辖域化，链上级别单调递减）。
+ */
+function nearestFoldableUnfolded(
+  spans: readonly HeadingFoldSpan[],
+  foldKeys: ReadonlySet<number>,
+  doc: Text,
+  startIdx: number,
+): number | null {
+  let minLevel = Infinity
+  for (let i = startIdx; i >= 0; i--) {
+    const s = spans[i]!
+    if (s.level >= minLevel) {
+      continue // 非祖先链上的（同级或更深）
+    }
+    minLevel = s.level
+    if (!foldKeys.has(s.key) && rangeHasNonSpace(doc, s.hideFrom, s.hideTo)) {
+      return s.key
+    }
+  }
+  return null
+}
+
+/** 逐 selection range 解析并集去重（非空选区/多光标口径：折叠无破坏性，
+ *  不收敛主选区）；解析无目标的 range 不贡献键。回调经闭包捕获折叠集 */
+function resolveTargets(
+  headings: readonly HeadingInfo[],
+  doc: Text,
+  selection: EditorSelection,
+  resolveRange: (idx: number, spans: readonly HeadingFoldSpan[], head: number) => number | null,
+): number[] {
+  const spans = headingSpansOf(headings, doc.length)
+  const targets = new Set<number>()
+  for (const range of selection.ranges) {
+    const idx = enclosingHeadingIdx(headings, range.head)
+    if (idx < 0) {
+      continue
+    }
+    const hit = resolveRange(idx, spans, range.head)
+    if (hit !== null) {
+      targets.add(hit)
+    }
+  }
+  return [...targets]
+}
+
+/** 折叠操作目标键集：辖域可折叠且未折叠 → 折之；已折叠 → 上溯最近未折叠
+ *  祖先折叠（连续折叠逐层外扩）；无目标 → 空集（静默 no-op） */
+export function resolveHeadingFoldTargets(
+  headings: readonly HeadingInfo[],
+  foldKeys: ReadonlySet<number>,
+  doc: Text,
+  selection: EditorSelection,
+): number[] {
+  return resolveTargets(headings, doc, selection, (idx, spans) =>
+    nearestFoldableUnfolded(spans, foldKeys, doc, idx))
+}
+
+/** 展开操作目标键集：辖域标题已折叠（有效折叠）→ 展之；否则展开包含
+ *  光标的最深已折叠区间；再无 → 空集 */
+export function resolveHeadingUnfoldTargets(
+  headings: readonly HeadingInfo[],
+  foldKeys: ReadonlySet<number>,
+  doc: Text,
+  selection: EditorSelection,
+): number[] {
+  return resolveTargets(headings, doc, selection, (idx, spans, head) => {
+    const self = spans[idx]!
+    if (foldKeys.has(self.key) && rangeHasNonSpace(doc, self.hideFrom, self.hideTo)) {
+      return self.key
+    }
+    let best: HeadingFoldSpan | null = null
+    for (const s of spans) {
+      if (!foldKeys.has(s.key) || rangeHasNonSpace(doc, s.hideFrom, s.hideTo) === false) {
+        continue
+      }
+      // 包含光标（隐藏区开区间：标题行行尾到节末）
+      if (head < s.hideFrom || head >= s.hideTo) {
+        continue
+      }
+      if (!best || s.hideTo - s.hideFrom < best.hideTo - best.hideFrom) {
+        best = s
+      }
+    }
+    return best ? best.key : null
+  })
+}
+
+/** 切换操作目标键集：辖域标题两态取反（不外扩；调用方按目标键当前在否
+ *  翻转）。辖域不可折叠 → 无目标 */
+export function resolveHeadingToggleTargets(
+  headings: readonly HeadingInfo[],
+  doc: Text,
+  selection: EditorSelection,
+): number[] {
+  const targets = new Set<number>()
+  const spans = headingSpansOf(headings, doc.length)
+  for (const range of selection.ranges) {
+    const idx = enclosingHeadingIdx(headings, range.head)
+    if (idx < 0) {
+      continue
+    }
+    const self = spans[idx]!
+    if (rangeHasNonSpace(doc, self.hideFrom, self.hideTo)) {
+      targets.add(self.key)
+    }
+  }
+  return [...targets]
+}
+
+// ---- 光标迁移（折叠瞬间） ----
+
+/**
+ * 折叠事务的选区迁移计算（纯函数）：任一 range 与被隐藏区间相交（标题
+ * 行本身不算——hideFrom 已是标题块行尾）时迁移到该区间标题行行尾
+ * （collapse 为空选区）；其余 range 保留。多区间嵌套时取包含该 range 的
+ * 最深区间（离光标最近的可见锚点）。返回 null 表示无需迁移。
+ */
+export function migrateSelectionForFold(
+  selection: EditorSelection,
+  folds: readonly HeadingFoldSpan[],
+): EditorSelection | null {
+  let ranges: ReturnType<typeof EditorSelection.cursor>[] | null = null
+  for (let i = 0; i < selection.ranges.length; i++) {
+    const r = selection.ranges[i]!
+    let hit: HeadingFoldSpan | null = null
+    for (const f of folds) {
+      if (r.to > f.hideFrom && r.from < f.hideTo) {
+        if (!hit || f.hideTo - f.hideFrom < hit.hideTo - hit.hideFrom) {
+          hit = f
+        }
+      }
+    }
+    if (hit) {
+      ;(ranges ??= selection.ranges.slice())[i] = EditorSelection.cursor(hit.hideFrom)
+    }
+  }
+  return ranges ? EditorSelection.create(ranges, selection.mainIndex) : null
+}
+
+// ---- StateField：折叠键集合 ----
+
+/** 折叠切换 effect（T03 gutter 箭头 / toggleFold：单键翻转） */
+export const headingFoldToggle = StateEffect.define<number>()
+
+/** 折叠集整体设置 effect（foldAll / unfoldAll / 批量目标一次生效） */
+export const headingFoldSet = StateEffect.define<ReadonlySet<number>>()
+
+const EMPTY_FOLD: ReadonlySet<number> = new Set<number>()
+
+/**
+ * 折叠状态（#412 T01）：已折叠标题的标题行行首位置集合。视图态（零写回、
+ * 不 dirty、不进撤销栈、不跨会话持久化）。docChanged 时键随 ChangeSet
+ * 映射（mapPos(pos, 1)，assoc=1 对齐 codeCardFoldField）；effect 键按
+ * dispatch 时（startState）坐标解释，先应用后映射；覆盖全文档的变更
+ * （init / doc.resync）显式清空——重开等价语义。
+ */
+export const headingFoldField = StateField.define<ReadonlySet<number>>({
+  create: () => EMPTY_FOLD,
+  update(value, tr) {
+    if (tr.docChanged) {
+      const oldLength = tr.startState.doc.length
+      let fullReplace = false
+      tr.changes.iterChangedRanges((fromA, toA) => {
+        if (fromA === 0 && toA === oldLength) {
+          fullReplace = true
+        }
+      })
+      if (fullReplace) {
+        return EMPTY_FOLD
+      }
+    }
+    let next = value
+    let changed = false
+    for (const eff of tr.effects) {
+      if (eff.is(headingFoldSet)) {
+        next = eff.value
+        changed = true
+      } else if (eff.is(headingFoldToggle)) {
+        const toggled = new Set(next)
+        if (!toggled.delete(eff.value)) {
+          toggled.add(eff.value)
+        }
+        next = toggled
+        changed = true
+      }
+    }
+    if (tr.docChanged) {
+      const mapped = new Set<number>()
+      for (const pos of next) {
+        mapped.add(tr.changes.mapPos(pos, 1))
+      }
+      next = mapped
+      changed = true
+    }
+    return changed ? next : value
+  },
+})
+
+// ---- 隐藏装饰 ----
+
+/** 隐藏区间装饰实例（共享单例保证 RangeSet.eq 结构比较稳定；零宽无
+ *  widget——T01 省略号占位先零宽，T03 补 widget） */
+const FOLD_HIDE_DECO = Decoration.replace({})
+
+/**
+ * 折叠隐藏装饰构建（纯 (state) 派生）：键集为空零成本直返；非空时经
+ * 消费点增量树直查派生有效折叠区间，逐区间发射多行 Decoration.replace
+ * （标题块保持可见，隐藏区间 = 标题块行尾到节末，含中间空行）。被隐藏
+ * 区间内的其他装饰（表格、代码卡、Mermaid 等）随 replace 覆盖一并不可
+ * 见。树来源 liveDecorationsField（未装配时全量解析防御）。
+ */
+function buildHeadingFoldDecos(state: import('@codemirror/state').EditorState): DecorationSet {
+  const keys = state.field(headingFoldField, false)
+  if (!keys || keys.size === 0) {
+    return RangeSet.empty
+  }
+  const tree = state.field(liveDecorationsField, false)?.tree
+  const folds = effectiveHeadingFolds(keys, collectHeadings(state.doc, tree), state.doc)
+  if (folds.length === 0) {
+    return RangeSet.empty
+  }
+  return RangeSet.of(folds.map((f) => FOLD_HIDE_DECO.range(f.hideFrom, f.hideTo)), true)
+}
+
+/**
+ * 折叠隐藏装饰（StateField）：CM6 硬约束——跨行块 replace 必须来自
+ * StateField 而非插件装饰集（#59/liveMermaid 同款先例）。重建触发 =
+ * 折叠集变化或 docChanged（结构重派生）；选区/视口变化零成本（折叠
+ * 呈现不随光标显隐——与代码卡「光标进入显源码」语义不同，折叠只认
+ * 折叠集）。
+ */
+export const headingFoldDecorations = StateField.define<DecorationSet>({
+  create: buildHeadingFoldDecos,
+  update(value, tr) {
+    const foldChanged =
+      tr.startState.field(headingFoldField, false) !== tr.state.field(headingFoldField, false)
+    if (!tr.docChanged && !foldChanged) {
+      return value
+    }
+    return buildHeadingFoldDecos(tr.state)
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})
+
+/** 标题折叠扩展装配（liveInstance 扩展组消费） */
+export const headingFoldExtension: Extension = [headingFoldField, headingFoldDecorations]
+
+/**
+ * 折叠集应用入口（effect 直驱 + 光标迁移；键位/箭头/API 编程触发共用）：
+ * 以 startState 坐标解释键集，dispatch 单笔零写回事务；新集生效后的有效
+ * 折叠区间若与选区相交，同笔事务内迁移（迁移到标题块行尾 collapse 空选
+ * 区）。迁移后集合不再含任何 range 所在节时（如纯展开操作）无迁移发生。
+ */
+export function setHeadingFolds(view: EditorView, next: ReadonlySet<number>): void {
+  const spec: import('@codemirror/state').TransactionSpec = {
+    effects: headingFoldSet.of(next),
+  }
+  if (next.size > 0) {
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const folds = effectiveHeadingFolds(next, collectHeadings(view.state.doc, tree), view.state.doc)
+    const migrated = migrateSelectionForFold(view.state.selection, folds)
+    if (migrated) {
+      spec.selection = migrated
+    }
+  }
+  view.dispatch(spec)
+}

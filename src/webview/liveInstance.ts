@@ -50,6 +50,7 @@ import { liveDecorationsField, livePreviewDecorations, tableCompositionSettled, 
 import { createLinkInteractions } from './liveLinks'
 import { liveMath } from './liveMath'
 import { liveMermaid, rendererLanguagesChanged } from './liveMermaid'
+import { headingFoldExtension } from './headingFold'
 import { liveEmbed } from './liveEmbed'
 import { liveBlockId } from './liveBlockId'
 import { anchorFlash } from './anchorFlash'
@@ -2363,6 +2364,10 @@ export class LiveEditorInstance {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
+      // #412 T01 标题折叠本体：折叠键 StateField + 隐藏 replace 装饰
+      // （消费点经上方 liveDecorationsField 增量树直查派生区间；effect
+      // 驱动无键位——T02/T03 在其上生长，#410 API 只消费派生视图）
+      headingFoldExtension,
       // #223/#247 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态只替换嵌入
       // 精确区间 [from, to] 呈卡片——#247 起不再整行替换，前后文与父结构
       // 保留 / 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，
