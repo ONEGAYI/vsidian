@@ -72,6 +72,10 @@ interface ActiveLoad {
   disposeCallbacks: Array<() => void>
   mountRoots: HTMLElement[]
   extensionsAttached: boolean
+  /** 本装载经 registerExtension 收集的 CM6 扩展（聚合下发——见
+   *  aggregateExtensionParts：消费端 Compartment reconfigure 是整体替换，
+   *  per-load 直发会让多组件互相覆盖、单组件释放清空全部） */
+  extensionParts: Extension[]
   cssLinks: HTMLLinkElement[]
   /** T12 运行期故障已上报（同代次去重——回收指令到达前的重复异常丢弃） */
   faultReported: boolean
@@ -203,6 +207,17 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
   /** 已消费（或已丢弃）的登记条目——同一工厂不得接入两个代次 */
   const consumedRegistrations = new Set<AddonPageRegistration>()
   const active = new Map<string, ActiveLoad>()
+  /** 页面级扩展聚合：全部活跃装载的 extensionParts 按装载序拼接。
+   *  消费端（liveInstance.reconfigureAddonExtensions）是 Compartment 的
+   *  整体替换语义——任何注册/释放都重发全量聚合，多组件互不覆盖、单个
+   *  释放只摘自身段（active.delete 先行，聚合自然不含本装载） */
+  const aggregateExtensionParts = (): Extension[] => {
+    const merged: Extension[] = []
+    for (const load of active.values()) {
+      merged.push(...load.extensionParts)
+    }
+    return merged
+  }
   const pendingRequests = new Map<string, PendingChannelRequest>()
   const history: AddonLoaderStats['history'] = []
   const counters = {
@@ -291,7 +306,6 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
   }
 
   const buildSdk = (loadRecord: ActiveLoad, manifest: AddonLoadManifest): VsidianAddonPageSdk => {
-    const extensionParts: Extension[] = []
     const viewsFacet: AddonViewsFacet | undefined = env.addonViews
       ? {
           list: () => env.addonViews!.list(),
@@ -395,8 +409,8 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
           return false
         }
-        extensionParts.push(extension)
-        env.attachExtensions(extensionParts)
+        loadRecord.extensionParts.push(extension)
+        env.attachExtensions(aggregateExtensionParts())
         loadRecord.extensionsAttached = true
         return true
       },
@@ -520,7 +534,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     }
     if (loadRecord.extensionsAttached) {
       try {
-        env.attachExtensions?.(null)
+        // active.delete 已先行：重发剩余活跃装载的聚合（可能为空数组），
+        // 不再发 null——多组件并存时单个释放不得清掉其余组件的扩展
+        env.attachExtensions?.(aggregateExtensionParts())
       } catch {
         // 装配槽异常不阻断其余回收
       }
@@ -599,6 +615,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       disposeCallbacks: [],
       mountRoots: [],
       extensionsAttached: false,
+      extensionParts: [],
       cssLinks,
       faultReported: false,
     }

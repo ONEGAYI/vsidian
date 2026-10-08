@@ -410,6 +410,42 @@ describe('T02 生产装载器：真实 CM6 扩展接入与释放', () => {
   })
 })
 
+describe('评审：多组件扩展槽聚合与独立释放', () => {
+  it('两个组件 registerExtension 并存；单个释放只摘自身段、全部释放清空', async () => {
+    const h = harness()
+    const markerA: StateFieldType<number> = StateField.define<number>({ create: () => 1, update: (v) => v })
+    const markerB: StateFieldType<number> = StateField.define<number>({ create: () => 2, update: (v) => v })
+    // 时序对齐生产：登记随各自 load 的脚本装载发生（一次装载只接入一个
+    // 工厂、同批多余登记丢弃——B 的登记必须在 A 装载落定后才入桶）
+    registerFactory(
+      h,
+      (sdk) => {
+        expect(sdk.registerExtension([markerA])).toBe(true)
+      },
+      'addon.a',
+    )
+    await h.handle.load(manifest({ addonId: 'addon.a', generation: 1 }))
+    registerFactory(
+      h,
+      (sdk) => {
+        expect(sdk.registerExtension([markerB])).toBe(true)
+      },
+      'addon.b',
+    )
+    await h.handle.load(manifest({ addonId: 'addon.b', generation: 1 }))
+    // 聚合下发：后注册组件触发的是全部活跃装载的拼接，不覆盖先注册者
+    expect(h.attached.length).toBe(2)
+    expect(h.attached[0]).toHaveLength(1)
+    expect(h.attached[1]).toHaveLength(2)
+    // 释放 B 只摘 B 段：重发聚合只剩 A 的扩展
+    await h.handle.unload('addon.b', 1)
+    expect(h.attached.at(-1)).toHaveLength(1)
+    // 再释放 A：聚合为空（不再以 null 清掉其余组件的扩展）
+    await h.handle.unload('addon.a', 1)
+    expect(h.attached.at(-1)).toHaveLength(0)
+  })
+})
+
 describe('T02 生产装载器：释放矩阵其余路径', () => {
   it('故障指令释放：回调执行、历史记为 faulted、扩展槽摘除、旧请求 released', async () => {
     const h = harness()
@@ -426,7 +462,8 @@ describe('T02 生产装载器：释放矩阵其余路径', () => {
     await settle()
     expect(results).toEqual([{ ok: false, reason: 'released' }])
     expect(h.handle.stats().history.at(-1)).toMatchObject({ ended: 'faulted', reason: 'attributable', disposals: 1 })
-    expect(h.attached.at(-1)).toBe(null)
+    // 聚合语义：释放重发剩余活跃装载（此处无其余组件 = 空数组），不再发 null
+    expect(h.attached.at(-1)).toEqual([])
     expect(h.sent.some((message) => message.type === 'addon.faulted')).toBe(true)
   })
 
