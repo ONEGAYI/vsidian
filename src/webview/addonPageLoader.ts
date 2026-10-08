@@ -327,6 +327,14 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     }
   }
 
+  /** SDK 守卫：按记录身份判活（#395 P3 追加收紧，registerExtension 同款
+   *  契约扩展到全部 SDK 面）——active.has(addonId) 在同组件新代次在场时
+   *  会让已释放代次句柄的迟到调用误放行（句柄穿越：旧代次注册进入新代次
+   *  下游注册表、或经桥的整体替换语义顶掉新代次候选、或在已脱离 active
+   *  的旧记录上滞留回调）。比对 active 条目是否为本装载记录本身，不符即
+   *  拒绝；releaseLoad 的回收路径按 loadRecord 自身执行，不受此守卫约束。 */
+  const isLoadActive = (loadRecord: ActiveLoad): boolean => active.get(loadRecord.addonId) === loadRecord
+
   const buildSdk = (loadRecord: ActiveLoad, manifest: AddonLoadManifest): VsidianAddonPageSdk => {
     const viewsFacet: AddonViewsFacet | undefined = env.addonViews
       ? {
@@ -343,7 +351,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             if (page !== 'editor') {
               return { ok: false, reason: 'not-editor-page' }
             }
-            if (!active.has(loadRecord.addonId)) {
+            if (!isLoadActive(loadRecord)) {
               return { ok: false, reason: 'released' }
             }
             return env.addonBehaviors!.register(loadRecord.addonId, loadRecord.generation, registration)
@@ -359,7 +367,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
           register: (def, handler) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return { ok: false, reason: 'released', dispose: () => {} }
             }
             return env.addonCommands!.registerCommand(loadRecord.addonId, loadRecord.generation, def, handler)
@@ -367,13 +375,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         },
         menus: {
           registerItem: (def) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return { ok: false, reason: 'released', dispose: () => {} }
             }
             return env.addonCommands!.registerMenuItem(loadRecord.addonId, def, (commandId) => {
               // 菜单执行回调只在装载在场时有效（释放后的菜单项随 cleanup
-              // 撤下——不会迟到；守卫是防御性复核）
-              if (!active.has(loadRecord.addonId)) return
+              // 撤下——不会迟到；守卫是防御性复核，记录身份口径同上）
+              if (!isLoadActive(loadRecord)) return
               env.addonCommands!.execute(commandId)
             })
           },
@@ -385,8 +393,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             renderers: {
               register: (spec: AddonRendererRegistration) => {
                 const bridge = env.addonRenderers!
-                if (!active.has(loadRecord.addonId)) {
-                  // 已终结代次的迟到注册：no-op 句柄（不接入新代次）
+                if (!isLoadActive(loadRecord)) {
+                  // 已终结代次的迟到注册：no-op 句柄（不接入新代次——
+                  // 记录身份口径，防止旧句柄经桥整体替换顶掉新代次候选）
                   return { dispose: () => {} }
                 }
                 const accepted = bridge.register(loadRecord.addonId, loadRecord.generation, spec)
@@ -396,7 +405,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
                 const rendererId = spec.rendererId
                 return {
                   dispose: () => {
-                    if (!active.has(loadRecord.addonId)) {
+                    if (!isLoadActive(loadRecord)) {
                       return
                     }
                     bridge.disposeRenderer(loadRecord.addonId, loadRecord.generation, rendererId)
@@ -411,13 +420,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       ...(env.addonUi && page === 'editor' ? {
         ui: {
           registerButton: (def, onClick) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return { ok: false, reason: 'released', dispose: () => {} }
             }
             return env.addonUi!.registerButton(loadRecord.addonId, loadRecord.generation, def, onClick)
           },
           registerPanel: (def) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return {
                 ok: false, reason: 'released',
                 dispose: () => {}, open: () => false, close: () => false, isOpen: () => false,
@@ -428,11 +437,11 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         },
       } : {}),
       registerExtension: (extension) => {
-        // 守卫按记录身份（#395 P3）：active.has(addonId) 在同组件新代次在场
-        // 时会让已释放代次的迟到调用误放行——扩展 push 进旧记录却永不进
-        // 聚合（聚合只遍历 active），返回 true 但扩展不生效。比对 active
-        // 条目是否为本装载记录本身，不符即拒绝。
-        if (active.get(loadRecord.addonId) !== loadRecord || page !== 'editor' || !env.attachExtensions) {
+        // 守卫按记录身份（#395 P3，isLoadActive 同款内联）：active.has
+        // (addonId) 在同组件新代次在场时会让已释放代次的迟到调用误放行——
+        // 扩展 push 进旧记录却永不进聚合（聚合只遍历 active），返回 true
+        // 但扩展不生效。比对 active 条目是否为本装载记录本身，不符即拒绝。
+        if (!isLoadActive(loadRecord) || page !== 'editor' || !env.attachExtensions) {
           return false
         }
         loadRecord.extensionParts.push(extension)
@@ -441,7 +450,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         return true
       },
       mountRoot: () => {
-        if (!active.has(loadRecord.addonId) || page !== 'settings') {
+        if (!isLoadActive(loadRecord) || page !== 'settings') {
           return null
         }
         const root = document.createElement('div')
@@ -468,7 +477,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       },
       channel: {
         request: (topic, payload, opts) => {
-          if (!active.has(loadRecord.addonId)) {
+          if (!isLoadActive(loadRecord)) {
             counters.releasedChannelRequests++
             return Promise.resolve({ ok: false as const, reason: 'released' as const })
           }
@@ -505,8 +514,10 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         },
       },
       onDispose: (callback) => {
-        if (!active.has(loadRecord.addonId)) {
-          // 已终结代次的迟到登记：立即执行清理，不滞留（重复释放无害）
+        if (!isLoadActive(loadRecord)) {
+          // 已终结代次的迟到登记：立即执行清理，不滞留（重复释放无害；
+          // 记录身份口径——addonId 在场不等于本代次在场，滞留进已脱离
+          // active 的旧记录会让回调永不执行）
           try {
             callback()
           } catch {
