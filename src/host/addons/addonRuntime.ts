@@ -208,7 +208,11 @@ export class AddonRuntime {
     return plans
   }
 
-  /** 停用/故障/释放时的编辑器 unload 意图（携带最后装载代次；从未装载为 null） */
+  /** 停用/故障/释放时的编辑器 unload 意图（携带最后装载代次；从未装载
+   *  为 null）。观测/测试面：生产 unload 不消费此方法——由面板桥按
+   *  record.pushed 与 desired 的对账驱动推送（addonWiring 的
+   *  pushEditorDirectives）。高水位恢复后未再装载的 record 其代次非 0
+   *  但不代表本 record 生命周期内装载过，据此下发会是空 unload */
   lastEditorUnloadDirective(addonId: string): AddonPageDirective | null {
     const record = this.records.get(addonId)
     if (!record || record.editorGeneration === 0) return null
