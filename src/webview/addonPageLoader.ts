@@ -609,11 +609,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       return outcome
     }
 
-    if (active.has(manifest.addonId)) {
+    const resident = active.get(manifest.addonId)
+    if (resident && resident.generation === manifest.generation) {
       // 对齐设计 §2.2：同一接入代次再次注册返回 AlreadyRegistered
       const outcome: AddonLoadOutcome = { ok: false, reason: 'already-loaded' }
       env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, page, outcome })
       return outcome
+    }
+    if (resident) {
+      // 换代指令（#395 回归）：宿主恢复时 setEnabled→notify 先推旧代次
+      // load、enable 完成递增代次后再推新代次 load（T09 集成实证的 g1→g2
+      // 连推）——不同代次的 load 是换代信号，先释放在场旧代次再装载新
+      // 代次（宿主最新代次为准；旧代次指令不得回收新代次的对称边界在
+      // unload 侧 stale-generation，两向各自成立）
+      releaseLoad(resident, 'released')
     }
     const loadStartedAt = now()
 

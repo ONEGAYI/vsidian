@@ -132,11 +132,11 @@ describe('T02 生产装载器：装载与身份', () => {
     expect(h.sent.at(-1)).toMatchObject({ type: 'addon.loaded', outcome: { ok: true } })
   })
 
-  it('同一组件重复装载 → already-loaded（对齐设计的 AlreadyRegistered 语义）', async () => {
+  it('同一接入代次重复装载 → already-loaded（对齐设计的 AlreadyRegistered 语义）', async () => {
     const h = harness()
     registerFactory(h, () => {})
     await h.handle.load(manifest())
-    const second = await h.handle.load(manifest({ generation: 2 }))
+    const second = await h.handle.load(manifest())
     expect(second).toEqual({ ok: false, reason: 'already-loaded' })
     expect(h.handle.stats().active[0].generation).toBe(1)
   })
@@ -651,7 +651,7 @@ describe('#395 P3 装载并发串行化（按 addonId 在途链）', () => {
     expect(headLinks(CSS_URI).length).toBe(0)
   })
 
-  it('并发双 load（宿主未发 unload）：终态唯一——先到代次生效、后到 already-loaded、无孤儿样式', async () => {
+  it('并发双 load（宿主未发 unload）：终态唯一——后到新代次换代生效、先到代次完整释放、无孤儿样式', async () => {
     let loadScriptImpl: (uri: string) => Promise<{ ok: true }> = async () => ({ ok: true })
     const h = harness({ loadCss: undefined, loadScript: (uri) => loadScriptImpl(uri) })
     let releaseGen1!: () => void
@@ -669,12 +669,18 @@ describe('#395 P3 装载并发串行化（按 addonId 在途链）', () => {
     headLinks(CSS_URI).forEach((link) => link.dispatchEvent(new window.Event('load')))
     await settle()
     releaseGen1()
+    await settle()
+    // g1 落地后被 g2 换代释放（link 撤下），g2 挂上新 link——派发其 onload
+    headLinks(CSS_URI).forEach((link) => link.dispatchEvent(new window.Event('load')))
     const outcome1 = await p1
     const outcome2 = await p2
     expect(outcome1.ok).toBe(true)
-    expect(outcome2).toEqual({ ok: false, reason: 'already-loaded' })
-    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
-    // 后到代次未装载（already-loaded 在样式装载前拒绝）：head 只留 gen1 的 link
+    // 后到新代次是换代指令（#395 回归修订：宿主恢复连推 g1→g2 实证）——
+    // 串行链上 g1 落地后 g2 释放旧代次再装载，终态 g2
+    expect(outcome2.ok).toBe(true)
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    expect(h.handle.stats().history.some((e) => e.generation === 1 && e.ended === 'released')).toBe(true)
+    // gen1 的 link 随换代释放撤下，gen2 装载重挂：head 只留一条（终态无孤儿）
     expect(headLinks(CSS_URI).length).toBe(1)
   })
 })
@@ -817,5 +823,41 @@ describe('#395 P3 追加：SDK 守卫记录身份统一收紧（旧代次句柄�
     } finally {
       container.remove()
     }
+  })
+})
+
+describe('#395 回归钉住：换代 load 指令按最新代次落地（宿主恢复连推 g1/g2）', () => {
+  /** 场景还原（T09 集成实证）：宿主恢复（setEnabled→notify 先推旧代次
+   *  load，enable 完成递增代次后再推新代次 load）会产生 g1→g2 连推。
+   *  串行链按到达序执行后 g1 落地、g2 撞 already-loaded——页面停在旧
+   *  代次，宿主权威代次失配、候选上报全被拒收，恢复失效。页面侧正确
+   *  语义：不同代次的 load 是换代指令——先释放在场旧代次再装载新代次
+   *  （宿主最新代次为准）；同代次重复 load 维持 already-loaded 幂等。 */
+  it('unload(g1) → load(g1) → load(g2)：g1 释放留痕、g2 装载成功', async () => {
+    const h = harness()
+    const factories: number[] = []
+    const onFactory = () => factories.push(factories.length)
+    registerFactory(h, onFactory)
+    await h.handle.load(manifest({ generation: 1 }))
+    await h.handle.unload(ADDON_ID, 1)
+    registerFactory(h, onFactory)
+    const first = await h.handle.load(manifest({ generation: 1 }))
+    expect(first.ok).toBe(true)
+    registerFactory(h, onFactory)
+    const second = await h.handle.load(manifest({ generation: 2 }))
+    expect(second.ok).toBe(true)
+    expect(factories).toHaveLength(3)
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    const history = h.handle.stats().history
+    expect(history.some((e) => e.generation === 1 && e.ended === 'released')).toBe(true)
+  })
+
+  it('同代次重复 load 仍 already-loaded（幂等语义不变）', async () => {
+    const h = harness()
+    registerFactory(h, () => {})
+    await h.handle.load(manifest({ generation: 1 }))
+    const dup = await h.handle.load(manifest({ generation: 1 }))
+    expect(dup).toMatchObject({ ok: false, reason: 'already-loaded' })
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
   })
 })
