@@ -5,7 +5,7 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "d470c81458742fbe7f80acd1c6cfe6c3d1f37cb1",
+      "sha": "ee1b22b9608e25e02f669902afeeaa7d0dedfd2f",
       "ref": "HEAD",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
@@ -332,7 +332,7 @@
       "purpose": "页面 bundle 自构造的 CM6 模块命名空间（state 与 view）与语法树读取子集（language，#406 起），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension 与做基于语法树的行类型判定。",
       "semantics": {
         "lifecycle": "仅编辑器页提供（设置页 undefined）；使用前须在清单 experimental 声明 cm6 兼容范围，且范围含宿主提供的入口版本才判兼容。",
-        "language": "language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。",
+        "language": "language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。已知边界：live 编辑器的 markdown 语法树是内核私有增量解析（不经 @codemirror/language 的 language facet 装配），syntaxTree 在 live 状态上恒为未解析空树——行类型判定类需求不能依赖本入口，平台级树查询能力另行评估。",
         "errors": "宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。"
       },
       "signatures": [
