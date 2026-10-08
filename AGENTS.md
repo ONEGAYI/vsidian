@@ -117,6 +117,8 @@ vsidian/
 │   ├── features.md # README 功能与设置详解下沉页
 │   ├── perf/…      # 性能实测数据与测量工具说明
 │   ├── research/   # 技术调研报告
+│   │   ├── addon-csp-dynamic-eval-probe.md        # 动态代码 CSP 探针报告
+│   │   ├── addon-fold-capability-probe.md         # 折叠能力载体盘点探针
 │   │   ├── data/                                  # 探针证据数据目录
 │   │   │   ├── addon-v02-probe-results.json        # V02 探针证据数据
 │   │   │   ├── appearance-probe-dark-custom.json   # 外观探针暗色轮证据

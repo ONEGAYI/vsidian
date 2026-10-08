@@ -26,6 +26,7 @@ vsidian/
         ├── 2026-10-table-height-opt.md                # 多列表格高度优化实测报告
         ├── 2026-10-wikilink-completion-capacity.md    # 双链联想容量与费用基准解读（#382）
         └── data/                                      # 性能探针原始报告数据
+            ├── addon-behavior-chain-perf.json         # 行为链性能档位数据
             ├── browser-test-runner.json               # 浏览器调度实测数据
             ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
             ├── hover-embed-perf.json                  # #225 状态层嵌入装饰实测数据
