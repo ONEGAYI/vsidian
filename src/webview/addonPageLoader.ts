@@ -218,6 +218,14 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     }
     return merged
   }
+  /** 终结留痕（释放/故障/装载失败均记）：环形上限防反复启停/装载失败
+   *  循环下的无界增长（stats() 全量序列化——对齐 addonPageEvents 200） */
+  const pushHistory = (entry: AddonLoaderStats['history'][number]): void => {
+    history.push(entry)
+    while (history.length > 200) {
+      history.shift()
+    }
+  }
   const pendingRequests = new Map<string, PendingChannelRequest>()
   const history: AddonLoaderStats['history'] = []
   const counters = {
@@ -555,13 +563,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         entry.settle({ ok: false, reason: 'released' })
       }
     }
-    history.push({ addonId: loadRecord.addonId, generation: loadRecord.generation, ended, reason, disposals })
+    pushHistory({ addonId: loadRecord.addonId, generation: loadRecord.generation, ended, reason, disposals })
     return { disposals, releasedRequests }
   }
 
   const load = async (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> => {
     const fail = (reason: AddonLoadFailureReason, detail?: string): AddonLoadOutcome => {
-      history.push({ addonId: manifest.addonId, generation: manifest.generation, ended: 'load-failed', reason, detail })
+      pushHistory({ addonId: manifest.addonId, generation: manifest.generation, ended: 'load-failed', reason, detail })
       const outcome: AddonLoadOutcome = { ok: false, reason, detail }
       env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, page, outcome })
       return outcome

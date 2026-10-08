@@ -411,8 +411,7 @@ describe('T02 生产装载器：真实 CM6 扩展接入与释放', () => {
 })
 
 describe('评审：多组件扩展槽聚合与独立释放', () => {
-  it('两个组件 registerExtension 并存；单个释放只摘自身段、全部释放清空', async () => {
-    const h = harness()
+  it('两个组件 registerExtension 并存；单个释放只摘自身段、全部释放清空', async () => {    const h = harness()
     const markerA: StateFieldType<number> = StateField.define<number>({ create: () => 1, update: (v) => v })
     const markerB: StateFieldType<number> = StateField.define<number>({ create: () => 2, update: (v) => v })
     // 时序对齐生产：登记随各自 load 的脚本装载发生（一次装载只接入一个
@@ -443,6 +442,17 @@ describe('评审：多组件扩展槽聚合与独立释放', () => {
     // 再释放 A：聚合为空（不再以 null 清掉其余组件的扩展）
     await h.handle.unload('addon.a', 1)
     expect(h.attached.at(-1)).toHaveLength(0)
+  })
+
+  it('history 终结留痕有环形上限：反复装载失败不无界增长（评审 R8）', async () => {
+    const h = harness()
+    // 不登记任何工厂：每次 load 直接失败留痕（no-factory-registered）
+    for (let i = 0; i < 205; i++) {
+      await h.handle.load(manifest({ generation: i + 1 }))
+    }
+    const history = h.handle.stats().history
+    expect(history.length).toBe(200)
+    expect(history.at(-1)).toMatchObject({ ended: 'load-failed', reason: 'no-factory-registered', generation: 205 })
   })
 })
 
