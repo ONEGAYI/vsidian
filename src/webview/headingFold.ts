@@ -22,8 +22,10 @@
 // - 标题口径单一事实源是语法树节点（headingLevelOf + frontmatter 排除），
 //   增量树已由 liveDecorationsField 随每笔事务增量维护，直查不重复解析、
 //   无「每次 docChanged 全文档重扫」；
-// - 折叠集为空的常规编辑零成本（装饰重建先判键集空即返回），增量表的
-//   每击键全表 mapPos 反而是常驻开销；
+// - 折叠集为空的常规编辑：装饰重建先判键集空即返回；箭头插件的
+//   foldable 派生走 (doc, tree) 共享缓存（同一 doc 版本内四处消费共享
+//   一次计算），rangeHasNonSpace 正文行首行早退、均摊 ~O(1) 行/标题
+//   ——空白行密集的骨架稿是已知最坏面（档位数据 out/test/rl2-arrow-perf.log）；
 // - 块级剪枝遍历（只下降容器块节点）把直查成本压到 O(块节点数)，与
 //   extractOutline 的语义等价由对拍单测钉住（含容器白名单完整性）。
 //
@@ -161,6 +163,26 @@ function rangeHasNonSpace(doc: Text, from: number, to: number): boolean {
  */
 export function foldableHeadingSpans(headings: readonly HeadingInfo[], doc: Text): HeadingFoldSpan[] {
   return headingSpansOf(headings, doc.length).filter((s) => rangeHasNonSpace(doc, s.hideFrom, s.hideTo))
+}
+
+/** 可折叠集共享缓存：同一 doc 版本（Text 对象身份——每笔编辑即新对象，
+ *  天然失效）与同一增量树引用下，箭头插件重建、foldAll 执行、箭头点击
+ *  命中判定与 #410 foldable 查询共享一次 foldable 派生（审查轮 F3：
+ *  消除同一事务内的重复逐 span 扫描）。装饰侧只在键集非空时按键计算、
+ *  不走本缓存。成本口径：rangeHasNonSpace 逐行扫描、正文行首行命中即
+ *  早退（均摊 ~O(1) 行/标题）；空白行密集的骨架稿是已知最坏面，档位
+ *  数据见 out/test/rl2-arrow-perf.log。 */
+const foldableCache = new WeakMap<Text, { tree: Tree | undefined; spans: HeadingFoldSpan[] }>()
+
+/** (doc, tree) → 可折叠集（共享缓存派生；树引用变化时重算） */
+export function foldableSpansCached(doc: Text, tree: Tree | undefined): HeadingFoldSpan[] {
+  const hit = foldableCache.get(doc)
+  if (hit && hit.tree === tree) {
+    return hit.spans
+  }
+  const spans = foldableHeadingSpans(collectHeadings(doc, tree), doc)
+  foldableCache.set(doc, { tree, spans })
+  return spans
 }
 
 /**
@@ -400,6 +422,11 @@ export const headingFoldField = StateField.define<ReadonlySet<number>>({
       }
     }
     if (tr.docChanged) {
+      if (next.size === 0) {
+        // 空集无映射必要：返回共享引用，避免每笔键入分配新 Set 使
+        // foldChanged 引用比较恒真（箭头/装饰重建门槛保持真实判定）
+        return EMPTY_FOLD
+      }
       const mapped = new Set<number>()
       for (const pos of next) {
         mapped.add(tr.changes.mapPos(pos, 1))
@@ -447,7 +474,7 @@ export class HeadingFoldEllipsisWidget extends WidgetType {
     })
     btn.addEventListener('click', (event) => {
       event.stopPropagation()
-      view.dispatch({ effects: headingFoldToggle.of(this.key) })
+      toggleHeadingFoldAt(view, this.key)
     })
     return btn
   }
@@ -526,6 +553,18 @@ export function setHeadingFolds(view: EditorView, next: ReadonlySet<number>): vo
   view.dispatch(spec)
 }
 
+/** 箭头/省略号点击的统一翻转入口（审查轮 F1 修复）：与键位、命令面板、
+ *  API 编程触发同走 setHeadingFolds——折叠方向含光标迁移，两入口行为
+ *  不分叉；翻转语义 = 键在集内删除、不在集内加入。 */
+export function toggleHeadingFoldAt(view: EditorView, key: number): void {
+  const current = view.state.field(headingFoldField, false) ?? EMPTY_FOLD
+  const next = new Set(current)
+  if (!next.delete(key)) {
+    next.add(key)
+  }
+  setHeadingFolds(view, next)
+}
+
 // ---- T02（#413）：五操作执行体（键位本地分支与 ui.command 共用） ----
 
 /** 标题折叠操作 id（#413 五操作；与 keybindings.ts UI_OPERATIONS 的
@@ -580,8 +619,8 @@ export function applyHeadingFoldOperation(view: EditorView, op: HeadingFoldOpera
       return
     }
     case 'headingFoldAll': {
-      // 全部可折叠标题（空节/纯空白节排除）
-      const spans = foldableHeadingSpans(headings, state.doc)
+      // 全部可折叠标题（空节/纯空白节排除；共享缓存路径）
+      const spans = foldableSpansCached(state.doc, tree)
       if (!spans.length) return
       const next = new Set(keys)
       for (const span of spans) next.add(span.key)
@@ -632,7 +671,15 @@ export function headingFoldArrowStates(
   foldKeys: ReadonlySet<number>,
   doc: Text,
 ): Array<{ lineFrom: number; folded: boolean }> {
-  return foldableHeadingSpans(headings, doc).map((span) => ({
+  return arrowStatesFromSpans(foldableHeadingSpans(headings, doc), foldKeys)
+}
+
+/** 可折叠集 → 箭头态（共享缓存路径的消费形态） */
+function arrowStatesFromSpans(
+  spans: readonly HeadingFoldSpan[],
+  foldKeys: ReadonlySet<number>,
+): Array<{ lineFrom: number; folded: boolean }> {
+  return spans.map((span) => ({
     lineFrom: span.key,
     folded: foldKeys.has(span.key),
   }))
@@ -675,6 +722,13 @@ class HeadingFoldArrowMarker extends GutterMarker {
       : 'vsidian-fold-arrow'
     // aria-expanded 反映当前内容态（对齐 buildFoldButton：折叠中 = false）
     btn.setAttribute('aria-expanded', this.folded ? 'false' : 'true')
+    // 审查轮 F2 修复：同省略号（#190/#414）与代码卡 buildFoldButton 先例，
+    // 防点击夺焦——Chromium mousedown 默认把焦点移到按钮（contentDOM
+    // 失焦、后续 Space/Enter 激活聚焦按钮再次翻转折叠）
+    btn.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+    })
     const word = this.folded ? 'headingfold.unfold' : 'headingfold.fold'
     btn.setAttribute('aria-label', t(word))
     btn.setAttribute('data-tooltip', t(word))
@@ -721,7 +775,9 @@ const headingFoldArrowsPlugin = ViewPlugin.fromClass(
     build(state: import('@codemirror/state').EditorState): RangeSet<GutterMarker> {
       const keys = state.field(headingFoldField, false) ?? new Set<number>()
       const tree = state.field(liveDecorationsField, false)?.tree
-      const states = headingFoldArrowStates(collectHeadings(state.doc, tree), keys, state.doc)
+      // 共享缓存路径（审查轮 F3）：同一 doc 版本内与 foldAll/点击命中/
+      // API foldable 查询共享一次 foldable 派生
+      const states = arrowStatesFromSpans(foldableSpansCached(state.doc, tree), keys)
       if (states.length === 0) {
         return RangeSet.empty as RangeSet<GutterMarker>
       }
@@ -791,14 +847,14 @@ const headingFoldGutter = gutter({
       const from = line.from
       const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
       const tree = view.state.field(liveDecorationsField, false)?.tree
-      const hit = headingFoldArrowStates(collectHeadings(view.state.doc, tree), keys, view.state.doc)
+      const hit = arrowStatesFromSpans(foldableSpansCached(view.state.doc, tree), keys)
         .some((s) => s.lineFrom === from)
       if (!hit) {
         return false
       }
-      // effect 直驱（规格纪律：与键位/API 编程触发同链路）；折叠含光标时
-      // 的选区迁移由 setHeadingFolds 承担——箭头路径走 toggle 单键翻转
-      view.dispatch({ effects: headingFoldToggle.of(from) })
+      // 统一入口（审查轮 F1 修复）：与键位/API 编程触发同链路 setHeadingFolds
+      // ——折叠方向含光标迁移，与 toggle 裸 effect 的行为不再分叉
+      toggleHeadingFoldAt(view, from)
       return true
     },
   },

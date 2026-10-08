@@ -60,7 +60,7 @@ import {
   clampSelectionOutOfFolds,
   collectHeadings,
   effectiveHeadingFolds,
-  foldableHeadingSpans,
+  foldableSpansCached,
   headingFoldExtension,
   headingFoldField,
   setHeadingFolds,
@@ -940,14 +940,15 @@ export class LiveEditorInstance {
     return effectiveHeadingFolds(keys, collectHeadings(view.state.doc, tree), view.state.doc)
   }
 
-  /** 实例侧全部可折叠标题区间（空节/纯空白节排除） */
+  /** 实例侧全部可折叠标题区间（空节/纯空白节排除；共享缓存路径——与
+   *  箭头插件/foldAll 同一 doc 版本共享一次派生） */
   foldableHeadingSpansForAddon(): readonly AddonHeadingFoldSpan[] | null {
     const view = this.view
     if (!view) {
       return null
     }
     const tree = view.state.field(liveDecorationsField, false)?.tree
-    return foldableHeadingSpans(collectHeadings(view.state.doc, tree), view.state.doc)
+    return foldableSpansCached(view.state.doc, tree)
   }
 
   /** 五操作执行：直传本体执行体（选区驱动三操作 + 全文档两操作）；
@@ -965,7 +966,7 @@ export class LiveEditorInstance {
     if (operation === 'foldAll' && options?.upToLevel !== undefined) {
       const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
       const tree = view.state.field(liveDecorationsField, false)?.tree
-      const spans = foldableHeadingSpans(collectHeadings(view.state.doc, tree), view.state.doc)
+      const spans = foldableSpansCached(view.state.doc, tree)
         .filter((s) => s.level <= options.upToLevel!)
       if (spans.length > 0) {
         const next = new Set(keys)
@@ -991,7 +992,7 @@ export class LiveEditorInstance {
     const current = view.state.field(headingFoldField, false) ?? new Set<number>()
     const tree = view.state.field(liveDecorationsField, false)?.tree
     const valid = fold
-      ? new Set(foldableHeadingSpans(collectHeadings(view.state.doc, tree), view.state.doc).map((s) => s.key))
+      ? new Set(foldableSpansCached(view.state.doc, tree).map((s) => s.key))
       : this.effectiveFoldKeys(view)
     const next = new Set(current)
     let hit = false

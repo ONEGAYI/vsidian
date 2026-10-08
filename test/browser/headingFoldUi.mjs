@@ -109,11 +109,13 @@ try {
     await check(errors, '悬停显现/移开消失、箭头可达与零布局位移')
   }
 
-  // ---- 场景 2：真实点击箭头折叠（绘制层断言） ----
+  // ---- 场景 2：真实点击箭头折叠（绘制层断言 + 光标迁移/焦点不夺） ----
   {
     const { page, errors } = await openPage()
     const left = await page.evaluate(() => window.contentBox().left)
-    await page.evaluate(() => window.locate(0))
+    // 光标先落在 T2 节正文内（beta）——审查轮 F1/F2 断言面：折叠方向须把
+    // 光标迁到标题行行尾，且点击不得把焦点夺给箭头按钮
+    await page.evaluate((offset) => window.locate(offset), DOC.indexOf('beta'))
     // 武装后点击 T2 行箭头（文档序第二枚：T1、T2、Blank）
     await page.mouse.move(left - 30, 100)
     const boxes = await page.evaluate(() => window.arrowBoxes())
@@ -122,6 +124,11 @@ try {
     assert.equal(boxes[1].expanded, 'true', '未折叠态 aria-expanded=true')
     await page.mouse.click(boxes[1].x + boxes[1].w / 2, boxes[1].y + boxes[1].h / 2)
     assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T2], '点击箭头应折叠 T2')
+    assert.equal(await page.evaluate(() => window.selHead()), T2 + 5, '光标在节内点击箭头：迁移到标题行行尾（F1）')
+    assert.equal(await page.evaluate(() => {
+      const active = document.activeElement
+      return !(active instanceof HTMLElement && active.closest('.vsidian-fold-arrow'))
+    }), true, '点击后焦点未被箭头按钮夺走（F2：Space/Enter 不再意外翻转）')
     const probe = await page.evaluate(() => window.probe())
     assert.equal(probe.foldCount, 1, '折叠区间数 1')
     assert.equal(probe.arrowCollapsed, true, '首箭头应为折叠态（常显右向）')
@@ -132,7 +139,7 @@ try {
     assert.equal(await page.evaluate(() => window.headingVisible('T2')), true, '标题行保持可见')
     assert.equal(await page.evaluate(() => window.editRequestCount()), 0, '折叠零写回')
     await page.close()
-    await check(errors, '点击箭头折叠：隐藏区不可见/标题与省略号可见/常显箭头')
+    await check(errors, '点击箭头折叠：隐藏区不可见/标题与省略号可见/常显箭头/光标迁移/焦点不夺')
   }
 
   // ---- 场景 3：点击省略号展开 + 滚动无错乱 ----

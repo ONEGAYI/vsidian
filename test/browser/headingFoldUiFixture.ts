@@ -73,6 +73,10 @@ Object.assign(window, {
     const keys = mainView(document.getElementById('app2')!)?.state.field(headingFoldField, false)
     return keys ? [...keys].sort((a, b) => a - b) : []
   },
+  /** 主实例主选区 head（箭头点击的光标迁移断言用） */
+  selHead(): number | null {
+    return mainView()?.state.selection.main.head ?? null
+  },
   /** paint 探针（生产 collectHeadingFoldPaint 采集体；浏览器有布局，
    *  visible 类字段为绘制层断言依据） */
   probe() {

@@ -47,6 +47,7 @@ import {
   resolveHeadingToggleTargets,
   resolveHeadingUnfoldTargets,
   setHeadingFoldBindingHints,
+  toggleHeadingFoldAt,
   unfoldAround,
   unfoldAroundKeys,
 } from '../../src/webview/headingFold'
@@ -189,6 +190,16 @@ describe('headingFoldField：StateField 语义与坐标生命周期', () => {
     const edited3 = state.update({ changes: { from: 0, to: 0, insert: 'note\n' } }).state
     expect(edited3.field(headingFoldField).has(5)).toBe(true)
     expect(edited3.doc.sliceString(5, 9)).toBe('# A\n')
+  })
+
+  it('标题行行首拆行：键随内容下移仍命中同一标题，折叠保持（3e4855db 定案）', () => {
+    let state = foldState('# A\nx\nmore\n')
+    state = fold(state, [0])
+    // 标题行行首 Enter：键（0）随内容下移到新行首（mapPos assoc=1 语义），
+    // 仍命中同一标题——折叠保持（规格生命周期表 T01 实测定案格）
+    const split = state.update({ changes: { from: 0, to: 0, insert: '\n' } }).state
+    expect(split.field(headingFoldField).has(1)).toBe(true)
+    expect(split.doc.sliceString(1, 5)).toBe('# A\n')
   })
 
   it('外部同步增量（externalSync 注解事务）：折叠跨同步保持，区间按新文档重派生', () => {
@@ -548,6 +559,22 @@ describe('applyHeadingFoldOperation（T02 五操作执行体）', () => {
     applyHeadingFoldOperation(view, 'headingUnfoldAll')
     expect([...view.state.field(headingFoldField)]).toEqual([])
     // 零写回：文档全程未变
+    expect(view.state.doc.toString()).toBe(DOC)
+    view.destroy()
+  })
+
+  it('箭头统一入口 toggleHeadingFoldAt：折叠方向迁移光标到标题行行尾，展开方向不迁移（审查轮 F1）', () => {
+    // 光标先落在 T2 隐藏区内（beta）——箭头/省略号点击路径旧行为是直接
+    // toggle 裸 effect（光标困在隐藏区），修复后统一走 setHeadingFolds
+    const view = viewOf(DOC, DOC.indexOf('beta'))
+    toggleHeadingFoldAt(view, T2)
+    expect([...view.state.field(headingFoldField)]).toEqual([T2])
+    expect(view.state.selection.main.head).toBe(T2 + 5)
+    // 展开方向：光标已不在任何隐藏区，选区原样（迁移只在折叠方向发生）
+    const headBefore = view.state.selection.main.head
+    toggleHeadingFoldAt(view, T2)
+    expect([...view.state.field(headingFoldField)]).toEqual([])
+    expect(view.state.selection.main.head).toBe(headBefore)
     expect(view.state.doc.toString()).toBe(DOC)
     view.destroy()
   })
