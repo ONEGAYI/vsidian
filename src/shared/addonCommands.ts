@@ -25,6 +25,14 @@ import type { BindingMode } from './keybindings'
  *  点号保留给命名空间分隔符，含点即伪造跨组件或内置身份的尝试） */
 const ADDON_LOCAL_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 
+/**
+ * 展示字段封顶（#395 P3）：名称类用户可见文本（命令 title、菜单 label、
+ * 按钮 label/iconText、面板 title、渲染提供者 label）注册期统一封 256。
+ * 超限整批拒绝并返回可辨认 reason（不截断、不静默）——异常大载荷不进
+ * 协议与界面，量级对齐行为面既有名称字段的合理上界。
+ */
+export const ADDON_DISPLAY_TEXT_MAX = 256
+
 /** 命名空间限定后的完整 ID 形态（观测/断言面） */
 export const ADDON_MENU_ITEM_ID_PATTERN = /^[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]{1,64}$/
 
@@ -38,6 +46,7 @@ export type AddonDefaultBindingsProblem = 'not-string' | 'invalid-chord' | 'tab-
 export type AddonMenuItemProblem =
   | AddonLocalIdProblem
   | 'label-empty'
+  | 'label-too-long'
   | 'icon-key'
   | 'command-local-id'
 
@@ -46,7 +55,8 @@ export type AddonMenuItemProblem =
 export interface AddonCommandDefinition {
   /** 组件内局部 ID（无点号；命名空间前缀由平台注入） */
   id: string
-  /** 用户可见标题（自由文本——组件文案不进 Vsidian 内置字典，ADR 5.5） */
+  /** 用户可见标题（自由文本——组件文案不进 Vsidian 内置字典，ADR 5.5；
+   *  封顶 ADDON_DISPLAY_TEXT_MAX，超限注册拒绝——#395 P3） */
   title: string
   /** 生效模式（由代码声明） */
   mode: BindingMode
@@ -124,6 +134,9 @@ export function addonMenuItemProblem(def: AddonMenuItemDefinition): AddonMenuIte
   if (typeof def.label !== 'string' || def.label.length === 0) {
     return 'label-empty'
   }
+  if (def.label.length > ADDON_DISPLAY_TEXT_MAX) {
+    return 'label-too-long'
+  }
   if (def.iconKey !== undefined && !(CONTEXT_MENU_ICON_KEYS as readonly string[]).includes(def.iconKey)) {
     return 'icon-key'
   }
@@ -157,6 +170,9 @@ export function buildAddonCommandReport(addonId: string, def: AddonCommandDefini
     return null
   }
   if (typeof def.title !== 'string' || def.title.length === 0) {
+    return null
+  }
+  if (def.title.length > ADDON_DISPLAY_TEXT_MAX) {
     return null
   }
   if (def.mode !== 'live' && def.mode !== 'reading' && def.mode !== 'both') {

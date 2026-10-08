@@ -14,6 +14,7 @@
 //
 // 身份约定：提供者稳定 ID = `${addonId}/${rendererId}`；内置实现恒为
 // 'builtin'（批次视作 0——任何新安装批次默认序上都排在其后）。
+import { ADDON_DISPLAY_TEXT_MAX } from './addonCommands'
 import { RENDERED_FENCE_LABELS } from './mermaid'
 
 /** 内置提供者稳定 ID（始终可用；对内置图形语言即 graphicRenderers 注册表） */
@@ -21,6 +22,11 @@ export const BUILTIN_RENDERER_PROVIDER_ID = 'builtin'
 
 /** 渲染提供者支持的模式（T06 统一视图口径） */
 export type AddonRendererMode = 'live' | 'reading'
+
+/** 单语言声明上限（#395 P3：语言名是围栏 info 串，64 字符已远超合理语言标记长度） */
+export const ADDON_RENDERER_LANGUAGE_MAX = 64
+/** 语言数组上限（#395 P3：单个提供者声明的支持语言数封顶，防异常大载荷进协议） */
+export const ADDON_RENDERER_LANGUAGES_MAX = 32
 
 /** 图形导出格式（可选能力；空数组 = 无图形导出，弹窗与导出降级） */
 export type AddonRendererExportFormat = 'svg' | 'png'
@@ -279,12 +285,18 @@ function isExportFormat(value: unknown): value is AddonRendererExportFormat {
   return value === 'svg' || value === 'png'
 }
 
-/** 提供者声明守卫（上报与广播共用的内层形状） */
+/** 提供者声明守卫（上报与广播共用的内层形状；#395 P3 封顶：label 256、
+ *  languages 32 项且单项 64——超限整体拒绝，webview 注册与宿主上报同面生效） */
 export function isAddonRendererProviderInfo(value: unknown): value is AddonRendererProviderInfo {
   if (!isRecord(value)) return false
   if (typeof value['rendererId'] !== 'string' || value['rendererId'] === '') return false
   if (typeof value['label'] !== 'string' || value['label'] === '') return false
-  if (!Array.isArray(value['languages']) || value['languages'].length === 0 || !value['languages'].every((l) => typeof l === 'string' && l.trim() !== '')) {
+  if (value['label'].length > ADDON_DISPLAY_TEXT_MAX) return false
+  if (
+    !Array.isArray(value['languages']) || value['languages'].length === 0 ||
+    value['languages'].length > ADDON_RENDERER_LANGUAGES_MAX ||
+    !value['languages'].every((l) => typeof l === 'string' && l.trim() !== '' && l.length <= ADDON_RENDERER_LANGUAGE_MAX)
+  ) {
     return false
   }
   if (!Array.isArray(value['modes']) || value['modes'].length === 0 || !value['modes'].every(isMode)) {

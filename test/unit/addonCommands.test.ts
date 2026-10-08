@@ -12,8 +12,10 @@ import {
   addonLocalIdProblem,
   addonDefaultBindingsProblem,
   addonMenuItemProblem,
+  buildAddonCommandReport,
   namespacedAddonId,
   ADDON_MENU_ITEM_ID_PATTERN,
+  ADDON_DISPLAY_TEXT_MAX,
 } from '../../src/shared/addonCommands'
 import {
   setRuntimeOperations,
@@ -188,6 +190,19 @@ describe('T10 菜单注册形状校验', () => {
     expect(addonMenuItemProblem({ id: 'stamp', label: '' })).toBe('label-empty')
     expect(addonMenuItemProblem({ id: 'stamp', label: 'x', iconKey: 'not-in-table' })).toBe('icon-key')
     expect(addonMenuItemProblem({ id: 'bad.id', label: 'x' })).toBe('dot')
+  })
+})
+
+describe('#395 P3 展示字段封顶（名称类 256，超限整批拒绝不截断）', () => {
+  it('命令 title：边界 256 通过、257 拒绝（buildAddonCommandReport 整体返回 null）', () => {
+    const base = { id: 'stamp', mode: 'live' as const }
+    expect(buildAddonCommandReport('publisher.addon', { ...base, title: 'a'.repeat(ADDON_DISPLAY_TEXT_MAX) })).not.toBeNull()
+    expect(buildAddonCommandReport('publisher.addon', { ...base, title: 'a'.repeat(ADDON_DISPLAY_TEXT_MAX + 1) })).toBeNull()
+  })
+
+  it('菜单 label：边界 256 通过、超限以 label-too-long 拒绝', () => {
+    expect(addonMenuItemProblem({ id: 'stamp', label: 'a'.repeat(ADDON_DISPLAY_TEXT_MAX) })).toBeNull()
+    expect(addonMenuItemProblem({ id: 'stamp', label: 'a'.repeat(ADDON_DISPLAY_TEXT_MAX + 1) })).toBe('label-too-long')
   })
 })
 
