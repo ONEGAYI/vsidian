@@ -898,3 +898,113 @@ export const headingFoldExtension: Extension = [
   headingFoldDecorations,
   headingFoldGutterExtension,
 ]
+
+// ---- T04（#415）：落点展开（reveal 族统一机制）与外部同步光标钳制 ----
+// 规格「七、落点展开」：任何把选区/滚动定位到折叠隐藏区内的链路，先展开
+// 包含落点的全部已折叠区间（effect 派发）再执行定位。展开是**永久展开**
+// ——不做临时折叠窥视（peek 需折叠态快照与超时恢复，列为后续可选）。
+// 接线点：findLocate（查找命中/替换定位）、locateOffset（view.locate 通道
+// ——锚点跳转/搜索结果/双链/链接跳转/大纲点击的共同汇聚）、setViewMode
+// reading→live 回切（modeAnchor 落点）。
+
+/**
+ * 落点展开键集派生（纯函数）：移除「包含 [from, to] 区间内任一端点的
+ * 全部有效折叠」后的新键集——嵌套折叠（外层与内层都罩住落点）一并
+ * 展开。无包含折叠返回 null（无需事务）。端点在隐藏区判定 = 开区间
+ * (hideFrom, hideTo)：标题块行尾与节末下一标题行首均属可见锚点，不算
+ * 隐藏区。脱靶键原样保留（update 只做映射不修剪纪律）。
+ */
+export function unfoldAroundKeys(
+  foldKeys: ReadonlySet<number>,
+  headings: readonly HeadingInfo[],
+  doc: Text,
+  from: number,
+  to?: number,
+): ReadonlySet<number> | null {
+  const folds = effectiveHeadingFolds(foldKeys, headings, doc)
+  if (folds.length === 0) {
+    return null
+  }
+  const toPos = to ?? from
+  let hit = false
+  const next = new Set(foldKeys)
+  for (const f of folds) {
+    const inside =
+      (from > f.hideFrom && from < f.hideTo) || (toPos > f.hideFrom && toPos < f.hideTo)
+    if (inside) {
+      next.delete(f.key)
+      hit = true
+    }
+  }
+  return hit ? next : null
+}
+
+/**
+ * 落点展开（规格「七、落点展开」）：展开包含落点 [from, to] 的全部有效
+ * 折叠区间（嵌套全展开），effect 直驱（headingFoldSet，键位/箭头/API
+ * 编程触发同链路）。返回是否发生了展开；无包含折叠/未装配折叠域时零
+ * 事务返回 false。定位事务由接线点随后派发（先展开再定位）。
+ */
+export function unfoldAround(view: EditorView, from: number, to?: number): boolean {
+  const keys = view.state.field(headingFoldField, false)
+  if (!keys || keys.size === 0) {
+    return false
+  }
+  const tree = view.state.field(liveDecorationsField, false)?.tree
+  const next = unfoldAroundKeys(keys, collectHeadings(view.state.doc, tree), view.state.doc, from, to)
+  if (!next) {
+    return false
+  }
+  view.dispatch({ effects: headingFoldSet.of(next) })
+  return true
+}
+
+/**
+ * 外部同步光标钳制（规格「三、折叠与光标/选区」「折叠后进入」）：pos
+ * 落入任一有效折叠隐藏区间 → 钳到该区间辖域标题块行尾（hideFrom）；
+ * 可见区返回 null。嵌套取包含 pos 的最深区间（最近可见锚点，与
+ * migrateSelectionForFold 同口径）。clampExternalCursor（表格网格）的
+ * 同款防御思想——折叠侧判定函数。
+ */
+export function clampFoldHiddenCursor(folds: readonly HeadingFoldSpan[], pos: number): number | null {
+  let hit: HeadingFoldSpan | null = null
+  for (const f of folds) {
+    if (pos > f.hideFrom && pos < f.hideTo) {
+      if (!hit || f.hideTo - f.hideFrom < hit.hideTo - hit.hideFrom) {
+        hit = f
+      }
+    }
+  }
+  return hit ? hit.hideFrom : null
+}
+
+/**
+ * 外部同步事务后的选区钳制（T04 接线面）：逐 range 判定光标是否被外部
+ * 增量映射进折叠隐藏区，命中则钳到辖域标题行行尾；返回补事务用的完整
+ * 选区，无需钳制（无折叠域/全可见）返回 null。liveInstance 的外部同步
+ * 光标恢复路径（dispatchExternalChanges）在表格钳制后接入。
+ */
+export function clampSelectionOutOfFolds(view: EditorView): EditorSelection | null {
+  const keys = view.state.field(headingFoldField, false)
+  if (!keys || keys.size === 0) {
+    return null
+  }
+  const tree = view.state.field(liveDecorationsField, false)?.tree
+  const folds = effectiveHeadingFolds(keys, collectHeadings(view.state.doc, tree), view.state.doc)
+  if (folds.length === 0) {
+    return null
+  }
+  const sel = view.state.selection
+  let ranges: ReturnType<typeof EditorSelection.cursor>[] | null = null
+  for (let i = 0; i < sel.ranges.length; i++) {
+    const clamped = clampFoldHiddenCursor(folds, sel.ranges[i]!.head)
+    if (clamped === null) {
+      continue
+    }
+    if (!ranges) {
+      ranges = sel.ranges.slice()
+    }
+    ranges[i] = EditorSelection.cursor(clamped)
+  }
+  return ranges ? EditorSelection.create(ranges, sel.mainIndex) : null
+}

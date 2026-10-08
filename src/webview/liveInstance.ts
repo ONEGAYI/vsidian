@@ -50,7 +50,7 @@ import { liveDecorationsField, livePreviewDecorations, tableCompositionSettled, 
 import { createLinkInteractions } from './liveLinks'
 import { liveMath } from './liveMath'
 import { liveMermaid, rendererLanguagesChanged } from './liveMermaid'
-import { headingFoldExtension } from './headingFold'
+import { clampSelectionOutOfFolds, headingFoldExtension } from './headingFold'
 import { liveEmbed } from './liveEmbed'
 import { liveBlockId } from './liveBlockId'
 import { anchorFlash } from './anchorFlash'
@@ -1572,6 +1572,13 @@ export class LiveEditorInstance {
     }
     if (ranges) {
       view.dispatch({ selection: EditorSelection.create(ranges, sel.mainIndex) })
+    }
+    // T04（#415）外部同步光标钳制：增量映射把光标带进折叠隐藏区（运行期
+    // 进入隐藏区的漏网路径——正常进入已被落点展开接住）时钳到辖域标题行
+    // 行尾；与上笔表格钳制同为 selection-only 补事务，连发只渲染最终态。
+    const foldClamped = clampSelectionOutOfFolds(view)
+    if (foldClamped) {
+      view.dispatch({ selection: foldClamped })
     }
   }
 

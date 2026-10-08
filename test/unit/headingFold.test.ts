@@ -39,12 +39,16 @@ import {
   headingFoldSet,
   headingFoldToggle,
   HeadingFoldEllipsisWidget,
+  clampFoldHiddenCursor,
+  clampSelectionOutOfFolds,
   foldableHeadingSpans,
   migrateSelectionForFold,
   resolveHeadingFoldTargets,
   resolveHeadingToggleTargets,
   resolveHeadingUnfoldTargets,
   setHeadingFoldBindingHints,
+  unfoldAround,
+  unfoldAroundKeys,
 } from '../../src/webview/headingFold'
 
 /** 最小装配：折叠本体 + 装饰 + 增量树源（liveDecorationsField；装饰与
@@ -719,3 +723,123 @@ function viewOfT03(doc: string, cursor: number): EditorView {
   })
   return new EditorView({ state, parent: document.body })
 }
+
+// ---- T04（#415）：落点展开（reveal 族统一机制）与外部同步光标钳制 ----
+// 规格「七、落点展开」「三、折叠与光标/选区（折叠后进入）」：任何把选区/
+// 滚动定位到折叠隐藏区内的链路先展开包含落点的全部已折叠区间（嵌套全
+// 展开，effect 直驱）再定位；外部同步把光标映射进隐藏区时钳制到辖域
+// 标题行行尾。接线点（findLocate / locateOffset / setViewMode 回切）在
+// syncController，浏览器套件端到端；本节钉住纯函数与 view 级行为。
+
+/** T04 测试文档：T2（##）是 T1（#）的子节；T3（#）与 T1 同级截断 */
+const R_DOC = '# T1\n\nalpha\n\n## T2\n\nbeta\n\n# T3\n\ngamma\n'
+const R_T1 = 0
+const R_T2 = R_DOC.indexOf('## T2')
+const R_T3 = R_DOC.indexOf('# T3')
+const R_ALPHA = R_DOC.indexOf('alpha')
+const R_BETA = R_DOC.indexOf('beta')
+const R_GAMMA = R_DOC.indexOf('gamma')
+
+describe('T04：落点展开键集派生（unfoldAroundKeys 纯函数）', () => {
+  const state = () => foldState(R_DOC)
+  const headings = () => collectHeadings(state().doc)
+
+  it('落点同时在嵌套外层与内层隐藏区 → 全部展开（嵌套全展开）', () => {
+    // 折 T1+T2（beta 落点同时在两隐藏区内）：locate 进折叠区应两者皆展开
+    const next = unfoldAroundKeys(new Set([R_T1, R_T2]), headings(), state().doc, R_BETA)
+    expect(next).not.toBeNull()
+    expect([...next!].sort((a, b) => a - b)).toEqual([])
+  })
+
+  it('落点仅在外层隐藏区（内层子节外）→ 只展开外层，其余折叠保持', () => {
+    // alpha 在 T1 隐藏区内、T2 节外；T3 另行折叠应保持
+    const next = unfoldAroundKeys(new Set([R_T1, R_T2, R_T3]), headings(), state().doc, R_ALPHA)
+    expect(next).not.toBeNull()
+    expect([...next!].sort((a, b) => a - b)).toEqual([R_T2, R_T3])
+  })
+
+  it('落点在可见区（未折叠节/标题行）→ null（零事务）', () => {
+    const keys = new Set([R_T1])
+    // gamma 在 T3 节内（未折叠）：T1 折叠保持
+    expect(unfoldAroundKeys(keys, headings(), state().doc, R_GAMMA)).toBeNull()
+    // 落点恰在折叠标题行行首（可见区）：不展开
+    expect(unfoldAroundKeys(keys, headings(), state().doc, R_T1)).toBeNull()
+  })
+
+  it('区间落点：from 可见、to 落入隐藏区 → 展开（查找匹配跨折叠边界）', () => {
+    // 模拟查找选区 [R_T1（标题行首可见）, R_ALPHA（隐藏区内）]
+    const next = unfoldAroundKeys(new Set([R_T1]), headings(), state().doc, R_T1, R_ALPHA)
+    expect(next).not.toBeNull()
+    expect([...next!]).toEqual([])
+  })
+
+  it('脱靶键不因落点展开被清理（update 只做映射不修剪纪律）', () => {
+    // 脱靶键 3（非标题行行首）：落点展开产出集保留原样（派生视图过滤语义）
+    const next = unfoldAroundKeys(new Set([3, R_T1]), headings(), state().doc, R_BETA)
+    expect(next).not.toBeNull()
+    expect([...next!].sort((a, b) => a - b)).toEqual([3])
+  })
+})
+
+describe('T04：落点展开（unfoldAround view 级 effect 直驱）', () => {
+  it('真实 EditorView：落点在隐藏区 → dispatch 后键集移除（headingFoldSet）', () => {
+    const view = viewOfT03(R_DOC, R_GAMMA)
+    view.dispatch({ effects: headingFoldSet.of(new Set([R_T1, R_T2])) })
+    expect(unfoldAround(view, R_BETA)).toBe(true)
+    expect([...view.state.field(headingFoldField)]).toEqual([])
+    view.destroy()
+  })
+
+  it('无包含折叠 → 返回 false 零事务（键集不变）', () => {
+    const view = viewOfT03(R_DOC, R_GAMMA)
+    view.dispatch({ effects: headingFoldSet.of(new Set([R_T1, R_T2])) })
+    const before = view.state.field(headingFoldField)
+    expect(unfoldAround(view, R_GAMMA)).toBe(false)
+    expect(view.state.field(headingFoldField)).toBe(before) // 同一引用：未 dispatch
+    view.destroy()
+  })
+
+  it('未装配折叠域 → 返回 false（无 headingFoldField 的视图安全）', () => {
+    const view = new EditorView({ state: EditorState.create({ doc: R_DOC }), parent: document.body })
+    expect(unfoldAround(view, R_BETA)).toBe(false)
+    view.destroy()
+  })
+})
+
+describe('T04：外部同步光标钳制（clampFoldHiddenCursor / clampSelectionOutOfFolds）', () => {
+  const state = () => foldState(R_DOC)
+  const headings = () => collectHeadings(state().doc)
+
+  it('光标落入隐藏区 → 钳到辖域标题块行尾；可见区与端点边界 → null', () => {
+    const folds = effectiveHeadingFolds(new Set([R_T1, R_T2]), headings(), state().doc)
+    // beta 同时在 T1 与 T2 隐藏区：取最深（T2）→ 钳到 T2 标题块行尾 16
+    expect(clampFoldHiddenCursor(folds, R_BETA)).toBe(R_T2 + '## T2'.length)
+    // alpha 仅在 T1 隐藏区 → 钳到 T1 标题块行尾 4
+    expect(clampFoldHiddenCursor(folds, R_ALPHA)).toBe(R_T1 + '# T1'.length)
+    // 可见区（gamma 在未折叠 T3 节）与边界端点（hideFrom/hideTo 本身）→ null
+    expect(clampFoldHiddenCursor(folds, R_GAMMA)).toBeNull()
+    expect(clampFoldHiddenCursor(folds, R_T1 + '# T1'.length)).toBeNull()
+    expect(clampFoldHiddenCursor(folds, R_T3)).toBeNull()
+  })
+
+  it('clampSelectionOutOfFolds：外部事务映射后光标进隐藏区 → 返回钳制选区；全可见 → null', () => {
+    const view = viewOfT03(R_DOC, R_GAMMA)
+    view.dispatch({ effects: headingFoldSet.of(new Set([R_T1])) })
+    // 模拟外部同步映射产物：selection-only 事务把光标放进隐藏区（运行期
+    // 唯一漏网路径——正常进入路径已被落点展开接住），随后钳制恢复
+    view.dispatch({ selection: EditorSelection.range(R_ALPHA, R_BETA) })
+    const clamped = clampSelectionOutOfFolds(view)
+    expect(clamped).not.toBeNull()
+    expect(clamped!.main.head).toBe(R_T1 + '# T1'.length)
+    // 全可见：无需补事务
+    view.dispatch({ selection: EditorSelection.cursor(R_GAMMA) })
+    expect(clampSelectionOutOfFolds(view)).toBeNull()
+    view.destroy()
+  })
+
+  it('无折叠域 → null（未装配视图安全）', () => {
+    const view = new EditorView({ state: EditorState.create({ doc: R_DOC }), parent: document.body })
+    expect(clampSelectionOutOfFolds(view)).toBeNull()
+    view.destroy()
+  })
+})

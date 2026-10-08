@@ -45,6 +45,7 @@ import {
   applyHeadingFoldOperation,
   collectHeadingFoldPaint,
   setHeadingFoldBindingHints,
+  unfoldAround,
   type HeadingFoldOperationId,
 } from './headingFold'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
@@ -3991,6 +3992,10 @@ export class WebviewSyncController {
     if (readingHadFocus) this.view?.focus()
     // 恢复光标到锚点并滚动到视口中部；事务不带 changes → 不产生编辑历史
     const pos = this.clampToDoc(this.modeAnchor ?? 0)
+    // T04（#415）落点展开：modeAnchor 落在折叠隐藏区内时（阅读期间滚动/
+    // 定位使锚点回到隐藏区）先展开再回切定位（U12）——折叠态本身随实例
+    // 内存驻留保持（setViewMode 不销毁 StateField），此处只处理落点可见性
+    if (this.view) unfoldAround(this.view, pos)
     this.view?.dispatch({
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: 'center' }),
@@ -4144,6 +4149,13 @@ export class WebviewSyncController {
       }
     } else {
       this.modeAnchor = pos
+      // T04（#415）落点展开：view.locate（锚点跳转/搜索结果/双链/链接
+      // 跳转）与大纲点击（outlineJumpToItem）都汇聚到本实现——落点或
+      // 区间右端在折叠隐藏区内时，先永久展开包含它的全部折叠（嵌套全
+      // 展开，effect 直驱）再定位；reading 分支无折叠呈现（规格「六」）
+      if (this.view) {
+        unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
+      }
       // #57：定位离开表格选区语境时清选区（view.locate 与大纲跳转共用）
       if (this.view) selectTableRegion(this.view, null)
       // 聚焦编辑器（#66，QO「jump + 聚焦」语义）：未聚焦时 CM6 不把选区
@@ -8723,6 +8735,10 @@ export class WebviewSyncController {
       })
     } else {
       if (this.view) selectTableRegion(this.view, null)
+      // T04（#415）落点展开：查找下一个/上一个命中（含替换后定位）落在
+      // 折叠隐藏区内时，该节自动展开并定位（U10）——匹配区间 [from, to]
+      // 任一端在隐藏区即展开
+      if (this.view) unfoldAround(this.view, cur.from, cur.to)
       this.view?.dispatch({
         selection: { anchor: cur.from, head: cur.to },
         effects: EditorView.scrollIntoView(cur.from, { y: 'center' }),

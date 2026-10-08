@@ -118,7 +118,11 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #414（#409 T03）标题折叠 UI：真实鼠标驱动 gutter 箭头（悬停显现/
   // 折叠态常显/行号两态定位）与省略号占位——paint 探针绘制层断言、零
   // 布局位移、明暗主题与双实例独立折叠态
-  'headingFoldUi']
+  'headingFoldUi',
+  // #415（#409 T04）标题折叠落点展开：view.locate 通道（锚点/搜索/双链/
+  // 大纲点击共同汇聚）、查找面板真实键盘命中折叠区自动展开、双模式往返
+  // 存续与 modeAnchor 落隐藏区回切展开——全程零写回
+  'headingFoldReveal']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
