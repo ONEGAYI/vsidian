@@ -5,7 +5,7 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "0b66f9014c8ee301a6bbf66ae2f7dd774472fed2",
+      "sha": "a05837618c5ab13c693cb43d9f7bf2319f454b8b",
       "ref": "HEAD",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
@@ -388,6 +388,47 @@
       "introduced": "#351（T02）"
     },
     {
+      "id": "addon-storage",
+      "group": "settings",
+      "title": "组件数据目录与文件监听",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "host"
+      ],
+      "purpose": "每组件一个安装目录外的隔离可写数据目录（globalStorage 语义）与目录内文件监听：富结构数据（规则对象等，超出设置存储一层嵌套边界）自由读写，外部同步工具改写文件后自动重载。宿主侧 setup/enable 上下文同形状；页面侧组件经自己的 channel topic 桥接宿主读写。",
+      "semantics": {
+        "modes": "仅宿主端（编辑器/设置页面不直接提供——经组件通道桥接）。",
+        "coordinates": "相对路径为正斜杠形态，先过 isSafeAddonStoragePath 守卫（越界/非法一律 invalid-path 拒绝——普通 API 拒绝不算故障）；文件内容按 UTF-8 文本读写。",
+        "lifecycle": "目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件代次终结时平台统一注销。",
+        "errors": "invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因）——可辨认拒绝，不抛出。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonStorage.ts",
+          "symbols": [
+            "AddonStorageFacet",
+            "AddonStorageResult",
+            "AddonStorageListResult",
+            "AddonStorageEntryInfo",
+            "AddonStorageRejection",
+            "isSafeAddonStoragePath",
+            "ADDON_STORAGE_FILE_LIMIT_BYTES"
+          ]
+        },
+        {
+          "module": "src/host/addons/addonStorageService.ts",
+          "symbols": [
+            "AddonStorageService",
+            "AddonStorageFsPort"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonStorage.test.ts"
+      ],
+      "introduced": "#404"
+    },
+    {
       "id": "behaviors-register",
       "group": "behaviors",
       "title": "输入行为注册与观察",
@@ -745,8 +786,8 @@
     },
     "src/host/addons/addonRegistry.ts": {
       "AddonDefinition": "/** 组件注册传入的定义（T02 形状：setup 轻量接入 + enable 运行装配） */\nexport interface AddonDefinition {\n  /** 轻量接入回调：注册成功时在本接入代次恰好调用一次 */\n  setup?(context: AddonSetupContext): void\n  /** 运行装配回调：按用户功能开关开启时调用；关闭或故障时释放所属注册 */\n  enable?(context: AddonEnableContext): void\n}",
-      "AddonSetupContext": "/** 轻量接入上下文（setup 生命周期：设置定义 + 自己的设置入口 + 设置通信。\n *  普通功能停用后保留；故障暂停时回收组件代码——迟到注册被拒） */\nexport interface AddonSetupContext extends AddonRegistrationContext {\n  /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */\n  readonly settings: AddonSettingsContextApi\n  /** 设置生命周期通道（归 setup 所在的生命周期） */\n  readonly channel: AddonChannelRegistry\n}",
-      "AddonEnableContext": "/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 清理回调。\n *  开启时装配；关闭或故障时释放所属注册） */\nexport interface AddonEnableContext extends AddonRegistrationContext {\n  /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，\n   *  第二个登记拒绝） */\n  readonly pages: {\n    registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle\n  }\n  /** 运行生命周期通道（停用即注销） */\n  readonly channel: AddonChannelRegistry\n  /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
+      "AddonSetupContext": "/** 轻量接入上下文（setup 生命周期：设置定义 + 自己的设置入口 + 设置通信。\n *  普通功能停用后保留；故障暂停时回收组件代码——迟到注册被拒） */\nexport interface AddonSetupContext extends AddonRegistrationContext {\n  /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */\n  readonly settings: AddonSettingsContextApi\n  /** #404 组件数据目录（globalStorage 语义的隔离可写目录 + 文件监听；\n   *  富结构数据（规则对象等）归本面，不并入设置存储的一层边界） */\n  readonly storage: AddonStorageFacet\n  /** 设置生命周期通道（归 setup 所在的生命周期） */\n  readonly channel: AddonChannelRegistry\n}",
+      "AddonEnableContext": "/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 清理回调。\n *  开启时装配；关闭或故障时释放所属注册） */\nexport interface AddonEnableContext extends AddonRegistrationContext {\n  /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，\n   *  第二个登记拒绝） */\n  readonly pages: {\n    registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle\n  }\n  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */\n  readonly storage: AddonStorageFacet\n  /** 运行生命周期通道（停用即注销） */\n  readonly channel: AddonChannelRegistry\n  /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
       "AddonRegistrationHandle": "/** 注册面返回的释放句柄（重复 dispose 无害；迟到登记被拒时为 no-op） */\nexport interface AddonRegistrationHandle {\n  dispose(): void\n}",
       "AddonChannelRegistry": "/** 通道注册面（setup/enable 上下文同形状；同名 topic 重复注册拒绝） */\nexport interface AddonChannelRegistry {\n  handle(topic: string, handler: AddonChannelHandler): AddonRegistrationHandle\n}",
       "AddonChannelHandler": "/** 通道处理器（宿主组件代码注册；载荷与结果都是 JSON 数据） */\nexport type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknown>",
@@ -791,6 +832,19 @@
       "AddonApplyEditsResult": "export type AddonApplyEditsResult =\n  | { ok: true; credential: AddonEditCredential }\n  | { ok: false; reason: AddonEditRejection }",
       "AddonEditRejection": "/** 可辨认拒绝类型（接口冻结面；新增值视为契约变更） */\nexport type AddonEditRejection =\n  /** 句柄已释放 / 实例已销毁 */\n  | 'view-disposed'\n  /** 只读视图（hover 引用、reading 态主正文）不接受写入 */\n  | 'read-only'\n  /** 视图失活（冲突暂停写回） */\n  | 'suspended'\n  /** 快照修订失配（旧快照；内核输入重定位不适用于 API 提交，不自动重试） */\n  | 'stale-snapshot'\n  /** joinPrevious 无可确认的同目标前项（HistoryBoundaryUnavailable 语义：\n   *  空日志、仅外来写入、组顶被外来写入打断、映射失配四种形态） */\n  | 'history-boundary'\n  /** 宿主冲突拒绝（不可安全重定位 / 暂停面板） */\n  | 'conflict'\n  /** 宿主写回失败 */\n  | 'error'\n  /** 请求形状非法（revision/changes/selection 越界或类型错误） */\n  | 'invalid-request'",
       "AddonEditCredential": "/** 提交凭据（宿主确认后签发；与该笔 edit.ack(ok) 同源版本） */\nexport interface AddonEditCredential {\n  /** 本次修饰操作 ID（SDK 注入；凭据可对账来源记录） */\n  opId: string\n  /** 宿主确认版本 */\n  version: number\n}"
+    },
+    "src/shared/addonStorage.ts": {
+      "AddonStorageFacet": "/** 组件数据目录面（宿主侧 setup/enable 上下文同形状；组件页面侧经\n * channel 桥接宿主消费）。全部相对路径先过 isSafeAddonStoragePath，\n * 越界形态明确拒绝（普通 API 拒绝，不算组件故障）。 */\nexport interface AddonStorageFacet {\n  /** 本组件数据目录的 URI（显示与同步工具配置用） */\n  uri(): string\n  /** 读 UTF-8 文本文件 */\n  readFile(relativePath: string): Promise<AddonStorageResult<string>>\n  /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */\n  writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>\n  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层） */\n  list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>\n  /** 删文件（不删目录——目录生命周期归卸载策略） */\n  deleteFile(relativePath: string): Promise<AddonStorageResult<null>>\n  /** 订阅目录内文件变化（外部同步工具改写后自动重载的支撑面）；\n   * 返回取消函数；组件生命周期结束时平台统一注销 watcher */\n  onDidChangeFile(callback: (relativePath: string) => void): AddonStorageWatchHandle\n}",
+      "AddonStorageResult": "export type AddonStorageResult<T> =\n  | { ok: true; value: T }\n  | { ok: false; reason: AddonStorageRejection; detail?: string }",
+      "AddonStorageListResult": "export type AddonStorageListResult =\n  | { ok: true; entries: AddonStorageEntryInfo[] }\n  | { ok: false; reason: AddonStorageRejection; detail?: string }",
+      "AddonStorageEntryInfo": "export interface AddonStorageEntryInfo {\n  /** 相对组件数据目录的路径（正斜杠） */\n  path: string\n  kind: 'file' | 'directory'\n}",
+      "AddonStorageRejection": "/** 拒绝码：invalid-path = 越界/非法相对路径；too-large = 单文件超限；\n * error = IO 失败（不存在/权限等，detail 归因） */\nexport type AddonStorageRejection = 'invalid-path' | 'too-large' | 'error'",
+      "isSafeAddonStoragePath": "/** 相对路径守卫：正斜杠相对路径，段非空且不为 `.`/`..`，无反斜杠、\n * 无盘符/协议头、长度有界。拒绝一切可逃出组件目录的字面形态（编码\n * 变形由宿主侧 URI join 后的包含性判定兜底——本守卫是防呆层，与\n * resourceUri 的分层口径一致）。 */\nexport function isSafeAddonStoragePath(relativePath: string): boolean {\n  if (relativePath.length === 0 || relativePath.length > 512) {\n    return false\n  }\n  if (relativePath.includes('\\\\') || relativePath.includes(':')) {\n    return false\n  }\n  if (relativePath.startsWith('/') || relativePath.includes('//')) {\n    return false\n  }\n  for (const segment of relativePath.split('/')) {\n    if (segment === '' || segment === '.' || segment === '..') {\n      return false\n    }\n  }\n  return true\n}",
+      "ADDON_STORAGE_FILE_LIMIT_BYTES": "/** 单文件大小上限（字节；writeFile 拒绝超限——防滥用，正常规则文件远小于此） */\nexport const ADDON_STORAGE_FILE_LIMIT_BYTES = 8 * 1024 * 1024"
+    },
+    "src/host/addons/addonStorageService.ts": {
+      "AddonStorageService": "/** 页面级服务：按 addonId 派生隔离的存储 facet；release 注销该组件 watcher */\nexport class AddonStorageService {\n  private readonly watchers = new Map<string, WatcherState>()\n\n  constructor(private readonly deps: AddonStorageServiceDeps) {}\n\n  storageFor(addonId: string): AddonStorageFacet {\n    const root = `${this.deps.baseDir}/${addonId}`\n    const deps = this.deps\n    const service = this\n    return {\n      uri: () => deps.uriOf(addonId),\n      readFile: (relativePath) =>\n        withGuard(relativePath, async () => ({\n          ok: true as const,\n          value: Buffer.from(await deps.fs.readFile(`${root}/${relativePath}`)).toString('utf8'),\n        })),\n      writeFile: (relativePath, content) =>\n        withGuard(relativePath, async () => {\n          if (Buffer.byteLength(content, 'utf8') > ADDON_STORAGE_FILE_LIMIT_BYTES) {\n            return { ok: false as const, reason: 'too-large' as const }\n          }\n          await deps.fs.createDirectory(`${root}/${dirOf(relativePath)}`)\n          await deps.fs.writeFile(`${root}/${relativePath}`, Buffer.from(content, 'utf8'))\n          return { ok: true as const, value: null }\n        }),\n      list: (relativePath, recursive) =>\n        listDirectory(deps, root, relativePath ?? '', recursive === true),\n      deleteFile: (relativePath) =>\n        withGuard(relativePath, async () => {\n          await deps.fs.delete(`${root}/${relativePath}`)\n          return { ok: true as const, value: null }\n        }),\n      onDidChangeFile: (callback) => service.subscribe(addonId, root, callback),\n    }\n  }\n\n  private subscribe(\n    addonId: string,\n    root: string,\n    callback: (relativePath: string) => void,\n  ): { dispose(): void } {\n    let state = this.watchers.get(addonId)\n    if (!state) {\n      const subscribers = new Set<(relativePath: string, kind: 'change' | 'delete') => void>()\n      const underlying = this.deps.createWatcher(root, (kind, relativePath) => {\n        for (const subscriber of subscribers) {\n          try {\n            subscriber(relativePath, kind)\n          } catch {\n            // 订阅方异常不阻断其余订阅\n          }\n        }\n      })\n      state = { underlying, subscribers }\n      this.watchers.set(addonId, state)\n    }\n    state.subscribers.add(callback)\n    return {\n      dispose: () => {\n        const current = this.watchers.get(addonId)\n        if (!current) return\n        current.subscribers.delete(callback)\n        if (current.subscribers.size === 0) {\n          current.underlying.dispose()\n          this.watchers.delete(addonId)\n        }\n      },\n    }\n  }\n\n  /** 组件释放（停用/故障/代次终结）：注销该组件 watcher；文件数据保留 */\n  release(addonId: string): void {\n    this.watchers.get(addonId)?.underlying.dispose()\n    this.watchers.delete(addonId)\n  }\n}",
+      "AddonStorageFsPort": "/** 文件系统端口（vscode 层实现 = vscode.workspace.fs；路径为正斜杠\n * 归一后的绝对文件系统路径；FileType 沿用 vscode 枚举数值：1=目录 0=文件） */\nexport interface AddonStorageFsPort {\n  readFile(path: string): Promise<Uint8Array>\n  writeFile(path: string, content: Uint8Array): Promise<void>\n  delete(path: string): Promise<void>\n  readDirectory(path: string): Promise<Array<[string, number]>>\n  createDirectory(path: string): Promise<void>\n}"
     },
     "src/shared/addonBehaviors.ts": {
       "AddonBehaviorsFacet": "/** SDK behaviors 面（仅编辑器页提供；设置页为 undefined）。register 与\n *  onChanged 分开注册——onChanged 不是原输入链的第二写入口 */\nexport interface AddonBehaviorsFacet {\n  /** 登记输入行为（稳定局部 ID + 必填名称 + 可选说明/例子/独占组/撤回\n   *  声明 + 业务回调）；名称缺失拒绝，说明/例子缺失允许 */\n  register(registration: AddonBehaviorRegistration): AddonBehaviorRegisterResult\n  /** 观察用户输入（只读事件；不进入修饰链） */\n  onChanged(callback: (event: AddonBehaviorChangeEvent) => void): () => void\n}",
