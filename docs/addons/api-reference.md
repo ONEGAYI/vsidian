@@ -16,7 +16,7 @@
 
 | 入口 | 版本 | 状态 | 实际发布日期 | 兼容边界 |
 | --- | --- | --- | --- | --- |
-| `cm6` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 页面共享 CM6 运行时（experimental.cm6）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
+| `cm6` | 1.1.0 | 候选（未发行） | —（未发行不携带日期） | 页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 
 ### 稳定 API 移除规则
 
@@ -48,6 +48,7 @@
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
     - [`behavior-order-state` 行为顺序与逐项开关持久](#behavior-order-state)
   - [4. 设置](#4-设置)
+    - [`addon-storage` 组件数据目录与文件监听](#addon-storage)
     - [`settings-context` 宿主设置能力面（setup 上下文）](#settings-context)
     - [`settings-definitions` 可序列化设置定义与值校验](#settings-definitions)
     - [`settings-scope` 作用范围解析与存储](#settings-scope)
@@ -231,6 +232,9 @@ export interface AddonDefinition {
 export interface AddonSetupContext extends AddonRegistrationContext {
   /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */
   readonly settings: AddonSettingsContextApi
+  /** #404 组件数据目录（globalStorage 语义的隔离可写目录 + 文件监听；
+   *  富结构数据（规则对象等）归本面，不并入设置存储的一层边界） */
+  readonly storage: AddonStorageFacet
   /** 设置生命周期通道（归 setup 所在的生命周期） */
   readonly channel: AddonChannelRegistry
 }
@@ -243,6 +247,8 @@ export interface AddonEnableContext extends AddonRegistrationContext {
   readonly pages: {
     registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle
   }
+  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */
+  readonly storage: AddonStorageFacet
   /** 运行生命周期通道（停用即注销） */
   readonly channel: AddonChannelRegistry
   /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */
@@ -675,24 +681,38 @@ export interface AddonEditCredential {
 
 ### `cm6-experimental` 实验入口：共享 CM6 运行时（experimental.cm6）
 
-**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#349（V02）、#351（T02 登记候选版本）
+**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#349（V02）、#351（T02 登记候选版本）、#406（language 语法树子集）
 > **实验入口**：清单 `experimental` 声明名 `cm6`——兼容边界见上方实验入口兼容清单。
 
-**目标**：页面 bundle 自构造的 CM6 模块命名空间（state 与 view），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension。
+**目标**：页面 bundle 自构造的 CM6 模块命名空间（state 与 view）与语法树读取子集（language，#406 起），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension 与做基于语法树的行类型判定。
 
 语义要点：
 - **生命周期**：仅编辑器页提供（设置页 undefined）；使用前须在清单 experimental 声明 cm6 兼容范围，且范围含宿主提供的入口版本才判兼容。
 - **错误与拒绝**：宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。
+- **暴露面裁剪**：language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。已知边界：live 编辑器的 markdown 语法树是内核私有增量解析（不经 @codemirror/language 的 language facet 装配），syntaxTree 在 live 状态上恒为未解析空树——行类型判定类需求不能依赖本入口，平台级树查询能力另行评估。
+- **按键优先级**：#402 按键拦截优先级契约（实验层）：扩展槽为平台扩展数组末位——普通 keymap 在平台情境链（Tab 三段/列表续行等）不处理时落空接手；Prec.high 为抢先层（可替代平台键位，返回 false 落穿）；撤销/重做（Mod-z / Shift-Mod-z / Mod-y）是 Prec.highest 的平台保留键闸、在扩展序上先于附加组件槽——addon 用 Prec.highest 也不可越过；Esc 与宿主级快捷键不开放抢先；多组件同层按装载顺序仲裁；实验层 keymap 不进统一快捷键管理，用户关闭 = 停用组件。
 
 签名事实源：`src/shared/addonPage.ts`
 
 ```ts
 /** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。值为本页 bundle
  *  内的模块命名空间对象——装载器由页面产物自身构造，因此与生产控制器
- *  共享同一份实例（构造器身份一致的机制来源）。 */
+ *  共享同一份实例（构造器身份一致的机制来源）。language 是语法树读取
+ *  函数子集（#406），非整模块命名空间。 */
 export interface AddonCm6Runtime {
   readonly state: typeof import('@codemirror/state')
   readonly view: typeof import('@codemirror/view')
+  readonly language: AddonCm6LanguageRuntime
+}
+
+/** #406 language 语法树读取子集（@codemirror/language 的最小暴露面）：
+ *  只纳入「读树」函数——LRLanguage/foldGutter/indentUnit 等注册类成员不
+ *  暴露（addon 不应借实验入口注册语言或改全局语言配置）；树与节点的
+ *  类型消费经 type-only 导入（构建桥允许），无需值暴露。 */
+export interface AddonCm6LanguageRuntime {
+  readonly syntaxTree: (typeof import('@codemirror/language'))['syntaxTree']
+  readonly ensureSyntaxTree: (typeof import('@codemirror/language'))['ensureSyntaxTree']
+  readonly syntaxTreeAvailable: (typeof import('@codemirror/language'))['syntaxTreeAvailable']
 }
 ```
 
@@ -744,8 +764,8 @@ export type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknow
 **目标**：注册可组合输入行为：稳定局部 ID + 必填名称 + 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。
 
 语义要点：
-- **适用模式**：合法可编辑 Live 实例（内核先执行只读、IME、表格与既有情境门控）。
-- **坐标与数据形状**：修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。
+- **适用模式**：合法可编辑 Live 实例（内核先执行只读、IME 组合中间态、表格网格与既有情境门控；IME 组合定稿（composition commit）驱动一次——userEvent input.type.compose、inputText 为净定稿文本，#399；删除事务白名单 backward/forward/selection/cut/line 驱动（dedent 属缩进命令族不纳入），#400）。
+- **坐标与数据形状**：修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。上下文与观察事件携带 docUri（目标文档 URI，与 views 句柄 targetDocUri 同源：main = 面板文档，embed = 引用目标——在引用 B 内触发时是 B 的 URI，#407）与 replaced（事务替换/删除侧：键入替换选区 = 被替换内容（#401），delete = 被删文本（#400），事务前 LF 坐标，IME 定稿恒 null）。
 - **生命周期**：行为能力与适用条件只由代码表达（不复制进清单）；每次修饰按自己的原子声明提交，提交与身份注入由平台完成（行为不能直接写文档）。
 - **错误与拒绝**：注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失拒绝、说明/例子缺失允许）。
 - **历史与撤回**：文本变化不终止链（默认可组合）；确需择一的用显式独占组（同组件命名空间内互斥，跨组件不互斥）——不恢复统一「先接管者生效」。
@@ -785,13 +805,37 @@ export interface AddonBehaviorRegistration {
 
 /** 输入行为的操作上下文（技术方案 §5.2：当前快照 + 操作上下文） */
 export interface AddonInputContext {
-  /** 触发本次链的用户输入 userEvent（CM6 语义，如 'input.type'） */
+  /** 触发本次链的用户输入 userEvent（CM6 语义，如 'input.type'、
+   *  'delete.backward'、'input.type.compose'——IME 定稿） */
   readonly userEvent: string
-  /** 本次输入插入的净文本（多选区拼接；不含删除侧） */
+  /** 本次输入插入的净文本（多选区拼接；不含删除侧；delete 事务为空串） */
   readonly inputText: string
+  /** 本次输入替换/删除掉的文本（事务前 LF 坐标）：input.type 替换选区时
+   *  为被替换的选区内容（#401——SelectKey 包裹/替换类规则的判定依据：
+   *  按键插入发生在选区销毁之后，行为从本字段读回包裹目标）；delete.*
+   *  事务时为被删文本（#400——联动删除配对端需要知道删了什么）。多区间
+   *  时为全部删除区间的最小包围与按序拼接文本。IME 定稿补驱动恒 null
+   *  （组合事务先于 compositionend，替换侧无法归因——#399 边界）；
+   *  纯插入无删除侧为 null */
+  readonly replaced: AddonReplacedRange | null
   /** 行为读取时点的当前快照——已含本次输入与**前序行为的修饰结果**
    *  （后续行为读取前序结果）；输入点从快照选区读取 */
   readonly snapshot: AddonEditorSnapshot
+  /** 本次驱动所属视图的目标文档 URI（#407，与该实例 views 句柄的
+   *  targetDocUri 同源：main = 面板文档，embed = 引用目标文档——在
+   *  引用 B 内触发时是 B 的 URI，不是宿主文档 A；文件排除类规则据此
+   *  判定「我正在哪个文件里被触发」） */
+  readonly docUri: string
+}
+
+/** 事务替换/删除侧的区间与文本（事务前 LF 坐标） */
+export interface AddonReplacedRange {
+  /** 全部删除区间的最小包围起点 */
+  readonly from: number
+  /** 全部删除区间的最小包围终点 */
+  readonly to: number
+  /** 被替换/删除的文本（按区间顺序拼接） */
+  readonly text: string
 }
 
 /** 文本修饰计划（行为返回；提交与身份注入由平台完成——行为不能直接
@@ -808,7 +852,11 @@ export interface AddonBehaviorInputPlan {
 export interface AddonBehaviorChangeEvent {
   readonly userEvent: string
   readonly inputText: string
+  /** 替换/删除侧（与 AddonInputContext.replaced 同义：#400/#401） */
+  readonly replaced: AddonReplacedRange | null
   readonly snapshot: AddonEditorSnapshot
+  /** 本次驱动所属视图的目标文档 URI（#407，与 AddonInputContext.docUri 同源） */
+  readonly docUri: string
 }
 
 /** 注册结果（SDK behaviors.register 的返回） */
@@ -917,6 +965,181 @@ export function mergeBehaviorOrderPreservingUnknown(
 ## 4. 设置
 
 **能力范围**：定义注册、读写与来源、作用范围、自定义设置页
+
+### `addon-storage` 组件数据目录与文件监听
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#404
+
+**目标**：每组件一个安装目录外的隔离可写数据目录（globalStorage 语义）与目录内文件监听：富结构数据（规则对象等，超出设置存储一层嵌套边界）自由读写，外部同步工具改写文件后自动重载。宿主侧 setup/enable 上下文同形状；页面侧组件经自己的 channel topic 桥接宿主读写。
+
+语义要点：
+- **适用模式**：仅宿主端（编辑器/设置页面不直接提供——经组件通道桥接）。
+- **坐标与数据形状**：相对路径为正斜杠形态，先过 isSafeAddonStoragePath 守卫（越界/非法一律 invalid-path 拒绝——普通 API 拒绝不算故障）；文件内容按 UTF-8 文本读写。
+- **生命周期**：目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件停用/故障/代次终结时平台统一注销；onDidChangeFile 回调回 (相对路径, change|delete)，change 含改写与新建。
+- **错误与拒绝**：invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因）——可辨认拒绝，不抛出。
+
+签名事实源：`src/shared/addonStorage.ts`
+
+```ts
+/** 组件数据目录面（宿主侧 setup/enable 上下文同形状；组件页面侧经
+ * channel 桥接宿主消费）。全部相对路径先过 isSafeAddonStoragePath，
+ * 越界形态明确拒绝（普通 API 拒绝，不算组件故障）。 */
+export interface AddonStorageFacet {
+  /** 本组件数据目录的 URI（显示与同步工具配置用） */
+  uri(): string
+  /** 读 UTF-8 文本文件 */
+  readFile(relativePath: string): Promise<AddonStorageResult<string>>
+  /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */
+  writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>
+  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层） */
+  list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>
+  /** 删文件（不删目录——目录生命周期归卸载策略） */
+  deleteFile(relativePath: string): Promise<AddonStorageResult<null>>
+  /** 订阅目录内文件变化（外部同步工具改写/新建文件后自动重载的支撑面）；
+   * 回调回相对路径与变化类型（change = 改写或新建，delete = 删除）；
+   * 返回取消函数；组件停用/故障/代次终结时平台统一注销 watcher */
+  onDidChangeFile(callback: (relativePath: string, kind: 'change' | 'delete') => void): AddonStorageWatchHandle
+}
+
+export type AddonStorageResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: AddonStorageRejection; detail?: string }
+
+export type AddonStorageListResult =
+  | { ok: true; entries: AddonStorageEntryInfo[] }
+  | { ok: false; reason: AddonStorageRejection; detail?: string }
+
+export interface AddonStorageEntryInfo {
+  /** 相对组件数据目录的路径（正斜杠） */
+  path: string
+  kind: 'file' | 'directory'
+}
+
+/** 拒绝码：invalid-path = 越界/非法相对路径；too-large = 单文件超限；
+ * error = IO 失败（不存在/权限等，detail 归因） */
+export type AddonStorageRejection = 'invalid-path' | 'too-large' | 'error'
+
+/** 相对路径守卫：正斜杠相对路径，段非空且不为 `.`/`..`，无反斜杠、
+ * 无盘符/协议头、长度有界。字面守卫是唯一防线：`%xx` 编码形态按字面
+ * 目录名处理（Uri.file 不解码、`%2e%2e` 不构成 `..` 逃逸）；数据目录
+ * 隔离是 API 卫生而非安全边界——组件本体是宿主侧扩展、本就握有完整
+ * vscode.workspace.fs，无更高权限可越。 */
+export function isSafeAddonStoragePath(relativePath: string): boolean {
+  if (relativePath.length === 0 || relativePath.length > 512) {
+    return false
+  }
+  if (relativePath.includes('\\') || relativePath.includes(':')) {
+    return false
+  }
+  if (relativePath.startsWith('/') || relativePath.includes('//')) {
+    return false
+  }
+  for (const segment of relativePath.split('/')) {
+    if (segment === '' || segment === '.' || segment === '..') {
+      return false
+    }
+  }
+  return true
+}
+
+/** 单文件大小上限（字节；writeFile 拒绝超限——防滥用，正常规则文件远小于此） */
+export const ADDON_STORAGE_FILE_LIMIT_BYTES = 8 * 1024 * 1024
+```
+
+签名事实源：`src/host/addons/addonStorageService.ts`
+
+```ts
+/** 页面级服务：按 addonId 派生隔离的存储 facet；release 注销该组件 watcher */
+export class AddonStorageService {
+  private readonly watchers = new Map<string, WatcherState>()
+
+  constructor(private readonly deps: AddonStorageServiceDeps) {}
+
+  storageFor(addonId: string): AddonStorageFacet {
+    const root = `${this.deps.baseDir}/${addonId}`
+    const deps = this.deps
+    const service = this
+    return {
+      uri: () => deps.uriOf(addonId),
+      readFile: (relativePath) =>
+        withGuard(relativePath, async () => ({
+          ok: true as const,
+          value: Buffer.from(await deps.fs.readFile(`${root}/${relativePath}`)).toString('utf8'),
+        })),
+      writeFile: (relativePath, content) =>
+        withGuard(relativePath, async () => {
+          if (Buffer.byteLength(content, 'utf8') > ADDON_STORAGE_FILE_LIMIT_BYTES) {
+            return { ok: false as const, reason: 'too-large' as const }
+          }
+          await deps.fs.createDirectory(`${root}/${dirOf(relativePath)}`)
+          await deps.fs.writeFile(`${root}/${relativePath}`, Buffer.from(content, 'utf8'))
+          return { ok: true as const, value: null }
+        }),
+      list: (relativePath, recursive) =>
+        listDirectory(deps, root, relativePath ?? '', recursive === true),
+      deleteFile: (relativePath) =>
+        withGuard(relativePath, async () => {
+          await deps.fs.delete(`${root}/${relativePath}`)
+          return { ok: true as const, value: null }
+        }),
+      onDidChangeFile: (callback) => service.subscribe(addonId, root, callback),
+    }
+  }
+
+  private subscribe(
+    addonId: string,
+    root: string,
+    callback: (relativePath: string, kind: 'change' | 'delete') => void,
+  ): { dispose(): void } {
+    let state = this.watchers.get(addonId)
+    if (!state) {
+      const subscribers = new Set<(relativePath: string, kind: 'change' | 'delete') => void>()
+      const underlying = this.deps.createWatcher(root, (kind, relativePath) => {
+        for (const subscriber of subscribers) {
+          try {
+            subscriber(relativePath, kind)
+          } catch {
+            // 订阅方异常不阻断其余订阅
+          }
+        }
+      })
+      state = { underlying, subscribers }
+      this.watchers.set(addonId, state)
+    }
+    state.subscribers.add(callback)
+    return {
+      dispose: () => {
+        const current = this.watchers.get(addonId)
+        if (!current) return
+        current.subscribers.delete(callback)
+        if (current.subscribers.size === 0) {
+          current.underlying.dispose()
+          this.watchers.delete(addonId)
+        }
+      },
+    }
+  }
+
+  /** 组件释放（停用/故障/代次终结）：注销该组件 watcher；文件数据保留 */
+  release(addonId: string): void {
+    this.watchers.get(addonId)?.underlying.dispose()
+    this.watchers.delete(addonId)
+  }
+}
+
+/** 文件系统端口（vscode 层实现 = vscode.workspace.fs；路径为正斜杠
+ * 归一后的绝对文件系统路径；FileType 沿用 vscode 枚举数值——File=1、
+ * Directory=2，与下方 FILE_TYPE 常量对齐） */
+export interface AddonStorageFsPort {
+  readFile(path: string): Promise<Uint8Array>
+  writeFile(path: string, content: Uint8Array): Promise<void>
+  delete(path: string): Promise<void>
+  readDirectory(path: string): Promise<Array<[string, number]>>
+  createDirectory(path: string): Promise<void>
+}
+```
+
+**验证**：`test/unit/addonStorage.test.ts`
 
 ### `settings-context` 宿主设置能力面（setup 上下文）
 

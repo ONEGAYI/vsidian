@@ -71,6 +71,10 @@ export interface AddonApiSemantics {
   readonly history?: string
   /** 自动渲染/接管规则（渲染类条目） */
   readonly autoRules?: string
+  /** 暴露面裁剪口径（实验入口的最小集合边界，#406 起） */
+  readonly language?: string
+  /** 按键拦截优先级契约（实验层，#402 起） */
+  readonly keymap?: string
 }
 
 /** 单个公开接口条目（参考文档的一节） */
@@ -504,17 +508,19 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonPage.ts',
-        symbols: ['AddonCm6Runtime'],
+        symbols: ['AddonCm6Runtime', 'AddonCm6LanguageRuntime'],
       },
     ],
     purpose:
-      '页面 bundle 自构造的 CM6 模块命名空间（state 与 view），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension。',
+      '页面 bundle 自构造的 CM6 模块命名空间（state 与 view）与语法树读取子集（language，#406 起），与生产控制器共享同一实例（构造器身份一致）。供高级扩展登记真正的 CM6 Extension 与做基于语法树的行类型判定。',
     semantics: {
       lifecycle: '仅编辑器页提供（设置页 undefined）；使用前须在清单 experimental 声明 cm6 兼容范围，且范围含宿主提供的入口版本才判兼容。',
+      language: 'language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。已知边界：live 编辑器的 markdown 语法树是内核私有增量解析（不经 @codemirror/language 的 language facet 装配），syntaxTree 在 live 状态上恒为未解析空树——行类型判定类需求不能依赖本入口，平台级树查询能力另行评估。',
+      keymap: '#402 按键拦截优先级契约（实验层）：扩展槽为平台扩展数组末位——普通 keymap 在平台情境链（Tab 三段/列表续行等）不处理时落空接手；Prec.high 为抢先层（可替代平台键位，返回 false 落穿）；撤销/重做（Mod-z / Shift-Mod-z / Mod-y）是 Prec.highest 的平台保留键闸、在扩展序上先于附加组件槽——addon 用 Prec.highest 也不可越过；Esc 与宿主级快捷键不开放抢先；多组件同层按装载顺序仲裁；实验层 keymap 不进统一快捷键管理，用户关闭 = 停用组件。',
       errors: '宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。',
     },
     verification: ['test/unit/addonPageLoader.test.ts', 'test/browser/addonPageSdk.mjs'],
-    introduced: '#349（V02）、#351（T02 登记候选版本）',
+    introduced: '#349（V02）、#351（T02 登记候选版本）、#406（language 语法树子集）',
   },
   {
     id: 'channel',
@@ -541,6 +547,33 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     verification: ['test/unit/addonPageLoader.test.ts', 'test/browser/addonPageSdk.mjs'],
     introduced: '#351（T02）',
   },
+  {
+    id: 'addon-storage',
+    group: 'settings',
+    title: '组件数据目录与文件监听',
+    layer: 'stable-candidate',
+    endpoints: ['host'],
+    signatures: [
+      {
+        module: 'src/shared/addonStorage.ts',
+        symbols: ['AddonStorageFacet', 'AddonStorageResult', 'AddonStorageListResult', 'AddonStorageEntryInfo', 'AddonStorageRejection', 'isSafeAddonStoragePath', 'ADDON_STORAGE_FILE_LIMIT_BYTES'],
+      },
+      {
+        module: 'src/host/addons/addonStorageService.ts',
+        symbols: ['AddonStorageService', 'AddonStorageFsPort'],
+      },
+    ],
+    purpose:
+      '每组件一个安装目录外的隔离可写数据目录（globalStorage 语义）与目录内文件监听：富结构数据（规则对象等，超出设置存储一层嵌套边界）自由读写，外部同步工具改写文件后自动重载。宿主侧 setup/enable 上下文同形状；页面侧组件经自己的 channel topic 桥接宿主读写。',
+    semantics: {
+      modes: '仅宿主端（编辑器/设置页面不直接提供——经组件通道桥接）。',
+      coordinates: '相对路径为正斜杠形态，先过 isSafeAddonStoragePath 守卫（越界/非法一律 invalid-path 拒绝——普通 API 拒绝不算故障）；文件内容按 UTF-8 文本读写。',
+      lifecycle: '目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件停用/故障/代次终结时平台统一注销；onDidChangeFile 回调回 (相对路径, change|delete)，change 含改写与新建。',
+      errors: 'invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因）——可辨认拒绝，不抛出。',
+    },
+    verification: ['test/unit/addonStorage.test.ts'],
+    introduced: '#404',
+  },
   // ---- ③ 输入行为 ----
   {
     id: 'behaviors-register',
@@ -551,14 +584,14 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonBehaviors.ts',
-        symbols: ['AddonBehaviorsFacet', 'AddonBehaviorRegistration', 'AddonInputContext', 'AddonBehaviorInputPlan', 'AddonBehaviorChangeEvent', 'AddonBehaviorRegisterResult'],
+        symbols: ['AddonBehaviorsFacet', 'AddonBehaviorRegistration', 'AddonInputContext', 'AddonReplacedRange', 'AddonBehaviorInputPlan', 'AddonBehaviorChangeEvent', 'AddonBehaviorRegisterResult'],
       },
     ],
     purpose:
       '注册可组合输入行为：稳定局部 ID + 必填名称 + 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。',
     semantics: {
-      modes: '合法可编辑 Live 实例（内核先执行只读、IME、表格与既有情境门控）。',
-      coordinates: '修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。',
+      modes: '合法可编辑 Live 实例（内核先执行只读、IME 组合中间态、表格网格与既有情境门控；IME 组合定稿（composition commit）驱动一次——userEvent input.type.compose、inputText 为净定稿文本，#399；删除事务白名单 backward/forward/selection/cut/line 驱动（dedent 属缩进命令族不纳入），#400）。',
+      coordinates: '修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。上下文与观察事件携带 docUri（目标文档 URI，与 views 句柄 targetDocUri 同源：main = 面板文档，embed = 引用目标——在引用 B 内触发时是 B 的 URI，#407）与 replaced（事务替换/删除侧：键入替换选区 = 被替换内容（#401），delete = 被删文本（#400），事务前 LF 坐标，IME 定稿恒 null）。',
       lifecycle: '行为能力与适用条件只由代码表达（不复制进清单）；每次修饰按自己的原子声明提交，提交与身份注入由平台完成（行为不能直接写文档）。',
       errors: '注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失拒绝、说明/例子缺失允许）。',
       history: '文本变化不终止链（默认可组合）；确需择一的用显式独占组（同组件命名空间内互斥，跨组件不互斥）——不恢复统一「先接管者生效」。',
@@ -782,9 +815,9 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
     experimental: [
       {
         entry: 'cm6',
-        version: '1.0.0',
+        version: '1.1.0',
         status: 'candidate',
-        note: '页面共享 CM6 运行时（experimental.cm6）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
+        note: '页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
       },
     ],
   },

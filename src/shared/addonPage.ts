@@ -26,12 +26,24 @@ import type {
 import type { AddonUiButtonDefinition, AddonUiPanelDefinition } from './addonUi'
 import type { MenuContextSnapshot } from './contextMenu'
 
+/** #406 language 语法树读取子集（@codemirror/language 的最小暴露面）：
+ *  只纳入「读树」函数——LRLanguage/foldGutter/indentUnit 等注册类成员不
+ *  暴露（addon 不应借实验入口注册语言或改全局语言配置）；树与节点的
+ *  类型消费经 type-only 导入（构建桥允许），无需值暴露。 */
+export interface AddonCm6LanguageRuntime {
+  readonly syntaxTree: (typeof import('@codemirror/language'))['syntaxTree']
+  readonly ensureSyntaxTree: (typeof import('@codemirror/language'))['ensureSyntaxTree']
+  readonly syntaxTreeAvailable: (typeof import('@codemirror/language'))['syntaxTreeAvailable']
+}
+
 /** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。值为本页 bundle
  *  内的模块命名空间对象——装载器由页面产物自身构造，因此与生产控制器
- *  共享同一份实例（构造器身份一致的机制来源）。 */
+ *  共享同一份实例（构造器身份一致的机制来源）。language 是语法树读取
+ *  函数子集（#406），非整模块命名空间。 */
 export interface AddonCm6Runtime {
   readonly state: typeof import('@codemirror/state')
   readonly view: typeof import('@codemirror/view')
+  readonly language: AddonCm6LanguageRuntime
 }
 
 /** T10（#359）SDK 命令面（仅编辑器页）：注册自己的可绑定命令——操作进入

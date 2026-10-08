@@ -22,6 +22,7 @@ import {
 import type { AddonPageEntryInput } from './addonPageRegistry'
 import type { AddonSettingsUpdateResult } from './addonSettingsService'
 import type { AddonSettingSource, AddonSettingValue } from '../../shared/addonSettings'
+import type { AddonStorageFacet } from '../../shared/addonStorage'
 
 /** 注册表宿主端口（vscode 层注入） */
 export interface AddonRegistryPorts {
@@ -78,6 +79,9 @@ export interface AddonSettingsContextApi {
 export interface AddonSetupContext extends AddonRegistrationContext {
   /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */
   readonly settings: AddonSettingsContextApi
+  /** #404 组件数据目录（globalStorage 语义的隔离可写目录 + 文件监听；
+   *  富结构数据（规则对象等）归本面，不并入设置存储的一层边界） */
+  readonly storage: AddonStorageFacet
   /** 设置生命周期通道（归 setup 所在的生命周期） */
   readonly channel: AddonChannelRegistry
 }
@@ -90,6 +94,8 @@ export interface AddonEnableContext extends AddonRegistrationContext {
   readonly pages: {
     registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle
   }
+  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */
+  readonly storage: AddonStorageFacet
   /** 运行生命周期通道（停用即注销） */
   readonly channel: AddonChannelRegistry
   /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */
@@ -209,7 +215,8 @@ export class AddonRegistry {
 }
 
 /** 生产注册表端口默认值（experimental 表含 T02 起提供的 cm6 实验入口——
- *  1.0.0 为首个候选版本，页面 SDK 的 experimental.cm6 形状随公开声明冻结） */
+ *  1.1.0 = #406 起暴露面含 language 语法树子集，页面 SDK 的
+ *  experimental.cm6 形状随公开声明冻结） */
 export function createDefaultRegistryPorts(
   findExtension: (id: string) => { packageJSON: unknown } | undefined,
 ): AddonRegistryPorts {
@@ -222,5 +229,7 @@ export function createDefaultRegistryPorts(
 }
 
 /** T02 实验入口版本：experimental.cm6（页面共享 CM6 运行时）——组件声明
- *  `experimental: { cm6: '<range>' }` 且范围含本版本才判兼容 */
-export const ADDON_EXPERIMENTAL_CM6_VERSION = '1.0.0'
+ *  `experimental: { cm6: '<range>' }` 且范围含本版本才判兼容。
+ *  1.1.0（#406）：暴露面追加 language 语法树子集（minor 扩展——
+ *  `^1.0.0` 声明保持兼容，精确 `1.0.0` 判不兼容） */
+export const ADDON_EXPERIMENTAL_CM6_VERSION = '1.1.0'

@@ -80,6 +80,10 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - 构建桥是 esbuild 插件：解析期注入 `vsidian-addon-sdk` shim（**不是真实 npm 包**——SDK 载体未发布，当前从主仓库测试夹具复制，见[示例仓库准备](example-repo-plan.md)）。
 - 构建目标 chrome114（对齐下界宿主 1.82.3 = Electron 25）。
 - **CM6 红线**：构建桥拒绝 `@codemirror/*` 值导入；共享 CM6 运行时须经 `sdk.experimental.cm6` 取得（该入口须在清单 `experimental` 声明）。产物含 CM6 运行时标记串即构建失败（双防线）。
+- **cm6 暴露面**：`state` 与 `view` 是整模块命名空间（构造 StateField/ViewPlugin 等值对象）；`language` 是**语法树读取子集**（`syntaxTree` / `ensureSyntaxTree` / `syntaxTreeAvailable`，#406 起 1.1.0）——`LRLanguage`、`foldGutter`、`indentUnit` 等注册类成员不暴露，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 `import type` 消费（构建桥允许 type-only）。
+- **已知边界（重要）**：live 编辑器的 markdown 语法树是内核私有的增量解析，不经 `@codemirror/language` 的 language facet 装配——`syntaxTree()` 在 live 编辑器状态上**恒返回未解析空树**。行类型判定（代码块/frontmatter/表格等）类需求不能依赖本入口，等待平台级树查询能力（另行评估）。
+- **组件数据目录**（#404）：`ctx.storage` 提供安装目录外的隔离可写目录（`uri()` 显示/同步配置用；`<vsidian globalStorage>/addons/<你的组件 ID>/`）。富结构数据（规则对象、含正则与优先级的 JSON）归这里读写，不塞设置存储（一层嵌套边界）；相对路径用正斜杠，越界形态（`..`、绝对路径、反斜杠）一律 `invalid-path` 拒绝；单文件上限 8MB。`onDidChangeFile(callback)` 监听外部变化——回调收 `(relativePath, kind)`，`kind` 为 `'change'`（改写或新建）或 `'delete'`（删除），同步工具改写/新建规则文件后自动重载；停用/故障/卸载不删数据（随 Vsidian 本体卸载清除，重装组件数据仍在）。页面侧组件代码经自己的 channel topic 桥接宿主读写。
+- **动态代码（`new Function` / `eval`）不可用**：附加组件页面的 CSP 由平台配置且不含 `unsafe-eval`（`'wasm-unsafe-eval'` 仅覆盖 WebAssembly）——动态构造的替换逻辑在两个 webview 都会被 CSP 引擎拦截，且平台**不计划**为此放行。等价能力：替换函数写成组件代码内的真函数，规则文件只存声明性数据与函数引用（预注册变换函数表，评估见 [CSP 探针](../research/addon-csp-dynamic-eval-probe.md)，#405）。
 - 装载器核对入口身份后调用工厂注入 SDK；组件只登记安装目录内的相对入口与资源子目录，越界路径被资源服务拒绝。
 - 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge) 与 [`page-load-protocol`](api-reference.md#page-load-protocol) 条目。
 
@@ -103,6 +107,8 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **目标归属**：操作始终归当前目标文档（在引用 B 中编辑不误改父 A）；按钮与面板回调收到的句柄由平台动态解析当前活动视图。
 - **渲染接管**：新安装的兼容且已启用组件自动替换所支持语言的显示（含内置）；重启/重复注册/普通升级不当作新安装；组件仍运行而渲染有 bug 时平台不自动接管。
 - **命名空间**：命令/菜单/按钮/面板的公开 ID 由平台注入 `<addonId>.<localId>`（局部 ID 禁点号）；不存在覆写、隐藏或接管内置菜单项的入口。
+- **按键拦截与优先级**（#402，实验入口契约）：经 `registerExtension` 挂 CM6 keymap 有两层位置——**普通 keymap**（扩展槽为平台扩展数组末位，平台 Tab 三段/列表续行等情境链先试，addon keymap 在平台不处理时落空接手，适合 Tabout 兜底类）与**抢先层**（用 `Prec.high` 包裹——高于平台普通键位，可替代平台处理如智能退格；返回 `false` 即落穿平台链，透传语义）。**保留键面不可越过**：撤销/重做（`Mod-z` / `Shift-Mod-z` / `Mod-y`）是 `Prec.highest` 的平台保留键闸（撤销栈归宿主文本管线），addon 即便用 `Prec.highest` 也抢不掉（同为 highest 时平台闸在扩展序上先注册、先者先匹配）；Esc 与宿主级快捷键（`Ctrl+P` 等命令面板键不经编辑器）同理不开放抢先。多组件同层按键按装载顺序仲裁（先装载先试）；逐项关闭=停用组件（实验层 keymap 不进统一快捷键管理，稳定化路线另行设计）。
+- **行为链触发面**（#399/#400/#401）：普通键入（`input.type`）与删除白名单（`delete.backward` / `forward` / `selection` / `cut` / `line`——`delete.dedent` 属缩进命令族不纳入）驱动；IME 候选期不驱动，**组合定稿驱动一次**（`userEvent='input.type.compose'`、`inputText` 为净定稿文本；取消/空白格组合/代码上下文不驱动）。上下文 `inputText` 为插入侧净文本；`replaced` 携带替换/删除侧（键入替换选区 = 被替换内容，delete = 被删文本，事务前 LF 坐标，IME 定稿恒 null）；`docUri` 为当前目标文档 URI（多视图语义：embed 触发时是引用目标的 URI）。
 
 ## 4. 消费样例入口
 

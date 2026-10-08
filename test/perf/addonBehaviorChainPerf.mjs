@@ -77,6 +77,9 @@ function makePorts(baseText, lineCount = 1_000) {
   let snapshotCalls = 0
   let applyCalls = 0
   const ports = {
+    docUriOf() {
+      return 'file:///bench/main.md'
+    },
     snapshotOf() {
       snapshotCalls++
       // 逐行 join（rope 惰性拼接）+ 对象组装：快照构造的真实形态近似

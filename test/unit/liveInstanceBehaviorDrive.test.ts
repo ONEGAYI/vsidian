@@ -6,15 +6,17 @@
 // - 合格用户键入（userEvent 'input.type'）经微任务驱动（不在键入事务的
 //   updateListener 同步段内嵌套 dispatch——修饰先于输入反序出站的实证
 //   修复）；
-// - compose userEvent（IME 组合中间/定稿）、网格编辑态（tableRegionField
-//   在场——setTableRegion 激活）、代码上下文（inCodeContext）、外部同步
-//   （externalSync）、SDK 修饰（addonEditOriginTag）不驱动；
+// - IME（#399 修订）：组合中间态（composing 在场）不驱动；compositionend
+//   之后的定稿 compose 事务驱动（inputText 含定稿文本）；
+// - 网格编辑态（tableRegionField 在场——setTableRegion 激活）、代码上下文
+//   （inCodeContext）、外部同步（externalSync）、SDK 修饰
+//   （addonEditOriginTag）不驱动；
 // - 表格源码行内（region 未激活）键入照常驱动（#124 同口径：排除面是
 //   网格编辑态而非表格行文本）；
 // - 未装配驱动（deps 缺省）或未设身份（setAddonBehaviorIdentity 未调）
 //   时零驱动。
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Transaction } from '@codemirror/state'
+import { EditorSelection, Transaction } from '@codemirror/state'
 import { LiveEditorInstance, externalSync, addonEditOriginTag, type LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
 import { setTableRegion } from '../../src/webview/tableRegionSelection'
 import { ImageResourceManager } from '../../src/webview/imageResource'
@@ -24,7 +26,12 @@ if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
 }
 
-interface DriveCall { instanceId: string; userEvent: string; inputText: string }
+interface DriveCall {
+  instanceId: string
+  userEvent: string
+  inputText: string
+  replaced: { from: number; to: number; text: string } | null
+}
 
 function makeDeps(sent: WebviewToHost[], drives: DriveCall[]): LiveEditorInstanceDeps {
   return {
@@ -73,13 +80,119 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     view.dispatch({ changes: { from: 4, insert: '^' }, userEvent: 'input.type' })
     expect(drives).toEqual([]) // 键入事务的 updateListener 同步段内不驱动
     await flushMicrotasks()
-    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: '^' }])
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: '^', replaced: null }])
   })
 
-  it('compose userEvent（IME 组合中间/定稿）不驱动', async () => {
+  it('IME：组合中间态与定稿事务不驱动；compositionend 后微任务补定稿驱动（#399）', async () => {
     const { instance, drives } = setup('word\n')
     const view = instance.getView()!
-    view.dispatch({ changes: { from: 4, insert: '组' }, userEvent: 'input.type.compose' })
+    view.dispatch({ selection: { anchor: 4 } })
+    const content = view.contentDOM
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    // 组合中间态：候选上屏事务不驱动（中间态不是行为输入）
+    view.dispatch({ changes: { from: 4, insert: 'ni' }, userEvent: 'input.type.compose.start' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+    // 定稿替换事务：实证顺序**先于** compositionend（Chromium 的
+    // insertCompositionText 提交）——仍处组合期门控窗口，不驱动
+    view.dispatch({ changes: { from: 4, to: 6, insert: '你好' }, userEvent: 'input.type.compose' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+    // compositionend（携带净定稿文本）后微任务补驱动
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '你好' }))
+    expect(drives).toEqual([]) // 同步段零驱动（微任务模式）
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你好', replaced: null }])
+  })
+
+  it('#400 delete 事务驱动：inputText 空、replaced 携带被删文本（事务前坐标）', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    // 退格删除 'd'（word 的 [3,4)，backward）：userEvent delete.backward
+    view.dispatch({ changes: { from: 3, to: 4 }, userEvent: 'delete.backward' })
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'delete.backward', inputText: '', replaced: { from: 3, to: 4, text: 'd' } }])
+  })
+
+  it('#400 delete 白名单外（delete.dedent 缩进命令族）不驱动', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    view.dispatch({ changes: { from: 0, to: 2 }, userEvent: 'delete.dedent' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('#401 键入替换选区：replaced 携带被替换的选区文本', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 0, head: 4 } })
+    view.dispatch({ changes: { from: 0, to: 4, insert: 'x' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: 'x', replaced: { from: 0, to: 4, text: 'word' } }])
+  })
+
+  it('#401 多选区替换：replaced 取删除区间最小包围、文本按区间序拼接', async () => {
+    const { instance, drives } = setup('one two\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: EditorSelection.create([EditorSelection.range(0, 3), EditorSelection.range(4, 7)], 0) })
+    view.dispatch({
+      changes: [
+        { from: 0, to: 3, insert: 'X' },
+        { from: 4, to: 7, insert: 'Y' },
+      ],
+      userEvent: 'input.type',
+    })
+    await flushMicrotasks()
+    expect(drives).toEqual([{
+      instanceId: 'main', userEvent: 'input.type', inputText: 'XY',
+      replaced: { from: 0, to: 7, text: 'onetwo' },
+    }])
+  })
+
+  it('#400 行为修饰的删除事务（addonEditOriginTag）不重入驱动', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    view.dispatch({
+      changes: { from: 3, to: 4 },
+      userEvent: 'delete.backward',
+      annotations: addonEditOriginTag.of({ origins: [{ addonId: 'pub.x', opId: 'g1-op1', undo: 'atomic' }] }),
+    })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('IME 定稿补驱动门控：取消（空 data）、代码上下文不驱动', async () => {
+    const { instance, drives } = setup('```js\nconst a = 1\n```\n')
+    const view = instance.getView()!
+    const content = view.contentDOM
+    // 取消组合：compositionend data 为空——不驱动
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '' }))
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+    // 代码上下文（定稿落点在围栏代码块内）：不驱动
+    view.dispatch({ selection: { anchor: 12 } })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: 'x' }))
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('IME 定稿补驱动门控：表格格区内选区替换式组合不驱动（#124 格区口径）', async () => {
+    const { instance, drives } = setup('| a | b |\n| --- | --- |\n')
+    const view = instance.getView()!
+    const content = view.contentDOM
+    // 格区激活 + 非空选区开始组合：beginBlankComposition 对非空选区不建立
+    // （blankComposition 为 null），定稿补驱动须由「组合开始点处于格区」
+    // 标记拦截——定稿事务已清空 tableRegionField，事后查在场状态查不到
+    view.dispatch({ effects: setTableRegion.of({
+      tableFrom: 0, rowFrom: 0, rowTo: 0, columnFrom: 0, columnTo: 1,
+    }) })
+    view.dispatch({ selection: { anchor: 2, head: 3 } })
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    view.dispatch({ changes: { from: 2, to: 3, insert: '你' }, userEvent: 'input.type.compose' })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '你' }))
     await flushMicrotasks()
     expect(drives).toEqual([])
   })
@@ -122,12 +235,12 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([])
   })
 
-  it('非 input.type userEvent（delete/paste/keymap 派生）不驱动', async () => {
+  it('白名单外 userEvent（paste/drop/程序化）不驱动——#400 起 delete 白名单内除外', async () => {
     const { instance, drives } = setup('word\n')
     const view = instance.getView()!
-    view.dispatch({ changes: { from: 4, to: 5 }, userEvent: 'delete.backward' })
     view.dispatch({ changes: { from: 4, insert: 'P' }, userEvent: 'input.paste' })
     view.dispatch({ changes: { from: 5, insert: 'K' } }) // 无 userEvent（程序化）
+    view.dispatch({ changes: { from: 0, to: 1 }, userEvent: 'input.drop' })
     await flushMicrotasks()
     expect(drives).toEqual([])
   })

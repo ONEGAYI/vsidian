@@ -10,10 +10,11 @@
 import 'katex/dist/katex.min.css'
 import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
+import * as cmLanguage from '@codemirror/language'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from '../../src/webview/syncController'
-import { installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
+import { addonCm6LanguageSubset, installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
 import { AddonViewRegistry } from '../../src/webview/addonViews'
 import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
@@ -70,7 +71,7 @@ const addonUi = new AddonUiRuntime({
 })
 const loader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'editor',
-  cm6: { state: cmState, view: cmView },
+  cm6: { state: cmState, view: cmView, language: addonCm6LanguageSubset(cmLanguage) },
   attachExtensions: (extension) => {
     controller.reconfigureAddonExtensions(extension)
   },

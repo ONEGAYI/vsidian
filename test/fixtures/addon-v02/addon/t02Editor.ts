@@ -46,7 +46,12 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     const length = view.state.field(docLength, false) ?? -1
     if (length === lastReported) return
     lastReported = length
-    void sdk.channel.request('t02.docState', { docLength: length, markColor: markColor(view) })
+    // #406 language 子集消费证据：函数源文本前缀（同一性证据，见 V02 组件同款注释）
+    void sdk.channel.request('t02.docState', {
+      docLength: length,
+      markColor: markColor(view),
+      syntaxTreeFn: String(cm6.language.syntaxTree).slice(0, 48),
+    })
   }
   // 装饰 DOM 在装载器 reconfigure 后的下一帧才绘制——挂载即读计算色
   // 可能为空；rAF 轮询直到读到非空色再补一报（有界 60 帧）

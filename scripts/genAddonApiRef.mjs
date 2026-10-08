@@ -55,7 +55,7 @@ export function extractSymbolDeclarations(fileText, fileName, wantedSymbols) {
   const sf = ts.createSourceFile(fileName, fileText, ts.ScriptTarget.Latest, true)
   const visit = (node) => {
     let name = null
-    if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isFunctionDeclaration(node)) {
+    if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) {
       name = node.name?.text ?? null
     } else if (ts.isVariableStatement(node)) {
       const decl = node.declarationList.declarations[0]
@@ -225,6 +225,8 @@ function renderEntry(entry, signatures) {
     sem.errors ? `- **错误与拒绝**：${sem.errors}` : null,
     sem.history ? `- **历史与撤回**：${sem.history}` : null,
     sem.autoRules ? `- **自动规则**：${sem.autoRules}` : null,
+    sem.language ? `- **暴露面裁剪**：${sem.language}` : null,
+    sem.keymap ? `- **按键优先级**：${sem.keymap}` : null,
   ].filter(Boolean)
 
   const signatureBlocks = entry.signatures

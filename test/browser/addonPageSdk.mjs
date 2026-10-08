@@ -183,7 +183,7 @@ await scenario('绘制层——组件标记的计算背景色与几何（page.cs
   await page.evaluate(() => window.initDoc('paint'))
   await page.click('.cm-content')
   await loadAddon(page, 1)
-  await waitReports(page, 'addon.state')
+  const stateReports = await waitReports(page, 'addon.state')
   const mark = await page.evaluate(() => window.markInfo())
   assert.equal(mark.count, 1)
   assert.equal(mark.color, 'rgb(255, 0, 127)', '组件样式的计算背景色（用户可见）')
@@ -192,6 +192,36 @@ await scenario('绘制层——组件标记的计算背景色与几何（page.cs
   assert.equal(identity.cm6Shared, true, '装载器注入了页面共享运行时')
   assert.ok(String(identity.stateFieldConstructor).includes('StateField'), `StateField 构造器身份：${identity.stateFieldConstructor}`)
   assert.ok(String(identity.viewConstructor).includes('EditorView'), `EditorView 构造器身份：${identity.viewConstructor}`)
+  // #406 language 语法树子集：页面 bundle 侧函数在场，组件侧真实调用并上报
+  assert.ok(!String(identity.languageSyntaxTreeFn).includes('missing'), `syntaxTree 函数在场：${identity.languageSyntaxTreeFn}`)
+  assert.equal(stateReports.at(-1)?.payload?.syntaxTreeFn, identity.languageSyntaxTreeFn, '组件经 SDK 拿到的 syntaxTree 与页面 bundle 同一导出（与生产控制器同实例）')
+})
+
+// ---- 场景 6：#402 按键拦截优先级契约 ----
+await scenario('按键拦截——addon highest 吞普通键，撤销保留键闸不可越（#402）', async (page) => {
+  await page.evaluate(() => window.initDoc('ab'))
+  await page.click('.cm-content')
+  // 装载前 x 正常输入（基线；夹具无宿主 undo 往返，撤销行为在真宿主套件）
+  await page.keyboard.type('x')
+  let editor = await page.evaluate(() => window.readEditor())
+  assert.equal(editor.text.length, 3, `装载前 x 正常输入：${JSON.stringify(editor)}`)
+  // 装载组件（highest keymap 吞 x）
+  await loadAddon(page, 1)
+  await waitReports(page, 'addon.state')
+  await page.keyboard.type('x')
+  editor = await page.evaluate(() => window.readEditor())
+  assert.equal(editor.text.length, 3, `addon highest keymap 吞掉 x：${JSON.stringify(editor)}`)
+  // 撤销保留键闸：Mod-z 闸在 addon highest 之前（扩展序先者先匹配）——
+  // 闸到达即出站 history.request（若被 addon 吞掉则无此出站）
+  await page.keyboard.press('Control+z')
+  const lastHost = await page.evaluate(() => window.__lastHostMessage)
+  assert.equal(lastHost?.kind, 'history.request', `撤销请求出站（保留键闸先于 addon）：${JSON.stringify(lastHost)}`)
+  // 卸载后 x 恢复输入
+  const unload = await page.evaluate((g) => window.unloadAddon(g), 1)
+  assert.deepEqual(unload, { ok: true })
+  await page.keyboard.type('x')
+  editor = await page.evaluate(() => window.readEditor())
+  assert.equal(editor.text.length, 4, `卸载后 x 恢复输入：${JSON.stringify(editor)}`)
 })
 
 // ---- 场景 7：卸载、迟回执拒收与手动恢复 ----

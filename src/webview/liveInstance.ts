@@ -85,6 +85,17 @@ export const externalSync = Annotation.define<boolean>()
  *  （addonId/opId），作者请求不可携带——不能冒充其他组件 */
 export const addonEditOriginTag = Annotation.define<{ origins: EditOriginMeta[] }>()
 
+/** #400 行为链驱动的 delete userEvent 白名单：字符/选区/行删除（用户
+ *  删除意图）；delete.dedent（Shift+Tab 降缩进）属缩进命令族、Tab 家族
+ *  情境链语义（不新增可绑定命令绕过），不纳入 */
+const ADDON_BEHAVIOR_DELETE_USER_EVENTS: ReadonlySet<string> = new Set([
+  'delete.backward',
+  'delete.forward',
+  'delete.selection',
+  'delete.cut',
+  'delete.line',
+])
+
 /** T06（#355）SDK applyEdits 实例侧实现——事务净插入长度（选区边界校验） */
 function totalInserted(changes: readonly { text: string }[]): number {
   return changes.reduce((sum, c) => sum + c.text.length, 0)
@@ -399,9 +410,15 @@ export interface LiveEditorInstanceDeps {
    *  注入点；缺省静默跳过（无 toast 面的装配不阻塞确认） */
   notifyToast?(text: string, severity: 'neutral' | 'warning' | 'error'): void
   /** T07（#356）输入行为链驱动（页面级 runtime 的窄接口）：本实例检测到
-   *  通过内核情境门控的用户键入事务时调用；缺省不驱动（未装配行为面
-   *  的环境零开销）。instanceId 由注册方 setAddonBehaviorIdentity 告知 */
-  driveAddonBehaviors?(input: { instanceId: string; userEvent: string; inputText: string }): void
+   *  通过内核情境门控的用户键入/删除事务时调用（#400 起纳入 delete 白
+   *  名单事务；#401 起携带替换/删除侧）；缺省不驱动（未装配行为面的
+   *  环境零开销）。instanceId 由注册方 setAddonBehaviorIdentity 告知 */
+  driveAddonBehaviors?(input: {
+    instanceId: string
+    userEvent: string
+    inputText: string
+    replaced: import('../shared/addonBehaviors').AddonReplacedRange | null
+  }): void
 }
 
 /**
@@ -532,6 +549,11 @@ export class LiveEditorInstance {
   /** 空白格或矩形区域的组合暂缓：宿主只接收结束后的净变更。 */
   private blankComposition: { startState: EditorState; changes: ChangeSet | null; region?: TableRegion } | null = null
   private compositionCommittedText: string | null = null
+  /** 组合开始点处于表格格区（#124 口径：格区归表格管线，行为链不驱动）。
+   *  定稿 compose 事务会清空 tableRegionField，compositionend 时刻事后查
+   *  在场状态恒为空——须在组合开始（compositionstart）时刻留存，键入路径
+   *  用 tr.startState 同基准。 */
+  private compositionInTableRegion = false
   /** 组合期间到达、待 flush 的外部增量（按到达序） */
   private pendingExternal: BufferedIncremental[] = []
   /** 组合期间到达、待 flush 的全文消息（覆盖增量形态）。source 记录来源
@@ -878,9 +900,11 @@ export class LiveEditorInstance {
    * 用户键入事务的链驱动检测（updateListener 逐事务调用）。门控次序与
    * 口径（票面：内核只读、IME、表格、Tab 等既有情境门控先于行为链）：
    * - 只读：非 Live/已销毁实例没有输入事务，天然不达此路径；
-   * - IME：组合期（composing/空白格组合缓冲在场）与 compose userEvent
-   *   事务不驱动——组合中间态不是行为输入（symbol-input「IME 组合期
-   *   时序」同口径，情境保持）；
+   * - IME（#399）：组合进行期（composing/空白格组合缓冲在场）与组合
+   *   中间态事务不驱动——候选中间态不是行为输入（symbol-input「IME
+   *   组合期时序」同口径，情境保持）；compositionend 之后的定稿 compose
+   *   事务**驱动**（inputText 含定稿文本），与 #123 补全/#124 包裹的
+   *   「定稿后微任务处理」模式一致；
    * - 表格：tableRegionField 格区内的键入不驱动（格区归 tableEditing，
    *   结构不被行为改写——#124「表格格区不接管」同口径）；
    * - Tab：Tab 是 keymap 命令（fenceEscape/tableEditing/indentEditing
@@ -890,8 +914,9 @@ export class LiveEditorInstance {
    *   口径）排除——行为只作用于正文；
    * - 程序化事务排除：外部同步（externalSync）与 SDK 修饰
    *   （addonEditOriginTag）不触发（防第二写入口/递归）。
-   * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/delete/
-   * undo 不驱动）。
+   * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/undo 不
+   * 驱动）+ delete 白名单（backward/forward/selection/cut/line——#400；
+   * paste/drop/undo 与 dedent 等命令族删除仍不驱动）。
    */
   private maybeDriveAddonBehaviors(tr: Transaction, state: EditorState): void {
     if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined || !tr.docChanged) {
@@ -901,7 +926,7 @@ export class LiveEditorInstance {
       return
     }
     const userEvent = tr.annotation(Transaction.userEvent)
-    if (userEvent === undefined || !userEvent.startsWith('input.type') || userEvent.includes('.compose')) {
+    if (userEvent === undefined || !(userEvent.startsWith('input.type') || ADDON_BEHAVIOR_DELETE_USER_EVENTS.has(userEvent)) || userEvent.includes('.compose')) {
       return
     }
     if (this.composing || this.blankComposition !== null) {
@@ -918,9 +943,18 @@ export class LiveEditorInstance {
       return
     }
     let inputText = ''
-    tr.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
+    let replacedFrom = -1
+    let replacedTo = -1
+    let replacedText = ''
+    tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
       inputText += inserted.sliceString(0)
+      if (toA > fromA) {
+        replacedFrom = replacedFrom < 0 ? fromA : Math.min(replacedFrom, fromA)
+        replacedTo = Math.max(replacedTo, toA)
+        replacedText += tr.startState.doc.sliceString(fromA, toA)
+      }
     })
+    const replaced = replacedFrom < 0 ? null : { from: replacedFrom, to: replacedTo, text: replacedText }
     // 微任务延迟：链执行的首次 applyEdits 会在其 await 求值时**同步**
     // dispatch 修饰事务（Promise executor 同步语义）——若在此处（键入
     // 事务的 updateListener 同步段内）直接驱动，修饰事务会嵌套 dispatch
@@ -930,8 +964,43 @@ export class LiveEditorInstance {
     const instanceId = this.addonBehaviorInstanceId
     const userEventRef = userEvent
     const inputTextRef = inputText
+    const replacedRef = replaced
     queueMicrotask(() => {
-      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef })
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef, replaced: replacedRef })
+    })
+  }
+
+  /**
+   * #399 IME 组合定稿的行为链驱动（compositionend 钩子调用）。定稿事务
+   * 先于 compositionend 到达且被组合期门控拦截（见 compositionend 处的
+   * 实证注释），这里以净定稿文本（event.data）补一次驱动，userEvent 标
+   * 'input.type.compose'（行为可据此区分普通键入与 IME 定稿）。
+   * 门控对齐键入路径的既有情境：空白格/网格组合（blankComposition 在场
+   * ——净输入归表格管线规范化）、表格格区（组合开始点标记——定稿事务
+   * 已清空 region，开始时刻留存，#124「格区不接管」口径）、代码上下文
+   * （定稿落点判 inCodeContext；多选区时只查主选区 head 与 head-1，
+   * 是键入路径「全部选区双端」的近似——IME 定稿在多选区下极罕见，
+   * 取主落点已覆盖现实输入形态）、取消组合（data 为空）。外部同步与
+   * SDK 修饰不经此路径。
+   */
+  private maybeDriveAddonBehaviorsForComposeCommit(committedText: string): void {
+    if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined) {
+      return
+    }
+    if (committedText === '' || this.composing || this.blankComposition !== null || this.compositionInTableRegion) {
+      return
+    }
+    const state = this.view?.state
+    if (!state) {
+      return
+    }
+    const head = state.selection.main.head
+    if (inCodeContext(state, head - 1) || inCodeContext(state, head)) {
+      return
+    }
+    const instanceId = this.addonBehaviorInstanceId
+    queueMicrotask(() => {
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: 'input.type.compose', inputText: committedText, replaced: null })
     })
   }
 
@@ -2440,17 +2509,18 @@ export class LiveEditorInstance {
           this.recordLocalChangeSet(tr.changes, changes, addonTag?.origins)
         }
       }),
-      // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
-      // 先后依次尝试（先者先匹配），调用方传入的 defaultKeymap（其本地
-      // undo/redo 绑定在未装 history 扩展时返回 false）先于本转发落穿，
-      // 之后才轮到转发请求宿主权威栈。#314 起 stopPropagation：撤销意图
-      // 不得落穿到 webview 预载脚本的宿主键位转发（宿主 undo 会绕开
-      // 本实例的粘贴历史回流语义）
-      keymap.of([
+      // 撤销/重做转发 keymap（#402 起提升为 Prec.highest 保留键闸）：
+      // 撤销/重做归宿主文本管线，是附加组件按键拦截的**保留键面**——
+      // addon keymap 即使用 Prec.highest 抢占也不得越过（同为 highest 时
+      // 本闸在扩展序上先于附加组件槽，先者先匹配）。#314 起
+      // stopPropagation：撤销意图不得落穿到 webview 预载脚本的宿主键位
+      // 转发（宿主 undo 会绕开本实例的粘贴历史回流语义）；defaultKeymap
+      // 的本地 undo/redo 绑定在未装 history 扩展时返回 false，先试无害
+      Prec.highest(keymap.of([
         { key: 'Mod-z', run: () => this.requestHistory('undo'), stopPropagation: true },
         { key: 'Shift-Mod-z', run: () => this.requestHistory('redo'), stopPropagation: true },
         { key: 'Mod-y', run: () => this.requestHistory('redo'), stopPropagation: true },
-      ]),
+      ])),
       ViewPlugin.fromClass(class {
         private readonly onStart = captureCompositionStart
 
@@ -2468,6 +2538,9 @@ export class LiveEditorInstance {
           // 停顿回看在 captureCompositionStart（捕获阶段）已完成——到达
           // 冒泡 handler 时 composing 已置 true，此处只保留既有标记逻辑
           this.composing = true
+          // 组合开始点的格区标记（定稿补驱动门控用，见字段注释；初始值
+          // 为 null 非.undefined，用真值判定与键入路径同口径）
+          this.compositionInTableRegion = Boolean(this.view?.state.field(tableRegionField, false))
           this.beginBlankComposition()
         },
         compositionupdate: () => {
@@ -2476,6 +2549,7 @@ export class LiveEditorInstance {
           if (!this.composing) {
             this.markPauseBoundary()
             this.composing = true
+            this.compositionInTableRegion = Boolean(this.view?.state.field(tableRegionField, false))
           }
           this.beginBlankComposition()
           // P2-05：组合开始 = 输入挂起态——置位 settle 检测
@@ -2485,6 +2559,13 @@ export class LiveEditorInstance {
           this.compositionCommittedText = event.data || null
           this.composing = false
           this.scheduleFlush()
+          // #399 组合定稿驱动行为链。实证（CDP + Chromium）：定稿事务
+          // （insertCompositionText，userEvent 'input.type.compose'）**先于**
+          // compositionend 派发、处于组合期门控窗口内被 maybeDriveAddonBehaviors
+          // 拦截——故定稿不能靠事务路径驱动，在 compositionend 钩子补一次
+          // （与 #123 补全/#124 包裹的「定稿后微任务处理」同模式）。
+          this.maybeDriveAddonBehaviorsForComposeCommit(event.data || '')
+          this.compositionInTableRegion = false
         },
         // #153：用户主动移光标开新撤销段（点击 / 导航键选区移动）；纯输入
         // 导致的光标后移不在此列（不派发 DOM 事件信号）

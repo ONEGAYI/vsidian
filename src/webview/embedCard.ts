@@ -286,7 +286,7 @@ export interface EmbedCardContext {
   } | undefined
   /** T07（#356）输入行为链驱动（根注入页面级 runtime 的窄接口；嵌入内
    *  键入同样驱动——缺省不驱动） */
-  driveAddonBehaviors?(input: { instanceId: string; userEvent: string; inputText: string }): void
+  driveAddonBehaviors?(input: { instanceId: string; userEvent: string; inputText: string; replaced: import('../shared/addonBehaviors').AddonReplacedRange | null }): void
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除）。

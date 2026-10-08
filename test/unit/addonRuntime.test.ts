@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { AddonRegistry } from '../../src/host/addons/addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from '../../src/host/addons/addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort } from '../../src/host/addons/addonSettingsService'
+import { AddonStorageService } from '../../src/host/addons/addonStorageService'
 import { ADDON_API_VERSION, OFFICIAL_ADDON_EXTENSION_IDS } from '../../src/shared/addonIdentity'
 
 const INSTALL = process.platform === 'win32' ? 'C:\\addons\\demo-addon' : '/addons/demo-addon'
@@ -41,6 +42,8 @@ interface Harness {
   store: ReturnType<typeof memoryStore>
   logs: string[]
   changes: number
+  /** storage.release 被平台侧调用的 addonId 序列（B5：停用/故障/代次终结注销 watcher） */
+  storageReleases: string[]
   register(definition?: import('../../src/host/addons/addonRegistry').AddonDefinition, addonId?: string): unknown
 }
 
@@ -54,10 +57,32 @@ function harness(options: { store?: ReturnType<typeof memoryStore>; installDirs?
     read: () => undefined,
     write: async () => true,
   }
+  // 计数子类：release 的平台侧触发面（停用/故障/代次终结）可断言
+  class CountingStorage extends AddonStorageService {
+    readonly releases: string[] = []
+    override release(addonId: string): void {
+      this.releases.push(addonId)
+      super.release(addonId)
+    }
+  }
+  const countingStorage = new CountingStorage({
+    baseDir: '/test/addons',
+    uriOf: (addonId) => `file:///test/addons/${addonId}`,
+    fs: {
+      readFile: async () => new Uint8Array(),
+      writeFile: async () => {},
+      delete: async () => {},
+      readDirectory: async () => [],
+      createDirectory: async () => {},
+    },
+    createWatcher: () => ({ dispose: () => {} }),
+  })
+  const storageReleases = countingStorage.releases
   const runtime = new AddonRuntime({
     apiVersion: ADDON_API_VERSION,
     preferences: store,
     settings: new AddonSettingsService(settingsPersistence),
+    storage: countingStorage,
     installDirOf: (addonId) => installDirs[addonId],
     log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
   })
@@ -78,6 +103,7 @@ function harness(options: { store?: ReturnType<typeof memoryStore>; installDirs?
     runtime,
     store,
     logs,
+    storageReleases,
     get changes() { return changes.length },
     register: (definition, addonId = 'fixture.demo') => registry.register({ id: addonId }, definition ?? {}),
   }
@@ -165,6 +191,9 @@ describe('T02 运行生命周期：手动停用与持久化', () => {
     h.runtime.setUserEnabled('fixture.demo', false)
     // 运行贡献释放：清理回调执行、装载面清空、run handler 移除
     expect(events).toEqual(['released'])
+    // #404 停用同时注销数据目录 watcher（组件订阅不受平台约束，防停用后
+    // 仍派发与重启用后重复派发）
+    expect(h.storageReleases).toEqual(['fixture.demo'])
     expect(h.runtime.desiredEditorLoads()).toEqual([])
     expect(h.runtime.runtimeStatus('fixture.demo')).toMatchObject({ enabled: false, runState: 'disabled' })
     // 停用 unload 意图携带最后装载代次（面板桥据此发 addon.unload）
@@ -542,6 +571,18 @@ describe('T12 设置变化回调异常升级为全组件故障', () => {
       apiVersion: ADDON_API_VERSION,
       preferences: store,
       settings: settingsService,
+      storage: new AddonStorageService({
+        baseDir: '/test/addons',
+        uriOf: (addonId) => `file:///test/addons/${addonId}`,
+        fs: {
+          readFile: async () => new Uint8Array(),
+          writeFile: async () => {},
+          delete: async () => {},
+          readDirectory: async () => [],
+          createDirectory: async () => {},
+        },
+        createWatcher: () => ({ dispose: () => {} }),
+      }),
       installDirOf: () => INSTALL,
       log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
     })

@@ -15,7 +15,8 @@
 //    跳过；调序后均 atomic，三次 Ctrl+Z 逐笔回退；
 // 3. 单项停用（关 dash）后组内接位者生效；恢复默认（幂等写回）后
 //    默认链回归；
-// 4. IME 情境保持：组合定稿输入不触发行为链（驱动计数不增、零修饰）；
+// 4. IME 情境（#399 修订）：候选期不驱动（组合中间态非行为输入）、
+//    组合定稿驱动行为链（inputText 含定稿文本，观察与修饰面一致）；
 // 5. 表格情境口径：源码行内键入照常驱动与受修饰（#124 同口径——排除
 //    面是网格编辑态 tableRegionField 而非表格行文本；网格 region 在场
 //    不驱动由单测 liveInstanceBehaviorDrive 钉住）；
@@ -238,22 +239,51 @@ try {
   await waitText(T0)
   console.log('[PASS] 单项停用即时生效（组内 space 接位）；恢复默认后默认链回归')
 
-  // ---- 4. IME 情境保持：组合定稿输入不触发行为链 ----
+  // ---- 4. IME 情境（#399 修订）：候选期不驱动、组合定稿驱动 ----
   await command('reset')
   const drivesBeforeIme = (await command('stats')).counters.drives
   await focus(); await docEnd()
   await call('Input.imeSetComposition', { text: '，', selectionStart: 1, selectionEnd: 1 })
   await new Promise((resolve) => setTimeout(resolve, 250))
+  // 候选期（组合中间态）：不驱动、零事件——组合中间态不是行为输入
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeIme, `IME 候选期不应驱动行为链：${JSON.stringify(stats.counters)}`)
+  events = await collectEvents()
+  assert.ok(!events.some((e) => e.kind === 'behavior'), `IME 候选期不应触发行为回调：${JSON.stringify(events)}`)
   await call('Input.insertText', { text: '，' })
   await waitText('word，')
   await new Promise((resolve) => setTimeout(resolve, 500))
+  // 组合定稿：驱动恰一次，行为上下文的 inputText 含定稿文本（'，' 非 '^'，
+  // 行为族判定不修饰——但回调被真实调用且可读定稿文本）
   events = await collectEvents()
-  assert.ok(!events.some((e) => e.kind === 'behavior'), `IME 定稿输入不应触发行为修饰：${JSON.stringify(events)}`)
+  const imeBehaviors = events.filter((e) => e.kind === 'behavior')
+  assert.ok(imeBehaviors.length > 0, `IME 定稿应触发行为回调：${JSON.stringify(events)}`)
+  assert.ok(imeBehaviors.every((e) => e.inputText === '，'), `行为上下文 inputText 应为定稿文本：${JSON.stringify(imeBehaviors)}`)
+  assert.ok(events.some((e) => e.kind === 'changed' && e.inputText === '，'), `onChanged 观察应含定稿文本：${JSON.stringify(events)}`)
   stats = await command('stats')
-  assert.equal(stats.counters.drives, drivesBeforeIme, `IME 输入不应驱动行为链（计数不增）：${JSON.stringify(stats.counters)}`)
+  assert.equal(stats.counters.drives, drivesBeforeIme + 1, `IME 定稿应驱动恰好一次：${JSON.stringify(stats.counters)}`)
   await undo()
   await waitText(T0)
-  console.log('[PASS] IME 组合定稿输入不触发行为链（情境保持，驱动计数不增）')
+  console.log('[PASS] IME 候选期不驱动、组合定稿驱动行为链（inputText 含定稿文本，#399）')
+
+  // ---- 4.5 #400：真实退格驱动行为链，replaced 携带被删文本 ----
+  await command('reset')
+  const drivesBeforeDel = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+  await waitText('wor')
+  events = await collectEvents()
+  const delBehaviors = events.filter((e) => e.kind === 'behavior')
+  assert.ok(delBehaviors.length > 0, `退格应触发行为回调：${JSON.stringify(events)}`)
+  assert.ok(delBehaviors.every((e) => e.inputText === '' && e.replaced?.text === 'd' && e.replaced.from === 3),
+    `删除上下文 inputText 空、replaced 为被删文本（事务前坐标）：${JSON.stringify(delBehaviors)}`)
+  assert.ok(events.some((e) => e.kind === 'changed' && e.replaced?.text === 'd'), `onChanged 观察携带被删文本：${JSON.stringify(events)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeDel + 1, `退格驱动恰好一次：${JSON.stringify(stats.counters)}`)
+  await undo()
+  await waitText(T0)
+  console.log('[PASS] 真实退格驱动行为链（inputText 空、replaced 携带被删文本，#400）')
 
   // ---- 5. 表格情境口径：源码行键入照常受行为修饰（网格编辑态排除）----
   // #124 同口径：排除面是「网格编辑态」（tableRegionField 在场——点击

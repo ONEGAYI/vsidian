@@ -12,10 +12,11 @@
 import 'katex/dist/katex.min.css'
 import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
+import * as cmLanguage from '@codemirror/language'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from '../../src/webview/syncController'
-import { installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
+import { addonCm6LanguageSubset, installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
 import { setAddonRenderersBridge, type AddonRenderersOutboundMessage } from '../../src/webview/addonRenderers'
 import { AddonRendererService } from '../../src/host/addons/addonRendererService'
 import type { AddonRendererStoreV1 } from '../../src/shared/addonRenderers'
@@ -44,7 +45,7 @@ const rendererOutbox: AddonRenderersOutboundMessage[] = []
 const addonRenderers = setAddonRenderersBridge((message) => rendererOutbox.push(message))
 const loader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'editor',
-  cm6: { state: cmState, view: cmView },
+  cm6: { state: cmState, view: cmView, language: addonCm6LanguageSubset(cmLanguage) },
   // 生产槽路径：装载器 → controller → liveInstance 的附加组件
   // Compartment（与生产 main.ts 装载点同一装配）
   attachExtensions: (extension) => {
@@ -288,6 +289,7 @@ Object.assign(window, {
       cm6Shared: stats.cm6Shared,
       stateFieldConstructor: cmState.StateField?.name,
       viewConstructor: cmView.EditorView?.name,
+      languageSyntaxTreeFn: typeof cmLanguage.syntaxTree === 'function' ? String(cmLanguage.syntaxTree).slice(0, 48) : 'missing',
     }
   },
 })

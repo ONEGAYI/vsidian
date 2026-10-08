@@ -24,6 +24,7 @@ import {
 import type { AddonApiEntry, AddonApiGroup, AddonApiReleaseRecord } from '../../src/shared/addonApiCatalog'
 import type {
   AddonChannelOutcome,
+  AddonCm6Runtime,
   AddonLoadFailureReason,
   AddonPageFactory,
   AddonPageKind,
@@ -53,6 +54,7 @@ import type {
   AddonSettingSource,
   AddonSettingValue,
 } from '../../src/shared/addonSettings'
+import type { AddonStorageFacet, AddonStorageRejection } from '../../src/shared/addonStorage'
 import type {
   AddonRendererRegistration,
   AddonRenderersFacet,
@@ -166,6 +168,12 @@ export type SdkSurface = Pick<
 
 /** views 面（枚举/获取/创建/销毁订阅） */
 export type ViewsSurface = Pick<AddonViewsFacet, 'list' | 'get' | 'onCreated' | 'onDisposed'>
+/** 实验入口 cm6 运行时（state/view 整命名空间 + #406 language 语法树子集） */
+export type Cm6RuntimeSurface = Pick<AddonCm6Runtime, 'state' | 'view' | 'language'>
+export type Cm6LanguageSurface = Pick<
+  AddonCm6Runtime['language'],
+  'syntaxTree' | 'ensureSyntaxTree' | 'syntaxTreeAvailable'
+>
 /** behaviors 面（注册与只读观察分开） */
 export type BehaviorsSurface = Pick<AddonBehaviorsFacet, 'register' | 'onChanged'>
 /** renderers 面 */
@@ -202,6 +210,15 @@ export type BehaviorShapes = {
   registration: AddonBehaviorRegistration
   changeEvent: AddonBehaviorChangeEvent
 }
+
+/** #404 组件数据目录面（读写监听六入口 + 拒绝码钉住） */
+export type StorageSurface = Pick<
+  AddonStorageFacet,
+  'uri' | 'readFile' | 'writeFile' | 'list' | 'deleteFile' | 'onDidChangeFile'
+>
+export const storageRejectionsPinned: Equals<AddonStorageRejection, 'invalid-path' | 'too-large' | 'error'> = true
+/** onDidChangeFile 回调两参契约（相对路径, 变化类型）——删参/收窄 kind 即编译失败 */
+export const storageWatchKindPinned: Equals<Parameters<Parameters<AddonStorageFacet['onDidChangeFile']>[0]>[1], 'change' | 'delete'> = true
 
 /** 设置定义到值的组合 */
 export type SettingShapes = {

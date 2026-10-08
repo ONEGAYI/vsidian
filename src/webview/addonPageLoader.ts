@@ -19,6 +19,7 @@
 import type { Extension } from '@codemirror/state'
 import type {
   AddonChannelOutcome,
+  AddonCm6LanguageRuntime,
   AddonCm6Runtime,
   AddonLoadFailureReason,
   AddonLoadManifest,
@@ -43,6 +44,17 @@ import type { AddonUiRuntime } from './addonUi'
 /** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
  *  会追加新条目，装载器按「本次装载期间注册 + 未消费」规则取用） */
 export const ADDON_PAGE_REGISTRY_GLOBAL = '__vsidianAddonPages'
+
+/** #406 从 @codemirror/language 模块命名空间裁出共享运行时的 language
+ *  子集——「最小暴露集合」的单一事实源：构造点（生产 main 与各测试
+ *  夹具/探针）一律经本函数裁剪，将来调整集合只改此处 */
+export function addonCm6LanguageSubset(ns: typeof import('@codemirror/language')): AddonCm6LanguageRuntime {
+  return {
+    syntaxTree: ns.syntaxTree,
+    ensureSyntaxTree: ns.ensureSyntaxTree,
+    syntaxTreeAvailable: ns.syntaxTreeAvailable,
+  }
+}
 /** 装载器调用工厂前的 SDK 注入槽（构建桥 currentSdk() 的读取点） */
 export const ADDON_SDK_SLOT_GLOBAL = '__vsidianAddonSdk'
 

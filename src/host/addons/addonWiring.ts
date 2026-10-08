@@ -35,6 +35,7 @@ import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type AddonSettingsLoadPlan } from './addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
+import { AddonStorageService } from './addonStorageService'
 import { AddonBehaviorStateService } from './addonBehaviorStateService'
 import { AddonBehaviorCatalogService } from './addonBehaviorCatalogService'
 import { mergeBehaviorOrderPreservingUnknown } from '../../shared/addonBehaviors'
@@ -266,10 +267,43 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     persistence: rendererPersistence,
     log: (stage, detail) => log(`addons ${stage}: ${detail}`),
   })
+  // #404 组件数据目录：base = <globalStorage>/addons（Uri 构造保证跨平台
+  // 路径形态；fsPath 正斜杠归一供纯逻辑服务拼接，workspace.fs 经 Uri 回装）
+  const storageBaseUri = vscode.Uri.joinPath(context.globalStorageUri, 'addons')
+  /** 正斜杠路径 → file Uri（fsPath 归一的逆变换） */
+  const toStorageUri = (path: string): vscode.Uri => vscode.Uri.file(path)
+  const storageService = new AddonStorageService({
+    baseDir: storageBaseUri.fsPath.split('\\').join('/'),
+    uriOf: (addonId) => vscode.Uri.joinPath(storageBaseUri, addonId).toString(),
+    fs: {
+      readFile: async (path) => vscode.workspace.fs.readFile(toStorageUri(path)),
+      writeFile: async (path, content) => vscode.workspace.fs.writeFile(toStorageUri(path), content),
+      delete: async (path) => vscode.workspace.fs.delete(toStorageUri(path)),
+      readDirectory: async (path) => {
+        const entries = await vscode.workspace.fs.readDirectory(toStorageUri(path))
+        return entries.map(([name, type]) => [name, type as number] as [string, number])
+      },
+      createDirectory: async (path) => vscode.workspace.fs.createDirectory(toStorageUri(path)),
+    },
+    createWatcher: (dirPath, onEvent) => {
+      const base = toStorageUri(dirPath)
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(base, '**/*'),
+      )
+      const rel = (uri: vscode.Uri): string => uri.path.slice(base.path.length + 1)
+      // 新建文件归并为 change（组件收到即可读；「删旧建新」式替换两侧
+      // 事件齐全，不漏新文件就位）
+      watcher.onDidCreate((uri) => onEvent('change', rel(uri)))
+      watcher.onDidChange((uri) => onEvent('change', rel(uri)))
+      watcher.onDidDelete((uri) => onEvent('delete', rel(uri)))
+      return watcher
+    },
+  })
   const runtime = new AddonRuntime({
     apiVersion: ADDON_API_VERSION,
     preferences: preferenceStore,
     settings: settingsService,
+    storage: storageService,
     installDirOf: (addonId) => vscode.extensions.getExtension(addonId)?.extensionUri.fsPath,
     log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
   })
