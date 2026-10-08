@@ -878,9 +878,11 @@ export class LiveEditorInstance {
    * 用户键入事务的链驱动检测（updateListener 逐事务调用）。门控次序与
    * 口径（票面：内核只读、IME、表格、Tab 等既有情境门控先于行为链）：
    * - 只读：非 Live/已销毁实例没有输入事务，天然不达此路径；
-   * - IME：组合期（composing/空白格组合缓冲在场）与 compose userEvent
-   *   事务不驱动——组合中间态不是行为输入（symbol-input「IME 组合期
-   *   时序」同口径，情境保持）；
+   * - IME（#399）：组合进行期（composing/空白格组合缓冲在场）与组合
+   *   中间态事务不驱动——候选中间态不是行为输入（symbol-input「IME
+   *   组合期时序」同口径，情境保持）；compositionend 之后的定稿 compose
+   *   事务**驱动**（inputText 含定稿文本），与 #123 补全/#124 包裹的
+   *   「定稿后微任务处理」模式一致；
    * - 表格：tableRegionField 格区内的键入不驱动（格区归 tableEditing，
    *   结构不被行为改写——#124「表格格区不接管」同口径）；
    * - Tab：Tab 是 keymap 命令（fenceEscape/tableEditing/indentEditing
@@ -932,6 +934,36 @@ export class LiveEditorInstance {
     const inputTextRef = inputText
     queueMicrotask(() => {
       this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef })
+    })
+  }
+
+  /**
+   * #399 IME 组合定稿的行为链驱动（compositionend 钩子调用）。定稿事务
+   * 先于 compositionend 到达且被组合期门控拦截（见 compositionend 处的
+   * 实证注释），这里以净定稿文本（event.data）补一次驱动，userEvent 标
+   * 'input.type.compose'（行为可据此区分普通键入与 IME 定稿）。
+   * 门控对齐键入路径的既有情境：空白格/网格组合（blankComposition 在场
+   * ——净输入归表格管线规范化）、代码上下文（定稿落点判 inCodeContext）、
+   * 取消组合（data 为空）。外部同步与 SDK 修饰不经此路径。
+   */
+  private maybeDriveAddonBehaviorsForComposeCommit(committedText: string): void {
+    if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined) {
+      return
+    }
+    if (committedText === '' || this.composing || this.blankComposition !== null) {
+      return
+    }
+    const state = this.view?.state
+    if (!state) {
+      return
+    }
+    const head = state.selection.main.head
+    if (inCodeContext(state, head - 1) || inCodeContext(state, head)) {
+      return
+    }
+    const instanceId = this.addonBehaviorInstanceId
+    queueMicrotask(() => {
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: 'input.type.compose', inputText: committedText })
     })
   }
 
@@ -2485,6 +2517,12 @@ export class LiveEditorInstance {
           this.compositionCommittedText = event.data || null
           this.composing = false
           this.scheduleFlush()
+          // #399 组合定稿驱动行为链。实证（CDP + Chromium）：定稿事务
+          // （insertCompositionText，userEvent 'input.type.compose'）**先于**
+          // compositionend 派发、处于组合期门控窗口内被 maybeDriveAddonBehaviors
+          // 拦截——故定稿不能靠事务路径驱动，在 compositionend 钩子补一次
+          // （与 #123 补全/#124 包裹的「定稿后微任务处理」同模式）。
+          this.maybeDriveAddonBehaviorsForComposeCommit(event.data || '')
         },
         // #153：用户主动移光标开新撤销段（点击 / 导航键选区移动）；纯输入
         // 导致的光标后移不在此列（不派发 DOM 事件信号）

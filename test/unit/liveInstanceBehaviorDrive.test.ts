@@ -6,9 +6,11 @@
 // - 合格用户键入（userEvent 'input.type'）经微任务驱动（不在键入事务的
 //   updateListener 同步段内嵌套 dispatch——修饰先于输入反序出站的实证
 //   修复）；
-// - compose userEvent（IME 组合中间/定稿）、网格编辑态（tableRegionField
-//   在场——setTableRegion 激活）、代码上下文（inCodeContext）、外部同步
-//   （externalSync）、SDK 修饰（addonEditOriginTag）不驱动；
+// - IME（#399 修订）：组合中间态（composing 在场）不驱动；compositionend
+//   之后的定稿 compose 事务驱动（inputText 含定稿文本）；
+// - 网格编辑态（tableRegionField 在场——setTableRegion 激活）、代码上下文
+//   （inCodeContext）、外部同步（externalSync）、SDK 修饰
+//   （addonEditOriginTag）不驱动；
 // - 表格源码行内（region 未激活）键入照常驱动（#124 同口径：排除面是
 //   网格编辑态而非表格行文本）；
 // - 未装配驱动（deps 缺省）或未设身份（setAddonBehaviorIdentity 未调）
@@ -76,10 +78,39 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: '^' }])
   })
 
-  it('compose userEvent（IME 组合中间/定稿）不驱动', async () => {
+  it('IME：组合中间态与定稿事务不驱动；compositionend 后微任务补定稿驱动（#399）', async () => {
     const { instance, drives } = setup('word\n')
     const view = instance.getView()!
-    view.dispatch({ changes: { from: 4, insert: '组' }, userEvent: 'input.type.compose' })
+    view.dispatch({ selection: { anchor: 4 } })
+    const content = view.contentDOM
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    // 组合中间态：候选上屏事务不驱动（中间态不是行为输入）
+    view.dispatch({ changes: { from: 4, insert: 'ni' }, userEvent: 'input.type.compose.start' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+    // 定稿替换事务：实证顺序**先于** compositionend（Chromium 的
+    // insertCompositionText 提交）——仍处组合期门控窗口，不驱动
+    view.dispatch({ changes: { from: 4, to: 6, insert: '你好' }, userEvent: 'input.type.compose' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+    // compositionend（携带净定稿文本）后微任务补驱动
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '你好' }))
+    expect(drives).toEqual([]) // 同步段零驱动（微任务模式）
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你好' }])
+  })
+
+  it('IME 定稿补驱动门控：取消（空 data）、代码上下文不驱动', async () => {
+    const { instance, drives } = setup('```js\nconst a = 1\n```\n')
+    const view = instance.getView()!
+    const content = view.contentDOM
+    // 取消组合：compositionend data 为空——不驱动
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '' }))
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+    // 代码上下文（定稿落点在围栏代码块内）：不驱动
+    view.dispatch({ selection: { anchor: 12 } })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: 'x' }))
     await flushMicrotasks()
     expect(drives).toEqual([])
   })

@@ -560,7 +560,7 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     purpose:
       '注册可组合输入行为：稳定局部 ID + 必填名称 + 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。',
     semantics: {
-      modes: '合法可编辑 Live 实例（内核先执行只读、IME、表格与既有情境门控）。',
+      modes: '合法可编辑 Live 实例（内核先执行只读、IME 组合中间态、表格网格与既有情境门控；IME 组合定稿（composition commit）事务驱动——inputText 含定稿文本，#399）。',
       coordinates: '修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。',
       lifecycle: '行为能力与适用条件只由代码表达（不复制进清单）；每次修饰按自己的原子声明提交，提交与身份注入由平台完成（行为不能直接写文档）。',
       errors: '注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失拒绝、说明/例子缺失允许）。',
