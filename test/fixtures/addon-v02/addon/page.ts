@@ -104,7 +104,13 @@ function buildEditorExtension(sdk: VsidianAddonPageSdk): void {
     { decorations: (instance: { decorations: DecorationSet }) => instance.decorations },
   )
 
-  if (!sdk.registerExtension([docLength, markPlugin] as Extension[])) {
+  // #402 按键拦截优先级契约演示：Prec.highest 的 keymap 吞掉 'x'
+  // （addon 抢先层可拦截普通键位；平台保留键闸——撤销/重做——在扩展序
+  // 上先于本槽，同为 highest 时先者先匹配，addon 不可越过）
+  const { Prec } = cm6.state
+  const interceptX = Prec.highest(cm6.view.keymap.of([{ key: 'x', run: () => true }]))
+
+  if (!sdk.registerExtension([docLength, markPlugin, interceptX] as Extension[])) {
     throw new Error('扩展登记被拒绝（编辑器装配槽不可用）')
   }
 

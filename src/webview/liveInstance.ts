@@ -2499,17 +2499,18 @@ export class LiveEditorInstance {
           this.recordLocalChangeSet(tr.changes, changes, addonTag?.origins)
         }
       }),
-      // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
-      // 先后依次尝试（先者先匹配），调用方传入的 defaultKeymap（其本地
-      // undo/redo 绑定在未装 history 扩展时返回 false）先于本转发落穿，
-      // 之后才轮到转发请求宿主权威栈。#314 起 stopPropagation：撤销意图
-      // 不得落穿到 webview 预载脚本的宿主键位转发（宿主 undo 会绕开
-      // 本实例的粘贴历史回流语义）
-      keymap.of([
+      // 撤销/重做转发 keymap（#402 起提升为 Prec.highest 保留键闸）：
+      // 撤销/重做归宿主文本管线，是附加组件按键拦截的**保留键面**——
+      // addon keymap 即使用 Prec.highest 抢占也不得越过（同为 highest 时
+      // 本闸在扩展序上先于附加组件槽，先者先匹配）。#314 起
+      // stopPropagation：撤销意图不得落穿到 webview 预载脚本的宿主键位
+      // 转发（宿主 undo 会绕开本实例的粘贴历史回流语义）；defaultKeymap
+      // 的本地 undo/redo 绑定在未装 history 扩展时返回 false，先试无害
+      Prec.highest(keymap.of([
         { key: 'Mod-z', run: () => this.requestHistory('undo'), stopPropagation: true },
         { key: 'Shift-Mod-z', run: () => this.requestHistory('redo'), stopPropagation: true },
         { key: 'Mod-y', run: () => this.requestHistory('redo'), stopPropagation: true },
-      ]),
+      ])),
       ViewPlugin.fromClass(class {
         private readonly onStart = captureCompositionStart
 
