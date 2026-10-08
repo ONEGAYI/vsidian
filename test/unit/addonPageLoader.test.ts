@@ -608,3 +608,86 @@ describe('T02 生产装载器：设置页与资源地址', () => {
     expect(results).toEqual([{ ok: true, result: { echoed: true } }])
   })
 })
+
+describe('#395 P3 装载并发串行化（按 addonId 在途链）', () => {
+  const CSS_URI = 'https://page.test/addon.css'
+  const headLinks = (uri: string) => document.head.querySelectorAll(`link[href="${uri}"]`)
+
+  it('gen1 在途时 unload(gen1)+load(gen2) 按宿主指令序生效：后代次落 active、前代次资源回收', async () => {
+    let loadScriptImpl: (uri: string) => Promise<{ ok: true }> = async () => ({ ok: true })
+    const h = harness({ loadCss: undefined, loadScript: (uri) => loadScriptImpl(uri) })
+    let releaseGen1!: () => void
+    const gen1Gate = new Promise<void>((r) => { releaseGen1 = r })
+    let call = 0
+    loadScriptImpl = async () => {
+      const index = call++
+      if (index === 0) await gen1Gate
+      registerFactory(h, () => {})
+      return { ok: true }
+    }
+    const p1 = h.handle.load(manifest({ generation: 1, cssUris: [CSS_URI] }))
+    const pUnload = h.handle.unload(ADDON_ID, 1)
+    const p2 = h.handle.load(manifest({ generation: 2 }))
+    await vi.waitFor(() => {
+      if (headLinks(CSS_URI).length === 0) throw new Error('link 未入 head')
+    })
+    headLinks(CSS_URI).forEach((link) => link.dispatchEvent(new window.Event('load')))
+    releaseGen1()
+    const outcome1 = await p1
+    const unloadOutcome = await pUnload
+    const outcome2 = await p2
+    expect(outcome1.ok).toBe(true)
+    // unload 排在 gen1 落地之后执行：真实释放 gen1（现状并发下先到即返回 not-loaded）
+    expect(unloadOutcome).toMatchObject({ ok: true })
+    expect(outcome2.ok).toBe(true)
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    // gen1 的授权样式随释放撤下——无孤儿 link
+    expect(headLinks(CSS_URI).length).toBe(0)
+  })
+
+  it('并发双 load（宿主未发 unload）：终态唯一——先到代次生效、后到 already-loaded、无孤儿样式', async () => {
+    let loadScriptImpl: (uri: string) => Promise<{ ok: true }> = async () => ({ ok: true })
+    const h = harness({ loadCss: undefined, loadScript: (uri) => loadScriptImpl(uri) })
+    let releaseGen1!: () => void
+    const gen1Gate = new Promise<void>((r) => { releaseGen1 = r })
+    let call = 0
+    loadScriptImpl = async () => {
+      const index = call++
+      if (index === 0) await gen1Gate
+      registerFactory(h, () => {})
+      return { ok: true }
+    }
+    const p1 = h.handle.load(manifest({ generation: 1, cssUris: [CSS_URI] }))
+    const p2 = h.handle.load(manifest({ generation: 2, cssUris: [CSS_URI] }))
+    await settle()
+    headLinks(CSS_URI).forEach((link) => link.dispatchEvent(new window.Event('load')))
+    await settle()
+    releaseGen1()
+    const outcome1 = await p1
+    const outcome2 = await p2
+    expect(outcome1.ok).toBe(true)
+    expect(outcome2).toEqual({ ok: false, reason: 'already-loaded' })
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+    // 后到代次未装载（already-loaded 在样式装载前拒绝）：head 只留 gen1 的 link
+    expect(headLinks(CSS_URI).length).toBe(1)
+  })
+})
+
+describe('#395 P3 registerExtension 守卫按记录身份（旧代次句柄拒绝）', () => {
+  it('已释放代次的迟到 registerExtension 返回 false，不重发聚合；新代次句柄照常 true', async () => {
+    const h = harness()
+    const sdks: VsidianAddonPageSdk[] = []
+    registerFactory(h, (sdk) => { sdks.push(sdk) })
+    await h.handle.load(manifest({ generation: 1 }))
+    await h.handle.unload(ADDON_ID, 1)
+    registerFactory(h, (sdk) => { sdks.push(sdk) })
+    await h.handle.load(manifest({ generation: 2 }))
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    const attachedCount = h.attached.length
+    // gen1 已释放、gen2 在场：旧句柄调用不得因 active.has(addonId) 误放行
+    expect(sdks[0]!.registerExtension(StateField.define<never>({ create: () => null as never, update: (value) => value }))).toBe(false)
+    expect(h.attached.length).toBe(attachedCount)
+    expect(sdks[1]!.registerExtension(StateField.define<never>({ create: () => null as never, update: (value) => value }))).toBe(true)
+    expect(h.attached.length).toBe(attachedCount + 1)
+  })
+})

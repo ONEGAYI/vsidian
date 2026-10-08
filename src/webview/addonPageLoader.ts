@@ -238,6 +238,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
   }
   let nextRequestSeq = 0
 
+  /** 按组件串行化的装载/卸载链（#395 P3）：load 是异步流（样式/脚本 await
+   *  期间未落 active），同 addonId 的后到指令并发执行会双双越过 already-
+   *  loaded 检查、后落者覆盖 active 条目——前代次的样式 link/扩展/回调成
+   *  孤儿，宿主与页面失同步。链保证同组件指令按到达序逐个执行：后到 load
+   *  在前序落定后按既有规则判定（在场 → already-loaded），unload 排队后
+   *  能释放在途 load 刚落地的代次（宿主指令序语义保持）。跨组件互不阻塞。 */
+  const loadChains = new Map<string, Promise<unknown>>()
+  const enqueueForAddon = <T>(addonId: string, operation: () => Promise<T>): Promise<T> => {
+    const previous = loadChains.get(addonId) ?? Promise.resolve()
+    const next = previous.then(operation, operation)
+    loadChains.set(addonId, next.catch(() => {}))
+    return next
+  }
+
   // T06（#355）编辑提交的操作身份计数器：opId = 装载代次 + 序号（组件
   // 不可自报——来源身份由 SDK 层注入，伪来源请求结构上不可表达）。
   // 计数器为页面级（同一 webview 内多次装载共享递增，同页唯一）；跨面板
@@ -414,7 +428,11 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         },
       } : {}),
       registerExtension: (extension) => {
-        if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
+        // 守卫按记录身份（#395 P3）：active.has(addonId) 在同组件新代次在场
+        // 时会让已释放代次的迟到调用误放行——扩展 push 进旧记录却永不进
+        // 聚合（聚合只遍历 active），返回 true 但扩展不生效。比对 active
+        // 条目是否为本装载记录本身，不符即拒绝。
+        if (active.get(loadRecord.addonId) !== loadRecord || page !== 'editor' || !env.attachExtensions) {
           return false
         }
         loadRecord.extensionParts.push(extension)
@@ -567,7 +585,8 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     return { disposals, releasedRequests }
   }
 
-  const load = async (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> => {
+  /** 装载实现（串行链内执行；直接调用入口 load 经 enqueueForAddon 排队） */
+  const loadImpl = async (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> => {
     const fail = (reason: AddonLoadFailureReason, detail?: string): AddonLoadOutcome => {
       pushHistory({ addonId: manifest.addonId, generation: manifest.generation, ended: 'load-failed', reason, detail })
       const outcome: AddonLoadOutcome = { ok: false, reason, detail }
@@ -649,7 +668,11 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     return outcome
   }
 
-  const unload = (addonId: string, generation: number): Promise<AddonUnloadOutcome> => {
+  const load = (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> =>
+    enqueueForAddon(manifest.addonId, () => loadImpl(manifest))
+
+  /** 卸载实现（串行链内执行；排队后可释放在途 load 刚落地的代次） */
+  const unloadImpl = (addonId: string, generation: number): Promise<AddonUnloadOutcome> => {
     const record = active.get(addonId)
     const finish = (outcome: AddonUnloadOutcome, disposals = 0, releasedRequests = 0): AddonUnloadOutcome => {
       env.send({ type: 'addon.unloaded', addonId, generation, outcome, disposals, releasedRequests })
@@ -666,6 +689,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     const { disposals, releasedRequests } = releaseLoad(record, 'released')
     return Promise.resolve(finish({ ok: true }, disposals, releasedRequests))
   }
+
+  const unload = (addonId: string, generation: number): Promise<AddonUnloadOutcome> =>
+    enqueueForAddon(addonId, () => unloadImpl(addonId, generation))
 
   const handleDirective = (directive: AddonPageDirective): void => {
     switch (directive.type) {
@@ -737,9 +763,19 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       counters: { ...counters },
     }),
     disposeAll: async () => {
-      for (const record of [...active.values()]) {
-        releaseLoad(record, 'released')
-      }
+      // #395 P3：在途装载一并对口——对每个有活跃装载或串行链的组件排队
+      // 释放，链上在途 load 落定后才执行（页面销毁/测试收尾不留孤儿）
+      const addonIds = new Set<string>([...active.keys(), ...loadChains.keys()])
+      await Promise.all(
+        [...addonIds].map((addonId) =>
+          enqueueForAddon(addonId, async () => {
+            const record = active.get(addonId)
+            if (record) {
+              releaseLoad(record, 'released')
+            }
+          }),
+        ),
+      )
     },
   }
 }
