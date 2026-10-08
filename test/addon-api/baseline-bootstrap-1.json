@@ -5,7 +5,7 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "803a7ffead91a2caf6dc45587de3132ad56444e6",
+      "sha": "0b66f9014c8ee301a6bbf66ae2f7dd774472fed2",
       "ref": "HEAD",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
@@ -333,6 +333,7 @@
       "semantics": {
         "lifecycle": "仅编辑器页提供（设置页 undefined）；使用前须在清单 experimental 声明 cm6 兼容范围，且范围含宿主提供的入口版本才判兼容。",
         "language": "language 只暴露 syntaxTree / ensureSyntaxTree / syntaxTreeAvailable 三个读树函数（最小暴露集合的单一裁剪点在装载器的 addonCm6LanguageSubset）——LRLanguage / foldGutter / indentUnit 等注册类成员不纳入，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 type-only 导入消费（构建桥允许）。已知边界：live 编辑器的 markdown 语法树是内核私有增量解析（不经 @codemirror/language 的 language facet 装配），syntaxTree 在 live 状态上恒为未解析空树——行类型判定类需求不能依赖本入口，平台级树查询能力另行评估。",
+        "keymap": "#402 按键拦截优先级契约（实验层）：扩展槽为平台扩展数组末位——普通 keymap 在平台情境链（Tab 三段/列表续行等）不处理时落空接手；Prec.high 为抢先层（可替代平台键位，返回 false 落穿）；撤销/重做（Mod-z / Shift-Mod-z / Mod-y）是 Prec.highest 的平台保留键闸、在扩展序上先于附加组件槽——addon 用 Prec.highest 也不可越过；Esc 与宿主级快捷键不开放抢先；多组件同层按装载顺序仲裁；实验层 keymap 不进统一快捷键管理，用户关闭 = 停用组件。",
         "errors": "宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。"
       },
       "signatures": [
