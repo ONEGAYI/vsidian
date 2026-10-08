@@ -78,6 +78,19 @@ describe('注册与上报', () => {
     bridge.releaseGeneration('pub.a', 1)
     expect(outbox).toHaveLength(before)
   })
+
+  it('#395 P3 追加：在场候选的异代次注册拒绝且不覆盖（旧代次句柄迟到不得顶掉当前候选）', () => {
+    const bridge = installAddonRenderersBridge(() => {})
+    // gen2 在场注册 r1
+    expect(bridge.register('pub.a', 2, specOf('r1', ['x']))).toBe(true)
+    // gen1 旧句柄迟到注册 r2：拒绝，gen2 候选保持（现状整体替换会顶掉 r1）
+    expect(bridge.register('pub.a', 1, specOf('r2', ['y']))).toBe(false)
+    expect(bridge.localProvidersOf('pub.a').map((p) => p.rendererId)).toEqual(['r1'])
+    // 正常换代不受影响：释放 gen2 后 gen3 可注册（条目已撤，异代次拦截不误伤）
+    bridge.releaseGeneration('pub.a', 2)
+    expect(bridge.register('pub.a', 3, specOf('r3', ['z']))).toBe(true)
+    expect(bridge.localProvidersOf('pub.a').map((p) => p.rendererId)).toEqual(['r3'])
+  })
 })
 
 describe('生效表解析', () => {

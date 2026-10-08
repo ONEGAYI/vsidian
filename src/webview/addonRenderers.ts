@@ -207,6 +207,14 @@ export function installAddonRenderersBridge(
       if (spec.exportFormats.includes('svg') && typeof spec.exportSvg !== 'function') {
         return false
       }
+      // #395 P3 追加收紧：在场候选的异代次注册拒绝（布尔拒绝面，不新造
+      // reason 码）。正常换代先经 releaseGeneration 撤条目——条目在场时
+      // 的异代次调用只能是已释放代次句柄的迟到注册，不得经下方整体替换
+      // 语义顶掉当前代次候选。
+      const resident = local.get(addonId)
+      if (resident && resident.generation !== generation) {
+        return false
+      }
       const entry = generationEntry(addonId, generation)
       if (entry.providers.has(spec.rendererId)) {
         // 同代次同局部 ID 重复注册：拒绝（首个保留）

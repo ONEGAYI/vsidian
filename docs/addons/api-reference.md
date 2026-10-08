@@ -402,7 +402,9 @@ export interface VsidianAddonPageSdk {
   /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */
   mountRoot(): HTMLElement | null
   /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；
-   *  越出资源子目录的相对路径返回 null——组件不得自造越界地址） */
+   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面
+   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；
+   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */
   resourceUri(relativePath: string): string | null
   /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */
   readonly channel: {
@@ -1403,7 +1405,8 @@ export interface AddonRendererStoreV1 {
 export interface AddonCommandDefinition {
   /** 组件内局部 ID（无点号；命名空间前缀由平台注入） */
   id: string
-  /** 用户可见标题（自由文本——组件文案不进 Vsidian 内置字典，ADR 5.5） */
+  /** 用户可见标题（自由文本——组件文案不进 Vsidian 内置字典，ADR 5.5；
+   *  封顶 ADDON_DISPLAY_TEXT_MAX，超限注册拒绝——#395 P3） */
   title: string
   /** 生效模式（由代码声明） */
   mode: BindingMode
@@ -1494,6 +1497,9 @@ export function addonMenuItemProblem(def: AddonMenuItemDefinition): AddonMenuIte
   if (typeof def.label !== 'string' || def.label.length === 0) {
     return 'label-empty'
   }
+  if (def.label.length > ADDON_DISPLAY_TEXT_MAX) {
+    return 'label-too-long'
+  }
   if (def.iconKey !== undefined && !(CONTEXT_MENU_ICON_KEYS as readonly string[]).includes(def.iconKey)) {
     return 'icon-key'
   }
@@ -1547,7 +1553,8 @@ export const ADDON_UI_BUTTON_SLOTS = ['toolbar'] as const
 export interface AddonUiButtonDefinition {
   /** 组件内局部 ID（无点号；命名空间前缀由平台注入） */
   id: string
-  /** 用户可见标题（自由文本——aria/提示承载；组件文案不进 Vsidian 内置字典） */
+  /** 用户可见标题（自由文本——aria/提示承载；组件文案不进 Vsidian 内置字典；
+   *  封顶 ADDON_DISPLAY_TEXT_MAX，超限注册拒绝——#395 P3） */
   label: string
   /** 挂载槽位（缺省 toolbar；白名单见 ADDON_UI_BUTTON_SLOTS） */
   slot?: AddonUiButtonSlot
@@ -1557,7 +1564,7 @@ export interface AddonUiButtonDefinition {
   order?: number
   /** 挂接的命令局部 ID（点击经命令体系执行——须为本组件已注册命令） */
   command?: string
-  /** 按钮显示文本（缺省 label；单字符/emoji/短词皆可） */
+  /** 按钮显示文本（缺省 label；单字符/emoji/短词皆可；封顶同 label） */
   iconText?: string
 }
 
@@ -1566,7 +1573,8 @@ export interface AddonUiButtonDefinition {
 export interface AddonUiPanelDefinition {
   /** 组件内局部 ID（无点号） */
   id: string
-  /** 面板标题（自由文本——平台面板标题栏展示） */
+  /** 面板标题（自由文本——平台面板标题栏展示；封顶 ADDON_DISPLAY_TEXT_MAX，
+   *  超限注册拒绝——#395 P3） */
   title: string
   /** 生效模式（缺省 both；不匹配模式的面板强制关闭并回收挂载） */
   mode?: BindingMode

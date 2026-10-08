@@ -238,6 +238,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
   }
   let nextRequestSeq = 0
 
+  /** 按组件串行化的装载/卸载链（#395 P3）：load 是异步流（样式/脚本 await
+   *  期间未落 active），同 addonId 的后到指令并发执行会双双越过 already-
+   *  loaded 检查、后落者覆盖 active 条目——前代次的样式 link/扩展/回调成
+   *  孤儿，宿主与页面失同步。链保证同组件指令按到达序逐个执行：后到 load
+   *  在前序落定后按既有规则判定（在场 → already-loaded），unload 排队后
+   *  能释放在途 load 刚落地的代次（宿主指令序语义保持）。跨组件互不阻塞。 */
+  const loadChains = new Map<string, Promise<unknown>>()
+  const enqueueForAddon = <T>(addonId: string, operation: () => Promise<T>): Promise<T> => {
+    const previous = loadChains.get(addonId) ?? Promise.resolve()
+    const next = previous.then(operation, operation)
+    loadChains.set(addonId, next.catch(() => {}))
+    return next
+  }
+
   // T06（#355）编辑提交的操作身份计数器：opId = 装载代次 + 序号（组件
   // 不可自报——来源身份由 SDK 层注入，伪来源请求结构上不可表达）。
   // 计数器为页面级（同一 webview 内多次装载共享递增，同页唯一）；跨面板
@@ -313,6 +327,14 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     }
   }
 
+  /** SDK 守卫：按记录身份判活（#395 P3 追加收紧，registerExtension 同款
+   *  契约扩展到全部 SDK 面）——active.has(addonId) 在同组件新代次在场时
+   *  会让已释放代次句柄的迟到调用误放行（句柄穿越：旧代次注册进入新代次
+   *  下游注册表、或经桥的整体替换语义顶掉新代次候选、或在已脱离 active
+   *  的旧记录上滞留回调）。比对 active 条目是否为本装载记录本身，不符即
+   *  拒绝；releaseLoad 的回收路径按 loadRecord 自身执行，不受此守卫约束。 */
+  const isLoadActive = (loadRecord: ActiveLoad): boolean => active.get(loadRecord.addonId) === loadRecord
+
   const buildSdk = (loadRecord: ActiveLoad, manifest: AddonLoadManifest): VsidianAddonPageSdk => {
     const viewsFacet: AddonViewsFacet | undefined = env.addonViews
       ? {
@@ -329,7 +351,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             if (page !== 'editor') {
               return { ok: false, reason: 'not-editor-page' }
             }
-            if (!active.has(loadRecord.addonId)) {
+            if (!isLoadActive(loadRecord)) {
               return { ok: false, reason: 'released' }
             }
             return env.addonBehaviors!.register(loadRecord.addonId, loadRecord.generation, registration)
@@ -345,7 +367,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
           register: (def, handler) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return { ok: false, reason: 'released', dispose: () => {} }
             }
             return env.addonCommands!.registerCommand(loadRecord.addonId, loadRecord.generation, def, handler)
@@ -353,13 +375,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         },
         menus: {
           registerItem: (def) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return { ok: false, reason: 'released', dispose: () => {} }
             }
             return env.addonCommands!.registerMenuItem(loadRecord.addonId, def, (commandId) => {
               // 菜单执行回调只在装载在场时有效（释放后的菜单项随 cleanup
-              // 撤下——不会迟到；守卫是防御性复核）
-              if (!active.has(loadRecord.addonId)) return
+              // 撤下——不会迟到；守卫是防御性复核，记录身份口径同上）
+              if (!isLoadActive(loadRecord)) return
               env.addonCommands!.execute(commandId)
             })
           },
@@ -371,8 +393,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             renderers: {
               register: (spec: AddonRendererRegistration) => {
                 const bridge = env.addonRenderers!
-                if (!active.has(loadRecord.addonId)) {
-                  // 已终结代次的迟到注册：no-op 句柄（不接入新代次）
+                if (!isLoadActive(loadRecord)) {
+                  // 已终结代次的迟到注册：no-op 句柄（不接入新代次——
+                  // 记录身份口径，防止旧句柄经桥整体替换顶掉新代次候选）
                   return { dispose: () => {} }
                 }
                 const accepted = bridge.register(loadRecord.addonId, loadRecord.generation, spec)
@@ -382,7 +405,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
                 const rendererId = spec.rendererId
                 return {
                   dispose: () => {
-                    if (!active.has(loadRecord.addonId)) {
+                    if (!isLoadActive(loadRecord)) {
                       return
                     }
                     bridge.disposeRenderer(loadRecord.addonId, loadRecord.generation, rendererId)
@@ -397,13 +420,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       ...(env.addonUi && page === 'editor' ? {
         ui: {
           registerButton: (def, onClick) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return { ok: false, reason: 'released', dispose: () => {} }
             }
             return env.addonUi!.registerButton(loadRecord.addonId, loadRecord.generation, def, onClick)
           },
           registerPanel: (def) => {
-            if (!active.has(loadRecord.addonId) || page !== 'editor') {
+            if (!isLoadActive(loadRecord) || page !== 'editor') {
               return {
                 ok: false, reason: 'released',
                 dispose: () => {}, open: () => false, close: () => false, isOpen: () => false,
@@ -414,7 +437,11 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         },
       } : {}),
       registerExtension: (extension) => {
-        if (!active.has(loadRecord.addonId) || page !== 'editor' || !env.attachExtensions) {
+        // 守卫按记录身份（#395 P3，isLoadActive 同款内联）：active.has
+        // (addonId) 在同组件新代次在场时会让已释放代次的迟到调用误放行——
+        // 扩展 push 进旧记录却永不进聚合（聚合只遍历 active），返回 true
+        // 但扩展不生效。比对 active 条目是否为本装载记录本身，不符即拒绝。
+        if (!isLoadActive(loadRecord) || page !== 'editor' || !env.attachExtensions) {
           return false
         }
         loadRecord.extensionParts.push(extension)
@@ -423,7 +450,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         return true
       },
       mountRoot: () => {
-        if (!active.has(loadRecord.addonId) || page !== 'settings') {
+        if (!isLoadActive(loadRecord) || page !== 'settings') {
           return null
         }
         const root = document.createElement('div')
@@ -435,6 +462,10 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       },
       resourceUri: (relativePath) => {
         if (!manifest.resourceBase) return null
+        // #395 P3：字面形态拦截是防呆层而非安全边界——只拦字面 `..`，
+        // 编码变形（%2e%2e）与同 realm 直连 webview URI 不在本层防线内；
+        // 有效边界是本 webview 的 localResourceRoots 包含性与宿主侧
+        // realpath 符号链接守卫（ADR-0012：不构成安全沙箱）
         if (
           typeof relativePath !== 'string' || relativePath === '' || relativePath.startsWith('/') ||
           /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(relativePath) || relativePath.split('/').includes('..')
@@ -446,7 +477,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       },
       channel: {
         request: (topic, payload, opts) => {
-          if (!active.has(loadRecord.addonId)) {
+          if (!isLoadActive(loadRecord)) {
             counters.releasedChannelRequests++
             return Promise.resolve({ ok: false as const, reason: 'released' as const })
           }
@@ -483,8 +514,10 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         },
       },
       onDispose: (callback) => {
-        if (!active.has(loadRecord.addonId)) {
-          // 已终结代次的迟到登记：立即执行清理，不滞留（重复释放无害）
+        if (!isLoadActive(loadRecord)) {
+          // 已终结代次的迟到登记：立即执行清理，不滞留（重复释放无害；
+          // 记录身份口径——addonId 在场不等于本代次在场，滞留进已脱离
+          // active 的旧记录会让回调永不执行）
           try {
             callback()
           } catch {
@@ -567,7 +600,8 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     return { disposals, releasedRequests }
   }
 
-  const load = async (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> => {
+  /** 装载实现（串行链内执行；直接调用入口 load 经 enqueueForAddon 排队） */
+  const loadImpl = async (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> => {
     const fail = (reason: AddonLoadFailureReason, detail?: string): AddonLoadOutcome => {
       pushHistory({ addonId: manifest.addonId, generation: manifest.generation, ended: 'load-failed', reason, detail })
       const outcome: AddonLoadOutcome = { ok: false, reason, detail }
@@ -575,11 +609,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       return outcome
     }
 
-    if (active.has(manifest.addonId)) {
+    const resident = active.get(manifest.addonId)
+    if (resident && resident.generation === manifest.generation) {
       // 对齐设计 §2.2：同一接入代次再次注册返回 AlreadyRegistered
       const outcome: AddonLoadOutcome = { ok: false, reason: 'already-loaded' }
       env.send({ type: 'addon.loaded', addonId: manifest.addonId, generation: manifest.generation, page, outcome })
       return outcome
+    }
+    if (resident) {
+      // 换代指令（#395 回归）：宿主恢复时 setEnabled→notify 先推旧代次
+      // load、enable 完成递增代次后再推新代次 load（T09 集成实证的 g1→g2
+      // 连推）——不同代次的 load 是换代信号，先释放在场旧代次再装载新
+      // 代次（宿主最新代次为准；旧代次指令不得回收新代次的对称边界在
+      // unload 侧 stale-generation，两向各自成立）
+      releaseLoad(resident, 'released')
     }
     const loadStartedAt = now()
 
@@ -649,7 +692,11 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     return outcome
   }
 
-  const unload = (addonId: string, generation: number): Promise<AddonUnloadOutcome> => {
+  const load = (manifest: AddonLoadManifest): Promise<AddonLoadOutcome> =>
+    enqueueForAddon(manifest.addonId, () => loadImpl(manifest))
+
+  /** 卸载实现（串行链内执行；排队后可释放在途 load 刚落地的代次） */
+  const unloadImpl = (addonId: string, generation: number): Promise<AddonUnloadOutcome> => {
     const record = active.get(addonId)
     const finish = (outcome: AddonUnloadOutcome, disposals = 0, releasedRequests = 0): AddonUnloadOutcome => {
       env.send({ type: 'addon.unloaded', addonId, generation, outcome, disposals, releasedRequests })
@@ -666,6 +713,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     const { disposals, releasedRequests } = releaseLoad(record, 'released')
     return Promise.resolve(finish({ ok: true }, disposals, releasedRequests))
   }
+
+  const unload = (addonId: string, generation: number): Promise<AddonUnloadOutcome> =>
+    enqueueForAddon(addonId, () => unloadImpl(addonId, generation))
 
   const handleDirective = (directive: AddonPageDirective): void => {
     switch (directive.type) {
@@ -737,9 +787,19 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       counters: { ...counters },
     }),
     disposeAll: async () => {
-      for (const record of [...active.values()]) {
-        releaseLoad(record, 'released')
-      }
+      // #395 P3：在途装载一并对口——对每个有活跃装载或串行链的组件排队
+      // 释放，链上在途 load 落定后才执行（页面销毁/测试收尾不留孤儿）
+      const addonIds = new Set<string>([...active.keys(), ...loadChains.keys()])
+      await Promise.all(
+        [...addonIds].map((addonId) =>
+          enqueueForAddon(addonId, async () => {
+            const record = active.get(addonId)
+            if (record) {
+              releaseLoad(record, 'released')
+            }
+          }),
+        ),
+      )
     },
   }
 }

@@ -6,7 +6,9 @@
 // - 按批校验与保存：补丁逐键校验（未知键/非法值整批拒绝，有效值不落地）
 //   → 内存权威先更新、再写持久层——失败回滚内存并如实报失败（写盘
 //     pending 窗口内快照可读到未确认值，权威推送会纠正），
-//   内存回滚。无工作区时 workspace 层读写拒绝。
+//   内存回滚。无工作区时 workspace 层读写拒绝。等值短路（#395 P3）：
+//   变更前后深等值（含空补丁与同值回写）跳过落盘与事件，组件在
+//   onChanged 里回写同值的环路不会无限写盘。
 // - 清除工作区覆盖只删该键覆盖（恢复继承用户默认，不是恢复出厂值）。
 // - 存储结构冻结 version 1（shared/addonSettings.ts 单一事实源）；构造时
 //   从持久层装配，坏形态 fail-safe 回空不写回。
@@ -234,7 +236,9 @@ export class AddonSettingsService {
     return this.ports.hasWorkspace ? this.workspace.values[addonId] ?? {} : {}
   }
 
-  /** 层写入公共路径：内存改 → 落盘 → 成功才保留内存并广播；失败回滚 */
+  /** 层写入公共路径：内存改 → 落盘 → 成功才保留内存并广播；失败回滚。
+   *  #395 P3 等值短路：变更前后深等值（JSON 视角）则跳过落盘与事件——
+   *  组件在 onChanged 里回写同值的环路不再形成无限写盘循环。 */
   private async persistLayer(
     addonId: string,
     scope: 'user' | 'workspace',
@@ -244,6 +248,9 @@ export class AddonSettingsService {
     const previous = layerState.values[addonId]
     const nextLayer = { ...previous }
     const keys = mutate(nextLayer)
+    if (jsonEqual(previous, nextLayer)) {
+      return { ok: true }
+    }
     layerState.values[addonId] = nextLayer
     const written = await this.ports.write(scope, serializeAddonSettingsStore(layerState.values))
     if (!written) {
@@ -277,4 +284,11 @@ function safeKeyOf(def: unknown): string {
     return typeof key === 'string' ? key : '<non-string-key>'
   }
   return '<non-object>'
+}
+
+/** 深等值（JSON 视角）：设置值均为 JSON 安全类型（入仓前经形状校验与
+ *  结构化克隆防线），序列化比较即可判定；键序由同源 spread 构造保证一致，
+ *  极端键序漂移只会让短路失效回落落盘路径（无害），不会误判不等为等 */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }

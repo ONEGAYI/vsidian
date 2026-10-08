@@ -17,7 +17,7 @@
 // 拒绝面约定（沿 addonCommands/addonSettings 惯例）：SDK 注册拒绝用机器
 // 可辨认的 kebab-case reason 码，不给最终用户界面文案——普通 API 拒绝
 // 不算组件故障。
-import { addonLocalIdProblem, type AddonLocalIdProblem } from './addonCommands'
+import { ADDON_DISPLAY_TEXT_MAX, addonLocalIdProblem, type AddonLocalIdProblem } from './addonCommands'
 import type { BindingMode } from './keybindings'
 import type { AddonViewHandle } from './addonEditApi'
 
@@ -35,7 +35,8 @@ export type AddonUiTargetGetter = () => AddonViewHandle | null
 export interface AddonUiButtonDefinition {
   /** 组件内局部 ID（无点号；命名空间前缀由平台注入） */
   id: string
-  /** 用户可见标题（自由文本——aria/提示承载；组件文案不进 Vsidian 内置字典） */
+  /** 用户可见标题（自由文本——aria/提示承载；组件文案不进 Vsidian 内置字典；
+   *  封顶 ADDON_DISPLAY_TEXT_MAX，超限注册拒绝——#395 P3） */
   label: string
   /** 挂载槽位（缺省 toolbar；白名单见 ADDON_UI_BUTTON_SLOTS） */
   slot?: AddonUiButtonSlot
@@ -45,7 +46,7 @@ export interface AddonUiButtonDefinition {
   order?: number
   /** 挂接的命令局部 ID（点击经命令体系执行——须为本组件已注册命令） */
   command?: string
-  /** 按钮显示文本（缺省 label；单字符/emoji/短词皆可） */
+  /** 按钮显示文本（缺省 label；单字符/emoji/短词皆可；封顶同 label） */
   iconText?: string
 }
 
@@ -54,7 +55,8 @@ export interface AddonUiButtonDefinition {
 export interface AddonUiPanelDefinition {
   /** 组件内局部 ID（无点号） */
   id: string
-  /** 面板标题（自由文本——平台面板标题栏展示） */
+  /** 面板标题（自由文本——平台面板标题栏展示；封顶 ADDON_DISPLAY_TEXT_MAX，
+   *  超限注册拒绝——#395 P3） */
   title: string
   /** 生效模式（缺省 both；不匹配模式的面板强制关闭并回收挂载） */
   mode?: BindingMode
@@ -69,6 +71,7 @@ export interface AddonUiPanelDefinition {
 export type AddonUiButtonProblem =
   | AddonLocalIdProblem
   | 'label-empty'
+  | 'label-too-long'
   | 'slot-unknown'
   | 'mode-invalid'
   | 'order-invalid'
@@ -76,11 +79,13 @@ export type AddonUiButtonProblem =
   | 'action-conflict'
   | 'action-missing'
   | 'icon-text-empty'
+  | 'icon-text-too-long'
 
 /** 面板形状拒绝码 */
 export type AddonUiPanelProblem =
   | AddonLocalIdProblem
   | 'title-empty'
+  | 'title-too-long'
   | 'mode-invalid'
   | 'mount-not-function'
   | 'unmount-not-function'
@@ -113,6 +118,9 @@ export function addonUiButtonProblem(
   if (typeof def.label !== 'string' || def.label.length === 0) {
     return 'label-empty'
   }
+  if (def.label.length > ADDON_DISPLAY_TEXT_MAX) {
+    return 'label-too-long'
+  }
   if (def.slot !== undefined && !(ADDON_UI_BUTTON_SLOTS as readonly string[]).includes(def.slot)) {
     return 'slot-unknown'
   }
@@ -134,6 +142,9 @@ export function addonUiButtonProblem(
   if (def.iconText !== undefined && (typeof def.iconText !== 'string' || def.iconText.length === 0)) {
     return 'icon-text-empty'
   }
+  if (def.iconText !== undefined && def.iconText.length > ADDON_DISPLAY_TEXT_MAX) {
+    return 'icon-text-too-long'
+  }
   return null
 }
 
@@ -146,6 +157,9 @@ export function addonUiPanelProblem(def: AddonUiPanelDefinition): AddonUiPanelPr
   }
   if (typeof def.title !== 'string' || def.title.length === 0) {
     return 'title-empty'
+  }
+  if (def.title.length > ADDON_DISPLAY_TEXT_MAX) {
+    return 'title-too-long'
   }
   if (def.mode !== undefined && !isBindingMode(def.mode)) {
     return 'mode-invalid'

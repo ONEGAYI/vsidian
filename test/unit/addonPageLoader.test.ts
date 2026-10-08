@@ -10,15 +10,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Compartment, EditorState, StateField, type Extension, type StateField as StateFieldType } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
+import { AddonBehaviorRuntime } from '../../src/webview/addonBehaviors'
+import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
+import { AddonUiRuntime } from '../../src/webview/addonUi'
+import { installAddonRenderersBridge } from '../../src/webview/addonRenderers'
 import {
   ADDON_PAGE_REGISTRY_GLOBAL,
   installAddonPageLoader,
   type AddonPageLoaderEnv,
   type AddonPageLoaderHandle,
 } from '../../src/webview/addonPageLoader'
+import type { AddonRendererRegistration } from '../../src/shared/addonRenderers'
 import type {
   AddonCm6Runtime,
   AddonLoadManifest,
+  AddonPageKind,
   AddonPageOutbound,
   AddonPageRegistration,
   VsidianAddonPageSdk,
@@ -126,11 +132,11 @@ describe('T02 生产装载器：装载与身份', () => {
     expect(h.sent.at(-1)).toMatchObject({ type: 'addon.loaded', outcome: { ok: true } })
   })
 
-  it('同一组件重复装载 → already-loaded（对齐设计的 AlreadyRegistered 语义）', async () => {
+  it('同一接入代次重复装载 → already-loaded（对齐设计的 AlreadyRegistered 语义）', async () => {
     const h = harness()
     registerFactory(h, () => {})
     await h.handle.load(manifest())
-    const second = await h.handle.load(manifest({ generation: 2 }))
+    const second = await h.handle.load(manifest())
     expect(second).toEqual({ ok: false, reason: 'already-loaded' })
     expect(h.handle.stats().active[0].generation).toBe(1)
   })
@@ -606,5 +612,252 @@ describe('T02 生产装载器：设置页与资源地址', () => {
     })
     await settle()
     expect(results).toEqual([{ ok: true, result: { echoed: true } }])
+  })
+})
+
+describe('#395 P3 装载并发串行化（按 addonId 在途链）', () => {
+  const CSS_URI = 'https://page.test/addon.css'
+  const headLinks = (uri: string) => document.head.querySelectorAll(`link[href="${uri}"]`)
+
+  it('gen1 在途时 unload(gen1)+load(gen2) 按宿主指令序生效：后代次落 active、前代次资源回收', async () => {
+    let loadScriptImpl: (uri: string) => Promise<{ ok: true }> = async () => ({ ok: true })
+    const h = harness({ loadCss: undefined, loadScript: (uri) => loadScriptImpl(uri) })
+    let releaseGen1!: () => void
+    const gen1Gate = new Promise<void>((r) => { releaseGen1 = r })
+    let call = 0
+    loadScriptImpl = async () => {
+      const index = call++
+      if (index === 0) await gen1Gate
+      registerFactory(h, () => {})
+      return { ok: true }
+    }
+    const p1 = h.handle.load(manifest({ generation: 1, cssUris: [CSS_URI] }))
+    const pUnload = h.handle.unload(ADDON_ID, 1)
+    const p2 = h.handle.load(manifest({ generation: 2 }))
+    await vi.waitFor(() => {
+      if (headLinks(CSS_URI).length === 0) throw new Error('link 未入 head')
+    })
+    headLinks(CSS_URI).forEach((link) => link.dispatchEvent(new window.Event('load')))
+    releaseGen1()
+    const outcome1 = await p1
+    const unloadOutcome = await pUnload
+    const outcome2 = await p2
+    expect(outcome1.ok).toBe(true)
+    // unload 排在 gen1 落地之后执行：真实释放 gen1（现状并发下先到即返回 not-loaded）
+    expect(unloadOutcome).toMatchObject({ ok: true })
+    expect(outcome2.ok).toBe(true)
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    // gen1 的授权样式随释放撤下——无孤儿 link
+    expect(headLinks(CSS_URI).length).toBe(0)
+  })
+
+  it('并发双 load（宿主未发 unload）：终态唯一——后到新代次换代生效、先到代次完整释放、无孤儿样式', async () => {
+    let loadScriptImpl: (uri: string) => Promise<{ ok: true }> = async () => ({ ok: true })
+    const h = harness({ loadCss: undefined, loadScript: (uri) => loadScriptImpl(uri) })
+    let releaseGen1!: () => void
+    const gen1Gate = new Promise<void>((r) => { releaseGen1 = r })
+    let call = 0
+    loadScriptImpl = async () => {
+      const index = call++
+      if (index === 0) await gen1Gate
+      registerFactory(h, () => {})
+      return { ok: true }
+    }
+    const p1 = h.handle.load(manifest({ generation: 1, cssUris: [CSS_URI] }))
+    const p2 = h.handle.load(manifest({ generation: 2, cssUris: [CSS_URI] }))
+    await settle()
+    headLinks(CSS_URI).forEach((link) => link.dispatchEvent(new window.Event('load')))
+    await settle()
+    releaseGen1()
+    await settle()
+    // g1 落地后被 g2 换代释放（link 撤下），g2 挂上新 link——派发其 onload
+    headLinks(CSS_URI).forEach((link) => link.dispatchEvent(new window.Event('load')))
+    const outcome1 = await p1
+    const outcome2 = await p2
+    expect(outcome1.ok).toBe(true)
+    // 后到新代次是换代指令（#395 回归修订：宿主恢复连推 g1→g2 实证）——
+    // 串行链上 g1 落地后 g2 释放旧代次再装载，终态 g2
+    expect(outcome2.ok).toBe(true)
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    expect(h.handle.stats().history.some((e) => e.generation === 1 && e.ended === 'released')).toBe(true)
+    // gen1 的 link 随换代释放撤下，gen2 装载重挂：head 只留一条（终态无孤儿）
+    expect(headLinks(CSS_URI).length).toBe(1)
+  })
+})
+
+describe('#395 P3 registerExtension 守卫按记录身份（旧代次句柄拒绝）', () => {
+  it('已释放代次的迟到 registerExtension 返回 false，不重发聚合；新代次句柄照常 true', async () => {
+    const h = harness()
+    const sdks: VsidianAddonPageSdk[] = []
+    registerFactory(h, (sdk) => { sdks.push(sdk) })
+    await h.handle.load(manifest({ generation: 1 }))
+    await h.handle.unload(ADDON_ID, 1)
+    registerFactory(h, (sdk) => { sdks.push(sdk) })
+    await h.handle.load(manifest({ generation: 2 }))
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    const attachedCount = h.attached.length
+    // gen1 已释放、gen2 在场：旧句柄调用不得因 active.has(addonId) 误放行
+    expect(sdks[0]!.registerExtension(StateField.define<never>({ create: () => null as never, update: (value) => value }))).toBe(false)
+    expect(h.attached.length).toBe(attachedCount)
+    expect(sdks[1]!.registerExtension(StateField.define<never>({ create: () => null as never, update: (value) => value }))).toBe(true)
+    expect(h.attached.length).toBe(attachedCount + 1)
+  })
+})
+
+describe('#395 P3 追加：SDK 守卫记录身份统一收紧（旧代次句柄全面拒绝）', () => {
+  /** 双代次装配：装载 gen1 存句柄 → 释放 → 装载 gen2 存句柄。旧句柄的
+   *  迟到调用在同组件新代次在场时不得因 addonId 在场而放行（记录身份
+   *  比对——项 6 registerExtension 的同款契约扩展到全部 SDK 面） */
+  async function twoGenerations(opts: { page?: AddonPageKind; overrides?: Partial<AddonPageLoaderEnv> } = {}) {
+    const page = opts.page ?? 'editor'
+    const h = harness({ page, ...opts.overrides })
+    const sdks: VsidianAddonPageSdk[] = []
+    const onFactory = (sdk: VsidianAddonPageSdk) => {
+      sdks.push(sdk)
+      if (page === 'settings') sdk.mountRoot()
+    }
+    registerFactory(h, onFactory)
+    await h.handle.load(manifest({ generation: 1, page }))
+    await h.handle.unload(ADDON_ID, 1)
+    registerFactory(h, onFactory)
+    await h.handle.load(manifest({ generation: 2, page }))
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    return { h, oldSdk: sdks[0]!, newSdk: sdks[1]! }
+  }
+
+  const rendererSpec = (rendererId: string): AddonRendererRegistration => ({
+    rendererId,
+    label: `提供者 ${rendererId}`,
+    languages: ['mermaid'],
+    modes: ['live', 'reading'],
+    exportFormats: [],
+    mount: () => {},
+  })
+
+  it('重点穿越·commands：旧代次注册不进下游注册表（真 runtime），新代次照常可执行', async () => {
+    const commands = new AddonCommandsRuntime({ report: () => {} })
+    const { oldSdk, newSdk } = await twoGenerations({ overrides: { addonCommands: commands } })
+    const late = oldSdk.commands!.register({ id: 'late', title: '迟到命令', mode: 'live' }, () => {})
+    expect(late).toMatchObject({ ok: false, reason: 'released' })
+    // 下游注册表无迟到命令（不可执行）——穿越不得作用于新代次
+    expect(commands.execute(`${ADDON_ID}.late`)).toBe('unknown')
+    const fresh = newSdk.commands!.register({ id: 'fresh', title: '新代次命令', mode: 'live' }, () => {})
+    expect(fresh.ok).toBe(true)
+    expect(commands.execute(`${ADDON_ID}.fresh`)).toBe('executed')
+  })
+
+  it('重点穿越·renderers：旧代次注册不覆盖新代次候选（真桥下游）', async () => {
+    const bridge = installAddonRenderersBridge(() => {})
+    const { oldSdk, newSdk } = await twoGenerations({ overrides: { addonRenderers: bridge } })
+    newSdk.renderers!.register(rendererSpec('fresh-r'))
+    const late = oldSdk.renderers!.register(rendererSpec('late-r'))
+    expect(late.dispose).toBeTypeOf('function')
+    // 旧代次迟到注册不得顶掉当前代次候选（现状 generationEntry 会整体覆盖）
+    expect(bridge.localProvidersOf(ADDON_ID).map((p) => p.rendererId)).toEqual(['fresh-r'])
+  })
+
+  it('其余面·behaviors/menus/ui/channel：旧代次调用被拒且下游无副作用，新代次照常', async () => {
+    const behaviors = new AddonBehaviorRuntime({
+      snapshotOf: () => ({ ok: false, reason: 'view-disposed' }),
+      applyEdit: async () => ({ ok: false, reason: 'view-disposed' }),
+      log: () => {},
+    })
+    const ui = new AddonUiRuntime({
+      toolbarSlot: document.createElement('div'),
+      panelDock: document.createElement('div'),
+      currentMode: () => 'live',
+      activeInstanceId: () => 'main',
+      executeCommand: () => true,
+      bindingHints: () => [],
+      panelCloseLabel: () => '关闭',
+    })
+    // menus 面与 commands 同源装配（env.addonCommands 在场才有 sdk.menus）
+    const commands = new AddonCommandsRuntime({ report: () => {} })
+    const { h, oldSdk, newSdk } = await twoGenerations({
+      overrides: { addonBehaviors: behaviors, addonUi: ui, addonCommands: commands },
+    })
+    // behaviors：迟到注册被拒、下游注册表无条目
+    expect(oldSdk.behaviors!.register({ id: 'late', name: '迟到行为', onInput: () => null }))
+      .toEqual({ ok: false, reason: 'released' })
+    expect(behaviors.stats().registrations).toHaveLength(0)
+    expect(newSdk.behaviors!.register({ id: 'fresh', name: '新行为', onInput: () => null }).ok).toBe(true)
+    expect(behaviors.stats().registrations).toHaveLength(1)
+    // menus：迟到注册被拒
+    expect(oldSdk.menus!.registerItem({ id: 'late-menu', label: '迟到' }).ok).toBe(false)
+    expect(newSdk.menus!.registerItem({ id: 'fresh-menu', label: '新代次' }).ok).toBe(true)
+    // ui：按钮与面板迟到注册被拒
+    expect(oldSdk.ui!.registerButton({ id: 'late-btn', label: '迟到' }, () => {}).ok).toBe(false)
+    expect(oldSdk.ui!.registerPanel({ id: 'late-panel', title: '迟到', mount: () => {} }).ok).toBe(false)
+    expect(newSdk.ui!.registerButton({ id: 'fresh-btn', label: '新代次' }, () => {}).ok).toBe(true)
+    // channel：迟到请求以 released 终结且不发出请求消息
+    const sentBefore = h.sent.length
+    await expect(oldSdk.channel.request('late.topic', {})).resolves.toEqual({ ok: false, reason: 'released' })
+    expect(h.sent.length).toBe(sentBefore)
+    // 新代次请求照常发出（结局经 30s 超时/回执——既有用例覆盖，此处只钉发出）
+    const sentWithLate = h.sent.length
+    void newSdk.channel.request('fresh.topic', {})
+    expect(h.sent.length).toBe(sentWithLate + 1)
+    expect(h.sent.at(-1)).toMatchObject({ type: 'addon.channel.request', topic: 'fresh.topic' })
+  })
+
+  it('其余面·onDispose：旧代次迟到登记立即执行清理（不滞留已脱离 active 的记录）', async () => {
+    const { h, oldSdk, newSdk } = await twoGenerations()
+    let lateDisposed = false
+    oldSdk.onDispose(() => { lateDisposed = true })
+    expect(lateDisposed).toBe(true)
+    let freshDisposed = false
+    newSdk.onDispose(() => { freshDisposed = true })
+    expect(freshDisposed).toBe(false)
+    await h.handle.unload(ADDON_ID, 2)
+    expect(freshDisposed).toBe(true)
+  })
+
+  it('设置页：旧代次 mountRoot 不再挂载新根，新代次照常', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    try {
+      const { oldSdk } = await twoGenerations({ page: 'settings', overrides: { mountContainer: container } })
+      expect(oldSdk.mountRoot()).toBeNull()
+      // 容器内只有 gen2 factory 挂载的 1 个根（现状旧句柄会再挂第 2 个）
+      expect(container.childElementCount).toBe(1)
+    } finally {
+      container.remove()
+    }
+  })
+})
+
+describe('#395 回归钉住：换代 load 指令按最新代次落地（宿主恢复连推 g1/g2）', () => {
+  /** 场景还原（T09 集成实证）：宿主恢复（setEnabled→notify 先推旧代次
+   *  load，enable 完成递增代次后再推新代次 load）会产生 g1→g2 连推。
+   *  串行链按到达序执行后 g1 落地、g2 撞 already-loaded——页面停在旧
+   *  代次，宿主权威代次失配、候选上报全被拒收，恢复失效。页面侧正确
+   *  语义：不同代次的 load 是换代指令——先释放在场旧代次再装载新代次
+   *  （宿主最新代次为准）；同代次重复 load 维持 already-loaded 幂等。 */
+  it('unload(g1) → load(g1) → load(g2)：g1 释放留痕、g2 装载成功', async () => {
+    const h = harness()
+    const factories: number[] = []
+    const onFactory = () => factories.push(factories.length)
+    registerFactory(h, onFactory)
+    await h.handle.load(manifest({ generation: 1 }))
+    await h.handle.unload(ADDON_ID, 1)
+    registerFactory(h, onFactory)
+    const first = await h.handle.load(manifest({ generation: 1 }))
+    expect(first.ok).toBe(true)
+    registerFactory(h, onFactory)
+    const second = await h.handle.load(manifest({ generation: 2 }))
+    expect(second.ok).toBe(true)
+    expect(factories).toHaveLength(3)
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    const history = h.handle.stats().history
+    expect(history.some((e) => e.generation === 1 && e.ended === 'released')).toBe(true)
+  })
+
+  it('同代次重复 load 仍 already-loaded（幂等语义不变）', async () => {
+    const h = harness()
+    registerFactory(h, () => {})
+    await h.handle.load(manifest({ generation: 1 }))
+    const dup = await h.handle.load(manifest({ generation: 1 }))
+    expect(dup).toMatchObject({ ok: false, reason: 'already-loaded' })
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
   })
 })

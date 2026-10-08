@@ -125,3 +125,20 @@ describe('T11 面板注册形状校验', () => {
     expect(ADDON_UI_PANEL_ID_PATTERN.test('vsidian-toolbar')).toBe(false)
   })
 })
+
+describe('#395 P3 界面展示字段封顶（名称类 256）', () => {
+  it('按钮 label：边界 256 通过、超限以 label-too-long 拒绝', () => {
+    expect(addonUiButtonProblem({ id: 'b', label: 'a'.repeat(256), command: 'c' }, noClick)).toBeNull()
+    expect(addonUiButtonProblem({ id: 'b', label: 'a'.repeat(257), command: 'c' }, noClick)).toBe('label-too-long')
+  })
+
+  it('按钮 iconText：边界 256 通过、超限以 icon-text-too-long 拒绝', () => {
+    expect(addonUiButtonProblem({ id: 'b', label: 'x', command: 'c', iconText: 'a'.repeat(256) }, noClick)).toBeNull()
+    expect(addonUiButtonProblem({ id: 'b', label: 'x', command: 'c', iconText: 'a'.repeat(257) }, noClick)).toBe('icon-text-too-long')
+  })
+
+  it('面板 title：边界 256 通过、超限以 title-too-long 拒绝', () => {
+    expect(addonUiPanelProblem({ id: 'p', title: 'a'.repeat(256), mount: () => {} })).toBeNull()
+    expect(addonUiPanelProblem({ id: 'p', title: 'a'.repeat(257), mount: () => {} })).toBe('title-too-long')
+  })
+})

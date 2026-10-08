@@ -10,6 +10,7 @@ import {
   ADDON_RENDERERS_STORE_VERSION,
   BUILTIN_RENDERER_PROVIDER_ID,
   assignDiscoveryBatches,
+  isAddonRendererProviderInfo,
   normalizeRendererLanguage,
   parseAddonRendererStore,
   selectEffectiveRenderers,
@@ -227,5 +228,33 @@ describe('发现批次存储', () => {
       preferred: { draw: 'pub.a/r1', mermaid: 'builtin' },
     }
     expect(parseAddonRendererStore(data)).toEqual(data)
+  })
+})
+
+describe('#395 P3 提供者声明封顶（isAddonRendererProviderInfo）', () => {
+  const base = {
+    rendererId: 'r1',
+    modes: ['live', 'reading'],
+    exportFormats: ['svg'],
+  }
+  const legal = {
+    ...base,
+    label: 'a'.repeat(256),
+    languages: Array.from({ length: 32 }, (_, i) => `lang${i}${'x'.repeat(58)}`),
+  }
+
+  it('合法边界通过：label 256、languages 32 项且单项不超过 64 字符', () => {
+    expect(isAddonRendererProviderInfo(legal)).toBe(true)
+  })
+
+  it('label 超 256 拒绝（注册与宿主上报同走此守卫）', () => {
+    expect(isAddonRendererProviderInfo({ ...legal, label: 'a'.repeat(257) })).toBe(false)
+  })
+
+  it('languages 超 32 项拒绝；单项超 64 字符拒绝', () => {
+    expect(
+      isAddonRendererProviderInfo({ ...legal, languages: Array.from({ length: 33 }, (_, i) => `lang${i}`) }),
+    ).toBe(false)
+    expect(isAddonRendererProviderInfo({ ...legal, languages: ['a'.repeat(65)] })).toBe(false)
   })
 })

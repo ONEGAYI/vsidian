@@ -20,6 +20,7 @@ import {
   addonMenuItemProblem,
   buildAddonCommandReport,
   namespacedAddonId,
+  ADDON_DISPLAY_TEXT_MAX,
   type AddonCommandDefinition,
   type AddonCommandRegisterResult,
   type AddonCommandReport,
@@ -92,6 +93,11 @@ export class AddonCommandsRuntime {
     }
     if (typeof def.title !== 'string' || def.title.length === 0) {
       return reject('title-empty')
+    }
+    if (def.title.length > ADDON_DISPLAY_TEXT_MAX) {
+      // #395 P3 展示字段封顶：显式拒绝码（shared 层 buildAddonCommandReport
+      // 亦兜底拒绝——此处先行拦截保证 reason 可辨认）
+      return reject('title-too-long')
     }
     const bindingProblem = addonDefaultBindingsProblem(def.defaultBindings ?? [])
     if (bindingProblem !== null) {

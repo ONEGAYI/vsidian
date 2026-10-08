@@ -4142,12 +4142,18 @@ export function createTextEditorProvider(
           // 回——与建面板/refreshAddonPanels 两处同口径，否则换目录后
           // 面板重载时组件脚本被资源服务拒绝且不会自动恢复
           if (directoryChanged) {
-            panel.webview.options = {
-              enableScripts: true,
-              localResourceRoots: [
-                ...editorResourceRoots(context, entry.doc, state.directory),
-                ...grantedAddonRoots,
-              ],
+            try {
+              panel.webview.options = {
+                enableScripts: true,
+                localResourceRoots: [
+                  ...editorResourceRoots(context, entry.doc, state.directory),
+                  ...grantedAddonRoots,
+                ],
+              }
+            } catch {
+              // 面板销毁竞态（dispose 事件在途）：跳过许可面刷新——与
+              // refreshAddonPanels 同款兜底，该面板的装载器已随 webview
+              // 消亡，指令对账不再需要；广播循环内抛错会打断其余面板刷新
             }
           }
           if (entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready)) {
