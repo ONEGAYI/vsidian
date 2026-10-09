@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "39ca98bb7ba7eb8c9f5a7ef5571758be05a50df4",
-      "ref": "HEAD",
+      "sha": "6b27de4c82eda4cbd5ed09e26852d3f04272cb4c",
+      "ref": "6b27de4c",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -362,9 +362,9 @@
       ],
       "purpose": "页面 SDK 的标题折叠实验入口（sdk.experimental.headingFold，#410）：按 views 面实例 ID 查询有效折叠区间（folds）与可折叠区间全集（foldable），并执行折叠命令（apply 五操作、foldAt/unfoldAt 按区间键批量组合、foldAll 可 upToLevel 参数化）。折叠本体随 #409 落地（Live 实例的 CM6 StateField）；查询消费本体派生视图（不复制派生逻辑），命令直传本体五操作执行体——编程触发与用户触发同链路（effect 直驱，无 DOM-only 路径）。",
       "semantics": {
-        "modes": "Live-only（#409 定案阅读模式不开放）：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址（main / embed occurrence 键），折叠态随实例独立。",
+        "modes": "Live-only（#409 定案阅读模式不开放）：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址（main / embed occurrence 键），折叠态随实例独立；keymap/扩展回调拿到 CM6 view 时经 experimental.viewIdentity.instanceIdOf 反查实例 ID（#426，不依赖扩展槽装配范围推定）。",
         "coordinates": "全文 UTF-16 code unit 偏移、页面全程 LF。span = { key（标题起始行行首）、level（ATX 1–6 / Setext 1–2）、hideFrom（标题块行尾）、hideTo（下一级别 ≤ 自身的标题行首或文档末尾）}；序列化面不含标题文本摘要（大文档保持精简——作者可从快照 text 与 key 对应标题行自取）。",
-        "lifecycle": "折叠是视图态（零写回、不 dirty、不进撤销栈、不跨会话持久化）；全文替换显式清空、编辑时键随增量映射（#409 本体语义）。原始键集不对外——folds 是「折叠键 ∩ 可折叠标题键」的有效派生视图，脱靶键经此过滤天然无行为（foldAt/unfoldAt 的脱靶键静默忽略；applied = 有效折叠区间前后变化数）。组件代次终结后的迟到调用拒绝 view-disposed。",
+        "lifecycle": "折叠是视图态（零写回、不 dirty、不进撤销栈、不跨会话持久化）；全文替换显式清空、编辑时键随增量映射（#409 本体语义）。原始键集不对外——folds 是「折叠键 ∩ 可折叠标题键」的有效派生视图，脱靶键经此过滤天然无行为（foldAt/unfoldAt 的脱靶键静默忽略；applied = 有效折叠区间前后变化数）。#426 起 folds 与 foldable 共享同一 doc 版本的派生缓存（调用成本为 O(标题数) 过滤而非全文档重扫；返回逐项拷贝，组件侧变异不污染缓存），按键热路径消费无需自建行门槛节流。组件代次终结后的迟到调用拒绝 view-disposed。",
         "errors": "三种可辨认拒绝：view-disposed / read-only / invalid-request（upToLevel 仅 foldAll 接受且须为 1–6 整数；区间键须为非负整数）。使用前须在清单 experimental 声明 headingFold 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。"
       },
       "signatures": [
@@ -387,6 +387,35 @@
         "test/browser/addonHeadingFold.mjs"
       ],
       "introduced": "#410"
+    },
+    {
+      "id": "view-identity-experimental",
+      "group": "page-sdk",
+      "title": "实验入口：视图身份反查（experimental.viewIdentity）",
+      "layer": "experimental",
+      "experimentalEntry": "viewIdentity",
+      "endpoints": [
+        "editor-page"
+      ],
+      "purpose": "页面 SDK 的视图身份反查面（sdk.experimental.viewIdentity，#426）：CM6 EditorView → views 面实例 ID。keymap/扩展回调拿到的是 view，按实例 ID 寻址的 API（headingFold 查询与命令等）经此换算——不再依赖「扩展槽仅挂主正文 Live 实例」的装配范围推定（该装配范围契约见开发指南「视图身份与扩展槽」）。",
+      "semantics": {
+        "lifecycle": "身份承载于 Live 实例的 CM6 StateField，注册进视图注册表时写入（main 恒 main；embed 为 embed:<hostId>）；实例销毁随 state 消亡。未装配身份的 view（非平台实例或尚未注册）返回 null——组件据此自判。方法为闭包实现，无 this 依赖（解构裸传安全；SDK 各面通用的接收者绑定约束见开发指南）。",
+        "errors": "使用前须在清单 experimental 声明 viewIdentity 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonEditApi.ts",
+          "symbols": [
+            "AddonViewIdentityFacet"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonPageLoader.test.ts",
+        "test/unit/liveInstance.test.ts",
+        "test/unit/addonRegistry.test.ts"
+      ],
+      "introduced": "#426"
     },
     {
       "id": "channel",
@@ -696,11 +725,11 @@
       "endpoints": [
         "editor-page"
       ],
-      "purpose": "新增自己的可绑定命令（title 自由文本，不进 Vsidian 内置字典）：进入统一快捷键管理（冲突检查/绑定/显式清空/恢复默认）与宿主命令面板；执行链三入口（快捷键路由、宿主命令面板、菜单项点击）共用组件回调。",
+      "purpose": "新增自己的可绑定命令（title 自由文本，不进 Vsidian 内置字典）：进入统一快捷键管理（冲突检查/绑定/显式清空/恢复默认）与宿主命令面板；执行链三入口（快捷键路由、宿主命令面板、菜单项点击）共用组件回调。#427 起回调携带目标视图句柄（AddonViewHandle | null）——平台在执行时刻解析当前活动视图（焦点嵌入内部 Live → 该实例，否则主正文；无活动视图 null），组件无需自建焦点探针防御链。",
       "semantics": {
         "modes": "live / reading / both 由代码声明；写操作快捷键仅在 Live 正文接管宿主绑定——源码模式与设置页输入不接管（沿键位注册表 writes 门控）。",
         "lifecycle": "命名空间 ID 由平台注入（<组件 ID>.<局部 ID>）；局部 ID 禁点号（含点即伪造跨组件/内置身份）。停用/故障/代次释放整组件回收注册——不影响内置命令，不清用户键位。",
-        "errors": "duplicate-command、tab-forbidden（#125 Tab 固定链——「围栏越界 → 表格导航 → 行缩进」优先级不可绕）、非法 chord 等明确拒绝码；普通 API 拒绝不算故障。"
+        "errors": "duplicate-command、tab-forbidden（#125 Tab 固定链——「围栏越界 → 表格导航 → 行缩进」优先级不可绕；#427 收窄为裸 Tab 与 Shift+Tab 段，ctrl/alt/meta+Tab 放行——宿主/OS 占用组合不保证事件可达）、非法 chord 等明确拒绝码；普通 API 拒绝不算故障。"
       },
       "signatures": [
         {
@@ -838,7 +867,7 @@
       "OFFICIAL_ADDON_EXTENSION_IDS": "/** 判定用 ID 清单（登记表的投影视，供 isOfficialAddon 与文档消费） */\nexport const OFFICIAL_ADDON_EXTENSION_IDS: readonly string[] = OFFICIAL_ADDON_REGISTRY.map(\n  (entry) => entry.extensionId,\n)"
     },
     "src/shared/addonPage.ts": {
-      "VsidianAddonPageSdk": "/** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信\n * 生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与\n * 文本提交；T07（#356）起编辑器页提供 behaviors 面——可组合输入行为的\n * 注册与观察；T09（#358）起提供 renderers 面——代码块渲染提供者候选\n * 登记；六组稳定能力的其余部分属后续票） */\nexport interface VsidianAddonPageSdk {\n  /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */\n  readonly addon: { id: string; generation: number; page: AddonPageKind }\n  /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享\n   *  运行时；headingFold = 标题折叠查询与命令（#410）。使用前须在清单\n   *  experimental 声明对应入口的兼容范围 */\n  readonly experimental: {\n    readonly cm6?: AddonCm6Runtime\n    readonly headingFold?: AddonHeadingFoldFacet\n  }\n  /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、\n   *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子\n   *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */\n  readonly views?: AddonViewsFacet\n  /** T07（#356）输入行为面（仅编辑器页；设置页为 undefined）：注册可\n   *  组合输入行为（按有效序依次修饰同次操作，后续行为读取前序结果，\n   *  每次修饰按自己的原子声明提交）与只读输入观察——注册与观察分开，\n   *  onChanged 不是原操作的第二写入口 */\n  readonly behaviors?: AddonBehaviorsFacet\n  /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */\n  readonly commands?: AddonSdkCommandsFacet\n  /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */\n  readonly menus?: AddonSdkMenusFacet\n  /** T09（#358）渲染提供者面（仅编辑器页；设置页为 undefined）：登记\n   *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在\n   *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */\n  readonly renderers?: AddonRenderersFacet\n  /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与\n   *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */\n  readonly ui?: AddonSdkUiFacet\n  /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */\n  registerExtension(extension: Extension): boolean\n  /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */\n  mountRoot(): HTMLElement | null\n  /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；\n   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面\n   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；\n   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */\n  resourceUri(relativePath: string): string | null\n  /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */\n  readonly channel: {\n    request(topic: string, payload: unknown, opts?: { timeoutMs?: number }): Promise<AddonChannelOutcome>\n  }\n  /** 登记释放回调（停用/故障/代次回收时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
+      "VsidianAddonPageSdk": "/** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信\n * 生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与\n * 文本提交；T07（#356）起编辑器页提供 behaviors 面——可组合输入行为的\n * 注册与观察；T09（#358）起提供 renderers 面——代码块渲染提供者候选\n * 登记；六组稳定能力的其余部分属后续票） */\nexport interface VsidianAddonPageSdk {\n  /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */\n  readonly addon: { id: string; generation: number; page: AddonPageKind }\n  /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享\n   *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =\n   *  视图身份反查（#426）。使用前须在清单 experimental 声明对应入口的\n   *  兼容范围 */\n  readonly experimental: {\n    readonly cm6?: AddonCm6Runtime\n    readonly headingFold?: AddonHeadingFoldFacet\n    readonly viewIdentity?: AddonViewIdentityFacet\n  }\n  /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、\n   *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子\n   *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */\n  readonly views?: AddonViewsFacet\n  /** T07（#356）输入行为面（仅编辑器页；设置页为 undefined）：注册可\n   *  组合输入行为（按有效序依次修饰同次操作，后续行为读取前序结果，\n   *  每次修饰按自己的原子声明提交）与只读输入观察——注册与观察分开，\n   *  onChanged 不是原操作的第二写入口 */\n  readonly behaviors?: AddonBehaviorsFacet\n  /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */\n  readonly commands?: AddonSdkCommandsFacet\n  /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */\n  readonly menus?: AddonSdkMenusFacet\n  /** T09（#358）渲染提供者面（仅编辑器页；设置页为 undefined）：登记\n   *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在\n   *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */\n  readonly renderers?: AddonRenderersFacet\n  /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与\n   *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */\n  readonly ui?: AddonSdkUiFacet\n  /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */\n  registerExtension(extension: Extension): boolean\n  /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */\n  mountRoot(): HTMLElement | null\n  /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；\n   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面\n   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；\n   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */\n  resourceUri(relativePath: string): string | null\n  /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */\n  readonly channel: {\n    request(topic: string, payload: unknown, opts?: { timeoutMs?: number }): Promise<AddonChannelOutcome>\n  }\n  /** 登记释放回调（停用/故障/代次回收时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
       "AddonPageFactory": "/** 组件工厂：由构建辅助工具的 defineAddonPage 登记，装载器注入 SDK 调用 */\nexport type AddonPageFactory = (sdk: VsidianAddonPageSdk) => void",
       "AddonPageKind": "export type AddonPageKind = 'editor' | 'settings'",
       "AddonLoadManifest": "/** 宿主下发的装载指令载荷（URI 均由宿主经本 webview 的 asWebviewUri 构造） */\nexport interface AddonLoadManifest {\n  addonId: string\n  generation: number\n  page: AddonPageKind\n  /** 入口脚本的本页地址（须在 localResourceRoots 许可面内，否则资源服务拒绝） */\n  scriptUri: string\n  /** 随装载注入的样式表地址（逐条独立装载，互不牵连） */\n  cssUris?: string[]\n  /** 资源子目录的本页基址（resourceUri 的解析锚；缺省时 resourceUri 恒 null） */\n  resourceBase?: string\n}",
@@ -850,7 +879,7 @@
       "AddonCm6Runtime": "/** 页面提供的共享 CM6 运行时（experimental.cm6 的内容）。值为本页 bundle\n *  内的模块命名空间对象——装载器由页面产物自身构造，因此与生产控制器\n *  共享同一份实例（构造器身份一致的机制来源）。language 是语法树读取\n *  函数子集（#406），非整模块命名空间。 */\nexport interface AddonCm6Runtime {\n  readonly state: typeof import('@codemirror/state')\n  readonly view: typeof import('@codemirror/view')\n  readonly language: AddonCm6LanguageRuntime\n}",
       "AddonCm6LanguageRuntime": "/** #406 language 语法树读取子集（@codemirror/language 的最小暴露面）：\n *  只纳入「读树」函数——LRLanguage/foldGutter/indentUnit 等注册类成员不\n *  暴露（addon 不应借实验入口注册语言或改全局语言配置）；树与节点的\n *  类型消费经 type-only 导入（构建桥允许），无需值暴露。 */\nexport interface AddonCm6LanguageRuntime {\n  readonly syntaxTree: (typeof import('@codemirror/language'))['syntaxTree']\n  readonly ensureSyntaxTree: (typeof import('@codemirror/language'))['ensureSyntaxTree']\n  readonly syntaxTreeAvailable: (typeof import('@codemirror/language'))['syntaxTreeAvailable']\n}",
       "AddonChannelOutcome": "/** 通道请求结果：普通拒绝与组件异常分开（装载器只报协议性结束态；\n *  rejected = 宿主侧未注册 topic 或业务拒绝；timeout/released 由装载器\n *  本地终结——不依赖宿主存活） */\nexport type AddonChannelOutcome =\n  | { ok: true; result: unknown }\n  | { ok: false; reason: 'timeout' | 'released' | 'rejected' }",
-      "AddonSdkCommandsFacet": "/** T10（#359）SDK 命令面（仅编辑器页）：注册自己的可绑定命令——操作进入\n *  统一快捷键管理（冲突检查/绑定/清空/恢复），命令面板经宿主命令可达。\n *  命名空间由平台注入（`<addonId>.<localId>`）；同名注册与非法形状明确\n *  拒绝（普通 API 拒绝，不算故障）。 */\nexport interface AddonSdkCommandsFacet {\n  register(def: AddonCommandDefinition, handler: () => void): AddonCommandRegisterResult & { dispose(): void }\n}",
+      "AddonSdkCommandsFacet": "/** T10（#359）SDK 命令面（仅编辑器页）：注册自己的可绑定命令——操作进入\n *  统一快捷键管理（冲突检查/绑定/清空/恢复），命令面板经宿主命令可达。\n *  命名空间由平台注入（`<addonId>.<localId>`）；同名注册与非法形状明确\n *  拒绝（普通 API 拒绝，不算故障）。\n *  #427 起回调携带目标视图句柄：执行时刻由平台解析当前活动视图（焦点\n *  嵌入内部 Live → 该实例，否则主正文；无活动视图 null）——组件无需\n *  自建焦点探针防御链。 */\nexport interface AddonSdkCommandsFacet {\n  register(def: AddonCommandDefinition, handler: (target: AddonViewHandle | null) => void): AddonCommandRegisterResult & { dispose(): void }\n}",
       "AddonSdkMenusFacet": "/** T10（#359）SDK 菜单面（仅编辑器页）：新增自己的右键菜单项——组件簇\n *  （addon.<组件 ID>）追加在内置三簇之后；label 自由文本、iconKey 须在\n *  平台图标 key 表。不提供覆写/隐藏/接管内置菜单项的任何入口（ADR-0012\n *  菜单边界）。 */\nexport interface AddonSdkMenusFacet {\n  registerItem(def: AddonMenuItemDefinition): {\n    ok: boolean\n    reason?: string\n    /** 命名空间菜单项 ID（ok 时给出） */\n    id?: string\n    dispose(): void\n  }\n}",
       "AddonSdkUiFacet": "/** T11（#360）SDK 界面面（仅编辑器页）：往**平台预定义挂载点**新增自己\n *  的工具栏按钮与面板——不把内核容器、内置界面、菜单或设置框架交给作者\n *  接管（按钮槽位白名单、面板 dock 唯一宿主）。按钮动作二选一：挂接 T10\n *  已注册命令或自带回调（携当前活动视图句柄——T06 语义，在引用 B 中操作\n *  归 B 不误改父 A）；面板 mount/unmount 管内容根生命周期。随所属视图\n *  模式切换与组件退出完整回收（停用/故障/代次释放本页闭环）。 */\nexport interface AddonSdkUiFacet {\n  /** 注册工具栏按钮（slot 缺省 toolbar——白名单外值拒绝） */\n  registerButton(\n    def: AddonUiButtonDefinition,\n    onClick?: (target: AddonViewHandle | null) => void,\n  ): {\n    ok: boolean\n    reason?: string\n    /** 命名空间按钮 ID（ok 时给出） */\n    id?: string\n    dispose(): void\n  }\n  /** 注册面板（默认关闭；返回句柄含开闭控制——dispose 后全部拒绝） */\n  registerPanel(def: AddonUiPanelDefinition): {\n    ok: boolean\n    reason?: string\n    /** 命名空间面板 ID（ok 时给出） */\n    id?: string\n    dispose(): void\n    open(): boolean\n    close(): boolean\n    isOpen(): boolean\n  }\n}"
     },
@@ -868,7 +897,8 @@
       "AddonApplyEditsRequest": "/** applyEdits 请求（作者提供的业务修改；来源身份由 SDK 注入，不在此形） */\nexport interface AddonApplyEditsRequest {\n  /** 快照修订标记（getSnapshot 返回值；失配 = 旧快照，明确拒绝） */\n  revision: number\n  /** 变更列表（LF 坐标，多范围 = 一笔修饰操作，Q29：不按底层变更拆分） */\n  changes: SerChange[]\n  /** 提交后选区（随同一事务原子应用；缺省保持实例现有选区重定位） */\n  selection?: AddonSelectionRange\n  /** 撤回边界声明；缺省 atomic */\n  history?: AddonEditHistory\n}",
       "AddonApplyEditsResult": "export type AddonApplyEditsResult =\n  | { ok: true; credential: AddonEditCredential }\n  | { ok: false; reason: AddonEditRejection }",
       "AddonEditRejection": "/** 可辨认拒绝类型（接口冻结面；新增值视为契约变更） */\nexport type AddonEditRejection =\n  /** 句柄已释放 / 实例已销毁 */\n  | 'view-disposed'\n  /** 只读视图（hover 引用、reading 态主正文）不接受写入 */\n  | 'read-only'\n  /** 视图失活（冲突暂停写回） */\n  | 'suspended'\n  /** 快照修订失配（旧快照；内核输入重定位不适用于 API 提交，不自动重试） */\n  | 'stale-snapshot'\n  /** joinPrevious 无可确认的同目标前项（HistoryBoundaryUnavailable 语义：\n   *  空日志、仅外来写入、组顶被外来写入打断、映射失配四种形态） */\n  | 'history-boundary'\n  /** 宿主冲突拒绝（不可安全重定位 / 暂停面板） */\n  | 'conflict'\n  /** 宿主写回失败 */\n  | 'error'\n  /** 请求形状非法（revision/changes/selection 越界或类型错误） */\n  | 'invalid-request'",
-      "AddonEditCredential": "/** 提交凭据（宿主确认后签发；与该笔 edit.ack(ok) 同源版本） */\nexport interface AddonEditCredential {\n  /** 本次修饰操作 ID（SDK 注入；凭据可对账来源记录） */\n  opId: string\n  /** 宿主确认版本 */\n  version: number\n}"
+      "AddonEditCredential": "/** 提交凭据（宿主确认后签发；与该笔 edit.ack(ok) 同源版本） */\nexport interface AddonEditCredential {\n  /** 本次修饰操作 ID（SDK 注入；凭据可对账来源记录） */\n  opId: string\n  /** 宿主确认版本 */\n  version: number\n}",
+      "AddonViewIdentityFacet": "/** #426 视图身份反查面（experimental.viewIdentity 的内容）：CM6\n *  EditorView → 平台实例 ID。keymap/扩展回调拿到的是 view，按 ID 寻址\n *  的 API（headingFold 等）经此换算——不再依赖「扩展槽仅挂主正文」的\n *  装配范围推定。方法为闭包实现（无 this 依赖，解构裸传安全） */\nexport interface AddonViewIdentityFacet {\n  /** 反查实例 ID：装配在平台 Live 实例（main/embed）上的 view 返回其\n   *  views 面句柄 ID；未装配身份的 view（非平台实例或尚未注册）null */\n  instanceIdOf(view: import('@codemirror/view').EditorView): string | null\n}"
     },
     "src/shared/addonFoldApi.ts": {
       "AddonHeadingFoldSpan": "/** 折叠区间（LF 偏移；与本体派生视图同构）。key 同时是 foldAt/unfoldAt\n *  的区间定位键——只能来自查询结果（作者自算坐标属脱靶风险自负） */\nexport interface AddonHeadingFoldSpan {\n  /** 折叠键：标题起始行行首 offset（ATX = `#` 行行首；Setext = 内容首行行首） */\n  key: number\n  /** 标题级别（ATX 1–6 / Setext 1–2） */\n  level: number\n  /** 隐藏区间起点：标题块行尾（标题行保持可见） */\n  hideFrom: number\n  /** 隐藏区间终点：下一级别 ≤ 自身的标题行行首，或文档末尾 */\n  hideTo: number\n}",
@@ -959,6 +989,11 @@
         },
         {
           "entry": "headingFold",
+          "version": "1.0.0",
+          "status": "candidate"
+        },
+        {
+          "entry": "viewIdentity",
           "version": "1.0.0",
           "status": "candidate"
         }
