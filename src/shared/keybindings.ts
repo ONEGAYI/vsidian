@@ -267,7 +267,9 @@ function operationById(id: string): KeybindingOperation | undefined {
 }
 
 /** #359 T10（#427 修订）：chord 是否含保留 Tab 段——段内键为 tab 且无
- *  ctrl/alt/meta 修饰（裸 Tab 与 Shift+Tab）。这两形态属 #125 情境输入
+ *  ctrl/alt/meta 修饰（裸 Tab 与 Shift+Tab）。输入须为 normalizeChord
+ *  归一化形态（小写、修饰序固定）——本函数不做归一化，直接喂原始
+ *  大小写形态（如 'Ctrl+Tab'）会漏判；调用点（默认绑定校验）已先归一。这两形态属 #125 情境输入
  *  固定链（围栏越界 → 表格导航 → 行缩进），任何命令绑定都会被
  *  keybindingRouter 先于 CM6 keymap 拦截（stopPropagation）破坏该链，
  *  注册期即拒。ctrl/alt/meta+Tab 不参与三段链（链只匹配裸 Tab/Shift+Tab

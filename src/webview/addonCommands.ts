@@ -207,8 +207,11 @@ export class AddonCommandsRuntime {
     if (!entry) {
       return 'unknown'
     }
-    const target = this.activeTargetFn?.(entry.addonId) ?? null
     try {
+      // target 解析入 try：活动句柄构造链将来演化若抛错，走同一 catch
+      // 归因留痕（不静默当 null 执行——错误目标比不执行更危险；键路由/
+      // 宿主回发仍不断链）
+      const target = this.activeTargetFn?.(entry.addonId) ?? null
       entry.handler(target)
     } catch (err) {
       // 回调异常不外溢（键路由/宿主回发不因组件代码抛错断链）

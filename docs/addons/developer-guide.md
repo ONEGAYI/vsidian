@@ -179,8 +179,7 @@ sdk.commands?.register({ id: 'format', title: '格式化', mode: 'live', writes:
 | 折到文档末尾、文档以换行结尾 | `hideTo - 1`（尾随换行属隐藏区） |
 | 折到文档末尾、无尾随换行 | `hideTo`（两者都等于文档长度，无换行可回退） |
 
-判断式：`hideTo === doc.length && text[doc.length - 1] !== '
-'` 时不减一，其余减一。反向（把上游行尾换成本平台口径）对称加一。`hideFrom` 两侧口径一致（标题块行尾），无需换算。
+判断式：`hideTo === doc.length && text[doc.length - 1] !== '\n'` 时不减一，其余减一。反向（把上游行尾换成本平台口径）对称加一。`hideFrom` 两侧口径一致（标题块行尾），无需换算。
 
 ### 4.6 SDK 方法的接收者绑定
 

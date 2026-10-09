@@ -379,4 +379,11 @@ describe('#426 实例身份 field（view → instanceId 反查基座）', () => 
     instance.setAddonBehaviorIdentity('embed:h1')
     expect(instance.view!.state.field(addonInstanceIdField, false)).toBe('embed:h1')
   })
+
+  it('实例销毁后再告知身份不抛错（view 不在场只写内存字段，不 dispatch）', () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-identity-destroy', '# T\n')
+    instance.destroy()
+    expect(() => instance.setAddonBehaviorIdentity('main')).not.toThrow()
+  })
 })
