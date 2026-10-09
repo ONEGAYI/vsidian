@@ -380,7 +380,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   outline: 19,
   'chrome-limits': 4,
   'toolbar-banner': 8,
-  frontmatter: 6,
+  frontmatter: 7,
   'context-menu': 1,
   backlinks: 4,
   outlinks: 2,

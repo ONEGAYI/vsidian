@@ -182,6 +182,18 @@ describe('buildLivePreviewDecorations：全量构建（树驱动语义）', () =
     expect((c.get('vsidian-fm-card-line') ?? []).length).toBe(0)
   })
 
+  it('frontmatter 降级：首行上方发射轻提示 block widget（#424：zero-width 挂文档起点，成型与无头区不发射）', () => {
+    const hints = (set: DecorationSet) => collect(set)
+      .filter((i) => i.widget !== undefined && i.widget.startsWith('FmDegradedHintWidget:'))
+      .map((i) => ({ from: i.from, to: i.to }))
+    // 降级：提示挂文档起点，zero-width（坐标零影响——不产生文本位置）
+    expect(hints(build('---\ntitle: 元\nouter:\n  inner: 1\n---\n正文')))
+      .toEqual([{ from: 0, to: 0 }])
+    // 成型卡片态与无头区：不发射
+    expect(hints(build(FULL_DOC))).toHaveLength(0)
+    expect(hints(build('正文无头区'))).toHaveLength(0)
+  })
+
   it('粗斜体：内容 span + 标记隐藏（非活动行）', () => {
     expect(coveredTexts(set, LIVE_CLASS_NAMES.strong, FULL_DOC)).toEqual(['粗体'])
     expect(coveredTexts(set, LIVE_CLASS_NAMES.emphasis, FULL_DOC)).toEqual(['斜体'])

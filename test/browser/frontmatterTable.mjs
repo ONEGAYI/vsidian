@@ -350,6 +350,56 @@ try {
     await page.close()
   }
 
+  // ---- #424 降级源码态轻提示：可见（浅色小字、与 --- 左对齐）、
+  //      纯装饰（pointer-events 穿透、不可聚焦、点击落到编辑器）、
+  //      成型态不发射 ----
+  {
+    const { page, errors } = await openPage()
+    const DEGRADED_DOC = [
+      '---', 'title: hello', 'perm:', '  bash: deny', '---', '', '正文段落。', '',
+    ].join('\n')
+    await page.evaluate((t) => window.initFmDoc(t, 'live'), DEGRADED_DOC)
+    const hint = page.locator('.vsidian-fm-degraded-hint')
+    assert.equal(await hint.count(), 1, '降级文档应发射一条轻提示')
+    // 可见且非零面积（用户看到的东西，不是 DOM 存在性）
+    const box = await hint.boundingBox()
+    assert.ok(box && box.height > 5 && box.width > 10, `提示应有可见面积: ${JSON.stringify(box)}`)
+    // 文案非空、穿透与不可选、小号字
+    const style = await hint.evaluate((el) => {
+      const cs = getComputedStyle(el)
+      return { text: el.textContent, pe: cs.pointerEvents, us: cs.userSelect, size: cs.fontSize }
+    })
+    assert.ok(style.text && style.text.length >= 4, `提示文案非空: ${style.text}`)
+    assert.equal(style.pe, 'none', '鼠标穿透（pointer-events: none）')
+    assert.equal(style.us, 'none', '不可选区（user-select: none）')
+    assert.ok(parseFloat(style.size) <= 12, `浅色小字（≤12px 实际 ${style.size}）`)
+    // 与首道 --- 分割线左对齐：同容器同 padding 起点（block widget 与
+    // .cm-line 同级，取首行 `---` 的左缘对比）
+    const firstFence = page.locator('.cm-content .cm-line').first()
+    const [hintLeft, fenceLeft] = await Promise.all([
+      hint.evaluate((el) => el.getBoundingClientRect().left),
+      firstFence.evaluate((el) => el.getBoundingClientRect().left),
+    ])
+    assert.ok(Math.abs(hintLeft - fenceLeft) < 1,
+      `提示与 --- 左对齐（提示 ${hintLeft} vs 围栏 ${fenceLeft}）`)
+    // 点击穿透：点击提示中心，焦点/光标落到编辑器（提示不拦截）
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    const focusClass = await page.evaluate(() =>
+      document.activeElement ? document.activeElement.className : null)
+    assert.ok(String(focusClass).includes('cm-content'), `点击穿透后焦点在编辑器: ${focusClass}`)
+    assert.deepEqual(errors, [], '页面不能有未捕获异常')
+    await page.close()
+  }
+  {
+    // 成型态对照：不发射
+    const { page, errors } = await openPage()
+    await page.evaluate((t) => window.initFmDoc(t, 'live'), FM_DOC)
+    assert.equal(await page.locator('.vsidian-fm-degraded-hint').count(), 0,
+      '成型卡片态不发射降级提示')
+    assert.deepEqual(errors, [], '页面不能有未捕获异常')
+    await page.close()
+  }
+
 } finally {
   await browser.close()
 }

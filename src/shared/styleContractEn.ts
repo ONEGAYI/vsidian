@@ -890,6 +890,13 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'The rightmost slot of the header button area (to the right of the Edit button).',
     obsidian: { counterpart: 'The .metadata-container header collapse direction (the Obsidian properties panel is collapsible)' },
   },
+  'live-fm-degraded-hint': {
+    purpose:
+      'The degraded-source frontmatter hint (#424): one line of small, dimmed text (descriptionForeground, 11px) above the opening `---` fence line, explaining that the header is shown as source because it contains complex YAML (nested mappings, flow maps, and other forms unsupported by the first version) — resolving the "why did this not become a table card" confusion (the #421 trigger chain). Hard constraints of a pure decoration (user visual spec): a block widget anchored at the document start, zero-width and not part of the text model (zero coordinate impact, no cursor stop, never part of a selection); no interactive elements so it cannot take focus; pointer-events:none so the mouse passes through; shares the same container and padding as .cm-line, so it is naturally left-aligned with the `---` fence. The text (frontmatter.degradedHint) is refreshed in place via the localeOnDemand scan. Not emitted for the well-formed card state or documents without frontmatter.',
+    states: 'Persistent in the degraded-source state (not emitted when well-formed or with no header); does not vary with cursor position.',
+    dom: 'Live: the block-widget content above the opening fence line (a sibling of .cm-line under cm-content).',
+    obsidian: { counterpart: 'Obsidian only directs users to source mode for complex types and offers no such hint (this entry is a superset)' },
+  },
   // ---- 限制说明（chrome-limits，4 条）----
   'limit-fm-complex-types': {
     purpose:

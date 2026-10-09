@@ -74,7 +74,7 @@ import {
   type TableHeightPlanPayload,
 } from './tableHeightPlan'
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
-import { buildFrontmatterCardPlan, fmFoldField } from './frontmatterDecorations'
+import { buildFrontmatterCardPlan, fmDegradedHintRangeAt, fmFoldField } from './frontmatterDecorations'
 import {
   barePipeAt,
   blankContainerPrefix,
@@ -899,6 +899,12 @@ function emitForRange(
     } else {
       for (let n = Math.max(1, fromLine); n <= Math.min(toLine, fmLast); n++) {
         addLineCls(n, LIVE_CLASS_NAMES.frontmatterLine)
+      }
+      // #424 降级源码态轻提示：block widget 挂首围栏行上方（zero-width
+      // 挂文档起点，坐标零影响）；发射窗口含第 1 行才发（增量重析窗口
+      // 不含首行时旧装饰保留，不重复发射）
+      if (fromLine <= 1 && toLine >= 1) {
+        out.push(fmDegradedHintRangeAt(doc.line(1).from))
       }
     }
   }

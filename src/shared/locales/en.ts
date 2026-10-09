@@ -755,6 +755,8 @@ export const en = {
   /** 标题栏折叠 chevron：收起键值行区（与代码块折叠同交互） */
   'frontmatter.collapse': 'Collapse properties',
   'frontmatter.expand': 'Expand properties',
+  /** 降级源码态轻提示（#424：首围栏行上方一行浅色小字） */
+  'frontmatter.degradedHint': 'Complex YAML shown as source',
   /** Popover 容器 aria 标签 */
   'frontmatter.popoverAriaLabel': 'Edit properties',
   /** Popover 内键名输入框 aria 标签 */

@@ -704,6 +704,8 @@ export const zhCn: Record<MessageKey, string> = {
   /** 标题栏折叠 chevron：收起键值行区（与代码块折叠同交互） */
   'frontmatter.collapse': '折叠属性',
   'frontmatter.expand': '展开属性',
+  /** 降级源码态轻提示（#424：首围栏行上方一行浅色小字） */
+  'frontmatter.degradedHint': '复杂 YAML，源码呈现',
   /** Popover 容器 aria 标签 */
   'frontmatter.popoverAriaLabel': '修改属性',
   /** Popover 内键名输入框 aria 标签 */

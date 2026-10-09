@@ -3230,6 +3230,29 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "2026-10（折叠批次）"
   },
   {
+    "id": "live-fm-degraded-hint",
+    "domain": "chrome",
+    "category": "frontmatter",
+    "kind": "selector",
+    "target": ".vsidian-fm-degraded-hint（降级源码态轻提示文字块）",
+    "purpose": "降级源码态 frontmatter 的轻提示（#424）：首围栏行 `---` 上方一行浅色小字（descriptionForeground、11px），说明头区因复杂 YAML（嵌套映射、flow map 等一期不支持形态）以源码呈现——消解「为什么没变表格卡片」的困惑（#421 触发链）。纯装饰硬约束（用户观感规格）：block widget 挂文档起点、zero-width 不参与文本模型（坐标零影响、光标不可停靠、不参与选区）；无交互元素不可聚焦；pointer-events:none 鼠标穿透；与 .cm-line 同容器同 padding，天然与 `---` 线左对齐。文案 frontmatter.degradedHint 经 localeOnDemand 扫描就地重刷。成型卡片态与无头区不发射。",
+    "views": [
+      "live"
+    ],
+    "states": "降级源码态常驻（成型/无头区不发射）；不随光标位置变化。",
+    "dom": "live：首围栏行上方 block widget 内容（cm-content 下与 .cm-line 同级）。",
+    "example": "#app .vsidian-fm-degraded-hint {\n  pointer-events: none;\n}",
+    "obsidian": {
+      "counterpart": "Obsidian 对复杂类型仅劝退源码模式、无对应提示（本条为超集）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveDecorations（降级发射/成型与无头区不发射/zero-width）+ frontmatterPaintCssContract（穿透与不可选规则）+ localeRefreshContract（换词）",
+      "浏览器 frontmatterTable 套件（真实渲染可见性、computed pointer-events、与 `---` 左对齐、点击穿透）——探针文档为成型头区（文档首唯一，成型/降级互斥），降态类不进静态探针表（chromeContract 覆盖边界诚实声明），浏览器路径验证（live-fm-popover 交互态先例）"
+    ],
+    "introduced": "#424（2026-10-09）"
+  },
+  {
     "id": "limit-fm-complex-types",
     "domain": "chrome",
     "category": "chrome-limits",
@@ -6312,6 +6335,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "The rightmost slot of the header button area (to the right of the Edit button).",
     "obsidian": {
       "counterpart": "The .metadata-container header collapse direction (the Obsidian properties panel is collapsible)"
+    }
+  },
+  "live-fm-degraded-hint": {
+    "purpose": "The degraded-source frontmatter hint (#424): one line of small, dimmed text (descriptionForeground, 11px) above the opening `---` fence line, explaining that the header is shown as source because it contains complex YAML (nested mappings, flow maps, and other forms unsupported by the first version) — resolving the \"why did this not become a table card\" confusion (the #421 trigger chain). Hard constraints of a pure decoration (user visual spec): a block widget anchored at the document start, zero-width and not part of the text model (zero coordinate impact, no cursor stop, never part of a selection); no interactive elements so it cannot take focus; pointer-events:none so the mouse passes through; shares the same container and padding as .cm-line, so it is naturally left-aligned with the `---` fence. The text (frontmatter.degradedHint) is refreshed in place via the localeOnDemand scan. Not emitted for the well-formed card state or documents without frontmatter.",
+    "states": "Persistent in the degraded-source state (not emitted when well-formed or with no header); does not vary with cursor position.",
+    "dom": "Live: the block-widget content above the opening fence line (a sibling of .cm-line under cm-content).",
+    "obsidian": {
+      "counterpart": "Obsidian only directs users to source mode for complex types and offers no such hint (this entry is a superset)"
     }
   },
   "limit-fm-complex-types": {

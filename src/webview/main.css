@@ -2595,6 +2595,20 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   background: var(--vscode-button-hoverBackground, #1177bb);
 }
 
+/* 降级源码态轻提示（#424）：首围栏行 `---` 上方一行浅色小字，说明头区
+   为何源码呈现（复杂 YAML）。纯装饰：鼠标穿透、不可选区、不可聚焦——
+   block widget 挂文档起点，zero-width 不参与文本模型（坐标零影响）；
+   与 .cm-line 同容器同 padding，天然与 `---` 线左对齐 */
+#app .vsidian-fm-degraded-hint {
+  padding: 0 0 2px;
+  color: var(--vscode-descriptionForeground, #717171);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ---- 代码块卡片（#79–#84，规格 docs/specs/code-block-card.md）----
    呈现态围栏行内容被清空（replace 装饰零宽）但行槽保留；卡片 = 块首行
    上方的头部横带（block widget）+ 连续块行底色 + 尾行底边圆角（顶边

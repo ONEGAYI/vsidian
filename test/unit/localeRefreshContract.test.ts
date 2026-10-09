@@ -20,7 +20,7 @@ import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import { en } from '../../src/shared/locales/en'
 import { CodeCardHeaderWidget } from '../../src/webview/liveCodeCard'
-import { FmCardHeaderWidget } from '../../src/webview/frontmatterDecorations'
+import { FmCardHeaderWidget, FmDegradedHintWidget } from '../../src/webview/frontmatterDecorations'
 import { buildGraphicChrome } from '../../src/webview/graphicBlockChrome'
 import { LiveMathWidget } from '../../src/webview/liveMath'
 import { EmptyTableCellWidget, LIVE_CLASS_NAMES } from '../../src/webview/liveDecorations'
@@ -335,6 +335,22 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
     } finally {
       host.remove()
       detach()
+    }
+  })
+
+  it('fm 降级轻提示：换包后就地重刷文案（#424：widget eq 短路物化 DOM 不重建）', () => {
+    installLocale('zh-cn', zhCn)
+    const host = document.createElement('div')
+    document.body.append(host)
+    try {
+      host.append(new FmDegradedHintWidget().toDOM())
+      expect(host.querySelector<HTMLElement>('.vsidian-fm-degraded-hint')!.textContent)
+        .toBe(zhCn['frontmatter.degradedHint'])
+      switchToEnglish()
+      expect(host.querySelector<HTMLElement>('.vsidian-fm-degraded-hint')!.textContent)
+        .toBe(en['frontmatter.degradedHint'])
+    } finally {
+      host.remove()
     }
   })
 

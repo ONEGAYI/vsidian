@@ -80,6 +80,8 @@ export const FM_CARD_CLASS_NAMES = {
   cardFolded: 'vsidian-fm-card-folded',
   /** 阅读收起态表格修饰（行区整体隐藏，表壳边框圆角保留） */
   tableFolded: 'vsidian-fm-folded',
+  /** 降级源码态轻提示（#424：首围栏行上方 block widget，纯装饰） */
+  degradedHint: 'vsidian-fm-degraded-hint',
 } as const
 
 // ---- 折叠状态（与代码块 codeCardFoldField 同语义）----
@@ -242,6 +244,41 @@ export class FmCardHeaderWidget extends WidgetType {
 // ---- 装饰实例缓存（增量与全量产出相同实例，RangeSet.eq 前提） ----
 
 const fmHideDeco = Decoration.replace({})
+
+/**
+ * 降级源码态轻提示（#424）：首围栏行 `---` 上方的一行浅色小字（文案
+ * frontmatter.degradedHint，如「复杂 YAML，源码呈现」），说明「为什么这里
+ * 没有表格卡片」。纯装饰 hard 约束（用户观感规格）：**block widget**
+ * 挂文档起点——zero-width 不产生文本位置（坐标零影响、光标不可停靠进
+ * 提示、不参与选区）；DOM 无交互元素（无 tabindex，天然不可聚焦）；
+ * pointer-events:none 鼠标穿透（CSS 钉住）。文案经 localeOnDemand 扫描
+ * 就地重刷（eq 恒成立短路物化 DOM 重建）。
+ */
+export class FmDegradedHintWidget extends WidgetType {
+  eq(): boolean {
+    return true
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement('div')
+    el.className = FM_CARD_CLASS_NAMES.degradedHint
+    el.textContent = t('frontmatter.degradedHint')
+    return el
+  }
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
+const fmDegradedHintDeco = Decoration.widget({
+  widget: new FmDegradedHintWidget(),
+  block: true,
+  side: -1,
+})
+
+/** 降级轻提示区间（挂文档首行行首；发射窗口含第 1 行时使用，#424） */
+export function fmDegradedHintRangeAt(pos: number): Range<Decoration> {
+  return fmDegradedHintDeco.range(pos)
+}
 
 const fmHeaderDecos = new Map<boolean, ReturnType<typeof Decoration.replace>>()
 function fmHeaderDeco(folded: boolean): ReturnType<typeof Decoration.replace> {
