@@ -34,6 +34,7 @@ import type {
 } from '../shared/addonPage'
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '../shared/addonEditApi'
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
+import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
 import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
@@ -391,6 +392,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             instanceIdOf: (view) => view.state.field(addonInstanceIdField, false) ?? null,
           }
         : undefined
+    // #433 行类型/行内标记查询面（仅编辑器页 + 视图注册表在场提供；对齐
+    // headingFold 的 instanceId 寻址与三值拒绝）。方法过 isLoadActive 守卫：
+    // 已终结代次的迟到查询拒绝 view-disposed（僵尸调用不落视图）
+    const syntaxFacet: AddonSyntaxFacet | undefined =
+      page === 'editor' && env.addonViews
+        ? {
+            lineTypeAt: (instanceId, pos) => (isLoadActive(loadRecord)
+              ? env.addonViews!.syntaxLineTypeOf(instanceId, pos)
+              : { ok: false, reason: 'view-disposed' }),
+            inlineAt: (instanceId, pos) => (isLoadActive(loadRecord)
+              ? env.addonViews!.syntaxInlineOf(instanceId, pos)
+              : { ok: false, reason: 'view-disposed' }),
+          }
+        : undefined
     const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
       ? {
           register: (registration) => {
@@ -407,7 +422,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
-      experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet },
+      experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {

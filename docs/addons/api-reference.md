@@ -19,6 +19,7 @@
 | `cm6` | 1.1.0 | 候选（未发行） | —（未发行不携带日期） | 页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 | `headingFold` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（阅读模式不开放，#409 定案）。#426 起 folds 与 foldable 共享同一 doc 版本缓存（调用成本 O(标题数) 过滤，非全文档重扫），实例寻址可经 viewIdentity.instanceIdOf 反查。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 | `viewIdentity` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 视图身份反查面（experimental.viewIdentity，#426）。1.0.0 首版候选：instanceIdOf（CM6 EditorView → views 面实例 ID；未装配身份的 view 返回 null）——keymap/扩展回调拿到 view 后据此反查实例，headingFold 等按 ID 寻址的 API 不再依赖「扩展槽仅挂主正文 Live 实例」的装配范围推定。闭包实现无 this 依赖（解构裸传安全）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
+| `syntax` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 行类型与行内标记查询面（experimental.syntax，#433，#408 B+ 形态落定）。1.0.0 首版候选：lineTypeAt（八种行类型：frontmatter/code/formula/table/heading/quote/list/text——平台侧组合增量树、frontmatter 区间缓存与跨行公式块表，live 树对 fm 反语义、公式零语义由组合判定补齐）+ inlineAt（code/formula/none 位置级行内标记）+ nodeNames 诊断载荷（祖先链节点名快照，非稳定、不构成兼容承诺）。位置驱动单点查询（µs 级），不暴露树/节点句柄；Live-only。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 
 ### 稳定 API 移除规则
 
@@ -47,6 +48,7 @@
     - [`cm6-experimental` 实验入口：共享 CM6 运行时（experimental.cm6）](#cm6-experimental)
     - [`heading-fold-experimental` 实验入口：标题折叠查询与命令（experimental.headingFold）](#heading-fold-experimental)
     - [`view-identity-experimental` 实验入口：视图身份反查（experimental.viewIdentity）](#view-identity-experimental)
+    - [`syntax-experimental` 实验入口：行类型与行内标记查询（experimental.syntax）](#syntax-experimental)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
@@ -387,12 +389,13 @@ export interface VsidianAddonPageSdk {
   readonly addon: { id: string; generation: number; page: AddonPageKind }
   /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
    *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =
-   *  视图身份反查（#426）。使用前须在清单 experimental 声明对应入口的
-   *  兼容范围 */
+   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）。使用
+   *  前须在清单 experimental 声明对应入口的兼容范围 */
   readonly experimental: {
     readonly cm6?: AddonCm6Runtime
     readonly headingFold?: AddonHeadingFoldFacet
     readonly viewIdentity?: AddonViewIdentityFacet
+    readonly syntax?: AddonSyntaxFacet
   }
   /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、
    *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子
@@ -835,6 +838,65 @@ export interface AddonViewIdentityFacet {
 ```
 
 **验证**：`test/unit/addonPageLoader.test.ts`、`test/unit/liveInstance.test.ts`、`test/unit/addonRegistry.test.ts`
+
+### `syntax-experimental` 实验入口：行类型与行内标记查询（experimental.syntax）
+
+**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#433
+> **实验入口**：清单 `experimental` 声明名 `syntax`——兼容边界见上方实验入口兼容清单。
+
+**目标**：页面 SDK 的行类型/行内标记位置查询面（sdk.experimental.syntax，#433，#408 B+ 形态落定）：光标驱动的单点查询，供输入行为类组件判定当前位置语义（替代组件自带的全文档文本扫描）。live 树对 frontmatter 反语义（HorizontalRule/SetextHeading2）、公式零语义（皆 Paragraph），查询面在平台侧组合三条常驻管线（增量树 + frontmatter 区间缓存 + 跨行公式块表）给出平台自有枚举——不暴露树/节点句柄，不把 Lezer 节点名变成事实契约。
+
+语义要点：
+- **适用模式**：Live-only：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址，与 headingFold 同款；keymap/扩展回调可经 viewIdentity.instanceIdOf 反查实例 ID。
+- **坐标与数据形状**：全文 UTF-16 code unit 偏移、页面全程 LF。pos 为非负整数（否则 invalid-request）；超出文档长度时钳制到文末（行尾是合法光标位）。
+- **生命周期**：位置驱动单点查询（µs 级：三管线常驻快照 + 单行扫描），无全树 iterate 形态；查询零写回。行类型判定链：frontmatter 区间（行级，树上反语义先拦截）→ 跨行公式块表 → 树链枚举（code > table > heading > list > quote，嵌套组合取先命中者）→ 单行闭合块 $$x$$（独占一行）→ 兜底 text。行内标记判定链：frontmatter → none（源码态）→ InlineCode → code → 其余代码上下文 → none（$ 为字面）→ 公式块表/当前行扫描 → formula → 兜底 none。
+- **错误与拒绝**：三种可辨认拒绝：view-disposed / read-only / invalid-request（pos 须为非负整数）。使用前须在清单 experimental 声明 syntax 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。nodeNames 为诊断载荷，显式声明非稳定、不构成兼容承诺（节点名随解析器升级变化）。
+
+签名事实源：`src/shared/addonSyntaxApi.ts`
+
+```ts
+/** 行类型枚举（块级维度；callout 一期不入枚举——live 侧无识别管线，
+ * 引用块形态统一 quote，落档见 developer-guide「与 Obsidian 上游语义
+ * 对照」节） */
+export type AddonSyntaxLineKind =
+  | 'frontmatter'
+  | 'code'
+  | 'formula'
+  | 'table'
+  | 'heading'
+  | 'quote'
+  | 'list'
+  | 'text'
+
+/** 行内标记枚举（位置级行内维度；none = 普通文本位置） */
+export type AddonSyntaxInlineKind = 'code' | 'formula' | 'none'
+
+/** 拒绝类型（照 addonFoldApi 三值先例；接口冻结面）：view-disposed =
+ * 句柄已释放/实例已销毁/组件代次已终结；read-only = Live-only 边界
+ * （reading 态或 hover 只读视图）；invalid-request = 请求形状非法 */
+export type AddonSyntaxRejection = 'view-disposed' | 'read-only' | 'invalid-request'
+
+export type AddonSyntaxLineTypeResult =
+  | ({ ok: true } & AddonSyntaxLineJudge)
+  | { ok: false; reason: 'view-disposed' | 'read-only' | 'invalid-request' }
+
+export type AddonSyntaxInlineResult =
+  | ({ ok: true } & AddonSyntaxInlineJudge)
+  | { ok: false; reason: 'view-disposed' | 'read-only' | 'invalid-request' }
+
+/** 查询面（experimental.syntax 的内容；仅编辑器页提供）。方法按 views
+ * 面的实例 ID 寻址（对齐 headingFold/viewIdentity 先例），pos 为全文
+ * UTF-16 code unit 偏移（页面全程 LF） */
+export interface AddonSyntaxFacet {
+  /** 光标处行类型（块级维度；见 AddonSyntaxLineKind） */
+  lineTypeAt(instanceId: string, pos: number): AddonSyntaxLineTypeResult
+  /** 位置级行内标记：code（行内代码）/ formula（行内或块内公式）/
+   * none（普通文本） */
+  inlineAt(instanceId: string, pos: number): AddonSyntaxInlineResult
+}
+```
+
+**验证**：`test/unit/addonSyntaxApi.test.ts`、`test/unit/addonSyntaxSdk.test.ts`、`test/unit/addonRegistry.test.ts`
 
 ### `channel` 页面与宿主通道
 

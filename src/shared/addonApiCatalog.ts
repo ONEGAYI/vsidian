@@ -577,6 +577,37 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#426',
   },
   {
+    id: 'syntax-experimental',
+    group: 'page-sdk',
+    title: '实验入口：行类型与行内标记查询（experimental.syntax）',
+    layer: 'experimental',
+    experimentalEntry: 'syntax',
+    endpoints: ['editor-page'],
+    signatures: [
+      {
+        module: 'src/shared/addonSyntaxApi.ts',
+        symbols: [
+          'AddonSyntaxLineKind',
+          'AddonSyntaxInlineKind',
+          'AddonSyntaxRejection',
+          'AddonSyntaxLineTypeResult',
+          'AddonSyntaxInlineResult',
+          'AddonSyntaxFacet',
+        ],
+      },
+    ],
+    purpose:
+      '页面 SDK 的行类型/行内标记位置查询面（sdk.experimental.syntax，#433，#408 B+ 形态落定）：光标驱动的单点查询，供输入行为类组件判定当前位置语义（替代组件自带的全文档文本扫描）。live 树对 frontmatter 反语义（HorizontalRule/SetextHeading2）、公式零语义（皆 Paragraph），查询面在平台侧组合三条常驻管线（增量树 + frontmatter 区间缓存 + 跨行公式块表）给出平台自有枚举——不暴露树/节点句柄，不把 Lezer 节点名变成事实契约。',
+    semantics: {
+      modes: 'Live-only：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址，与 headingFold 同款；keymap/扩展回调可经 viewIdentity.instanceIdOf 反查实例 ID。',
+      coordinates: '全文 UTF-16 code unit 偏移、页面全程 LF。pos 为非负整数（否则 invalid-request）；超出文档长度时钳制到文末（行尾是合法光标位）。',
+      lifecycle: '位置驱动单点查询（µs 级：三管线常驻快照 + 单行扫描），无全树 iterate 形态；查询零写回。行类型判定链：frontmatter 区间（行级，树上反语义先拦截）→ 跨行公式块表 → 树链枚举（code > table > heading > list > quote，嵌套组合取先命中者）→ 单行闭合块 $$x$$（独占一行）→ 兜底 text。行内标记判定链：frontmatter → none（源码态）→ InlineCode → code → 其余代码上下文 → none（$ 为字面）→ 公式块表/当前行扫描 → formula → 兜底 none。',
+      errors: '三种可辨认拒绝：view-disposed / read-only / invalid-request（pos 须为非负整数）。使用前须在清单 experimental 声明 syntax 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。nodeNames 为诊断载荷，显式声明非稳定、不构成兼容承诺（节点名随解析器升级变化）。',
+    },
+    verification: ['test/unit/addonSyntaxApi.test.ts', 'test/unit/addonSyntaxSdk.test.ts', 'test/unit/addonRegistry.test.ts'],
+    introduced: '#433',
+  },
+  {
     id: 'channel',
     group: 'page-sdk',
     title: '页面与宿主通道',
@@ -884,6 +915,12 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
         version: '1.0.0',
         status: 'candidate',
         note: '视图身份反查面（experimental.viewIdentity，#426）。1.0.0 首版候选：instanceIdOf（CM6 EditorView → views 面实例 ID；未装配身份的 view 返回 null）——keymap/扩展回调拿到 view 后据此反查实例，headingFold 等按 ID 寻址的 API 不再依赖「扩展槽仅挂主正文 Live 实例」的装配范围推定。闭包实现无 this 依赖（解构裸传安全）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
+      },
+      {
+        entry: 'syntax',
+        version: '1.0.0',
+        status: 'candidate',
+        note: '行类型与行内标记查询面（experimental.syntax，#433，#408 B+ 形态落定）。1.0.0 首版候选：lineTypeAt（八种行类型：frontmatter/code/formula/table/heading/quote/list/text——平台侧组合增量树、frontmatter 区间缓存与跨行公式块表，live 树对 fm 反语义、公式零语义由组合判定补齐）+ inlineAt（code/formula/none 位置级行内标记）+ nodeNames 诊断载荷（祖先链节点名快照，非稳定、不构成兼容承诺）。位置驱动单点查询（µs 级），不暴露树/节点句柄；Live-only。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
       },
     ],
   },

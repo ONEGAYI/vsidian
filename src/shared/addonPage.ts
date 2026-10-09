@@ -16,6 +16,7 @@
 // - 代次硬边界：旧工厂注册、旧消息、迟到结果不能接入新代次。
 import type { Extension } from '@codemirror/state'
 import type { AddonHeadingFoldFacet } from './addonFoldApi'
+import type { AddonSyntaxFacet } from './addonSyntaxApi'
 import type { AddonRenderersFacet } from './addonRenderers'
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from './addonEditApi'
 import type { AddonBehaviorsFacet } from './addonBehaviors'
@@ -123,12 +124,13 @@ export interface VsidianAddonPageSdk {
   readonly addon: { id: string; generation: number; page: AddonPageKind }
   /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
    *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =
-   *  视图身份反查（#426）。使用前须在清单 experimental 声明对应入口的
-   *  兼容范围 */
+   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）。使用
+   *  前须在清单 experimental 声明对应入口的兼容范围 */
   readonly experimental: {
     readonly cm6?: AddonCm6Runtime
     readonly headingFold?: AddonHeadingFoldFacet
     readonly viewIdentity?: AddonViewIdentityFacet
+    readonly syntax?: AddonSyntaxFacet
   }
   /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、
    *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子

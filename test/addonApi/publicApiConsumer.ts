@@ -55,6 +55,14 @@ import type {
   AddonHeadingFoldSpan,
 } from '../../src/shared/addonFoldApi'
 import type {
+  AddonSyntaxFacet,
+  AddonSyntaxInlineKind,
+  AddonSyntaxInlineResult,
+  AddonSyntaxLineKind,
+  AddonSyntaxLineTypeResult,
+  AddonSyntaxRejection,
+} from '../../src/shared/addonSyntaxApi'
+import type {
   AddonBehaviorChangeEvent,
   AddonBehaviorRegistration,
   AddonBehaviorsFacet,
@@ -244,6 +252,28 @@ export type HeadingFoldShapes = {
 export type ViewIdentitySurface = Pick<AddonViewIdentityFacet, 'instanceIdOf'>
 /** 反查输入是共享 CM6 运行时的 EditorView（组件 keymap/扩展回调的 view） */
 export type ViewIdentityParam = Parameters<AddonViewIdentityFacet['instanceIdOf']>[0]
+
+/** #433 行类型与行内标记查询面：枚举与拒绝码钉住（接口冻结面） */
+export type PinnedSyntaxLineKinds =
+  | 'frontmatter'
+  | 'code'
+  | 'formula'
+  | 'table'
+  | 'heading'
+  | 'quote'
+  | 'list'
+  | 'text'
+export const syntaxLineKindsPinned: Equals<AddonSyntaxLineKind, PinnedSyntaxLineKinds> = true
+export type PinnedSyntaxInlineKinds = 'code' | 'formula' | 'none'
+export const syntaxInlineKindsPinned: Equals<AddonSyntaxInlineKind, PinnedSyntaxInlineKinds> = true
+export type PinnedSyntaxRejections = 'view-disposed' | 'read-only' | 'invalid-request'
+export const syntaxRejectionsPinned: Equals<AddonSyntaxRejection, PinnedSyntaxRejections> = true
+/** 查询面（两方法）与结果形状（nodeNames 诊断载荷非稳定，形状钉住） */
+export type SyntaxSurface = Pick<AddonSyntaxFacet, 'lineTypeAt' | 'inlineAt'>
+export type SyntaxShapes = {
+  lineResult: AddonSyntaxLineTypeResult
+  inlineResult: AddonSyntaxInlineResult
+}
 
 /** #427 命令回调签名：携带目标视图句柄（无活动视图 null）——删参/改形即编译失败 */
 export const commandsHandlerParamPinned: Equals<

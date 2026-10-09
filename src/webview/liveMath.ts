@@ -29,7 +29,7 @@ import type { Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
-import { MATH_CLASS_NAMES, opensMathBlockLine, scanMathInLine, scanMathRanges, type MathOccurrence } from '../shared/math'
+import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathInLine, scanMathRanges, type MathOccurrence } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
 import { t } from '../shared/i18n'
 
@@ -245,15 +245,8 @@ export const mathBlocksField = StateField.define<readonly MathOccurrence[]>({
 
 // ---- 视口装饰构建 ----
 
-/** 公式排除的代码上下文（lezer 节点名；照 #11 双链先例） */
-const MATH_CODE_CONTEXTS = new Set([
-  'FencedCode',
-  'CodeBlock',
-  'CodeText',
-  'CodeMark',
-  'CodeInfo',
-  'InlineCode',
-])
+// 公式排除的代码上下文（lezer 节点名）单一事实源已上提至
+// shared/math.ts 的 MATH_CODE_CONTEXTS（#433 起与附加组件语法查询面共用）
 
 /** occurrence 是否处于代码上下文或 frontmatter 内（源码降级边界）。
  *  跨行块额外要求区间不与围栏/缩进代码节点相交。 */
