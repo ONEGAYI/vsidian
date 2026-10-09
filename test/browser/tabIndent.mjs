@@ -37,6 +37,10 @@ await build({ entryPoints: [path.join(root, 'test/browser/tabIndentFixture.ts')]
 
 const TABLE_DOC = '| a | b |\n| --- | --- |\n| 1 | 2 |\npara'
 
+// #420 降级 frontmatter 文档对（嵌套 map 源码态；Tab 前后互为镜像）
+const DEGRADED_FM = '---\nperm:\n  bash: deny\n---\nbody'
+const DEGRADED_FM_TABBED = '---\nperm:\n    bash: deny\n---\nbody'
+
 const scenarios = [
   { name: 'tab-plain', doc: 'plain text', cursor: 6, keys: ['Tab'],
     text: '  plain text', head: 8,
@@ -73,6 +77,25 @@ const scenarios = [
   {
     name: 'shift-table-edge-no-indent', doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('a') + 1,
     keys: ['Shift+Tab'], text: TABLE_DOC, head: TABLE_DOC.indexOf('a') + 1,
+  },
+  // #420 降级 frontmatter（嵌套 map 源码态）：普通行 2 空格缩进 + 焦点保持
+  //（修复前 fm 门控整体放行 → Tab 落穿默认路径 → 焦点逃逸到工作台控件）
+  {
+    name: 'tab-degraded-fm-blank', doc: '---\nperm:\n\n  bash: deny\n---\nbody', cursor: 10,
+    keys: ['Tab'], text: '---\nperm:\n  \n  bash: deny\n---\nbody', head: 12,
+    focus: 'cm-content',
+  },
+  {
+    name: 'tab-degraded-fm-nested',
+    doc: DEGRADED_FM, cursor: DEGRADED_FM.indexOf('deny') + 4,
+    keys: ['Tab'], text: DEGRADED_FM_TABBED, head: DEGRADED_FM_TABBED.indexOf('deny') + 4,
+    focus: 'cm-content',
+  },
+  {
+    name: 'shift-degraded-fm-nested',
+    doc: DEGRADED_FM_TABBED, cursor: DEGRADED_FM_TABBED.indexOf('deny') + 4,
+    keys: ['Shift+Tab'], text: DEGRADED_FM, head: DEGRADED_FM.indexOf('deny') + 4,
+    focus: 'cm-content',
   },
   {
     name: 'tab-table-row-selection-no-indent', doc: TABLE_DOC,
@@ -114,6 +137,13 @@ try {
         assert.equal(after.to, s.to, `${s.name} to: ${JSON.stringify(after)}`)
       } else {
         assert.equal(after.head, s.head, `${s.name} head: ${JSON.stringify(after)}`)
+      }
+      if (s.focus) {
+        const focusClass = await page.evaluate(() => window.readFocus())
+        assert.ok(
+          typeof focusClass === 'string' && focusClass.includes(s.focus),
+          `${s.name} 焦点保持（实际: ${focusClass}）`,
+        )
       }
       if (s.type) {
         await page.keyboard.type(s.type.keys)
