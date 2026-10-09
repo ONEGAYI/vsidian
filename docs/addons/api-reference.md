@@ -447,7 +447,7 @@ export type AddonPageKind = 'editor' | 'settings'
 
 语义要点：
 - **生命周期**：装载指令携带代次；卸载结果区分 not-loaded / stale-generation / already-released；样式逐条独立装载互不牵连。
-- **错误与拒绝**：五种装载失败原因：already-loaded / script-load-failed / identity-mismatch / no-factory-registered / factory-error（工厂同步异常按故障释放全部注册）。
+- **错误与拒绝**：五种装载失败原因：already-loaded / script-load-failed / identity-mismatch / no-factory-registered / factory-error（工厂同步异常与 async 工厂 rejection 同归因：按故障释放全部注册并整代次回滚，rejection 迟到则静默丢弃）。
 
 签名事实源：`src/shared/addonPage.ts`
 

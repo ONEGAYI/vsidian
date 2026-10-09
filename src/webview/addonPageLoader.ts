@@ -724,7 +724,19 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     const sdk = buildSdk(loadRecord, manifest)
     ;(globalThis as typeof globalThis & { [key: string]: unknown })[ADDON_SDK_SLOT_GLOBAL] = sdk
     try {
-      registered.factory(sdk)
+      // #430：async 工厂（官方样例形态：await 通道握手后再注册）的
+      // rejection 与同步异常同路径归因 factory-error——装载结局按工厂
+      // 同步段判定（不等待工厂 promise：驻留型工厂/长握手不得挂起装载
+      // 指令流），rejection 到达时若本代次仍在场则整代次回滚并上报
+      // faulted；代次已终结（unload/换代/故障先行）则只吞不回收——迟到
+      // 异常不接入新代次（与迟到通道回执同一代次硬边界）。
+      Promise.resolve(registered.factory(sdk)).catch((err) => {
+        if (!isLoadActive(loadRecord)) {
+          return
+        }
+        releaseLoad(loadRecord, 'faulted', `factory-error: ${String(err)}`)
+        env.send({ type: 'addon.faulted', addonId: manifest.addonId, generation: manifest.generation, page, reason: `factory-error: ${String(err)}` })
+      })
     } catch (err) {
       // 故障释放已留痕（releaseLoad 记 ended:'faulted'），此处只补装载结局
       releaseLoad(loadRecord, 'faulted', `factory-error: ${String(err)}`)

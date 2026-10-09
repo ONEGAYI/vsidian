@@ -448,7 +448,7 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       '宿主与页面之间的装载/卸载/通道/故障消息形状。装载实现细节（作者一般经构建桥间接使用，不直接记忆桥接名）；每 webview 资源独立授权，不复用另一页 URI。',
     semantics: {
       lifecycle: '装载指令携带代次；卸载结果区分 not-loaded / stale-generation / already-released；样式逐条独立装载互不牵连。',
-      errors: '五种装载失败原因：already-loaded / script-load-failed / identity-mismatch / no-factory-registered / factory-error（工厂同步异常按故障释放全部注册）。',
+      errors: '五种装载失败原因：already-loaded / script-load-failed / identity-mismatch / no-factory-registered / factory-error（工厂同步异常与 async 工厂 rejection 同归因：按故障释放全部注册并整代次回滚，rejection 迟到则静默丢弃）。',
     },
     verification: ['test/unit/addonPageLoader.test.ts'],
     introduced: '#351（T02）',

@@ -232,6 +232,59 @@ describe('T02 生产装载器：装载与身份', () => {
     expect(h.handle.stats().history.at(-1)).toMatchObject({ ended: 'faulted', reason: 'factory-error: Error: boom' })
     expect(h.sent.some((message) => message.type === 'addon.faulted')).toBe(true)
   })
+
+  it('#430 async 工厂 await 后 reject → 装载结局保持 ok:true，rejection 归因 factory-error 并整代次回滚', async () => {
+    const h = harness()
+    let disposed = false
+    // 官方样例形态：await 通道握手后再注册（async 工厂的 rejection 曾无人接管）
+    registerFactory(h, async (sdk) => {
+      sdk.onDispose(() => {
+        disposed = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      throw new Error('late boom')
+    })
+    const outcome = await h.handle.load(manifest())
+    // 装载结局按工厂同步段判定：不等待工厂 promise（驻留型工厂/长握手不得挂起装载指令流）
+    expect(outcome).toEqual({ ok: true, css: [] })
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+    await settle()
+    // rejection 到达即归因 factory-error：onDispose 即时回收，不等下次 unload 代次事件
+    expect(disposed).toBe(true)
+    expect(h.handle.stats().active).toEqual([])
+    expect(h.handle.stats().history.at(-1)).toMatchObject({ ended: 'faulted', reason: 'factory-error: Error: late boom' })
+    expect(h.sent.some((message) => message.type === 'addon.faulted')).toBe(true)
+  })
+
+  it('#430 async 工厂 rejection 迟到（代次已释放）→ 不回收不上报（迟到异常不接入新代次）', async () => {
+    const h = harness()
+    registerFactory(h, async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      throw new Error('late')
+    })
+    await h.handle.load(manifest())
+    await h.handle.unload(ADDON_ID, 1)
+    await settle()
+    expect(h.sent.filter((message) => message.type === 'addon.faulted')).toEqual([])
+    expect(h.handle.stats().history.at(-1)).toMatchObject({ ended: 'released' })
+    expect(h.handle.stats().active).toEqual([])
+  })
+
+  it('#430 async 工厂正常 resolve → 装载保持在场且无故障上报（回归钉住）', async () => {
+    const h = harness()
+    let disposed = false
+    registerFactory(h, async (sdk) => {
+      sdk.onDispose(() => {
+        disposed = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await h.handle.load(manifest())
+    await settle()
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+    expect(h.sent.filter((message) => message.type === 'addon.faulted')).toEqual([])
+    expect(disposed).toBe(false)
+  })
 })
 
 describe('T12 运行期故障上报：reportRuntimeFault（上报与回收分离）', () => {
