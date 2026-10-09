@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "6b27de4c82eda4cbd5ed09e26852d3f04272cb4c",
-      "ref": "6b27de4c",
+      "sha": "6a5b6779ba5a7834b2dfb6a1ca0391d59062d022",
+      "ref": "6a5b6779",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -229,7 +229,7 @@
       "purpose": "宿主与页面之间的装载/卸载/通道/故障消息形状。装载实现细节（作者一般经构建桥间接使用，不直接记忆桥接名）；每 webview 资源独立授权，不复用另一页 URI。",
       "semantics": {
         "lifecycle": "装载指令携带代次；卸载结果区分 not-loaded / stale-generation / already-released；样式逐条独立装载互不牵连。",
-        "errors": "五种装载失败原因：already-loaded / script-load-failed / identity-mismatch / no-factory-registered / factory-error（工厂同步异常按故障释放全部注册）。"
+        "errors": "五种装载失败原因：already-loaded / script-load-failed / identity-mismatch / no-factory-registered / factory-error（工厂同步异常与 async 工厂 rejection 同归因：按故障释放全部注册并整代次回滚，rejection 迟到则静默丢弃）。"
       },
       "signatures": [
         {
