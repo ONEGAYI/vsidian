@@ -84,6 +84,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **已知边界（重要）**：live 编辑器的 markdown 语法树是内核私有的增量解析，不经 `@codemirror/language` 的 language facet 装配——`syntaxTree()` 在 live 编辑器状态上**恒返回未解析空树**。行类型判定（代码块/frontmatter/表格等）类需求不能依赖本入口，等待平台级树查询能力（另行评估）。
 - **组件数据目录**（#404）：`ctx.storage` 提供安装目录外的隔离可写目录（`uri()` 显示/同步配置用；`<vsidian globalStorage>/addons/<你的组件 ID>/`）。富结构数据（规则对象、含正则与优先级的 JSON）归这里读写，不塞设置存储（一层嵌套边界）；相对路径用正斜杠，越界形态（`..`、绝对路径、反斜杠）一律 `invalid-path` 拒绝；单文件上限 8MB。`onDidChangeFile(callback)` 监听外部变化——回调收 `(relativePath, kind)`，`kind` 为 `'change'`（改写或新建）或 `'delete'`（删除），同步工具改写/新建规则文件后自动重载；停用/故障/卸载不删数据（随 Vsidian 本体卸载清除，重装组件数据仍在）。页面侧组件代码经自己的 channel topic 桥接宿主读写。
 - **动态代码（`new Function` / `eval`）不可用**：附加组件页面的 CSP 由平台配置且不含 `unsafe-eval`（`'wasm-unsafe-eval'` 仅覆盖 WebAssembly）——动态构造的替换逻辑在两个 webview 都会被 CSP 引擎拦截，且平台**不计划**为此放行。等价能力：替换函数写成组件代码内的真函数，规则文件只存声明性数据与函数引用（预注册变换函数表，评估见 [CSP 探针](../research/addon-csp-dynamic-eval-probe.md)，#405）。
+- **视图身份反查（#426，实验）**：`sdk.experimental.viewIdentity.instanceIdOf(view)` 把 CM6 `EditorView` 反查为 views 面实例 ID（keymap/扩展回调消费；非平台实例返回 null）——清单声明 `experimental: { viewIdentity: '^1.0.0' }`，详见 §4.2。
 - **标题折叠入口（#410，实验）**：`sdk.experimental.headingFold` 提供折叠区间查询与命令——方法按 `views` 面实例 ID 寻址（`folds(instanceId)` 有效折叠派生视图、`foldable(instanceId)` 可折叠全集；span 形状 `{ key, level, hideFrom, hideTo }`，LF 偏移、不含文本摘要）。命令面 `apply(instanceId, operation, options?)` 五操作（`fold` / `unfold` / `toggle` 选区驱动——先经 `views` 面 `setSelection` 定位；`foldAll` 可 `{ upToLevel }` 参数化、`unfoldAll` 全清）与 `foldAt` / `unfoldAt(instanceId, keys)` 按区间键批量组合（键来自查询结果，脱靶键静默忽略）。**Live-only**：reading 态与 hover 只读视图拒绝 `read-only`，设置页不提供该入口；折叠是视图态（零写回、不进撤销栈、不跨会话），编程触发与用户触发同链路。使用须在清单声明 `experimental: { headingFold: '^1.0.0' }`。
 - 装载器核对入口身份后调用工厂注入 SDK；组件只登记安装目录内的相对入口与资源子目录，越界路径被资源服务拒绝。
 - 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol) 与 [`heading-fold-experimental`](api-reference.md#heading-fold-experimental) 条目。
@@ -110,9 +111,88 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **命名空间**：命令/菜单/按钮/面板的公开 ID 由平台注入 `<addonId>.<localId>`（局部 ID 禁点号）；不存在覆写、隐藏或接管内置菜单项的入口。
 - **按键拦截与优先级**（#402，实验入口契约）：经 `registerExtension` 挂 CM6 keymap 有两层位置——**普通 keymap**（扩展槽为平台扩展数组末位，平台 Tab 三段/列表续行等情境链先试，addon keymap 在平台不处理时落空接手，适合 Tabout 兜底类）与**抢先层**（用 `Prec.high` 包裹——高于平台普通键位，可替代平台处理如智能退格；返回 `false` 即落穿平台链，透传语义）。**保留键面不可越过**：撤销/重做（`Mod-z` / `Shift-Mod-z` / `Mod-y`）是 `Prec.highest` 的平台保留键闸（撤销栈归宿主文本管线），addon 即便用 `Prec.highest` 也抢不掉（同为 highest 时平台闸在扩展序上先注册、先者先匹配）；Esc 与宿主级快捷键（`Ctrl+P` 等命令面板键不经编辑器）同理不开放抢先。多组件同层按键按装载顺序仲裁（先装载先试）；逐项关闭=停用组件（实验层 keymap 不进统一快捷键管理，稳定化路线另行设计）。
 - **标题折叠**（#410，实验入口）：查询只读派生视图（原始键集不对外）；命令选区驱动三操作与全文档两操作共用用户触发执行体（effect 直驱）；`upToLevel` 仅 `foldAll` 接受（1–6 整数），其他操作携带即 `invalid-request`。
+- **视图身份与扩展槽**（#426/#427/#428，契约）：扩展槽仅装配主正文 Live 实例；view → instanceId 反查走 `experimental.viewIdentity`；命令回调携带目标视图句柄——完整条款与移植换算见 §4。
 - **行为链触发面**（#399/#400/#401）：普通键入（`input.type`）与删除白名单（`delete.backward` / `forward` / `selection` / `cut` / `line`——`delete.dedent` 属缩进命令族不纳入）驱动；IME 候选期不驱动，**组合定稿驱动一次**（`userEvent='input.type.compose'`、`inputText` 为净定稿文本；取消/空白格组合/代码上下文不驱动）。上下文 `inputText` 为插入侧净文本；`replaced` 携带替换/删除侧（键入替换选区 = 被替换内容，delete = 被删文本，事务前 LF 坐标，IME 定稿恒 null）；`docUri` 为当前目标文档 URI（多视图语义：embed 触发时是引用目标的 URI）。
 
-## 4. 消费样例入口
+## 4. 视图身份与扩展槽（契约）
+
+本节是跨六组能力的横向契约：视图实例如何被识别、扩展装配到哪些实例、以及移植 Obsidian 插件时的换算口径。变更这些条款视为契约演进（声明面版本 + 迁移说明），不得顺手改。
+
+### 4.1 扩展槽装配范围（显式契约）
+
+`sdk.registerExtension` 登记的 CM6 扩展**仅装配到主正文 Live 实例**（装载器聚合后经主正文控制器的附加组件 Compartment 槽下发）；嵌入（embed）与悬停（hover）视图不经装配——组件扩展在这些实例上不存在。
+
+- 这意味着：keymap 等 ViewPlugin 回调当前只在主正文触发；但**不要据此把「回调的 view 一定是主正文」写成组件逻辑**——装配范围是平台实现契约，若未来扩展槽装配到更多实例，该推定会静默失效。需要实例身份时一律走 4.2 的反查面。
+- 变更约束：装配范围变化（例如未来把扩展槽装到嵌入实例）属于实验入口 `cm6` 的语义变更，须随入口版本声明与迁移说明显式演进，组件会得到版本不兼容信号而不是静默行为漂移。
+
+### 4.2 视图身份反查（experimental.viewIdentity）
+
+keymap / 扩展回调拿到的是 CM6 `EditorView`，而按实例寻址的 API（`experimental.headingFold` 的 folds / foldable / apply 等）需要 views 面实例 ID。反查面补上这段换算：
+
+```ts
+defineAddonPage('publisher.my-addon', (sdk) => {
+  const identity = sdk.experimental.viewIdentity
+  sdk.registerExtension(keymap.of([{
+    key: 'Enter',
+    run: (view) => {
+      // 回调 view → 实例 ID（'main' 或 'embed:<hostId>'）；非平台实例 null
+      const instanceId = identity?.instanceIdOf(view)
+      if (instanceId === null || instanceId === undefined) return false
+      const folds = sdk.experimental.headingFold?.folds(instanceId)
+      // ...
+      return true
+    },
+  }]))
+})
+```
+
+- 清单声明：`experimental: { viewIdentity: '^1.0.0', headingFold: '^1.0.0' }`（样例同时消费折叠入口，两入口都须声明；与其他实验入口同规则）。
+- 身份由平台在实例注册进视图注册表时写入其编辑器状态；实例销毁即随状态消亡。未装配身份的 view 返回 `null`——组件据此自行降级。
+- `instanceIdOf` 为闭包实现，无 `this` 依赖（解构引用安全，有单测钉住）；不过通用消费仍建议按 4.6 的接收者绑定口径书写。
+
+### 4.3 命令回调的目标视图句柄
+
+`sdk.commands.register` 的回调**携带执行时刻的目标视图句柄**：
+
+```ts
+sdk.commands?.register({ id: 'format', title: '格式化', mode: 'live', writes: true }, (target) => {
+  if (!target) return            // 无活动视图（罕见）
+  if (!target.info.editable) return  // reading 态等只读目标
+  void target.editor.applyEdits({ /* ... */ })
+})
+```
+
+- 解析口径：焦点在嵌入内部 Live → 该实例句柄；否则主正文；无活动视图 `null`。与界面面按钮回调（`onClick(target)`）同一解析。
+- 组件侧不再需要 `document.activeElement` 焦点探针与「焦点视图不在登记表即拒绝」的防御链——平台保证句柄即命令语义的目标文档（在引用 B 中编辑不会误写父 A）。
+
+### 4.4 折叠查询的调用成本
+
+`headingFold.folds / foldable` 共享同一文档版本的派生缓存：同一版本内重复调用是 O(标题数) 的过滤，不做全文档重扫；文档编辑后的首次调用会重派生一次（与平台折叠箭头指示器共用）。**按键热路径可以直接消费，无需自建「行门槛」节流**。返回值为逐项拷贝，组件侧可自由持有与修改。
+
+### 4.5 hideTo 与 Obsidian 上游的换算
+
+`hideTo` 采用**下一标题行首**口径（换行符之后）；Obsidian / CM5 上游的折叠终点在末行**行尾**（换行符之前）——同一物理间隙的两侧。移植换算：
+
+| 场景 | 上游行尾口径 |
+| --- | --- |
+| 区间被下一标题截断（常态） | `hideTo - 1`（回退一个分隔换行） |
+| 折到文档末尾、文档以换行结尾 | `hideTo - 1`（尾随换行属隐藏区） |
+| 折到文档末尾、无尾随换行 | `hideTo`（两者都等于文档长度，无换行可回退） |
+
+判断式：`hideTo === doc.length && text[doc.length - 1] !== '
+'` 时不减一，其余减一。反向（把上游行尾换成本平台口径）对称加一。`hideFrom` 两侧口径一致（标题块行尾），无需换算。
+
+### 4.6 SDK 方法的接收者绑定
+
+调用 SDK 各面方法须**保持接收者绑定**：写 `sdk.views.list()`，不要解构后裸传引用（`const list = sdk.views.list; list()`）。平台保留以对象方法 + `this` 实现各面的自由；当前各面实现为闭包函数（解构实测可用，`viewIdentity.instanceIdOf` 已有单测钉住），但**不构成兼容承诺**——组件侧统一按接收者绑定或箭头包装书写最稳。
+
+### 4.7 默认绑定的保留 Tab
+
+命令**默认绑定**中，**裸 Tab 与 Shift+Tab 恒被拒绝**（注册期 `tab-forbidden`）：它们属于平台情境输入固定链（围栏越界 → 表格导航 → 行缩进），任何命令绑定都会破坏该链。**ctrl / alt / meta + Tab（可再叠加 shift）放行**——它们不参与情境链。注意宿主（如 VSCode 自身的标签切换）或操作系统可能占用个别修饰组合，注册成功不保证按键事件可达，选用前先在目标环境实测。
+
+已知边界：**用户绑定通道（设置页键位捕获与存储）现状不拦截保留 Tab 段**——`tab-forbidden` 只存在于注册期默认绑定校验。是否为用户绑定补同款拦截另行评估（平台已知缺口，组件作者不应依赖该缺口给默认绑定之外的使用路径绑定裸 Tab/Shift+Tab）。
+
+## 5. 消费样例入口
 
 主仓库的测试夹具是当前最完整的消费样例（输入、渲染、界面三类及组合），全部经公开路径消费、不引用内部控制器：
 
@@ -132,7 +212,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 
 **独立消费样例（T15，2026-10-08 起）**：`test/examples/` 另有三套完整独立扩展工程（输入/渲染/界面——`input-behavior`、`renderer`、`ui-command`），只使用公开 SDK、可独立构建，是「从零写一个组件」的最佳参考（比测试夹具更贴近真实业务形态：无短轮询驱动协议、有自己的设置与 i18n 字典、共享构建脚本与产物扫描）。构建与复制清单见 [test/examples/README](../../test/examples/README.md)。
 
-## 5. 调试
+## 6. 调试
 
 调试复用 VSCode 工具，不另建开发者控制台：
 
@@ -141,14 +221,14 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **安装态日志**：写入 VSCode 输出通道，标明组件 ID、出错阶段与原因。
 - **组件状态**：Vsidian 设置页「附加组件」分页展示启用偏好、兼容、装载与故障状态，并提供手动重试；故障暂停的组件保留启用偏好。
 
-## 6. 版本、兼容与迁移
+## 7. 版本、兼容与迁移
 
 - **API 版本独立于 Vsidian 本体版本**：兼容判定只看清单 `api` 范围与宿主稳定 API 版本（当前候选 1.0.0），不因本体升级自动改变。
 - **实验入口另行声明**：`experimental.cm6`、`experimental.headingFold` 等入口可能随版本调整，不随稳定 API 弃用期限承诺；使用前必须在清单声明兼容范围。
 - **稳定移除规则**：稳定 API 确需移除时，先发布弃用说明与替代方案；从弃用版本实际发布日起，同时满足两个后续 API 次版本和 30 天才允许移除。
 - **当前状态**：全部条目为候选——发行台账（`src/shared/addonApiCatalog.ts` 的 `ADDON_API_RELEASES`）如实区分候选与已发布，只有真实发行才携带日期。迁移内容在真实发行并出现破坏性变更时补充。
 
-## 7. 文档维护入口（组件作者一般不需要）
+## 8. 文档维护入口（组件作者一般不需要）
 
 修改六组接口时的事实源与命令（详细纪律见 [AGENTS.md](../../AGENTS.md) 的附加组件条目与[规格 §7](../specs/vsidian-addons.md)）：
 

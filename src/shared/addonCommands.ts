@@ -10,14 +10,16 @@
 // 命名空间前缀由平台注入——组件传入的 id 不可能成为内置菜单 id 或另一
 // 组件的命名空间 id（localId 禁含点号，点号是命名空间分隔符）。
 //
-// Tab 通道拒绝（#125 落档铁律）：任何命令绑定 Tab 都会被 keybindingRouter
-// 先于 CM6 keymap 拦截（stopPropagation），破坏「围栏越界 → 表格导航 →
-// 行缩进」三段优先级——附加组件命令的默认绑定注册期拒绝含 Tab 的 chord。
+// 保留 Tab 段拒绝（#125 落档铁律，#427 收窄）：裸 Tab 与 Shift+Tab 属
+// 情境输入固定链（围栏越界 → 表格导航 → 行缩进），命令绑定该形态会被
+// keybindingRouter 先于 CM6 keymap 拦截（stopPropagation）破坏三段优先级
+// ——默认绑定含保留 Tab 段的 chord 注册期拒绝；ctrl/alt/meta+Tab 不参与
+// 三段链，#427 起放行（宿主/OS 占用组合不保证事件可达）。
 //
 // 拒绝面约定（沿 addonSettings 惯例）：SDK 注册拒绝用机器可辨认的
 // kebab-case reason 码（+ 英文 detail），不给最终用户界面文案——组件作者
 // 的排障文案归宿主输出通道日志（英文拼接）。
-import { normalizeChord, chordContainsTab } from './keybindings'
+import { normalizeChord, chordContainsReservedTab } from './keybindings'
 import { CONTEXT_MENU_ICON_KEYS, type MenuPredicate } from './contextMenu'
 import type { BindingMode } from './keybindings'
 
@@ -118,7 +120,7 @@ export function addonDefaultBindingsProblem(bindings: readonly string[]): AddonD
     if (normalized === null) {
       return 'invalid-chord'
     }
-    if (chordContainsTab(normalized)) {
+    if (chordContainsReservedTab(normalized)) {
       return 'tab-forbidden'
     }
   }

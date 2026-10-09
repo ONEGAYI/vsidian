@@ -9,6 +9,7 @@ import {
   AddonRegistry,
   ADDON_EXPERIMENTAL_CM6_VERSION,
   ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION,
+  ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION,
   createDefaultRegistryPorts,
   type AddonDefinition,
   type AddonRegistryHooks,
@@ -194,5 +195,38 @@ describe('重复注册与释放（hooks 联动）', () => {
     // 契约说明用例：无独立断言（行为归属 addonRuntime.test.ts
     // 「setup 抛错 → fault：注册记录保留」——register 调用不抛、记录保留）
     expect(true).toBe(true)
+  })
+})
+
+
+describe('#426 viewIdentity 实验入口（宿主侧）', () => {
+  it('生产默认端口的 viewIdentity 实验版本与发行台账一致（两处事实源防漂移）', () => {
+    const ports = createDefaultRegistryPorts(() => undefined)
+    const ledger = ADDON_API_RELEASES[0]?.experimental.find((entry) => entry.entry === 'viewIdentity')
+    expect(ports.experimental.viewIdentity).toBe(ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION)
+    expect(ledger?.version).toBe(ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION)
+  })
+
+  it('声明 viewIdentity 实验入口且范围匹配 → 兼容通过；宿主未提供时拒绝', () => {
+    const ok = new AddonRegistry({
+      apiVersion: ADDON_API_VERSION,
+      experimental: { viewIdentity: '1.0.0' },
+      officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
+      findExtension: (id) => (id === 'fixture.identity'
+        ? { packageJSON: { vsidianAddon: { manifestVersion: 1, api: '^1.0.0', experimental: { viewIdentity: '^1.0.0' } } } }
+        : undefined),
+    })
+    expect(ok.register({ id: 'fixture.identity' }, {}).ok).toBe(true)
+    const missing = new AddonRegistry({
+      apiVersion: ADDON_API_VERSION,
+      experimental: {},
+      officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
+      findExtension: (id) => (id === 'fixture.identity'
+        ? { packageJSON: { vsidianAddon: { manifestVersion: 1, api: '^1.0.0', experimental: { viewIdentity: '^1.0.0' } } } }
+        : undefined),
+    })
+    const outcome = missing.register({ id: 'fixture.identity' }, {})
+    expect(outcome.ok).toBe(false)
+    expect(!outcome.ok && outcome.reason).toBe('incompatible-api')
   })
 })

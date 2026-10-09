@@ -8,8 +8,9 @@
 // - greet（both、只读、默认 ctrl+alt+g）：计一次执行（真实键盘场景的
 //   默认绑定路由载体）；
 // - stampEntry 菜单项（挂接 insertStamp；iconKey=link 复用既有资产）；
-// - 负向注册三例（同名/局部 ID 含点/Tab 默认绑定 + 菜单 iconKey 未登记）：
-//   结局随 t10.register 挂载上报，用例断言「明确拒绝」。
+// - 负向注册（同名/局部 ID 含点/保留 Tab 默认绑定 + 菜单 iconKey 未登记）
+//   与 #427 正向样例（ctrl+tab 修饰 Tab 放行）：结局随 t10.register 挂载
+//   上报，用例分别断言「明确拒绝」与「注册成功」。
 //
 // 驱动协议（与 T06 同款短轮询）：挂载即 t10.register 上报注册结局；
 // 循环 t10.next 取指令（立即回执一条或 null，无指令小睡重试）；每条指令
@@ -17,6 +18,7 @@
 // （文本提交）/ counters（执行计数快照）。
 import { defineAddonPage } from 'vsidian-addon-sdk'
 import type { VsidianAddonPageSdk } from '../../../../src/shared/addonPage'
+import type { AddonViewHandle } from '../../../../src/shared/addonEditApi'
 
 /** 本组件声明的扩展 ID（装载器按此核对入口身份；宿主夹具 addon-t10 配对） */
 const ADDON_ID = 'vsidian-test-fixture.addon-t10'
@@ -41,6 +43,8 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
   const counters: Record<string, number> = { greet: 0, insertStamp: 0 }
   const outcomes: Record<string, unknown> = {}
   const handles: Array<() => void> = []
+  /** #427：最近一次命令回调收到的目标视图句柄信息（观察面） */
+  let lastTarget: { instanceId: string; mode: string } | null = null
 
   // ---- 正向注册：真实业务命令（文本提交经公开 views 面） ----
   const insertText = async (text: string): Promise<unknown> => {
@@ -63,11 +67,29 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     })
   }
 
+  /** #427：经回调收到的目标句柄提交（null = 无活动视图——防御性回报） */
+  const insertTextVia = async (target: AddonViewHandle | null, text: string): Promise<unknown> => {
+    if (!target) {
+      return { ok: false, reason: 'no-target-view' }
+    }
+    const snapshot = await target.editor.getSnapshot()
+    if (!snapshot.ok) {
+      return snapshot
+    }
+    return target.editor.applyEdits({
+      revision: snapshot.snapshot.revision,
+      changes: [{ offset: snapshot.snapshot.selections[0]?.head ?? 0, length: 0, text }],
+    })
+  }
+
   const stampCommand = commands.register(
     { id: 'insertStamp', title: 'T10 Stamp', mode: 'live', writes: true },
-    () => {
+    // #427：回调携带命令激活时刻的活动视图句柄——直接向 target 提交，
+    // 不再经 views.list 推定主正文（组件侧防御链拆除的正向样板）
+    (target) => {
       counters.insertStamp++
-      void insertText('T10-STAMP')
+      lastTarget = target ? { instanceId: target.info.instanceId, mode: target.info.mode } : null
+      void insertTextVia(target, 'T10-STAMP')
     },
   )
   outcomes['insertStamp'] = stampCommand.ok
@@ -77,8 +99,10 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
 
   const greetCommand = commands.register(
     { id: 'greet', title: 'T10 Greet', mode: 'both', writes: false, defaultBindings: ['ctrl+alt+g'] },
-    () => {
+    // #427：观察面——记录回调收到的目标视图句柄（counters 快照带出）
+    (target) => {
       counters.greet++
+      lastTarget = target ? { instanceId: target.info.instanceId, mode: target.info.mode } : null
     },
   )
   outcomes['greet'] = greetCommand.ok
@@ -99,11 +123,18 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
   )
   outcomes['dottedCommand'] = dottedCommand.ok ? { ok: true } : { ok: false, reason: dottedCommand.reason }
 
-  const tabCommand = commands.register(
-    { id: 'tabbed', title: 'T10 Tabbed', mode: 'both', defaultBindings: ['ctrl+tab'] },
+  // #427 起：裸 Tab / Shift+Tab 仍拒（#125 三段链），ctrl/alt/meta+Tab 放行
+  const bareTabCommand = commands.register(
+    { id: 'tabbed', title: 'T10 Tabbed', mode: 'both', defaultBindings: ['shift+tab'] },
     () => {},
   )
-  outcomes['tabCommand'] = tabCommand.ok ? { ok: true } : { ok: false, reason: tabCommand.reason }
+  outcomes['bareTabCommand'] = bareTabCommand.ok ? { ok: true } : { ok: false, reason: bareTabCommand.reason }
+
+  const modTabCommand = commands.register(
+    { id: 'tabbed-mod', title: 'T10 Mod Tabbed', mode: 'both', defaultBindings: ['ctrl+tab'] },
+    () => {},
+  )
+  outcomes['modTabCommand'] = modTabCommand.ok ? { ok: true } : { ok: false, reason: modTabCommand.reason }
 
   // ---- 菜单注册：挂接命令（执行键 = 命名空间命令 ID） ----
   const menuOutcome = menus.registerItem({
@@ -129,7 +160,7 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
       case 'stamp':
         return insertText('T10-STAMP')
       case 'counters':
-        return { ...counters }
+        return { ...counters, lastTarget }
       default:
         return { ok: false, reason: `unknown-op:${op}` }
     }

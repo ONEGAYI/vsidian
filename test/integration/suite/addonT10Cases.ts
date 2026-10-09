@@ -186,8 +186,10 @@ export const addonT10Cases: Array<[string, () => Promise<void>]> = [
       `同名注册应明确拒绝（${JSON.stringify(outcomes['dupCommand'])}）`)
     assert(outcomes['dottedCommand']?.ok === false && String(outcomes['dottedCommand']!.reason).includes('dot'),
       `含点局部 ID 应明确拒绝（${JSON.stringify(outcomes['dottedCommand'])}）`)
-    assert(outcomes['tabCommand']?.ok === false && String(outcomes['tabCommand']!.reason).includes('tab-forbidden'),
-      `Tab 默认绑定应明确拒绝（${JSON.stringify(outcomes['tabCommand'])}）`)
+    // #427：保留 Tab 段（裸 Tab/Shift+Tab）仍拒，ctrl+tab 修饰形态放行
+    assert(outcomes['bareTabCommand']?.ok === false && String(outcomes['bareTabCommand']!.reason).includes('tab-forbidden'),
+      `保留 Tab 默认绑定应明确拒绝（${JSON.stringify(outcomes['bareTabCommand'])}）`)
+    assert(outcomes['modTabCommand']?.ok === true, `修饰 Tab（ctrl+tab）默认绑定应放行（${JSON.stringify(outcomes['modTabCommand'])}）`)
     assert(outcomes['badIconMenu']?.ok === false && String(outcomes['badIconMenu']!.reason).includes('icon-key'),
       `未登记 iconKey 应明确拒绝（${JSON.stringify(outcomes['badIconMenu'])}）`)
 
@@ -201,9 +203,10 @@ export const addonT10Cases: Array<[string, () => Promise<void>]> = [
     assert(greet!.mode === 'both' && greet!.writes === false && greet!.defaults.includes('ctrl+alt+g'),
       `目录载荷应保真（${JSON.stringify(greet)}）`)
 
-    // 负向拒绝不进目录（tabbed/dotted/dup 无条目）
-    assert(!catalog.some((entry) => entry.commandId.includes('tabbed') || entry.commandId.includes('evil')),
+    // 负向拒绝不进目录（被拒的 tabbed/dotted/dup 无条目；放行的 tabbed-mod 在场）
+    assert(!catalog.some((entry) => entry.commandId.endsWith('.tabbed') || entry.commandId.includes('evil')),
       '被拒注册不得进宿主命令目录')
+    assert(catalog.some((entry) => entry.commandId === `${ADDON_ID}.tabbed-mod`), '放行的修饰 Tab 命令应进目录')
     await closeAllEditors()
     console.log('[#359] 命令/菜单注册上报与负向拒绝通过')
   }],

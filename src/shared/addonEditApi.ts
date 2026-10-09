@@ -133,6 +133,16 @@ export interface AddonViewsFacet {
   onDisposed(callback: (info: AddonViewInfo) => void): () => void
 }
 
+/** #426 视图身份反查面（experimental.viewIdentity 的内容）：CM6
+ *  EditorView → 平台实例 ID。keymap/扩展回调拿到的是 view，按 ID 寻址
+ *  的 API（headingFold 等）经此换算——不再依赖「扩展槽仅挂主正文」的
+ *  装配范围推定。方法为闭包实现（无 this 依赖，解构裸传安全） */
+export interface AddonViewIdentityFacet {
+  /** 反查实例 ID：装配在平台 Live 实例（main/embed）上的 view 返回其
+   *  views 面句柄 ID；未装配身份的 view（非平台实例或尚未注册）null */
+  instanceIdOf(view: import('@codemirror/view').EditorView): string | null
+}
+
 // ---- 守卫（SDK 请求入口与测试共用；非法请求不进入编辑管线） ----
 
 function isRecord(value: unknown): value is Record<string, unknown> {

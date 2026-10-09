@@ -25,7 +25,7 @@ import {
   findConflictedOperationIds,
   resolveKeybinding,
   sanitizeStoredOverrides,
-  chordContainsTab,
+  chordContainsReservedTab,
   __resetRuntimeOperationsForTest,
 } from '../../src/shared/keybindings'
 import {
@@ -79,10 +79,18 @@ describe('T10 命名空间与局部 ID 校验', () => {
 })
 
 describe('T10 默认绑定校验', () => {
-  it('Tab 通道被拒（含单段 Tab 与 chord 段 Tab）——#125 三段优先级铁律', () => {
+  it('无修饰 Tab 通道被拒（裸 Tab 与 Shift+Tab，含 chord 段）——#125 三段优先级铁律', () => {
     expect(addonDefaultBindingsProblem(['tab'])).toBe('tab-forbidden')
-    expect(addonDefaultBindingsProblem(['ctrl+tab'])).toBe('tab-forbidden')
+    expect(addonDefaultBindingsProblem(['shift+tab'])).toBe('tab-forbidden')
     expect(addonDefaultBindingsProblem(['ctrl+k', 'tab'])).toBe('tab-forbidden')
+    expect(addonDefaultBindingsProblem(['ctrl+k shift+tab'])).toBe('tab-forbidden')
+  })
+
+  it('修饰 Tab（ctrl/alt/meta+Tab）放行——不参与 #125 三段情境链（#427）', () => {
+    expect(addonDefaultBindingsProblem(['ctrl+tab'])).toBeNull()
+    expect(addonDefaultBindingsProblem(['alt+tab'])).toBeNull()
+    expect(addonDefaultBindingsProblem(['meta+tab'])).toBeNull()
+    expect(addonDefaultBindingsProblem(['ctrl+shift+tab'])).toBeNull()
   })
 
   it('非法 chord 被拒；合法绑定（含默认未绑定 = 空数组）通过', () => {
@@ -91,12 +99,16 @@ describe('T10 默认绑定校验', () => {
     expect(addonDefaultBindingsProblem(['ctrl+alt+s', 'ctrl+k ctrl+j'])).toBeNull()
   })
 
-  it('chordContainsTab 识别 Tab 本体（修饰键组合中的 tab 键）', () => {
-    expect(chordContainsTab('tab')).toBe(true)
-    expect(chordContainsTab('ctrl+tab')).toBe(true)
-    expect(chordContainsTab('ctrl+k tab')).toBe(true)
-    expect(chordContainsTab('ctrl+k')).toBe(false)
-    expect(chordContainsTab('ctrl+shift+t')).toBe(false)
+  it('chordContainsReservedTab 只认无 ctrl/alt/meta 修饰的 Tab 段（保留给情境链的形态）', () => {
+    expect(chordContainsReservedTab('tab')).toBe(true)
+    expect(chordContainsReservedTab('shift+tab')).toBe(true)
+    expect(chordContainsReservedTab('ctrl+k tab')).toBe(true)
+    expect(chordContainsReservedTab('ctrl+tab')).toBe(false)
+    expect(chordContainsReservedTab('alt+tab')).toBe(false)
+    expect(chordContainsReservedTab('meta+tab')).toBe(false)
+    expect(chordContainsReservedTab('ctrl+shift+tab')).toBe(false)
+    expect(chordContainsReservedTab('ctrl+k')).toBe(false)
+    expect(chordContainsReservedTab('ctrl+shift+t')).toBe(false)
   })
 })
 
