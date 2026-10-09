@@ -65,6 +65,11 @@ export function refreshOnDemandControlLocale(root: ParentNode): void {
     t(btn.classList.contains(FM_CARD_CLASS_NAMES.foldCollapsed)
       ? 'frontmatter.expand'
       : 'frontmatter.collapse'))
+  // fm 降级源码态轻提示（FmDegradedHintWidget.toDOM 固化；#424）：文本
+  // 节点就地改写（widget eq 恒成立，物化 DOM 不随换包重建）
+  for (const el of root.querySelectorAll<HTMLElement>(`.${FM_CARD_CLASS_NAMES.degradedHint}`)) {
+    el.textContent = t('frontmatter.degradedHint')
+  }
   // 标题折叠 UI（#414 T03，gutter 箭头与省略号占位）：两态词按折叠修饰类
   // 判定（折叠态提示「展开」）；aria-expanded 与键位徽章属性（data-tooltip-
   // keys）语言无关，不动

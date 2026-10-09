@@ -134,4 +134,15 @@ describe('frontmatter 表格卡片 CSS 契约（#140 Popover 改版）', () => {
     expect(rule('.vsidian-reading-frontmatter .vsidian-fm-table.vsidian-fm-folded .vsidian-fm-row'))
       .toMatch(/display:\s*none/)
   })
+
+  it('降级源码态轻提示：浅色小字、非交互（#424：pointer-events 穿透、不可选、不可聚焦）', () => {
+    const hint = rule('#app .vsidian-fm-degraded-hint')
+    // 鼠标穿透（点击落到下方编辑区）
+    expect(hint).toMatch(/pointer-events:\s*none/)
+    // 不可选区、不可聚焦（纯装饰，无 tabindex 无交互元素）
+    expect(hint).toMatch(/user-select:\s*none/)
+    // 浅色小字（次级说明文字：descriptionForeground + 小号字）
+    expect(hint).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    expect(hint).toMatch(/font-size:\s*11px/)
+  })
 })

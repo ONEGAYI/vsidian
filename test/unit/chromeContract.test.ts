@@ -70,6 +70,7 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'live-code-card-edge', // 首末行修饰（首行由头部覆盖，CSS 契约钉）
   'live-fm-popover', // #140 Popover 改版：属性编辑浮层（打开时挂载 body，开闭与写回由浏览器套件验证）
   'live-fm-fold', // 2026-10 卡片折叠：chevron 两态常驻但收起态形态由行为切换，折叠/热区/浮层联动由浏览器与集成套件验证
+  'live-fm-degraded-hint', // #424 降级源码态轻提示：依赖文档形态（fm 成型/降级互斥、文档首唯一），探针 fixture 为成型头区不可静态命中；浏览器 frontmatterTable 断可见性/穿透/左对齐
   // #414 T03 标题折叠 UI：箭头显隐（悬停武装/折叠常显）与省略号占位是
   // 行为驱动形态——headingFoldCssContract 静态钉规则、浏览器 headingFoldUi
   // 绘制层断言显隐与点击

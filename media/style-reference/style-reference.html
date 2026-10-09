@@ -1286,7 +1286,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（132 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（133 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -2031,7 +2031,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元：webview 源码不再含该类发射（迁移历史断言）</p>
       <p class="life">引入：#4（2026-09-23） · 移除：#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）</p>
     </article>
-    <h2>界面域 · frontmatter 表格卡片（6）</h2>
+    <h2>界面域 · frontmatter 表格卡片（7）</h2>
     <article class="entry" id="live-fm-card-line">
       <h3><code>.vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰 / -folded 收起态首行修饰）</code><span class="eid">live-fm-card-line</span></h3>
       <p class="purpose">frontmatter 只读表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载左右边线（行区透明，撞色边界感由边框与标题栏微亮条承担），首尾围栏行补横线并做圆角修饰，拼装为完整边框圆角卡片。折叠收起时键值/项/杂项行连同闭合行整块隐藏，首行改携 -folded 修饰兼任卡片底边（补底边框与四角圆角）。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。</p>
@@ -2113,6 +2113,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>.vsidian-fm-fold-collapsed svg { transform: rotate(-90deg); }</code></pre>
       <p class="verify">验证：单元 frontmatterInteraction / readingFrontmatterFold：折叠交互契约；浏览器 frontmatterTable 套件（真实鼠标折叠/展开/热区/浮层联动）；集成 frontmatter 卡片折叠用例（paint.fm 绘制层探针）</p>
       <p class="life">引入：2026-10（折叠批次）</p>
+    </article>
+    <article class="entry" id="live-fm-degraded-hint">
+      <h3><code>.vsidian-fm-degraded-hint（降级源码态轻提示文字块）</code><span class="eid">live-fm-degraded-hint</span></h3>
+      <p class="purpose">降级源码态 frontmatter 的轻提示（#424）：首围栏行 `---` 上方一行浅色小字（descriptionForeground、11px），说明头区因复杂 YAML（嵌套映射、flow map 等一期不支持形态）以源码呈现——消解「为什么没变表格卡片」的困惑（#421 触发链）。纯装饰硬约束（用户观感规格）：block widget 挂文档起点、zero-width 不参与文本模型（坐标零影响、光标不可停靠、不参与选区）；无交互元素不可聚焦；pointer-events:none 鼠标穿透；与 .cm-line 同容器同 padding，天然与 `---` 线左对齐。文案 frontmatter.degradedHint 经 localeOnDemand 扫描就地重刷。成型卡片态与无头区不发射。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：降级源码态常驻（成型/无头区不发射）；不随光标位置变化。</p>
+      <p class="obsidian">Obsidian 对应：Obsidian 对复杂类型仅劝退源码模式、无对应提示（本条为超集）</p>
+
+      <p class="dom">DOM 关系：live：首围栏行上方 block widget 内容（cm-content 下与 .cm-line 同级）。</p>
+      <pre><code>#app .vsidian-fm-degraded-hint {
+  pointer-events: none;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations（降级发射/成型与无头区不发射/zero-width）+ frontmatterPaintCssContract（穿透与不可选规则）+ localeRefreshContract（换词）；浏览器 frontmatterTable 套件（真实渲染可见性、computed pointer-events、与 `---` 左对齐、点击穿透）——探针文档为成型头区（文档首唯一，成型/降级互斥），降态类不进静态探针表（chromeContract 覆盖边界诚实声明），浏览器路径验证（live-fm-popover 交互态先例）</p>
+      <p class="life">引入：#424（2026-10-09）</p>
     </article>
     <h2>界面域 · 正文右键菜单（1）</h2>
     <article class="entry" id="context-menu">
