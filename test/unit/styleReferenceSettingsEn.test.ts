@@ -174,8 +174,8 @@ describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
   it('全部类目遍历渲染（含翻页）：双语字段段落无汉字，且全部条目被遍历到', () => {
     const parent = mountDetail('overview')
     const catButtons = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-cat')]
-    // 25 = content 10 + chrome 15（#236 起新增 find-panel 类目，#292 起新增 loading 类目，#300 起新增 tooltip 类目，#376 起新增 wikilink-suggest 类目）
-    expect(catButtons.length).toBe(28)
+    // 29 = content 10 + chrome 19（#236 find-panel、#292 loading、#300 tooltip、#376 wikilink-suggest、#414 heading-fold 各批次新增）
+    expect(catButtons.length).toBe(29)
     const seen = new Set<string>()
     for (const cat of catButtons) {
       const catId = cat.dataset['category']!

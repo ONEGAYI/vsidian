@@ -17,6 +17,13 @@ import type {
   AddonViewMode,
 } from '../shared/addonEditApi'
 import { isAddonApplyEditsRequest } from '../shared/addonEditApi'
+import type {
+  AddonHeadingFoldApplyOptions,
+  AddonHeadingFoldCommandResult,
+  AddonHeadingFoldOperation,
+  AddonHeadingFoldQueryResult,
+} from '../shared/addonFoldApi'
+import { isAddonHeadingFoldApplyOptions, isAddonHeadingFoldKeyList, isAddonHeadingFoldOperation } from '../shared/addonFoldApi'
 import type { EditOriginMeta } from '../shared/editOrigin'
 import type { LiveEditorInstance } from './liveInstance'
 
@@ -52,6 +59,21 @@ export interface AddonViewsRuntime {
   }): Promise<AddonApplyEditsResult>
   setSelectionOf(instanceId: string, ranges: AddonSelectionRange[]): boolean
   revealOf(instanceId: string, offset: number): boolean
+  /** #410 折叠查询（Live-only：非 Live 视图拒绝，实例侧消费 headingFold
+   *  纯函数族——不复制派生逻辑） */
+  headingFoldsOf(instanceId: string): AddonHeadingFoldQueryResult
+  /** #410 可折叠区间全集（同上口径） */
+  foldableHeadingSpansOf(instanceId: string): AddonHeadingFoldQueryResult
+  /** #410 五操作执行（直传本体执行体；守卫失败 invalid-request） */
+  applyHeadingFoldOf(
+    instanceId: string,
+    operation: AddonHeadingFoldOperation,
+    options?: AddonHeadingFoldApplyOptions,
+  ): AddonHeadingFoldCommandResult
+  /** #410 按区间键折叠（批量组合） */
+  foldAtOf(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult
+  /** #410 按区间键展开（批量组合） */
+  unfoldAtOf(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult
   onCreated(callback: (info: AddonViewInfo) => void): () => void
   onDisposed(callback: (info: AddonViewInfo) => void): () => void
 }
@@ -180,6 +202,89 @@ export class AddonViewRegistry implements AddonViewsRuntime {
       return false
     }
     return live.instance.revealForAddon(offset)
+  }
+
+  // ---- #410 标题折叠面（experimental.headingFold 的注册表分派） ----
+  // 拒绝分层对齐 applyEdits：实例不存在 view-disposed；非 Live（reading
+  // 态或 hover 只读登记）read-only；请求形状非法 invalid-request——
+  // 实例侧（liveInstance.*ForAddon）只认 view 在场。
+
+  headingFoldsOf(instanceId: string): AddonHeadingFoldQueryResult {
+    const live = this.liveViews.get(instanceId)
+    if (!live) {
+      return this.readonlyViews.has(instanceId)
+        ? { ok: false, reason: 'read-only' }
+        : { ok: false, reason: 'view-disposed' }
+    }
+    if (live.mode() !== 'live') {
+      return { ok: false, reason: 'read-only' }
+    }
+    const spans = live.instance.headingFoldsForAddon()
+    return spans === null ? { ok: false, reason: 'view-disposed' } : { ok: true, spans }
+  }
+
+  foldableHeadingSpansOf(instanceId: string): AddonHeadingFoldQueryResult {
+    const live = this.liveViews.get(instanceId)
+    if (!live) {
+      return this.readonlyViews.has(instanceId)
+        ? { ok: false, reason: 'read-only' }
+        : { ok: false, reason: 'view-disposed' }
+    }
+    if (live.mode() !== 'live') {
+      return { ok: false, reason: 'read-only' }
+    }
+    const spans = live.instance.foldableHeadingSpansForAddon()
+    return spans === null ? { ok: false, reason: 'view-disposed' } : { ok: true, spans }
+  }
+
+  applyHeadingFoldOf(
+    instanceId: string,
+    operation: AddonHeadingFoldOperation,
+    options?: AddonHeadingFoldApplyOptions,
+  ): AddonHeadingFoldCommandResult {
+    const live = this.liveViews.get(instanceId)
+    if (!live) {
+      return this.readonlyViews.has(instanceId)
+        ? { ok: false, reason: 'read-only' }
+        : { ok: false, reason: 'view-disposed' }
+    }
+    if (live.mode() !== 'live') {
+      return { ok: false, reason: 'read-only' }
+    }
+    // upToLevel 仅 foldAll 接受（其余操作携带即形状非法——契约窄而明确）
+    if (options !== undefined && (operation !== 'foldAll' || !isAddonHeadingFoldApplyOptions(options))) {
+      return { ok: false, reason: 'invalid-request' }
+    }
+    if (!isAddonHeadingFoldOperation(operation)) {
+      return { ok: false, reason: 'invalid-request' }
+    }
+    const outcome = live.instance.applyHeadingFoldForAddon(operation, options)
+    return outcome === 'view-disposed' ? { ok: false, reason: 'view-disposed' } : { ok: true, applied: outcome.applied }
+  }
+
+  foldAtOf(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult {
+    return this.foldKeysOf(instanceId, keys, true)
+  }
+
+  unfoldAtOf(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult {
+    return this.foldKeysOf(instanceId, keys, false)
+  }
+
+  private foldKeysOf(instanceId: string, keys: readonly number[], fold: boolean): AddonHeadingFoldCommandResult {
+    const live = this.liveViews.get(instanceId)
+    if (!live) {
+      return this.readonlyViews.has(instanceId)
+        ? { ok: false, reason: 'read-only' }
+        : { ok: false, reason: 'view-disposed' }
+    }
+    if (live.mode() !== 'live') {
+      return { ok: false, reason: 'read-only' }
+    }
+    if (!isAddonHeadingFoldKeyList(keys)) {
+      return { ok: false, reason: 'invalid-request' }
+    }
+    const outcome = live.instance.foldAtForAddon(keys, fold)
+    return outcome === 'view-disposed' ? { ok: false, reason: 'view-disposed' } : { ok: true, applied: outcome.applied }
   }
 
   onCreated(callback: (info: AddonViewInfo) => void): () => void {

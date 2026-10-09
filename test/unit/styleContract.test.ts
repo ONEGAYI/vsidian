@@ -391,6 +391,8 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   toast: 26,
   'rich-paste': 2,
   'wikilink-suggest': 5,
+  // #414 T03 标题折叠 UI：箭头/悬停/省略号选择器 5 + 观感变量 4
+  'heading-fold': 9,
 }
 
 describe('styleContract 类目体系（#145）', () => {

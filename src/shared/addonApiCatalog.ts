@@ -523,6 +523,38 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#349（V02）、#351（T02 登记候选版本）、#406（language 语法树子集）',
   },
   {
+    id: 'heading-fold-experimental',
+    group: 'page-sdk',
+    title: '实验入口：标题折叠查询与命令（experimental.headingFold）',
+    layer: 'experimental',
+    experimentalEntry: 'headingFold',
+    endpoints: ['editor-page'],
+    signatures: [
+      {
+        module: 'src/shared/addonFoldApi.ts',
+        symbols: [
+          'AddonHeadingFoldSpan',
+          'AddonHeadingFoldOperation',
+          'AddonHeadingFoldApplyOptions',
+          'AddonHeadingFoldRejection',
+          'AddonHeadingFoldQueryResult',
+          'AddonHeadingFoldCommandResult',
+          'AddonHeadingFoldFacet',
+        ],
+      },
+    ],
+    purpose:
+      '页面 SDK 的标题折叠实验入口（sdk.experimental.headingFold，#410）：按 views 面实例 ID 查询有效折叠区间（folds）与可折叠区间全集（foldable），并执行折叠命令（apply 五操作、foldAt/unfoldAt 按区间键批量组合、foldAll 可 upToLevel 参数化）。折叠本体随 #409 落地（Live 实例的 CM6 StateField）；查询消费本体派生视图（不复制派生逻辑），命令直传本体五操作执行体——编程触发与用户触发同链路（effect 直驱，无 DOM-only 路径）。',
+    semantics: {
+      modes: 'Live-only（#409 定案阅读模式不开放）：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址（main / embed occurrence 键），折叠态随实例独立。',
+      coordinates: '全文 UTF-16 code unit 偏移、页面全程 LF。span = { key（标题起始行行首）、level（ATX 1–6 / Setext 1–2）、hideFrom（标题块行尾）、hideTo（下一级别 ≤ 自身的标题行首或文档末尾）}；序列化面不含标题文本摘要（大文档保持精简——作者可从快照 text 与 key 对应标题行自取）。',
+      lifecycle: '折叠是视图态（零写回、不 dirty、不进撤销栈、不跨会话持久化）；全文替换显式清空、编辑时键随增量映射（#409 本体语义）。原始键集不对外——folds 是「折叠键 ∩ 可折叠标题键」的有效派生视图，脱靶键经此过滤天然无行为（foldAt/unfoldAt 的脱靶键静默忽略；applied = 有效折叠区间前后变化数）。组件代次终结后的迟到调用拒绝 view-disposed。',
+      errors: '三种可辨认拒绝：view-disposed / read-only / invalid-request（upToLevel 仅 foldAll 接受且须为 1–6 整数；区间键须为非负整数）。使用前须在清单 experimental 声明 headingFold 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。',
+    },
+    verification: ['test/unit/addonFoldApi.test.ts', 'test/unit/addonHeadingFoldApi.test.ts', 'test/browser/addonHeadingFold.mjs'],
+    introduced: '#410',
+  },
+  {
     id: 'channel',
     group: 'page-sdk',
     title: '页面与宿主通道',
@@ -818,6 +850,12 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
         version: '1.1.0',
         status: 'candidate',
         note: '页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
+      },
+      {
+        entry: 'headingFold',
+        version: '1.0.0',
+        status: 'candidate',
+        note: '页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（阅读模式不开放，#409 定案）。折叠本体随 #409 落地。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
       },
     ],
   },

@@ -86,5 +86,10 @@
   "command.find.selectNext.title": "Select Next Occurrence",
   "command.find.selectPrevious.title": "Select Previous Occurrence",
   "command.find.skipCurrent.title": "Skip and Select Next Occurrence",
-  "command.find.allOccurrences.title": "Select All Occurrences"
+  "command.find.allOccurrences.title": "Select All Occurrences",
+  "command.heading.fold.title": "Fold Heading Section",
+  "command.heading.unfold.title": "Unfold Heading Section",
+  "command.heading.toggleFold.title": "Toggle Fold of Heading Section",
+  "command.heading.foldAll.title": "Fold All Heading Sections",
+  "command.heading.unfoldAll.title": "Unfold All Heading Sections"
 }

@@ -1522,6 +1522,75 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       "counterpart": "None (Vsidian wikilink suggestions)"
     }
   },
+
+  // ---- 标题折叠（heading-fold，9 条，#414 T03）----
+  "fold-gutter": {
+    "purpose": "Carrier column for the heading-fold arrow (#414 T03): a custom CM6 gutter that stays at zero width (its markers are absolutely positioned out of flow, taking no share of the .cm-gutters inline width) - hover show/hide and the collapsed-state always-on arrow cause zero layout shift, and the readable-line-width whole-group centering contract [.cm-gutters + gap + .cm-content] is preserved. With the line-number column on or off, the arrow always reaches into the existing gap between the line numbers and the body text.",
+    "dom": "Last column inside .cm-gutters (after the line-number column); its .cm-gutterElement row cells host the arrow buttons.",
+    "obsidian": {
+      "counterpart": "None (Obsidian fold controls ship with its editor theme, no public customization hook)"
+    }
+  },
+  "fold-arrow": {
+    "purpose": "Gutter fold-arrow button (#414 T03): the folding entry at the gutter position of foldable heading lines - a downward chevron (click to fold); hidden by default via visibility (no interference and not clickable until hovered, mirroring VSCode's default alwaysShowFoldControls=off), shown when hovering the editor's left edge arms the state (.vsidian-fold-hover) or always shown in the collapsed state (.vsidian-fold-arrow-collapsed). Accessibility mirrors the code-card buildFoldButton precedent: aria-label + aria-expanded + data-tooltip hover word, with the keybinding badge on the structured data-tooltip-keys channel.",
+    "states": "Unfolded: visible under the hover-armed class (downward chevron, click folds); collapsed: always visible and pointing right (-collapsed modifier, click unfolds). Show/hide goes through visibility (no layout effect).",
+    "dom": "A button inside a .vsidian-fold-gutter row cell, absolutely positioned (left: 100% reaching into the gap, vertically centered on the line block); the SVG chevron shares the code-card fold button's stroke.",
+    "obsidian": {
+      "counterpart": "None (Obsidian fold controls have no public customization hook)"
+    }
+  },
+  "fold-arrow-collapsed": {
+    "purpose": "Collapsed-state arrow modifier (#414 T03): the arrow of a folded heading is always shown (independent of hover arming) and points right (chevron rotated -90deg), click to unfold - the standing discoverable entry for 'already folded'.",
+    "states": "Always visible while folded; removed on unfold.",
+    "dom": "A modifier class on .vsidian-fold-arrow (same button).",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
+  "fold-hover": {
+    "purpose": "Hover-reveal arming class (#414 T03): applied to .cm-editor while the pointer is left of the body column's left edge (line-number column plus the gap, same judgement for both line-number on/off states), driving the unfolded arrows' visibility; leaving the editor disarms it. The reveal switch of VSCode's default fold-control policy.",
+    "states": "Toggles in real time with pointer movement (foldHoverArmed pure-function judgement); collapsed arrows do not depend on it.",
+    "dom": "Modifier class on the .cm-editor container.",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
+  "fold-ellipsis": {
+    "purpose": "Collapsed-state ellipsis placeholder (#414 T03): the placeholder widget of the folded range's Decoration.replace (VSCode's fold '...' preview marker, Obsidian's '...' alike), a standing inline hint at the heading line's end that folded content lives here; click unfolds the section. Division of labor with the always-on arrow: the arrow lives in the gutter (structural-operation mental model), the ellipsis inline (content-hint mental model). Accessibility mirrors the arrow (aria-expanded=false + hover word + keybinding badge).",
+    "states": "Materialized at the heading line's end while folded; removed with the decoration on unfold.",
+    "dom": "A button inside the heading line's .cm-line (materialized replace widget, events swallowed - CM6 does not treat clicks as body-text clicks).",
+    "obsidian": {
+      "counterpart": "None (Obsidian's fold ellipsis is an editor built-in presentation)"
+    }
+  },
+  "var-fold-arrow-color": {
+    "purpose": "Arrow color (#414 T03): defaults to the line-number foreground family (shared gutter-area look); light/dark themes adapt through the host variables.",
+    "dom": "Defined on #app.",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
+  "var-fold-arrow-hover-color": {
+    "purpose": "Arrow hover feedback color (#414 T03): defaults to the line-number active foreground family, an immediate confirmation of clickability on hover.",
+    "dom": "Defined on #app.",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
+  "var-fold-arrow-width": {
+    "purpose": "Arrow area width (#414 T03): the out-of-flow button's footprint width (default 16px) - the arrow reaches into the gap between the line-number column and the body text (ln-gap + content padding baseline), never taking part in inline width distribution.",
+    "dom": "Defined on #app.",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
+  "var-fold-ellipsis-color": {
+    "purpose": "Ellipsis placeholder color (#414 T03): defaults to the host descriptive foreground (muted, not competing with body text for attention).",
+    "dom": "Defined on #app.",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
 }
 
 /**

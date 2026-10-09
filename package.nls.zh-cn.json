@@ -86,5 +86,10 @@
   "command.find.selectNext.title": "选下一处相同词",
   "command.find.selectPrevious.title": "选上一处相同词",
   "command.find.skipCurrent.title": "跳过当前，选下一处相同词",
-  "command.find.allOccurrences.title": "选中全部相同词"
+  "command.find.allOccurrences.title": "选中全部相同词",
+  "command.heading.fold.title": "折叠标题节",
+  "command.heading.unfold.title": "展开标题节",
+  "command.heading.toggleFold.title": "折叠/展开切换标题节",
+  "command.heading.foldAll.title": "折叠全部标题节",
+  "command.heading.unfoldAll.title": "展开全部标题节"
 }

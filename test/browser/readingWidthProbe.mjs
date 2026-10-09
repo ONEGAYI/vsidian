@@ -61,6 +61,11 @@ try {
     if (!content || !scroller) return null
     const c = content.getBoundingClientRect()
     const g = gutters?.getBoundingClientRect()
+    // #414 起 ln-gap 间距挂 .cm-lineNumbers（gutters 内常驻零宽箭头列，
+    // margin 留容器会让行号关态正文基线多出一段）——间距测量改以行号列
+    // 右缘为锚（视觉语义不变：行号数字右缘到正文左缘）
+    const ln = document.querySelector('.cm-lineNumbers')
+    const lnr = ln?.getBoundingClientRect()
     const sr = scroller.getBoundingClientRect()
     const cs = getComputedStyle(scroller)
     const padL = Number.parseFloat(cs.paddingLeft)
@@ -69,7 +74,7 @@ try {
     const contentW = scroller.clientWidth - padL - padR
     return { contentW, colW: c.width, colLeft: c.left, colRight: c.right,
       gutterLeft: g ? g.left : null, gutterRight: g ? g.right : null, gutterW: g ? g.width : 0,
-      spacing: g ? c.left - g.right : 0,
+      spacing: lnr ? c.left - lnr.right : 0,
       gapL: (g ? g.left : c.left) - contentLeft, gapR: contentLeft + contentW - c.right }
   })
 

@@ -109,7 +109,24 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #360 T11：组件按钮/面板与视图界面贡献（生产界面运行时装配——真实
   // 点击经 target 句柄提交、悬停提示与键位徽章、面板开闭与迟到结果、
   // 模式回收与卸载回收、内置工具栏不受影响）紧随附加组件族
-  'addonT11Ui']
+  'addonT11Ui',
+  // #413（#409 T02）标题折叠键位：注册表五操作默认键真实路由——美式
+  // 布局 Ctrl+Shift+[ / ]（事件字符 { }，keyStep shift 上档符号映射的
+  // 端到端验证）、Ctrl+K 弦族、零写回与阅读模式不接管（绘制层断言属
+  // #414 T03 paint 探针）
+  'headingFoldKeys',
+  // #414（#409 T03）标题折叠 UI：真实鼠标驱动 gutter 箭头（悬停显现/
+  // 折叠态常显/行号两态定位）与省略号占位——paint 探针绘制层断言、零
+  // 布局位移、明暗主题与双实例独立折叠态
+  'headingFoldUi',
+  // #415（#409 T04）标题折叠落点展开：view.locate 通道（锚点/搜索/双链/
+  // 大纲点击共同汇聚）、查找面板真实键盘命中折叠区自动展开、双模式往返
+  // 存续与 modeAnchor 落隐藏区回切展开——全程零写回
+  'headingFoldReveal',
+  // #410 附加组件折叠 API：experimental.headingFold 消费（生产控制器 +
+  // 装载器 + views 注册表；折叠夹具组件经公开 SDK 查询/命令、paint 探针
+  // 绘制层断言、零写回与卸载回收）紧随标题折叠族
+  'addonHeadingFold']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

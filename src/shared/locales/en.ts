@@ -32,6 +32,7 @@ export const en = {
   'toast.pasteTextOnly': 'Text pasted without the image. Use {paste} to paste the image.',
   'styleRef.category.toast': 'Light notifications',
   'styleRef.category.wikilinkSuggest': 'Wikilink suggestions',
+  'styleRef.category.headingFold': 'Heading folding',
   // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
   'wikilinkSuggest.list.ariaLabel': 'Wikilink suggestions',
   'wikilinkSuggest.status.loading': 'Searching files…',
@@ -906,6 +907,15 @@ export const en = {
   'command.find.selectPrevious.title': 'Select Previous Occurrence',
   'command.find.skipCurrent.title': 'Skip and Select Next Occurrence',
   'command.find.allOccurrences.title': 'Select All Occurrences',
+  // ---- #413（#409 T02）标题折叠五操作（操作注册表 titleKey） ----
+  'command.heading.fold.title': 'Fold Heading Section',
+  'command.heading.unfold.title': 'Unfold Heading Section',
+  'command.heading.toggleFold.title': 'Toggle Fold of Heading Section',
+  'command.heading.foldAll.title': 'Fold All Heading Sections',
+  'command.heading.unfoldAll.title': 'Unfold All Heading Sections',
+  // ---- #414（#409 T03）折叠 UI 悬停词（箭头/省略号可访问形态） ----
+  'headingfold.fold': 'Fold this section',
+  'headingfold.unfold': 'Unfold this section',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': 'Word segmentation engine',
   'setting.wordSegmentEngine.description': 'Engine used to split continuous CJK text for word-wise Ctrl+Left/Right motion. Latin and digit runs always keep the built-in group semantics.',

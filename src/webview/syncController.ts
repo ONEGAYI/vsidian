@@ -41,6 +41,13 @@ import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
 import { PDF_ZOOM_STEP } from './pdfRender'
 import { KeybindingRouter, keyStep } from './keybindingRouter'
+import {
+  applyHeadingFoldOperation,
+  collectHeadingFoldPaint,
+  setHeadingFoldBindingHints,
+  unfoldAround,
+  type HeadingFoldOperationId,
+} from './headingFold'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
 import { ToastChannel } from './toast'
@@ -981,6 +988,15 @@ export class WebviewSyncController {
       else if (id === 'findSelectPrevious') { if (!embedBlocked()) this.runOccurrenceSelect('prev') }
       else if (id === 'findSkipCurrent') { if (!embedBlocked()) this.runOccurrenceSelect('skip') }
       else if (id === 'findAllOccurrences') { if (!embedBlocked()) this.runOccurrenceSelect('all') }
+      // #413（#409 T02）标题折叠五操作：本地分支直执行（折叠是视图态零
+      // 写回，不出站宿主往返；命令面板经 ui.command 回发入口共用
+      // runHeadingFoldCommand）。router 已按注册表 mode: live 过滤路由；
+      // 焦点分派走 actionTarget（P2-10：焦点在嵌入内部 Live 时折叠落 B，
+      // 不设 embedBlocked——折叠按焦点实例各自独立，非主文面板会话命令）
+      else if (id === 'headingFold' || id === 'headingUnfold' || id === 'headingToggleFold' ||
+        id === 'headingFoldAll' || id === 'headingUnfoldAll') {
+        this.runHeadingFoldCommand(id)
+      }
       // #359 T10 附加组件命令：本地分支直执行（回调在本页，不出站宿主往返
       // ——与词移动/选词族同款先例；router 已按命令声明的 mode/writes 过滤
       // 路由，模式与写门控在此不重复）。命令面板入口经宿主 executeCommand
@@ -2216,6 +2232,9 @@ export class WebviewSyncController {
         this.keybindingRouter.update(overrides)
         this.keybindingOverrides = overrides
         this.setQuickActionBindingHints((id) => getEffectiveBindings(overrides, id))
+        // #414 T03 折叠箭头/省略号的键位徽章数据源（同 quickBindingHints
+        // 源注入：widget 与 marker 物化时读取）
+        setHeadingFoldBindingHints((op) => getEffectiveBindings(overrides, op))
         break
       }
       case 'settings.snapshot':
@@ -2884,6 +2903,15 @@ export class WebviewSyncController {
           case 'findSelectPrevious': this.runOccurrenceSelect('prev'); break
           case 'findSkipCurrent': this.runOccurrenceSelect('skip'); break
           case 'findAllOccurrences': this.runOccurrenceSelect('all'); break
+          // #413（#409 T02）标题折叠五操作：命令面板入口（快捷键走 router
+          // 本地分支直达），两入口共用 runHeadingFoldCommand——执行域按
+          // 焦点实例解析目标（actionTarget），阅读模式/无可编辑 Live 实例
+          // 时静默（生效模式由 targetEditable 保证）
+          case 'headingFold': this.runHeadingFoldCommand('headingFold'); break
+          case 'headingUnfold': this.runHeadingFoldCommand('headingUnfold'); break
+          case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
+          case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
+          case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
         }
         break
       case 'addonCommand.execute':
@@ -3964,6 +3992,10 @@ export class WebviewSyncController {
     if (readingHadFocus) this.view?.focus()
     // 恢复光标到锚点并滚动到视口中部；事务不带 changes → 不产生编辑历史
     const pos = this.clampToDoc(this.modeAnchor ?? 0)
+    // T04（#415）落点展开：modeAnchor 落在折叠隐藏区内时（阅读期间滚动/
+    // 定位使锚点回到隐藏区）先展开再回切定位（U12）——折叠态本身随实例
+    // 内存驻留保持（setViewMode 不销毁 StateField），此处只处理落点可见性
+    if (this.view) unfoldAround(this.view, pos)
     this.view?.dispatch({
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: 'center' }),
@@ -4117,6 +4149,13 @@ export class WebviewSyncController {
       }
     } else {
       this.modeAnchor = pos
+      // T04（#415）落点展开：view.locate（锚点跳转/搜索结果/双链/链接
+      // 跳转）与大纲点击（outlineJumpToItem）都汇聚到本实现——落点或
+      // 区间右端在折叠隐藏区内时，先永久展开包含它的全部折叠（嵌套全
+      // 展开，effect 直驱）再定位；reading 分支无折叠呈现（规格「六」）
+      if (this.view) {
+        unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
+      }
       // #57：定位离开表格选区语境时清选区（view.locate 与大纲跳转共用）
       if (this.view) selectTableRegion(this.view, null)
       // 聚焦编辑器（#66，QO「jump + 聚焦」语义）：未聚焦时 CM6 不把选区
@@ -8696,6 +8735,10 @@ export class WebviewSyncController {
       })
     } else {
       if (this.view) selectTableRegion(this.view, null)
+      // T04（#415）落点展开：查找下一个/上一个命中（含替换后定位）落在
+      // 折叠隐藏区内时，该节自动展开并定位（U10）——匹配区间 [from, to]
+      // 任一端在隐藏区即展开
+      if (this.view) unfoldAround(this.view, cur.from, cur.to)
       this.view?.dispatch({
         selection: { anchor: cur.from, head: cur.to },
         effects: EditorView.scrollIntoView(cur.from, { y: 'center' }),
@@ -9132,6 +9175,20 @@ export class WebviewSyncController {
     if (resolved && this.targetEditable(resolved.view, resolved.embed)) {
       command(resolved.view)
     }
+  }
+
+  /** #413（#409 T02）标题折叠五操作执行口：键位本地分支（router execute
+   *  回调）与命令面板（ui.command 回发）共用。目标解析按 P2-10 焦点分派
+   *  （焦点在嵌入内部 Live 时折叠落 B——StateField 随实例，折叠态各自
+   *  独立）；门控 targetEditable（主文 Live 态/实例未暂停），无目标或
+   *  阅读模式静默 no-op。执行体在 headingFold.applyHeadingFoldOperation
+   *  （effect 直驱零写回，无 DOM-only 路径） */
+  private runHeadingFoldCommand(op: HeadingFoldOperationId): void {
+    const resolved = this.actionTarget()
+    if (!resolved || !this.targetEditable(resolved.view, resolved.embed)) {
+      return
+    }
+    applyHeadingFoldOperation(resolved.view, op)
   }
 
   /**
@@ -9991,6 +10048,8 @@ export class WebviewSyncController {
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
       ...(wikilinkSuggest ? { wikilinkSuggest } : {}),
+      // #414 T03 标题折叠 UI 绘制观测（折叠区间数/省略号/箭头/悬停武装）
+      headingFold: collectHeadingFoldPaint(view),
       ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),
     }

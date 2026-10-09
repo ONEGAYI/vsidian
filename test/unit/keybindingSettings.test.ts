@@ -118,6 +118,25 @@ describe('快捷键设置页', () => {
     root.remove()
   })
 
+  it('捕获签：shift 符号键归一为物理键名（美式布局上档形态可捕获，#413 审查轮 A4）', () => {
+    const sent: unknown[] = []
+    const section = new KeybindingSettingsSection({ postMessage: (m) => sent.push(m) })
+    const root = document.createElement('div')
+    document.body.append(root)
+    section.mount(root)
+    const row = () => root.querySelector<HTMLElement>('[data-operation-id="inlineMath"]')!
+    row().querySelector<HTMLButtonElement>('.vsidian-keybindings-add')!.click()
+    const capture = row().querySelector<HTMLInputElement>('.vsidian-keybindings-capture')!
+    // 美式布局 Ctrl+Shift+; 的 event.key 是 ':'——捕获链路经 keyStep 别名
+    // 归一为 semicolon（与键位路由同源；bracketleft/right 同理）
+    capture.dispatchEvent(new KeyboardEvent('keydown', { key: ':', ctrlKey: true, shiftKey: true, bubbles: true }))
+    expect(capture.value).toBe('Ctrl+Shift+;')
+    capture.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(sent).toMatchObject([{ kind: 'keybindings.set', id: 'inlineMath', bindings: ['ctrl+shift+semicolon'], replaceConflicts: false }])
+    root.remove()
+  })
+
+
   it('捕获签：Esc 与失焦取消录制，草稿不残留、不发送', async () => {
     const sent: unknown[] = []
     const section = new KeybindingSettingsSection({ postMessage: (m) => sent.push(m) })

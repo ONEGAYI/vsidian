@@ -35,6 +35,14 @@ body {
   --vsidian-content-padding-inline: 24px;
   /* 行号列与正文的固定间距：响应 VSCode UI 字号（界面元素大小） */
   --vsidian-ln-gap: calc(var(--vscode-font-size, 13px) * 2);
+  /* ---- #414 T03 标题折叠 UI 观感（styleContract heading-fold 类目）----
+     箭头颜色随行号前景族（gutter 区观感同源），悬停反馈用其 active 态；
+     箭头区宽 = 绝对定位按钮占位宽（伸入行号列与正文间距区，零流内足迹）；
+     省略号占位颜色随描述性前景。 */
+  --vsidian-fold-arrow-color: var(--vscode-editorLineNumber-foreground, rgba(127, 127, 127, 0.6));
+  --vsidian-fold-arrow-hover-color: var(--vscode-editorLineNumber-activeForeground, rgb(127, 127, 127));
+  --vsidian-fold-arrow-width: 16px;
+  --vsidian-fold-ellipsis-color: var(--vscode-descriptionForeground, rgba(127, 127, 127, 0.9));
   /* 表格单元格文字下移量（块轴 padding + 边框宽，#116）：表格 cell 规则
      与行号表头格补偿同源引用；改单元格字面值须同步（契约联动断言：
      lineNumberCssContract） */
@@ -161,13 +169,96 @@ body.vscode-light #app {
    不外扩也不覆盖正文，正文左缘相应右移（向右内缩）；关闭行号时
    Compartment 卸载整列，正文回到 --vsidian-content-padding-inline 基线。
    CM6 Gutter 以 JS 内联样式设 position: sticky（横向滚动钉住），在流内
-   静态位（留白带右缘）与包含块钳制一致，无需干预。 */
+   静态位（留白带右缘）与包含块钳制一致，无需干预。
+   #414 起 --vsidian-ln-gap 间距挂行号列自身（不再挂 .cm-gutters 容器）：
+   gutters 内常驻零宽箭头列（.vsidian-fold-gutter，标题折叠 UI），间距若
+   留在容器上会让行号关闭时的正文基线多出一段——挂行号列后两态布局与
+   迁移前逐像素一致（行号列曾是 gutters 唯一成员）。 */
 #app .cm-editor .cm-scroller .cm-gutters {
-  margin-right: var(--vsidian-ln-gap);
   background-color: transparent;
   border: none;
   color: var(--vscode-editorLineNumber-foreground, rgba(127, 127, 127, 0.6));
   /* 行号非可编辑内容：禁选，避免拖选正文时把行号一并选中 */
+  user-select: none;
+}
+
+#app .cm-editor .cm-scroller .cm-lineNumbers {
+  margin-right: var(--vsidian-ln-gap);
+}
+
+/* ---- #414 T03 标题折叠：gutter 折叠箭头（零布局位移硬约束）----
+   箭头列 .vsidian-fold-gutter 为零宽常驻列（marker 绝对定位脱流，不参与
+   .cm-gutters 流内宽度分配）——悬停显隐与折叠态常显均不推动正文列，
+   可读行宽档 [.cm-gutters + 间距 + .cm-content] 整组居中契约不受影响
+   （viewport-width.md「实施落档」）。baseTheme 对 .cm-gutter 默认
+   overflow: hidden 会裁掉伸出列外的 marker，此处放行；箭头伸出到行号
+   列与正文之间的既有间距区（行号开/关两态同区：行号关时列宽 0，箭头落
+   content padding 基线左侧），不与行号数字、正文文字重叠。 */
+#app .cm-editor .cm-scroller .vsidian-fold-gutter {
+  overflow: visible;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fold-gutter .cm-gutterElement {
+  position: relative;
+}
+
+/* 箭头按钮：绝对定位脱流（right: 100% = 列右缘向左伸入行号列与正文间的
+   ln-gap 间距区——行号开态箭头带 [行号列右缘, 正文左缘)，行号关态落
+   scroller padding 留白带）、垂直居中于行块；默认 visibility: hidden
+   （未悬停零干扰、不可点击——VSCode alwaysShowFoldControls 关策略），
+   悬停武装类或折叠态修饰类驱动显现；显隐切换不触发布局（visibility
+   不参与盒计算）。折叠态 -collapsed 转向右（chevron 旋转 -90deg）。 */
+#app .cm-editor .cm-scroller .vsidian-fold-gutter .vsidian-fold-arrow {
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--vsidian-fold-arrow-width);
+  height: var(--vsidian-fold-arrow-width);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vsidian-fold-arrow-color);
+  cursor: pointer;
+  visibility: hidden;
+  line-height: 1;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fold-gutter .vsidian-fold-arrow svg {
+  display: block;
+}
+
+#app .cm-editor.vsidian-fold-hover .cm-scroller .vsidian-fold-gutter .vsidian-fold-arrow {
+  visibility: visible;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fold-gutter .vsidian-fold-arrow.vsidian-fold-arrow-collapsed {
+  visibility: visible;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fold-gutter .vsidian-fold-arrow.vsidian-fold-arrow-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+#app .cm-editor .cm-scroller .vsidian-fold-gutter .vsidian-fold-arrow:hover {
+  color: var(--vsidian-fold-arrow-hover-color);
+}
+
+/* ---- #414 T03 标题折叠：省略号占位（折叠态标题行行尾）----
+   折叠隐藏区间的 Decoration.replace 占位 widget（VSCode `...` 预览标记、
+   Obsidian `⋯` 同款）：行内常驻「此处有被折叠内容」提示，点击展开；
+   零宽视觉（不占行内宽度预算），颜色随描述性前景。 */
+#app .cm-editor .cm-scroller .cm-content .vsidian-fold-ellipsis {
+  display: inline-block;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--vsidian-fold-ellipsis-color);
+  font: inherit;
+  cursor: pointer;
   user-select: none;
 }
 

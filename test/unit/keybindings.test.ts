@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   KEYBINDING_OPERATIONS, getEffectiveBindings, normalizeChord,
   findBindingConflicts, findConflictedOperationIds, operationMatchesFilter,
-  applyBindingChange, resolveKeybinding,
+  applyBindingChange, resolveKeybinding, formatBindingLabel,
   type KeybindingOverrides,
 } from '../../src/shared/keybindings'
 import { en } from '../../src/shared/locales/en'
@@ -257,5 +257,72 @@ describe('查找替换快捷键（#236）', () => {
     expect(commands).toContain('onegayi.vsidian.find.replace')
     expect(commands).toContain('onegayi.vsidian.find.replaceNext')
     expect(commands).toContain('onegayi.vsidian.find.replaceAll')
+  })
+})
+
+describe('标题折叠快捷键（#413，#409 T02）', () => {
+  const foldOps = [
+    { id: 'headingFold', command: 'onegayi.vsidian.heading.fold', titleKey: 'command.heading.fold.title',
+      defaults: ['ctrl+shift+bracketleft', 'alt+meta+bracketleft'] },
+    { id: 'headingUnfold', command: 'onegayi.vsidian.heading.unfold', titleKey: 'command.heading.unfold.title',
+      defaults: ['ctrl+shift+bracketright', 'alt+meta+bracketright'] },
+    { id: 'headingToggleFold', command: 'onegayi.vsidian.heading.toggleFold', titleKey: 'command.heading.toggleFold.title',
+      defaults: ['ctrl+k ctrl+l', 'meta+k meta+l'] },
+    { id: 'headingFoldAll', command: 'onegayi.vsidian.heading.foldAll', titleKey: 'command.heading.foldAll.title',
+      defaults: ['ctrl+k ctrl+0', 'meta+k meta+0'] },
+    { id: 'headingUnfoldAll', command: 'onegayi.vsidian.heading.unfoldAll', titleKey: 'command.heading.unfoldAll.title',
+      defaults: ['ctrl+k ctrl+j', 'meta+k meta+j'] },
+  ] as const
+
+  it('五操作登记：Live 生效、非写（视图态零写回）、默认键对齐 VSCode 惯例（含 mac 形态）', () => {
+    for (const expected of foldOps) {
+      const op = KEYBINDING_OPERATIONS.find((item) => item.id === expected.id)
+      expect(op, expected.id).toBeDefined()
+      expect(op, expected.id).toMatchObject({
+        mode: 'live', writes: false, command: expected.command, titleKey: expected.titleKey,
+      })
+      expect(getEffectiveBindings({}, expected.id), expected.id).toEqual([...expected.defaults])
+    }
+  })
+
+  it('生效模式 = Live：阅读模式键路由不消费（折叠是 Live 编辑器视图态）', () => {
+    expect(resolveKeybinding({}, 'live', 'ctrl+shift+bracketleft')).toEqual({ kind: 'command', id: 'headingFold' })
+    expect(resolveKeybinding({}, 'reading', 'ctrl+shift+bracketleft')).toEqual({ kind: 'none' })
+    for (const chord of ['ctrl+k ctrl+l', 'ctrl+k ctrl+0', 'ctrl+k ctrl+j']) {
+      expect(resolveKeybinding({}, 'reading', chord)).toEqual({ kind: 'none' })
+    }
+  })
+
+  it('物理键名规范化：bracketleft/bracketright 在白名单内可改绑；修饰键序按规范形态', () => {
+    expect(normalizeChord('ctrl+shift+bracketleft')).toBe('ctrl+shift+bracketleft')
+    // 存储默认不再次归一：mac 默认按规范序 ctrl→alt→shift→meta 书写
+    //（非规范序永不匹配 keyStep 派生的事件串——resolveKeybinding 整串比较）
+    expect(normalizeChord('meta+alt+bracketright')).toBe('alt+meta+bracketright')
+    expect(applyBindingChange({}, 'headingFold', ['ctrl+alt+bracketleft'], false).ok).toBe(true)
+  })
+
+  it('与全部既有默认键位零冲突（#240 收口形态复核，2026-10-09）', () => {
+    // Ctrl+Shift+[ / ] 与全部注册表默认零占用；Ctrl+K 弦与既有唯一弦
+    // ctrl+k ctrl+d 首段重叠但整串精确匹配不冲突（chordOverlap 按整弦）
+    for (const expected of foldOps) {
+      for (const chord of expected.defaults) {
+        expect(findBindingConflicts({}, expected.id, chord), `${expected.id} ${chord}`).toEqual([])
+      }
+    }
+    expect([...findConflictedOperationIds({})]).toEqual([])
+  })
+
+  it('manifest 命令已登记（三面同源）', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+    const commands = manifest.contributes.commands.map((item: { command: string }) => item.command)
+    for (const expected of foldOps) {
+      expect(commands, expected.command).toContain(expected.command)
+    }
+  })
+
+  it('键位展示：符号物理键名渲染为字符（设置页标签不出现 BRACKETLEFT 大写名）', () => {
+    expect(formatBindingLabel('ctrl+shift+bracketleft')).toBe('Ctrl+Shift+[')
+    expect(formatBindingLabel('ctrl+shift+bracketright')).toBe('Ctrl+Shift+]')
+    expect(formatBindingLabel('ctrl+k ctrl+l')).toBe('Ctrl+K Ctrl+L')
   })
 })

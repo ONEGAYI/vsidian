@@ -214,15 +214,18 @@ export class AddonRegistry {
   }
 }
 
-/** 生产注册表端口默认值（experimental 表含 T02 起提供的 cm6 实验入口——
- *  1.1.0 = #406 起暴露面含 language 语法树子集，页面 SDK 的
- *  experimental.cm6 形状随公开声明冻结） */
+/** 生产注册表端口默认值（experimental 表含 T02 起提供的 cm6 实验入口与
+ *  #410 起提供的 headingFold 实验入口——cm6 1.1.0 = #406 起暴露面含
+ *  language 语法树子集，页面 SDK 的 experimental.* 形状随公开声明冻结） */
 export function createDefaultRegistryPorts(
   findExtension: (id: string) => { packageJSON: unknown } | undefined,
 ): AddonRegistryPorts {
   return {
     apiVersion: ADDON_API_VERSION,
-    experimental: { cm6: ADDON_EXPERIMENTAL_CM6_VERSION },
+    experimental: {
+      cm6: ADDON_EXPERIMENTAL_CM6_VERSION,
+      headingFold: ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION,
+    },
     officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
     findExtension,
   }
@@ -233,3 +236,9 @@ export function createDefaultRegistryPorts(
  *  1.1.0（#406）：暴露面追加 language 语法树子集（minor 扩展——
  *  `^1.0.0` 声明保持兼容，精确 `1.0.0` 判不兼容） */
 export const ADDON_EXPERIMENTAL_CM6_VERSION = '1.1.0'
+
+/** #410 实验入口版本：experimental.headingFold（页面 SDK 的标题折叠查询
+ *  与命令）——组件声明 `experimental: { headingFold: '<range>' }` 且范围
+ *  含本版本才判兼容。1.0.0：首版候选（folds/foldable 查询 + apply 五
+ *  操作与 foldAt/unfoldAt 批量组合、upToLevel 参数化），Live-only */
+export const ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION = '1.0.0'

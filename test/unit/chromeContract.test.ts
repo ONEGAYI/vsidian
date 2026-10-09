@@ -70,6 +70,14 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'live-code-card-edge', // 首末行修饰（首行由头部覆盖，CSS 契约钉）
   'live-fm-popover', // #140 Popover 改版：属性编辑浮层（打开时挂载 body，开闭与写回由浏览器套件验证）
   'live-fm-fold', // 2026-10 卡片折叠：chevron 两态常驻但收起态形态由行为切换，折叠/热区/浮层联动由浏览器与集成套件验证
+  // #414 T03 标题折叠 UI：箭头显隐（悬停武装/折叠常显）与省略号占位是
+  // 行为驱动形态——headingFoldCssContract 静态钉规则、浏览器 headingFoldUi
+  // 绘制层断言显隐与点击
+  'fold-gutter', // 零宽承载列（marker 绝对定位脱流）
+  'fold-arrow', // 悬停武装显现 / 折叠态常显
+  'fold-arrow-collapsed', // 折叠态修饰（常显 + 右向）
+  'fold-hover', // 悬停武装类（指针驱动瞬态）
+  'fold-ellipsis', // 折叠态占位 widget（装饰物化）
   'suspend-banner', // 暂停态横幅
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）
   'hover-popup', // #218 悬停预览浮层（悬停延迟打开期间挂载，开闭/保活/绘制由浏览器 hoverPreview 套件验证）

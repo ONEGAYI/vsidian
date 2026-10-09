@@ -21,6 +21,7 @@ vsidian/
     │   │   ├── addonRendererService.ts        # 宿主渲染服务
     │   │   ├── addonRuntime.ts                # 运行生命周期状态机
     │   │   ├── addonSettingsService.ts        # 附加组件设置服务
+    │   │   ├── addonStorageService.ts         # 组件数据目录服务
     │   │   └── addonWiring.ts                 # 宿主装配与面板桥
     │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
     │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
@@ -77,11 +78,13 @@ vsidian/
     │   ├── addonBehaviors.ts       # 输入行为共享契约事实源
     │   ├── addonCommands.ts        # 附加组件命令/菜单共享形状与校验
     │   ├── addonEditApi.ts         # 统一视图编辑API共享形状
+    │   ├── addonFoldApi.ts         # 折叠 API 形状事实源
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
     │   ├── addonRenderers.ts       # 渲染提供者共享契约
     │   ├── addonSettings.ts        # 复杂设置共享模型
+    │   ├── addonStorage.ts         # 数据目录形状与守卫
     │   ├── addonUi.ts              # 附加组件界面贡献共享形状与校验
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts        # 变更重定位纯函数
@@ -187,6 +190,7 @@ vsidian/
         ├── frontmatterPopover.ts       # frontmatter 属性编辑浮层
         ├── graphicBlockChrome.ts       # 图形化块右上角按钮组
         ├── graphicRenderers.ts         # 图形化渲染器注册表
+        ├── headingFold.ts              # 标题折叠本体、箭头与省略号 UI
         ├── hitReveal.ts                # 命中显形活跃命中集单一事实源
         ├── hoverPopup.ts               # 悬停预览浮层单例
         ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数

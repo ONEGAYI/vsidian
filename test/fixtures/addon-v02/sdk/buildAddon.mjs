@@ -125,6 +125,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't12-addon', 'dist', 'editor.js'),
       note: 't12-addon 编辑器页',
     },
+    // #410 标题折叠 API 夹具组件（编辑器页——experimental.headingFold 的
+    // 查询与命令消费；短轮询驱动与 T06 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'foldEditor.ts'),
+      outfile: path.join(buildRoot, 'fold-addon', 'dist', 'editor.js'),
+      note: 'fold-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -212,6 +219,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t12Addon: {
       installDir: path.join(buildRoot, 't12-addon'),
       distDir: path.join(buildRoot, 't12-addon', 'dist'),
+    },
+    // #410：折叠夹具组件布局（浏览器套件经本地 http 服务装载）
+    foldAddon: {
+      installDir: path.join(buildRoot, 'fold-addon'),
+      distDir: path.join(buildRoot, 'fold-addon', 'dist'),
     },
     outsideDir,
   }

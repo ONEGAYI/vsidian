@@ -17,6 +17,7 @@
 | 入口 | 版本 | 状态 | 实际发布日期 | 兼容边界 |
 | --- | --- | --- | --- | --- |
 | `cm6` | 1.1.0 | 候选（未发行） | —（未发行不携带日期） | 页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
+| `headingFold` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（阅读模式不开放，#409 定案）。折叠本体随 #409 落地。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 
 ### 稳定 API 移除规则
 
@@ -43,6 +44,7 @@
     - [`page-bridge` SDK 构建桥（vsidian-addon-sdk 虚拟模块）](#page-bridge)
     - [`views-editor` 统一视图与编辑面（views / editor）](#views-editor)
     - [`cm6-experimental` 实验入口：共享 CM6 运行时（experimental.cm6）](#cm6-experimental)
+    - [`heading-fold-experimental` 实验入口：标题折叠查询与命令（experimental.headingFold）](#heading-fold-experimental)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
@@ -381,8 +383,13 @@ export type AddonStatusKind =
 export interface VsidianAddonPageSdk {
   /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */
   readonly addon: { id: string; generation: number; page: AddonPageKind }
-  /** 实验入口：CM6 共享运行时（仅编辑器页提供；设置页为 undefined） */
-  readonly experimental: { readonly cm6?: AddonCm6Runtime }
+  /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
+   *  运行时；headingFold = 标题折叠查询与命令（#410）。使用前须在清单
+   *  experimental 声明对应入口的兼容范围 */
+  readonly experimental: {
+    readonly cm6?: AddonCm6Runtime
+    readonly headingFold?: AddonHeadingFoldFacet
+  }
   /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、
    *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子
    *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */
@@ -717,6 +724,86 @@ export interface AddonCm6LanguageRuntime {
 ```
 
 **验证**：`test/unit/addonPageLoader.test.ts`、`test/browser/addonPageSdk.mjs`
+
+### `heading-fold-experimental` 实验入口：标题折叠查询与命令（experimental.headingFold）
+
+**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#410
+> **实验入口**：清单 `experimental` 声明名 `headingFold`——兼容边界见上方实验入口兼容清单。
+
+**目标**：页面 SDK 的标题折叠实验入口（sdk.experimental.headingFold，#410）：按 views 面实例 ID 查询有效折叠区间（folds）与可折叠区间全集（foldable），并执行折叠命令（apply 五操作、foldAt/unfoldAt 按区间键批量组合、foldAll 可 upToLevel 参数化）。折叠本体随 #409 落地（Live 实例的 CM6 StateField）；查询消费本体派生视图（不复制派生逻辑），命令直传本体五操作执行体——编程触发与用户触发同链路（effect 直驱，无 DOM-only 路径）。
+
+语义要点：
+- **适用模式**：Live-only（#409 定案阅读模式不开放）：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址（main / embed occurrence 键），折叠态随实例独立。
+- **坐标与数据形状**：全文 UTF-16 code unit 偏移、页面全程 LF。span = { key（标题起始行行首）、level（ATX 1–6 / Setext 1–2）、hideFrom（标题块行尾）、hideTo（下一级别 ≤ 自身的标题行首或文档末尾）}；序列化面不含标题文本摘要（大文档保持精简——作者可从快照 text 与 key 对应标题行自取）。
+- **生命周期**：折叠是视图态（零写回、不 dirty、不进撤销栈、不跨会话持久化）；全文替换显式清空、编辑时键随增量映射（#409 本体语义）。原始键集不对外——folds 是「折叠键 ∩ 可折叠标题键」的有效派生视图，脱靶键经此过滤天然无行为（foldAt/unfoldAt 的脱靶键静默忽略；applied = 有效折叠区间前后变化数）。组件代次终结后的迟到调用拒绝 view-disposed。
+- **错误与拒绝**：三种可辨认拒绝：view-disposed / read-only / invalid-request（upToLevel 仅 foldAll 接受且须为 1–6 整数；区间键须为非负整数）。使用前须在清单 experimental 声明 headingFold 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。
+
+签名事实源：`src/shared/addonFoldApi.ts`
+
+```ts
+/** 折叠区间（LF 偏移；与本体派生视图同构）。key 同时是 foldAt/unfoldAt
+ *  的区间定位键——只能来自查询结果（作者自算坐标属脱靶风险自负） */
+export interface AddonHeadingFoldSpan {
+  /** 折叠键：标题起始行行首 offset（ATX = `#` 行行首；Setext = 内容首行行首） */
+  key: number
+  /** 标题级别（ATX 1–6 / Setext 1–2） */
+  level: number
+  /** 隐藏区间起点：标题块行尾（标题行保持可见） */
+  hideFrom: number
+  /** 隐藏区间终点：下一级别 ≤ 自身的标题行行首，或文档末尾 */
+  hideTo: number
+}
+
+/** 命令操作（与本体五操作一一对应，编程触发与用户触发同链路）：
+ *  fold/unfold/toggle 为选区驱动（按实例当前选区解析目标——组件可先经
+ *  views 面 setSelection 定位）；foldAll/unfoldAll 作用全文档 */
+export type AddonHeadingFoldOperation = 'fold' | 'unfold' | 'toggle' | 'foldAll' | 'unfoldAll'
+
+/** apply 可选参数（形状守卫见 isAddonHeadingFoldApplyOptions） */
+export interface AddonHeadingFoldApplyOptions {
+  /** 仅 foldAll 接受：折叠级别上限（level ≤ upToLevel 的可折叠标题才折叠；
+   *  合法值 1–6 整数）。其他操作携带即 invalid-request */
+  upToLevel?: number
+}
+
+/** 拒绝类型（接口冻结面；新增值视为契约变更）：view-disposed = 句柄已
+ *  释放/实例已销毁/组件代次已终结；read-only = Live-only 边界（reading
+ *  态或 hover 只读视图）；invalid-request = 请求形状非法 */
+export type AddonHeadingFoldRejection = 'view-disposed' | 'read-only' | 'invalid-request'
+
+/** 查询结果（spans 按文档序） */
+export type AddonHeadingFoldQueryResult =
+  | { ok: true; spans: readonly AddonHeadingFoldSpan[] }
+  | { ok: false; reason: 'view-disposed' | 'read-only' }
+
+/** 命令结果：applied = 实际发生折叠/展开变更的区间数（有效派生口径的
+ *  前后变化数；0 = 无目标或重复提交的静默 no-op） */
+export type AddonHeadingFoldCommandResult =
+  | { ok: true; applied: number }
+  | { ok: false; reason: AddonHeadingFoldRejection }
+
+/** 折叠面（experimental.headingFold 的内容；仅编辑器页提供）。方法按
+ *  views 面的实例 ID 寻址——主正文 'main'、嵌入内部 Live 为 occurrence
+ *  键（views.list 枚举），折叠态随实例独立 */
+export interface AddonHeadingFoldFacet {
+  /** 有效折叠区间（派生视图：脱靶键过滤，原始键集不对外） */
+  folds(instanceId: string): AddonHeadingFoldQueryResult
+  /** 全部可折叠标题区间（空节/纯空白节排除） */
+  foldable(instanceId: string): AddonHeadingFoldQueryResult
+  /** 五操作执行（选区驱动三操作 + 全文档两操作；upToLevel 仅 foldAll） */
+  apply(
+    instanceId: string,
+    operation: AddonHeadingFoldOperation,
+    options?: AddonHeadingFoldApplyOptions,
+  ): AddonHeadingFoldCommandResult
+  /** 按区间键折叠（键集并入；键须来自查询结果，脱靶键静默忽略） */
+  foldAt(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult
+  /** 按区间键展开（键集差集；脱靶键静默忽略） */
+  unfoldAt(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult
+}
+```
+
+**验证**：`test/unit/addonFoldApi.test.ts`、`test/unit/addonHeadingFoldApi.test.ts`、`test/browser/addonHeadingFold.mjs`
 
 ### `channel` 页面与宿主通道
 

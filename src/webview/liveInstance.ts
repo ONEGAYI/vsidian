@@ -20,6 +20,11 @@ import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/vie
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
 import type { DocumentChangeReason, HostToWebview, PasteHistory, PasteStage, SerChange, WebviewToHost } from '../shared/protocol'
 import type { AddonApplyEditsResult, AddonEditorSnapshot, AddonSelectionRange } from '../shared/addonEditApi'
+import type {
+  AddonHeadingFoldApplyOptions,
+  AddonHeadingFoldOperation,
+  AddonHeadingFoldSpan,
+} from '../shared/addonFoldApi'
 import type { EditOriginMeta } from '../shared/editOrigin'
 import {
   CODEBLOCK_CARD_DEFAULT,
@@ -50,6 +55,17 @@ import { liveDecorationsField, livePreviewDecorations, tableCompositionSettled, 
 import { createLinkInteractions } from './liveLinks'
 import { liveMath } from './liveMath'
 import { liveMermaid, rendererLanguagesChanged } from './liveMermaid'
+import {
+  applyHeadingFoldOperation,
+  clampSelectionOutOfFolds,
+  collectHeadings,
+  effectiveHeadingFolds,
+  foldableSpansCached,
+  headingFoldExtension,
+  headingFoldField,
+  setHeadingFolds,
+  type HeadingFoldOperationId,
+} from './headingFold'
 import { liveEmbed } from './liveEmbed'
 import { liveBlockId } from './liveBlockId'
 import { anchorFlash } from './anchorFlash'
@@ -95,6 +111,29 @@ const ADDON_BEHAVIOR_DELETE_USER_EVENTS: ReadonlySet<string> = new Set([
   'delete.cut',
   'delete.line',
 ])
+
+/** #410 API 操作字面量 → 本体五操作 id（headingFold.ts 执行体词表）：
+ *  编程触发与用户触发共用同一执行体（effect 直驱） */
+const ADDON_HEADING_FOLD_OP_BY_ID: Readonly<Record<AddonHeadingFoldOperation, HeadingFoldOperationId>> = {
+  fold: 'headingFold',
+  unfold: 'headingUnfold',
+  toggle: 'headingToggleFold',
+  foldAll: 'headingFoldAll',
+  unfoldAll: 'headingUnfoldAll',
+}
+
+/** #410 折叠命令的 applied 计数：前后有效折叠键集的对称差大小（派生
+ *  口径——脱靶键不产生行为也不计数） */
+function countChanged(before: ReadonlySet<number>, after: ReadonlySet<number>): number {
+  let changed = 0
+  for (const key of after) {
+    if (!before.has(key)) changed++
+  }
+  for (const key of before) {
+    if (!after.has(key)) changed++
+  }
+  return changed
+}
 
 /** T06（#355）SDK applyEdits 实例侧实现——事务净插入长度（选区边界校验） */
 function totalInserted(changes: readonly { text: string }[]): number {
@@ -883,6 +922,109 @@ export class LiveEditorInstance {
     return true
   }
 
+  // ---- #410 附加组件标题折叠面（experimental.headingFold 的实例侧实现） ----
+  // 查询消费 headingFold 纯函数族（collectHeadings / effectiveHeadingFolds /
+  // foldableHeadingSpans——不复制逻辑）；命令消费 effect 驱动操作
+  // （applyHeadingFoldOperation / setHeadingFolds——编程触发与用户触发
+  // 同链路，无 DOM-only 路径）。Live-only 门控（mode/只读/句柄存活）由
+  // addonViews 层承担，本层只认 view 在场。全程零写回（折叠是视图态）。
+
+  /** 实例侧有效折叠派生视图（LF 偏移；视图不在场 null → 调用方折 view-disposed） */
+  headingFoldsForAddon(): readonly AddonHeadingFoldSpan[] | null {
+    const view = this.view
+    if (!view) {
+      return null
+    }
+    const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    return effectiveHeadingFolds(keys, collectHeadings(view.state.doc, tree), view.state.doc)
+  }
+
+  /** 实例侧全部可折叠标题区间（空节/纯空白节排除；共享缓存路径——与
+   *  箭头插件/foldAll 同一 doc 版本共享一次派生）。返回前逐项拷贝：
+   *  附加组件侧变异不得污染 foldableCache（同 doc 版本内箭头/foldAll
+   *  连带消费脏数据，rl2 第 2 轮复核 P1） */
+  foldableHeadingSpansForAddon(): readonly AddonHeadingFoldSpan[] | null {
+    const view = this.view
+    if (!view) {
+      return null
+    }
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    return foldableSpansCached(view.state.doc, tree).map((span) => ({ ...span }))
+  }
+
+  /** 五操作执行：直传本体执行体（选区驱动三操作 + 全文档两操作）；
+   *  upToLevel 参数化 = foldableHeadingSpans 过滤后并入（既有 effect 的
+   *  批量组合）。applied = 有效折叠区间前后变化数（派生口径） */
+  applyHeadingFoldForAddon(
+    operation: AddonHeadingFoldOperation,
+    options?: AddonHeadingFoldApplyOptions,
+  ): { applied: number } | 'view-disposed' {
+    const view = this.view
+    if (!view) {
+      return 'view-disposed'
+    }
+    const before = this.effectiveFoldKeys(view)
+    if (operation === 'foldAll' && options?.upToLevel !== undefined) {
+      const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
+      const tree = view.state.field(liveDecorationsField, false)?.tree
+      const spans = foldableSpansCached(view.state.doc, tree)
+        .filter((s) => s.level <= options.upToLevel!)
+      if (spans.length > 0) {
+        const next = new Set(keys)
+        for (const span of spans) {
+          next.add(span.key)
+        }
+        setHeadingFolds(view, next)
+      }
+    } else {
+      const opId: HeadingFoldOperationId = ADDON_HEADING_FOLD_OP_BY_ID[operation]
+      applyHeadingFoldOperation(view, opId)
+    }
+    return { applied: countChanged(before, this.effectiveFoldKeys(view)) }
+  }
+
+  /** 按区间键批量组合：fold = 并入可折叠键集、unfold = 差集当前有效折叠；
+   *  键集先过滤到对应键集（脱靶键静默忽略——派生过滤语义，不进键集） */
+  foldAtForAddon(keys: readonly number[], fold: boolean): { applied: number } | 'view-disposed' {
+    const view = this.view
+    if (!view) {
+      return 'view-disposed'
+    }
+    const current = view.state.field(headingFoldField, false) ?? new Set<number>()
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const valid = fold
+      ? new Set(foldableSpansCached(view.state.doc, tree).map((s) => s.key))
+      : this.effectiveFoldKeys(view)
+    const next = new Set(current)
+    let hit = false
+    for (const key of keys) {
+      if (!valid.has(key)) {
+        continue // 脱靶键：无行为（不进键集——原始键集语义的 API 侧守卫）
+      }
+      if (fold ? !next.has(key) : next.has(key)) {
+        if (fold) {
+          next.add(key)
+        } else {
+          next.delete(key)
+        }
+        hit = true
+      }
+    }
+    const before = this.effectiveFoldKeys(view)
+    if (hit) {
+      setHeadingFolds(view, next)
+    }
+    return { applied: countChanged(before, this.effectiveFoldKeys(view)) }
+  }
+
+  /** 当前有效折叠键集（派生口径——原始键集不出本类） */
+  private effectiveFoldKeys(view: EditorView): ReadonlySet<number> {
+    const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    return new Set(effectiveHeadingFolds(keys, collectHeadings(view.state.doc, tree), view.state.doc).map((f) => f.key))
+  }
+
   // ---- T07（#356）附加组件输入行为链（内核情境门控后的驱动点） ----
 
   /** 行为链驱动的实例身份（注册进 addonViews 时由注册方告知） */
@@ -1571,6 +1713,13 @@ export class LiveEditorInstance {
     }
     if (ranges) {
       view.dispatch({ selection: EditorSelection.create(ranges, sel.mainIndex) })
+    }
+    // T04（#415）外部同步光标钳制：增量映射把光标带进折叠隐藏区（运行期
+    // 进入隐藏区的漏网路径——正常进入已被落点展开接住）时钳到辖域标题行
+    // 行尾；与上笔表格钳制同为 selection-only 补事务，连发只渲染最终态。
+    const foldClamped = clampSelectionOutOfFolds(view)
+    if (foldClamped) {
+      view.dispatch({ selection: foldClamped })
     }
   }
 
@@ -2363,6 +2512,10 @@ export class LiveEditorInstance {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
+      // #412 T01 标题折叠本体：折叠键 StateField + 隐藏 replace 装饰
+      // （消费点经上方 liveDecorationsField 增量树直查派生区间；effect
+      // 驱动无键位——T02/T03 在其上生长，#410 API 只消费派生视图）
+      headingFoldExtension,
       // #223/#247 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态只替换嵌入
       // 精确区间 [from, to] 呈卡片——#247 起不再整行替换，前后文与父结构
       // 保留 / 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，

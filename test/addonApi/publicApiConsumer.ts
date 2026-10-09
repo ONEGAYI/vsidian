@@ -44,6 +44,15 @@ import type {
   AddonViewsFacet,
 } from '../../src/shared/addonEditApi'
 import type {
+  AddonHeadingFoldApplyOptions,
+  AddonHeadingFoldCommandResult,
+  AddonHeadingFoldFacet,
+  AddonHeadingFoldOperation,
+  AddonHeadingFoldQueryResult,
+  AddonHeadingFoldRejection,
+  AddonHeadingFoldSpan,
+} from '../../src/shared/addonFoldApi'
+import type {
   AddonBehaviorChangeEvent,
   AddonBehaviorRegistration,
   AddonBehaviorsFacet,
@@ -209,6 +218,24 @@ export type PageKinds = AddonPageKind
 export type BehaviorShapes = {
   registration: AddonBehaviorRegistration
   changeEvent: AddonBehaviorChangeEvent
+}
+
+/** #410 标题折叠实验入口：三种拒绝码与五操作字面量（接口冻结面） */
+export type PinnedHeadingFoldRejections = 'view-disposed' | 'read-only' | 'invalid-request'
+export const headingFoldRejectionsPinned: Equals<AddonHeadingFoldRejection, PinnedHeadingFoldRejections> = true
+export type PinnedHeadingFoldOperations = 'fold' | 'unfold' | 'toggle' | 'foldAll' | 'unfoldAll'
+export const headingFoldOperationsPinned: Equals<AddonHeadingFoldOperation, PinnedHeadingFoldOperations> = true
+
+/** #410 折叠面（查询二入口 + 命令三入口）与结果形状 */
+export type HeadingFoldSurface = Pick<
+  AddonHeadingFoldFacet,
+  'folds' | 'foldable' | 'apply' | 'foldAt' | 'unfoldAt'
+>
+export type HeadingFoldShapes = {
+  span: AddonHeadingFoldSpan
+  applyOptions: AddonHeadingFoldApplyOptions
+  queryResult: AddonHeadingFoldQueryResult
+  commandResult: AddonHeadingFoldCommandResult
 }
 
 /** #404 组件数据目录面（读写监听六入口 + 拒绝码钉住） */

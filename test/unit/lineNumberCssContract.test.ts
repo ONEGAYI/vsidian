@@ -31,11 +31,16 @@ describe('行号列布局与 main.css 的一致（#34 流内列改造后）', ()
     )
   })
 
-  it('流内列布局：.cm-gutters 以 --vsidian-ln-gap 作右侧间距，无外扩/叠加残留', () => {
-    const rule = extractOne('行号列规则', /\.cm-gutters\s*\{[^}]*\}/g)
-    expect(rule[0], '行号列应以间距变量与正文相隔（margin-right）').toMatch(
+  it('流内列布局：--vsidian-ln-gap 间距挂行号列自身（#414 起自 .cm-gutters 迁移），无外扩/叠加残留', () => {
+    // #414：gutters 内常驻零宽箭头列（.vsidian-fold-gutter），间距留容器
+    // 会让行号关态正文基线多出一段——迁至 .cm-lineNumbers 后行号开态布局
+    // 逐像素一致（行号列曾是 gutters 唯一成员）
+    const ln = extractOne('行号列间距规则', /#app[^{]*?\.cm-lineNumbers\s*\{[^}]*\}/g)
+    expect(ln[0], '行号列应以间距变量与正文相隔（margin-right）').toMatch(
       /margin-right:\s*var\(--vsidian-ln-gap\)/,
     )
+    const rule = extractOne('行号列规则', /\.cm-gutters\s*\{[^}]*\}/g)
+    expect(rule[0], '间距不得留在 gutters 容器（行号关态正文回 padding 基线）').not.toMatch(/margin-right/)
     // 旧叠加布局（负边距入留白带 + 固定栏宽 + overflow 裁剪）不得回流
     expect(rule[0], '行号列不得回退为留白带内叠加（负边距）').not.toMatch(/margin-left:\s*calc/)
     expect(rule[0]).not.toMatch(/width:\s*var\(--vsidian-content-padding-inline\)/)
@@ -53,7 +58,9 @@ describe('行号列布局与 main.css 的一致（#34 流内列改造后）', ()
   })
 
   it('行号垂直锚定首个视觉行：禁用折行块居中，top 基线偏移公式完整在场', () => {
-    const rule = css.match(/\.cm-gutterElement\s*\{[^}]*\}/g)
+    // #414：.vsidian-fold-gutter 的格子规则先于本规则出现，选择器须限定
+    // lineNumbers 列（首块匹配不再可靠）
+    const rule = css.match(/\.cm-lineNumbers\s+\.cm-gutterElement\s*\{[^}]*\}/g)
     expect(rule, '.cm-gutterElement 规则应存在').toBeTruthy()
     const block = rule![0]!
     expect(block, '行号单元格不得垂直居中于整块（应锚定首个视觉行）').not.toMatch(
