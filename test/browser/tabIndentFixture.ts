@@ -37,4 +37,9 @@ Object.assign(window, {
     return { text: view.state.doc.toString(), head: main.head, from: main.from,
       to: main.to }
   },
+  /** 焦点宿主只读探针（#420 降级 fm 焦点逃逸断言）：返回激活元素类名 */
+  readFocus() {
+    const el = document.activeElement
+    return el ? el.className || el.tagName : null
+  },
 })

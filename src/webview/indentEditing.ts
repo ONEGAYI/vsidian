@@ -13,8 +13,9 @@
 // - 不自动携带子孙项；整体移动由用户用选区覆盖表达
 // - 不接管（return false 交默认）：表格行——Tab/Shift+Tab 归
 //   tableEditing 的单元格导航，边界放行也不缩进表格行（不破坏表格
-//   结构与「表格内导航语义优先」）；frontmatter（按源码呈现）；
-//   IME 组合进行中
+//   结构与「表格内导航语义优先」）；成型 frontmatter（卡片态，光标被
+//   引导弹出）；IME 组合进行中。降级 frontmatter（源码态）不在其列：
+//   可编辑源码按普通行缩进（#420）
 // - Shift+Tab 无可删空白时仍吞键（return true）：Tab 族按键一旦在
 //   Live 正文消费域内放行到 keydown 默认路径，会被宿主 webview 预加
 //   载脚本转发为工作台焦点导航（焦点逃逸），故无变化也不放行
@@ -126,8 +127,12 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
   const mathBlocks = state.field(mathBlocksField, false)
   for (const num of [...lineNumbers].sort((a, b) => a - b)) {
     const line = state.doc.line(num)
+    // fm 门控只拦成型卡片态（fmModel 非空——卡片只读、光标被引导弹出）；
+    // 降级源码态（fmModel null）是可编辑源码，YAML 嵌套缩进走普通行
+    // 2 空格制（#420：此前对 fm range 整体放行，降级头区内 Tab 落穿
+    // 默认路径被宿主预加载脚本转发为工作台焦点导航——焦点逃逸）
     const fm = field.fm
-    if (fm && line.from < fm.end && line.to > fm.start) return false
+    if (fm && field.fmModel && line.from < fm.end && line.to > fm.start) return false
     // 行内首个非空白字符处探测容器链（空行取行首）：缩进代码块的节点
     // 起点在内容列，行首探测永远落在缩进空白上（CodeBlock 成死条目）
     const lead = /^\s*/u.exec(line.text)![0].length

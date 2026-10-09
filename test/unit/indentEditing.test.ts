@@ -296,11 +296,32 @@ describe('不接管条件（返回 false 交默认）', () => {
     view.destroy()
   })
 
-  it('frontmatter 内不接管', () => {
+  it('frontmatter 内不接管（成型卡片态）', () => {
     const doc = '---\ntitle: x\n---\nbody'
     const view = makeEditView(doc, doc.indexOf('title'))
     expect(indentLine(view)).toBe(false)
     view.destroy()
+  })
+
+  // #420：门控只应保护成型卡片；降级源码态头区是可编辑源码
+  // （frontmatterTable「降级后编辑不受限」），YAML 嵌套缩进走普通行 2 空格制
+  it('降级 frontmatter（嵌套 map 源码态）内空行：Tab 插 2 空格（#420）', () => {
+    const doc = '---\nperm:\n\n  bash: deny\n---\nbody'
+    const blankHead = doc.indexOf('\n\n  bash') + 1
+    expect(typed(makeEditView(doc, blankHead)))
+      .toEqual({ text: '---\nperm:\n  \n  bash: deny\n---\nbody', from: blankHead + 2, to: blankHead + 2 })
+  })
+
+  it('降级 frontmatter 内嵌套行：Tab 行首插 2 空格（#420）', () => {
+    const doc = '---\nperm:\n  bash: deny\n---\nbody'
+    expect(typed(makeEditView(doc, doc.indexOf('deny') + 4)))
+      .toEqual({ text: '---\nperm:\n    bash: deny\n---\nbody', from: doc.indexOf('deny') + 6, to: doc.indexOf('deny') + 6 })
+  })
+
+  it('降级 frontmatter 内嵌套行：Shift+Tab 删至多 2 空格（#420）', () => {
+    const doc = '---\nperm:\n    bash: deny\n---\nbody'
+    expect(typed(makeEditView(doc, doc.indexOf('deny') + 4), true))
+      .toEqual({ text: '---\nperm:\n  bash: deny\n---\nbody', from: doc.indexOf('deny') + 2, to: doc.indexOf('deny') + 2 })
   })
 
   it('IME 组合进行中不接管', () => {
