@@ -266,11 +266,23 @@ function operationById(id: string): KeybindingOperation | undefined {
   return byId.get(id) ?? runtimeOps.get(id)
 }
 
-/** #359 T10：chord 是否含 Tab 键本体（含 chord 任一段）——Tab 属情境输入
- *  固定链（#125：围栏越界 → 表格导航 → 行缩进），任何命令绑定 Tab 都会被
- *  keybindingRouter 先于 CM6 keymap 拦截而破坏该链，注册期即拒。 */
-export function chordContainsTab(chord: string): boolean {
-  return chord.split(' ').some((step) => step.split('+').includes('tab'))
+/** #359 T10（#427 修订）：chord 是否含保留 Tab 段——段内键为 tab 且无
+ *  ctrl/alt/meta 修饰（裸 Tab 与 Shift+Tab）。输入须为 normalizeChord
+ *  归一化形态（小写、修饰序固定）——本函数不做归一化，直接喂原始
+ *  大小写形态（如 'Ctrl+Tab'）会漏判；调用点（默认绑定校验）已先归一。这两形态属 #125 情境输入
+ *  固定链（围栏越界 → 表格导航 → 行缩进），任何命令绑定都会被
+ *  keybindingRouter 先于 CM6 keymap 拦截（stopPropagation）破坏该链，
+ *  注册期即拒。ctrl/alt/meta+Tab 不参与三段链（链只匹配裸 Tab/Shift+Tab
+ *  语义），#427 起放行；宿主/操作系统可能占用个别修饰组合（如宿主标签
+ *  切换），注册成功不保证按键事件可达——组件文档明示。 */
+export function chordContainsReservedTab(chord: string): boolean {
+  return chord.split(' ').some((step) => {
+    const parts = step.split('+')
+    if (!parts.includes('tab')) {
+      return false
+    }
+    return !parts.some((p) => p === 'ctrl' || p === 'alt' || p === 'meta')
+  })
 }
 
 const modifiers = new Set(['ctrl', 'alt', 'shift', 'meta'])

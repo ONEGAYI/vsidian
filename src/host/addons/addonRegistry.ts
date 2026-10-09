@@ -214,9 +214,10 @@ export class AddonRegistry {
   }
 }
 
-/** 生产注册表端口默认值（experimental 表含 T02 起提供的 cm6 实验入口与
- *  #410 起提供的 headingFold 实验入口——cm6 1.1.0 = #406 起暴露面含
- *  language 语法树子集，页面 SDK 的 experimental.* 形状随公开声明冻结） */
+/** 生产注册表端口默认值（experimental 表含 T02 起提供的 cm6 实验入口、
+ *  #410 起提供的 headingFold 实验入口与 #426 起提供的 viewIdentity 实验
+ *  入口——cm6 1.1.0 = #406 起暴露面含 language 语法树子集，页面 SDK 的
+ *  experimental.* 形状随公开声明冻结） */
 export function createDefaultRegistryPorts(
   findExtension: (id: string) => { packageJSON: unknown } | undefined,
 ): AddonRegistryPorts {
@@ -225,6 +226,7 @@ export function createDefaultRegistryPorts(
     experimental: {
       cm6: ADDON_EXPERIMENTAL_CM6_VERSION,
       headingFold: ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION,
+      viewIdentity: ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION,
     },
     officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
     findExtension,
@@ -242,3 +244,9 @@ export const ADDON_EXPERIMENTAL_CM6_VERSION = '1.1.0'
  *  含本版本才判兼容。1.0.0：首版候选（folds/foldable 查询 + apply 五
  *  操作与 foldAt/unfoldAt 批量组合、upToLevel 参数化），Live-only */
 export const ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION = '1.0.0'
+
+/** #426 实验入口版本：experimental.viewIdentity（页面 SDK 的视图身份
+ *  反查面）——组件声明 `experimental: { viewIdentity: '<range>' }` 且范围
+ *  含本版本才判兼容。1.0.0：首版候选（instanceIdOf：CM6 EditorView →
+ *  views 面实例 ID，未装配身份的 view 返回 null） */
+export const ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION = '1.0.0'

@@ -28,6 +28,7 @@ import {
 } from '../shared/addonCommands'
 import { setRuntimeOperations, type RuntimeKeybindingOperation } from '../shared/keybindings'
 import { registerContextMenuItem, CONTEXT_MENU_ITEMS, type MenuContextSnapshot } from '../shared/contextMenu'
+import type { AddonViewHandle } from '../shared/addonEditApi'
 
 /** 内置菜单项 id 全集（覆写尝试的结构性对照面：localId 命名空间化后
  *  不得命中任何内置 id——前缀隔离天然满足，此处仅防御性复核） */
@@ -60,7 +61,7 @@ interface CommandEntry {
   addonId: string
   generation: number
   report: AddonCommandReport
-  handler: () => void
+  handler: (target: AddonViewHandle | null) => void
 }
 
 export interface AddonCommandsRuntimeEnv {
@@ -78,11 +79,21 @@ export class AddonCommandsRuntime {
   private readonly commands = new Map<string, CommandEntry>()
   /** 菜单 cleanup 句柄（per addon 收集——releaseAddon 统一撤） */
   private readonly menuCleanups = new Map<string, Array<() => void>>()
+  /** #427 活动视图句柄构造（main.ts 装载器安装后绑定——沿 addonUi
+   *  bindHandleFactory 先例解装配环；缺省回调收 null） */
+  private activeTargetFn: ((addonId: string) => AddonViewHandle | null) | undefined
 
   constructor(private readonly env: AddonCommandsRuntimeEnv) {}
 
+  /** #427 绑定活动视图句柄构造：execute 时按组件解析「命令激活时刻的
+   *  焦点视图」（焦点嵌入内部 Live → 该实例，否则主正文；无活动视图
+   *  null）——回调防御链（焦点探针 + 登记表判别）由平台承担 */
+  bindActiveTarget(make: (addonId: string) => AddonViewHandle | null): void {
+    this.activeTargetFn = make
+  }
+
   /** SDK commands.register 后端：校验 → 存管 → 同步运行期表 → 上报 */
-  registerCommand(addonId: string, generation: number, def: AddonCommandDefinition, handler: () => void): AddonCommandRegistrationOutcome {
+  registerCommand(addonId: string, generation: number, def: AddonCommandDefinition, handler: (target: AddonViewHandle | null) => void): AddonCommandRegistrationOutcome {
     const reject = (reason: string): AddonCommandRegistrationOutcome => {
       this.env.log?.(`addon ${addonId} command-register rejected: ${reason}`)
       return { ok: false, reason, dispose: () => {} }
@@ -188,14 +199,20 @@ export class AddonCommandsRuntime {
     disposeMenu()
   }
 
-  /** 执行命令回调（快捷键本地分支与宿主回发两入口共用；返回执行结局） */
+  /** 执行命令回调（快捷键本地分支、宿主回发与菜单点击三入口共用；回调
+   *  携带命令激活时刻的活动视图句柄（#427——无活动视图为 null）；返回
+   *  执行结局） */
   execute(commandId: string): 'executed' | 'unknown' {
     const entry = this.commands.get(commandId)
     if (!entry) {
       return 'unknown'
     }
     try {
-      entry.handler()
+      // target 解析入 try：活动句柄构造链将来演化若抛错，走同一 catch
+      // 归因留痕（不静默当 null 执行——错误目标比不执行更危险；键路由/
+      // 宿主回发仍不断链）
+      const target = this.activeTargetFn?.(entry.addonId) ?? null
+      entry.handler(target)
     } catch (err) {
       // 回调异常不外溢（键路由/宿主回发不因组件代码抛错断链）
       this.env.log?.(`addon ${entry.addonId} command ${commandId} handler error: ${String(err)}`)

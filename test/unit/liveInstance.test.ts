@@ -9,6 +9,7 @@
 //   只派发一笔 edit.request（不重复注册监听/双重消费，验收第 3 条）。
 import { afterEach, describe, expect, it } from 'vitest'
 import { LiveEditorInstance, type LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
+import { addonInstanceIdField } from '../../src/webview/addonViewIdentity'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { ImageResourceManager } from '../../src/webview/imageResource'
 import type { WebviewToHost } from '../../src/shared/protocol'
@@ -363,5 +364,26 @@ describe('T06 SDK 编辑面（#355）：快照/applyEdits/凭据结算', () => {
     instance.handleEditAck({ kind: 'edit.ack', seq: second[1]!.seq, ok: true, version: 4 })
     expect((await promiseA).ok).toBe(true)
     expect((await promiseB).ok).toBe(true)
+  })
+})
+
+describe('#426 实例身份 field（view → instanceId 反查基座）', () => {
+  it('setAddonBehaviorIdentity 把实例 ID 写进 view state；注册前为 null', () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-identity', '# 标题\n\n正文')
+    // 注册前：身份未知（null——SDK 反查面据此判「非平台实例或未注册」）
+    expect(instance.view!.state.field(addonInstanceIdField, false)).toBeNull()
+    instance.setAddonBehaviorIdentity('main')
+    expect(instance.view!.state.field(addonInstanceIdField, false)).toBe('main')
+    // 重复告知以新代旧（实例重建场景的注册方口径）
+    instance.setAddonBehaviorIdentity('embed:h1')
+    expect(instance.view!.state.field(addonInstanceIdField, false)).toBe('embed:h1')
+  })
+
+  it('实例销毁后再告知身份不抛错（view 不在场只写内存字段，不 dispatch）', () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-identity-destroy', '# T\n')
+    instance.destroy()
+    expect(() => instance.setAddonBehaviorIdentity('main')).not.toThrow()
   })
 })

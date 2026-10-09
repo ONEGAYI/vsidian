@@ -135,6 +135,10 @@ async function waitForPageLoaded(addonId: string): Promise<void> {
   await poll(`页面装载 ${addonId}`, async () => {
     const events = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<{ kind: string; addonId: string; ok?: boolean }>
     return events.some((e) => e.addonId === addonId && e.kind === 'outbound.loaded' && e.ok === true) ? true : undefined
+  }, 30000, async () => {
+    // 诊断：全部页面事件（定位「宿主未下发」vs「装载失败 ok:false」）
+    const events = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<Record<string, unknown>>
+    return `addonPageEvents=${JSON.stringify(events.slice(-12))}`
   })
 }
 

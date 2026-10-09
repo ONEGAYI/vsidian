@@ -32,12 +32,13 @@ import type {
   AddonUnloadOutcome,
   VsidianAddonPageSdk,
 } from '../shared/addonPage'
-import type { AddonViewHandle, AddonViewsFacet } from '../shared/addonEditApi'
+import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '../shared/addonEditApi'
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
 import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
 import type { AddonViewsRuntime } from './addonViews'
+import { addonInstanceIdField } from './addonViewIdentity'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
 import type { AddonCommandsRuntime } from './addonCommands'
 import type { AddonUiRuntime } from './addonUi'
@@ -381,6 +382,15 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
               : { ok: false, reason: 'view-disposed' }),
           }
         : undefined
+    // #426 视图身份反查面（仅编辑器页提供；与 headingFold 同款「入口键
+    // 恒在、内容按页给」形态）。闭包实现无 this 依赖——解构裸传安全
+    // （#426 第 4 条实现形态契约，单测钉住）
+    const viewIdentityFacet: AddonViewIdentityFacet | undefined =
+      page === 'editor'
+        ? {
+            instanceIdOf: (view) => view.state.field(addonInstanceIdField, false) ?? null,
+          }
+        : undefined
     const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
       ? {
           register: (registration) => {
@@ -397,7 +407,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
-      experimental: { cm6: env.cm6, headingFold: headingFoldFacet },
+      experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {

@@ -17,7 +17,8 @@
 | 入口 | 版本 | 状态 | 实际发布日期 | 兼容边界 |
 | --- | --- | --- | --- | --- |
 | `cm6` | 1.1.0 | 候选（未发行） | —（未发行不携带日期） | 页面共享 CM6 运行时（experimental.cm6）。1.1.0 = #406 起暴露面含 language 语法树子集（syntaxTree / ensureSyntaxTree / syntaxTreeAvailable——最小集合，注册类成员不纳入）。使用须在清单 experimental 声明 cm6 兼容范围且含本版本；组件不得重打包 CM6（构建桥拒绝值导入 + 产物静态标记双防线）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
-| `headingFold` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（阅读模式不开放，#409 定案）。折叠本体随 #409 落地。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
+| `headingFold` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（阅读模式不开放，#409 定案）。#426 起 folds 与 foldable 共享同一 doc 版本缓存（调用成本 O(标题数) 过滤，非全文档重扫），实例寻址可经 viewIdentity.instanceIdOf 反查。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
+| `viewIdentity` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 视图身份反查面（experimental.viewIdentity，#426）。1.0.0 首版候选：instanceIdOf（CM6 EditorView → views 面实例 ID；未装配身份的 view 返回 null）——keymap/扩展回调拿到 view 后据此反查实例，headingFold 等按 ID 寻址的 API 不再依赖「扩展槽仅挂主正文 Live 实例」的装配范围推定。闭包实现无 this 依赖（解构裸传安全）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 
 ### 稳定 API 移除规则
 
@@ -45,6 +46,7 @@
     - [`views-editor` 统一视图与编辑面（views / editor）](#views-editor)
     - [`cm6-experimental` 实验入口：共享 CM6 运行时（experimental.cm6）](#cm6-experimental)
     - [`heading-fold-experimental` 实验入口：标题折叠查询与命令（experimental.headingFold）](#heading-fold-experimental)
+    - [`view-identity-experimental` 实验入口：视图身份反查（experimental.viewIdentity）](#view-identity-experimental)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
@@ -384,11 +386,13 @@ export interface VsidianAddonPageSdk {
   /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */
   readonly addon: { id: string; generation: number; page: AddonPageKind }
   /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
-   *  运行时；headingFold = 标题折叠查询与命令（#410）。使用前须在清单
-   *  experimental 声明对应入口的兼容范围 */
+   *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =
+   *  视图身份反查（#426）。使用前须在清单 experimental 声明对应入口的
+   *  兼容范围 */
   readonly experimental: {
     readonly cm6?: AddonCm6Runtime
     readonly headingFold?: AddonHeadingFoldFacet
+    readonly viewIdentity?: AddonViewIdentityFacet
   }
   /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、
    *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子
@@ -733,9 +737,9 @@ export interface AddonCm6LanguageRuntime {
 **目标**：页面 SDK 的标题折叠实验入口（sdk.experimental.headingFold，#410）：按 views 面实例 ID 查询有效折叠区间（folds）与可折叠区间全集（foldable），并执行折叠命令（apply 五操作、foldAt/unfoldAt 按区间键批量组合、foldAll 可 upToLevel 参数化）。折叠本体随 #409 落地（Live 实例的 CM6 StateField）；查询消费本体派生视图（不复制派生逻辑），命令直传本体五操作执行体——编程触发与用户触发同链路（effect 直驱，无 DOM-only 路径）。
 
 语义要点：
-- **适用模式**：Live-only（#409 定案阅读模式不开放）：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址（main / embed occurrence 键），折叠态随实例独立。
+- **适用模式**：Live-only（#409 定案阅读模式不开放）：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址（main / embed occurrence 键），折叠态随实例独立；keymap/扩展回调拿到 CM6 view 时经 experimental.viewIdentity.instanceIdOf 反查实例 ID（#426，不依赖扩展槽装配范围推定）。
 - **坐标与数据形状**：全文 UTF-16 code unit 偏移、页面全程 LF。span = { key（标题起始行行首）、level（ATX 1–6 / Setext 1–2）、hideFrom（标题块行尾）、hideTo（下一级别 ≤ 自身的标题行首或文档末尾）}；序列化面不含标题文本摘要（大文档保持精简——作者可从快照 text 与 key 对应标题行自取）。
-- **生命周期**：折叠是视图态（零写回、不 dirty、不进撤销栈、不跨会话持久化）；全文替换显式清空、编辑时键随增量映射（#409 本体语义）。原始键集不对外——folds 是「折叠键 ∩ 可折叠标题键」的有效派生视图，脱靶键经此过滤天然无行为（foldAt/unfoldAt 的脱靶键静默忽略；applied = 有效折叠区间前后变化数）。组件代次终结后的迟到调用拒绝 view-disposed。
+- **生命周期**：折叠是视图态（零写回、不 dirty、不进撤销栈、不跨会话持久化）；全文替换显式清空、编辑时键随增量映射（#409 本体语义）。原始键集不对外——folds 是「折叠键 ∩ 可折叠标题键」的有效派生视图，脱靶键经此过滤天然无行为（foldAt/unfoldAt 的脱靶键静默忽略；applied = 有效折叠区间前后变化数）。#426 起 folds 与 foldable 共享同一 doc 版本的派生缓存（调用成本为 O(标题数) 过滤而非全文档重扫；返回逐项拷贝，组件侧变异不污染缓存），按键热路径消费无需自建行门槛节流。组件代次终结后的迟到调用拒绝 view-disposed。
 - **错误与拒绝**：三种可辨认拒绝：view-disposed / read-only / invalid-request（upToLevel 仅 foldAll 接受且须为 1–6 整数；区间键须为非负整数）。使用前须在清单 experimental 声明 headingFold 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。
 
 签名事实源：`src/shared/addonFoldApi.ts`
@@ -804,6 +808,33 @@ export interface AddonHeadingFoldFacet {
 ```
 
 **验证**：`test/unit/addonFoldApi.test.ts`、`test/unit/addonHeadingFoldApi.test.ts`、`test/browser/addonHeadingFold.mjs`
+
+### `view-identity-experimental` 实验入口：视图身份反查（experimental.viewIdentity）
+
+**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#426
+> **实验入口**：清单 `experimental` 声明名 `viewIdentity`——兼容边界见上方实验入口兼容清单。
+
+**目标**：页面 SDK 的视图身份反查面（sdk.experimental.viewIdentity，#426）：CM6 EditorView → views 面实例 ID。keymap/扩展回调拿到的是 view，按实例 ID 寻址的 API（headingFold 查询与命令等）经此换算——不再依赖「扩展槽仅挂主正文 Live 实例」的装配范围推定（该装配范围契约见开发指南「视图身份与扩展槽」）。
+
+语义要点：
+- **生命周期**：身份承载于 Live 实例的 CM6 StateField，注册进视图注册表时写入（main 恒 main；embed 为 embed:<hostId>）；实例销毁随 state 消亡。未装配身份的 view（非平台实例或尚未注册）返回 null——组件据此自判。方法为闭包实现，无 this 依赖（解构裸传安全；SDK 各面通用的接收者绑定约束见开发指南）。
+- **错误与拒绝**：使用前须在清单 experimental 声明 viewIdentity 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。
+
+签名事实源：`src/shared/addonEditApi.ts`
+
+```ts
+/** #426 视图身份反查面（experimental.viewIdentity 的内容）：CM6
+ *  EditorView → 平台实例 ID。keymap/扩展回调拿到的是 view，按 ID 寻址
+ *  的 API（headingFold 等）经此换算——不再依赖「扩展槽仅挂主正文」的
+ *  装配范围推定。方法为闭包实现（无 this 依赖，解构裸传安全） */
+export interface AddonViewIdentityFacet {
+  /** 反查实例 ID：装配在平台 Live 实例（main/embed）上的 view 返回其
+   *  views 面句柄 ID；未装配身份的 view（非平台实例或尚未注册）null */
+  instanceIdOf(view: import('@codemirror/view').EditorView): string | null
+}
+```
+
+**验证**：`test/unit/addonPageLoader.test.ts`、`test/unit/liveInstance.test.ts`、`test/unit/addonRegistry.test.ts`
 
 ### `channel` 页面与宿主通道
 
@@ -1700,12 +1731,12 @@ export interface AddonRendererStoreV1 {
 
 **分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#359（T10）
 
-**目标**：新增自己的可绑定命令（title 自由文本，不进 Vsidian 内置字典）：进入统一快捷键管理（冲突检查/绑定/显式清空/恢复默认）与宿主命令面板；执行链三入口（快捷键路由、宿主命令面板、菜单项点击）共用组件回调。
+**目标**：新增自己的可绑定命令（title 自由文本，不进 Vsidian 内置字典）：进入统一快捷键管理（冲突检查/绑定/显式清空/恢复默认）与宿主命令面板；执行链三入口（快捷键路由、宿主命令面板、菜单项点击）共用组件回调。#427 起回调携带目标视图句柄（AddonViewHandle | null）——平台在执行时刻解析当前活动视图（焦点嵌入内部 Live → 该实例，否则主正文；无活动视图 null），组件无需自建焦点探针防御链。
 
 语义要点：
 - **适用模式**：live / reading / both 由代码声明；写操作快捷键仅在 Live 正文接管宿主绑定——源码模式与设置页输入不接管（沿键位注册表 writes 门控）。
 - **生命周期**：命名空间 ID 由平台注入（<组件 ID>.<局部 ID>）；局部 ID 禁点号（含点即伪造跨组件/内置身份）。停用/故障/代次释放整组件回收注册——不影响内置命令，不清用户键位。
-- **错误与拒绝**：duplicate-command、tab-forbidden（#125 Tab 固定链——「围栏越界 → 表格导航 → 行缩进」优先级不可绕）、非法 chord 等明确拒绝码；普通 API 拒绝不算故障。
+- **错误与拒绝**：duplicate-command、tab-forbidden（#125 Tab 固定链——「围栏越界 → 表格导航 → 行缩进」优先级不可绕；#427 收窄为裸 Tab 与 Shift+Tab 段，ctrl/alt/meta+Tab 放行——宿主/OS 占用组合不保证事件可达）、非法 chord 等明确拒绝码；普通 API 拒绝不算故障。
 
 签名事实源：`src/shared/addonCommands.ts`
 
@@ -1758,9 +1789,12 @@ export type AddonDefaultBindingsProblem = 'not-string' | 'invalid-chord' | 'tab-
 /** T10（#359）SDK 命令面（仅编辑器页）：注册自己的可绑定命令——操作进入
  *  统一快捷键管理（冲突检查/绑定/清空/恢复），命令面板经宿主命令可达。
  *  命名空间由平台注入（`<addonId>.<localId>`）；同名注册与非法形状明确
- *  拒绝（普通 API 拒绝，不算故障）。 */
+ *  拒绝（普通 API 拒绝，不算故障）。
+ *  #427 起回调携带目标视图句柄：执行时刻由平台解析当前活动视图（焦点
+ *  嵌入内部 Live → 该实例，否则主正文；无活动视图 null）——组件无需
+ *  自建焦点探针防御链。 */
 export interface AddonSdkCommandsFacet {
-  register(def: AddonCommandDefinition, handler: () => void): AddonCommandRegisterResult & { dispose(): void }
+  register(def: AddonCommandDefinition, handler: (target: AddonViewHandle | null) => void): AddonCommandRegisterResult & { dispose(): void }
 }
 ```
 

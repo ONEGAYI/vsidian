@@ -17,7 +17,7 @@
 import type { Extension } from '@codemirror/state'
 import type { AddonHeadingFoldFacet } from './addonFoldApi'
 import type { AddonRenderersFacet } from './addonRenderers'
-import type { AddonViewHandle, AddonViewsFacet } from './addonEditApi'
+import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from './addonEditApi'
 import type { AddonBehaviorsFacet } from './addonBehaviors'
 import type {
   AddonCommandDefinition,
@@ -50,9 +50,12 @@ export interface AddonCm6Runtime {
 /** T10（#359）SDK 命令面（仅编辑器页）：注册自己的可绑定命令——操作进入
  *  统一快捷键管理（冲突检查/绑定/清空/恢复），命令面板经宿主命令可达。
  *  命名空间由平台注入（`<addonId>.<localId>`）；同名注册与非法形状明确
- *  拒绝（普通 API 拒绝，不算故障）。 */
+ *  拒绝（普通 API 拒绝，不算故障）。
+ *  #427 起回调携带目标视图句柄：执行时刻由平台解析当前活动视图（焦点
+ *  嵌入内部 Live → 该实例，否则主正文；无活动视图 null）——组件无需
+ *  自建焦点探针防御链。 */
 export interface AddonSdkCommandsFacet {
-  register(def: AddonCommandDefinition, handler: () => void): AddonCommandRegisterResult & { dispose(): void }
+  register(def: AddonCommandDefinition, handler: (target: AddonViewHandle | null) => void): AddonCommandRegisterResult & { dispose(): void }
 }
 
 /** T11（#360）SDK 界面面（仅编辑器页）：往**平台预定义挂载点**新增自己
@@ -119,11 +122,13 @@ export interface VsidianAddonPageSdk {
   /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */
   readonly addon: { id: string; generation: number; page: AddonPageKind }
   /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
-   *  运行时；headingFold = 标题折叠查询与命令（#410）。使用前须在清单
-   *  experimental 声明对应入口的兼容范围 */
+   *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =
+   *  视图身份反查（#426）。使用前须在清单 experimental 声明对应入口的
+   *  兼容范围 */
   readonly experimental: {
     readonly cm6?: AddonCm6Runtime
     readonly headingFold?: AddonHeadingFoldFacet
+    readonly viewIdentity?: AddonViewIdentityFacet
   }
   /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、
    *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子

@@ -18,6 +18,7 @@
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, Transaction, type Extension } from '@codemirror/state'
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
+import { addonInstanceIdField, setAddonInstanceId } from './addonViewIdentity'
 import type { DocumentChangeReason, HostToWebview, PasteHistory, PasteStage, SerChange, WebviewToHost } from '../shared/protocol'
 import type { AddonApplyEditsResult, AddonEditorSnapshot, AddonSelectionRange } from '../shared/addonEditApi'
 import type {
@@ -58,8 +59,6 @@ import { liveMermaid, rendererLanguagesChanged } from './liveMermaid'
 import {
   applyHeadingFoldOperation,
   clampSelectionOutOfFolds,
-  collectHeadings,
-  effectiveHeadingFolds,
   foldableSpansCached,
   headingFoldExtension,
   headingFoldField,
@@ -923,13 +922,18 @@ export class LiveEditorInstance {
   }
 
   // ---- #410 附加组件标题折叠面（experimental.headingFold 的实例侧实现） ----
-  // 查询消费 headingFold 纯函数族（collectHeadings / effectiveHeadingFolds /
-  // foldableHeadingSpans——不复制逻辑）；命令消费 effect 驱动操作
+  // 查询消费 headingFold 纯函数族（headingSpansOf 的缓存入口
+  // foldableSpansCached——#426 起查询与计数统一走共享缓存，不复制逻辑）；
+  // 命令消费 effect 驱动操作
   // （applyHeadingFoldOperation / setHeadingFolds——编程触发与用户触发
   // 同链路，无 DOM-only 路径）。Live-only 门控（mode/只读/句柄存活）由
   // addonViews 层承担，本层只认 view 在场。全程零写回（折叠是视图态）。
 
-  /** 实例侧有效折叠派生视图（LF 偏移；视图不在场 null → 调用方折 view-disposed） */
+  /** 实例侧有效折叠派生视图（LF 偏移；视图不在场 null → 调用方折 view-disposed）。
+   *  #426 起走 foldableSpansCached 共享缓存按折叠键过滤（folds = 可折叠
+   *  全集 ∩ 折叠键，语义与 effectiveHeadingFolds 直查等价）——同一 doc
+   *  版本内按键热路径的重复查询不再全文档重扫，调用成本 O(标题数) 过滤；
+   *  返回前逐项拷贝（附加组件侧变异不得污染共享缓存，对齐 foldable 口径） */
   headingFoldsForAddon(): readonly AddonHeadingFoldSpan[] | null {
     const view = this.view
     if (!view) {
@@ -937,7 +941,9 @@ export class LiveEditorInstance {
     }
     const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
     const tree = view.state.field(liveDecorationsField, false)?.tree
-    return effectiveHeadingFolds(keys, collectHeadings(view.state.doc, tree), view.state.doc)
+    return foldableSpansCached(view.state.doc, tree)
+      .filter((span) => keys.has(span.key))
+      .map((span) => ({ ...span }))
   }
 
   /** 实例侧全部可折叠标题区间（空节/纯空白节排除；共享缓存路径——与
@@ -1018,18 +1024,27 @@ export class LiveEditorInstance {
     return { applied: countChanged(before, this.effectiveFoldKeys(view)) }
   }
 
-  /** 当前有效折叠键集（派生口径——原始键集不出本类） */
+  /** 当前有效折叠键集（派生口径——原始键集不出本类）。#426 起走
+   *  foldableSpansCached 共享缓存过滤（apply/foldAt/unfoldAt 的前后
+   *  计数路径同享缓存，语义与 effectiveHeadingFolds 直查等价） */
   private effectiveFoldKeys(view: EditorView): ReadonlySet<number> {
     const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
     const tree = view.state.field(liveDecorationsField, false)?.tree
-    return new Set(effectiveHeadingFolds(keys, collectHeadings(view.state.doc, tree), view.state.doc).map((f) => f.key))
+    return new Set(foldableSpansCached(view.state.doc, tree)
+      .filter((span) => keys.has(span.key))
+      .map((span) => span.key))
   }
 
   // ---- T07（#356）附加组件输入行为链（内核情境门控后的驱动点） ----
 
-  /** 行为链驱动的实例身份（注册进 addonViews 时由注册方告知） */
+  /** 行为链驱动的实例身份（注册进 addonViews 时由注册方告知）。同一
+   *  入口也是 #426 身份 field 的写入点——view 在场即同步写入 state，
+   *  SDK 反查面（experimental.viewIdentity）据此取值 */
   setAddonBehaviorIdentity(instanceId: string): void {
     this.addonBehaviorInstanceId = instanceId
+    if (this.view) {
+      this.view.dispatch({ effects: setAddonInstanceId.of(instanceId) })
+    }
   }
 
   /** 实例的 addonViews 句柄键（注册前 undefined；#360 T11 界面回调的
@@ -2462,6 +2477,10 @@ export class LiveEditorInstance {
     }
     return [
       EditorView.lineWrapping,
+      // #426 实例身份 field（view → instanceId 反查基座）：注册进 addonViews
+      // 时经 setAddonBehaviorIdentity 写入值（main / embed:<hostId>）——
+      // SDK experimental.viewIdentity.instanceIdOf 据此反查
+      addonInstanceIdField,
       // 宿主明暗主题声明：初始按装配时刻 deps.initialDark，切换时热重配
       // （applyDarkTheme）。baseTheme 内建变体接管 caret 等颜色——不硬编码
       this.darkCompartment.of(EditorView.darkTheme.of(this.hostDarkApplied === true)),

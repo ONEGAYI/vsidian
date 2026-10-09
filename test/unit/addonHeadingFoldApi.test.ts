@@ -177,6 +177,36 @@ describe('查询面：folds / foldable', () => {
     h.instance.destroy()
   })
 
+  it('#426 folds 走可折叠集共享缓存：结果与 foldable 同源一致且返回拷贝（变异不污染后续查询与下游消费）', async () => {
+    const h = mountHarness()
+    await load(h)
+    const facet = h.sdk()!.experimental.headingFold!
+    expect(facet.foldAt('main', [T1_KEY, T2_KEY])).toEqual({ ok: true, applied: 2 })
+    const folds = facet.folds('main')
+    expect(folds.ok).toBe(true)
+    if (!folds.ok) return
+    // 缓存路径的等价不变量：folds = foldable 全集按折叠键过滤（保序、
+    // span 形状一致）——实现改走 foldableSpansCached 后语义不变
+    const foldable = facet.foldable('main')
+    expect(foldable.ok).toBe(true)
+    if (!foldable.ok) return
+    expect(folds.spans).toEqual(foldable.spans.filter((s) => s.key === T1_KEY || s.key === T2_KEY))
+    // 变异 folds 返回数组不污染共享缓存：后续 folds/foldable 查询与
+    // foldAll 消费仍取真实标题区间
+    const mutable = folds.spans as { key: number; level: number; hideFrom: number; hideTo: number }[]
+    mutable[0] = { ...mutable[0]!, key: 9999 }
+    mutable.push({ key: 8888, level: 1, hideFrom: 0, hideTo: 1 })
+    const reFolds = facet.folds('main')
+    expect(reFolds.ok).toBe(true)
+    if (!reFolds.ok) return
+    expect(reFolds.spans.map((s) => s.key)).toEqual([T1_KEY, T2_KEY])
+    const reFoldable = facet.foldable('main')
+    expect(reFoldable.ok).toBe(true)
+    if (!reFoldable.ok) return
+    expect(reFoldable.spans.map((s) => s.key)).toEqual([T1_KEY, T2_KEY, BLANK_KEY])
+    h.instance.destroy()
+  })
+
   it('folds 初始为空；foldAt 后返回有效折叠派生视图（区间语义与本体一致）', async () => {
     const h = mountHarness()
     await load(h)

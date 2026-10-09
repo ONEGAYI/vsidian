@@ -12,6 +12,7 @@ import { Compartment, EditorState, StateField, type Extension, type StateField a
 import { EditorView } from '@codemirror/view'
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 import { AddonBehaviorRuntime } from '../../src/webview/addonBehaviors'
+import { addonInstanceIdField, setAddonInstanceId } from '../../src/webview/addonViewIdentity'
 import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
 import { installAddonRenderersBridge } from '../../src/webview/addonRenderers'
@@ -881,5 +882,40 @@ describe('#395 回归钉住：换代 load 指令按最新代次落地（宿主�
     const dup = await h.handle.load(manifest({ generation: 1 }))
     expect(dup).toMatchObject({ ok: false, reason: 'already-loaded' })
     expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+  })
+})
+
+describe('#426 视图身份反查面（experimental.viewIdentity）', () => {
+  it('instanceIdOf 反查装配了身份 field 的 view；未装配 view 返回 null', async () => {
+    const h = harness()
+    let identity: import('../../src/shared/addonPage').VsidianAddonPageSdk['experimental']['viewIdentity'] | undefined
+    registerFactory(h, (sdk) => { identity = sdk.experimental.viewIdentity })
+    await h.handle.load(manifest())
+    expect(identity).toBeDefined()
+    const view = new EditorView({
+      state: EditorState.create({ extensions: [addonInstanceIdField] }),
+      parent: document.body,
+    })
+    view.dispatch({ effects: setAddonInstanceId.of('main') })
+    expect(identity!.instanceIdOf(view)).toBe('main')
+    const plain = new EditorView({ state: EditorState.create(), parent: document.body })
+    expect(identity!.instanceIdOf(plain)).toBeNull()
+    view.destroy()
+    plain.destroy()
+  })
+
+  it('instanceIdOf 为闭包实现——解构裸传不丢接收者（#426 第 4 条实现形态）', async () => {
+    const h = harness()
+    let identity: import('../../src/shared/addonPage').VsidianAddonPageSdk['experimental']['viewIdentity'] | undefined
+    registerFactory(h, (sdk) => { identity = sdk.experimental.viewIdentity })
+    await h.handle.load(manifest())
+    const view = new EditorView({
+      state: EditorState.create({ extensions: [addonInstanceIdField] }),
+      parent: document.body,
+    })
+    view.dispatch({ effects: setAddonInstanceId.of('embed:h1') })
+    const bare = identity!.instanceIdOf
+    expect(bare(view)).toBe('embed:h1')
+    view.destroy()
   })
 })

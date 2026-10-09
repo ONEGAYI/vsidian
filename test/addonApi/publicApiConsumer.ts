@@ -28,6 +28,7 @@ import type {
   AddonLoadFailureReason,
   AddonPageFactory,
   AddonPageKind,
+  AddonSdkCommandsFacet,
   VsidianAddonPageSdk,
 } from '../../src/shared/addonPage'
 import type {
@@ -39,6 +40,7 @@ import type {
   AddonEditorSnapshot,
   AddonSelectionRange,
   AddonViewHandle,
+  AddonViewIdentityFacet,
   AddonViewInfo,
   AddonViewType,
   AddonViewsFacet,
@@ -237,6 +239,17 @@ export type HeadingFoldShapes = {
   queryResult: AddonHeadingFoldQueryResult
   commandResult: AddonHeadingFoldCommandResult
 }
+
+/** #426 视图身份反查面（experimental.viewIdentity 的内容） */
+export type ViewIdentitySurface = Pick<AddonViewIdentityFacet, 'instanceIdOf'>
+/** 反查输入是共享 CM6 运行时的 EditorView（组件 keymap/扩展回调的 view） */
+export type ViewIdentityParam = Parameters<AddonViewIdentityFacet['instanceIdOf']>[0]
+
+/** #427 命令回调签名：携带目标视图句柄（无活动视图 null）——删参/改形即编译失败 */
+export const commandsHandlerParamPinned: Equals<
+  Parameters<Parameters<AddonSdkCommandsFacet['register']>[1]>,
+  [AddonViewHandle | null]
+> = true
 
 /** #404 组件数据目录面（读写监听六入口 + 拒绝码钉住） */
 export type StorageSurface = Pick<

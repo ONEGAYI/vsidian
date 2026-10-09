@@ -87,8 +87,11 @@ describe('T10 webview 命令注册表', () => {
     const { runtime } = makeRuntime()
     const r1 = runtime.registerCommand(ADDON, 1, { id: 'bold.x', title: 'x', mode: 'both' }, () => {}); expect(!r1.ok && r1.reason).toBe('local-id:dot')
     const r2 = runtime.registerCommand(ADDON, 1, { id: 'other.addon.cmd', title: 'x', mode: 'both' }, () => {}); expect(!r2.ok && r2.reason).toBe('local-id:dot')
-    const r3 = runtime.registerCommand(ADDON, 1, { id: 'tabbed', title: 'x', mode: 'both', defaultBindings: ['ctrl+tab'] }, () => {}); expect(!r3.ok && r3.reason)
+    // #427 起 ctrl+tab 放行（不参与 #125 三段链）；保留 Tab 段（裸/Shift+Tab）仍拒
+    const r3 = runtime.registerCommand(ADDON, 1, { id: 'tabbed', title: 'x', mode: 'both', defaultBindings: ['shift+tab'] }, () => {}); expect(!r3.ok && r3.reason)
       .toBe('default-bindings:tab-forbidden')
+    const r3b = runtime.registerCommand(ADDON, 1, { id: 'tabbed-mod', title: 'x', mode: 'both', defaultBindings: ['ctrl+tab'] }, () => {}); expect(r3b.ok)
+      .toBe(true)
   })
 
   it('dispose 单条撤销：运行期表移除、空表上报', () => {
@@ -206,5 +209,67 @@ describe('T12 命令回调异常升级为全组件故障', () => {
     expect(runtime.execute(`${ADDON}.ok`)).toBe('executed')
     expect(runtime.execute('unknown.command')).toBe('unknown')
     expect(faults).toEqual([])
+  })
+})
+
+describe('#427 命令回调目标视图句柄', () => {
+  beforeEach(() => {
+    __resetRuntimeOperationsForTest()
+    __resetContextMenuRegistryForTest()
+  })
+  afterEach(() => {
+    __resetRuntimeOperationsForTest()
+    __resetContextMenuRegistryForTest()
+  })
+
+  /** 测试用视图句柄（AddOnViewHandle 形状——真实构造走装载器 buildViewHandle） */
+  const fakeHandle = (instanceId: string) => ({
+    info: {
+      instanceId,
+      targetDocUri: `file:///doc-${instanceId}.md`,
+      mode: 'live' as const,
+      viewType: 'main' as const,
+      editable: true,
+    },
+    editor: {
+      getSnapshot: () => ({ ok: false as const, reason: 'view-disposed' as const }),
+      applyEdits: () => Promise.resolve({ ok: false as const, reason: 'view-disposed' as const }),
+      setSelection: () => false,
+      reveal: () => false,
+    },
+  })
+
+  it('execute 把活动视图句柄传给 handler——bindActiveTarget 注入的解析结果（焦点视图）', () => {
+    const { runtime } = makeRuntime()
+    const target = fakeHandle('main')
+    runtime.bindActiveTarget((addonId) => (addonId === ADDON ? target : null))
+    let received: unknown = 'unset'
+    runtime.registerCommand(ADDON, 1, { id: 'stamp', title: '盖戳', mode: 'both' }, (t) => { received = t })
+    expect(runtime.execute(`${ADDON}.stamp`)).toBe('executed')
+    expect(received).toBe(target)
+  })
+
+  it('未注入 activeTarget（缺省装配）时回调收 null——无活动视图语义', () => {
+    const { runtime } = makeRuntime()
+    let received: unknown = 'unset'
+    runtime.registerCommand(ADDON, 1, { id: 'stamp', title: '盖戳', mode: 'both' }, (t) => { received = t })
+    expect(runtime.execute(`${ADDON}.stamp`)).toBe('executed')
+    expect(received).toBeNull()
+  })
+
+  it('菜单执行路径同样携带句柄（execute 单一收口）', () => {
+    const { runtime } = makeRuntime()
+    const target = fakeHandle('embed:h1')
+    runtime.bindActiveTarget(() => target)
+    let received: unknown = 'unset'
+    runtime.registerCommand(ADDON, 1, { id: 'stamp', title: '盖戳', mode: 'both' }, (t) => { received = t })
+    const menu = runtime.registerMenuItem(ADDON, { id: 'entry', label: '菜单项', command: 'stamp' }, (commandId) => {
+      runtime.execute(commandId)
+    })
+    expect(menu.ok).toBe(true)
+    const handler = contextMenuHandlerForCommand(`${ADDON}.stamp`)
+    expect(handler).toBeTypeOf('function')
+    handler!()
+    expect(received).toBe(target)
   })
 })

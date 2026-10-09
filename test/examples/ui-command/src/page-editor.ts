@@ -102,10 +102,11 @@ defineAddonPage(ADDON_ID, async (sdk: VsidianAddonPageSdk) => {
     return main ? views.get(main.instanceId) ?? null : null
   }
 
-  /** 插入时间戳（默认原子提交——宿主撤销一笔回退） */
-  const insertTimestamp = async (): Promise<unknown> => {
+  /** 插入时间戳（默认原子提交——宿主撤销一笔回退）。#427：优先用命令
+   *  回调携带的目标视图句柄（无参调用回落主正文推定——面板指令路径） */
+  const insertTimestamp = async (target: AddonViewHandle | null = null): Promise<unknown> => {
     await refreshSettings()
-    const handle = mainHandle()
+    const handle = target ?? mainHandle()
     if (!handle) {
       return { ok: false, reason: 'no-main-view' }
     }
@@ -150,9 +151,11 @@ defineAddonPage(ADDON_ID, async (sdk: VsidianAddonPageSdk) => {
   // ---- 命令注册（T10）----
   const insertCommand = commands.register(
     { id: 'insertTimestamp', title: m.commandInsertTimestamp, mode: 'live', writes: true },
-    () => {
+    // #427：回调携带执行时刻的目标视图句柄——直接向 target 提交，不经
+    // views.list 推定主正文（无活动视图时组件自行降级）
+    (target) => {
       counters.insertTimestamp++
-      void insertTimestamp().catch(() => {})
+      void insertTimestamp(target).catch(() => {})
     },
   )
   outcomes['insertTimestamp'] = insertCommand.ok

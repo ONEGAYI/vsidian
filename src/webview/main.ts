@@ -128,6 +128,13 @@ const addonLoader = installAddonPageLoader({
 reportAddonRuntimeFault = (addonId, stage, detail) => addonLoader.reportRuntimeFault(addonId, stage, detail)
 bindAddonFaultReporter(reportAddonRuntimeFault)
 addonUi.bindHandleFactory((addonId, instanceId) => addonLoader.buildViewHandle(addonId, instanceId))
+// #427 命令回调目标视图句柄：与 addonUi 同款「装载器安装后绑定」先例
+// ——execute 时把当前活动视图（焦点嵌入 → 该实例，否则主正文）解析为
+// 句柄传给组件回调（组件侧焦点探针防御链拆除）
+addonCommands.bindActiveTarget((addonId) => {
+  const instanceId = controller.addonActiveInstanceId()
+  return instanceId === null ? null : addonLoader.buildViewHandle(addonId, instanceId)
+})
 controller.attachAddonUi(addonUi)
 controller.attachAddonViews(addonViews)
 controller.attachAddonBehaviorDrive((input) => {

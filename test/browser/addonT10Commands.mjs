@@ -125,11 +125,15 @@ await scenario('装载与注册：命令表上报宿主 + 负向明确拒绝', a
   const outcome = await page.evaluate((uri) => window.loadT10(uri, 1), scriptUrl)
   assert.equal(outcome.ok, true, `装载应成功（收到 ${JSON.stringify(outcome)}）`)
 
-  // 命令表上报：两条命令、命名空间 ID、默认绑定归一化、写标记
+  // 命令表上报：三条命令（含 #427 放行的 ctrl+tab 修饰 Tab）、命名空间
+  // ID、默认绑定归一化、写标记
   const reports = await page.evaluate(() => window.takeCommandReports())
   assert.ok(reports.length >= 1, '装载后应有命令表上报')
   const table = reports.at(-1).commands
-  assert.equal(table.length, 2, `命令表应含两条命令（收到 ${JSON.stringify(table)}）`)
+  assert.equal(table.length, 3, `命令表应含三条命令（收到 ${JSON.stringify(table)}）`)
+  const modTab = table.find((entry) => entry.commandId === `${ADDON_ID}.tabbed-mod`)
+  assert.ok(modTab, 'tabbed-mod 应在命令表（ctrl+tab 放行）')
+  assert.deepEqual(modTab.defaults, ['ctrl+tab'], '修饰 Tab 默认绑定应归一化保存')
   const stamp = table.find((entry) => entry.commandId === `${ADDON_ID}.insertStamp`)
   const greet = table.find((entry) => entry.commandId === `${ADDON_ID}.greet`)
   assert.ok(stamp, 'insertStamp 应在命令表')
@@ -150,8 +154,10 @@ await scenario('装载与注册：命令表上报宿主 + 负向明确拒绝', a
   assert.equal(outcomes.dupCommand.reason, 'duplicate-command', '同名注册应明确拒绝')
   assert.equal(outcomes.dottedCommand.ok, false)
   assert.match(outcomes.dottedCommand.reason, /local-id:dot/, '含点局部 ID 应明确拒绝（伪造跨组件身份）')
-  assert.equal(outcomes.tabCommand.ok, false)
-  assert.match(outcomes.tabCommand.reason, /tab-forbidden/, 'Tab 默认绑定应明确拒绝（#125 固定链）')
+  // #427：保留 Tab 段（Shift+Tab 无 ctrl/alt/meta）仍拒；ctrl+tab 放行
+  assert.equal(outcomes.bareTabCommand.ok, false)
+  assert.match(outcomes.bareTabCommand.reason, /tab-forbidden/, '保留 Tab 默认绑定应明确拒绝（#125 固定链）')
+  assert.equal(outcomes.modTabCommand.ok, true, '修饰 Tab（ctrl+tab）默认绑定应放行（#427）')
   assert.equal(outcomes.badIconMenu.ok, false)
   assert.match(outcomes.badIconMenu.reason, /icon-key/, '未登记 iconKey 应明确拒绝')
   assert.equal(outcomes.menuEntry.ok, true, '菜单项注册应成功')
@@ -181,6 +187,14 @@ await scenario('真实键盘：默认绑定触发、绑定/清空沿键位契约
   const after = await page.evaluate(() => window.readEditor().text)
   assert.equal(after, before, '只读命令不得改写文档')
 
+  // #427：命令回调收到目标视图句柄（经组件 counters 指令带出——焦点在
+  // 主正文时 target 即 main 句柄，组件侧无需焦点探针防御链）
+  await page.evaluate(() => window.queueT10Op('counters'))
+  const counted = await page.evaluate(() => window.takeT10Result())
+  assert.ok(counted, 'counters 指令应回执')
+  assert.equal(counted.outcome?.greet >= 1, true, 'greet 计数应在场')
+  assert.equal(counted.outcome?.lastTarget?.instanceId, 'main', `回调应携带 main 目标句柄（收到 ${JSON.stringify(counted.outcome)}）`)
+
   // 用户显式清空 greet 绑定 → 按键落穿（不触发、文档不变）
   const greetId = `${ADDON_ID}.greet`
   await page.evaluate((id) => window.applyKeybindings({ [id]: [] }), greetId)
@@ -195,7 +209,9 @@ await scenario('真实键盘：默认绑定触发、绑定/清空沿键位契约
   const settled = await page.evaluate(() => window.settleInputs())
   assert.ok(settled, '本地输入应落定')
   const text = await page.evaluate(() => window.readEditor().text)
-  assert.ok(text.includes('T10-STAMP'), `写命令应经 views.applyEdits 提交文本（收到 ${JSON.stringify(text)}）`)
+  // #427：提交经回调收到的目标视图句柄（target 为 null 时组件回报
+  // no-target-view、不提交——文本在场即句柄链路端到端贯通）
+  assert.ok(text.includes('T10-STAMP'), `写命令应经回调目标句柄提交文本（收到 ${JSON.stringify(text)}）`)
 
   // 写门控（allowWrites=false 场景由 router 承担——此处验证 mode 门控）：
   // reading 模式下 live 命令不经路由（切模式后按键落穿，文档不变）

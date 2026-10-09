@@ -40,6 +40,11 @@ const commandReports: Array<{ addonId: string; generation: number; commands: Add
 /** t10.register 的注册结局收件箱（负向拒绝断言面） */
 const registrations: unknown[] = []
 const channelRequests: Array<{ requestId: string; topic: string; payload: unknown }> = []
+/** t10.next 待发指令队列与 t10.result 收件箱（宿主角色——counters 观察
+ *  面：#427 回调目标句柄经组件内部状态带出断言） */
+const pendingOps: Array<{ seq: number; op: string }> = []
+const opResults: Array<{ seq: number; outcome: unknown }> = []
+let opSeq = 0
 
 const addonCommands = new AddonCommandsRuntime({
   report: (payload) => {
@@ -63,6 +68,12 @@ const loader: AddonPageLoaderHandle = installAddonPageLoader({
 })
 controller.attachAddonViews(addonViews)
 controller.attachAddonCommands(addonCommands)
+// #427 命令回调目标视图句柄接线（生产 main.ts 同款）：execute 时解析
+// 当前活动视图为句柄——组件回调防御链由平台承担
+addonCommands.bindActiveTarget((addonId) => {
+  const instanceId = controller.addonActiveInstanceId()
+  return instanceId === null ? null : loader.buildViewHandle(addonId, instanceId)
+})
 
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
 
@@ -82,7 +93,10 @@ const drainChannel = () => {
       registrations.push(request.payload)
       outcome = { ok: true, result: 'ok' }
     } else if (request.topic === 't10.next') {
-      outcome = { ok: true, result: null }
+      outcome = { ok: true, result: pendingOps.shift() ?? null }
+    } else if (request.topic === 't10.result') {
+      opResults.push(request.payload as { seq: number; outcome: unknown })
+      outcome = { ok: true, result: 'ok' }
     } else {
       outcome = { ok: true, result: null }
     }
@@ -148,6 +162,24 @@ Object.assign(window, {
   takeRegistrations() {
     drainChannel()
     return registrations.splice(0)
+  },
+  /** 排一条组件指令（t10.next 弹出——组件执行后经 t10.result 回报） */
+  queueT10Op(op: string) {
+    pendingOps.push({ seq: ++opSeq, op })
+  },
+  /** 取第一条已回执的指令结果（先冲刷通道；无结果轮询等待） */
+  async takeT10Result(): Promise<{ seq: number; outcome: unknown } | null> {
+    for (let i = 0; i < 40; i++) {
+      collectOutbound()
+      drainChannel()
+      const result = opResults.shift()
+      if (result) {
+        return result
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return null
   },
   /** 键位快照伪造（宿主角色驱动 router 的 overrides——绑定/清空场景） */
   applyKeybindings(overrides: KeybindingOverrides) {
