@@ -124,6 +124,7 @@ vsidian/
 │   │   │   ├── appearance-probe-dark-custom.json   # 外观探针暗色轮证据
 │   │   │   └── appearance-probe-light-default.json # 外观探针亮色轮证据
 │   │   ├── obsidian-live-preview-editor.md        # Obsidian 技术栈与选型调研
+│   │   ├── obsidian-properties-nested-yaml.md     # Obsidian 嵌套 YAML 调查
 │   │   ├── obsidian-viewport-rendering.md         # 视口渲染性能补充调研
 │   │   ├── pdf-engine-compatibility-probe.md      # P3-02 PDF 引擎兼容性探针报告
 │   │   ├── vscode-1823-host-route-probes.md       # P2-01 宿主路线探针结论
