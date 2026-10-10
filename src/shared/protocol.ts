@@ -1280,6 +1280,10 @@ export type WebviewToHost =
        *  绘制层证据——状态级 total 不保证 DOM 类落地；仅 reading 模式上报，
        *  旧 webview 缺省） */
       readingFindHitBlocks?: number
+      /** 阅读容器内 <br> 元素数（#423 宽松换行的绘制层证据：段内单换行
+       *  渲染为 br 与否的直接 DOM 观测——渲染语义正确不保证换行可见；
+       *  仅 reading 模式上报，旧 webview 缺省） */
+      readingBrCount?: number
       /** 稳定样式契约探针（#6 内部测试 CSS 验证入口）：目标元素不存在时字段为 null */
       cssProbe?: CssProbeReport
       /** live 侧语法装饰统计（#8 双视图语义一致性观测；装饰集合级计数，非 DOM） */
@@ -4157,6 +4161,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.readingScrollTopPx === undefined || isNonNegativeNumber(v.readingScrollTopPx)) &&
         (v.readingScrollHeightPx === undefined || isNonNegativeNumber(v.readingScrollHeightPx)) &&
         (v.readingFindHitBlocks === undefined || isNonNegativeInt(v.readingFindHitBlocks)) &&
+        (v.readingBrCount === undefined || isNonNegativeInt(v.readingBrCount)) &&
         (v.cssProbe === undefined || isCssProbeReport(v.cssProbe)) &&
         (v.liveSyntax === undefined || isLiveSyntaxProbe(v.liveSyntax)) &&
         (v.tableGrid === undefined || isTableGridProbe(v.tableGrid)) &&

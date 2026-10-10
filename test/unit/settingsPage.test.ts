@@ -169,6 +169,23 @@ describe('页面结构（#33 归属与空状态）', () => {
     box.dispatchEvent(new Event('change'))
     expect(sent).toContainEqual({ kind: 'settings.set', values: { 'editor.searchRevealHint': true } })
   })
+
+  it('阅读宽松换行（#423）渲染于编辑器页显示小节：标题/说明经 t() 取词、默认关闭、切换上送 settings.set', () => {
+    const { parent, sent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const item = [...sectionByTitle(parent, zhCn['settings.groupDisplay'])
+      .querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+      .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
+        zhCn['setting.readingBreaks.title'])
+    expect(item, '应渲染「阅读宽松换行」设置行').toBeTruthy()
+    expect(item!.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemDescription}`)?.textContent)
+      .toBe(zhCn['setting.readingBreaks.description'])
+    const box = item!.querySelector<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!
+    expect(box.checked).toBe(false) // 默认关闭（严格软换行维持现状）
+    box.checked = true
+    box.dispatchEvent(new Event('change'))
+    expect(sent).toContainEqual({ kind: 'settings.set', values: { 'editor.readingBreaks': true } })
+  })
 })
 
 describe('定义渲染与快照回显', () => {
@@ -482,12 +499,14 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       zhCn['settings.groupCodeblock'],
     ])
     // #298 迁组后「显示」小节不再收录 embed.* / hover.* 条目；#318 打开
-    // 提示（editor.searchRevealHint）随注册表顺序追加在末位
+    // 提示（editor.searchRevealHint）随注册表顺序追加在末位，#423 阅读宽松
+    // 换行（editor.readingBreaks）同规则追加
     expect(groupItemTitles(parent, zhCn['settings.groupDisplay']))
       .toEqual([
         zhCn['setting.editorLineNumbers.title'],
         zhCn['setting.readableLineWidth.title'],
         zhCn['setting.searchRevealHint.title'],
+        zhCn['setting.readingBreaks.title'],
       ])
     // #237 多光标（editor.multicursor 域落编辑组）
     expect(groupItemTitles(parent, zhCn['settings.groupEditing']))

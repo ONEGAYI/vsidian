@@ -82,6 +82,17 @@ export function getRefReadingBlockCacheStats(): {
   }
 }
 
+/**
+ * #423 宽松换行设置变更：块数据按渲染器 breaks 产出，缓存整体失效
+ * （下次挂载/刷新按新设置重切块——onLocaleChanged 清缓存同款语义）。
+ * 在场引用挂载（嵌入卡片/悬停浮层）保持当前呈现，随下次挂载自然更新
+ * （瞬态 UI 不强制重挂；与语言切换「就地刷文案不重建块」的边界一致）。
+ */
+export function clearRefReadingBlockCache(): void {
+  parsedBlockCache.clear()
+  cacheBytes = 0
+}
+
 export function getRefContentLifecycleStats(): { mounts: number; releases: number; activeBlocks: number } {
   return { mounts: contentBlockMounts, releases: contentBlockReleases,
     activeBlocks: contentBlockMounts - contentBlockReleases }

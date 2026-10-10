@@ -634,6 +634,8 @@ interface ViewState {
   readingScrollHeightPx?: number
   /** #241 验收回归：阅读容器内查找命中块元素数（块级高亮的绘制层证据） */
   readingFindHitBlocks?: number
+  /** #423 阅读容器内 br 元素数（宽松换行开关的绘制层证据） */
+  readingBrCount?: number
   cssProbe?: {
     liveHeadingDecorationColor: string | null
     readingHeadingDecorationColor: string | null
@@ -1341,6 +1343,10 @@ async function waitViewState(
         readingEmbed: s['readingEmbed'],
         liveEmbedReveal: s['liveEmbedReveal'],
         readingWikilinkCount: s['readingWikilinkCount'],
+        // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
+        readingBlockCount: s['readingBlockCount'],
+        readingMountedBlocks: s['readingMountedBlocks'],
+        readingBrCount: s['readingBrCount'],
         hoverPreview: hover === undefined ? undefined : {
           open: hover['open'], state: hover['state'], note: hover['note'],
           pdf: hover['pdf'],
@@ -12826,6 +12832,56 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 480 })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
     await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live')
+  }],
+
+  // 阅读宽松换行设置闭环（#423）：默认严格（段内单换行拼回同段）→ 保存
+  // true 广播热更已开阅读面板（readingBrCount 绘制层观测：br 1→3）→
+  // 关闭恢复 → 重开面板拉取持久值（真实重启读同一 globalState 键）
+  ['阅读渲染：宽松换行设置持久化、回显与已开面板热更（#423）', async () => {
+    const base = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(base['editor.readingBreaks'] === false,
+      `默认应为 false（严格软换行，对齐 markdown.preview.breaks），实际 ${String(base['editor.readingBreaks'])}`)
+    await openWithEditor('reading-breaks.md')
+    await waitSessionReady('reading-breaks.md')
+    const uri = wsUri('reading-breaks.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    // 样例文档 br 源：双空格显式硬换行 1 处（恒在）+ 段内单换行 2 处
+    //（仅宽松态）——严格态 br=1 是「单换行不成行」的绘制层证据
+    const strict = await waitViewState('reading-breaks.md',
+      (v) => v.viewMode === 'reading' && v.readingBrCount === 1)
+    assert(strict.readingBrCount === 1,
+      `严格态应仅显式硬换行 1 处 br（单换行拼回同段），实际 ${String(strict.readingBrCount)}`)
+
+    // 广播热更：保存 true → 已开阅读面板重切块（br 1→3，绘制层）。
+    // setSettings 后先读回稳定（globalState 迟到回翻防护，#221 同款）——
+    // 否则后续 closeAllEditors 重开时宿主快照可能已被回翻
+    await waitSettings({ 'editor.readingBreaks': true })
+    const loose = await waitViewState('reading-breaks.md', (v) => v.readingBrCount === 3)
+    assert(loose.readingBrCount === 3,
+      `宽松态应为 3 处 br（2 单换行 + 1 显式），实际 ${String(loose.readingBrCount)}`)
+
+    // 关闭恢复严格（保存 → 广播 → 重切块回 1）
+    await waitSettings({ 'editor.readingBreaks': false })
+    await waitViewState('reading-breaks.md', (v) => v.readingBrCount === 1)
+
+    // 持久化口径：置 true → 关全部面板重开 → 新面板拉取持久值（与 #221 同口径）
+    await waitSettings({ 'editor.readingBreaks': true })
+    await waitViewState('reading-breaks.md', (v) => v.readingBrCount === 3)
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+    await openWithEditor('reading-breaks.md')
+    await waitSessionReady('reading-breaks.md')
+    const reopenedUri = wsUri('reading-breaks.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, reopenedUri, { kind: 'view.mode.set', mode: 'reading' })
+    const reopened = await waitViewState('reading-breaks.md',
+      (v) => v.viewMode === 'reading' && v.readingBrCount === 3)
+    assert(reopened.readingBrCount === 3, '重开面板应按持久化的宽松设置渲染（拉取链路）')
+
+    // 收尾：恢复默认并切回 live（重置面亦会兜底）
+    await waitSettings({ 'editor.readingBreaks': false })
+    await waitViewState('reading-breaks.md', (v) => v.readingBrCount === 1)
+    await vscode.commands.executeCommand(CMD.postToPanel, reopenedUri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('reading-breaks.md', (v) => v.viewMode === 'live')
+    console.log('[#423] 宽松换行设置持久化回显与面板热更链路通过')
   }],
 
   // #221 全入口悬停的真宿主定向：Live 直接悬停设置的保存/广播/持久化

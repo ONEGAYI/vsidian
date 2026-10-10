@@ -334,3 +334,65 @@ describe('mounted Markdown reference highlight settings (#389)', () => {
     }
   })
 })
+
+// #423 阅读宽松换行：设置变更 → 渲染器单例重建 → 已开阅读视图重切块重挂
+//（br 是换行呈现的直接 DOM 证据）；源文/撤销栈零改动。无关设置变更不
+// 触发重解析（滚动路径零额外切块成本）。
+describe('reading breaks setting re-renders mounted view (#423)', () => {
+  it('breaks on/off re-chunks mounted reading paragraphs; unrelated settings keep parse intact', () => {
+    const { bridge, sent } = makeBridge()
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const c = new WebviewSyncController(bridge)
+    c.mount(parent)
+    const source = '段一甲\n段一乙\n段一丙\n\n结尾段\n'
+    c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: source })
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const reading = parent.querySelector<HTMLElement>('.vsidian-view-reading')!
+    const snapshot = () => {
+      c.handleHostMessage({ kind: 'view.state.request' })
+      return sent.filter((m): m is Extract<WebviewToHost, { kind: 'view.state' }> => m.kind === 'view.state').at(-1)!
+    }
+    const apply = (kind: 'settings.snapshot' | 'settings.changed', values: SettingsPayload) =>
+      c.handleHostMessage({ kind, values })
+    try {
+      // 默认严格：单换行段无 br
+      expect(reading.querySelectorAll('p br')).toHaveLength(0)
+      const before = snapshot()
+
+      // 无关设置变更：不重切块（parse 计数不变）
+      apply('settings.changed', { 'editor.lineNumbers': false })
+      expect(snapshot().readingParseCount).toBe(before.readingParseCount)
+      expect(reading.querySelectorAll('p br')).toHaveLength(0)
+
+      // 开启宽松：段落重建出 br（两处单换行），源文不变
+      apply('settings.changed', { 'editor.readingBreaks': true })
+      expect(reading.querySelectorAll('p br')).toHaveLength(2)
+      expect(reading.querySelector('p')?.textContent).toContain('段一甲')
+      expect(snapshot().readingParseCount).toBeGreaterThan(before.readingParseCount!)
+      expect(c.getView()!.state.doc.toString()).toBe(source)
+      expect(sent.some((m) => m.kind === 'edit.request')).toBe(false)
+
+      // 快照缺键回默认（严格）——空快照不误触发重建后仍是宽松语义？
+      // 缺键按定义默认 false 解析：回严格（与 sanitize 语义一致）
+      apply('settings.snapshot', {})
+      expect(reading.querySelectorAll('p br')).toHaveLength(0)
+
+      // 空快照回退后再开启：false→true 值变化，重建并重新生效
+      const mid = snapshot().readingParseCount
+      apply('settings.changed', { 'editor.readingBreaks': true })
+      expect(snapshot().readingParseCount).toBeGreaterThan(mid!)
+      expect(reading.querySelectorAll('p br')).toHaveLength(2)
+      // 同值消息不重复重建（控制器层钉住短路路径）：parse 计数不再增长
+      const rebuilt = snapshot().readingParseCount
+      apply('settings.changed', { 'editor.readingBreaks': true })
+      expect(snapshot().readingParseCount).toBe(rebuilt)
+      expect(reading.querySelectorAll('p br')).toHaveLength(2)
+    } finally {
+      // 模块级渲染器单例是共享状态：恢复默认严格，不泄漏到其他用例
+      apply('settings.snapshot', {})
+      c.dispose()
+      parent.remove()
+    }
+  })
+})

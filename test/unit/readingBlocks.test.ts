@@ -7,9 +7,10 @@
 // - 大围栏按行细分（FENCE_CHUNK_LINES）：细分后仍是普通块（#7 机制不变）
 // - 未支持语法保留原文（脚注等按普通段落渲染——局部源码降级）
 // - 块携带内部 HTML：html:false 的 markdown-it 渲染产物（转义源文）
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import {
   FENCE_CHUNK_LINES,
+  applyReadingRendererBreaks,
   blockForOffset,
   splitReadingBlocks,
   type ReadingBlock,
@@ -433,5 +434,38 @@ describe('#336 图片嵌入块形态：独行图不入嵌入块', () => {
   it('纯 markdown 多行嵌入段不变（仍逐行升级嵌入块）', () => {
     const blocks = splitReadingBlocks('![[A]]\n![[B]]\n')
     expect(blocks.map((b) => b.kind)).toEqual(['embed', 'embed'])
+  })
+})
+
+// #423 宽松换行设置：切块渲染器的模块级单例随设置重建（splitReadingBlocks
+// 无参调用方——虚拟阅读视图/引用内容实例——经此全局生效；值未变时不重建）。
+describe('#423 applyReadingRendererBreaks：渲染器单例随设置重建', () => {
+  const doc = '段一甲\n段一乙\n'
+  const paragraphBrCount = (): number =>
+    splitReadingBlocks(doc).reduce(
+      (sum, b) => sum + (b.kind === 'paragraph' ? (b.html.match(/<br/g) ?? []).length : 0),
+      0,
+    )
+
+  afterEach(() => {
+    // 模块级单例是共享状态：恢复默认严格换行，不污染同文件其他用例
+    applyReadingRendererBreaks(false)
+  })
+
+  it('默认严格：段内单换行不产 br', () => {
+    expect(paragraphBrCount()).toBe(0)
+  })
+
+  it('应用 true 后切块输出含 br；同值重复应用不重建', () => {
+    expect(applyReadingRendererBreaks(true)).toBe(true)
+    expect(paragraphBrCount()).toBe(1)
+    expect(applyReadingRendererBreaks(true)).toBe(false)
+    expect(paragraphBrCount()).toBe(1)
+  })
+
+  it('回退 false 恢复严格语义', () => {
+    applyReadingRendererBreaks(true)
+    expect(applyReadingRendererBreaks(false)).toBe(true)
+    expect(paragraphBrCount()).toBe(0)
   })
 })

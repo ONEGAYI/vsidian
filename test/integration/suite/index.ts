@@ -99,6 +99,9 @@ export async function run(): Promise<void> {
             // #318 搜索定位打开提示（默认关，2026-10-04 用户裁定——重置面
             // 跟随默认值；提示用例自行显式开启，残留 true 不外溢）
             'editor.searchRevealHint': false,
+            // #423 阅读宽松换行（默认关 = 严格软换行；用例自行显式开启，
+            // 残留 true 会改变后续阅读渲染用例的段落呈现断言）
+            'editor.readingBreaks': false,
             // #161 图片粘贴三键并入重置面：pasteLocation/pasteSubpath 残留会
             // 让后续粘贴用例落盘到错误位置（paste 总开关残留 false 则整链
             // 静默失效）

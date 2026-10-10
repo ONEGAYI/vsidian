@@ -163,6 +163,9 @@ export const zhCn: Record<MessageKey, string> = {
   /** #318 搜索定位打开提示（editor.searchRevealHint） */
   'setting.searchRevealHint.title': '搜索定位打开提示',
   'setting.searchRevealHint.description': '从工作区搜索结果打开笔记并首次激活时，右下角显示带「定位」按钮的提示气泡，点击后跳转到搜索选中的匹配处。提示本身不做任何操作——只有点击按钮才会定位。每篇笔记每会话最多提示一次；命令与键位入口不受此设置影响。',
+  /** #423 阅读宽松换行（editor.readingBreaks） */
+  'setting.readingBreaks.title': '阅读宽松换行',
+  'setting.readingBreaks.description': '阅读模式中段内单次换行是否直接显示为换行：默认关闭时按标准 Markdown 规则拼回同一段（行尾两空格或空行才换行）；开启后单次换行即换行显示，与实时预览的逐行呈现一致。仅影响阅读渲染（含嵌入卡片与悬停预览中的笔记内容），实时预览的编辑呈现不受影响；行尾两空格的显式换行在两种状态下始终生效。',
   /** #222 嵌入卡片限高（阅读模式嵌入内容超出后内部滚动） */
   'setting.embedMaxHeight.title': '嵌入内容最大高度',
   'setting.embedMaxHeight.description': '阅读模式嵌入卡片内容区的最大高度：较短笔记保持自然高度，超出该值的内容在卡片内部滚动。',
