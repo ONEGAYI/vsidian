@@ -684,3 +684,268 @@ describe('快捷键入口（同一命令的两个入口汇到同一执行）', (
     expect(h.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
   })
 })
+
+// ---- #436 场景命中负载（采集层：contextSnapshotAt 的三类负载）----
+
+import { type MenuContextSnapshot } from '../../src/shared/contextMenu'
+
+describe('场景命中负载采集（表格/链接/图形块进快照，#436）', () => {
+  /** 打开菜单并捕获快照探针：注册一个 when 恒隐藏的临时项（不改变菜单
+   *  呈现），openContextMenu → buildContextMenuModel 求值 when 时捕获的
+   *  ctx 即控制器收到的同一份快照引用 */
+  function snapshotAt(c: ReturnType<typeof mountPanel>['c'], pos: number): MenuContextSnapshot | null {
+    let captured: MenuContextSnapshot | null = null
+    const cleanup = registerContextMenuItem({
+      id: '__snapshotProbe436', group: 'clipboard', order: 99,
+      command: '__snapshotProbe436', labelKey: 'contextMenu.copy',
+      when: (ctx) => { captured = ctx; return false },
+    })
+    try {
+      c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos })
+    } finally {
+      cleanup()
+    }
+    return captured
+  }
+
+  describe('表格负载（zone=table）', () => {
+    const TABLE = '| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |'
+
+    it('命中数据行：内容行/列坐标、行列总数、行区间与顶层层级', () => {
+      const pos = TABLE.indexOf('| 3 |') + 2 // `3` 字符处
+      const h = makeBridge()
+      const { c } = mountPanel(h, TABLE)
+      const snap = snapshotAt(c, pos)!
+      expect(snap.zone).toBe('table')
+      expect(snap.table).toEqual({
+        rowIndex: 2, columnIndex: 0, inHeader: false,
+        rowCount: 3, columnCount: 2,
+        lines: { start: 0, end: 3 },
+        pos,
+        quoteUniform: true, quoteDepth: 0, hitQuoteDepth: 0,
+      })
+      expect(snap.link, '结构敏感区不采链接').toBeUndefined()
+      expect(snap.graphic).toBeUndefined()
+    })
+
+    it('命中表头：rowIndex=0；命中列随命中位置', () => {
+      const h = makeBridge()
+      const { c } = mountPanel(h, TABLE)
+      const snap = snapshotAt(c, TABLE.indexOf('b |') + 1)!
+      expect(snap.table!.rowIndex).toBe(0)
+      expect(snap.table!.inHeader).toBe(true)
+      expect(snap.table!.columnIndex).toBe(1)
+    })
+
+    it('命中分隔行：无内容行身份（rowIndex/columnIndex null），快照仍构造', () => {
+      const h = makeBridge()
+      const { c } = mountPanel(h, TABLE)
+      const snap = snapshotAt(c, TABLE.indexOf('---'))!
+      expect(snap.zone).toBe('table')
+      expect(snap.table!.rowIndex).toBeNull()
+      expect(snap.table!.columnIndex).toBeNull()
+      expect(snap.table!.inHeader).toBe(false)
+      expect(snap.table!.rowCount).toBe(3)
+    })
+
+    it('引用内表格：层级一致 1 层（quoteDepthOfLine 口径）', () => {
+      const quoted = '> | a | b |\n> |---|---|\n> | 1 | 2 |'
+      const h = makeBridge()
+      const { c } = mountPanel(h, quoted)
+      const snap = snapshotAt(c, quoted.indexOf('1'))!
+      expect(snap.table).toMatchObject({
+        rowIndex: 1, quoteUniform: true, quoteDepth: 1, hitQuoteDepth: 1,
+      })
+    })
+
+    it('gridPlans 缓存缺失回退：引用表列数按分隔行声明（前缀剥离后解析）', () => {
+      // 表外一次编辑 → liveDecorations 增量重建换新 Map（未重建的表不在
+      // 缓存）→ 采集走 parseTableDelimiter 回退分支（review F1 回归钉住）
+      const quoted = '> | a | b |\n> |---|---|\n> | 1 | 2 |\n\n表外段落'
+      const h = makeBridge()
+      const { c } = mountPanel(h, quoted)
+      const view = c.getView()!
+      const outside = quoted.indexOf('表外段落')
+      view.dispatch({ changes: { from: outside, to: outside, insert: '前' } })
+      const snap = snapshotAt(c, quoted.indexOf('1'))!
+      expect(snap.table, '回退解析失败会整体缺省——树接管时负载应在场').toBeDefined()
+      expect(snap.table!.columnCount).toBe(2)
+      expect(snap.table!.columnIndex).toBe(0)
+      expect(snap.table!.quoteDepth).toBe(1)
+    })
+
+    it('列钳制：行首落首列、行尾落末列（越出格区钳到最近格）', () => {
+      const TABLE = '| a | b |\n|---|---|\n| 1 | 2 |'
+      const h = makeBridge()
+      const { c } = mountPanel(h, TABLE)
+      const view = c.getView()!
+      const lastLine = view.state.doc.lineAt(TABLE.length) // 末数据行
+      const head = snapshotAt(c, TABLE.indexOf('| a'))! // 行首管道前 → 首列
+      expect(head.table!.columnIndex).toBe(0)
+      const tail = snapshotAt(c, lastLine.to)! // 行尾（末管道上）→ 末列
+      expect(tail.table!.columnIndex).toBe(1)
+    })
+
+    it('源码降级表（分隔行在组尾，树不认）：负载缺省不阻塞菜单', () => {
+      const degraded = '| a | b |\n| 1 | 2 |\n|---|---|'
+      const h = makeBridge()
+      const { c } = mountPanel(h, degraded)
+      const snap = snapshotAt(c, degraded.indexOf('1'))
+      expect(snap, '快照仍构造（zone 形态学判定）').not.toBeNull()
+      expect(snap!.zone).toBe('table')
+      expect(snap!.table, '树解析失败负载缺省').toBeUndefined()
+    })
+  })
+
+  describe('链接负载（zone=normal）', () => {
+    it('双链含别名：kind/target 未 trim/display 别名优先', () => {
+      const text = '看 [[笔记 一|显示名]] 尾'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('显示名'))!
+      expect(snap.link).toEqual({
+        kind: 'wikilink',
+        target: '笔记 一',
+        display: '显示名',
+        range: { from: text.indexOf('[['), to: text.indexOf(']]') + 2 },
+      })
+    })
+
+    it('普通链接：href 原样 + 链接文字', () => {
+      const text = '前 [链接文字](https://example.com/x?y=1) 后'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('链接文字'))!
+      expect(snap.link).toEqual({
+        kind: 'link',
+        target: 'https://example.com/x?y=1',
+        display: '链接文字',
+        range: { from: text.indexOf('['), to: text.indexOf(')') + 1 },
+      })
+    })
+
+    it('autolink：URL 本身即显示文字', () => {
+      const text = '见 <https://example.com/a> 尾'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('example'))!
+      expect(snap.link).toEqual({
+        kind: 'autolink',
+        target: 'https://example.com/a',
+        display: 'https://example.com/a',
+        range: { from: text.indexOf('<'), to: text.indexOf('>') + 1 },
+      })
+    })
+
+    it('宽松链接（目标含空格）：文字段为显示文字', () => {
+      const text = '开 [文字段](my note.md) 尾'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('文字段'))!
+      expect(snap.link).toEqual({
+        kind: 'loose',
+        target: 'my note.md',
+        display: '文字段',
+        range: { from: text.indexOf('['), to: text.indexOf(')') + 1 },
+      })
+    })
+
+    it('裸 URL 不命中；嵌入 ![[…]] 不采集（守卫排除前置 !）', () => {
+      const bare = '裸 https://example.com/a 尾'
+      const h = makeBridge()
+      const { c } = mountPanel(h, bare)
+      expect(snapshotAt(c, bare.indexOf('example'))!.link).toBeUndefined()
+
+      const embed = '嵌 ![[嵌入目标]] 尾'
+      const h2 = makeBridge()
+      const { c: c2 } = mountPanel(h2, embed)
+      expect(snapshotAt(c2, embed.indexOf('嵌入目标'))!.link, '嵌入不产生链接负载').toBeUndefined()
+    })
+
+    it('行内代码内链接文本不采集（inlineScanSuppressed 同口径）', () => {
+      const text = '码 `[t](u)` 尾'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('(u)'))!
+      expect(snap.zone).toBe('normal')
+      expect(snap.link).toBeUndefined()
+    })
+
+    it('表格格内链接不采集链接负载（zone=table 优先）', () => {
+      const text = '| [[格内链]] | b |\n|---|---|\n| 1 | 2 |'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('格内链'))!
+      expect(snap.zone).toBe('table')
+      expect(snap.link).toBeUndefined()
+    })
+  })
+
+  describe('图形块负载（zone=graphic）', () => {
+    it('mermaid 渲染态：行区间/语言/源码/svg 能力', () => {
+      const text = '```mermaid\ngraph TD\nA-->B\n```'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('graph'))!
+      expect(snap.zone).toBe('graphic')
+      expect(snap.graphic).toEqual({
+        lines: { start: 0, end: 3 },
+        language: 'mermaid',
+        code: 'graph TD\nA-->B',
+        svgExport: true, // 内置 mermaid 恒有 renderSvg
+      })
+      expect(snap.link).toBeUndefined()
+      expect(snap.table).toBeUndefined()
+    })
+
+    it('mermaid 错误态源码：负载数据面同构（能力 ≠ 渲染成功）', () => {
+      const text = '```mermaid\nthis is ( not [ valid\n```'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('valid'))!
+      expect(snap.graphic).toEqual({
+        lines: { start: 0, end: 2 },
+        language: 'mermaid',
+        code: 'this is ( not [ valid',
+        svgExport: true,
+      })
+    })
+
+    it('未闭合图形围栏：区间到末行、源码取到末行（closed=false 分支）', () => {
+      const text = '```mermaid\ngraph TD\nA-->B'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('graph'))!
+      expect(snap.graphic).toEqual({
+        lines: { start: 0, end: 2 },
+        language: 'mermaid',
+        code: 'graph TD\nA-->B',
+        svgExport: true,
+      })
+    })
+
+    it('普通围栏（zone=fence）无任何场景负载', () => {
+      const text = '```js\nconst a = 1\n```'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('const'))!
+      expect(snap.zone).toBe('fence')
+      expect(snap.graphic).toBeUndefined()
+      expect(snap.link).toBeUndefined()
+      expect(snap.table).toBeUndefined()
+    })
+  })
+
+  it('执行期通道：打开菜单持有完整快照（含负载），关闭即清理（#436）', () => {
+    const text = '```mermaid\ngraph TD\n```'
+    const h = makeBridge()
+    const { c } = mountPanel(h, text)
+    expect(c.getContextMenuSnapshot()).toBeNull()
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: text.indexOf('graph') })
+    const held = c.getContextMenuSnapshot()
+    expect(held?.zone).toBe('graphic')
+    expect(held?.graphic?.language).toBe('mermaid')
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClose' })
+    expect(c.getContextMenuSnapshot()).toBeNull()
+  })
+})

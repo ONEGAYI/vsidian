@@ -227,6 +227,7 @@ function renderEntry(entry, signatures) {
     sem.autoRules ? `- **自动规则**：${sem.autoRules}` : null,
     sem.language ? `- **暴露面裁剪**：${sem.language}` : null,
     sem.keymap ? `- **按键优先级**：${sem.keymap}` : null,
+    sem.contextPayloads ? `- **谓词输入的场景命中负载**：${sem.contextPayloads}` : null,
   ].filter(Boolean)
 
   const signatureBlocks = entry.signatures

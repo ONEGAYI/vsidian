@@ -134,6 +134,17 @@ T10 落地形态：附加组件经页面 SDK `menus.registerItem`（仅编辑器
 - **全选**：CM6 纯选区事务，本地完成，零写回。
 - **键位评估记录**（AGENTS.md 操作注册约定）：四项沿用 CM6 既有默认绑定（Ctrl+X/C/V/A），**不新增** vsidian 键位注册表条目；菜单提示列对这四项显示固定默认提示。
 
+### 场景命中负载（#436 基建：表格/链接/图形块坐标进谓词数据面）
+
+`MenuContextSnapshot`（谓词唯一数据面）自 #436 起含三类**可选**命中负载，供场景差异化菜单项（表格簇 #437 / 图形块簇 #438 / 链接项 #439）的 `when` / `enable` 与执行期消费。本节是字段与采集口径的落档：
+
+- **TableMenuHit**（仅 zone='table'）：命中格的内容行/列索引（表头 = 第 0 行、分隔行无格身份 → null；格数与声明列数不齐的内容行列索引亦为 null）、表头/表体（`inHeader`）、行列总数、表格全部物理行区间（LF 行系）、命中处文档偏移（执行期定位入口输入——`runTableEditAt` 族以 pos 自行解析结构）、引用层级一致性与命中行层级（`quoteDepthOfLine` 同源；分隔行不参与一致性判定，lazy 豁免——与 blockquote-table 规格残缺口径一致）。采集复用 `tableRowsAt`（解析树行身份）与 gridPlans 列数缓存（缺省回退分隔行声明，前缀按行身份 `prefixLen` 剥离）；**解析树不认该表（源码降级表/残缺表）或命中行不在树行集合内时负载缺省**——不阻塞菜单打开，场景票按「负载在场」判 enable（置灰不隐藏）。
+- **LinkMenuHit**（仅 zone='normal' 且命中链接）：族类（wikilink / link / autolink / loose，判定内核与次序完全复用 Ctrl+单击 activate 族——嵌入 `![[…]]` 经双链扫描守卫排除，代码上下文与头区抑制同口径）；目标原文（双链 `|` 之前未 trim / 外部 href 原样——activate 上报同口径）；显示文字（双链别名优先 / 普通链接链接文字 / autolink URL 本身 / 宽松文字段）；源区间。采集经 `menuLinkHitAtPos`（liveLinks 只读查询，activate 跳转行为零改动）。
+- **GraphicMenuHit**（仅 zone='graphic'）：围栏行区间（`scanFenceBlocks`，未闭合到末行）、语言标识（info string trim 后——`isRenderedFenceInfo` 判定同键）、围栏源码（开闭围栏行之间内容）、svg 取图能力（`effectiveGraphicSvgExport(language, 'live')`——弹窗/导出 gate 同口径；能力 ≠ 渲染成功，错误态负载数据面同构）。
+- **执行期通道**：`openContextMenu` 把完整快照记到控制器字段（`contextMenuTarget` 同款先例；`getContextMenuSnapshot` 只读投影），场景票命令分支执行期取用；锚点过期重验沿 `contextMenuDoc` 既有模式。
+- **组序预登记**：`CONTEXT_MENU_GROUP_ORDER` 预登记 `tableOps` / `graphicOps`（链接簇后、块与格式簇前），避免三张场景票并行时同改一行常量；场景组无项时零产出（空组自然收起），预登记不改变菜单呈现。
+- **SDK 面**：快照经 `addonPage.ts` re-export 进附加组件页面 SDK 菜单谓词输入，负载组成类型（`TableMenuHit` / `LinkMenuHit` / `MenuLinkKind` / `GraphicMenuHit`）一并透出；语义台账见 `addonApiCatalog.ts` menus-register 条目 `contextPayloads` 字段（向后兼容扩展，无基线重锚定）。
+
 ## 交互契约
 
 - **定位**：视口系 fixed、右键点位锚定、右/下缘 clamp、底部放不下翻上方（提为内核公用纯函数，两菜单共用）。
