@@ -758,6 +758,34 @@ describe('场景命中负载采集（表格/链接/图形块进快照，#436）'
       })
     })
 
+    it('gridPlans 缓存缺失回退：引用表列数按分隔行声明（前缀剥离后解析）', () => {
+      // 表外一次编辑 → liveDecorations 增量重建换新 Map（未重建的表不在
+      // 缓存）→ 采集走 parseTableDelimiter 回退分支（review F1 回归钉住）
+      const quoted = '> | a | b |\n> |---|---|\n> | 1 | 2 |\n\n表外段落'
+      const h = makeBridge()
+      const { c } = mountPanel(h, quoted)
+      const view = c.getView()!
+      const outside = quoted.indexOf('表外段落')
+      view.dispatch({ changes: { from: outside, to: outside, insert: '前' } })
+      const snap = snapshotAt(c, quoted.indexOf('1'))!
+      expect(snap.table, '回退解析失败会整体缺省——树接管时负载应在场').toBeDefined()
+      expect(snap.table!.columnCount).toBe(2)
+      expect(snap.table!.columnIndex).toBe(0)
+      expect(snap.table!.quoteDepth).toBe(1)
+    })
+
+    it('列钳制：行首落首列、行尾落末列（越出格区钳到最近格）', () => {
+      const TABLE = '| a | b |\n|---|---|\n| 1 | 2 |'
+      const h = makeBridge()
+      const { c } = mountPanel(h, TABLE)
+      const view = c.getView()!
+      const lastLine = view.state.doc.lineAt(TABLE.length) // 末数据行
+      const head = snapshotAt(c, TABLE.indexOf('| a'))! // 行首管道前 → 首列
+      expect(head.table!.columnIndex).toBe(0)
+      const tail = snapshotAt(c, lastLine.to)! // 行尾（末管道上）→ 末列
+      expect(tail.table!.columnIndex).toBe(1)
+    })
+
     it('源码降级表（分隔行在组尾，树不认）：负载缺省不阻塞菜单', () => {
       const degraded = '| a | b |\n| 1 | 2 |\n|---|---|'
       const h = makeBridge()
@@ -879,6 +907,19 @@ describe('场景命中负载采集（表格/链接/图形块进快照，#436）'
         lines: { start: 0, end: 2 },
         language: 'mermaid',
         code: 'this is ( not [ valid',
+        svgExport: true,
+      })
+    })
+
+    it('未闭合图形围栏：区间到末行、源码取到末行（closed=false 分支）', () => {
+      const text = '```mermaid\ngraph TD\nA-->B'
+      const h = makeBridge()
+      const { c } = mountPanel(h, text)
+      const snap = snapshotAt(c, text.indexOf('graph'))!
+      expect(snap.graphic).toEqual({
+        lines: { start: 0, end: 2 },
+        language: 'mermaid',
+        code: 'graph TD\nA-->B',
         svgExport: true,
       })
     })

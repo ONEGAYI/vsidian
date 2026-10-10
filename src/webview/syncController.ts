@@ -773,8 +773,10 @@ export class WebviewSyncController {
   /** 菜单目标快照（块区间 + 命中行标题；块链接两项的命令分派对象） */
   private contextMenuTarget: ContextMenuBlockTarget | null = null
   /** 打开菜单时的完整判定快照（#436 执行期通道：场景命中负载——表格/链接/
-   *  图形块——随块目标一并记录，场景票的 runContextMenuCommand 分支执行期
-   *  取用；锚点过期重验沿 contextMenuDoc 既有模式） */
+   *  图形块——随块目标一并记录。消费口径照 contextMenuTarget 先例：命令
+   *  分支须在 closeContextMenu 之前捕获局部变量（close 先于分派清理本字段，
+   *  分支执行期读字段恒 null——错误模式已有注释在 getContextMenuSnapshot）；
+   *  锚点过期重验沿 contextMenuDoc 既有模式） */
   private contextMenuSnapshot: MenuContextSnapshot | null = null
   /** 菜单打开时的文档快照（命令执行时 doc 已变则放弃——锚点过期防御） */
   private contextMenuDoc: Text | null = null
@@ -1609,9 +1611,10 @@ export class WebviewSyncController {
     return this.view
   }
 
-  /** 打开中的统一菜单完整快照（#436 执行期通道的只读投影：场景票命令分支
-   *  与采集层测试经此取场景命中负载——同 getView 的公开只读访问器模式；
-   *  未打开 = null） */
+  /** 打开中的统一菜单完整快照（#436 的只读投影，同 getView 公开访问器
+   *  模式）。语义窗口：菜单打开期间有效——closeContextMenu 先于命令分派
+   *  清理字段，命令分支执行期经此取恒 null；场景票分支须照 contextMenuTarget
+   *  先例在 close 之前捕获局部变量。采集层测试（谓词求值窗口内）可用 */
   getContextMenuSnapshot(): MenuContextSnapshot | null {
     return this.contextMenuSnapshot
   }
@@ -7195,13 +7198,13 @@ export class WebviewSyncController {
     const contentRows = rows.filter((r) => r.kind !== 'delimiter')
     const delimiterRow = rows.find((r) => r.kind === 'delimiter')
     // 列数：gridPlans 缓存优先，缺省回退分隔行声明（blankRowInputPlan 同
-    // 口径——parseTableDelimiter 的列数就是格数）
+    // 口径——prefixLen 剥容器前缀后解析，parseTableDelimiter 的列数即格数）
     const table = chainAt(field.tree, pos).find((n) => n.name === 'Table')
     let columnCount = table ? field.gridPlans.get(table.from)?.columns : undefined
     if (columnCount === undefined && delimiterRow) {
       const delimLine = doc.lineAt(delimiterRow.lineFrom)
       columnCount = parseTableDelimiter(
-        delimLine.text, delimiterRow.lineFrom - delimLine.from,
+        delimLine.text, delimiterRow.prefixLen ?? 0,
       )?.length
     }
     if (columnCount === undefined) {

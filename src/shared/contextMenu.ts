@@ -84,7 +84,8 @@ export interface TableMenuHit {
   /** 命中行是否表头行（= rowIndex 0；命中分隔行 false）——表头/表体的
    *  显式判定面（删表头行升格等语义差异由执行侧按此分流） */
   inHeader: boolean
-  /** 命中列索引（0 基，行内钳到最近列）；命中分隔行 = null */
+  /** 命中列索引（0 基，行内越出格区时钳到最近列）；命中分隔行或格数与
+   *  声明列数不齐的内容行（ragged 行，如两列表中的 `| 1 |`）= null */
   columnIndex: number | null
   /** 内容行总数（表头 + 数据行；分隔行不计） */
   rowCount: number
