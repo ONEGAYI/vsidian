@@ -326,3 +326,33 @@ describe('标题折叠快捷键（#413，#409 T02）', () => {
     expect(formatBindingLabel('ctrl+k ctrl+l')).toBe('Ctrl+K Ctrl+L')
   })
 })
+
+describe('默认键位规范序契约（#417：pastePlain mac 默认键序永不命中修复）', () => {
+  it('pastePlain 的 mac 默认在真实按键事件派生序下命中（Cmd+Shift+V → shift+meta+v）', () => {
+    // keyStep（keybindingRouter.ts）按 ctrl→alt→shift→meta 序拼事件串再归一，
+    // mac 真实按下 Cmd+Shift+V 派生 shift+meta+v；resolveKeybinding 与存储
+    // 默认整串字面比较，存储串必须按同一规范序书写才可命中
+    expect(resolveKeybinding({}, 'live', 'shift+meta+v')).toEqual({ kind: 'command', id: 'pastePlain' })
+    expect(resolveKeybinding({}, 'live', 'ctrl+shift+v')).toEqual({ kind: 'command', id: 'pastePlain' })
+  })
+
+  it('全部默认绑定均按修饰键规范序书写（存储默认不再次归一，非规范序永不匹配）', () => {
+    // 同批排查结论的钉住断言：非规范序书写（如 meta 在 shift 前）在
+    // normalizeChord 下会改变形态，自归一等值即规范序书写
+    for (const op of KEYBINDING_OPERATIONS) {
+      for (const chord of op.defaults) {
+        expect(normalizeChord(chord), `${op.id}: ${chord}`).toBe(chord)
+      }
+    }
+  })
+
+  it('每个默认绑定在其生效模式下经真实按键归一化序可命中所属操作', () => {
+    for (const op of KEYBINDING_OPERATIONS) {
+      for (const chord of op.defaults) {
+        const mode = op.mode === 'reading' ? 'reading' : 'live'
+        expect(resolveKeybinding({}, mode, chord), `${op.id}: ${chord}`)
+          .toEqual({ kind: 'command', id: op.id })
+      }
+    }
+  })
+})
