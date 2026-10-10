@@ -115,6 +115,8 @@ import {
   HOVER_TARGET_TIP_KEY,
   HOVER_LIVE_DIRECT_KEY,
   HOVER_EXTERNAL_ENABLED_KEY,
+  READING_BREAKS_DEFAULT,
+  READING_BREAKS_KEY,
   WORD_SEGMENT_ENGINE_DEFAULT,
   WORD_SEGMENT_ENGINE_KEY,
   type SettingsPayload,
@@ -334,6 +336,8 @@ import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidian
 import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
+import { applyReadingRendererBreaks } from './readingBlocks'
+import { clearRefReadingBlockCache } from './refContentInstance'
 import { runCreateTable, runTableEdit } from './tableEditing'
 // #237 多光标：上下添加光标命令（@codemirror/commands 内置，webview 本地
 // 执行——快捷键路由本地分支与 ui.command 两入口共用 runCursorAdd）
@@ -2299,6 +2303,8 @@ export class WebviewSyncController {
         this.applyEmbedMaxHeightSetting()
         this.embedCards?.setMaxDepth(this.embedMaxDepth())
         this.applyWordSegmentEngineSetting()
+        // #423 阅读宽松换行：渲染器重建 + 阅读视图重切块（值变化时）
+        this.applyReadingBreaksSetting()
         // #343（P3-11）外链设置联动：总开关关闭或形态切回 card 时销毁
         // 在场原网页 iframe、就地退回卡片（缺键 = 无关变更不动作）
         notifyHoverExternalSettings(message.values)
@@ -3740,6 +3746,11 @@ export class WebviewSyncController {
       readingScrollHeightPx: rScroll?.scrollHeight,
       readingFindHitBlocks: readingActive && this.readingContainer
         ? this.readingContainer.querySelectorAll('.vsidian-reading-find-hit').length
+        : undefined,
+      // #423 宽松换行绘制层证据：阅读容器内 br 计数（含未开宽松时的显式
+      // 双空格硬换行——测试文档据此对照）
+      readingBrCount: readingActive && this.readingContainer
+        ? this.readingContainer.querySelectorAll('br').length
         : undefined,
       cssProbe: this.collectCssProbe(),
       liveSyntax: this.collectLiveSyntax(),
@@ -9301,6 +9312,27 @@ export class WebviewSyncController {
    *  防御——与其他设置应用器一致）；遍历在场卡片热更内联 max-height */
   private applyEmbedMaxHeightSetting(): void {
     this.embedCards?.setMaxHeight(this.embedMaxHeightPx())
+  }
+
+  /**
+   * #423 阅读宽松换行应用（settings.snapshot / settings.changed）：值变化
+   * 时重建切块渲染器单例并让已开阅读视图重切块重挂（refreshReading 保
+   * 滚动锚点），引用内容块缓存整体失效（下次挂载按新设置）。缺键/非布尔
+   * 回默认 false（严格，与其他设置应用器的缺省回退一致）。值未变时零
+   * 动作——无关设置变更不触发重解析（滚动路径零额外切块成本）。在场
+   * 引用挂载（嵌入卡片/悬停浮层）不强制重挂，随下次挂载自然更新
+   * （瞬态 UI，与语言切换不重建在场卡片的边界一致）。
+   */
+  private applyReadingBreaksSetting(): void {
+    const raw = this.settings?.[READING_BREAKS_KEY]
+    const breaks = raw === undefined ? READING_BREAKS_DEFAULT : raw === true
+    if (!applyReadingRendererBreaks(breaks)) {
+      return
+    }
+    clearRefReadingBlockCache()
+    if (this.viewMode === 'reading') {
+      this.refreshReading()
+    }
   }
 
   /** 嵌入限高当前值（设置投影；消费方 EmbedCardContext.maxHeightPx） */

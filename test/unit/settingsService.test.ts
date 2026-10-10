@@ -88,6 +88,9 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'general.defaultEditorGuard': true,
       // #318 搜索定位打开提示（默认关 = 2026-10-04 用户裁定，需在设置页显式开启）
       'editor.searchRevealHint': false,
+      // #423 阅读宽松换行（默认关 = CommonMark 严格软换行维持现状，对齐
+      // VSCode markdown.preview.breaks 默认）
+      'editor.readingBreaks': false,
     })
   })
 

@@ -60,6 +60,58 @@ describe('createMarkdownRenderer：安全配置', () => {
   })
 })
 
+describe('宽松换行设置（#423 breaks 选项）', () => {
+  // 矩阵：默认（breaks:false）单换行是 CommonMark 软换行（拼回同段不产
+  // <br>）；breaks:true 时段内单换行渲染为 <br>（对齐 VSCode
+  // markdown.preview.breaks / Obsidian 非 strictLineBreaks 的宽松形态）。
+  // 安全边界不随设置放宽：breaks 只影响换行呈现语义，html/linkify/
+  // typographer 锁定不变（攻击面论证见 createMarkdownRenderer 注释）。
+  it('默认（false）单换行不产生 <br>（既有严格语义钉住）', () => {
+    const md = createMarkdownRenderer()
+    const host = renderToDom(md, '第一行\n第二行\n')
+    expect(host.querySelector('p')!.innerHTML).not.toContain('<br')
+    expect(host.querySelector('p')!.textContent).toContain('第一行')
+  })
+
+  it('breaks:true 段内单换行渲染为 <br>（每个换行一处）', () => {
+    const md = createMarkdownRenderer({ breaks: true })
+    const host = renderToDom(md, '第一行\n第二行\n第三行\n')
+    expect(host.querySelectorAll('p br')).toHaveLength(2)
+  })
+
+  it('行尾双空格硬换行两种形态都产生 <br>（显式标记优先级不随设置变化）', () => {
+    const strict = renderToDom(createMarkdownRenderer(), '第一行  \n第二行\n')
+    expect(strict.querySelector('p')!.innerHTML).toContain('<br')
+    const loose = renderToDom(createMarkdownRenderer({ breaks: true }), '第一行  \n第二行\n')
+    expect(loose.querySelectorAll('p br')).toHaveLength(1)
+  })
+
+  it('breaks:true 不进代码区：行内代码换行按 CommonMark 规范为空格、围栏保持字面', () => {
+    const md = createMarkdownRenderer({ breaks: true })
+    const host = renderToDom(md, '`行内\n码`\n\n```\n围栏一\n围栏二\n```\n')
+    // code span 内换行 → 空格是 CommonMark 标准规范化，与 breaks 无关
+    expect(host.querySelector('p code')?.textContent).toBe('行内 码')
+    expect(host.querySelector('pre code')?.textContent).toContain('围栏一\n围栏二')
+    expect(host.querySelectorAll('p br')).toHaveLength(0)
+  })
+
+  it('breaks:true 不引入 HTML 面：标签仍转义、javascript: 仍拦截（安全锁定不受设置影响）', () => {
+    const md = createMarkdownRenderer({ breaks: true })
+    const host = renderToDom(md, '<script>alert(1)</script>\n[点](javascript:alert(1))\n')
+    expect(host.querySelector('script')).toBeNull()
+    expect(host.querySelector('a')).toBeNull()
+    expect(host.textContent).toContain('<script>alert(1)</script>')
+  })
+
+  it('段落块边界不因 breaks 变化（空行分段语义恒定）', () => {
+    const src = '段一甲\n段一乙\n\n段二甲\n'
+    const strictBlocks = createMarkdownRenderer().parse(src, {} as never)
+    const looseBlocks = createMarkdownRenderer({ breaks: true }).parse(src, {} as never)
+    expect(strictBlocks.filter((t) => t.type === 'paragraph_open')).toHaveLength(2)
+    expect(looseBlocks.filter((t) => t.type === 'paragraph_open')).toHaveLength(2)
+  })
+})
+
 describe('行尾双空格与末尾无换行（mvp.md 文档样例清单）', () => {
   it('行尾双空格渲染为硬换行 <br>（CommonMark 语义），行尾单空格不产生', () => {
     const md = createMarkdownRenderer()

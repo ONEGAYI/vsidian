@@ -185,6 +185,9 @@ export const en = {
   /** #318 search reveal open hint (editor.searchRevealHint) */
   'setting.searchRevealHint.title': 'Search reveal open hint',
   'setting.searchRevealHint.description': 'When a note opened from workspace search results becomes active, show a hint notification with a "Locate" button that jumps to the selected match. The hint itself changes nothing — locating only runs after you click. One hint per note per session; command and keybinding entries stay available regardless.',
+  /** #423 reading loose line breaks (editor.readingBreaks) */
+  'setting.readingBreaks.title': 'Reading loose line breaks',
+  'setting.readingBreaks.description': 'Whether a single line break inside a paragraph renders as a visible line break in the reading view: off (default) joins lines back into one paragraph per standard Markdown rules (two trailing spaces or a blank line are needed to break); on renders each single line break, matching the line-by-line live preview. Affects reading rendering only (note content inside embeds and hover previews included) — the live preview editing surface is unchanged; explicit two-space line breaks always work in both states.',
   /** #222 embed card height cap (reading-view embeds scroll internally past it) */
   'setting.embedMaxHeight.title': 'Embedded note max height',
   'setting.embedMaxHeight.description': 'Maximum height of the reading-view embed card content area: shorter notes keep their natural height while longer content scrolls inside the card up to this limit.',
