@@ -142,6 +142,7 @@ vsidian/
 │   │   ├── batch-2026-09-menu.md                # 右键菜单批次总览与决策回执
 │   │   ├── batch-2026-09.md                     # 2026-09 开票批次总览
 │   │   ├── batch-2026-10-heading-fold.md        # 标题折叠批次索引
+│   │   ├── batch-2026-10-menu-scenes.md         # 右键菜单场景差异化批次切片记录
 │   │   ├── batch-2026-10-settings-sections.md   # 2026-10 设置页批次实施树
 │   │   ├── batch-2026-10-vscode-ops.md          # 2026-10 编辑器操作批次实施树
 │   │   ├── batch-2026-10-vsidian-addons.md      # 附加组件验证与实施批次索引
