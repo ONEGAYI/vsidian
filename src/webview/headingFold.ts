@@ -25,7 +25,8 @@
 // - 折叠集为空的常规编辑：装饰重建先判键集空即返回；箭头插件的
 //   foldable 派生走 (doc, tree) 共享缓存（同一 doc 版本内四处消费共享
 //   一次计算），rangeHasNonSpace 正文行首行早退、均摊 ~O(1) 行/标题
-//   ——空白行密集的骨架稿是已知最坏面（档位数据 out/test/rl2-arrow-perf.log）；
+//   ——空白行密集的骨架稿是已知最坏面（#417 评审轮档位实测：空白行
+//   密集文档的箭头派生耗时随空白行占比线性增长，常规文档不可感知）；
 // - 块级剪枝遍历（只下降容器块节点）把直查成本压到 O(块节点数)，与
 //   extractOutline 的语义等价由对拍单测钉住（含容器白名单完整性）。
 //
@@ -170,8 +171,8 @@ export function foldableHeadingSpans(headings: readonly HeadingInfo[], doc: Text
  *  命中判定与 #410 foldable 查询共享一次 foldable 派生（审查轮 F3：
  *  消除同一事务内的重复逐 span 扫描）。装饰侧只在键集非空时按键计算、
  *  不走本缓存。成本口径：rangeHasNonSpace 逐行扫描、正文行首行命中即
- *  早退（均摊 ~O(1) 行/标题）；空白行密集的骨架稿是已知最坏面，档位
- *  数据见 out/test/rl2-arrow-perf.log。 */
+ *  早退（均摊 ~O(1) 行/标题）；空白行密集的骨架稿是已知最坏面（#417
+ *  评审轮以空白行密集档实测确认量级，可按同构造文档复测）。 */
 const foldableCache = new WeakMap<Text, { tree: Tree | undefined; spans: HeadingFoldSpan[] }>()
 
 /** (doc, tree) → 可折叠集（共享缓存派生；树引用变化时重算） */
@@ -376,10 +377,11 @@ export function migrateSelectionForFold(
 
 // ---- StateField：折叠键集合 ----
 
-/** 折叠切换 effect（T03 gutter 箭头 / toggleFold：单键翻转） */
-export const headingFoldToggle = StateEffect.define<number>()
-
-/** 折叠集整体设置 effect（foldAll / unfoldAll / 批量目标一次生效） */
+/** 折叠集整体设置 effect（全部折叠操作的唯一生效通道——箭头/toggleFold
+ *  的单键翻转经 toggleHeadingFoldAt 组合出下一集后同样走本 effect；
+ *  #418 移除了曾并存的 headingFoldToggle 裸翻转 effect：生产无派发方
+ *  （测试直驱除外），双通道只会分叉行为——「先应用后映射」语义也由
+ *  本 effect 单通道承载） */
 export const headingFoldSet = StateEffect.define<ReadonlySet<number>>()
 
 const EMPTY_FOLD: ReadonlySet<number> = new Set<number>()
@@ -411,13 +413,6 @@ export const headingFoldField = StateField.define<ReadonlySet<number>>({
     for (const eff of tr.effects) {
       if (eff.is(headingFoldSet)) {
         next = eff.value
-        changed = true
-      } else if (eff.is(headingFoldToggle)) {
-        const toggled = new Set(next)
-        if (!toggled.delete(eff.value)) {
-          toggled.add(eff.value)
-        }
-        next = toggled
         changed = true
       }
     }
@@ -895,9 +890,12 @@ export function collectHeadingFoldPaint(view: EditorView): HeadingFoldPaintProbe
   const state = view.state
   const keys = state.field(headingFoldField, false) ?? new Set<number>()
   const tree = state.field(liveDecorationsField, false)?.tree
-  const headings = collectHeadings(state.doc, tree)
-  const folds = effectiveHeadingFolds(keys, headings, state.doc)
-  const arrowStates = headingFoldArrowStates(headings, keys, state.doc)
+  // #418：走 foldableSpansCached 共享缓存（同一 doc 版本内与箭头插件/
+  // foldAll/点击命中共享一次派生）——有效折叠 = 可折叠集 ∩ 折叠键集
+  // （与 effectiveHeadingFolds 的键集∩可折叠语义等价，均纯派生）
+  const foldables = foldableSpansCached(state.doc, tree)
+  const folds = foldables.filter((s) => keys.has(s.key))
+  const arrowStates = arrowStatesFromSpans(foldables, keys)
 
   // 票面口径：箭头绘制态取**首折叠区间**的箭头（折叠态常显右向）——
   // DOM 首箭头未必属折叠区间；无折叠时两字段缺省（false / null）

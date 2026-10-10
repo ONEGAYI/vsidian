@@ -37,7 +37,6 @@ import {
   headingFoldField,
   headingFoldGutterExtension,
   headingFoldSet,
-  headingFoldToggle,
   HeadingFoldEllipsisWidget,
   clampFoldHiddenCursor,
   clampSelectionOutOfFolds,
@@ -159,18 +158,14 @@ describe('collectHeadings：标题序列与节边界', () => {
 describe('headingFoldField：StateField 语义与坐标生命周期', () => {
   it('折叠是视图态：effect 事务零写回（无文档变更）', () => {
     const state = foldState('# A\nx\n')
-    const tr = state.update({ effects: headingFoldToggle.of(0) })
+    const tr = state.update({ effects: headingFoldSet.of(new Set([0])) })
     expect(tr.changes.empty).toBe(true)
     expect(tr.docChanged).toBe(false)
     expect(tr.state.field(headingFoldField).has(0)).toBe(true)
   })
 
-  it('headingFoldToggle 翻转单键；headingFoldSet 整体设置（unfoldAll = 空集）', () => {
+  it('headingFoldSet 整体设置（unfoldAll = 空集；单键翻转经 toggleHeadingFoldAt 组合本 effect——#418 移除裸 toggle effect 后单一通道）', () => {
     let state = foldState('# A\nx\n')
-    state = state.update({ effects: headingFoldToggle.of(0) }).state
-    expect(state.field(headingFoldField).has(0)).toBe(true)
-    state = state.update({ effects: headingFoldToggle.of(0) }).state
-    expect(state.field(headingFoldField).size).toBe(0)
     state = state.update({ effects: headingFoldSet.of(new Set([0])) }).state
     expect(state.field(headingFoldField).size).toBe(1)
     state = state.update({ effects: headingFoldSet.of(new Set()) }).state
@@ -514,11 +509,9 @@ describe('collectHeadings 一致性', () => {
 // ---- 七、effect 直驱事务形态 ----
 
 describe('effect 驱动（无 DOM-only 路径）', () => {
-  it('headingFoldSet 与 headingFoldToggle 均为 StateEffect 实例（编程触发与用户触发同链路）', () => {
+  it('headingFoldSet 为 StateEffect 实例（编程触发与用户触发同链路的单一生效通道）', () => {
     const setEff = headingFoldSet.of(new Set([1]))
     expect(setEff.is(headingFoldSet)).toBe(true)
-    const toggleEff = headingFoldToggle.of(1)
-    expect(toggleEff.is(headingFoldToggle)).toBe(true)
   })
 })
 
@@ -729,7 +722,7 @@ describe('T03：paint 探针数据（collectHeadingFoldPaint 结构性字段）'
 
   it('折叠后：foldCount、省略号文字、折叠态箭头与悬停武装字段', () => {
     const view = viewOfT03('# A\nbody\n\n# B\nmore\n', 0)
-    view.dispatch({ effects: headingFoldToggle.of(0) })
+    view.dispatch({ effects: headingFoldSet.of(new Set([0])) })
     const probe = collectHeadingFoldPaint(view)
     expect(probe.foldCount).toBe(1)
     expect(probe.ellipsisText).toContain('⋯')
