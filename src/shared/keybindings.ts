@@ -443,11 +443,58 @@ export function resolveKeybinding(overrides: KeybindingOverrides, mode: 'live' |
   return { kind: 'none' }
 }
 
+/** #444：键位标签的平台呈现维度（仅渲染层——存储与比较恒用规范序小写
+ *  形态，不受本状态影响）。webview 端按 navigator 探测默认；宿主与测试经
+ *  setKeybindingLabelPlatform 显式注入（宿主当前无标签消费点，注入留作
+ *  未来通知类消费的接线位）。 */
+export type KeybindingLabelPlatform = 'mac' | 'windows' | 'linux'
+
+let labelPlatform: KeybindingLabelPlatform | null = null
+
+function detectLabelPlatform(): KeybindingLabelPlatform {
+  if (typeof navigator === 'undefined') {
+    return 'windows'
+  }
+  const ua = navigator.userAgent
+  if (/Macintosh|Mac OS X|MacIntel/i.test(ua)) return 'mac'
+  if (/Linux|X11/i.test(ua)) return 'linux'
+  return 'windows'
+}
+
+/** 显式指定平台（宿主按 process.platform 注入；webview 默认走探测） */
+export function setKeybindingLabelPlatform(platform: KeybindingLabelPlatform): void {
+  labelPlatform = platform
+}
+
+/** 当前标签平台（首访探测并缓存） */
+export function keybindingLabelPlatform(): KeybindingLabelPlatform {
+  return (labelPlatform ??= detectLabelPlatform())
+}
+
+/** 测试钩子：还原平台探测默认 */
+export function __resetKeybindingLabelPlatformForTest(): void {
+  labelPlatform = null
+}
+
 export function formatBindingLabel(chord: string): string {
-  return chord.split(' ').map((step) => step.split('+').map((part) =>
+  const platform = keybindingLabelPlatform()
+  const metaLabel = { mac: 'Cmd', windows: 'Win', linux: 'Super' }[platform]
+  const labelOf = (part: string): string =>
     // #413：符号物理键名渲染为字符形态（bracketleft → [），设置页标签与
-    // 捕获框不出现 BRACKETLEFT 式大写名；与 keyStep 别名同一份键名词表
-    ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Win', escape: 'Esc', space: 'Space',
+    // 捕获框不出现 BRACKETLEFT 式大写名；与 keyStep 别名同一份键名词表。
+    // #444：meta 按平台渲染（mac: Cmd / Windows: Win / Linux: Super）
+    ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: metaLabel, escape: 'Esc', space: 'Space',
       minus: '-', equal: '=', comma: ',', period: '.', slash: '/', backslash: '\\',
-      semicolon: ';', quote: "'", bracketleft: '[', bracketright: ']' })[part] ?? part.toUpperCase()).join('+')).join(' ')
+      semicolon: ';', quote: "'", bracketleft: '[', bracketright: ']' })[part] ?? part.toUpperCase()
+  return chord.split(' ').map((step) => {
+    const labels = step.split('+').map(labelOf)
+    // #444：mac 用户视角 Cmd 前置（keybindings.md「Cmd+Shift+V」式）——
+    // 存储规范序 shift 在 meta 前，mac 标签把 meta 提到段首；Windows/Linux
+    // 保持位置渲染（meta 后置，与平台惯例一致，票面未要求改序）
+    const metaIndex = step.split('+').indexOf('meta')
+    if (platform === 'mac' && metaIndex >= 0) {
+      labels.unshift(labels.splice(metaIndex, 1)[0]!)
+    }
+    return labels.join('+')
+  }).join(' ')
 }

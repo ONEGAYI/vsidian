@@ -7,6 +7,7 @@ import type { AddonCommandReport } from '../../src/shared/addonCommands'
 import {
   runtimeOperations,
   getEffectiveBindings,
+  findConflictedOperationIds,
   __resetRuntimeOperationsForTest,
 } from '../../src/shared/keybindings'
 
@@ -108,5 +109,51 @@ describe('T10 宿主命令服务', () => {
     // 重复回收无害
     service.releaseAddon(ADDON)
     expect(changes).toEqual([1, 0])
+  })
+
+  it('#443 非法 defaults（normalizeChord 拒绝形态）整批拒绝', () => {
+    const { service, logs } = makeService()
+    service.syncReport(ADDON, 1, [
+      report(`${ADDON}.one`),
+      report(`${ADDON}.bad`, ADDON, { defaults: ['ctrl+alt'] }),
+    ])
+    expect(service.catalog()).toHaveLength(0)
+    expect(runtimeOperations()).toHaveLength(0)
+    expect(logs.some((line) =>
+      line.includes('commands-report-rejected') && line.includes('invalid defaults'))).toBe(true)
+  })
+
+  it('#443 保留 Tab 段 defaults 整批拒绝（SDK 侧 tab-forbidden 的宿主对称面）', () => {
+    for (const reserved of ['Tab', 'shift+tab']) {
+      const { service, logs } = makeService()
+      service.syncReport(ADDON, 1, [
+        report(`${ADDON}.one`),
+        report(`${ADDON}.tabbed`, ADDON, { defaults: [reserved] }),
+      ])
+      expect(service.catalog(), reserved).toHaveLength(0)
+      expect(runtimeOperations(), reserved).toHaveLength(0)
+      expect(logs.some((line) =>
+        line.includes('commands-report-rejected') && line.includes('tab-forbidden'))).toBe(true)
+    }
+    // ctrl/alt/meta+Tab 不属保留段（#427 放行），复验不拒
+    const { service: ok } = makeService()
+    ok.syncReport(ADDON, 1, [report(`${ADDON}.ctrlTab`, ADDON, { defaults: ['ctrl+tab'] })])
+    expect(getEffectiveBindings({}, `${ADDON}.ctrlTab`)).toEqual(['ctrl+tab'])
+  })
+
+  it('#443 非规范序 defaults 归一后入目录：冲突检查不漏判', () => {
+    const { service } = makeService()
+    // 伪造协议消息：defaults 非规范序（大写形态）。修复前宿主目录原样透传，
+    // chordOverlap 字面比较与内置 pastePlain 的 ctrl+shift+v 不相等 → 漏判
+    service.syncReport(ADDON, 1, [
+      report(`${ADDON}.dupe`, ADDON, { defaults: ['Ctrl+Shift+V'] }),
+      report(`${ADDON}.alias`, ADDON, { defaults: ['Cmd+Shift+V'] }),
+    ])
+    expect(getEffectiveBindings({}, `${ADDON}.dupe`)).toEqual(['ctrl+shift+v'])
+    expect(getEffectiveBindings({}, `${ADDON}.alias`)).toEqual(['shift+meta+v'])
+    const conflicted = findConflictedOperationIds({})
+    expect(conflicted.has(`${ADDON}.dupe`)).toBe(true)
+    expect(conflicted.has(`${ADDON}.alias`)).toBe(true)
+    expect(conflicted.has('pastePlain')).toBe(true)
   })
 })
