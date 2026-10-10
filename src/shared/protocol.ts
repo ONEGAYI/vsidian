@@ -2504,7 +2504,9 @@ export interface HeadingFoldPaintProbe {
 export interface ReadingFoldPaintProbe {
   /** 有效折叠区间数（与 Live 派生同口径——同一状态集） */
   foldCount: number
-  /** 可折叠标题块箭头计数（悬停显现族总量；不可折叠标题不产） */
+  /** 可折叠标题区间总数（与 Live 派生同口径的 span 计数；阅读侧箭头
+   *  只装于 heading 块——列表/引用内标题可折叠但无阅读箭头身份，此计数
+   *  含之，可大于实际箭头数，见规格已知边界） */
   foldableArrowCount: number
   /** 首折叠标题省略号占位绘制态（中心点 elementFromPoint 命中） */
   ellipsisVisible: boolean

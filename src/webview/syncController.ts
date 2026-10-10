@@ -8778,6 +8778,13 @@ export class WebviewSyncController {
     }
     this.modeAnchor = cur.from
     if (this.viewMode === 'reading' && this.readingView) {
+      // #419 落点展开（同 locateOffset 阅读分支）：查找命中落在折叠隐藏区
+      // 内时先永久展开（匹配区间任一端在隐藏区即展开，与 Live 分支
+      // T04/#415 同款语义），展开的同步回环刷新块序列后再算锚点——命中
+      // 块已进可见序列，锚点不再 floor 到折叠标题
+      if (this.view) {
+        unfoldAround(this.view, this.clampToDoc(cur.from), this.clampToDoc(cur.to))
+      }
       const start = this.readingView.anchorStartFor(this.clampToDoc(cur.from)) ?? cur.from
       this.modeAnchor = start
       this.readingView.scrollToSrcStart(start)

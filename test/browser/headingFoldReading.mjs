@@ -44,7 +44,7 @@ const T3 = DOC.indexOf('# T3')
 const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 let passed = 0
-const total = 6
+const total = 7
 
 async function openPage() {
   const page = await browser.newPage()
@@ -137,6 +137,14 @@ try {
     // 箭头在正文列左缘之左（留白带内，零侵入）
     const contentLeft = await page.evaluate(() => window.readingContentLeft())
     assert.ok(t2Arrow.x + t2Arrow.w <= contentLeft + 0.5, '箭头不得侵入正文列')
+    // 命中桥回归（评审 B1）：从标题左缘内侧以 ~1.2px/步连续移向箭头中心，
+    // 路径必穿过箭头盒右缘 4px margin 视觉间隙——无桥时块在此失 :hover、
+    // 箭头回 hidden（不可再命中），慢速移动永远点不到；桥在场则全程可命中
+    await page.mouse.move(t2Heading.x + 2, t2Arrow.y + t2Arrow.h / 2)
+    await page.mouse.move(t2Arrow.x + t2Arrow.w / 2, t2Arrow.y + t2Arrow.h / 2, { steps: 12 })
+    boxes = await page.evaluate(() => window.arrowBoxes())
+    const armedAcrossGap = boxes.find((b) => b.srcStart === String(T2))
+    assert.equal(armedAcrossGap.visibility, 'visible', '连续移动穿越间隙后箭头仍可见（命中桥）')
     await page.mouse.click(t2Arrow.x + t2Arrow.w / 2, t2Arrow.y + t2Arrow.h / 2)
     assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T2], '点击箭头翻转 Live StateField（共享状态集）')
     await settle(page)
@@ -273,6 +281,35 @@ try {
     assert.equal(await page.evaluate(() => window.editRequestCount()), 0, '折叠与模式往返全程零写回')
     await page.close()
     await check(errors, '零写回')
+  }
+  // ---- 场景 7：阅读态查找命中折叠区自动展开（落点展开，与 Live 同款） ----
+  {
+    const { page, errors } = await openPage()
+    const editsBefore = await page.evaluate(() => window.editRequestCount())
+    await foldT2InLive(page) // Live 折 T2（beta 落隐藏区）
+    assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T2], '前置：T2 折叠')
+    await page.evaluate(() => window.setMode('reading'))
+    await page.waitForSelector('.vsidian-reading-block', { timeout: 5000 })
+    // 阅读态查找：键路由要求焦点在阅读容器内（findPanel 套件同款前置）
+    await page.evaluate(() => {
+      const container = document.querySelector('.vsidian-view-reading')
+      if (container instanceof HTMLElement) container.focus()
+    })
+    await page.keyboard.press('Control+f')
+    await page.click('.vsidian-find-input')
+    await page.keyboard.type('beta') // 输入即定位：命中落在折叠隐藏区
+    // findLocate 阅读分支落点展开（与 locateOffset 阅读分支同款
+    // unfoldAround，规格第六节「阅读态查找……自动展开直达」承诺句）
+    assert.deepEqual(await page.evaluate(() => window.foldKeys()), [],
+      '阅读态查找命中折叠区 → 该节自动展开')
+    await settle(page)
+    const text = await page.evaluate(() => window.readingText())
+    assert.equal(text.includes('beta'), true, '展开后 beta 进入可见序列')
+    // 查找定位与落点展开全程零写回
+    assert.equal(await page.evaluate(() => window.editRequestCount()), editsBefore,
+      '阅读态查找落点展开零写回')
+    await page.close()
+    await check(errors, '阅读态查找命中折叠区自动展开')
   }
 } finally {
   await browser.close()

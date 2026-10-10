@@ -1374,4 +1374,36 @@ describe('阅读态标题折叠（#419）：折叠状态消费', () => {
     expect(probe.arrowVisible).toBe(false)
     view.dispose()
   })
+
+  it('折叠态下文档增量重建（refreshReading 顺序：先新折叠态再 setDocument）过滤与键映射一致', () => {
+    const { container, view } = setupFold()
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    view.setFoldState(spans, new Set([t2.key]))
+    expect(container.textContent ?? '').not.toContain('beta body')
+    // 外部增量：文档前插一行（折叠键随 ChangeSet 平移 = 标题行行首平移）
+    const inserted = 'pre line\n'
+    const doc2 = inserted + DOC
+    const spans2 = (() => {
+      const state = EditorState.create({ doc: doc2 })
+      return foldableHeadingSpans(collectHeadings(state.doc), state.doc)
+    })()
+    const key2 = doc2.indexOf('## T2')
+    expect(key2).toBe(t2.key + inserted.length) // 键映射语义 = 行首 offset 平移
+    // refreshReading 真实顺序（syncReadingFolds(false) → setDocument）：
+    // 组合重建后仍只隐藏平移后的 T2 节，区外与前置行保持
+    view.setFoldState(spans2, new Set([key2]), { rebuild: false })
+    view.setDocument(doc2)
+    const text = container.textContent ?? ''
+    expect(text).toContain('pre line')
+    expect(text).not.toContain('beta body')
+    expect(text).toContain('alpha body')
+    expect(text).toContain('tail body')
+    // 反例钉住映射语义：未映射的旧键在新文档上脱靶（有效折叠为空，
+    // 不隐藏任何节——键集与可折叠全集的交集派生）
+    view.setFoldState(spans2, new Set([t2.key]), { rebuild: false })
+    view.setDocument(doc2)
+    expect(container.textContent ?? '').toContain('beta body')
+    view.dispose()
+  })
 })

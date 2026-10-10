@@ -651,7 +651,7 @@ describe('T03：省略号占位 widget（headingFoldDecorations 升级）', () =
     installLocale('test', {})
   })
 
-  it('widget 点击派发 headingFoldToggle（effect 直驱，无 DOM-only 状态改动）', () => {
+  it('widget 点击经 toggleHeadingFoldAt 派发 headingFoldSet（effect 直驱，无 DOM-only 状态改动）', () => {
     const view = viewOfT03('# A\nbody\n', 6)
     const dom = new HeadingFoldEllipsisWidget(0).toDOM(view)
     ;(dom as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))

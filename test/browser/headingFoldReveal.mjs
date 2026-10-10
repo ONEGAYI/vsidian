@@ -128,7 +128,7 @@ try {
     assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T2], '前置：T2 折叠')
     await page.evaluate(() => window.setMode('reading'))
     await page.waitForSelector('.vsidian-reading-block', { timeout: 5000 })
-    // 阅读看全文（折叠不带入阅读呈现）；折叠态不因模式切换丢失
+    // 阅读态同呈现折叠（#419 两模式共享同一状态集）；折叠态不因模式切换丢失
     await page.evaluate(() => window.setMode('live'))
     assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T2],
       'Live 折叠 → 阅读 → Live：折叠原样（StateField 驻留）')

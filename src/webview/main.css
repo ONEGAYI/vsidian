@@ -3490,6 +3490,16 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   display: block;
 }
 
+/* 命中桥（评审 B1）：箭头盒与标题左缘的 4px 视觉间隙属 margin（不参与
+   命中）——指针穿过间隙时标题块失 :hover，箭头即回 visibility:hidden
+   （不再可命中），慢速连续移动永远点不到箭头。透明伪元素向四周外扩
+   4px 铺桥：间隙内仍命中箭头（块的后代，hover 链保持），视觉零变化 */
+#app .vsidian-view-reading .vsidian-reading-fold-arrow::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
 /* 标题块 hover 显现（CSS :hover 直驱——阅读态无 gutter 武装带，悬停
    即显现；移开即消失） */
 #app .vsidian-view-reading .vsidian-reading-block:hover .vsidian-reading-fold-arrow {

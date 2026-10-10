@@ -64,4 +64,16 @@ describe('阅读态标题折叠 CSS 契约（#419）', () => {
     expect(block).toContain('var(--vsidian-fold-ellipsis-color)')
     expect(block).toContain('cursor: pointer')
   })
+
+  it('箭头命中桥：透明伪元素外扩铺桥（margin 视觉间隙不可命中的防回潮）', () => {
+    // 评审 B1：箭头盒与标题左缘的 4px 间隙属 margin（不参与命中）——指针
+    // 穿过间隙时块失 :hover、箭头回 hidden 且不可再命中，慢速移动点不到
+    // 箭头。桥 = 透明 ::after 外扩；移除该规则即回归死区（多步移动断言
+    // 归浏览器套件 headingFoldReading）
+    const block = ruleBlock('.vsidian-view-reading .vsidian-reading-fold-arrow::after {')
+    expect(block).not.toBe('')
+    expect(block).toContain('position: absolute')
+    // 四向外扩（右向外扩覆盖 margin 间隙是桥的本质；上下左提高命中容差）
+    expect(block).toMatch(/inset:\s*-4px/)
+  })
 })
