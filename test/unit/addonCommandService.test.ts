@@ -123,6 +123,23 @@ describe('T10 宿主命令服务', () => {
       line.includes('commands-report-rejected') && line.includes('invalid defaults'))).toBe(true)
   })
 
+  it('#443 保留 Tab 段 defaults 整批拒绝（SDK 侧 tab-forbidden 的宿主对称面）', () => {
+    const { service, logs } = makeService()
+    service.syncReport(ADDON, 1, [
+      report(`${ADDON}.one`),
+      report(`${ADDON}.tabbed`, ADDON, { defaults: ['Tab'] }),
+      report(`${ADDON}.shiftTabbed`, ADDON, { defaults: ['shift+tab'] }),
+    ])
+    expect(service.catalog()).toHaveLength(0)
+    expect(runtimeOperations()).toHaveLength(0)
+    expect(logs.some((line) =>
+      line.includes('commands-report-rejected') && line.includes('tab-forbidden'))).toBe(true)
+    // ctrl/alt/meta+Tab 不属保留段（#427 放行），复验不拒
+    const { service: ok } = makeService()
+    ok.syncReport(ADDON, 1, [report(`${ADDON}.ctrlTab`, ADDON, { defaults: ['ctrl+tab'] })])
+    expect(getEffectiveBindings({}, `${ADDON}.ctrlTab`)).toEqual(['ctrl+tab'])
+  })
+
   it('#443 非规范序 defaults 归一后入目录：冲突检查不漏判', () => {
     const { service } = makeService()
     // 伪造协议消息：defaults 非规范序（大写形态）。修复前宿主目录原样透传，

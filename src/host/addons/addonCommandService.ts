@@ -13,6 +13,7 @@
 //   目录并广播——不影响内置命令与菜单。
 import type { AddonCommandReport } from '../../shared/addonCommands'
 import {
+  chordContainsReservedTab,
   normalizeChord,
   setRuntimeOperations,
   type RuntimeKeybindingOperation,
@@ -65,12 +66,18 @@ export class AddonCommandService {
       // #443：defaults 复验归一形态。协议守卫仅形态过滤（字符串数组即可
       // 过），伪造消息携带非规范序 defaults 会让宿主目录/设置页的字面比较
       // （chordOverlap）漏判冲突。null 即整批拒绝；非规范序归一后入目录
-      // （与编辑器 SDK 侧 buildAddonCommandReport 的「归一化后存储」同语义）。
+      // （与编辑器 SDK 侧 buildAddonCommandReport 的「归一化后存储」同
+      // 语义——含保留 Tab 段拒绝的对称面：裸 Tab/Shift+Tab 归一为
+      // tab/shift+tab 非 null，须独立拦下，否则违约绑定进宿主目录与设置页）。
       const defaults: string[] = []
       for (const raw of command.defaults) {
         const normalized = normalizeChord(raw)
         if (normalized === null) {
           this.ports.log('commands-report-rejected', addonId, `invalid defaults: ${command.commandId}`)
+          return
+        }
+        if (chordContainsReservedTab(normalized)) {
+          this.ports.log('commands-report-rejected', addonId, `tab-forbidden defaults: ${command.commandId}`)
           return
         }
         defaults.push(normalized)

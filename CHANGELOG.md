@@ -39,7 +39,7 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 **mac 快捷键标签显示 Cmd（#444）**
 
-- 设置页快捷键分页、右键菜单提示列与键位徽章里的 meta 系键位在 mac 按 Cmd 显示且置于段首（如「粘贴纯文本」的 Cmd+Shift+V）——此前固定显示 Win（Shift+Win+V），与 mac 用户视角描述不一致
+- 设置页快捷键分页、右键菜单提示列与编辑器提示文字里的 meta 系键位在 mac 按 Cmd 显示且置于段首（如「粘贴纯文本」的 Cmd+Shift+V）——此前固定显示 Win（Shift+Win+V），与 mac 用户视角描述不一致
 - Linux 上同类标签由 Win 改为 Super（对齐 VSCode 惯例）；Windows 显示不变
 - 仅为标签呈现修正，键位存储、匹配与冲突检查不受影响
 
