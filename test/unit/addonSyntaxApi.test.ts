@@ -29,7 +29,7 @@ const SAMPLE_LINES = [
 ]
 
 /** #433 口径扩展样例：单行闭合块、段内形态、嵌套组合、fm 行内、围栏内
- *  字面 $、setext 标题与未闭合块（1-based 行号见矩阵注释） */
+ *  字面 $、围栏内跨行 $$ 块、setext 标题与未闭合块（1-based 行号见矩阵注释） */
 const EXT_LINES = [
   '---', // L1 fm 开
   'fmcode: `x` $y$', // L2 fm 行内（源码态：无行内标记语义）
@@ -44,12 +44,15 @@ const EXT_LINES = [
   '- > lq', // L11 列表内引用（优先级 list > quote）
   '```', // L12 围栏开
   '$$f$$', // L13 围栏内单行块形态（字面代码）
-  '$d$', // L14 围栏内行内 $（字面）
-  '```', // L15 围栏闭
-  '$$', // L16 未闭合块（不产出 → text）
-  '', // L17（隔离行：避免 $$ 行与 setext 例相邻构成 SetextHeading）
-  'Setext 题', // L18 setext 内容行
-  '===', // L19 setext 下划线行
+  '$$', // L14 围栏内跨行块开（块表收、树判 code——代码上下文守卫）
+  'a+b', // L15 围栏内跨行块内容（同上）
+  '$$', // L16 围栏内跨行块闭（同上）
+  '$d$', // L17 围栏内行内 $（字面）
+  '```', // L18 围栏闭
+  '$$', // L19 未闭合块（不产出 → text）
+  '', // L20（隔离行：避免 $$ 行与 setext 例相邻构成 SetextHeading）
+  'Setext 题', // L21 setext 内容行
+  '===', // L22 setext 下划线行
 ]
 
 function sourceOf(lines: readonly string[]): { source: AddonSyntaxSource; at: (ln: number, col?: number) => number } {
@@ -123,12 +126,15 @@ describe('lineTypeAt：#433 口径扩展矩阵', () => {
     [8, 'list', '列表内公式（树优先于单行块扫描）'],
     [9, 'quote', '引用内公式（树优先）'],
     [11, 'list', '列表内引用（优先级 list > quote）'],
-    [13, 'code', '围栏内的 $$…$$ 形态（字面代码）'],
-    [14, 'code', '围栏内容行'],
-    [15, 'code', '围栏闭'],
-    [16, 'text', '未闭合 $$（不产出，稳定降级）'],
-    [18, 'heading', 'setext 内容行'],
-    [19, 'heading', 'setext 下划线行'],
+    [13, 'code', '围栏内的 $$…$$ 单行形态（字面代码）'],
+    [14, 'code', '围栏内跨行 $$ 块开行（块表收但代码上下文守卫——字面代码）'],
+    [15, 'code', '围栏内跨行 $$ 块内容行（同上）'],
+    [16, 'code', '围栏内跨行 $$ 块闭行（同上）'],
+    [17, 'code', '围栏内行内 $ 行（字面）'],
+    [18, 'code', '围栏闭'],
+    [19, 'text', '未闭合 $$（不产出，稳定降级）'],
+    [21, 'heading', 'setext 内容行'],
+    [22, 'heading', 'setext 下划线行'],
   ]
   for (const [ln, want, label] of cases) {
     it(`L${ln} ${label} → ${want}`, () => {
@@ -173,11 +179,18 @@ describe('inlineAt：行内标记点位（code / formula / none）', () => {
   it('跨行公式块内的位置 → formula；围栏内的 $ 与 $$ 形态 → none（字面代码）', () => {
     expect(addonSyntaxInlineAt(sample.source, sample.at(11, 2)).kind).toBe('formula')
     expect(addonSyntaxInlineAt(ext.source, ext.at(13, 2)).kind).toBe('none')
-    expect(addonSyntaxInlineAt(ext.source, ext.at(14, 1)).kind).toBe('none')
+    expect(addonSyntaxInlineAt(ext.source, ext.at(17, 1)).kind).toBe('none')
+    // 围栏内跨行块的三行：与行类型同口径——代码上下文内 $ 是字面
+    expect(addonSyntaxInlineAt(ext.source, ext.at(15, 1)).kind).toBe('none')
   })})
 
 describe('nodeNames 诊断载荷（非稳定快照，存在性与如实性）', () => {
   const ext = sourceOf(EXT_LINES)
+  it('空文档（Text.of([""])）：两查询不抛错、落 text/none（评审 R2 边界钉住）', () => {
+    const empty = sourceOf([''])
+    expect(addonSyntaxLineTypeAt(empty.source, 0).kind).toBe('text')
+    expect(addonSyntaxInlineAt(empty.source, 0).kind).toBe('none')
+  })
   it('普通段落行返回非空祖先链；fm 内容行如实快照树上反语义节点', () => {
     const plain = addonSyntaxLineTypeAt(ext.source, ext.at(7, 0))
     expect(Array.isArray(plain.nodeNames)).toBe(true)

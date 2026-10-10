@@ -116,10 +116,11 @@ function nodeNamesAt(source: AddonSyntaxSource, pos: number): string[] {
 }
 
 /**
- * 光标处行类型（块级维度）。判定链（探针 #408 修正版同序，矩阵测试
- * 钉住）：
+ * 光标处行类型（块级维度）。判定链（探针 #408 修正版同序 + 评审 R1
+ * 代码上下文守卫，矩阵测试钉住）：
  * 1. frontmatter 区间（行级）→ frontmatter（树上反语义，必须最先拦截）
- * 2. 跨行 `$$` 块表命中 → formula（树上零语义，必须先于树枚举）
+ * 2. 跨行 `$$` 块表命中且非代码上下文 → formula（树上零语义，先于树
+ *    枚举；代码上下文内块表不命中——围栏内 `$$` 是字面，见下方守卫）
  * 3. 树链枚举按优先级：code（FencedCode）> table > heading（ATX/Setext）
  *    > list（Bullet/Ordered）> quote（嵌套组合取先命中者）
  * 4. 单行闭合块 `$$x$$`（独占一行、内容非空）→ formula（树上零语义、
@@ -133,9 +134,17 @@ export function addonSyntaxLineTypeAt(source: AddonSyntaxSource, pos: number): A
   if (inFrontmatter(source, pos)) {
     return { kind: 'frontmatter', nodeNames }
   }
-  for (const hit of source.mathBlocks) {
-    if (pos >= hit.from && pos < hit.to) {
-      return { kind: 'formula', nodeNames }
+  // 代码上下文守卫（评审 R1）：块表是纯文本扫描（mathBlocksField 的
+  // create 不做代码抑制——装饰层的 mathSuppressed 发生在 paint），围栏
+  // 代码内的 `$$` 文本同样进表；查询面与 inlineAt/live 视觉抑制同口径
+  // ——代码上下文内 `$` 是字面，不判 formula，落到树枚举（FencedCode →
+  // code）。跨行块与围栏交叉的畸形形态按位置局部语义（光标在围栏行判
+  // code、块内普通行判 formula）
+  if (!nodeNames.some((name) => MATH_CODE_CONTEXTS.has(name))) {
+    for (const hit of source.mathBlocks) {
+      if (pos >= hit.from && pos < hit.to) {
+        return { kind: 'formula', nodeNames }
+      }
     }
   }
   const chain = nodeNames.join(' ')

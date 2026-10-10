@@ -48,6 +48,12 @@ const DOC = [
   '',
   '$$y$$',
   '',
+  '```',
+  '$$',
+  'z',
+  '$$',
+  '```',
+  '',
 ].join('\n')
 
 function makeInstanceDeps(sent: WebviewToHost[]): LiveEditorInstanceDeps {
@@ -173,6 +179,7 @@ describe('真实链路：lineTypeAt / inlineAt 矩阵点位（生产取数路径
       [at('> quote'), 'quote', '引用行'],
       [at('- item'), 'list', '列表项'],
       [at('$$y$$'), 'formula', '单行闭合块（补判，不在跨行块表）'],
+      [at('z'), 'code', '围栏内跨行 $$ 块内容行（真实 mathBlocksField：块表收、代码上下文守卫判字面代码）'],
     ]
     for (const [pos, want, label] of cases) {
       const result = facet.lineTypeAt('main', pos)

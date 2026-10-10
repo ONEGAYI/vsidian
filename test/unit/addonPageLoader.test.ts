@@ -270,6 +270,28 @@ describe('T02 生产装载器：装载与身份', () => {
     expect(h.handle.stats().active).toEqual([])
   })
 
+  it('#430 async 工厂 rejection 迟到（换代而非卸载）→ 静默且新代次不受扰；loaded 结局恰一条不补发', async () => {
+    const h = harness()
+    // g1：async 工厂，其 rejection 将在 g2 落地后才到达
+    h.registrations.push({ addonId: ADDON_ID, factory: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      throw new Error('stale gen')
+    }, registeredAt: h.now() })
+    await h.handle.load(manifest())
+    // 换代：宿主最新代次为准（g2 同步工厂正常装载）
+    h.registrations.push({ addonId: ADDON_ID, factory: () => {}, registeredAt: h.now() })
+    const second = await h.handle.load(manifest({ generation: 2 }))
+    expect(second).toEqual({ ok: true, css: [] })
+    await settle()
+    // g1 的迟到 rejection：静默丢弃——g2 在场不受扰、无 faulted 上报
+    expect(h.sent.filter((message) => message.type === 'addon.faulted')).toEqual([])
+    expect(h.handle.stats().active).toEqual([{ addonId: ADDON_ID, generation: 2 }])
+    expect(h.handle.stats().history.at(-1)).not.toMatchObject({ ended: 'faulted' })
+    // 装载结局恰两条 ok:true（两次装载各一条；rejection 路径不补发第三条——评审 R6）
+    expect(h.sent.filter((message) => message.type === 'addon.loaded')).toHaveLength(2)
+    expect(h.sent.filter((message) => message.type === 'addon.loaded').every((m) => m.type === 'addon.loaded' && m.outcome.ok)).toBe(true)
+  })
+
   it('#430 async 工厂正常 resolve → 装载保持在场且无故障上报（回归钉住）', async () => {
     const h = harness()
     let disposed = false
