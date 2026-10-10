@@ -77,7 +77,11 @@ function treeFor(text: string): Tree {
   return tree
 }
 
-/** 引用集提取专用渲染器（规则链一次装配；parse 是同步纯函数，实例复用） */
+/** 引用集提取专用渲染器（规则链一次装配；parse 是同步纯函数，实例复用）。
+ *  禁用于渲染输出：#423 起宽松换行是切块单例（readingBlocks 的
+ *  applyReadingRendererBreaks）的设置面，本实例 breaks 恒为严格且不随
+ *  设置重建——正确性依赖「只读 env.references」这一用途（引用识别是
+ *  block 规则，与 inline 的 breaks 渲染分叉无关） */
 const refMd = createMarkdownRenderer()
 
 /** 引用式图片 alt 排除所需的文档级 ref 定义集（markdown-it refmap 权威，

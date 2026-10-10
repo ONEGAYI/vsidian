@@ -378,12 +378,15 @@ describe('reading breaks setting re-renders mounted view (#423)', () => {
       apply('settings.snapshot', {})
       expect(reading.querySelectorAll('p br')).toHaveLength(0)
 
-      // 再次开启后恢复：值未变的消息不重复重建
+      // 空快照回退后再开启：false→true 值变化，重建并重新生效
       const mid = snapshot().readingParseCount
       apply('settings.changed', { 'editor.readingBreaks': true })
       expect(snapshot().readingParseCount).toBeGreaterThan(mid!)
       expect(reading.querySelectorAll('p br')).toHaveLength(2)
+      // 同值消息不重复重建（控制器层钉住短路路径）：parse 计数不再增长
+      const rebuilt = snapshot().readingParseCount
       apply('settings.changed', { 'editor.readingBreaks': true })
+      expect(snapshot().readingParseCount).toBe(rebuilt)
       expect(reading.querySelectorAll('p br')).toHaveLength(2)
     } finally {
       // 模块级渲染器单例是共享状态：恢复默认严格，不泄漏到其他用例
