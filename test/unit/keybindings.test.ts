@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   KEYBINDING_OPERATIONS, getEffectiveBindings, normalizeChord,
   findBindingConflicts, findConflictedOperationIds, operationMatchesFilter,
   applyBindingChange, resolveKeybinding, formatBindingLabel,
+  setKeybindingLabelPlatform, __resetKeybindingLabelPlatformForTest,
   type KeybindingOverrides,
 } from '../../src/shared/keybindings'
 import { en } from '../../src/shared/locales/en'
@@ -353,6 +354,38 @@ describe('默认键位规范序契约（#417：pastePlain mac 默认键序永不
         expect(resolveKeybinding({}, mode, chord), `${op.id}: ${chord}`)
           .toEqual({ kind: 'command', id: op.id })
       }
+    }
+  })
+})
+
+describe('键位标签平台渲染（#444：meta 不再固定 Win）', () => {
+  afterEach(() => __resetKeybindingLabelPlatformForTest())
+
+  it('mac 平台 meta 渲染为 Cmd（设置页 pastePlain 显示 Cmd+Shift+V，与用户视角描述一致）', () => {
+    setKeybindingLabelPlatform('mac')
+    expect(formatBindingLabel('shift+meta+v')).toBe('Cmd+Shift+V')
+    expect(formatBindingLabel('meta+f')).toBe('Cmd+F')
+    expect(formatBindingLabel('alt+meta+bracketleft')).toBe('Cmd+Alt+[')
+    expect(formatBindingLabel('meta+k meta+l')).toBe('Cmd+K Cmd+L')
+  })
+
+  it('Windows 平台 meta 渲染为 Win（既有形态不变）', () => {
+    setKeybindingLabelPlatform('windows')
+    expect(formatBindingLabel('shift+meta+v')).toBe('Shift+Win+V')
+    expect(formatBindingLabel('meta+f')).toBe('Win+F')
+  })
+
+  it('Linux 平台 meta 渲染为 Super（对齐宿主 VSCode 惯例）', () => {
+    setKeybindingLabelPlatform('linux')
+    expect(formatBindingLabel('shift+meta+v')).toBe('Shift+Super+V')
+    expect(formatBindingLabel('meta+f')).toBe('Super+F')
+  })
+
+  it('平台只影响 meta 标签：非 meta 键位与符号渲染不随平台变化（跨端一致）', () => {
+    for (const platform of ['mac', 'windows', 'linux'] as const) {
+      setKeybindingLabelPlatform(platform)
+      expect(formatBindingLabel('ctrl+shift+bracketleft'), platform).toBe('Ctrl+Shift+[')
+      expect(formatBindingLabel('ctrl+k ctrl+l'), platform).toBe('Ctrl+K Ctrl+L')
     }
   })
 })
