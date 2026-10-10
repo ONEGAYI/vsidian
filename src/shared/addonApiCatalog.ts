@@ -75,6 +75,8 @@ export interface AddonApiSemantics {
   readonly language?: string
   /** 按键拦截优先级契约（实验层，#402 起） */
   readonly keymap?: string
+  /** 谓词输入的场景命中负载语义（菜单类条目，#436 起） */
+  readonly contextPayloads?: string
 }
 
 /** 单个公开接口条目（参考文档的一节） */
@@ -858,6 +860,8 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       '向统一右键菜单新增自己的菜单项：组件簇（addon.<组件 ID>）追加在内置三簇之后；label 自由文本，iconKey 须已在平台图标 key 表登记（组件不能注入新图标资产）。',
     semantics: {
       modes: 'when / enable 谓词输入为打开菜单时采集的结构化快照（MenuContextSnapshot）；结构敏感区置灰的安全降级矩阵由组件自行声明。',
+      contextPayloads:
+        '快照自 #436 起含三类可选场景命中负载，谓词可直接消费：table（表格网格坐标——内容行/列索引、行列总数、表格行区间、引用层级一致性；仅 zone=table 且解析树接管该表时在场，残缺表缺省）、link（链接族类 wikilink/link/autolink/loose + 目标原文 + 显示文字 + 源区间；仅 zone=normal 且命中时在场，嵌入 ![[…]] 与代码上下文/头区不采集）、graphic（图形块围栏行区间/语言/源码/svg 取图能力；仅 zone=graphic 时在场）。负载只在对应 zone 出现——结构敏感区不采链接与安全降级矩阵对齐。',
       errors: 'label 空、icon-key 未登记、command 局部 ID 非法等明确拒绝。不提供覆写/隐藏/接管内置菜单项的任何入口（ADR-0012 菜单边界；结构性免疫：局部 ID 禁点号，传入的 id 不可能成为内置或另一组件的身份）。',
     },
     verification: ['test/unit/addonCommands.test.ts', 'test/integration/suite/addonT10Cases.ts', 'test/browser/addonT10Commands.mjs'],

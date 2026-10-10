@@ -150,7 +150,7 @@ import {
 import { planOverlayAnchorRight } from './overlayAnchor'
 import { liveDecorationsField, LIVE_CLASS_NAMES, selectionTouchesRange, TaskCheckboxWidget } from './liveDecorations'
 import { setOccurrenceHitActive } from './hitReveal'
-import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
+import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
@@ -300,19 +300,26 @@ import {
   contextMenuHandlerForCommand,
   contextMenuKeybindingHints,
   contextMenuZoneAt,
+  fenceInfoOf,
   menuLineStructureOf,
   menuViewportPosition,
   type ContextMenuBlockTarget,
+  type GraphicMenuHit,
   type MenuContextSnapshot,
+  type TableMenuHit,
 } from '../shared/contextMenu'
 import {
   blockIdOfLine,
   collectBlockIds,
+  fenceMarkerOf,
   generateBlockId,
   planBlockIdInsertion,
+  scanFenceBlocks,
   standaloneBlockIdAfterBlock,
   standaloneBlockIdOf,
 } from '../shared/blockId'
+import { parseTableDelimiter, quoteDepthOfLine, tableRowCellsForColumns } from '../shared/tableCells'
+import { runCreateTable, runTableEdit, tableRowsAt } from './tableEditing'
 import { FM_SCAN_LIMIT, frontmatterRange } from '../shared/markdownDoc'
 import {
   outlineChangesOrdered,
@@ -334,7 +341,6 @@ import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidian
 import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
-import { runCreateTable, runTableEdit } from './tableEditing'
 // #237 多光标：上下添加光标命令（@codemirror/commands 内置，webview 本地
 // 执行——快捷键路由本地分支与 ui.command 两入口共用 runCursorAdd）
 import { addCursorAbove, addCursorBelow } from '@codemirror/commands'
@@ -766,6 +772,10 @@ export class WebviewSyncController {
   private contextMenuEl: HTMLElement | undefined
   /** 菜单目标快照（块区间 + 命中行标题；块链接两项的命令分派对象） */
   private contextMenuTarget: ContextMenuBlockTarget | null = null
+  /** 打开菜单时的完整判定快照（#436 执行期通道：场景命中负载——表格/链接/
+   *  图形块——随块目标一并记录，场景票的 runContextMenuCommand 分支执行期
+   *  取用；锚点过期重验沿 contextMenuDoc 既有模式） */
+  private contextMenuSnapshot: MenuContextSnapshot | null = null
   /** 菜单打开时的文档快照（命令执行时 doc 已变则放弃——锚点过期防御） */
   private contextMenuDoc: Text | null = null
   /** 菜单外点关闭监听（document capture pointerdown；close 时摘除） */
@@ -1597,6 +1607,13 @@ export class WebviewSyncController {
 
   getView(): EditorView | undefined {
     return this.view
+  }
+
+  /** 打开中的统一菜单完整快照（#436 执行期通道的只读投影：场景票命令分支
+   *  与采集层测试经此取场景命中负载——同 getView 的公开只读访问器模式；
+   *  未打开 = null） */
+  getContextMenuSnapshot(): MenuContextSnapshot | null {
+    return this.contextMenuSnapshot
   }
 
   /** P2-02：Live 实例的依赖注入面——出站/持久化时机/资源来源/模式门控经
@@ -7122,11 +7139,14 @@ export class WebviewSyncController {
     this.openContextMenu(snapshot, event.clientX, event.clientY, view)
   }
 
-  /** doc 偏移 → 打开菜单的判定快照（zone + 块目标 + 选区态 + 行段落结构；
-   *  不接管位返回 null）。头区行索引在此推导：frontmatterRange 的字符区间
-   *  换算为结束行索引。行结构只在 normal 区解析（#184 勾选接线）——表格/
-   *  围栏/图形区整簇置灰且围栏内 `# 行` 是代码内容非结构，采集中性态
-   *  不点亮任何勾选。P2-10：view 参数化（嵌入实例与主正文同判定族） */
+  /** doc 偏移 → 打开菜单的判定快照（zone + 块目标 + 选区态 + 行段落结构 +
+   *  #436 场景命中负载；不接管位返回 null）。头区行索引在此推导：
+   *  frontmatterRange 的字符区间换算为结束行索引。行结构只在 normal 区解析
+   *  （#184 勾选接线）——表格/围栏/图形区整簇置灰且围栏内 `# 行` 是代码
+   *  内容非结构，采集中性态不点亮任何勾选。场景负载只在对应 zone 采集
+   *  （table/graphic/link 与安全降级矩阵对齐——结构敏感区不采链接，嵌入
+   *  与代码上下文由链接查询内核排除）；表格树解析失败负载缺省不阻塞打开。
+   *  P2-10：view 参数化（嵌入实例与主正文同判定族） */
   private contextSnapshotAt(view: EditorView, pos: number): MenuContextSnapshot | null {
     if (pos < 0 || pos > view.state.doc.length) {
       return null
@@ -7145,6 +7165,95 @@ export class WebviewSyncController {
       hasSelection: !view.state.selection.main.empty,
       blockTarget: contextMenuBlockTargetAt(lines, lineIndex, fmEndLine),
       line: zone === 'normal' ? menuLineStructureOf(lines[lineIndex] ?? '') : PLAIN_MENU_LINE,
+      ...(zone === 'table' ? { table: this.tableMenuHitAt(view, pos) } : {}),
+      ...(zone === 'graphic' ? { graphic: this.graphicMenuHitAt(lines, lineIndex) } : {}),
+      ...(zone === 'normal' ? { link: menuLinkHitAtPos(view, pos) ?? undefined } : {}),
+    }
+  }
+
+  /** 表格命中负载（#436）：行/列坐标复用 tableRowsAt（解析树行身份）与
+   *  gridPlans 列数缓存（缺省回退分隔行声明——blankRowInputPlan 同口径）；
+   *  列命中钳到最近格（editableGridCellAt 同口径）。树不认该表（源码降级
+   *  表/残缺表）或命中行不在树行集合内时返回 undefined——#437 结构操作
+   *  enable 按负载在场判定，解析失败置灰不隐藏。层级判定与
+   *  tableCells.quoteDepthOfLine 同源，分隔行不参与一致性（lazy 豁免） */
+  private tableMenuHitAt(view: EditorView, pos: number): TableMenuHit | undefined {
+    const state = view.state
+    const field = state.field(liveDecorationsField, false)
+    if (!field) {
+      return undefined
+    }
+    const rows = tableRowsAt(state, pos, field.tree)
+    if (!rows) {
+      return undefined
+    }
+    const doc = state.doc
+    const hitRow = rows.find((r) => pos >= r.lineFrom && pos <= r.lineTo)
+    if (!hitRow) {
+      return undefined // 形态学行组宽于树行集合（残缺表）：命中处无树身份
+    }
+    const contentRows = rows.filter((r) => r.kind !== 'delimiter')
+    const delimiterRow = rows.find((r) => r.kind === 'delimiter')
+    // 列数：gridPlans 缓存优先，缺省回退分隔行声明（blankRowInputPlan 同
+    // 口径——parseTableDelimiter 的列数就是格数）
+    const table = chainAt(field.tree, pos).find((n) => n.name === 'Table')
+    let columnCount = table ? field.gridPlans.get(table.from)?.columns : undefined
+    if (columnCount === undefined && delimiterRow) {
+      const delimLine = doc.lineAt(delimiterRow.lineFrom)
+      columnCount = parseTableDelimiter(
+        delimLine.text, delimiterRow.lineFrom - delimLine.from,
+      )?.length
+    }
+    if (columnCount === undefined) {
+      return undefined
+    }
+    // 命中列（分隔行无格语义 → null；内容行钳到最近格）
+    let columnIndex: number | null = null
+    if (hitRow.kind !== 'delimiter') {
+      const cells = tableRowCellsForColumns(
+        doc.lineAt(hitRow.lineFrom).text, hitRow.lineFrom, columnCount, hitRow.prefixLen ?? 0,
+      )
+      if (cells) {
+        const cell = cells.find((c) => pos >= c.from && pos <= c.to) ??
+          (pos < cells[0]!.from ? cells[0]! : cells[cells.length - 1]!)
+        columnIndex = cells.indexOf(cell)
+      }
+    }
+    const quoteDepths = contentRows.map((r) => quoteDepthOfLine(doc.sliceString(r.lineFrom, r.lineTo)))
+    const uniformDepth = quoteDepths[0] ?? 0
+    const quoteUniform = quoteDepths.every((d) => d === uniformDepth)
+    return {
+      rowIndex: hitRow.kind === 'delimiter' ? null : contentRows.indexOf(hitRow),
+      columnIndex,
+      inHeader: hitRow.kind === 'header',
+      rowCount: contentRows.length,
+      columnCount,
+      lines: {
+        start: doc.lineAt(rows[0]!.lineFrom).number - 1,
+        end: doc.lineAt(rows[rows.length - 1]!.lineTo).number - 1,
+      },
+      pos,
+      quoteUniform,
+      quoteDepth: quoteUniform ? uniformDepth : null,
+      hitQuoteDepth: quoteDepthOfLine(doc.sliceString(hitRow.lineFrom, hitRow.lineTo)),
+    }
+  }
+
+  /** 图形块命中负载（#436）：围栏区间与语言与 contextMenuZoneAt 同源
+   *  （scanFenceBlocks + isRenderedFenceInfo 判定键 = info trim 后全等）；
+   *  源码取开闭围栏行之间内容（未闭合围栏到末行）；svg 能力按 live 模式
+   *  生效渲染器（effectiveGraphicSvgExport——#438 弹窗/导出 gate 同口径） */
+  private graphicMenuHitAt(lines: readonly string[], lineIndex: number): GraphicMenuHit {
+    const fence = scanFenceBlocks(lines).find((f) => lineIndex >= f.start && lineIndex <= f.end)!
+    const language = fenceInfoOf(lines[fence.start]!).trim()
+    // 未闭合围栏（end = 末行）没有闭围栏行：内容延伸到末行
+    const closed = fenceMarkerOf(lines[fence.end]!) === fence.char
+    const code = lines.slice(fence.start + 1, closed ? fence.end : fence.end + 1).join('\n')
+    return {
+      lines: { start: fence.start, end: fence.end },
+      language,
+      code,
+      svgExport: effectiveGraphicSvgExport(language, 'live'),
     }
   }
 
@@ -7167,6 +7276,7 @@ export class WebviewSyncController {
     this.contextMenuEl = menu
     this.contextMenuView = view
     this.contextMenuTarget = snapshot.blockTarget
+    this.contextMenuSnapshot = snapshot
     this.contextMenuDoc = view.state.doc
     document.body.appendChild(menu)
     const size = { w: menu.offsetWidth || 220, h: menu.offsetHeight || 260 }
@@ -7217,6 +7327,7 @@ export class WebviewSyncController {
     this.contextMenuEl = undefined
     this.contextMenuView = undefined
     this.contextMenuTarget = null
+    this.contextMenuSnapshot = null
     this.contextMenuDoc = null
   }
 

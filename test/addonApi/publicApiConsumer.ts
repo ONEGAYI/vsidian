@@ -29,6 +29,11 @@ import type {
   AddonPageFactory,
   AddonPageKind,
   AddonSdkCommandsFacet,
+  GraphicMenuHit,
+  LinkMenuHit,
+  MenuContextSnapshot,
+  MenuLinkKind,
+  TableMenuHit,
   VsidianAddonPageSdk,
 } from '../../src/shared/addonPage'
 import type {
@@ -223,6 +228,18 @@ export type EditFlowShapes = {
 /** 页面工厂形态（构建桥 defineAddonPage 的第二参数） */
 export type PageFactoryShape = AddonPageFactory
 export type PageKinds = AddonPageKind
+
+/** 菜单谓词输入的场景命中负载消费（#436：快照三类可选负载组成类型互相
+ *  咬合——字段收回/形状收窄使 compile 失败，即钉住） */
+export type MenuScenePayloadShapes = {
+  snapshot: MenuContextSnapshot
+  table: TableMenuHit
+  link: LinkMenuHit
+  graphic: GraphicMenuHit
+  linkKinds: MenuLinkKind
+  /** 负载是快照可选字段（zone 限定在场，缺省合法） */
+  payloadFields: Pick<MenuContextSnapshot, 'table' | 'link' | 'graphic'>
+}
 
 /** 行为注册到事件的组合 */
 export type BehaviorShapes = {

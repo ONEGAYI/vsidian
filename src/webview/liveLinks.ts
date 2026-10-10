@@ -20,7 +20,7 @@
 // Ctrl/Cmd+单击在两种形态下都跳转
 // （原始 URI/target + 源区间），执行归宿主（URI 解析与白名单在宿主侧；
 // 双链先于普通链接判定——两者语法不重叠）。
-import { EditorSelection, RangeSet, Text, type Extension, type Range } from '@codemirror/state'
+import { EditorSelection, EditorState, RangeSet, Text, type Extension, type Range } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
@@ -41,6 +41,7 @@ import {
 import { refEmbedTargetIsImage } from '../shared/refContent'
 import { looseLinkAtCol, scanLooseLinksInLine } from '../shared/looseLink'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
+import type { LinkMenuHit } from '../shared/contextMenu'
 
 /** #10 链接稳定类名（图片类名复用 IMAGE_CLASS_NAMES.image） */
 export const LINK_CLASS_NAMES = {
@@ -810,6 +811,84 @@ export function activateEmbedAtPos(
   const target = pipeAt >= 0 ? hit.inner.slice(0, pipeAt) : hit.inner
   postActivate(target, from, to)
   return true
+}
+
+/** 树驱动链接（Link/Autolink）的族类与显示文字提取（#436 菜单快照的
+ *  补充数据面）：kind 按 pos 处解析树节点名判普通链接/autolink；display
+ *  普通链接 = 首二 LinkMark 之间的链接文字，autolink = URL 本身（与
+ *  href 同值）。非链接位置返回 null */
+function mdLinkFacetsAt(state: EditorState, pos: number): { kind: 'link' | 'autolink'; display: string } | null {
+  const field = state.field(liveDecorationsField, false)
+  if (!field) {
+    return null
+  }
+  const node = chainAt(field.tree, pos).find((n) => n.name === 'Link' || n.name === 'Autolink')
+  if (!node) {
+    return null
+  }
+  if (node.name === 'Autolink') {
+    const url = childNamed(node, 'URL')
+    if (!url) {
+      return null
+    }
+    return { kind: 'autolink', display: linkHrefOf(state.doc, node) ?? '' }
+  }
+  const marks = linkMarks(node)
+  const opener = marks[0]
+  const closer = marks[1]
+  if (!opener || !closer || closer.from <= opener.to) {
+    return null
+  }
+  return { kind: 'link', display: state.doc.sliceString(opener.to, closer.from) }
+}
+
+/**
+ * 菜单快照的链接命中查询（#436）：判定内核与次序完全复用 Ctrl+单击
+ * activate 族（双链 → 树驱动 → 宽松；嵌入经双链扫描守卫排除；代码上下文
+ * 与头区抑制检查在 activate 族内），本函数零副作用——收集回调形态取值，
+ * activate 跳转行为零改动。target 与 activate 上报同口径（双链 `|` 之前
+ * 原文未 trim / href 原样）；display 按渲染口径补算（双链别名优先 /
+ * 普通链接链接文字 / autolink URL / 宽松文字段）。
+ */
+export function menuLinkHitAtPos(view: EditorView, pos: number): LinkMenuHit | null {
+  let hit: LinkMenuHit | null = null
+  activateWikilinkAtPos(view, pos, (target, from, to) => {
+    const inner = view.state.doc.sliceString(from + 2, to - 2)
+    hit = {
+      kind: 'wikilink',
+      target,
+      display: parseWikilinkInner(inner)?.display ?? target,
+      range: { from, to },
+    }
+  })
+  if (hit) {
+    return hit
+  }
+  activateLinkAtPos(view, pos, (href, from, to) => {
+    const facets = mdLinkFacetsAt(view.state, from)
+    hit = {
+      kind: facets?.kind ?? 'link',
+      target: href,
+      display: facets?.display ?? href,
+      range: { from, to },
+    }
+  })
+  if (hit) {
+    return hit
+  }
+  activateLooseLinkAtPos(view, pos, (dest, from, to) => {
+    const line = view.state.doc.lineAt(from)
+    const loose = looseLinkAtCol(line.text, from - line.from)
+    hit = {
+      kind: 'loose',
+      target: dest,
+      display: loose
+        ? view.state.doc.sliceString(line.from + loose.labelFrom, line.from + loose.labelTo)
+        : dest,
+      range: { from, to },
+    }
+  })
+  return hit
 }
 
 /** Ctrl/Cmd+mousedown 直接激活；普通单击在 mouseup 才确认，以免拖选时跳转。

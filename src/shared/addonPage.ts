@@ -26,7 +26,7 @@ import type {
   AddonMenuItemDefinition,
 } from './addonCommands'
 import type { AddonUiButtonDefinition, AddonUiPanelDefinition } from './addonUi'
-import type { MenuContextSnapshot } from './contextMenu'
+import type { GraphicMenuHit, LinkMenuHit, MenuContextSnapshot, MenuLinkKind, TableMenuHit } from './contextMenu'
 
 /** #406 language 语法树读取子集（@codemirror/language 的最小暴露面）：
  *  只纳入「读树」函数——LRLanguage/foldGutter/indentUnit 等注册类成员不
@@ -104,8 +104,10 @@ export interface AddonSdkMenusFacet {
   }
 }
 
-/** 菜单谓词输入（when/enable 的结构化快照；与内核 MenuContextSnapshot 同源） */
-export type { MenuContextSnapshot }
+/** 菜单谓词输入（when/enable 的结构化快照；与内核 MenuContextSnapshot 同源）。
+ *  #436 起快照含三类可选场景命中负载（table/link/graphic），组成类型一并
+ *  透出——组件谓词按 zone 消费负载字段（如 ctx.link?.kind） */
+export type { MenuContextSnapshot, TableMenuHit, LinkMenuHit, MenuLinkKind, GraphicMenuHit }
 
 /** 通道请求结果：普通拒绝与组件异常分开（装载器只报协议性结束态；
  *  rejected = 宿主侧未注册 topic 或业务拒绝；timeout/released 由装载器

@@ -436,6 +436,43 @@ describe('安全降级矩阵（逐区域 when/enable）', () => {
   }
 })
 
+describe('场景命中负载与场景簇组预登记（#436 基建）', () => {
+  it('组序预登记 tableOps / graphicOps：位于链接簇后、块与格式簇前', () => {
+    expect([...CONTEXT_MENU_GROUP_ORDER]).toEqual([
+      'link', 'tableOps', 'graphicOps', 'blockFormat', 'clipboard',
+    ])
+  })
+
+  it('场景组无项时零产出（预登记不产生空组/空分隔线——场景票落项前菜单不变）', () => {
+    const groups = buildContextMenuModel(normalCtx())
+    expect(groups.map((g) => g.id)).toEqual(['link', 'blockFormat', 'clipboard'])
+  })
+
+  it('负载字段在场不改变安全降级矩阵（谓词只读 zone 等既有面）', () => {
+    const tableCtx = normalCtx({
+      zone: 'table',
+      table: {
+        rowIndex: 1, columnIndex: 0, inHeader: false, rowCount: 2, columnCount: 2,
+        lines: { start: 0, end: 2 }, pos: 10,
+        quoteUniform: true, quoteDepth: 0, hitQuoteDepth: 0,
+      },
+    })
+    const groups = buildContextMenuModel(tableCtx)
+    expect(groups.find((g) => g.id === 'link')!.items
+      .find((i) => i.id === 'insertWikilink')!.enabled).toBe(false)
+    expect(groups.find((g) => g.id === 'blockFormat')!.items
+      .every((i) => !i.enabled)).toBe(true)
+    // graphic 同理：svg 能力字段不解锁结构敏感区
+    const graphicCtx = normalCtx({
+      zone: 'graphic',
+      graphic: { lines: { start: 0, end: 2 }, language: 'mermaid', code: 'graph TD', svgExport: true },
+    })
+    const graphicGroups = buildContextMenuModel(graphicCtx)
+    expect(graphicGroups.find((g) => g.id === 'blockFormat')!.items
+      .every((i) => !i.enabled)).toBe(true)
+  })
+})
+
 describe('勾选态与提示列（内核字段承载）', () => {
   it('checked 谓词：渲染为勾选；未声明恒 false', () => {
     overrideContextMenuItem('selectAll', { checked: (ctx) => ctx.zone === 'normal' })
