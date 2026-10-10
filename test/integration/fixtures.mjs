@@ -31,6 +31,10 @@ const SYMBOL_TAB_CRLF_DOC = '**CRLF 越界**段\r\n正文行\r\n'
 const CONFLICT_DOC = '第一段原文甲\n第二段原文乙\n'
 const SPLIT_CONFLICT_DOC = '分裂测试行一\n分裂测试行二\n'
 const HEADING_DOC = '# 顶部一级标题\n普通段落第一行内容\n普通段落第二行内容\n## 中部二级标题\n另一段普通内容结尾\n'
+// #423 阅读宽松换行样例：首段三行两处单换行（严格态拼回同段、宽松态逐行）；
+// 次段行尾双空格显式硬换行（两种形态恒 1 br，显式标记不随设置变化的对照）
+const READING_BREAKS_DOC =
+  '# 宽松换行标题\n\n段一甲\n段一乙\n段一丙\n\n显式换行行尾  \n第二行\n\n结尾独立段\n'
 // #32 排版对照：标题/正文/列表/引用/表格齐全（两模式基础排版一致性断言载体）
 const TYPOGRAPHY_DOC = [
   '# 排版对照标题',
@@ -971,6 +975,9 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'conflict.md'), CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'splitconflict.md'), SPLIT_CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'heading.md'), HEADING_DOC, 'utf8')
+  // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
+  // 对照——严格态 br=1（仅显式）、宽松态 br=3
+  writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'typography.md'), TYPOGRAPHY_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode.md'), MODE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'viewport-mermaid.md'), VIEWPORT_MERMAID_DOC, 'utf8')

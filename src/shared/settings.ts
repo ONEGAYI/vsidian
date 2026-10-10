@@ -417,6 +417,20 @@ export const SEARCH_REVEAL_HINT_KEY = 'editor.searchRevealHint'
 export const SEARCH_REVEAL_HINT_DEFAULT = false
 
 /**
+ * #423「阅读宽松换行」开关：阅读视图（含嵌入卡片/悬停浮层的 Markdown
+ * 内容）段内单换行是否渲染为 <br>（markdown-it breaks 选项）。关闭
+ * （默认）维持 CommonMark 严格软换行——单换行拼回同段，可见换行需行尾
+ * 双空格或空行分段；开启后与 Live 按源文行的呈现一致（宽松形态，对齐
+ * VSCode markdown.preview.breaks 开启档与 Obsidian 默认行为）。**仅辖
+ * 阅读渲染**：Live 编辑按源文行呈现、不随本开关变化。键与消费方
+ * （syncController 的 applyReadingBreaksSetting → readingBlocks 的
+ * applyReadingRendererBreaks）成对导出，避免字面量漂移。
+ */
+export const READING_BREAKS_KEY = 'editor.readingBreaks'
+/** 默认 false：严格软换行维持既有呈现（对齐 VSCode markdown.preview.breaks 默认） */
+export const READING_BREAKS_DEFAULT = false
+
+/**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
  * 实际设置项「显示行号」（设置页自此渲染真实开关），#79 加入「代码块卡片」，
  * #80 加入「卡内行号」，#81 加入「复制按钮」，#83 加入「语法高亮」，#96
@@ -424,7 +438,8 @@ export const SEARCH_REVEAL_HINT_DEFAULT = false
  * general.* 的定义渲染进常规分组，见 settingsPageView 分组规则），#123
  * 加入「符号自动补全」，#124 加入「选区符号包裹」，#125 加入「符号 Tab
  * 越界」（三者独立布尔开关，见上方键常量注释），#161 加入图片粘贴三件
- * （总开关 / 存放模式枚举 / 子路径自由文本，首个 StringText 型）。
+ * （总开关 / 存放模式枚举 / 子路径自由文本，首个 StringText 型），#423
+ * 加入「阅读宽松换行」（阅读渲染 breaks 开关）。
  * #95 i18n 起文案字段键化（titleKey/descriptionKey → 字典 setting.*），
  * 注册表不再含用户可见字面量。
  */
@@ -737,6 +752,15 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: SEARCH_REVEAL_HINT_DEFAULT,
     titleKey: 'setting.searchRevealHint.title',
     descriptionKey: 'setting.searchRevealHint.description',
+  },
+  // #423 阅读宽松换行（editor.* 域非排除前缀 → 编辑器页「显示」小节，
+  // 组内末位）：仅辖阅读渲染的段内单换行呈现
+  {
+    key: READING_BREAKS_KEY,
+    type: 'boolean',
+    default: READING_BREAKS_DEFAULT,
+    titleKey: 'setting.readingBreaks.title',
+    descriptionKey: 'setting.readingBreaks.description',
   },
 ]
 

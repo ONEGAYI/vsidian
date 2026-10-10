@@ -83,8 +83,27 @@ export interface ReadingBlock {
 /** 超过该行数的围栏代码块按行细分为多个挂载单位（#7 超大单块缓解） */
 export const FENCE_CHUNK_LINES = 60
 
-/** 单例渲染器（规则链一次装配；渲染是同步纯函数，实例可安全复用） */
-const md = createMarkdownRenderer()
+/**
+ * 单例渲染器（规则链一次装配；渲染是同步纯函数，实例可安全复用）。
+ * #423 宽松换行：单例随 breaks 设置经 applyReadingRendererBreaks 重建
+ * （splitReadingBlocks 的无参调用方——虚拟阅读视图/引用内容实例——经此
+ * 全局生效；值未变时不重建，滚动路径零额外装配成本）
+ */
+let md = createMarkdownRenderer()
+
+/**
+ * #423 应用宽松换行设置到切块渲染器单例：值变化时重建实例并返回 true，
+ * 同值应用返回 false（调用方据此决定是否重切块/清缓存）。设置语义与
+ * 默认值（false = CommonMark 严格软换行）单一事实源在 shared/settings
+ * 的 READING_BREAKS_* 常量，此处只接受已解析的布尔值。
+ */
+export function applyReadingRendererBreaks(breaks: boolean): boolean {
+  if (md.options.breaks === breaks) {
+    return false
+  }
+  md = createMarkdownRenderer({ breaks })
+  return true
+}
 
 export function hasReadingReference(block: ReadingBlock, label: string): boolean {
   return block.references?.has(md.utils.normalizeReference(label)) ?? false

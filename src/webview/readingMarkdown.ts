@@ -376,13 +376,19 @@ function embedSlotHtml(inner: string): string {
   )
 }
 
-/** 创建阅读渲染器（安全配置锁定；渲染规则一次性装配，实例应复用） */
-export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
+/**
+ * 创建阅读渲染器（安全配置锁定；渲染规则一次性装配，实例应复用）。
+ * 安全锁定的边界（#423 重协商）：html/linkify/typographer 恒锁定——
+ * 它们分别引入 HTML 注入、自动链接化与改写排版的攻击/语义面；breaks
+ * 只影响段内换行的呈现语义（软换行是否渲染 <br>），不引入新的 HTML、
+ * 链接化或排版改写面，#423 起作为用户设置开放（默认 false 维持严格）。
+ */
+export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceType<typeof MarkdownIt> {
   const md = new MarkdownIt({
     html: false,
     linkify: false,
     typographer: false,
-    breaks: false,
+    breaks: opts?.breaks === true,
   })
   // #11 双链规则先于 link（[t](u)）：`[[…]]` 在 CommonMark 中只是普通文本，
   // 必须在文本规则消费前拦截
