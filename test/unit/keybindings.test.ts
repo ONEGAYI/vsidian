@@ -388,4 +388,27 @@ describe('键位标签平台渲染（#444：meta 不再固定 Win）', () => {
       expect(formatBindingLabel('ctrl+k ctrl+l'), platform).toBe('Ctrl+K Ctrl+L')
     }
   })
+
+  it('UA 探测分支：三平台映射与首访缓存语义（webview 默认路径的护栏）', () => {
+    const original = navigator.userAgent
+    const setUa = (value: string) =>
+      Object.defineProperty(navigator, 'userAgent', { value, configurable: true })
+    try {
+      setUa('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36')
+      __resetKeybindingLabelPlatformForTest()
+      expect(formatBindingLabel('shift+meta+v')).toBe('Cmd+Shift+V')
+      setUa('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.289 Safari/537.36')
+      __resetKeybindingLabelPlatformForTest()
+      expect(formatBindingLabel('meta+f')).toBe('Super+F')
+      setUa('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.289 Safari/537.36')
+      __resetKeybindingLabelPlatformForTest()
+      expect(formatBindingLabel('shift+meta+v')).toBe('Shift+Win+V')
+      // 首访探测并缓存：缓存生效后再改 UA 不影响渲染
+      setUa('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.289 Safari/537.36')
+      expect(formatBindingLabel('meta+f')).toBe('Win+F')
+    } finally {
+      setUa(original)
+      __resetKeybindingLabelPlatformForTest()
+    }
+  })
 })

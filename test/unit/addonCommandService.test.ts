@@ -124,16 +124,17 @@ describe('T10 宿主命令服务', () => {
   })
 
   it('#443 保留 Tab 段 defaults 整批拒绝（SDK 侧 tab-forbidden 的宿主对称面）', () => {
-    const { service, logs } = makeService()
-    service.syncReport(ADDON, 1, [
-      report(`${ADDON}.one`),
-      report(`${ADDON}.tabbed`, ADDON, { defaults: ['Tab'] }),
-      report(`${ADDON}.shiftTabbed`, ADDON, { defaults: ['shift+tab'] }),
-    ])
-    expect(service.catalog()).toHaveLength(0)
-    expect(runtimeOperations()).toHaveLength(0)
-    expect(logs.some((line) =>
-      line.includes('commands-report-rejected') && line.includes('tab-forbidden'))).toBe(true)
+    for (const reserved of ['Tab', 'shift+tab']) {
+      const { service, logs } = makeService()
+      service.syncReport(ADDON, 1, [
+        report(`${ADDON}.one`),
+        report(`${ADDON}.tabbed`, ADDON, { defaults: [reserved] }),
+      ])
+      expect(service.catalog(), reserved).toHaveLength(0)
+      expect(runtimeOperations(), reserved).toHaveLength(0)
+      expect(logs.some((line) =>
+        line.includes('commands-report-rejected') && line.includes('tab-forbidden'))).toBe(true)
+    }
     // ctrl/alt/meta+Tab 不属保留段（#427 放行），复验不拒
     const { service: ok } = makeService()
     ok.syncReport(ADDON, 1, [report(`${ADDON}.ctrlTab`, ADDON, { defaults: ['ctrl+tab'] })])
