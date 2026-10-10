@@ -39,7 +39,7 @@ function edits(sent: WebviewToHost[]) { return sent.filter((m): m is Extract<Web
 
 describe('纯文本粘贴纵向入口', () => {
   it('两操作统一注册，默认键可清空', () => {
-    expect(KEYBINDING_OPERATIONS.find((op) => op.id === 'pastePlain')).toMatchObject({ mode: 'live', writes: true, defaults: ['ctrl+shift+v', 'meta+shift+v'] })
+    expect(KEYBINDING_OPERATIONS.find((op) => op.id === 'pastePlain')).toMatchObject({ mode: 'live', writes: true, defaults: ['ctrl+shift+v', 'shift+meta+v'] })
     expect(getEffectiveBindings({}, 'paste')).toEqual(['ctrl+v', 'meta+v'])
     expect(getEffectiveBindings({ paste: [] }, 'paste')).toEqual([])
   })
