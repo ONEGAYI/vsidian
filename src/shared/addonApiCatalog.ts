@@ -910,7 +910,7 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
         entry: 'headingFold',
         version: '1.0.0',
         status: 'candidate',
-        note: '页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（阅读模式不开放，#409 定案）。#426 起 folds 与 foldable 共享同一 doc 版本缓存（调用成本 O(标题数) 过滤，非全文档重扫），实例寻址可经 viewIdentity.instanceIdOf 反查。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
+        note: '页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（#419 翻案后维持：阅读视图消费同一折叠状态集呈现折叠，但折叠状态仍以 Live 编辑器 StateField 为单一事实源，阅读态交互走平台 UI 通道，API 拒绝面不变）。#426 起 folds 与 foldable 共享同一 doc 版本缓存（调用成本 O(标题数) 过滤，非全文档重扫），实例寻址可经 viewIdentity.instanceIdOf 反查。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
       },
       {
         entry: 'viewIdentity',

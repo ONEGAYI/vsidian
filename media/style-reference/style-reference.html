@@ -1286,7 +1286,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（133 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（136 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -3025,7 +3025,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：浏览器 wikilinkSuggest：三阶段提示段数、绘制层可见性与 border-top 实线分割；单元 wikilinkSuggestSession：阶段裁剪矩阵与容器末尾结构</p>
       <p class="life">引入：#374（2026-10-06）</p>
     </article>
-    <h2>界面域 · 标题折叠（9）</h2>
+    <h2>界面域 · 标题折叠（12）</h2>
     <article class="entry" id="fold-gutter">
       <h3><code>.vsidian-fold-gutter</code><span class="eid">fold-gutter</span></h3>
       <p class="purpose">标题折叠箭头的承载列（#414 T03）：CM6 自定义 gutter，常驻零宽（marker 绝对定位脱流，不参与 .cm-gutters 流内宽度分配）——悬停显隐与折叠态常显均零布局位移，可读行宽档 [.cm-gutters + 间距 + .cm-content] 整组居中契约不受影响。行号列开/关两态箭头均伸入行号列与正文之间的既有间距区定位。</p>
@@ -3086,10 +3086,46 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 headingFold（T03）：widget DOM 形态与点击派发 effect；浏览器 headingFoldUi：省略号可见与点击展开（绘制层）</p>
       <p class="life">引入：#414（2026-10-08）</p>
     </article>
+    <article class="entry" id="fold-arrow-reading">
+      <h3><code>.vsidian-reading-fold-arrow</code><span class="eid">fold-arrow-reading</span></h3>
+      <p class="purpose">阅读态标题折叠箭头按钮（#419）：阅读模式消费 Live 折叠状态集后，可折叠标题块悬停显现的折叠入口——向下箭头（点击折叠），折叠态常显转向右（块级 -collapsed 修饰驱动，点击展开）。观感与 Live 箭头同源（同 --vsidian-fold-arrow-* 变量族与 chevron 笔画，DOM 经 createHeadingFoldControlButton 工厂）；点击回调翻转 Live StateField（阅读与 Live 共享同一折叠状态集）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：未折叠：标题块 hover 显现（CSS :hover 直驱，阅读态无 gutter 武装带）；已折叠：常显 + 右向（.vsidian-reading-fold-collapsed 块级修饰）。显隐经 visibility（不触发布局）。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 阅读视图折叠控件随其内建主题）</p>
+
+      <p class="dom">DOM 关系：标题块内 h1..h6 首子 button，绝对定位（right:100% 伸入容器 --vsidian-content-padding-inline 留白带、垂直居中标题行）；标题元素为定位上下文（foldTarget 块标记驱动）。</p>
+      <pre><code>.vsidian-reading-fold-arrow { color: var(--vsidian-fold-arrow-color); width: var(--vsidian-fold-arrow-width); }</code></pre>
+      <p class="verify">验证：单元 readingFoldCssContract：绝对定位 + 默认隐藏 + hover/折叠常显规则与变量引用；浏览器 headingFoldReading：悬停显现/折叠常显、真实点击折叠/展开（绘制层）</p>
+      <p class="life">引入：#419（2026-10-10）</p>
+    </article>
+    <article class="entry" id="fold-collapsed-reading">
+      <h3><code>.vsidian-reading-fold-collapsed</code><span class="eid">fold-collapsed-reading</span></h3>
+      <p class="purpose">阅读态折叠标题块修饰类（#419）：已折叠标题块的块级标记——驱动箭头常显转向右与省略号占位在场；块重挂载（视口回收/滚动窗口平移）后随挂载装饰重建保持。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：折叠态常在；展开即撤除（重建后块无本类）。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：.vsidian-reading-block.vsidian-reading-fold-target 的修饰类（同一块元素）。</p>
+      <pre><code>.vsidian-reading-block.vsidian-reading-fold-collapsed .vsidian-reading-fold-arrow { visibility: visible; }</code></pre>
+      <p class="verify">验证：单元 readingFoldCssContract：常显规则；浏览器 headingFoldReading：折叠后箭头常显可点展开、省略号在场</p>
+      <p class="life">引入：#419（2026-10-10）</p>
+    </article>
+    <article class="entry" id="fold-ellipsis-reading">
+      <h3><code>.vsidian-reading-fold-ellipsis</code><span class="eid">fold-ellipsis-reading</span></h3>
+      <p class="purpose">阅读态折叠标题行尾省略号占位（#419）：折叠态标题的常驻「此处有被折叠内容」提示（点击展开），形态与 Live 省略号同款（同 --vsidian-fold-ellipsis-color 变量，行内追加不推标题文本）；被折叠区间的正文块整体不进可见序列（块级过滤，非行内隐藏）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：折叠态在标题文字后行内物化；展开随装饰撤除。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 阅读视图折叠提示为内建呈现）</p>
+
+      <p class="dom">DOM 关系：折叠标题块内 h1..h6 尾子 button（inline-block）。</p>
+      <pre><code>.vsidian-reading-fold-ellipsis { color: var(--vsidian-fold-ellipsis-color); }</code></pre>
+      <p class="verify">验证：单元 readingFoldCssContract：行内形态与变量引用；浏览器 headingFoldReading：省略号可见与点击展开（绘制层）</p>
+      <p class="life">引入：#419（2026-10-10）</p>
+    </article>
     <article class="entry" id="var-fold-arrow-color">
       <h3><code>--vsidian-fold-arrow-color</code><span class="eid">var-fold-arrow-color</span></h3>
       <p class="purpose">箭头颜色（#414 T03）：默认随行号前景族（gutter 区观感同源）；明暗主题随宿主变量自适应。</p>
-      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 
       <p class="obsidian">Obsidian 对应：无</p>
 
@@ -3101,7 +3137,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     <article class="entry" id="var-fold-arrow-hover-color">
       <h3><code>--vsidian-fold-arrow-hover-color</code><span class="eid">var-fold-arrow-hover-color</span></h3>
       <p class="purpose">箭头悬停反馈色（#414 T03）：默认随行号 active 前景族，悬停可点性的即时确认。</p>
-      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 
       <p class="obsidian">Obsidian 对应：无</p>
 
@@ -3113,7 +3149,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     <article class="entry" id="var-fold-arrow-width">
       <h3><code>--vsidian-fold-arrow-width</code><span class="eid">var-fold-arrow-width</span></h3>
       <p class="purpose">箭头区宽（#414 T03）：绝对定位按钮的占位宽（默认 16px）——箭头伸入行号列与正文间距区（ln-gap + content padding 基线），不影响流内宽度分配。</p>
-      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 
       <p class="obsidian">Obsidian 对应：无</p>
 
@@ -3125,7 +3161,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     <article class="entry" id="var-fold-ellipsis-color">
       <h3><code>--vsidian-fold-ellipsis-color</code><span class="eid">var-fold-ellipsis-color</span></h3>
       <p class="purpose">省略号占位颜色（#414 T03）：默认随宿主描述性前景（弱化、不与正文争夺注意力）。</p>
-      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 
       <p class="obsidian">Obsidian 对应：无</p>
 

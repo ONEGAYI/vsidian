@@ -205,6 +205,26 @@ export function effectiveHeadingFolds(
   return out
 }
 
+/**
+ * 区间 [from, to) 是否被任一有效折叠隐藏（#419 阅读侧块过滤的唯一判定
+ * 入口——区间语义单一事实源，阅读侧不复制派生逻辑）：块区间与隐藏区
+ * (hideFrom, hideTo) 开区间相交即隐藏。标题块 end 恰为 hideFrom、下一
+ * 标题块 start 恰为 hideTo，均不落在开区间内，天然保持可见；部分相交
+ * 的块同样隐藏（与 Live 侧 Decoration.replace 覆盖语义一致）。
+ */
+export function rangeFoldHidden(
+  folds: readonly HeadingFoldSpan[],
+  from: number,
+  to: number,
+): boolean {
+  for (const f of folds) {
+    if (from < f.hideTo && to > f.hideFrom) {
+      return true
+    }
+  }
+  return false
+}
+
 // ---- 折叠目标解析（辖域标题，规格「三、折叠与光标/选区」） ----
 
 /** 辖域标题：光标所在行是标题行 → 该标题；否则向上最近标题（任意级别）。
@@ -436,6 +456,56 @@ export const headingFoldField = StateField.define<ReadonlySet<number>>({
 // ---- 隐藏装饰（T03 起带省略号占位 widget） ----
 
 /**
+ * 折叠控件按钮 DOM 工厂（Live gutter 箭头 marker、Live 省略号 widget 与
+ * #419 阅读态标题装饰共用）：可访问形态（aria-label + aria-expanded +
+ * data-tooltip 悬停词 + data-tooltip-keys 结构化键位徽章）、防夺焦
+ * mousedown（#190/#414 同口径）与 SVG 笔画一致；click 回调可选——Live
+ * gutter 箭头的点击由 gutter domEventHandlers 统一处理（不绑 click，
+ * 防冒泡双触发），阅读态与省略号形态自带 click。类名族由调用方给定
+ * （Live 的 vsidian-fold-* 与阅读的 vsidian-reading-fold-* 各自契约登记）。
+ */
+export function createHeadingFoldControlButton(spec: {
+  /** 折叠中 = true（aria-expanded false、悬停词「展开」、箭头右向） */
+  folded: boolean
+  /** 省略号占位形态（'⋯' 行内常驻提示）；false = 箭头 chevron 形态 */
+  ellipsis: boolean
+  /** 完整类名（含折叠修饰，由调用方拼装） */
+  className: string
+  /** click 回调；省略 = 不绑定（Live gutter 路径） */
+  onToggle?: () => void
+}): HTMLElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = spec.className
+  const word = spec.folded || spec.ellipsis ? 'headingfold.unfold' : 'headingfold.fold'
+  btn.setAttribute('aria-label', t(word))
+  // aria-expanded 反映当前内容态（对齐 buildFoldButton：折叠中 = false）
+  btn.setAttribute('aria-expanded', spec.folded || spec.ellipsis ? 'false' : 'true')
+  btn.setAttribute('data-tooltip', t(word))
+  applyFoldBindingHint(btn, spec.folded || spec.ellipsis ? 'headingUnfold' : 'headingFold')
+  if (spec.ellipsis) {
+    btn.textContent = '⋯'
+  } else {
+    // 图标与代码卡 chevron 同款笔画；折叠态转向由 CSS 修饰类旋转（右向）
+    btn.innerHTML =
+      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg>'
+  }
+  // #190/#414 同口径：防 CM6 落选区（replace widget 行内场景）与点击夺焦
+  btn.addEventListener('mousedown', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+  })
+  if (spec.onToggle) {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation()
+      spec.onToggle!()
+    })
+  }
+  return btn
+}
+
+/**
  * 折叠态省略号占位 widget（#414 T03，规格「交互入口」节补充形态）：
  * 隐藏区间的常驻「此处有被折叠内容」提示（VSCode 折叠 `...` 预览标记、
  * Obsidian 折叠标题 `⋯` 同款），点击即展开该节。与 gutter 常显箭头分工：
@@ -454,24 +524,12 @@ export class HeadingFoldEllipsisWidget extends WidgetType {
   }
 
   override toDOM(view: EditorView): HTMLElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'vsidian-fold-ellipsis'
-    btn.setAttribute('aria-label', t('headingfold.unfold'))
-    btn.setAttribute('aria-expanded', 'false') // 折叠态：内容收起
-    btn.setAttribute('data-tooltip', t('headingfold.unfold'))
-    applyFoldBindingHint(btn, 'headingUnfold')
-    btn.textContent = '⋯'
-    // #190/#414 同口径：防 CM6 落选区（replace widget 行内场景）
-    btn.addEventListener('mousedown', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
+    return createHeadingFoldControlButton({
+      folded: true,
+      ellipsis: true,
+      className: 'vsidian-fold-ellipsis',
+      onToggle: () => toggleHeadingFoldAt(view, this.key),
     })
-    btn.addEventListener('click', (event) => {
-      event.stopPropagation()
-      toggleHeadingFoldAt(view, this.key)
-    })
-    return btn
   }
 
   /** 吞事件（liveEmbed 宿主同先例）：widget 内交互自处理，CM6 不当正文点击 */
@@ -699,7 +757,9 @@ function applyFoldBindingHint(btn: HTMLElement, op: 'headingFold' | 'headingUnfo
   }
 }
 
-/** 箭头 marker（官方 FoldMarker 同形态，两态双实例共享） */
+/** 箭头 marker（官方 FoldMarker 同形态，两态双实例共享；DOM 形态经
+ *  createHeadingFoldControlButton 工厂——点击由 gutter domEventHandlers
+ *  统一处理，此处不绑 click） */
 class HeadingFoldArrowMarker extends GutterMarker {
   constructor(readonly folded: boolean) {
     super()
@@ -710,29 +770,13 @@ class HeadingFoldArrowMarker extends GutterMarker {
   }
 
   override toDOM(): HTMLElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = this.folded
-      ? 'vsidian-fold-arrow vsidian-fold-arrow-collapsed'
-      : 'vsidian-fold-arrow'
-    // aria-expanded 反映当前内容态（对齐 buildFoldButton：折叠中 = false）
-    btn.setAttribute('aria-expanded', this.folded ? 'false' : 'true')
-    // 审查轮 F2 修复：同省略号（#190/#414）与代码卡 buildFoldButton 先例，
-    // 防点击夺焦——Chromium mousedown 默认把焦点移到按钮（contentDOM
-    // 失焦、后续 Space/Enter 激活聚焦按钮再次翻转折叠）
-    btn.addEventListener('mousedown', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
+    return createHeadingFoldControlButton({
+      folded: this.folded,
+      ellipsis: false,
+      className: this.folded
+        ? 'vsidian-fold-arrow vsidian-fold-arrow-collapsed'
+        : 'vsidian-fold-arrow',
     })
-    const word = this.folded ? 'headingfold.unfold' : 'headingfold.fold'
-    btn.setAttribute('aria-label', t(word))
-    btn.setAttribute('data-tooltip', t(word))
-    applyFoldBindingHint(btn, this.folded ? 'headingUnfold' : 'headingFold')
-    // 图标与代码卡 chevron 同款笔画；折叠态转向由 CSS 修饰类旋转（右向）
-    btn.innerHTML =
-      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" ' +
-      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"></path></svg>'
-    return btn
   }
 }
 
@@ -865,8 +909,9 @@ export const headingFoldGutterExtension: Extension = [
 // ---- T03（#414）：paint 探针折叠观测 ----
 
 /** 元素中心点 elementFromPoint 命中自身（paintedWithVisibleBackground /
- *  paintedLineNumbers 同口径；jsdom 无布局恒 false，只作真宿主断言依据） */
-function hitPainted(el: HTMLElement): boolean {
+ *  paintedLineNumbers 同口径；jsdom 无布局恒 false，只作真宿主断言依据）。
+ *  #419 起导出：阅读态折叠探针（readingVirtualView）同口径复用。 */
+export function hitPainted(el: HTMLElement): boolean {
   try {
     const rect = el.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) {

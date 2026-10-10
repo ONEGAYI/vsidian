@@ -44,7 +44,10 @@ import { KeybindingRouter, keyStep } from './keybindingRouter'
 import {
   applyHeadingFoldOperation,
   collectHeadingFoldPaint,
+  foldableSpansCached,
+  headingFoldField,
   setHeadingFoldBindingHints,
+  toggleHeadingFoldAt,
   unfoldAround,
   type HeadingFoldOperationId,
 } from './headingFold'
@@ -1174,6 +1177,14 @@ export class WebviewSyncController {
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
     this.readingView = new VirtualReadingView(this.readingContainer, {
+      // #419 阅读态折叠交互：翻转主文 Live 的折叠 StateField（单一事实源
+      // ——阅读与 Live 共享同一折叠状态集）；阅读呈现刷新经下方折叠侦测
+      // updateListener 闭环（dispatch → 折叠集变化 → syncReadingFolds）
+      onFoldToggle: (key) => {
+        if (this.view) {
+          toggleHeadingFoldAt(this.view, key)
+        }
+      },
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
       onBlockMounted: (el) => {
@@ -1818,6 +1829,24 @@ export class WebviewSyncController {
                 (sel !== undefined && !tr.startState.selection.eq(sel))) &&
               !tr.annotation(occurrenceCmd)) {
             this.endOccurrenceSession()
+            return
+          }
+        }
+      }),
+      // #419 阅读态折叠同步：Live 折叠集变化（阅读态箭头/省略号交互的
+      // onFoldToggle 回环、或编程触发 dispatch）时刷新阅读视图的折叠
+      // 消费。docChanged 事务不在此处理——外部增量/init 链统一走
+      // refreshReading（内含折叠态同步与全量重建），避免双重重建。
+      EditorView.updateListener.of((update) => {
+        if (this.viewMode !== 'reading' || !this.readingView) {
+          return
+        }
+        for (const tr of update.transactions) {
+          if (tr.docChanged) {
+            continue
+          }
+          if (tr.startState.field(headingFoldField, false) !== tr.state.field(headingFoldField, false)) {
+            this.syncReadingFolds()
             return
           }
         }
@@ -4059,7 +4088,8 @@ export class WebviewSyncController {
 
   /** 阅读模式下按当前 CM6 文本重建阅读视图（保留滚动锚点）。
    *  调用点：进入 reading、全文重置（init/resync）、外部增量应用后。
-   *  #7 起：全文切块（唯一一次解析）后按需挂载窗口；滚动路径不再进入此处 */
+   *  #7 起：全文切块（唯一一次解析）后按需挂载窗口；滚动路径不再进入此处
+   *  #419 起：重建前同步折叠消费状态（Live 折叠集 → 阅读块过滤） */
   private refreshReading(): void {
     if (this.viewMode !== 'reading' || !this.readingView || !this.view) {
       return
@@ -4067,11 +4097,35 @@ export class WebviewSyncController {
     // 布局可用才读视口锚点（否则保留当前锚点 offset，重建后再映射）
     const hasLayout = (this.readingContainer?.scrollHeight ?? 0) > 0
     const keep = hasLayout ? this.readingView.currentAnchor() : null
+    // 折叠态先行更新（rebuild:false——随后的 setDocument 统一重建消费，
+    // 避免双重建；折叠状态未变时 setFoldState 内部短路）
+    this.syncReadingFolds(false)
     this.readingView.setDocument(this.view.state.doc.toString())
     if (keep !== null) {
       this.readingView.scrollToSrcStart(keep)
       this.modeAnchor = keep
     }
+  }
+
+  /**
+   * #419 阅读态折叠消费同步：从主文 Live StateField 派生折叠状态集并
+   * 推给阅读视图（可折叠全集 foldableSpansCached + 折叠键集
+   * headingFoldField 值——区间派生单一事实源在 headingFold 纯函数族，
+   * 阅读侧只消费不复制）。rebuild=false 时只更新状态不重建（调用方
+   * 随后 setDocument 统一重建）。
+   */
+  private syncReadingFolds(rebuild = true): void {
+    const view = this.view
+    if (!view || !this.readingView) {
+      return
+    }
+    const keys = view.state.field(headingFoldField, false) ?? new Set<number>()
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    this.readingView.setFoldState(
+      foldableSpansCached(view.state.doc, tree),
+      keys,
+      { rebuild },
+    )
   }
 
   // ---- 任务勾选（#9）：阅读视图的 checkbox 交互 ----
@@ -4136,6 +4190,14 @@ export class WebviewSyncController {
     this.clearViewport()
     this.suspendOutlineLinking()
     if (this.viewMode === 'reading' && this.readingView) {
+      // #419 落点展开（翻案修订）：阅读态同样呈现折叠——定位落点（或
+      // 区间右端）在折叠隐藏区内时先永久展开（effect 直驱回 Live
+      // StateField，updateListener 同步回环刷新阅读块序列），再定位；
+      // 展开后落点已进可见序列，锚点不再 floor 到折叠标题。语义与
+      // Live 分支同款（reveal 族统一机制，规格「七」）
+      if (this.view) {
+        unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
+      }
       const start = this.readingView.anchorStartFor(pos) ?? pos
       this.modeAnchor = start
       this.readingView.scrollToSrcStart(start)
@@ -4152,7 +4214,7 @@ export class WebviewSyncController {
       // T04（#415）落点展开：view.locate（锚点跳转/搜索结果/双链/链接
       // 跳转）与大纲点击（outlineJumpToItem）都汇聚到本实现——落点或
       // 区间右端在折叠隐藏区内时，先永久展开包含它的全部折叠（嵌套全
-      // 展开，effect 直驱）再定位；reading 分支无折叠呈现（规格「六」）
+      // 展开，effect 直驱）再定位；#419 起阅读分支同款（上方）
       if (this.view) {
         unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
       }
@@ -10050,6 +10112,11 @@ export class WebviewSyncController {
       ...(wikilinkSuggest ? { wikilinkSuggest } : {}),
       // #414 T03 标题折叠 UI 绘制观测（折叠区间数/省略号/箭头/悬停武装）
       headingFold: collectHeadingFoldPaint(view),
+      // #419 阅读态标题折叠绘制观测（仅 reading 模式且装配折叠交互时
+      //  采集；Live 模式缺省不参与断言）
+      ...(this.viewMode === 'reading' && this.readingView
+        ? { readingFold: this.readingView.collectFoldPaint() }
+        : {}),
       ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),
     }

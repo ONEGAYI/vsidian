@@ -78,6 +78,12 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'fold-arrow', // 悬停武装显现 / 折叠态常显
   'fold-arrow-collapsed', // 折叠态修饰（常显 + 右向）
   'fold-hover', // 悬停武装类（指针驱动瞬态）
+  // #419 阅读态标题折叠：同 Live fold 族理由——hover 显隐/折叠态/装饰
+  // 物化是行为驱动形态，readingFoldCssContract 静态钉规则、浏览器
+  // headingFoldReading 绘制层断言显隐与点击
+  'fold-arrow-reading', // 标题块 hover 显现 / 折叠态常显
+  'fold-collapsed-reading', // 折叠标题块修饰（箭头常显 + 省略号在场）
+  'fold-ellipsis-reading', // 折叠态标题行尾占位（装饰物化）
   'fold-ellipsis', // 折叠态占位 widget（装饰物化）
   'suspend-banner', // 暂停态横幅
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）

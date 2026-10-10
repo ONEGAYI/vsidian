@@ -1570,6 +1570,30 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       "counterpart": "None (Obsidian's fold ellipsis is an editor built-in presentation)"
     }
   },
+  "fold-arrow-reading": {
+    "purpose": "Reading-mode heading fold-arrow button (#419): after the reading view consumes the Live fold state set, the folding entry that appears on hover over foldable heading blocks - a downward chevron (click folds); in the collapsed state it is always shown and rotated right (driven by the block-level -collapsed modifier, click unfolds). The look shares provenance with the Live arrow (same --vsidian-fold-arrow-* variable family and chevron stroke, DOM via the createHeadingFoldControlButton factory); the click callback toggles the Live StateField (reading and Live share one fold state set).",
+    "states": "Unfolded: shown on heading-block hover (CSS :hover driven - reading mode has no gutter arming band); collapsed: always shown pointing right (.vsidian-reading-fold-collapsed block modifier). Show/hide goes through visibility (no layout effect).",
+    "dom": "A button as the first child of h1..h6 inside the heading block, absolutely positioned (right:100% reaching into the container's --vsidian-content-padding-inline whitespace band, vertically centered on the heading line); the heading element is the positioning context (driven by the foldTarget block marker).",
+    "obsidian": {
+      "counterpart": "None (Obsidian's reading-view fold controls follow its built-in theme)"
+    }
+  },
+  "fold-collapsed-reading": {
+    "purpose": "Reading-mode collapsed-heading block modifier (#419): the block-level marker of a folded heading - drives the always-shown right-pointing arrow and the standing ellipsis placeholder; re-established with the mount decoration after block remounts (viewport recycling / scroll-window shifts).",
+    "states": "Present while folded; removed on unfold (the rebuilt block carries no such class).",
+    "dom": "A modifier class on .vsidian-reading-block.vsidian-reading-fold-target (same block element).",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
+  "fold-ellipsis-reading": {
+    "purpose": "Reading-mode collapsed-heading trailing ellipsis placeholder (#419): the standing 'folded content lives here' hint on a folded heading (click unfolds), shaped like the Live ellipsis (same --vsidian-fold-ellipsis-color variable, inline append does not push the heading text); blocks inside the folded range drop out of the visible sequence entirely (block-level filtering, not inline hiding).",
+    "states": "Materialized inline after the heading text while folded; removed with the decoration on unfold.",
+    "dom": "A button as the last child of h1..h6 inside the folded heading block (inline-block).",
+    "obsidian": {
+      "counterpart": "None (Obsidian's reading-view fold hint is a built-in presentation)"
+    }
+  },
   "var-fold-arrow-color": {
     "purpose": "Arrow color (#414 T03): defaults to the line-number foreground family (shared gutter-area look); light/dark themes adapt through the host variables.",
     "dom": "Defined on #app.",

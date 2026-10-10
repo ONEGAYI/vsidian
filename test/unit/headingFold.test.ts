@@ -42,6 +42,7 @@ import {
   clampSelectionOutOfFolds,
   foldableHeadingSpans,
   migrateSelectionForFold,
+  rangeFoldHidden,
   resolveHeadingFoldTargets,
   resolveHeadingToggleTargets,
   resolveHeadingUnfoldTargets,
@@ -150,6 +151,21 @@ describe('collectHeadings：标题序列与节边界', () => {
     const state = foldState(doc)
     const folds = effectiveHeadingFolds(new Set([0, 4]), collectHeadings(state.doc), state.doc)
     expect(folds.map((f) => f.key)).toEqual([0])
+  })
+
+  it('rangeFoldHidden 开区间语义（#419 阅读侧块过滤）：标题块端点不隐藏、区间内与部分相交隐藏', () => {
+    const doc = '# T1\nalpha\n\n# T2\nbeta\n'
+    const state = foldState(doc)
+    const spans = foldableHeadingSpans(collectHeadings(state.doc), state.doc)
+    // T1 节：key 0、hideFrom 4（标题行行尾）、hideTo 12（T2 行首）；
+    // T2 节：key 12、hideTo 22（文档末尾）——两节均可折叠
+    expect(spans[0]).toEqual({ key: 0, level: 1, hideFrom: 4, hideTo: 12 })
+    const folds = [spans[0]!] // 阅读侧传入的有效折叠集（此处取 T1 单折叠）
+    expect(rangeFoldHidden(folds, 0, 4)).toBe(false) // T1 标题块 [0,4)：to 恰为 hideFrom
+    expect(rangeFoldHidden(folds, 12, 16)).toBe(false) // T2 标题块 [12,16)：from 恰为 hideTo
+    expect(rangeFoldHidden(folds, 5, 10)).toBe(true) // alpha 段落块：区间内
+    expect(rangeFoldHidden(folds, 4, 11)).toBe(true) // 部分相交（Live replace 覆盖同语义）
+    expect(rangeFoldHidden([], 5, 10)).toBe(false) // 空折叠集恒不隐藏
   })
 })
 

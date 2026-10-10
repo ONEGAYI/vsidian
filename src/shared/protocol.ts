@@ -2495,11 +2495,41 @@ export interface HeadingFoldPaintProbe {
   hiddenLinePainted: boolean | null
 }
 
+/** #419 阅读态标题折叠绘制观测（采集实体 src/webview/readingVirtualView.ts
+ *  的 collectFoldPaint）：阅读视图消费 Live 折叠状态集后的折叠呈现观测
+ *  ——折叠区间数、可折叠标题箭头计数、首折叠标题的省略号/箭头绘制态、
+ *  隐藏内容是否仍被绘制（结构性文本采样 + elementFromPoint 绘制层双
+ *  口径）。jsdom 无布局（rect 恒 0），visible 类字段恒 false，只作真
+ *  宿主/浏览器断言依据。 */
+export interface ReadingFoldPaintProbe {
+  /** 有效折叠区间数（与 Live 派生同口径——同一状态集） */
+  foldCount: number
+  /** 可折叠标题块箭头计数（悬停显现族总量；不可折叠标题不产） */
+  foldableArrowCount: number
+  /** 首折叠标题省略号占位绘制态（中心点 elementFromPoint 命中） */
+  ellipsisVisible: boolean
+  /** 省略号文字（'⋯'；不在场为 null） */
+  ellipsisText: string | null
+  /** 首折叠标题箭头绘制态（折叠态常显右向） */
+  arrowVisible: boolean
+  /** 首折叠标题箭头是否在场（无折叠为 false） */
+  arrowCollapsed: boolean
+  /** 首折叠区间隐藏文本采样是否仍在容器 DOM（结构性「不可见」断言面：
+   *  块被移出可见序列即 false；无折叠为 null） */
+  hiddenTextInDom: boolean | null
+  /** 首折叠区间隐藏文本是否仍被绘制（elementFromPoint 命中含该文本；
+   *  jsdom 恒 false，真宿主/浏览器断言依据；无折叠为 null） */
+  hiddenLinePainted: boolean | null
+}
+
 export interface PaintProbe {
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
   toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
   /** #414 T03 标题折叠 UI 绘制观测（无 Live 视图时缺省） */
   headingFold?: HeadingFoldPaintProbe
+  /** #419 阅读态标题折叠绘制观测（仅 reading 模式采集；无折叠交互装配
+   *  时缺省） */
+  readingFold?: ReadingFoldPaintProbe
   /** #358 T09 渲染提供者接管绘制观测：文档内图形容器的生效提供者与
    *  绘制层证据（组件容器计算色/几何；内置 SVG 在场数）——「实际选中
    *  内容」的断言面（非 DOM 存在性）。无图形容器为空数组（graphic 名
@@ -3421,6 +3451,15 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       typeof v.headingFold.foldableArrowCount === 'number' &&
       typeof v.headingFold.hoverArmed === 'boolean' &&
       (v.headingFold.hiddenLinePainted === null || typeof v.headingFold.hiddenLinePainted === 'boolean'))) &&
+    (v.readingFold === undefined || (isObject(v.readingFold) &&
+      typeof v.readingFold.foldCount === 'number' &&
+      typeof v.readingFold.foldableArrowCount === 'number' &&
+      typeof v.readingFold.ellipsisVisible === 'boolean' &&
+      (v.readingFold.ellipsisText === null || isString(v.readingFold.ellipsisText)) &&
+      typeof v.readingFold.arrowVisible === 'boolean' &&
+      typeof v.readingFold.arrowCollapsed === 'boolean' &&
+      (v.readingFold.hiddenTextInDom === null || typeof v.readingFold.hiddenTextInDom === 'boolean') &&
+      (v.readingFold.hiddenLinePainted === null || typeof v.readingFold.hiddenLinePainted === 'boolean'))) &&
     (v.renderers === undefined || (isObject(v.renderers) &&
       Array.isArray(v.renderers.containers) &&
       v.renderers.containers.every((c: unknown) => isObject(c) &&

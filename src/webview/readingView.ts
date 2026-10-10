@@ -58,6 +58,15 @@ export const READING_CLASS_NAMES = {
   /** #163 验收反馈：跳转目标高亮（块级；用户任意操作后清除）——与 live
    *  行级高亮同类名（跨视图同口径，颜色经 --vsidian-anchor-flash-background） */
   anchorFlash: 'vsidian-anchor-flash',
+  /** #419 阅读态标题折叠：可折叠标题块（箭头宿主标记，标题元素为定位
+   *  上下文；块 hover 驱动箭头显现） */
+  foldTarget: 'vsidian-reading-fold-target',
+  /** #419 折叠态标题块修饰类（箭头常显 + 省略号占位在场） */
+  foldCollapsed: 'vsidian-reading-fold-collapsed',
+  /** #419 标题内折叠箭头按钮（悬停显现/折叠态常显；点击翻转折叠） */
+  foldArrow: 'vsidian-reading-fold-arrow',
+  /** #419 折叠态标题行尾省略号占位按钮（点击展开） */
+  foldEllipsis: 'vsidian-reading-fold-ellipsis',
 } as const
 
 /** 创建阅读视图容器（稳定类名 + 模式标记；初始由调用方控制显隐） */
