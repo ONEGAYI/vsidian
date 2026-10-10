@@ -1223,3 +1223,187 @@ describe('VirtualReadingView：窗口差分重排最小移动（#258）', () => 
     view.dispose()
   })
 })
+
+// ---- #419 阅读态标题折叠：折叠状态消费（块过滤 + 标题装饰 + 探针） ----
+// Live 与阅读共享同一折叠状态集（#419 翻案 #416 定案 1）：本族用例钉住
+// VirtualReadingView 的消费面——setFoldState 过滤隐藏区块、折叠标题装饰
+// （箭头/省略号/类名/可访问属性）、onToggle 回调、rebuild:false 协作形态、
+// 锚点 floor 语义与探针结构性字段。绘制层断言归浏览器套件 headingFoldReading。
+import { EditorState } from '@codemirror/state'
+import {
+  collectHeadings,
+  foldableHeadingSpans,
+  type HeadingFoldSpan,
+} from '../../src/webview/headingFold'
+
+describe('阅读态标题折叠（#419）：折叠状态消费', () => {
+  const DOC = '# T1\nalpha body\n\n## T2\nbeta body\n\n# T3\ntail body\n'
+
+  /** 与生产 syncController 同源派生：可折叠全集（foldableSpansCached 形态） */
+  function foldables(): HeadingFoldSpan[] {
+    const state = EditorState.create({ doc: DOC })
+    return foldableHeadingSpans(collectHeadings(state.doc), state.doc)
+  }
+
+  function setupFold(onFoldToggle?: (key: number) => void) {
+    const container = createReadingContainer()
+    // 生产 syncController 恒注入回调；省略时默认空回调（无回调形态由
+    // 「无折叠数据零装饰」负向断言钉住）
+    const view = new VirtualReadingView(container, { onFoldToggle: onFoldToggle ?? (() => {}) })
+    view.setDocument(DOC)
+    return { container, view }
+  }
+
+  it('折叠后隐藏区块不渲染、标题块保持可见；展开恢复（块序列过滤）', () => {
+    const { container, view } = setupFold()
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    view.setFoldState(spans, new Set([t2.key]))
+    expect(container.textContent ?? '').not.toContain('beta body') // T2 节隐藏
+    expect(container.textContent ?? '').toContain('T2') // 标题块可见（渲染后无 # 井号）
+    expect(container.textContent ?? '').toContain('alpha body') // 区外保持
+    expect(container.textContent ?? '').toContain('tail body') // T3 区外保持
+    // 展开：隐藏块回到可见序列
+    view.setFoldState(spans, new Set())
+    expect(container.textContent ?? '').toContain('beta body')
+    view.dispose()
+  })
+
+  it('折叠标题装饰：foldTarget/foldCollapsed 类 + 箭头与省略号按钮（可访问属性同工厂）', () => {
+    const { container, view } = setupFold()
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    view.setFoldState(spans, new Set([t2.key]))
+    // 取 T2 所属标题块（文档序首个 foldTarget 属 T1，未折叠）
+    const headingEl = [...container.querySelectorAll<HTMLElement>('.vsidian-reading-fold-target')]
+      .find((el) => el.getAttribute('data-vsidian-src-start') === String(t2.key))!
+    expect(headingEl.classList.contains('vsidian-reading-fold-collapsed')).toBe(true)
+    const arrow = headingEl.querySelector<HTMLElement>('.vsidian-reading-fold-arrow')!
+    expect(arrow.getAttribute('aria-expanded')).toBe('false') // 折叠中
+    expect(arrow.querySelector('svg')).not.toBeNull()
+    const ellipsis = headingEl.querySelector<HTMLElement>('.vsidian-reading-fold-ellipsis')!
+    expect(ellipsis.textContent).toContain('⋯')
+    expect(ellipsis.getAttribute('aria-label')).toBeTruthy()
+    // 未折叠标题：有箭头无折叠类、无省略号
+    view.setFoldState(spans, new Set())
+    expect(container.querySelector('.vsidian-reading-fold-collapsed')).toBeNull()
+    expect(container.querySelector('.vsidian-reading-fold-ellipsis')).toBeNull()
+    expect(container.querySelector('.vsidian-reading-fold-arrow')).not.toBeNull()
+    view.dispose()
+  })
+
+  it('不可折叠标题（空节）无箭头；无折叠数据零装饰零过滤', () => {
+    const { container, view } = setupFold()
+    // 空节文档：'# A\n# B\n' 两标题相邻，均不可折叠
+    view.setDocument('# A\n# B\nx\n')
+    const spans = (() => {
+      const state = EditorState.create({ doc: '# A\n# B\nx\n' })
+      return foldableHeadingSpans(collectHeadings(state.doc), state.doc)
+    })()
+    expect(spans.length).toBe(1) // 仅 B 可折叠（A 节含 B 标题非空白）
+    view.setFoldState(spans, new Set())
+    expect(container.querySelectorAll('.vsidian-reading-fold-arrow').length).toBe(1)
+    // 未传入折叠数据（构造后未 setFoldState 的既有行为）：零装饰
+    const view2 = new VirtualReadingView(createReadingContainer())
+    view2.setDocument(DOC)
+    expect(view2['container'].querySelectorAll('.vsidian-reading-fold-arrow').length).toBe(0)
+    view2.dispose()
+    view.dispose()
+  })
+
+  it('onFoldToggle 回调：箭头与省略号点击翻转键（Live StateField 单一事实源闭环入口）', () => {
+    const toggled: number[] = []
+    const { container, view } = setupFold((key) => toggled.push(key))
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    view.setFoldState(spans, new Set([t2.key]))
+    const ellipsis = container.querySelector<HTMLElement>('.vsidian-reading-fold-ellipsis')!
+    ellipsis.click()
+    view.setFoldState(spans, new Set()) // 模拟控制器回环后的展开态
+    // 取 T2 所属标题块的箭头（文档序首个箭头属 T1）
+    const arrow = [...container.querySelectorAll<HTMLElement>('.vsidian-reading-fold-arrow')]
+      .find((el) => el.closest('[data-vsidian-src-start]')?.getAttribute('data-vsidian-src-start') === String(t2.key))!
+    arrow.click()
+    expect(toggled).toEqual([t2.key, t2.key])
+    view.dispose()
+  })
+
+  it('折叠切换不重新解析（parseCount 不变）且状态未变时零重建短路', () => {
+    const { container, view } = setupFold()
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    const before = view.getStats().parseCount
+    view.setFoldState(spans, new Set([t2.key]))
+    view.setFoldState(spans, new Set()) // 展开
+    expect(view.getStats().parseCount).toBe(before)
+    // 同状态重复同步：容器内容保持（元素不重建）
+    const el = container.querySelector('.vsidian-reading-block')
+    view.setFoldState(spans, new Set())
+    expect(container.querySelector('.vsidian-reading-block')).toBe(el)
+    view.dispose()
+  })
+
+  it('anchorStartFor 落隐藏区 floor 到折叠标题（切回 Live 的锚点映射）', () => {
+    const { view } = setupFold()
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    view.setFoldState(spans, new Set([t2.key]))
+    const betaPos = DOC.indexOf('beta body')
+    expect(view.anchorStartFor(betaPos)).toBe(t2.key)
+    view.dispose()
+  })
+
+  it('collectFoldPaint 探针：结构性字段（计数/文字/隐藏文本采样）', () => {
+    const { view } = setupFold()
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    view.setFoldState(spans, new Set()) // 先同步状态（生产链恒有；探针消费状态集）
+    const noFold = view.collectFoldPaint()
+    expect(noFold.foldCount).toBe(0)
+    expect(noFold.foldableArrowCount).toBe(spans.length)
+    expect(noFold.hiddenTextInDom).toBeNull()
+    view.setFoldState(spans, new Set([t2.key]))
+    const probe = view.collectFoldPaint()
+    expect(probe.foldCount).toBe(1)
+    expect(probe.foldableArrowCount).toBe(spans.length)
+    expect(probe.ellipsisText).toContain('⋯')
+    expect(probe.arrowCollapsed).toBe(true)
+    expect(probe.hiddenTextInDom).toBe(false) // 隐藏文本不在容器 DOM（结构性）
+    // jsdom 无布局：visible 类字段恒 false，绘制层断言归浏览器套件
+    expect(probe.ellipsisVisible).toBe(false)
+    expect(probe.arrowVisible).toBe(false)
+    view.dispose()
+  })
+
+  it('折叠态下文档增量重建（refreshReading 顺序：先新折叠态再 setDocument）过滤与键映射一致', () => {
+    const { container, view } = setupFold()
+    const spans = foldables()
+    const t2 = spans.find((s) => s.key === DOC.indexOf('## T2'))!
+    view.setFoldState(spans, new Set([t2.key]))
+    expect(container.textContent ?? '').not.toContain('beta body')
+    // 外部增量：文档前插一行（折叠键随 ChangeSet 平移 = 标题行行首平移）
+    const inserted = 'pre line\n'
+    const doc2 = inserted + DOC
+    const spans2 = (() => {
+      const state = EditorState.create({ doc: doc2 })
+      return foldableHeadingSpans(collectHeadings(state.doc), state.doc)
+    })()
+    const key2 = doc2.indexOf('## T2')
+    expect(key2).toBe(t2.key + inserted.length) // 键映射语义 = 行首 offset 平移
+    // refreshReading 真实顺序（syncReadingFolds(false) → setDocument）：
+    // 组合重建后仍只隐藏平移后的 T2 节，区外与前置行保持
+    view.setFoldState(spans2, new Set([key2]), { rebuild: false })
+    view.setDocument(doc2)
+    const text = container.textContent ?? ''
+    expect(text).toContain('pre line')
+    expect(text).not.toContain('beta body')
+    expect(text).toContain('alpha body')
+    expect(text).toContain('tail body')
+    // 反例钉住映射语义：未映射的旧键在新文档上脱靶（有效折叠为空，
+    // 不隐藏任何节——键集与可折叠全集的交集派生）
+    view.setFoldState(spans2, new Set([t2.key]), { rebuild: false })
+    view.setDocument(doc2)
+    expect(container.textContent ?? '').toContain('beta body')
+    view.dispose()
+  })
+})

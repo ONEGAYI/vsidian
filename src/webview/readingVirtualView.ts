@@ -20,10 +20,6 @@
 //   变化后实测回填 + 滚动锚定（视口顶块的顶部位置变化平移 scrollTop，
 //   保持源位置锚点稳定）
 import { splitReadingBlocks, type ReadingBlock } from './readingBlocks'
-import type { DiagnosticEvent } from '../shared/testDiagnostics'
-import type { FindMatch } from './findSession'
-import { highlightReadingMatches } from './readingFind'
-import { ReadingFindSource } from './readingFindSource'
 import {
   READING_CLASS_NAMES,
   createReadingContainer,
@@ -32,6 +28,17 @@ import {
   readingAnchorStartFor,
 } from './readingView'
 import {
+  createHeadingFoldControlButton,
+  hitPainted,
+  rangeFoldHidden,
+  type HeadingFoldSpan,
+} from './headingFold'
+import type { ReadingFoldPaintProbe } from '../shared/protocol'
+import type { DiagnosticEvent } from '../shared/testDiagnostics'
+import type { FindMatch } from './findSession'
+import { highlightReadingMatches } from './readingFind'
+import { ReadingFindSource } from './readingFindSource'
+import {
   DEFAULT_LINE_HEIGHT_PX,
   anchorIndexAtScroll,
   blockIndexForOffset,
@@ -39,7 +46,6 @@ import {
   computeMountWindow,
   diffWindow,
   estimateBlockHeightPx,
-  estimateHeights,
   recalibrate,
   type HeightCalibration,
   type HeightSample,
@@ -75,6 +81,10 @@ export interface VirtualReadingViewOptions {
    *  重建前释放其内图片槽位（src 清空、条目回收） */
   onBlockMounted?: (el: HTMLElement) => void
   onBlockUnmounted?: (el: HTMLElement) => void
+  /** #419 阅读态折叠交互回调：翻转 Live 折叠键（toggleHeadingFoldAt 同
+   *  链路——阅读与 Live 共享同一折叠状态集）；缺省无折叠交互（引用
+   *  内容等只读场景）。 */
+  onFoldToggle?: (key: number) => void
 }
 
 /** 实测块外高：offsetHeight + 上下 margin（jsdom 无计算值时 margin 记 0） */
@@ -117,11 +127,25 @@ export class VirtualReadingView {
   private parseCount = 0
   private virtualized = false
 
+  /** #419 全量解析缓存（折叠过滤只作用于可见序列 allBlocks → blocks，
+   *  折叠切换不重新解析——parseCount 不变） */
+  private allBlocks: ReadingBlock[] = []
+  /** #419 折叠消费状态：可折叠标题区间集（foldableSpansCached 产出，
+   *  区间派生单一事实源在 headingFold 纯函数族）与折叠键集
+   *  （headingFoldField 值——Live 与阅读共享同一状态集） */
+  private foldSpans: readonly HeadingFoldSpan[] = []
+  private foldedKeys: ReadonlySet<number> = new Set()
+  /** foldSpans 的 key → span 索引（标题块装饰的 O(1) 命中） */
+  private foldSpanByStart = new Map<number, HeadingFoldSpan>()
+  private readonly onFoldToggle: ((key: number) => void) | undefined
+
   /** 当前挂载窗口与元素表（索引 → 元素） */
   private mounted: MountWindow | null = null
   private elements = new Map<number, HTMLElement>()
-  /** 已获得真实高度的块；新块首次替代估计值不应拖动外层滚动区。 */
-  private measured = new Set<number>()
+  /** #419 实测高度按块 start 保留（keyed by block.start——折叠过滤使可见
+   *  序列索引漂移，按索引的实测集会失真；重建时先取实测再回估计。语义
+   *  对象于旧 measured 索引集：heights 为实测 ⟺ 本表有记录） */
+  private measuredHeights = new Map<number, number>()
   private maxMountedBlocks = 0
   private mountedEver = 0
   private unmountedEver = 0
@@ -164,6 +188,7 @@ export class VirtualReadingView {
     this.scrollEl = options.scrollEl ?? this.container
     this.fixedBufferPx = options.bufferPx
     this.hooks = options
+    this.onFoldToggle = options.onFoldToggle
     this.onDiagnostic = options.onDiagnostic
     this.findSource = new ReadingFindSource(this.container)
     this.spacerTop = document.createElement('div')
@@ -191,16 +216,90 @@ export class VirtualReadingView {
     parsedNow?: boolean
   }): void {
     if (this.disposed) return
-    this.locateSnap = null
-    this.findSource.hide()
     if (opts?.parsedNow !== false) this.parseCount += 1
     this.text = text
-    this.blocks = opts?.blocks ? [...opts.blocks]
-      : splitReadingBlocks(text)
+    this.allBlocks = opts?.blocks ? [...opts.blocks] : splitReadingBlocks(text)
+    // 新文档：实测缓存按 start 键可能碰撞（不同文档同 start），保守清空
+    this.measuredHeights.clear()
+    this.rebuildBlocks(false)
+  }
+
+  /**
+   * #419 折叠状态更新：foldables = 可折叠全集（foldableSpansCached 产出）、
+   * foldedKeys = 折叠键集（headingFoldField 值）。文档在场且状态真实变化
+   * 时轻重建（保视觉位置的块序列重过滤——不重新解析，parseCount 不变，
+   * 实测高度按块 start 保留）；`rebuild: false` 形态供调用方在
+   * setDocument 前更新状态（随后的全量重建统一消费，避免双重建）。
+   */
+  setFoldState(
+    foldables: readonly HeadingFoldSpan[],
+    foldedKeys: ReadonlySet<number>,
+    opts?: { rebuild?: boolean },
+  ): void {
+    const sameSpans = foldables.length === this.foldSpans.length &&
+      foldables.every((s, i) => s === this.foldSpans[i])
+    const sameKeys = foldedKeys === this.foldedKeys ||
+      (foldedKeys.size === this.foldedKeys.size &&
+        [...foldedKeys].every((k) => this.foldedKeys.has(k)))
+    this.foldSpans = foldables
+    this.foldedKeys = foldedKeys
+    this.foldSpanByStart = new Map(foldables.map((s) => [s.key, s]))
+    if (opts?.rebuild === false) {
+      return
+    }
+    if (sameSpans && sameKeys) {
+      return // 状态未变：零重建（外部增量链的重复同步短路）
+    }
+    if (this.blocks.length > 0 || this.allBlocks.length > 0) {
+      this.rebuildBlocks(true)
+    }
+  }
+
+  /** 可见块序列过滤：折叠隐藏区内的块不进入（#419）——隐藏判定经
+   *  rangeFoldHidden（headingFold 区间语义单一事实源），标题块端点不落
+   *  开区间天然保持可见；无折叠数据全量直通。 */
+  private filterVisibleBlocks(all: readonly ReadingBlock[]): ReadingBlock[] {
+    if (this.foldSpans.length === 0) {
+      return [...all]
+    }
+    let effective: HeadingFoldSpan[] | null = null
+    for (const s of this.foldSpans) {
+      if (this.foldedKeys.has(s.key)) {
+        ;(effective ??= []).push(s)
+      }
+    }
+    if (!effective) {
+      return [...all]
+    }
+    return all.filter((b) => !rangeFoldHidden(effective, b.start, b.end))
+  }
+
+  /**
+   * 块序列重建（setDocument 与 setFoldState 共用后半段）：可见序列过滤 →
+   * 高度表重建（实测按 start 保留）→ 容器清空重挂。preserveViewport 时
+   * 记录锚点块及其块内偏移，重建后恢复同一视觉位置——折叠交互期望标题
+   * 行原地收放，不是 scrollToSrcStart 的吸附视口顶。
+   */
+  private rebuildBlocks(preserveViewport: boolean): void {
+    this.locateSnap = null
+    this.findSource.hide()
+    // 视口锚定信息（折叠切换的视觉位置保持）：锚点块 start + 块内偏移
+    let anchorStart: number | null = null
+    let offsetInBlock = 0
+    if (preserveViewport) {
+      const scrollTop = this.contentScrollTop()
+      const idx = anchorIndexAtScroll(this.tops, this.heights, scrollTop)
+      if (idx !== null && this.blocks[idx]) {
+        anchorStart = this.blocks[idx]!.start
+        offsetInBlock = scrollTop - this.tops[idx]!
+      }
+    }
+    this.blocks = this.filterVisibleBlocks(this.allBlocks)
     this.blocksByStart = new Map(this.blocks.map(block => [block.start, block]))
-    this.heights = estimateHeights(this.blocks, text, this.calib)
+    this.heights = this.blocks.map(
+      (b) => this.measuredHeights.get(b.start) ?? estimateBlockHeightPx(b, this.text, this.calib),
+    )
     this.tops = blockTops(this.heights)
-    this.measured.clear()
     // C-9：旧挂载元素逐个解除观察后再丢弃——ResizeObserver 对元素是
     // 强引用，直接清空会留下游离观察并阻碍节点回收；同时释放块内图片
     // 槽位（#10：旧文档节点连同其资源状态一并回收）
@@ -227,7 +326,8 @@ export class VirtualReadingView {
       // 无布局回退：#6 全量渲染路径（结构与锚点语义不变；图片照常预备）
       this.virtualized = false
       for (const block of this.blocks) {
-        const el = createReadingBlockElement(block, text)
+        const el = createReadingBlockElement(block, this.text)
+        this.decorateFoldControls(el, block)
         this.container.appendChild(el)
         this.hooks.onBlockMounted?.(el)
       }
@@ -238,6 +338,14 @@ export class VirtualReadingView {
     }
     this.virtualized = true
     this.updateNow()
+    if (anchorStart !== null) {
+      // 视觉位置恢复：锚点块若被折叠隐藏则 floor 到其前可见块（折叠标题）
+      const idx = blockIndexForOffset(this.blocks, anchorStart)
+      if (idx !== null) {
+        this.setContentScrollTop(this.tops[idx]! + offsetInBlock)
+        this.updateNow()
+      }
+    }
   }
 
   /** 滚动入口（scroll 事件）：rAF 合帧后重算窗口 */
@@ -599,15 +707,89 @@ export class VirtualReadingView {
     return { scrollTop: this.scrollEl.scrollTop, scrollHeight: this.scrollEl.scrollHeight }
   }
 
+  /**
+   * #419 阅读态折叠绘制观测（view.state.paint 探针族 readingFold 字段的
+   * 采集体，协议 ReadingFoldPaintProbe）：折叠区间数、可折叠标题箭头
+   * 计数、首折叠标题的省略号/箭头绘制态与隐藏内容是否仍被绘制。
+   * 结构性字段（计数/文字/文本包含）jsdom 可断言；visible 类字段
+   * （elementFromPoint 中心命中）jsdom 无布局恒 false，只作真宿主/
+   * 浏览器断言依据——视觉层断言约定（AGENTS.md）的绘制层口径。
+   */
+  collectFoldPaint(): ReadingFoldPaintProbe {
+    let foldCount = 0
+    let firstFoldedText: string | null = null
+    for (const s of this.foldSpans) {
+      if (this.foldedKeys.has(s.key)) {
+        foldCount += 1
+        if (firstFoldedText === null) {
+          // 首折叠区间的隐藏文本行（容器 textContent 是否仍含——结构性
+          // 「不可见」断言面：块被移出可见序列即不含）
+          firstFoldedText = this.hiddenTextSample(s)
+        }
+      }
+    }
+    const hiddenTextInDom = firstFoldedText !== null
+      ? this.container.textContent != null && this.container.textContent.includes(firstFoldedText)
+      : null
+    const ellipsisEl = this.container.querySelector<HTMLElement>(
+      `.${READING_CLASS_NAMES.foldEllipsis}`,
+    )
+    const firstFoldedArrow = this.container.querySelector<HTMLElement>(
+      `.${READING_CLASS_NAMES.foldTarget}.${READING_CLASS_NAMES.foldCollapsed} .${READING_CLASS_NAMES.foldArrow}`,
+    )
+    // 隐藏区首个非空行的 elementFromPoint 绘制层断言：隐藏块不在 DOM，
+    // 落点坐标命中的应是其他内容或空——以文本采样是否在命中节点判定
+    let hiddenLinePainted: boolean | null = null
+    if (firstFoldedText !== null) {
+      try {
+        const hit = document.elementFromPoint(
+          this.scrollEl.getBoundingClientRect().left + this.scrollEl.clientWidth / 2,
+          this.scrollEl.getBoundingClientRect().top + this.scrollEl.clientHeight / 2,
+        )
+        hiddenLinePainted =
+          !!hit && hit.textContent != null && hit.textContent.includes(firstFoldedText)
+      } catch {
+        hiddenLinePainted = false
+      }
+    }
+    return {
+      foldCount,
+      foldableArrowCount: this.foldSpans.length,
+      ellipsisVisible: !!ellipsisEl && hitPainted(ellipsisEl),
+      ellipsisText: ellipsisEl ? ellipsisEl.textContent : null,
+      arrowVisible: !!firstFoldedArrow && hitPainted(firstFoldedArrow),
+      arrowCollapsed: firstFoldedArrow != null,
+      hiddenTextInDom,
+      hiddenLinePainted,
+    }
+  }
+
+  /** 折叠区间隐藏侧首个非空行的文本采样（trim 后；全空白节取 null——
+   *  可折叠判定保证有效折叠必有非空行，防御兜底） */
+  private hiddenTextSample(span: HeadingFoldSpan): string | null {
+    let pos = span.hideFrom + 1
+    while (pos < span.hideTo && pos < this.text.length) {
+      const lineEnd = this.text.indexOf('\n', pos)
+      const end = lineEnd === -1 || lineEnd > span.hideTo ? span.hideTo : lineEnd
+      const line = this.text.slice(pos, end).trim()
+      if (line !== '') {
+        return line
+      }
+      pos = end + 1
+    }
+    return null
+  }
+
   /** 释放当前文档及资源，不将清空计为一次 Markdown 解析。 */
   clearDocument(): void {
     if (this.disposed) return
     this.locateSnap = null
     this.blocks = []
+    this.allBlocks = []
     this.text = ''
     this.heights = []
     this.tops = [0]
-    this.measured.clear()
+    this.measuredHeights.clear()
     this.clearAll()
   }
 
@@ -729,6 +911,7 @@ export class VirtualReadingView {
   private mountBlock(i: number): void {
     const block = this.blocks[i]!
     const el = createReadingBlockElement(block, this.text)
+    this.decorateFoldControls(el, block)
     if (block.start === this.highlightSrcStart) {
       // #14 查找命中块：滚动窗口平移导致重挂载后高亮保持
       el.classList.add(READING_CLASS_NAMES.findHit)
@@ -770,6 +953,49 @@ export class VirtualReadingView {
       this.container.querySelectorAll<HTMLElement>(`.${READING_CLASS_NAMES.block}`),
     )) {
       this.hooks.onBlockUnmounted?.(el)
+    }
+  }
+
+  /**
+   * #419 折叠态标题装饰（挂载与无布局全量渲染两路径共用）：可折叠标题
+   * 块标记 foldTarget（标题元素成为箭头定位上下文）并注入折叠箭头（块
+   * hover 显现/折叠态常显，CSS 驱动）；折叠态加 collapsed 修饰类与行尾
+   * 省略号占位（点击展开）。DOM 形态经 createHeadingFoldControlButton
+   * 工厂（与 Live 箭头/省略号同源）；点击回调走构造注入的 onFoldToggle
+   * （翻转 Live StateField——呈现刷新由控制器的折叠侦测闭环驱动）。
+   * 非可折叠标题（空节）与列表/引用内标题（无阅读标题块身份，隐藏
+   * 判定照常、仅无交互入口——规格已知边界）不装饰。
+   */
+  private decorateFoldControls(el: HTMLElement, block: ReadingBlock): void {
+    if (block.kind !== 'heading' || this.foldSpans.length === 0 || !this.onFoldToggle) {
+      return
+    }
+    const span = this.foldSpanByStart.get(block.start)
+    if (!span) {
+      return
+    }
+    const heading = el.querySelector<HTMLElement>('h1, h2, h3, h4, h5, h6')
+    if (!heading) {
+      return
+    }
+    const folded = this.foldedKeys.has(block.start)
+    el.classList.add(READING_CLASS_NAMES.foldTarget)
+    const onToggle = () => this.onFoldToggle?.(block.start)
+    const arrow = createHeadingFoldControlButton({
+      folded,
+      ellipsis: false,
+      className: READING_CLASS_NAMES.foldArrow,
+      onToggle,
+    })
+    heading.insertBefore(arrow, heading.firstChild)
+    if (folded) {
+      el.classList.add(READING_CLASS_NAMES.foldCollapsed)
+      heading.appendChild(createHeadingFoldControlButton({
+        folded: true,
+        ellipsis: true,
+        className: READING_CLASS_NAMES.foldEllipsis,
+        onToggle,
+      }))
     }
   }
 
@@ -818,7 +1044,7 @@ export class VirtualReadingView {
       // 本轮窗口内块照常实测回填，回收块交由下方 drift 重估刷成新标定
       // 估计（宽度变化通常改变行数分布，标定随之漂移触发重估）
       this.widthDriftPending = false
-      this.measured.clear()
+      this.measuredHeights.clear()
     }
     const oldTops = this.tops
     const refIdx = anchorIndexAtScroll(oldTops, this.heights, prevScrollTop)
@@ -827,11 +1053,12 @@ export class VirtualReadingView {
     for (const [i, el] of this.elements) {
       const h = outerHeight(el)
       if (h > 0) {
-        if (refIdx !== null && i < refIdx && this.measured.has(i) && h !== this.heights[i]) {
+        const blockStart = this.blocks[i]!.start
+        if (refIdx !== null && i < refIdx && this.measuredHeights.has(blockStart) && h !== this.heights[i]) {
           measuredAboveChanged = true
         }
         this.heights[i] = h
-        this.measured.add(i)
+        this.measuredHeights.set(blockStart, h)
       }
       const block = this.blocks[i]!
       if (block.kind === 'paragraph') {
@@ -849,14 +1076,15 @@ export class VirtualReadingView {
       const drift = Math.abs(next.lineHeightPx / this.calib.lineHeightPx - 1)
       this.calib = next
       if (drift > 0.02) {
-        // 重估全部「从未实测」的块（#259：判 measured 而非 elements）：
+        // 重估全部「从未实测」的块（#259：判实测缓存而非 elements）：
         // 已实测但被窗口回收的块必须保留实测值——若按「当前未挂载」判，
         // 标定中位数随窗口样本摆动时，回收带的实测值被换回估计值再随
         // 下一轮窗口实测换回，形成估计↔实测翻转的自持闭环，稳定化平移
         // 把翻转转译成对用户滚轮的回吐（长文档滚不到底的恒差根因）
         for (let i = 0; i < this.blocks.length; i++) {
-          if (!this.measured.has(i)) {
-            this.heights[i] = estimateBlockHeightPx(this.blocks[i]!, this.text, this.calib)
+          const block = this.blocks[i]!
+          if (!this.measuredHeights.has(block.start)) {
+            this.heights[i] = estimateBlockHeightPx(block, this.text, this.calib)
           }
         }
       }
@@ -904,10 +1132,10 @@ export class VirtualReadingView {
       if (h > 0 && idx < this.heights.length) {
         this.heights[idx] = h
         // 与 measureAndStabilize 实测路径成对回填：heights 为实测 ⟺
-        // measured 有记录（#259 判据的不变量）。缺此回填时，隐藏期全量
-        // 渲染 → 可见晋升的块在 heights 持实测值、measured 无记录，其后
+        // measuredHeights 有记录（#259 判据的不变量）。缺此回填时，隐藏期全量
+        // 渲染 → 可见晋升的块在 heights 持实测值、measuredHeights 无记录，其后
         // 首次 drift 重估会把实测值换回估计值。
-        this.measured.add(idx)
+        this.measuredHeights.set(this.blocks[idx]!.start, h)
       }
       idx += 1
     }

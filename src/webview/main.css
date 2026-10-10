@@ -3448,6 +3448,92 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 #app .vsidian-view-reading .vsidian-reading-heading-5 { font-size: 1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-5); }
 #app .vsidian-view-reading .vsidian-reading-heading-6 { font-size: 1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-6); }
 
+/* ---- #419 阅读态标题折叠：标题内箭头与省略号占位 ----
+   阅读模式消费 Live 折叠状态集（#419 翻案 #416 定案 1）：可折叠标题块
+   悬停显现折叠箭头（点击折叠）；折叠态箭头常显转向右 + 标题行尾省略号
+   占位（点击展开）。形态对齐 Live 态（同 --vsidian-fold-* 观感变量族、
+   同 chevron 笔画），交互语义与 Live 共享同一 StateField。
+   硬约束（对齐 Live gutter 箭头）：箭头绝对定位脱流伸入容器
+   --vsidian-content-padding-inline 留白带（24px ≥ 箭头 16px），显隐经
+   visibility 不触发布局——限宽档块级居中与正文零位移不受影响；标题
+   hover 区按 DOM 层级覆盖伸出的箭头（absolute 不改 :hover 链）。 */
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-target > h1,
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-target > h2,
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-target > h3,
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-target > h4,
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-target > h5,
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-target > h6 {
+  position: relative;
+}
+
+#app .vsidian-view-reading .vsidian-reading-fold-arrow {
+  position: absolute;
+  right: 100%;
+  margin-right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--vsidian-fold-arrow-width);
+  height: var(--vsidian-fold-arrow-width);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vsidian-fold-arrow-color);
+  cursor: pointer;
+  visibility: hidden;
+  line-height: 1;
+}
+
+#app .vsidian-view-reading .vsidian-reading-fold-arrow svg {
+  display: block;
+}
+
+/* 命中桥（评审 B1）：箭头盒与标题左缘的 4px 视觉间隙属 margin（不参与
+   命中）——指针穿过间隙时标题块失 :hover，箭头即回 visibility:hidden
+   （不再可命中），慢速连续移动永远点不到箭头。透明伪元素向四周外扩
+   4px 铺桥：间隙内仍命中箭头（块的后代，hover 链保持），视觉零变化 */
+#app .vsidian-view-reading .vsidian-reading-fold-arrow::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+/* 标题块 hover 显现（CSS :hover 直驱——阅读态无 gutter 武装带，悬停
+   即显现；移开即消失） */
+#app .vsidian-view-reading .vsidian-reading-block:hover .vsidian-reading-fold-arrow {
+  visibility: visible;
+}
+
+/* 折叠态常显 + 转向右（块级折叠修饰类驱动——同 Live -collapsed 语义） */
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-collapsed .vsidian-reading-fold-arrow {
+  visibility: visible;
+}
+
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-fold-collapsed .vsidian-reading-fold-arrow svg {
+  transform: rotate(-90deg);
+}
+
+#app .vsidian-view-reading .vsidian-reading-fold-arrow:hover {
+  color: var(--vsidian-fold-arrow-hover-color);
+}
+
+/* 省略号占位（折叠态标题行尾；行内追加不推标题文本）——与 Live
+   vsidian-fold-ellipsis 同款形态与变量 */
+#app .vsidian-view-reading .vsidian-reading-fold-ellipsis {
+  display: inline-block;
+  margin-left: 0.35em;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--vsidian-fold-ellipsis-color);
+  font-size: 0.72em;
+  vertical-align: baseline;
+  cursor: pointer;
+  user-select: none;
+}
+
 /* markdown-it 的语义标题保留在块内；字号与间距由阅读块统一控制，
    避免浏览器 h1..h6 默认样式再次放大字号和上下留白。
    #206：heading-N 装饰类与 .vsidian-reading-block 同挂在块 div 上且源序

@@ -5316,6 +5316,75 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#414（2026-10-08）"
   },
   {
+    "id": "fold-arrow-reading",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-reading-fold-arrow",
+    "purpose": "阅读态标题折叠箭头按钮（#419）：阅读模式消费 Live 折叠状态集后，可折叠标题块悬停显现的折叠入口——向下箭头（点击折叠），折叠态常显转向右（块级 -collapsed 修饰驱动，点击展开）。观感与 Live 箭头同源（同 --vsidian-fold-arrow-* 变量族与 chevron 笔画，DOM 经 createHeadingFoldControlButton 工厂）；点击回调翻转 Live StateField（阅读与 Live 共享同一折叠状态集）。",
+    "views": [
+      "reading"
+    ],
+    "states": "未折叠：标题块 hover 显现（CSS :hover 直驱，阅读态无 gutter 武装带）；已折叠：常显 + 右向（.vsidian-reading-fold-collapsed 块级修饰）。显隐经 visibility（不触发布局）。",
+    "dom": "标题块内 h1..h6 首子 button，绝对定位（right:100% 伸入容器 --vsidian-content-padding-inline 留白带、垂直居中标题行）；标题元素为定位上下文（foldTarget 块标记驱动）。",
+    "example": ".vsidian-reading-fold-arrow { color: var(--vsidian-fold-arrow-color); width: var(--vsidian-fold-arrow-width); }",
+    "obsidian": {
+      "counterpart": "无（Obsidian 阅读视图折叠控件随其内建主题）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 readingFoldCssContract：绝对定位 + 默认隐藏 + hover/折叠常显规则与变量引用",
+      "浏览器 headingFoldReading：悬停显现/折叠常显、真实点击折叠/展开（绘制层）"
+    ],
+    "introduced": "#419（2026-10-10）"
+  },
+  {
+    "id": "fold-collapsed-reading",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-reading-fold-collapsed",
+    "purpose": "阅读态折叠标题块修饰类（#419）：已折叠标题块的块级标记——驱动箭头常显转向右与省略号占位在场；块重挂载（视口回收/滚动窗口平移）后随挂载装饰重建保持。",
+    "views": [
+      "reading"
+    ],
+    "states": "折叠态常在；展开即撤除（重建后块无本类）。",
+    "dom": ".vsidian-reading-block.vsidian-reading-fold-target 的修饰类（同一块元素）。",
+    "example": ".vsidian-reading-block.vsidian-reading-fold-collapsed .vsidian-reading-fold-arrow { visibility: visible; }",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "单元 readingFoldCssContract：常显规则",
+      "浏览器 headingFoldReading：折叠后箭头常显可点展开、省略号在场"
+    ],
+    "introduced": "#419（2026-10-10）"
+  },
+  {
+    "id": "fold-ellipsis-reading",
+    "domain": "chrome",
+    "category": "heading-fold",
+    "kind": "selector",
+    "target": ".vsidian-reading-fold-ellipsis",
+    "purpose": "阅读态折叠标题行尾省略号占位（#419）：折叠态标题的常驻「此处有被折叠内容」提示（点击展开），形态与 Live 省略号同款（同 --vsidian-fold-ellipsis-color 变量，行内追加不推标题文本）；被折叠区间的正文块整体不进可见序列（块级过滤，非行内隐藏）。",
+    "views": [
+      "reading"
+    ],
+    "states": "折叠态在标题文字后行内物化；展开随装饰撤除。",
+    "dom": "折叠标题块内 h1..h6 尾子 button（inline-block）。",
+    "example": ".vsidian-reading-fold-ellipsis { color: var(--vsidian-fold-ellipsis-color); }",
+    "obsidian": {
+      "counterpart": "无（Obsidian 阅读视图折叠提示为内建呈现）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 readingFoldCssContract：行内形态与变量引用",
+      "浏览器 headingFoldReading：省略号可见与点击展开（绘制层）"
+    ],
+    "introduced": "#419（2026-10-10）"
+  },
+  {
     "id": "var-fold-arrow-color",
     "domain": "chrome",
     "category": "heading-fold",
@@ -5323,7 +5392,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "target": "--vsidian-fold-arrow-color",
     "purpose": "箭头颜色（#414 T03）：默认随行号前景族（gutter 区观感同源）；明暗主题随宿主变量自适应。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
     "dom": "定义于 #app。",
     "example": "#app { --vsidian-fold-arrow-color: …; }",
@@ -5345,7 +5415,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "target": "--vsidian-fold-arrow-hover-color",
     "purpose": "箭头悬停反馈色（#414 T03）：默认随行号 active 前景族，悬停可点性的即时确认。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
     "dom": "定义于 #app。",
     "example": "#app { --vsidian-fold-arrow-hover-color: …; }",
@@ -5366,7 +5437,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "target": "--vsidian-fold-arrow-width",
     "purpose": "箭头区宽（#414 T03）：绝对定位按钮的占位宽（默认 16px）——箭头伸入行号列与正文间距区（ln-gap + content padding 基线），不影响流内宽度分配。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
     "dom": "定义于 #app。",
     "example": "#app { --vsidian-fold-arrow-width: 20px; }",
@@ -5388,7 +5460,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "target": "--vsidian-fold-ellipsis-color",
     "purpose": "省略号占位颜色（#414 T03）：默认随宿主描述性前景（弱化、不与正文争夺注意力）。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
     "dom": "定义于 #app。",
     "example": "#app { --vsidian-fold-ellipsis-color: …; }",
@@ -7020,6 +7093,30 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A button inside the heading line's .cm-line (materialized replace widget, events swallowed - CM6 does not treat clicks as body-text clicks).",
     "obsidian": {
       "counterpart": "None (Obsidian's fold ellipsis is an editor built-in presentation)"
+    }
+  },
+  "fold-arrow-reading": {
+    "purpose": "Reading-mode heading fold-arrow button (#419): after the reading view consumes the Live fold state set, the folding entry that appears on hover over foldable heading blocks - a downward chevron (click folds); in the collapsed state it is always shown and rotated right (driven by the block-level -collapsed modifier, click unfolds). The look shares provenance with the Live arrow (same --vsidian-fold-arrow-* variable family and chevron stroke, DOM via the createHeadingFoldControlButton factory); the click callback toggles the Live StateField (reading and Live share one fold state set).",
+    "states": "Unfolded: shown on heading-block hover (CSS :hover driven - reading mode has no gutter arming band); collapsed: always shown pointing right (.vsidian-reading-fold-collapsed block modifier). Show/hide goes through visibility (no layout effect).",
+    "dom": "A button as the first child of h1..h6 inside the heading block, absolutely positioned (right:100% reaching into the container's --vsidian-content-padding-inline whitespace band, vertically centered on the heading line); the heading element is the positioning context (driven by the foldTarget block marker).",
+    "obsidian": {
+      "counterpart": "None (Obsidian's reading-view fold controls follow its built-in theme)"
+    }
+  },
+  "fold-collapsed-reading": {
+    "purpose": "Reading-mode collapsed-heading block modifier (#419): the block-level marker of a folded heading - drives the always-shown right-pointing arrow and the standing ellipsis placeholder; re-established with the mount decoration after block remounts (viewport recycling / scroll-window shifts).",
+    "states": "Present while folded; removed on unfold (the rebuilt block carries no such class).",
+    "dom": "A modifier class on .vsidian-reading-block.vsidian-reading-fold-target (same block element).",
+    "obsidian": {
+      "counterpart": "None"
+    }
+  },
+  "fold-ellipsis-reading": {
+    "purpose": "Reading-mode collapsed-heading trailing ellipsis placeholder (#419): the standing 'folded content lives here' hint on a folded heading (click unfolds), shaped like the Live ellipsis (same --vsidian-fold-ellipsis-color variable, inline append does not push the heading text); blocks inside the folded range drop out of the visible sequence entirely (block-level filtering, not inline hiding).",
+    "states": "Materialized inline after the heading text while folded; removed with the decoration on unfold.",
+    "dom": "A button as the last child of h1..h6 inside the folded heading block (inline-block).",
+    "obsidian": {
+      "counterpart": "None (Obsidian's reading-view fold hint is a built-in presentation)"
     }
   },
   "var-fold-arrow-color": {

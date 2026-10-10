@@ -37,12 +37,12 @@ import {
   headingFoldField,
   headingFoldGutterExtension,
   headingFoldSet,
-  headingFoldToggle,
   HeadingFoldEllipsisWidget,
   clampFoldHiddenCursor,
   clampSelectionOutOfFolds,
   foldableHeadingSpans,
   migrateSelectionForFold,
+  rangeFoldHidden,
   resolveHeadingFoldTargets,
   resolveHeadingToggleTargets,
   resolveHeadingUnfoldTargets,
@@ -152,6 +152,21 @@ describe('collectHeadings：标题序列与节边界', () => {
     const folds = effectiveHeadingFolds(new Set([0, 4]), collectHeadings(state.doc), state.doc)
     expect(folds.map((f) => f.key)).toEqual([0])
   })
+
+  it('rangeFoldHidden 开区间语义（#419 阅读侧块过滤）：标题块端点不隐藏、区间内与部分相交隐藏', () => {
+    const doc = '# T1\nalpha\n\n# T2\nbeta\n'
+    const state = foldState(doc)
+    const spans = foldableHeadingSpans(collectHeadings(state.doc), state.doc)
+    // T1 节：key 0、hideFrom 4（标题行行尾）、hideTo 12（T2 行首）；
+    // T2 节：key 12、hideTo 22（文档末尾）——两节均可折叠
+    expect(spans[0]).toEqual({ key: 0, level: 1, hideFrom: 4, hideTo: 12 })
+    const folds = [spans[0]!] // 阅读侧传入的有效折叠集（此处取 T1 单折叠）
+    expect(rangeFoldHidden(folds, 0, 4)).toBe(false) // T1 标题块 [0,4)：to 恰为 hideFrom
+    expect(rangeFoldHidden(folds, 12, 16)).toBe(false) // T2 标题块 [12,16)：from 恰为 hideTo
+    expect(rangeFoldHidden(folds, 5, 10)).toBe(true) // alpha 段落块：区间内
+    expect(rangeFoldHidden(folds, 4, 11)).toBe(true) // 部分相交（Live replace 覆盖同语义）
+    expect(rangeFoldHidden([], 5, 10)).toBe(false) // 空折叠集恒不隐藏
+  })
 })
 
 // ---- 二、StateField 语义与坐标生命周期 ----
@@ -159,18 +174,14 @@ describe('collectHeadings：标题序列与节边界', () => {
 describe('headingFoldField：StateField 语义与坐标生命周期', () => {
   it('折叠是视图态：effect 事务零写回（无文档变更）', () => {
     const state = foldState('# A\nx\n')
-    const tr = state.update({ effects: headingFoldToggle.of(0) })
+    const tr = state.update({ effects: headingFoldSet.of(new Set([0])) })
     expect(tr.changes.empty).toBe(true)
     expect(tr.docChanged).toBe(false)
     expect(tr.state.field(headingFoldField).has(0)).toBe(true)
   })
 
-  it('headingFoldToggle 翻转单键；headingFoldSet 整体设置（unfoldAll = 空集）', () => {
+  it('headingFoldSet 整体设置（unfoldAll = 空集；单键翻转经 toggleHeadingFoldAt 组合本 effect——#418 移除裸 toggle effect 后单一通道）', () => {
     let state = foldState('# A\nx\n')
-    state = state.update({ effects: headingFoldToggle.of(0) }).state
-    expect(state.field(headingFoldField).has(0)).toBe(true)
-    state = state.update({ effects: headingFoldToggle.of(0) }).state
-    expect(state.field(headingFoldField).size).toBe(0)
     state = state.update({ effects: headingFoldSet.of(new Set([0])) }).state
     expect(state.field(headingFoldField).size).toBe(1)
     state = state.update({ effects: headingFoldSet.of(new Set()) }).state
@@ -514,11 +525,9 @@ describe('collectHeadings 一致性', () => {
 // ---- 七、effect 直驱事务形态 ----
 
 describe('effect 驱动（无 DOM-only 路径）', () => {
-  it('headingFoldSet 与 headingFoldToggle 均为 StateEffect 实例（编程触发与用户触发同链路）', () => {
+  it('headingFoldSet 为 StateEffect 实例（编程触发与用户触发同链路的单一生效通道）', () => {
     const setEff = headingFoldSet.of(new Set([1]))
     expect(setEff.is(headingFoldSet)).toBe(true)
-    const toggleEff = headingFoldToggle.of(1)
-    expect(toggleEff.is(headingFoldToggle)).toBe(true)
   })
 })
 
@@ -642,7 +651,7 @@ describe('T03：省略号占位 widget（headingFoldDecorations 升级）', () =
     installLocale('test', {})
   })
 
-  it('widget 点击派发 headingFoldToggle（effect 直驱，无 DOM-only 状态改动）', () => {
+  it('widget 点击经 toggleHeadingFoldAt 派发 headingFoldSet（effect 直驱，无 DOM-only 状态改动）', () => {
     const view = viewOfT03('# A\nbody\n', 6)
     const dom = new HeadingFoldEllipsisWidget(0).toDOM(view)
     ;(dom as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -729,7 +738,7 @@ describe('T03：paint 探针数据（collectHeadingFoldPaint 结构性字段）'
 
   it('折叠后：foldCount、省略号文字、折叠态箭头与悬停武装字段', () => {
     const view = viewOfT03('# A\nbody\n\n# B\nmore\n', 0)
-    view.dispatch({ effects: headingFoldToggle.of(0) })
+    view.dispatch({ effects: headingFoldSet.of(new Set([0])) })
     const probe = collectHeadingFoldPaint(view)
     expect(probe.foldCount).toBe(1)
     expect(probe.ellipsisText).toContain('⋯')

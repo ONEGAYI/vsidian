@@ -119,6 +119,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 折叠态常显/行号两态定位）与省略号占位——paint 探针绘制层断言、零
   // 布局位移、明暗主题与双实例独立折叠态
   'headingFoldUi',
+  // #419 阅读模式标题折叠：阅读视图消费 Live 折叠状态集（翻案 #416 定案
+  // 1）——双向同步、标题 hover 显现箭头/折叠常显/省略号点击展开（真实
+  // 鼠标）、隐藏内容不可见（readingFold 探针绘制层）、零写回
+  'headingFoldReading',
   // #415（#409 T04）标题折叠落点展开：view.locate 通道（锚点/搜索/双链/
   // 大纲点击共同汇聚）、查找面板真实键盘命中折叠区自动展开、双模式往返
   // 存续与 modeAnchor 落隐藏区回切展开——全程零写回

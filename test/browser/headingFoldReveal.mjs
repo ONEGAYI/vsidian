@@ -128,7 +128,7 @@ try {
     assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T2], '前置：T2 折叠')
     await page.evaluate(() => window.setMode('reading'))
     await page.waitForSelector('.vsidian-reading-block', { timeout: 5000 })
-    // 阅读看全文（折叠不带入阅读呈现）；折叠态不因模式切换丢失
+    // 阅读态同呈现折叠（#419 两模式共享同一状态集）；折叠态不因模式切换丢失
     await page.evaluate(() => window.setMode('live'))
     assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T2],
       'Live 折叠 → 阅读 → Live：折叠原样（StateField 驻留）')
@@ -144,14 +144,15 @@ try {
     await page.keyboard.press('Control+Shift+BracketLeft') // T1+T2 折叠
     await page.evaluate(() => window.setMode('reading'))
     await page.waitForSelector('.vsidian-reading-block', { timeout: 5000 })
-    // 阅读定位到 beta（阅读分支不展开折叠——阅读无折叠呈现）：modeAnchor
-    // 落到折叠隐藏区内的源位置
+    // #419 翻案修订：阅读态同样呈现折叠——定位到 beta（隐藏区内）走
+    // 落点展开（reveal 族统一语义，与 Live 分支同款）：嵌套折叠（T1+T2
+    // 都罩住 beta）一并展开，阅读即时显示目标内容
     await page.evaluate((offset) => window.locate(offset), BETA)
-    assert.deepEqual(await page.evaluate(() => window.foldKeys()), [T1, T2],
-      '阅读模式定位不得展开折叠（阅读不开放折叠）')
+    assert.deepEqual(await page.evaluate(() => window.foldKeys()), [],
+      '阅读态定位命中折叠区自动展开（落点展开，嵌套全展开）')
     await page.evaluate(() => window.setMode('live'))
     assert.deepEqual(await page.evaluate(() => window.foldKeys()), [],
-      'modeAnchor 落隐藏区 → 回切 Live 落点展开（嵌套全展开）')
+      '切回 Live：落点已展开（modeAnchor 落真实源位置）')
     const st = await page.evaluate(() => window.readEditor())
     assert.equal(st.head, BETA, `回切光标应落在 beta: ${JSON.stringify(st)}`)
     // 折叠与落点展开全程零写回

@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.11.0",
     "generatedAt": "2026-10-06",
-    "entryCount": 221,
+    "entryCount": 224,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -308,7 +308,7 @@
       "title": "标题折叠",
       "titleKey": "styleRef.category.headingFold",
       "order": 19,
-      "count": 9
+      "count": 12
     }
   ],
   "variableAliases": [
@@ -5405,6 +5405,75 @@
       "introduced": "#414（2026-10-08）"
     },
     {
+      "id": "fold-arrow-reading",
+      "domain": "chrome",
+      "category": "heading-fold",
+      "kind": "selector",
+      "target": ".vsidian-reading-fold-arrow",
+      "purpose": "阅读态标题折叠箭头按钮（#419）：阅读模式消费 Live 折叠状态集后，可折叠标题块悬停显现的折叠入口——向下箭头（点击折叠），折叠态常显转向右（块级 -collapsed 修饰驱动，点击展开）。观感与 Live 箭头同源（同 --vsidian-fold-arrow-* 变量族与 chevron 笔画，DOM 经 createHeadingFoldControlButton 工厂）；点击回调翻转 Live StateField（阅读与 Live 共享同一折叠状态集）。",
+      "views": [
+        "reading"
+      ],
+      "states": "未折叠：标题块 hover 显现（CSS :hover 直驱，阅读态无 gutter 武装带）；已折叠：常显 + 右向（.vsidian-reading-fold-collapsed 块级修饰）。显隐经 visibility（不触发布局）。",
+      "dom": "标题块内 h1..h6 首子 button，绝对定位（right:100% 伸入容器 --vsidian-content-padding-inline 留白带、垂直居中标题行）；标题元素为定位上下文（foldTarget 块标记驱动）。",
+      "example": ".vsidian-reading-fold-arrow { color: var(--vsidian-fold-arrow-color); width: var(--vsidian-fold-arrow-width); }",
+      "obsidian": {
+        "counterpart": "无（Obsidian 阅读视图折叠控件随其内建主题）",
+        "support": "none"
+      },
+      "verification": [
+        "单元 readingFoldCssContract：绝对定位 + 默认隐藏 + hover/折叠常显规则与变量引用",
+        "浏览器 headingFoldReading：悬停显现/折叠常显、真实点击折叠/展开（绘制层）"
+      ],
+      "introduced": "#419（2026-10-10）"
+    },
+    {
+      "id": "fold-collapsed-reading",
+      "domain": "chrome",
+      "category": "heading-fold",
+      "kind": "selector",
+      "target": ".vsidian-reading-fold-collapsed",
+      "purpose": "阅读态折叠标题块修饰类（#419）：已折叠标题块的块级标记——驱动箭头常显转向右与省略号占位在场；块重挂载（视口回收/滚动窗口平移）后随挂载装饰重建保持。",
+      "views": [
+        "reading"
+      ],
+      "states": "折叠态常在；展开即撤除（重建后块无本类）。",
+      "dom": ".vsidian-reading-block.vsidian-reading-fold-target 的修饰类（同一块元素）。",
+      "example": ".vsidian-reading-block.vsidian-reading-fold-collapsed .vsidian-reading-fold-arrow { visibility: visible; }",
+      "obsidian": {
+        "counterpart": "无",
+        "support": "none"
+      },
+      "verification": [
+        "单元 readingFoldCssContract：常显规则",
+        "浏览器 headingFoldReading：折叠后箭头常显可点展开、省略号在场"
+      ],
+      "introduced": "#419（2026-10-10）"
+    },
+    {
+      "id": "fold-ellipsis-reading",
+      "domain": "chrome",
+      "category": "heading-fold",
+      "kind": "selector",
+      "target": ".vsidian-reading-fold-ellipsis",
+      "purpose": "阅读态折叠标题行尾省略号占位（#419）：折叠态标题的常驻「此处有被折叠内容」提示（点击展开），形态与 Live 省略号同款（同 --vsidian-fold-ellipsis-color 变量，行内追加不推标题文本）；被折叠区间的正文块整体不进可见序列（块级过滤，非行内隐藏）。",
+      "views": [
+        "reading"
+      ],
+      "states": "折叠态在标题文字后行内物化；展开随装饰撤除。",
+      "dom": "折叠标题块内 h1..h6 尾子 button（inline-block）。",
+      "example": ".vsidian-reading-fold-ellipsis { color: var(--vsidian-fold-ellipsis-color); }",
+      "obsidian": {
+        "counterpart": "无（Obsidian 阅读视图折叠提示为内建呈现）",
+        "support": "none"
+      },
+      "verification": [
+        "单元 readingFoldCssContract：行内形态与变量引用",
+        "浏览器 headingFoldReading：省略号可见与点击展开（绘制层）"
+      ],
+      "introduced": "#419（2026-10-10）"
+    },
+    {
       "id": "var-fold-arrow-color",
       "domain": "chrome",
       "category": "heading-fold",
@@ -5412,7 +5481,8 @@
       "target": "--vsidian-fold-arrow-color",
       "purpose": "箭头颜色（#414 T03）：默认随行号前景族（gutter 区观感同源）；明暗主题随宿主变量自适应。",
       "views": [
-        "live"
+        "live",
+        "reading"
       ],
       "dom": "定义于 #app。",
       "example": "#app { --vsidian-fold-arrow-color: …; }",
@@ -5434,7 +5504,8 @@
       "target": "--vsidian-fold-arrow-hover-color",
       "purpose": "箭头悬停反馈色（#414 T03）：默认随行号 active 前景族，悬停可点性的即时确认。",
       "views": [
-        "live"
+        "live",
+        "reading"
       ],
       "dom": "定义于 #app。",
       "example": "#app { --vsidian-fold-arrow-hover-color: …; }",
@@ -5455,7 +5526,8 @@
       "target": "--vsidian-fold-arrow-width",
       "purpose": "箭头区宽（#414 T03）：绝对定位按钮的占位宽（默认 16px）——箭头伸入行号列与正文间距区（ln-gap + content padding 基线），不影响流内宽度分配。",
       "views": [
-        "live"
+        "live",
+        "reading"
       ],
       "dom": "定义于 #app。",
       "example": "#app { --vsidian-fold-arrow-width: 20px; }",
@@ -5477,7 +5549,8 @@
       "target": "--vsidian-fold-ellipsis-color",
       "purpose": "省略号占位颜色（#414 T03）：默认随宿主描述性前景（弱化、不与正文争夺注意力）。",
       "views": [
-        "live"
+        "live",
+        "reading"
       ],
       "dom": "定义于 #app。",
       "example": "#app { --vsidian-fold-ellipsis-color: …; }",
