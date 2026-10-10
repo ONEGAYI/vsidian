@@ -115,17 +115,29 @@ function nodeNamesAt(source: AddonSyntaxSource, pos: number): string[] {
   return source.tree ? chainAt(source.tree, pos).map((node) => node.name) : []
 }
 
+/** 块级代码上下文（围栏与缩进代码）节点名——lineTypeAt 的块表守卫与
+ *  code 枚举共用（评审第 2 轮 N1/N2/N3）：行级维度只认块级代码上下文，
+ *  行内 span（InlineCode/CodeMark/CodeInfo）不影响所在块级的行类型
+ *  （公式块内容含反引号 span 时行类型仍是 formula）；inlineAt 维持
+ *  MATH_CODE_CONTEXTS 全集（行内位置的 $ 抑制需要含行内系） */
+const SYNTAX_BLOCK_CODE_CONTEXTS: ReadonlySet<string> = new Set([
+  'FencedCode',
+  'CodeBlock',
+  'CodeText',
+])
+
 /**
  * 光标处行类型（块级维度）。判定链（探针 #408 修正版同序 + 评审 R1
- * 代码上下文守卫，矩阵测试钉住）：
+ * 代码上下文守卫 + 第 2 轮 N1/N2/N3 块级化，矩阵测试钉住）：
  * 1. frontmatter 区间（行级）→ frontmatter（树上反语义，必须最先拦截）
- * 2. 跨行 `$$` 块表命中且非代码上下文 → formula（树上零语义，先于树
- *    枚举；代码上下文内块表不命中——围栏内 `$$` 是字面，见下方守卫）
- * 3. 树链枚举按优先级：code（FencedCode）> table > heading（ATX/Setext）
- *    > list（Bullet/Ordered）> quote（嵌套组合取先命中者）
+ * 2. 跨行 `$$` 块表命中且非块级代码上下文 → formula（树上零语义，先于
+ *    树枚举；围栏/缩进代码内块表不命中——`$$` 是字面，见下方守卫）
+ * 3. 树链枚举按优先级：code（FencedCode/CodeBlock——围栏与缩进代码）
+ *    > table > heading（ATX/Setext）> list（Bullet/Ordered）> quote
+ *    （嵌套组合取先命中者）
  * 4. 单行闭合块 `$$x$$`（独占一行、内容非空）→ formula（树上零语义、
  *    块表不含；段内 `text $$x$$` 形态不算——那是行内维度，见
- *    addonSyntaxInlineAt；树链已有强语义的行不抢判，如围栏内 `$$x$$`
+ *    addonSyntaxInlineAt；树链已有强语义的行不抢判，如代码内的 `$$x$$`
  *    是字面代码）
  * 5. 兜底 text
  */
@@ -134,13 +146,15 @@ export function addonSyntaxLineTypeAt(source: AddonSyntaxSource, pos: number): A
   if (inFrontmatter(source, pos)) {
     return { kind: 'frontmatter', nodeNames }
   }
-  // 代码上下文守卫（评审 R1）：块表是纯文本扫描（mathBlocksField 的
-  // create 不做代码抑制——装饰层的 mathSuppressed 发生在 paint），围栏
-  // 代码内的 `$$` 文本同样进表；查询面与 inlineAt/live 视觉抑制同口径
-  // ——代码上下文内 `$` 是字面，不判 formula，落到树枚举（FencedCode →
-  // code）。跨行块与围栏交叉的畸形形态按位置局部语义（光标在围栏行判
-  // code、块内普通行判 formula）
-  if (!nodeNames.some((name) => MATH_CODE_CONTEXTS.has(name))) {
+  // 块级代码上下文守卫（评审 R1 + 第 2 轮 N1/N2/N3）：块表是纯文本扫描
+  // （mathBlocksField 的 create 不做代码抑制——装饰层的 mathSuppressed
+  // 发生在 paint），围栏与缩进代码内的 `$$` 文本同样进表；查询面与
+  // inlineAt/live 视觉抑制同口径——代码上下文内 `$` 是字面，不判
+  // formula，落到树枚举（FencedCode/CodeBlock → code）。守卫只认块级
+  // 上下文：公式块内容含行内代码 span 不影响所在块的行类型；跨行块与
+  // 围栏交叉的畸形形态按位置局部语义（光标在围栏行判 code、块内普通
+  // 行判 formula）
+  if (!nodeNames.some((name) => SYNTAX_BLOCK_CODE_CONTEXTS.has(name))) {
     for (const hit of source.mathBlocks) {
       if (pos >= hit.from && pos < hit.to) {
         return { kind: 'formula', nodeNames }
@@ -148,7 +162,7 @@ export function addonSyntaxLineTypeAt(source: AddonSyntaxSource, pos: number): A
     }
   }
   const chain = nodeNames.join(' ')
-  if (chain.includes('FencedCode')) {
+  if (chain.includes('FencedCode') || chain.includes('CodeBlock')) {
     return { kind: 'code', nodeNames }
   }
   if (chain.includes('Table')) {

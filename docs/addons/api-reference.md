@@ -849,7 +849,7 @@ export interface AddonViewIdentityFacet {
 语义要点：
 - **适用模式**：Live-only：reading 态主正文与 hover 只读视图一律 read-only 拒绝；设置页不提供该入口。实例按 views 面句柄寻址，与 headingFold 同款；keymap/扩展回调可经 viewIdentity.instanceIdOf 反查实例 ID。
 - **坐标与数据形状**：全文 UTF-16 code unit 偏移、页面全程 LF。pos 为非负整数（否则 invalid-request；形状校验在边界拒绝之后——视图不在场或非 Live 时先折 view-disposed / read-only）；超出文档长度时钳制到文末（行尾是合法光标位）。
-- **生命周期**：位置驱动单点查询（µs 级：三管线常驻快照 + 单行扫描），无全树 iterate 形态；查询零写回。行类型判定链：frontmatter 区间（行级，树上反语义先拦截）→ 跨行公式块表（代码上下文内不命中——块表是纯文本扫描，围栏内 $$ 是字面，与 live 渲染抑制同口径）→ 树链枚举（code > table > heading > list > quote，嵌套组合取先命中者）→ 单行闭合块 $$x$$（独占一行）→ 兜底 text。行内标记判定链：frontmatter → none（源码态）→ InlineCode → code → 其余代码上下文 → none（$ 为字面）→ 公式块表/当前行扫描 → formula → 兜底 none。
+- **生命周期**：位置驱动单点查询（µs 级：三管线常驻快照 + 单行扫描），无全树 iterate 形态；查询零写回。行类型判定链：frontmatter 区间（行级，树上反语义先拦截）→ 跨行公式块表（块级代码上下文内不命中——块表是纯文本扫描，围栏/缩进代码内 $$ 是字面，与 live 渲染抑制同口径；公式块内容含行内代码 span 不受影响）→ 树链枚举（code（围栏与缩进代码）> table > heading > list > quote，嵌套组合取先命中者）→ 单行闭合块 $$x$$（独占一行）→ 兜底 text。行内标记判定链：frontmatter → none（源码态）→ InlineCode → code → 其余代码上下文 → none（$ 为字面）→ 公式块表/当前行扫描 → formula → 兜底 none。
 - **错误与拒绝**：三种可辨认拒绝：view-disposed / read-only / invalid-request（pos 须为非负整数）。使用前须在清单 experimental 声明 syntax 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。nodeNames 为诊断载荷，显式声明非稳定、不构成兼容承诺（节点名随解析器升级变化）。
 
 签名事实源：`src/shared/addonSyntaxApi.ts`

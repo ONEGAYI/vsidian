@@ -49,10 +49,21 @@ const EXT_LINES = [
   '$$', // L16 围栏内跨行块闭（同上）
   '$d$', // L17 围栏内行内 $（字面）
   '```', // L18 围栏闭
-  '$$', // L19 未闭合块（不产出 → text）
-  '', // L20（隔离行：避免 $$ 行与 setext 例相邻构成 SetextHeading）
-  'Setext 题', // L21 setext 内容行
-  '===', // L22 setext 下划线行
+  '', // L19
+  '    ind $$ib$$', // L20 缩进代码内单行闭合块（CodeBlock → code，评审 N1）
+  '', // L21
+  '    $$', // L22 缩进代码内跨行块开（评审 N2）
+  '    b+c', // L23 缩进代码内跨行块内容
+  '    $$', // L24 缩进代码内跨行块闭
+  '', // L25
+  '$$', // L26 跨行公式块开（内容含行内代码 span，评审 N3）
+  'a `b` c', // L27 公式块内容：span 上 lineTypeAt 仍 formula（块级），inlineAt 判 code
+  '$$', // L28 公式块闭
+  '', // L29
+  'Setext 题', // L30 setext 内容行
+  '===', // L31 setext 下划线行
+  '', // L32
+  '$$', // L33 未闭合块（文档末尾，不产出 → text）
 ]
 
 function sourceOf(lines: readonly string[]): { source: AddonSyntaxSource; at: (ln: number, col?: number) => number } {
@@ -132,9 +143,15 @@ describe('lineTypeAt：#433 口径扩展矩阵', () => {
     [16, 'code', '围栏内跨行 $$ 块闭行（同上）'],
     [17, 'code', '围栏内行内 $ 行（字面）'],
     [18, 'code', '围栏闭'],
-    [19, 'text', '未闭合 $$（不产出，稳定降级）'],
-    [21, 'heading', 'setext 内容行'],
-    [22, 'heading', 'setext 下划线行'],
+    [22, 'code', '缩进代码内跨行块开行（评审 N2）'],
+    [23, 'code', '缩进代码内跨行块内容行（评审 N2）'],
+    [24, 'code', '缩进代码内跨行块闭行（评审 N2）'],
+    [26, 'formula', '跨行公式块开行（内容含反引号 span）'],
+    [27, 'formula', '公式块内容行（span 位置断言见下文 N3 用例）'],
+    [28, 'formula', '跨行公式块闭行'],
+    [30, 'heading', 'setext 内容行'],
+    [31, 'heading', 'setext 下划线行'],
+    [33, 'text', '未闭合 $$（文档末尾，不产出，稳定降级）'],
   ]
   for (const [ln, want, label] of cases) {
     it(`L${ln} ${label} → ${want}`, () => {
@@ -146,6 +163,12 @@ describe('lineTypeAt：#433 口径扩展矩阵', () => {
     // 右侧的项内容处链进 BulletList；两种位置各判各的，粒度语义钉住
     expect(addonSyntaxLineTypeAt(source, at(10, 0)).kind).toBe('quote')
     expect(addonSyntaxLineTypeAt(source, at(10, 3)).kind).toBe('list')
+  })
+  it('L20 缩进代码内单行闭合块：内容处 code（CodeBlock 枚举），行首缩进间隙 text（位置粒度同 L10）', () => {
+    // CodeBlock 区间从缩进后内容起——行首 4 空格处链为空（text）；
+    // 内容处（col 6）链 CodeBlock → code（评审 N1：块级守卫与树枚举同口径）
+    expect(addonSyntaxLineTypeAt(source, at(20, 0)).kind).toBe('text')
+    expect(addonSyntaxLineTypeAt(source, at(20, 6)).kind).toBe('code')
   })
 })
 
@@ -182,6 +205,17 @@ describe('inlineAt：行内标记点位（code / formula / none）', () => {
     expect(addonSyntaxInlineAt(ext.source, ext.at(17, 1)).kind).toBe('none')
     // 围栏内跨行块的三行：与行类型同口径——代码上下文内 $ 是字面
     expect(addonSyntaxInlineAt(ext.source, ext.at(15, 1)).kind).toBe('none')
+  })
+  it('评审 N1/N3：缩进代码内 $ 是字面（none）；公式块内反引号 span 两维度各自正确', () => {
+    const ibLine = EXT_LINES[19]!
+    expect(addonSyntaxInlineAt(ext.source, ext.at(20, ibLine.indexOf('$$ib$$') + 3)).kind).toBe('none')
+    const spanLine = EXT_LINES[26]!
+    // 行内维度：span 上 code、span 外 formula（当前已正确，回归钉住）
+    expect(addonSyntaxInlineAt(ext.source, ext.at(27, spanLine.indexOf('`b`') + 1)).kind).toBe('code')
+    expect(addonSyntaxInlineAt(ext.source, ext.at(27, spanLine.indexOf('a ') + 1)).kind).toBe('formula')
+    // 块级维度（评审 N3）：span 位置仍判 formula——块级守卫只认块级代码
+    // 上下文，行内 span 不影响所在公式块的行类型
+    expect(addonSyntaxLineTypeAt(ext.source, ext.at(27, spanLine.indexOf('`b`') + 1)).kind).toBe('formula')
   })})
 
 describe('nodeNames 诊断载荷（非稳定快照，存在性与如实性）', () => {

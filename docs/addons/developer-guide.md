@@ -217,7 +217,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 })
 ```
 
-- **判定链（lineTypeAt）**：frontmatter 区间（行级）→ 跨行 `$$` 块表（**代码上下文内不命中**——块表是纯文本扫描、围栏内的 `$$` 文本同样进表，查询按代码上下文守卫判字面代码，与 live 渲染抑制和 inlineAt 同口径）→ 树链枚举（code > table > heading > list > quote，嵌套组合取先命中者）→ 单行闭合块 `$$x$$`（独占一行）→ 兜底 `text`。**inlineAt**：frontmatter → `none`（源码态）→ 行内代码 → `code` → 其余代码上下文 → `none`（`$` 为字面）→ 公式块表/当前行扫描 → `formula` → 兜底 `none`。跨行块与围栏交叉的畸形形态按位置局部语义（光标在围栏行判 `code`、块内普通行判 `formula`）。
+- **判定链（lineTypeAt）**：frontmatter 区间（行级）→ 跨行 `$$` 块表（**块级代码上下文内不命中**——块表是纯文本扫描、围栏与缩进代码内的 `$$` 文本同样进表，查询按块级代码守卫判字面代码，与 live 渲染抑制同口径；公式块内容含行内代码 span 不影响所在块的行类型）→ 树链枚举（code（围栏与缩进代码）> table > heading > list > quote，嵌套组合取先命中者）→ 单行闭合块 `$$x$$`（独占一行）→ 兜底 `text`。**inlineAt**：frontmatter → `none`（源码态）→ 行内代码 → `code` → 其余代码上下文 → `none`（`$` 为字面）→ 公式块表/当前行扫描 → `formula` → 兜底 `none`。跨行块与围栏交叉的畸形形态按位置局部语义（光标在围栏行判 `code`、块内普通行判 `formula`）。
 - **与 Obsidian 上游的关键对照**（上游 `getPosLineType` / `detectRuleScope` 移植者必读）：
   - **frontmatter**：fm 判定是**文档头部 8192 字符的有界扫描**（与平台呈现同源）——超长头块按未识别降级为普通 Markdown，fm 行类型随之变化；fm 区间按**行级**判定（fm 结束行行尾仍属 frontmatter）。上游若在 fm 内判 `code` 等，移植时改为 `frontmatter` + `none`（fm 是源码态，无行内标记语义）。
   - **公式**：上游块级判定通常逐行扫描 `$$`；本平台跨行块表 + 单行扫描的口径差异——**段内形态 `text $$x$$ tail` 行类型是 `text`**（不是公式行；行内维度 `inlineAt` 在公式位置返回 `formula`），**单行闭合块 `$$x$$`（独占一行、内容非空）是 `formula`**；未闭合 `$$` 稳定降级 `text`。
