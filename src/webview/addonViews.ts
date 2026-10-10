@@ -24,6 +24,8 @@ import type {
   AddonHeadingFoldQueryResult,
 } from '../shared/addonFoldApi'
 import { isAddonHeadingFoldApplyOptions, isAddonHeadingFoldKeyList, isAddonHeadingFoldOperation } from '../shared/addonFoldApi'
+import type { AddonSyntaxInlineResult, AddonSyntaxLineTypeResult } from '../shared/addonSyntaxApi'
+import { isAddonSyntaxPos } from '../shared/addonSyntaxApi'
 import type { EditOriginMeta } from '../shared/editOrigin'
 import type { LiveEditorInstance } from './liveInstance'
 
@@ -74,6 +76,11 @@ export interface AddonViewsRuntime {
   foldAtOf(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult
   /** #410 按区间键展开（批量组合） */
   unfoldAtOf(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult
+  /** #433 行类型查询（Live-only：非 Live 视图拒绝；实例侧消费
+   *  addonSyntaxApi 纯函数判定器——组合三管线快照，不复制判定逻辑） */
+  syntaxLineTypeOf(instanceId: string, pos: number): AddonSyntaxLineTypeResult
+  /** #433 位置级行内标记查询（同上口径） */
+  syntaxInlineOf(instanceId: string, pos: number): AddonSyntaxInlineResult
   onCreated(callback: (info: AddonViewInfo) => void): () => void
   onDisposed(callback: (info: AddonViewInfo) => void): () => void
 }
@@ -268,6 +275,45 @@ export class AddonViewRegistry implements AddonViewsRuntime {
 
   unfoldAtOf(instanceId: string, keys: readonly number[]): AddonHeadingFoldCommandResult {
     return this.foldKeysOf(instanceId, keys, false)
+  }
+
+  // ---- #433 语法查询面（experimental.syntax 的注册表分派） ----
+  // 拒绝分层对齐 headingFold：实例不存在 view-disposed；非 Live（reading
+  // 态或 hover 只读登记）read-only；pos 非非负整数 invalid-request——
+  // 实例侧（liveInstance.*ForAddon）只认 view 在场。
+
+  syntaxLineTypeOf(instanceId: string, pos: number): AddonSyntaxLineTypeResult {
+    const live = this.liveViews.get(instanceId)
+    if (!live) {
+      return this.readonlyViews.has(instanceId)
+        ? { ok: false, reason: 'read-only' }
+        : { ok: false, reason: 'view-disposed' }
+    }
+    if (live.mode() !== 'live') {
+      return { ok: false, reason: 'read-only' }
+    }
+    if (!isAddonSyntaxPos(pos)) {
+      return { ok: false, reason: 'invalid-request' }
+    }
+    const judged = live.instance.syntaxLineTypeForAddon(pos)
+    return judged === 'view-disposed' ? { ok: false, reason: 'view-disposed' } : { ok: true, ...judged }
+  }
+
+  syntaxInlineOf(instanceId: string, pos: number): AddonSyntaxInlineResult {
+    const live = this.liveViews.get(instanceId)
+    if (!live) {
+      return this.readonlyViews.has(instanceId)
+        ? { ok: false, reason: 'read-only' }
+        : { ok: false, reason: 'view-disposed' }
+    }
+    if (live.mode() !== 'live') {
+      return { ok: false, reason: 'read-only' }
+    }
+    if (!isAddonSyntaxPos(pos)) {
+      return { ok: false, reason: 'invalid-request' }
+    }
+    const judged = live.instance.syntaxInlineForAddon(pos)
+    return judged === 'view-disposed' ? { ok: false, reason: 'view-disposed' } : { ok: true, ...judged }
   }
 
   private foldKeysOf(instanceId: string, keys: readonly number[], fold: boolean): AddonHeadingFoldCommandResult {

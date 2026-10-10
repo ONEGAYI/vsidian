@@ -26,6 +26,7 @@ import type {
   AddonHeadingFoldOperation,
   AddonHeadingFoldSpan,
 } from '../shared/addonFoldApi'
+import { addonSyntaxInlineAt, addonSyntaxLineTypeAt, type AddonSyntaxInlineJudge, type AddonSyntaxLineJudge } from '../shared/addonSyntaxApi'
 import type { EditOriginMeta } from '../shared/editOrigin'
 import {
   CODEBLOCK_CARD_DEFAULT,
@@ -54,7 +55,7 @@ import {
 } from '../shared/settings'
 import { liveDecorationsField, livePreviewDecorations, tableCompositionSettled, tableContainerRenderFacet } from './liveDecorations'
 import { createLinkInteractions } from './liveLinks'
-import { liveMath } from './liveMath'
+import { liveMath, mathBlocksField } from './liveMath'
 import { liveMermaid, rendererLanguagesChanged } from './liveMermaid'
 import {
   applyHeadingFoldOperation,
@@ -1033,6 +1034,42 @@ export class LiveEditorInstance {
     return new Set(foldableSpansCached(view.state.doc, tree)
       .filter((span) => keys.has(span.key))
       .map((span) => span.key))
+  }
+
+  // ---- #433 附加组件语法查询面（experimental.syntax 的实例侧装配） ----
+  // addonViews 层承担拒绝分层（三值），本层只认 view 在场。取数 = 三条
+  // 常驻管线快照（liveDecorationsField 的 tree/fm + mathBlocksField 跨行
+  // 块表），判定在 shared addonSyntaxApi 纯函数——本层不复制判定逻辑。
+
+  /** 光标处行类型（块级维度）。pos 钳制到文档长度（行尾是合法光标位）；
+   *  视图不在场 'view-disposed' → 调用方折拒绝 */
+  syntaxLineTypeForAddon(pos: number): AddonSyntaxLineJudge | 'view-disposed' {
+    const view = this.view
+    if (!view) {
+      return 'view-disposed'
+    }
+    const deco = view.state.field(liveDecorationsField, false)
+    return addonSyntaxLineTypeAt({
+      doc: view.state.doc,
+      tree: deco?.tree,
+      fm: deco?.fm ?? null,
+      mathBlocks: view.state.field(mathBlocksField, false) ?? [],
+    }, Math.min(pos, view.state.doc.length))
+  }
+
+  /** 位置级行内标记（code/formula/none；取数与钳制口径同上） */
+  syntaxInlineForAddon(pos: number): AddonSyntaxInlineJudge | 'view-disposed' {
+    const view = this.view
+    if (!view) {
+      return 'view-disposed'
+    }
+    const deco = view.state.field(liveDecorationsField, false)
+    return addonSyntaxInlineAt({
+      doc: view.state.doc,
+      tree: deco?.tree,
+      fm: deco?.fm ?? null,
+      mathBlocks: view.state.field(mathBlocksField, false) ?? [],
+    }, Math.min(pos, view.state.doc.length))
   }
 
   // ---- T07（#356）附加组件输入行为链（内核情境门控后的驱动点） ----

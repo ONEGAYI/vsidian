@@ -34,6 +34,7 @@ import type {
 } from '../shared/addonPage'
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '../shared/addonEditApi'
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
+import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
 import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
@@ -391,6 +392,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             instanceIdOf: (view) => view.state.field(addonInstanceIdField, false) ?? null,
           }
         : undefined
+    // #433 行类型/行内标记查询面（仅编辑器页 + 视图注册表在场提供；对齐
+    // headingFold 的 instanceId 寻址与三值拒绝）。方法过 isLoadActive 守卫：
+    // 已终结代次的迟到查询拒绝 view-disposed（僵尸调用不落视图）
+    const syntaxFacet: AddonSyntaxFacet | undefined =
+      page === 'editor' && env.addonViews
+        ? {
+            lineTypeAt: (instanceId, pos) => (isLoadActive(loadRecord)
+              ? env.addonViews!.syntaxLineTypeOf(instanceId, pos)
+              : { ok: false, reason: 'view-disposed' }),
+            inlineAt: (instanceId, pos) => (isLoadActive(loadRecord)
+              ? env.addonViews!.syntaxInlineOf(instanceId, pos)
+              : { ok: false, reason: 'view-disposed' }),
+          }
+        : undefined
     const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
       ? {
           register: (registration) => {
@@ -407,7 +422,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
-      experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet },
+      experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
@@ -724,7 +739,19 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     const sdk = buildSdk(loadRecord, manifest)
     ;(globalThis as typeof globalThis & { [key: string]: unknown })[ADDON_SDK_SLOT_GLOBAL] = sdk
     try {
-      registered.factory(sdk)
+      // #430：async 工厂（官方样例形态：await 通道握手后再注册）的
+      // rejection 与同步异常同路径归因 factory-error——装载结局按工厂
+      // 同步段判定（不等待工厂 promise：驻留型工厂/长握手不得挂起装载
+      // 指令流），rejection 到达时若本代次仍在场则整代次回滚并上报
+      // faulted；代次已终结（unload/换代/故障先行）则只吞不回收——迟到
+      // 异常不接入新代次（与迟到通道回执同一代次硬边界）。
+      Promise.resolve(registered.factory(sdk)).catch((err) => {
+        if (!isLoadActive(loadRecord)) {
+          return
+        }
+        releaseLoad(loadRecord, 'faulted', `factory-error: ${String(err)}`)
+        env.send({ type: 'addon.faulted', addonId: manifest.addonId, generation: manifest.generation, page, reason: `factory-error: ${String(err)}` })
+      })
     } catch (err) {
       // 故障释放已留痕（releaseLoad 记 ended:'faulted'），此处只补装载结局
       releaseLoad(loadRecord, 'faulted', `factory-error: ${String(err)}`)

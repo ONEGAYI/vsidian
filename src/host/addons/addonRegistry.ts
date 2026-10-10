@@ -215,9 +215,9 @@ export class AddonRegistry {
 }
 
 /** 生产注册表端口默认值（experimental 表含 T02 起提供的 cm6 实验入口、
- *  #410 起提供的 headingFold 实验入口与 #426 起提供的 viewIdentity 实验
- *  入口——cm6 1.1.0 = #406 起暴露面含 language 语法树子集，页面 SDK 的
- *  experimental.* 形状随公开声明冻结） */
+ *  #410 起提供的 headingFold 实验入口、#426 起提供的 viewIdentity 实验
+ *  入口与 #433 起提供的 syntax 实验入口——cm6 1.1.0 = #406 起暴露面含
+ *  language 语法树子集，页面 SDK 的 experimental.* 形状随公开声明冻结） */
 export function createDefaultRegistryPorts(
   findExtension: (id: string) => { packageJSON: unknown } | undefined,
 ): AddonRegistryPorts {
@@ -227,6 +227,7 @@ export function createDefaultRegistryPorts(
       cm6: ADDON_EXPERIMENTAL_CM6_VERSION,
       headingFold: ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION,
       viewIdentity: ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION,
+      syntax: ADDON_EXPERIMENTAL_SYNTAX_VERSION,
     },
     officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
     findExtension,
@@ -250,3 +251,10 @@ export const ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION = '1.0.0'
  *  含本版本才判兼容。1.0.0：首版候选（instanceIdOf：CM6 EditorView →
  *  views 面实例 ID，未装配身份的 view 返回 null） */
 export const ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION = '1.0.0'
+
+/** #433 实验入口版本：experimental.syntax（页面 SDK 的行类型与行内标记
+ *  查询面）——组件声明 `experimental: { syntax: '<range>' }` 且范围含本
+ *  版本才判兼容。1.0.0：首版候选（lineTypeAt 八种行类型 + inlineAt 三
+ *  值行内标记 + nodeNames 非稳定诊断载荷），Live-only，不暴露树/节点
+ *  句柄 */
+export const ADDON_EXPERIMENTAL_SYNTAX_VERSION = '1.0.0'

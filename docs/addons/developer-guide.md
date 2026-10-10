@@ -81,13 +81,15 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - 构建目标 chrome114（对齐下界宿主 1.82.3 = Electron 25）。
 - **CM6 红线**：构建桥拒绝 `@codemirror/*` 值导入；共享 CM6 运行时须经 `sdk.experimental.cm6` 取得（该入口须在清单 `experimental` 声明）。产物含 CM6 运行时标记串即构建失败（双防线）。
 - **cm6 暴露面**：`state` 与 `view` 是整模块命名空间（构造 StateField/ViewPlugin 等值对象）；`language` 是**语法树读取子集**（`syntaxTree` / `ensureSyntaxTree` / `syntaxTreeAvailable`，#406 起 1.1.0）——`LRLanguage`、`foldGutter`、`indentUnit` 等注册类成员不暴露，addon 不应借实验入口注册语言或改全局语言配置；树与节点类型经 `import type` 消费（构建桥允许 type-only）。
-- **已知边界（重要）**：live 编辑器的 markdown 语法树是内核私有的增量解析，不经 `@codemirror/language` 的 language facet 装配——`syntaxTree()` 在 live 编辑器状态上**恒返回未解析空树**。行类型判定（代码块/frontmatter/表格等）类需求不能依赖本入口，等待平台级树查询能力（另行评估）。
+- **已知边界（重要）**：live 编辑器的 markdown 语法树是内核私有的增量解析，不经 `@codemirror/language` 的 language facet 装配——`syntaxTree()` 在 live 编辑器状态上**恒返回未解析空树**。行类型判定（代码块/frontmatter/表格等）类需求**不要依赖本入口**，改用平台级行类型查询面 `experimental.syntax`（#433，见下条与 §4.8）。
 - **组件数据目录**（#404）：`ctx.storage` 提供安装目录外的隔离可写目录（`uri()` 显示/同步配置用；`<vsidian globalStorage>/addons/<你的组件 ID>/`）。富结构数据（规则对象、含正则与优先级的 JSON）归这里读写，不塞设置存储（一层嵌套边界）；相对路径用正斜杠，越界形态（`..`、绝对路径、反斜杠）一律 `invalid-path` 拒绝；单文件上限 8MB。`onDidChangeFile(callback)` 监听外部变化——回调收 `(relativePath, kind)`，`kind` 为 `'change'`（改写或新建）或 `'delete'`（删除），同步工具改写/新建规则文件后自动重载；停用/故障/卸载不删数据（随 Vsidian 本体卸载清除，重装组件数据仍在）。页面侧组件代码经自己的 channel topic 桥接宿主读写。
 - **动态代码（`new Function` / `eval`）不可用**：附加组件页面的 CSP 由平台配置且不含 `unsafe-eval`（`'wasm-unsafe-eval'` 仅覆盖 WebAssembly）——动态构造的替换逻辑在两个 webview 都会被 CSP 引擎拦截，且平台**不计划**为此放行。等价能力：替换函数写成组件代码内的真函数，规则文件只存声明性数据与函数引用（预注册变换函数表，评估见 [CSP 探针](../research/addon-csp-dynamic-eval-probe.md)，#405）。
 - **视图身份反查（#426，实验）**：`sdk.experimental.viewIdentity.instanceIdOf(view)` 把 CM6 `EditorView` 反查为 views 面实例 ID（keymap/扩展回调消费；非平台实例返回 null）——清单声明 `experimental: { viewIdentity: '^1.0.0' }`，详见 §4.2。
+- **行类型查询（#433，实验）**：`sdk.experimental.syntax` 提供位置驱动的单点语义查询——`lineTypeAt(instanceId, pos)` 返回八种行类型（`frontmatter` / `code` / `formula` / `table` / `heading` / `quote` / `list` / `text`），`inlineAt(instanceId, pos)` 返回位置级行内标记（`code` / `formula` / `none`）；成功结果附带 `nodeNames` 诊断载荷（祖先链节点名快照，**非稳定**——不构成兼容承诺）。**Live-only**：reading 态与 hover 只读视图拒绝 `read-only`，设置页不提供。查询 µs 级（平台侧组合常驻管线，无全文档扫描）。使用须在清单声明 `experimental: { syntax: '^1.0.0' }`，语义对照与口径细节见 §4.8。
 - **标题折叠入口（#410，实验）**：`sdk.experimental.headingFold` 提供折叠区间查询与命令——方法按 `views` 面实例 ID 寻址（`folds(instanceId)` 有效折叠派生视图、`foldable(instanceId)` 可折叠全集；span 形状 `{ key, level, hideFrom, hideTo }`，LF 偏移、不含文本摘要）。命令面 `apply(instanceId, operation, options?)` 五操作（`fold` / `unfold` / `toggle` 选区驱动——先经 `views` 面 `setSelection` 定位；`foldAll` 可 `{ upToLevel }` 参数化、`unfoldAll` 全清）与 `foldAt` / `unfoldAt(instanceId, keys)` 按区间键批量组合（键来自查询结果，脱靶键静默忽略）。**Live-only**：reading 态与 hover 只读视图拒绝 `read-only`，设置页不提供该入口；折叠是视图态（零写回、不进撤销栈、不跨会话），编程触发与用户触发同链路。使用须在清单声明 `experimental: { headingFold: '^1.0.0' }`。
 - 装载器核对入口身份后调用工厂注入 SDK；组件只登记安装目录内的相对入口与资源子目录，越界路径被资源服务拒绝。
-- 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol) 与 [`heading-fold-experimental`](api-reference.md#heading-fold-experimental) 条目。
+- **工厂允许 async 形态**（官方样例即「await 通道握手后再注册」）：装载结局按工厂同步段判定（返回 pending 的 promise 即报装载成功），但工厂 promise 的 rejection 会与同步异常**同路径归因 `factory-error`**——整代次立即回滚（`onDispose` 回调、扩展、命令等全部回收）并上报宿主触发全组件故障暂停；rejection 迟到（代次已被卸载或替换）则静默丢弃。工厂内部的长等待或驻留循环不会挂起装载指令流。
+- 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental) 与 [`syntax-experimental`](api-reference.md#syntax-experimental) 条目。
 
 ## 3. 六组能力速览
 
@@ -190,6 +192,40 @@ sdk.commands?.register({ id: 'format', title: '格式化', mode: 'live', writes:
 命令**默认绑定**中，**裸 Tab 与 Shift+Tab 恒被拒绝**（注册期 `tab-forbidden`）：它们属于平台情境输入固定链（围栏越界 → 表格导航 → 行缩进），任何命令绑定都会破坏该链。**ctrl / alt / meta + Tab（可再叠加 shift）放行**——它们不参与情境链。注意宿主（如 VSCode 自身的标签切换）或操作系统可能占用个别修饰组合，注册成功不保证按键事件可达，选用前先在目标环境实测。
 
 已知边界：**用户绑定通道（设置页键位捕获与存储）现状不拦截保留 Tab 段**——`tab-forbidden` 只存在于注册期默认绑定校验。是否为用户绑定补同款拦截另行评估（平台已知缺口，组件作者不应依赖该缺口给默认绑定之外的使用路径绑定裸 Tab/Shift+Tab）。
+
+### 4.8 行类型查询与 Obsidian 上游语义对照（experimental.syntax）
+
+`experimental.syntax` 是位置驱动的单点查询（#433，#408 B+ 形态）：平台侧组合三条常驻管线（增量语法树、frontmatter 区间缓存、跨行公式块表）给出平台自有枚举，**不暴露树/节点句柄**——组件不需要也不应该自带 HyperMD→树映射表或全文档文本扫描。
+
+```ts
+defineAddonPage('publisher.my-addon', (sdk) => {
+  const syntax = sdk.experimental.syntax
+  // keymap 回调里：view → 实例 ID → 行类型（与 headingFold 同款寻址链）
+  sdk.registerExtension(keymap.of([{
+    key: 'Enter',
+    run: (view) => {
+      const instanceId = sdk.experimental.viewIdentity?.instanceIdOf(view)
+      if (!instanceId || !syntax) return false
+      const pos = view.state.selection.main.head
+      const line = syntax.lineTypeAt(instanceId, pos)
+      if (line.ok && line.kind === 'table') {
+        // 表格行上的定制 Enter 行为……
+      }
+      return false
+    },
+  }]))
+})
+```
+
+- **判定链（lineTypeAt）**：frontmatter 区间（行级）→ 跨行 `$$` 块表（**块级代码上下文内不命中**——块表是纯文本扫描、围栏与缩进代码内的 `$$` 文本同样进表，查询按块级代码守卫判字面代码，与 live 渲染抑制同口径；公式块内容含行内代码 span 不影响所在块的行类型）→ 树链枚举（code（围栏与缩进代码）> table > heading > list > quote，嵌套组合取先命中者）→ 单行闭合块 `$$x$$`（独占一行）→ 兜底 `text`。**inlineAt**：frontmatter → `none`（源码态）→ 行内代码 → `code` → 其余代码上下文 → `none`（`$` 为字面）→ 公式块表/当前行扫描 → `formula` → 兜底 `none`。跨行块与围栏交叉的畸形形态按位置局部语义（光标在围栏行判 `code`、块内普通行判 `formula`）。
+- **与 Obsidian 上游的关键对照**（上游 `getPosLineType` / `detectRuleScope` 移植者必读）：
+  - **frontmatter**：fm 判定是**文档头部 8192 字符的有界扫描**（与平台呈现同源）——超长头块按未识别降级为普通 Markdown，fm 行类型随之变化；fm 区间按**行级**判定（fm 结束行行尾仍属 frontmatter）。上游若在 fm 内判 `code` 等，移植时改为 `frontmatter` + `none`（fm 是源码态，无行内标记语义）。
+  - **公式**：上游块级判定通常逐行扫描 `$$`；本平台跨行块表 + 单行扫描的口径差异——**段内形态 `text $$x$$ tail` 行类型是 `text`**（不是公式行；行内维度 `inlineAt` 在公式位置返回 `formula`），**单行闭合块 `$$x$$`（独占一行、内容非空）是 `formula`**；未闭合 `$$` 稳定降级 `text`。
+  - **callout**：一期**不入枚举**——live 侧无 callout 识别管线，`> [!note]` 系列统一 `quote`。上游有 callout 细分语义的组件，移植时按 `quote` 处理或自判标记行。
+  - **嵌套优先级**：引用内列表、列表内引用等组合按 code > table > heading > list > quote 取先命中者（如 `> - item` 的列表项内容处判 `list`、行首 `>` 标记处判 `quote`——链式下降按位置走，两种位置各判各的）。
+- **pos 口径**：全文 UTF-16 code unit 偏移（页面全程 LF）；非负整数否则 `invalid-request`，超出文档长度**钳制到文末**（行尾是合法光标位）。
+- **nodeNames 诊断载荷**：光标处祖先链节点名快照（根→叶）。**显式声明非稳定**——节点名随解析器升级变化，不构成兼容承诺；诊断用途（如观察平台树形态）可用，逻辑分支不要依赖它。fm 行的快照会如实包含树上反语义节点（如 `SetextHeading2`）——这正是它作为诊断载荷的价值。
+- **Live-only**：reading 态主正文与 hover 只读视图拒绝 `read-only`（照 headingFold 先例）；设置页不提供该入口。
 
 ## 5. 消费样例入口
 

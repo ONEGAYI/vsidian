@@ -48,6 +48,18 @@ export interface MathOccurrence {
   tex: string
 }
 
+/** 公式排除的代码上下文节点名（lezer；照 #11 双链先例）。live 装饰的
+ *  mathSuppressed 与 #433 附加组件语法查询面（addonSyntaxApi）共用——
+ * 两处分叉会让「代码内 `$` 是否公式」的呈现与查询判定漂移 */
+export const MATH_CODE_CONTEXTS: ReadonlySet<string> = new Set([
+  'FencedCode',
+  'CodeBlock',
+  'CodeText',
+  'CodeMark',
+  'CodeInfo',
+  'InlineCode',
+])
+
 /** 词字符（[\w]：拉丁字母/数字/下划线）——贴字规则的判定口径 */
 function isWordChar(ch: string | undefined): boolean {
   return ch !== undefined && /[\w\d]/u.test(ch)
