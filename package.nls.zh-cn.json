@@ -91,5 +91,9 @@
   "command.heading.unfold.title": "展开标题节",
   "command.heading.toggleFold.title": "折叠/展开切换标题节",
   "command.heading.foldAll.title": "折叠全部标题节",
-  "command.heading.unfoldAll.title": "展开全部标题节"
+  "command.heading.unfoldAll.title": "展开全部标题节",
+  "command.graphic.popup.title": "弹窗预览光标处图形",
+  "command.graphic.exportSvg.title": "导出光标处图形为 SVG",
+  "command.graphic.exportPng.title": "导出光标处图形为 PNG",
+  "command.graphic.copySource.title": "复制光标处图形源码"
 }

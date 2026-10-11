@@ -134,6 +134,11 @@ export interface GraphicMenuHit {
   /** 当前生效渲染器（live 模式）有无 svg 取图能力——弹窗/导出类操作的
    *  enable gate 与 effectiveGraphicSvgExport 同口径 */
   svgExport: boolean
+  /** #438 右键时该围栏 live 渲染是否成功（渲染容器 state 属性的 DOM 探针：
+   *  错误降级态 false；探针不可得——widget 未物化/异步渲染在途——缺省，
+   *  enable gate 按成功放行，执行路径重渲染自会兜底）。弹窗/导出三项的
+   *  渲染成功 gate（能力 ≠ 渲染成功，#436 落档口径的执行侧补充） */
+  rendered?: boolean
 }
 
 /** 打开菜单时采集的判定输入快照（when/enable/checked 谓词的唯一数据面）。
@@ -209,6 +214,9 @@ export const CONTEXT_MENU_ICON_KEYS = [
   // 需 AI 新生成（接线）
   'externalLink', 'textFormat', 'paragraphStyle', 'insertPlus', 'normalText',
   'cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'comment',
+  // #438 图形专属簇新登记（资产生成与 CSS 接线归图标票 #441——渲染层
+  // 无规则时留空降级，资产后补即生效）
+  'popupPreview', 'exportSvg', 'exportPng',
   // 备用（项不做，显式记账）
   'media', 'footnote', 'callout',
 ] as const
@@ -218,6 +226,17 @@ const structureSensitive = (ctx: MenuContextSnapshot): boolean => ctx.zone !== '
 /** 簇 1 新增链接与簇 2 全簇的 enable（矩阵：结构敏感区置灰） */
 const enabledOutsideStructure = (ctx: MenuContextSnapshot): boolean => !structureSensitive(ctx)
 const hasSelection = (ctx: MenuContextSnapshot): boolean => ctx.hasSelection
+
+/** #438 图形专属簇显隐谓词：仅图形块（渲染型围栏 zone）出簇——普通围栏
+ *  （zone='fence'）与正文不出；渲染失败/负载缺省置灰不隐藏（保可发现性） */
+const graphicZone = (ctx: MenuContextSnapshot): boolean => ctx.zone === 'graphic'
+/** #438 弹窗/导出三项 enable gate：负载在场 + svg 取图能力（与 popup 按钮
+ *  「不虚设」同口径）+ 渲染成功态（错误降级块无图可弹/可导）。复制源码
+ *  不经此 gate（错误块取源码恰是高价值操作） */
+const graphicRenderable = (ctx: MenuContextSnapshot): boolean => {
+  const graphic = ctx.graphic
+  return graphic !== undefined && graphic.svgExport && graphic.rendered !== false
+}
 
 /** 文本格式子项（簇 2.1）——id/command/iconKey 与 formatOperations 同名 */
 const textFormatChildren: readonly MenuItemDescriptor[] = [
@@ -271,6 +290,15 @@ export const CONTEXT_MENU_ITEMS = [
   { id: 'insertExternalLink', group: 'link', order: 1, command: 'link', labelKey: 'format.link', iconKey: 'externalLink', enable: enabledOutsideStructure },
   { id: 'copyHeadingLink', group: 'link', order: 2, command: 'copyHeadingLink', labelKey: 'contextMenu.copyHeadingLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget?.heading != null },
   { id: 'copyBlockLink', group: 'link', order: 3, command: 'copyBlockLink', labelKey: 'contextMenu.copyBlockLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget != null },
+  // ---- 场景簇：图形块（#438；全部只读/导出——「编辑源码」不设右键项，
+  // 编辑入口仍收敛于 edit 按钮（graphic-code-block-interaction.md 契约 2）。
+  // 弹窗/导出 enable = svg 能力 + 渲染成功（错误降级置灰）；复制源码仅按
+  // zone 显隐（错误块取源码可用）。图标 popupPreview/exportSvg/exportPng
+  // 资产归 #441，渲染层留空降级 ----
+  { id: 'graphicPopup', group: 'graphicOps', order: 0, command: 'graphicPopup', labelKey: 'contextMenu.graphicPopup', iconKey: 'popupPreview', when: graphicZone, enable: graphicRenderable },
+  { id: 'graphicExportSvg', group: 'graphicOps', order: 1, command: 'graphicExportSvg', labelKey: 'contextMenu.graphicExportSvg', iconKey: 'exportSvg', when: graphicZone, enable: graphicRenderable },
+  { id: 'graphicExportPng', group: 'graphicOps', order: 2, command: 'graphicExportPng', labelKey: 'contextMenu.graphicExportPng', iconKey: 'exportPng', when: graphicZone, enable: graphicRenderable },
+  { id: 'graphicCopySource', group: 'graphicOps', order: 3, command: 'graphicCopySource', labelKey: 'contextMenu.graphicCopySource', iconKey: 'copy', when: graphicZone },
   // ---- 簇 2：块与格式（全部带子菜单）----
   { id: 'textFormat', group: 'blockFormat', order: 0, command: 'textFormat', labelKey: 'contextMenu.textFormat', iconKey: 'textFormat', enable: enabledOutsideStructure, children: textFormatChildren },
   { id: 'paragraphStyle', group: 'blockFormat', order: 1, command: 'paragraphStyle', labelKey: 'contextMenu.paragraphStyle', iconKey: 'paragraphStyle', enable: enabledOutsideStructure, children: paragraphChildren },
