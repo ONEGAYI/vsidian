@@ -842,8 +842,56 @@ export const zhCn: Record<MessageKey, string> = {
   'contextMenu.copy': '复制',
   'contextMenu.paste': '粘贴',
   'contextMenu.selectAll': '全选',
+  /** #439 链接场景三项（链接文字命中的簇首上下文动作；措辞与块链接两项
+   *  区分——避免泛称「复制链接」（CONTEXT.md 术语约束），address 是链接
+   *  目标、显示文字是渲染标签） */
+  'contextMenu.openLink': '打开链接',
+  'contextMenu.copyLinkAddress': '复制链接地址',
+  'contextMenu.copyLinkText': '复制显示文字',
+  /** #439 链接场景三项的键位入口操作名（目标 = 光标处链接命中；默认未
+   *  绑定——Ctrl+单击是鼠标语义主入口） */
+  'command.link.open.title': '打开光标处链接',
+  'command.link.copyAddress.title': '复制光标处链接地址',
+  'command.link.copyText.title': '复制光标处链接显示文字',
+  /** #438 图形专属簇（右键菜单项；只读/导出，编辑入口仍收敛于 edit 按钮） */
+  'contextMenu.graphicPopup': '弹窗预览',
+  'contextMenu.graphicExportSvg': '导出 SVG',
+  'contextMenu.graphicExportPng': '导出 PNG',
+  'contextMenu.graphicCopySource': '复制源码',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': '复制当前块链接',
+  // ---- #438 图形块场景簇四操作（右键菜单项的键位评估记录；默认未绑定） ----
+  'command.graphic.popup.title': '弹窗预览光标处图形',
+  'command.graphic.exportSvg.title': '导出光标处图形为 SVG',
+  'command.graphic.exportPng.title': '导出光标处图形为 PNG',
+  'command.graphic.copySource.title': '复制光标处图形源码',
+
+  // ---- #437 表格专属右键簇（tableOps；复制语义沿区域复制口径）----
+  /** 表格簇：结构六操作（复用键位注册表既有 id，提示列自动派生） */
+  'contextMenu.table.insertRowAbove': '上方插入行',
+  'contextMenu.table.insertRowBelow': '下方插入行',
+  'contextMenu.table.insertColumnLeft': '左侧插入列',
+  'contextMenu.table.insertColumnRight': '右侧插入列',
+  'contextMenu.table.deleteRow': '删除行',
+  'contextMenu.table.deleteColumn': '删除列',
+  /** 表格簇：删除表格（整表层）与选择三项（{n} = 命中行列序号，1 基） */
+  'contextMenu.table.deleteTable': '删除表格',
+  'contextMenu.table.selectRow': '选择第 {n} 行',
+  'contextMenu.table.selectColumn': '选择第 {n} 列',
+  'contextMenu.table.selectTable': '选择整表',
+  /** 表格簇：复制表格 Markdown（活跃格区含命中格 → 格区，否则整表） */
+  'contextMenu.table.copyMarkdown': '复制表格 Markdown',
+  /** 表格簇：引用层级两项（blockquote-table 三轮职能转移项） */
+  'contextMenu.table.removeQuote': '移除引用块',
+  'contextMenu.table.addQuote': '增一层引用',
+  /** 表格簇新命令的操作注册表 titleKey（默认未绑定；删除/层级为写操作） */
+  'command.table.deleteTable.title': '表格：删除表格',
+  'command.table.selectRow.title': '表格：选择行',
+  'command.table.selectColumn.title': '表格：选择列',
+  'command.table.selectTable.title': '表格：选择整表',
+  'command.table.copyMarkdown.title': '表格：复制 Markdown',
+  'command.table.quoteRemove.title': '表格：移除引用块',
+  'command.table.quoteAdd.title': '表格：增一层引用',
 
   // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
   /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；

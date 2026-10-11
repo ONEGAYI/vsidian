@@ -21,7 +21,17 @@
   "command.table.insertColumnLeft.title": "Table: insert column left",
   "command.table.insertColumnRight.title": "Table: insert column right",
   "command.table.deleteColumn.title": "Table: delete column",
+  "command.table.deleteTable.title": "Table: delete table",
+  "command.table.selectRow.title": "Table: select row",
+  "command.table.selectColumn.title": "Table: select column",
+  "command.table.selectTable.title": "Table: select whole table",
+  "command.table.copyMarkdown.title": "Table: copy as Markdown",
+  "command.table.quoteRemove.title": "Table: remove quote level",
+  "command.table.quoteAdd.title": "Table: add quote level",
   "command.block.copyLink.title": "Copy link to current block",
+  "command.link.open.title": "Open link at cursor",
+  "command.link.copyAddress.title": "Copy link address at cursor",
+  "command.link.copyText.title": "Copy link display text at cursor",
   "format.bold": "Bold",
   "format.italic": "Italic",
   "format.strikethrough": "Strikethrough",
@@ -91,5 +101,9 @@
   "command.heading.unfold.title": "Unfold Heading Section",
   "command.heading.toggleFold.title": "Toggle Fold of Heading Section",
   "command.heading.foldAll.title": "Fold All Heading Sections",
-  "command.heading.unfoldAll.title": "Unfold All Heading Sections"
+  "command.heading.unfoldAll.title": "Unfold All Heading Sections",
+  "command.graphic.popup.title": "Open Popup Preview for Graphic at Cursor",
+  "command.graphic.exportSvg.title": "Export Graphic at Cursor as SVG",
+  "command.graphic.exportPng.title": "Export Graphic at Cursor as PNG",
+  "command.graphic.copySource.title": "Copy Source of Graphic at Cursor"
 }

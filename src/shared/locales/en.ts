@@ -897,8 +897,55 @@ export const en = {
   'contextMenu.copy': 'Copy',
   'contextMenu.paste': 'Paste',
   'contextMenu.selectAll': 'Select all',
+  /** #439 链接场景三项（链接文字命中的簇首上下文动作；措辞与块链接两项
+   *  区分——address 是链接目标、text 是显示文字，不泛称 "copy link"） */
+  'contextMenu.openLink': 'Open link',
+  'contextMenu.copyLinkAddress': 'Copy link address',
+  'contextMenu.copyLinkText': 'Copy link text',
+  /** #439 链接场景三项的键位入口操作名（目标 = 光标处链接命中；默认未
+   *  绑定——Ctrl+click 是鼠标语义主入口） */
+  'command.link.open.title': 'Open link at cursor',
+  'command.link.copyAddress.title': 'Copy link address at cursor',
+  'command.link.copyText.title': 'Copy link display text at cursor',
+  /** #438 图形专属簇（右键菜单项；只读/导出，编辑入口仍收敛于 edit 按钮） */
+  'contextMenu.graphicPopup': 'Open in popup',
+  'contextMenu.graphicExportSvg': 'Export as SVG',
+  'contextMenu.graphicExportPng': 'Export as PNG',
+  'contextMenu.graphicCopySource': 'Copy source',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': 'Copy link to current block',
+  // ---- #438 图形块场景簇四操作（右键菜单项的键位评估记录；默认未绑定） ----
+  'command.graphic.popup.title': 'Open Popup Preview for Graphic at Cursor',
+  'command.graphic.exportSvg.title': 'Export Graphic at Cursor as SVG',
+  'command.graphic.exportPng.title': 'Export Graphic at Cursor as PNG',
+  'command.graphic.copySource.title': 'Copy Source of Graphic at Cursor',
+
+  // ---- #437 表格专属右键簇（tableOps；复制语义沿区域复制口径）----
+  /** 表格簇：结构六操作（复用键位注册表既有 id，提示列自动派生） */
+  'contextMenu.table.insertRowAbove': 'Insert row above',
+  'contextMenu.table.insertRowBelow': 'Insert row below',
+  'contextMenu.table.insertColumnLeft': 'Insert column left',
+  'contextMenu.table.insertColumnRight': 'Insert column right',
+  'contextMenu.table.deleteRow': 'Delete row',
+  'contextMenu.table.deleteColumn': 'Delete column',
+  /** 表格簇：删除表格（整表层）与选择三项（{n} = 命中行列序号，1 基） */
+  'contextMenu.table.deleteTable': 'Delete table',
+  'contextMenu.table.selectRow': 'Select row {n}',
+  'contextMenu.table.selectColumn': 'Select column {n}',
+  'contextMenu.table.selectTable': 'Select whole table',
+  /** 表格簇：复制表格 Markdown（活跃格区含命中格 → 格区，否则整表） */
+  'contextMenu.table.copyMarkdown': 'Copy table as Markdown',
+  /** 表格簇：引用层级两项（blockquote-table 三轮职能转移项） */
+  'contextMenu.table.removeQuote': 'Remove quote level',
+  'contextMenu.table.addQuote': 'Add quote level',
+  /** 表格簇新命令的操作注册表 titleKey（默认未绑定；删除/层级为写操作） */
+  'command.table.deleteTable.title': 'Table: delete table',
+  'command.table.selectRow.title': 'Table: select row',
+  'command.table.selectColumn.title': 'Table: select column',
+  'command.table.selectTable.title': 'Table: select whole table',
+  'command.table.copyMarkdown.title': 'Table: copy as Markdown',
+  'command.table.quoteRemove.title': 'Table: remove quote level',
+  'command.table.quoteAdd.title': 'Table: add quote level',
 
   // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
   /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；

@@ -10,6 +10,7 @@
 // 真宿主 B 会话（保存/撤销路由/dirty）在集成层。
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EditorView } from '@codemirror/view'
 import type { HoverPreviewResult, WebviewToHost } from '../../src/shared/protocol'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -218,6 +219,46 @@ describe('P2-04 端口生命周期与编辑链路', () => {
       expect(msg.message.docUri).toBe(B_DOC_URI)
       expect(msg.message.changes).toEqual([{ offset: 6, length: 0, text: '!' }])
     }
+    h.manager.dispose()
+  })
+
+  it('#439 sendRefEditClientMessage：按 view 匹配在场端口转发信封，失配 view 拒绝不回落', () => {
+    const h = harness()
+    const el = loadCard(h)
+    clickModeButton(el)
+    const portId = bindPort(h)
+    const editorEl = editorOf(el)
+    expect(editorEl, '前置：内部 Live 的 EditorView 在场').toBeTruthy()
+    const view = EditorView.findFromDOM(editorEl as HTMLElement)
+    expect(view, '前置：DOM 可反查 EditorView').toBeTruthy()
+    // 链接场景命令的端口出站（runLinkSceneCommand 嵌入分支）：消息已带 B
+    // 身份（调用方注入 targetSessionId/targetDocUri），本方法只做 view→端口
+    // 配对与 refEdit.message 信封转发（message 原样）
+    const ok = h.manager.sendRefEditClientMessage(view!, {
+      kind: 'link.activate',
+      sessionId: portId, docUri: B_DOC_URI,
+      href: 'https://example.com/x', srcStart: 0, srcEnd: 8,
+    })
+    expect(ok).toBe(true)
+    const outbound = h.sent.filter((m) => m.kind === 'refEdit.message')
+    expect(outbound).toHaveLength(1)
+    const msg = outbound[0] as Extract<WebviewToHost, { kind: 'refEdit.message' }>
+    expect(msg.portId).toBe(portId)
+    expect(msg.fsPath).toBe(B_FS)
+    expect(msg.message).toEqual({
+      kind: 'link.activate',
+      sessionId: portId, docUri: B_DOC_URI,
+      href: 'https://example.com/x', srcStart: 0, srcEnd: 8,
+    })
+    // 失配 view（不属于任何在场端口）：拒绝返回 false、零新增出站（竞态
+    // 放弃语义——不回落主正文桥）
+    const stranger = new EditorView()
+    expect(h.manager.sendRefEditClientMessage(stranger, {
+      kind: 'link.activate',
+      sessionId: 'x', docUri: 'x', href: 'https://example.com/y', srcStart: 0, srcEnd: 1,
+    })).toBe(false)
+    expect(h.sent.filter((m) => m.kind === 'refEdit.message')).toHaveLength(1)
+    stranger.destroy()
     h.manager.dispose()
   })
 

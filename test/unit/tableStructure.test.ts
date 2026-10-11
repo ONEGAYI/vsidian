@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest'
 import {
   planTableEdit,
   planTableColumnMove,
+  planTableQuoteLevel,
   planTableRowMove,
   tableCellNavTarget,
   type TableRowInfo,
@@ -587,5 +588,132 @@ describe('顶层无边界行插列（基线缺陷，#296 审查轮顺带修复�
     const rows = rowsOf(doc, [0, 1, 2], ['header', 'delimiter', 'row'])
     const plan = planTableEdit(doc, rows, 0, 'insertColumnLeft')!
     expect(apply(doc, plan.changes)).toBe('| |a | b\n| --- |--- | ---\n| |c | d')
+  })
+})
+
+// ---- #437 表格右键簇：引用层级统一增/删一层（blockquote-table 三轮职能转移）----
+// 契约：对表格全部物理行（表头/分隔/数据行）逐行独立变换（规格契约 5——
+// 行前缀逐行计算，不一表一常量）；一笔事务（changes 合一）一笔撤销；
+// delta=-1 时无引用前缀的行（lazy 分隔行）原样保留；光标可选——在表内
+// 时按行内偏移跟随新行文本（不落前缀端点触发显形）。
+describe('planTableQuoteLevel：多行统一增删引用层级（#437）', () => {
+  const QDOC = '前文\n\n> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n\n后文'
+  const qrows = rowsOf(QDOC, [2, 3, 4], ['header', 'delimiter', 'row'], [2, 2, 2])
+
+  it('增一层：全部物理行（含分隔行）行首补 "> "，一笔事务', () => {
+    const plan = planTableQuoteLevel(QDOC, qrows, 1)!
+    expect(plan.changes).toHaveLength(3)
+    expect(apply(QDOC, plan.changes))
+      .toBe('前文\n\n> > | a | b |\n> > | --- | --- |\n> > | 1 | 2 |\n\n后文')
+  })
+
+  it('减一层：全部物理行剥一层 "> "（含分隔行），表外文本逐字节不变', () => {
+    const deep = '> > | a | b |\n> > | --- | --- |\n> > | 1 | 2 |'
+    const rows = rowsOf(deep, [0, 1, 2], ['header', 'delimiter', 'row'], [4, 4, 4])
+    const plan = planTableQuoteLevel(deep, rows, -1)!
+    expect(apply(deep, plan.changes))
+      .toBe('> | a | b |\n> | --- | --- |\n> | 1 | 2 |')
+  })
+
+  it('减到顶层：单层引用表减一层成为顶层表（quoteDepth 0 合法落点）', () => {
+    const plan = planTableQuoteLevel(QDOC, qrows, -1)!
+    expect(apply(QDOC, plan.changes))
+      .toBe('前文\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n后文')
+  })
+
+  it('顶层表（0 层）减一层：无变更返回 null（enable 由菜单谓词置灰）', () => {
+    const top = '| a | b |\n| --- | --- |\n| 1 | 2 |'
+    const rows = rowsOf(top, [0, 1, 2], ['header', 'delimiter', 'row'])
+    expect(planTableQuoteLevel(top, rows, -1)).toBeNull()
+  })
+
+  it('顶层表增一层：全部行补 "> " 成为单层引用表（0 层也可加）', () => {
+    const top = '| a | b |\n| --- | --- |\n| 1 | 2 |'
+    const rows = rowsOf(top, [0, 1, 2], ['header', 'delimiter', 'row'])
+    const plan = planTableQuoteLevel(top, rows, 1)!
+    expect(apply(top, plan.changes))
+      .toBe('> | a | b |\n> | --- | --- |\n> | 1 | 2 |')
+  })
+
+  it('lazy 分隔行（无前缀）减一层豁免：原样保留，其余行照减（契约 5 逐行独立）', () => {
+    const lazy = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const rows = rowsOf(lazy, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 0, 2])
+    const plan = planTableQuoteLevel(lazy, rows, -1)!
+    expect(apply(lazy, plan.changes)).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |')
+  })
+
+  it('lazy 分隔行增一层：同样补 "> "（不再 lazy，层级判定只看内容行不受影响）', () => {
+    const lazy = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const rows = rowsOf(lazy, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 0, 2])
+    const plan = planTableQuoteLevel(lazy, rows, 1)!
+    expect(apply(lazy, plan.changes))
+      .toBe('> > | a | b |\n> | --- | --- |\n> > | 1 | 2 |')
+  })
+
+  it('引用内列表容器（> - 前缀）：增层在行首补一层引用，列表标记随内容右移', () => {
+    const ql = '> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |'
+    const rows = rowsOf(ql, [0, 1, 2], ['header', 'delimiter', 'row'], [4, 4, 4])
+    const plan = planTableQuoteLevel(ql, rows, 1)!
+    expect(apply(ql, plan.changes))
+      .toBe('> > - | a | b |\n> >   | --- | --- |\n> >   | 1 | 2 |')
+    const back = planTableQuoteLevel(apply(ql, plan.changes),
+      rowsOf(apply(ql, plan.changes), [0, 1, 2], ['header', 'delimiter', 'row'], [6, 6, 6]), -1)!
+    expect(apply(apply(ql, plan.changes), back.changes)).toBe(ql)
+  })
+
+  it('层级残缺行（某行少一层）：逐行独立运算照常执行（残缺表 enable 由菜单置灰，不做猜测修复）', () => {
+    const ragged = '> | a | b |\n> | --- | --- |\n| 1 | 2 |'
+    const rows = rowsOf(ragged, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 2, 0])
+    const plan = planTableQuoteLevel(ragged, rows, 1)!
+    expect(apply(ragged, plan.changes))
+      .toBe('> > | a | b |\n> > | --- | --- |\n> | 1 | 2 |')
+  })
+
+  it('紧贴形态（>> 无空格）：减一层剥首个 ">"，不吞第二个引用符', () => {
+    const tight = '>>| a | b |\n>>| --- | --- |\n>>| 1 | 2 |'
+    const rows = rowsOf(tight, [0, 1, 2], ['header', 'delimiter', 'row'], [1, 1, 1])
+    const plan = planTableQuoteLevel(tight, rows, -1)!
+    expect(apply(tight, plan.changes)).toBe('>| a | b |\n>| --- | --- |\n>| 1 | 2 |')
+  })
+
+  it('cursor 在表内：selection 按行内偏移跟随新行文本（不落前缀端点）', () => {
+    const cursor = QDOC.indexOf('1') // 数据行格内容内
+    const plan = planTableQuoteLevel(QDOC, qrows, 1, cursor)!
+    // 数据行前方表头/分隔行各 +2、本行 +2——期望从变换后文本独立推导
+    expect(plan.selection).toBe(cursor + 6)
+    const back = planTableQuoteLevel(QDOC, qrows, -1, cursor)!
+    expect(back.selection).toBe(cursor - 6)
+  })
+
+  it('cursor 在非首行：selection 须累计前方各行平移（新文档坐标契约）', () => {
+    const cursor = QDOC.indexOf('1') // 数据行——前方表头/分隔行各 +2
+    const plan = planTableQuoteLevel(QDOC, qrows, 1, cursor)!
+    const after = apply(QDOC, plan.changes)
+    expect(after).toBe('前文\n\n> > | a | b |\n> > | --- | --- |\n> > | 1 | 2 |\n\n后文')
+    // 光标跟随原内容：期望值从变换后文本独立推导（前方 4 + 本行 2 = cursor + 6）
+    expect(plan.selection).toBe(after.indexOf('1'))
+  })
+
+  it('cursor 在 lazy 分隔行（减层豁免行）：selection 同样按前方平移映射', () => {
+    const lazy = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const rows = rowsOf(lazy, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 0, 2])
+    const cursor = lazy.indexOf('---') // 分隔行——本行无前缀豁免不变
+    const plan = planTableQuoteLevel(lazy, rows, -1, cursor)!
+    expect(apply(lazy, plan.changes)).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |')
+    // 表头行 -2、分隔行不变：新文档中 cursor 应平移 -2（旧行首坐标陷阱）
+    expect(plan.selection).toBe(cursor - 2)
+  })
+
+  it('cursor 在表外/未提供：不给 selection 时由上层走默认映射（本层返回 blockFrom 兜底）', () => {
+    const outside = QDOC.indexOf('前文')
+    const plan = planTableQuoteLevel(QDOC, qrows, 1, outside)!
+    expect(typeof plan.selection).toBe('number')
+    expect(planTableQuoteLevel(QDOC, qrows, 1)!.selection).toBeGreaterThanOrEqual(0)
+  })
+
+  it('空 rows 或非表行集：返回 null 零变更', () => {
+    expect(planTableQuoteLevel(QDOC, [], 1)).toBeNull()
+    const notTable = rowsOf('普通段落\n另一行', [0, 1], ['row', 'row'])
+    expect(planTableQuoteLevel('普通段落\n另一行', notTable, -1)).toBeNull()
   })
 })

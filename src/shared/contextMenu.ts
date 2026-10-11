@@ -134,6 +134,11 @@ export interface GraphicMenuHit {
   /** 当前生效渲染器（live 模式）有无 svg 取图能力——弹窗/导出类操作的
    *  enable gate 与 effectiveGraphicSvgExport 同口径 */
   svgExport: boolean
+  /** #438 右键时该围栏 live 渲染是否成功（渲染容器 state 属性的 DOM 探针：
+   *  错误降级态 false；探针不可得——widget 未物化/异步渲染在途——缺省，
+   *  enable gate 按成功放行，执行路径重渲染自会兜底）。弹窗/导出三项的
+   *  渲染成功 gate（能力 ≠ 渲染成功，#436 落档口径的执行侧补充） */
+  rendered?: boolean
 }
 
 /** 打开菜单时采集的判定输入快照（when/enable/checked 谓词的唯一数据面）。
@@ -159,6 +164,39 @@ export interface MenuContextSnapshot {
 /** 上下文谓词（纯函数；输入只认 MenuContextSnapshot） */
 export type MenuPredicate = (ctx: MenuContextSnapshot) => boolean
 
+/** 链接命中在场谓词（#439 三项的 when——无命中不显示而非置灰；采集只在
+ *  zone='normal'，结构敏感区天然不出现） */
+const hasLinkHit = (ctx: MenuContextSnapshot): boolean => ctx.link != null
+
+// ---- #439 链接场景命令：菜单三项（打开链接/复制链接地址/复制显示文字）
+// 的出站载荷派生。纯函数、零 vscode/DOM 依赖——控制器只补会话身份与通道
+// 路由（主正文面板桥直发 / 嵌入目标端口信封）。取材口径单一事实源在本
+// 函数：打开 = 与 Ctrl+单击激活上报同构（双链 wikilink.activate 的 target /
+// 其余 link.activate 的 href，源区间 = 命中负载 range）；复制链接地址 =
+// target 原样（双链 `|` 之前未 trim、外部 href 不解码）；复制显示文字 =
+// display（双链别名优先）。外部 scheme 准入归宿主 linkTarget，此处不预判 ----
+
+/** 链接场景命令标识（菜单描述符 command 与键位入口共用） */
+export type LinkSceneCommand = 'openLink' | 'copyLinkAddress' | 'copyLinkText'
+
+/** 命令出站载荷（不含会话身份字段——sessionId/docUri 由通道路由补齐） */
+export type LinkScenePayload =
+  | { kind: 'wikilink.activate'; target: string; srcStart: number; srcEnd: number }
+  | { kind: 'link.activate'; href: string; srcStart: number; srcEnd: number }
+  | { kind: 'clipboard.write'; text: string }
+
+/** 链接命中 → 命令出站载荷（#439）。打开链接按族分派激活消息（与
+ *  Ctrl+单击判定族完全同源同消息——不重复造跳转入口）；复制两项取材
+ * target/display 原口径直写剪贴板桥。 */
+export function linkMenuCommandPayload(command: LinkSceneCommand, hit: LinkMenuHit): LinkScenePayload {
+  if (command === 'openLink') {
+    return hit.kind === 'wikilink'
+      ? { kind: 'wikilink.activate', target: hit.target, srcStart: hit.range.from, srcEnd: hit.range.to }
+      : { kind: 'link.activate', href: hit.target, srcStart: hit.range.from, srcEnd: hit.range.to }
+  }
+  return { kind: 'clipboard.write', text: command === 'copyLinkAddress' ? hit.target : hit.display }
+}
+
 /** 菜单项描述符（注册单位；children 支持任意嵌套，内置表最深两级） */
 export interface MenuItemDescriptor {
   id: string
@@ -167,6 +205,9 @@ export interface MenuItemDescriptor {
   /** 组内排序键（稳定排序） */
   order: number
   labelKey: MessageKey
+  /** 文案插值参数（#437：含行列序号的菜单文案参数化——table.selectRow{n}
+   *  先例的渲染层载体；按快照求值，如选择第 {n} 行取命中 rowIndex） */
+  labelParams?: (ctx: MenuContextSnapshot) => Record<string, string | number>
   /** #359 T10 显式文字（附加组件菜单项的自由文本——组件文案不进 Vsidian
    *  内置字典；渲染时优先于 labelKey 取词，内置表不用此字段） */
   label?: string
@@ -200,7 +241,10 @@ export type ContextMenuGroupId = (typeof CONTEXT_MENU_GROUP_ORDER)[number]
 
 /** 图标 key 表（规格图标清单全量：复用 16 + 需生成接线 10 + 备用记账 4。
  *  资产生成与 quick-action-icons.py KEYS 的两表同步归图标接线票；渲染层
- *  按 CSS 有无 data-icon 规则降级留空，key 先行登记不阻塞内核。 */
+ *  按 CSS 有无 data-icon 规则降级留空，key 先行登记不阻塞内核。
+ *  #437 表格簇新增 10 key（候选语义表见 #441）：资产与 CSS 接线归 #441
+ *  承接（登记即合规、渲染留空降级——S6 决策），复用 key 三枚（table/
+ *  quote/copy）零新增。 */
 export const CONTEXT_MENU_ICON_KEYS = [
   // 复用现有快速操作图标资产
   'link', 'bold', 'italic', 'strikethrough', 'highlight', 'inlineCode', 'inlineMath',
@@ -209,8 +253,14 @@ export const CONTEXT_MENU_ICON_KEYS = [
   // 需 AI 新生成（接线）
   'externalLink', 'textFormat', 'paragraphStyle', 'insertPlus', 'normalText',
   'cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'comment',
+  // #438 图形专属簇新登记（资产生成与 CSS 接线归图标票 #441——渲染层
+  // 无规则时留空降级，资产后补即生效）
+  'popupPreview', 'exportSvg', 'exportPng',
   // 备用（项不做，显式记账）
   'media', 'footnote', 'callout',
+  // #437 表格专属簇（资产归 #441 后补；渲染层无规则时留空降级）
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
 ] as const
 
 /** 结构敏感区谓词（表格单元格/围栏代码/图形块——写操作置灰的矩阵单元） */
@@ -218,6 +268,17 @@ const structureSensitive = (ctx: MenuContextSnapshot): boolean => ctx.zone !== '
 /** 簇 1 新增链接与簇 2 全簇的 enable（矩阵：结构敏感区置灰） */
 const enabledOutsideStructure = (ctx: MenuContextSnapshot): boolean => !structureSensitive(ctx)
 const hasSelection = (ctx: MenuContextSnapshot): boolean => ctx.hasSelection
+
+/** #438 图形专属簇显隐谓词：仅图形块（渲染型围栏 zone）出簇——普通围栏
+ *  （zone='fence'）与正文不出；渲染失败/负载缺省置灰不隐藏（保可发现性） */
+const graphicZone = (ctx: MenuContextSnapshot): boolean => ctx.zone === 'graphic'
+/** #438 弹窗/导出三项 enable gate：负载在场 + svg 取图能力（与 popup 按钮
+ *  「不虚设」同口径）+ 渲染成功态（错误降级块无图可弹/可导）。复制源码
+ *  不经此 gate（错误块取源码恰是高价值操作） */
+const graphicRenderable = (ctx: MenuContextSnapshot): boolean => {
+  const graphic = ctx.graphic
+  return graphic !== undefined && graphic.svgExport && graphic.rendered !== false
+}
 
 /** 文本格式子项（簇 2.1）——id/command/iconKey 与 formatOperations 同名 */
 const textFormatChildren: readonly MenuItemDescriptor[] = [
@@ -264,13 +325,67 @@ const insertChildren: readonly MenuItemDescriptor[] = [
   { id: 'blockMath', group: 'blockFormat', order: 3, command: 'blockMath', labelKey: 'format.blockMath', iconKey: 'blockMath', enable: enabledOutsideStructure },
 ]
 
+// ---- 表格专属簇（#437；平铺单簇不设子菜单）----
+// 谓词口径：全簇 when = zone==='table'（结构敏感区才在场）；enable 按命中
+// 负载在场（解析树接管该表）判定——源码降级表/残缺表负载缺省时**置灰不
+// 隐藏**（安全降级矩阵不破例）。结构六操作复用键位注册表既有 id（提示列
+// 自动派生）；选择行/列需命中行列坐标（分隔行/ragged 行 null → 置灰）；
+// 引用层级两项按层级一致性（quoteUniform）与是否可减（quoteDepth≥1）。
+const inTableZone = (ctx: MenuContextSnapshot): boolean => ctx.zone === 'table'
+const tableHitPresent = (ctx: MenuContextSnapshot): boolean => ctx.table !== undefined
+const tableUniform = (ctx: MenuContextSnapshot): boolean =>
+  ctx.table !== undefined && ctx.table.quoteUniform
+
+/** 表格专属簇描述符（13 项；执行分派在 syncController.runContextMenuCommand） */
+const tableOpsChildren: readonly MenuItemDescriptor[] = [
+  { id: 'insertRowAbove', group: 'tableOps', order: 0, command: 'insertRowAbove', labelKey: 'contextMenu.table.insertRowAbove', iconKey: 'insertRowAbove', when: inTableZone, enable: tableHitPresent },
+  { id: 'insertRowBelow', group: 'tableOps', order: 1, command: 'insertRowBelow', labelKey: 'contextMenu.table.insertRowBelow', iconKey: 'insertRowBelow', when: inTableZone, enable: tableHitPresent },
+  { id: 'insertColumnLeft', group: 'tableOps', order: 2, command: 'insertColumnLeft', labelKey: 'contextMenu.table.insertColumnLeft', iconKey: 'insertColumnLeft', when: inTableZone, enable: tableHitPresent },
+  { id: 'insertColumnRight', group: 'tableOps', order: 3, command: 'insertColumnRight', labelKey: 'contextMenu.table.insertColumnRight', iconKey: 'insertColumnRight', when: inTableZone, enable: tableHitPresent },
+  { id: 'deleteRow', group: 'tableOps', order: 4, command: 'deleteRow', labelKey: 'contextMenu.table.deleteRow', iconKey: 'deleteRow', when: inTableZone, enable: tableHitPresent },
+  { id: 'deleteColumn', group: 'tableOps', order: 5, command: 'deleteColumn', labelKey: 'contextMenu.table.deleteColumn', iconKey: 'deleteColumn', when: inTableZone, enable: tableHitPresent },
+  { id: 'deleteTable', group: 'tableOps', order: 6, command: 'deleteTable', labelKey: 'contextMenu.table.deleteTable', iconKey: 'deleteTable', when: inTableZone, enable: tableHitPresent, danger: true },
+  {
+    id: 'selectTableRow', group: 'tableOps', order: 7, command: 'selectTableRow',
+    labelKey: 'contextMenu.table.selectRow', iconKey: 'selectRow', when: inTableZone,
+    enable: (ctx) => ctx.table?.rowIndex != null,
+    labelParams: (ctx) => ({ n: (ctx.table?.rowIndex ?? 0) + 1 }),
+  },
+  {
+    id: 'selectTableColumn', group: 'tableOps', order: 8, command: 'selectTableColumn',
+    labelKey: 'contextMenu.table.selectColumn', iconKey: 'selectColumn', when: inTableZone,
+    enable: (ctx) => ctx.table?.columnIndex != null,
+    labelParams: (ctx) => ({ n: (ctx.table?.columnIndex ?? 0) + 1 }),
+  },
+  { id: 'selectWholeTable', group: 'tableOps', order: 9, command: 'selectWholeTable', labelKey: 'contextMenu.table.selectTable', iconKey: 'table', when: inTableZone, enable: tableHitPresent },
+  { id: 'copyTableMarkdown', group: 'tableOps', order: 10, command: 'copyTableMarkdown', labelKey: 'contextMenu.table.copyMarkdown', iconKey: 'copy', when: inTableZone, enable: tableHitPresent },
+  { id: 'tableQuoteRemove', group: 'tableOps', order: 11, command: 'tableQuoteRemove', labelKey: 'contextMenu.table.removeQuote', iconKey: 'removeQuote', when: inTableZone, enable: (ctx) => tableUniform(ctx) && (ctx.table?.quoteDepth ?? 0) >= 1 },
+  { id: 'tableQuoteAdd', group: 'tableOps', order: 12, command: 'tableQuoteAdd', labelKey: 'contextMenu.table.addQuote', iconKey: 'quote', when: inTableZone, enable: tableUniform },
+]
+
 /** 内置项编译期表（照 formatOperations 惯例；运行期覆写层的首个注册者） */
 export const CONTEXT_MENU_ITEMS = [
   // ---- 簇 1：链接 ----
-  { id: 'insertWikilink', group: 'link', order: 0, command: 'wikilink', labelKey: 'format.wikilink', iconKey: 'link', enable: enabledOutsideStructure },
-  { id: 'insertExternalLink', group: 'link', order: 1, command: 'link', labelKey: 'format.link', iconKey: 'externalLink', enable: enabledOutsideStructure },
-  { id: 'copyHeadingLink', group: 'link', order: 2, command: 'copyHeadingLink', labelKey: 'contextMenu.copyHeadingLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget?.heading != null },
-  { id: 'copyBlockLink', group: 'link', order: 3, command: 'copyBlockLink', labelKey: 'contextMenu.copyBlockLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget != null },
+  // #439 链接场景三项排簇首（右键命中的上下文动作优先于常驻插入项）；
+  // 图标复用既有接线 key（externalLink/link/copy），不新增资产位
+  { id: 'openLink', group: 'link', order: 0, command: 'openLink', labelKey: 'contextMenu.openLink', iconKey: 'externalLink', when: hasLinkHit },
+  { id: 'copyLinkAddress', group: 'link', order: 1, command: 'copyLinkAddress', labelKey: 'contextMenu.copyLinkAddress', iconKey: 'link', when: hasLinkHit },
+  { id: 'copyLinkText', group: 'link', order: 2, command: 'copyLinkText', labelKey: 'contextMenu.copyLinkText', iconKey: 'copy', when: hasLinkHit },
+  { id: 'insertWikilink', group: 'link', order: 3, command: 'wikilink', labelKey: 'format.wikilink', iconKey: 'link', enable: enabledOutsideStructure },
+  { id: 'insertExternalLink', group: 'link', order: 4, command: 'link', labelKey: 'format.link', iconKey: 'externalLink', enable: enabledOutsideStructure },
+  { id: 'copyHeadingLink', group: 'link', order: 5, command: 'copyHeadingLink', labelKey: 'contextMenu.copyHeadingLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget?.heading != null },
+  { id: 'copyBlockLink', group: 'link', order: 6, command: 'copyBlockLink', labelKey: 'contextMenu.copyBlockLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget != null },
+  // ---- 簇：表格专属（#437；仅 zone='table' 在场，空组自然收起）----
+  ...tableOpsChildren,
+  // ---- 场景簇：图形块（#438；全部只读/导出——「编辑源码」不设右键项，
+  // 编辑入口仍收敛于 edit 按钮（graphic-code-block-interaction.md 契约 2）。
+  // 弹窗/导出 enable = svg 能力 + 渲染成功（错误降级置灰）；复制源码仅按
+  // zone 显隐（错误块取源码可用）。图标 popupPreview/exportSvg/exportPng
+  // 资产归 #441，渲染层留空降级 ----
+  { id: 'graphicPopup', group: 'graphicOps', order: 0, command: 'graphicPopup', labelKey: 'contextMenu.graphicPopup', iconKey: 'popupPreview', when: graphicZone, enable: graphicRenderable },
+  { id: 'graphicExportSvg', group: 'graphicOps', order: 1, command: 'graphicExportSvg', labelKey: 'contextMenu.graphicExportSvg', iconKey: 'exportSvg', when: graphicZone, enable: graphicRenderable },
+  { id: 'graphicExportPng', group: 'graphicOps', order: 2, command: 'graphicExportPng', labelKey: 'contextMenu.graphicExportPng', iconKey: 'exportPng', when: graphicZone, enable: graphicRenderable },
+  { id: 'graphicCopySource', group: 'graphicOps', order: 3, command: 'graphicCopySource', labelKey: 'contextMenu.graphicCopySource', iconKey: 'copy', when: graphicZone },
   // ---- 簇 2：块与格式（全部带子菜单）----
   { id: 'textFormat', group: 'blockFormat', order: 0, command: 'textFormat', labelKey: 'contextMenu.textFormat', iconKey: 'textFormat', enable: enabledOutsideStructure, children: textFormatChildren },
   { id: 'paragraphStyle', group: 'blockFormat', order: 1, command: 'paragraphStyle', labelKey: 'contextMenu.paragraphStyle', iconKey: 'paragraphStyle', enable: enabledOutsideStructure, children: paragraphChildren },
@@ -446,6 +561,8 @@ export function __resetContextMenuRegistryForTest(): void {
 export interface RenderedMenuItem {
   id: string
   labelKey: MessageKey
+  /** 文案插值参数（#437：含行列序号的菜单文案；DOM 装配传 t() 第二参） */
+  labelParams?: Record<string, string | number>
   /** #359 T10 显式文字（优先于 labelKey；附加组件项用） */
   label?: string
   command: string
@@ -494,6 +611,7 @@ function renderDef(
   const item: RenderedMenuItem = {
     id: def.id,
     labelKey: def.labelKey,
+    ...(def.labelParams !== undefined ? { labelParams: def.labelParams(ctx) } : {}),
     ...(def.label !== undefined ? { label: def.label } : {}),
     command: def.command,
     group: def.group,

@@ -911,13 +911,18 @@ interface ViewState {
     } | null
     /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据；
      *  #359 T10 起补组件菜单项命令清单（命名空间运行期项——组件簇在场/
-     *  回收的绘制层证据） */
+     *  回收的绘制层证据）；#437 起补表格簇命令清单（tableOps 簇渲染证据）；
+     *  #438 起补图形专属簇在场/置灰命令集（null = 簇不在场）；#439 起补全部
+     *  按钮 command 集（场景三项呈现的绘制层断言输入） */
     contextMenu?: {
       visible: boolean
       display: string | null
       separatorCount: number
       disabledCount: number
+      commands?: string[]
       addonCommands?: string[]
+      tableCommands?: string[]
+      graphicOps?: { commands: string[]; disabled: string[] } | null
     }
     /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性、
      *  行计数与键盘高亮行/状态行文本（会话关闭时缺省）；#377 T02 起补
@@ -7499,6 +7504,93 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('mermaid.md') === diskBefore, '导出交互零写回')
   }],
 
+  ['图形块右键簇：graphicOps 呈现/置灰与导出直发链路（#438）', async () => {
+    // 断言口径：paint.contextMenu.graphicOps 是绘制层探针（菜单浮层
+    // elementFromPoint 可见 + 簇命令集与置灰集）；导出直发经钩子模式
+    // 短路记录消息形态（takeDiagramExportLog）；复制源码走真实宿主剪贴板
+    // 对拍。菜单经 contextMenu.test.contextMenu/menuClick 注入通道驱动
+    await openWithEditor('mermaid.md')
+    await waitSessionReady('mermaid.md')
+    const uri = wsUri('mermaid.md').toString()
+    const diskBefore = await readDisk('mermaid.md')
+    const tailAnchor = diskBefore.indexOf('结尾段落')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.locate', offset: tailAnchor,
+    })
+    // 渲染完成前置（4 有效渲染 + 1 错误降级——菜单 gate 的 DOM 探针输入）
+    await waitViewState('mermaid.md', (v) =>
+      v.paint?.mermaid?.rendered === 4 && v.paint.mermaid.error === 1, 0, 60000)
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+
+    // 1) 有效块右键（第一块 graph TD 内容行）：簇四项在场且全亮（绘制层）
+    const firstBlockAnchor = diskBefore.indexOf('graph TD')
+    await post({ kind: 'contextMenu.test.contextMenu', pos: firstBlockAnchor })
+    const valid = await waitViewState('mermaid.md', (v) =>
+      v.paint?.contextMenu?.graphicOps != null && v.paint.contextMenu.graphicOps.commands.length === 4, 0, 60000)
+    const validCluster = valid.paint!.contextMenu!.graphicOps!
+    assert(valid.paint!.contextMenu!.visible === true, '绘制层：菜单浮层应实际可见')
+    assert(JSON.stringify(validCluster.commands) ===
+      JSON.stringify(['graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource']),
+      `有效块：graphicOps 四项平铺在场（实际 ${JSON.stringify(validCluster.commands)}）`)
+    assert(validCluster.disabled.length === 0,
+      `渲染成功 + svg 能力在场：四项应全亮（实际置灰 ${JSON.stringify(validCluster.disabled)}）`)
+
+    // 2) 弹窗预览（menuClick graphicPopup）：复用既有弹窗——浮层在场且
+    //    SVG 装载（paint.graphic 绘制层），随后经钩子关闭
+    await post({ kind: 'contextMenu.test.menuClick', command: 'graphicPopup' })
+    const popupOpened = await waitViewState('mermaid.md', (v) =>
+      v.paint?.graphic?.overlay === true && v.paint.graphic.overlaySvg === true, 0, 60000)
+    assert(popupOpened.paint!.graphic!.overlayVisible === true, '弹窗应实际遮蔽正文（绘制层）')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'graphic.test.popup', view: 'live', index: 0, action: 'close',
+    })
+    await waitViewState('mermaid.md', (v) => v.paint?.graphic?.overlay === false, 0, 60000)
+
+    // 3) 导出 SVG（menuClick graphicExportSvg）：不经弹窗直发——宿主钩子
+    //    记录消息形态（fileName 与弹窗导出同式）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: firstBlockAnchor })
+    await waitViewState('mermaid.md', (v) => v.paint?.contextMenu?.graphicOps != null, 0, 60000)
+    await post({ kind: 'contextMenu.test.menuClick', command: 'graphicExportSvg' })
+    let menuSvgEntry: { format?: string; fileName?: string; reqId?: number; content?: string; docUri?: string } | undefined
+    for (let i = 0; i < 30 && menuSvgEntry === undefined; i++) {
+      const log = (await vscode.commands.executeCommand(CMD.diagramExportLog, uri)) as
+        Array<{ format?: string; fileName?: string; reqId?: number; content?: string; docUri?: string }>
+      menuSvgEntry = log.find((m) => m.format === 'svg')
+      if (menuSvgEntry === undefined) {
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    }
+    assert(menuSvgEntry !== undefined, '右键导出 SVG：宿主应收到 diagram.export（钩子短路记录）')
+    assert(menuSvgEntry!.fileName === 'mermaid-diagram.svg', `默认文件名沿弹窗同式（实际 ${menuSvgEntry!.fileName}）`)
+    assert(typeof menuSvgEntry!.reqId === 'number' && menuSvgEntry!.reqId! >= 1, 'reqId 应为正整数')
+    assert(menuSvgEntry!.content!.includes('<svg'), '导出内容应为序列化 SVG 文档')
+    assert(menuSvgEntry!.docUri === uri, '导出消息应携带来源文档 URI')
+
+    // 4) 错误降级块（第三块，无效语法）：簇呈现但弹窗/导出三项置灰、
+    //    复制源码仍亮（置灰不隐藏——探针 rendered=false 的矩阵单元）
+    const badBlockAnchor = diskBefore.indexOf('这不是合法的 mermaid 语法')
+    await post({ kind: 'contextMenu.test.contextMenu', pos: badBlockAnchor })
+    const degraded = await waitViewState('mermaid.md', (v) =>
+      v.paint?.contextMenu?.graphicOps != null && v.paint.contextMenu.graphicOps.disabled.length === 3, 0, 60000)
+    const degradedCluster = degraded.paint!.contextMenu!.graphicOps!
+    assert(JSON.stringify(degradedCluster.disabled) ===
+      JSON.stringify(['graphicPopup', 'graphicExportSvg', 'graphicExportPng']),
+      `错误降级块：弹窗/导出三项置灰（实际 ${JSON.stringify(degradedCluster.disabled)}）`)
+    assert(degradedCluster.commands.length === 4, '错误降级块：簇仍呈现（置灰不隐藏）')
+
+    // 5) 复制源码（menuClick graphicCopySource）：真实宿主剪贴板对拍（环境
+    //    依赖步骤殿后——独立测试桌面剪贴板不生效的本机环境不影响前序绘制
+    //    层断言的本地可验证性，见 #446）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: firstBlockAnchor })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'graphicCopySource' })
+    assert(await poll('图形簇复制源码', async () =>
+      (await vscode.env.clipboard.readText()).replace(/\r\n?/g, '\n') === 'graph TD\nA[开始]-->B{判断}\nB-->|是| C[结束]'
+        ? true : undefined),
+      `复制源码应写围栏内容到真实宿主剪贴板（实际 ${await vscode.env.clipboard.readText()}）`)
+    assert(await readDisk('mermaid.md') === diskBefore, '图形簇交互全部零写回')
+  }],
+
   ['Mermaid 跨模式切换一致性：两模式计数对齐、文本不变、无写回（#60）', async () => {
     await openWithEditor('mermaid.md')
     await waitSessionReady('mermaid.md')
@@ -10557,6 +10649,96 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await post({ kind: 'contextMenu.test.menuClose' })
   }],
 
+  // ---- #437 表格专属右键簇（tableOps：结构六操作 + 删除表格 + 选择三项 + 复制 + 层级两项）----
+
+  ['表格专属簇：绘制层断言、结构/层级项执行与锚点过期防御（#437）', async () => {
+    // 断言口径：paint.contextMenu.tableCommands 是表格簇的绘制层探针（真实
+    // 按钮渲染证据——簇不在场/渲染失败即缺省）；写回粒度以 appliedEdits 对拍
+    //（单次菜单操作 = 恰一笔）；复制走真实宿主剪贴板；锚点过期用宿主权威
+    // WorkspaceEdit 制造外部变更（webview 经 doc.changed 换文档实例）
+    const TABLE_CLUSTER_DOC = [
+      '前文段落。',
+      '',
+      '| a | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '> | q1 | q2 |',
+      '> |---|---|',
+      '> | 5 | 6 |',
+      '',
+      '结尾段落。',
+      '',
+    ].join('\n')
+    const CLUSTER_COMMANDS = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+      'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+      'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+    await openWithEditor('table-cluster.md')
+    await waitSessionReady('table-cluster.md')
+    const uri = wsUri('table-cluster.md').toString()
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+    const sessionState = () =>
+      vscode.commands.executeCommand(CMD.sessionState, uri) as PromiseLike<SessionState>
+    const base = await sessionState()
+
+    // 1) 表格区开菜单：绘制层断言——簇命令清单齐全（13 项真实渲染）且浮层可见
+    await post({ kind: 'contextMenu.test.contextMenu', pos: TABLE_CLUSTER_DOC.indexOf('| 1 |') + 2 })
+    const tableMenu = await waitViewState('table-cluster.md', (v) => v.paint?.contextMenu != null)
+    const probe = tableMenu.paint!.contextMenu!
+    assert(probe.visible === true, `表格簇菜单应真实绘制（实际 ${JSON.stringify(probe)}）`)
+    assert(JSON.stringify(probe.tableCommands) === JSON.stringify(CLUSTER_COMMANDS),
+      `表格簇 13 项应全部真实渲染（实际 ${JSON.stringify(probe.tableCommands)}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+
+    // 2) 复制表格 Markdown：执行零写回（真实宿主剪贴板读回对拍沿 #183 既有
+    //    用例承载；本机独立/前台宿主的 vscode.env.clipboard 轮询已实证在
+    //    origin/main 基线同样超时——环境限制，出站 clipboard.write 消息由
+    //    jsdom 用例（contextMenuPanel.test.ts #437 组）钉住）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: TABLE_CLUSTER_DOC.indexOf('| 1 |') + 2 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    await poll('复制命令菜单收尾', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('table-cluster.md').toString(), 0)) as ViewState | undefined
+      return v && v.text === TABLE_CLUSTER_DOC ? true : undefined
+    })
+    assert((await sessionState()).appliedEdits === base.appliedEdits, '复制零写回')
+    await post({ kind: 'contextMenu.test.menuClose' })
+
+    // 3) 锚点过期防御：菜单打开期间宿主权威外部改文档（WorkspaceEdit →
+    //    doc.changed 广播换 webview 文档实例）→ 命令放弃（零写回，表格保留）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: TABLE_CLUSTER_DOC.indexOf('| 1 |') + 2 })
+    const extEdit = new vscode.WorkspaceEdit()
+    extEdit.replace(wsUri('table-cluster.md'), new vscode.Range(0, 0, 0, 5), '前文已被外部改写')
+    assert(await vscode.workspace.applyEdit(extEdit), '外部修改应成功')
+    await waitViewState('table-cluster.md', (v) => v.text.includes('前文已被外部改写'))
+    await post({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    const stale = await waitViewState('table-cluster.md', (v) => v.text.includes('前文已被外部改写'))
+    assert(stale.text.includes('| a | b |'), '锚点过期的删除表格应放弃执行（表格保留）')
+    const afterStale = await sessionState()
+    assert(afterStale.appliedEdits === base.appliedEdits,
+      `锚点过期命令零写回（实际 +${afterStale.appliedEdits - base.appliedEdits}）`)
+
+    // 4) 结构项：下方插入行（单笔写回，表格形状正确）。外部改写已使原文
+    //    偏移失效——命中位从当前视图文本推导
+    const afterExternal = (await waitViewState('table-cluster.md')).text
+    await post({ kind: 'contextMenu.test.contextMenu', pos: afterExternal.indexOf('| 1 |') + 2 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'insertRowBelow' })
+    await waitViewState('table-cluster.md', (v) => v.text.includes('| 1 | 2 |\n| | |'))
+    const afterInsert = await sessionState()
+    assert(afterInsert.appliedEdits === base.appliedEdits + 1,
+      `插行应恰一笔写回（实际 +${afterInsert.appliedEdits - base.appliedEdits}）`)
+
+    // 5) 引用层级项：引用表增一层（各行前缀正确，单笔写回）
+    const withInsertedRow = (await waitViewState('table-cluster.md')).text
+    await post({ kind: 'contextMenu.test.contextMenu', pos: withInsertedRow.indexOf('5 |') + 1 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'tableQuoteAdd' })
+    await waitViewState('table-cluster.md', (v) =>
+      v.text.includes('> > | q1 | q2 |') && v.text.includes('> > | 5 | 6 |'))
+    const afterQuote = await sessionState()
+    assert(afterQuote.appliedEdits === afterInsert.appliedEdits + 1,
+      `层级变换应恰一笔写回（实际 +${afterQuote.appliedEdits - afterInsert.appliedEdits}）`)
+  }],
+
   ['块链接两项：统一菜单两态、自动补写可撤销与快捷键入口（#183，自 #162 迁移）', async () => {
     // 断言口径：剪贴板成品对拍（vscode.env.clipboard.readText——真实宿主
     // 权威）、磁盘文本对拍（自动补写走标准写回）与单笔写回（appliedEdits
@@ -10674,6 +10856,98 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const stateAfter = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(stateAfter.appliedEdits === stateBefore.appliedEdits && stateAfter.version === stateBefore.version,
       '头区不接管：零写回零版本推进')
+  }],
+
+  // ---- #439 链接场景项（打开链接 / 复制链接地址 / 复制显示文字） ----
+
+  ['链接场景三项：链接文字上绘制层呈现、打开端到端与复制剪贴板对拍（#439）', async () => {
+    // 断言口径：view.state.paint.contextMenu.commands 是绘制层探针（浮层
+    // 真实可见 + 按钮 command 集——场景三项在不在菜单里的视觉层证据）；
+    // 打开链接经真实宿主会话执行（linkLog 归类 external——测试钩子模式
+    // 不真开浏览器）；复制两项对拍真实宿主剪贴板。菜单经
+    // contextMenu.test.contextMenu/menuClick 注入通道驱动（宿主测试无法
+    // 向 webview 派发真实右键）
+    const MENU_LINKS_DOC = [
+      '---',
+      'title: 链接菜单',
+      '---',
+      '',
+      '看 [[双链 笔记|别名]] 尾',
+      '',
+      '看 [链接文字](https://example.com/a%20b?q=1) 尾',
+      '',
+      '普通段落一行',
+      '',
+      '| [[格内链]] | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+    ].join('\n')
+    await openWithEditor('menu-links.md')
+    await waitSessionReady('menu-links.md')
+    const uri = wsUri('menu-links.md').toString()
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+    const clipboardText = () => vscode.env.clipboard.readText()
+
+    // 1) 双链上开菜单：绘制层断言（可见 + 三项在 command 集 + 簇 1 顶部）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('别名') })
+    const wiki = await waitViewState('menu-links.md', (v) => v.paint?.contextMenu != null)
+    const wikiMenu = wiki.paint!.contextMenu!
+    assert(wikiMenu.visible === true, `绘制层：菜单中心点应被命中（实际 ${JSON.stringify(wikiMenu)}）`)
+    const wikiCommands = wikiMenu.commands ?? []
+    assert(wikiCommands.includes('openLink') && wikiCommands.includes('copyLinkAddress')
+      && wikiCommands.includes('copyLinkText'),
+      `链接文字上三项应在绘制层 command 集（实际 ${JSON.stringify(wikiCommands)}）`)
+    assert(wikiCommands.indexOf('openLink') < wikiCommands.indexOf('wikilink'),
+      '三项应排簇 1 顶部（openLink 先于新增双链）')
+    // 复制显示文字 = 别名优先；复制链接地址 = target 未 trim
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyLinkText' })
+    assert(await poll('别名剪贴板', async () =>
+      (await clipboardText()) === '别名' ? true : undefined),
+      `复制显示文字应为别名（实际 ${await clipboardText()}）`)
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('别名') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    assert(await poll('双链地址剪贴板', async () =>
+      (await clipboardText()) === '双链 笔记' ? true : undefined),
+      `复制链接地址应为双链 target 未 trim（实际 ${await clipboardText()}）`)
+
+    // 2) 打开链接（外部）：经真实宿主会话执行——linkLog 归类 external（准入
+    //    归宿主，测试钩子模式仅记录不真开系统浏览器）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('链接文字') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+    assert(await poll('外链执行日志', async () => {
+      const data = (await vscode.commands.executeCommand(CMD.linkLog, uri)) as LinkLogData | undefined
+      const hit = data?.found
+        ? data.log.find((e) => e.kind === 'external' && e.href === 'https://example.com/a%20b?q=1')
+        : undefined
+      return hit ? true : undefined
+    }), '打开链接应经宿主以原样 href 执行（linkLog external）')
+    // 复制链接地址（外链）：href 原样不解码
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('链接文字') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    assert(await poll('外链地址剪贴板', async () =>
+      (await clipboardText()) === 'https://example.com/a%20b?q=1' ? true : undefined),
+      `外链地址应为 href 原样不解码（实际 ${await clipboardText()}）`)
+
+    // 3) 无命中不显示（绘制层）：普通段与表格格内链接（zone=table 维持降级）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('普通段落') })
+    const plain = await waitViewState('menu-links.md', (v) => v.paint?.contextMenu != null)
+    const plainCommands = plain.paint!.contextMenu!.commands ?? []
+    assert(!plainCommands.includes('openLink') && !plainCommands.includes('copyLinkAddress')
+      && !plainCommands.includes('copyLinkText'),
+      `普通段不显示三项（实际 ${JSON.stringify(plainCommands)}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('格内链') })
+    const cell = await waitViewState('menu-links.md', (v) => v.paint?.contextMenu != null)
+    const cellCommands = cell.paint!.contextMenu!.commands ?? []
+    assert(!cellCommands.includes('openLink'),
+      `表格格内链接不接三项（实际 ${JSON.stringify(cellCommands.slice(0, 8))}）`)
+    // 跳转全程只读：源文档零写回
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 0, `链接场景命令零写回（实际 ${finalState.appliedEdits}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
   }],
 
   // ---- #197 反链面板：索引就绪 → 面板显示 → 点击跳转，四态与互斥 ----

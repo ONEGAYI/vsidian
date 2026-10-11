@@ -25,12 +25,14 @@ import {
   contextMenuZoneAt,
   contextMenuClickWithinSelection,
   hideContextMenuItem,
+  linkMenuCommandPayload,
   menuLineStructureOf,
   menuViewportPosition,
   overrideContextMenuItem,
   registerContextMenuItem,
   submenuSide,
   __resetContextMenuRegistryForTest,
+  type LinkMenuHit,
   type MenuContextSnapshot,
   type MenuItemDescriptor,
 } from '../../src/shared/contextMenu'
@@ -120,13 +122,17 @@ describe('覆写层语义（运行期注册表，内置 = 第一个注册者）'
     const registryIds = contextMenuRegistrySnapshot().map((def) => def.id).sort()
     const builtinIds = flattenItems(CONTEXT_MENU_ITEMS).map((def) => def.id).sort()
     expect(registryIds).toEqual(builtinIds)
-    // 渲染走 registry：标题行上下文（when 全放行）能拿到全部顶级项，且子项
-    // 不因扁平注册表被提升为顶级项
+    // 渲染走 registry：标题行 + 链接命中上下文（#437/#438 场景簇按 zone
+    // 过滤、#439 链接三项与块链接两项按命中在场，期望集对谓词求值感知）
+    // 能拿到全部顶级项，且子项不因扁平注册表被提升为顶级项
     const headingCtx = normalCtx({
       blockTarget: { block: { start: 4, end: 4 }, heading: { level: 1, text: '标题' } },
+      link: { kind: 'wikilink', target: '目标', display: '目标', range: { from: 0, to: 6 } },
     })
-    expect(modelIds(headingCtx).sort()).toEqual(
-      CONTEXT_MENU_ITEMS.map((def) => def.id).sort())
+    const expectedTopIds = CONTEXT_MENU_ITEMS
+      .filter((def: MenuItemDescriptor) => def.when === undefined || def.when(headingCtx))
+      .map((def) => def.id).sort()
+    expect(modelIds(headingCtx).sort()).toEqual(expectedTopIds)
   })
 
   it('register 新增项：出现在模型中且来源记录为 runtime', () => {
@@ -470,6 +476,99 @@ describe('场景命中负载与场景簇组预登记（#436 基建）', () => {
     const graphicGroups = buildContextMenuModel(graphicCtx)
     expect(graphicGroups.find((g) => g.id === 'blockFormat')!.items
       .every((i) => !i.enabled)).toBe(true)
+  })
+})
+
+// ---- #437 表格专属簇（tableOps）：谓词矩阵与渲染参数 ----
+
+describe('表格专属簇（#437：when=zone table；enable 按命中负载）', () => {
+  const hit = (over: Partial<NonNullable<MenuContextSnapshot['table']>> = {}) => ({
+    rowIndex: 1, columnIndex: 0, inHeader: false, rowCount: 3, columnCount: 2,
+    lines: { start: 0, end: 3 }, pos: 10,
+    quoteUniform: true, quoteDepth: 0, hitQuoteDepth: 0,
+    ...over,
+  })
+  const tableCtx = (over: Partial<MenuContextSnapshot> = {}) => normalCtx({
+    zone: 'table',
+    table: hit(),
+    ...over,
+  })
+  const CLUSTER_IDS = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+    'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+    'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+  const clusterItems = (ctx: MenuContextSnapshot) =>
+    buildContextMenuModel(ctx).find((g) => g.id === 'tableOps')?.items ?? []
+
+  it('zone=table 且负载在场：13 项全亮成簇（位于链接簇后、块与格式簇前）', () => {
+    const groups = buildContextMenuModel(tableCtx())
+    expect(groups.map((g) => g.id)).toEqual(['link', 'tableOps', 'blockFormat', 'clipboard'])
+    const items = clusterItems(tableCtx())
+    expect(items.map((i) => i.id)).toEqual(CLUSTER_IDS)
+    expect(items.every((i) => i.enabled), '顶层表：除 quoteRemove 外全亮').toBe(false)
+    expect(items.find((i) => i.id === 'tableQuoteRemove')!.enabled, '顶层表 0 层不可减').toBe(false)
+    expect(items.filter((i) => i.id !== 'tableQuoteRemove').every((i) => i.enabled)).toBe(true)
+  })
+
+  it('普通正文/围栏/图形块：簇整组不在场（when 过滤 + 空组收起）', () => {
+    // graphic 区图形簇（#438）在场——本用例只钉 tableOps 不越场
+    const expectedByZone: Record<string, string[]> = {
+      normal: ['link', 'blockFormat', 'clipboard'],
+      fence: ['link', 'blockFormat', 'clipboard'],
+      graphic: ['link', 'graphicOps', 'blockFormat', 'clipboard'],
+    }
+    for (const zone of ['normal', 'fence', 'graphic'] as const) {
+      expect(buildContextMenuModel(normalCtx({ zone })).map((g) => g.id),
+        `${zone} 区不应出现 tableOps 簇`).toEqual(expectedByZone[zone])
+    }
+  })
+
+  it('负载缺省（源码降级表/残缺表）：13 项在场但全置灰（置灰不隐藏）', () => {
+    const ctx = normalCtx({ zone: 'table' })
+    const items = clusterItems(ctx)
+    expect(items.map((i) => i.id)).toEqual(CLUSTER_IDS)
+    expect(items.every((i) => !i.enabled), '解析失败置灰不隐藏').toBe(true)
+  })
+
+  it('单层引用表：移除引用块点亮；层级不一致：层级两项置灰（不猜修复）', () => {
+    const quoted = clusterItems(tableCtx({ table: hit({ quoteDepth: 1, hitQuoteDepth: 1 }) }))
+    expect(quoted.find((i) => i.id === 'tableQuoteRemove')!.enabled).toBe(true)
+    expect(quoted.find((i) => i.id === 'tableQuoteAdd')!.enabled).toBe(true)
+    const ragged = clusterItems(tableCtx({
+      table: hit({ quoteUniform: false, quoteDepth: null, hitQuoteDepth: 1 }),
+    }))
+    expect(ragged.find((i) => i.id === 'tableQuoteRemove')!.enabled).toBe(false)
+    expect(ragged.find((i) => i.id === 'tableQuoteAdd')!.enabled).toBe(false)
+  })
+
+  it('分隔行命中（rowIndex/columnIndex null）：选择行/列置灰，整表与结构项不受影响', () => {
+    const ctx = tableCtx({ table: hit({ rowIndex: null, columnIndex: null }) })
+    const items = clusterItems(ctx)
+    expect(items.find((i) => i.id === 'selectTableRow')!.enabled).toBe(false)
+    expect(items.find((i) => i.id === 'selectTableColumn')!.enabled).toBe(false)
+    expect(items.find((i) => i.id === 'selectWholeTable')!.enabled).toBe(true)
+    expect(items.find((i) => i.id === 'deleteRow')!.enabled).toBe(true)
+  })
+
+  it('ragged 内容行（rowIndex 在场、columnIndex null）：选择列置灰、选择行亮', () => {
+    const items = clusterItems(tableCtx({ table: hit({ columnIndex: null }) }))
+    expect(items.find((i) => i.id === 'selectTableColumn')!.enabled).toBe(false)
+    expect(items.find((i) => i.id === 'selectTableRow')!.enabled).toBe(true)
+  })
+
+  it('labelParams 渲染：选择行/列携带 1 基序号（table.selectRow{n} 先例）', () => {
+    const items = clusterItems(tableCtx({ table: hit({ rowIndex: 2, columnIndex: 1 }) }))
+    expect(items.find((i) => i.id === 'selectTableRow')!.labelParams).toEqual({ n: 3 })
+    expect(items.find((i) => i.id === 'selectTableColumn')!.labelParams).toEqual({ n: 2 })
+    expect(items.find((i) => i.id === 'deleteTable')!.labelParams).toBeUndefined()
+  })
+
+  it('删除表格为危险项（红字）；簇内项序与建议项序一致', () => {
+    const items = clusterItems(tableCtx())
+    expect(items.find((i) => i.id === 'deleteTable')!.danger).toBe(true)
+    expect(items.map((i) => i.id)).toEqual([
+      'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+      'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+      'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd'])
   })
 })
 
@@ -832,18 +931,32 @@ describe('段落设置勾选矩阵（checked 谓词按当前行结构点亮，#1
 
 // ---- #184：图标资产两表同步（描述符 iconKey ↔ 资产文件与 CSS 接线规则）----
 
+/** #437/#438 场景簇资产缺口豁口：新登记的 icon key（表格簇 10 枚 + 图形簇
+ *  popupPreview/exportSvg/exportPng）资产生成与 CSS 接线归图标票 #441 承接
+ *  ——豁口期内资产断言跳过这些 key（渲染层留空降级是规格口径）；#441 合入
+ *  后此清单应清空。quick-action-icons.py KEYS 同步由本文件最后一条用例核对
+ *  （两表同步的机器钉法） */
+const SCENE_KEYS_PENDING_ASSETS = [
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
+  'popupPreview', 'exportSvg', 'exportPng',
+] as const
+
 describe('图标资产两表同步（#184：规格「扩展约定」两表同步的机器钉法）', () => {
   const referenced = new Set(
     flattenItems(CONTEXT_MENU_ITEMS).flatMap((def) => (def.iconKey ? [def.iconKey] : [])),
   )
   const root = path.resolve(process.cwd())
 
-  it('被描述符引用的图标 key 恰 27 枚（#305 接入既有 pastePlain 资产）', () => {
-    expect(referenced.size).toBe(27)
+  it('被描述符引用的图标 key 恰 40 枚（27 接线 + #437 表格簇 10 枚 + #438 图形簇 3 枚待资产）', () => {
+    expect(referenced.size).toBe(40)
   })
 
-  it('每个被引用 key 都有明暗两套 SVG 资产文件', () => {
+  it('每个被引用 key 都有明暗两套 SVG 资产文件（#441 待生成清单除外）', () => {
     for (const key of referenced) {
+      if ((SCENE_KEYS_PENDING_ASSETS as readonly string[]).includes(key)) {
+        continue
+      }
       expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
         `${key} 缺 light SVG 资产`).toBe(true)
       expect(existsSync(path.join(root, 'media/quick-actions/dark', `dark-${key}.svg`)),
@@ -860,15 +973,153 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
     }
   })
 
-  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则', () => {
+  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则（#441 待生成清单除外）', () => {
     const css = readFileSync(path.join(root, 'src/webview/main.css'), 'utf8')
     for (const key of referenced) {
+      if ((SCENE_KEYS_PENDING_ASSETS as readonly string[]).includes(key)) {
+        continue
+      }
       const lightRule = new RegExp(
         `\\.vsidian-context-menu \\[data-icon='${key}'\\]\\s*\\{[^}]*light-${key}\\.svg`)
       const darkRule = new RegExp(
         `body\\.vscode-dark[^{]*\\.vsidian-context-menu \\[data-icon='${key}'\\][^}]*dark-${key}\\.svg`)
       expect(lightRule.test(css), `${key} 缺 light 接线规则（--vsidian-context-icon → light SVG）`).toBe(true)
       expect(darkRule.test(css), `${key} 缺 dark 接线规则（vscode-dark/high-contrast → dark SVG）`).toBe(true)
+    }
+  })
+
+  it('#437 两表同步：CONTEXT_MENU_ICON_KEYS ⊆ quick-action-icons.py KEYS（S6 决策；KEYS 另服务快速操作条/查找面板等非菜单消费方，不反向相等）', () => {
+    const py = readFileSync(path.join(root, 'scripts/quick-action-icons.py'), 'utf8')
+    const keysMatch = /KEYS = \(([^)]*)\)/s.exec(py)
+    expect(keysMatch, 'quick-action-icons.py 应有 KEYS 元组').not.toBeNull()
+    const pyKeys = new Set(
+      [...keysMatch![1]!.matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]!))
+    for (const key of CONTEXT_MENU_ICON_KEYS) {
+      expect(pyKeys.has(key), `图标 key ${key} 未在 quick-action-icons.py KEYS 登记（两表同步）`).toBe(true)
+    }
+  })
+})
+
+// ---- #439：链接场景项——命令载荷派生（纯函数）与描述符呈现 ----
+
+describe('链接场景命令载荷派生（linkMenuCommandPayload，#439）', () => {
+  // 取材口径与 Ctrl+单击 activate 上报 / 渲染 display 同源（LinkMenuHit 由
+  // #436 采集层产出）：target = 双链 `|` 之前未 trim / 外部 href 原样；
+  // display = 双链别名优先 / 普通链接链接文字 / autolink URL / 宽松文字段
+  const wikiHit: LinkMenuHit = {
+    kind: 'wikilink',
+    target: '笔记 一 ',
+    display: '别名',
+    range: { from: 10, to: 24 },
+  }
+  const mdHit: LinkMenuHit = {
+    kind: 'link',
+    target: 'https://example.com/a%20b?q=1',
+    display: '链接文字',
+    range: { from: 30, to: 62 },
+  }
+  const autolinkHit: LinkMenuHit = {
+    kind: 'autolink',
+    target: 'https://example.com/auto',
+    display: 'https://example.com/auto',
+    range: { from: 70, to: 94 },
+  }
+  const looseHit: LinkMenuHit = {
+    kind: 'loose',
+    target: 'my note.md',
+    display: '文字段',
+    range: { from: 100, to: 118 },
+  }
+
+  it('打开链接按族分派：双链 → wikilink.activate（target 未 trim + 源区间）', () => {
+    expect(linkMenuCommandPayload('openLink', wikiHit)).toEqual({
+      kind: 'wikilink.activate',
+      target: '笔记 一 ',
+      srcStart: 10,
+      srcEnd: 24,
+    })
+  })
+
+  it('打开链接其余三族 → link.activate（href 原样，含编码与查询串）', () => {
+    for (const hit of [mdHit, autolinkHit, looseHit]) {
+      expect(linkMenuCommandPayload('openLink', hit)).toEqual({
+        kind: 'link.activate',
+        href: hit.target,
+        srcStart: hit.range.from,
+        srcEnd: hit.range.to,
+      })
+    }
+  })
+
+  it('复制链接地址 = target 原样：双链未 trim、外部 href 不解码', () => {
+    expect(linkMenuCommandPayload('copyLinkAddress', wikiHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '笔记 一 ',
+    })
+    expect(linkMenuCommandPayload('copyLinkAddress', mdHit)).toEqual({
+      kind: 'clipboard.write',
+      text: 'https://example.com/a%20b?q=1',
+    })
+  })
+
+  it('复制显示文字 = display：双链别名优先 / autolink URL 本身 / 宽松文字段', () => {
+    expect(linkMenuCommandPayload('copyLinkText', wikiHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '别名',
+    })
+    expect(linkMenuCommandPayload('copyLinkText', mdHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '链接文字',
+    })
+    expect(linkMenuCommandPayload('copyLinkText', autolinkHit)).toEqual({
+      kind: 'clipboard.write',
+      text: 'https://example.com/auto',
+    })
+    expect(linkMenuCommandPayload('copyLinkText', looseHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '文字段',
+    })
+  })
+})
+
+describe('链接场景三项描述符（when = 链接命中在场；enable 恒可用；簇 1 顶部）', () => {
+  const linkHit: LinkMenuHit = {
+    kind: 'wikilink', target: '目标', display: '目标',
+    range: { from: 0, to: 6 },
+  }
+  const linkCtx = normalCtx({ link: linkHit })
+
+  it('链接命中：三项呈现于簇 1 顶部、可用；组不变（link）', () => {
+    const items = buildContextMenuModel(linkCtx).find((g) => g.id === 'link')!.items
+    expect(items.map((i) => i.id)).toEqual([
+      'openLink', 'copyLinkAddress', 'copyLinkText',
+      'insertWikilink', 'insertExternalLink', 'copyBlockLink',
+    ])
+    expect(items.slice(0, 3).every((i) => i.enabled), 'enable 恒可用（命中只在 normal 区采集）').toBe(true)
+  })
+
+  it('链接命中 + 标题行：块链接两项照常显隐（同簇并存）', () => {
+    const headingCtx = normalCtx({
+      blockTarget: { block: { start: 4, end: 4 }, heading: { level: 1, text: '标题' } },
+      link: linkHit,
+    })
+    expect(buildContextMenuModel(headingCtx).find((g) => g.id === 'link')!.items.map((i) => i.id))
+      .toEqual(['openLink', 'copyLinkAddress', 'copyLinkText',
+        'insertWikilink', 'insertExternalLink', 'copyHeadingLink', 'copyBlockLink'])
+  })
+
+  it('无命中不显示（非置灰）：普通正文 / 空行 / 表格区 / 图形块区', () => {
+    const contexts: MenuContextSnapshot[] = [
+      normalCtx({ blockTarget: { block: { start: 4, end: 4 }, heading: null } }),
+      normalCtx({ blockTarget: null }),
+      normalCtx({ zone: 'table' }),
+      normalCtx({ zone: 'graphic' }),
+    ]
+    for (const ctx of contexts) {
+      const ids = modelIds(ctx)
+      expect(ids, `ctx.zone=${ctx.zone} 无链接命中不显示三项`).not.toContain('openLink')
+      expect(ids).not.toContain('copyLinkAddress')
+      expect(ids).not.toContain('copyLinkText')
     }
   })
 })
@@ -879,9 +1130,16 @@ describe('命令分派契约（三簇叶命令可执行；显式分支另有面�
   it('叶命令 ∈ formatOperations id ∪ 显式分派分支集；父项（有 children）无叶命令豁免', () => {
     // runContextMenuCommand（syncController）的显式分支集合——行为级用例在
     // contextMenuPanel.test.ts 逐项覆盖（cut/copy/paste/selectAll/
-    // copyHeadingLink/copyBlockLink/insertTable + bold 代表 formatOperations
-    // 同路径）；本契约防「新增描述符忘接分派」的回归。
-    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable'])
+    // copyHeadingLink/copyBlockLink/insertTable/openLink/copyLinkAddress/
+    // copyLinkText + bold 代表 formatOperations 同路径 + #437 表格簇 13 项 +
+    // #438 图形簇 4 项）；本契约防「新增描述符忘接分派」的回归。
+    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable', 'openLink', 'copyLinkAddress', 'copyLinkText',
+      // #437 表格簇：结构六操作（TABLE_STRUCTURE_COMMANDS）+ 新七命令
+      'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+      'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+      'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd',
+      // #438 图形簇四项
+      'graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource'])
     for (const def of flattenItems(CONTEXT_MENU_ITEMS)) {
       if (def.children && def.children.length > 0) {
         continue // 父项点击只展开不执行（无叶命令）
@@ -891,5 +1149,75 @@ describe('命令分派契约（三簇叶命令可执行；显式分支另有面�
         `${def.id} 的命令 ${def.command} 无执行路径（formatOperations 与显式分支均未覆盖）`,
       ).toBe(true)
     }
+  })
+})
+
+// ---- #438 图形专属簇（graphicOps）：谓词矩阵与组位 ----
+
+describe('图形专属簇（#438：弹窗/导出/复制的谓词矩阵与簇位）', () => {
+  const graphicCtx = (over: Partial<NonNullable<MenuContextSnapshot['graphic']>> = {}): MenuContextSnapshot =>
+    normalCtx({
+      zone: 'graphic',
+      graphic: {
+        lines: { start: 0, end: 2 },
+        language: 'mermaid',
+        code: 'graph TD\nA-->B',
+        svgExport: true,
+        rendered: true,
+        ...over,
+      },
+    })
+  /** graphicOps 簇 → command → enable 映射（不在场 = undefined） */
+  const graphicStates = (ctx: MenuContextSnapshot): Record<string, boolean | undefined> => {
+    const group = buildContextMenuModel(ctx).find((g) => g.id === 'graphicOps')
+    if (!group) {
+      return {}
+    }
+    return Object.fromEntries(group.items.map((item) => [item.command, item.enabled]))
+  }
+
+  it('簇位与组序：仅 zone=graphic 出簇，位于链接簇后、块与格式簇前', () => {
+    const groups = buildContextMenuModel(graphicCtx()).map((g) => g.id)
+    expect(groups).toEqual(['link', 'graphicOps', 'blockFormat', 'clipboard'])
+    // 普通正文与普通围栏（zone=fence）不出簇
+    expect(buildContextMenuModel(normalCtx()).map((g) => g.id)).toEqual(['link', 'blockFormat', 'clipboard'])
+    const fenceCtx = normalCtx({ zone: 'fence' })
+    expect(buildContextMenuModel(fenceCtx).find((g) => g.id === 'graphicOps')).toBeUndefined()
+  })
+
+  it('渲染成功 + svg 能力在场：四项全亮（平铺四项，组内序即呈现序）', () => {
+    const states = graphicStates(graphicCtx())
+    expect(Object.keys(states)).toEqual([
+      'graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource',
+    ])
+    expect(Object.values(states).every((enabled) => enabled === true)).toBe(true)
+  })
+
+  it('错误降级（rendered=false）：弹窗/导出三项置灰、复制源码仍亮——置灰不隐藏', () => {
+    const states = graphicStates(graphicCtx({ rendered: false }))
+    expect(states['graphicPopup']).toBe(false)
+    expect(states['graphicExportSvg']).toBe(false)
+    expect(states['graphicExportPng']).toBe(false)
+    expect(states['graphicCopySource'], '错误块取源码恰是高价值操作').toBe(true)
+  })
+
+  it('附加组件渲染器无 svg 能力（svgExport=false）：三项置灰、复制源码亮（gate 与按钮同口径）', () => {
+    const states = graphicStates(graphicCtx({ svgExport: false, rendered: undefined }))
+    expect(states['graphicPopup']).toBe(false)
+    expect(states['graphicExportSvg']).toBe(false)
+    expect(states['graphicExportPng']).toBe(false)
+    expect(states['graphicCopySource']).toBe(true)
+  })
+
+  it('渲染态缺省（探针不可得，rendered 未采集）：按成功放行（执行路径兜底）', () => {
+    const states = graphicStates(graphicCtx({ rendered: undefined }))
+    expect(states['graphicPopup']).toBe(true)
+    expect(states['graphicExportSvg']).toBe(true)
+  })
+
+  it('负载缺省（zone=graphic 但负载不在场，防御路径）：三项置灰', () => {
+    const states = graphicStates(normalCtx({ zone: 'graphic' }))
+    expect(states['graphicPopup']).toBe(false)
+    expect(states['graphicExportSvg']).toBe(false)
   })
 })

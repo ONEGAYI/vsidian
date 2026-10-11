@@ -1884,7 +1884,7 @@ export interface AddonSdkCommandsFacet {
 语义要点：
 - **适用模式**：when / enable 谓词输入为打开菜单时采集的结构化快照（MenuContextSnapshot）；结构敏感区置灰的安全降级矩阵由组件自行声明。
 - **错误与拒绝**：label 空、icon-key 未登记、command 局部 ID 非法等明确拒绝。不提供覆写/隐藏/接管内置菜单项的任何入口（ADR-0012 菜单边界；结构性免疫：局部 ID 禁点号，传入的 id 不可能成为内置或另一组件的身份）。
-- **谓词输入的场景命中负载**：快照自 #436 起含三类可选场景命中负载，谓词可直接消费：table（表格网格坐标——内容行/列索引、行列总数、表格行区间、引用层级一致性；仅 zone=table 且解析树接管该表时在场，残缺表缺省）、link（链接族类 wikilink/link/autolink/loose + 目标原文 + 显示文字 + 源区间；仅 zone=normal 且命中时在场，嵌入 ![[…]] 与代码上下文/头区不采集）、graphic（图形块围栏行区间/语言/源码/svg 取图能力；仅 zone=graphic 时在场）。负载只在对应 zone 出现——结构敏感区不采链接与安全降级矩阵对齐。
+- **谓词输入的场景命中负载**：快照自 #436 起含三类可选场景命中负载，谓词可直接消费：table（表格网格坐标——内容行/列索引、行列总数、表格行区间、引用层级一致性；仅 zone=table 且解析树接管该表时在场，残缺表缺省）、link（链接族类 wikilink/link/autolink/loose + 目标原文 + 显示文字 + 源区间；仅 zone=normal 且命中时在场，嵌入 ![[…]] 与代码上下文/头区不采集）、graphic（图形块围栏行区间/语言/源码/svg 取图能力 + #438 起的渲染成功探针 rendered〔错误降级 false，探针不可得缺省〕；仅 zone=graphic 时在场）。负载只在对应 zone 出现——结构敏感区不采链接与安全降级矩阵对齐。
 
 签名事实源：`src/shared/addonCommands.ts`
 

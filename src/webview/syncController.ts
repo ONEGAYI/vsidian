@@ -61,6 +61,7 @@ import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
 import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage } from '../shared/protocol'
+import type { TableEditOp } from '../shared/protocol'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
@@ -168,6 +169,12 @@ import {
   setDiagramPopupDocSource,
 } from './diagramPopup'
 import {
+  rasterizeDiagramPng,
+  readSvgIntrinsicSize,
+  serializeDiagramSvg,
+} from './diagramExport'
+import {
+  effectiveGraphicRendererFor,
   effectiveGraphicSvgExport,
   hasEffectiveGraphicRenderer,
   refreshAddonGraphicBlocks,
@@ -219,7 +226,7 @@ import {
   targetTipAnchorLeave,
   targetTipProbe,
 } from './targetTip'
-import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
+import { EmbedCardManager, EMBED_CARD_CLASS_NAMES, type EmbedLiveTarget } from './embedCard'
 import {
   GRAPHIC_LANG_ATTR,
   GRAPHIC_MODE_ATTR,
@@ -303,10 +310,14 @@ import {
   contextMenuKeybindingHints,
   contextMenuZoneAt,
   fenceInfoOf,
+  linkMenuCommandPayload,
   menuLineStructureOf,
   menuViewportPosition,
+  CONTEXT_MENU_ITEMS,
   type ContextMenuBlockTarget,
   type GraphicMenuHit,
+  type LinkMenuHit,
+  type LinkSceneCommand,
   type MenuContextSnapshot,
   type TableMenuHit,
 } from '../shared/contextMenu'
@@ -321,7 +332,9 @@ import {
   standaloneBlockIdOf,
 } from '../shared/blockId'
 import { parseTableDelimiter, quoteDepthOfLine, tableRowCellsForColumns } from '../shared/tableCells'
-import { runCreateTable, runTableEdit, tableRowsAt } from './tableEditing'
+import { runCreateTable, runTableEdit, runTableEditAt, tableRowsAt } from './tableEditing'
+import { planTableRegionDelete, serializeTableRegion, type TableRegion } from './tableRegion'
+import { planTableQuoteLevel } from './tableStructure'
 import { FM_SCAN_LIMIT, frontmatterRange } from '../shared/markdownDoc'
 import {
   outlineChangesOrdered,
@@ -389,6 +402,28 @@ const SELECTION_SAVE_DEBOUNCE_MS = 250
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
 const OUTLINE_JUMP_GUARD_MS = 1000
+
+// ---- #437 表格专属右键簇：命令集与执行体（菜单/命令面板/快捷键三入口共用）----
+
+/** 结构六操作：菜单命令 id 即 TableEditOp（与键位注册表 id 同源） */
+const TABLE_STRUCTURE_COMMANDS: ReadonlySet<string> = new Set([
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn',
+])
+
+/** 表格簇新命令（删除表格/选择三项/复制/层级两项） */
+type TableClusterCommand =
+  | 'deleteTable' | 'selectTableRow' | 'selectTableColumn' | 'selectWholeTable'
+  | 'copyTableMarkdown' | 'tableQuoteRemove' | 'tableQuoteAdd'
+
+const TABLE_CLUSTER_COMMANDS: ReadonlySet<string> = new Set<TableClusterCommand>([
+  'deleteTable', 'selectTableRow', 'selectTableColumn', 'selectWholeTable',
+  'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd',
+])
+
+function isTableClusterCommand(command: string): command is TableClusterCommand {
+  return TABLE_CLUSTER_COMMANDS.has(command)
+}
 
 
 
@@ -795,6 +830,9 @@ export class WebviewSyncController {
   private toast: ToastChannel | undefined
   private richPasteDialog: RichPasteDialog | undefined
   private pastePreferenceReqId = 0
+  /** #438 右键导出直发的 reqId 序列（与弹窗工具条导出各自的计数独立，
+   *  宿主只按面板会话关联应答——两序列不要求全局唯一） */
+  private graphicExportReqSeq = 0
   private readonly pasteFeedback: { kind: 'rich' | 'fallback' | 'plain-image'; group: string; stage: PasteStage['stage']; landed: boolean }[] = []
   private pasteGroupId = 0
   private recordingPasteStage: PasteStage | undefined
@@ -1015,6 +1053,23 @@ export class WebviewSyncController {
       else if (id === 'headingFold' || id === 'headingUnfold' || id === 'headingToggleFold' ||
         id === 'headingFoldAll' || id === 'headingUnfoldAll') {
         this.runHeadingFoldCommand(id)
+      }
+      // #439 链接场景三项：本地分支直执行（目标 = 焦点实例光标处链接命中，
+      // 与「预览当前链接」同一目标推导口径；无命中静默不误动）。菜单入口
+      // 经 runContextMenuCommand 快照负载（打开时捕获），键位入口按光标即
+      // 时推导，两入口共用 runLinkSceneCommand；命令面板经 UI_OPERATIONS
+      // 注册循环回发 ui.command（同款执行体）
+      else if (id === 'openLink' || id === 'copyLinkAddress' || id === 'copyLinkText') {
+        this.runLinkSceneKeyCommand(id)
+      }
+      // #438 图形块场景簇四操作：本地分支直执行（只读/导出零写回，不出站
+      // 宿主往返；命令面板入口经 ui.command 回发与本入口共用 runGraphicOp
+      // ——目标按焦点实例光标解析，非图形块静默）。router 已按注册表
+      // mode: live 过滤路由（嵌入焦点下按实例 live 放行）；目标与模式门控
+      // 在执行体 actionTarget/targetEditable 实例级判定（#437/#439 同法）
+      else if (id === 'graphicPopup' || id === 'graphicExportSvg' ||
+        id === 'graphicExportPng' || id === 'graphicCopySource') {
+        this.runGraphicOpAtCursor(id)
       }
       // #359 T10 附加组件命令：本地分支直执行（回调在本页，不出站宿主往返
       // ——与词移动/选词族同款先例；router 已按命令声明的 mode/writes 过滤
@@ -2967,6 +3022,26 @@ export class WebviewSyncController {
           case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
           case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
           case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
+          // #439 链接场景三项：命令面板入口（快捷键走 router 本地分支直达），
+          // 与菜单入口共用 runLinkSceneCommand 执行体（目标按光标即时推导）
+          case 'openLink': this.runLinkSceneKeyCommand('openLink'); break
+          case 'copyLinkAddress': this.runLinkSceneKeyCommand('copyLinkAddress'); break
+          case 'copyLinkText': this.runLinkSceneKeyCommand('copyLinkText'); break
+          // #437 表格簇命令面板入口（快捷键走 keybindings.execute → 宿主命令
+          // → 本循环回发 ui.command，与菜单项同一执行实现；目标 = 光标处表格）
+          case 'deleteTable': this.runTableClusterAtCursor('deleteTable'); break
+          case 'selectTableRow': this.runTableClusterAtCursor('selectTableRow'); break
+          case 'selectTableColumn': this.runTableClusterAtCursor('selectTableColumn'); break
+          case 'selectWholeTable': this.runTableClusterAtCursor('selectWholeTable'); break
+          case 'copyTableMarkdown': this.runTableClusterAtCursor('copyTableMarkdown'); break
+          case 'tableQuoteRemove': this.runTableClusterAtCursor('tableQuoteRemove'); break
+          case 'tableQuoteAdd': this.runTableClusterAtCursor('tableQuoteAdd'); break
+          // #438 图形块场景簇（命令面板入口；快捷键走 router 本地分支直达，
+          // 两入口共用 runGraphicOp——目标按光标解析，非图形块静默）
+          case 'graphicPopup': this.runGraphicOpAtCursor('graphicPopup'); break
+          case 'graphicExportSvg': this.runGraphicOpAtCursor('graphicExportSvg'); break
+          case 'graphicExportPng': this.runGraphicOpAtCursor('graphicExportPng'); break
+          case 'graphicCopySource': this.runGraphicOpAtCursor('graphicCopySource'); break
         }
         break
       case 'addonCommand.execute':
@@ -7182,7 +7257,7 @@ export class WebviewSyncController {
       blockTarget: contextMenuBlockTargetAt(lines, lineIndex, fmEndLine),
       line: zone === 'normal' ? menuLineStructureOf(lines[lineIndex] ?? '') : PLAIN_MENU_LINE,
       ...(zone === 'table' ? { table: this.tableMenuHitAt(view, pos) } : {}),
-      ...(zone === 'graphic' ? { graphic: this.graphicMenuHitAt(lines, lineIndex) } : {}),
+      ...(zone === 'graphic' ? { graphic: this.graphicMenuHitAt(view, lines, lineIndex) } : {}),
       ...(zone === 'normal' ? { link: menuLinkHitAtPos(view, pos) ?? undefined } : {}),
     }
   }
@@ -7258,19 +7333,47 @@ export class WebviewSyncController {
   /** 图形块命中负载（#436）：围栏区间与语言与 contextMenuZoneAt 同源
    *  （scanFenceBlocks + isRenderedFenceInfo 判定键 = info trim 后全等）；
    *  源码取开闭围栏行之间内容（未闭合围栏到末行）；svg 能力按 live 模式
-   *  生效渲染器（effectiveGraphicSvgExport——#438 弹窗/导出 gate 同口径） */
-  private graphicMenuHitAt(lines: readonly string[], lineIndex: number): GraphicMenuHit {
+   *  生效渲染器（effectiveGraphicSvgExport——#438 弹窗/导出 gate 同口径）；
+   *  #438 渲染成功态经 DOM 探针（graphicRenderStateAt）补进负载 */
+  private graphicMenuHitAt(view: EditorView, lines: readonly string[], lineIndex: number): GraphicMenuHit {
     const fence = scanFenceBlocks(lines).find((f) => lineIndex >= f.start && lineIndex <= f.end)!
     const language = fenceInfoOf(lines[fence.start]!).trim()
     // 未闭合围栏（end = 末行）没有闭围栏行：内容延伸到末行
     const closed = fenceMarkerOf(lines[fence.end]!) === fence.char
     const code = lines.slice(fence.start + 1, closed ? fence.end : fence.end + 1).join('\n')
+    const rendered = this.graphicRenderStateAt(view, language, code)
     return {
       lines: { start: fence.start, end: fence.end },
       language,
       code,
       svgExport: effectiveGraphicSvgExport(language, 'live'),
+      ...(rendered !== undefined ? { rendered } : {}),
     }
+  }
+
+  /** #438 live 渲染态 DOM 探针：按语言 + 源码匹配目标视图内已物化的渲染
+   *  容器，读 state 属性（rendered / error；rendering / pending 不下结论）。
+   *  同源码渲染结果确定（渲染缓存键 = 源码）——匹配到任一 rendered 即成功。
+   *  无匹配容器（widget 未物化 / 异步渲染在途 / jsdom 边角）返回 undefined：
+   *  enable gate 缺省按成功放行，执行路径重渲染自会兜底（弹窗错误框 / 导出
+   *  失败 toast），不虚设阻塞 */
+  private graphicRenderStateAt(view: EditorView, language: string, code: string): boolean | undefined {
+    for (const el of Array.from(view.contentDOM.querySelectorAll<HTMLElement>(`[${GRAPHIC_LANG_ATTR}]`))) {
+      if ((el.getAttribute(GRAPHIC_LANG_ATTR) ?? '').trim() !== language) {
+        continue
+      }
+      if (el.getAttribute(MERMAID_CODE_ATTR) !== code) {
+        continue
+      }
+      const state = el.getAttribute(MERMAID_STATE_ATTR)
+      if (state === 'rendered') {
+        return true
+      }
+      if (state === 'error') {
+        return false
+      }
+    }
+    return undefined
   }
 
   /** 打开统一菜单（先关旧菜单；与大纲菜单互斥）。定位：挂载后量尺寸，
@@ -7379,6 +7482,12 @@ export class WebviewSyncController {
    *  即放弃执行，不落回主编辑器 */
   private runContextMenuCommand(command: string): void {
     const target = this.contextMenuTarget
+    // #437/#438/#439 场景负载照 contextMenuTarget 先例捕获（closeContextMenu
+    // 先于分派清理 contextMenuSnapshot——执行期经 getter 取恒 null，语义窗口
+    // 同 contextMenuTarget 先例，见 getContextMenuSnapshot 注释）；锚点新鲜度
+    // 由重验二保证
+    const menuSnapshot = this.contextMenuSnapshot
+    const tableHit = menuSnapshot?.table
     const menuView = this.contextMenuView
     if (!menuView) {
       this.closeContextMenu()
@@ -7417,6 +7526,26 @@ export class WebviewSyncController {
       }
       return
     }
+    // #439 链接场景三项：执行期取打开菜单时捕获的链接命中负载（#436 采集
+    // 层——嵌入 `![[…]]` 与代码上下文已在采集排除；锚点过期已由上方重验二
+    // 拦截）。无命中零操作（正常路径不会出现——when 已隐藏；防覆写层放开
+    // when 后的直发）
+    if (command === 'openLink' || command === 'copyLinkAddress' || command === 'copyLinkText') {
+      const hit = menuSnapshot?.link
+      if (hit) {
+        this.runLinkSceneCommand(command, view, embedTarget, hit)
+      }
+      return
+    }
+    // #438 图形专属簇（快照负载随菜单打开时采集；执行器内部重验 gate）
+    if (command === 'graphicPopup' || command === 'graphicExportSvg' ||
+        command === 'graphicExportPng' || command === 'graphicCopySource') {
+      const graphic = menuSnapshot?.graphic
+      if (graphic !== undefined) {
+        this.runGraphicOp(command, graphic, view)
+      }
+      return
+    }
     if (command === 'cut' || command === 'copy') {
       this.copySelectionToClipboard(command === 'cut', { view, embed })
       return
@@ -7443,6 +7572,21 @@ export class WebviewSyncController {
       }
       return
     }
+    // ---- #437 表格专属簇：命令 id 与键位注册表同源（结构六操作直接取
+    // TableEditOp；其余七项经 runTableClusterCommand 统一执行）。pos 取
+    // 命中格（TableMenuHit.pos）——runTableEditAt 定位入口不先移光标，
+    // 与悬浮控件同口径 ----
+    if (TABLE_STRUCTURE_COMMANDS.has(command)) {
+      if (tableHit && this.targetEditable(view, embed)) {
+        runTableEditAt(view, tableHit.pos, command as TableEditOp)
+        view.focus()
+      }
+      return
+    }
+    if (isTableClusterCommand(command)) {
+      this.runTableClusterCommand(command, view, embed, tableHit)
+      return
+    }
     // 其余为 formatOperations id（wikilink/link/bold/…/heading1-6）——复用
     // 快速操作条同一执行路径（含守卫、计划与焦点归还；目标 = 菜单捕获
     // 的重验后视图，不再按当前焦点二次解析——菜单关闭还焦存在时序差）
@@ -7453,6 +7597,256 @@ export class WebviewSyncController {
     // 运行期注册且无 handler、又不在白名单：开发期告警（注册方应在描述符
     // 带 handler 或对齐内置命令名；不再静默忽略）
     console.warn(`[vsidian] 右键菜单命令无执行器：${command}（注册项未带 handler 且不在内置白名单）`)
+  }
+
+  // ---- #438 图形专属簇执行器（graphicOps 四项；菜单与键位/命令面板两
+  // 入口共用。全部只读/导出：弹窗复用 openGraphicPopup（单例、popupMutex
+  // 互斥、快照语义全部不变）；导出不经弹窗直发——取图走渲染管线（缓存
+  // 优先）→ serializeDiagramSvg → diagram.export 出站 → 宿主 showSaveDialog
+  // 落盘；PNG 光栅化失败按规格契约 6 降级（仅 SVG + toast 明确提示，不用
+  // window.alert——sandbox iframe 无 allow-modals 会被静默吞）；复制源码经
+  // 宿主剪贴板桥 clipboard.write text 变体（与选区复制同款——EOL 按主文
+  // 会话归一；codeblock.copy 在嵌入场景走 B 端口按来源文档归一，两者通道
+  // 不同不互为先例）。执行期重验 svg 能力与渲染管线在场——菜单
+  // enable 是打开时的采集快照，提供者热切换后以当下为准 ----
+
+  /** 图形簇单命令执行（菜单分支与 runGraphicOpAtCursor 汇入此处） */
+  private runGraphicOp(command: 'graphicPopup' | 'graphicExportSvg' | 'graphicExportPng' | 'graphicCopySource',
+    graphic: GraphicMenuHit, view: EditorView): void {
+    if (command === 'graphicCopySource') {
+      this.bridge.postMessage({ kind: 'clipboard.write', text: graphic.code })
+      return
+    }
+    if (command === 'graphicPopup') {
+      // gate 与 popup 按钮装配同口径（openGraphicPopup 内部复核并早退，
+      // 不虚占弹窗互斥位）
+      if (!graphic.svgExport || !effectiveGraphicRendererFor(graphic.language, 'live')) {
+        return
+      }
+      openGraphicPopup(graphic.language, graphic.code, {
+        mode: 'live',
+        // 弹窗刷新按目标视图全文重定位（P2-10：嵌入内部 Live 的图形块归 B）
+        docSource: () => view.state.doc.toString(),
+      })
+      return
+    }
+    void this.exportGraphicDirect(command === 'graphicExportSvg' ? 'svg' : 'png', graphic)
+  }
+
+  /** 键位/命令面板入口：目标 = 焦点实例光标（或选区头）所在图形块，经打开
+   *  菜单同一采集判定；非图形块/实例不可交互/无负载静默（与 previewLinkAtFocus
+   *  的「无目标不误开」同口径）。目标与模式按焦点实例判定（actionTarget——
+   *  宿主 Reading + 嵌入手动 Live 是合法组合，router 已按嵌入焦点放行；
+   *  与 #437 表格簇/#439 链接项同法，主正文目标仍要求宿主 Live） */
+  private runGraphicOpAtCursor(command: string): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const view = resolved.view
+    if (!this.targetEditable(view, resolved.embed)) {
+      return
+    }
+    const pos = view.state.selection.main.head
+    const snapshot = this.contextSnapshotAt(view, pos)
+    if (snapshot === null || snapshot.graphic === undefined) {
+      return
+    }
+    this.runGraphicOp(command as 'graphicPopup' | 'graphicExportSvg' | 'graphicExportPng' | 'graphicCopySource',
+      snapshot.graphic, view)
+  }
+
+  /** 导出直发（不经弹窗）：取图 → 序列化/光栅化 → diagram.export 出站 */
+  private async exportGraphicDirect(format: 'svg' | 'png', graphic: GraphicMenuHit): Promise<void> {
+    const renderer = effectiveGraphicRendererFor(graphic.language, 'live')
+    if (!renderer || !graphic.svgExport) {
+      return
+    }
+    const result = await renderer.renderSvg(graphic.code)
+    if (!result.ok) {
+      // 错误降级源码等渲染失败：无图可导，明确提示不静默（弹窗内同场景
+      // 为错误框呈现；复用 graphic.* 键族）
+      this.toast?.show(t('graphic.exportFailed'), 'error')
+      return
+    }
+    const intrinsic = readSvgIntrinsicSize(result.svg)
+    const serialized = serializeDiagramSvg(result.svg, intrinsic)
+    if (format === 'svg') {
+      this.sendGraphicDiagramExport('svg', graphic.language, serialized)
+      return
+    }
+    const dataUrl = await rasterizeDiagramPng(serialized, intrinsic)
+    if (!dataUrl) {
+      this.toast?.show(t('graphic.exportPngUnavailable'), 'warning')
+      return
+    }
+    this.sendGraphicDiagramExport('png', graphic.language,
+      dataUrl.slice('data:image/png;base64,'.length))
+  }
+
+  /** 图形簇导出出站（文件名与弹窗工具条导出同式 `${language}-diagram.${format}`，
+   *  小写化沿用 diagramPopup.sendExport；宿主侧校验与另存为链路复用） */
+  private sendGraphicDiagramExport(format: 'svg' | 'png', language: string, content: string): void {
+    if (!this.sessionId) {
+      return // init 前无会话静默丢弃（与弹窗导出通道同口径）
+    }
+    this.graphicExportReqSeq += 1
+    this.bridge.postMessage({
+      kind: 'diagram.export',
+      sessionId: this.sessionId,
+      docUri: this.docUri,
+      reqId: this.graphicExportReqSeq,
+      format,
+      fileName: `${language.toLowerCase()}-diagram.${format}`,
+      content,
+    })
+  }
+
+  /** #437 表格簇命令统一执行体（菜单与命令面板/快捷键两路径共用）。
+   *  hit 缺省时按当前光标即时采集（tableMenuHitAt 与打开菜单同一判定族
+   *  ——命令面板入口的目标由光标推导）；无命中负载（光标不在树接管表格
+   *  上）静默零操作。写操作（删除表格/层级两项）单笔事务 = 宿主撤销一次；
+   *  选择三项为本地选区事务零写回；复制经宿主剪贴板桥零写回 */
+  private runTableClusterCommand(
+    command: TableClusterCommand,
+    view: EditorView,
+    embed: LiveEditorInstance | null,
+    hit?: TableMenuHit,
+  ): void {
+    if (!this.targetEditable(view, embed)) {
+      return
+    }
+    const resolved = hit ?? this.tableMenuHitAt(view, view.state.selection.main.head)
+    if (!resolved) {
+      return
+    }
+    const state = view.state
+    const field = state.field(liveDecorationsField, false)
+    const rows = field ? tableRowsAt(state, resolved.pos, field.tree) : null
+    if (!rows || rows.length === 0) {
+      return
+    }
+    const doc = state.doc.toString()
+    // 整表 region：全行全列一步构造（选整表现状无入口，属新组合非新语义）
+    const wholeRegion: TableRegion = {
+      tableFrom: rows[0]!.lineFrom,
+      rowFrom: 0,
+      rowTo: resolved.rowCount - 1,
+      columnFrom: 0,
+      columnTo: resolved.columnCount - 1,
+    }
+    if (command === 'deleteTable') {
+      const plan = planTableRegionDelete(doc, rows, wholeRegion)
+      if (plan) {
+        view.dispatch({ changes: plan.changes, selection: { anchor: plan.selection }, scrollIntoView: true })
+      }
+      view.focus()
+      return
+    }
+    if (command === 'selectTableRow' || command === 'selectTableColumn' || command === 'selectWholeTable') {
+      // 选行/选列口径照 tableControls 把手先例；选择后聚焦编辑器（蒙版呈现）
+      if (command === 'selectTableRow' && resolved.rowIndex != null) {
+        selectTableRegion(view, {
+          tableFrom: wholeRegion.tableFrom,
+          rowFrom: resolved.rowIndex, rowTo: resolved.rowIndex,
+          columnFrom: 0, columnTo: wholeRegion.columnTo,
+        })
+      } else if (command === 'selectTableColumn' && resolved.columnIndex != null) {
+        selectTableRegion(view, {
+          tableFrom: wholeRegion.tableFrom,
+          rowFrom: 0, rowTo: wholeRegion.rowTo,
+          columnFrom: resolved.columnIndex, columnTo: resolved.columnIndex,
+        })
+      } else if (command === 'selectWholeTable') {
+        selectTableRegion(view, wholeRegion)
+      }
+      view.focus()
+      return
+    }
+    if (command === 'copyTableMarkdown') {
+      // 优先语义：活跃格区（tableRegionField）包含命中格 → 复制格区，否则整表
+      const active = state.field(tableRegionField, false)
+      let region = wholeRegion
+      if (active && active.tableFrom === wholeRegion.tableFrom &&
+          resolved.rowIndex != null && resolved.columnIndex != null &&
+          resolved.rowIndex >= active.rowFrom && resolved.rowIndex <= active.rowTo &&
+          resolved.columnIndex >= active.columnFrom && resolved.columnIndex <= active.columnTo) {
+        region = active
+      }
+      const text = serializeTableRegion(doc, rows, region)
+      if (text !== null) {
+        this.bridge.postMessage({ kind: 'clipboard.write', text })
+      }
+      view.focus()
+      return
+    }
+    // 引用层级两项（blockquote-table 三轮职能转移）：行前缀逐行独立计算，
+    // 一笔事务一笔撤销；光标随命中格内容平移（不落前缀端点触发显形）
+    const delta = command === 'tableQuoteAdd' ? 1 : -1
+    const plan = planTableQuoteLevel(doc, rows, delta, resolved.pos)
+    if (plan) {
+      view.dispatch({ changes: plan.changes, selection: { anchor: plan.selection }, scrollIntoView: true })
+    }
+    view.focus()
+  }
+
+  /** #437 表格簇的命令面板/快捷键入口（ui.command 回流）：按焦点解析目标
+   *  实例后交 runTableClusterCommand（光标处即时采集命中负载） */
+  private runTableClusterAtCursor(command: TableClusterCommand): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    this.runTableClusterCommand(command, resolved.view, resolved.embed)
+  }
+
+  /** #439 链接场景命令执行体（菜单分支与键位入口共用）：出站载荷派生是
+   *  纯函数（linkMenuCommandPayload——打开与 Ctrl+单击激活上报同构，复制
+   *  取材 target/display 原口径），此处只补会话身份与通道路由。打开链接：
+   *  主正文经面板桥直发（与根实例 postActivate 同一出口）；嵌入目标经端
+   *  口信封（sendRefEditClientMessage——与嵌入内 Ctrl+单击同一 refEdit
+   *  通道，宿主按 B 的 docUri 守卫）。复制两项经宿主剪贴板桥 text 变体
+   *  （与选区复制同款，EOL 归一在会话层）。外部 scheme 准入归宿主
+   *  linkTarget（菜单层不预判，失败反馈与 Ctrl+单击口径一致） */
+  private runLinkSceneCommand(command: LinkSceneCommand, view: EditorView,
+    embedTarget: EmbedLiveTarget | null, hit: LinkMenuHit): void {
+    const payload = linkMenuCommandPayload(command, hit)
+    if (payload.kind === 'clipboard.write') {
+      this.bridge.postMessage(payload)
+      return
+    }
+    if (embedTarget) {
+      this.embedCards?.sendRefEditClientMessage(view, {
+        ...payload,
+        sessionId: embedTarget.instance.targetSessionId,
+        docUri: embedTarget.instance.targetDocUri,
+      })
+      return
+    }
+    this.bridge.postMessage({ ...payload, sessionId: this.sessionId, docUri: this.docUri })
+  }
+
+  /** #439 键位入口：焦点实例光标处链接命中即时推导（menuLinkHitAtPos——
+   *  与菜单采集同源；嵌入内目标按嵌入实例文档解析）。无命中静默（与
+   *  「预览当前链接」口径一致）。模式门控按目标实例（宿主 Reading + 嵌入
+   *  手动 Live 是合法组合——router 已按嵌入焦点放行，此处按实例判定，
+   *  与 #437 表格簇同法；主正文目标仍要求宿主 Live） */
+  private runLinkSceneKeyCommand(command: LinkSceneCommand): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    if (!this.targetEditable(resolved.view, resolved.embed)) {
+      return
+    }
+    const hit = menuLinkHitAtPos(resolved.view, resolved.view.state.selection.main.head)
+    if (!hit) {
+      return
+    }
+    const embedTarget = resolved.embed
+      ? this.embedCards?.liveViewEntry(resolved.view) ?? null
+      : null
+    this.runLinkSceneCommand(command, resolved.view, embedTarget, hit)
   }
 
   /** 剪切/复制：选区文本经宿主剪贴板桥直写（多行 EOL 归一在会话层）；
@@ -10015,6 +10409,18 @@ export class WebviewSyncController {
     // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。分组线
     // 计数限定顶级（:scope 直接子级）——子菜单内另有分组线，不计入三簇口径
     const contextMenuEl = this.contextMenuEl
+    // #438 图形专属簇观测：graphicOps 组命令集（注册表驱动，不手写第二
+    // 份）——菜单内在场者与置灰者（集成绘制层断言钉簇呈现与置灰态；簇
+    // 不在场 = null）
+    const graphicOpsCommands = CONTEXT_MENU_ITEMS
+      .filter((def) => def.group === 'graphicOps')
+      .map((def) => def.command)
+    const graphicOpsButtons = contextMenuEl
+      ? graphicOpsCommands
+          .map((command) => contextMenuEl.querySelector<HTMLButtonElement>(
+            `button[data-vsidian-command="${CSS.escape(command)}"]`))
+          .filter((btn): btn is HTMLButtonElement => btn !== null)
+      : []
     const contextMenu = contextMenuEl
       ? {
           visible: hitPaintedElement(contextMenuEl),
@@ -10022,11 +10428,32 @@ export class WebviewSyncController {
           separatorCount: contextMenuEl.querySelectorAll(
             `:scope > .${CONTEXT_MENU_CLASS_NAMES.separator}`).length,
           disabledCount: contextMenuEl.querySelectorAll('button:disabled').length,
+          graphicOps: graphicOpsButtons.length > 0
+            ? {
+                commands: graphicOpsButtons.map((btn) => btn.dataset['vsidianCommand'] ?? ''),
+                disabled: graphicOpsButtons.filter((btn) => btn.disabled)
+                  .map((btn) => btn.dataset['vsidianCommand'] ?? ''),
+              }
+            : null,
+          // #439 链接场景项等场景命令的呈现证据（全部按钮的 command 集，
+          // 含子菜单叶命令——「哪三项在不在菜单里」的绘制层断言输入）
+          commands: [...contextMenuEl.querySelectorAll<HTMLButtonElement>(
+            'button[data-vsidian-command]')].map((button) => button.dataset['vsidianCommand'] ?? ''),
           // #359 T10：组件菜单项观测（data-vsidian-command 含点 = 命名空间
           // 运行期项——集成断言组件簇在场/回收的绘制层证据）
           addonCommands: [...new Set([...contextMenuEl.querySelectorAll<HTMLButtonElement>(
             `button[data-vsidian-command]`)].map((button) => button.dataset['vsidianCommand'] ?? '')
             .filter((command) => command.includes('.')))],
+          // #437：表格专属簇命令清单（簇渲染的绘制层证据——以结构操作首项
+          // 锚定其所在组容器，列出组内全部命令；簇不在场时缺省）
+          tableCommands: (() => {
+            const anchor = contextMenuEl.querySelector<HTMLButtonElement>(
+              'button[data-vsidian-command="insertRowAbove"]')
+            const group = anchor?.closest(`.${CONTEXT_MENU_CLASS_NAMES.group}`) ?? null
+            return group ? [...group.querySelectorAll<HTMLButtonElement>(
+              'button[data-vsidian-command]')].map((button) => button.dataset['vsidianCommand'] ?? '')
+              : undefined
+          })(),
         }
       : undefined
     // #376 T01 双链联想候选绘制：document 级浮层（不在 #app 内），可见性
