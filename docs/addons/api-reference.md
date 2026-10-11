@@ -1846,7 +1846,8 @@ export interface AddonCommandReport {
   title: string
   mode: BindingMode
   writes: boolean
-  /** 归一化后的默认绑定（注册期已拒 Tab 与非法 chord；空数组 = 默认未绑定） */
+  /** 归一化后的默认绑定（注册期已拒 Tab 与非法 chord；归一后去重保留首现
+   *  序——#449；空数组 = 默认未绑定） */
   defaults: readonly string[]
 }
 

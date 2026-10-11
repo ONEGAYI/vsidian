@@ -162,7 +162,8 @@ export interface AddonCommandReport {
   title: string
   mode: BindingMode
   writes: boolean
-  /** 归一化后的默认绑定（注册期已拒 Tab 与非法 chord；空数组 = 默认未绑定） */
+  /** 归一化后的默认绑定（注册期已拒 Tab 与非法 chord；归一后去重保留首现
+   *  序——#449；空数组 = 默认未绑定） */
   defaults: readonly string[]
 }
 
@@ -184,6 +185,11 @@ export function buildAddonCommandReport(addonId: string, def: AddonCommandDefini
   if (addonDefaultBindingsProblem(defaults) !== null) {
     return null
   }
+  // #449：defaults 归一化 → 去重（保留首现序）→ 入协议。'Ctrl+F' 这类
+  // 别名书写是正常组件可达的合法形态（注册期 normalizeChord 非 null 即
+  // 过），重复形态去重收口而非拒绝——Set 按插入序迭代即首现序；宿主复验
+  // 侧 syncReport 同语义。违约拦截面（保留 Tab 段、非法 chord）不变。
+  const normalizedDefaults = [...new Set(defaults.map((raw) => normalizeChord(raw)!))]
   return {
     commandId: namespacedAddonId(addonId, def.id),
     addonId,
@@ -191,6 +197,6 @@ export function buildAddonCommandReport(addonId: string, def: AddonCommandDefini
     title: def.title,
     mode: def.mode,
     writes: def.writes === true,
-    defaults: defaults.map((raw) => normalizeChord(raw)!),
+    defaults: normalizedDefaults,
   }
 }

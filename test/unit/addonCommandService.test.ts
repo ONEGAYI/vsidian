@@ -156,4 +156,20 @@ describe('T10 宿主命令服务', () => {
     expect(conflicted.has(`${ADDON}.alias`)).toBe(true)
     expect(conflicted.has('pastePlain')).toBe(true)
   })
+
+  it('#449 归一后重复 defaults 上报：目录去重保留首现序、不触发 commands-report-rejected', () => {
+    const { service, logs } = makeService()
+    // SDK 侧 buildAddonCommandReport 已去重；伪造/旧版消息仍可能携带归一
+    // 后重复形态——宿主复验同样去重（与 SDK 侧同语义），重复不属违约
+    service.syncReport(ADDON, 1, [
+      report(`${ADDON}.dupe`, ADDON, { defaults: ['ctrl+f', 'Ctrl+F'] }),
+      report(`${ADDON}.mixed`, ADDON, { defaults: ['Meta+K', 'meta+k', 'ctrl+k'] }),
+    ])
+    const defaultsOf = (commandId: string) =>
+      service.catalog().find((item) => item.commandId === commandId)?.defaults
+    expect(defaultsOf(`${ADDON}.dupe`)).toEqual(['ctrl+f'])
+    expect(defaultsOf(`${ADDON}.mixed`)).toEqual(['meta+k', 'ctrl+k'])
+    expect(getEffectiveBindings({}, `${ADDON}.dupe`)).toEqual(['ctrl+f'])
+    expect(logs.some((line) => line.includes('commands-report-rejected'))).toBe(false)
+  })
 })
