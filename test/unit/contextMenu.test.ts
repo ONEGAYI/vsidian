@@ -931,32 +931,18 @@ describe('段落设置勾选矩阵（checked 谓词按当前行结构点亮，#1
 
 // ---- #184：图标资产两表同步（描述符 iconKey ↔ 资产文件与 CSS 接线规则）----
 
-/** #437/#438 场景簇资产缺口豁口：新登记的 icon key（表格簇 10 枚 + 图形簇
- *  popupPreview/exportSvg/exportPng）资产生成与 CSS 接线归图标票 #441 承接
- *  ——豁口期内资产断言跳过这些 key（渲染层留空降级是规格口径）；#441 合入
- *  后此清单应清空。quick-action-icons.py KEYS 同步由本文件最后一条用例核对
- *  （两表同步的机器钉法） */
-const SCENE_KEYS_PENDING_ASSETS = [
-  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
-  'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
-  'popupPreview', 'exportSvg', 'exportPng',
-] as const
-
 describe('图标资产两表同步（#184：规格「扩展约定」两表同步的机器钉法）', () => {
   const referenced = new Set(
     flattenItems(CONTEXT_MENU_ITEMS).flatMap((def) => (def.iconKey ? [def.iconKey] : [])),
   )
   const root = path.resolve(process.cwd())
 
-  it('被描述符引用的图标 key 恰 40 枚（27 接线 + #437 表格簇 10 枚 + #438 图形簇 3 枚待资产）', () => {
+  it('被描述符引用的图标 key 恰 40 枚（27 既有 + #441 表格簇 10 枚 + 图形簇 3 枚）', () => {
     expect(referenced.size).toBe(40)
   })
 
-  it('每个被引用 key 都有明暗两套 SVG 资产文件（#441 待生成清单除外）', () => {
+  it('每个被引用 key 都有明暗两套 SVG 资产文件', () => {
     for (const key of referenced) {
-      if ((SCENE_KEYS_PENDING_ASSETS as readonly string[]).includes(key)) {
-        continue
-      }
       expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
         `${key} 缺 light SVG 资产`).toBe(true)
       expect(existsSync(path.join(root, 'media/quick-actions/dark', `dark-${key}.svg`)),
@@ -973,12 +959,9 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
     }
   })
 
-  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则（#441 待生成清单除外）', () => {
+  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则', () => {
     const css = readFileSync(path.join(root, 'src/webview/main.css'), 'utf8')
     for (const key of referenced) {
-      if ((SCENE_KEYS_PENDING_ASSETS as readonly string[]).includes(key)) {
-        continue
-      }
       const lightRule = new RegExp(
         `\\.vsidian-context-menu \\[data-icon='${key}'\\]\\s*\\{[^}]*light-${key}\\.svg`)
       const darkRule = new RegExp(

@@ -85,6 +85,7 @@ vsidian/
     │   ├── addonRenderers.ts       # 渲染提供者共享契约
     │   ├── addonSettings.ts        # 复杂设置共享模型
     │   ├── addonStorage.ts         # 数据目录形状与守卫
+    │   ├── addonSyntaxApi.ts       # 附加组件语法查询与组合判定
     │   ├── addonUi.ts              # 附加组件界面贡献共享形状与校验
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts        # 变更重定位纯函数
@@ -158,6 +159,7 @@ vsidian/
         ├── addonSettingsControls.ts    # 基础设置控件构造器
         ├── addonSettingsSection.ts     # 设置页附加组件分页
         ├── addonUi.ts                  # 编辑器页界面贡献运行时
+        ├── addonViewIdentity.ts        # 编辑器实例身份状态字段
         ├── addonViews.ts               # 页面级视图句柄注册表
         ├── anchorFlash.ts              # 跳转目标高亮装饰状态
         ├── appearanceSettings.ts       # 外观合并分页

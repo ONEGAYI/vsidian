@@ -35,6 +35,10 @@ const QUICK_ICON_KEYS = [
   'pastePlain',
   // #337 顺带补登记（main 既有缺口：引用视图设置组跳转目标提示两枚）
   'pointerLink', 'dbLink',
+  // #441 菜单场景图标必须随运行时产物分发。
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
+  'popupPreview', 'exportSvg', 'exportPng',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({
@@ -296,12 +300,16 @@ test('VSIX 检查：缺少任一 KaTeX 字体报错（公式回落系统字体�
 })
 
 test('VSIX 检查：缺少任一快速操作 SVG 报错', () => {
-  const missing = makeEntries().filter(
-    (e) => e.name !== 'extension/out/webview/assets/dark-blockMath.svg',
-  )
-  const result = inspectVsixEntries(missing, { iconPath: 'media/vsidian-icon-256.png' })
-  assert.equal(result.ok, false)
-  assert.ok(result.errors.some((e) => e.includes('dark-blockMath.svg')))
+  for (const key of ['blockMath', ...QUICK_ICON_KEYS.slice(-13)]) {
+    for (const theme of ['light', 'dark']) {
+      const name = `${theme}-${key}.svg`
+      const missing = makeEntries().filter((entry) => entry.name !== `extension/out/webview/assets/${name}`)
+      const result = inspectVsixEntries(missing, { iconPath: 'media/vsidian-icon-256.png' })
+      assert.equal(result.ok, false, `${name} 缺失应失败`)
+      assert.ok(result.errors.some((error) => error.includes('缺少') && error.includes(name)),
+        `${name} 应被登记为必需资产`)
+    }
+  }
 })
 
 test('VSIX 检查：快速操作制作源不得混入 VSIX', () => {

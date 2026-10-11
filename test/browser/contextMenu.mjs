@@ -168,8 +168,8 @@ try {
   assert.ok(iconRequests.filter((name) => name.startsWith('light-')).length >= 27,
     `亮色图标资产应真实网络加载（实际 ${iconRequests.length} 次）`)
   // 顶级项图标真实绘制（mask 遮罩后非纯背景——照 quickActions 像素分析先例）
-  const iconPaint = async (key) => {
-    const png = await page.locator(`.vsidian-context-menu [data-icon='${key}']`).screenshot()
+  const iconPaint = async (selector) => {
+    const png = await page.locator(selector).screenshot()
     return page.evaluate(async (base64) => {
       const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
       const canvas = document.createElement('canvas')
@@ -191,12 +191,34 @@ try {
       return { colors: colors.size, paintedPixels }
     }, png.toString('base64'))
   }
-  const brush = await iconPaint('textFormat')
+  const brush = await iconPaint(".vsidian-context-menu [data-icon='textFormat']")
   assert.ok(brush.colors > 2 && brush.paintedPixels > 4, `textFormat 笔刷图标应真实绘制（${JSON.stringify(brush)}）`)
-  const clipboard = await iconPaint('paste')
+  const clipboard = await iconPaint(".vsidian-context-menu [data-icon='paste']")
   assert.ok(clipboard.colors > 2 && clipboard.paintedPixels > 4, `paste 图标应真实绘制（${JSON.stringify(clipboard)}）`)
   passed++
   console.log('[统一菜单回归][PASS] 图标接线：27 枚 mask 资产、真实加载与绘制、H1 徽标')
+
+  // #441：从真实右键菜单截图数墨迹像素；mask url 存在但资产未加载时也必须失败。
+  const assertSceneIconPaint = async (entries) => {
+    for (const theme of ['vscode-light', 'vscode-dark', 'vscode-high-contrast']) {
+      await page.evaluate((value) => {
+        document.body.classList.remove('vscode-light', 'vscode-dark', 'vscode-high-contrast')
+        document.body.classList.add(value)
+      }, theme)
+      for (const [command, key] of entries) {
+        const mask = await page.evaluate((value) => window.readMenu().iconMaskOf(value), command)
+        const prefix = theme === 'vscode-light' ? 'light' : 'dark'
+        assert.ok(mask?.includes(`${prefix}-${key}.svg`), `${theme} ${command} 应接入 ${prefix}-${key}.svg（实际 ${mask}）`)
+        const paint = await iconPaint(`.vsidian-context-menu button[data-vsidian-command='${command}'] [data-icon='${key}']`)
+        assert.ok(paint.colors > 2 && paint.paintedPixels > 4,
+          `${theme} ${command} 的 18px 图标应真实绘制（${JSON.stringify(paint)}）`)
+      }
+    }
+    await page.evaluate(() => {
+      document.body.classList.remove('vscode-dark', 'vscode-high-contrast')
+      document.body.classList.add('vscode-light')
+    })
+  }
 
   // ---- 场景 C2：暗色主题图标切换（body.vscode-dark → dark 资产加载） ----
   const darkPage = await browser.newPage({ viewport: { width: 900, height: 560 } })
@@ -359,6 +381,12 @@ try {
   assert.ok(!state.disabledCommands.includes('tableQuoteAdd'), '顶层表：增一层引用可用')
   const unboundHint = await page.evaluate(() => window.readMenu().hintOf('insertRowBelow'))
   assert.equal(unboundHint, null, '默认未绑定的结构项提示列不占位')
+  await assertSceneIconPaint([
+    ['insertRowAbove', 'insertRowAbove'], ['insertRowBelow', 'insertRowBelow'],
+    ['insertColumnLeft', 'insertColumnLeft'], ['insertColumnRight', 'insertColumnRight'],
+    ['deleteRow', 'deleteRow'], ['deleteColumn', 'deleteColumn'], ['deleteTable', 'deleteTable'],
+    ['selectTableRow', 'selectRow'], ['selectTableColumn', 'selectColumn'],
+  ])
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   // 用户自绑键位后重开菜单：提示列显示生效绑定（键位注册表派生）
   await page.evaluate(() => window.post({
@@ -396,6 +424,7 @@ try {
   await page.locator('.vsidian-table-grid-row').nth(1).click({ button: 'right', position: { x: 30, y: 8 } })
   state = await page.evaluate(() => window.readMenu())
   assert.ok(!state.disabledCommands.includes('tableQuoteRemove'), '单层引用表：移除引用块可用')
+  await assertSceneIconPaint([['tableQuoteRemove', 'removeQuote']])
   await page.locator('.vsidian-context-menu button[data-vsidian-command="tableQuoteAdd"]').click()
   state = await page.evaluate(() => window.readMenu())
   assert.ok(!state.menuExists, '层级项执行后菜单关闭')
@@ -429,9 +458,9 @@ try {
   for (const command of ['graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource']) {
     assert.ok(!state.disabledCommands.includes(command), `${command} 渲染成功态应可用`)
   }
-  // 图标降级（#441 资产未接入前）：新 key 的图标位留空不报错（mask 无资产
-  // url 是合法降级态，资产后补即生效——不钉住空态本身，只钉不抛错已渲染）
-  assert.ok(state.topCommands.includes('graphicPopup'), '图形簇条目真实渲染在菜单中')
+  await assertSceneIconPaint([
+    ['graphicPopup', 'popupPreview'], ['graphicExportSvg', 'exportSvg'], ['graphicExportPng', 'exportPng'],
+  ])
   // 弹窗预览：真实点击打开（快照语义与 popup 按钮同一 openGraphicPopup）
   await page.locator('.vsidian-context-menu button[data-vsidian-command="graphicPopup"]').click()
   const overlay = page.locator('.vsidian-diagram-overlay')
@@ -830,6 +859,9 @@ try {
     assert.ok(state.menuExists, `第 ${c.line} 行右键应打开菜单`)
     assert.deepEqual(state.topCommands.slice(0, 3), ['openLink', 'copyLinkAddress', 'copyLinkText'],
       `链接文字上三项应在簇 1 顶部（实际 ${JSON.stringify(state.topCommands.slice(0, 6))}）`)
+    await assertSceneIconPaint([
+      ['openLink', 'externalLink'], ['copyLinkAddress', 'link'], ['copyLinkText', 'copy'],
+    ])
     // 2) 打开链接：出站激活消息（target/href 原口径 + 完整链接源区间）
     await page.evaluate(() => window.clearSent())
     await page.locator('.vsidian-context-menu button[data-vsidian-command="openLink"]').click()

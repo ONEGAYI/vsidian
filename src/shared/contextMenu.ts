@@ -239,12 +239,10 @@ export interface MenuItemDescriptor {
 export const CONTEXT_MENU_GROUP_ORDER = ['link', 'tableOps', 'graphicOps', 'blockFormat', 'clipboard'] as const
 export type ContextMenuGroupId = (typeof CONTEXT_MENU_GROUP_ORDER)[number]
 
-/** 图标 key 表（规格图标清单全量：复用 16 + 需生成接线 10 + 备用记账 4。
- *  资产生成与 quick-action-icons.py KEYS 的两表同步归图标接线票；渲染层
- *  按 CSS 有无 data-icon 规则降级留空，key 先行登记不阻塞内核。
- *  #437 表格簇新增 10 key（候选语义表见 #441）：资产与 CSS 接线归 #441
- *  承接（登记即合规、渲染留空降级——S6 决策），复用 key 三枚（table/
- *  quote/copy）零新增。 */
+/** 图标 key 表：40 枚菜单接线 key + 3 枚备用记账 key。#441 已补齐
+ *  表格簇 10 枚与图形簇 3 枚的明暗资产及 CSS 接线；KEYS 另服务快速
+ *  操作条/查找面板等非菜单消费方，两表保持包含关系。未接线的备用
+ *  key 沿 data-icon 透明遮罩留空降级。 */
 export const CONTEXT_MENU_ICON_KEYS = [
   // 复用现有快速操作图标资产
   'link', 'bold', 'italic', 'strikethrough', 'highlight', 'inlineCode', 'inlineMath',
