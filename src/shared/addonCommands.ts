@@ -35,14 +35,23 @@ const ADDON_LOCAL_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
  */
 export const ADDON_DISPLAY_TEXT_MAX = 256
 
+/**
+ * 单命令默认绑定条数封顶（#450）：SDK 注册、协议守卫与宿主复验三面同拒。
+ * 按原始数组长度计数（['ctrl+f','Ctrl+F'] 原始 2 条，归一去重后入目录 1
+ * 条）——协议载荷体积是封顶动机之一，与 #449 归一去重正交。量级依据：
+ * 内置操作键位注册表惯例最多双登记（跨平台 meta/ctrl 各一），4 为其 2 倍
+ * 余量，对齐 #395「合理上界」原则。
+ */
+export const ADDON_DEFAULT_BINDINGS_MAX = 4
+
 /** 命名空间限定后的完整 ID 形态（观测/断言面） */
 export const ADDON_MENU_ITEM_ID_PATTERN = /^[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]{1,64}$/
 
 /** 局部 ID 拒绝码 */
 export type AddonLocalIdProblem = 'empty' | 'dot' | 'too-long' | 'invalid-chars'
 
-/** 默认绑定拒绝码（tab-forbidden = #125 Tab 固定链） */
-export type AddonDefaultBindingsProblem = 'not-string' | 'invalid-chord' | 'tab-forbidden'
+/** 默认绑定拒绝码（tab-forbidden = #125 Tab 固定链；too-many = #450 条数超限） */
+export type AddonDefaultBindingsProblem = 'not-string' | 'invalid-chord' | 'tab-forbidden' | 'too-many'
 
 /** 菜单项形状拒绝码 */
 export type AddonMenuItemProblem =
@@ -110,8 +119,12 @@ export function addonLocalIdProblem(localId: string): AddonLocalIdProblem | null
   return null
 }
 
-/** 默认绑定校验：返回拒绝码；null = 通过（Tab 通道拒绝见模块头） */
+/** 默认绑定校验：返回拒绝码；null = 通过（Tab 通道拒绝见模块头；条数
+ *  封顶见 ADDON_DEFAULT_BINDINGS_MAX——先量后形，超限即拒不进逐条循环） */
 export function addonDefaultBindingsProblem(bindings: readonly string[]): AddonDefaultBindingsProblem | null {
+  if (bindings.length > ADDON_DEFAULT_BINDINGS_MAX) {
+    return 'too-many'
+  }
   for (const raw of bindings) {
     if (typeof raw !== 'string') {
       return 'not-string'
@@ -162,7 +175,8 @@ export interface AddonCommandReport {
   title: string
   mode: BindingMode
   writes: boolean
-  /** 归一化后的默认绑定（注册期已拒 Tab 与非法 chord；空数组 = 默认未绑定） */
+  /** 归一化后的默认绑定（注册期已拒 Tab 与非法 chord；归一后去重保留首现
+   *  序——#449；空数组 = 默认未绑定） */
   defaults: readonly string[]
 }
 
@@ -184,6 +198,11 @@ export function buildAddonCommandReport(addonId: string, def: AddonCommandDefini
   if (addonDefaultBindingsProblem(defaults) !== null) {
     return null
   }
+  // #449：defaults 归一化 → 去重（保留首现序）→ 入协议。'Ctrl+F' 这类
+  // 别名书写是正常组件可达的合法形态（注册期 normalizeChord 非 null 即
+  // 过），重复形态去重收口而非拒绝——Set 按插入序迭代即首现序；宿主复验
+  // 侧 syncReport 同语义。违约拦截面（保留 Tab 段、非法 chord）不变。
+  const normalizedDefaults = [...new Set(defaults.map((raw) => normalizeChord(raw)!))]
   return {
     commandId: namespacedAddonId(addonId, def.id),
     addonId,
@@ -191,6 +210,6 @@ export function buildAddonCommandReport(addonId: string, def: AddonCommandDefini
     title: def.title,
     mode: def.mode,
     writes: def.writes === true,
-    defaults: defaults.map((raw) => normalizeChord(raw)!),
+    defaults: normalizedDefaults,
   }
 }

@@ -4,6 +4,10 @@ import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/sync
 import { selectTableRegion } from '../../src/webview/tableRegionSelection'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
+import {
+  __resetKeybindingLabelPlatformForTest,
+  setKeybindingLabelPlatform,
+} from '../../src/shared/keybindings'
 
 // #94 起文案经 t() 取词：装配生产中文包，断言与字典同源
 installLocale('zh-cn', zhCn)
@@ -127,6 +131,31 @@ describe('快速操作条', () => {
     expect(bold.disabled).toBe(true)
     bold.click()
     expect(h.view.state.doc.toString()).toBe('文字')
+    h.controller.dispose()
+    h.parent.remove()
+  })
+
+  it('键位徽章平台渲染契约：meta 绑定经 formatBindingLabel 平台呈现（#448）', () => {
+    const h = setup('文字')
+    h.parent.querySelector<HTMLButtonElement>('.vsidian-quick-toggle')!.click()
+    const bold = h.parent.querySelector<HTMLButtonElement>('[data-op="bold"]')!
+    const badgeOf = () => bold.getAttribute('data-tooltip-keys') ?? ''
+    try {
+      setKeybindingLabelPlatform('mac')
+      h.controller.setQuickActionBindingHints((op) => op === 'bold' ? ['meta+k'] : [])
+      expect(badgeOf()).toBe('Cmd+K')
+      // mac 段首 Cmd：存储规范序 shift 在 meta 前，标签把 Cmd 提到段首
+      h.controller.setQuickActionBindingHints((op) => op === 'bold' ? ['shift+meta+k'] : [])
+      expect(badgeOf()).toBe('Cmd+Shift+K')
+      setKeybindingLabelPlatform('windows')
+      h.controller.setQuickActionBindingHints((op) => op === 'bold' ? ['meta+k'] : [])
+      expect(badgeOf()).toBe('Win+K')
+      setKeybindingLabelPlatform('linux')
+      h.controller.setQuickActionBindingHints((op) => op === 'bold' ? ['meta+k'] : [])
+      expect(badgeOf()).toBe('Super+K')
+    } finally {
+      __resetKeybindingLabelPlatformForTest()
+    }
     h.controller.dispose()
     h.parent.remove()
   })

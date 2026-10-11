@@ -39,6 +39,7 @@ import type { SyntaxNode, Tree } from '@lezer/common'
 import { liveDecorationsField } from './liveDecorations'
 import { t } from '../shared/i18n'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
+import { formatBindingLabel } from '../shared/keybindings'
 import type { HeadingFoldPaintProbe } from '../shared/protocol'
 import {
   FM_SCAN_LIMIT,
@@ -749,11 +750,12 @@ export function setHeadingFoldBindingHints(
   foldBindingHints = resolve
 }
 
-/** 悬停词 + 结构化键位徽章（tooltip.md「接管机制」节：不做文字缀尾） */
+/** 悬停词 + 结构化键位徽章（tooltip.md「接管机制」节：不做文字缀尾；
+ *  徽章值经 formatBindingLabel 平台渲染——#448 统一接入） */
 function applyFoldBindingHint(btn: HTMLElement, op: 'headingFold' | 'headingUnfold'): void {
   const bindings = foldBindingHints(op)
   if (bindings.length > 0) {
-    btn.setAttribute('data-tooltip-keys', bindings.join(TOOLTIP_KEYS_SEPARATOR))
+    btn.setAttribute('data-tooltip-keys', bindings.map(formatBindingLabel).join(TOOLTIP_KEYS_SEPARATOR))
   }
 }
 

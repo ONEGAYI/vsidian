@@ -14,6 +14,10 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
 import type { AddonUiRuntimeEnv } from '../../src/webview/addonUi'
 import type { AddonViewHandle } from '../../src/shared/addonEditApi'
+import {
+  __resetKeybindingLabelPlatformForTest,
+  setKeybindingLabelPlatform,
+} from '../../src/shared/keybindings'
 
 const ADDON = 'vsidian-test-fixture.addon-t11'
 
@@ -109,9 +113,36 @@ describe('T11 webview 界面运行时：按钮', () => {
     runtime.registerButton(ADDON, 1, { id: 'cmdBtn', label: 'Cmd', command: 'insertStamp' })
     const btn = toolbarSlot.querySelector('button')!
     expect(btn.dataset['addonButton']).toBe(`${ADDON}.cmdBtn`)
-    expect(btn.getAttribute('data-tooltip-keys')).toBe('ctrl+alt+g')
+    // #448：徽章经 formatBindingLabel 平台渲染——显式固定 windows 防探测漂移
+    setKeybindingLabelPlatform('windows')
+    try {
+      expect(btn.getAttribute('data-tooltip-keys')).toBe('Ctrl+Alt+G')
+    } finally {
+      __resetKeybindingLabelPlatformForTest()
+    }
     btn.click()
     expect(state.executed).toEqual([`${ADDON}.insertStamp`])
+  })
+
+  it('命令按钮键位徽章平台渲染契约：meta 绑定经 formatBindingLabel 平台呈现（#448）', () => {
+    const { runtime, toolbarSlot, state } = makeEnv()
+    const badgeOfLast = () => toolbarSlot.lastElementChild!.getAttribute('data-tooltip-keys')
+    try {
+      setKeybindingLabelPlatform('mac')
+      state.hints[`${ADDON}.platMac`] = ['meta+k']
+      runtime.registerButton(ADDON, 1, { id: 'platMac', label: 'P', command: 'platMac' })
+      expect(badgeOfLast()).toBe('Cmd+K')
+      setKeybindingLabelPlatform('windows')
+      state.hints[`${ADDON}.platWin`] = ['meta+k']
+      runtime.registerButton(ADDON, 1, { id: 'platWin', label: 'P', command: 'platWin' })
+      expect(badgeOfLast()).toBe('Win+K')
+      setKeybindingLabelPlatform('linux')
+      state.hints[`${ADDON}.platLinux`] = ['meta+k']
+      runtime.registerButton(ADDON, 1, { id: 'platLinux', label: 'P', command: 'platLinux' })
+      expect(badgeOfLast()).toBe('Super+K')
+    } finally {
+      __resetKeybindingLabelPlatformForTest()
+    }
   })
 
   it('槽内排序：order 升序稳定排序（缺省 0，同序按注册序）', () => {

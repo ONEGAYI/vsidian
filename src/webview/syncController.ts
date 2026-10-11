@@ -5269,8 +5269,10 @@ export class WebviewSyncController {
       else el.setAttribute('aria-pressed', status === 'mixed' ? 'mixed' : String(status === 'active'))
       const base = t(FORMAT_OPERATIONS.find((item) => item.id === op)!.titleKey)
       const bindings = this.quickBindingHints(op)
-      const keys = bindings.map((key) => key.split('+').map((part) =>
-        part.length === 1 ? part.toUpperCase() : part[0]!.toUpperCase() + part.slice(1)).join('+'))
+      // #448：键位标签统一经 formatBindingLabel 平台渲染（mac Cmd 段首 /
+      // Win / Super——替换早期自写首字母大写映射）；aria 串同形态，与 #444
+      // 「编辑器提示文字」口径一致
+      const keys = bindings.map(formatBindingLabel)
       const joined = keys.join(t('common.keySeparator'))
       // #300 悬停词两段结构：名称与键位徽章分离（键位段为内部 \n 分隔的
       // 徽章串，显示连接符由徽章样式承担）；aria 侧沿用 keySeparator 显示串

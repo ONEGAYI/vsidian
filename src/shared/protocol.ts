@@ -18,6 +18,7 @@ import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from '.
 import { isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
 import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
+import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -4621,7 +4622,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isAddonPageOutbound(v.outbound)
     case 'addonCommands.report':
       // #359 T10 组件命令表全量对账：形态守卫（命令 id 唯一性由 webview
-      // 注册表保证——同 localId 拒绝重复注册）
+      // 注册表保证——同 localId 拒绝重复注册）；#450 defaults 条数封顶
+      // （与 SDK 注册、宿主复验三面同拒——异常大载荷不进协议）
       return (
         isString(v.addonId) &&
         isNonNegativeInt(v.generation) &&
@@ -4632,7 +4634,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           isString(entry.title) &&
           (entry.mode === 'live' || entry.mode === 'reading' || entry.mode === 'both') &&
           typeof entry.writes === 'boolean' &&
-          Array.isArray(entry.defaults) && entry.defaults.every(isString))
+          Array.isArray(entry.defaults) && entry.defaults.every(isString) &&
+          entry.defaults.length <= ADDON_DEFAULT_BINDINGS_MAX)
       )
     case 'addons.commandCatalogGet':
       return true

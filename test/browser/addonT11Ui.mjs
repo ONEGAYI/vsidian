@@ -151,7 +151,9 @@ await scenario('装载注册：三按钮绘制可见、键位徽章与负向拒�
     return p.buttons.length === 3 && p.buttons.every((b) => b.visible) ? p : undefined
   }, '三按钮绘制可见')
   const cmd = probe.buttons.find((b) => b.id === `${ADDON_ID}.cmdBtn`)
-  assert.equal(cmd.tooltipKeys, 'ctrl+alt+t', '命令按钮键位徽章（默认绑定经运行期表）')
+  // #448：徽章经 formatBindingLabel 平台渲染（ctrl+alt+t 无 meta——各平台均
+  // 渲染为大写形态 Ctrl+Alt+T，断言不依赖平台探测）
+  assert.equal(cmd.tooltipKeys, 'Ctrl+Alt+T', '命令按钮键位徽章（默认绑定经运行期表）')
   assert.equal(cmd.tooltip, 'T11 Cmd')
 })
 
@@ -177,7 +179,7 @@ await scenario('真实点击与悬停提示：onClick 经 target 句柄真实提
     })
   }, '悬停提示卡片出现')
   assert.equal(tooltip.text, 'T11 Cmd')
-  assert.deepEqual(tooltip.keys, ['ctrl+alt+t'])
+  assert.deepEqual(tooltip.keys, ['Ctrl+Alt+T'])
   assert.ok(editor.text.length > 0)
 })
 
