@@ -12,6 +12,7 @@
 // - 停用/故障/代次释放时整组件回收（releaseAddon）：注销 VSCode 命令、清
 //   目录并广播——不影响内置命令与菜单。
 import type { AddonCommandReport } from '../../shared/addonCommands'
+import { ADDON_DEFAULT_BINDINGS_MAX } from '../../shared/addonCommands'
 import {
   chordContainsReservedTab,
   normalizeChord,
@@ -71,6 +72,12 @@ export class AddonCommandService {
       // tab/shift+tab 非 null，须独立拦下，否则违约绑定进宿主目录与设置页）。
       // #449：归一后去重（保留首现序）——与 SDK 侧同语义；重复不属违约、
       // 不触发拒绝（违约拦截 null/保留 Tab 段仍逐条先判，不因重复跳过）。
+      // #450：条数封顶复验（ADDON_DEFAULT_BINDINGS_MAX）——按原始数组长度
+      // 计数（与 SDK/协议守卫三面同拒），归一去重不折抵条数。
+      if (command.defaults.length > ADDON_DEFAULT_BINDINGS_MAX) {
+        this.ports.log('commands-report-rejected', addonId, `too-many defaults: ${command.commandId}`)
+        return
+      }
       const defaults: string[] = []
       const seenNormalized = new Set<string>()
       for (const raw of command.defaults) {
