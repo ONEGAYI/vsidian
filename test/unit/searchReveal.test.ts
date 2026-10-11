@@ -5,12 +5,17 @@
 // 打开提示门控（shouldShowSearchRevealHint）：去重与设置开关的合取判定，
 // 记账语义 = 仅实际弹出才占用去重名额（wiring 在判 true 后记账）。
 import { describe, expect, it } from 'vitest'
-import { matchHostOffset, parseCopyMatch, shouldShowSearchRevealHint } from '../../src/host/searchReveal'
+import { matchHostOffset, parseCopyMatch, SEARCH_REVEAL_SENTINEL, shouldShowSearchRevealHint } from '../../src/host/searchReveal'
 
 const LF_DOC = '# 标题\n\n第一段正文。\n\n目标行内容在此。\n\n结尾。\n'
 const CRLF_DOC = '# 标题\r\n\r\n目标行内容在此。\r\n结尾。\r\n'
 
 describe('copyMatch 输出解析（parseCopyMatch）', () => {
+  it('捕获哨兵经 Windows NUL 终止文本回读仍全等，且不能冒充匹配输出', () => {
+    // CF_UNICODETEXT 以 NUL 终止；真实 Windows 宿主已复现前导 NUL 回读为空。
+    expect(SEARCH_REVEAL_SENTINEL.split('\u0000')[0]).toBe(SEARCH_REVEAL_SENTINEL)
+    expect(parseCopyMatch(SEARCH_REVEAL_SENTINEL)).toBeNull()
+  })
   it('1.82.3 实测样例：`3,1: 行文本` 解析为 1-based 行列', () => {
     expect(parseCopyMatch('3,1: 原型唯一匹配词出现在甲文件第三行。')).toEqual({
       line: 3,

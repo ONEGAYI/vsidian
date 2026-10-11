@@ -21,7 +21,7 @@ VSCode 全工作区搜索（Ctrl+Shift+F）命中 `.md` 后点击结果条目：
 命令语义（宿主 `src/host/textEditorProvider.ts` wiring + `src/host/searchReveal.ts` 纯逻辑）：
 
 1. **活动面板校验**：触发时活动 tab 须为 Vsidian 面板（非 Vsidian 面板或 5s 内未就绪 → 通知放弃，不误动其他文件）；目标 uri 在入口快照，快速连击时旧任务不得把位置落到后来激活的文件上。
-2. **copyMatch 回读**：剪贴板三步捕获——写哨兵 → 执行内部命令 `search.action.copyMatch`（把搜索树**当前选中条目**的「1-based 起始行,起始列: 匹配行全文」写入剪贴板）→ 回读 → 恢复原剪贴板文本。哨兵未变（命令 no-op：无选中或文件级选中）识别为无输出。
+2. **copyMatch 回读**：剪贴板三步捕获——写哨兵 → 执行内部命令 `search.action.copyMatch`（把搜索树**当前选中条目**的「1-based 起始行,起始列: 匹配行全文」写入剪贴板）→ 回读 → 恢复原剪贴板文本。哨兵未变（命令 no-op：无选中或文件级选中）识别为无输出。哨兵使用普通文本，不含 NUL（Windows 文本剪贴板在 NUL 处终止）；定义唯一入口为 `host/searchReveal.ts` 的 `SEARCH_REVEAL_SENTINEL`。
 3. **行文本唯一吻合校验**（文件身份的唯一校验）：解析出的行列须落在目标文档范围内，且该行文本（剥 `\r`）与预览文本完全吻合；不吻合即安全放弃。残留选中条目配对到其他文件时在此拦下。
 4. **落位**：换算 LF 坐标后经 `view.locate` 发送（与双链锚点跳转同一通道）——单点光标落**匹配词首**（col 指向词首而非行首），flash 高亮由该通道既有语义提供；重握手补发兜底由 `documentSession.lastLocate` 既有机制承担。
 

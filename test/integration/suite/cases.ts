@@ -6806,49 +6806,44 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
     await waitViewState('outline-menu.md',
       (v) => v.sidebar?.open === true && v.outline?.panelPainted === true && v.outline.items.length === 7)
-    const copy = async (index: number, command: string): Promise<string> => {
-      // 竞速防御（#69 时序抖动）：菜单关闭（menuOpen=false）只代表 webview
-      // 命令已执行，clipboard.write 经消息桥到宿主 writeText 仍在途——
-      // 高负载（多片并发）下立即 readText 会读到上一次的剪贴板内容。
-      // 等待谓词改为「剪贴板内容相对上次复制发生变化」：五项复制载荷两两
-      // 不同（相邻调用亦不同），变化即代表本次写已落地，端到端对拍语义
-      // 不变（读取的仍是系统剪贴板实值）
-      const before = await vscode.env.clipboard.readText()
+    const copy = async (index: number, command: string, expected: string): Promise<string> => {
+      // 菜单关闭不代表宿主写入已完成。只等「相对前值变化」还会误收迟到的
+      // 前一次文本；按独立 fixture 的预期成品等待，错误内容仍会使测试失败。
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outline.test.contextMenu', index })
       await waitViewState('outline-menu.md', (v) => v.outline?.menuOpen === true)
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outline.test.menuClick', command })
       await waitViewState('outline-menu.md', (v) => v.outline?.menuOpen === false)
-      return poll('剪贴板更新', async () => {
+      return poll(`剪贴板更新（${command}：${JSON.stringify(expected)}）`, async () => {
         const text = await vscode.env.clipboard.readText()
-        return text !== before ? text : undefined
+        return text === expected ? text : undefined
       })
     }
     // 标题（plainText：**加粗** 标记不透出）
-    assert(await copy(1, 'copyHeading') === '加粗 Alpha', '复制标题应为剥标记可见文本')
+    assert(await copy(1, 'copyHeading', '加粗 Alpha') === '加粗 Alpha', '复制标题应为剥标记可见文本')
     // 标题和兄弟标题（同父组 = Alpha、Beta，含自身）
-    assert(await copy(1, 'copySiblings') === '加粗 Alpha\nBeta', '兄弟复制为同父全部标题逐行')
+    assert(await copy(1, 'copySiblings', '加粗 Alpha\nBeta') === '加粗 Alpha\nBeta', '兄弟复制为同父全部标题逐行')
     // 标题和子标题（Alpha 子树 = Alpha、Alpha 子）
-    assert(await copy(1, 'copyChildren') === '加粗 Alpha\nAlpha 子', '子标题复制含后代')
+    assert(await copy(1, 'copyChildren', '加粗 Alpha\nAlpha 子') === '加粗 Alpha\nAlpha 子', '子标题复制含后代')
     // 标题链接（宿主拼 [[笔记名#标题]]：笔记名 = 文件名去扩展名；标题取条目
     // 原文（含 **加粗** 等行内标记）——宿主 findHeadingOffset 按 ATX 标题行
     // 字面文本比较，两侧口径同源才能定位回原标题；剥标记文本只服务「复制
     // 标题」纯文本场景，写进链接必然定位落空（review-loops 第 2 轮）
-    const markedLink = await copy(1, 'copyLink')
+    const markedLink = await copy(1, 'copyLink', '[[outline-menu#**加粗** Alpha]]')
     assert(markedLink === '[[outline-menu#**加粗** Alpha]]',
       `含标记标题的链接应为标题原文，实际 ${markedLink}`)
     // 纯文本标题链接（Beta，index 3）：无标记可剥，原文 == 可见文本，一期口径不变
-    const plainLink = await copy(3, 'copyLink')
+    const plainLink = await copy(3, 'copyLink', '[[outline-menu#Beta]]')
     assert(plainLink === '[[outline-menu#Beta]]', `纯文本标题链接应不变，实际 ${plainLink}`)
     // Setext 标题链接（index 5）：同样取原文（其不能定位属一期已知限制，见下方往返断言）
-    const setextLink = await copy(5, 'copyLink')
+    const setextLink = await copy(5, 'copyLink', '[[outline-menu#Setext 标题]]')
     assert(setextLink === '[[outline-menu#Setext 标题]]',
       `Setext 标题链接应为标题原文，实际 ${setextLink}`)
     // 该段内容（整控制域源文含标题行，标记原样）
-    const sectionText = await copy(3, 'copySection')
+    const sectionText = await copy(3, 'copySection', '## Beta\n\nBeta 内容。\n\n#### Beta 深\n\n深内容。')
     assert(sectionText === '## Beta\n\nBeta 内容。\n\n#### Beta 深\n\n深内容。',
       `该段内容为整控制域源文，实际 ${JSON.stringify(sectionText)}`)
     // Setext 标题的复制（plainText）
-    assert(await copy(5, 'copyHeading') === 'Setext 标题', 'Setext 标题复制为可见文本')
+    assert(await copy(5, 'copyHeading', 'Setext 标题') === 'Setext 标题', 'Setext 标题复制为可见文本')
 
     // ---- 端到端往返：复制出的链接能否定位回原标题（#69 写入端 × #11 读回端） ----
     // 剪贴板文本 → 剥 [[ ]] 得注入目标 → injectWikilink（与真实 webview 消息
@@ -10529,6 +10524,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const afterCopy = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(afterCopy.appliedEdits === before.appliedEdits, '复制零写回')
 
+    // copy 与 cut 的载荷相同：先写不同哨兵，避免把 copy 的旧值当作 cut 完成。
+    await vscode.env.clipboard.writeText('[vsidian-before-cut]')
+    await poll('剪切前哨兵', async () =>
+      (await clipboardText()) === '[vsidian-before-cut]' ? true : undefined)
     await post({ kind: 'table.test.crossSelect', anchor: selFrom, head: selFrom + 4 })
     await post({ kind: 'contextMenu.test.contextMenu', pos: selFrom + 1 })
     await post({ kind: 'contextMenu.test.menuClick', command: 'cut' })
@@ -10544,7 +10543,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await post({ kind: 'contextMenu.test.contextMenu', pos: afterCut.text.indexOf('段落。') })
     await post({ kind: 'contextMenu.test.menuClick', command: 'paste' })
     await waitViewState('block-menu.md', (v) => v.text.includes('宿主桥粘贴文本'))
-    assert((await clipboardText()) === '宿主桥粘贴文本', '粘贴不改变剪贴板内容')
+    await poll('粘贴不改变剪贴板内容', async () =>
+      (await clipboardText()) === '宿主桥粘贴文本' ? true : undefined)
 
     await post({ kind: 'contextMenu.test.contextMenu', pos: afterCut.text.indexOf('段落。') })
     await post({ kind: 'contextMenu.test.menuClick', command: 'selectAll' })
@@ -16131,12 +16131,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
       for (let i = 0; i < 20 && !ready; i++) {
         await new Promise((r) => setTimeout(r, 500))
         await focus()
-        ready = (await clip()).includes(needle)
+        // focusNext 在结果已自动选中首条时会推进到乙；必须找到甲的具体匹配，
+        // 不能以任意含 needle 的条目就绪代替后续要打开的目标身份。
+        ready = (await clip()).includes(lineA3)
       }
       assert(ready, '搜索结果 10s 未就绪')
       // 甲首条选中（结果按文件名序，proto-a 最先）
       const first = await clip()
-      assert(first.startsWith('3,1:'), `首条应为 proto-a 行 3 列 1（实际 ${JSON.stringify(first)}）`)
+      assert(first === `3,1: ${lineA3}`, `首条应为 proto-a 行 3 列 1（实际 ${JSON.stringify(first)}）`)
 
       // —— 首次导航 + 显式命令定位 ——
       await vscode.commands.executeCommand('list.select')

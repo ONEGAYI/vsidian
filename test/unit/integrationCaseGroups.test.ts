@@ -41,6 +41,7 @@ vi.mock('vscode', () => ({
 
 import { run } from '../integration/suite/index'
 import { selectIntegrationCases, SENSITIVE_CASES } from '../integration/suite/caseSelection'
+import { CLIPBOARD_CASE_NAMES } from '../integration/suite/clipboardLock'
 
 beforeEach(() => {
   fixture.executed.length = 0
@@ -221,6 +222,15 @@ function productionCases(): Array<[string, null]> {
   if (!names.length) throw new Error('未读取到生产用例清单')
   return names
 }
+
+it('剪贴板互斥清单登记真实用例且全部保持 core 归属', () => {
+  const cases = productionCases()
+  const core = selectIntegrationCases(cases, { group: 'core' }).selected.map(([name]) => name)
+  for (const name of CLIPBOARD_CASE_NAMES) {
+    expect(cases.filter(([caseName]) => caseName === name)).toHaveLength(1)
+    expect(core).toContain(name)
+  }
+})
 
 it('四个 core 分片与第五组无交集、无漏项，其他同领域用例仍保留强制检查', () => {
   const all = productionCases()
