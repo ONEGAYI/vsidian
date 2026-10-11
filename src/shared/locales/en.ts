@@ -897,6 +897,16 @@ export const en = {
   'contextMenu.copy': 'Copy',
   'contextMenu.paste': 'Paste',
   'contextMenu.selectAll': 'Select all',
+  /** #439 链接场景三项（链接文字命中的簇首上下文动作；措辞与块链接两项
+   *  区分——address 是链接目标、text 是显示文字，不泛称 "copy link"） */
+  'contextMenu.openLink': 'Open link',
+  'contextMenu.copyLinkAddress': 'Copy link address',
+  'contextMenu.copyLinkText': 'Copy link text',
+  /** #439 链接场景三项的键位入口操作名（目标 = 光标处链接命中；默认未
+   *  绑定——Ctrl+click 是鼠标语义主入口） */
+  'command.link.open.title': 'Open link at cursor',
+  'command.link.copyAddress.title': 'Copy link address at cursor',
+  'command.link.copyText.title': 'Copy link display text at cursor',
   /** #438 图形专属簇（右键菜单项；只读/导出，编辑入口仍收敛于 edit 按钮） */
   'contextMenu.graphicPopup': 'Open in popup',
   'contextMenu.graphicExportSvg': 'Export as SVG',

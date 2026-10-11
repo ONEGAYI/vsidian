@@ -2611,6 +2611,22 @@ export class EmbedCardManager {
     return undefined
   }
 
+  /** #439 链接场景命令的端口出站：view 所属在场端口的实例级客户端消息经
+   *  sendRefEditOut → refEdit.message 信封（与嵌入内 Ctrl+单击激活完全同一
+   *  通道，B 会话按自身 docUri 守卫并以 B 目录/根边界解析）。view 不属于
+   *  任何在场端口返回 false（菜单打开即捕获目标，失配属竞态——按放弃
+   *  处理，不回落主正文桥） */
+  sendRefEditClientMessage(view: EditorView, message: WebviewToHost): boolean {
+    for (const entry of this.entries.values()) {
+      const live = entry.live
+      if (live?.instance && live.instance.getView() === view) {
+        this.sendRefEditOut(entry, message)
+        return true
+      }
+    }
+    return false
+  }
+
   /** P2-10 冲突「放弃当前版本」（conflictDiscard 执行体；P2-12 起与选择条
    *  按钮 / 测试钩子同径 onConflictAction）：焦点嵌入处于冲突暂停时经端口
    *  出站 sync.request（宿主回 doc.resync + 清暂停 = 放弃本次未提交输入版本

@@ -226,7 +226,7 @@ import {
   targetTipAnchorLeave,
   targetTipProbe,
 } from './targetTip'
-import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
+import { EmbedCardManager, EMBED_CARD_CLASS_NAMES, type EmbedLiveTarget } from './embedCard'
 import {
   GRAPHIC_LANG_ATTR,
   GRAPHIC_MODE_ATTR,
@@ -310,11 +310,14 @@ import {
   contextMenuKeybindingHints,
   contextMenuZoneAt,
   fenceInfoOf,
+  linkMenuCommandPayload,
   menuLineStructureOf,
   menuViewportPosition,
   CONTEXT_MENU_ITEMS,
   type ContextMenuBlockTarget,
   type GraphicMenuHit,
+  type LinkMenuHit,
+  type LinkSceneCommand,
   type MenuContextSnapshot,
   type TableMenuHit,
 } from '../shared/contextMenu'
@@ -1050,6 +1053,14 @@ export class WebviewSyncController {
       else if (id === 'headingFold' || id === 'headingUnfold' || id === 'headingToggleFold' ||
         id === 'headingFoldAll' || id === 'headingUnfoldAll') {
         this.runHeadingFoldCommand(id)
+      }
+      // #439 链接场景三项：本地分支直执行（目标 = 焦点实例光标处链接命中，
+      // 与「预览当前链接」同一目标推导口径；无命中静默不误动）。菜单入口
+      // 经 runContextMenuCommand 快照负载（打开时捕获），键位入口按光标即
+      // 时推导，两入口共用 runLinkSceneCommand；命令面板经 UI_OPERATIONS
+      // 注册循环回发 ui.command（同款执行体）
+      else if (id === 'openLink' || id === 'copyLinkAddress' || id === 'copyLinkText') {
+        this.runLinkSceneKeyCommand(id)
       }
       // #438 图形块场景簇四操作：本地分支直执行（只读/导出零写回，不出站
       // 宿主往返；命令面板入口经 ui.command 回发与本入口共用 runGraphicOp
@@ -3011,6 +3022,11 @@ export class WebviewSyncController {
           case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
           case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
           case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
+          // #439 链接场景三项：命令面板入口（快捷键走 router 本地分支直达），
+          // 与菜单入口共用 runLinkSceneCommand 执行体（目标按光标即时推导）
+          case 'openLink': this.runLinkSceneKeyCommand('openLink'); break
+          case 'copyLinkAddress': this.runLinkSceneKeyCommand('copyLinkAddress'); break
+          case 'copyLinkText': this.runLinkSceneKeyCommand('copyLinkText'); break
           // #437 表格簇命令面板入口（快捷键走 keybindings.execute → 宿主命令
           // → 本循环回发 ui.command，与菜单项同一执行实现；目标 = 光标处表格）
           case 'deleteTable': this.runTableClusterAtCursor('deleteTable'); break
@@ -7464,10 +7480,10 @@ export class WebviewSyncController {
    *  即放弃执行，不落回主编辑器 */
   private runContextMenuCommand(command: string): void {
     const target = this.contextMenuTarget
-    // #437/#438 场景负载照 contextMenuTarget 先例捕获（closeContextMenu 先于
-    // 分派清理 contextMenuSnapshot——执行期经 getter 取恒 null，语义窗口同
-    // contextMenuTarget 先例，见 getContextMenuSnapshot 注释）；锚点新鲜度由
-    // 重验二保证
+    // #437/#438/#439 场景负载照 contextMenuTarget 先例捕获（closeContextMenu
+    // 先于分派清理 contextMenuSnapshot——执行期经 getter 取恒 null，语义窗口
+    // 同 contextMenuTarget 先例，见 getContextMenuSnapshot 注释）；锚点新鲜度
+    // 由重验二保证
     const menuSnapshot = this.contextMenuSnapshot
     const tableHit = menuSnapshot?.table
     const menuView = this.contextMenuView
@@ -7505,6 +7521,17 @@ export class WebviewSyncController {
     if (command === 'copyBlockLink') {
       if (target !== null) {
         this.copyBlockLinkOf(target, view, embedTarget?.docUri ?? this.docUri)
+      }
+      return
+    }
+    // #439 链接场景三项：执行期取打开菜单时捕获的链接命中负载（#436 采集
+    // 层——嵌入 `![[…]]` 与代码上下文已在采集排除；锚点过期已由上方重验二
+    // 拦截）。无命中零操作（正常路径不会出现——when 已隐藏；防覆写层放开
+    // when 后的直发）
+    if (command === 'openLink' || command === 'copyLinkAddress' || command === 'copyLinkText') {
+      const hit = menuSnapshot?.link
+      if (hit) {
+        this.runLinkSceneCommand(command, view, embedTarget, hit)
       }
       return
     }
@@ -7765,6 +7792,53 @@ export class WebviewSyncController {
       return
     }
     this.runTableClusterCommand(command, resolved.view, resolved.embed)
+  }
+
+  /** #439 链接场景命令执行体（菜单分支与键位入口共用）：出站载荷派生是
+   *  纯函数（linkMenuCommandPayload——打开与 Ctrl+单击激活上报同构，复制
+   *  取材 target/display 原口径），此处只补会话身份与通道路由。打开链接：
+   *  主正文经面板桥直发（与根实例 postActivate 同一出口）；嵌入目标经端
+   *  口信封（sendRefEditClientMessage——与嵌入内 Ctrl+单击同一 refEdit
+   *  通道，宿主按 B 的 docUri 守卫）。复制两项经宿主剪贴板桥 text 变体
+   *  （与选区复制同款，EOL 归一在会话层）。外部 scheme 准入归宿主
+   *  linkTarget（菜单层不预判，失败反馈与 Ctrl+单击口径一致） */
+  private runLinkSceneCommand(command: LinkSceneCommand, view: EditorView,
+    embedTarget: EmbedLiveTarget | null, hit: LinkMenuHit): void {
+    const payload = linkMenuCommandPayload(command, hit)
+    if (payload.kind === 'clipboard.write') {
+      this.bridge.postMessage(payload)
+      return
+    }
+    if (embedTarget) {
+      this.embedCards?.sendRefEditClientMessage(view, {
+        ...payload,
+        sessionId: embedTarget.instance.targetSessionId,
+        docUri: embedTarget.instance.targetDocUri,
+      })
+      return
+    }
+    this.bridge.postMessage({ ...payload, sessionId: this.sessionId, docUri: this.docUri })
+  }
+
+  /** #439 键位入口：焦点实例光标处链接命中即时推导（menuLinkHitAtPos——
+   *  与菜单采集同源；嵌入内目标按嵌入实例文档解析）。无命中静默（与
+   *  「预览当前链接」口径一致），阅读模式不接管 */
+  private runLinkSceneKeyCommand(command: LinkSceneCommand): void {
+    if (this.viewMode !== 'live') {
+      return
+    }
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const hit = menuLinkHitAtPos(resolved.view, resolved.view.state.selection.main.head)
+    if (!hit) {
+      return
+    }
+    const embedTarget = resolved.embed
+      ? this.embedCards?.liveViewEntry(resolved.view) ?? null
+      : null
+    this.runLinkSceneCommand(command, resolved.view, embedTarget, hit)
   }
 
   /** 剪切/复制：选区文本经宿主剪贴板桥直写（多行 EOL 归一在会话层）；
@@ -10353,6 +10427,10 @@ export class WebviewSyncController {
                   .map((btn) => btn.dataset['vsidianCommand'] ?? ''),
               }
             : null,
+          // #439 链接场景项等场景命令的呈现证据（全部按钮的 command 集，
+          // 含子菜单叶命令——「哪三项在不在菜单里」的绘制层断言输入）
+          commands: [...contextMenuEl.querySelectorAll<HTMLButtonElement>(
+            'button[data-vsidian-command]')].map((button) => button.dataset['vsidianCommand'] ?? ''),
           // #359 T10：组件菜单项观测（data-vsidian-command 含点 = 命名空间
           // 运行期项——集成断言组件簇在场/回收的绘制层证据）
           addonCommands: [...new Set([...contextMenuEl.querySelectorAll<HTMLButtonElement>(

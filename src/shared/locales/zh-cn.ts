@@ -842,6 +842,17 @@ export const zhCn: Record<MessageKey, string> = {
   'contextMenu.copy': '复制',
   'contextMenu.paste': '粘贴',
   'contextMenu.selectAll': '全选',
+  /** #439 链接场景三项（链接文字命中的簇首上下文动作；措辞与块链接两项
+   *  区分——避免泛称「复制链接」（CONTEXT.md 术语约束），address 是链接
+   *  目标、显示文字是渲染标签） */
+  'contextMenu.openLink': '打开链接',
+  'contextMenu.copyLinkAddress': '复制链接地址',
+  'contextMenu.copyLinkText': '复制显示文字',
+  /** #439 链接场景三项的键位入口操作名（目标 = 光标处链接命中；默认未
+   *  绑定——Ctrl+单击是鼠标语义主入口） */
+  'command.link.open.title': '打开光标处链接',
+  'command.link.copyAddress.title': '复制光标处链接地址',
+  'command.link.copyText.title': '复制光标处链接显示文字',
   /** #438 图形专属簇（右键菜单项；只读/导出，编辑入口仍收敛于 edit 按钮） */
   'contextMenu.graphicPopup': '弹窗预览',
   'contextMenu.graphicExportSvg': '导出 SVG',

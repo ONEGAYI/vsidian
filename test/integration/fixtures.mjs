@@ -1860,6 +1860,24 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '结尾段落。',
     '',
   ].join('\n'), 'utf8')
+  // #439 链接场景项：四类链接（双链别名/普通外链编码/autolink/宽松链接）
+  // 与普通段、表格格内链接——呈现与复制/打开端到端断言载体
+  writeFileSync(path.join(wsDir, 'menu-links.md'), [
+    '---',
+    'title: 链接菜单',
+    '---',
+    '',
+    '看 [[双链 笔记|别名]] 尾',
+    '',
+    '看 [链接文字](https://example.com/a%20b?q=1) 尾',
+    '',
+    '普通段落一行',
+    '',
+    '| [[格内链]] | b |',
+    '|---|---|',
+    '| 1 | 2 |',
+    '',
+  ].join('\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'dup'), { recursive: true })
   writeFileSync(path.join(wsDir, 'dup', '甲.md'), '# 重名甲（dup 目录）\n', 'utf8')
   mkdirSync(path.join(wsDir, 'other'), { recursive: true })

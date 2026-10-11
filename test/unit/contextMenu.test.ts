@@ -25,12 +25,14 @@ import {
   contextMenuZoneAt,
   contextMenuClickWithinSelection,
   hideContextMenuItem,
+  linkMenuCommandPayload,
   menuLineStructureOf,
   menuViewportPosition,
   overrideContextMenuItem,
   registerContextMenuItem,
   submenuSide,
   __resetContextMenuRegistryForTest,
+  type LinkMenuHit,
   type MenuContextSnapshot,
   type MenuItemDescriptor,
 } from '../../src/shared/contextMenu'
@@ -120,11 +122,12 @@ describe('覆写层语义（运行期注册表，内置 = 第一个注册者）'
     const registryIds = contextMenuRegistrySnapshot().map((def) => def.id).sort()
     const builtinIds = flattenItems(CONTEXT_MENU_ITEMS).map((def) => def.id).sort()
     expect(registryIds).toEqual(builtinIds)
-    // 渲染走 registry：标题行上下文（when 谓词全放行的顶级项——#437 表格簇
-    // 与 #438 图形簇均按 zone 过滤，期望集对谓词求值感知）能拿到全部顶级
-    // 项，且子项不因扁平注册表被提升为顶级项
+    // 渲染走 registry：标题行 + 链接命中上下文（#437/#438 场景簇按 zone
+    // 过滤、#439 链接三项与块链接两项按命中在场，期望集对谓词求值感知）
+    // 能拿到全部顶级项，且子项不因扁平注册表被提升为顶级项
     const headingCtx = normalCtx({
       blockTarget: { block: { start: 4, end: 4 }, heading: { level: 1, text: '标题' } },
+      link: { kind: 'wikilink', target: '目标', display: '目标', range: { from: 0, to: 6 } },
     })
     const expectedTopIds = CONTEXT_MENU_ITEMS
       .filter((def: MenuItemDescriptor) => def.when === undefined || def.when(headingCtx))
@@ -997,16 +1000,140 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
   })
 })
 
+// ---- #439：链接场景项——命令载荷派生（纯函数）与描述符呈现 ----
+
+describe('链接场景命令载荷派生（linkMenuCommandPayload，#439）', () => {
+  // 取材口径与 Ctrl+单击 activate 上报 / 渲染 display 同源（LinkMenuHit 由
+  // #436 采集层产出）：target = 双链 `|` 之前未 trim / 外部 href 原样；
+  // display = 双链别名优先 / 普通链接链接文字 / autolink URL / 宽松文字段
+  const wikiHit: LinkMenuHit = {
+    kind: 'wikilink',
+    target: '笔记 一 ',
+    display: '别名',
+    range: { from: 10, to: 24 },
+  }
+  const mdHit: LinkMenuHit = {
+    kind: 'link',
+    target: 'https://example.com/a%20b?q=1',
+    display: '链接文字',
+    range: { from: 30, to: 62 },
+  }
+  const autolinkHit: LinkMenuHit = {
+    kind: 'autolink',
+    target: 'https://example.com/auto',
+    display: 'https://example.com/auto',
+    range: { from: 70, to: 94 },
+  }
+  const looseHit: LinkMenuHit = {
+    kind: 'loose',
+    target: 'my note.md',
+    display: '文字段',
+    range: { from: 100, to: 118 },
+  }
+
+  it('打开链接按族分派：双链 → wikilink.activate（target 未 trim + 源区间）', () => {
+    expect(linkMenuCommandPayload('openLink', wikiHit)).toEqual({
+      kind: 'wikilink.activate',
+      target: '笔记 一 ',
+      srcStart: 10,
+      srcEnd: 24,
+    })
+  })
+
+  it('打开链接其余三族 → link.activate（href 原样，含编码与查询串）', () => {
+    for (const hit of [mdHit, autolinkHit, looseHit]) {
+      expect(linkMenuCommandPayload('openLink', hit)).toEqual({
+        kind: 'link.activate',
+        href: hit.target,
+        srcStart: hit.range.from,
+        srcEnd: hit.range.to,
+      })
+    }
+  })
+
+  it('复制链接地址 = target 原样：双链未 trim、外部 href 不解码', () => {
+    expect(linkMenuCommandPayload('copyLinkAddress', wikiHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '笔记 一 ',
+    })
+    expect(linkMenuCommandPayload('copyLinkAddress', mdHit)).toEqual({
+      kind: 'clipboard.write',
+      text: 'https://example.com/a%20b?q=1',
+    })
+  })
+
+  it('复制显示文字 = display：双链别名优先 / autolink URL 本身 / 宽松文字段', () => {
+    expect(linkMenuCommandPayload('copyLinkText', wikiHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '别名',
+    })
+    expect(linkMenuCommandPayload('copyLinkText', mdHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '链接文字',
+    })
+    expect(linkMenuCommandPayload('copyLinkText', autolinkHit)).toEqual({
+      kind: 'clipboard.write',
+      text: 'https://example.com/auto',
+    })
+    expect(linkMenuCommandPayload('copyLinkText', looseHit)).toEqual({
+      kind: 'clipboard.write',
+      text: '文字段',
+    })
+  })
+})
+
+describe('链接场景三项描述符（when = 链接命中在场；enable 恒可用；簇 1 顶部）', () => {
+  const linkHit: LinkMenuHit = {
+    kind: 'wikilink', target: '目标', display: '目标',
+    range: { from: 0, to: 6 },
+  }
+  const linkCtx = normalCtx({ link: linkHit })
+
+  it('链接命中：三项呈现于簇 1 顶部、可用；组不变（link）', () => {
+    const items = buildContextMenuModel(linkCtx).find((g) => g.id === 'link')!.items
+    expect(items.map((i) => i.id)).toEqual([
+      'openLink', 'copyLinkAddress', 'copyLinkText',
+      'insertWikilink', 'insertExternalLink', 'copyBlockLink',
+    ])
+    expect(items.slice(0, 3).every((i) => i.enabled), 'enable 恒可用（命中只在 normal 区采集）').toBe(true)
+  })
+
+  it('链接命中 + 标题行：块链接两项照常显隐（同簇并存）', () => {
+    const headingCtx = normalCtx({
+      blockTarget: { block: { start: 4, end: 4 }, heading: { level: 1, text: '标题' } },
+      link: linkHit,
+    })
+    expect(buildContextMenuModel(headingCtx).find((g) => g.id === 'link')!.items.map((i) => i.id))
+      .toEqual(['openLink', 'copyLinkAddress', 'copyLinkText',
+        'insertWikilink', 'insertExternalLink', 'copyHeadingLink', 'copyBlockLink'])
+  })
+
+  it('无命中不显示（非置灰）：普通正文 / 空行 / 表格区 / 图形块区', () => {
+    const contexts: MenuContextSnapshot[] = [
+      normalCtx({ blockTarget: { block: { start: 4, end: 4 }, heading: null } }),
+      normalCtx({ blockTarget: null }),
+      normalCtx({ zone: 'table' }),
+      normalCtx({ zone: 'graphic' }),
+    ]
+    for (const ctx of contexts) {
+      const ids = modelIds(ctx)
+      expect(ids, `ctx.zone=${ctx.zone} 无链接命中不显示三项`).not.toContain('openLink')
+      expect(ids).not.toContain('copyLinkAddress')
+      expect(ids).not.toContain('copyLinkText')
+    }
+  })
+})
+
 // ---- #184：命令分派契约（每个内置叶命令在 runContextMenuCommand 有执行路径）----
 
 describe('命令分派契约（三簇叶命令可执行；显式分支另有面板行为用例逐项钉住）', () => {
   it('叶命令 ∈ formatOperations id ∪ 显式分派分支集；父项（有 children）无叶命令豁免', () => {
     // runContextMenuCommand（syncController）的显式分支集合——行为级用例在
     // contextMenuPanel.test.ts 逐项覆盖（cut/copy/paste/selectAll/
-    // copyHeadingLink/copyBlockLink/insertTable + bold 代表 formatOperations
-    // 同路径 + #437 表格簇 13 项 + #438 图形簇 4 项）；本契约防「新增描述符
-    // 忘接分派」的回归。
-    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable',
+    // copyHeadingLink/copyBlockLink/insertTable/openLink/copyLinkAddress/
+    // copyLinkText + bold 代表 formatOperations 同路径 + #437 表格簇 13 项 +
+    // #438 图形簇 4 项）；本契约防「新增描述符忘接分派」的回归。
+    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable', 'openLink', 'copyLinkAddress', 'copyLinkText',
       // #437 表格簇：结构六操作（TABLE_STRUCTURE_COMMANDS）+ 新七命令
       'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
       'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
