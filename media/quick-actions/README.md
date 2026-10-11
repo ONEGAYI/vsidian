@@ -1,8 +1,8 @@
 # 快速操作图标
 
-`contact-sheet.png` 是栅格总览：42 列按下表顺序排列，首行为浅色主题，次行为深色主题。每格 96×96 像素，透明背景。`light/` 和 `dark/` 内的 PNG 从总览逐格原样裁切；同名 SVG 再由 VTracer 对该 PNG 描摹生成，内含真实 `<path>`，不嵌入位图。
+`contact-sheet.png` 是栅格总览：55 列按下表顺序排列，首行为浅色主题，次行为深色主题。每格 96×96 像素，透明背景。`light/` 和 `dark/` 内的 PNG 从总览逐格原样裁切；同名 SVG 再由 VTracer 对该 PNG 描摹生成，内含真实 `<path>`，不嵌入位图。
 
-AI 生图源图有五张，均保留最终原图与裁切源图：`highlight-horizontal-rule-ai-board.png` / `highlight-horizontal-rule-source.png`（高亮笔与分割线，192×96），`context-menu-ai-board.png` / `context-menu-source.png`（右键菜单图标 14 枚，1344×96；提示词与工具记录见 `context-menu-ai-prompt.md`），`find-panel-ai-board.png` / `find-panel-source.png`（查找面板图标 6 枚，576×96；提示词与工具记录见 `find-panel-ai-prompt.md`），`settings-sections-ai-board.png` / `settings-sections-source.png`（设置页标题图标 2 枚，192×96；候选、提示词与裁切记录见 `settings-sections-ai-prompt.md`），`refview-index-ai-board.png` / `refview-index-source.png`（文件与链接组标题图标 2 枚，192×96；提示词与裁切记录见 `refview-index-ai-prompt.md`）。重建脚本按格裁切源图的 alpha，分别着浅色或深色主题色，再纳入总览及 VTracer 描摹流程；其余 16 枚仍由脚本绘制。
+AI 生图源图有六张，均保留最终原图与裁切源图：`highlight-horizontal-rule-ai-board.png` / `highlight-horizontal-rule-source.png`（高亮笔与分割线，192×96），`context-menu-ai-board.png` / `context-menu-source.png`（右键菜单图标 14 枚，1344×96；提示词与工具记录见 `context-menu-ai-prompt.md`），`find-panel-ai-board.png` / `find-panel-source.png`（查找面板图标 6 枚，576×96；提示词与工具记录见 `find-panel-ai-prompt.md`），`settings-sections-ai-board.png` / `settings-sections-source.png`（设置页标题图标 2 枚，192×96；候选、提示词与裁切记录见 `settings-sections-ai-prompt.md`），`refview-index-ai-board.png` / `refview-index-source.png`（文件与链接组标题图标 2 枚，192×96；提示词与裁切记录见 `refview-index-ai-prompt.md`），`menu-scenes-ai-board.png` / `menu-scenes-source.png`（菜单场景图标 13 枚，1248×96；元素对应、提示词与裁切记录见 `menu-scenes-ai-prompt.md`）。重建脚本按格裁切源图的 alpha，分别着浅色或深色主题色，再纳入总览及 VTracer 描摹流程；其余 16 枚仍由脚本绘制。
 
 | 列 | 图标 key | 列 | 图标 key | 列 | 图标 key |
 | --- | --- | --- | --- | --- | --- |
@@ -37,6 +37,24 @@ AI 生图源图有五张，均保留最终原图与裁切源图：`highlight-hor
 | 40 | `wordSegment` | 中文分词组的词块切分 |
 | 41 | `pointerLink` | 引用视图组的手型指针与下划线链接 |
 | 42 | `dbLink` | 索引维护组的数据库与锁链 |
+
+菜单场景图标（#441，43–55 列；用户已授权接线，明暗 PNG/SVG 与菜单 CSS 规则已补齐，18px 图标经真实右键截图像素验证）：
+
+| 列 | 图标 key | 对应菜单元素 |
+| --- | --- | --- |
+| 43 | `insertRowAbove` | 表格：上方插入行 |
+| 44 | `insertRowBelow` | 表格：下方插入行 |
+| 45 | `insertColumnLeft` | 表格：左侧插入列 |
+| 46 | `insertColumnRight` | 表格：右侧插入列 |
+| 47 | `deleteRow` | 表格：删除行 |
+| 48 | `deleteColumn` | 表格：删除列 |
+| 49 | `deleteTable` | 表格：删除表格 |
+| 50 | `selectRow` | 表格：选择行 |
+| 51 | `selectColumn` | 表格：选择列 |
+| 52 | `removeQuote` | 引用块内表格：移除引用块 |
+| 53 | `popupPreview` | 图形块：弹窗预览 |
+| 54 | `exportSvg` | 图形块：导出 SVG |
+| 55 | `exportPng` | 图形块：导出 PNG |
 
 重建命令：
 

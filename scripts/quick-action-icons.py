@@ -31,6 +31,11 @@ AI_ICON_SOURCES: tuple[tuple[Path, tuple[str, ...]], ...] = (
     )),
     (ASSETS / "settings-sections-source.png", ("typewriter", "wordSegment")),
     (ASSETS / "refview-index-source.png", ("pointerLink", "dbLink")),
+    (ASSETS / "menu-scenes-source.png", (
+        "insertRowAbove", "insertRowBelow", "insertColumnLeft", "insertColumnRight",
+        "deleteRow", "deleteColumn", "deleteTable", "selectRow", "selectColumn", "removeQuote",
+        "popupPreview", "exportSvg", "exportPng",
+    )),
 )
 KEYS = (
     "bold", "italic", "strikethrough", "inlineCode", "heading",

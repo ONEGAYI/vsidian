@@ -1882,10 +1882,10 @@ body.vscode-high-contrast #app {
   mask-size: contain;
 }
 
-/* #184 图标接线（26 枚 = 16 复用快速操作资产 + 10 新生成）：菜单挂 body
+/* #441 图标接线（40 枚，含表格 10 枚与图形块 3 枚）：菜单挂 body
    （不在 #app 内），规则不带 #app 前缀；两套资源与快速操作条同一 18px
-   画布资产族，mask 跟随前景色。备用 4 key（pastePlain/media/footnote/
-   callout）资产在场但菜单不引用——规格「扩展约定」显式记账，两表同步
+   画布资产族，mask 跟随前景色。备用 3 key（media/footnote/callout）
+   资产在场但菜单不引用——规格「扩展约定」显式记账，两表同步
    由 test/unit/contextMenu.test.ts 钉住。 */
 .vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-link.svg'); }
 .vsidian-context-menu [data-icon='externalLink'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-externalLink.svg'); }
@@ -1914,6 +1914,20 @@ body.vscode-high-contrast #app {
 .vsidian-context-menu [data-icon='horizontalRule'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-horizontalRule.svg'); }
 .vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-codeBlock.svg'); }
 .vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-blockMath.svg'); }
+/* #441：表格与图形块场景图标，沿既有 data-icon 遮罩入口接线。 */
+.vsidian-context-menu [data-icon='insertRowAbove'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-insertRowAbove.svg'); }
+.vsidian-context-menu [data-icon='insertRowBelow'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-insertRowBelow.svg'); }
+.vsidian-context-menu [data-icon='insertColumnLeft'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-insertColumnLeft.svg'); }
+.vsidian-context-menu [data-icon='insertColumnRight'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-insertColumnRight.svg'); }
+.vsidian-context-menu [data-icon='deleteRow'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-deleteRow.svg'); }
+.vsidian-context-menu [data-icon='deleteColumn'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-deleteColumn.svg'); }
+.vsidian-context-menu [data-icon='deleteTable'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-deleteTable.svg'); }
+.vsidian-context-menu [data-icon='selectRow'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-selectRow.svg'); }
+.vsidian-context-menu [data-icon='selectColumn'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-selectColumn.svg'); }
+.vsidian-context-menu [data-icon='removeQuote'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-removeQuote.svg'); }
+.vsidian-context-menu [data-icon='popupPreview'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-popupPreview.svg'); }
+.vsidian-context-menu [data-icon='exportSvg'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-exportSvg.svg'); }
+.vsidian-context-menu [data-icon='exportPng'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-exportPng.svg'); }
 
 body.vscode-dark .vsidian-context-menu [data-icon='link'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-link.svg'); }
@@ -1969,6 +1983,32 @@ body.vscode-dark .vsidian-context-menu [data-icon='codeBlock'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-codeBlock.svg'); }
 body.vscode-dark .vsidian-context-menu [data-icon='blockMath'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-blockMath.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='insertRowAbove'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='insertRowAbove'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-insertRowAbove.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='insertRowBelow'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='insertRowBelow'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-insertRowBelow.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='insertColumnLeft'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='insertColumnLeft'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-insertColumnLeft.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='insertColumnRight'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='insertColumnRight'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-insertColumnRight.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='deleteRow'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='deleteRow'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-deleteRow.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='deleteColumn'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='deleteColumn'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-deleteColumn.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='deleteTable'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='deleteTable'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-deleteTable.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='selectRow'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='selectRow'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-selectRow.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='selectColumn'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='selectColumn'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-selectColumn.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='removeQuote'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='removeQuote'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-removeQuote.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='popupPreview'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='popupPreview'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-popupPreview.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='exportSvg'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='exportSvg'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-exportSvg.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='exportPng'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-exportPng.svg'); }
 
 /* 文字徽标（H1–H6）：语言无关的字面，弱化一档与文案区分 */
 .vsidian-context-menu .vsidian-context-menu-badge {

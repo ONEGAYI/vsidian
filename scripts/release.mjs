@@ -129,6 +129,10 @@ const QUICK_ACTION_ICON_KEYS = [
   'pointerLink', 'dbLink',
   // #265 设置页二级标题组的两枚生图资产
   'typewriter', 'wordSegment',
+  // #441 表格与图形块场景菜单图标。
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
+  'popupPreview', 'exportSvg', 'exportPng',
 ]
 const REQUIRED_QUICK_ACTION_SVGS = ['light', 'dark'].flatMap((theme) =>
   QUICK_ACTION_ICON_KEYS.map((key) => `out/webview/assets/${theme}-${key}.svg`),
