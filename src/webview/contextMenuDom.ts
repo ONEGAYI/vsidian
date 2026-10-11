@@ -89,8 +89,9 @@ export interface BuildMenuDomOptions {
   classNames?: Partial<MenuDomClassNames>
   /** 叶命令回调（父项不触发） */
   onCommand: (command: string) => void
-  /** 取词器（缺省 t()；测试注入绕过语言包装配态） */
-  resolveLabel?: (key: MessageKey) => string
+  /** 取词器（缺省 t()；测试注入绕过语言包装配态。params 为 #437 起的
+   *  文案插值参数（选择第 {n} 行类），透传 t() 第二参 */
+  resolveLabel?: (key: MessageKey, params?: Record<string, string | number>) => string
 }
 
 export function buildMenuDom(
@@ -98,7 +99,8 @@ export function buildMenuDom(
   options: BuildMenuDomOptions,
 ): HTMLElement {
   const names: MenuDomClassNames = { ...CONTEXT_MENU_CLASS_NAMES, ...options.classNames }
-  const resolveLabel = options.resolveLabel ?? ((key: MessageKey) => t(key))
+  const resolveLabel = options.resolveLabel ??
+    ((key: MessageKey, params?: Record<string, string | number>) => t(key, params))
   const menu = document.createElement('div')
   menu.className = names.menu
   menu.setAttribute('role', 'menu')
@@ -150,8 +152,9 @@ export function buildMenuDom(
     }
     const label = document.createElement('span')
     label.className = names.label
-    // #359 T10：显式文字（附加组件项的自由文本）优先于字典键取词
-    label.textContent = def.label !== undefined ? def.label : resolveLabel(def.labelKey)
+    // #359 T10：显式文字（附加组件项的自由文本）优先于字典键取词；
+    // #437：labelParams（选择第 {n} 行类插值）随 labelKey 透传 t()
+    label.textContent = def.label !== undefined ? def.label : resolveLabel(def.labelKey, def.labelParams)
     btn.appendChild(label)
     if (def.hint !== undefined) {
       const hint = document.createElement('span')

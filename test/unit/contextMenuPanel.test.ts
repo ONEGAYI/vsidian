@@ -15,6 +15,8 @@ import {
   overrideContextMenuItem,
   registerContextMenuItem,
 } from '../../src/shared/contextMenu'
+import { activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from '../../src/webview/liveLinks'
+import { zhCn } from '../../src/shared/locales/zh-cn'
 
 if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined) {
   ;(Range.prototype as unknown as { getClientRects(): DOMRectList }).getClientRects =
@@ -685,9 +687,208 @@ describe('快捷键入口（同一命令的两个入口汇到同一执行）', (
   })
 })
 
+// ---- #439 链接场景三项（打开链接 / 复制链接地址 / 复制显示文字）----
+
+describe('链接场景三项：呈现与显隐（#439）', () => {
+  const LINK_DOC = [
+    '---',
+    'title: 头区',
+    '---',
+    '',
+    '看 [[双链 笔记|别名]] 尾',
+    '',
+    '普通段落一行',
+    '',
+  ].join('\n')
+
+  it('链接文字上：三项呈现于簇 1 顶部且可用；措辞键与块链接两项区分', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, LINK_DOC)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: LINK_DOC.indexOf('别名') })
+    expect(topCommands().slice(0, 6)).toEqual([
+      'openLink', 'copyLinkAddress', 'copyLinkText',
+      'wikilink', 'link', 'copyBlockLink',
+    ])
+    for (const command of ['openLink', 'copyLinkAddress', 'copyLinkText']) {
+      expect(buttonOf(command)!.disabled, `${command} enable 恒可用`).toBe(false)
+    }
+    // 措辞红线（CONTEXT.md 术语约束）：新词条不得泛称「复制链接」——jsdom
+    // 无语言岛时标签回退键名，中文措辞直接对拍语言包词条
+    const texts = [...menuEl()!.querySelectorAll('.vsidian-context-menu-label')]
+      .map((el) => el.textContent ?? '')
+    expect(texts).toContain('contextMenu.openLink')
+    expect(texts).toContain('contextMenu.copyLinkAddress')
+    expect(texts).toContain('contextMenu.copyLinkText')
+    expect(zhCn['contextMenu.openLink']).toBe('打开链接')
+    expect(zhCn['contextMenu.copyLinkAddress']).toBe('复制链接地址')
+    expect(zhCn['contextMenu.copyLinkText']).toBe('复制显示文字')
+    expect(Object.values(zhCn).some((v) => v === '复制链接'), '语言包不得出现泛称「复制链接」词条').toBe(false)
+  })
+
+  it('普通文本与空行：三项不显示（无命中隐藏而非置灰）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, LINK_DOC)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: LINK_DOC.indexOf('普通段落') })
+    expect(topCommands()).not.toContain('openLink')
+    expect(topCommands()).not.toContain('copyLinkAddress')
+    expect(topCommands()).not.toContain('copyLinkText')
+    const blankPos = LINK_DOC.split('\n').slice(0, 3).join('\n').length + 1
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: blankPos })
+    expect(topCommands()).not.toContain('openLink')
+  })
+
+  it('表格格内链接不接三项（zone=table 维持降级矩阵简化）', () => {
+    const text = '| [[格内链]] | b |\n|---|---|\n| 1 | 2 |'
+    const h = makeBridge()
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: text.indexOf('格内链') })
+    expect(allCommands()).not.toContain('openLink')
+    expect(allCommands()).not.toContain('copyLinkAddress')
+    expect(allCommands()).not.toContain('copyLinkText')
+  })
+
+  it('裸 URL 文本按普通正文处理（不识别为链接，三项不显示）', () => {
+    const text = '裸 https://example.com/a 尾'
+    const h = makeBridge()
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: text.indexOf('example') })
+    expect(topCommands()).not.toContain('openLink')
+  })
+})
+
+describe('链接场景三项：打开链接与 Ctrl+单击同构（#439）', () => {
+  /** 与 Ctrl+单击判定族同源的期望载荷收集：activate 族回调只收集不上报，
+   *  菜单出站消息须与之同 kind 同载荷（jsdom 无布局，真实 Ctrl+单击路径
+   *  的同构对拍在浏览器套件） */
+  const cases: Array<[string, 'wikilink.activate' | 'link.activate', (doc: string) => number]> = [
+    ['看 [[双链 笔记|别名]] 尾', 'wikilink.activate', (doc) => doc.indexOf('别名')],
+    ['看 [链接文字](https://example.com/a%20b?q=1) 尾', 'link.activate', (doc) => doc.indexOf('链接文字')],
+    ['见 <https://example.com/auto> 尾', 'link.activate', (doc) => doc.indexOf('auto')],
+    ['开 [文字段](my note.md) 尾', 'link.activate', (doc) => doc.indexOf('文字段')],
+  ]
+
+  for (const [docLine, expectedKind, posOf] of cases) {
+    it(`${expectedKind}：menuClick openLink 出站与 activate 判定族同构（${docLine.slice(0, 12)}…）`, async () => {
+      const h = makeBridge()
+      const { c } = mountPanel(h, `${docLine}\n`)
+      const view = c.getView()!
+      const pos = posOf(docLine)
+      // 期望载荷：activate 族收集回调（零副作用查询，与 Ctrl+单击同一判定内核）
+      let expected: { target?: string; href?: string; from: number; to: number } | null = null
+      activateWikilinkAtPos(view, pos, (target, from, to) => { expected = { target, from, to } })
+      if (!expected) {
+        activateLinkAtPos(view, pos, (href, from, to) => { expected = { href, from, to } }) ||
+          activateLooseLinkAtPos(view, pos, (href, from, to) => { expected = { href, from, to } })
+      }
+      expect(expected, '前置：光标处应命中链接（activate 判定族）').not.toBeNull()
+      c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos })
+      c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+      const activate = h.sent.find((m) => m.kind === 'wikilink.activate' || m.kind === 'link.activate')
+      expect(activate, '应出站激活消息').toBeTruthy()
+      expect(activate!.kind).toBe(expectedKind)
+      expect(expectedKind === 'wikilink.activate' ? (activate as { target: string }).target
+        : (activate as { href: string }).href).toBe(
+          expectedKind === 'wikilink.activate' ? expected!.target : expected!.href)
+      expect((activate as { srcStart: number }).srcStart).toBe(expected!.from)
+      expect((activate as { srcEnd: number }).srcEnd).toBe(expected!.to)
+      expect((activate as { sessionId: string }).sessionId).toBeTruthy()
+      expect((activate as { docUri: string }).docUri).toBe(DOC_URI)
+      expect(menuEl(), '命令执行后菜单关闭').toBeNull()
+    })
+  }
+
+  it('无命中直发 openLink（防覆写层放开 when 的直发路径）：零出站', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, '普通段落\n')
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: 0 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+    expect(h.sent.filter((m) => m.kind === 'wikilink.activate' || m.kind === 'link.activate'
+      || m.kind === 'clipboard.write')).toHaveLength(0)
+  })
+
+  it('执行前重验：菜单打开期间文档被外部改写，openLink 放弃（零出站）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, '看 [[目标笔记]] 尾\n')
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: 4 })
+    c.handleHostMessage({
+      kind: 'doc.changed', version: 2, changes: [{ offset: 0, length: 0, text: 'x' }], origin: 'external',
+    })
+    h.sent.length = 0
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+    expect(h.sent.filter((m) => m.kind === 'wikilink.activate' || m.kind === 'clipboard.write')).toHaveLength(0)
+    expect(menuEl(), '放弃路径也应关闭菜单').toBeNull()
+  })
+})
+
+describe('链接场景三项：复制取材与键位入口（#439）', () => {
+  it('复制链接地址：双链 target 未 trim、外部 href 原样不解码', () => {
+    const wiki = '看 [[双链 笔记 |别名]] 尾\n'
+    const h = makeBridge()
+    const { c } = mountPanel(h, wiki)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: wiki.indexOf('别名') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    expect(h.sent).toContainEqual({ kind: 'clipboard.write', text: '双链 笔记 ' })
+
+    const ext = '看 [链接文字](https://example.com/a%20b?q=1) 尾\n'
+    const h2 = makeBridge()
+    const { c: c2 } = mountPanel(h2, ext)
+    c2.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: ext.indexOf('链接文字') })
+    c2.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    expect(h2.sent).toContainEqual({ kind: 'clipboard.write', text: 'https://example.com/a%20b?q=1' })
+  })
+
+  it('复制显示文字：双链别名优先 / 普通链接链接文字', () => {
+    const wiki = '看 [[双链 笔记|别名]] 尾\n'
+    const h = makeBridge()
+    const { c } = mountPanel(h, wiki)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: wiki.indexOf('别名') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkText' })
+    expect(h.sent).toContainEqual({ kind: 'clipboard.write', text: '别名' })
+
+    const ext = '看 [链接文字](https://example.com/a) 尾\n'
+    const h2 = makeBridge()
+    const { c: c2 } = mountPanel(h2, ext)
+    c2.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: ext.indexOf('链接文字') })
+    c2.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkText' })
+    expect(h2.sent).toContainEqual({ kind: 'clipboard.write', text: '链接文字' })
+    // 复制零写回
+    expect(h2.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
+  })
+
+  it('键位入口：绑定后光标在双链上按键 → 同一执行体出站（无命中静默）', () => {
+    const text = '看 [[目标 笔记]] 与普通段 尾\n'
+    const h = makeBridge()
+    const { c, parent } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'keybindings.snapshot', overrides: { openLink: ['ctrl+alt+o'] } })
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: text.indexOf('目标'), head: text.indexOf('目标') } })
+    view.focus()
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'o', ctrlKey: true, altKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(h.sent).toContainEqual({
+      kind: 'wikilink.activate',
+      sessionId: 's1',
+      docUri: DOC_URI,
+      target: '目标 笔记',
+      srcStart: text.indexOf('[['),
+      srcEnd: text.indexOf(']]') + 2,
+    })
+    // 无命中（光标在普通文本）：零出站
+    h.sent.length = 0
+    view.dispatch({ selection: { anchor: text.indexOf('普通段'), head: text.indexOf('普通段') } })
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'o', ctrlKey: true, altKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(h.sent.filter((m) => m.kind === 'wikilink.activate' || m.kind === 'link.activate')).toHaveLength(0)
+    expect(parent.isConnected).toBe(true)
+  })
+})
+
 // ---- #436 场景命中负载（采集层：contextSnapshotAt 的三类负载）----
 
 import { type MenuContextSnapshot } from '../../src/shared/contextMenu'
+import { selectTableRegion, tableRegionField } from '../../src/webview/tableRegionSelection'
 
 describe('场景命中负载采集（表格/链接/图形块进快照，#436）', () => {
   /** 打开菜单并捕获快照探针：注册一个 when 恒隐藏的临时项（不改变菜单
@@ -947,5 +1148,172 @@ describe('场景命中负载采集（表格/链接/图形块进快照，#436）'
     expect(held?.graphic?.language).toBe('mermaid')
     c.handleHostMessage({ kind: 'contextMenu.test.menuClose' })
     expect(c.getContextMenuSnapshot()).toBeNull()
+  })
+})
+
+// ---- #437 表格专属簇：执行链（菜单注入通道逐项执行——结构/删除/选择/复制/层级）----
+
+describe('表格专属簇执行链（#437）', () => {
+  const TOP = '| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |'
+  const QUOTED = '> | a | b |\n> |---|---|\n> | 1 | 2 |'
+  const editRequests = (h: BridgeHarness) => h.sent.filter((m) => m.kind === 'edit.request')
+  const clipboardWrites = (h: BridgeHarness) =>
+    h.sent.filter((m) => m.kind === 'clipboard.write' && typeof (m as { text?: string }).text === 'string')
+  const CLUSTER = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+    'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+    'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+
+  it('表格区开菜单：tableOps 簇 13 项在场（顶层表 quoteRemove 置灰），项序与簇位正确', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    expect(topCommands()).toEqual([
+      'wikilink', 'link', 'copyBlockLink',
+      ...CLUSTER,
+      'textFormat', 'paragraphStyle', 'insert',
+      'cut', 'copy', 'paste', 'pastePlain', 'selectAll',
+    ])
+    expect(buttonOf('tableQuoteRemove')!.disabled, '顶层表 0 层不可减').toBe(true)
+    expect(buttonOf('tableQuoteAdd')!.disabled).toBe(false)
+    expect(buttonOf('deleteTable')!.disabled).toBe(false)
+  })
+
+  it('结构项：命中数据行执行 insertRowAbove——命中行上方插空行，单笔写回', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'insertRowAbove' })
+    expect(c.getView()!.state.doc.toString())
+      .toBe('| a | b |\n|---|---|\n| 1 | 2 |\n| | |\n| 3 | 4 |')
+    expect(editRequests(h)).toHaveLength(1)
+    expect(menuEl(), '命令执行后菜单关闭').toBeNull()
+  })
+
+  it('结构项：insertColumnRight 在命中列右插列（表格形状正确）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('a') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'insertColumnRight' })
+    // 分隔行新列段沿用既有引擎最小插入形态（` --- ` 带空格）
+    expect(c.getView()!.state.doc.toString())
+      .toBe('| a | | b |\n|---| --- |---|\n| 1 | | 2 |\n| 3 | | 4 |')
+    expect(editRequests(h)).toHaveLength(1)
+  })
+
+  it('删除表格：整表层单笔删除，前后正文保留', () => {
+    const doc = `前文\n\n${TOP}\n\n后文`
+    const h = makeBridge()
+    const { c } = mountPanel(h, doc)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: doc.indexOf('| 1 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    expect(c.getView()!.state.doc.toString()).toBe('前文\n\n\n\n后文')
+    expect(editRequests(h)).toHaveLength(1)
+  })
+
+  it('选择行：格区 region 落命中行全列（零写回），选择整表同理', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    const view = c.getView()!
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'selectTableRow' })
+    const region = view.state.field(tableRegionField, false)
+    expect(region).toMatchObject({
+      tableFrom: 0, rowFrom: 2, rowTo: 2, columnFrom: 0, columnTo: 1,
+    })
+    expect(editRequests(h)).toHaveLength(0)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('a') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'selectWholeTable' })
+    expect(view.state.field(tableRegionField, false)).toMatchObject({
+      tableFrom: 0, rowFrom: 0, rowTo: 2, columnFrom: 0, columnTo: 1,
+    })
+    expect(editRequests(h)).toHaveLength(0)
+  })
+
+  it('复制表格 Markdown：无活跃格区 → 整表（含重造表头）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    expect(clipboardWrites(h)).toEqual([{
+      kind: 'clipboard.write',
+      text: '| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |',
+    }])
+    expect(editRequests(h)).toHaveLength(0)
+  })
+
+  it('复制优先语义：活跃格区包含命中格 → 复制格区；不含命中格 → 整表', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    const view = c.getView()!
+    // 活跃格区：数据行 1-2 × 全列（selectTableRegion 同通道建立——蒙版态）
+    selectTableRegion(view, {
+      tableFrom: 0, rowFrom: 1, rowTo: 2, columnFrom: 0, columnTo: 1,
+    })
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    expect(clipboardWrites(h).map((m) => (m as { text: string }).text))
+      .toEqual(['| 1 | 2 |\n| --- | --- |\n| 3 | 4 |'])
+    // 命中表头行（不在格区内）→ 回落整表
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('a') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    const texts = clipboardWrites(h).map((m) => (m as { text: string }).text)
+    expect(texts[1]).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |')
+  })
+
+  it('引用层级：增一层/减一层逐行独立变换，各一笔事务（单层引用表往返）', () => {
+    // 增层：单次派发 = 单笔 edit.request（一次菜单操作 = 宿主撤销一次）
+    const h = makeBridge()
+    const { c } = mountPanel(h, QUOTED)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: QUOTED.indexOf('1') })
+    expect(buttonOf('tableQuoteRemove')!.disabled).toBe(false)
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'tableQuoteAdd' })
+    const added = c.getView()!.state.doc.toString()
+    expect(added).toBe('> > | a | b |\n> > |---|---|\n> > | 1 | 2 |')
+    expect(editRequests(h)).toHaveLength(1)
+    // 减层：独立挂载（两次快速派发会被出站去抖合并成一条消息——粒度按
+    // 每次菜单操作单独钉），往返还原原文
+    const h2 = makeBridge()
+    const { c: c2 } = mountPanel(h2, added)
+    c2.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: added.indexOf('1') })
+    c2.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'tableQuoteRemove' })
+    expect(c2.getView()!.state.doc.toString()).toBe(QUOTED)
+    expect(editRequests(h2)).toHaveLength(1)
+  })
+
+  it('源码降级表（树不认）：簇在场全置灰，点击零写回', () => {
+    const degraded = '| a | b |\n| 1 | 2 |\n|---|---|'
+    const h = makeBridge()
+    const { c } = mountPanel(h, degraded)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: degraded.indexOf('1') })
+    for (const command of CLUSTER) {
+      expect(buttonOf(command)!.disabled, `${command} 解析失败置灰不隐藏`).toBe(true)
+    }
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    expect(editRequests(h)).toHaveLength(0)
+    expect(clipboardWrites(h)).toHaveLength(0)
+  })
+
+  it('锚点过期防御：菜单打开期间外部改文档，deleteTable 放弃执行（零写回）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 1 |') + 2 })
+    c.handleHostMessage({
+      kind: 'doc.changed', version: 2, changes: [{ offset: 0, length: 0, text: 'x' }], origin: 'external',
+    })
+    h.sent.length = 0
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    expect(editRequests(h)).toHaveLength(0)
+    expect(menuEl(), '放弃路径关闭菜单').toBeNull()
+  })
+
+  it('命令面板/快捷键入口（ui.command）：光标处表格执行删除（与菜单同一实现）', () => {
+    const doc = `前文\n\n${TOP}\n\n后文`
+    const h = makeBridge()
+    const { c } = mountPanel(h, doc)
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: doc.indexOf('| 3 |') + 2 } })
+    c.handleHostMessage({ kind: 'ui.command', op: 'deleteTable' })
+    expect(c.getView()!.state.doc.toString()).toBe('前文\n\n\n\n后文')
+    expect(editRequests(h)).toHaveLength(1)
   })
 })

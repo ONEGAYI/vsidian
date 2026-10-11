@@ -296,3 +296,156 @@ describe('阅读视图：按钮组形态（契约 1 的阅读侧）', () => {
     expect(frame.querySelector('.vsidian-graphic-chrome-popup')).not.toBeNull()
   })
 })
+
+// ---- #438 图形专属簇（graphicOps 右键四项：呈现 gate 与执行通道）----
+// 菜单注入通道（contextMenu.test.*）驱动：渲染态 DOM 探针进快照 → 簇呈现
+// 与置灰；四项执行（弹窗单例 / 导出直发出站 / PNG 降级 toast / 复制源码
+// 桥写）；执行前锚点重验。导出载荷形态经宿主侧既有校验器复检
+// （validateDiagramExportPayload，纯逻辑 node 直驱）。
+import { validateDiagramExportPayload } from '../../src/host/diagramExportValidate'
+import { t } from '../../src/shared/i18n'
+
+describe('图形专属簇（#438）：渲染态 gate 与四项执行', () => {
+  const menuEl = () => document.querySelector<HTMLElement>('.vsidian-context-menu')
+  const buttonOf = (command: string) =>
+    menuEl()?.querySelector<HTMLButtonElement>(`button[data-vsidian-command="${command}"]`)
+  const openMenuAt = (c: ReturnType<typeof mountDoc>, pos: number) =>
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos })
+
+  it('渲染成功态：四项全亮；快照负载携带 rendered=true（DOM 探针）', async () => {
+    mockMermaid()
+    const { bridge } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    const snapshot = c.getContextMenuSnapshot()
+    expect(snapshot?.zone).toBe('graphic')
+    expect(snapshot?.graphic?.rendered).toBe(true)
+    for (const command of ['graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource']) {
+      expect(buttonOf(command), `${command} 应在 graphicOps 簇中`).toBeTruthy()
+      expect(buttonOf(command)!.disabled, `${command} 渲染成功态应可用`).toBe(false)
+    }
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClose' })
+  })
+
+  it('错误降级块：弹窗/导出三项置灰、复制源码仍亮（探针 rendered=false）', async () => {
+    const api: MermaidApi = {
+      initialize() {},
+      async render() {
+        throw new Error('syntax error')
+      },
+    }
+    __setMermaidApiForTest(api)
+    const { bridge } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    expect(c.getContextMenuSnapshot()?.graphic?.rendered).toBe(false)
+    expect(buttonOf('graphicPopup')!.disabled).toBe(true)
+    expect(buttonOf('graphicExportSvg')!.disabled).toBe(true)
+    expect(buttonOf('graphicExportPng')!.disabled).toBe(true)
+    expect(buttonOf('graphicCopySource')!.disabled, '错误块取源码仍可用').toBe(false)
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClose' })
+  })
+
+  it('menuClick graphicPopup：弹窗打开（单例）；执行后菜单关闭', async () => {
+    mockMermaid()
+    const { bridge } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'graphicPopup' })
+    await settle()
+    expect(isDiagramPopupOpen()).toBe(true)
+    expect(menuEl(), '命令执行后菜单应关闭').toBeNull()
+    // 单例（openGraphicPopup 内部 closeDiagramPopup + popupMutex 语义继承）
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'graphicPopup' })
+    await settle()
+    expect(document.querySelectorAll('.vsidian-diagram-overlay')).toHaveLength(1)
+    closeDiagramPopup()
+  })
+
+  it('menuClick graphicExportSvg：不经弹窗直发 diagram.export，载荷过宿主校验器', async () => {
+    mockMermaid()
+    const { bridge, sent } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'graphicExportSvg' })
+    await settle()
+    expect(isDiagramPopupOpen(), '导出不得开弹窗').toBe(false)
+    const msg = sent.find((m): m is Extract<WebviewToHost, { kind: 'diagram.export' }> =>
+      m.kind === 'diagram.export')
+    expect(msg).toBeDefined()
+    expect(msg!.format).toBe('svg')
+    expect(msg!.fileName).toBe('mermaid-diagram.svg')
+    expect(msg!.content).toContain('<svg')
+    expect(msg!.sessionId).toBe('s1')
+    expect(typeof msg!.reqId).toBe('number')
+    // 载荷形态过宿主侧既有校验（导出直发链路的载荷契约复用）
+    expect(validateDiagramExportPayload(msg!)).toBe(true)
+    expect(c.getView()!.state.doc.toString()).toBe(DOC)
+  })
+
+  it('menuClick graphicExportPng（jsdom 无 canvas）：toast 降级提示、零出站', async () => {
+    mockMermaid()
+    const { bridge, sent } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'graphicExportPng' })
+    await settle()
+    expect(sent.filter((m) => m.kind === 'diagram.export')).toHaveLength(0)
+    const toast = document.querySelector<HTMLElement>('.vsidian-toast')
+    expect(toast, 'PNG 不可用应走 toast 提示（不用 window.alert）').toBeTruthy()
+    expect(toast!.getAttribute('data-severity')).toBe('warning')
+    expect(toast!.textContent).toBe(t('graphic.exportPngUnavailable'))
+  })
+
+  it('menuClick graphicCopySource：围栏源码经宿主剪贴板桥直写，零写回', async () => {
+    mockMermaid()
+    const { bridge, sent } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'graphicCopySource' })
+    await settle()
+    expect(sent).toContainEqual({ kind: 'clipboard.write', text: 'A-->B' })
+    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
+    expect(c.getView()!.state.doc.toString()).toBe(DOC)
+  })
+
+  it('执行前重验：菜单打开期间文档被外部改写，graphicCopySource 放弃（零出站）', async () => {
+    mockMermaid()
+    const { bridge, sent } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    openMenuAt(c, DOC.indexOf('A-->B'))
+    c.handleHostMessage({
+      kind: 'doc.changed', version: 2, changes: [{ offset: 0, length: 0, text: 'x' }], origin: 'external',
+    })
+    sent.length = 0
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'graphicCopySource' })
+    await settle()
+    expect(sent.filter((m) => m.kind === 'clipboard.write')).toHaveLength(0)
+    expect(menuEl(), '放弃路径同样关闭菜单').toBeNull()
+  })
+
+  it('键位/命令面板入口（ui.command）：光标在图形块执行复制源码；正文光标静默', async () => {
+    mockMermaid()
+    const { bridge, sent } = makeBridge()
+    const c = mountDoc(bridge)
+    await settle()
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: DOC.indexOf('A-->B'), head: DOC.indexOf('A-->B') } })
+    c.handleHostMessage({ kind: 'ui.command', op: 'graphicCopySource' })
+    await settle()
+    expect(sent).toContainEqual({ kind: 'clipboard.write', text: 'A-->B' })
+    sent.length = 0
+    view.dispatch({ selection: { anchor: view.state.doc.length, head: view.state.doc.length } })
+    c.handleHostMessage({ kind: 'ui.command', op: 'graphicCopySource' })
+    await settle()
+    expect(sent.filter((m) => m.kind === 'clipboard.write')).toHaveLength(0)
+  })
+})

@@ -204,6 +204,34 @@ export const UI_OPERATIONS = [
   { id: 'headingToggleFold', command: 'onegayi.vsidian.heading.toggleFold', titleKey: 'command.heading.toggleFold.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+l', 'meta+k meta+l'] },
   { id: 'headingFoldAll', command: 'onegayi.vsidian.heading.foldAll', titleKey: 'command.heading.foldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+0', 'meta+k meta+0'] },
   { id: 'headingUnfoldAll', command: 'onegayi.vsidian.heading.unfoldAll', titleKey: 'command.heading.unfoldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+j', 'meta+k meta+j'] },
+  // #439 链接场景三项：正文右键菜单链接簇专属项的键位/命令面板入口（打
+  // 开链接有键盘可达价值；Ctrl+单击是鼠标语义不占默认键——两入口共用
+  // webview 执行体 runLinkSceneKeyCommand：焦点实例光标处链接命中，与
+  // 「预览当前链接」同一目标推导口径，无命中静默）。命令面板经
+  // UI_OPERATIONS 注册循环回发 ui.command（hoverPreviewLink 同款先例）
+  { id: 'openLink', command: 'onegayi.vsidian.link.open', titleKey: 'command.link.open.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'copyLinkAddress', command: 'onegayi.vsidian.link.copyAddress', titleKey: 'command.link.copyAddress.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'copyLinkText', command: 'onegayi.vsidian.link.copyText', titleKey: 'command.link.copyText.title', mode: 'live', writes: false, defaults: [] },
+  // #437 表格右键簇新命令（右键菜单为主入口；键位注册表登记默认未绑定，
+  // 用户可自绑——提示列由注册表派生）。结构六操作（insertRowAbove 族）已在
+  // extra 表登记不重复。执行按光标处表格（runTableClusterCommand）；删除/
+  // 层级为写操作（writes: true 走焦点门控），选择/复制零文档写回
+  { id: 'deleteTable', command: 'onegayi.vsidian.table.deleteTable', titleKey: 'command.table.deleteTable.title', mode: 'live', writes: true, defaults: [] },
+  { id: 'selectTableRow', command: 'onegayi.vsidian.table.selectRow', titleKey: 'command.table.selectRow.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'selectTableColumn', command: 'onegayi.vsidian.table.selectColumn', titleKey: 'command.table.selectColumn.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'selectWholeTable', command: 'onegayi.vsidian.table.selectTable', titleKey: 'command.table.selectTable.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'copyTableMarkdown', command: 'onegayi.vsidian.table.copyMarkdown', titleKey: 'command.table.copyMarkdown.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'tableQuoteRemove', command: 'onegayi.vsidian.table.quoteRemove', titleKey: 'command.table.quoteRemove.title', mode: 'live', writes: true, defaults: [] },
+  { id: 'tableQuoteAdd', command: 'onegayi.vsidian.table.quoteAdd', titleKey: 'command.table.quoteAdd.title', mode: 'live', writes: true, defaults: [] },
+  // #438 图形块场景簇四操作（右键菜单项的键位评估记录）：全部只读/导出
+  // （writes: false），仅 Live 生效（阅读不接管右键、图形交互以 live 呈现态
+  // 为前提），默认不占键位——菜单是主入口，弹窗预览有键盘可达价值、导出/
+  // 复制同口径登记，键位留给用户按需绑定。目标 = 光标所在图形块（无目标
+  // 静默，与 hoverPreviewLink 同口径）；「编辑源码」不设操作（契约边界）
+  { id: 'graphicPopup', command: 'onegayi.vsidian.graphic.popup', titleKey: 'command.graphic.popup.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'graphicExportSvg', command: 'onegayi.vsidian.graphic.exportSvg', titleKey: 'command.graphic.exportSvg.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'graphicExportPng', command: 'onegayi.vsidian.graphic.exportPng', titleKey: 'command.graphic.exportPng.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'graphicCopySource', command: 'onegayi.vsidian.graphic.copySource', titleKey: 'command.graphic.copySource.title', mode: 'live', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

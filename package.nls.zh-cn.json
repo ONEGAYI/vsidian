@@ -21,7 +21,17 @@
   "command.table.insertColumnLeft.title": "表格：左侧插入列",
   "command.table.insertColumnRight.title": "表格：右侧插入列",
   "command.table.deleteColumn.title": "表格：删除列",
+  "command.table.deleteTable.title": "表格：删除表格",
+  "command.table.selectRow.title": "表格：选择行",
+  "command.table.selectColumn.title": "表格：选择列",
+  "command.table.selectTable.title": "表格：选择整表",
+  "command.table.copyMarkdown.title": "表格：复制 Markdown",
+  "command.table.quoteRemove.title": "表格：移除引用块",
+  "command.table.quoteAdd.title": "表格：增一层引用",
   "command.block.copyLink.title": "复制当前块链接",
+  "command.link.open.title": "打开光标处链接",
+  "command.link.copyAddress.title": "复制光标处链接地址",
+  "command.link.copyText.title": "复制光标处链接显示文字",
   "format.bold": "粗体",
   "format.italic": "斜体",
   "format.strikethrough": "删除线",
@@ -91,5 +101,9 @@
   "command.heading.unfold.title": "展开标题节",
   "command.heading.toggleFold.title": "折叠/展开切换标题节",
   "command.heading.foldAll.title": "折叠全部标题节",
-  "command.heading.unfoldAll.title": "展开全部标题节"
+  "command.heading.unfoldAll.title": "展开全部标题节",
+  "command.graphic.popup.title": "弹窗预览光标处图形",
+  "command.graphic.exportSvg.title": "导出光标处图形为 SVG",
+  "command.graphic.exportPng.title": "导出光标处图形为 PNG",
+  "command.graphic.copySource.title": "复制光标处图形源码"
 }

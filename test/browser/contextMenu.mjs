@@ -5,7 +5,8 @@
 // 渲染、图标资产接线（#184：明暗两套真实加载 + mask 绘制 + 暗色主题切换）、
 // 段落设置勾选（#184：按行结构点亮）、剪贴板四项桥链路（cut/copy/paste/
 // selectAll）、块链接两项（自 blockMenu.mjs 迁移：标题链接/自动补写/既有
-// id 复用）。
+// id 复用）、链接场景三项（#439：四类链接渲染态与源码态右键、打开与真实
+// Ctrl+单击消息同构对拍、复制两项桥载荷）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +18,15 @@ const bundle = artifactPath(root, 'contextMenu/contextMenu.js')
 await build({ entryPoints: [path.join(root, 'test/browser/contextMenuFixture.ts')],
   bundle: true, outfile: bundle, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
+// #438 图形簇需要真实渲染成功态：mermaid 独立产物自建（入口与配置同
+// esbuild.mjs 的 mermaid target——CI browser job 不跑 npm run compile，
+// 引用 out/webview/mermaid.js 会因产物缺失而 404，套件须自包含）
+const mermaidArtifact = artifactPath(root, 'mermaid.js')
+await build({
+  entryPoints: [path.join(root, 'src/webview/mermaidEntry.ts')],
+  outfile: mermaidArtifact, bundle: true, platform: 'browser', format: 'iife',
+  target: 'chrome118', minify: true, sourcemap: false, logLevel: 'silent',
+})
 
 // 行号（0 基）：0 `---` 1 头区行 2 `---` 3 空行 4 H1 5 空行 6 段落 7 空行
 // 8 表格三行 11 空行 12 ```js 13 代码 14 ``` 15 空行 16 mermaid 三行
@@ -62,6 +72,10 @@ try {
     iconRequests.push(name)
     await route.fulfill({ path: artifactPath(root, 'contextMenu/assets', name),
       contentType: 'image/svg+xml' })
+  })
+  // #438 mermaid 产物路由（懒加载 script.src → __vsidianMermaidUri 指向此处）
+  await page.route('http://ctx.test/mermaid.js', async (route) => {
+    await route.fulfill({ path: mermaidArtifact, contentType: 'text/javascript' })
   })
   await page.setContent(
     `<html><head><base href="http://ctx.test/"></head><body>${islandHtml}<div id="app"></div></body></html>`)
@@ -316,6 +330,156 @@ try {
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   passed++
   console.log('[统一菜单回归][PASS] 安全降级矩阵：表格/围栏/图形块逐区域置灰')
+
+  // ---- 场景 T1（#437）：表格簇真实右键呈现——13 项平铺、簇位与 4 条分组
+  // 线、labelParams 序号取词（选择第 {n} 行）、默认未绑定不占位 ----
+  await page.evaluate(() => window.clearSent())
+  const TABLE_DOC = '正文一段\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n'
+  await page.evaluate((t) => window.initContextMenu(t), TABLE_DOC)
+  await page.waitForTimeout(120)
+  // 数据行 2（| 3 | 4 |）真实右键：网格行序 = 表头 + 数据行（分隔行非网格行）
+  await page.locator('.vsidian-table-grid-row').nth(2).click({ button: 'right', position: { x: 30, y: 8 } })
+  state = await page.evaluate(() => window.readMenu())
+  const TABLE_CLUSTER = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+    'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+    'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+  assert.deepEqual(state.topCommands, [
+    'wikilink', 'link', 'copyBlockLink',
+    ...TABLE_CLUSTER,
+    'textFormat', 'paragraphStyle', 'insert',
+    'cut', 'copy', 'paste', 'pastePlain', 'selectAll',
+  ], `表格区顶级命令应以表格簇居第三簇（实际 ${JSON.stringify(state.topCommands)}）`)
+  assert.equal(state.separatorCount, 3, `四簇（链接/表格/块格式/剪贴板）应 3 条分组线（实际 ${state.separatorCount}）`)
+  // labelParams 渲染：选择行/列显示 1 基序号（zh 语言包 {n} 插值——命中第 3 行）
+  const rowLabel = await page.evaluate(() =>
+    document.querySelector('button[data-vsidian-command="selectTableRow"] .vsidian-context-menu-label')?.textContent ?? null)
+  assert.equal(rowLabel, '选择第 3 行', `选择行文案应参数化显示命中行序（实际 ${JSON.stringify(rowLabel)}）`)
+  // 顶层表：移除引用块置灰（0 层不可减）、增一层亮
+  assert.ok(state.disabledCommands.includes('tableQuoteRemove'), '顶层表：移除引用块置灰')
+  assert.ok(!state.disabledCommands.includes('tableQuoteAdd'), '顶层表：增一层引用可用')
+  const unboundHint = await page.evaluate(() => window.readMenu().hintOf('insertRowBelow'))
+  assert.equal(unboundHint, null, '默认未绑定的结构项提示列不占位')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 用户自绑键位后重开菜单：提示列显示生效绑定（键位注册表派生）
+  await page.evaluate(() => window.post({
+    kind: 'keybindings.changed', overrides: { insertRowBelow: ['ctrl+alt+r'] },
+  }))
+  await page.locator('.vsidian-table-grid-row').nth(2).click({ button: 'right', position: { x: 30, y: 8 } })
+  const boundHint = await page.evaluate(() => window.readMenu().hintOf('insertRowBelow'))
+  assert.equal(boundHint, 'Ctrl+Alt+R', '用户自绑键位应在提示列显示（注册表派生）')
+  await page.evaluate(() => window.post({ kind: 'keybindings.changed', overrides: {} }))
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  passed++
+  console.log('[统一菜单回归][PASS] 表格簇呈现：13 项平铺、簇位、序号取词、提示列绑定派生')
+
+  // ---- 场景 T2（#437）：结构项真实点击——下方插入行后表格形状正确 ----
+  await page.evaluate(() => window.clearSent())
+  await page.evaluate((t) => window.initContextMenu(t), TABLE_DOC)
+  await page.waitForTimeout(120)
+  await page.locator('.vsidian-table-grid-row').nth(2).click({ button: 'right', position: { x: 30, y: 8 } })
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="insertRowBelow"]').click()
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.menuExists, '结构项执行后菜单关闭')
+  assert.ok(state.text.includes('| 3 | 4 |\n| | |'), `下方插入行后表格形状正确（实际 ${JSON.stringify(state.text.split('\n').slice(1, 7))}）`)
+  await page.waitForTimeout(300) // 出站去抖收敛
+  const structSent = await page.evaluate(() => window.sent())
+  assert.equal(structSent.filter((m) => m.kind === 'edit.request').length, 1, '插行走标准出站一笔')
+  passed++
+  console.log('[统一菜单回归][PASS] 表格结构项：真实点击插行、形状与出站粒度')
+
+  // ---- 场景 T3（#437）：引用层级项真实点击——各行前缀统一 +1 层 ----
+  await page.evaluate(() => window.clearSent())
+  const QUOTE_DOC = '引用表\n\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n'
+  await page.evaluate((t) => window.initContextMenu(t), QUOTE_DOC)
+  await page.waitForTimeout(120)
+  // 引用表网格行真实右键（命中数据行）→ 增一层引用
+  await page.locator('.vsidian-table-grid-row').nth(1).click({ button: 'right', position: { x: 30, y: 8 } })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.disabledCommands.includes('tableQuoteRemove'), '单层引用表：移除引用块可用')
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="tableQuoteAdd"]').click()
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.menuExists, '层级项执行后菜单关闭')
+  const quotedLines = state.text.split('\n').slice(2, 5)
+  assert.deepEqual(quotedLines, ['> > | a | b |', '> > |---|---|', '> > | 1 | 2 |'],
+    `增一层后各行前缀正确（实际 ${JSON.stringify(quotedLines)}）`)
+  await page.waitForTimeout(300)
+  const quoteSent = await page.evaluate(() => window.sent())
+  assert.equal(quoteSent.filter((m) => m.kind === 'edit.request').length, 1, '层级变换走标准出站一笔')
+  passed++
+  console.log('[统一菜单回归][PASS] 引用层级项：真实点击增层、各行前缀正确')
+
+  // ---- 场景 G2：图形专属簇（#438——真实右键图形块、簇呈现、弹窗与错误降级）----
+  // 前置：注入 mermaid 产物 URI 并重装载文档——本套件页面默认无 mermaid
+  // （容器落 error 态），重装载触发新 widget 真实渲染（state=rendered 是
+  // 渲染成功 gate 的 DOM 探针输入）
+  await page.evaluate(() => {
+    window.__vsidianMermaidUri = 'http://ctx.test/mermaid.js'
+  })
+  await page.evaluate((t) => window.initContextMenu(t), DOC)
+  await page.waitForFunction(() =>
+    document.querySelector('.vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered',
+    undefined, { timeout: 30000 })
+  await page.locator('.vsidian-mermaid').first().click({ button: 'right', position: { x: 40, y: 40 } })
+  state = await page.evaluate(() => window.readMenu())
+  // 簇位：链接簇后、块与格式簇前；四项平铺全亮（渲染成功 + svg 能力在场）
+  assert.deepEqual(state.topCommands.slice(0, 7), [
+    'wikilink', 'link', 'copyBlockLink',
+    'graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource',
+  ], `图形块顶级命令序列（实际 ${JSON.stringify(state.topCommands)}）`)
+  for (const command of ['graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource']) {
+    assert.ok(!state.disabledCommands.includes(command), `${command} 渲染成功态应可用`)
+  }
+  // 图标降级（#441 资产未接入前）：新 key 的图标位留空不报错（mask 无资产
+  // url 是合法降级态，资产后补即生效——不钉住空态本身，只钉不抛错已渲染）
+  assert.ok(state.topCommands.includes('graphicPopup'), '图形簇条目真实渲染在菜单中')
+  // 弹窗预览：真实点击打开（快照语义与 popup 按钮同一 openGraphicPopup）
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="graphicPopup"]').click()
+  const overlay = page.locator('.vsidian-diagram-overlay')
+  await overlay.waitFor({ state: 'visible' })
+  assert.equal(await overlay.getAttribute('role'), 'dialog', '弹窗应为模态对话框')
+  await page.waitForFunction(() =>
+    document.querySelector('.vsidian-diagram-media svg') !== null, undefined, { timeout: 10000 })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.menuExists, '弹窗命令执行后菜单应关闭')
+  // Esc 关闭弹窗（弹窗内键盘局部生效，焦点在 stage）
+  await page.keyboard.press('Escape')
+  await overlay.waitFor({ state: 'detached' })
+  // 复制源码：真实点击 → 桥写围栏源码（零写回）
+  await page.evaluate(() => window.clearSent())
+  await page.locator('.vsidian-mermaid').first().click({ button: 'right', position: { x: 40, y: 40 } })
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="graphicCopySource"]').click()
+  let graphicSent = await page.evaluate(() => window.sent())
+  assert.ok(graphicSent.some((m) => m.kind === 'clipboard.write' && m.text === 'graph TD; A-->B;'),
+    `复制源码应经桥写围栏源码（实际 ${JSON.stringify(graphicSent.filter((m) => m.kind === 'clipboard.write'))}）`)
+  state = await page.evaluate(() => window.readMenu())
+  assert.equal(state.text, DOC, '复制源码零写回')
+  // 错误降级块：渲染失败 → 弹窗/导出三项置灰、复制源码仍亮（置灰不隐藏）
+  // （无效源码文本沿用集成 fixture 已证伪语法——mermaid 对部分自由文本
+  // 仍能解析成图，须用确定失败形态）
+  const BAD_MERMAID = '```mermaid\nthis is not valid mermaid syntax\n```\n'
+  await page.evaluate((t) => {
+    // 光标挪文末：围栏在行 0，初始光标（文档首）触及围栏会源码显形不发射
+    // widget——呈现态容器无从谈起
+    window.initContextMenu(t)
+    window.setSelection(t.length, t.length)
+  }, BAD_MERMAID)
+  await page.waitForFunction(() =>
+    document.querySelector('.vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'error',
+    undefined, { timeout: 30000 })
+  await page.locator('.vsidian-mermaid').first().click({ button: 'right', position: { x: 40, y: 20 } })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(state.topCommands.includes('graphicPopup'), '错误降级块：图形簇仍呈现（置灰不隐藏）')
+  assert.ok(state.disabledCommands.includes('graphicPopup'), '错误降级块：弹窗预览置灰')
+  assert.ok(state.disabledCommands.includes('graphicExportSvg'), '错误降级块：导出 SVG 置灰')
+  assert.ok(state.disabledCommands.includes('graphicExportPng'), '错误降级块：导出 PNG 置灰')
+  assert.ok(!state.disabledCommands.includes('graphicCopySource'), '错误降级块：复制源码仍可用（取源码恰是高价值操作）')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 还原主 DOC 供后续场景
+  await page.evaluate((t) => window.initContextMenu(t), DOC)
+  await page.waitForTimeout(120)
+  passed++
+  console.log('[统一菜单回归][PASS] 图形专属簇：真实右键呈现、弹窗开合、复制源码与错误降级置灰')
+
 
   // ---- 场景 H：剪贴板四项（cut/copy/paste/selectAll 真实点击）----
   // 场景 E 的 bold 已改写文档——重装载原始 DOC，后续偏移按 DOC 对拍
@@ -606,7 +770,129 @@ try {
     `阅读侧不应出现块 id 标记（实际片段 ${JSON.stringify(readingText.slice(-80))}）`)
   passed++
   console.log('[统一菜单回归][PASS] 块 id 双形态淡化 + 自定义字体色适配 + 阅读隐藏（迁移回归）')
+  // ---- 场景 O：链接场景三项（#439：真实右键四类链接逐类开菜单——渲染态
+  // 与源码态两种命中形态；打开链接与真实 Ctrl+单击激活消息同构对拍（同
+  // kind 同载荷）；复制两项经宿主剪贴板桥的载荷断言） ----
+  const LINK_DOC_LINES = [
+    '---',
+    'title: 头区',
+    '---',
+    '',
+    '看 [[双链 笔记|别名]] 尾',
+    '看 [链接文字](https://example.com/a%20b?q=1) 尾',
+    '见 <https://example.com/auto> 尾',
+    '开 [宽文字](my note.md) 尾',
+    '',
+  ]
+  await page.evaluate((t) => window.initContextMenu(t), LINK_DOC_LINES.join('\n'))
+  // 场景 N 收尾切到了阅读模式：链接场景是 Live 菜单能力，先切回 live
+  await page.evaluate(() => window.post({ kind: 'view.mode.set', mode: 'live' }))
+  await page.waitForTimeout(120)
+  await page.locator('.cm-content .cm-line').nth(4).waitFor()
+  await page.evaluate(() => window.clearSent())
+  /** 光标移出链接（Ctrl+单击后光标落入链接源区，渲染态按既有行为切源码
+   *  形态——重置后等待装饰重建，恢复渲染态命中条件） */
+  const resetCursorAway = async () => {
+    await page.evaluate(() => window.setSelection(0, 0))
+    await page.waitForTimeout(80)
+  }
+  /** 渲染态链接定位（wikilink 渲染 widget / 树驱动与宽松链接的渲染 mark） */
+  const renderedLink = (p, n, attr) => p.locator('.cm-line').nth(n).locator(`[${attr}="true"]`)
+  /** 真实 Ctrl+单击渲染链接中心点（与用户手势同一事件路径） */
+  const ctrlClickRendered = async (p, locator) => {
+    const box = await locator.boundingBox()
+    assert.ok(box, '渲染链接应有布局盒')
+    await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { modifiers: ['Control'] })
+  }
+  const LINK_LINES = LINK_DOC_LINES
+  const LINK_CASES = [
+    { line: 4, attr: 'data-vsidian-rendered-wikilink', kind: 'wikilink.activate',
+      open: '[', close: ']]',
+      activate: { target: '双链 笔记' }, address: '双链 笔记', text: '别名' },
+    { line: 5, attr: 'data-vsidian-rendered-link', kind: 'link.activate',
+      open: '[', close: ')',
+      activate: { href: 'https://example.com/a%20b?q=1' }, address: 'https://example.com/a%20b?q=1', text: '链接文字' },
+    { line: 6, attr: 'data-vsidian-rendered-link', kind: 'link.activate',
+      open: '<', close: '>',
+      activate: { href: 'https://example.com/auto' }, address: 'https://example.com/auto', text: 'https://example.com/auto' },
+    { line: 7, attr: 'data-vsidian-rendered-link', kind: 'link.activate',
+      open: '[', close: ')',
+      activate: { href: 'my note.md' }, address: 'my note.md', text: '宽文字' },
+  ]
+  for (const c of LINK_CASES) {
+    const lineText = LINK_LINES[c.line]
+    const lineStart = LINK_LINES.slice(0, c.line).join('\n').length + 1
+    const srcStart = lineStart + lineText.indexOf(c.open)
+    const srcEnd = lineStart + lineText.indexOf(c.close) + c.close.length
+    // 1) 渲染态真实右键：三项呈现于簇 1 顶部
+    await renderedLink(page, c.line, c.attr).click({ button: 'right', position: { x: 4, y: 4 } })
+    state = await page.evaluate(() => window.readMenu())
+    assert.ok(state.menuExists, `第 ${c.line} 行右键应打开菜单`)
+    assert.deepEqual(state.topCommands.slice(0, 3), ['openLink', 'copyLinkAddress', 'copyLinkText'],
+      `链接文字上三项应在簇 1 顶部（实际 ${JSON.stringify(state.topCommands.slice(0, 6))}）`)
+    // 2) 打开链接：出站激活消息（target/href 原口径 + 完整链接源区间）
+    await page.evaluate(() => window.clearSent())
+    await page.locator('.vsidian-context-menu button[data-vsidian-command="openLink"]').click()
+    let sent = await page.evaluate(() => window.sent())
+    const menuActivate = sent.findLast((m) => m.kind === c.kind)
+    assert.ok(menuActivate, `打开链接应出站 ${c.kind}（实际 ${JSON.stringify(sent.map((m) => m.kind))}）`)
+    assert.deepEqual(
+      c.kind === 'wikilink.activate'
+        ? { target: menuActivate.target, srcStart: menuActivate.srcStart, srcEnd: menuActivate.srcEnd }
+        : { href: menuActivate.href, srcStart: menuActivate.srcStart, srcEnd: menuActivate.srcEnd },
+      { ...c.activate, srcStart, srcEnd },
+      `激活载荷应为 target/href 原文与完整链接源区间（实际 ${JSON.stringify(menuActivate)}）`)
+    // 3) 真实 Ctrl+单击同一链接：消息与菜单打开链接完全同构（同 kind 同载荷）
+    await page.evaluate(() => window.clearSent())
+    await ctrlClickRendered(page, renderedLink(page, c.line, c.attr))
+    sent = await page.evaluate(() => window.sent())
+    const ctrlActivate = sent.findLast((m) => m.kind === c.kind)
+    assert.ok(ctrlActivate, `Ctrl+单击应出站 ${c.kind}（实际 ${JSON.stringify(sent.map((m) => m.kind))}）`)
+    assert.deepEqual(menuActivate, ctrlActivate,
+      `菜单打开链接与 Ctrl+单击应同构（菜单 ${JSON.stringify(menuActivate)} vs 单击 ${JSON.stringify(ctrlActivate)}）`)
+    await resetCursorAway()
+    // 4) 复制链接地址 / 复制显示文字：经宿主剪贴板桥的载荷
+    await page.evaluate(() => window.clearSent())
+    await renderedLink(page, c.line, c.attr).click({ button: 'right', position: { x: 4, y: 4 } })
+    await page.locator('.vsidian-context-menu button[data-vsidian-command="copyLinkAddress"]').click()
+    sent = await page.evaluate(() => window.sent())
+    assert.ok(sent.some((m) => m.kind === 'clipboard.write' && m.text === c.address),
+      `复制链接地址应为 target/href 原样（实际 ${JSON.stringify(sent.filter((m) => m.kind === 'clipboard.write'))}）`)
+    await renderedLink(page, c.line, c.attr).click({ button: 'right', position: { x: 4, y: 4 } })
+    await page.locator('.vsidian-context-menu button[data-vsidian-command="copyLinkText"]').click()
+    sent = await page.evaluate(() => window.sent())
+    assert.ok(sent.some((m) => m.kind === 'clipboard.write' && m.text === c.text),
+      `复制显示文字应为 display 口径（实际 ${JSON.stringify(sent.filter((m) => m.kind === 'clipboard.write'))}）`)
+  }
+  passed++
+  console.log('[统一菜单回归][PASS] 链接场景三项：四类链接渲染态右键、打开与 Ctrl+单击同构、复制载荷')
+
+  // 5) 源码态命中形态：光标触及链接显形源码后右键，三项照常呈现（四类
+  //    链接逐类——票面「渲染态与源码态两种命中形态」全矩阵；命中判定在
+  //    源码坐标，渲染态装饰是否在场不影响）
+  for (const c of LINK_CASES) {
+    const lineText = LINK_LINES[c.line]
+    const cursor = LINK_LINES.slice(0, c.line).join('\n').length + 1 + lineText.indexOf(c.open) + 1
+    await page.evaluate((pos) => window.setSelection(pos, pos), cursor)
+    await page.waitForTimeout(60)
+    await page.locator('.cm-line').nth(c.line).click({ button: 'right', position: { x: 64, y: 6 } })
+    state = await page.evaluate(() => window.readMenu())
+    assert.ok(state.menuExists && state.topCommands.includes('openLink'),
+      `第 ${c.line} 行源码态右键应呈现链接三项（实际 ${JSON.stringify(state.topCommands.slice(0, 6))}）`)
+    await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  }
+  // 6) 普通文本右键：三项不出现（无命中隐藏而非置灰——右键落在行首
+  //    前缀「看 」上，不在任何链接区间内）
+  await page.locator('.cm-line').nth(4).click({ button: 'right', position: { x: 6, y: 6 } })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(state.menuExists, '前置：普通文字右键打开菜单')
+  assert.ok(!state.topCommands.includes('openLink') && !state.disabledCommands.includes('openLink'),
+    '非链接文字不显示三项（隐藏而非置灰）')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  passed++
+  console.log('[统一菜单回归][PASS] 链接场景：源码态命中与无命中隐藏')
 } finally {
   await browser.close()
 }
 console.log(`[统一菜单回归] 全部通过：${passed} 场景`)
+
