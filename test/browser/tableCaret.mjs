@@ -198,7 +198,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -212,7 +212,7 @@ try {
       if (scenario === 'empty-row-realclick') source = source.replace('| B1 | B2 |', '|  |  |')
       if (scenario === 'empty-cell-padding') source = source.replace('| B1 | B2 |', '|  | B2 |')
       if (scenario === 'header-clear') source = source.replace('| H1 | H2 |', '| H1 |  |')
-      if (scenario === 'handle-column') source = source.replace('| --- | --- |', '| :--- | ---: |')
+      if (scenario === 'handle-column' || scenario === 'handle-column-refresh') source = source.replace('| --- | --- |', '| :--- | ---: |')
       if (scenario.startsWith('region-zero-width')) source = 'BEFORE\n\n|H1|H2|\n|---|---|\n||B2|\n|C1|C2|\n\nAFTER'
       if (scenario === 'region-padded-drag') source = 'BEFORE\n\n|H1|H2|\n|---|---|\n| |B2|\n|C1|C2|\n\nAFTER'
       if (scenario === 'region-drag-caret-yield-empty') source = 'BEFORE\n\n|H1|H2|\n|---|---|\n||B2|\n|C1|C2|\n\nAFTER'
@@ -355,23 +355,40 @@ try {
         await page.mouse.up()
         assert.equal((await page.evaluate(() => window.readEditor())).text, source,
           '把手落到另一张表格时不得修改源表格')
-      } else if (scenario === 'handle-row') {
+      } else if (scenario === 'handle-row' || scenario === 'handle-row-refresh') {
+        if (scenario.endsWith('-refresh')) await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0)
         const from = await page.locator('.vsidian-table-row-handle').nth(2).boundingBox()
         const to = await page.locator('.vsidian-table-row-handle').nth(0).boundingBox()
         await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
         await page.mouse.down()
         await page.mouse.move(from.x + from.width / 2, to.y + 2, { steps: 8 })
         assert(await page.locator('.vsidian-table-drop-before').count() > 0, '沿左侧把手栏拖动须绘出插入线')
+        if (scenario.endsWith('-refresh')) {
+          await page.evaluate(() => window.refreshTableLayout())
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+          assert(await page.locator('.vsidian-table-drop-before').count() > 0, '度量重发装饰后行插入线应保持')
+        }
         await page.mouse.up()
         assert((await page.evaluate(() => window.readEditor())).text.includes('| C1 | C2 |\n| --- | --- |\n| H1 | H2 |'),
           '数据行移到顶部后须升为表头，原表头成为数据行')
-      } else if (scenario === 'handle-column') {
+      } else if (scenario === 'handle-column' || scenario === 'handle-column-refresh') {
+        if (scenario.endsWith('-refresh')) await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0)
         const from = await page.locator('.vsidian-table-column-handle').nth(1).boundingBox()
         const to = await page.locator('.vsidian-table-column-handle').nth(0).boundingBox()
         await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
         await page.mouse.down()
         await page.mouse.move(to.x + 2, from.y + from.height / 2, { steps: 8 })
-        assert(await page.locator('.vsidian-table-column-drop-before').count() > 0, '沿上方把手栏拖动须绘出列插入线')
+        const paint = await page.evaluate(() => {
+          const drops = document.querySelectorAll('.vsidian-table-column-drop-before')
+          return { count: drops.length, stroke: drops.length ? getComputedStyle(drops[0]).borderLeft : null }
+        })
+        assert(paint.count > 0, '沿上方把手栏拖动须绘出列插入线')
+        assert.equal(paint.stroke, '3px solid rgb(122, 176, 208)', '列插入线应实际绘制焦点色边条')
+        if (scenario.endsWith('-refresh')) {
+          await page.evaluate(() => window.refreshTableLayout())
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+          assert(await page.locator('.vsidian-table-column-drop-before').count() > 0, '度量重发装饰后列插入线应保持')
+        }
         await page.mouse.up()
         const text = (await page.evaluate(() => window.readEditor())).text
         assert(text.includes('| H2 | H1 |\n| ---: | :--- |\n| B2 | B1 |'), `列拖排须连对齐信息一同移动: ${text}`)

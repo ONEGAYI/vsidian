@@ -75,7 +75,10 @@ class TableControlsView {
       this.rowsCache = []
       this.rowsCacheTree = null
     }
-    if (update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged) {
+    // 度量/高度计划可只重发表格装饰而不改变几何；CM 重写的类需在 DOM 更新后恢复。
+    const decorationsChanged = update.startState.field(liveDecorationsField, false)?.decos !==
+      update.state.field(liveDecorationsField, false)?.decos
+    if (update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged || decorationsChanged) {
       this.scheduleRender()
     } else if (update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setTableRegion)))) {
       this.applySelection()

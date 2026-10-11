@@ -2848,7 +2848,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const reading = await poll('阅读模式语义', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
-      return v?.viewMode === 'reading' && v.readingSyntax !== undefined ? v : undefined
+      return v?.viewMode === 'reading' && v.readingSyntax?.headings === 3 && v.readingSyntax.taskCheckboxes === 2 ? v : undefined
     })
     assert(reading.readingSyntax!.headings === 3, `阅读侧围栏内伪标题被误判：${reading.readingSyntax!.headings}`)
     assert(reading.readingSyntax!.taskCheckboxes === 2, `阅读侧围栏内伪任务被误判：${reading.readingSyntax!.taskCheckboxes}`)
@@ -2886,7 +2886,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const reading = await poll('阅读模式 frontmatter', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
-      return v?.viewMode === 'reading' && v.readingSyntax !== undefined ? v : undefined
+      return v?.viewMode === 'reading' && v.readingSyntax?.headings === 3 ? v : undefined
     })
     // 阅读侧标题也恰 3（frontmatter 内伪标题不渲染为 h1）
     assert(reading.readingSyntax!.headings === 3, `阅读侧 frontmatter 伪标题误判：${reading.readingSyntax!.headings}`)
@@ -3397,7 +3397,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const reading = await poll('阅读模式链接/图片观测', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
-      return v?.viewMode === 'reading' && v.readingLinkCount !== undefined && v.readingImageCount !== undefined ? v : undefined
+      return v?.viewMode === 'reading' && (v.readingLinkCount ?? 0) >= 5 && (v.readingImageCount ?? 0) >= 1 ? v : undefined
     })
     assert((reading.readingLinkCount ?? 0) >= 5, `阅读链接数应 >=5，实际 ${reading.readingLinkCount}`)
     assert((reading.readingImageCount ?? 0) >= 1, `阅读图片数应 >=1，实际 ${reading.readingImageCount}`)
@@ -4016,7 +4016,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('table.md', (v) => v.viewMode === 'live')
 
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
-    const reading = await waitViewState('table.md', (v) => v.viewMode === 'reading' && v.readingSyntax?.tables !== undefined)
+    const reading = await waitViewState('table.md', (v) => v.viewMode === 'reading' && v.readingSyntax?.tables === 1)
     assert(reading.readingSyntax!.tables === 1, `阅读视图应渲染 1 张表格，实际 ${reading.readingSyntax!.tables}`)
     // fixture 数据行含 `x|y`：若错误地按管道切列，行内代码 token 会丢失。
     assert(reading.readingSyntax!.inlineCodeCount === 1,
@@ -4443,7 +4443,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const reading = await poll('阅读模式双链观测', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
-      return v?.viewMode === 'reading' && v.readingWikilinkCount !== undefined ? v : undefined
+      return v?.viewMode === 'reading' && v.readingWikilinkCount === 3 ? v : undefined
     })
     assert(reading.readingWikilinkCount === 3, `阅读双链数应为 3，实际 ${reading.readingWikilinkCount}`)
     assert(

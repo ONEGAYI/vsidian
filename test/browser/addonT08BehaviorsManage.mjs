@@ -48,6 +48,7 @@ try {
     const post = (message) => window.dispatchEvent(new MessageEvent('message', { source: window, data: message }))
     window.acquireVsCodeApi = () => ({ postMessage(message) {
       window.sentMessages.push(message)
+      // 调序权威回显晚于消息上送，覆盖尚未完成重排的采样窗口（#446）。
       setTimeout(() => {
         if (message.kind === 'addons.get') { post(window.__reply('addons-state')); return }
         if (message.kind === 'addons.behaviorsGet') { post(window.__reply('addons-behaviors')); return }
@@ -77,7 +78,7 @@ try {
         }
         if (message.kind === 'addons.commandCatalogGet') { post({ kind: 'addons.commandCatalog', commands: [] }); return }
         if (message.kind === 'settings.uiState' || message.kind === 'addonPage.ready') return
-      }, 0)
+      }, message.kind === 'addons.behaviorsSetOrder' ? 100 : 0)
     } })
     window.__hostState = state
     window.__reply = (kind, notice) => {
@@ -147,18 +148,17 @@ try {
   // 权威回显后的行序：首两行交换（用户可见文本级断言，非 DOM 顺序恒等）
   await page.waitForFunction(() => {
     const titles = [...document.querySelectorAll('.vsidian-addons-behaviors-row .vsidian-settings-item-title')].map((el) => el.textContent)
-    return titles[0] !== titles[1]
+    return titles[0] === '空格整理' && titles[1] === '破折填充' && titles[2] === '波浪填充'
   })
   const titles = await area.locator('.vsidian-settings-item-title').allInnerTexts()
-  const firstTwo = new Set(titles.slice(0, 2))
-  assert.ok(firstTwo.has('破折填充') && firstTwo.has('空格整理') || firstTwo.has('波浪填充'), '回显后首两行为调序交换结果')
+  assert.deepEqual(titles, ['空格整理', '破折填充', '波浪填充'], '回显后首两行为调序交换结果')
 
   // ---- 5. 键盘展开说明/例子（details summary 原生激活） ----
-  const dashDetails = area.locator('details.vsidian-addons-behaviors-details').first()
+  const dashDetails = area.locator(`.vsidian-addons-behaviors-row[data-behavior-key="${KEY_DASH}"] details.vsidian-addons-behaviors-details`)
   const summary = dashDetails.locator('summary')
   await summary.focus()
   await page.keyboard.press('Enter')
-  await page.waitForFunction(() => document.querySelector('details.vsidian-addons-behaviors-details')?.open === true)
+  await page.waitForFunction((key) => document.querySelector(`.vsidian-addons-behaviors-row[data-behavior-key="${key}"] details`)?.open === true, KEY_DASH)
   assert.match(await dashDetails.innerText(), /输入 - 后补全/)
   assert.match(await dashDetails.innerText(), new RegExp(zhCn['addons.behaviorsExamplesLabel'].replace('{examples}', '.+')))
   await page.screenshot({ path: path.join(artifacts, 'behaviors-details-open.png') })
