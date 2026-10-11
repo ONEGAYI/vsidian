@@ -13,12 +13,14 @@ export const CLIPBOARD_CASE_NAMES: ReadonlySet<string> = new Set([
   '搜索定位恢复（#318）：显式命令矩阵——首次/重复/多匹配/CRLF/剪贴板恢复',
 ])
 
-export async function withClipboardLock(run: () => Promise<void>): Promise<void> {
+export async function withClipboardLock(
+  run: () => Promise<void>, mutexName = 'Local\\VsidianIntegrationClipboard',
+): Promise<void> {
   // Local 命名互斥量跨宿主、工作树共享，不需要管理员权限。持锁进程的
   // stdin 随调用方退出而关闭，ReadLine 收到 EOF 后也会释放互斥量。
   const script = String.raw`
 $ErrorActionPreference = 'Stop'
-$mutex = [Threading.Mutex]::new($false, 'Local\VsidianIntegrationClipboard')
+$mutex = [Threading.Mutex]::new($false, $env:VSIDIAN_TEST_CLIPBOARD_MUTEX)
 $owned = $false
 try {
   try { $null = $mutex.WaitOne(); $owned = $true }
@@ -32,7 +34,7 @@ try {
 `
   const child = spawn(path.join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    { windowsHide: true })
+    { windowsHide: true, env: { ...process.env, VSIDIAN_TEST_CLIPBOARD_MUTEX: mutexName } })
   let stderr = ''
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
   let finish!: (code: number | null) => void

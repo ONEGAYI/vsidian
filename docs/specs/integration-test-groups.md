@@ -70,9 +70,15 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 
 互斥量协调参与本机制的测试进程，不隔离用户桌面的其他剪贴板程序。用例结束或调用方退出关闭 stdin 时释放；获取、释放失败均报错，不自动重执行用例、不扩大等待预算。命名窗口站隔离在本机普通权限下被拒绝，未纳入实现，也不要求提权。
 
+单测使用每例独立的随机锁名，同一用例内的两个真实子进程仍争用同一把锁。这样可以验证互斥与释放，又不会排队等待正在运行的集成用例；不同锁名可独立执行也有断言。2026-10-11 的并行复验曾因单测使用固定集成锁名而在 5 秒超时，隔离红测与绿测分别保存在 `lock-isolation-red.log` / `lock-isolation-green.log`。
+
 证据保存在本次实现树 `out/test/clipboard-investigation/`：`baseline-windows-desktop-host.log` 为原始 3/7 失败，`search-navigation-trace-host.log` 为选中乙、等待甲的现场，`sentinel-red.json` 与 `sentinel-green.log` 为哨兵红绿，`clipboard-lock-red.log` 为互斥红测，`family-four-shards-s*.log` 与 `family-four-shards-locked-s*.log` 为四宿主对照。名单仍在 core；本机通过不等于 Linux CI 或人工验收完成。
 
 最终本地验证：`compile-final.log` 退出码 0；`unit-final.log` 为 7552 项 Vitest 与 181 项 Node 契约全过；`family-single-final-host.log` 与四片 `family-four-shards-locked-s*.log` 各合计 7/7 通过、宿主退出码均为 0。`git diff --check` 通过。本次新增文件已通过技能入口登记；文件树严格检查仍报七个基线既有漏项，`tree-baseline-comparison.json` 逐项证实这些文件在 `7011adee` 已跟踪而未收录，未扩大本次变更修补其他领域台账。
+
+2026-10-11 对齐 `4d9102ae` 后，编译通过；锁名隔离后的全量单测为 7586 项 Vitest 通过、181 项 Node 契约零失败（175 通过，foreground 模式按启动器约定跳过六项独立桌面探针，`publish-unit-isolated.log`）。这六项探针随后在默认 desktop 模式单独补验，全部通过（`publish-desktop-probes.log`）。
+
+同轮本机隐藏桌面四片复验为 0/7（`publish-family-four.log`）。绕过业务链路，直接调用 `vscode.env.clipboard.writeText/readText` 的普通文本探针连续三轮、每轮三次采样均回读空串（`publish-raw-clipboard-host.log`）；当前环境未满足原生剪贴板回读前提，不能把这轮失败当作修复后的通过证据。该环境变化的具体来源尚未识别，互斥机制不修复这一系统读写边界；远端 CI 与本机结果分别记录，不用重试、跳过用例或放宽断言掩盖。
 
 ## 真宿主文本外观对照套件（#344 接线，2026-10-04）
 
