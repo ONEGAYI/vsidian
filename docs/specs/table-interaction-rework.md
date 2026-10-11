@@ -57,6 +57,15 @@ preview-5760 的表格跨格拖选、删除和控件交互未通过用户验收�
 - **列宽与网格**：格内卡嵌在网格格 mark span 内（CM6 inline replace widget 不切开 mark），网格行仍是单 grid item——列宽计划（[live-table-column-width.md](live-table-column-width.md)）与列对齐不受影响；紧邻嵌入宿主的 cm-widgetBuffer 零高块级化（其余格内 widget 的 buffer 是 posAtCoords 坐标锚，**不得**一并零高——tableCaret cell-widget 场景曾因误伤回归，回归用例钉住）。
 - **转义映射单一事实源**：格内嵌入的「源码—表格转义—渲染文字」三套区间映射在 `src/shared/tableCellEmbed.ts`（`\|` 按格内语义解码、inner 为解码语义、区间恒为源文），切列判定复用 `tableCells` 不另起一套。
 
+## #437 表格专属右键入口（2026-10 场景批次落档）
+
+统一右键菜单的表格场景簇（[context-menu.md](context-menu.md)「簇 1.5」）把本规格的表格能力收进右键入口，**全部复用既有执行管线、零新表格语义**：
+
+- **结构六操作**（插行/插列/删行/删列）：命令 id 与键位注册表既有条目同源，执行走 `runTableEditAt(view, hit.pos, op)`（不先移光标，与悬浮控件同口径）——菜单项是补充入口不是替代。
+- **删除表格 / 选择行 / 选择列 / 选择整表 / 复制表格 Markdown**：整表层 `planTableRegionDelete`、`selectTableRegion`（选整表 = 全行全列一步构造，新组合非新语义）、`serializeTableRegion`（复制优先语义：活跃格区包含命中格 → 格区，否则整表——与本规格契约 4 的区域复制同源）经宿主剪贴板桥。
+- **移除引用块 / 增一层引用**：[blockquote-table.md](blockquote-table.md) 三轮用户决策的职能转移项（行前缀逐行独立计算，一笔事务一笔撤销；残缺表置灰不猜）。
+- **边界不变**：格内 Ctrl+C / Delete / 粘贴的事件层接管零改动；悬浮控件（抓手拖排、边条插行列）保留，右键不复制拖排语义（「上移/下移行」类项明确不做）；本规格排除项（列宽/对齐/合并/单格搬移/Excel 粘贴）维持不做；命令面板/快捷键入口按光标处表格执行（键位注册表登记、默认未绑定）。
+
 ## 参考与范围
 用户给出矩形2×2高亮、底部悬停新增带、边沿点阵把手三张参考截图。详细调研保存在本机 D:/CODE/Project/_ForExplore/vsidian-table-research/调研结论.md。
 Obsidian 原生行列重排：https://obsidian.md/changelog/2023-12-12-desktop-v1.5.2/
