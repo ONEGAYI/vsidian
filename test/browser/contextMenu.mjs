@@ -17,6 +17,15 @@ const bundle = artifactPath(root, 'contextMenu/contextMenu.js')
 await build({ entryPoints: [path.join(root, 'test/browser/contextMenuFixture.ts')],
   bundle: true, outfile: bundle, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
+// #438 图形簇需要真实渲染成功态：mermaid 独立产物自建（入口与配置同
+// esbuild.mjs 的 mermaid target——CI browser job 不跑 npm run compile，
+// 引用 out/webview/mermaid.js 会因产物缺失而 404，套件须自包含）
+const mermaidArtifact = artifactPath(root, 'mermaid.js')
+await build({
+  entryPoints: [path.join(root, 'src/webview/mermaidEntry.ts')],
+  outfile: mermaidArtifact, bundle: true, platform: 'browser', format: 'iife',
+  target: 'chrome118', minify: true, sourcemap: false, logLevel: 'silent',
+})
 
 // 行号（0 基）：0 `---` 1 头区行 2 `---` 3 空行 4 H1 5 空行 6 段落 7 空行
 // 8 表格三行 11 空行 12 ```js 13 代码 14 ``` 15 空行 16 mermaid 三行
@@ -62,6 +71,10 @@ try {
     iconRequests.push(name)
     await route.fulfill({ path: artifactPath(root, 'contextMenu/assets', name),
       contentType: 'image/svg+xml' })
+  })
+  // #438 mermaid 产物路由（懒加载 script.src → __vsidianMermaidUri 指向此处）
+  await page.route('http://ctx.test/mermaid.js', async (route) => {
+    await route.fulfill({ path: mermaidArtifact, contentType: 'text/javascript' })
   })
   await page.setContent(
     `<html><head><base href="http://ctx.test/"></head><body>${islandHtml}<div id="app"></div></body></html>`)
@@ -316,6 +329,78 @@ try {
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   passed++
   console.log('[统一菜单回归][PASS] 安全降级矩阵：表格/围栏/图形块逐区域置灰')
+
+  // ---- 场景 G2：图形专属簇（#438——真实右键图形块、簇呈现、弹窗与错误降级）----
+  // 前置：注入 mermaid 产物 URI 并重装载文档——本套件页面默认无 mermaid
+  // （容器落 error 态），重装载触发新 widget 真实渲染（state=rendered 是
+  // 渲染成功 gate 的 DOM 探针输入）
+  await page.evaluate(() => {
+    window.__vsidianMermaidUri = 'http://ctx.test/mermaid.js'
+  })
+  await page.evaluate((t) => window.initContextMenu(t), DOC)
+  await page.waitForFunction(() =>
+    document.querySelector('.vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered',
+    undefined, { timeout: 30000 })
+  await page.locator('.vsidian-mermaid').first().click({ button: 'right', position: { x: 40, y: 40 } })
+  state = await page.evaluate(() => window.readMenu())
+  // 簇位：链接簇后、块与格式簇前；四项平铺全亮（渲染成功 + svg 能力在场）
+  assert.deepEqual(state.topCommands.slice(0, 7), [
+    'wikilink', 'link', 'copyBlockLink',
+    'graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource',
+  ], `图形块顶级命令序列（实际 ${JSON.stringify(state.topCommands)}）`)
+  for (const command of ['graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource']) {
+    assert.ok(!state.disabledCommands.includes(command), `${command} 渲染成功态应可用`)
+  }
+  // 图标降级（#441 资产未接入前）：新 key 的图标位留空不报错（mask 无资产
+  // url 是合法降级态，资产后补即生效——不钉住空态本身，只钉不抛错已渲染）
+  assert.ok(state.topCommands.includes('graphicPopup'), '图形簇条目真实渲染在菜单中')
+  // 弹窗预览：真实点击打开（快照语义与 popup 按钮同一 openGraphicPopup）
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="graphicPopup"]').click()
+  const overlay = page.locator('.vsidian-diagram-overlay')
+  await overlay.waitFor({ state: 'visible' })
+  assert.equal(await overlay.getAttribute('role'), 'dialog', '弹窗应为模态对话框')
+  await page.waitForFunction(() =>
+    document.querySelector('.vsidian-diagram-media svg') !== null, undefined, { timeout: 10000 })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.menuExists, '弹窗命令执行后菜单应关闭')
+  // Esc 关闭弹窗（弹窗内键盘局部生效，焦点在 stage）
+  await page.keyboard.press('Escape')
+  await overlay.waitFor({ state: 'detached' })
+  // 复制源码：真实点击 → 桥写围栏源码（零写回）
+  await page.evaluate(() => window.clearSent())
+  await page.locator('.vsidian-mermaid').first().click({ button: 'right', position: { x: 40, y: 40 } })
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="graphicCopySource"]').click()
+  let graphicSent = await page.evaluate(() => window.sent())
+  assert.ok(graphicSent.some((m) => m.kind === 'clipboard.write' && m.text === 'graph TD; A-->B;'),
+    `复制源码应经桥写围栏源码（实际 ${JSON.stringify(graphicSent.filter((m) => m.kind === 'clipboard.write'))}）`)
+  state = await page.evaluate(() => window.readMenu())
+  assert.equal(state.text, DOC, '复制源码零写回')
+  // 错误降级块：渲染失败 → 弹窗/导出三项置灰、复制源码仍亮（置灰不隐藏）
+  // （无效源码文本沿用集成 fixture 已证伪语法——mermaid 对部分自由文本
+  // 仍能解析成图，须用确定失败形态）
+  const BAD_MERMAID = '```mermaid\nthis is not valid mermaid syntax\n```\n'
+  await page.evaluate((t) => {
+    // 光标挪文末：围栏在行 0，初始光标（文档首）触及围栏会源码显形不发射
+    // widget——呈现态容器无从谈起
+    window.initContextMenu(t)
+    window.setSelection(t.length, t.length)
+  }, BAD_MERMAID)
+  await page.waitForFunction(() =>
+    document.querySelector('.vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'error',
+    undefined, { timeout: 30000 })
+  await page.locator('.vsidian-mermaid').first().click({ button: 'right', position: { x: 40, y: 20 } })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(state.topCommands.includes('graphicPopup'), '错误降级块：图形簇仍呈现（置灰不隐藏）')
+  assert.ok(state.disabledCommands.includes('graphicPopup'), '错误降级块：弹窗预览置灰')
+  assert.ok(state.disabledCommands.includes('graphicExportSvg'), '错误降级块：导出 SVG 置灰')
+  assert.ok(state.disabledCommands.includes('graphicExportPng'), '错误降级块：导出 PNG 置灰')
+  assert.ok(!state.disabledCommands.includes('graphicCopySource'), '错误降级块：复制源码仍可用（取源码恰是高价值操作）')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 还原主 DOC 供后续场景
+  await page.evaluate((t) => window.initContextMenu(t), DOC)
+  await page.waitForTimeout(120)
+  passed++
+  console.log('[统一菜单回归][PASS] 图形专属簇：真实右键呈现、弹窗开合、复制源码与错误降级置灰')
 
   // ---- 场景 H：剪贴板四项（cut/copy/paste/selectAll 真实点击）----
   // 场景 E 的 bold 已改写文档——重装载原始 DOC，后续偏移按 DOC 对拍
