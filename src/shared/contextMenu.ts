@@ -159,6 +159,39 @@ export interface MenuContextSnapshot {
 /** 上下文谓词（纯函数；输入只认 MenuContextSnapshot） */
 export type MenuPredicate = (ctx: MenuContextSnapshot) => boolean
 
+/** 链接命中在场谓词（#439 三项的 when——无命中不显示而非置灰；采集只在
+ *  zone='normal'，结构敏感区天然不出现） */
+const hasLinkHit = (ctx: MenuContextSnapshot): boolean => ctx.link != null
+
+// ---- #439 链接场景命令：菜单三项（打开链接/复制链接地址/复制显示文字）
+// 的出站载荷派生。纯函数、零 vscode/DOM 依赖——控制器只补会话身份与通道
+// 路由（主正文面板桥直发 / 嵌入目标端口信封）。取材口径单一事实源在本
+// 函数：打开 = 与 Ctrl+单击激活上报同构（双链 wikilink.activate 的 target /
+// 其余 link.activate 的 href，源区间 = 命中负载 range）；复制链接地址 =
+// target 原样（双链 `|` 之前未 trim、外部 href 不解码）；复制显示文字 =
+// display（双链别名优先）。外部 scheme 准入归宿主 linkTarget，此处不预判 ----
+
+/** 链接场景命令标识（菜单描述符 command 与键位入口共用） */
+export type LinkSceneCommand = 'openLink' | 'copyLinkAddress' | 'copyLinkText'
+
+/** 命令出站载荷（不含会话身份字段——sessionId/docUri 由通道路由补齐） */
+export type LinkScenePayload =
+  | { kind: 'wikilink.activate'; target: string; srcStart: number; srcEnd: number }
+  | { kind: 'link.activate'; href: string; srcStart: number; srcEnd: number }
+  | { kind: 'clipboard.write'; text: string }
+
+/** 链接命中 → 命令出站载荷（#439）。打开链接按族分派激活消息（与
+ *  Ctrl+单击判定族完全同源同消息——不重复造跳转入口）；复制两项取材
+ * target/display 原口径直写剪贴板桥。 */
+export function linkMenuCommandPayload(command: LinkSceneCommand, hit: LinkMenuHit): LinkScenePayload {
+  if (command === 'openLink') {
+    return hit.kind === 'wikilink'
+      ? { kind: 'wikilink.activate', target: hit.target, srcStart: hit.range.from, srcEnd: hit.range.to }
+      : { kind: 'link.activate', href: hit.target, srcStart: hit.range.from, srcEnd: hit.range.to }
+  }
+  return { kind: 'clipboard.write', text: command === 'copyLinkAddress' ? hit.target : hit.display }
+}
+
 /** 菜单项描述符（注册单位；children 支持任意嵌套，内置表最深两级） */
 export interface MenuItemDescriptor {
   id: string
@@ -267,10 +300,15 @@ const insertChildren: readonly MenuItemDescriptor[] = [
 /** 内置项编译期表（照 formatOperations 惯例；运行期覆写层的首个注册者） */
 export const CONTEXT_MENU_ITEMS = [
   // ---- 簇 1：链接 ----
-  { id: 'insertWikilink', group: 'link', order: 0, command: 'wikilink', labelKey: 'format.wikilink', iconKey: 'link', enable: enabledOutsideStructure },
-  { id: 'insertExternalLink', group: 'link', order: 1, command: 'link', labelKey: 'format.link', iconKey: 'externalLink', enable: enabledOutsideStructure },
-  { id: 'copyHeadingLink', group: 'link', order: 2, command: 'copyHeadingLink', labelKey: 'contextMenu.copyHeadingLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget?.heading != null },
-  { id: 'copyBlockLink', group: 'link', order: 3, command: 'copyBlockLink', labelKey: 'contextMenu.copyBlockLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget != null },
+  // #439 链接场景三项排簇首（右键命中的上下文动作优先于常驻插入项）；
+  // 图标复用既有接线 key（externalLink/link/copy），不新增资产位
+  { id: 'openLink', group: 'link', order: 0, command: 'openLink', labelKey: 'contextMenu.openLink', iconKey: 'externalLink', when: hasLinkHit },
+  { id: 'copyLinkAddress', group: 'link', order: 1, command: 'copyLinkAddress', labelKey: 'contextMenu.copyLinkAddress', iconKey: 'link', when: hasLinkHit },
+  { id: 'copyLinkText', group: 'link', order: 2, command: 'copyLinkText', labelKey: 'contextMenu.copyLinkText', iconKey: 'copy', when: hasLinkHit },
+  { id: 'insertWikilink', group: 'link', order: 3, command: 'wikilink', labelKey: 'format.wikilink', iconKey: 'link', enable: enabledOutsideStructure },
+  { id: 'insertExternalLink', group: 'link', order: 4, command: 'link', labelKey: 'format.link', iconKey: 'externalLink', enable: enabledOutsideStructure },
+  { id: 'copyHeadingLink', group: 'link', order: 5, command: 'copyHeadingLink', labelKey: 'contextMenu.copyHeadingLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget?.heading != null },
+  { id: 'copyBlockLink', group: 'link', order: 6, command: 'copyBlockLink', labelKey: 'contextMenu.copyBlockLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget != null },
   // ---- 簇 2：块与格式（全部带子菜单）----
   { id: 'textFormat', group: 'blockFormat', order: 0, command: 'textFormat', labelKey: 'contextMenu.textFormat', iconKey: 'textFormat', enable: enabledOutsideStructure, children: textFormatChildren },
   { id: 'paragraphStyle', group: 'blockFormat', order: 1, command: 'paragraphStyle', labelKey: 'contextMenu.paragraphStyle', iconKey: 'paragraphStyle', enable: enabledOutsideStructure, children: paragraphChildren },

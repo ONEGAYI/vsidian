@@ -204,6 +204,14 @@ export const UI_OPERATIONS = [
   { id: 'headingToggleFold', command: 'onegayi.vsidian.heading.toggleFold', titleKey: 'command.heading.toggleFold.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+l', 'meta+k meta+l'] },
   { id: 'headingFoldAll', command: 'onegayi.vsidian.heading.foldAll', titleKey: 'command.heading.foldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+0', 'meta+k meta+0'] },
   { id: 'headingUnfoldAll', command: 'onegayi.vsidian.heading.unfoldAll', titleKey: 'command.heading.unfoldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+j', 'meta+k meta+j'] },
+  // #439 链接场景三项：正文右键菜单链接簇专属项的键位/命令面板入口（打
+  // 开链接有键盘可达价值；Ctrl+单击是鼠标语义不占默认键——两入口共用
+  // webview 执行体 runLinkSceneKeyCommand：焦点实例光标处链接命中，与
+  // 「预览当前链接」同一目标推导口径，无命中静默）。命令面板经
+  // UI_OPERATIONS 注册循环回发 ui.command（hoverPreviewLink 同款先例）
+  { id: 'openLink', command: 'onegayi.vsidian.link.open', titleKey: 'command.link.open.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'copyLinkAddress', command: 'onegayi.vsidian.link.copyAddress', titleKey: 'command.link.copyAddress.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'copyLinkText', command: 'onegayi.vsidian.link.copyText', titleKey: 'command.link.copyText.title', mode: 'live', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

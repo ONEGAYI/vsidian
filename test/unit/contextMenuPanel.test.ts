@@ -15,6 +15,8 @@ import {
   overrideContextMenuItem,
   registerContextMenuItem,
 } from '../../src/shared/contextMenu'
+import { activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from '../../src/webview/liveLinks'
+import { zhCn } from '../../src/shared/locales/zh-cn'
 
 if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined) {
   ;(Range.prototype as unknown as { getClientRects(): DOMRectList }).getClientRects =
@@ -682,6 +684,204 @@ describe('快捷键入口（同一命令的两个入口汇到同一执行）', (
     c.handleHostMessage({ kind: 'blockLink.copy' })
     expect(h.sent.filter((m) => m.kind === 'clipboard.write')).toHaveLength(0)
     expect(h.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
+  })
+})
+
+// ---- #439 链接场景三项（打开链接 / 复制链接地址 / 复制显示文字）----
+
+describe('链接场景三项：呈现与显隐（#439）', () => {
+  const LINK_DOC = [
+    '---',
+    'title: 头区',
+    '---',
+    '',
+    '看 [[双链 笔记|别名]] 尾',
+    '',
+    '普通段落一行',
+    '',
+  ].join('\n')
+
+  it('链接文字上：三项呈现于簇 1 顶部且可用；措辞键与块链接两项区分', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, LINK_DOC)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: LINK_DOC.indexOf('别名') })
+    expect(topCommands().slice(0, 6)).toEqual([
+      'openLink', 'copyLinkAddress', 'copyLinkText',
+      'wikilink', 'link', 'copyBlockLink',
+    ])
+    for (const command of ['openLink', 'copyLinkAddress', 'copyLinkText']) {
+      expect(buttonOf(command)!.disabled, `${command} enable 恒可用`).toBe(false)
+    }
+    // 措辞红线（CONTEXT.md 术语约束）：新词条不得泛称「复制链接」——jsdom
+    // 无语言岛时标签回退键名，中文措辞直接对拍语言包词条
+    const texts = [...menuEl()!.querySelectorAll('.vsidian-context-menu-label')]
+      .map((el) => el.textContent ?? '')
+    expect(texts).toContain('contextMenu.openLink')
+    expect(texts).toContain('contextMenu.copyLinkAddress')
+    expect(texts).toContain('contextMenu.copyLinkText')
+    expect(zhCn['contextMenu.openLink']).toBe('打开链接')
+    expect(zhCn['contextMenu.copyLinkAddress']).toBe('复制链接地址')
+    expect(zhCn['contextMenu.copyLinkText']).toBe('复制显示文字')
+    expect(Object.values(zhCn).some((v) => v === '复制链接'), '语言包不得出现泛称「复制链接」词条').toBe(false)
+  })
+
+  it('普通文本与空行：三项不显示（无命中隐藏而非置灰）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, LINK_DOC)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: LINK_DOC.indexOf('普通段落') })
+    expect(topCommands()).not.toContain('openLink')
+    expect(topCommands()).not.toContain('copyLinkAddress')
+    expect(topCommands()).not.toContain('copyLinkText')
+    const blankPos = LINK_DOC.split('\n').slice(0, 3).join('\n').length + 1
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: blankPos })
+    expect(topCommands()).not.toContain('openLink')
+  })
+
+  it('表格格内链接不接三项（zone=table 维持降级矩阵简化）', () => {
+    const text = '| [[格内链]] | b |\n|---|---|\n| 1 | 2 |'
+    const h = makeBridge()
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: text.indexOf('格内链') })
+    expect(allCommands()).not.toContain('openLink')
+    expect(allCommands()).not.toContain('copyLinkAddress')
+    expect(allCommands()).not.toContain('copyLinkText')
+  })
+
+  it('裸 URL 文本按普通正文处理（不识别为链接，三项不显示）', () => {
+    const text = '裸 https://example.com/a 尾'
+    const h = makeBridge()
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: text.indexOf('example') })
+    expect(topCommands()).not.toContain('openLink')
+  })
+})
+
+describe('链接场景三项：打开链接与 Ctrl+单击同构（#439）', () => {
+  /** 与 Ctrl+单击判定族同源的期望载荷收集：activate 族回调只收集不上报，
+   *  菜单出站消息须与之同 kind 同载荷（jsdom 无布局，真实 Ctrl+单击路径
+   *  的同构对拍在浏览器套件） */
+  const cases: Array<[string, 'wikilink.activate' | 'link.activate', (doc: string) => number]> = [
+    ['看 [[双链 笔记|别名]] 尾', 'wikilink.activate', (doc) => doc.indexOf('别名')],
+    ['看 [链接文字](https://example.com/a%20b?q=1) 尾', 'link.activate', (doc) => doc.indexOf('链接文字')],
+    ['见 <https://example.com/auto> 尾', 'link.activate', (doc) => doc.indexOf('auto')],
+    ['开 [文字段](my note.md) 尾', 'link.activate', (doc) => doc.indexOf('文字段')],
+  ]
+
+  for (const [docLine, expectedKind, posOf] of cases) {
+    it(`${expectedKind}：menuClick openLink 出站与 activate 判定族同构（${docLine.slice(0, 12)}…）`, async () => {
+      const h = makeBridge()
+      const { c } = mountPanel(h, `${docLine}\n`)
+      const view = c.getView()!
+      const pos = posOf(docLine)
+      // 期望载荷：activate 族收集回调（零副作用查询，与 Ctrl+单击同一判定内核）
+      let expected: { target?: string; href?: string; from: number; to: number } | null = null
+      activateWikilinkAtPos(view, pos, (target, from, to) => { expected = { target, from, to } })
+      if (!expected) {
+        activateLinkAtPos(view, pos, (href, from, to) => { expected = { href, from, to } }) ||
+          activateLooseLinkAtPos(view, pos, (href, from, to) => { expected = { href, from, to } })
+      }
+      expect(expected, '前置：光标处应命中链接（activate 判定族）').not.toBeNull()
+      c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos })
+      c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+      const activate = h.sent.find((m) => m.kind === 'wikilink.activate' || m.kind === 'link.activate')
+      expect(activate, '应出站激活消息').toBeTruthy()
+      expect(activate!.kind).toBe(expectedKind)
+      expect(expectedKind === 'wikilink.activate' ? (activate as { target: string }).target
+        : (activate as { href: string }).href).toBe(
+          expectedKind === 'wikilink.activate' ? expected!.target : expected!.href)
+      expect((activate as { srcStart: number }).srcStart).toBe(expected!.from)
+      expect((activate as { srcEnd: number }).srcEnd).toBe(expected!.to)
+      expect((activate as { sessionId: string }).sessionId).toBeTruthy()
+      expect((activate as { docUri: string }).docUri).toBe(DOC_URI)
+      expect(menuEl(), '命令执行后菜单关闭').toBeNull()
+    })
+  }
+
+  it('无命中直发 openLink（防覆写层放开 when 的直发路径）：零出站', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, '普通段落\n')
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: 0 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+    expect(h.sent.filter((m) => m.kind === 'wikilink.activate' || m.kind === 'link.activate'
+      || m.kind === 'clipboard.write')).toHaveLength(0)
+  })
+
+  it('执行前重验：菜单打开期间文档被外部改写，openLink 放弃（零出站）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, '看 [[目标笔记]] 尾\n')
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: 4 })
+    c.handleHostMessage({
+      kind: 'doc.changed', version: 2, changes: [{ offset: 0, length: 0, text: 'x' }], origin: 'external',
+    })
+    h.sent.length = 0
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+    expect(h.sent.filter((m) => m.kind === 'wikilink.activate' || m.kind === 'clipboard.write')).toHaveLength(0)
+    expect(menuEl(), '放弃路径也应关闭菜单').toBeNull()
+  })
+})
+
+describe('链接场景三项：复制取材与键位入口（#439）', () => {
+  it('复制链接地址：双链 target 未 trim、外部 href 原样不解码', () => {
+    const wiki = '看 [[双链 笔记 |别名]] 尾\n'
+    const h = makeBridge()
+    const { c } = mountPanel(h, wiki)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: wiki.indexOf('别名') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    expect(h.sent).toContainEqual({ kind: 'clipboard.write', text: '双链 笔记 ' })
+
+    const ext = '看 [链接文字](https://example.com/a%20b?q=1) 尾\n'
+    const h2 = makeBridge()
+    const { c: c2 } = mountPanel(h2, ext)
+    c2.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: ext.indexOf('链接文字') })
+    c2.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    expect(h2.sent).toContainEqual({ kind: 'clipboard.write', text: 'https://example.com/a%20b?q=1' })
+  })
+
+  it('复制显示文字：双链别名优先 / 普通链接链接文字', () => {
+    const wiki = '看 [[双链 笔记|别名]] 尾\n'
+    const h = makeBridge()
+    const { c } = mountPanel(h, wiki)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: wiki.indexOf('别名') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkText' })
+    expect(h.sent).toContainEqual({ kind: 'clipboard.write', text: '别名' })
+
+    const ext = '看 [链接文字](https://example.com/a) 尾\n'
+    const h2 = makeBridge()
+    const { c: c2 } = mountPanel(h2, ext)
+    c2.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: ext.indexOf('链接文字') })
+    c2.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyLinkText' })
+    expect(h2.sent).toContainEqual({ kind: 'clipboard.write', text: '链接文字' })
+    // 复制零写回
+    expect(h2.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
+  })
+
+  it('键位入口：绑定后光标在双链上按键 → 同一执行体出站（无命中静默）', () => {
+    const text = '看 [[目标 笔记]] 与普通段 尾\n'
+    const h = makeBridge()
+    const { c, parent } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'keybindings.snapshot', overrides: { openLink: ['ctrl+alt+o'] } })
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: text.indexOf('目标'), head: text.indexOf('目标') } })
+    view.focus()
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'o', ctrlKey: true, altKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(h.sent).toContainEqual({
+      kind: 'wikilink.activate',
+      sessionId: 's1',
+      docUri: DOC_URI,
+      target: '目标 笔记',
+      srcStart: text.indexOf('[['),
+      srcEnd: text.indexOf(']]') + 2,
+    })
+    // 无命中（光标在普通文本）：零出站
+    h.sent.length = 0
+    view.dispatch({ selection: { anchor: text.indexOf('普通段'), head: text.indexOf('普通段') } })
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'o', ctrlKey: true, altKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(h.sent.filter((m) => m.kind === 'wikilink.activate' || m.kind === 'link.activate')).toHaveLength(0)
+    expect(parent.isConnected).toBe(true)
   })
 })
 

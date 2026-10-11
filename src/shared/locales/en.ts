@@ -897,8 +897,18 @@ export const en = {
   'contextMenu.copy': 'Copy',
   'contextMenu.paste': 'Paste',
   'contextMenu.selectAll': 'Select all',
+  /** #439 链接场景三项（链接文字命中的簇首上下文动作；措辞与块链接两项
+   *  区分——address 是链接目标、text 是显示文字，不泛称 "copy link"） */
+  'contextMenu.openLink': 'Open link',
+  'contextMenu.copyLinkAddress': 'Copy link address',
+  'contextMenu.copyLinkText': 'Copy link text',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': 'Copy link to current block',
+  /** #439 链接场景三项的键位入口操作名（目标 = 光标处链接命中；默认未
+   *  绑定——Ctrl+click 是鼠标语义主入口） */
+  'command.link.open.title': 'Open link at cursor',
+  'command.link.copyAddress.title': 'Copy link address at cursor',
+  'command.link.copyText.title': 'Copy link display text at cursor',
 
   // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
   /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；

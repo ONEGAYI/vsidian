@@ -2785,6 +2785,12 @@ export interface PaintProbe {
     display: string | null
     separatorCount: number
     disabledCount: number
+    /** #439 场景命令呈现证据：全部菜单按钮的 command 集（含子菜单叶命令
+     *  ——「场景三项在不在菜单里」的绘制层断言输入） */
+    commands?: string[]
+    /** #359 T10 组件菜单项观测（data-vsidian-command 含点 = 命名空间
+     *  运行期项——集成断言组件簇在场/回收的绘制层证据） */
+    addonCommands?: string[]
   }
   /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性
    *  （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、

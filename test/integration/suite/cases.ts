@@ -911,12 +911,14 @@ interface ViewState {
     } | null
     /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据；
      *  #359 T10 起补组件菜单项命令清单（命名空间运行期项——组件簇在场/
-     *  回收的绘制层证据） */
+     *  回收的绘制层证据）；#439 起补全部按钮 command 集（场景三项呈现的
+     *  绘制层断言输入） */
     contextMenu?: {
       visible: boolean
       display: string | null
       separatorCount: number
       disabledCount: number
+      commands?: string[]
       addonCommands?: string[]
     }
     /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性、
@@ -10674,6 +10676,98 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const stateAfter = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(stateAfter.appliedEdits === stateBefore.appliedEdits && stateAfter.version === stateBefore.version,
       '头区不接管：零写回零版本推进')
+  }],
+
+  // ---- #439 链接场景项（打开链接 / 复制链接地址 / 复制显示文字） ----
+
+  ['链接场景三项：链接文字上绘制层呈现、打开端到端与复制剪贴板对拍（#439）', async () => {
+    // 断言口径：view.state.paint.contextMenu.commands 是绘制层探针（浮层
+    // 真实可见 + 按钮 command 集——场景三项在不在菜单里的视觉层证据）；
+    // 打开链接经真实宿主会话执行（linkLog 归类 external——测试钩子模式
+    // 不真开浏览器）；复制两项对拍真实宿主剪贴板。菜单经
+    // contextMenu.test.contextMenu/menuClick 注入通道驱动（宿主测试无法
+    // 向 webview 派发真实右键）
+    const MENU_LINKS_DOC = [
+      '---',
+      'title: 链接菜单',
+      '---',
+      '',
+      '看 [[双链 笔记|别名]] 尾',
+      '',
+      '看 [链接文字](https://example.com/a%20b?q=1) 尾',
+      '',
+      '普通段落一行',
+      '',
+      '| [[格内链]] | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+    ].join('\n')
+    await openWithEditor('menu-links.md')
+    await waitSessionReady('menu-links.md')
+    const uri = wsUri('menu-links.md').toString()
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+    const clipboardText = () => vscode.env.clipboard.readText()
+
+    // 1) 双链上开菜单：绘制层断言（可见 + 三项在 command 集 + 簇 1 顶部）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('别名') })
+    const wiki = await waitViewState('menu-links.md', (v) => v.paint?.contextMenu != null)
+    const wikiMenu = wiki.paint!.contextMenu!
+    assert(wikiMenu.visible === true, `绘制层：菜单中心点应被命中（实际 ${JSON.stringify(wikiMenu)}）`)
+    const wikiCommands = wikiMenu.commands ?? []
+    assert(wikiCommands.includes('openLink') && wikiCommands.includes('copyLinkAddress')
+      && wikiCommands.includes('copyLinkText'),
+      `链接文字上三项应在绘制层 command 集（实际 ${JSON.stringify(wikiCommands)}）`)
+    assert(wikiCommands.indexOf('openLink') < wikiCommands.indexOf('wikilink'),
+      '三项应排簇 1 顶部（openLink 先于新增双链）')
+    // 复制显示文字 = 别名优先；复制链接地址 = target 未 trim
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyLinkText' })
+    assert(await poll('别名剪贴板', async () =>
+      (await clipboardText()) === '别名' ? true : undefined),
+      `复制显示文字应为别名（实际 ${await clipboardText()}）`)
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('别名') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    assert(await poll('双链地址剪贴板', async () =>
+      (await clipboardText()) === '双链 笔记' ? true : undefined),
+      `复制链接地址应为双链 target 未 trim（实际 ${await clipboardText()}）`)
+
+    // 2) 打开链接（外部）：经真实宿主会话执行——linkLog 归类 external（准入
+    //    归宿主，测试钩子模式仅记录不真开系统浏览器）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('链接文字') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'openLink' })
+    assert(await poll('外链执行日志', async () => {
+      const data = (await vscode.commands.executeCommand(CMD.linkLog, uri)) as LinkLogData | undefined
+      const hit = data?.found
+        ? data.log.find((e) => e.kind === 'external' && e.href === 'https://example.com/a%20b?q=1')
+        : undefined
+      return hit ? true : undefined
+    }), '打开链接应经宿主以原样 href 执行（linkLog external）')
+    // 复制链接地址（外链）：href 原样不解码
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('链接文字') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyLinkAddress' })
+    assert(await poll('外链地址剪贴板', async () =>
+      (await clipboardText()) === 'https://example.com/a%20b?q=1' ? true : undefined),
+      `外链地址应为 href 原样不解码（实际 ${await clipboardText()}）`)
+
+    // 3) 无命中不显示（绘制层）：普通段与表格格内链接（zone=table 维持降级）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('普通段落') })
+    const plain = await waitViewState('menu-links.md', (v) => v.paint?.contextMenu != null)
+    const plainCommands = plain.paint!.contextMenu!.commands ?? []
+    assert(!plainCommands.includes('openLink') && !plainCommands.includes('copyLinkAddress')
+      && !plainCommands.includes('copyLinkText'),
+      `普通段不显示三项（实际 ${JSON.stringify(plainCommands)}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_LINKS_DOC.indexOf('格内链') })
+    const cell = await waitViewState('menu-links.md', (v) => v.paint?.contextMenu != null)
+    const cellCommands = cell.paint!.contextMenu!.commands ?? []
+    assert(!cellCommands.includes('openLink'),
+      `表格格内链接不接三项（实际 ${JSON.stringify(cellCommands.slice(0, 8))}）`)
+    // 跳转全程只读：源文档零写回
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 0, `链接场景命令零写回（实际 ${finalState.appliedEdits}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
   }],
 
   // ---- #197 反链面板：索引就绪 → 面板显示 → 点击跳转，四态与互斥 ----

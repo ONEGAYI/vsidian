@@ -5,7 +5,8 @@
 // 渲染、图标资产接线（#184：明暗两套真实加载 + mask 绘制 + 暗色主题切换）、
 // 段落设置勾选（#184：按行结构点亮）、剪贴板四项桥链路（cut/copy/paste/
 // selectAll）、块链接两项（自 blockMenu.mjs 迁移：标题链接/自动补写/既有
-// id 复用）。
+// id 复用）、链接场景三项（#439：四类链接渲染态与源码态右键、打开与真实
+// Ctrl+单击消息同构对拍、复制两项桥载荷）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -606,7 +607,128 @@ try {
     `阅读侧不应出现块 id 标记（实际片段 ${JSON.stringify(readingText.slice(-80))}）`)
   passed++
   console.log('[统一菜单回归][PASS] 块 id 双形态淡化 + 自定义字体色适配 + 阅读隐藏（迁移回归）')
+  // ---- 场景 O：链接场景三项（#439：真实右键四类链接逐类开菜单——渲染态
+  // 与源码态两种命中形态；打开链接与真实 Ctrl+单击激活消息同构对拍（同
+  // kind 同载荷）；复制两项经宿主剪贴板桥的载荷断言） ----
+  const LINK_DOC_LINES = [
+    '---',
+    'title: 头区',
+    '---',
+    '',
+    '看 [[双链 笔记|别名]] 尾',
+    '看 [链接文字](https://example.com/a%20b?q=1) 尾',
+    '见 <https://example.com/auto> 尾',
+    '开 [宽文字](my note.md) 尾',
+    '',
+  ]
+  await page.evaluate((t) => window.initContextMenu(t), LINK_DOC_LINES.join('\n'))
+  // 场景 N 收尾切到了阅读模式：链接场景是 Live 菜单能力，先切回 live
+  await page.evaluate(() => window.post({ kind: 'view.mode.set', mode: 'live' }))
+  await page.waitForTimeout(120)
+  await page.locator('.cm-content .cm-line').nth(4).waitFor()
+  await page.evaluate(() => window.clearSent())
+  /** 光标移出链接（Ctrl+单击后光标落入链接源区，渲染态按既有行为切源码
+   *  形态——重置后等待装饰重建，恢复渲染态命中条件） */
+  const resetCursorAway = async () => {
+    await page.evaluate(() => window.setSelection(0, 0))
+    await page.waitForTimeout(80)
+  }
+  /** 渲染态链接定位（wikilink 渲染 widget / 树驱动与宽松链接的渲染 mark） */
+  const renderedLink = (p, n, attr) => p.locator('.cm-line').nth(n).locator(`[${attr}="true"]`)
+  /** 真实 Ctrl+单击渲染链接中心点（与用户手势同一事件路径） */
+  const ctrlClickRendered = async (p, locator) => {
+    const box = await locator.boundingBox()
+    assert.ok(box, '渲染链接应有布局盒')
+    await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { modifiers: ['Control'] })
+  }
+  const LINK_LINES = LINK_DOC_LINES
+  const LINK_CASES = [
+    { line: 4, attr: 'data-vsidian-rendered-wikilink', kind: 'wikilink.activate',
+      open: '[', close: ']]',
+      activate: { target: '双链 笔记' }, address: '双链 笔记', text: '别名' },
+    { line: 5, attr: 'data-vsidian-rendered-link', kind: 'link.activate',
+      open: '[', close: ')',
+      activate: { href: 'https://example.com/a%20b?q=1' }, address: 'https://example.com/a%20b?q=1', text: '链接文字' },
+    { line: 6, attr: 'data-vsidian-rendered-link', kind: 'link.activate',
+      open: '<', close: '>',
+      activate: { href: 'https://example.com/auto' }, address: 'https://example.com/auto', text: 'https://example.com/auto' },
+    { line: 7, attr: 'data-vsidian-rendered-link', kind: 'link.activate',
+      open: '[', close: ')',
+      activate: { href: 'my note.md' }, address: 'my note.md', text: '宽文字' },
+  ]
+  for (const c of LINK_CASES) {
+    const lineText = LINK_LINES[c.line]
+    const lineStart = LINK_LINES.slice(0, c.line).join('\n').length + 1
+    const srcStart = lineStart + lineText.indexOf(c.open)
+    const srcEnd = lineStart + lineText.indexOf(c.close) + c.close.length
+    // 1) 渲染态真实右键：三项呈现于簇 1 顶部
+    await renderedLink(page, c.line, c.attr).click({ button: 'right', position: { x: 4, y: 4 } })
+    state = await page.evaluate(() => window.readMenu())
+    assert.ok(state.menuExists, `第 ${c.line} 行右键应打开菜单`)
+    assert.deepEqual(state.topCommands.slice(0, 3), ['openLink', 'copyLinkAddress', 'copyLinkText'],
+      `链接文字上三项应在簇 1 顶部（实际 ${JSON.stringify(state.topCommands.slice(0, 6))}）`)
+    // 2) 打开链接：出站激活消息（target/href 原口径 + 完整链接源区间）
+    await page.evaluate(() => window.clearSent())
+    await page.locator('.vsidian-context-menu button[data-vsidian-command="openLink"]').click()
+    let sent = await page.evaluate(() => window.sent())
+    const menuActivate = sent.findLast((m) => m.kind === c.kind)
+    assert.ok(menuActivate, `打开链接应出站 ${c.kind}（实际 ${JSON.stringify(sent.map((m) => m.kind))}）`)
+    assert.deepEqual(
+      c.kind === 'wikilink.activate'
+        ? { target: menuActivate.target, srcStart: menuActivate.srcStart, srcEnd: menuActivate.srcEnd }
+        : { href: menuActivate.href, srcStart: menuActivate.srcStart, srcEnd: menuActivate.srcEnd },
+      { ...c.activate, srcStart, srcEnd },
+      `激活载荷应为 target/href 原文与完整链接源区间（实际 ${JSON.stringify(menuActivate)}）`)
+    // 3) 真实 Ctrl+单击同一链接：消息与菜单打开链接完全同构（同 kind 同载荷）
+    await page.evaluate(() => window.clearSent())
+    await ctrlClickRendered(page, renderedLink(page, c.line, c.attr))
+    sent = await page.evaluate(() => window.sent())
+    const ctrlActivate = sent.findLast((m) => m.kind === c.kind)
+    assert.ok(ctrlActivate, `Ctrl+单击应出站 ${c.kind}（实际 ${JSON.stringify(sent.map((m) => m.kind))}）`)
+    assert.deepEqual(menuActivate, ctrlActivate,
+      `菜单打开链接与 Ctrl+单击应同构（菜单 ${JSON.stringify(menuActivate)} vs 单击 ${JSON.stringify(ctrlActivate)}）`)
+    await resetCursorAway()
+    // 4) 复制链接地址 / 复制显示文字：经宿主剪贴板桥的载荷
+    await page.evaluate(() => window.clearSent())
+    await renderedLink(page, c.line, c.attr).click({ button: 'right', position: { x: 4, y: 4 } })
+    await page.locator('.vsidian-context-menu button[data-vsidian-command="copyLinkAddress"]').click()
+    sent = await page.evaluate(() => window.sent())
+    assert.ok(sent.some((m) => m.kind === 'clipboard.write' && m.text === c.address),
+      `复制链接地址应为 target/href 原样（实际 ${JSON.stringify(sent.filter((m) => m.kind === 'clipboard.write'))}）`)
+    await renderedLink(page, c.line, c.attr).click({ button: 'right', position: { x: 4, y: 4 } })
+    await page.locator('.vsidian-context-menu button[data-vsidian-command="copyLinkText"]').click()
+    sent = await page.evaluate(() => window.sent())
+    assert.ok(sent.some((m) => m.kind === 'clipboard.write' && m.text === c.text),
+      `复制显示文字应为 display 口径（实际 ${JSON.stringify(sent.filter((m) => m.kind === 'clipboard.write'))}）`)
+  }
+  passed++
+  console.log('[统一菜单回归][PASS] 链接场景三项：四类链接渲染态右键、打开与 Ctrl+单击同构、复制载荷')
+
+  // 5) 源码态命中形态：光标触及链接显形源码后右键，三项照常呈现（双链与
+  //    普通链接两代表；命中判定在源码坐标，渲染态装饰是否在场不影响）
+  for (const c of [LINK_CASES[0], LINK_CASES[1]]) {
+    const lineText = LINK_LINES[c.line]
+    const cursor = LINK_LINES.slice(0, c.line).join('\n').length + 1 + lineText.indexOf(c.open) + 1
+    await page.evaluate((pos) => window.setSelection(pos, pos), cursor)
+    await page.waitForTimeout(60)
+    await page.locator('.cm-line').nth(c.line).click({ button: 'right', position: { x: 64, y: 6 } })
+    state = await page.evaluate(() => window.readMenu())
+    assert.ok(state.menuExists && state.topCommands.includes('openLink'),
+      `第 ${c.line} 行源码态右键应呈现链接三项（实际 ${JSON.stringify(state.topCommands.slice(0, 6))}）`)
+    await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  }
+  // 6) 普通文本右键：三项不出现（无命中隐藏而非置灰——右键落在行首
+  //    前缀「看 」上，不在任何链接区间内）
+  await page.locator('.cm-line').nth(4).click({ button: 'right', position: { x: 6, y: 6 } })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(state.menuExists, '前置：普通文字右键打开菜单')
+  assert.ok(!state.topCommands.includes('openLink') && !state.disabledCommands.includes('openLink'),
+    '非链接文字不显示三项（隐藏而非置灰）')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  passed++
+  console.log('[统一菜单回归][PASS] 链接场景：源码态命中与无命中隐藏')
 } finally {
   await browser.close()
 }
 console.log(`[统一菜单回归] 全部通过：${passed} 场景`)
+

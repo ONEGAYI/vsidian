@@ -155,6 +155,21 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.link.open",
+        "title": "%command.link.open.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.link.copyAddress",
+        "title": "%command.link.copyAddress.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.link.copyText",
+        "title": "%command.link.copyText.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.format.bold",
         "title": "%format.bold%",
         "category": "Vsidian"
