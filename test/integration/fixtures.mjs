@@ -1844,6 +1844,22 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '已有 id 段落 ^keep9',
     '',
   ].join('\n'), 'utf8')
+  // #437 表格专属右键簇：顶层表（结构/选择/复制/层级载体）与单层引用表
+  //（层级两项与网格渲染的引用表载体）
+  writeFileSync(path.join(wsDir, 'table-cluster.md'), [
+    '前文段落。',
+    '',
+    '| a | b |',
+    '|---|---|',
+    '| 1 | 2 |',
+    '',
+    '> | q1 | q2 |',
+    '> |---|---|',
+    '> | 5 | 6 |',
+    '',
+    '结尾段落。',
+    '',
+  ].join('\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'dup'), { recursive: true })
   writeFileSync(path.join(wsDir, 'dup', '甲.md'), '# 重名甲（dup 目录）\n', 'utf8')
   mkdirSync(path.join(wsDir, 'other'), { recursive: true })

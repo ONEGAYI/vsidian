@@ -317,6 +317,84 @@ try {
   passed++
   console.log('[统一菜单回归][PASS] 安全降级矩阵：表格/围栏/图形块逐区域置灰')
 
+  // ---- 场景 T1（#437）：表格簇真实右键呈现——13 项平铺、簇位与 4 条分组
+  // 线、labelParams 序号取词（选择第 {n} 行）、默认未绑定不占位 ----
+  await page.evaluate(() => window.clearSent())
+  const TABLE_DOC = '正文一段\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n'
+  await page.evaluate((t) => window.initContextMenu(t), TABLE_DOC)
+  await page.waitForTimeout(120)
+  // 数据行 2（| 3 | 4 |）真实右键：网格行序 = 表头 + 数据行（分隔行非网格行）
+  await page.locator('.vsidian-table-grid-row').nth(2).click({ button: 'right', position: { x: 30, y: 8 } })
+  state = await page.evaluate(() => window.readMenu())
+  const TABLE_CLUSTER = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+    'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+    'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+  assert.deepEqual(state.topCommands, [
+    'wikilink', 'link', 'copyBlockLink',
+    ...TABLE_CLUSTER,
+    'textFormat', 'paragraphStyle', 'insert',
+    'cut', 'copy', 'paste', 'pastePlain', 'selectAll',
+  ], `表格区顶级命令应以表格簇居第三簇（实际 ${JSON.stringify(state.topCommands)}）`)
+  assert.equal(state.separatorCount, 3, `四簇（链接/表格/块格式/剪贴板）应 3 条分组线（实际 ${state.separatorCount}）`)
+  // labelParams 渲染：选择行/列显示 1 基序号（zh 语言包 {n} 插值——命中第 3 行）
+  const rowLabel = await page.evaluate(() =>
+    document.querySelector('button[data-vsidian-command="selectTableRow"] .vsidian-context-menu-label')?.textContent ?? null)
+  assert.equal(rowLabel, '选择第 3 行', `选择行文案应参数化显示命中行序（实际 ${JSON.stringify(rowLabel)}）`)
+  // 顶层表：移除引用块置灰（0 层不可减）、增一层亮
+  assert.ok(state.disabledCommands.includes('tableQuoteRemove'), '顶层表：移除引用块置灰')
+  assert.ok(!state.disabledCommands.includes('tableQuoteAdd'), '顶层表：增一层引用可用')
+  const unboundHint = await page.evaluate(() => window.readMenu().hintOf('insertRowBelow'))
+  assert.equal(unboundHint, null, '默认未绑定的结构项提示列不占位')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 用户自绑键位后重开菜单：提示列显示生效绑定（键位注册表派生）
+  await page.evaluate(() => window.post({
+    kind: 'keybindings.changed', overrides: { insertRowBelow: ['ctrl+alt+r'] },
+  }))
+  await page.locator('.vsidian-table-grid-row').nth(2).click({ button: 'right', position: { x: 30, y: 8 } })
+  const boundHint = await page.evaluate(() => window.readMenu().hintOf('insertRowBelow'))
+  assert.equal(boundHint, 'Ctrl+Alt+R', '用户自绑键位应在提示列显示（注册表派生）')
+  await page.evaluate(() => window.post({ kind: 'keybindings.changed', overrides: {} }))
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  passed++
+  console.log('[统一菜单回归][PASS] 表格簇呈现：13 项平铺、簇位、序号取词、提示列绑定派生')
+
+  // ---- 场景 T2（#437）：结构项真实点击——下方插入行后表格形状正确 ----
+  await page.evaluate(() => window.clearSent())
+  await page.evaluate((t) => window.initContextMenu(t), TABLE_DOC)
+  await page.waitForTimeout(120)
+  await page.locator('.vsidian-table-grid-row').nth(2).click({ button: 'right', position: { x: 30, y: 8 } })
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="insertRowBelow"]').click()
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.menuExists, '结构项执行后菜单关闭')
+  assert.ok(state.text.includes('| 3 | 4 |\n| | |'), `下方插入行后表格形状正确（实际 ${JSON.stringify(state.text.split('\n').slice(1, 7))}）`)
+  await page.waitForTimeout(300) // 出站去抖收敛
+  const structSent = await page.evaluate(() => window.sent())
+  assert.equal(structSent.filter((m) => m.kind === 'edit.request').length, 1, '插行走标准出站一笔')
+  passed++
+  console.log('[统一菜单回归][PASS] 表格结构项：真实点击插行、形状与出站粒度')
+
+  // ---- 场景 T3（#437）：引用层级项真实点击——各行前缀统一 +1 层 ----
+  await page.evaluate(() => window.clearSent())
+  const QUOTE_DOC = '引用表\n\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n'
+  await page.evaluate((t) => window.initContextMenu(t), QUOTE_DOC)
+  await page.waitForTimeout(120)
+  // 引用表网格行真实右键（命中数据行）→ 增一层引用
+  await page.locator('.vsidian-table-grid-row').nth(1).click({ button: 'right', position: { x: 30, y: 8 } })
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.disabledCommands.includes('tableQuoteRemove'), '单层引用表：移除引用块可用')
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="tableQuoteAdd"]').click()
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.menuExists, '层级项执行后菜单关闭')
+  const quotedLines = state.text.split('\n').slice(2, 5)
+  assert.deepEqual(quotedLines, ['> > | a | b |', '> > |---|---|', '> > | 1 | 2 |'],
+    `增一层后各行前缀正确（实际 ${JSON.stringify(quotedLines)}）`)
+  await page.waitForTimeout(300)
+  const quoteSent = await page.evaluate(() => window.sent())
+  assert.equal(quoteSent.filter((m) => m.kind === 'edit.request').length, 1, '层级变换走标准出站一笔')
+  passed++
+  console.log('[统一菜单回归][PASS] 引用层级项：真实点击增层、各行前缀正确')
+
+
   // ---- 场景 H：剪贴板四项（cut/copy/paste/selectAll 真实点击）----
   // 场景 E 的 bold 已改写文档——重装载原始 DOC，后续偏移按 DOC 对拍
   await page.evaluate((t) => window.initContextMenu(t), DOC)

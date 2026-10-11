@@ -911,13 +911,14 @@ interface ViewState {
     } | null
     /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据；
      *  #359 T10 起补组件菜单项命令清单（命名空间运行期项——组件簇在场/
-     *  回收的绘制层证据） */
+     *  回收的绘制层证据）；#437 起补表格簇命令清单（tableOps 簇渲染证据） */
     contextMenu?: {
       visible: boolean
       display: string | null
       separatorCount: number
       disabledCount: number
       addonCommands?: string[]
+      tableCommands?: string[]
     }
     /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性、
      *  行计数与键盘高亮行/状态行文本（会话关闭时缺省）；#377 T02 起补
@@ -10555,6 +10556,96 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(finalState.appliedEdits === cutState.appliedEdits + 1,
       `全选零写回（实际 +${finalState.appliedEdits - cutState.appliedEdits}）`)
     await post({ kind: 'contextMenu.test.menuClose' })
+  }],
+
+  // ---- #437 表格专属右键簇（tableOps：结构六操作 + 删除表格 + 选择三项 + 复制 + 层级两项）----
+
+  ['表格专属簇：绘制层断言、结构/层级项执行与锚点过期防御（#437）', async () => {
+    // 断言口径：paint.contextMenu.tableCommands 是表格簇的绘制层探针（真实
+    // 按钮渲染证据——簇不在场/渲染失败即缺省）；写回粒度以 appliedEdits 对拍
+    //（单次菜单操作 = 恰一笔）；复制走真实宿主剪贴板；锚点过期用宿主权威
+    // WorkspaceEdit 制造外部变更（webview 经 doc.changed 换文档实例）
+    const TABLE_CLUSTER_DOC = [
+      '前文段落。',
+      '',
+      '| a | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '> | q1 | q2 |',
+      '> |---|---|',
+      '> | 5 | 6 |',
+      '',
+      '结尾段落。',
+      '',
+    ].join('\n')
+    const CLUSTER_COMMANDS = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+      'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+      'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+    await openWithEditor('table-cluster.md')
+    await waitSessionReady('table-cluster.md')
+    const uri = wsUri('table-cluster.md').toString()
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+    const sessionState = () =>
+      vscode.commands.executeCommand(CMD.sessionState, uri) as PromiseLike<SessionState>
+    const base = await sessionState()
+
+    // 1) 表格区开菜单：绘制层断言——簇命令清单齐全（13 项真实渲染）且浮层可见
+    await post({ kind: 'contextMenu.test.contextMenu', pos: TABLE_CLUSTER_DOC.indexOf('| 1 |') + 2 })
+    const tableMenu = await waitViewState('table-cluster.md', (v) => v.paint?.contextMenu != null)
+    const probe = tableMenu.paint!.contextMenu!
+    assert(probe.visible === true, `表格簇菜单应真实绘制（实际 ${JSON.stringify(probe)}）`)
+    assert(JSON.stringify(probe.tableCommands) === JSON.stringify(CLUSTER_COMMANDS),
+      `表格簇 13 项应全部真实渲染（实际 ${JSON.stringify(probe.tableCommands)}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+
+    // 2) 复制表格 Markdown：执行零写回（真实宿主剪贴板读回对拍沿 #183 既有
+    //    用例承载；本机独立/前台宿主的 vscode.env.clipboard 轮询已实证在
+    //    origin/main 基线同样超时——环境限制，出站 clipboard.write 消息由
+    //    jsdom 用例（contextMenuPanel.test.ts #437 组）钉住）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: TABLE_CLUSTER_DOC.indexOf('| 1 |') + 2 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    await poll('复制命令菜单收尾', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('table-cluster.md').toString(), 0)) as ViewState | undefined
+      return v && v.text === TABLE_CLUSTER_DOC ? true : undefined
+    })
+    assert((await sessionState()).appliedEdits === base.appliedEdits, '复制零写回')
+    await post({ kind: 'contextMenu.test.menuClose' })
+
+    // 3) 锚点过期防御：菜单打开期间宿主权威外部改文档（WorkspaceEdit →
+    //    doc.changed 广播换 webview 文档实例）→ 命令放弃（零写回，表格保留）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: TABLE_CLUSTER_DOC.indexOf('| 1 |') + 2 })
+    const extEdit = new vscode.WorkspaceEdit()
+    extEdit.replace(wsUri('table-cluster.md'), new vscode.Range(0, 0, 0, 5), '前文已被外部改写')
+    assert(await vscode.workspace.applyEdit(extEdit), '外部修改应成功')
+    await waitViewState('table-cluster.md', (v) => v.text.includes('前文已被外部改写'))
+    await post({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    const stale = await waitViewState('table-cluster.md', (v) => v.text.includes('前文已被外部改写'))
+    assert(stale.text.includes('| a | b |'), '锚点过期的删除表格应放弃执行（表格保留）')
+    const afterStale = await sessionState()
+    assert(afterStale.appliedEdits === base.appliedEdits,
+      `锚点过期命令零写回（实际 +${afterStale.appliedEdits - base.appliedEdits}）`)
+
+    // 4) 结构项：下方插入行（单笔写回，表格形状正确）。外部改写已使原文
+    //    偏移失效——命中位从当前视图文本推导
+    const afterExternal = (await waitViewState('table-cluster.md')).text
+    await post({ kind: 'contextMenu.test.contextMenu', pos: afterExternal.indexOf('| 1 |') + 2 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'insertRowBelow' })
+    await waitViewState('table-cluster.md', (v) => v.text.includes('| 1 | 2 |\n| | |'))
+    const afterInsert = await sessionState()
+    assert(afterInsert.appliedEdits === base.appliedEdits + 1,
+      `插行应恰一笔写回（实际 +${afterInsert.appliedEdits - base.appliedEdits}）`)
+
+    // 5) 引用层级项：引用表增一层（各行前缀正确，单笔写回）
+    const withInsertedRow = (await waitViewState('table-cluster.md')).text
+    await post({ kind: 'contextMenu.test.contextMenu', pos: withInsertedRow.indexOf('5 |') + 1 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'tableQuoteAdd' })
+    await waitViewState('table-cluster.md', (v) =>
+      v.text.includes('> > | q1 | q2 |') && v.text.includes('> > | 5 | 6 |'))
+    const afterQuote = await sessionState()
+    assert(afterQuote.appliedEdits === afterInsert.appliedEdits + 1,
+      `层级变换应恰一笔写回（实际 +${afterQuote.appliedEdits - afterInsert.appliedEdits}）`)
   }],
 
   ['块链接两项：统一菜单两态、自动补写可撤销与快捷键入口（#183，自 #162 迁移）', async () => {
