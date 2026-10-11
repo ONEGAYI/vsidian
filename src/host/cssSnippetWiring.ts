@@ -4,6 +4,8 @@
 // 依赖 vscode，本模块是它唯一的 vscode 壳。
 import * as vscode from 'vscode'
 import { realpath } from 'fs/promises'
+import { watch, existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { CssSnippetService, type CssSnippetFsPort } from './cssSnippetService'
 import { isSnippetFileName, fileTypeMatches } from '../shared/cssSnippets'
 import { t } from '../shared/i18n'
@@ -52,10 +54,7 @@ async function realpathNode(path: string): Promise<string | null> {
   }
 }
 
-/** 监听端口：递归监听（列表只扫一层，但被嵌套引用的文件变化也要触发刷新，
- *  #129 的 @import 依赖归因——事件携带变更文件路径，服务按「第一层/子级」
- *  分流）。目录暂不存在时 watcher 保持注册（@parcel/watcher 对不存在基路径
- *  监听其重建），目录恢复后事件继续到达 */
+/** 第一层清单增删沿用 VSCode watcher；导入闭包另有独立监听。 */
 function watchSnippetDirectory(
   directory: string,
   onEvent: (changedPath: string | null) => void,
@@ -74,10 +73,33 @@ function watchSnippetDirectory(
   }
 }
 
+/** 独立监听启用导入的目录：Node fs 与 realpath 同在实际宿主机器上。
+ *  缺失目录由已监听的祖先创建事件接续，不轮询、不修改工作区排除设置。 */
+function watchDependencyDirectory(directory: string, onEvent: (changedPath: string | null) => void): () => void {
+  let watcher: ReturnType<typeof watch>
+  try {
+    watcher = watch(directory, (_event, file) => onEvent(file === null ? null : join(directory, file.toString())))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return () => {}
+  }
+  watcher.on('error', (error: NodeJS.ErrnoException) => {
+    // Windows 删除正在监听的目录可能报 EPERM；按目录删除交给服务重建。
+    if (error.code === 'ENOENT' || (error.code === 'EPERM' && !existsSync(directory))) {
+      watcher.close()
+      onEvent(directory)
+      return
+    }
+    throw error
+  })
+  return () => watcher.close()
+}
+
 export function createSnippetFsPort(): CssSnippetFsPort {
   return {
     listCssFiles,
     watchDirectory: watchSnippetDirectory,
+    watchDependencyDirectory,
     readFileText,
     realpath: realpathNode,
   }

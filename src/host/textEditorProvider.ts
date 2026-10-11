@@ -102,7 +102,7 @@ import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
-import { matchHostOffset, parseCopyMatch, shouldShowSearchRevealHint } from './searchReveal'
+import { matchHostOffset, parseCopyMatch, SEARCH_REVEAL_SENTINEL, shouldShowSearchRevealHint } from './searchReveal'
 import {
   readRefContentTarget,
   resolveHoverTargetTip,
@@ -1864,7 +1864,6 @@ export function createTextEditorProvider(
   /** 剪贴板三步捕获：哨兵 → copyMatch → 回读 → 恢复原文本。no-op（非
    *  匹配级选中不写剪贴板）经哨兵未变识别为无输出。已知副作用：恢复只能
    *  写回文本——捕获前的非文本剪贴板（图片等）被覆盖，#318 矩阵记录该代价 */
-  const SEARCH_REVEAL_SENTINEL = '\u0000vsidian-search-reveal\u0000'
   const captureSearchMatch = async (): Promise<string | null> => {
     // before 只在成功读到后恢复：readText 即失败（剪贴板 API reject 极少）
     // 时不执行写回，不把异常路径变成覆盖用户剪贴板

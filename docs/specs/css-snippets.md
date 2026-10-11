@@ -77,6 +77,14 @@
 
 入口级缓存击穿版本（`?v=`）与列表版本是两轴：其他入口启停不得扰动未涉及入口的 URI。#130 HTTPS 导入在此基础上扩展 `classifyCssRef` 的 http 类与 CSP `style-src`/`font-src`，勿在宿主预判联网资源成败。
 
+#### 本地导入监听加固（2026-10-11）
+
+真实宿主 CI `38106084465` 的 #129 失败发生在子文件修改后：初始样式已生效，诊断记录却没有该子文件的 `snippets.fs`，后续依赖版本拍也未产生。尚未定位工作区事件缺失的底层来源。VSCode 1.82.3 的[监听实现](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/api/browser/mainThreadFileSystem.ts)会复用工作区递归事件；工作区内非递归 API 也仅补充排除规则覆盖的事件，不能当作完整的独立事件通道。
+
+第一层清单监视仍经原有 VSCode 端口。启用入口的本地导入闭包，由宿主 Node `fs.watch` 独立监听其目录及闭包内祖先目录；依赖图仍唯一消费 `analyzeSnippetEntry`，共享目录只保留一份订阅，停用、换目录和释放时回收。导入子目录创建、删除和替换沿同一归因路径重建订阅；缺失的导入子目录由仍在监听的祖先接续。非预期订阅错误向外传播，不静默吞掉。未增加轮询、业务重试或等待预算，core/sensitive 归属不变。
+
+公开选择器、变量、导入语法、列表排序、两轴版本与远程引用边界不变。样式对照基线为已发布 `v0.11.0`（`c16349acade8b17f2ebc1ec91c9de8c3746c3010`），历史兼容仍由独立 `v0.4.0` 基线门禁校验。证据在实现树 `out/test/clipboard-investigation/`：`css129-independent-watch-red-host.log` 为屏蔽共享工作区事件后的真实红测；`css129-native-watch-green-host.log` 与 `css129-directory-lifecycle-host.log` 为独立监听、文件恢复及目录删除重建后的绘制读值验证；`css129-watch-error-contract-red.json` / `css129-contract-unit-green.json` 为后台订阅错误传播的红绿证据。
+
 ### HTTPS 样式导入与联网字体约定（#130 落档）
 
 远程引用（`classifyCssRef` 的 http 类，含协议相对 `//`）的宿主语义是「**完全不进本地面**」——不进依赖闭包（`importPaths`）、不进 watcher 归因（远程不可 watch）、不触发越界/realpath 拒绝、不预判联网成败（断网/CORS/HTTP 错误/无效 CSS 一律交浏览器与装载器三态分流：入口降级、其他片段不受影响、字体回退备用）；远程内容的重发**只**由入口级版本驱动（手动刷新或入口/本地依赖变更推进 `?v=`）。

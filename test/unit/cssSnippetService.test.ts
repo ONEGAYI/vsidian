@@ -74,6 +74,7 @@ function makeFs(initial: string[] | null = null): FakeSnippetFs {
       }
       return port.fail ? null : port.listing
     },
+    watchDependencyDirectory: () => () => {},
     watchDirectory: (dir, onEvent) => {
       port.watcherDirs.push(dir)
       notifyRef.notify = onEvent

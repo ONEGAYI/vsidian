@@ -10,6 +10,7 @@
 import * as vscode from 'vscode'
 import { cases } from './cases'
 import { selectIntegrationCases, SENSITIVE_CASES, sshMarkerCaseFilter } from './caseSelection'
+import { CLIPBOARD_CASE_NAMES, withClipboardLock } from './clipboardLock'
 
 export async function run(): Promise<void> {
   const failures: string[] = []
@@ -161,7 +162,11 @@ export async function run(): Promise<void> {
         }
         await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', diagnose)
       }
-      await fn()
+      if (process.platform === 'win32' && CLIPBOARD_CASE_NAMES.has(name)) {
+        await withClipboardLock(fn)
+      } else {
+        await fn()
+      }
       console.log(`[集成测试][PASS] ${name}`)
     } catch (err) {
       failures.push(name)

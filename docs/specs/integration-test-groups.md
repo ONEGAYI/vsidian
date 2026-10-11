@@ -17,7 +17,7 @@
 
 名单之外继续强制检查：包括 #129 其他导入契约、#222 限高设置，以及已加固的 #215 视口锚点。浏览器构建冲突与滚动恢复失败属于 browser job，不并入本组。
 
-#318 搜索定位恢复用例处置（2026-10-03）：原型验证带入的五个用例按裁定收口——显式命令矩阵转正进 core 组（「搜索定位恢复（#318）：显式命令矩阵——首次/重复/多匹配/CRLF/剪贴板恢复」，`integrationCaseGroups.test.ts` 有 `core` 包含断言钉住），自动捕获歧义矩阵、搜索跳转反馈回路（官方 API 落地前必然失败的红测试）、信号盘点与命令面探针（纯观测无断言）四个删除，实证与探针留档于 [#318 原型验证结论评论](https://github.com/ONEGAYI/vsidian/issues/318)与原型分支 `dev/diag-search-reveal`。该用例依赖剪贴板三步捕获与 200ms 时序，本地实测稳定；若后续 CI 出现超时证据，再按上节规则评估 sensitive 归组。
+#318 搜索定位恢复用例处置（2026-10-03）：原型验证带入的五个用例按裁定收口——显式命令矩阵转正进 core 组（「搜索定位恢复（#318）：显式命令矩阵——首次/重复/多匹配/CRLF/剪贴板恢复」，`integrationCaseGroups.test.ts` 有 `core` 包含断言钉住），自动捕获歧义矩阵、搜索跳转反馈回路（官方 API 落地前必然失败的红测试）、信号盘点与命令面探针（纯观测无断言）四个删除，实证与探针留档于 [#318 原型验证结论评论](https://github.com/ONEGAYI/vsidian/issues/318)与原型分支 `dev/diag-search-reveal`。2026-10-10 的 Windows 诊断与加固见下节；后续新失败仍须按独立证据归因，不自动调入 sensitive。
 
 保持原始切片位置：先应用既有 `VSIDIAN_TEST_CASES` 多子串筛选，记录筛选结果中的位置，再按组选择和 `k/N` 取模。移入第五组的用例不占执行项，但其位置不被压缩；后续普通用例不会因本次分组迁移到其他宿主。
 
@@ -56,6 +56,29 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 ```
 
 `all` 为默认组，显式组名只接受 `all / core / sensitive`。定向筛选未命中当前组即报错；切片后合法的空片仍允许。开发态 all/core 的报告沿用 `.vscode-test/integration-dev.log` 或 `integration-dev-s<片号>.log`；sensitive 使用 `integration-sensitive.log` 或 `integration-sensitive-s<片号>.log`。报告记录分组、计划数量、逐项 START/PASS/FAIL/TIME 和宿主退出码；首次运行即落盘，复核只读报告。
+
+### Windows 剪贴板族诊断与互斥（2026-10-10）
+
+**本轮确认了产品兼容缺陷、测试驱动问题和共享资源干扰**。基线为 `7011adee`，宿主为真实 VSCode 1.82.3，开发态加载独立工作树的 `out/extension.js` 与 `out/webview/`。
+
+- #318 的旧哨兵以 NUL 开头，Windows `CF_UNICODETEXT` 在 NUL 处终止。独立宿主探针与 Win32 回读均得到空串，9 次采样全部复现；普通文本哨兵能完整回读。生产哨兵改为普通文本，定义归 `host/searchReveal.ts`，单测钉住 Windows 回读兼容性与「不能冒充匹配输出」两项约束。
+- #318 的测试只等待任意含查询词的条目，现场实际选中、打开 `proto-b.md`，却等待 `proto-a.md`。就绪条件改为甲文件的具体匹配，首条断言核对完整行列与行文本。
+- #69 只等剪贴板相对前值变化，会误收迟到的前一次文本；现按 fixture 的独立预期成品等待。#183 的 copy/cut 载荷相同，剪切前写不同哨兵，避免旧复制值冒充剪切完成；粘贴后的成品改为等待回读，保留文本全等要求。
+- Windows 的隐藏桌面仍在 `WinSta0`，剪贴板属于窗口站，多个宿主共享它（[微软窗口站文档](https://learn.microsoft.com/en-us/windows/win32/winstation/window-stations)）。四宿主对照中 #69 与 #291 失败，单宿主同组 7/7 通过；加入跨进程互斥后，四宿主同组 7/7 通过。普通文本探针也出现过延后回读旧值，尚未识别具体来源，不能把所有历史失败都归给同一进程。
+
+`test/integration/suite/clipboardLock.ts` 的 `CLIPBOARD_CASE_NAMES` 是互斥名单唯一入口，覆盖 #69、Live/阅读代码卡复制、#183 菜单与块链接、#291 和 #318 七项。Windows runner 仅在这些用例正文期间持有会话内命名互斥量；其余用例继续并发，切片位置、core/sensitive 归属与 Linux 调度不变。新增真实宿主剪贴板用例时同步登记名单；契约检查名称存在且唯一、保持 core 归属，并用真实 Windows 子进程验证互斥与抛错释放。
+
+互斥量协调参与本机制的测试进程，不隔离用户桌面的其他剪贴板程序。用例结束或调用方退出关闭 stdin 时释放；获取、释放失败均报错，不自动重执行用例、不扩大等待预算。命名窗口站隔离在本机普通权限下被拒绝，未纳入实现，也不要求提权。
+
+单测使用每例独立的随机锁名，同一用例内的两个真实子进程仍争用同一把锁。这样可以验证互斥与释放，又不会排队等待正在运行的集成用例；不同锁名可独立执行也有断言。2026-10-11 的并行复验曾因单测使用固定集成锁名而在 5 秒超时，隔离红测与绿测分别保存在 `lock-isolation-red.log` / `lock-isolation-green.log`。
+
+证据保存在本次实现树 `out/test/clipboard-investigation/`：`baseline-windows-desktop-host.log` 为原始 3/7 失败，`search-navigation-trace-host.log` 为选中乙、等待甲的现场，`sentinel-red.json` 与 `sentinel-green.log` 为哨兵红绿，`clipboard-lock-red.log` 为互斥红测，`family-four-shards-s*.log` 与 `family-four-shards-locked-s*.log` 为四宿主对照。名单仍在 core；本机通过不等于 Linux CI 或人工验收完成。
+
+最终本地验证：`compile-final.log` 退出码 0；`unit-final.log` 为 7552 项 Vitest 与 181 项 Node 契约全过；`family-single-final-host.log` 与四片 `family-four-shards-locked-s*.log` 各合计 7/7 通过、宿主退出码均为 0。`git diff --check` 通过。本次新增文件已通过技能入口登记；文件树严格检查仍报七个基线既有漏项，`tree-baseline-comparison.json` 逐项证实这些文件在 `7011adee` 已跟踪而未收录，未扩大本次变更修补其他领域台账。
+
+2026-10-11 对齐 `4d9102ae` 后，编译通过；锁名隔离后的全量单测为 7586 项 Vitest 通过、181 项 Node 契约零失败（175 通过，foreground 模式按启动器约定跳过六项独立桌面探针，`publish-unit-isolated.log`）。这六项探针随后在默认 desktop 模式单独补验，全部通过（`publish-desktop-probes.log`）。
+
+同轮本机隐藏桌面四片复验为 0/7（`publish-family-four.log`）。绕过业务链路，直接调用 `vscode.env.clipboard.writeText/readText` 的普通文本探针连续三轮、每轮三次采样均回读空串（`publish-raw-clipboard-host.log`）；当前环境未满足原生剪贴板回读前提，不能把这轮失败当作修复后的通过证据。该环境变化的具体来源尚未识别，互斥机制不修复这一系统读写边界；远端 CI 与本机结果分别记录，不用重试、跳过用例或放宽断言掩盖。
 
 ## 真宿主文本外观对照套件（#344 接线，2026-10-04）
 

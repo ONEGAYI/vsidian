@@ -7,6 +7,9 @@ import { describe, it, expect } from 'vitest'
 import { CssSnippetService } from '../../src/host/cssSnippetService'
 import type { CssSnippetFsPort, CssSnippetStorage } from '../../src/host/cssSnippetService'
 import { normalizeSnippetPath } from '../../src/shared/cssSnippetImports'
+import { buildSync } from 'esbuild'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -26,6 +29,7 @@ interface FakeDepFs extends CssSnippetFsPort {
   realpaths: Map<string, string>
   listing: string[] | null
   scans: number
+  watcherDirs: Set<string>
   fire(path: string | null): void
 }
 
@@ -34,22 +38,26 @@ function makeFs(initialFiles: Record<string, string>, listing: string[]): FakeDe
     Object.entries(initialFiles).map(([k, v]) => [normalizeSnippetPath(k), v]),
   )
   const realpaths = new Map<string, string>()
-  let notify: (changedPath: string | null) => void = () => {}
+  const watchers = new Map<string, (changedPath: string | null) => void>()
   const fs: FakeDepFs = {
     files,
     realpaths,
     listing,
     scans: 0,
-    fire: (path) => notify(path),
+    watcherDirs: new Set(),
+    fire: (path) => watchers.values().next().value?.(path),
     listCssFiles: async () => {
       fs.scans += 1
       return fs.listing
     },
-    watchDirectory: (_dir, onEvent) => {
-      notify = onEvent
-      return () => {
-        notify = () => {}
-      }
+    watchDirectory: (dir, onEvent) => {
+      watchers.set(`root:${dir}`, onEvent)
+      return () => { watchers.delete(`root:${dir}`) }
+    },
+    watchDependencyDirectory: (dir, onEvent) => {
+      watchers.set(`dep:${dir}`, onEvent)
+      fs.watcherDirs.add(dir)
+      return () => { watchers.delete(`dep:${dir}`); fs.watcherDirs.delete(dir) }
     },
     readFileText: async (p) => files.get(normalizeSnippetPath(p)) ?? null,
     realpath: async (p) => {
@@ -77,6 +85,64 @@ function linkMap(svc: CssSnippetService): Record<string, number> {
 }
 
 describe('依赖归因：子级文件变更只重载受影响入口', () => {
+  it('后台重新订阅失败不得静默吞掉系统错误', () => {
+    const servicePath = fileURLToPath(new URL('../../src/host/cssSnippetService.ts', import.meta.url))
+    const source = `
+      import { CssSnippetService } from ${JSON.stringify(servicePath.replaceAll('\\', '/'))};
+      let fail = false;
+      const fs = {
+        listCssFiles: async () => ['main.css'],
+        readFileText: async p => p.endsWith('main.css') ? '@import "sub/dep.css";' : '.dep{}',
+        realpath: async p => p,
+        watchDirectory: () => () => {},
+        watchDependencyDirectory: dir => {
+          if (fail && dir.endsWith('/sub')) throw new Error('WATCH_REGISTRATION_FAILED');
+          return () => {};
+        },
+      };
+      const svc = new CssSnippetService({ get: () => undefined, update: async () => {} }, fs, 'k', { debounceMs: 1 });
+      (async () => {
+        await svc.setDirectory('D:/snips');
+        await svc.setEnabled('main.css', true);
+        fail = true;
+        svc.notifyFsEvent('D:/snips/sub');
+        setTimeout(() => svc.dispose(), 50);
+      })();
+    `
+    const bundle = buildSync({ stdin: { contents: source, resolveDir: process.cwd() }, bundle: true, write: false, platform: 'node', format: 'cjs' })
+    const child = spawnSync(process.execPath, ['--unhandled-rejections=strict'], { input: bundle.outputFiles[0].text, encoding: 'utf8' })
+    expect(child.status).not.toBe(0)
+    expect(child.stderr).toContain('WATCH_REGISTRATION_FAILED')
+  })
+
+  it('启用依赖目录独立监听，共享目录仅一份，停用与释放回收', async () => {
+    const fs = makeFs(SHARED_LAYOUT, ['main-a.css', 'main-b.css'])
+    const svc = new CssSnippetService(makeStorage(), fs, 'k', { debounceMs: 1 })
+    await svc.setDirectory('D:/snips')
+    expect([...fs.watcherDirs]).toEqual([])
+    await svc.setEnabled('main-a.css', true)
+    expect([...fs.watcherDirs].sort()).toEqual(['D:/snips', 'D:/snips/sub', 'D:/snips/sub2'])
+    await svc.setEnabled('main-b.css', true)
+    expect(fs.watcherDirs.size).toBe(3)
+    await svc.setEnabled('main-a.css', false)
+    expect([...fs.watcherDirs].sort()).toEqual(['D:/snips', 'D:/snips/sub'])
+    svc.dispose()
+    expect(fs.watcherDirs.size).toBe(0)
+  })
+
+  it('缺失依赖的祖先目录创建或删除也归因，嵌套目录均有独立监听', async () => {
+    const fs = makeFs({ 'D:/snips/main.css': '@import "sub/deep/dep.css";' }, ['main.css'])
+    const svc = new CssSnippetService(makeStorage(), fs, 'k', { debounceMs: 1 })
+    await svc.setDirectory('D:/snips')
+    await svc.setEnabled('main.css', true)
+    expect([...fs.watcherDirs].sort()).toEqual(['D:/snips', 'D:/snips/sub', 'D:/snips/sub/deep'])
+    const before = linkMap(svc)['main.css']
+    fs.fire('D:/snips/sub')
+    await sleep(30)
+    expect(linkMap(svc)['main.css']).toBeGreaterThan(before)
+    svc.dispose()
+  })
+
   it('共享依赖变更：两个入口的 v 都推进；结构版本不动、reason=dep', async () => {
     const fs = makeFs(SHARED_LAYOUT, ['main-a.css', 'main-b.css'])
     const svc = new CssSnippetService(makeStorage(), fs, 'k', { debounceMs: 1 })

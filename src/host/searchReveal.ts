@@ -22,6 +22,9 @@ export interface SearchMatchProbe {
   text: string
 }
 
+/** 捕获前写入的无匹配哨兵。Windows 文本剪贴板以 NUL 终止，必须使用普通文本。 */
+export const SEARCH_REVEAL_SENTINEL = '[vsidian-search-reveal]'
+
 /** 解析 copyMatch 输出。非匹配级输出（无选中或文件级选中时命令 no-op 不写
  *  剪贴板，回读到的是恢复用哨兵或无关文本）、多行文本、0 基行列一律 null
  *  ——调用方以 null 安全放弃，不误定位。只剥行尾换行符不做整体 trim：
