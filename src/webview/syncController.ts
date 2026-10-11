@@ -61,6 +61,7 @@ import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
 import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage } from '../shared/protocol'
+import type { TableEditOp } from '../shared/protocol'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
@@ -321,7 +322,9 @@ import {
   standaloneBlockIdOf,
 } from '../shared/blockId'
 import { parseTableDelimiter, quoteDepthOfLine, tableRowCellsForColumns } from '../shared/tableCells'
-import { runCreateTable, runTableEdit, tableRowsAt } from './tableEditing'
+import { runCreateTable, runTableEdit, runTableEditAt, tableRowsAt } from './tableEditing'
+import { planTableRegionDelete, serializeTableRegion, type TableRegion } from './tableRegion'
+import { planTableQuoteLevel } from './tableStructure'
 import { FM_SCAN_LIMIT, frontmatterRange } from '../shared/markdownDoc'
 import {
   outlineChangesOrdered,
@@ -389,6 +392,28 @@ const SELECTION_SAVE_DEBOUNCE_MS = 250
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
 const OUTLINE_JUMP_GUARD_MS = 1000
+
+// ---- #437 表格专属右键簇：命令集与执行体（菜单/命令面板/快捷键三入口共用）----
+
+/** 结构六操作：菜单命令 id 即 TableEditOp（与键位注册表 id 同源） */
+const TABLE_STRUCTURE_COMMANDS: ReadonlySet<string> = new Set([
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn',
+])
+
+/** 表格簇新命令（删除表格/选择三项/复制/层级两项） */
+type TableClusterCommand =
+  | 'deleteTable' | 'selectTableRow' | 'selectTableColumn' | 'selectWholeTable'
+  | 'copyTableMarkdown' | 'tableQuoteRemove' | 'tableQuoteAdd'
+
+const TABLE_CLUSTER_COMMANDS: ReadonlySet<string> = new Set<TableClusterCommand>([
+  'deleteTable', 'selectTableRow', 'selectTableColumn', 'selectWholeTable',
+  'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd',
+])
+
+function isTableClusterCommand(command: string): command is TableClusterCommand {
+  return TABLE_CLUSTER_COMMANDS.has(command)
+}
 
 
 
@@ -2967,6 +2992,15 @@ export class WebviewSyncController {
           case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
           case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
           case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
+          // #437 表格簇命令面板入口（快捷键走 keybindings.execute → 宿主命令
+          // → 本循环回发 ui.command，与菜单项同一执行实现；目标 = 光标处表格）
+          case 'deleteTable': this.runTableClusterAtCursor('deleteTable'); break
+          case 'selectTableRow': this.runTableClusterAtCursor('selectTableRow'); break
+          case 'selectTableColumn': this.runTableClusterAtCursor('selectTableColumn'); break
+          case 'selectWholeTable': this.runTableClusterAtCursor('selectWholeTable'); break
+          case 'copyTableMarkdown': this.runTableClusterAtCursor('copyTableMarkdown'); break
+          case 'tableQuoteRemove': this.runTableClusterAtCursor('tableQuoteRemove'); break
+          case 'tableQuoteAdd': this.runTableClusterAtCursor('tableQuoteAdd'); break
         }
         break
       case 'addonCommand.execute':
@@ -7377,6 +7411,10 @@ export class WebviewSyncController {
    *  即放弃执行，不落回主编辑器 */
   private runContextMenuCommand(command: string): void {
     const target = this.contextMenuTarget
+    // #437 表格簇执行期输入：命中负载须在 closeContextMenu **之前**捕获
+    //（close 先于分派清理 contextMenuSnapshot——语义窗口同 contextMenuTarget
+    // 先例，见 getContextMenuSnapshot 注释）；锚点新鲜度由重验二保证
+    const tableHit = this.contextMenuSnapshot?.table
     const menuView = this.contextMenuView
     if (!menuView) {
       this.closeContextMenu()
@@ -7441,6 +7479,21 @@ export class WebviewSyncController {
       }
       return
     }
+    // ---- #437 表格专属簇：命令 id 与键位注册表同源（结构六操作直接取
+    // TableEditOp；其余七项经 runTableClusterCommand 统一执行）。pos 取
+    // 命中格（TableMenuHit.pos）——runTableEditAt 定位入口不先移光标，
+    // 与悬浮控件同口径 ----
+    if (TABLE_STRUCTURE_COMMANDS.has(command)) {
+      if (tableHit && this.targetEditable(view, embed)) {
+        runTableEditAt(view, tableHit.pos, command as TableEditOp)
+        view.focus()
+      }
+      return
+    }
+    if (isTableClusterCommand(command)) {
+      this.runTableClusterCommand(command, view, embed, tableHit)
+      return
+    }
     // 其余为 formatOperations id（wikilink/link/bold/…/heading1-6）——复用
     // 快速操作条同一执行路径（含守卫、计划与焦点归还；目标 = 菜单捕获
     // 的重验后视图，不再按当前焦点二次解析——菜单关闭还焦存在时序差）
@@ -7451,6 +7504,104 @@ export class WebviewSyncController {
     // 运行期注册且无 handler、又不在白名单：开发期告警（注册方应在描述符
     // 带 handler 或对齐内置命令名；不再静默忽略）
     console.warn(`[vsidian] 右键菜单命令无执行器：${command}（注册项未带 handler 且不在内置白名单）`)
+  }
+
+  /** #437 表格簇命令统一执行体（菜单与命令面板/快捷键两路径共用）。
+   *  hit 缺省时按当前光标即时采集（tableMenuHitAt 与打开菜单同一判定族
+   *  ——命令面板入口的目标由光标推导）；无命中负载（光标不在树接管表格
+   *  上）静默零操作。写操作（删除表格/层级两项）单笔事务 = 宿主撤销一次；
+   *  选择三项为本地选区事务零写回；复制经宿主剪贴板桥零写回 */
+  private runTableClusterCommand(
+    command: TableClusterCommand,
+    view: EditorView,
+    embed: LiveEditorInstance | null,
+    hit?: TableMenuHit,
+  ): void {
+    if (!this.targetEditable(view, embed)) {
+      return
+    }
+    const resolved = hit ?? this.tableMenuHitAt(view, view.state.selection.main.head)
+    if (!resolved) {
+      return
+    }
+    const state = view.state
+    const field = state.field(liveDecorationsField, false)
+    const rows = field ? tableRowsAt(state, resolved.pos, field.tree) : null
+    if (!rows || rows.length === 0) {
+      return
+    }
+    const doc = state.doc.toString()
+    // 整表 region：全行全列一步构造（选整表现状无入口，属新组合非新语义）
+    const wholeRegion: TableRegion = {
+      tableFrom: rows[0]!.lineFrom,
+      rowFrom: 0,
+      rowTo: resolved.rowCount - 1,
+      columnFrom: 0,
+      columnTo: resolved.columnCount - 1,
+    }
+    if (command === 'deleteTable') {
+      const plan = planTableRegionDelete(doc, rows, wholeRegion)
+      if (plan) {
+        view.dispatch({ changes: plan.changes, selection: { anchor: plan.selection }, scrollIntoView: true })
+      }
+      view.focus()
+      return
+    }
+    if (command === 'selectTableRow' || command === 'selectTableColumn' || command === 'selectWholeTable') {
+      // 选行/选列口径照 tableControls 把手先例；选择后聚焦编辑器（蒙版呈现）
+      if (command === 'selectTableRow' && resolved.rowIndex != null) {
+        selectTableRegion(view, {
+          tableFrom: wholeRegion.tableFrom,
+          rowFrom: resolved.rowIndex, rowTo: resolved.rowIndex,
+          columnFrom: 0, columnTo: wholeRegion.columnTo,
+        })
+      } else if (command === 'selectTableColumn' && resolved.columnIndex != null) {
+        selectTableRegion(view, {
+          tableFrom: wholeRegion.tableFrom,
+          rowFrom: 0, rowTo: wholeRegion.rowTo,
+          columnFrom: resolved.columnIndex, columnTo: resolved.columnIndex,
+        })
+      } else if (command === 'selectWholeTable') {
+        selectTableRegion(view, wholeRegion)
+      }
+      view.focus()
+      return
+    }
+    if (command === 'copyTableMarkdown') {
+      // 优先语义：活跃格区（tableRegionField）包含命中格 → 复制格区，否则整表
+      const active = state.field(tableRegionField, false)
+      let region = wholeRegion
+      if (active && active.tableFrom === wholeRegion.tableFrom &&
+          resolved.rowIndex != null && resolved.columnIndex != null &&
+          resolved.rowIndex >= active.rowFrom && resolved.rowIndex <= active.rowTo &&
+          resolved.columnIndex >= active.columnFrom && resolved.columnIndex <= active.columnTo) {
+        region = active
+      }
+      const text = serializeTableRegion(doc, rows, region)
+      if (text !== null) {
+        this.bridge.postMessage({ kind: 'clipboard.write', text })
+      }
+      view.focus()
+      return
+    }
+    // 引用层级两项（blockquote-table 三轮职能转移）：行前缀逐行独立计算，
+    // 一笔事务一笔撤销；光标随命中格内容平移（不落前缀端点触发显形）
+    const delta = command === 'tableQuoteAdd' ? 1 : -1
+    const plan = planTableQuoteLevel(doc, rows, delta, resolved.pos)
+    if (plan) {
+      view.dispatch({ changes: plan.changes, selection: { anchor: plan.selection }, scrollIntoView: true })
+    }
+    view.focus()
+  }
+
+  /** #437 表格簇的命令面板/快捷键入口（ui.command 回流）：按焦点解析目标
+   *  实例后交 runTableClusterCommand（光标处即时采集命中负载） */
+  private runTableClusterAtCursor(command: TableClusterCommand): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    this.runTableClusterCommand(command, resolved.view, resolved.embed)
   }
 
   /** 剪切/复制：选区文本经宿主剪贴板桥直写（多行 EOL 归一在会话层）；
@@ -10025,6 +10176,16 @@ export class WebviewSyncController {
           addonCommands: [...new Set([...contextMenuEl.querySelectorAll<HTMLButtonElement>(
             `button[data-vsidian-command]`)].map((button) => button.dataset['vsidianCommand'] ?? '')
             .filter((command) => command.includes('.')))],
+          // #437：表格专属簇命令清单（簇渲染的绘制层证据——以结构操作首项
+          // 锚定其所在组容器，列出组内全部命令；簇不在场时缺省）
+          tableCommands: (() => {
+            const anchor = contextMenuEl.querySelector<HTMLButtonElement>(
+              'button[data-vsidian-command="insertRowAbove"]')
+            const group = anchor?.closest(`.${CONTEXT_MENU_CLASS_NAMES.group}`) ?? null
+            return group ? [...group.querySelectorAll<HTMLButtonElement>(
+              'button[data-vsidian-command]')].map((button) => button.dataset['vsidianCommand'] ?? '')
+              : undefined
+          })(),
         }
       : undefined
     // #376 T01 双链联想候选绘制：document 级浮层（不在 #app 内），可见性
