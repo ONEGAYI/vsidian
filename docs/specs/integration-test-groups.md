@@ -204,6 +204,8 @@ browser `cssSnippets` 也开启同一 webview 记录器，等待超时时先输�
 
 这里确认的是可重复的覆盖机制，与上述 CI 现场相符；CI 快照没有记录旧校准的逐次写入，不能还原那轮完整的帧间顺序。#294 尚需同一提交的多次 CI 验证，未据本地通过结案。
 
+**2026-10-11 状态补核**：[#304](https://github.com/ONEGAYI/vsidian/pull/304) 已于 2026-10-02 合并（`4fbb829d`）。同一提交 `b02ee81ae0f8a0c74331b81fcc968e205dbbd09c` 的 [36998926653](https://github.com/ONEGAYI/vsidian/actions/runs/36998926653) 与 [36999059633](https://github.com/ONEGAYI/vsidian/actions/runs/36999059633) 两次独立 CI 均为 attempt 1 成功；本轮从 GitHub 读回确认。当前 main `5d3f46dd` 的四种时序回归 4/4 与 `cssSnippets` 再验通过，#294 补齐证据后关闭。前文保留诊断阶段当时的结论；本次自动化复验不等于用户人工验收。
+
 ### #293：原失败已定位到删除降级步骤，机制待核实
 
 [原 CI run 36878422903](https://github.com/ONEGAYI/vsidian/actions/runs/36878422903) 的 shard 2 日志对应提交 `7ceda0d7`。以该提交生成的集成测试 bundle 映射堆栈，`index.js:11484` 是删除 `sub/dep.css` 后，等待 Live 标题装饰色回落为 `rgb(1, 2, 3)` 的断言。此前的文件修改刷新、入口自身规则与阅读切换等待已经返回；原日志未包含 CSS 读值和传播快照，仍不能区分删除事件、广播、嵌套装载或采样问题。
@@ -255,3 +257,29 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 **验证结果**：原 62 项顺序红态复现后，隔离 fixture 版本全绿；关闭 B 段 clean 退役接线时，新回归按预期失败。rebase 到合并 #311 后的 `origin/main`（`9f1877e`），编译与类型检查通过，235 个 Vitest 文件 5129 项通过，Node 启动器等契约 112 项通过、6 项按 foreground 模式跳过；四分片 all 组集成测试 252/252 全过，各宿主退出码为 0。
 
 原失败的自动复现仍需约 100～130 秒完整前序，未取得小于 5 秒的独立红态复现。诊断脚本、日志与便携宿主均为本机临时产物，不进入 Git；本地验证不代表用户验收。
+
+## #446：表格装饰重发与采样就绪（2026-10-11）
+
+**条目 1 的表格插入线有可重复缺陷**。CI `38010114937`、`38048478551` 的 `tableCaret.log` 与本机三并发基线轮 `run-p2gLrB` 同错失败；修复前的后续轮 `run-1HdSY5` 还复现 `tableEmbed` S4 行插入线缺失，后者与本次固定的行装饰重发路径相符。只增加等待仍失败（`run-5nlLUN`），排除“等待一下就会恢复”的处置方式。
+
+真实浏览器新增 `handle-column-refresh` / `handle-row-refresh`：先通过原生指针拖动绘出插入线，再经公开 `metricsCompartment` 重配字体度量，不移动指针，验证两帧后提示仍在并继续完成拖放。旧实现两项稳定失败。原因是度量或高度计划重发 `liveDecorationsField.decos` 时，CM6 重写行/格类名；纯装饰变化可没有文档、选区或几何变化，控件层因而不重绘。修复把装饰集合变化纳入原有重绘调度，继续用当前拖动状态恢复插入线，不建立第二套状态源。
+
+**条目 2 的 T08 弱等待已固定**。原条件 `titles[0] !== titles[1]` 在调序前也成立，允许下一步详情操作与迟到的宿主回显竞争。夹具将调序回显延迟 100ms，精确行序断言在旧实现中得到调序前顺序。测试现在等待完整目标行序，并按行为键展开详情；说明文字、例子、徽章色、失败回弹与真实键盘入口断言保留。没有加宽等待预算或自动重跑。
+
+**条目 3 已修复并勾销**。提交 `e78cae2c` 的大纲剪贴板成品采样与会话内跨进程互斥已在 main；本轮真宿主 #69 复制五项再验通过。条目 4 则改为等待 `readingWikilinkCount === 3`。同面修复 #10 链接/图片、#8 伪语法/frontmatter、#12 阅读表格四处默认零计数的弱等待，保留原断言、组别和分片。新增单测直接运行实际采样回调，五处均已先观察红态，再验证完成快照。
+
+**样式兼容范围**：本次触及网格行/格的装饰更新与把手浮层重绘；发布对照为 v0.11.0（`c16349ac`），实施基点为 `5d3f46dd`。网格行/格、把手与插入线既有类名、DOM 关系、颜色变量与作用域均保留，样式清单和历史基线未改。列插入线另断言实际绘制的 3px 焦点色边条；历史 CSS 基线与当前契约检查通过。#294 原有标题挂载及 CSS 颜色断言继续保留。
+
+证据在 `D:/.codex/worktrees/fix-446-294/vscode-obsidian-like-editor/out/test/`：`446-decoration-refresh-red.log` / `446-decoration-refresh-green.log`、`446-t08-delayed-reply-red.log` / `446-t08-green.log`、`446-reading-*-red.json` / `446-reading-all-green.json`。`446-integration-focused.log` 与宿主自有 `.vscode-test/integration-dev.log` 记录 9/9 通过，包含五处阅读采样和 #69 剪贴板对拍。完整回归结果以下方最终验证记录为准；本轮未推送代码或运行候选分支 CI，不把本机通过当作远端验证。
+
+| 最终验证 | 结果 | 证据 |
+| --- | --- | --- |
+| 全量 Vitest 与 Node 契约 | 340 文件、7679 项 Vitest；181 项 Node 契约，零失败 | `446-unit-full.log` |
+| 完整浏览器回归 | 默认三并发，94/94 套件通过，退出码 0 | `446-browser-full.log`、`browser-runs/run-ndImze/report.json` |
+| 表格与 T08 稳定性轮次 | 全量后追加两轮三并发，各 3/3 通过，未重跑失败用例 | `446-stability-round1.log` / `446-stability-round2.log`，原生报告 `run-ROri5F` / `run-WEejDp` |
+| 真宿主定向回归 | 独立测试桌面、开发态 VSCode 1.82.3，9/9 通过 | `446-integration-focused.log` |
+| 编译与类型检查 | 退出码 0；生成产物无变化 | `446-compile-complete.log` |
+| 历史样式与当前契约 | git 锚点复验通过；八项检查零失败 | `446-style-baseline.log`、`446-style-current.log` |
+| 文件树 | strict 校验通过 | `446-tree-final.log` |
+
+追加验证的第一次命令未透传 `--suite`，误启了第二轮全量；`run-q5i5CC` 被本轮主动中断，原生报告 `exitCode=null`，不计入验证样本。上表两轮定向验证随后经直接调用调度器完成。临时诊断代码已清除；本轮代码仅在 `codex/fix-446-294` 本地分支，尚未推送。
