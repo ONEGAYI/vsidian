@@ -2796,6 +2796,9 @@ export interface PaintProbe {
     /** #359 T10 组件菜单项观测（data-vsidian-command 含点 = 命名空间
      *  运行期项——集成断言组件簇在场/回收的绘制层证据） */
     addonCommands?: string[]
+    /** #437 表格专属簇命令清单（以结构操作首项锚定组容器列出组内全部命令；
+     *  簇不在场时缺省——集成绘制层断言簇渲染证据） */
+    tableCommands?: string[]
   }
   /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性
    *  （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、
@@ -3630,6 +3633,15 @@ function isPaintProbe(v: unknown): v is PaintProbe {
         v.contextMenu.graphicOps.commands.every(isString) &&
         Array.isArray(v.contextMenu.graphicOps.disabled) &&
         v.contextMenu.graphicOps.disabled.every(isString)
+      )) &&
+      (v.contextMenu.commands === undefined || (
+        Array.isArray(v.contextMenu.commands) && v.contextMenu.commands.every(isString)
+      )) &&
+      (v.contextMenu.addonCommands === undefined || (
+        Array.isArray(v.contextMenu.addonCommands) && v.contextMenu.addonCommands.every(isString)
+      )) &&
+      (v.contextMenu.tableCommands === undefined || (
+        Array.isArray(v.contextMenu.tableCommands) && v.contextMenu.tableCommands.every(isString)
       ))
     )) &&
     (v.wikilinkSuggest === undefined || (

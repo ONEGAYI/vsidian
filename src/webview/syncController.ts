@@ -1064,9 +1064,9 @@ export class WebviewSyncController {
       }
       // #438 图形块场景簇四操作：本地分支直执行（只读/导出零写回，不出站
       // 宿主往返；命令面板入口经 ui.command 回发与本入口共用 runGraphicOp
-      // ——目标按光标解析，非图形块静默）。router 已按注册表 mode: live
-      // 过滤路由；焦点不判嵌入（目标按各自光标解析，主文与嵌入 Live 各自
-      // 的图形块各归各视图）
+      // ——目标按焦点实例光标解析，非图形块静默）。router 已按注册表
+      // mode: live 过滤路由（嵌入焦点下按实例 live 放行）；目标与模式门控
+      // 在执行体 actionTarget/targetEditable 实例级判定（#437/#439 同法）
       else if (id === 'graphicPopup' || id === 'graphicExportSvg' ||
         id === 'graphicExportPng' || id === 'graphicCopySource') {
         this.runGraphicOpAtCursor(id)
@@ -7605,8 +7605,9 @@ export class WebviewSyncController {
   // 优先）→ serializeDiagramSvg → diagram.export 出站 → 宿主 showSaveDialog
   // 落盘；PNG 光栅化失败按规格契约 6 降级（仅 SVG + toast 明确提示，不用
   // window.alert——sandbox iframe 无 allow-modals 会被静默吞）；复制源码经
-  // 宿主剪贴板桥 clipboard.write text 变体（EOL 归一在会话层，#81 与
-  // codeblock.copy 同式）。执行期重验 svg 能力与渲染管线在场——菜单
+  // 宿主剪贴板桥 clipboard.write text 变体（与选区复制同款——EOL 按主文
+  // 会话归一；codeblock.copy 在嵌入场景走 B 端口按来源文档归一，两者通道
+  // 不同不互为先例）。执行期重验 svg 能力与渲染管线在场——菜单
   // enable 是打开时的采集快照，提供者热切换后以当下为准 ----
 
   /** 图形簇单命令执行（菜单分支与 runGraphicOpAtCursor 汇入此处） */
@@ -7632,15 +7633,18 @@ export class WebviewSyncController {
     void this.exportGraphicDirect(command === 'graphicExportSvg' ? 'svg' : 'png', graphic)
   }
 
-  /** 键位/命令面板入口：目标 = 光标（或选区头）所在图形块，经打开菜单同
-   *  一采集判定；非图形块/非 live/无负载静默（与 previewLinkAtFocus 的
-   *  「无目标不误开」同口径） */
+  /** 键位/命令面板入口：目标 = 焦点实例光标（或选区头）所在图形块，经打开
+   *  菜单同一采集判定；非图形块/实例不可交互/无负载静默（与 previewLinkAtFocus
+   *  的「无目标不误开」同口径）。目标与模式按焦点实例判定（actionTarget——
+   *  宿主 Reading + 嵌入手动 Live 是合法组合，router 已按嵌入焦点放行；
+   *  与 #437 表格簇/#439 链接项同法，主正文目标仍要求宿主 Live） */
   private runGraphicOpAtCursor(command: string): void {
-    if (this.viewMode !== 'live') {
+    const resolved = this.actionTarget()
+    if (!resolved) {
       return
     }
-    const view = this.view
-    if (!view) {
+    const view = resolved.view
+    if (!this.targetEditable(view, resolved.embed)) {
       return
     }
     const pos = view.state.selection.main.head
@@ -7824,13 +7828,15 @@ export class WebviewSyncController {
 
   /** #439 键位入口：焦点实例光标处链接命中即时推导（menuLinkHitAtPos——
    *  与菜单采集同源；嵌入内目标按嵌入实例文档解析）。无命中静默（与
-   *  「预览当前链接」口径一致），阅读模式不接管 */
+   *  「预览当前链接」口径一致）。模式门控按目标实例（宿主 Reading + 嵌入
+   *  手动 Live 是合法组合——router 已按嵌入焦点放行，此处按实例判定，
+   *  与 #437 表格簇同法；主正文目标仍要求宿主 Live） */
   private runLinkSceneKeyCommand(command: LinkSceneCommand): void {
-    if (this.viewMode !== 'live') {
-      return
-    }
     const resolved = this.actionTarget()
     if (!resolved) {
+      return
+    }
+    if (!this.targetEditable(resolved.view, resolved.embed)) {
       return
     }
     const hit = menuLinkHitAtPos(resolved.view, resolved.view.state.selection.main.head)

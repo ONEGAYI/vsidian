@@ -867,9 +867,10 @@ try {
   passed++
   console.log('[统一菜单回归][PASS] 链接场景三项：四类链接渲染态右键、打开与 Ctrl+单击同构、复制载荷')
 
-  // 5) 源码态命中形态：光标触及链接显形源码后右键，三项照常呈现（双链与
-  //    普通链接两代表；命中判定在源码坐标，渲染态装饰是否在场不影响）
-  for (const c of [LINK_CASES[0], LINK_CASES[1]]) {
+  // 5) 源码态命中形态：光标触及链接显形源码后右键，三项照常呈现（四类
+  //    链接逐类——票面「渲染态与源码态两种命中形态」全矩阵；命中判定在
+  //    源码坐标，渲染态装饰是否在场不影响）
+  for (const c of LINK_CASES) {
     const lineText = LINK_LINES[c.line]
     const cursor = LINK_LINES.slice(0, c.line).join('\n').length + 1 + lineText.indexOf(c.open) + 1
     await page.evaluate((pos) => window.setSelection(pos, pos), cursor)

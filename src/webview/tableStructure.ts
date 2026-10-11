@@ -260,23 +260,29 @@ export function planTableQuoteLevel(
       cursorOffset = cursor - rows[cursorRow]!.lineFrom
     }
   }
+  // 新文档行首游标：按各行**变换后**文本长度累计（selection 是应用 changes
+  // 之后的新文档坐标——前方各行的前缀增删同样平移本行，与
+  // planTableColumnMove 的按新文本累计行首同法）
+  let nextLineFrom = rows[0]!.lineFrom
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!
     const text = doc.slice(row.lineFrom, row.lineTo)
     const next = changeLineQuoteLevel(text, delta)
     if (next === null) {
       if (i === cursorRow) {
-        selection = cursor! // 无变化行上的光标原位保留
+        selection = nextLineFrom + cursorOffset // 无变化行：行内偏移照旧，行首按前方平移
       }
+      nextLineFrom += text.length + 1
       continue
     }
     changes.push({ from: row.lineFrom, to: row.lineTo, insert: next })
     if (i === cursorRow) {
       // 行首前缀增删使行内内容平移（next - text 长度差）：光标按平移量
       // 跟随原内容（clamp 在新行内），不落前缀端点触发显形（#296 六轮口径）
-      selection = row.lineFrom +
+      selection = nextLineFrom +
         Math.max(0, Math.min(cursorOffset + next.length - text.length, next.length))
     }
+    nextLineFrom += next.length + 1
   }
   return changes.length ? { changes, selection } : null
 }

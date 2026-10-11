@@ -679,9 +679,29 @@ describe('planTableQuoteLevel：多行统一增删引用层级（#437）', () =>
   it('cursor 在表内：selection 按行内偏移跟随新行文本（不落前缀端点）', () => {
     const cursor = QDOC.indexOf('1') // 数据行格内容内
     const plan = planTableQuoteLevel(QDOC, qrows, 1, cursor)!
-    expect(plan.selection).toBe(cursor + 2) // 行首补 "> "，内容右移 2
+    // 数据行前方表头/分隔行各 +2、本行 +2——期望从变换后文本独立推导
+    expect(plan.selection).toBe(cursor + 6)
     const back = planTableQuoteLevel(QDOC, qrows, -1, cursor)!
-    expect(back.selection).toBe(cursor - 2)
+    expect(back.selection).toBe(cursor - 6)
+  })
+
+  it('cursor 在非首行：selection 须累计前方各行平移（新文档坐标契约）', () => {
+    const cursor = QDOC.indexOf('1') // 数据行——前方表头/分隔行各 +2
+    const plan = planTableQuoteLevel(QDOC, qrows, 1, cursor)!
+    const after = apply(QDOC, plan.changes)
+    expect(after).toBe('前文\n\n> > | a | b |\n> > | --- | --- |\n> > | 1 | 2 |\n\n后文')
+    // 光标跟随原内容：期望值从变换后文本独立推导（前方 4 + 本行 2 = cursor + 6）
+    expect(plan.selection).toBe(after.indexOf('1'))
+  })
+
+  it('cursor 在 lazy 分隔行（减层豁免行）：selection 同样按前方平移映射', () => {
+    const lazy = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const rows = rowsOf(lazy, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 0, 2])
+    const cursor = lazy.indexOf('---') // 分隔行——本行无前缀豁免不变
+    const plan = planTableQuoteLevel(lazy, rows, -1, cursor)!
+    expect(apply(lazy, plan.changes)).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |')
+    // 表头行 -2、分隔行不变：新文档中 cursor 应平移 -2（旧行首坐标陷阱）
+    expect(plan.selection).toBe(cursor - 2)
   })
 
   it('cursor 在表外/未提供：不给 selection 时由上层走默认映射（本层返回 blockFrom 兜底）', () => {
