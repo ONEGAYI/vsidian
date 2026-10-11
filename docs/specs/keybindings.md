@@ -17,6 +17,7 @@
 | 插入分割线（#106） | Live | 无 |
 | HTML 注释（#139，两态切换：包裹/取消） | Live | Ctrl+/ |
 | 复制块链接（2026-09-28 批次：光标在标题行=复制标题链接） | Live | Ctrl+Shift+C |
+| 打开链接；复制链接地址；复制显示文字（#439 链接场景三项：光标处链接命中为目标） | Live | 无 |
 | 按词左移；按词右移（#239，中文分词词级移动） | Live | Ctrl+Left / Ctrl+Right（mac Alt+方向） |
 | 按词向左/向右扩展选区（#239，Shift 变体单列） | Live | Ctrl+Shift+Left / Ctrl+Shift+Right（mac Alt+Shift+方向） |
 | 创建表格；上方/下方插入行；删除行 | Live | 无 |
@@ -85,6 +86,8 @@
 **工具栏刷新按钮与快捷键（#208 评估结论，2026-09-29）**：工具栏右端组的刷新按钮与快捷键「刷新嵌入资源」是同一操作的两个入口，**单列为可绑定操作**（`onegayi.vsidian.editor.refresh`，双模式生效、默认未绑定——手动触发场景低频，键位留给用户按需绑定）：作用范围为当前文档面板，点击/按键后清图片解析缓存、资源代次自增、活跃图片条目全量失效重挂（新 URI 带代次戳）并重置 Mermaid 懒加载失败终态；不触碰文档内容/撤销栈/视图状态。按钮经 webview→宿主 `refresh.request` 消息；快捷键经 `keybindings.execute` 出站→宿主 executeCommand（UI_OPERATIONS 注册循环）→回发 `ui.command`，webview 两条入口共用同一发送实现，宿主失效编排在 documentSession 的 `refresh.request` 处理唯一，不另造路径。
 
 **复制块链接（2026-09-28 批次评估结论）**：目标由「光标所在块」即时推导（光标在标题行等价复制标题链接，其余块复制块链接；无块 id 时先在块尾自动补写——一笔可撤销编辑），属可枚举目标的写操作，**单列为可绑定操作**（默认 Ctrl+Shift+C，仅 Live 编辑正文生效——阅读只读不接管，源码与设置页输入不装配）。与正文右键菜单「复制块链接/复制标题链接」是同一命令的两个入口（规格 [anchor-navigation.md](anchor-navigation.md)）。Ctrl+Shift+C 冲突核对（2026-09-28）：操作表与 keybindingRouter 零占用；宿主侧该组合在集成终端有选区时为复制，编辑器正文无默认占用，Live 覆盖属既定「写操作仅 Live 正文覆盖宿主」语义。
+
+**链接场景三项注册为 UI 操作、默认未绑定（#439 评估结论）**：链接文字右键菜单（统一菜单链接簇）专属项「打开链接 / 复制链接地址 / 复制显示文字」的键位与命令面板入口。目标由「焦点实例光标处链接命中」即时推导（`menuLinkHitAtPos`——与菜单采集、Ctrl+单击判定族同源；嵌入内部 Live 以嵌入文档解析），无命中静默不误动（与「预览当前链接」同口径）。**单列为可绑定操作**（`onegayi.vsidian.link.open` / `.copyAddress` / `.copyText`，仅 Live 生效 `mode: live`、零写回 `writes: false`——打开与复制均不写文档）。三条命令与右键菜单共用 webview 同一执行体（`runLinkSceneCommand`，载荷派生纯函数 `linkMenuCommandPayload`）；快捷键经 keybindingRouter 本地分支执行，命令面板经 UI_OPERATIONS 注册循环回发 `ui.command`。默认不占键位——Ctrl+单击是「打开链接」的鼠标语义主入口（不占默认键），复制两项的目标依赖光标上下文，键位留给用户按需绑定；显式清空后保持禁用。
 
 **图片粘贴无快捷键（2026-09-28 批次评估结论）**：粘贴图片由**原生 Ctrl+V 通道**触发（webview paste 事件拦截剪贴板图片项），不是可枚举目标的命令、不占用键位（规格 [image-paste.md](image-paste.md)）；阅读模式不接管粘贴。
 
