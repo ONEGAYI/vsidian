@@ -187,6 +187,19 @@ describe('T10 宿主命令服务', () => {
       line.includes('commands-report-rejected') && line.includes('too-many defaults'))).toBe(true)
   })
 
+  it('#450 宿主侧先量后形：超限且含非法 chord 报 too-many defaults 而非 invalid defaults', () => {
+    const { service, logs } = makeService()
+    service.syncReport(ADDON, 1, [
+      report(`${ADDON}.over-bad`, ADDON, {
+        defaults: ['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4', 'not-a-key'],
+      }),
+    ])
+    expect(service.catalog()).toHaveLength(0)
+    expect(logs.some((line) =>
+      line.includes('commands-report-rejected') && line.includes('too-many defaults'))).toBe(true)
+    expect(logs.some((line) => line.includes('invalid defaults'))).toBe(false)
+  })
+
   it('#450 defaults 恰 4 条通过（边界值；原始条数计数，归一后重复不折抵）', () => {
     const { service, logs } = makeService()
     service.syncReport(ADDON, 1, [

@@ -151,7 +151,8 @@ await scenario('装载注册：三按钮绘制可见、键位徽章与负向拒�
     return p.buttons.length === 3 && p.buttons.every((b) => b.visible) ? p : undefined
   }, '三按钮绘制可见')
   const cmd = probe.buttons.find((b) => b.id === `${ADDON_ID}.cmdBtn`)
-  // #448：徽章经 formatBindingLabel 平台渲染（headless Chromium 本机 Windows → Win 形态）
+  // #448：徽章经 formatBindingLabel 平台渲染（ctrl+alt+t 无 meta——各平台均
+  // 渲染为大写形态 Ctrl+Alt+T，断言不依赖平台探测）
   assert.equal(cmd.tooltipKeys, 'Ctrl+Alt+T', '命令按钮键位徽章（默认绑定经运行期表）')
   assert.equal(cmd.tooltip, 'T11 Cmd')
 })
