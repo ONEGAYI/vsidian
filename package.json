@@ -502,6 +502,26 @@
         "command": "onegayi.vsidian.heading.unfoldAll",
         "title": "%command.heading.unfoldAll.title%",
         "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.graphic.popup",
+        "title": "%command.graphic.popup.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.graphic.exportSvg",
+        "title": "%command.graphic.exportSvg.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.graphic.exportPng",
+        "title": "%command.graphic.exportPng.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.graphic.copySource",
+        "title": "%command.graphic.copySource.title%",
+        "category": "Vsidian"
       }
     ],
     "menus": {

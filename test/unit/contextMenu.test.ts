@@ -120,13 +120,16 @@ describe('覆写层语义（运行期注册表，内置 = 第一个注册者）'
     const registryIds = contextMenuRegistrySnapshot().map((def) => def.id).sort()
     const builtinIds = flattenItems(CONTEXT_MENU_ITEMS).map((def) => def.id).sort()
     expect(registryIds).toEqual(builtinIds)
-    // 渲染走 registry：标题行上下文（when 全放行）能拿到全部顶级项，且子项
-    // 不因扁平注册表被提升为顶级项
+    // 渲染走 registry：标题行上下文（when 谓词全放行的顶级项——#438 起
+    // graphicOps 四项按 zone 过滤，期望集对谓词求值感知）能拿到全部顶级
+    // 项，且子项不因扁平注册表被提升为顶级项
     const headingCtx = normalCtx({
       blockTarget: { block: { start: 4, end: 4 }, heading: { level: 1, text: '标题' } },
     })
-    expect(modelIds(headingCtx).sort()).toEqual(
-      CONTEXT_MENU_ITEMS.map((def) => def.id).sort())
+    const expectedTopIds = CONTEXT_MENU_ITEMS
+      .filter((def: MenuItemDescriptor) => def.when === undefined || def.when(headingCtx))
+      .map((def) => def.id).sort()
+    expect(modelIds(headingCtx).sort()).toEqual(expectedTopIds)
   })
 
   it('register 新增项：出现在模型中且来源记录为 runtime', () => {
@@ -832,18 +835,26 @@ describe('段落设置勾选矩阵（checked 谓词按当前行结构点亮，#1
 
 // ---- #184：图标资产两表同步（描述符 iconKey ↔ 资产文件与 CSS 接线规则）----
 
+/** #438 资产缺口豁口：新登记的图形簇 icon key（popupPreview/exportSvg/
+ *  exportPng）资产生成与 CSS 接线归图标票 #441 承接——豁口期内资产断言
+ *  跳过这些 key（渲染层留空降级是规格口径）；#441 合入后此清单应清空 */
+const ICON_KEYS_PENDING_ASSETS: readonly string[] = ['popupPreview', 'exportSvg', 'exportPng']
+
 describe('图标资产两表同步（#184：规格「扩展约定」两表同步的机器钉法）', () => {
   const referenced = new Set(
     flattenItems(CONTEXT_MENU_ITEMS).flatMap((def) => (def.iconKey ? [def.iconKey] : [])),
   )
   const root = path.resolve(process.cwd())
 
-  it('被描述符引用的图标 key 恰 27 枚（#305 接入既有 pastePlain 资产）', () => {
-    expect(referenced.size).toBe(27)
+  it('被描述符引用的图标 key 恰 30 枚（#438 图形簇接入 popupPreview/exportSvg/exportPng/copy）', () => {
+    expect(referenced.size).toBe(30)
   })
 
-  it('每个被引用 key 都有明暗两套 SVG 资产文件', () => {
+  it('每个被引用 key 都有明暗两套 SVG 资产文件（#441 资产缺口 key 豁免）', () => {
     for (const key of referenced) {
+      if (ICON_KEYS_PENDING_ASSETS.includes(key)) {
+        continue
+      }
       expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
         `${key} 缺 light SVG 资产`).toBe(true)
       expect(existsSync(path.join(root, 'media/quick-actions/dark', `dark-${key}.svg`)),
@@ -860,9 +871,12 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
     }
   })
 
-  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则', () => {
+  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则（#441 豁免同上）', () => {
     const css = readFileSync(path.join(root, 'src/webview/main.css'), 'utf8')
     for (const key of referenced) {
+      if (ICON_KEYS_PENDING_ASSETS.includes(key)) {
+        continue
+      }
       const lightRule = new RegExp(
         `\\.vsidian-context-menu \\[data-icon='${key}'\\]\\s*\\{[^}]*light-${key}\\.svg`)
       const darkRule = new RegExp(
@@ -881,7 +895,8 @@ describe('命令分派契约（三簇叶命令可执行；显式分支另有面�
     // contextMenuPanel.test.ts 逐项覆盖（cut/copy/paste/selectAll/
     // copyHeadingLink/copyBlockLink/insertTable + bold 代表 formatOperations
     // 同路径）；本契约防「新增描述符忘接分派」的回归。
-    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable'])
+    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable',
+      'graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource'])
     for (const def of flattenItems(CONTEXT_MENU_ITEMS)) {
       if (def.children && def.children.length > 0) {
         continue // 父项点击只展开不执行（无叶命令）
@@ -891,5 +906,75 @@ describe('命令分派契约（三簇叶命令可执行；显式分支另有面�
         `${def.id} 的命令 ${def.command} 无执行路径（formatOperations 与显式分支均未覆盖）`,
       ).toBe(true)
     }
+  })
+})
+
+// ---- #438 图形专属簇（graphicOps）：谓词矩阵与组位 ----
+
+describe('图形专属簇（#438：弹窗/导出/复制的谓词矩阵与簇位）', () => {
+  const graphicCtx = (over: Partial<NonNullable<MenuContextSnapshot['graphic']>> = {}): MenuContextSnapshot =>
+    normalCtx({
+      zone: 'graphic',
+      graphic: {
+        lines: { start: 0, end: 2 },
+        language: 'mermaid',
+        code: 'graph TD\nA-->B',
+        svgExport: true,
+        rendered: true,
+        ...over,
+      },
+    })
+  /** graphicOps 簇 → command → enable 映射（不在场 = undefined） */
+  const graphicStates = (ctx: MenuContextSnapshot): Record<string, boolean | undefined> => {
+    const group = buildContextMenuModel(ctx).find((g) => g.id === 'graphicOps')
+    if (!group) {
+      return {}
+    }
+    return Object.fromEntries(group.items.map((item) => [item.command, item.enabled]))
+  }
+
+  it('簇位与组序：仅 zone=graphic 出簇，位于链接簇后、块与格式簇前', () => {
+    const groups = buildContextMenuModel(graphicCtx()).map((g) => g.id)
+    expect(groups).toEqual(['link', 'graphicOps', 'blockFormat', 'clipboard'])
+    // 普通正文与普通围栏（zone=fence）不出簇
+    expect(buildContextMenuModel(normalCtx()).map((g) => g.id)).toEqual(['link', 'blockFormat', 'clipboard'])
+    const fenceCtx = normalCtx({ zone: 'fence' })
+    expect(buildContextMenuModel(fenceCtx).find((g) => g.id === 'graphicOps')).toBeUndefined()
+  })
+
+  it('渲染成功 + svg 能力在场：四项全亮（平铺四项，组内序即呈现序）', () => {
+    const states = graphicStates(graphicCtx())
+    expect(Object.keys(states)).toEqual([
+      'graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource',
+    ])
+    expect(Object.values(states).every((enabled) => enabled === true)).toBe(true)
+  })
+
+  it('错误降级（rendered=false）：弹窗/导出三项置灰、复制源码仍亮——置灰不隐藏', () => {
+    const states = graphicStates(graphicCtx({ rendered: false }))
+    expect(states['graphicPopup']).toBe(false)
+    expect(states['graphicExportSvg']).toBe(false)
+    expect(states['graphicExportPng']).toBe(false)
+    expect(states['graphicCopySource'], '错误块取源码恰是高价值操作').toBe(true)
+  })
+
+  it('附加组件渲染器无 svg 能力（svgExport=false）：三项置灰、复制源码亮（gate 与按钮同口径）', () => {
+    const states = graphicStates(graphicCtx({ svgExport: false, rendered: undefined }))
+    expect(states['graphicPopup']).toBe(false)
+    expect(states['graphicExportSvg']).toBe(false)
+    expect(states['graphicExportPng']).toBe(false)
+    expect(states['graphicCopySource']).toBe(true)
+  })
+
+  it('渲染态缺省（探针不可得，rendered 未采集）：按成功放行（执行路径兜底）', () => {
+    const states = graphicStates(graphicCtx({ rendered: undefined }))
+    expect(states['graphicPopup']).toBe(true)
+    expect(states['graphicExportSvg']).toBe(true)
+  })
+
+  it('负载缺省（zone=graphic 但负载不在场，防御路径）：三项置灰', () => {
+    const states = graphicStates(normalCtx({ zone: 'graphic' }))
+    expect(states['graphicPopup']).toBe(false)
+    expect(states['graphicExportSvg']).toBe(false)
   })
 })

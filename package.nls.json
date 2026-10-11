@@ -91,5 +91,9 @@
   "command.heading.unfold.title": "Unfold Heading Section",
   "command.heading.toggleFold.title": "Toggle Fold of Heading Section",
   "command.heading.foldAll.title": "Fold All Heading Sections",
-  "command.heading.unfoldAll.title": "Unfold All Heading Sections"
+  "command.heading.unfoldAll.title": "Unfold All Heading Sections",
+  "command.graphic.popup.title": "Open Popup Preview for Graphic at Cursor",
+  "command.graphic.exportSvg.title": "Export Graphic at Cursor as SVG",
+  "command.graphic.exportPng.title": "Export Graphic at Cursor as PNG",
+  "command.graphic.copySource.title": "Copy Source of Graphic at Cursor"
 }

@@ -842,8 +842,18 @@ export const zhCn: Record<MessageKey, string> = {
   'contextMenu.copy': '复制',
   'contextMenu.paste': '粘贴',
   'contextMenu.selectAll': '全选',
+  /** #438 图形专属簇（右键菜单项；只读/导出，编辑入口仍收敛于 edit 按钮） */
+  'contextMenu.graphicPopup': '弹窗预览',
+  'contextMenu.graphicExportSvg': '导出 SVG',
+  'contextMenu.graphicExportPng': '导出 PNG',
+  'contextMenu.graphicCopySource': '复制源码',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': '复制当前块链接',
+  // ---- #438 图形块场景簇四操作（右键菜单项的键位评估记录；默认未绑定） ----
+  'command.graphic.popup.title': '弹窗预览光标处图形',
+  'command.graphic.exportSvg.title': '导出光标处图形为 SVG',
+  'command.graphic.exportPng.title': '导出光标处图形为 PNG',
+  'command.graphic.copySource.title': '复制光标处图形源码',
 
   // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
   /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；

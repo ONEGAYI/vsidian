@@ -41,6 +41,19 @@
 | 复制标题链接 | （`blockMenu` 既有能力迁入） | `link` | 仅标题行显示 |
 | 复制块链接 | （`blockMenu` 既有能力迁入） | `link` | 目标块存在时显示；表格按整块，空行隐藏 |
 
+### 场景簇：图形块（#438，仅 zone='graphic' 呈现）
+
+图形块（渲染型围栏）上的专属簇 `graphicOps`，平铺四项、全部只读/导出——**不设「编辑源码」右键项**（编辑入口收敛于 `edit` 按钮是 [graphic-code-block-interaction.md](graphic-code-block-interaction.md) 契约 2 钉住的边界；表格簇 `tableOps` 组位已预登记，条目归 #437）：
+
+| 菜单项 | 命令 | 图标 key | 显隐 / enable |
+|---|---|---|---|
+| 弹窗预览 | `graphicPopup` | `popupPreview` | 仅图形块；enable = svg 取图能力 + 渲染成功 |
+| 导出 SVG | `graphicExportSvg` | `exportSvg` | 同上（不经弹窗直发 `diagram.export`） |
+| 导出 PNG | `graphicExportPng` | `exportPng` | 同上；光栅化失败 toast 降级提示 |
+| 复制源码 | `graphicCopySource` | `copy` | 仅图形块（错误降级块仍可用） |
+
+渲染失败/负载缺省**置灰不隐藏**（保可发现性）；弹窗互斥沿 `popupMutex`，不新增协议消息（复用 `diagram.export`）；图标资产归 #441（留空降级）；四操作进键位注册表、默认未绑定（评估记录见 [keybindings.md](keybindings.md)）。
+
 ### 簇 2：块与格式（全部带子菜单）
 
 **文本格式 ▸**（图标 `textFormat`）
@@ -84,16 +97,17 @@
 
 统一接管后，结构敏感区域的**写操作必须置灰**（置灰项仍显示，保留可发现性；「隐藏」仅用于显隐规则声明的场合）：
 
-| 区域 | 簇 1 新增链接 / 新增外部链接 | 簇 1 块链接两项 | 簇 2 全部子菜单 | 簇 3 剪贴板 |
-|---|---|---|---|---|
-| 普通正文 / 空行 | 可用 | 按目标显隐 | 可用 | 可用 |
-| 正文有选区 | 可用 | 按目标显隐 | 可用 | 剪切/复制亮，其余同左 |
-| 表格单元格内 | **置灰** | 可用（整块） | **整簇置灰** | 可用 |
-| 围栏代码内部 | **置灰** | 可用（整块） | **整簇置灰** | 可用 |
-| 图形块上 | **置灰** | 可用 | **整簇置灰** | 可用 |
-| 链接文字上 | 可用 | 按目标显隐 | 可用 | 可用（专属项留票位） |
-| frontmatter 成型头区 | — 不接管，透传原生菜单 — | | | |
-| 阅读模式 | — 不接管 — | | | |
+| 区域 | 簇 1 新增链接 / 新增外部链接 | 簇 1 块链接两项 | 图形专属簇（#438） | 簇 2 全部子菜单 | 簇 3 剪贴板 |
+|---|---|---|---|---|---|
+| 普通正文 / 空行 | 可用 | 按目标显隐 | **不出现**（zone 谓词） | 可用 | 可用 |
+| 正文有选区 | 可用 | 按目标显隐 | 不出现 | 可用 | 剪切/复制亮，其余同左 |
+| 表格单元格内 | **置灰** | 可用（整块） | 不出现 | **整簇置灰** | 可用 |
+| 围栏代码内部 | **置灰** | 可用（整块） | 不出现（zone='fence'） | **整簇置灰** | 可用 |
+| 图形块上（渲染成功） | **置灰** | 可用 | 四项全亮 | **整簇置灰** | 可用 |
+| 图形块上（错误降级 / 无 svg 能力渲染器） | **置灰** | 可用 | 弹窗/导出三项**置灰**、复制源码仍亮 | **整簇置灰** | 可用 |
+| 链接文字上 | 可用 | 按目标显隐 | 不出现 | 可用 | 可用（专属项留票位） |
+| frontmatter 成型头区 | — 不接管，透传原生菜单 — | | | | |
+| 阅读模式 | — 不接管 — | | | | |
 
 安全降级由注册表的上下文谓词实现，**新增菜单项必须显式声明 `when` / `enable`，不得默认继承「到处可用」**。
 
@@ -140,7 +154,7 @@ T10 落地形态：附加组件经页面 SDK `menus.registerItem`（仅编辑器
 
 - **TableMenuHit**（仅 zone='table'）：命中格的内容行/列索引（表头 = 第 0 行、分隔行无格身份 → null；格数与声明列数不齐的内容行列索引亦为 null）、表头/表体（`inHeader`）、行列总数、表格全部物理行区间（LF 行系）、命中处文档偏移（执行期定位入口输入——`runTableEditAt` 族以 pos 自行解析结构）、引用层级一致性与命中行层级（`quoteDepthOfLine` 同源；分隔行不参与一致性判定，lazy 豁免——与 blockquote-table 规格残缺口径一致）。采集复用 `tableRowsAt`（解析树行身份）与 gridPlans 列数缓存（缺省回退分隔行声明，前缀按行身份 `prefixLen` 剥离）；**解析树不认该表（源码降级表/残缺表）或命中行不在树行集合内时负载缺省**——不阻塞菜单打开，场景票按「负载在场」判 enable（置灰不隐藏）。
 - **LinkMenuHit**（仅 zone='normal' 且命中链接）：族类（wikilink / link / autolink / loose，判定内核与次序完全复用 Ctrl+单击 activate 族——嵌入 `![[…]]` 经双链扫描守卫排除，代码上下文与头区抑制同口径）；目标原文（双链 `|` 之前未 trim / 外部 href 原样——activate 上报同口径）；显示文字（双链别名优先 / 普通链接链接文字 / autolink URL 本身 / 宽松文字段）；源区间。采集经 `menuLinkHitAtPos`（liveLinks 只读查询，activate 跳转行为零改动）。
-- **GraphicMenuHit**（仅 zone='graphic'）：围栏行区间（`scanFenceBlocks`，未闭合到末行）、语言标识（info string trim 后——`isRenderedFenceInfo` 判定同键）、围栏源码（开闭围栏行之间内容）、svg 取图能力（`effectiveGraphicSvgExport(language, 'live')`——弹窗/导出 gate 同口径；能力 ≠ 渲染成功，错误态负载数据面同构）。
+- **GraphicMenuHit**（仅 zone='graphic'）：围栏行区间（`scanFenceBlocks`，未闭合到末行）、语言标识（info string trim 后——`isRenderedFenceInfo` 判定同键）、围栏源码（开闭围栏行之间内容）、svg 取图能力（`effectiveGraphicSvgExport(language, 'live')`——弹窗/导出 gate 同口径；能力 ≠ 渲染成功，错误态负载数据面同构）。#438 起负载补 `rendered?: boolean`（右键时 live 渲染容器的 state 属性 DOM 探针——错误降级 false，探针不可得缺省按成功放行、执行路径重渲染兜底），供 graphicOps 弹窗/导出三项的渲染成功 gate。
 - **执行期通道**：`openContextMenu` 把完整快照记到控制器字段（`contextMenuTarget` 同款先例；`getContextMenuSnapshot` 只读投影），场景票命令分支执行期取用；锚点过期重验沿 `contextMenuDoc` 既有模式。
 - **组序预登记**：`CONTEXT_MENU_GROUP_ORDER` 预登记 `tableOps` / `graphicOps`（链接簇后、块与格式簇前），避免三张场景票并行时同改一行常量；场景组无项时零产出（空组自然收起），预登记不改变菜单呈现。
 - **SDK 面**：快照经 `addonPage.ts` re-export 进附加组件页面 SDK 菜单谓词输入，负载组成类型（`TableMenuHit` / `LinkMenuHit` / `MenuLinkKind` / `GraphicMenuHit`）一并透出；语义台账见 `addonApiCatalog.ts` menus-register 条目 `contextPayloads` 字段（向后兼容扩展，无基线重锚定）。

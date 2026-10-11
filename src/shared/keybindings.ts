@@ -204,6 +204,15 @@ export const UI_OPERATIONS = [
   { id: 'headingToggleFold', command: 'onegayi.vsidian.heading.toggleFold', titleKey: 'command.heading.toggleFold.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+l', 'meta+k meta+l'] },
   { id: 'headingFoldAll', command: 'onegayi.vsidian.heading.foldAll', titleKey: 'command.heading.foldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+0', 'meta+k meta+0'] },
   { id: 'headingUnfoldAll', command: 'onegayi.vsidian.heading.unfoldAll', titleKey: 'command.heading.unfoldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+j', 'meta+k meta+j'] },
+  // #438 图形块场景簇四操作（右键菜单项的键位评估记录）：全部只读/导出
+  // （writes: false），仅 Live 生效（阅读不接管右键、图形交互以 live 呈现态
+  // 为前提），默认不占键位——菜单是主入口，弹窗预览有键盘可达价值、导出/
+  // 复制同口径登记，键位留给用户按需绑定。目标 = 光标所在图形块（无目标
+  // 静默，与 hoverPreviewLink 同口径）；「编辑源码」不设操作（契约边界）
+  { id: 'graphicPopup', command: 'onegayi.vsidian.graphic.popup', titleKey: 'command.graphic.popup.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'graphicExportSvg', command: 'onegayi.vsidian.graphic.exportSvg', titleKey: 'command.graphic.exportSvg.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'graphicExportPng', command: 'onegayi.vsidian.graphic.exportPng', titleKey: 'command.graphic.exportPng.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'graphicCopySource', command: 'onegayi.vsidian.graphic.copySource', titleKey: 'command.graphic.copySource.title', mode: 'live', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

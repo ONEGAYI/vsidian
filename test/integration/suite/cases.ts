@@ -911,13 +911,15 @@ interface ViewState {
     } | null
     /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据；
      *  #359 T10 起补组件菜单项命令清单（命名空间运行期项——组件簇在场/
-     *  回收的绘制层证据） */
+     *  回收的绘制层证据）；#438 起补图形专属簇在场/置灰命令集（null = 簇
+     *  不在场） */
     contextMenu?: {
       visible: boolean
       display: string | null
       separatorCount: number
       disabledCount: number
       addonCommands?: string[]
+      graphicOps?: { commands: string[]; disabled: string[] } | null
     }
     /** #376 T01 双链联想候选绘制：浮层在场（会话开启）时的实际可见性、
      *  行计数与键盘高亮行/状态行文本（会话关闭时缺省）；#377 T02 起补
@@ -7497,6 +7499,93 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(pngEntry!.content!.length > 100, `PNG base64 应为非平凡载荷，实际 ${pngEntry!.content?.length ?? 0} 字符`)
     assert(/^[A-Za-z0-9+/]+={0,2}$/.test(pngEntry!.content!), 'PNG 内容应为严格 base64')
     assert(await readDisk('mermaid.md') === diskBefore, '导出交互零写回')
+  }],
+
+  ['图形块右键簇：graphicOps 呈现/置灰与导出直发链路（#438）', async () => {
+    // 断言口径：paint.contextMenu.graphicOps 是绘制层探针（菜单浮层
+    // elementFromPoint 可见 + 簇命令集与置灰集）；导出直发经钩子模式
+    // 短路记录消息形态（takeDiagramExportLog）；复制源码走真实宿主剪贴板
+    // 对拍。菜单经 contextMenu.test.contextMenu/menuClick 注入通道驱动
+    await openWithEditor('mermaid.md')
+    await waitSessionReady('mermaid.md')
+    const uri = wsUri('mermaid.md').toString()
+    const diskBefore = await readDisk('mermaid.md')
+    const tailAnchor = diskBefore.indexOf('结尾段落')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.locate', offset: tailAnchor,
+    })
+    // 渲染完成前置（4 有效渲染 + 1 错误降级——菜单 gate 的 DOM 探针输入）
+    await waitViewState('mermaid.md', (v) =>
+      v.paint?.mermaid?.rendered === 4 && v.paint.mermaid.error === 1, 0, 60000)
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+
+    // 1) 有效块右键（第一块 graph TD 内容行）：簇四项在场且全亮（绘制层）
+    const firstBlockAnchor = diskBefore.indexOf('graph TD')
+    await post({ kind: 'contextMenu.test.contextMenu', pos: firstBlockAnchor })
+    const valid = await waitViewState('mermaid.md', (v) =>
+      v.paint?.contextMenu?.graphicOps != null && v.paint.contextMenu.graphicOps.commands.length === 4, 0, 60000)
+    const validCluster = valid.paint!.contextMenu!.graphicOps!
+    assert(valid.paint!.contextMenu!.visible === true, '绘制层：菜单浮层应实际可见')
+    assert(JSON.stringify(validCluster.commands) ===
+      JSON.stringify(['graphicPopup', 'graphicExportSvg', 'graphicExportPng', 'graphicCopySource']),
+      `有效块：graphicOps 四项平铺在场（实际 ${JSON.stringify(validCluster.commands)}）`)
+    assert(validCluster.disabled.length === 0,
+      `渲染成功 + svg 能力在场：四项应全亮（实际置灰 ${JSON.stringify(validCluster.disabled)}）`)
+
+    // 2) 弹窗预览（menuClick graphicPopup）：复用既有弹窗——浮层在场且
+    //    SVG 装载（paint.graphic 绘制层），随后经钩子关闭
+    await post({ kind: 'contextMenu.test.menuClick', command: 'graphicPopup' })
+    const popupOpened = await waitViewState('mermaid.md', (v) =>
+      v.paint?.graphic?.overlay === true && v.paint.graphic.overlaySvg === true, 0, 60000)
+    assert(popupOpened.paint!.graphic!.overlayVisible === true, '弹窗应实际遮蔽正文（绘制层）')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'graphic.test.popup', view: 'live', index: 0, action: 'close',
+    })
+    await waitViewState('mermaid.md', (v) => v.paint?.graphic?.overlay === false, 0, 60000)
+
+    // 3) 导出 SVG（menuClick graphicExportSvg）：不经弹窗直发——宿主钩子
+    //    记录消息形态（fileName 与弹窗导出同式）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: firstBlockAnchor })
+    await waitViewState('mermaid.md', (v) => v.paint?.contextMenu?.graphicOps != null, 0, 60000)
+    await post({ kind: 'contextMenu.test.menuClick', command: 'graphicExportSvg' })
+    let menuSvgEntry: { format?: string; fileName?: string; reqId?: number; content?: string; docUri?: string } | undefined
+    for (let i = 0; i < 30 && menuSvgEntry === undefined; i++) {
+      const log = (await vscode.commands.executeCommand(CMD.diagramExportLog, uri)) as
+        Array<{ format?: string; fileName?: string; reqId?: number; content?: string; docUri?: string }>
+      menuSvgEntry = log.find((m) => m.format === 'svg')
+      if (menuSvgEntry === undefined) {
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    }
+    assert(menuSvgEntry !== undefined, '右键导出 SVG：宿主应收到 diagram.export（钩子短路记录）')
+    assert(menuSvgEntry!.fileName === 'mermaid-diagram.svg', `默认文件名沿弹窗同式（实际 ${menuSvgEntry!.fileName}）`)
+    assert(typeof menuSvgEntry!.reqId === 'number' && menuSvgEntry!.reqId! >= 1, 'reqId 应为正整数')
+    assert(menuSvgEntry!.content!.includes('<svg'), '导出内容应为序列化 SVG 文档')
+    assert(menuSvgEntry!.docUri === uri, '导出消息应携带来源文档 URI')
+
+    // 4) 错误降级块（第三块，无效语法）：簇呈现但弹窗/导出三项置灰、
+    //    复制源码仍亮（置灰不隐藏——探针 rendered=false 的矩阵单元）
+    const badBlockAnchor = diskBefore.indexOf('这不是合法的 mermaid 语法')
+    await post({ kind: 'contextMenu.test.contextMenu', pos: badBlockAnchor })
+    const degraded = await waitViewState('mermaid.md', (v) =>
+      v.paint?.contextMenu?.graphicOps != null && v.paint.contextMenu.graphicOps.disabled.length === 3, 0, 60000)
+    const degradedCluster = degraded.paint!.contextMenu!.graphicOps!
+    assert(JSON.stringify(degradedCluster.disabled) ===
+      JSON.stringify(['graphicPopup', 'graphicExportSvg', 'graphicExportPng']),
+      `错误降级块：弹窗/导出三项置灰（实际 ${JSON.stringify(degradedCluster.disabled)}）`)
+    assert(degradedCluster.commands.length === 4, '错误降级块：簇仍呈现（置灰不隐藏）')
+
+    // 5) 复制源码（menuClick graphicCopySource）：真实宿主剪贴板对拍（环境
+    //    依赖步骤殿后——独立测试桌面剪贴板不生效的本机环境不影响前序绘制
+    //    层断言的本地可验证性，见 #446）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: firstBlockAnchor })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'graphicCopySource' })
+    assert(await poll('图形簇复制源码', async () =>
+      (await vscode.env.clipboard.readText()).replace(/\r\n?/g, '\n') === 'graph TD\nA[开始]-->B{判断}\nB-->|是| C[结束]'
+        ? true : undefined),
+      `复制源码应写围栏内容到真实宿主剪贴板（实际 ${await vscode.env.clipboard.readText()}）`)
+    assert(await readDisk('mermaid.md') === diskBefore, '图形簇交互全部零写回')
   }],
 
   ['Mermaid 跨模式切换一致性：两模式计数对齐、文本不变、无写回（#60）', async () => {
