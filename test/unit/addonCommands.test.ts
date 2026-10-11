@@ -196,6 +196,26 @@ describe('T10 统一快捷键管理：运行期操作层', () => {
   })
 })
 
+describe('#449 defaults 归一后去重（保留首现序）', () => {
+  it('归一后重复形态去重入协议：单键别名书写只留首现', () => {
+    const report = buildAddonCommandReport('publisher.addon', {
+      id: 'stamp', title: '盖时间戳', mode: 'live',
+      defaultBindings: ['ctrl+f', 'Ctrl+F'],
+    })
+    // 'Ctrl+F' 是正常组件可达的合法别名书写（注册期不拒）——归一后与
+    // 'ctrl+f' 重复，去重而非拒绝（对照用户录入路径 applyBindingChange）
+    expect(report?.defaults).toEqual(['ctrl+f'])
+  })
+
+  it('混合形态：不同键全保留、归一后重复只留首现', () => {
+    const report = buildAddonCommandReport('publisher.addon', {
+      id: 'stamp', title: '盖时间戳', mode: 'live',
+      defaultBindings: ['meta+k', 'Meta+K', 'ctrl+k'],
+    })
+    expect(report?.defaults).toEqual(['meta+k', 'ctrl+k'])
+  })
+})
+
 describe('T10 菜单注册形状校验', () => {
   it('合法形状通过；label 空与未登记 iconKey 被拒', () => {
     expect(addonMenuItemProblem({ id: 'stamp', label: '盖时间戳', iconKey: 'link' })).toBeNull()

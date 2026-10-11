@@ -69,7 +69,10 @@ export class AddonCommandService {
       // （与编辑器 SDK 侧 buildAddonCommandReport 的「归一化后存储」同
       // 语义——含保留 Tab 段拒绝的对称面：裸 Tab/Shift+Tab 归一为
       // tab/shift+tab 非 null，须独立拦下，否则违约绑定进宿主目录与设置页）。
+      // #449：归一后去重（保留首现序）——与 SDK 侧同语义；重复不属违约、
+      // 不触发拒绝（违约拦截 null/保留 Tab 段仍逐条先判，不因重复跳过）。
       const defaults: string[] = []
+      const seenNormalized = new Set<string>()
       for (const raw of command.defaults) {
         const normalized = normalizeChord(raw)
         if (normalized === null) {
@@ -80,7 +83,10 @@ export class AddonCommandService {
           this.ports.log('commands-report-rejected', addonId, `tab-forbidden defaults: ${command.commandId}`)
           return
         }
-        defaults.push(normalized)
+        if (!seenNormalized.has(normalized)) {
+          seenNormalized.add(normalized)
+          defaults.push(normalized)
+        }
       }
       seen.add(command.commandId)
       defaultsByCommand.set(command.commandId, defaults)
