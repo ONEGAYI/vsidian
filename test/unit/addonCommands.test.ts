@@ -16,6 +16,7 @@ import {
   namespacedAddonId,
   ADDON_MENU_ITEM_ID_PATTERN,
   ADDON_DISPLAY_TEXT_MAX,
+  ADDON_DEFAULT_BINDINGS_MAX,
 } from '../../src/shared/addonCommands'
 import {
   setRuntimeOperations,
@@ -193,6 +194,60 @@ describe('T10 统一快捷键管理：运行期操作层', () => {
     setRuntimeOperations([])
     expect(runtimeOperations()).toEqual([])
     expect(resolveKeybinding({}, 'live', 'ctrl+alt+f9', true).kind).toBe('none')
+  })
+})
+
+describe('#449 defaults 归一后去重（保留首现序）', () => {
+  it('归一后重复形态去重入协议：单键别名书写只留首现', () => {
+    const report = buildAddonCommandReport('publisher.addon', {
+      id: 'stamp', title: '盖时间戳', mode: 'live',
+      defaultBindings: ['ctrl+f', 'Ctrl+F'],
+    })
+    // 'Ctrl+F' 是正常组件可达的合法别名书写（注册期不拒）——归一后与
+    // 'ctrl+f' 重复，去重而非拒绝（对照用户录入路径 applyBindingChange）
+    expect(report?.defaults).toEqual(['ctrl+f'])
+  })
+
+  it('混合形态：不同键全保留、归一后重复只留首现', () => {
+    const report = buildAddonCommandReport('publisher.addon', {
+      id: 'stamp', title: '盖时间戳', mode: 'live',
+      defaultBindings: ['meta+k', 'Meta+K', 'ctrl+k'],
+    })
+    expect(report?.defaults).toEqual(['meta+k', 'ctrl+k'])
+  })
+})
+
+describe('#450 默认绑定条数封顶（ADDON_DEFAULT_BINDINGS_MAX，先量后形）', () => {
+  const FIVE = ['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4', 'ctrl+f5']
+
+  it('5 条合法 chord 以 too-many 拒绝；4 条恰好通过（边界值）', () => {
+    expect(addonDefaultBindingsProblem(FIVE)).toBe('too-many')
+    expect(addonDefaultBindingsProblem(FIVE.slice(0, ADDON_DEFAULT_BINDINGS_MAX))).toBeNull()
+  })
+
+  it('条数判断先于逐条形态：超限数组即使含非法 chord 也以 too-many 拒绝', () => {
+    expect(addonDefaultBindingsProblem(['ctrl+f1', 'not-a-key', 'ctrl+f3', 'ctrl+f4', 'ctrl+f5']))
+      .toBe('too-many')
+  })
+
+  it('按原始数组长度计数，与归一去重正交：归一后重复形态不折抵条数', () => {
+    // 原始 5 条（归一后仅 4 个形态）仍拒绝——封顶动机含协议载荷体积，
+    // 与 #449 去重语义互不代偿
+    expect(addonDefaultBindingsProblem(['ctrl+f', 'Ctrl+F', 'meta+k', 'ctrl+k', 'alt+k']))
+      .toBe('too-many')
+    // 原始 4 条（归一后 3 个形态）通过，去重照常在构造期收口
+    const report = buildAddonCommandReport('publisher.addon', {
+      id: 'stamp', title: '盖时间戳', mode: 'live',
+      defaultBindings: ['ctrl+f', 'Ctrl+F', 'meta+k', 'ctrl+k'],
+    })
+    expect(report?.defaults).toEqual(['ctrl+f', 'meta+k', 'ctrl+k'])
+  })
+
+  it('超限注册整批拒绝：buildAddonCommandReport 返回 null（不截断）', () => {
+    const report = buildAddonCommandReport('publisher.addon', {
+      id: 'stamp', title: '盖时间戳', mode: 'live', defaultBindings: FIVE,
+    })
+    expect(report).toBeNull()
   })
 })
 

@@ -51,6 +51,10 @@ import {
   unfoldAround,
   unfoldAroundKeys,
 } from '../../src/webview/headingFold'
+import {
+  __resetKeybindingLabelPlatformForTest,
+  setKeybindingLabelPlatform,
+} from '../../src/shared/keybindings'
 
 /** 最小装配：折叠本体 + 装饰 + 增量树源（liveDecorationsField；装饰与
  *  派生经它复用增量解析树，未装配时退化为全量解析的双入口形态） */
@@ -692,6 +696,8 @@ describe('T03：gutter 箭头态集合（headingFoldArrowStates 纯函数）', (
       'headingfold.fold': '折叠此节',
       'headingfold.unfold': '展开此节',
     })
+    // #448：徽章经 formatBindingLabel 平台渲染——显式固定 windows 防探测漂移
+    setKeybindingLabelPlatform('windows')
     setHeadingFoldBindingHints((op) => (op === 'headingUnfold' ? ['ctrl+shift+]'] : ['ctrl+shift+[']))
     const unfolded = buildHeadingFoldArrowMarker(false).toDOM!(null as never) as HTMLElement
     expect(unfolded.tagName).toBe('BUTTON')
@@ -699,14 +705,40 @@ describe('T03：gutter 箭头态集合（headingFoldArrowStates 纯函数）', (
     expect(unfolded.getAttribute('aria-expanded')).toBe('true')
     expect(unfolded.getAttribute('aria-label')).toBe('折叠此节')
     expect(unfolded.getAttribute('data-tooltip')).toBe('折叠此节')
-    expect(unfolded.getAttribute('data-tooltip-keys')).toBe('ctrl+shift+[')
+    expect(unfolded.getAttribute('data-tooltip-keys')).toBe('Ctrl+Shift+[')
     const folded = buildHeadingFoldArrowMarker(true).toDOM!(null as never) as HTMLElement
     expect(folded.className).toContain('vsidian-fold-arrow-collapsed')
     expect(folded.getAttribute('aria-expanded')).toBe('false')
     expect(folded.getAttribute('aria-label')).toBe('展开此节')
-    expect(folded.getAttribute('data-tooltip-keys')).toBe('ctrl+shift+]')
+    expect(folded.getAttribute('data-tooltip-keys')).toBe('Ctrl+Shift+]')
+    __resetKeybindingLabelPlatformForTest()
     setHeadingFoldBindingHints(() => [])
     installLocale('test', {})
+  })
+
+  it('键位徽章平台渲染契约：meta 绑定经 formatBindingLabel 平台呈现（#448）', () => {
+    installLocale('test', {
+      'headingfold.fold': '折叠此节',
+      'headingfold.unfold': '展开此节',
+    })
+    setHeadingFoldBindingHints((op) => (op === 'headingUnfold' ? ['meta+l'] : ['meta+k']))
+    try {
+      setKeybindingLabelPlatform('mac')
+      const unfolded = buildHeadingFoldArrowMarker(false).toDOM!(null as never) as HTMLElement
+      expect(unfolded.getAttribute('data-tooltip-keys')).toBe('Cmd+K')
+      const folded = buildHeadingFoldArrowMarker(true).toDOM!(null as never) as HTMLElement
+      expect(folded.getAttribute('data-tooltip-keys')).toBe('Cmd+L')
+      setKeybindingLabelPlatform('windows')
+      expect((buildHeadingFoldArrowMarker(false).toDOM!(null as never) as HTMLElement)
+        .getAttribute('data-tooltip-keys')).toBe('Win+K')
+      setKeybindingLabelPlatform('linux')
+      expect((buildHeadingFoldArrowMarker(false).toDOM!(null as never) as HTMLElement)
+        .getAttribute('data-tooltip-keys')).toBe('Super+K')
+    } finally {
+      __resetKeybindingLabelPlatformForTest()
+      setHeadingFoldBindingHints(() => [])
+      installLocale('test', {})
+    }
   })
 
   it('无绑定时省略号与箭头均不写 data-tooltip-keys（无徽章）', () => {

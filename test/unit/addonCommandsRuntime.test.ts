@@ -94,6 +94,21 @@ describe('T10 webview 命令注册表', () => {
       .toBe(true)
   })
 
+  it('#450 默认绑定超限注册拒绝：default-bindings:too-many（先量后形，非法 chord 不折抵）', () => {
+    const { runtime } = makeRuntime()
+    const over = runtime.registerCommand(ADDON, 1, {
+      id: 'many', title: 'x', mode: 'both',
+      defaultBindings: ['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4', 'ctrl+f5'],
+    }, () => {})
+    expect(!over.ok && over.reason).toBe('default-bindings:too-many')
+    // 量先于形：5 条含非法 chord 时仍报 too-many（与 addonDefaultBindingsProblem 先量后形同源）
+    const overBad = runtime.registerCommand(ADDON, 1, {
+      id: 'many-bad', title: 'x', mode: 'both',
+      defaultBindings: ['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4', 'not-a-key'],
+    }, () => {})
+    expect(!overBad.ok && overBad.reason).toBe('default-bindings:too-many')
+  })
+
   it('dispose 单条撤销：运行期表移除、空表上报', () => {
     const { runtime, reports } = makeRuntime()
     const outcome = runtime.registerCommand(ADDON, 1, { id: 'one', title: 'one', mode: 'both' }, () => {})
