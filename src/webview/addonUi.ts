@@ -27,8 +27,9 @@ import {
   type AddonUiPanelDefinition,
   type AddonUiTargetGetter,
 } from '../shared/addonUi'
-import type { BindingMode } from '../shared/keybindings'
+import { formatBindingLabel, type BindingMode } from '../shared/keybindings'
 import type { AddonViewHandle } from '../shared/addonEditApi'
+import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 
 /** 运行时环境（main.ts 构造注入；vscode/CM6 不进本模块——jsdom 可测） */
 export interface AddonUiRuntimeEnv {
@@ -297,7 +298,8 @@ export class AddonUiRuntime {
     if (entry.commandId !== undefined) {
       const keys = this.env.bindingHints(entry.commandId)
       if (keys.length > 0) {
-        button.setAttribute('data-tooltip-keys', keys.join('\n'))
+        // #448：徽章值经 formatBindingLabel 平台渲染（'\n' 字面量换常量，值同）
+        button.setAttribute('data-tooltip-keys', keys.map(formatBindingLabel).join(TOOLTIP_KEYS_SEPARATOR))
       }
     }
     button.textContent = def.iconText ?? def.label
