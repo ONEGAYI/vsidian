@@ -688,6 +688,7 @@ describe('快捷键入口（同一命令的两个入口汇到同一执行）', (
 // ---- #436 场景命中负载（采集层：contextSnapshotAt 的三类负载）----
 
 import { type MenuContextSnapshot } from '../../src/shared/contextMenu'
+import { selectTableRegion, tableRegionField } from '../../src/webview/tableRegionSelection'
 
 describe('场景命中负载采集（表格/链接/图形块进快照，#436）', () => {
   /** 打开菜单并捕获快照探针：注册一个 when 恒隐藏的临时项（不改变菜单
@@ -947,5 +948,172 @@ describe('场景命中负载采集（表格/链接/图形块进快照，#436）'
     expect(held?.graphic?.language).toBe('mermaid')
     c.handleHostMessage({ kind: 'contextMenu.test.menuClose' })
     expect(c.getContextMenuSnapshot()).toBeNull()
+  })
+})
+
+// ---- #437 表格专属簇：执行链（菜单注入通道逐项执行——结构/删除/选择/复制/层级）----
+
+describe('表格专属簇执行链（#437）', () => {
+  const TOP = '| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |'
+  const QUOTED = '> | a | b |\n> |---|---|\n> | 1 | 2 |'
+  const editRequests = (h: BridgeHarness) => h.sent.filter((m) => m.kind === 'edit.request')
+  const clipboardWrites = (h: BridgeHarness) =>
+    h.sent.filter((m) => m.kind === 'clipboard.write' && typeof (m as { text?: string }).text === 'string')
+  const CLUSTER = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+    'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+    'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+
+  it('表格区开菜单：tableOps 簇 13 项在场（顶层表 quoteRemove 置灰），项序与簇位正确', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    expect(topCommands()).toEqual([
+      'wikilink', 'link', 'copyBlockLink',
+      ...CLUSTER,
+      'textFormat', 'paragraphStyle', 'insert',
+      'cut', 'copy', 'paste', 'pastePlain', 'selectAll',
+    ])
+    expect(buttonOf('tableQuoteRemove')!.disabled, '顶层表 0 层不可减').toBe(true)
+    expect(buttonOf('tableQuoteAdd')!.disabled).toBe(false)
+    expect(buttonOf('deleteTable')!.disabled).toBe(false)
+  })
+
+  it('结构项：命中数据行执行 insertRowAbove——命中行上方插空行，单笔写回', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'insertRowAbove' })
+    expect(c.getView()!.state.doc.toString())
+      .toBe('| a | b |\n|---|---|\n| 1 | 2 |\n| | |\n| 3 | 4 |')
+    expect(editRequests(h)).toHaveLength(1)
+    expect(menuEl(), '命令执行后菜单关闭').toBeNull()
+  })
+
+  it('结构项：insertColumnRight 在命中列右插列（表格形状正确）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('a') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'insertColumnRight' })
+    // 分隔行新列段沿用既有引擎最小插入形态（` --- ` 带空格）
+    expect(c.getView()!.state.doc.toString())
+      .toBe('| a | | b |\n|---| --- |---|\n| 1 | | 2 |\n| 3 | | 4 |')
+    expect(editRequests(h)).toHaveLength(1)
+  })
+
+  it('删除表格：整表层单笔删除，前后正文保留', () => {
+    const doc = `前文\n\n${TOP}\n\n后文`
+    const h = makeBridge()
+    const { c } = mountPanel(h, doc)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: doc.indexOf('| 1 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    expect(c.getView()!.state.doc.toString()).toBe('前文\n\n\n\n后文')
+    expect(editRequests(h)).toHaveLength(1)
+  })
+
+  it('选择行：格区 region 落命中行全列（零写回），选择整表同理', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    const view = c.getView()!
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'selectTableRow' })
+    const region = view.state.field(tableRegionField, false)
+    expect(region).toMatchObject({
+      tableFrom: 0, rowFrom: 2, rowTo: 2, columnFrom: 0, columnTo: 1,
+    })
+    expect(editRequests(h)).toHaveLength(0)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('a') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'selectWholeTable' })
+    expect(view.state.field(tableRegionField, false)).toMatchObject({
+      tableFrom: 0, rowFrom: 0, rowTo: 2, columnFrom: 0, columnTo: 1,
+    })
+    expect(editRequests(h)).toHaveLength(0)
+  })
+
+  it('复制表格 Markdown：无活跃格区 → 整表（含重造表头）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    expect(clipboardWrites(h)).toEqual([{
+      kind: 'clipboard.write',
+      text: '| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |',
+    }])
+    expect(editRequests(h)).toHaveLength(0)
+  })
+
+  it('复制优先语义：活跃格区包含命中格 → 复制格区；不含命中格 → 整表', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    const view = c.getView()!
+    // 活跃格区：数据行 1-2 × 全列（selectTableRegion 同通道建立——蒙版态）
+    selectTableRegion(view, {
+      tableFrom: 0, rowFrom: 1, rowTo: 2, columnFrom: 0, columnTo: 1,
+    })
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 3 |') + 2 })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    expect(clipboardWrites(h).map((m) => (m as { text: string }).text))
+      .toEqual(['| 1 | 2 |\n| --- | --- |\n| 3 | 4 |'])
+    // 命中表头行（不在格区内）→ 回落整表
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('a') })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'copyTableMarkdown' })
+    const texts = clipboardWrites(h).map((m) => (m as { text: string }).text)
+    expect(texts[1]).toBe('| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |')
+  })
+
+  it('引用层级：增一层/减一层逐行独立变换，各一笔事务（单层引用表往返）', () => {
+    // 增层：单次派发 = 单笔 edit.request（一次菜单操作 = 宿主撤销一次）
+    const h = makeBridge()
+    const { c } = mountPanel(h, QUOTED)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: QUOTED.indexOf('1') })
+    expect(buttonOf('tableQuoteRemove')!.disabled).toBe(false)
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'tableQuoteAdd' })
+    const added = c.getView()!.state.doc.toString()
+    expect(added).toBe('> > | a | b |\n> > |---|---|\n> > | 1 | 2 |')
+    expect(editRequests(h)).toHaveLength(1)
+    // 减层：独立挂载（两次快速派发会被出站去抖合并成一条消息——粒度按
+    // 每次菜单操作单独钉），往返还原原文
+    const h2 = makeBridge()
+    const { c: c2 } = mountPanel(h2, added)
+    c2.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: added.indexOf('1') })
+    c2.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'tableQuoteRemove' })
+    expect(c2.getView()!.state.doc.toString()).toBe(QUOTED)
+    expect(editRequests(h2)).toHaveLength(1)
+  })
+
+  it('源码降级表（树不认）：簇在场全置灰，点击零写回', () => {
+    const degraded = '| a | b |\n| 1 | 2 |\n|---|---|'
+    const h = makeBridge()
+    const { c } = mountPanel(h, degraded)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: degraded.indexOf('1') })
+    for (const command of CLUSTER) {
+      expect(buttonOf(command)!.disabled, `${command} 解析失败置灰不隐藏`).toBe(true)
+    }
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    expect(editRequests(h)).toHaveLength(0)
+    expect(clipboardWrites(h)).toHaveLength(0)
+  })
+
+  it('锚点过期防御：菜单打开期间外部改文档，deleteTable 放弃执行（零写回）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h, TOP)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: TOP.indexOf('| 1 |') + 2 })
+    c.handleHostMessage({
+      kind: 'doc.changed', version: 2, changes: [{ offset: 0, length: 0, text: 'x' }], origin: 'external',
+    })
+    h.sent.length = 0
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'deleteTable' })
+    expect(editRequests(h)).toHaveLength(0)
+    expect(menuEl(), '放弃路径关闭菜单').toBeNull()
+  })
+
+  it('命令面板/快捷键入口（ui.command）：光标处表格执行删除（与菜单同一实现）', () => {
+    const doc = `前文\n\n${TOP}\n\n后文`
+    const h = makeBridge()
+    const { c } = mountPanel(h, doc)
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: doc.indexOf('| 3 |') + 2 } })
+    c.handleHostMessage({ kind: 'ui.command', op: 'deleteTable' })
+    expect(c.getView()!.state.doc.toString()).toBe('前文\n\n\n\n后文')
+    expect(editRequests(h)).toHaveLength(1)
   })
 })

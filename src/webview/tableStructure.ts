@@ -212,6 +212,75 @@ export function prefixLenOf(row: TableRowInfo): number {
   return row.prefixLen ?? 0
 }
 
+/**
+ * 单行引用层级变换（#437 表格右键簇；逐行独立——blockquote-table 规格
+ * 契约 5 口径，不一表一常量）：
+ * - delta=+1：行首补 `> `（顶层 0 层同样可加）；
+ * - delta=-1：剥掉首个 `>` 及其后至多一个空格（`>>` 紧贴形态只剥首个
+ *   `>`；行首空白保留）；无引用前缀的行（lazy 分隔行）原样保留返回 null。
+ * 返回 null 表示该行无变化。
+ */
+export function changeLineQuoteLevel(text: string, delta: -1 | 1): string | null {
+  if (delta === 1) {
+    return `> ${text}`
+  }
+  const m = /^(\s*)> ?/.exec(text)
+  if (!m) {
+    return null
+  }
+  return `${m[1] ?? ''}${text.slice(m[0].length)}`
+}
+
+/**
+ * 表格引用层级统一增/删一层（#437 右键簇「移除引用块 / 增一层引用」，
+ * blockquote-table 三轮职能转移项）：对全部物理行（表头/分隔/数据行）逐行
+ * 独立变换，changes 合一为单笔事务（宿主撤销一次）。层级一致性（enable）
+ * 由菜单谓词按 TableMenuHit 判定——残缺表置灰不做猜测修复，本函数不做
+ * 一致性校验（逐行独立运算天然安全）。无任何变更（如顶层表减层）返回
+ * null。cursor 给出且落在表内行上时 selection 按行内偏移跟随新行文本
+ * （不落前缀端点触发显形——#296 六轮口径）；否则 selection 为表头行
+ * lineFrom 兜底（调用方也可走默认映射）。
+ */
+export function planTableQuoteLevel(
+  doc: string,
+  rows: TableRowInfo[],
+  delta: -1 | 1,
+  cursor?: number,
+): PlannedTableEdit | null {
+  if (rows.length === 0) {
+    return null
+  }
+  const changes: PlannedTableEdit['changes'] = []
+  let selection = rows[0]!.lineFrom
+  let cursorRow = -1
+  let cursorOffset = 0
+  if (cursor !== undefined) {
+    cursorRow = rowIndexOf(rows, cursor)
+    if (cursorRow >= 0) {
+      cursorOffset = cursor - rows[cursorRow]!.lineFrom
+    }
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!
+    const text = doc.slice(row.lineFrom, row.lineTo)
+    const next = changeLineQuoteLevel(text, delta)
+    if (next === null) {
+      if (i === cursorRow) {
+        selection = cursor! // 无变化行上的光标原位保留
+      }
+      continue
+    }
+    changes.push({ from: row.lineFrom, to: row.lineTo, insert: next })
+    if (i === cursorRow) {
+      // 行首前缀增删使行内内容平移（next - text 长度差）：光标按平移量
+      // 跟随原内容（clamp 在新行内），不落前缀端点触发显形（#296 六轮口径）
+      selection = row.lineFrom +
+        Math.max(0, Math.min(cursorOffset + next.length - text.length, next.length))
+    }
+  }
+  return changes.length ? { changes, selection } : null
+}
+
 /** pos 所在行（区间含端点）；未命中返回 -1 */
 function rowIndexOf(rows: TableRowInfo[], pos: number): number {
   for (let i = 0; i < rows.length; i++) {
