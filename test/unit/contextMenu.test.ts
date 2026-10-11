@@ -507,9 +507,15 @@ describe('表格专属簇（#437：when=zone table；enable 按命中负载）',
   })
 
   it('普通正文/围栏/图形块：簇整组不在场（when 过滤 + 空组收起）', () => {
+    // graphic 区图形簇（#438）在场——本用例只钉 tableOps 不越场
+    const expectedByZone: Record<string, string[]> = {
+      normal: ['link', 'blockFormat', 'clipboard'],
+      fence: ['link', 'blockFormat', 'clipboard'],
+      graphic: ['link', 'graphicOps', 'blockFormat', 'clipboard'],
+    }
     for (const zone of ['normal', 'fence', 'graphic'] as const) {
       expect(buildContextMenuModel(normalCtx({ zone })).map((g) => g.id),
-        `${zone} 区不应出现 tableOps 簇`).toEqual(['link', 'blockFormat', 'clipboard'])
+        `${zone} 区不应出现 tableOps 簇`).toEqual(expectedByZone[zone])
     }
   })
 

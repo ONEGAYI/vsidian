@@ -43,10 +43,11 @@ KEYS = (
     "findPrev", "findNext", "findClose", "replaceOne", "replaceAll", "findInSelection",
     "chevronRight",
     "typewriter", "wordSegment", "pointerLink", "dbLink",
-    # #437 表格专属簇 10 键（两表同步登记；AI 生图与 CSS 接线归 #441 承接，
-    # 本表先行登记保证键集一致——生成侧对账在 #441）
+    # #437 表格专属簇 10 键 + #438 图形簇 3 键（两表同步登记；AI 生图与
+    # CSS 接线归 #441 承接，本表先行登记保证键集一致——生成侧对账在 #441）
     "insertRowAbove", "insertRowBelow", "insertColumnLeft", "insertColumnRight",
     "deleteRow", "deleteColumn", "deleteTable", "selectRow", "selectColumn", "removeQuote",
+    "popupPreview", "exportSvg", "exportPng",
 )
 COLORS = {"light": (54, 60, 70), "dark": (210, 218, 229)}
 CELL = 96
