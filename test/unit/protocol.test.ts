@@ -76,6 +76,20 @@ describe('isWebviewToHost', () => {
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 1 })).toBe(false)
   })
 
+  it('addonCommands.report defaults 条数封顶（#450）：4 条通过、5 条拒绝', () => {
+    const msg = (defaults: string[]) => ({
+      kind: 'addonCommands.report',
+      addonId: 'publisher.addon',
+      generation: 1,
+      commands: [{
+        commandId: 'publisher.addon.stamp', addonId: 'publisher.addon', localId: 'stamp',
+        title: 'stamp', mode: 'both', writes: false, defaults,
+      }],
+    })
+    expect(isWebviewToHost(msg(['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4']))).toBe(true)
+    expect(isWebviewToHost(msg(['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4', 'ctrl+f5']))).toBe(false)
+  })
+
   it('view.locate.ack 送达确认校验（#163 反馈）：offset 为非负整数', () => {
     expect(isWebviewToHost({ kind: 'view.locate.ack', offset: 0 })).toBe(true)
     expect(isWebviewToHost({ kind: 'view.locate.ack', offset: 128 })).toBe(true)

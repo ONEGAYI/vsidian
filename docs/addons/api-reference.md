@@ -1810,7 +1810,7 @@ export interface AddonRendererStoreV1 {
 语义要点：
 - **适用模式**：live / reading / both 由代码声明；写操作快捷键仅在 Live 正文接管宿主绑定——源码模式与设置页输入不接管（沿键位注册表 writes 门控）。
 - **生命周期**：命名空间 ID 由平台注入（<组件 ID>.<局部 ID>）；局部 ID 禁点号（含点即伪造跨组件/内置身份）。停用/故障/代次释放整组件回收注册——不影响内置命令，不清用户键位。
-- **错误与拒绝**：duplicate-command、tab-forbidden（#125 Tab 固定链——「围栏越界 → 表格导航 → 行缩进」优先级不可绕；#427 收窄为裸 Tab 与 Shift+Tab 段，ctrl/alt/meta+Tab 放行——宿主/OS 占用组合不保证事件可达）、非法 chord 等明确拒绝码；普通 API 拒绝不算故障。
+- **错误与拒绝**：duplicate-command、tab-forbidden（#125 Tab 固定链——「围栏越界 → 表格导航 → 行缩进」优先级不可绕；#427 收窄为裸 Tab 与 Shift+Tab 段，ctrl/alt/meta+Tab 放行——宿主/OS 占用组合不保证事件可达）、too-many（#450 默认绑定条数封顶 4，按原始数组长度计数）、非法 chord 等明确拒绝码；普通 API 拒绝不算故障。
 
 签名事实源：`src/shared/addonCommands.ts`
 
@@ -1854,8 +1854,8 @@ export interface AddonCommandReport {
 /** 局部 ID 拒绝码 */
 export type AddonLocalIdProblem = 'empty' | 'dot' | 'too-long' | 'invalid-chars'
 
-/** 默认绑定拒绝码（tab-forbidden = #125 Tab 固定链） */
-export type AddonDefaultBindingsProblem = 'not-string' | 'invalid-chord' | 'tab-forbidden'
+/** 默认绑定拒绝码（tab-forbidden = #125 Tab 固定链；too-many = #450 条数超限） */
+export type AddonDefaultBindingsProblem = 'not-string' | 'invalid-chord' | 'tab-forbidden' | 'too-many'
 ```
 
 签名事实源：`src/shared/addonPage.ts`

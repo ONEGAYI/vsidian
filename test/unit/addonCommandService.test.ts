@@ -172,4 +172,32 @@ describe('T10 宿主命令服务', () => {
     expect(getEffectiveBindings({}, `${ADDON}.dupe`)).toEqual(['ctrl+f'])
     expect(logs.some((line) => line.includes('commands-report-rejected'))).toBe(false)
   })
+
+  it('#450 defaults 条数超限（> 4）整批拒绝：too-many defaults', () => {
+    const { service, logs } = makeService()
+    service.syncReport(ADDON, 1, [
+      report(`${ADDON}.one`),
+      report(`${ADDON}.many`, ADDON, {
+        defaults: ['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4', 'ctrl+f5'],
+      }),
+    ])
+    expect(service.catalog()).toHaveLength(0)
+    expect(runtimeOperations()).toHaveLength(0)
+    expect(logs.some((line) =>
+      line.includes('commands-report-rejected') && line.includes('too-many defaults'))).toBe(true)
+  })
+
+  it('#450 defaults 恰 4 条通过（边界值；原始条数计数，归一后重复不折抵）', () => {
+    const { service, logs } = makeService()
+    service.syncReport(ADDON, 1, [
+      report(`${ADDON}.four`, ADDON, { defaults: ['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4'] }),
+      // 原始 4 条含归一后重复（f1/F1）：去重入目录、不拒绝
+      report(`${ADDON}.alias`, ADDON, { defaults: ['ctrl+f1', 'Ctrl+F1', 'meta+k', 'ctrl+k'] }),
+    ])
+    expect(logs.some((line) => line.includes('commands-report-rejected'))).toBe(false)
+    const defaultsOf = (commandId: string) =>
+      service.catalog().find((item) => item.commandId === commandId)?.defaults
+    expect(defaultsOf(`${ADDON}.four`)).toEqual(['ctrl+f1', 'ctrl+f2', 'ctrl+f3', 'ctrl+f4'])
+    expect(defaultsOf(`${ADDON}.alias`)).toEqual(['ctrl+f1', 'meta+k', 'ctrl+k'])
+  })
 })
