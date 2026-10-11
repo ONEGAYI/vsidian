@@ -150,6 +150,41 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.table.deleteTable",
+        "title": "%command.table.deleteTable.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.table.selectRow",
+        "title": "%command.table.selectRow.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.table.selectColumn",
+        "title": "%command.table.selectColumn.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.table.selectTable",
+        "title": "%command.table.selectTable.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.table.copyMarkdown",
+        "title": "%command.table.copyMarkdown.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.table.quoteRemove",
+        "title": "%command.table.quoteRemove.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.table.quoteAdd",
+        "title": "%command.table.quoteAdd.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.block.copyLink",
         "title": "%command.block.copyLink.title%",
         "category": "Vsidian"

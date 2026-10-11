@@ -845,6 +845,33 @@ export const zhCn: Record<MessageKey, string> = {
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': '复制当前块链接',
 
+  // ---- #437 表格专属右键簇（tableOps；复制语义沿区域复制口径）----
+  /** 表格簇：结构六操作（复用键位注册表既有 id，提示列自动派生） */
+  'contextMenu.table.insertRowAbove': '上方插入行',
+  'contextMenu.table.insertRowBelow': '下方插入行',
+  'contextMenu.table.insertColumnLeft': '左侧插入列',
+  'contextMenu.table.insertColumnRight': '右侧插入列',
+  'contextMenu.table.deleteRow': '删除行',
+  'contextMenu.table.deleteColumn': '删除列',
+  /** 表格簇：删除表格（整表层）与选择三项（{n} = 命中行列序号，1 基） */
+  'contextMenu.table.deleteTable': '删除表格',
+  'contextMenu.table.selectRow': '选择第 {n} 行',
+  'contextMenu.table.selectColumn': '选择第 {n} 列',
+  'contextMenu.table.selectTable': '选择整表',
+  /** 表格簇：复制表格 Markdown（活跃格区含命中格 → 格区，否则整表） */
+  'contextMenu.table.copyMarkdown': '复制表格 Markdown',
+  /** 表格簇：引用层级两项（blockquote-table 三轮职能转移项） */
+  'contextMenu.table.removeQuote': '移除引用块',
+  'contextMenu.table.addQuote': '增一层引用',
+  /** 表格簇新命令的操作注册表 titleKey（默认未绑定；删除/层级为写操作） */
+  'command.table.deleteTable.title': '表格：删除表格',
+  'command.table.selectRow.title': '表格：选择行',
+  'command.table.selectColumn.title': '表格：选择列',
+  'command.table.selectTable.title': '表格：选择整表',
+  'command.table.copyMarkdown.title': '表格：复制 Markdown',
+  'command.table.quoteRemove.title': '表格：移除引用块',
+  'command.table.quoteAdd.title': '表格：增一层引用',
+
   // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
   /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；
    *  Shift 变体单列操作——扩选注册） */

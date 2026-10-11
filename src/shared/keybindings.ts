@@ -204,6 +204,17 @@ export const UI_OPERATIONS = [
   { id: 'headingToggleFold', command: 'onegayi.vsidian.heading.toggleFold', titleKey: 'command.heading.toggleFold.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+l', 'meta+k meta+l'] },
   { id: 'headingFoldAll', command: 'onegayi.vsidian.heading.foldAll', titleKey: 'command.heading.foldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+0', 'meta+k meta+0'] },
   { id: 'headingUnfoldAll', command: 'onegayi.vsidian.heading.unfoldAll', titleKey: 'command.heading.unfoldAll.title', mode: 'live', writes: false, defaults: ['ctrl+k ctrl+j', 'meta+k meta+j'] },
+  // #437 表格右键簇新命令（右键菜单为主入口；键位注册表登记默认未绑定，
+  // 用户可自绑——提示列由注册表派生）。结构六操作（insertRowAbove 族）已在
+  // extra 表登记不重复。执行按光标处表格（runTableClusterCommand）；删除/
+  // 层级为写操作（writes: true 走焦点门控），选择/复制零文档写回
+  { id: 'deleteTable', command: 'onegayi.vsidian.table.deleteTable', titleKey: 'command.table.deleteTable.title', mode: 'live', writes: true, defaults: [] },
+  { id: 'selectTableRow', command: 'onegayi.vsidian.table.selectRow', titleKey: 'command.table.selectRow.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'selectTableColumn', command: 'onegayi.vsidian.table.selectColumn', titleKey: 'command.table.selectColumn.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'selectWholeTable', command: 'onegayi.vsidian.table.selectTable', titleKey: 'command.table.selectTable.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'copyTableMarkdown', command: 'onegayi.vsidian.table.copyMarkdown', titleKey: 'command.table.copyMarkdown.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'tableQuoteRemove', command: 'onegayi.vsidian.table.quoteRemove', titleKey: 'command.table.quoteRemove.title', mode: 'live', writes: true, defaults: [] },
+  { id: 'tableQuoteAdd', command: 'onegayi.vsidian.table.quoteAdd', titleKey: 'command.table.quoteAdd.title', mode: 'live', writes: true, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

@@ -167,6 +167,9 @@ export interface MenuItemDescriptor {
   /** 组内排序键（稳定排序） */
   order: number
   labelKey: MessageKey
+  /** 文案插值参数（#437：含行列序号的菜单文案参数化——table.selectRow{n}
+   *  先例的渲染层载体；按快照求值，如选择第 {n} 行取命中 rowIndex） */
+  labelParams?: (ctx: MenuContextSnapshot) => Record<string, string | number>
   /** #359 T10 显式文字（附加组件菜单项的自由文本——组件文案不进 Vsidian
    *  内置字典；渲染时优先于 labelKey 取词，内置表不用此字段） */
   label?: string
@@ -200,7 +203,10 @@ export type ContextMenuGroupId = (typeof CONTEXT_MENU_GROUP_ORDER)[number]
 
 /** 图标 key 表（规格图标清单全量：复用 16 + 需生成接线 10 + 备用记账 4。
  *  资产生成与 quick-action-icons.py KEYS 的两表同步归图标接线票；渲染层
- *  按 CSS 有无 data-icon 规则降级留空，key 先行登记不阻塞内核。 */
+ *  按 CSS 有无 data-icon 规则降级留空，key 先行登记不阻塞内核。
+ *  #437 表格簇新增 10 key（候选语义表见 #441）：资产与 CSS 接线归 #441
+ *  承接（登记即合规、渲染留空降级——S6 决策），复用 key 三枚（table/
+ *  quote/copy）零新增。 */
 export const CONTEXT_MENU_ICON_KEYS = [
   // 复用现有快速操作图标资产
   'link', 'bold', 'italic', 'strikethrough', 'highlight', 'inlineCode', 'inlineMath',
@@ -211,6 +217,9 @@ export const CONTEXT_MENU_ICON_KEYS = [
   'cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'comment',
   // 备用（项不做，显式记账）
   'media', 'footnote', 'callout',
+  // #437 表格专属簇（资产归 #441 后补；渲染层无规则时留空降级）
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
 ] as const
 
 /** 结构敏感区谓词（表格单元格/围栏代码/图形块——写操作置灰的矩阵单元） */
@@ -264,6 +273,44 @@ const insertChildren: readonly MenuItemDescriptor[] = [
   { id: 'blockMath', group: 'blockFormat', order: 3, command: 'blockMath', labelKey: 'format.blockMath', iconKey: 'blockMath', enable: enabledOutsideStructure },
 ]
 
+// ---- 表格专属簇（#437；平铺单簇不设子菜单）----
+// 谓词口径：全簇 when = zone==='table'（结构敏感区才在场）；enable 按命中
+// 负载在场（解析树接管该表）判定——源码降级表/残缺表负载缺省时**置灰不
+// 隐藏**（安全降级矩阵不破例）。结构六操作复用键位注册表既有 id（提示列
+// 自动派生）；选择行/列需命中行列坐标（分隔行/ragged 行 null → 置灰）；
+// 引用层级两项按层级一致性（quoteUniform）与是否可减（quoteDepth≥1）。
+const inTableZone = (ctx: MenuContextSnapshot): boolean => ctx.zone === 'table'
+const tableHitPresent = (ctx: MenuContextSnapshot): boolean => ctx.table !== undefined
+const tableUniform = (ctx: MenuContextSnapshot): boolean =>
+  ctx.table !== undefined && ctx.table.quoteUniform
+
+/** 表格专属簇描述符（13 项；执行分派在 syncController.runContextMenuCommand） */
+const tableOpsChildren: readonly MenuItemDescriptor[] = [
+  { id: 'insertRowAbove', group: 'tableOps', order: 0, command: 'insertRowAbove', labelKey: 'contextMenu.table.insertRowAbove', iconKey: 'insertRowAbove', when: inTableZone, enable: tableHitPresent },
+  { id: 'insertRowBelow', group: 'tableOps', order: 1, command: 'insertRowBelow', labelKey: 'contextMenu.table.insertRowBelow', iconKey: 'insertRowBelow', when: inTableZone, enable: tableHitPresent },
+  { id: 'insertColumnLeft', group: 'tableOps', order: 2, command: 'insertColumnLeft', labelKey: 'contextMenu.table.insertColumnLeft', iconKey: 'insertColumnLeft', when: inTableZone, enable: tableHitPresent },
+  { id: 'insertColumnRight', group: 'tableOps', order: 3, command: 'insertColumnRight', labelKey: 'contextMenu.table.insertColumnRight', iconKey: 'insertColumnRight', when: inTableZone, enable: tableHitPresent },
+  { id: 'deleteRow', group: 'tableOps', order: 4, command: 'deleteRow', labelKey: 'contextMenu.table.deleteRow', iconKey: 'deleteRow', when: inTableZone, enable: tableHitPresent },
+  { id: 'deleteColumn', group: 'tableOps', order: 5, command: 'deleteColumn', labelKey: 'contextMenu.table.deleteColumn', iconKey: 'deleteColumn', when: inTableZone, enable: tableHitPresent },
+  { id: 'deleteTable', group: 'tableOps', order: 6, command: 'deleteTable', labelKey: 'contextMenu.table.deleteTable', iconKey: 'deleteTable', when: inTableZone, enable: tableHitPresent, danger: true },
+  {
+    id: 'selectTableRow', group: 'tableOps', order: 7, command: 'selectTableRow',
+    labelKey: 'contextMenu.table.selectRow', iconKey: 'selectRow', when: inTableZone,
+    enable: (ctx) => ctx.table?.rowIndex != null,
+    labelParams: (ctx) => ({ n: (ctx.table?.rowIndex ?? 0) + 1 }),
+  },
+  {
+    id: 'selectTableColumn', group: 'tableOps', order: 8, command: 'selectTableColumn',
+    labelKey: 'contextMenu.table.selectColumn', iconKey: 'selectColumn', when: inTableZone,
+    enable: (ctx) => ctx.table?.columnIndex != null,
+    labelParams: (ctx) => ({ n: (ctx.table?.columnIndex ?? 0) + 1 }),
+  },
+  { id: 'selectWholeTable', group: 'tableOps', order: 9, command: 'selectWholeTable', labelKey: 'contextMenu.table.selectTable', iconKey: 'table', when: inTableZone, enable: tableHitPresent },
+  { id: 'copyTableMarkdown', group: 'tableOps', order: 10, command: 'copyTableMarkdown', labelKey: 'contextMenu.table.copyMarkdown', iconKey: 'copy', when: inTableZone, enable: tableHitPresent },
+  { id: 'tableQuoteRemove', group: 'tableOps', order: 11, command: 'tableQuoteRemove', labelKey: 'contextMenu.table.removeQuote', iconKey: 'removeQuote', when: inTableZone, enable: (ctx) => tableUniform(ctx) && (ctx.table?.quoteDepth ?? 0) >= 1 },
+  { id: 'tableQuoteAdd', group: 'tableOps', order: 12, command: 'tableQuoteAdd', labelKey: 'contextMenu.table.addQuote', iconKey: 'quote', when: inTableZone, enable: tableUniform },
+]
+
 /** 内置项编译期表（照 formatOperations 惯例；运行期覆写层的首个注册者） */
 export const CONTEXT_MENU_ITEMS = [
   // ---- 簇 1：链接 ----
@@ -271,6 +318,8 @@ export const CONTEXT_MENU_ITEMS = [
   { id: 'insertExternalLink', group: 'link', order: 1, command: 'link', labelKey: 'format.link', iconKey: 'externalLink', enable: enabledOutsideStructure },
   { id: 'copyHeadingLink', group: 'link', order: 2, command: 'copyHeadingLink', labelKey: 'contextMenu.copyHeadingLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget?.heading != null },
   { id: 'copyBlockLink', group: 'link', order: 3, command: 'copyBlockLink', labelKey: 'contextMenu.copyBlockLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget != null },
+  // ---- 簇：表格专属（#437；仅 zone='table' 在场，空组自然收起）----
+  ...tableOpsChildren,
   // ---- 簇 2：块与格式（全部带子菜单）----
   { id: 'textFormat', group: 'blockFormat', order: 0, command: 'textFormat', labelKey: 'contextMenu.textFormat', iconKey: 'textFormat', enable: enabledOutsideStructure, children: textFormatChildren },
   { id: 'paragraphStyle', group: 'blockFormat', order: 1, command: 'paragraphStyle', labelKey: 'contextMenu.paragraphStyle', iconKey: 'paragraphStyle', enable: enabledOutsideStructure, children: paragraphChildren },
@@ -446,6 +495,8 @@ export function __resetContextMenuRegistryForTest(): void {
 export interface RenderedMenuItem {
   id: string
   labelKey: MessageKey
+  /** 文案插值参数（#437：含行列序号的菜单文案；DOM 装配传 t() 第二参） */
+  labelParams?: Record<string, string | number>
   /** #359 T10 显式文字（优先于 labelKey；附加组件项用） */
   label?: string
   command: string
@@ -494,6 +545,7 @@ function renderDef(
   const item: RenderedMenuItem = {
     id: def.id,
     labelKey: def.labelKey,
+    ...(def.labelParams !== undefined ? { labelParams: def.labelParams(ctx) } : {}),
     ...(def.label !== undefined ? { label: def.label } : {}),
     command: def.command,
     group: def.group,

@@ -121,12 +121,14 @@ describe('覆写层语义（运行期注册表，内置 = 第一个注册者）'
     const builtinIds = flattenItems(CONTEXT_MENU_ITEMS).map((def) => def.id).sort()
     expect(registryIds).toEqual(builtinIds)
     // 渲染走 registry：标题行上下文（when 全放行）能拿到全部顶级项，且子项
-    // 不因扁平注册表被提升为顶级项
+    // 不因扁平注册表被提升为顶级项。#437 表格簇是 zone 条件簇（zone!=='table'
+    // 隐藏）——对照集按该上下文可见的顶级项收敛
     const headingCtx = normalCtx({
       blockTarget: { block: { start: 4, end: 4 }, heading: { level: 1, text: '标题' } },
     })
-    expect(modelIds(headingCtx).sort()).toEqual(
-      CONTEXT_MENU_ITEMS.map((def) => def.id).sort())
+    const visibleTopIds = CONTEXT_MENU_ITEMS
+      .filter((def) => def.group !== 'tableOps').map((def) => def.id).sort()
+    expect(modelIds(headingCtx).sort()).toEqual(visibleTopIds)
   })
 
   it('register 新增项：出现在模型中且来源记录为 runtime', () => {
@@ -470,6 +472,93 @@ describe('场景命中负载与场景簇组预登记（#436 基建）', () => {
     const graphicGroups = buildContextMenuModel(graphicCtx)
     expect(graphicGroups.find((g) => g.id === 'blockFormat')!.items
       .every((i) => !i.enabled)).toBe(true)
+  })
+})
+
+// ---- #437 表格专属簇（tableOps）：谓词矩阵与渲染参数 ----
+
+describe('表格专属簇（#437：when=zone table；enable 按命中负载）', () => {
+  const hit = (over: Partial<NonNullable<MenuContextSnapshot['table']>> = {}) => ({
+    rowIndex: 1, columnIndex: 0, inHeader: false, rowCount: 3, columnCount: 2,
+    lines: { start: 0, end: 3 }, pos: 10,
+    quoteUniform: true, quoteDepth: 0, hitQuoteDepth: 0,
+    ...over,
+  })
+  const tableCtx = (over: Partial<MenuContextSnapshot> = {}) => normalCtx({
+    zone: 'table',
+    table: hit(),
+    ...over,
+  })
+  const CLUSTER_IDS = ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+    'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+    'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd']
+  const clusterItems = (ctx: MenuContextSnapshot) =>
+    buildContextMenuModel(ctx).find((g) => g.id === 'tableOps')?.items ?? []
+
+  it('zone=table 且负载在场：13 项全亮成簇（位于链接簇后、块与格式簇前）', () => {
+    const groups = buildContextMenuModel(tableCtx())
+    expect(groups.map((g) => g.id)).toEqual(['link', 'tableOps', 'blockFormat', 'clipboard'])
+    const items = clusterItems(tableCtx())
+    expect(items.map((i) => i.id)).toEqual(CLUSTER_IDS)
+    expect(items.every((i) => i.enabled), '顶层表：除 quoteRemove 外全亮').toBe(false)
+    expect(items.find((i) => i.id === 'tableQuoteRemove')!.enabled, '顶层表 0 层不可减').toBe(false)
+    expect(items.filter((i) => i.id !== 'tableQuoteRemove').every((i) => i.enabled)).toBe(true)
+  })
+
+  it('普通正文/围栏/图形块：簇整组不在场（when 过滤 + 空组收起）', () => {
+    for (const zone of ['normal', 'fence', 'graphic'] as const) {
+      expect(buildContextMenuModel(normalCtx({ zone })).map((g) => g.id),
+        `${zone} 区不应出现 tableOps 簇`).toEqual(['link', 'blockFormat', 'clipboard'])
+    }
+  })
+
+  it('负载缺省（源码降级表/残缺表）：13 项在场但全置灰（置灰不隐藏）', () => {
+    const ctx = normalCtx({ zone: 'table' })
+    const items = clusterItems(ctx)
+    expect(items.map((i) => i.id)).toEqual(CLUSTER_IDS)
+    expect(items.every((i) => !i.enabled), '解析失败置灰不隐藏').toBe(true)
+  })
+
+  it('单层引用表：移除引用块点亮；层级不一致：层级两项置灰（不猜修复）', () => {
+    const quoted = clusterItems(tableCtx({ table: hit({ quoteDepth: 1, hitQuoteDepth: 1 }) }))
+    expect(quoted.find((i) => i.id === 'tableQuoteRemove')!.enabled).toBe(true)
+    expect(quoted.find((i) => i.id === 'tableQuoteAdd')!.enabled).toBe(true)
+    const ragged = clusterItems(tableCtx({
+      table: hit({ quoteUniform: false, quoteDepth: null, hitQuoteDepth: 1 }),
+    }))
+    expect(ragged.find((i) => i.id === 'tableQuoteRemove')!.enabled).toBe(false)
+    expect(ragged.find((i) => i.id === 'tableQuoteAdd')!.enabled).toBe(false)
+  })
+
+  it('分隔行命中（rowIndex/columnIndex null）：选择行/列置灰，整表与结构项不受影响', () => {
+    const ctx = tableCtx({ table: hit({ rowIndex: null, columnIndex: null }) })
+    const items = clusterItems(ctx)
+    expect(items.find((i) => i.id === 'selectTableRow')!.enabled).toBe(false)
+    expect(items.find((i) => i.id === 'selectTableColumn')!.enabled).toBe(false)
+    expect(items.find((i) => i.id === 'selectWholeTable')!.enabled).toBe(true)
+    expect(items.find((i) => i.id === 'deleteRow')!.enabled).toBe(true)
+  })
+
+  it('ragged 内容行（rowIndex 在场、columnIndex null）：选择列置灰、选择行亮', () => {
+    const items = clusterItems(tableCtx({ table: hit({ columnIndex: null }) }))
+    expect(items.find((i) => i.id === 'selectTableColumn')!.enabled).toBe(false)
+    expect(items.find((i) => i.id === 'selectTableRow')!.enabled).toBe(true)
+  })
+
+  it('labelParams 渲染：选择行/列携带 1 基序号（table.selectRow{n} 先例）', () => {
+    const items = clusterItems(tableCtx({ table: hit({ rowIndex: 2, columnIndex: 1 }) }))
+    expect(items.find((i) => i.id === 'selectTableRow')!.labelParams).toEqual({ n: 3 })
+    expect(items.find((i) => i.id === 'selectTableColumn')!.labelParams).toEqual({ n: 2 })
+    expect(items.find((i) => i.id === 'deleteTable')!.labelParams).toBeUndefined()
+  })
+
+  it('删除表格为危险项（红字）；簇内项序与建议项序一致', () => {
+    const items = clusterItems(tableCtx())
+    expect(items.find((i) => i.id === 'deleteTable')!.danger).toBe(true)
+    expect(items.map((i) => i.id)).toEqual([
+      'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+      'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+      'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd'])
   })
 })
 
@@ -832,18 +921,30 @@ describe('段落设置勾选矩阵（checked 谓词按当前行结构点亮，#1
 
 // ---- #184：图标资产两表同步（描述符 iconKey ↔ 资产文件与 CSS 接线规则）----
 
+/** #437 表格簇新 icon key（资产归 #441 承接——登记即合规、渲染留空降级）：
+ *  本清单是「资产待生成」的显式记账；#441 落地后清单清空、下方资产/CSS
+ *  断言自动收严（对账钉法）。quick-action-icons.py KEYS 同步由本文件
+ *  最后一条用例核对（两表同步的机器钉法） */
+const SCENE_KEYS_PENDING_ASSETS = [
+  'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+  'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
+] as const
+
 describe('图标资产两表同步（#184：规格「扩展约定」两表同步的机器钉法）', () => {
   const referenced = new Set(
     flattenItems(CONTEXT_MENU_ITEMS).flatMap((def) => (def.iconKey ? [def.iconKey] : [])),
   )
   const root = path.resolve(process.cwd())
 
-  it('被描述符引用的图标 key 恰 27 枚（#305 接入既有 pastePlain 资产）', () => {
-    expect(referenced.size).toBe(27)
+  it('被描述符引用的图标 key 恰 37 枚（27 接线 + #437 表格簇 10 枚待资产）', () => {
+    expect(referenced.size).toBe(37)
   })
 
-  it('每个被引用 key 都有明暗两套 SVG 资产文件', () => {
+  it('每个被引用 key 都有明暗两套 SVG 资产文件（#441 待生成清单除外）', () => {
     for (const key of referenced) {
+      if ((SCENE_KEYS_PENDING_ASSETS as readonly string[]).includes(key)) {
+        continue
+      }
       expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
         `${key} 缺 light SVG 资产`).toBe(true)
       expect(existsSync(path.join(root, 'media/quick-actions/dark', `dark-${key}.svg`)),
@@ -860,15 +961,29 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
     }
   })
 
-  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则', () => {
+  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则（#441 待生成清单除外）', () => {
     const css = readFileSync(path.join(root, 'src/webview/main.css'), 'utf8')
     for (const key of referenced) {
+      if ((SCENE_KEYS_PENDING_ASSETS as readonly string[]).includes(key)) {
+        continue
+      }
       const lightRule = new RegExp(
         `\\.vsidian-context-menu \\[data-icon='${key}'\\]\\s*\\{[^}]*light-${key}\\.svg`)
       const darkRule = new RegExp(
         `body\\.vscode-dark[^{]*\\.vsidian-context-menu \\[data-icon='${key}'\\][^}]*dark-${key}\\.svg`)
       expect(lightRule.test(css), `${key} 缺 light 接线规则（--vsidian-context-icon → light SVG）`).toBe(true)
       expect(darkRule.test(css), `${key} 缺 dark 接线规则（vscode-dark/high-contrast → dark SVG）`).toBe(true)
+    }
+  })
+
+  it('#437 两表同步：CONTEXT_MENU_ICON_KEYS ⊆ quick-action-icons.py KEYS（S6 决策；KEYS 另服务快速操作条/查找面板等非菜单消费方，不反向相等）', () => {
+    const py = readFileSync(path.join(root, 'scripts/quick-action-icons.py'), 'utf8')
+    const keysMatch = /KEYS = \(([^)]*)\)/s.exec(py)
+    expect(keysMatch, 'quick-action-icons.py 应有 KEYS 元组').not.toBeNull()
+    const pyKeys = new Set(
+      [...keysMatch![1]!.matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]!))
+    for (const key of CONTEXT_MENU_ICON_KEYS) {
+      expect(pyKeys.has(key), `图标 key ${key} 未在 quick-action-icons.py KEYS 登记（两表同步）`).toBe(true)
     }
   })
 })
@@ -880,8 +995,12 @@ describe('命令分派契约（三簇叶命令可执行；显式分支另有面�
     // runContextMenuCommand（syncController）的显式分支集合——行为级用例在
     // contextMenuPanel.test.ts 逐项覆盖（cut/copy/paste/selectAll/
     // copyHeadingLink/copyBlockLink/insertTable + bold 代表 formatOperations
-    // 同路径）；本契约防「新增描述符忘接分派」的回归。
-    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable'])
+    // 同路径 + #437 表格簇 13 项）；本契约防「新增描述符忘接分派」的回归。
+    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable',
+      // #437 表格簇：结构六操作（TABLE_STRUCTURE_COMMANDS）+ 新七命令
+      'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
+      'deleteRow', 'deleteColumn', 'deleteTable', 'selectTableRow', 'selectTableColumn',
+      'selectWholeTable', 'copyTableMarkdown', 'tableQuoteRemove', 'tableQuoteAdd'])
     for (const def of flattenItems(CONTEXT_MENU_ITEMS)) {
       if (def.children && def.children.length > 0) {
         continue // 父项点击只展开不执行（无叶命令）
