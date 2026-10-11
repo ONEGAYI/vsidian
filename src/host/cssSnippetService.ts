@@ -35,6 +35,7 @@ import {
 import { readStoredCssSnippetBucket } from '../shared/cssSnippetEnv'
 import { analyzeSnippetEntry, normalizeSnippetPath } from '../shared/cssSnippetImports'
 import { TestDiagnostics } from '../shared/testDiagnostics'
+import { posix } from 'node:path'
 
 /** 持久层抽象（与 SettingsService/KeybindingService 同形；vscode 层用
  *  context.globalState 实现） */
@@ -43,7 +44,7 @@ export interface CssSnippetStorage {
   update(key: string, value: unknown): Thenable<void> | Promise<void>
 }
 
-/** 文件系统端口：vscode 层实现（workspace.fs + createFileSystemWatcher） */
+/** 文件系统端口：vscode 壳装配（workspace.fs + 工作区/独立目录监听） */
 export interface CssSnippetFsPort {
   /**
    * 列出目录第一层 .css 文件名（仅文件，不含目录）。读取失败（目录不存
@@ -51,12 +52,13 @@ export interface CssSnippetFsPort {
    */
   listCssFiles(directory: string): Promise<string[] | null>
   /**
-   * 递归监听目录（含子目录：列表只扫一层，但被 @import 的嵌套文件变化也
-   * 要触发刷新——#129 依赖归因的输入）。事件携带变更文件路径（宿主
+   * 递归监听目录，第一层清单增删沿用宿主 watcher。事件携带变更文件路径（宿主
    * fsPath；端口无法给出路径时传 null——服务按保守全量重扫处理）。
    * 返回取消函数。
    */
   watchDirectory(directory: string, onEvent: (changedPath: string | null) => void): () => void
+  /** 启用导入闭包的独立、非递归目录监听，不复用工作区事件。 */
+  watchDependencyDirectory(directory: string, onEvent: (changedPath: string | null) => void): () => void
   /** #129 读 CSS 文本（utf-8 解码；失败/不存在 → null） */
   readFileText(path: string): Promise<string | null>
   /** #129 符号链接解析（失败/不存在 → null；宿主 node fs.realpath 语义） */
@@ -132,6 +134,7 @@ export class CssSnippetService {
   /** 去抖窗口内归集的变更路径（PATHLESS_MARKER 表示无路径信息） */
   private pendingChanges = new Set<string>()
   private watcherDispose: (() => void) | undefined
+  private readonly dependencyWatchers = new Map<string, () => void>()
   private debounceTimer: ReturnType<typeof setTimeout> | undefined
   private scanToken = 0
   private queue: Promise<unknown> = Promise.resolve()
@@ -256,6 +259,7 @@ export class CssSnippetService {
         this.rejections.delete(name)
         this.depWatch.delete(name)
         this.contentVersions.delete(name)
+        if (this.stored.directory) this.syncDependencyWatchers(this.stored.directory)
       }
       this.notify('enabled')
       return { ok: true, state: this.getState() }
@@ -327,7 +331,7 @@ export class CssSnippetService {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined
-      void this.serialize(() => this.handleWatchBatch()).then(() => undefined, () => undefined)
+      void this.serialize(() => this.handleWatchBatch()).then(() => undefined)
     }, this.options.debounceMs ?? 400)
   }
 
@@ -339,6 +343,8 @@ export class CssSnippetService {
     }
     this.watcherDispose?.()
     this.watcherDispose = undefined
+    for (const dispose of this.dependencyWatchers.values()) dispose()
+    this.dependencyWatchers.clear()
     this.listeners.clear()
     this.pendingChanges.clear()
   }
@@ -356,6 +362,8 @@ export class CssSnippetService {
   }
 
   private resetDependencyState(): void {
+    for (const dispose of this.dependencyWatchers.values()) dispose()
+    this.dependencyWatchers.clear()
     this.contentVersions.clear()
     this.depWatch.clear()
     this.rejections.clear()
@@ -375,6 +383,14 @@ export class CssSnippetService {
       return
     }
     const dirNorm = normalizeSnippetPath(directory)
+    // 目录被替换时，旧订阅可能已停止；祖先事件使缺失目录的订阅重新建立。
+    for (const [dir, dispose] of this.dependencyWatchers) {
+      if ([...this.pendingChanges].some((changed) =>
+        dir.toLowerCase() === changed.toLowerCase() || dir.toLowerCase().startsWith(`${changed.toLowerCase()}/`))) {
+        dispose()
+        this.dependencyWatchers.delete(dir)
+      }
+    }
     const needsScan =
       this.pendingChanges.has(PATHLESS_MARKER) ||
       [...this.pendingChanges].some((p) => {
@@ -421,7 +437,8 @@ export class CssSnippetService {
     for (const name of enabledSnippetFiles(this.getState())) {
       const entryPath = this.entryPathOf(name).toLowerCase()
       const deps = this.depWatch.get(name) ?? []
-      if (pendingFolded.has(entryPath) || deps.some((dep) => pendingFolded.has(dep.toLowerCase()))) {
+      if (pendingFolded.has(entryPath) || deps.some((dep) => [...pendingFolded].some((changed) =>
+        dep.toLowerCase() === changed || dep.toLowerCase().startsWith(`${changed}/`)))) {
         affected.add(name)
       }
     }
@@ -551,7 +568,35 @@ export class CssSnippetService {
         }
       }
     }
+    this.syncDependencyWatchers(directory)
     return rejectionChanged
+  }
+
+  /** 显式监听导入闭包及其祖先目录；共享目录只持有一份订阅。 */
+  private syncDependencyWatchers(directory: string): void {
+    const root = normalizeSnippetPath(directory)
+    const desired = new Set<string>()
+    for (const paths of this.depWatch.values()) {
+      if (paths.length > 0) desired.add(root)
+      for (const file of paths) {
+        let dir = posix.dirname(file)
+        while (posix.relative(root, dir) !== '') {
+          desired.add(dir)
+          dir = posix.dirname(dir)
+        }
+      }
+    }
+    for (const [dir, dispose] of this.dependencyWatchers) {
+      if (!desired.has(dir)) {
+        dispose()
+        this.dependencyWatchers.delete(dir)
+      }
+    }
+    for (const dir of desired) {
+      if (!this.dependencyWatchers.has(dir)) {
+        this.dependencyWatchers.set(dir, this.fs.watchDependencyDirectory(dir, (changedPath) => this.notifyFsEvent(changedPath)))
+      }
+    }
   }
 
   /** 监听器随目录重挂（目录取消配置时摘除） */

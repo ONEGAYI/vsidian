@@ -9069,12 +9069,20 @@ export const cases: Array<[string, () => Promise<void>]> = [
   }],
 
   ['CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）', async () => {
+    const filesConfig = vscode.workspace.getConfiguration('files')
+    const previousWatcherExclude = filesConfig.inspect<Record<string, boolean>>('watcherExclude')?.workspaceValue
     await vscode.workspace.fs.createDirectory(wsUri('css-snippets/sub'))
     const depColor = (color: string) =>
       `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
     await writeSnippetCss('css-snippets/hot.css', '@import "sub/dep.css";\n')
     await writeSnippetCss('css-snippets/sub/dep.css', depColor('rgb(201, 211, 221)'))
     try {
+      // 屏蔽共享工作区递归事件：用户已启用片段的本地依赖须有独立监听，
+      // 不依赖工作区 watcher 的排除规则或启动状态。
+      await filesConfig.update('watcherExclude', {
+        ...filesConfig.get<Record<string, boolean>>('watcherExclude'),
+        '**/css-snippets/sub/**': true,
+      }, vscode.ConfigurationTarget.Workspace)
       await setSnippetDirectory(wsUri('css-snippets').fsPath)
       await setSnippetEnabled('hot.css', true)
       await openWithEditor('mode.md')
@@ -9111,10 +9119,22 @@ export const cases: Array<[string, () => Promise<void>]> = [
         v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'entry-own', 0, 15000)
 
       // 恢复：缺失目标在归因集内（创建事件可归因），内容更新生效
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
       await writeSnippetCss('css-snippets/sub/dep.css', depColor('rgb(50, 220, 120)'))
-      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(50, 220, 120)', 0, 15000)
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.liveHeadingDecorationColor === 'rgb(50, 220, 120)', 0, 15000)
+
+      // 目录本身被替换后，祖先监听须重建子目录订阅；恢复后再修改证明仍在监听。
+      await vscode.workspace.fs.delete(wsUri('css-snippets/sub'), { recursive: true, useTrash: false })
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)', 0, 15000)
+      await vscode.workspace.fs.createDirectory(wsUri('css-snippets/sub'))
+      await writeSnippetCss('css-snippets/sub/dep.css', depColor('rgb(60, 70, 80)'))
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(60, 70, 80)', 0, 15000)
+      await writeSnippetCss('css-snippets/sub/dep.css', depColor('rgb(80, 90, 100)'))
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(80, 90, 100)', 0, 15000)
     } finally {
       await setSnippetDirectory(null)
+      await filesConfig.update('watcherExclude', previousWatcherExclude, vscode.ConfigurationTarget.Workspace)
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
     }
   }],
