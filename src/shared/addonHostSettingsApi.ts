@@ -64,8 +64,10 @@ export function resolveAddonHostSettingValue(
     const raw = snapshot?.[READING_BREAKS_KEY]
     return raw === undefined ? READING_BREAKS_DEFAULT : raw === true
   }
-  // 白名单穷举的防御位：新键登记时此处不可达（登记遗漏由清单自洽与
-  // 测试暴露）；保底回默认值不抛出
+  // 白名单穷举的编译期守卫：新增白名单键而漏加分支时，此处 key 不再
+  // 收窄为 never，tsc --noEmit 即失败（防漏改——兜底回错误键的默认值
+  // 是静默错值；运行时此分支不可达）
+  key satisfies never
   return READING_BREAKS_DEFAULT
 }
 
