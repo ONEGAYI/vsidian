@@ -76,6 +76,13 @@ export interface SettingsPageSection {
     icon?: SettingsGroupIcon
     prefixes: readonly string[]
   }[]
+  /**
+   * bare 装配（2026-10-12 验收反馈，附加组件页先例）：分页内容不套
+   * section-content 大卡片容器，组卡片直挂页面列表——多组管理型分页用
+   * （组卡片与「编辑器」页二级组同级形态）；表单型分页（快捷键/外观/
+   * 索引维护）维持整页一张容器语言。缺省 false。
+   */
+  readonly bare?: boolean
   /** 返回清理函数；focusEntry 为全局搜索定位到的入口。 */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
   /**
@@ -755,7 +762,9 @@ export class SettingsPageView {
         list.append(container)
         this.renderDefItems(container, defs, focusEntry)
       }
-      const content = element('div', 'vsidian-settings-section-content')
+      // bare 装配：不套 section-content 大卡片（组卡片直挂列表，卡中卡
+      // 不复现）；表单型分页维持整页一张容器语言
+      const content = element('div', section.bare ? 'vsidian-settings-section-bare' : 'vsidian-settings-section-content')
       list.append(content)
       const dispose = section.mount(content, focusEntry)
       if (dispose) this.sectionDisposers.push(dispose)

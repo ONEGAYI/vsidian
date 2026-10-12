@@ -126,6 +126,20 @@ describe('行为冲突管理（T08）', () => {
     expect(harness.parent.querySelector('.vsidian-addons-behaviors .vsidian-settings-group > .vsidian-addons-behaviors-hint')).not.toBeNull()
   })
 
+  it('bare 装配：组卡片直挂页面列表，不嵌套进 section-content 大卡片', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    // 附加组件页内容容器为 bare（无卡容器语言），大卡片不在此页渲染
+    expect(harness.parent.querySelector('.vsidian-settings-section-content')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-settings-section-bare')).not.toBeNull()
+    // 行为区组卡片的上溯链不含 section-content（不卡中卡）
+    const group = harness.parent.querySelector('.vsidian-addons-behaviors .vsidian-settings-group')!
+    expect(group.closest('.vsidian-settings-section-content')).toBeNull()
+    // 页面自有内容（状态列表/操作行/API 版本行）同住 bare 容器
+    expect(harness.parent.querySelector('.vsidian-settings-section-bare > .vsidian-addons-list')).not.toBeNull()
+    expect(harness.parent.querySelector('.vsidian-settings-section-bare > .vsidian-addons-actions')).not.toBeNull()
+  })
+
   it('按展示全序渲染行为行：名称、所属组件与例子可见，说明/例子按需展开', () => {
     const harness = makeView()
     openAddonsPage(harness)

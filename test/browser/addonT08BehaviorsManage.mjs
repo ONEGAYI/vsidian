@@ -130,6 +130,7 @@ try {
     }
     return {
       inCard: h3.parentElement?.classList.contains('vsidian-settings-group') ?? false,
+      nestedInPageCard: !!h3.closest('.vsidian-settings-section-content'),
       hasIcon: !!svg,
       iconLeft: r ? r.left - box.left : NaN,
       iconSize: r ? r.width : 0,
@@ -141,6 +142,18 @@ try {
     }
   })
   assert.equal(headerPaint.inCard, true, '组标题应挂在组卡片内（全幅头部形态，不游离卡片外）')
+  assert.equal(headerPaint.nestedInPageCard, false, '组卡片不应嵌套进分页 section-content 大卡片（bare 装配）')
+  // bare 容器的绘制层钉住：无卡片底/描边/圆角——卡中卡回潮（误加卡片样式）即失败
+  const barePaint = await area.evaluate((el) => {
+    const bare = el.closest('.vsidian-settings-section-bare')
+    if (!bare) return null
+    const cs = getComputedStyle(bare)
+    return { bg: cs.backgroundColor, borderWidth: cs.borderWidth, radius: cs.borderRadius }
+  })
+  assert.ok(barePaint, '行为区应位于 bare 装配容器内')
+  assert.equal(barePaint.bg, 'rgba(0, 0, 0, 0)', 'bare 容器不得有卡片底色')
+  assert.equal(barePaint.borderWidth, '0px', 'bare 容器不得有卡片描边')
+  assert.equal(barePaint.radius, '0px', 'bare 容器不得有卡片圆角')
   assert.equal(headerPaint.hasIcon, true, '组标题应带分流合流图标')
   assert.equal(Math.round(headerPaint.iconLeft), 20, '图标应贴左 padding 缘')
   assert.equal(headerPaint.iconSize, 16, '图标渲染盒应为 16px')

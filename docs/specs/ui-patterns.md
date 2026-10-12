@@ -78,6 +78,7 @@
 - 两列 grid：侧栏 `236px` + 主区 `minmax(0,1fr)`，**各自独立滚动**（视口锁高）；窄屏（≤约 700px）退化整页滚动（契约由 settingsPage 浏览器用例钉住）。
 - 侧栏导航条目：`图标(20px) + 文字`，padding `11px 12px`、圆角 `9px`、透明边框；hover = list-hover；选中（`aria-current="page"`）= activeSelection 前景/背景 + `contrastActiveBorder`。
 - 大组标签 12px/600、子组标签 11px 说明色、大组间分隔线（`hr` + panel-border）。
+- **分页容器语言两型**：表单型分页（快捷键/外观/索引维护）内容整体住进一张 `vsidian-settings-section-content` 大卡片（圆角 10px、padding 16px 20px，组头可直接作卡片全幅头部——索引维护先例）；多组管理型分页声明 `SettingsPageSection.bare`（附加组件页先例，2026-10-12 验收反馈）——内容不套大卡片，组卡片直挂页面列表，**不允许组卡片嵌套进大卡片（卡中卡）**。新分页按内容形态选型并在此登记。
 
 ### 2.2 二级组卡片与组标题（本轮契约核心）
 
@@ -139,7 +140,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 
 - 菜单族圆角三档并存：右键/大纲/子菜单/快速操作标题菜单 5px、反链排序菜单 4px、tooltip 与联想浮层 6px——「菜单」意象未收敛到单档。
 - 输入控件两档：搜索框 8px（卡片感）vs select/text 2px（VSCode 原生控件向）——语义上有别，是否统一待定。
-- 附加组件页「官方组件 / 第三方组件」列表组头仍是旧形态（标题悬卡片外、无图标，`addonSettingsSection.ts` 状态列表渲染处）——与 §2.2 标准形态不符，2026-10-12 已报，待修复与图标拍板。
+- 附加组件页「官方组件 / 第三方组件」列表组头仍是旧形态（标题悬卡片外、无图标，`addonSettingsSection.ts` 状态列表渲染处）——与 §2.2 标准形态不符，2026-10-12 已报，待修复与图标拍板（bare 装配后其组卡片已直挂页面层，剩组头形态待整改）。bare 过渡态事实：该 h3 与组件自定义设置页挂载区 h4（`renderAddonPageMount`）仍带组标题类负边距，bare 容器无横向 padding 吸收，分隔线两侧各外溢约 20px（落在主区 padding 内，无裁剪）——两者一并归入该整改票，不做临时覆写（会把标题文字移离列缘，预支待拍板的形态决策）。
 - 附加组件基础设置区存在失效 `gap` 死规则（`settingsPage.css` 的 `.vsidian-addons-settings .vsidian-settings-group { gap: 8px }` 作用于 block 容器不生效）——待上一条组头整改时一并处理，行距随该区按 §2.2 标准结构归型。
 
 ## 6. 维护纪律

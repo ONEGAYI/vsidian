@@ -1978,7 +1978,9 @@ Live 正文标题节折叠（批次票：T01 本体 #412 / T02 五操作键位�
 
 修复口径：组头同构于编辑器页二级组——h3 挂进 `.vsidian-settings-group` 承载负边距全幅头部与下边线；新增「分流合流」内联字形（用户 2026-10-12 拍板，git-merge 线性化）置左 16px；提示文案与行为行收进同一卡片。设置页样式属内部类名、不入公开样式契约（CSS 内注释钉住）。
 
-自动化证据：单测 `addonBehaviorManageSection` 11 项（含新增组头同构断言）与全量 7696 项通过；浏览器 T08 用例新增组头几何绘制层断言（图标贴左缘 20px、文字右移 44px、负边距全幅、下边线、描边随主题前景色），settingsPage / addonSettings / addonSidebar / languageSwitch / keybindings 套件全绿；`npm run compile` 与 `npm run check:stylecontract`（8 项）通过。
+同日二轮反馈跟进：组卡片不应嵌套在分页 section-content 大卡片内（卡中卡）——附加组件页改为 bare 装配（`SettingsPageSection.bare`），分页内容不套大卡片，组卡片直挂页面列表（形态登记于 ui-patterns §2.1 分页容器语言两型）。
 
-- [ ] 真实宿主打开设置页 → 附加组件，目视核对「行为冲突管理」组头与「编辑器」分页各组观感一致（图标、通栏分隔线、左对齐）。
-- [ ] 安装附加组件并注册输入行为后，核对行为行进卡片后的行距、徽章与调序按钮呈现；空态核对「暂无已注册的输入行为」仍在组卡片内。
+自动化证据：单测 `addonBehaviorManageSection` 12 项（组头同构与 bare 不嵌套断言）与全量 7697 项通过；浏览器 T08 用例含组头几何绘制层断言、「不嵌套 section-content」断言与 bare 容器绘制层断言（透明底/零描边/零圆角），settingsPage / addonSettings / addonSidebar 套件全绿；`npm run compile` 与 `npm run check:stylecontract`（8 项）通过。
+
+- [ ] 真实宿主打开设置页 → 附加组件，目视核对「行为冲突管理」组头与「编辑器」分页各组观感一致（图标、通栏分隔线、左对齐），且组卡片直接位于页面内容层（无外层大卡片包裹）。
+- [ ] 安装附加组件并注册输入行为后，核对行为行进卡片后的行距、徽章与调序按钮呈现；空态核对「暂无已注册的输入行为」仍在组卡片内、页内无卡中卡嵌套。

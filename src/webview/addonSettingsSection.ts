@@ -112,6 +112,10 @@ export class AddonSection implements SettingsPageSection {
   readonly id = 'addons'
   /** 四块拼贴字形（附加组件 = 独立扩展模块的组合意象） */
   readonly icon = 'blocks' as const
+  /** bare 装配（2026-10-12 验收反馈）：本页为多组管理型分页——状态列表、
+   *  行为冲突管理与操作行各自成块，不套 section-content 大卡片（组卡片
+   *  直挂页面列表，与编辑器页二级组同级形态） */
+  readonly bare = true
   get title(): string { return t('settings.addonsSection') }
   get description(): string { return t('settings.addonsSectionDescription') }
 
