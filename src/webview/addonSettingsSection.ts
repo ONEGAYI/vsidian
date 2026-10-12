@@ -26,7 +26,7 @@ import {
   type AddonBehaviorStateStore,
 } from '../shared/addonBehaviors'
 import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
-import type { SettingsPageBridge, SettingsPageSection, SettingsSidebarGroup } from './settingsPageView'
+import { groupIcon, type SettingsPageBridge, type SettingsPageSection, type SettingsSidebarGroup } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
 
 type AddonsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.state' }>
@@ -423,13 +423,19 @@ export class AddonSection implements SettingsPageSection {
     if (focusEntry === ADDONS_SECTION_BEHAVIORS_ENTRY) {
       area.classList.add('vsidian-settings-item-located')
     }
+    // 组卡片与组头同构于编辑器页二级组（#357 验收缺陷修复）：h3 挂进
+    // .vsidian-settings-group 承载全幅头部形态（负边距 + 下边线），分流
+    // 合流图标置左，提示文案作组内首行——标题不再游离卡片外
+    const group = document.createElement('div')
+    group.className = 'vsidian-settings-group'
     const title = document.createElement('h3')
     title.className = 'vsidian-settings-group-title'
-    title.textContent = t('addons.behaviorsGroupTitle')
+    title.append(groupIcon('merge'))
+    title.append(document.createTextNode(t('addons.behaviorsGroupTitle')))
     const hint = document.createElement('p')
     hint.className = 'vsidian-addons-behaviors-hint'
     hint.textContent = t('addons.behaviorsGroupHint')
-    area.append(title, hint)
+    group.append(title, hint)
 
     const payload = this.behaviorsState
     if (payload === undefined) {
@@ -437,15 +443,13 @@ export class AddonSection implements SettingsPageSection {
       pending.className = 'vsidian-settings-empty'
       pending.setAttribute('role', 'status')
       pending.textContent = t('addons.behaviorsLoading')
-      area.append(pending)
+      group.append(pending)
     } else if (payload.behaviors.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'vsidian-settings-empty'
       empty.textContent = t('addons.behaviorsEmpty')
-      area.append(empty)
+      group.append(empty)
     } else {
-      const group = document.createElement('div')
-      group.className = 'vsidian-settings-group'
       const disabledSet = new Set(payload.state === null ? [] : payload.state.disabled)
       const store: AddonBehaviorStateStore | null = payload.state
       const fullOrder = orderedAddonBehaviorKeys(payload.behaviors.map((entry) => `${entry.addonId}#${entry.id}`), store)
@@ -456,14 +460,14 @@ export class AddonSection implements SettingsPageSection {
           group.append(this.renderBehaviorRow(behavior, fullOrder, index, disabledSet.has(key)))
         }
       })
-      area.append(group)
-      if (payload.notice !== undefined) {
-        const notice = document.createElement('p')
-        notice.className = `vsidian-addons-behaviors-notice vsidian-addons-behaviors-notice-${payload.notice.kind}`
-        notice.setAttribute('role', 'status')
-        notice.textContent = t(payload.notice.kind === 'saved' ? 'addons.behaviorsSavedNotice' : 'addons.behaviorsSaveFailedNotice')
-        area.append(notice)
-      }
+    }
+    area.append(group)
+    if (payload !== undefined && payload.behaviors.length > 0 && payload.notice !== undefined) {
+      const notice = document.createElement('p')
+      notice.className = `vsidian-addons-behaviors-notice vsidian-addons-behaviors-notice-${payload.notice.kind}`
+      notice.setAttribute('role', 'status')
+      notice.textContent = t(payload.notice.kind === 'saved' ? 'addons.behaviorsSavedNotice' : 'addons.behaviorsSaveFailedNotice')
+      area.append(notice)
     }
     if (focusEntry === ADDONS_SECTION_BEHAVIORS_ENTRY) {
       area.scrollIntoView?.({ block: 'nearest' })

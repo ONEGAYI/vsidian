@@ -636,12 +636,12 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 
 /* ---- T08（#357）行为冲突管理：注册行为的调序与逐项开关（内部样式，
    非公开样式契约入口；与 vsidian-addons-* 族同口径——全部内部类名，
-   不入 styleContract 清单） ---- */
+   不入 styleContract 清单）。组头与编辑器页二级组同构：标题挂进
+   .vsidian-settings-group 卡片承载全幅头部（负边距 + 下边线 + 图标），
+   标题不再游离卡片外（#357 验收缺陷修复） ---- */
 .vsidian-addons-behaviors { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
-.vsidian-addons-behaviors h3 { margin: 0; }
-.vsidian-addons-behaviors-hint { margin: 0; color: var(--vscode-descriptionForeground, #666); }
-.vsidian-addons-behaviors .vsidian-settings-group { gap: 8px; }
-.vsidian-addons-behaviors-row { display: flex; flex-direction: column; gap: 4px; }
+.vsidian-addons-behaviors-hint { margin: 10px 0 0; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-addons-behaviors-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .vsidian-addons-behaviors-row > label { align-items: center; }
 .vsidian-addons-behaviors-owner { display: block; margin-top: 2px;
   color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
