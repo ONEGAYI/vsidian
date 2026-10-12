@@ -121,6 +121,10 @@ const addonLoader = installAddonPageLoader({
   addonCommands,
   addonRenderers,
   addonUi,
+  // #457 宿主设置白名单读取面：SDK experimental.hostSettings 的数据源
+  //（controller 设置快照缓存——settings.snapshot/changed 到达即更新，
+  //  保存热更后组件下次 get 即新值，无需重开面板）
+  hostSettingsSnapshot: () => controller.settingsSnapshotNow(),
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
 // T12（#361）：故障上报槽接线（装载器在场后升级生效）——各 runtime 与

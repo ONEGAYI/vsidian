@@ -612,6 +612,42 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#433',
   },
   {
+    id: 'host-settings-experimental',
+    group: 'page-sdk',
+    title: '实验入口：宿主设置白名单读取（experimental.hostSettings）',
+    layer: 'experimental',
+    experimentalEntry: 'hostSettings',
+    endpoints: ['editor-page'],
+    signatures: [
+      {
+        module: 'src/shared/addonHostSettingsApi.ts',
+        symbols: [
+          'ADDON_HOST_SETTING_KEYS',
+          'AddonHostSettingKey',
+          'AddonHostSettingValue',
+          'AddonHostSettingsRejection',
+          'AddonHostSettingGetResult',
+          'AddonHostSettingsFacet',
+          'addonHostSettingGet',
+        ],
+      },
+    ],
+    purpose:
+      '页面 SDK 的宿主设置读取面（sdk.experimental.hostSettings，#457）：按显式白名单读宿主设置的当前生效值（首项 editor.readingBreaks——阅读渲染宽松换行，#423），供组件按宿主行为决定自身门控（如 easy-typing 严格换行三模式）。不开放任意 configuration 全量读取——读取范围收敛是本入口的存在前提。',
+    semantics: {
+      modes: '仅编辑器页提供（设置页不提供该入口）；不按视图模式门控——设置值与 live/reading 视图状态无关。',
+      lifecycle: '拉取式快照：每次 get 经快照读取器取最新值（数据源为编辑器面板的设置快照缓存，settings.snapshot/settings.changed 到达即更新）——宿主保存热更后下次 get 即新值，无需重开面板。首版不提供 onDidChange 推送通知（#457 评估定案：门控类消费只需读当前值；需即时感知时在输入回调中重读）。快照未达或键缺失回定义表默认值（与宿主渲染的缺键口径一致）。与宿主一致性：值来自宿主设置快照投影，无独立合成层——host settings 为 globalState 单层（无工作区覆盖层），透传即与宿主完全一致。',
+      errors: '两种可辨认拒绝：invalid-key（白名单外键——读取范围收敛，不静默 undefined）/ view-disposed（组件代次已终结的迟到调用）。使用前须在清单 experimental 声明 hostSettings 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。',
+    },
+    verification: [
+      'test/unit/addonHostSettingsApi.test.ts',
+      'test/unit/addonHostSettingsSdk.test.ts',
+      'test/unit/addonRegistry.test.ts',
+      'test/browser/addonHostSettings.mjs',
+    ],
+    introduced: '#457',
+  },
+  {
     id: 'channel',
     group: 'page-sdk',
     title: '页面与宿主通道',
@@ -927,6 +963,12 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
         version: '1.0.0',
         status: 'candidate',
         note: '行类型与行内标记查询面（experimental.syntax，#433，#408 B+ 形态落定）。1.0.0 首版候选：lineTypeAt（八种行类型：frontmatter/code/formula/table/heading/quote/list/text——平台侧组合增量树、frontmatter 区间缓存与跨行公式块表，live 树对 fm 反语义、公式零语义由组合判定补齐）+ inlineAt（code/formula/none 位置级行内标记）+ nodeNames 诊断载荷（祖先链节点名快照，非稳定、不构成兼容承诺）。位置驱动单点查询（µs 级），不暴露树/节点句柄；Live-only。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
+      },
+      {
+        entry: 'hostSettings',
+        version: '1.0.0',
+        status: 'candidate',
+        note: '宿主设置白名单读取面（experimental.hostSettings，#457）。1.0.0 首版候选：get 同步读白名单键当前生效值——首项 editor.readingBreaks（#423 阅读渲染宽松换行，easy-typing 严格换行门控的消费入口）；仅编辑器页；拉取式快照（宿主保存热更后下次 get 即新值，无 onDidChange 推送通知）；快照未达/缺键回定义表默认值；白名单外键 invalid-key 拒绝（读取范围收敛，不开放任意 configuration 全量读取）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。',
       },
     ],
   },

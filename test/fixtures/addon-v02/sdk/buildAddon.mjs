@@ -132,6 +132,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 'fold-addon', 'dist', 'editor.js'),
       note: 'fold-addon 编辑器页',
     },
+    // #457 宿主设置读取面夹具组件（编辑器页——experimental.hostSettings
+    // 的白名单读取消费；短轮询驱动与 fold 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'hostSettingsEditor.ts'),
+      outfile: path.join(buildRoot, 'host-settings-addon', 'dist', 'editor.js'),
+      note: 'host-settings-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -224,6 +231,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     foldAddon: {
       installDir: path.join(buildRoot, 'fold-addon'),
       distDir: path.join(buildRoot, 'fold-addon', 'dist'),
+    },
+    // #457：宿主设置读取面夹具组件布局（浏览器套件经本地 http 服务装载）
+    hostSettingsAddon: {
+      installDir: path.join(buildRoot, 'host-settings-addon'),
+      distDir: path.join(buildRoot, 'host-settings-addon', 'dist'),
     },
     outsideDir,
   }

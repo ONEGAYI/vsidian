@@ -34,6 +34,7 @@ import type {
 } from '../shared/addonPage'
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '../shared/addonEditApi'
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
+import type { AddonHostSettingsFacet } from '../shared/addonHostSettingsApi'
 import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
 import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
@@ -43,6 +44,8 @@ import { addonInstanceIdField } from './addonViewIdentity'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
 import type { AddonCommandsRuntime } from './addonCommands'
 import type { AddonUiRuntime } from './addonUi'
+import { addonHostSettingGet } from '../shared/addonHostSettingsApi'
+import type { SettingsPayload } from '../shared/settings'
 
 /** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
  *  会追加新条目，装载器按「本次装载期间注册 + 未消费」规则取用） */
@@ -116,6 +119,10 @@ export interface AddonPageLoaderEnv {
   /** T11（#360）附加组件界面运行时（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 ui 面，releaseLoad 时亦不做回收） */
   addonUi?: AddonUiRuntime
+  /** #457 宿主设置快照读取器（编辑器页由 main.ts 注入——生产实现为
+   *  syncController 的设置快照缓存 settings.snapshot/changed 到达即更新；
+   *  省略时 SDK 不提供 experimental.hostSettings 面） */
+  hostSettingsSnapshot?: () => SettingsPayload | undefined
   /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
    *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
   attachExtensions?: (extension: Extension[] | null) => void
@@ -406,6 +413,18 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
               : { ok: false, reason: 'view-disposed' }),
           }
         : undefined
+    // #457 宿主设置白名单读取面（仅编辑器页 + 快照读取器在场提供；对齐
+    // 「入口键恒在、内容按页给」形态）。拉取式：每次 get 经读取器取最新
+    // 快照（宿主 settings.changed 广播更新缓存后下次 get 即新值）；方法过
+    // isLoadActive 守卫——已终结代次的迟到读取拒绝 view-disposed
+    const hostSettingsFacet: AddonHostSettingsFacet | undefined =
+      page === 'editor' && env.hostSettingsSnapshot
+        ? {
+            get: (key) => (isLoadActive(loadRecord)
+              ? addonHostSettingGet(env.hostSettingsSnapshot!(), key)
+              : { ok: false, reason: 'view-disposed' }),
+          }
+        : undefined
     const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
       ? {
           register: (registration) => {
@@ -422,7 +441,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
-      experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet },
+      experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet, hostSettings: hostSettingsFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
