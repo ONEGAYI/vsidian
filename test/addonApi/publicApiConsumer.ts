@@ -67,6 +67,14 @@ import type {
   AddonSyntaxLineTypeResult,
   AddonSyntaxRejection,
 } from '../../src/shared/addonSyntaxApi'
+import {
+  ADDON_HOST_SETTING_KEYS,
+  type AddonHostSettingGetResult,
+  type AddonHostSettingsFacet,
+  type AddonHostSettingKey,
+  type AddonHostSettingsRejection,
+  type AddonHostSettingValue,
+} from '../../src/shared/addonHostSettingsApi'
 import type {
   AddonBehaviorChangeEvent,
   AddonBehaviorRegistration,
@@ -290,6 +298,21 @@ export type SyntaxSurface = Pick<AddonSyntaxFacet, 'lineTypeAt' | 'inlineAt'>
 export type SyntaxShapes = {
   lineResult: AddonSyntaxLineTypeResult
   inlineResult: AddonSyntaxInlineResult
+}
+
+/** #457 宿主设置白名单读取面：白名单键集与拒绝码钉住（接口冻结面——
+ *  新增白名单项是 minor 扩展，须同步台账/文档后在此放宽钉住） */
+export type PinnedHostSettingKeys = 'editor.readingBreaks'
+export const hostSettingKeysPinned: Equals<AddonHostSettingKey, PinnedHostSettingKeys> = true
+export type PinnedHostSettingsRejections = 'invalid-key' | 'view-disposed'
+export const hostSettingsRejectionsPinned: Equals<AddonHostSettingsRejection, PinnedHostSettingsRejections> = true
+/** 白名单常量可被组件作者值导入（运行时校验自己的 key 集合） */
+export const consumedHostSettingKeys: readonly string[] = ADDON_HOST_SETTING_KEYS
+/** 读取面（单方法）与结果形状 */
+export type HostSettingsSurface = Pick<AddonHostSettingsFacet, 'get'>
+export type HostSettingsShapes = {
+  getResult: AddonHostSettingGetResult
+  value: AddonHostSettingValue
 }
 
 /** #427 命令回调签名：携带目标视图句柄（无活动视图 null）——删参/改形即编译失败 */

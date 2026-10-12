@@ -216,8 +216,9 @@ export class AddonRegistry {
 
 /** 生产注册表端口默认值（experimental 表含 T02 起提供的 cm6 实验入口、
  *  #410 起提供的 headingFold 实验入口、#426 起提供的 viewIdentity 实验
- *  入口与 #433 起提供的 syntax 实验入口——cm6 1.1.0 = #406 起暴露面含
- *  language 语法树子集，页面 SDK 的 experimental.* 形状随公开声明冻结） */
+ *  入口、#433 起提供的 syntax 实验入口与 #457 起提供的 hostSettings
+ *  实验入口——cm6 1.1.0 = #406 起暴露面含 language 语法树子集，页面 SDK
+ *  的 experimental.* 形状随公开声明冻结） */
 export function createDefaultRegistryPorts(
   findExtension: (id: string) => { packageJSON: unknown } | undefined,
 ): AddonRegistryPorts {
@@ -228,6 +229,7 @@ export function createDefaultRegistryPorts(
       headingFold: ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION,
       viewIdentity: ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION,
       syntax: ADDON_EXPERIMENTAL_SYNTAX_VERSION,
+      hostSettings: ADDON_EXPERIMENTAL_HOST_SETTINGS_VERSION,
     },
     officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
     findExtension,
@@ -258,3 +260,10 @@ export const ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION = '1.0.0'
  *  值行内标记 + nodeNames 非稳定诊断载荷），Live-only，不暴露树/节点
  *  句柄 */
 export const ADDON_EXPERIMENTAL_SYNTAX_VERSION = '1.0.0'
+
+/** #457 实验入口版本：experimental.hostSettings（页面 SDK 的宿主设置
+ *  白名单读取面）——组件声明 `experimental: { hostSettings: '<range>' }`
+ *  且范围含本版本才判兼容。1.0.0：首版候选（get 同步读白名单键当前
+ *  生效值；首项 editor.readingBreaks），仅编辑器页，白名单外键
+ *  invalid-key 拒绝，无变更通知（拉取式跟随热更） */
+export const ADDON_EXPERIMENTAL_HOST_SETTINGS_VERSION = '1.0.0'

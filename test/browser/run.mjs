@@ -130,7 +130,12 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #410 附加组件折叠 API：experimental.headingFold 消费（生产控制器 +
   // 装载器 + views 注册表；折叠夹具组件经公开 SDK 查询/命令、paint 探针
   // 绘制层断言、零写回与卸载回收）紧随标题折叠族
-  'addonHeadingFold']
+  'addonHeadingFold',
+  // #457 附加组件宿主设置读取面：experimental.hostSettings 消费（生产
+  // 控制器 + 装载器，hostSettingsSnapshot 接线与生产 main.ts 同款；设置
+  // 消息经生产路径进缓存、夹具组件经公开 SDK 读值回报——默认值/同源/
+  // 热更跟随/白名单拒绝）紧随附加组件族
+  'addonHostSettings']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

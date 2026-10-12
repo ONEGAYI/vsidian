@@ -9,6 +9,7 @@ import {
   AddonRegistry,
   ADDON_EXPERIMENTAL_CM6_VERSION,
   ADDON_EXPERIMENTAL_HEADING_FOLD_VERSION,
+  ADDON_EXPERIMENTAL_HOST_SETTINGS_VERSION,
   ADDON_EXPERIMENTAL_SYNTAX_VERSION,
   ADDON_EXPERIMENTAL_VIEW_IDENTITY_VERSION,
   createDefaultRegistryPorts,
@@ -260,6 +261,39 @@ describe('#433 syntax 实验入口（宿主侧）', () => {
         : undefined),
     })
     const outcome = missing.register({ id: 'fixture.syntax' }, {})
+    expect(outcome.ok).toBe(false)
+    expect(!outcome.ok && outcome.reason).toBe('incompatible-api')
+  })
+})
+
+describe('#457 hostSettings 实验入口（宿主侧）', () => {
+  it('生产默认端口的 hostSettings 实验版本与发行台账一致（两处事实源防漂移）', () => {
+    const ports = createDefaultRegistryPorts(() => undefined)
+    const ledger = ADDON_API_RELEASES[0]?.experimental.find((entry) => entry.entry === 'hostSettings')
+    expect(ports.experimental.hostSettings).toBe(ADDON_EXPERIMENTAL_HOST_SETTINGS_VERSION)
+    expect(ledger?.version).toBe(ADDON_EXPERIMENTAL_HOST_SETTINGS_VERSION)
+    expect(ledger?.status).toBe('candidate')
+  })
+
+  it('声明 hostSettings 实验入口且范围匹配 → 兼容通过；宿主未提供时拒绝', () => {
+    const ok = new AddonRegistry({
+      apiVersion: ADDON_API_VERSION,
+      experimental: { hostSettings: '1.0.0' },
+      officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
+      findExtension: (id) => (id === 'fixture.host-settings'
+        ? { packageJSON: { vsidianAddon: { manifestVersion: 1, api: '^1.0.0', experimental: { hostSettings: '^1.0.0' } } } }
+        : undefined),
+    })
+    expect(ok.register({ id: 'fixture.host-settings' }, {}).ok).toBe(true)
+    const missing = new AddonRegistry({
+      apiVersion: ADDON_API_VERSION,
+      experimental: {},
+      officialIds: OFFICIAL_ADDON_EXTENSION_IDS,
+      findExtension: (id) => (id === 'fixture.host-settings'
+        ? { packageJSON: { vsidianAddon: { manifestVersion: 1, api: '^1.0.0', experimental: { hostSettings: '^1.0.0' } } } }
+        : undefined),
+    })
+    const outcome = missing.register({ id: 'fixture.host-settings' }, {})
     expect(outcome.ok).toBe(false)
     expect(!outcome.ok && outcome.reason).toBe('incompatible-api')
   })

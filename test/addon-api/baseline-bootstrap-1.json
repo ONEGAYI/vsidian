@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "d812d0320a79bf020ed60efc3e83cd2e5043d807",
-      "ref": "d812d032",
+      "sha": "60f926040f36dc4597844d57c218f4278eea4ccc",
+      "ref": "60f92604",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -454,6 +454,43 @@
         "test/unit/addonRegistry.test.ts"
       ],
       "introduced": "#433"
+    },
+    {
+      "id": "host-settings-experimental",
+      "group": "page-sdk",
+      "title": "实验入口：宿主设置白名单读取（experimental.hostSettings）",
+      "layer": "experimental",
+      "experimentalEntry": "hostSettings",
+      "endpoints": [
+        "editor-page"
+      ],
+      "purpose": "页面 SDK 的宿主设置读取面（sdk.experimental.hostSettings，#457）：按显式白名单读宿主设置的当前生效值（首项 editor.readingBreaks——阅读渲染宽松换行，#423），供组件按宿主行为决定自身门控（如 easy-typing 严格换行三模式）。不开放任意 configuration 全量读取——读取范围收敛是本入口的存在前提。",
+      "semantics": {
+        "modes": "仅编辑器页提供（设置页不提供该入口）；不按视图模式门控——设置值与 live/reading 视图状态无关。",
+        "lifecycle": "拉取式快照：每次 get 经快照读取器取最新值（数据源为编辑器面板的设置快照缓存，settings.snapshot/settings.changed 到达即更新）——宿主保存热更后下次 get 即新值，无需重开面板。首版不提供 onDidChange 推送通知（#457 评估定案：门控类消费只需读当前值；需即时感知时在输入回调中重读）。快照未达或键缺失回定义表默认值（与宿主渲染的缺键口径一致）。与宿主一致性：值来自宿主设置快照投影，无独立合成层——host settings 为 globalState 单层（无工作区覆盖层），透传即与宿主完全一致。",
+        "errors": "两种可辨认拒绝：invalid-key（白名单外键——读取范围收敛，不静默 undefined）/ view-disposed（组件代次已终结的迟到调用）。使用前须在清单 experimental 声明 hostSettings 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonHostSettingsApi.ts",
+          "symbols": [
+            "ADDON_HOST_SETTING_KEYS",
+            "AddonHostSettingKey",
+            "AddonHostSettingValue",
+            "AddonHostSettingsRejection",
+            "AddonHostSettingGetResult",
+            "AddonHostSettingsFacet",
+            "addonHostSettingGet"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonHostSettingsApi.test.ts",
+        "test/unit/addonHostSettingsSdk.test.ts",
+        "test/unit/addonRegistry.test.ts",
+        "test/browser/addonHostSettings.mjs"
+      ],
+      "introduced": "#457"
     },
     {
       "id": "channel",
@@ -906,7 +943,7 @@
       "OFFICIAL_ADDON_EXTENSION_IDS": "/** 判定用 ID 清单（登记表的投影视，供 isOfficialAddon 与文档消费） */\nexport const OFFICIAL_ADDON_EXTENSION_IDS: readonly string[] = OFFICIAL_ADDON_REGISTRY.map(\n  (entry) => entry.extensionId,\n)"
     },
     "src/shared/addonPage.ts": {
-      "VsidianAddonPageSdk": "/** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信\n * 生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与\n * 文本提交；T07（#356）起编辑器页提供 behaviors 面——可组合输入行为的\n * 注册与观察；T09（#358）起提供 renderers 面——代码块渲染提供者候选\n * 登记；六组稳定能力的其余部分属后续票） */\nexport interface VsidianAddonPageSdk {\n  /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */\n  readonly addon: { id: string; generation: number; page: AddonPageKind }\n  /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享\n   *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =\n   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）。使用\n   *  前须在清单 experimental 声明对应入口的兼容范围 */\n  readonly experimental: {\n    readonly cm6?: AddonCm6Runtime\n    readonly headingFold?: AddonHeadingFoldFacet\n    readonly viewIdentity?: AddonViewIdentityFacet\n    readonly syntax?: AddonSyntaxFacet\n  }\n  /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、\n   *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子\n   *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */\n  readonly views?: AddonViewsFacet\n  /** T07（#356）输入行为面（仅编辑器页；设置页为 undefined）：注册可\n   *  组合输入行为（按有效序依次修饰同次操作，后续行为读取前序结果，\n   *  每次修饰按自己的原子声明提交）与只读输入观察——注册与观察分开，\n   *  onChanged 不是原操作的第二写入口 */\n  readonly behaviors?: AddonBehaviorsFacet\n  /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */\n  readonly commands?: AddonSdkCommandsFacet\n  /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */\n  readonly menus?: AddonSdkMenusFacet\n  /** T09（#358）渲染提供者面（仅编辑器页；设置页为 undefined）：登记\n   *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在\n   *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */\n  readonly renderers?: AddonRenderersFacet\n  /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与\n   *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */\n  readonly ui?: AddonSdkUiFacet\n  /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */\n  registerExtension(extension: Extension): boolean\n  /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */\n  mountRoot(): HTMLElement | null\n  /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；\n   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面\n   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；\n   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */\n  resourceUri(relativePath: string): string | null\n  /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */\n  readonly channel: {\n    request(topic: string, payload: unknown, opts?: { timeoutMs?: number }): Promise<AddonChannelOutcome>\n  }\n  /** 登记释放回调（停用/故障/代次回收时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
+      "VsidianAddonPageSdk": "/** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信\n * 生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与\n * 文本提交；T07（#356）起编辑器页提供 behaviors 面——可组合输入行为的\n * 注册与观察；T09（#358）起提供 renderers 面——代码块渲染提供者候选\n * 登记；六组稳定能力的其余部分属后续票） */\nexport interface VsidianAddonPageSdk {\n  /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */\n  readonly addon: { id: string; generation: number; page: AddonPageKind }\n  /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享\n   *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =\n   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）；\n   *  hostSettings = 宿主设置白名单读取（#457）。使用前须在清单\n   *  experimental 声明对应入口的兼容范围 */\n  readonly experimental: {\n    readonly cm6?: AddonCm6Runtime\n    readonly headingFold?: AddonHeadingFoldFacet\n    readonly viewIdentity?: AddonViewIdentityFacet\n    readonly syntax?: AddonSyntaxFacet\n    readonly hostSettings?: AddonHostSettingsFacet\n  }\n  /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、\n   *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子\n   *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */\n  readonly views?: AddonViewsFacet\n  /** T07（#356）输入行为面（仅编辑器页；设置页为 undefined）：注册可\n   *  组合输入行为（按有效序依次修饰同次操作，后续行为读取前序结果，\n   *  每次修饰按自己的原子声明提交）与只读输入观察——注册与观察分开，\n   *  onChanged 不是原操作的第二写入口 */\n  readonly behaviors?: AddonBehaviorsFacet\n  /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */\n  readonly commands?: AddonSdkCommandsFacet\n  /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */\n  readonly menus?: AddonSdkMenusFacet\n  /** T09（#358）渲染提供者面（仅编辑器页；设置页为 undefined）：登记\n   *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在\n   *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */\n  readonly renderers?: AddonRenderersFacet\n  /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与\n   *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */\n  readonly ui?: AddonSdkUiFacet\n  /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */\n  registerExtension(extension: Extension): boolean\n  /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */\n  mountRoot(): HTMLElement | null\n  /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；\n   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面\n   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；\n   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */\n  resourceUri(relativePath: string): string | null\n  /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */\n  readonly channel: {\n    request(topic: string, payload: unknown, opts?: { timeoutMs?: number }): Promise<AddonChannelOutcome>\n  }\n  /** 登记释放回调（停用/故障/代次回收时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
       "AddonPageFactory": "/** 组件工厂：由构建辅助工具的 defineAddonPage 登记，装载器注入 SDK 调用 */\nexport type AddonPageFactory = (sdk: VsidianAddonPageSdk) => void",
       "AddonPageKind": "export type AddonPageKind = 'editor' | 'settings'",
       "AddonLoadManifest": "/** 宿主下发的装载指令载荷（URI 均由宿主经本 webview 的 asWebviewUri 构造） */\nexport interface AddonLoadManifest {\n  addonId: string\n  generation: number\n  page: AddonPageKind\n  /** 入口脚本的本页地址（须在 localResourceRoots 许可面内，否则资源服务拒绝） */\n  scriptUri: string\n  /** 随装载注入的样式表地址（逐条独立装载，互不牵连） */\n  cssUris?: string[]\n  /** 资源子目录的本页基址（resourceUri 的解析锚；缺省时 resourceUri 恒 null） */\n  resourceBase?: string\n}",
@@ -957,6 +994,15 @@
       "AddonSyntaxLineTypeResult": "export type AddonSyntaxLineTypeResult =\n  | ({ ok: true } & AddonSyntaxLineJudge)\n  | { ok: false; reason: 'view-disposed' | 'read-only' | 'invalid-request' }",
       "AddonSyntaxInlineResult": "export type AddonSyntaxInlineResult =\n  | ({ ok: true } & AddonSyntaxInlineJudge)\n  | { ok: false; reason: 'view-disposed' | 'read-only' | 'invalid-request' }",
       "AddonSyntaxFacet": "/** 查询面（experimental.syntax 的内容；仅编辑器页提供）。方法按 views\n * 面的实例 ID 寻址（对齐 headingFold/viewIdentity 先例），pos 为全文\n * UTF-16 code unit 偏移（页面全程 LF） */\nexport interface AddonSyntaxFacet {\n  /** 光标处行类型（块级维度；见 AddonSyntaxLineKind） */\n  lineTypeAt(instanceId: string, pos: number): AddonSyntaxLineTypeResult\n  /** 位置级行内标记：code（行内代码）/ formula（行内或块内公式）/\n   * none（普通文本） */\n  inlineAt(instanceId: string, pos: number): AddonSyntaxInlineResult\n}"
+    },
+    "src/shared/addonHostSettingsApi.ts": {
+      "ADDON_HOST_SETTING_KEYS": "/** 白名单（票面「读取范围收敛」的落地）：显式清单枚举宿主设置键，键名\n *  引用宿主侧成对导出的常量（不复制字面量）。首版仅 #423 的\n *  editor.readingBreaks（easy-typing #30 门控消费方）。 */\nexport const ADDON_HOST_SETTING_KEYS = [READING_BREAKS_KEY] as const",
+      "AddonHostSettingKey": "/** 白名单键类型（新增白名单项时经 as const 数组自动扩展） */\nexport type AddonHostSettingKey = (typeof ADDON_HOST_SETTING_KEYS)[number]",
+      "AddonHostSettingValue": "/** 白名单值类型：首版全部白名单键均为 boolean；将来纳入非布尔项时按\n *  键扩展联合类型（minor 演进） */\nexport type AddonHostSettingValue = boolean",
+      "AddonHostSettingsRejection": "/** 拒绝类型：invalid-key = 白名单外键（读取范围收敛）；view-disposed =\n *  组件代次已终结（迟到的僵尸调用，装载器守卫给出） */\nexport type AddonHostSettingsRejection = 'invalid-key' | 'view-disposed'",
+      "AddonHostSettingGetResult": "/** 读取结果（可辨认拒绝，不抛出） */\nexport type AddonHostSettingGetResult =\n  | { ok: true; value: AddonHostSettingValue }\n  | { ok: false; reason: AddonHostSettingsRejection }",
+      "AddonHostSettingsFacet": "/** 读取面（experimental.hostSettings 的内容；仅编辑器页提供）。get 同步\n *  返回——keymap/输入行为等热路径可直接消费 */\nexport interface AddonHostSettingsFacet {\n  /** 读白名单宿主设置的当前生效值（类型收窄为白名单键；JS 组件传入\n   *  任意值时运行时校验拒绝 invalid-key） */\n  get(key: AddonHostSettingKey): AddonHostSettingGetResult\n}",
+      "addonHostSettingGet": "/** 读取组合（装载器 facet 的实现体）：白名单校验 + 值解析 */\nexport function addonHostSettingGet(\n  snapshot: SettingsPayload | undefined,\n  key: string,\n): AddonHostSettingGetResult {\n  if (!isAddonHostSettingKey(key)) {\n    return { ok: false, reason: 'invalid-key' }\n  }\n  return { ok: true, value: resolveAddonHostSettingValue(snapshot, key) }\n}"
     },
     "src/shared/addonStorage.ts": {
       "AddonStorageFacet": "/** 组件数据目录面（宿主侧 setup/enable 上下文同形状；组件页面侧经\n * channel 桥接宿主消费）。全部相对路径先过 isSafeAddonStoragePath，\n * 越界形态明确拒绝（普通 API 拒绝，不算组件故障）。 */\nexport interface AddonStorageFacet {\n  /** 本组件数据目录的 URI（显示与同步工具配置用） */\n  uri(): string\n  /** 读 UTF-8 文本文件 */\n  readFile(relativePath: string): Promise<AddonStorageResult<string>>\n  /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */\n  writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>\n  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层） */\n  list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>\n  /** 删文件（不删目录——目录生命周期归卸载策略） */\n  deleteFile(relativePath: string): Promise<AddonStorageResult<null>>\n  /** 订阅目录内文件变化（外部同步工具改写/新建文件后自动重载的支撑面）；\n   * 回调回相对路径与变化类型（change = 改写或新建，delete = 删除）；\n   * 返回取消函数；组件停用/故障/代次终结时平台统一注销 watcher */\n  onDidChangeFile(callback: (relativePath: string, kind: 'change' | 'delete') => void): AddonStorageWatchHandle\n}",
@@ -1048,6 +1094,11 @@
         },
         {
           "entry": "syntax",
+          "version": "1.0.0",
+          "status": "candidate"
+        },
+        {
+          "entry": "hostSettings",
           "version": "1.0.0",
           "status": "candidate"
         }

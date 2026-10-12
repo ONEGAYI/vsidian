@@ -2189,6 +2189,13 @@ export class WebviewSyncController {
     return this.viewMode
   }
 
+  /** #457：当前设置快照的只读投影（附加组件宿主设置读取面 experimental.
+   *  hostSettings 的数据源——settings.snapshot/settings.changed 到达即
+   *  更新，装载器每次 get 经本方法取最新值，拉取式跟随热更） */
+  settingsSnapshotNow(): SettingsPayload | undefined {
+    return this.settings
+  }
+
   /** #360 T11：组件命令的生效绑定（按钮键位徽章数据——与快速操作条
    *  quickBindingHints 同源：宿主 keybindings.snapshot/changed 下发的
    *  权威覆盖 + 运行期操作表默认值合并求值） */

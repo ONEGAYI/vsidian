@@ -87,9 +87,10 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **视图身份反查（#426，实验）**：`sdk.experimental.viewIdentity.instanceIdOf(view)` 把 CM6 `EditorView` 反查为 views 面实例 ID（keymap/扩展回调消费；非平台实例返回 null）——清单声明 `experimental: { viewIdentity: '^1.0.0' }`，详见 §4.2。
 - **行类型查询（#433，实验）**：`sdk.experimental.syntax` 提供位置驱动的单点语义查询——`lineTypeAt(instanceId, pos)` 返回八种行类型（`frontmatter` / `code` / `formula` / `table` / `heading` / `quote` / `list` / `text`），`inlineAt(instanceId, pos)` 返回位置级行内标记（`code` / `formula` / `none`）；成功结果附带 `nodeNames` 诊断载荷（祖先链节点名快照，**非稳定**——不构成兼容承诺）。**Live-only**：reading 态与 hover 只读视图拒绝 `read-only`，设置页不提供。查询 µs 级（平台侧组合常驻管线，无全文档扫描）。使用须在清单声明 `experimental: { syntax: '^1.0.0' }`，语义对照与口径细节见 §4.8。
 - **标题折叠入口（#410，实验）**：`sdk.experimental.headingFold` 提供折叠区间查询与命令——方法按 `views` 面实例 ID 寻址（`folds(instanceId)` 有效折叠派生视图、`foldable(instanceId)` 可折叠全集；span 形状 `{ key, level, hideFrom, hideTo }`，LF 偏移、不含文本摘要）。命令面 `apply(instanceId, operation, options?)` 五操作（`fold` / `unfold` / `toggle` 选区驱动——先经 `views` 面 `setSelection` 定位；`foldAll` 可 `{ upToLevel }` 参数化、`unfoldAll` 全清）与 `foldAt` / `unfoldAt(instanceId, keys)` 按区间键批量组合（键来自查询结果，脱靶键静默忽略）。**Live-only**：reading 态与 hover 只读视图拒绝 `read-only`，设置页不提供该入口；折叠是视图态（零写回、不进撤销栈、不跨会话），编程触发与用户触发同链路。使用须在清单声明 `experimental: { headingFold: '^1.0.0' }`。
+- **宿主设置读取（#457，实验）**：`sdk.experimental.hostSettings.get(key)` 同步读**白名单**宿主设置的当前生效值（首项 `editor.readingBreaks`——阅读渲染宽松换行，#423）。白名单外键拒绝 `invalid-key`（不开放任意 configuration 全量读取）；快照未达或键缺失回定义表默认值（与宿主渲染缺键同口径）。**拉取式跟随热更**：宿主保存设置后经既有广播更新页面缓存，组件**下次 `get` 即拿到新值**（无需重开面板）；首版不提供变更推送通知——需即时感知时在输入回调中重读。仅编辑器页提供（设置页 `undefined`）；不按视图模式门控（live/reading 均可读）。使用须在清单声明 `experimental: { hostSettings: '^1.0.0' }`。
 - 装载器核对入口身份后调用工厂注入 SDK；组件只登记安装目录内的相对入口与资源子目录，越界路径被资源服务拒绝。
 - **工厂允许 async 形态**（官方样例即「await 通道握手后再注册」）：装载结局按工厂同步段判定（返回 pending 的 promise 即报装载成功），但工厂 promise 的 rejection 会与同步异常**同路径归因 `factory-error`**——整代次立即回滚（`onDispose` 回调、扩展、命令等全部回收）并上报宿主触发全组件故障暂停；rejection 迟到（代次已被卸载或替换）则静默丢弃。工厂内部的长等待或驻留循环不会挂起装载指令流。
-- 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental) 与 [`syntax-experimental`](api-reference.md#syntax-experimental) 条目。
+- 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental)、[`syntax-experimental`](api-reference.md#syntax-experimental) 与 [`host-settings-experimental`](api-reference.md#host-settings-experimental) 条目。
 
 ## 3. 六组能力速览
 
@@ -243,6 +244,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | T11 界面样例 | ui 按钮/面板、目标句柄（**界面类样板**） | `test/fixtures/addon-v02/addon/t11Editor.ts` |
 | T12 诊断样例 | 四通道故障注入与全组件暂停 | `test/fixtures/addon-v02/addon/t12Editor.ts` |
 | 折叠样例 | experimental.headingFold 查询与命令（**实验入口样板**） | `test/fixtures/addon-v02/addon/foldEditor.ts` |
+| 宿主设置样例 | experimental.hostSettings 白名单读取（**门控类样板**） | `test/fixtures/addon-v02/addon/hostSettingsEditor.ts` |
 | 构建桥 | esbuild 插件与产物红线 | `test/fixtures/addon-v02/sdk/buildAddon.mjs`、`sdkBridge.mjs` |
 
 夹具的驱动协议是「宿主夹具 ↔ 页面短轮询」（各文件头注有说明），真实业务里组件自行决定调用时机。

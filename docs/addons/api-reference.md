@@ -20,6 +20,7 @@
 | `headingFold` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 页面 SDK 的标题折叠查询与命令（experimental.headingFold，#410）。1.0.0 首版候选：folds / foldable 查询（有效派生视图与可折叠全集，span 不含文本摘要）+ apply 五操作（选区驱动，编程触发与用户触发同链路）+ foldAt / unfoldAt 按区间键批量组合 + foldAll 可 upToLevel 参数化；Live-only（#419 翻案后维持：阅读视图消费同一折叠状态集呈现折叠，但折叠状态仍以 Live 编辑器 StateField 为单一事实源，阅读态交互走平台 UI 通道，API 拒绝面不变）。#426 起 folds 与 foldable 共享同一 doc 版本缓存（调用成本 O(标题数) 过滤，非全文档重扫），实例寻址可经 viewIdentity.instanceIdOf 反查。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 | `viewIdentity` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 视图身份反查面（experimental.viewIdentity，#426）。1.0.0 首版候选：instanceIdOf（CM6 EditorView → views 面实例 ID；未装配身份的 view 返回 null）——keymap/扩展回调拿到 view 后据此反查实例，headingFold 等按 ID 寻址的 API 不再依赖「扩展槽仅挂主正文 Live 实例」的装配范围推定。闭包实现无 this 依赖（解构裸传安全）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 | `syntax` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 行类型与行内标记查询面（experimental.syntax，#433，#408 B+ 形态落定）。1.0.0 首版候选：lineTypeAt（八种行类型：frontmatter/code/formula/table/heading/quote/list/text——平台侧组合增量树、frontmatter 区间缓存与跨行公式块表，live 树对 fm 反语义、公式零语义由组合判定补齐）+ inlineAt（code/formula/none 位置级行内标记）+ nodeNames 诊断载荷（祖先链节点名快照，非稳定、不构成兼容承诺）。位置驱动单点查询（µs 级），不暴露树/节点句柄；Live-only。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
+| `hostSettings` | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 宿主设置白名单读取面（experimental.hostSettings，#457）。1.0.0 首版候选：get 同步读白名单键当前生效值——首项 editor.readingBreaks（#423 阅读渲染宽松换行，easy-typing 严格换行门控的消费入口）；仅编辑器页；拉取式快照（宿主保存热更后下次 get 即新值，无 onDidChange 推送通知）；快照未达/缺键回定义表默认值；白名单外键 invalid-key 拒绝（读取范围收敛，不开放任意 configuration 全量读取）。实验入口可能随版本调整，不随稳定 API 弃用期限承诺。 |
 
 ### 稳定 API 移除规则
 
@@ -49,6 +50,7 @@
     - [`heading-fold-experimental` 实验入口：标题折叠查询与命令（experimental.headingFold）](#heading-fold-experimental)
     - [`view-identity-experimental` 实验入口：视图身份反查（experimental.viewIdentity）](#view-identity-experimental)
     - [`syntax-experimental` 实验入口：行类型与行内标记查询（experimental.syntax）](#syntax-experimental)
+    - [`host-settings-experimental` 实验入口：宿主设置白名单读取（experimental.hostSettings）](#host-settings-experimental)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
@@ -389,13 +391,15 @@ export interface VsidianAddonPageSdk {
   readonly addon: { id: string; generation: number; page: AddonPageKind }
   /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
    *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =
-   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）。使用
-   *  前须在清单 experimental 声明对应入口的兼容范围 */
+   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）；
+   *  hostSettings = 宿主设置白名单读取（#457）。使用前须在清单
+   *  experimental 声明对应入口的兼容范围 */
   readonly experimental: {
     readonly cm6?: AddonCm6Runtime
     readonly headingFold?: AddonHeadingFoldFacet
     readonly viewIdentity?: AddonViewIdentityFacet
     readonly syntax?: AddonSyntaxFacet
+    readonly hostSettings?: AddonHostSettingsFacet
   }
   /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、
    *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子
@@ -909,6 +913,64 @@ export interface AddonSyntaxFacet {
 ```
 
 **验证**：`test/unit/addonSyntaxApi.test.ts`、`test/unit/addonSyntaxSdk.test.ts`、`test/unit/addonRegistry.test.ts`
+
+### `host-settings-experimental` 实验入口：宿主设置白名单读取（experimental.hostSettings）
+
+**分层**：实验入口（不随稳定 API 弃用期限承诺） · **执行端**：编辑器页 · **引入**：#457
+> **实验入口**：清单 `experimental` 声明名 `hostSettings`——兼容边界见上方实验入口兼容清单。
+
+**目标**：页面 SDK 的宿主设置读取面（sdk.experimental.hostSettings，#457）：按显式白名单读宿主设置的当前生效值（首项 editor.readingBreaks——阅读渲染宽松换行，#423），供组件按宿主行为决定自身门控（如 easy-typing 严格换行三模式）。不开放任意 configuration 全量读取——读取范围收敛是本入口的存在前提。
+
+语义要点：
+- **适用模式**：仅编辑器页提供（设置页不提供该入口）；不按视图模式门控——设置值与 live/reading 视图状态无关。
+- **生命周期**：拉取式快照：每次 get 经快照读取器取最新值（数据源为编辑器面板的设置快照缓存，settings.snapshot/settings.changed 到达即更新）——宿主保存热更后下次 get 即新值，无需重开面板。首版不提供 onDidChange 推送通知（#457 评估定案：门控类消费只需读当前值；需即时感知时在输入回调中重读）。快照未达或键缺失回定义表默认值（与宿主渲染的缺键口径一致）。与宿主一致性：值来自宿主设置快照投影，无独立合成层——host settings 为 globalState 单层（无工作区覆盖层），透传即与宿主完全一致。
+- **错误与拒绝**：两种可辨认拒绝：invalid-key（白名单外键——读取范围收敛，不静默 undefined）/ view-disposed（组件代次已终结的迟到调用）。使用前须在清单 experimental 声明 hostSettings 兼容范围；宿主未提供该入口或版本不符时整个组件判不兼容（experimental-unsupported / experimental-incompatible）——不是运行期降级。
+
+签名事实源：`src/shared/addonHostSettingsApi.ts`
+
+```ts
+/** 白名单（票面「读取范围收敛」的落地）：显式清单枚举宿主设置键，键名
+ *  引用宿主侧成对导出的常量（不复制字面量）。首版仅 #423 的
+ *  editor.readingBreaks（easy-typing #30 门控消费方）。 */
+export const ADDON_HOST_SETTING_KEYS = [READING_BREAKS_KEY] as const
+
+/** 白名单键类型（新增白名单项时经 as const 数组自动扩展） */
+export type AddonHostSettingKey = (typeof ADDON_HOST_SETTING_KEYS)[number]
+
+/** 白名单值类型：首版全部白名单键均为 boolean；将来纳入非布尔项时按
+ *  键扩展联合类型（minor 演进） */
+export type AddonHostSettingValue = boolean
+
+/** 拒绝类型：invalid-key = 白名单外键（读取范围收敛）；view-disposed =
+ *  组件代次已终结（迟到的僵尸调用，装载器守卫给出） */
+export type AddonHostSettingsRejection = 'invalid-key' | 'view-disposed'
+
+/** 读取结果（可辨认拒绝，不抛出） */
+export type AddonHostSettingGetResult =
+  | { ok: true; value: AddonHostSettingValue }
+  | { ok: false; reason: AddonHostSettingsRejection }
+
+/** 读取面（experimental.hostSettings 的内容；仅编辑器页提供）。get 同步
+ *  返回——keymap/输入行为等热路径可直接消费 */
+export interface AddonHostSettingsFacet {
+  /** 读白名单宿主设置的当前生效值（类型收窄为白名单键；JS 组件传入
+   *  任意值时运行时校验拒绝 invalid-key） */
+  get(key: AddonHostSettingKey): AddonHostSettingGetResult
+}
+
+/** 读取组合（装载器 facet 的实现体）：白名单校验 + 值解析 */
+export function addonHostSettingGet(
+  snapshot: SettingsPayload | undefined,
+  key: string,
+): AddonHostSettingGetResult {
+  if (!isAddonHostSettingKey(key)) {
+    return { ok: false, reason: 'invalid-key' }
+  }
+  return { ok: true, value: resolveAddonHostSettingValue(snapshot, key) }
+}
+```
+
+**验证**：`test/unit/addonHostSettingsApi.test.ts`、`test/unit/addonHostSettingsSdk.test.ts`、`test/unit/addonRegistry.test.ts`、`test/browser/addonHostSettings.mjs`
 
 ### `channel` 页面与宿主通道
 
