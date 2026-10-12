@@ -114,6 +114,18 @@ describe('行为冲突管理（T08）', () => {
     expect(visibleText(harness.parent)).toContain('暂无已注册的输入行为')
   })
 
+  it('组头与编辑器页二级组同构：标题进组卡片并带分流合流图标', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    const title = harness.parent.querySelector('.vsidian-addons-behaviors .vsidian-settings-group-title')!
+    // 标题挂在组卡片内（全幅头部形态由组容器承载，不再游离卡片外）
+    expect(title.parentElement?.classList.contains('vsidian-settings-group')).toBe(true)
+    // 图标槽位在场（分流合流字形；aria-hidden 纯装饰，不读屏）
+    expect(title.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    // 提示文案随组头进卡片（组内首行，不再悬在卡片外）
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors .vsidian-settings-group > .vsidian-addons-behaviors-hint')).not.toBeNull()
+  })
+
   it('按展示全序渲染行为行：名称、所属组件与例子可见，说明/例子按需展开', () => {
     const harness = makeView()
     openAddonsPage(harness)

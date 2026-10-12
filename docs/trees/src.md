@@ -80,6 +80,7 @@ vsidian/
     │   ├── addonEditApi.ts         # 统一视图编辑API共享形状
     │   ├── addonFoldApi.ts         # 折叠 API 形状事实源
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
+    │   ├── addonHostSettingsApi.ts # 宿主设置读取面白名单事实源
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
     │   ├── addonRenderers.ts       # 渲染提供者共享契约

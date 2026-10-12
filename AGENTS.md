@@ -25,6 +25,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **正文标题折叠扩展约定（#412–#415/#418/#419 落档，规格 #409）**：新增或修改标题折叠的区间语义、坐标生命周期、交互入口（gutter 箭头/省略号占位/五操作键位/阅读态标题箭头与省略号）、落点展开接线（任何把选区或滚动定位到折叠隐藏区的链路）或 #410 API 留口前，必读 [docs/specs/heading-fold.md](docs/specs/heading-fold.md)——标题口径单一事实源在 `headingLevelOf`（`src/shared/markdownDoc.ts`，不另建标题识别）、折叠操作注册在 `src/shared/keybindings.ts` 注册表（不手写第二份命令表）、折叠观感变量在 `src/shared/styleContract.ts` heading-fold 类目、区间派生与目标解析在 `src/webview/headingFold.ts` 纯函数族（大纲/阅读/API 后续消费方引用它，不复制其逻辑）；硬边界——不装配 `@codemirror/language` 的 codeFolding/foldGutter 全量折叠、不把大纲展开集映射为正文折叠或反之、阅读模式折叠只经 #419 消费链路（headingFold 纯函数派生 → VirtualReadingView.setFoldState 块过滤 → onFoldToggle 回环，不建第二套状态源、阅读态键位不响应、API 仍 Live-only）、不动 codeCard/frontmatter 折叠既有语义、不新增右键菜单项与设置项、折叠操作一律 effect 驱动查询一律纯函数派生（评审拦 DOM-only 路径）；台账外边界不得顺手改。
 - **附加组件公开 API 维护（#362/#363 落档）**：新增或修改六组附加组件 API（发现与安装/页面 SDK/行为/设置/渲染提供者/命令菜单界面）的接口形状、语义、实验入口或发行状态前，必读 [docs/addons/developer-guide.md](docs/addons/developer-guide.md) 的「文档维护入口」节——语义清单与发行台账单一事实源在 `src/shared/addonApiCatalog.ts`（签名不手写第二份，条目指向各事实源模块的导出符号）；版本参考由 `npm run gen:addonapi` 生成、`npm run check:addonapi` 校验新鲜度（compile 链前置）；公开声明的编译期消费在 `test/addonApi/publicApiConsumer.ts`，导入面纪律由 `test/unit/addonApiSurface.test.ts` 钉住。签名/语义调整必须同步清单条目、重生成参考、更新消费样例与钉住断言；台账如实区分候选与已发布——未真正发行不得携带发布日期，实际发行是人工落账动作。**契约门禁（#363 T14）**：接口/语义/签名/台账的历史兼容由 `npm run check:addoncompat` 对照 git 锚定基线（`test/addon-api/baseline-bootstrap-1.json`）校验，CI job `addon-api-contract` 先跑 `npm run check:addonapi:baseline` 复验基线可信再跑契约检查；改检查器、基线、清单或门禁工作流前必读 [docs/specs/addons-api-gate.md](docs/specs/addons-api-gate.md)——基线重锚定与发行落账是 `--emit-baseline` 显式动作，须随变更同 PR 提交并独立说明理由。规则依据 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)「文档与兼容维护」与[规格 §7](docs/specs/vsidian-addons.md)。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
+- **UI 元素形态契约（2026-10-12 落档）**：新增或修改自绘 UI 元素（组标题与组卡片、圆角、浮层、按钮、徽章、控件、图标槽）前，必读 [docs/specs/ui-patterns.md](docs/specs/ui-patterns.md)——设计基元档位（色彩变量族/圆角/阴影/z-index/间距字号/焦点环）、设置页与浮层元素模式、三步接入清单与维护纪律在其中，档位不发明新值、新形态先登记后实现；流程入口为项目技能 **ui-patterns**（`.agents/skills/ui-patterns/SKILL.md`）。与 style-contract（公开契约兼容）分工并行：既改公开条目又改元素形态时两个技能都执行。
 
 ## 公开样式契约：Agent 修改约束（项目技能 style-contract）
 
@@ -69,8 +70,10 @@ vsidian/
 │       ├── file-tree/            # file-tree 技能部署实例
 │       ├── release/              # 打包与发布流程项目技能目录
 │       │   └── SKILL.md # 打包与发布流程项目技能
-│       └── style-contract/       # 样式契约修改约束项目技能目录
-│           └── SKILL.md # 样式契约修改约束项目技能
+│       ├── style-contract/       # 样式契约修改约束项目技能目录
+│       │   └── SKILL.md # 样式契约修改约束项目技能
+│       └── ui-patterns/          # UI元素形态契约项目技能目录
+│           └── SKILL.md # UI元素形态契约流程技能
 ├── .github/               # GitHub 平台配置
 │   └── workflows/ # Actions 工作流目录
 │       ├── ci.yml      # GitHub CI 工作流
@@ -183,6 +186,7 @@ vsidian/
 │   │   ├── toolbar-refresh.md                   # 工具栏刷新按钮与缓存刷新规格
 │   │   ├── toolbar-view-toggle.md               # 工具栏双态切换按钮规格
 │   │   ├── tooltip.md                           # 统一自绘悬停提示规格
+│   │   ├── ui-patterns.md                       # UI元素形态契约目录（单一事实源）
 │   │   ├── vault-index-backlinks.md             # 引用索引与反链实施规格
 │   │   ├── viewport-width.md                    # 可读行宽与双模式列布局规格
 │   │   ├── vsidian-addons-coverage.md           # 29 用户故事覆盖映射

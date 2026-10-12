@@ -1,0 +1,149 @@
+# UI 元素形态契约（ui-patterns）
+
+> 状态：2026-10-12 建立（行为冲突管理组头验收缺陷修复的另一半任务）。本文档是**扩展自绘 UI 元素形态的单一事实源**：汇总各元素的统一形态（组标题、卡片圆角、浮层、按钮、徽章等）、给出新增 UI 的取值指引与接入清单。项目技能 [ui-patterns](../../.agents/skills/ui-patterns/SKILL.md) 是它的流程入口——新增或修改 UI 元素前必读并按其执行。
+>
+> **分工边界**：本文档管「元素长什么样、新 UI 怎么写才一致」；[styleContract.ts](../../src/shared/styleContract.ts)（公开样式契约清单）管「对外承诺的选择器/变量兼容」。浮层族多数类名与变量已入公开契约——本文档对其只做形态汇总并指针，不复制条目语义；两处冲突时公开契约优先。设置页类名为内部样式（不入公开契约），本文档是其唯一形态基准。
+
+## 1. 设计基元（取值档位）
+
+新增 UI 一律从本节档位取值；**不发明新档位**。确需新档位时先更新本表并在变更说明中给出理由。
+
+### 1.1 色彩：主题变量优先，禁止硬编码
+
+| 用途 | 变量族 |
+| --- | --- |
+| 正文/页面底 | `--vscode-editor-foreground` / `--vscode-editor-background` |
+| 说明性文字 | `--vscode-descriptionForeground` |
+| 分隔线、卡片描边 | `--vscode-panel-border` |
+| 焦点与选中强调 | `--vscode-focusBorder` |
+| 导航/列表 hover 与选中 | `--vscode-list-hoverBackground` / `list-activeSelection*` |
+| 菜单浮层 | `--vscode-menu-*`（回落 `--vscode-editorWidget-*`） |
+| 悬停提示 | `--vscode-editorHoverWidget-*` |
+| 控件 | `--vscode-button-*` / `--vscode-dropdown-*` / `--vscode-input-*` |
+
+- 设置页容器色差用内部基调变量：`--vsidian-settings-tint`（前景色）派生 `--vsidian-settings-container-bg`（前景 4% 叠加正文背景）与 `--vsidian-settings-container-border`（前景 10% 透明）——任意主题自适应，**整族切换只改这两条派生**。
+- 明暗主题：默认值经变量或 `color-mix` 自适应，不写主题分支；生图图标资产按 `body.vscode-dark` / `vscode-high-contrast` 切换（§2.2）。
+
+### 1.2 圆角谱系
+
+| 档位 | 用途（现状即规范） |
+| --- | --- |
+| `999px` | pill：拨动开关、筛选签、键位捕获框、各类徽章 |
+| `10px` | 设置页二级组卡片（`vsidian-settings-group`）、frontmatter Popover |
+| `9px` | 侧栏导航条目 |
+| `8px` | 搜索框（设置页/快捷键页）、callout、悬停弹窗、toast（变量化）、富文本粘贴对话框、设置页页内菜单 |
+| `6px` | 按钮、键位牌、图标钮、悬停提示卡、双链联想浮层、附加组件面板 |
+| `5px` | 右键菜单族（正文右键/大纲菜单/子菜单/快速操作标题菜单） |
+| `4px` | 反链排序菜单、查找面板、tooltip 键位徽章 |
+| `3px` | 定位高亮外框 |
+| `2px` | select / text 输入控件（对齐 VSCode 原生控件观感） |
+
+随形半径不属于档位：圆形与半高条（开关圆点 `50%`、大纲能量条 `1.5px` = 高/2 等按几何随形的半径）不视为新档位，无需登记。
+
+### 1.3 浮层阴影谱系
+
+| 层级 | 取值 |
+| --- | --- |
+| 菜单 / 联想 / tooltip | `0 2px 8px rgba(0,0,0,.25–.28)` 或 `var(--vscode-widget-shadow)` |
+| 快速操作标题菜单 | `0 3px 10px var(--vscode-widget-shadow)` |
+| 设置页页内菜单（快捷键「更多操作」） | `0 4px 14px rgba(0,0,0,.22)` |
+| 悬停弹窗（hover-popup） | `0 6px 24px rgba(0,0,0,.22)` |
+| frontmatter Popover | `0 6px 24px rgba(0,0,0,.18)`（同形异透明度，勿与上一行混用） |
+| 富文本粘贴对话框 | `0 8px 32px rgba(0,0,0,.25)` |
+| toast | 变量化：明 `0 4px 16px .12` / 暗 `.28`（`--vsidian-toast-shadow`，公开契约） |
+
+### 1.4 z-index 谱系（浮层分层）
+
+编辑器 webview 全局浮层自下而上：
+
+`40` 查找面板 → `60` 引用编辑关闭确认遮罩（局部模态阻断）→ `8500` 阅读查找源反馈 → `9000` 轻提示（toast）与悬停弹窗（同层）→ `9500` 双链联想（编辑中瞬态，高于轻提示）→ `10000–10002` 模态（图片/图表弹窗、富文本粘贴对话框）→ `10500` 悬停提示（高于模态：模态内按钮的提示可呈现）。
+
+挂局部容器的页内菜单不入全局谱（页内无跨层竞争，用局部小值）：设置页快捷键「更多操作」菜单 `6`，编辑器侧大纲菜单 `30`、反链排序菜单 `10`、快速操作标题菜单 `5`。新全局浮层按类型入层，不插新值。
+
+### 1.5 间距与字号节奏
+
+- 组卡片间 `20px`；卡片内边距 `2px 20px 8px`（组头自带 `12px 20px`）；设置行 `18px 0`、行间分隔线（tint 8%）。
+- 页标题 24px/600；页副题 13px 说明色；组标题 13px/600；条目标题 14px/500；描述 13px 说明色、行高 1.65；小标签 12px（子组 11px）；徽章 11px。
+
+### 1.6 焦点环
+
+全局 `:focus-visible`：`outline: 2px solid var(--vscode-focusBorder)`、`offset 3px`。特例：悬停提示小卡片用 `1px`（可选中文字的紧凑卡，不抢内容）。新元素默认走全局规则，不自带焦点样式。
+
+## 2. 设置页元素模式
+
+设置页全部为内部类名（不入公开契约），CSS 单文件 `src/webview/settingsPage.css`，视觉刷新基线见 [settings-page-visual-refresh.md](settings-page-visual-refresh.md)。
+
+### 2.1 页面骨架与侧栏
+
+- 两列 grid：侧栏 `236px` + 主区 `minmax(0,1fr)`，**各自独立滚动**（视口锁高）；窄屏（≤约 700px）退化整页滚动（契约由 settingsPage 浏览器用例钉住）。
+- 侧栏导航条目：`图标(20px) + 文字`，padding `11px 12px`、圆角 `9px`、透明边框；hover = list-hover；选中（`aria-current="page"`）= activeSelection 前景/背景 + `contrastActiveBorder`。
+- 大组标签 12px/600、子组标签 11px 说明色、大组间分隔线（`hr` + panel-border）。
+
+### 2.2 二级组卡片与组标题（本轮契约核心）
+
+标准结构（编辑器页各组、行为冲突管理组均此形态）：
+
+```text
+div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、色差底、padding 2px 20px 8px
+├─ h3.vsidian-settings-group-title    ← 组头：负边距全幅（margin 0 -20px；padding 12px 20px）
+│    ├─ 图标（16px：内联 svg 或生图 span）      + border-bottom 1px panel-border 通栏
+│    └─ 标题文字（起点 44px = 20 padding + 16 图标 + 8 gap）
+└─ 内容行（设置行 / 委托组内容 / 空态）
+```
+
+- **组头必须挂在卡片内**（负边距 + 通栏下边线由卡片承载）；标题游离卡片外即形态缺陷（#357 验收缺陷先例：行为冲突管理组头 2026-10-12 修复）。
+- 图标两形态同一 16px 槽：内联 svg（24 viewBox 单 path、`stroke: currentColor`、1.7 圆角线帽，注册表 `ICON_PATHS` + `SettingsGroupIcon` 类型，`settingsPageView.ts` 单表装配）；生图资产（`span.vsidian-settings-generated-icon[data-icon]` + CSS 背景明暗两套，走 [ai-icon-sheet-to-svg](../../.agents/skills/ai-icon-sheet-to-svg/SKILL.md) 生图管线）。新字形先登记注册表再使用，`aria-hidden` 纯装饰。
+- 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（行为冲突管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
+- 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。
+
+### 2.3 设置行与控件
+
+- 设置行 `vsidian-settings-item`：`padding 18px 0`、行间分隔线、末行无线；label 两侧布局（文字 copy 左、控件右，gap 28px）；依赖灰化（opacity 0.55 + 控件禁用）由注册表 `dependsOn` 驱动。
+- 控件：拨动开关 36×20 pill（`appearance:none` 纯 CSS，选中 focusBorder，120ms 过渡，保留 checkbox 语义）；select/text 圆角 2px（dropdown/input 变量族）；range 用 `accent-color` + 值文本 `tabular-nums`。**新控件类型先在本节登记形态再实现。**
+
+### 2.4 按钮、徽章与状态
+
+- 次级按钮（`button-border` + `button-secondary*` 变量族、圆角 6px）：高度三档——工具栏 32px / 操作行 26px（附加组件页）/ 行内微钮 22px（调序按钮）；主按钮用 `--vscode-button-background/foreground`、透明边框（附加组件页市场入口先例）。
+- 筛选签：pill 999px、`aria-pressed` 单选，选中态 activeSelection 同导航条目。
+- 徽章：pill、11px；警示徽章用 `statusBarItem-error*`（侧栏故障）；行内状态徽章 panel-border 描边 + 说明色。
+- 空态：说明色、`padding 24px 0`；状态行（保存反馈）12px 说明色、`role=status`。
+- callout：圆角 8px + 左强调条 3px（focusBorder）+ `inputValidation-infoBackground`，承载说明性长文案。
+- 定位高亮（搜索/路由跳转落点）：`outline 1px focusBorder + offset 8px`、圆角 3px，类名 `vsidian-settings-item-located`。
+
+## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）
+
+| 模式 | 形态要点 | 事实源与契约指针 |
+| --- | --- | --- |
+| 菜单族（正文右键/大纲菜单/排序菜单/快速操作标题菜单） | `menu` 变量族、圆角 4–5px、padding 3–4px、阴影 §1.3；真实 button 逐项、键盘可达 | [context-menu.md](context-menu.md)、[tooltip.md](tooltip.md)；公开契约 menu/chrome 类目 |
+| 悬停提示（tooltip） | 两 webview 共享 `tooltipCard.css`；`--vsidian-tooltip-*` 公开变量（radius 6px、出现延迟等）；悬停词唯一承载 `data-tooltip` | [tooltip.md](tooltip.md)；styleContract tooltip 类目 |
+| 双链联想浮层 | 圆角 6px、widget-shadow、widget 变量族、z-index 9500（编辑中瞬态层） | [wikilink-completion.md](wikilink-completion.md) |
+| frontmatter Popover | 圆角 10px、阴影 §1.3（.18 透明度档）、z-index 9000 | [frontmatter-table.md](frontmatter-table.md)；公开契约 frontmatter 类目 |
+| 富文本粘贴对话框 | 模态对话框、圆角 8px、editorWidget 变量族、z-index 10000 | [rich-text-paste.md](rich-text-paste.md) |
+| 设置页页内菜单（快捷键「更多操作」） | 局部绝对定位、圆角 8px、阴影 §1.3、z-index 6（页内局部小值） | `settingsPage.css` 快捷键菜单段 |
+| 查找面板 | 绝对定位右上、圆角 4px、widget 变量族、z-index 40 | `main.css` 查找面板段；chromeContract 探针与 `findPanel` 浏览器用例 |
+| 悬停弹窗（hover-popup） | 480px 宽、圆角 8px、阴影 §1.3、z-index 9000 | [hover-preview-embed.md](hover-preview-embed.md) |
+| 模态（图片/图表弹窗） | 全屏 overlay z-10000 + 背板 `blur(16px) saturate(150%)` 55% 黑 | [image-popup.md](image-popup.md)、[graphic-code-block-interaction.md](graphic-code-block-interaction.md) |
+| toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影） | toast.css 头注；styleContract toast 类目 |
+
+新增浮层：先查上表归型；同型复用变量族与档位，新形态先登记本表。
+
+## 4. 新增 UI 三步接入清单
+
+1. **定形态**：对照 §1 基元与 §2/§3 模式选定档位与结构；没有合型的新元素，先在本文档登记（模式表加行/小节补写）再实现——评审拦「未登记的新形态」。
+2. **实现**：主题变量优先（禁硬编码色值）；用户可见文字一律 i18n（`t()`，双语 parity）；图标走注册表/生图管线；明暗两主题可随变量自适应。
+3. **钉住**：呈现类变更至少一条断言落绘制层（可见性/几何/计算色/墨迹，非 DOM 存在性）；关键 CSS 规则由契约测试钉住；涉及公开契约条目时走 [style-contract 技能](../../.agents/skills/style-contract/SKILL.md)流程；CHANGELOG 登记用户可见变化。
+
+## 5. 已知不一致（统一候选——未经拍板不擅改）
+
+以下为**现状如实记录**的档位偏离；统一属用户可见变更，需单独立项拍板后同时改本目录与实现：
+
+- 菜单族圆角三档并存：右键/大纲/子菜单/快速操作标题菜单 5px、反链排序菜单 4px、tooltip 与联想浮层 6px——「菜单」意象未收敛到单档。
+- 输入控件两档：搜索框 8px（卡片感）vs select/text 2px（VSCode 原生控件向）——语义上有别，是否统一待定。
+- 附加组件页「官方组件 / 第三方组件」列表组头仍是旧形态（标题悬卡片外、无图标，`addonSettingsSection.ts` 状态列表渲染处）——与 §2.2 标准形态不符，2026-10-12 已报，待修复与图标拍板。
+- 附加组件基础设置区存在失效 `gap` 死规则（`settingsPage.css` 的 `.vsidian-addons-settings .vsidian-settings-group { gap: 8px }` 作用于 block 容器不生效）——待上一条组头整改时一并处理，行距随该区按 §2.2 标准结构归型。
+
+## 6. 维护纪律
+
+- 本文档是 UI 元素形态的**单一事实源**；CSS 实现与本文档不一致时，以「CSS 实现 + 契约测试」为准，随即修正本文档——不许只改文档不改实现，也不许改实现不更新文档。
+- 修改既有元素的取值即修改规范：同步 §1 档位表与对应模式小节、同步/新增绘制层断言、涉及公开契约走 style-contract 技能、用户可见变化进 CHANGELOG。
+- 新增元素先登记后实现；删除/退役元素时从本文档移除并注明去向（公开契约条目的弃用另走 style-contract 弃用流程，不受本条管辖）。

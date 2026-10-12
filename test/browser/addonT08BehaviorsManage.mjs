@@ -112,6 +112,46 @@ try {
   assert.match(groupText, /破折填充/)
   assert.match(groupText, /所属组件：组件甲/)
 
+  // ---- 1.5 组头样式契约：与编辑器页二级组同构（进卡片全幅头部 + 图标） ----
+  const behaviorsTitle = area.locator('.vsidian-settings-group-title', { hasText: zhCn['addons.behaviorsGroupTitle'] })
+  const headerPaint = await behaviorsTitle.evaluate((h3) => {
+    const cs = getComputedStyle(h3)
+    const box = h3.getBoundingClientRect()
+    const svg = h3.querySelector('svg')
+    const r = svg?.getBoundingClientRect()
+    let textLeft = NaN
+    for (const node of h3.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        textLeft = range.getBoundingClientRect().left - box.left
+        break
+      }
+    }
+    return {
+      inCard: h3.parentElement?.classList.contains('vsidian-settings-group') ?? false,
+      hasIcon: !!svg,
+      iconLeft: r ? r.left - box.left : NaN,
+      iconSize: r ? r.width : 0,
+      textLeft,
+      marginLeft: cs.marginLeft,
+      borderBottom: cs.borderBottomWidth,
+      stroke: svg ? getComputedStyle(svg).stroke : '',
+      fill: svg ? getComputedStyle(svg).fill : '',
+    }
+  })
+  assert.equal(headerPaint.inCard, true, '组标题应挂在组卡片内（全幅头部形态，不游离卡片外）')
+  assert.equal(headerPaint.hasIcon, true, '组标题应带分流合流图标')
+  assert.equal(Math.round(headerPaint.iconLeft), 20, '图标应贴左 padding 缘')
+  assert.equal(headerPaint.iconSize, 16, '图标渲染盒应为 16px')
+  assert.equal(Math.round(headerPaint.textLeft), 44, '标题文字应右移（20 padding + 16 图标 + 8 gap）')
+  assert.equal(headerPaint.marginLeft, '-20px', '组头负边距全幅形态（与编辑器页二级组同口径）')
+  assert.equal(headerPaint.borderBottom, '1px', '组头下边线')
+  assert.equal(headerPaint.stroke, 'rgb(48, 52, 59)', '内联图标描边应随主题前景色（currentColor）')
+  assert.equal(headerPaint.fill, 'none')
+  assert.equal(await area.locator('.vsidian-settings-group > .vsidian-addons-behaviors-hint').count(), 1,
+    '提示文案应随组头进卡片')
+
   // ---- 2. 行序与绘制层：徽章计算色（组件已停用 = 组件乙的行为带徽章） ----
   const rows = area.locator('.vsidian-addons-behaviors-row')
   assert.equal(await rows.count(), 3, '三个注册行为各占一行')

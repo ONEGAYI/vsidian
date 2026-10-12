@@ -205,6 +205,11 @@ const ICON_PATHS = {
   // 组合成整体的意象（与 VSCode 扩展图标同构，纯几何零认知风险）
   blocks:
     'M4 2h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M15 2h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M4 13h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z M15 13h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z',
+  // merge（#357 验收缺陷修复：「行为冲突管理」组标题）：git-merge 线性化——
+  // 双节点 + 分合曲线（多行为抢同一路输入、按序合流的冲突意象；2026-10-12
+  // 用户拍板「分流合流」）
+  merge:
+    'M9 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0 M21 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0 M6 21V9a9 9 0 0 0 9 9',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
@@ -225,9 +230,11 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
  *  字形随资产交付退役（#298 占位链环 → 一轮内联 → 二轮生图资产）；
  *  table（#296 三轮）：实验页「表格行为」小节标题；
  *  shield（#323）：常规页「默认编辑器」委托组标题（守护意象内联字形）；
+ *  merge（#357 验收缺陷修复）：附加组件页「行为冲突管理」组标题（分流
+ *  合流意象内联字形）；
  *  refview（#298 占位）与 links（#332 一轮借位）随二轮三处链环重复整改
  *  一并退役（全仓引用迁移至新字形）。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink'
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink' | 'merge'
 
 /** 生图资产槽位：这些 kind 不走 ICON_PATHS 内联字形，装配为 generated
  *  span（CSS 按 data-icon 映射 media/quick-actions 明暗背景） */
