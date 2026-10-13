@@ -370,8 +370,8 @@ describe('T04 设置区：数组与对象基础控件（重复项/字段）', ()
 describe('#473/#475 设置区：枚举档位标签与多行形态', () => {
   const openArea = (): ReturnType<typeof makeView> => {
     const h = makeView()
-    openAddonsPage(h)
-    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
     h.dispatch(settingsState({}))
     return h
   }
@@ -475,8 +475,8 @@ describe('#473/#475 设置区：枚举档位标签与多行形态', () => {
 
   it('枚举值为原型属性名（toString）时缺失标签回退枚举值本身（审查 F2：hasOwn 不走原型链）', () => {
     const h = makeView()
-    openAddonsPage(h)
-    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
     h.dispatch(settingsState({
       definitions: [{
         key: 'protoMode', title: '原型枚举', type: 'string', enum: ['toString', 'safe'], default: 'toString',

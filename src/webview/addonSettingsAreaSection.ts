@@ -18,6 +18,7 @@
 // addonSettingsControls.ts。
 import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
+import { splitAddonArrayPasteText } from '../shared/addonSettings'
 import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
 import { groupIcon, type SettingsPageBridge, type SettingsPageSection } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
@@ -408,6 +409,9 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       item.append(this.renderArrayControl(addon, def))
     } else if (def.type === 'object') {
       item.append(this.renderObjectControl(addon, def))
+    } else if (def.type === 'string' && def.multiline === true) {
+      // #475 多行控件占定义行整行（放 label 行下方），不挤右槽
+      item.append(this.scalarControl(addon, def))
     } else {
       head.append(this.scalarControl(addon, def))
     }
@@ -447,10 +451,36 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       draft.forEach((value, index) => {
         const row = document.createElement('div')
         row.className = 'vsidian-addons-array-row'
+        const control = createScalarItemControl(def.items, value, { 'data-addon-array-item': def.key }, (next) => {
+          draft[index] = next
+        }, 'input')
+        // #475 批量粘贴拆分：string 自由文本项的多行剪贴板按行拆为多项
+        //（首行追加当前项末尾，其余插入其后）；enum/number/boolean 项不适用。
+        // 拼接结果同样经 maxLength 截断（对齐浏览器单行粘贴按总量的截断
+        // 语义——逐行截断后拼接仍可能超限，草稿不持不可保存值）；
+        // 逐项插入不走 spread（数万行级剪贴板可触发实参上限 RangeError）
+        if (def.items.kind === 'string' && def.items.enum === undefined) {
+          const items = def.items
+          control.addEventListener('paste', (event) => {
+            const text = event.clipboardData?.getData('text') ?? ''
+            if (!/[\r\n]/.test(text)) return // 单行粘贴走默认输入行为
+            event.preventDefault()
+            const lines = splitAddonArrayPasteText(text, items.maxLength)
+            if (lines.length === 0) return
+            const current = typeof draft[index] === 'string' ? (draft[index] as string) : ''
+            const merged = current + lines[0]!
+            draft[index] = items.maxLength !== undefined && items.maxLength > 0 ? merged.slice(0, items.maxLength) : merged
+            for (let i = 1; i < lines.length; i++) {
+              draft.splice(index + i, 0, lines[i]!)
+            }
+            this.drafts.set(def.key, [...draft])
+            renderRows()
+            const refocus = rows.children[index]?.querySelector<HTMLElement>('[data-addon-array-item]')
+            refocus?.focus({ preventScroll: true })
+          })
+        }
         row.append(
-          createScalarItemControl(def.items, value, { 'data-addon-array-item': def.key }, (next) => {
-            draft[index] = next
-          }, 'input'),
+          control,
           this.button(t('addons.arrayRemoveItem'), () => {
             draft.splice(index, 1)
             this.drafts.set(def.key, [...draft])
