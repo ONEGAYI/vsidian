@@ -78,11 +78,12 @@
 - 两列 grid：侧栏 `236px` + 主区 `minmax(0,1fr)`，**各自独立滚动**（视口锁高）；窄屏（≤约 700px）退化整页滚动（契约由 settingsPage 浏览器用例钉住）。
 - 侧栏导航条目：`图标(20px) + 文字`，padding `11px 12px`、圆角 `9px`、透明边框；hover = list-hover；选中（`aria-current="page"`）= activeSelection 前景/背景 + `contrastActiveBorder`。
 - 大组标签 12px/600、子组标签 11px 说明色、大组间分隔线（`hr` + panel-border）。
-- **分页容器语言两型**：表单型分页（快捷键/外观/索引维护）内容整体住进一张 `vsidian-settings-section-content` 大卡片（圆角 10px、padding 16px 20px，组头可直接作卡片全幅头部——索引维护先例）；多组管理型分页声明 `SettingsPageSection.bare`（附加组件页先例，2026-10-12 验收反馈）——内容不套大卡片，组卡片直挂页面列表，**不允许组卡片嵌套进大卡片（卡中卡）**。新分页按内容形态选型并在此登记。
+- **分页容器语言两型**：表单型分页（快捷键/外观/索引维护）内容整体住进一张 `vsidian-settings-section-content` 大卡片（圆角 10px、padding 16px 20px，组头可直接作卡片全幅头部——索引维护先例）；多组管理型分页声明 `SettingsPageSection.bare`（附加组件页先例，2026-10-12 验收反馈；输入行为管理页与组件设置页沿用，#465）——内容不套大卡片，组卡片直挂页面列表，**不允许组卡片嵌套进大卡片（卡中卡）**。新分页按内容形态选型并在此登记。
+- **同页双态与跨分页导航**（#465 先例：组件设置分页）：一个分页内按宿主权威态整页切换两种视图（组件清单 hub ↔ 打开的组件详情），切换点是消息推送而非侧栏路由——侧栏导航项与 `h2` 页标题保持稳定，详情自带标题与「返回」类按钮回清单态；由分页自身 render 分流（不新增视图层机制）。跨分页导航经分页构造注入的回调（settingsMain 接 `view.selectSection`，微任务延迟——mount 内触发不嵌套重渲染）：源分页只发出「打开」类消息并导航，不在本页渲染目标内容（「附加组件」页对组件设置的渲染通道堵死，守护契约钉住——任何组件设置项不得在该页出现）。
 
 ### 2.2 二级组卡片与组标题（本轮契约核心）
 
-标准结构（编辑器页各组、行为冲突管理组均此形态）：
+标准结构（编辑器页各组、输入行为管理组均此形态）：
 
 ```text
 div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、色差底、padding 2px 20px 8px
@@ -92,10 +93,10 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 └─ 内容行（设置行 / 委托组内容 / 空态）
 ```
 
-- **组头必须挂在卡片内**（负边距 + 通栏下边线由卡片承载）；标题游离卡片外即形态缺陷（#357 验收缺陷先例：行为冲突管理组头 2026-10-12 修复）。
-- 图标两形态同一 16px 槽：内联 svg（24 viewBox 单 path、`stroke: currentColor`、1.7 圆角线帽，注册表 `ICON_PATHS` + `SettingsGroupIcon` 类型，`settingsPageView.ts` 单表装配）；生图资产（`span.vsidian-settings-generated-icon[data-icon]` + CSS 背景明暗两套，走 [ai-icon-sheet-to-svg](../../.agents/skills/ai-icon-sheet-to-svg/SKILL.md) 生图管线）。新字形先登记注册表再使用，`aria-hidden` 纯装饰。
-- 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（行为冲突管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
-- 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。
+- **组头必须挂在卡片内**（负边距 + 通栏下边线由卡片承载）；标题游离卡片外即形态缺陷（#357 验收缺陷先例：行为管理组头 2026-10-12 修复）。
+- 图标两形态同一 16px 槽：内联 svg（24 viewBox 单 path、`stroke: currentColor`、1.7 圆角线帽，注册表 `ICON_PATHS` + `SettingsGroupIcon` 类型，`settingsPageView.ts` 单表装配）；生图资产（`span.vsidian-settings-generated-icon[data-icon]` + CSS 背景明暗两套，走 [ai-icon-sheet-to-svg](../../.agents/skills/ai-icon-sheet-to-svg/SKILL.md) 生图管线）。新字形先登记注册表再使用，`aria-hidden` 纯装饰。现役内联字形表见 `settingsPageView.ts` 的 `ICON_PATHS` 注释（#466 起 `inputCursor`＝输入框 + I 型光标，输入行为管理页组头与侧栏导航共用；`sliders`＝三档滑杆组，组件设置页同槽；原 `merge` 分流合流字形随更名退役）。
+- 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（输入行为管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
+- 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。整页单卡片的管理型分页（如输入行为管理页）可把说明句升为分页副题（`vsidian-settings-subtitle`）而不在卡内重复——副题即页级说明位，不算悬空。
 
 ### 2.3 设置行与控件
 
@@ -110,7 +111,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 空态：说明色、`padding 24px 0`；状态行（保存反馈）12px 说明色、`role=status`。
 - callout：圆角 8px + 左强调条 3px（focusBorder）+ `inputValidation-infoBackground`，承载说明性长文案。
 - 外观页「预设主题」沿用现有 pill 页签；「代码块渲染」组头与标准设置行直接放入页签面板，外观页的大卡片承载组头负边距，不再套一层组卡片。Mermaid 的 Codex 图表配色与 16px 节点圆角属于用户选择的图内容预设，不用于设置控件或其他界面元素。
-- 定位高亮（搜索/路由跳转落点）：`outline 1px focusBorder + offset 8px`、圆角 3px，类名 `vsidian-settings-item-located`。档位语义是**一次性导航反馈**：显式定位时呈现，约 1.5s 后退场，退场后不重现；定位落点唯一——容器级与条目级描边互斥，定位到具体条目只标条目行，列表级定位才描容器本身。当前落地范围是**附加组件页的列表级与条目级两处**（#462 先例）：条目级高亮经定位态跨推送重渲染保持（时限内不延长寿命）；列表级容器描边仅在定位渲染当次呈现（推送重建即消）；同分页 manage/behaviors 入口与其他分页的定位高亮维持既有语义（常驻至下次重渲染），迁移到本档位语义另行落档。
+- 定位高亮（搜索/路由跳转落点）：`outline 1px focusBorder + offset 8px`、圆角 3px，类名 `vsidian-settings-item-located`。档位语义是**一次性导航反馈**：显式定位时呈现，约 1.5s 后退场，退场后不重现；定位落点唯一——容器级与条目级描边互斥，定位到具体条目只标条目行，列表级定位才描容器本身。当前落地范围是**附加组件页的列表级与条目级两处**（#462 先例）：条目级高亮经定位态跨推送重渲染保持（时限内不延长寿命）；列表级容器描边仅在定位渲染当次呈现（推送重建即消）；同分页 manage 入口、输入行为管理页 behaviors 入口与其他分页的定位高亮维持既有语义（常驻至下次重渲染），迁移到本档位语义另行落档。
 
 ## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）
 
