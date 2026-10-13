@@ -125,6 +125,7 @@ export interface AddonPageWiring {
   /** #353 T04 设置服务与 #359 T10 命令服务观测（测试钩子与集成的断言面） */
   settingsServiceSnapshot(): {
     definitions: Readonly<Record<string, readonly unknown[]>>
+    groups: Readonly<Record<string, readonly unknown[]>>
     userValues: Readonly<Record<string, Readonly<Record<string, unknown>>>>
     workspaceValues: Readonly<Record<string, Readonly<Record<string, unknown>>>> | null
     hasWorkspace: boolean
@@ -402,6 +403,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       hasSettingsPage: status.hasSettingsPage,
       // #353 T04 定义保留（故障暂停仍在——基础控件可用）
       hasSettingsDefinitions: settingsService.hasDefinitions(entry.id),
+      // #472 定义搜索摘要（定义级/组级全局索引数据源；随既有 addons.state 推送）
+      ...(settingsService.hasDefinitions(entry.id) ? { settingsSearchIndex: settingsService.searchIndexOf(entry.id) } : {}),
       ...(status.faultReason !== undefined ? { fault: { reason: status.faultReason } } : {}),
     }
   }
@@ -442,6 +445,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     const userExplicit = addonId in preferences.user ? preferences.user[addonId] : null
     const workspaceExplicit = preferences.workspace !== null && addonId in preferences.workspace ? preferences.workspace[addonId] : null
     const source = workspaceExplicit !== null ? 'workspace' : userExplicit !== null ? 'user' : 'default'
+    // #472 组声明（声明序随载荷透传；无声明缺省——渲染侧保持既有平铺）
+    const groups = settingsService.groupsOf(addonId)
     return {
       addonId,
       label: entry.label,
@@ -455,6 +460,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         source,
       },
       definitions,
+      ...(groups.length > 0 ? { groups } : {}),
       values,
     }
   }
@@ -1131,10 +1137,12 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     openSettingsArea: (addonId) => runtime.openSettingsArea(addonId),
     settingsServiceSnapshot: () => {
       const definitions: Record<string, readonly unknown[]> = {}
+      const groups: Record<string, readonly unknown[]> = {}
       const userValues: Record<string, Readonly<Record<string, unknown>>> = {}
       const workspaceValues: Record<string, Readonly<Record<string, unknown>>> | null = hostHasWorkspace() ? {} : null
       for (const entry of coordinator.stateEntries()) {
         definitions[entry.id] = settingsService.definitionsOf(entry.id)
+        groups[entry.id] = settingsService.groupsOf(entry.id)
         const snapshot = settingsService.effectiveSnapshot(entry.id)
         userValues[entry.id] = snapshot.userValues
         if (workspaceValues !== null) {
@@ -1143,6 +1151,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       }
       return {
         definitions,
+        groups,
         userValues,
         workspaceValues,
         hasWorkspace: hostHasWorkspace(),

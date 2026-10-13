@@ -97,6 +97,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 图标两形态同一 16px 槽：内联 svg（24 viewBox 单 path、`stroke: currentColor`、1.7 圆角线帽，注册表 `ICON_PATHS` + `SettingsGroupIcon` 类型，`settingsPageView.ts` 单表装配）；生图资产（`span.vsidian-settings-generated-icon[data-icon]` + CSS 背景明暗两套，走 [ai-icon-sheet-to-svg](../../.agents/skills/ai-icon-sheet-to-svg/SKILL.md) 生图管线）。新字形先登记注册表再使用，`aria-hidden` 纯装饰。现役内联字形表见 `settingsPageView.ts` 的 `ICON_PATHS` 注释（#466 起 `inputCursor`＝输入框 + I 型光标，输入行为管理页组头与侧栏导航共用；`sliders`＝三档滑杆组，组件设置页同槽；原 `merge` 分流合流字形随更名退役）。
 - 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（输入行为管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
 - 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。整页单卡片的管理型分页（如输入行为管理页）可把说明句升为分页副题（`vsidian-settings-subtitle`）而不在卡内重复——副题即页级说明位，不算悬空。
+- #472 附加组件设置区分组沿用本节结构：组卡片直挂设置区（bare 分页同口径，组间 `20px` 档位），组标题不配图标（组件声明的组无语义字形——不发明）；组描述即上一条「组说明句」模式（`.vsidian-addons-group-description`，卡片内首行说明色）。首容器（功能开关行 + 未分组定义）无组标题恒置顶，组容器按声明序随后。
 
 ### 2.3 设置行与控件
 

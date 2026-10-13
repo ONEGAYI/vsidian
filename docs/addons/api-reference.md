@@ -309,9 +309,9 @@ export const OFFICIAL_ADDON_EXTENSION_IDS: readonly string[] = OFFICIAL_ADDON_RE
 
 ### `addon-status` 组件状态模型与设置页呈现
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#350（T01）、#355（T06 运行状态）
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#350（T01）、#355（T06 运行状态）、#472（搜索摘要）
 
-**目标**：设置页「附加组件」分页的状态载荷：七种状态覆盖注册、唤醒在途、待注册、不兼容、激活失败、宿主不可查与声明非法；故障暂停标注但不改变「已启用」归类。
+**目标**：设置页「附加组件」分页的状态载荷：七种状态覆盖注册、唤醒在途、待注册、不兼容、激活失败、宿主不可查与声明非法；故障暂停标注但不改变「已启用」归类。#472 起已注册有定义组件附带 settingsSearchIndex 摘要（定义 title/description 与组声明——组件设置分页全局搜索索引的数据源，随 addons.state 既有链路推送）。
 
 语义要点：
 - **生命周期**：启用偏好与实际故障分别记录（enabled 与 fault 两个字段）；host-unavailable 原因不可判——不直接写成未安装或装错侧。
@@ -341,6 +341,9 @@ export interface AddonStatusEntry {
   /** #353 T04 已注册设置定义（「基础设置」入口可见性；故障暂停时定义
    *  保留——入口仍在，平台基础控件可用） */
   hasSettingsDefinitions?: boolean
+  /** #472 定义搜索摘要（全局搜索索引数据源——定义 title/description 与组
+   *  声明随 addons.state 既有链路推送；仅已注册有定义组件附带） */
+  settingsSearchIndex?: import('./addonSettings').AddonSettingsSearchIndex
 }
 
 /** 设置页状态列表条目（发现/注册协调的呈现载荷；协议 addons.state 使用） */
@@ -1440,13 +1443,13 @@ export interface AddonStorageFsPort {
 
 ### `settings-context` 宿主设置能力面（setup 上下文）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#351（T02 页面入口）、#353（T04 读写）
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）
 
-**目标**：setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。
+**目标**：setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。
 
 语义要点：
-- **生命周期**：普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。
-- **错误与拒绝**：按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。
+- **生命周期**：普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。新 setup 代次重跑时定义集与组声明一并清换。
+- **错误与拒绝**：按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。#472 组批校验：组键重复或定义引用未声明组键整批拒绝（归因 invalid-definitions）。
 
 签名事实源：`src/host/addons/addonRegistry.ts`
 
@@ -1458,8 +1461,10 @@ export interface AddonStorageFsPort {
 export interface AddonSettingsContextApi {
   /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */
   registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle
-  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings） */
-  registerDefinitions(defs: readonly unknown[]): AddonRegistrationHandle
+  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings）。
+   *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段
+   *  引用其组键——引用未声明组键或组键重复整批拒绝 */
+  registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle
   /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */
   get(): AddonSettingsGetSnapshot
   /** 单键来源（未定义键为 undefined） */
@@ -1489,12 +1494,12 @@ export interface AddonSettingsChangeEventData {
 
 ### `settings-definitions` 可序列化设置定义与值校验
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#353（T04）、#473/#475（呈现形态）
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#353（T04）、#473/#475（呈现形态）、#472（分组）
 
-**目标**：设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。
+**目标**：设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。#472 分组（引用式）：定义可选 group 字段引用组键，组元数据（title/description 为 AddonLocalizedText）经注册载荷声明一次、声明序即呈现序；组键组件内唯一、引用未声明组键整批拒绝。
 
 语义要点：
-- **错误与拒绝**：定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。
+- **错误与拒绝**：定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。#472 组批校验：组声明形状非法或键重复、定义引用未声明组键——整批拒绝。
 
 签名事实源：`src/shared/addonSettings.ts`
 
@@ -1547,6 +1552,28 @@ export type AddonScalarItemSpec =
 /** 枚举档位显示标签的多语言形态（#473）：直值或「语言代码→文本」映射，
  *  选值语义见 localizedText.ts（与 #464 行为名多语言惯例同构） */
 export type AddonLocalizedText = LocalizedText
+
+/**
+ * 设置分组声明（#472 引用式分组）：组元数据随注册载荷声明一次，定义以
+ * `group` 组键引用。组序 = 声明序；组键组件内唯一；title/description
+ * 直值或多语言映射（AddonLocalizedText，与 #464/#473 惯例同构）。
+ */
+export interface AddonSettingGroup {
+  /** 组键（组件内唯一、非空；定义 group 字段引用此键） */
+  key: string
+  /** 组标题 */
+  title: AddonLocalizedText
+  /** 可选组说明（组卡片内首行说明色呈现） */
+  description?: AddonLocalizedText
+}
+
+/** 全组件设置搜索索引（#472：addons.state 携带，webview 据此建全局搜索条目） */
+export interface AddonSettingsSearchIndex {
+  /** 定义摘要（注册序；object 字段级不进——定义级即止） */
+  definitions: readonly AddonSettingSearchEntry[]
+  /** 组声明（声明序；搜索只匹配组标题，description 仅随载荷透传） */
+  groups?: readonly AddonSettingGroup[]
+}
 
 /** 设置定义形状校验（必需字段与约束自洽；多余字段忽略——组件升级新增元数据不炸老平台） */
 export function isAddonSettingDefinition(value: unknown): value is AddonSettingDefinition {
@@ -1618,6 +1645,19 @@ export function isAddonSettingDefinition(value: unknown): value is AddonSettingD
   }
 }
 
+/**
+ * 分组声明形状守卫（#472）：key 非空字符串；title 经多语言文本守卫；
+ * description 可选、同守卫。组键唯一性与定义引用合法性由服务层注册批
+ * 校验（单条声明无全集上下文）。
+ */
+export function isAddonSettingGroupDeclaration(value: unknown): value is AddonSettingGroup {
+  if (!isRecord(value)) return false
+  if (!(typeof value.key === 'string' && value.key.length > 0)) return false
+  if (!isUsableLocalizedText(value.title)) return false
+  if (value.description !== undefined && !isUsableLocalizedText(value.description)) return false
+  return true
+}
+
 /** 值是否满足定义（数组/对象为一层结构：项与字段值必须是标量） */
 export function addonSettingValueMatches(def: AddonSettingDefinition, value: unknown): boolean {
   switch (def.type) {
@@ -1648,7 +1688,7 @@ export function addonSettingValueMatches(def: AddonSettingDefinition, value: unk
 }
 ```
 
-**验证**：`test/unit/addonSettings.test.ts`、`test/unit/addonSettingsArea.test.ts`
+**验证**：`test/unit/addonSettings.test.ts`、`test/unit/addonSettingsArea.test.ts`、`test/unit/addonSettingsService.test.ts`
 
 ### `settings-scope` 作用范围解析与存储
 

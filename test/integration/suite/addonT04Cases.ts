@@ -101,6 +101,27 @@ export const addonT04Cases: Array<[string, () => Promise<void>]> = [
     console.log('[#353] 复杂定义注册与公开读取通过（标量/数组/对象默认值）')
   }],
 
+  ['附加组件 T04：设置定义分组声明经公开注册链路走通（#472）', async () => {
+    await ensureRegistered()
+    const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsState')) as {
+      definitions: Record<string, Array<Record<string, unknown>>>
+      groups: Record<string, Array<Record<string, unknown>>>
+    }
+    const groups = state.groups[ADDON_ID] ?? []
+    assert(groups.length === 2, `应声明 2 个组（basic + appearance），实际 ${groups.length}`)
+    assert(groups[0]?.key === 'basic' && groups[1]?.key === 'appearance', `组按声明序（组序 = 声明序），实际 ${groups.map((g) => g.key).join(',')}`)
+    assert(groups[0]?.title === '基础', '组标题直值形态透传')
+    assert(JSON.stringify(groups[1]?.title) === JSON.stringify({ 'zh-cn': '外观', en: 'Appearance' }), '组标题多语言映射形态透传')
+    assert(groups[1]?.description === '观感相关', '组可选描述透传')
+    // 定义引用组键（引用式：group 字段指向已声明组）
+    const defs = state.definitions[ADDON_ID] ?? []
+    const groupedKeys = defs.filter((def) => def.group !== undefined).map((def) => `${def.key}→${def.group}`)
+    assert(groupedKeys.length === 4, `应 4 条定义带组引用，实际 ${groupedKeys.length}`)
+    const declaredKeys = new Set(groups.map((group) => group.key as string))
+    assert(defs.every((def) => def.group === undefined || declaredKeys.has(def.group as string)), '定义引用的组键全部已声明（非法引用整批拒绝的注册前置）')
+    console.log('[#472] 设置定义分组声明注册与透传通过（声明序/两形态 title/引用一致）')
+  }],
+
   ['附加组件 T04：分层写入、生效切换与变化事件时序（#353）', async () => {
     await ensureRegistered()
     // 公开 API 写 user 层（夹具内调用——成功保存后 onChanged 触发）

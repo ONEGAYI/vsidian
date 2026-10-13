@@ -409,12 +409,12 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       },
     ],
     purpose:
-      '设置页「附加组件」分页的状态载荷：七种状态覆盖注册、唤醒在途、待注册、不兼容、激活失败、宿主不可查与声明非法；故障暂停标注但不改变「已启用」归类。',
+      '设置页「附加组件」分页的状态载荷：七种状态覆盖注册、唤醒在途、待注册、不兼容、激活失败、宿主不可查与声明非法；故障暂停标注但不改变「已启用」归类。#472 起已注册有定义组件附带 settingsSearchIndex 摘要（定义 title/description 与组声明——组件设置分页全局搜索索引的数据源，随 addons.state 既有链路推送）。',
     semantics: {
       lifecycle: '启用偏好与实际故障分别记录（enabled 与 fault 两个字段）；host-unavailable 原因不可判——不直接写成未安装或装错侧。',
     },
     verification: ['test/integration/suite/addonT02Cases.ts', 'test/browser/addonSidebar.mjs'],
-    introduced: '#350（T01）、#355（T06 运行状态）',
+    introduced: '#350（T01）、#355（T06 运行状态）、#472（搜索摘要）',
   },
   // ---- ② 页面 SDK ----
   {
@@ -763,13 +763,13 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       },
     ],
     purpose:
-      'setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。',
+      'setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。',
     semantics: {
-      lifecycle: '普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。',
-      errors: '按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。',
+      lifecycle: '普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。新 setup 代次重跑时定义集与组声明一并清换。',
+      errors: '按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。#472 组批校验：组键重复或定义引用未声明组键整批拒绝（归因 invalid-definitions）。',
     },
     verification: ['test/unit/addonRuntimeSettings.test.ts', 'test/integration/suite/addonT04Cases.ts', 'test/browser/addonSettings.mjs'],
-    introduced: '#351（T02 页面入口）、#353（T04 读写）',
+    introduced: '#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）',
   },
   {
     id: 'settings-definitions',
@@ -780,17 +780,17 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonSettings.ts',
-        symbols: ['AddonSettingDefinition', 'AddonSettingValue', 'AddonScalarItemSpec', 'AddonLocalizedText', 'isAddonSettingDefinition', 'addonSettingValueMatches'],
+        symbols: ['AddonSettingDefinition', 'AddonSettingValue', 'AddonScalarItemSpec', 'AddonLocalizedText', 'AddonSettingGroup', 'AddonSettingsSearchIndex', 'isAddonSettingDefinition', 'isAddonSettingGroupDeclaration', 'addonSettingValueMatches'],
       },
     ],
     purpose:
-      '设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。',
+      '设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。#472 分组（引用式）：定义可选 group 字段引用组键，组元数据（title/description 为 AddonLocalizedText）经注册载荷声明一次、声明序即呈现序；组键组件内唯一、引用未声明组键整批拒绝。',
     semantics: {
-      errors: '定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。',
-      presentation: 'enumLabels 与 multiline 仅作用设置页呈现（#473/#475）：标签缺失回退渲染枚举值本身，标签选值随页面语言切换；multiline 渲染 textarea、换行符参与持久化值；持久化值与值校验口径不变。数组 string 自由文本项支持批量粘贴拆分（逐行 trim、去空行、maxLength 截断，enum/number/boolean 项不适用）。',
+      errors: '定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。#472 组批校验：组声明形状非法或键重复、定义引用未声明组键——整批拒绝。',
+      presentation: 'enumLabels 与 multiline 仅作用设置页呈现（#473/#475）：标签缺失回退渲染枚举值本身，标签选值随页面语言切换；multiline 渲染 textarea、换行符参与持久化值；持久化值与值校验口径不变。数组 string 自由文本项支持批量粘贴拆分（逐行 trim、去空行、maxLength 截断，enum/number/boolean 项不适用）。#472 分组呈现：组标题按当前语言选值、组容器按声明序，未分组定义与功能开关行恒居首容器；组声明随 addons.settingsState 既有链路透传；定义级与组级条目进全局搜索（object 字段级不进），定位键 addon:<组件 ID>/def:<定义键> 与 addon:<组件 ID>/group:<组键>。',
     },
-    verification: ['test/unit/addonSettings.test.ts', 'test/unit/addonSettingsArea.test.ts'],
-    introduced: '#353（T04）、#473/#475（呈现形态）',
+    verification: ['test/unit/addonSettings.test.ts', 'test/unit/addonSettingsArea.test.ts', 'test/unit/addonSettingsService.test.ts'],
+    introduced: '#353（T04）、#473/#475（呈现形态）、#472（分组）',
   },
   {
     id: 'settings-scope',
