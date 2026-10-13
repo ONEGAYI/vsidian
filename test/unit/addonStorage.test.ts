@@ -81,6 +81,13 @@ describe('#404 AddonStorageService（内存 fs 端口）', () => {
       },
       readDirectory: async (path) => {
         if (readDirectoryFailure !== null) throw readDirectoryFailure
+        // #461 目标路径是文件：真实端口抛非目录错误（node 透传 ENOTDIR /
+        // vscode FileNotADirectory）——不属 not-found 归一范围，error 拒绝
+        if (files.get(path) instanceof Uint8Array) {
+          throw Object.assign(new Error(`ENOTDIR: not a directory, readDirectory '${path}'`), {
+            code: 'ENOTDIR',
+          })
+        }
         if (missingDirs.has(path) || !dirExists(path)) {
           throw Object.assign(new Error(`${notFoundCode}: no such directory, readDirectory '${path}'`), {
             code: notFoundCode,
@@ -230,6 +237,19 @@ describe('#404 AddonStorageService（内存 fs 端口）', () => {
       failReadDirectoryWith(new Error('boom'))
       expect(await service.storageFor(ADDON).list()).toMatchObject({ ok: false, reason: 'error' })
     }
+  })
+
+  it('list 的目标路径是文件：非目录错误不属 not-found 归一，仍 error 拒绝（#461）', async () => {
+    // 真实端口对非目录路径抛 ENOTDIR（node 透传）/ FileNotADirectory
+    // （vscode 语义）——isFileNotFound 不收，error 拒绝是生产语义；mock
+    // 须按同形抛错，不得借 not-found 归一兜成空清单
+    const { service } = makeService({
+      '/gs/addons/pub.my-addon/rule-state.json': '{"seed":true}',
+    })
+    expect(await service.storageFor(ADDON).list('rule-state.json')).toMatchObject({
+      ok: false,
+      reason: 'error',
+    })
   })
 
   it('递归中途子目录消失：该子树为空、整体 ok（#461）', async () => {
