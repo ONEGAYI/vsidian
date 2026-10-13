@@ -75,7 +75,8 @@ try {
   })
   // #438 mermaid 产物路由（懒加载 script.src → __vsidianMermaidUri 指向此处）
   await page.route('http://ctx.test/mermaid.js', async (route) => {
-    await route.fulfill({ path: mermaidArtifact, contentType: 'text/javascript' })
+    await route.fulfill({ path: mermaidArtifact, contentType: 'text/javascript',
+      headers: { 'Access-Control-Allow-Origin': '*' } })
   })
   await page.setContent(
     `<html><head><base href="http://ctx.test/"></head><body>${islandHtml}<div id="app"></div></body></html>`)

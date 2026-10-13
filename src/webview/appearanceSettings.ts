@@ -1,7 +1,7 @@
 // 设置页「外观」合并分页（#231）：侧栏「CSS 片段」与「样式参考」两条分页
 // 合并为一条「外观」（调色板图标，取 CSS 片段原槽位，位于快捷键与索引维护
 // 之间）。外观页复用样式参考现有 tablist 页签机制（pill 页签 + aria-selected
-// 单选 + hidden 面板切换），扁平三页签：CSS 片段 / 样式参考 / 详细查询——
+// 单选 + hidden 面板切换）；原三页签后追加「预设主题」，仍为扁平层级——
 // 不加嵌套层级。实现形态是组合复用：CssSnippetSettingsSection 与
 // StyleReferenceSection 作为页签体原样挂载（不重写两者内部逻辑），
 // snippets.state 消息接线保持 settingsMain 直连实例不变。
@@ -14,7 +14,7 @@ import { CssSnippetSettingsSection } from './cssSnippetSettings'
 import { StyleReferenceSection } from './styleReferenceSettings'
 
 /** 外观页页签 id（data-tab 值；顺序即呈现顺序，CSS 片段为第一页签） */
-export type AppearanceTab = 'cssSnippets' | 'overview' | 'detail'
+export type AppearanceTab = 'cssSnippets' | 'overview' | 'detail' | 'presets'
 
 /**
  * 搜索定位路由（纯函数）：focusEntry 按条目归属映射到外观页内页签。
@@ -26,12 +26,17 @@ export function routeAppearanceTab(focusEntry?: string): AppearanceTab {
   if (!focusEntry) return 'cssSnippets'
   if (focusEntry === 'directory' || focusEntry.startsWith('snippet:')) return 'cssSnippets'
   if (focusEntry === 'overview') return 'overview'
+  if (focusEntry.startsWith('appearance.')) return 'presets'
   return 'detail'
 }
 
 export class AppearanceSection implements SettingsPageSection {
   readonly id = 'appearance'
   readonly icon = 'palette' as const
+  readonly defsGroups = [{
+    titleKey: 'appearance.codeblockRendering' as const, icon: 'codeblock' as const,
+    prefixes: ['appearance.'], target: '.vsidian-appearance-presets',
+  }]
   get title(): string { return t('appearance.title') }
   get description(): string { return t('appearance.description') }
 
@@ -58,7 +63,7 @@ export class AppearanceSection implements SettingsPageSection {
   restoreState(state: unknown): void {
     if (typeof state !== 'object' || state === null || Array.isArray(state)) return
     const tab = (state as Record<string, unknown>).tab
-    if (tab === 'cssSnippets' || tab === 'overview' || tab === 'detail') {
+    if (tab === 'cssSnippets' || tab === 'overview' || tab === 'detail' || tab === 'presets') {
       this.activeTab = tab
     }
   }
@@ -73,7 +78,7 @@ export class AppearanceSection implements SettingsPageSection {
     // 定位路由优先（显式定位语义）：无定位时按记忆页签呈现（会话内恢复）
     const tab = focusEntry ? routeAppearanceTab(focusEntry) : this.activeTab
 
-    // ---- 三页签 tablist：复用样式参考页签机制（类名/aria 语义与 #155 同源，
+    // ---- tablist：复用样式参考页签机制（类名/aria 语义与 #155 同源，
     // settingsPage.css 的页签样式契约与 detail 可见时主区滚动规则照常生效）----
     const tabbar = document.createElement('div')
     tabbar.className = 'vsidian-style-ref-tabs'
@@ -88,14 +93,18 @@ export class AppearanceSection implements SettingsPageSection {
     const detailPanel = document.createElement('div')
     detailPanel.className = 'vsidian-style-ref-detail'
     detailPanel.setAttribute('role', 'tabpanel')
+    const presetPanel = document.createElement('div')
+    presetPanel.className = 'vsidian-appearance-presets'
+    presetPanel.setAttribute('role', 'tabpanel')
     const panels: Record<AppearanceTab, HTMLElement> = {
-      cssSnippets: snippetPanel, overview: overviewPanel, detail: detailPanel,
+      cssSnippets: snippetPanel, overview: overviewPanel, detail: detailPanel, presets: presetPanel,
     }
     // 页签文案沿用现有键（工单拍板）：页签标题不新增词条
     const tabLabels: Record<AppearanceTab, string> = {
       cssSnippets: t('cssSnippets.title'),
       overview: t('styleRef.tabOverview'),
       detail: t('styleRef.tabDetail'),
+      presets: t('appearance.presets'),
     }
     const tabs = new Map<AppearanceTab, HTMLButtonElement>()
     const setTab = (selected: AppearanceTab): void => {
@@ -112,7 +121,7 @@ export class AppearanceSection implements SettingsPageSection {
         this.stateSink?.()
       }
     }
-    for (const id of ['cssSnippets', 'overview', 'detail'] as const) {
+    for (const id of ['cssSnippets', 'overview', 'detail', 'presets'] as const) {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'vsidian-style-ref-tab'
@@ -130,7 +139,7 @@ export class AppearanceSection implements SettingsPageSection {
     // 命中），不匹配的一侧按「无定位」处理，与全局搜索行为一致
     const disposeSnippets = this.snippets.mount(snippetPanel, focusEntry)
     this.styleRef.mountPanels(overviewPanel, detailPanel, focusEntry)
-    parent.append(snippetPanel, overviewPanel, detailPanel)
+    parent.append(snippetPanel, overviewPanel, detailPanel, presetPanel)
     setTab(tab)
     return () => {
       disposeSnippets?.()

@@ -27,6 +27,26 @@ export const MERMAID_DARK_FALLBACK_PALETTE: Readonly<VscodeMermaidPalette> = {
   widgetBorder: '#3c3c3c',
 }
 
+/** Codex 26.1007.2314.0 蓝色流程图的近似预设；保留 Mermaid 形状与源码覆写。 */
+export function buildCodexMermaidConfig(): Record<string, unknown> {
+  return {
+    theme: 'base', layout: 'elk', htmlLabels: false,
+    themeVariables: {
+      primaryColor: '#e5f3ff', primaryTextColor: '#004f99', primaryBorderColor: '#cedbe5',
+      secondaryColor: '#f5faff', tertiaryColor: '#f5faff',
+      lineColor: '#cedbe5', textColor: '#004f99', fontSize: '14px',
+      fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
+      edgeLabelBackground: 'transparent', clusterBkg: '#f5faff', clusterBorder: '#cedbe5',
+    },
+    flowchart: { htmlLabels: false, useMaxWidth: false, padding: 16, wrappingWidth: 320, curve: 'linear', nodeSpacing: 40, rankSpacing: 40 },
+    elk: { nodePlacementStrategy: 'LINEAR_SEGMENTS', mergeEdges: false, considerModelOrder: 'NODES_AND_EDGES', forceNodeModelOrder: true },
+    themeCSS: '.node rect.label-container { rx:16px; ry:16px; stroke-width:1px; }\n' +
+      '.node polygon.label-container { fill:#f5faff; }\n' +
+      '.node .label, .edgeLabel { font-weight:600; }\n' +
+      '.flowchart-link { stroke-linecap:round; stroke-linejoin:round; }',
+  }
+}
+
 /** 解析宿主注入的 VSCode 色板；无 DOM 或变量缺失的键不出现（走兜底） */
 export function resolveVscodeMermaidPalette(root?: HTMLElement): Partial<VscodeMermaidPalette> {
   if (typeof document === 'undefined') {

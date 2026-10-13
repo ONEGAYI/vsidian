@@ -28,6 +28,7 @@ out/samples/**
 # 本地工单草稿目录（#128 CSS 片段工单拆分留档）仅作过程留证，非运行时资产。
 out/css-snippets-tickets/**
 **/*.map
+# Mermaid ESM 的 mermaid-chunks/*.js 随包；上面的规则继续排除其 source map。
 .gitignore
 .git/**
 package-lock.json
