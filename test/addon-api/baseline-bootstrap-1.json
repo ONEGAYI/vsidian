@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "785f5ab4c018fac1db1484e8bb6fd970f95c08e3",
-      "ref": "785f5ab4",
+      "sha": "3e62420d893f82fb64ff77edc25645475bb2f899",
+      "ref": "3e62420d",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -140,7 +140,7 @@
       "endpoints": [
         "host"
       ],
-      "purpose": "官方归属只由主仓库维护的扩展 ID 清单判定（唯一入口 isOfficialAddon）；组件不能自行声明「核心」。初版为空占位——首个官方组件发布时在表内登记。",
+      "purpose": "官方归属只由主仓库维护的扩展 ID 清单判定（唯一入口 isOfficialAddon）；组件不能自行声明「核心」。表内已登记首个官方组件 vsidian-easy-typing，后续官方组件发布时增行登记。",
       "semantics": {
         "lifecycle": "登记官方组件只改 officialAddons.ts；表内容变化不构成兼容性承诺（第三方不得依据曾在表内/表外主张契约）。"
       },
@@ -939,7 +939,7 @@
     },
     "src/shared/officialAddons.ts": {
       "OfficialAddonEntry": "/** 官方附加组件登记条目（extensionId 是判定键；label 备注不参与判定） */\nexport interface OfficialAddonEntry {\n  /** 官方组件的 VSCode 扩展 ID（publisher.name） */\n  readonly extensionId: string\n  /** 维护备注（用途或发布仓线索；仅文档性质） */\n  readonly label?: string\n}",
-      "OFFICIAL_ADDON_REGISTRY": "/**\n * 官方（核心）附加组件登记表。初版为空占位——首个官方组件发布时在此\n * 登记；「核心组件」侧栏分组随之从空态转为条目列表。\n */\nexport const OFFICIAL_ADDON_REGISTRY: readonly OfficialAddonEntry[] = [\n  // 登记样例（形态参考，勿留注释放行）：\n  // { extensionId: 'onegayi.vsidian-official-xxx', label: '官方 xxx 组件' },\n]",
+      "OFFICIAL_ADDON_REGISTRY": "/**\n * 官方（核心）附加组件登记表。已登记首个官方组件 vsidian-easy-typing；\n * 后续官方组件发布时在此增行，「核心组件」侧栏分组随之出现对应条目。\n */\nexport const OFFICIAL_ADDON_REGISTRY: readonly OfficialAddonEntry[] = [\n  { extensionId: 'ONEGAYI.vsidian-easy-typing', label: '官方输入增强组件（上游 Obsidian Easy-Typing 移植）' },\n]",
       "OFFICIAL_ADDON_EXTENSION_IDS": "/** 判定用 ID 清单（登记表的投影视，供 isOfficialAddon 与文档消费） */\nexport const OFFICIAL_ADDON_EXTENSION_IDS: readonly string[] = OFFICIAL_ADDON_REGISTRY.map(\n  (entry) => entry.extensionId,\n)"
     },
     "src/shared/addonPage.ts": {

@@ -221,3 +221,68 @@ describe('索引维护分页图标（形态改版批次；#332 改名后二轮�
     view.dispose()
   })
 })
+
+// ---- #467：推送/草稿重渲染的滚动与焦点保持 ----
+
+describe('重渲染的滚动与焦点保持（#467）', () => {
+  /** 挂进滚动容器（.vsidian-settings-main）的分区装配：render 经 closest
+   *  发现滚动容器；jsdom 焦点管理要求元素挂在 document 上 */
+  function makeScrolledSection(): { section: IndexMaintenanceSection; sent: unknown[]; parent: HTMLElement; main: HTMLElement } {
+    const sent: unknown[] = []
+    const section = new IndexMaintenanceSection({ postMessage: (m) => sent.push(m) })
+    const main = document.createElement('main')
+    main.className = 'vsidian-settings-main'
+    const parent = document.createElement('div')
+    main.append(parent)
+    document.body.append(main)
+    section.mount(parent)
+    return { section, sent, parent, main }
+  }
+
+  it('Add 行重渲染：焦点回到新增按钮，主区 scrollTop 保持', () => {
+    const { section, parent, main } = makeScrolledSection()
+    try {
+      pushState(section)
+      const add = buttonByLabel(parent, zhCn['indexMaintenance.addPattern'])!
+      add.focus()
+      main.scrollTop = 90
+      add.click() // 本地草稿增行 → render() 整块重建
+      expect(document.activeElement?.textContent).toBe(zhCn['indexMaintenance.addPattern'])
+      expect(main.scrollTop).toBe(90)
+    } finally {
+      main.remove()
+    }
+  })
+
+  it('保存回推（index.state）：焦点回到保存按钮，主区 scrollTop 保持', () => {
+    const { section, sent, parent, main } = makeScrolledSection()
+    try {
+      pushState(section, { patterns: ['**/.git/**'] })
+      const save = buttonByLabel(parent, zhCn['indexMaintenance.savePatterns'])!
+      save.focus()
+      main.scrollTop = 90
+      save.click() // 上送 index.setPatterns；权威回显经 index.state 推送重建
+      expect(sent).toContainEqual({ kind: 'index.setPatterns', patterns: ['**/.git/**'] })
+      pushState(section, { patterns: ['**/.git/**'], notice: { kind: 'patterns-saved' } })
+      expect(document.activeElement?.textContent).toBe(zhCn['indexMaintenance.savePatterns'])
+      expect(main.scrollTop).toBe(90)
+    } finally {
+      main.remove()
+    }
+  })
+
+  it('移除行重渲染：草稿行序收缩，主区 scrollTop 保持', () => {
+    const { section, parent, main } = makeScrolledSection()
+    try {
+      pushState(section, { patterns: ['a/**', 'b/**'] })
+      const removeFirst = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-index-pattern-remove')][0]!
+      removeFirst.focus()
+      main.scrollTop = 60
+      removeFirst.click() // 移除草稿首行 → render() 整块重建
+      expect(inputsOf(parent).map((input) => input.value)).toEqual(['b/**', ''])
+      expect(main.scrollTop).toBe(60)
+    } finally {
+      main.remove()
+    }
+  })
+})

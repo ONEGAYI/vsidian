@@ -133,6 +133,36 @@ try {
   const located = page.locator('.vsidian-addons-list .vsidian-settings-item-located')
   await located.waitFor()
   assert.match(await located.first().innerText(), /Third On/, '点击条目定位组件状态行')
+  // #462 绘制层：条目行定位描边真实绘制（focusBorder 1px + offset 8px），
+  // 列表容器不再套区块级描边（容器级与条目级互斥，消三层叠加）
+  const locatedPaint = await page.evaluate(() => {
+    const list = document.querySelector('.vsidian-addons-list')
+    const row = list?.querySelector('.vsidian-settings-item-located')
+    if (!list || !row) return null
+    const rowCs = getComputedStyle(row)
+    const listCs = getComputedStyle(list)
+    return {
+      rowOutline: `${rowCs.outlineWidth} ${rowCs.outlineStyle} ${rowCs.outlineColor}`,
+      rowOffset: rowCs.outlineOffset,
+      rowRadius: rowCs.borderRadius,
+      listOutlineStyle: listCs.outlineStyle,
+      listLocated: list.classList.contains('vsidian-settings-item-located'),
+    }
+  })
+  assert.ok(locatedPaint, '定位条目行应在场')
+  assert.equal(locatedPaint.rowOutline, '1px solid rgb(38, 135, 212)', '条目行定位描边应绘制（focusBorder 1px）')
+  assert.equal(locatedPaint.rowOffset, '8px', '条目行定位描边外扩 8px（跳转落点档位）')
+  assert.equal(locatedPaint.rowRadius, '3px', '定位高亮圆角 3px（跳转落点档位）')
+  assert.equal(locatedPaint.listOutlineStyle, 'none', '列表容器不得再套区块级描边（层级互斥）')
+  assert.equal(locatedPaint.listLocated, false, '列表容器不带定位高亮类')
+  // #462 一次性退场：约 1.5s 后高亮摘除（跳转落点是一次性导航反馈）
+  await page.waitForTimeout(1700)
+  assert.equal(
+    await page.locator('.vsidian-addons-list .vsidian-settings-item-located').count()
+      + (await page.locator('.vsidian-addons-list.vsidian-settings-item-located').count()),
+    0,
+    '定位高亮应在约 1.5s 后一次性退场',
+  )
 
   // ---- 4. 故障组件设置区排障块（状态 + 日志入口 + 重试入口） ----
   await nav.getByRole('button', { name: /Core A/ }).click()

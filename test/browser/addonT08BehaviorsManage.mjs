@@ -239,8 +239,32 @@ try {
   await located.waitFor()
   await search.fill('')
 
+  // ---- 8. #467 推送重渲染滚动与焦点保持：滚到中部改单项开关 ----
+  // 交互统一「先 preventScroll 聚焦 → 钉滚动 → 程序化 click（对已聚焦
+  // 元素不再引发焦点滚动）」；键盘路径的 Blink 焦点补偿与滚动锚定恢复
+  // 会互相抵消、掩盖丢失向量，不用于本场景
+  await page.setViewportSize({ width: 1100, height: 320 })
+  const main = page.locator('.vsidian-settings-main')
+  await page.evaluate((key) => {
+    document.querySelector(`input[data-behavior-key="${key}"]`)?.focus({ preventScroll: true })
+  }, KEY_TILDE)
+  const pinned = await main.evaluate((el) => {
+    el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)
+    return el.scrollTop
+  })
+  await page.evaluate((key) => {
+    document.querySelector(`input[data-behavior-key="${key}"]`)?.click()
+  }, KEY_TILDE)
+  await page.waitForFunction((key) => document.querySelector(`input[data-behavior-key="${key}"]`)?.checked === false, KEY_TILDE)
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
+  assert.equal(await main.evaluate((el) => el.scrollTop), pinned, '#467 行为开关回推后滚动位置保持（不回顶）')
+  assert.equal(await page.evaluate((key) => document.activeElement?.getAttribute('data-behavior-key'), KEY_TILDE), KEY_TILDE,
+    '#467 行为开关回推后焦点回到同键控件')
+  await page.setViewportSize({ width: 1100, height: 760 })
+
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
   console.log('[#357] 行为冲突管理浏览器回归通过（调序/逐项开关/徽章绘制/详情展开/失败回弹/搜索定位）')
+  console.log('[#467] 行为区推送链路滚动与焦点保持通过（单项开关 × 中部滚动）')
 } finally {
   await browser.close()
 }

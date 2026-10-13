@@ -275,7 +275,7 @@ export interface AddonRegistrationHandle {
 
 **分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#354（T05）
 
-**目标**：官方归属只由主仓库维护的扩展 ID 清单判定（唯一入口 isOfficialAddon）；组件不能自行声明「核心」。初版为空占位——首个官方组件发布时在表内登记。
+**目标**：官方归属只由主仓库维护的扩展 ID 清单判定（唯一入口 isOfficialAddon）；组件不能自行声明「核心」。表内已登记首个官方组件 vsidian-easy-typing，后续官方组件发布时增行登记。
 
 语义要点：
 - **生命周期**：登记官方组件只改 officialAddons.ts；表内容变化不构成兼容性承诺（第三方不得依据曾在表内/表外主张契约）。
@@ -292,12 +292,11 @@ export interface OfficialAddonEntry {
 }
 
 /**
- * 官方（核心）附加组件登记表。初版为空占位——首个官方组件发布时在此
- * 登记；「核心组件」侧栏分组随之从空态转为条目列表。
+ * 官方（核心）附加组件登记表。已登记首个官方组件 vsidian-easy-typing；
+ * 后续官方组件发布时在此增行，「核心组件」侧栏分组随之出现对应条目。
  */
 export const OFFICIAL_ADDON_REGISTRY: readonly OfficialAddonEntry[] = [
-  // 登记样例（形态参考，勿留注释放行）：
-  // { extensionId: 'onegayi.vsidian-official-xxx', label: '官方 xxx 组件' },
+  { extensionId: 'ONEGAYI.vsidian-easy-typing', label: '官方输入增强组件（上游 Obsidian Easy-Typing 移植）' },
 ]
 
 /** 判定用 ID 清单（登记表的投影视，供 isOfficialAddon 与文档消费） */

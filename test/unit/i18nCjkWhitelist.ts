@@ -2,12 +2,11 @@
 // 文件（仓库相对路径）→ 允许在案的 CJK 字面量（集合语义）。
 // 条目失效时契约测试报错，须同步清除。
 // 再生：VSIDIAN_I18N_DUMP_WHITELIST=1 npx vitest run test/unit/i18nNoHardcodedCjk.test.ts
-// 在案说明（防回潮「清零」终态=仅剩永久合法类别，见规格「防回潮纪律」），
-// #101 扫描器升级后仅剩两类：
-// settings.ts「简体中文」为语言自名直显（#96，规格「语言设置项」，不自译）；
-// perfProbe「探」为探针徽标标识——数据流进 view.dispatch 文档编辑负载而非
-// console 文案，属合法永久居所（原 tableEditing 3 条 helper 间接传递已由
-// 扫描器「console 转发 helper」语义放行，不再需要白名单）。
+// 在案说明（防回潮「清零」终态=仅剩永久合法类别，见规格「防回潮纪律」）：
+// 各条目行内注明类别与依据——语言自名（#96）、探针徽标/探针载荷（#5/#371）、
+// 文档性质登记备注（#463）均非用户可见界面文案，属合法永久居所（原
+// tableEditing 3 条 helper 间接传递已由 #101 扫描器「console 转发 helper」
+// 语义放行，不再需要白名单）。
 export const CJK_LITERALS_WHITELIST: Readonly<Record<string, readonly string[]>> = {
   // #96 语言设置项残留：语言自名不自译（规格「语言设置项」）——静态直显的
   // 「简体中文」是刻意的字面量，不随界面语言翻译；title/description 字面量
@@ -25,5 +24,11 @@ export const CJK_LITERALS_WHITELIST: Readonly<Record<string, readonly string[]>>
   // visibility hidden、无命中面），非界面文字不自译，永久在案
   'src/webview/tableMetrics.ts': [
     "汉汉汉",
+  ],
+  // #463 官方组件登记表 label：维护备注（用途/发布仓线索），仅文档性质、
+  // 运行时零消费（UI 显示名来自扩展 displayName），同注释等价不走 t()，
+  // 见 OfficialAddonEntry 接口注释与 #463 探索论证
+  'src/shared/officialAddons.ts': [
+    "官方输入增强组件（上游 Obsidian Easy-Typing 移植）",
   ],
 }
