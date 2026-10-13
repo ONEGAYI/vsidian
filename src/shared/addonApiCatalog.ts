@@ -77,6 +77,8 @@ export interface AddonApiSemantics {
   readonly keymap?: string
   /** 谓词输入的场景命中负载语义（菜单类条目，#436 起） */
   readonly contextPayloads?: string
+  /** 多语言名称形态与语言回落（本地化条目，#464 起） */
+  readonly localization?: string
 }
 
 /** 单个公开接口条目（参考文档的一节） */
@@ -709,17 +711,18 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonBehaviors.ts',
-        symbols: ['AddonBehaviorsFacet', 'AddonBehaviorRegistration', 'AddonInputContext', 'AddonReplacedRange', 'AddonBehaviorInputPlan', 'AddonBehaviorChangeEvent', 'AddonBehaviorRegisterResult'],
+        symbols: ['AddonBehaviorsFacet', 'AddonBehaviorRegistration', 'AddonBehaviorName', 'resolveAddonBehaviorName', 'AddonInputContext', 'AddonReplacedRange', 'AddonBehaviorInputPlan', 'AddonBehaviorChangeEvent', 'AddonBehaviorRegisterResult'],
       },
     ],
     purpose:
-      '注册可组合输入行为：稳定局部 ID + 必填名称 + 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。',
+      '注册可组合输入行为：稳定局部 ID + 必填名称（单语言字符串或多语言映射，映射按页面语言渲染）+ 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。',
     semantics: {
       modes: '合法可编辑 Live 实例（内核先执行只读、IME 组合中间态、表格网格与既有情境门控；IME 组合定稿（composition commit）驱动一次——userEvent input.type.compose、inputText 为净定稿文本，#399；删除事务白名单 backward/forward/selection/cut/line 驱动（dedent 属缩进命令族不纳入），#400）。',
       coordinates: '修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。上下文与观察事件携带 docUri（目标文档 URI，与 views 句柄 targetDocUri 同源：main = 面板文档，embed = 引用目标——在引用 B 内触发时是 B 的 URI，#407）与 replaced（事务替换/删除侧：键入替换选区 = 被替换内容（#401），delete = 被删文本（#400），事务前 LF 坐标，IME 定稿恒 null）。',
       lifecycle: '行为能力与适用条件只由代码表达（不复制进清单）；每次修饰按自己的原子声明提交，提交与身份注入由平台完成（行为不能直接写文档）。',
-      errors: '注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失拒绝、说明/例子缺失允许）。',
+      errors: '注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失或形态非法拒绝、说明/例子缺失允许）。',
       history: '文本变化不终止链（默认可组合）；确需择一的用显式独占组（同组件命名空间内互斥，跨组件不互斥）——不恢复统一「先接管者生效」。',
+      localization: 'name 为多语言映射时键规整 trim+小写（推荐小写 BCP47 连字符形，如 zh-cn/en）；候选链 zh-cn → zh → en（zh 开头页面语言折算，对齐 resolveLocale），非 zh 页面只试 en；全部候选缺失取规整字典序最小键的值（非空呈现、确定性）；映射全链路透传不预解析，语言切换后已注册名跟随（渲染时经 resolveAddonBehaviorName 选值，#464）。纯字符串单语言不随语言切换（历史兼容）。映射条目上限 32、键规整后 ≤64 字符、值同单语言口径（trim 非空 ≤256）；规整后键重复拒绝（zh 与 ZH 共存歧义）。',
     },
     verification: ['test/unit/addonBehaviors.test.ts', 'test/unit/addonBehaviorRuntime.test.ts', 'test/integration/suite/addonT07Cases.ts', 'test/browser/addonT07Behaviors.mjs'],
     introduced: '#356（T07）',

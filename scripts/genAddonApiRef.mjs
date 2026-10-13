@@ -228,6 +228,7 @@ function renderEntry(entry, signatures) {
     sem.language ? `- **暴露面裁剪**：${sem.language}` : null,
     sem.keymap ? `- **按键优先级**：${sem.keymap}` : null,
     sem.contextPayloads ? `- **谓词输入的场景命中负载**：${sem.contextPayloads}` : null,
+    sem.localization ? `- **多语言与本地化**：${sem.localization}` : null,
   ].filter(Boolean)
 
   const signatureBlocks = entry.signatures
