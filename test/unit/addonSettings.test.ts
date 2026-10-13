@@ -253,11 +253,14 @@ describe('#473 enumLabels 与 #475 multiline（string 定义可选呈现字段�
     expect(isAddonSettingDefinition({ key: 'x', title: '非对象', type: 'string', enum: ['a'], default: 'a', enumLabels: '甲' })).toBe(false)
   })
 
-  it('multiline 声明：boolean 合法（true/false 均收），非 boolean 拒绝', () => {
+  it('multiline 声明：boolean 合法（true/false 均收），非 boolean 拒绝；enum 组合互斥', () => {
     expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: true, default: 'a\nb' })).toBe(true)
     expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: false, default: 'ab' })).toBe(true)
     expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: 1, default: 'a' })).toBe(false)
     expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: 'yes', default: 'a' })).toBe(false)
+    // enum（档位下拉）与 multiline（自由文本多行）语义互斥——组合拒绝
+    expect(isAddonSettingDefinition({ key: 'x', title: '组合', type: 'string', enum: ['a'], multiline: true, default: 'a' })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'x', title: '组合假多行', type: 'string', enum: ['a'], multiline: false, default: 'a' })).toBe(false)
   })
 
   it('多行与标签不改变值校验：换行计 1 字符参与 maxLength，enum 校验口径不变', () => {

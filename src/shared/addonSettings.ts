@@ -67,7 +67,8 @@ export type AddonSettingDefinition =
      *  映射；缺失键/缺失整个字段回退渲染枚举值本身。不参与值校验 */
     enumLabels?: Readonly<Record<string, AddonLocalizedText>>
     /** 多行形态声明（#475，仅呈现层）：true 时设置页渲染 textarea，换行符
-     *  参与持久化值；缺省/false 保持单行。不引入内容校验 */
+     *  参与持久化值；缺省/false 保持单行。仅自由文本适用——enum 定义
+     *  （档位下拉）拒绝与本声明组合（形状自洽，拼错早失败）。不引入内容校验 */
     multiline?: boolean
     default: string
   })
@@ -182,6 +183,8 @@ export function isAddonSettingDefinition(value: unknown): value is AddonSettingD
       return isStringSpec({ kind: 'string', maxLength: value.maxLength, enum: value.enum }) &&
         isEnumLabelsValid(value.enumLabels, value.enum as readonly string[] | undefined) &&
         (value.multiline === undefined || typeof value.multiline === 'boolean') &&
+        // enum（档位下拉）与 multiline（自由文本多行）语义互斥——组合即拒绝
+        !(value.multiline !== undefined && value.enum !== undefined) &&
         typeof value.default === 'string' &&
         addonScalarValueMatchesSpec(value.default, {
           kind: 'string',
@@ -277,7 +280,8 @@ export function splitAddonArrayPasteText(text: string, maxLength?: number): stri
   return lines
 }
 
-/** 对象定义的出厂值组装（default 缺省的单一来源：字段 default） */export function composeObjectDefault(def: Extract<AddonSettingDefinition, { type: 'object' }>): Record<string, AddonSettingScalarValue> {
+/** 对象定义的出厂值组装（default 缺省的单一来源：字段 default） */
+export function composeObjectDefault(def: Extract<AddonSettingDefinition, { type: 'object' }>): Record<string, AddonSettingScalarValue> {
   if (def.default !== undefined) {
     return { ...def.default }
   }

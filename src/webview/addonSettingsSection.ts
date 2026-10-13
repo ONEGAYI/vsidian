@@ -880,7 +880,10 @@ export class AddonSection implements SettingsPageSection {
           draft[index] = next
         }, 'input')
         // #475 批量粘贴拆分：string 自由文本项的多行剪贴板按行拆为多项
-        //（首行追加当前项末尾，其余插入其后）；enum/number/boolean 项不适用
+        //（首行追加当前项末尾，其余插入其后）；enum/number/boolean 项不适用。
+        // 拼接结果同样经 maxLength 截断（对齐浏览器单行粘贴按总量的截断
+        // 语义——逐行截断后拼接仍可能超限，草稿不持不可保存值）；
+        // 逐项插入不走 spread（数万行级剪贴板可触发实参上限 RangeError）
         if (def.items.kind === 'string' && def.items.enum === undefined) {
           const items = def.items
           control.addEventListener('paste', (event) => {
@@ -890,8 +893,11 @@ export class AddonSection implements SettingsPageSection {
             const lines = splitAddonArrayPasteText(text, items.maxLength)
             if (lines.length === 0) return
             const current = typeof draft[index] === 'string' ? (draft[index] as string) : ''
-            draft[index] = current + lines[0]!
-            draft.splice(index + 1, 0, ...lines.slice(1))
+            const merged = current + lines[0]!
+            draft[index] = items.maxLength !== undefined && items.maxLength > 0 ? merged.slice(0, items.maxLength) : merged
+            for (let i = 1; i < lines.length; i++) {
+              draft.splice(index + i, 0, lines[i]!)
+            }
             this.drafts.set(def.key, [...draft])
             renderRows()
             const refocus = rows.children[index]?.querySelector<HTMLElement>('[data-addon-array-item]')

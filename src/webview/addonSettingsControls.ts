@@ -72,7 +72,8 @@ export function createScalarItemControl(
       const el = document.createElement('option')
       el.value = option
       // #473 档位标签仅呈现层：option.value 恒为枚举原值，缺失标签回退原值
-      el.textContent = labels !== undefined && option in labels
+      //（hasOwn 不走原型链——枚举值恰为 toString 等原型属性名时不误取）
+      el.textContent = labels !== undefined && Object.hasOwn(labels, option)
         ? resolveLocalizedText(labels[option]!, currentLocaleLang())
         : option
       if (option === current) el.selected = true

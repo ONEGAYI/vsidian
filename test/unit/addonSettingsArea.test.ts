@@ -87,7 +87,7 @@ const DEFINITIONS = [
   },
 ]
 
-/** 构造 addons.settingsState 载荷（默认全 default 来源） */
+/** 构造 addons.settingsState 载荷（默认全 default 来源；可注入自定义定义集） */
 function settingsState(options: {
   open?: string | null
   hasWorkspace?: boolean
@@ -98,19 +98,21 @@ function settingsState(options: {
   hasCustomPage?: boolean
   openAddonSettingsPage?: string | null
   notice?: Record<string, unknown>
+  definitions?: Array<Record<string, unknown>>
 }): HostToWebview {
-  const defaultValueOf = (def: (typeof DEFINITIONS)[number]): unknown => {
+  const definitions = options.definitions ?? DEFINITIONS
+  const defaultValueOf = (def: Record<string, unknown>): unknown => {
     if (def.type === 'object') {
       const composed: Record<string, unknown> = {}
-      for (const field of def.fields ?? []) composed[field.key] = field.default
+      for (const field of (def.fields as Array<Record<string, unknown>>) ?? []) composed[field.key as string] = field.default
       return composed
     }
     return def.default
   }
   const values: Record<string, { effective: unknown; source: string; user?: unknown; workspace?: unknown }> = {}
-  for (const def of DEFINITIONS) {
-    const override = options.values?.[def.key]
-    values[def.key] = {
+  for (const def of definitions) {
+    const override = options.values?.[def.key as string]
+    values[def.key as string] = {
       effective: override?.effective ?? defaultValueOf(def),
       source: override?.source ?? 'default',
       ...(override?.user !== undefined ? { user: override.user } : {}),
@@ -135,7 +137,7 @@ function settingsState(options: {
         workspaceExplicit: options.enabled?.workspaceExplicit ?? null,
         source: options.enabled?.source ?? 'default',
       },
-      definitions: DEFINITIONS,
+      definitions,
       values,
     },
     openAddonSettingsPage: options.openAddonSettingsPage ?? null,
@@ -411,6 +413,32 @@ describe('#473/#475 设置区：枚举档位标签与多行形态', () => {
     first.dispatchEvent(pasteEvent('x\n一二三四五六七八九十十二'))
     const rowInputs = [...h.parent.querySelectorAll('input[data-addon-array-item="replacements"]')] as HTMLInputElement[]
     expect(rowInputs.map((input) => input.value)).toEqual(['旧→新x', '一二三四五六七八九十'])
+  })
+
+  it('首行拼接结果同样经 maxLength 截断——草稿不持不可保存值（审查 F1）', () => {
+    const h = openArea()
+    const first = h.parent.querySelector<HTMLInputElement>('input[data-addon-array-item="replacements"]')!
+    // 当前项 3 字符 + 首行 9 字符 = 12 > maxLength 10：拼接后截为 10
+    first.dispatchEvent(pasteEvent('一二三四五六七八九\n乙'))
+    const rowInputs = [...h.parent.querySelectorAll('input[data-addon-array-item="replacements"]')] as HTMLInputElement[]
+    expect(rowInputs.map((input) => input.value)).toEqual(['旧→新一二三四五六七', '乙'])
+    // 截断后的草稿可整批保存（不触发 save-failed）
+    buttons(h, '保存')[0]!.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsUpdate', addonId: ADDON_ID, scope: 'user', values: { replacements: ['旧→新一二三四五六七', '乙'] } })
+  })
+
+  it('枚举值为原型属性名（toString）时缺失标签回退枚举值本身（审查 F2：hasOwn 不走原型链）', () => {
+    const h = makeView()
+    openAddonsPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
+    h.dispatch(settingsState({
+      definitions: [{
+        key: 'protoMode', title: '原型枚举', type: 'string', enum: ['toString', 'safe'], default: 'toString',
+        enumLabels: { safe: '安全' },
+      }],
+    }))
+    const select = h.parent.querySelector<HTMLSelectElement>('select[data-addon-setting="protoMode"]')
+    expect([...select!.options].map((option) => option.textContent)).toEqual(['toString', '安全'])
   })
 })
 
