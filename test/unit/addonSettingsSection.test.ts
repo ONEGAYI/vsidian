@@ -3,7 +3,7 @@
 // （注册/唤醒/不兼容含声明范围/激活失败含原因/当前宿主不可用不冒充未安
 // 装）、官方与第三方分组、空态、API 版本草案标注、市场搜索与 VSCode 扩
 // 展管理按钮的消息上送。装配口径与生产 settingsMain.ts 同构。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
@@ -485,6 +485,8 @@ describe('设置页侧栏三组结构（T05）', () => {
     // 列表行定位（located 类）
     const list = harness.parent.querySelector('.vsidian-addons-list')
     expect(list?.querySelector('.vsidian-settings-item-located .vsidian-settings-item-title')?.textContent).toContain('Demo')
+    // #462 层级互斥：定位组件时高亮只落条目行，列表容器不套区块级描边
+    expect(list?.classList.contains('vsidian-settings-item-located')).toBe(false)
   })
 
   it('无定义且无设置页的组件条目点击只定位列表行（不强开设置区）', () => {
@@ -496,7 +498,12 @@ describe('设置页侧栏三组结构（T05）', () => {
     const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Plain'))
     item!.click()
     expect(harness.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toEqual([])
-    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
+    // 定位落在条目行上（.vsidian-settings-item），容器本身不带 located
+    const list = harness.parent.querySelector('.vsidian-addons-list')
+    const locatedRow = harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')
+    expect(locatedRow).toBeTruthy()
+    expect(locatedRow?.classList.contains('vsidian-settings-item')).toBe(true)
+    expect(list?.classList.contains('vsidian-settings-item-located')).toBe(false)
   })
 
   it('addons.state 推送后侧栏随之重建（分组数据实时）', () => {
@@ -509,6 +516,79 @@ describe('设置页侧栏三组结构（T05）', () => {
     ]))
     navText = harness.parent.querySelector('nav')?.textContent ?? ''
     expect(navText).toContain('Later')
+  })
+})
+
+// ---- #462：定位高亮层级互斥与一次性退场（跳转落点 = 一次性导航反馈） ----
+
+describe('定位高亮层级互斥与一次性退场（#462）', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function locateBySidebar(harness: ReturnType<typeof makeView>, label: string): void {
+    const nav = harness.parent.querySelector('nav')
+    const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes(label))
+    expect(item).toBeTruthy()
+    item!.click()
+  }
+
+  it('list 级定位：高亮落列表容器本身，不落到条目行（互斥另一半）', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true },
+    ]))
+    // 全局搜索命中「附加组件」list 入口 → render('list') 定位列表容器
+    const search = harness.parent.querySelector<HTMLInputElement>('input.vsidian-settings-search')
+    search!.value = '附加组件'
+    search!.dispatchEvent(new Event('input', { bubbles: true }))
+    const results = [...harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+    const listEntry = results.find((b) => b.querySelector('strong')?.textContent === '附加组件')
+    expect(listEntry).toBeTruthy()
+    listEntry!.click()
+    const list = harness.parent.querySelector('.vsidian-addons-list')
+    expect(list?.classList.contains('vsidian-settings-item-located')).toBe(true)
+    expect(list?.querySelector('.vsidian-settings-item-located')).toBeNull()
+  })
+
+  it('定位高亮一次性退场：约 1.5s 后摘除类，后续推送重渲染不再重现', () => {
+    vi.useFakeTimers()
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    locateBySidebar(harness, 'Demo')
+    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
+    vi.advanceTimersByTime(1500)
+    // 退场：已渲染的高亮类被摘除（定位态清空）
+    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
+    // 此后推送重渲染不重现（locatedAddonId 已清，不再是持久标记）
+    harness.dispatch(addonsState([
+      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-list')?.classList.contains('vsidian-settings-item-located')).toBe(false)
+  })
+
+  it('退场时限内的推送重渲染保持高亮且不叠容器描边；重新定位可再次呈现', () => {
+    vi.useFakeTimers()
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    locateBySidebar(harness, 'Demo')
+    // 时限内的推送（定位后应答回灌）重渲染：条目行高亮保持，容器仍不带
+    harness.dispatch(addonsState([
+      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    const list = harness.parent.querySelector('.vsidian-addons-list')
+    expect(list?.classList.contains('vsidian-settings-item-located')).toBe(false)
+    expect(list?.querySelector('.vsidian-settings-item-located .vsidian-settings-item-title')?.textContent).toContain('Demo')
+    vi.advanceTimersByTime(1500)
+    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
+    // 再次显式定位：高亮重新呈现（一次性退场不清灭后续导航）
+    locateBySidebar(harness, 'Demo')
+    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
   })
 })
 

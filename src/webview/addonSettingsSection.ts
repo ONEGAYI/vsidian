@@ -40,6 +40,10 @@ const ENABLED_KEY = '__enabled__'
 /** 侧栏组件条目定位键前缀（mount 的 focusEntry 形如 addon:<组件 ID>） */
 const SIDEBAR_ADDON_ENTRY_PREFIX = 'addon:'
 
+/** #462 定位高亮一次性退场时限：跳转落点是导航反馈而非持久状态标记，
+ *  呈现约 1.5s 后摘除（ui-patterns §2.4 档位语义） */
+const LOCATED_FADE_MS = 1500
+
 /** 全局搜索定位入口 id（list = 状态列表；manage = 搜索与管理入口组；
  *  behaviors = 行为冲突管理组——T08 #357） */
 export const ADDONS_SECTION_LIST_ENTRY = 'list'
@@ -128,9 +132,12 @@ export class AddonSection implements SettingsPageSection {
   private scope: 'user' | 'workspace' = 'user'
   /** 数组/对象的未保存草稿（定义键 → 草稿值；推送保留，保存成功清除） */
   private drafts = new Map<string, unknown>()
-  /** #354 T05 侧栏条目定位的组件 ID（推送重渲染保持——定位高亮不因
-   *  settingsOpen 的应答回灌清失；下次定位或分页重挂载时更新） */
+  /** #354 T05 侧栏条目定位的组件 ID（推送重渲染在退场时限内保持——定位
+   *  后排定一次性退场（#462），摘除高亮类时一并清空；时限外推送不再重现） */
   private locatedAddonId: string | undefined
+  /** #462 定位高亮退场计时器（显式定位时排定；fire 时清定位态并摘除
+   *  已渲染的高亮类——实例级，跨分页挂载/卸载存续，保证最终退场） */
+  private locatedFadeTimer: ReturnType<typeof setTimeout> | undefined
   private parent: HTMLElement | undefined
 
   constructor(
@@ -226,6 +233,23 @@ export class AddonSection implements SettingsPageSection {
     this.bridge.postMessage(message)
   }
 
+  /** #462 排定定位高亮一次性退场：约 1.5s 后摘除列表区已渲染的 located
+   *  类（列表容器自身与条目行）并清定位态——此后推送重渲染不再重现 */
+  private scheduleLocatedFade(): void {
+    if (this.locatedFadeTimer !== undefined) {
+      clearTimeout(this.locatedFadeTimer)
+    }
+    this.locatedFadeTimer = setTimeout(() => {
+      this.locatedFadeTimer = undefined
+      this.locatedAddonId = undefined
+      this.parent?.querySelectorAll(
+        '.vsidian-addons-list.vsidian-settings-item-located, .vsidian-addons-list .vsidian-settings-item-located',
+      ).forEach((el) => {
+        el.classList.remove('vsidian-settings-item-located')
+      })
+    }, LOCATED_FADE_MS)
+  }
+
   private button(label: string, action: () => void, cls = ''): HTMLButtonElement {
     const el = document.createElement('button')
     el.className = cls
@@ -249,11 +273,19 @@ export class AddonSection implements SettingsPageSection {
       this.locatedAddonId = explicitFocus
     }
     const focusAddonId = this.locatedAddonId
+    // #462 跳转落点是一次性导航反馈：显式定位（列表级或组件条目）排定
+    // 退场计时，推送触发的无参重渲染不重排（不因后续活动延长落点寿命）
+    if (focusEntry === ADDONS_SECTION_LIST_ENTRY || explicitFocus !== undefined) {
+      this.scheduleLocatedFade()
+    }
 
     // ---- 状态列表（官方分组在前；列表未到达时显示读取中） ----
     const listWrap = document.createElement('div')
     listWrap.className = 'vsidian-addons-list'
-    if (focusEntry === ADDONS_SECTION_LIST_ENTRY || focusAddonId !== undefined) {
+    // #462 容器级与条目级定位互斥：定位到具体组件只标条目行——容器描边
+    // （offset 8px 外扩套住标题与卡片）与条目描边、分组灰边框三层叠加是
+    // 票面「圈圈套圈圈」观感来源；列表级定位（list 入口）才描容器本身
+    if (focusEntry === ADDONS_SECTION_LIST_ENTRY) {
       listWrap.classList.add('vsidian-settings-item-located')
     }
     if (!state) {
