@@ -1071,7 +1071,8 @@ export type AddonBehaviorName = string | { readonly [locale: string]: string }
  *   resolveLocale 的 zh* 折算）依次试 'zh-cn'、'zh'、'en'，非 zh 只试
  *   'en'（候选链是固定清单，其余键不参与匹配）；
  * - 全部候选缺失：取规整后字典序最小的键的值（兜底非空呈现、确定性）。
- * 输入应先经守卫（合法映射至少一项），守卫外的空映射属调用方契约外。 */
+ * 输入应先经守卫（合法映射至少一项）；守卫外的空映射返回空串（防御
+ * 早退——不靠非空断言把 undefined 静默传播给消费方）。 */
 export function resolveAddonBehaviorName(name: AddonBehaviorName, localeLang: string): string {
   if (typeof name === 'string') {
     return name
@@ -1088,6 +1089,9 @@ export function resolveAddonBehaviorName(name: AddonBehaviorName, localeLang: st
     if (value !== undefined) {
       return value
     }
+  }
+  if (byNormalizedKey.size === 0) {
+    return ''
   }
   const fallbackKey = [...byNormalizedKey.keys()].sort()[0]!
   return byNormalizedKey.get(fallbackKey)!

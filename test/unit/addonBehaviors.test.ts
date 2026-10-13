@@ -394,4 +394,17 @@ describe('#464 行为名选值回落矩阵（resolveAddonBehaviorName）', () =>
     expect(resolveAddonBehaviorName('括号补全', 'en')).toBe('括号补全')
     expect(resolveAddonBehaviorName('Auto pairs', 'zh-cn')).toBe('Auto pairs')
   })
+
+  it('空映射返回空串（守卫外输入的防御早退——不非空断言传播 undefined）', () => {
+    expect(resolveAddonBehaviorName({}, 'zh-cn')).toBe('')
+    expect(resolveAddonBehaviorName({}, 'en')).toBe('')
+  })
+
+  it('空 localeLang 非 zh 系只试 en（空串不命中 zh 前缀判定）', () => {
+    expect(resolveAddonBehaviorName({ 'zh-cn': '中', en: 'E' }, '')).toBe('E')
+  })
+
+  it('单键映射走兜底路径（字典序最小键即唯一键）', () => {
+    expect(resolveAddonBehaviorName({ fr: '法' }, 'en')).toBe('法')
+  })
 })

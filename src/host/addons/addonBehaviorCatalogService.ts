@@ -36,7 +36,13 @@ export class AddonBehaviorCatalogService {
       this.ports.log('behaviors-report-ignored', addonId, `runState=${runState ?? 'unregistered'} generation=${generation}`)
       return
     }
-    const snapshot = behaviors.map((entry) => ({ ...entry, examples: entry.examples === undefined ? undefined : [...entry.examples] }))
+    // 防御拷贝（防外泄引用）：name 映射形态与 examples 同口径做拷贝——
+    // string 形态不可变原样保留，映射形态浅拷一层防调用方事后 mutate
+    const snapshot = behaviors.map((entry) => ({
+      ...entry,
+      name: typeof entry.name === 'string' ? entry.name : { ...entry.name },
+      examples: entry.examples === undefined ? undefined : [...entry.examples],
+    }))
     const previous = this.byAddon.get(addonId)
     if (previous !== undefined && sameTable(previous, snapshot)) {
       return

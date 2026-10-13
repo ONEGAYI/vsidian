@@ -131,4 +131,14 @@ describe('#464 多语言行为名的目录等值比较（sameTable 深比较）'
     // 目录如实反映最新形态
     expect(h.service.catalog()[0]!.name).toEqual({ 'zh-cn': '单语言名' })
   })
+
+  it('快照防御拷贝 map 形态 name（mutate 上报原对象不影响目录——防外泄引用与 examples 同口径）', () => {
+    const h = createHarness({ 'pub.a': 'enabled' })
+    const reportName: Record<string, string> = { en: 'Auto pairs', 'zh-cn': '括号补全' }
+    h.service.syncReport('pub.a', 1, [infoWithName(reportName)])
+    // 调用方事后改写上报载荷的映射对象：目录不得跟随（同一引用外泄）
+    reportName['zh-cn'] = '被篡改'
+    delete reportName['en']
+    expect(h.service.catalog()[0]!.name).toEqual({ en: 'Auto pairs', 'zh-cn': '括号补全' })
+  })
 })

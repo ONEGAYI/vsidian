@@ -36,6 +36,8 @@ const wsDir = process.env['WORKSPACE_DIR'] ?? ''
 const KEY_DASH = `${ADDON_ID}#dash-fill`
 const KEY_SPACE = `${ADDON_ID}#space-fill`
 const KEY_TILDE = `${ADDON_ID}#tilde-fill`
+/** #464 多语言名载体行为（恒不修饰）：全关/重置面与三行为同列 */
+const KEY_LOCALE = `${ADDON_ID}#locale-name`
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -203,7 +205,7 @@ async function closeAllEditors(): Promise<void> {
 /** 行为状态恢复默认（防跨用例污染；幂等） */
 async function resetBehaviorState(): Promise<void> {
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', { order: [] })
-  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE], disabled: false })
+  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE], disabled: false })
 }
 
 export const addonT07Cases: Array<[string, () => Promise<void>]> = [
@@ -228,8 +230,9 @@ export const addonT07Cases: Array<[string, () => Promise<void>]> = [
       `名称缺失应拒绝：${JSON.stringify(results)}`)
     await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
 
-    // 默认序（字典序 dash → space → tilde）链执行：键入 ^ 后 dash 插 -，
-    // space（组内先于 tilde 适用）读前序结果后再插空格，tilde 同组被占不调
+    // 默认序（字典序 dash → locale-name → space → tilde；locale-name 恒不
+    // 修饰，等效于 dash → space → tilde 的三行为链）链执行：键入 ^ 后 dash
+    // 插 -，space（组内先于 tilde 适用）读前序结果后再插空格，tilde 同组被占不调
     const chainInbox = new EventInbox()
     await typeAt(file, 4, '^')
     try {
@@ -342,13 +345,15 @@ export const addonT07Cases: Array<[string, () => Promise<void>]> = [
     await resetDocAndOpen(file, 'word\n')
     await probeRegistrations(file)
 
-    // 全部关闭：输入仍达观察者（changed 事件），但零修饰零提交
+    // 全部关闭：输入仍达观察者（changed 事件），但零修饰零提交。
+    // locale-name 也纳入全关面（其回调恒不修饰，关闭仅影响目录/管理面
+    // 呈现——全关语义覆盖夹具全部四行为，非仅三修饰行为）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', {
-      keys: [KEY_DASH, KEY_SPACE, KEY_TILDE], disabled: true,
+      keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE], disabled: true,
     })
     await poll('全关推送到达', async () => {
       const stats = await behaviorStats(file)
-      return stats?.hostState?.disabled?.length === 3 ? stats : undefined
+      return stats?.hostState?.disabled?.length === 4 ? stats : undefined
     })
     const drivesBefore = (await behaviorStats(file))?.counters.drives ?? 0
     await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
