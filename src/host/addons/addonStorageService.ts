@@ -18,6 +18,7 @@ import {
   type AddonStorageListResult,
   type AddonStorageResult,
 } from '../../shared/addonStorage'
+import { isFileNotFound } from '../../shared/imageRefresh'
 
 /** 文件系统端口（vscode 层实现 = vscode.workspace.fs；路径为正斜杠
  * 归一后的绝对文件系统路径；FileType 沿用 vscode 枚举数值——File=1、
@@ -172,7 +173,18 @@ async function collectEntries(
   recursive: boolean,
   out: AddonStorageEntryInfo[],
 ): Promise<void> {
-  for (const [name, type] of await deps.fs.readDirectory(dir)) {
+  let entries: Array<[string, number]>
+  try {
+    entries = await deps.fs.readDirectory(dir)
+  } catch (err) {
+    // #461 目标目录不存在（存储根惰性未建 / 显式列不存在的子目录 / 递归
+    // 中途被外部删除）= 空存储，不是 IO 故障——该层返回零条目；其余错误
+    // 照常冒泡（listDirectory 统一 error 拒绝）。判定复用 isFileNotFound
+    // 单一口径（同时覆盖 vscode FileNotFound 与 node fs ENOENT 透传）。
+    if (isFileNotFound(err)) return
+    throw err
+  }
+  for (const [name, type] of entries) {
     if (type === FILE_TYPE.directory) {
       out.push({ path: `${prefix}${name}`, kind: 'directory' })
       if (recursive) {

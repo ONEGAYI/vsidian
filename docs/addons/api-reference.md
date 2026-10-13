@@ -1229,8 +1229,8 @@ export function mergeBehaviorOrderPreservingUnknown(
 语义要点：
 - **适用模式**：仅宿主端（编辑器/设置页面不直接提供——经组件通道桥接）。
 - **坐标与数据形状**：相对路径为正斜杠形态，先过 isSafeAddonStoragePath 守卫（越界/非法一律 invalid-path 拒绝——普通 API 拒绝不算故障）；文件内容按 UTF-8 文本读写。
-- **生命周期**：目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件停用/故障/代次终结时平台统一注销；onDidChangeFile 回调回 (相对路径, change|delete)，change 含改写与新建。
-- **错误与拒绝**：invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因）——可辨认拒绝，不抛出。
+- **生命周期**：目录 = <vsidian globalStorage>/addons/<addonId>（按需创建；list 对不存在目录（含根目录未建）返回空清单——未建目录 = 空存储，#461）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件停用/故障/代次终结时平台统一注销；onDidChangeFile 回调回 (相对路径, change|delete)，change 含改写与新建。
+- **错误与拒绝**：invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因；list 的目标目录不存在不属 error——返回空清单，#461）——可辨认拒绝，不抛出。
 
 签名事实源：`src/shared/addonStorage.ts`
 
@@ -1245,7 +1245,8 @@ export interface AddonStorageFacet {
   readFile(relativePath: string): Promise<AddonStorageResult<string>>
   /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */
   writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>
-  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层） */
+  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层；目标目录不
+   * 存在——含根目录未建——返回空清单：未建目录 = 空存储，#461） */
   list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>
   /** 删文件（不删目录——目录生命周期归卸载策略） */
   deleteFile(relativePath: string): Promise<AddonStorageResult<null>>
@@ -1270,7 +1271,9 @@ export interface AddonStorageEntryInfo {
 }
 
 /** 拒绝码：invalid-path = 越界/非法相对路径；too-large = 单文件超限；
- * error = IO 失败（不存在/权限等，detail 归因） */
+ * error = IO 失败（权限等，detail 归因）。例外：list 的目标目录不存在
+ * （含存储根未建）不算 error——未建目录 = 空存储，返回空清单（#461）；
+ * readFile 的文件不存在仍为 error（读不到内容无从正常化）。 */
 export type AddonStorageRejection = 'invalid-path' | 'too-large' | 'error'
 
 /** 相对路径守卫：正斜杠相对路径，段非空且不为 `.`/`..`，无反斜杠、
