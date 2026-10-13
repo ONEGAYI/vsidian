@@ -109,6 +109,16 @@ describe('附加组件公开声明消费面（T13）', () => {
     expect(symbols.has('resolveAddonBehaviorName'), '消费面应导入 resolveAddonBehaviorName（选值纯函数）').toBe(true)
   })
 
+  it('#476 行为禁用态只读面已进消费面（behaviorState 进 SdkSurface 与 facet 钉住防回潮）', () => {
+    // 从消费面移除 behaviorState 的任一消费（SdkSurface Pick 键、facet
+    // 形状钉住、快照 union 钉住）即红——只读面的公开消费由本断言钉住
+    const source = readFileSync(consumerPath, 'utf8')
+    expect(source.includes("'behaviorState'"), 'SdkSurface 应 Pick behaviorState 键').toBe(true)
+    expect(source.includes('BehaviorStateSurface'), '消费面应含 BehaviorStateSurface 钉住').toBe(true)
+    expect(source.includes('AddonBehaviorEnabledState'), '消费面应导入 AddonBehaviorEnabledState（快照形状）').toBe(true)
+    expect(source.includes('behaviorRunStatesPinned'), '消费面应钉住 AddonBehaviorRunState union').toBe(true)
+  })
+
   it('#473/#475 设置定义呈现形态已进消费面（AddonLocalizedText 类型导入与 enumLabels/multiline 消费样例防回潮）', () => {
     // 删除公开符号或呈现字段（或从消费面移除其消费）即红——标签值形态
     // 与 string 定义新字段的公开消费由本断言钉住

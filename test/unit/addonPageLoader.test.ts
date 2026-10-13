@@ -12,6 +12,7 @@ import { Compartment, EditorState, StateField, type Extension, type StateField a
 import { EditorView } from '@codemirror/view'
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 import { AddonBehaviorRuntime } from '../../src/webview/addonBehaviors'
+import { AddonBehaviorEnabledStateRuntime } from '../../src/webview/addonBehaviorEnabledState'
 import { addonInstanceIdField, setAddonInstanceId } from '../../src/webview/addonViewIdentity'
 import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
@@ -992,5 +993,66 @@ describe('#426 视图身份反查面（experimental.viewIdentity）', () => {
     const bare = identity!.instanceIdOf
     expect(bare(view)).toBe('embed:h1')
     view.destroy()
+  })
+})
+
+describe('#476 行为禁用态只读面（behaviorState）：编辑器页与设置页均提供', () => {
+
+  it('编辑器页：工厂收到 sdk.behaviorState，查询返回注入快照、订阅经 runtime 分发', async () => {
+    const runtime = new AddonBehaviorEnabledStateRuntime()
+    const h = harness({ addonBehaviorEnabledState: runtime })
+    let snapshot: unknown
+    let notified: unknown[] = []
+    registerFactory(h, (sdk) => {
+      const facet = sdk.behaviorState
+      snapshot = facet?.enabledState()
+      facet?.onEnabledChange((state) => notified.push(state))
+    })
+    await h.handle.load(manifest())
+    expect(snapshot).toEqual({ addonRunState: 'enabled', disabled: [] })
+    runtime.applyBroadcast({
+      disabled: [`${ADDON_ID}#rule-x`],
+      addons: [{ addonId: ADDON_ID, addonRunState: 'user-disabled' }],
+    })
+    expect(notified).toEqual([{ addonRunState: 'user-disabled', disabled: ['rule-x'] }])
+  })
+
+  it('设置页：面同样提供（两端点同形——与 behaviors 面的仅编辑器页对照）', async () => {
+    const runtime = new AddonBehaviorEnabledStateRuntime()
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonBehaviorEnabledState: runtime })
+    let snapshot: unknown
+    registerFactory(h, (sdk) => {
+      snapshot = sdk.behaviorState?.enabledState()
+    })
+    runtime.applyBroadcast({
+      disabled: [`${ADDON_ID}#rule-y`],
+      addons: [{ addonId: ADDON_ID, addonRunState: 'enabled' }],
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    expect(snapshot).toEqual({ addonRunState: 'enabled', disabled: ['rule-y'] })
+    // 设置页 behaviors 面仍不提供（既有契约不动——D1）
+    let behaviorsFacet: unknown = 'unset'
+    registerFactory(h, (sdk) => { behaviorsFacet = sdk.behaviors }, ADDON_ID, h.now() + 5)
+    await h.handle.load(manifest({ page: 'settings', generation: 2, scriptUri: 'https://page.test/addon.js' }))
+    expect(behaviorsFacet).toBeUndefined()
+  })
+
+  it('env 未注入时面为 undefined（旧装配兼容——测试夹具可省略）', async () => {
+    const h = harness()
+    let facet: unknown = 'unset'
+    registerFactory(h, (sdk) => { facet = sdk.behaviorState })
+    await h.handle.load(manifest())
+    expect(facet).toBeUndefined()
+  })
+
+  it('卸载后查询仍返回最后已知快照、订阅静默（只读面无副作用——不发明拒绝形态）', async () => {
+    const runtime = new AddonBehaviorEnabledStateRuntime()
+    const h = harness({ addonBehaviorEnabledState: runtime })
+    let facet: import('../../src/shared/addonBehaviors').AddonBehaviorStateFacet | undefined
+    registerFactory(h, (sdk) => { facet = sdk.behaviorState })
+    await h.handle.load(manifest())
+    runtime.applyBroadcast({ disabled: [], addons: [{ addonId: ADDON_ID, addonRunState: 'user-disabled' }] })
+    await h.handle.unload(ADDON_ID, 1)
+    expect(facet!.enabledState()).toEqual({ addonRunState: 'user-disabled', disabled: [] })
   })
 })

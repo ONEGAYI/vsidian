@@ -78,10 +78,13 @@ import {
 import {
   resolveAddonBehaviorName,
   type AddonBehaviorChangeEvent,
+  type AddonBehaviorEnabledState,
   type AddonBehaviorName,
   type AddonBehaviorRegistration,
   type AddonBehaviorsFacet,
   type AddonBehaviorRegisterResult,
+  type AddonBehaviorRunState,
+  type AddonBehaviorStateFacet,
 } from '../../src/shared/addonBehaviors'
 import type {
   AddonLocalizedText,
@@ -183,13 +186,15 @@ export const loadFailureReasonsPinned: Equals<AddonLoadFailureReason, PinnedLoad
 
 // ---- facet 形状钉住（Pick 键不存在即编译失败——删除/改名公开成员被发现） ----
 
-/** 页面 SDK 十三个公开面（六个能力 facet + 装配/资源/通信/释放） */
+/** 页面 SDK 十四个公开面（六个能力 facet + 装配/资源/通信/释放；#476 起
+ *  含 behaviorState 只读面） */
 export type SdkSurface = Pick<
   VsidianAddonPageSdk,
   | 'addon'
   | 'experimental'
   | 'views'
   | 'behaviors'
+  | 'behaviorState'
   | 'commands'
   | 'menus'
   | 'renderers'
@@ -211,6 +216,8 @@ export type Cm6LanguageSurface = Pick<
 >
 /** behaviors 面（注册与只读观察分开） */
 export type BehaviorsSurface = Pick<AddonBehaviorsFacet, 'register' | 'onChanged'>
+/** #476 行为禁用态只读面（查询 + 订阅双件——无写入成员） */
+export type BehaviorStateSurface = Pick<AddonBehaviorStateFacet, 'enabledState' | 'onEnabledChange'>
 /** renderers 面 */
 export type RenderersSurface = Pick<AddonRenderersFacet, 'register'>
 /** 宿主导出 API */
@@ -256,6 +263,16 @@ export type MenuScenePayloadShapes = {
 export type BehaviorShapes = {
   registration: AddonBehaviorRegistration
   changeEvent: AddonBehaviorChangeEvent
+}
+
+/** #476 行为禁用态：运行态 union 钉住（接口冻结面——扩态是契约变更）；
+ *  快照形状与订阅回调参数同源（消费组合证明声明互相咬合） */
+export type PinnedBehaviorRunStates = 'enabled' | 'user-disabled'
+export const behaviorRunStatesPinned: Equals<AddonBehaviorRunState, PinnedBehaviorRunStates> = true
+export type BehaviorEnabledStateShapes = {
+  snapshot: AddonBehaviorEnabledState
+  changeCallbackParam: Parameters<Parameters<AddonBehaviorStateFacet['onEnabledChange']>[0]>[0]
+  unsubscribeReturn: ReturnType<AddonBehaviorStateFacet['onEnabledChange']>
 }
 
 /** #464 多语言行为名：union 形状钉住（string | 语言键映射）——收窄或

@@ -16,6 +16,7 @@ import { AddonSection } from './addonSettingsSection'
 import { AddonBehaviorManageSection } from './addonBehaviorManageSection'
 import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from './addonSettingsAreaSection'
 import { installAddonPageLoader, type AddonPageLoaderHandle } from './addonPageLoader'
+import { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
 import { isTrustedHostMessageSource } from './untrustedFrame'
@@ -41,9 +42,14 @@ installTooltipCard()
 // 挂载容器为持久 host 元素（不随分页重渲染销毁——AddonSection 按当前打开
 // 的组件设置页把它装进分页内容区；面板隐藏即销毁的既有语义不变）
 const addonSettingsHost = document.createElement('div')
+// #476 行为禁用态 runtime（设置页一份）：SDK behaviorState 面在设置页
+// 同样提供（两端点同形——组件规则页灰态消费场景：被停用后设置页不卸载，
+// 仍可查询与订阅；广播经 addon.behaviorEnabledState 到达）
+const addonBehaviorEnabledState = new AddonBehaviorEnabledStateRuntime()
 const addonLoader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'settings',
   mountContainer: addonSettingsHost,
+  addonBehaviorEnabledState,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
 
@@ -147,6 +153,12 @@ window.addEventListener('message', (event) => {
   // 代次与释放由装载器自持；指令只在 trusted 桥消息内到达）
   if (isHostToWebview(event.data) && event.data.kind === 'addonPage.directive') {
     addonLoader.handleDirective(event.data.directive)
+    return
+  }
+  // #476 行为禁用态广播（页面级 runtime 消费——设置页 SDK behaviorState
+  // 面的数据源；组件启停与行为开关落库后即时到达）
+  if (isHostToWebview(event.data) && event.data.kind === 'addon.behaviorEnabledState') {
+    addonBehaviorEnabledState.applyBroadcast(event.data.state)
     return
   }
   // #359 T10 组件命令目录：合并视图更新 + 快捷键分页重渲染（设置页自身

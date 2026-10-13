@@ -19,6 +19,7 @@ import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
 import { AddonViewRegistry } from './addonViews'
 import { AddonBehaviorRuntime } from './addonBehaviors'
+import { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
 import { AddonCommandsRuntime } from './addonCommands'
 import { AddonUiRuntime } from './addonUi'
 import { addonCm6LanguageSubset, installAddonPageLoader } from './addonPageLoader'
@@ -75,6 +76,9 @@ controller.mount(document.getElementById('app') ?? document.body, [
 // 先例解装配环；上报只经宿主裁决，本页回收由 unload 指令对账）
 let reportAddonRuntimeFault: (addonId: string, stage: string, detail: string) => boolean = () => false
 const addonViews = new AddonViewRegistry()
+// #476 行为禁用态 runtime（页面级一份）：SDK behaviorState 面的缓存与
+// 订阅分发后端（只读——无写回宿主的成员）
+const addonBehaviorEnabledState = new AddonBehaviorEnabledStateRuntime()
 const addonBehaviors = new AddonBehaviorRuntime({
   snapshotOf: (instanceId) => addonViews.snapshotOf(instanceId),
   docUriOf: (instanceId) => addonViews.infoOf(instanceId)?.targetDocUri,
@@ -118,6 +122,9 @@ const addonLoader = installAddonPageLoader({
   attachExtensions: (extensions) => controller.reconfigureAddonExtensions(extensions),
   addonViews,
   addonBehaviors,
+  // #476 行为禁用态只读面：SDK behaviorState 的操作后端（广播经
+  // addon.behaviorEnabledState 到达——宿主在装载指令同拍或之前推送）
+  addonBehaviorEnabledState: addonBehaviorEnabledState,
   addonCommands,
   addonRenderers,
   addonUi,
@@ -178,6 +185,12 @@ window.addEventListener('message', (event) => {
   // 覆盖——默认序全开启）
   if (isHostToWebview(event.data) && event.data.kind === 'addon.behaviors.state') {
     addonBehaviors.applyHostState(event.data.state)
+    return
+  }
+  // #476：行为禁用态广播（页面级 runtime 消费——SDK behaviorState 面
+  // 的数据源；组件启停与行为开关落库后即时到达）
+  if (isHostToWebview(event.data) && event.data.kind === 'addon.behaviorEnabledState') {
+    addonBehaviorEnabledState.applyBroadcast(event.data.state)
     return
   }
   // T09（#358）：宿主渲染提供者生效表广播（等值跳过；变化即热切换）

@@ -38,7 +38,7 @@ import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSett
 import { AddonStorageService } from './addonStorageService'
 import { AddonBehaviorStateService } from './addonBehaviorStateService'
 import { AddonBehaviorCatalogService } from './addonBehaviorCatalogService'
-import { mergeBehaviorOrderPreservingUnknown } from '../../shared/addonBehaviors'
+import { mergeBehaviorOrderPreservingUnknown, type AddonBehaviorEnabledStateBroadcast } from '../../shared/addonBehaviors'
 import { AddonCommandService } from './addonCommandService'
 import { AddonRendererService, type AddonRendererPersistencePort } from './addonRendererService'
 import { isAddonRenderersRegisteredPayload } from '../../shared/addonRenderers'
@@ -654,6 +654,36 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   }
 
   /**
+   * #476 行为禁用态广播（SDK behaviorState 面的数据源；编辑器面板与设置
+   * 面板同拍同形）。disabled 与存储 version 1 同源（完整键集）；addons 只
+   * 列 enabled / user-disabled 两态组件——faulted（设置页不装载、编辑器页
+   * 整组件回收）与 idle（未激活，页面不存在）对组件页语义不可达，不进表
+   * （webview 端缺省回落 enabled）。面板销毁静默容忍（ready/状态变化重推）。
+   */
+  const buildBehaviorEnabledStateBroadcast = (): AddonBehaviorEnabledStateBroadcast => {
+    const addons: Array<{ addonId: string; addonRunState: 'enabled' | 'user-disabled' }> = []
+    for (const entry of coordinator.stateEntries()) {
+      const runState = runtime.runtimeStatus(entry.id)?.runState
+      if (runState === 'enabled') {
+        addons.push({ addonId: entry.id, addonRunState: 'enabled' })
+      } else if (runState === 'disabled') {
+        addons.push({ addonId: entry.id, addonRunState: 'user-disabled' })
+      }
+    }
+    return { disabled: [...behaviorStateService.snapshot().disabled], addons }
+  }
+  const postBehaviorEnabledState = (webview: vscode.Webview): void => {
+    try {
+      void webview.postMessage({
+        kind: 'addon.behaviorEnabledState',
+        state: buildBehaviorEnabledStateBroadcast(),
+      }).then(undefined, () => {})
+    } catch {
+      // 面板已销毁：下次对账（ready/状态变化）重推
+    }
+  }
+
+  /**
    * T08（#357）行为冲突管理载荷下发（设置页消费：注册目录 + 用户覆盖 +
    * 最近写操作 notice）。常规推送不带 notice（不残留旧结局）；面板销毁
    * 静默容忍（重开经 addons.behaviorsGet 拉取权威态）。
@@ -681,6 +711,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     // T07（#356）行为状态下发（随装载指令对账同拍：ready/状态变化/显式
     // pushDirectives 都经此处；null = 无用户覆盖——默认序全开启）
     postBehaviorState(record.webview)
+    // #476 行为禁用态广播（先于装载指令：工厂执行时 SDK behaviorState
+    // 已持权威值——停用后新装载的设置页同拍语义见 pushSettingsDirectives）
+    postBehaviorEnabledState(record.webview)
     const desired = runtime.desiredEditorLoads()
     const desiredIds = new Set(desired.map((plan) => plan.addonId))
     // 停用/故障/释放的组件：推送 unload（携带最后装载代次；装载器幂等）
@@ -898,6 +931,10 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   let settingsPanel: SettingsPanelRecord | undefined
 
   const pushSettingsDirectives = (record: SettingsPanelRecord): void => {
+    // #476 行为禁用态广播（先于装载指令到达——同 webview postMessage 保
+    // 序：停用后新装载/保持装载的设置页，工厂里 enabledState() 即读到
+    // user-disabled，不等下一次状态变化）
+    postBehaviorEnabledState(record.webview)
     const desired = runtime.desiredSettingsLoad()
     if (desired === null) {
       if (record.pushed) {
@@ -1195,13 +1232,16 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
 
   // T07（#356）行为状态变化（排序/开关成功落库后）→ 全部活跃编辑器面板
   // 即时推送（webview runtime applyHostState 即时生效——不经 CM6 装配）；
-  // T08（#357）起设置页同步回推权威态（管理列表勾选与次序回显）
+  // T08（#357）起设置页同步回推权威态（管理列表勾选与次序回显）；
+  // #476 起禁用态广播两页同拍（SDK behaviorState 订阅者落库后即时收到）
   behaviorStateService.onChanged(() => {
     for (const record of [...editorPanels.values()]) {
       postBehaviorState(record.webview)
+      postBehaviorEnabledState(record.webview)
     }
     if (settingsPanel) {
       postBehaviorCatalog(settingsPanel.webview)
+      postBehaviorEnabledState(settingsPanel.webview)
     }
   })
 

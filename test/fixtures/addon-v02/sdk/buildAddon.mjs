@@ -97,6 +97,18 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 't07-addon', 'dist', 'editor.js'),
       note: 't07-addon 编辑器页',
     },
+    // #476：行为禁用态只读面夹具组件（编辑器页 + 设置页两入口——
+    // behaviorState 面消费与事件上报）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'bstateEditor.ts'),
+      outfile: path.join(buildRoot, 'bstate-addon', 'dist', 'editor.js'),
+      note: 'bstate-addon 编辑器页',
+    },
+    {
+      entry: path.join(fixtureRoot, 'addon', 'bstateSettings.ts'),
+      outfile: path.join(buildRoot, 'bstate-addon', 'dist', 'settings.js'),
+      note: 'bstate-addon 设置页',
+    },
     // #358 T09：渲染提供者夹具组件（编辑器页 renderers.register 消费）
     {
       entry: path.join(fixtureRoot, 'addon', 't09Renderer.ts'),
@@ -206,6 +218,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     t07Addon: {
       installDir: path.join(buildRoot, 't07-addon'),
       distDir: path.join(buildRoot, 't07-addon', 'dist'),
+    },
+    // #476：禁用态面夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-bstate）
+    bstateAddon: {
+      installDir: path.join(buildRoot, 'bstate-addon'),
+      distDir: path.join(buildRoot, 'bstate-addon', 'dist'),
     },
     // #358 T09：夹具组件布局（runTest.mjs 拷入 addonFixtures/addon-t09）
     t09Addon: {

@@ -15,7 +15,7 @@ import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './ed
 import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './editOrigin'
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
-import { isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
+import { isAddonBehaviorEnabledStateBroadcast, isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
 import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
@@ -952,6 +952,11 @@ export type HostToWebview =
    *  webview 重载（addonPage.ready）与宿主状态变化时推送；null = 无
    *  用户覆盖（全新默认态） */
   | { kind: 'addon.behaviors.state'; state: import('./addonBehaviors').AddonBehaviorStateStore | null }
+  /** #476 行为禁用态广播（宿主 → 编辑器与设置 webview）：SDK
+   *  behaviorState 面的数据源（disabled 完整键集 + 组件运行态表——
+   *  AddonBehaviorEnabledStateBroadcast）。面板 ready 对账、组件启停与
+   *  行为开关落库后推送；编辑器面板与设置面板同拍同形 */
+  | { kind: 'addon.behaviorEnabledState'; state: import('./addonBehaviors').AddonBehaviorEnabledStateBroadcast }
   /** #359 T10 组件命令目录（宿主 → webview）：当前全部在场组件命令表
    *  （设置页快捷键分页合并展示与冲突检查的消费面；编辑器面板不消费）。
    *  设置页经 addons.commandCatalogGet 拉取，宿主目录变化后主动推送 */
@@ -5546,6 +5551,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // T07（#356）行为状态内层守卫（单一事实源在 shared/addonBehaviors；
       // null = 无用户覆盖）
       return v.state === null || parseAddonBehaviorStateStore(v.state) !== null
+    case 'addon.behaviorEnabledState':
+      // #476 行为禁用态广播内层守卫（单一事实源在 shared/addonBehaviors）
+      return isAddonBehaviorEnabledStateBroadcast(v.state)
     case 'addons.commandCatalog':
       // #359 T10 组件命令目录推送（形态与 addonCommands.report 内层同构）
       return Array.isArray(v.commands) &&

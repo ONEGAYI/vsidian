@@ -153,6 +153,7 @@ vsidian/
     │   ├── wikilinkQuery.ts        # 双链联想查询评分移植
     │   └── wordSegment.ts          # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
+        ├── addonBehaviorEnabledState.ts  # 行为禁用态只读面 runtime
         ├── addonBehaviorManageSection.ts # 设置页输入行为管理分页
         ├── addonBehaviors.ts             # 输入行为页面级链执行
         ├── addonCommands.ts              # 编辑器页命令/菜单注册表运行时

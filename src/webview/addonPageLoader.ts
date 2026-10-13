@@ -36,12 +36,13 @@ import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '.
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
 import type { AddonHostSettingsFacet } from '../shared/addonHostSettingsApi'
 import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
-import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
+import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
 import type { AddonViewsRuntime } from './addonViews'
 import { addonInstanceIdField } from './addonViewIdentity'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
+import type { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
 import type { AddonCommandsRuntime } from './addonCommands'
 import type { AddonUiRuntime } from './addonUi'
 import { addonHostSettingGet } from '../shared/addonHostSettingsApi'
@@ -110,6 +111,9 @@ export interface AddonPageLoaderEnv {
   /** T07（#356）输入行为 runtime（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 behaviors 面） */
   addonBehaviors?: AddonBehaviorRuntime
+  /** #476 行为禁用态 runtime（编辑器页与设置页均由各自入口构造注入；
+   *  省略时 SDK 不提供 behaviorState 面——旧装配与最小测试夹具兼容） */
+  addonBehaviorEnabledState?: AddonBehaviorEnabledStateRuntime
   /** T10（#359）命令与菜单注册表（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 commands/menus 面，releaseLoad 时亦不做回收） */
   addonCommands?: AddonCommandsRuntime
@@ -439,11 +443,22 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
           onChanged: (callback) => env.addonBehaviors!.onChanged(callback),
         }
       : undefined
+    // #476 行为禁用态只读面：编辑器页与设置页均提供（两端点同形——env
+    //  在场即挂面，无 page 条件）。查询与订阅均不做代次守卫（只读快照无
+    //  副作用，已释放代次返回最后已知值——观察面与 behaviors.onChanged
+    //  同款口径，规格 D2/D3）
+    const behaviorStateFacet: AddonBehaviorStateFacet | undefined = env.addonBehaviorEnabledState
+      ? {
+          enabledState: () => env.addonBehaviorEnabledState!.enabledStateOf(loadRecord.addonId),
+          onEnabledChange: (callback) => env.addonBehaviorEnabledState!.onEnabledChangeOf(loadRecord.addonId, callback),
+        }
+      : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
       experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet, hostSettings: hostSettingsFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
+      ...(behaviorStateFacet ? { behaviorState: behaviorStateFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
           register: (def, handler) => {

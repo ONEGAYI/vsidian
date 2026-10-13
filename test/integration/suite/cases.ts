@@ -15,6 +15,7 @@ import { addonStorageCases } from './addonStorageCases'
 import { addonT06Cases } from './addonT06Cases'
 import { addonT07Cases } from './addonT07Cases'
 import { addonT08Cases } from './addonT08Cases'
+import { addonBehaviorStateCases } from './addonBehaviorStateCases'
 import { addonT09Cases } from './addonT09Cases'
 import { addonT10Cases } from './addonT10Cases'
 import { addonT11Cases } from './addonT11Cases'
@@ -17949,6 +17950,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // T08（#357）行为冲突管理：目录上报对账、真实设置页通道调序与单项
   // 关闭、整体停用区分与恢复（断言面见 addonT08Cases.ts 头注）
   ...addonT08Cases,
+  // #476：行为禁用态只读可见面（编辑器页/设置页挂面、单项禁用与组件
+  // 停用的落库后即时通知、停用后仍可查询——断言面见
+  // addonBehaviorStateCases.ts 头注）
+  ...addonBehaviorStateCases,
   // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
   // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
   ...addonT09Cases,
