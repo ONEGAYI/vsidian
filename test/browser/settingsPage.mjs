@@ -313,10 +313,60 @@ try {
     await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
     const refTabs = page.locator('.vsidian-style-ref-tab')
     await refTabs.first().waitFor()
-    assert.equal(await refTabs.count(), 3)
+    assert.equal(await refTabs.count(), 4)
     assert.equal(await refTabs.nth(0).textContent(), zhCn['cssSnippets.title'])
     assert.equal(await refTabs.nth(1).textContent(), zhCn['styleRef.tabOverview'])
     assert.equal(await refTabs.nth(2).textContent(), zhCn['styleRef.tabDetail'])
+    assert.equal(await refTabs.nth(3).textContent(), zhCn['appearance.presets'])
+    await refTabs.nth(3).click()
+    const mermaidTheme = page.getByRole('combobox', { name: zhCn['setting.mermaidTheme.title'], exact: true })
+    assert.equal(await mermaidTheme.isVisible(), true)
+    assert.equal(await mermaidTheme.inputValue(), 'default')
+    await mermaidTheme.selectOption('codex')
+    await page.waitForFunction(() => window.savedSettings['appearance.mermaidTheme'] === 'codex')
+    const presetPaint = await mermaidTheme.evaluate(el => {
+      const h3 = el.closest('[role="tabpanel"]').querySelector('h3')
+      const headingBox = h3.getBoundingClientRect()
+      const icon = h3.querySelector('svg')
+      const iconBox = icon.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents([...h3.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim()))
+      const headingStyle = getComputedStyle(h3)
+      return { radius: getComputedStyle(el).borderRadius, fg: getComputedStyle(el).color,
+        bg: getComputedStyle(el).backgroundColor, heading: h3.textContent,
+        headingBorder: headingStyle.borderBottomWidth,
+        marginLeft: headingStyle.marginLeft, marginRight: headingStyle.marginRight,
+        iconWidth: iconBox.width, iconHeight: iconBox.height,
+        iconLeft: iconBox.left - headingBox.left,
+        textLeft: range.getBoundingClientRect().left - headingBox.left,
+        iconStroke: getComputedStyle(icon).stroke, iconFill: getComputedStyle(icon).fill }
+    })
+    assert.equal(presetPaint.radius, '2px')
+    assert.notEqual(presetPaint.fg, presetPaint.bg)
+    assert.equal(presetPaint.heading, zhCn['appearance.codeblockRendering'])
+    assert.equal(presetPaint.headingBorder, '1px')
+    assert.equal(presetPaint.marginLeft, '-20px')
+    assert.equal(presetPaint.marginRight, '-20px')
+    assert.equal(presetPaint.iconWidth, 16)
+    assert.equal(presetPaint.iconHeight, 16)
+    assert.equal(Math.round(presetPaint.iconLeft), 20)
+    assert.equal(Math.round(presetPaint.textLeft), 44)
+    assert.equal(presetPaint.iconStroke, expectedFg)
+    assert.equal(presetPaint.iconFill, 'none')
+    await page.screenshot({ path: path.join(artifacts, `presets-${theme}.png`) })
+    await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
+    assert.equal(await page.locator('[data-setting-key="appearance.mermaidTheme"]').count(), 0)
+    await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
+    assert.equal(await mermaidTheme.inputValue(), 'codex', '重开外观页应回显已保存的 Codex')
+    await search.fill('Mermaid')
+    const presetResult = page.locator('.vsidian-settings-result').filter({ hasText: zhCn['setting.mermaidTheme.title'] })
+    assert.equal(await presetResult.count(), 1)
+    assert.match(await presetResult.innerText(), new RegExp(escapeRegExp(zhCn['appearance.title'])))
+    await presetResult.click()
+    assert.equal(await refTabs.nth(3).getAttribute('aria-selected'), 'true')
+    assert.equal(await mermaidTheme.isVisible(), true, '搜索定位应进入预设主题页签')
+    await mermaidTheme.selectOption('default')
+    await refTabs.nth(0).click()
     // 默认落 CSS 片段页签：总表与详细查询面板均隐藏；进「样式参考」总表后
     // 总表可见、详细查询仍隐藏；页签 pill 形态（绘制层）
     assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), false)

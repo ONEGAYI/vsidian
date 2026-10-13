@@ -75,6 +75,8 @@ export interface SettingsPageSection {
     titleKey: MessageKey
     icon?: SettingsGroupIcon
     prefixes: readonly string[]
+    /** 页签内标准组挂载点；缺省仍在分页自有内容之前装配独立卡片。 */
+    target?: string
   }[]
   /**
    * bare 装配（2026-10-12 验收反馈，附加组件页先例）：分页内容不套
@@ -491,7 +493,7 @@ export class SettingsPageView {
     // 同一前缀收纳，搜索随该分页分组命中）
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment') &&
       !d.key.startsWith('experimental.') && !d.key.startsWith('image.') &&
-      !d.key.startsWith('hover.') && !d.key.startsWith('embed.'))
+      !d.key.startsWith('hover.') && !d.key.startsWith('embed.') && !d.key.startsWith('appearance.'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
    *  icon 为二级组标题图标，注册表驱动（#263 内联字形 + #265 生图资产）。
@@ -749,25 +751,26 @@ export class SettingsPageView {
     if (section) {
       list.append(element('h2', 'vsidian-settings-heading', section.title),
         element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, section.description))
+      // bare 分页直挂内容；其余分页用大卡片。先 mount 才能取得页签内挂载点。
+      const content = element('div', section.bare ? 'vsidian-settings-section-bare' : 'vsidian-settings-section-content')
+      list.append(content)
+      const dispose = section.mount(content, focusEntry)
+      if (dispose) this.sectionDisposers.push(dispose)
       // #332 分页内嵌标准设置行组：视图统一装配（h3 组容器 + 标准行，依赖
       // 灰化与快照回推共用既有链路）；空组跳过（fixture 只含部分前缀时不占位）
       for (const group of section.defsGroups ?? []) {
         const defs = this.defs.filter((d) => group.prefixes.some((p) => d.key.startsWith(p)))
         if (!defs.length) continue
-        const container = element('div', 'vsidian-settings-group')
+        const container = group.target
+          ? content.querySelector<HTMLElement>(group.target)!
+          : element('div', 'vsidian-settings-group')
         const title = element('h3', 'vsidian-settings-group-title')
         if (group.icon) title.append(groupIcon(group.icon))
         title.append(document.createTextNode(t(group.titleKey)))
         container.append(title)
-        list.append(container)
+        if (!group.target) list.insertBefore(container, content)
         this.renderDefItems(container, defs, focusEntry)
       }
-      // bare 装配：不套 section-content 大卡片（组卡片直挂列表，卡中卡
-      // 不复现）；表单型分页维持整页一张容器语言
-      const content = element('div', section.bare ? 'vsidian-settings-section-bare' : 'vsidian-settings-section-content')
-      list.append(content)
-      const dispose = section.mount(content, focusEntry)
-      if (dispose) this.sectionDisposers.push(dispose)
       return
     }
     // 常规分组：标准行直铺（无小节），#323 起标准行之后可挂二级委托组

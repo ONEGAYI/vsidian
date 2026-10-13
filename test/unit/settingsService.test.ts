@@ -52,6 +52,7 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'codeblock.lineNumbers': true,
       'codeblock.copyButton': true,
       'codeblock.highlight': true,
+      'appearance.mermaidTheme': 'default',
       'editor.symbolAutocomplete': true,
       'editor.symbolSelectionWrap': true,
       'editor.symbolTabEscape': true,
@@ -104,6 +105,15 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
 })
 
 describe('补丁保存（apply）', () => {
+  it('Mermaid 主题默认为 default，Codex 选项保存后重开回显，未知主题拒绝', async () => {
+    const storage = makeStorage()
+    const first = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
+    expect(first.getSnapshot()['appearance.mermaidTheme']).toBe('default')
+    expect((await first.apply({ 'appearance.mermaidTheme': 'codex' })).ok).toBe(true)
+    const reopened = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
+    expect(reopened.getSnapshot()['appearance.mermaidTheme']).toBe('codex')
+    expect((await reopened.apply({ 'appearance.mermaidTheme': 'unknown' })).ok).toBe(false)
+  })
   it('#244 引用深度在自有设置中保存 1/3 并重开回显，越界值拒绝', async () => {
     const storage = makeStorage()
     const first = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)

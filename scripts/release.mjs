@@ -31,8 +31,10 @@ export const SIZE_LIMITS = {
   // #339（P3-07）textLayer/字体等 PDF 交互资产预留——2026-10-04 用户
   // 二次裁决：两条线各上调 2 MB（警告线 11.0→13.0 MB、失败线
   // 11.5→13.5 MB，单文件仍不动）。
-  totalWarnBytes: 13.0 * 1024 * 1024,
-  totalMaxBytes: 13.5 * 1024 * 1024,
+  // Codex 流程图增加本地 ELK 分块，实际包约 13.80 MiB；2026-10-13 用户
+  // 授权总量两线各上调 1.5 MiB，单文件 4 MiB 红线保持。
+  totalWarnBytes: 14.5 * 1024 * 1024,
+  totalMaxBytes: 15.0 * 1024 * 1024,
   // 一般单文件：mermaid.js（刻意 vendored 的独立产物，minify 后实测
   // 2,727,077 B ≈ 2.60 MB）是最大单项，警告线 3 MB 在其上留小余量、
   // 失败线 4 MB 拦截意外超大文件（如误升 mermaid 12.x 的 5.3 MB 产物）。
@@ -318,6 +320,11 @@ export function inspectVsixEntries(entries, options = {}) {
       errors.push(`缺少运行时资产 extension/${rel}`)
     }
   }
+  // Mermaid ESM：目录只接纳 esbuild 的散列 JS；缺整组仍视为安装不完整。
+  const mermaidChunks = /^extension\/out\/webview\/mermaid-chunks\/[\w.-]+-[a-z0-9]{8}\.js$/
+  if (!lowerNames.some(name => mermaidChunks.test(name))) {
+    errors.push('缺少运行时资产 extension/out/webview/mermaid-chunks/*.js')
+  }
 
   // out/ 白名单（评审 C1）：上面只拦「缺」，这里拦「多」——out/ 下任何
   // 未登记文件（调试遗留、构建实验产物、裁剪失效的重复字体）一律拒绝，
@@ -328,6 +335,7 @@ export function inspectVsixEntries(entries, options = {}) {
   for (const e of entries) {
     const lower = e.name.toLowerCase()
     if (lower.startsWith('extension/out/') && !allowedOut.has(lower) &&
+      !mermaidChunks.test(lower) &&
       !ALLOWED_OUT_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
       errors.push(`out/ 未登记产物 ${e.name}（新资产须登记 REQUIRED_EXTENSION）`)
     }

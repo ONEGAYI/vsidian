@@ -9,6 +9,12 @@
 // decor）；#95 补设置页框架、快捷键分页、设置项定义（setting.*）与宿主消息
 // （host.*）词条（键前缀分组见规格「字典架构」表）。
 export const en = {
+  'appearance.presets': 'Preset themes',
+  'appearance.codeblockRendering': 'Code block rendering',
+  'setting.mermaidTheme.title': 'Mermaid rendering theme',
+  'setting.mermaidTheme.description': 'Choose the built-in flowchart appearance. Codex uses light blue rounded nodes and ELK layered layout; diagram styles and configuration can override the preset.',
+  'setting.mermaidTheme.default': 'Default',
+  'setting.mermaidTheme.codex': 'Codex',
   'setting.pastePreserveFormatting.title': 'Preserve formatting when pasting',
   'setting.pastePreserveFormatting.description': 'Convert supported rich text formatting to Markdown during ordinary paste.',
   'setting.pasteAskBefore.title': 'Ask before pasting',
@@ -244,7 +250,7 @@ export const en = {
 
   // ---- appearance.（#231 外观合并分页：侧栏条目标题与描述）----
   'appearance.title': 'Appearance',
-  'appearance.description': 'Manage CSS snippets and appearance customization: snippet directory, per-file toggles, and the public style contract reference.',
+  'appearance.description': 'Manage CSS snippets, preset themes and appearance customization, and browse the public style contract.',
 
   // ---- styleRef.（样式参考：总表/详细查询文案与骨架标签，#132；#231 起为
   // 外观合并分页的页签体，tabOverview/tabDetail 亦作外观页签文案沿用）----

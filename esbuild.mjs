@@ -3,7 +3,7 @@
 // - webview 端：src/webview/main.ts -> out/webview/main.js（chrome118 / iife，css 随 import 打包为同名 .css）
 // - 设置页 webview 端（#33）：src/webview/settingsMain.ts -> out/webview/settings.js（同 browser/iife 形态）
 // - Mermaid 独立产物（#60）：src/webview/mermaidEntry.ts -> out/webview/mermaid.js
-//   （同 browser/iife 形态）。mermaid 不进主 bundle（约 2.7MB 会让每个 webview
+//   与 mermaid-chunks/（browser/esm）。mermaid 不进主 bundle（会让每个 webview
 //   启动都付出解析成本），宿主在 webview HTML 注入资源 URI、webview 存在
 //   mermaid 围栏时按需 <script> 加载。
 // - PDF 双产物（#337 / P3-05，装配结论来自 #334 探针）：
@@ -151,10 +151,16 @@ const targets = [
   {
     // Mermaid 独立产物（#60）：经 ESM 源打包（官方 UMD 的模块作用域下
     // 全局自赋值会落空抛错，见 mermaidEntry.ts 头注释），入口显式挂
-    // globalThis.mermaid；minify 后 2,727,077 B，与官方预压缩产物相当
+    // globalThis.mermaid；图类型和 ELK 经 ESM 分块按需加载
     entryPoints: ['src/webview/mermaidEntry.ts'],
-    outfile: 'out/webview/mermaid.js',
     ...webviewBase,
+    // ELK 引擎独立动态块：主入口与各图类型按需加载，保持单文件体积红线。
+    outfile: undefined,
+    outdir: 'out/webview',
+    entryNames: 'mermaid',
+    format: 'esm',
+    splitting: true,
+    chunkNames: 'mermaid-chunks/[name]-[hash]',
   },
   // PDF.js 双产物（#337）：配置单一事实源在 scripts/pdfBuildConfig.mjs
   //（#346 修复轮 2 提取——浏览器测试侧 ensurePdfArtifacts 消费同一工厂，
@@ -313,6 +319,8 @@ if (!production) {
 }
 
 async function main() {
+  // 仅清理本构建负责的生成目录，避免开发/生产切换遗留旧散列块进入 VSIX。
+  await rm(path.resolve('out/webview/mermaid-chunks'), { recursive: true, force: true })
   const contexts = await Promise.all(targets.map((t) => esbuild.context(t)))
   if (watch) {
     await Promise.all(contexts.map((ctx) => ctx.watch()))
