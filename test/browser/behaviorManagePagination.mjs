@@ -145,6 +145,33 @@ try {
   const statusPaint = await statusBlock.evaluate((el) => getComputedStyle(el).borderRadius)
   assert.equal(statusPaint, '6px', '状态积木应为 6px 矩形档')
 
+  // ---- 3a. 字段积木连续输入不丢焦点（评审 C1：查询编辑只重渲染列表，
+  //      构造器 DOM 不动——每键丢焦会让筛选词只能打一个字符） ----
+  await add.click()
+  await menu.locator('button', { hasText: zhCn['addons.behaviorQueryField.behaviorName'] }).focus()
+  await page.keyboard.press('Enter')
+  const fieldInput = page.locator('.vsidian-bq-field-input')
+  await fieldInput.waitFor()
+  await fieldInput.click()
+  for (const key of ['行', '为', '4']) {
+    // insertText 模拟 IME 提交后的文本插入（中文输入路径）
+    await page.keyboard.insertText(key)
+    // 每键后焦点仍在输入框（activeElement 不回 body）
+    const focused = await page.evaluate(() => document.activeElement?.className ?? 'BODY')
+    assert.equal(focused, 'vsidian-bq-field-input', `输入 ${key} 后焦点应保持在字段输入框`)
+  }
+  assert.equal(await fieldInput.inputValue(), '行为4', '连续输入应完整落值')
+  // 输入过程实时过滤生效（此刻树 = 状态(已启用) AND 行为显示名含「行为4」：
+  // 40-44 均启用 → 5 行）
+  await page.locator('.vsidian-addons-behaviors-row').first().waitFor()
+  assert.equal(await page.locator('.vsidian-addons-behaviors-row').count(), 5, '字段筛选应实时过滤（AND 状态积木下 5 行）')
+  // 清理：键盘删掉该字段积木（focus + Delete——焦点块即删除目标），回到
+  // 状态积木单块供段 4 断言
+  await page.locator('.vsidian-bq-block--field').focus()
+  await page.keyboard.press('Delete')
+  await page.locator('.vsidian-bq-block--field').waitFor({ state: 'detached' })
+  await page.waitForTimeout(30)
+
   // ---- 4. 状态筛选（D6）：下拉选「已关闭」→ 实时过滤为 2 行 ----
   await statusBlock.locator('select').selectOption('disabled')
   await page.locator('.vsidian-addons-behaviors-row').first().waitFor()
@@ -167,7 +194,6 @@ try {
   // 真实键盘链路：状态积木拾取（Enter）→ 缺口高亮移动（ArrowRight）→ 放下（Enter）
   await statusBlock.focus()
   await page.keyboard.press('Enter')
-  await statusBlock.evaluate((el) => el.classList.contains('vsidian-bq-carrying'))
   const carrying = await statusBlock.evaluate((el) => el.classList.contains('vsidian-bq-carrying'))
   assert.equal(carrying, true, 'Enter 拾取后积木应带浅色高亮类')
   const targetSlot = logicBlock.locator('.vsidian-bq-slot--empty').nth(1)

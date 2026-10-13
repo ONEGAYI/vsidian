@@ -1100,7 +1100,6 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.behaviorQueryLimitTooltip': '积木数量已达上限（16）',
   'addons.behaviorQueryTrashAria': '删除积木',
   'addons.behaviorQueryTrashTooltip': '单击清空整个查询；先单击选中积木再单击（或把积木拖到此处）可删除该积木及其嵌套内容',
-  'addons.behaviorQuerySlotAria': '积木缺口',
   'addons.behaviorsPagerAria': '分页',
   'addons.behaviorsPageFirst': '首页',
   'addons.behaviorsPagePrev': '上一页',

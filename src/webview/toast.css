@@ -68,10 +68,17 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   box-shadow: var(--vsidian-toast-shadow);
-  /* 形态演进（#474，规格 behavior-manage-pagination D14）：气泡放开 pointer-events（原继承容器 none）——
-   * 撤销按钮可点、悬停/聚焦可暂停；容器保持 none，空白区不拦截输入。 */
-  pointer-events: auto;
   animation: vsidian-toast-enter var(--vsidian-toast-enter-duration) ease-out both;
+  /* 形态演进（#474，规格 behavior-manage-pagination D14）：无按钮气泡保持
+   * pointer-events 穿透（继承容器 none，编辑器侧纯文字提示不拦截鼠标——
+   * 评审 F2）；带撤销按钮的气泡经下方 :has 规则放开 */
+  pointer-events: none;
+}
+
+/* 带撤销按钮的气泡放开 pointer-events——按钮可点、悬停/聚焦可暂停倒计时；
+ * 容器恒 none，空白区不拦截输入 */
+:where(.vsidian-toast:has(.vsidian-toast-action)) {
+  pointer-events: auto;
 }
 
 /* 倒计时条：右端锚定满格，随呈现时长线性向左收缩至零（宽度动画）；时长由 toast.ts 按气泡内联注入。

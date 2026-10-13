@@ -160,9 +160,15 @@ function isLogicChildrenShape(op: BehaviorQueryLogicOp, children: unknown): chil
   return children.length === slots
 }
 
-/** 单积木序列化守卫（递归）：非法形态回 null */
-function parseBlock(v: unknown): BehaviorQueryBlock | null {
+/** 单积木序列化守卫（递归；depth 剪枝：合法树每层 logic 自身至少计 1 块，
+ * 深度超过 BEHAVIOR_QUERY_BLOCKS_LIMIT 必然超块数上限——深嵌套载荷在此
+ * 早拒，防递归爆栈上抛打断扩展激活（守卫调用链无 try/catch 兜底））；
+ * 非法形态回 null */
+function parseBlock(v: unknown, depth: number): BehaviorQueryBlock | null {
   if (typeof v !== 'object' || v === null) {
+    return null
+  }
+  if (depth > BEHAVIOR_QUERY_BLOCKS_LIMIT) {
     return null
   }
   const candidate = v as Record<string, unknown>
@@ -195,7 +201,7 @@ function parseBlock(v: unknown): BehaviorQueryBlock | null {
         children.push(null)
         continue
       }
-      const parsed = parseBlock(slot)
+      const parsed = parseBlock(slot, depth + 1)
       if (parsed === null) {
         return null
       }
@@ -219,7 +225,7 @@ export function parseBehaviorQueryFilter(v: unknown): BehaviorQueryFilter | null
   }
   const blocks: BehaviorQueryBlock[] = []
   for (const raw of candidate.blocks) {
-    const parsed = parseBlock(raw)
+    const parsed = parseBlock(raw, 1)
     if (parsed === null) {
       return null
     }

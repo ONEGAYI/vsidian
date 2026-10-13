@@ -87,13 +87,13 @@ function adjustPathAfterRemoval(path: readonly number[], removed: BehaviorBlockP
 }
 
 /** 删除路径上的积木：嵌套位置 → 槽置 null；顶层 → splice。返回新树与被
- *  删块（可变视图——草稿对象，供放置复用；自嵌套防护由调用方先行排除；
- *  路径失效兜底返回原树，removed 值不会被使用） */
-function removeBlockAt(query: BehaviorQueryFilter, path: BehaviorBlockPath): { query: BehaviorQueryFilter; removed: MutableBehaviorBlock } {
+ *  删块（可变视图——草稿对象，供放置复用）；路径失效（树被并发改动）时
+ *  返回 removed: null，调用方放弃后续放置（不拿错块冒充，评审 F3） */
+function removeBlockAt(query: BehaviorQueryFilter, path: BehaviorBlockPath): { query: BehaviorQueryFilter; removed: MutableBehaviorBlock | null } {
   const draft = cloneQuery(query)
   const removed = getBlockAt(draft.blocks, path)
   if (removed === null) {
-    return { query, removed: query.blocks[0] as MutableBehaviorBlock }
+    return { query, removed: null }
   }
   if (path.length === 1) {
     draft.blocks.splice(path[0]!, 1)
@@ -186,6 +186,7 @@ export class BehaviorQueryBuilder {
   private readonly root: HTMLElement
   private readonly blockFlow: HTMLElement
   private readonly addButton: HTMLButtonElement
+  private readonly addWrap: HTMLElement
   private readonly trashButton: HTMLButtonElement
   private menu: HTMLElement | undefined
   /** 选中积木路径（发光明示删除范围；null = 无选中） */
@@ -218,7 +219,13 @@ export class BehaviorQueryBuilder {
     this.addButton.type = 'button'
     this.addButton.className = 'vsidian-behavior-query-add'
     this.addButton.textContent = '+'
+    this.addButton.setAttribute('aria-haspopup', 'menu')
     this.addButton.addEventListener('click', () => this.toggleMenu())
+    // tooltip 挂非禁用包裹（评审 F1）：disabled 表单控件不派发鼠标事件，
+    // document 级 tooltip 委托在按钮本体上收不到悬停——包裹 span 恒可命中
+    this.addWrap = document.createElement('span')
+    this.addWrap.className = 'vsidian-behavior-query-add-wrap'
+    this.addWrap.append(this.addButton)
     this.trashButton = document.createElement('button')
     this.trashButton.type = 'button'
     this.trashButton.className = 'vsidian-behavior-query-trash'
@@ -251,7 +258,7 @@ export class BehaviorQueryBuilder {
         this.removeBlock(path)
       }
     })
-    this.root.append(this.addButton, this.trashButton)
+    this.root.append(this.addWrap, this.trashButton)
     this.rebuild()
   }
 
@@ -308,6 +315,9 @@ export class BehaviorQueryBuilder {
       return // 自嵌套（放进自己或后代）拒绝
     }
     const { query: without, removed } = removeBlockAt(this.query, from)
+    if (removed === null) {
+      return // 拖拽路径已失效（树被并发改动）：放弃放置，树保持现状
+    }
     const adjustedParent = adjustPathAfterRemoval(target.parentPath, from)
     // 顶层插入位语义 = 「当前第 i 块之前」：remove 原块（顶层第 r 块）后，
     // i > r 的插入位随序列前移一并减一（i <= r 不变）
@@ -385,11 +395,13 @@ export class BehaviorQueryBuilder {
         this.blockFlow.append(this.renderBlock(block, [index]))
       }
     }
-    this.addButton.disabled = countBehaviorQueryBlocks(this.query) >= BEHAVIOR_QUERY_BLOCKS_LIMIT
-    this.addButton.dataset.tooltip = this.addButton.disabled
-      ? t('addons.behaviorQueryLimitTooltip')
-      : t('addons.behaviorQueryAddTooltip')
-    this.addButton.setAttribute('aria-label', t('addons.behaviorQueryAddTooltip'))
+    const atLimit = countBehaviorQueryBlocks(this.query) >= BEHAVIOR_QUERY_BLOCKS_LIMIT
+    this.addButton.disabled = atLimit
+    // D9：超限禁用 + 悬停提示——tooltip 挂包裹（disabled 不派发鼠标事件），
+    // aria-label 随禁用态切换（读屏获知不可用原因，评审 F1）
+    this.addWrap.dataset.tooltip = t(atLimit ? 'addons.behaviorQueryLimitTooltip' : 'addons.behaviorQueryAddTooltip')
+    this.addButton.setAttribute('aria-label', t(atLimit ? 'addons.behaviorQueryLimitTooltip' : 'addons.behaviorQueryAddTooltip'))
+    this.addButton.setAttribute('aria-expanded', this.menu !== undefined ? 'true' : 'false')
     this.trashButton.classList.toggle('vsidian-behavior-query-trash--active', this.selectedPath !== null)
   }
 
@@ -527,7 +539,6 @@ export class BehaviorQueryBuilder {
     const slot = document.createElement('span')
     slot.className = 'vsidian-bq-slot'
     slot.dataset.bqSlot = `${pathToString(path.slice(0, -1))}:${path[path.length - 1]!}`
-    slot.setAttribute('aria-label', t('addons.behaviorQuerySlotAria'))
     if (child === null) {
       slot.classList.add('vsidian-bq-slot--empty')
       slot.addEventListener('dragover', (event) => {
@@ -645,12 +656,14 @@ export class BehaviorQueryBuilder {
     }])
     this.root.append(menu)
     this.menu = menu
+    this.addButton.setAttribute('aria-expanded', 'true')
     document.addEventListener('pointerdown', this.closeMenuOnDocClick, true)
   }
 
   private closeMenu(): void {
     this.menu?.remove()
     this.menu = undefined
+    this.addButton.setAttribute('aria-expanded', 'false')
     document.removeEventListener('pointerdown', this.closeMenuOnDocClick, true)
   }
 

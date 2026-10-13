@@ -1154,7 +1154,6 @@ export const en = {
   'addons.behaviorQueryLimitTooltip': 'Block limit reached (16)',
   'addons.behaviorQueryTrashAria': 'Delete block',
   'addons.behaviorQueryTrashTooltip': 'Click to clear the whole query. Select a block first (or drag one here) to delete that block and its nested content',
-  'addons.behaviorQuerySlotAria': 'Block slot',
   'addons.behaviorsPagerAria': 'Pagination',
   'addons.behaviorsPageFirst': 'First page',
   'addons.behaviorsPagePrev': 'Previous page',

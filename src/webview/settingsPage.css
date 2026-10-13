@@ -736,7 +736,9 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-bq-slot--target { background: color-mix(in srgb, var(--vscode-focusBorder, #2687d4) 25%, transparent); }
 .vsidian-bq-block--dragging { opacity: 0.5; }
 
-/* 加号/垃圾桶微钮（22px 档；次级按钮变量族） */
+/* 加号/垃圾桶微钮（22px 档；次级按钮变量族）。加号带非禁用包裹：
+   tooltip 载体（disabled 控件不派发鼠标事件，document 级委托收不到） */
+.vsidian-behavior-query-add-wrap { display: inline-flex; }
 .vsidian-behavior-query-add, .vsidian-behavior-query-trash { min-height: 22px; min-width: 28px; padding: 2px 8px;
   border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
   color: var(--vscode-button-secondaryForeground, inherit);

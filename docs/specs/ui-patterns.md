@@ -121,11 +121,11 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 ```text
 div.vsidian-behavior-query                        ← 查询区（组卡片内，列表上方）
 ├─ 顶层积木流（flex-wrap；顶层并列 = 隐式 AND）
-│   ├─ 字段积木 div.vsidian-bq-block[data-kind=field]   ← pill 999px 外壳：字段标签 + text 输入（2px 档）
-│   ├─ 逻辑积木 div.vsidian-bq-block[data-kind=logic]   ← 菱形（clip-path 随形，不入圆角档位）；AND/OR 双缺口、NOT 单缺口
-│   │    └─ 缺口槽 div.vsidian-bq-slot                  ← 空槽 = 虚线占位框（拖放/键盘目标）；可嵌任意积木
-│   └─ 状态积木 div.vsidian-bq-block[data-kind=status]  ← 6px 矩形（按钮档）：标签 + select（2px 档，四态）
-├─ button.vsidian-behavior-query-add              ← 加号微钮（22px 档）：展开三组下拉（复用设置页页内菜单形态）
+│   ├─ 字段积木 .vsidian-bq-block--field          ← pill 999px 外壳：字段标签 + text 输入（2px 档）
+│   ├─ 逻辑积木 .vsidian-bq-block--logic[data-bq-op] ← 菱形（clip-path 随形，不入圆角档位）；AND/OR 双缺口、NOT 单缺口
+│   │    └─ 缺口槽 .vsidian-bq-slot               ← 空槽 = 虚线占位框（拖放/键盘目标）；可嵌任意积木
+│   └─ 状态积木 .vsidian-bq-block--status         ← 6px 矩形（按钮档）：标签 + select（2px 档，四态）
+├─ span.vsidian-behavior-query-add-wrap > button  ← 加号微钮（22px 档）+ 非禁用包裹（tooltip 载体）；展开三组下拉（页内菜单形态）
 └─ button.vsidian-behavior-query-trash            ← 垃圾桶微钮（22px 档，data-tooltip 三用法说明）
 ```
 
@@ -148,7 +148,7 @@ div.vsidian-behavior-query                        ← 查询区（组卡片内�
 | 查找面板 | 绝对定位右上、圆角 4px、widget 变量族、z-index 40 | `main.css` 查找面板段；chromeContract 探针与 `findPanel` 浏览器用例 |
 | 悬停弹窗（hover-popup） | 480px 宽、圆角 8px、阴影 §1.3、z-index 9000 | [hover-preview-embed.md](hover-preview-embed.md) |
 | 模态（图片/图表弹窗） | 全屏 overlay z-10000 + 背板 `blur(16px) saturate(150%)` 55% 黑 | [image-popup.md](image-popup.md)、[graphic-code-block-interaction.md](graphic-code-block-interaction.md) |
-| toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影）。#474 形态演进（两 webview 通用）：气泡顶部倒计时条（深色右端锚定向左收缩、悬停/聚焦暂停）+ 气泡内撤销按钮（次级按钮 6px 档，气泡 pointer-events 放开为 auto） | toast.css 头注；styleContract toast 类目 |
+| toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影）。#474 形态演进（两 webview 通用）：气泡顶部倒计时条（深色右端锚定向左收缩、悬停/聚焦暂停）+ 气泡内撤销按钮（次级按钮 6px 档）；pointer-events 仅对带撤销按钮的气泡放开（` :has(action)` 限定，无按钮气泡保持穿透） | toast.css 头注；styleContract toast 类目 |
 
 新增浮层：先查上表归型；同型复用变量族与档位，新形态先登记本表。
 

@@ -370,11 +370,15 @@ export function createSettingsPage(
         }
         return
       // ---- #474 行为管理视图状态拉取（页码 + 查询树的用户级持久；装载
-      // 应答一次——webview 自持权威，宿主不主动推送） ----
+      // 应答一次——webview 自持权威，宿主不主动推送）。addons 未就绪也回
+      // 默认态（评审 F5：静默无应答会让 webview 的定位挂起条件永不满足） ----
       case 'addons.behaviorsViewGet':
         if (addons) {
           ready = true
           void current?.webview.postMessage(addons.getBehaviorsViewState())
+        } else {
+          ready = true
+          void current?.webview.postMessage({ kind: 'addons.behaviorsView', view: null })
         }
         return
       case 'index.setPatterns':

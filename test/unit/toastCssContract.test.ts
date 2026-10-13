@@ -47,13 +47,16 @@ describe('轻提示公开样式入口', () => {
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
     expect(reduced).toContain(':where(.vsidian-toast-timer)')
   })
-  it('撤销按钮为次级形态（secondary 变量族 + 6px 圆角），气泡放开 pointer-events 而容器保持 none', () => {
+  it('撤销按钮为次级形态（secondary 变量族 + 6px 圆角）；pointer-events 只对带按钮气泡放开（评审 F2）', () => {
     expect(css).toContain(':where(.vsidian-toast-action)')
     expect(css).toContain('--vscode-button-secondaryBackground')
     expect(css).toContain('--vscode-button-secondaryForeground')
     expect(css).toContain('--vscode-button-secondaryHoverBackground')
     expect(css).toContain('border-radius: 6px')
-    expect(css).toContain('pointer-events: none')
+    // 无按钮气泡保持穿透（编辑器侧纯文字提示不拦截鼠标）；仅 :has(action)
+    // 气泡放开——按钮可点、悬停/聚焦可暂停；容器恒 none（CRLF 行尾不进断言）
+    expect(css).toContain(':where(.vsidian-toast:has(.vsidian-toast-action))')
     expect(css).toContain('pointer-events: auto')
+    expect(css).toContain('pointer-events: none')
   })
 })

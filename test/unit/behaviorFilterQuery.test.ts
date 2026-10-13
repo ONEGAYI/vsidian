@@ -206,6 +206,16 @@ describe('#474 积木总数上限（D9：≤16）', () => {
     expect(parseBehaviorQueryFilter({ version: 1, blocks: blocksOf(17) })).toBeNull()
     expect(BEHAVIOR_QUERY_BLOCKS_LIMIT).toBe(16)
   })
+
+  it('深嵌套载荷深度剪枝早拒（不递归爆栈——守卫调用链无 try/catch 兜底）', () => {
+    // 深度 > 16 的嵌套 logic 必然超块数上限：剪枝在递归中早拒，
+    // 数千层嵌套不触发 RangeError（评审 C2/B-3：激活链同步 parse）
+    let deep: unknown = { kind: 'status', status: 'enabled' }
+    for (let i = 0; i < 5000; i++) {
+      deep = { kind: 'logic', op: 'not', children: [deep] }
+    }
+    expect(parseBehaviorQueryFilter({ version: 1, blocks: [deep] })).toBeNull()
+  })
 })
 
 describe('#474 查询树序列化守卫（fail-safe：坏形态整条回 null）', () => {

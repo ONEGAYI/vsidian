@@ -119,6 +119,8 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
   private focusRowKey: string | undefined
   /** 积木查询构造器（跨渲染复用 DOM——编辑现场与焦点不因列表重渲染丢失） */
   private readonly queryBuilder: BehaviorQueryBuilder
+  /** 当前列表容器引用（查询编辑的轻量重渲染目标；随整卡渲染重建） */
+  private listContainer: HTMLElement | undefined
   private stateSink: (() => void) | undefined
 
   constructor(
@@ -184,6 +186,9 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
     this.render(focusEntry)
     return () => {
       this.parent = undefined
+      // 构造器的 document 级菜单监听随分页卸载释放（评审 B-4：键盘切分页
+      // 不触发 pointerdown 自愈路径）
+      this.queryBuilder.dispose()
     }
   }
 
@@ -233,12 +238,13 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
 
   // ---- #474 视图状态流转 ----
 
-  /** 查询树变化（构造器回调）：持久 + 会话 uiState 上报 + 列表重渲染
-   *  （构造器 DOM 复用，编辑现场保持） */
+  /** 查询树变化（构造器回调）：持久 + 会话 uiState 上报 + **仅列表区**重渲染
+   *  ——构造器 DOM 与组卡结构不动（字段输入/控件焦点不因查询编辑丢失，
+   *  评审 C1：整卡 replaceChildren 会把聚焦 input 移出文档并清焦） */
   private onQueryChange(query: BehaviorQueryFilter): void {
     this.persistView(query)
     this.stateSink?.()
-    this.render()
+    this.renderListOnly()
   }
 
   /** 页码变化（翻页/定位跳页/调序跟随）：持久 + 会话上报 */
@@ -259,7 +265,8 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
   }
 
   /** 可撤销的「查询已清空」toast（垃圾桶清空与 D15 定位清空共用）：撤销
-   *  恢复清空前的查询与页码（UI 状态，不涉行为生效语义） */
+   *  恢复清空前的查询与页码（UI 状态，不涉行为生效语义）。恢复后同步会话
+   *  uiState 记忆（评审 B-1：漏报会让面板重载时恢复过时的旧查询） */
   private showUndoableClearToast(previousQuery: BehaviorQueryFilter, previousPage: number): void {
     if (previousQuery.blocks.length === 0) {
       return
@@ -270,6 +277,7 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
         this.page = previousPage
         this.queryBuilder.setQuery(previousQuery)
         this.persistView(previousQuery)
+        this.stateSink?.()
         this.render()
       },
     })
@@ -345,9 +353,13 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
       group.append(empty)
     } else {
       // #474 积木查询区（构造器 DOM 跨渲染复用——appendChild 移动不重建，
-      // 编辑现场与焦点保持）
+      // 编辑现场与焦点保持）；列表装进稳定容器（查询编辑只换列表内容，
+      // 构造器与组卡结构不动——评审 C1 焦点保持路径）
       group.append(this.queryBuilder.ensureRendered())
-      group.append(this.renderBehaviorList(payload, focusEntry))
+      const listContainer = document.createElement('div')
+      this.listContainer = listContainer
+      group.append(listContainer)
+      this.renderListInto(listContainer, payload, focusEntry)
     }
     area.append(group)
     if (payload !== undefined && payload.behaviors.length > 0 && payload.notice !== undefined) {
@@ -383,6 +395,31 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
     }
   }
 
+  /** 列表渲染入容器：page 若在渲染中被规范化/定位/跟随改写（与进入时不同），
+   *  补一次持久 + 会话上报——持久值与用户实际所见一致（评审 F4/B-2：
+   *  越界回落与定位跳页此前不落盘，重启后回到旧页码） */
+  private renderListInto(container: HTMLElement, payload: AddonBehaviorsMessage, focusEntry?: string): void {
+    const pageBefore = this.page
+    container.replaceChildren(this.renderBehaviorList(payload, focusEntry))
+    if (this.page !== pageBefore) {
+      this.persistView(this.queryBuilder.getQuery())
+      this.stateSink?.()
+    }
+  }
+
+  /** 查询编辑路径的轻量重渲染：只换列表内容（构造器/组卡/notice 不动——
+   *  notice 属写操作结局，查询编辑不产生）；载荷不在场（目录为空）时退回
+   *  整卡渲染兜底 */
+  private renderListOnly(): void {
+    const container = this.listContainer
+    const payload = this.behaviorsState
+    if (container === undefined || payload === undefined || payload.behaviors.length === 0) {
+      this.render()
+      return
+    }
+    this.renderListInto(container, payload, undefined)
+  }
+
   /** 展示全序（关闭项保位）+ 查询过滤（只过滤不排序，D7）+ 分页切片 + 定位
    *  消费（D12–D15）+ 调序跟随（D10）+ 翻页控件 */
   private renderBehaviorList(payload: AddonBehaviorsMessage, focusEntry?: string): HTMLElement {
@@ -411,12 +448,14 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
     let visibleKeys = filterBy(this.queryBuilder.getQuery())
 
     // D15：定位行被当前查询过滤——清空查询并定位（定位意图高于筛选保持），
-    // toast 说明 + 气泡撤销（恢复清空前的查询与页码）；命中集随清空重算
+    // toast 说明 + 气泡撤销（恢复清空前的查询与页码）；命中集随清空重算；
+    // 清空与撤销都同步会话 uiState 记忆（评审 B-1：防面板重载时查询复活）
     if (focus.kind === 'row' && focus.rowKey !== undefined && !visibleKeys.includes(focus.rowKey)) {
       const previousQuery = this.queryBuilder.getQuery()
       const previousPage = this.page
       this.queryBuilder.setQuery({ version: 1, blocks: [] })
       this.persistView({ version: 1, blocks: [] })
+      this.stateSink?.()
       visibleKeys = filterBy({ version: 1, blocks: [] })
       this.toast?.show(t('addons.behaviorsQueryClearedForFocus'), 'neutral', 'addons-behaviors-focus', {
         label: t('addons.behaviorsQueryUndo'),
@@ -424,6 +463,7 @@ export class AddonBehaviorManageSection implements SettingsPageSection {
           this.page = previousPage
           this.queryBuilder.setQuery(previousQuery)
           this.persistView(previousQuery)
+          this.stateSink?.()
           this.render()
         },
       })
