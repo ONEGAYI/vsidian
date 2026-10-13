@@ -109,6 +109,32 @@ describe('附加组件公开声明消费面（T13）', () => {
     expect(symbols.has('resolveAddonBehaviorName'), '消费面应导入 resolveAddonBehaviorName（选值纯函数）').toBe(true)
   })
 
+  it('#473/#475 设置定义呈现形态已进消费面（AddonLocalizedText 类型导入与 enumLabels/multiline 消费样例防回潮）', () => {
+    // 删除公开符号或呈现字段（或从消费面移除其消费）即红——标签值形态
+    // 与 string 定义新字段的公开消费由本断言钉住
+    const source = readFileSync(consumerPath, 'utf8')
+    const sf = ts.createSourceFile(consumerPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const symbols = new Set<string>()
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text.endsWith('/addonSettings') &&
+        node.importClause?.namedBindings !== undefined &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const element of node.importClause.namedBindings.elements) {
+          symbols.add(element.name.text)
+        }
+      }
+      node.forEachChild(visit)
+    }
+    sf.forEachChild(visit)
+    expect(symbols.has('AddonLocalizedText'), '消费面应导入 AddonLocalizedText（枚举档位标签值形态）').toBe(true)
+    expect(source.includes('enumLabels'), '消费面应含 enumLabels 字段消费样例').toBe(true)
+    expect(source.includes('multiline'), '消费面应含 multiline 字段消费样例').toBe(true)
+  })
+
   it('开发文档与生成器不进 Vsidian VSIX（.vscodeignore 排除 docs 与 scripts）', () => {
     const ignore = readFileSync(path.join(root, '.vscodeignore'), 'utf8')
     for (const pattern of ['docs/', 'scripts/', 'src/', 'test/']) {

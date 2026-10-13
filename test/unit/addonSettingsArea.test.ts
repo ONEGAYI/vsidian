@@ -11,6 +11,7 @@ import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
+import { en } from '../../src/shared/locales/en'
 import { isHostToWebview, type HostToWebview } from '../../src/shared/protocol'
 import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
@@ -85,6 +86,15 @@ const DEFINITIONS = [
   { key: 'flag', title: '开关项', type: 'boolean', default: true },
   { key: 'threshold', title: '阈值', type: 'number', min: 1, max: 100, default: 20 },
   { key: 'mode', title: '模式', type: 'string', enum: ['a', 'b'], default: 'a' },
+  {
+    key: 'strategy', title: '空格策略', type: 'string', enum: ['none', 'soft', 'strict'], default: 'soft',
+    // strict 缺失标签：回退渲染枚举值本身（向后兼容语义）
+    enumLabels: {
+      none: { 'zh-cn': '不要求空格', en: 'No spaces' },
+      soft: { 'zh-cn': '软空格', en: 'Soft spaces' },
+    },
+  },
+  { key: 'note', title: '备注', type: 'string', multiline: true, maxLength: 20, default: '第一行\n第二行' },
   { key: 'replacements', title: '替换规则', type: 'array', items: { kind: 'string', maxLength: 10 }, default: ['旧→新'] },
   {
     key: 'limits', title: '对象样例', type: 'object',
@@ -95,7 +105,7 @@ const DEFINITIONS = [
   },
 ]
 
-/** 构造 addons.settingsState 载荷（默认全 default 来源） */
+/** 构造 addons.settingsState 载荷（默认全 default 来源；可注入自定义定义集） */
 function settingsState(options: {
   open?: string | null
   hasWorkspace?: boolean
@@ -106,19 +116,21 @@ function settingsState(options: {
   hasCustomPage?: boolean
   openAddonSettingsPage?: string | null
   notice?: Record<string, unknown>
+  definitions?: Array<Record<string, unknown>>
 }): HostToWebview {
-  const defaultValueOf = (def: (typeof DEFINITIONS)[number]): unknown => {
+  const definitions = options.definitions ?? DEFINITIONS
+  const defaultValueOf = (def: Record<string, unknown>): unknown => {
     if (def.type === 'object') {
       const composed: Record<string, unknown> = {}
-      for (const field of def.fields ?? []) composed[field.key] = field.default
+      for (const field of (def.fields as Array<Record<string, unknown>>) ?? []) composed[field.key as string] = field.default
       return composed
     }
     return def.default
   }
   const values: Record<string, { effective: unknown; source: string; user?: unknown; workspace?: unknown }> = {}
-  for (const def of DEFINITIONS) {
-    const override = options.values?.[def.key]
-    values[def.key] = {
+  for (const def of definitions) {
+    const override = options.values?.[def.key as string]
+    values[def.key as string] = {
       effective: override?.effective ?? defaultValueOf(def),
       source: override?.source ?? 'default',
       ...(override?.user !== undefined ? { user: override.user } : {}),
@@ -143,7 +155,7 @@ function settingsState(options: {
         workspaceExplicit: options.enabled?.workspaceExplicit ?? null,
         source: options.enabled?.source ?? 'default',
       },
-      definitions: DEFINITIONS,
+      definitions,
       values,
     },
     openAddonSettingsPage: options.openAddonSettingsPage ?? null,
@@ -352,6 +364,127 @@ describe('T04 设置区：数组与对象基础控件（重复项/字段）', ()
     countInput!.dispatchEvent(new Event('input', { bubbles: true }))
     buttons(h, '保存')[1]!.click()
     expect(h.sent).toContainEqual({ kind: 'addons.settingsUpdate', addonId: ADDON_ID, scope: 'user', values: { limits: { name: '甲', count: 7 } } })
+  })
+})
+
+describe('#473/#475 设置区：枚举档位标签与多行形态', () => {
+  const openArea = (): ReturnType<typeof makeView> => {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
+    h.dispatch(settingsState({}))
+    return h
+  }
+
+  /** jsdom 无 DataTransfer 构造：手挂 clipboardData 的 paste 事件 */
+  function pasteEvent(text: string): Event {
+    const event = new Event('paste', { cancelable: true, bubbles: true })
+    ;(event as Event & { clipboardData: { getData: (kind: string) => string } }).clipboardData = {
+      getData: () => text,
+    }
+    return event
+  }
+
+  it('枚举下拉显示本地化标签；option value 仍是枚举值；缺失标签回退枚举值本身', () => {
+    const h = openArea()
+    const select = h.parent.querySelector<HTMLSelectElement>('select[data-addon-setting="strategy"]')
+    expect(select).toBeTruthy()
+    const options = [...select!.options]
+    expect(options.map((option) => option.value)).toEqual(['none', 'soft', 'strict'])
+    expect(options.map((option) => option.textContent)).toEqual(['不要求空格', '软空格', 'strict'])
+    expect(select!.selectedOptions[0]!.textContent).toBe('软空格')
+    // 切换标签后上送枚举原值（标签仅呈现层，持久化值不变）
+    select!.value = 'none'
+    select!.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsUpdate', addonId: ADDON_ID, scope: 'user', values: { strategy: 'none' } })
+  })
+
+  it('标签随页面语言切换（zh-cn → en 换包重渲染后显示英文标签，缺失键仍回退）', () => {
+    const h = openArea()
+    try {
+      installLocale('en', en)
+      const select = h.parent.querySelector<HTMLSelectElement>('select[data-addon-setting="strategy"]')
+      expect([...select!.options].map((option) => option.textContent)).toEqual(['No spaces', 'Soft spaces', 'strict'])
+    } finally {
+      installLocale('zh-cn', zhCn)
+    }
+  })
+
+  it('multiline 定义渲染 textarea：当前值含换行呈现；修改后 change 上送含换行的值；maxLength 生效', () => {
+    const h = openArea()
+    const areaEl = h.parent.querySelector<HTMLTextAreaElement>('textarea[data-addon-setting="note"]')
+    expect(areaEl).toBeTruthy()
+    expect(areaEl!.value).toBe('第一行\n第二行')
+    expect(areaEl!.maxLength).toBe(20)
+    areaEl!.value = '甲\n乙\n丙'
+    areaEl!.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsUpdate', addonId: ADDON_ID, scope: 'user', values: { note: '甲\n乙\n丙' } })
+  })
+
+  it('multiline 控件占定义行整行（不进 label 行右槽）；单行控件仍在 label 行', () => {
+    const h = openArea()
+    const areaEl = h.parent.querySelector<HTMLTextAreaElement>('textarea[data-addon-setting="note"]')!
+    const noteItem = areaEl.closest('.vsidian-addons-setting-item')!
+    expect(noteItem).toBeTruthy()
+    expect(noteItem.querySelector('.vsidian-settings-item-label')!.contains(areaEl)).toBe(false)
+    const modeSelect = h.parent.querySelector<HTMLSelectElement>('select[data-addon-setting="mode"]')!
+    const modeItem = modeSelect.closest('.vsidian-addons-setting-item')!
+    expect(modeItem.querySelector('.vsidian-settings-item-label')!.contains(modeSelect)).toBe(true)
+  })
+
+  it('数组批量粘贴拆分：多行剪贴板按行拆分追加（trim、去空行、maxLength 截断）；保存整批上送', () => {
+    const h = openArea()
+    const rowInputs = () => [...h.parent.querySelectorAll('input[data-addon-array-item="replacements"]')] as HTMLInputElement[]
+    expect(rowInputs().map((input) => input.value)).toEqual(['旧→新'])
+    rowInputs()[0]!.dispatchEvent(pasteEvent(' 甲 \r\n\r\n乙\n丙\n'))
+    // 首行追加到当前项末尾（trim），后续行插入其后；空行丢弃
+    expect(rowInputs().map((input) => input.value)).toEqual(['旧→新甲', '乙', '丙'])
+    buttons(h, '保存')[0]!.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsUpdate', addonId: ADDON_ID, scope: 'user', values: { replacements: ['旧→新甲', '乙', '丙'] } })
+  })
+
+  it('单行粘贴不拆分：不拦截默认行为，行数不变', () => {
+    const h = openArea()
+    const first = h.parent.querySelector<HTMLInputElement>('input[data-addon-array-item="replacements"]')!
+    const paste = pasteEvent('单行')
+    first.dispatchEvent(paste)
+    expect(paste.defaultPrevented).toBe(false)
+    expect([...h.parent.querySelectorAll('input[data-addon-array-item="replacements"]')]).toHaveLength(1)
+  })
+
+  it('各行超 maxLength 经截断入草稿（对齐浏览器单行粘贴截断语义）', () => {
+    const h = openArea()
+    const first = h.parent.querySelector<HTMLInputElement>('input[data-addon-array-item="replacements"]')!
+    // maxLength=10：第二行 12 字符截为 10
+    first.dispatchEvent(pasteEvent('x\n一二三四五六七八九十十二'))
+    const rowInputs = [...h.parent.querySelectorAll('input[data-addon-array-item="replacements"]')] as HTMLInputElement[]
+    expect(rowInputs.map((input) => input.value)).toEqual(['旧→新x', '一二三四五六七八九十'])
+  })
+
+  it('首行拼接结果同样经 maxLength 截断——草稿不持不可保存值（审查 F1）', () => {
+    const h = openArea()
+    const first = h.parent.querySelector<HTMLInputElement>('input[data-addon-array-item="replacements"]')!
+    // 当前项 3 字符 + 首行 9 字符 = 12 > maxLength 10：拼接后截为 10
+    first.dispatchEvent(pasteEvent('一二三四五六七八九\n乙'))
+    const rowInputs = [...h.parent.querySelectorAll('input[data-addon-array-item="replacements"]')] as HTMLInputElement[]
+    expect(rowInputs.map((input) => input.value)).toEqual(['旧→新一二三四五六七', '乙'])
+    // 截断后的草稿可整批保存（不触发 save-failed）
+    buttons(h, '保存')[0]!.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsUpdate', addonId: ADDON_ID, scope: 'user', values: { replacements: ['旧→新一二三四五六七', '乙'] } })
+  })
+
+  it('枚举值为原型属性名（toString）时缺失标签回退枚举值本身（审查 F2：hasOwn 不走原型链）', () => {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
+    h.dispatch(settingsState({
+      definitions: [{
+        key: 'protoMode', title: '原型枚举', type: 'string', enum: ['toString', 'safe'], default: 'toString',
+        enumLabels: { safe: '安全' },
+      }],
+    }))
+    const select = h.parent.querySelector<HTMLSelectElement>('select[data-addon-setting="protoMode"]')
+    expect([...select!.options].map((option) => option.textContent)).toEqual(['toString', '安全'])
   })
 })
 

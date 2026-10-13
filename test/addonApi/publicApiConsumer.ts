@@ -84,6 +84,7 @@ import {
   type AddonBehaviorRegisterResult,
 } from '../../src/shared/addonBehaviors'
 import type {
+  AddonLocalizedText,
   AddonSettingDefinition,
   AddonSettingSource,
   AddonSettingValue,
@@ -349,6 +350,22 @@ export type SettingShapes = {
   definition: AddonSettingDefinition
   value: AddonSettingValue
 }
+
+/** #473/#475 string 定义呈现形态字段：enumLabels（枚举档位标签，直值或
+ *  多语言映射）与 multiline（多行文本声明）——字段改名/删除/形态收窄即
+ *  编译失败（AddonLocalizedText 是标签值形态的公开别名） */
+export const presentationSettingDefinitions: readonly AddonSettingDefinition[] = [
+  {
+    key: 'strategy', title: '空格策略', type: 'string',
+    enum: ['none', 'soft', 'strict'], default: 'soft',
+    enumLabels: {
+      none: { 'zh-cn': '不要求空格', en: 'No spaces' },
+      soft: '软空格',
+    },
+  },
+  { key: 'prefixes', title: '前缀词典', type: 'string', multiline: true, default: '' },
+]
+export type EnumLabelText = AddonLocalizedText
 
 /** 渲染与界面注册形状 */
 export type RendererShapes = { registration: AddonRendererRegistration }

@@ -102,6 +102,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 
 - 设置行 `vsidian-settings-item`：`padding 18px 0`、行间分隔线、末行无线；label 两侧布局（文字 copy 左、控件右，gap 28px）；依赖灰化（opacity 0.55 + 控件禁用）由注册表 `dependsOn` 驱动。
 - 控件：拨动开关 36×20 pill（`appearance:none` 纯 CSS，选中 focusBorder，120ms 过渡，保留 checkbox 语义）；select/text 圆角 2px（dropdown/input 变量族）；range 用 `accent-color` + 值文本 `tabular-nums`。**新控件类型先在本节登记形态再实现。**
+- 多行文本（#475 附加组件设置区，内部类 `vsidian-addons-setting-item > textarea`）：圆角 2px + `--vscode-input-*` 变量族对齐 select/text 档位；`width 100%` / `min-height 72px`（rows=4 语义兜底）/ `resize: vertical` 可拖高；占定义行整行（label 行下方），不进右槽。
 
 ### 2.4 按钮、徽章与状态
 

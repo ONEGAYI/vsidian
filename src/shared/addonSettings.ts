@@ -21,8 +21,14 @@
 //   内存为权威并主动推送；跨窗口不做实时推送，读取以新构造（重开/重启）
 //   对账，并发写按最后落盘胜出——详见 addonSettingsService.ts 头注。
 
+import { isUsableLocalizedText, type LocalizedText } from './localizedText'
+
 /** 组件设置标量值（普通值三型） */
 export type AddonSettingScalarValue = boolean | number | string
+
+/** 枚举档位显示标签的多语言形态（#473）：直值或「语言代码→文本」映射，
+ *  选值语义见 localizedText.ts（与 #464 行为名多语言惯例同构） */
+export type AddonLocalizedText = LocalizedText
 
 /** 组件设置值：标量 / 标量数组 / 字段为标量的对象（一层结构硬边界） */
 export type AddonSettingValue =
@@ -53,7 +59,19 @@ interface AddonSettingDefinitionBase {
 export type AddonSettingDefinition =
   | (AddonSettingDefinitionBase & { type: 'boolean'; default: boolean })
   | (AddonSettingDefinitionBase & { type: 'number'; min?: number; max?: number; default: number })
-  | (AddonSettingDefinitionBase & { type: 'string'; maxLength?: number; enum?: readonly string[]; default: string })
+  | (AddonSettingDefinitionBase & {
+    type: 'string'
+    maxLength?: number
+    enum?: readonly string[]
+    /** 枚举档位显示标签（#473，仅呈现层）：键 = enum 值、值 = 直值或多语言
+     *  映射；缺失键/缺失整个字段回退渲染枚举值本身。不参与值校验 */
+    enumLabels?: Readonly<Record<string, AddonLocalizedText>>
+    /** 多行形态声明（#475，仅呈现层）：true 时设置页渲染 textarea，换行符
+     *  参与持久化值；缺省/false 保持单行。仅自由文本适用——enum 定义
+     *  （档位下拉）拒绝与本声明组合（形状自洽，拼错早失败）。不引入内容校验 */
+    multiline?: boolean
+    default: string
+  })
   | (AddonSettingDefinitionBase & {
     type: 'array'
     /** 重复项约束（一层：只描述标量） */
@@ -131,6 +149,21 @@ function definitionBaseValid(value: Record<string, unknown>): boolean {
   return typeof value.key === 'string' && value.key.length > 0 && typeof value.title === 'string' && value.title.length > 0
 }
 
+/**
+ * 枚举档位标签形状守卫（#473）：仅在 enum 存在时可选；键必须是 enum 成员
+ * （拼错早失败——定义形状自洽），值经多语言文本守卫（直值或合法映射）。
+ */
+function isEnumLabelsValid(value: unknown, enumValues: readonly string[] | undefined): boolean {
+  if (value === undefined) return true
+  if (enumValues === undefined) return false
+  if (!isRecord(value)) return false
+  for (const [key, label] of Object.entries(value)) {
+    if (!enumValues.includes(key)) return false
+    if (!isUsableLocalizedText(label)) return false
+  }
+  return true
+}
+
 /** 设置定义形状校验（必需字段与约束自洽；多余字段忽略——组件升级新增元数据不炸老平台） */
 export function isAddonSettingDefinition(value: unknown): value is AddonSettingDefinition {
   if (!isRecord(value) || typeof value.type !== 'string') return false
@@ -148,6 +181,10 @@ export function isAddonSettingDefinition(value: unknown): value is AddonSettingD
         })
     case 'string':
       return isStringSpec({ kind: 'string', maxLength: value.maxLength, enum: value.enum }) &&
+        isEnumLabelsValid(value.enumLabels, value.enum as readonly string[] | undefined) &&
+        (value.multiline === undefined || typeof value.multiline === 'boolean') &&
+        // enum（档位下拉）与 multiline（自由文本多行）语义互斥——组合即拒绝
+        !(value.multiline !== undefined && value.enum !== undefined) &&
         typeof value.default === 'string' &&
         addonScalarValueMatchesSpec(value.default, {
           kind: 'string',
@@ -226,6 +263,21 @@ export function addonSettingValueMatches(def: AddonSettingDefinition, value: unk
       return def.fields.every((field) => addonScalarValueMatchesSpec(value[field.key], field))
     }
   }
+}
+
+/**
+ * 数组批量粘贴拆分（#475 纯函数）：按 LF/CRLF/CR 拆行、逐行 trim、丢弃
+ * 空行（批量粘贴的空行是噪声）、各行经 maxLength 截断（对齐浏览器单行
+ * 粘贴的截断语义）。全空输入得空数组（调用方判空跳过，不改动草稿）。
+ */
+export function splitAddonArrayPasteText(text: string, maxLength?: number): string[] {
+  const lines: string[] = []
+  for (const raw of text.split(/\r\n|\r|\n/)) {
+    const trimmed = raw.trim()
+    if (trimmed.length === 0) continue
+    lines.push(maxLength !== undefined && maxLength > 0 ? trimmed.slice(0, maxLength) : trimmed)
+  }
+  return lines
 }
 
 /** 对象定义的出厂值组装（default 缺省的单一来源：字段 default） */

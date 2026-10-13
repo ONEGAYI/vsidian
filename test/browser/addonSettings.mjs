@@ -20,6 +20,12 @@ const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
 const DEFINITIONS = [
   { key: 'flag', title: '开关项', type: 'boolean', default: true },
   { key: 'threshold', title: '阈值', type: 'number', min: 1, max: 100, default: 20 },
+  {
+    // #473：enumLabels 部分覆盖（strict 缺失——回退枚举值本身）
+    key: 'strategy', title: '空格策略', type: 'string', enum: ['none', 'soft', 'strict'], default: 'soft',
+    enumLabels: { none: { 'zh-cn': '不要求空格', en: 'No spaces' }, soft: { 'zh-cn': '软空格', en: 'Soft spaces' } },
+  },
+  { key: 'note', title: '备注', type: 'string', multiline: true, maxLength: 20, default: '第一行\n第二行' },
   { key: 'replacements', title: '替换规则', type: 'array', items: { kind: 'string', maxLength: 10 }, default: ['旧→新'] },
   {
     key: 'limits', title: '对象样例', type: 'object',
@@ -205,6 +211,56 @@ try {
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user'
     && m.values.limits && m.values.limits.name === '乙' && m.values.limits.count === 7))
 
+  // ---- 6b. #473 枚举档位标签 / #475 多行形态与批量粘贴拆分 ----
+  // 标签绘制层：用户看到的下拉文案是本地化标签（缺失键回退枚举值），
+  // option.value 恒为枚举原值（标签仅呈现层）
+  const strategySelect = area.locator('select[data-addon-setting="strategy"]')
+  const optionShape = await strategySelect.evaluate((el) => [...el.options].map((o) => ({ value: o.value, text: o.textContent })))
+  assert.deepEqual(optionShape, [
+    { value: 'none', text: '不要求空格' },
+    { value: 'soft', text: '软空格' },
+    { value: 'strict', text: 'strict' },
+  ], '枚举档位显示本地化标签，缺失标签回退枚举值本身')
+  assert.equal(await strategySelect.evaluate((el) => el.selectedOptions[0].textContent), '软空格', '选中态用户可见文本为当前值标签')
+  await strategySelect.selectOption('none')
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user' && m.values.strategy === 'none'))
+
+  // 多行文本：textarea 计算样式绘制层（样式未注入即失败）
+  const noteArea = area.locator('textarea[data-addon-setting="note"]')
+  const notePaint = await noteArea.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { display: cs.display, radius: cs.borderRadius, resize: cs.resize, height: el.getBoundingClientRect().height }
+  })
+  assert.notEqual(notePaint.display, 'none', '多行控件可见')
+  assert.equal(notePaint.radius, '2px', 'textarea 圆角对齐 select/text 档位')
+  assert.equal(notePaint.resize, 'vertical', 'textarea 可纵向拖高')
+  assert.ok(notePaint.height >= 72, 'textarea 最小高度档位（min-height 72px）')
+  // 真实键盘多行输入（textarea 内 Enter 是换行）→ 失焦上送含换行的值
+  await noteArea.click()
+  await page.keyboard.press('Control+a')
+  await page.keyboard.type('甲行')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('乙行')
+  await noteArea.evaluate((el) => el.blur())
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user' && typeof m.values.note === 'string' && m.values.note.includes('\n')))
+  await area.getByText(new RegExp(zhCn['addons.savedNotice'].replace('{scope}', '.+'))).waitFor()
+  await page.screenshot({ path: path.join(artifacts, 'settings-area-labels-multiline.png') })
+
+  // 批量粘贴拆分（真实 ClipboardEvent + DataTransfer）：多行剪贴板按行
+  // 拆为多项（首行追加当前项末尾、空行丢弃）；单行粘贴不拦截由单测钉住
+  await area.evaluate(() => {
+    const input = document.querySelector('input[data-addon-array-item="replacements"]')
+    const data = new DataTransfer()
+    data.setData('text', ' 甲 \r\n\r\n乙\n丙\n')
+    input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+  })
+  await page.waitForFunction(() => document.querySelectorAll('input[data-addon-array-item="replacements"]').length === 4)
+  const pastedValues = await area.evaluate(() => [...document.querySelectorAll('input[data-addon-array-item="replacements"]')].map((el) => el.value))
+  assert.deepEqual(pastedValues, ['旧→新甲', '乙', '丙', '甲→乙'], '粘贴拆分：首行追加当前项，其余行依次插入')
+  await page.getByRole('button', { name: zhCn['addons.saveChanges'], exact: true }).nth(0).click()
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user'
+    && Array.isArray(m.values.replacements) && m.values.replacements.length === 4 && m.values.replacements[0] === '旧→新甲' && m.values.replacements[3] === '甲→乙'))
+
   // ---- 7. 功能开关随标签层（workspace）----
   await page.getByRole('tab', { name: zhCn['addons.scopeWorkspace'], exact: true }).click()
   await area.locator('input[data-addon-setting="__enabled__"]').click()
@@ -299,6 +355,8 @@ try {
     document.querySelectorAll('input[data-addon-array-item="replacements"]')[2]
       ?.focus({ preventScroll: true })
   })
+  // 6b 粘贴拆分后该行已有值（'丙'）：全选替换回目标内容
+  await page.keyboard.press('Control+a')
   await page.keyboard.type('丙→丁')
   const pinnedSave = await main.evaluate((el) => {
     document.querySelector('.vsidian-addons-array-save')?.focus({ preventScroll: true })
