@@ -5,6 +5,12 @@
 import type { MessageKey } from './en'
 
 export const zhCn: Record<MessageKey, string> = {
+  'appearance.presets': '预设主题',
+  'appearance.codeblockRendering': '代码块渲染',
+  'setting.mermaidTheme.title': 'Mermaid 渲染主题',
+  'setting.mermaidTheme.description': '选择内置流程图的外观。Codex 使用浅蓝圆角节点和 ELK 分层布局；图内样式与配置可以覆盖预设。',
+  'setting.mermaidTheme.default': '默认',
+  'setting.mermaidTheme.codex': 'Codex',
   'setting.pastePreserveFormatting.title': '粘贴保留富文本',
   'setting.pastePreserveFormatting.description': '普通粘贴时，将支持的富文本格式转换为 Markdown。',
   'setting.pasteAskBefore.title': '粘贴前询问',
@@ -221,7 +227,7 @@ export const zhCn: Record<MessageKey, string> = {
 
   // ---- appearance.（#231 外观合并分页：侧栏条目标题与描述）----
   'appearance.title': '外观',
-  'appearance.description': '管理 CSS 片段与外观定制：片段目录、逐项开关与公开样式契约参考。',
+  'appearance.description': '管理 CSS 片段、预设主题与外观定制，查阅公开样式契约。',
 
   // ---- styleRef.（样式参考：总表/详细查询文案与骨架标签，#132；#231 起为
   // 外观合并分页的页签体，tabOverview/tabDetail 亦作外观页签文案沿用）----

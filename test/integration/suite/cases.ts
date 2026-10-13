@@ -7335,6 +7335,33 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('math.md', (v) => v.viewMode === 'reading' && (v.readingMathCount ?? -1) === 8)
   }],
   // ---- 工单 #60：Mermaid 围栏块双模式渲染（live/reading/降级/一致性） ----
+  ['Mermaid Codex 预设：设置保存、双模式绘制与重开回显', async () => {
+    const previous = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    try {
+      await openWithEditor('mermaid.md')
+      await waitSessionReady('mermaid.md')
+      const uri = wsUri('mermaid.md').toString()
+      const text = await readDisk('mermaid.md')
+      const saved = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'codex' })) as { ok: boolean }
+      assert(saved.ok, 'Codex 主题应经正式设置链路保存')
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: text.indexOf('结尾段落') })
+      const live = await waitViewState('mermaid.md', v =>
+        v.settings?.['appearance.mermaidTheme'] === 'codex' && v.paint?.mermaid?.rendered === 4, 0, 60000)
+      assert(live.paint?.mermaid?.visible === true, 'Codex 预设在 Live 中应真实绘制')
+      assert(live.paint?.mermaid?.error === 1, '无效图仍经原管线降级')
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+      const reading = await waitViewState('mermaid.md', v => v.viewMode === 'reading' && v.paint?.mermaid?.rendered === 4, 0, 60000)
+      assert(reading.paint?.mermaid?.visible === true, 'Codex 预设在阅读模式应真实绘制')
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+      await openWithEditor('mermaid.md')
+      await waitSessionReady('mermaid.md')
+      const reopened = await waitViewState('mermaid.md', v => v.settings?.['appearance.mermaidTheme'] === 'codex')
+      assert(reopened.settings?.['appearance.mermaidTheme'] === 'codex', '重开面板应回显持久化主题')
+      assert(await readDisk('mermaid.md') === text, '主题切换不得改写图源码')
+    } finally {
+      await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': previous['appearance.mermaidTheme'] })
+    }
+  }],
 
   ['live Mermaid 渲染与绘制层：渲染数、分态计数与真实可见（#60）', async () => {
     await openWithEditor('mermaid.md')

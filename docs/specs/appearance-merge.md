@@ -10,7 +10,7 @@
 
 ## 已拍板决策（防回摆）
 
-- **页签结构**：扁平三页签，不加嵌套层级。
+- **页签结构**：原三页签保持顺序，2026-10-13 增加末项「预设主题」，不加嵌套层级。
 - **默认页签**：从侧栏进入外观时默认第一页签「CSS 片段」；搜索定位与宿主命令按目标页签落。
 - **搜索路由**：按条目归属落页签（见下）。
 - **分页 id 与命令**：新分页 id `appearance`；`openStyleReference` 命令 id 与标题保留，行为改为打开外观并定位「样式参考」页签。
@@ -42,6 +42,7 @@
 | 无（侧栏进入） | CSS 片段页签 |
 | `directory`、`snippet:<文件名>` | CSS 片段页签（目录行/条目定位高亮） |
 | `overview` | 样式参考页签 |
+| `appearance.*` 设置键 | 预设主题页签（标准设置行定位高亮） |
 | 其余（契约条目 id） | 详细查询页签（跳类目与页 + 定位高亮） |
 
 全局搜索的 entries 由外观分页聚合两子分页：`[...snippets.entries, ...styleRef.entries]`。
@@ -82,3 +83,19 @@
 - [x] 片段与契约两侧既有能力无回归（相关单测同步更新并全绿）—— `cssSnippetSettings.test.ts` / `styleReferenceSettings.test.ts` / `styleReferenceSettingsEn.test.ts` 全量保留并通过
 
 前四项自动化已覆盖；真实 IME、物理鼠标与视觉观感仍按惯例由人工验收（见 `manual-verification.md` 增补项）。
+
+## 预设主题与 Mermaid Codex（2026-10-13）
+
+**入口**：「外观 → 预设主题 → 代码块渲染 → Mermaid 渲染主题」。`appearance.mermaidTheme` 是自有设置注册表中的枚举，默认 `default`，可选 `codex`；沿用用户 profile 的持久化、设置广播与搜索定位机制。它是设置项，不新增编辑操作或快捷键。
+
+**呈现**：第四个页签复用 pill / `hidden` 面板机制；组头和标准设置行挂入页签面板，外观页大卡片直接承载组头，不嵌套第二张卡片。具体元素形态见 [ui-patterns.md](ui-patterns.md) §2.4。
+
+**渲染范围**：仅内置 Mermaid 的 `flowchart/graph` 使用 Codex 预设；时序图等其他类型和附加组件提供者保持各自渲染。默认模式仍采用已有明暗主题。切换预设清除当前 webview 缓存并重画内置容器，Live 与阅读共用；弹窗维持原有「打开时快照」语义，刷新、重开与新导出时取当前预设。
+
+**外观与布局**：参考本机 Codex 26.1007.2314.0 的蓝色亮色调色板（节点 `#e5f3ff`、文字 `#004f99`、节点边框与连线 `#cedbe5`、决策节点 `#f5faff`），矩形节点 16px 圆角、默认 14px/600 文字、普通折线 1px；粗边和虚线保留源码语义。边标签采用 Mermaid 有效字号（参考 Codex 为 13px），不额外锁死字号，以允许显式配置覆盖。两种编辑器明暗环境均使用这套浅蓝图内容配色。Mermaid 11.12.2 注册兼容的 `@mermaid-js/layout-elk` 0.2.0，采用 `elk.layered`、`LINEAR_SEGMENTS` 与声明顺序约束。ELK 模块随包分块加载，无远程依赖；包内容检查只放行散列 JS，仍检查整组缺失、总量和单文件红线。
+
+**差异边界**：Codex 使用应用自己的 `chatgpt-flowchart` 渲染器；本实现复用 Mermaid 的形状、标签测量和箭头。参考图的父节点偏上，而本示例的原生 ELK 父节点偏居中；节点尺寸、端口位置、箭头形状与折线路径不承诺逐像素相同。保留 `classDef/style`、init/frontmatter 与节点形状，不复制 Codex 的源码指令过滤。
+
+**契约基线**：公开入口 `.vsidian-mermaid`、`.vsidian-mermaid svg`、`.vsidian-reading-mermaid` 与错误态族保持原义。公开样式历史基线为 v0.4.0 / `75c3df79074bdeaec0f02a38d40124f0cd66f857`；本次开发基线为 `0fc0388490680c502a5ab4d4e287aade1a6adcee`。SVG 内部节点仍属第三方私有 DOM；未新增公开选择器或变量，未修改历史基线。新增模块分块只改变内部装载形态。
+
+**验证入口**：`appearanceSettings` / `settingsService` / `mermaidRender` 单测覆盖入口、保存与缓存；浏览器 `settingsPage` 和 `graphicPopup` 覆盖实际颜色、文字墨迹字重、折线、双模式、CSP、导出、显式样式和非流程图回归；真宿主「Mermaid Codex 预设」用例覆盖设置广播、绘制与重开。用户视觉验收仍待执行。

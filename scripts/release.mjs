@@ -318,6 +318,11 @@ export function inspectVsixEntries(entries, options = {}) {
       errors.push(`缺少运行时资产 extension/${rel}`)
     }
   }
+  // Mermaid ESM：目录只接纳 esbuild 的散列 JS；缺整组仍视为安装不完整。
+  const mermaidChunks = /^extension\/out\/webview\/mermaid-chunks\/[\w.-]+-[a-z0-9]{8}\.js$/
+  if (!lowerNames.some(name => mermaidChunks.test(name))) {
+    errors.push('缺少运行时资产 extension/out/webview/mermaid-chunks/*.js')
+  }
 
   // out/ 白名单（评审 C1）：上面只拦「缺」，这里拦「多」——out/ 下任何
   // 未登记文件（调试遗留、构建实验产物、裁剪失效的重复字体）一律拒绝，
@@ -328,6 +333,7 @@ export function inspectVsixEntries(entries, options = {}) {
   for (const e of entries) {
     const lower = e.name.toLowerCase()
     if (lower.startsWith('extension/out/') && !allowedOut.has(lower) &&
+      !mermaidChunks.test(lower) &&
       !ALLOWED_OUT_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
       errors.push(`out/ 未登记产物 ${e.name}（新资产须登记 REQUIRED_EXTENSION）`)
     }

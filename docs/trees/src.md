@@ -163,7 +163,7 @@ vsidian/
         ├── addonViewIdentity.ts        # 编辑器实例身份状态字段
         ├── addonViews.ts               # 页面级视图句柄注册表
         ├── anchorFlash.ts              # 跳转目标高亮装饰状态
-        ├── appearanceSettings.ts       # 外观合并分页
+        ├── appearanceSettings.ts       # 外观分页与预设主题
         ├── backlinkGrouping.ts         # 反链面板分组排序过滤纯函数
         ├── backlinkPanel.ts            # 反链面板 DOM 与四态渲染（#197）
         ├── blockIdStrip.ts             # 阅读渲染块标记剥离纯函数
@@ -224,9 +224,9 @@ vsidian/
         ├── main.css                    # webview 全局布局样式
         ├── main.ts                     # webview 启动入口
         ├── mathRenderCache.ts          # KaTeX 渲染 LRU 缓存共享模块
-        ├── mermaidEntry.ts             # Mermaid 独立产物入口（#60）
+        ├── mermaidEntry.ts             # Mermaid模块与ELK入口
         ├── mermaidRender.ts            # Mermaid 渲染管线（#60）
-        ├── mermaidTheme.ts             # Mermaid 暗色主题装配
+        ├── mermaidTheme.ts             # Mermaid主题与Codex预设
         ├── multicursor.ts              # 多光标扩展组单一事实源（#237）
         ├── nextOccurrence.ts           # 选下一处相同词选区计划纯函数
         ├── outline.ts                  # 大纲全文解析与面板装配

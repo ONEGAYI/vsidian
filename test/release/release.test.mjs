@@ -69,6 +69,7 @@ function makeEntries() {
     // #60 Mermaid 独立产物（minify 后实测 2,727,077 B 的代表值；低于 3MB
     // 单文件警告线与 4MB 上限）
     { size: 2727077, name: 'extension/out/webview/mermaid.js' },
+    { size: 12000, name: 'extension/out/webview/mermaid-chunks/flowDiagram-ABCD1234.js' },
     // #337 PDF 双产物（#334 探针 minified 实测代表值：主库约 480KB、
     // worker 约 1.23MB；均低于 3MB 单文件警告线）
     { size: 491520, name: 'extension/out/webview/pdfMain.js' },
@@ -254,6 +255,15 @@ test('VSIX 检查：完整合法集合通过且零警告（#60 后单文件警�
   // 单文件 < 3MB——合法基线不再有预期警告（#59 期 main.js 超 700KB
   // 警告线的口径作废）
   assert.deepEqual(result.warnings, [])
+})
+
+test('VSIX 检查：Mermaid 分块允许散列 JS，缺少整组或混入调试文件仍拒绝', () => {
+  const entries = makeEntries()
+  assert.equal(inspectVsixEntries(entries).ok, true)
+  const missing = entries.filter(e => !e.name.includes('/mermaid-chunks/'))
+  assert.ok(inspectVsixEntries(missing).errors.some(e => e.includes('mermaid-chunks')))
+  const debug = [...entries, { size: 10, name: 'extension/out/webview/mermaid-chunks/debug.log' }]
+  assert.ok(inspectVsixEntries(debug).errors.some(e => e.includes('debug.log')))
 })
 
 test('VSIX 检查：#337 pdfjs 资产目录按前缀放行（cmaps/字体/wasm/iccs 内建文件名不逐个登记）', () => {

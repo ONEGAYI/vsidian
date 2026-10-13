@@ -64,6 +64,7 @@ describe('搜索定位路由（routeAppearanceTab 纯函数）', () => {
     expect(routeAppearanceTab('directory')).toBe('cssSnippets')
     expect(routeAppearanceTab('snippet:github.css')).toBe('cssSnippets')
     expect(routeAppearanceTab('overview')).toBe('overview')
+    expect(routeAppearanceTab('appearance.mermaidTheme')).toBe('presets')
     expect(routeAppearanceTab('outline-search-hit')).toBe('detail')
     expect(routeAppearanceTab('any-contract-entry')).toBe('detail')
   })
@@ -74,7 +75,7 @@ describe('三页签结构与默认页签', () => {
     const { parent } = makeAppearance()
     const tabs = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-tab')]
     expect(tabs.map((b) => b.textContent)).toEqual([
-      zhCn['cssSnippets.title'], zhCn['styleRef.tabOverview'], zhCn['styleRef.tabDetail'],
+      zhCn['cssSnippets.title'], zhCn['styleRef.tabOverview'], zhCn['styleRef.tabDetail'], '预设主题',
     ])
     expect(tabOf(parent, 'cssSnippets').getAttribute('aria-selected')).toBe('true')
     expect(tabOf(parent, 'overview').getAttribute('aria-selected')).toBe('false')
@@ -153,6 +154,20 @@ describe('全局搜索 entries 与定位路由', () => {
 })
 
 describe('组合接线（snippets.state 直连实例不回归）', () => {
+  it('预设主题页签可切换并恢复，设置行归外观分页的代码块渲染组', () => {
+    const { appearance, parent } = makeAppearance()
+    tabOf(parent, 'presets').click()
+    expect(parent.querySelector('.vsidian-appearance-presets')!.hasAttribute('hidden')).toBe(false)
+    expect(parent.querySelector('.vsidian-appearance-snippets')!.hasAttribute('hidden')).toBe(true)
+    expect(appearance.captureState()).toEqual({ tab: 'presets' })
+    expect(appearance.defsGroups).toEqual([{
+      titleKey: 'appearance.codeblockRendering', icon: 'codeblock',
+      prefixes: ['appearance.'], target: '.vsidian-appearance-presets',
+    }])
+    appearance.restoreState({ tab: 'presets' })
+    appearance.mount(parent)
+    expect(tabOf(parent, 'presets').getAttribute('aria-selected')).toBe('true')
+  })
   it('组合形态下宿主状态推送就地回显：CSS 片段页签体目录与开关更新', () => {
     const { snippets, parent } = makeAppearance()
     pushState(snippets, { directory: 'D:/片段', entries: [{ name: 'a.css', enabled: false }] })

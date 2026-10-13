@@ -25,7 +25,8 @@ await build({
 const mermaidArtifact = artifactPath(root, 'mermaid.js')
 await build({
   entryPoints: [path.join(root, 'src/webview/mermaidEntry.ts')],
-  outfile: mermaidArtifact, bundle: true, platform: 'browser', format: 'iife',
+   outdir: path.dirname(mermaidArtifact), entryNames: 'mermaid', chunkNames: 'mermaid-chunks/[name]-[hash]',
+   bundle: true, platform: 'browser', format: 'esm', splitting: true,
   target: 'chrome118', minify: true, sourcemap: false, logLevel: 'silent',
 })
 
@@ -60,7 +61,8 @@ const server = http.createServer((req, res) => {
     }
     const rel = url.pathname.slice(1)
     try {
-      const data = await readFile(rel === 'mermaid.js' ? mermaidArtifact : path.join(outDir, rel))
+      const data = await readFile(rel === 'mermaid.js' || rel.startsWith('mermaid-chunks/')
+        ? path.join(path.dirname(mermaidArtifact), rel) : path.join(outDir, rel))
       res.writeHead(200, {
         'content-type': rel.endsWith('.css') ? 'text/css' : 'text/javascript',
       })
@@ -241,6 +243,100 @@ try {
   await page.waitForFunction(() => document.querySelector('.vsidian-diagram-overlay') === null)
 
   await page.close()
+  // Codex 预设：真实产物与 CSP 下的双模式、缓存切换、弹窗导出和语义回归。
+  const presetPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
+  await presetPage.goto(pageBase + '/')
+  await presetPage.addStyleTag({ content: 'body { --vscode-editor-background:#fff; --vscode-editor-foreground:#333; }' })
+  const codexCode = 'flowchart LR\nS["会话 session"] --> M["消息 message：user / assistant"]\nM --> T["text：正文"]\nM --> R["reasoning：已暴露的思考记录"]\nM --> F["file：文件与来源引用"]\nM --> U["tool：参数、状态与结果"]'
+  await presetPage.evaluate(code => {
+    window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': 'codex' } })
+    window.initQuick('```mermaid\n' + code + '\n```\n\n结尾')
+    const view = window.controller.getView()
+    view.dispatch({ selection: { anchor: view.state.doc.length } })
+  }, codexCode)
+  await presetPage.waitForFunction(() => document.querySelector('.vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered')
+  const presetPaint = await presetPage.evaluate(() => {
+    const svg = document.querySelector('.vsidian-mermaid svg')
+    const rect = svg.querySelector('.node rect.label-container')
+    const label = svg.querySelector('.node .label')
+    const edge = svg.querySelector('.flowchart-link')
+    window.controller.handleHostMessage({ kind: 'view.state.request' })
+    return { fill: getComputedStyle(rect).fill, stroke: getComputedStyle(rect).stroke,
+      radius: getComputedStyle(rect).rx, text: getComputedStyle(label).fill,
+      fontSize: getComputedStyle(label).fontSize, weight: getComputedStyle(label).fontWeight,
+      inkWeight: getComputedStyle(label.querySelector('tspan')).fontWeight,
+      line: getComputedStyle(edge).stroke, lineWidth: getComputedStyle(edge).strokeWidth,
+      paths: [...svg.querySelectorAll('.flowchart-link')].map(el => el.getAttribute('d')),
+      visible: window.quickSent().at(-1).paint?.mermaid?.visible,
+      labels: svg.textContent, htmlLabels: svg.querySelectorAll('foreignObject').length }
+  })
+  assert.equal(presetPaint.visible, true)
+  assert.equal(presetPaint.fill, 'rgb(229, 243, 255)')
+  assert.equal(presetPaint.stroke, 'rgb(206, 219, 229)')
+  assert.equal(presetPaint.radius, '16px')
+  assert.equal(presetPaint.text, 'rgb(0, 79, 153)')
+  assert.equal(presetPaint.fontSize, '14px')
+  assert.equal(presetPaint.weight, '600')
+  assert.equal(presetPaint.inkWeight, '600', '实际绘制文字应使用 600 字重')
+  assert.equal(presetPaint.line, 'rgb(206, 219, 229)')
+  assert.equal(presetPaint.lineWidth, '1px')
+  assert.equal(presetPaint.htmlLabels, 0)
+  assert.equal(presetPaint.paths.length, 5)
+  assert.ok(presetPaint.paths.every(d => !/[CQ]/.test(d)), 'ELK 预设应输出折线')
+  assert.ok(presetPaint.labels.includes('已暴露的思考记录'))
+  const presetArtifacts = artifactPath(root, 'screenshots/mermaidPreset')
+  await mkdir(presetArtifacts, { recursive: true })
+  await presetPage.locator('.vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, 'codex-live.png') })
+  await presetPage.locator('.vsidian-graphic-frame').hover()
+  await presetPage.locator('.vsidian-graphic-chrome-popup').click()
+  await presetPage.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
+  assert.equal(await presetPage.locator('.vsidian-diagram-media .node rect.label-container').first().evaluate(el => getComputedStyle(el).fill), presetPaint.fill)
+  await presetPage.locator('.vsidian-diagram-export-svg').click()
+  await presetPage.waitForFunction(() => window.quickSent().some(m => m.kind === 'diagram.export'))
+  const codexExport = await presetPage.evaluate(() => window.quickSent().find(m => m.kind === 'diagram.export'))
+  assert.ok(codexExport.content.includes('#e5f3ff'))
+  assert.ok(!codexExport.content.includes('foreignObject'))
+  await presetPage.locator('.vsidian-diagram-export-png').click()
+  await presetPage.waitForFunction(() => window.quickSent().some(m => m.kind === 'diagram.export' && m.format === 'png'))
+  await presetPage.keyboard.press('Escape')
+  await presetPage.evaluate(() => window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' }))
+  await presetPage.waitForFunction(() => document.querySelector('.vsidian-view-reading .vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered')
+  assert.equal(await presetPage.locator('.vsidian-view-reading .node rect.label-container').first().evaluate(el => getComputedStyle(el).fill), presetPaint.fill)
+  await presetPage.locator('.vsidian-view-reading .vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, 'codex-reading.png') })
+  await presetPage.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': 'default' } }))
+  await presetPage.waitForFunction(() => getComputedStyle(document.querySelector('.vsidian-view-reading .node rect.label-container')).fill !== 'rgb(229, 243, 255)')
+  await presetPage.locator('.vsidian-view-reading .vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, 'default.png') })
+  // 原生 Mermaid classDef / 菱形与非流程图保持自身语义；init/frontmatter 仍可覆写布局。
+  const semantic = await presetPage.evaluate(async () => {
+    const sequence = 'sequenceDiagram\nparticipant A\nparticipant B\nA->>B: hello'
+    const normal = await window.mermaid.render('sequence-default', sequence, 'default')
+    const codex = await window.mermaid.render('sequence-codex', sequence, 'codex')
+    const flow = await window.mermaid.render('shape-codex', 'flowchart LR\nA[自定义]:::red --> B{判断}\nB ==> C[粗线]\nA -.-> D[虚线]\nclassDef red fill:#ff0000,color:#000000', 'codex')
+    const override = await window.mermaid.render('override-codex', '---\nconfig:\n  layout: dagre\n  themeVariables:\n    fontSize: 24px\n---\nflowchart LR\nA-->B', 'codex')
+    const holder = document.createElement('div')
+    document.body.append(holder)
+    holder.innerHTML = normal.svg
+    const normalColor = getComputedStyle(holder.querySelector('.actor')).fill
+    holder.innerHTML = codex.svg
+    const codexColor = getComputedStyle(holder.querySelector('.actor')).fill
+    holder.innerHTML = flow.svg
+    const customColor = getComputedStyle(holder.querySelector('.node rect')).fill
+    const decision = holder.querySelector('.node polygon') !== null
+    const thickWidth = getComputedStyle(holder.querySelector('.edge-thickness-thick')).strokeWidth
+    const dashed = getComputedStyle(holder.querySelector('.edge-pattern-dotted')).strokeDasharray
+    holder.innerHTML = override.svg
+    const overrideFont = getComputedStyle(holder.querySelector('.node .label tspan')).fontSize
+    holder.remove()
+    return { normalColor, codexColor, customColor, decision, thickWidth, dashed, overrideFont, override: override.svg.includes('<svg') }
+  })
+  assert.equal(semantic.normalColor, semantic.codexColor, '时序图不应用流程图预设')
+  assert.equal(semantic.customColor, 'rgb(255, 0, 0)', '显式 classDef 保留')
+  assert.equal(semantic.decision, true, '菱形节点不改成矩形')
+  assert.equal(semantic.thickWidth, '3.5px', '源码 ==> 的粗箭头语义保留')
+  assert.notEqual(semantic.dashed, 'none', '源码虚线语义保留')
+  assert.equal(semantic.override, true, 'frontmatter 可覆写布局')
+  assert.equal(semantic.overrideFont, '24px', 'frontmatter 显式字号应覆盖预设默认值')
+  await presetPage.close()
   console.log('[图形化代码块交互] 悬停显隐、禁点击、edit 迁移、弹窗缩放/平移/键盘/Esc、点图不关、SVG/PNG 导出（CSP 复刻页）通过')
 } finally {
   server.close()

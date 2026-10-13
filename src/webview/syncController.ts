@@ -159,7 +159,8 @@ import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from '
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
-import { resetMermaidLoadFailure, setMermaidDarkTheme } from './mermaidRender'
+import { resetMermaidLoadFailure, setMermaidDarkTheme, setMermaidPreset } from './mermaidRender'
+import { MERMAID_THEME_KEY } from '../shared/settings'
 import {
   closeDiagramPopup,
   DIAGRAM_POPUP_CLASS_NAMES,
@@ -2362,6 +2363,7 @@ export class WebviewSyncController {
         // 引擎）仍在下方处理
         const previousCodeCard = this.live?.codeCardConfigSnapshot
         this.settings = message.values
+        setMermaidPreset(message.values[MERMAID_THEME_KEY] === 'codex' ? 'codex' : 'default')
         this.live?.applySettings(message.values)
         const nextCodeCard = this.live?.codeCardConfigSnapshot
         if (previousCodeCard && nextCodeCard && (

@@ -109,6 +109,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 徽章：pill、11px；警示徽章用 `statusBarItem-error*`（侧栏故障）；行内状态徽章 panel-border 描边 + 说明色。
 - 空态：说明色、`padding 24px 0`；状态行（保存反馈）12px 说明色、`role=status`。
 - callout：圆角 8px + 左强调条 3px（focusBorder）+ `inputValidation-infoBackground`，承载说明性长文案。
+- 外观页「预设主题」沿用现有 pill 页签；「代码块渲染」组头与标准设置行直接放入页签面板，外观页的大卡片承载组头负边距，不再套一层组卡片。Mermaid 的 Codex 图表配色与 16px 节点圆角属于用户选择的图内容预设，不用于设置控件或其他界面元素。
 - 定位高亮（搜索/路由跳转落点）：`outline 1px focusBorder + offset 8px`、圆角 3px，类名 `vsidian-settings-item-located`。档位语义是**一次性导航反馈**：显式定位时呈现，约 1.5s 后退场，退场后不重现；定位落点唯一——容器级与条目级描边互斥，定位到具体条目只标条目行，列表级定位才描容器本身。当前落地范围是**附加组件页的列表级与条目级两处**（#462 先例）：条目级高亮经定位态跨推送重渲染保持（时限内不延长寿命）；列表级容器描边仅在定位渲染当次呈现（推送重建即消）；同分页 manage/behaviors 入口与其他分页的定位高亮维持既有语义（常驻至下次重渲染），迁移到本档位语义另行落档。
 
 ## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）

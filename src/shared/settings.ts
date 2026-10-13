@@ -172,6 +172,9 @@ export const CODEBLOCK_COPY_BUTTON_DEFAULT = true
  */
 export const CODEBLOCK_HIGHLIGHT_KEY = 'codeblock.highlight'
 export const CODEBLOCK_HIGHLIGHT_DEFAULT = true
+/** 外观页预设主题：仅内置 Mermaid 流程图消费，默认保留既有渲染。 */
+export const MERMAID_THEME_KEY = 'appearance.mermaidTheme'
+export type MermaidPreset = 'default' | 'codex'
 
 /**
  * #123「符号自动补全」开关：实时预览正文中键入起始符号自动补入闭合
@@ -501,6 +504,15 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: CODEBLOCK_HIGHLIGHT_DEFAULT,
     titleKey: 'setting.codeblockHighlight.title',
     descriptionKey: 'setting.codeblockHighlight.description',
+  },
+  {
+    key: MERMAID_THEME_KEY,
+    type: 'string', default: 'default', enum: ['default', 'codex'],
+    titleKey: 'setting.mermaidTheme.title',
+    descriptionKey: 'setting.mermaidTheme.description',
+    optionLabelKeys: {
+      default: 'setting.mermaidTheme.default', codex: 'setting.mermaidTheme.codex',
+    },
   },
   {
     key: SYMBOL_AUTOCOMPLETE_KEY,
