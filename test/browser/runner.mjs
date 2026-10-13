@@ -32,7 +32,8 @@ export async function runSuites({ suites, workers, reportDir, root, timeoutMs = 
   const broker = createBuildBroker({ build, reuse: reuseBuilds })
   const report = { startedAt: new Date().toISOString(), workers, reuseBuilds,
     environment: { platform: process.platform, arch: process.arch, node: process.version,
-      browserChannel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || 'chromium' },
+      browserChannel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || 'chromium',
+      browserGroup: process.env.VSIDIAN_TEST_BROWSER_GROUP || 'all' },
     durationMs: 0, exitCode: null, suites: [] }
   let writing = Promise.resolve()
   const save = () => {

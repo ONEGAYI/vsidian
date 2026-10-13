@@ -57,6 +57,26 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 
 `all` 为默认组，显式组名只接受 `all / core / sensitive`。定向筛选未命中当前组即报错；切片后合法的空片仍允许。开发态 all/core 的报告沿用 `.vscode-test/integration-dev.log` 或 `integration-dev-s<片号>.log`；sensitive 使用 `integration-sensitive.log` 或 `integration-sensitive-s<片号>.log`。报告记录分组、计划数量、逐项 START/PASS/FAIL/TIME 和宿主退出码；首次运行即落盘，复核只读报告。
 
+## 浏览器测试分组（browser core / 敏感组，2026-10-14）
+
+浏览器测试（`npm run test:browser`）原为单 job 跑全部脚本清单，任一脚本失败整体非零；#272 抖动族在 browser 的表现为「不同 attempt 随机挂不同套件」（PR #481 四次 attempt 挂三个互不相同套件、main 基线近 10 次 CI 8 红），使 browser 长期随机挂红且无法靠重跑收敛。2026-10-14 用户授权仿照集成第五组建制 browser 敏感组：**结构仿照、语义独立**——分组只作用于浏览器套件选择，不与集成 core/sensitive 组共享名单或退出条件。
+
+`test/browser/groups.mjs` 的 `BROWSER_SENSITIVE_SUITES` 是浏览器敏感名单的单一事实源，按套件名与 `run.mjs` 的 names 精确匹配；每项登记原因、跟踪票和原始证据，不按领域关键词批量排除。名单成员消失于全量清单、或定向 `--suite` 与组别交集为空时立即报错（契约测试 `test/browser/groups.test.mjs` 钉住名单内容与接线）。
+
+| 敏感组成员 | 证据与待查问题 |
+| --- | --- |
+| tableCaret | PR #481 [run 38450365230](https://github.com/ONEGAYI/vsidian/actions/runs/38450365230) attempt 2/4 两次复挂、同 ~70s 超时形态（Linux runner；本地 Windows 全绿）——CI 环境真实脆弱点候选，归因最优先。条目 1 已修复的度量重发（fae41d5f）是另一根因，本次复发另册跟踪（#446 条目 9） |
+| addonT10Commands | 同 run attempt 1 断言失败（10.3s）；本地定向单跑稳定通过——CI 时序敏感，根因未定（#446 条目 9） |
+| addonRendererTakeover | 同 run attempt 3 断言失败（16.9s），与条目 5 的初始化等待超时同套件（#446 条目 5/9）；本地全绿 |
+
+### CI 语义
+
+- `browser` job 保持既有 job 名与非必需地位不变，改设 `VSIDIAN_TEST_BROWSER_GROUP=core`（全量减敏感名单）；报告 artifact 更名 `browser-core-reports-a<attempt>`。
+- 新 job `browser-sensitive` 设 `VSIDIAN_TEST_BROWSER_GROUP=sensitive`，不在任何 needs 链上：不用 continue-on-error、不自动重试、不放宽断言——失败保留红灯、逐套件报告与非零退出码，整轮 workflow 可为 failure，但不阻断必需检查。
+- 本地默认（不设环境变量）仍是全量，回归习惯与全量验证口径不变；`VSIDIAN_TEST_BROWSER_GROUP=sensitive npm run test:browser` 单跑敏感组（Git Bash），PowerShell 用 `$env:VSIDIAN_TEST_BROWSER_GROUP='sensitive'` 后清除。
+
+此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组不修复产品行为、不修改套件断言；三套件的归因排查仍开放，跟踪 #446。
+
 ### Windows 剪贴板族诊断与互斥（2026-10-10）
 
 **本轮确认了产品兼容缺陷、测试驱动问题和共享资源干扰**。基线为 `7011adee`，宿主为真实 VSCode 1.82.3，开发态加载独立工作树的 `out/extension.js` 与 `out/webview/`。

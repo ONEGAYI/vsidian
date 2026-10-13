@@ -2,6 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { parseBrowserRunOptions, runSuites } from './runner.mjs'
+import { parseBrowserGroupEnv, selectBrowserSuites } from './groups.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 保留原 test:browser 的全部脚本；长套件优先启动。
@@ -139,18 +140,23 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 消息经生产路径进缓存、夹具组件经公开 SDK 读值回报——默认值/同源/
   // 热更跟随/白名单拒绝）紧随附加组件族
   'addonHostSettings']
+// 分组（仿集成 VSIDIAN_TEST_GROUP）：缺省 all 全量（本地习惯不变）；CI 的
+// browser job 跑 core，独立非必需的 browser-sensitive job 跑敏感名单。
+// 名单与维护口径见 test/browser/groups.mjs 与 docs/specs/integration-test-groups.md。
+const group = parseBrowserGroupEnv(process.env.VSIDIAN_TEST_BROWSER_GROUP)
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
+const grouped = selectBrowserSuites(names, selected, group)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
 const reportDir = await mkdtemp(path.join(parent, 'run-'))
-console.log(`浏览器报告: ${reportDir}`)
+console.log(`浏览器报告: ${reportDir}（组别 ${group}，${grouped.length}/${names.length} 套件）`)
 const abort = new AbortController()
 const cancel = () => abort.abort()
 process.once('SIGINT', cancel)
 process.once('SIGTERM', cancel)
 const report = await runSuites({ root, workers, reuseBuilds, reportDir,
   signal: abort.signal,
-  suites: selected.map(name => ({ name, script: path.join(root, 'test/browser', `${name}.mjs`) })) })
+  suites: grouped.map(name => ({ name, script: path.join(root, 'test/browser', `${name}.mjs`) })) })
 process.off('SIGINT', cancel)
 process.off('SIGTERM', cancel)
 for (const suite of report.suites) console.log(`[${suite.status}] ${suite.name}: ${(suite.durationMs / 1000).toFixed(2)}s`)
