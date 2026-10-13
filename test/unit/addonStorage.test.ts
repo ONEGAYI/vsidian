@@ -39,14 +39,29 @@ describe('#404 AddonStorageService（内存 fs 端口）', () => {
     disposedWatchers: string[]
     /** 模拟底层 watcher 派发（存活 watcher 的 onEvent 端口） */
     fire: (kind: 'change' | 'delete', relativePath: string) => void
+    /** #461 注入 readDirectory 恒抛错误（null 清除——非 not-found 错误仍 error 拒绝的断言面） */
+    failReadDirectoryWith: (err: unknown | null) => void
+    /** #461 标记目录缺失（递归中途子目录消失模拟：首层列出后下钻才 not-found） */
+    markMissing: (dir: string) => void
   }
 
-  function makeService(initial: Record<string, string> = {}): Harness {
+  function makeService(
+    initial: Record<string, string> = {},
+    opts: { notFoundCode?: string } = {},
+  ): Harness {
     const files: Map<string, Uint8Array | 'dir'> = new Map(
       Object.entries(initial).map(([path, content]) => [path, Buffer.from(content, 'utf8')]),
     )
     const disposedWatchers: string[] = []
     const liveEvents: Array<(kind: 'change' | 'delete', relativePath: string) => void> = []
+    // #461 readDirectory 的 not-found 语义对齐真实端口：目录不存在抛错而非
+    // 返回空数组——code 形态可参差（node fs 透传 ENOENT / vscode 语义
+    // FileNotFound），经 notFoundCode 参数化双验
+    const notFoundCode = opts.notFoundCode ?? 'ENOENT'
+    const missingDirs = new Set<string>()
+    let readDirectoryFailure: unknown | null = null
+    const dirExists = (path: string) =>
+      files.get(path) === 'dir' || [...files.keys()].some((key) => key.startsWith(`${path}/`))
     const fs: AddonStorageFsPort = {
       readFile: async (path) => {
         const entry = files.get(path)
@@ -65,6 +80,19 @@ describe('#404 AddonStorageService（内存 fs 端口）', () => {
         files.delete(path)
       },
       readDirectory: async (path) => {
+        if (readDirectoryFailure !== null) throw readDirectoryFailure
+        // #461 目标路径是文件：真实端口抛非目录错误（node 透传 ENOTDIR /
+        // vscode FileNotADirectory）——不属 not-found 归一范围，error 拒绝
+        if (files.get(path) instanceof Uint8Array) {
+          throw Object.assign(new Error(`ENOTDIR: not a directory, readDirectory '${path}'`), {
+            code: 'ENOTDIR',
+          })
+        }
+        if (missingDirs.has(path) || !dirExists(path)) {
+          throw Object.assign(new Error(`${notFoundCode}: no such directory, readDirectory '${path}'`), {
+            code: notFoundCode,
+          })
+        }
         const prefix = `${path}/`
         const out: Array<[string, number]> = []
         const seen = new Set<string>()
@@ -96,6 +124,12 @@ describe('#404 AddonStorageService（内存 fs 端口）', () => {
       disposedWatchers,
       fire: (kind, relativePath) => {
         for (const onEvent of [...liveEvents]) onEvent(kind, relativePath)
+      },
+      failReadDirectoryWith: (err) => {
+        readDirectoryFailure = err
+      },
+      markMissing: (dir) => {
+        missingDirs.add(dir)
       },
       service: new AddonStorageService({
         baseDir: BASE,
@@ -177,6 +211,62 @@ describe('#404 AddonStorageService（内存 fs 端口）', () => {
     const { service } = makeService()
     const result = await service.storageFor(ADDON).readFile('missing.json')
     expect(result).toMatchObject({ ok: false, reason: 'error' })
+  })
+
+  it('list 对不存在目录返回空清单——根未建/子目录未建/递归，ENOENT 与 FileNotFound 双 code（#461）', async () => {
+    // 「未建目录 = 空存储」一条口径覆盖三种形态；readDirectory 的 not-found
+    // code 两种来源（node fs 透传 ENOENT / vscode.workspace.fs FileNotFound）
+    // 各验一遍——组件 fail-safe init 不应把全新 profile 的惰性根目录当 IO 故障
+    for (const notFoundCode of ['ENOENT', 'FileNotFound'] as const) {
+      const { service } = makeService({}, { notFoundCode })
+      const storage = service.storageFor(ADDON)
+      expect(await storage.list()).toEqual({ ok: true, entries: [] })
+      expect(await storage.list('sub')).toEqual({ ok: true, entries: [] })
+      expect(await storage.list(undefined, true)).toEqual({ ok: true, entries: [] })
+    }
+  })
+
+  it('readDirectory 非 not-found 错误仍 error 拒绝（EPERM 与无 code 普通 Error）（#461）', async () => {
+    {
+      const { service, failReadDirectoryWith } = makeService()
+      failReadDirectoryWith(Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }))
+      expect(await service.storageFor(ADDON).list()).toMatchObject({ ok: false, reason: 'error' })
+    }
+    {
+      const { service, failReadDirectoryWith } = makeService()
+      failReadDirectoryWith(new Error('boom'))
+      expect(await service.storageFor(ADDON).list()).toMatchObject({ ok: false, reason: 'error' })
+    }
+  })
+
+  it('list 的目标路径是文件：非目录错误不属 not-found 归一，仍 error 拒绝（#461）', async () => {
+    // 真实端口对非目录路径抛 ENOTDIR（node 透传）/ FileNotADirectory
+    // （vscode 语义）——isFileNotFound 不收，error 拒绝是生产语义；mock
+    // 须按同形抛错，不得借 not-found 归一兜成空清单
+    const { service } = makeService({
+      '/gs/addons/pub.my-addon/rule-state.json': '{"seed":true}',
+    })
+    expect(await service.storageFor(ADDON).list('rule-state.json')).toMatchObject({
+      ok: false,
+      reason: 'error',
+    })
+  })
+
+  it('递归中途子目录消失：该子树为空、整体 ok（#461）', async () => {
+    // 首层列出含 gone 子目录，下钻 readDirectory 时它已缺失（竞态形态）——
+    // 该子树静默为空，不把整个 list 拒绝
+    const { service, markMissing } = makeService({
+      '/gs/addons/pub.my-addon/builtin-rules.json': '[]',
+      '/gs/addons/pub.my-addon/gone/inner.txt': 'x',
+    })
+    markMissing('/gs/addons/pub.my-addon/gone')
+    expect(await service.storageFor(ADDON).list(undefined, true)).toEqual({
+      ok: true,
+      entries: [
+        { path: 'builtin-rules.json', kind: 'file' },
+        { path: 'gone', kind: 'directory' },
+      ],
+    })
   })
 
   it('onDidChangeFile：事件回相对路径与变化类型（change/delete）；多订阅共享一个底层 watcher，全退订注销；release 注销', async () => {
