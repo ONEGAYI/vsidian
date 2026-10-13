@@ -21,12 +21,11 @@ export interface OfficialAddonEntry {
 }
 
 /**
- * 官方（核心）附加组件登记表。初版为空占位——首个官方组件发布时在此
- * 登记；「核心组件」侧栏分组随之从空态转为条目列表。
+ * 官方（核心）附加组件登记表。已登记首个官方组件 vsidian-easy-typing；
+ * 后续官方组件发布时在此增行，「核心组件」侧栏分组随之出现对应条目。
  */
 export const OFFICIAL_ADDON_REGISTRY: readonly OfficialAddonEntry[] = [
-  // 登记样例（形态参考，勿留注释放行）：
-  // { extensionId: 'onegayi.vsidian-official-xxx', label: '官方 xxx 组件' },
+  { extensionId: 'ONEGAYI.vsidian-easy-typing', label: '官方输入增强组件（上游 Obsidian Easy-Typing 移植）' },
 ]
 
 /** 判定用 ID 清单（登记表的投影视，供 isOfficialAddon 与文档消费） */
