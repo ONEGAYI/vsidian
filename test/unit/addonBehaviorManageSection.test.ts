@@ -19,11 +19,30 @@ import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
 import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
 import { AddonSection } from '../../src/webview/addonSettingsSection'
-import { AddonBehaviorManageSection, ADDONS_BEHAVIORS_SECTION_ID } from '../../src/webview/addonBehaviorManageSection'
+import {
+  AddonBehaviorManageSection,
+  ADDONS_BEHAVIORS_SECTION_ID,
+  type BehaviorManageToastChannel,
+} from '../../src/webview/addonBehaviorManageSection'
 
 installLocale('zh-cn', zhCn)
 
-function makeView(): {
+/** #474 toast stub：收集 show 调用（text + 可选撤销 action） */
+type ToastCall = { text: string; action?: { label: string; onClick: () => void } }
+function makeToast(): { toast: BehaviorManageToastChannel; calls: ToastCall[] } {
+  const calls: ToastCall[] = []
+  return {
+    calls,
+    toast: {
+      show: (text: string, _severity?: 'neutral' | 'warning' | 'error', _key?: string,
+        action?: { label: string; onClick: () => void }) => {
+        calls.push({ text, action })
+      },
+    },
+  }
+}
+
+function makeView(toast?: BehaviorManageToastChannel): {
   view: SettingsPageView
   addons: AddonSection
   behaviors: AddonBehaviorManageSection
@@ -35,7 +54,7 @@ function makeView(): {
   const bridge = { postMessage: (m: unknown) => sent.push(m) }
   let refreshSidebar: () => void = () => {}
   const addons = new AddonSection(bridge, () => refreshSidebar())
-  const behaviors = new AddonBehaviorManageSection(bridge)
+  const behaviors = new AddonBehaviorManageSection(bridge, toast)
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
@@ -443,5 +462,285 @@ describe('输入行为管理分页：行为行呈现与交互（T08 契约延续
       harness.parent.remove()
       harness.view.dispose()
     }
+  })
+})
+
+// ---- #474：分页 / 积木筛选 / 持久 / 定位 / 跨页调序 ----
+
+/** #474 视图状态消息（addons.behaviorsView；先经协议守卫验证载荷形态） */
+function behaviorsViewPayload(view: { page: number; query: unknown } | null): HostToWebview {
+  const message = { kind: 'addons.behaviorsView', view }
+  if (!isHostToWebview(message)) {
+    throw new Error('addons.behaviorsView 载荷未通过协议守卫')
+  }
+  return message
+}
+
+/** #474 大列表 fixture：同一组件下的顺序行为（行为00..行为N-1） */
+function manyBehaviors(count: number): Array<Record<string, unknown>> {
+  return Array.from({ length: count }, (_, i) => ({
+    addonId: ADDON_A,
+    id: `behavior-${String(i).padStart(2, '0')}`,
+    name: `行为${String(i).padStart(2, '0')}`,
+    history: 'atomic',
+  }))
+}
+
+/** 装配已就绪的 #474 场景：行为页打开、目录（count 行）与视图状态（默认
+ *  无存储）都已到达——定位求值不再挂起 */
+function setupPagedHarness(count: number, toast?: BehaviorManageToastChannel): ReturnType<typeof makeView> {
+  const harness = makeView(toast)
+  openBehaviorsPage(harness)
+  harness.dispatch(addonsState([
+    { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+  ]))
+  harness.dispatch(behaviorsPayload({ behaviors: manyBehaviors(count) }))
+  harness.dispatch(behaviorsViewPayload(null))
+  return harness
+}
+
+describe('#474 行为列表分页（D1–D3）', () => {
+  it('45 行分 3 页：第 1 页 20 行 + 翻页五件套，首页/上一页禁用发灰', () => {
+    const harness = setupPagedHarness(45)
+    const rows = behaviorRows(harness)
+    expect(rows).toHaveLength(20)
+    const pager = harness.parent.querySelector('.vsidian-addons-behaviors-pager')!
+    const buttons = [...pager.querySelectorAll<HTMLButtonElement>('.vsidian-addons-behaviors-pager-button')]
+    expect(buttons.map((b) => b.textContent)).toEqual(['<<', '<', '>', '>>'])
+    expect(buttons[0]!.disabled).toBe(true)
+    expect(buttons[1]!.disabled).toBe(true)
+    expect(buttons[2]!.disabled).toBe(false)
+    expect(buttons[3]!.disabled).toBe(false)
+    expect(pager.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 1 / 3 页')
+    // aria 可读（翻页控件全套）
+    expect(buttons[0]!.getAttribute('aria-label')).toBe('首页')
+    expect(buttons[2]!.getAttribute('aria-label')).toBe('下一页')
+  })
+
+  it('翻页导航：下一页/末页跳转正确，末页按钮禁用；翻页上送视图持久', () => {
+    const harness = setupPagedHarness(45)
+    const buttons = [...harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-behaviors-pager-button')]
+    buttons[2]!.click() // >
+    expect(behaviorRows(harness)).toHaveLength(20)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 2 / 3 页')
+    buttons[3]!.click() // >>
+    expect(behaviorRows(harness)).toHaveLength(5)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 3 / 3 页')
+    const refreshed = [...harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-behaviors-pager-button')]
+    expect(refreshed[2]!.disabled).toBe(true)
+    expect(refreshed[3]!.disabled).toBe(true)
+    // 翻页写入跨重启视图持久（D11：页码变化整表写）
+    expect(harness.sent).toContainEqual({
+      kind: 'addons.behaviorsViewSet',
+      view: { page: 3, query: null },
+    })
+  })
+
+  it('不満一页（20 行以内）不渲染翻页控件（D3 自然阈值）', () => {
+    const harness = setupPagedHarness(20)
+    expect(behaviorRows(harness)).toHaveLength(20)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager')).toBeNull()
+  })
+})
+
+describe('#474 积木筛选与视图持久（D5–D7/D11）', () => {
+  it('恢复的查询过滤列表（按行为 ID 子串）：命中保持全序、页码回落第 1 页', () => {
+    const harness = makeView()
+    openBehaviorsPage(harness)
+    harness.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    // 会话内恢复（restoreState 在 mount 前调用；页码越界 99 → 渲染时回落 1）
+    harness.view.dispose()
+    const harness2 = makeView()
+    openBehaviorsPage(harness2)
+    harness2.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    harness2.behaviors.restoreState({
+      page: 99,
+      query: { version: 1, blocks: [{ kind: 'field', field: 'behaviorId', text: 'behavior-4' }] },
+    })
+    harness2.dispatch(behaviorsPayload({ behaviors: manyBehaviors(50) }))
+    harness2.dispatch(behaviorsViewPayload(null))
+    // 'behavior-4' 子串命中 behavior-40..49（字典序升序，共 10 行）；页码回落第 1 页
+    const rows = behaviorRows(harness2)
+    expect(rows).toHaveLength(10)
+    expect(rows[0]!.querySelector('.vsidian-settings-item-title')!.textContent).toBe('行为40')
+    // 单页呈现（10 行无翻页控件）
+    expect(harness2.parent.querySelector('.vsidian-addons-behaviors-pager')).toBeNull()
+    void harness
+  })
+
+  it('跨重启视图状态应用（addons.behaviorsView 应答）：页码与查询生效', () => {
+    const harness = makeView()
+    openBehaviorsPage(harness)
+    harness.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    harness.dispatch(behaviorsPayload({ behaviors: manyBehaviors(45) }))
+    // 应答到达前：默认第 1 页全量渲染
+    expect(behaviorRows(harness)).toHaveLength(20)
+    harness.dispatch(behaviorsViewPayload({
+      page: 2,
+      query: { version: 1, blocks: [{ kind: 'field', field: 'behaviorName', text: '行为' }] },
+    }))
+    expect(behaviorRows(harness)).toHaveLength(20)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 2 / 3 页')
+  })
+
+  it('会话内恢复优先于跨重启值：restoreState 后到达的 behaviorsView 不覆盖', () => {
+    const harness = makeView()
+    openBehaviorsPage(harness)
+    harness.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    harness.behaviors.restoreState({ page: 1 })
+    harness.dispatch(behaviorsPayload({ behaviors: manyBehaviors(45) }))
+    harness.dispatch(behaviorsViewPayload({ page: 3, query: null }))
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 1 / 3 页')
+  })
+
+  it('查询编辑经构造器上抛：字段输入实时持久（query 变化整表写）', () => {
+    const harness = setupPagedHarness(45)
+    const input = harness.parent.querySelector<HTMLInputElement>('.vsidian-bq-field-input')
+    // 无积木时无输入框——先经加号菜单新建字段积木（UI 真实路径）
+    if (input === null) {
+      harness.parent.querySelector<HTMLButtonElement>('.vsidian-behavior-query-add')!.click()
+      const items = [...harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-bq-menu-item')]
+      items[0]!.click() // 行为显示名
+    }
+    const field = harness.parent.querySelector<HTMLInputElement>('.vsidian-bq-field-input')!
+    field.value = '行为4'
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(behaviorRows(harness)).toHaveLength(5) // 40-44
+    expect(harness.sent).toContainEqual({
+      kind: 'addons.behaviorsViewSet',
+      view: { page: 1, query: { version: 1, blocks: [{ kind: 'field', field: 'behaviorName', text: '行为4' }] } },
+    })
+  })
+
+  it('垃圾桶清空整个查询：toast 说明 + 气泡撤销恢复查询（D4/D14）', () => {
+    const toastBox = makeToast()
+    const harness = setupPagedHarness(45, toastBox.toast)
+    // 经 UI 建立查询（行为显示名 = 行为4 → 5 行）
+    harness.parent.querySelector<HTMLButtonElement>('.vsidian-behavior-query-add')!.click()
+    const items = [...harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-bq-menu-item')]
+    items[0]!.click()
+    const field = harness.parent.querySelector<HTMLInputElement>('.vsidian-bq-field-input')!
+    field.value = '行为4'
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(behaviorRows(harness)).toHaveLength(5)
+    // 无选中单击垃圾桶 = 清空整个查询
+    harness.parent.querySelector<HTMLButtonElement>('.vsidian-behavior-query-trash')!.click()
+    expect(behaviorRows(harness)).toHaveLength(20)
+    expect(toastBox.calls.map((call) => call.text)).toEqual(['已清空筛选'])
+    expect(toastBox.calls[0]!.action!.label).toBe('撤销')
+    // 撤销：恢复清空前的查询树
+    toastBox.calls[0]!.action!.onClick()
+    expect(behaviorRows(harness)).toHaveLength(5)
+  })
+})
+
+describe('#474 定位（D12–D15）', () => {
+  it('row:完整键 定位：跳至行所在页并高亮该行（行优先，D12）', () => {
+    const harness = setupPagedHarness(45)
+    harness.view.selectSection(ADDONS_BEHAVIORS_SECTION_ID, `row:${ADDON_A}#behavior-42`)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 3 / 3 页')
+    const row = harness.parent.querySelector(`[data-behavior-key="${ADDON_A}#behavior-42"]`)!
+    expect(row.classList.contains('vsidian-settings-item-located')).toBe(true)
+  })
+
+  it('page:n 定位：跳至指定页（D12）', () => {
+    const harness = setupPagedHarness(45)
+    harness.view.selectSection(ADDONS_BEHAVIORS_SECTION_ID, 'page:2')
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 2 / 3 页')
+  })
+
+  it('非法定位（页码越界 / 行键不在注册集）回落默认渲染 + toast（D13）', () => {
+    const toastBox = makeToast()
+    const harness = setupPagedHarness(45, toastBox.toast)
+    harness.view.selectSection(ADDONS_BEHAVIORS_SECTION_ID, 'page:99')
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 1 / 3 页')
+    harness.view.selectSection(ADDONS_BEHAVIORS_SECTION_ID, 'row:unknown.addon#nope')
+    expect(toastBox.calls.map((call) => call.text)).toEqual([
+      '未找到定位目标，已回到默认视图',
+      '未找到定位目标，已回到默认视图',
+    ])
+  })
+
+  it('D15：定位行被当前查询过滤 → 清空查询定位 + toast 说明 + 气泡撤销恢复查询与页码', () => {
+    const toastBox = makeToast()
+    const harness = makeView(toastBox.toast)
+    openBehaviorsPage(harness)
+    harness.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    harness.behaviors.restoreState({
+      page: 1,
+      query: { version: 1, blocks: [{ kind: 'field', field: 'behaviorId', text: 'behavior-00' }] },
+    })
+    harness.dispatch(behaviorsPayload({ behaviors: manyBehaviors(45) }))
+    harness.dispatch(behaviorsViewPayload(null))
+    // 定位行 behavior-42 被查询过滤：清空查询并定位（定位优先——跳至行
+    // 所在第 3 页呈现该行，非回第 1 页）
+    harness.view.selectSection(ADDONS_BEHAVIORS_SECTION_ID, `row:${ADDON_A}#behavior-42`)
+    expect(behaviorRows(harness)).toHaveLength(5) // 第 3 页（40–44）
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 3 / 3 页')
+    expect(harness.parent.querySelector(`[data-behavior-key="${ADDON_A}#behavior-42"]`)!.classList.contains('vsidian-settings-item-located')).toBe(true)
+    expect(toastBox.calls).toHaveLength(1)
+    expect(toastBox.calls[0]!.text).toBe('目标行为被当前筛选隐藏，已清空筛选以显示该行为')
+    // 清空查询已持久（view query null）
+    expect(harness.sent).toContainEqual({ kind: 'addons.behaviorsViewSet', view: { page: 1, query: null } })
+    // 气泡撤销：恢复清空前的查询与页码
+    toastBox.calls[0]!.action!.onClick()
+    const rows = behaviorRows(harness)
+    expect(rows).toHaveLength(1) // 查询恢复：只 behavior-00
+    expect(rows[0]!.dataset.behaviorKey).toBe(`${ADDON_A}#behavior-00`)
+  })
+
+  it('定位挂起（D13）：载荷未齐时定位不消费，到达后统一求值', () => {
+    const toastBox = makeToast()
+    const harness = makeView(toastBox.toast)
+    openBehaviorsPage(harness)
+    harness.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    // mount 时定位（behaviors 已到但视图状态未到）——渲染默认态不弹 toast
+    harness.view.selectSection(ADDONS_BEHAVIORS_SECTION_ID, 'page:99')
+    expect(toastBox.calls).toHaveLength(0)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-list')).toBeNull() // 仍在读取中
+    // 目录后到（重新 dispatch behaviors）但视图状态仍未到：仍不消费
+    harness.dispatch(behaviorsPayload({ behaviors: manyBehaviors(45) }))
+    expect(toastBox.calls).toHaveLength(0)
+    // 视图状态到达：挂起定位统一求值（非法 → toast + 回落）
+    harness.dispatch(behaviorsViewPayload(null))
+    expect(toastBox.calls).toHaveLength(1)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 1 / 3 页')
+  })
+})
+
+describe('#474 跨页调序视图跟随（D10）', () => {
+  it('第 2 页行上移跨页：回显后视图跟随该行跳回第 1 页并保持可见', () => {
+    const harness = setupPagedHarness(45)
+    // 跳到第 2 页
+    const buttons = [...harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-behaviors-pager-button')]
+    buttons[2]!.click()
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 2 / 3 页')
+    // 第 2 页首行（全序第 20 项 behavior-20）上移：与 behavior-19 交换
+    const up = harness.parent.querySelector<HTMLButtonElement>('[data-behavior-move=up]')!
+    up.click()
+    // 宿主权威回显（新序）
+    const behaviors = manyBehaviors(45) as Array<{ addonId: string; id: string; name: string; history: string }>
+    const reordered = [...behaviors]
+    ;[reordered[19], reordered[20]] = [reordered[20]!, reordered[19]!]
+    harness.dispatch(behaviorsPayload({
+      behaviors: reordered,
+      state: { order: reordered.map((entry) => `${entry.addonId}#${entry.id}`) },
+    }))
+    // 视图跟随被移动行（behavior-20 现在全序第 19 位 = 第 1 页末尾）
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors-pager-indicator')!.textContent).toBe('第 1 / 3 页')
+    const rows = behaviorRows(harness)
+    expect(rows[19]!.dataset.behaviorKey).toBe(`${ADDON_A}#behavior-20`)
   })
 })
