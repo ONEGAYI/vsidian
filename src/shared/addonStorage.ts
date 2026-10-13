@@ -15,7 +15,9 @@
 export const ADDON_STORAGE_FILE_LIMIT_BYTES = 8 * 1024 * 1024
 
 /** 拒绝码：invalid-path = 越界/非法相对路径；too-large = 单文件超限；
- * error = IO 失败（不存在/权限等，detail 归因） */
+ * error = IO 失败（权限等，detail 归因）。例外：list 的目标目录不存在
+ * （含存储根未建）不算 error——未建目录 = 空存储，返回空清单（#461）；
+ * readFile 的文件不存在仍为 error（读不到内容无从正常化）。 */
 export type AddonStorageRejection = 'invalid-path' | 'too-large' | 'error'
 
 export type AddonStorageResult<T> =
@@ -69,7 +71,8 @@ export interface AddonStorageFacet {
   readFile(relativePath: string): Promise<AddonStorageResult<string>>
   /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */
   writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>
-  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层） */
+  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层；目标目录不
+   * 存在——含根目录未建——返回空清单：未建目录 = 空存储，#461） */
   list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>
   /** 删文件（不删目录——目录生命周期归卸载策略） */
   deleteFile(relativePath: string): Promise<AddonStorageResult<null>>

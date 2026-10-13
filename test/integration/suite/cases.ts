@@ -11,6 +11,7 @@ import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
+import { addonStorageCases } from './addonStorageCases'
 import { addonT06Cases } from './addonT06Cases'
 import { addonT07Cases } from './addonT07Cases'
 import { addonT08Cases } from './addonT08Cases'
@@ -17909,6 +17910,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #354 T05 组件管理侧栏数据面、故障手动重试与 realpath 逃逸守卫（断言
   // 面见 addonT05Cases.ts 头注）
   ...addonT05Cases,
+  // #461 存储面空目录语义：全新 profile 首启 fail-safe init 走种子路径不
+  // faulted（断言面见 addonStorageCases.ts 头注）
+  ...addonStorageCases,
   // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
   // 断言面见 addonT06Cases.ts 头注）
   ...addonT06Cases,

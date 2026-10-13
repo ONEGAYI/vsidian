@@ -64,6 +64,8 @@ const testCacheDir = path.join(root, '.vscode-test')
 // （addon-fail）；#351 T02 页面 SDK 夹具（addon-t02——页面产物由 V02
 // 构建桥生成后拷入其 dist/，构建产物不入库）；#353 T04 复杂设置夹具
 //（addon-t04——纯宿主 CJS，无页面产物；经公开 API 注册复杂定义与分层读写）；
+// #461 存储面夹具（addon-storage——纯宿主 CJS，无页面产物；模拟组件
+// fail-safe init：通道处理器内 list 探测存储，未建目录走种子路径）；
 // #355 T06 视图编辑夹具（addon-t06——页面产物经构建桥生成，长轮询协议）；
 // #356 T07 可组合输入行为夹具（addon-t07——页面产物经构建桥生成，
 // behaviors 面注册行为链）；#359 T10 命令/菜单/快捷键夹具（addon-t10——
@@ -71,7 +73,7 @@ const testCacheDir = path.join(root, '.vscode-test')
 // #358 T09 渲染提供者夹具（addon-t09——页面产物经构建桥生成，renderers 面）；
 // #360 T11 界面贡献夹具（addon-t11——页面产物经构建桥生成，ui 面注册
 // 按钮/面板 + 负向对照 + target 句柄真实业务）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-t06', 'addon-t07', 'addon-t09', 'addon-t10', 'addon-t11', 'addon-t12', 'addon-escape'].map((name) =>
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-storage', 'addon-t06', 'addon-t07', 'addon-t09', 'addon-t10', 'addon-t11', 'addon-t12', 'addon-escape'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
 // #364 T15 三套独立消费样例（test/examples/——独立 VSCode 扩展工程，产物
