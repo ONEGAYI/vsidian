@@ -1,7 +1,7 @@
 # 附加组件设置定义分组（#472）——规格
 
 > 状态：**定稿**（2026-10-13 三轮访谈，用户确认；补充细则四条随定稿接受）。本票是「附加组件基础设置呈现复刻」（#477）的平台前置之一。
-> 代码基线：origin/main @ ee8af89e（含 #465/#466 拆分）。规格树 `spec/472-476-settings-ia`。
+> 代码基线：origin/main @ ee8af89e 起草，已 rebase 至 5db35d70（批 4 PR #479 合并后），实施基于 5db35d70。规格树 `spec/472-476-settings-ia`。
 
 ## 0. 需求原文（2026-10-13 票面要点）
 
@@ -31,10 +31,10 @@
 - **附加组件设置定义不进搜索索引**：两个分页只登记页级条目（附加组件页 `list`/`manage`；组件设置页 `hub`）。定义级命中属新增能力，且组件设置区**没有页内搜索**。
 - focusEntry：协议 `settings.focusSection { section, entry? }`（`src/shared/protocol.ts:565-571`）；组件设置页现仅 `hub` 整卡定位（located 类 + scrollIntoView，`addonSettingsAreaSection.ts:212-215`）。前缀先例：附加组件页 `addon:<id>`（`addonSettingsSection.ts:415-421` 解析）。
 
-### 1.4 批 4 并行与撞形
+### 1.4 批 4（#473/#475）——已合并
 
-- 批 4（#473/#475，树 `D:/CODE/Project/_Extensions/vsidian-473-475`，基于旧 main 53c20cb6）在同文件 string 臂新增 `enumLabels?: Readonly<Record<string, AddonLocalizedText>>` 与 `multiline?: boolean`，并新增 `src/shared/localizedText.ts`（`LocalizedText = string | Readonly<Record<string, string>>`）。
-- 撞形面：批 4 动联合的 string 臂与 `isAddonSettingDefinition` 的 string 分支；本票分组落在 base 臂加可选字段 + 注册载荷扩形——类型不重叠，同文件同函数区域文本冲突概率低但存在，合并时需手工合流。
+- 批 4 已随 PR #479 合并进 main（2026-10-13，5db35d70，CI 11/11 全绿）：string 臂新增 `enumLabels?: Readonly<Record<string, AddonLocalizedText>>` 与 `multiline?: boolean`；`src/shared/localizedText.ts`（`AddonLocalizedText = string | Readonly<Record<string, string>>` 与选值纯函数，#464 候选链语义）已在 main。
+- 本票实施基于合并后 main：组标题直接复用 `AddonLocalizedText`；分组落 base 臂加可选字段 + 注册载荷扩形，与批 4 改动（string 臂）类型不重叠，无合流需求。
 
 ### 1.5 契约登记点
 
@@ -45,7 +45,7 @@
 - **D1 能力路线**：扩平台分组能力（方向 A），不做组件整体自绘。〔票面既有拍板〕
 - **D2 数据模型（引用式）**：定义公共臂加可选 `group?: string`（组键引用）；`registerDefinitions` 载荷新增可选组声明数组 `groups?: [{ key, title, description? }]`——组元数据只声明一次，组序 = 声明序。否决内嵌式（组元数据随定义重复、无法声明空组、组序隐式）。〔第一轮 Q1 用户拍板〕命名用 `group` 不用 `section`——「section」在设置页语境已固定指侧栏分页（`SettingsPageSection`），避免术语冲突。
 - **D3 层级深度**：一层，组内不嵌组。〔第一轮 Q2〕
-- **D4 组元数据本地化**：组 `title`/`description` 采用批 4 的 `LocalizedText`（string 直值或语言码映射二选一）。**依赖批 4（#473）先行合并或实施时合流**。〔第一轮 Q3〕
+- **D4 组元数据本地化**：组 `title`/`description` 直接复用批 4 落地的 `AddonLocalizedText`（`src/shared/localizedText.ts`，string 直值或语言码映射二选一）。依赖已满足——批 4 随 PR #479 合并（5db35d70）。〔第一轮 Q3〕
 - **D5 呈现**：每个分组一个圆角容器（对齐 CONTEXT.md「设置页容器语言」与内建设置分组观感），组标题用设置页组标题档位（ui-patterns 既有）；未分组定义与 `__enabled__` 行留在首个无组标题容器恒置顶；分组容器按声明序随后；未分组项聚拢不散插。〔第一轮 Q4〕
 - **D6 全局搜索与定位兼容**：〔第三轮 T1 定案〕
   - **定义级与组级进全局搜索索引**：索引**全部已注册组件**的定义 `title`/`description` 与组标题（宿主 setup 阶段已收齐全部定义，数据在手）；命中条目归入「组件设置」搜索分组，title/description 直用定义原文，同名定义靠描述与组件上下文消歧；object 定义字段级不进（定义级即止）。
@@ -68,7 +68,7 @@
 
 ## 5. 依赖与并行
 
-- 批 4（#473/#475）同文件并行：合并时 `addonSettings.ts` 两处改动手工合流（base 臂 vs string 臂、`isAddonSettingDefinition` 同函数不同分支）。
+- 批 4（#473/#475）已合并（PR #479，5db35d70）——无并行合流需求。
 - 消费方 #477（呈现复刻总装）以本票为前置之一。
 
 ## 6. 轮次记录
