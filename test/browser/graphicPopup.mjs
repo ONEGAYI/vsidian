@@ -22,7 +22,7 @@ await build({
 // mermaid 独立产物自建（入口与配置同 esbuild.mjs 的 mermaid target）：CI
 // browser job 不跑 npm run compile，引用 out/webview/mermaid.js 会因产物
 // 缺失而懒加载 404，本测试须自包含、不依赖前置构建
-const mermaidArtifact = artifactPath(root, 'mermaid.js')
+const mermaidArtifact = artifactPath(root, 'graphicPopup/mermaid.js')
 await build({
   entryPoints: [path.join(root, 'src/webview/mermaidEntry.ts')],
    outdir: path.dirname(mermaidArtifact), entryNames: 'mermaid', chunkNames: 'mermaid-chunks/[name]-[hash]',
