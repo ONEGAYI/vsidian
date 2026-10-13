@@ -92,3 +92,53 @@ describe('T08 行为注册目录服务', () => {
     expect(h.changes).toHaveLength(2)
   })
 })
+
+describe('#464 多语言行为名的目录等值比较（sameTable 深比较）', () => {
+  const infoWithName = (name: unknown): AddonBehaviorInfo =>
+    ({ addonId: 'pub.a', id: 'x', name, history: 'atomic' }) as AddonBehaviorInfo
+
+  it('等值映射重报不打扰（键插入序无关、键数相同值相同即等值）', () => {
+    const h = createHarness({ 'pub.a': 'enabled' })
+    h.service.syncReport('pub.a', 1, [infoWithName({ en: 'Auto pairs', 'zh-cn': '括号补全' })])
+    const before = h.changes.length
+    // 相同映射、不同插入序：等值，不通知
+    h.service.syncReport('pub.a', 2, [infoWithName({ 'zh-cn': '括号补全', en: 'Auto pairs' })])
+    expect(h.changes).toHaveLength(before)
+  })
+
+  it('映射值变化或键集变化触发更新通知', () => {
+    const h = createHarness({ 'pub.a': 'enabled' })
+    h.service.syncReport('pub.a', 1, [infoWithName({ 'zh-cn': '旧名', en: 'Old' })])
+    const before = h.changes.length
+    // 值变化
+    h.service.syncReport('pub.a', 2, [infoWithName({ 'zh-cn': '新名', en: 'Old' })])
+    expect(h.changes).toHaveLength(before + 1)
+    // 键集变化（少一键）
+    h.service.syncReport('pub.a', 3, [infoWithName({ 'zh-cn': '新名' })])
+    expect(h.changes).toHaveLength(before + 2)
+    // 键规整后等值（ZH-CN 与 zh-cn 规整同键同值）：不打扰
+    const steady = h.changes.length
+    h.service.syncReport('pub.a', 4, [infoWithName({ 'ZH-CN': '新名' })])
+    expect(h.changes).toHaveLength(steady)
+  })
+
+  it('string 与映射视为不等值（形态变化即目录变化）', () => {
+    const h = createHarness({ 'pub.a': 'enabled' })
+    h.service.syncReport('pub.a', 1, [infoWithName('单语言名')])
+    const before = h.changes.length
+    h.service.syncReport('pub.a', 2, [infoWithName({ 'zh-cn': '单语言名' })])
+    expect(h.changes).toHaveLength(before + 1)
+    // 目录如实反映最新形态
+    expect(h.service.catalog()[0]!.name).toEqual({ 'zh-cn': '单语言名' })
+  })
+
+  it('快照防御拷贝 map 形态 name（mutate 上报原对象不影响目录——防外泄引用与 examples 同口径）', () => {
+    const h = createHarness({ 'pub.a': 'enabled' })
+    const reportName: Record<string, string> = { en: 'Auto pairs', 'zh-cn': '括号补全' }
+    h.service.syncReport('pub.a', 1, [infoWithName(reportName)])
+    // 调用方事后改写上报载荷的映射对象：目录不得跟随（同一引用外泄）
+    reportName['zh-cn'] = '被篡改'
+    delete reportName['en']
+    expect(h.service.catalog()[0]!.name).toEqual({ en: 'Auto pairs', 'zh-cn': '括号补全' })
+  })
+})

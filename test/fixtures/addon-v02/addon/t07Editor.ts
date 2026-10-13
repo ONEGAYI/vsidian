@@ -7,9 +7,13 @@
 // - space-fill：键入 ^ 后在光标处插入空格 ——独占组 fill，joinPrevious
 //  （演示非原子修饰随上次原子操作撤回——Q29 撤销粒度验收载体）
 // - tilde-fill：键入 ^ 后在光标处插入 ~ ——同独占组 fill，atomic
+// - locale-name：多语言 name 形态（#464）——恒不修饰（返回 null 且不经
+//   wrapReporter 上报），仅钉住多语言行为名在目录/设置页的端到端呈现；
+//   不干扰既有链断言（默认序/独占组/全关零回调）
 //
 // 判定只依赖本次输入文本（健壮：不受前序修饰与光标映射语义影响）；
-// 默认序（完整键字典序）dash → space → tilde：键入 ^ 的默认结果
+// 默认序（完整键字典序）dash → locale-name → space → tilde（locale-name
+// 恒不修饰，等效于 dash → space → tilde 的链结果）：键入 ^ 的默认结果
 // word^- (dash 先插 -，space 组内先于 tilde 适用再插空格)；调序
 // （tilde 前置）后 word^~-（tilde 先占组、space 跳过）——「调整顺序
 // 导致可预期结果」；组外 dash 两种顺序都运行（不恢复先接管者生效）。
@@ -18,7 +22,7 @@
   // fire-and-forget 上报宿主收件箱（用例经 t07.collect 断言链执行与顺序）。
 import { defineAddonPage } from 'vsidian-addon-sdk'
 import type { VsidianAddonPageSdk } from '../../../../src/shared/addonPage'
-import type { AddonBehaviorInputPlan, AddonInputContext } from '../../../../src/shared/addonBehaviors'
+import type { AddonBehaviorInputPlan, AddonBehaviorName, AddonInputContext } from '../../../../src/shared/addonBehaviors'
 
 /** 本组件声明的扩展 ID（装载器按此核对入口身份） */
 const ADDON_ID = 'vsidian-test-fixture.addon-t07'
@@ -69,7 +73,7 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
       return result
     }
 
-  const registrations: Array<{ id: string; name: string; description?: string; examples?: string[]; exclusiveGroup?: string; history?: 'atomic' | 'joinPrevious'; plan: (ctx: AddonInputContext) => AddonBehaviorInputPlan | null }> = [
+  const registrations: Array<{ id: string; name: AddonBehaviorName; description?: string; examples?: string[]; exclusiveGroup?: string; history?: 'atomic' | 'joinPrevious'; plan: (ctx: AddonInputContext) => AddonBehaviorInputPlan | null; report?: boolean }> = [
     { id: 'dash-fill', name: '短划填充', description: '键入 ^ 后插入短划', examples: ['^-^'], plan: planFill('-') },
     {
       id: 'space-fill', name: '空格整理', exclusiveGroup: 'fill', history: 'joinPrevious',
@@ -78,6 +82,13 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     {
       id: 'tilde-fill', name: '波浪填充', exclusiveGroup: 'fill',
       description: '键入 ^ 后插入波浪号', plan: planFill('~'),
+    },
+    // #464 多语言 name 端到端载体：恒不修饰（plan 恒 null）且不上报回调
+    // 事件（report: false——T07「全关零回调」断言不受扰动），仅钉住映射
+    // 名在目录与设置页的呈现
+    {
+      id: 'locale-name', name: { en: 'Localized name demo', 'zh-cn': '多语言名称示例' },
+      plan: () => null, report: false,
     },
   ]
   const registerResults: Array<{ id: string; result: unknown }> = []
@@ -91,7 +102,7 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
         ...(entry.examples !== undefined ? { examples: entry.examples } : {}),
         ...(entry.exclusiveGroup !== undefined ? { exclusiveGroup: entry.exclusiveGroup } : {}),
         ...(entry.history !== undefined ? { history: entry.history } : {}),
-        onInput: wrapReporter(entry.id, entry.plan),
+        onInput: entry.report === false ? entry.plan : wrapReporter(entry.id, entry.plan),
       }),
     })
   }

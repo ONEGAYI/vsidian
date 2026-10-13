@@ -18,12 +18,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   BEHAVIOR_LOCAL_ID_LIMIT,
+  BEHAVIOR_NAME_LOCALES_LIMIT,
   addonBehaviorFullKey,
+  addonBehaviorInfoOf,
   isAddonBehaviorRegistration,
   mergeBehaviorOrderPreservingUnknown,
   orderedAddonBehaviorKeys,
   isAddonBehaviorInfo,
   parseAddonBehaviorStateStore,
+  resolveAddonBehaviorName,
   resolveAddonBehaviorOrder,
 } from '../../src/shared/addonBehaviors'
 
@@ -258,5 +261,150 @@ describe('T08 行为信息序列化守卫（上报载荷信任边界）', () => 
     expect(isAddonBehaviorInfo({ ...info, examples: 'x' })).toBe(false)
     expect(isAddonBehaviorInfo({ ...info, examples: ['a', 1] })).toBe(false)
     expect(isAddonBehaviorInfo({ ...info, exclusiveGroup: 'g 1' })).toBe(false)
+  })
+})
+
+describe('#464 行为名多语言形态：守卫矩阵', () => {
+  it('合法映射 name 注册通过（含键两侧空白与边界条数）；string 形态仍通过（历史兼容）', () => {
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { en: 'Auto pairs', 'zh-cn': '括号补全' },
+    }))).toBe(true)
+    // 键两侧空白合法（规整 trim 后非空即可）；单键映射合法
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { ' zh-cn ': '括号补全' },
+    }))).toBe(true)
+    // 条数上限边界：恰好 32 项通过
+    const full = Object.fromEntries(
+      Array.from({ length: BEHAVIOR_NAME_LOCALES_LIMIT }, (_, i) => [`l${i}`, `名${i}`]),
+    )
+    expect(isAddonBehaviorRegistration(validRegistration({ name: full }))).toBe(true)
+    // string 形态不受影响
+    expect(isAddonBehaviorRegistration(validRegistration({ name: '括号补全' }))).toBe(true)
+  })
+
+  it('空对象与非对象形态拒绝（数组、数字、null 都不是合法映射）', () => {
+    for (const name of [{}, [], 42, null, 'x'.repeat(0)]) {
+      if (name === '') {
+        continue // 空串走 string 口径（既有用例覆盖）
+      }
+      expect(isAddonBehaviorRegistration(validRegistration({ name }))).toBe(false)
+    }
+  })
+
+  it('映射条目超限拒绝（33 项 > 上限 32）', () => {
+    const over = Object.fromEntries(
+      Array.from({ length: BEHAVIOR_NAME_LOCALES_LIMIT + 1 }, (_, i) => [`l${i}`, `名${i}`]),
+    )
+    expect(isAddonBehaviorRegistration(validRegistration({ name: over }))).toBe(false)
+  })
+
+  it('键非法拒绝：trim 后空、规整后超 64 字符（64 恰好通过）', () => {
+    expect(isAddonBehaviorRegistration(validRegistration({ name: { '  ': '名' } }))).toBe(false)
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { ['k'.repeat(65)]: '名' },
+    }))).toBe(false)
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { ['k'.repeat(64)]: '名' },
+    }))).toBe(true)
+  })
+
+  it('值非法拒绝（同单语言口径：非字符串、空白、超 256）', () => {
+    expect(isAddonBehaviorRegistration(validRegistration({ name: { en: 42 } }))).toBe(false)
+    expect(isAddonBehaviorRegistration(validRegistration({ name: { en: '   ' } }))).toBe(false)
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { en: 'x'.repeat(257) },
+    }))).toBe(false)
+    // 值 256 恰好通过（与单语言同界）
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { en: 'x'.repeat(256) },
+    }))).toBe(true)
+  })
+
+  it('规整后键重复拒绝（zh 与 ZH 共存产生选值歧义）', () => {
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { zh: '中', ZH: '复' },
+    }))).toBe(false)
+    // trim 后重复同样拒绝（'zh' 与 ' zh ' 规整同键）
+    expect(isAddonBehaviorRegistration(validRegistration({
+      name: { zh: '中', ' zh ': '复' },
+    }))).toBe(false)
+  })
+
+  it('上报信息面同口径：合法映射通过、非法映射拒绝（protocol 两处复用本守卫）', () => {
+    expect(isAddonBehaviorInfo({
+      addonId: 'pub.a',
+      id: 'bracket-close',
+      name: { en: 'Auto pairs', 'zh-cn': '括号补全' },
+      history: 'atomic',
+    })).toBe(true)
+    for (const badName of [{}, { zh: '中', ZH: '复' }, { '': '名' }, []]) {
+      expect(isAddonBehaviorInfo({
+        addonId: 'pub.a',
+        id: 'bracket-close',
+        name: badName,
+        history: 'atomic',
+      })).toBe(false)
+    }
+  })
+
+  it('映射全链路透传：addonBehaviorInfoOf 不预解析（语言切换后已注册名仍可跟随）', () => {
+    const name = { en: 'Auto pairs', 'zh-cn': '括号补全' }
+    const info = addonBehaviorInfoOf('pub.a', {
+      id: 'bracket-close',
+      name,
+      onInput: () => null,
+    })
+    expect(info.name).toEqual(name)
+  })
+})
+
+describe('#464 行为名选值回落矩阵（resolveAddonBehaviorName）', () => {
+  it('精确 zh-cn 命中；zh 系页面语言先试 zh-cn 再 zh 再 en', () => {
+    expect(resolveAddonBehaviorName({ 'zh-cn': '中', en: '英' }, 'zh-cn')).toBe('中')
+    // zh-cn 键缺失回落 zh 键
+    expect(resolveAddonBehaviorName({ zh: '中', en: '英' }, 'zh-cn')).toBe('中')
+    // localeLang 为 zh（zh 系）：先试 zh-cn 命中
+    expect(resolveAddonBehaviorName({ 'zh-cn': '中', zh: '别', en: '英' }, 'zh')).toBe('中')
+    // zh-cn/zh 都缺失回落 en
+    expect(resolveAddonBehaviorName({ en: '英' }, 'zh-tw')).toBe('英')
+  })
+
+  it('非 zh 系页面语言只试 en（其余键不参与匹配——候选链是固定清单）', () => {
+    expect(resolveAddonBehaviorName({ en: '英', fr: '法' }, 'en')).toBe('英')
+    expect(resolveAddonBehaviorName({ en: '英', fr: '法' }, 'fr')).toBe('英')
+    // 大写页面语言规整后判定（ZH 开头折 zh 系）
+    expect(resolveAddonBehaviorName({ 'zh-cn': '中', en: '英' }, 'ZH-CN')).toBe('中')
+  })
+
+  it('全部候选缺失：取规整后字典序最小的键的值（非空呈现、确定性）', () => {
+    expect(resolveAddonBehaviorName({ fr: '法', de: '德' }, 'zh-cn')).toBe('德')
+    expect(resolveAddonBehaviorName({ fr: '法', de: '德' }, 'en')).toBe('德')
+    // 规整参与排序：' DE ' 规整为 de，字典序仍小于 fr
+    expect(resolveAddonBehaviorName({ fr: '法', ' DE ': '德' }, 'en')).toBe('德')
+  })
+
+  it('映射键规整命中：ZH-CN 大写键命中 zh-cn 候选；键两侧空白同样规整', () => {
+    expect(resolveAddonBehaviorName({ 'ZH-CN': '中', en: '英' }, 'zh-cn')).toBe('中')
+    expect(resolveAddonBehaviorName({ ' zh-cn ': '中', en: '英' }, 'zh-cn')).toBe('中')
+    // 候选 zh 命中 ZH 大写键
+    expect(resolveAddonBehaviorName({ ZH: '中', en: '英' }, 'zh-tw')).toBe('中')
+  })
+
+  it('纯字符串透传（单语言形态不随语言切换——历史兼容边界）', () => {
+    expect(resolveAddonBehaviorName('括号补全', 'en')).toBe('括号补全')
+    expect(resolveAddonBehaviorName('Auto pairs', 'zh-cn')).toBe('Auto pairs')
+  })
+
+  it('空映射返回空串（守卫外输入的防御早退——不非空断言传播 undefined）', () => {
+    expect(resolveAddonBehaviorName({}, 'zh-cn')).toBe('')
+    expect(resolveAddonBehaviorName({}, 'en')).toBe('')
+  })
+
+  it('空 localeLang 非 zh 系只试 en（空串不命中 zh 前缀判定）', () => {
+    expect(resolveAddonBehaviorName({ 'zh-cn': '中', en: 'E' }, '')).toBe('E')
+  })
+
+  it('单键映射走兜底路径（字典序最小键即唯一键）', () => {
+    expect(resolveAddonBehaviorName({ fr: '法' }, 'en')).toBe('法')
   })
 })

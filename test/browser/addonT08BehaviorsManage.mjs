@@ -26,7 +26,9 @@ const KEY_TILDE = `${ADDON_B}#tilde-fill`
 /** 页内 mock 宿主状态（回灌应答的数据源——消息构造在 evaluate 内联） */
 const hostState = {
   behaviors: [
-    { addonId: ADDON_A, id: 'dash-fill', name: '破折填充', description: '输入 - 后补全——', examples: ['- |'], history: 'atomic' },
+    // #464 map 形态 name 端到端：dash-fill 以多语言映射上报，页面语言
+    // zh-cn 渲染选 '破折填充'（既有断言文本不变），en 值不得出现
+    { addonId: ADDON_A, id: 'dash-fill', name: { en: 'Dash fill demo', 'zh-cn': '破折填充' }, description: '输入 - 后补全——', examples: ['- |'], history: 'atomic' },
     { addonId: ADDON_A, id: 'space-fill', name: '空格整理', history: 'atomic' },
     { addonId: ADDON_B, id: 'tilde-fill', name: '波浪填充', history: 'atomic' },
   ],
@@ -110,6 +112,8 @@ try {
   const groupText = await area.innerText()
   assert.match(groupText, new RegExp(zhCn['addons.behaviorsGroupTitle']))
   assert.match(groupText, /破折填充/)
+  // #464 map 形态 name：zh-cn 页面只渲染 zh-cn 值，en 值不得出现
+  assert.doesNotMatch(groupText, /Dash fill demo/)
   assert.match(groupText, /所属组件：组件甲/)
 
   // ---- 1.5 组头样式契约：与编辑器页二级组同构（进卡片全幅头部 + 图标） ----

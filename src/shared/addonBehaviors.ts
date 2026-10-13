@@ -9,6 +9,12 @@
 // - **注册形状**：稳定局部 ID、必填名称、可选简短说明/例子及业务回调；
 //   行为能力和适用条件只由代码表达，不复制进 manifest。名称缺失拒绝，
 //   说明/例子缺失允许。
+// - **名称多语言形态（#464）**：name 是单语言字符串或「语言键 → 名称」
+//   映射；映射全链路透传（注册、上报、目录不预解析——语言切换后已注册
+//   名仍可跟随），消费端渲染时按页面语言选值（resolveAddonBehaviorName：
+//   键规整 trim+小写；zh 系页面语言候选链 zh-cn → zh → en，非 zh 只试
+//   en——对齐 resolveLocale 的 zh* 折算语义；全部候选缺失取规整字典序
+//   最小键，兜底非空呈现）。纯字符串是历史兼容形态，不随语言切换。
 // - **键形态**：行为持久身份 = 组件 ID + 局部 ID（addonBehaviorFullKey），
 //   不以显示名为存储键。局部 ID 限定 `[A-Za-z0-9._-]`（首字符字母数字）
 //   ——与 addonId（publisher.name，无 #）拼出的完整键无歧义，可直接作
@@ -33,6 +39,10 @@ const BEHAVIOR_NAME_LIMIT = 256
 const BEHAVIOR_DESCRIPTION_LIMIT = 1024
 const BEHAVIOR_EXAMPLE_LIMIT = 256
 const BEHAVIOR_EXAMPLES_MAX = 8
+/** 多语言名称映射的条目上限（防滥用；正常语言数远小于此，#464） */
+export const BEHAVIOR_NAME_LOCALES_LIMIT = 32
+/** 多语言名称映射的语言键长度上限（规整 trim 后计，#464） */
+const BEHAVIOR_NAME_LOCALE_KEY_LIMIT = 64
 
 /** 局部 ID 与独占组名的字符集（首字符字母数字，余 `[A-Za-z0-9._-]`） */
 const BEHAVIOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -85,8 +95,11 @@ export interface AddonBehaviorInputPlan {
 export interface AddonBehaviorRegistration {
   /** 稳定局部 ID（组件内唯一；持久身份的一半） */
   readonly id: string
-  /** 必填的用户可读名称（ADR Q27：注册行为时名称必填） */
-  readonly name: string
+  /** 必填的用户可读名称（ADR Q27：注册行为时名称必填）。单语言字符串
+   *  （历史兼容，不随语言切换）或多语言映射（按页面语言选值——消费端
+   *  渲染时经 resolveAddonBehaviorName 求值，注册/上报/目录全链路透传，
+   *  #464） */
+  readonly name: AddonBehaviorName
   /** 可选简短说明（推荐提供，不作接入强制条件） */
   readonly description?: string
   /** 可选例子（推荐提供；至多 8 项） */
@@ -101,11 +114,17 @@ export interface AddonBehaviorRegistration {
   readonly onInput: (context: AddonInputContext) => AddonBehaviorInputPlan | null
 }
 
+/** 行为显示名：单语言字符串（历史兼容，不随语言切换）或「语言键 → 名称」
+ *  映射（按页面语言选值——键规整 trim+小写，候选链见
+ *  resolveAddonBehaviorName；映射全链路透传不预解析，#464） */
+export type AddonBehaviorName = string | { readonly [locale: string]: string }
+
 /** 注册结果的观测面（不含回调；诊断与 T08 管理查询的序列化形态） */
 export interface AddonBehaviorInfo {
   addonId: string
   id: string
-  name: string
+  /** 与注册面同形态（string 或多语言映射）——渲染时由消费端选值 */
+  name: AddonBehaviorName
   description?: string
   examples?: readonly string[]
   exclusiveGroup?: string
@@ -127,7 +146,84 @@ function isUsableLocalId(value: unknown): value is string {
     BEHAVIOR_ID_PATTERN.test(value)
 }
 
-/** 注册形状守卫：名称缺失拒绝、说明/例子缺失允许；非法形态不进入链 */
+/** 名称单语言口径（string 形态与映射值共用：trim 非空、≤256） */
+function isUsableBehaviorNameText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 &&
+    value.length <= BEHAVIOR_NAME_LIMIT
+}
+
+/** 多语言名称映射的语言键规整（trim + 小写——'ZH-CN' 与 ' zh-cn ' 同键） */
+function normalizeBehaviorLocaleKey(key: string): string {
+  return key.trim().toLowerCase()
+}
+
+/** 名称映射形态守卫：非数组对象、1..BEHAVIOR_NAME_LOCALES_LIMIT 项、
+ *  键规整后非空且 ≤64、值同单语言口径、规整后键不重复（'zh' 与 'ZH'
+ *  共存产生选值歧义，拒绝） */
+function isUsableBehaviorNameMap(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length < 1 || entries.length > BEHAVIOR_NAME_LOCALES_LIMIT) {
+    return false
+  }
+  const seen = new Set<string>()
+  for (const [key, text] of entries) {
+    const normalized = normalizeBehaviorLocaleKey(key)
+    if (normalized.length === 0 || normalized.length > BEHAVIOR_NAME_LOCALE_KEY_LIMIT) {
+      return false
+    }
+    if (!isUsableBehaviorNameText(text)) {
+      return false
+    }
+    if (seen.has(normalized)) {
+      return false
+    }
+    seen.add(normalized)
+  }
+  return true
+}
+
+/** 名称守卫（注册与上报信息面同口径）：string 或合法映射 */
+function isUsableBehaviorName(value: unknown): boolean {
+  return isUsableBehaviorNameText(value) || isUsableBehaviorNameMap(value)
+}
+
+/** 行为名选值（#464 纯函数）：按页面语言从名称形态求显示文本。
+ * - 纯字符串原样返回（历史兼容，不随语言切换）；
+ * - 映射形态：键规整 trim+小写；zh 系页面语言（startsWith('zh')，对齐
+ *   resolveLocale 的 zh* 折算）依次试 'zh-cn'、'zh'、'en'，非 zh 只试
+ *   'en'（候选链是固定清单，其余键不参与匹配）；
+ * - 全部候选缺失：取规整后字典序最小的键的值（兜底非空呈现、确定性）。
+ * 输入应先经守卫（合法映射至少一项）；守卫外的空映射返回空串（防御
+ * 早退——不靠非空断言把 undefined 静默传播给消费方）。 */
+export function resolveAddonBehaviorName(name: AddonBehaviorName, localeLang: string): string {
+  if (typeof name === 'string') {
+    return name
+  }
+  const byNormalizedKey = new Map<string, string>()
+  for (const [key, value] of Object.entries(name)) {
+    byNormalizedKey.set(normalizeBehaviorLocaleKey(key), value)
+  }
+  const candidates = localeLang.toLowerCase().startsWith('zh')
+    ? ['zh-cn', 'zh', 'en']
+    : ['en']
+  for (const candidate of candidates) {
+    const value = byNormalizedKey.get(candidate)
+    if (value !== undefined) {
+      return value
+    }
+  }
+  if (byNormalizedKey.size === 0) {
+    return ''
+  }
+  const fallbackKey = [...byNormalizedKey.keys()].sort()[0]!
+  return byNormalizedKey.get(fallbackKey)!
+}
+
+/** 注册形状守卫：名称缺失拒绝（string 与多语言映射两形态，#464）、
+ * 说明/例子缺失允许；非法形态不进入链 */
 export function isAddonBehaviorRegistration(v: unknown): v is AddonBehaviorRegistration {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) {
     return false
@@ -136,8 +232,7 @@ export function isAddonBehaviorRegistration(v: unknown): v is AddonBehaviorRegis
   if (!isUsableLocalId(candidate.id)) {
     return false
   }
-  if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0 ||
-    candidate.name.length > BEHAVIOR_NAME_LIMIT) {
+  if (!isUsableBehaviorName(candidate.name)) {
     return false
   }
   if (candidate.description !== undefined &&
@@ -330,8 +425,7 @@ export function isAddonBehaviorInfo(v: unknown): v is AddonBehaviorInfo {
   if (!isUsableLocalId(candidate.id)) {
     return false
   }
-  if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0 ||
-    candidate.name.length > BEHAVIOR_NAME_LIMIT) {
+  if (!isUsableBehaviorName(candidate.name)) {
     return false
   }
   if (candidate.description !== undefined &&

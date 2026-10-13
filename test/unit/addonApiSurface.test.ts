@@ -84,6 +84,31 @@ describe('附加组件公开声明消费面（T13）', () => {
     }
   })
 
+  it('#464 行为名多语言形态已进消费面（AddonBehaviorName 类型与 resolveAddonBehaviorName 值导入防回潮）', () => {
+    // 删除这两个公开符号的任一（或从消费面移除其消费）即红——签名面
+    // 与选值函数的公开消费由本断言钉住
+    const source = readFileSync(consumerPath, 'utf8')
+    const sf = ts.createSourceFile(consumerPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const symbols = new Set<string>()
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text.endsWith('/addonBehaviors') &&
+        node.importClause?.namedBindings !== undefined &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const element of node.importClause.namedBindings.elements) {
+          symbols.add(element.name.text)
+        }
+      }
+      node.forEachChild(visit)
+    }
+    sf.forEachChild(visit)
+    expect(symbols.has('AddonBehaviorName'), '消费面应导入 AddonBehaviorName（多语言名称 union）').toBe(true)
+    expect(symbols.has('resolveAddonBehaviorName'), '消费面应导入 resolveAddonBehaviorName（选值纯函数）').toBe(true)
+  })
+
   it('开发文档与生成器不进 Vsidian VSIX（.vscodeignore 排除 docs 与 scripts）', () => {
     const ignore = readFileSync(path.join(root, '.vscodeignore'), 'utf8')
     for (const pattern of ['docs/', 'scripts/', 'src/', 'test/']) {

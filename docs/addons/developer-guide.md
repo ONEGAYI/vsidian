@@ -73,9 +73,12 @@ import type { VsidianAddonPageSdk } from '<主仓库>/src/shared/addonPage' // �
 
 defineAddonPage('publisher.my-addon', (sdk) => {
   // sdk 即注入的页面 SDK：六个能力 facet + 装配/资源/通信/释放
-  sdk.behaviors?.register({ id: 'auto-pairs', name: '括号补全', onInput(ctx) { /* ... */ } })
+  // 行为名：单语言字符串（历史兼容）或多语言映射（#464——按页面语言渲染）
+  sdk.behaviors?.register({ id: 'auto-pairs', name: { en: 'Auto pairs', 'zh-cn': '括号补全' }, onInput(ctx) { /* ... */ } })
 })
 ```
+
+- **行为名的多语言形态（#464）**：`name` 除单语言字符串外可传「语言键 → 名称」映射。键推荐小写 BCP47 连字符形（如 `en`、`zh-cn`），匹配时规整 trim + 小写；页面语言以 `zh` 开头的候选链为 `zh-cn` → `zh` → `en`，其余页面语言只试 `en`；全部候选缺失时取字典序最小的键的值兜底（非空呈现）。映射全链路透传（注册、上报、设置页目录均不预解析），**语言切换后已注册行为名即时跟随**。纯字符串是历史兼容形态，不随语言切换。映射条目上限 32、键规整后至多 64 字符、值与单语言同名口径（非空、≤256 字符）；规整后重复键（`zh` 与 `ZH` 共存）会被拒绝。**注册后不得修改传入的 `name` 对象（含映射对象）**——平台不复制注册载荷，修改会影响后续上报与呈现。`description` / `examples` 仍是单语言字符串（多语言形态后续另行演进）。
 
 - 构建桥是 esbuild 插件：解析期注入 `vsidian-addon-sdk` shim（**不是真实 npm 包**——SDK 载体未发布，当前从主仓库测试夹具复制，见[示例仓库准备](example-repo-plan.md)）。
 - 构建目标 chrome114（对齐下界宿主 1.82.3 = Electron 25）。

@@ -1014,14 +1014,15 @@ export type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknow
 
 **分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#356（T07）
 
-**目标**：注册可组合输入行为：稳定局部 ID + 必填名称 + 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。
+**目标**：注册可组合输入行为：稳定局部 ID + 必填名称（单语言字符串或多语言映射，映射按页面语言渲染）+ 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。
 
 语义要点：
 - **适用模式**：合法可编辑 Live 实例（内核先执行只读、IME 组合中间态、表格网格与既有情境门控；IME 组合定稿（composition commit）驱动一次——userEvent input.type.compose、inputText 为净定稿文本，#399；删除事务白名单 backward/forward/selection/cut/line 驱动（dedent 属缩进命令族不纳入），#400）。
 - **坐标与数据形状**：修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。上下文与观察事件携带 docUri（目标文档 URI，与 views 句柄 targetDocUri 同源：main = 面板文档，embed = 引用目标——在引用 B 内触发时是 B 的 URI，#407）与 replaced（事务替换/删除侧：键入替换选区 = 被替换内容（#401），delete = 被删文本（#400），事务前 LF 坐标，IME 定稿恒 null）。
 - **生命周期**：行为能力与适用条件只由代码表达（不复制进清单）；每次修饰按自己的原子声明提交，提交与身份注入由平台完成（行为不能直接写文档）。
-- **错误与拒绝**：注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失拒绝、说明/例子缺失允许）。
+- **错误与拒绝**：注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失或形态非法拒绝、说明/例子缺失允许）。
 - **历史与撤回**：文本变化不终止链（默认可组合）；确需择一的用显式独占组（同组件命名空间内互斥，跨组件不互斥）——不恢复统一「先接管者生效」。
+- **多语言与本地化**：name 为多语言映射时键规整 trim+小写（推荐小写 BCP47 连字符形，如 zh-cn/en）；候选链 zh-cn → zh → en（zh 开头页面语言折算，对齐 resolveLocale），非 zh 页面只试 en；全部候选缺失取规整字典序最小键的值（非空呈现、确定性）；映射全链路透传不预解析，语言切换后已注册名跟随（渲染时经 resolveAddonBehaviorName 选值，#464）。纯字符串单语言不随语言切换（历史兼容）。映射条目上限 32、键规整后 ≤64 字符、值同单语言口径（trim 非空 ≤256）；规整后键重复拒绝（zh 与 ZH 共存歧义）。
 
 签名事实源：`src/shared/addonBehaviors.ts`
 
@@ -1040,8 +1041,11 @@ export interface AddonBehaviorsFacet {
 export interface AddonBehaviorRegistration {
   /** 稳定局部 ID（组件内唯一；持久身份的一半） */
   readonly id: string
-  /** 必填的用户可读名称（ADR Q27：注册行为时名称必填） */
-  readonly name: string
+  /** 必填的用户可读名称（ADR Q27：注册行为时名称必填）。单语言字符串
+   *  （历史兼容，不随语言切换）或多语言映射（按页面语言选值——消费端
+   *  渲染时经 resolveAddonBehaviorName 求值，注册/上报/目录全链路透传，
+   *  #464） */
+  readonly name: AddonBehaviorName
   /** 可选简短说明（推荐提供，不作接入强制条件） */
   readonly description?: string
   /** 可选例子（推荐提供；至多 8 项） */
@@ -1054,6 +1058,43 @@ export interface AddonBehaviorRegistration {
   readonly history?: 'atomic' | 'joinPrevious'
   /** 业务回调：返回不处理（null）或文本修饰计划；适用条件由代码表达 */
   readonly onInput: (context: AddonInputContext) => AddonBehaviorInputPlan | null
+}
+
+/** 行为显示名：单语言字符串（历史兼容，不随语言切换）或「语言键 → 名称」
+ *  映射（按页面语言选值——键规整 trim+小写，候选链见
+ *  resolveAddonBehaviorName；映射全链路透传不预解析，#464） */
+export type AddonBehaviorName = string | { readonly [locale: string]: string }
+
+/** 行为名选值（#464 纯函数）：按页面语言从名称形态求显示文本。
+ * - 纯字符串原样返回（历史兼容，不随语言切换）；
+ * - 映射形态：键规整 trim+小写；zh 系页面语言（startsWith('zh')，对齐
+ *   resolveLocale 的 zh* 折算）依次试 'zh-cn'、'zh'、'en'，非 zh 只试
+ *   'en'（候选链是固定清单，其余键不参与匹配）；
+ * - 全部候选缺失：取规整后字典序最小的键的值（兜底非空呈现、确定性）。
+ * 输入应先经守卫（合法映射至少一项）；守卫外的空映射返回空串（防御
+ * 早退——不靠非空断言把 undefined 静默传播给消费方）。 */
+export function resolveAddonBehaviorName(name: AddonBehaviorName, localeLang: string): string {
+  if (typeof name === 'string') {
+    return name
+  }
+  const byNormalizedKey = new Map<string, string>()
+  for (const [key, value] of Object.entries(name)) {
+    byNormalizedKey.set(normalizeBehaviorLocaleKey(key), value)
+  }
+  const candidates = localeLang.toLowerCase().startsWith('zh')
+    ? ['zh-cn', 'zh', 'en']
+    : ['en']
+  for (const candidate of candidates) {
+    const value = byNormalizedKey.get(candidate)
+    if (value !== undefined) {
+      return value
+    }
+  }
+  if (byNormalizedKey.size === 0) {
+    return ''
+  }
+  const fallbackKey = [...byNormalizedKey.keys()].sort()[0]!
+  return byNormalizedKey.get(fallbackKey)!
 }
 
 /** 输入行为的操作上下文（技术方案 §5.2：当前快照 + 操作上下文） */

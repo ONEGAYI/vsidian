@@ -75,11 +75,13 @@ import {
   type AddonHostSettingsRejection,
   type AddonHostSettingValue,
 } from '../../src/shared/addonHostSettingsApi'
-import type {
-  AddonBehaviorChangeEvent,
-  AddonBehaviorRegistration,
-  AddonBehaviorsFacet,
-  AddonBehaviorRegisterResult,
+import {
+  resolveAddonBehaviorName,
+  type AddonBehaviorChangeEvent,
+  type AddonBehaviorName,
+  type AddonBehaviorRegistration,
+  type AddonBehaviorsFacet,
+  type AddonBehaviorRegisterResult,
 } from '../../src/shared/addonBehaviors'
 import type {
   AddonSettingDefinition,
@@ -254,6 +256,18 @@ export type BehaviorShapes = {
   registration: AddonBehaviorRegistration
   changeEvent: AddonBehaviorChangeEvent
 }
+
+/** #464 多语言行为名：union 形状钉住（string | 语言键映射）——收窄或
+ *  放宽（如 any）都编译失败 */
+export const behaviorNamePinned: Equals<
+  AddonBehaviorName,
+  string | { readonly [locale: string]: string }
+> = true
+/** 注册样例：多语言映射形态（推荐键形小写 BCP47 连字符，如 zh-cn/en） */
+export const multilanguageBehaviorName: AddonBehaviorName = { en: 'Auto pairs', 'zh-cn': '括号补全' }
+/** 选值函数可被组件作者值导入消费（渲染/上报前按页面语言求显示文本） */
+export const resolvedBehaviorNameInZh: string = resolveAddonBehaviorName(multilanguageBehaviorName, 'zh-cn')
+export const resolvedBehaviorNameInEn: string = resolveAddonBehaviorName(multilanguageBehaviorName, 'en')
 
 /** #410 标题折叠实验入口：三种拒绝码与五操作字面量（接口冻结面） */
 export type PinnedHeadingFoldRejections = 'view-disposed' | 'read-only' | 'invalid-request'

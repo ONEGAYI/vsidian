@@ -9,6 +9,7 @@ import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
+import { en } from '../../src/shared/locales/en'
 import { isHostToWebview, type HostToWebview } from '../../src/shared/protocol'
 import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
@@ -318,5 +319,65 @@ describe('行为冲突管理（T08）', () => {
     harness.dispatch(behaviorsPayload({ behaviors: [INFO_TILDE] }))
     const owner = harness.parent.querySelector('.vsidian-addons-behaviors-owner')!
     expect(owner.textContent).toBe(`所属组件：${ADDON_B}`)
+  })
+
+  it('#464 多语言 name 按当前页面语言渲染：标题与三处 aria 同幅，换包后重渲染跟随', () => {
+    // 复位 zh-cn（其他用例不换包，此处显式装配保证起点确定）
+    installLocale('zh-cn', zhCn)
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    harness.dispatch(behaviorsPayload({
+      behaviors: [{
+        addonId: ADDON_A,
+        id: 'locale-name',
+        name: { en: 'Localized name demo', 'zh-cn': '多语言名称示例' },
+        history: 'atomic',
+      }],
+    }))
+    // zh-cn 装配：标题取 zh-cn 值（映射形态透传到渲染时才选值）
+    const titleOf = () =>
+      harness.parent.querySelector('.vsidian-addons-behaviors-row .vsidian-settings-item-title')!.textContent
+    expect(titleOf()).toBe('多语言名称示例')
+    // 三处 aria 用同一 displayName（调序上移/下移与单项开关）
+    const moveUp = harness.parent.querySelector<HTMLElement>('[data-behavior-move=up]')!
+    const moveDown = harness.parent.querySelector<HTMLElement>('[data-behavior-move=down]')!
+    const toggle = harness.parent.querySelector<HTMLElement>('input[type=checkbox][data-behavior-key]')!
+    expect(moveUp.getAttribute('aria-label')).toContain('多语言名称示例')
+    expect(moveDown.getAttribute('aria-label')).toContain('多语言名称示例')
+    expect(toggle.getAttribute('aria-label')).toContain('多语言名称示例')
+    expect(moveUp.getAttribute('aria-label')).not.toContain('Localized name demo')
+    // 换包 en（installLocale 原子换包 → SettingsPageView.applyLocale → render
+    // → AddonSection.mount 重入）：标题与 aria 就地跟随 en 值
+    installLocale('en', en)
+    expect(titleOf()).toBe('Localized name demo')
+    const moveUpEn = harness.parent.querySelector<HTMLElement>('[data-behavior-move=up]')!
+    const toggleEn = harness.parent.querySelector<HTMLElement>('input[type=checkbox][data-behavior-key]')!
+    expect(moveUpEn.getAttribute('aria-label')).toContain('Localized name demo')
+    expect(moveUpEn.getAttribute('aria-label')).not.toContain('多语言名称示例')
+    expect(toggleEn.getAttribute('aria-label')).toContain('Localized name demo')
+    // 复位 zh-cn（避免影响后续用例的 zh 装配假设）
+    installLocale('zh-cn', zhCn)
+  })
+
+  it('#464 映射缺失当前语言键时回落 en（zh-cn 值缺席不空白）', () => {
+    installLocale('zh-cn', zhCn)
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+    ]))
+    harness.dispatch(behaviorsPayload({
+      behaviors: [{
+        addonId: ADDON_A,
+        id: 'en-only',
+        name: { en: 'English only name' },
+        history: 'atomic',
+      }],
+    }))
+    const title = harness.parent.querySelector('.vsidian-addons-behaviors-row .vsidian-settings-item-title')!
+    expect(title.textContent).toBe('English only name')
   })
 })

@@ -61,7 +61,7 @@ async function docText(name: string): Promise<string> {
 
 /** view.state 探针的 addonBehaviors 面（requestViewState 触发面板回报） */
 async function behaviorStats(file: string): Promise<{
-  registrations: Array<{ addonId: string; id: string; name: string }>
+  registrations: Array<{ addonId: string; id: string; name: string | Record<string, string> }>
   hostState: { order: string[]; disabled: string[] } | null
 } | undefined> {
   const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', wsUri(file).toString(), 0)) as
@@ -70,8 +70,9 @@ async function behaviorStats(file: string): Promise<{
   return state?.['addonBehaviors'] as never
 }
 
-/** 宿主行为注册目录快照（_test.addonBehaviorCatalog——上报对账的断言面） */
-async function behaviorCatalog(): Promise<Array<{ addonId: string; id: string; name: string }>> {
+/** 宿主行为注册目录快照（_test.addonBehaviorCatalog——上报对账的断言面）。
+ *  #464 起 name 可为多语言映射（string | 语言键映射）。 */
+async function behaviorCatalog(): Promise<Array<{ addonId: string; id: string; name: string | Record<string, string> }>> {
   return (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorCatalog')) as never
 }
 
@@ -104,6 +105,15 @@ async function ensureEnabled(): Promise<void> {
     })
   }
   throw new Error('运行态未能恢复 enabled')
+}
+
+/** #464 行为名形态校验：string（非空）或语言键映射（每值非空 string） */
+function isNonEmptyBehaviorName(name: string | Record<string, string>): boolean {
+  if (typeof name === 'string') {
+    return name.length > 0
+  }
+  const values = Object.values(name)
+  return values.length > 0 && values.every((v) => typeof v === 'string' && v.length > 0)
 }
 
 /** 以基态重写盘面并打开（行为链用例的可重复基线；T07 resetDocAndOpen 同款） */
@@ -207,13 +217,21 @@ export const addonT08Cases: Array<[string, () => Promise<void>]> = [
     await resetDocAndOpen(file, 'word\n')
     await probeRegistrations(file)
 
-    // 注册上报对账：宿主目录含三个行为（名称为注册面元数据）
+    // 注册上报对账：宿主目录含四个行为（名称为注册面元数据；#464 起
+    // 含一个多语言映射名行为）
     const catalog = await poll('目录上报到达', async () => {
       const list = await behaviorCatalog()
-      return list.filter((entry) => entry.addonId === ADDON_ID).length === 3 ? list : undefined
+      return list.filter((entry) => entry.addonId === ADDON_ID).length === 4 ? list : undefined
     })
     const names = catalog.filter((entry) => entry.addonId === ADDON_ID).map((entry) => entry.name)
-    assert(names.every((name) => typeof name === 'string' && name.length > 0), `目录应含必填名称：${JSON.stringify(catalog)}`)
+    assert(names.every((name) => isNonEmptyBehaviorName(name)), `目录应含必填名称：${JSON.stringify(catalog)}`)
+    // #464 多语言名端到端：locale-name 的映射透传进目录（不预解析），
+    // zh-cn 与 en 值原样在场
+    const localeNameEntry = catalog.find((entry) => entry.id === 'locale-name')!
+    assert(typeof localeNameEntry.name === 'object' &&
+      localeNameEntry.name['zh-cn'] === '多语言名称示例' &&
+      localeNameEntry.name['en'] === 'Localized name demo',
+      `多语言行为名应映射透传进目录：${JSON.stringify(localeNameEntry)}`)
 
     // 真实设置页面板通道写入单项关闭（生产路由：settingsPage.handleMessage
     // → addons wiring → behaviorStateService → 推送活跃编辑器面板）
@@ -314,7 +332,7 @@ export const addonT08Cases: Array<[string, () => Promise<void>]> = [
     await poll('重开后目录与关闭配置恢复', async () => {
       const list = await behaviorCatalog()
       const stats = await behaviorStats(file)
-      return list.filter((entry) => entry.addonId === ADDON_ID).length === 3 &&
+      return list.filter((entry) => entry.addonId === ADDON_ID).length === 4 &&
         stats?.hostState?.disabled?.includes(KEY_SPACE) ? list : undefined
     })
     await typeAt(file, 4, '^')

@@ -17,11 +17,12 @@
 // 状态权威在宿主（addons.state / addons.settingsState 推送回显；装载经
 // addons.get / addons.settingsGet 拉取）；页面不自行推断。文案一律 t()
 // 取词（addons.* 词条）。控件构造器在 addonSettingsControls.ts。
-import { t } from '../shared/i18n'
+import { t, currentLocaleLang } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import type { AddonStatusEntry } from '../shared/addonIdentity'
 import {
   orderedAddonBehaviorKeys,
+  resolveAddonBehaviorName,
   type AddonBehaviorInfo,
   type AddonBehaviorStateStore,
 } from '../shared/addonBehaviors'
@@ -534,6 +535,10 @@ export class AddonSection implements SettingsPageSection {
   private renderBehaviorRow(behavior: AddonBehaviorInfo, fullOrder: readonly string[], index: number, userDisabled: boolean): HTMLElement {
     const key = `${behavior.addonId}#${behavior.id}`
     const addonEntry = this.state?.addons.find((entry) => entry.id === behavior.addonId)
+    // #464 多语言名称渲染时按当前页面语言选值（对齐 styleReferenceSettings
+    // 先例：语言切换经 applyLocale → render → 本方法重入，天然跟随；纯
+    // 字串形态原样返回，行为不变）
+    const displayName = resolveAddonBehaviorName(behavior.name, currentLocaleLang())
     const item = document.createElement('div')
     item.className = 'vsidian-addons-behaviors-row'
     item.dataset.behaviorKey = key
@@ -543,7 +548,7 @@ export class AddonSection implements SettingsPageSection {
     copy.className = 'vsidian-settings-item-copy'
     const title = document.createElement('span')
     title.className = 'vsidian-settings-item-title'
-    title.textContent = behavior.name
+    title.textContent = displayName
     const owner = document.createElement('span')
     owner.className = 'vsidian-addons-behaviors-owner'
     owner.textContent = t('addons.behaviorsOwnerLabel', { label: addonEntry?.label ?? behavior.addonId })
@@ -571,7 +576,7 @@ export class AddonSection implements SettingsPageSection {
         this.send({ kind: 'addons.behaviorsSetOrder', order: next })
       }, 'vsidian-addons-behaviors-move', { [REBUILD_FOCUS_ATTR]: `behavior-move:${key}:${direction}` })
       button.dataset.behaviorMove = direction
-      button.setAttribute('aria-label', t(direction === 'up' ? 'addons.behaviorsMoveUpAria' : 'addons.behaviorsMoveDownAria', { name: behavior.name }))
+      button.setAttribute('aria-label', t(direction === 'up' ? 'addons.behaviorsMoveUpAria' : 'addons.behaviorsMoveDownAria', { name: displayName }))
       button.disabled = direction === 'up' ? index === 0 : index === fullOrder.length - 1
       return button
     }
@@ -584,7 +589,7 @@ export class AddonSection implements SettingsPageSection {
     toggle.checked = !userDisabled
     toggle.dataset.behaviorKey = key
     toggle.setAttribute(REBUILD_FOCUS_ATTR, `behavior:${key}`)
-    toggle.setAttribute('aria-label', t('addons.behaviorsToggleAria', { name: behavior.name }))
+    toggle.setAttribute('aria-label', t('addons.behaviorsToggleAria', { name: displayName }))
     toggle.addEventListener('change', () => {
       this.send({ kind: 'addons.behaviorsSetDisabled', keys: [key], disabled: !toggle.checked })
     })
