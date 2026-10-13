@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-// T08（#357）行为冲突管理——设置页「附加组件」分页的呈现与交互契约：
-// 用户可见文本（名称、所属组件、徽章、提示）、展示全序（关闭项保位）、
-// 单项开关与调序的上送形态、状态一致性（单项关闭 vs 整体停用/故障）、
-// 写操作结局提示与全局搜索定位。装配口径与生产 settingsMain.ts 同构
-// （复用 addonSettingsSection.test.ts 的 makeView 形态）。
+// #465/#466 输入行为管理独立分页（AddonBehaviorManageSection）——呈现与
+// 交互契约：侧栏「选项」组导航项（「附加组件」之后）、页标题与副题（管理
+// 语义）、组卡片头（已注册行为 + 图标槽）、展示全序（关闭项保位）、单项
+// 开关与调序的上送形态、状态一致性（单项关闭 vs 整体停用/故障）、写操作
+// 结局提示、全局搜索定位与 #464 多语言名称渲染。装配口径与生产
+// settingsMain.ts 同构（附加组件页收敛为组件级管理后行为区不再在 'addons'
+// 分页呈现——该侧契约见 addonSettingsSection.test.ts）。
 import { describe, it, expect } from 'vitest'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
@@ -17,12 +19,14 @@ import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
 import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
 import { AddonSection } from '../../src/webview/addonSettingsSection'
+import { AddonBehaviorManageSection, ADDONS_BEHAVIORS_SECTION_ID } from '../../src/webview/addonBehaviorManageSection'
 
 installLocale('zh-cn', zhCn)
 
 function makeView(): {
   view: SettingsPageView
   addons: AddonSection
+  behaviors: AddonBehaviorManageSection
   dispatch(message: unknown): void
   sent: unknown[]
   parent: HTMLElement
@@ -30,23 +34,26 @@ function makeView(): {
   const sent: unknown[] = []
   const bridge = { postMessage: (m: unknown) => sent.push(m) }
   let refreshSidebar: () => void = () => {}
-  const addons = new AddonSection(bridge, undefined, () => refreshSidebar())
+  const addons = new AddonSection(bridge, () => refreshSidebar())
+  const behaviors = new AddonBehaviorManageSection(bridge)
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
       new AppearanceSection(new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge)),
       new IndexMaintenanceSection(bridge),
       addons,
+      behaviors,
     ],
     [], [])
   refreshSidebar = () => view.refreshSidebar()
   const parent = document.createElement('div')
   view.mount(parent)
   return {
-    view, addons, sent, parent,
+    view, addons, behaviors, sent, parent,
     dispatch: (message: unknown) => {
       view.handleHostMessage(message)
       addons.handleHostMessage(message)
+      behaviors.handleHostMessage(message)
     },
   }
 }
@@ -90,8 +97,8 @@ const INFO_DASH = { addonId: ADDON_A, id: 'dash-fill', name: '破折填充', des
 const INFO_SPACE = { addonId: ADDON_A, id: 'space-fill', name: '空格整理', history: 'atomic' }
 const INFO_TILDE = { addonId: ADDON_B, id: 'tilde-fill', name: '波浪填充', history: 'atomic' }
 
-function openAddonsPage(harness: ReturnType<typeof makeView>): void {
-  harness.view.selectSection('addons')
+function openBehaviorsPage(harness: ReturnType<typeof makeView>): void {
+  harness.view.selectSection(ADDONS_BEHAVIORS_SECTION_ID)
 }
 
 function visibleText(root: HTMLElement): string {
@@ -102,48 +109,83 @@ function behaviorRows(harness: ReturnType<typeof makeView>): HTMLElement[] {
   return [...harness.parent.querySelectorAll<HTMLElement>('.vsidian-addons-behaviors-row')]
 }
 
-describe('行为冲突管理（T08）', () => {
-  it('载荷未到达时呈现组标题与读取中；空目录呈现空态提示（打开文档后可管理）', () => {
+describe('输入行为管理分页：IA 注册与页面结构（#465/#466）', () => {
+  it('侧栏「选项」组注册「输入行为管理」导航项：位于「附加组件」之后并带图标槽', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    const optionsSection = harness.parent.querySelector('.vsidian-settings-nav-section')!
+    const items = [...optionsSection.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+    const titles = items.map((button) => button.textContent)
+    const addonsIndex = titles.findIndex((text) => text === '附加组件')
+    const behaviorsIndex = titles.findIndex((text) => text === '输入行为管理')
+    expect(addonsIndex).toBeGreaterThanOrEqual(0)
+    expect(behaviorsIndex).toBeGreaterThan(addonsIndex)
+    // 导航项带图标（aria-hidden 纯装饰不读屏）
+    expect(items[behaviorsIndex]!.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('IA 分页：行为区只在独立分页呈现，附加组件页与行为页互不混装', () => {
+    const harness = makeView()
+    harness.view.selectSection('addons')
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors')).toBeNull()
+    openBehaviorsPage(harness)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors')).not.toBeNull()
+    // 行为页不承载附加组件页的管理内容（状态列表/工具组）
+    expect(harness.parent.querySelector('.vsidian-addons-list')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-actions')).toBeNull()
+  })
+
+  it('页面结构：页标题与副题（管理语义）、bare 装配、组卡片头挂卡片内并带图标', () => {
+    const harness = makeView()
+    openBehaviorsPage(harness)
+    const heading = harness.parent.querySelector('.vsidian-settings-heading')!
+    expect(heading.textContent).toBe('输入行为管理')
+    const subtitle = harness.parent.querySelector('.vsidian-settings-subtitle')!
+    // #466 副题为管理语义：说明默认依次触发、可调序/逐项关闭，关闭单项
+    // 不停用整个组件
+    expect(subtitle.textContent).toContain('依次触发')
+    expect(subtitle.textContent).toContain('不会停用整个组件')
+    // bare 装配（多组管理型分页先例）：组卡片直挂页面列表，不套大卡片
+    expect(harness.parent.querySelector('.vsidian-settings-section-content')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-settings-section-bare')).not.toBeNull()
+    const area = harness.parent.querySelector('.vsidian-addons-behaviors')!
+    const group = area.querySelector('.vsidian-settings-group')!
+    expect(group.closest('.vsidian-settings-section-content')).toBeNull()
+    // 组卡片头：已注册行为 + 图标槽（挂卡片内，不游离）
+    const title = area.querySelector('.vsidian-settings-group-title')!
+    expect(title.parentElement?.classList.contains('vsidian-settings-group')).toBe(true)
+    expect(title.textContent).toContain('已注册行为')
+    expect(title.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('全局搜索条目命中本分页分组（页名可检索）并定位行为区', () => {
+    const harness = makeView()
+    const search = harness.parent.querySelector<HTMLInputElement>('input.vsidian-settings-search')!
+    search.value = '输入行为管理'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    const results = [...harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+    const hit = results.find((button) => button.querySelector('strong')?.textContent === '输入行为管理')
+    expect(hit).toBeTruthy()
+    hit!.click()
+    const area = harness.parent.querySelector('.vsidian-addons-behaviors')
+    expect(area?.classList.contains('vsidian-settings-item-located')).toBe(true)
+  })
+
+  it('载荷未到达时呈现读取中；空目录呈现空态提示（打开文档后可管理）', () => {
+    const harness = makeView()
+    openBehaviorsPage(harness)
     const text = visibleText(harness.parent)
-    expect(text).toContain('行为冲突管理')
     expect(text).toContain('正在读取行为注册')
     expect(text).not.toContain('暂无已注册的输入行为')
 
     harness.dispatch(behaviorsPayload({}))
     expect(visibleText(harness.parent)).toContain('暂无已注册的输入行为')
   })
+})
 
-  it('组头与编辑器页二级组同构：标题进组卡片并带分流合流图标', () => {
-    const harness = makeView()
-    openAddonsPage(harness)
-    const title = harness.parent.querySelector('.vsidian-addons-behaviors .vsidian-settings-group-title')!
-    // 标题挂在组卡片内（全幅头部形态由组容器承载，不再游离卡片外）
-    expect(title.parentElement?.classList.contains('vsidian-settings-group')).toBe(true)
-    // 图标槽位在场（分流合流字形；aria-hidden 纯装饰，不读屏）
-    expect(title.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
-    // 提示文案随组头进卡片（组内首行，不再悬在卡片外）
-    expect(harness.parent.querySelector('.vsidian-addons-behaviors .vsidian-settings-group > .vsidian-addons-behaviors-hint')).not.toBeNull()
-  })
-
-  it('bare 装配：组卡片直挂页面列表，不嵌套进 section-content 大卡片', () => {
-    const harness = makeView()
-    openAddonsPage(harness)
-    // 附加组件页内容容器为 bare（无卡容器语言），大卡片不在此页渲染
-    expect(harness.parent.querySelector('.vsidian-settings-section-content')).toBeNull()
-    expect(harness.parent.querySelector('.vsidian-settings-section-bare')).not.toBeNull()
-    // 行为区组卡片的上溯链不含 section-content（不卡中卡）
-    const group = harness.parent.querySelector('.vsidian-addons-behaviors .vsidian-settings-group')!
-    expect(group.closest('.vsidian-settings-section-content')).toBeNull()
-    // 页面自有内容（状态列表/操作行/API 版本行）同住 bare 容器
-    expect(harness.parent.querySelector('.vsidian-settings-section-bare > .vsidian-addons-list')).not.toBeNull()
-    expect(harness.parent.querySelector('.vsidian-settings-section-bare > .vsidian-addons-actions')).not.toBeNull()
-  })
-
+describe('输入行为管理分页：行为行呈现与交互（T08 契约延续）', () => {
   it('按展示全序渲染行为行：名称、所属组件与例子可见，说明/例子按需展开', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
       { id: ADDON_B, label: '组件乙', official: false, status: 'registered', enabled: true },
@@ -171,7 +213,7 @@ describe('行为冲突管理（T08）', () => {
 
   it('单项开关：取消勾选上送关闭、恢复勾选上送开启（键为行为完整键）', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
     ]))
@@ -197,7 +239,7 @@ describe('行为冲突管理（T08）', () => {
 
   it('调序：上移/下移上送可见全序新序列；首末按钮禁用（回显驱动）', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
     ]))
@@ -229,7 +271,7 @@ describe('行为冲突管理（T08）', () => {
 
   it('状态一致性：单项关闭与整体停用徽章互相区分，配置行仍在', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
       { id: ADDON_B, label: '组件乙', official: false, status: 'registered', enabled: false },
@@ -253,7 +295,7 @@ describe('行为冲突管理（T08）', () => {
 
   it('故障暂停徽章与单项关闭并存可辨（组件故障 ≠ 行为被关）', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true, fault: { reason: 'setup 崩溃' } },
     ]))
@@ -268,7 +310,7 @@ describe('行为冲突管理（T08）', () => {
 
   it('推送回显重排与徽章（宿主权威）：关闭项保位呈现', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
     ]))
@@ -289,7 +331,7 @@ describe('行为冲突管理（T08）', () => {
 
   it('写操作结局提示呈现（保存成功/失败），常规推送不残留', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
     ]))
@@ -302,19 +344,9 @@ describe('行为冲突管理（T08）', () => {
     expect(visibleText(harness.parent)).not.toContain('行为设置保存失败')
   })
 
-  it('全局搜索入口可定位行为冲突管理组（条目命中后跳转定位）', () => {
-    const harness = makeView()
-    openAddonsPage(harness)
-    const entry = harness.addons.entries.find((e) => e.id === 'behaviors')
-    expect(entry?.title).toBe('行为冲突管理')
-    harness.view.selectSection('addons', 'behaviors')
-    const group = harness.parent.querySelector('.vsidian-addons-behaviors')
-    expect(group?.classList.contains('vsidian-settings-item-located')).toBe(true)
-  })
-
   it('组件状态条目缺席时所属组件回退为组件 ID（目录滞后于 addons.state）', () => {
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([]))
     harness.dispatch(behaviorsPayload({ behaviors: [INFO_TILDE] }))
     const owner = harness.parent.querySelector('.vsidian-addons-behaviors-owner')!
@@ -325,7 +357,7 @@ describe('行为冲突管理（T08）', () => {
     // 复位 zh-cn（其他用例不换包，此处显式装配保证起点确定）
     installLocale('zh-cn', zhCn)
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
     ]))
@@ -350,7 +382,7 @@ describe('行为冲突管理（T08）', () => {
     expect(toggle.getAttribute('aria-label')).toContain('多语言名称示例')
     expect(moveUp.getAttribute('aria-label')).not.toContain('Localized name demo')
     // 换包 en（installLocale 原子换包 → SettingsPageView.applyLocale → render
-    // → AddonSection.mount 重入）：标题与 aria 就地跟随 en 值
+    // → 分页 mount 重入）：标题与 aria 就地跟随 en 值
     installLocale('en', en)
     expect(titleOf()).toBe('Localized name demo')
     const moveUpEn = harness.parent.querySelector<HTMLElement>('[data-behavior-move=up]')!
@@ -365,7 +397,7 @@ describe('行为冲突管理（T08）', () => {
   it('#464 映射缺失当前语言键时回落 en（zh-cn 值缺席不空白）', () => {
     installLocale('zh-cn', zhCn)
     const harness = makeView()
-    openAddonsPage(harness)
+    openBehaviorsPage(harness)
     harness.dispatch(addonsState([
       { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
     ]))
@@ -379,5 +411,37 @@ describe('行为冲突管理（T08）', () => {
     }))
     const title = harness.parent.querySelector('.vsidian-addons-behaviors-row .vsidian-settings-item-title')!
     expect(title.textContent).toBe('English only name')
+  })
+
+  it('#467 单项开关推送回显：焦点回到同键开关，主区 scrollTop 保持', () => {
+    const harness = makeView()
+    document.body.append(harness.parent)
+    try {
+      openBehaviorsPage(harness)
+      harness.dispatch(addonsState([
+        { id: ADDON_A, label: '组件甲', official: false, status: 'registered', enabled: true },
+      ]))
+      const behaviorKey = `${ADDON_A}#dash-fill`
+      const behaviorMessage = {
+        kind: 'addons.behaviors',
+        behaviors: [{ addonId: ADDON_A, id: 'dash-fill', name: '破折填充', history: 'atomic' }],
+        state: null,
+      }
+      if (!isHostToWebview(behaviorMessage)) {
+        throw new Error('addons.behaviors 载荷未通过协议守卫')
+      }
+      harness.dispatch(behaviorMessage)
+      const main = harness.parent.querySelector<HTMLElement>('.vsidian-settings-main')!
+      const toggle = harness.parent.querySelector<HTMLInputElement>(`input[data-behavior-key="${behaviorKey}"]`)!
+      toggle.focus()
+      main.scrollTop = 90
+      toggle.click() // change → 上送 behaviorsSetDisabled；回显推送整块重建
+      harness.dispatch({ ...behaviorMessage, state: { version: 1, order: [], disabled: [behaviorKey] } })
+      expect(document.activeElement?.getAttribute('data-behavior-key')).toBe(behaviorKey)
+      expect(main.scrollTop).toBe(90)
+    } finally {
+      harness.parent.remove()
+      harness.view.dispose()
+    }
   })
 })

@@ -1,7 +1,7 @@
-// T08（#357）行为冲突管理——生产设置页入口的真实浏览器回归：真实键盘/
-// 点击驱动调序与逐项开关、说明/例子按需展开；绘制层断言（徽章计算色、
-// 勾选态、行序文本——非 DOM 存在性）。宿主应答由页面内 mock 桥回灌
-// （addons.state / addons.behaviors），消息断言以 webview → 宿主的上送
+// T08（#357→#465/#466）输入行为管理独立分页——生产设置页入口的真实浏览
+// 器回归：真实键盘/点击驱动调序与逐项开关、说明/例子按需展开；绘制层断言
+// （徽章计算色、勾选态、行序文本——非 DOM 存在性）。宿主应答由页面内 mock
+// 桥回灌（addons.state / addons.behaviors），消息断言以 webview → 宿主的上送
 // 形态为准；权威回显驱动重排与徽章呈现（回显驱动的 UI 契约）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -105,19 +105,25 @@ try {
   }, hostState)
   await page.addScriptTag({ path: output })
 
-  // ---- 1. 打开附加组件分页：行为冲突管理组在场（固定入口） ----
-  await page.getByRole('button', { name: zhCn['settings.addonsSection'], exact: true }).click()
+  // ---- 1. 打开「输入行为管理」独立分页（#465：自附加组件页迁出） ----
+  await page.getByRole('button', { name: zhCn['settings.addonsBehaviorsSection'], exact: true }).click()
   const area = page.locator('.vsidian-addons-behaviors')
   await area.waitFor()
+  // 页标题与副题（#466 管理语义）；附加组件页的管理内容不混装在本页
+  assert.equal(await page.locator('.vsidian-settings-heading').innerText(), zhCn['settings.addonsBehaviorsSection'])
+  const subtitleText = await page.locator('.vsidian-settings-subtitle').innerText()
+  assert.match(subtitleText, new RegExp(zhCn['settings.addonsBehaviorsSectionDescription']))
+  assert.equal(await page.locator('.vsidian-addons-list').count(), 0, '行为页不得混装附加组件状态列表')
+  assert.equal(await page.locator('.vsidian-addons-actions').count(), 0, '行为页不得混装附加组件工具组')
   const groupText = await area.innerText()
-  assert.match(groupText, new RegExp(zhCn['addons.behaviorsGroupTitle']))
+  assert.match(groupText, new RegExp(zhCn['addons.behaviorsListTitle']))
   assert.match(groupText, /破折填充/)
   // #464 map 形态 name：zh-cn 页面只渲染 zh-cn 值，en 值不得出现
   assert.doesNotMatch(groupText, /Dash fill demo/)
   assert.match(groupText, /所属组件：组件甲/)
 
   // ---- 1.5 组头样式契约：与编辑器页二级组同构（进卡片全幅头部 + 图标） ----
-  const behaviorsTitle = area.locator('.vsidian-settings-group-title', { hasText: zhCn['addons.behaviorsGroupTitle'] })
+  const behaviorsTitle = area.locator('.vsidian-settings-group-title', { hasText: zhCn['addons.behaviorsListTitle'] })
   const headerPaint = await behaviorsTitle.evaluate((h3) => {
     const cs = getComputedStyle(h3)
     const box = h3.getBoundingClientRect()
@@ -158,7 +164,7 @@ try {
   assert.equal(barePaint.bg, 'rgba(0, 0, 0, 0)', 'bare 容器不得有卡片底色')
   assert.equal(barePaint.borderWidth, '0px', 'bare 容器不得有卡片描边')
   assert.equal(barePaint.radius, '0px', 'bare 容器不得有卡片圆角')
-  assert.equal(headerPaint.hasIcon, true, '组标题应带分流合流图标')
+  assert.equal(headerPaint.hasIcon, true, '组标题应带输入语义图标（输入框 + I 型光标）')
   assert.equal(Math.round(headerPaint.iconLeft), 20, '图标应贴左 padding 缘')
   assert.equal(headerPaint.iconSize, 16, '图标渲染盒应为 16px')
   assert.equal(Math.round(headerPaint.textLeft), 44, '标题文字应右移（20 padding + 16 图标 + 8 gap）')
@@ -166,8 +172,11 @@ try {
   assert.equal(headerPaint.borderBottom, '1px', '组头下边线')
   assert.equal(headerPaint.stroke, 'rgb(48, 52, 59)', '内联图标描边应随主题前景色（currentColor）')
   assert.equal(headerPaint.fill, 'none')
-  assert.equal(await area.locator('.vsidian-settings-group > .vsidian-addons-behaviors-hint').count(), 1,
-    '提示文案应随组头进卡片')
+  // #466 管理说明升为分页副题（绘制层说明色可见——样式未注入即失败）；
+  // 组卡片内不再重复提示行
+  const subtitlePaint = await page.locator('.vsidian-settings-subtitle').evaluate((el) => getComputedStyle(el).color)
+  assert.equal(subtitlePaint, 'rgb(89, 97, 109)', '分页副题（管理说明）应为说明前景色（绘制层）')
+  assert.equal(await area.locator('.vsidian-addons-behaviors-hint').count(), 0, '组内提示行已升为分页副题')
 
   // ---- 2. 行序与绘制层：徽章计算色（组件已停用 = 组件乙的行为带徽章） ----
   const rows = area.locator('.vsidian-addons-behaviors-row')
@@ -236,8 +245,8 @@ try {
 
   // ---- 7. 全局搜索定位：入口条目命中后跳转定位 ----
   const search = page.locator('.vsidian-settings-search')
-  await search.fill(zhCn['addons.behaviorsGroupTitle'])
-  const result = page.locator('.vsidian-settings-result', { hasText: zhCn['addons.behaviorsGroupTitle'] })
+  await search.fill(zhCn['settings.addonsBehaviorsSection'])
+  const result = page.locator('.vsidian-settings-result', { hasText: zhCn['settings.addonsBehaviorsSection'] })
   await result.first().click()
   const located = page.locator('.vsidian-addons-behaviors.vsidian-settings-item-located')
   await located.waitFor()
@@ -267,7 +276,8 @@ try {
   await page.setViewportSize({ width: 1100, height: 760 })
 
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
-  console.log('[#357] 行为冲突管理浏览器回归通过（调序/逐项开关/徽章绘制/详情展开/失败回弹/搜索定位）')
+  console.log('[#357] 输入行为管理分页浏览器回归通过（调序/逐项开关/徽章绘制/详情展开/失败回弹/搜索定位）')
+  console.log('[#465/#466] 行为管理独立分页与更名浏览器契约通过（IA 分页/页标题副题/输入语义图标）')
   console.log('[#467] 行为区推送链路滚动与焦点保持通过（单项开关 × 中部滚动）')
 } finally {
   await browser.close()

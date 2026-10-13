@@ -193,11 +193,18 @@ try {
     assert.equal(restorePaint, '1', '解灰后不透明度恢复')
     // #155 独立滚动骨架（绘制层，编辑器分组内容超一屏）：主区滚动时侧栏静止；
     // 切过分页后主区滚动复位、根元素不整体滚动。#163 二轮还原后编辑器页
-    // 内置小节（#332 起四小节 + 分词委托组）天然超一屏，直接承载本探针
+    // 内置小节（#332 起四小节 + 分词委托组）天然超一屏，直接承载本探针。
+    // #465 起侧栏「选项」组新增「输入行为管理」与「组件设置」两枚导航项——
+    // 720px 视口下侧栏内容恰好超一屏（侧栏本就是设计上的独立滚动容器），
+    // 探针段临时抬高视口使「内容不超一屏」前提成立，量完还原
+    await page.setViewportSize({ width: 1100, height: 980 })
     const scrollProbe = await page.evaluate(() => {
       const main = document.querySelector('.vsidian-settings-main')
       const sidebar = document.querySelector('.vsidian-settings-sidebar')
       const heading = document.querySelector('.vsidian-settings-heading')
+      // 先回顶再量基线：前置交互（依赖灰化的勾选点击）可能已把主区滚到
+      // 最大位，滚底对照将成空操作（#465 探针段抬高视口后暴露）
+      main.scrollTop = 0
       const sidebarTop = sidebar.getBoundingClientRect().top
       const headingTop = heading.getBoundingClientRect().top
       main.scrollTop = main.scrollHeight
@@ -222,6 +229,8 @@ try {
     assert.equal(scrollProbe.headingMovedUp, true, '主区内容应随滚动移动')
     assert.equal(scrollProbe.sidebarNotScrollable, true, '侧栏内容不超一屏时应无滚动')
     assert.equal(scrollProbe.docNotScrollable, true, '页面根不应再整体滚动')
+    // 还原探针段抬高的视口（后续断言沿用套件开头的 720px 基线）
+    await page.setViewportSize({ width: 1100, height: 720 })
     // #155 分组容器色差（绘制层）：容器底色 = 前景 4% 叠加正文背景，
     // 且与正文底色确有色差（色值序列化随内核以页面内同公式探针比对）。
     // #163 二轮还原后正停在「编辑器」分组——首个容器即「显示」小节
@@ -465,13 +474,15 @@ try {
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-css-snippets.png`) })
     // #264 中文分词并入编辑器页：侧栏不再有分词入口（#332 起「文件与链接」
     // 居实验性之前）；编辑器页尾二级组「中文分词」承载引擎/下载源与资源
-    // 管理（可见性断言落用户看到的东西）。#350 起尾项为「附加组件」分页
+    // 管理（可见性断言落用户看到的东西）。#350 起尾项为「附加组件」分页；
+    // #465 起「附加组件」之后为「输入行为管理」与「组件设置」两枚独立分页
     assert.deepEqual(await page.locator('.vsidian-settings-nav-item').allInnerTexts(),
       [zhCn['settings.generalSection'], zhCn['settings.editorCategory'],
         zhCn['settings.filesLinksSection'], zhCn['settings.experimentalSection'],
         zhCn['keybindingSettings.title'], zhCn['appearance.title'],
-        zhCn['settings.addonsSection']],
-      '侧栏应为七项（#332 文件与链接居实验性之前、#350 附加组件居尾）且不再有中文分词入口')
+        zhCn['settings.addonsSection'], zhCn['settings.addonsBehaviorsSection'],
+        zhCn['settings.addonSettingsSection']],
+      '侧栏应为九项（#332 文件与链接居实验性之前、附加组件域三分页居尾：#465 输入行为管理与组件设置）且不再有中文分词入口')
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     const wordsegGroup = page.locator('.vsidian-settings-group').filter({
       has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['wordSegment.title'] }) })
