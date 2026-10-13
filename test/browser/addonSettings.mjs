@@ -452,6 +452,43 @@ try {
   assert.match(await locatedRow.innerText(), /阈值/, 'def 级定位描定义行')
   assert.equal(await area.locator('.vsidian-settings-group.vsidian-settings-item-located').count(), 0, 'def 级定位不描组容器（落点唯一）')
 
+  // ---- 13b. #472 挂起定位的真实布局滚动（评审轮修复回归） ----
+  // 长定义集（远超一屏）+ 窄视口 + 设置区关闭态：经全局搜索点击末位组内
+  // 定义 → 发 settingsOpen → 应答渲染定位——断言主区滚到目标行且不被
+  // #467 滚动守卫的 restore 写回（定位语义优先于锚点恢复）
+  await page.evaluate(() => {
+    const longDefs = [{ key: 'flag', title: '开关项', type: 'boolean', default: true }]
+    for (let i = 1; i <= 30; i++) longDefs.push({ key: `opt${i}`, title: `选项 ${String(i).padStart(2, '0')}`, type: 'boolean', default: false })
+    longDefs.push({ key: 'farTheme', title: '远端主题', type: 'string', default: 'light', group: 'appearance' })
+    window.__defs = longDefs
+    window.__hostState.open = null
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: window.__addonsState() }))
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: window.__settingsState() }))
+  })
+  await page.locator('.vsidian-addons-settings-hub').waitFor()
+  await page.setViewportSize({ width: 1100, height: 320 })
+  await page.evaluate(() => { window.sentMessages.length = 0 })
+  const search13b = page.locator('input.vsidian-settings-search')
+  await search13b.fill('远端主题')
+  const farHit = page.locator('.vsidian-settings-result', { hasText: zhCn['settings.addonSettingsSection'] }).filter({ hasText: '远端主题' }).first()
+  await farHit.waitFor()
+  await farHit.click()
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsOpen' && m.addonId === 'fixture.demo'))
+  const area13b = page.locator('.vsidian-addons-settings')
+  await area13b.waitFor()
+  const locatedRow13b = area13b.locator('.vsidian-addons-setting-item.vsidian-settings-item-located')
+  await locatedRow13b.waitFor()
+  assert.match(await locatedRow13b.innerText(), /远端主题/, '挂起定位到达后目标行高亮')
+  const scrolled = await main.evaluate((el) => el.scrollTop)
+  assert.ok(scrolled > 0, `定位滚动应落位且不被滚动守卫写回（实际 scrollTop ${scrolled}）`)
+  const inViewport = await locatedRow13b.evaluate((el) => {
+    const rect = el.getBoundingClientRect()
+    return rect.top >= 0 && rect.bottom <= window.innerHeight
+  })
+  assert.equal(inViewport, true, '目标行在视口内（真实布局定位）')
+  await page.setViewportSize({ width: 1100, height: 760 })
+  await page.screenshot({ path: path.join(artifacts, 'settings-area-pending-located.png') })
+
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
   console.log('[#353] 附加组件基础设置区浏览器回归通过（双标签/标量数组对象/清覆盖/失败反馈）')
   console.log('[#467] 附加分页推送链路滚动与焦点保持通过（复选框/功能开关/数组保存 × 中部滚动）')

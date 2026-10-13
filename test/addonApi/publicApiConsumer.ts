@@ -87,6 +87,7 @@ import type {
   AddonLocalizedText,
   AddonSettingDefinition,
   AddonSettingGroup,
+  AddonSettingSearchEntry,
   AddonSettingSource,
   AddonSettingValue,
 } from '../../src/shared/addonSettings'
@@ -377,6 +378,11 @@ export const groupedSettingDefinitions: readonly AddonSettingDefinition[] = [
 ]
 export const settingGroupDeclarations: readonly AddonSettingGroup[] = [
   { key: 'appearance', title: { 'zh-cn': '外观', en: 'Appearance' }, description: '观感相关' },
+]
+/** #472 搜索摘要条目（definitions 的元素形状）：title 非空直值、可选说明 */
+export const settingSearchEntries: readonly AddonSettingSearchEntry[] = [
+  { key: 'theme', title: '主题', description: '配色主题' },
+  { key: 'flag', title: '开关项' },
 ]
 
 /** 渲染与界面注册形状 */

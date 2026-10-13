@@ -119,7 +119,16 @@ export const addonT04Cases: Array<[string, () => Promise<void>]> = [
     assert(groupedKeys.length === 4, `应 4 条定义带组引用，实际 ${groupedKeys.length}`)
     const declaredKeys = new Set(groups.map((group) => group.key as string))
     assert(defs.every((def) => def.group === undefined || declaredKeys.has(def.group as string)), '定义引用的组键全部已声明（非法引用整批拒绝的注册前置）')
-    console.log('[#472] 设置定义分组声明注册与透传通过（声明序/两形态 title/引用一致）')
+    // 搜索摘要装配点（addons.state 真实载荷——全局索引数据源经生产 wiring 落位）
+    const addonsState = (await vscode.commands.executeCommand('onegayi.vsidian._test.getAddonsState')) as {
+      addons: Array<{ id: string; settingsSearchIndex?: { definitions: Array<Record<string, unknown>>; groups?: Array<Record<string, unknown>> } }>
+    }
+    const index = addonsState.addons.find((item) => item.id === ADDON_ID)?.settingsSearchIndex
+    assert(index !== undefined, '已注册有定义组件的 addons.state 应携带 settingsSearchIndex 摘要')
+    assert(index!.definitions.length === 8, `摘要应含全部 8 条定义（title 直用原文），实际 ${index!.definitions.length}`)
+    assert(index!.definitions.some((entry) => entry.key === 'strategy' && entry.title === '空格策略'), '摘要定义 title 直用注册原文')
+    assert(JSON.stringify(index!.groups) === JSON.stringify(groups), '摘要组声明与设置区载荷同一来源（groupsOf）')
+    console.log('[#472] 设置定义分组声明注册与透传通过（声明序/两形态 title/引用一致/搜索摘要装配）')
   }],
 
   ['附加组件 T04：分层写入、生效切换与变化事件时序（#353）', async () => {

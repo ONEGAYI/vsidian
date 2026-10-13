@@ -1567,6 +1567,13 @@ export interface AddonSettingGroup {
   description?: AddonLocalizedText
 }
 
+/** 分组声明的搜索摘要条目（#472 定义级：进全局搜索索引的轻量形状） */
+export interface AddonSettingSearchEntry {
+  key: string
+  title: string
+  description?: string
+}
+
 /** 全组件设置搜索索引（#472：addons.state 携带，webview 据此建全局搜索条目） */
 export interface AddonSettingsSearchIndex {
   /** 定义摘要（注册序；object 字段级不进——定义级即止） */
@@ -1655,6 +1662,16 @@ export function isAddonSettingGroupDeclaration(value: unknown): value is AddonSe
   if (!(typeof value.key === 'string' && value.key.length > 0)) return false
   if (!isUsableLocalizedText(value.title)) return false
   if (value.description !== undefined && !isUsableLocalizedText(value.description)) return false
+  return true
+}
+
+/** 搜索摘要条目形状守卫（#472）：key/title 非空字符串、description 可选——
+ *  协议侧 addons.state 载荷校验与类型同一口径（不另建手写分支） */
+export function isAddonSettingSearchEntry(value: unknown): value is AddonSettingSearchEntry {
+  if (!isRecord(value)) return false
+  if (!(typeof value.key === 'string' && value.key.length > 0)) return false
+  if (!(typeof value.title === 'string' && value.title.length > 0)) return false
+  if (value.description !== undefined && typeof value.description !== 'string') return false
   return true
 }
 

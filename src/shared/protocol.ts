@@ -17,7 +17,7 @@ import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './ed
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
 import { isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
-import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingStoredValue } from './addonSettings'
+import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -5644,9 +5644,7 @@ function isAddonSettingsSearchIndex(v: unknown): v is import('./addonIdentity').
   if (!isObject(v) || !Array.isArray(v.definitions)) {
     return false
   }
-  const entryOk = (entry: unknown): boolean =>
-    isObject(entry) && isString(entry.key) && isString(entry.title) && (entry.description === undefined || isString(entry.description))
-  if (!(v.definitions as unknown[]).every(entryOk)) return false
+  if (!(v.definitions as unknown[]).every(isAddonSettingSearchEntry)) return false
   if (v.groups === undefined) return true
   if (!Array.isArray(v.groups)) return false
   return (v.groups as unknown[]).every(isAddonSettingGroupDeclaration)

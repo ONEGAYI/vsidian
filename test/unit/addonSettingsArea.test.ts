@@ -986,4 +986,37 @@ describe('#472 跨组件定位（focusEntry：addon:<id>/def:<键> 与 addon:<id
       vi.useRealTimers()
     }
   })
+
+  it('挂起定位应答晚于退场时限：消费时按挂起目标重立定位并重排退场', () => {
+    vi.useFakeTimers()
+    const spy = scrollIntoViewSpy()
+    try {
+      const h = makeView()
+      h.dispatch(addonsState([{
+        id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true,
+        settingsSearchIndex: {
+          definitions: GROUPED_DEFS.map((def) => ({ key: def.key as string, title: def.title as string })),
+          groups: [{ key: 'appearance', title: '外观' }],
+        },
+      }]))
+      locateBySearch(h, '主题')
+      expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: ADDON_ID })
+      // 应答慢于退场时限：mount 时排定的退场已 fire，定位态被清
+      vi.advanceTimersByTime(1600)
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+      // 应答到达：按挂起目标重立（高亮寿命从定位渲染起算，不从发请求起算）
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      const row = h.parent.querySelector('[data-addon-setting="theme"]')?.closest('.vsidian-addons-setting-item')
+      expect(row?.classList.contains('vsidian-settings-item-located')).toBe(true)
+      expect(spy.calls).toContain(row)
+      // 重排的退场到期后摘除，此后推送不重现
+      vi.advanceTimersByTime(1500)
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+    } finally {
+      spy.restore()
+      vi.useRealTimers()
+    }
+  })
 })

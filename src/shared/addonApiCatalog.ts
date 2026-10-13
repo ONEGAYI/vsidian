@@ -780,7 +780,7 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonSettings.ts',
-        symbols: ['AddonSettingDefinition', 'AddonSettingValue', 'AddonScalarItemSpec', 'AddonLocalizedText', 'AddonSettingGroup', 'AddonSettingsSearchIndex', 'isAddonSettingDefinition', 'isAddonSettingGroupDeclaration', 'addonSettingValueMatches'],
+        symbols: ['AddonSettingDefinition', 'AddonSettingValue', 'AddonScalarItemSpec', 'AddonLocalizedText', 'AddonSettingGroup', 'AddonSettingSearchEntry', 'AddonSettingsSearchIndex', 'isAddonSettingDefinition', 'isAddonSettingGroupDeclaration', 'isAddonSettingSearchEntry', 'addonSettingValueMatches'],
       },
     ],
     purpose:

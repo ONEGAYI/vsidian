@@ -184,6 +184,16 @@ function definitionBaseValid(value: Record<string, unknown>): boolean {
   return true
 }
 
+/** 搜索摘要条目形状守卫（#472）：key/title 非空字符串、description 可选——
+ *  协议侧 addons.state 载荷校验与类型同一口径（不另建手写分支） */
+export function isAddonSettingSearchEntry(value: unknown): value is AddonSettingSearchEntry {
+  if (!isRecord(value)) return false
+  if (!(typeof value.key === 'string' && value.key.length > 0)) return false
+  if (!(typeof value.title === 'string' && value.title.length > 0)) return false
+  if (value.description !== undefined && typeof value.description !== 'string') return false
+  return true
+}
+
 /**
  * 分组声明形状守卫（#472）：key 非空字符串；title 经多语言文本守卫；
  * description 可选、同守卫。组键唯一性与定义引用合法性由服务层注册批

@@ -20,7 +20,7 @@ import { t, currentLocaleLang } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import { splitAddonArrayPasteText } from '../shared/addonSettings'
 import { resolveLocalizedText } from '../shared/localizedText'
-import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
+import type { AddonSettingDefinition, AddonSettingGroup, AddonSettingValue } from '../shared/addonSettings'
 import { groupIcon, type SettingsPageBridge, type SettingsPageSection } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
 import { captureSectionRebuildAnchor, restoreSectionRebuildAnchor, captureLocalFocusKey, restoreLocalFocusKey, REBUILD_FOCUS_ATTR } from './sectionRebuildGuard'
@@ -76,6 +76,9 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
   /** #472 跨组件定位挂起（目标组件设置区未开：已发 settingsOpen，等
    *  settingsState 应答渲染后定位；只消费一次——此后常规推送不重现） */
   private pendingFocus: AddonFocusTarget | undefined
+  /** #472 挂起定位的消费渲染标记（一次读一次清）：消费渲染等价显式定位
+   *  ——跳过 #467 滚动/焦点守卫，否则 restore 会把 scrollIntoView 写回 */
+  private consumingPendingFocus = false
   /** #472 定位高亮目标（退场时限内推送重渲染保持——定位后排定一次性
    *  退场（#462 语义），摘除高亮类时一并清空；时限外推送不再重现） */
   private locatedTarget: AddonFocusTarget | undefined
@@ -160,9 +163,16 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       }
       this.settingsState = message
       // #472 挂起定位消费：目标组件设置区已开（settingsOpen 应答到达）——
-      // 本次渲染按 locatedTarget 定位；pending 清空（此后推送不重现）
+      // 本次渲染按定位语义走（等价显式 focusEntry）；pending 清空（此后
+      // 推送不重现）。应答晚于退场时限到达时定位态已被清——按挂起目标
+      // 重立并重排退场（高亮寿命从定位渲染起算，不从发请求起算）
       if (this.pendingFocus !== undefined && message.open === this.pendingFocus.addonId) {
+        if (this.locatedTarget === undefined) {
+          this.locatedTarget = this.pendingFocus
+          this.scheduleLocatedFade()
+        }
         this.pendingFocus = undefined
+        this.consumingPendingFocus = true
       }
       this.render()
     }
@@ -205,14 +215,20 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       return
     }
     // #467 同分页推送重渲染保持滚动与焦点（守卫说明见 sectionRebuildGuard）；
-    // 显式定位渲染（focusEntry 在场）不恢复——定位语义优先
-    const anchor = focusEntry === undefined ? captureSectionRebuildAnchor(parent) : undefined
+    // 显式定位渲染（focusEntry 在场）不恢复——定位语义优先；#472 挂起定位
+    // 的消费渲染同豁免（consumed 一次读一次清），否则 restore 把定位滚动写回
+    const locating = focusEntry !== undefined || this.consumingPendingFocus
+    this.consumingPendingFocus = false
+    const anchor = locating ? undefined : captureSectionRebuildAnchor(parent)
     parent.replaceChildren()
     // ---- 组件详情：基础设置区打开（settingsState.open）或组件设置页挂载
     //      在场（openAddonSettingsPage，设置区未承载时的 T02 回退） ----
     const settingsArea = this.renderSettingsArea(focusEntry)
     if (settingsArea) {
       parent.append(settingsArea)
+      // #472 def/group 定位滚动须在挂载后（渲染函数返回前 scrollIntoView
+      // 作用于游离子树，无可滚动祖先——真实布局下不滚动）
+      settingsArea.querySelector('.vsidian-settings-item-located')?.scrollIntoView?.({ block: 'nearest' })
     } else if (this.state && this.addonSettingsHost) {
       const openId = this.state.openAddonSettingsPage ?? null
       const openEntry = openId === null ? undefined : this.state.addons.find((entry) => entry.id === openId)
@@ -359,9 +375,16 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
 
     // 控件组（#472 分组呈现）：首容器无组标题——功能开关行恒居首 + 未分组
     // 定义聚拢（按注册序）；组容器按声明序随后（组标题档位 + 组内定义按
-    // 注册序聚拢不散插；空组仍渲染）。无组声明时单容器平铺（向后兼容）
+    // 注册序聚拢不散插；空组仍渲染）。无组声明时单容器平铺（向后兼容）。
+    // 宿主注册批已保证组键唯一，重复键只可能来自损坏载荷——按首见去重，
+    // 防同一定义在同名组卡片重复渲染
     const definitions = payload.addon.definitions
-    const declaredGroups = payload.addon.groups ?? []
+    const declaredGroups: AddonSettingGroup[] = []
+    for (const group of payload.addon.groups ?? []) {
+      if (!declaredGroups.some((seen) => seen.key === group.key)) {
+        declaredGroups.push(group)
+      }
+    }
     // #472 定位落点（目标组件匹配时）：def 级描定义行、group 级描组容器
     //（互斥——落点唯一；渲染循环内按 key 比对标记，避免选择器转义）
     const located = this.locatedTarget
@@ -380,14 +403,11 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       empty.textContent = t('addons.settingsEmpty')
       firstGroup.append(empty)
     }
-    let locatedRow: HTMLElement | undefined
-    let locatedCard: HTMLElement | undefined
     for (const def of definitions) {
       if (belongsToFirst(def)) {
         const row = this.renderDefinitionRow(payload.addon, def)
         if (locatedRowOf(def)) {
           row.classList.add('vsidian-settings-item-located')
-          locatedRow = row
         }
         firstGroup.append(row)
       }
@@ -408,25 +428,17 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       }
       if (located !== undefined && located.kind === 'group' && located.addonId === payload.addon.addonId && located.key === group.key) {
         card.classList.add('vsidian-settings-item-located')
-        locatedCard = card
       }
       for (const def of definitions) {
         if (def.group === group.key) {
           const row = this.renderDefinitionRow(payload.addon, def)
           if (locatedRowOf(def)) {
             row.classList.add('vsidian-settings-item-located')
-            locatedRow = row
           }
           card.append(row)
         }
       }
       area.append(card)
-    }
-    // 组装完成后再滚动（行已入文档；对齐既有 nearest 口径）
-    if (locatedCard !== undefined) {
-      locatedCard.scrollIntoView?.({ block: 'nearest' })
-    } else if (locatedRow !== undefined) {
-      locatedRow.scrollIntoView?.({ block: 'nearest' })
     }
 
     // 保存反馈（notice 由宿主应答推送；常规推送清空——不残留旧结局）
