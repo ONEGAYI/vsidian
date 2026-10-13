@@ -19,6 +19,12 @@
 // data-rebuild-focus="<分页内唯一键>"；capture 只认渲染前焦点落在分页
 // 内且带该键的控件，restore 按 CSS 选择器找同键控件（键含特殊字符经
 // CSS.escape 转义）。
+//
+// 键的取舍边界（评审落档）：无稳定标识的行控件（数组行、索引排除模式
+// 行）以位置做键——删行后恢复到新 DOM 等价位置的控件，连续操作符合
+// 直觉；重复值场景无法用值做唯一键。自由文本输入框（数组项、对象字
+// 段、模式行）不持键：打字中到达的宿主推送重建会丢焦点（值经草稿态
+// 恢复不丢数据），焦点保持只覆盖触发重建的按钮类操作。
 
 /** 焦点恢复锚点属性（各分页设置控件键时引用，避免拼写漂移） */
 export const REBUILD_FOCUS_ATTR = 'data-rebuild-focus'
@@ -63,4 +69,22 @@ function cssEscape(value: string): string {
   return typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
     ? CSS.escape(value)
     : value.replace(/["\\]/g, '\\$&')
+}
+
+/** 局部重建（数组行等不涉滚动容器的小块）的焦点键快照：渲染前焦点不
+ *  在容器内或不带键时为 null（调用方重建后按键恢复） */
+export function captureLocalFocusKey(container: HTMLElement): string | null {
+  const active = document.activeElement
+  return active instanceof HTMLElement && container !== active && container.contains(active)
+    ? active.getAttribute(REBUILD_FOCUS_ATTR)
+    : null
+}
+
+/** 局部重建后按键恢复焦点（preventScroll，不引入焦点滚动）；键为 null
+ *  时无操作 */
+export function restoreLocalFocusKey(container: HTMLElement, key: string | null): void {
+  if (key === null) {
+    return
+  }
+  container.querySelector<HTMLElement>(`[${REBUILD_FOCUS_ATTR}="${cssEscape(key)}"]`)?.focus({ preventScroll: true })
 }

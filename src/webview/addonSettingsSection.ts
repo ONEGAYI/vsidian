@@ -28,7 +28,7 @@ import {
 import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
 import { groupIcon, type SettingsPageBridge, type SettingsPageSection, type SettingsSidebarGroup } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
-import { captureSectionRebuildAnchor, restoreSectionRebuildAnchor, REBUILD_FOCUS_ATTR } from './sectionRebuildGuard'
+import { captureSectionRebuildAnchor, restoreSectionRebuildAnchor, captureLocalFocusKey, restoreLocalFocusKey, REBUILD_FOCUS_ATTR } from './sectionRebuildGuard'
 
 type AddonsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.state' }>
 type AddonSettingsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.settingsState' }>
@@ -692,7 +692,7 @@ export class AddonSection implements SettingsPageSection {
         }),
         this.button(t('addons.retryFaulted'), () => {
           this.send({ kind: 'addons.retry', addonId: payload.addon!.addonId })
-        }, 'vsidian-addons-retry', { [REBUILD_FOCUS_ATTR]: `retry:${payload.addon!.addonId}` }),
+        }, 'vsidian-addons-retry', { [REBUILD_FOCUS_ATTR]: `settings-retry:${payload.addon!.addonId}` }),
       )
       troubleshoot.append(faultTitle, reason, hint, faultActions)
       area.append(troubleshoot)
@@ -860,6 +860,9 @@ export class AddonSection implements SettingsPageSection {
     const rows = document.createElement('div')
     rows.className = 'vsidian-addons-array-rows'
     const renderRows = (): void => {
+      // #467 局部重建焦点保持：数组行不经 section render 守卫，移除/
+      // 追加行后按位置键把焦点回到等价控件（键盘删行不落 BODY）
+      const focusKey = captureLocalFocusKey(rows)
       rows.replaceChildren()
       draft.forEach((value, index) => {
         const row = document.createElement('div')
@@ -872,10 +875,11 @@ export class AddonSection implements SettingsPageSection {
             draft.splice(index, 1)
             this.drafts.set(def.key, [...draft])
             renderRows()
-          }, 'vsidian-addons-array-remove'),
+          }, 'vsidian-addons-array-remove', { [REBUILD_FOCUS_ATTR]: `array-remove:${def.key}:${index}` }),
         )
         rows.append(row)
       })
+      restoreLocalFocusKey(rows, focusKey)
     }
     renderRows()
     const actions = document.createElement('div')

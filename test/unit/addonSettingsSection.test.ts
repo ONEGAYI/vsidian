@@ -746,4 +746,90 @@ describe('推送重渲染的滚动与焦点保持（#467）', () => {
       harness.view.dispose()
     }
   })
+
+  it('数组定义行键盘移除：局部重建后焦点回到等价位置的移除按钮（不落 BODY）', () => {
+    const harness = makeView()
+    document.body.append(harness.parent)
+    try {
+      openAddonsPage(harness)
+      harness.dispatch(addonsState([
+        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      ]))
+      const message = {
+        kind: 'addons.settingsState',
+        apiVersion: '1.0.0',
+        draft: true,
+        open: 'fixture.demo',
+        hasWorkspace: false,
+        addon: {
+          addonId: 'fixture.demo',
+          label: 'Demo',
+          faulted: false,
+          hasCustomPage: false,
+          enabled: { effective: true, userExplicit: null, workspaceExplicit: null, source: 'default' },
+          definitions: [{ key: 'words', title: '词表', type: 'array', items: { kind: 'string' }, default: ['甲', '乙', '丙'] }],
+          values: { words: { effective: ['甲', '乙', '丙'], source: 'default' } },
+        },
+        openAddonSettingsPage: null,
+      }
+      if (!isHostToWebview(message)) {
+        throw new Error('addons.settingsState 载荷未通过协议守卫')
+      }
+      harness.dispatch(message)
+      const rows = harness.parent.querySelectorAll('.vsidian-addons-array-row')
+      expect(rows.length).toBe(3)
+      const removeButtons = harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-array-remove')
+      removeButtons[1]!.focus() // 键盘场景：焦点在第二行移除按钮上按 Enter
+      removeButtons[1]!.click()
+      const afterRows = harness.parent.querySelectorAll('.vsidian-addons-array-row')
+      expect(afterRows.length).toBe(2)
+      // 焦点不丢到 BODY：回到重建后同位置的移除按钮（值序列为 甲/丙）
+      expect(document.activeElement?.classList.contains('vsidian-addons-array-remove')).toBe(true)
+      expect(document.activeElement?.closest('.vsidian-addons-array-row')?.querySelector('input')?.value).toBe('丙')
+    } finally {
+      harness.parent.remove()
+      harness.view.dispose()
+    }
+  })
+
+  it('故障组件行与设置区排障块的重试按钮焦点键互不碰撞（分页内唯一）', () => {
+    const harness = makeView()
+    document.body.append(harness.parent)
+    try {
+      openAddonsPage(harness)
+      harness.dispatch(addonsState([
+        { id: 'a.broken', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'setup 异常：bad' }, hasSettingsDefinitions: true },
+      ]))
+      const settingsState = {
+        kind: 'addons.settingsState',
+        apiVersion: '1.0.0',
+        draft: true,
+        open: 'a.broken',
+        hasWorkspace: false,
+        addon: {
+          addonId: 'a.broken',
+          label: 'Broken',
+          faulted: true,
+          faultReason: 'setup 异常：bad',
+          hasCustomPage: false,
+          enabled: { effective: true, userExplicit: true, workspaceExplicit: null, source: 'user' },
+          definitions: [],
+          values: {},
+        },
+        openAddonSettingsPage: null,
+      }
+      if (!isHostToWebview(settingsState)) {
+        throw new Error('addons.settingsState 载荷未通过协议守卫')
+      }
+      harness.dispatch(settingsState)
+      const keys = [...harness.parent.querySelectorAll('[data-rebuild-focus]')]
+        .map((el) => el.getAttribute('data-rebuild-focus'))
+      const retryKeys = keys.filter((k) => k !== null && k.endsWith('a.broken') && k.includes('retry'))
+      expect(retryKeys.length).toBe(2) // 列表行 + 设置区排障块
+      expect(new Set(retryKeys).size).toBe(2) // 键互不相同：焦点恢复不歧义
+    } finally {
+      harness.parent.remove()
+      harness.view.dispose()
+    }
+  })
 })
