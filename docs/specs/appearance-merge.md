@@ -99,3 +99,5 @@
 **契约基线**：公开入口 `.vsidian-mermaid`、`.vsidian-mermaid svg`、`.vsidian-reading-mermaid` 与错误态族保持原义。公开样式历史基线为 v0.4.0 / `75c3df79074bdeaec0f02a38d40124f0cd66f857`；本次开发基线为 `0fc0388490680c502a5ab4d4e287aade1a6adcee`。SVG 内部节点仍属第三方私有 DOM；未新增公开选择器或变量，未修改历史基线。新增模块分块只改变内部装载形态。
 
 **验证入口**：`appearanceSettings` / `settingsService` / `mermaidRender` 单测覆盖入口、保存与缓存；浏览器 `settingsPage` 和 `graphicPopup` 覆盖实际颜色、文字墨迹字重、折线、双模式、CSP、导出、显式样式和非流程图回归；真宿主「Mermaid Codex 预设」用例覆盖设置广播、绘制与重开。用户视觉验收仍待执行。
+
+**包体预算**：2026-10-13 用户确认总量警告线/上限调整为 14.5/15.0 MiB，单文件上限仍为 4 MiB。候选 VSIX 解压约 13.80 MiB；阈值事实源与发布技能同步维护，修改未涉及对外发布授权。

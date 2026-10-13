@@ -31,8 +31,10 @@ export const SIZE_LIMITS = {
   // #339（P3-07）textLayer/字体等 PDF 交互资产预留——2026-10-04 用户
   // 二次裁决：两条线各上调 2 MB（警告线 11.0→13.0 MB、失败线
   // 11.5→13.5 MB，单文件仍不动）。
-  totalWarnBytes: 13.0 * 1024 * 1024,
-  totalMaxBytes: 13.5 * 1024 * 1024,
+  // Codex 流程图增加本地 ELK 分块，实际包约 13.80 MiB；2026-10-13 用户
+  // 授权总量两线各上调 1.5 MiB，单文件 4 MiB 红线保持。
+  totalWarnBytes: 14.5 * 1024 * 1024,
+  totalMaxBytes: 15.0 * 1024 * 1024,
   // 一般单文件：mermaid.js（刻意 vendored 的独立产物，minify 后实测
   // 2,727,077 B ≈ 2.60 MB）是最大单项，警告线 3 MB 在其上留小余量、
   // 失败线 4 MB 拦截意外超大文件（如误升 mermaid 12.x 的 5.3 MB 产物）。

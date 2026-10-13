@@ -257,6 +257,23 @@ test('VSIX 检查：完整合法集合通过且零警告（#60 后单文件警�
   assert.deepEqual(result.warnings, [])
 })
 
+test('Codex ELK 包体预算：13.80 MiB 零警告，单文件红线仍为 4 MiB', () => {
+  const entries = makeEntries()
+  const targetBytes = Math.ceil(13.80 * 1024 * 1024)
+  let remaining = targetBytes - entries.reduce((total, entry) => total + entry.size, 0)
+  for (let i = 0; remaining > 0; i++) {
+    const size = Math.min(remaining, 2 * 1024 * 1024)
+    entries.push({ size, name: `extension/out/webview/pdfjs/cmaps/budget-${i}.bcmap` })
+    remaining -= size
+  }
+  const result = inspectVsixEntries(entries)
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.warnings, [])
+  assert.equal(SIZE_LIMITS.totalWarnBytes, 14.5 * 1024 * 1024)
+  assert.equal(SIZE_LIMITS.totalMaxBytes, 15.0 * 1024 * 1024)
+  assert.equal(SIZE_LIMITS.fileMaxBytes, 4 * 1024 * 1024)
+})
+
 test('VSIX 检查：Mermaid 分块允许散列 JS，缺少整组或混入调试文件仍拒绝', () => {
   const entries = makeEntries()
   assert.equal(inspectVsixEntries(entries).ok, true)
