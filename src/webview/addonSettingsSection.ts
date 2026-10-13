@@ -879,7 +879,12 @@ export class AddonSection implements SettingsPageSection {
         )
         rows.append(row)
       })
-      restoreLocalFocusKey(rows, focusKey)
+      // 末行（或唯一行）删除后无同键位置：回退到新末行的移除按钮，键盘
+      // 连续删除不断流；数组删空时容器内无可聚焦控件，焦点回落 BODY
+      if (focusKey !== null && !restoreLocalFocusKey(rows, focusKey)) {
+        const removes = rows.querySelectorAll<HTMLElement>('.vsidian-addons-array-remove')
+        removes[removes.length - 1]?.focus({ preventScroll: true })
+      }
     }
     renderRows()
     const actions = document.createElement('div')

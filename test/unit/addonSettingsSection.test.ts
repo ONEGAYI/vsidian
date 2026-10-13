@@ -792,6 +792,49 @@ describe('推送重渲染的滚动与焦点保持（#467）', () => {
     }
   })
 
+  it('数组定义行键盘移除末行：精确键无同位控件时回退到新末行的移除按钮', () => {
+    const harness = makeView()
+    document.body.append(harness.parent)
+    try {
+      openAddonsPage(harness)
+      harness.dispatch(addonsState([
+        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      ]))
+      const message = {
+        kind: 'addons.settingsState',
+        apiVersion: '1.0.0',
+        draft: true,
+        open: 'fixture.demo',
+        hasWorkspace: false,
+        addon: {
+          addonId: 'fixture.demo',
+          label: 'Demo',
+          faulted: false,
+          hasCustomPage: false,
+          enabled: { effective: true, userExplicit: null, workspaceExplicit: null, source: 'default' },
+          definitions: [{ key: 'words', title: '词表', type: 'array', items: { kind: 'string' }, default: ['甲', '乙', '丙'] }],
+          values: { words: { effective: ['甲', '乙', '丙'], source: 'default' } },
+        },
+        openAddonSettingsPage: null,
+      }
+      if (!isHostToWebview(message)) {
+        throw new Error('addons.settingsState 载荷未通过协议守卫')
+      }
+      harness.dispatch(message)
+      const removeButtons = harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-array-remove')
+      removeButtons[2]!.focus() // 键盘焦点在末行（第三行）移除按钮
+      removeButtons[2]!.click()
+      const afterRows = harness.parent.querySelectorAll('.vsidian-addons-array-row')
+      expect(afterRows.length).toBe(2)
+      // 末行删除后无同索引位置：回退到新末行（原第二行）的移除按钮
+      expect(document.activeElement?.classList.contains('vsidian-addons-array-remove')).toBe(true)
+      expect(document.activeElement?.closest('.vsidian-addons-array-row')?.querySelector('input')?.value).toBe('乙')
+    } finally {
+      harness.parent.remove()
+      harness.view.dispose()
+    }
+  })
+
   it('故障组件行与设置区排障块的重试按钮焦点键互不碰撞（分页内唯一）', () => {
     const harness = makeView()
     document.body.append(harness.parent)

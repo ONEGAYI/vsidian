@@ -22,9 +22,12 @@
 //
 // 键的取舍边界（评审落档）：无稳定标识的行控件（数组行、索引排除模式
 // 行）以位置做键——删行后恢复到新 DOM 等价位置的控件，连续操作符合
-// 直觉；重复值场景无法用值做唯一键。自由文本输入框（数组项、对象字
-// 段、模式行）不持键：打字中到达的宿主推送重建会丢焦点（值经草稿态
-// 恢复不丢数据），焦点保持只覆盖触发重建的按钮类操作。
+// 直觉；数组行的局部恢复在无同键位置（末行删除）时由调用方回退到
+// 新末行的移除按钮。重复值场景无法用值做唯一键。自由文本输入框（数组
+// 项、对象字段、模式行）不持键：打字中到达的宿主推送重建会丢焦点（值
+// 经草稿态恢复不丢数据），焦点保持只覆盖触发重建的按钮类操作；同键
+// 控件重建后不可聚焦（如索引模式末空行的 disabled 按钮）时按未命中
+// 处理。
 
 /** 焦点恢复锚点属性（各分页设置控件键时引用，避免拼写漂移） */
 export const REBUILD_FOCUS_ATTR = 'data-rebuild-focus'
@@ -81,10 +84,14 @@ export function captureLocalFocusKey(container: HTMLElement): string | null {
 }
 
 /** 局部重建后按键恢复焦点（preventScroll，不引入焦点滚动）；键为 null
- *  时无操作 */
-export function restoreLocalFocusKey(container: HTMLElement, key: string | null): void {
+ *  或容器内无同键控件时返回 false（调用方可回退到场景内可聚焦控件）；
+ *  同键控件存在但不可聚焦（如 disabled）时 focus 无效，同样按未命中
+ *  处理返回值不区分 */
+export function restoreLocalFocusKey(container: HTMLElement, key: string | null): boolean {
   if (key === null) {
-    return
+    return false
   }
-  container.querySelector<HTMLElement>(`[${REBUILD_FOCUS_ATTR}="${cssEscape(key)}"]`)?.focus({ preventScroll: true })
+  const el = container.querySelector<HTMLElement>(`[${REBUILD_FOCUS_ATTR}="${cssEscape(key)}"]`)
+  el?.focus({ preventScroll: true })
+  return el !== null
 }
