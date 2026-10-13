@@ -106,7 +106,7 @@ async function docText(name: string): Promise<string> {
 
 /** view.state 探针的 addonBehaviors 面（requestViewState 触发面板回报） */
 async function behaviorStats(file: string): Promise<{
-  registrations: Array<{ addonId: string; id: string; name: string; exclusiveGroup?: string; history?: string }>
+  registrations: Array<{ addonId: string; id: string; name: string | Record<string, string>; exclusiveGroup?: string; history?: string }>
   hostState: { order: string[]; disabled: string[] } | null
   counters: { drives: number; drivesSkippedWhileRunning: number; callbackErrors: number; submitsRejected: number }
   trace: Array<{ behaviorKey: string; opId: string; outcome: string }>

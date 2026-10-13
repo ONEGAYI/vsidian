@@ -13,7 +13,7 @@
 // - catalog 输出按完整键稳定排序（多组件合表；与默认序同键序，设置页
 //   再按用户覆盖排出展示全序）。
 // - 变化通知仅在目录内容实际变化后投递（等值重报不打扰——推送节流）。
-import type { AddonBehaviorInfo } from '../../shared/addonBehaviors'
+import type { AddonBehaviorInfo, AddonBehaviorName } from '../../shared/addonBehaviors'
 
 export interface AddonBehaviorCatalogPorts {
   /** 组件当前运行态（addonRuntime.runtimeStatus 同源；未注册为 undefined） */
@@ -82,6 +82,23 @@ export class AddonBehaviorCatalogService {
   }
 }
 
+/** 行为名等值（#464 多语言形态）：两边同为 string 直比；两边同为映射按
+ * 「规整键 → 值」逐项比较（键规整 trim+小写、排序后比较——与插入序及
+ * 键大小写写法无关）；string 与映射形态不同即不等值 */
+function sameBehaviorName(a: AddonBehaviorName, b: AddonBehaviorName): boolean {
+  if (typeof a === 'string' || typeof b === 'string') {
+    return a === b
+  }
+  const entriesOf = (name: AddonBehaviorName) =>
+    Object.entries(name)
+      .map(([key, value]) => [key.trim().toLowerCase(), value] as const)
+      .sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))
+  const ea = entriesOf(a)
+  const eb = entriesOf(b)
+  return ea.length === eb.length &&
+    ea.every(([key, value], index) => key === eb[index]![0] && value === eb[index]![1])
+}
+
 function sameTable(a: readonly AddonBehaviorInfo[], b: readonly AddonBehaviorInfo[]): boolean {
   if (a.length !== b.length) {
     return false
@@ -90,7 +107,7 @@ function sameTable(a: readonly AddonBehaviorInfo[], b: readonly AddonBehaviorInf
     const other = b[index]!
     return entry.addonId === other.addonId &&
       entry.id === other.id &&
-      entry.name === other.name &&
+      sameBehaviorName(entry.name, other.name) &&
       entry.description === other.description &&
       entry.exclusiveGroup === other.exclusiveGroup &&
       entry.history === other.history &&
