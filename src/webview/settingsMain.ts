@@ -13,6 +13,8 @@ import { IndexMaintenanceSection } from './indexMaintenanceSettings'
 import { WordSegmentSection } from './wordSegmentSettings'
 import { DefaultEditorSection } from './defaultEditorSettings'
 import { AddonSection } from './addonSettingsSection'
+import { AddonBehaviorManageSection } from './addonBehaviorManageSection'
+import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from './addonSettingsAreaSection'
 import { installAddonPageLoader, type AddonPageLoaderHandle } from './addonPageLoader'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
@@ -73,20 +75,35 @@ const defaultEditor = new DefaultEditorSection({ postMessage: (message) => vscod
 // 推送后经 onSidebarChange 触发视图 refreshSidebar 重建侧栏——经中转
 // 函数接线，view 构造晚于分页实例）
 let refreshSidebar: () => void = () => {}
+let navigateToAddonSettings: () => void = () => {}
 const addons = new AddonSection(
   { postMessage: (message) => vscode.postMessage(message) },
-  addonSettingsHost,
   () => refreshSidebar(),
+  () => navigateToAddonSettings(),
+)
+// #465/#466 输入行为管理独立分页：跨组件行为仲裁面自附加组件页迁出
+// （原「行为冲突管理」更名；行为目录与组件状态推送在此消费——侧栏无
+// 大组贡献，不接 refreshSidebar）
+const addonBehaviors = new AddonBehaviorManageSection({ postMessage: (message) => vscode.postMessage(message) })
+// #465 组件设置独立分页：基础设置区（T04）与组件设置页挂载（T02）的
+// 唯一承载方——附加组件页通道堵死后，addons.settingsState /
+// openAddonSettingsPage 在此消费（addonSettingsHost 装载器容器随迁）
+const addonSettingsArea = new AddonSettingsAreaSection(
+  { postMessage: (message) => vscode.postMessage(message) },
+  addonSettingsHost,
 )
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
-  [keybindings, appearance, indexMaintenance, addons],
+  [keybindings, appearance, indexMaintenance, addons, addonBehaviors, addonSettingsArea],
   [wordSegment],
   [defaultEditor],
 )
 refreshSidebar = () => view.refreshSidebar()
+// 微任务延迟与 ui-patterns §2.1 契约及单测 harness 同口径：AddonSection.mount
+// 内触发导航时避免在外层 renderContent 调用栈里嵌套 view.render
+navigateToAddonSettings = () => queueMicrotask(() => view.selectSection(ADDON_SETTINGS_SECTION_ID))
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })
 vscode.postMessage({ kind: 'keybindings.get' })
@@ -155,5 +172,11 @@ window.addEventListener('message', (event) => {
   wordSegment.handleHostMessage(event.data)
   defaultEditor.handleHostMessage(event.data)
   addons.handleHostMessage(event.data)
+  // #465 输入行为管理分页：消费 addons.behaviors（行为目录/用户覆盖）与
+  // addons.state（行为行的所属组件显示名与停用/故障徽章）
+  addonBehaviors.handleHostMessage(event.data)
+  // #465 组件设置分页：消费 addons.settingsState（基础设置区）与
+  // addons.state（组件清单与挂载回退）
+  addonSettingsArea.handleHostMessage(event.data)
   handleLocaleChangedMessage(event.data)
 })

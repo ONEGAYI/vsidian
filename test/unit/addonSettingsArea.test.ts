@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// #353 T04 设置页「附加组件」分页的基础设置区契约测试：双标签作用范围、
-// 标量/数组/对象基础控件、来源徽章、「使用用户默认」清除覆盖、保存反馈
-// （失败不虚报）、无工作区形态、自定义页入口与挂载区合并。
+// #353 T04「组件设置」独立分页（#465 二轮起自附加组件页迁出）：组件清单
+// （hub）与组件详情（基础设置区）两形态、双标签作用范围、标量/数组/对象
+// 基础控件、来源徽章、「使用用户默认」清除覆盖、保存反馈（失败不虚报）、
+// 无工作区形态、自定义页入口与挂载区、T02 回退挂载与故障排障块。
 //
 // 断言对象是用户可见文本与控件行为（消息上送形态），不是 DOM 存在性——
 // 绘制层断言（颜色/可见性）在浏览器套件 test/browser/addonSettings.mjs。
@@ -17,6 +18,8 @@ import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
 import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
 import { AddonSection } from '../../src/webview/addonSettingsSection'
+import { AddonBehaviorManageSection } from '../../src/webview/addonBehaviorManageSection'
+import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from '../../src/webview/addonSettingsAreaSection'
 
 installLocale('zh-cn', zhCn)
 
@@ -24,40 +27,55 @@ const ADDON_ID = 'fixture.demo'
 
 function makeView(addonSettingsHost?: HTMLElement): {
   view: SettingsPageView
+  settingsArea: AddonSettingsAreaSection
   sent: unknown[]
   parent: HTMLElement
   dispatch(message: unknown): void
+  settle(): Promise<void>
 } {
   const sent: unknown[] = []
   const bridge = { postMessage: (m: unknown) => sent.push(m) }
-  const addons = new AddonSection(bridge, addonSettingsHost)
+  // 与生产 settingsMain 同构（#465 导航回调经微任务延迟——mount 内触发
+  // 时不嵌套重渲染）
+  let refreshSidebar: () => void = () => {}
+  let navigateToAddonSettings: () => void = () => {}
+  const addons = new AddonSection(bridge, () => refreshSidebar(), () => navigateToAddonSettings())
+  const behaviors = new AddonBehaviorManageSection(bridge)
+  const settingsArea = new AddonSettingsAreaSection(bridge, addonSettingsHost)
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
       new AppearanceSection(new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge)),
       new IndexMaintenanceSection(bridge),
       addons,
+      behaviors,
+      settingsArea,
     ],
     [], [])
+  refreshSidebar = () => view.refreshSidebar()
+  navigateToAddonSettings = () => queueMicrotask(() => view.selectSection(ADDON_SETTINGS_SECTION_ID))
   const parent = document.createElement('div')
   view.mount(parent)
   return {
-    view, sent, parent,
+    view, settingsArea, sent, parent,
     dispatch: (message) => {
       view.handleHostMessage(message)
       addons.handleHostMessage(message)
+      behaviors.handleHostMessage(message)
+      settingsArea.handleHostMessage(message)
     },
+    settle: () => Promise.resolve(),
   }
 }
 
-function addonsState(entries: Array<Record<string, unknown>>, openSettings?: string | null): HostToWebview {
+function addonsState(entries: Array<Record<string, unknown>>, openAddonSettingsPage?: string | null): HostToWebview {
   const message = {
     kind: 'addons.state',
     apiVersion: '1.0.0',
     draft: true,
     addons: entries,
     openAddonSettingsPage: null,
-    ...(openSettings !== undefined ? { openAddonSettings: openSettings } : {}),
+    ...(openAddonSettingsPage !== undefined ? { openAddonSettingsPage } : {}),
   }
   if (!isHostToWebview(message)) throw new Error('addons.state 载荷未通过协议守卫')
   return message
@@ -135,8 +153,8 @@ function settingsState(options: {
   return message
 }
 
-function openAddonsPage(h: ReturnType<typeof makeView>): void {
-  h.view.selectSection('addons')
+function openSettingsAreaPage(h: ReturnType<typeof makeView>): void {
+  h.view.selectSection(ADDON_SETTINGS_SECTION_ID)
 }
 
 function area(h: ReturnType<typeof makeView>): HTMLElement | null {
@@ -147,27 +165,53 @@ function buttons(h: ReturnType<typeof makeView>, text: string): HTMLButtonElemen
   return [...h.parent.querySelectorAll('button')].filter((b) => b.textContent === text) as HTMLButtonElement[]
 }
 
-describe('T04 设置区：入口与打开', () => {
-  it('hasSettingsDefinitions 的组件显示「设置」按钮；点击上送 addons.settingsOpen', () => {
+describe('组件设置分页：组件清单（hub）与入口', () => {
+  it('hub 呈现可配置组件（有定义或有设置页），点击「设置」上送 settingsOpen', () => {
     const h = makeView()
-    openAddonsPage(h)
-    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true }]))
-    const open = buttons(h, '设置')[0]
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      { id: 'a.page', label: 'Page', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+      { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+    ]))
+    const hub = h.parent.querySelector('.vsidian-addons-settings-hub')!
+    expect(hub).toBeTruthy()
+    const text = hub.textContent ?? ''
+    expect(text).toContain('可配置的组件')
+    expect(text).toContain('Demo')
+    expect(text).toContain('Page')
+    // 纯运行组件不进清单（无可开设置）
+    expect(text).not.toContain('Plain')
+    const open = [...hub.querySelectorAll('button')].find((b) => b.textContent === '设置')!
     expect(open).toBeTruthy()
-    open!.click()
-    expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: ADDON_ID })
+    open.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: 'fixture.demo' })
   })
 
-  it('无定义且无设置页的组件不显示「设置」按钮', () => {
+  it('无可配置组件时 hub 呈现空态（页面结构在场）', () => {
     const h = makeView()
-    openAddonsPage(h)
-    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', enabled: true }]))
-    expect(buttons(h, '设置')).toEqual([])
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+    ]))
+    expect(h.parent.querySelector('.vsidian-addons-settings-hub')).toBeTruthy()
+    expect((h.parent.textContent ?? '')).toContain('暂无可配置的附加组件')
   })
 
+  it('官方组件在 hub 带官方徽章', () => {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: 'onegayi.core', label: 'Core', official: true, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    expect((h.parent.querySelector('.vsidian-addons-settings-hub')?.textContent ?? '')).toContain('Core · 官方')
+  })
+})
+
+describe('T04 设置区：详情形态', () => {
   it('设置区渲染：标题、双标签、全部定义行（用户可见文本）', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
     h.dispatch(settingsState({}))
     const el = area(h)
@@ -183,22 +227,24 @@ describe('T04 设置区：入口与打开', () => {
     expect(text).toContain('对象样例')
   })
 
-  it('关闭按钮上送 addons.settingsClose；open=null 后设置区消失', () => {
+  it('「返回组件列表」上送 addons.settingsClose；open=null 后回到 hub 清单', () => {
     const h = makeView()
-    openAddonsPage(h)
-    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
     h.dispatch(settingsState({}))
-    buttons(h, '关闭基础设置')[0]!.click()
+    buttons(h, '返回组件列表')[0]!.click()
     expect(h.sent).toContainEqual({ kind: 'addons.settingsClose' })
     h.dispatch(settingsState({ open: null }))
     expect(area(h)).toBeNull()
+    // 回到 hub 清单形态（同页两态切换）
+    expect(h.parent.querySelector('.vsidian-addons-settings-hub')).not.toBeNull()
   })
 })
 
 describe('T04 设置区：双标签作用范围', () => {
   it('默认用户默认标签选中；切换工作区标签后保存携带 workspace scope', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({}))
     const tabs = [...h.parent.querySelectorAll('.vsidian-addons-scope-tab')] as HTMLButtonElement[]
@@ -214,7 +260,7 @@ describe('T04 设置区：双标签作用范围', () => {
 
   it('无工作区：工作区标签禁用并显示提示（明确结果，不猜测）', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({ hasWorkspace: false }))
     const tabs = [...h.parent.querySelectorAll('.vsidian-addons-scope-tab')] as HTMLButtonElement[]
@@ -227,7 +273,7 @@ describe('T04 设置区：双标签作用范围', () => {
 describe('T04 设置区：标量基础控件', () => {
   it('boolean/number/enum 控件按定义呈现；修改即按批上送（user 层）', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({}))
     const checkbox = h.parent.querySelector<HTMLInputElement>('input[data-addon-setting="flag"]')
@@ -250,7 +296,7 @@ describe('T04 设置区：标量基础控件', () => {
 
   it('来源徽章按生效来源显示（默认/用户默认/工作区覆盖）', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({}))
     expect((area(h)!.textContent ?? '')).toContain('默认')
@@ -262,7 +308,7 @@ describe('T04 设置区：标量基础控件', () => {
 
   it('控件显示当前标签层的值：workspace 标签下显示覆盖值，user 标签显示用户层值', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({ values: { threshold: { effective: 77, user: 30, workspace: 77, source: 'workspace' } } }))
     // user 标签（默认）：显示用户层值 30
@@ -277,7 +323,7 @@ describe('T04 设置区：标量基础控件', () => {
 describe('T04 设置区：数组与对象基础控件（重复项/字段）', () => {
   it('数组重复项控件：行呈现默认项；添加/移除后经保存按钮整批上送', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({}))
     const rowInputs = () => [...h.parent.querySelectorAll('input[data-addon-array-item="replacements"]')] as HTMLInputElement[]
@@ -293,7 +339,7 @@ describe('T04 设置区：数组与对象基础控件（重复项/字段）', ()
 
   it('对象字段控件：字段行呈现默认值；修改后经保存按钮整批上送', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({}))
     const nameInput = h.parent.querySelector<HTMLInputElement>('input[data-addon-field="limits.name"]')
@@ -312,7 +358,7 @@ describe('T04 设置区：数组与对象基础控件（重复项/字段）', ()
 describe('T04 设置区：使用用户默认（清除覆盖）', () => {
   it('workspace 标签下已覆盖项显示「使用用户默认」；点击上送 settingsClearOverride', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({ values: { threshold: { workspace: 77, source: 'workspace' } } }))
     // user 标签下无清除按钮（覆盖只在工作区标签呈现）
@@ -327,7 +373,7 @@ describe('T04 设置区：使用用户默认（清除覆盖）', () => {
 
   it('功能开关的工作区覆盖同样可清除（clearEnabledOverride）', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({ enabled: { effective: false, userExplicit: false, workspaceExplicit: true, source: 'workspace' } }))
     const tabs = [...h.parent.querySelectorAll('.vsidian-addons-scope-tab')] as HTMLButtonElement[]
@@ -340,7 +386,7 @@ describe('T04 设置区：使用用户默认（清除覆盖）', () => {
 
   it('功能开关随当前标签写入对应层', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({}))
     const toggle = h.parent.querySelector<HTMLInputElement>('input[data-addon-setting="__enabled__"]')
@@ -361,7 +407,7 @@ describe('T04 设置区：使用用户默认（清除覆盖）', () => {
 describe('T04 设置区：保存反馈（失败不虚报）', () => {
   it('notice saved 显示已保存；save-failed 显示原因（值不合法/未知项）', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({ notice: { kind: 'saved', scope: 'user', keys: ['threshold'] } }))
     expect((area(h)!.textContent ?? '')).toContain('已保存')
@@ -375,7 +421,7 @@ describe('T04 设置区：保存反馈（失败不虚报）', () => {
 
   it('常规状态推送（无 notice）清空提示——不残留旧结局', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({ notice: { kind: 'saved', scope: 'user' } }))
     expect((area(h)!.textContent ?? '')).toContain('已保存')
@@ -387,7 +433,7 @@ describe('T04 设置区：保存反馈（失败不虚报）', () => {
 describe('T04 设置区：故障态与自定义页', () => {
   it('故障暂停：显示原因与基础配置提示；自定义页入口消失；控件仍可用', () => {
     const h = makeView()
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
     h.dispatch(settingsState({ faulted: true, faultReason: 'enable 异常：boom', hasCustomPage: false }))
     const text = area(h)!.textContent ?? ''
@@ -404,7 +450,7 @@ describe('T04 设置区：故障态与自定义页', () => {
     mounted.textContent = '组件自定义内容'
     host.appendChild(mounted)
     const h = makeView(host)
-    openAddonsPage(h)
+    openSettingsAreaPage(h)
     h.dispatch(addonsState([
       { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true },
     ], ADDON_ID))
@@ -421,5 +467,136 @@ describe('T04 设置区：故障态与自定义页', () => {
     expect(wrap!.contains(mounted)).toBe(true)
     const close = [...wrap!.querySelectorAll('button')].find((b) => b.textContent === '关闭组件设置页')
     expect(close).toBeTruthy()
+  })
+})
+
+// ---- #351 T02 / #354 T05 / #467：迁自附加组件页的承载类用例（#465 后
+//      挂载与排障块只在「组件设置」分页渲染） ----
+
+describe('组件设置分页：T02 回退挂载与故障排障', () => {
+  it('openAddonSettingsPage 在场（设置区未开）时挂载区独占详情形态', () => {
+    const host = document.createElement('div')
+    const mounted = document.createElement('span')
+    mounted.textContent = '组件内容'
+    host.appendChild(mounted)
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], ADDON_ID))
+    const wrap = h.parent.querySelector('.vsidian-addons-addonpage')
+    expect(wrap).toBeTruthy()
+    expect(wrap!.textContent).toContain('组件设置页：Demo')
+    expect(wrap!.contains(host)).toBe(true)
+    expect(wrap!.contains(mounted)).toBe(true)
+    const close = [...wrap!.querySelectorAll('button')].find((b) => b.textContent === '关闭组件设置页')
+    expect(close).toBeTruthy()
+    close!.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.closeAddonPage' })
+  })
+
+  it('状态推送重渲染只移动 host 节点，不清空组件挂载内容', () => {
+    const host = document.createElement('div')
+    const mounted = document.createElement('span')
+    mounted.textContent = '组件内容'
+    host.appendChild(mounted)
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], ADDON_ID))
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], ADDON_ID))
+    const wrap = h.parent.querySelector('.vsidian-addons-addonpage')
+    expect(wrap).toBeTruthy()
+    expect(wrap!.contains(mounted)).toBe(true)
+  })
+
+  it('openAddonSettingsPage 终结（null）后挂载区消失，host 移出分页但内容保留', () => {
+    const host = document.createElement('div')
+    const mounted = document.createElement('span')
+    mounted.textContent = '组件内容'
+    host.appendChild(mounted)
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], ADDON_ID))
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ], null))
+    expect(h.parent.querySelector('.vsidian-addons-addonpage')).toBeNull()
+    expect(h.parent.contains(host)).toBe(false)
+    expect(host.contains(mounted)).toBe(true)
+  })
+
+  it('设置区故障态呈现排障块：标题、提示、原因、日志与重试入口', () => {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: 'a.broken', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'setup 异常：bad' }, hasSettingsDefinitions: true },
+    ]))
+    h.dispatch(settingsState({ faulted: true, faultReason: 'setup 异常：bad' }))
+    const troubleshoot = h.parent.querySelector('.vsidian-addons-fault-troubleshoot')
+    expect(troubleshoot).toBeTruthy()
+    const text = troubleshoot!.textContent ?? ''
+    expect(text).toContain('组件故障暂停')
+    expect(text).toContain('setup 异常：bad')
+    const faultButtons = [...troubleshoot!.querySelectorAll('button')].map((b) => b.textContent)
+    expect(faultButtons).toContain('查看组件日志')
+    expect(faultButtons).toContain('重试组件')
+  })
+})
+
+describe('组件设置分页：推送重渲染的滚动与焦点保持（#467）', () => {
+  it('设置区功能开关变更回推：同键控件重获焦点，主区 scrollTop 保持', () => {
+    const h = makeView()
+    // jsdom 焦点管理只对挂在 document 上的元素生效（脱离文档 focus 为空操作）
+    document.body.append(h.parent)
+    try {
+      openSettingsAreaPage(h)
+      h.dispatch(addonsState([
+        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      ]))
+      h.dispatch(settingsState({}))
+      const main = h.parent.querySelector<HTMLElement>('.vsidian-settings-main')!
+      const toggle = h.parent.querySelector<HTMLInputElement>('input[data-addon-setting="__enabled__"]')!
+      toggle.focus()
+      main.scrollTop = 120
+      toggle.click() // change → 上送 addons.setEnabled；宿主权威回显经推送到达
+      h.dispatch(settingsState({ enabled: { effective: false, userExplicit: false } }))
+      expect(document.activeElement?.getAttribute('data-addon-setting')).toBe('__enabled__')
+      expect(main.scrollTop).toBe(120)
+    } finally {
+      h.parent.remove()
+      h.view.dispose()
+    }
+  })
+
+  it('数组定义行键盘移除：局部重建后焦点回到等价位置的移除按钮（不落 BODY）', () => {
+    const h = makeView()
+    document.body.append(h.parent)
+    try {
+      openSettingsAreaPage(h)
+      h.dispatch(addonsState([
+        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      ]))
+      // 数组默认单行不足以验键盘焦点链：注入三行生效值
+      h.dispatch(settingsState({ values: { replacements: { effective: ['甲', '乙', '丙'], source: 'default' } } }))
+      const rows = h.parent.querySelectorAll('.vsidian-addons-array-row')
+      expect(rows.length).toBe(3)
+      const removeButtons = h.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-array-remove')
+      removeButtons[1]!.focus() // 键盘场景：焦点在第二行移除按钮上按 Enter
+      removeButtons[1]!.click()
+      const afterRows = h.parent.querySelectorAll('.vsidian-addons-array-row')
+      expect(afterRows.length).toBe(2)
+      // 焦点不丢到 BODY：回到重建后同位置的移除按钮（值序列为 甲/丙）
+      expect(document.activeElement?.classList.contains('vsidian-addons-array-remove')).toBe(true)
+      expect(document.activeElement?.closest('.vsidian-addons-array-row')?.querySelector('input')?.value).toBe('丙')
+    } finally {
+      h.parent.remove()
+      h.view.dispose()
+    }
   })
 })

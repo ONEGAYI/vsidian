@@ -981,9 +981,16 @@ export const zhCn: Record<MessageKey, string> = {
   'defaultEditor.statusOther': '其他扩展：{name}',
   'defaultEditor.statusNone': '无记录（打开 Markdown 文件时由 VSCode 仲裁决定）',
   'defaultEditor.fixButton': '设为默认',
-  /** #350 T01 附加组件：设置页「附加组件」分页（状态列表与 VSCode 管理入口） */
+  /** #350 T01 附加组件：设置页「附加组件」分页（状态列表与 VSCode 管理入口）。
+   *  #465 IA 分页起本页收敛为组件级管理，行为管理独立成页 */
   'settings.addonsSection': '附加组件',
   'settings.addonsSectionDescription': 'Vsidian 附加组件是独立的 VSCode 扩展：安装、卸载与禁用由 VSCode 管理，能力由组件代码经附加组件 API 注册。该 API 仍为草案。',
+  /** #465/#466 输入行为管理独立分页（原「行为冲突管理」更名迁出） */
+  'settings.addonsBehaviorsSection': '输入行为管理',
+  'settings.addonsBehaviorsSectionDescription': '管理附加组件注册的输入行为：适用的行为默认按序依次触发，可调整顺序或逐项关闭；关闭单项不会停用整个组件。',
+  /** #465 组件设置独立分页（附加组件页禁现组件设置项——通道堵死） */
+  'settings.addonSettingsSection': '组件设置',
+  'settings.addonSettingsSectionDescription': '打开附加组件的基础设置与自定义设置页；从「附加组件」页、侧栏组件条目或下方列表进入。',
   'addons.groupOfficial': '核心组件',
   'addons.groupThirdParty': '第三方组件',
   'addons.empty': '当前扩展宿主中未发现 Vsidian 附加组件。',
@@ -1016,7 +1023,7 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #353 T04 基础设置区（双标签作用范围 / 基础控件 / 保存反馈） ----
   'addons.openSettingsArea': '设置',
   'addons.settingsAreaTitle': '基础设置：{label}',
-  'addons.closeSettingsArea': '关闭基础设置',
+  'addons.closeSettingsArea': '返回组件列表',
   'addons.scopeUserDefault': '用户默认',
   'addons.scopeWorkspace': '当前工作区',
   'addons.noWorkspaceHint': '当前无打开的工作区——工作区层不可用',
@@ -1038,6 +1045,9 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.saveFailedRejected': '组件代次已终结',
   'addons.openCustomPage': '打开自定义设置页',
   'addons.settingsEmpty': '该组件未注册设置定义',
+  /** #465 组件设置分页：组件清单（hub）形态 */
+  'addons.settingsHubTitle': '可配置的组件',
+  'addons.settingsHubEmpty': '暂无可配置的附加组件——组件注册设置定义或提供设置页后出现在这里。',
   'addons.faultedSettingsHint': '组件故障暂停——自定义设置页已撤下，可先用基础控件修正参数，再从组件管理页手动重试',
   /** #354 T05 侧栏三组结构（选项/核心组件/第三方组件）与故障排障入口 */
   'settings.sidebarOptions': '选项',
@@ -1051,9 +1061,9 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.retryFaulted': '重试组件',
   'addons.faultTroubleshootTitle': '组件故障暂停',
   'addons.faultTroubleshootHint': '该组件在 Vsidian 中的全部注册功能已暂停，自定义设置页已撤下。已有设置定义时下方基础控件仍可修改参数；完整诊断信息将在后续版本提供。',
-  // T08（#357）行为冲突管理：注册行为的调序与逐项开关
-  'addons.behaviorsGroupTitle': '行为冲突管理',
-  'addons.behaviorsGroupHint': '管理各附加组件注册的输入行为：适用的行为默认按序依次触发，可调整顺序或只关闭个别行为；单项关闭不影响组件其他行为继续运行。',
+  // T08（#357）输入行为管理（#465 起独立分页；#466 更名——组头标注清单
+  // 范围，页标题与管理说明在 settings.addonsBehaviorsSection* 词条）
+  'addons.behaviorsListTitle': '已注册行为',
   'addons.behaviorsLoading': '正在读取行为注册……',
   'addons.behaviorsEmpty': '暂无已注册的输入行为——打开文档后，组件注册的行为会显示在这里。',
   'addons.behaviorsOwnerLabel': '所属组件：{label}',
