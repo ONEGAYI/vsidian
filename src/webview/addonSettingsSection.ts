@@ -28,6 +28,7 @@ import {
 import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
 import { groupIcon, type SettingsPageBridge, type SettingsPageSection, type SettingsSidebarGroup } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
+import { captureSectionRebuildAnchor, restoreSectionRebuildAnchor, REBUILD_FOCUS_ATTR } from './sectionRebuildGuard'
 
 type AddonsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.state' }>
 type AddonSettingsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.settingsState' }>
@@ -226,11 +227,14 @@ export class AddonSection implements SettingsPageSection {
     this.bridge.postMessage(message)
   }
 
-  private button(label: string, action: () => void, cls = ''): HTMLButtonElement {
+  private button(label: string, action: () => void, cls = '', attrs: Record<string, string> = {}): HTMLButtonElement {
     const el = document.createElement('button')
     el.className = cls
     el.type = 'button'
     el.textContent = label
+    for (const [key, value] of Object.entries(attrs)) {
+      el.setAttribute(key, value)
+    }
     el.addEventListener('click', action)
     return el
   }
@@ -240,6 +244,10 @@ export class AddonSection implements SettingsPageSection {
     if (!parent) {
       return
     }
+    // #467 同分页推送重渲染保持滚动与焦点（守卫说明见 sectionRebuildGuard）；
+    // 显式定位渲染（focusEntry 在场）不恢复——定位的 scrollIntoView 与
+    // 视图侧导航焦点语义优先
+    const anchor = focusEntry === undefined ? captureSectionRebuildAnchor(parent) : undefined
     parent.replaceChildren()
     const state = this.state
     // #354 T05 侧栏组件条目定位：显式携带 focusEntry 时更新定位意图，
@@ -294,7 +302,10 @@ export class AddonSection implements SettingsPageSection {
     parent.append(listWrap)
     if (focusEntry === ADDONS_SECTION_LIST_ENTRY) {
       listWrap.scrollIntoView?.({ block: 'nearest' })
-    } else if (focusAddonId !== undefined) {
+    } else if (explicitFocus !== undefined) {
+      // #467 定位条目滚入视图只在显式定位渲染执行：locatedAddonId 跨推送
+      // 持久（定位高亮保留），但推送重渲染的重放会在渲染中间态（内容塌
+      // 缩中）强制布局把主区滚动钳到顶部——回顶向量
       listWrap.querySelector('.vsidian-settings-item-located')?.scrollIntoView?.({ block: 'nearest' })
     }
 
@@ -346,6 +357,10 @@ export class AddonSection implements SettingsPageSection {
       api.textContent = t('addons.apiVersionLabel', { version: state.apiVersion })
       parent.append(api)
     }
+    // #467 重建完成：恢复主区滚动与分页内焦点（同步块内，见守卫头注）
+    if (anchor) {
+      restoreSectionRebuildAnchor(parent, anchor)
+    }
   }
 
   /** 单条组件行：显示名（+官方徽章）、状态句、功能开关、组件设置页入口
@@ -380,13 +395,13 @@ export class AddonSection implements SettingsPageSection {
     if (entry.enabled !== undefined) {
       buttons.append(this.button(entry.enabled ? t('addons.disable') : t('addons.enable'), () => {
         this.send({ kind: 'addons.setEnabled', addonId: entry.id, enabled: !entry.enabled })
-      }))
+      }, '', { [REBUILD_FOCUS_ATTR]: `entry-toggle:${entry.id}` }))
     }
     // #353 T04 基础设置入口：有定义即可配置（故障暂停仍保留——定义在）
     if (entry.hasSettingsDefinitions) {
       buttons.append(this.button(t('addons.openSettingsArea'), () => {
         this.send({ kind: 'addons.settingsOpen', addonId: entry.id })
-      }))
+      }, '', { [REBUILD_FOCUS_ATTR]: `entry-settings:${entry.id}` }))
     }
     // #351 组件设置页入口：hasSettingsPage 由宿主按运行状态给出（故障
     // 暂停撤下——不可打开时入口消失而非禁用占位）
@@ -400,7 +415,7 @@ export class AddonSection implements SettingsPageSection {
     if (entry.fault !== undefined) {
       buttons.append(this.button(t('addons.retryFaulted'), () => {
         this.send({ kind: 'addons.retry', addonId: entry.id })
-      }, 'vsidian-addons-retry'))
+      }, 'vsidian-addons-retry', { [REBUILD_FOCUS_ATTR]: `retry:${entry.id}` }))
     }
     const detail = this.button(t('addons.openDetail'), () => {
       this.send({ kind: 'addons.openExtension', extensionId: entry.id })
@@ -522,7 +537,7 @@ export class AddonSection implements SettingsPageSection {
         const target = index + delta
         ;[next[index], next[target]] = [next[target]!, next[index]!]
         this.send({ kind: 'addons.behaviorsSetOrder', order: next })
-      }, 'vsidian-addons-behaviors-move')
+      }, 'vsidian-addons-behaviors-move', { [REBUILD_FOCUS_ATTR]: `behavior-move:${key}:${direction}` })
       button.dataset.behaviorMove = direction
       button.setAttribute('aria-label', t(direction === 'up' ? 'addons.behaviorsMoveUpAria' : 'addons.behaviorsMoveDownAria', { name: behavior.name }))
       button.disabled = direction === 'up' ? index === 0 : index === fullOrder.length - 1
@@ -536,6 +551,7 @@ export class AddonSection implements SettingsPageSection {
     toggle.className = 'vsidian-settings-checkbox'
     toggle.checked = !userDisabled
     toggle.dataset.behaviorKey = key
+    toggle.setAttribute(REBUILD_FOCUS_ATTR, `behavior:${key}`)
     toggle.setAttribute('aria-label', t('addons.behaviorsToggleAria', { name: behavior.name }))
     toggle.addEventListener('change', () => {
       this.send({ kind: 'addons.behaviorsSetDisabled', keys: [key], disabled: !toggle.checked })
@@ -594,7 +610,7 @@ export class AddonSection implements SettingsPageSection {
     heading.textContent = t('addons.settingsAreaTitle', { label: payload.addon.label })
     head.append(heading, this.button(t('addons.closeSettingsArea'), () => {
       this.send({ kind: 'addons.settingsClose' })
-    }))
+    }, '', { [REBUILD_FOCUS_ATTR]: 'close-settings-area' }))
     area.append(head)
 
     // 双标签（用户默认 / 当前工作区；无工作区禁用 + 提示）
@@ -607,6 +623,7 @@ export class AddonSection implements SettingsPageSection {
         this.render()
       }, 'vsidian-addons-scope-tab')
       tab.setAttribute('role', 'tab')
+      tab.setAttribute(REBUILD_FOCUS_ATTR, `scope:${scope}`)
       tab.setAttribute('aria-selected', this.scope === scope ? 'true' : 'false')
       if (scope === 'workspace' && !payload.hasWorkspace) {
         tab.disabled = true
@@ -643,7 +660,7 @@ export class AddonSection implements SettingsPageSection {
         }),
         this.button(t('addons.retryFaulted'), () => {
           this.send({ kind: 'addons.retry', addonId: payload.addon!.addonId })
-        }, 'vsidian-addons-retry'),
+        }, 'vsidian-addons-retry', { [REBUILD_FOCUS_ATTR]: `retry:${payload.addon!.addonId}` }),
       )
       troubleshoot.append(faultTitle, reason, hint, faultActions)
       area.append(troubleshoot)
@@ -740,6 +757,7 @@ export class AddonSection implements SettingsPageSection {
     toggle.className = 'vsidian-settings-checkbox'
     toggle.checked = layerValue === true
     toggle.setAttribute('data-addon-setting', ENABLED_KEY)
+    toggle.setAttribute(REBUILD_FOCUS_ATTR, ENABLED_KEY)
     toggle.addEventListener('change', () => {
       this.send({ kind: 'addons.setEnabled', addonId: addon.addonId, enabled: toggle.checked, scope: this.scope })
     })
@@ -792,9 +810,11 @@ export class AddonSection implements SettingsPageSection {
   /** 标量即时控件（change 即按批上送单键） */
   private scalarControl(addon: NonNullable<AddonSettingsAreaPayload>, def: AddonSettingDefinition): HTMLElement {
     const value = this.layerDisplayValue(addon, def)
-    return createScalarDefinitionControl(def, value, (next) => {
+    const control = createScalarDefinitionControl(def, value, (next) => {
       this.send({ kind: 'addons.settingsUpdate', addonId: addon.addonId, scope: this.scope, values: { [def.key]: next } })
     })
+    control.setAttribute(REBUILD_FOCUS_ATTR, def.key)
+    return control
   }
 
   /** 数组重复项控件（草稿编辑 + 保存整批上送） */
@@ -836,7 +856,7 @@ export class AddonSection implements SettingsPageSection {
       }),
       this.button(t('addons.saveChanges'), () => {
         this.send({ kind: 'addons.settingsUpdate', addonId: addon.addonId, scope: this.scope, values: { [def.key]: [...draft] } })
-      }, 'vsidian-addons-array-save'),
+      }, 'vsidian-addons-array-save', { [REBUILD_FOCUS_ATTR]: `array-save:${def.key}` }),
     )
     wrap.append(rows, actions)
     return wrap
@@ -871,7 +891,7 @@ export class AddonSection implements SettingsPageSection {
     actions.className = 'vsidian-addons-object-actions'
     actions.append(this.button(t('addons.saveChanges'), () => {
       this.send({ kind: 'addons.settingsUpdate', addonId: addon.addonId, scope: this.scope, values: { [def.key]: { ...draft } } })
-    }, 'vsidian-addons-object-save'))
+    }, 'vsidian-addons-object-save', { [REBUILD_FOCUS_ATTR]: `object-save:${def.key}` }))
     wrap.append(fields, actions)
     return wrap
   }
@@ -901,7 +921,7 @@ export class AddonSection implements SettingsPageSection {
       } else {
         this.send({ kind: 'addons.settingsClearOverride', addonId, key })
       }
-    }, 'vsidian-addons-clear-override')
+    }, 'vsidian-addons-clear-override', { [REBUILD_FOCUS_ATTR]: `clear:${key}` })
     button.dataset.addonSettingKey = key
     return button
   }

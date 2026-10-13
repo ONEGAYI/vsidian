@@ -227,8 +227,89 @@ try {
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsClose'))
   await area.waitFor({ state: 'detached' })
 
+  // ---- 10-12. #467 推送链路滚动与焦点保持 ----
+  // 经侧栏组件条目进入（locatedAddonId 持久化）：定位高亮保留，但推送
+  // 重渲染不得重放定位 scrollIntoView（渲染中间态内容塌缩时它把滚动钳
+  // 制到顶部——真宿主跨帧推送下的回顶向量）。交互统一「先 preventScroll
+  // 聚焦 → 钉滚动 → 程序化 click（对已聚焦元素不再引发焦点滚动）」，
+  // 使钉住值与渲染入口保存值之间零扰动；键盘路径的 Blink 焦点补偿与滚
+  // 动锚定恢复会互相抵消、掩盖丢失向量，不用于本场景
+  await page.getByRole('button', { name: 'Demo', exact: true }).click()
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsOpen' && m.addonId === 'fixture.demo'))
+  await area.waitFor()
+  // 长页场景：收窄视口使分页内容超一屏
+  await page.setViewportSize({ width: 1100, height: 320 })
+  const main = page.locator('.vsidian-settings-main')
+  const nextFrame = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
+  // 劫持 scrollIntoView 计数：定位态推送重渲染的重放即回顶向量（初始
+  // 定位渲染的合法调用发生在注入前，不计数）
+  await page.evaluate(() => {
+    globalThis.__sivCount = 0
+    const orig = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function patched(...args) {
+      globalThis.__sivCount++
+      return orig.apply(this, args)
+    }
+  })
+  const sivCount = () => page.evaluate(() => globalThis.__sivCount)
+  /** 先 preventScroll 聚焦 → 钉滚动到主区中部 → 程序化点击（变更） */
+  const scrollAndChange = async (selector) => {
+    await page.evaluate((sel) => { document.querySelector(sel)?.focus({ preventScroll: true }) }, selector)
+    const pinned = await main.evaluate((el) => {
+      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)
+      return el.scrollTop
+    })
+    await page.evaluate((sel) => { document.querySelector(sel)?.click() }, selector)
+    return pinned
+  }
+
+  // 复选框类：boolean 定义行
+  const pinnedFlag = await scrollAndChange('input[data-addon-setting="flag"]')
+  await page.waitForFunction(() => document.querySelector('input[data-addon-setting="flag"]')?.checked === false)
+  await nextFrame()
+  assert.equal(await main.evaluate((el) => el.scrollTop), pinnedFlag, '#467 复选框变更回推后滚动位置保持（不回顶）')
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-addon-setting')), 'flag',
+    '#467 复选框变更回推后焦点回到同键控件')
+  assert.equal(await sivCount(), 0, '#467 复选框回推重渲染不得重放定位 scrollIntoView')
+
+  // 功能开关：两连发回推（addons.state + addons.settingsState）
+  const pinnedEnabled = await scrollAndChange('input[data-addon-setting="__enabled__"]')
+  await page.waitForFunction(() => document.querySelector('input[data-addon-setting="__enabled__"]')?.checked === false)
+  await nextFrame()
+  assert.equal(await main.evaluate((el) => el.scrollTop), pinnedEnabled, '#467 功能开关两连发回推后滚动位置保持')
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-addon-setting')), '__enabled__',
+    '#467 功能开关回推后焦点回到同键控件')
+  assert.equal(await sivCount(), 0, '#467 功能开关回推重渲染不得重放定位 scrollIntoView')
+
+  // 列表增删：数组项 Add（本地行重建）+ Save（推送重渲染）
+  await page.evaluate(() => {
+    const add = document.querySelector('.vsidian-addons-array-actions button')
+    add?.focus({ preventScroll: true })
+    add?.click() // 本地草稿增行（不整页重渲染）
+  })
+  await page.evaluate(() => {
+    document.querySelectorAll('input[data-addon-array-item="replacements"]')[2]
+      ?.focus({ preventScroll: true })
+  })
+  await page.keyboard.type('丙→丁')
+  const pinnedSave = await main.evaluate((el) => {
+    document.querySelector('.vsidian-addons-array-save')?.focus({ preventScroll: true })
+    el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)
+    return el.scrollTop
+  })
+  await page.evaluate(() => { document.querySelector('.vsidian-addons-array-save')?.click() })
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate'
+    && Array.isArray(m.values.replacements) && m.values.replacements[2] === '丙→丁'))
+  await area.getByText(new RegExp(zhCn['addons.savedNotice'].replace('{scope}', '.+'))).waitFor()
+  await nextFrame()
+  assert.equal(await main.evaluate((el) => el.scrollTop), pinnedSave, '#467 数组保存回推后滚动位置保持')
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('vsidian-addons-array-save')), true,
+    '#467 保存回推后焦点回到数组保存按钮')
+  await page.setViewportSize({ width: 1100, height: 760 })
+
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
   console.log('[#353] 附加组件基础设置区浏览器回归通过（双标签/标量数组对象/清覆盖/失败反馈）')
+  console.log('[#467] 附加分页推送链路滚动与焦点保持通过（复选框/功能开关/数组保存 × 中部滚动）')
 } finally {
   await browser.close()
 }
