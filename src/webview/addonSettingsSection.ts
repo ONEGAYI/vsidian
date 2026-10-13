@@ -19,6 +19,7 @@
 // 取词（addons.* 词条）。控件构造器在 addonSettingsControls.ts。
 import { t, currentLocaleLang } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
+import { splitAddonArrayPasteText } from '../shared/addonSettings'
 import type { AddonStatusEntry } from '../shared/addonIdentity'
 import {
   orderedAddonBehaviorKeys,
@@ -833,6 +834,9 @@ export class AddonSection implements SettingsPageSection {
       item.append(this.renderArrayControl(addon, def))
     } else if (def.type === 'object') {
       item.append(this.renderObjectControl(addon, def))
+    } else if (def.type === 'string' && def.multiline === true) {
+      // #475 多行控件占定义行整行（放 label 行下方），不挤右槽
+      item.append(this.scalarControl(addon, def))
     } else {
       head.append(this.scalarControl(addon, def))
     }
@@ -872,10 +876,30 @@ export class AddonSection implements SettingsPageSection {
       draft.forEach((value, index) => {
         const row = document.createElement('div')
         row.className = 'vsidian-addons-array-row'
+        const control = createScalarItemControl(def.items, value, { 'data-addon-array-item': def.key }, (next) => {
+          draft[index] = next
+        }, 'input')
+        // #475 批量粘贴拆分：string 自由文本项的多行剪贴板按行拆为多项
+        //（首行追加当前项末尾，其余插入其后）；enum/number/boolean 项不适用
+        if (def.items.kind === 'string' && def.items.enum === undefined) {
+          const items = def.items
+          control.addEventListener('paste', (event) => {
+            const text = event.clipboardData?.getData('text') ?? ''
+            if (!/[\r\n]/.test(text)) return // 单行粘贴走默认输入行为
+            event.preventDefault()
+            const lines = splitAddonArrayPasteText(text, items.maxLength)
+            if (lines.length === 0) return
+            const current = typeof draft[index] === 'string' ? (draft[index] as string) : ''
+            draft[index] = current + lines[0]!
+            draft.splice(index + 1, 0, ...lines.slice(1))
+            this.drafts.set(def.key, [...draft])
+            renderRows()
+            const refocus = rows.children[index]?.querySelector<HTMLElement>('[data-addon-array-item]')
+            refocus?.focus({ preventScroll: true })
+          })
+        }
         row.append(
-          createScalarItemControl(def.items, value, { 'data-addon-array-item': def.key }, (next) => {
-            draft[index] = next
-          }, 'input'),
+          control,
           this.button(t('addons.arrayRemoveItem'), () => {
             draft.splice(index, 1)
             this.drafts.set(def.key, [...draft])

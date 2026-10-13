@@ -601,7 +601,16 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-addons-array { display: flex; flex-direction: column; gap: 6px; }
 .vsidian-addons-array-rows { display: flex; flex-direction: column; gap: 4px; }
 .vsidian-addons-array-row { display: flex; align-items: center; gap: 6px; }
-.vsidian-addons-array-row > input, .vsidian-addons-array-row > select { flex: 1; min-height: 24px; }
+/* #475 逐项文本框加宽：flex:1 占满行剩余宽 + min-width:0 允许随内容收缩
+   （长内容不把行撑出容器，宽度恒定可预期） */
+.vsidian-addons-array-row > input, .vsidian-addons-array-row > select { flex: 1; min-width: 0; min-height: 24px; }
+/* #475 多行文本形态（定义级 string 声明 multiline）：占定义行整行，
+   观感对齐 select/text 档位（2px 圆角 + input 变量族），可纵向拖高 */
+.vsidian-addons-setting-item > textarea { width: 100%; min-height: 72px; padding: 4px 6px; box-sizing: border-box;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 2px;
+  color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, transparent); font: inherit; resize: vertical; }
+.vsidian-addons-setting-item > textarea:focus-visible { outline: 1px solid var(--vscode-focusBorder, #2687d4); outline-offset: -1px; }
 .vsidian-addons-array-remove { min-height: 22px; padding: 2px 8px;
   border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
   color: var(--vscode-button-secondaryForeground, inherit);

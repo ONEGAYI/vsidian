@@ -21,6 +21,7 @@ import {
   parseAddonSettingsStore,
   serializeAddonSettingsStore,
   isAddonSettingStoredValue,
+  splitAddonArrayPasteText,
   type AddonSettingDefinition,
 } from '../../src/shared/addonSettings'
 
@@ -214,6 +215,82 @@ describe('T04 作用范围解析（resolveAddonSettingLayer）', () => {
       ],
     } as const
     expect(composeObjectDefault(objectDef)).toEqual({ name: 'demo', count: 3 })
+  })
+})
+
+// ---- #473 枚举档位标签 / #475 多行形态（string 定义可选呈现字段） ----
+
+describe('#473 enumLabels 与 #475 multiline（string 定义可选呈现字段）', () => {
+  it('enum 定义带 per-值标签合法：直值 / 多语言映射 / 部分值有标签', () => {
+    expect(isAddonSettingDefinition({
+      key: 'mode', title: '模式', type: 'string', enum: ['a', 'b'], default: 'a',
+      enumLabels: { a: '甲', b: '乙' },
+    })).toBe(true)
+    expect(isAddonSettingDefinition({
+      key: 'mode', title: '模式', type: 'string', enum: ['a', 'b'], default: 'a',
+      enumLabels: { a: { 'zh-cn': '甲', en: 'A' }, b: { 'zh-cn': '乙', en: 'B' } },
+    })).toBe(true)
+    // 部分值有标签：缺失键回退渲染枚举值本身
+    expect(isAddonSettingDefinition({
+      key: 'mode', title: '模式', type: 'string', enum: ['a', 'b'], default: 'a',
+      enumLabels: { a: '甲' },
+    })).toBe(true)
+  })
+
+  it('enumLabels 非法矩阵：非对象 / 未知键 / 值非法 / 无 enum 时给出', () => {
+    // 未知键（拼错早失败——定义形状自洽）
+    expect(isAddonSettingDefinition({ key: 'x', title: '未知键', type: 'string', enum: ['a'], default: 'a', enumLabels: { b: '乙' } })).toBe(false)
+    // 无 enum 时给 enumLabels 拒绝
+    expect(isAddonSettingDefinition({ key: 'x', title: '无枚举', type: 'string', default: 'a', enumLabels: { a: '甲' } })).toBe(false)
+    // 值非法：空串 / 全空白 / 非字符串 / 空映射 / 映射键规整重复 / 超长
+    expect(isAddonSettingDefinition({ key: 'x', title: '空值', type: 'string', enum: ['a'], default: 'a', enumLabels: { a: '' } })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'x', title: '空白值', type: 'string', enum: ['a'], default: 'a', enumLabels: { a: '   ' } })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'x', title: '数值', type: 'string', enum: ['a'], default: 'a', enumLabels: { a: 1 } })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'x', title: '空映射', type: 'string', enum: ['a'], default: 'a', enumLabels: { a: {} } })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'x', title: '重复键', type: 'string', enum: ['a'], default: 'a', enumLabels: { a: { zh: '中', ZH: '重' } } })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'x', title: '超长', type: 'string', enum: ['a'], default: 'a', enumLabels: { a: 'x'.repeat(257) } })).toBe(false)
+    // enumLabels 自身非对象
+    expect(isAddonSettingDefinition({ key: 'x', title: '非对象', type: 'string', enum: ['a'], default: 'a', enumLabels: '甲' })).toBe(false)
+  })
+
+  it('multiline 声明：boolean 合法（true/false 均收），非 boolean 拒绝', () => {
+    expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: true, default: 'a\nb' })).toBe(true)
+    expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: false, default: 'ab' })).toBe(true)
+    expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: 1, default: 'a' })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'note', title: '备注', type: 'string', multiline: 'yes', default: 'a' })).toBe(false)
+  })
+
+  it('多行与标签不改变值校验：换行计 1 字符参与 maxLength，enum 校验口径不变', () => {
+    const def: AddonSettingDefinition = { key: 'note', title: '备注', type: 'string', multiline: true, maxLength: 10, default: 'a\nb' }
+    expect(addonSettingValueMatches(def, 'x\ny\nz')).toBe(true)
+    expect(addonSettingValueMatches(def, '0123456789\nX')).toBe(false)
+  })
+
+  it('旧定义（无新字段）不受影响（向后兼容钉住）', () => {
+    expect(isAddonSettingDefinition({ key: 'mode', title: '模式', type: 'string', enum: ['a', 'b'], default: 'a' })).toBe(true)
+    expect(isAddonSettingDefinition({ key: 'label', title: '标签', type: 'string', maxLength: 30, default: 'demo' })).toBe(true)
+  })
+})
+
+describe('#475 数组批量粘贴拆分（splitAddonArrayPasteText）', () => {
+  it('多行文本按行拆分：LF / CRLF / CR', () => {
+    expect(splitAddonArrayPasteText('a\nb\nc')).toEqual(['a', 'b', 'c'])
+    expect(splitAddonArrayPasteText('a\r\nb\rc')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('逐行 trim 且丢弃空行（批量粘贴的空行是噪声）', () => {
+    expect(splitAddonArrayPasteText(' a \n\n  \nb\n')).toEqual(['a', 'b'])
+  })
+
+  it('各行经 maxLength 截断（对齐浏览器单行粘贴的截断语义）', () => {
+    expect(splitAddonArrayPasteText('abcdef\ngh', 3)).toEqual(['abc', 'gh'])
+    expect(splitAddonArrayPasteText('abcdef', 3)).toEqual(['abc'])
+  })
+
+  it('无换行文本不拆（单元素），全空输入得空数组', () => {
+    expect(splitAddonArrayPasteText('single')).toEqual(['single'])
+    expect(splitAddonArrayPasteText('')).toEqual([])
+    expect(splitAddonArrayPasteText('\n \n')).toEqual([])
   })
 })
 

@@ -86,12 +86,15 @@ export const addonT04Cases: Array<[string, () => Promise<void>]> = [
       definitions: Record<string, unknown[]>
     }
     const defs = state.definitions[ADDON_ID] ?? []
-    assert(defs.length === 6, `应注册 6 条定义（标量×4 + 数组 + 对象），实际 ${defs.length}`)
+    assert(defs.length === 8, `应注册 8 条定义（标量×6 含 #473/#475 呈现形态字段 + 数组 + 对象），实际 ${defs.length}`)
     // 公开读取（宿主侧等价入口与夹具 get() 同源）
     const snapshot = await addonGet()
     assert(snapshot.values['threshold'] === 20 && snapshot.sources['threshold'] === 'default', '标量默认值生效，来源 default')
     assert(JSON.stringify(snapshot.values['replacements']) === JSON.stringify(['旧词→新词']), `数组默认值生效，实际 ${JSON.stringify(snapshot.values['replacements'])}`)
     assert(JSON.stringify(snapshot.values['limits']) === JSON.stringify({ name: 'demo', count: 3 }), '对象出厂值按字段默认组装')
+    // #473/#475：带 enumLabels / multiline 的定义经宿主注册链路真实走通（含换行默认值原样下发）
+    assert(snapshot.values['strategy'] === 'soft', '枚举标签定义默认值生效（标签仅呈现层，值为枚举原值）')
+    assert(snapshot.values['note'] === '第一行\n第二行', `多行定义默认值含换行原样下发，实际 ${JSON.stringify(snapshot.values['note'])}`)
     // 夹具经公开 API 读到同一快照
     const stats = await fixtureStats()
     assert(stats.lastGet !== null && stats.lastGet.values['threshold'] === 20, '夹具 setup 后经公开 get() 读到默认值')

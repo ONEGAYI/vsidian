@@ -79,6 +79,8 @@ export interface AddonApiSemantics {
   readonly contextPayloads?: string
   /** 多语言名称形态与语言回落（本地化条目，#464 起） */
   readonly localization?: string
+  /** 呈现层形态声明与编辑行为（设置控件类条目，#473/#475 起） */
+  readonly presentation?: string
 }
 
 /** 单个公开接口条目（参考文档的一节） */
@@ -778,16 +780,17 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonSettings.ts',
-        symbols: ['AddonSettingDefinition', 'AddonSettingValue', 'AddonScalarItemSpec', 'isAddonSettingDefinition', 'addonSettingValueMatches'],
+        symbols: ['AddonSettingDefinition', 'AddonSettingValue', 'AddonScalarItemSpec', 'AddonLocalizedText', 'isAddonSettingDefinition', 'addonSettingValueMatches'],
       },
     ],
     purpose:
-      '设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。',
+      '设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。',
     semantics: {
       errors: '定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。',
+      presentation: 'enumLabels 与 multiline 仅作用设置页呈现（#473/#475）：标签缺失回退渲染枚举值本身，标签选值随页面语言切换；multiline 渲染 textarea、换行符参与持久化值；持久化值与值校验口径不变。数组 string 自由文本项支持批量粘贴拆分（逐行 trim、去空行、maxLength 截断，enum/number/boolean 项不适用）。',
     },
-    verification: ['test/unit/addonSettings.test.ts'],
-    introduced: '#353（T04）',
+    verification: ['test/unit/addonSettings.test.ts', 'test/unit/addonSettingsArea.test.ts'],
+    introduced: '#353（T04）、#473/#475（呈现形态）',
   },
   {
     id: 'settings-scope',

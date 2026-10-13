@@ -20,11 +20,18 @@ const vscode = require('vscode')
 const SELF_ID = 'vsidian-test-fixture.addon-t04'
 const HOST_ID = 'onegayi.vsidian'
 
-// 复杂定义样本：标量三型 + 替换规则数组 + 对象样例（票面验收三形态）
+// 复杂定义样本：标量三型 + 替换规则数组 + 对象样例（票面验收三形态）；
+// #473/#475 呈现形态字段（enumLabels 枚举档位标签 / multiline 多行声明）
+// ——钉「新字段经宿主注册链路真实走通」（isAddonSettingDefinition 接受并下发）
 const DEFINITIONS = [
   { key: 'threshold', title: '阈值', type: 'number', min: 1, max: 100, default: 20 },
   { key: 'label', title: '标签', type: 'string', maxLength: 30, default: 'demo' },
   { key: 'mode', title: '模式', type: 'string', enum: ['a', 'b'], default: 'a' },
+  {
+    key: 'strategy', title: '空格策略', type: 'string', enum: ['none', 'soft', 'strict'], default: 'soft',
+    enumLabels: { none: { 'zh-cn': '不要求空格', en: 'No spaces' }, soft: { 'zh-cn': '软空格', en: 'Soft spaces' } },
+  },
+  { key: 'note', title: '备注', type: 'string', multiline: true, maxLength: 20, default: '第一行\n第二行' },
   { key: 'flag', title: '开关', type: 'boolean', default: false },
   { key: 'replacements', title: '替换规则', type: 'array', items: { kind: 'string', maxLength: 20 }, default: ['旧词→新词'] },
   {

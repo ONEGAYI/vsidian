@@ -1489,9 +1489,9 @@ export interface AddonSettingsChangeEventData {
 
 ### `settings-definitions` 可序列化设置定义与值校验
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#353（T04）
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#353（T04）、#473/#475（呈现形态）
 
-**目标**：设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。
+**目标**：设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。
 
 语义要点：
 - **错误与拒绝**：定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。
@@ -1503,7 +1503,18 @@ export interface AddonSettingsChangeEventData {
 export type AddonSettingDefinition =
   | (AddonSettingDefinitionBase & { type: 'boolean'; default: boolean })
   | (AddonSettingDefinitionBase & { type: 'number'; min?: number; max?: number; default: number })
-  | (AddonSettingDefinitionBase & { type: 'string'; maxLength?: number; enum?: readonly string[]; default: string })
+  | (AddonSettingDefinitionBase & {
+    type: 'string'
+    maxLength?: number
+    enum?: readonly string[]
+    /** 枚举档位显示标签（#473，仅呈现层）：键 = enum 值、值 = 直值或多语言
+     *  映射；缺失键/缺失整个字段回退渲染枚举值本身。不参与值校验 */
+    enumLabels?: Readonly<Record<string, AddonLocalizedText>>
+    /** 多行形态声明（#475，仅呈现层）：true 时设置页渲染 textarea，换行符
+     *  参与持久化值；缺省/false 保持单行。不引入内容校验 */
+    multiline?: boolean
+    default: string
+  })
   | (AddonSettingDefinitionBase & {
     type: 'array'
     /** 重复项约束（一层：只描述标量） */
@@ -1532,6 +1543,10 @@ export type AddonScalarItemSpec =
   | { kind: 'number'; min?: number; max?: number }
   | { kind: 'string'; maxLength?: number; enum?: readonly string[] }
 
+/** 枚举档位显示标签的多语言形态（#473）：直值或「语言代码→文本」映射，
+ *  选值语义见 localizedText.ts（与 #464 行为名多语言惯例同构） */
+export type AddonLocalizedText = LocalizedText
+
 /** 设置定义形状校验（必需字段与约束自洽；多余字段忽略——组件升级新增元数据不炸老平台） */
 export function isAddonSettingDefinition(value: unknown): value is AddonSettingDefinition {
   if (!isRecord(value) || typeof value.type !== 'string') return false
@@ -1549,6 +1564,8 @@ export function isAddonSettingDefinition(value: unknown): value is AddonSettingD
         })
     case 'string':
       return isStringSpec({ kind: 'string', maxLength: value.maxLength, enum: value.enum }) &&
+        isEnumLabelsValid(value.enumLabels, value.enum as readonly string[] | undefined) &&
+        (value.multiline === undefined || typeof value.multiline === 'boolean') &&
         typeof value.default === 'string' &&
         addonScalarValueMatchesSpec(value.default, {
           kind: 'string',
@@ -1628,7 +1645,7 @@ export function addonSettingValueMatches(def: AddonSettingDefinition, value: unk
 }
 ```
 
-**验证**：`test/unit/addonSettings.test.ts`
+**验证**：`test/unit/addonSettings.test.ts`、`test/unit/addonSettingsArea.test.ts`
 
 ### `settings-scope` 作用范围解析与存储
 
