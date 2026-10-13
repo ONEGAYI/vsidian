@@ -385,7 +385,7 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       },
     ],
     purpose:
-      '官方归属只由主仓库维护的扩展 ID 清单判定（唯一入口 isOfficialAddon）；组件不能自行声明「核心」。初版为空占位——首个官方组件发布时在表内登记。',
+      '官方归属只由主仓库维护的扩展 ID 清单判定（唯一入口 isOfficialAddon）；组件不能自行声明「核心」。表内已登记首个官方组件 vsidian-easy-typing，后续官方组件发布时增行登记。',
     semantics: {
       lifecycle: '登记官方组件只改 officialAddons.ts；表内容变化不构成兼容性承诺（第三方不得依据曾在表内/表外主张契约）。',
     },

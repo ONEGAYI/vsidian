@@ -24,9 +24,16 @@ describe('官方清单形态（可维护登记表）', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('清单当前为空占位（首个官方组件登记前的事实）', () => {
-    // 形态先行：登记入口与判定机制本票落地，清单内容随官方组件发布增补
-    expect(OFFICIAL_ADDON_EXTENSION_IDS).toEqual([])
+  it('登记表已登记官方输入增强组件 vsidian-easy-typing（#463 首个登记）', () => {
+    // extensionId 大小写须与 easy-typing 扩展 package.json 的 publisher.name
+    // 声明完全一致（判定为严格相等，大小写敏感）
+    expect(OFFICIAL_ADDON_EXTENSION_IDS).toContain('ONEGAYI.vsidian-easy-typing')
+  })
+
+  it('默认登记表判定：登记 ID 判官方（严格相等，大小写敏感）', () => {
+    expect(isOfficialAddon('ONEGAYI.vsidian-easy-typing')).toBe(true)
+    // 判定实现是 ===：大小写漂移的 ID 不判官方（登记形态即运行时形态）
+    expect(isOfficialAddon('onegayi.vsidian-easy-typing')).toBe(false)
   })
 
   it('表内 ID 判官方、表外 ID 不判（判定唯一入口 isOfficialAddon）', () => {
