@@ -444,13 +444,17 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         }
       : undefined
     // #476 行为禁用态只读面：编辑器页与设置页均提供（两端点同形——env
-    //  在场即挂面，无 page 条件）。查询与订阅均不做代次守卫（只读快照无
-    //  副作用，已释放代次返回最后已知值——观察面与 behaviors.onChanged
-    //  同款口径，规格 D2/D3）
+    //  在场即挂面，无 page 条件）。生命周期两分：**查询**不做代次守卫
+    //  （只读快照无副作用，已释放代次返回最后已知值）；**订阅**过
+    //  isLoadActive 守卫（与 #395 P3 起全部 SDK 面的记录身份判活同款）
+    //  ——已释放代次的迟到登记为 no-op 退订，不滞留回调；释放时点已有
+    //  的订阅由 releaseLoad 的 releaseAddon 整组回收
     const behaviorStateFacet: AddonBehaviorStateFacet | undefined = env.addonBehaviorEnabledState
       ? {
           enabledState: () => env.addonBehaviorEnabledState!.enabledStateOf(loadRecord.addonId),
-          onEnabledChange: (callback) => env.addonBehaviorEnabledState!.onEnabledChangeOf(loadRecord.addonId, callback),
+          onEnabledChange: (callback) => (isLoadActive(loadRecord)
+            ? env.addonBehaviorEnabledState!.onEnabledChangeOf(loadRecord.addonId, callback)
+            : () => {}),
         }
       : undefined
     const sdk: VsidianAddonPageSdk = {

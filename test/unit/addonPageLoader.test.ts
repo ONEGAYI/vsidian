@@ -1064,5 +1064,11 @@ describe('#476 行为禁用态只读面（behaviorState）：编辑器页与设�
     runtime.applyBroadcast({ disabled: [], addons: [{ addonId: ADDON_ID, addonRunState: 'enabled' }] })
     expect(notified).toEqual([{ addonRunState: 'user-disabled', disabled: [] }])
     expect(facet!.enabledState()).toEqual({ addonRunState: 'enabled', disabled: [] })
+    // 已释放代次的迟到登记为 no-op 退订（isLoadActive 守卫——与全部 SDK
+    // 面的记录身份判活同款，不重建 listeners）
+    const lateNotified: unknown[] = []
+    facet!.onEnabledChange((state) => lateNotified.push(state))
+    runtime.applyBroadcast({ disabled: [], addons: [{ addonId: ADDON_ID, addonRunState: 'user-disabled' }] })
+    expect(lateNotified).toEqual([])
   })
 })

@@ -466,14 +466,16 @@ export interface AddonBehaviorEnabledState {
 /** #476 SDK behaviorState 面（编辑器页与设置页均提供；查询 + 订阅双件
  *  ——D2：打开页面取初值用 enabledState，灰态实时同步用 onEnabledChange）。
  *  生命周期口径：**查询**不做代次守卫——已释放代次的迟到调用返回最后
- *  已知快照（只读无副作用）；**订阅**随组件释放整组回收（装载器
- *  releaseLoad 驱动，不依赖组件自觉退订——与 behaviors/commands/
- *  renderers/ui 四面的整组件回收同款）。 */
+ *  已知快照（只读无副作用）；**订阅**过装载器的记录身份判活（与全部
+ *  SDK 面同款）——已释放代次的迟到登记为 no-op 退订，释放时点已有的
+ *  订阅随组件释放整组回收（releaseLoad 驱动，不依赖组件自觉退订——
+ *  与 behaviors/commands/renderers/ui 四面的整组件回收同款）。 */
 export interface AddonBehaviorStateFacet {
   /** 立即返回当前快照（同步——广播未到达时为默认态 enabled + 空集） */
   enabledState(): AddonBehaviorEnabledState
   /** 订阅本组件快照变化（宿主状态落库后即时通知——D5；回调异常只吞不
-   *  升级；组件释放后订阅就地回收不再分发）；返回退订函数 */
+   *  升级；组件释放后订阅就地回收、迟到登记为 no-op 退订）；返回退订
+   *  函数 */
   onEnabledChange(callback: (state: AddonBehaviorEnabledState) => void): () => void
 }
 

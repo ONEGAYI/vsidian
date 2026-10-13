@@ -1272,7 +1272,7 @@ export function mergeBehaviorOrderPreservingUnknown(
 语义要点：
 - **适用模式**：无编辑模式门槛：灰态消费在设置页与编辑器页同样可达。
 - **坐标与数据形状**：disabled 为本组件行为的局部 id 集（存储完整键按组件 ID 前缀过滤后剥离；顺序保持存储序，不去重不排序）——组件自知 addonId，接口按「本组件」过滤天然隔离。
-- **生命周期**：快照两层报事实：addonRunState（enabled / user-disabled）+ disabled。组件被用户停用后设置页不卸载，本面仍可查询与订阅（灰态消费场景）；faulted 不进快照（故障时设置页不装载，语义不可达）。通知在宿主状态落库后即时发出（单项禁用/恢复与组件启停）。查询不做代次守卫：已释放代次的迟到调用返回最后已知快照（只读无副作用）；订阅随组件释放整组回收（装载器释放路径驱动，不依赖组件自觉退订——与 behaviors/commands/renderers/ui 四面的整组件回收同款）。
+- **生命周期**：快照两层报事实：addonRunState（enabled / user-disabled）+ disabled。组件被用户停用后设置页不卸载，本面仍可查询与订阅（灰态消费场景）；faulted 不进快照（故障时设置页不装载，语义不可达）。通知在宿主状态落库后即时发出（单项禁用/恢复与组件启停）。查询不做代次守卫：已释放代次的迟到调用返回最后已知快照（只读无副作用）；订阅过装载器记录身份判活（与全部 SDK 面同款）——迟到登记为 no-op 退订，释放时点已有的订阅随组件释放整组回收（不依赖组件自觉退订——与 behaviors/commands/renderers/ui 四面的整组件回收同款）。
 - **错误与拒绝**：本面无拒绝码：只读查询恒返回快照（广播未到达时为默认态 enabled + 空集），订阅回调异常只吞不升级。
 
 签名事实源：`src/shared/addonBehaviors.ts`
@@ -1281,14 +1281,16 @@ export function mergeBehaviorOrderPreservingUnknown(
 /** #476 SDK behaviorState 面（编辑器页与设置页均提供；查询 + 订阅双件
  *  ——D2：打开页面取初值用 enabledState，灰态实时同步用 onEnabledChange）。
  *  生命周期口径：**查询**不做代次守卫——已释放代次的迟到调用返回最后
- *  已知快照（只读无副作用）；**订阅**随组件释放整组回收（装载器
- *  releaseLoad 驱动，不依赖组件自觉退订——与 behaviors/commands/
- *  renderers/ui 四面的整组件回收同款）。 */
+ *  已知快照（只读无副作用）；**订阅**过装载器的记录身份判活（与全部
+ *  SDK 面同款）——已释放代次的迟到登记为 no-op 退订，释放时点已有的
+ *  订阅随组件释放整组回收（releaseLoad 驱动，不依赖组件自觉退订——
+ *  与 behaviors/commands/renderers/ui 四面的整组件回收同款）。 */
 export interface AddonBehaviorStateFacet {
   /** 立即返回当前快照（同步——广播未到达时为默认态 enabled + 空集） */
   enabledState(): AddonBehaviorEnabledState
   /** 订阅本组件快照变化（宿主状态落库后即时通知——D5；回调异常只吞不
-   *  升级；组件释放后订阅就地回收不再分发）；返回退订函数 */
+   *  升级；组件释放后订阅就地回收、迟到登记为 no-op 退订）；返回退订
+   *  函数 */
   onEnabledChange(callback: (state: AddonBehaviorEnabledState) => void): () => void
 }
 
