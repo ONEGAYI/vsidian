@@ -12,6 +12,7 @@
 import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import { groupIcon, type SettingsPageBridge, type SettingsPageSection } from './settingsPageView'
+import { captureSectionRebuildAnchor, restoreSectionRebuildAnchor, REBUILD_FOCUS_ATTR } from './sectionRebuildGuard'
 
 type IndexStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'index.state' }>
 
@@ -75,11 +76,14 @@ export class IndexMaintenanceSection implements SettingsPageSection {
     this.bridge.postMessage(message)
   }
 
-  private button(label: string, action: () => void, cls = ''): HTMLButtonElement {
+  private button(label: string, action: () => void, cls = '', attrs: Record<string, string> = {}): HTMLButtonElement {
     const el = document.createElement('button')
     el.className = cls
     el.type = 'button'
     el.textContent = label
+    for (const [key, value] of Object.entries(attrs)) {
+      el.setAttribute(key, value)
+    }
     el.addEventListener('click', action)
     return el
   }
@@ -95,6 +99,10 @@ export class IndexMaintenanceSection implements SettingsPageSection {
     if (!parent) {
       return
     }
+    // #467 同分页推送/草稿重渲染保持滚动与焦点（守卫说明见
+    // sectionRebuildGuard；显式定位渲染 focusEntry 在场时不恢复——
+    // 定位的 scrollIntoView 语义优先）
+    const anchor = focusEntry === undefined ? captureSectionRebuildAnchor(parent) : undefined
     parent.replaceChildren()
     const state = this.state
     const busy = state?.status === 'cleaning' || state?.status === 'rebuilding'
@@ -149,8 +157,7 @@ export class IndexMaintenanceSection implements SettingsPageSection {
       input.value = value
       input.placeholder = t('indexMaintenance.patternPlaceholder')
       input.addEventListener('input', () => this.setDraft(index, input.value))
-      const remove = this.button(t('indexMaintenance.removePattern'), () => this.removeRow(index))
-      remove.className = 'vsidian-index-pattern-remove'
+      const remove = this.button(t('indexMaintenance.removePattern'), () => this.removeRow(index), 'vsidian-index-pattern-remove', { [REBUILD_FOCUS_ATTR]: `index-remove:${index}` })
       remove.disabled = index === rows.length - 1 && value === '' // 空尾行无需移除
       row.append(input, remove)
       list.append(row)
@@ -160,10 +167,10 @@ export class IndexMaintenanceSection implements SettingsPageSection {
     const patternActions = document.createElement('div')
     patternActions.className = 'vsidian-index-pattern-actions'
     patternActions.append(
-      this.button(t('indexMaintenance.addPattern'), () => this.addDraftRow()),
-      this.button(t('indexMaintenance.savePatterns'), () => this.savePatterns(), 'vsidian-index-primary'),
+      this.button(t('indexMaintenance.addPattern'), () => this.addDraftRow(), '', { [REBUILD_FOCUS_ATTR]: 'index-add' }),
+      this.button(t('indexMaintenance.savePatterns'), () => this.savePatterns(), 'vsidian-index-primary', { [REBUILD_FOCUS_ATTR]: 'index-save' }),
       this.button(t('indexMaintenance.resetPatterns'), () =>
-        this.send({ kind: 'index.resetPatterns' })),
+        this.send({ kind: 'index.resetPatterns' }), '', { [REBUILD_FOCUS_ATTR]: 'index-reset' }),
     )
     patternsBlock.append(patternActions)
     parent.append(patternsBlock)
@@ -182,15 +189,15 @@ export class IndexMaintenanceSection implements SettingsPageSection {
     const opButtons = document.createElement('div')
     opButtons.className = 'vsidian-index-pattern-actions'
     const rebuild = this.button(t('indexMaintenance.rebuild'), () =>
-      this.send({ kind: 'index.rebuild' }), 'vsidian-index-primary')
+      this.send({ kind: 'index.rebuild' }), 'vsidian-index-primary', { [REBUILD_FOCUS_ATTR]: 'index-rebuild' })
     const cleanup = this.button(t('indexMaintenance.cleanup'), () =>
-      this.send({ kind: 'index.cleanup' }))
+      this.send({ kind: 'index.cleanup' }), '', { [REBUILD_FOCUS_ATTR]: 'index-cleanup' })
     rebuild.disabled = busy || state?.available !== true
     cleanup.disabled = busy || state?.available !== true
     opButtons.append(rebuild, cleanup)
     if (busy) {
       opButtons.append(this.button(t('indexMaintenance.cancel'), () =>
-        this.send({ kind: 'index.cancel' })))
+        this.send({ kind: 'index.cancel' }), '', { [REBUILD_FOCUS_ATTR]: 'index-cancel' }))
     }
     actionsBlock.append(opButtons)
     // 进度（role=status：进度与结果反馈对读屏可达）
@@ -215,6 +222,10 @@ export class IndexMaintenanceSection implements SettingsPageSection {
       actionsBlock.append(noticeEl)
     }
     parent.append(actionsBlock)
+    // #467 重建完成：恢复主区滚动与分页内焦点（同步块内，见守卫头注）
+    if (anchor) {
+      restoreSectionRebuildAnchor(parent, anchor)
+    }
   }
 
   // ---- 草稿操作（行事件驱动；重渲染保持焦点外的行值） ----

@@ -258,6 +258,7 @@ vsidian/
         ├── richPasteDialog.css         # 粘贴询问主题与零特异性样式
         ├── richPasteDialog.ts          # 粘贴格式询问会话模态
         ├── richPastePlan.ts            # 富文本粘贴两阶段计划
+        ├── sectionRebuildGuard.ts      # 分页重渲染滚动焦点守卫
         ├── settingsMain.ts             # 设置页 webview 入口
         ├── settingsPage.css            # 设置页样式
         ├── settingsPageView.ts         # 设置页 webview 视图

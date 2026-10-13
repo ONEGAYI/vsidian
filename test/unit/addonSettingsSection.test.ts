@@ -582,3 +582,88 @@ describe('故障排障入口（T05）', () => {
     expect(buttons).toContain('重试组件')
   })
 })
+
+// ---- #467：推送重渲染的滚动与焦点保持 ----
+
+describe('推送重渲染的滚动与焦点保持（#467）', () => {
+  /** 构造打开设置区的 addons.settingsState 推送（含一个 boolean 定义行） */
+  function settingsStatePush(harness: ReturnType<typeof makeView>, enabledUser: boolean | null): void {
+    const message = {
+      kind: 'addons.settingsState',
+      apiVersion: '1.0.0',
+      draft: true,
+      open: 'fixture.demo',
+      hasWorkspace: false,
+      addon: {
+        addonId: 'fixture.demo',
+        label: 'Demo',
+        faulted: false,
+        hasCustomPage: false,
+        enabled: { effective: enabledUser ?? true, userExplicit: enabledUser, workspaceExplicit: null, source: enabledUser === null ? 'default' : 'user' },
+        definitions: [{ key: 'flag', title: '开关项', type: 'boolean', default: true }],
+        values: { flag: { effective: true, source: 'default' } },
+      },
+      openAddonSettingsPage: null,
+    }
+    if (!isHostToWebview(message)) {
+      throw new Error('addons.settingsState 载荷未通过协议守卫')
+    }
+    harness.dispatch(message)
+  }
+
+  it('设置区功能开关变更回推：同键控件重获焦点，主区 scrollTop 保持', () => {
+    const harness = makeView()
+    // jsdom 焦点管理只对挂在 document 上的元素生效（脱离文档 focus 为空操作）
+    document.body.append(harness.parent)
+    try {
+      openAddonsPage(harness)
+      harness.dispatch(addonsState([
+        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      ]))
+      settingsStatePush(harness, true)
+      const main = harness.parent.querySelector<HTMLElement>('.vsidian-settings-main')!
+      const toggle = harness.parent.querySelector<HTMLInputElement>('input[data-addon-setting="__enabled__"]')!
+      toggle.focus()
+      main.scrollTop = 120
+      toggle.click() // change → 上送 addons.setEnabled；宿主权威回显经推送到达
+      settingsStatePush(harness, false)
+      expect(document.activeElement?.getAttribute('data-addon-setting')).toBe('__enabled__')
+      expect(main.scrollTop).toBe(120)
+    } finally {
+      harness.parent.remove()
+      harness.view.dispose()
+    }
+  })
+
+  it('行为区单项开关推送回显：焦点回到同键开关，主区 scrollTop 保持', () => {
+    const harness = makeView()
+    document.body.append(harness.parent)
+    try {
+      openAddonsPage(harness)
+      harness.dispatch(addonsState([
+        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true },
+      ]))
+      const behaviorKey = 'fixture.demo#dash-fill'
+      const behaviorMessage = {
+        kind: 'addons.behaviors',
+        behaviors: [{ addonId: 'fixture.demo', id: 'dash-fill', name: '破折填充', history: 'atomic' }],
+        state: null,
+      }
+      if (!isHostToWebview(behaviorMessage)) {
+        throw new Error('addons.behaviors 载荷未通过协议守卫')
+      }
+      harness.dispatch(behaviorMessage)
+      const main = harness.parent.querySelector<HTMLElement>('.vsidian-settings-main')!
+      const toggle = harness.parent.querySelector<HTMLInputElement>(`input[data-behavior-key="${behaviorKey}"]`)!
+      toggle.focus()
+      main.scrollTop = 90
+      toggle.click() // change → 上送 behaviorsSetDisabled；回显推送整块重建
+      harness.dispatch({ ...behaviorMessage, state: { version: 1, order: [], disabled: [behaviorKey] } })
+      expect(document.activeElement?.getAttribute('data-behavior-key')).toBe(behaviorKey)
+      expect(main.scrollTop).toBe(90)
+    } finally {
+      harness.parent.remove()
+      harness.view.dispose()
+    }
+  })
+})
