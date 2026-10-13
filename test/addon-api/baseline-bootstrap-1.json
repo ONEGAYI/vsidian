@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "b94bda822916ab1062fe6501bd91b1c0ed9c7581",
-      "ref": "b94bda82",
+      "sha": "3e62420d893f82fb64ff77edc25645475bb2f899",
+      "ref": "3e62420d",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -540,8 +540,8 @@
       "semantics": {
         "modes": "仅宿主端（编辑器/设置页面不直接提供——经组件通道桥接）。",
         "coordinates": "相对路径为正斜杠形态，先过 isSafeAddonStoragePath 守卫（越界/非法一律 invalid-path 拒绝——普通 API 拒绝不算故障）；文件内容按 UTF-8 文本读写。",
-        "lifecycle": "目录 = <vsidian globalStorage>/addons/<addonId>（按需创建）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件停用/故障/代次终结时平台统一注销；onDidChangeFile 回调回 (相对路径, change|delete)，change 含改写与新建。",
-        "errors": "invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因）——可辨认拒绝，不抛出。"
+        "lifecycle": "目录 = <vsidian globalStorage>/addons/<addonId>（按需创建；list 对不存在目录（含根目录未建）返回空清单——未建目录 = 空存储，#461）；停用/故障/组件扩展卸载不删数据（随 Vsidian 本体卸载整体清除，重装组件数据仍在）；watcher 惰性创建、多订阅共享，组件停用/故障/代次终结时平台统一注销；onDidChangeFile 回调回 (相对路径, change|delete)，change 含改写与新建。",
+        "errors": "invalid-path（越界/非法相对路径）/ too-large（单文件超 ADDON_STORAGE_FILE_LIMIT_BYTES 8MB）/ error（IO 失败，detail 归因；list 的目标目录不存在不属 error——返回空清单，#461）——可辨认拒绝，不抛出。"
       },
       "signatures": [
         {
@@ -1005,11 +1005,11 @@
       "addonHostSettingGet": "/** 读取组合（装载器 facet 的实现体）：白名单校验 + 值解析 */\nexport function addonHostSettingGet(\n  snapshot: SettingsPayload | undefined,\n  key: string,\n): AddonHostSettingGetResult {\n  if (!isAddonHostSettingKey(key)) {\n    return { ok: false, reason: 'invalid-key' }\n  }\n  return { ok: true, value: resolveAddonHostSettingValue(snapshot, key) }\n}"
     },
     "src/shared/addonStorage.ts": {
-      "AddonStorageFacet": "/** 组件数据目录面（宿主侧 setup/enable 上下文同形状；组件页面侧经\n * channel 桥接宿主消费）。全部相对路径先过 isSafeAddonStoragePath，\n * 越界形态明确拒绝（普通 API 拒绝，不算组件故障）。 */\nexport interface AddonStorageFacet {\n  /** 本组件数据目录的 URI（显示与同步工具配置用） */\n  uri(): string\n  /** 读 UTF-8 文本文件 */\n  readFile(relativePath: string): Promise<AddonStorageResult<string>>\n  /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */\n  writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>\n  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层） */\n  list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>\n  /** 删文件（不删目录——目录生命周期归卸载策略） */\n  deleteFile(relativePath: string): Promise<AddonStorageResult<null>>\n  /** 订阅目录内文件变化（外部同步工具改写/新建文件后自动重载的支撑面）；\n   * 回调回相对路径与变化类型（change = 改写或新建，delete = 删除）；\n   * 返回取消函数；组件停用/故障/代次终结时平台统一注销 watcher */\n  onDidChangeFile(callback: (relativePath: string, kind: 'change' | 'delete') => void): AddonStorageWatchHandle\n}",
+      "AddonStorageFacet": "/** 组件数据目录面（宿主侧 setup/enable 上下文同形状；组件页面侧经\n * channel 桥接宿主消费）。全部相对路径先过 isSafeAddonStoragePath，\n * 越界形态明确拒绝（普通 API 拒绝，不算组件故障）。 */\nexport interface AddonStorageFacet {\n  /** 本组件数据目录的 URI（显示与同步工具配置用） */\n  uri(): string\n  /** 读 UTF-8 文本文件 */\n  readFile(relativePath: string): Promise<AddonStorageResult<string>>\n  /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */\n  writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>\n  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层；目标目录不\n   * 存在——含根目录未建——返回空清单：未建目录 = 空存储，#461） */\n  list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>\n  /** 删文件（不删目录——目录生命周期归卸载策略） */\n  deleteFile(relativePath: string): Promise<AddonStorageResult<null>>\n  /** 订阅目录内文件变化（外部同步工具改写/新建文件后自动重载的支撑面）；\n   * 回调回相对路径与变化类型（change = 改写或新建，delete = 删除）；\n   * 返回取消函数；组件停用/故障/代次终结时平台统一注销 watcher */\n  onDidChangeFile(callback: (relativePath: string, kind: 'change' | 'delete') => void): AddonStorageWatchHandle\n}",
       "AddonStorageResult": "export type AddonStorageResult<T> =\n  | { ok: true; value: T }\n  | { ok: false; reason: AddonStorageRejection; detail?: string }",
       "AddonStorageListResult": "export type AddonStorageListResult =\n  | { ok: true; entries: AddonStorageEntryInfo[] }\n  | { ok: false; reason: AddonStorageRejection; detail?: string }",
       "AddonStorageEntryInfo": "export interface AddonStorageEntryInfo {\n  /** 相对组件数据目录的路径（正斜杠） */\n  path: string\n  kind: 'file' | 'directory'\n}",
-      "AddonStorageRejection": "/** 拒绝码：invalid-path = 越界/非法相对路径；too-large = 单文件超限；\n * error = IO 失败（不存在/权限等，detail 归因） */\nexport type AddonStorageRejection = 'invalid-path' | 'too-large' | 'error'",
+      "AddonStorageRejection": "/** 拒绝码：invalid-path = 越界/非法相对路径；too-large = 单文件超限；\n * error = IO 失败（权限等，detail 归因）。例外：list 的目标目录不存在\n * （含存储根未建）不算 error——未建目录 = 空存储，返回空清单（#461）；\n * readFile 的文件不存在仍为 error（读不到内容无从正常化）。 */\nexport type AddonStorageRejection = 'invalid-path' | 'too-large' | 'error'",
       "isSafeAddonStoragePath": "/** 相对路径守卫：正斜杠相对路径，段非空且不为 `.`/`..`，无反斜杠、\n * 无盘符/协议头、长度有界。字面守卫是唯一防线：`%xx` 编码形态按字面\n * 目录名处理（Uri.file 不解码、`%2e%2e` 不构成 `..` 逃逸）；数据目录\n * 隔离是 API 卫生而非安全边界——组件本体是宿主侧扩展、本就握有完整\n * vscode.workspace.fs，无更高权限可越。 */\nexport function isSafeAddonStoragePath(relativePath: string): boolean {\n  if (relativePath.length === 0 || relativePath.length > 512) {\n    return false\n  }\n  if (relativePath.includes('\\\\') || relativePath.includes(':')) {\n    return false\n  }\n  if (relativePath.startsWith('/') || relativePath.includes('//')) {\n    return false\n  }\n  for (const segment of relativePath.split('/')) {\n    if (segment === '' || segment === '.' || segment === '..') {\n      return false\n    }\n  }\n  return true\n}",
       "ADDON_STORAGE_FILE_LIMIT_BYTES": "/** 单文件大小上限（字节；writeFile 拒绝超限——防滥用，正常规则文件远小于此） */\nexport const ADDON_STORAGE_FILE_LIMIT_BYTES = 8 * 1024 * 1024"
     },
