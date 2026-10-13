@@ -102,6 +102,33 @@ describe('#474 构造器：加号下拉与新建（D4/D9）', () => {
     expect(builder.ensureRendered().querySelector<HTMLButtonElement>('.vsidian-behavior-query-add')!.disabled).toBe(true)
     expect(blocks(builder)).toHaveLength(16)
   })
+
+  it('超限提示可达（评审 F1 钉住）：tooltip 挂非禁用包裹且随禁用态切换；aria 全套同步', () => {
+    const { builder } = makeBuilder()
+    const root = builder.ensureRendered()
+    const add = root.querySelector<HTMLButtonElement>('.vsidian-behavior-query-add')!
+    const wrap = root.querySelector<HTMLElement>('.vsidian-behavior-query-add-wrap')!
+    // 常态：tooltip 与 aria-label 同为「添加」，menu 触发属性在位
+    expect(wrap.dataset.tooltip).toBe('添加筛选积木')
+    expect(add.getAttribute('aria-label')).toBe('添加筛选积木')
+    expect(add.getAttribute('aria-haspopup')).toBe('menu')
+    expect(add.getAttribute('aria-expanded')).toBe('false')
+    // 打开菜单：aria-expanded 翻转
+    add.click()
+    expect(add.getAttribute('aria-expanded')).toBe('true')
+    add.click()
+    expect(add.getAttribute('aria-expanded')).toBe('false')
+    // 达上限：tooltip 载体在非禁用包裹上（disabled 按钮不派发鼠标事件），
+    // 文案切换为上限说明；aria-label 随禁用态告知原因
+    for (let i = 0; i < 16; i++) {
+      builder.addTopLevelBlock(newQueryBlock('status'))
+    }
+    const wrapAtLimit = builder.ensureRendered().querySelector<HTMLElement>('.vsidian-behavior-query-add-wrap')!
+    const addAtLimit = builder.ensureRendered().querySelector<HTMLButtonElement>('.vsidian-behavior-query-add')!
+    expect(addAtLimit.disabled).toBe(true)
+    expect(wrapAtLimit.dataset.tooltip).toBe('积木数量已达上限（16）')
+    expect(addAtLimit.getAttribute('aria-label')).toBe('积木数量已达上限（16）')
+  })
 })
 
 describe('#474 构造器：就地编辑与选中（D8）', () => {
