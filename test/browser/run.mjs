@@ -100,6 +100,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'addonHotSwitch',
   // T08（#357）：行为冲突管理（注册行为调序/逐项开关——真实键盘 + 绘制层）
   'addonT08BehaviorsManage',
+  // #474：行为管理分页与积木筛选（分页控件/积木键盘构建/发光选中/toast
+  // 倒计时条——真实键盘 + 绘制层 + 视图持久往返）紧随 T08（同行为族）
+  'behaviorManagePagination',
   // #359 T10：组件命令/菜单/统一快捷键（生产命令注册表装配——真实键盘
   // 默认绑定/绑定/清空、真实右键组件簇菜单与点击执行、宿主转发路径、
   // 停用回收）紧随附加组件族
