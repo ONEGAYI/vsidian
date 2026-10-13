@@ -636,6 +636,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     // T07（#356）行为注册整组注销（opId 分配器随卸载解绑——释放后该组件
     // 的行为不再有可注入来源，提交路径结构上不可用）
     env.addonBehaviors?.unregisterAddon(loadRecord.addonId)
+    // #476 行为禁用态订阅整组件回收（查询不受影响——迟到调用返回最后
+    // 已知快照；订阅不滞留进已脱离 active 的旧代次闭包）
+    env.addonBehaviorEnabledState?.releaseAddon(loadRecord.addonId)
     // T10（#359）命令与菜单整组件回收（本页闭环——不依赖宿主消息到达）：
     // 撤命令、菜单与运行期操作表，并向宿主上报空表
     if (env.addonCommands) {

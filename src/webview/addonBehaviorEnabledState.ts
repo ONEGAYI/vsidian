@@ -80,4 +80,12 @@ export class AddonBehaviorEnabledStateRuntime {
       target.delete(callback)
     }
   }
+
+  /** 整组件订阅回收（装载器 releaseLoad 驱动——卸载/故障/换代）：该组件
+   *  的全部订阅就地移除，不依赖组件自觉退订（与 behaviors/commands/
+   *  renderers/ui 四面的整组件回收同款口径）。查询不受影响——已释放
+   *  代次的迟到 enabledState 仍返回最后已知快照（只读无副作用）。 */
+  releaseAddon(addonId: string): void {
+    this.listeners.delete(addonId)
+  }
 }

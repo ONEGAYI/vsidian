@@ -74,6 +74,11 @@ class EventInbox {
     return fresh
   }
 
+  /** 缓冲内是否存在匹配事件（负向断言用——如面缺失的 missing 上报） */
+  has(match: (e: BstateEvent) => boolean): boolean {
+    return this.buffer.some(match)
+  }
+
   /** 等待匹配事件出现（缓冲内查找；等待期间持续拉取） */
   async take(match: (e: BstateEvent) => boolean, timeoutMs = 20000): Promise<BstateEvent> {
     return poll('目标事件', async () => {
@@ -163,11 +168,14 @@ export const addonBehaviorStateCases: Array<[string, () => Promise<void>]> = [
   ['附加组件 #476：编辑器页行为禁用态快照与订阅（单项禁用落库后即时），#476', async () => {
     await ensureEnabled()
     await resetBehaviorState()
-    await resetDocAndOpen('bstate-editor.md', 'word\n')
+    // 收件箱清空先于装载动作（装载链的 initial 上报必然产生于装载之后，
+    // 清箱晚于装载会在快机上把已到达的 initial 清掉——假阴性竞态）
     await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
+    await resetDocAndOpen('bstate-editor.md', 'word\n')
 
-    // 装载即上报初值：编辑器页 SDK behaviorState 可用，广播先于装载指令
-    // 到达（工厂执行时已持宿主权威值——enabled + 空 disabled）
+    // 装载即上报初值：编辑器页 SDK behaviorState 可用的证据（快照形态
+    // 正确；权威值的时序到达由下方 change 事件的字段值承担——reset 后
+    // 的默认态与广播未到回落态在此不可区分，不作时序断言）
     const inbox = new EventInbox()
     const initial = await inbox.take((e) => e.topic === 'initial' && e.page === 'editor')
     assert(initial.state?.addonRunState === 'enabled', `初值 addonRunState 应为 enabled：${JSON.stringify(initial)}`)
@@ -176,7 +184,7 @@ export const addonBehaviorStateCases: Array<[string, () => Promise<void>]> = [
 
     // 面未装配的负向可见性：missing 事件出现即失败（夹具只在面缺失时上报）
     await inbox.pull()
-    assert(!inbox.buffer.some((e) => e.topic === 'missing'), 'behaviorState 面应在编辑器页提供（未收到 missing 上报）')
+    assert(!inbox.has((e) => e.topic === 'missing'), 'behaviorState 面应在编辑器页提供（未收到 missing 上报）')
 
     // 键载体行为注册在目录（demo-rule 经编辑器页 behaviors.register）
     await poll('键载体行为注册对账', async () => {
@@ -187,16 +195,16 @@ export const addonBehaviorStateCases: Array<[string, () => Promise<void>]> = [
 
     // 单项禁用落库 → 广播即时到达：页面收到本组件局部 id（完整键已剥离）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DEMO], disabled: true })
-    const disabledEvent = await inbox.take((e) => e.topic === 'change' && e.page === 'editor' && e.state?.disabled?.includes('demo-rule'))
+    const disabledEvent = await inbox.take((e) => e.topic === 'change' && e.page === 'editor' &&
+      Array.isArray(e.state?.disabled) && e.state.disabled.includes('demo-rule'))
     assert(disabledEvent.state?.addonRunState === 'enabled', `单项禁用时组件运行态应保持 enabled：${JSON.stringify(disabledEvent)}`)
     assert(!disabledEvent.state!.disabled!.some((id) => id.includes('#') || id.includes(ADDON_ID)),
       `disabled 应为本组件局部 id（不含完整键）：${JSON.stringify(disabledEvent.state)}`)
 
-    // 恢复开启 → 消息即时到达（disabled 回空）
+    // 恢复开启 → 消息即时到达（disabled 回空；谓词即断言，超时即失败）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DEMO], disabled: false })
-    const restored = await inbox.take((e) => e.topic === 'change' && e.page === 'editor' &&
+    await inbox.take((e) => e.topic === 'change' && e.page === 'editor' &&
       e.state?.addonRunState === 'enabled' && Array.isArray(e.state?.disabled) && e.state.disabled.length === 0)
-    assert(restored !== undefined, '恢复开启后应收到 disabled 回空的 change 事件')
 
     await resetBehaviorState()
     await closeAllEditors()
@@ -205,10 +213,12 @@ export const addonBehaviorStateCases: Array<[string, () => Promise<void>]> = [
   ['附加组件 #476：设置页挂面与停用后仍可查询（灰态场景），#476', async () => {
     await ensureEnabled()
     await resetBehaviorState()
-    // 组件设置页装载前先打开 Vsidian 设置页面板（挂载容器在场）
+    // 组件设置页装载前先打开 Vsidian 设置页面板（挂载容器在场）；收件箱
+    // 清空先于装载动作（initial 上报必然产生于装载之后——清箱晚于装载
+    // 会在快机上把已到达的 initial 清掉）
     await openSettingsPageBeside()
-    await vscode.commands.executeCommand('onegayi.vsidian._test.addonOpenSettingsPage', { addonId: ADDON_ID })
     await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonOpenSettingsPage', { addonId: ADDON_ID })
 
     // 设置页挂面：装载即上报初值（initial 事件经 setup scope 通道回宿主）
     const inbox = new EventInbox()
@@ -218,20 +228,32 @@ export const addonBehaviorStateCases: Array<[string, () => Promise<void>]> = [
       `设置页初值 disabled 应为空：${JSON.stringify(initial)}`)
 
     // 停用组件：设置页不卸载（desiredSettingsLoad 只挡 faulted），页面
-    // 收到 user-disabled 的即时通知——停用灰态事实对组件页可见
+    // 收到 user-disabled 的即时通知——停用灰态事实对组件页可见（事件
+    // 携带完整快照：disabled 为数组即 enabledState 同源形态——停用后仍
+    // 可由订阅路径读到查询同源的值）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: false })
     const disabled = await inbox.take((e) => e.topic === 'change' && e.page === 'settings' && e.state?.addonRunState === 'user-disabled')
-    assert(disabled.state !== null, '停用 change 事件应携带快照（enabledState 同源——停用后仍可查询的证据）')
+    assert(Array.isArray(disabled.state?.disabled), `停用 change 事件快照应含 disabled 数组：${JSON.stringify(disabled)}`)
 
     // 设置页面板仍在场（不随停用卸载）
     const info = (await vscode.commands.executeCommand('onegayi.vsidian._test.settingsPageInfo')) as { open: boolean }
     assert(info.open, '停用后设置页面板应保持打开（不卸载）')
 
-    // 恢复启用 → 即时通知回到 enabled
+    // 恢复启用 → 即时通知回到 enabled（谓词即断言，超时即失败）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: true })
-    const restored = await inbox.take((e) => e.topic === 'change' && e.page === 'settings' && e.state?.addonRunState === 'enabled')
-    assert(restored.state !== null, '恢复启用后应收到 enabled 的 change 事件')
+    await inbox.take((e) => e.topic === 'change' && e.page === 'settings' && e.state?.addonRunState === 'enabled')
 
+    // 停用状态下**新装载**的设置页：工厂初值即读到 user-disabled（广播
+    // 先于装载指令到达——停用灰态对首帧就成立，不等下一次状态变化）
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: false })
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonCloseSettingsPage')
+    await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonOpenSettingsPage', { addonId: ADDON_ID })
+    const reopened = await inbox.take((e) => e.topic === 'initial' && e.page === 'settings' && e.state?.addonRunState === 'user-disabled')
+    assert(Array.isArray(reopened.state?.disabled), `停用态新装载初值快照应含 disabled 数组：${JSON.stringify(reopened)}`)
+
+    // 收尾恢复：停用偏好与组件设置页关闭（防跨用例污染）
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: true })
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonCloseSettingsPage')
     await closeSettingsPage()
     await resetBehaviorState()

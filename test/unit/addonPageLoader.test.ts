@@ -1045,14 +1045,24 @@ describe('#476 行为禁用态只读面（behaviorState）：编辑器页与设�
     expect(facet).toBeUndefined()
   })
 
-  it('卸载后查询仍返回最后已知快照、订阅静默（只读面无副作用——不发明拒绝形态）', async () => {
+  it('卸载后查询仍返回最后已知快照、订阅被整组件回收（四面回收同款——不依赖组件自觉退订）', async () => {
     const runtime = new AddonBehaviorEnabledStateRuntime()
     const h = harness({ addonBehaviorEnabledState: runtime })
     let facet: import('../../src/shared/addonBehaviors').AddonBehaviorStateFacet | undefined
-    registerFactory(h, (sdk) => { facet = sdk.behaviorState })
+    const notified: unknown[] = []
+    registerFactory(h, (sdk) => {
+      facet = sdk.behaviorState
+      facet?.onEnabledChange((state) => notified.push(state))
+    })
     await h.handle.load(manifest())
     runtime.applyBroadcast({ disabled: [], addons: [{ addonId: ADDON_ID, addonRunState: 'user-disabled' }] })
+    expect(notified).toEqual([{ addonRunState: 'user-disabled', disabled: [] }])
     await h.handle.unload(ADDON_ID, 1)
     expect(facet!.enabledState()).toEqual({ addonRunState: 'user-disabled', disabled: [] })
+    // 卸载后广播仍到达页面级 runtime：查询路径返回最后已知值，旧代次的
+    // 滞留订阅不再分发（releaseLoad 已整组件回收——闭包不滞留）
+    runtime.applyBroadcast({ disabled: [], addons: [{ addonId: ADDON_ID, addonRunState: 'enabled' }] })
+    expect(notified).toEqual([{ addonRunState: 'user-disabled', disabled: [] }])
+    expect(facet!.enabledState()).toEqual({ addonRunState: 'enabled', disabled: [] })
   })
 })

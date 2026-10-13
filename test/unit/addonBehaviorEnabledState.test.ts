@@ -150,4 +150,28 @@ describe('#476 webview 行为禁用态 runtime（快照缓存与订阅分发）'
     })).not.toThrow()
     expect(ok).toEqual(['user-disabled'])
   })
+
+  it('整组件订阅回收（releaseAddon）：该组件订阅不再分发，他组件不受影响；查询不受影响', () => {
+    const runtime = new AddonBehaviorEnabledStateRuntime()
+    const seenA: string[] = []
+    const seenB: string[] = []
+    runtime.onEnabledChangeOf(ADDON_A, (state) => seenA.push(state.addonRunState))
+    runtime.onEnabledChangeOf(ADDON_B, (state) => seenB.push(state.addonRunState))
+    runtime.releaseAddon(ADDON_A)
+    runtime.applyBroadcast({
+      disabled: [],
+      addons: [
+        { addonId: ADDON_A, addonRunState: 'user-disabled' },
+        { addonId: ADDON_B, addonRunState: 'user-disabled' },
+      ],
+    })
+    expect(seenA).toEqual([]) // 已回收：不分发
+    expect(seenB).toEqual(['user-disabled']) // 他组件订阅不受影响
+    // 查询路径不受回收影响：仍可读取快照（只读面）
+    expect(runtime.enabledStateOf(ADDON_A)).toEqual({ addonRunState: 'user-disabled', disabled: [] })
+    // 回收后可重新订阅（换代重装载场景）
+    runtime.onEnabledChangeOf(ADDON_A, (state) => seenA.push(state.addonRunState))
+    runtime.applyBroadcast({ disabled: [], addons: [{ addonId: ADDON_A, addonRunState: 'enabled' }] })
+    expect(seenA).toEqual(['enabled'])
+  })
 })
