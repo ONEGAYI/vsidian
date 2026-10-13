@@ -1035,9 +1035,16 @@ export const en = {
   'defaultEditor.statusOther': 'Another extension: {name}',
   'defaultEditor.statusNone': 'No association recorded — VSCode picks the editor when a Markdown file opens',
   'defaultEditor.fixButton': 'Set as Default',
-  /** #350 T01 附加组件：设置页「附加组件」分页（状态列表与 VSCode 管理入口） */
+  /** #350 T01 附加组件：设置页「附加组件」分页（状态列表与 VSCode 管理入口）。
+   *  #465 IA 分页起本页收敛为组件级管理，行为管理独立成页 */
   'settings.addonsSection': 'Add-ons',
   'settings.addonsSectionDescription': 'Vsidian add-ons are separate VSCode extensions. Install, uninstall and disable them in VSCode; their capabilities register through the add-on API. The add-on API is still a draft.',
+  /** #465/#466 输入行为管理独立分页（原「Behavior conflicts」更名迁出） */
+  'settings.addonsBehaviorsSection': 'Input behaviors',
+  'settings.addonsBehaviorsSectionDescription': 'Manage input behaviors registered by add-ons: applicable behaviors trigger in order by default; reorder them or turn off individual ones. Turning off one item does not disable the whole add-on.',
+  /** #465 组件设置独立分页（附加组件页禁现组件设置项——通道堵死） */
+  'settings.addonSettingsSection': 'Add-on settings',
+  'settings.addonSettingsSectionDescription': 'Open the basic settings or the custom settings page of an add-on; enter from the Add-ons page, sidebar entries, or the list below.',
   'addons.groupOfficial': 'Core add-ons',
   'addons.groupThirdParty': 'Third-party add-ons',
   'addons.empty': 'No Vsidian add-ons are visible in the current extension host.',
@@ -1070,7 +1077,7 @@ export const en = {
   // ---- #353 T04 basic settings area (scope tabs / basic controls / save notice) ----
   'addons.openSettingsArea': 'Settings',
   'addons.settingsAreaTitle': 'Basic settings: {label}',
-  'addons.closeSettingsArea': 'Close basic settings',
+  'addons.closeSettingsArea': 'Back to add-on list',
   'addons.scopeUserDefault': 'User default',
   'addons.scopeWorkspace': 'Current workspace',
   'addons.noWorkspaceHint': 'No workspace open — the workspace scope is unavailable',
@@ -1092,6 +1099,9 @@ export const en = {
   'addons.saveFailedRejected': 'Add-on generation ended',
   'addons.openCustomPage': 'Open custom settings page',
   'addons.settingsEmpty': 'This add-on registered no setting definitions',
+  /** #465 组件设置分页：组件清单（hub）形态 */
+  'addons.settingsHubTitle': 'Configurable add-ons',
+  'addons.settingsHubEmpty': 'No configurable add-ons yet. Add-ons appear here once they register setting definitions or provide a settings page.',
   'addons.faultedSettingsHint': 'Add-on faulted (suspended) — the custom settings page is withdrawn; adjust parameters with the basic controls, then retry from the add-on list',
   /** #354 T05 侧栏三组结构（选项/核心组件/第三方组件）与故障排障入口 */
   'settings.sidebarOptions': 'Options',
@@ -1105,9 +1115,9 @@ export const en = {
   'addons.retryFaulted': 'Retry add-on',
   'addons.faultTroubleshootTitle': 'Add-on faulted',
   'addons.faultTroubleshootHint': 'Running contributions of this add-on are suspended and its custom settings page is withdrawn. Basic controls below remain usable when definitions exist; full diagnostics arrive with later versions.',
-  // T08（#357）行为冲突管理：注册行为的调序与逐项开关
-  'addons.behaviorsGroupTitle': 'Behavior conflicts',
-  'addons.behaviorsGroupHint': 'Manage input behaviors registered by add-ons: applicable behaviors trigger in order by default; reorder them or turn off individual ones. Turning off one behavior keeps the rest of the add-on running.',
+  // T08（#357）输入行为管理（#465 起独立分页；#466 更名——组头标注清单
+  // 范围，页标题与管理说明在 settings.addonsBehaviorsSection* 词条）
+  'addons.behaviorsListTitle': 'Registered behaviors',
   'addons.behaviorsLoading': 'Loading registered behaviors…',
   'addons.behaviorsEmpty': 'No registered input behaviors yet. Behaviors registered by add-ons appear here once a document is open.',
   'addons.behaviorsOwnerLabel': 'Add-on: {label}',

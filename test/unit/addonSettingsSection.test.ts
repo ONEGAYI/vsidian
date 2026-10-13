@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-// #350 T01 设置页「附加组件」分页呈现契约：状态列表的**用户可见文本**
-// （注册/唤醒/不兼容含声明范围/激活失败含原因/当前宿主不可用不冒充未安
-// 装）、官方与第三方分组、空态、API 版本草案标注、市场搜索与 VSCode 扩
-// 展管理按钮的消息上送。装配口径与生产 settingsMain.ts 同构。
-import { describe, it, expect, vi, afterEach } from 'vitest'
+// #350 T01 设置页「附加组件」分页呈现契约（#465 二轮起本页收敛为组件级
+// 管理并**通道堵死**）：状态列表的用户可见文本（注册/唤醒/不兼容含声明范
+// 围/激活失败含原因/当前宿主不可用不冒充未安装）、官方与第三方分组、空
+// 态、API 版本草案标注、市场搜索与 VSCode 扩展管理按钮的消息上送、设置
+// 类入口的跨分页导航（附加组件页不承载任何组件设置内容——守护契约）。
+// 组件设置分页侧见 addonSettingsArea.test.ts；行为管理分页侧见
+// addonBehaviorManageSection.test.ts。装配口径与生产 settingsMain.ts 同构。
+import { describe, it, expect, vi } from 'vitest'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
@@ -15,39 +18,55 @@ import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
 import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
 import { AddonSection, ADDONS_SECTION_LIST_ENTRY, ADDONS_SECTION_MANAGE_ENTRY } from '../../src/webview/addonSettingsSection'
+import { AddonBehaviorManageSection } from '../../src/webview/addonBehaviorManageSection'
+import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from '../../src/webview/addonSettingsAreaSection'
 
 installLocale('zh-cn', zhCn)
 
 function makeView(addonSettingsHost?: HTMLElement): {
   view: SettingsPageView
   addons: AddonSection
+  behaviors: AddonBehaviorManageSection
+  settingsArea: AddonSettingsAreaSection
   dispatch(message: unknown): void
   sent: unknown[]
   parent: HTMLElement
+  /** 微任务收敛（生产 settingsMain 的导航回调同口径——见 wiring 注释） */
+  settle(): Promise<void>
 } {
   const sent: unknown[] = []
   const bridge = { postMessage: (m: unknown) => sent.push(m) }
   // #354 T05 侧栏联动中转（与生产 settingsMain 同构：分页经回调触发
-  // 视图 refreshSidebar 重建侧栏大组）
+  // 视图 refreshSidebar 重建侧栏大组）；#465 跨分页导航经微任务延迟
+  // （navigate 回调在 mount 内触发时避免嵌套重渲染——生产同款）
   let refreshSidebar: () => void = () => {}
-  const addons = new AddonSection(bridge, addonSettingsHost, () => refreshSidebar())
+  let navigateToAddonSettings: () => void = () => {}
+  const addons = new AddonSection(bridge, () => refreshSidebar(), () => navigateToAddonSettings())
+  const behaviors = new AddonBehaviorManageSection(bridge)
+  const settingsArea = new AddonSettingsAreaSection(bridge, addonSettingsHost)
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
       new AppearanceSection(new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge)),
       new IndexMaintenanceSection(bridge),
       addons,
+      behaviors,
+      settingsArea,
     ],
     [], [])
   refreshSidebar = () => view.refreshSidebar()
+  navigateToAddonSettings = () => queueMicrotask(() => view.selectSection(ADDON_SETTINGS_SECTION_ID))
   const parent = document.createElement('div')
   view.mount(parent)
   return {
-    view, addons, sent, parent,
+    view, addons, behaviors, settingsArea, sent, parent,
     dispatch: (message: unknown) => {
       view.handleHostMessage(message)
       addons.handleHostMessage(message)
+      behaviors.handleHostMessage(message)
+      settingsArea.handleHostMessage(message)
     },
+    settle: () => Promise.resolve(),
   }
 }
 
@@ -242,7 +261,130 @@ describe('附加组件分页入口与消息上送', () => {
   })
 })
 
-// ---- #351 T02：运行生命周期（功能开关 / 组件设置页挂载区 / 故障态） ----
+// ---- #465 二轮：通道堵死与跨分页导航（守护契约） ----
+
+describe('附加组件分页：通道堵死与设置入口导航（#465）', () => {
+  /** 构造打开指定组件基础设置区的 addons.settingsState 推送 */
+  function settingsStatePush(harness: ReturnType<typeof makeView>, open: string | null): void {
+    const message = {
+      kind: 'addons.settingsState',
+      apiVersion: '1.0.0',
+      draft: true,
+      open,
+      hasWorkspace: false,
+      addon: open === null ? null : {
+        addonId: open,
+        label: 'Demo',
+        faulted: false,
+        hasCustomPage: false,
+        enabled: { effective: true, userExplicit: true, workspaceExplicit: null, source: 'user' },
+        definitions: [
+          { key: 'flag', title: '开关项', type: 'boolean', default: true },
+          { key: 'replacements', title: '替换规则', type: 'array', items: { kind: 'string', maxLength: 10 }, default: ['旧→新'] },
+          {
+            key: 'limits', title: '对象样例', type: 'object',
+            fields: [
+              { key: 'name', title: '名称', kind: 'string', maxLength: 10, default: 'demo' },
+              { key: 'count', title: '数量', kind: 'number', min: 0, max: 9, default: 3 },
+            ],
+          },
+        ],
+        values: {
+          flag: { effective: true, source: 'default' },
+          replacements: { effective: ['旧→新'], source: 'default' },
+          limits: { effective: { name: 'demo', count: 3 }, source: 'default' },
+        },
+      },
+      openAddonSettingsPage: null,
+    }
+    if (!isHostToWebview(message)) {
+      throw new Error('addons.settingsState 载荷未通过协议守卫')
+    }
+    harness.dispatch(message)
+  }
+
+  it('守护契约：设置载荷在场时附加组件页仍恒为管理视图，不渲染任何组件设置内容', () => {
+    const host = document.createElement('div')
+    const harness = makeView(host)
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true, hasSettingsPage: true },
+    ], 'fixture.demo'))
+    settingsStatePush(harness, 'fixture.demo')
+    // 管理视图恒在场（启用开关与入口可见）
+    expect(harness.parent.querySelector('.vsidian-addons-list')).not.toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-actions')).not.toBeNull()
+    // 通道堵死：任何组件设置内容不得在本页渲染（基础设置区/挂载区/设置
+    // 控件/作用范围标签一律缺席——组件设置分页承载）。数组/对象控件的
+    // data 契约与 boolean 不同（data-addon-array-item / data-addon-field，
+    // 均不带 data-addon-setting），须按族钉住；hub 清单同理不得回潮本页
+    expect(harness.parent.querySelector('.vsidian-addons-settings')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-addonpage')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-scope-tabs')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-settings-hub')).toBeNull()
+    expect(harness.parent.querySelector('[data-addon-setting]')).toBeNull()
+    expect(harness.parent.querySelector('[data-addon-array-item]')).toBeNull()
+    expect(harness.parent.querySelector('[data-addon-field]')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-array')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-object')).toBeNull()
+    expect(harness.parent.querySelector('.vsidian-addons-clear-override')).toBeNull()
+    // 同一载荷下「组件设置」分页正常承载（对侧正例——三族控件齐在场）
+    harness.view.selectSection(ADDON_SETTINGS_SECTION_ID)
+    expect(harness.parent.querySelector('.vsidian-addons-settings')).not.toBeNull()
+    expect(harness.parent.querySelector('[data-addon-setting]')).not.toBeNull()
+    expect(harness.parent.querySelector('[data-addon-array-item]')).not.toBeNull()
+    expect(harness.parent.querySelector('[data-addon-field]')).not.toBeNull()
+  })
+
+  it('守护契约：本页不消费 addons.behaviors（行为区在独立分页呈现）', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    expect(harness.parent.querySelector('.vsidian-addons-behaviors')).toBeNull()
+    expect(harness.parent.querySelector('[data-behavior-key]')).toBeNull()
+  })
+
+  it('行内「设置」入口：上送 settingsOpen 并导航到「组件设置」分页', async () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    const open = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '设置')
+    expect(open).toBeTruthy()
+    open!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: 'fixture.demo' })
+    await harness.settle()
+    expect(harness.parent.querySelector('.vsidian-settings-heading')?.textContent).toBe('组件设置')
+    expect(harness.parent.querySelector('.vsidian-addons-list')).toBeNull()
+  })
+
+  it('行内「打开组件设置页」入口：上送 openAddonPage 并导航到「组件设置」分页', async () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
+    ]))
+    const open = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '打开组件设置页')
+    expect(open).toBeTruthy()
+    open!.click()
+    expect(harness.sent).toContainEqual({ kind: 'addons.openAddonPage', addonId: 'fixture.demo' })
+    await harness.settle()
+    expect(harness.parent.querySelector('.vsidian-settings-heading')?.textContent).toBe('组件设置')
+  })
+
+  it('无设置能力组件不显示设置类入口（仅开关/详情/重试）', () => {
+    const harness = makeView()
+    openAddonsPage(harness)
+    harness.dispatch(addonsState([
+      { id: 'fixture.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+    ]))
+    const buttons = [...harness.parent.querySelectorAll('button')].map((b) => b.textContent)
+    expect(buttons).not.toContain('设置')
+    expect(buttons).not.toContain('打开组件设置页')
+  })
+})
+
+// ---- #351 T02：运行生命周期（功能开关 / 故障态） ----
 
 describe('附加组件分页：功能开关与运行状态（T02）', () => {
   it('已启用组件显示「停用」按钮与「已启用」状态句；点击上送 setEnabled(false)', () => {
@@ -299,104 +441,25 @@ describe('附加组件分页：功能开关与运行状态（T02）', () => {
   })
 })
 
-describe('附加组件分页：组件设置页入口与挂载区（T02）', () => {
-  it('hasSettingsPage 时显示「打开组件设置页」按钮；点击上送 openAddonPage', () => {
-    const harness = makeView()
-    openAddonsPage(harness)
-    harness.dispatch(addonsState([
-      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
-    ]))
-    const open = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '打开组件设置页')
-    expect(open).toBeTruthy()
-    open!.click()
-    expect(harness.sent).toContainEqual({ kind: 'addons.openAddonPage', addonId: 'fixture.demo' })
-  })
-
-  it('无设置页或故障暂停时不显示打开入口', () => {
-    const harness = makeView()
-    openAddonsPage(harness)
-    harness.dispatch(addonsState([
-      { id: 'fixture.none', label: 'None', official: false, status: 'registered', enabled: true },
-      { id: 'fixture.faulted', label: 'Faulted', official: false, status: 'registered', enabled: true, fault: { reason: 'x' }, hasSettingsPage: false },
-    ]))
-    const buttons = [...harness.parent.querySelectorAll('button')].map((b) => b.textContent)
-    expect(buttons).not.toContain('打开组件设置页')
-  })
-
-  it('openAddonSettingsPage 时渲染挂载区（标题 + 关闭按钮 + host 移入分页）', () => {
-    const host = document.createElement('div')
-    const mounted = document.createElement('button')
-    mounted.textContent = '组件内容'
-    host.appendChild(mounted)
-    const harness = makeView(host)
-    openAddonsPage(harness)
-    harness.dispatch(addonsState([
-      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
-    ], 'fixture.demo'))
-    const wrap = harness.parent.querySelector('.vsidian-addons-addonpage')
-    expect(wrap).toBeTruthy()
-    expect(wrap!.textContent).toContain('组件设置页：Demo')
-    // host（含组件挂载内容）被移入分页，子树保留
-    expect(wrap!.contains(host)).toBe(true)
-    expect(wrap!.contains(mounted)).toBe(true)
-    const close = [...wrap!.querySelectorAll('button')].find((b) => b.textContent === '关闭组件设置页')
-    expect(close).toBeTruthy()
-    close!.click()
-    expect(harness.sent).toContainEqual({ kind: 'addons.closeAddonPage' })
-  })
-
-  it('状态推送重渲染只移动 host 节点，不清空组件挂载内容', () => {
-    const host = document.createElement('div')
-    const mounted = document.createElement('span')
-    mounted.textContent = '组件内容'
-    host.appendChild(mounted)
-    const harness = makeView(host)
-    openAddonsPage(harness)
-    harness.dispatch(addonsState([
-      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
-    ], 'fixture.demo'))
-    harness.dispatch(addonsState([
-      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
-    ], 'fixture.demo'))
-    const wrap = harness.parent.querySelector('.vsidian-addons-addonpage')
-    expect(wrap).toBeTruthy()
-    expect(wrap!.contains(mounted)).toBe(true)
-  })
-
-  it('openAddonSettingsPage 终结（null）后挂载区消失，host 移出分页但内容保留', () => {
-    const host = document.createElement('div')
-    const mounted = document.createElement('span')
-    mounted.textContent = '组件内容'
-    host.appendChild(mounted)
-    const harness = makeView(host)
-    openAddonsPage(harness)
-    harness.dispatch(addonsState([
-      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
-    ], 'fixture.demo'))
-    harness.dispatch(addonsState([
-      { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
-    ], null))
-    expect(harness.parent.querySelector('.vsidian-addons-addonpage')).toBeNull()
-    expect(harness.parent.contains(host)).toBe(false)
-    expect(host.contains(mounted)).toBe(true)
-  })
-})
-
 // ---- #354 T05：侧栏三组结构（选项 / 核心组件 / 第三方组件） ----
 
 describe('设置页侧栏三组结构（T05）', () => {
-  it('「选项」大组恒在场并收纳现有内置分页与「附加组件」管理分页', () => {
+  it('「选项」大组恒在场并收纳现有内置分页与附加组件域三个管理分页', () => {
     const harness = makeView()
     const nav = harness.parent.querySelector('nav')
     const optionsLabel = nav?.querySelector('.vsidian-settings-nav-group-label')
     expect(optionsLabel?.textContent).toBe('选项')
     const optionsSection = optionsLabel?.closest('.vsidian-settings-nav-section')
     // 现有内置分页（常规/编辑器/快捷键/外观/文件与链接/实验性功能）与
-    // 「附加组件」管理分页都在「选项」大组内
+    // 附加组件域三分页（附加组件/输入行为管理/组件设置）都在「选项」大组内
     const itemTexts = [...(optionsSection?.querySelectorAll('.vsidian-settings-nav-item') ?? [])].map((b) => b.textContent)
-    for (const expected of ['常规', '编辑器', '快捷键', '外观', '文件与链接', '实验性功能', '附加组件']) {
+    for (const expected of ['常规', '编辑器', '快捷键', '外观', '文件与链接', '实验性功能', '附加组件', '输入行为管理', '组件设置']) {
       expect(itemTexts.some((text) => text?.includes(expected))).toBe(true)
     }
+    // 附加组件域三分页相邻且按约定顺序
+    const ids = itemTexts.map((text) => text)
+    expect(ids.indexOf('附加组件')).toBeLessThan(ids.indexOf('输入行为管理'))
+    expect(ids.indexOf('输入行为管理')).toBeLessThan(ids.indexOf('组件设置'))
   })
 
   it('核心/第三方两大组恒在场（空清单也不消失），官方与第三方组件归位准确', () => {
@@ -471,7 +534,7 @@ describe('设置页侧栏三组结构（T05）', () => {
     expect(sections[2]?.querySelector('.vsidian-settings-nav-empty')?.textContent).toContain('暂无')
   })
 
-  it('侧栏组件条目点击：进入附加组件分页、打开该组件设置区并定位列表行', () => {
+  it('侧栏可配置组件条目点击：打开设置区并导航到「组件设置」分页', async () => {
     const harness = makeView()
     harness.dispatch(addonsState([
       { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
@@ -480,16 +543,13 @@ describe('设置页侧栏三组结构（T05）', () => {
     const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Demo'))
     expect(item).toBeTruthy()
     item!.click()
-    // 打开该组件基础设置区（停用后仍可配置——ADR Q23）
+    // 打开该组件基础设置区（停用后仍可配置——ADR Q23）并离开本页
     expect(harness.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: 'a.demo' })
-    // 列表行定位（located 类）
-    const list = harness.parent.querySelector('.vsidian-addons-list')
-    expect(list?.querySelector('.vsidian-settings-item-located .vsidian-settings-item-title')?.textContent).toContain('Demo')
-    // #462 层级互斥：定位组件时高亮只落条目行，列表容器不套区块级描边
-    expect(list?.classList.contains('vsidian-settings-item-located')).toBe(false)
+    await harness.settle()
+    expect(harness.parent.querySelector('.vsidian-settings-heading')?.textContent).toBe('组件设置')
   })
 
-  it('无定义且无设置页的组件条目点击只定位列表行（不强开设置区）', () => {
+  it('无定义且无设置页的组件条目点击只定位列表行（不导航、不强开设置区）', async () => {
     const harness = makeView()
     harness.dispatch(addonsState([
       { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
@@ -498,6 +558,8 @@ describe('设置页侧栏三组结构（T05）', () => {
     const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Plain'))
     item!.click()
     expect(harness.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toEqual([])
+    await harness.settle()
+    expect(harness.parent.querySelector('.vsidian-settings-heading')?.textContent).toBe('附加组件')
     // 定位落在条目行上（.vsidian-settings-item），容器本身不带 located
     const list = harness.parent.querySelector('.vsidian-addons-list')
     const locatedRow = harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')
@@ -519,16 +581,12 @@ describe('设置页侧栏三组结构（T05）', () => {
   })
 })
 
-// ---- #462：定位高亮层级互斥与一次性退场（跳转落点 = 一次性导航反馈） ----
+// ---- #462：定位高亮层级互斥与一次性退场（纯运行组件 = 条目级唯一载体） ----
 
 describe('定位高亮层级互斥与一次性退场（#462）', () => {
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  function locateBySidebar(harness: ReturnType<typeof makeView>, label: string): void {
+  function locatePlainBySidebar(harness: ReturnType<typeof makeView>): void {
     const nav = harness.parent.querySelector('nav')
-    const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes(label))
+    const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Plain'))
     expect(item).toBeTruthy()
     item!.click()
   }
@@ -536,7 +594,7 @@ describe('定位高亮层级互斥与一次性退场（#462）', () => {
   it('list 级定位：高亮落列表容器本身，不落到条目行（互斥另一半）', () => {
     const harness = makeView()
     harness.dispatch(addonsState([
-      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true },
+      { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
     ]))
     // 全局搜索命中「附加组件」list 入口 → render('list') 定位列表容器
     const search = harness.parent.querySelector<HTMLInputElement>('input.vsidian-settings-search')
@@ -553,46 +611,54 @@ describe('定位高亮层级互斥与一次性退场（#462）', () => {
 
   it('定位高亮一次性退场：约 1.5s 后摘除类，后续推送重渲染不再重现', () => {
     vi.useFakeTimers()
-    const harness = makeView()
-    harness.dispatch(addonsState([
-      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-    ]))
-    locateBySidebar(harness, 'Demo')
-    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
-    vi.advanceTimersByTime(1500)
-    // 退场：已渲染的高亮类被摘除（定位态清空）
-    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
-    // 此后推送重渲染不重现（locatedAddonId 已清，不再是持久标记）
-    harness.dispatch(addonsState([
-      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-    ]))
-    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
-    expect(harness.parent.querySelector('.vsidian-addons-list')?.classList.contains('vsidian-settings-item-located')).toBe(false)
+    try {
+      const harness = makeView()
+      harness.dispatch(addonsState([
+        { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+      ]))
+      locatePlainBySidebar(harness)
+      expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
+      vi.advanceTimersByTime(1500)
+      // 退场：已渲染的高亮类被摘除（定位态清空）
+      expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
+      // 此后推送重渲染不重现（locatedAddonId 已清，不再是持久标记）
+      harness.dispatch(addonsState([
+        { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+      ]))
+      expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
+      expect(harness.parent.querySelector('.vsidian-addons-list')?.classList.contains('vsidian-settings-item-located')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('退场时限内的推送重渲染保持高亮且不叠容器描边；重新定位可再次呈现', () => {
     vi.useFakeTimers()
-    const harness = makeView()
-    harness.dispatch(addonsState([
-      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-    ]))
-    locateBySidebar(harness, 'Demo')
-    // 时限内的推送（定位后应答回灌）重渲染：条目行高亮保持，容器仍不带
-    harness.dispatch(addonsState([
-      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-    ]))
-    const list = harness.parent.querySelector('.vsidian-addons-list')
-    expect(list?.classList.contains('vsidian-settings-item-located')).toBe(false)
-    expect(list?.querySelector('.vsidian-settings-item-located .vsidian-settings-item-title')?.textContent).toContain('Demo')
-    vi.advanceTimersByTime(1500)
-    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
-    // 再次显式定位：高亮重新呈现（一次性退场不清灭后续导航）
-    locateBySidebar(harness, 'Demo')
-    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
+    try {
+      const harness = makeView()
+      harness.dispatch(addonsState([
+        { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+      ]))
+      locatePlainBySidebar(harness)
+      // 时限内的推送（定位后应答回灌）重渲染：条目行高亮保持，容器仍不带
+      harness.dispatch(addonsState([
+        { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+      ]))
+      const list = harness.parent.querySelector('.vsidian-addons-list')
+      expect(list?.classList.contains('vsidian-settings-item-located')).toBe(false)
+      expect(list?.querySelector('.vsidian-settings-item-located .vsidian-settings-item-title')?.textContent).toContain('Plain')
+      vi.advanceTimersByTime(1500)
+      expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
+      // 再次显式定位：高亮重新呈现（一次性退场不清灭后续导航）
+      locatePlainBySidebar(harness)
+      expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
-// ---- #354 T05：故障排障入口（日志 + 手动重试；完整诊断归 T12） ----
+// ---- #354 T05：故障排障入口（列表行重试 + 工具组日志） ----
 
 describe('故障排障入口（T05）', () => {
   it('故障状态行提供「重试组件」按钮；点击上送 addons.retry', () => {
@@ -624,255 +690,5 @@ describe('故障排障入口（T05）', () => {
     expect(logs).toBeTruthy()
     logs!.click()
     expect(harness.sent).toContainEqual({ kind: 'addons.openLogs' })
-  })
-
-  it('设置区故障态呈现排障块：标题、提示、原因、日志与重试入口', () => {
-    const harness = makeView()
-    openAddonsPage(harness)
-    harness.dispatch(addonsState([
-      { id: 'a.broken', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'setup 异常：bad' }, hasSettingsDefinitions: true },
-    ]))
-    // 打开设置区（宿主推送 addons.settingsState）
-    const settingsState = {
-      kind: 'addons.settingsState',
-      apiVersion: '1.0.0',
-      draft: true,
-      open: 'a.broken',
-      hasWorkspace: false,
-      addon: {
-        addonId: 'a.broken',
-        label: 'Broken',
-        faulted: true,
-        faultReason: 'setup 异常：bad',
-        hasCustomPage: false,
-        enabled: { effective: true, userExplicit: true, workspaceExplicit: null, source: 'user' },
-        definitions: [],
-        values: {},
-      },
-      openAddonSettingsPage: null,
-    }
-    harness.dispatch(settingsState)
-    const troubleshoot = harness.parent.querySelector('.vsidian-addons-fault-troubleshoot')
-    expect(troubleshoot).toBeTruthy()
-    const text = troubleshoot!.textContent ?? ''
-    expect(text).toContain('组件故障暂停')
-    expect(text).toContain('setup 异常：bad')
-    const buttons = [...troubleshoot!.querySelectorAll('button')].map((b) => b.textContent)
-    expect(buttons).toContain('查看组件日志')
-    expect(buttons).toContain('重试组件')
-  })
-})
-
-// ---- #467：推送重渲染的滚动与焦点保持 ----
-
-describe('推送重渲染的滚动与焦点保持（#467）', () => {
-  /** 构造打开设置区的 addons.settingsState 推送（含一个 boolean 定义行） */
-  function settingsStatePush(harness: ReturnType<typeof makeView>, enabledUser: boolean | null): void {
-    const message = {
-      kind: 'addons.settingsState',
-      apiVersion: '1.0.0',
-      draft: true,
-      open: 'fixture.demo',
-      hasWorkspace: false,
-      addon: {
-        addonId: 'fixture.demo',
-        label: 'Demo',
-        faulted: false,
-        hasCustomPage: false,
-        enabled: { effective: enabledUser ?? true, userExplicit: enabledUser, workspaceExplicit: null, source: enabledUser === null ? 'default' : 'user' },
-        definitions: [{ key: 'flag', title: '开关项', type: 'boolean', default: true }],
-        values: { flag: { effective: true, source: 'default' } },
-      },
-      openAddonSettingsPage: null,
-    }
-    if (!isHostToWebview(message)) {
-      throw new Error('addons.settingsState 载荷未通过协议守卫')
-    }
-    harness.dispatch(message)
-  }
-
-  it('设置区功能开关变更回推：同键控件重获焦点，主区 scrollTop 保持', () => {
-    const harness = makeView()
-    // jsdom 焦点管理只对挂在 document 上的元素生效（脱离文档 focus 为空操作）
-    document.body.append(harness.parent)
-    try {
-      openAddonsPage(harness)
-      harness.dispatch(addonsState([
-        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-      ]))
-      settingsStatePush(harness, true)
-      const main = harness.parent.querySelector<HTMLElement>('.vsidian-settings-main')!
-      const toggle = harness.parent.querySelector<HTMLInputElement>('input[data-addon-setting="__enabled__"]')!
-      toggle.focus()
-      main.scrollTop = 120
-      toggle.click() // change → 上送 addons.setEnabled；宿主权威回显经推送到达
-      settingsStatePush(harness, false)
-      expect(document.activeElement?.getAttribute('data-addon-setting')).toBe('__enabled__')
-      expect(main.scrollTop).toBe(120)
-    } finally {
-      harness.parent.remove()
-      harness.view.dispose()
-    }
-  })
-
-  it('行为区单项开关推送回显：焦点回到同键开关，主区 scrollTop 保持', () => {
-    const harness = makeView()
-    document.body.append(harness.parent)
-    try {
-      openAddonsPage(harness)
-      harness.dispatch(addonsState([
-        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true },
-      ]))
-      const behaviorKey = 'fixture.demo#dash-fill'
-      const behaviorMessage = {
-        kind: 'addons.behaviors',
-        behaviors: [{ addonId: 'fixture.demo', id: 'dash-fill', name: '破折填充', history: 'atomic' }],
-        state: null,
-      }
-      if (!isHostToWebview(behaviorMessage)) {
-        throw new Error('addons.behaviors 载荷未通过协议守卫')
-      }
-      harness.dispatch(behaviorMessage)
-      const main = harness.parent.querySelector<HTMLElement>('.vsidian-settings-main')!
-      const toggle = harness.parent.querySelector<HTMLInputElement>(`input[data-behavior-key="${behaviorKey}"]`)!
-      toggle.focus()
-      main.scrollTop = 90
-      toggle.click() // change → 上送 behaviorsSetDisabled；回显推送整块重建
-      harness.dispatch({ ...behaviorMessage, state: { version: 1, order: [], disabled: [behaviorKey] } })
-      expect(document.activeElement?.getAttribute('data-behavior-key')).toBe(behaviorKey)
-      expect(main.scrollTop).toBe(90)
-    } finally {
-      harness.parent.remove()
-      harness.view.dispose()
-    }
-  })
-
-  it('数组定义行键盘移除：局部重建后焦点回到等价位置的移除按钮（不落 BODY）', () => {
-    const harness = makeView()
-    document.body.append(harness.parent)
-    try {
-      openAddonsPage(harness)
-      harness.dispatch(addonsState([
-        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-      ]))
-      const message = {
-        kind: 'addons.settingsState',
-        apiVersion: '1.0.0',
-        draft: true,
-        open: 'fixture.demo',
-        hasWorkspace: false,
-        addon: {
-          addonId: 'fixture.demo',
-          label: 'Demo',
-          faulted: false,
-          hasCustomPage: false,
-          enabled: { effective: true, userExplicit: null, workspaceExplicit: null, source: 'default' },
-          definitions: [{ key: 'words', title: '词表', type: 'array', items: { kind: 'string' }, default: ['甲', '乙', '丙'] }],
-          values: { words: { effective: ['甲', '乙', '丙'], source: 'default' } },
-        },
-        openAddonSettingsPage: null,
-      }
-      if (!isHostToWebview(message)) {
-        throw new Error('addons.settingsState 载荷未通过协议守卫')
-      }
-      harness.dispatch(message)
-      const rows = harness.parent.querySelectorAll('.vsidian-addons-array-row')
-      expect(rows.length).toBe(3)
-      const removeButtons = harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-array-remove')
-      removeButtons[1]!.focus() // 键盘场景：焦点在第二行移除按钮上按 Enter
-      removeButtons[1]!.click()
-      const afterRows = harness.parent.querySelectorAll('.vsidian-addons-array-row')
-      expect(afterRows.length).toBe(2)
-      // 焦点不丢到 BODY：回到重建后同位置的移除按钮（值序列为 甲/丙）
-      expect(document.activeElement?.classList.contains('vsidian-addons-array-remove')).toBe(true)
-      expect(document.activeElement?.closest('.vsidian-addons-array-row')?.querySelector('input')?.value).toBe('丙')
-    } finally {
-      harness.parent.remove()
-      harness.view.dispose()
-    }
-  })
-
-  it('数组定义行键盘移除末行：精确键无同位控件时回退到新末行的移除按钮', () => {
-    const harness = makeView()
-    document.body.append(harness.parent)
-    try {
-      openAddonsPage(harness)
-      harness.dispatch(addonsState([
-        { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-      ]))
-      const message = {
-        kind: 'addons.settingsState',
-        apiVersion: '1.0.0',
-        draft: true,
-        open: 'fixture.demo',
-        hasWorkspace: false,
-        addon: {
-          addonId: 'fixture.demo',
-          label: 'Demo',
-          faulted: false,
-          hasCustomPage: false,
-          enabled: { effective: true, userExplicit: null, workspaceExplicit: null, source: 'default' },
-          definitions: [{ key: 'words', title: '词表', type: 'array', items: { kind: 'string' }, default: ['甲', '乙', '丙'] }],
-          values: { words: { effective: ['甲', '乙', '丙'], source: 'default' } },
-        },
-        openAddonSettingsPage: null,
-      }
-      if (!isHostToWebview(message)) {
-        throw new Error('addons.settingsState 载荷未通过协议守卫')
-      }
-      harness.dispatch(message)
-      const removeButtons = harness.parent.querySelectorAll<HTMLButtonElement>('.vsidian-addons-array-remove')
-      removeButtons[2]!.focus() // 键盘焦点在末行（第三行）移除按钮
-      removeButtons[2]!.click()
-      const afterRows = harness.parent.querySelectorAll('.vsidian-addons-array-row')
-      expect(afterRows.length).toBe(2)
-      // 末行删除后无同索引位置：回退到新末行（原第二行）的移除按钮
-      expect(document.activeElement?.classList.contains('vsidian-addons-array-remove')).toBe(true)
-      expect(document.activeElement?.closest('.vsidian-addons-array-row')?.querySelector('input')?.value).toBe('乙')
-    } finally {
-      harness.parent.remove()
-      harness.view.dispose()
-    }
-  })
-
-  it('故障组件行与设置区排障块的重试按钮焦点键互不碰撞（分页内唯一）', () => {
-    const harness = makeView()
-    document.body.append(harness.parent)
-    try {
-      openAddonsPage(harness)
-      harness.dispatch(addonsState([
-        { id: 'a.broken', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'setup 异常：bad' }, hasSettingsDefinitions: true },
-      ]))
-      const settingsState = {
-        kind: 'addons.settingsState',
-        apiVersion: '1.0.0',
-        draft: true,
-        open: 'a.broken',
-        hasWorkspace: false,
-        addon: {
-          addonId: 'a.broken',
-          label: 'Broken',
-          faulted: true,
-          faultReason: 'setup 异常：bad',
-          hasCustomPage: false,
-          enabled: { effective: true, userExplicit: true, workspaceExplicit: null, source: 'user' },
-          definitions: [],
-          values: {},
-        },
-        openAddonSettingsPage: null,
-      }
-      if (!isHostToWebview(settingsState)) {
-        throw new Error('addons.settingsState 载荷未通过协议守卫')
-      }
-      harness.dispatch(settingsState)
-      const keys = [...harness.parent.querySelectorAll('[data-rebuild-focus]')]
-        .map((el) => el.getAttribute('data-rebuild-focus'))
-      const retryKeys = keys.filter((k) => k !== null && k.endsWith('a.broken') && k.includes('retry'))
-      expect(retryKeys.length).toBe(2) // 列表行 + 设置区排障块
-      expect(new Set(retryKeys).size).toBe(2) // 键互不相同：焦点恢复不歧义
-    } finally {
-      harness.parent.remove()
-      harness.view.dispose()
-    }
   })
 })

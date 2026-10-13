@@ -1,6 +1,6 @@
 // #353 T04 附加组件基础设置控件（webview 纯 DOM 构造）：标量三型、数组
 // 重复项控件与对象字段控件的构造器。只负责控件与值形态，不含作用范围
-// 编排（AddonSection 持有标签状态与草稿，本模块按定义 + 当前值构造）。
+// 编排（AddonSettingsAreaSection 持有标签状态与草稿，本模块按定义 + 当前值构造）。
 //
 // 控件口径（技术方案 5.5）：
 // - boolean → 复选开关；number → number input（min/max，step any——手改

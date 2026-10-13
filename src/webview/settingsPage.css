@@ -563,8 +563,9 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 
 /* ---- #353 T04 基础设置区：双标签作用范围 + 平台基础控件 + 保存反馈
    （内部样式，非公开样式契约入口；与 #350/#351 的 vsidian-addons-* 族
-   同口径——全部内部类名，不入 styleContract 清单） ---- */
-.vsidian-addons-settings { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+   同口径——全部内部类名，不入 styleContract 清单）。#465 起为组件详情
+   子页唯一内容（整页呈现，不再悬在管理列表下方） ---- */
+.vsidian-addons-settings { display: flex; flex-direction: column; gap: 10px; }
 .vsidian-addons-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vsidian-addons-settings-head h3 { margin: 0; }
 .vsidian-addons-settings-head button { min-height: 26px; padding: 3px 10px;
@@ -643,13 +644,12 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
   background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
 .vsidian-addons-custompage-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
 
-/* ---- T08（#357）行为冲突管理：注册行为的调序与逐项开关（内部样式，
-   非公开样式契约入口；与 vsidian-addons-* 族同口径——全部内部类名，
-   不入 styleContract 清单）。组头与编辑器页二级组同构：标题挂进
-   .vsidian-settings-group 卡片承载全幅头部（负边距 + 下边线 + 图标），
-   标题不再游离卡片外（#357 验收缺陷修复） ---- */
-.vsidian-addons-behaviors { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
-.vsidian-addons-behaviors-hint { margin: 10px 0 0; color: var(--vscode-descriptionForeground, #666); }
+/* ---- T08（#357）输入行为管理（#465 起独立分页；#466 更名）：注册行为
+   的调序与逐项开关（内部样式，非公开样式契约入口；与 vsidian-addons-*
+   族同口径——全部内部类名，不入 styleContract 清单）。组头与编辑器页
+   二级组同构：标题挂进 .vsidian-settings-group 卡片承载全幅头部（负边距
+   + 下边线 + 图标）；管理说明升为分页副题后组内不再有提示行 ---- */
+.vsidian-addons-behaviors { display: flex; flex-direction: column; gap: 8px; }
 .vsidian-addons-behaviors-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .vsidian-addons-behaviors-row > label { align-items: center; }
 .vsidian-addons-behaviors-owner { display: block; margin-top: 2px;

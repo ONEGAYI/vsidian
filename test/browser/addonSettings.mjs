@@ -139,14 +139,19 @@ try {
   }, { state: hostState, defs: DEFINITIONS })
   await page.addScriptTag({ path: output })
 
-  // ---- 1. 打开附加组件分页与基础设置区 ----
+  // ---- 1. 附加组件页「设置」入口：导航到「组件设置」分页（#465 通道堵死，
+  //      本页不承载任何组件设置内容） ----
   await page.getByRole('button', { name: zhCn['settings.addonsSection'], exact: true }).click()
   await page.getByRole('button', { name: zhCn['addons.openSettingsArea'], exact: true }).click()
+  await page.locator('.vsidian-settings-heading', { hasText: zhCn['settings.addonSettingsSection'] }).waitFor()
   const area = page.locator('.vsidian-addons-settings')
   await area.waitFor()
   assert.match(await area.innerText(), new RegExp(zhCn['addons.settingsAreaTitle'].replace('{label}', 'Demo')))
   assert.match(await area.innerText(), new RegExp(zhCn['addons.scopeUserDefault']))
   assert.match(await area.innerText(), new RegExp(zhCn['addons.scopeWorkspace']))
+  // #465 IA 分页：组件设置分页不混装附加组件管理内容（对偶守护）
+  assert.equal(await page.locator('.vsidian-addons-list').count(), 0, '组件设置分页不混装管理列表')
+  assert.equal(await page.locator('.vsidian-addons-actions').count(), 0, '组件设置分页不混装工具组')
 
   // ---- 2. 双标签绘制层：选中态为强调底色（非 DOM 存在性） ----
   const tabs = page.locator('.vsidian-addons-scope-tab')
@@ -278,10 +283,13 @@ try {
   assert.equal(noticePaint, 'rgb(255, 102, 102)', '失败提示应为错误前景色（绘制层）')
   await page.screenshot({ path: path.join(artifacts, 'settings-area-failed.png') })
 
-  // ---- 9. 关闭设置区 ----
+  // ---- 9. 「返回组件列表」：关闭详情，回到本页的组件清单（hub）形态 ----
   await page.getByRole('button', { name: zhCn['addons.closeSettingsArea'], exact: true }).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsClose'))
   await area.waitFor({ state: 'detached' })
+  const hub = page.locator('.vsidian-addons-settings-hub')
+  await hub.waitFor()
+  assert.match(await hub.innerText(), new RegExp(zhCn['addons.settingsHubTitle']), '关闭后回到组件清单（hub）')
 
   // ---- 10-12. #467 推送链路滚动与焦点保持 ----
   // 经侧栏组件条目进入（locatedAddonId 持久化）：定位高亮保留，但推送

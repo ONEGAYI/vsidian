@@ -127,12 +127,25 @@ try {
   const badgePaint = await coreGroup.locator('.vsidian-settings-nav-item-badge').first().evaluate((el) => getComputedStyle(el).backgroundColor)
   assert.equal(badgePaint, 'rgb(184, 17, 27)', '故障徽章应为错误底色（绘制层）')
 
-  // ---- 3. 侧栏组件条目点击：进入附加组件分页 + 打开设置区 + 定位 ----
+  // ---- 3. 侧栏组件条目点击：可配置组件直达「组件设置」分页（#465）；
+  //      纯运行组件回附加组件页定位列表行 ----
   await nav.getByRole('button', { name: /Third On/ }).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsOpen' && m.addonId === 'a.third-on'))
+  // #465 通道堵死：可配置组件条目导航到「组件设置」分页，附加组件页不
+  // 承载任何组件设置内容
+  const detail = page.locator('.vsidian-addons-settings')
+  await detail.waitFor()
+  assert.match(await detail.innerText(), new RegExp(zhCn['addons.settingsAreaTitle'].replace('{label}', 'Third On')))
+  assert.equal(await page.locator('.vsidian-addons-list').count(), 0, '组件设置分页不混装管理列表（#465 通道堵死）')
+  // 「返回组件列表」回本页组件清单（hub 形态）
+  await page.getByRole('button', { name: zhCn['addons.closeSettingsArea'], exact: true }).click()
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsClose'))
+  await page.locator('.vsidian-addons-settings-hub').waitFor()
+  // 纯运行组件条目（Third Off——无定义无设置页）：回附加组件页只定位列表行
+  await nav.getByRole('button', { name: /Third Off/ }).click()
   const located = page.locator('.vsidian-addons-list .vsidian-settings-item-located')
   await located.waitFor()
-  assert.match(await located.first().innerText(), /Third On/, '点击条目定位组件状态行')
+  assert.match(await located.first().innerText(), /Third Off/, '点击条目定位组件状态行')
   // #462 绘制层：条目行定位描边真实绘制（focusBorder 1px + offset 8px），
   // 列表容器不再套区块级描边（容器级与条目级互斥，消三层叠加）
   const locatedPaint = await page.evaluate(() => {
@@ -186,6 +199,7 @@ try {
 
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
   console.log('[#354] 附加组件侧栏三组与故障排障浏览器回归通过（三组结构/子组归属/分隔绘制/条目路由/排障块/空态）')
+  console.log('[#465] 通道堵死与组件设置分页浏览器契约通过（可配置条目直达设置分页/返回 hub/纯运行组件定位行）')
 } finally {
   await browser.close()
 }

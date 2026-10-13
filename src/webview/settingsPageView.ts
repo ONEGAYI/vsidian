@@ -55,8 +55,9 @@ export interface SettingsPageSection {
    *  'folderCog' 为「文件与链接」分页（#332 原索引维护改名承接）字形
    *  （#332 二轮自链环 glyph 换装：文件夹 + 右下角齿轮，用户指定意象）；
    *  'keyboard' 为快捷键分页的字形（#264 中文分词分页退役——其曾占位借
-   *  用的 keyboard 槽位随之消失） */
-  icon: 'keyboard' | 'editor' | 'palette' | 'folderCog' | 'blocks'
+   *  用的 keyboard 槽位随之消失）；'inputCursor' 为「输入行为管理」分页
+   *  字形（#466：输入框 + I 型光标，git 合并形 merge 随更名退役） */
+  icon: 'keyboard' | 'editor' | 'palette' | 'folderCog' | 'blocks' | 'inputCursor' | 'sliders'
   entries: readonly { id: string; title: string; description?: string }[]
   /**
    * #354 T05 侧栏大组贡献（可选）：本分页向侧栏「选项」大组之外贡献
@@ -214,11 +215,15 @@ const ICON_PATHS = {
   // 组合成整体的意象（与 VSCode 扩展图标同构，纯几何零认知风险）
   blocks:
     'M4 2h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M15 2h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M4 13h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z M15 13h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z',
-  // merge（#357 验收缺陷修复：「行为冲突管理」组标题）：git-merge 线性化——
-  // 双节点 + 分合曲线（多行为抢同一路输入、按序合流的冲突意象；2026-10-12
-  // 用户拍板「分流合流」）
-  merge:
-    'M9 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0 M21 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0 M6 21V9a9 9 0 0 0 9 9',
+  // inputCursor（#466「输入行为管理」分页）：输入框 + 框内 I 型光标——
+  // 输入/键盘语义（原 merge 分流合流字形随更名退役：git 合并意象不再
+  // 匹配管理语义）。卡片组头与侧栏导航同槽（SettingsGroupIcon 联合）
+  inputCursor:
+    'M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z M12 9v6 M10 9h4 M10 15h4',
+  // sliders（#465「组件设置」分页）：三档滑杆组——调参意象（组件设置的
+  // 调谐面；与 blocks/inputCursor 构成附加组件域三枚分页字形）
+  sliders:
+    'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
@@ -239,11 +244,11 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
  *  字形随资产交付退役（#298 占位链环 → 一轮内联 → 二轮生图资产）；
  *  table（#296 三轮）：实验页「表格行为」小节标题；
  *  shield（#323）：常规页「默认编辑器」委托组标题（守护意象内联字形）；
- *  merge（#357 验收缺陷修复）：附加组件页「行为冲突管理」组标题（分流
- *  合流意象内联字形）；
+ *  inputCursor（#466）：「输入行为管理」分页组头与侧栏导航（输入框 +
+ *  I 型光标——输入/键盘语义；merge 分流合流字形随更名退役）；
  *  refview（#298 占位）与 links（#332 一轮借位）随二轮三处链环重复整改
  *  一并退役（全仓引用迁移至新字形）。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink' | 'merge'
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink' | 'inputCursor' | 'sliders'
 
 /** 生图资产槽位：这些 kind 不走 ICON_PATHS 内联字形，装配为 generated
  *  span（CSS 按 data-icon 映射 media/quick-actions 明暗背景） */

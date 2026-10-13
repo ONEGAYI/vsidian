@@ -36,8 +36,8 @@
 | 7 | 已开文档热切换 | #351、#354、#358、#365、#367 | `page-sdk`（代次硬边界）、`page-load-protocol` | 浏 `addonHotSwitch`（CDP IME 组合中切换不丢输入）；集 `addonT05Cases`；装 B（装载指令 diff + 兜底重开） | 过（T18 browser 全量含 addonHotSwitch） |
 | 8 | IME 输入与历史安全 | #348、#349、#352、#355、#356、#367 | `views-editor`（revision 快照）、`page-sdk` | V01 探针（真宿主 16 + CDP 4）；浏 `addonPageSdk`/`addonHotSwitch`/`addonT06EditHost`/`addonT07Behaviors`；集 `addonT06Cases`/`addonT07Cases` | 过（T18 browser 全量四 host 套件绿）；真机 IME 观感待验 A63① |
 | 9 | 同操作按序共同执行 | #356、#357 | `behaviors-register`（默认可组合 + 显式独占组） | 单 `addonBehaviors`/`addonBehaviorRuntime`；集 `addonT07Cases`；样 input-behavior（真实键入三行为链） | 过 |
-| 10 | 行为冲突管理调序/部分关闭 | #357 | `behavior-order-state` | 单 `addonBehaviorStateService`；浏 `addonT08BehaviorsManage`；集 `addonT08Cases` | 过；观感待验 A60 |
-| 11 | 行为名称及归属 | #356、#357 | `behaviors-register`（名称必填 + 组件命名空间） | 同上（管理列表按名称与所属组件展示，目录上报对账） | 过；观感待验 A60④ |
+| 10 | 输入行为管理（原行为冲突管理，#465/#466 独立分页更名）调序/部分关闭 | #357、#465、#466 | `behavior-order-state` | 单 `addonBehaviorStateService`；浏 `addonT08BehaviorsManage`；集 `addonT08Cases` | 过；观感待验 A60/A71 |
+| 11 | 行为名称及归属 | #356、#357 | `behaviors-register`（名称必填 + 组件命名空间） | 同上（管理列表按名称与所属组件展示，目录上报对账） | 过；观感待验 A71（观感项并入） |
 | 12 | 渲染安装后自动替换 | #358、#365 | `renderer-selection`（Q28 自动接管） | 单 `addonRendererTakeover`/`addonRendererService`；浏 `addonRendererTakeover`；集 `addonT09Cases`；装 B（builtinSvg=0 绘制层）；样 renderer（mermaid-lite 接管） | 过；真机观感待验 A64 |
 | 13 | 用户默认与工作区覆盖 | #353 | `settings-context`、`settings-scope` | 单 `addonSettings`/`addonSettingsService`/`addonRuntimeSettings`；浏 `addonSettings`；集 `addonT04Cases` | 过 |
 | 14 | 清除覆盖恢复继承 | #353 | `settings-context`（clearWorkspaceOverride） | 浏 `addonSettings`（清除回退断言）；样 ui-command（分层 default→user→workspace→清除） | 过 |
