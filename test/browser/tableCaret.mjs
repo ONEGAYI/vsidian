@@ -1705,6 +1705,76 @@ try {
   mermaidServer.close()
 }
 if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid 渲染回归失败')
+
+// ---- #484 表格格内跨视觉行选区：高亮不得贯穿整行（绘制层几何断言，独立浏览器实例） ----
+// 复现链：格内容含 <br>（cell break）时选区跨视觉行，CM6 rectanglesForRange
+// 的双分支把 top 段右界强制取内容区右缘——grid 行中表现为高亮横穿列边界
+// 并越出表格右缘。断言对象是用户看到的高亮几何（可见选区块 vs 格盒），
+// 不是 DOM 存在性。触发与围栏无关（普通跨行文字同样贯穿），围栏是用户
+// 形成跨行格内容的常见载体，三种形态一并钉住。
+{
+  const selBrowser = await chromium.launch({ headless: true,
+    channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
+  let selFixtureScript
+  const selFailures = []
+  try {
+    selFixtureScript = await startFixtureScriptServer()
+    for (const scenario of [
+      { id: 'bold-fence', cell: '**V2 会话内容<br>**<br>**' },
+      { id: 'strike-fence', cell: '~~V2 会话内容<br>~~<br>~~' },
+      { id: 'plain-break', cell: 'V2 会话内容<br>第二行<br>第三行' },
+    ]) {
+      const page = await selBrowser.newPage()
+      const errors = []
+      page.on('pageerror', (error) => errors.push(error.message))
+      try {
+        await page.setContent('<div id="app"></div>')
+        await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+        await page.addScriptTag({ url: selFixtureScript.url })
+        await page.evaluate((cell) => window.initTable(`| a | b | c |\n| --- | --- | --- |\n| ${cell} | y | z |\n`), scenario.cell)
+        await page.waitForFunction(() => document.querySelectorAll('.vsidian-table-grid-row').length >= 2, null, { timeout: 20000 })
+        // 数据行第一格点击后 Ctrl+A 格内全选（用户复现路径）
+        const cell = page.locator('.vsidian-table-grid-row').nth(1).locator('.vsidian-table-grid-cell').nth(0)
+        await cell.click()
+        await page.keyboard.press('Control+a')
+        await page.waitForTimeout(300)
+        const paint = await page.evaluate(() => {
+          const rect = (el) => {
+            const r = el.getBoundingClientRect()
+            return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+          }
+          const dataRow = document.querySelectorAll('.vsidian-table-grid-row')[1]
+          const cellRect = rect(dataRow.querySelectorAll(':scope > .vsidian-table-grid-cell')[0])
+          // display:none 的元素无盒（client rects 为空），天然不进可见集合
+          const blocks = [...document.querySelectorAll(
+            '.cm-selectionLayer .cm-selectionBackground, .vsidian-selection-layer .vsidian-selection-background',
+          )].filter((el) => el.getClientRects().length > 0).map(rect)
+          const sel = window.readEditor()
+          return { cellRect, blocks, selFrom: sel.from, selTo: sel.to }
+        })
+        assert.ok(paint.blocks.length > 0, `应有可见选区块，实际 ${JSON.stringify(paint)}`)
+        assert.ok(paint.selTo > paint.selFrom, `格内全选应形成非空选区，实际 ${JSON.stringify(paint)}`)
+        for (const block of paint.blocks) {
+          assert.ok(block.right <= paint.cellRect.right + 2,
+            `选区块右界 ${block.right.toFixed(1)} 不得越出所在格右缘 ${paint.cellRect.right.toFixed(1)}（贯穿整行回归，场景 ${scenario.id}）`)
+          assert.ok(block.left >= paint.cellRect.left - 2,
+            `选区块左界 ${block.left.toFixed(1)} 不得越出所在格左缘 ${paint.cellRect.left.toFixed(1)}（场景 ${scenario.id}）`)
+        }
+        assert.deepEqual(errors, [], `页面异常: ${JSON.stringify(errors)}`)
+        console.log(`[原生输入][PASS] table-selection/${scenario.id}`)
+      } catch (error) {
+        selFailures.push(error)
+        console.error(`[原生输入][FAIL] table-selection/${scenario.id}: ${error.message}`)
+      } finally {
+        await page.close()
+      }
+    }
+  } finally {
+    await selBrowser.close()
+    selFixtureScript?.close()
+  }
+  if (selFailures.length) throw new AggregateError(selFailures, '表格跨视觉行选区回归失败')
+}
 console.log(`[原生输入] mermaid ${mermaidPassed} 项通过`)
 
 // ---- #79 代码块卡片：光标进出围栏的原生点击与键盘路径（独立浏览器实例） ----

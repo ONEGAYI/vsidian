@@ -27,6 +27,7 @@
 //   回，等同于光标上/下移一行——即 #237 之前的既有行为）
 import { EditorState } from '@codemirror/state'
 import { drawSelection, EditorView, keymap, ViewPlugin } from '@codemirror/view'
+import { tableAwareSelectionLayer } from './tableSelectionLayer'
 
 /** 宿主会转发 webview 的 Alt keyup 并激活菜单；真宿主复现表明夺焦在
  *  释放 Alt 时发生，mouseup 追回焦点过早。只消费已用于点击添光标的
@@ -60,6 +61,9 @@ const altClickFocusGuard = ViewPlugin.fromClass(class {
 export const multicursorExtensions = [
   EditorState.allowMultipleSelections.of(true),
   drawSelection(),
+  // #484 表格感知选区背景层：与 drawSelection 同进出（多光标关闭时整组
+  // 撤下，回到原生 ::selection 路径），接管选区背景绘制并按表格格 clamp
+  tableAwareSelectionLayer,
   EditorView.clickAddsSelectionRange.of((event: MouseEvent) => event.altKey),
   altClickFocusGuard,
   keymap.of([

@@ -282,6 +282,7 @@ vsidian/
         ├── tableRegion.ts                # 表格矩形选区与结构规划
         ├── tableRegionField.ts           # 表格格区选区状态单一事实源
         ├── tableRegionSelection.ts       # 表格格区拖选指针交互
+        ├── tableSelectionLayer.ts        # 表格感知选区背景层（#484）
         ├── tableStructure.ts             # 表格导航与增删行列纯函数（#13）
         ├── targetTip.ts                  # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts                 # 任务勾选解析纯函数（#9）
