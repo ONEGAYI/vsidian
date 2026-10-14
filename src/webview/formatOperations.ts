@@ -543,32 +543,41 @@ function linePlan(text: string, op: FormatOperationId, range: FormatSelection): 
       const delim = carry?.delim ?? '.'
       const pad = carry ? carry.digits.length : 1
       const startCount = carry ? Number(carry.digits) + 1 : 1
-      // 层级栈：层 key 用 引用层数:缩进宽度 复合（引用层数不同即非同层，
-      // 承接与计数都不跨引用层），深度比较只用缩进宽度；弹栈归入「缩进
-      // 不大于它的最近已见层」继续计数，层 key 随行接管（同歪缩进的
-      // 后续行在该层继续递增）；各行缩进在产物中原样保留
-      const stack: { key: string; depth: number; count: number }[] = []
+      // 层级栈：层 key 用 引用层数:缩进宽度 复合，深度比较只用缩进
+      // 宽度；弹栈归入「缩进不大于它的最近已见层」继续计数且要求引用
+      // 层数相等（承接与计数都不跨引用层，与承接判定同向）——引用层
+      // 变化（如正文与引用块混选）从 1 起新层；歪缩进行归并后续行在
+      // 该层继续递增（层 key 随行接管）；各行缩进在产物中原样保留
+      const stack: { key: string; quoteDepth: number; depth: number; count: number }[] = []
       for (const p of parsed) {
-        const key = `${quoteDepth(p.quote)}:${p.indent.length}`
-        if (!stack.length) stack.push({ key, depth: p.indent.length, count: startCount })
+        const quoteLayer = quoteDepth(p.quote)
+        const key = `${quoteLayer}:${p.indent.length}`
+        if (!stack.length) stack.push({ key, quoteDepth: quoteLayer, depth: p.indent.length, count: startCount })
         else if (stack[stack.length - 1]!.key === key) stack[stack.length - 1]!.count++
         else if (stack[stack.length - 1]!.depth < p.indent.length) {
-          stack.push({ key, depth: p.indent.length, count: 1 })
+          stack.push({ key, quoteDepth: quoteLayer, depth: p.indent.length, count: 1 })
         } else {
           while (stack.length > 1 && stack[stack.length - 1]!.depth > p.indent.length) stack.pop()!
           const top = stack[stack.length - 1]!
-          top.count++
-          top.key = key
-          top.depth = p.indent.length
+          if (top.quoteDepth === quoteLayer) {
+            top.count++
+            top.key = key
+            top.depth = p.indent.length
+          } else {
+            stack.push({ key, quoteDepth: quoteLayer, depth: p.indent.length, count: 1 })
+          }
         }
         const number = String(stack[stack.length - 1]!.count).padStart(pad, '0')
-        lines.push({ from: p.row.from, to: p.row.to,
-          insert: p.quote + p.indent + number + delim + ' ' + p.body })
+        const insert = p.quote + p.indent + number + delim + ' ' + p.body
+        // 混合选区统一重排时已是目标形态的行不产等文变更段——CM6 的
+        // docChanged 按区间数判定，等文替换会出站标脏并留无效撤销步
+        if (insert !== p.row.line) lines.push({ from: p.row.from, to: p.row.to, insert })
       }
     } else {
       const mark = op === 'taskList' ? '- [ ] ' : '- '
       for (const p of parsed) {
-        lines.push({ from: p.row.from, to: p.row.to, insert: p.quote + p.indent + mark + p.body })
+        const insert = p.quote + p.indent + mark + p.body
+        if (insert !== p.row.line) lines.push({ from: p.row.from, to: p.row.to, insert })
       }
     }
   }

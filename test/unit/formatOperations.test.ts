@@ -342,6 +342,12 @@ describe('格式操作的文本契约', () => {
     expect(apply('> 1. x\n>> 甲', 'orderedList', 7, 10)).toEqual({ text: '> 1. x\n>> 1. 甲' })
     // 只入口层承接：上方项与选区首行缩进不等（浅于入口层）不承接
     expect(apply('1. x\n  甲', 'orderedList', 5, 8)).toEqual({ text: '1. x\n  1. 甲' })
+    // bullet 行打断承接：最近非空行非有序项，从 1 起
+    expect(apply('- x\n甲', 'orderedList', 4, 5)).toEqual({ text: '- x\n1. 甲' })
+    // 引用层数相等即同层承接（`>` 与 `> ` 是同一引用块的两种书写形态）
+    expect(apply('> 1. x\n>甲', 'orderedList', 6, 8)).toEqual({ text: '> 1. x\n>2. 甲' })
+    // 承接上溯遇引用层数不等的有序项不承接
+    expect(apply('>> 1. x\n> 甲', 'orderedList', 8, 11)).toEqual({ text: '>> 1. x\n> 1. 甲' })
   })
 
   it('orderedList 层级计数：缩进分层、子层从 1、弹栈归浅层、空行不打断（#513）', () => {
@@ -353,6 +359,8 @@ describe('格式操作的文本契约', () => {
     expect(apply('甲\n\n乙', 'orderedList', 0, 4)).toEqual({ text: '1. 甲\n\n2. 乙' })
     // 入口行缩进最深、后续更浅：弹栈保护栈底，浅行归入栈底层继续计数
     expect(apply('  甲\n乙', 'orderedList', 0, 5)).toEqual({ text: '  1. 甲\n2. 乙' })
+    // 跨引用层不延续计数：正文与引用块混选，引用内从 1 起新列表
+    expect(apply('甲\n> 乙', 'orderedList', 0, 5)).toEqual({ text: '1. 甲\n> 1. 乙' })
   })
 
   it('列表族统一两态：全部真实行同类才取消，否则统一套用；空行不参与判定（#513）', () => {
@@ -370,8 +378,23 @@ describe('格式操作的文本契约', () => {
     // orderedList 下 bullet/task 行算未编号参与重排（标记按既有语义剥除）
     expect(apply('- 甲\n乙', 'orderedList', 0, 5)).toEqual({ text: '1. 甲\n2. 乙' })
     expect(apply('- [x] 甲\n乙', 'orderedList', 0, 9)).toEqual({ text: '1. 甲\n2. 乙' })
+    // 取消保留各行缩进
+    expect(apply('  1. 甲\n  2. 乙', 'orderedList', 0, 13)).toEqual({ text: '  甲\n  乙' })
     // 引用容器内的统一两态同口径
     expect(apply('> 1. 甲\n> 2. 乙', 'orderedList', 0, 12)).toEqual({ text: '> 甲\n> 乙' })
+  })
+
+  it('混合选区统一套用只对需变更的行产变更段，不产等文替换（审查轮钉子）', () => {
+    // `- 甲` 已是目标形态：等文变更段会让 CM6 docChanged 出站标脏（审查轮修复）
+    const plan = planFormatOperation('- 甲\n乙', 'bulletList', { from: 0, to: 5 })
+    expect(plan?.changes).toEqual([{ from: 4, to: 5, insert: '- 乙' }])
+    const renumber = planFormatOperation('1. 甲\n乙', 'orderedList', { from: 0, to: 6 })
+    expect(renumber?.changes).toEqual([{ from: 5, to: 6, insert: '2. 乙' }])
+  })
+
+  it('全空白多行选区仅首行插入并透传原缩进，两态可还原（#512 边界）', () => {
+    expect(apply('   \n\t', 'bulletList', 0, 5)).toEqual({ text: '   - \n\t' })
+    expect(apply('   - \n\t', 'bulletList', 0, 6)).toEqual({ text: '   \n\t' })
   })
 
   it('显式选区围栏精确包裹，前后文独立成段且文首尾无多余空行', () => {
