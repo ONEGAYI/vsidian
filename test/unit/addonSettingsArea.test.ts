@@ -977,6 +977,8 @@ describe('#472 跨组件定位（focusEntry：addon:<id>/def:<键> 与 addon:<id
       // 时限内同组件推送：高亮保持（定位态跨推送——不延长退场寿命）
       h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
       expect(h.parent.querySelectorAll('.vsidian-addons-settings .vsidian-settings-item-located')).toHaveLength(1)
+      // 滚动不随常规推送重放（#467 契约：scrollIntoView 收窄到显式定位渲染）
+      expect(spy.calls).toHaveLength(1)
       // 退场后推送不再重现（定位态已清——pending 与高亮均一次性）
       vi.advanceTimersByTime(1500)
       h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))

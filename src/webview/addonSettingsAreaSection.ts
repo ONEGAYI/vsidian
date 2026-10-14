@@ -227,8 +227,12 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     if (settingsArea) {
       parent.append(settingsArea)
       // #472 def/group 定位滚动须在挂载后（渲染函数返回前 scrollIntoView
-      // 作用于游离子树，无可滚动祖先——真实布局下不滚动）
-      settingsArea.querySelector('.vsidian-settings-item-located')?.scrollIntoView?.({ block: 'nearest' })
+      // 作用于游离子树，无可滚动祖先——真实布局下不滚动）；且只在显式
+      // 定位渲染滚（#467 契约）——退场窗口内常规推送重渲染保持高亮但不
+      // 重放滚动
+      if (locating) {
+        settingsArea.querySelector('.vsidian-settings-item-located')?.scrollIntoView?.({ block: 'nearest' })
+      }
     } else if (this.state && this.addonSettingsHost) {
       const openId = this.state.openAddonSettingsPage ?? null
       const openEntry = openId === null ? undefined : this.state.addons.find((entry) => entry.id === openId)
