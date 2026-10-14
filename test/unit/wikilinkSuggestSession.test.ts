@@ -230,7 +230,7 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
     }
   })
 
-  it('空目标锚点字段输入/删除重开占位会话（不猜默认文档、不出站标题查询）', () => {
+  it('空目标锚点字段输入重开标题会话：按当前文档出站标题查询（2026-10-14 修复）', () => {
     const { controller, sent, view } = setup('[[#]]')
     try {
       locate(controller, 3) // # 后
@@ -238,10 +238,12 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
       expect(view.state.doc.toString()).toBe('[[#预]]')
       const p = popupState()
       expect(p.open).toBe(true)
-      expect(p.itemCount).toBe(0)
-      expect(p.statusText).toBe(zhCn['wikilinkSuggest.placeholder.heading'])
-      expect(queries(sent)).toHaveLength(0)
-      expect(headingQueries(sent)).toHaveLength(0)
+      expect(p.statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      const hq = lastHeadingQuery(sent)
+      expect(hq).toBeDefined()
+      expect(hq!.query).toBe('预')
+      expect(hq!.target).toBe('') // 空目标=当前文档（宿主 sameDocFsPath 解析）
+      expect(queries(sent)).toHaveLength(0) // 文件查询不复发
     } finally {
       controller.dispose()
     }
@@ -286,15 +288,20 @@ describe('二次触发矩阵：Esc 后仅目标区输入/删除重开', () => {
     }
   })
 
-  it('空目标块锚点保持占位不出站（T03 语义不动）', () => {
+  it('空目标块锚点按当前文档出站块查询（2026-10-14 修复；target 空）', () => {
     const { controller, sent, view } = setup('[[#^id]]')
     try {
       locate(controller, 5) // id 中部
       deleteAt(view, 5, 6)
       const p = popupState()
       expect(p.open).toBe(true)
-      expect(p.statusText).toBe(zhCn['wikilinkSuggest.placeholder.block'])
-      expect(blockQueries(sent)).toHaveLength(0)
+      expect(p.statusText).toBe(zhCn['wikilinkSuggest.status.blockLoading'])
+      const bq = lastBlockQuery(sent)
+      expect(bq).toBeDefined()
+      expect(bq!.query).toBe('i')
+      expect(bq!.target).toBe('') // 空目标=当前文档（宿主 sameDocFsPath 解析）
+      expect(queries(sent)).toHaveLength(0) // 文件查询不复发
+      expect(headingQueries(sent)).toHaveLength(0) // 标题查询不复发
     } finally {
       controller.dispose()
     }
@@ -363,7 +370,7 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
     }
   })
 
-  it('空双链无高亮按 #：不补文件名，进入标题占位；关闭后 ^ 不接管', () => {
+  it('空双链无高亮按 #：不补文件名，按当前文档出站标题查询；关闭后 ^ 不接管', () => {
     const { controller, sent, view } = setup('[[]]')
     try {
       locate(controller, 2)
@@ -372,7 +379,8 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
       deleteAt(view, 2, 3) // 清回空字段
       press(view, '#')
       expect(view.state.doc.toString()).toBe('[[#]]')
-      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.placeholder.heading'])
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      expect(lastHeadingQuery(sent)?.target).toBe('') // 空目标=当前文档
       press(view, 'Escape')
       press(view, '^') // 会话已关：^ 落穿（jsdom 合成 keydown 无默认插入）
       expect(view.state.doc.toString()).toBe('[[#]]')
@@ -1159,6 +1167,31 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
     }
   })
 
+  it('同文档无 ID 块（空目标）：确认产物为本文件锚点，不补默认别名', () => {
+    const { controller, sent, view } = setup('[[#^]]')
+    try {
+      locate(controller, 4) // ^ 后
+      typeAt(view, 4, 'x')
+      respondBlock(controller, sent, [
+        { id: 'C:/vault/t03.md#^3', blockId: '', snippet: '会议记录', line: 3, lineCount: 2, alias: '' },
+      ], 2)
+      expect(lastBlockQuery(sent)!.target).toBe('')
+      press(view, 'Enter')
+      respondAccept(controller, sent, {
+        ok: true, blockId: 'same001', sameDoc: true, alias: '',
+        markerLfOffset: 7, markerText: '\n\n^same001',
+      })
+      const text = view.state.doc.toString()
+      expect(text).toContain('[[#^same001]]')
+      expect(text).toContain('\n\n^same001')
+      expect(text.indexOf('|')).toBe(-1)
+      expect(popupState().open).toBe(false)
+      expect(linkeds(sent)).toHaveLength(1)
+    } finally {
+      controller.dispose()
+    }
+  })
+
   it('F8：sameDoc 合笔标记在字段上方——光标平移到锚点末（不落链接内部）', () => {
     const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
     try {
@@ -1696,6 +1729,75 @@ describe('浮层定位与底部键提示条（2026-10-06 验收反馈）', () =>
       expect(hints.textContent).not.toContain(zhCn['wikilinkSuggest.hint.block'])
     } finally {
       controller.dispose()
+    }
+  })
+})
+
+// ---- 2026-10-14 修复：同文档锚点会话（省略文件名）——空目标按当前文档
+// 枚举标题/块候选，确认不补默认别名（[[#标题]] / [[#^块ID]] 直接成立，
+// 与 parseWikilinkInner 本文件锚点语义一致）----
+
+describe('同文档锚点会话：当前文档候选与确认（2026-10-14 修复）', () => {
+  it('[[#预 Enter：确认同文档标题，不补默认别名', () => {
+    const { controller, sent, view } = setup('[[#]]')
+    try {
+      locate(controller, 3) // # 后
+      typeAt(view, 3, '预')
+      respondHeading(controller, sent, [
+        { id: 't03.md#2', heading: '预算', level: 2, line: 2, duplicate: false, alias: '' },
+      ])
+      expect(popupState().activeIndex).toBe(0) // 非空查询高亮首项
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe('[[#预算]]')
+      expect(view.state.selection.main.head).toBe('[[#预算'.length)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('[[#^i 空查询方向键选择后 Enter：确认已有 ID 块，不补默认别名', () => {
+    const { controller, sent, view } = setup('[[#^id]]')
+    try {
+      locate(controller, 5) // id 中部
+      deleteAt(view, 5, 6)
+      const q = lastBlockQuery(sent)
+      expect(q).toBeDefined()
+      expect(q!.target).toBe('')
+      controller.handleHostMessage({
+        kind: 'wikilink.block.query.result', sessionId: q!.sessionId, docUri: q!.docUri,
+        reqId: q!.reqId, generation: q!.generation, status: 'ready', targetVersion: 2,
+        items: [{ id: 't03.md#^3', blockId: 'keep01', snippet: '块首行', line: 3, lineCount: 1, alias: '' }],
+      })
+      expect(popupState().activeIndex).toBe(0) // 非空查询（i）高亮首项
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe('[[#^keep01]]')
+      expect(view.state.selection.main.head).toBe('[[#^keep01'.length)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('invalidate 在空目标标题会话重查（正文/索引变更后候选刷新）', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let fixture: ReturnType<typeof setup> | undefined
+    try {
+      fixture = setup('[[#]]')
+      const { controller, sent, view } = fixture
+      locate(controller, 3)
+      typeAt(view, 3, '预')
+      const before = lastHeadingQuery(sent)
+      expect(before).toBeDefined()
+      controller.handleHostMessage({ kind: 'wikilink.invalidate' })
+      vi.advanceTimersByTime(300)
+      const after = lastHeadingQuery(sent)
+      expect(after).toBeDefined()
+      expect(after!.reqId).toBeGreaterThan(before!.reqId)
+      expect(after!.target).toBe('')
+    } finally {
+      fixture?.controller.dispose()
+      vi.useRealTimers()
     }
   })
 })

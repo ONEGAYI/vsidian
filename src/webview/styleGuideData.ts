@@ -5122,7 +5122,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "views": [
       "live"
     ],
-    "states": "主正文 Live 光标进入闭合双链 [[]]/![[]] 的目标字段（文件字段，或文件目标明确的标题/块锚点字段）时挂载；确认、Esc、移出字段或切模式即移除。空目标 #/^ 保持占位提示（不读目标文档）；文件目标明确时标题/块阶段出站查询（#380 T05 起块阶段同样）。",
+    "states": "主正文 Live 光标进入闭合双链 [[]]/![[]] 的目标字段（文件字段，或标题/块锚点字段）时挂载；确认、Esc、移出字段或切模式即移除。标题/块阶段均出站查询：文件目标明确时按该文档读取，省略文件名（空目标）时按当前文档枚举——本文件锚点语义（2026-10-14 修订；此前空目标仅显示占位提示、不读目标文档）。",
     "dom": "document.body 直接后代（不在 #app 内）；role=listbox、aria-label 取词条 wikilinkSuggest.list.ariaLabel；不夺正文焦点。两段结构：候选与状态行收进 .vsidian-wikilink-suggest-list 滚动区，底部固定 .vsidian-wikilink-suggest-hints 键提示条；max-height 留在容器（覆盖示例形态不变）。定位：水平以光标居中对齐（8px 视口钳制，光标坐标不可得回退字段起点），垂直贴字段行、越下缘翻到上方。",
     "example": ".vsidian-wikilink-suggest { max-height: 320px; }",
     "obsidian": {
@@ -5191,7 +5191,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "live"
     ],
     "states": "随查询结果/索引就绪态切换；与候选行共存（仍在构建时可用项继续候选）；命中总数未尽时列表尾部追加一行剩余计数（#377 触底续页加载的入口提示）。",
-    "dom": "列表滚动区（.vsidian-wikilink-suggest-list）直接子行（非 option 语义——占位不可确认）。",
+    "dom": "列表滚动区（.vsidian-wikilink-suggest-list）直接子行（非 option 语义——状态行不可确认）。",
     "example": ".vsidian-wikilink-suggest-status { opacity: 0.7; }",
     "obsidian": {
       "counterpart": "无（Vsidian 双链联想候选）",
@@ -5213,7 +5213,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "views": [
       "live"
     ],
-    "states": "随会话阶段切换段落数；与候选/状态行共存（无结果、加载、占位时同样在场）。",
+    "states": "随会话阶段切换段落数；与候选/状态行共存（无结果、加载等状态同样在场）。",
     "dom": "容器直接末子行（在 .vsidian-wikilink-suggest-list 滚动区之外）；子 span 每键一段；顶 border-top 1px 实线与条目主体分割。",
     "example": ".vsidian-wikilink-suggest-hints { border-top-color: var(--vscode-editorHoverWidget-border); }",
     "obsidian": {
@@ -7053,7 +7053,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   },
   "wikilink-suggest-popup": {
     "purpose": "Popup container for wikilink suggestions: anchored at the wikilink fence opening, listing candidates and the real states (searching / no matches / not ready / no folder open; the heading stage additionally distinguishes target-not-found / not-Markdown / read-error, #379 T04; the block stage shares those states and adds the 'inserting block ID' state while an ID-less block acceptance is in flight, #380 T05).",
-    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading/block anchor field with an explicit file target); removed on confirm, Esc, leaving the field or switching mode. An empty #/^ target keeps the placeholder hint (the target document is not read); with an explicit file target the heading/block stages query outbound (the block stage since #380 T05).",
+    "states": "Mounted while the main-body Live cursor sits inside the target field of a closed wikilink [[]] / ![[ ] (file field, or a heading/block anchor field); removed on confirm, Esc, leaving the field or switching mode. Both the heading and block stages query outbound: with an explicit file target the target document is read, and with the file name omitted (empty target) the current document is enumerated - the same-file anchor semantics (revised 2026-10-14; previously the empty target only kept a placeholder hint without reading any document).",
     "dom": "Direct child of document.body (outside #app); role=listbox with the wikilinkSuggest.list.ariaLabel message; never steals editor focus. Two-segment structure: candidates and status rows live in the .vsidian-wikilink-suggest-list scroll region while the fixed .vsidian-wikilink-suggest-hints key-hint bar sits at the bottom; max-height stays on the container (the override example keeps its shape). Positioning: horizontally centered on the caret (8px viewport clamping, falling back to the field start when caret coords are unavailable), vertically attached to the field line and flipped above it when it would overflow the bottom edge.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
@@ -7077,14 +7077,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   "wikilink-suggest-status": {
     "purpose": "Status row: textual presentation of real states - searching, no matching files, index not ready, no folder open, 'index still updating (partial results)' and the pagination hint (#377 - 'N more, press ArrowDown to load more'); not confirmable, never writes to the document.",
     "states": "Switches with query results and index readiness; can coexist with candidate rows (usable items remain listed while the index is still building); appends a remaining-count row at the list tail when the match total is not exhausted (#377 load-more hint).",
-    "dom": "Direct child rows of the list scroll region (.vsidian-wikilink-suggest-list), not option semantics - placeholders are not confirmable.",
+    "dom": "Direct child rows of the list scroll region (.vsidian-wikilink-suggest-list), not option semantics - status rows are not confirmable.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"
     }
   },
   "wikilink-suggest-hints": {
     "purpose": "Bottom key-hint bar (acceptance feedback 2026-10-06): hints the advanced keys still available in the current stage - three segments in the file stage (# links a heading, ^ links a text block, | sets display text), two in the heading stage (# already consumed), only | in the block stage; muted small text, never scrolls with the list and is never confirmable.",
-    "states": "Segment count switches with the session stage; coexists with candidate and status rows (also present for no-result, loading and placeholder states).",
+    "states": "Segment count switches with the session stage; coexists with candidate and status rows (also present for no-result and loading states).",
     "dom": "Last direct child row of the container (outside the .vsidian-wikilink-suggest-list scroll region); one child span per key hint; separated from the item body by a 1px solid border-top.",
     "obsidian": {
       "counterpart": "None (Vsidian wikilink suggestions)"

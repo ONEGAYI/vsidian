@@ -2079,6 +2079,8 @@ export function createTextEditorProvider(
       isWindowsHost: process.platform === 'win32',
       hasWorkspace: folder !== undefined,
     }
+    // sameDocFsPath（2026-10-14）：空目标（省略文件名 `[[#`）按当前文档
+    // 枚举（本文件锚点语义）；显式目标（含显式自引）行为不变
     const result = await queryWikilinkHeadings(message.target, message.query, ctx, {
       exists: statFileRealPath,
       openTextDocument: (fsPath) => {
@@ -2095,7 +2097,7 @@ export function createTextEditorProvider(
         const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
         return { text: opened.getText(), version: opened.version }
       },
-    })
+    }, doc.uri.fsPath)
     const base = {
       kind: 'wikilink.heading.query.result' as const,
       sessionId: message.sessionId,
@@ -2204,6 +2206,7 @@ export function createTextEditorProvider(
     message: Extract<WebviewToHost, { kind: 'wikilink.block.query' }>,
   ): Promise<void> => {
     await entry.session.whenEditsSettled()
+    // sameDocFsPath（2026-10-14）：空目标（省略文件名 `[[#^`）按当前文档枚举
     const result = await queryWikilinkBlocks(message.target, message.query, vaultResolveCtxOf(doc), {
       exists: statFileRealPath,
       openTextDocument: (fsPath) => {
@@ -2214,7 +2217,7 @@ export function createTextEditorProvider(
         const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
         return { text: opened.getText(), version: opened.version }
       },
-    })
+    }, doc.uri.fsPath)
     const base = {
       kind: 'wikilink.block.query.result' as const,
       sessionId: message.sessionId,
@@ -2250,14 +2253,22 @@ export function createTextEditorProvider(
         reason,
       })
     }
-    const resolution = await resolveVaultLinkFile(message.target, vaultResolveCtxOf(doc), statFileRealPath)
-    if (resolution.kind === 'no-workspace') {
-      return fail('no-workspace')
+    // 目标解析（2026-10-14）：空目标（省略文件名 `[[#^`）＝本文件锚点，
+    // 直接以来源文档为目标（与查询应答 sameDocFsPath 同口径）；非空仍走
+    // 来源相对语义解析（不按部分文件名猜目标）
+    let targetFsPath: string
+    if (message.target.trim() === '') {
+      targetFsPath = doc.uri.fsPath
+    } else {
+      const resolution = await resolveVaultLinkFile(message.target, vaultResolveCtxOf(doc), statFileRealPath)
+      if (resolution.kind === 'no-workspace') {
+        return fail('no-workspace')
+      }
+      if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
+        return fail('target-not-found')
+      }
+      targetFsPath = resolution.fsPath
     }
-    if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
-      return fail('target-not-found')
-    }
-    const targetFsPath = resolution.fsPath
     if (classifyVaultFileCategory(targetFsPath) !== 'markdown') {
       return fail('target-not-md')
     }
@@ -2282,21 +2293,26 @@ export function createTextEditorProvider(
     if (plan === null) {
       return fail('target-changed')
     }
-    const aliasOfTarget = defaultAliasOf(path.basename(targetFsPath), 'markdown')
+    const isSameDoc = process.platform === 'win32'
+      ? targetFsPath.toLowerCase() === doc.uri.fsPath.toLowerCase()
+      : targetFsPath === doc.uri.fsPath
+    // 省略文件名（空目标）＝本文件锚点：alias 空串——webview 确认不补默认
+    // 别名（`[[#^块ID]]` 直接成立）；显式写出的目标（含显式自引）仍补
+    // 目标文件名默认别名（既有行为不变）
+    const aliasOfResult = message.target.trim() === ''
+      ? ''
+      : defaultAliasOf(path.basename(targetFsPath), 'markdown')
     if (plan.kind === 'reused') {
       // 防御分支：版本未变时不应出现（查询时无 id 现在有）；复用零写入
       return entry.session.postToPanel(sessionId, {
         kind: 'wikilink.block.accept.result',
         sessionId: message.sessionId, docUri: message.docUri,
         reqId: message.reqId, generation: message.generation,
-        ok: true, blockId: plan.id, alias: aliasOfTarget,
+        ok: true, blockId: plan.id, alias: aliasOfResult,
       })
     }
     const targetCrlf = target.eol === vscode.EndOfLine.CRLF
     const markerText = targetCrlf ? plan.insertText.replace(/\n/g, '\r\n') : plan.insertText
-    const isSameDoc = process.platform === 'win32'
-      ? targetFsPath.toLowerCase() === doc.uri.fsPath.toLowerCase()
-      : targetFsPath === doc.uri.fsPath
     if (isSameDoc) {
       // 源与目标同一文档：宿主不写（避免 undo 两笔）——标记插入点换算为
       // webview LF 坐标随包返回，由 webview 并入同一笔确认编辑（V01 场景
@@ -2307,7 +2323,7 @@ export function createTextEditorProvider(
         sessionId: message.sessionId, docUri: message.docUri,
         reqId: message.reqId, generation: message.generation,
         ok: true, blockId: plan.id, sameDoc: true,
-        markerLfOffset, markerText: plan.insertText, alias: aliasOfTarget,
+        markerLfOffset, markerText: plan.insertText, alias: aliasOfResult,
       })
     }
     // 跨文档：宿主先补写 ^id（V01 场景 1 路径），成功后登记因果记录
@@ -2332,7 +2348,7 @@ export function createTextEditorProvider(
       kind: 'wikilink.block.accept.result',
       sessionId: message.sessionId, docUri: message.docUri,
       reqId: message.reqId, generation: message.generation,
-      ok: true, blockId: plan.id, alias: aliasOfTarget,
+      ok: true, blockId: plan.id, alias: aliasOfResult,
     })
   }
 

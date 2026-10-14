@@ -739,7 +739,7 @@ export type HostToWebview =
       markerLfOffset?: number
       /** 标记插入文本（LF 形态 '\n\n^id'；sameDoc=true 在场） */
       markerText?: string
-      /** 默认显示文字（ok=true 在场；无手写别名时 webview 补用） */
+      /** 默认显示文字（ok=true 在场；无手写别名时 webview 补用；空目标（本文件锚点）时为空串——确认不补默认别名） */
       alias?: string
     }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
@@ -1825,10 +1825,11 @@ export type WebviewToHost =
       offset?: number
     }
   /** 双链联想标题查询（#379 T04）：光标进入闭合双链的**标题锚点字段**
-   *  （`[[目标#前缀…]]`）时由 webview 发起。target 为文件字段原文（宿主按
-   *  来源相对语义解析——与跳转同一 resolveVaultLinkFile，不按部分文件名猜
-   *  目标）；query 为锚点字段光标左侧前缀；reqId/generation 守卫与
-   *  wikilink.query 同构。#381 T06 起嵌入 B 同通道出站（来源 = B） */
+   *  （`[[目标#前缀…]]`）时由 webview 发起。target 为文件字段原文（非空时
+   *  宿主按来源相对语义解析——与跳转同一 resolveVaultLinkFile，不按部分
+   *  文件名猜目标；空白＝省略文件名，宿主按当前文档枚举——本文件锚点，
+   *  2026-10-14 修复）；query 为锚点字段光标左侧前缀；reqId/generation
+   *  守卫与 wikilink.query 同构。#381 T06 起嵌入 B 同通道出站（来源 = B） */
   | {
       kind: 'wikilink.heading.query'
       sessionId: string
@@ -1836,7 +1837,7 @@ export type WebviewToHost =
       reqId: number
       generation: number
       query: string
-      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标） */
+      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标；空白=当前文档） */
       target: string
     }
   /** 双链联想块查询（#380 T05）：光标进入闭合双链的**块锚点字段**
@@ -1851,7 +1852,7 @@ export type WebviewToHost =
       reqId: number
       generation: number
       query: string
-      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标） */
+      /** 文件目标原文（文件字段当前文本；宿主解析为明确 Markdown 目标；空白=当前文档） */
       target: string
     }
   /** 双链联想无 ID 块接受（#380 T05）：webview 选定无 ID 块时发起——宿主
@@ -1859,15 +1860,16 @@ export type WebviewToHost =
    *  V01 放行路径），成功后回 wikilink.block.accept.result，webview 再本地
    *  接受来源链接。line 为查询结果携带的块首行（1-based）；
    *  targetVersion 为查询结果的版本基准（宿主核对：目标正文在请求中改动
-   *  即淘汰）。reqId/generation 守卫与查询族同构。已有 ID 块不走本消息
-   *  （webview 本地直接确认） */
+   *  即淘汰）。target 空白＝省略文件名，宿主按当前文档（本文件锚点，
+   *  2026-10-14 修复）。reqId/generation 守卫与查询族同构。已有 ID 块不走
+   *  本消息（webview 本地直接确认） */
   | {
       kind: 'wikilink.block.accept'
       sessionId: string
       docUri: string
       reqId: number
       generation: number
-      /** 文件目标原文（宿主解析为明确 Markdown 目标） */
+      /** 文件目标原文（宿主解析为明确 Markdown 目标；空白=当前文档） */
       target: string
       /** 块首行（1-based；查询结果身份回传） */
       line: number
@@ -2159,7 +2161,7 @@ export interface WikilinkHeadingItem {
   line: number
   /** 规范化同名项在场（选中时 toast 提示定位风险的依据；不改变跳转语义） */
   duplicate: boolean
-  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用） */
+  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用；空目标（本文件锚点）时为空串——确认不补默认别名） */
   alias: string
 }
 
@@ -2177,7 +2179,7 @@ export interface WikilinkBlockItem {
   line: number
   /** 块行数（「位置」元信息显示） */
   lineCount: number
-  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用） */
+  /** 默认显示文字（Markdown 文件名去尾 .md；无用户手写别名时使用；空目标（本文件锚点）时为空串——确认不补默认别名） */
   alias: string
 }
 

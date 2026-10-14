@@ -37,24 +37,37 @@ export type WikilinkHeadingQueryResult =
  * 查询明确 Markdown 目标的标题候选：targetRaw 为双链文件字段原文（宿主按
  * 来源相对语义解析——精确路径 / 补 .md 候选 / 越界拦截，与跳转同一
  * resolveVaultLinkFile）；query 为标题前缀（规范化口径过滤，空 = 全部）。
- * 目标非 Markdown 或不可定位返回真实状态；读取失败分态（不猜当前文档、
- * 不冒充空结果）。
+ * 目标非 Markdown 或不可定位返回真实状态；读取失败分态（不冒充空结果）。
+ *
+ * 同文档锚点（2026-10-14 修复）：targetRaw 为空/空白且提供 sameDocFsPath
+ * 时跳过目标解析，直接以来源文档（当前文档）为目标——与 parseWikilinkInner
+ * 本文件锚点 `[[#标题]]`（path 空串）及 #159 跳转语义同口径；不依赖工作区
+ * 在场。此时候选 alias 为空串：确认写回不补文件名默认别名（显式写出的
+ * 目标——含显式自引——仍按文件名补默认别名，既有行为不变）。
  */
 export async function queryWikilinkHeadings(
   targetRaw: string,
   query: string,
   ctx: VaultLinkResolveContext,
   ports: WikilinkHeadingSourcePorts,
+  sameDocFsPath?: string,
 ): Promise<WikilinkHeadingQueryResult> {
-  const resolution = await resolveVaultLinkFile(targetRaw, ctx, ports.exists)
-  if (resolution.kind === 'no-workspace') {
-    return { status: 'unavailable', reason: 'no-workspace' }
+  // 本文件锚点：省略文件名 = 当前文档（文档在编辑中即在场，不走存在性探测）
+  const selfAnchor = targetRaw.trim() === '' && sameDocFsPath !== undefined
+  let targetFsPath: string
+  if (selfAnchor) {
+    targetFsPath = sameDocFsPath
+  } else {
+    const resolution = await resolveVaultLinkFile(targetRaw, ctx, ports.exists)
+    if (resolution.kind === 'no-workspace') {
+      return { status: 'unavailable', reason: 'no-workspace' }
+    }
+    if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
+      // 越界与未命中都归「无法定位明确目标」：不按部分文件名猜目标
+      return { status: 'unavailable', reason: 'target-not-found' }
+    }
+    targetFsPath = resolution.fsPath
   }
-  if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
-    // 越界与未命中都归「无法定位明确目标」：不按部分文件名猜目标
-    return { status: 'unavailable', reason: 'target-not-found' }
-  }
-  const targetFsPath = resolution.fsPath
   if (classifyVaultFileCategory(targetFsPath) !== 'markdown') {
     return { status: 'unavailable', reason: 'target-not-md' }
   }
@@ -71,7 +84,9 @@ export async function queryWikilinkHeadings(
       return { status: 'unavailable', reason: 'read-error' }
     }
   }
-  const alias = defaultAliasOf(path.basename(targetFsPath), 'markdown')
+  // 省略文件名（本文件锚点）→ alias 空串：确认写回不补文件名默认别名
+  // （`[[#标题]]` 直接成立）；显式写出的目标（含显式自引）仍按文件名补
+  const alias = selfAnchor ? '' : defaultAliasOf(path.basename(targetFsPath), 'markdown')
   // F5：标题写回语法往返校验——含 | / # / ^ / [ / ] 的标题经确认写回后
   // 引用静默损坏或表格格内裂格（`[[t#标题]]` 解析不回同一标题），不入
   // 候选列表（与文件候选 insertPath 往返失败丢弃同口径）

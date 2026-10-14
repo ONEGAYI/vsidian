@@ -39,7 +39,7 @@ export const en = {
   'styleRef.category.toast': 'Light notifications',
   'styleRef.category.wikilinkSuggest': 'Wikilink suggestions',
   'styleRef.category.headingFold': 'Heading folding',
-  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
+  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01）----
   'wikilinkSuggest.list.ariaLabel': 'Wikilink suggestions',
   'wikilinkSuggest.status.loading': 'Searching files…',
   'wikilinkSuggest.status.empty': 'No matching files',
@@ -47,9 +47,6 @@ export const en = {
   'wikilinkSuggest.status.notReady': 'Index is being prepared — type the link manually',
   'wikilinkSuggest.status.updating': 'Index still updating — results are partial',
   'wikilinkSuggest.status.more': '{count} more — press ↓ to load more',
-  // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
-  'wikilinkSuggest.placeholder.heading': 'Type a heading…',
-  'wikilinkSuggest.placeholder.block': 'Type a block ID…',
   // 验收反馈（2026-10-06）：浮层底部键提示条——按阶段裁剪显示当前可用进阶键
   'wikilinkSuggest.hint.heading': 'Type # to link to a heading',
   'wikilinkSuggest.hint.block': 'Type ^ to link a text block',

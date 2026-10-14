@@ -288,14 +288,15 @@ export function planWikilinkFieldEdit(
       // #380 T05 块确认：替换整个锚点字段（^ 后的查询文字——^ 前缀由字段
       // 形态承载），无分隔符时补文件名默认别名（与标题确认同规则：块选择
       // 完成后没有用户手写别名仍用文件名）；已有 |（含空别名）原样保留；
-      // 关闭会话
+      // 关闭会话。同文档锚点（2026-10-14）：alias 为空串时不补分隔符——
+      // `[[#^块ID]]` 直接成立（parseWikilinkInner 本文件锚点语义）
       if (!replaceBlock) {
         return null
       }
       const blockChanges: WikilinkFieldEditPlan['changes'] = [
         { from: anchorFrom, to: anchorTo, insert: replaceBlock.blockId },
       ]
-      if (pipeAt < 0) {
+      if (pipeAt < 0 && replaceBlock.alias !== '') {
         blockChanges.push({ from: closeFrom, to: closeFrom, insert: `${pipeIns}${replaceBlock.alias}` })
       }
       return {
@@ -307,14 +308,16 @@ export function planWikilinkFieldEdit(
     if (stage === 'heading') {
       // #379 T04 标题确认：替换整个锚点字段（不留光标右侧残留），无分隔符
       // 时补文件名默认别名（规格「路径与显示文字」：标题选择完成后没有
-      // 用户手写别名仍用文件名）；已有 |（含空别名）原样保留；关闭会话
+      // 用户手写别名仍用文件名）；已有 |（含空别名）原样保留；关闭会话。
+      // 同文档锚点（2026-10-14）：alias 为空串时不补分隔符——`[[#标题]]`
+      // 直接成立（parseWikilinkInner 本文件锚点语义，裸 `|` 空别名非法）
       if (!replaceHeading) {
         return null
       }
       const changes: WikilinkFieldEditPlan['changes'] = [
         { from: anchorFrom, to: anchorTo, insert: replaceHeading.heading },
       ]
-      if (pipeAt < 0) {
+      if (pipeAt < 0 && replaceHeading.alias !== '') {
         changes.push({ from: closeFrom, to: closeFrom, insert: `${pipeIns}${replaceHeading.alias}` })
       }
       // 光标落锚点末（| 前 / 闭围栏前）——与文件确认「留在目标区末端」对称
