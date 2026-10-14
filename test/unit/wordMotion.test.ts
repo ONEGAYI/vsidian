@@ -63,6 +63,7 @@ describe('拉丁/数字路径逐字节一致（回归断言钉住）', () => {
     ['  lead spaces', 0], ['trail.  ', 6], ['a.b,c;d', 1], ['a.b,c;d', 4],
     ['snake_case_word', 5], ['123 456', 3], ['MiXeD CaSe', 4],
     ['end.', 4], ['^caret', 0], ['tab\tsep', 3],
+    [' abc中文', 0], ['中文abc ', 6],
   ]
   it.each(latinCases)('右移一致：%s @%d', (doc, pos) => {
     expect(sameOutcome(doc, pos, undefined, cursorWordRight, cursorGroupRight)).toBe(true)
@@ -83,6 +84,12 @@ describe('拉丁/数字路径逐字节一致（回归断言钉住）', () => {
       expect(sameOutcome(doc, from, to, cursorWordRight, cursorGroupRight)).toBe(true)
       expect(sameOutcome(doc, from, to, cursorWordLeft, cursorGroupLeft)).toBe(true)
     }
+  })
+  it('跨空白后邻接 ASCII 标点时仍与原生命令一致', () => {
+    expect(sameOutcome('中文 ,测试', 2, undefined, cursorWordRight, cursorGroupRight)).toBe(true)
+    expect(sameOutcome('中文 ,测试', 2, undefined, selectWordRight, selectGroupRight)).toBe(true)
+    expect(sameOutcome('中文, 测试', 4, undefined, cursorWordLeft, cursorGroupLeft)).toBe(true)
+    expect(sameOutcome('中文, 测试', 4, undefined, selectWordLeft, selectGroupLeft)).toBe(true)
   })
 })
 
@@ -120,6 +127,39 @@ describe('中文段逐词移动（注入 mock 边界 = jieba 注入路径）', (
       cursorWordLeft(view)
       expect(view.state.selection.main.head).toBe(expected)
     }
+  })
+
+  it('从中文后的空格右侧左移仍按中文分词边界落点', () => {
+    const chinese = '模型调用了一次工具，工具调用经过许多阶段：准备中、运行中、完成态……每次都会把最新的状态更新覆写到对应的片段表'
+    const text = `- ${chinese} part`
+    __setJiebaBoundariesForTest(words([
+      chinese.slice(0, -3), '片段', '表',
+    ]))
+    configureWordSegment({ engine: 'jieba', resources: null })
+    const wordStart = text.indexOf('片段表') + 2
+    const beforeSpace = makeView(text, { anchor: text.indexOf(' part') })
+    cursorWordLeft(beforeSpace)
+    expect(beforeSpace.state.selection.main.head).toBe(wordStart)
+    const afterSpace = makeView(text, { anchor: text.indexOf('part') })
+    cursorWordLeft(afterSpace)
+    expect(afterSpace.state.selection.main.head).toBe(wordStart)
+  })
+
+  it('跨空格/Tab 的 Shift 扩选保持 anchor，往返只经过一个中文词', () => {
+    __setJiebaBoundariesForTest(words(['中文', '测试', '文档']))
+    configureWordSegment({ engine: 'jieba', resources: null })
+    const text = 'part \t 中文测试文档 \t part'
+    const chineseStart = text.indexOf('中文')
+    const leftAnchor = text.indexOf(' ')
+    const rightAnchor = text.lastIndexOf('part')
+    const left = makeView(text, { anchor: leftAnchor })
+    selectWordRight(left)
+    expect(left.state.selection.main.anchor).toBe(leftAnchor)
+    expect(left.state.selection.main.head).toBe(chineseStart + 2)
+    const right = makeView(text, { anchor: rightAnchor })
+    selectWordLeft(right)
+    expect(right.state.selection.main.anchor).toBe(rightAnchor)
+    expect(right.state.selection.main.head).toBe(chineseStart + 4)
   })
 
   it('Shift 变体逐词扩选（anchor 保持、head 逐词推进）', () => {

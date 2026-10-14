@@ -1,6 +1,6 @@
 // 中文分词词级移动命令（#239）：Ctrl+Left/Right 与 Shift 变体对连续
-// CJK 段按分词结果逐词切分；拉丁/数字/空白/ASCII 标点路径**逐字节沿用**
-// CM6 cursorGroupLeft/Right 既有语义（见命令实现：无 CJK 细化时直接委托
+// CJK 段按分词结果逐词切分（含跨空格/Tab 入段），ASCII 词段紧贴 CJK 时
+// 停在交界；其余路径逐字节沿用 CM6 原生语义（无 CJK 细化时直接委托
 // 原生命令；混合场景的组装路径与 @codemirror/commands 的
 // moveSel/extendSel 同构——回归断言钉住）。
 //
@@ -135,8 +135,9 @@ export function __setJiebaBoundariesForTest(boundaries: WordBoundaryFn | null): 
 /**
  * 词级移动命令工厂。forward = 文档序前向；extend = Shift 扩选变体。
  * 逐 range：原生目标由 view.moveByGroup 计算（与 cursorByGroup/
- * selectByGroup 同式）；head 邻近分词域字符时以分词目标替换。全部
- * range 无细化时委托原生命令（cursorGroupLeft/Right 与 select 变体，
+ * selectByGroup 同式）；head 沿方向跨过空格/Tab 后邻近分词域字符时以
+ * 分词目标替换。全部 range 无细化时委托原生命令（cursorGroupLeft/Right
+ * 与 select 变体，
  * 零组装差异——拉丁行为逐字节不变的最终保证）。
  */
 export function wordMotionCommand(forward: boolean, extend: boolean): Command {
