@@ -67,4 +67,7 @@ test('接线契约：run.mjs 消费组别环境变量，ci.yml 双 job 按组运
   assert.match(ci, /VSIDIAN_TEST_BROWSER_GROUP: sensitive/)
   assert.match(ci, /browser-core-reports-a\$\{\{ github\.run_attempt \}\}/)
   assert.match(ci, /browser-sensitive-reports-a\$\{\{ github\.run_attempt \}\}/)
+  // 敏感组串行（防 addon 夹具 .build 目录并发清理竞争——ENOTEMPTY 定案）；
+  // 正则容忍 CRLF 工作区行尾
+  assert.match(ci, /VSIDIAN_TEST_BROWSER_GROUP: sensitive\r?\n\s+run: npm run test:browser -- --workers=1/)
 })

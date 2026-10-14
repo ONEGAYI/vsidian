@@ -333,9 +333,15 @@ jobs:
       - name: 安装 Chromium
         run: npx playwright install --with-deps chromium
       - name: 浏览器原生输入回归（敏感组）
+        # --workers=1 串行（首跑 run 38488230138 定案）：三并发下
+        # addonT10Commands 与 addonRendererTakeover 同窗共用
+        # test/fixtures/addon-v02/.build，buildTestAddons 开头的 rmSync
+        # 非原子清理撞上并发写入即 ENOTEMPTY 即败（0.79s）；全量时代两
+        # 套件相邻但不必然同窗，分组使敏感组内必然并发。串行同时给三
+        # 套件归因提供排除并发变量的观察面（夹具并发安全修复归 #446）。
         env:
           VSIDIAN_TEST_BROWSER_GROUP: sensitive
-        run: npm run test:browser
+        run: npm run test:browser -- --workers=1
       - name: 保存敏感组报告
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
