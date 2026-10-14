@@ -358,3 +358,19 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 证据：本树 `out/test/outline-animation-red.log`、`outline-readiness-red.json` / `outline-readiness-green.json`、`outline-unit-full.json`、`outline-browser-final.log` 及对应浏览器报告、`outline-final-compile-fixed.log`、`outline-native-all.log` / `outline-native-all-report.log`；交付时归档至 `D:/.codex/evidence/vsidian-outline-dot-20261014/`。
 
 **本轮补查的新失败保持独立**：main [38521864148](https://github.com/ONEGAYI/vsidian/actions/runs/38521864148) 的第 2 片挂在 #111 图表弹窗装载；[38520568957](https://github.com/ONEGAYI/vsidian/actions/runs/38520568957) 的 tableCaret 是“靠近右边新增列带出现”预期 opacity=1、实际 0，`handle-hover-refresh` 仍通过，套件 69.109s、`TIMEOUT=false`。这些不等于先前控件重建时样式空串的根因复发，也不因本轮 #67 修正而联动勾销。
+
+## #446 条目 13 / #496：表格新增带重建丢失静止指针悬停态（2026-10-14）
+
+**已固定真实呈现缺陷**：Chromium 原生指针靠近表格右边后新增列带 opacity=1；保持指针不动，用既有 `refreshTableLayout` 重发表格度量。刷新前后表格右边界均为 952px，指针为 x=948/y=80、距边界 4px，源文不变。控件确已重建，旧按钮断开连接；当前新按钮仍连接在 DOM 中，却丢失 `vsidian-table-control-hover`、opacity=0。原子查询当前按钮仍见红，排除了本次回放是读取旧节点空样式的解释。新增行带也能按同一重建机制复现。历史 CI 只有 opacity=0、没有控件代次与几何，不能宣称逐帧还原；本轮证明了可复现同形态的生产缺陷，独立开票 #496。
+
+`TableControlsView.render` 每次重建整层按钮，原新增带悬停类只由指针事件写入。候选保存最近的新增带指针坐标，在控件重建后按**当前**可见表格边界重新计算显隐；进入新增带同步坐标，离开时清空。没有复制旧 DOM、旧类或固定旧几何；边界移远后应隐藏。修正限定在新增行/列带，不将其他抓手的状态概括为已修复。
+
+永久浏览器场景 `handle-hover-visible-refresh` 覆盖行/列新增带、指针离开后的重配与零文本写回；原 `handle-hover-refresh` 的隐藏态原子采样回归保留。单测覆盖静止指针、当前边界移开、新增带内部移动和离开后重建。原生回放先红后绿，不延长预算、不调整 core/sensitive 分组。
+
+**契约基线**：已发布 v1.0.0，提交 `1ced19532a9ef1e1a8a34b1da075fbc8c694469d`。公开 `live-table-grid-row` / `live-table-grid-cell` 的节点、选择器和变量入口保留；控件层、新增带与悬停类为既有实现锚点，本次没有新增公开条目。历史格选择器片段在新回归中实际改变 padding，并在该布局下验证新增带显隐。按钮沿用既有 20px 盒、4px 圆角、editor/toolbar 主题变量，新增带沿用 12px 带与热区；本次没有改变元素形态、样式值或登记新档位。历史基线复验与当前样式契约检查通过。用户可见修正只记入 Unreleased，物理鼠标验收留在 manual-verification 的未勾选条目。
+
+证据保存在本树 `out/test/column-hover-probe-red.log`、`column-hover-visible-red.log` 及对应 `tableCaret.log` / `report.json`、`column-hover-browser-final.log` 及其报告、单测 JSON、`column-hover-style-baseline.log` / `column-hover-style-check.log`。交付时另存 `D:/.codex/evidence/vsidian-table-column-hover-20261014/`；本地与候选 CI 的结论分开记录。
+
+本地 tableCaret 83 个场景、相关单测、compile/类型检查与样式契约通过。首轮全量 Vitest 为 7927/7928，唯一失败是 #372 两表优化模板互异断言；该用例只装配 `livePreviewDecorations`，未装配本次修改的表格控件，同日另一实施会话两轮全量已有同款失败。单独 liveTable 151/151 通过。与 Vitest 同时执行的 Node 契约为 190/192，两项宿主 700ms 超时快照未收到目标输出；改为单独执行后 192/192 通过。原失败与独立通过日志均保留，这些对照不等于未定性项已修复，不修改其断言或预算以迁就当前修正。
+
+推送前同步 main `2c5f1ab7`，文件树按三方字段合并保留双方 16 项变动，人工清单保留两边待验项。新基线 compile/类型检查、完整 Vitest 7977/7977 与 Node 契约 192/192 通过；文件树 strict 全部通过，主线已补齐此前漏录。日志为 `column-hover-rebased-compile.log`、`column-hover-rebased-unit-all.log`、`column-hover-tree-merge.json`、`column-hover-tree-rebased-check.log`。旧基线的未定性失败仍在 #446 单独跟踪，不因新基线一轮通过勾销。

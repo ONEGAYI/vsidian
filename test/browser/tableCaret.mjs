@@ -198,7 +198,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'handle-hover-refresh', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'handle-hover-refresh', 'handle-hover-visible-refresh', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -392,7 +392,13 @@ try {
         await page.mouse.up()
         const text = (await page.evaluate(() => window.readEditor())).text
         assert(text.includes('| H2 | H1 |\n| ---: | :--- |\n| B2 | B1 |'), `列拖排须连对齐信息一同移动: ${text}`)
-      } else if (scenario === 'handle-hover' || scenario === 'handle-hover-refresh') {
+      } else if (scenario === 'handle-hover' || scenario === 'handle-hover-refresh' || scenario === 'handle-hover-visible-refresh') {
+        if (scenario === 'handle-hover-visible-refresh') {
+          // v1.0.0 的公开格选择器示例；重要声明让夹具中的历史片段优先于内置规则。
+          await page.addStyleTag({ content: '.vsidian-table-grid-cell { padding: 2px 8px !important; }' })
+          assert.equal(await cell(1, 1).evaluate(el => getComputedStyle(el).paddingLeft), '8px',
+            '旧格选择器片段应实际改变单元格绘制')
+        }
         const band = page.locator('.vsidian-table-insert-row')
         const rect = await cell(2, 0).boundingBox()
         // 查询与样式读取同一回调执行，避免 Locator 句柄在控件重建后指向脱离 DOM 的按钮。
@@ -401,6 +407,11 @@ try {
         assert.equal(await opacity(), '0', '新增行带平时不可见')
         await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height - 2)
         assert.equal(await opacity(), '1', '靠近表格底边新增行带出现')
+        if (scenario === 'handle-hover-visible-refresh') {
+          await page.evaluate(() => window.refreshTableLayout())
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+          assert.equal(await opacity(), '1', '指针静止时度量重配后新增行带应保持出现')
+        }
         await captureTable('table-add-row-band.png')
         const bandRect = await band.boundingBox()
         await page.mouse.move(bandRect.x + bandRect.width / 2, bandRect.y + bandRect.height / 2)
@@ -420,7 +431,22 @@ try {
         await page.mouse.move(right.x + right.width - 2, right.y + right.height / 2)
         assert.equal(await page.evaluate(() =>
           getComputedStyle(document.querySelector('.vsidian-table-insert-column')).opacity), '1', '靠近右边新增列带出现')
-        await captureTable('table-add-column-band.png')
+        if (scenario === 'handle-hover-visible-refresh') {
+          await page.evaluate(() => window.refreshTableLayout())
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+          assert.equal(await page.evaluate(() =>
+            getComputedStyle(document.querySelector('.vsidian-table-insert-column')).opacity), '1',
+          '指针静止时度量重配后新增列带应保持出现')
+          assert.equal((await page.evaluate(() => window.readEditor())).text, source, '悬停与重配不得修改表格源文')
+          await captureTable('table-add-column-band.png')
+          await page.mouse.move(600, 400)
+          await page.evaluate(() => window.refreshTableLayout())
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+          assert.equal(await page.evaluate(() =>
+            getComputedStyle(document.querySelector('.vsidian-table-insert-column')).opacity), '0',
+          '指针离开后重配不得恢复旧新增列带')
+        }
+        if (scenario !== 'handle-hover-visible-refresh') await captureTable('table-add-column-band.png')
         const header = await cell(0, 0).boundingBox()
         await page.mouse.move(header.x + header.width / 2, header.y + header.height / 2)
         await captureTable('table-edge-handles.png')
