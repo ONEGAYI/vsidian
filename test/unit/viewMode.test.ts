@@ -250,6 +250,26 @@ describe('视图容器显隐与稳定类名', () => {
 })
 
 describe('持久化与 webview 重载恢复', () => {
+  it('纯光标移动在隐藏前写入桥状态，重载不依赖销毁时的最后一次回包', () => {
+    const h = makeBridge()
+    const c1 = mountMode(h)
+    const target = DOC.indexOf('中部二级标题')
+    let c2: WebviewSyncController | undefined
+    try {
+      c1.getView()!.dispatch({ selection: { anchor: target } })
+      expect(h.saved()?.anchor).toBe(target)
+      // VSCode 销毁 iframe 后不再消费其消息；新实例只能使用隐藏前已收到的 JSON。
+      const received = JSON.parse(JSON.stringify(h.saved())) as Record<string, unknown>
+      const restored = makeBridge(received)
+      c2 = mountMode(restored)
+      expect(viewState(c2, restored).selectionOffset).toBe(target)
+      expect(sentEditRequests(h)).toBe(0)
+    } finally {
+      c1.dispose()
+      c2?.dispose()
+    }
+  })
+
   it('纯光标移动后立即切页，落盘并在重载后恢复光标', () => {
     const h = makeBridge()
     const c1 = mountMode(h)

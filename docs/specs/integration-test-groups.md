@@ -506,3 +506,17 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 日志为out/test/graphic12-historical-install.log、graphic12-historical-build.log、graphic12-stage-map.json、graphic12-browser-probe.log（装配错误）/corrected.log、graphic12-diagnostics-red.log/green.log和clipboard14-group-control.log/report.log。历史源码与source map仅为忽略目录中的诊断证据，不加入发行产物；临时DEBUG-graphic12探针不进入提交。
 
 本地验证：compile/类型、完整Vitest8047/8047与Node194/194、文件树strict通过；真实VSCode1.82.3三项图形集成3/3（目标1933ms），graphicPopup完整原生浏览器套件通过（run-dTCq50，14.27s）。这些通过验证诊断补全未破坏原链路，不据此关闭条目12或14。
+
+## #446 条目6：光标状态延迟与iframe销毁的交叠（初步修复，2026-10-15）
+
+**异步传输下取得2029→0的确定性红**。使用VSCode1.82.3安装目录中的原API注入脚本、生产控制器与CSS、原viewport-mermaid.md及真实嵌套iframe。API先同步更新iframe内state，再经MessageChannel发送JSON；对照按该版本webviewElement.dispose的顺序移除iframe并停止接收。纯光标定位后0/80/200ms销毁的六次均恢复到0，300ms两次均保持2029。保留接收器只改一个变量，前三档各一次均恢复2029。
+
+**销毁时补发已发送，但没有抵达被撤销的接收器**。pagehide和visibilitychange均触发生产flush，发送的anchor为2029；原250ms光标保存尚未到期，隐藏前宿主仍没有该锚点。保留接收器的对照收到补发，而按销毁顺序撤销接收器的对照未收到。这补齐了此前同一JS环境、同步内存桥的对照所缺失的边界。原失败CI38141117256没有消息时间线，本轮没有重新复现原生宿主的历史失败，不能将上述边界实验当作旧现场；条目6继续保留未勾选状态。
+
+对应上游事实源为[1.82.3的API注入与MessageChannel](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/webview/browser/pre/index.html)、[状态接收与iframe销毁](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/webview/browser/webviewElement.ts)及[隐藏时释放webview](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/webview/browser/overlayWebview.ts)。这些源码支持传输与释放机制，不包含旧CI的事件时序。
+
+**修正为Live纯选区变化立即提交锚点**。移除对应250ms计时器，只复用既有persistState；光标变化不测量布局，滚动视口采样与恢复仍走原去抖。取舍是每次锚点变化会多发小型状态JSON，减少等待窗口；不宣称同一任务内发送后立刻销毁的异步消息必然送达。文本同步、历史、持久化格式、DOM/CSS及原用例预算与分组均不改。
+
+永久viewMode契约在隐藏前检查桥状态，并以独立JSON快照重建新控制器；旧实现预期偏移24、实际undefined，修正后33/33通过。原异步通道矩阵12/12通过；使用真实Mermaid产物的0/80/150/200/300ms矩阵15/15通过，已观测到实际SVG和允许的error终态。完整Vitest8048/8048与Node194/194、compile/类型通过；原生viewToggle浏览器套件通过（run-Qq9nSl），真实VSCode1.82.3原Mermaid标签切换用例通过。
+
+证据为out/test/mermaid6-public-seam-red.json/green.json、mermaid6-iframe-transport-observed.log、mermaid6-iframe-transport-green.log、mermaid6-iframe-real-paint-green.log及独立真实产物JSON、mermaid6-unit-full.log、mermaid6-native-green.log/report.log。诊断探针只在忽略目录；红轮通道JSON随后被同名绿轮覆写，原红取证以保留的带退出码日志为准，不冒充原完整JSON。自动验证不代替物理键盘/鼠标、IME与日用安装态人工验收。

@@ -399,7 +399,6 @@ function scheduleFrame(fn: () => void): void {
  *  定位纯函数 + 一次类切换，不解析文档） */
 const OUTLINE_HIGHLIGHT_DEBOUNCE_MS = 100
 const VIEWPORT_SAVE_DEBOUNCE_MS = 250
-const SELECTION_SAVE_DEBOUNCE_MS = 250
 
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
@@ -631,7 +630,6 @@ export class WebviewSyncController {
   /** 当前模式的滚动像素位置；与 modeAnchor 分开，避免纯滚动移动编辑光标。 */
   private viewport: { mode: ViewMode; top: number; centerOffset?: number } | null
   private viewportSaveTimer: ReturnType<typeof setTimeout> | undefined
-  private selectionSaveTimer: ReturnType<typeof setTimeout> | undefined
   private restoringViewport = false
   /** 仅测试注入后开放绘制中心探针，避免常规 view.state 改变 CM6 测量时机。 */
   private viewportProbeEnabled = false
@@ -1773,7 +1771,9 @@ export class WebviewSyncController {
           const anchor = update.state.selection.main.from
           if (anchor !== this.modeAnchor) {
             this.modeAnchor = anchor
-            this.scheduleSelectionSave()
+            // VSCode 隐藏时会销毁 iframe，pagehide 发出的异步状态可能来不及接收。
+            // 光标锚点不依赖布局，随选区立即保存；视口测量仍走滚动去抖。
+            this.persistState()
           }
         }
         if (!update.docChanged) {
@@ -4891,24 +4891,10 @@ export class WebviewSyncController {
     this.persistState()
   }
 
-  private scheduleSelectionSave(): void {
-    if (this.selectionSaveTimer !== undefined) clearTimeout(this.selectionSaveTimer)
-    this.selectionSaveTimer = setTimeout(() => this.flushSelectionSave(), SELECTION_SAVE_DEBOUNCE_MS)
-  }
-
-  private flushSelectionSave(): void {
-    if (this.selectionSaveTimer === undefined) return
-    clearTimeout(this.selectionSaveTimer)
-    this.selectionSaveTimer = undefined
-    this.persistState()
-  }
-
   private flushPendingViewState(): void {
-    const pending = this.viewportSaveTimer !== undefined || this.selectionSaveTimer !== undefined
+    const pending = this.viewportSaveTimer !== undefined
     if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
-    if (this.selectionSaveTimer !== undefined) clearTimeout(this.selectionSaveTimer)
     this.viewportSaveTimer = undefined
-    this.selectionSaveTimer = undefined
     if (this.viewport && !this.restoringViewport) this.captureViewport()
     if (pending || this.viewport) this.persistState()
   }
@@ -4967,10 +4953,6 @@ export class WebviewSyncController {
    *  outlineExpandLevel（#67 档位全局记忆）、sidebarWidth（拖宽记忆）共存
    *  互不覆盖 */
   private persistState(): void {
-    if (this.selectionSaveTimer !== undefined) {
-      clearTimeout(this.selectionSaveTimer)
-      this.selectionSaveTimer = undefined
-    }
     const saved = this.bridge.getState<PersistedState>() ?? {}
     this.bridge.setState({
       ...saved,
