@@ -386,6 +386,9 @@ describe('#477 设置区视觉呈现：卡片式设置行与开关形态', () =>
     expect(css).toMatch(/\.vsidian-addons-settings \.vsidian-settings-group \+ \.vsidian-settings-group\s*\{[^}]*margin-top:\s*10px/)
     // #477 死规则清理：组卡片（block）上不写 gap（ui-patterns §5 已知不一致项随本批移除）
     expect(css).not.toMatch(/\.vsidian-addons-settings \.vsidian-settings-group\s*\{[^}]*gap/)
+    // 布尔数组项/对象字段开关不被行内 flex:1 拉伸（审查轮 1 发现 1）：行内
+    // input 通用规则（类+元素特异性）高于开关档位类，需显式覆写回 36×20 档
+    expect(css).toMatch(/\.vsidian-addons-array-row > input\.vsidian-settings-checkbox,\s*\.vsidian-addons-object-field > input\.vsidian-settings-checkbox\s*\{[^}]*flex:\s*none/)
   })
 })
 

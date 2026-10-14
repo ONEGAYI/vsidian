@@ -622,6 +622,11 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 /* #475 逐项文本框加宽：flex:1 占满行剩余宽 + min-width:0 允许随内容收缩
    （长内容不把行撑出容器，宽度恒定可预期） */
 .vsidian-addons-array-row > input, .vsidian-addons-array-row > select { flex: 1; min-width: 0; min-height: 24px; }
+/* #477 布尔数组项/对象字段的拨动开关不参与逐项拉伸：上行通用 input 规则
+   特异性（类+元素）高于开关档位类，需显式覆写回 36×20 几何（审查轮实证：
+   未覆写时 flex:1 把开关拉成整行宽胶囊、min-height 24px 压过高度档） */
+.vsidian-addons-array-row > input.vsidian-settings-checkbox,
+.vsidian-addons-object-field > input.vsidian-settings-checkbox { flex: none; min-height: 0; }
 /* #475 多行文本形态（定义级 string 声明 multiline）：占定义行整行，
    观感对齐 select/text 档位（2px 圆角 + input 变量族），可纵向拖高 */
 .vsidian-addons-setting-item > textarea { width: 100%; min-height: 72px; padding: 4px 6px; box-sizing: border-box;

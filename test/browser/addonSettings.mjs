@@ -33,8 +33,12 @@ const DEFINITIONS = [
     fields: [
       { key: 'name', title: '名称', kind: 'string', maxLength: 10, default: 'demo' },
       { key: 'count', title: '数量', kind: 'number', min: 0, max: 9, default: 3 },
+      // #477：布尔对象字段（开关档位几何断言对象——审查轮 1 发现 2 补两路断言）
+      { key: 'strict', title: '严格', kind: 'boolean', default: true },
     ],
   },
+  // #477：布尔数组项（开关档位几何断言对象；放末位不扰动既有保存按钮 nth 定位）
+  { key: 'switches', title: '开关数组', type: 'array', items: { kind: 'boolean' }, default: [true] },
 ]
 
 /** 页内 mock 宿主状态（回灌应答的数据源——消息构造在 evaluate 内联） */
@@ -245,7 +249,8 @@ try {
 
   // ---- 5. 数组重复项控件：真实键盘输入新项 + 保存整批 ----
   await page.getByRole('tab', { name: zhCn['addons.scopeUserDefault'], exact: true }).click()
-  await page.getByRole('button', { name: zhCn['addons.arrayAddItem'], exact: true }).click()
+  // #477 夹具新增布尔数组后有多个「添加项」按钮——replacements 按定义序居首
+  await page.getByRole('button', { name: zhCn['addons.arrayAddItem'], exact: true }).first().click()
   const newRow = area.locator('input[data-addon-array-item="replacements"]').nth(1)
   await newRow.click()
   await page.keyboard.type('甲→乙')
@@ -313,6 +318,24 @@ try {
   await page.getByRole('button', { name: zhCn['addons.saveChanges'], exact: true }).nth(0).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user'
     && Array.isArray(m.values.replacements) && m.values.replacements.length === 4 && m.values.replacements[0] === '旧→新甲' && m.values.replacements[3] === '甲→乙'))
+
+  // ---- 6c. #477 布尔数组项/对象字段开关几何（审查轮 1 发现 1 回归钉住：
+  //      行内 input 通用 flex:1 规则曾把两路开关拉成整行宽胶囊） ----
+  const arraySwitch = area.locator('.vsidian-addons-array-row input[data-addon-array-item="switches"]')
+  const arraySwitchShape = await arraySwitch.evaluate((el) => {
+    const rect = el.getBoundingClientRect()
+    return { width: rect.width, height: rect.height, appearance: getComputedStyle(el).appearance }
+  })
+  assert.equal(arraySwitchShape.width, 36, '布尔数组项开关宽 36px（不被行内 flex:1 拉伸）')
+  assert.equal(arraySwitchShape.height, 20, '布尔数组项开关高 20px（min-height 覆写回档）')
+  assert.equal(arraySwitchShape.appearance, 'none', '布尔数组项为拨动开关形态')
+  const fieldSwitch = area.locator('input[data-addon-field="limits.strict"]')
+  const fieldSwitchShape = await fieldSwitch.evaluate((el) => {
+    const rect = el.getBoundingClientRect()
+    return { width: rect.width, height: rect.height }
+  })
+  assert.equal(fieldSwitchShape.width, 36, '布尔对象字段开关宽 36px（不被行内 flex:1 拉伸）')
+  assert.equal(fieldSwitchShape.height, 20, '布尔对象字段开关高 20px（min-height 覆写回档）')
 
   // ---- 7. 功能开关随标签层（workspace）----
   await page.getByRole('tab', { name: zhCn['addons.scopeWorkspace'], exact: true }).click()
