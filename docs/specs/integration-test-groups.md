@@ -448,3 +448,5 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 本轮证明测试观测缺口，历史CI缺少完整目标事件时间线，尚不能把条目7/17每次失败都归为日志淘汰，两项继续未定因跟踪。其余条目5/6/9/12/14本机对照均通过，已在Issue补证据，未拿到目标红的路径未修改或勾销。证据为out/test/t15-ring-red.log、ring-green.log、target-contract-red.log、final-callback.log、all-native.log / all-native-report.log、compile.log及ring-diagnosis.md（同组文件均带t15前缀）；候选CI与本机结果分开记录。
 
 基线56e03882上完整Vitest8026/8026与Node193/193通过。文件树相关职责由维护入口更新；全树严格检查仍仅为前节列出的五项主线既有漏录，没有新增漏录。
+
+独立审查发现永久测试不应绑定生产私有recordEvent变量名。实际记录器抽取回放留在忽略目录作为诊断证据；永久回归通过公开命令mock提供独立截断快照，并执行真实等待函数。公开边界旧等待仍先红（t15-public-red.log），修正后10/10通过（t15-public-green.log），不为测试新增生产接口。
