@@ -403,6 +403,20 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 
 **修正只控制快照测试的时钟和就绪**。真实包装层与Node子进程保留；父测试只模拟setTimeout，等待stdout完整目标标记，再推进至699ms验证尚未停止，700ms验证立即报告超时，随后检查原124退出码、断点标记与尾部保留。另加首输出前700ms到期的空缓冲契约，禁止伪造快照。用例独立5000ms时限约束启动就绪与清理；宿主timeoutMs仍为700，生产全程计时、tail缓冲及杀树实现不变。就绪标记缺失的隔离探针触发1000ms真实测试取消后，after hook仍停止并等待本次树退出，收尾标记成功。
 
-原负载下完整Node契约193/193，三个快照用例通过；负载生成的Vitest为8009/8010，唯一失败是未改的wikilinkSuggestSession:634“非空查询取首项”expected0/actualnull，另记未归因，不改其断言。标准串行compile/类型、完整Vitest8010/8010与Node193/193通过，文件树strict通过。本票只改测试夹具和维护文档；没有webview输入/样式或宿主实现变更，真实包装层的超时、中断、异常及进程树清理原契约仍以真实时钟运行。候选CI与本机并行诊断分开记录，其他#446未定性项不联动勾销。
+原负载下完整Node契约193/193，三个快照用例通过；负载生成的Vitest为8009/8010，唯一失败是未改的wikilinkSuggestSession:634“清空查询后 ↓ 未高亮首项”expected0/actualnull，另记条目19，当时未归因，不改其断言。标准串行compile/类型、完整Vitest8010/8010与Node193/193通过，文件树strict通过。本票只改测试夹具和维护文档；没有webview输入/样式或宿主实现变更，真实包装层的超时、中断、异常及进程树清理原契约仍以真实时钟运行。候选CI与本机并行诊断分开记录，其他#446未定性项不联动勾销。
 
 证据：本树out/test/host16-original-solo.log、original-under-load.log、timeline-solo.json / timeline-load.json、before-vitest.json、fixed-under-load-node-all.log、fixed-load-vitest.json、snapshots-final.log、cancel-probe.log / json、standard-unit.log、compile.log、tree-check.log及host16-diagnosis.md（同组文件均带host16-前缀）。交付归档D:/.codex/evidence/vsidian-host16-timeout-20261014/；旁路探针仅在忽略目录，不进提交。
+
+## #446 条目 19：双链高亮夹具未等待去抖后的新查询（2026-10-14）
+
+**原失败位于空查询后的方向键选择**。原报告wikilinkSuggestSession.test.ts:634预期0、实际null，对应删除为起始空查询后按↓；非空查询身份消失取首项的断言在627行已经通过。此前台账将两处混称，本轮按原堆栈纠正。
+
+**已固定快慢回包的红绿对照**。保持原输入、回包、真实keydown和高亮断言，只将首次回包耗时固定为0/80ms：快分支通过，慢分支稳定在原方向键步骤失败，单例47ms。慢回包使下一次文件查询启用自适应去抖；删除时会话已换代，最新出站却仍是reqId1/generation1/query方。夹具立即回灌旧请求，生产守卫正确拒收，浮层维持0项的加载态。原activeIndex=null断言把加载态误作已就绪空查询无高亮，直到↓后才失败。
+
+只推进待发查询的模拟时间，新空查询reqId2/generation2出站；同样回包得到两项，初始无高亮，↓后索引0。非空同查询重排、身份消失与空查询身份消失步骤均继续通过。历史全量没有逐阶段时钟记录，不声称已测得旧现场RTT；本轮证明夹具对慢回包缺少就绪前提，可稳定复现同形态断言。
+
+**最小修正只改会话契约**：固定0/80ms快慢分支和父测试时钟；删除后推进查询调度，先断言新空查询及新reqId，再确认两项真实候选就绪，随后执行原高亮与身份消失断言。生产去抖、响应守卫、高亮、按键、DOM与样式实现均未改，没有延长真实等待预算或修改分组。单文件74/74通过；代理自检不替代真实IME和物理键盘的人工验收。
+
+本地compile/类型、文件树strict、原生wikilinkSuggest48/48通过。完整npm run test:unit与额外Node契约并行运行，Vitest8011/8011及两份Node193/193均通过，覆盖原并行诊断条件。RTK本轮成功解析后未更新JSON/tee，原.vitest/json/output.json仍是上一轮数据；本轮统计只取带退出码的日志，不以旧报告充当新证据。候选CI与本机诊断分开留存，其余#446未归因条目不联动勾销。
+
+证据：本树out/test/highlight19-original-solo.log、clock-red.log、public-trace-red.log / green.log、session-green.log、compile.log及diagnosis.md（同组文件均带highlight19-前缀）。交付归档D:/.codex/evidence/vsidian-highlight19-20261014/；临时DEBUG-highlight19输出已从测试移除。
