@@ -541,49 +541,90 @@ test('Windows 启动器收到 SIGINT 后返回中断码并清理进程树', { sk
   }
 })
 
-test('超时被杀时输出最近输出快照：就地分辨截断与定位断点（不依赖末尾报告汇总）', async () => {
+// 快照契约只控制停止时刻，不把包装层/C#编译/管道抵达耗时混进700ms。
+// 仍跑真实子进程；先收齐目标输出，再推进受控时钟到699/700ms。
+// 用例5000ms上限约束就绪与清理；宿主timeoutMs仍为700。
+async function snapshotAfterOutput(t, script, marker) {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let stdoutText = ''
+  let stderrText = ''
+  let outputReady
+  const ready = new Promise((resolve) => { outputReady = resolve })
+  const finished = runTestHost({
+    executable: process.execPath,
+    args: ['-e', script],
+    env: process.env,
+    mode: 'foreground',
+    timeoutMs: 700,
+    stdout: { write: (chunk) => {
+      stdoutText += chunk.toString()
+      if (stdoutText.includes(marker)) outputReady()
+    } },
+    stderr: { write: (chunk) => { stderrText += chunk.toString() } },
+  })
+  // 就绪等待失败或测试取消时，同样停止并等待本次进程树退出。
+  t.after(async () => {
+    t.mock.timers.tick(700)
+    await finished
+  })
+  await ready
+  t.mock.timers.tick(699)
+  assert.doesNotMatch(stderrText, /超过 700 ms/, '预算到期之前不得停止')
+  t.mock.timers.tick(1)
+  assert.match(stderrText, /超过 700 ms/, '预算到期应立即报告停止')
+  const code = await finished
+  return { code, stderrText }
+}
+
+test('超时被杀时输出最近输出快照：就地分辨截断与定位断点（不依赖末尾报告汇总）', { timeout: 5000 }, async (t) => {
   // 本地全量单宿主默认 15 分钟预算被击穿时，只打一行「超过 N ms」需要人工
   // 回读报告才能分清「超时截断」与「真失败」。快照随停止原因就地输出，
   // 最后的 START/PASS 行即断点。假宿主输出用 ASCII 标记——中文经
   // hiddenDesktop 包装层传递存在编码损坏面，与本测无关。
-  let stderrText = ''
-  const code = await runTestHost({
-    executable: process.execPath,
-    args: ['-e', [
-      'process.stdout.write("[itest][START] case-a")',
-      'process.stdout.write("[itest][PASS] case-a")',
-      'process.stdout.write("[itest][START] case-b-hang")',
-      'setInterval(() => {}, 1000)',
-    ].join('; ')],
-    env: process.env,
-    mode: 'foreground',
-    timeoutMs: 700,
-    stdout: { write: () => {} },
-    stderr: { write: (chunk) => { stderrText += chunk.toString() } },
-  })
+  const { code, stderrText } = await snapshotAfterOutput(t, [
+    'process.stdout.write("[itest][START] case-a")',
+    'process.stdout.write("[itest][PASS] case-a")',
+    'process.stdout.write("[itest][START] case-b-hang")',
+    'setInterval(() => {}, 1000)',
+  ].join('; '), 'case-b-hang')
   assert.equal(code, 124)
   assert.match(stderrText, /超过 700 ms/)
   assert.match(stderrText, /最近输出/, '超时应附最近输出快照')
   assert.match(stderrText, /case-b-hang/, '快照应含最后的输出行（断点用例名）')
 })
 
-test('最近输出快照只保留尾部行：早期输出不随快照复读', async () => {
+test('最近输出快照只保留尾部行：早期输出不随快照复读', { timeout: 5000 }, async (t) => {
+  const { code, stderrText } = await snapshotAfterOutput(t, [
+    "for (let i = 0; i < 40; i++) process.stdout.write('early-' + i + String.fromCharCode(10))",
+    "process.stdout.write('last-marker' + String.fromCharCode(10))",
+    'setInterval(() => {}, 1000)',
+  ].join('; '), 'last-marker')
+  assert.equal(code, 124)
+  const snapshot = stderrText.slice(stderrText.indexOf('最近输出'))
+  assert.match(snapshot, /last-marker/)
+  assert.doesNotMatch(snapshot, /early-0/, '快照只保留尾部行，早期输出不复读')
+})
+
+test('首输出前耗尽 700ms 预算时不伪造最近输出快照', { timeout: 5000 }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   let stderrText = ''
-  const code = await runTestHost({
+  const finished = runTestHost({
     executable: process.execPath,
-    args: ['-e', [
-      "for (let i = 0; i < 40; i++) process.stdout.write('early-' + i + String.fromCharCode(10))",
-      "process.stdout.write('last-marker' + String.fromCharCode(10))",
-      'setInterval(() => {}, 1000)',
-    ].join('; ')],
+    args: ['-e', 'setInterval(() => {}, 1000)'],
     env: process.env,
     mode: 'foreground',
     timeoutMs: 700,
     stdout: { write: () => {} },
     stderr: { write: (chunk) => { stderrText += chunk.toString() } },
   })
-  assert.equal(code, 124)
-  const snapshot = stderrText.slice(stderrText.indexOf('最近输出'))
-  assert.match(snapshot, /last-marker/)
-  assert.doesNotMatch(snapshot, /early-0/, '快照只保留尾部行，早期输出不复读')
+  t.after(async () => {
+    t.mock.timers.tick(700)
+    await finished
+  })
+  // 尚未让出事件循环，管道没有data；699ms不能停止，700ms立即到期。
+  t.mock.timers.tick(699)
+  assert.equal(stderrText, '')
+  t.mock.timers.tick(1)
+  assert.equal(await finished, 124)
+  assert.equal(stderrText, '[testHost] 超过 700 ms，结束本次测试宿主进程树\n')
 })

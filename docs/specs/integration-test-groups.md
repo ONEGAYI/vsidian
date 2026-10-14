@@ -394,3 +394,15 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 基线 `a267f120` 上 compile/类型检查、完整 Vitest 7982/7982、Node 契约 192/192、tableCaret 与引用绘制通过；文件树 strict 通过。补齐活动态修正并同步 main `09840779`（#502）后，compile/类型检查、完整 Vitest 8010/8010、Node 契约 192/192、tableCaret 91 场景与引用绘制 11 场景通过，历史样式基线及当前契约通过。CHANGELOG 冲突按三方核对保留两项修正；经文件树入口补录 #502 新增的块查询单测后 strict 通过。引用绘制日志既有汇总分母写作 8，tableCaret 部分汇总也未包含全部场景，结论按逐场景 PASS 和 report.json 状态记录，本轮未改汇总公式。分组与敏感名单不变，条目 16/17 及其他未定性项继续独立跟踪。
 
 证据：本树 out/test/table-width15-probe-red.log、table-width15-consistent-trace.json、table-width15-both-contract-red.json / green.json、table-width15-active-red.json / green.json、table-width15-region-red.json、table-width15-active-final.json、table-width15-browser-red.log（run-Oo1WqY）、table-width15-quote-browser-green.log（run-Kb1wuX）、table-width15-browser-green.log（run-KDTjKW）；同步后的 table-width15-rebased-unit-full.log、compile.log、table-browser.log（run-9ltoqo）、quote-browser.log（run-JfFwNq）、style-baseline.log / style-check.log、tree-final.log。交付归档 D:/.codex/evidence/vsidian-table-width15-20261014/，本地与候选 CI 结论分开记录。
+
+## #446 条目 16：700ms 快照测试混入启动与流抵达耗时（2026-10-14）
+
+**根因在测试夹具的就绪前提**。原快照用例要求在700ms停止时已经收到假宿主的完整目标输出，但计时从包装进程spawn后开始，包含Windows PowerShell启动、Add-Type编译、Node目标启动和管道抵达。停止时缓冲没有任何行，则生产逻辑只打印超时原因；收到部分行则只快照已收行。这两种行为符合当时的输入状态，原用例没有保证快照验证所需的输出就绪。
+
+**原并行条件已复现**。原两项单独执行2/2，通过全量Vitest加载后0/2，760.6/832.4ms结束，分别缺少“最近输出”与last-marker，症状与旧日志一致。旁路只记录阶段文件，不向stdout/stderr增加诊断：单独运行目标输出250–257ms抵达；并行一轮包装脚本473ms才开始，741ms停止时未完成C#编译、没有接收输出。另轮编译675ms、包装前缀695ms、710ms停止，仍无目标输出；再一轮同一毫秒内按先early-0、后停止、再含last-marker块的顺序抵达，快照只含停止前已收行。历史两轮没有阶段时间线，不逐帧断言都停在C#编译；本轮固定了同路径、同负载下的夹具竞态。
+
+**修正只控制快照测试的时钟和就绪**。真实包装层与Node子进程保留；父测试只模拟setTimeout，等待stdout完整目标标记，再推进至699ms验证尚未停止，700ms验证立即报告超时，随后检查原124退出码、断点标记与尾部保留。另加首输出前700ms到期的空缓冲契约，禁止伪造快照。用例独立5000ms时限约束启动就绪与清理；宿主timeoutMs仍为700，生产全程计时、tail缓冲及杀树实现不变。就绪标记缺失的隔离探针触发1000ms真实测试取消后，after hook仍停止并等待本次树退出，收尾标记成功。
+
+原负载下完整Node契约193/193，三个快照用例通过；负载生成的Vitest为8009/8010，唯一失败是未改的wikilinkSuggestSession:634“非空查询取首项”expected0/actualnull，另记未归因，不改其断言。标准串行compile/类型、完整Vitest8010/8010与Node193/193通过，文件树strict通过。本票只改测试夹具和维护文档；没有webview输入/样式或宿主实现变更，真实包装层的超时、中断、异常及进程树清理原契约仍以真实时钟运行。候选CI与本机并行诊断分开记录，其他#446未定性项不联动勾销。
+
+证据：本树out/test/host16-original-solo.log、original-under-load.log、timeline-solo.json / timeline-load.json、before-vitest.json、fixed-under-load-node-all.log、fixed-load-vitest.json、snapshots-final.log、cancel-probe.log / json、standard-unit.log、compile.log、tree-check.log及host16-diagnosis.md（同组文件均带host16-前缀）。交付归档D:/.codex/evidence/vsidian-host16-timeout-20261014/；旁路探针仅在忽略目录，不进提交。
