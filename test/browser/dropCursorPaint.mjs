@@ -2,7 +2,9 @@
 // + 产物 CSS，断言用户看到的东西（AGENTS 视觉层断言）：
 //   D1 拖动选中文本悬停期间 .cm-dropCursor 落点光标真实画出且定位在落点
 //      附近（liveInstance 装配 dropCursor 扩展的绘制层证据；修复前无扩展、
-//      拖拽全程无任何落点指示）
+//      拖拽全程无任何落点指示）；亮色轮为 baseTheme 黑线
+//   D1b 暗色轮（body.vscode-dark）落点光标提亮为 caret 色——CM6 baseTheme
+//      的 dark 变体只提亮 .cm-cursor，不补则暗底黑线不可见（评审 F1）
 //   D2 松手落位后落点光标撤下（无残留幽灵指示）
 //   D3 文本真实落位（CM6 核心 drop 链路不受扩展装配影响：源区间移除 +
 //      落点插入，dragMovesSelection 默认语义）
@@ -70,12 +72,16 @@ try {
   await page.evaluate(() => window.selectRange(0, 5))
   await page.evaluate(() => window.dispatchDrag('dragstart', 2))
   const to = await page.evaluate((offset) => window.dispatchDrag('dragover', offset), DROP_AT)
-  // dropCursor 经 view.requestMeasure 异步测量定位（rAF 一帧），等定位
-  // 落定再读——同步读会拿到未定位的静态流内位置（left 漂移、height=0）
-  await page.waitForTimeout(100)
+  // dropCursor 经 view.requestMeasure 异步测量定位（rAF 一帧），轮询等
+  // 定位落定再读——同步读会拿到未定位的静态流内位置（left 漂移、height=0）
+  await page.waitForFunction(() => {
+    const c = window.readDropCursor()
+    return c !== null && c.height > 0 && c.left > -1000
+  })
 
   // D1：拖拽悬停期间落点光标在场且真实定位（无扩展时元素不存在；
-  // 装配但未定位时停在 -100000px 兜底位——两种失败形态都拦）
+  // 装配但未定位时停在 -100000px 兜底位——两种失败形态都拦）；
+  // 亮色轮维持 baseTheme 黑线（明暗两轮都可见的亮端）
   const cursor = await page.evaluate(() => window.readDropCursor())
   check('D1 拖拽悬停期间落点光标真实画出并定位在落点附近',
     cursor !== null && cursor.height > 5 && cursor.left > -1000
@@ -83,11 +89,28 @@ try {
     cursor === null
       ? '.cm-dropCursor 不在场（dropCursor 扩展未装配）'
       : `left=${cursor.left.toFixed(1)} height=${cursor.height.toFixed(1)} 落点x=${to.x.toFixed(1)}`)
+  check('D1 亮色轮落点光标为 baseTheme 黑线',
+    cursor?.color === 'rgb(0, 0, 0)',
+    `color=${cursor?.color}`)
+
+  // D1b：暗色轮（VSCode 注入 body.vscode-dark）落点光标跟随 caret 色板
+  // 提亮——CM6 baseTheme 的 dark 变体只提亮 .cm-cursor，.cm-dropCursor
+  // 不补则暗底黑线不可见（评审 F1，修复本体）
+  await page.evaluate(() => document.body.classList.add('vscode-dark'))
+  await page.evaluate((offset) => window.dispatchDrag('dragover', offset), DROP_AT)
+  const darkCursor = await page.evaluate(() => window.readDropCursor())
+  check('D1b 暗色轮落点光标提亮为 caret 色（不再黑线不可见）',
+    darkCursor?.color === 'rgb(221, 221, 221)',
+    `color=${darkCursor?.color}（--vscode-editorCursor-foreground 缺省回退 #ddd）`)
+  await page.evaluate(() => document.body.classList.remove('vscode-dark'))
 
   await page.evaluate((offset) => window.dispatchDrag('drop', offset), DROP_AT)
 
   // D2：松手落位后落点光标撤下（无残留幽灵指示）
-  await page.waitForTimeout(120)
+  await page.waitForFunction(() => {
+    const c = window.readDropCursor()
+    return c === null || c.left < -1000
+  })
   const afterDrop = await page.evaluate(() => window.readDropCursor())
   check('D2 落位后落点光标撤下（无残留）',
     afterDrop === null || afterDrop.left < -1000,

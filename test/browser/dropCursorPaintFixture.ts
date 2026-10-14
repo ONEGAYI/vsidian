@@ -57,12 +57,13 @@ Object.assign(window, {
     return { x, y }
   },
   /** 落点光标绘制层读数：dropCursor 扩展装配并真实定位的证据（无装配/
-   *  无定位时返回 null 或 -100000px 兜底位） */
+   *  无定位时返回 null 或 -100000px 兜底位）；颜色随明暗主题（D1b） */
   readDropCursor() {
     const el = document.querySelector<HTMLElement>('.cm-dropCursor')
     if (!el) return null
     const r = el.getBoundingClientRect()
-    return { left: r.left, top: r.top, height: r.height }
+    return { left: r.left, top: r.top, height: r.height,
+      color: getComputedStyle(el).borderLeftColor }
   },
   readText() {
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!

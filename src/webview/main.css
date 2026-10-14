@@ -3222,6 +3222,17 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   display: none;
 }
 
+/* 拖放落点光标明暗对齐主光标（2026-10 评审跟进）：CM6 baseTheme 给
+   .cm-cursor / .cm-dropCursor 共用 1.2px 黑边，但 dark 变体只提亮
+   .cm-cursor（#ddd）——.cm-dropCursor 在暗色主题保持黑线，深底上
+   不可见，落点指示实质失效。跟随宿主 caret 色板（缺省回退 baseTheme
+   暗色变体取值）；亮色主题维持 baseTheme 黑线不动。浏览器层断言在
+   dropCursorPaint 套件 D1/D1b（明暗两轮颜色） */
+body.vscode-dark #app .cm-editor .cm-dropCursor,
+body.vscode-high-contrast #app .cm-editor .cm-dropCursor {
+  border-left-color: var(--vscode-editorCursor-foreground, #ddd);
+}
+
 #app .cm-editor .cm-scroller .vsidian-table-grid-empty-active {
   position: relative;
 }

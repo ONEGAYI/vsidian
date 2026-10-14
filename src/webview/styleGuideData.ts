@@ -2393,7 +2393,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "reading"
     ],
     "dom": "阅读块级容器。",
-    "example": ".vsidian-reading-mermaid {\n  margin: 8px 0;\n}",
+    "example": ".vsidian-reading-mermaid {\n  margin: 8px auto;\n}",
     "obsidian": {
       "counterpart": ".markdown-preview-view .mermaid 方向",
       "support": "semantic"
