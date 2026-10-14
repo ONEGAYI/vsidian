@@ -201,7 +201,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
         for (const seg of field.gridSegments) {
           for (const r of state.selection.ranges) {
             if (!r.empty && seg.to >= r.from && seg.from <= r.to) {
-              addAt(seg.from, 1)
+              addAt(seg.to, -1)
               break
             }
           }
@@ -210,7 +210,7 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
       // 矩形格区属于该表
       const region = state.field(tableRegionField, false)
       if (region) {
-        addAt(region.tableFrom, 1)
+        addAt(state.doc.lineAt(region.tableFrom).to, -1)
       }
       return out
     }

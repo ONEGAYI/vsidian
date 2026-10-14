@@ -38,7 +38,7 @@ import {
   tableMetricsSig,
   type TableHeightPlanPayload,
 } from '../../src/webview/tableHeightPlan'
-import { setTableRegion } from '../../src/webview/tableRegionSelection'
+import { setTableRegion, tableRegionField } from '../../src/webview/tableRegionSelection'
 import { blankRowInputPlan, tableEditing, tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { splitTableRowCells, tableRowCellsForColumns } from '../../src/shared/tableCells'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -2867,54 +2867,72 @@ describe('#372 评审 I-7：availablePx 按表实测行区宽', () => {
   ].join('\n')
   const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 400 }
 
-  it.each([
-    ['单层引用', '> ', '> ', false],
-    ['多层引用', '> > ', '> > ', false],
-    ['引用内列表', '> - ', '>   ', false],
-    ['lazy 分隔行', '> ', '> ', true],
-  ] as const)('顶层表与%s表分别优化，按各自首网格行实测行区宽', async (_name, headerPrefix, rowPrefix, lazyDelimiter) => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const source = TWO_TABLES.split('\n').map(line => line.startsWith('> ')
-      ? (line.includes('| --- |') && lazyDelimiter ? ''
-        : line.includes('| 功能 |') ? headerPrefix : rowPrefix) + line.slice(2)
-      : line).join('\n')
-    const host = document.body.appendChild(document.createElement('div'))
-    const gbcr = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const width = this.classList.contains('vsidian-table-metrics-probe') ? 60
-        : this.classList.contains('vsidian-table-grid-row')
-          // CM 行盒左右各 4px padding，border-box 比轨道净宽多 8px。
-          ? (this.classList.contains('vsidian-quote-line') ? 308 : 408) : 0
-      return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
+  describe.each(['非活动', '跨越选区', '矩形选区'] as const)('%s', (activity) => {
+    it.each([
+      ['单层引用', '> ', '> ', false],
+      ['多层引用', '> > ', '> > ', false],
+      ['引用内列表', '> - ', '>   ', false],
+      ['lazy 分隔行', '> ', '> ', true],
+    ] as const)('顶层表与%s表遵循行区宽及活动态约束', async (_name, headerPrefix, rowPrefix, lazyDelimiter) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const source = TWO_TABLES.split('\n').map(line => line.startsWith('> ')
+        ? (line.includes('| --- |') && lazyDelimiter ? ''
+          : line.includes('| 功能 |') ? headerPrefix : rowPrefix) + line.slice(2)
+        : line).join('\n')
+      const host = document.body.appendChild(document.createElement('div'))
+      const gbcr = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const width = this.classList.contains('vsidian-table-metrics-probe') ? 60
+          : this.classList.contains('vsidian-table-grid-row')
+            // CM 行盒左右各 4px padding，border-box 比轨道净宽多 8px。
+            ? (this.classList.contains('vsidian-quote-line') ? 308 : 408) : 0
+        return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
+      })
+      const before = getTableOptimizeStats()
+      const view = new EditorView({
+        parent: host,
+        state: EditorState.create({ doc: source,
+          selection: activity === '跨越选区' ? { anchor: 0, head: source.length }
+            : { anchor: activity === '矩形选区' ? source.indexOf('| 功能 |') + 2 : 0 },
+          extensions: [livePreviewDecorations, tableRegionField] }),
+      })
+      try {
+        if (activity === '矩形选区') {
+          // 光标只在顶层表内，引用表仅靠矩形区域成为活动表。
+          view.dispatch({ effects: setTableRegion.of({ tableFrom: view.state.doc.line(8).from,
+            rowFrom: 0, rowTo: 1, columnFrom: 0, columnTo: 1 }) })
+        }
+        // 测量插件和按表优化查询同一批真实网格行；不以脱离 DOM 的替身行
+        // 报宽度。推进时钟跨过 150ms 尾随测量，覆盖原夹具的退回轻量窗口。
+        view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+        await vi.advanceTimersByTimeAsync(200)
+        expect(view.state.facet(tableMetricsFacet)?.availablePx).toBe(400)
+        expect(view.state.facet(tableMetricsFacet)?.contentPx).toBe(60)
+        expect(view.state.facet(tableMetricsFacet)?.cellBoxPx).toBe(0)
+        const after = getTableOptimizeStats()
+        if (activity !== '非活动') {
+          // 覆盖网格行的选区或矩形区域使整表活动，禁止完整搜索。
+          expect(after.searches - before.searches).toBe(0)
+          expect(after.publishes - before.publishes).toBe(0)
+        } else {
+          // 模板互异不能由“一张优化、一张仍轻量”凑数，两表都须实际发布。
+          expect(after.publishes - before.publishes).toBe(2)
+        }
+        const plans = view.state.field(liveDecorationsField).gridPlans
+        const templates = [...plans.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([, p]) => p?.template)
+        expect(templates).toHaveLength(2)
+        expect(templates[0]).toBeTruthy()
+        expect(templates[1]).toBeTruthy()
+        if (activity === '非活动') expect(templates[0]).not.toBe(templates[1])
+        if (activity === '矩形选区') expect(view.state.field(tableRegionField)?.tableFrom).toBe(view.state.doc.line(8).from)
+        expect(view.state.doc.toString()).toBe(source)
+      } finally {
+        view.destroy()
+        host.remove()
+        gbcr.mockRestore()
+        vi.useRealTimers()
+      }
     })
-    const before = getTableOptimizeStats()
-    const view = new EditorView({
-      parent: host,
-      state: EditorState.create({ doc: source, extensions: [livePreviewDecorations] }),
-    })
-    try {
-      // 测量插件和按表优化查询同一批真实网格行；不以脱离 DOM 的替身行
-      // 报宽度。推进时钟跨过 150ms 尾随测量，覆盖原夹具的退回轻量窗口。
-      view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
-      await vi.advanceTimersByTimeAsync(200)
-      expect(view.state.facet(tableMetricsFacet)?.availablePx).toBe(400)
-      expect(view.state.facet(tableMetricsFacet)?.contentPx).toBe(60)
-      expect(view.state.facet(tableMetricsFacet)?.cellBoxPx).toBe(0)
-      // 模板互异不能由“一张优化、一张仍轻量”凑数，两表都须实际发布。
-      expect(getTableOptimizeStats().publishes - before.publishes).toBe(2)
-      const plans = view.state.field(liveDecorationsField).gridPlans
-      const templates = [...plans.entries()]
-        .sort((a, b) => a[0] - b[0])
-        .map(([, p]) => p?.template)
-      expect(templates).toHaveLength(2)
-      expect(templates[0]).toBeTruthy()
-      expect(templates[1]).toBeTruthy()
-      expect(templates[0]).not.toBe(templates[1])
-      expect(view.state.doc.toString()).toBe(source)
-    } finally {
-      view.destroy()
-      host.remove()
-      gbcr.mockRestore()
-      vi.useRealTimers()
-    }
   })
 })
