@@ -36,6 +36,12 @@ describe('Codex Mermaid 截图参考配色', () => {
     })
     expect(buildCodexMermaidConfig('mindmap')).toBeUndefined()
   })
+
+  it('流程图的固定蓝色文字配白色画布，弹窗与导出保持同一背景', () => {
+    const config = buildCodexMermaidConfig('flowchart-v2')!
+    expect(config.themeCSS).toContain('& { background-color:#ffffff; }')
+    expect(contrast('#004f99', '#ffffff')).toBeGreaterThanOrEqual(4.5)
+  })
 })
 
 /** 相对亮度（WCAG）：sRGB → 线性 → L */

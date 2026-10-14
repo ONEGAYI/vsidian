@@ -410,6 +410,8 @@ export function openGraphicPopup(
     if (event.button !== 0 || event.target === toolbar || toolbar.contains(event.target as Node)) {
       return
     }
+    // 弹窗中的左键拖动只平移，不同时创建 SVG 文字选区。
+    event.preventDefault()
     dragging = true
     moved = false
     downTarget = event.target

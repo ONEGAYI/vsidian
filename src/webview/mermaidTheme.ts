@@ -80,7 +80,8 @@ export function buildCodexMermaidConfig(type = 'flowchart'): Record<string, unkn
     },
     flowchart: { htmlLabels: false, useMaxWidth: false, padding: 16, wrappingWidth: 320, curve: 'linear', nodeSpacing: 40, rankSpacing: 40 },
     elk: { nodePlacementStrategy: 'LINEAR_SEGMENTS', mergeEdges: false, considerModelOrder: 'NODES_AND_EDGES', forceNodeModelOrder: true },
-    themeCSS: '.node rect.label-container { rx:16px; ry:16px; stroke-width:1px; }\n' +
+    themeCSS: '& { background-color:#ffffff; }\n' +
+      '.node rect.label-container { rx:16px; ry:16px; stroke-width:1px; }\n' +
       '.node polygon.label-container { fill:#f5faff; }\n' +
       '.node .label, .edgeLabel { font-weight:600; }\n' +
       '.flowchart-link { stroke-linecap:round; stroke-linejoin:round; }',

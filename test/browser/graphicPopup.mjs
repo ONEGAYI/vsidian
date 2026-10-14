@@ -244,10 +244,10 @@ try {
 
   await page.close()
   // Codex 预设：真实产物与 CSP 下的双模式、缓存切换、弹窗导出和语义回归。
-  const presetPage = await browser.newPage({ viewport: { width: 1400, height: 800 } })
+  const presetPage = await browser.newPage({ viewport: { width: 1400, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] })
   await presetPage.goto(pageBase + '/')
-  await presetPage.addStyleTag({ content: 'body { --vscode-editor-background:#fff; --vscode-editor-foreground:#333; }' })
-  const codexCode = 'flowchart LR\nS["会话 session"] --> M["消息 message：user / assistant"]\nM --> T["text：正文"]\nM --> R["reasoning：已暴露的思考记录"]\nM --> F["file：文件与来源引用"]\nM --> U["tool：参数、状态与结果"]'
+  await presetPage.addStyleTag({ content: 'body { --vscode-editor-background:#fff; --vscode-editor-foreground:#333; --vscode-editorWidget-background:#f8f8f8; --vscode-editorWidget-foreground:#333; }' })
+  const codexCode = 'flowchart LR\nS["会话 session"] -->|关系标签 relationship| M["消息 message：user / assistant"]\nM --> T["text：正文"]\nM --> R["reasoning：已暴露的思考记录"]\nM --> F["file：文件与来源引用"]\nM --> U["tool：参数、状态与结果"]'
   await presetPage.evaluate(code => {
     window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': 'codex' } })
     window.initQuick('```mermaid\n' + code + '\n```\n\n结尾')
@@ -287,21 +287,88 @@ try {
   const presetArtifacts = artifactPath(root, 'screenshots/mermaidPreset')
   await mkdir(presetArtifacts, { recursive: true })
   await presetPage.locator('.vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, 'codex-live.png') })
+  // 原生拖选：常态仍能选中文字，CM6 正文选区与图形呈现不被接管。
+  const labelBox = await presetPage.locator('.vsidian-view-live .node .label tspan').first().boundingBox()
+  const docAnchor = await presetPage.evaluate(() => {
+    window.getSelection().removeAllRanges()
+    return window.controller.getView().state.selection.main.anchor
+  })
+  await presetPage.mouse.move(labelBox.x + 1, labelBox.y + labelBox.height / 2)
+  await presetPage.mouse.down()
+  await presetPage.mouse.move(labelBox.x + labelBox.width - 1, labelBox.y + labelBox.height / 2, { steps: 12 })
+  await presetPage.mouse.up()
+  await presetPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const regularSelection = await presetPage.evaluate(() => ({
+    text: window.getSelection().toString(),
+    anchor: window.controller.getView().state.selection.main.anchor,
+    rendered: document.querySelector('.vsidian-view-live .vsidian-mermaid svg') !== null,
+  }))
+  assert.ok(regularSelection.text.includes('会话'), '常态图中文字应可原生拖选')
+  assert.equal(regularSelection.anchor, docAnchor, '图中文字选区不得移动正文光标')
+  assert.equal(regularSelection.rendered, true, '拖选不得让渲染图退回源码')
+  await presetPage.keyboard.press('Control+c')
+  assert.equal(await presetPage.evaluate(() => navigator.clipboard.readText()), regularSelection.text, '原生复制应取得图中文字')
+  assert.equal(await presetPage.evaluate(() => window.controller.getView().state.doc.toString()), '```mermaid\n' + codexCode + '\n```\n\n结尾', '选字复制不修改围栏源码')
   await presetPage.locator('.vsidian-graphic-frame').hover()
   await presetPage.locator('.vsidian-graphic-chrome-popup').click()
   await presetPage.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
   assert.equal(await presetPage.locator('.vsidian-diagram-media .node rect.label-container').first().evaluate(el => getComputedStyle(el).fill), presetPaint.fill)
+  const popupCanvas = await presetPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor)
+  const popupTransform = await presetPage.locator('.vsidian-diagram-media').evaluate(el => el.style.transform)
+  const edgeLabelBox = await presetPage.locator('.vsidian-diagram-media .edgeLabel tspan').first().boundingBox()
+  await presetPage.evaluate(() => window.getSelection().removeAllRanges())
+  await presetPage.mouse.move(edgeLabelBox.x + 1, edgeLabelBox.y + edgeLabelBox.height / 2)
+  await presetPage.mouse.down()
+  await presetPage.mouse.move(edgeLabelBox.x + edgeLabelBox.width - 1, edgeLabelBox.y + edgeLabelBox.height / 2, { steps: 12 })
+  await presetPage.mouse.up()
+  const popupSelection = await presetPage.evaluate(() => window.getSelection().toString())
+  const popupPanned = await presetPage.locator('.vsidian-diagram-media').evaluate(el => el.style.transform)
+  assert.deepEqual({
+    popupNoSelection: popupSelection === '',
+    popupPanned: popupPanned !== popupTransform,
+    popupCanvas,
+  }, {
+    popupNoSelection: true, popupPanned: true, popupCanvas: 'rgb(255, 255, 255)',
+  }, '弹窗只平移、不选字，Codex 图形使用白色画布')
+  await presetPage.keyboard.press('0')
+  await presetPage.waitForFunction(() => getComputedStyle(document.querySelector('.vsidian-diagram-overlay')).opacity === '1')
+  await presetPage.locator('.vsidian-diagram-overlay').screenshot({ path: path.join(presetArtifacts, 'codex-popup.png') })
   await presetPage.locator('.vsidian-diagram-export-svg').click()
   await presetPage.waitForFunction(() => window.quickSent().some(m => m.kind === 'diagram.export'))
   const codexExport = await presetPage.evaluate(() => window.quickSent().find(m => m.kind === 'diagram.export'))
   assert.ok(codexExport.content.includes('#e5f3ff'))
+  assert.ok(codexExport.content.includes('background-color:#ffffff'), 'SVG 导出保留白色画布')
   assert.ok(!codexExport.content.includes('foreignObject'))
   await presetPage.locator('.vsidian-diagram-export-png').click()
   await presetPage.waitForFunction(() => window.quickSent().some(m => m.kind === 'diagram.export' && m.format === 'png'))
+  const pngCorner = await presetPage.evaluate(async () => {
+    const exported = window.quickSent().find(m => m.kind === 'diagram.export' && m.format === 'png')
+    const img = new Image()
+    img.src = 'data:image/png;base64,' + exported.content
+    await img.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = img.width
+    canvas.height = img.height
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+    return [...ctx.getImageData(0, 0, 1, 1).data]
+  })
+  assert.deepEqual(pngCorner, [255, 255, 255, 255], 'PNG 实际像素保留不透明白色画布')
   await presetPage.keyboard.press('Escape')
   await presetPage.evaluate(() => window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' }))
   await presetPage.waitForFunction(() => document.querySelector('.vsidian-view-reading .vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered')
   assert.equal(await presetPage.locator('.vsidian-view-reading .node rect.label-container').first().evaluate(el => getComputedStyle(el).fill), presetPaint.fill)
+  const readingLabelBox = await presetPage.locator('.vsidian-view-reading .node .label tspan').first().boundingBox()
+  await presetPage.evaluate(() => window.getSelection().removeAllRanges())
+  await presetPage.mouse.move(readingLabelBox.x + 1, readingLabelBox.y + readingLabelBox.height / 2)
+  await presetPage.mouse.down()
+  await presetPage.mouse.move(readingLabelBox.x + readingLabelBox.width - 1, readingLabelBox.y + readingLabelBox.height / 2, { steps: 12 })
+  await presetPage.mouse.up()
+  const readingSelected = await presetPage.evaluate(() => window.getSelection().toString())
+  assert.ok(readingSelected.includes('会话'), '阅读模式图中文字仍能拖选')
+  await presetPage.keyboard.press('Control+c')
+  assert.equal(await presetPage.evaluate(() => navigator.clipboard.readText()), readingSelected, '阅读模式图中文字仍能原生复制')
+  await presetPage.evaluate(() => window.getSelection().removeAllRanges())
   await presetPage.locator('.vsidian-view-reading .vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, 'codex-reading.png') })
   await presetPage.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': 'default' } }))
   await presetPage.waitForFunction(() => getComputedStyle(document.querySelector('.vsidian-view-reading .node rect.label-container')).fill !== 'rgb(229, 243, 255)')
@@ -338,6 +405,52 @@ try {
   assert.equal(semantic.override, true, 'frontmatter 可覆写布局')
   assert.equal(semantic.overrideFont, '24px', 'frontmatter 显式字号应覆盖预设默认值')
   await presetPage.close()
+
+  // 默认主题的透明 SVG 在弹窗中衬编辑器画布；Codex 固定亮色画布不受宿主明暗影响。
+  for (const host of [
+    { name: 'light', bodyClass: 'vscode-light', background: '#ffffff', foreground: '#333333', canvas: 'rgb(255, 255, 255)' },
+    { name: 'dark', bodyClass: 'vscode-dark', background: '#1f1f1f', foreground: '#cccccc', canvas: 'rgb(31, 31, 31)' },
+  ]) {
+    const canvasPage = await browser.newPage({ viewport: { width: 900, height: 700 } })
+    await canvasPage.goto(pageBase + '/')
+    await canvasPage.evaluate(host => {
+      document.body.className = host.bodyClass
+      document.body.style.setProperty('--vscode-editor-background', host.background)
+      document.body.style.setProperty('--vscode-editor-foreground', host.foreground)
+      document.body.style.setProperty('--vscode-editorWidget-background', host.name === 'dark' ? '#2d2d30' : '#f8f8f8')
+      document.body.style.setProperty('--vscode-editorWidget-foreground', host.foreground)
+      window.initQuick('```mermaid\nflowchart TD\nA[开始] -->|关系标签| B[结束]\n```\n\n结尾')
+      const view = window.controller.getView()
+      view.dispatch({ selection: { anchor: view.state.doc.length } })
+    }, host)
+    for (const preset of ['default', 'codex']) {
+      await canvasPage.evaluate(preset => window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': preset } }), preset)
+      await canvasPage.waitForFunction(() => document.querySelector('.vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered')
+      if (preset === 'default') {
+        await canvasPage.locator('.cm-content').focus()
+        const anchor = await canvasPage.evaluate(() => window.controller.getView().state.selection.main.anchor)
+        const label = await canvasPage.locator('.node .label').first().boundingBox()
+        await canvasPage.mouse.move(label.x + 1, label.y + label.height / 2)
+        await canvasPage.mouse.down()
+        await canvasPage.mouse.move(label.x + label.width - 1, label.y + label.height / 2, { steps: 12 })
+        await canvasPage.mouse.up()
+        await canvasPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+        assert.ok(await canvasPage.evaluate(() => window.getSelection().toString().includes('开始')), `${host.name} 默认 HTML 标签应可原生拖选`)
+        assert.equal(await canvasPage.evaluate(() => window.controller.getView().state.selection.main.anchor), anchor, '默认标签拖选不移动正文光标')
+      }
+      await canvasPage.locator('.vsidian-graphic-frame').hover()
+      await canvasPage.locator('.vsidian-graphic-chrome-popup').click()
+      await canvasPage.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
+      assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), preset === 'codex' ? 'rgb(255, 255, 255)' : host.canvas, `${host.name}/${preset} 弹窗画布应与图中文字配色匹配`)
+      if (host.name === 'dark' && preset === 'default') {
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color), 'rgb(204, 204, 204)', '默认暗色文字保持宿主浅色墨迹')
+      }
+      await canvasPage.waitForFunction(() => getComputedStyle(document.querySelector('.vsidian-diagram-overlay')).opacity === '1')
+      await canvasPage.locator('.vsidian-diagram-overlay').screenshot({ path: path.join(presetArtifacts, `${host.name}-${preset}-popup.png`) })
+      await canvasPage.keyboard.press('Escape')
+    }
+    await canvasPage.close()
+  }
 
   // 2026-10-14 用户提供的六类截图：经生产管线观察真实绘制色，保存双模式截图。
   const samples = [

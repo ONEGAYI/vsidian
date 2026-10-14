@@ -153,6 +153,8 @@ div.vsidian-behavior-query                        ← 查询区（组卡片内�
 | 模态（图片/图表弹窗） | 全屏 overlay z-10000 + 背板 `blur(16px) saturate(150%)` 55% 黑 | [image-popup.md](image-popup.md)、[graphic-code-block-interaction.md](graphic-code-block-interaction.md) |
 | toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影）。#474 形态演进（两 webview 通用）：气泡顶部倒计时条（深色右端锚定向左收缩、悬停/聚焦暂停）+ 气泡内撤销按钮（次级按钮 6px 档）；pointer-events 仅对带撤销按钮的气泡放开（` :has(action)` 限定，无按钮气泡保持穿透） | toast.css 头注；styleContract toast 类目 |
 
+图表弹窗的透明 SVG 画布衬 `--vscode-editor-background`，图内主题自带背景优先；Codex 的白色背景属于图内容预设。图片弹窗不补这层 SVG 画布。弹窗左键拖动仅平移；常态图形仍可选字，交互口径见上述图形化代码块规格。
+
 新增浮层：先查上表归型；同型复用变量族与档位，新形态先登记本表。
 
 ## 4. 新增 UI 三步接入清单
