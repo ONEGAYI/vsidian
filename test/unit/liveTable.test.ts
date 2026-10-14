@@ -2865,37 +2865,42 @@ describe('#372 评审 I-7：availablePx 按表实测行区宽', () => {
     `> | ${cjk(1)} | ${cjk(8)} |`,
     '',
   ].join('\n')
-  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 400 }
 
-  it('顶层表与引用表（同内容形态）优化的模板互异：各按首网格行实测行区宽', async () => {
+  it.each([
+    ['单层引用', '> ', '> ', false],
+    ['多层引用', '> > ', '> > ', false],
+    ['引用内列表', '> - ', '>   ', false],
+    ['lazy 分隔行', '> ', '> ', true],
+  ] as const)('顶层表与%s表分别优化，按各自首网格行实测行区宽', async (_name, headerPrefix, rowPrefix, lazyDelimiter) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const source = TWO_TABLES.split('\n').map(line => line.startsWith('> ')
+      ? (line.includes('| --- |') && lazyDelimiter ? ''
+        : line.includes('| 功能 |') ? headerPrefix : rowPrefix) + line.slice(2)
+      : line).join('\n')
     const host = document.body.appendChild(document.createElement('div'))
-    const topRow = document.createElement('div')
-    topRow.className = 'vsidian-table-grid-row'
-    const quoteRow = document.createElement('div')
-    quoteRow.className = 'vsidian-table-grid-row'
-    const widths = new Map<HTMLElement, number>([[topRow, 400], [quoteRow, 300]])
     const gbcr = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const width = this.classList.contains('vsidian-table-metrics-probe') ? 60
-        : widths.get(this) ?? 0
+        : this.classList.contains('vsidian-table-grid-row')
+          // CM 行盒左右各 4px padding，border-box 比轨道净宽多 8px。
+          ? (this.classList.contains('vsidian-quote-line') ? 308 : 408) : 0
       return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
     })
+    const before = getTableOptimizeStats()
     const view = new EditorView({
       parent: host,
-      state: EditorState.create({ doc: TWO_TABLES, extensions: [livePreviewDecorations] }),
+      state: EditorState.create({ doc: source, extensions: [livePreviewDecorations] }),
     })
     try {
-      // 调度层按表实测的行 DOM 定位：spy domAtPos——顶层表行（1-4）返回
-      // topRow（宽 400）、引用表行（6-9）返回 quoteRow（宽 300）
-      const domAtPos = vi.spyOn(view, 'domAtPos').mockImplementation((pos: number) => {
-        const line = view.state.doc.lineAt(Math.min(Math.max(pos, 0), view.state.doc.length))
-        return { node: line.number <= 6 ? topRow : quoteRow, offset: 0 }
-      })
+      // 测量插件和按表优化查询同一批真实网格行；不以脱离 DOM 的替身行
+      // 报宽度。推进时钟跨过 150ms 尾随测量，覆盖原夹具的退回轻量窗口。
       view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
-      await settle()
-      domAtPos.mockRestore()
-      // 挂载/度量扫描对两表各一次优化（同内容形态）：搜索输入的 availablePx
-      // 取各自实测（400/300），优化模板互异——同单值（facet 340 或任一）时
-      // 同内容表模板必然相同
+      await vi.advanceTimersByTimeAsync(200)
+      expect(view.state.facet(tableMetricsFacet)?.availablePx).toBe(400)
+      expect(view.state.facet(tableMetricsFacet)?.contentPx).toBe(60)
+      expect(view.state.facet(tableMetricsFacet)?.cellBoxPx).toBe(0)
+      // 模板互异不能由“一张优化、一张仍轻量”凑数，两表都须实际发布。
+      expect(getTableOptimizeStats().publishes - before.publishes).toBe(2)
       const plans = view.state.field(liveDecorationsField).gridPlans
       const templates = [...plans.entries()]
         .sort((a, b) => a[0] - b[0])
@@ -2904,10 +2909,12 @@ describe('#372 评审 I-7：availablePx 按表实测行区宽', () => {
       expect(templates[0]).toBeTruthy()
       expect(templates[1]).toBeTruthy()
       expect(templates[0]).not.toBe(templates[1])
+      expect(view.state.doc.toString()).toBe(source)
     } finally {
       view.destroy()
       host.remove()
       gbcr.mockRestore()
+      vi.useRealTimers()
     }
   })
 })

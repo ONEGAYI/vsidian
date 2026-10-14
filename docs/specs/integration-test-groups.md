@@ -374,3 +374,19 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 本地 tableCaret 83 个场景、相关单测、compile/类型检查与样式契约通过。首轮全量 Vitest 为 7927/7928，唯一失败是 #372 两表优化模板互异断言；该用例只装配 `livePreviewDecorations`，未装配本次修改的表格控件，同日另一实施会话两轮全量已有同款失败。单独 liveTable 151/151 通过。与 Vitest 同时执行的 Node 契约为 190/192，两项宿主 700ms 超时快照未收到目标输出；改为单独执行后 192/192 通过。原失败与独立通过日志均保留，这些对照不等于未定性项已修复，不修改其断言或预算以迁就当前修正。
 
 推送前同步 main `c71caaab`（包含 #494），文件树按三方字段合并保留双方 16 项变动，人工清单保留两边待验项。新基线 compile/类型检查、完整 Vitest 7977/7977 与 Node 契约 192/192 通过；tableCaret 83 个浏览器场景、历史样式基线复验与当前契约检查通过。文件树 strict 全部通过，主线已补齐此前漏录。日志为 `column-hover-rebased-compile.log`、`column-hover-rebased-unit-all.log`、`column-hover-rebased-browser.log`、`column-hover-rebased-style-baseline.log` / `column-hover-rebased-style-check.log`、`column-hover-tree-merge.json`、`column-hover-tree-rebased-check.log`。旧基线的未定性失败仍在 #446 单独跟踪，不因新基线一轮通过勾销。
+
+## #446 条目 15 / 18 与 #500：统一度量夹具，修正引用表可见扫描（2026-10-14）
+
+**条目 15 已固定测试夹具根因**。原 I-7 用例让优化查询的脱离 DOM 替身行报 400/300px，却让度量插件查询的实际行报 0。独立生产 EditorView 的受控时钟回放：1ms 时顶层优化计划已发布，两表模板不同；161ms 时尾随测量撤掉 availablePx，两表都回到历史失败的 92fr/20fr 轻量模板。回放始终保留几何 mock，证明失败不要求提前 mockRestore；仅让实际行也报正宽度，跨过同一发布后有效度量仍保留。历史全量没有这一时间线，不声称还原每轮执行帧。
+
+永久夹具统一真实网格行几何，使测量与按表优化共同看到 400/300px 轨道净宽（含 CM 行盒 padding 的 border-box 分别为 408/308px）；度量注入值匹配实际首行。受控时钟推进到 200ms 覆盖原尾随窗口，随后校验有效度量、两表分别发布、模板互异和零文本写回。不是延长真实等待预算，也没有改生产度量的不可测降级逻辑。
+
+**独立产品缺陷另列条目 18 / #500**。网格段从含容器前缀的物理行首起，Lezer Table.from 在前缀之后。可见扫描从段首向上找 Table 祖先时，引用表被漏掉。旧 I-7 仅要求模板不同，会接受“顶层表优化、引用表仍轻量”的状态。统一夹具后，单层、多层、引用内列表与 lazy 分隔行四项契约都先失败：预期两表各发布一次，实际只有一次。
+
+修正只把扫描定位改为从网格段末端向内查询既有 Table 祖先，避开行首前缀；不新增前缀解析、不改变安全网格判定、优化模型、预算、活动／IME／离屏语义。四项永久回归转绿。浏览器原 README“引用”场景实际没有引用前缀，本轮补齐，进入或离开表格之前的初次扫描等待在旧实现 5 秒超时；候选通过，原高度、净宽、文字绘制与源文断言保留。
+
+**样式兼容基线**：已发布 v1.0.0，提交 `1ced19532a9ef1e1a8a34b1da075fbc8c694469d`。公开 live-table-grid-row/cell、引用别名、行属性与列宽变量入口保留，没有新增样式条目或改变元素形态。历史格选择器的 padding 片段在真实引用布局下读到 8px；历史基线复验和当前契约检查通过。用户可见修正写入 Unreleased，人工待验未勾选。
+
+基线 `a267f120` 上 compile/类型检查、完整 Vitest 7982/7982、Node 契约 192/192、tableCaret 83 场景与引用绘制 11 场景通过；文件树 strict 通过。引用绘制日志既有汇总分母写作 8，实际逐场景为 11 条 PASS，本轮未修改该汇总公式；结论按逐场景与 report.json 状态记录。分组与敏感名单不变，条目 16/17 及其他未定性项继续独立跟踪。
+
+证据：本树 out/test/table-width15-probe-red.log、table-width15-consistent-trace.json、table-width15-both-contract-red.json / green.json、table-width15-browser-red.log（run-Oo1WqY）、table-width15-quote-browser-green.log（run-Kb1wuX）、table-width15-browser-green.log（run-KDTjKW）、table-width15-unit-full.log、table-width15-compile.log、table-width15-style-baseline.log / style-check.log、table-width15-tree-check.log。交付归档 D:/.codex/evidence/vsidian-table-width15-20261014/，本地与候选 CI 结论分开记录。

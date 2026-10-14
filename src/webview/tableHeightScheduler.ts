@@ -372,7 +372,8 @@ const tableHeightSchedulerPlugin = ViewPlugin.fromClass(
           if (seg.from > range.to) {
             break
           }
-          const node = tableNodeClosest(tree, seg.from, 1)
+          // 网格段从物理行首起，引用/列表前缀在 Table 外；末端向内才是表内容。
+          const node = tableNodeClosest(tree, seg.to, -1)
           if (node && !seen.has(node.from)) {
             seen.add(node.from)
             out.push(node)
