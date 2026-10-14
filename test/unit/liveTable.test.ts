@@ -38,7 +38,7 @@ import {
   tableMetricsSig,
   type TableHeightPlanPayload,
 } from '../../src/webview/tableHeightPlan'
-import { setTableRegion } from '../../src/webview/tableRegionSelection'
+import { setTableRegion, tableRegionField } from '../../src/webview/tableRegionSelection'
 import { blankRowInputPlan, tableEditing, tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { splitTableRowCells, tableRowCellsForColumns } from '../../src/shared/tableCells'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -2865,49 +2865,74 @@ describe('#372 评审 I-7：availablePx 按表实测行区宽', () => {
     `> | ${cjk(1)} | ${cjk(8)} |`,
     '',
   ].join('\n')
-  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 340 }
+  const OPT_METRICS = { contentPx: 60, cellBoxPx: 0, availablePx: 400 }
 
-  it('顶层表与引用表（同内容形态）优化的模板互异：各按首网格行实测行区宽', async () => {
-    const host = document.body.appendChild(document.createElement('div'))
-    const topRow = document.createElement('div')
-    topRow.className = 'vsidian-table-grid-row'
-    const quoteRow = document.createElement('div')
-    quoteRow.className = 'vsidian-table-grid-row'
-    const widths = new Map<HTMLElement, number>([[topRow, 400], [quoteRow, 300]])
-    const gbcr = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const width = this.classList.contains('vsidian-table-metrics-probe') ? 60
-        : widths.get(this) ?? 0
-      return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
-    })
-    const view = new EditorView({
-      parent: host,
-      state: EditorState.create({ doc: TWO_TABLES, extensions: [livePreviewDecorations] }),
-    })
-    try {
-      // 调度层按表实测的行 DOM 定位：spy domAtPos——顶层表行（1-4）返回
-      // topRow（宽 400）、引用表行（6-9）返回 quoteRow（宽 300）
-      const domAtPos = vi.spyOn(view, 'domAtPos').mockImplementation((pos: number) => {
-        const line = view.state.doc.lineAt(Math.min(Math.max(pos, 0), view.state.doc.length))
-        return { node: line.number <= 6 ? topRow : quoteRow, offset: 0 }
+  describe.each(['非活动', '跨越选区', '矩形选区'] as const)('%s', (activity) => {
+    it.each([
+      ['单层引用', '> ', '> ', false],
+      ['多层引用', '> > ', '> > ', false],
+      ['引用内列表', '> - ', '>   ', false],
+      ['lazy 分隔行', '> ', '> ', true],
+    ] as const)('顶层表与%s表遵循行区宽及活动态约束', async (_name, headerPrefix, rowPrefix, lazyDelimiter) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const source = TWO_TABLES.split('\n').map(line => line.startsWith('> ')
+        ? (line.includes('| --- |') && lazyDelimiter ? ''
+          : line.includes('| 功能 |') ? headerPrefix : rowPrefix) + line.slice(2)
+        : line).join('\n')
+      const host = document.body.appendChild(document.createElement('div'))
+      const gbcr = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const width = this.classList.contains('vsidian-table-metrics-probe') ? 60
+          : this.classList.contains('vsidian-table-grid-row')
+            // CM 行盒左右各 4px padding，border-box 比轨道净宽多 8px。
+            ? (this.classList.contains('vsidian-quote-line') ? 308 : 408) : 0
+        return { width, height: 0, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0 } as DOMRect
       })
-      view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
-      await settle()
-      domAtPos.mockRestore()
-      // 挂载/度量扫描对两表各一次优化（同内容形态）：搜索输入的 availablePx
-      // 取各自实测（400/300），优化模板互异——同单值（facet 340 或任一）时
-      // 同内容表模板必然相同
-      const plans = view.state.field(liveDecorationsField).gridPlans
-      const templates = [...plans.entries()]
-        .sort((a, b) => a[0] - b[0])
-        .map(([, p]) => p?.template)
-      expect(templates).toHaveLength(2)
-      expect(templates[0]).toBeTruthy()
-      expect(templates[1]).toBeTruthy()
-      expect(templates[0]).not.toBe(templates[1])
-    } finally {
-      view.destroy()
-      host.remove()
-      gbcr.mockRestore()
-    }
+      const before = getTableOptimizeStats()
+      const view = new EditorView({
+        parent: host,
+        state: EditorState.create({ doc: source,
+          selection: activity === '跨越选区' ? { anchor: 0, head: source.length }
+            : { anchor: activity === '矩形选区' ? source.indexOf('| 功能 |') + 2 : 0 },
+          extensions: [livePreviewDecorations, tableRegionField] }),
+      })
+      try {
+        if (activity === '矩形选区') {
+          // 光标只在顶层表内，引用表仅靠矩形区域成为活动表。
+          view.dispatch({ effects: setTableRegion.of({ tableFrom: view.state.doc.line(8).from,
+            rowFrom: 0, rowTo: 1, columnFrom: 0, columnTo: 1 }) })
+        }
+        // 测量插件和按表优化查询同一批真实网格行；不以脱离 DOM 的替身行
+        // 报宽度。推进时钟跨过 150ms 尾随测量，覆盖原夹具的退回轻量窗口。
+        view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of(OPT_METRICS)) })
+        await vi.advanceTimersByTimeAsync(200)
+        expect(view.state.facet(tableMetricsFacet)?.availablePx).toBe(400)
+        expect(view.state.facet(tableMetricsFacet)?.contentPx).toBe(60)
+        expect(view.state.facet(tableMetricsFacet)?.cellBoxPx).toBe(0)
+        const after = getTableOptimizeStats()
+        if (activity !== '非活动') {
+          // 覆盖网格行的选区或矩形区域使整表活动，禁止完整搜索。
+          expect(after.searches - before.searches).toBe(0)
+          expect(after.publishes - before.publishes).toBe(0)
+        } else {
+          // 模板互异不能由“一张优化、一张仍轻量”凑数，两表都须实际发布。
+          expect(after.publishes - before.publishes).toBe(2)
+        }
+        const plans = view.state.field(liveDecorationsField).gridPlans
+        const templates = [...plans.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([, p]) => p?.template)
+        expect(templates).toHaveLength(2)
+        expect(templates[0]).toBeTruthy()
+        expect(templates[1]).toBeTruthy()
+        if (activity === '非活动') expect(templates[0]).not.toBe(templates[1])
+        if (activity === '矩形选区') expect(view.state.field(tableRegionField)?.tableFrom).toBe(view.state.doc.line(8).from)
+        expect(view.state.doc.toString()).toBe(source)
+      } finally {
+        view.destroy()
+        host.remove()
+        gbcr.mockRestore()
+        vi.useRealTimers()
+      }
+    })
   })
 })

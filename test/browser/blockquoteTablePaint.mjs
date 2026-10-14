@@ -460,9 +460,17 @@ try {
       '| 跳转目标提示 | 悬停链接不弹预览浮层时，短暂停留显示目标路径与锚点的小浮标，双模式与链接面板均可用，可在设置关闭。 |',
       '| 引用自动更新 | 在 VSCode 内重命名或移动文件、文件夹与多文件时，指向它们的双链、链接与图片按新位置自动重算，一步撤销。 |',
       '', '后文',
-    ].join('\n')
+    ].map(line => line.startsWith('|') ? `> ${line}` : line).join('\n')
+    // 已发布 v1.0.0 的格选择器片段，在真实引用行布局下继续生效。
+    await page.addStyleTag({ content: '.vsidian-table-grid-cell { padding: 2px 8px !important; }' })
     await page.evaluate((text) => window.initTable(text), source)
     await page.waitForFunction(() => window.tableMetricsReady().availablePx > 0, undefined, { timeout: 5000 })
+    // 引用表初次挂载也须进入优化扫描，不能靠后续进出表才补救。
+    await page.waitForFunction(() => window.tableOptimizeStats().searches >= 1, undefined, { timeout: 5000 })
+    assert.equal(await page.evaluate(() => window.readEditor().text), source,
+      '初次引用表优化不得写回源文')
+    assert.equal(await page.locator('.vsidian-table-grid-cell').first()
+      .evaluate(el => getComputedStyle(el).paddingLeft), '8px', '旧格选择器片段应实际生效')
     // 进表（活动态）+ 净零编辑：列宽回到轻量基线，作为对照高度
     const cellPos = await page.evaluate(() => {
       const rows = [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
