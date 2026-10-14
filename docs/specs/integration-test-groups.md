@@ -389,6 +389,8 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 
 **样式兼容基线**：已发布 v1.0.0，提交 `1ced19532a9ef1e1a8a34b1da075fbc8c694469d`。公开 live-table-grid-row/cell、引用别名、行属性与列宽变量入口保留，没有新增样式条目或改变元素形态。历史格选择器的 padding 片段在真实引用布局下读到 8px；历史基线复验和当前契约检查通过。用户可见修正写入 Unreleased，人工待验未勾选。
 
+**发布同步**：推送期间主线发布 v1.0.1，锚点 `5f2929ea6f259b92ebb3b52aa1c7607930da8cd0`；另存该标签的清单与 CSS 快照。CHANGELOG 保持已发布段落原样，#500 留在新 Unreleased；文件树按字段三方合并保留本票三项职责，并采用主线对 #502 新单测的描述。发布后基线重跑 compile/类型、完整 Vitest 8010/8010、Node 192/192、样式历史基线/当前契约及文件树 strict 均通过。表格源码和 CSS 未变，原生输入沿用上一段同一表格代码的 91/11 场景报告，不将发布同步称为新产品修正。
+
 基线 `a267f120` 上 compile/类型检查、完整 Vitest 7982/7982、Node 契约 192/192、tableCaret 与引用绘制通过；文件树 strict 通过。补齐活动态修正并同步 main `09840779`（#502）后，compile/类型检查、完整 Vitest 8010/8010、Node 契约 192/192、tableCaret 91 场景与引用绘制 11 场景通过，历史样式基线及当前契约通过。CHANGELOG 冲突按三方核对保留两项修正；经文件树入口补录 #502 新增的块查询单测后 strict 通过。引用绘制日志既有汇总分母写作 8，tableCaret 部分汇总也未包含全部场景，结论按逐场景 PASS 和 report.json 状态记录，本轮未改汇总公式。分组与敏感名单不变，条目 16/17 及其他未定性项继续独立跟踪。
 
 证据：本树 out/test/table-width15-probe-red.log、table-width15-consistent-trace.json、table-width15-both-contract-red.json / green.json、table-width15-active-red.json / green.json、table-width15-region-red.json、table-width15-active-final.json、table-width15-browser-red.log（run-Oo1WqY）、table-width15-quote-browser-green.log（run-Kb1wuX）、table-width15-browser-green.log（run-KDTjKW）；同步后的 table-width15-rebased-unit-full.log、compile.log、table-browser.log（run-9ltoqo）、quote-browser.log（run-JfFwNq）、style-baseline.log / style-check.log、tree-final.log。交付归档 D:/.codex/evidence/vsidian-table-width15-20261014/，本地与候选 CI 结论分开记录。
