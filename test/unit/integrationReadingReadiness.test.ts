@@ -61,3 +61,26 @@ it('阅读表格采样拒绝默认的 0 张表，等到目标表格挂载（#446
   expect(sample({ viewMode: 'reading', readingSyntax: { tables: 0 } })).toBe(false)
   expect(sample({ viewMode: 'reading', readingSyntax: { tables: 1 } })).toBe(true)
 })
+
+it('P2-09 等待五个唯一孙位，重复卡片不能抵掉尚未绑定的格内位（#446 条目 10）', () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'waitViewState' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === 'p209-递归父A.md' &&
+      node.arguments[1]?.getText(source).includes('grandInners')) callbacks.push(node.arguments[1])
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})(state);`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('state', 'grandInners', code)
+  const inners = ['main', 'mixed', 'list', 'quote', 'table']
+  const cards = inners.map((inner, index) => ({ inner, internalMode: 'live', liveBound: true,
+    liveTextLen: 10, livePortId: `port-${index}` }))
+  const parent = { inner: 'p209-递归B', internalMode: 'live', liveBound: true, liveTextLen: 10 }
+  // 四个唯一位置 + 一个重复位置，正好凑到旧谓词要求的五张卡。
+  const incomplete = [parent, ...cards.slice(0, 4), { ...cards[0]!, livePortId: 'duplicate-main' }]
+  expect(sample({ readingEmbed: incomplete }, inners)).toBe(false)
+  expect(sample({ readingEmbed: [...incomplete, { ...cards[4]!, liveBound: false }] }, inners)).toBe(false)
+  expect(sample({ readingEmbed: [parent, ...cards] }, inners)).toBe(true)
+})

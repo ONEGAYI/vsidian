@@ -15747,7 +15747,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const cards = (v.readingEmbed ?? []).filter((c) =>
         grandInners.includes(String(c.inner)) && c.internalMode === 'live' &&
         c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
-      return cards.length >= 5 ? true : false
+      // #446 条目 10：模式切换期间可同时观测同一位置的卡片；按唯一位置就绪。
+      return grandInners.every((inner) => cards.some((c) => String(c.inner) === inner))
     }, 0, 30000)
     const byInner = new Map<string, string>()
     for (const c of bound.readingEmbed ?? []) {

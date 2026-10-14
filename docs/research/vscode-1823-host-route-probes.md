@@ -130,9 +130,13 @@ revert 完成后再执行一次 undo：**已丢弃的两笔修改整体翻回**�
 
 ### 6.1 untitled 作 vscode.diff 左侧
 
-`workspace.openTextDocument({content, language:'markdown'})` 产出 untitled 文档，`vscode.diff(untitled, bUri, title, {override:true})` 打开对比页：活动 tab 为 `TabInputTextDiff` 且左侧=untitled、右侧=真实 B；左右内容完整可读；B 的 dirty 与内容零扰动；B 没有产生独立文本标签（对比页是它唯一的视图形态）。
+`workspace.openTextDocument({content, language:'markdown'})` 产出 untitled 文档，`vscode.diff(untitled, bUri, title, {override:true})` 打开对比页：活动 tab 为 `TabInputTextDiff` 且左侧=untitled、右侧=真实 B；左右内容完整可读；B 的 dirty 与内容零扰动。
+
+2026-10-02 的这轮探针在 B 原先没有独立标签的前置下，观察到对比页是 B 唯一的视图形态。该观察不能推广为 `vscode.diff` 会关闭 B 已有的标签。
 
 > `[P2-01][diff-open] {"leftLen":18,"rightDirty":true,"bTextTabs":0,...,"activeTab":{"kind":"diff","label":"冲突对比（左临时右真实）"}}`
+
+**2026-10-14 复验修订（#446 条目 8）**：真实 1.82.3 宿主中先打开 B 文本标签，再写入冲突版本，宿主会将该脏标签钉住；打开 diff 后它与对比页持续并存。旧探针等待“B 仅剩 diff”稳定超时，近期失败 CI 在打开 diff 前也已记录 `bTabs:1`。探针现固定这一前置，要求 diff 左右目标正确、原有非 diff 视图的种类与分组保持、命令不新增其他形态，继续检查 B 原文、dirty 与临时副本释放。旧条件失败，修正后完整 P2-01 18 项通过；不修改产品打开对比的行为。
 
 `override:true` 沿用既有 #38 结论：避免右侧 .md 被默认编辑器解析成 custom editor。
 
