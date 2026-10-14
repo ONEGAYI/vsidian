@@ -8,6 +8,7 @@
 // - 主正文走新入口后：根面板只创建一套 chrome 与单份编辑器，一次输入
 //   只派发一笔 edit.request（不重复注册监听/双重消费，验收第 3 条）。
 import { afterEach, describe, expect, it } from 'vitest'
+import { EditorSelection } from '@codemirror/state'
 import { LiveEditorInstance, type LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
 import { addonInstanceIdField } from '../../src/webview/addonViewIdentity'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
@@ -385,5 +386,62 @@ describe('#426 实例身份 field（view → instanceId 反查基座）', () => 
     const { instance } = mountInstance(sent, 'sess-identity-destroy', '# T\n')
     instance.destroy()
     expect(() => instance.setAddonBehaviorIdentity('main')).not.toThrow()
+  })
+})
+
+describe('#495 多选区 IME 定稿光标补偿', () => {
+  /** 模拟一次 IME 组合定稿（jsdom 手法对齐 CM6 官方 domchange 组合用例与
+   *  easy-typing #47 探针）：组合开始 → DOM 在主光标处插入定稿文本 → DOM
+   *  selection 停组合起点（真实 IME 后续键形态——applyDOMChange 的
+   *  sameSelPos 检查命中、mainSel 缺席，主副光标都不前进）→ 组合结束。
+   *  等待窗覆盖 MutationObserver flush 与 CM6 观察轮询 */
+  async function simulateImeCommit(instance: LiveEditorInstance, text: string): Promise<void> {
+    const view = instance.view!
+    const dom = view.contentDOM
+    const mainPos = view.state.selection.main.to
+    const { node, offset } = view.domAtPos(mainPos)
+    const sel = document.getSelection()!
+    if (node.nodeType !== 3) throw new Error(`domAtPos -> 非 ${mainPos} 文本节点`)
+    const textNode = node as Text
+    sel.collapse(textNode, offset)
+    dom.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    textNode.textContent = textNode.textContent!.slice(0, offset) + text + textNode.textContent!.slice(offset)
+    sel.collapse(textNode, offset)
+    await new Promise((r) => setTimeout(r, 30))
+    dom.dispatchEvent(new CompositionEvent('compositionend', { data: text }))
+    await new Promise((r) => setTimeout(r, 30))
+  }
+
+  it('双光标连续三次组合定稿：各光标随输入前进、文本广播两行各自累积', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-mc', '- 句一：今天天气很好\n- 句二：他问了一')
+    // 双光标：句一末（11）与句二末（21）
+    instance.view!.dispatch({ selection: EditorSelection.create([
+      EditorSelection.range(11, 11),
+      EditorSelection.range(21, 21),
+    ], 0) })
+    for (let round = 0; round < 3; round++) {
+      await simulateImeCommit(instance, '。')
+    }
+    const state = instance.view!.state
+    // 修复语义：广播插入两行各自累积 3 枚句号，双光标各随最后一枚前进。
+    // 句二末坐标含句一三轮插入的累计平移（24 + 3）
+    expect(state.doc.toString()).toBe('- 句一：今天天气很好。。。\n- 句二：他问了一。。。')
+    expect(state.selection.ranges.map((r) => r.head)).toEqual([14, 27])
+  })
+
+  it('单光标组合定稿不介入：行为保持（补偿面收窄到多选区广播分支）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-sc', '今天天气很好')
+    instance.view!.dispatch({ selection: { anchor: 6 } }) // '好' 后
+    for (let round = 0; round < 2; round++) {
+      await simulateImeCommit(instance, '。')
+    }
+    // 单光标路径不经广播分支（DOM 读回定稿，光标随 DOM selection）：
+    // jsdom 手动置 DOM 光标停起点 → CM6 以 mainSel 读回推进（单选区
+    // replaceRange 语义），行为自洽即可——本用例钉住「不因补偿引入异常」
+    const text = instance.view!.state.doc.toString()
+    expect(text).toBe('今天天气很好。。')
+    expect(instance.view!.state.selection.ranges).toHaveLength(1)
   })
 })

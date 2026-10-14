@@ -593,6 +593,16 @@ export class LiveEditorInstance {
    *  在场状态恒为空——须在组合开始（compositionstart）时刻留存，键入路径
    *  用 tr.startState 同基准。 */
   private compositionInTableRegion = false
+  /** #495 多选区组合定稿的光标补偿材料（组合外为 null）：组合起点选区
+   *  快照 + 组合期净变更累积。CM6 广播分支（applyDefaultInsert 的
+   *  composition 多光标路径）把定稿文本复制插入每个塌缩光标，但光标映射对
+   *  mainSel 缺席的主 range 与全部副 range 都停在插入点前（SelectionRange.map
+   *  默认 assoc=-1）——定稿文本落光标右侧、光标不前进。组合结束时刻
+   *  （compositionend 钩子内、DOM 组合已结束）以「起点选区 + 净变更
+   *  assoc=1 映射」回设前进后的选区。仅全塌缩多光标建立（CM6 广播分支
+   *  的实际作用面）；单选区与非塌缩选区（replaceSelection 路径，选区
+   *  归 #107 重建等既有链路）不建立——保守收窄干预面。 */
+  private multiCursorCompose: { startSelection: EditorSelection; netChanges: ChangeSet } | null = null
   /** 组合期间到达、待 flush 的外部增量（按到达序） */
   private pendingExternal: BufferedIncremental[] = []
   /** 组合期间到达、待 flush 的全文消息（覆盖增量形态）。source 记录来源
@@ -1162,6 +1172,41 @@ export class LiveEditorInstance {
     queueMicrotask(() => {
       this.deps.driveAddonBehaviors?.({ instanceId, userEvent: userEventRef, inputText: inputTextRef, replaced: replacedRef })
     })
+  }
+
+  /**
+   * #495 多选区组合定稿的选区补偿（compositionend 钩子内调用——DOM 组合
+   * 已结束，写回选区不再中断 IME）。以「组合起点选区 + 组合期净变更
+   * assoc=1 映射」推导前进后的选区；与现状一致（CM6 自身映射已前进——
+   * mainSel 在场的形态，或取消组合回退原位）不派发。
+   * 门控：空白格/表格组合缓冲在场时选区归表格管线（finishBlankComposition
+   * 规范化），不补偿；选区 range 数与起点不一致（组合中被程序化变更）
+   * 保守跳过。纯选区事务：零文本变更、不出站、不进撤销栈。
+   */
+  private compensateMultiCursorCompose(): void {
+    const compose = this.multiCursorCompose
+    this.multiCursorCompose = null
+    const view = this.view
+    if (!compose || !view || this.blankComposition !== null) {
+      return
+    }
+    const current = view.state.selection
+    if (current.ranges.length !== compose.startSelection.ranges.length) {
+      return
+    }
+    const derived = EditorSelection.create(
+      compose.startSelection.ranges.map((r) => EditorSelection.range(
+        compose.netChanges.mapPos(r.anchor, 1),
+        compose.netChanges.mapPos(r.head, 1),
+      )),
+      compose.startSelection.mainIndex,
+    )
+    const settled = current.mainIndex === derived.mainIndex &&
+      current.ranges.every((r, i) =>
+        r.anchor === derived.ranges[i]!.anchor && r.head === derived.ranges[i]!.head)
+    if (!settled) {
+      view.dispatch({ selection: derived })
+    }
   }
 
   /**
@@ -2686,6 +2731,12 @@ export class LiveEditorInstance {
           if (tr.docChanged) {
             this.docRevision += 1
           }
+          // #495 多选区组合光标补偿：组合期净变更逐笔累积（含广播插入的
+          // 副选区变更；取消组合的回退事务同样进累积——映射结果回到原位，
+          // 与最终选区一致时不派发）
+          if (this.multiCursorCompose && tr.docChanged) {
+            this.multiCursorCompose.netChanges = this.multiCursorCompose.netChanges.compose(tr.changes)
+          }
           // T07（#356）输入行为链驱动检测（内核情境门控在检测内先行）
           this.maybeDriveAddonBehaviors(tr, update.state)
           if (!tr.docChanged || tr.annotation(externalSync)) {
@@ -2750,6 +2801,18 @@ export class LiveEditorInstance {
           // 组合开始点的格区标记（定稿补驱动门控用，见字段注释；初始值
           // 为 null 非.undefined，用真值判定与键入路径同口径）
           this.compositionInTableRegion = Boolean(this.view?.state.field(tableRegionField, false))
+          // #495 多选区组合的光标补偿材料：组合起点选区快照（净变更在
+          // updateListener 逐笔累积）。仅全塌缩光标建立——CM6 广播分支
+          // 只对塌缩光标复制插入（副 range 处 sliceDoc 相同才广播）；
+          // 非塌缩选区走 replaceSelection 替换路径，选区语义归选区包裹
+          // 重建（#107）等既有链路，补偿介入会破坏其组合后选区形态
+          if (this.view && this.view.state.selection.ranges.length > 1 &&
+              this.view.state.selection.ranges.every((r) => r.empty)) {
+            this.multiCursorCompose = {
+              startSelection: this.view.state.selection,
+              netChanges: ChangeSet.empty(this.view.state.doc.length),
+            }
+          }
           this.beginBlankComposition()
         },
         compositionupdate: () => {
@@ -2767,6 +2830,10 @@ export class LiveEditorInstance {
         compositionend: (event) => {
           this.compositionCommittedText = event.data || null
           this.composing = false
+          // #495 多选区组合定稿的光标补偿：DOM 组合已结束，写回选区不再
+          // 中断 IME（组合进行中改选区会被浏览器当作取消组合——这是补偿
+          // 放在 compositionend 而非事务过滤器的缘故）
+          this.compensateMultiCursorCompose()
           this.scheduleFlush()
           // #399 组合定稿驱动行为链。实证（CDP + Chromium）：定稿事务
           // （insertCompositionText，userEvent 'input.type.compose'）**先于**
