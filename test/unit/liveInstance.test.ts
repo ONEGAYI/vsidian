@@ -387,3 +387,21 @@ describe('#426 实例身份 field（view → instanceId 反查基座）', () => 
     expect(() => instance.setAddonBehaviorIdentity('main')).not.toThrow()
   })
 })
+
+describe('全文替换的选区归一：CM6 反向映射 Range 不滞留', () => {
+  it('跨行选区被全文替换吞没后，handleFullSync 不留下 from > to 的反向 Range', () => {
+    const sent: WebviewToHost[] = []
+    // 长文档上跨行选区 → 全文替换为更短文档：CM6 自动映射把 anchor/head
+    // 贴到新文本两缘（anchor 贴右缘、head 贴左缘），产出 from > to 的
+    // 反向 Range；反向 Range 滞留 selection 会让后续纯选区事务的增量
+    // 重扫拿到倒置行区间（liveDecorations 崩溃链）。replaceDoc 显式带
+    // 归一后的映射选区，杜绝滞留。
+    const { instance } = mountInstance(sent, 'sess-reversed', 'a'.repeat(80))
+    instance.view!.dispatch({ selection: { anchor: 4, head: 60 } })
+    instance.handleFullSync(2, 'b\n\nc\n', {})
+    const ranges = instance.view!.state.selection.ranges
+    expect(ranges.length).toBeGreaterThan(0)
+    expect(ranges.every((r) => r.from <= r.to), JSON.stringify(ranges.map((r) => [r.from, r.to])))
+      .toBe(true)
+  })
+})

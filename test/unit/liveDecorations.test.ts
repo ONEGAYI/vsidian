@@ -376,6 +376,40 @@ describe('mark 作用域显形', () => {
     expect(hiddenRanges(build(doc, { anchor: quote }))).not.toContainEqual([quote, quote + 2])
   })
 
+  it('裸标题 mark 非聚焦保持可见：空标题行（只有 #）隐藏后整行无可见字符，不发射隐藏（与 ==== 空形态同口径）', () => {
+    const doc = '#\n## \n# 有内容\n\n普通正文'
+    const bare1 = doc.indexOf('#')
+    const bare2 = doc.indexOf('##')
+    const titled = doc.indexOf('# 有内容')
+    const elsewhere = hiddenRanges(build(doc, { anchor: doc.indexOf('普通正文') }))
+    // 空标题（无尾随内容 / 尾随空白）mark 不隐藏，源文不丢
+    expect(elsewhere).not.toContainEqual([bare1, bare1 + 1])
+    expect(elsewhere).not.toContainEqual([bare2, bare2 + 2])
+    // 对照：有内容标题非聚焦照常隐藏
+    expect(elsewhere).toContainEqual([titled, titled + 2])
+    // 聚焦空标题行同样不隐藏（既有显形语义不受影响）
+    expect(hiddenRanges(build(doc, { anchor: bare1 }))).not.toContainEqual([bare1, bare1 + 1])
+  })
+
+  it('CM6 全替换映射的反向选区不使纯选区事务崩增量重扫（倒置 span 防御）', () => {
+    // 跨行选区 → 全文替换为更短文档：CM6 自动映射把 anchor/head 贴到
+    // 新文本两缘，产出 from > to 的反向 Range（下方行为钉子）；后续纯
+    // 选区事务经 selectionSpans 消费该 Range——修前倒置 span 传入
+    // emitForRange 抛 RangeError: Invalid array length
+    const long = ['a'.repeat(40), '', '```js', 'const a = 1;', '```'].join('\n')
+    let state = EditorState.create({
+      doc: long,
+      extensions: [liveDecorationsField],
+      selection: EditorSelection.single(4, 60),
+    })
+    state = state.update({ changes: { from: 0, to: long.length, insert: 'b\n\nc\n' } }).state
+    const reversed = state.selection.ranges[0]!
+    expect(reversed.from).toBeGreaterThan(reversed.to) // 前提：反向 Range 确实发生
+    // 纯选区事务消费反向 Range：不抛且增量与全量对拍一致
+    const next = state.update({ selection: { anchor: 1 } })
+    expect(setsEqual(next.state, build(next.state.doc, { anchor: 1 }))).toBe(true)
+  })
+
   it('标题行内的粗体 mark 仍由粗体自身控制域决定', () => {
     const doc = '# 标题前文 **重点** 标题后文'
     const heading = doc.indexOf('#')

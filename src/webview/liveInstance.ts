@@ -2453,6 +2453,23 @@ export class LiveEditorInstance {
       changes: { from: 0, to: view.state.doc.length, insert: text },
       annotations: externalSync.of(true),
     })
+    // 选区归一（按需翻转）：被替换区间整体吞没的选区，CM6 自动映射把
+    // anchor/head 贴到新文本两缘，产出 from > to 的反向 Range 滞留到下
+    // 一个纯选区事务——增量重扫按 from/to 建区间会拿到倒置行区间。
+    // 仅在确实反向时补一笔翻转事务：常态（映射正向）零额外事务，init
+    // 事务不带显式 selection——dispatch 显式 selection 会改变事务形态
+    // （selectionSet），实测扰动浮窗 Live 的定位滚动（embedLiveCloseout
+    // S6 前置自检 5/6 挂）。
+    const sel = view.state.selection
+    if (sel.ranges.some((r) => r.from > r.to)) {
+      view.dispatch({
+        selection: EditorSelection.create(
+          sel.ranges.map((r) => (r.from > r.to ? EditorSelection.range(r.to, r.from) : r)),
+          sel.mainIndex,
+        ),
+        annotations: externalSync.of(true),
+      })
+    }
   }
 
   // ---- 扩展装配 ----

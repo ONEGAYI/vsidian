@@ -411,6 +411,91 @@ try {
   assert(Math.abs(((liveWrap.lnLeft ?? -1) - liveWrap.lineLeft) - 8) < 1,
     `#191 Live 首行行号左缘应距行左缘 8px：${liveWrap.lnLeft} vs ${liveWrap.lineLeft}`)
 
+  // ---- 跨行代码选区不越界卡内行号（#484 满宽块左界的台账外场景） ----
+  // 代码卡片行的悬挂缩进（#191 padding-left + 负 text-indent）把行盒左缘
+  // 留在卡内行号区：跨行选区的中间/末行满宽块左界若取行盒左缘，高亮会
+  // 横穿行号 widget 区。断言对象是绘制层真实几何：任何可见选区块不得与
+  // 行号盒水平相交；正文折行满宽惯例保持（满宽块左界 ≈ 正文行盒左缘）。
+  {
+    const SEL_DOC = [
+      '正文' + '长文折行观测'.repeat(28) + '段落', '',
+      '```js', 'const aa = 1;', 'let bb = 2;', 'var cc = 3;', '```', '',
+    ].join('\n')
+    await page.evaluate((text) => window.initCode(text), SEL_DOC)
+    await page.waitForSelector('.cm-line.vsidian-code-card-line')
+    const codeLine1From = SEL_DOC.indexOf('const aa')
+    const codeLine3From = SEL_DOC.indexOf('var cc')
+    const visibleBlocks = () => page.evaluate(() =>
+      [...document.querySelectorAll('.vsidian-selection-layer .vsidian-selection-background')]
+        .filter((el) => el.getClientRects().length > 0)
+        .map((el) => el.getBoundingClientRect().toJSON()))
+    const setSelection = (anchor, head) => page.evaluate(({ anchor, head }) => {
+      window.controller.getView().dispatch({ selection: { anchor, head } })
+    }, { anchor, head })
+
+    // (a) 代码跨行选区：中行满宽块不进行号区
+    await setSelection(codeLine1From + 6, codeLine3From + 6)
+    await page.waitForFunction(() =>
+      document.querySelectorAll('.vsidian-selection-layer .vsidian-selection-background:not([style*="display: none"])').length >= 3)
+    const codeGeom = await page.evaluate(() => {
+      const line = [...document.querySelectorAll('.cm-line.vsidian-code-card-line')]
+        .find((el) => el.textContent.includes('let bb'))
+      const ln = line?.querySelector('.vsidian-code-card-linenumber')
+      let textX = null
+      if (line) {
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (node.parentElement.closest('.vsidian-code-card-linenumber') !== null || node.textContent === '') {
+            continue
+          }
+          const range = document.createRange()
+          range.setStart(node, 0)
+          range.setEnd(node, 1)
+          textX = range.getBoundingClientRect().left
+          break
+        }
+      }
+      return {
+        lnLeft: ln ? ln.getBoundingClientRect().left : null,
+        lnRight: ln ? ln.getBoundingClientRect().right : null,
+        lineLeft: line ? line.getBoundingClientRect().left : null,
+        textX,
+      }
+    })
+    const blocks = await visibleBlocks()
+    assert.ok(blocks.length >= 3, `跨行代码选区应有首/满宽/末段至少 3 块，实际 ${blocks.length}`)
+    const offenders = blocks.filter((b) => codeGeom.lnLeft !== null && b.right > codeGeom.lnLeft + 0.5 && b.left < codeGeom.lnRight - 0.5)
+    assert.equal(offenders.length, 0,
+      `选区块不得伸入卡内行号区 [${codeGeom.lnLeft},${codeGeom.lnRight}]：${JSON.stringify(offenders)}`)
+    const fullWidth = blocks.filter((b) => codeGeom.textX !== null && b.left >= codeGeom.textX - 1)
+    assert.ok(fullWidth.length >= 1, `中间满宽块左界应不小于代码文本列 x（${codeGeom.textX}）：${JSON.stringify(blocks)}`)
+
+    // (b) 正文折行满宽惯例保持：满宽块左界 ≈ 正文行盒左缘（无悬挂缩进）
+    const plainFrom = SEL_DOC.indexOf('正文')
+    const plainTo = SEL_DOC.indexOf('段落') + '段落'.length
+    await setSelection(plainFrom + 2, plainTo)
+    const plainLine = page.locator('.cm-line', { hasText: '长文折行观测' })
+    const plainBox = await plainLine.boundingBox()
+    assert.ok(plainBox, '正文长行应有 boundingBox')
+    // 等待层更新出与正文行垂直相交的新块（旧块残留期间不得采信）
+    await page.waitForFunction(({ top, bottom }) =>
+      [...document.querySelectorAll('.vsidian-selection-layer .vsidian-selection-background')]
+        .some((el) => {
+          const r = el.getBoundingClientRect()
+          return r.bottom > top + 1 && r.top < bottom - 1
+        }), { top: plainBox.y, bottom: plainBox.y + plainBox.height })
+    const plainGeom = plainBox.x
+    const plainBlocks = await visibleBlocks()
+    const inPlain = plainBlocks.filter((b) => b.bottom > plainBox.y + 1 && b.top < plainBox.y + plainBox.height - 1)
+    const fullPlain = inPlain.filter((b) => Math.abs(b.left - plainGeom) < 1.5)
+    assert.ok(fullPlain.length >= 1,
+      `正文折行跨视觉行选区的满宽块左界应仍取行盒左缘 ${plainGeom}：${JSON.stringify(inPlain)}`)
+    // 收场清选区（光标归一点）：保持场景间状态干净——跨行选区残留态
+    // 曾触发换文档时反向 Range 的倒置 span 崩溃（已在 liveInstance 归一
+    // 与 liveDecorations 防御两层修复，单测钉住），此处不再依赖该规避
+    await setSelection(plainTo, plainTo)
+  }
+
   // ---- #389：语言扩展的真实文字绘制（生产色板，无测试 CSS 改写） ----
   const paintColors = {
     light: { string: 'rgb(10, 48, 105)', string2: 'rgb(129, 31, 63)', number: 'rgb(9, 134, 88)', keyword: 'rgb(175, 0, 219)',
