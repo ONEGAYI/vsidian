@@ -276,7 +276,7 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
       instanceId: 'main',
       request: {
         revision: multiSnap.snapshot.revision,
-        changes: [{ offset: 0, length: 0, text: '多' }, { offset: 3, length: 0, text: '光' }],
+        changes: [{ offset: 0, length: 0, text: '多' }, { offset: 2, length: 0, text: '光' }],
         selection: [{ anchor: 1, head: 1 }, { anchor: 4, head: 4 }],
       },
     })
