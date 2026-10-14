@@ -35,7 +35,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.toast': '轻提示',
   'styleRef.category.wikilinkSuggest': '双链联想候选',
   'styleRef.category.headingFold': '标题折叠',
-  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01；#378 T03 占位）----
+  // ---- wikilinkSuggest.（双链文件联想候选，#376 T01）----
   'wikilinkSuggest.list.ariaLabel': '双链联想候选',
   'wikilinkSuggest.status.loading': '正在搜索文件…',
   'wikilinkSuggest.status.empty': '没有匹配的文件',
@@ -43,9 +43,6 @@ export const zhCn: Record<MessageKey, string> = {
   'wikilinkSuggest.status.notReady': '索引准备中——可继续手写链接',
   'wikilinkSuggest.status.updating': '索引仍在构建——当前为部分结果',
   'wikilinkSuggest.status.more': '还有 {count} 项——按 ↓ 继续加载',
-  // #378 T03：标题/块占位提示（占位只作提示，不可确认、不写正文）
-  'wikilinkSuggest.placeholder.heading': '输入小标题…',
-  'wikilinkSuggest.placeholder.block': '输入块 ID…',
   // 验收反馈（2026-10-06）：浮层底部键提示条——按阶段裁剪显示当前可用进阶键
   'wikilinkSuggest.hint.heading': '输入 # 可以链接到标题',
   'wikilinkSuggest.hint.block': '输入 ^ 链接文本块',

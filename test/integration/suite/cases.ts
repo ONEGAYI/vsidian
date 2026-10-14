@@ -17469,7 +17469,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   }],
 
   // ---- #378 T03 双链联想：目标区重编辑、#／^／| 转阶段与输入仲裁 ----
-  ['双链联想：#／^／| 转阶段（标题候选/块占位）、| 进显示文字、撤销分段与零文本动作（#378 T03）', async () => {
+  ['双链联想：#／^／| 转阶段（标题/块候选）、| 进显示文字、撤销分段与零文本动作（#378 T03）', async () => {
     await waitRenameIndexReady()
     await openWithEditor('联想目录/联想来源.md')
     await waitSessionReady('联想目录/联想来源.md')
@@ -17549,8 +17549,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await pressKey('^')
     const afterCaret = '来源正文\n[[同目录目标.md#^]]'
     await poll('^ 转块阶段（已有 # 只补 ^）', () => doc.getText() === afterCaret ? true : undefined)
-    // T05 起块阶段为真实候选（仅空目标保持占位）：fixture 的同目录目标.md
-    // 恰有一个无 ID 块（段落「同目录目标正文」），空查询应列出全部块
+    // T05 起块阶段为真实候选（2026-10-14 起空目标同样出站——按当前文档
+    // 枚举，本文件锚点）：fixture 的同目录目标.md 恰有一个无 ID 块
+    // （段落「同目录目标正文」），空查询应列出全部块
     const blockPaint = await poll('^ 后块候选浮层（T05 真实候选）', async () => {
       const s = await suggestPaint()
       return s && s.visible && s.itemCount >= 1 ? s : undefined

@@ -428,6 +428,39 @@ describe('planWikilinkFieldEdit：标题阶段 | 进显示文字（#379 T04）',
   })
 })
 
+// ---- 同文档锚点（省略文件名，2026-10-14 修复）：宿主对空文件目标按当前
+// 文档枚举候选，alias 给空串——确认写回不补默认别名（`[[#标题]]` /
+// `[[#^块ID]]` 直接成立，与 parseWikilinkInner 本文件锚点语义一致）----
+
+const SELF_YUSUAN = { heading: '预算', alias: '' }
+
+describe('planWikilinkFieldEdit：同文档锚点确认（空 alias 不补默认别名）', () => {
+  it('[[#预x]] 标题确认：锚点字段整体替换且不插 |', () => {
+    const line = '[[#预x]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 4), 'confirm', 4, null, SELF_YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[#预算¦]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('[[#^id]] 块确认：块字段整体替换且不插 |', () => {
+    const line = '[[#^id]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 6), 'confirm', 6, null, null, { blockId: 'abc-1', alias: '' })
+    expect(applyPlan(line, plan!)).toBe('[[#^abc-1¦]]')
+  })
+
+  it('已有别名（用户手写）仍保留：[[#预x|手写]] 确认只换锚点', () => {
+    const line = '[[#预x|手写]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 4), 'confirm', 4, null, SELF_YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[#预算¦|手写]]')
+  })
+
+  it('| 主动进显示文字不受空 alias 影响：接受标题后仍插 |（手动别名入口）', () => {
+    const line = '[[#预x]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 4), '|', 4, null, SELF_YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[#预算|¦]]')
+  })
+})
+
 // ---- #381 T06：表格格内 pipeEscape 形态（别名分隔符为转义序列，行文本
 // 为格窗口内文本（调用侧窗口化）——识别 pipeAt 指向反斜杠、pipeWidth=2，
 // 计划插入/复用按两字符序列，不写裸竖线破坏网格）----
