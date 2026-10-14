@@ -159,6 +159,8 @@ const CRLF_DOC = '标题一\r\n正文 A 行\r\n正文 B 行\r\n'
 // 在 '- 列表项一' 行首插入 '插入的新段落\n' 后的期望全文
 const LF_DOC_AFTER_EDIT = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n插入的新段落\n- 列表项一\n- 列表项二\n'
 // #6 模式切换 fixture（与 runTest.mjs 的 MODE_DOC 一致）
+// 样式契约对拍文本：须与 fixtures.mjs 的 STYLE_CONTRACT_DOC 逐字一致
+// （宿主写盘那份）——改 fixtures 不同步此处会使 #132 重挂用例 text 对拍永不成立
 const STYLE_CONTRACT_DOC_TEXT = [
   '---',
   'title: 样式契约',
@@ -166,7 +168,7 @@ const STYLE_CONTRACT_DOC_TEXT = [
   '',
   '# 样式契约标题',
   '',
-  '**粗体** 与 *斜体* 与 `行内代码` 与 ==高亮==。',
+  '**粗体** 与 *斜体* 与 `行内代码` 与 ==高亮== 与 ~~删除线~~。',
   '',
   '> 引用一行',
   '',
