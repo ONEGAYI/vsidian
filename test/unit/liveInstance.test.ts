@@ -437,9 +437,9 @@ describe('#495 多选区 IME 定稿光标补偿', () => {
     for (let round = 0; round < 2; round++) {
       await simulateImeCommit(instance, '。')
     }
-    // 单光标路径不经广播分支（DOM 读回定稿，光标随 DOM selection）：
-    // jsdom 手动置 DOM 光标停起点 → CM6 以 mainSel 读回推进（单选区
-    // replaceRange 语义），行为自洽即可——本用例钉住「不因补偿引入异常」
+    // 单光标路径不经广播分支（jsdom 下 view 未聚焦 → DOM 选区读回缺席 →
+    // CM6 以默认选区的 map 映射落位）：本用例钉住「不因补偿引入异常」，
+    // 光标精确落点不钉（单光标无补偿介入，行为归属 CM6 既有语义）
     const text = instance.view!.state.doc.toString()
     expect(text).toBe('今天天气很好。。')
     expect(instance.view!.state.selection.ranges).toHaveLength(1)

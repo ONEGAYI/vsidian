@@ -1,9 +1,9 @@
 // 多光标 IME 定稿的原生浏览器回归（#495）：CDP Input.imeSetComposition /
 // Input.insertText 真实驱动 compositionstart..compositionend，双光标连续
-// 键入全角句号——钉住 CM6 广播插入下的光标前进（修复前形态：定稿文本落
-// 光标右侧且光标不前进，错位使连续标点规则永不触发）。与 multicursor /
-// multicursorWrite 同口径：生产 WebviewSyncController 直挂页面，键盘/IME
-// 事件原生派发。
+// 键入全角句号——回归保护面（CDP 组合的 DOM selection 时序不复现错位，
+// 错位的机制级钉住在 test/unit/liveInstance.test.ts 的 #495 describe；
+// 口径详见 multicursorIme.mjs 头注）。与 multicursor / multicursorWrite
+// 同口径：生产 WebviewSyncController 直挂页面，键盘/IME 事件原生派发。
 import 'katex/dist/katex.min.css'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { EditorView, keymap } from '@codemirror/view'

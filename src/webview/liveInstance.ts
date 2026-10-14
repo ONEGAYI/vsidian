@@ -1182,6 +1182,10 @@ export class LiveEditorInstance {
    * 门控：空白格/表格组合缓冲在场时选区归表格管线（finishBlankComposition
    * 规范化），不补偿；选区 range 数与起点不一致（组合中被程序化变更）
    * 保守跳过。纯选区事务：零文本变更、不出站、不进撤销栈。
+   * 残余边界：若定稿 DOM 变异晚于 compositionend 交付（CM6 走微任务
+   * 后补 flush 的形态），本补偿在净变更缺席下推导——零候选轮的单发组合
+   * 会退化为未补偿形态（不会更糟）；VS Code webview（Chromium）经 CDP
+   * 实证为定稿先于 compositionend（#399 注释），本补偿按先序形态设计。
    */
   private compensateMultiCursorCompose(): void {
     const compose = this.multiCursorCompose
@@ -2817,7 +2821,10 @@ export class LiveEditorInstance {
         },
         compositionupdate: () => {
           // 未观察到 start 的迟入组合（missed start 兜底）：捕获阶段未回看
-          // 停顿，这里在置组合态前补判；组合中的候选更新不再回看（原子性）
+          // 停顿，这里在置组合态前补判；组合中的候选更新不再回看（原子性）。
+          // #495 补偿不覆盖迟入组合：快照须在组合起点建立，迟入时组合前
+          // 的事务可能已入账，此时补建会漏记净变更——该形态放弃补偿
+          //（退化为此前行为，不引入新错位）
           if (!this.composing) {
             this.markPauseBoundary()
             this.composing = true
