@@ -16,6 +16,7 @@ import type { AddonStatusEntry, AddonStatusKind } from './addonIdentity'
 import { isEditOriginMeta, type EditOriginList, type EditOriginMeta } from './editOrigin'
 import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from './addonPage'
 import { isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
+import { parseBehaviorQueryFilter, type BehaviorQueryFilter } from './behaviorFilterQuery'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
 import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
@@ -967,6 +968,11 @@ export type HostToWebview =
     state: import('./addonBehaviors').AddonBehaviorStateStore | null
     notice?: { kind: 'saved' | 'save-failed' }
   }
+  /** #474 行为管理视图状态（宿主 → 设置页 webview）：当前页码与积木查询树
+   *  的用户级持久快照（跨重启 globalState；view 为 null = 无存储默认态）。
+   *  设置页装载经 addons.behaviorsViewGet 拉取一次；写入经
+   *  addons.behaviorsViewSet——webview 自持权威，宿主不推送变化 */
+  | { kind: 'addons.behaviorsView'; view: { page: number; query: BehaviorQueryFilter | null } | null }
   /** #359 T10 组件命令执行指令（宿主 → 编辑器 webview）：命令面板/宿主
    *  侧命令入口转发到活动面板执行（webview 按命令声明的生效模式复核后
    *  调组件回调；快捷键入口在 webview 本地分支直接执行不经本消息） */
@@ -2001,6 +2007,13 @@ export type WebviewToHost =
   /** T08（#357）行为调序写入（设置页 → 宿主；order 为当前可见行为的完整
    *  键新序——宿主与存储中不可见键锚定合并，配置不丢） */
   | { kind: 'addons.behaviorsSetOrder'; order: string[] }
+  /** #474 行为管理视图状态拉取（设置页 → 宿主；宿主以 addons.behaviorsView
+   *  应答一次——装载即拉取，与 addons.behaviorsGet 同模式） */
+  | { kind: 'addons.behaviorsViewGet' }
+  /** #474 行为管理视图状态写入（设置页 → 宿主；页码 + 查询树整表写——
+   *  用户级持久跨重启恢复；查询树形态由 shared 守卫把关，页码越界由
+   *  webview 渲染时静默回落第 1 页，宿主不裁决） */
+  | { kind: 'addons.behaviorsViewSet'; view: { page: number; query: BehaviorQueryFilter | null } }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -4676,6 +4689,12 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addons.behaviorsSetOrder':
       // T08（#357）调序写入（当前可见行为完整键新序）
       return Array.isArray(v.order) && v.order.every(isString)
+    case 'addons.behaviorsViewGet':
+      // #474 行为管理视图状态拉取（无载荷）
+      return true
+    case 'addons.behaviorsViewSet':
+      // #474 行为管理视图状态写入（页码 + 查询树；树形态由 shared 守卫把关）
+      return isBehaviorViewPayload(v.view)
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
         (v.detail === undefined || isString(v.detail))
@@ -5572,9 +5591,23 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.notice === undefined ||
           (isObject(v.notice) && (v.notice.kind === 'saved' || v.notice.kind === 'save-failed')))
       )
+    case 'addons.behaviorsView':
+      // #474 行为管理视图状态（null = 无存储默认态）
+      return v.view === null || isBehaviorViewPayload(v.view)
     default:
       return false
   }
+}
+
+/** #474 行为管理视图状态载荷守卫（addons.behaviorsView / behaviorsViewSet
+ * 共用内层）：page 为正整数；query 为 null（无查询 = 全集）或可解析的
+ * 积木查询树（含块数上限与递归形态，单一事实源 shared/behaviorFilterQuery） */
+function isBehaviorViewPayload(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    typeof v.page === 'number' && Number.isInteger(v.page) && v.page >= 1 &&
+    (v.query === null || parseBehaviorQueryFilter(v.query) !== null)
+  )
 }
 
 /** #198 索引维护操作结果反馈种类（index.state.notice.kind） */

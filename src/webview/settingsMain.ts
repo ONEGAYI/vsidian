@@ -18,6 +18,7 @@ import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from './addonSett
 import { installAddonPageLoader, type AddonPageLoaderHandle } from './addonPageLoader'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
+import { ToastChannel } from './toast'
 import { isTrustedHostMessageSource } from './untrustedFrame'
 import { isHostToWebview } from '../shared/protocol'
 import { setRuntimeOperations } from '../shared/keybindings'
@@ -83,8 +84,14 @@ const addons = new AddonSection(
 )
 // #465/#466 输入行为管理独立分页：跨组件行为仲裁面自附加组件页迁出
 // （原「行为冲突管理」更名；行为目录与组件状态推送在此消费——侧栏无
-// 大组贡献，不接 refreshSidebar）
-const addonBehaviors = new AddonBehaviorManageSection({ postMessage: (message) => vscode.postMessage(message) })
+// 大组贡献，不接 refreshSidebar）。#474 起注入轻提示通道（D14：toast 引入
+// 设置页——复用编辑器侧 ToastChannel 随设置页 bundle；定位回落与查询清空
+// 的说明/撤销气泡经此呈现）
+const toast = new ToastChannel(document.getElementById('app') ?? document.body)
+const addonBehaviors = new AddonBehaviorManageSection(
+  { postMessage: (message) => vscode.postMessage(message) },
+  toast,
+)
 // #465 组件设置独立分页：基础设置区（T04）与组件设置页挂载（T02）的
 // 唯一承载方——附加组件页通道堵死后，addons.settingsState /
 // openAddonSettingsPage 在此消费（addonSettingsHost 装载器容器随迁）
@@ -131,6 +138,10 @@ vscode.postMessage({ kind: 'addons.commandCatalogGet' })
 // T08（#357）行为冲突管理载荷：同「装载即拉取」模式（addons.behaviorsGet
 // 应答；注册表对账/回收与用户状态写入后宿主推送 addons.behaviors）
 vscode.postMessage({ kind: 'addons.behaviorsGet' })
+// #474 行为管理视图状态（页码 + 积木查询树的用户级持久）：同「装载即拉取」
+// 模式（addons.behaviorsView 应答一次；写入经 addons.behaviorsViewSet，宿主
+// 不推送变化）
+vscode.postMessage({ kind: 'addons.behaviorsViewGet' })
 // #351 T02 装载器就绪上报（设置页 webview 安装装载器后与面板重载后各发
 // 一次）：宿主按当前期望装载清单幂等推送组件设置页指令（addon.load）
 vscode.postMessage({ kind: 'addonPage.ready' })

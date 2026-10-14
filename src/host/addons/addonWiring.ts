@@ -37,6 +37,7 @@ import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
 import { AddonStorageService } from './addonStorageService'
 import { AddonBehaviorStateService } from './addonBehaviorStateService'
+import { AddonBehaviorViewService } from './addonBehaviorViewService'
 import { AddonBehaviorCatalogService } from './addonBehaviorCatalogService'
 import { mergeBehaviorOrderPreservingUnknown } from '../../shared/addonBehaviors'
 import { AddonCommandService } from './addonCommandService'
@@ -99,6 +100,10 @@ export interface AddonPageWiring {
     state: import('../../shared/addonBehaviors').AddonBehaviorStateStore | null
     notice?: { kind: 'saved' | 'save-failed' }
   }
+  /** #474 addons.behaviorsView 消息载荷（行为管理视图状态：页码 + 积木
+   *  查询树的用户级持久快照；view 为 null = 无存储默认态——webview 拉取
+   *  应答一次，变化写入经 addons.behaviorsViewSet 走 handleSettingsMessage） */
+  getBehaviorsViewState(): { kind: 'addons.behaviorsView'; view: { page: number; query: import('../../shared/behaviorFilterQuery').BehaviorQueryFilter | null } | null }
   /** 市场搜索（关键词仅搜索辅助：vsidian-addon） */
   openSearch(): void
   /** VSCode 扩展管理视图 */
@@ -244,6 +249,21 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     write: async (value) => {
       try {
         await context.globalState.update(ADDON_BEHAVIOR_STATE_KEY, value)
+        return true
+      } catch {
+        return false
+      }
+    },
+  })
+  // #474 行为管理视图状态（当前页码 + 积木查询树）：用户级持久，跨重启
+  // 恢复——与行为状态存储同层但独立键（视图偏好 vs 生效语义）；webview
+  // 自持权威，宿主只存储不推送（服务说明见模块头注）
+  const ADDON_BEHAVIOR_VIEW_KEY = 'vsidian.addonBehaviors.view.v1'
+  const behaviorViewService = new AddonBehaviorViewService({
+    read: () => context.globalState.get(ADDON_BEHAVIOR_VIEW_KEY),
+    write: async (value) => {
+      try {
+        await context.globalState.update(ADDON_BEHAVIOR_VIEW_KEY, value)
         return true
       } catch {
         return false
@@ -1093,6 +1113,15 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         })
         return true
       }
+      // ---- #474 行为管理视图状态写入（页码 + 查询树整表写；拉取由
+      // settingsPage 经 page.getBehaviorsViewState 直接应答，同 behaviorsGet
+      // 模式）----
+      case 'addons.behaviorsViewSet': {
+        // 写失败静默（视图状态丢失非灾难：下次装载回退旧值；不涉行为生效
+        // 语义，见服务模块头注）；webview 自持权威，无需回推
+        void behaviorViewService.setView(message.view.page, message.view.query)
+        return true
+      }
       default:
         return false
     }
@@ -1102,6 +1131,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     getState,
     getSettingsState,
     getBehaviorsState: (notice) => buildBehaviorsState(notice),
+    // #474 视图状态快照现算（null = 无存储默认态；装载拉取应答用）
+    getBehaviorsViewState: () => ({ kind: 'addons.behaviorsView', view: behaviorViewService.snapshot() }),
     openSearch: () => {
       // 关键词仅帮助市场寻找（vsidian-addon）；不代表接入协议或官方身份
       void vscode.commands.executeCommand('workbench.extensions.search', '@keyword:"vsidian-addon"')
