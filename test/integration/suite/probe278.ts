@@ -692,6 +692,8 @@ export const probe278Cases: Array<[string, () => Promise<void>]> = [
 
   ['P2-01 探针：untitled 临时副本作 vscode.diff 左侧且不扰动 B', async () => {
     const bDoc = await docOf('p201-diff-b.md')
+    // #446 条目 8：B 已有文本标签是合法前置；修改后该标签由宿主钉住。
+    await vscode.window.showTextDocument(bDoc, { preview: true })
     const B0 = baseText('diff', 'b')
     const B1 = `乙冲突版本 ${B0}`
     assert(await insertAt(bDoc, 0, '乙冲突版本 '), 'B 编辑应成功')
@@ -699,6 +701,9 @@ export const probe278Cases: Array<[string, () => Promise<void>]> = [
     const temp = await vscode.workspace.openTextDocument({ content: tempText, language: 'markdown' })
     assert(temp.uri.scheme === 'untitled', '临时副本应为 untitled 文档')
     logEv('diff-temp-created', { tempUri: temp.uri.toString(), bTabs: tabsOfFile('p201-diff-b.md').length })
+    const otherViewsBefore = tabsOfFile('p201-diff-b.md')
+      .filter(({ kind }) => kind !== 'diff')
+      .map(({ kind, tab }) => `${kind}:${tab.group.viewColumn}`).sort()
     await vscode.commands.executeCommand('vscode.diff', temp.uri, bDoc.uri, '冲突对比（左临时右真实）', {
       override: true,
     })
@@ -713,17 +718,19 @@ export const probe278Cases: Array<[string, () => Promise<void>]> = [
     // 左右内容完整可读；B 的 dirty 与内容不被打开对比扰动
     assert(temp.getText() === tempText, '临时副本内容应完整')
     assert(bDoc.getText() === B1 && bDoc.isDirty, '打开对比不得改写或清洗 B')
-    // 对比页应为 B 的唯一视图形态：轮询断言——vscode.diff 打开过程中宿主
-    // 可能先为 modified 侧建 text 编辑器再异步替换为 diff 编辑器，慢宿主上
-    // 瞬时断言会撞上回收窗口（CI 间歇红、快宿主恒绿的时序敏感点；给收敛
-    // 窗后语义不变：diff 标签在场且 B 无其他形态标签）
-    await poll('对比页应为 B 的唯一视图形态', () => {
+    // diff 不会收掉 B 已有的脏标签；只禁止打开对比新增其他视图。
+    // 以种类和分组比较前后状态，不依赖 Tab 对象跨事件的引用身份。
+    await poll('对比页应保留 B 既有视图且不新增其他形态', () => {
       const tabs = tabsOfFile('p201-diff-b.md')
-      return tabs.length > 0 && tabs.every((t) => t.kind === 'diff') ? true : undefined
+      const otherViews = tabs.filter(({ kind }) => kind !== 'diff')
+        .map(({ kind, tab }) => `${kind}:${tab.group.viewColumn}`).sort()
+      return tabs.some(({ kind }) => kind === 'diff') &&
+        JSON.stringify(otherViews) === JSON.stringify(otherViewsBefore) ? true : undefined
     }, 10000)
     logEv('diff-open', {
       leftLen: temp.getText().length, rightDirty: bDoc.isDirty,
       bTextTabs: tabsOfFile('p201-diff-b.md').filter((t) => t.kind === 'text').length,
+      otherViewsBefore,
       untitledCount: untitledDocs().length, ...visibleBrief(),
     })
     // 关闭对比页：untitled 左侧恒「未保存」，直接关可能触发宿主保存确认

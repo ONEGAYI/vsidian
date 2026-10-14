@@ -328,3 +328,19 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 - 完整套件：`446-tablecaret-baseline.log`、`446-tablecaret-regression-red.log`、`446-tablecaret-regression-green.log`；对应原生报告 `run-boxnrx`、`run-ihJLPC`、`run-x3gwda`。
 
 历史 CI 没有记录节点连接状态，具体是哪次页面更新替换了按钮仍无法从旧日志还原；本轮固定的是能解释同款空串的采样竞态。tableCaret 恢复 core 的候选同步更新分组契约；合并前须完成同一提交两轮独立 Linux CI 验证，结果以修复 PR 与 #446 台账为准。#446 内另外两项套件及其他未解决条目仍保持打开，不因 tableCaret 修复一起勾销。
+
+## #446 条目 8/10：diff 前置与孙位身份等待（2026-10-14 后续调查）
+
+本轮从 main `1ced1953`（v1.0.0）建立独立工作树，核对最近 18 次 CI 与开放的稳定性 Issue。最新 [run 38514133619](https://github.com/ONEGAYI/vsidian/actions/runs/38514133619) 全绿；此前两轮 main 红灯分别是 [38510350338](https://github.com/ONEGAYI/vsidian/actions/runs/38510350338) 的 P2-01 diff 标签页等待超时，以及 [38511777005](https://github.com/ONEGAYI/vsidian/actions/runs/38511777005) 在 `Resolving version...` 阶段连接宿主下载服务超时。后者尚未启动用例、没有生成宿主报告，不与断言抖动混为同根因。
+
+**条目 8 的探针假设已可重复证伪**。CI 的 `diff-temp-created` 已记录 `bTabs:1`；本机无既有 B 标签时原用例通过，固定“先打开 B，再写入冲突版本”后稳定复现旧等待超时。真实宿主中，原文本标签变为 dirty/pinned，打开 diff 后仍保留；这不是等待更久就会自动回收的临时编辑器。候选按打开前的非 diff 视图种类及分组校验打开后状态，保留正确 diff 目标、B 内容/dirty、临时副本与关闭释放断言；没有增加预算或关闭 B 的脏标签来迁就测试。历史 CI 未记录既有标签种类，不能还原其每个标签；固定相同 `bTabs:1` 前置的宿主重放验证了旧独占性假设不成立。调研正文的相关断言已同步收窄。
+
+**条目 10 的等待弱于后续身份断言**。旧谓词以 `cards.length >= 5` 就绪，随后却按 `inner` 建 Map 并要求五个唯一位置。同一个匹配快照中，四个唯一位置加一张重复卡会通过等待，再在“缺格内位”的断言失败；`waitViewState` 返回的正是匹配快照，不存在第二次采样解释。新增单测直接执行实际谓词，回放这一快照时旧实现返回 true；候选逐个等待五个目标 `inner` 均有已绑定的 Live 卡，拒绝重复卡凑数与格内位未绑定状态。原独立端口、真实输入、保存归属断言保留，产品引用链路未改。
+
+本地验证使用独立桌面的 VSCode 1.82.3，开发态加载本树 `out/extension.js` 与 `out/webview/`。P2-01 全组 18 项、P2-09 两项分别通过，最终组合运行 20/20 通过；完整 Vitest 7900 项、Node 契约 192 项及 compile/类型检查通过。本轮未更改分组，未将本地通过记作 Linux CI 或用户人工验收。文件树严格校验仍报告主线既有的 14 项漏录；本次既有文件的职责说明经维护入口更新，没有新增漏录项。
+
+证据在独立树 `D:/.codex/worktrees/ci-stability-followup/vscode-obsidian-like-editor/out/test/`：`p201-existing-preview-red-host.log`、`p201-existing-tab-green-host.log`、`p201-all-green-host.log`、`p209-readiness-red.json` / `p209-readiness-green.json`、`p209-host-green-report.log`、`ci-audit-unit-full.json`、`ci-audit-node-contracts.log`、`ci-audit-compile.log`。历史 CI 原始报告另存 `D:/.codex/evidence/vsidian-ci-audit-20261014/`。
+
+**仍待独立归因**：#446 的 T09/T10、Mermaid 恢复、T15 输入样例及 #293 CSS 刷新保持待查。T09 在 `38489048403` 的“停用内置接管与恢复”场景也出现 `waitForBoxCount` 8 秒超时，另五个场景通过，不与旧场景直接合并归因。大纲 #67 的“当前档圆点实心绘制”已在 `38491605871` 与 `38503490734` 两轮第 4 片复现，另有 #446 既有评论记录，属于后续高优先级线索。本轮未修改这些用例的断言。
+
+**已修复的历史失败分开记录**：`38502547733` 的 addonSettings 布尔字段开关宽度曾读到 0（预期 36px）；当前 main 已包含 `09067ea3` 的保存回灌节点替换等待与原子几何读取修正。该项不再作为本轮新增缺陷。#446 另记的本机 textarea 样式空串是不同场景，尚无本轮同根因或已修复的证据。
