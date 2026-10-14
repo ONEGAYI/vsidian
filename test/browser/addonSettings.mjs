@@ -315,27 +315,40 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('input[data-addon-array-item="replacements"]').length === 4)
   const pastedValues = await area.evaluate(() => [...document.querySelectorAll('input[data-addon-array-item="replacements"]')].map((el) => el.value))
   assert.deepEqual(pastedValues, ['旧→新甲', '乙', '丙', '甲→乙'], '粘贴拆分：首行追加当前项，其余行依次插入')
+  // 保存触发的 mock 回灌（setTimeout(0) 推送 settingsState）会整区重建——
+  // notice 文本不含 keys（两次保存同文本），等 notice 等不住本次重建；改为
+  // 抓保存前节点引用、等它被替换为新节点（重建完成的精确信号，CI 实挂过
+  // 一次 evaluate 恰跨重建边界拿到 detached 节点 rect 0 的竞态）
+  const strictSwitchBeforeSave = await page.evaluate(() => document.querySelector('input[data-addon-field="limits.strict"]'))
   await page.getByRole('button', { name: zhCn['addons.saveChanges'], exact: true }).nth(0).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user'
     && Array.isArray(m.values.replacements) && m.values.replacements.length === 4 && m.values.replacements[0] === '旧→新甲' && m.values.replacements[3] === '甲→乙'))
+  await page.waitForFunction((oldNode) => {
+    const current = document.querySelector('input[data-addon-field="limits.strict"]')
+    return current !== null && current !== oldNode
+  }, strictSwitchBeforeSave)
 
   // ---- 6c. #477 布尔数组项/对象字段开关几何（审查轮 1 发现 1 回归钉住：
-  //      行内 input 通用 flex:1 规则曾把两路开关拉成整行宽胶囊） ----
-  const arraySwitch = area.locator('.vsidian-addons-array-row input[data-addon-array-item="switches"]')
-  const arraySwitchShape = await arraySwitch.evaluate((el) => {
-    const rect = el.getBoundingClientRect()
-    return { width: rect.width, height: rect.height, appearance: getComputedStyle(el).appearance }
+  //      行内 input 通用 flex:1 规则曾把两路开关拉成整行宽胶囊；
+  //      一次 evaluate 现场查询双路，最小化跨重建时序窗口） ----
+  const switchShapes = await page.evaluate(() => {
+    const measure = (el) => el === null ? null : {
+      width: el.getBoundingClientRect().width,
+      height: el.getBoundingClientRect().height,
+      appearance: getComputedStyle(el).appearance,
+    }
+    return {
+      arraySwitch: measure(document.querySelector('.vsidian-addons-array-row input[data-addon-array-item="switches"]')),
+      fieldSwitch: measure(document.querySelector('input[data-addon-field="limits.strict"]')),
+    }
   })
-  assert.equal(arraySwitchShape.width, 36, '布尔数组项开关宽 36px（不被行内 flex:1 拉伸）')
-  assert.equal(arraySwitchShape.height, 20, '布尔数组项开关高 20px（min-height 覆写回档）')
-  assert.equal(arraySwitchShape.appearance, 'none', '布尔数组项为拨动开关形态')
-  const fieldSwitch = area.locator('input[data-addon-field="limits.strict"]')
-  const fieldSwitchShape = await fieldSwitch.evaluate((el) => {
-    const rect = el.getBoundingClientRect()
-    return { width: rect.width, height: rect.height }
-  })
-  assert.equal(fieldSwitchShape.width, 36, '布尔对象字段开关宽 36px（不被行内 flex:1 拉伸）')
-  assert.equal(fieldSwitchShape.height, 20, '布尔对象字段开关高 20px（min-height 覆写回档）')
+  assert.ok(switchShapes.arraySwitch, '布尔数组项开关在场')
+  assert.equal(switchShapes.arraySwitch.width, 36, '布尔数组项开关宽 36px（不被行内 flex:1 拉伸）')
+  assert.equal(switchShapes.arraySwitch.height, 20, '布尔数组项开关高 20px（min-height 覆写回档）')
+  assert.equal(switchShapes.arraySwitch.appearance, 'none', '布尔数组项为拨动开关形态')
+  assert.ok(switchShapes.fieldSwitch, '布尔对象字段开关在场')
+  assert.equal(switchShapes.fieldSwitch.width, 36, '布尔对象字段开关宽 36px（不被行内 flex:1 拉伸）')
+  assert.equal(switchShapes.fieldSwitch.height, 20, '布尔对象字段开关高 20px（min-height 覆写回档）')
 
   // ---- 7. 功能开关随标签层（workspace）----
   await page.getByRole('tab', { name: zhCn['addons.scopeWorkspace'], exact: true }).click()
