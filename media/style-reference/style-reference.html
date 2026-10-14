@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（88 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（89 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -154,7 +154,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 liveDecorations：活动标题行类发射契约</p>
       <p class="life">引入：#5（2026-09-23）</p>
     </article>
-    <h2>正文域 · 行内格式（8）</h2>
+    <h2>正文域 · 行内格式（9）</h2>
     <article class="entry" id="inline-strong">
       <h3><code>.vsidian-strong（live）/ strong 标签（阅读）</code><span class="eid">inline-strong</span></h3>
       <p class="purpose">粗体内容入口：live 为 mark 装饰 span；阅读为 markdown-it 渲染的语义 strong 标签。</p>
@@ -216,17 +216,31 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="inline-strikethrough">
       <h3><code>del 标签（仅阅读）</code><span class="eid">inline-strikethrough</span></h3>
-      <p class="purpose">删除线（~~文字~~）内容入口：**仅阅读视图**——markdown-it 渲染语义 del 标签。live 侧解析器支持但未装饰，源码形态呈现（见 limit-strikethrough-live）。</p>
+      <p class="purpose">删除线（~~文字~~）阅读视图内容入口：markdown-it 渲染语义 del 标签。live 侧 #483 起已支持（见 inline-strikethrough-live）。</p>
       <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
 
       <p class="obsidian">Obsidian 对应：.markdown-preview-view del（阅读标签）</p>
 
-      <p class="dom">DOM 关系：阅读块内 &lt;del&gt; 元素。live 侧无装饰类，不支持。</p>
+      <p class="dom">DOM 关系：阅读块内 &lt;del&gt; 元素。</p>
       <pre><code>.markdown-preview-view del {
   color: var(--vscode-descriptionForeground);
 }</code></pre>
       <p class="verify">验证：单元 readingMarkdown：~~文字~~ 渲染 del 标签契约</p>
-      <p class="life">引入：阅读侧随 #8 语义渲染（2026-09-24）；live 侧缺口如实记录</p>
+      <p class="life">引入：阅读侧随 #8 语义渲染（2026-09-24）；live 侧入口见 inline-strikethrough-live（#483）</p>
+    </article>
+    <article class="entry" id="inline-strikethrough-live">
+      <h3><code>.vsidian-strikethrough（live）</code><span class="eid">inline-strikethrough-live</span></h3>
+      <p class="purpose">删除线（~~文字~~）live 侧内容入口（#483）：内容 span 常显 line-through、~~ 定界符触界显形（同粗体语义）；此前 live 侧未装饰（历史记录见 limit-strikethrough-live）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：live 侧 ~~ 定界符触及显形（同粗体语义）。</p>
+      <p class="obsidian">Obsidian 对应：.cm-strikethrough（live token）</p>
+<p class="aliases">别名承诺：<code>cm-strikethrough</code></p>
+      <p class="dom">DOM 关系：live：mark 装饰 span。</p>
+      <pre><code>.cm-strikethrough {
+  text-decoration: line-through;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations（#483 describe）：Strikethrough span 发射与定界符显隐矩阵；cssProbe.obsidianAliases['inline-strikethrough-live']</p>
+      <p class="life">引入：#483（2026-10-14）</p>
     </article>
     <article class="entry" id="html-comment">
       <h3><code>.vsidian-html-comment（仅 live）</code><span class="eid">html-comment</span></h3>
@@ -1209,14 +1223,14 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="limit-strikethrough-live">
       <h3><code>.cm-strikethrough（live 侧）</code><span class="eid">limit-strikethrough-live</span></h3>
-      <p class="purpose">删除线 live 侧未装饰：解析器支持但 live 视图无装饰类，源码形态呈现；阅读侧 del 标签可用（见 inline-strikethrough）。</p>
-      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+      <p class="purpose">历史限制（已解除）：删除线 live 侧曾未装饰、源码形态呈现；#483 起已支持（见 inline-strikethrough-live），本条目保留作迁移记录，不再描述现行行为。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
 
       <p class="obsidian">Obsidian 对应：.cm-strikethrough（live token）/ 阅读侧 del 已支持</p>
 
-      <p class="dom">DOM 关系：live 无删除线 span。</p>
-      <p class="verify">验证：单元 liveDecorations：无 Strikethrough 装饰（现状契约）</p>
-      <p class="life">引入：#8（2026-09-24，如实记录）</p>
+      <p class="dom">DOM 关系：live 现有删除线 span（见 inline-strikethrough-live）。</p>
+      <p class="verify">验证：单元 liveDecorations（#483 describe）：Strikethrough 装饰契约（迁移后正向断言）</p>
+      <p class="life">引入：#8（2026-09-24，如实记录）；#483（2026-10-14）解除限制</p>
     </article>
     <article class="entry" id="limit-quote-span">
       <h3><code>.cm-quote（span 级）</code><span class="eid">limit-quote-span</span></h3>

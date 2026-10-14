@@ -134,11 +134,15 @@ describe('光标与选区颜色按主题适配（main.css 源文本；#237 起 d
         .not.toMatch(/(?:^|[\s;])(?:border|background|(?:caret-)?color)[a-z-]*\s*:/)
     }
     // #237 绘制选区背景（.cm-selectionBackground）：必须经 VSCode 主题变量
-    // 落色（聚焦/失焦两态各一条），不得硬编码色值
+    // 落色（聚焦/失焦两态各一条），不得硬编码色值；#484 起另有一条非颜色
+    // 的 display:none 隐藏规则（表格感知层接管，原生块仅不再可见），同选择器
+    // 分流断言
     const selectionBodies = [...css.matchAll(/[^{}]*\.cm-selectionBackground[^{}]*\{([^}]*)\}/g)]
       .map((match) => match[1] ?? '')
-    expect(selectionBodies.length, '聚焦/失焦两条选区背景规则应在场').toBe(2)
-    for (const body of selectionBodies) {
+    const selectionColorBodies = selectionBodies.filter((body) => /background\s*:/.test(body))
+    const selectionHideBodies = selectionBodies.filter((body) => !/background\s*:/.test(body))
+    expect(selectionColorBodies.length, '聚焦/失焦两条选区背景颜色规则应在场').toBe(2)
+    for (const body of selectionColorBodies) {
       // 变量实名：聚焦 selectionBackground（小写 s）/ 失焦 inactiveSelectionBackground
       expect(body).toMatch(/background:\s*var\(--vscode-editor-(?:inactiveS|s)electionBackground/)
       // 硬编码检查剥掉 var() 整体（含其回退色）再做——回退色近似 VSCode
@@ -147,6 +151,22 @@ describe('光标与选区颜色按主题适配（main.css 源文本；#237 起 d
       // （rgba(...)），剥壳正则按一层嵌套展开
       const stripped = body.replace(/var\([^()]*(?:\([^()]*\)[^()]*)*\)/g, '')
       expect(stripped, '选区背景不得硬编码色值（var() 回退除外）')
+        .not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/)
+    }
+    // #484 原生块隐藏：唯一非颜色规则，且必须 :has(.cm-selectionLayer) 限定
+    // （drawSelection 在场才隐藏；多光标关闭整组退出回到原生 ::selection 路径）
+    expect(selectionHideBodies.length, '原生选区块只允许 #484 的 display:none 隐藏规则').toBe(1)
+    expect(css).toMatch(
+      /#app \.cm-editor:has\(\.cm-selectionLayer\) \.cm-selectionLayer \.cm-selectionBackground\s*\{\s*display:\s*none;/)
+    // #484 自建层块（.vsidian-selection-background）：与原生块同款两态主题变量
+    // 落色、同样不得硬编码——接管绘制不得绕开选区颜色契约
+    const ownBodies = [...css.matchAll(/[^{}]*\.vsidian-selection-background[^{}]*\{([^}]*)\}/g)]
+      .map((match) => match[1] ?? '')
+    expect(ownBodies.length, '自建层聚焦/失焦两条选区背景规则应在场').toBe(2)
+    for (const body of ownBodies) {
+      expect(body).toMatch(/background:\s*var\(--vscode-editor-(?:inactiveS|s)electionBackground/)
+      const stripped = body.replace(/var\([^()]*(?:\([^()]*\)[^()]*)*\)/g, '')
+      expect(stripped, '自建层选区背景不得硬编码色值（var() 回退除外）')
         .not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/)
     }
   })

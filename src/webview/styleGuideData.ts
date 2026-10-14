@@ -554,11 +554,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "inline-format",
     "kind": "selector",
     "target": "del 标签（仅阅读）",
-    "purpose": "删除线（~~文字~~）内容入口：**仅阅读视图**——markdown-it 渲染语义 del 标签。live 侧解析器支持但未装饰，源码形态呈现（见 limit-strikethrough-live）。",
+    "purpose": "删除线（~~文字~~）阅读视图内容入口：markdown-it 渲染语义 del 标签。live 侧 #483 起已支持（见 inline-strikethrough-live）。",
     "views": [
       "reading"
     ],
-    "dom": "阅读块内 <del> 元素。live 侧无装饰类，不支持。",
+    "dom": "阅读块内 <del> 元素。",
     "example": ".markdown-preview-view del {\n  color: var(--vscode-descriptionForeground);\n}",
     "obsidian": {
       "counterpart": ".markdown-preview-view del（阅读标签）",
@@ -567,7 +567,33 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "单元 readingMarkdown：~~文字~~ 渲染 del 标签契约"
     ],
-    "introduced": "阅读侧随 #8 语义渲染（2026-09-24）；live 侧缺口如实记录"
+    "introduced": "阅读侧随 #8 语义渲染（2026-09-24）；live 侧入口见 inline-strikethrough-live（#483）"
+  },
+  {
+    "id": "inline-strikethrough-live",
+    "domain": "content",
+    "category": "inline-format",
+    "kind": "selector",
+    "target": ".vsidian-strikethrough（live）",
+    "purpose": "删除线（~~文字~~）live 侧内容入口（#483）：内容 span 常显 line-through、~~ 定界符触界显形（同粗体语义）；此前 live 侧未装饰（历史记录见 limit-strikethrough-live）。",
+    "views": [
+      "live"
+    ],
+    "states": "live 侧 ~~ 定界符触及显形（同粗体语义）。",
+    "dom": "live：mark 装饰 span。",
+    "example": ".cm-strikethrough {\n  text-decoration: line-through;\n}",
+    "obsidian": {
+      "counterpart": ".cm-strikethrough（live token）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-strikethrough"
+    ],
+    "verification": [
+      "单元 liveDecorations（#483 describe）：Strikethrough span 发射与定界符显隐矩阵",
+      "cssProbe.obsidianAliases['inline-strikethrough-live']"
+    ],
+    "introduced": "#483（2026-10-14）"
   },
   {
     "id": "html-comment",
@@ -2053,20 +2079,20 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".cm-strikethrough（live 侧）",
-    "purpose": "删除线 live 侧未装饰：解析器支持但 live 视图无装饰类，源码形态呈现；阅读侧 del 标签可用（见 inline-strikethrough）。",
+    "purpose": "历史限制（已解除）：删除线 live 侧曾未装饰、源码形态呈现；#483 起已支持（见 inline-strikethrough-live），本条目保留作迁移记录，不再描述现行行为。",
     "views": [
       "live"
     ],
-    "dom": "live 无删除线 span。",
+    "dom": "live 现有删除线 span（见 inline-strikethrough-live）。",
     "example": "",
     "obsidian": {
       "counterpart": ".cm-strikethrough（live token）/ 阅读侧 del 已支持",
-      "support": "none"
+      "support": "direct"
     },
     "verification": [
-      "单元 liveDecorations：无 Strikethrough 装饰（现状契约）"
+      "单元 liveDecorations（#483 describe）：Strikethrough 装饰契约（迁移后正向断言）"
     ],
-    "introduced": "#8（2026-09-24，如实记录）"
+    "introduced": "#8（2026-09-24，如实记录）；#483（2026-10-14）解除限制"
   },
   {
     "id": "limit-quote-span",
@@ -5556,10 +5582,18 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "inline-strikethrough": {
-    "purpose": "Entry point for strikethrough (~~text~~) content: reading view only — a semantic del tag rendered by markdown-it. The live side parses the syntax but adds no decoration and shows the raw source (see limit-strikethrough-live).",
-    "dom": "A <del> element inside the reading block. No live decoration class exists; not supported there.",
+    "purpose": "Entry point for strikethrough (~~text~~) content in reading view: markdown-it renders the semantic del tag. The live side is supported since #483 (see inline-strikethrough-live).",
+    "dom": "A <del> element inside the reading block.",
     "obsidian": {
       "counterpart": ".markdown-preview-view del (reading tag)"
+    }
+  },
+  "inline-strikethrough-live": {
+    "purpose": "Entry point for strikethrough (~~text~~) content in live view (#483): the content span carries a persistent line-through and the ~~ delimiters are revealed when the cursor touches them (same semantics as bold); previously undecorated (historical record in limit-strikethrough-live).",
+    "states": "In live view the ~~ delimiters are revealed when the cursor touches them (same semantics as bold).",
+    "dom": "A mark decoration span inside the live container.",
+    "obsidian": {
+      "counterpart": ".cm-strikethrough (live token)"
     }
   },
   "html-comment": {
@@ -6011,8 +6045,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-strikethrough-live": {
-    "purpose": "Strikethrough is undecorated in live view: the parser supports it but no live decoration class exists and the raw source is shown; the reading-side del tag is available (see inline-strikethrough).",
-    "dom": "No strikethrough span exists in live view.",
+    "purpose": "Historical limitation (lifted): strikethrough was once undecorated in live view with the raw source shown; supported since #483 (see inline-strikethrough-live). This entry is kept as a migration record and no longer describes current behavior.",
+    "dom": "The live view now has the strikethrough span (see inline-strikethrough-live).",
     "obsidian": {
       "counterpart": ".cm-strikethrough (live token) / the reading-side del is supported"
     }

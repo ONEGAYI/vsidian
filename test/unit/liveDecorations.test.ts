@@ -533,12 +533,15 @@ describe('高亮 ==text==（#105）：#29 行内标记组语义', () => {
     }
   })
 
-  it('#149 删除线内层：外层高亮照常，~~ 按既有契约保持源码可见（limit-strikethrough-live）', () => {
+  it('#483 删除线内层：外层高亮照常覆盖内层源文，~~ 隐藏、删除线 span 发射', () => {
     const doc = '看==~~词~~==的'
     const set = build(doc, { anchor: 0 })
     expect(coveredTexts(set, 'vsidian-highlight', doc)).toEqual(['~~词~~'])
+    expect(coveredTexts(set, 'vsidian-strikethrough', doc)).toEqual(['词'])
     const strike = doc.indexOf('~~')
-    expect(hiddenRanges(set)).not.toContainEqual([strike, strike + 2])
+    const strikeClose = doc.indexOf('~~', strike + 2)
+    expect(hiddenRanges(set)).toContainEqual([strike, strike + 2])
+    expect(hiddenRanges(set)).toContainEqual([strikeClose, strikeClose + 2])
   })
 
   it('#149 内侧空格紧贴不发射：嵌套组合不放宽空白边界', () => {
@@ -547,6 +550,71 @@ describe('高亮 ==text==（#105）：#29 行内标记组语义', () => {
     expect(coveredTexts(set, 'vsidian-highlight', doc)).toEqual([])
     for (const at of [doc.indexOf('=='), doc.lastIndexOf('==')]) {
       expect(hiddenRanges(set), doc.slice(at, at + 2)).not.toContainEqual([at, at + 2])
+    }
+  })
+})
+
+describe('删除线 ~~text~~（#483）：行内标记组语义对齐其余四种', () => {
+  it('光标离开：内容 span 常显删除线类、两端 ~~ 定界符隐藏', () => {
+    const doc = '正文 ~~删除线~~ 文本'
+    const set = build(doc, { anchor: doc.indexOf('文本') })
+    expect(coveredTexts(set, 'vsidian-strikethrough', doc)).toEqual(['删除线'])
+    const first = doc.indexOf('~~')
+    const second = doc.indexOf('~~', first + 2)
+    const hidden = hiddenRanges(set)
+    expect(hidden).toContainEqual([first, first + 2])
+    expect(hidden).toContainEqual([second, second + 2])
+  })
+
+  it('别名桥：删除线 span 同元素挂 Obsidian 原名类 cm-strikethrough', () => {
+    const doc = '正文 ~~删除线~~ 文本'
+    const set = build(doc, { anchor: doc.indexOf('文本') })
+    expect(coveredTexts(set, 'cm-strikethrough', doc)).toEqual(['删除线'])
+  })
+
+  it('光标触及删除线范围（含两端边界）时 ~~ 显形可编辑', () => {
+    const doc = '正文 ~~删除线~~ 文本'
+    const first = doc.indexOf('~~')
+    const second = doc.indexOf('~~', first + 2)
+    for (const pos of [first, doc.indexOf('删除线'), second + 2]) {
+      const hidden = hiddenRanges(build(doc, { anchor: pos }))
+      expect(hidden, `光标在 ${pos}`).not.toContainEqual([first, first + 2])
+      expect(hidden, `光标在 ${pos}`).not.toContainEqual([second, second + 2])
+    }
+  })
+
+  it('同一行不同标记互不连带：删除线显形不影响高亮隐藏，反之亦然', () => {
+    const doc = '~~删除线~~ 与 ==高亮== 共行'
+    const strike = doc.indexOf('~~')
+    const hl = doc.indexOf('==')
+    const inStrike = hiddenRanges(build(doc, { anchor: doc.indexOf('删除线') }))
+    expect(inStrike).not.toContainEqual([strike, strike + 2])
+    expect(inStrike).toContainEqual([hl, hl + 2])
+    const inHighlight = hiddenRanges(build(doc, { anchor: doc.indexOf('高亮') }))
+    expect(inHighlight).toContainEqual([strike, strike + 2])
+    expect(inHighlight).not.toContainEqual([hl, hl + 2])
+  })
+
+  it('残缺与空格紧贴形态：无装饰无隐藏（源码降级，源文不丢）', () => {
+    for (const doc of ['a ~~ b ~~ c', '~~未闭合']) {
+      const set = build(doc, { anchor: 0 })
+      expect(coveredTexts(set, 'vsidian-strikethrough', doc)).toEqual([])
+      expect(hiddenRanges(set)).toEqual([])
+    }
+  })
+
+  it('行内代码内的 ~~ 不产删除线装饰；表格单元格内照常装饰', () => {
+    expect(coveredTexts(build('`~~x~~`', { anchor: 0 }), 'vsidian-strikethrough', '`~~x~~`')).toEqual([])
+    const table = '| A | B |\n| --- | --- |\n| ~~x~~ | y |'
+    expect(coveredTexts(build(table, { anchor: 0 }), 'vsidian-strikethrough', table)).toEqual(['x'])
+  })
+
+  it('光标移动切换显隐：增量装饰与全量对拍一致（零写回）', () => {
+    const doc = '- 正文 ~~强调~~ 和 `代码`'
+    let state = stateWithDoc(doc, { anchor: doc.indexOf('正文') })
+    for (const pos of [doc.indexOf('强调'), doc.indexOf('~~'), doc.length, 0]) {
+      state = state.update({ selection: EditorSelection.single(pos) }).state
+      expect(setsEqual(state, buildLivePreviewDecorations(state.doc, state.selection))).toBe(true)
     }
   })
 })

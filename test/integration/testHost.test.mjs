@@ -540,3 +540,50 @@ test('Windows 启动器收到 SIGINT 后返回中断码并清理进程树', { sk
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('超时被杀时输出最近输出快照：就地分辨截断与定位断点（不依赖末尾报告汇总）', async () => {
+  // 本地全量单宿主默认 15 分钟预算被击穿时，只打一行「超过 N ms」需要人工
+  // 回读报告才能分清「超时截断」与「真失败」。快照随停止原因就地输出，
+  // 最后的 START/PASS 行即断点。假宿主输出用 ASCII 标记——中文经
+  // hiddenDesktop 包装层传递存在编码损坏面，与本测无关。
+  let stderrText = ''
+  const code = await runTestHost({
+    executable: process.execPath,
+    args: ['-e', [
+      'process.stdout.write("[itest][START] case-a")',
+      'process.stdout.write("[itest][PASS] case-a")',
+      'process.stdout.write("[itest][START] case-b-hang")',
+      'setInterval(() => {}, 1000)',
+    ].join('; ')],
+    env: process.env,
+    mode: 'foreground',
+    timeoutMs: 700,
+    stdout: { write: () => {} },
+    stderr: { write: (chunk) => { stderrText += chunk.toString() } },
+  })
+  assert.equal(code, 124)
+  assert.match(stderrText, /超过 700 ms/)
+  assert.match(stderrText, /最近输出/, '超时应附最近输出快照')
+  assert.match(stderrText, /case-b-hang/, '快照应含最后的输出行（断点用例名）')
+})
+
+test('最近输出快照只保留尾部行：早期输出不随快照复读', async () => {
+  let stderrText = ''
+  const code = await runTestHost({
+    executable: process.execPath,
+    args: ['-e', [
+      "for (let i = 0; i < 40; i++) process.stdout.write('early-' + i + String.fromCharCode(10))",
+      "process.stdout.write('last-marker' + String.fromCharCode(10))",
+      'setInterval(() => {}, 1000)',
+    ].join('; ')],
+    env: process.env,
+    mode: 'foreground',
+    timeoutMs: 700,
+    stdout: { write: () => {} },
+    stderr: { write: (chunk) => { stderrText += chunk.toString() } },
+  })
+  assert.equal(code, 124)
+  const snapshot = stderrText.slice(stderrText.indexOf('最近输出'))
+  assert.match(snapshot, /last-marker/)
+  assert.doesNotMatch(snapshot, /early-0/, '快照只保留尾部行，早期输出不复读')
+})

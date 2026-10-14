@@ -176,6 +176,12 @@ try {
         timeoutMs: Number(process.env.VSIDIAN_ITEST_TIMEOUT_MS ?? '') * 1000 || 15 * 60_000,
       })
       console.log(`[runTest] 分片 ${shard}/${shardTotal} 宿主退出码 ${code}（耗时 ${((Date.now() - started) / 1000).toFixed(1)}s）`)
+      if (code === 124) {
+        // 预算出口就地提示：默认 15 分钟按 CI 分片口径设定，本地全量单宿主
+        // 或与其他重负载验证（browser 全量）同机并行时会击穿——见停止原因
+        // 旁的「最近输出」快照定位断点
+        console.error('[runTest] 宿主超时被杀：本地全量可用 VSIDIAN_ITEST_TIMEOUT_MS（秒）放宽预算或 VSIDIAN_ITEST_SHARDS=4 分片，并避免与其他重负载验证同机并行')
+      }
       return code
     }),
   )

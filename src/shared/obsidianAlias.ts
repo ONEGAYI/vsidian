@@ -33,6 +33,8 @@ export const OBSIDIAN_DOM_ALIASES = {
   emphasis: ['cm-emphasis'] as const,
   inlineCode: ['cm-inline-code'] as const,
   highlight: ['cm-highlight'] as const,
+  /** 删除线内容 span（#483，Obsidian `.cm-strikethrough`） */
+  strikethrough: ['cm-strikethrough'] as const,
   /** 引用行（Obsidian 行级类；span 级 .cm-quote 不承诺，见 limit-quote-span） */
   quoteLine: ['HyperMD-quote'] as const,
   /** 围栏/缩进代码行（Obsidian 代码块行族） */
@@ -122,6 +124,7 @@ export const OBSIDIAN_ALIAS_PROBES: readonly ObsidianAliasProbe[] = [
   { id: 'inline-emphasis', view: 'live', selector: '.cm-emphasis', expected: 'rgb(113, 114, 115)' },
   { id: 'inline-code', view: 'live', selector: '.cm-inline-code', expected: 'rgb(116, 117, 118)' },
   { id: 'inline-highlight', view: 'live', selector: '.cm-highlight', expected: 'rgb(119, 120, 121)' },
+  { id: 'inline-strikethrough-live', view: 'live', selector: '.cm-strikethrough', expected: 'rgb(190, 191, 192)' },
   { id: 'live-code-line', view: 'live', selector: '.HyperMD-codeblock', expected: 'rgb(122, 123, 124)' },
   { id: 'live-quote-line', view: 'live', selector: '.HyperMD-quote', expected: 'rgb(125, 126, 127)' },
   { id: 'live-list-line', view: 'live', selector: '.HyperMD-list-line', expected: 'rgb(128, 129, 130)' },
@@ -167,6 +170,7 @@ const DOM_ALIAS_BY_VSIDIAN_CLASS: ReadonlyMap<string, readonly string[]> = (() =
   m.set('vsidian-emphasis', OBSIDIAN_DOM_ALIASES.emphasis)
   m.set('vsidian-inline-code', OBSIDIAN_DOM_ALIASES.inlineCode)
   m.set('vsidian-highlight', OBSIDIAN_DOM_ALIASES.highlight)
+  m.set('vsidian-strikethrough', OBSIDIAN_DOM_ALIASES.strikethrough)
   m.set('vsidian-quote-line', OBSIDIAN_DOM_ALIASES.quoteLine)
   m.set('vsidian-code-line', OBSIDIAN_DOM_ALIASES.codeLine)
   m.set('vsidian-list-line', OBSIDIAN_DOM_ALIASES.listLine)

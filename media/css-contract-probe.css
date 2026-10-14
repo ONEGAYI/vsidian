@@ -144,6 +144,11 @@
   outline-color: rgb(119, 120, 121);
 }
 
+/* live 删除线（Obsidian .cm-strikethrough，#483） */
+#app .vsidian-view-live .cm-strikethrough {
+  outline-color: rgb(190, 191, 192);
+}
+
 /* live 代码行（Obsidian .HyperMD-codeblock） */
 #app .vsidian-view-live .HyperMD-codeblock {
   outline-color: rgb(122, 123, 124);

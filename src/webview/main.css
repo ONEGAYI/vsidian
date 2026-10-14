@@ -154,6 +154,25 @@ body.vscode-light #app {
   background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
 }
 
+/* ---- #484 表格感知选区背景层接管绘制 ----
+   grid 表格行内跨视觉行选区，CM6 selectionLayer 的满宽块会横穿列边界并
+   越出表格右缘（rectanglesForRange 双分支的 rightSide/leftSide）；自建层
+   （tableSelectionLayer.ts）按格 clamp 后绘制。原生层的测量与 DOM 维持
+   照常运行，仅不再可见；:has(.cm-selectionLayer) 限定在 drawSelection
+   在场（多光标组装配）时生效，关闭组回到原生 ::selection 路径不受影响。
+   自建层块与 CM6 原生块同色规则（失焦/聚焦两态）。 */
+#app .cm-editor:has(.cm-selectionLayer) .cm-selectionLayer .cm-selectionBackground {
+  display: none;
+}
+
+#app .cm-editor .vsidian-selection-layer .vsidian-selection-background {
+  background: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
+}
+
+#app .cm-editor.cm-focused > .cm-scroller > .vsidian-selection-layer .vsidian-selection-background {
+  background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
+}
+
 /* 代码行允许不透明底色；文字层补绘选区。多光标关闭时仍用原生选区。 */
 #app .cm-editor:has(.cm-selectionLayer) .cm-content .vsidian-code-selection {
   background-color: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
@@ -2879,6 +2898,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
 #app .cm-editor .cm-scroller .vsidian-highlight {
   background-color: var(--vsidian-highlight-background);
   border-radius: 2px;
+}
+
+/* #483 删除线内容 span（~~ 定界符显隐由装饰控制，见 liveDecorations 的
+   StrikethroughMark；Obsidian 对应 .cm-strikethrough） */
+#app .cm-editor .cm-scroller .vsidian-strikethrough {
+  text-decoration: line-through;
 }
 
 /* #139 HTML 注释淡化（.cm-comment 方向）：低对比度、明显非正文、仍可读
