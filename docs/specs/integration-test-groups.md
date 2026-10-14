@@ -344,3 +344,17 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 **仍待独立归因**：#446 的 T09/T10、Mermaid 恢复、T15 输入样例及 #293 CSS 刷新保持待查。T09 在 `38489048403` 的“停用内置接管与恢复”场景也出现 `waitForBoxCount` 8 秒超时，另五个场景通过，不与旧场景直接合并归因。大纲 #67 的“当前档圆点实心绘制”已在 `38491605871` 与 `38503490734` 两轮第 4 片复现，另有 #446 既有评论记录，属于后续高优先级线索。本轮未修改这些用例的断言。
 
 **已修复的历史失败分开记录**：`38502547733` 的 addonSettings 布尔字段开关宽度曾读到 0（预期 36px）；当前 main 已包含 `09067ea3` 的保存回灌节点替换等待与原子几何读取修正。该项不再作为本轮新增缺陷。#446 另记的本机 textarea 样式空串是不同场景，尚无本轮同根因或已修复的证据。
+
+## #446 条目 11：大纲右端圆点在侧栏过渡期被裁切（2026-10-14）
+
+历史两轮第 4 片失败均是初始快照的 `panelPainted=true`、`sliderPainted=true`、`sliderActiveDotPainted=false`、`chevronPainted=true`，默认档仍为 5。初始等待只检查侧栏 open、面板命中与 101 条目；这些条件不足以保证最右圆点已经可见。
+
+**真实 Chromium 固定了这一窗口**：沿用生产控制器、样式和绘制探针，暂停原生侧栏宽度过渡在 40% 时间处。侧栏宽约 159.84px，面板和滑块中心已经命中，圆点中心却在 1000px 视口外的 x≈1090.16；圆点类名正确、背景为 `rgb(14, 99, 156)`，但 `elementFromPoint` 返回 null。结束过渡后侧栏宽 280px，圆点中心 x=971、绘制探针转为 true，类名与背景不变。旧等待会接受过渡期快照，随后原圆点断言稳定失败。历史 CI 没记录该帧几何，不能逐帧还原；本轮证明了原等待缺口及能复现相同失败快照的生产过渡机制。
+
+**修正只收紧就绪条件**：等待滑块、当前档圆点和折叠箭头的既有绘制探针全部为 true，再执行原断言；预算、产品样式、绘制探针实现和 core/sensitive 分组均未改。单测执行 #67 的实际回调，过渡期快照在旧条件下先红；候选拒绝圆点、滑块或箭头尚未绘制的快照。浏览器回归永久保留暂停过渡的绘制证据，继续验证原点击、拖拽、展开和编辑存活场景。
+
+本地 compile/类型检查、完整 Vitest 7918/7918、`outlineCollapse` 七项浏览器场景通过。真实 VSCode 1.82.3 开发态加载本树产物，大纲整组 14/15；目标 #67 用例通过，唯一失败是 #69 `copyChildren` 剪贴板更新超时，保留报告另列待查，不称作环境原因或全组通过。文件树职责经维护入口同步；严格检查的 main 既有漏录另行记录。本地验证不替代 Linux CI 与人工验收。
+
+证据：本树 `out/test/outline-animation-red.log`、`outline-readiness-red.json` / `outline-readiness-green.json`、`outline-unit-full.json`、`outline-browser-final.log` 及对应浏览器报告、`outline-final-compile-fixed.log`、`outline-native-all.log` / `outline-native-all-report.log`；交付时归档至 `D:/.codex/evidence/vsidian-outline-dot-20261014/`。
+
+**本轮补查的新失败保持独立**：main [38521864148](https://github.com/ONEGAYI/vsidian/actions/runs/38521864148) 的第 2 片挂在 #111 图表弹窗装载；[38520568957](https://github.com/ONEGAYI/vsidian/actions/runs/38520568957) 的 tableCaret 是“靠近右边新增列带出现”预期 opacity=1、实际 0，`handle-hover-refresh` 仍通过，套件 69.109s、`TIMEOUT=false`。这些不等于先前控件重建时样式空串的根因复发，也不因本轮 #67 修正而联动勾销。

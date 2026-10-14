@@ -6548,8 +6548,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const doc = await vscode.workspace.openTextDocument(wsUri('outline-long.md'))
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
     // 条目序列（101 项）：0=主标题(H1)；第 i 章 H2=index 2i-1、H3=index 2i
+    // #446 条目 11：侧栏过渡期面板中心可先命中，最右圆点仍被裁切。
+    // 按下方实际绘制断言等待，不把 open 状态与面板命中当作全部控件就绪。
     const initial = await waitViewState('outline-long.md',
-      (v) => v.sidebar?.open === true && v.outline?.panelPainted === true && v.outline.items.length === 101)
+      (v) => v.sidebar?.open === true && v.outline?.panelPainted === true &&
+        v.outline.sliderPainted === true && v.outline.sliderActiveDotPainted === true &&
+        v.outline.chevronPainted === true && v.outline.items.length === 101)
     assert(initial.outline!.expandLevel === 5, `默认档应为 5（实际 ${initial.outline!.expandLevel}）`)
     assert(initial.outline!.visibleIndices.length === 101, `默认档全展开应 101 条可见（实际 ${initial.outline!.visibleIndices.length}）`)
     assert(initial.outline!.sliderPainted === true,

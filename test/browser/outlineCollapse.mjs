@@ -43,7 +43,37 @@ try {
   await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: bundle })
   await page.evaluate((text) => window.initOutline(text), DOC)
-  await page.evaluate(() => window.controller.handleHostMessage({ kind: 'sidebar.test.click' }))
+  // #446 条目 11：暂停原生宽度过渡，固定面板已绘制但右端圆点仍被裁切的窗口。
+  // 用与真实宿主相同的绘制探针，不把 computed 背景当作已经可见。
+  const transition = await page.evaluate(async () => {
+    const sidebar = document.querySelector('.vsidian-sidebar')
+    sidebar.getBoundingClientRect()
+    window.controller.handleHostMessage({ kind: 'sidebar.test.click' })
+    sidebar.getBoundingClientRect()
+    const animation = sidebar.getAnimations().find(a => a.transitionProperty === 'width')
+    if (!animation) throw new Error('侧栏宽度过渡未创建')
+    animation.pause()
+    animation.currentTime = Number(animation.effect.getComputedTiming().duration) * 0.4
+    await new Promise(requestAnimationFrame)
+    const during = window.readViewState().outline
+    const dot = document.querySelector('.vsidian-outline-slider-active')
+    const bgDuring = getComputedStyle(dot).backgroundColor
+    animation.finish()
+    await new Promise(requestAnimationFrame)
+    const settled = window.readViewState().outline
+    return { during: { panel: during.panelPainted, slider: during.sliderPainted,
+      dot: during.sliderActiveDotPainted }, settled: { panel: settled.panelPainted,
+      slider: settled.sliderPainted, dot: settled.sliderActiveDotPainted },
+      bgDuring, bgSettled: getComputedStyle(dot).backgroundColor }
+  })
+  assert.deepEqual(transition.during, { panel: true, slider: true, dot: false },
+    `过渡期面板和滑块中心先命中，右端圆点仍被裁切（${JSON.stringify(transition)}）`)
+  assert.deepEqual(transition.settled, { panel: true, slider: true, dot: true },
+    '过渡结束后当前档圆点应真实绘制')
+  assert.match(transition.bgDuring, /^rgb\(/, '过渡期圆点背景已实心，未绘制的原因是裁切')
+  assert.equal(transition.bgDuring, transition.bgSettled, '宽度过渡不改变圆点背景')
+  passed++
+  console.log('[折叠回归][PASS] 侧栏过渡：面板中心就绪早于右端圆点，结束后绘制就绪')
   await page.locator('.vsidian-outline-item').first().waitFor()
   // 等待 250ms 去抖刷新链路完成（首场经 ensureFresh 即时渲染，等待兜底）
   await page.waitForTimeout(120)

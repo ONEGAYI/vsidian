@@ -7,7 +7,11 @@ import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
 
-const controller = new WebviewSyncController({ postMessage() {}, getState() { return undefined }, setState() {} })
+let lastMessage: unknown
+const controller = new WebviewSyncController({
+  postMessage(message) { lastMessage = message },
+  getState() { return undefined }, setState() {},
+})
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
 
 /** 大纲面板观测（断言用户看到的东西：折叠隐藏、active 圆点 computed
@@ -71,6 +75,10 @@ Object.assign(window, {
   },
   controller,
   readOutline,
+  readViewState() {
+    controller.handleHostMessage({ kind: 'view.state.request' })
+    return lastMessage
+  },
   /** 直接触发条目点击/箭头点击/选档的宿主消息通道（与真实点击同一委托） */
   post(msg: Record<string, unknown>) {
     controller.handleHostMessage(msg)
