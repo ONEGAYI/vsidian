@@ -11,7 +11,13 @@
 # docs/specs/integration-test-groups.md（2026-10-01 用户授权）。
 # browser 暂未纳入必需检查（2026-09 核查保护规则仅含 unit / integration）：
 # 其失败不阻塞合并但会在 PR 状态区显示；是否升为必需由维护者视其稳定性决定，
-# 升级前无需改本文件，仅需在仓库设置中加入 browser 上下文。
+# 升级前无需改本文件，仅在仓库设置中加入 browser 上下文。
+# browser 与 browser-sensitive（2026-10-14，仿集成第五组）：browser job 跑
+# core 组（全量减敏感名单），browser-sensitive 独立跑敏感名单（#272 抖动族
+# 在 browser 的在册未归因套件）；后者不加入任何 needs、不吞退出码——失败
+# 保留红灯与报告，不阻断必需检查。名单单一事实源在 test/browser/groups.mjs，
+# 维护口径与移入/移出条件见 docs/specs/integration-test-groups.md
+# 「浏览器测试分组」节；未归因跟踪在 #446。
 # style-contract（#135）为历史 CSS 契约兼容检查（#134 检查器的 CI 接线），
 # 与 unit / integration 同为合并必需检查候选：job 名即 required status check
 # 的 context 名（稳定、独立可查）。2026-09-27 实读远端保护规则仅含
@@ -280,11 +286,13 @@ jobs:
         # 检测到二进制已存在会跳过下载，apt 部分幂等（约 20s），保留它比
         # 拆出 install-deps 分支更简单，也不损失系统库确定性。
         run: npx playwright install --with-deps chromium
-      - name: 浏览器原生输入回归
+      - name: 浏览器原生输入回归（core 组）
         # 与本地一致性：tableCaret.mjs 默认 Playwright chromium 通道，
         # CI 与本机（npx playwright install chromium 后）跑同一套二进制；
         # VSIDIAN_TEST_BROWSER_CHANNEL=msedge 仅供 Windows 本机借系统
-        # Edge 调试，不进 CI。
+        # Edge 调试，不进 CI。core = 全量减敏感名单（本地缺省仍是全量）。
+        env:
+          VSIDIAN_TEST_BROWSER_GROUP: core
         run: npm run test:browser
       - name: 保存浏览器计时与失败日志
         # 名称带 attempt 号（#164）：gh run rerun 后新 attempt 同名上传会
@@ -292,7 +300,53 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: browser-reports-a${{ github.run_attempt }}
+          name: browser-core-reports-a${{ github.run_attempt }}
+          path: |
+            out/test/browser-runs/run-*/report.json
+            out/test/browser-runs/run-*/report.md
+            out/test/browser-runs/run-*/*.log
+            out/test/browser-runs/run-*/*.phases.jsonl
+          if-no-files-found: ignore
+
+  # 浏览器测试敏感组（2026-10-14，仿 integration-sensitive）：只跑
+  # test/browser/groups.mjs 敏感名单内的套件（#272 抖动族在 browser 的
+  # 在册未归因套件，跟踪 #446）。不用 continue-on-error、不自动重试、
+  # 不放宽断言——失败保留红灯、逐套件报告与非零退出码；本 job 不在任何
+  # needs 链上，不阻断必需检查。
+  browser-sensitive:
+    name: browser-sensitive
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 缓存 Playwright 浏览器二进制
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('package-lock.json') }}
+      - name: 安装 Chromium
+        run: npx playwright install --with-deps chromium
+      - name: 浏览器原生输入回归（敏感组）
+        # --workers=1 串行（首跑 run 38488230138 定案）：三并发下
+        # addonT10Commands 与 addonRendererTakeover 同窗共用
+        # test/fixtures/addon-v02/.build，buildTestAddons 开头的 rmSync
+        # 非原子清理撞上并发写入即 ENOTEMPTY 即败（0.79s）；全量时代两
+        # 套件相邻但不必然同窗，分组使敏感组内必然并发。串行同时给三
+        # 套件归因提供排除并发变量的观察面（夹具并发安全修复归 #446）。
+        env:
+          VSIDIAN_TEST_BROWSER_GROUP: sensitive
+        run: npm run test:browser -- --workers=1
+      - name: 保存敏感组报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-sensitive-reports-a${{ github.run_attempt }}
           path: |
             out/test/browser-runs/run-*/report.json
             out/test/browser-runs/run-*/report.md
