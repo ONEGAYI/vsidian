@@ -3,12 +3,13 @@
 // 问题（诊断见 #484）：CM6 drawSelection 的 rectanglesForRange 在折行编辑器
 // 中，凡选区 from/to 分属不同视觉行即走「上下双分支」——上段右边界强制取
 // 内容区右缘（rightSide）、下段左边界取内容区左缘（leftSide）、中间补满宽
-// 竖带。普通正文折行中该行为正确（视觉行高亮满宽符合直觉）；但表格 grid 行
+// 竖带。这种满宽形态符合普通正文惯例（边界采样另由 textRangeMarkers 校正）；但表格 grid 行
 // 的「视觉行」是单个单元格内的折行（<br> cell break 或窄列换行），满宽高亮
 // 因此横穿列分隔线并越出表格右边框。
 //
 // 方案：自建一个与 CM6 selectionLayer 同形的背景层接管绘制——非表格行为逐
-// 像素复用 RectangleMarker.forRange（保持正文折行满宽的既有惯例）；命中表格
+// 复用 RectangleMarker.forRange（保持正文折行满宽的既有惯例），开放边界按
+// 实际行校正，避免 CM6 采样首个挂载行的缩进污染后文；命中表格
 // grid 行的选区按 tableCells 语义的格区间分段，每段块的横向边界 clamp 到
 // 所属格内容盒。CM6 原生 selectionLayer 经 CSS 隐藏（display:none——其测量
 // 与 DOM 维持照常运行，行为零风险，仅不再可见），装配随 multicursorExtensions
@@ -104,7 +105,53 @@ function rangeMarkers(view: EditorView, rawFrom: number, rawTo: number): Array<R
     pos = line.to + 1
   }
   if (runStart != null) {
-    out.push(...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(runStart, to)))
+    out.push(...textRangeMarkers(view, runStart, to))
+  }
+  return out
+}
+
+/** CM6 的开放边界（跨行时延伸到行两侧的背景边界）使用首个 .cm-line 的
+ * padding。保留端点与软折行测量，
+ * 只把开放边界改为所在行的样式；中间满宽块按文档行分段，避免不同缩进
+ * 共用同一左右界。非空 range 的 RectangleMarker.width 恒为数值。 */
+function textRangeMarkers(view: EditorView, from: number, to: number): Array<RectangleMarker> {
+  const markers = RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(from, to))
+  const sampled = contentSides(view)
+  const start = view.coordsAtPos(from, 1)
+  const end = view.coordsAtPos(to, -1)
+  const out: Array<RectangleMarker> = []
+  for (const marker of markers) {
+    const left = marker.left + sampled.base.left
+    let right = left + marker.width!
+    const top = marker.top + sampled.base.top
+    const bottom = top + marker.height
+    const openLeft = (!start || top >= start.bottom - 0.5) && Math.abs(left - sampled.left) < 0.5
+    const openRight = (!end || bottom <= end.top + 0.5) && Math.abs(right - sampled.right) < 0.5
+    // CM6 将负宽截为 0：首行缩进越过短续行终点时，不能从 width 还原
+    // 闭合右界。终点所在视觉行改用实际端点，避免覆盖其后的未选文字。
+    if (openLeft && !openRight && marker.width === 0 && end &&
+        top <= end.top + 0.5 && bottom >= end.bottom - 0.5) right = end.right
+    if (!openLeft && !openRight) {
+      out.push(marker)
+      continue
+    }
+    let pos = view.elementAtHeight(top - view.documentTop).from
+    while (pos <= to) {
+      const block = view.lineBlockAt(pos)
+      const blockTop = block.top + view.documentTop
+      if (blockTop >= bottom) break
+      const partTop = Math.max(top, blockTop)
+      const partBottom = Math.min(bottom, blockTop + block.height)
+      if (partTop < partBottom) {
+        const sides = contentSides(view, pos)
+        const partLeft = openLeft ? sides.left : left
+        const partRight = openRight ? sides.right : right
+        out.push(new RectangleMarker(SELECTION_BLOCK_CLASS,
+          partLeft - sampled.base.left, partTop - sampled.base.top,
+          Math.max(0, partRight - partLeft), partBottom - partTop))
+      }
+      pos = view.state.doc.lineAt(block.to).to + 1
+    }
   }
   return out
 }
@@ -132,7 +179,7 @@ function closeRunBeforeGrid(
   runStart: number,
   gridLineFrom: number,
 ): void {
-  const sides = contentSides(view)
+  const sides = contentSides(view, runStart)
   const piece = (left: number, top: number, right: number, bottom: number) =>
     out.push(new RectangleMarker(
       SELECTION_BLOCK_CLASS,
@@ -164,15 +211,16 @@ function closeRunBeforeGrid(
     const line = view.state.doc.lineAt(pos)
     const block = view.lineBlockAt(line.from)
     const top = blockTop(block)
-    piece(sides.left, top, sides.right, top + block.height)
+    const lineSides = contentSides(view, line.from)
+    piece(lineSides.left, top, lineSides.right, top + block.height)
     pos = line.to + 1
   }
 }
 
-/** 内容区左右界（与 CM6 rectanglesForRange 的 leftSide/rightSide 同式取值） */
-function contentSides(view: EditorView): { left: number; right: number; base: { left: number; top: number } } {
+/** 指定行的左右界；不传 pos 时仅用于识别 CM6 首行采样产生的开放边界。 */
+function contentSides(view: EditorView, pos?: number): { left: number; right: number; base: { left: number; top: number } } {
   const contentRect = view.contentDOM.getBoundingClientRect()
-  const lineElt = view.contentDOM.querySelector('.cm-line')
+  const lineElt = pos === undefined ? view.contentDOM.querySelector('.cm-line') : lineElement(view, pos)
   const win = view.dom.ownerDocument.defaultView
   const style = lineElt && win ? win.getComputedStyle(lineElt) : null
   const pad = (v: string | undefined) => (style ? Number.parseInt(v ?? '', 10) || 0 : 0)
@@ -235,7 +283,7 @@ function tableLineMarkers(
   if (out.length === 0) {
     // 未产出任何段（格收集为空或全零宽区间无交）：回退 CM6 整行段，防止
     // 原生层已隐藏的形态下选区背景整行消失
-    return [...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(from, to))]
+    return textRangeMarkers(view, from, to)
   }
   return out
 }

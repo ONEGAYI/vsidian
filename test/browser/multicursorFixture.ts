@@ -34,6 +34,30 @@ Object.assign(window, {
     controller.handleHostMessage({ kind: 'settings.changed',
       values: { 'editor.multicursor': on } })
   },
+  setSettings(values: Record<string, unknown>) {
+    controller.handleHostMessage({ kind: 'settings.changed', values })
+  },
+  selectRange(from: number, to: number) {
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+    view.dispatch({ selection: { anchor: from, head: to } })
+  },
+  firstWrappedChar(from: number, to: number) {
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+    const first = view.coordsAtPos(from, 1)!
+    for (let pos = from; pos < to; pos++) {
+      const start = view.domAtPos(pos), end = view.domAtPos(pos + 1)
+      const range = document.createRange()
+      range.setStart(start.node, start.offset)
+      range.setEnd(end.node, end.offset)
+      for (const rect of range.getClientRects()) {
+        if (rect.width > 0 && rect.top >= first.bottom) {
+          return { pos, char: view.state.doc.sliceString(pos, pos + 1),
+            left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+        }
+      }
+    }
+    throw new Error('段落必须出现自动换行')
+  },
   /** 快捷键注册表生效绑定改写（清空 = overrides 空数组，生产链路同款） */
   setKeybindings(overrides: Record<string, string[]>) {
     controller.handleHostMessage({ kind: 'keybindings.snapshot', overrides })
