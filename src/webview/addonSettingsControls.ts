@@ -3,11 +3,13 @@
 // 编排（AddonSettingsAreaSection 持有标签状态与草稿，本模块按定义 + 当前值构造）。
 //
 // 控件口径（技术方案 5.5）：
-// - boolean → 复选开关；number → number input（min/max，step any——手改
-//   存量允许任意范围内值，与内置滑块的步进口径一致）；string enum →
-//   select（enum 顺序即选项顺序，#473 起档位文案可经 enumLabels 本地化，
-//   缺失标签回退枚举值本身）；string 自由文本 → text input（maxLength），
-//   #475 起定义可声明 multiline 渲染 textarea（换行参与持久化值）。
+// - boolean → 拨动开关（#477 起统一 vsidian-settings-checkbox 档位类，
+//   与内建设置行同形态；语义仍是 checkbox）；number → number input
+//   （min/max，step any——手改存量允许任意范围内值，与内置滑块的步进口
+//   径一致）；string enum → select（enum 顺序即选项顺序，#473 起档位文
+//   案可经 enumLabels 本地化，缺失标签回退枚举值本身）；string 自由文
+//   本 → text input（maxLength），#475 起定义可声明 multiline 渲染
+//   textarea（换行参与持久化值）。
 // - 数组用重复项控件：每行一个 item 控件 + 移除；添加/移除/输入更新草稿，
 //   保存按钮整批上送。
 // - 对象用字段控件：每字段一行（字段名 + 控件），保存按钮整批上送。
@@ -45,6 +47,9 @@ export function createScalarItemControl(
   if (spec.kind === 'boolean') {
     const box = document.createElement('input')
     box.type = 'checkbox'
+    // #477 拨动开关档位类（ui-patterns §2.3，与内建设置行同源）：纯 CSS
+    // 形态，语义与键盘可达不变；数组项/对象字段布尔控件同走此形态
+    box.className = 'vsidian-settings-checkbox'
     box.checked = value === true
     for (const [key, attr] of Object.entries(attrs)) box.setAttribute(key, attr)
     box.addEventListener('change', () => onValue(box.checked))

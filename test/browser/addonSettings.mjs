@@ -18,7 +18,8 @@ await mkdir(artifacts, { recursive: true })
 const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
 
 const DEFINITIONS = [
-  { key: 'flag', title: '开关项', type: 'boolean', default: true },
+  // #477：带 description（徽章挂标题行、描述独占行的布局断言对象）
+  { key: 'flag', title: '开关项', description: '开关项的描述文案', type: 'boolean', default: true },
   { key: 'threshold', title: '阈值', type: 'number', min: 1, max: 100, default: 20 },
   {
     // #473：enumLabels 部分覆盖（strict 缺失——回退枚举值本身）
@@ -32,8 +33,12 @@ const DEFINITIONS = [
     fields: [
       { key: 'name', title: '名称', kind: 'string', maxLength: 10, default: 'demo' },
       { key: 'count', title: '数量', kind: 'number', min: 0, max: 9, default: 3 },
+      // #477：布尔对象字段（开关档位几何断言对象——审查轮 1 发现 2 补两路断言）
+      { key: 'strict', title: '严格', kind: 'boolean', default: true },
     ],
   },
+  // #477：布尔数组项（开关档位几何断言对象；放末位不扰动既有保存按钮 nth 定位）
+  { key: 'switches', title: '开关数组', type: 'array', items: { kind: 'boolean' }, default: [true] },
 ]
 
 /** 页内 mock 宿主状态（回灌应答的数据源——消息构造在 evaluate 内联） */
@@ -171,9 +176,53 @@ try {
   assert.equal(tabPaint.bg, 'rgb(224, 228, 235)', '选中标签应为主题选中底色（样式未注入即失败）')
   assert.equal(tabPaint.radius, '6px')
 
-  // 来源徽章绘制（默认来源可见）
+  // 来源徽章绘制（默认来源可见）+ #477 挂标题行不挤占描述行（真实布局：
+  // 徽章与标题垂直区间重叠、描述起点在标题行之下——几何坐标仅作同容器
+  // 行列关系断言，非存在性）
   const badge = area.locator('.vsidian-addons-source-badge').first()
   assert.equal((await badge.evaluate((el) => getComputedStyle(el).display)) !== 'none', true)
+  const badgeLayout = await area.locator('.vsidian-addons-setting-item').first().evaluate((row) => {
+    const titleRow = row.querySelector('.vsidian-addons-setting-title-row')
+    const title = row.querySelector('.vsidian-settings-item-title')
+    const badgeEl = row.querySelector('.vsidian-addons-source-badge')
+    if (!titleRow || !title || !badgeEl) return null
+    const rowRect = titleRow.getBoundingClientRect()
+    const titleRect = title.getBoundingClientRect()
+    const badgeRect = badgeEl.getBoundingClientRect()
+    const desc = row.querySelector('.vsidian-settings-item-description')
+    const descTop = desc ? desc.getBoundingClientRect().top : null
+    return {
+      inTitleRow: rowRect.top <= badgeRect.top && badgeRect.bottom <= rowRect.bottom,
+      sameLineAsTitle: Math.abs((titleRect.top + titleRect.bottom) / 2 - (badgeRect.top + badgeRect.bottom) / 2) < titleRect.height,
+      descBelowTitleRow: descTop === null || descTop >= rowRect.bottom - 1,
+    }
+  })
+  assert.ok(badgeLayout, '标题行容器在场（徽章挂标题行）')
+  assert.equal(badgeLayout.inTitleRow, true, '来源徽章在标题行容器内')
+  assert.equal(badgeLayout.sameLineAsTitle, true, '来源徽章与标题同行（不挤占描述行）')
+  assert.equal(badgeLayout.descBelowTitleRow, true, '描述独占行（起点在标题行之下）')
+
+  // #477 布尔定义控件为拨动开关形态（绘制层：appearance/几何/选中底色）
+  const flagSwitch = area.locator('input[data-addon-setting="flag"]')
+  const togglePaint = await flagSwitch.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    const rect = el.getBoundingClientRect()
+    return { appearance: cs.appearance, width: rect.width, height: rect.height, radius: cs.borderRadius, bg: cs.backgroundColor, checked: el.checked }
+  })
+  assert.equal(togglePaint.appearance, 'none', '布尔控件为纯 CSS 拨动开关（非原生复选框）')
+  assert.equal(togglePaint.width, 36, '开关宽度 36px 档位')
+  assert.equal(togglePaint.height, 20, '开关高度 20px 档位')
+  assert.equal(togglePaint.radius, '999px', '开关 pill 圆角档位')
+  assert.equal(togglePaint.checked, true, '开关选中（默认值 true）')
+  assert.equal(togglePaint.bg, 'rgb(38, 135, 212)', '选中态为主题焦点色（样式未注入即失败）')
+
+  // #477 定义行归型标准设置行（绘制层：非末行行间分隔线在场）
+  const dividerPaint = await area.locator('.vsidian-addons-setting-item').first().evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { width: cs.borderBottomWidth, style: cs.borderBottomStyle }
+  })
+  assert.equal(dividerPaint.width, '1px', '定义行行间分隔线宽度（样式未注入即失败）')
+  assert.equal(dividerPaint.style, 'solid', '定义行行间分隔线样式')
 
   // ---- 3. 标量：真实键盘修改 number → user 层单键批 ----
   const threshold = area.locator('input[data-addon-setting="threshold"]')
@@ -200,7 +249,8 @@ try {
 
   // ---- 5. 数组重复项控件：真实键盘输入新项 + 保存整批 ----
   await page.getByRole('tab', { name: zhCn['addons.scopeUserDefault'], exact: true }).click()
-  await page.getByRole('button', { name: zhCn['addons.arrayAddItem'], exact: true }).click()
+  // #477 夹具新增布尔数组后有多个「添加项」按钮——replacements 按定义序居首
+  await page.getByRole('button', { name: zhCn['addons.arrayAddItem'], exact: true }).first().click()
   const newRow = area.locator('input[data-addon-array-item="replacements"]').nth(1)
   await newRow.click()
   await page.keyboard.type('甲→乙')
@@ -265,9 +315,44 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('input[data-addon-array-item="replacements"]').length === 4)
   const pastedValues = await area.evaluate(() => [...document.querySelectorAll('input[data-addon-array-item="replacements"]')].map((el) => el.value))
   assert.deepEqual(pastedValues, ['旧→新甲', '乙', '丙', '甲→乙'], '粘贴拆分：首行追加当前项，其余行依次插入')
+  // 保存触发的 mock 回灌（setTimeout(0) 推送 settingsState）会整区重建——
+  // notice 文本不含 keys（两次保存同文本），等 notice 等不住本次重建。双保
+  // 险：① evaluateHandle 抓保存前节点引用（page.evaluate 返回元素会被序列
+  // 化为 "ref:" 字符串、身份比较恒真——须用 evaluateHandle 保真引用），等
+  // 它被替换为新节点（重建完成的精确信号）；② 下方几何测量为单次原子
+  // page.evaluate（页内同步 querySelector + measure，只可能拿到 attached
+  // 节点——detached rect 0 的竞态结构性不可能，这是 CI 实挂一次后的主修
+  // 复向量，①防止测量形态回退到 locator.evaluate 时竞态复活）
+  const strictSwitchBeforeSave = await page.evaluateHandle(() => document.querySelector('input[data-addon-field="limits.strict"]'))
   await page.getByRole('button', { name: zhCn['addons.saveChanges'], exact: true }).nth(0).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user'
     && Array.isArray(m.values.replacements) && m.values.replacements.length === 4 && m.values.replacements[0] === '旧→新甲' && m.values.replacements[3] === '甲→乙'))
+  await page.waitForFunction((oldNode) => {
+    const current = document.querySelector('input[data-addon-field="limits.strict"]')
+    return current !== null && current !== oldNode
+  }, strictSwitchBeforeSave)
+
+  // ---- 6c. #477 布尔数组项/对象字段开关几何（审查轮 1 发现 1 回归钉住：
+  //      行内 input 通用 flex:1 规则曾把两路开关拉成整行宽胶囊；
+  //      一次 evaluate 现场查询双路，最小化跨重建时序窗口） ----
+  const switchShapes = await page.evaluate(() => {
+    const measure = (el) => el === null ? null : {
+      width: el.getBoundingClientRect().width,
+      height: el.getBoundingClientRect().height,
+      appearance: getComputedStyle(el).appearance,
+    }
+    return {
+      arraySwitch: measure(document.querySelector('.vsidian-addons-array-row input[data-addon-array-item="switches"]')),
+      fieldSwitch: measure(document.querySelector('input[data-addon-field="limits.strict"]')),
+    }
+  })
+  assert.ok(switchShapes.arraySwitch, '布尔数组项开关在场')
+  assert.equal(switchShapes.arraySwitch.width, 36, '布尔数组项开关宽 36px（不被行内 flex:1 拉伸）')
+  assert.equal(switchShapes.arraySwitch.height, 20, '布尔数组项开关高 20px（min-height 覆写回档）')
+  assert.equal(switchShapes.arraySwitch.appearance, 'none', '布尔数组项为拨动开关形态')
+  assert.ok(switchShapes.fieldSwitch, '布尔对象字段开关在场')
+  assert.equal(switchShapes.fieldSwitch.width, 36, '布尔对象字段开关宽 36px（不被行内 flex:1 拉伸）')
+  assert.equal(switchShapes.fieldSwitch.height, 20, '布尔对象字段开关高 20px（min-height 覆写回档）')
 
   // ---- 7. 功能开关随标签层（workspace）----
   await page.getByRole('tab', { name: zhCn['addons.scopeWorkspace'], exact: true }).click()
@@ -412,13 +497,26 @@ try {
   const firstCard = area.locator('.vsidian-settings-group').first()
   assert.equal(await firstCard.locator('.vsidian-settings-group-title').count(), 0, '首容器无组标题（开关行 + 未分组项恒置顶）')
   assert.match(await firstCard.innerText(), /开关项|阈值/, '未分组定义留在首容器')
-  // 绘制层：组卡片间距档位（20px）与组标题分隔线（形态未注入即失败）
+  // 绘制层：组卡片间距 20px 档位（#477 起为合成口径——flex gap 10px +
+  // 组卡 margin 10px，真实布局间距经 rect 断言）与组标题分隔线
   const groupPaint = await groupCard.evaluate((el) => {
     const cs = getComputedStyle(el)
-    return { radius: cs.borderRadius, marginTop: cs.marginTop, title: getComputedStyle(el.querySelector('.vsidian-settings-group-title')).borderBottomWidth }
+    return {
+      radius: cs.borderRadius,
+      marginTop: cs.marginTop,
+      title: getComputedStyle(el.querySelector('.vsidian-settings-group-title')).borderBottomWidth,
+      areaGap: getComputedStyle(el.parentElement).rowGap,
+      realGap: (() => {
+        const cards = [...el.parentElement.querySelectorAll(':scope > .vsidian-settings-group')]
+        const idx = cards.indexOf(el)
+        return idx > 0 ? cards[idx].getBoundingClientRect().top - cards[idx - 1].getBoundingClientRect().bottom : null
+      })(),
+    }
   })
   assert.equal(groupPaint.radius, '10px', '组卡片圆角 10px 档位')
-  assert.equal(groupPaint.marginTop, '20px', '组卡片间距 20px 档位')
+  assert.equal(groupPaint.marginTop, '10px', '组卡 margin 10px（与 flex gap 合成 20px 档位）')
+  assert.equal(groupPaint.areaGap, '10px', '设置区 flex gap 10px（间距合成的另一半）')
+  assert.equal(groupPaint.realGap, 20, '组卡片真实间距 20px 档位（gap + margin 叠加后）')
   assert.equal(groupPaint.title, '1px', '组标题通栏下边线在场')
   await page.screenshot({ path: path.join(artifacts, 'settings-area-grouped.png') })
 
