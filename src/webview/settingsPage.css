@@ -595,6 +595,12 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-addons-fault-troubleshoot h4 { margin: 0; color: var(--vscode-errorForeground, #f66); font-size: 13px; }
 .vsidian-addons-fault-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .vsidian-addons-settings .vsidian-settings-group { gap: 8px; }
+/* #472 设置定义分组：多个组卡片并列时对齐设置页组卡片间距档位（20px）；
+   首容器（开关行 + 未分组项）与声明序组容器同级直挂设置区 */
+.vsidian-addons-settings .vsidian-settings-group + .vsidian-settings-group { margin-top: 20px; }
+/* #472 组说明句（组件声明的组描述）：组卡片内首行说明色（ui-patterns §2.2
+   组内提示文案口径），位于组标题之下、首个定义行之前 */
+.vsidian-addons-group-description { margin: 10px 0 0; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-addons-setting-item { display: flex; flex-direction: column; gap: 6px; }
 .vsidian-addons-source-badge { display: inline-block; margin-top: 2px; padding: 0 6px; min-height: 16px;
   border: 1px solid var(--vscode-panel-border, #cbd0d8); border-radius: 999px;
@@ -678,3 +684,98 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
   background: var(--vscode-textCodeBlock-background, var(--vscode-input-background, #f4f5f7)); }
 .vsidian-addons-behaviors-notice { margin: 0; min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-addons-behaviors-notice-save-failed { color: var(--vscode-errorForeground, #f66); }
+
+/* ---- #474 行为管理分页与积木筛选（docs/specs/behavior-manage-pagination.md；
+   形态档位登记见 docs/specs/ui-patterns.md §2.5——积木三形态/发光选中态/
+   键盘两态高亮/翻页控件均为新登记形态，全部内部类名不入公开契约） ---- */
+.vsidian-behavior-query { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 10px; padding: 8px; border-radius: 8px;
+  border: 1px solid var(--vsidian-settings-container-border, rgba(102, 102, 102, 0.1));
+  background: var(--vsidian-settings-container-bg, rgba(102, 102, 102, 0.04)); }
+.vsidian-behavior-query-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+
+/* 顶层插入位（D8 顶层任意落点）：常态细条，dragover 增宽着色 */
+.vsidian-bq-dropzone { width: 4px; align-self: stretch; min-height: 26px; border-radius: 2px; }
+.vsidian-bq-dropzone--active { width: 20px; background: color-mix(in srgb, var(--vscode-focusBorder, #2687d4) 25%, transparent); }
+
+/* 积木公共（可聚焦：Tab 序可达，D8） */
+.vsidian-bq-block { display: inline-flex; align-items: center; gap: 6px; }
+
+/* 字段积木：pill 999px 外壳 + 内嵌 text 输入（2px 档） */
+.vsidian-bq-block--field { padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--vsidian-settings-container-border, rgba(102, 102, 102, 0.1));
+  background: var(--vsidian-settings-container-bg, rgba(102, 102, 102, 0.04)); }
+.vsidian-bq-block-label { font-size: 12px; white-space: nowrap; }
+.vsidian-bq-field-input { min-width: 110px; padding: 1px 6px; border-radius: 2px; font-size: 12px;
+  border: 1px solid var(--vscode-input-border, #cecece); color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, #fff); }
+
+/* 状态积木：6px 矩形（按钮档）+ 内嵌 select（2px 档，四态） */
+.vsidian-bq-block--status { padding: 3px 8px; border-radius: 6px;
+  border: 1px solid var(--vsidian-settings-container-border, rgba(102, 102, 102, 0.1));
+  background: var(--vsidian-settings-container-bg, rgba(102, 102, 102, 0.04)); }
+.vsidian-bq-status-select { padding: 1px 4px; border-radius: 2px; font-size: 12px;
+  border: 1px solid var(--vscode-dropdown-border, #cecece); color: var(--vscode-dropdown-foreground, inherit);
+  background: var(--vscode-dropdown-background, #fff); }
+
+/* 逻辑积木：菱形带缺口（clip-path 随形，不入圆角档位）——focusBorder 派生
+   底色区分族感（ui-patterns §2.5）；AND/OR 双缺口、NOT 单缺口 */
+.vsidian-bq-block--logic { flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 18px 8px;
+  clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+  background: color-mix(in srgb, var(--vscode-focusBorder, #2687d4) 16%, var(--vsidian-settings-container-bg, rgba(102, 102, 102, 0.04))); }
+.vsidian-bq-slots { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; }
+
+/* 缺口槽：空槽 = 虚线占位框（拖放/键盘放置目标）；dragover 实线高亮 */
+.vsidian-bq-slot { display: inline-flex; align-items: center; min-width: 34px; min-height: 26px; }
+.vsidian-bq-slot--empty { border: 1px dashed color-mix(in srgb, var(--vscode-focusBorder, #2687d4) 45%, transparent);
+  border-radius: 4px; }
+.vsidian-bq-slot--over { border-style: solid;
+  background: color-mix(in srgb, var(--vscode-focusBorder, #2687d4) 15%, transparent); }
+
+/* 发光选中态（D8）：该积木及其全部嵌套整体发光，明示删除范围 */
+.vsidian-bq-selected { box-shadow: 0 0 0 2px var(--vscode-focusBorder, #2687d4),
+  0 0 10px color-mix(in srgb, var(--vscode-focusBorder, #2687d4) 35%, transparent); }
+/* 键盘拾取中（浅色高亮，D8） */
+.vsidian-bq-carrying { outline: 1px dashed var(--vscode-focusBorder, #2687d4); outline-offset: 2px; }
+/* 键盘目标缺口（深色高亮，D8） */
+.vsidian-bq-slot--target { background: color-mix(in srgb, var(--vscode-focusBorder, #2687d4) 25%, transparent); }
+.vsidian-bq-block--dragging { opacity: 0.5; }
+
+/* 加号/垃圾桶微钮（22px 档；次级按钮变量族）。加号带非禁用包裹：
+   tooltip 载体（disabled 控件不派发鼠标事件，document 级委托收不到） */
+.vsidian-behavior-query-add-wrap { display: inline-flex; }
+.vsidian-behavior-query-add, .vsidian-behavior-query-trash { min-height: 22px; min-width: 28px; padding: 2px 8px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; font-size: 12px; }
+.vsidian-behavior-query-add:hover:not(:disabled), .vsidian-behavior-query-trash:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-behavior-query-add:disabled { opacity: 0.5; cursor: default; }
+.vsidian-behavior-query-trash--active { border-color: var(--vscode-focusBorder, #2687d4); }
+.vsidian-behavior-query-trash--armed { background: color-mix(in srgb, var(--vscode-errorForeground, #f66) 15%, transparent); }
+
+/* 加号下拉（设置页页内菜单形态：局部绝对定位、圆角 8px、阴影档、z-index 6） */
+.vsidian-bq-menu { position: absolute; top: calc(100% + 4px); left: 8px; z-index: 6; min-width: 180px; padding: 4px;
+  border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--vscode-panel-border, #cbd0d8);
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, #252526));
+  color: var(--vscode-menu-foreground, var(--vscode-editorWidget-foreground, inherit)); }
+.vsidian-bq-menu-group { padding: 6px 8px 2px; font-size: 12px;
+  color: var(--vscode-descriptionForeground, #666); }
+.vsidian-bq-menu-item { display: block; width: 100%; margin: 0; padding: 5px 8px; text-align: left; font-size: 12px;
+  border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.vsidian-bq-menu-item:hover { background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground, #04395e)); }
+
+/* 列表与翻页控件（D1–D3：20 行/页；总页数 ≤ 1 不渲染——由 TS 控制） */
+.vsidian-addons-behaviors-list { display: flex; flex-direction: column; }
+.vsidian-addons-behaviors-pager { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; }
+.vsidian-addons-behaviors-pager-button { min-height: 22px; min-width: 30px; padding: 2px 8px; font-size: 12px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-addons-behaviors-pager-button:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-addons-behaviors-pager-button:disabled { opacity: 0.5; cursor: default; }
+.vsidian-addons-behaviors-pager-indicator { font-size: 12px; color: var(--vscode-descriptionForeground, #666);
+  min-width: 72px; text-align: center; }

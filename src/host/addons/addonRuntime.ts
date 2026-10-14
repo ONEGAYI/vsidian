@@ -475,7 +475,7 @@ export class AddonRuntime {
             },
           }
         },
-        registerDefinitions: (defs) => {
+        registerDefinitions: (defs, groups) => {
           if (!this.isLive(record, addonId)) {
             this.ports.log('late-registration-rejected', addonId, 'definitions')
             return NOOP_HANDLE
@@ -485,8 +485,18 @@ export class AddonRuntime {
             this.ports.log('definitions-rejected', addonId, 'definitions not serializable')
             return NOOP_HANDLE
           }
+          // #472 组声明与定义同批可序列化防线（组元数据同样过克隆校验）
+          let storedGroups: unknown[] | undefined
+          if (groups !== undefined) {
+            const clonedGroups = safeClone(groups)
+            if (clonedGroups === CLONE_FAILED) {
+              this.ports.log('definitions-rejected', addonId, 'groups not serializable')
+              return NOOP_HANDLE
+            }
+            storedGroups = clonedGroups as unknown[]
+          }
           // #353 T04：可序列化防线后进服务形状校验（非法整批拒绝并归因）
-          const registered = settings.registerDefinitions(addonId, stored as unknown[])
+          const registered = settings.registerDefinitions(addonId, stored as unknown[], storedGroups)
           if (!registered.ok) {
             this.ports.log('definitions-rejected', addonId, registered.detail ?? registered.reason)
             return NOOP_HANDLE

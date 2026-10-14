@@ -56,6 +56,7 @@
 
 :where(.vsidian-toast) {
   box-sizing: border-box;
+  position: relative; /* 倒计时条（absolute）的定位锚 */
   max-width: min(var(--vsidian-toast-max-width), 100%);
   padding: var(--vsidian-toast-padding-block) var(--vsidian-toast-padding-inline);
   background: var(--vsidian-toast-background);
@@ -67,8 +68,63 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   box-shadow: var(--vsidian-toast-shadow);
-  pointer-events: none;
   animation: vsidian-toast-enter var(--vsidian-toast-enter-duration) ease-out both;
+  /* 形态演进（#474，规格 behavior-manage-pagination D14）：无按钮气泡保持
+   * pointer-events 穿透（继承容器 none，编辑器侧纯文字提示不拦截鼠标——
+   * 评审 F2）；带撤销按钮的气泡经下方 :has 规则放开 */
+  pointer-events: none;
+}
+
+/* 带撤销按钮的气泡放开 pointer-events——按钮可点、悬停/聚焦可暂停倒计时；
+ * 容器恒 none，空白区不拦截输入 */
+:where(.vsidian-toast:has(.vsidian-toast-action)) {
+  pointer-events: auto;
+}
+
+/* 倒计时条：右端锚定满格，随呈现时长线性向左收缩至零（宽度动画）；时长由 toast.ts 按气泡内联注入。
+ * 内部形态（颜色/几何）硬编码于此，不进公开样式契约。 */
+:where(.vsidian-toast-timer) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 2px;
+  width: 100%;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--vsidian-toast-foreground) 60%, transparent);
+  animation-name: vsidian-toast-timer-shrink;
+  animation-duration: 2600ms; /* 无 JS 注入时的兜底；实际时长经内联 animationDuration 覆盖 */
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+/* 悬停/聚焦暂停倒计时条：与 toast.ts 的 JS 计时暂停由同一组 enter/leave 事件驱动（双轨同步）。 */
+:where(.vsidian-toast:hover) :where(.vsidian-toast-timer),
+:where(.vsidian-toast:focus-within) :where(.vsidian-toast-timer) {
+  animation-play-state: paused;
+}
+
+@keyframes vsidian-toast-timer-shrink {
+  from { width: 100%; }
+  to { width: 0; }
+}
+
+/* 气泡内撤销按钮：行内微钮档（ui-patterns 次级按钮形态——secondary 变量族 + 6px 圆角）；
+ * 焦点环走页面全局 :focus-visible 规则，本组件不自带。 */
+:where(.vsidian-toast-action) {
+  box-sizing: border-box;
+  margin-left: 10px;
+  padding: 2px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, transparent));
+  border-radius: 6px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, inherit);
+  font-size: var(--vsidian-toast-font-size);
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+}
+:where(.vsidian-toast-action:hover) {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, rgb(128 128 128 / 0.2)));
 }
 
 :where(.vsidian-toast[data-severity="warning"]) {
@@ -97,4 +153,6 @@
 @media (prefers-reduced-motion: reduce) {
   :where(.vsidian-toast) { animation: none; }
   :where(.vsidian-toast--leaving) { opacity: 0; }
+  /* 倒计时条静态满格呈现（回落基础规则 width: 100%），JS 消失计时照常 */
+  :where(.vsidian-toast-timer) { animation: none; }
 }

@@ -25,11 +25,14 @@
 // 组件自管数据走其自身通道（channel）。
 import {
   isAddonSettingDefinition,
+  isAddonSettingGroupDeclaration,
   addonSettingValueMatches,
   resolveAddonSettingLayer,
   serializeAddonSettingsStore,
   parseAddonSettingsStore,
   type AddonSettingDefinition,
+  type AddonSettingGroup,
+  type AddonSettingsSearchIndex,
   type AddonSettingSource,
   type AddonSettingValue,
 } from '../../shared/addonSettings'
@@ -80,6 +83,8 @@ interface LayerState {
 export class AddonSettingsService {
   /** 组件 ID → 定义表（注册序保留；重新注册整体替换） */
   private readonly definitions = new Map<string, readonly AddonSettingDefinition[]>()
+  /** 组件 ID → 组声明表（#472 声明序保留；与定义集同生命周期清换） */
+  private readonly groups = new Map<string, readonly AddonSettingGroup[]>()
   private readonly user: LayerState
   private readonly workspace: LayerState
   private readonly listeners = new Set<(change: AddonSettingsChange) => void>()
@@ -101,9 +106,33 @@ export class AddonSettingsService {
    * 或与既有）整批拒绝；同一 setup 代次内的多次调用按追加处理（键冲突
    * 拒绝）。新代次 setup 重跑前由 runtime 调 clearDefinitions 清空该组件
    * 定义集（普通升级语义——存储值不动，定义消失的键暂不呈现、存储保留）。
+   *
+   * #472 分组：第三参为可选组声明批——组键唯一（批内与既有），定义的
+   * group 引用必须落在（既有 + 本批）声明的组键集合内，违者整批拒绝。
    */
-  registerDefinitions(addonId: string, defs: readonly unknown[]): { ok: true } | { ok: false; reason: 'invalid-definitions'; detail?: string } {
-    const seen = new Set<string>(this.definitions.get(addonId)?.map((def) => def.key) ?? [])
+  registerDefinitions(
+    addonId: string,
+    defs: readonly unknown[],
+    groups?: readonly unknown[],
+  ): { ok: true } | { ok: false; reason: 'invalid-definitions'; detail?: string } {
+    // 组声明批先整批校验（形状 + 键唯一），失败即整批拒绝
+    const knownGroupKeys = new Set(this.groups.get(addonId)?.map((group) => group.key) ?? [])
+    const declared: AddonSettingGroup[] = []
+    if (groups !== undefined) {
+      for (const group of groups) {
+        if (!isAddonSettingGroupDeclaration(group)) {
+          this.log('definitions-rejected', addonId, `invalid group: ${safeKeyOf(group)}`)
+          return { ok: false, reason: 'invalid-definitions', detail: `invalid group: ${safeKeyOf(group)}` }
+        }
+        if (knownGroupKeys.has(group.key)) {
+          this.log('definitions-rejected', addonId, `duplicate group: ${group.key}`)
+          return { ok: false, reason: 'invalid-definitions', detail: `duplicate group: ${group.key}` }
+        }
+        knownGroupKeys.add(group.key)
+        declared.push(group)
+      }
+    }
+    const seen = new Set(this.definitions.get(addonId)?.map((def) => def.key) ?? [])
     for (const def of defs) {
       if (!isAddonSettingDefinition(def)) {
         this.log('definitions-rejected', addonId, `invalid shape: ${safeKeyOf(def)}`)
@@ -113,19 +142,48 @@ export class AddonSettingsService {
         this.log('definitions-rejected', addonId, `duplicate key: ${def.key}`)
         return { ok: false, reason: 'invalid-definitions', detail: `duplicate key: ${def.key}` }
       }
+      // 引用的组键必须已声明（含本批新声明）
+      if (def.group !== undefined && !knownGroupKeys.has(def.group)) {
+        this.log('definitions-rejected', addonId, `unknown group reference: ${def.key} → ${def.group}`)
+        return { ok: false, reason: 'invalid-definitions', detail: `unknown group reference: ${def.key} → ${def.group}` }
+      }
       seen.add(def.key)
     }
     this.definitions.set(addonId, [...(this.definitions.get(addonId) ?? []), ...(defs as readonly AddonSettingDefinition[])])
+    if (declared.length > 0) {
+      this.groups.set(addonId, [...(this.groups.get(addonId) ?? []), ...declared])
+    }
     return { ok: true }
   }
 
-  /** 清空某组件定义集（新 setup 代次重跑前调用；存储值不动） */
+  /** 清空某组件定义集（新 setup 代次重跑前调用；存储值与组声明一并清换） */
   clearDefinitions(addonId: string): void {
     this.definitions.delete(addonId)
+    this.groups.delete(addonId)
   }
 
   definitionsOf(addonId: string): readonly AddonSettingDefinition[] {
     return this.definitions.get(addonId) ?? []
+  }
+
+  /** 组声明（#472 声明序；无声明为空数组——渲染侧保持既有平铺） */
+  groupsOf(addonId: string): readonly AddonSettingGroup[] {
+    return this.groups.get(addonId) ?? []
+  }
+
+  /** 定义搜索摘要（#472 全局索引用：定义 title/description + 组声明；无定义为 undefined） */
+  searchIndexOf(addonId: string): AddonSettingsSearchIndex | undefined {
+    const defs = this.definitions.get(addonId)
+    if (defs === undefined || defs.length === 0) return undefined
+    const groups = this.groups.get(addonId)
+    return {
+      definitions: defs.map((def) => ({
+        key: def.key,
+        title: def.title,
+        ...(def.description !== undefined ? { description: def.description } : {}),
+      })),
+      ...(groups !== undefined && groups.length > 0 ? { groups } : {}),
+    }
   }
 
   hasDefinitions(addonId: string): boolean {

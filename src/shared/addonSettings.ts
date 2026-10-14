@@ -53,6 +53,38 @@ interface AddonSettingDefinitionBase {
   title: string
   /** 可选说明 */
   description?: string
+  /** #472 所属分组（组键引用——必须已在 registerDefinitions 载荷的 groups
+   *  中声明；引用合法性由注册批校验，本守卫只校验字符串形状） */
+  group?: string
+}
+
+/**
+ * 设置分组声明（#472 引用式分组）：组元数据随注册载荷声明一次，定义以
+ * `group` 组键引用。组序 = 声明序；组键组件内唯一；title/description
+ * 直值或多语言映射（AddonLocalizedText，与 #464/#473 惯例同构）。
+ */
+export interface AddonSettingGroup {
+  /** 组键（组件内唯一、非空；定义 group 字段引用此键） */
+  key: string
+  /** 组标题 */
+  title: AddonLocalizedText
+  /** 可选组说明（组卡片内首行说明色呈现） */
+  description?: AddonLocalizedText
+}
+
+/** 分组声明的搜索摘要条目（#472 定义级：进全局搜索索引的轻量形状） */
+export interface AddonSettingSearchEntry {
+  key: string
+  title: string
+  description?: string
+}
+
+/** 全组件设置搜索索引（#472：addons.state 携带，webview 据此建全局搜索条目） */
+export interface AddonSettingsSearchIndex {
+  /** 定义摘要（注册序；object 字段级不进——定义级即止） */
+  definitions: readonly AddonSettingSearchEntry[]
+  /** 组声明（声明序；搜索只匹配组标题，description 仅随载荷透传） */
+  groups?: readonly AddonSettingGroup[]
 }
 
 /** 组件设置定义（settings.registerDefinitions 的元素形状） */
@@ -146,7 +178,33 @@ export function addonScalarValueMatchesSpec(value: unknown, spec: AddonScalarIte
 // ---- 定义形状校验 ----
 
 function definitionBaseValid(value: Record<string, unknown>): boolean {
-  return typeof value.key === 'string' && value.key.length > 0 && typeof value.title === 'string' && value.title.length > 0
+  if (!(typeof value.key === 'string' && value.key.length > 0 && typeof value.title === 'string' && value.title.length > 0)) return false
+  // #472 组键引用形状（非空字符串；引用已声明的组由注册批校验负责）
+  if (value.group !== undefined && !(typeof value.group === 'string' && value.group.length > 0)) return false
+  return true
+}
+
+/** 搜索摘要条目形状守卫（#472）：key/title 非空字符串、description 可选——
+ *  协议侧 addons.state 载荷校验与类型同一口径（不另建手写分支） */
+export function isAddonSettingSearchEntry(value: unknown): value is AddonSettingSearchEntry {
+  if (!isRecord(value)) return false
+  if (!(typeof value.key === 'string' && value.key.length > 0)) return false
+  if (!(typeof value.title === 'string' && value.title.length > 0)) return false
+  if (value.description !== undefined && typeof value.description !== 'string') return false
+  return true
+}
+
+/**
+ * 分组声明形状守卫（#472）：key 非空字符串；title 经多语言文本守卫；
+ * description 可选、同守卫。组键唯一性与定义引用合法性由服务层注册批
+ * 校验（单条声明无全集上下文）。
+ */
+export function isAddonSettingGroupDeclaration(value: unknown): value is AddonSettingGroup {
+  if (!isRecord(value)) return false
+  if (!(typeof value.key === 'string' && value.key.length > 0)) return false
+  if (!isUsableLocalizedText(value.title)) return false
+  if (value.description !== undefined && !isUsableLocalizedText(value.description)) return false
+  return true
 }
 
 /**

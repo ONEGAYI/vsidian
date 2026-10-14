@@ -60,8 +60,10 @@ export interface AddonSettingsChangeEventData {
 export interface AddonSettingsContextApi {
   /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */
   registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle
-  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings） */
-  registerDefinitions(defs: readonly unknown[]): AddonRegistrationHandle
+  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings）。
+   *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段
+   *  引用其组键——引用未声明组键或组键重复整批拒绝 */
+  registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle
   /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */
   get(): AddonSettingsGetSnapshot
   /** 单键来源（未定义键为 undefined） */

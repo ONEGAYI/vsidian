@@ -21,6 +21,7 @@ import {
   parseAddonSettingsStore,
   serializeAddonSettingsStore,
   isAddonSettingStoredValue,
+  isAddonSettingGroupDeclaration,
   splitAddonArrayPasteText,
   type AddonSettingDefinition,
 } from '../../src/shared/addonSettings'
@@ -343,5 +344,50 @@ describe('T04 存储结构（version 1 冻结 + fail-safe 解析）', () => {
       values: { 'a.b': { ok: 1 }, 'c.d': { bad: null } },
     })
     expect(parsed).toBeNull()
+  })
+})
+
+// ---- #472 设置定义分组（引用式：定义 group 引用载荷声明的组键） ----
+
+describe('#472 组声明形状校验（isAddonSettingGroupDeclaration）', () => {
+  it('合法：key 非空 + title 直值；title 与 description 均可多语言映射（AddonLocalizedText）', () => {
+    expect(isAddonSettingGroupDeclaration({ key: 'appearance', title: '外观' })).toBe(true)
+    expect(isAddonSettingGroupDeclaration({ key: 'appearance', title: '外观', description: '观感相关' })).toBe(true)
+    expect(isAddonSettingGroupDeclaration({
+      key: 'appearance',
+      title: { 'zh-cn': '外观', en: 'Appearance' },
+      description: { 'zh-cn': '观感相关', en: 'Look and feel' },
+    })).toBe(true)
+  })
+
+  it('非法矩阵：非对象、key 缺失/空串/非字符串、title 缺失或非法形态、description 非法', () => {
+    expect(isAddonSettingGroupDeclaration(null)).toBe(false)
+    expect(isAddonSettingGroupDeclaration('appearance')).toBe(false)
+    expect(isAddonSettingGroupDeclaration([{ key: 'g', title: 't' }])).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ title: '无键' })).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ key: '', title: '空键' })).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ key: 7, title: '数字键' })).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ key: 'g' })).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ key: 'g', title: 42 })).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ key: 'g', title: '' })).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ key: 'g', title: 't', description: 7 })).toBe(false)
+    expect(isAddonSettingGroupDeclaration({ key: 'g', title: 't', description: '' })).toBe(false)
+  })
+})
+
+describe('#472 定义 base 的 group 字段形状（组键引用）', () => {
+  it('group 为非空 string 时形状合法（引用合法性由注册批的载荷校验负责）', () => {
+    expect(isAddonSettingDefinition({ key: 'flag', title: '开关', type: 'boolean', default: true, group: 'appearance' })).toBe(true)
+    expect(isAddonSettingDefinition({ key: 'mode', title: '模式', type: 'string', default: 'a', group: 'behavior' })).toBe(true)
+  })
+
+  it('group 空串或非字符串拒绝（拼错早失败——引用键必须是可对账的标识）', () => {
+    expect(isAddonSettingDefinition({ key: 'flag', title: '开关', type: 'boolean', default: true, group: '' })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'flag', title: '开关', type: 'boolean', default: true, group: 9 })).toBe(false)
+    expect(isAddonSettingDefinition({ key: 'flag', title: '开关', type: 'boolean', default: true, group: null })).toBe(false)
+  })
+
+  it('group 缺省合法（无分组定义——向后兼容既有载荷）', () => {
+    expect(isAddonSettingDefinition({ key: 'flag', title: '开关', type: 'boolean', default: true })).toBe(true)
   })
 })

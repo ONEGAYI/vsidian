@@ -97,6 +97,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 图标两形态同一 16px 槽：内联 svg（24 viewBox 单 path、`stroke: currentColor`、1.7 圆角线帽，注册表 `ICON_PATHS` + `SettingsGroupIcon` 类型，`settingsPageView.ts` 单表装配）；生图资产（`span.vsidian-settings-generated-icon[data-icon]` + CSS 背景明暗两套，走 [ai-icon-sheet-to-svg](../../.agents/skills/ai-icon-sheet-to-svg/SKILL.md) 生图管线）。新字形先登记注册表再使用，`aria-hidden` 纯装饰。现役内联字形表见 `settingsPageView.ts` 的 `ICON_PATHS` 注释（#466 起 `inputCursor`＝输入框 + I 型光标，输入行为管理页组头与侧栏导航共用；`sliders`＝三档滑杆组，组件设置页同槽；原 `merge` 分流合流字形随更名退役）。
 - 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（输入行为管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
 - 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。整页单卡片的管理型分页（如输入行为管理页）可把说明句升为分页副题（`vsidian-settings-subtitle`）而不在卡内重复——副题即页级说明位，不算悬空。
+- #472 附加组件设置区分组沿用本节结构：组卡片直挂设置区（bare 分页同口径，组间 `20px` 档位），组标题不配图标（组件声明的组无语义字形——不发明）；组描述即上一条「组说明句」模式（`.vsidian-addons-group-description`，卡片内首行说明色）。首容器（功能开关行 + 未分组定义）无组标题恒置顶，组容器按声明序随后。
 
 ### 2.3 设置行与控件
 
@@ -114,6 +115,27 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 外观页「预设主题」沿用现有 pill 页签；「代码块渲染」组头与标准设置行直接放入页签面板，外观页的大卡片承载组头负边距，不再套一层组卡片。Mermaid 的 Codex 图表配色与 16px 节点圆角属于用户选择的图内容预设，不用于设置控件或其他界面元素。
 - 定位高亮（搜索/路由跳转落点）：`outline 1px focusBorder + offset 8px`、圆角 3px，类名 `vsidian-settings-item-located`。档位语义是**一次性导航反馈**：显式定位时呈现，约 1.5s 后退场，退场后不重现；定位落点唯一——容器级与条目级描边互斥，定位到具体条目只标条目行，列表级定位才描容器本身。当前落地范围是**附加组件页的列表级与条目级两处**（#462 先例）：条目级高亮经定位态跨推送重渲染保持（时限内不延长寿命）；列表级容器描边仅在定位渲染当次呈现（推送重建即消）；同分页 manage 入口、输入行为管理页 behaviors 入口与其他分页的定位高亮维持既有语义（常驻至下次重渲染），迁移到本档位语义另行落档。
 
+### 2.5 积木式查询构造器（输入行为管理页搜索区，#474）
+
+搜索区不直接输文本，以三类积木可视化组合表达查询（ADR-0015）。结构：
+
+```text
+div.vsidian-behavior-query                        ← 查询区（组卡片内，列表上方）
+├─ 顶层积木流（flex-wrap；顶层并列 = 隐式 AND）
+│   ├─ 字段积木 .vsidian-bq-block--field          ← pill 999px 外壳：字段标签 + text 输入（2px 档）
+│   ├─ 逻辑积木 .vsidian-bq-block--logic[data-bq-op] ← 菱形（clip-path 随形，不入圆角档位）；AND/OR 双缺口、NOT 单缺口
+│   │    └─ 缺口槽 .vsidian-bq-slot               ← 空槽 = 虚线占位框（拖放/键盘目标）；可嵌任意积木
+│   └─ 状态积木 .vsidian-bq-block--status         ← 6px 矩形（按钮档）：标签 + select（2px 档，四态）
+├─ span.vsidian-behavior-query-add-wrap > button  ← 加号微钮（22px 档）+ 非禁用包裹（tooltip 载体）；展开三组下拉（页内菜单形态）
+└─ button.vsidian-behavior-query-trash            ← 垃圾桶微钮（22px 档，data-tooltip 三用法说明）
+```
+
+- **积木三形态**：字段 pill 999px（筛选签同档）内嵌 2px 输入；状态 6px 矩形内嵌 2px select；逻辑菱形带缺口为 clip-path 随形（同 §1.2 随形注记不占圆角档位），缺口槽是虚线框 drop target。积木外壳配色 = 容器基调族（`--vsidian-settings-container-*`）；逻辑积木以 focusBorder 16% 派生底色区分族感（clip-path 裁边框，不用于描边）。
+- **发光选中态**：`.vsidian-bq-selected` 整体（含嵌套）`box-shadow: 0 0 0 2px var(--vscode-focusBorder), 0 0 10px color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent)`——明示删除范围（单击/拖到垃圾桶、Delete 删除的是发光整体）。
+- **键盘构建两态高亮**：拾取中（Enter 后浅色）= `outline 1px dashed focusBorder`；目标缺口（方向键移动，深色）= `background: color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent)`。Enter 拾取 → 方向键选缺口 → Enter 放下；Esc 取消；Delete 删选中。
+- **翻页控件**（行为列表底部）：`<< < 第 x / y 页 > >>` 五件套——四枚行内微钮（22px 档、次级按钮变量族，到头/到底禁用发灰）+ 指示文本 12px 说明色；总页数 ≤ 1 不渲染。
+- **上限提示**：积木总数 > 16 时加号禁用（微钮禁用态）+ data-tooltip 说明（D9）。
+
 ## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）
 
 | 模式 | 形态要点 | 事实源与契约指针 |
@@ -127,7 +149,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 | 查找面板 | 绝对定位右上、圆角 4px、widget 变量族、z-index 40 | `main.css` 查找面板段；chromeContract 探针与 `findPanel` 浏览器用例 |
 | 悬停弹窗（hover-popup） | 480px 宽、圆角 8px、阴影 §1.3、z-index 9000 | [hover-preview-embed.md](hover-preview-embed.md) |
 | 模态（图片/图表弹窗） | 全屏 overlay z-10000 + 背板 `blur(16px) saturate(150%)` 55% 黑 | [image-popup.md](image-popup.md)、[graphic-code-block-interaction.md](graphic-code-block-interaction.md) |
-| toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影） | toast.css 头注；styleContract toast 类目 |
+| toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影）。#474 形态演进（两 webview 通用）：气泡顶部倒计时条（深色右端锚定向左收缩、悬停/聚焦暂停）+ 气泡内撤销按钮（次级按钮 6px 档）；pointer-events 仅对带撤销按钮的气泡放开（` :has(action)` 限定，无按钮气泡保持穿透） | toast.css 头注；styleContract toast 类目 |
 
 新增浮层：先查上表归型；同型复用变量族与档位，新形态先登记本表。
 

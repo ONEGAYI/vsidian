@@ -37,6 +37,7 @@ import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
 import { AddonStorageService } from './addonStorageService'
 import { AddonBehaviorStateService } from './addonBehaviorStateService'
+import { AddonBehaviorViewService } from './addonBehaviorViewService'
 import { AddonBehaviorCatalogService } from './addonBehaviorCatalogService'
 import { mergeBehaviorOrderPreservingUnknown, type AddonBehaviorEnabledStateBroadcast } from '../../shared/addonBehaviors'
 import { AddonCommandService } from './addonCommandService'
@@ -99,6 +100,10 @@ export interface AddonPageWiring {
     state: import('../../shared/addonBehaviors').AddonBehaviorStateStore | null
     notice?: { kind: 'saved' | 'save-failed' }
   }
+  /** #474 addons.behaviorsView 消息载荷（行为管理视图状态：页码 + 积木
+   *  查询树的用户级持久快照；view 为 null = 无存储默认态——webview 拉取
+   *  应答一次，变化写入经 addons.behaviorsViewSet 走 handleSettingsMessage） */
+  getBehaviorsViewState(): { kind: 'addons.behaviorsView'; view: { page: number; query: import('../../shared/behaviorFilterQuery').BehaviorQueryFilter | null } | null }
   /** 市场搜索（关键词仅搜索辅助：vsidian-addon） */
   openSearch(): void
   /** VSCode 扩展管理视图 */
@@ -125,6 +130,7 @@ export interface AddonPageWiring {
   /** #353 T04 设置服务与 #359 T10 命令服务观测（测试钩子与集成的断言面） */
   settingsServiceSnapshot(): {
     definitions: Readonly<Record<string, readonly unknown[]>>
+    groups: Readonly<Record<string, readonly unknown[]>>
     userValues: Readonly<Record<string, Readonly<Record<string, unknown>>>>
     workspaceValues: Readonly<Record<string, Readonly<Record<string, unknown>>>> | null
     hasWorkspace: boolean
@@ -244,6 +250,21 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     write: async (value) => {
       try {
         await context.globalState.update(ADDON_BEHAVIOR_STATE_KEY, value)
+        return true
+      } catch {
+        return false
+      }
+    },
+  })
+  // #474 行为管理视图状态（当前页码 + 积木查询树）：用户级持久，跨重启
+  // 恢复——与行为状态存储同层但独立键（视图偏好 vs 生效语义）；webview
+  // 自持权威，宿主只存储不推送（服务说明见模块头注）
+  const ADDON_BEHAVIOR_VIEW_KEY = 'vsidian.addonBehaviors.view.v1'
+  const behaviorViewService = new AddonBehaviorViewService({
+    read: () => context.globalState.get(ADDON_BEHAVIOR_VIEW_KEY),
+    write: async (value) => {
+      try {
+        await context.globalState.update(ADDON_BEHAVIOR_VIEW_KEY, value)
         return true
       } catch {
         return false
@@ -402,6 +423,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       hasSettingsPage: status.hasSettingsPage,
       // #353 T04 定义保留（故障暂停仍在——基础控件可用）
       hasSettingsDefinitions: settingsService.hasDefinitions(entry.id),
+      // #472 定义搜索摘要（定义级/组级全局索引数据源；随既有 addons.state 推送）
+      ...(settingsService.hasDefinitions(entry.id) ? { settingsSearchIndex: settingsService.searchIndexOf(entry.id) } : {}),
       ...(status.faultReason !== undefined ? { fault: { reason: status.faultReason } } : {}),
     }
   }
@@ -442,6 +465,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     const userExplicit = addonId in preferences.user ? preferences.user[addonId] : null
     const workspaceExplicit = preferences.workspace !== null && addonId in preferences.workspace ? preferences.workspace[addonId] : null
     const source = workspaceExplicit !== null ? 'workspace' : userExplicit !== null ? 'user' : 'default'
+    // #472 组声明（声明序随载荷透传；无声明缺省——渲染侧保持既有平铺）
+    const groups = settingsService.groupsOf(addonId)
     return {
       addonId,
       label: entry.label,
@@ -455,6 +480,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         source,
       },
       definitions,
+      ...(groups.length > 0 ? { groups } : {}),
       values,
     }
   }
@@ -1130,6 +1156,15 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         })
         return true
       }
+      // ---- #474 行为管理视图状态写入（页码 + 查询树整表写；拉取由
+      // settingsPage 经 page.getBehaviorsViewState 直接应答，同 behaviorsGet
+      // 模式）----
+      case 'addons.behaviorsViewSet': {
+        // 写失败静默（视图状态丢失非灾难：下次装载回退旧值；不涉行为生效
+        // 语义，见服务模块头注）；webview 自持权威，无需回推
+        void behaviorViewService.setView(message.view.page, message.view.query)
+        return true
+      }
       default:
         return false
     }
@@ -1139,6 +1174,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     getState,
     getSettingsState,
     getBehaviorsState: (notice) => buildBehaviorsState(notice),
+    // #474 视图状态快照现算（null = 无存储默认态；装载拉取应答用）
+    getBehaviorsViewState: () => ({ kind: 'addons.behaviorsView', view: behaviorViewService.snapshot() }),
     openSearch: () => {
       // 关键词仅帮助市场寻找（vsidian-addon）；不代表接入协议或官方身份
       void vscode.commands.executeCommand('workbench.extensions.search', '@keyword:"vsidian-addon"')
@@ -1168,10 +1205,12 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     openSettingsArea: (addonId) => runtime.openSettingsArea(addonId),
     settingsServiceSnapshot: () => {
       const definitions: Record<string, readonly unknown[]> = {}
+      const groups: Record<string, readonly unknown[]> = {}
       const userValues: Record<string, Readonly<Record<string, unknown>>> = {}
       const workspaceValues: Record<string, Readonly<Record<string, unknown>>> | null = hostHasWorkspace() ? {} : null
       for (const entry of coordinator.stateEntries()) {
         definitions[entry.id] = settingsService.definitionsOf(entry.id)
+        groups[entry.id] = settingsService.groupsOf(entry.id)
         const snapshot = settingsService.effectiveSnapshot(entry.id)
         userValues[entry.id] = snapshot.userValues
         if (workspaceValues !== null) {
@@ -1180,6 +1219,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       }
       return {
         definitions,
+        groups,
         userValues,
         workspaceValues,
         hasWorkspace: hostHasWorkspace(),
