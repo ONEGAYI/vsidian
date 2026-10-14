@@ -94,11 +94,15 @@ function textRangeMarkers(view: EditorView, from: number, to: number): Array<Rec
   const out: Array<RectangleMarker> = []
   for (const marker of markers) {
     const left = marker.left + sampled.base.left
-    const right = left + marker.width!
+    let right = left + marker.width!
     const top = marker.top + sampled.base.top
     const bottom = top + marker.height
     const openLeft = (!start || top >= start.bottom - 0.5) && Math.abs(left - sampled.left) < 0.5
     const openRight = (!end || bottom <= end.top + 0.5) && Math.abs(right - sampled.right) < 0.5
+    // CM6 将负宽截为 0：首行缩进越过短续行终点时，不能从 width 还原
+    // 闭合右界。终点所在视觉行改用实际端点，避免覆盖其后的未选文字。
+    if (openLeft && !openRight && marker.width === 0 && end &&
+        top <= end.top + 0.5 && bottom >= end.bottom - 0.5) right = end.right
     if (!openLeft && !openRight) {
       out.push(marker)
       continue
