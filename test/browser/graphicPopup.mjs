@@ -306,7 +306,7 @@ try {
   await presetPage.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': 'default' } }))
   await presetPage.waitForFunction(() => getComputedStyle(document.querySelector('.vsidian-view-reading .node rect.label-container')).fill !== 'rgb(229, 243, 255)')
   await presetPage.locator('.vsidian-view-reading .vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, 'default.png') })
-  // 原生 Mermaid classDef / 菱形与非流程图保持自身语义；init/frontmatter 仍可覆写布局。
+  // 原生 Mermaid classDef / 菱形保持自身语义；init/frontmatter 仍可覆写配置。
   const semantic = await presetPage.evaluate(async () => {
     const sequence = 'sequenceDiagram\nparticipant A\nparticipant B\nA->>B: hello'
     const normal = await window.mermaid.render('sequence-default', sequence, 'default')
@@ -329,7 +329,8 @@ try {
     holder.remove()
     return { normalColor, codexColor, customColor, decision, thickWidth, dashed, overrideFont, override: override.svg.includes('<svg') }
   })
-  assert.equal(semantic.normalColor, semantic.codexColor, '时序图不应用流程图预设')
+  assert.notEqual(semantic.normalColor, semantic.codexColor, '时序图使用独立 Codex 配色')
+  assert.equal(semantic.codexColor, 'rgb(224, 237, 254)')
   assert.equal(semantic.customColor, 'rgb(255, 0, 0)', '显式 classDef 保留')
   assert.equal(semantic.decision, true, '菱形节点不改成矩形')
   assert.equal(semantic.thickWidth, '3.5px', '源码 ==> 的粗箭头语义保留')
@@ -337,6 +338,209 @@ try {
   assert.equal(semantic.override, true, 'frontmatter 可覆写布局')
   assert.equal(semantic.overrideFont, '24px', 'frontmatter 显式字号应覆盖预设默认值')
   await presetPage.close()
+
+  // 2026-10-14 用户提供的六类截图：经生产管线观察真实绘制色，保存双模式截图。
+  const samples = [
+    { name: 'sequence', code: `sequenceDiagram
+autonumber
+actor U as 用户
+participant E as 编辑器
+participant H as 宿主
+participant F as 文件系统
+U->>E: 打开文档
+activate E
+E->>H: 请求文档内容
+activate H
+H->>F: 读取文件
+F-->>H: 返回结果
+alt 读取成功
+H-->>E: 文档内容
+E-->>U: 显示文档
+else 读取失败
+H-->>E: 错误信息
+E-->>U: 显示提示
+end
+deactivate H
+Note over E,H: 编辑内容经宿主写回
+loop 自动保存
+E->>H: 提交修改
+H->>F: 写入文件
+F-->>H: 保存完成
+end
+deactivate E` },
+    { name: 'class', code: `classDiagram
+direction LR
+class Document {
+  +String title
+  +String content
+  +save()
+}
+class Editor {
+  +String mode
+  +open(Document)
+  +switchMode()
+}
+class Renderer {
+  <<interface>>
+  +render(String) String
+}
+class MermaidRenderer {
+  +String theme
+  +render(String) String
+}
+class Attachment {
+  +String path
+  +String type
+}
+Editor "1" *-- "1" Document : 编辑
+Document "1" o-- "*" Attachment : 包含
+Editor --> Renderer : 使用
+Renderer <|.. MermaidRenderer : 实现` },
+    { name: 'state', code: `stateDiagram-v2
+[*] --> Idle
+state "等待打开" as Idle
+state "加载中" as Loading
+state "编辑中" as Editing
+state "加载失败" as Failed
+Idle --> Loading: 打开文档
+Loading --> Editing: 加载成功
+Loading --> Failed: 加载失败
+Failed --> Loading: 重试
+state Editing {
+  [*] --> Clean
+  state "已保存" as Clean
+  state "有修改" as Dirty
+  state "保存中" as Saving
+  Clean --> Dirty: 输入内容
+  Dirty --> Saving: 保存
+  Saving --> Clean: 写入成功
+  Saving --> Dirty: 写入失败
+}
+Editing --> Idle: 关闭文档
+Idle --> [*]` },
+    { name: 'er', code: `erDiagram
+FOLDER ||--o{ NOTE : contains
+NOTE ||--o{ ATTACHMENT : owns
+NOTE }o--o{ TAG : tagged_with
+FOLDER {
+  string id PK
+  string name
+  string path
+}
+NOTE {
+  string id PK
+  string folder_id FK
+  string title
+  datetime updated_at
+}
+ATTACHMENT {
+  string id PK
+  string note_id FK
+  string path
+}
+TAG {
+  string id PK
+  string name
+}` },
+    { name: 'gantt', code: `gantt
+title 主题适配计划
+dateFormat YYYY-MM-DD
+axisFormat %m-%d
+section 参考采集
+流程图截图 :done, flow, 2026-10-14, 2d
+其他图形截图 :active, capture, after flow, 3d
+section 实现
+主题变量适配 :theme, after capture, 3d
+布局与连线调整 :crit, layout, after theme, 2d
+section 验证
+明暗主题检查 :check, after layout, 2d
+完成 :milestone, after check, 0d` },
+    { name: 'pie', code: `pie showData
+title 图形示例分布
+"流程图" : 35
+"时序图" : 25
+"类图" : 15
+"状态图" : 10
+"ER 图" : 10
+"其他" : 5` },
+  ]
+  for (const sample of samples) {
+    const samplePage = await browser.newPage({ viewport: { width: 1400, height: 1000 } })
+    await samplePage.goto(pageBase + '/')
+    await samplePage.evaluate(code => {
+      window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': 'codex' } })
+      window.initQuick('擅长图形渲染\n\n```mermaid\n' + code + '\n```\n\n结尾')
+      const view = window.controller.getView()
+      view.dispatch({ selection: { anchor: 0 } })
+    }, sample.code)
+    for (const mode of ['live', 'reading']) {
+      await samplePage.evaluate(mode => window.controller.handleHostMessage({ kind: 'view.mode.set', mode }), mode)
+      const diagramSelector = '.vsidian-view-' + mode + ' .vsidian-mermaid'
+      await samplePage.waitForFunction(selector => document.querySelector(selector)?.getAttribute('data-vsidian-mermaid-state') === 'rendered', diagramSelector)
+      const paint = await samplePage.evaluate(selector => {
+        const svg = document.querySelector(selector + ' svg')
+        window.controller.handleHostMessage({ kind: 'view.state.request' })
+        return {
+          fills: [...svg.querySelectorAll('rect,path,polygon')].map(el => getComputedStyle(el).fill),
+          strokes: [...svg.querySelectorAll('rect,path,polygon,line')].map(el => getComputedStyle(el).stroke),
+          ink: [...svg.querySelectorAll('text,tspan')].map(el => getComputedStyle(el).fill),
+          background: getComputedStyle(svg).backgroundColor,
+          markerFills: [...svg.querySelectorAll('marker path')].map(el => getComputedStyle(el).fill),
+          visible: window.quickSent().at(-1).paint?.mermaid?.visible,
+        }
+      }, diagramSelector)
+      assert.equal(paint.visible, true, sample.name + ' / ' + mode + ' 应实际绘制')
+      assert.equal(paint.background, 'rgb(255, 255, 255)', sample.name + ' 白色图形画布')
+      assert.ok(paint.ink.includes('rgb(26, 28, 31)'), sample.name + ' 深灰文字')
+      if (sample.name === 'state') assert.ok(paint.markerFills.length > 0 && paint.markerFills.every(fill => fill === 'rgb(142, 143, 144)'), '状态图灰色箭头')
+      if (sample.name === 'pie') {
+        for (const color of ['rgb(83, 154, 248)', 'rgb(107, 198, 127)', 'rgb(239, 139, 87)', 'rgb(248, 212, 93)', 'rgb(184, 151, 244)', 'rgb(246, 142, 188)']) {
+          assert.ok(paint.fills.includes(color), '饼图六色：' + color)
+        }
+        assert.ok(paint.strokes.includes('rgb(255, 255, 255)'), '饼图分隔线')
+      } else {
+        assert.ok(paint.fills.includes('rgb(224, 237, 254)'), sample.name + ' 浅蓝填充')
+        assert.ok(paint.strokes.includes('rgb(83, 154, 248)'), sample.name + ' 蓝色边框')
+        assert.ok(paint.strokes.includes('rgb(142, 143, 144)'), sample.name + ' 灰色连线')
+        if (sample.name === 'sequence' || sample.name === 'gantt') {
+          assert.ok(paint.strokes.includes('rgb(107, 198, 127)'), sample.name + ' 绿色注释或关键任务边框')
+        }
+      }
+      await samplePage.locator(diagramSelector + ' svg').screenshot({ path: path.join(presetArtifacts, sample.name + '-' + mode + '.png') })
+    }
+    const beforeDark = await samplePage.evaluate(() => {
+      const id = document.querySelector('.vsidian-view-reading .vsidian-mermaid svg').id
+      document.body.style.setProperty('--vscode-editor-background', '#1f1f1f')
+      document.body.style.setProperty('--vscode-editor-foreground', '#cccccc')
+      document.body.classList.add('vscode-dark')
+      return id
+    })
+    await samplePage.waitForFunction(previousId => {
+      const svg = document.querySelector('.vsidian-view-reading .vsidian-mermaid svg')
+      return svg && svg.id !== previousId && getComputedStyle(svg).backgroundColor === 'rgb(255, 255, 255)'
+    }, beforeDark)
+    await samplePage.locator('.vsidian-view-reading .vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, sample.name + '-dark.png') })
+    const restored = await samplePage.evaluate(async ({ code, name }) => {
+      const holder = document.createElement('div')
+      document.body.append(holder)
+      const codex = await window.mermaid.render('preset-extra', code, 'codex')
+      holder.innerHTML = codex.svg
+      const presetBackground = getComputedStyle(holder.querySelector('svg')).backgroundColor
+      const normal = await window.mermaid.render('default-extra', code, 'default')
+      holder.innerHTML = normal.svg
+      const defaultBackground = getComputedStyle(holder.querySelector('svg')).backgroundColor
+      const variable = { sequence: 'actorBkg', class: 'mainBkg', state: 'stateBkg', er: 'mainBkg', gantt: 'taskBkgColor', pie: 'pie1' }[name]
+      const override = await window.mermaid.render('override-extra', '---\nconfig:\n  themeVariables:\n    ' + variable + ': "#ff0000"\n---\n' + code, 'codex')
+      holder.innerHTML = override.svg
+      const overridden = [...holder.querySelectorAll('rect,path,polygon')].some(el => getComputedStyle(el).fill === 'rgb(255, 0, 0)')
+      holder.remove()
+      return { presetBackground, defaultBackground, overridden }
+    }, sample)
+    assert.equal(restored.presetBackground, 'rgb(255, 255, 255)', sample.name + ' 暗色宿主仍使用参考图白底')
+    assert.notEqual(restored.defaultBackground, restored.presetBackground, sample.name + ' 切回默认不残留 Codex 配置')
+    assert.equal(restored.overridden, true, sample.name + ' 图内配色覆盖预设')
+    await samplePage.close()
+  }
   console.log('[图形化代码块交互] 悬停显隐、禁点击、edit 迁移、弹窗缩放/平移/键盘/Esc、点图不关、SVG/PNG 导出（CSP 复刻页）通过')
 } finally {
   server.close()

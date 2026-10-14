@@ -6,9 +6,37 @@ import { describe, expect, it } from 'vitest'
 import {
   MERMAID_DARK_FALLBACK_PALETTE,
   buildDarkMermaidThemeVariables,
+  buildCodexMermaidConfig,
   resolveVscodeMermaidPalette,
   type VscodeMermaidPalette,
 } from '../../src/webview/mermaidTheme'
+
+describe('Codex Mermaid 截图参考配色', () => {
+  it.each(['sequence', 'class', 'classDiagram', 'state', 'stateDiagram', 'er', 'gantt', 'pie'])(
+    '%s 使用六张参考图的浅蓝边框与深灰文字，不沿用流程图 ELK 布局',
+    (type) => {
+      const config = buildCodexMermaidConfig(type)
+      expect(config).toMatchObject({
+        theme: 'base',
+        themeVariables: {
+          primaryColor: '#e0edfe',
+          primaryBorderColor: '#539af8',
+          primaryTextColor: '#1a1c1f',
+          lineColor: '#8e8f90',
+        },
+      })
+      expect(config).not.toHaveProperty('layout')
+      expect(config).not.toHaveProperty('elk')
+    },
+  )
+
+  it('保留既有流程图预设，未采集参考的图类型不套用预设', () => {
+    expect(buildCodexMermaidConfig('flowchart-v2')).toMatchObject({
+      layout: 'elk', themeVariables: { primaryColor: '#e5f3ff', primaryTextColor: '#004f99' },
+    })
+    expect(buildCodexMermaidConfig('mindmap')).toBeUndefined()
+  })
+})
 
 /** 相对亮度（WCAG）：sRGB → 线性 → L */
 function luminance(hex: string): number {
