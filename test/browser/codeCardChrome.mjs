@@ -490,9 +490,9 @@ try {
     const fullPlain = inPlain.filter((b) => Math.abs(b.left - plainGeom) < 1.5)
     assert.ok(fullPlain.length >= 1,
       `正文折行跨视觉行选区的满宽块左界应仍取行盒左缘 ${plainGeom}：${JSON.stringify(inPlain)}`)
-    // 收场清选区（光标归一点）：后续 #389 场景 initCode 换文档时，旧选区
-    // 不再参与增量重建 span 计算（跨行选区残留态触发倒置 span 的既有
-    // 增量缺陷，与选区绘制修复正交，单独跟踪）
+    // 收场清选区（光标归一点）：保持场景间状态干净——跨行选区残留态
+    // 曾触发换文档时反向 Range 的倒置 span 崩溃（已在 liveInstance 归一
+    // 与 liveDecorations 防御两层修复，单测钉住），此处不再依赖该规避
     await setSelection(plainTo, plainTo)
   }
 

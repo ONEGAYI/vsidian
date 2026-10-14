@@ -1467,17 +1467,23 @@ interface ChangedRange4 {
   toB: number
 }
 
-/** 选区驱动的重建行：旧选区行映射 + 新选区行 */
+/** 选区驱动的重建行：旧选区行映射 + 新选区行。from/to 归一防御——
+ *  被替换区间整体吞没的选区经 CM6 映射可得 from > to 的反向 Range
+ *  （replaceDoc 已归一主路径；此处兜底其余来源），直接建区间会产出
+ *  倒置 span 使 emitForRange 分配负长数组。 */
 function selectionSpans(tr: Transaction): LineSpan[] {
   const doc = tr.state.doc
   const spans: LineSpan[] = []
+  const push = (from: number, to: number): void => {
+    const lo = Math.min(from, to)
+    const hi = Math.max(from, to)
+    spans.push({ fromLine: doc.lineAt(lo).number, toLine: doc.lineAt(hi).number })
+  }
   for (const r of tr.startState.selection.ranges) {
-    const from = tr.changes.mapPos(r.from, -1)
-    const to = tr.changes.mapPos(r.to, 1)
-    spans.push({ fromLine: doc.lineAt(from).number, toLine: doc.lineAt(to).number })
+    push(tr.changes.mapPos(r.from, -1), tr.changes.mapPos(r.to, 1))
   }
   for (const r of tr.state.selection.ranges) {
-    spans.push({ fromLine: doc.lineAt(r.from).number, toLine: doc.lineAt(r.to).number })
+    push(r.from, r.to)
   }
   return spans
 }

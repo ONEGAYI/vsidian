@@ -391,6 +391,25 @@ describe('mark 作用域显形', () => {
     expect(hiddenRanges(build(doc, { anchor: bare1 }))).not.toContainEqual([bare1, bare1 + 1])
   })
 
+  it('CM6 全替换映射的反向选区不使纯选区事务崩增量重扫（倒置 span 防御）', () => {
+    // 跨行选区 → 全文替换为更短文档：CM6 自动映射把 anchor/head 贴到
+    // 新文本两缘，产出 from > to 的反向 Range（下方行为钉子）；后续纯
+    // 选区事务经 selectionSpans 消费该 Range——修前倒置 span 传入
+    // emitForRange 抛 RangeError: Invalid array length
+    const long = ['a'.repeat(40), '', '```js', 'const a = 1;', '```'].join('\n')
+    let state = EditorState.create({
+      doc: long,
+      extensions: [liveDecorationsField],
+      selection: EditorSelection.single(4, 60),
+    })
+    state = state.update({ changes: { from: 0, to: long.length, insert: 'b\n\nc\n' } }).state
+    const reversed = state.selection.ranges[0]!
+    expect(reversed.from).toBeGreaterThan(reversed.to) // 前提：反向 Range 确实发生
+    // 纯选区事务消费反向 Range：不抛且增量与全量对拍一致
+    const next = state.update({ selection: { anchor: 1 } })
+    expect(setsEqual(next.state, build(next.state.doc, { anchor: 1 }))).toBe(true)
+  })
+
   it('标题行内的粗体 mark 仍由粗体自身控制域决定', () => {
     const doc = '# 标题前文 **重点** 标题后文'
     const heading = doc.indexOf('#')

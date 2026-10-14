@@ -2449,8 +2449,19 @@ export class LiveEditorInstance {
     if (!view) {
       return
     }
+    const changes = ChangeSet.of({ from: 0, to: view.state.doc.length, insert: text }, view.state.doc.length)
+    // 选区归一：被替换区间整体吞没的选区，CM6 自动映射把 anchor/head 贴
+    // 到新文本两缘（anchor 贴右、head 贴左），产出 from > to 的反向 Range
+    // 并滞留到下一个纯选区事务——增量重扫按 from/to 建区间会拿到倒置行
+    // 区间。显式携带映射后归一的选区（反向翻转），杜绝滞留；非吞没形态
+    // 映射结果本就正向，归一为恒等。
+    const mapped = view.state.selection.map(changes)
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: text },
+      changes,
+      selection: EditorSelection.create(
+        mapped.ranges.map((r) => (r.from > r.to ? EditorSelection.range(r.to, r.from) : r)),
+        mapped.mainIndex,
+      ),
       annotations: externalSync.of(true),
     })
   }
