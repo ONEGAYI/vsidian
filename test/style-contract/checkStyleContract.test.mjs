@@ -784,7 +784,7 @@ test('正向 e3：注入 tag 快照时段落未动（正常演进）不误报 ch
 })
 
 test('负向 f：跳版本号（声明未发布版本移除）→ removal-version-unverifiable', async () => {
-  // 0.99.0 是永不发布的占位版本（0.1.0–0.9.0 均已固化进基线 releases，占位号须选发布记录之外的值）
+  // 0.99.0 是永不发布的占位版本（0.1.0–1.0.1 均已固化进基线 releases，占位号须选发布记录之外的值）
   const sim = await buildSimTree([
     rewrite('src/shared/styleContract.ts', (text) =>
       text.replace(/introduced: '#8（2026-09-24）',\r?\n  },/, "introduced: '#8（2026-09-24）',\n    deprecated: 'v0.4.0 起弃用；替代：用 vsidian 名',\n    removed: 'v0.99.0 移除',\n  },"),
@@ -869,7 +869,7 @@ test('负向 j：候选伪造版本号（package.json 抬高但无发布记录�
   try {
     const report = await runStyleContractCheck({ ...SIM_OPTS(), root: sim })
     assert.equal(report.ok, false)
-    // 0.99.0 不在基线固化发布记录：移除版本不可核实（单纯抬高版本号不算发布）
+    // 0.99.0 不在基线固化发布记录（发布记录固化至 1.0.1）：移除版本不可核实（单纯抬高版本号不算发布）
     assert.ok(report.failures.some((f) => f.code === 'removal-version-unverifiable'), JSON.stringify(report.failures.map((f) => f.code)))
   } finally {
     rmSync(sim, { recursive: true, force: true })
