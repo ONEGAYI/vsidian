@@ -50,6 +50,28 @@ function pressKey(view: EditorView, key: string, init: KeyboardEventInit = {}): 
 }
 
 describe('drawSelection 与多选区装配（#237）', () => {
+  it('字符补绘覆盖全部非空选区，随多光标设置退出与恢复；不修改正文', () => {
+    const { controller, sent, view } = setup('> abc\n> def')
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.range(2, 5), EditorSelection.range(8, 11),
+    ]) })
+    const selectedText = () => [...view.contentDOM.querySelectorAll('.vsidian-selection-text')]
+      .map(node => node.textContent)
+    expect(selectedText()).toEqual(['abc', 'def'])
+    controller.handleHostMessage({ kind: 'settings.changed', values: { 'editor.multicursor': false } })
+    expect(selectedText()).toEqual([])
+    controller.handleHostMessage({ kind: 'settings.changed', values: { 'editor.multicursor': true } })
+    expect(selectedText()).toEqual(['abc']) // 关闭多光标时按既有约定折回主选区。
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.range(2, 5), EditorSelection.range(8, 11),
+    ]) })
+    expect(selectedText()).toEqual(['abc', 'def'])
+    view.dispatch({ selection: EditorSelection.cursor(3) })
+    expect(selectedText()).toEqual([])
+    expect(view.state.doc.toString()).toBe('> abc\n> def')
+    expect(sent.filter(message => message.kind === 'edit.request')).toHaveLength(0)
+    controller.dispose()
+  })
   it('默认开启：多 range 选区存续、光标/选区绘制层在场', () => {
     const { view } = setup('aaa\nbbb\nccc')
     view.dispatch({ selection: EditorSelection.create(

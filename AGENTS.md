@@ -106,7 +106,9 @@ vsidian/
 │   │   ├── 0011-reference-full-document-navigation.md         # 引用全文可达与锚点导航决策
 │   │   ├── 0012-vsidian-addons-distribution-api-governance.md # 附加组件接入与API治理决策
 │   │   ├── 0013-wikilink-completion-file-catalog.md           # 全文件登记与联想架构决策
-│   │   └── 0014-vscode-query-matching-for-wikilinks.md        # VSCode 查询匹配复用决策
+│   │   ├── 0014-vscode-query-matching-for-wikilinks.md        # VSCode 查询匹配复用决策
+│   │   ├── 0015-behavior-filter-query-blocks.md               # 行为筛选积木构造器决策
+│   │   └── 0016-two-layer-behavior-disable-semantics.md       # 行为禁用两层独立开关决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -139,6 +141,8 @@ vsidian/
 │   │   ├── vsidian-addons-v02-page-sdk-probe.md   # V02 页面 SDK 探针结论
 │   │   └── wikilink-completion-v01-probe.md       # V01 补 ID 与尽力撤销探针报告
 │   ├── specs/      # 产品规格
+│   │   ├── addon-behavior-disabled-state.md     # 组件行为禁用态可见性规格
+│   │   ├── addon-settings-grouping.md           # 附加组件设置分组规格
 │   │   ├── addons-api-gate.md                   # API 契约门禁 CI 接线规格
 │   │   ├── anchor-navigation.md                 # 锚点跳转规格（标题/块引用/复制块链接）
 │   │   ├── appearance-merge.md                  # 外观合并分页规格
@@ -150,6 +154,7 @@ vsidian/
 │   │   ├── batch-2026-10-vscode-ops.md          # 2026-10 编辑器操作批次实施树
 │   │   ├── batch-2026-10-vsidian-addons.md      # 附加组件验证与实施批次索引
 │   │   ├── batch-2026-10-wikilink-completion.md # 双链输入联想实施批次
+│   │   ├── behavior-manage-pagination.md        # 行为管理分页与筛选规格
 │   │   ├── blockquote-accent-bar.md             # 引用块紫色提示边条规格
 │   │   ├── blockquote-table.md                  # 引用块内表格规格
 │   │   ├── code-block-card.md                   # 代码块卡片功能规格

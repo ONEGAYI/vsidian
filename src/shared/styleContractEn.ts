@@ -150,7 +150,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'live-quote-line': {
     purpose:
-      'Line class for live quotes (the > prefix); quote content gets no extra spans (see limit-quote-span). For the 3px accent bar on the left edge see var-quote-bar-color (shared with the reading blockquote); left padding is calc(0.9em + 3px) — the layout slot left after the QuoteMark presentation is hidden — aligned with the reading blockquote.',
+      'Line class for live quotes (the > prefix); no quote-specific syntax spans are emitted (see limit-quote-span). The 3px accent bar uses var-quote-bar-color, shared with reading blockquotes. Left padding is calc(0.9em + 3px). List depth indentation is added inside that quote padding. Internal shared text-selection marks keep nonempty selections visible without changing the quote background.',
     states: 'The > marker at line start is only revealed near the marker and its adjacent spaces.',
     dom: 'A .cm-line line element inside the live container.',
     obsidian: { counterpart: '.HyperMD-quote (the Obsidian quote line class)' },
@@ -532,8 +532,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'limit-quote-span': {
     purpose:
-      'Quote content gets no extra spans: live view only has the line-level .HyperMD-quote alias; the span-level .cm-quote token class of Obsidian is not promised.',
-    dom: 'No content spans exist inside quote lines.',
+      'No quote-specific syntax spans are emitted. Quote aliases remain line-level .HyperMD-quote; the span-level .cm-quote token class of Obsidian is not promised. Internal shared selection spans are not a quote syntax interface.',
+    dom: 'No quote-specific content span; inline formatting and nonempty selections may emit their own shared spans.',
     obsidian: { counterpart: '.cm-quote (span-level token)' },
   },
   'limit-is-unresolved': {

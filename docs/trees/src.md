@@ -13,6 +13,7 @@ vsidian/
     │   ├── addons/                       # 附加组件宿主端实现
     │   │   ├── addonBehaviorCatalogService.ts # 行为注册目录宿主服务
     │   │   ├── addonBehaviorStateService.ts   # 行为顺序开关宿主服务
+    │   │   ├── addonBehaviorViewService.ts    # 行为管理视图状态持久服务
     │   │   ├── addonCommandService.ts         # 宿主命令目录服务与命令面板注册
     │   │   ├── addonCoordinator.ts            # 附加组件发现协调与唤醒
     │   │   ├── addonPageRegistry.ts           # 页面入口登记校验
@@ -88,6 +89,7 @@ vsidian/
     │   ├── addonStorage.ts         # 数据目录形状与守卫
     │   ├── addonSyntaxApi.ts       # 附加组件语法查询与组合判定
     │   ├── addonUi.ts              # 附加组件界面贡献共享形状与校验
+    │   ├── behaviorFilterQuery.ts  # 行为筛选查询与分页纯函数
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
     │   ├── changeMapping.ts        # 变更重定位纯函数
     │   ├── chromeContract.ts       # 界面域样式契约探针表
@@ -113,6 +115,7 @@ vsidian/
     │   │   ├── index.ts  # 语言注册表与解析（仅宿主可引）
     │   │   ├── island.ts # 语言数据岛构建与解析
     │   │   └── zh-cn.ts  # 简体中文语言包（编译期 parity）
+    │   ├── localizedText.ts        # 组件多语言文本选值与守卫
     │   ├── looseLink.ts            # 宽松内联链接/图片形态学单一事实源
     │   ├── markdownDoc.ts          # Markdown 文档工具与树查询
     │   ├── math.ts                 # 公式形态学纯函数（#59）
@@ -169,6 +172,7 @@ vsidian/
         ├── appearanceSettings.ts         # 外观分页与预设主题
         ├── backlinkGrouping.ts           # 反链面板分组排序过滤纯函数
         ├── backlinkPanel.ts              # 反链面板 DOM 与四态渲染（#197）
+        ├── behaviorQueryBuilder.ts       # 行为筛选积木查询编辑器
         ├── blockIdStrip.ts               # 阅读渲染块标记剥离纯函数
         ├── clipboardPaste.ts             # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts              # 卡片共享状态中立模块
@@ -282,7 +286,7 @@ vsidian/
         ├── tableRegion.ts                # 表格矩形选区与结构规划
         ├── tableRegionField.ts           # 表格格区选区状态单一事实源
         ├── tableRegionSelection.ts       # 表格格区拖选指针交互
-        ├── tableSelectionLayer.ts        # 表格感知选区背景层（#484）
+        ├── tableSelectionLayer.ts        # 选区矩形层与字符补绘
         ├── tableStructure.ts             # 表格导航与增删行列纯函数（#13）
         ├── targetTip.ts                  # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts                 # 任务勾选解析纯函数（#9）
