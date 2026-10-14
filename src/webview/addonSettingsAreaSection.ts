@@ -509,7 +509,7 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     const desc = document.createElement('span')
     desc.className = 'vsidian-settings-item-description'
     desc.textContent = t('addons.enableSwitchDescription')
-    copy.append(title, desc, this.sourceBadge(addon.enabled.source))
+    copy.append(this.renderTitleRow(title, addon.enabled.source), desc)
     // 当前标签层的开关值：user 标签 = userExplicit ?? 默认启用；workspace
     // 标签 = workspaceExplicit ?? 生效值（继承显示）
     const layerValue = this.scope === 'user'
@@ -543,15 +543,14 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     const title = document.createElement('span')
     title.className = 'vsidian-settings-item-title'
     title.textContent = def.title
-    copy.append(title)
+    const entry = addon.values[def.key]
+    copy.append(this.renderTitleRow(title, entry?.source ?? 'default'))
     if (def.description) {
       const desc = document.createElement('span')
       desc.className = 'vsidian-settings-item-description'
       desc.textContent = def.description
       copy.append(desc)
     }
-    const entry = addon.values[def.key]
-    copy.append(this.sourceBadge(entry?.source ?? 'default'))
     head.append(copy)
     item.append(head)
 
@@ -704,6 +703,15 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       return entry?.user ?? (def.type === 'object' ? objectDefault(def) : def.default)
     }
     return entry?.workspace ?? entry?.effective ?? (def.type === 'object' ? objectDefault(def) : def.default)
+  }
+
+  /** 标题行（#477 三行挤压修复）：标题 + 来源徽章同容器，描述独占行——
+   * 徽章不挤占描述行；span 标签保持 phrasing content 合法（CSS flex） */
+  private renderTitleRow(title: HTMLElement, source: 'default' | 'user' | 'workspace'): HTMLElement {
+    const row = document.createElement('span')
+    row.className = 'vsidian-addons-setting-title-row'
+    row.append(title, this.sourceBadge(source))
+    return row
   }
 
   /** 来源徽章（生效来源——两层标签共用同一生效口径） */
