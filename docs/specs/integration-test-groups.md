@@ -353,7 +353,7 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 
 **修正只收紧就绪条件**：等待滑块、当前档圆点和折叠箭头的既有绘制探针全部为 true，再执行原断言；预算、产品样式、绘制探针实现和 core/sensitive 分组均未改。单测执行 #67 的实际回调，过渡期快照在旧条件下先红；候选拒绝圆点、滑块或箭头尚未绘制的快照。浏览器回归永久保留暂停过渡的绘制证据，继续验证原点击、拖拽、展开和编辑存活场景。
 
-本地 compile/类型检查、完整 Vitest 7918/7918、`outlineCollapse` 七项浏览器场景通过。真实 VSCode 1.82.3 开发态加载本树产物，大纲整组 14/15；目标 #67 用例通过，唯一失败是 #69 `copyChildren` 剪贴板更新超时，保留报告另列待查，不称作环境原因或全组通过。文件树职责经维护入口同步；严格检查的 main 既有漏录另行记录。本地验证不替代 Linux CI 与人工验收。
+本地 compile/类型检查、完整 Vitest 7918/7918、`outlineCollapse` 七项浏览器场景通过。同步 main `366449ac` 的 Mermaid 主题扩展后，文件树通过三方字段合并保留两边职责，重新编译、完整 Vitest 7927/7927 与 Node 契约 192/192 通过。真实 VSCode 1.82.3 开发态加载本树产物，大纲整组 14/15；目标 #67 用例通过，唯一失败是 #69 `copyChildren` 剪贴板更新超时，保留报告另列待查，不称作环境原因或全组通过。文件树职责经维护入口同步；严格检查仍是 main 既有 14 项漏录，没有新增结构错误。本地验证不替代 Linux CI 与人工验收。
 
 证据：本树 `out/test/outline-animation-red.log`、`outline-readiness-red.json` / `outline-readiness-green.json`、`outline-unit-full.json`、`outline-browser-final.log` 及对应浏览器报告、`outline-final-compile-fixed.log`、`outline-native-all.log` / `outline-native-all-report.log`；交付时归档至 `D:/.codex/evidence/vsidian-outline-dot-20261014/`。
 
