@@ -59,6 +59,7 @@ function parseAddonFocusEntry(focusEntry: string | undefined): AddonFocusTarget 
 
 export class AddonSettingsAreaSection implements SettingsPageSection {
   readonly id = ADDON_SETTINGS_SECTION_ID
+  readonly hideFromNavigation = true
   /** 滑杆组字形（调参意象——组件设置的调谐面） */
   readonly icon = 'sliders' as const
   /** bare 装配（与附加组件域各分页同口径）：组卡片直挂页面列表 */

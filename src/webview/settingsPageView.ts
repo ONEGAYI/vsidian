@@ -49,6 +49,8 @@ export interface SettingsPageSection {
   id: string
   title: string
   description: string
+  /** 仅由组件条目或搜索进入的内容页，不在「选项」中重复提供总入口。 */
+  readonly hideFromNavigation?: boolean
   /** 分页图标（侧栏导航与搜索分组共用）。#231 外观合并：'palette' 由
    *  CSS 片段分页槽位改为调色板字形并被「外观」合并分页沿用（画笔字形
    *  退役）；'book'（#132 样式参考分页）随侧栏条目合并一并退役；
@@ -600,6 +602,7 @@ export class SettingsPageView {
     optionsSection.append(optionsLabel)
     const categoriesNavHolder = element('div', 'vsidian-settings-nav-items')
     for (const category of this.categories()) {
+      if (this.sections.find((section) => section.id === category.id)?.hideFromNavigation) continue
       const button = element('button', 'vsidian-settings-nav-item')
       button.type = 'button'
       button.setAttribute('aria-current', !query && active?.id === category.id ? 'page' : 'false')

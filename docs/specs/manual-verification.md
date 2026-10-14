@@ -6,6 +6,10 @@
 
 ## 当前执行记录
 
+2026-10-14 侧栏入口验收修订：移除「选项」中的「组件设置」总入口，各组件从「核心组件／第三方组件」分组的自身条目直接进入设置。A71 的顶层滑杆入口观感项由本次要求替代；待用户在实际设置页确认多余入口消失、已启用与已停用组件的设置入口仍可直接使用。
+
+该修订基线为 v1.0.0（`1ced19532a9ef1e1a8a34b1da075fbc8c694469d`），仅改变设置页内部导航的装配，不修改公开选择器、变量、DOM 关系或历史契约清单；条目复用现有形态，无新档位。独立工作树 `D:/.codex/worktrees/addon-settings-sidebar/vscode-obsidian-like-editor` 验证：定向测试先红后绿（`out/test/addon-sidebar-red.log` / `addon-sidebar-green.log`）；编译通过；全量 Vitest 348 文件、7900 用例通过，Node 契约 186 通过、6 跳过（foreground 环境），报告 `out/test/addon-sidebar-unit.log`；样式历史基线复验与八项检查通过（`out/test/addon-sidebar-style-baseline.log` / `addon-sidebar-style.log`）；浏览器 `addonSidebar`、`settingsPage` 通过，覆盖组件直达、设置文字绘制与明暗主题导航（`out/test/browser-runs/run-5MWs6H/report.json`）。同轮 `addonSettings` 在既有 textarea 圆角断言失败（第 293 行，空串不等于 2px）；将两个生产文件还原为基线后定向对照，同处同值失败（`out/test/browser-runs/run-5VOqIm/report.json` 与 `addonSettings.log`），随后恢复本轮修改，未扩大到该样式问题。独立规范轴与规格轴审查均无发现；未运行真实宿主与安装态回归，未合并或安装，用户验收仍待执行。
+
 状态截至 2026-09-26。下表只记录已取得的证据；自动化通过不代表对应人工项已通过。执行人工步骤后逐项补充日期、环境、结果与复现证据。
 
 前次验收缺陷修复的执行代码为 `ddd3d71`：编译、879 项 Vitest 单测、11 项启动器契约、开发态与 VSIX 安装态各 85 项真实 VSCode 1.86.2 集成用例全部通过，覆盖单元格删除保形、多表段首行号及中文候选保存。之后用户发现中列点击偏到右格；代码 `355d085` 增加光标关联侧与零宽格可见光标提示，编译、882 项单测、11 项启动器契约以及开发态与新 VSIX 安装态各 86 项真实宿主集成用例全部通过。新 `vsidian-0.1.0.vsix` 已打包；物理鼠标复验仍待用户执行。
