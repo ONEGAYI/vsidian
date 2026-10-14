@@ -15,11 +15,35 @@ describe('快速操作可用状态', () => {
     expect(state('标题\n===', 'headingNone', 1)).toBe('inactive')
   })
 
+  it('组合容器的按钮分别反映引用、列表与标题状态', () => {
+    const text = '> - ## 标题'
+    expect(state(text, 'quote', 0, text.length)).toBe('active')
+    expect(state(text, 'bulletList', 0, text.length)).toBe('active')
+    expect(state(text, 'heading2', 0, text.length)).toBe('active')
+    expect(state(text, 'headingNone', 0, text.length)).toBe('inactive')
+    expect(state('> 1. 条目', 'orderedList', 0, 7)).toBe('active')
+    expect(state('> - [x] 条目', 'taskList', 0, 10)).toBe('active')
+  })
+
   it('围栏内禁用行内格式；跨不同列表项显式围栏禁用', () => {
     const fenced = '```\ncode\n```'
     expect(state(fenced, 'bold', 5)).toBe('disabled')
     const list = '- 第一项\n- 第二项'
     expect(state(list, 'codeBlock', 2, list.length)).toBe('disabled')
+  })
+
+  it.each([
+    ['bold', '**'], ['italic', '*'], ['strikethrough', '~~'], ['highlight', '=='],
+  ] as const)('%s 按钮允许完整代码选区，仍禁用代码内部及截断选区', (op, mark) => {
+    for (const text of ['`code`', '`code` 后文', '前文 `code`', '`first` 与 ``a`b``']) {
+      expect(state(text, op, 0, text.length)).toBe('inactive')
+      const wrapped = mark + text + mark
+      expect(state(wrapped, op, mark.length, wrapped.length - mark.length)).toBe('active')
+    }
+    const text = '`code` 后文'
+    for (const [from, to] of [[2, 2], [1, 5], [2, text.length], [0, 4]]) {
+      expect(state(text, op, from, to)).toBe('disabled')
+    }
   })
 
   it('已应用的粗体是可切换状态，阅读态禁用', () => {

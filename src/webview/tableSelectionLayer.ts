@@ -14,12 +14,40 @@
 // 所属格内容盒。CM6 原生 selectionLayer 经 CSS 隐藏（display:none——其测量
 // 与 DOM 维持照常运行，行为零风险，仅不再可见），装配随 multicursorExtensions
 // 整组进出（多光标关闭时回到原生 ::selection 路径，不装本层）。
-import { EditorSelection } from '@codemirror/state'
-import { EditorView, getDrawSelectionConfig, layer, RectangleMarker } from '@codemirror/view'
+import { EditorSelection, Prec } from '@codemirror/state'
+import { Decoration, EditorView, getDrawSelectionConfig, layer, RectangleMarker, ViewPlugin } from '@codemirror/view'
+import type { DecorationSet, ViewUpdate } from '@codemirror/view'
 import { EmptyTableCellWidget, liveDecorationsField, LIVE_CLASS_NAMES } from './liveDecorations'
 
 /** 自建层块类名（与 CM6 的 cm-selectionBackground 同样式，见 main.css） */
 const SELECTION_BLOCK_CLASS = 'vsidian-selection-background'
+
+/** 字符级补绘置于内层，避免不透明行/行内底色遮住下层选区。
+ *  与背景矩形层同进退；最高装饰优先级使补绘 span 位于表格格容器内。
+ *  CSS 只在有底色的语法元素上落色，普通正文仍由原矩形层绘制。 */
+export const selectionTextPaint = Prec.highest(ViewPlugin.fromClass(class {
+  decorations: DecorationSet
+  constructor(view: EditorView) { this.decorations = this.build(view) }
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.selectionSet || update.viewportChanged) {
+      this.decorations = this.build(update.view)
+    }
+  }
+  build(view: EditorView): DecorationSet {
+    const ranges = []
+    for (const selected of view.state.selection.ranges) {
+      if (selected.empty) continue
+      for (const visible of view.visibleRanges) {
+        const from = Math.max(selected.from, visible.from)
+        const to = Math.min(selected.to, visible.to)
+        if (from < to) ranges.push(selectionTextMark.range(from, to))
+      }
+    }
+    return Decoration.set(ranges, true)
+  }
+}, { decorations: plugin => plugin.decorations }))
+
+const selectionTextMark = Decoration.mark({ class: 'vsidian-selection-text' })
 
 /** 表格感知选区背景层：装配在 drawSelection() 旁边（multicursorExtensions） */
 export const tableAwareSelectionLayer = layer({

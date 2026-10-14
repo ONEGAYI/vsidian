@@ -110,6 +110,13 @@ describe('CM6 dark 声明随宿主主题热跟随', () => {
 })
 
 describe('光标与选区颜色按主题适配（main.css 源文本；#237 起 drawSelection 在场）', () => {
+  it('字符补绘继续采用聚焦与失焦主题色，代码旧补绘保持唯一着色', () => {
+    const bodies = [...css.matchAll(/[^{}]*\.vsidian-selection-text\s*\{([^}]*)\}/g)]
+      .map(match => match[1]!)
+    expect(bodies.filter(body => /--vscode-editor-selectionBackground/.test(body))).toHaveLength(1)
+    expect(bodies.filter(body => /--vscode-editor-inactiveSelectionBackground/.test(body))).toHaveLength(1)
+    expect(css).toMatch(/\.vsidian-code-selection \.vsidian-selection-text\s*\{\s*background-color:\s*transparent;/)
+  })
   it('原生 caret 只允许零宽格与格区让位两处隐藏；绘制光标颜色归 baseTheme，选区背景归 VSCode 主题变量', () => {
     // 两处合法透明：#237 零宽活动格隐藏原生 caret；#252 格区在场让位
     //（折叠单光标在多光标关闭时的原生 caret 呈现路径）——此外不得新增

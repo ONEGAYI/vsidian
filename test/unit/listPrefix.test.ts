@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseLinePrefix,
+  lineContainerPrefixLength,
   continuePrefix,
   stripLayer,
   blankExitCut,
@@ -14,6 +15,12 @@ import {
 } from '../../src/shared/listPrefix'
 
 describe('parseLinePrefix 行前缀解析', () => {
+  it('正文落点逐层跳过交错容器，标题标记留给标题操作处理', () => {
+    expect(lineContainerPrefixLength('> - > 1. ## 正文')).toBe(9)
+    expect(lineContainerPrefixLength('- > 正文')).toBe(4)
+    expect(lineContainerPrefixLength('> - [x] 正文')).toBe(8)
+    expect(lineContainerPrefixLength('正文')).toBe(0)
+  })
   it('无序三族：标记与标记后空白构成 mark，quote/indent 为空', () => {
     expect(parseLinePrefix('- a')).toMatchObject({
       quote: '', indent: '', mark: '- ', list: { bullet: '-' },

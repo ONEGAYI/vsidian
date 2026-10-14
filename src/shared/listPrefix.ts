@@ -1,8 +1,8 @@
 // 列表/引用行前缀形态学单一事实源（工单 #119/#120）：live 正文行「结构
 // 前缀」的解析与重建。前缀 = 容器前缀（引用层）+ 列表缩进 + 列表标记
-// （含任务标记）；Enter 前缀延续、退格清层与 Tab/Shift+Tab 行缩进三族
-// 键位变换共用本模块——三处对「什么算前缀、延续成什么、剥哪一层、
-// 缩进单位多宽」的判定必须逐字节一致，否则延续与清层会互相打架。
+// （含任务标记）；Enter 前缀延续、退格清层、Tab/Shift+Tab 行缩进与格式
+// 操作共用本模块，对「什么算前缀、延续成什么、剥哪一层、正文从哪开始」
+// 的判定保持同源，避免不同操作破坏组合容器。
 //
 // 形态学规则（与 Lezer GFM 解析对齐，但不依赖树——结构合法性由调用方
 // 用语法树验证，本模块只管文本形态）：
@@ -45,6 +45,17 @@ export interface LinePrefix {
 /** 前缀总宽（相对行首的正文起点） */
 export function prefixLength(prefix: LinePrefix): number {
   return prefix.quote.length + prefix.indent.length + prefix.mark.length
+}
+
+/** 行内格式与标题操作的正文落点：逐层保留引用/列表容器，含交错嵌套。 */
+export function lineContainerPrefixLength(line: string): number {
+  let length = 0
+  for (;;) {
+    const rest = line.slice(length)
+    const prefix = parseLinePrefix(rest)
+    if (!prefix) return length + /^\s*/u.exec(rest)![0].length
+    length += prefixLength(prefix)
+  }
 }
 
 /**
