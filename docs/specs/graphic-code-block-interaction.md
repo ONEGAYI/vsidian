@@ -72,6 +72,8 @@
 
 2026-10-14 选区与画布修复：开发基线为 `366449ac3d03d7cf8e539c9527bd3aff412540ad`；公开样式历史基线仍为 v0.4.0 / `75c3df79074bdeaec0f02a38d40124f0cd66f857`。保留 `.vsidian-mermaid`、其 `svg` 后代、`.vsidian-reading-mermaid`、`.vsidian-graphic-frame` 与图表弹窗类名族、挂载关系及片段覆盖路径；未新增公开选择器、未修改历史基线。浏览器 `graphicPopup` 钉住原生拖选/复制、正文选区稳定、弹窗标签拖动不选字、默认明暗与 Codex 画布、SVG/PNG 背景和旧片段刷新后仍着色。
 
+2026-10-14 Live 灰底与多余空行修复：发布基线为 v1.0.2 / `17b999fddddf609d8ddfe1929d94d28946e55172`。图形替换所在的代码行不绘制源码底色，前后 CM6 光标缓冲元素以零高度块保留，消除额外行盒；图形自身上下边距保留。规则限定在代码行，不改变 Markdown 图片的行内布局。保留 `.vsidian-code-line`／`.HyperMD-codeblock` 与图形外壳的类名和挂载关系；进入源码后代码行／卡片背景变量仍生效。`mermaidPaint` 验证实际占高、明暗与高对比度的双模式往返和源码背景，`graphicPopup` 验证真实 Mermaid 产物的外层绘制。
+
 ### PNG 光栅化与降级
 
 PNG 光栅化在 webview canvas 完成，CSP `img-src` 已放行 `data:`（浏览器回归在宿主同形 CSP 复刻页内实证），环境不支持时降级为仅 SVG 并以弹窗内提示条回报——**不得用 `window.alert`**（宿主 webview 的 sandbox iframe 无 `allow-modals`，alert 被静默吞掉）。

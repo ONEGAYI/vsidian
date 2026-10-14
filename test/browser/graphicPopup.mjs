@@ -431,6 +431,16 @@ try {
     for (const preset of ['default', 'codex']) {
       await canvasPage.evaluate(preset => window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'appearance.mermaidTheme': preset } }), preset)
       await canvasPage.waitForFunction(() => document.querySelector('.vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered')
+      assert.equal(await canvasPage.locator('.vsidian-graphic-frame').evaluate(el => getComputedStyle(el.parentElement).backgroundColor),
+        'rgba(0, 0, 0, 0)', `${host.name}/${preset} Live 图形外层不能绘出源码灰底`)
+      const extraHeight = await canvasPage.locator('.vsidian-graphic-frame').evaluate(frame => {
+        const css = getComputedStyle(frame)
+        return frame.parentElement.getBoundingClientRect().height - frame.getBoundingClientRect().height
+          - parseFloat(css.marginTop) - parseFloat(css.marginBottom)
+      })
+      assert.ok(Math.abs(extraHeight) < 1, `${host.name}/${preset} 真实图形不应多出光标缓冲空行：${extraHeight}px`)
+      await canvasPage.evaluate(() => document.activeElement.blur())
+      await canvasPage.locator('.cm-content').screenshot({ path: path.join(presetArtifacts, `${host.name}-${preset}-live-surround.png`) })
       if (preset === 'default') {
         await canvasPage.locator('.cm-content').focus()
         const anchor = await canvasPage.evaluate(() => window.controller.getView().state.selection.main.anchor)
