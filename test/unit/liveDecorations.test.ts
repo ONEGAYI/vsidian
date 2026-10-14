@@ -376,6 +376,21 @@ describe('mark 作用域显形', () => {
     expect(hiddenRanges(build(doc, { anchor: quote }))).not.toContainEqual([quote, quote + 2])
   })
 
+  it('裸标题 mark 非聚焦保持可见：空标题行（只有 #）隐藏后整行无可见字符，不发射隐藏（与 ==== 空形态同口径）', () => {
+    const doc = '#\n## \n# 有内容\n\n普通正文'
+    const bare1 = doc.indexOf('#')
+    const bare2 = doc.indexOf('##')
+    const titled = doc.indexOf('# 有内容')
+    const elsewhere = hiddenRanges(build(doc, { anchor: doc.indexOf('普通正文') }))
+    // 空标题（无尾随内容 / 尾随空白）mark 不隐藏，源文不丢
+    expect(elsewhere).not.toContainEqual([bare1, bare1 + 1])
+    expect(elsewhere).not.toContainEqual([bare2, bare2 + 2])
+    // 对照：有内容标题非聚焦照常隐藏
+    expect(elsewhere).toContainEqual([titled, titled + 2])
+    // 聚焦空标题行同样不隐藏（既有显形语义不受影响）
+    expect(hiddenRanges(build(doc, { anchor: bare1 }))).not.toContainEqual([bare1, bare1 + 1])
+  })
+
   it('标题行内的粗体 mark 仍由粗体自身控制域决定', () => {
     const doc = '# 标题前文 **重点** 标题后文'
     const heading = doc.indexOf('#')

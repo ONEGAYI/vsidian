@@ -1115,7 +1115,14 @@ function emitForRange(
       case 'HeaderMark': {
         const heading = [...path].reverse().find((parent) => headingLevelOf(parent.name) !== null)
         const to = markerEnd(node)
-        if (!heading || !touches(heading.from, heading.to)) {
+        // 裸标题不隐藏：ATX mark 后到节点尾只有空白（空标题行）时，
+        // 隐藏 mark 会使该行无任何可见字符、整行视觉蒸发——与高亮 ====
+        // 空形态同口径（定界符保持可见，源码降级，源文不丢）。Setext
+        // 下划线标记在内容行之后、无空形态，不进此判定（node.from 在
+        // 节点头部的 ATX 判定天然排除它）。
+        const bare = heading != null && node.from === heading.from &&
+          !doc.sliceString(node.to, heading.to).trim()
+        if (!bare && (!heading || !touches(heading.from, heading.to))) {
           out.push(hideDeco.range(node.from, to))
         }
         return
