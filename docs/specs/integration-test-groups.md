@@ -492,3 +492,17 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 证据在out/test/image22-native-original.log / report.log、image22-browser-timeline.log、image22-browser-controlled-green.log、image22-readiness-red.log / red-observation.json / green.log、image22-unit-full.log、image22-compile.log与image22-native-final.log。诊断夹具和逐帧探针只在忽略目录；候选CI与本机证据分开，其他未归因条目不联动勾销。
 
 推送前同步main38be3c75的Mermaid暗色/Live图形修正，compile/类型、文件树strict及真实阅读三例3/3通过（目标1082ms）。新基线全量首次与compile同机运行时两个Vitest worker异常退出3221226505，位于webLinkMetaService/proxyAgent，8022/8046完成、24项未完成，未进入Node阶段；无断言失败记录，另记条目23，不归为本票已修复。两文件单worker77/77、Node契约另跑194/194通过；无compile并行的一次独立全量8046/8046与Node194/194通过。原失败保留，条件相关不等于因果，不据独立通过勾销23；当轮旧JSON仍为此前11项报告，仅取带退出码的日志统计。
+
+## #446 条目12：历史弹窗等待阶段定位与诊断补全（2026-10-15）
+
+**已定位到第二段弹窗SVG等待**。原主线696a1668的CI38521864148第2片在60841ms超时。按原提交归档源码及原lockfile重新安装依赖，只重建集成入口（esbuild0.28.2、原node18/cjs配置）；lockfile与构建脚本git对象分别为7f1bd52c656cfd847a4ca35bc774a3700f79bcc9、b3685f5936b4c43823780365ff71db115176c78f。旧堆栈70875:13、76270:20、85812:9三处均与重建bundle对齐，source map对应cases.ts:1345、7464与index.ts:168；7464是弹窗请求之后等待overlay与overlaySvg的第二段。由此排除首次frame等待与后续reading等待为这一次超时所在阶段，不据此判定弹窗未打开还是取图失败。
+
+当前12163dcf基线的真实Chromium/生产控制器、CSS、Mermaid产物和原五围栏fixture，在首次frame就绪后0/250/1000ms三种点击时机均装载SVG。首次快照可为5个frame、0个渲染终态，立即点击仍成功；不能把pending frame本身认定为根因。这是HTTP夹具对照，未复刻VSCode iframe与完整宿主条件，不替代旧Linux现场。初次探针误用不存在的media类名，后验overlaySvg实际为true；该装配错误单独保留，修正选择器后的三组均通过，不作为目标红。
+
+**已修正的缺陷是超时报告丢失现有探针**。waitViewState原摘要省略live/reading Mermaid计数和paint中的Mermaid/graphic字段；即使最后采样已携带overlay、overlaySvg与渲染分态，报错仍只留下模式和光标等字段。永久契约直接执行实际waitViewState，用公开宿主采样边界提供两帧，验证超时报告保留最后一帧的图形字段与原错误文本；旧实现49ms稳定失败，最小修正只追加上述现有字段，12项就绪/诊断契约通过。生产取图、弹窗、DOM/CSS、原60秒预算、装载/绘制断言与分组均不动。此修正改善下一次失败的可归因性，条目12继续未勾销。
+
+条目14另做保留前序用例的完整大纲组对照：Windows独立桌面、VSCode1.82.3开发态15/15，复制用例3865ms通过。旧copyChildren超时21795ms，没有最后实际剪贴板值或写入完成时间线；本次通过不作为根治，未改复制、互斥、预算或成品断言，仍未勾销。
+
+日志为out/test/graphic12-historical-install.log、graphic12-historical-build.log、graphic12-stage-map.json、graphic12-browser-probe.log（装配错误）/corrected.log、graphic12-diagnostics-red.log/green.log和clipboard14-group-control.log/report.log。历史源码与source map仅为忽略目录中的诊断证据，不加入发行产物；临时DEBUG-graphic12探针不进入提交。
+
+本地验证：compile/类型、完整Vitest8047/8047与Node194/194、文件树strict通过；真实VSCode1.82.3三项图形集成3/3（目标1933ms），graphicPopup完整原生浏览器套件通过（run-dTCq50，14.27s）。这些通过验证诊断补全未破坏原链路，不据此关闭条目12或14。
