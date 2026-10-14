@@ -1796,6 +1796,11 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
       // 审查轮 2：run 末行衔接 grid 行的满宽——选区从段落延续进表格首格，
       // 段落行是「选区延续行」，高亮须延伸到内容区右缘（不得止于行尾文本）
       { id: 'para-into-grid-fullwidth', kind: 'para-grid', doc: '段落延续一行。\n\n| a | b |\n| --- | --- |\n| x | y |\n', fromPick: '段落延续', toPick: 'x' },
+      // 审查轮 4：真实 webview 编辑器上方有工具栏，documentTop 非零——
+      // lineBlockAt（文档坐标）与 coordsAtPos（屏幕坐标）混用会使延续行
+      // 背景整体上移 documentTop。fixture 无工具栏故人为加 padding-top，
+      // 断言延续行（空行）选区块与该行行盒纵向对位
+      { id: 'para-into-grid-offset', kind: 'para-grid', doc: '段落延续一行。\n\n| a | b |\n| --- | --- |\n| x | y |\n', fromPick: '段落延续', toPick: 'x', offsetPadding: 64 },
     ]) {
       const page = await selBrowser.newPage()
       const errors = []
@@ -1803,6 +1808,9 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
       try {
         await page.setContent('<div id="app"></div>')
         await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+        if (scenario.offsetPadding) {
+          await page.addStyleTag({ content: `#app { padding-top: ${scenario.offsetPadding}px; }` })
+        }
         await page.addScriptTag({ url: selFixtureScript.url })
         await page.evaluate((doc) => window.initTable(doc), scenario.doc)
         await page.waitForFunction((needGrid) =>
@@ -1850,8 +1858,10 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
           const content = document.querySelector('.cm-content')
           const lines = [...document.querySelectorAll('.cm-content .cm-line')]
           const paraRect = ctx.paraLineIndex != null && lines[ctx.paraLineIndex] ? rect(lines[ctx.paraLineIndex]) : null
-          return { cellRect, blocks, contentRect: content ? rect(content) : null, paraRect }
-        }, { cellIndex: scenario.cellIndex, paraLineIndex: scenario.kind === 'para-grid' ? range.paraLineIndex : null })
+          const blankRect = ctx.blankLineIndex != null && lines[ctx.blankLineIndex] ? rect(lines[ctx.blankLineIndex]) : null
+          return { cellRect, blocks, contentRect: content ? rect(content) : null, paraRect, blankRect }
+        }, { cellIndex: scenario.cellIndex, paraLineIndex: scenario.kind === 'para-grid' ? range.paraLineIndex : null,
+          blankLineIndex: scenario.kind === 'para-grid' ? range.paraLineIndex + 1 : null })
         assert.ok(paint.blocks.length > 0, `场景 ${scenario.id}：应有可见选区块（全零宽行回退/格分段不得丢背景）`)
         if (scenario.kind === 'cell-clamp' && paint.cellRect) {
           for (const block of paint.blocks) {
@@ -1873,6 +1883,17 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
           const worst = Math.max(...overlapped.map((b) => b.right))
           assert.ok(worst >= paint.contentRect.right - 4,
             `场景 ${scenario.id}：延续进表格的段落行高亮应满宽到内容区右缘（实际 ${worst.toFixed(1)} vs ${paint.contentRect.right.toFixed(1)}——run 末行退化回归）`)
+        }
+        if (scenario.offsetPadding && paint.blankRect) {
+          // documentTop 偏移下的纵向对位：延续行（空行）选区块须落在该行行盒
+          // y 带内——lineBlockAt（文档坐标）漏加 documentTop 会整体上移偏移量
+          const band = paint.blocks.filter((b) => b.top < paint.blankRect.bottom - 2 && paint.blankRect.top + 2 < b.bottom)
+          assert.ok(band.length > 0,
+            `场景 ${scenario.id}：偏移下延续行（空行）选区背景应与该行行盒纵向对位——空行盒 y ${paint.blankRect.top.toFixed(1)}~${paint.blankRect.bottom.toFixed(1)}，实际块 y ${paint.blocks.map((b) => `${b.top.toFixed(1)}~${b.bottom.toFixed(1)}`).join('、')}（坐标系混用回归）`)
+          for (const b of band) {
+            assert.ok(b.bottom <= paint.blankRect.bottom + 2 && b.top >= paint.blankRect.top - 2,
+              `场景 ${scenario.id}：延续行选区块 ${b.top.toFixed(1)}~${b.bottom.toFixed(1)} 不得越出空行盒 ${paint.blankRect.top.toFixed(1)}~${paint.blankRect.bottom.toFixed(1)} ±2`)
+          }
         }
         assert.deepEqual(errors, [], `页面异常: ${JSON.stringify(errors)}`)
         console.log(`[原生输入][PASS] table-selection/${scenario.id}`)

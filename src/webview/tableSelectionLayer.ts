@@ -95,7 +95,8 @@ function rangeMarkers(view: EditorView, rawFrom: number, rawTo: number): Array<R
  * 下覆盖选区使分隔行保持隐藏、coordsAtPos 为 null 提前返回，不触发）。
  * run 首行不可测提前返回依赖「隐藏行必为分隔行且其后必是 grid 行」的
  * 现状；整块替换 widget（如 Mermaid 图形块）作 run 首行时画满内容宽
- * （原生画 widget 盒宽），属形态超集。
+ * （原生画 widget 盒宽），属形态超集；延续行同理——行内整块 widget 使
+ * 一行分多块时只画首块，同型超集（审查轮 4 落档）。
  */
 function closeRunBeforeGrid(
   view: EditorView,
@@ -115,19 +116,27 @@ function closeRunBeforeGrid(
   const first = view.state.doc.lineAt(runStart)
   const startCoords = view.coordsAtPos(runStart, 1)
   if (!startCoords) return
+  // BlockInfo.top 是相对文档顶的文档坐标，coordsAtPos/getBoundingClientRect 是
+  // 屏幕坐标——经 documentTop 统一到屏幕坐标再比较/拼接（CM6 drawForWidget
+  // 的 contentRect.top + block.top 同构），否则随编辑器上方工具栏与滚动整体
+  // 错位（审查轮 4：真实 webview documentTop 约 34px，混用使延续行背景上移
+  // 一行、起点下方折行补段被抑制）
+  const blockTop = (block: { top: number }) => block.top + view.documentTop
   const firstBlock = view.lineBlockAt(runStart)
+  const firstBottom = blockTop(firstBlock) + firstBlock.height
   // 起点所在视觉行：从起点到内容区右缘；起点下方同文档行的其余视觉行
   // 满宽（起点在软折行中间时存在——审查轮 3：整块画会在起点下方各行
   // 左侧留 [leftSide, 起点左] 缺口）
   piece(Math.max(startCoords.left, sides.left), startCoords.top, sides.right, startCoords.bottom)
-  if (firstBlock.top + firstBlock.height > startCoords.bottom + 0.5) {
-    piece(sides.left, startCoords.bottom, sides.right, firstBlock.top + firstBlock.height)
+  if (firstBottom > startCoords.bottom + 0.5) {
+    piece(sides.left, startCoords.bottom, sides.right, firstBottom)
   }
   let pos = first.to + 1
   while (pos < gridLineFrom) {
     const line = view.state.doc.lineAt(pos)
     const block = view.lineBlockAt(line.from)
-    piece(sides.left, block.top, sides.right, block.top + block.height)
+    const top = blockTop(block)
+    piece(sides.left, top, sides.right, top + block.height)
     pos = line.to + 1
   }
 }
@@ -234,7 +243,9 @@ function cellMarkers(
 
 /** 层坐标基点（与 CM6 RectangleMarker.forRange 的 getBase 同构，仅 LTR
  * 分支——VSCode webview 编辑器未设 RTL 文本方向；引入 RTL 支持时须补
- * right 锚点分支，与 CM6 getBase 对齐） */
+ * right 锚点分支，与 CM6 getBase 对齐）。注意**整层均为 LTR-only**：
+ * cellMarkers 的跨视觉行三段（首段右伸/末段左伸）与 closeRunBeforeGrid
+ * 的首段右伸在 RTL 下方向相反，只补本函数锚点不等于 RTL 可用 */
 function layerBase(view: EditorView): { left: number; top: number } {
   const rect = view.scrollDOM.getBoundingClientRect()
   return {
