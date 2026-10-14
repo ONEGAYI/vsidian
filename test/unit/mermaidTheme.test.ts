@@ -32,7 +32,10 @@ describe('Codex Mermaid 截图参考配色', () => {
 
   it('保留既有流程图预设，未采集参考的图类型不套用预设', () => {
     expect(buildCodexMermaidConfig('flowchart-v2')).toMatchObject({
-      layout: 'elk', themeVariables: { primaryColor: '#e5f3ff', primaryTextColor: '#004f99' },
+      layout: 'elk', themeVariables: {
+        primaryColor: '#e5f3ff', primaryTextColor: '#004f99',
+        primaryBorderColor: '#b8b9ba', lineColor: '#b8b9ba',
+      },
     })
     expect(buildCodexMermaidConfig('mindmap')).toBeUndefined()
   })

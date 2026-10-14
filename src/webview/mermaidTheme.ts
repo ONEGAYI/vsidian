@@ -72,11 +72,11 @@ export function buildCodexMermaidConfig(type = 'flowchart'): Record<string, unkn
   return {
     theme: 'base', layout: 'elk', htmlLabels: false,
     themeVariables: {
-      primaryColor: '#e5f3ff', primaryTextColor: '#004f99', primaryBorderColor: '#cedbe5',
+      primaryColor: '#e5f3ff', primaryTextColor: '#004f99', primaryBorderColor: '#b8b9ba',
       secondaryColor: '#f5faff', tertiaryColor: '#f5faff',
-      lineColor: '#cedbe5', textColor: '#004f99', fontSize: '14px',
+      lineColor: '#b8b9ba', textColor: '#004f99', fontSize: '14px',
       fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
-      edgeLabelBackground: 'transparent', clusterBkg: '#f5faff', clusterBorder: '#cedbe5',
+      edgeLabelBackground: 'transparent', clusterBkg: '#f5faff', clusterBorder: '#b8b9ba',
     },
     flowchart: { htmlLabels: false, useMaxWidth: false, padding: 16, wrappingWidth: 320, curve: 'linear', nodeSpacing: 40, rankSpacing: 40 },
     elk: { nodePlacementStrategy: 'LINEAR_SEGMENTS', mergeEdges: false, considerModelOrder: 'NODES_AND_EDGES', forceNodeModelOrder: true },

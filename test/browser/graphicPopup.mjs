@@ -266,19 +266,21 @@ try {
       fontSize: getComputedStyle(label).fontSize, weight: getComputedStyle(label).fontWeight,
       inkWeight: getComputedStyle(label.querySelector('tspan')).fontWeight,
       line: getComputedStyle(edge).stroke, lineWidth: getComputedStyle(edge).strokeWidth,
+      arrow: getComputedStyle(svg.querySelector('marker path')).fill,
       paths: [...svg.querySelectorAll('.flowchart-link')].map(el => el.getAttribute('d')),
       visible: window.quickSent().at(-1).paint?.mermaid?.visible,
       labels: svg.textContent, htmlLabels: svg.querySelectorAll('foreignObject').length }
   })
   assert.equal(presetPaint.visible, true)
   assert.equal(presetPaint.fill, 'rgb(229, 243, 255)')
-  assert.equal(presetPaint.stroke, 'rgb(206, 219, 229)')
+  assert.equal(presetPaint.stroke, 'rgb(184, 185, 186)')
   assert.equal(presetPaint.radius, '16px')
   assert.equal(presetPaint.text, 'rgb(0, 79, 153)')
   assert.equal(presetPaint.fontSize, '14px')
   assert.equal(presetPaint.weight, '600')
   assert.equal(presetPaint.inkWeight, '600', '实际绘制文字应使用 600 字重')
-  assert.equal(presetPaint.line, 'rgb(206, 219, 229)')
+  assert.equal(presetPaint.line, 'rgb(184, 185, 186)')
+  assert.equal(presetPaint.arrow, 'rgb(184, 185, 186)')
   assert.equal(presetPaint.lineWidth, '1px')
   assert.equal(presetPaint.htmlLabels, 0)
   assert.equal(presetPaint.paths.length, 5)
@@ -313,6 +315,7 @@ try {
   await presetPage.locator('.vsidian-graphic-chrome-popup').click()
   await presetPage.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
   assert.equal(await presetPage.locator('.vsidian-diagram-media .node rect.label-container').first().evaluate(el => getComputedStyle(el).fill), presetPaint.fill)
+  assert.equal(await presetPage.locator('.vsidian-diagram-media .flowchart-link').first().evaluate(el => getComputedStyle(el).stroke), presetPaint.line)
   const popupCanvas = await presetPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor)
   const popupTransform = await presetPage.locator('.vsidian-diagram-media').evaluate(el => el.style.transform)
   const edgeLabelBox = await presetPage.locator('.vsidian-diagram-media .edgeLabel tspan').first().boundingBox()
@@ -337,6 +340,7 @@ try {
   await presetPage.waitForFunction(() => window.quickSent().some(m => m.kind === 'diagram.export'))
   const codexExport = await presetPage.evaluate(() => window.quickSent().find(m => m.kind === 'diagram.export'))
   assert.ok(codexExport.content.includes('#e5f3ff'))
+  assert.ok(codexExport.content.includes('#b8b9ba'), '导出的 SVG 保留辅助灰色')
   assert.ok(codexExport.content.includes('background-color:#ffffff'), 'SVG 导出保留白色画布')
   assert.ok(!codexExport.content.includes('foreignObject'))
   await presetPage.locator('.vsidian-diagram-export-png').click()
@@ -358,6 +362,7 @@ try {
   await presetPage.evaluate(() => window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' }))
   await presetPage.waitForFunction(() => document.querySelector('.vsidian-view-reading .vsidian-mermaid')?.getAttribute('data-vsidian-mermaid-state') === 'rendered')
   assert.equal(await presetPage.locator('.vsidian-view-reading .node rect.label-container').first().evaluate(el => getComputedStyle(el).fill), presetPaint.fill)
+  assert.equal(await presetPage.locator('.vsidian-view-reading .node rect.label-container').first().evaluate(el => getComputedStyle(el).stroke), presetPaint.stroke)
   const readingLabelBox = await presetPage.locator('.vsidian-view-reading .node .label tspan').first().boundingBox()
   await presetPage.evaluate(() => window.getSelection().removeAllRanges())
   await presetPage.mouse.move(readingLabelBox.x + 1, readingLabelBox.y + readingLabelBox.height / 2)
