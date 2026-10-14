@@ -166,7 +166,9 @@ try {
   // ---- 1. 真实键盘键入 ^ 触发默认序链：dash 插 -、space 组内先适用插空格、tilde 跳过 ----
   await command('reset')
   let stats = await command('stats')
-  assert.equal(stats.registrations.length, 3, `应注册三个行为：${JSON.stringify(stats.registrations)}`)
+  // #464 增加恒不修饰的多语言目录样例，原三条输入行为仍各自验证。
+  assert.deepEqual(stats.registrations.map((entry) => entry.id).sort(),
+    ['dash-fill', 'locale-name', 'space-fill', 'tilde-fill'], `行为目录应含三个输入行为与多语言样例：${JSON.stringify(stats.registrations)}`)
   assert.equal(stats.hostState, null, '初始无用户覆盖（默认序全开启）')
   await typeChar('^')
   await waitText('word^- ')

@@ -1,5 +1,5 @@
 // V02 验证票（#349）：测试附加组件构建脚本（SDK 构建辅助工具的最小形态）。
-// 产物（.build/，git 忽略，运行时构建）：
+// 产物（.build/run-*/，git 忽略，每次构建独立）：
 // - test-addon/dist/{page.js, page.css, logo.png}——主测试组件（IIFE +
 //   独立样式 + 资源子目录内容）；
 // - throw-addon/dist/throw.js——故障注入组件（工厂同步抛错）；
@@ -11,13 +11,13 @@
 // 静态红线：组件产物不得包含 CM6 运行时标记串——出现即构建失败（构建桥
 // 拒绝 @codemirror/* 值导入是第一道防线，此处是第二道）。
 import { build } from 'esbuild'
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSdkBridgePlugin } from './sdkBridge.mjs'
 
 const fixtureRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const buildRoot = path.join(fixtureRoot, '.build')
+const buildCacheRoot = path.join(fixtureRoot, '.build')
 
 /** @codemirror/state 与 @codemirror/view 发行产物中的稳定标记串：
  *  组件产物若含任一即证明打包进了第二份 CM6 运行时 */
@@ -61,7 +61,9 @@ export function assertNoCm6Runtime(productPath) {
 }
 
 export async function buildTestAddons({ log = console.log } = {}) {
-  rmSync(buildRoot, { recursive: true, force: true })
+  // 并发套件仍在通过 HTTP 服务先前产物；每次构建拥有独立目录。
+  mkdirSync(buildCacheRoot, { recursive: true })
+  const buildRoot = mkdtempSync(path.join(buildCacheRoot, 'run-'))
   const sdkBridge = createSdkBridgePlugin()
   const targets = [
     {
