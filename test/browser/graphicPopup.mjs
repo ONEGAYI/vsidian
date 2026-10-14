@@ -411,7 +411,7 @@ try {
   assert.equal(semantic.overrideFont, '24px', 'frontmatter 显式字号应覆盖预设默认值')
   await presetPage.close()
 
-  // 默认主题的透明 SVG 在弹窗中衬编辑器画布；Codex 固定亮色画布不受宿主明暗影响。
+  // 默认主题的透明 SVG 衬编辑器画布；Codex 按宿主明暗选择图内容配色。
   for (const host of [
     { name: 'light', bodyClass: 'vscode-light', background: '#ffffff', foreground: '#333333', canvas: 'rgb(255, 255, 255)' },
     { name: 'dark', bodyClass: 'vscode-dark', background: '#1f1f1f', foreground: '#cccccc', canvas: 'rgb(31, 31, 31)' },
@@ -446,18 +446,30 @@ try {
       await canvasPage.locator('.vsidian-graphic-frame').hover()
       await canvasPage.locator('.vsidian-graphic-chrome-popup').click()
       await canvasPage.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
-      assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), preset === 'codex' ? 'rgb(255, 255, 255)' : host.canvas, `${host.name}/${preset} 弹窗画布应与图中文字配色匹配`)
+      assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), preset === 'codex' ? (host.name === 'dark' ? 'rgb(24, 24, 24)' : 'rgb(255, 255, 255)') : host.canvas, `${host.name}/${preset} 弹窗画布应与图中文字配色匹配`)
       if (host.name === 'dark' && preset === 'default') {
         assert.equal(await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color), 'rgb(204, 204, 204)', '默认暗色文字保持宿主浅色墨迹')
       }
+      if (host.name === 'dark' && preset === 'codex') {
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media .node text').first().evaluate(el => getComputedStyle(el).fill), 'rgb(255, 255, 255)', 'Codex 暗色流程图白字')
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media .node rect').first().evaluate(el => getComputedStyle(el).fill), 'rgb(26, 40, 61)', 'Codex 暗色流程图深蓝节点')
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media .flowchart-link').first().evaluate(el => getComputedStyle(el).stroke), 'rgb(184, 185, 186)', 'Codex 暗色流程图保留指定辅助灰')
+      }
       await canvasPage.waitForFunction(() => getComputedStyle(document.querySelector('.vsidian-diagram-overlay')).opacity === '1')
       await canvasPage.locator('.vsidian-diagram-overlay').screenshot({ path: path.join(presetArtifacts, `${host.name}-${preset}-popup.png`) })
-      if (preset === 'default') {
+      {
+        const labelSelector = preset === 'codex' ? '.node text' : '.node .label'
+        const inkProperty = preset === 'codex' ? 'fill' : 'color'
+        const snapshotCanvas = await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor)
         const snapshotId = await canvasPage.locator('.vsidian-diagram-media svg').getAttribute('id')
-        const snapshotInk = await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color)
+        const snapshotInk = await canvasPage.locator('.vsidian-diagram-media ' + labelSelector).first().evaluate((el, property) => getComputedStyle(el)[property], inkProperty)
         const nextTheme = host.name === 'light'
           ? { name: 'dark', bodyClass: 'vscode-dark', background: '#1f1f1f', foreground: '#cccccc', canvas: 'rgb(31, 31, 31)', ink: 'rgb(204, 204, 204)' }
           : { name: 'light', bodyClass: 'vscode-light', background: '#ffffff', foreground: '#333333', canvas: 'rgb(255, 255, 255)', ink: 'rgb(51, 51, 51)' }
+        if (preset === 'codex') {
+          nextTheme.canvas = nextTheme.name === 'dark' ? 'rgb(24, 24, 24)' : 'rgb(255, 255, 255)'
+          nextTheme.ink = nextTheme.name === 'dark' ? 'rgb(255, 255, 255)' : 'rgb(0, 79, 153)'
+        }
         await canvasPage.evaluate(theme => {
           document.body.className = theme.bodyClass
           document.body.style.setProperty('--vscode-editor-background', theme.background)
@@ -465,17 +477,17 @@ try {
           document.body.style.setProperty('--vscode-editorWidget-background', theme.name === 'dark' ? '#2d2d30' : '#f8f8f8')
           document.body.style.setProperty('--vscode-editorWidget-foreground', theme.foreground)
         }, nextTheme)
-        await canvasPage.waitForFunction(ink => {
-          const label = document.querySelector('.vsidian-view-live .node .label')
-          return label && getComputedStyle(label).color === ink
-        }, nextTheme.ink)
+        await canvasPage.waitForFunction(({ selector, property, ink }) => {
+          const label = document.querySelector('.vsidian-view-live ' + selector)
+          return label && getComputedStyle(label)[property] === ink
+        }, { selector: labelSelector, property: inkProperty, ink: nextTheme.ink })
         assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').getAttribute('id'), snapshotId, '主题变化保留打开时的图形快照')
-        assert.equal(await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color), snapshotInk)
-        assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), host.canvas, '画布应跟随快照保留，不能只切底色')
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media ' + labelSelector).first().evaluate((el, property) => getComputedStyle(el)[property], inkProperty), snapshotInk)
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), snapshotCanvas, '画布应跟随快照保留，不能只切底色')
         await canvasPage.locator('.vsidian-diagram-refresh').click()
         await canvasPage.waitForFunction(id => document.querySelector('.vsidian-diagram-media svg')?.id !== id, snapshotId)
         assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), nextTheme.canvas, '刷新后画布与新主题配色一同更新')
-        assert.equal(await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color), nextTheme.ink)
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media ' + labelSelector).first().evaluate((el, property) => getComputedStyle(el)[property], inkProperty), nextTheme.ink)
         await canvasPage.evaluate(theme => {
           document.body.className = theme.bodyClass
           document.body.style.setProperty('--vscode-editor-background', theme.background)
@@ -667,9 +679,66 @@ title 图形示例分布
     })
     await samplePage.waitForFunction(previousId => {
       const svg = document.querySelector('.vsidian-view-reading .vsidian-mermaid svg')
-      return svg && svg.id !== previousId && getComputedStyle(svg).backgroundColor === 'rgb(255, 255, 255)'
+      return svg && svg.id !== previousId
     }, beforeDark)
-    await samplePage.locator('.vsidian-view-reading .vsidian-mermaid svg').screenshot({ path: path.join(presetArtifacts, sample.name + '-dark.png') })
+    for (const mode of ['reading', 'live']) {
+      await samplePage.evaluate(mode => window.controller.handleHostMessage({ kind: 'view.mode.set', mode }), mode)
+      const selector = '.vsidian-view-' + mode + ' .vsidian-mermaid'
+      await samplePage.waitForFunction(selector => document.querySelector(selector)?.getAttribute('data-vsidian-mermaid-state') === 'rendered', selector)
+      const paint = await samplePage.evaluate(selector => {
+        const svg = document.querySelector(selector + ' svg')
+        return {
+          background: getComputedStyle(svg).backgroundColor,
+          fills: [...svg.querySelectorAll('rect,path,polygon')].map(el => getComputedStyle(el).fill),
+          strokes: [...svg.querySelectorAll('rect,path,polygon,line')].map(el => getComputedStyle(el).stroke),
+          ink: [...svg.querySelectorAll('text,tspan')].map(el => getComputedStyle(el).fill),
+        }
+      }, selector)
+      await samplePage.locator(selector + ' svg').screenshot({ path: path.join(presetArtifacts, sample.name + '-dark-' + mode + '.png') })
+      assert.equal(paint.background, 'rgb(24, 24, 24)', sample.name + '/' + mode + ' 暗色画布')
+      assert.ok(paint.ink.includes('rgb(255, 255, 255)'), sample.name + ' 暗色白字')
+      if (sample.name === 'pie') {
+        for (const color of ['rgb(31, 78, 148)', 'rgb(58, 132, 63)', 'rgb(172, 79, 35)', 'rgb(217, 163, 55)', 'rgb(120, 73, 209)', 'rgb(171, 79, 122)']) {
+          assert.ok(paint.fills.includes(color), '暗色饼图六色：' + color)
+        }
+        assert.ok(paint.strokes.includes('rgb(24, 24, 24)'), '暗色饼图分隔线')
+      } else {
+        assert.ok(paint.fills.includes('rgb(26, 40, 61)'), sample.name + ' 深蓝节点')
+        assert.ok(paint.strokes.includes('rgb(31, 78, 148)'), sample.name + ' 暗蓝边框')
+        if (sample.name !== 'gantt') assert.ok(paint.strokes.includes('rgb(139, 139, 139)'), sample.name + ' 灰色连线')
+        if (sample.name === 'gantt') {
+          assert.ok(paint.strokes.includes('rgb(58, 132, 63)'), '甘特关键任务绿色边框')
+          assert.deepEqual(await samplePage.locator(selector + ' .section1').first().evaluate(el => ({ fill: getComputedStyle(el).fill, opacity: getComputedStyle(el).opacity })), { fill: 'rgb(255, 255, 255)', opacity: '0.2' }, '甘特分区以白色 20% 叠加到深灰画布')
+        }
+        if (sample.name === 'er') {
+          assert.ok(paint.fills.includes('rgb(34, 52, 79)'), 'ER 交替深色行底：' + JSON.stringify([...new Set(paint.fills)]))
+          assert.ok(!paint.fills.includes('rgb(227, 233, 243)'), 'ER 白字不落在参考图的浅底行上')
+        }
+      }
+    }
+    await samplePage.locator('.vsidian-view-live .vsidian-graphic-frame').hover()
+    await samplePage.locator('.vsidian-view-live .vsidian-graphic-chrome-popup').click()
+    await samplePage.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
+    assert.equal(await samplePage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(24, 24, 24)', sample.name + ' 暗色弹窗画布')
+    await samplePage.locator('.vsidian-diagram-export-svg').click()
+    await samplePage.waitForFunction(() => window.quickSent().some(m => m.kind === 'diagram.export' && m.format === 'svg'))
+    assert.ok(await samplePage.evaluate(() => window.quickSent().find(m => m.kind === 'diagram.export' && m.format === 'svg').content.includes('background-color:#181818')), sample.name + ' SVG 导出保留暗色画布')
+    await samplePage.locator('.vsidian-diagram-export-png').click()
+    await samplePage.waitForFunction(() => window.quickSent().some(m => m.kind === 'diagram.export' && m.format === 'png'))
+    const darkCorner = await samplePage.evaluate(async () => {
+      const exported = window.quickSent().find(m => m.kind === 'diagram.export' && m.format === 'png')
+      const img = new Image()
+      img.src = 'data:image/png;base64,' + exported.content
+      await img.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0)
+      return [...ctx.getImageData(0, 0, 1, 1).data]
+    })
+    assert.deepEqual(darkCorner, [24, 24, 24, 255], sample.name + ' PNG 实际像素保留暗色画布')
+    await samplePage.keyboard.press('Escape')
     const restored = await samplePage.evaluate(async ({ code, name }) => {
       const holder = document.createElement('div')
       document.body.append(holder)
@@ -686,9 +755,20 @@ title 图形示例分布
       holder.remove()
       return { presetBackground, defaultBackground, overridden }
     }, sample)
-    assert.equal(restored.presetBackground, 'rgb(255, 255, 255)', sample.name + ' 暗色宿主仍使用参考图白底')
+    assert.equal(restored.presetBackground, 'rgb(24, 24, 24)', sample.name + ' 暗色宿主使用暗色参考画布')
     assert.notEqual(restored.defaultBackground, restored.presetBackground, sample.name + ' 切回默认不残留 Codex 配置')
     assert.equal(restored.overridden, true, sample.name + ' 图内配色覆盖预设')
+    const darkId = await samplePage.locator('.vsidian-view-live .vsidian-mermaid svg').getAttribute('id')
+    await samplePage.evaluate(() => {
+      document.body.className = 'vscode-light'
+      document.body.style.setProperty('--vscode-editor-background', '#ffffff')
+      document.body.style.setProperty('--vscode-editor-foreground', '#333333')
+    })
+    await samplePage.waitForFunction(id => {
+      const svg = document.querySelector('.vsidian-view-live .vsidian-mermaid svg')
+      return svg && svg.id !== id && getComputedStyle(svg).backgroundColor === 'rgb(255, 255, 255)'
+    }, darkId)
+    assert.ok(await samplePage.locator('.vsidian-view-live .vsidian-mermaid svg').evaluate(svg => [...svg.querySelectorAll('text,tspan')].some(el => getComputedStyle(el).fill === 'rgb(26, 28, 31)')), sample.name + ' 切回亮色恢复原配色')
     await samplePage.close()
   }
   console.log('[图形化代码块交互] 悬停显隐、禁点击、edit 迁移、弹窗缩放/平移/键盘/Esc、点图不关、SVG/PNG 导出（CSP 复刻页）通过')
