@@ -41,6 +41,11 @@ describe('引用块提示竖条变量族（#143）', () => {
     expect(reading).toMatch(/background-color:\s*var\(--vscode-textBlockQuote-background/)
   })
 
+  it('引用内列表在引用内容边距上叠加列表缩进，不覆盖引用边距', () => {
+    const combined = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-quote-line')
+    expect(combined).toMatch(/padding-left:\s*calc\(0\.9em \+ 3px \+ var\(--_vsidian-list-indent\)\)/)
+  })
+
   it('旧灰调竖条消费已退场：两处规则不再引用 --vscode-textBlockQuote-border', () => {
     const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line')
     const reading = cssRule(css, '#app .vsidian-view-reading .vsidian-reading-block blockquote')

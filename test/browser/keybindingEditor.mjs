@@ -58,6 +58,48 @@ try {
   state = await page.evaluate(() => window.keyState())
   assert.equal(state.text, '**word**')
   assert.equal(state.forwarded, 3)
+
+  const paragraph = '`type` 末尾的 `.1` 表示事件格式版本，不是第一次更新。`(aggregate_id, seq)` 有唯一约束；不同会话可以各自拥有 `seq = 11`。读取某个会话的持久化历史，应按该会话的 `seq` 排序。[事件表定义](opencode/packages/core/src/event/sql.ts)'
+  for (const [op, key, binding, mark, className, property, expected] of [
+    ['bold', 'Control+b', 'ctrl+b', '**', 'vsidian-strong', 'fontWeight', '700'],
+    ['italic', 'Control+i', 'ctrl+i', '*', 'vsidian-emphasis', 'fontStyle', 'italic'],
+    ['strikethrough', 'Control+Shift+s', 'ctrl+shift+s', '~~', 'vsidian-strikethrough', 'textDecorationLine', 'line-through'],
+    ['highlight', 'Control+Shift+h', 'ctrl+shift+h', '==', 'vsidian-highlight', 'backgroundColor', 'rgb(255, 230, 0)'],
+  ]) {
+    await page.evaluate(({ paragraph, op, binding }) => {
+      window.initKeys(paragraph)
+      window.updateKeys({ [op]: [binding] })
+      document.getElementById('app').style.setProperty('--vsidian-highlight-background', 'rgb(255, 230, 0)')
+    }, { paragraph, op, binding })
+    await page.locator('.cm-content').focus()
+    await page.keyboard.press('Control+a')
+    const editsBefore = (await page.evaluate(() => window.keyState())).messages
+      .filter(message => message.kind === 'edit.request').length
+    await page.keyboard.press(key)
+    state = await page.evaluate(() => window.keyState())
+    assert.equal(state.text, mark + paragraph + mark, `${op} 应包裹含行内代码和链接的整段选区`)
+    assert.equal(state.messages.filter(message => message.kind === 'edit.request').length,
+      editsBefore + 1, `${op} 应经单笔写回提交`)
+    const paint = await page.locator(`.cm-content .${className}`).filter({ hasText: '末尾的' })
+      .first().evaluate((node, property) => getComputedStyle(node)[property], property)
+    assert.equal(paint, expected, `${op} 应在正文绘制层生效`)
+    await page.keyboard.press(key)
+    assert.equal((await page.evaluate(() => window.keyState())).text, paragraph,
+      `${op} 再次切换应还原整段及代码、链接原文`)
+  }
+  for (const [op, mark] of [['bold', '**'], ['italic', '*'], ['strikethrough', '~~'], ['highlight', '=='], ['inlineCode', '`']]) {
+    await page.evaluate((op) => {
+      window.initKeys('> - ## 正文')
+      window.updateKeys({ [op]: ['ctrl+i'] })
+    }, op)
+    await page.locator('.cm-content').focus()
+    await page.keyboard.press('Control+a')
+    await page.keyboard.press('Control+i')
+    assert.equal((await page.evaluate(() => window.keyState())).text, '> - ## ' + mark + '正文' + mark,
+      `${op} 快捷键应保留引用、列表和标题的组合前缀`)
+    await page.keyboard.press('Control+i')
+    assert.equal((await page.evaluate(() => window.keyState())).text, '> - ## 正文')
+  }
   await page.close()
-  console.log('[编辑器快捷键][PASS] 原生键盘默认/清空释放/改绑/两段键与 window 转发隔离')
+  console.log('[编辑器快捷键][PASS] 原生键盘默认/清空释放/改绑/两段键与 window 转发隔离；含行内代码的整段粗体/斜体/删除线/高亮往返与绘制')
 } finally { await browser.close() }

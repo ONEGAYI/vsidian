@@ -2,9 +2,10 @@ import type { SyntaxNode, Tree } from '@lezer/common'
 import type { Text } from '@codemirror/state'
 import type { FormatOperationId } from '../shared/formatOperations'
 import type { FormatSelection } from './formatOperations'
-import { INLINE } from './formatOperations'
+import { INLINE, isPartialInlineCodeSelection } from './formatOperations'
 import type { TableRegion } from './tableRegion'
 import { containerPrefixLen, parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
+import { lineContainerPrefixLength, parseLinePrefix } from '../shared/listPrefix'
 
 export type QuickActionState = 'inactive' | 'active' | 'mixed' | 'disabled'
 
@@ -109,7 +110,7 @@ export function createQuickActionStateReader(doc: Text, tree: Tree, range: Forma
   const edges = [...atStart, ...atEnd]
   const blocked = edges.some((node) =>
     node.name === 'FencedCode' || node.name === 'CodeBlock' || node.name === 'HTMLBlock')
-  const inInlineCode = edges.some((node) => node.name === 'InlineCode')
+  const inInlineCode = edges.some((node) => isPartialInlineCodeSelection(node, range.from, range.to))
   const inTable = edges.some((node) => node.name === 'Table' || node.name === 'TableCell')
   const inLink = edges.some((node) => node.name === 'Link' || node.name === 'Autolink')
   let crossContainer = false
@@ -192,15 +193,16 @@ export function createQuickActionStateReader(doc: Text, tree: Tree, range: Forma
     lines ??= lineRange(doc, range)
     if (!lines.length) return 'inactive'
     const count = lines.filter((line) => {
-      const body = line.trimStart()
+      const prefix = parseLinePrefix(line)
+      const body = line.slice(lineContainerPrefixLength(line))
       if (op.startsWith('heading')) {
         const found = /^(#{1,6})\s+/u.exec(body)
         return op === 'headingNone' ? !found : found?.[1]?.length === Number(op.slice(7))
       }
-      if (op === 'bulletList') return /^[-+*]\s+(?!\[[ xX]\]\s)/u.test(body)
-      if (op === 'orderedList') return /^\d+[.)]\s+/u.test(body)
-      if (op === 'taskList') return /^[-+*]\s+\[[ xX]\]\s+/u.test(body)
-      if (op === 'quote') return /^>\s?/u.test(body)
+      if (op === 'bulletList') return Boolean(prefix?.list?.bullet && !prefix.list.task)
+      if (op === 'orderedList') return Boolean(prefix?.list?.digits)
+      if (op === 'taskList') return Boolean(prefix?.list?.task)
+      if (op === 'quote') return Boolean(prefix?.quote)
       return false
     }).length
     return count === 0 ? 'inactive' : count === lines.length ? 'active' : 'mixed'

@@ -163,6 +163,47 @@ describe('格式操作的文本契约', () => {
     expect(apply('# 标题\n\n- 列表', 'bold', 2, 9).text).toBe('# **标题**\n\n- **列**表')
   })
 
+  it.each([
+    ['bold', '**'], ['italic', '*'], ['strikethrough', '~~'], ['highlight', '=='],
+  ] as const)('整段选区以完整行内代码开头时仍可切换 %s', (op, mark) => {
+    const text = '`type` 末尾的 `.1` 表示事件格式版本，不是第一次更新。`(aggregate_id, seq)` 有唯一约束；不同会话可以各自拥有 `seq = 11`。读取某个会话的持久化历史，应按该会话的 `seq` 排序。[事件表定义](opencode/packages/core/src/event/sql.ts)'
+    const wrapped = apply(text, op, 0, text.length).text
+    expect(wrapped).toBe(mark + text + mark)
+    if (op === 'italic') {
+      expect(new MarkdownIt().renderInline(wrapped)).toBe('<em>' + new MarkdownIt().renderInline(text) + '</em>')
+    }
+    expect(apply(wrapped, op, 0, wrapped.length).text).toBe(text)
+  })
+
+  it.each([
+    ['bold', '**'], ['italic', '*'], ['strikethrough', '~~'], ['highlight', '=='],
+  ] as const)('完整行内代码在选区开头、末尾或两端均可外层切换 %s', (op, mark) => {
+    for (const text of ['`code`', '`code` 后文', '前文 `code`', '`first` 与 ``a`b``', '`**literal** ==mark==`']) {
+      const wrapped = apply(text, op, 0, text.length).text
+      expect(wrapped).toBe(mark + text + mark)
+      expect(apply(wrapped, op, 0, wrapped.length).text).toBe(text)
+    }
+  })
+
+  it.each(['bold', 'italic', 'strikethrough', 'highlight'] as const)(
+    '%s 仍拒绝代码内部、截断代码选区及块级代码', (op) => {
+      const text = '`code` 后文'
+      for (const [from, to] of [[2, 2], [1, 5], [2, text.length], [0, 4]]) {
+        expect(planFormatOperation(text, op, { from, to })).toBeNull()
+      }
+      for (const block of ['```bash\ncode\n```', '    code', '<script>code</script>']) {
+        expect(planFormatOperation(block, op, { from: 0, to: block.length })).toBeNull()
+      }
+    },
+  )
+
+  it('完整行内代码的外层添加与移除保持幂等', () => {
+    expect(apply('`code`', 'bold', 0, 6, undefined, 'add').text).toBe('**`code`**')
+    expect(apply('**`code`**', 'bold', 0, 10, undefined, 'add').text).toBe('**`code`**')
+    expect(apply('**`code`**', 'bold', 0, 10, undefined, 'remove').text).toBe('`code`')
+    expect(apply('`code`', 'bold', 0, 6, undefined, 'remove').text).toBe('`code`')
+  })
+
   it('空白插入成对标记并把光标置于中间；公式双链无选区也插入空结构', () => {
     expect(apply('甲 乙', 'inlineCode', 1)).toEqual({ text: '甲`` 乙', selection: { anchor: 2 } })
     expect(apply('', 'inlineMath', 0)).toEqual({ text: '$$', selection: { anchor: 1 } })
@@ -186,6 +227,48 @@ describe('格式操作的文本契约', () => {
     expect(apply('标题\n====', 'headingNone', 1).text).toBe('标题')
     expect(apply('标题\n----', 'heading2', 1).text).toBe('标题\n----')
     expect(apply('标题\n----', 'heading3', 1).text).toBe('### 标题')
+  })
+
+  it.each([
+    ['- 条目', 'quote', '> - 条目'],
+    ['1. 条目', 'quote', '> 1. 条目'],
+    ['- [x] 条目', 'quote', '> - [x] 条目'],
+    ['> - 条目', 'quote', '- 条目'],
+    ['> > - 条目', 'quote', '> - 条目'],
+    ['> 条目', 'bulletList', '> - 条目'],
+    ['> 条目', 'orderedList', '> 1. 条目'],
+    ['> 条目', 'taskList', '> - [ ] 条目'],
+    ['> - 条目', 'bulletList', '> 条目'],
+    ['> 1. 条目', 'orderedList', '> 条目'],
+    ['> - [x] 条目', 'taskList', '> 条目'],
+    ['> 01) 条目', 'bulletList', '> - 条目'],
+    ['>   - 子项', 'orderedList', '>   1. 子项'],
+    ['> # 标题', 'bulletList', '> - # 标题'],
+    ['> - 条目', 'heading2', '> - ## 条目'],
+    ['> - ## 标题', 'headingNone', '> - 标题'],
+    ['> - ## 标题', 'heading3', '> - ### 标题'],
+  ] as const)('结构前缀独立切换：%s 应用 %s → %s', (text, op, expected) => {
+    expect(apply(text, op, 0, text.length).text).toBe(expected)
+  })
+
+  it.each([
+    ['bold', '**'], ['italic', '*'], ['strikethrough', '~~'], ['highlight', '=='], ['inlineCode', '`'],
+  ] as const)('%s 包裹正文时保留完整引用、列表、任务与标题前缀', (op, mark) => {
+    for (const prefix of ['> - ', '> # ', '> - ## ', '> > 1. ', '> - [x] ', '- > ', '> - > 1. ## ']) {
+      const text = prefix + '正文'
+      const wrapped = apply(text, op, 0, text.length).text
+      expect(wrapped).toBe(prefix + mark + '正文' + mark)
+      expect(apply(wrapped, op, 0, wrapped.length).text).toBe(text)
+    }
+  })
+
+  it.each([
+    ['link', '[正文]()'], ['wikilink', '[[正文]]'], ['inlineMath', '$正文$'],
+  ] as const)('%s 的单行整段选区仅包裹容器内正文', (op, expected) => {
+    for (const prefix of ['> - ', '> # ', '> - ## ', '- > ']) {
+      const text = prefix + '正文'
+      expect(apply(text, op, 0, text.length).text).toBe(prefix + expected)
+    }
   })
 
   it('空行按标题操作插入 mark 并把光标置于空格后（#393）', () => {
@@ -246,6 +329,17 @@ describe('格式操作的文本契约', () => {
     const table = '| A | B |\n| --- | --- |\n| x | y |'
     expect(apply(table, 'codeBlock', table.indexOf('x')).text).toBe(table)
   })
+
+  it.each([['codeBlock', '```'], ['blockMath', '$$']] as const)(
+    '%s 在引用内列表中包裹及取消时保留两层容器', (op, marker) => {
+      const text = '> - 正文'
+      const wrapped = '> - ' + marker + '\n>   正文\n>   ' + marker
+      expect(apply(text, op, 5).text).toBe(wrapped)
+      expect(apply(wrapped, op, wrapped.indexOf('正文')).text).toBe(text)
+      expect(apply('> - 前中文后', op, 5, 7).text)
+        .toBe('> - 前\n>\n>   ' + marker + '\n>   中文\n>   ' + marker + '\n>\n>   后')
+    },
+  )
 
   it('容器内显式选区仍只包裹文字，前后文留在同一容器', () => {
     expect(apply('- 前中文后', 'codeBlock', 3, 5).text)

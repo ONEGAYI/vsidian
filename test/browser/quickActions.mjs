@@ -229,6 +229,23 @@ try {
     await page.keyboard.press('Escape')
     assert.equal(await page.locator('.vsidian-quick-heading').evaluate((el) =>
       document.activeElement === el), true, 'Escape 应把焦点还给标题按钮')
+    for (const [op, mark] of [['bold', '**'], ['italic', '*'], ['strikethrough', '~~'], ['highlight', '==']]) {
+      const text = '`code` 与 [链接](test.md) 和 `tail`'
+      await page.evaluate((text) => {
+        window.initQuick(text)
+        const view = window.controller.getView()
+        view.dispatch({ selection: { anchor: 0, head: text.length } })
+        view.focus()
+      }, text)
+      const button = page.locator(`[data-op="${op}"]`)
+      assert.equal(await button.isEnabled(), true, `${op} 按钮不应因完整代码选区置灰`)
+      await button.click()
+      assert.equal(await page.evaluate(() => window.quickText()), mark + text + mark,
+        `${op} 按钮应包裹整段，保留代码及链接`)
+      assert.equal(await button.getAttribute('aria-pressed'), 'true')
+      await button.click()
+      assert.equal(await page.evaluate(() => window.quickText()), text, `${op} 按钮应支持再次取消`)
+    }
     assert.deepEqual(errors, [], '页面不能有未捕获异常')
     await page.close()
   }

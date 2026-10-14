@@ -676,7 +676,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-quote-line",
-    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）；左内边距 calc(0.9em + 3px)（QuoteMark 呈现态隐藏后的排版位，与阅读 blockquote 对齐）。",
+    "purpose": "live 引用行（> 前缀）；不生成引用语法专用 span（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）；左内边距 calc(0.9em + 3px)（QuoteMark 呈现态隐藏后的排版位，与阅读 blockquote 对齐）。与列表行叠加时，在引用内容边距内增加列表层级缩进；非空选区经内部通用字符补绘保持可见，不改引用底色。",
     "views": [
       "live"
     ],
@@ -2100,11 +2100,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".cm-quote（span 级）",
-    "purpose": "引用内容不额外 span 化：live 侧仅行级 .HyperMD-quote 别名；Obsidian 的 span 级 .cm-quote token 类不承诺。",
+    "purpose": "不生成引用语法专用 span：live 侧引用别名仅行级 .HyperMD-quote；Obsidian 的 span 级 .cm-quote token 类不承诺。非空选区的内部通用补绘 span 不属于引用语法接口。",
     "views": [
       "live"
     ],
-    "dom": "引用行内无内容 span。",
+    "dom": "引用行没有专用引用内容 span；行内格式与非空选区可各自生成通用 span。",
     "example": "",
     "obsidian": {
       "counterpart": ".cm-quote（span 级 token）",
@@ -5620,7 +5620,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-quote-line": {
-    "purpose": "Line class for live quotes (the > prefix); quote content gets no extra spans (see limit-quote-span). For the 3px accent bar on the left edge see var-quote-bar-color (shared with the reading blockquote); left padding is calc(0.9em + 3px) — the layout slot left after the QuoteMark presentation is hidden — aligned with the reading blockquote.",
+    "purpose": "Line class for live quotes (the > prefix); no quote-specific syntax spans are emitted (see limit-quote-span). The 3px accent bar uses var-quote-bar-color, shared with reading blockquotes. Left padding is calc(0.9em + 3px). List depth indentation is added inside that quote padding. Internal shared text-selection marks keep nonempty selections visible without changing the quote background.",
     "states": "The > marker at line start is only revealed near the marker and its adjacent spaces.",
     "dom": "A .cm-line line element inside the live container.",
     "obsidian": {
@@ -6052,8 +6052,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-quote-span": {
-    "purpose": "Quote content gets no extra spans: live view only has the line-level .HyperMD-quote alias; the span-level .cm-quote token class of Obsidian is not promised.",
-    "dom": "No content spans exist inside quote lines.",
+    "purpose": "No quote-specific syntax spans are emitted. Quote aliases remain line-level .HyperMD-quote; the span-level .cm-quote token class of Obsidian is not promised. Internal shared selection spans are not a quote syntax interface.",
+    "dom": "No quote-specific content span; inline formatting and nonempty selections may emit their own shared spans.",
     "obsidian": {
       "counterpart": ".cm-quote (span-level token)"
     }

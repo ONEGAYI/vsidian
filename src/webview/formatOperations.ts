@@ -1,6 +1,7 @@
 import type { SyntaxNode } from '@lezer/common'
 import type { FormatOperationId } from '../shared/formatOperations'
 import { markdownTreeParser } from '../shared/markdownDoc'
+import { lineContainerPrefixLength, parseLinePrefix, prefixLength } from '../shared/listPrefix'
 import { containerPrefixLen, parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
 import type { TableRegion } from './tableRegion'
 
@@ -70,11 +71,17 @@ function adjacentSpan(root: SyntaxNode, name: string, pos: number): SyntaxNode |
   return found
 }
 
+/** 完整代码片段可以被外层格式包裹；光标、内部及截断选区仍属代码上下文。
+ *  格式命令与快速操作按钮共用此判定，避免执行与可用状态分歧。 */
+export function isPartialInlineCodeSelection(node: SyntaxNode, from: number, to: number): boolean {
+  return node.name === 'InlineCode' && (from > node.from || to < node.to)
+}
+
 function blockedInline(root: SyntaxNode, from: number, to: number, target: string): boolean {
   const blocked = new Set(['FencedCode', 'CodeBlock', 'HTMLBlock'])
-  if (target !== 'InlineCode') blocked.add('InlineCode')
   for (const pos of [from, Math.max(from, to - 1)]) {
-    if (nodesAt(root, pos).some((node) => blocked.has(node.name))) return true
+    if (nodesAt(root, pos).some((node) => blocked.has(node.name) ||
+      target !== 'InlineCode' && isPartialInlineCodeSelection(node, from, to))) return true
   }
   return false
 }
@@ -110,6 +117,11 @@ function codeSpanMarkers(content: string): { open: string; close: string } {
   const padding = content.startsWith('`') || content.endsWith('`') ||
     content.startsWith(' ') && content.endsWith(' ') ? ' ' : ''
   return { open: delimiter + padding, close: padding + delimiter }
+}
+
+function lineContentStart(line: string): number {
+  const container = lineContainerPrefixLength(line)
+  return container + (/^#{1,6}\s+/u.exec(line.slice(container))?.[0].length ?? 0)
 }
 
 function rewriteInlineLine(text: string, root: SyntaxNode, name: string, mark: string,
@@ -377,7 +389,7 @@ function inlinePlan(text: string, op: FormatOperationId, range: FormatSelection,
     const partTo = Math.min(to, lineTo)
     if (partFrom < partTo) {
       const line = text.slice(lineFrom, lineTo)
-      const prefix = /^(\s*(?:#{1,6}\s+|(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?|>\s*))/u.exec(line)?.[0].length ?? 0
+      const prefix = lineContentStart(line)
       const start = Math.max(partFrom, lineFrom + prefix)
       if (start < partTo && !blockedInline(root, start, partTo, config.node)) {
         let change: FormatChange | null = null
@@ -417,26 +429,30 @@ function linePlan(text: string, op: FormatOperationId, range: FormatSelection): 
     if (start < range.to || range.from === range.to) {
       const line = text.slice(start, end)
       if (line.trim()) {
-        const indent = /^\s*/u.exec(line)![0]
-        const body = line.slice(indent.length)
-        const heading = /^(?:#{1,6}\s+|[^\n]+\n[=-]+$)/u.exec(body)
-        const clean = body.replace(/^#{1,6}\s+/u, '')
-          .replace(/^(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/u, '')
-          .replace(/^>\s?/u, '')
+        const prefix = parseLinePrefix(line)
+        const quote = prefix?.quote ?? ''
+        const indent = prefix?.indent ?? /^\s*/u.exec(line)![0]
+        const body = line.slice(prefix ? prefixLength(prefix) : indent.length)
         let next = line
         if (op.startsWith('heading')) {
+          const headingStart = lineContainerPrefixLength(line)
+          const headingBody = line.slice(headingStart)
+          const heading = /^#{1,6}\s+/u.exec(headingBody)
+          const clean = headingBody.replace(/^#{1,6}\s+/u, '')
           const level = op === 'headingNone' ? 0 : Number(op.slice(7))
-          next = indent + (level ? '#'.repeat(level) + ' ' : '') +
-            (op === 'headingNone' ? clean : clean)
+          next = line.slice(0, headingStart) + (level ? '#'.repeat(level) + ' ' : '') + clean
           if (op === 'headingNone' && !heading) next = line
-        } else if (op === 'bulletList') next = indent +
-          (/^[-+*]\s+(?!\[[ xX]\]\s)/u.test(body) ? clean : '- ' + clean)
-        else if (op === 'orderedList') next = indent +
-          (/^\d+[.)]\s+/u.test(body) ? clean : '1. ' + clean)
-        else if (op === 'taskList') next = indent +
-          (/^[-+*]\s+\[[ xX]\]\s+/u.test(body) ? clean : '- [ ] ' + clean)
-        else if (op === 'quote') next = indent +
-          (/^>\s?/u.test(body) ? clean : '> ' + clean)
+        } else if (op === 'bulletList') next = quote + indent +
+          (prefix?.list?.bullet && !prefix.list.task ? body : '- ' + body)
+        else if (op === 'orderedList') next = quote + indent +
+          (prefix?.list?.digits ? body : '1. ' + body)
+        else if (op === 'taskList') next = quote + indent +
+          (prefix?.list?.task ? body : '- [ ] ' + body)
+        else if (op === 'quote') {
+          // 引用是外层容器：只增删一层 >，保留列表、标题与它们的缩进。
+          const outer = /^(\s*)> ?/u.exec(line)
+          next = outer ? outer[1]! + line.slice(outer[0].length) : '> ' + line
+        }
         if (next !== line) lines.push({ from: start, to: end, insert: next })
       } else {
         // 空行插入（#393）：标题与列表/引用统一插入对应前缀、光标置于
@@ -464,6 +480,17 @@ function linePlan(text: string, op: FormatOperationId, range: FormatSelection): 
     : { changes: lines, selection: { anchor: emptyPrefixAnchor } }
 }
 
+function fenceLinePrefixes(line: string): { prefix: string; continuation: string; quote: string } | null {
+  const shape = parseLinePrefix(line.split('\n', 1)[0]!)
+  if (!shape) return null
+  const list = shape.list
+  // 任务复选标记属于项内容；块级围栏沿既有规则只消费列表的结构标记。
+  const mark = list ? (list.bullet || list.digits + list.delim) + list.gap1 : ''
+  const prefix = shape.quote + shape.indent + mark
+  const continuation = shape.quote + ' '.repeat(shape.indent.length + mark.length)
+  return { prefix, continuation, quote: shape.quote }
+}
+
 function fencePlan(text: string, op: 'codeBlock' | 'blockMath', range: FormatSelection, root: SyntaxNode): FormatPlan | null {
   let { from, to } = range
   const selected = from !== to
@@ -477,7 +504,7 @@ function fencePlan(text: string, op: 'codeBlock' | 'blockMath', range: FormatSel
     if (lines.length < 3) return null
     const lineStart = text.lastIndexOf('\n', node.from - 1) + 1
     const prefix = text.slice(lineStart, node.from)
-    const continuation = inQuote ? prefix : inList ? ' '.repeat(prefix.length) : ''
+    const continuation = fenceLinePrefixes(prefix)?.continuation ?? ''
     const content = lines.slice(1, -1).map((line) =>
       line.startsWith(continuation) ? line.slice(continuation.length) : line)
     return { changes: [{ from: node.from, to: node.to,
@@ -492,7 +519,8 @@ function fencePlan(text: string, op: 'codeBlock' | 'blockMath', range: FormatSel
       const math = [...initialNodes].reverse().find((node) => node.name === 'Paragraph')
       if (math) {
         const lines = text.slice(math.from, math.to).split('\n')
-        const last = lines.at(-1)?.replace(/^\s*>\s?|^\s+/u, '')
+        const lastLine = lines.at(-1)!
+        const last = lastLine.slice(lineContainerPrefixLength(lastLine))
         if (lines.length >= 3 && lines[0] === '$$' && last === '$$') return unwrap(math)
       }
     }
@@ -514,11 +542,10 @@ function fencePlan(text: string, op: 'codeBlock' | 'blockMath', range: FormatSel
     const eol = text.indexOf('\n', to)
     const sourceTo = eol < 0 ? text.length : eol
     const source = text.slice(sourceFrom, sourceTo)
-    const match = /^(\s*(?:[-+*]|\d+[.)])\s+|\s*>\s?)/u.exec(source)
-    if (match && from >= sourceFrom + match[0].length) {
-      const prefix = match[0]
-      const continuation = inQuote ? '> ' : ' '.repeat(prefix.length)
-      const separator = inQuote ? '\n>\n' : '\n\n'
+    const parts = fenceLinePrefixes(source)
+    if (parts && from >= sourceFrom + parts.prefix.length) {
+      const { prefix, continuation } = parts
+      const separator = parts.quote ? '\n' + parts.quote.trimEnd() + '\n' : '\n\n'
       const left = text.slice(sourceFrom + prefix.length, from)
       const picked = text.slice(from, to)
       const right = text.slice(to, sourceTo)
@@ -533,13 +560,12 @@ function fencePlan(text: string, op: 'codeBlock' | 'blockMath', range: FormatSel
   if (!selected && (inList || inQuote)) {
     const sourceFrom = text.lastIndexOf('\n', from - 1) + 1
     const source = text.slice(sourceFrom, to)
-    const match = /^(\s*(?:[-+*]|\d+[.)])\s+|\s*>\s?)/u.exec(source)
-    if (match) {
-      const prefix = match[0]
+    const parts = fenceLinePrefixes(source)
+    if (parts) {
+      const { prefix, continuation } = parts
       const content = source.slice(prefix.length)
       const marker = op === 'blockMath' ? '$$' : '`'.repeat(Math.max(3,
         ...[...content.matchAll(/`+/gu)].map((m) => m[0].length + 1)))
-      const continuation = inQuote ? prefix : ' '.repeat(prefix.length)
       return { changes: [{ from: sourceFrom, to,
         insert: prefix + marker + '\n' + continuation + content + '\n' + continuation + marker }] }
     }
@@ -716,6 +742,15 @@ export function planFormatOperation(
       op === 'taskList' || op === 'quote') return linePlan(text, op, range)
   if (op === 'link' || op === 'inlineMath' || op === 'wikilink') {
     let { from, to } = range
+    if (from !== to) {
+      const lineFrom = text.lastIndexOf('\n', from - 1) + 1
+      const lineBreak = text.indexOf('\n', lineFrom)
+      const lineTo = lineBreak < 0 ? text.length : lineBreak
+      if (to <= lineTo) {
+        from = Math.max(from, lineFrom + lineContentStart(text.slice(lineFrom, lineTo)))
+        if (from >= to) return null
+      }
+    }
     if (op === 'link') {
       const link = nodesAt(root, from).find((node) => node.name === 'Link')
       if (link && (from === to || from === link.from && to === link.to)) {
