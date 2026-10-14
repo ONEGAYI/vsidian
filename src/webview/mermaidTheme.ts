@@ -1,8 +1,8 @@
-// Mermaid 暗色主题装配（工单 #110）：暗色分支的 themeVariables 与 VSCode
+// 默认 Mermaid 暗色主题装配（工单 #110）：暗色分支的 themeVariables 与 VSCode
 // 注入色板（--vscode-* 计算值）对齐——墨水色组（连线、信号线、文字）取
 // 编辑器前景色，节点组取编辑器部件底色与描边，边标签底取编辑器画布底。
 // 变量缺失（测试环境、宿主未注入）回退到与 Dark Modern 量级一致的暗色
-// 兜底；亮色分支不经过本模块（维持 #60 现状）。
+// 兜底；默认预设亮色分支不注入此色板（维持 #60 现状）。
 //
 // 只覆盖对齐正文所需的最小键集：其余变量由 mermaid dark 基底主题自行
 // 派生（本身已是暗色友好取值），避免整套主题硬编码后随上游版本漂移。
@@ -27,8 +27,16 @@ export const MERMAID_DARK_FALLBACK_PALETTE: Readonly<VscodeMermaidPalette> = {
   widgetBorder: '#3c3c3c',
 }
 
-/** Codex 截图的近似预设；流程图与其他六种图分别配色，保留源码覆写。 */
-export function buildCodexMermaidConfig(type = 'flowchart'): Record<string, unknown> | undefined {
+/** Codex 明暗截图的近似预设；保留各图布局与源码覆写。 */
+export function buildCodexMermaidConfig(type = 'flowchart', dark = false): Record<string, unknown> | undefined {
+  const background = dark ? '#181818' : '#ffffff'
+  const fill = dark ? '#1a283d' : '#e0edfe'
+  const border = dark ? '#1f4e94' : '#539af8'
+  const ink = dark ? '#ffffff' : '#1a1c1f'
+  const line = dark ? '#8b8b8b' : '#8e8f90'
+  const green = dark ? '#3a843f' : '#6bc67f'
+  const muted = dark ? '#1f1f1f' : '#ffffff'
+  const mutedBorder = dark ? '#2b2b2b' : '#ededed'
   if (!type.startsWith('flowchart')) {
     if (!['sequence', 'class', 'classDiagram', 'state', 'stateDiagram', 'er', 'gantt', 'pie'].includes(type)) {
       return undefined
@@ -36,53 +44,56 @@ export function buildCodexMermaidConfig(type = 'flowchart'): Record<string, unkn
     return {
       theme: 'base', htmlLabels: false,
       fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
-      themeCSS: '& { background-color:#ffffff; }\n.grid .tick line { stroke:#8e8f90; }' +
-        (type === 'state' || type === 'stateDiagram' ? '\nmarker path { fill:#8e8f90; stroke:#8e8f90; }' : ''),
+      themeCSS: `& { background-color:${background}; }\n.grid .tick line { stroke:${dark ? '#0a0a0a' : line}; }` +
+        (type === 'state' || type === 'stateDiagram' ? `\nmarker path { fill:${line}; stroke:${line}; }` : ''),
       themeVariables: {
-        darkMode: false, background: '#ffffff',
-        primaryColor: '#e0edfe', primaryTextColor: '#1a1c1f', primaryBorderColor: '#539af8',
-        secondaryColor: '#e0edfe', secondaryTextColor: '#1a1c1f',
-        tertiaryColor: '#e0edfe', tertiaryTextColor: '#1a1c1f',
-        lineColor: '#8e8f90', arrowheadColor: '#8e8f90', textColor: '#1a1c1f', titleColor: '#1a1c1f',
+        darkMode: dark, background,
+        primaryColor: fill, primaryTextColor: ink, primaryBorderColor: border,
+        secondaryColor: fill, secondaryTextColor: ink,
+        tertiaryColor: fill, tertiaryTextColor: ink,
+        lineColor: line, arrowheadColor: line, textColor: ink, titleColor: ink,
         fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
-        edgeLabelBackground: '#eff6fe',
-        actorLineColor: '#8e8f90', signalColor: '#8e8f90', signalTextColor: '#1a1c1f',
-        labelBoxBkgColor: '#ffffff', labelBoxBorderColor: '#ededed',
-        activationBkgColor: '#ffffff', activationBorderColor: '#ededed',
-        noteBkgColor: '#ffffff', noteBorderColor: '#6bc67f', noteTextColor: '#1a1c1f',
-        sequenceNumberColor: '#c6c7c7',
-        compositeBackground: '#e0edfe', compositeTitleBackground: '#e0edfe',
-        attributeBackgroundColorOdd: '#ffffff', attributeBackgroundColorEven: '#f9fbff',
-        sectionBkgColor: '#ffffff', sectionBkgColor2: '#f9fbff', altSectionBkgColor: '#ffffff',
-        gridColor: '#8e8f90',
-        taskBkgColor: '#e0edfe', taskBorderColor: '#539af8',
-        activeTaskBkgColor: '#e0edfe', activeTaskBorderColor: '#539af8',
-        doneTaskBkgColor: '#ffffff', doneTaskBorderColor: '#ededed',
-        critBkgColor: '#ffffff', critBorderColor: '#6bc67f',
-        taskTextColor: '#1a1c1f', taskTextDarkColor: '#1a1c1f',
-        taskTextLightColor: '#1a1c1f', taskTextOutsideColor: '#1a1c1f',
-        pie1: '#539af8', pie2: '#6bc67f', pie3: '#ef8b57',
-        pie4: '#f8d45d', pie5: '#b897f4', pie6: '#f68ebc',
-        pieOpacity: '0.7', pieStrokeColor: '#ffffff', pieStrokeWidth: '2px',
-        pieOuterStrokeWidth: '0px', pieSectionTextColor: '#1a1c1f',
-        pieLegendTextColor: '#1a1c1f', pieTitleTextColor: '#1a1c1f',
+        edgeLabelBackground: dark ? '#19202b' : '#eff6fe',
+        actorLineColor: line, signalColor: line, signalTextColor: ink,
+        labelBoxBkgColor: background, labelBoxBorderColor: mutedBorder,
+        activationBkgColor: muted, activationBorderColor: mutedBorder,
+        noteBkgColor: muted, noteBorderColor: green, noteTextColor: ink,
+        sequenceNumberColor: dark ? '#515151' : '#c6c7c7',
+        compositeBackground: fill, compositeTitleBackground: fill,
+        attributeBackgroundColorOdd: dark ? fill : '#ffffff', attributeBackgroundColorEven: dark ? '#22344f' : '#f9fbff',
+        ...(dark ? { rowOdd: fill, rowEven: '#22344f' } : {}),
+        // 原生甘特分区为 0.2 透明度；暗色叠加后分别为 #1a1a1a、#181b1f、#464646。
+        sectionBkgColor: dark ? '#222222' : '#ffffff', sectionBkgColor2: dark ? '#18273b' : '#f9fbff', altSectionBkgColor: '#ffffff',
+        gridColor: dark ? '#0a0a0a' : line,
+        taskBkgColor: fill, taskBorderColor: border,
+        activeTaskBkgColor: fill, activeTaskBorderColor: border,
+        doneTaskBkgColor: muted, doneTaskBorderColor: mutedBorder,
+        critBkgColor: dark ? '#4c4c4c' : '#ffffff', critBorderColor: green,
+        taskTextColor: ink, taskTextDarkColor: ink,
+        taskTextLightColor: ink, taskTextOutsideColor: ink,
+        pie1: border, pie2: green, pie3: dark ? '#ac4f23' : '#ef8b57',
+        pie4: dark ? '#d9a337' : '#f8d45d', pie5: dark ? '#7849d1' : '#b897f4', pie6: dark ? '#ab4f7a' : '#f68ebc',
+        pieOpacity: '0.7', pieStrokeColor: background, pieStrokeWidth: '2px',
+        pieOuterStrokeWidth: '0px', pieSectionTextColor: ink,
+        pieLegendTextColor: ink, pieTitleTextColor: ink,
       },
     }
   }
   return {
     theme: 'base', layout: 'elk', htmlLabels: false,
     themeVariables: {
-      primaryColor: '#e5f3ff', primaryTextColor: '#004f99', primaryBorderColor: '#b8b9ba',
-      secondaryColor: '#f5faff', tertiaryColor: '#f5faff',
-      lineColor: '#b8b9ba', textColor: '#004f99', fontSize: '14px',
+      darkMode: dark,
+      primaryColor: dark ? fill : '#e5f3ff', primaryTextColor: dark ? ink : '#004f99', primaryBorderColor: '#b8b9ba',
+      secondaryColor: dark ? '#22344f' : '#f5faff', tertiaryColor: dark ? '#22344f' : '#f5faff',
+      lineColor: '#b8b9ba', textColor: dark ? ink : '#004f99', fontSize: '14px',
       fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
-      edgeLabelBackground: 'transparent', clusterBkg: '#f5faff', clusterBorder: '#b8b9ba',
+      edgeLabelBackground: 'transparent', clusterBkg: dark ? '#22344f' : '#f5faff', clusterBorder: '#b8b9ba',
     },
     flowchart: { htmlLabels: false, useMaxWidth: false, padding: 16, wrappingWidth: 320, curve: 'linear', nodeSpacing: 40, rankSpacing: 40 },
     elk: { nodePlacementStrategy: 'LINEAR_SEGMENTS', mergeEdges: false, considerModelOrder: 'NODES_AND_EDGES', forceNodeModelOrder: true },
-    themeCSS: '& { background-color:#ffffff; }\n' +
+    themeCSS: `& { background-color:${background}; }\n` +
       '.node rect.label-container { rx:16px; ry:16px; stroke-width:1px; }\n' +
-      '.node polygon.label-container { fill:#f5faff; }\n' +
+      `.node polygon.label-container { fill:${dark ? '#22344f' : '#f5faff'}; }\n` +
       '.node .label, .edgeLabel { font-weight:600; }\n' +
       '.flowchart-link { stroke-linecap:round; stroke-linejoin:round; }',
   }
