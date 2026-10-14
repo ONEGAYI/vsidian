@@ -17,6 +17,73 @@ try {
   await page.setContent('<div id="app"></div>')
   await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: output })
+  // 1.0.2 回归：真实 Live 围栏装饰不能把源码行底色绘到图形四周。
+  // SVG stub 只隔离异步绘图；外层行、widget 与双模式由生产控制器创建。
+  await page.evaluate(() => {
+    window.mermaid = { initialize() {}, async render() {
+      return { svg: '<svg width="100" height="100" style="background:white"><rect width="100" height="100" fill="white"/></svg>' }
+    } }
+    document.getElementById('app').style.setProperty('--vsidian-live-code-background', 'rgb(50, 51, 52)')
+    document.getElementById('app').style.setProperty('--vsidian-code-card-background', 'rgb(70, 71, 72)')
+    window.initQuick('```mermaid\nflowchart TD\nA-->B\n```\n\n结尾')
+    const view = window.controller.getView()
+    view.dispatch({ selection: { anchor: view.state.doc.length } })
+  })
+  await page.waitForFunction(() => document.querySelector('.vsidian-mermaid svg'))
+  const layout = await page.locator('.vsidian-graphic-frame').evaluate(frame => {
+    const css = getComputedStyle(frame)
+    return { actual: frame.parentElement.getBoundingClientRect().height,
+      expected: frame.getBoundingClientRect().height + parseFloat(css.marginTop) + parseFloat(css.marginBottom) }
+  })
+  assert.ok(Math.abs(layout.actual - layout.expected) < 1,
+    `图形行高度应只包含图形及其上下边距，不能多出光标缓冲空行：${JSON.stringify(layout)}`)
+  const surround = await page.locator('.vsidian-graphic-frame').evaluate(frame => {
+    const layers = []
+    for (let el = frame; el && !el.classList.contains('cm-content'); el = el.parentElement) {
+      layers.push({ className: el.className, background: getComputedStyle(el).backgroundColor })
+    }
+    return layers
+  })
+  assert.ok(surround.every(layer => layer.background === 'rgba(0, 0, 0, 0)'),
+    `Live 图形外层应透明，不能继承源码行底色：${JSON.stringify(surround)}`)
+  for (const theme of [
+    { name: 'vscode-light', size: '14px', lineHeight: '1.5' },
+    { name: 'vscode-dark', size: '18px', lineHeight: '2' },
+    { name: 'vscode-high-contrast', size: '24px', lineHeight: '1.5' },
+  ]) {
+    await page.evaluate(theme => {
+      document.body.className = theme.name
+      document.getElementById('app').style.setProperty('--vsidian-content-font-size', theme.size)
+      document.getElementById('app').style.setProperty('--vsidian-content-line-height', theme.lineHeight)
+    }, theme)
+    await page.evaluate(() => window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' }))
+    await page.waitForFunction(() => document.querySelector('.vsidian-view-reading .vsidian-mermaid svg'))
+    assert.equal(await page.locator('.vsidian-view-reading .vsidian-graphic-frame').evaluate(el => getComputedStyle(el.parentElement).backgroundColor),
+      'rgba(0, 0, 0, 0)', `${theme.name} 阅读图形外层应透明`)
+    await page.evaluate(() => window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'live' }))
+    await page.waitForFunction(() => document.querySelector('.cm-content .vsidian-mermaid svg'))
+    assert.equal(await page.locator('.cm-content .vsidian-graphic-frame').evaluate(el => getComputedStyle(el.parentElement).backgroundColor),
+      'rgba(0, 0, 0, 0)', `${theme.name} 切回 Live 后图形外层应透明`)
+    const extraHeight = await page.locator('.cm-content .vsidian-graphic-frame').evaluate(frame => {
+      const css = getComputedStyle(frame)
+      return frame.parentElement.getBoundingClientRect().height - frame.getBoundingClientRect().height
+        - parseFloat(css.marginTop) - parseFloat(css.marginBottom)
+    })
+    assert.ok(Math.abs(extraHeight) < 1, `${theme.name}/${theme.size}/${theme.lineHeight} 不应多出光标缓冲空行：${extraHeight}px`)
+  }
+  await page.locator('.vsidian-graphic-chrome-edit').evaluate(button => button.click())
+  assert.equal(await page.locator('.vsidian-code-line').first().evaluate(el => getComputedStyle(el).backgroundColor),
+    'rgb(70, 71, 72)', '进入源码后仍使用既有代码卡片背景变量')
+  await page.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'codeblock.card': false } }))
+  assert.equal(await page.locator('.vsidian-code-line').first().evaluate(el => getComputedStyle(el).backgroundColor),
+    'rgb(50, 51, 52)', '关闭卡片后源码仍使用既有代码行背景变量')
+  await page.evaluate(() => {
+    document.body.className = ''
+    const root = document.getElementById('app')
+    for (const key of ['--vsidian-content-font-size', '--vsidian-content-line-height',
+      '--vsidian-live-code-background', '--vsidian-code-card-background']) root.style.removeProperty(key)
+    window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'codeblock.card': true } })
+  })
   await page.evaluate(() => window.initQuick('正文'))
 
   const hidden = await page.evaluate(() => {

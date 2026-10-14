@@ -2198,6 +2198,11 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
   background-color: var(--vsidian-live-code-background, rgba(128, 128, 128, 0.09));
 }
 
+/* 图形替换仍挂在围栏行内：源码底色不能透出 SVG 的四周。 */
+#app .cm-editor .cm-scroller .vsidian-code-line:has(> .vsidian-graphic-frame) {
+  background-color: transparent;
+}
+
 #app .cm-editor .cm-scroller .vsidian-quote-line {
   box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color);
   /* #143 验收修复：QuoteMark 呈现态隐藏后内容左移至行首，文字与竖条
@@ -4320,6 +4325,13 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 
 #app .vsidian-graphic-frame .vsidian-mermaid {
   margin: 0;
+}
+
+/* Live 围栏图形占整行；前后光标缓冲不应另撑两行空白（同嵌入卡片）。 */
+#app .cm-editor .cm-content .cm-line.vsidian-code-line > .cm-widgetBuffer:has(+ .vsidian-graphic-frame),
+#app .cm-editor .cm-content .cm-line.vsidian-code-line > .vsidian-graphic-frame + .cm-widgetBuffer {
+  display: block;
+  height: 0;
 }
 
 #app .vsidian-graphic-chrome {

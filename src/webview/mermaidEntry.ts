@@ -26,7 +26,7 @@ const api: MermaidApi = {
   async render(id, code, preset = 'default') {
     mermaid.initialize(baseConfig)
     if (preset === 'codex') {
-      const config = buildCodexMermaidConfig(mermaid.detectType(code))
+      const config = buildCodexMermaidConfig(mermaid.detectType(code), baseConfig.theme === 'dark')
       if (config) mermaid.initialize({ ...baseConfig, ...config })
     }
     return mermaid.render(id, code)

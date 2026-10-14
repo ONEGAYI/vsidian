@@ -13,6 +13,36 @@ import {
 
 describe('Codex Mermaid 截图参考配色', () => {
   it.each(['sequence', 'class', 'classDiagram', 'state', 'stateDiagram', 'er', 'gantt', 'pie'])(
+    '%s 暗色模式按参考图使用深蓝节点、白字与深灰画布',
+    (type) => {
+      const config = buildCodexMermaidConfig(type, true)!
+      expect(config).toMatchObject({
+        theme: 'base',
+        themeVariables: {
+          darkMode: true, background: '#181818',
+          primaryColor: '#1a283d', primaryBorderColor: '#1f4e94',
+          primaryTextColor: '#ffffff', lineColor: '#8b8b8b',
+        },
+      })
+      expect(config.themeCSS).toContain('& { background-color:#181818; }')
+      expect(config).not.toHaveProperty('layout')
+    },
+  )
+
+  it('暗色 ER 表格的两种行底色都保持白字可读，饼图保留深色六色盘', () => {
+    const config = buildCodexMermaidConfig('er', true)!
+    const tv = config.themeVariables as Record<string, string>
+    expect(tv.rowOdd).toBe('#1a283d')
+    expect(tv.rowEven).toBe('#22344f')
+    for (const background of [tv.primaryColor!, tv.attributeBackgroundColorOdd!, tv.attributeBackgroundColorEven!, tv.rowOdd!, tv.rowEven!]) {
+      expect(contrast(tv.primaryTextColor!, background)).toBeGreaterThanOrEqual(4.5)
+    }
+    expect(buildCodexMermaidConfig('pie', true)).toMatchObject({
+      themeVariables: { pie1: '#1f4e94', pie2: '#3a843f', pieSectionTextColor: '#ffffff', pieStrokeColor: '#181818' },
+    })
+  })
+
+  it.each(['sequence', 'class', 'classDiagram', 'state', 'stateDiagram', 'er', 'gantt', 'pie'])(
     '%s 使用六张参考图的浅蓝边框与深灰文字，不沿用流程图 ELK 布局',
     (type) => {
       const config = buildCodexMermaidConfig(type)
@@ -30,6 +60,12 @@ describe('Codex Mermaid 截图参考配色', () => {
     },
   )
 
+  it('甘特分区按原生 0.2 透明度叠加成参考中的深灰条带', () => {
+    expect(buildCodexMermaidConfig('gantt', true)).toMatchObject({
+      themeVariables: { sectionBkgColor: '#222222', sectionBkgColor2: '#18273b', altSectionBkgColor: '#ffffff' },
+    })
+  })
+
   it('保留既有流程图预设，未采集参考的图类型不套用预设', () => {
     expect(buildCodexMermaidConfig('flowchart-v2')).toMatchObject({
       layout: 'elk', themeVariables: {
@@ -44,6 +80,18 @@ describe('Codex Mermaid 截图参考配色', () => {
     const config = buildCodexMermaidConfig('flowchart-v2')!
     expect(config.themeCSS).toContain('& { background-color:#ffffff; }')
     expect(contrast('#004f99', '#ffffff')).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('流程图暗色使用深蓝节点和白字，保留 ELK 布局与指定辅助灰', () => {
+    const config = buildCodexMermaidConfig('flowchart-v2', true)!
+    expect(config).toMatchObject({
+      layout: 'elk', themeVariables: {
+        darkMode: true, primaryColor: '#1a283d', primaryTextColor: '#ffffff',
+        primaryBorderColor: '#b8b9ba', lineColor: '#b8b9ba', clusterBorder: '#b8b9ba',
+      },
+    })
+    expect(config.themeCSS).toContain('& { background-color:#181818; }')
+    expect(contrast('#ffffff', '#1a283d')).toBeGreaterThanOrEqual(4.5)
   })
 })
 
