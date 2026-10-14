@@ -334,6 +334,61 @@ describe('T04 设置区：标量基础控件', () => {
   })
 })
 
+describe('#477 设置区视觉呈现：卡片式设置行与开关形态', () => {
+  it('布尔定义控件为拨动开关形态（vsidian-settings-checkbox 档位类；语义仍是 checkbox）', () => {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
+    h.dispatch(settingsState({}))
+    const checkbox = h.parent.querySelector<HTMLInputElement>('input[data-addon-setting="flag"]')
+    expect(checkbox!.type).toBe('checkbox')
+    expect(checkbox!.classList.contains('vsidian-settings-checkbox')).toBe(true)
+    // 形态不改语义：change 仍按批上送
+    checkbox!.checked = false
+    checkbox!.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsUpdate', addonId: ADDON_ID, scope: 'user', values: { flag: false } })
+  })
+
+  it('来源徽章挂标题行、描述独占行（三行挤压修复）；标题保持纯文本', () => {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
+    h.dispatch(settingsState({
+      definitions: [
+        { key: 'flag', title: '开关项', description: '开关描述文案', type: 'boolean', default: true },
+      ],
+    }))
+    const row = h.parent.querySelector('.vsidian-addons-setting-item')!
+    const titleRow = row.querySelector('.vsidian-addons-setting-title-row')!
+    expect(titleRow.querySelector('.vsidian-settings-item-title')?.textContent).toBe('开关项')
+    expect(titleRow.querySelector('.vsidian-addons-source-badge')?.textContent).toBe(zhCn['addons.sourceDefault'])
+    // 描述独占行：不与徽章同容器（徽章不挤占描述行）
+    expect(titleRow.querySelector('.vsidian-settings-item-description')).toBeNull()
+    expect(row.querySelector('.vsidian-settings-item-description')?.textContent).toBe('开关描述文案')
+    // 功能开关行（__enabled__）同结构：徽章挂标题行
+    const enabledRow = area(h)!.querySelector('.vsidian-settings-item')!
+    const enabledTitleRow = enabledRow.querySelector('.vsidian-addons-setting-title-row')!
+    expect(enabledTitleRow.querySelector('.vsidian-settings-item-title')?.textContent).toBe(zhCn['addons.enableSwitchTitle'])
+    expect(enabledTitleRow.querySelector('.vsidian-addons-source-badge')).toBeTruthy()
+  })
+
+  it('样式契约：定义行归型标准设置行（留白+分隔线+末行无线）、徽章标题行与组间 20px 档位', async () => {
+    const { readFileSync } = await import('node:fs')
+    const css = readFileSync('src/webview/settingsPage.css', 'utf8')
+    // 定义行归型 §2.3 标准设置行：行内留白 18px 0 + 行间分隔线（tint 8%）
+    expect(css).toMatch(/\.vsidian-addons-setting-item\s*\{[^}]*padding:\s*18px 0/)
+    expect(css).toMatch(/\.vsidian-addons-setting-item\s*\{[^}]*border-bottom:\s*1px solid color-mix\(in srgb, var\(--vsidian-settings-tint\) 8%, transparent\)/)
+    expect(css).toMatch(/\.vsidian-addons-setting-item:last-child\s*\{[^}]*border-bottom:\s*0/)
+    // 徽章标题行容器在场（flex 布局，gap 承接徽章间距）
+    expect(css).toMatch(/\.vsidian-addons-setting-title-row\s*\{[^}]*display:\s*flex/)
+    // 组间距合成 20px 档位：设置区 flex gap 10px + 组卡 margin 10px 叠加
+    expect(css).toMatch(/\.vsidian-addons-settings\s*\{[^}]*gap:\s*10px/)
+    expect(css).toMatch(/\.vsidian-addons-settings \.vsidian-settings-group \+ \.vsidian-settings-group\s*\{[^}]*margin-top:\s*10px/)
+    // #477 死规则清理：组卡片（block）上不写 gap（ui-patterns §5 已知不一致项随本批移除）
+    expect(css).not.toMatch(/\.vsidian-addons-settings \.vsidian-settings-group\s*\{[^}]*gap/)
+  })
+})
+
 describe('T04 设置区：数组与对象基础控件（重复项/字段）', () => {
   it('数组重复项控件：行呈现默认项；添加/移除后经保存按钮整批上送', () => {
     const h = makeView()

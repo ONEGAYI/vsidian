@@ -18,7 +18,8 @@ await mkdir(artifacts, { recursive: true })
 const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
 
 const DEFINITIONS = [
-  { key: 'flag', title: '开关项', type: 'boolean', default: true },
+  // #477：带 description（徽章挂标题行、描述独占行的布局断言对象）
+  { key: 'flag', title: '开关项', description: '开关项的描述文案', type: 'boolean', default: true },
   { key: 'threshold', title: '阈值', type: 'number', min: 1, max: 100, default: 20 },
   {
     // #473：enumLabels 部分覆盖（strict 缺失——回退枚举值本身）
@@ -171,9 +172,53 @@ try {
   assert.equal(tabPaint.bg, 'rgb(224, 228, 235)', '选中标签应为主题选中底色（样式未注入即失败）')
   assert.equal(tabPaint.radius, '6px')
 
-  // 来源徽章绘制（默认来源可见）
+  // 来源徽章绘制（默认来源可见）+ #477 挂标题行不挤占描述行（真实布局：
+  // 徽章与标题垂直区间重叠、描述起点在标题行之下——几何坐标仅作同容器
+  // 行列关系断言，非存在性）
   const badge = area.locator('.vsidian-addons-source-badge').first()
   assert.equal((await badge.evaluate((el) => getComputedStyle(el).display)) !== 'none', true)
+  const badgeLayout = await area.locator('.vsidian-addons-setting-item').first().evaluate((row) => {
+    const titleRow = row.querySelector('.vsidian-addons-setting-title-row')
+    const title = row.querySelector('.vsidian-settings-item-title')
+    const badgeEl = row.querySelector('.vsidian-addons-source-badge')
+    if (!titleRow || !title || !badgeEl) return null
+    const rowRect = titleRow.getBoundingClientRect()
+    const titleRect = title.getBoundingClientRect()
+    const badgeRect = badgeEl.getBoundingClientRect()
+    const desc = row.querySelector('.vsidian-settings-item-description')
+    const descTop = desc ? desc.getBoundingClientRect().top : null
+    return {
+      inTitleRow: rowRect.top <= badgeRect.top && badgeRect.bottom <= rowRect.bottom,
+      sameLineAsTitle: Math.abs((titleRect.top + titleRect.bottom) / 2 - (badgeRect.top + badgeRect.bottom) / 2) < titleRect.height,
+      descBelowTitleRow: descTop === null || descTop >= rowRect.bottom - 1,
+    }
+  })
+  assert.ok(badgeLayout, '标题行容器在场（徽章挂标题行）')
+  assert.equal(badgeLayout.inTitleRow, true, '来源徽章在标题行容器内')
+  assert.equal(badgeLayout.sameLineAsTitle, true, '来源徽章与标题同行（不挤占描述行）')
+  assert.equal(badgeLayout.descBelowTitleRow, true, '描述独占行（起点在标题行之下）')
+
+  // #477 布尔定义控件为拨动开关形态（绘制层：appearance/几何/选中底色）
+  const flagSwitch = area.locator('input[data-addon-setting="flag"]')
+  const togglePaint = await flagSwitch.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    const rect = el.getBoundingClientRect()
+    return { appearance: cs.appearance, width: rect.width, height: rect.height, radius: cs.borderRadius, bg: cs.backgroundColor, checked: el.checked }
+  })
+  assert.equal(togglePaint.appearance, 'none', '布尔控件为纯 CSS 拨动开关（非原生复选框）')
+  assert.equal(togglePaint.width, 36, '开关宽度 36px 档位')
+  assert.equal(togglePaint.height, 20, '开关高度 20px 档位')
+  assert.equal(togglePaint.radius, '999px', '开关 pill 圆角档位')
+  assert.equal(togglePaint.checked, true, '开关选中（默认值 true）')
+  assert.equal(togglePaint.bg, 'rgb(38, 135, 212)', '选中态为主题焦点色（样式未注入即失败）')
+
+  // #477 定义行归型标准设置行（绘制层：非末行行间分隔线在场）
+  const dividerPaint = await area.locator('.vsidian-addons-setting-item').first().evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { width: cs.borderBottomWidth, style: cs.borderBottomStyle }
+  })
+  assert.equal(dividerPaint.width, '1px', '定义行行间分隔线宽度（样式未注入即失败）')
+  assert.equal(dividerPaint.style, 'solid', '定义行行间分隔线样式')
 
   // ---- 3. 标量：真实键盘修改 number → user 层单键批 ----
   const threshold = area.locator('input[data-addon-setting="threshold"]')
@@ -412,13 +457,26 @@ try {
   const firstCard = area.locator('.vsidian-settings-group').first()
   assert.equal(await firstCard.locator('.vsidian-settings-group-title').count(), 0, '首容器无组标题（开关行 + 未分组项恒置顶）')
   assert.match(await firstCard.innerText(), /开关项|阈值/, '未分组定义留在首容器')
-  // 绘制层：组卡片间距档位（20px）与组标题分隔线（形态未注入即失败）
+  // 绘制层：组卡片间距 20px 档位（#477 起为合成口径——flex gap 10px +
+  // 组卡 margin 10px，真实布局间距经 rect 断言）与组标题分隔线
   const groupPaint = await groupCard.evaluate((el) => {
     const cs = getComputedStyle(el)
-    return { radius: cs.borderRadius, marginTop: cs.marginTop, title: getComputedStyle(el.querySelector('.vsidian-settings-group-title')).borderBottomWidth }
+    return {
+      radius: cs.borderRadius,
+      marginTop: cs.marginTop,
+      title: getComputedStyle(el.querySelector('.vsidian-settings-group-title')).borderBottomWidth,
+      areaGap: getComputedStyle(el.parentElement).rowGap,
+      realGap: (() => {
+        const cards = [...el.parentElement.querySelectorAll(':scope > .vsidian-settings-group')]
+        const idx = cards.indexOf(el)
+        return idx > 0 ? cards[idx].getBoundingClientRect().top - cards[idx - 1].getBoundingClientRect().bottom : null
+      })(),
+    }
   })
   assert.equal(groupPaint.radius, '10px', '组卡片圆角 10px 档位')
-  assert.equal(groupPaint.marginTop, '20px', '组卡片间距 20px 档位')
+  assert.equal(groupPaint.marginTop, '10px', '组卡 margin 10px（与 flex gap 合成 20px 档位）')
+  assert.equal(groupPaint.areaGap, '10px', '设置区 flex gap 10px（间距合成的另一半）')
+  assert.equal(groupPaint.realGap, 20, '组卡片真实间距 20px 档位（gap + margin 叠加后）')
   assert.equal(groupPaint.title, '1px', '组标题通栏下边线在场')
   await page.screenshot({ path: path.join(artifacts, 'settings-area-grouped.png') })
 

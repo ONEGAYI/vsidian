@@ -97,13 +97,14 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 图标两形态同一 16px 槽：内联 svg（24 viewBox 单 path、`stroke: currentColor`、1.7 圆角线帽，注册表 `ICON_PATHS` + `SettingsGroupIcon` 类型，`settingsPageView.ts` 单表装配）；生图资产（`span.vsidian-settings-generated-icon[data-icon]` + CSS 背景明暗两套，走 [ai-icon-sheet-to-svg](../../.agents/skills/ai-icon-sheet-to-svg/SKILL.md) 生图管线）。新字形先登记注册表再使用，`aria-hidden` 纯装饰。现役内联字形表见 `settingsPageView.ts` 的 `ICON_PATHS` 注释（#466 起 `inputCursor`＝输入框 + I 型光标，输入行为管理页组头与侧栏导航共用；`sliders`＝三档滑杆组，组件设置页同槽；原 `merge` 分流合流字形随更名退役）。
 - 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（输入行为管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
 - 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。整页单卡片的管理型分页（如输入行为管理页）可把说明句升为分页副题（`vsidian-settings-subtitle`）而不在卡内重复——副题即页级说明位，不算悬空。
-- #472 附加组件设置区分组沿用本节结构：组卡片直挂设置区（bare 分页同口径，组间 `20px` 档位），组标题不配图标（组件声明的组无语义字形——不发明）；组描述即上一条「组说明句」模式（`.vsidian-addons-group-description`，卡片内首行说明色）。首容器（功能开关行 + 未分组定义）无组标题恒置顶，组容器按声明序随后。
+- #472 附加组件设置区分组沿用本节结构：组卡片直挂设置区（bare 分页同口径，组间 `20px` 档位——设置区容器为 flex column，实际间距 = flex gap 10px + 组卡 margin 10px 合成，#477 归位；此前 margin 20px 与 gap 叠加为 30px 偏离档位），组标题不配图标（组件声明的组无语义字形——不发明）；组描述即上一条「组说明句」模式（`.vsidian-addons-group-description`，卡片内首行说明色）。首容器（功能开关行 + 未分组定义）无组标题恒置顶，组容器按声明序随后。
 
 ### 2.3 设置行与控件
 
 - 设置行 `vsidian-settings-item`：`padding 18px 0`、行间分隔线、末行无线；label 两侧布局（文字 copy 左、控件右，gap 28px）；依赖灰化（opacity 0.55 + 控件禁用）由注册表 `dependsOn` 驱动。
 - 控件：拨动开关 36×20 pill（`appearance:none` 纯 CSS，选中 focusBorder，120ms 过渡，保留 checkbox 语义）；select/text 圆角 2px（dropdown/input 变量族）；range 用 `accent-color` + 值文本 `tabular-nums`。**新控件类型先在本节登记形态再实现。**
 - 多行文本（#475 附加组件设置区，内部类 `vsidian-addons-setting-item > textarea`）：圆角 2px + `--vscode-input-*` 变量族对齐 select/text 档位；`width 100%` / `min-height 72px`（rows=4 语义兜底）/ `resize: vertical` 可拖高；占定义行整行（label 行下方），不进右槽。
+- 附加组件设置区定义行（#477 归型）：内部类 `vsidian-addons-setting-item` 复用本节标准设置行形态——`padding 18px 0`、行间分隔线（tint 8%）、末行无线，label 两侧布局沿用 `vsidian-settings-item-label`（copy 左、控件右）；标题行容器 `vsidian-addons-setting-title-row`（flex、gap 8px）承载标题 + 来源徽章同左列同行，描述独占行（三行挤压修复——徽章不挤占描述行）；布尔控件复用拨动开关档位类 `vsidian-settings-checkbox`（定义行、数组项、对象字段三路统一，语义仍 checkbox）；行内多段（label 行与整行控件、清除覆盖钮）纵排 gap 8px。
 
 ### 2.4 按钮、徽章与状态
 
@@ -166,7 +167,6 @@ div.vsidian-behavior-query                        ← 查询区（组卡片内�
 - 菜单族圆角三档并存：右键/大纲/子菜单/快速操作标题菜单 5px、反链排序菜单 4px、tooltip 与联想浮层 6px——「菜单」意象未收敛到单档。
 - 输入控件两档：搜索框 8px（卡片感）vs select/text 2px（VSCode 原生控件向）——语义上有别，是否统一待定。
 - 附加组件页「官方组件 / 第三方组件」列表组头仍是旧形态（标题悬卡片外、无图标，`addonSettingsSection.ts` 状态列表渲染处）——与 §2.2 标准形态不符，2026-10-12 已报，待修复与图标拍板（bare 装配后其组卡片已直挂页面层，剩组头形态待整改）。bare 过渡态事实：该 h3 与组件自定义设置页挂载区 h4（`renderAddonPageMount`）仍带组标题类负边距，bare 容器无横向 padding 吸收，分隔线两侧各外溢约 20px（落在主区 padding 内，无裁剪）——两者一并归入该整改票，不做临时覆写（会把标题文字移离列缘，预支待拍板的形态决策）。
-- 附加组件基础设置区存在失效 `gap` 死规则（`settingsPage.css` 的 `.vsidian-addons-settings .vsidian-settings-group { gap: 8px }` 作用于 block 容器不生效）——待上一条组头整改时一并处理，行距随该区按 §2.2 标准结构归型。
 
 ## 6. 维护纪律
 

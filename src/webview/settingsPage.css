@@ -594,15 +594,26 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 }
 .vsidian-addons-fault-troubleshoot h4 { margin: 0; color: var(--vscode-errorForeground, #f66); font-size: 13px; }
 .vsidian-addons-fault-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.vsidian-addons-settings .vsidian-settings-group { gap: 8px; }
-/* #472 设置定义分组：多个组卡片并列时对齐设置页组卡片间距档位（20px）；
-   首容器（开关行 + 未分组项）与声明序组容器同级直挂设置区 */
-.vsidian-addons-settings .vsidian-settings-group + .vsidian-settings-group { margin-top: 20px; }
+/* #472 设置定义分组 + #477 观感归位：组卡间距对齐 20px 档位——设置区
+   flex gap（10px）与组卡 margin（10px）叠加合成（首容器与声明序组容器
+   同级直挂设置区）。原 20px margin 与 gap 叠加为 30px 偏离档位，随本批
+   归位；组卡（block）上的失效 gap 死规则同批移除（ui-patterns §5） */
+.vsidian-addons-settings .vsidian-settings-group + .vsidian-settings-group { margin-top: 10px; }
 /* #472 组说明句（组件声明的组描述）：组卡片内首行说明色（ui-patterns §2.2
    组内提示文案口径），位于组标题之下、首个定义行之前 */
 .vsidian-addons-group-description { margin: 10px 0 0; color: var(--vscode-descriptionForeground, #666); }
-.vsidian-addons-setting-item { display: flex; flex-direction: column; gap: 6px; }
-.vsidian-addons-source-badge { display: inline-block; margin-top: 2px; padding: 0 6px; min-height: 16px;
+/* #477 定义行归型标准设置行（ui-patterns §2.3）：行内留白 18px 0 + 行间
+   分隔线（tint 8%）+ 末行无线；label 两侧布局（copy 左控件右）由
+   vsidian-settings-item-label 既有规则承载。行内多段（head 与整行控件、
+   清除覆盖钮）纵排 gap 8px */
+.vsidian-addons-setting-item { display: flex; flex-direction: column; gap: 8px;
+  padding: 18px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent); }
+.vsidian-addons-setting-item:last-child { border-bottom: 0; }
+/* #477 标题行（三行挤压修复）：标题 + 来源徽章同容器居左，描述独占行——
+   徽章不挤占描述行 */
+.vsidian-addons-setting-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vsidian-addons-source-badge { display: inline-block; padding: 0 6px; min-height: 16px;
   border: 1px solid var(--vscode-panel-border, #cbd0d8); border-radius: 999px;
   color: var(--vscode-descriptionForeground, #666); font-size: 11px; line-height: 16px; }
 .vsidian-addons-array { display: flex; flex-direction: column; gap: 6px; }
