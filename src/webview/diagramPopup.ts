@@ -193,6 +193,7 @@ const TB_ICON = {
 
 async function loadSnapshot(p: PopupState): Promise<void> {
   const seq = ++p.loadSeq
+  const canvasBackground = getComputedStyle(document.body).getPropertyValue('--vscode-editor-background')
   const renderer = effectiveGraphicRendererFor(p.language, p.mode)
   const result = renderer
     ? await renderer.renderSvg(p.code)
@@ -221,6 +222,8 @@ async function loadSnapshot(p: PopupState): Promise<void> {
     return
   }
   p.svg = result.svg
+  // 画布与图形配色一起保留为快照，刷新时再按当前宿主主题重取。
+  p.media.style.setProperty('--vscode-editor-background', canvasBackground)
   p.intrinsic = readSvgIntrinsicSize(result.svg) ?? POPUP_FALLBACK_SIZE
   p.media.textContent = ''
   const tpl = document.createElement('template')

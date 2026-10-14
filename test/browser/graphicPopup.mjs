@@ -447,6 +447,38 @@ try {
       }
       await canvasPage.waitForFunction(() => getComputedStyle(document.querySelector('.vsidian-diagram-overlay')).opacity === '1')
       await canvasPage.locator('.vsidian-diagram-overlay').screenshot({ path: path.join(presetArtifacts, `${host.name}-${preset}-popup.png`) })
+      if (preset === 'default') {
+        const snapshotId = await canvasPage.locator('.vsidian-diagram-media svg').getAttribute('id')
+        const snapshotInk = await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color)
+        const nextTheme = host.name === 'light'
+          ? { name: 'dark', bodyClass: 'vscode-dark', background: '#1f1f1f', foreground: '#cccccc', canvas: 'rgb(31, 31, 31)', ink: 'rgb(204, 204, 204)' }
+          : { name: 'light', bodyClass: 'vscode-light', background: '#ffffff', foreground: '#333333', canvas: 'rgb(255, 255, 255)', ink: 'rgb(51, 51, 51)' }
+        await canvasPage.evaluate(theme => {
+          document.body.className = theme.bodyClass
+          document.body.style.setProperty('--vscode-editor-background', theme.background)
+          document.body.style.setProperty('--vscode-editor-foreground', theme.foreground)
+          document.body.style.setProperty('--vscode-editorWidget-background', theme.name === 'dark' ? '#2d2d30' : '#f8f8f8')
+          document.body.style.setProperty('--vscode-editorWidget-foreground', theme.foreground)
+        }, nextTheme)
+        await canvasPage.waitForFunction(ink => {
+          const label = document.querySelector('.vsidian-view-live .node .label')
+          return label && getComputedStyle(label).color === ink
+        }, nextTheme.ink)
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').getAttribute('id'), snapshotId, '主题变化保留打开时的图形快照')
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color), snapshotInk)
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), host.canvas, '画布应跟随快照保留，不能只切底色')
+        await canvasPage.locator('.vsidian-diagram-refresh').click()
+        await canvasPage.waitForFunction(id => document.querySelector('.vsidian-diagram-media svg')?.id !== id, snapshotId)
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media svg').evaluate(el => getComputedStyle(el).backgroundColor), nextTheme.canvas, '刷新后画布与新主题配色一同更新')
+        assert.equal(await canvasPage.locator('.vsidian-diagram-media .node .label').first().evaluate(el => getComputedStyle(el).color), nextTheme.ink)
+        await canvasPage.evaluate(theme => {
+          document.body.className = theme.bodyClass
+          document.body.style.setProperty('--vscode-editor-background', theme.background)
+          document.body.style.setProperty('--vscode-editor-foreground', theme.foreground)
+          document.body.style.setProperty('--vscode-editorWidget-background', theme.name === 'dark' ? '#2d2d30' : '#f8f8f8')
+          document.body.style.setProperty('--vscode-editorWidget-foreground', theme.foreground)
+        }, host)
+      }
       await canvasPage.keyboard.press('Escape')
     }
     await canvasPage.close()
