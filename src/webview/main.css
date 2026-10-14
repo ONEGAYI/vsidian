@@ -4272,10 +4272,14 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   height: auto;
 }
 
-/* 阅读块级容器（mermaid 围栏整块成块）：块级 margin 交给内层容器，
-   块元素自身只保留与相邻块的间距语义 */
+/* 阅读块级容器（mermaid 围栏整块成块）：垂直 margin 交给内层容器，块元素
+   自身保留与相邻块的间距语义；水平必须保持 auto——本规则与 .vsidian-reading-block
+   的限宽居中（margin: 0 auto）同特异性且源序在后，简写不含 auto 会覆盖
+   块居中，限宽档 mermaid 贴左而正文居中（铺满档两者等价不可见，2026-10
+   修复；#206 标题块水平盒禁令的同族缺陷，契约钉在
+   readingMermaidMarginCssContract 与 readingWidthProbe A7b） */
 #app .vsidian-view-reading .vsidian-reading-mermaid {
-  margin: 0;
+  margin: 0 auto;
 }
 
 /* 降级态（语法/渲染失败）：错误信息 + 源码可读，浅红底标记异常，

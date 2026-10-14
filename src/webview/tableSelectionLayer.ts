@@ -144,7 +144,11 @@ function textRangeMarkers(view: EditorView, from: number, to: number): Array<Rec
       const partBottom = Math.min(bottom, blockTop + block.height)
       if (partTop < partBottom) {
         const sides = contentSides(view, pos)
-        const partLeft = openLeft ? sides.left : left
+        // 满宽/开放段左界取内容盒（padding 生效处，不被负 text-indent 拉回
+        // 行盒左缘）：代码卡片行（#191 悬挂缩进）行盒左缘含卡内行号 widget
+        // 区，满宽块取行盒左缘会横穿行号区（#484 台账外场景）——满宽语义
+        // 只应覆盖文本延续区。普通行无 padding/indent，两式同值行为不变。
+        const partLeft = openLeft ? sides.contentLeft : left
         const partRight = openRight ? sides.right : right
         out.push(new RectangleMarker(SELECTION_BLOCK_CLASS,
           partLeft - sampled.base.left, partTop - sampled.base.top,
@@ -201,10 +205,11 @@ function closeRunBeforeGrid(
   const firstBottom = blockTop(firstBlock) + firstBlock.height
   // 起点所在视觉行：从起点到内容区右缘；起点下方同文档行的其余视觉行
   // 满宽（起点在软折行中间时存在——审查轮 3：整块画会在起点下方各行
-  // 左侧留 [leftSide, 起点左] 缺口）
-  piece(Math.max(startCoords.left, sides.left), startCoords.top, sides.right, startCoords.bottom)
+  // 左侧留 [leftSide, 起点左] 缺口）。左界下限用内容盒（contentLeft），
+  // 满宽段不进 #191 悬挂缩进行的行号区（与 textRangeMarkers 同口径）
+  piece(Math.max(startCoords.left, sides.contentLeft), startCoords.top, sides.right, startCoords.bottom)
   if (firstBottom > startCoords.bottom + 0.5) {
-    piece(sides.left, startCoords.bottom, sides.right, firstBottom)
+    piece(sides.contentLeft, startCoords.bottom, sides.right, firstBottom)
   }
   let pos = first.to + 1
   while (pos < gridLineFrom) {
@@ -212,20 +217,26 @@ function closeRunBeforeGrid(
     const block = view.lineBlockAt(line.from)
     const top = blockTop(block)
     const lineSides = contentSides(view, line.from)
-    piece(lineSides.left, top, lineSides.right, top + block.height)
+    piece(lineSides.contentLeft, top, lineSides.right, top + block.height)
     pos = line.to + 1
   }
 }
 
-/** 指定行的左右界；不传 pos 时仅用于识别 CM6 首行采样产生的开放边界。 */
-function contentSides(view: EditorView, pos?: number): { left: number; right: number; base: { left: number; top: number } } {
+/** 指定行的左右界；不传 pos 时仅用于识别 CM6 首行采样产生的开放边界。
+ *  left 含负 text-indent 的拉回（悬挂缩进行的行盒左缘），仅与 CM6 开放
+ *  边界采样对齐用于**识别**；contentLeft 是 padding 生效后的内容盒左缘，
+ *  满宽/开放段的**绘制**左界取它——悬挂缩进行的行盒左缘含卡内行号等
+ *  非文本 widget 区，不参与满宽（普通行无 padding/indent，两式同值）。 */
+function contentSides(view: EditorView, pos?: number): { left: number; contentLeft: number; right: number; base: { left: number; top: number } } {
   const contentRect = view.contentDOM.getBoundingClientRect()
   const lineElt = pos === undefined ? view.contentDOM.querySelector('.cm-line') : lineElement(view, pos)
   const win = view.dom.ownerDocument.defaultView
   const style = lineElt && win ? win.getComputedStyle(lineElt) : null
   const pad = (v: string | undefined) => (style ? Number.parseInt(v ?? '', 10) || 0 : 0)
+  const padding = pad(style?.paddingLeft)
   return {
-    left: contentRect.left + pad(style?.paddingLeft) + Math.min(0, pad(style?.textIndent)),
+    left: contentRect.left + padding + Math.min(0, pad(style?.textIndent)),
+    contentLeft: contentRect.left + padding,
     right: contentRect.right - pad(style?.paddingRight),
     base: layerBase(view),
   }

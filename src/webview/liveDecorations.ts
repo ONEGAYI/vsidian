@@ -1115,7 +1115,14 @@ function emitForRange(
       case 'HeaderMark': {
         const heading = [...path].reverse().find((parent) => headingLevelOf(parent.name) !== null)
         const to = markerEnd(node)
-        if (!heading || !touches(heading.from, heading.to)) {
+        // 裸标题不隐藏：ATX mark 后到节点尾只有空白（空标题行）时，
+        // 隐藏 mark 会使该行无任何可见字符、整行视觉蒸发——与高亮 ====
+        // 空形态同口径（定界符保持可见，源码降级，源文不丢）。Setext
+        // 下划线标记在内容行之后、无空形态，不进此判定（node.from 在
+        // 节点头部的 ATX 判定天然排除它）。
+        const bare = heading != null && node.from === heading.from &&
+          !doc.sliceString(node.to, heading.to).trim()
+        if (!bare && (!heading || !touches(heading.from, heading.to))) {
           out.push(hideDeco.range(node.from, to))
         }
         return
@@ -1460,17 +1467,23 @@ interface ChangedRange4 {
   toB: number
 }
 
-/** 选区驱动的重建行：旧选区行映射 + 新选区行 */
+/** 选区驱动的重建行：旧选区行映射 + 新选区行。from/to 归一防御——
+ *  被替换区间整体吞没的选区经 CM6 映射可得 from > to 的反向 Range
+ *  （replaceDoc 已归一主路径；此处兜底其余来源），直接建区间会产出
+ *  倒置 span 使 emitForRange 分配负长数组。 */
 function selectionSpans(tr: Transaction): LineSpan[] {
   const doc = tr.state.doc
   const spans: LineSpan[] = []
+  const push = (from: number, to: number): void => {
+    const lo = Math.min(from, to)
+    const hi = Math.max(from, to)
+    spans.push({ fromLine: doc.lineAt(lo).number, toLine: doc.lineAt(hi).number })
+  }
   for (const r of tr.startState.selection.ranges) {
-    const from = tr.changes.mapPos(r.from, -1)
-    const to = tr.changes.mapPos(r.to, 1)
-    spans.push({ fromLine: doc.lineAt(from).number, toLine: doc.lineAt(to).number })
+    push(tr.changes.mapPos(r.from, -1), tr.changes.mapPos(r.to, 1))
   }
   for (const r of tr.state.selection.ranges) {
-    spans.push({ fromLine: doc.lineAt(r.from).number, toLine: doc.lineAt(r.to).number })
+    push(r.from, r.to)
   }
   return spans
 }

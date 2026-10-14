@@ -171,6 +171,8 @@ try {
       preW: pre?.getBoundingClientRect().width ?? 0,
       fmW: fm?.getBoundingClientRect().width ?? 0,
       mermaidW: mermaid?.getBoundingClientRect().width ?? 0,
+      mermaidLeft: mermaid?.getBoundingClientRect().left ?? 0,
+      paragraphLeft: view?.querySelector('.vsidian-reading-paragraph')?.getBoundingClientRect().left ?? 0,
     }
   })
   check('A7 宽表格钳制进正文列（600）', wideBlocks.tableW <= 610 && wideBlocks.tableLeft > 300,
@@ -181,6 +183,13 @@ try {
     `FM 表宽=${wideBlocks.fmW.toFixed(1)}（border-box 后不超列宽）`)
   check('A7 Mermaid 块钳制进正文列（600）', wideBlocks.mermaidW <= 610 && wideBlocks.mermaidW > 0,
     `Mermaid 块宽=${wideBlocks.mermaidW.toFixed(1)}`)
+  // A7b（2026-10 修复）：mermaid 块与段落块左缘一致——mermaid 块类规则
+  // #60 起 margin: 0（纵向交内层容器）与块基类同挂在块 div 上且源序在后，
+  // 若简写不含水平 auto，同特异性下覆盖块居中 auto，限宽档 mermaid 贴左
+  // 而正文居中（铺满档 auto 与 0 等价不可见；#206 标题块同族缺陷的变体）
+  check('A7b 限宽档 Mermaid 块与段落块左缘一致（居中不丢）',
+    Math.abs(wideBlocks.mermaidLeft - wideBlocks.paragraphLeft) < 2,
+    `Mermaid=${wideBlocks.mermaidLeft.toFixed(1)} 段落=${wideBlocks.paragraphLeft.toFixed(1)}`)
   await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
 
   // —— A8：长文档虚拟化重排（规格注意点 3：宽度变更 → 折行高度变 → 高度表重算）——
