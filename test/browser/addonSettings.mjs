@@ -316,10 +316,14 @@ try {
   const pastedValues = await area.evaluate(() => [...document.querySelectorAll('input[data-addon-array-item="replacements"]')].map((el) => el.value))
   assert.deepEqual(pastedValues, ['旧→新甲', '乙', '丙', '甲→乙'], '粘贴拆分：首行追加当前项，其余行依次插入')
   // 保存触发的 mock 回灌（setTimeout(0) 推送 settingsState）会整区重建——
-  // notice 文本不含 keys（两次保存同文本），等 notice 等不住本次重建；改为
-  // 抓保存前节点引用、等它被替换为新节点（重建完成的精确信号，CI 实挂过
-  // 一次 evaluate 恰跨重建边界拿到 detached 节点 rect 0 的竞态）
-  const strictSwitchBeforeSave = await page.evaluate(() => document.querySelector('input[data-addon-field="limits.strict"]'))
+  // notice 文本不含 keys（两次保存同文本），等 notice 等不住本次重建。双保
+  // 险：① evaluateHandle 抓保存前节点引用（page.evaluate 返回元素会被序列
+  // 化为 "ref:" 字符串、身份比较恒真——须用 evaluateHandle 保真引用），等
+  // 它被替换为新节点（重建完成的精确信号）；② 下方几何测量为单次原子
+  // page.evaluate（页内同步 querySelector + measure，只可能拿到 attached
+  // 节点——detached rect 0 的竞态结构性不可能，这是 CI 实挂一次后的主修
+  // 复向量，①防止测量形态回退到 locator.evaluate 时竞态复活）
+  const strictSwitchBeforeSave = await page.evaluateHandle(() => document.querySelector('input[data-addon-field="limits.strict"]'))
   await page.getByRole('button', { name: zhCn['addons.saveChanges'], exact: true }).nth(0).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user'
     && Array.isArray(m.values.replacements) && m.values.replacements.length === 4 && m.values.replacements[0] === '旧→新甲' && m.values.replacements[3] === '甲→乙'))
