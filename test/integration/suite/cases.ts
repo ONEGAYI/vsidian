@@ -2758,6 +2758,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const imageText = '第 191 段 阅读段落样本文本，固定宽度内容，用于体量对比测试。'
     const imageOffset = doc.getText().indexOf(imageText)
     const grow = 240 // 初始占位 20px + 加载后增长 220px = 内容总高增量
+    const offsetBefore = (before.readingAnchorTopPx ?? 0) - (before.readingScrollTopPx ?? 0)
     const ok = (await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'reading.test.image',
       srcStart: imageOffset,
@@ -2769,12 +2770,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const after = await poll('图片尺寸变化生效', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
       const grew = (v?.readingScrollHeightPx ?? 0) - (before.readingScrollHeightPx ?? 0)
-      return v && grew >= grow - 4 ? v : undefined
+      // DOM 总高先变化，ResizeObserver 排队的滚动补偿在后续帧完成。
+      return v && grew >= grow - 4 && v.readingAnchorStart === anchorOffset &&
+        v.readingAnchorTopPx !== undefined && v.readingScrollTopPx !== undefined &&
+        Math.abs(v.readingAnchorTopPx - v.readingScrollTopPx - offsetBefore) <= 2 ? v : undefined
     }, 15000)
     // 源位置锚点不变（仍是同一块的 start）
     assert(after.readingAnchorStart === anchorOffset, `图片变化后锚点块不应漂移：${before.readingAnchorStart} → ${after.readingAnchorStart}`)
     // 视觉位置稳定：锚点块顶与 scrollTop 的差保持不变（上方内容增高由滚动补偿）
-    const offsetBefore = (before.readingAnchorTopPx ?? 0) - (before.readingScrollTopPx ?? 0)
     const offsetAfter = (after.readingAnchorTopPx ?? 0) - (after.readingScrollTopPx ?? 0)
     assert(
       Math.abs(offsetAfter - offsetBefore) <= 2,
