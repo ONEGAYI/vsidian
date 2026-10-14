@@ -221,6 +221,7 @@ function renderEntry(entry, signatures) {
   const semanticLines = [
     sem.modes ? `- **适用模式**：${sem.modes}` : null,
     sem.coordinates ? `- **坐标与数据形状**：${sem.coordinates}` : null,
+    sem.selection ? `- **提交后选区**：${sem.selection}` : null,
     sem.lifecycle ? `- **生命周期**：${sem.lifecycle}` : null,
     sem.errors ? `- **错误与拒绝**：${sem.errors}` : null,
     sem.history ? `- **历史与撤回**：${sem.history}` : null,
@@ -229,6 +230,7 @@ function renderEntry(entry, signatures) {
     sem.keymap ? `- **按键优先级**：${sem.keymap}` : null,
     sem.contextPayloads ? `- **谓词输入的场景命中负载**：${sem.contextPayloads}` : null,
     sem.localization ? `- **多语言与本地化**：${sem.localization}` : null,
+    sem.presentation ? `- **呈现形态**：${sem.presentation}` : null,
   ].filter(Boolean)
 
   const signatureBlocks = entry.signatures

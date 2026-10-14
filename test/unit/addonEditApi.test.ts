@@ -62,6 +62,16 @@ describe('addonEditApi 形状守卫', () => {
     expect(isAddonApplyEditsRequest({ revision: 0, changes: [], history: 'mergeUp' })).toBe(false)
     expect(isAddonApplyEditsRequest(null)).toBe(false)
   })
+
+  it('提交请求守卫：selection 数组形态（#498 多光标回设）逐项合法、空数组拒绝', () => {
+    expect(isAddonApplyEditsRequest({ revision: 3, changes: [], selection: [{ anchor: 1, head: 2 }, { anchor: 4, head: 4 }] })).toBe(true)
+    // 空数组拒绝（EditorSelection.create 要求至少一个 range，对齐 setSelection 非空口径）
+    expect(isAddonApplyEditsRequest({ revision: 3, changes: [], selection: [] })).toBe(false)
+    // 数组含非法元素拒绝（负偏移 / 非整数 / 形状不符）
+    expect(isAddonApplyEditsRequest({ revision: 3, changes: [], selection: [{ anchor: 1, head: 2 }, { anchor: -1, head: 0 }] })).toBe(false)
+    expect(isAddonApplyEditsRequest({ revision: 3, changes: [], selection: [{ anchor: 1.5, head: 2 }] })).toBe(false)
+    expect(isAddonApplyEditsRequest({ revision: 3, changes: [], selection: [{ anchor: 1 }, 'x'] })).toBe(false)
+  })
 })
 
 describe('editOrigin 数组形态（T06 合并提交）', () => {

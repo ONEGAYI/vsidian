@@ -79,6 +79,7 @@ import {
   resolveAddonBehaviorName,
   type AddonBehaviorChangeEvent,
   type AddonBehaviorEnabledState,
+  type AddonBehaviorInputPlan,
   type AddonBehaviorName,
   type AddonBehaviorRegistration,
   type AddonBehaviorsFacet,
@@ -244,6 +245,17 @@ export type EditFlowShapes = {
   result: AddonApplyEditsResult
   credential: AddonEditCredential
 }
+
+/** #498 applyEdits selection 多形态：单对象旧形态零迁移 + 数组 = 多光标
+ *  回设（多 ranges 随文本事务同笔生效）——收窄回单形态或数组形态消失
+ *  即编译失败 */
+export type PinnedApplyEditsSelection = AddonSelectionRange | AddonSelectionRange[]
+export const applyEditsSelectionPinned: Equals<NonNullable<AddonApplyEditsRequest['selection']>, PinnedApplyEditsSelection> = true
+/** 行为修饰计划同形态透传（行为回调返回的 plan.selection 流入 applyEdits
+ *  请求——通道前提对 TS 组件作者同样可表达） */
+export const behaviorPlanSelectionPinned: Equals<NonNullable<AddonBehaviorInputPlan['selection']>, PinnedApplyEditsSelection> = true
+/** 数组形态组合消费样例（多 ranges 提交链路可直接组装） */
+export const multiCursorSelectionSample: AddonSelectionRange[] = [{ anchor: 1, head: 1 }, { anchor: 4, head: 4 }]
 
 /** 页面工厂形态（构建桥 defineAddonPage 的第二参数） */
 export type PageFactoryShape = AddonPageFactory

@@ -268,6 +268,27 @@ export const addonT06Cases: Array<[string, () => Promise<void>]> = [
     assert(crlfApplied.ok === true, `CRLF 修饰应成功，实际 ${JSON.stringify(crlfApplied)}`)
     const crlfDoc = await docText(crlfFile)
     assert(crlfDoc.text.startsWith('改题\r\n正文 A'), `CRLF 文档行尾应保持（LF 坐标替换「标题一」三字符），写入后实际 ${JSON.stringify(crlfDoc.text.slice(0, 8))}）`)
+
+    // #498 多光标回设：数组形态 selection 随文本变更同事务生效（不坍缩其余光标）
+    const multiSnapSeq = await queue('snapshot', { instanceId: 'main' })
+    const multiSnap = (await collectOne(multiSnapSeq)) as { snapshot: { revision: number } }
+    const multiApplySeq = await queue('applyEdits', {
+      instanceId: 'main',
+      request: {
+        revision: multiSnap.snapshot.revision,
+        changes: [{ offset: 0, length: 0, text: '多' }, { offset: 2, length: 0, text: '光' }],
+        selection: [{ anchor: 1, head: 1 }, { anchor: 4, head: 4 }],
+      },
+    })
+    const multiApplied = (await collectOne(multiApplySeq)) as { ok: boolean; reason?: string }
+    assert(multiApplied.ok === true, `多 ranges selection 修饰应成功，实际 ${JSON.stringify(multiApplied)}`)
+    const multiAfterSeq = await queue('snapshot', { instanceId: 'main' })
+    const multiAfter = (await collectOne(multiAfterSeq)) as { snapshot: { text: string; selections: Array<{ anchor: number; head: number }> } }
+    assert(multiAfter.snapshot.text.startsWith('多改题光'), `双插入应落盘，实际 ${JSON.stringify(multiAfter.snapshot.text.slice(0, 6))}`)
+    assert(
+      JSON.stringify(multiAfter.snapshot.selections) === JSON.stringify([{ anchor: 1, head: 1 }, { anchor: 4, head: 4 }]),
+      `多 ranges selection 应同事务生效不坍缩，实际 ${JSON.stringify(multiAfter.snapshot.selections)}`,
+    )
     await closeAllEditors()
     console.log('[#355] 公开 API 读取与多范围修饰通过（LF/CRLF、凭据对位、dirty/save、零文本操作不造历史）')
   }],

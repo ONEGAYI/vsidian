@@ -87,8 +87,11 @@ export interface AddonReplacedRange {
 export interface AddonBehaviorInputPlan {
   /** LF 坐标变更列表（相对 context.snapshot） */
   readonly changes: SerChange[]
-  /** 提交后选区（可选；缺省保持实例现有选区重定位） */
-  readonly selection?: AddonSelectionRange
+  /** 提交后选区（可选；缺省保持实例现有选区重定位）。双形态与
+   *  applyEdits 请求同源（#498）：单对象 = 单选区；数组 = 多光标回设
+   *  （多 ranges 随文本事务同笔生效）——逐 range 评估类行为（如连续
+   *  标点规则）回设多光标的通道前提 */
+  readonly selection?: AddonSelectionRange | AddonSelectionRange[]
 }
 
 /** behaviors.register 的注册载荷（作者提供） */
