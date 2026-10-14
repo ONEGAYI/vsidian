@@ -130,6 +130,37 @@ it('P2-14 保存采样同时等待目标文档干净和新内容落盘（#446 �
   await expect(sample(async () => '【三层孙】', { isDirty: false })).resolves.toBe(true)
 })
 
+it('图片尺寸采样等待目标锚点完成视觉补偿，高度增长不能单独放行（#446 条目22）', async () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'poll' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === '图片尺寸变化生效') {
+      callbacks.push(node.arguments[1]!)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)});`, { target: ts.ScriptTarget.ES2022 })
+  const before = { readingScrollHeightPx: 2000, readingAnchorTopPx: 1000, readingScrollTopPx: 1000 }
+  let state: Record<string, number> = {
+    readingScrollHeightPx: 2240, readingAnchorStart: 201, readingAnchorTopPx: 1240, readingScrollTopPx: 1000,
+  }
+  const sample = new Function('vscode', 'CMD', 'uri', 'before', 'grow', 'anchorOffset', 'offsetBefore', code)(
+    { commands: { executeCommand: async () => state } }, { viewState: 'probe' }, 'fixture.md', before, 240, 201, 0,
+  )
+  await expect(sample()).resolves.toBeUndefined()
+  state = { ...state, readingScrollTopPx: 1240 }
+  await expect(sample()).resolves.toBe(state)
+  state = { ...state, readingScrollHeightPx: 2020 }
+  await expect(sample()).resolves.toBeUndefined()
+  state = { ...state, readingScrollHeightPx: 2240, readingAnchorStart: 191 }
+  await expect(sample()).resolves.toBeUndefined()
+  state = { ...state, readingAnchorStart: 201 }
+  delete state.readingAnchorTopPx
+  await expect(sample()).resolves.toBeUndefined()
+})
+
 it('T15 装载等待读取目标页面当前状态，日志淘汰不能造成永久等待（#446 条目 7/17）', async () => {
   const addonId = 'vsidian-example.ui-command'
   // 公开事件命令返回的截断快照，不依赖宿主记录器的私有实现。
