@@ -151,6 +151,20 @@ describe('planCjkWordTarget 移动规划矩阵（注入确定性边界）', () =
     expect(planCjkWordTarget(text, 2, false, boundaries)).toBe(0)
     expect(planCjkWordTarget(text, 1, false, boundaries)).toBe(0)
   })
+  it.each([' ', '  ', '\t', ' \t '])('跨行内空白 %j 后仍逐词移动', (space) => {
+    const line = `abc${space}中文测试文档${space}def`
+    expect(planCjkWordTarget(line, 3, true, boundaries)).toBe(3 + space.length + 2)
+    expect(planCjkWordTarget(line, line.indexOf('def'), false, boundaries)).toBe(3 + space.length + 4)
+  })
+  it('跨空白后没有直接进入分词域时仍交原生（含行界、标点和拉丁粘连）', () => {
+    for (const [line, offset, forward] of [
+      ['中文  ', 2, true], ['  中文', 2, false],
+      ['中文 ,测试', 2, true], ['中文, 测试', 4, false],
+      [' abc中文', 0, true], ['中文abc ', 6, false],
+    ] as const) {
+      expect(planCjkWordTarget(line, offset, forward, boundaries)).toBeNull()
+    }
+  })
   it('引擎整段不切时退化为段界（等同原生整段跳，词典未收录形态）', () => {
     expect(planCjkWordTarget(text, 0, true, wholeSegment)).toBe(6)
     expect(planCjkWordTarget(text, 6, false, wholeSegment)).toBe(0)

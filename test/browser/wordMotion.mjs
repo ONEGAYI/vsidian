@@ -42,7 +42,7 @@ const TABLE_DOC = '| aaaa | b |\n| --- | --- |\n| 1 | 2 |\npara'
 const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 let passed = 0
-const total = 9
+const total = 11
 
 /** 打开一页并装载文档，聚焦正文后按 offset 定位（生产 view.locate 链路） */
 async function openPage(doc, cursor) {
@@ -184,6 +184,53 @@ try {
     assert.equal(engineAfter, 'builtin', '恢复后引擎应为 builtin')
     await page.close()
     await check(errors, 'jieba 词表注入路径（真实键盘逐词 + 引擎切换）')
+  }
+
+  // 空格两侧发起左移均应进入最后一个中文词，覆盖用户原文与两个引擎。
+  {
+    const chinese = '模型调用了一次工具，工具调用经过许多阶段：准备中、运行中、完成态……每次都会把最新的状态更新覆写到对应的片段表'
+    const doc = `- ${chinese} part`
+    const beforeSpace = doc.indexOf(' part')
+    const afterSpace = doc.indexOf('part')
+    const { page, errors } = await openPage(doc, afterSpace)
+    for (const engine of ['builtin', 'jieba']) {
+      let expected
+      if (engine === 'jieba') {
+        await page.evaluate((tokens) => window.setJiebaWords(tokens), [chinese.slice(0, -3), '片段', '表'])
+        expected = doc.indexOf('片段表') + 2
+      } else {
+        const boundaries = await page.evaluate((text) => window.intlWordBoundaries(text), chinese)
+        expected = 2 + boundaries.at(-2)
+      }
+      for (const offset of [beforeSpace, afterSpace]) {
+        await page.evaluate((pos) => window.locate(pos), offset)
+        await page.keyboard.press('Control+ArrowLeft')
+        let st = await page.evaluate(() => window.readEditor())
+        assert.equal(st.head, expected, `${engine} 空格两侧左移 @${offset}: ${JSON.stringify(st)}`)
+        await page.evaluate((pos) => window.locate(pos), offset)
+        await page.keyboard.press('Control+Shift+ArrowLeft')
+        st = await page.evaluate(() => window.readEditor())
+        assert.equal(st.from, expected, `${engine} Shift 左扩选词界: ${JSON.stringify(st)}`)
+        assert.equal(st.to, offset, `${engine} Shift 左扩选 anchor: ${JSON.stringify(st)}`)
+        assert.equal(st.text, doc, '词移动和扩选不得改变原文')
+      }
+    }
+    await page.close()
+    await check(errors, '原文空格两侧左移/扩选一致（builtin + jieba）')
+  }
+  {
+    const doc = 'part \t 中文测试文档 \t part'
+    const { page, errors } = await openPage(doc, 4)
+    await page.evaluate(() => window.setJiebaWords(['中文', '测试', '文档']))
+    await page.keyboard.press('Control+ArrowRight')
+    let st = await page.evaluate(() => window.readEditor())
+    assert.equal(st.head, 9, `跨空格/Tab 右移一个词: ${JSON.stringify(st)}`)
+    await page.evaluate(() => window.locate(16))
+    await page.keyboard.press('Control+ArrowLeft')
+    st = await page.evaluate(() => window.readEditor())
+    assert.equal(st.head, 11, `跨空格/Tab 左移一个词: ${JSON.stringify(st)}`)
+    await page.close()
+    await check(errors, '跨连续空格/Tab 双向逐词移动')
   }
 
   // ---- 表格共存：注册表只登记带修饰键方向，裸方向键/Tab 仍走格导航与

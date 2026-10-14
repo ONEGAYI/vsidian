@@ -1,7 +1,7 @@
 // 中文分词词级移动的分词域形态学与移动规划纯函数（#239）：
 // Ctrl+Left/Right 词级移动仅对「连续 CJK 分词域」按引擎结果逐词切分，
-// 拉丁/数字/空白路径不在本模块——由 CM6 cursorGroupLeft/Right 既有语义
-// 原样处理（回归断言钉住，见 test/unit/wordMotion.test.ts）。
+// ASCII 词段紧贴 CJK 域时停在交界，空格/Tab 后紧邻 CJK 域时仍按分词
+// 细化；其余域外路径交 CM6 原生 group 语义（见 test/unit/wordMotion.test.ts）。
 //
 // 分词域（isCjkTextChar，按码点判定）：CJK 统一表意与扩展（含兼容表意、
 // 扩展 B–H）、CJK 符号与标点（U+3000–U+303F）、平假名/片假名、全角
@@ -109,11 +109,11 @@ export function boundariesFromTokens(text: string, tokens: readonly string[]): n
 
 /**
  * 词级移动目标规划（核心纯函数）：行内 offset 处沿 forward 方向按分词
- * 细化一步的目标偏移；返回 null = 该步不涉分词域（拉丁/空白/ASCII 标点/
+ * 细化一步的目标偏移；返回 null = 该步不涉分词域（拉丁/ASCII 标点/
  * 行界等，交 CM6 原生 group 语义）。
- * 语义：offset 邻近（移动方向一侧）字符属分词域时，取该侧连续域段的
- * 分词边界中距 offset 最近的一个；段内无更细边界时即段界（等同原生整
- * 段跳过，引擎词典未收录的退化形态）。
+ * 语义：先跨过移动方向一侧的行内空格/Tab，再判断邻近字符；属分词域
+ * 时，取该侧连续域段中距空白末端最近的词边界；段内无更细边界时即段界
+ *（等同原生整段跳过，引擎词典未收录的退化形态）。
  * 域外补充（#241 验收修订）：方向一侧是 ASCII 词字符（字母/数字/下划
  * 线）且其连续词段与分词域粘连（无空白/标点分隔）时，目标截断在词段
  * 与域段的交界——原生 word 语义把中英连排吞成整词（CM6 wordChar 覆盖
@@ -127,17 +127,20 @@ export function planCjkWordTarget(
   boundariesOf: WordBoundaryFn,
 ): number | null {
   if (!Number.isInteger(offset) || offset < 0 || offset > lineText.length) return null
+  const originalOffset = offset
   if (forward) {
+    while (/[ \t]/.test(lineText.charAt(offset))) offset++
     if (offset === lineText.length) return null
     const cp = codePointAt(lineText, offset)
     if (!isCjkTextChar(cp)) {
-      return asciiRunToCjkSeamForward(lineText, offset)
+      return offset === originalOffset ? asciiRunToCjkSeamForward(lineText, offset) : null
     }
   } else {
+    while (offset > 0 && /[ \t]/.test(lineText.charAt(offset - 1))) offset--
     if (offset === 0) return null
     const prevStart = prevCodePointStart(lineText, offset)
     if (!isCjkTextChar(codePointAt(lineText, prevStart))) {
-      return asciiRunToCjkSeamBackward(lineText, prevStart)
+      return offset === originalOffset ? asciiRunToCjkSeamBackward(lineText, prevStart) : null
     }
   }
   const [segStart, segEnd] = cjkSegmentAround(lineText, offset, forward)
