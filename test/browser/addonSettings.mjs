@@ -283,16 +283,21 @@ try {
   await strategySelect.selectOption('none')
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsUpdate' && m.scope === 'user' && m.values.strategy === 'none'))
 
-  // 多行文本：textarea 计算样式绘制层（样式未注入即失败）
+  // 多行文本：每次真实状态回推后原子查询并测量当前 textarea。
+  // Locator 先取得的旧节点可能在回推重建时脱离 DOM，样式为空串。
   const noteArea = area.locator('textarea[data-addon-setting="note"]')
-  const notePaint = await noteArea.evaluate((el) => {
-    const cs = getComputedStyle(el)
-    return { display: cs.display, radius: cs.borderRadius, resize: cs.resize, height: el.getBoundingClientRect().height }
-  })
-  assert.notEqual(notePaint.display, 'none', '多行控件可见')
-  assert.equal(notePaint.radius, '2px', 'textarea 圆角对齐 select/text 档位')
-  assert.equal(notePaint.resize, 'vertical', 'textarea 可纵向拖高')
-  assert.ok(notePaint.height >= 72, 'textarea 最小高度档位（min-height 72px）')
+  for (let sample = 0; sample < 10; sample++) {
+    const notePaint = await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { source: window, data: window.__settingsState() }))
+      const el = document.querySelector('textarea[data-addon-setting="note"]')
+      const cs = getComputedStyle(el)
+      return { display: cs.display, radius: cs.borderRadius, resize: cs.resize, height: el.getBoundingClientRect().height }
+    })
+    assert.notEqual(notePaint.display, 'none', '多行控件可见')
+    assert.equal(notePaint.radius, '2px', 'textarea 圆角对齐 select/text 档位')
+    assert.equal(notePaint.resize, 'vertical', 'textarea 可纵向拖高')
+    assert.ok(notePaint.height >= 72, 'textarea 最小高度档位（min-height 72px）')
+  }
   // 真实键盘多行输入（textarea 内 Enter 是换行）→ 失焦上送含换行的值
   await noteArea.click()
   await page.keyboard.press('Control+a')
