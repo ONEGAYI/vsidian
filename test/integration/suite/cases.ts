@@ -1342,6 +1342,7 @@ async function waitViewState(
     if (lastSeen !== undefined) {
       const s = lastSeen as unknown as Record<string, unknown>
       const hover = s['hoverPreview'] as Record<string, unknown> | undefined
+      const paint = s['paint'] as Record<string, unknown> | undefined
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
@@ -1352,6 +1353,10 @@ async function waitViewState(
         readingEmbed: s['readingEmbed'],
         liveEmbedReveal: s['liveEmbedReveal'],
         readingWikilinkCount: s['readingWikilinkCount'],
+        liveMermaidCount: s['liveMermaidCount'],
+        readingMermaidCount: s['readingMermaidCount'],
+        mermaid: paint?.['mermaid'],
+        graphic: paint?.['graphic'],
         // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
         readingBlockCount: s['readingBlockCount'],
         readingMountedBlocks: s['readingMountedBlocks'],
