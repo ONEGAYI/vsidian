@@ -53,6 +53,7 @@ class TableControlsView {
   private suppressNextClick = false
   private rowsCache: Array<{ first: number; last: number; rows: TableRowInfo[] }> = []
   private rowsCacheTree: Tree | null = null
+  private insertHover: { x: number; y: number } | null = null
 
   constructor(private readonly view: EditorView, private readonly actions: TableControlActions) {
     this.layer = document.createElement('div')
@@ -127,6 +128,11 @@ class TableControlsView {
       button.classList.toggle('vsidian-table-control-hover', hovered !== undefined &&
         button.dataset['tableFrom'] === String(hovered.tableFrom) && button.dataset['column'] === String(column))
     }
+    this.insertHover = { x: event.clientX, y: event.clientY }
+    this.paintInsertHover(event.clientX, event.clientY)
+  }
+
+  private paintInsertHover(x: number, y: number): void {
     for (const button of this.layer.querySelectorAll<HTMLButtonElement>('.vsidian-table-insert-row, .vsidian-table-insert-column')) {
       const tableFrom = Number(button.dataset['tableFrom'])
       const group = this.visible.filter((item) => item.tableFrom === tableFrom)
@@ -134,10 +140,8 @@ class TableControlsView {
       const first = group[0]!.element.getBoundingClientRect()
       const last = group[group.length - 1]!.element.getBoundingClientRect()
       const near = button.classList.contains('vsidian-table-insert-row')
-        ? event.clientX >= first.left && event.clientX <= first.right &&
-          Math.abs(event.clientY - last.bottom) <= 12
-        : event.clientY >= first.top && event.clientY <= last.bottom &&
-          Math.abs(event.clientX - first.right) <= 12
+        ? x >= first.left && x <= first.right && Math.abs(y - last.bottom) <= 12
+        : y >= first.top && y <= last.bottom && Math.abs(x - first.right) <= 12
       button.classList.toggle('vsidian-table-control-hover', near)
     }
   }
@@ -146,12 +150,14 @@ class TableControlsView {
     const button = (event.target as Element).closest?.('button')
     if (button?.classList.contains('vsidian-table-insert-row') ||
         button?.classList.contains('vsidian-table-insert-column')) {
+      this.insertHover = { x: event.clientX, y: event.clientY }
       button.classList.add('vsidian-table-control-hover')
     }
   }
 
   private readonly onLeave = (event: PointerEvent): void => {
     if ((event.relatedTarget as Element | null)?.closest?.('.vsidian-table-insert-row, .vsidian-table-insert-column')) return
+    this.insertHover = null
     this.layer.querySelectorAll('.vsidian-table-control-hover').forEach((button) =>
       button.classList.remove('vsidian-table-control-hover'))
   }
@@ -303,6 +309,7 @@ class TableControlsView {
     }
     this.applySelection()
     if (this.dragging?.moved) this.paintDrag(this.dragging.lastX, this.dragging.lastY)
+    else if (!this.dragging && this.insertHover) this.paintInsertHover(this.insertHover.x, this.insertHover.y)
   }
 
   private applySelection(): void {

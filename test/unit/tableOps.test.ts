@@ -14,7 +14,7 @@
 //   落到分隔行后
 // - 增删后装饰的源映射正确：增量装饰与全量重建对拍一致（RangeSet.eq）
 // - 阅读模式只读：表格命令零写回
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { EditorSelection, EditorState, RangeSet } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import type { DecorationSet } from '@codemirror/view'
@@ -404,6 +404,47 @@ const settle = async (): Promise<void> => {
 }
 
 describe('表格点阵与悬停控件', () => {
+  it('新增带重建按当前边界恢复悬停，边界移开或指针离开后保持隐藏（#446 条目 13）', async () => {
+    let right = 100
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('vsidian-table-grid-row')
+        ? new DOMRect(0, 0, right, 90) : new DOMRect(0, 0, 0, 0)
+    })
+    const view = makeEditView(TABLE_DOC, 0)
+    try {
+      await Promise.resolve()
+      const row = view.contentDOM.querySelector<HTMLElement>('.vsidian-table-grid-row')!
+      row.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 98, clientY: 30 }))
+      const columnVisible = () => view.dom.querySelector('.vsidian-table-insert-column')!
+        .classList.contains('vsidian-table-control-hover')
+      expect(columnVisible()).toBe(true)
+      view.dispatch({ selection: EditorSelection.single(TABLE_DOC.indexOf('苹果')) })
+      await Promise.resolve()
+      expect(columnVisible()).toBe(true)
+
+      right = 200
+      view.dispatch({ selection: EditorSelection.single(TABLE_DOC.indexOf('苹果') + 1) })
+      await Promise.resolve()
+      expect(columnVisible()).toBe(false)
+
+      const band = view.dom.querySelector('.vsidian-table-insert-column')!
+      band.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 206, clientY: 30 }))
+      view.dispatch({ selection: EditorSelection.single(TABLE_DOC.indexOf('苹果') + 2) })
+      await Promise.resolve()
+      expect(columnVisible()).toBe(true)
+
+      view.dom.querySelector('.vsidian-table-controls')!.dispatchEvent(
+        new MouseEvent('pointerleave', { relatedTarget: document.body }))
+      view.dispatch({ selection: EditorSelection.single(0) })
+      await Promise.resolve()
+      expect(columnVisible()).toBe(false)
+      expect(view.state.doc.toString()).toBe(TABLE_DOC)
+    } finally {
+      view.destroy()
+      geometry.mockRestore()
+    }
+  })
+
   it('只给安全网格的可见内容行提供抓手、选列与新增入口；状态反馈零写回', async () => {
     const view = makeEditView(TABLE_DOC, 0)
     await Promise.resolve()
