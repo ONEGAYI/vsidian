@@ -6,10 +6,10 @@
 // 消息走生产链路。与 symbolInputFixture 同口径。
 import 'katex/dist/katex.min.css'
 import { WebviewSyncController } from '../../src/webview/syncController'
-import { EditorSelection } from '@codemirror/state'
+import { ChangeSet, EditorSelection, Text } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
-import type { WebviewToHost, WikilinkBlockItem, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
+import type { SerChange, WebviewToHost, WikilinkBlockItem, WikilinkCandidateItem, WikilinkHeadingItem } from '../../src/shared/protocol'
 import '../../src/webview/main.css'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 
@@ -20,6 +20,42 @@ const hostMessages: unknown[] = []
 let autoAck = true
 /** 已确认的 edit.request seq（自动 ack 与补发 ack 共享去重） */
 const ackedSeqs = new Set<number>()
+
+/** #503 宿主权威文本模型 + undo/redo 栈：生产宿主把每个 edit.request 应用为
+ *  一次权威编辑（VSCode undo 栈一个单元——仓库口径「一笔 edit.request = 宿主
+ *  撤销一次」），Ctrl+Z 一步回退一个单元。扮演同构：确认时压入「编辑前文本 +
+ *  正向变更」条目；history.request 到达即弹栈，undo 以逆变更回灌
+ *  doc.changed(reason:'undo')，与真实宿主 undoRedoService 回流同构。 */
+let hostText = ''
+interface HistoryEntry { before: string; changes: SerChange[] }
+const undoEntries: HistoryEntry[] = []
+const redoEntries: HistoryEntry[] = []
+
+const applySer = (text: string, changes: SerChange[]): string =>
+  ChangeSet.of(
+    changes.map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
+    text.length,
+  ).apply(Text.of(text.split('\n'))).toString()
+
+const invertSer = (entry: HistoryEntry): SerChange[] => {
+  const result: SerChange[] = []
+  ChangeSet.of(
+    entry.changes.map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
+    entry.before.length,
+  ).invert(Text.of(entry.before.split('\n'))).iterChanges((from, to, _b, _e, inserted) =>
+    result.push({ offset: from, length: to - from, text: inserted.toString() }))
+  return result
+}
+
+/** 一笔 edit.request 落到权威模型：压栈（编辑前快照）+ 应用 + 清 redo（与
+ *  生产宿主「新编辑截断 redo 分支」一致）。autoAck 关闭期间不落账，由
+ *  ackPendingEdits 补发时补齐（模型不缺单元）。 */
+function landEditToHost(req: Extract<WebviewToHost, { kind: 'edit.request' }>) {
+  undoEntries.push({ before: hostText, changes: req.changes })
+  redoEntries.length = 0
+  hostText = applySer(hostText, req.changes)
+}
+
 const controller = new WebviewSyncController({
   postMessage(message) {
     hostMessages.push(message)
@@ -29,6 +65,7 @@ const controller = new WebviewSyncController({
     // 暂缓且永不清空，无 ID 块接受的未出站核对恒触发）
     const req = message as Extract<WebviewToHost, { kind: 'edit.request' }>
     if ((message as { kind?: string }).kind === 'edit.request' && controller && autoAck) {
+      landEditToHost(req)
       ackedSeqs.add(req.seq)
       ackVersion += 1
       queueMicrotask(() => {
@@ -36,6 +73,22 @@ const controller = new WebviewSyncController({
           kind: 'edit.ack', seq: req.seq, ok: true, version: ackVersion,
         } as Parameters<typeof controller.handleHostMessage>[0])
       })
+    }
+    // 宿主扮演（#503）：webview 转发的 Ctrl+Z / Ctrl+Shift+Z 在权威模型上
+    // 执行 undo/redo，逆变更经 doc.changed external 路径回流（栈空无动作，
+    // 与 VSCode 无可撤销项一致）
+    if ((message as { kind?: string }).kind === 'history.request' && controller) {
+      const op = (message as { op: 'undo' | 'redo' }).op
+      const undo = op === 'undo'
+      const entry = (undo ? undoEntries : redoEntries).pop()
+      if (entry) {
+        const changes = undo ? invertSer(entry) : entry.changes
+        hostText = applySer(hostText, changes)
+        ;(undo ? redoEntries : undoEntries).push(entry)
+        controller.handleHostMessage({
+          kind: 'doc.changed', version: ++ackVersion, changes, origin: 'external', reason: op,
+        } as Parameters<typeof controller.handleHostMessage>[0])
+      }
     }
   },
   getState() {
@@ -87,6 +140,7 @@ Object.assign(window, {
         continue
       }
       ackedSeqs.add(req.seq)
+      landEditToHost(req)
       ackVersion += 1
       controller.handleHostMessage({
         kind: 'edit.ack', seq: req.seq, ok: true, version: ackVersion,
@@ -94,6 +148,9 @@ Object.assign(window, {
     }
   },
   initDoc(text: string) {
+    hostText = text
+    undoEntries.length = 0
+    redoEntries.length = 0
     controller.handleHostMessage({ kind: 'init', sessionId: 'wikilink-suggest',
       docUri: 'file:///vault/%E9%A1%B9%E7%9B%AE/%E8%AE%B0%E5%BD%95.md', version: 1, text })
   },
