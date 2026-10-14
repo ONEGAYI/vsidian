@@ -16,7 +16,7 @@ import { buildCodexMermaidConfig } from './mermaidTheme'
 
 mermaid.registerLayoutLoaders(elkLayouts)
 let baseConfig: Record<string, unknown> = {}
-// 每张图先恢复站点配置，再按 Mermaid 自身识别结果应用流程图预设。
+// 每张图先恢复站点配置，再按 Mermaid 自身识别结果应用对应图形预设。
 // 预设不改写源码：init/frontmatter、classDef 与 style 仍由 Mermaid 解析。
 const api: MermaidApi = {
   initialize(config) {
@@ -25,8 +25,9 @@ const api: MermaidApi = {
   },
   async render(id, code, preset = 'default') {
     mermaid.initialize(baseConfig)
-    if (preset === 'codex' && mermaid.detectType(code).startsWith('flowchart')) {
-      mermaid.initialize({ ...baseConfig, ...buildCodexMermaidConfig() })
+    if (preset === 'codex') {
+      const config = buildCodexMermaidConfig(mermaid.detectType(code))
+      if (config) mermaid.initialize({ ...baseConfig, ...config })
     }
     return mermaid.render(id, code)
   },

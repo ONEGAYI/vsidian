@@ -8,7 +8,7 @@ export const zhCn: Record<MessageKey, string> = {
   'appearance.presets': '预设主题',
   'appearance.codeblockRendering': '代码块渲染',
   'setting.mermaidTheme.title': 'Mermaid 渲染主题',
-  'setting.mermaidTheme.description': '选择内置流程图的外观。Codex 使用浅蓝圆角节点和 ELK 分层布局；图内样式与配置可以覆盖预设。',
+  'setting.mermaidTheme.description': '选择内置 Mermaid 图表的外观。Codex 支持流程图、时序图、类图、状态图、ER 图、甘特图和饼图；图内样式与配置可以覆盖预设。',
   'setting.mermaidTheme.default': '默认',
   'setting.mermaidTheme.codex': 'Codex',
   'setting.pastePreserveFormatting.title': '粘贴保留富文本',

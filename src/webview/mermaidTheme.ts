@@ -27,8 +27,48 @@ export const MERMAID_DARK_FALLBACK_PALETTE: Readonly<VscodeMermaidPalette> = {
   widgetBorder: '#3c3c3c',
 }
 
-/** Codex 26.1007.2314.0 蓝色流程图的近似预设；保留 Mermaid 形状与源码覆写。 */
-export function buildCodexMermaidConfig(): Record<string, unknown> {
+/** Codex 截图的近似预设；流程图与其他六种图分别配色，保留源码覆写。 */
+export function buildCodexMermaidConfig(type = 'flowchart'): Record<string, unknown> | undefined {
+  if (!type.startsWith('flowchart')) {
+    if (!['sequence', 'class', 'classDiagram', 'state', 'stateDiagram', 'er', 'gantt', 'pie'].includes(type)) {
+      return undefined
+    }
+    return {
+      theme: 'base', htmlLabels: false,
+      fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
+      themeCSS: '& { background-color:#ffffff; }\n.grid .tick line { stroke:#8e8f90; }' +
+        (type === 'state' || type === 'stateDiagram' ? '\nmarker path { fill:#8e8f90; stroke:#8e8f90; }' : ''),
+      themeVariables: {
+        darkMode: false, background: '#ffffff',
+        primaryColor: '#e0edfe', primaryTextColor: '#1a1c1f', primaryBorderColor: '#539af8',
+        secondaryColor: '#e0edfe', secondaryTextColor: '#1a1c1f',
+        tertiaryColor: '#e0edfe', tertiaryTextColor: '#1a1c1f',
+        lineColor: '#8e8f90', arrowheadColor: '#8e8f90', textColor: '#1a1c1f', titleColor: '#1a1c1f',
+        fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
+        edgeLabelBackground: '#eff6fe',
+        actorLineColor: '#8e8f90', signalColor: '#8e8f90', signalTextColor: '#1a1c1f',
+        labelBoxBkgColor: '#ffffff', labelBoxBorderColor: '#ededed',
+        activationBkgColor: '#ffffff', activationBorderColor: '#ededed',
+        noteBkgColor: '#ffffff', noteBorderColor: '#6bc67f', noteTextColor: '#1a1c1f',
+        sequenceNumberColor: '#c6c7c7',
+        compositeBackground: '#e0edfe', compositeTitleBackground: '#e0edfe',
+        attributeBackgroundColorOdd: '#ffffff', attributeBackgroundColorEven: '#f9fbff',
+        sectionBkgColor: '#ffffff', sectionBkgColor2: '#f9fbff', altSectionBkgColor: '#ffffff',
+        gridColor: '#8e8f90',
+        taskBkgColor: '#e0edfe', taskBorderColor: '#539af8',
+        activeTaskBkgColor: '#e0edfe', activeTaskBorderColor: '#539af8',
+        doneTaskBkgColor: '#ffffff', doneTaskBorderColor: '#ededed',
+        critBkgColor: '#ffffff', critBorderColor: '#6bc67f',
+        taskTextColor: '#1a1c1f', taskTextDarkColor: '#1a1c1f',
+        taskTextLightColor: '#1a1c1f', taskTextOutsideColor: '#1a1c1f',
+        pie1: '#539af8', pie2: '#6bc67f', pie3: '#ef8b57',
+        pie4: '#f8d45d', pie5: '#b897f4', pie6: '#f68ebc',
+        pieOpacity: '0.7', pieStrokeColor: '#ffffff', pieStrokeWidth: '2px',
+        pieOuterStrokeWidth: '0px', pieSectionTextColor: '#1a1c1f',
+        pieLegendTextColor: '#1a1c1f', pieTitleTextColor: '#1a1c1f',
+      },
+    }
+  }
   return {
     theme: 'base', layout: 'elk', htmlLabels: false,
     themeVariables: {

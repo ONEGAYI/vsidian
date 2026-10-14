@@ -12,7 +12,7 @@ export const en = {
   'appearance.presets': 'Preset themes',
   'appearance.codeblockRendering': 'Code block rendering',
   'setting.mermaidTheme.title': 'Mermaid rendering theme',
-  'setting.mermaidTheme.description': 'Choose the built-in flowchart appearance. Codex uses light blue rounded nodes and ELK layered layout; diagram styles and configuration can override the preset.',
+  'setting.mermaidTheme.description': 'Choose the appearance of built-in Mermaid diagrams. Codex supports flowcharts, sequence, class, state, ER, Gantt, and pie diagrams; diagram styles and configuration can override the preset.',
   'setting.mermaidTheme.default': 'Default',
   'setting.mermaidTheme.codex': 'Codex',
   'setting.pastePreserveFormatting.title': 'Preserve formatting when pasting',
