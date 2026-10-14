@@ -434,3 +434,17 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 推送前同步main56e03882的多光标IME/API修正，重新compile/类型、完整Vitest8024/8024与Node193/193通过，真实目标用例2461ms通过。采样名称明确为“孙目标保存落盘且干净”，持续失败时不会仅报告磁盘条件。
 
 文件树仅更新本票三项职责；初始基线三项漏录保留，同步后另有main新增multicursorIme.mjs/Fixture.ts两项漏录，共五项，未称全树strict通过。证据为out/test/save20-callback-red-final.log、callback-green.log、native.log / native-report.log、compile.log、unit-full.log、rebased-unit.log、rebased-native.log及diagnosis.md（同组文件均带save20前缀）。候选CI与本机初步验证分开记录，其他未归因项不联动勾销。
+
+## #446 条目7/17：T15装载等待依赖短期事件日志（初步修正，2026-10-14）
+
+PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待页面装载30秒超时。第3片P2-14与其余十项检查通过；原失败保留，没有直接重跑。原报告只有全局事件尾部，未记录目标页面的装载快照。
+
+抽取并执行生产recordEvent与集成waitForPageLoaded：loaded成功事件随后被200条其他通道请求淘汰，目标页面仍活跃，旧等待却未完成，21ms稳定红。事件缓冲只保留最近200条，不能承担当前装载状态查询。
+
+既有等待改读目标文件的view.state.addonPage.active，七个调用点显式绑定刚打开的文件。三套样例的后续目录、行为、命令、绘制与设置断言、30秒预算、生产装载器及事件容量均保留。活跃装载不等于异步工厂所有贡献已就绪；后续断言继续验证贡献。失败诊断包含目标页面装载快照与该组件事件，避免高频通道请求覆盖有用的尾部。
+
+永久回放验证日志淘汰后可完成、缺少页面/已卸载/其他组件活跃仍不能放行；另验证七个等待地址与刚打开文件一致。本轮实现一度把渲染文件写成t15-renderer.md，地址契约先红后修正为实际t15-render.md，不把这次实现错误当历史根因。就绪契约10/10、compile/类型通过，真实VSCode1.82.3开发态独立桌面的T15六个完整用例通过（界面目标2840ms、输入2778ms）。
+
+本轮证明测试观测缺口，历史CI缺少完整目标事件时间线，尚不能把条目7/17每次失败都归为日志淘汰，两项继续未定因跟踪。其余条目5/6/9/12/14本机对照均通过，已在Issue补证据，未拿到目标红的路径未修改或勾销。证据为out/test/t15-ring-red.log、ring-green.log、target-contract-red.log、final-callback.log、all-native.log / all-native-report.log、compile.log及ring-diagnosis.md（同组文件均带t15前缀）；候选CI与本机结果分开记录。
+
+基线56e03882上完整Vitest8026/8026与Node193/193通过。文件树相关职责由维护入口更新；全树严格检查仍仅为前节列出的五项主线既有漏录，没有新增漏录。
