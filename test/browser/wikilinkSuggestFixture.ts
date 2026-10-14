@@ -49,9 +49,10 @@ const invertSer = (entry: HistoryEntry): SerChange[] => {
 
 /** 一笔 edit.request 落到权威模型：压栈（编辑前快照）+ 应用 + 清 redo（与
  *  生产宿主「新编辑截断 redo 分支」一致）。autoAck 关闭期间该编辑不入
- *  模型（此刻 undo 会弹到更早条目，与真实宿主「权威文本已应用」分叉），
- *  由 ackPendingEdits 补发时补齐——现有场景无 F3 窗口内按 undo 的交叉，
- *  后续新增此类场景前须先补账。 */
+ *  模型——此窗口内 undo 栈缺当前单元（轻则弹到更早条目，F3 型场景栈为
+ *  空则无动作），与真实宿主「权威文本已应用」分叉；由 ackPendingEdits
+ *  补发时补齐。现有场景无 F3 窗口内按 undo 的交叉，后续新增此类场景前
+ *  须先补账。 */
 function landEditToHost(req: Extract<WebviewToHost, { kind: 'edit.request' }>) {
   undoEntries.push({ before: hostText, changes: req.changes })
   redoEntries.length = 0
@@ -76,9 +77,9 @@ const controller = new WebviewSyncController({
         } as Parameters<typeof controller.handleHostMessage>[0])
       })
     }
-    // 宿主扮演（#503）：webview 转发的 Ctrl+Z / Ctrl+Shift+Z 在权威模型上
-    // 执行 undo/redo，逆变更经 doc.changed external 路径回流（栈空无动作，
-    // 与 VSCode 无可撤销项一致）
+    // 宿主扮演（#503）：webview 转发的撤销/重做按键（Mod-z / Shift-Mod-z /
+    // Mod-y → history.request）在权威模型上执行 undo/redo，逆变更经
+    // doc.changed external 路径回流（栈空无动作，与 VSCode 无可撤销项一致）
     if ((message as { kind?: string }).kind === 'history.request' && controller) {
       const op = (message as { op: 'undo' | 'redo' }).op
       const undo = op === 'undo'
