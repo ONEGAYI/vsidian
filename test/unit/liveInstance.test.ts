@@ -208,6 +208,65 @@ describe('T06 SDK 编辑面（#355）：快照/applyEdits/凭据结算', () => {
     expect((await promise).ok).toBe(true)
   })
 
+  it('applyEdits selection 数组形态：多 ranges 同事务回设不坍缩（#498）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'abcdef')
+    const revision = instance.snapshotForAddon()!.revision
+    const promise = instance.applyAddonEdit({
+      request: {
+        revision,
+        changes: [{ offset: 0, length: 0, text: 'X' }, { offset: 6, length: 0, text: 'Y' }],
+        selection: [{ anchor: 1, head: 1 }, { anchor: 8, head: 8 }],
+      },
+      origins: [{ addonId: 'pub.addon', opId: 'op-mr', undo: 'atomic' }],
+    })
+    const reqs = editRequests(sent)
+    expect(reqs).toHaveLength(1)
+    expect(instance.view!.state.doc.toString()).toBe('XabcdefY')
+    // 多 ranges 各就各位（文本事务与选区同笔原子生效，不坍缩为单光标）
+    expect(instance.view!.state.selection.ranges.map((r) => [r.anchor, r.head])).toEqual([[1, 1], [8, 8]])
+    // mainIndex 对齐 setSelectionForAddon 的 0 起始语义
+    expect(instance.view!.state.selection.mainIndex).toBe(0)
+    instance.handleEditAck({ kind: 'edit.ack', seq: reqs[0]!.seq, ok: true, version: 2 })
+    expect((await promise).ok).toBe(true)
+  })
+
+  it('applyEdits selection 数组形态逐 range 边界校验：越界拒绝 invalid-request（#498）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'abcdef')
+    const revision = instance.snapshotForAddon()!.revision
+    // growth=2：offset 8 合法（6+2），offset 9 越界
+    const bad = await instance.applyAddonEdit({
+      request: {
+        revision,
+        changes: [{ offset: 0, length: 0, text: 'X' }, { offset: 6, length: 0, text: 'Y' }],
+        selection: [{ anchor: 1, head: 1 }, { anchor: 9, head: 9 }],
+      },
+      origins: [{ addonId: 'pub.addon', opId: 'op-mb', undo: 'atomic' }],
+    })
+    expect(bad).toEqual({ ok: false, reason: 'invalid-request' })
+    // 空数组同样拒绝（EditorSelection.create 要求非空，对齐 setSelection）
+    const empty = await instance.applyAddonEdit({
+      request: { revision, changes: [{ offset: 0, length: 0, text: 'X' }], selection: [] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-me', undo: 'atomic' }],
+    })
+    expect(empty).toEqual({ ok: false, reason: 'invalid-request' })
+    expect(editRequests(sent)).toHaveLength(0)
+  })
+
+  it('applyEdits 零文本变更 + 数组 selection：本地原子应用、不出站（#498）', async () => {
+    const sent: WebviewToHost[] = []
+    const { instance } = mountInstance(sent, 'sess-a', 'abcdef')
+    const revision = instance.snapshotForAddon()!.revision
+    const zero = await instance.applyAddonEdit({
+      request: { revision, changes: [], selection: [{ anchor: 1, head: 1 }, { anchor: 3, head: 4 }] },
+      origins: [{ addonId: 'pub.addon', opId: 'op-za', undo: 'atomic' }],
+    })
+    expect(zero.ok).toBe(true)
+    expect(editRequests(sent)).toHaveLength(0) // 零文本变更不出站
+    expect(instance.view!.state.selection.ranges.map((r) => [r.anchor, r.head])).toEqual([[1, 1], [3, 4]])
+  })
+
   it('旧快照拒绝 stale-snapshot；非法边界拒绝 invalid-request；零变更直接凭据', async () => {
     const sent: WebviewToHost[] = []
     const { instance } = mountInstance(sent, 'sess-a', 'alpha')

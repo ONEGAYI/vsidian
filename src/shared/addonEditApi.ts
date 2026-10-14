@@ -65,8 +65,11 @@ export interface AddonApplyEditsRequest {
   revision: number
   /** 变更列表（LF 坐标，多范围 = 一笔修饰操作，Q29：不按底层变更拆分） */
   changes: SerChange[]
-  /** 提交后选区（随同一事务原子应用；缺省保持实例现有选区重定位） */
-  selection?: AddonSelectionRange
+  /** 提交后选区（随同一事务原子应用；缺省保持实例现有选区重定位）。
+   *  单对象 = 单选区（旧形态，既有组件零迁移）；数组 = 多选区回设（#498：
+   *  多 ranges 随文本事务同笔生效，mainIndex 恒 0——对齐 setSelection；
+   *  空数组拒绝） */
+  selection?: AddonSelectionRange | AddonSelectionRange[]
   /** 撤回边界声明；缺省 atomic */
   history?: AddonEditHistory
 }
@@ -157,6 +160,13 @@ export function isAddonSelectionRange(v: unknown): v is AddonSelectionRange {
   return isRecord(v) && isNonNegativeInt(v.anchor) && isNonNegativeInt(v.head)
 }
 
+/** selection 联合形态守卫（#498）：单对象或非空数组逐项合法（空数组拒绝
+ *  ——EditorSelection.create 要求至少一个 range，对齐 setSelection 非空口径） */
+export function isAddonSelectionSpec(v: unknown): v is AddonSelectionRange | AddonSelectionRange[] {
+  return isAddonSelectionRange(v) ||
+    (Array.isArray(v) && v.length > 0 && v.every(isAddonSelectionRange))
+}
+
 /** applyEdits 请求形状守卫：非法形态按 invalid-request 拒绝，不进入
  *  CM6 事务（无效变更在 dispatch 前拦截——CM6 会抛出而非拒绝） */
 export function isAddonApplyEditsRequest(v: unknown): v is AddonApplyEditsRequest {
@@ -169,7 +179,7 @@ export function isAddonApplyEditsRequest(v: unknown): v is AddonApplyEditsReques
   if (!Array.isArray(v.changes) || !v.changes.every(isSerChange)) {
     return false
   }
-  if (v.selection !== undefined && !isAddonSelectionRange(v.selection)) {
+  if (v.selection !== undefined && !isAddonSelectionSpec(v.selection)) {
     return false
   }
   return v.history === undefined || v.history === 'atomic' || v.history === 'joinPrevious'

@@ -825,7 +825,7 @@ export class LiveEditorInstance {
    *  来源列表由 SDK 层构造注入（首项 = 本次提交声明：atomic 或单笔
    *  joinPrevious；合并并入发生在暂缓窗口的段拼接）。 */
   applyAddonEdit(input: {
-    request: { revision: number; changes: SerChange[]; selection?: AddonSelectionRange }
+    request: { revision: number; changes: SerChange[]; selection?: AddonSelectionRange | AddonSelectionRange[] }
     origins: EditOriginMeta[]
   }): Promise<AddonApplyEditsResult> {
     const view = this.view
@@ -854,18 +854,31 @@ export class LiveEditorInstance {
     }
     if (input.request.selection !== undefined) {
       const growth = totalInserted(input.request.changes) - input.request.changes.reduce((sum, c) => sum + c.length, 0)
-      const maxPos = Math.max(input.request.selection.anchor, input.request.selection.head)
-      if (maxPos > docLength + growth) {
+      // #498 逐 range 覆盖（数组形态不坍缩校验面）；空数组拒绝（create 要求非空）
+      const positions = Array.isArray(input.request.selection)
+        ? input.request.selection.flatMap((r) => [r.anchor, r.head])
+        : [input.request.selection.anchor, input.request.selection.head]
+      if (positions.length === 0 || Math.max(...positions) > docLength + growth) {
         return Promise.resolve({ ok: false, reason: 'invalid-request' })
       }
     }
+    // selection 形态归一：单对象旧形态 EditorSelection.single；数组走
+    // EditorSelection.create（mainIndex=0，对齐 setSelectionForAddon 语义）
+    const selection = input.request.selection === undefined
+      ? undefined
+      : Array.isArray(input.request.selection)
+        ? EditorSelection.create(
+          input.request.selection.map((r) => EditorSelection.range(r.anchor, r.head)),
+          0,
+        )
+        : EditorSelection.single(input.request.selection.anchor, input.request.selection.head)
     const netChanged = input.request.changes.some((c) => c.length > 0 || c.text.length > 0)
     if (!netChanged) {
       // 零文本变更：选区类操作——本地原子应用（可选 selection 事务）、不
       // 出站、不造文本撤销项，凭据以当前基线签发（宿主无对应条目）
-      if (input.request.selection !== undefined) {
+      if (selection !== undefined) {
         view.dispatch({
-          selection: EditorSelection.single(input.request.selection.anchor, input.request.selection.head),
+          selection,
           annotations: addonEditOriginTag.of({ origins: input.origins }),
         })
       }
@@ -881,9 +894,7 @@ export class LiveEditorInstance {
       const changes = input.request.changes.map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text }))
       view.dispatch({
         changes,
-        ...(input.request.selection !== undefined
-          ? { selection: EditorSelection.single(input.request.selection.anchor, input.request.selection.head) }
-          : {}),
+        ...(selection !== undefined ? { selection } : {}),
         annotations: addonEditOriginTag.of({ origins: input.origins }),
       })
     })

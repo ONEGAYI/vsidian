@@ -665,8 +665,11 @@ export interface AddonApplyEditsRequest {
   revision: number
   /** 变更列表（LF 坐标，多范围 = 一笔修饰操作，Q29：不按底层变更拆分） */
   changes: SerChange[]
-  /** 提交后选区（随同一事务原子应用；缺省保持实例现有选区重定位） */
-  selection?: AddonSelectionRange
+  /** 提交后选区（随同一事务原子应用；缺省保持实例现有选区重定位）。
+   *  单对象 = 单选区（旧形态，既有组件零迁移）；数组 = 多选区回设（#498：
+   *  多 ranges 随文本事务同笔生效，mainIndex 恒 0——对齐 setSelection；
+   *  空数组拒绝） */
+  selection?: AddonSelectionRange | AddonSelectionRange[]
   /** 撤回边界声明；缺省 atomic */
   history?: AddonEditHistory
 }
