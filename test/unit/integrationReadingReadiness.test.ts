@@ -110,3 +110,22 @@ it('大纲初始采样等待当前档圆点绘制，拒绝侧栏过渡期的裁�
   expect(sample({ sidebar: { open: true }, outline: { ...outline, chevronPainted: false } })).toBe(false)
   expect(sample({ sidebar: { open: true }, outline })).toBe(true)
 })
+
+it('P2-14 保存采样同时等待目标文档干净和新内容落盘（#446 条目 20）', async () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'poll' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === '孙目标保存落盘' &&
+      node.arguments[1]?.getText(source).includes('p214-组合C.md')) {
+      callbacks.push(node.arguments[1]!)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})();`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('readDisk', 'cDoc', code)
+  await expect(sample(async () => '【三层孙】', { isDirty: true })).resolves.toBeUndefined()
+  await expect(sample(async () => '旧内容', { isDirty: false })).resolves.toBeUndefined()
+  await expect(sample(async () => '【三层孙】', { isDirty: false })).resolves.toBe(true)
+})

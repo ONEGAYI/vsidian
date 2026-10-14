@@ -422,3 +422,13 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 推送前同步main的拖放光标、阅读布局与Live选区修正：678a4972上的完整Vitest8013/8013、Node193/193与wikilinkSuggest48/48通过；进一步同步eee043c6，compile/类型、完整Vitest8016/8016、Node193/193与浏览器48/48通过。新基线文件树strict报三项已有漏录：dropCursorPaint.mjs、dropCursorPaintFixture.ts和readingMermaidMarginCssContract.test.ts，基线tree.json同样缺少；本票两项职责更新正确，保留该基线问题，不称最终全树strict通过。
 
 证据：本树out/test/highlight19-original-solo.log、clock-red.log、public-trace-red.log / green.log、session-green.log、compile.log及diagnosis.md（同组文件均带highlight19-前缀）。交付归档D:/.codex/evidence/vsidian-highlight19-20261014/；临时DEBUG-highlight19输出已从测试移除。
+
+## #446 条目20：P2-14保存等待弱于文档干净断言（初步修正，2026-10-14）
+
+主线CI38564195639的第3片101/102，三层引用组合用例在磁盘已包含新编辑文本后，紧接的“保存后C干净”断言失败，1328ms。原等待只验证磁盘内容，未验证后续断言要求的TextDocument.isDirty状态。
+
+直接执行P2-14实际采样回调：磁盘含新文本、文档仍dirty时旧回调放行，53ms稳定红。候选同次采样在读取磁盘后检查文档干净；永久契约同时拒绝“已落盘但仍dirty”和“文档干净但磁盘仍旧”，两项齐备才完成。原20秒预算、dirty断言、A/B零落盘、干净关闭与订阅回收均保留，生产保存实现与core分组不变。
+
+开发态真实VSCode1.82.3加载本树产物，目标用例2599ms通过；实际采样8/8、compile/类型、完整Vitest8017/8017与Node193/193通过。本轮确认的是测试等待条件缺口，历史没有保存完成和dirty事件时间线，不将dirty滞后的具体阶段说满。持续dirty仍会在原预算内失败，等待后的再次置dirty仍由原断言拦截。
+
+文件树仅更新本票三项职责；main已有三项漏录继续保留，不称全树strict通过。证据为out/test/save20-callback-red-final.log、callback-green.log、native.log / native-report.log、compile.log、unit-full.log、diagnosis.md（同组文件均带save20前缀）。候选CI与本机初步验证分开记录，其他未归因项不联动勾销。
