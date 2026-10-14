@@ -5,7 +5,7 @@ English | **[中文](https://github.com/ONEGAYI/vsidian/blob/main/README.md)**
 Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After installing, opening a `.md` file enters live preview directly: the document renders as you read it, moving the cursor onto a heading, link, or formula reveals its source, and the rendering restores once you move on. A reading mode and the native source editor are one click away at any time.
 
 - **Both views render only the viewport**: scrolling and editing stay responsive on large documents.
-- **Obsidian editing habits**: wikilinks and block-reference jumps, hover preview and document embeds (edit embedded notes in place), backlink and outgoing-link panels, reference updates on rename, grid table editing, task checkboxes, frontmatter property tables, image paste with automatic saving, and a unified context menu — familiar operations in familiar places.
+- **Obsidian editing habits**: wikilinks and block-reference jumps, hover preview and document embeds (edit embedded notes in place), backlink and outgoing-link panels, reference updates on rename, grid table editing, task checkboxes, frontmatter property tables, image paste with automatic saving, heading-section folding, and a unified context menu (with dedicated clusters for tables, graphic blocks, and links) — familiar operations in familiar places.
 - **Public styling surface**: a built-in CSS snippet system plus a documented style contract browsed offline and exportable as JSON, with Obsidian-name selectors and CSS variables accepted directly.
 
 ## Installation
@@ -24,6 +24,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Default editor guard | Prompts when another extension takes over as the default `.md` editor and restores Vsidian in one click; the "General" settings group shows the current default editor live |
 | Unified context menu | Right-click anywhere in the live preview body for link, formatting, and clipboard clusters, with cascading submenus, icons, and shortcut hints |
 | Text formatting | Command palette and quick-action bar cover bold, italic, highlight, headings, inline code, and more; every action is rebindable |
+| Heading folding | Hover a heading and click the arrow to fold its section away (folded sections show a `⋯` placeholder); five fold actions are rebindable, and fold state survives undo, external edits, and view switches |
 | Rich / plain text paste | Ctrl+V converts supported HTML formatting to Markdown, asking first and undoing text and formatting separately by default; Ctrl+Shift+V keeps original text and Markdown markers; see [paste details](docs/features.md#富文本粘贴与撤销) (Chinese) |
 | Multi-cursor editing | Alt+click and Ctrl+Alt+Up/Down add cursors; type and format across selections in parallel, Esc collapses back to one cursor (toggle in settings) |
 | Select next occurrence | Ctrl+D adds each next match as a selection; Ctrl+Shift+L selects all occurrences |
@@ -88,11 +89,20 @@ See the [fenced-language list](docs/specs/code-block-card.md#语法高亮) for s
 | Readable line width | One slider constrains the body column in both views; 0 fills the available width, the column centers and yields to the outline panel |
 | Interface language | English and 简体中文 switch instantly, following the VS Code display language by default |
 
+### Add-ons
+
+| Feature | Description |
+| --- | --- |
+| Add-on system | VS Code extensions that declare an add-on identity are discovered and registered by Vsidian automatically; they can contribute settings pages, input behaviors, code-block renderers, commands and keybindings, context-menu items, toolbar buttons, and panels |
+| Management & diagnostics | Vsidian settings offer per-add-on toggles, settings editing, input-behavior ordering and per-item disabling, failure reasons, and manual retry; a failing add-on has its contributions withdrawn without affecting others or built-in features |
+| Code-block renderer takeover | Add-ons may replace the rendering of languages they declare (Mermaid included); users can switch per language or back to built-in, and disabling or failure falls back to built-in rendering |
+| Developer API | The API reference, semantic catalog, and developer guide live in `docs/addons/` in the repository; the API is at a 1.0.0 candidate stage and not yet released |
+
 The complete behavior, boundaries, and settings of each feature are documented in [docs/features.md](https://github.com/ONEGAYI/vsidian/blob/main/docs/features.md) (in Chinese).
 
 ## Known limitations
 
-- No support for Obsidian Canvas, whiteboards, the Obsidian plugin ecosystem, or note formats other than Markdown.
+- No support for Obsidian Canvas, whiteboards, or note formats other than Markdown; Obsidian plugins themselves are not compatible — Vsidian has its own add-on system (see above).
 - The CSP allows any https image source (a design trade-off for remote image hosting; in theory usable as a tracking pixel).
 - Very long code blocks skip syntax coloring and fall back to a plain-text card.
 - External entries (workspace search, problems panel, etc.) open a note without revealing the match — a VSCode public API gap (tracking vscode#289785); use the command "Reveal selected search result" to locate it manually.
