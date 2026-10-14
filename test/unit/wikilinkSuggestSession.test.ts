@@ -610,12 +610,17 @@ describe('异步列表更新按候选身份保留手动高亮', () => {
     }
   })
 
-  it('同查询更新帧：手动高亮按 id 保留；身份消失时空查询回无高亮、非空取首项', () => {
-    const { controller, sent, view } = setup('[[]]')
+  it.each([0, 80])('同查询更新帧：手动高亮按 id 保留；身份消失时空查询回无高亮、非空取首项（回包 %ims）', (responseTime) => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(0)
+    let fixture: ReturnType<typeof setup> | undefined
     try {
+      fixture = setup('[[]]')
+      const { controller, sent, view } = fixture
       // 非空查询：高亮第 2 项（通知），更新帧保留其身份
       locate(controller, 2)
       typeAt(view, 2, '方')
+      vi.setSystemTime(responseTime)
       respond(controller, sent, [FANGAN, TONGZHI])
       press(view, 'ArrowDown')
       expect(popupState().activeIndex).toBe(1)
@@ -627,15 +632,22 @@ describe('异步列表更新按候选身份保留手动高亮', () => {
       expect(popupState().activeIndex).toBe(0)
 
       // 空查询：手动高亮后身份消失回无高亮
+      const beforeEmptyQuery = lastQuery(sent)!
       deleteAt(view, 2, 3)
+      // 慢回包会使后续文件查询去抖；先让新查询出站，才能按其身份回包。
+      vi.advanceTimersByTime(responseTime)
+      expect(lastQuery(sent)?.query).toBe('')
+      expect(lastQuery(sent)!.reqId).toBeGreaterThan(beforeEmptyQuery.reqId)
       respond(controller, sent, [FANGAN, TONGZHI])
+      expect(popupState().itemCount).toBe(2)
       expect(popupState().activeIndex).toBe(null) // 空查询初始无高亮
       press(view, 'ArrowDown')
       expect(popupState().activeIndex).toBe(0)
       respond(controller, sent, [TONGZHI]) // 方案消失
       expect(popupState().activeIndex).toBe(null)
     } finally {
-      controller.dispose()
+      fixture?.controller.dispose()
+      vi.useRealTimers()
     }
   })
 
