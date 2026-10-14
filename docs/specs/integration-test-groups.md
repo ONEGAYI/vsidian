@@ -468,3 +468,5 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 条目6的额外30次0/80/200ms控制器重建对照通过，只覆盖内存桥与dispose路径，仍不覆盖真实VSCode销毁/消息保存的全部环节，继续未定因。证据为out/test/446-build-isolation-red.log / green.log、446-build-read-probe.log / green-final.log、446-build-consumers-browser-final.log、446-build-unit-full.log、446-build-native.log / report.log及446-build-diagnosis.md；目录断言证据为446-build-t07-browser.log / green.log。候选CI与本机证据分开记录，两套浏览器敏感组的恢复仍按既定多轮独立Linux验证条件评估。
 
 同步17b999fd后，compile/类型、完整Vitest8034/8034与Node194/194通过；独立T12真实键盘宿主四场景通过。文件树相关职责和新契约已同步，strict通过；此前五项主线漏录由17b999fd收录，本轮没有重复补录。
+
+完整浏览器三并发、禁构建复用为97/98通过（run-P20LWJ，304.08s）；SDK消费者全部通过，唯一失败是未改的addonSettings.mjs:293 textarea圆角expected2px/actual空字符串，另按设置页采样路径追查，不称全量全绿。独立审查指出回归测试应在取得布局后即登记自有目录，避免后续断言失败遗漏清理；修正登记时机后，公开构建契约1/1通过，187ms。
