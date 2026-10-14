@@ -181,11 +181,29 @@ export function runTestHost({ executable, args, env, mode = resolveTestHostMode(
   return new Promise((resolve, reject) => {
     const child = spawn(command, commandArgs, { env, windowsHide: windowsWrapper })
     let stopCode = 0
+    // 最近输出环形缓冲（超时/信号停止时随原因就地输出——分清「超时截断」
+    // 与「真失败」、定位断点用例，不必回读报告；只留尾部行防复读洪流）
+    const TAIL_LINES = 20
+    const tailLines = []
+    const noteTail = (chunk) => {
+      for (const line of chunk.toString().split('\n')) {
+        if (line.length === 0) continue
+        tailLines.push(line)
+        if (tailLines.length > TAIL_LINES) tailLines.shift()
+      }
+    }
+    const writeStop = (reason) => {
+      const head = `[testHost] ${reason}，结束本次测试宿主进程树\n`
+      const tail = tailLines.length > 0
+        ? `[testHost] 最近输出（最后 ${tailLines.length} 行）：\n${tailLines.join('\n')}\n`
+        : ''
+      report(head + tail)
+      stderr.write(head + tail)
+    }
     const stop = (code, reason) => {
       if (stopCode) return
       stopCode = code
-      report(`[testHost] ${reason}，结束本次测试宿主进程树\n`)
-      stderr.write(`[testHost] ${reason}，结束本次测试宿主进程树\n`)
+      writeStop(reason)
       child.kill()
     }
     const onSigint = () => stop(130, '收到 SIGINT')
@@ -198,8 +216,8 @@ export function runTestHost({ executable, args, env, mode = resolveTestHostMode(
       process.off('SIGINT', onSigint)
       process.off('SIGTERM', onSigterm)
     }
-    child.stdout.on('data', (chunk) => { report(chunk); stdout.write(chunk) })
-    child.stderr.on('data', (chunk) => { report(chunk); stderr.write(chunk) })
+    child.stdout.on('data', (chunk) => { noteTail(chunk); report(chunk); stdout.write(chunk) })
+    child.stderr.on('data', (chunk) => { noteTail(chunk); report(chunk); stderr.write(chunk) })
     child.on('error', (error) => {
       report(`[testHost] 启动失败 ${error.message}\n`)
       if (reportFd >= 0) closeSync(reportFd)

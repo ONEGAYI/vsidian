@@ -88,6 +88,14 @@ function rangeMarkers(view: EditorView, rawFrom: number, rawTo: number): Array<R
  * 场景抓回）。形态对齐原生跨行选区：首行（选区起点所在）从起点延伸到
  * 内容区右缘、起点之后的折行视觉行与其余各行（含衔接 grid 的末行）满宽
  * ——它们都是「选区延续行」。
+ *
+ * 已知边界（审查轮 3 落档）：选区**终止**于分隔行的路径由循环尾部
+ * forRange 画文本宽（台账口径）；分隔行被命中显形揭示且选区**穿越**进
+ * grid 行的窄路径按延续行画满宽——两口径不一致属已知边界（单光标常态
+ * 下覆盖选区使分隔行保持隐藏、coordsAtPos 为 null 提前返回，不触发）。
+ * run 首行不可测提前返回依赖「隐藏行必为分隔行且其后必是 grid 行」的
+ * 现状；整块替换 widget（如 Mermaid 图形块）作 run 首行时画满内容宽
+ * （原生画 widget 盒宽），属形态超集。
  */
 function closeRunBeforeGrid(
   view: EditorView,
@@ -108,7 +116,13 @@ function closeRunBeforeGrid(
   const startCoords = view.coordsAtPos(runStart, 1)
   if (!startCoords) return
   const firstBlock = view.lineBlockAt(runStart)
-  piece(Math.max(startCoords.left, sides.left), startCoords.top, sides.right, firstBlock.top + firstBlock.height)
+  // 起点所在视觉行：从起点到内容区右缘；起点下方同文档行的其余视觉行
+  // 满宽（起点在软折行中间时存在——审查轮 3：整块画会在起点下方各行
+  // 左侧留 [leftSide, 起点左] 缺口）
+  piece(Math.max(startCoords.left, sides.left), startCoords.top, sides.right, startCoords.bottom)
+  if (firstBlock.top + firstBlock.height > startCoords.bottom + 0.5) {
+    piece(sides.left, startCoords.bottom, sides.right, firstBlock.top + firstBlock.height)
+  }
   let pos = first.to + 1
   while (pos < gridLineFrom) {
     const line = view.state.doc.lineAt(pos)
