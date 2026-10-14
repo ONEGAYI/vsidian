@@ -93,11 +93,13 @@ try {
     cursor?.color === 'rgb(0, 0, 0)',
     `color=${cursor?.color}`)
 
-  // D1b：暗色轮（VSCode 注入 body.vscode-dark）落点光标跟随 caret 色板
-  // 提亮——CM6 baseTheme 的 dark 变体只提亮 .cm-cursor，.cm-dropCursor
-  // 不补则暗底黑线不可见（评审 F1，修复本体）
+  // D1b：暗色轮落点光标提亮为 caret 色——CM6 baseTheme 的 dark 变体只
+  // 提亮 .cm-cursor，.cm-dropCursor 由实例主题层 &dark 变体补（评审 F1）。
+  // 生产链路：body.vscode-dark → hostThemeObserver → applyHostTheme →
+  // darkCompartment 热重配（异步），加类后重发 dragover 并轮询颜色落定
   await page.evaluate(() => document.body.classList.add('vscode-dark'))
   await page.evaluate((offset) => window.dispatchDrag('dragover', offset), DROP_AT)
+  await page.waitForFunction(() => window.readDropCursor()?.color === 'rgb(221, 221, 221)')
   const darkCursor = await page.evaluate(() => window.readDropCursor())
   check('D1b 暗色轮落点光标提亮为 caret 色（不再黑线不可见）',
     darkCursor?.color === 'rgb(221, 221, 221)',
