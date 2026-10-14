@@ -102,6 +102,7 @@ try {
 
   // ---- 1. 三组结构与子组归属（用户可见文本） ----
   const nav = page.locator('.vsidian-settings-nav')
+  assert.equal(await nav.getByRole('button', { name: zhCn['settings.addonSettingsSection'], exact: true }).count(), 0, '不重复提供组件设置总入口')
   const groupLabels = nav.locator('.vsidian-settings-nav-group-label')
   assert.deepEqual(await groupLabels.allInnerTexts(), [zhCn['settings.sidebarOptions'], zhCn['addons.sidebarCoreAddons'], zhCn['addons.sidebarThirdPartyAddons']], '侧栏三大组标题按约定呈现')
 
@@ -135,6 +136,14 @@ try {
   // 承载任何组件设置内容
   const detail = page.locator('.vsidian-addons-settings')
   await detail.waitFor()
+  assert.equal(await detail.isVisible(), true, '点击组件条目后直接显示该组件设置')
+  const detailPaint = await detail.evaluate((el) => {
+    const style = getComputedStyle(el)
+    return { display: style.display, visibility: style.visibility, color: style.color, background: getComputedStyle(document.body).backgroundColor }
+  })
+  assert.notEqual(detailPaint.display, 'none')
+  assert.equal(detailPaint.visibility, 'visible')
+  assert.notEqual(detailPaint.color, detailPaint.background, '组件设置文字与背景应有可见色差')
   assert.match(await detail.innerText(), new RegExp(zhCn['addons.settingsAreaTitle'].replace('{label}', 'Third On')))
   assert.equal(await page.locator('.vsidian-addons-list').count(), 0, '组件设置分页不混装管理列表（#465 通道堵死）')
   // 「返回组件列表」回本页组件清单（hub 形态）

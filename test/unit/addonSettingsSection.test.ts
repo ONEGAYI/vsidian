@@ -444,22 +444,22 @@ describe('附加组件分页：功能开关与运行状态（T02）', () => {
 // ---- #354 T05：侧栏三组结构（选项 / 核心组件 / 第三方组件） ----
 
 describe('设置页侧栏三组结构（T05）', () => {
-  it('「选项」大组恒在场并收纳现有内置分页与附加组件域三个管理分页', () => {
+  it('「选项」大组只收纳内置分页与组件管理入口，不重复提供「组件设置」总入口', () => {
     const harness = makeView()
     const nav = harness.parent.querySelector('nav')
     const optionsLabel = nav?.querySelector('.vsidian-settings-nav-group-label')
     expect(optionsLabel?.textContent).toBe('选项')
     const optionsSection = optionsLabel?.closest('.vsidian-settings-nav-section')
     // 现有内置分页（常规/编辑器/快捷键/外观/文件与链接/实验性功能）与
-    // 附加组件域三分页（附加组件/输入行为管理/组件设置）都在「选项」大组内
+    // 附加组件管理与输入行为管理在「选项」内，组件设置从各组件条目进入
     const itemTexts = [...(optionsSection?.querySelectorAll('.vsidian-settings-nav-item') ?? [])].map((b) => b.textContent)
-    for (const expected of ['常规', '编辑器', '快捷键', '外观', '文件与链接', '实验性功能', '附加组件', '输入行为管理', '组件设置']) {
+    for (const expected of ['常规', '编辑器', '快捷键', '外观', '文件与链接', '实验性功能', '附加组件', '输入行为管理']) {
       expect(itemTexts.some((text) => text?.includes(expected))).toBe(true)
     }
-    // 附加组件域三分页相邻且按约定顺序
+    expect(itemTexts).not.toContain('组件设置')
+    // 两个管理入口相邻且按约定顺序
     const ids = itemTexts.map((text) => text)
     expect(ids.indexOf('附加组件')).toBeLessThan(ids.indexOf('输入行为管理'))
-    expect(ids.indexOf('输入行为管理')).toBeLessThan(ids.indexOf('组件设置'))
   })
 
   it('核心/第三方两大组恒在场（空清单也不消失），官方与第三方组件归位准确', () => {
@@ -534,10 +534,10 @@ describe('设置页侧栏三组结构（T05）', () => {
     expect(sections[2]?.querySelector('.vsidian-settings-nav-empty')?.textContent).toContain('暂无')
   })
 
-  it('侧栏可配置组件条目点击：打开设置区并导航到「组件设置」分页', async () => {
+  it.each([true, false])('侧栏可配置组件条目点击直达自己的设置（enabled=%s）', async (enabled) => {
     const harness = makeView()
     harness.dispatch(addonsState([
-      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      { id: 'a.demo', label: 'Demo', official: false, status: 'registered', enabled, hasSettingsDefinitions: true },
     ]))
     const nav = harness.parent.querySelector('nav')
     const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Demo'))
