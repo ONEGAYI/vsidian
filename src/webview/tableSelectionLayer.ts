@@ -63,8 +63,7 @@ function rangeMarkers(view: EditorView, rawFrom: number, rawTo: number): Array<R
     const lineEl = lineElement(view, line.from)
     if (lineEl?.classList.contains(LIVE_CLASS_NAMES.tableGridRow)) {
       if (runStart != null) {
-        // run 闭合到 grid 行前一位置（含上一行行尾，不含本行）
-        out.push(...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(runStart, line.from - 1)))
+        closeRunBeforeGrid(view, out, runStart, line.from)
         runStart = null
       }
       const segStart = Math.max(from, line.from)
@@ -80,6 +79,57 @@ function rangeMarkers(view: EditorView, rawFrom: number, rawTo: number): Array<R
     out.push(...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(runStart, to)))
   }
   return out
+}
+
+/**
+ * run 在 grid 行前闭合（审查轮 2）：被 grid 打断的 run 内部**全手动分段**，
+ * 不再委托 forRange——委托段的 to 落点在哪一行，哪一行就成为「to 所在行」
+ * 而退化为文本宽（首版只补末行时倒数第二行同样退化，被 para-into-grid
+ * 场景抓回）。形态对齐原生跨行选区：首行（选区起点所在）从起点延伸到
+ * 内容区右缘、起点之后的折行视觉行与其余各行（含衔接 grid 的末行）满宽
+ * ——它们都是「选区延续行」。
+ */
+function closeRunBeforeGrid(
+  view: EditorView,
+  out: Array<RectangleMarker>,
+  runStart: number,
+  gridLineFrom: number,
+): void {
+  const sides = contentSides(view)
+  const piece = (left: number, top: number, right: number, bottom: number) =>
+    out.push(new RectangleMarker(
+      SELECTION_BLOCK_CLASS,
+      left - sides.base.left,
+      top - sides.base.top,
+      Math.max(0, right - left),
+      bottom - top,
+    ))
+  const first = view.state.doc.lineAt(runStart)
+  const startCoords = view.coordsAtPos(runStart, 1)
+  if (!startCoords) return
+  const firstBlock = view.lineBlockAt(runStart)
+  piece(Math.max(startCoords.left, sides.left), startCoords.top, sides.right, firstBlock.top + firstBlock.height)
+  let pos = first.to + 1
+  while (pos < gridLineFrom) {
+    const line = view.state.doc.lineAt(pos)
+    const block = view.lineBlockAt(line.from)
+    piece(sides.left, block.top, sides.right, block.top + block.height)
+    pos = line.to + 1
+  }
+}
+
+/** 内容区左右界（与 CM6 rectanglesForRange 的 leftSide/rightSide 同式取值） */
+function contentSides(view: EditorView): { left: number; right: number; base: { left: number; top: number } } {
+  const contentRect = view.contentDOM.getBoundingClientRect()
+  const lineElt = view.contentDOM.querySelector('.cm-line')
+  const win = view.dom.ownerDocument.defaultView
+  const style = lineElt && win ? win.getComputedStyle(lineElt) : null
+  const pad = (v: string | undefined) => (style ? Number.parseInt(v ?? '', 10) || 0 : 0)
+  return {
+    left: contentRect.left + pad(style?.paddingLeft) + Math.min(0, pad(style?.textIndent)),
+    right: contentRect.right - pad(style?.paddingRight),
+    base: layerBase(view),
+  }
 }
 
 /** 位置所在 .cm-line 元素（不可得时 null） */

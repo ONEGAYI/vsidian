@@ -1790,9 +1790,12 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
   try {
     selFixtureScript = await startFixtureScriptServer()
     for (const scenario of [
-      { id: 'empty-cell-index', kind: 'cell-clamp', doc: '| a | b | c |\n| --- | --- | --- |\n| x | | 目标格 |\n', pick: '目标格', cellIndex: 2 },
+      { id: 'empty-cell-index', kind: 'cell-clamp', doc: '| a | b | c |\n| --- | --- | --- |\n| x | | 目<br>标格 |\n', pick: '目标格', cellIndex: 2 },
       { id: 'all-empty-row', kind: 'blocks-only', doc: '| a | b | c |\n| --- | --- | --- |\n| x | y | z |\n| | | |\n', pick: '| | |', cellIndex: null },
       { id: 'para-cross-fullwidth', kind: 'para-fullwidth', doc: '短段甲一句话。\n\n短段乙一句话。\n', fromPick: '短段甲', toPick: '短段乙' },
+      // 审查轮 2：run 末行衔接 grid 行的满宽——选区从段落延续进表格首格，
+      // 段落行是「选区延续行」，高亮须延伸到内容区右缘（不得止于行尾文本）
+      { id: 'para-into-grid-fullwidth', kind: 'para-grid', doc: '段落延续一行。\n\n| a | b |\n| --- | --- |\n| x | y |\n', fromPick: '段落延续', toPick: 'x' },
     ]) {
       const page = await selBrowser.newPage()
       const errors = []
@@ -1807,7 +1810,7 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
         await page.waitForTimeout(300)
         const range = await page.evaluate((sc) => {
           const text = [...document.querySelectorAll('.cm-line')].map((el) => el.textContent ?? '')
-          if (sc.kind === 'para-fullwidth') {
+          if (sc.kind === 'para-fullwidth' || sc.kind === 'para-grid') {
             const i1 = text.findIndex((t) => t.includes(sc.fromPick))
             const i2 = text.findIndex((t, i) => i > i1 && t.includes(sc.toPick))
             if (i1 < 0 || i2 < 0) return null
@@ -1815,6 +1818,10 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
             for (const t of text.slice(0, i1)) at1 += t.length + 1
             let at2 = at1 + text[i1].length + 1
             for (const t of text.slice(i1 + 1, i2)) at2 += t.length + 1
+            if (sc.kind === 'para-grid') {
+              // to 落在目标行文本中部（进入表格后的延续选区）
+              return { from: at1, to: at2 + Math.floor(text[i2].length / 2), paraLineIndex: i1 }
+            }
             return { from: at1, to: at2 + Math.floor(text[i2].length / 2) }
           }
           const lineIdx = text.findIndex((t) => t.includes(sc.pick))
@@ -1827,22 +1834,24 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
         assert.ok(range, `场景 ${scenario.id}：目标文本应在行内`)
         await page.evaluate((r) => window.selectRange(r.from, r.to), range)
         await page.waitForTimeout(300)
-        const paint = await page.evaluate((cellIndex) => {
+        const paint = await page.evaluate((ctx) => {
           const rect = (el) => {
             const r = el.getBoundingClientRect()
             return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }
           }
           const rows = document.querySelectorAll('.vsidian-table-grid-row')
           const dataRow = rows[rows.length - 1]
-          const cellRect = cellIndex != null && dataRow
-            ? rect(dataRow.querySelectorAll(':scope > .vsidian-table-grid-cell')[cellIndex])
+          const cellRect = ctx.cellIndex != null && dataRow
+            ? rect(dataRow.querySelectorAll(':scope > .vsidian-table-grid-cell')[ctx.cellIndex])
             : null
           const blocks = [...document.querySelectorAll(
             '.cm-selectionLayer .cm-selectionBackground, .vsidian-selection-layer .vsidian-selection-background',
           )].filter((el) => el.getClientRects().length > 0).map(rect)
           const content = document.querySelector('.cm-content')
-          return { cellRect, blocks, contentRect: content ? rect(content) : null }
-        }, scenario.cellIndex)
+          const lines = [...document.querySelectorAll('.cm-content .cm-line')]
+          const paraRect = ctx.paraLineIndex != null && lines[ctx.paraLineIndex] ? rect(lines[ctx.paraLineIndex]) : null
+          return { cellRect, blocks, contentRect: content ? rect(content) : null, paraRect }
+        }, { cellIndex: scenario.cellIndex, paraLineIndex: scenario.kind === 'para-grid' ? range.paraLineIndex : null })
         assert.ok(paint.blocks.length > 0, `场景 ${scenario.id}：应有可见选区块（全零宽行回退/格分段不得丢背景）`)
         if (scenario.kind === 'cell-clamp' && paint.cellRect) {
           for (const block of paint.blocks) {
@@ -1856,6 +1865,14 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
           const worst = Math.max(...paint.blocks.map((b) => b.right))
           assert.ok(worst >= paint.contentRect.right - 4,
             `场景 ${scenario.id}：跨段落选区首行高亮应延伸到内容区右缘（实际 ${worst.toFixed(1)} vs ${paint.contentRect.right.toFixed(1)}——逐行拆分回归）`)
+        }
+        if (scenario.kind === 'para-grid' && paint.contentRect && paint.paraRect) {
+          // 与段落行 y 带重叠的块，其右界须达内容区右缘（选区延续行满宽）
+          const overlapped = paint.blocks.filter((b) => b.top < paint.paraRect.bottom && paint.paraRect.top < b.bottom)
+          assert.ok(overlapped.length > 0, `场景 ${scenario.id}：段落行上应有选区块`)
+          const worst = Math.max(...overlapped.map((b) => b.right))
+          assert.ok(worst >= paint.contentRect.right - 4,
+            `场景 ${scenario.id}：延续进表格的段落行高亮应满宽到内容区右缘（实际 ${worst.toFixed(1)} vs ${paint.contentRect.right.toFixed(1)}——run 末行退化回归）`)
         }
         assert.deepEqual(errors, [], `页面异常: ${JSON.stringify(errors)}`)
         console.log(`[原生输入][PASS] table-selection/${scenario.id}`)
