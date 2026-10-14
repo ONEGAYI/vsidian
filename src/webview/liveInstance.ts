@@ -16,7 +16,7 @@
 // webview 全程 LF 坐标。本票为准备性 expand 改造：不接入引用目标 B 的
 // 生产写端口，不引入独立 history（撤销权威仍在宿主 TextDocument）。
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, Transaction, type Extension } from '@codemirror/state'
-import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
+import { EditorView, ViewPlugin, dropCursor, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
 import { addonInstanceIdField, setAddonInstanceId } from './addonViewIdentity'
 import type { DocumentChangeReason, HostToWebview, PasteHistory, PasteStage, SerChange, WebviewToHost } from '../shared/protocol'
@@ -2627,6 +2627,27 @@ export class LiveEditorInstance {
       // （键位所有权归操作注册表）。组内无 keymap/filter 顺序语义（facet/
       // 绘制层/吞键 keymap 与其他扩展不竞争事务），关闭时整组退出装配
       this.multicursorCompartment.of(this.multicursorOn ? multicursorExtensions : []),
+      // 拖放落点光标（2026-10 修复）：拖动选中文本悬停时在落点画出插入
+      // 指示（CM6 dropCursor 扩展；落位本身由 @codemirror/view 核心 drop
+      // 处理，此处只补可视化）。绘制层 eventObservers、无 keymap/filter
+      // 顺序语义，不随多光标设置门控——单选区拖放同样需要落点指示；
+      // 浏览器层断言在 dropCursorPaint 套件
+      dropCursor(),
+      // 主题层补 CM6 baseTheme 漏掉的 dropCursor 明暗变体：上游 dark
+      // 变体只提亮 .cm-cursor（&dark #ddd），.cm-dropCursor 暗色轮保持
+      // 黑线深底不可见。&dark 变体选择器只在 baseTheme 编译器支持
+      // （EditorView.theme 会抛 Unsupported selector，CI unit 实证），
+      // 用户 baseTheme 晚于内建主题挂载、同特异性源序在后，覆盖口径与
+      // 上游 &dark .cm-cursor 提亮同构；darkCompartment 热重配驱动
+      // （宿主 body.vscode-dark 经 hostThemeObserver）。颜色语义归 CM6
+      // 主题层——main.css 不得落光标颜色（editorChromeCssContract
+      // 「绘制光标颜色归 baseTheme」契约）。亮色维持 baseTheme 黑线；
+      // 跟随宿主 caret 色板，缺省回退上游暗色取值 #ddd
+      EditorView.baseTheme({
+        '&dark .cm-dropCursor': {
+          borderLeftColor: 'var(--vscode-editorCursor-foreground, #ddd)',
+        },
+      }),
       // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
       // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
       // defaultKeymap 之前（先于通用键位拦截）

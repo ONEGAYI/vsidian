@@ -1642,7 +1642,10 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     purpose: '阅读 mermaid 围栏整块成块的块元素类（豁免 60 行大围栏切片；挂载即渲染、卸载随块释放）；块内才是 .vsidian-mermaid 渲染容器。',
     views: ['reading'],
     dom: '阅读块级容器。',
-    example: '.vsidian-reading-mermaid {\n  margin: 8px 0;\n}',
+    // 示例水平分量必须保持 auto：简写置 0 会以同特异性源序在后覆盖块
+    // 基类的限宽居中（2026-10 修复同期对齐，契约见
+    // readingMermaidMarginCssContract）
+    example: '.vsidian-reading-mermaid {\n  margin: 8px auto;\n}',
     obsidian: { counterpart: '.markdown-preview-view .mermaid 方向', support: 'semantic' },
     verification: [
       '集成「阅读模式 Mermaid 渲染」（#60）',
