@@ -429,6 +429,8 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 
 直接执行P2-14实际采样回调：磁盘含新文本、文档仍dirty时旧回调放行，53ms稳定红。候选同次采样在读取磁盘后检查文档干净；永久契约同时拒绝“已落盘但仍dirty”和“文档干净但磁盘仍旧”，两项齐备才完成。原20秒预算、dirty断言、A/B零落盘、干净关闭与订阅回收均保留，生产保存实现与core分组不变。
 
-开发态真实VSCode1.82.3加载本树产物，目标用例2599ms通过；实际采样8/8、compile/类型、完整Vitest8017/8017与Node193/193通过。本轮确认的是测试等待条件缺口，历史没有保存完成和dirty事件时间线，不将dirty滞后的具体阶段说满。持续dirty仍会在原预算内失败，等待后的再次置dirty仍由原断言拦截。
+初始基线12d39c89上，开发态真实VSCode1.82.3加载本树产物，目标用例2599ms通过；实际采样8/8、compile/类型、完整Vitest8017/8017与Node193/193通过。本轮确认的是测试等待条件缺口，历史没有保存完成和dirty事件时间线，不将dirty滞后的具体阶段说满。持续dirty仍会在原预算内失败，等待后的再次置dirty仍由原断言拦截。
 
-文件树仅更新本票三项职责；main已有三项漏录继续保留，不称全树strict通过。证据为out/test/save20-callback-red-final.log、callback-green.log、native.log / native-report.log、compile.log、unit-full.log、diagnosis.md（同组文件均带save20前缀）。候选CI与本机初步验证分开记录，其他未归因项不联动勾销。
+推送前同步main56e03882的多光标IME/API修正，重新compile/类型、完整Vitest8024/8024与Node193/193通过，真实目标用例2461ms通过。采样名称明确为“孙目标保存落盘且干净”，持续失败时不会仅报告磁盘条件。
+
+文件树仅更新本票三项职责；初始基线三项漏录保留，同步后另有main新增multicursorIme.mjs/Fixture.ts两项漏录，共五项，未称全树strict通过。证据为out/test/save20-callback-red-final.log、callback-green.log、native.log / native-report.log、compile.log、unit-full.log、rebased-unit.log、rebased-native.log及diagnosis.md（同组文件均带save20前缀）。候选CI与本机初步验证分开记录，其他未归因项不联动勾销。

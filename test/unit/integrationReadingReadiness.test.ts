@@ -115,7 +115,7 @@ it('P2-14 保存采样同时等待目标文档干净和新内容落盘（#446 �
   const callbacks: ts.Expression[] = []
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'poll' &&
-      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === '孙目标保存落盘' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text.startsWith('孙目标保存落盘') &&
       node.arguments[1]?.getText(source).includes('p214-组合C.md')) {
       callbacks.push(node.arguments[1]!)
     }
