@@ -1723,8 +1723,7 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
       { id: 'bold-fence', cell: '**V2 会话内容<br>**<br>**' },
       { id: 'strike-fence', cell: '~~V2 会话内容<br>~~<br>~~' },
       { id: 'plain-break', cell: 'V2 会话内容<br>第二行<br>第三行' },
-    ]) {
-      const page = await selBrowser.newPage()
+    ]) {      const page = await selBrowser.newPage()
       const errors = []
       page.on('pageerror', (error) => errors.push(error.message))
       try {
@@ -1774,6 +1773,104 @@ if (mermaidFailures.length) throw new AggregateError(mermaidFailures, 'Mermaid �
     selFixtureScript?.close()
   }
   if (selFailures.length) throw new AggregateError(selFailures, '表格跨视觉行选区回归失败')
+}
+
+// ---- #484 审查轮补充：零宽格不错位、全零宽行不丢背景、正文跨段满宽保持 ----
+// 空格格发射 EmptyTableCellWidget（spec 无 class），若格收集漏掉它，cells
+// 与 DOM 格元素索引错位——其后每格高亮左移一列；全零宽行收集为空时若不
+// 回退 CM6 整行段，该行选区背景消失（原生层已被隐藏）。另钉正文契约：
+// 跨文档行（跨段落）选区的首/中间行高亮须延伸到内容区右缘（CM6 跨视觉行
+// 双分支的满宽惯例）——逐行拆分委托会使高亮止于行尾文本（审查轮 1 P1）。
+// 源文本精确选区驱动（键盘无法覆盖零宽区间）。
+{
+  const selBrowser = await chromium.launch({ headless: true,
+    channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
+  let selFixtureScript
+  const selFailures = []
+  try {
+    selFixtureScript = await startFixtureScriptServer()
+    for (const scenario of [
+      { id: 'empty-cell-index', kind: 'cell-clamp', doc: '| a | b | c |\n| --- | --- | --- |\n| x | | 目标格 |\n', pick: '目标格', cellIndex: 2 },
+      { id: 'all-empty-row', kind: 'blocks-only', doc: '| a | b | c |\n| --- | --- | --- |\n| x | y | z |\n| | | |\n', pick: '| | |', cellIndex: null },
+      { id: 'para-cross-fullwidth', kind: 'para-fullwidth', doc: '短段甲一句话。\n\n短段乙一句话。\n', fromPick: '短段甲', toPick: '短段乙' },
+    ]) {
+      const page = await selBrowser.newPage()
+      const errors = []
+      page.on('pageerror', (error) => errors.push(error.message))
+      try {
+        await page.setContent('<div id="app"></div>')
+        await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+        await page.addScriptTag({ url: selFixtureScript.url })
+        await page.evaluate((doc) => window.initTable(doc), scenario.doc)
+        await page.waitForFunction((needGrid) =>
+          !needGrid || document.querySelectorAll('.vsidian-table-grid-row').length >= 2, scenario.kind !== 'para-fullwidth', { timeout: 20000 })
+        await page.waitForTimeout(300)
+        const range = await page.evaluate((sc) => {
+          const text = [...document.querySelectorAll('.cm-line')].map((el) => el.textContent ?? '')
+          if (sc.kind === 'para-fullwidth') {
+            const i1 = text.findIndex((t) => t.includes(sc.fromPick))
+            const i2 = text.findIndex((t, i) => i > i1 && t.includes(sc.toPick))
+            if (i1 < 0 || i2 < 0) return null
+            let at1 = 0
+            for (const t of text.slice(0, i1)) at1 += t.length + 1
+            let at2 = at1 + text[i1].length + 1
+            for (const t of text.slice(i1 + 1, i2)) at2 += t.length + 1
+            return { from: at1, to: at2 + Math.floor(text[i2].length / 2) }
+          }
+          const lineIdx = text.findIndex((t) => t.includes(sc.pick))
+          if (lineIdx < 0) return null
+          let before = 0
+          for (const t of text.slice(0, lineIdx)) before += t.length + 1
+          const at = text[lineIdx].indexOf(sc.pick)
+          return { from: before + at, to: before + at + sc.pick.length }
+        }, scenario)
+        assert.ok(range, `场景 ${scenario.id}：目标文本应在行内`)
+        await page.evaluate((r) => window.selectRange(r.from, r.to), range)
+        await page.waitForTimeout(300)
+        const paint = await page.evaluate((cellIndex) => {
+          const rect = (el) => {
+            const r = el.getBoundingClientRect()
+            return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+          }
+          const rows = document.querySelectorAll('.vsidian-table-grid-row')
+          const dataRow = rows[rows.length - 1]
+          const cellRect = cellIndex != null && dataRow
+            ? rect(dataRow.querySelectorAll(':scope > .vsidian-table-grid-cell')[cellIndex])
+            : null
+          const blocks = [...document.querySelectorAll(
+            '.cm-selectionLayer .cm-selectionBackground, .vsidian-selection-layer .vsidian-selection-background',
+          )].filter((el) => el.getClientRects().length > 0).map(rect)
+          const content = document.querySelector('.cm-content')
+          return { cellRect, blocks, contentRect: content ? rect(content) : null }
+        }, scenario.cellIndex)
+        assert.ok(paint.blocks.length > 0, `场景 ${scenario.id}：应有可见选区块（全零宽行回退/格分段不得丢背景）`)
+        if (scenario.kind === 'cell-clamp' && paint.cellRect) {
+          for (const block of paint.blocks) {
+            assert.ok(block.right <= paint.cellRect.right + 2,
+              `场景 ${scenario.id}：选区块右界 ${block.right.toFixed(1)} 不得越出目标格右缘 ${paint.cellRect.right.toFixed(1)}（零宽格索引错位回归）`)
+            assert.ok(block.left >= paint.cellRect.left - 2,
+              `场景 ${scenario.id}：选区块左界 ${block.left.toFixed(1)} 不得越出目标格左缘 ${paint.cellRect.left.toFixed(1)}`)
+          }
+        }
+        if (scenario.kind === 'para-fullwidth' && paint.contentRect) {
+          const worst = Math.max(...paint.blocks.map((b) => b.right))
+          assert.ok(worst >= paint.contentRect.right - 4,
+            `场景 ${scenario.id}：跨段落选区首行高亮应延伸到内容区右缘（实际 ${worst.toFixed(1)} vs ${paint.contentRect.right.toFixed(1)}——逐行拆分回归）`)
+        }
+        assert.deepEqual(errors, [], `页面异常: ${JSON.stringify(errors)}`)
+        console.log(`[原生输入][PASS] table-selection/${scenario.id}`)
+      } catch (error) {
+        selFailures.push(error)
+        console.error(`[原生输入][FAIL] table-selection/${scenario.id}: ${error.message}`)
+      } finally {
+        await page.close()
+      }
+    }
+  } finally {
+    await selBrowser.close()
+    selFixtureScript?.close()
+  }
+  if (selFailures.length) throw new AggregateError(selFailures, '审查轮选区回归失败')
 }
 console.log(`[原生输入] mermaid ${mermaidPassed} 项通过`)
 

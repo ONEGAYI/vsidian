@@ -76,10 +76,13 @@ Object.assign(window, {
       findPanelOpen: !!document.querySelector('.vsidian-find')?.classList.contains('vsidian-find-open'),
     }
   },
-  /** 绘制层读数：drawSelection 副选区可见性的真实布局证据（multicursor 同款） */
+  /** 绘制层读数：drawSelection 副选区可见性的真实布局证据（multicursor 同款；
+   *  #484 起原生块 display:none，可见性由自建层块承接——按有盒过滤联合计数） */
   readPaint() {
     const editor = document.querySelector('.cm-editor')!
-    const selections = [...editor.querySelectorAll<HTMLElement>('.cm-selectionLayer .cm-selectionBackground')]
+    const selections = [...editor.querySelectorAll<HTMLElement>(
+      '.cm-selectionLayer .cm-selectionBackground, .vsidian-selection-layer .vsidian-selection-background',
+    )].filter((el) => el.getClientRects().length > 0)
     return { selectionCount: selections.length }
   },
 })

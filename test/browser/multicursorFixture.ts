@@ -55,11 +55,15 @@ Object.assign(window, {
     return { x: rect.left, y: (rect.top + rect.bottom) / 2 }
   },
   /** 绘制层读数：drawSelection 装配与副光标可见性的真实布局证据
-   * （元素计数 + 首个光标高度；多光标关闭时层不在场为 0） */
+   * （元素计数 + 首个光标高度；多光标关闭时层不在场为 0）。
+   *  选区计数按有盒过滤并联合自建层（#484 起原生块 display:none 不再
+   *  可见，副选区可见性由 .vsidian-selection-background 承接） */
   readPaint() {
     const editor = document.querySelector('.cm-editor')!
     const cursors = [...editor.querySelectorAll<HTMLElement>('.cm-cursorLayer .cm-cursor')]
-    const selections = [...editor.querySelectorAll<HTMLElement>('.cm-selectionLayer .cm-selectionBackground')]
+    const selections = [...editor.querySelectorAll<HTMLElement>(
+      '.cm-selectionLayer .cm-selectionBackground, .vsidian-selection-layer .vsidian-selection-background',
+    )].filter((el) => el.getClientRects().length > 0)
     return {
       cursorCount: cursors.length,
       firstCursorHeight: cursors[0]?.getBoundingClientRect().height ?? 0,

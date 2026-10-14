@@ -212,14 +212,18 @@ try {
       await pj.mouse.move(jb.x + 1, jb.y, { steps: 4 })
       await pj.mouse.up()
       const vis = await pj.evaluate(() => {
-        const sels = [...document.querySelectorAll('.cm-editor .cm-selectionBackground')]
+        // #484 起原生块被隐藏（display:none 无盒）、自建层块（.vsidian-selection-background）
+        // 承接可见性——可见集合按有盒过滤，断言对象是用户真正看到的高亮
+        const sels = [...document.querySelectorAll(
+          '.cm-editor .cm-selectionLayer .cm-selectionBackground, .cm-editor .vsidian-selection-layer .vsidian-selection-background',
+        )].filter((el) => el.getClientRects().length > 0)
         const withColor = sels.filter((el) => {
           const bg = getComputedStyle(el).backgroundColor
           return bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)'
         })
         return { count: sels.length, visible: withColor.length, sample: sels[0] ? getComputedStyle(sels[0]).backgroundColor : null }
       })
-      check(`J ${theme} ${label}选区绘制层可见（cm-selectionBackground 有不透明底色）`,
+      check(`J ${theme} ${label}选区绘制层可见（可见选区块有不透明底色）`,
         vis.count > 0 && vis.visible === vis.count, JSON.stringify(vis))
     }
     await pj.close()

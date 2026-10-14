@@ -14,8 +14,8 @@
 // 与 DOM 维持照常运行，行为零风险，仅不再可见），装配随 multicursorExtensions
 // 整组进出（多光标关闭时回到原生 ::selection 路径，不装本层）。
 import { EditorSelection } from '@codemirror/state'
-import { EditorView, layer, RectangleMarker } from '@codemirror/view'
-import { liveDecorationsField, LIVE_CLASS_NAMES } from './liveDecorations'
+import { EditorView, getDrawSelectionConfig, layer, RectangleMarker } from '@codemirror/view'
+import { EmptyTableCellWidget, liveDecorationsField, LIVE_CLASS_NAMES } from './liveDecorations'
 
 /** 自建层块类名（与 CM6 的 cm-selectionBackground 同样式，见 main.css） */
 const SELECTION_BLOCK_CLASS = 'vsidian-selection-background'
@@ -32,28 +32,52 @@ export const tableAwareSelectionLayer = layer({
     return markers
   },
   update(update) {
-    // 与 CM6 selectionLayer 同条件重算（LayerView 外层另有 geometryChanged 兜底）
-    return update.docChanged || update.selectionSet || update.viewportChanged
+    // 与 CM6 selectionLayer 同条件重算（LayerView 外层另有 geometryChanged
+    // 兜底）。configChanged（selectionConfig 重配）在原生层有、此处同样
+    // 纳入——drawSelection() 全仓唯一调用点且恒默认装配，当前无重配路径，
+    // 条件保留是为与原生层语义完全对齐
+    const configChanged = getDrawSelectionConfig(update.startState) !== getDrawSelectionConfig(update.state)
+    return update.docChanged || update.selectionSet || update.viewportChanged || configChanged
   },
   class: 'vsidian-selection-layer',
 })
 
-/** 选区区间 → 背景块：按文档行分段，表格 grid 行走格内 clamp，其余复用 CM6 */
-function rangeMarkers(view: EditorView, from: number, to: number): Array<RectangleMarker> {
+/** 选区区间 → 背景块：表格 grid 行走格内 clamp；连续非表格行合并为 run
+ * 整段交 CM6——run 内跨行/跨软折行命中 CM6 的跨视觉行双分支，首行延伸到
+ * 内容区右缘、中间行满宽、末行起内容区左缘（正文惯例保持）。不能逐行
+ * 拆分委托：拆分后每段两端落在同一文档行、永远命中单行分支，跨段落选区
+ * 的首/中间行高亮会止于行尾文本（审查轮 1 P1）。grid 行打断 run；分隔行
+ * （vsidian-table-delimiter-line）非 grid 行、在两段 grid 行间单独成 run，
+ * 画文本宽带——比旧的原生满宽横穿收敛，属 #484 台账内口径。 */
+function rangeMarkers(view: EditorView, rawFrom: number, rawTo: number): Array<RectangleMarker> {
+  // 视口裁剪与 CM6 rectanglesForRange 同口径：视口外行不产出块，裁掉可
+  // 避免万行级大范围选区在每次选区/视口变化时全文档逐行 domAtPos 上溯
+  const from = Math.max(rawFrom, view.viewport.from)
+  const to = Math.min(rawTo, view.viewport.to)
+  if (from >= to) return []
   const out: Array<RectangleMarker> = []
+  let runStart: number | null = null
   let pos = from
   while (pos < to) {
     const line = view.state.doc.lineAt(pos)
-    const segEnd = Math.min(to, line.to)
-    const segStart = Math.max(from, line.from)
     const lineEl = lineElement(view, line.from)
     if (lineEl?.classList.contains(LIVE_CLASS_NAMES.tableGridRow)) {
+      if (runStart != null) {
+        // run 闭合到 grid 行前一位置（含上一行行尾，不含本行）
+        out.push(...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(runStart, line.from - 1)))
+        runStart = null
+      }
+      const segStart = Math.max(from, line.from)
+      const segEnd = Math.min(to, line.to)
       out.push(...tableLineMarkers(view, lineEl, segStart, segEnd, line.from, line.to))
-    } else {
-      // 非表格行：整段交 CM6（正文折行跨视觉行满宽是既有正确惯例）
-      out.push(...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(segStart, segEnd)))
+    } else if (runStart == null) {
+      runStart = Math.max(from, line.from)
     }
+    if (line.to >= to) break
     pos = line.to + 1
+  }
+  if (runStart != null) {
+    out.push(...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(runStart, to)))
   }
   return out
 }
@@ -67,9 +91,13 @@ function lineElement(view: EditorView, pos: number): HTMLElement | null {
 }
 
 /**
- * 表格 grid 行内选区分段绘制：格区间来自 liveDecorations 的 grid cell mark
- * 装饰（tableCells 的 GFM 语义拆分，\| 与行内代码内管道不切格）；每段块的
- * 横向边界 clamp 到所属格元素盒。
+ * 表格 grid 行内选区分段绘制：格区间来自 liveDecorations 的格装饰
+ * （tableCells 的 GFM 语义拆分，\| 与行内代码内管道不切格）——非空格走
+ * mark 装饰、零宽空格走 EmptyTableCellWidget（spec 无 class），两类都要
+ * 收集：空格格区间零宽天然不产段，但缺席会使 cells 与 DOM 格元素索引
+ * 错位（其后每格高亮左移一列）；每段块的横向边界 clamp 到所属格元素盒。
+ * 一行未产出任何段时（格收集为空或全零宽区间无交）回退 CM6 整行段——
+ * 原生层已被隐藏，不回退会使该行选区背景完全消失。
  */
 function tableLineMarkers(
   view: EditorView,
@@ -83,12 +111,13 @@ function tableLineMarkers(
   if (!field) return []
   const cells: Array<[number, number]> = []
   field.decos.between(lineFrom, lineTo, (f, t, deco) => {
-    const cls = (deco.spec as { class?: string }).class
-    if (typeof cls === 'string' && cls.split(' ').includes(LIVE_CLASS_NAMES.tableGridCell)) {
+    const spec = deco.spec as { class?: string; widget?: unknown }
+    const isCellMark = typeof spec.class === 'string' && spec.class.split(' ').includes(LIVE_CLASS_NAMES.tableGridCell)
+    const isEmptyCell = spec.widget instanceof EmptyTableCellWidget
+    if (isCellMark || isEmptyCell) {
       cells.push([f, t])
     }
   })
-  if (cells.length === 0) return []
   const cellEls = lineEl.querySelectorAll<HTMLElement>(':scope > .vsidian-table-grid-cell')
   const base = layerBase(view)
   const out: Array<RectangleMarker> = []
@@ -102,6 +131,11 @@ function tableLineMarkers(
     if (box.width === 0 && box.height === 0) return
     out.push(...cellMarkers(view, segStart, segEnd, box, base))
   })
+  if (out.length === 0) {
+    // 未产出任何段（格收集为空或全零宽区间无交）：回退 CM6 整行段，防止
+    // 原生层已隐藏的形态下选区背景整行消失
+    return [...RectangleMarker.forRange(view, SELECTION_BLOCK_CLASS, EditorSelection.range(from, to))]
+  }
   return out
 }
 
@@ -134,7 +168,9 @@ function cellMarkers(
   return out
 }
 
-/** 层坐标基点（与 CM6 RectangleMarker.forRange 的 getBase 同构，LTR） */
+/** 层坐标基点（与 CM6 RectangleMarker.forRange 的 getBase 同构，仅 LTR
+ * 分支——VSCode webview 编辑器未设 RTL 文本方向；引入 RTL 支持时须补
+ * right 锚点分支，与 CM6 getBase 对齐） */
 function layerBase(view: EditorView): { left: number; top: number } {
   const rect = view.scrollDOM.getBoundingClientRect()
   return {

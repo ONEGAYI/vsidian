@@ -35,6 +35,13 @@ Object.assign(window, { initTable(text: string) {
   return { text: view.state.doc.toString(), head, from: view.state.selection.main.from,
     to: view.state.selection.main.to, line: view.state.doc.lineAt(head).number }
 },
+// #484 表格感知选区层：源文本精确选区（零宽格等无法用键盘全选覆盖的形态）
+selectRange(from: number, to: number) {
+  const view = controller.getView()
+  if (!view) return false
+  view.dispatch({ selection: { anchor: from, head: to } })
+  return true
+},
 // #372 高度优化观测口：调度层统计（完整搜索/发布/丢弃）与度量就绪探针
 tableOptimizeStats() {
   return getTableOptimizeStats()
