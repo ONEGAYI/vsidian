@@ -32,9 +32,18 @@ describe('Codex Mermaid 截图参考配色', () => {
 
   it('保留既有流程图预设，未采集参考的图类型不套用预设', () => {
     expect(buildCodexMermaidConfig('flowchart-v2')).toMatchObject({
-      layout: 'elk', themeVariables: { primaryColor: '#e5f3ff', primaryTextColor: '#004f99' },
+      layout: 'elk', themeVariables: {
+        primaryColor: '#e5f3ff', primaryTextColor: '#004f99',
+        primaryBorderColor: '#b8b9ba', lineColor: '#b8b9ba',
+      },
     })
     expect(buildCodexMermaidConfig('mindmap')).toBeUndefined()
+  })
+
+  it('流程图的固定蓝色文字配白色画布，弹窗与导出保持同一背景', () => {
+    const config = buildCodexMermaidConfig('flowchart-v2')!
+    expect(config.themeCSS).toContain('& { background-color:#ffffff; }')
+    expect(contrast('#004f99', '#ffffff')).toBeGreaterThanOrEqual(4.5)
   })
 })
 

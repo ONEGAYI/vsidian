@@ -69,6 +69,10 @@ describe('图表弹窗 CSS 契约（#111 契约 4–5）', () => {
     expect(rule('.vsidian-diagram-media svg')).toMatch(/max-width:\s*none/)
   })
 
+  it('透明 SVG 使用编辑器主题画布，避免文字落在压暗背板上', () => {
+    expect(rule('.vsidian-diagram-media svg')).toMatch(/background-color:\s*var\(--vscode-editor-background\)/)
+  })
+
   it('工具条底部居中胶囊、按钮配色走主题变量', () => {
     expect(rule('.vsidian-diagram-toolbar')).toMatch(/bottom:\s*18px/)
     expect(rule('.vsidian-diagram-toolbar')).toMatch(/transform:\s*translateX\(-50%\)/)

@@ -4461,6 +4461,7 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 .vsidian-diagram-media svg {
   max-width: none;
   display: block;
+  background-color: var(--vscode-editor-background);
 }
 
 /* #212 图片弹窗：media 内容是 <img>（位图无矢量重排，缩放走 transform，

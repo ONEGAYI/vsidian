@@ -91,6 +91,8 @@ export class LiveMermaidWidget extends WidgetType {
   toDOM(): HTMLElement {
     const inner = document.createElement('div')
     inner.className = MERMAID_CLASS_NAMES.diagram
+    // 只读图形承接鼠标焦点，原生文字选区不进入 CM6 正文选区管线。
+    inner.tabIndex = -1
     inner.setAttribute(MERMAID_CODE_ATTR, this.code)
     inner.setAttribute(MERMAID_STATE_ATTR, 'pending')
     const frame = document.createElement('div')
