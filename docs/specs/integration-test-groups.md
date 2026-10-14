@@ -417,6 +417,8 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 
 **最小修正只改会话契约**：固定0/80ms快慢分支和父测试时钟；删除后推进查询调度，先断言新空查询及新reqId，再确认两项真实候选就绪，随后执行原高亮与身份消失断言。生产去抖、响应守卫、高亮、按键、DOM与样式实现均未改，没有延长真实等待预算或修改分组。单文件74/74通过；代理自检不替代真实IME和物理键盘的人工验收。
 
-本地compile/类型、文件树strict、原生wikilinkSuggest48/48通过。完整npm run test:unit与额外Node契约并行运行，Vitest8011/8011及两份Node193/193均通过，覆盖原并行诊断条件。RTK本轮成功解析后未更新JSON/tee，原.vitest/json/output.json仍是上一轮数据；本轮统计只取带退出码的日志，不以旧报告充当新证据。候选CI与本机诊断分开留存，其余#446未归因条目不联动勾销。
+初始基线de106027上，compile/类型、文件树strict、原生wikilinkSuggest48/48通过。完整npm run test:unit与额外Node契约并行运行，Vitest8011/8011及两份Node193/193均通过，覆盖原并行诊断条件。RTK本轮成功解析后未更新JSON/tee，原.vitest/json/output.json仍是上一轮数据；本轮统计只取带退出码的日志，不以旧报告充当新证据。候选CI与本机诊断分开留存，其余#446未归因条目不联动勾销。
+
+推送前同步main的拖放光标、阅读布局与Live选区修正：678a4972上的完整Vitest8013/8013、Node193/193与wikilinkSuggest48/48通过；进一步同步eee043c6，compile/类型、完整Vitest8016/8016、Node193/193与浏览器48/48通过。新基线文件树strict报三项已有漏录：dropCursorPaint.mjs、dropCursorPaintFixture.ts和readingMermaidMarginCssContract.test.ts，基线tree.json同样缺少；本票两项职责更新正确，保留该基线问题，不称最终全树strict通过。
 
 证据：本树out/test/highlight19-original-solo.log、clock-red.log、public-trace-red.log / green.log、session-green.log、compile.log及diagnosis.md（同组文件均带highlight19-前缀）。交付归档D:/.codex/evidence/vsidian-highlight19-20261014/；临时DEBUG-highlight19输出已从测试移除。
