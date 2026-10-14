@@ -490,3 +490,5 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 永久契约执行真实采样回调，拒绝高度已增长但尚未补偿、仅初始20px、错误目标身份及缺少目标布局；旧实现先红，修正后整份就绪契约11/11绿。首次红测日志记录EXIT1，当轮JSON读出10过/1失败，目标期望undefined但实际放行快照；完整JSON随后被绿测覆盖，只保留读回观测摘要，不冒充原完整JSON。完整Vitest8035/8035、Node194/194与compile/类型通过。三用例烟测一度误用竖线分隔，筛选未命中、未执行用例，单独保留启动错误；正确入口使用逗号。
 
 证据在out/test/image22-native-original.log / report.log、image22-browser-timeline.log、image22-browser-controlled-green.log、image22-readiness-red.log / red-observation.json / green.log、image22-unit-full.log、image22-compile.log与image22-native-final.log。诊断夹具和逐帧探针只在忽略目录；候选CI与本机证据分开，其他未归因条目不联动勾销。
+
+推送前同步main38be3c75的Mermaid暗色/Live图形修正，compile/类型、文件树strict及真实阅读三例3/3通过（目标1082ms）。新基线全量首次与compile同机运行时两个Vitest worker异常退出3221226505，位于webLinkMetaService/proxyAgent，8022/8046完成、24项未完成，未进入Node阶段；无断言失败记录，另记条目23，不归为本票已修复。两文件单worker77/77、Node契约另跑194/194通过；无compile并行的一次独立全量8046/8046与Node194/194通过。原失败保留，条件相关不等于因果，不据独立通过勾销23；当轮旧JSON仍为此前11项报告，仅取带退出码的日志统计。
