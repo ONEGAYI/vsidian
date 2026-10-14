@@ -301,9 +301,100 @@ describe('格式操作的文本契约', () => {
     expect(apply('  - ', 'bulletList', 4).text).toBe('  ')
   })
 
-  it('跨行选区中实质重叠的空行同样插入标题与列表前缀，无独立选区（#393）', () => {
-    expect(apply('正文\n\n尾', 'heading2', 0, 4)).toEqual({ text: '## 正文\n## \n尾' })
-    expect(apply('正文\n\n尾', 'bulletList', 0, 4)).toEqual({ text: '- 正文\n- \n尾' })
+  it('跨行选区空行跳过不加前缀，空行原样保留（#512 修订 #393 泛化口径）', () => {
+    expect(apply('正文\n\n尾', 'heading2', 0, 4)).toEqual({ text: '## 正文\n\n尾' })
+    expect(apply('正文\n\n尾', 'bulletList', 0, 4)).toEqual({ text: '- 正文\n\n尾' })
+    expect(apply('正文\n\n尾', 'quote', 0, 4)).toEqual({ text: '> 正文\n\n尾' })
+    // 纯空白行原样保留（缩进透传口径随跳过语义自然保持，无截断）
+    expect(apply('正文\n   \n尾', 'bulletList', 0, 7)).toEqual({ text: '- 正文\n   \n尾' })
+  })
+
+  it('选区全空行或无选区空行：仅首个空行插入前缀（#512）', () => {
+    // 空行选区（`\n\n` 两换行）仅选区起点所在行插入，其余空行不动
+    expect(apply('\n\n', 'bulletList', 0, 2)).toEqual({ text: '- \n\n' })
+    expect(apply('\n\n', 'heading2', 0, 2)).toEqual({ text: '## \n\n' })
+    // 单光标空行保持 #393 产物光标（前缀之后）
+    expect(apply('', 'bulletList', 0)).toEqual({ text: '- ', selection: { anchor: 2 } })
+    expect(apply('', 'orderedList', 0)).toEqual({ text: '1. ', selection: { anchor: 3 } })
+    // 取消型操作空行无反应保持（headingNone 经 #393 审查 D1）
+    expect(apply('\n\n', 'headingNone', 0, 2)).toEqual({ text: '\n\n', selection: null })
+  })
+
+  it('含空行选区的取消仅作用于真实行，两态对称（#512）', () => {
+    expect(apply('- 正文\n\n尾', 'bulletList', 0, 5)).toEqual({ text: '正文\n\n尾' })
+    // 引用取消同样只摘真实行；空行跳过
+    expect(apply('> 正文\n\n尾', 'quote', 0, 5)).toEqual({ text: '正文\n\n尾' })
+  })
+
+  it('orderedList 多行递增：承接空行上溯、段落打断、分隔符与前导零沿用（#513）', () => {
+    // 递增：选区真实行编号依行序递增
+    expect(apply('甲\n乙\n丙', 'orderedList', 0, 5)).toEqual({ text: '1. 甲\n2. 乙\n3. 丙' })
+    // 承接：向上最近非空行是同层有序项，+1 接续；空行不打断上溯
+    expect(apply('1. x\n\n甲\n乙', 'orderedList', 6, 9)).toEqual({ text: '1. x\n\n2. 甲\n3. 乙' })
+    // 段落打断：最近非空行不是同层有序项，从 1 起新列表
+    expect(apply('1. x\n\n正文\n甲', 'orderedList', 9, 10)).toEqual({ text: '1. x\n\n正文\n1. 甲' })
+    // 承接形态：分隔符与前导零宽度沿用（+1 保宽与「行前缀延续」同源）
+    expect(apply('01) x\n甲', 'orderedList', 6, 7)).toEqual({ text: '01) x\n02) 甲' })
+    // 承接宽度自然增长：`9.` 之后为 `10.`（与行前缀延续同口径）
+    expect(apply('9. x\n甲', 'orderedList', 5, 6)).toEqual({ text: '9. x\n10. 甲' })
+    // 引用容器同层承接；引用层数不同（>> 对 >）不承接
+    expect(apply('> 1. x\n> 甲', 'orderedList', 7, 10)).toEqual({ text: '> 1. x\n> 2. 甲' })
+    expect(apply('> 1. x\n>> 甲', 'orderedList', 7, 10)).toEqual({ text: '> 1. x\n>> 1. 甲' })
+    // 只入口层承接：上方项与选区首行缩进不等（浅于入口层）不承接
+    expect(apply('1. x\n  甲', 'orderedList', 5, 8)).toEqual({ text: '1. x\n  1. 甲' })
+    // bullet 行打断承接：最近非空行非有序项，从 1 起
+    expect(apply('- x\n甲', 'orderedList', 4, 5)).toEqual({ text: '- x\n1. 甲' })
+    // 引用层数相等即同层承接（`>` 与 `> ` 是同一引用块的两种书写形态）
+    expect(apply('> 1. x\n>甲', 'orderedList', 6, 8)).toEqual({ text: '> 1. x\n>2. 甲' })
+    // 承接上溯遇引用层数不等的有序项不承接
+    expect(apply('>> 1. x\n> 甲', 'orderedList', 8, 11)).toEqual({ text: '>> 1. x\n> 1. 甲' })
+  })
+
+  it('orderedList 层级计数：缩进分层、子层从 1、弹栈归浅层、空行不打断（#513）', () => {
+    // 加深开子层从 1 起；各行缩进在前缀中原样保留（准则明文，验收示例省略空格按准则钉住）
+    expect(apply('甲\n  乙\n丙', 'orderedList', 0, 7)).toEqual({ text: '1. 甲\n  1. 乙\n2. 丙' })
+    // 弹栈：丙缩进 1，归入缩进不大于它的最近已见层（0 层）计数 2，缩进原样保留
+    expect(apply('甲\n  乙\n 丙', 'orderedList', 0, 8)).toEqual({ text: '1. 甲\n  1. 乙\n 2. 丙' })
+    // 空行不打断递增：真实行连续编号、空行跳过
+    expect(apply('甲\n\n乙', 'orderedList', 0, 4)).toEqual({ text: '1. 甲\n\n2. 乙' })
+    // 入口行缩进最深、后续更浅：弹栈保护栈底，浅行归入栈底层继续计数
+    expect(apply('  甲\n乙', 'orderedList', 0, 5)).toEqual({ text: '  1. 甲\n2. 乙' })
+    // 跨引用层不延续计数：正文与引用块混选，引用内从 1 起新列表
+    expect(apply('甲\n> 乙', 'orderedList', 0, 5)).toEqual({ text: '1. 甲\n> 1. 乙' })
+  })
+
+  it('列表族统一两态：全部真实行同类才取消，否则统一套用；空行不参与判定（#513）', () => {
+    // orderedList：全同类取消（忽略空行）；混合统一重排
+    expect(apply('1. 甲\n2. 乙', 'orderedList', 0, 9)).toEqual({ text: '甲\n乙' })
+    expect(apply('1. 甲\n\n2. 乙', 'orderedList', 0, 10)).toEqual({ text: '甲\n\n乙' })
+    expect(apply('1. 甲\n乙', 'orderedList', 0, 6)).toEqual({ text: '1. 甲\n2. 乙' })
+    // bullet 族：同类取消 / 混合统一；task 行算非 bullet 项（统一时转普通 bullet）
+    expect(apply('- 甲\n- 乙', 'bulletList', 0, 7)).toEqual({ text: '甲\n乙' })
+    expect(apply('- 甲\n乙', 'bulletList', 0, 5)).toEqual({ text: '- 甲\n- 乙' })
+    expect(apply('- [ ] 甲\n乙', 'bulletList', 0, 9)).toEqual({ text: '- 甲\n- 乙' })
+    // task 族：同类取消 / bullet 行升级为 task
+    expect(apply('- [ ] 甲\n- [x] 乙', 'taskList', 0, 15)).toEqual({ text: '甲\n乙' })
+    expect(apply('- 甲\n乙', 'taskList', 0, 5)).toEqual({ text: '- [ ] 甲\n- [ ] 乙' })
+    // orderedList 下 bullet/task 行算未编号参与重排（标记按既有语义剥除）
+    expect(apply('- 甲\n乙', 'orderedList', 0, 5)).toEqual({ text: '1. 甲\n2. 乙' })
+    expect(apply('- [x] 甲\n乙', 'orderedList', 0, 9)).toEqual({ text: '1. 甲\n2. 乙' })
+    // 取消保留各行缩进
+    expect(apply('  1. 甲\n  2. 乙', 'orderedList', 0, 13)).toEqual({ text: '  甲\n  乙' })
+    // 引用容器内的统一两态同口径
+    expect(apply('> 1. 甲\n> 2. 乙', 'orderedList', 0, 12)).toEqual({ text: '> 甲\n> 乙' })
+  })
+
+  it('混合选区统一套用只对需变更的行产变更段，不产等文替换（审查轮钉子）', () => {
+    // `- 甲` 已是目标形态：等文变更段会让 CM6 docChanged 出站标脏（审查轮修复）
+    const plan = planFormatOperation('- 甲\n乙', 'bulletList', { from: 0, to: 5 })
+    expect(plan?.changes).toEqual([{ from: 4, to: 5, insert: '- 乙' }])
+    const renumber = planFormatOperation('1. 甲\n乙', 'orderedList', { from: 0, to: 6 })
+    expect(renumber?.changes).toEqual([{ from: 5, to: 6, insert: '2. 乙' }])
+  })
+
+  it('全空白多行选区仅首行插入并透传原缩进，两态可还原（#512 边界）', () => {
+    expect(apply('   \n\t', 'bulletList', 0, 5)).toEqual({ text: '   - \n\t' })
+    expect(apply('   - \n\t', 'bulletList', 0, 6)).toEqual({ text: '   \n\t' })
   })
 
   it('显式选区围栏精确包裹，前后文独立成段且文首尾无多余空行', () => {

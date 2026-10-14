@@ -25,6 +25,11 @@ Object.assign(window, {
   locate(offset: number) {
     controller.handleHostMessage({ kind: 'view.locate', offset })
   },
+  // #512/#513：格式化操作经 format.command 宿主消息（工具栏/快捷键/
+  // 命令面板同款生产链路）触发，选区由原生键盘 Shift 扩展建立
+  formatCommand(op: string) {
+    controller.handleHostMessage({ kind: 'format.command', op: op as never })
+  },
   readEditor() {
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
     const head = view.state.selection.main.head
