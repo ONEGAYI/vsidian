@@ -858,7 +858,8 @@ export class LiveEditorInstance {
       const positions = Array.isArray(input.request.selection)
         ? input.request.selection.flatMap((r) => [r.anchor, r.head])
         : [input.request.selection.anchor, input.request.selection.head]
-      if (positions.length === 0 || Math.max(...positions) > docLength + growth) {
+      // reduce 而非展开传参：数万 ranges 的展开受调用栈深限制（会抛而非拒绝）
+      if (positions.length === 0 || positions.reduce((a, b) => Math.max(a, b), 0) > docLength + growth) {
         return Promise.resolve({ ok: false, reason: 'invalid-request' })
       }
     }

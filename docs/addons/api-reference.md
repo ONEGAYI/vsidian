@@ -593,6 +593,7 @@ export function currentSdk(): VsidianAddonPageSdk | undefined
 语义要点：
 - **适用模式**：live 可写、reading 只读；hover 恒只读（写入拒 read-only）；embed 句柄身份为宿主 occurrence 序号。
 - **坐标与数据形状**：全文 UTF-16 code unit 偏移、页面全程 LF（宿主适配器负责行尾转换）；快照含页面未确认输入——revision 标记覆盖「宿主版本未变但页面有未确认输入」的窗口。
+- **提交后选区**：applyEdits 提交后选区双形态（#498）：单对象 = 单选区（旧形态，既有组件零迁移）；数组 = 多光标回设——多 ranges 随文本事务同笔原子生效（不坍缩其余光标），主光标 = 数组首项（对齐 setSelection；乱序输入经 CM6 归一化排序，mainIndex 随首项重定位），空数组拒绝 invalid-request；缺省不携带则保持实例现有选区重定位。边界校验逐 range 覆盖（docLength + growth 上界，越界整体拒绝）。行为修饰计划（AddonBehaviorInputPlan.selection）同形态透传。
 - **生命周期**：来源身份由 SDK 注入（opId 按装载代次生成），作者请求结构上不携带身份字段——不能冒充其他组件。
 - **错误与拒绝**：八种可辨认拒绝：view-disposed / read-only / suspended / stale-snapshot / history-boundary / conflict / error / invalid-request。旧快照不自动重试（内核输入重定位逻辑不适用于 API 提交）。
 - **历史与撤回**：atomic（缺省）= 独立撤回边界；joinPrevious = 随同目标上次原子操作撤回，无可确认前项时拒绝（history-boundary 四种形态：空日志/仅外来/组顶被打断/映射失配）。撤销与重做归宿主文本管线。
@@ -707,7 +708,7 @@ export interface AddonEditCredential {
 }
 ```
 
-**验证**：`test/unit/addonEditApi.test.ts`、`test/unit/addonViews.test.ts`、`test/integration/suite/addonT06Cases.ts`、`test/browser/addonT06EditHost.mjs`、`test/integration/suite/addonHistoryCases.ts`
+**验证**：`test/unit/addonEditApi.test.ts`、`test/unit/addonViews.test.ts`、`test/unit/liveInstance.test.ts`、`test/integration/suite/addonT06Cases.ts`、`test/browser/addonT06EditHost.mjs`、`test/integration/suite/addonHistoryCases.ts`
 
 ### `cm6-experimental` 实验入口：共享 CM6 运行时（experimental.cm6）
 
@@ -1150,8 +1151,11 @@ export interface AddonReplacedRange {
 export interface AddonBehaviorInputPlan {
   /** LF 坐标变更列表（相对 context.snapshot） */
   readonly changes: SerChange[]
-  /** 提交后选区（可选；缺省保持实例现有选区重定位） */
-  readonly selection?: AddonSelectionRange
+  /** 提交后选区（可选；缺省保持实例现有选区重定位）。双形态与
+   *  applyEdits 请求同源（#498）：单对象 = 单选区；数组 = 多光标回设
+   *  （多 ranges 随文本事务同笔生效）——逐 range 评估类行为（如连续
+   *  标点规则）回设多光标的通道前提 */
+  readonly selection?: AddonSelectionRange | AddonSelectionRange[]
 }
 
 /** onChanged 观察事件（通知分离面：只读观察，无修饰权——技术方案 §5.2
@@ -1569,6 +1573,7 @@ export interface AddonSettingsChangeEventData {
 
 语义要点：
 - **错误与拒绝**：定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。#472 组批校验：组声明形状非法或键重复、定义引用未声明组键——整批拒绝。
+- **呈现形态**：enumLabels 与 multiline 仅作用设置页呈现（#473/#475）：标签缺失回退渲染枚举值本身，标签选值随页面语言切换；multiline 渲染 textarea、换行符参与持久化值；持久化值与值校验口径不变。数组 string 自由文本项支持批量粘贴拆分（逐行 trim、去空行、maxLength 截断，enum/number/boolean 项不适用）。#472 分组呈现：组标题按当前语言选值、组容器按声明序，未分组定义与功能开关行恒居首容器；组声明随 addons.settingsState 既有链路透传；定义级与组级条目进全局搜索（object 字段级不进），定位键 addon:<组件 ID>/def:<定义键> 与 addon:<组件 ID>/group:<组键>。
 
 签名事实源：`src/shared/addonSettings.ts`
 

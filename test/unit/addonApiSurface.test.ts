@@ -121,9 +121,10 @@ describe('附加组件公开声明消费面（T13）', () => {
 
   it('#498 applyEdits selection 多形态已进消费面（联合类型钉住与数组消费样例防回潮）', () => {
     // 从消费面移除多形态的任一消费（联合钉住、数组样例）即红——selection
-    // 扩形态的公开消费由本断言钉住
+    // 扩形态的公开消费由本断言钉住（请求类型与行为计划同形态透传）
     const source = readFileSync(consumerPath, 'utf8')
     expect(source.includes('applyEditsSelectionPinned'), '消费面应钉住 applyEdits selection 联合形态').toBe(true)
+    expect(source.includes('behaviorPlanSelectionPinned'), '消费面应钉住行为计划 selection 联合形态').toBe(true)
     expect(source.includes('multiCursorSelectionSample'), '消费面应含数组形态消费样例').toBe(true)
   })
 

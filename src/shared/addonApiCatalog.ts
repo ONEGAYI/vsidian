@@ -499,12 +499,12 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     semantics: {
       modes: 'live 可写、reading 只读；hover 恒只读（写入拒 read-only）；embed 句柄身份为宿主 occurrence 序号。',
       coordinates: '全文 UTF-16 code unit 偏移、页面全程 LF（宿主适配器负责行尾转换）；快照含页面未确认输入——revision 标记覆盖「宿主版本未变但页面有未确认输入」的窗口。',
-      selection: 'applyEdits 提交后选区双形态（#498）：单对象 = 单选区（旧形态，既有组件零迁移）；数组 = 多光标回设——多 ranges 随文本事务同笔原子生效（不坍缩其余光标），mainIndex 恒 0 对齐 setSelection，空数组拒绝 invalid-request；缺省不携带则保持实例现有选区重定位。边界校验逐 range 覆盖（docLength + growth 上界，越界整体拒绝）。',
+      selection: 'applyEdits 提交后选区双形态（#498）：单对象 = 单选区（旧形态，既有组件零迁移）；数组 = 多光标回设——多 ranges 随文本事务同笔原子生效（不坍缩其余光标），主光标 = 数组首项（对齐 setSelection；乱序输入经 CM6 归一化排序，mainIndex 随首项重定位），空数组拒绝 invalid-request；缺省不携带则保持实例现有选区重定位。边界校验逐 range 覆盖（docLength + growth 上界，越界整体拒绝）。行为修饰计划（AddonBehaviorInputPlan.selection）同形态透传。',
       lifecycle: '来源身份由 SDK 注入（opId 按装载代次生成），作者请求结构上不携带身份字段——不能冒充其他组件。',
       errors: '八种可辨认拒绝：view-disposed / read-only / suspended / stale-snapshot / history-boundary / conflict / error / invalid-request。旧快照不自动重试（内核输入重定位逻辑不适用于 API 提交）。',
       history: 'atomic（缺省）= 独立撤回边界；joinPrevious = 随同目标上次原子操作撤回，无可确认前项时拒绝（history-boundary 四种形态：空日志/仅外来/组顶被打断/映射失配）。撤销与重做归宿主文本管线。',
     },
-    verification: ['test/unit/addonEditApi.test.ts', 'test/unit/addonViews.test.ts', 'test/integration/suite/addonT06Cases.ts', 'test/browser/addonT06EditHost.mjs', 'test/integration/suite/addonHistoryCases.ts'],
+    verification: ['test/unit/addonEditApi.test.ts', 'test/unit/addonViews.test.ts', 'test/unit/liveInstance.test.ts', 'test/integration/suite/addonT06Cases.ts', 'test/browser/addonT06EditHost.mjs', 'test/integration/suite/addonHistoryCases.ts'],
     introduced: '#355（T06）',
   },
   {
