@@ -216,7 +216,7 @@ const probeCss = readFileSync(path.resolve(process.cwd(), 'media/css-contract-pr
 
 describe('别名探针资产一致性', () => {
   it('探针表每条在 probe.css 有同形规则（选择器按 Obsidian 原名 + 期望色）', () => {
-    expect(OBSIDIAN_ALIAS_PROBES.length).toBe(29)
+    expect(OBSIDIAN_ALIAS_PROBES.length).toBe(30)
     for (const probe of OBSIDIAN_ALIAS_PROBES) {
       // probe.css 规则形态：live 探针带 #app .vsidian-view-live 前缀
       //（container-live 的组合选择器除外），reading 探针带 #app 前缀

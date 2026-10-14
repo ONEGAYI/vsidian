@@ -364,7 +364,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   // #296 渲染断裂修复增 live-table-prefix，P2-12 #289 增冲突三项选择条）
   'view-container': 2,
   heading: 4,
-  'inline-format': 8,
+  'inline-format': 9,
   'list-task': 5,
   'line-syntax': 5,
   table: 12,

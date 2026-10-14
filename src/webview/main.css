@@ -2881,6 +2881,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
   border-radius: 2px;
 }
 
+/* #483 删除线内容 span（~~ 定界符显隐由装饰控制，见 liveDecorations 的
+   StrikethroughMark；Obsidian 对应 .cm-strikethrough） */
+#app .cm-editor .cm-scroller .vsidian-strikethrough {
+  text-decoration: line-through;
+}
+
 /* #139 HTML 注释淡化（.cm-comment 方向）：低对比度、明显非正文、仍可读
    ——正文前景色 45% 混入（color-mix 单规则服务明暗主题，口径同
    --vsidian-hr-color），不隐藏不折叠；关键规则由 htmlCommentCssContract

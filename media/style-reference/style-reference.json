@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.11.0",
     "generatedAt": "2026-10-06",
-    "entryCount": 224,
+    "entryCount": 225,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -100,7 +100,7 @@
       "title": "行内格式",
       "titleKey": "styleRef.category.inlineFormat",
       "order": 3,
-      "count": 8
+      "count": 9
     },
     {
       "id": "list-task",
@@ -643,11 +643,11 @@
       "category": "inline-format",
       "kind": "selector",
       "target": "del 标签（仅阅读）",
-      "purpose": "删除线（~~文字~~）内容入口：**仅阅读视图**——markdown-it 渲染语义 del 标签。live 侧解析器支持但未装饰，源码形态呈现（见 limit-strikethrough-live）。",
+      "purpose": "删除线（~~文字~~）阅读视图内容入口：markdown-it 渲染语义 del 标签。live 侧 #483 起已支持（见 inline-strikethrough-live）。",
       "views": [
         "reading"
       ],
-      "dom": "阅读块内 <del> 元素。live 侧无装饰类，不支持。",
+      "dom": "阅读块内 <del> 元素。",
       "example": ".markdown-preview-view del {\n  color: var(--vscode-descriptionForeground);\n}",
       "obsidian": {
         "counterpart": ".markdown-preview-view del（阅读标签）",
@@ -656,7 +656,33 @@
       "verification": [
         "单元 readingMarkdown：~~文字~~ 渲染 del 标签契约"
       ],
-      "introduced": "阅读侧随 #8 语义渲染（2026-09-24）；live 侧缺口如实记录"
+      "introduced": "阅读侧随 #8 语义渲染（2026-09-24）；live 侧入口见 inline-strikethrough-live（#483）"
+    },
+    {
+      "id": "inline-strikethrough-live",
+      "domain": "content",
+      "category": "inline-format",
+      "kind": "selector",
+      "target": ".vsidian-strikethrough（live）",
+      "purpose": "删除线（~~文字~~）live 侧内容入口（#483）：内容 span 常显 line-through、~~ 定界符触界显形（同粗体语义）；此前 live 侧未装饰（历史记录见 limit-strikethrough-live）。",
+      "views": [
+        "live"
+      ],
+      "states": "live 侧 ~~ 定界符触及显形（同粗体语义）。",
+      "dom": "live：mark 装饰 span。",
+      "example": ".cm-strikethrough {\n  text-decoration: line-through;\n}",
+      "obsidian": {
+        "counterpart": ".cm-strikethrough（live token）",
+        "support": "direct"
+      },
+      "aliasTargets": [
+        "cm-strikethrough"
+      ],
+      "verification": [
+        "单元 liveDecorations（#483 describe）：Strikethrough span 发射与定界符显隐矩阵",
+        "cssProbe.obsidianAliases['inline-strikethrough-live']"
+      ],
+      "introduced": "#483（2026-10-14）"
     },
     {
       "id": "html-comment",
@@ -2142,20 +2168,20 @@
       "category": "content-limits",
       "kind": "limitation",
       "target": ".cm-strikethrough（live 侧）",
-      "purpose": "删除线 live 侧未装饰：解析器支持但 live 视图无装饰类，源码形态呈现；阅读侧 del 标签可用（见 inline-strikethrough）。",
+      "purpose": "历史限制（已解除）：删除线 live 侧曾未装饰、源码形态呈现；#483 起已支持（见 inline-strikethrough-live），本条目保留作迁移记录，不再描述现行行为。",
       "views": [
         "live"
       ],
-      "dom": "live 无删除线 span。",
+      "dom": "live 现有删除线 span（见 inline-strikethrough-live）。",
       "example": "",
       "obsidian": {
         "counterpart": ".cm-strikethrough（live token）/ 阅读侧 del 已支持",
-        "support": "none"
+        "support": "direct"
       },
       "verification": [
-        "单元 liveDecorations：无 Strikethrough 装饰（现状契约）"
+        "单元 liveDecorations（#483 describe）：Strikethrough 装饰契约（迁移后正向断言）"
       ],
-      "introduced": "#8（2026-09-24，如实记录）"
+      "introduced": "#8（2026-09-24，如实记录）；#483（2026-10-14）解除限制"
     },
     {
       "id": "limit-quote-span",

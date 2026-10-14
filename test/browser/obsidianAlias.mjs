@@ -36,7 +36,7 @@ try {
   const DOC = [
     '---', 'title: t', '---', '',
     '# 样式契约标题', '',
-    '**粗体** 与 *斜体* 与 `行内代码` 与 ==高亮==。', '',
+    '**粗体** 与 *斜体* 与 `行内代码` 与 ==高亮== 与 ~~删除线~~。', '',
     '> 引用一行', '',
     '- 无序列表项', '- [ ] 未完成任务', '',
     '---', '',
@@ -64,6 +64,19 @@ try {
 
   // live 视图（默认）
   await checkView('live', '初始')
+
+  // #483 删除线绘制层：内容 span 真实画线（非仅类命中），Obsidian 原名类同元素
+  {
+    const strike = await page.evaluate(() => {
+      const el = document.querySelector('.vsidian-strikethrough')
+      if (!el) return null
+      return { deco: getComputedStyle(el).textDecorationLine, alias: el.classList.contains('cm-strikethrough') }
+    })
+    assert.notEqual(strike, null, 'live 删除线内容 span 应在 DOM 中')
+    assert.equal(strike?.deco, 'line-through', `删除线应画线，实际 ${String(strike?.deco)}`)
+    assert.equal(strike?.alias, true, 'Obsidian 原名类 cm-strikethrough 应同元素命中')
+  }
+
   // reading 视图
   await page.evaluate(() => window.setAliasMode('reading'))
   await page.waitForTimeout(150)

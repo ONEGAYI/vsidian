@@ -108,6 +108,8 @@ export const LIVE_CLASS_NAMES = {
   inlineCode: 'vsidian-inline-code',
   /** 高亮内容 span（#105，`.cm-highlight` 方向；底色变量见 main.css #app） */
   highlight: 'vsidian-highlight',
+  /** 删除线内容 span（#483，`.cm-strikethrough`） */
+  strikethrough: 'vsidian-strikethrough',
   /** HTML 注释淡化 span（#139，`.cm-comment` 方向；低对比度常显，
    *  不隐藏不折叠；颜色规则由 htmlCommentCssContract 契约钉住） */
   htmlComment: 'vsidian-html-comment',
@@ -205,6 +207,7 @@ const htmlCommentDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.htmlComment })
 const emphasisDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.emphasis) })
 const inlineCodeDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.inlineCode) })
 const highlightDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.highlight) })
+const strikeDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.strikethrough) })
 
 /**
  * 任务 checkbox widget（#9）：input[type=checkbox] 替换任务标记 [ ]/[x]。
@@ -1098,6 +1101,10 @@ function emitForRange(
         // last.from > first.to 检查天然跳过空内容形态 ====）
         pushInnerSpan(out, node, 'HighlightMark', highlightDeco)
         return
+      case 'Strikethrough':
+        // #483 删除线：语义对齐其余四种行内围栏（内容 span + 定界符触界显形）
+        pushInnerSpan(out, node, 'StrikethroughMark', strikeDeco)
+        return
       case 'Comment':
       case 'CommentBlock':
         // #139 注释淡化：整节点（含定界符）低对比度常显——明显非正文
@@ -1143,6 +1150,14 @@ function emitForRange(
         return
       }
       case 'EmphasisMark': {
+        const scope = path[path.length - 1]
+        if (!scope || !touches(scope.from, scope.to)) {
+          out.push(hideDeco.range(node.from, node.to))
+        }
+        return
+      }
+      case 'StrikethroughMark': {
+        // #483：控制域 = 删除线节点范围，同 EmphasisMark 口径
         const scope = path[path.length - 1]
         if (!scope || !touches(scope.from, scope.to)) {
           out.push(hideDeco.range(node.from, node.to))

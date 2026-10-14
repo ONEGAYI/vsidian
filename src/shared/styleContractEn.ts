@@ -113,9 +113,16 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'inline-strikethrough': {
     purpose:
-      'Entry point for strikethrough (~~text~~) content: reading view only — a semantic del tag rendered by markdown-it. The live side parses the syntax but adds no decoration and shows the raw source (see limit-strikethrough-live).',
-    dom: 'A <del> element inside the reading block. No live decoration class exists; not supported there.',
+      'Entry point for strikethrough (~~text~~) content in reading view: markdown-it renders the semantic del tag. The live side is supported since #483 (see inline-strikethrough-live).',
+    dom: 'A <del> element inside the reading block.',
     obsidian: { counterpart: '.markdown-preview-view del (reading tag)' },
+  },
+  'inline-strikethrough-live': {
+    purpose:
+      'Entry point for strikethrough (~~text~~) content in live view (#483): the content span carries a persistent line-through and the ~~ delimiters are revealed when the cursor touches them (same semantics as bold); previously undecorated (historical record in limit-strikethrough-live).',
+    states: 'In live view the ~~ delimiters are revealed when the cursor touches them (same semantics as bold).',
+    dom: 'A mark decoration span inside the live container.',
+    obsidian: { counterpart: '.cm-strikethrough (live token)' },
   },
   'html-comment': {
     purpose:
@@ -519,8 +526,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'limit-strikethrough-live': {
     purpose:
-      'Strikethrough is undecorated in live view: the parser supports it but no live decoration class exists and the raw source is shown; the reading-side del tag is available (see inline-strikethrough).',
-    dom: 'No strikethrough span exists in live view.',
+      'Historical limitation (lifted): strikethrough was once undecorated in live view with the raw source shown; supported since #483 (see inline-strikethrough-live). This entry is kept as a migration record and no longer describes current behavior.',
+    dom: 'The live view now has the strikethrough span (see inline-strikethrough-live).',
     obsidian: { counterpart: '.cm-strikethrough (live token) / the reading-side del is supported' },
   },
   'limit-quote-span': {
