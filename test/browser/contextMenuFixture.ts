@@ -119,6 +119,11 @@ Object.assign(window, {
       version: 1, text,
     })
   },
+  /** #518 选区感知勾选：经生产 view.locate 链路定位光标，选区由
+   *  Shift 键盘扩展建立（与右键消费的 selection 同源） */
+  locate(offset: number) {
+    controller.handleHostMessage({ kind: 'view.locate', offset })
+  },
   controller,
   readMenu,
   /** 块 id 淡化标记观测（#163 验收线：双形态 computed color 断言——

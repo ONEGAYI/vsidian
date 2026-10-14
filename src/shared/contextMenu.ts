@@ -152,6 +152,11 @@ export interface MenuContextSnapshot {
   blockTarget: ContextMenuBlockTarget | null
   /** 命中行段落结构（checked 谓词输入；结构敏感区采集中性态不点亮） */
   line: MenuLineStructure
+  /** 选区覆盖行的段落结构（#518 列表族勾选选区感知）：仅 zone='normal'
+   *  且有选区时采集，空行已过滤（与 quickActionState 的行集合同口径）；
+   *  全空行选区为空数组——谓词退回命中行。执行侧（runFormatOperation）
+   *  消费同一 selection.main，勾选与执行同数据面 */
+  selectionLines?: MenuLineStructure[]
   /** 表格命中负载（#436；仅 zone='table' 且解析树接管该表时在场） */
   table?: TableMenuHit
   /** 链接命中负载（#436；仅 zone='normal' 且命中链接时在场——代码上下文
@@ -298,6 +303,16 @@ const isPlainParagraphLine = (ctx: MenuContextSnapshot): boolean => {
   const line = lineOf(ctx)
   return line.hasText && line.headingLevel === null && line.listKind === null && !line.quoted
 }
+/** 列表族勾选选区感知（#518 对齐 #513 统一两态）：有选区且含真实行时
+ *  按「全部真实行同类」点亮（点击将整体取消），混合不亮（点击将统一
+ *  套用/重排）——与执行方向同向；无选区或全空行退回命中行判定 */
+const listKindChecked = (kind: 'bullet' | 'ordered' | 'task'): MenuPredicate => (ctx) => {
+  const selection = ctx.selectionLines
+  if (selection !== undefined && selection.length > 0) {
+    return selection.every((line) => line.listKind === kind)
+  }
+  return lineOf(ctx).listKind === kind
+}
 // 段落设置子项分子类组（#183 验收反馈）：正文+标题族｜列表族｜引用 各成
 // 一组，DOM 装配在组边界落分隔线（与顶级三簇同机制）；组内序 = Obsidian
 // 顺序（正文在最前、标题按级、列表保持既有相对序）
@@ -309,9 +324,9 @@ const paragraphChildren: readonly MenuItemDescriptor[] = [
   { id: 'heading4', group: 'paragraphHeading', order: 4, command: 'heading4', labelKey: 'format.heading4', badge: 'H4', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 4 },
   { id: 'heading5', group: 'paragraphHeading', order: 5, command: 'heading5', labelKey: 'format.heading5', badge: 'H5', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 5 },
   { id: 'heading6', group: 'paragraphHeading', order: 6, command: 'heading6', labelKey: 'format.heading6', badge: 'H6', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 6 },
-  { id: 'bulletList', group: 'paragraphList', order: 0, command: 'bulletList', labelKey: 'format.bulletList', iconKey: 'bulletList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'bullet' },
-  { id: 'orderedList', group: 'paragraphList', order: 1, command: 'orderedList', labelKey: 'format.orderedList', iconKey: 'orderedList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'ordered' },
-  { id: 'taskList', group: 'paragraphList', order: 2, command: 'taskList', labelKey: 'format.taskList', iconKey: 'taskList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'task' },
+  { id: 'bulletList', group: 'paragraphList', order: 0, command: 'bulletList', labelKey: 'format.bulletList', iconKey: 'bulletList', enable: enabledOutsideStructure, checked: listKindChecked('bullet') },
+  { id: 'orderedList', group: 'paragraphList', order: 1, command: 'orderedList', labelKey: 'format.orderedList', iconKey: 'orderedList', enable: enabledOutsideStructure, checked: listKindChecked('ordered') },
+  { id: 'taskList', group: 'paragraphList', order: 2, command: 'taskList', labelKey: 'format.taskList', iconKey: 'taskList', enable: enabledOutsideStructure, checked: listKindChecked('task') },
   { id: 'quote', group: 'paragraphQuote', order: 0, command: 'quote', labelKey: 'format.quote', iconKey: 'quote', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).quoted },
 ]
 
