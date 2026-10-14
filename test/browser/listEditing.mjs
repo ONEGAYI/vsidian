@@ -70,6 +70,27 @@ const scenarios = [
   { name: 'backspace-nested-promote', doc: '- p\n  - c', cursor: 8, keys: ['Backspace'], text: '- p\n- c', head: 6 },
   { name: 'backspace-inside-mark', doc: '1. item', cursor: 1, keys: ['Backspace'], text: '. item', head: 0 },
   { name: 'backspace-plain-default', doc: 'plain', cursor: 2, keys: ['Backspace'], text: 'pain', head: 1 },
+  // #512/#513：多行选区格式化——Shift+End 到行尾后 Shift+ArrowDown 逐行
+  // 扩展（原生键盘建选区），操作经 format.command 生产链路触发。多行产物
+  // 光标由 CM6 变更映射（不携带独立 selection），只断言文本不锁 head
+  // Shift+ArrowDown 的 goal 列使两次下移实际选到文末（三行全选）：
+  // 空行跳过不加 `- `、选区内真实行（含尾行）都加——一场景钉两语义
+  { name: 'format-blank-skip-bullet', doc: '正文\n\n尾', cursor: 0,
+    selectKeys: ['Shift+End', 'Shift+ArrowDown', 'Shift+ArrowDown'], format: 'bulletList',
+    text: '- 正文\n\n- 尾' },
+  { name: 'format-blank-single-cursor', doc: '', cursor: 0,
+    selectKeys: [], format: 'bulletList', text: '- ', head: 2 },
+  { name: 'format-ordered-increment', doc: '甲\n乙\n丙', cursor: 0,
+    selectKeys: ['Shift+End', 'Shift+ArrowDown', 'Shift+ArrowDown'], format: 'orderedList',
+    text: '1. 甲\n2. 乙\n3. 丙' },
+  { name: 'format-ordered-carry', doc: '1. x\n\n甲\n乙', cursor: 6,
+    selectKeys: ['Shift+End', 'Shift+ArrowDown'], format: 'orderedList',
+    text: '1. x\n\n2. 甲\n3. 乙' },
+  { name: 'format-ordered-cancel-with-blank', doc: '1. 甲\n\n2. 乙', cursor: 0,
+    selectKeys: ['Shift+End', 'Shift+ArrowDown', 'Shift+ArrowDown'], format: 'orderedList',
+    text: '甲\n\n乙' },
+  { name: 'format-bullet-cancel', doc: '- 甲\n- 乙', cursor: 0,
+    selectKeys: ['Shift+End', 'Shift+ArrowDown'], format: 'bulletList', text: '甲\n乙' },
 ]
 
 const browser = await chromium.launch({ headless: true,
@@ -90,12 +111,18 @@ try {
       // 先点击聚焦（光标会落到点击处），再经生产 view.locate 链路精确定位
       await page.click('.cm-content')
       await page.evaluate((cursor) => window.locate(cursor), s.cursor)
-      for (const key of s.keys) {
+      for (const key of s.keys ?? []) {
         await page.keyboard.press(key)
       }
+      for (const key of s.selectKeys ?? []) {
+        await page.keyboard.press(key)
+      }
+      if (s.format) await page.evaluate((op) => window.formatCommand(op), s.format)
       const after = await page.evaluate(() => window.readEditor())
       assert.equal(after.text, s.text, `${s.name}: ${JSON.stringify(after)}`)
-      assert.equal(after.head, s.head, `${s.name} head: ${JSON.stringify(after)}`)
+      if (s.head !== undefined) {
+        assert.equal(after.head, s.head, `${s.name} head: ${JSON.stringify(after)}`)
+      }
       if (s.type) {
         await page.keyboard.type(s.type.keys)
         const typedState = await page.evaluate(() => window.readEditor())

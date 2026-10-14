@@ -417,63 +417,160 @@ function inlinePlan(text: string, op: FormatOperationId, range: FormatSelection,
   return changes.length ? { changes, ...(selection ? { selection } : {}) } : null
 }
 
+/** 引用前缀层数（`> > ` → 2；形态学内每层一个 `>`） */
+function quoteDepth(quote: string): number {
+  let depth = 0
+  for (const ch of quote) if (ch === '>') depth++
+  return depth
+}
+
+/**
+ * 有序编号承接（#513）：从选区入口行向上找最近非空行，该行是同层
+ * 有序项（引用层数与缩进宽度均相等）即返回其编号形态供 +1 承接；
+ * 空行跳过继续上溯，最近非空行是其他块时自然打断（返回 null 从 1 起）。
+ */
+function orderedCarryBefore(text: string, entryFrom: number, entryQuoteDepth: number,
+  entryIndentWidth: number): { digits: string; delim: '.' | ')' } | null {
+  let eol = entryFrom - 1
+  while (eol > 0) {
+    const lineStart = text.lastIndexOf('\n', eol - 1) + 1
+    const line = text.slice(lineStart, eol)
+    if (line.trim()) {
+      const prefix = parseLinePrefix(line)
+      if (prefix?.list?.digits && quoteDepth(prefix.quote) === entryQuoteDepth
+        && prefix.indent.length === entryIndentWidth) {
+        // digits 非空时 delim 必非空串，|| 仅做类型窄化兜底
+        return { digits: prefix.list.digits, delim: prefix.list.delim || '.' }
+      }
+      return null
+    }
+    eol = lineStart - 1
+  }
+  return null
+}
+
 function linePlan(text: string, op: FormatOperationId, range: FormatSelection): FormatPlan | null {
   const lines: FormatChange[] = []
   // 空行插入前缀的产物光标（#393）：仅单光标形态给出（`## |`、`- |`）；
   // 跨行选区不携带独立选区，光标经变更映射——与既有行级操作口径一致
   let emptyPrefixAnchor: number | null = null
-  let start = text.lastIndexOf('\n', range.from - 1) + 1
+  // 先收集选区行再整体决策（#512/#513）：空行是块分隔符，选区含真实行
+  // 时空行一律跳过不加前缀；无选区或选区全空行时仅首个空行（选区起点
+  // 所在行）插入前缀——插入产物（如 `- `）trim 非空，再按一次经真实行
+  // 取消路径还原，两态闭环不另设空行取消分支
+  interface RowPlan { from: number; to: number; line: string; blank: boolean }
+  const rows: RowPlan[] = []
+  // 选区起点所在行行首：from=0 时 lastIndexOf 的 fromIndex=-1 会被按 0
+  // 处理，文首恰为空行（text[0] 即 \n）会错算行首——用 slice 语义免疫
+  let start = text.slice(0, range.from).lastIndexOf('\n') + 1
   while (start <= range.to) {
     const eol = text.indexOf('\n', start)
     const end = eol < 0 ? text.length : eol
     if (start < range.to || range.from === range.to) {
       const line = text.slice(start, end)
-      if (line.trim()) {
-        const prefix = parseLinePrefix(line)
-        const quote = prefix?.quote ?? ''
-        const indent = prefix?.indent ?? /^\s*/u.exec(line)![0]
-        const body = line.slice(prefix ? prefixLength(prefix) : indent.length)
-        let next = line
-        if (op.startsWith('heading')) {
-          const headingStart = lineContainerPrefixLength(line)
-          const headingBody = line.slice(headingStart)
-          const heading = /^#{1,6}\s+/u.exec(headingBody)
-          const clean = headingBody.replace(/^#{1,6}\s+/u, '')
-          const level = op === 'headingNone' ? 0 : Number(op.slice(7))
-          next = line.slice(0, headingStart) + (level ? '#'.repeat(level) + ' ' : '') + clean
-          if (op === 'headingNone' && !heading) next = line
-        } else if (op === 'bulletList') next = quote + indent +
-          (prefix?.list?.bullet && !prefix.list.task ? body : '- ' + body)
-        else if (op === 'orderedList') next = quote + indent +
-          (prefix?.list?.digits ? body : '1. ' + body)
-        else if (op === 'taskList') next = quote + indent +
-          (prefix?.list?.task ? body : '- [ ] ' + body)
-        else if (op === 'quote') {
-          // 引用是外层容器：只增删一层 >，保留列表、标题与它们的缩进。
-          const outer = /^(\s*)> ?/u.exec(line)
-          next = outer ? outer[1]! + line.slice(outer[0].length) : '> ' + line
-        }
-        if (next !== line) lines.push({ from: start, to: end, insert: next })
-      } else {
-        // 空行插入（#393）：标题与列表/引用统一插入对应前缀、光标置于
-        // 前缀之后；缩进透传与非空行路径一致，不做截断特判。前缀行
-        // （如 `- `）trim 非空，再按一次落回上方非空行取消路径——两态
-        // 闭环天然成立。headingNone 为取消型操作，空行无可摘除，不插入
-        const prefix = op === 'bulletList' ? '- '
-          : op === 'orderedList' ? '1. '
-          : op === 'taskList' ? '- [ ] '
-          : op === 'quote' ? '> '
-          : op.startsWith('heading') && op !== 'headingNone' ? '#'.repeat(Number(op.slice(7))) + ' '
-          : null
-        if (prefix !== null) {
-          const indent = /^\s*/u.exec(line)![0]
-          lines.push({ from: start, to: end, insert: indent + prefix })
-          if (range.from === range.to) emptyPrefixAnchor = start + indent.length + prefix.length
-        }
-      }
+      rows.push({ from: start, to: end, line, blank: !line.trim() })
     }
     if (eol < 0 || eol >= range.to) break
     start = eol + 1
+  }
+  const parsed = rows.filter((row) => !row.blank).map((row) => {
+    const prefix = parseLinePrefix(row.line)
+    const quote = prefix?.quote ?? ''
+    const indent = prefix?.indent ?? /^\s*/u.exec(row.line)![0]
+    const body = row.line.slice(prefix ? prefixLength(prefix) : indent.length)
+    return { row, prefix, quote, indent, body }
+  })
+  if (!parsed.length) {
+    // 空行插入（#393 收窄，#512）：headingNone 为取消型操作，空行无可
+    // 摘除，不插入
+    const row = rows[0]
+    const prefix = op === 'bulletList' ? '- '
+      : op === 'orderedList' ? '1. '
+      : op === 'taskList' ? '- [ ] '
+      : op === 'quote' ? '> '
+      : op.startsWith('heading') && op !== 'headingNone' ? '#'.repeat(Number(op.slice(7))) + ' '
+      : null
+    if (row && prefix !== null) {
+      const indent = /^\s*/u.exec(row.line)![0]
+      lines.push({ from: row.from, to: row.to, insert: indent + prefix })
+      if (range.from === range.to) emptyPrefixAnchor = row.from + indent.length + prefix.length
+    }
+  } else if (op.startsWith('heading')) {
+    // 标题为定值语义：混合选区各行独立设级（#513 明确不统一）
+    for (const p of parsed) {
+      const headingStart = lineContainerPrefixLength(p.row.line)
+      const headingBody = p.row.line.slice(headingStart)
+      const heading = /^#{1,6}\s+/u.exec(headingBody)
+      const clean = headingBody.replace(/^#{1,6}\s+/u, '')
+      const level = op === 'headingNone' ? 0 : Number(op.slice(7))
+      const next = p.row.line.slice(0, headingStart) + (level ? '#'.repeat(level) + ' ' : '') + clean
+      if (op !== 'headingNone' || heading) {
+        if (next !== p.row.line) lines.push({ from: p.row.from, to: p.row.to, insert: next })
+      }
+    }
+  } else if (op === 'quote') {
+    // 引用是外层容器：只增删一层 >，保留列表、标题与它们的缩进。引用
+    // 前缀是块归属的粘合剂，部分选区统一剥除会截断引用块——保持逐行
+    // 独立切换，不参与列表族两态统一（#513 拷问决策）
+    for (const p of parsed) {
+      const outer = /^(\s*)> ?/u.exec(p.row.line)
+      const next = outer ? outer[1]! + p.row.line.slice(outer[0].length) : '> ' + p.row.line
+      if (next !== p.row.line) lines.push({ from: p.row.from, to: p.row.to, insert: next })
+    }
+  } else {
+    // 列表族统一两态（#513）：选区真实行全部已是同类列表项即全部取消，
+    // 否则统一套用标记；两态判定只看真实行，空行不参与（否则含空行的
+    // 有序选区永远无法取消）。族间归族：bulletList 下任务行算非 bullet
+    // 项（统一时剥任务标记转普通 bullet）；orderedList 下 bullet/task 行
+    // 算未编号行参与重排
+    const isTarget = op === 'orderedList'
+      ? (p: (typeof parsed)[number]) => !!p.prefix?.list?.digits
+      : op === 'bulletList'
+        ? (p: (typeof parsed)[number]) => !!p.prefix?.list?.bullet && !p.prefix.list.task
+        : (p: (typeof parsed)[number]) => !!p.prefix?.list?.task
+    if (parsed.every(isTarget)) {
+      // 取消：摘整段标记（含任务标记），保留引用前缀与缩进
+      for (const p of parsed) {
+        lines.push({ from: p.row.from, to: p.row.to, insert: p.quote + p.indent + p.body })
+      }
+    } else if (op === 'orderedList') {
+      // 编号承接与层级计数（#513）：仅入口层（首个真实行所在层）承接
+      // 上方同层有序项编号 +1（沿用分隔符与前导零宽度，+1 保宽与
+      // 「行前缀延续」同源），其余层一律从 1 起
+      const entry = parsed[0]!
+      const carry = orderedCarryBefore(text, entry.row.from,
+        quoteDepth(entry.quote), entry.indent.length)
+      const delim = carry?.delim ?? '.'
+      const pad = carry ? carry.digits.length : 1
+      const startCount = carry ? Number(carry.digits) + 1 : 1
+      // 层级栈：层 key 用 引用层数:缩进宽度 复合（引用层数不同即非同层，
+      // 承接与计数都不跨引用层），深度比较只用缩进宽度；弹栈归入「缩进
+      // 不大于它的最近已见层」继续计数，层 key 随行接管（同歪缩进的
+      // 后续行在该层继续递增）；各行缩进在产物中原样保留
+      const stack: { key: string; depth: number; count: number }[] = []
+      for (const p of parsed) {
+        const key = `${quoteDepth(p.quote)}:${p.indent.length}`
+        if (!stack.length) stack.push({ key, depth: p.indent.length, count: startCount })
+        else if (stack[stack.length - 1]!.key === key) stack[stack.length - 1]!.count++
+        else if (stack[stack.length - 1]!.depth < p.indent.length) {
+          stack.push({ key, depth: p.indent.length, count: 1 })
+        } else {
+          while (stack.length > 1 && stack[stack.length - 1]!.depth > p.indent.length) stack.pop()!
+          const top = stack[stack.length - 1]!
+          top.count++
+          top.key = key
+          top.depth = p.indent.length
+        }
+        const number = String(stack[stack.length - 1]!.count).padStart(pad, '0')
+        lines.push({ from: p.row.from, to: p.row.to,
+          insert: p.quote + p.indent + number + delim + ' ' + p.body })
+      }
+    } else {
+      const mark = op === 'taskList' ? '- [ ] ' : '- '
+      for (const p of parsed) {
+        lines.push({ from: p.row.from, to: p.row.to, insert: p.quote + p.indent + mark + p.body })
+      }
+    }
   }
   if (!lines.length) return null
   return emptyPrefixAnchor === null ? { changes: lines }
