@@ -84,3 +84,29 @@ it('P2-09 等待五个唯一孙位，重复卡片不能抵掉尚未绑定的格�
   expect(sample({ readingEmbed: [...incomplete, { ...cards[4]!, liveBound: false }] }, inners)).toBe(false)
   expect(sample({ readingEmbed: [parent, ...cards] }, inners)).toBe(true)
 })
+
+it('大纲初始采样等待当前档圆点绘制，拒绝侧栏过渡期的裁切快照（#446 条目 11）', () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'waitViewState' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === 'outline-long.md' &&
+      node.arguments[1]?.getText(source).includes('items.length === 101')) {
+      let scope: ts.Node | undefined = node.parent
+      while (scope && !ts.isArrayLiteralExpression(scope)) scope = scope.parent
+      if (scope && ts.isArrayLiteralExpression(scope) && ts.isStringLiteral(scope.elements[0]!) &&
+        scope.elements[0].text.startsWith('大纲折叠滑块与手动折叠：')) callbacks.push(node.arguments[1])
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})(state);`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('state', code)
+  const outline = { panelPainted: true, sliderPainted: true, sliderActiveDotPainted: true,
+    chevronPainted: true, items: Array.from({ length: 101 }, () => ({})) }
+  // 真实 Chromium 过渡期：面板与滑块中心已命中，最右圆点仍被裁在视口外。
+  expect(sample({ sidebar: { open: true }, outline: { ...outline, sliderActiveDotPainted: false } })).toBe(false)
+  expect(sample({ sidebar: { open: true }, outline: { ...outline, sliderPainted: false } })).toBe(false)
+  expect(sample({ sidebar: { open: true }, outline: { ...outline, chevronPainted: false } })).toBe(false)
+  expect(sample({ sidebar: { open: true }, outline })).toBe(true)
+})
