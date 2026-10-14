@@ -95,6 +95,43 @@ async function altClick(page, offset) {
 }
 
 try {
+  const WRAPPED_DOC = '对于这次片段更新，`part` 的当前状态更新、`event` 的新增记录与 `event_sequence` 的序号更新在**同一个数据库事务**中提交。上表描述提交前后，不表示三项修改的执行先后顺序；事务把这组修改作为整体提交，提交后再通知订阅者。[4]'
+  const TABLE_SUFFIX = '\n\n| a | b |\n| --- | --- |\n| x | y |'
+  for (const { name, prefix, suffix = '' } of [
+    { name: '引用块', prefix: '> 引用块。\n\n' },
+    { name: '代码块', prefix: '```text\n代码。\n```\n\n' },
+    { name: '嵌套列表', prefix: '- 一层\n  - 二层\n    - 三层\n\n' },
+    { name: '普通段落', prefix: '前文。\n\n' },
+    { name: '引用块且选区延续进表格', prefix: '> 引用块。\n\n', suffix: TABLE_SUFFIX },
+  ]) {
+    const doc = prefix + WRAPPED_DOC + suffix
+    await scenario(`前文${name}不得使普通段落续行首字漏绘`,
+      { doc }, async (page) => {
+        await page.setViewportSize({ width: 1200, height: 400 })
+        await page.addStyleTag({ content: 'body { background: white; --vscode-editor-font-family: Consolas, monospace; --vscode-editor-font-size: 14px; } #app { --vsidian-content-font-family: "SimSun", serif; --vsidian-content-font-size: 14px; --vscode-editor-selectionBackground: rgb(20,120,200); }' })
+        await page.evaluate(({ from, to }) => {
+          window.setSettings({ 'editor.readableLineWidth': 920 })
+          window.selectRange(from, to)
+        }, { from: prefix.length, to: suffix ? doc.lastIndexOf('x') + 1 : prefix.length + WRAPPED_DOC.length })
+        await settle(page)
+        const state = await read(page)
+        assert.ok(state.text.slice(state.from, state.to).startsWith(WRAPPED_DOC), '实际选区须完整包含段落')
+        const at = await page.evaluate(({from,to}) => window.firstWrappedChar(from,to),
+          { from: state.from, to: state.from + WRAPPED_DOC.length })
+        const png = await page.screenshot({ clip: { x: Math.floor(at.left + 1), y: Math.ceil(at.top), width: 1, height: 1 } })
+        const rgb = await page.evaluate(async (base64) => {
+          const image = new Image()
+          image.src = `data:image/png;base64,${base64}`
+          await image.decode()
+          const canvas = document.createElement('canvas')
+          canvas.width = image.width; canvas.height = image.height
+          const context = canvas.getContext('2d')
+          context.drawImage(image, 0, 0)
+          return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3)
+        }, png.toString('base64'))
+        assert.deepEqual(rgb, [20,120,200], `续行首字“${at.char}”背后须实际绘制选区色`)
+      })
+  }
   await scenario('代码块不透明底色下：选区必须真正绘制在文字背景上',
     { doc: '```js\nlet hi = "hello";\n```', cursor: 12 }, async (page) => {
       await page.addStyleTag({ content: '#app { --vsidian-code-card-background: rgb(36,37,38); --vsidian-live-code-background: rgb(36,37,38); --vscode-editor-selectionBackground: rgb(20,120,200); }' })
