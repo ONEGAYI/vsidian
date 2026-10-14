@@ -914,6 +914,35 @@ describe('段落设置勾选矩阵（checked 谓词按当前行结构点亮，#1
     expect(checked['bulletList']).toBe(false)
   })
 
+  it('列表族勾选选区感知（#518 对齐统一两态）：全部真实行同类才点亮', () => {
+    // 采集侧过滤空行后传入真实行数组（与 quickActionState 的 lineRange 同口径）
+    const selectionCheckedOf = (selectionLines: string[], hitLine: string) => {
+      const ctx = normalCtx({
+        hasSelection: true,
+        line: menuLineStructureOf(hitLine),
+        selectionLines: selectionLines.filter((line) => line.trim()).map(menuLineStructureOf),
+      })
+      const style = buildContextMenuModel(ctx).flatMap((g) => g.items).find((i) => i.id === 'paragraphStyle')!
+      return Object.fromEntries((style.children ?? []).map((child) => [child.id, child.checked]))
+    }
+    // 混合选区：锚点行已是 bullet 也不点亮（点击将统一套用，勾选与执行同向）
+    expect(selectionCheckedOf(['- 甲', '乙'], '- 甲')['bulletList']).toBe(false)
+    expect(selectionCheckedOf(['1. 甲', '乙'], '1. 甲')['orderedList']).toBe(false)
+    expect(selectionCheckedOf(['- [ ] 甲', '- 乙'], '- [ ] 甲')['taskList']).toBe(false)
+    // 全同类：点亮（点击将整体取消）
+    expect(selectionCheckedOf(['- 甲', '- 乙'], '- 甲')['bulletList']).toBe(true)
+    expect(selectionCheckedOf(['1. 甲', '2. 乙'], '1. 甲')['orderedList']).toBe(true)
+    expect(selectionCheckedOf(['- [ ] 甲', '- [x] 乙'], '- [ ] 甲')['taskList']).toBe(true)
+    // 引用内列表全同类同口径（quote 仍按命中行）
+    const quoted = selectionCheckedOf(['> - 甲', '> - 乙'], '> - 甲')
+    expect(quoted['bulletList']).toBe(true)
+    expect(quoted['quote']).toBe(true)
+    // heading 定值语义不参与对齐：混合选区仍按命中行点亮
+    expect(selectionCheckedOf(['## 甲', '乙'], '## 甲')['heading2']).toBe(true)
+    // 全空行选区（真实行为空数组）：退回命中行判定
+    expect(selectionCheckedOf(['', '   '], '- 甲')['bulletList']).toBe(true)
+  })
+
   it('中性态快照（结构敏感区采集约定）：不点亮任何勾选', () => {
     const checked = paragraphCheckedOf('## 不该勾') // 行本身是标题——
     const neutral = buildContextMenuModel(normalCtx({ line: PLAIN_MENU_LINE }))

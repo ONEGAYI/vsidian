@@ -700,8 +700,50 @@ try {
   assert.equal(checkState.none, 'true', '普通段右键：正文应勾选')
   assert.equal(checkState.quote, null, '普通段：引用不勾')
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+
+  // #518 列表族勾选选区感知：键盘 Shift 建选区（右键不清选区）后右键，
+  // 勾选按「选区真实行全部同类」判定——与统一两态执行方向同向
+  await page.evaluate(() => window.initContextMenu('- 甲\n- 乙\n'))
+  await page.waitForTimeout(80)
+  await page.click('.cm-content')
+  await page.evaluate(() => window.locate(0))
+  await page.keyboard.press('Shift+End')
+  await page.keyboard.press('Shift+ArrowDown')
+  await line(0).click({ button: 'right', position: { x: 4, y: 6 } })
+  await hoverParagraphStyle()
+  checkState = await page.evaluate(() => ({
+    bullet: window.readMenu().checkedOf('bulletList'),
+    selection: window.readMenu().selection,
+  }))
+  assert.equal(checkState.selection.empty, false, '右键时刻选区应存活（勾选与执行同数据面前提）')
+  assert.equal(checkState.bullet, 'true', '全同类选区：bulletList 应勾选（点击将整体取消）')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 混合选区：锚点行已是 bullet 也不点亮（点击将统一套用——旧模型此处误亮）；
+  // 随后真实点击叶命令，端到端钉住「勾选与执行同数据面」：产物为统一套用
+  await page.evaluate(() => window.initContextMenu('- 甲\n乙\n'))
+  await page.waitForTimeout(80)
+  await page.click('.cm-content')
+  await page.evaluate(() => window.locate(0))
+  await page.keyboard.press('Shift+End')
+  await page.keyboard.press('Shift+ArrowDown')
+  await line(0).click({ button: 'right', position: { x: 4, y: 6 } })
+  await hoverParagraphStyle()
+  checkState = await page.evaluate(() => window.readMenu().checkedOf('bulletList'))
+  assert.equal(checkState, null, '混合选区：bulletList 不勾（点击将统一套用）')
+  const sentBeforeMenuClick = await page.evaluate(() => window.sent().length)
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="bulletList"]').click()
+  const mixedClickState = await page.evaluate(() => window.readMenu())
+  assert.ok(!mixedClickState.menuExists, '叶命令执行后菜单应关闭')
+  assert.equal(mixedClickState.text, '- 甲\n- 乙\n', '混合选区点击应统一套用（勾选承诺与执行一致，#518+#513）')
+  const sentAfterMenuClick = await page.evaluate(() => window.sent())
+  assert.equal(sentAfterMenuClick.slice(sentBeforeMenuClick).filter((m) => m.kind === 'edit.request').length, 1,
+    '统一套用走标准出站一笔')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 恢复多行 DOC：后续场景 M 沿用本用例链的文档前置（不自带 init）
+  await page.evaluate((t) => window.initContextMenu(t), DOC)
+  await page.waitForTimeout(80)
   passed++
-  console.log('[统一菜单回归][PASS] 段落设置勾选：标题/任务/正文按行结构点亮')
+  console.log('[统一菜单回归][PASS] 列表族勾选选区感知：全同类亮、混合不亮（#518）')
 
   // ---- 场景 M：键盘方向键导航（规格交互契约：Up/Down 移动、Right 进子级、
   // Left 退出；真实 page.keyboard——ArrowRight 进子级后子菜单须真实可见） ----

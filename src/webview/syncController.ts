@@ -320,6 +320,7 @@ import {
   type LinkMenuHit,
   type LinkSceneCommand,
   type MenuContextSnapshot,
+  type MenuLineStructure,
   type TableMenuHit,
 } from '../shared/contextMenu'
 import {
@@ -7260,11 +7261,28 @@ export class WebviewSyncController {
     if (zone === null) {
       return null // 头区不接管：成型卡片只读；降级源码行写 ^id 只会破坏 YAML
     }
+    // #518 列表族勾选选区感知：normal 区有选区时采集覆盖行结构（空行
+    // 过滤，与 quickActionState 的行集合同口径）；右键不清选区，执行侧
+    // 消费同一 selection.main——勾选与执行同数据面
+    const selection = view.state.selection.main
+    let selectionLines: MenuLineStructure[] | undefined
+    if (zone === 'normal' && !selection.empty) {
+      const first = view.state.doc.lineAt(selection.from).number
+      const last = view.state.doc.lineAt(selection.from === selection.to
+        ? selection.to : selection.to - 1).number
+      const collected: MenuLineStructure[] = []
+      for (let number = first; number <= last; number++) {
+        const line = view.state.doc.line(number).text
+        if (line.trim()) collected.push(menuLineStructureOf(line))
+      }
+      selectionLines = collected
+    }
     return {
       zone,
-      hasSelection: !view.state.selection.main.empty,
+      hasSelection: !selection.empty,
       blockTarget: contextMenuBlockTargetAt(lines, lineIndex, fmEndLine),
       line: zone === 'normal' ? menuLineStructureOf(lines[lineIndex] ?? '') : PLAIN_MENU_LINE,
+      ...(selectionLines !== undefined ? { selectionLines } : {}),
       ...(zone === 'table' ? { table: this.tableMenuHitAt(view, pos) } : {}),
       ...(zone === 'graphic' ? { graphic: this.graphicMenuHitAt(view, lines, lineIndex) } : {}),
       ...(zone === 'normal' ? { link: menuLinkHitAtPos(view, pos) ?? undefined } : {}),
