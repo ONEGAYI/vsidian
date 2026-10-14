@@ -65,9 +65,10 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 
 | 敏感组成员 | 证据与待查问题 |
 | --- | --- |
-| tableCaret | PR #481 [run 38450365230](https://github.com/ONEGAYI/vsidian/actions/runs/38450365230) attempt 2/4 两次复挂、同 ~70s 超时形态（Linux runner；本地 Windows 全绿）——CI 环境真实脆弱点候选，归因最优先。条目 1 已修复的度量重发（fae41d5f）是另一根因，本次复发另册跟踪（#446 条目 9） |
 | addonT10Commands | 同 run attempt 1 断言失败（10.3s）；本地定向单跑稳定通过——CI 时序敏感，根因未定（#446 条目 9） |
 | addonRendererTakeover | 同 run attempt 3 断言失败（16.9s），与条目 5 的初始化等待超时同套件（#446 条目 5/9）；本地全绿 |
+
+tableCaret 的原始两次失败已确认是 `handle-hover` 读隐藏新增带 opacity 时得到空串，报告 `TIMEOUT=false`；约 70s 是套件总耗时。控件重建期间取到脱离 DOM 的节点可稳定复现同款失败。修复将查询与样式读取合在同一浏览器回调，补充重建期间的连续采样回归，并恢复 core；该候选须在同一提交两轮独立 CI 通过后合并，远端证据与勾销状态记录于修复 PR 和 #446 条目 9。根因与本地红绿证据见本文末节。
 
 ### CI 语义
 
@@ -75,7 +76,7 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 - 新 job `browser-sensitive` 设 `VSIDIAN_TEST_BROWSER_GROUP=sensitive`，不在任何 needs 链上：不用 continue-on-error、不自动重试、不放宽断言——失败保留红灯、逐套件报告与非零退出码，整轮 workflow 可为 failure，但不阻断必需检查。
 - 本地默认（不设环境变量）仍是全量，回归习惯与全量验证口径不变；`VSIDIAN_TEST_BROWSER_GROUP=sensitive npm run test:browser` 单跑敏感组（Git Bash），PowerShell 用 `$env:VSIDIAN_TEST_BROWSER_GROUP='sensitive'` 后清除。
 
-此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组不修复产品行为、不修改套件断言；三套件的归因排查仍开放，跟踪 #446。
+此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组本身不修复产品行为、不修改套件断言；名单内两套件的归因排查仍开放，跟踪 #446。
 
 ### Windows 剪贴板族诊断与互斥（2026-10-10）
 
@@ -303,3 +304,27 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 | 文件树 | strict 校验通过 | `446-tree-final.log` |
 
 追加验证的第一次命令未透传 `--suite`，误启了第二轮全量；`run-q5i5CC` 被本轮主动中断，原生报告 `exitCode=null`，不计入验证样本。上表两轮定向验证随后经直接调用调度器完成。临时诊断代码已清除；本轮代码仅在 `codex/fix-446-294` 本地分支，尚未推送。
+
+## #446 条目 9：tableCaret 控件重建与样式采样（2026-10-14）
+
+**历史失败是断言失败，不是超时**。固定提交 `756c1fe5` 的 CI run `38450365230` attempt 2/4 原始 `tableCaret.log` 均在 `handle-hover` 的“离开表格后新增带隐藏”断言得到 `'' !== '0'`，结束行均为 `EXIT=1 SIGNAL= TIMEOUT=false`。70.67s / 67.33s 是整套脚本耗时；行/列插入线及度量重发场景在两轮都通过。本项与条目 1 的插入线缺失分开归因。
+
+**可重复机制是采样持有了旧按钮**。`TableControlsView.render()` 重建浮层控件；生产度量或装饰更新可以触发这一路径。Playwright 的 `Locator.evaluate` 先解析节点句柄，再调用句柄的 evaluate，两次异步调用之间允许页面更新。若按钮在此期间被替换，回调仍收到旧按钮；其 `isConnected=false`，`getComputedStyle(...).opacity` 是空串，当前按钮的 opacity 则为 `0`。
+
+红测之后按三个预测收敛：
+
+| 候选原因 | 可证伪预测 | 观测 |
+| --- | --- | --- |
+| 采样句柄过期 | 旧按钮断开连接且读空串，当前按钮仍隐藏；合并查询与读取后消失 | 度量重配红测 3/3、持续重配红测 10/10 符合；同条件原子采样 10/10 通过 |
+| 悬停状态未清除或退出坐标仍在表格内 | 当前按钮的 opacity 应为 `1` | 同次采样当前按钮为 `0`，不符合 |
+| 样式未装载 | 当前连接按钮也无法得到预期 opacity | 原生移入/移出及当前按钮读值符合 `1`/`0`，不符合 |
+
+本机自然场景 20/20 通过；仅在退出后持续经既有 `refreshTableLayout()` 度量入口触发控件重建，保持原采样回调，即稳定复现空串。永久回归 `handle-hover-refresh` 在该入口持续重配时连续采样 10 次，每次都要求隐藏断言成立，未设置重试或延长预算。行/列新增带的样式采样改为在同一个 `page.evaluate` 回调中查询当前 DOM 并读取计算样式；生产控件、CSS 和原生指针交互均未修改。
+
+**本地验证**：基线 `3977b0a4` 的完整 tableCaret 通过；新增回归配旧采样时失败，修正采样后完整套件通过。日志在独立工作树 `D:/.codex/worktrees/tablecaret-root-cause/vscode-obsidian-like-editor/out/test/`：
+
+- CI 原始证据：`ci-a2/run-fJx2xH/tableCaret.log`、`ci-a4/run-X6Vvp0/tableCaret.log`。
+- 短复现：`446-hover-natural.log`、`446-hover-reconfigure-red.log`、`446-hover-churn-red.log`、`446-hover-churn-green.log`。
+- 完整套件：`446-tablecaret-baseline.log`、`446-tablecaret-regression-red.log`、`446-tablecaret-regression-green.log`；对应原生报告 `run-boxnrx`、`run-ihJLPC`、`run-x3gwda`。
+
+历史 CI 没有记录节点连接状态，具体是哪次页面更新替换了按钮仍无法从旧日志还原；本轮固定的是能解释同款空串的采样竞态。tableCaret 恢复 core 的候选同步更新分组契约；合并前须完成同一提交两轮独立 Linux CI 验证，结果以修复 PR 与 #446 台账为准。#446 内另外两项套件及其他未解决条目仍保持打开，不因 tableCaret 修复一起勾销。

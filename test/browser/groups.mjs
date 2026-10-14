@@ -10,14 +10,15 @@
 //
 // 入选背景（PR #481 四次 CI attempt 的抖动证据，全部与当期改动零交集、
 // 本地 Windows 全绿、main 基线同型挂红——#272 族在 browser job 的表现）：
-// - tableCaret：attempt 2/4 两次复挂、同 ~70s 超时形态（Linux runner），
-//   最有归因线索的一条；条目 1 曾修复的度量重发是另一根因，复发另册跟踪
+// tableCaret 的 attempt 2/4 是隐藏态样式采样读空串（TIMEOUT=false），
+// 控件重建后 Locator 句柄过期已补原子采样及回归；恢复 core 的候选须在
+// 同一提交两轮 CI 通过后合并，证据见 #446 条目 9 与文档台账。
 // - addonT10Commands：attempt 1 断言失败（10.3s）
 // - addonRendererTakeover：attempt 3 断言失败（16.9s），与 #446 条目 5
 //   的初始化等待超时同套件
 
 /** 敏感名单（单一事实源；增删须同步文档台账、#446 条目与契约测试钉住项） */
-export const BROWSER_SENSITIVE_SUITES = ['tableCaret', 'addonT10Commands', 'addonRendererTakeover']
+export const BROWSER_SENSITIVE_SUITES = ['addonT10Commands', 'addonRendererTakeover']
 
 /**
  * 解析分组环境变量：缺省（未设或空串）为 'all'；只接受 all/core/sensitive，
