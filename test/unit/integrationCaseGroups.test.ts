@@ -185,6 +185,7 @@ function productionCases(): Array<[string, null]> {
     ['addonT06Cases', parseCaseArray('addonT06Cases.ts', 'addonT06Cases')],
     ['addonT07Cases', parseCaseArray('addonT07Cases.ts', 'addonT07Cases')],
     ['addonT08Cases', parseCaseArray('addonT08Cases.ts', 'addonT08Cases')],
+    ['addonBehaviorStateCases', parseCaseArray('addonBehaviorStateCases.ts', 'addonBehaviorStateCases')],
     ['addonT09Cases', parseCaseArray('addonT09Cases.ts', 'addonT09Cases')],
     ['addonT10Cases', parseCaseArray('addonT10Cases.ts', 'addonT10Cases')],
     ['addonT11Cases', parseCaseArray('addonT11Cases.ts', 'addonT11Cases')],

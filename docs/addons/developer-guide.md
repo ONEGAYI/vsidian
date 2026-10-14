@@ -75,6 +75,11 @@ defineAddonPage('publisher.my-addon', (sdk) => {
   // sdk 即注入的页面 SDK：六个能力 facet + 装配/资源/通信/释放
   // 行为名：单语言字符串（历史兼容）或多语言映射（#464——按页面语言渲染）
   sdk.behaviors?.register({ id: 'auto-pairs', name: { en: 'Auto pairs', 'zh-cn': '括号补全' }, onInput(ctx) { /* ... */ } })
+  // 行为禁用态只读面（#476，编辑器页与设置页均提供）：灰态实时同步
+  const off = sdk.behaviorState?.onEnabledChange((state) => {
+    // state.addonRunState: 'enabled' | 'user-disabled'；state.disabled: 本组件被禁行为局部 id 集
+  })
+  sdk.onDispose(() => off?.())
 })
 ```
 
@@ -93,7 +98,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **宿主设置读取（#457，实验）**：`sdk.experimental.hostSettings.get(key)` 同步读**白名单**宿主设置的当前生效值（首项 `editor.readingBreaks`——阅读渲染宽松换行，#423）。白名单外键拒绝 `invalid-key`（不开放任意 configuration 全量读取）；快照未达或键缺失回定义表默认值（与宿主渲染缺键同口径）。**拉取式跟随热更**：宿主保存设置后经既有广播更新页面缓存，组件**下次 `get` 即拿到新值**（无需重开面板）；首版不提供变更推送通知——需即时感知时在输入回调中重读。仅编辑器页提供（设置页 `undefined`）；不按视图模式门控（live/reading 均可读）。使用须在清单声明 `experimental: { hostSettings: '^1.0.0' }`。
 - 装载器核对入口身份后调用工厂注入 SDK；组件只登记安装目录内的相对入口与资源子目录，越界路径被资源服务拒绝。
 - **工厂允许 async 形态**（官方样例即「await 通道握手后再注册」）：装载结局按工厂同步段判定（返回 pending 的 promise 即报装载成功），但工厂 promise 的 rejection 会与同步异常**同路径归因 `factory-error`**——整代次立即回滚（`onDispose` 回调、扩展、命令等全部回收）并上报宿主触发全组件故障暂停；rejection 迟到（代次已被卸载或替换）则静默丢弃。工厂内部的长等待或驻留循环不会挂起装载指令流。
-- 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental)、[`syntax-experimental`](api-reference.md#syntax-experimental) 与 [`host-settings-experimental`](api-reference.md#host-settings-experimental) 条目。
+- 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental)、[`syntax-experimental`](api-reference.md#syntax-experimental)、[`host-settings-experimental`](api-reference.md#host-settings-experimental) 与 [`behavior-enabled-state`](api-reference.md#behavior-enabled-state) 条目。
 
 ## 3. 六组能力速览
 
@@ -104,6 +109,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 发现与安装 | 声明身份、兼容、注册接入 | `vsidianAddon` 清单、`registerAddon` | 宿主 |
 | 页面 SDK | 装载协议、视图/快照/文本提交、通道 | `sdk.views`、`sdk.channel`、`defineAddonPage` | 两端 |
 | 输入行为 | 可组合输入处理 | `sdk.behaviors.register` | 编辑器页 |
+| 输入行为 | 行为禁用态只读可见（灰态同步） | `sdk.behaviorState.enabledState` / `onEnabledChange` | 两端页面 |
 | 设置 | 定义、读写、作用范围、设置页 | `ctx.settings.*` | 宿主 |
 | 渲染提供者 | 代码块渲染候选与自动接管 | `sdk.renderers.register` | 编辑器页 |
 | 命令/菜单/界面 | 命令、菜单项、按钮、面板 | `sdk.commands` / `sdk.menus` / `sdk.ui` | 编辑器页 |
@@ -118,6 +124,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **设置定义分组**（#472，引用式）：定义可选 `group` 字段引用组键，组元数据经 `registerDefinitions(defs, groups)` 第二参声明一次（`groups: [{ key, title, description? }]`，`title`/`description` 直值或 `{ 'zh-cn': '…', en: '…' }` 多语言映射——与 `enumLabels` 同构）。声明序即设置页呈现序；组键组件内唯一、定义引用未声明组键或组键重复**整批拒绝**。无分组声明的组件保持既有平铺（向后兼容）；未分组定义与功能开关行恒居首容器。定义级与组级条目进设置页全局搜索（命中跨组件定位——`addon:<组件 ID>/def:<定义键>` 与 `addon:<组件 ID>/group:<组键>`）；object 定义字段级不进。组声明随 `addons.settingsState` 既有链路透传，不新增消息通道。
 - **命名空间**：命令/菜单/按钮/面板的公开 ID 由平台注入 `<addonId>.<localId>`（局部 ID 禁点号）；不存在覆写、隐藏或接管内置菜单项的入口。
 - **按键拦截与优先级**（#402，实验入口契约）：经 `registerExtension` 挂 CM6 keymap 有两层位置——**普通 keymap**（扩展槽为平台扩展数组末位，平台 Tab 三段/列表续行等情境链先试，addon keymap 在平台不处理时落空接手，适合 Tabout 兜底类）与**抢先层**（用 `Prec.high` 包裹——高于平台普通键位，可替代平台处理如智能退格；返回 `false` 即落穿平台链，透传语义）。**保留键面不可越过**：撤销/重做（`Mod-z` / `Shift-Mod-z` / `Mod-y`）是 `Prec.highest` 的平台保留键闸（撤销栈归宿主文本管线），addon 即便用 `Prec.highest` 也抢不掉（同为 highest 时平台闸在扩展序上先注册、先者先匹配）；Esc 与宿主级快捷键（`Ctrl+P` 等命令面板键不经编辑器）同理不开放抢先。多组件同层按键按装载顺序仲裁（先装载先试）；逐项关闭=停用组件（实验层 keymap 不进统一快捷键管理，稳定化路线另行设计）。
+- **行为禁用态只读可见**（#476）：`sdk.behaviorState` 在编辑器页与设置页均提供——`enabledState()` 返回本组件快照（`addonRunState: 'enabled' | 'user-disabled'` + 本组件被禁行为局部 id 集），`onEnabledChange(cb)` 在宿主落库后即时通知（返回退订；组件释放时订阅由平台整组回收，不依赖自觉退订，查询仍返回最后已知快照）。宿主层开关（组件停用或单项禁用）与组件层开关（自己的规则配置）是两层独立开关，生效 = 两层都开启——组件页对宿主层任一为真的行为行可呈灰态；被停用后设置页不卸载，本面仍可查询与订阅。本面只读，无任何写入成员。
 - **标题折叠**（#410，实验入口）：查询只读派生视图（原始键集不对外）；命令选区驱动三操作与全文档两操作共用用户触发执行体（effect 直驱）；`upToLevel` 仅 `foldAll` 接受（1–6 整数），其他操作携带即 `invalid-request`。
 - **视图身份与扩展槽**（#426/#427/#428，契约）：扩展槽仅装配主正文 Live 实例；view → instanceId 反查走 `experimental.viewIdentity`；命令回调携带目标视图句柄——完整条款与移植换算见 §4。
 - **行为链触发面**（#399/#400/#401）：普通键入（`input.type`）与删除白名单（`delete.backward` / `forward` / `selection` / `cut` / `line`——`delete.dedent` 属缩进命令族不纳入）驱动；IME 候选期不驱动，**组合定稿驱动一次**（`userEvent='input.type.compose'`、`inputText` 为净定稿文本；取消/空白格组合/代码上下文不驱动）。上下文 `inputText` 为插入侧净文本；`replaced` 携带替换/删除侧（键入替换选区 = 被替换内容，delete = 被删文本，事务前 LF 坐标，IME 定稿恒 null）；`docUri` 为当前目标文档 URI（多视图语义：embed 触发时是引用目标的 URI）。

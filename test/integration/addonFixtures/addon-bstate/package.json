@@ -1,0 +1,21 @@
+{
+  "name": "addon-bstate",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (Behavior Enabled State)",
+  "description": "Integration fixture: Vsidian add-on consuming the behaviorState read-only facet on both editor and settings pages (#476).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-bstate.stats", "title": "Fixture bstate: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-bstate.collect", "title": "Fixture bstate: collect behavior state events" },
+      { "command": "vsidian-test-fixture.addon-bstate.reset", "title": "Fixture bstate: reset event inbox" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

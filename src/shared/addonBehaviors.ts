@@ -443,3 +443,75 @@ export function isAddonBehaviorInfo(v: unknown): v is AddonBehaviorInfo {
   }
   return candidate.history === 'atomic' || candidate.history === 'joinPrevious'
 }
+
+// ---- #476 行为禁用态只读可见面（独立于 behaviors 面；编辑器页与设置页均提供） ----
+
+/** 组件运行态（快照第一层——D3 口径）。faulted 不进快照：故障时设置页
+ *  不装载、编辑器页整组件回收，该态对组件页语义不可达。 */
+export type AddonBehaviorRunState = 'enabled' | 'user-disabled'
+
+/** #476 行为禁用态快照（SDK behaviorState.enabledState 的返回；两层报
+ * 事实——组件运行态 + 本组件被禁行为的局部 id 集，不报完整键：组件
+ * 自知 addonId，接口按「本组件」过滤天然隔离）。**只读**：本面不提供
+ * 任何写入宿主状态的成员（ADR-0016 两层开关语义的平台侧答案）。 */
+export interface AddonBehaviorEnabledState {
+  /** 本组件当前运行态：enabled = 激活中；user-disabled = 被用户停用
+   *  （停用后设置页不卸载——仍可查询，灰态消费场景 #50） */
+  readonly addonRunState: AddonBehaviorRunState
+  /** 本组件被用户禁用的行为局部 id 集（存储完整键按 addonId 前缀过滤
+   *  后剥离；顺序保持存储序，不在场 = 空） */
+  readonly disabled: readonly string[]
+}
+
+/** #476 SDK behaviorState 面（编辑器页与设置页均提供；查询 + 订阅双件
+ *  ——D2：打开页面取初值用 enabledState，灰态实时同步用 onEnabledChange）。
+ *  生命周期口径：**查询**不做代次守卫——已释放代次的迟到调用返回最后
+ *  已知快照（只读无副作用）；**订阅**过装载器的记录身份判活（与全部
+ *  SDK 面同款）——已释放代次的迟到登记为 no-op 退订，释放时点已有的
+ *  订阅随组件释放整组回收（releaseLoad 驱动，不依赖组件自觉退订——
+ *  与 behaviors/commands/renderers/ui 四面的整组件回收同款）。 */
+export interface AddonBehaviorStateFacet {
+  /** 立即返回当前快照（同步——广播未到达时为默认态 enabled + 空集） */
+  enabledState(): AddonBehaviorEnabledState
+  /** 订阅本组件快照变化（宿主状态落库后即时通知——D5；回调异常只吞不
+   *  升级；组件释放后订阅就地回收、迟到登记为 no-op 退订）；返回退订
+   *  函数 */
+  onEnabledChange(callback: (state: AddonBehaviorEnabledState) => void): () => void
+}
+
+/** #476 宿主 → webview 的禁用态广播载荷（宿主在面板 ready 对账、组件
+ *  启停与行为开关落库后推送；编辑器面板与设置面板同拍同形）。
+ *  disabled 与存储 version 1 的 disabled 同源（完整键集合）；addons 只列
+ *  enabled / user-disabled 两态组件（faulted / idle 不列——不可达态，
+ *  webview 端缺省回落 enabled）。 */
+export interface AddonBehaviorEnabledStateBroadcast {
+  readonly disabled: readonly string[]
+  readonly addons: ReadonlyArray<{ readonly addonId: string; readonly addonRunState: AddonBehaviorRunState }>
+}
+
+/** 广播载荷守卫（消息桥 addon.behaviorEnabledState 的内层） */
+export function isAddonBehaviorEnabledStateBroadcast(v: unknown): v is AddonBehaviorEnabledStateBroadcast {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    return false
+  }
+  const candidate = v as { disabled?: unknown; addons?: unknown }
+  if (!Array.isArray(candidate.disabled) || !candidate.disabled.every((key) => typeof key === 'string')) {
+    return false
+  }
+  if (!Array.isArray(candidate.addons)) {
+    return false
+  }
+  return candidate.addons.every((entry) =>
+    typeof entry === 'object' && entry !== null && !Array.isArray(entry) &&
+    typeof (entry as { addonId?: unknown }).addonId === 'string' &&
+    ((entry as { addonRunState?: unknown }).addonRunState === 'enabled' ||
+      (entry as { addonRunState?: unknown }).addonRunState === 'user-disabled'))
+}
+
+/** 完整键集 → 本组件局部 id 集（快照 disabled 字段的过滤单一事实源：
+ * 剥离 `${addonId}#` 前缀、排除他组件键。addonId 形态 publisher.name 无
+ * #，前缀匹配无歧义）。顺序保持存储序，不去重不排序——快照报事实。 */
+export function behaviorDisabledLocalIds(disabledKeys: readonly string[], addonId: string): string[] {
+  const prefix = `${addonId}#`
+  return disabledKeys.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length))
+}

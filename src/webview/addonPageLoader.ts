@@ -36,12 +36,13 @@ import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '.
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
 import type { AddonHostSettingsFacet } from '../shared/addonHostSettingsApi'
 import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
-import type { AddonBehaviorsFacet } from '../shared/addonBehaviors'
+import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
 import type { AddonViewsRuntime } from './addonViews'
 import { addonInstanceIdField } from './addonViewIdentity'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
+import type { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
 import type { AddonCommandsRuntime } from './addonCommands'
 import type { AddonUiRuntime } from './addonUi'
 import { addonHostSettingGet } from '../shared/addonHostSettingsApi'
@@ -110,6 +111,9 @@ export interface AddonPageLoaderEnv {
   /** T07（#356）输入行为 runtime（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 behaviors 面） */
   addonBehaviors?: AddonBehaviorRuntime
+  /** #476 行为禁用态 runtime（编辑器页与设置页均由各自入口构造注入；
+   *  省略时 SDK 不提供 behaviorState 面——旧装配与最小测试夹具兼容） */
+  addonBehaviorEnabledState?: AddonBehaviorEnabledStateRuntime
   /** T10（#359）命令与菜单注册表（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 commands/menus 面，releaseLoad 时亦不做回收） */
   addonCommands?: AddonCommandsRuntime
@@ -439,11 +443,26 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
           onChanged: (callback) => env.addonBehaviors!.onChanged(callback),
         }
       : undefined
+    // #476 行为禁用态只读面：编辑器页与设置页均提供（两端点同形——env
+    //  在场即挂面，无 page 条件）。生命周期两分：**查询**不做代次守卫
+    //  （只读快照无副作用，已释放代次返回最后已知值）；**订阅**过
+    //  isLoadActive 守卫（与 #395 P3 起全部 SDK 面的记录身份判活同款）
+    //  ——已释放代次的迟到登记为 no-op 退订，不滞留回调；释放时点已有
+    //  的订阅由 releaseLoad 的 releaseAddon 整组回收
+    const behaviorStateFacet: AddonBehaviorStateFacet | undefined = env.addonBehaviorEnabledState
+      ? {
+          enabledState: () => env.addonBehaviorEnabledState!.enabledStateOf(loadRecord.addonId),
+          onEnabledChange: (callback) => (isLoadActive(loadRecord)
+            ? env.addonBehaviorEnabledState!.onEnabledChangeOf(loadRecord.addonId, callback)
+            : () => {}),
+        }
+      : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
       experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet, hostSettings: hostSettingsFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
+      ...(behaviorStateFacet ? { behaviorState: behaviorStateFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
           register: (def, handler) => {
@@ -621,6 +640,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     // T07（#356）行为注册整组注销（opId 分配器随卸载解绑——释放后该组件
     // 的行为不再有可注入来源，提交路径结构上不可用）
     env.addonBehaviors?.unregisterAddon(loadRecord.addonId)
+    // #476 行为禁用态订阅整组件回收（查询不受影响——迟到调用返回最后
+    // 已知快照；订阅不滞留进已脱离 active 的旧代次闭包）
+    env.addonBehaviorEnabledState?.releaseAddon(loadRecord.addonId)
     // T10（#359）命令与菜单整组件回收（本页闭环——不依赖宿主消息到达）：
     // 撤命令、菜单与运行期操作表，并向宿主上报空表
     if (env.addonCommands) {

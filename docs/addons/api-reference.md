@@ -55,6 +55,7 @@
   - [3. 输入行为](#3-输入行为)
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
     - [`behavior-order-state` 行为顺序与逐项开关持久](#behavior-order-state)
+    - [`behavior-enabled-state` 行为禁用态只读可见面](#behavior-enabled-state)
   - [4. 设置](#4-设置)
     - [`addon-storage` 组件数据目录与文件监听](#addon-storage)
     - [`settings-context` 宿主设置能力面（setup 上下文）](#settings-context)
@@ -412,6 +413,12 @@ export interface VsidianAddonPageSdk {
    *  每次修饰按自己的原子声明提交）与只读输入观察——注册与观察分开，
    *  onChanged 不是原操作的第二写入口 */
   readonly behaviors?: AddonBehaviorsFacet
+  /** #476 行为禁用态只读面（编辑器页与设置页**均提供**）：查询本组件
+   *  行为启用快照（运行态 + 被禁行为局部 id 集）与订阅变化（宿主落库
+   *  后即时通知）。只读——无任何写入宿主状态的成员；与 behaviors 面
+   *  分开（register 在设置页无意义，本面只报事实）。组件被停用后设置
+   *  页不卸载，本面仍可查询与订阅（灰态消费场景） */
+  readonly behaviorState?: AddonBehaviorStateFacet
   /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */
   readonly commands?: AddonSdkCommandsFacet
   /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */
@@ -1258,6 +1265,65 @@ export function mergeBehaviorOrderPreservingUnknown(
 ```
 
 **验证**：`test/unit/addonBehaviorStateService.test.ts`、`test/integration/suite/addonT08Cases.ts`、`test/browser/addonT08BehaviorsManage.mjs`
+
+### `behavior-enabled-state` 行为禁用态只读可见面
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页、设置页 · **引入**：#476
+
+**目标**：SDK behaviorState 面（独立于 behaviors 面，编辑器页与设置页均提供）：enabledState() 立即返回本组件行为启用快照（组件运行态 + 本组件被禁行为局部 id 集），onEnabledChange(cb) 订阅变化（返回退订）。只读——无任何写入宿主状态的成员（两层开关语义的平台侧答案：宿主层只报事实，写入归宿主行为管理）。
+
+语义要点：
+- **适用模式**：无编辑模式门槛：灰态消费在设置页与编辑器页同样可达。
+- **坐标与数据形状**：disabled 为本组件行为的局部 id 集（存储完整键按组件 ID 前缀过滤后剥离；顺序保持存储序，不去重不排序）——组件自知 addonId，接口按「本组件」过滤天然隔离。
+- **生命周期**：快照两层报事实：addonRunState（enabled / user-disabled）+ disabled。组件被用户停用后设置页不卸载，本面仍可查询与订阅（灰态消费场景）；faulted 不进快照（故障时设置页不装载，语义不可达）。通知在宿主状态落库后即时发出（单项禁用/恢复与组件启停）。查询不做代次守卫：已释放代次的迟到调用返回最后已知快照（只读无副作用）；订阅过装载器记录身份判活（与全部 SDK 面同款）——迟到登记为 no-op 退订，释放时点已有的订阅随组件释放整组回收（不依赖组件自觉退订——与 behaviors/commands/renderers/ui 四面的整组件回收同款）。
+- **错误与拒绝**：本面无拒绝码：只读查询恒返回快照（广播未到达时为默认态 enabled + 空集），订阅回调异常只吞不升级。
+
+签名事实源：`src/shared/addonBehaviors.ts`
+
+```ts
+/** #476 SDK behaviorState 面（编辑器页与设置页均提供；查询 + 订阅双件
+ *  ——D2：打开页面取初值用 enabledState，灰态实时同步用 onEnabledChange）。
+ *  生命周期口径：**查询**不做代次守卫——已释放代次的迟到调用返回最后
+ *  已知快照（只读无副作用）；**订阅**过装载器的记录身份判活（与全部
+ *  SDK 面同款）——已释放代次的迟到登记为 no-op 退订，释放时点已有的
+ *  订阅随组件释放整组回收（releaseLoad 驱动，不依赖组件自觉退订——
+ *  与 behaviors/commands/renderers/ui 四面的整组件回收同款）。 */
+export interface AddonBehaviorStateFacet {
+  /** 立即返回当前快照（同步——广播未到达时为默认态 enabled + 空集） */
+  enabledState(): AddonBehaviorEnabledState
+  /** 订阅本组件快照变化（宿主状态落库后即时通知——D5；回调异常只吞不
+   *  升级；组件释放后订阅就地回收、迟到登记为 no-op 退订）；返回退订
+   *  函数 */
+  onEnabledChange(callback: (state: AddonBehaviorEnabledState) => void): () => void
+}
+
+/** #476 行为禁用态快照（SDK behaviorState.enabledState 的返回；两层报
+ * 事实——组件运行态 + 本组件被禁行为的局部 id 集，不报完整键：组件
+ * 自知 addonId，接口按「本组件」过滤天然隔离）。**只读**：本面不提供
+ * 任何写入宿主状态的成员（ADR-0016 两层开关语义的平台侧答案）。 */
+export interface AddonBehaviorEnabledState {
+  /** 本组件当前运行态：enabled = 激活中；user-disabled = 被用户停用
+   *  （停用后设置页不卸载——仍可查询，灰态消费场景 #50） */
+  readonly addonRunState: AddonBehaviorRunState
+  /** 本组件被用户禁用的行为局部 id 集（存储完整键按 addonId 前缀过滤
+   *  后剥离；顺序保持存储序，不在场 = 空） */
+  readonly disabled: readonly string[]
+}
+
+/** 组件运行态（快照第一层——D3 口径）。faulted 不进快照：故障时设置页
+ *  不装载、编辑器页整组件回收，该态对组件页语义不可达。 */
+export type AddonBehaviorRunState = 'enabled' | 'user-disabled'
+
+/** 完整键集 → 本组件局部 id 集（快照 disabled 字段的过滤单一事实源：
+ * 剥离 `${addonId}#` 前缀、排除他组件键。addonId 形态 publisher.name 无
+ * #，前缀匹配无歧义）。顺序保持存储序，不去重不排序——快照报事实。 */
+export function behaviorDisabledLocalIds(disabledKeys: readonly string[], addonId: string): string[] {
+  const prefix = `${addonId}#`
+  return disabledKeys.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length))
+}
+```
+
+**验证**：`test/unit/addonBehaviorEnabledState.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/integration/suite/addonBehaviorStateCases.ts`
 
 ## 4. 设置
 
