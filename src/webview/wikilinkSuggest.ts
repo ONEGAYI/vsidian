@@ -21,14 +21,14 @@
 //   高亮；身份消失时空查询回无高亮、非空查询取首项。
 // - 转阶段（#378 T03）：#／^ 接受文件阶段高亮并切标题/块阶段；块标记
 //   形成现有 `#^` 语法且已有 # 不重复补；| 接受当前阶段真实高亮，进显示
-//   文字并关闭候选，无高亮保留原输入。占位只作提示（i18n status 行），
-//   不可确认、不写正文，Enter/Tab 落穿。
-// - 标题阶段（#379 T04）：文件目标明确（target 非空——经 T03 # 转阶段补全
-//   或用户手写）时出站标题查询（宿主按来源相对语义解析为明确 Markdown
-//   目标并读当前正文）；候选显示标题与层级/行号，重复标题独立身份全部
-//   展示不合并，确认/竖线替换整个锚点字段（无手写别名补文件名默认别名），
-//   选中规范化同名项以 toast 提示定位风险并**继续接受**（不改跳转语义）；
-//   空目标 # 与块阶段 ^ 保持 T03 占位（空目标不猜默认文档；块候选归 T05）。
+//   文字并关闭候选，无高亮保留原输入。加载/失败状态行只作提示，不可
+//   确认、不写正文，Enter/Tab 落穿。
+// - 标题阶段（#379 T04）：出站标题查询（宿主按来源相对语义解析为明确
+//   Markdown 目标并读当前正文；target 空白＝省略文件名，宿主按当前文档
+//   枚举——本文件锚点，2026-10-14 修复）；候选显示标题与层级/行号，重复
+//   标题独立身份全部展示不合并，确认/竖线替换整个锚点字段（无手写别名
+//   且目标为显式文件名时补文件名默认别名；省略文件名的本文件锚点不补），
+//   选中规范化同名项以 toast 提示定位风险并**继续接受**（不改跳转语义）。
 // - 键位是**候选会话内的固定控件按键**（↑↓ 移动高亮、Enter/Tab 确认、
 //   Esc 关闭、#／^／| 转阶段），仅在会话内消费，未命中一律 return false
 //   落穿既有围栏越界/表格切格/缩进/列表延续链；不注册快捷键操作表、
@@ -362,7 +362,7 @@ export class WikilinkSuggestController {
   /**
    * 标题查询结果入站（#379 T04）：reqId + generation + 会话三重守卫（与
    * handleResult 同构），任一不符即迟到响应，拒收不改状态；仅标题阶段
-   * 会话消费（块阶段占位不出站，无回包路径）。重复标题候选独立身份全部
+   * 会话消费；块阶段结果见 handleBlockResult。重复标题候选独立身份全部
    * 展示；同一查询的重发帧（invalidate 去抖后同 generation）按候选身份
    * 保留手动高亮。
    */
@@ -527,17 +527,12 @@ export class WikilinkSuggestController {
    * 宿主广播。会话在场时去抖 300ms 重发当前查询（同查询新 reqId，结果按
    * 既有守卫整体替换——旧枚举/旧查询不得复活已删除身份）；无会话零动作。
    * #379 T04 起标题阶段同样重查（覆盖层冲刷含目标正文未保存变化——目标
-   * 改动后旧候选淘汰）。块阶段占位（T05 前）与空目标标题占位不出站（占位
-   * 无查询语义，出站只会污染 result 状态），零动作。notify 在扫描/核验
-   * 期间高频到达，去抖把重查合并为每 300ms 至多一次。
+   * 改动后旧候选淘汰）。空目标（省略文件名）自 2026-10-14 起按当前文档
+   * 枚举，同样重查。notify 在扫描/核验期间高频到达，去抖把重查合并为
+   * 每 300ms 至多一次。
    */
   handleInvalidate(): void {
     if (!this.session || this.deps.isSuspended() || !this.deps.isLiveActive()) {
-      return
-    }
-    const stage = this.session.origin.stage
-    // 占位无查询语义（空目标标题/块占位），出站只会污染 result 状态
-    if ((stage === 'block' || stage === 'heading') && this.session.target.trim() === '') {
       return
     }
     if (this.invalidateTimer !== undefined) {
@@ -549,11 +544,8 @@ export class WikilinkSuggestController {
       if (!session || this.deps.isSuspended() || !this.deps.isLiveActive()) {
         return
       }
-      const curStage = session.origin.stage
-      if ((curStage === 'block' || curStage === 'heading') && session.target.trim() === '') {
-        return
-      }
       this.morePending = false
+      const curStage = session.origin.stage
       if (curStage === 'file') {
         this.sendQuery(session.query, session.generation, 0)
       } else if (curStage === 'heading') {
@@ -666,16 +658,14 @@ export class WikilinkSuggestController {
     this.result = null
     this.activeIndex = null
     this.activeId = null
+    // 空目标（省略文件名）自 2026-10-14 起按当前文档出站（宿主
+    // sameDocFsPath 解析——本文件锚点 `[[#标题]]` / `[[#^块ID]]` 语义）
     if (origin.stage === 'file') {
       this.sendQuery(query, generation, 0)
-    } else if (origin.stage === 'heading' && target.trim() !== '') {
-      // 文件目标明确才读标题（空目标 # 保持占位——T03 语义不动，不猜默认文档）
+    } else if (origin.stage === 'heading') {
       this.sendHeadingQuery(query, target, generation)
-    } else if (origin.stage === 'block' && target.trim() !== '') {
-      // #380 T05：文件目标明确才读块（空目标 ^ 保持占位，不猜默认文档）
-      this.sendBlockQuery(query, target, generation)
     } else {
-      this.lastReqId = -1 // 占位阶段不出站（空目标标题/块占位）
+      this.sendBlockQuery(query, target, generation)
     }
     this.render()
   }
@@ -912,12 +902,6 @@ export class WikilinkSuggestController {
     if (this.pendingBlockAccept !== null) {
       return true // 接受在途：方向键不移动高亮（等待宿主补写回包）
     }
-    if (this.session.origin.stage === 'heading' && this.session.target.trim() === '') {
-      return false // 空目标标题占位：方向键落穿
-    }
-    if (this.session.origin.stage === 'block' && this.session.target.trim() === '') {
-      return false // 空目标块占位：方向键落穿（#380 T05 保持占位口径）
-    }
     // F11：浮层可见的加载/真实状态/零命中态——方向键一律消费不落穿：
     // 落穿会移动正文光标移出目标字段，会话随即销毁、在途查询结果被弃；
     // 此时无 items 可移动，不动作（与「接受在途方向键吞掉」口径统一）
@@ -1112,9 +1096,9 @@ export class WikilinkSuggestController {
     this.morePending = false
     if (session.origin.stage === 'file') {
       this.sendQuery(session.query, session.generation, 0)
-    } else if (session.origin.stage === 'heading' && session.target.trim() !== '') {
+    } else if (session.origin.stage === 'heading') {
       this.sendHeadingQuery(session.query, session.target, session.generation)
-    } else if (session.origin.stage === 'block' && session.target.trim() !== '') {
+    } else {
       this.sendBlockQuery(session.query, session.target, session.generation)
     }
   }
@@ -1167,8 +1151,8 @@ export class WikilinkSuggestController {
       this.close()
       return true
     }
-    // 转阶段：在编辑后状态按新光标重识别，重建会话——标题/块阶段且文件
-    // 目标明确时出站对应查询（#379 T04/#380 T05；空目标保持占位不出站）
+    // 转阶段：在编辑后状态按新光标重识别，重建会话——标题/块阶段出站
+    // 对应查询（空目标按当前文档枚举，2026-10-14 起同口径）
     const next = this.recognizeAt(view.state, plan.cursorTo)
     if (!next || next.stage === 'file') {
       this.close()
@@ -1180,12 +1164,10 @@ export class WikilinkSuggestController {
     this.result = null
     this.activeIndex = null
     this.activeId = null
-    if (next.stage === 'heading' && nextTarget.trim() !== '') {
+    if (next.stage === 'heading') {
       this.sendHeadingQuery('', nextTarget, session.generation + 1)
-    } else if (next.stage === 'block' && nextTarget.trim() !== '') {
-      this.sendBlockQuery('', nextTarget, session.generation + 1)
     } else {
-      this.lastReqId = -1 // 空目标标题/块占位不出站
+      this.sendBlockQuery('', nextTarget, session.generation + 1)
     }
     this.render()
     return true
@@ -1276,14 +1258,7 @@ export class WikilinkSuggestController {
     popup.appendChild(list)
     const result = this.result
     const stage = this.session.origin.stage
-    const targetEmpty = this.session.target.trim() === ''
-    if (stage === 'heading' && targetEmpty) {
-      // 空目标标题占位（T03 语义保持：不猜默认文档，仅提示；占位不可确认）
-      list.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.heading')))
-    } else if (stage === 'block' && targetEmpty) {
-      // 空目标块占位（T03 语义保持：不猜默认文档；占位不可确认）
-      list.appendChild(this.buildStatusRow(t('wikilinkSuggest.placeholder.block')))
-    } else if (stage === 'block' && this.pendingBlockAccept !== null) {
+    if (stage === 'block' && this.pendingBlockAccept !== null) {
       // 无 ID 块接受在途（#380 T05）：宿主补写 ^id 中——占位状态行不可确认
       list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockAccepting')))
     } else if (stage === 'block' && result !== null && result.stage === 'block') {

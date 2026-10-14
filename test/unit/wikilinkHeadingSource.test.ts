@@ -185,3 +185,57 @@ describe('queryWikilinkHeadings：F5 标题写回语法往返校验（不合法�
     }
   })
 })
+
+describe('queryWikilinkHeadings：同文档锚点（空目标=当前文档，2026-10-14 修复）', () => {
+  it('空目标 + sameDocFsPath：跳过目标解析直接枚举当前文档，alias 为空串', async () => {
+    const h = harness()
+    // 注意：existsPaths 未登记——同文档不走存在性探测（文档在编辑中即在场）
+    h.openDocs.set('/vault/项目/记录.md', { text: '# 概述\n## 预算\n正文\n', version: 4 })
+    const result = await queryWikilinkHeadings('', '预', CTX, h.ports, '/vault/项目/记录.md')
+    expect(result).toEqual({
+      status: 'ready',
+      targetVersion: 4,
+      targetFsPath: '/vault/项目/记录.md',
+      items: [
+        { id: '/vault/项目/记录.md#2', heading: '预算', level: 2, line: 2, duplicate: false, alias: '' },
+      ],
+    })
+  })
+
+  it('空白目标（空格）与空串同判（parseWikilinkInner 同一 trim 口径）', async () => {
+    const h = harness()
+    h.openDocs.set('/vault/项目/记录.md', { text: '# 概述\n', version: 1 })
+    const result = await queryWikilinkHeadings(' ', '', CTX, h.ports, '/vault/项目/记录.md')
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') {
+      expect(result.items.map((i) => i.heading)).toEqual(['概述'])
+    }
+  })
+
+  it('无工作区也按当前文档枚举（本文件锚点不依赖根解析，与 #159 跳转同口径）', async () => {
+    const h = harness()
+    h.openDocs.set('/独立/笔记.md', { text: '# 标题\n', version: 1 })
+    const result = await queryWikilinkHeadings('', '', { ...CTX, hasWorkspace: false }, h.ports, '/独立/笔记.md')
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') {
+      expect(result.items.map((i) => i.heading)).toEqual(['标题'])
+    }
+  })
+
+  it('未提供 sameDocFsPath 的空目标维持不可定位（target-not-found，旧守卫不放宽）', async () => {
+    const h = harness()
+    const result = await queryWikilinkHeadings('', '', CTX, h.ports)
+    expect(result).toEqual({ status: 'unavailable', reason: 'target-not-found' })
+  })
+
+  it('显式自引目标仍补文件名默认别名（既有行为不变）', async () => {
+    const h = harness()
+    h.existsPaths.set('/vault/项目/记录.md', '/vault/项目/记录.md')
+    h.openDocs.set('/vault/项目/记录.md', { text: '# 标题\n', version: 2 })
+    const result = await queryWikilinkHeadings('记录.md', '', CTX, h.ports, '/vault/项目/记录.md')
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') {
+      expect(result.items[0]!.alias).toBe('记录')
+    }
+  })
+})

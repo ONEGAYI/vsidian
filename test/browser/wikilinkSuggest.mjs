@@ -6,8 +6,10 @@
 // IME 组合期候选不确认、多 range 不接管。
 // T03 覆盖：Esc 后二次触发矩阵（纯移动/编辑显示文字不重开，目标区修改才
 // 重开且查询取光标左侧）、#／^／| 真实键盘转阶段（高亮补全/无高亮保留、
-// 已有 # 只补 ^）、标题/块占位文案与不可确认（Tab 落穿围栏越界零写回）、
+// 已有 # 只补 ^）、加载态不可确认（Tab 落穿围栏越界零写回）、
 // | 进显示文字（新链接留空、已有别名保留）、组合期 # 不转阶段。
+// 2026-10-14 修复覆盖：省略文件名（空目标 #/^）按当前文档出站标题/块
+// 查询并确认（不补默认别名，[[#标题]] / [[#^块ID]] 直接成立）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -515,19 +517,56 @@ try {
     assert.match((await popup(page)).statusText, /正在读取块|Loading blocks/)
   })
 
-  await scenario('空双链按 # / ^：不补文件名，进入对应占位（空目标不猜文档）', { doc: '', cursor: 0 }, async (page) => {
+  // ---- 2026-10-14 修复：省略文件名（空目标）按当前文档枚举标题/块候选，
+  // 确认不补默认别名（[[#标题]] / [[#^块ID]] 直接成立）----
+  await scenario('空双链按 #：按当前文档出站标题查询，确认同文档标题不补别名', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[')
     await page.keyboard.type('[')
     await page.evaluate(() => window.respondQuery([]))
     await page.keyboard.press('#')
     assert.equal((await read(page)).text, '[[#]]', '空目标 # 不补文件名')
-    assert.match((await popup(page)).statusText, /输入小标题|Type a heading/)
-    await page.keyboard.press('Escape')
-    await page.keyboard.type('x')
-    await page.keyboard.press('Backspace')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.ok(hq, '空目标按当前文档出站标题查询')
+    assert.equal(hq.target, '', 'target 为空=当前文档（本文件锚点）')
+    await page.evaluate((items) => window.respondHeadingQuery(items), [
+      { id: 'vault/项目/记录.md#1', heading: '概述', level: 1, line: 1, duplicate: false, alias: '' },
+      { id: 'vault/项目/记录.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '' },
+    ])
+    let p = await popup(page)
+    assert.equal(p.itemCount, 2, '当前文档标题候选在场')
+    assert.equal(p.activeIndex, null, '空查询无高亮')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown')
+    p = await popup(page)
+    assert.equal(p.activeIndex, 1, '方向键可选当前文档标题')
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text, '[[#预算]]', '确认同文档标题不补默认别名')
+    assert.equal(after.head, '[[#预算'.length, '光标落锚点末')
+    assert.equal((await popup(page)).open, false, '确认后关闭候选')
+  })
+
+  await scenario('空双链按 ^：按当前文档出站块查询，确认已有 ID 块不补别名', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    await page.evaluate(() => window.respondQuery([]))
     await page.keyboard.press('^')
-    assert.equal((await read(page)).text, '[[#^]]', '空目标 ^ 形成空块字段、不写占位词')
-    assert.match((await popup(page)).statusText, /输入块 ID|Type a block ID/)
+    assert.equal((await read(page)).text, '[[#^]]', '空目标 ^ 一次形成 #^（不写占位词）')
+    const bq = await page.evaluate(() => window.lastBlockQuery())
+    assert.ok(bq, '空目标按当前文档出站块查询')
+    assert.equal(bq.target, '', 'target 为空=当前文档（本文件锚点）')
+    await page.evaluate((items) => window.respondBlockQuery(items), [
+      { id: 'vault/项目/记录.md#^2', blockId: 'keep01', snippet: '可引用段落', line: 2, lineCount: 1, alias: '' },
+    ])
+    let p = await popup(page)
+    assert.equal(p.itemCount, 1, '当前文档块候选在场')
+    await page.keyboard.press('ArrowDown')
+    p = await popup(page)
+    assert.equal(p.activeIndex, 0)
+    await page.keyboard.press('Enter')
+    const after = await read(page)
+    assert.equal(after.text, '[[#^keep01]]', '确认已有 ID 块不补默认别名')
+    assert.equal((await popup(page)).open, false)
   })
 
   // ---- #378 T03：| 进显示文字 ----
