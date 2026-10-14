@@ -854,13 +854,23 @@ try {
       return text.includes('[[../资料/方案.md#^same001|方案]]') && text.includes('\n\n^same001')
     })
     const confirmed = (await read(page)).text
+    // 拆两笔回归下判据恒假，等待只会拖到超时：显式短超时快红，并在失败时
+    // 补读当前正文——给失败报告留下「半态文本」直接证据而非通用超时报错
+    const settleText = async (expect, what) => {
+      try {
+        await page.waitForFunction((target) => window.readEditor().text === target, expect, { timeout: 8000 })
+      } catch (error) {
+        const current = (await read(page)).text
+        assert.fail(`${what}：正文未达预期。当前=${JSON.stringify(current)} 预期=${JSON.stringify(expect)}（${error.message}）`)
+      }
+    }
     // 真实键盘一次 undo：一步同时回退链接补全与块 ID 补写（正文回基线）
     await page.keyboard.press('Control+z')
-    await page.waitForFunction((base) => window.readEditor().text === base, baseline)
+    await settleText(baseline, '一次 Ctrl+Z 回到确认前基线（两段同退）')
     assert.equal((await read(page)).text, baseline, '一次 Ctrl+Z 回到确认前基线（两段同退）')
     // redo：一步同时恢复两段
     await page.keyboard.press('Control+y')
-    await page.waitForFunction((text) => window.readEditor().text === text, confirmed)
+    await settleText(confirmed, '一次 redo 两段同复')
     assert.equal((await read(page)).text, confirmed, '一次 redo 两段同复')
     assert.equal((await popup(page)).open, false, 'undo/redo 后候选浮层不回潮')
   })

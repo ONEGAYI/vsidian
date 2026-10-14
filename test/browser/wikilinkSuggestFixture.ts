@@ -48,8 +48,10 @@ const invertSer = (entry: HistoryEntry): SerChange[] => {
 }
 
 /** 一笔 edit.request 落到权威模型：压栈（编辑前快照）+ 应用 + 清 redo（与
- *  生产宿主「新编辑截断 redo 分支」一致）。autoAck 关闭期间不落账，由
- *  ackPendingEdits 补发时补齐（模型不缺单元）。 */
+ *  生产宿主「新编辑截断 redo 分支」一致）。autoAck 关闭期间该编辑不入
+ *  模型（此刻 undo 会弹到更早条目，与真实宿主「权威文本已应用」分叉），
+ *  由 ackPendingEdits 补发时补齐——现有场景无 F3 窗口内按 undo 的交叉，
+ *  后续新增此类场景前须先补账。 */
 function landEditToHost(req: Extract<WebviewToHost, { kind: 'edit.request' }>) {
   undoEntries.push({ before: hostText, changes: req.changes })
   redoEntries.length = 0
