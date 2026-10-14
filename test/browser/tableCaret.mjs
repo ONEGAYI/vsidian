@@ -198,7 +198,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'handle-hover-refresh', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -392,10 +392,12 @@ try {
         await page.mouse.up()
         const text = (await page.evaluate(() => window.readEditor())).text
         assert(text.includes('| H2 | H1 |\n| ---: | :--- |\n| B2 | B1 |'), `列拖排须连对齐信息一同移动: ${text}`)
-      } else if (scenario === 'handle-hover') {
+      } else if (scenario === 'handle-hover' || scenario === 'handle-hover-refresh') {
         const band = page.locator('.vsidian-table-insert-row')
         const rect = await cell(2, 0).boundingBox()
-        const opacity = () => band.evaluate(e => getComputedStyle(e).opacity)
+        // 查询与样式读取同一回调执行，避免 Locator 句柄在控件重建后指向脱离 DOM 的按钮。
+        const opacity = () => page.evaluate(() =>
+          getComputedStyle(document.querySelector('.vsidian-table-insert-row')).opacity)
         assert.equal(await opacity(), '0', '新增行带平时不可见')
         await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height - 2)
         assert.equal(await opacity(), '1', '靠近表格底边新增行带出现')
@@ -404,11 +406,20 @@ try {
         await page.mouse.move(bandRect.x + bandRect.width / 2, bandRect.y + bandRect.height / 2)
         assert.equal(await opacity(), '1', '移入新增带不得闪退')
         await page.mouse.move(600, 400)
-        assert.equal(await opacity(), '0', '离开表格后新增带隐藏')
+        // #446 条目 9：度量重配可在取样期间重建控件；仍须读取当前按钮的绘制状态。
+        const refreshTimer = scenario === 'handle-hover-refresh'
+          ? await page.evaluate(() => setInterval(() => window.refreshTableLayout(), 1)) : null
+        try {
+          for (let i = 0; i < (refreshTimer === null ? 1 : 10); i++) {
+            assert.equal(await opacity(), '0', '离开表格后新增带隐藏')
+          }
+        } finally {
+          if (refreshTimer !== null) await page.evaluate(id => clearInterval(id), refreshTimer)
+        }
         const right = await cell(1, 1).boundingBox()
         await page.mouse.move(right.x + right.width - 2, right.y + right.height / 2)
-        const colBand = page.locator('.vsidian-table-insert-column')
-        assert.equal(await colBand.evaluate(e => getComputedStyle(e).opacity), '1', '靠近右边新增列带出现')
+        assert.equal(await page.evaluate(() =>
+          getComputedStyle(document.querySelector('.vsidian-table-insert-column')).opacity), '1', '靠近右边新增列带出现')
         await captureTable('table-add-column-band.png')
         const header = await cell(0, 0).boundingBox()
         await page.mouse.move(header.x + header.width / 2, header.y + header.height / 2)
