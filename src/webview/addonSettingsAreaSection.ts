@@ -16,10 +16,11 @@
 // addons.get / addons.settingsGet 拉取，由 settingsMain 装载点统一发送）；
 // 页面不自行推断。文案一律 t() 取词（addons.* 词条）。控件构造器在
 // addonSettingsControls.ts。
-import { t } from '../shared/i18n'
+import { t, currentLocaleLang } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import { splitAddonArrayPasteText } from '../shared/addonSettings'
-import type { AddonSettingDefinition, AddonSettingValue } from '../shared/addonSettings'
+import { resolveLocalizedText } from '../shared/localizedText'
+import type { AddonSettingDefinition, AddonSettingGroup, AddonSettingValue } from '../shared/addonSettings'
 import { groupIcon, type SettingsPageBridge, type SettingsPageSection } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
 import { captureSectionRebuildAnchor, restoreSectionRebuildAnchor, captureLocalFocusKey, restoreLocalFocusKey, REBUILD_FOCUS_ATTR } from './sectionRebuildGuard'
@@ -31,10 +32,30 @@ type AddonSettingsAreaPayload = AddonSettingsStateMessage['addon'] extends infer
 /** 功能开关行的 data 键（与定义键空间区分——开关不是设置定义） */
 const ENABLED_KEY = '__enabled__'
 
+/** 定位高亮一次性退场时限（#462 档位语义：约 1.5s 后摘除，推送重渲染不重现） */
+const LOCATED_FADE_MS = 1500
+
 /** 全局搜索定位入口 id（hub = 组件清单；area = 打开中的组件详情） */
 export const ADDON_SETTINGS_SECTION_ID = 'addon-settings'
 export const ADDON_SETTINGS_SECTION_HUB_ENTRY = 'hub'
 export const ADDON_SETTINGS_SECTION_AREA_ENTRY = 'area'
+
+/** #472 跨组件定位目标（focusEntry 形状 addon:<addonId>/def:<定义键> 或
+ *  addon:<addonId>/group:<组键>——沿 addon:<id> 前缀先例层进；组件 ID 是
+ *  publisher.name 形状不含斜杠，首个斜杠即分隔位） */
+type AddonFocusTarget = { addonId: string; kind: 'def' | 'group'; key: string }
+
+/** 解析定位入口（非 addon: 前缀或形状不合法返回 undefined） */
+function parseAddonFocusEntry(focusEntry: string | undefined): AddonFocusTarget | undefined {
+  if (focusEntry === undefined || !focusEntry.startsWith('addon:')) return undefined
+  const rest = focusEntry.slice('addon:'.length)
+  const slash = rest.indexOf('/')
+  if (slash <= 0) return undefined
+  const tail = rest.slice(slash + 1)
+  if (tail.startsWith('def:')) return { addonId: rest.slice(0, slash), kind: 'def', key: tail.slice('def:'.length) }
+  if (tail.startsWith('group:')) return { addonId: rest.slice(0, slash), kind: 'group', key: tail.slice('group:'.length) }
+  return undefined
+}
 
 export class AddonSettingsAreaSection implements SettingsPageSection {
   readonly id = ADDON_SETTINGS_SECTION_ID
@@ -52,6 +73,17 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
   private scope: 'user' | 'workspace' = 'user'
   /** 数组/对象的未保存草稿（定义键 → 草稿值；推送保留，保存成功清除） */
   private drafts = new Map<string, unknown>()
+  /** #472 跨组件定位挂起（目标组件设置区未开：已发 settingsOpen，等
+   *  settingsState 应答渲染后定位；只消费一次——此后常规推送不重现） */
+  private pendingFocus: AddonFocusTarget | undefined
+  /** #472 挂起定位的消费渲染标记（一次读一次清）：消费渲染等价显式定位
+   *  ——跳过 #467 滚动/焦点守卫，否则 restore 会把 scrollIntoView 写回 */
+  private consumingPendingFocus = false
+  /** #472 定位高亮目标（退场时限内推送重渲染保持——定位后排定一次性
+   *  退场（#462 语义），摘除高亮类时一并清空；时限外推送不再重现） */
+  private locatedTarget: AddonFocusTarget | undefined
+  /** #472 定位高亮退场计时器（实例级，跨分页挂载/卸载存续，保证最终退场） */
+  private locatedFadeTimer: ReturnType<typeof setTimeout> | undefined
   private parent: HTMLElement | undefined
 
   constructor(
@@ -62,17 +94,46 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
   ) {}
 
   get entries() {
-    return [
+    // #472 定义级与组级条目进全局搜索（全部已注册组件——addons.state 携带
+    // 搜索摘要；组标题按当前语言选值、定义 title/description 直用原文，
+    // object 字段级不进）。id 即跨组件定位键（addon:<id>/def|group:<键>）
+    const list: Array<{ id: string; title: string; description?: string }> = [
       {
         id: ADDON_SETTINGS_SECTION_HUB_ENTRY,
         title: t('settings.addonSettingsSection'),
         description: t('settings.addonSettingsSectionDescription'),
       },
     ]
+    for (const entry of this.state?.addons ?? []) {
+      const index = entry.settingsSearchIndex
+      if (!index) continue
+      for (const group of index.groups ?? []) {
+        list.push({ id: `addon:${entry.id}/group:${group.key}`, title: resolveLocalizedText(group.title, currentLocaleLang()) })
+      }
+      for (const def of index.definitions) {
+        list.push({
+          id: `addon:${entry.id}/def:${def.key}`,
+          title: def.title,
+          ...(def.description !== undefined ? { description: def.description } : {}),
+        })
+      }
+    }
+    return list
   }
 
   mount(parent: HTMLElement, focusEntry?: string): (() => void) | undefined {
     this.parent = parent
+    // #472 跨组件定位（全局搜索命中 def/group 级条目）：记定位态并排定
+    // 一次性退场；目标组件设置区未开时先请求打开（应答后渲染定位）
+    const target = parseAddonFocusEntry(focusEntry)
+    if (target) {
+      this.locatedTarget = target
+      this.scheduleLocatedFade()
+      if (this.settingsState?.open !== target.addonId) {
+        this.pendingFocus = target
+        this.send({ kind: 'addons.settingsOpen', addonId: target.addonId })
+      }
+    }
     this.render(focusEntry)
     return () => {
       this.parent = undefined
@@ -101,8 +162,35 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
         this.drafts.clear()
       }
       this.settingsState = message
+      // #472 挂起定位消费：目标组件设置区已开（settingsOpen 应答到达）——
+      // 本次渲染按定位语义走（等价显式 focusEntry）；pending 清空（此后
+      // 推送不重现）。应答晚于退场时限到达时定位态已被清——按挂起目标
+      // 重立并重排退场（高亮寿命从定位渲染起算，不从发请求起算）
+      if (this.pendingFocus !== undefined && message.open === this.pendingFocus.addonId) {
+        if (this.locatedTarget === undefined) {
+          this.locatedTarget = this.pendingFocus
+          this.scheduleLocatedFade()
+        }
+        this.pendingFocus = undefined
+        this.consumingPendingFocus = true
+      }
       this.render()
     }
+  }
+
+  /** #472 排定定位高亮一次性退场：约 1.5s 后摘除设置区已渲染的 located
+   *  类（定义行与组容器）并清定位态——此后推送重渲染不再重现 */
+  private scheduleLocatedFade(): void {
+    if (this.locatedFadeTimer !== undefined) {
+      clearTimeout(this.locatedFadeTimer)
+    }
+    this.locatedFadeTimer = setTimeout(() => {
+      this.locatedFadeTimer = undefined
+      this.locatedTarget = undefined
+      this.parent?.querySelectorAll('.vsidian-addons-settings .vsidian-settings-item-located').forEach((el) => {
+        el.classList.remove('vsidian-settings-item-located')
+      })
+    }, LOCATED_FADE_MS)
   }
 
   private send(message: object): void {
@@ -127,14 +215,24 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       return
     }
     // #467 同分页推送重渲染保持滚动与焦点（守卫说明见 sectionRebuildGuard）；
-    // 显式定位渲染（focusEntry 在场）不恢复——定位语义优先
-    const anchor = focusEntry === undefined ? captureSectionRebuildAnchor(parent) : undefined
+    // 显式定位渲染（focusEntry 在场）不恢复——定位语义优先；#472 挂起定位
+    // 的消费渲染同豁免（consumed 一次读一次清），否则 restore 把定位滚动写回
+    const locating = focusEntry !== undefined || this.consumingPendingFocus
+    this.consumingPendingFocus = false
+    const anchor = locating ? undefined : captureSectionRebuildAnchor(parent)
     parent.replaceChildren()
     // ---- 组件详情：基础设置区打开（settingsState.open）或组件设置页挂载
     //      在场（openAddonSettingsPage，设置区未承载时的 T02 回退） ----
     const settingsArea = this.renderSettingsArea(focusEntry)
     if (settingsArea) {
       parent.append(settingsArea)
+      // #472 def/group 定位滚动须在挂载后（渲染函数返回前 scrollIntoView
+      // 作用于游离子树，无可滚动祖先——真实布局下不滚动）；且只在显式
+      // 定位渲染滚（#467 契约）——退场窗口内常规推送重渲染保持高亮但不
+      // 重放滚动
+      if (locating) {
+        settingsArea.querySelector('.vsidian-settings-item-located')?.scrollIntoView?.({ block: 'nearest' })
+      }
     } else if (this.state && this.addonSettingsHost) {
       const openId = this.state.openAddonSettingsPage ?? null
       const openEntry = openId === null ? undefined : this.state.addons.find((entry) => entry.id === openId)
@@ -279,21 +377,73 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       area.append(troubleshoot)
     }
 
-    // 控件组：功能开关行 + 定义行
-    const group = document.createElement('div')
-    group.className = 'vsidian-settings-group'
-    group.append(this.renderEnabledRow(payload.addon))
+    // 控件组（#472 分组呈现）：首容器无组标题——功能开关行恒居首 + 未分组
+    // 定义聚拢（按注册序）；组容器按声明序随后（组标题档位 + 组内定义按
+    // 注册序聚拢不散插；空组仍渲染）。无组声明时单容器平铺（向后兼容）。
+    // 宿主注册批已保证组键唯一，重复键只可能来自损坏载荷——按首见去重，
+    // 防同一定义在同名组卡片重复渲染
     const definitions = payload.addon.definitions
+    const declaredGroups: AddonSettingGroup[] = []
+    for (const group of payload.addon.groups ?? []) {
+      if (!declaredGroups.some((seen) => seen.key === group.key)) {
+        declaredGroups.push(group)
+      }
+    }
+    // #472 定位落点（目标组件匹配时）：def 级描定义行、group 级描组容器
+    //（互斥——落点唯一；渲染循环内按 key 比对标记，避免选择器转义）
+    const located = this.locatedTarget
+    const locatedRowOf = (def: AddonSettingDefinition): boolean =>
+      located !== undefined && located.kind === 'def' && located.addonId === payload.addon!.addonId && located.key === def.key
+    // 引用键不在声明集（异常载荷，宿主校验后不应出现）时回落首容器——
+    // 不吞呈现
+    const declaredKeys = new Set(declaredGroups.map((group) => group.key))
+    const belongsToFirst = (def: AddonSettingDefinition): boolean => def.group === undefined || !declaredKeys.has(def.group)
+    const firstGroup = document.createElement('div')
+    firstGroup.className = 'vsidian-settings-group'
+    firstGroup.append(this.renderEnabledRow(payload.addon))
     if (definitions.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'vsidian-settings-empty'
       empty.textContent = t('addons.settingsEmpty')
-      group.append(empty)
+      firstGroup.append(empty)
     }
     for (const def of definitions) {
-      group.append(this.renderDefinitionRow(payload.addon, def))
+      if (belongsToFirst(def)) {
+        const row = this.renderDefinitionRow(payload.addon, def)
+        if (locatedRowOf(def)) {
+          row.classList.add('vsidian-settings-item-located')
+        }
+        firstGroup.append(row)
+      }
     }
-    area.append(group)
+    area.append(firstGroup)
+    for (const group of declaredGroups) {
+      const card = document.createElement('div')
+      card.className = 'vsidian-settings-group'
+      const title = document.createElement('h3')
+      title.className = 'vsidian-settings-group-title'
+      title.textContent = resolveLocalizedText(group.title, currentLocaleLang())
+      card.append(title)
+      if (group.description !== undefined) {
+        const desc = document.createElement('p')
+        desc.className = 'vsidian-addons-group-description'
+        desc.textContent = resolveLocalizedText(group.description, currentLocaleLang())
+        card.append(desc)
+      }
+      if (located !== undefined && located.kind === 'group' && located.addonId === payload.addon.addonId && located.key === group.key) {
+        card.classList.add('vsidian-settings-item-located')
+      }
+      for (const def of definitions) {
+        if (def.group === group.key) {
+          const row = this.renderDefinitionRow(payload.addon, def)
+          if (locatedRowOf(def)) {
+            row.classList.add('vsidian-settings-item-located')
+          }
+          card.append(row)
+        }
+      }
+      area.append(card)
+    }
 
     // 保存反馈（notice 由宿主应答推送；常规推送清空——不残留旧结局）
     if (payload.notice !== undefined) {

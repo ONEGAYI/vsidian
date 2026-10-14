@@ -18,7 +18,7 @@ import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from '.
 import { isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
 import { parseBehaviorQueryFilter, type BehaviorQueryFilter } from './behaviorFilterQuery'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
-import { isAddonSettingDefinition, isAddonSettingStoredValue } from './addonSettings'
+import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -1022,6 +1022,9 @@ export interface AddonSettingsAreaPayload {
   }
   /** 平台基础控件数据源（注册序；shape 单一事实源 shared/addonSettings） */
   definitions: readonly import('./addonSettings').AddonSettingDefinition[]
+  /** #472 组声明（声明序；定义的 group 字段引用此表键。可选——无组声明
+   *  的旧载荷缺省容忍，渲染侧保持既有平铺） */
+  groups?: readonly import('./addonSettings').AddonSettingGroup[]
   /** 定义键 → 生效值 / 两层显式值（仅当显式且通过当前定义校验时下发）/
    *  生效来源 */
   values: Readonly<Record<string, {
@@ -5663,8 +5666,21 @@ function isAddonStatusEntry(v: unknown): v is AddonStatusEntry {
     (v.enabled === undefined || typeof v.enabled === 'boolean') &&
     (v.fault === undefined || (isObject(v.fault) && isString(v.fault.reason))) &&
     (v.hasSettingsPage === undefined || typeof v.hasSettingsPage === 'boolean') &&
-    (v.hasSettingsDefinitions === undefined || typeof v.hasSettingsDefinitions === 'boolean')
+    (v.hasSettingsDefinitions === undefined || typeof v.hasSettingsDefinitions === 'boolean') &&
+    // #472 定义搜索摘要可选（仅已注册有定义组件附带；旧载荷缺省容忍）
+    (v.settingsSearchIndex === undefined || isAddonSettingsSearchIndex(v.settingsSearchIndex))
   )
+}
+
+/** #472 组件设置搜索摘要守卫（形状单一事实源在 shared/addonSettings） */
+function isAddonSettingsSearchIndex(v: unknown): v is import('./addonIdentity').AddonStatusEntry['settingsSearchIndex'] {
+  if (!isObject(v) || !Array.isArray(v.definitions)) {
+    return false
+  }
+  if (!(v.definitions as unknown[]).every(isAddonSettingSearchEntry)) return false
+  if (v.groups === undefined) return true
+  if (!Array.isArray(v.groups)) return false
+  return (v.groups as unknown[]).every(isAddonSettingGroupDeclaration)
 }
 
 /** #353 T04 单组件设置区载荷守卫（定义形态与值形态的单一事实源在
@@ -5687,6 +5703,8 @@ function isAddonSettingsArea(v: unknown): v is AddonSettingsAreaPayload {
     (enabled.source === 'default' || enabled.source === 'user' || enabled.source === 'workspace') &&
     Array.isArray(v.definitions) &&
     (v.definitions as unknown[]).every(isAddonSettingDefinition) &&
+    // #472 组声明可选（旧载荷缺省容忍）；在场时逐条经形状守卫
+    (v.groups === undefined || (Array.isArray(v.groups) && (v.groups as unknown[]).every(isAddonSettingGroupDeclaration))) &&
     isObject(v.values) &&
     Object.values(v.values as Record<string, unknown>).every((entry) => {
       if (!isObject(entry)) return false

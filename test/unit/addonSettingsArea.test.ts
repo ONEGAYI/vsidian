@@ -6,7 +6,7 @@
 //
 // 断言对象是用户可见文本与控件行为（消息上送形态），不是 DOM 存在性——
 // 绘制层断言（颜色/可见性）在浏览器套件 test/browser/addonSettings.mjs。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
@@ -117,6 +117,7 @@ function settingsState(options: {
   openAddonSettingsPage?: string | null
   notice?: Record<string, unknown>
   definitions?: Array<Record<string, unknown>>
+  groups?: Array<Record<string, unknown>>
 }): HostToWebview {
   const definitions = options.definitions ?? DEFINITIONS
   const defaultValueOf = (def: Record<string, unknown>): unknown => {
@@ -156,6 +157,7 @@ function settingsState(options: {
         source: options.enabled?.source ?? 'default',
       },
       definitions,
+      ...(options.groups !== undefined ? { groups: options.groups } : {}),
       values,
     },
     openAddonSettingsPage: options.openAddonSettingsPage ?? null,
@@ -730,6 +732,293 @@ describe('组件设置分页：推送重渲染的滚动与焦点保持（#467）
     } finally {
       h.parent.remove()
       h.view.dispose()
+    }
+  })
+})
+
+// ---- #472 设置定义分组：呈现、全局搜索与跨组件定位 ----
+
+describe('#472 设置区分组呈现', () => {
+  const GROUPS = [
+    { key: 'appearance', title: { 'zh-cn': '外观', en: 'Appearance' }, description: { 'zh-cn': '观感相关', en: 'Look and feel' } },
+    { key: 'behavior', title: '行为' },
+  ]
+  const GROUPED_DEFS = [
+    { key: 'flag', title: '开关项', type: 'boolean', default: true },
+    { key: 'theme', title: '主题', type: 'string', default: 'light', group: 'appearance' },
+    { key: 'strict', title: '严格模式', type: 'boolean', default: false, group: 'behavior' },
+    { key: 'density', title: '密度', type: 'string', default: 'compact', group: 'appearance' },
+    { key: 'legacy', title: '未分组项', type: 'boolean', default: false },
+  ]
+
+  function openGrouped(options: { groups?: Array<Record<string, unknown>>; definitions?: Array<Record<string, unknown>> } = {}): ReturnType<typeof makeView> {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
+    h.dispatch(settingsState({ definitions: options.definitions ?? GROUPED_DEFS, groups: options.groups }))
+    return h
+  }
+
+  /** 组容器列表（区域头部不在 .vsidian-settings-group 内，直接取设置区内组卡片） */
+  function groupCards(h: ReturnType<typeof makeView>): HTMLElement[] {
+    return [...h.parent.querySelectorAll<HTMLElement>('.vsidian-addons-settings > .vsidian-settings-group')]
+  }
+
+  it('分组渲染：首容器无组标题且开关行 + 未分组项恒置顶；组容器按声明序、组内聚拢不散插', () => {
+    const h = openGrouped({ groups: GROUPS })
+    const cards = groupCards(h)
+    expect(cards).toHaveLength(3)
+    // 首容器：开关行 + 未分组项（flag、legacy 按注册序），无组标题
+    expect(cards[0]!.querySelector('.vsidian-settings-group-title')).toBeNull()
+    expect(cards[0]!.querySelector('[data-addon-setting="__enabled__"]')).toBeTruthy()
+    expect([...cards[0]!.querySelectorAll('.vsidian-addons-setting-item .vsidian-settings-item-title')].map((el) => el.textContent)).toEqual(['开关项', '未分组项'])
+    // 组容器按声明序（appearance 先于 behavior），组内定义按注册序聚拢（theme、density 相邻）
+    expect([...cards[1]!.querySelectorAll('.vsidian-addons-setting-item .vsidian-settings-item-title')].map((el) => el.textContent)).toEqual(['主题', '密度'])
+    expect([...cards[2]!.querySelectorAll('.vsidian-addons-setting-item .vsidian-settings-item-title')].map((el) => el.textContent)).toEqual(['严格模式'])
+  })
+
+  it('组标题与组描述按当前语言选值（zh-cn 页面语言取 zh-cn 键；直值原样；无描述不渲染）', () => {
+    const h = openGrouped({ groups: GROUPS })
+    const cards = groupCards(h)
+    expect(cards[1]!.querySelector('.vsidian-settings-group-title')?.textContent).toBe('外观')
+    expect(cards[1]!.querySelector('.vsidian-addons-group-description')?.textContent).toBe('观感相关')
+    expect(cards[2]!.querySelector('.vsidian-settings-group-title')?.textContent).toBe('行为')
+    expect(cards[2]!.querySelector('.vsidian-addons-group-description')).toBeNull()
+  })
+
+  it('组文案随页面语言切换（zh-cn → en 换包重渲染后取 en 键）', () => {
+    const h = openGrouped({ groups: GROUPS })
+    try {
+      installLocale('en', en)
+      const cards = groupCards(h)
+      expect(cards[1]!.querySelector('.vsidian-settings-group-title')?.textContent).toBe('Appearance')
+      expect(cards[1]!.querySelector('.vsidian-addons-group-description')?.textContent).toBe('Look and feel')
+    } finally {
+      installLocale('zh-cn', zhCn)
+    }
+  })
+
+  it('无组声明保持既有平铺（单容器无组标题、全部定义按注册序）', () => {
+    const h = openGrouped()
+    const cards = groupCards(h)
+    expect(cards).toHaveLength(1)
+    expect(cards[0]!.querySelector('.vsidian-settings-group-title')).toBeNull()
+    expect(cards[0]!.querySelectorAll('.vsidian-addons-setting-item').length).toBe(GROUPED_DEFS.length)
+  })
+
+  it('空组（声明了组但没有定义引用）仍渲染组容器（引用式可声明空组）', () => {
+    const h = openGrouped({ groups: [...GROUPS, { key: 'empty', title: '空组' }] })
+    const cards = groupCards(h)
+    expect(cards).toHaveLength(4)
+    expect(cards[3]!.querySelector('.vsidian-settings-group-title')?.textContent).toBe('空组')
+    expect(cards[3]!.querySelectorAll('.vsidian-addons-setting-item')).toHaveLength(0)
+  })
+})
+
+describe('#472 全局搜索：定义级与组级条目（全部已注册组件）', () => {
+  const INDEX = {
+    definitions: [
+      { key: 'theme', title: '主题', description: '配色主题' },
+      { key: 'flag', title: '开关项' },
+    ],
+    groups: [{ key: 'appearance', title: { 'zh-cn': '外观', en: 'Appearance' } }],
+  }
+
+  function searchFor(h: ReturnType<typeof makeView>, text: string): HTMLButtonElement[] {
+    const search = h.parent.querySelector<HTMLInputElement>('input.vsidian-settings-search')!
+    search.value = text
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    return [...h.parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+  }
+
+  /** 只取「组件设置」分组的搜索命中（全局搜索跨全部分页——宽词命中其他分页属正常） */
+  function addonSettingsHits(h: ReturnType<typeof makeView>, text: string): HTMLButtonElement[] {
+    return searchFor(h, text).filter((b) => b.querySelector('.vsidian-settings-result-category')?.textContent === zhCn['settings.addonSettingsSection'])
+  }
+
+  it('定义 title/description 与组标题进全局搜索，命中归「组件设置」分组', () => {
+    const h = makeView()
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, settingsSearchIndex: INDEX },
+      { id: 'b.other', label: 'Other', official: false, status: 'registered', hasSettingsDefinitions: false },
+    ]))
+    const results = addonSettingsHits(h, '主题')
+    expect(results).toHaveLength(1)
+    expect(results[0]!.querySelector('strong')?.textContent).toBe('主题')
+    // 描述参与匹配
+    expect(addonSettingsHits(h, '配色')).toHaveLength(1)
+    // 组标题（按当前语言选值）参与匹配
+    const groupHits = addonSettingsHits(h, '外观')
+    expect(groupHits).toHaveLength(1)
+    expect(groupHits[0]!.querySelector('strong')?.textContent).toBe('外观')
+  })
+
+  it('点击定义条目：切到组件设置分页，目标组件设置区未开时上送 settingsOpen；点击组条目同链路', () => {
+    const h = makeView()
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, settingsSearchIndex: INDEX },
+    ]))
+    const [hit] = addonSettingsHits(h, '开关项')
+    hit!.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: ADDON_ID })
+    const [groupHit] = addonSettingsHits(h, '外观')
+    groupHit!.click()
+    expect(h.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toHaveLength(2)
+  })
+})
+
+describe('#472 跨组件定位（focusEntry：addon:<id>/def:<键> 与 addon:<id>/group:<键>）', () => {
+  const GROUPS = [{ key: 'appearance', title: '外观' }]
+  const GROUPED_DEFS = [
+    { key: 'flag', title: '开关项', type: 'boolean', default: true },
+    { key: 'theme', title: '主题', type: 'string', default: 'light', group: 'appearance' },
+  ]
+
+  function scrollIntoViewSpy(): { restore(): void; calls: HTMLElement[] } {
+    const calls: HTMLElement[] = []
+    const proto = HTMLElement.prototype as unknown as Record<string, unknown>
+    const original = proto.scrollIntoView
+    proto.scrollIntoView = function scrolled(this: HTMLElement) {
+      calls.push(this)
+    }
+    return {
+      restore: () => {
+        if (original === undefined) delete proto.scrollIntoView
+        else proto.scrollIntoView = original
+      },
+      calls,
+    }
+  }
+
+  /** 经全局搜索点击条目导航（真实用户链路；只取「组件设置」分组的命中） */
+  function locateBySearch(h: ReturnType<typeof makeView>, text: string): void {
+    const search = h.parent.querySelector<HTMLInputElement>('input.vsidian-settings-search')!
+    search.value = text
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    const [hit] = [...h.parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+      .filter((b) => b.querySelector('.vsidian-settings-result-category')?.textContent === zhCn['settings.addonSettingsSection'])
+    expect(hit, `搜索应有命中: ${text}`).toBeTruthy()
+    hit!.click()
+  }
+
+  it('def 级定位：设置区已开时定义行 located + scrollIntoView；定位落点唯一（不描组容器）', () => {
+    const spy = scrollIntoViewSpy()
+    try {
+      const h = makeView()
+      h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      openSettingsAreaPage(h)
+      // 重新 mount 带 focusEntry（搜索点击等价路径）
+      h.view.selectSection(ADDON_SETTINGS_SECTION_ID, `addon:${ADDON_ID}/def:theme`)
+      const row = h.parent.querySelector('[data-addon-setting="theme"]')?.closest('.vsidian-addons-setting-item')
+      expect(row?.classList.contains('vsidian-settings-item-located')).toBe(true)
+      expect(spy.calls).toContain(row)
+      expect(h.parent.querySelectorAll('.vsidian-addons-settings .vsidian-settings-item-located')).toHaveLength(1)
+    } finally {
+      spy.restore()
+    }
+  })
+
+  it('group 级定位：组容器 located（描组卡片，不描区域内行）', () => {
+    const spy = scrollIntoViewSpy()
+    try {
+      const h = makeView()
+      h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      h.view.selectSection(ADDON_SETTINGS_SECTION_ID, `addon:${ADDON_ID}/group:appearance`)
+      const cards = [...h.parent.querySelectorAll('.vsidian-addons-settings > .vsidian-settings-group')]
+      const groupCard = cards.find((card) => card.querySelector('.vsidian-settings-group-title')?.textContent === '外观')
+      expect(groupCard?.classList.contains('vsidian-settings-item-located')).toBe(true)
+      expect(spy.calls).toContain(groupCard)
+      expect(groupCard!.querySelector('.vsidian-settings-item-located')).toBeNull()
+    } finally {
+      spy.restore()
+    }
+  })
+
+  it('定位高亮一次性退场：约 1.5s 后摘除，后续推送重渲染不重现', () => {
+    vi.useFakeTimers()
+    try {
+      const h = makeView()
+      h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      h.view.selectSection(ADDON_SETTINGS_SECTION_ID, `addon:${ADDON_ID}/def:theme`)
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeTruthy()
+      vi.advanceTimersByTime(1500)
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('未开区定位：先上送 settingsOpen，settingsState 到达后定位（pending 只消费一次）', () => {
+    vi.useFakeTimers()
+    const spy = scrollIntoViewSpy()
+    try {
+      const h = makeView()
+      h.dispatch(addonsState([{
+        id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true,
+        settingsSearchIndex: {
+          definitions: GROUPED_DEFS.map((def) => ({ key: def.key as string, title: def.title as string })),
+          groups: [{ key: 'appearance', title: '外观' }],
+        },
+      }]))
+      // 设置区未开（无 settingsState）——经搜索点击触发定位链路
+      locateBySearch(h, '主题')
+      expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: ADDON_ID })
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+      // 宿主应答 settingsState 后渲染并定位
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      const row = h.parent.querySelector('[data-addon-setting="theme"]')?.closest('.vsidian-addons-setting-item')
+      expect(row?.classList.contains('vsidian-settings-item-located')).toBe(true)
+      expect(spy.calls).toContain(row)
+      // 时限内同组件推送：高亮保持（定位态跨推送——不延长退场寿命）
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      expect(h.parent.querySelectorAll('.vsidian-addons-settings .vsidian-settings-item-located')).toHaveLength(1)
+      // 滚动不随常规推送重放（#467 契约：scrollIntoView 收窄到显式定位渲染）
+      expect(spy.calls).toHaveLength(1)
+      // 退场后推送不再重现（定位态已清——pending 与高亮均一次性）
+      vi.advanceTimersByTime(1500)
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      expect(h.parent.querySelectorAll('.vsidian-addons-settings .vsidian-settings-item-located')).toHaveLength(0)
+    } finally {
+      spy.restore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('挂起定位应答晚于退场时限：消费时按挂起目标重立定位并重排退场', () => {
+    vi.useFakeTimers()
+    const spy = scrollIntoViewSpy()
+    try {
+      const h = makeView()
+      h.dispatch(addonsState([{
+        id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true,
+        settingsSearchIndex: {
+          definitions: GROUPED_DEFS.map((def) => ({ key: def.key as string, title: def.title as string })),
+          groups: [{ key: 'appearance', title: '外观' }],
+        },
+      }]))
+      locateBySearch(h, '主题')
+      expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: ADDON_ID })
+      // 应答慢于退场时限：mount 时排定的退场已 fire，定位态被清
+      vi.advanceTimersByTime(1600)
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+      // 应答到达：按挂起目标重立（高亮寿命从定位渲染起算，不从发请求起算）
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      const row = h.parent.querySelector('[data-addon-setting="theme"]')?.closest('.vsidian-addons-setting-item')
+      expect(row?.classList.contains('vsidian-settings-item-located')).toBe(true)
+      expect(spy.calls).toContain(row)
+      // 重排的退场到期后摘除，此后推送不重现
+      vi.advanceTimersByTime(1500)
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+      h.dispatch(settingsState({ definitions: GROUPED_DEFS, groups: GROUPS }))
+      expect(h.parent.querySelector('.vsidian-addons-settings .vsidian-settings-item-located')).toBeNull()
+    } finally {
+      spy.restore()
+      vi.useRealTimers()
     }
   })
 })

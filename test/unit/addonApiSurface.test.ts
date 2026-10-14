@@ -133,6 +133,10 @@ describe('附加组件公开声明消费面（T13）', () => {
     expect(symbols.has('AddonLocalizedText'), '消费面应导入 AddonLocalizedText（枚举档位标签值形态）').toBe(true)
     expect(source.includes('enumLabels'), '消费面应含 enumLabels 字段消费样例').toBe(true)
     expect(source.includes('multiline'), '消费面应含 multiline 字段消费样例').toBe(true)
+    expect(symbols.has('AddonSettingGroup'), '消费面应导入 AddonSettingGroup（#472 组声明形状）').toBe(true)
+    expect(symbols.has('AddonSettingSearchEntry'), '消费面应导入 AddonSettingSearchEntry（#472 搜索摘要条目形状）').toBe(true)
+    expect(source.includes('group:'), '消费面应含定义 group 字段消费样例').toBe(true)
+    expect(source.includes('settingGroupDeclarations'), '消费面应含组声明消费样例').toBe(true)
   })
 
   it('开发文档与生成器不进 Vsidian VSIX（.vscodeignore 排除 docs 与 scripts）', () => {

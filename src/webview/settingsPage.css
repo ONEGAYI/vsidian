@@ -595,6 +595,12 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-addons-fault-troubleshoot h4 { margin: 0; color: var(--vscode-errorForeground, #f66); font-size: 13px; }
 .vsidian-addons-fault-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .vsidian-addons-settings .vsidian-settings-group { gap: 8px; }
+/* #472 设置定义分组：多个组卡片并列时对齐设置页组卡片间距档位（20px）；
+   首容器（开关行 + 未分组项）与声明序组容器同级直挂设置区 */
+.vsidian-addons-settings .vsidian-settings-group + .vsidian-settings-group { margin-top: 20px; }
+/* #472 组说明句（组件声明的组描述）：组卡片内首行说明色（ui-patterns §2.2
+   组内提示文案口径），位于组标题之下、首个定义行之前 */
+.vsidian-addons-group-description { margin: 10px 0 0; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-addons-setting-item { display: flex; flex-direction: column; gap: 6px; }
 .vsidian-addons-source-badge { display: inline-block; margin-top: 2px; padding: 0 6px; min-height: 16px;
   border: 1px solid var(--vscode-panel-border, #cbd0d8); border-radius: 999px;

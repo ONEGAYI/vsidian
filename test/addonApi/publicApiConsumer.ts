@@ -86,6 +86,8 @@ import {
 import type {
   AddonLocalizedText,
   AddonSettingDefinition,
+  AddonSettingGroup,
+  AddonSettingSearchEntry,
   AddonSettingSource,
   AddonSettingValue,
 } from '../../src/shared/addonSettings'
@@ -366,6 +368,22 @@ export const presentationSettingDefinitions: readonly AddonSettingDefinition[] =
   { key: 'prefixes', title: '前缀词典', type: 'string', multiline: true, default: '' },
 ]
 export type EnumLabelText = AddonLocalizedText
+
+/** #472 设置定义分组（引用式）：定义 group 字段引用组声明键，组元数据
+ *  （title/description 为 AddonLocalizedText）经注册载荷声明一次、声明
+ *  序即呈现序——字段/类型改名或形态收窄即编译失败 */
+export const groupedSettingDefinitions: readonly AddonSettingDefinition[] = [
+  { key: 'theme', title: '主题', type: 'string', default: 'light', group: 'appearance' },
+  { key: 'legacy', title: '兼容项', type: 'boolean', default: true },
+]
+export const settingGroupDeclarations: readonly AddonSettingGroup[] = [
+  { key: 'appearance', title: { 'zh-cn': '外观', en: 'Appearance' }, description: '观感相关' },
+]
+/** #472 搜索摘要条目（definitions 的元素形状）：title 非空直值、可选说明 */
+export const settingSearchEntries: readonly AddonSettingSearchEntry[] = [
+  { key: 'theme', title: '主题', description: '配色主题' },
+  { key: 'flag', title: '开关项' },
+]
 
 /** 渲染与界面注册形状 */
 export type RendererShapes = { registration: AddonRendererRegistration }

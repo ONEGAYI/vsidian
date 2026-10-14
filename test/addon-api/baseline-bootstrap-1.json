@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "974399cf15e857e224a9c1bc53509f2fd3c6246f",
-      "ref": "974399cf",
+      "sha": "96486e72eafa7f7cb8560de80314493b21e680d4",
+      "ref": "HEAD",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -167,7 +167,7 @@
       "endpoints": [
         "host"
       ],
-      "purpose": "设置页「附加组件」分页的状态载荷：七种状态覆盖注册、唤醒在途、待注册、不兼容、激活失败、宿主不可查与声明非法；故障暂停标注但不改变「已启用」归类。",
+      "purpose": "设置页「附加组件」分页的状态载荷：七种状态覆盖注册、唤醒在途、待注册、不兼容、激活失败、宿主不可查与声明非法；故障暂停标注但不改变「已启用」归类。#472 起已注册有定义组件附带 settingsSearchIndex 摘要（定义 title/description 与组声明——组件设置分页全局搜索索引的数据源，随 addons.state 既有链路推送）。",
       "semantics": {
         "lifecycle": "启用偏好与实际故障分别记录（enabled 与 fault 两个字段）；host-unavailable 原因不可判——不直接写成未安装或装错侧。"
       },
@@ -184,7 +184,7 @@
         "test/integration/suite/addonT02Cases.ts",
         "test/browser/addonSidebar.mjs"
       ],
-      "introduced": "#350（T01）、#355（T06 运行状态）"
+      "introduced": "#350（T01）、#355（T06 运行状态）、#472（搜索摘要）"
     },
     {
       "id": "page-sdk",
@@ -649,10 +649,10 @@
       "endpoints": [
         "host"
       ],
-      "purpose": "setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。",
+      "purpose": "setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。",
       "semantics": {
-        "lifecycle": "普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。",
-        "errors": "按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。"
+        "lifecycle": "普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。新 setup 代次重跑时定义集与组声明一并清换。",
+        "errors": "按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。#472 组批校验：组键重复或定义引用未声明组键整批拒绝（归因 invalid-definitions）。"
       },
       "signatures": [
         {
@@ -669,7 +669,7 @@
         "test/integration/suite/addonT04Cases.ts",
         "test/browser/addonSettings.mjs"
       ],
-      "introduced": "#351（T02 页面入口）、#353（T04 读写）"
+      "introduced": "#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）"
     },
     {
       "id": "settings-definitions",
@@ -679,10 +679,10 @@
       "endpoints": [
         "host"
       ],
-      "purpose": "设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。",
+      "purpose": "设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。#472 分组（引用式）：定义可选 group 字段引用组键，组元数据（title/description 为 AddonLocalizedText）经注册载荷声明一次、声明序即呈现序；组键组件内唯一、引用未声明组键整批拒绝。",
       "semantics": {
-        "errors": "定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。",
-        "presentation": "enumLabels 与 multiline 仅作用设置页呈现（#473/#475）：标签缺失回退渲染枚举值本身，标签选值随页面语言切换；multiline 渲染 textarea、换行符参与持久化值；持久化值与值校验口径不变。数组 string 自由文本项支持批量粘贴拆分（逐行 trim、去空行、maxLength 截断，enum/number/boolean 项不适用）。"
+        "errors": "定义升级后存量漂移：显式值非法视为该层未设置（跳过继续下层，不从存储删除——定义回退后自动恢复生效）。数组/对象一层硬边界：项与字段必须是标量。#472 组批校验：组声明形状非法或键重复、定义引用未声明组键——整批拒绝。",
+        "presentation": "enumLabels 与 multiline 仅作用设置页呈现（#473/#475）：标签缺失回退渲染枚举值本身，标签选值随页面语言切换；multiline 渲染 textarea、换行符参与持久化值；持久化值与值校验口径不变。数组 string 自由文本项支持批量粘贴拆分（逐行 trim、去空行、maxLength 截断，enum/number/boolean 项不适用）。#472 分组呈现：组标题按当前语言选值、组容器按声明序，未分组定义与功能开关行恒居首容器；组声明随 addons.settingsState 既有链路透传；定义级与组级条目进全局搜索（object 字段级不进），定位键 addon:<组件 ID>/def:<定义键> 与 addon:<组件 ID>/group:<组键>。"
       },
       "signatures": [
         {
@@ -692,16 +692,22 @@
             "AddonSettingValue",
             "AddonScalarItemSpec",
             "AddonLocalizedText",
+            "AddonSettingGroup",
+            "AddonSettingSearchEntry",
+            "AddonSettingsSearchIndex",
             "isAddonSettingDefinition",
+            "isAddonSettingGroupDeclaration",
+            "isAddonSettingSearchEntry",
             "addonSettingValueMatches"
           ]
         }
       ],
       "verification": [
         "test/unit/addonSettings.test.ts",
-        "test/unit/addonSettingsArea.test.ts"
+        "test/unit/addonSettingsArea.test.ts",
+        "test/unit/addonSettingsService.test.ts"
       ],
-      "introduced": "#353（T04）、#473/#475（呈现形态）"
+      "introduced": "#353（T04）、#473/#475（呈现形态）、#472（分组）"
     },
     {
       "id": "settings-scope",
@@ -925,7 +931,7 @@
       "AddonCompatibilityHost": "/** 兼容判定的宿主侧输入 */\nexport interface AddonCompatibilityHost {\n  /** 宿主当前提供的稳定 API 版本 */\n  apiVersion: string\n  /** 宿主当前支持的实验入口表（入口名 → 宿主侧版本范围；未发布的入口不在表内） */\n  experimental: Readonly<Record<string, string>>\n}",
       "AddonCompatibility": "export type AddonCompatibility =\n  | { compatible: true }\n  | {\n      compatible: false\n      reason: 'api-range' | 'experimental-unsupported' | 'experimental-incompatible'\n      /** experimental 拒绝时点名入口名 */\n      entry?: string\n    }",
       "checkAddonCompatibility": "/** 兼容判定：声明范围须包含宿主稳定 API 版本；声明的实验入口须宿主已提供\n *  且版本匹配。当前宿主实验入口表为空——任何 experimental 声明都会被判\n *  experimental-unsupported（如实反映「实验入口未发布」）。 */\nexport function checkAddonCompatibility(\n  declaration: AddonIdentityDeclaration,\n  host: AddonCompatibilityHost,\n): AddonCompatibility {\n  if (!satisfiesSemverRange(declaration.api, host.apiVersion)) {\n    return { compatible: false, reason: 'api-range' }\n  }\n  for (const [entry, range] of Object.entries(declaration.experimental ?? {})) {\n    const hosted = host.experimental[entry]\n    if (hosted === undefined) {\n      return { compatible: false, reason: 'experimental-unsupported', entry }\n    }\n    if (!satisfiesSemverRange(range, hosted)) {\n      return { compatible: false, reason: 'experimental-incompatible', entry }\n    }\n  }\n  return { compatible: true }\n}",
-      "AddonStatusEntry": "export interface AddonStatusEntry {\n  /** 组件 ID（沿用 Extension.id） */\n  id: string\n  /** 展示名（displayName 或 id 回退） */\n  label: string\n  /** 官方归属（仅 OFFICIAL_ADDON_EXTENSION_IDS 判定） */\n  official: boolean\n  status: AddonStatusKind\n  /** 原因/摘要原文（错误消息、声明范围等；呈现层原样展示或组句） */\n  detail?: string\n  /** 不兼容时携带的声明 api 范围（组句呈现） */\n  apiRange?: string\n  /** #351 T02 运行状态（已注册组件附带）：用户偏好生效值（设置页开关\n   *  与「已启用/已停用」归类依据）；未注册组件缺省 */\n  enabled?: boolean\n  /** #351 T02 故障暂停（可归因异常原文——基础可观察，完整诊断归 T12） */\n  fault?: { reason: string }\n  /** #351 T02 设置页入口当前可装载（「打开设置页」入口可见性） */\n  hasSettingsPage?: boolean\n  /** #353 T04 已注册设置定义（「基础设置」入口可见性；故障暂停时定义\n   *  保留——入口仍在，平台基础控件可用） */\n  hasSettingsDefinitions?: boolean\n}",
+      "AddonStatusEntry": "export interface AddonStatusEntry {\n  /** 组件 ID（沿用 Extension.id） */\n  id: string\n  /** 展示名（displayName 或 id 回退） */\n  label: string\n  /** 官方归属（仅 OFFICIAL_ADDON_EXTENSION_IDS 判定） */\n  official: boolean\n  status: AddonStatusKind\n  /** 原因/摘要原文（错误消息、声明范围等；呈现层原样展示或组句） */\n  detail?: string\n  /** 不兼容时携带的声明 api 范围（组句呈现） */\n  apiRange?: string\n  /** #351 T02 运行状态（已注册组件附带）：用户偏好生效值（设置页开关\n   *  与「已启用/已停用」归类依据）；未注册组件缺省 */\n  enabled?: boolean\n  /** #351 T02 故障暂停（可归因异常原文——基础可观察，完整诊断归 T12） */\n  fault?: { reason: string }\n  /** #351 T02 设置页入口当前可装载（「打开设置页」入口可见性） */\n  hasSettingsPage?: boolean\n  /** #353 T04 已注册设置定义（「基础设置」入口可见性；故障暂停时定义\n   *  保留——入口仍在，平台基础控件可用） */\n  hasSettingsDefinitions?: boolean\n  /** #472 定义搜索摘要（全局搜索索引数据源——定义 title/description 与组\n   *  声明随 addons.state 既有链路推送；仅已注册有定义组件附带） */\n  settingsSearchIndex?: import('./addonSettings').AddonSettingsSearchIndex\n}",
       "AddonStatusKind": "/** 设置页状态列表条目（发现/注册协调的呈现载荷；协议 addons.state 使用） */\nexport type AddonStatusKind =\n  /** 已注册（setup 已在本接入代次执行） */\n  | 'registered'\n  /** 唤醒在途（Vsidian 主动 activate 进行中） */\n  | 'activating'\n  /** 已激活（原生或唤醒）但组件尚未调用注册入口 */\n  | 'awaiting-registration'\n  /** 合法声明但 API 范围/实验兼容不符（不唤醒） */\n  | 'incompatible'\n  /** 主动唤醒失败（激活抛错） */\n  | 'activation-failed'\n  /** 曾发现，当前宿主已查不到（原因不可判——不等于未安装或装错侧） */\n  | 'host-unavailable'\n  /** 声明形状非法 */\n  | 'invalid-declaration'"
     },
     "src/host/addons/addonWiring.ts": {
@@ -939,7 +945,7 @@
       "AddonRegistrationHandle": "/** 注册面返回的释放句柄（重复 dispose 无害；迟到登记被拒时为 no-op） */\nexport interface AddonRegistrationHandle {\n  dispose(): void\n}",
       "AddonChannelRegistry": "/** 通道注册面（setup/enable 上下文同形状；同名 topic 重复注册拒绝） */\nexport interface AddonChannelRegistry {\n  handle(topic: string, handler: AddonChannelHandler): AddonRegistrationHandle\n}",
       "AddonChannelHandler": "/** 通道处理器（宿主组件代码注册；载荷与结果都是 JSON 数据） */\nexport type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknown>",
-      "AddonSettingsContextApi": "/**\n * 设置能力面（setup 生命周期常驻——普通停用后保留；技术方案 5.5 形状）。\n * T02 先立 registerPage/registerDefinitions；T04 起接入读写与事件。\n */\nexport interface AddonSettingsContextApi {\n  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */\n  registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle\n  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings） */\n  registerDefinitions(defs: readonly unknown[]): AddonRegistrationHandle\n  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */\n  get(): AddonSettingsGetSnapshot\n  /** 单键来源（未定义键为 undefined） */\n  getSource(key: string): AddonSettingSource | undefined\n  /** 按批校验并保存到指定层（失败不虚报；变化事件只在持久化成功后发出） */\n  update(scope: 'user' | 'workspace', patch: Record<string, unknown>): Promise<AddonSettingsUpdateResult>\n  /** 清除工作区对某键的覆盖（恢复继承用户默认，不是恢复出厂值） */\n  clearWorkspaceOverride(key: string): Promise<AddonSettingsUpdateResult>\n  /** 订阅成功保存后的变化（所属组件设置生命周期内有效） */\n  onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle\n}",
+      "AddonSettingsContextApi": "/**\n * 设置能力面（setup 生命周期常驻——普通停用后保留；技术方案 5.5 形状）。\n * T02 先立 registerPage/registerDefinitions；T04 起接入读写与事件。\n */\nexport interface AddonSettingsContextApi {\n  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */\n  registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle\n  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings）。\n   *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段\n   *  引用其组键——引用未声明组键或组键重复整批拒绝 */\n  registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle\n  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */\n  get(): AddonSettingsGetSnapshot\n  /** 单键来源（未定义键为 undefined） */\n  getSource(key: string): AddonSettingSource | undefined\n  /** 按批校验并保存到指定层（失败不虚报；变化事件只在持久化成功后发出） */\n  update(scope: 'user' | 'workspace', patch: Record<string, unknown>): Promise<AddonSettingsUpdateResult>\n  /** 清除工作区对某键的覆盖（恢复继承用户默认，不是恢复出厂值） */\n  clearWorkspaceOverride(key: string): Promise<AddonSettingsUpdateResult>\n  /** 订阅成功保存后的变化（所属组件设置生命周期内有效） */\n  onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle\n}",
       "AddonSettingsGetSnapshot": "/** 设置读取快照（settings.get() 的结果：生效值与来源） */\nexport interface AddonSettingsGetSnapshot {\n  readonly values: Readonly<Record<string, AddonSettingValue>>\n  readonly sources: Readonly<Record<string, AddonSettingSource>>\n}",
       "AddonSettingsChangeEventData": "/** 设置变化事件（settings.onChanged 的载荷） */\nexport interface AddonSettingsChangeEventData {\n  readonly scope: 'user' | 'workspace'\n  readonly keys: readonly string[]\n}"
     },
@@ -1044,7 +1050,12 @@
       "AddonSettingValue": "/** 组件设置值：标量 / 标量数组 / 字段为标量的对象（一层结构硬边界） */\nexport type AddonSettingValue =\n  | AddonSettingScalarValue\n  | readonly AddonSettingScalarValue[]\n  | { readonly [field: string]: AddonSettingScalarValue }",
       "AddonScalarItemSpec": "/** 标量项约束（数组 items 与对象字段共用形状；无嵌套） */\nexport type AddonScalarItemSpec =\n  | { kind: 'boolean' }\n  | { kind: 'number'; min?: number; max?: number }\n  | { kind: 'string'; maxLength?: number; enum?: readonly string[] }",
       "AddonLocalizedText": "/** 枚举档位显示标签的多语言形态（#473）：直值或「语言代码→文本」映射，\n *  选值语义见 localizedText.ts（与 #464 行为名多语言惯例同构） */\nexport type AddonLocalizedText = LocalizedText",
+      "AddonSettingGroup": "/**\n * 设置分组声明（#472 引用式分组）：组元数据随注册载荷声明一次，定义以\n * `group` 组键引用。组序 = 声明序；组键组件内唯一；title/description\n * 直值或多语言映射（AddonLocalizedText，与 #464/#473 惯例同构）。\n */\nexport interface AddonSettingGroup {\n  /** 组键（组件内唯一、非空；定义 group 字段引用此键） */\n  key: string\n  /** 组标题 */\n  title: AddonLocalizedText\n  /** 可选组说明（组卡片内首行说明色呈现） */\n  description?: AddonLocalizedText\n}",
+      "AddonSettingSearchEntry": "/** 分组声明的搜索摘要条目（#472 定义级：进全局搜索索引的轻量形状） */\nexport interface AddonSettingSearchEntry {\n  key: string\n  title: string\n  description?: string\n}",
+      "AddonSettingsSearchIndex": "/** 全组件设置搜索索引（#472：addons.state 携带，webview 据此建全局搜索条目） */\nexport interface AddonSettingsSearchIndex {\n  /** 定义摘要（注册序；object 字段级不进——定义级即止） */\n  definitions: readonly AddonSettingSearchEntry[]\n  /** 组声明（声明序；搜索只匹配组标题，description 仅随载荷透传） */\n  groups?: readonly AddonSettingGroup[]\n}",
       "isAddonSettingDefinition": "/** 设置定义形状校验（必需字段与约束自洽；多余字段忽略——组件升级新增元数据不炸老平台） */\nexport function isAddonSettingDefinition(value: unknown): value is AddonSettingDefinition {\n  if (!isRecord(value) || typeof value.type !== 'string') return false\n  if (!definitionBaseValid(value)) return false\n  switch (value.type) {\n    case 'boolean':\n      return typeof value.default === 'boolean'\n    case 'number':\n      return isNumberSpec({ kind: 'number', min: value.min, max: value.max }) &&\n        isFiniteNumber(value.default) &&\n        addonScalarValueMatchesSpec(value.default, {\n          kind: 'number',\n          ...(value.min !== undefined ? { min: value.min as number } : {}),\n          ...(value.max !== undefined ? { max: value.max as number } : {}),\n        })\n    case 'string':\n      return isStringSpec({ kind: 'string', maxLength: value.maxLength, enum: value.enum }) &&\n        isEnumLabelsValid(value.enumLabels, value.enum as readonly string[] | undefined) &&\n        (value.multiline === undefined || typeof value.multiline === 'boolean') &&\n        // enum（档位下拉）与 multiline（自由文本多行）语义互斥——组合即拒绝\n        !(value.multiline !== undefined && value.enum !== undefined) &&\n        typeof value.default === 'string' &&\n        addonScalarValueMatchesSpec(value.default, {\n          kind: 'string',\n          ...(value.maxLength !== undefined ? { maxLength: value.maxLength as number } : {}),\n          ...(value.enum !== undefined ? { enum: value.enum as readonly string[] } : {}),\n        })\n    case 'array': {\n      if (!isAddonScalarItemSpec(value.items)) return false\n      if (!Array.isArray(value.default)) return false\n      if (value.minItems !== undefined && !isFiniteNumber(value.minItems)) return false\n      if (value.maxItems !== undefined && !isFiniteNumber(value.maxItems)) return false\n      if (value.minItems !== undefined && value.maxItems !== undefined && (value.minItems as number) > (value.maxItems as number)) {\n        return false\n      }\n      const items = value.items as AddonScalarItemSpec\n      if (value.minItems !== undefined && value.default.length < (value.minItems as number)) return false\n      if (value.maxItems !== undefined && value.default.length > (value.maxItems as number)) return false\n      return value.default.every((entry) => addonScalarValueMatchesSpec(entry, items))\n    }\n    case 'object': {\n      if (!Array.isArray(value.fields) || value.fields.length === 0) return false\n      const seenKeys = new Set<string>()\n      for (const field of value.fields) {\n        if (!isRecord(field)) return false\n        // 先取 base 字段（isRecord 收窄下可访问），再做标量项形状判定\n        const fieldKey = field.key as string\n        const fieldDefault = field.default\n        if (!definitionBaseValid(field)) return false\n        if (!isAddonScalarItemSpec(field)) return false\n        if (seenKeys.has(fieldKey)) return false\n        seenKeys.add(fieldKey)\n        if (!addonScalarValueMatchesSpec(fieldDefault, field as AddonScalarItemSpec)) return false\n      }\n      if (value.default === undefined) return true\n      if (!isRecord(value.default)) return false\n      const objectDefault = value.default as Record<string, unknown>\n      const fieldKeys = new Set(value.fields.map((field) => (field as Record<string, unknown>).key as string))\n      const defaultKeys = Object.keys(objectDefault)\n      if (defaultKeys.length !== fieldKeys.size || !defaultKeys.every((key) => fieldKeys.has(key))) return false\n      return value.fields.every((field) => {\n        const record = field as Record<string, unknown>\n        return addonScalarValueMatchesSpec(objectDefault[record.key as string], field as AddonScalarItemSpec)\n      })\n    }\n    default:\n      return false\n  }\n}",
+      "isAddonSettingGroupDeclaration": "/**\n * 分组声明形状守卫（#472）：key 非空字符串；title 经多语言文本守卫；\n * description 可选、同守卫。组键唯一性与定义引用合法性由服务层注册批\n * 校验（单条声明无全集上下文）。\n */\nexport function isAddonSettingGroupDeclaration(value: unknown): value is AddonSettingGroup {\n  if (!isRecord(value)) return false\n  if (!(typeof value.key === 'string' && value.key.length > 0)) return false\n  if (!isUsableLocalizedText(value.title)) return false\n  if (value.description !== undefined && !isUsableLocalizedText(value.description)) return false\n  return true\n}",
+      "isAddonSettingSearchEntry": "/** 搜索摘要条目形状守卫（#472）：key/title 非空字符串、description 可选——\n *  协议侧 addons.state 载荷校验与类型同一口径（不另建手写分支） */\nexport function isAddonSettingSearchEntry(value: unknown): value is AddonSettingSearchEntry {\n  if (!isRecord(value)) return false\n  if (!(typeof value.key === 'string' && value.key.length > 0)) return false\n  if (!(typeof value.title === 'string' && value.title.length > 0)) return false\n  if (value.description !== undefined && typeof value.description !== 'string') return false\n  return true\n}",
       "addonSettingValueMatches": "/** 值是否满足定义（数组/对象为一层结构：项与字段值必须是标量） */\nexport function addonSettingValueMatches(def: AddonSettingDefinition, value: unknown): boolean {\n  switch (def.type) {\n    case 'boolean':\n      return typeof value === 'boolean'\n    case 'number':\n      return addonScalarValueMatchesSpec(value, { kind: 'number', ...(def.min !== undefined ? { min: def.min } : {}), ...(def.max !== undefined ? { max: def.max } : {}) })\n    case 'string':\n      return addonScalarValueMatchesSpec(value, {\n        kind: 'string',\n        ...(def.maxLength !== undefined ? { maxLength: def.maxLength } : {}),\n        ...(def.enum !== undefined ? { enum: def.enum } : {}),\n      })\n    case 'array': {\n      if (!Array.isArray(value)) return false\n      if (def.minItems !== undefined && value.length < def.minItems) return false\n      if (def.maxItems !== undefined && value.length > def.maxItems) return false\n      return value.every((entry) => addonScalarValueMatchesSpec(entry, def.items))\n    }\n    case 'object': {\n      if (!isRecord(value)) return false\n      const fieldKeys = new Set(def.fields.map((field) => field.key))\n      const valueKeys = Object.keys(value)\n      if (valueKeys.length !== fieldKeys.size || !valueKeys.every((key) => fieldKeys.has(key))) return false\n      return def.fields.every((field) => addonScalarValueMatchesSpec(value[field.key], field))\n    }\n  }\n}",
       "AddonSettingSource": "/** 生效值来源（规格 5.4：区分出厂默认、用户默认与工作区覆盖） */\nexport type AddonSettingSource = 'default' | 'user' | 'workspace'",
       "resolveAddonSettingLayer": "/**\n * 作用范围解析：工作区显式合法值 > 用户默认显式合法值 > 出厂默认。\n * 显式值非法（定义升级后存量漂移）视为该层未设置——跳过继续下层，\n * 不从存储删除（存储原值保留，定义回退后自动恢复生效）。\n */\nexport function resolveAddonSettingLayer(\n  def: AddonSettingDefinition,\n  userValue: unknown,\n  workspaceValue: unknown,\n): { value: AddonSettingValue; source: AddonSettingSource } {\n  if (workspaceValue !== undefined && addonSettingValueMatches(def, workspaceValue)) {\n    return { value: workspaceValue as AddonSettingValue, source: 'workspace' }\n  }\n  if (userValue !== undefined && addonSettingValueMatches(def, userValue)) {\n    return { value: userValue as AddonSettingValue, source: 'user' }\n  }\n  return { value: addonSettingDefault(def), source: 'default' }\n}",

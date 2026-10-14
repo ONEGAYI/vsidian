@@ -115,13 +115,19 @@ try {
   }, hostState)
   await page.evaluate(({ state, defs }) => {
     window.__hostState = state
+    window.__defs = defs
     window.__addonsState = () => ({
       kind: 'addons.state', apiVersion: '1.0.0', draft: true, openAddonSettingsPage: null, openAddonSettings: window.__hostState.open,
-      addons: [{ id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: window.__hostState.enabled.effective, hasSettingsPage: false, hasSettingsDefinitions: true }],
+      addons: [{ id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: window.__hostState.enabled.effective, hasSettingsPage: false, hasSettingsDefinitions: true,
+        // #472 搜索摘要随 addons.state 既有链路（mock 与生产 wiring 同形）
+        settingsSearchIndex: {
+          definitions: window.__defs.map((def) => ({ key: def.key, title: def.title, ...(def.description !== undefined ? { description: def.description } : {}) })),
+          ...(window.__hostState.groups ? { groups: window.__hostState.groups } : {}),
+        } }],
     })
     window.__settingsState = () => {
       const values = {}
-      for (const def of defs) {
+      for (const def of window.__defs) {
         const fallback = def.type === 'object' ? Object.fromEntries(def.fields.map((field) => [field.key, field.default])) : def.default
         values[def.key] = { effective: fallback, source: 'default', ...(window.__hostState.values[def.key] ?? {}) }
       }
@@ -130,7 +136,9 @@ try {
         open: window.__hostState.open, hasWorkspace: window.__hostState.hasWorkspace,
         addon: window.__hostState.open === null ? null : {
           addonId: 'fixture.demo', label: 'Demo', faulted: false, hasCustomPage: false,
-          enabled: window.__hostState.enabled, definitions: defs, values,
+          enabled: window.__hostState.enabled, definitions: window.__defs,
+          ...(window.__hostState.groups ? { groups: window.__hostState.groups } : {}),
+          values,
         },
         openAddonSettingsPage: null,
         ...(window.__hostState.notice !== undefined ? { notice: window.__hostState.notice } : {}),
@@ -373,9 +381,118 @@ try {
     '#467 保存回推后焦点回到数组保存按钮')
   await page.setViewportSize({ width: 1100, height: 760 })
 
+  // ---- 13. #472 设置定义分组：组容器/组标题/组描述呈现 + 全局搜索跨组件定位 ----
+  // 运行时换组化定义集（strategy/note 进组、其余未分组）+ 组声明（title
+  // 多语言映射、description 直值——AddonLocalizedText 两形态），推送
+  // settingsState 重渲染（与生产宿主推送同链路）
+  await page.evaluate(() => {
+    window.__defs = [
+      { key: 'flag', title: '开关项', type: 'boolean', default: true },
+      { key: 'threshold', title: '阈值', type: 'number', min: 1, max: 100, default: 20 },
+      { key: 'strategy', title: '空格策略', type: 'string', enum: ['none', 'soft', 'strict'], default: 'soft', group: 'appearance',
+        enumLabels: { none: { 'zh-cn': '不要求空格', en: 'No spaces' }, soft: { 'zh-cn': '软空格', en: 'Soft spaces' } } },
+      { key: 'note', title: '备注', type: 'string', multiline: true, maxLength: 20, default: '行一', group: 'appearance' },
+    ]
+    window.__hostState.groups = [
+      { key: 'appearance', title: { 'zh-cn': '外观', en: 'Appearance' }, description: '观感相关' },
+    ]
+    // 搜索摘要随 addons.state 既有链路刷新（全局索引用），组声明随
+    // settingsState 透传——两条既有推送，与生产宿主同形
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: window.__addonsState() }))
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: window.__settingsState() }))
+  })
+  await area.waitFor()
+  // 组标题与组描述：用户可见文本按当前语言取值（zh-cn 页面）——组描述
+  // 文本「观感相关」唯一定位组卡片（filter 相对语义，不嵌套绝对定位器）
+  const groupCard = area.locator('.vsidian-settings-group').filter({ hasText: '观感相关' })
+  await groupCard.waitFor()
+  assert.equal(await groupCard.locator('.vsidian-settings-group-title').innerText(), '外观', '组标题按当前语言选值（映射取 zh-cn 键）')
+  assert.match(await groupCard.innerText(), /观感相关/, '组描述（直值）呈现在组卡片内')
+  assert.equal(await groupCard.innerText().then((t) => /开关项/.test(t)), false, '组容器只收组内定义（聚拢不散插）')
+  const firstCard = area.locator('.vsidian-settings-group').first()
+  assert.equal(await firstCard.locator('.vsidian-settings-group-title').count(), 0, '首容器无组标题（开关行 + 未分组项恒置顶）')
+  assert.match(await firstCard.innerText(), /开关项|阈值/, '未分组定义留在首容器')
+  // 绘制层：组卡片间距档位（20px）与组标题分隔线（形态未注入即失败）
+  const groupPaint = await groupCard.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { radius: cs.borderRadius, marginTop: cs.marginTop, title: getComputedStyle(el.querySelector('.vsidian-settings-group-title')).borderBottomWidth }
+  })
+  assert.equal(groupPaint.radius, '10px', '组卡片圆角 10px 档位')
+  assert.equal(groupPaint.marginTop, '20px', '组卡片间距 20px 档位')
+  assert.equal(groupPaint.title, '1px', '组标题通栏下边线在场')
+  await page.screenshot({ path: path.join(artifacts, 'settings-area-grouped.png') })
+
+  // 全局搜索：组标题命中归「组件设置」分组，点击跨组件定位组容器
+  const search = page.locator('input.vsidian-settings-search')
+  await search.fill('外观')
+  const groupHit = page.locator('.vsidian-settings-result', { hasText: zhCn['settings.addonSettingsSection'] }).filter({ hasText: '外观' }).first()
+  await groupHit.waitFor()
+  await groupHit.click()
+  await area.waitFor()
+  const locatedCard = area.locator('.vsidian-settings-group.vsidian-settings-item-located')
+  await locatedCard.waitFor()
+  assert.match(await locatedCard.innerText(), /外观/, '组级定位描组容器')
+  const locatedPaint = await locatedCard.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { width: cs.outlineWidth, style: cs.outlineStyle, offset: cs.outlineOffset }
+  })
+  assert.equal(locatedPaint.width, '1px', '定位高亮外框宽度（绘制层）')
+  assert.equal(locatedPaint.style, 'solid', '定位高亮外框样式（绘制层）')
+  assert.equal(locatedPaint.offset, '8px', '定位高亮外框偏移档位')
+  await page.screenshot({ path: path.join(artifacts, 'settings-area-group-located.png') })
+
+  // 定义级定位：搜索定义标题命中并定位到定义行（落点唯一——行不描容器）
+  await search.fill('阈值')
+  const defHit = page.locator('.vsidian-settings-result', { hasText: zhCn['settings.addonSettingsSection'] }).filter({ hasText: '阈值' }).first()
+  await defHit.waitFor()
+  await defHit.click()
+  await area.waitFor()
+  const locatedRow = area.locator('.vsidian-addons-setting-item.vsidian-settings-item-located')
+  await locatedRow.waitFor()
+  assert.match(await locatedRow.innerText(), /阈值/, 'def 级定位描定义行')
+  assert.equal(await area.locator('.vsidian-settings-group.vsidian-settings-item-located').count(), 0, 'def 级定位不描组容器（落点唯一）')
+
+  // ---- 13b. #472 挂起定位的真实布局滚动（评审轮修复回归） ----
+  // 长定义集（远超一屏）+ 窄视口 + 设置区关闭态：经全局搜索点击末位组内
+  // 定义 → 发 settingsOpen → 应答渲染定位——断言主区滚到目标行且不被
+  // #467 滚动守卫的 restore 写回（定位语义优先于锚点恢复）
+  await page.evaluate(() => {
+    const longDefs = [{ key: 'flag', title: '开关项', type: 'boolean', default: true }]
+    for (let i = 1; i <= 30; i++) longDefs.push({ key: `opt${i}`, title: `选项 ${String(i).padStart(2, '0')}`, type: 'boolean', default: false })
+    longDefs.push({ key: 'farTheme', title: '远端主题', type: 'string', default: 'light', group: 'appearance' })
+    window.__defs = longDefs
+    window.__hostState.open = null
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: window.__addonsState() }))
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: window.__settingsState() }))
+  })
+  await page.locator('.vsidian-addons-settings-hub').waitFor()
+  await page.setViewportSize({ width: 1100, height: 320 })
+  await page.evaluate(() => { window.sentMessages.length = 0 })
+  const search13b = page.locator('input.vsidian-settings-search')
+  await search13b.fill('远端主题')
+  const farHit = page.locator('.vsidian-settings-result', { hasText: zhCn['settings.addonSettingsSection'] }).filter({ hasText: '远端主题' }).first()
+  await farHit.waitFor()
+  await farHit.click()
+  await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsOpen' && m.addonId === 'fixture.demo'))
+  const area13b = page.locator('.vsidian-addons-settings')
+  await area13b.waitFor()
+  const locatedRow13b = area13b.locator('.vsidian-addons-setting-item.vsidian-settings-item-located')
+  await locatedRow13b.waitFor()
+  assert.match(await locatedRow13b.innerText(), /远端主题/, '挂起定位到达后目标行高亮')
+  const scrolled = await main.evaluate((el) => el.scrollTop)
+  assert.ok(scrolled > 0, `定位滚动应落位且不被滚动守卫写回（实际 scrollTop ${scrolled}）`)
+  const inViewport = await locatedRow13b.evaluate((el) => {
+    const rect = el.getBoundingClientRect()
+    return rect.top >= 0 && rect.bottom <= window.innerHeight
+  })
+  assert.equal(inViewport, true, '目标行在视口内（真实布局定位）')
+  await page.setViewportSize({ width: 1100, height: 760 })
+  await page.screenshot({ path: path.join(artifacts, 'settings-area-pending-located.png') })
+
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
   console.log('[#353] 附加组件基础设置区浏览器回归通过（双标签/标量数组对象/清覆盖/失败反馈）')
   console.log('[#467] 附加分页推送链路滚动与焦点保持通过（复选框/功能开关/数组保存 × 中部滚动）')
+  console.log('[#472] 设置定义分组浏览器回归通过（组容器/组标题档位/搜索跨组件定位 def+group）')
 } finally {
   await browser.close()
 }

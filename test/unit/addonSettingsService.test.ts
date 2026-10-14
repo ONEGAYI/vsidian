@@ -399,3 +399,88 @@ describe('#395 P3 设置回写等值短路（同值不落盘不发事件）', ()
     expect(service.effectiveSnapshot('a.demo').values['threshold']).toBe(60)
   })
 })
+
+// ---- #472 设置定义分组：组声明注册、引用校验与搜索摘要 ----
+
+describe('#472 设置服务：组声明注册与引用校验', () => {
+  const GROUPED: readonly AddonSettingDefinition[] = [
+    { key: 'flag', title: '开关', type: 'boolean', default: true, group: 'basic' },
+    { key: 'theme', title: '主题', type: 'string', default: 'light', group: 'appearance' },
+    { key: 'threshold', title: '阈值', type: 'number', default: 10, group: 'appearance' },
+    { key: 'legacy', title: '未分组项', type: 'boolean', default: false },
+  ]
+  const GROUPS = [
+    { key: 'basic', title: { 'zh-cn': '基础', en: 'Basic' } },
+    { key: 'appearance', title: '外观', description: '观感相关' },
+  ]
+
+  it('带组声明注册成功；groupsOf 按声明序；未分组定义留在定义集（渲染聚拢归 webview）', () => {
+    const service = new AddonSettingsService(memoryPersistence())
+    expect(service.registerDefinitions('a.demo', GROUPED, GROUPS)).toEqual({ ok: true })
+    expect(service.groupsOf('a.demo')).toEqual(GROUPS)
+    expect(service.definitionsOf('a.demo')).toHaveLength(4)
+    expect(service.groupsOf('b.other')).toEqual([])
+  })
+
+  it('组键重复拒绝：批内重复与跨批重复（组元数据只声明一次）', () => {
+    const service = new AddonSettingsService(memoryPersistence())
+    const dupInBatch = service.registerDefinitions('a.demo', [GROUPED[0]!], [
+      { key: 'basic', title: '基础' },
+      { key: 'basic', title: '重复' },
+    ])
+    expect(dupInBatch.ok).toBe(false)
+    expect(service.definitionsOf('a.demo')).toEqual([])
+    expect(service.groupsOf('a.demo')).toEqual([])
+    // 跨批：第一批声明 basic 后，第二批再声明 basic 拒绝
+    expect(service.registerDefinitions('a.demo', [GROUPED[0]!], [{ key: 'basic', title: '基础' }]).ok).toBe(true)
+    const dupCrossBatch = service.registerDefinitions('a.demo', [GROUPED[1]!], [{ key: 'basic', title: '重复' }])
+    expect(dupCrossBatch.ok).toBe(false)
+    expect(service.definitionsOf('a.demo')).toHaveLength(1)
+  })
+
+  it('定义引用未声明组键整批拒绝（合法项不落地、组声明不落地）', () => {
+    const service = new AddonSettingsService(memoryPersistence())
+    const result = service.registerDefinitions('a.demo', GROUPED, [{ key: 'basic', title: '基础' }])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('invalid-definitions')
+    expect(service.definitionsOf('a.demo')).toEqual([])
+    expect(service.groupsOf('a.demo')).toEqual([])
+  })
+
+  it('后批定义可引用前批声明的组（同 setup 代次追加；组键集合累积）', () => {
+    const service = new AddonSettingsService(memoryPersistence())
+    expect(service.registerDefinitions('a.demo', [GROUPED[0]!], [{ key: 'basic', title: '基础' }]).ok).toBe(true)
+    expect(service.registerDefinitions('a.demo', [{ key: 'extra', title: '追加项', type: 'boolean', default: true, group: 'basic' }]).ok).toBe(true)
+    expect(service.definitionsOf('a.demo')).toHaveLength(2)
+  })
+
+  it('组声明形状非法整批拒绝（title 非法 / key 空）', () => {
+    const service = new AddonSettingsService(memoryPersistence())
+    expect(service.registerDefinitions('a.demo', [GROUPED[0]!], [{ key: 'basic', title: 42 }]).ok).toBe(false)
+    expect(service.registerDefinitions('a.demo', [GROUPED[0]!], [{ key: '', title: '空键' }]).ok).toBe(false)
+    expect(service.definitionsOf('a.demo')).toEqual([])
+  })
+
+  it('clearDefinitions 清组：新代次重新声明同名组不受旧声明影响', () => {
+    const service = new AddonSettingsService(memoryPersistence())
+    service.registerDefinitions('a.demo', GROUPED, GROUPS)
+    service.clearDefinitions('a.demo')
+    expect(service.groupsOf('a.demo')).toEqual([])
+    expect(service.registerDefinitions('a.demo', [GROUPED[3]!], [{ key: 'appearance', title: '新声明' }]).ok).toBe(true)
+    expect(service.groupsOf('a.demo')).toEqual([{ key: 'appearance', title: '新声明' }])
+  })
+
+  it('searchIndexOf 返回定义摘要与组元数据（全局搜索索引数据源；无定义为 undefined）', () => {
+    const service = new AddonSettingsService(memoryPersistence())
+    expect(service.searchIndexOf('a.demo')).toBeUndefined()
+    const described = { key: 'theme', title: '主题', description: '配色主题', type: 'string' as const, default: 'light', group: 'appearance' }
+    service.registerDefinitions('a.demo', [described, GROUPED[0]!], GROUPS)
+    expect(service.searchIndexOf('a.demo')).toEqual({
+      definitions: [
+        { key: 'theme', title: '主题', description: '配色主题' },
+        { key: 'flag', title: '开关' },
+      ],
+      groups: GROUPS,
+    })
+  })
+})

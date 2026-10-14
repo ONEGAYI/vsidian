@@ -207,4 +207,7 @@ export interface AddonStatusEntry {
   /** #353 T04 已注册设置定义（「基础设置」入口可见性；故障暂停时定义
    *  保留——入口仍在，平台基础控件可用） */
   hasSettingsDefinitions?: boolean
+  /** #472 定义搜索摘要（全局搜索索引数据源——定义 title/description 与组
+   *  声明随 addons.state 既有链路推送；仅已注册有定义组件附带） */
+  settingsSearchIndex?: import('./addonSettings').AddonSettingsSearchIndex
 }
