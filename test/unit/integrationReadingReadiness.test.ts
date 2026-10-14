@@ -110,3 +110,78 @@ it('大纲初始采样等待当前档圆点绘制，拒绝侧栏过渡期的裁�
   expect(sample({ sidebar: { open: true }, outline: { ...outline, chevronPainted: false } })).toBe(false)
   expect(sample({ sidebar: { open: true }, outline })).toBe(true)
 })
+
+it('P2-14 保存采样同时等待目标文档干净和新内容落盘（#446 条目 20）', async () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'poll' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text.startsWith('孙目标保存落盘') &&
+      node.arguments[1]?.getText(source).includes('p214-组合C.md')) {
+      callbacks.push(node.arguments[1]!)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})();`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('readDisk', 'cDoc', code)
+  await expect(sample(async () => '【三层孙】', { isDirty: true })).resolves.toBeUndefined()
+  await expect(sample(async () => '旧内容', { isDirty: false })).resolves.toBeUndefined()
+  await expect(sample(async () => '【三层孙】', { isDirty: false })).resolves.toBe(true)
+})
+
+it('T15 装载等待读取目标页面当前状态，日志淘汰不能造成永久等待（#446 条目 7/17）', async () => {
+  const addonId = 'vsidian-example.ui-command'
+  // 公开事件命令返回的截断快照，不依赖宿主记录器的私有实现。
+  const events: unknown[] = Array.from({ length: 200 }, () => ({
+    panel: 'editor', kind: 'outbound.request', addonId: 'other-addon', topic: 'next',
+  }))
+
+  const cases = ts.createSourceFile('addonT15Cases.ts', readFileSync('test/integration/suite/addonT15Cases.ts', 'utf8'),
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const waiters = cases.statements.filter((node): node is ts.FunctionDeclaration =>
+    ts.isFunctionDeclaration(node) && node.name?.text === 'waitForPageLoaded')
+  expect(waiters).toHaveLength(1)
+  let snapshot: unknown = { addonPage: { active: [{ addonId, generation: 1 }] } }
+  const wait = new Function('vscode', 'poll', 'wsUri', ts.transpile(`${waiters[0]!.getText(cases)}; return waitForPageLoaded;`,
+    { target: ts.ScriptTarget.ES2022 }))(
+    { commands: { executeCommand: async (command: string, uri: string) => {
+      if (command === 'onegayi.vsidian._test.addonPageEvents') return events
+      expect(command).toBe('onegayi.vsidian._test.requestViewState')
+      expect(uri).toBe('file:///t15-ui.md')
+      return snapshot
+    } } },
+    async (_label: string, sample: () => Promise<unknown>) => {
+      if (await sample() === undefined) throw new Error('页面已装载，等待仍未完成')
+    },
+    (file: string) => ({ toString: () => `file:///${file}` }),
+  )
+  await expect(wait(addonId, 't15-ui.md')).resolves.toBeUndefined()
+  // 旧成功日志不能放行已卸载的当前页面，其他组件活跃也不能抵数。
+  events.push({ kind: 'outbound.loaded', addonId, ok: true })
+  for (snapshot of [undefined, { addonPage: { active: [] } }, { addonPage: { active: [{ addonId: 'other-addon' }] } }]) {
+    await expect(wait(addonId, 't15-ui.md')).rejects.toThrow('页面已装载，等待仍未完成')
+  }
+})
+
+it('T15 的装载采样必须指向刚打开的目标文件', () => {
+  const cases = ts.createSourceFile('addonT15Cases.ts', readFileSync('test/integration/suite/addonT15Cases.ts', 'utf8'),
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  let checked = 0
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'waitForPageLoaded') {
+      const statement = node.parent.parent
+      const block = statement.parent
+      expect(ts.isBlock(block)).toBe(true)
+      if (!ts.isBlock(block)) throw new Error('装载等待必须位于用例块')
+      const previous = block.statements[block.statements.indexOf(statement as ts.Statement) - 1]!
+      expect(ts.isExpressionStatement(previous) && previous.expression.getText(cases)).toContain('openEditorPanel')
+      const open = (previous as ts.ExpressionStatement).expression as ts.AwaitExpression
+      expect(node.arguments[1]!.getText(cases)).toBe((open.expression as ts.CallExpression).arguments[0]!.getText(cases))
+      checked++
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(cases)
+  expect(checked).toBe(7)
+})

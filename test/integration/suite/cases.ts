@@ -15989,8 +15989,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'embed.test.save', inner: 'p214-组合C', occurrence: 0,
     })
-    await poll('孙目标保存落盘', async () =>
-      (await readDisk('p214-组合C.md')).includes('【三层孙】') ? true : undefined)
+    await poll('孙目标保存落盘且干净', async () =>
+      (await readDisk('p214-组合C.md')).includes('【三层孙】') && !cDoc.isDirty ? true : undefined)
     assert(!cDoc.isDirty, '保存后 C 干净')
     assert(await readDisk('p214-组合父A.md') === aBefore, '保存孙目标不落 A 盘')
     assert(await readDisk('p214-组合B.md') === bBefore, '保存孙目标不落 B 盘')

@@ -130,15 +130,17 @@ async function ensureEnabled(addonId: string): Promise<void> {
   assert(final?.runState === 'enabled', `样例 ${addonId} 未收敛到 enabled（${final?.runState ?? 'null'}）`)
 }
 
-/** 样例页面装载完成（面板桥 loaded 事件） */
-async function waitForPageLoaded(addonId: string): Promise<void> {
+/** 等目标页面的当前活跃装载；短期事件日志会被通道轮询淘汰。 */
+async function waitForPageLoaded(addonId: string, file: string): Promise<void> {
   await poll(`页面装载 ${addonId}`, async () => {
-    const events = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<{ kind: string; addonId: string; ok?: boolean }>
-    return events.some((e) => e.addonId === addonId && e.kind === 'outbound.loaded' && e.ok === true) ? true : undefined
+    const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', wsUri(file).toString(), 0)) as
+      | { addonPage?: { active: Array<{ addonId: string }> } } | undefined
+    return state?.addonPage?.active.some((entry) => entry.addonId === addonId) ? true : undefined
   }, 30000, async () => {
-    // 诊断：全部页面事件（定位「宿主未下发」vs「装载失败 ok:false」）
     const events = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonPageEvents')) as Array<Record<string, unknown>>
-    return `addonPageEvents=${JSON.stringify(events.slice(-12))}`
+    const state = (await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', wsUri(file).toString(), 0)) as
+      | { addonPage?: unknown } | undefined
+    return `addonPage=${JSON.stringify(state?.addonPage)}；addonPageEvents=${JSON.stringify(events.filter((e) => e['addonId'] === addonId))}`
   })
 }
 
@@ -155,7 +157,7 @@ export const addonT15InputCases: Array<[string, () => Promise<void>]> = [
     // 放行 + 打开面板（页面装载时经公开通道询问门控）
     await vscode.commands.executeCommand(`${INPUT_ID}.armBehaviors`)
     await openEditorPanel('t15-input.md')
-    await waitForPageLoaded(INPUT_ID)
+    await waitForPageLoaded(INPUT_ID, 't15-input.md')
     // 行为目录对账：三条行为注册上报（宿主权威目录）
     await poll('行为目录出现三条', async () => {
       const catalog = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorCatalog')) as Array<{ addonId: string; id: string }>
@@ -200,7 +202,7 @@ export const addonT15InputCases: Array<[string, () => Promise<void>]> = [
     await vscode.workspace.applyEdit(edit)
     await doc.save()
     await openEditorPanel('t15-input.md')
-    await waitForPageLoaded(INPUT_ID)
+    await waitForPageLoaded(INPUT_ID, 't15-input.md')
     // 设置默认值断言（出厂默认：三开关全开，来源 default）
     const settings = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsGet', { addonId: INPUT_ID })) as
       | { values: Record<string, unknown>; sources: Record<string, string> }
@@ -279,7 +281,7 @@ export const addonT15RendererCases: Array<[string, () => Promise<void>]> = [
     await ensureEnabled(RENDERER_ID)
     await vscode.commands.executeCommand(`${RENDERER_ID}.armProviders`)
     await openEditorPanel('t15-render.md')
-    await waitForPageLoaded(RENDERER_ID)
+    await waitForPageLoaded(RENDERER_ID, 't15-render.md')
     // 生效表：安装后自动接管（无额外选择）——mermaid-lite 接内置 mermaid、
     // sampleflow 确定性默认序（flow-boxed < flow-buggy < flow-plain 字典序
     // 末位 plain 生效）
@@ -311,7 +313,7 @@ export const addonT15RendererCases: Array<[string, () => Promise<void>]> = [
     await ensureEnabled(RENDERER_ID)
     await vscode.commands.executeCommand(`${RENDERER_ID}.armProviders`)
     await openEditorPanel('t15-render.md')
-    await waitForPageLoaded(RENDERER_ID)
+    await waitForPageLoaded(RENDERER_ID, 't15-render.md')
     await waitForProviderPaint('t15-render.md', `${RENDERER_ID}/mermaid-lite`, 'mermaid')
     // 建立首选：mermaid-lite（恢复后按原选择显示）
     await prefer('mermaid', `${RENDERER_ID}/mermaid-lite`)
@@ -393,7 +395,7 @@ export const addonT15UiCases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(`${UI_ID}.reset`)
     await vscode.commands.executeCommand(`${UI_ID}.armUi`)
     await openEditorPanel('t15-ui.md')
-    await waitForPageLoaded(UI_ID)
+    await waitForPageLoaded(UI_ID, 't15-ui.md')
     // 命令目录：两条命令注册（宿主权威目录；命名空间 ID 由平台注入）
     const catalogRow = await poll('命令目录出现样例命令', async () => {
       const result = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonCommands')) as
@@ -451,7 +453,7 @@ export const addonT15UiCases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsUpdate', { addonId: UI_ID, scope: 'user', values: { autoOpenPanel: true } })
     await closeActiveEditor()
     await openEditorPanel('t15-ui.md')
-    await waitForPageLoaded(UI_ID)
+    await waitForPageLoaded(UI_ID, 't15-ui.md')
     // 重开装载：autoOpenPanel=true → 注册后自动 open（开态 + mount 事件
     // 双证据——面板绘制层几何断言在 autoOpen 路径上受装载早期 dock 装配
     // 时序影响，以 mount 完成事件与宿主权威开态为准；用户手动打开路径
@@ -479,7 +481,7 @@ export const addonT15UiCases: Array<[string, () => Promise<void>]> = [
     await ensureEnabled(UI_ID)
     await vscode.commands.executeCommand(`${UI_ID}.armUi`)
     await openEditorPanel('t15-ui.md')
-    await waitForPageLoaded(UI_ID)
+    await waitForPageLoaded(UI_ID, 't15-ui.md')
     // 分层默认：出厂默认 iso / default 来源
     let settings = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsGet', { addonId: UI_ID })) as
       | { values: Record<string, unknown>; sources: Record<string, string> }

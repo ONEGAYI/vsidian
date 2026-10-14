@@ -422,3 +422,31 @@ VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/b
 推送前同步main的拖放光标、阅读布局与Live选区修正：678a4972上的完整Vitest8013/8013、Node193/193与wikilinkSuggest48/48通过；进一步同步eee043c6，compile/类型、完整Vitest8016/8016、Node193/193与浏览器48/48通过。新基线文件树strict报三项已有漏录：dropCursorPaint.mjs、dropCursorPaintFixture.ts和readingMermaidMarginCssContract.test.ts，基线tree.json同样缺少；本票两项职责更新正确，保留该基线问题，不称最终全树strict通过。
 
 证据：本树out/test/highlight19-original-solo.log、clock-red.log、public-trace-red.log / green.log、session-green.log、compile.log及diagnosis.md（同组文件均带highlight19-前缀）。交付归档D:/.codex/evidence/vsidian-highlight19-20261014/；临时DEBUG-highlight19输出已从测试移除。
+
+## #446 条目20：P2-14保存等待弱于文档干净断言（初步修正，2026-10-14）
+
+主线CI38564195639的第3片101/102，三层引用组合用例在磁盘已包含新编辑文本后，紧接的“保存后C干净”断言失败，1328ms。原等待只验证磁盘内容，未验证后续断言要求的TextDocument.isDirty状态。
+
+直接执行P2-14实际采样回调：磁盘含新文本、文档仍dirty时旧回调放行，53ms稳定红。候选同次采样在读取磁盘后检查文档干净；永久契约同时拒绝“已落盘但仍dirty”和“文档干净但磁盘仍旧”，两项齐备才完成。原20秒预算、dirty断言、A/B零落盘、干净关闭与订阅回收均保留，生产保存实现与core分组不变。
+
+初始基线12d39c89上，开发态真实VSCode1.82.3加载本树产物，目标用例2599ms通过；实际采样8/8、compile/类型、完整Vitest8017/8017与Node193/193通过。本轮确认的是测试等待条件缺口，历史没有保存完成和dirty事件时间线，不将dirty滞后的具体阶段说满。持续dirty仍会在原预算内失败，等待后的再次置dirty仍由原断言拦截。
+
+推送前同步main56e03882的多光标IME/API修正，重新compile/类型、完整Vitest8024/8024与Node193/193通过，真实目标用例2461ms通过。采样名称明确为“孙目标保存落盘且干净”，持续失败时不会仅报告磁盘条件。
+
+文件树仅更新本票三项职责；初始基线三项漏录保留，同步后另有main新增multicursorIme.mjs/Fixture.ts两项漏录，共五项，未称全树strict通过。证据为out/test/save20-callback-red-final.log、callback-green.log、native.log / native-report.log、compile.log、unit-full.log、rebased-unit.log、rebased-native.log及diagnosis.md（同组文件均带save20前缀）。候选CI与本机初步验证分开记录，其他未归因项不联动勾销。
+
+## #446 条目7/17：T15装载等待依赖短期事件日志（初步修正，2026-10-14）
+
+PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待页面装载30秒超时。第3片P2-14与其余十项检查通过；原失败保留，没有直接重跑。原报告只有全局事件尾部，未记录目标页面的装载快照。
+
+抽取并执行生产recordEvent与集成waitForPageLoaded：loaded成功事件随后被200条其他通道请求淘汰，目标页面仍活跃，旧等待却未完成，21ms稳定红。事件缓冲只保留最近200条，不能承担当前装载状态查询。
+
+既有等待改读目标文件的view.state.addonPage.active，七个调用点显式绑定刚打开的文件。三套样例的后续目录、行为、命令、绘制与设置断言、30秒预算、生产装载器及事件容量均保留。活跃装载不等于异步工厂所有贡献已就绪；后续断言继续验证贡献。失败诊断包含目标页面装载快照与该组件事件，避免高频通道请求覆盖有用的尾部。
+
+永久回放验证日志淘汰后可完成、缺少页面/已卸载/其他组件活跃仍不能放行；另验证七个等待地址与刚打开文件一致。本轮实现一度把渲染文件写成t15-renderer.md，地址契约先红后修正为实际t15-render.md，不把这次实现错误当历史根因。就绪契约10/10、compile/类型通过，真实VSCode1.82.3开发态独立桌面的T15六个完整用例通过（界面目标2840ms、输入2778ms）。
+
+本轮证明测试观测缺口，历史CI缺少完整目标事件时间线，尚不能把条目7/17每次失败都归为日志淘汰，两项继续未定因跟踪。其余条目5/6/9/12/14本机对照均通过，已在Issue补证据，未拿到目标红的路径未修改或勾销。证据为out/test/t15-ring-red.log、ring-green.log、target-contract-red.log、final-callback.log、all-native.log / all-native-report.log、compile.log及ring-diagnosis.md（同组文件均带t15前缀）；候选CI与本机结果分开记录。
+
+基线56e03882上完整Vitest8026/8026与Node193/193通过。文件树相关职责由维护入口更新；全树严格检查仍仅为前节列出的五项主线既有漏录，没有新增漏录。
+
+独立审查发现永久测试不应绑定生产私有recordEvent变量名。实际记录器抽取回放留在忽略目录作为诊断证据；永久回归通过公开命令mock提供独立截断快照，并执行真实等待函数。公开边界旧等待仍先红（t15-public-red.log），修正后10/10通过（t15-public-green.log），不为测试新增生产接口。
