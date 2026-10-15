@@ -10,6 +10,9 @@ import {
   isSettingDefinition,
   sanitizeStoredSettings,
   settingsDefaults,
+  LINK_INSERT_PATH_TYPE_DEFAULT,
+  LINK_INSERT_PATH_TYPE_KEY,
+  PRODUCTION_SETTING_DEFINITIONS,
   type SettingDefinition,
 } from '../../src/shared/settings'
 import { SettingsService, type SettingsStorage } from '../../src/host/settingsService'
@@ -187,5 +190,70 @@ describe('设置页下拉控件渲染与交互', () => {
     expect(
       parent.querySelectorAll(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`),
     ).toHaveLength(1)
+  })
+})
+
+describe('生产设置 link.insertPathType（#556 T5 三档「内部链接类型」）', () => {
+  const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === LINK_INSERT_PATH_TYPE_KEY)
+
+  it('注册：三档 shortest/relative/absolute，默认 relative，选项文案键按值域齐备', () => {
+    expect(def, 'link.insertPathType 应注册进生产定义表').toBeTruthy()
+    expect(def!.type).toBe('string')
+    if (def!.type !== 'string' || !('enum' in def!)) {
+      throw new Error('link.insertPathType 应为 string 枚举定义')
+    }
+    expect(def!.enum).toEqual(['shortest', 'relative', 'absolute'])
+    expect(def!.default).toBe('relative')
+    expect(def!.optionLabelKeys).toEqual({
+      shortest: 'setting.linkInsertPathTypeShortest',
+      relative: 'setting.linkInsertPathTypeRelative',
+      absolute: 'setting.linkInsertPathTypeAbsolute',
+    })
+    // 键常量成对导出（消费方 import 常量，避免字面量漂移）
+    expect(LINK_INSERT_PATH_TYPE_KEY).toBe('link.insertPathType')
+    expect(LINK_INSERT_PATH_TYPE_DEFAULT).toBe('relative')
+  })
+
+  it('文案：zh-cn 标题/描述/选项为用户给定文案（逐字）', () => {
+    expect(zhCn['setting.linkInsertPathType.title']).toBe('内部链接类型')
+    expect(zhCn['setting.linkInsertPathType.description'])
+      .toBe('设置在笔记中链接其他文件时插入“[[ ]]”中的文件路径类型。')
+    expect(zhCn['setting.linkInsertPathTypeShortest']).toBe('尽可能简短的形式')
+    expect(zhCn['setting.linkInsertPathTypeRelative']).toBe('基于当前笔记的相对路径')
+    expect(zhCn['setting.linkInsertPathTypeAbsolute']).toBe('基于文件系统的绝对路径')
+  })
+
+  it('存量清洗与补丁：值域内保留，值域外/类型不符恢复默认，非法补丁整批拒绝', () => {
+    expect(settingsDefaults([def!])).toEqual({ 'link.insertPathType': 'relative' })
+    expect(sanitizeStoredSettings([def!], { 'link.insertPathType': 'absolute' }))
+      .toEqual({ 'link.insertPathType': 'absolute' })
+    expect(sanitizeStoredSettings([def!], { 'link.insertPathType': 'link' }))
+      .toEqual({ 'link.insertPathType': 'relative' })
+    const current = settingsDefaults([def!])
+    expect(applySettingsPatch([def!], current, { 'link.insertPathType': 'shortest' })).toEqual({
+      ok: true,
+      merged: { 'link.insertPathType': 'shortest' },
+    })
+    const rejected = applySettingsPatch([def!], current, { 'link.insertPathType': 'url' })
+    expect(rejected.ok).toBe(false)
+  })
+
+  it('profile 级持久化与重开读回（SettingsStorage 替身 → 新实例同持久层）', async () => {
+    const store: Record<string, unknown> = {}
+    const storage: SettingsStorage = {
+      get: <T,>(key: string) => store[key] as T | undefined,
+      update: (key: string, value: unknown) => {
+        store[key] = value
+        return Promise.resolve()
+      },
+    }
+    const service = new SettingsService(storage, [def!])
+    const saved = await service.apply({ 'link.insertPathType': 'absolute' })
+    expect(saved.ok).toBe(true)
+    expect(service.getSnapshot()['link.insertPathType']).toBe('absolute')
+    // 新实例从同一持久层读回（重开窗口语义）
+    expect(
+      new SettingsService(storage, [def!]).getSnapshot()['link.insertPathType'],
+    ).toBe('absolute')
   })
 })

@@ -93,6 +93,8 @@ import {
   rankWikilinkCandidates,
   wikilinkFileCandidateSafe,
   type WikilinkCandidateFile,
+  type WikilinkInsertPathMode,
+  type WikilinkInsertPathOptions,
 } from '../shared/wikilinkQuery'
 import {
   classifyVaultFileCategory,
@@ -2916,6 +2918,7 @@ export class VaultIndexService {
     query: string,
     offset = 0,
     limit = WIKILINK_QUERY_LIMIT,
+    opts?: { insertPathType?: WikilinkInsertPathMode },
   ):
     | { status: 'unavailable'; reason: 'no-workspace' | 'not-ready' }
     | { status: 'ready'; updating: boolean; total: number; catalogGen: number; items: WikilinkCandidateItem[] } {
@@ -2930,9 +2933,17 @@ export class VaultIndexService {
     if (sourceRel === null) {
       return { status: 'unavailable', reason: 'no-workspace' }
     }
+    // #556 T5 插入路径档位：缺省 relative（不传档位的既有调用行为不变）；
+    // 逐查询传入（调用点从设置快照读取——设置变更后下一次查询即按新档位
+    // 产出，即时生效）。shortest 档的核对数据面（同目录候选直击/遮蔽 +
+    // 短名补查）在本方法内从清单数据装配（R6 零 IO、R1 与跳转/悬停共用
+    // shortnameLookupFor 数据面）
+    const shortest = opts?.insertPathType === 'shortest'
     const files: WikilinkCandidateFile[] = []
     /** 候选类型（别名派生：markdown 去尾 .md，其余完整文件名） */
     const kindByRel = new Map<string, 'markdown' | 'asset'>()
+    /** shortest 档存在性端口的命中集（fold 身份 → 索引域真实身份形态） */
+    const identityByFold = new Map<string, string>()
     const pushFile = (rel: string, mtimeMs: number, kind: 'markdown' | 'asset'): void => {
       const nameAt = rel.lastIndexOf('/') + 1
       files.push({
@@ -2942,6 +2953,10 @@ export class VaultIndexService {
         mtimeMs,
       })
       kindByRel.set(rel, kind)
+      if (shortest) {
+        const identity = this.identityOf(state, rel)
+        identityByFold.set(this.foldKey(identity), identity)
+      }
     }
     const catalog = state.catalog
     if (catalog !== null) {
@@ -2978,6 +2993,19 @@ export class VaultIndexService {
       })
       : files
     const docDir = this.dirname(sourceFsPath)
+    // 插入路径档位选项：shortest 携核对端口（存在性 = 清单身份 fold 集，
+    // 补查 = shortnameLookupFor 倒排）；absolute/relative 只传档位；缺省
+    // 不传 options（与既有调用逐字节一致）
+    const insertOptions: WikilinkInsertPathOptions | undefined = shortest
+      ? {
+          mode: 'shortest',
+          exists: (fsPath: string): string | null =>
+            identityByFold.get(this.foldKey(this.normKey(fsPath))) ?? null,
+          lookupShortname: (basename: string) => this.shortnameLookupFor(state)(basename),
+        }
+      : opts?.insertPathType === undefined
+        ? undefined
+        : { mode: opts.insertPathType }
     const items: WikilinkCandidateItem[] = []
     // F6：病态候选（insertPath 规划失败或写回往返失败）在页内丢弃须**补位**
     // ——排名全量取得后自头部滑动跳过病态条目，从第 offset 个**可投递**
@@ -2995,8 +3023,8 @@ export class VaultIndexService {
       const abs = this.absOf(state, item.relPath)
       // 插入路径按来源文档目录计算并经 vaultLink 往返核对 + F5 写回语法
       // 往返核对——核对失败的病态候选丢弃，不产出与所选身份不一致或写入
-      // 即损坏引用的路径
-      const insertPath = planWikilinkInsertPath(docDir, state.fsPath, this.opts.isWindowsHost, abs)
+      // 即损坏引用的路径；#556 T5 起按档位生成（shortest/absolute 见上）
+      const insertPath = planWikilinkInsertPath(docDir, state.fsPath, this.opts.isWindowsHost, abs, insertOptions)
       const alias = defaultAliasOf(item.name, kindByRel.get(item.relPath) ?? 'asset')
       if (insertPath === null || !wikilinkFileCandidateSafe(insertPath, alias)) {
         continue

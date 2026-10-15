@@ -120,6 +120,8 @@ export const en = {
   'settings.groupCodeblock': 'Code blocks',
   /** Files-and-links page section (moved from editor page in #332): image.* paste settings */
   'settings.groupImage': 'Images',
+  /** Files-and-links page section (#556): link.* internal link generation settings */
+  'settings.groupLink': 'Internal links',
   /** Files-and-links page section (#298 created, moved with the page in #332):
    *  hover.* preview family and embed.* family */
   'settings.groupRefview': 'Reference views',
@@ -898,6 +900,13 @@ export const en = {
   'host.imagePasteInvalidLocation': 'Pasted image was not saved: the configured subpath "{subpath}" is invalid (absolute paths and ".." are not allowed).',
   'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
   'host.imagePasteWriteFailed': 'Failed to save the pasted image.',
+
+  // ---- #556 Internal link type (three-mode enum; zh copy is user-given) ----
+  'setting.linkInsertPathType.title': 'Internal link type',
+  'setting.linkInsertPathType.description': 'The kind of file path inserted inside "[[ ]]" when linking to another file from a note.',
+  'setting.linkInsertPathTypeShortest': 'Shortest form whenever possible',
+  'setting.linkInsertPathTypeRelative': 'Relative to the current note',
+  'setting.linkInsertPathTypeAbsolute': 'Absolute file system path',
 
   // ---- #183 统一右键菜单（Live 正文全域接管；块链接两项自 #162 迁入）----
   /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */

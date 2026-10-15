@@ -15,7 +15,13 @@ import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefE
 import { AddonHistoryProbeHub } from './addonHistoryProbe'
 import { WebLinkMetaService } from './webLinkMetaService'
 import { resolveProxyConfig, type ProxyDecision } from './proxyAgent'
-import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type HoverExternalShapeMode } from '../shared/settings'
+import {
+  HOVER_EXTERNAL_ENABLED_KEY,
+  HOVER_EXTERNAL_SHAPE_KEY,
+  LINK_INSERT_PATH_TYPE_DEFAULT,
+  LINK_INSERT_PATH_TYPE_KEY,
+  type HoverExternalShapeMode,
+} from '../shared/settings'
 import {
   appendImageVersionStamp,
   classifyImageTarget,
@@ -2048,13 +2054,21 @@ export function createTextEditorProvider(
   /** 双链联想查询应答（wikilink.query 同步执行）：无索引服务按无工作区
    *  真实报状态；候选条目为协议稳定契约形态（含经 vaultLink 往返核对的
    *  插入路径与默认别名，均在服务侧完成）。#377 T02 起透传 offset（分页
-   *  继续加载）并回传 catalogGen（清单代次——webview 拒收跨代次追加页） */
+   *  继续加载）并回传 catalogGen（清单代次——webview 拒收跨代次追加页）。
+   *  #556 T5 起每次应答从设置快照读取「内部链接类型」档位传入（externalHoverShape
+   *  同款闭包读取模式——设置变更后下一次查询即按新档位产出，即时生效；
+   *  快照未知/非法值回落默认 relative，不猜档位） */
   const respondWikilinkQuery = (
     doc: vscode.TextDocument,
     message: Extract<WebviewToHost, { kind: 'wikilink.query' }>,
   ): Extract<HostToWebview, { kind: 'wikilink.query.result' }> => {
+    const rawInsertPathType = settings?.service.getSnapshot()[LINK_INSERT_PATH_TYPE_KEY]
+    const insertPathType = rawInsertPathType === 'shortest' || rawInsertPathType === 'absolute'
+      ? rawInsertPathType
+      : LINK_INSERT_PATH_TYPE_DEFAULT
     const result = vaultIndex
-      ? vaultIndex.queryWikilinkFileCandidates(doc.uri.fsPath, message.query, message.offset ?? 0)
+      ? vaultIndex.queryWikilinkFileCandidates(
+        doc.uri.fsPath, message.query, message.offset ?? 0, undefined, { insertPathType })
       : ({ status: 'unavailable', reason: 'no-workspace' } as const)
     const base = {
       kind: 'wikilink.query.result' as const,

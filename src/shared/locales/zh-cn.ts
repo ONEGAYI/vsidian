@@ -112,6 +112,8 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.groupCodeblock': '代码块',
   /** 「文件与链接」分页内小节（#332 自编辑器页迁入）：image.* 图片粘贴设置 */
   'settings.groupImage': '图片',
+  /** 「文件与链接」分页内小节（#556）：link.* 内部链接生成设置 */
+  'settings.groupLink': '内部链接',
   /** 「文件与链接」分页内小节（#298 建组、#332 随分页迁移）：hover.* 悬停
    *  预览族与 embed.* 正文嵌入族 */
   'settings.groupRefview': '引用视图',
@@ -843,6 +845,13 @@ export const zhCn: Record<MessageKey, string> = {
   'host.imagePasteInvalidLocation': '粘贴图片未保存：子路径 {subpath} 非法（不允许绝对路径或 ..）。',
   'host.imagePasteNoWorkspaceFallback': '未打开工作区文件夹，粘贴图片已保存到当前文件同目录。',
   'host.imagePasteWriteFailed': '粘贴图片保存失败。',
+
+  // ---- #556 内部链接类型（三档枚举；文案为用户给定中文，逐字）----
+  'setting.linkInsertPathType.title': '内部链接类型',
+  'setting.linkInsertPathType.description': '设置在笔记中链接其他文件时插入“[[ ]]”中的文件路径类型。',
+  'setting.linkInsertPathTypeShortest': '尽可能简短的形式',
+  'setting.linkInsertPathTypeRelative': '基于当前笔记的相对路径',
+  'setting.linkInsertPathTypeAbsolute': '基于文件系统的绝对路径',
  
   // ---- #183 统一右键菜单（Live 正文全域接管；块链接两项自 #162 迁入）----
   /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */

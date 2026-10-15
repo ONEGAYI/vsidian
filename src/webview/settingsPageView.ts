@@ -226,6 +226,11 @@ const ICON_PATHS = {
   // 调谐面；与 blocks/inputCursor 构成附加组件域三枚分页字形）
   sliders:
     'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
+  // link（#556「内部链接」组，文件与链接分页首组）：断链环两节——链接
+  // 生成语义（lucide link 线性化；#332 二轮随三处链环重复整改退役的旧
+  // links 字形原样再登记，组语义收敛到内部链接单一职责后重新启用）
+  link:
+    'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
@@ -249,8 +254,10 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
  *  inputCursor（#466）：「输入行为管理」分页组头与侧栏导航（输入框 +
  *  I 型光标——输入/键盘语义；merge 分流合流字形随更名退役）；
  *  refview（#298 占位）与 links（#332 一轮借位）随二轮三处链环重复整改
- *  一并退役（全仓引用迁移至新字形）。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink' | 'inputCursor' | 'sliders'
+ *  一并退役（全仓引用迁移至新字形）；link（#556）：「内部链接」组标题
+ *  （文件与链接分页首组）——旧 links 断链环字形原样再登记（lucide link
+ *  线性化），组语义收敛到内部链接生成单一职责。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink' | 'inputCursor' | 'sliders' | 'link'
 
 /** 生图资产槽位：这些 kind 不走 ICON_PATHS 内联字形，装配为 generated
  *  span（CSS 按 data-icon 映射 media/quick-actions 明暗背景） */
@@ -503,10 +510,12 @@ export class SettingsPageView {
     // 独立「实验性功能」侧栏分组，同样不进编辑器页（displayDefs 以上游
     // editorDefs 为基，一并排除）；#332 起图片（image.*）与引用视图
     // （hover.*/embed.*）两族迁至「文件与链接」分页（分页 defsGroups 按
-    // 同一前缀收纳，搜索随该分页分组命中）
+    // 同一前缀收纳，搜索随该分页分组命中）；#556 起 link.*（内部链接类型）
+    // 随同分页收纳，同样排除防重复呈现
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment') &&
       !d.key.startsWith('experimental.') && !d.key.startsWith('image.') &&
-      !d.key.startsWith('hover.') && !d.key.startsWith('embed.') && !d.key.startsWith('appearance.'))
+      !d.key.startsWith('hover.') && !d.key.startsWith('embed.') && !d.key.startsWith('appearance.') &&
+      !d.key.startsWith('link.'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
    *  icon 为二级组标题图标，注册表驱动（#263 内联字形 + #265 生图资产）。

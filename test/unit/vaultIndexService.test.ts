@@ -2099,6 +2099,39 @@ describe('VaultIndexService：全文件清单（#377 T02）', () => {
     }
   })
 
+  it('#556 T5 三档插入路径：档位逐查询传入（即时生效），shortest 经 catalog 唯一短名（零 IO）', async () => {
+    const fs = makeFs({
+      'C:/vault/项目/来源.md': '来源\n',
+      'C:/vault/资料/方案.md': '# 方案\n',
+      'C:/vault/项目/内嵌.md': '# 内嵌\n',
+      'C:/vault/素材/图.png': 'png',
+    })
+    const { service } = makeService(fs)
+    try {
+      await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+      const source = 'C:/vault/项目/来源.md'
+      const insertOf = (name: string, opts?: { insertPathType?: 'shortest' | 'relative' | 'absolute' }): string => {
+        const r = candidatesOf(service.queryWikilinkFileCandidates(source, name, 0, undefined, opts))
+        return r.items.find((i) => i.name === (name === '图' ? '图.png' : `${name}.md`))!.insertPath
+      }
+      // 默认（未传档位）与 relative：来源相对路径（显式扩展名，现状风格）
+      expect(insertOf('方案')).toBe('../资料/方案.md')
+      expect(insertOf('方案', { insertPathType: 'relative' })).toBe('../资料/方案.md')
+      // absolute：宿主完整路径（Windows 盘符 / 分隔形态）
+      expect(insertOf('方案', { insertPathType: 'absolute' })).toBe('C:/vault/资料/方案.md')
+      // shortest：跨目录唯一短名（catalog 完整）→ 省略 .md；同目录 → 文件名；
+      // 非 Markdown 跨目录 → 相对（不产生短名）
+      expect(insertOf('方案', { insertPathType: 'shortest' })).toBe('方案')
+      expect(insertOf('内嵌', { insertPathType: 'shortest' })).toBe('内嵌')
+      expect(insertOf('图', { insertPathType: 'shortest' })).toBe('../素材/图.png')
+      // 档位即时生效：同一服务实例上相邻查询按各自档位产出（设置读取在
+      // 调用点逐次传入，无缓存）
+      expect(insertOf('方案')).toBe('../资料/方案.md')
+    } finally {
+      service.dispose()
+    }
+  })
+
   it('全文件登记：所有未排除文件入清单并落盘 catalog.json；常用资源取真实 mtime，未知类型仅记名 mtime=0', async () => {
     const fs = makeFs({
       'C:/vault/a.md': '# A\n',

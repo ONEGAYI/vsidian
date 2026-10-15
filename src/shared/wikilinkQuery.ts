@@ -24,7 +24,13 @@
 //
 // 本模块不依赖 vscode/DOM（node 单测直驱；宿主与 webview 双产物共用）。
 import * as path from 'node:path'
-import { planVaultLinkPath } from './vaultLink'
+import {
+  planVaultLinkPath,
+  shortnameLookupKeyOf,
+  shortnameLookupResolution,
+  type VaultLinkPathContext,
+  type VaultLinkShortnameLookupResult,
+} from './vaultLink'
 import { parseWikilinkInner, scanWikilinksInLine } from './wikilink'
 
 /** 高亮区间（UTF-16 code unit 半开区间；对应原始文字偏移） */
@@ -571,36 +577,168 @@ export function defaultAliasOf(name: string, kind: 'markdown' | 'asset'): string
 }
 
 /**
- * 来源相对插入路径 + vaultLink 往返核对（验收标准：插入结果经现有解析器
- * 往返核对为所选目标）。计算 docDir → targetAbs 的相对路径（`/` 分隔），
- * 经 {@link planVaultLinkPath}（implicitMd=false 单候选精确语义）规划后
- * 须回到所选目标身份（Windows 宿主大小写不敏感对账），否则 null——调用方
- * 丢弃该候选（不产出不可信插入路径）。
+ * 插入路径生成 + vaultLink 往返核对（验收标准：插入结果经统一解析器往返
+ * 核对为所选目标身份，核对失败返回 null——调用方丢弃候选，不产出不可信
+ * 插入路径）。三档（#556 规格「最短形式与三档路径」，缺省 relative 与
+ * 现状逐字节一致）：
+ * - relative：来源相对路径（显式扩展名、`/` 分隔，现状风格）——经
+ *   {@link planVaultLinkPath} implicitMd=false 单候选精确语义核对；明确
+ *   跨根/跨盘/外部目标无法以合法根内相对路径表达时回退绝对形态保留身份
+ *   （目录身份恒 null）。
+ * - absolute：宿主完整路径（Windows 含盘符 `/` 分隔，POSIX 原样），经
+ *   规划器 absolute 分支核对（独立解析，不受 rootDir 边界）。
+ * - shortest：文件名（Markdown 经统一解析器核对能返回所选目标时可省
+ *   `.md`）→ 来源相对 → 绝对依次核对，取最短（同长先核对者优先）。
+ *   文件名形态的核对是 resolveVaultLinkFile 的同步镜像——同一组
+ *   shared/vaultLink 纯函数（planVaultLinkPath / shortnameLookupKeyOf /
+ *   shortnameLookupResolution），存在性与短名补查经 options 端口注入
+ *   （联想侧传索引清单数据面；缺端口不冒充短名，退相对/绝对）。
  */
 export function planWikilinkInsertPath(
   docDir: string,
   rootDir: string,
   isWindowsHost: boolean,
   targetAbs: string,
+  options: WikilinkInsertPathOptions = {},
 ): string | null {
+  const mode = options.mode ?? 'relative'
   const ops = isWindowsHost ? path.win32 : path.posix
-  const rel = ops.relative(ops.resolve(docDir), ops.resolve(targetAbs))
-  // rel 为空（targetAbs 即 docDir，目录身份）或跨盘绝对（Windows 相对
-  // 结果退化为绝对路径）不可用；含 `..` 的根内上行是合法插入路径——
-  // 越界判定交给下方 planVaultLinkPath 往返核对（root 内边界）
-  if (!rel || ops.isAbsolute(rel)) {
+  const ctx: VaultLinkPathContext = { docDir, rootDir, isWindowsHost }
+  const targetNorm = ops.resolve(targetAbs)
+  // 目录身份防御：targetAbs 即 docDir（真实链路中目标恒为清单文件，此形态
+  // 不会发生）——无可插入路径，各档均不产出（绝对回退不适用于目录）
+  if (ops.relative(ops.resolve(docDir), targetNorm) === '') {
     return null
   }
-  const insertPath = rel.replace(/\\/g, '/')
-  const plan = planVaultLinkPath(insertPath, { docDir, rootDir, isWindowsHost }, { implicitMd: false })
-  if (plan.kind !== 'inside' || plan.candidates.length === 0) {
+  /** 身份对账（单一口径：resolve 归一 + Windows 折叠大小写）——端口返回的
+   *  索引域 `/` 分隔形态经 ops.resolve 归一到宿主形态后比较 */
+  const sameIdentity = (p: string): boolean => isWindowsHost
+    ? p.toLowerCase() === targetNorm.toLowerCase()
+    : p === targetNorm
+
+  /** 来源相对路径形态（现状风格：显式扩展名、`/` 分隔）+ inside 单候选核对 */
+  const relativeForm = (): string | null => {
+    const rel = ops.relative(ops.resolve(docDir), targetNorm)
+    // rel 为空（targetAbs 即 docDir，目录身份）或跨盘绝对（Windows 相对
+    // 结果退化为绝对路径）不可用；含 `..` 的根内上行是合法插入路径——
+    // 越界判定交给下方 planVaultLinkPath 往返核对（root 内边界）
+    if (!rel || ops.isAbsolute(rel)) {
+      return null
+    }
+    const insertPath = rel.replace(/\\/g, '/')
+    const plan = planVaultLinkPath(insertPath, ctx, { implicitMd: false })
+    if (plan.kind !== 'inside' || plan.candidates.length === 0) {
+      return null
+    }
+    return sameIdentity(plan.candidates[0]!) ? insertPath : null
+  }
+
+  /** 宿主完整路径形态（#556：Windows 含盘符 `/` 分隔，POSIX 原样）+
+   *  absolute 分支单候选核对（绝对路径独立解析，不受 rootDir 边界） */
+  const absoluteForm = (): string | null => {
+    const text = isWindowsHost ? targetNorm.replace(/\\/g, '/') : targetNorm
+    const plan = planVaultLinkPath(text, ctx, { implicitMd: false })
+    if (plan.kind !== 'absolute' || plan.candidates.length === 0) {
+      return null
+    }
+    return sameIdentity(plan.candidates[0]!) ? text : null
+  }
+
+  if (mode === 'absolute') {
+    return absoluteForm()
+  }
+  if (mode === 'relative') {
+    // 现状风格不变；明确跨根/跨盘/外部目标无法以合法根内相对路径表达时，
+    // 以绝对路径保留身份（规格「基于当前笔记的相对路径」——不再丢弃候选；
+    // 目录身份（rel 空）不适用绝对回退）
+    return relativeForm() ?? absoluteForm()
+  }
+
+  // ---- shortest：文件名（Markdown 可省 .md）→ 相对 → 绝对，依次核对，
+  // 取最短（同长先核对者优先——文件名 > 相对 > 绝对） ----
+  /** 省略 .md 的文件名形态经统一解析器核对回到所选目标身份（resolveVaultLinkFile
+   *  的同步镜像：inside 候选按优先序探测，首个存在者即解析结果，须恰为所选
+   *  目标——同目录直击或他文件遮蔽即失败；全未命中走短名补查，0/多候选/
+   *  清单不完整/命中他目标均不通过。exists 与补查端口是核对的数据面前提，
+   *  缺任一不冒充短名（不猜目标）——退相对/绝对形态） */
+  const bareNameResolvesToTarget = (bare: string): boolean => {
+    const exists = options.exists
+    const lookupShortname = options.lookupShortname
+    if (exists === undefined || lookupShortname === undefined) {
+      return false
+    }
+    const plan = planVaultLinkPath(bare, ctx, { implicitMd: true })
+    if (plan.kind !== 'inside') {
+      return false
+    }
+    for (const candidate of plan.candidates) {
+      const real = exists(candidate)
+      if (real !== null) {
+        return sameIdentity(ops.resolve(real))
+      }
+    }
+    const key = shortnameLookupKeyOf(bare, ctx, { implicitMd: true })
+    if (key === null) {
+      return false
+    }
+    const found = lookupShortname(key)
+    if (found === null) {
+      return false
+    }
+    const resolution = shortnameLookupResolution(found)
+    return resolution.kind === 'target' && sameIdentity(ops.resolve(resolution.fsPath))
+  }
+
+  const rungs: string[] = []
+  const basename = ops.basename(targetNorm)
+  if (/\.md$/i.test(basename) && basename.length > 3) {
+    const bare = basename.slice(0, -3)
+    if (bare !== '' && bareNameResolvesToTarget(bare)) {
+      rungs.push(bare)
+    }
+  }
+  // 非 Markdown 不产生短名（补查只面向 Markdown）：同目录文件名即相对形态
+  // 的退化形式（rel === 文件名），由相对梯级承载
+  const relative = relativeForm()
+  if (relative !== null) {
+    rungs.push(relative)
+  }
+  const absolute = absoluteForm()
+  if (absolute !== null) {
+    rungs.push(absolute)
+  }
+  if (rungs.length === 0) {
     return null
   }
-  const hit = plan.candidates[0]!
-  const same = isWindowsHost
-    ? hit.toLowerCase() === ops.resolve(targetAbs).toLowerCase()
-    : hit === ops.resolve(targetAbs)
-  return same ? insertPath : null
+  let best = rungs[0]!
+  for (const rung of rungs) {
+    if (rung.length < best.length) {
+      best = rung
+    }
+  }
+  return best
+}
+
+/** 插入路径三档（#556 规格「最短形式与三档路径」）：shortest=依次核对取最短；
+ *  relative=来源相对（默认，现状风格）；absolute=宿主完整路径。档位值即
+ *  设置 link.insertPathType 的值域（设置侧以此为单一事实源，不另写第二份）。 */
+export const WIKILINK_INSERT_PATH_MODES = ['shortest', 'relative', 'absolute'] as const
+export type WikilinkInsertPathMode = (typeof WIKILINK_INSERT_PATH_MODES)[number]
+
+/**
+ * 插入路径生成选项（#556 T5）。档位由宿主侧调用点从设置快照读取传入——
+ * 本函数保持纯函数、不读设置；webview 侧接受结构对档位透明。
+ */
+export interface WikilinkInsertPathOptions {
+  /** 三档（缺省 relative——不传档位的既有调用行为与现状逐字节一致） */
+  mode?: WikilinkInsertPathMode
+  /** 同步存在性端口（最短档文件名形态的统一解析核对：返回目标真实路径或
+   *  null；联想侧传索引清单数据面，R6 零 IO）。VaultLinkExistsPort 的同步
+   *  收窄（本函数同步执行，不接受 Promise） */
+  exists?: (fsPath: string) => string | null
+  /** 短名补查端口（最短档唯一性经索引数据面：candidates 为磁盘真实路径
+   *  形态，complete=false 时唯一候选不声明唯一——pending 不冒充命中） */
+  lookupShortname?: (basename: string) => VaultLinkShortnameLookupResult | null
 }
 
 /**

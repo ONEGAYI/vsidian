@@ -202,9 +202,181 @@ describe('planWikilinkInsertPath（来源相对路径 + vaultLink 往返核对�
       .toBe('../资料/方案.md')
   })
 
-  it('越出根的目标（防御）返回 null', () => {
+  it('越出根的目标（#556 relative 档）：无法以合法根内相对路径表达时回退绝对路径保留身份', () => {
+    // 规格「路径生成与外部引用」：明确跨根或外部目标 → 绝对路径（不再丢弃候选）
     expect(planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/elsewhere/方案.md'))
+      .toBe('/elsewhere/方案.md')
+  })
+
+  it('目录身份（targetAbs 即 docDir）恒 null——绝对回退不适用于目录', () => {
+    expect(planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/项目'))
       .toBeNull()
+  })
+})
+
+describe('planWikilinkInsertPath 三档（#556 T5：shortest / relative / absolute）', () => {
+  const posix = { rootDir: '/root', isWindowsHost: false }
+  const win = { rootDir: 'C:\\root', isWindowsHost: true }
+
+  /** 同步存在性端口替身：命中集按平台 fold 归一，命中返回探测路径本身 */
+  function existsOf(isWindowsHost: boolean, paths: readonly string[]) {
+    const fold = (p: string): string => (isWindowsHost ? p.toLowerCase() : p)
+    const hits = new Set(paths.map(fold))
+    return (fsPath: string): string | null => (hits.has(fold(fsPath)) ? fsPath : null)
+  }
+
+  /** 短名补查端口替身（索引数据面形态：candidates 为磁盘真实路径形态） */
+  const lookupOf = (candidates: readonly string[], complete = true) => (): { candidates: string[]; complete: boolean } =>
+    ({ candidates: [...candidates], complete })
+
+  // ---- absolute 档：宿主完整路径，Windows 含盘符 / 分隔，POSIX 原样 ----
+
+  it('absolute 档（POSIX）：宿主路径原样', () => {
+    expect(planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', { mode: 'absolute' }))
+      .toBe('/root/资料/方案.md')
+  })
+
+  it('absolute 档（Windows）：反斜杠 fsPath 产出具盘符的 / 分隔形态', () => {
+    expect(planWikilinkInsertPath('C:\\root\\项目', win.rootDir, win.isWindowsHost, 'C:\\root\\资料\\方案.md', { mode: 'absolute' }))
+      .toBe('C:/root/资料/方案.md')
+  })
+
+  it('relative 档跨盘（Windows）：win32.relative 退化为绝对 → 绝对回退', () => {
+    expect(planWikilinkInsertPath('C:\\root\\项目', win.rootDir, win.isWindowsHost, 'D:\\other\\方案.md'))
+      .toBe('D:/other/方案.md')
+  })
+
+  // ---- shortest 档：文件名（可省 .md）→ 相对 → 绝对，经统一解析器核对 ----
+
+  it('shortest 跨目录唯一短名：根内唯一同名 Markdown → 省略 .md 的文件名', () => {
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, []),
+      lookupShortname: lookupOf(['/root/资料/方案.md']),
+    })
+    expect(insert).toBe('方案')
+  })
+
+  it('shortest 同目录目标：省略 .md 的文件名（exists 直击）', () => {
+    const insert = planWikilinkInsertPath('/root/资料', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, ['/root/资料/方案.md']),
+      lookupShortname: lookupOf(['/root/资料/方案.md']),
+    })
+    expect(insert).toBe('方案')
+  })
+
+  it('shortest 同名歧义：多候选不归任一 → 退来源相对路径', () => {
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, []),
+      lookupShortname: lookupOf(['/root/资料/方案.md', '/root/项目甲/方案.md']),
+    })
+    expect(insert).toBe('../资料/方案.md')
+  })
+
+  it('shortest 清单不完整：唯一候选不声明唯一（pending）→ 退相对路径', () => {
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, []),
+      lookupShortname: lookupOf(['/root/资料/方案.md'], false),
+    })
+    expect(insert).toBe('../资料/方案.md')
+  })
+
+  it('shortest 端口未注入：数据面不完整不冒充短名 → 退相对路径（不猜目标）', () => {
+    expect(planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', { mode: 'shortest' }))
+      .toBe('../资料/方案.md')
+    // 只注入 exists 不注入补查端口：跨目录短名仍不可核对
+    expect(planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest', exists: existsOf(false, []),
+    })).toBe('../资料/方案.md')
+  })
+
+  it('shortest 同目录无扩展名同名文件遮蔽：[[方案]] 首候选命中他文件 → 拒短名，退带扩展名文件名（相对退化形态）', () => {
+    // docDir 存在名为「方案」的无扩展文件——[[方案]] 解析首候选直击该文件，
+    // 不再走短名补查；省略 .md 形态不返回所选目标 → 退 '方案.md'（同目录相对）
+    const insert = planWikilinkInsertPath('/root/资料', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, ['/root/资料/方案', '/root/资料/方案.md']),
+      lookupShortname: lookupOf(['/root/资料/方案.md']),
+    })
+    expect(insert).toBe('方案.md')
+  })
+
+  it('shortest docDir 存在同名的其他 .md：统一解析先命中他文件 → 拒短名，退相对', () => {
+    // 来源目录已有相对候选优先（相对优先规则）：[[方案]] 命中 /root/项目/方案.md
+    // （非所选目标）——不因根内补查唯一而覆盖相对优先
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, ['/root/项目/方案.md']),
+      lookupShortname: lookupOf(['/root/资料/方案.md']),
+    })
+    expect(insert).toBe('../资料/方案.md')
+  })
+
+  it('shortest 补查唯一命中他目标：核对不返回所选身份 → 拒短名，退相对', () => {
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, []),
+      lookupShortname: lookupOf(['/root/其他/方案.md']),
+    })
+    expect(insert).toBe('../资料/方案.md')
+  })
+
+  it('shortest 非 Markdown 跨目录：不产生短名（补查只面向 Markdown）→ 退相对', () => {
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/素材/图.png', {
+      mode: 'shortest',
+      exists: existsOf(false, ['/root/素材/图.png']),
+      lookupShortname: lookupOf([]),
+    })
+    expect(insert).toBe('../素材/图.png')
+  })
+
+  it('shortest 非 Markdown 同目录：文件名即有效相对形式', () => {
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/项目/图.png', {
+      mode: 'shortest',
+      exists: existsOf(false, ['/root/项目/图.png']),
+      lookupShortname: lookupOf([]),
+    })
+    expect(insert).toBe('图.png')
+  })
+
+  it('shortest Windows 语义：补查端口身份为索引域 / 分隔形态，对账经宿主 ops 归一；大小写不敏感', () => {
+    const insert = planWikilinkInsertPath('C:\\root\\项目', win.rootDir, win.isWindowsHost, 'C:\\Root\\资料\\方案.md', {
+      mode: 'shortest',
+      exists: existsOf(true, []),
+      lookupShortname: lookupOf(['C:/root/资料/方案.md']),
+    })
+    expect(insert).toBe('方案')
+  })
+
+  it('shortest 越出根的目标：文件名与相对均不可表达 → 绝对路径保留身份', () => {
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/elsewhere/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, []),
+      lookupShortname: lookupOf([]),
+    })
+    expect(insert).toBe('/elsewhere/方案.md')
+  })
+
+  it('最短档结果稳定性：候选序（文件名 → 相对 → 绝对）结构性由短到长，先核对先得（同长优先文件名）', () => {
+    // 同目录目标：'方案'（3）< '方案.md'（5）< 绝对——首核对通过的最短形态即产出
+    const insert = planWikilinkInsertPath('/root/资料', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, ['/root/资料/方案.md']),
+      lookupShortname: lookupOf(['/root/资料/方案.md']),
+    })
+    expect(insert).toBe('方案')
+    expect(insert!.length).toBeLessThan('方案.md'.length)
+  })
+})
+
+describe('F5 绝对插入路径的写回语法校验（#556 T5：wikilinkFileCandidateSafe 对三档形态）', () => {
+  it('Windows 盘符 / 分隔与 POSIX 根路径均为合法 wikilink path（: 不在守卫字符集）', () => {
+    expect(wikilinkFileCandidateSafe('D:/笔记库/资料/目标.md', '目标')).toBe(true)
+    expect(wikilinkFileCandidateSafe('/home/user/notes/资料/目标.md', '目标')).toBe(true)
+    expect(wikilinkFileCandidateSafe('方案', '方案')).toBe(true)
   })
 })
 
