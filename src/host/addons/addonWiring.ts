@@ -33,10 +33,15 @@ import type { AddonSettingsStatePayload, AddonSettingsAreaPayload } from '../../
 import { isWebviewToHost } from '../../shared/protocol'
 import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
-import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan } from './addonRuntime'
+import { AddonRuntime, type AddonPreferenceStore } from './addonRuntime'
+import {
+  createEditorPanelRecord,
+  pushEditorPanelDirectives,
+  type EditorPanelReconcilePorts,
+  type EditorPanelReconcileRecord,
+} from './addonEditorPanelReconcile'
 import {
   createSettingsPanelRecord,
-  directiveEventOf,
   pushSettingsPanelDirectives,
   type SettingsPanelReconcilePorts,
   type SettingsPanelReconcileRecord,
@@ -713,7 +718,8 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     }
   }
   // directiveEventOf（指令 → 事件留痕）随设置面板对账逻辑移驻
-  // addonSettingsPanelReconcile（两面板共用形状）
+  // addonSettingsPanelReconcile，编辑器侧对账模块（addonEditorPanelReconcile）
+  // #557 起同源复用（两面板共用形状）
 
   /** 面板指令投递（disposed webview 不炸状态机链路——记录后吞掉异常） */
   const postDirective = (webview: vscode.Webview, directive: AddonPageDirective): void => {
@@ -781,74 +787,31 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
   }
 
   // ---- 编辑器面板桥（#351）----
-  interface EditorPanelRecord {
+  // 对账逻辑（pushEditorDirectives/postEditorLoadIfVerified）驻留纯模块
+  // addonEditorPanelReconcile（#557 起提取——含迟到验证竞态的按组件纪元
+  // 失效；desired 为多值集合，失效令牌按 addonId 计），此处注入 webview
+  // 绑定端口运行同一实现（单元测试以可控验证 promise 复用）
+  interface EditorPanelRecord extends EditorPanelReconcileRecord {
     webview: vscode.Webview
-    /** 本面板已推送的装载（addonId → generation；desired 对账用） */
-    pushed: Map<string, number>
-    /** #354 T05 realpath 验证在途的装载（addonId → generation；去重用） */
-    pendingVerify: Map<string, number>
   }
   const editorPanels = new Map<string, EditorPanelRecord>()
   const panelListeners = new Set<() => void>()
 
-  const pushEditorDirectives = (record: EditorPanelRecord): void => {
-    // T07（#356）行为状态下发（随装载指令对账同拍：ready/状态变化/显式
-    // pushDirectives 都经此处；null = 无用户覆盖——默认序全开启）
-    postBehaviorState(record.webview)
-    // #476 行为禁用态广播（先于装载指令：工厂执行时 SDK behaviorState
-    // 已持权威值——停用后新装载的设置页同拍语义见 pushSettingsDirectives）
-    postBehaviorEnabledState(record.webview)
-    const desired = runtime.desiredEditorLoads()
-    const desiredIds = new Set(desired.map((plan) => plan.addonId))
-    // 停用/故障/释放的组件：推送 unload（携带最后装载代次；装载器幂等）
-    for (const [addonId, generation] of [...record.pushed.entries()]) {
-      if (!desiredIds.has(addonId)) {
-        const directive: AddonPageDirective = { type: 'addon.unload', addonId, generation }
-        recordEvent('editor', directiveEventOf(directive))
-        postDirective(record.webview, directive)
-        record.pushed.delete(addonId)
-      }
-    }
-    for (const plan of desired) {
-      const pushed = record.pushed.get(plan.addonId)
-      if (pushed === plan.generation) {
-        continue // 同代次已推送（webview 重载由 ready 重推）
-      }
-      void postEditorLoadIfVerified(record, plan)
-    }
-  }
+  /** 编辑器面板对账端口（指令/广播经面板 webview；manifest 地址由其铸造） */
+  const editorReconcilePortsOf = (record: EditorPanelRecord): EditorPanelReconcilePorts => ({
+    desiredLoads: () => runtime.desiredEditorLoads(),
+    isEscapedDir: (fsPath) => realpathGuard.isEscapedDir(fsPath),
+    verifyLoadPlan,
+    blockEscapePlanRoots,
+    buildLoadDirective: (plan) => ({ type: 'addon.load', manifest: buildManifest(record.webview, plan) }),
+    postDirective: (directive) => postDirective(record.webview, directive),
+    recordEvent: (event) => recordEvent('editor', event),
+    postBehaviorState: () => postBehaviorState(record.webview),
+    postBehaviorEnabledState: () => postBehaviorEnabledState(record.webview),
+  })
 
-  /**
-   * #354 T05 realpath 装载门控：addon.load 推送前对计划路径取真实路径
-   * 复核（逃逸 = 符号链接指向组件安装目录外）。验证在途按 addonId+代次
-   * 去重；escape 整计划拒绝（不装载、不授权资源根）并登记目录排除表；
-   * 验证通过才推送装载指令（面板 ready 重推与状态变化重推走缓存，幂等）。
-   */
-  const postEditorLoadIfVerified = async (record: EditorPanelRecord, plan: AddonEditorLoadPlan): Promise<void> => {
-    if (record.pushed.get(plan.addonId) === plan.generation) return
-    if (record.pendingVerify.get(plan.addonId) === plan.generation) return
-    // 已判逃逸的入口/样式/资源基址：直接拒绝（免文件系统复核）
-    if (
-      realpathGuard.isEscapedDir(plan.entryFsPath) ||
-      plan.cssFsPaths.some((css) => realpathGuard.isEscapedDir(css)) ||
-      (plan.resourceBaseFsPath !== null && realpathGuard.isEscapedDir(plan.resourceBaseFsPath))
-    ) {
-      recordEvent('editor', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
-      return
-    }
-    record.pendingVerify.set(plan.addonId, plan.generation)
-    const verdict = await verifyLoadPlan(plan)
-    record.pendingVerify.delete(plan.addonId)
-    if (verdict === 'escape') {
-      blockEscapePlanRoots(plan)
-      recordEvent('editor', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
-      return
-    }
-    if (record.pushed.get(plan.addonId) === plan.generation) return
-    const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, plan) }
-    recordEvent('editor', directiveEventOf(directive))
-    postDirective(record.webview, directive)
-    record.pushed.set(plan.addonId, plan.generation)
+  const pushEditorDirectives = (record: EditorPanelRecord): void => {
+    pushEditorPanelDirectives(editorReconcilePortsOf(record), record)
   }
 
   /** realpath 守卫的统一装载计划输入（安装目录锚从扩展注册表解析） */
@@ -1114,7 +1077,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
       if (!record) {
         // 未注册面板（首条消息即 addonPage.ready 时就地登记）
         if (isWebviewToHost(message) && message.kind === 'addonPage.ready') {
-          const fresh: EditorPanelRecord = { webview, pushed: new Map(), pendingVerify: new Map() }
+          const fresh: EditorPanelRecord = { webview, ...createEditorPanelRecord() }
           editorPanels.set(sessionId, fresh)
           return handleEditorPanelMessage(fresh, message)
         }
@@ -1130,7 +1093,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
       return () => panelListeners.delete(listener)
     },
     pushDirectives: (sessionId, webview) => {
-      const record = editorPanels.get(sessionId) ?? { webview, pushed: new Map(), pendingVerify: new Map() }
+      const record = editorPanels.get(sessionId) ?? { webview, ...createEditorPanelRecord() }
       if (!editorPanels.has(sessionId)) {
         editorPanels.set(sessionId, record)
       }
