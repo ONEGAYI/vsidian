@@ -76,7 +76,7 @@ tableCaret 的原始两次失败已确认是 `handle-hover` 读隐藏新增带 o
 - 新 job `browser-sensitive` 设 `VSIDIAN_TEST_BROWSER_GROUP=sensitive`，不在任何 needs 链上：不用 continue-on-error、不自动重试、不放宽断言——失败保留红灯、逐套件报告与非零退出码，整轮 workflow 可为 failure，但不阻断必需检查。
 - 本地默认（不设环境变量）仍是全量，回归习惯与全量验证口径不变；`VSIDIAN_TEST_BROWSER_GROUP=sensitive npm run test:browser` 单跑敏感组（Git Bash），PowerShell 用 `$env:VSIDIAN_TEST_BROWSER_GROUP='sensitive'` 后清除。
 
-此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组本身不修复产品行为、不修改套件断言；名单内两套件的归因排查仍开放，跟踪 #446。
+此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组本身不修复产品行为、不修改套件断言；名单内两套件的共享构建互删已由 PR #520 初步修复，敏感分组仍保留，历史归因与处置见 #446 条目5/9。#446 已关闭归档，后续新增未定性失败统一记录于[跟踪集合 #552](https://github.com/ONEGAYI/vsidian/issues/552)。
 
 ### Windows 剪贴板族诊断与互斥（2026-10-10）
 
@@ -514,6 +514,8 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 推送前同步main38be3c75的Mermaid暗色/Live图形修正，compile/类型、文件树strict及真实阅读三例3/3通过（目标1082ms）。新基线全量首次与compile同机运行时两个Vitest worker异常退出3221226505，位于webLinkMetaService/proxyAgent，8022/8046完成、24项未完成，未进入Node阶段；无断言失败记录，另记条目23，不归为本票已修复。两文件单worker77/77、Node契约另跑194/194通过；无compile并行的一次独立全量8046/8046与Node194/194通过。原失败保留，条件相关不等于因果，不据独立通过勾销23；当轮旧JSON仍为此前11项报告，仅取带退出码的日志统计。
 
 ## #446 条目12：历史弹窗等待阶段定位与诊断补全（2026-10-15）
+
+**后续入口已迁移**：本节保留历史调查记录；条目12仍未定因、未修复，现于[#552](https://github.com/ONEGAYI/vsidian/issues/552)等待新证据。旧 #446 已按用户要求归档关闭。
 
 **已定位到第二段弹窗SVG等待**。原主线696a1668的CI38521864148第2片在60841ms超时。按原提交归档源码及原lockfile重新安装依赖，只重建集成入口（esbuild0.28.2、原node18/cjs配置）；lockfile与构建脚本git对象分别为7f1bd52c656cfd847a4ca35bc774a3700f79bcc9、b3685f5936b4c43823780365ff71db115176c78f。旧堆栈70875:13、76270:20、85812:9三处均与重建bundle对齐，source map对应cases.ts:1345、7464与index.ts:168；7464是弹窗请求之后等待overlay与overlaySvg的第二段。由此排除首次frame等待与后续reading等待为这一次超时所在阶段，不据此判定弹窗未打开还是取图失败。
 
