@@ -301,14 +301,33 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
   let opSeq = 0
 
   /**
-   * 取「本次装载期间新注册且未消费」的首个条目；本次装载开始前的遗留
-   * 未消费条目（旧工厂）就地丢弃并计数——旧工厂注册不接入新代次。
-   * 返回 null = 本次装载期间没有任何登记（no-factory-registered）。
+   * 取「本次装载期间新注册且未消费」且**属于本组件**（addonId 匹配）的
+   * 首个条目；本组件在本次装载开始前的遗留未消费条目（旧工厂）就地丢弃
+   * 并计数——旧工厂注册不接入新代次。返回 null = 本次装载期间没有本组件
+   * 的登记（no-factory-registered）。
+   *
+   * #559 异常登记隔离：非本组件条目（他组件的迟到/重复登记）不消费、
+   * 不丢弃、不计入丢弃统计，保留在登记表中给属主装载批次按同一规则处
+   * 理——是否「迟到」只能以属主批次的装载窗口判定，他人批次无权代弃
+   * （原缺陷：A 的批次把 B 的登记当旧条目或同批多余吞掉 → B 随后装载
+   * no-factory-registered）。孤儿积累不成立：登记只在脚本执行时产生，
+   * 脚本执行的装载流必然随后跑到自己的消费点。
+   *
+   * 本组件没有 fresh 登记而装载窗口内出现他组件登记时，返回该登记供
+   * loadImpl 既有身份核对报 identity-mismatch（失败码语义不变：装载期
+   * 间登记了工厂但身份不符）；该登记同样不消费，保留给属主。
    */
-  const takeFreshRegistration = (loadStartedAt: number): AddonPageRegistration | null => {
+  const takeFreshRegistration = (addonId: string, loadStartedAt: number): AddonPageRegistration | null => {
     let matched: AddonPageRegistration | null = null
+    let foreignFresh: AddonPageRegistration | null = null
     for (const entry of bucket) {
       if (consumedRegistrations.has(entry)) continue
+      if (entry.addonId !== addonId) {
+        if (foreignFresh === null && entry.registeredAt >= loadStartedAt) {
+          foreignFresh = entry
+        }
+        continue
+      }
       if (entry.registeredAt < loadStartedAt) {
         consumedRegistrations.add(entry)
         counters.lateRegistrationsDropped++
@@ -322,7 +341,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       }
       consumedRegistrations.add(entry)
     }
-    return matched
+    return matched ?? foreignFresh
   }
 
   /** 按组件身份构造视图句柄（views.get 与 T11 界面目标路由同源）：代次
@@ -862,7 +881,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       return fail('script-load-failed', script.error)
     }
 
-    const registered = takeFreshRegistration(loadStartedAt)
+    const registered = takeFreshRegistration(manifest.addonId, loadStartedAt)
     if (registered === null) {
       for (const link of cssLinks) link.remove()
       return fail('no-factory-registered')
