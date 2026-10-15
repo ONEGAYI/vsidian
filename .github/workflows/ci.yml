@@ -386,3 +386,65 @@ jobs:
           name: text-appearance-a${{ github.run_attempt }}
           path: .vscode-test/text-appearance.log
           if-no-files-found: warn
+
+  # #446/12 临时历史重放：仅诊断分支触发，收证后撤除，不合入 main。
+  graphic12-historical:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/446-graphic12-ci-replay'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: history
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: ONEGAYI/vsidian
+          ref: 696a1668ae1ea4021912a457d7f91d94517ed8fb
+          path: history
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.23.3
+          cache: npm
+          cache-dependency-path: history/package-lock.json
+      - name: 安装历史依赖
+        run: npm ci
+      - name: 安装原宿主所需系统库
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0t64 libdrm2 \
+            libxkbcommon0 libgbm1 libasound2t64 libgtk-3-0t64 libsecret-1-0 libxkbfile1
+      - name: 留存原文件摘要并补超时末帧
+        run: |
+          sha256sum package-lock.json src/webview/mermaidRender.ts src/webview/diagramPopup.ts src/webview/graphicBlockChrome.ts test/integration/suite/cases.ts > ../graphic12-replay-source-sha256.txt
+          node --input-type=module <<'NODE'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          import assert from 'node:assert/strict';
+          const path='test/integration/suite/cases.ts';
+          const source=readFileSync(path,'utf8');
+          const needle="        selectionOffset: s['selectionOffset'],";
+          assert.equal(source.split(needle).length,2);
+          writeFileSync(path,source.replace(needle,needle+"\n        paint: s['paint'],\n        liveMermaidCount: s['liveMermaidCount'],\n        readingMermaidCount: s['readingMermaidCount'],"));
+          NODE
+      - name: 原样重放历史第2分片一次
+        env:
+          VSIDIAN_TEST_GROUP: core
+          VSIDIAN_TEST_SHARD: 2/4
+        run: |
+          set +e
+          xvfb-run -a npm run test:integration > ../graphic12-replay-native.log 2>&1
+          replay_exit=$?
+          printf 'EXIT=%s\n' "$replay_exit" >> ../graphic12-replay-native.log
+          exit "$replay_exit"
+      - name: 无论成败保留完整历史报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphic12-historical-a${{ github.run_attempt }}
+          path: |
+            graphic12-replay-source-sha256.txt
+            graphic12-replay-native.log
+            history/.vscode-test/integration-dev.log
+          if-no-files-found: warn
