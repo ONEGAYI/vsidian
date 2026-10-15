@@ -25,13 +25,31 @@
 //   ——「保留断链及未命中引用」的可见性口径
 //
 // 本模块不依赖 vscode / DOM（node 单测直驱）；存在性经 resolver 端口注入
-// （宿主索引传「文件集合 + 平台大小写」实现，返回根内相对真实路径）。
+// （宿主索引传「文件集合 + 平台大小写」实现，返回规范绝对身份）。
+//
+// #556（T2）身份与解析升级：resolvedTarget 从根内相对路径升级为**规范
+// 绝对身份**（磁盘真实形态、`/` 分隔）——跨根/工作区外目标以绝对身份
+// 表达，不再恒 null；显式绝对路径目标（盘符/POSIX 根形态）经规划器
+// absolute 分支解析并登记（登记/失效语义在索引服务侧）；相对候选全未
+// 命中的纯文件名 Markdown 目标经注入的短名补查端口解析（唯一命中取
+// 端口给定的磁盘真实形态；ambiguous/pending **不归任一候选**——边保持
+// resolvedTarget=null，与断链共用现有 null 语义，消费入口的分态提示由
+// T3 经同一解析器实时判定）。补查域形态学与结果映射复用 vaultLink 的
+// shortnameLookupKeyOf / shortnameLookupResolution——不在本模块复制第二
+// 套规则（R1 单一解析语义）。
+import * as path from 'node:path'
 import type { SyntaxNode, Tree } from '@lezer/common'
-import { classifyImageTarget, classifyLinkTarget, type LinkContext } from './linkTarget'
+import { classifyImageTarget, classifyLinkTarget, planPathTextOf, splitHrefFragment, type LinkContext } from './linkTarget'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
 import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
 import { scanLooseLinksInLine } from '../shared/looseLink'
-import { planVaultLinkPath, type VaultLinkPathContext } from '../shared/vaultLink'
+import {
+  planVaultLinkPath,
+  shortnameLookupKeyOf,
+  shortnameLookupResolution,
+  type VaultLinkPathContext,
+  type VaultLinkShortnameLookupResult,
+} from '../shared/vaultLink'
 import { sortEdges, type VaultEdge, type VaultEdgeKind } from '../shared/vaultIndexModel'
 import { chainAt, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
 
@@ -47,10 +65,11 @@ export function isVaultPanelOutlink(edge: VaultEdge, ctx: LinkContext): boolean 
     return true
   }
   if (edge.kind === 'image') {
-    return classifyImageTarget(edge.target, ctx).kind === 'workspace'
+    const target = classifyImageTarget(edge.target, ctx)
+    return target.kind === 'workspace' || target.kind === 'absolute'
   }
   const target = classifyLinkTarget(edge.target, ctx)
-  return target.kind === 'doc' || target.kind === 'anchor'
+  return target.kind === 'doc' || target.kind === 'anchor' || target.kind === 'absolute'
 }
 
 /** occurrence 起点是否处于代码/注释上下文或 frontmatter 内（源码降级
@@ -71,10 +90,31 @@ const INLINE_SCAN_CODE_CONTEXTS = new Set([
   'CommentBlock',
 ])
 
-/** 存在性解析端口：绝对 fsPath → 根内相对规范路径（`/` 分隔、磁盘真实
- *  大小写形态）或 null（不存在）。大小写语义由实现方按宿主平台决定
- *  （Windows 折叠 / POSIX 严格），与 #196 的 statFileRealPath 端口同型。 */
+/** 存在性解析端口：绝对 fsPath → 目标**规范绝对身份**（磁盘真实形态、
+ *  `/` 分隔）或 null（不存在）。大小写语义由实现方按宿主平台决定
+ *  （Windows 折叠 / POSIX 严格），与 #196 的 statFileRealPath 端口同型。
+ *  #556 T2 起返回值从根内相对路径升级为绝对身份——跨根/工作区外目标
+ *  的命中结果即其绝对形态，不再因越根恒 null。 */
 export type VaultEdgeResolvePort = (absoluteFsPath: string) => string | null
+
+/** 短名补查端口（#556 T2 索引抽取侧注入）：与 vaultLink 的
+ *  VaultLinkShortnamePort 同结果形态（candidates 为磁盘真实绝对形态、
+ *  complete 为清单完整性），但为同步函数——索引抽取（extractVaultEdges）
+ *  是同步纯逻辑，端口由宿主索引服务以内存清单查询实现（R6 容量红线：
+ *  禁止点击/抽取时全库 fs 扫描）。 */
+export type VaultEdgeShortnamePort = (basename: string) => VaultLinkShortnameLookupResult
+
+/** 抽取选项（#556 T2）：短名补查与绝对目标解析端口注入 */
+export interface VaultEdgeExtractOptions {
+  /** 短名补查端口（不注入时纯文件名目标不做补查——与解析器端口缺省
+   *  语义一致）；索引服务传清单查询（catalog 内存倒排） */
+  lookupShortname?: VaultEdgeShortnamePort
+  /** 显式绝对路径目标的解析端口：与主端口（相对候选域）分立——绝对形态
+   *  允许跨根与工作区外（查外部登记表），相对候选落在嵌套根/他根维持
+   *  不解析的既有边界。缺省回落主端口（形态上无法区分时按相对域处理，
+   *  外部目标恒 miss——单测直驱的简化形态） */
+  resolveAbsolute?: VaultEdgeResolvePort
+}
 
 /** 表格内容行节点名（#248：嵌入行扫描的格内解码分类） */
 const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
@@ -156,11 +196,12 @@ function embedHitsOfLine(line: string, base: number, tree: Tree): ReturnType<typ
  * 从 Markdown 全文抽取全部出链边（LF 全文坐标）。
  *
  * @param sourceRelPath 来源文档的根内相对路径（边的 source 字段；
- *   本文件锚点边的 resolvedTarget 亦为该值）
+ *   本文件锚点边的身份亦由该值 + ctx.docDir 推导为绝对形态）
  * @param text LF 全文（宿主侧读盘后统一 LF——抽取器不做 CRLF 换算，
  *   区间语义与边表契约一致）
  * @param ctx 路径解析上下文（docDir / rootDir / 平台语义）
- * @param resolve 存在性端口（见 VaultEdgeResolvePort）
+ * @param resolve 存在性端口（见 VaultEdgeResolvePort——返回规范绝对身份）
+ * @param options 抽取选项（短名补查端口注入，#556 T2）
  * @returns 按 source → 区间稳定排序的边表（sortEdges 序）
  */
 export function extractVaultEdges(
@@ -168,33 +209,73 @@ export function extractVaultEdges(
   text: string,
   ctx: VaultLinkPathContext,
   resolve: VaultEdgeResolvePort,
+  options: VaultEdgeExtractOptions = {},
 ): VaultEdge[] {
   const linkCtx: LinkContext = ctx
   const edges: VaultEdge[] = []
   const fm = frontmatterRange(text)
   const fmEnd = fm ? fm.end : null
   const tree = markdownTreeParser.parse(text)
+  const ops = ctx.isWindowsHost ? path.win32 : path.posix
+  // 来源自身的规范绝对身份（本文件锚点边的 resolvedTarget；#556 T2 起边域
+  // 为绝对身份）——docDir 与 sourceRelPath 同源（服务侧 dirname/relOf 对同
+  // 一 fsPath 派生），basename 拼接即来源绝对路径
+  const sourceIdentity = ops.resolve(ctx.docDir, ops.basename(sourceRelPath)).replace(/\\/g, '/')
 
-  /** 解析文档类目标（classifyLinkTarget 的 doc 分支）：候选按优先序探测，
-   *  命中取根内相对真实路径；未命中 null（断链保留） */
-  const resolveDocTarget = (candidates: readonly string[]): string | null => {
+  /** 解析候选目标：候选按优先序探测，命中取端口归正的绝对身份；未命中
+   *  null（断链保留——补查在调用方接力）。port 由分支注入：相对候选走
+   *  主端口（嵌套根/越根不解析的既有边界），绝对形态走 resolveAbsolute
+   *  （跨根/工作区外允许） */
+  const resolveDocTarget = (candidates: readonly string[], port: VaultEdgeResolvePort): string | null => {
     for (const candidate of candidates) {
-      const hit = resolve(candidate)
+      const hit = port(candidate)
       if (hit !== null) {
         return hit
       }
     }
     return null
   }
+  const resolveAbsolutePort = options.resolveAbsolute ?? resolve
+
+  /** 纯文件名 Markdown 目标的短名补查（#556）：相对候选全未命中后接力；
+   *  唯一且清单完整 → 端口给定的绝对身份；ambiguous/pending/not-found →
+   *  null（不归任一候选，与断链共用 null——分态提示由消费入口实时判定） */
+  const resolveShortnameTarget = (rawPath: string, implicitMd: boolean): string | null => {
+    const key = shortnameLookupKeyOf(rawPath, ctx, { implicitMd })
+    if (key === null || options.lookupShortname === undefined) {
+      return null
+    }
+    const resolution = shortnameLookupResolution(options.lookupShortname(key))
+    return resolution.kind === 'target' ? resolution.fsPath : null
+  }
 
   /** mdlink / refdef 目标分类 → 边（anchor 取 fragment；本文件锚点自引用） */
   const pushLinkEdge = (kind: VaultEdgeKind, href: string, start: number, end: number): void => {
     const target = classifyLinkTarget(href, linkCtx)
     if (target.kind === 'doc') {
+      let resolved = resolveDocTarget(target.candidates, resolve)
+      if (resolved === null) {
+        // 短名补查的路径文本与跳转链路同形态（剥 fragment/query 后容错解码）
+        resolved = resolveShortnameTarget(planPathTextOf(splitHrefFragment(href).pathText), true)
+      }
       edges.push({
         source: sourceRelPath,
         target: href,
-        resolvedTarget: resolveDocTarget(target.candidates),
+        resolvedTarget: resolved,
+        kind,
+        anchor: target.fragment ?? '',
+        start,
+        end,
+      })
+      return
+    }
+    if (target.kind === 'absolute') {
+      // 显式绝对路径目标（#556）：候选探测（跨根/工作区外的登记由服务侧
+      // 经 missed 收集完成）；anchor 与 doc 分支同口径
+      edges.push({
+        source: sourceRelPath,
+        target: href,
+        resolvedTarget: resolveDocTarget(target.candidates, resolveAbsolutePort),
         kind,
         anchor: target.fragment ?? '',
         start,
@@ -206,7 +287,7 @@ export function extractVaultEdges(
       edges.push({
         source: sourceRelPath,
         target: href,
-        resolvedTarget: sourceRelPath,
+        resolvedTarget: sourceIdentity,
         kind,
         anchor: target.fragment,
         start,
@@ -260,7 +341,13 @@ export function extractVaultEdges(
             edges.push({
               source: sourceRelPath,
               target: src,
-              resolvedTarget: target.kind === 'workspace' ? resolve(target.fsPath) : null,
+              // workspace 与 absolute（#556 显式绝对图源）都探测；图片单候选
+              resolvedTarget:
+                target.kind === 'workspace'
+                  ? resolve(target.fsPath)
+                  : target.kind === 'absolute'
+                    ? resolveAbsolutePort(target.fsPath)
+                    : null,
               kind: 'image',
               anchor: '',
               start: node.from,
@@ -301,10 +388,20 @@ export function extractVaultEdges(
       }
       let resolved: string | null
       if (parsed.path === '') {
-        resolved = sourceRelPath // 本文件锚点：自引用
+        resolved = sourceIdentity // 本文件锚点：自引用
       } else {
         const plan = planVaultLinkPath(parsed.path, ctx, { implicitMd: true })
-        resolved = plan.kind === 'inside' ? resolveDocTarget(plan.candidates) : null
+        if (plan.kind === 'inside') {
+          resolved = resolveDocTarget(plan.candidates, resolve)
+          if (resolved === null) {
+            resolved = resolveShortnameTarget(parsed.path, true)
+          }
+        } else if (plan.kind === 'absolute') {
+          // 显式绝对路径（#556）：跨根/工作区外目标探测（missed 收集在服务侧）
+          resolved = resolveDocTarget(plan.candidates, resolveAbsolutePort)
+        } else {
+          resolved = null
+        }
       }
       edges.push({
         source: sourceRelPath,
@@ -335,10 +432,20 @@ export function extractVaultEdges(
       }
       let resolved: string | null
       if (parsed.path === '') {
-        resolved = sourceRelPath // 本文件锚点：自引用
+        resolved = sourceIdentity // 本文件锚点：自引用
       } else {
         const plan = planVaultLinkPath(parsed.path, ctx, { implicitMd: true })
-        resolved = plan.kind === 'inside' ? resolveDocTarget(plan.candidates) : null
+        if (plan.kind === 'inside') {
+          resolved = resolveDocTarget(plan.candidates, resolve)
+          if (resolved === null) {
+            resolved = resolveShortnameTarget(parsed.path, true)
+          }
+        } else if (plan.kind === 'absolute') {
+          // 显式绝对路径（#556）：嵌入的绝对目标与双链同口径
+          resolved = resolveDocTarget(plan.candidates, resolveAbsolutePort)
+        } else {
+          resolved = null
+        }
       }
       edges.push({
         source: sourceRelPath,
@@ -359,7 +466,13 @@ export function extractVaultEdges(
         edges.push({
           source: sourceRelPath,
           target: hit.dest,
-          resolvedTarget: target.kind === 'workspace' ? resolve(target.fsPath) : null,
+          // workspace 与 absolute（#556 显式绝对图源）分端口探测
+          resolvedTarget:
+            target.kind === 'workspace'
+              ? resolve(target.fsPath)
+              : target.kind === 'absolute'
+                ? resolveAbsolutePort(target.fsPath)
+                : null,
           kind: 'image',
           anchor: '',
           start: hit.from,
@@ -380,28 +493,40 @@ export function extractVaultEdges(
 }
 
 /**
- * 断链边重解析（#269 目标归位重抽依赖者的检测步）：对单条 resolvedTarget
- * 为 null 的边按其边型同口径重建候选并探测存在性端口，返回重解析目标
- * （仍不可解为 null）。边型口径与 extractVaultEdges 内部逐型一致——
- * wikilink/embed 走 planVaultLinkPath 候选序（implicitMd），mdlink/refdef
- * 走 classifyLinkTarget 的 doc 分支候选，image 走 classifyImageTarget 的
- * workspace 单候选；external/blocked（外链与危险 scheme）不可接通恒
- * null，本文件锚点边（target 空串）为自引用、resolved 恒非 null——二者
- * 传入属调用方防御，返回 null 不参与依赖者判定。
+ * 断链边重解析（#269 目标归位重抽依赖者的检测步；#556 T2 起返回绝对
+ * 身份并支持补查）：对单条 resolvedTarget 为 null 的边按其边型同口径
+ * 重建候选并探测存在性端口，返回重解析目标（仍不可解为 null）。边型
+ * 口径与 extractVaultEdges 内部逐型一致——wikilink/embed 走
+ * planVaultLinkPath 候选序（implicitMd）与纯文件名补查，mdlink/refdef
+ * 走 classifyLinkTarget 的 doc 分支候选与补查（absolute 分支探测绝对
+ * 候选），image 走 classifyImageTarget 的 workspace/absolute 单候选
+ * （非 Markdown 不补查）；external/blocked（外链与危险 scheme）不可
+ * 接通恒 null，本文件锚点边（target 空串）为自引用、resolved 恒非
+ * null——二者传入属调用方防御，返回 null 不参与依赖者判定。
  */
 export function reresolveVaultEdgeTarget(
   edge: Pick<VaultEdge, 'target' | 'kind'>,
   ctx: VaultLinkPathContext,
   resolve: VaultEdgeResolvePort,
+  options: VaultEdgeExtractOptions = {},
 ): string | null {
-  const probe = (candidates: readonly string[]): string | null => {
+  const probe = (candidates: readonly string[], port: VaultEdgeResolvePort = resolve): string | null => {
     for (const candidate of candidates) {
-      const hit = resolve(candidate)
+      const hit = port(candidate)
       if (hit !== null) {
         return hit
       }
     }
     return null
+  }
+  const resolveAbsolutePort = options.resolveAbsolute ?? resolve
+  const probeShortname = (rawPath: string, implicitMd: boolean): string | null => {
+    const key = shortnameLookupKeyOf(rawPath, ctx, { implicitMd })
+    if (key === null || options.lookupShortname === undefined) {
+      return null
+    }
+    const resolution = shortnameLookupResolution(options.lookupShortname(key))
+    return resolution.kind === 'target' ? resolution.fsPath : null
   }
   switch (edge.kind) {
     case 'wikilink':
@@ -410,19 +535,57 @@ export function reresolveVaultEdgeTarget(
         return null // 本文件锚点（自引用）边的防御分支
       }
       const plan = planVaultLinkPath(edge.target, ctx, { implicitMd: true })
-      return plan.kind === 'inside' ? probe(plan.candidates) : null
+      if (plan.kind === 'inside') {
+        return probe(plan.candidates) ?? probeShortname(edge.target, true)
+      }
+      if (plan.kind === 'absolute') {
+        return probe(plan.candidates, resolveAbsolutePort)
+      }
+      return null
     }
     case 'mdlink':
     case 'refdef': {
       const target = classifyLinkTarget(edge.target, ctx)
-      if (target.kind !== 'doc') {
-        return null // external / blocked / anchor：非文档目标不可接通
+      if (target.kind === 'doc') {
+        return probe(target.candidates)
+          ?? probeShortname(planPathTextOf(splitHrefFragment(edge.target).pathText), true)
       }
-      return probe(target.candidates)
+      if (target.kind === 'absolute') {
+        return probe(target.candidates, resolveAbsolutePort)
+      }
+      return null // external / blocked / anchor：非文档目标不可接通
     }
     case 'image': {
       const target = classifyImageTarget(edge.target, ctx)
-      return target.kind === 'workspace' ? resolve(target.fsPath) : null
+      return target.kind === 'workspace'
+      ? resolve(target.fsPath)
+      : target.kind === 'absolute'
+        ? (options.resolveAbsolute ?? resolve)(target.fsPath)
+        : null
     }
+  }
+}
+
+/**
+ * 短名依赖反查键（#556 T2 文件集合变化重判的数据面）：边目标在补查域
+ * （纯文件名 Markdown 语义——重判面与补查面同域）时返回查询键（完整
+ * basename 含扩展名），否则 null。服务侧按 fold(键) 建 basename → 来源
+ * 反查表，文件集合变化后仅重抽引用了受影响 basename 的来源。mdlink/
+ * refdef 的目标剥 fragment/query 后容错解码（与解析同形态）；image 为
+ * 非 Markdown 语义（implicitMd=false / 非 .md 扩展）恒不在域内。
+ */
+export function shortnameDepKeyOf(
+  edge: Pick<VaultEdge, 'target' | 'kind'>,
+  ctx: VaultLinkPathContext,
+): string | null {
+  switch (edge.kind) {
+    case 'wikilink':
+    case 'embed':
+      return shortnameLookupKeyOf(edge.target, ctx, { implicitMd: true })
+    case 'mdlink':
+    case 'refdef':
+      return shortnameLookupKeyOf(planPathTextOf(splitHrefFragment(edge.target).pathText), ctx, { implicitMd: true })
+    case 'image':
+      return shortnameLookupKeyOf(edge.target, ctx, { implicitMd: false })
   }
 }

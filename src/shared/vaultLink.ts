@@ -104,6 +104,53 @@ export type VaultLinkShortnamePort = (
   basename: string,
 ) => VaultLinkShortnameLookupResult | Promise<VaultLinkShortnameLookupResult>
 
+/**
+ * 短名补查域判定与查询键（#556 T2 抽取为同步纯函数）：目标归一后**仅含
+ * 文件名**（无分隔符）且属 Markdown 语义（显式 `.md` 或省略扩展名的
+ * implicitMd）时在补查域内，返回查询键（完整 basename，无扩展名补
+ * `.md`）；含分隔符的明确相对路径、非 Markdown 扩展、`implicitMd=false`
+ * 与空路径不在补查域（返回 null）。resolveVaultLinkFile（跳转/悬停）与
+ * extractVaultEdges（索引抽取）共用——补查域形态学的单一事实源，不在
+ * 消费方各自内联复制。
+ */
+export function shortnameLookupKeyOf(
+  rawPath: string,
+  ctx: VaultLinkPathContext,
+  options?: VaultLinkPlanOptions,
+): string | null {
+  const normalized = (ctx.isWindowsHost ? rawPath.replace(/\\/g, '/') : rawPath).trim()
+  if (normalized === '' || normalized.includes('/')) {
+    return null
+  }
+  const ext = path.posix.extname(normalized)
+  const markdownIntent = ext === '.md' || (ext === '' && (options?.implicitMd ?? true))
+  if (!markdownIntent) {
+    return null
+  }
+  return ext === '' ? `${normalized}.md` : normalized
+}
+
+/**
+ * 短名补查结果映射（#556 T2 抽取为同步纯函数）：0 候选 not-found、多候选
+ * ambiguous（无论清单是否完整，不归任一候选）、唯一且完整 target（端口
+ * 给定的磁盘真实形态）、唯一但不完整 pending（不声明唯一）。与
+ * resolveVaultLinkFile 的补查分支同一决策——索引抽取（同步）与跳转解析
+ * （异步）共用，结果形态不因消费方分叉。
+ */
+export function shortnameLookupResolution(
+  found: VaultLinkShortnameLookupResult,
+): Extract<VaultLinkFileResolution, { kind: 'target' | 'not-found' | 'ambiguous' | 'pending' }> {
+  if (found.candidates.length === 0) {
+    return { kind: 'not-found' }
+  }
+  if (found.candidates.length > 1) {
+    return { kind: 'ambiguous', candidates: found.candidates }
+  }
+  return found.complete
+    ? { kind: 'target', fsPath: found.candidates[0]! }
+    : { kind: 'pending' }
+}
+
 /** 存在性解析结果（vscode 层按 kind 分派：打开/提示） */
 export type VaultLinkFileResolution =
   | { kind: 'target'; fsPath: string }
@@ -259,23 +306,13 @@ export async function resolveVaultLinkFile(
       return { kind: 'target', fsPath: realPath }
     }
   }
-  // 短名补查：仅文件名（归一后无分隔符的明确相对目录路径不补查）、仅
-  // Markdown 语义（显式 .md 或省略扩展名的 implicitMd；非 Markdown 不跨
-  // 目录补查）——查询键为完整 basename（含扩展名）
-  const normalized = (ctx.isWindowsHost ? rawPath.replace(/\\/g, '/') : rawPath).trim()
-  const ext = path.posix.extname(normalized)
-  const markdownIntent = ext === '.md' || (ext === '' && (options?.implicitMd ?? true))
-  if (lookupShortname !== undefined && !normalized.includes('/') && markdownIntent) {
-    const found = await lookupShortname(ext === '' ? `${normalized}.md` : normalized)
-    if (found.candidates.length === 0) {
-      return { kind: 'not-found' }
+  // 短名补查：域判定与结果映射经 shortnameLookupKeyOf / shortnameLookupResolution
+  // （与索引抽取共用的同步单一事实源）
+  if (lookupShortname !== undefined) {
+    const key = shortnameLookupKeyOf(rawPath, ctx, options)
+    if (key !== null) {
+      return shortnameLookupResolution(await lookupShortname(key))
     }
-    if (found.candidates.length > 1) {
-      return { kind: 'ambiguous', candidates: found.candidates }
-    }
-    return found.complete
-      ? { kind: 'target', fsPath: found.candidates[0]! }
-      : { kind: 'pending' }
   }
   return { kind: 'not-found' }
 }

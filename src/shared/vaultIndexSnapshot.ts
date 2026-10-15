@@ -32,8 +32,18 @@ export type { VaultEdge, VaultEdgeKind, VaultFileEntry, VaultFileKind, VaultInde
  *  v2 内追加（不升版本）：文件行第 6 列可选 birthtimeMs（>0 才写）——
  *  旧片缺列容忍（undefined），增量重扫自愈补齐；列只追加不改语义。
  *  边 kind 码表尾追 'embed'（#222，code 4）：旧代码读写 0–3 不受影响；
- *  旧代码读到 code 4 抛错走损坏重建兜底（降级方向安全）。 */
-export const SNAPSHOT_FORMAT_VERSION = 2
+ *  旧代码读到 code 4 抛错走损坏重建兜底（降级方向安全）。
+ *  v3（#556 T2）：边行 resolvedTarget 列的语义域从根内相对路径升级为
+ *  **规范绝对身份**（片结构不变，仅语义域变化）。v3 片标 v:3——旧代码
+ *  拒读走重建（防把绝对身份误当相对解析，降级方向安全）；**v2 片结构
+ *  兼容**（结构同源），loadSnapshot 接受 v2 代并在 meta.formatVersion
+ *  如实回传 2，由服务层按其根把相对 resolvedTarget 重建为绝对（轻量
+ *  迁移，不触发重扫——旧索引可重建边界不变）。 */
+export const SNAPSHOT_FORMAT_VERSION = 3
+
+/** 结构兼容的最低快照格式版本（#556 T2）：v2 与 v3 片结构同源，v2 的
+ *  resolvedTarget 为根内相对形态（服务层迁移）；v1 及更早拒读。 */
+const MIN_LOADABLE_FORMAT_VERSION = 2
 
 /** 单次提交的片数上限（shard 文件名三位补零）。 */
 export const MAX_SHARD_COUNT = 1000
@@ -136,9 +146,11 @@ export interface PlanSnapshotOptions {
   writerTag?: string
 }
 
-/** 片的列式紧凑 JSON 形态（names 字符串表 + 数字数组，路径与锚点都走索引）。 */
+/** 片的列式紧凑 JSON 形态（names 字符串表 + 数字数组，路径与锚点都走索引）。
+ *  v3（#556 T2）与 v2 结构同源；v 字段区分语义域：v2 的 resolvedTarget
+ *  为根内相对形态（加载后由服务层迁移），v3 为规范绝对身份。 */
 interface ShardFile {
-  v: 2
+  v: 2 | 3
   names: string[]
   /** [nameIdx, mtimeMs, size, contentVersion, kindCode, birthtimeMs?]——
    *  birthtimeMs 仅 >0 时写第 6 列（旧片无此列，加载侧缺省） */
@@ -181,7 +193,7 @@ function serializeShard(files: VaultFileEntry[], edges: VaultEdge[]): string {
     e.end,
     e.resolvedTarget ? intern(e.resolvedTarget) : -1,
   ])
-  const shard: ShardFile = { v: 2, names, files: fileRows, edges: edgeRows }
+  const shard: ShardFile = { v: 3, names, files: fileRows, edges: edgeRows }
   return JSON.stringify(shard)
 }
 
@@ -192,7 +204,7 @@ function parseShard(content: string, dirLabel: string): { files: VaultFileEntry[
   } catch {
     throw new Error(`快照片 JSON 损坏（${dirLabel}）`)
   }
-  if (raw === null || typeof raw !== 'object' || raw.v !== 2 || !Array.isArray(raw.names) || !Array.isArray(raw.files) || !Array.isArray(raw.edges)) {
+  if (raw === null || typeof raw !== 'object' || (raw.v !== 2 && raw.v !== 3) || !Array.isArray(raw.names) || !Array.isArray(raw.files) || !Array.isArray(raw.edges)) {
     throw new Error(`快照片结构不符（${dirLabel}）`)
   }
   const files = raw.files.map((row) => {
@@ -544,7 +556,7 @@ async function tryLoadGeneration(port: VaultIndexFsPort, baseDir: string, dirNam
   }
   if (
     manifest === null || typeof manifest !== 'object'
-    || manifest.formatVersion !== SNAPSHOT_FORMAT_VERSION
+    || (manifest.formatVersion !== SNAPSHOT_FORMAT_VERSION && manifest.formatVersion !== MIN_LOADABLE_FORMAT_VERSION)
     || !Array.isArray(manifest.shards)
     || typeof manifest.generation !== 'number'
   ) {

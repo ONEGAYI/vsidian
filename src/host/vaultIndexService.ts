@@ -37,8 +37,33 @@
 // - **维护操作**：cleanupCache 按 planCleanupDirs 安全回收旧代际（保留
 //   CURRENT 代、继承源与更高代际——尊重并发窗口的活跃读者/写者）；
 //   rebuildAll 全根全量重扫（重解析正文并核验资源，进度回报、可取消）
+//
+// #556 T2 索引身份与补查接线（ADR-0018）：
+// - **目标身份**：边 resolvedTarget 升级为规范绝对身份（normKey 语义），
+//   反链聚合键随身份走——跨根/外部目标不与根内目标合并、不同根同名
+//   相对路径不串反链；跨根/工作区外的被引用目标以绝对键登记入 files
+//   表（asset，仅元数据与被引用关系，不扫描其目录、不递归建库），其
+//   失效经周期核验（accessOf 三态：missing 正证据删除 / inaccessible 只
+//   stale）+ onTargetChange 覆盖（无 watcher 域，核验是唯一探测通道）
+// - **短名补查**：抽取经 catalog 的 Markdown basename 倒排（代次缓存，
+//   零 IO）注入端口——complete = catalogComplete（未完整不声明唯一）；
+//   补查域形态学与结果映射复用 vaultLink 的同步帮手（R1 单一解析语义）
+// - **文件集合变化重判**：basename → 短名边来源的内存反查表（派生不
+//   持久化，与 backlinks 同点位重建）；Markdown 增删（rescanFile 新增/
+//   删除、verifyRoot removed、rename 批新旧名）、清单 Markdown 条目集
+//   合变化（排除/根重划/枚举漂移）与清单转完整触发——只重抽受影响
+//   来源（busy 时挂起，resumeAfterBusy 接力）
+// - **快照 v3**：resolvedTarget 语义域升级；v2 旧快照结构兼容加载，恢复
+//   时按根轻量迁移为绝对身份并全域重判（不触发重扫）
 import * as path from 'node:path'
-import { extractVaultEdges, isVaultPanelOutlink, reresolveVaultEdgeTarget } from './vaultLinkExtract'
+import {
+  extractVaultEdges,
+  isVaultPanelOutlink,
+  reresolveVaultEdgeTarget,
+  shortnameDepKeyOf,
+  type VaultEdgeExtractOptions,
+  type VaultEdgeShortnamePort,
+} from './vaultLinkExtract'
 import type { LinkContext } from './linkTarget'
 import { queryBacklinks, VaultIndexOverlay } from './vaultIndexOverlay'
 import {
@@ -265,6 +290,18 @@ interface RootIndexState {
   catalogTimers: Map<string, ReturnType<typeof setTimeout>>
   /** 清单扫描期间到达的文件事件（发布后重放——闭掉「扫描窗口漏事件」） */
   catalogPendingEvents: Set<string>
+  // ---- #556 T2 短名补查与文件集合重判 ----
+  /** basename（fold 后、含扩展名）→ 引用了该 basename 纯文件名目标的来源
+   *  rel 集合（派生数据不持久化，与 backlinks 同点位重建）——文件集合变化
+   *  后只重抽受影响来源，不全库重扫 */
+  shortnameDeps: Map<string, Set<string>>
+  /** 清单 Markdown basename 倒排（fold(basename) → rels；代次缓存——
+   *  catalogGen 变化时重建，补查端口零 IO 查询的载体） */
+  catalogNameIndex: { gen: number; index: Map<string, string[]> } | null
+  /** 清单转完整等触发的全域短名重判在 busy（扫描/核验/泵）期间挂起，由
+   *  resumeAfterBusy 接力消费（'all' = 全部短名边来源；集合 = 受影响
+   *  basename 的 fold 键） */
+  pendingShortnameRejudge: 'all' | Set<string> | null
 }
 
 export interface VaultIndexServiceOptions {
@@ -733,6 +770,9 @@ export class VaultIndexService {
       catalogCommitTimer: undefined,
       catalogTimers: new Map(),
       catalogPendingEvents: new Set(),
+      shortnameDeps: new Map(),
+      catalogNameIndex: null,
+      pendingShortnameRejudge: null,
     }
   }
 
@@ -777,18 +817,35 @@ export class VaultIndexService {
     try {
       const loaded = await loadSnapshot(this.storage, baseDir)
       if (loaded && !this.disposed) {
+        // v2 → v3 轻量迁移（#556 T2）：旧快照的 resolvedTarget 为根内相对
+        // 形态——按本根重建为规范绝对身份（结构同源不重扫，旧索引可重建
+        // 边界不变）；迁移后旧规则下的断链短名边按新语义重判（清单就绪后）
+        const migrated = loaded.meta.formatVersion === 2
+        if (migrated) {
+          for (const e of loaded.model.edges) {
+            if (e.resolvedTarget !== null) {
+              e.resolvedTarget = this.identityOf(state, e.resolvedTarget)
+            }
+          }
+        }
         state.model = loaded.model
         state.meta = loaded.meta
-        state.backlinks = buildBacklinkIndex(loaded.model.edges)
+        this.refreshDerived(state)
         state.hasData = true
         state.scanning = false
         this.notify()
+        // #377 T02 全文件清单：恢复或重建（与引用关系独立——清单就绪不
+        // 撑引用就绪，反之亦然）。先于核验完成：变更文件的重扫依赖清单
+        // 补查端口（#556 T2——空清单抽边会产生滞留断链边）
+        await this.ensureCatalog(state)
+        if (migrated && !this.disposed && state.hasData) {
+          // v2 边是旧规则（无补查/无绝对目标）产物：清单就绪后全域重判一次
+          // （幂等重抽；busy 时挂起接力）
+          void this.runShortnameRejudge(state, 'all')
+        }
         // 启动核验（#198）：快照恢复不读正文——停机窗口内的漂移由清单比对
         // 检出（mtime+size 仅筛变化；后台执行，不阻塞激活）
         void this.verifyRoot(state)
-        // #377 T02 全文件清单：恢复或重建（与引用关系独立——清单就绪不
-        // 撑引用就绪，反之亦然）
-        await this.ensureCatalog(state)
         return
       }
     } catch {
@@ -820,43 +877,88 @@ export class VaultIndexService {
         const rel = this.relOf(state, abs)
         return rel !== null && this.rootOf(abs) === state && !this.excludeMatcher.test(rel)
       })
-      const foldIndex = new Map<string, string>() // fold(rel) → rel（md 集合）
+      const foldIndex = new Map<string, string>() // fold(identity) → identity（md collection；#556 T2 identity domain）
       const absByRel = new Map<string, string>()
       for (const abs of listed) {
         const rel = this.relOf(state, abs)
         if (rel !== null) {
-          foldIndex.set(this.foldKey(rel), rel)
+          const identity = this.identityOf(state, rel)
+          foldIndex.set(this.foldKey(identity), identity)
           absByRel.set(rel, abs)
         }
       }
       const files = new Map<string, VaultFileEntry>()
       const edges: VaultEdge[] = []
-      /** 附件登记：fold(rel) → 条目（两遍法的第二遍起可见） */
-      const assetFold = new Map<string, VaultFileEntry>()
-      /** 第一遍 miss 的非 md 候选（绝对形态；stat 后决定是否登记 asset——
-       *  含被显式引用的排除位置目标：登记元数据，不递归扫描） */
+      /** 附件登记：fold(身份) → 身份（两遍法的第二遍起可见；#556 T2 起
+       *  键域为规范绝对身份——根内附件与外部/跨根目标同域，resolver 统一
+       *  命中） */
+      const assetFold = new Map<string, string>()
+      /** 第一遍 miss 的候选（绝对形态；stat 后决定是否登记 asset——含被
+       *  显式引用的排除位置目标与跨根/工作区外目标：登记元数据，不递归
+       *  扫描） */
       const missed: string[] = []
       /** 存在断链边的来源 rel（第二遍重抽——asset 登记后可能命中） */
       const pendingSources = new Set<string>()
 
+      /** 相对候选解析端口（#556 T2 起返回规范绝对身份）：根内 md/asset
+       *  折叠命中；归属更具体根（嵌套根）的目标不解析不登记（各根独立
+       *  资源边界的既有边界，不因绝对身份升级放宽） */
       const resolveWith = (absFsPath: string): string | null => {
         const rel = this.relOf(state, absFsPath)
-        // 越根或归属更具体根（嵌套根）的目标不解析（断链保留——各根独立
-        // 资源边界，#194「路径与范围」）
         if (rel === null || this.rootOf(absFsPath) !== state) {
           return null
         }
-        const mdHit = foldIndex.get(this.foldKey(rel))
+        const key = this.foldKey(this.normKey(absFsPath))
+        const mdHit = foldIndex.get(key)
         if (mdHit !== undefined) {
           return mdHit
         }
-        const assetHit = assetFold.get(this.foldKey(rel))
+        const assetHit = assetFold.get(key)
         if (assetHit !== undefined) {
-          return assetHit.path
+          return assetHit
         }
         missed.push(absFsPath)
         return null
       }
+
+      /** 绝对路径目标解析端口（#556）：显式绝对形态的目标允许跨根与工作
+       *  区外——根内照常命中，根外查绝对登记表，未登记者入 missed 供登记
+       *  （相对候选落在嵌套根不触发该端口——相对与绝对的跨根边界分立） */
+      const resolveAbsoluteWith = (absFsPath: string): string | null => {
+        const rel = this.relOf(state, absFsPath)
+        if (rel !== null && this.rootOf(absFsPath) === state) {
+          const key = this.foldKey(this.normKey(absFsPath))
+          const mdHit = foldIndex.get(key)
+          if (mdHit !== undefined) {
+            return mdHit
+          }
+          const assetHit = assetFold.get(key)
+          if (assetHit !== undefined) {
+            return assetHit
+          }
+          missed.push(absFsPath)
+          return null
+        }
+        const key = this.foldKey(this.normKey(absFsPath))
+        const hit = assetFold.get(key)
+        if (hit !== undefined) {
+          return hit
+        }
+        missed.push(absFsPath)
+        return null
+      }
+
+      /** 短名补查端口（#556 T2）：实时读清单（扫描与清单枚举并发——清单
+       *  中途就绪后后续来源自动可用；未就绪返回空候选） */
+      const lookupShortname: VaultEdgeShortnamePort = (basename) => {
+        const hits = this.mdBasenameIndexOf(state).get(this.foldKey(basename)) ?? []
+        const candidates: string[] = []
+        for (const rel of hits) {
+          candidates.push(this.identityOf(state, rel))
+        }
+        return { candidates, complete: state.catalogComplete }
+      }
+      const extractOptions: VaultEdgeExtractOptions = { lookupShortname, resolveAbsolute: resolveAbsoluteWith }
 
       const ctxOf = (abs: string) => ({
         docDir: this.dirname(abs),
@@ -878,7 +980,7 @@ export class VaultIndexService {
           continue // 读失败：不登记（watcher 兜底）
         }
         const text = normalizeLf(raw)
-        const docEdges = extractVaultEdges(rel, text, ctxOf(abs), resolveWith)
+        const docEdges = extractVaultEdges(rel, text, ctxOf(abs), resolveWith, extractOptions)
         edges.push(...docEdges)
         files.set(rel, {
           path: rel,
@@ -898,7 +1000,10 @@ export class VaultIndexService {
       }
 
       // 附件登记：miss 候选中真实存在者（任意类型，仅登记元数据与被引用
-      // 关系，不解析内容——#194 规格）
+      //  关系，不解析内容——#194 规格）。#556 T2 起跨根/工作区外的绝对目标
+      //  同域登记（键为规范绝对身份——「仅登记被明确引用的目标」，不扫描
+      //  外部目录、不递归追踪外部文档建库；相对候选落在嵌套根不进 missed，
+      //  各根不重复归属的既有边界不变）
       const uniqueMissed = [...new Set(missed)]
       for (let i = 0; i < uniqueMissed.length; i++) {
         if (cancelled()) {
@@ -906,19 +1011,19 @@ export class VaultIndexService {
         }
         const abs = uniqueMissed[i]!
         const rel = this.relOf(state, abs)
-        // 归属更具体根（嵌套根）的候选不登记（不能重复归属）；
-        // resolveWith 已按 rootOf 过滤，此为登记侧同口径防线
-        if (rel === null || this.rootOf(abs) !== state || files.has(rel)) {
+        const inRoot = rel !== null && this.rootOf(abs) === state
+        const key = inRoot ? rel! : this.normKey(abs)
+        if (files.has(key)) {
           continue
         }
         const stat = await this.scan.statFile(abs)
-        if (stat) {
-          const entry: VaultFileEntry = {
-            path: rel, kind: 'asset', mtimeMs: stat.mtimeMs, size: stat.size, contentVersion: 1,
+        if (stat && (inRoot || stat.type !== 'dir')) {
+          const identity = inRoot ? this.identityOf(state, rel!) : this.normKey(abs)
+          files.set(key, {
+            path: key, kind: 'asset', mtimeMs: stat.mtimeMs, size: stat.size, contentVersion: 1,
             ...this.birthtimeOf(stat),
-          }
-          files.set(rel, entry)
-          assetFold.set(this.foldKey(rel), entry)
+          })
+          assetFold.set(this.foldKey(identity), identity)
         }
         if ((i + 1) % this.scanBatch === 0) {
           await this.scan.yieldToEventLoop()
@@ -939,7 +1044,7 @@ export class VaultIndexService {
           continue
         }
         const text = normalizeLf(raw)
-        const next = extractVaultEdges(rel, text, ctxOf(abs), resolveWith)
+        const next = extractVaultEdges(rel, text, ctxOf(abs), resolveWith, extractOptions)
         replaceEdgesOf(edges, rel, next)
       }
 
@@ -953,7 +1058,7 @@ export class VaultIndexService {
       for (const [rel, entry] of files) {
         const prev = prevModel?.files.get(rel)
         if (prev === undefined) {
-          this.ensureGeneration(this.absOf(state, rel))
+          this.ensureGeneration(this.entryAbsOf(state, rel))
         } else if (prev.mtimeMs !== entry.mtimeMs || prev.size !== entry.size) {
           this.publishTargetChange(state, rel, 'changed', { mtimeMs: entry.mtimeMs, size: entry.size })
         }
@@ -986,7 +1091,7 @@ export class VaultIndexService {
       }
       const model: VaultIndexModel = { files, edges }
       state.model = model
-      state.backlinks = buildBacklinkIndex(model.edges)
+      this.refreshDerived(state)
       state.hasData = true
       this.notify()
       await this.commitSnapshot(state)
@@ -1010,6 +1115,248 @@ export class VaultIndexService {
       state.verifyPending = false
       void this.verifyRoot(state)
     }
+    // #556 T2：busy 期间挂起的短名重判接力（清单转完整/迁移触发）
+    if (state.pendingShortnameRejudge !== null && !state.pumping && !state.scanning && !state.verifying) {
+      const scope = state.pendingShortnameRejudge
+      state.pendingShortnameRejudge = null
+      void this.runShortnameRejudge(state, scope)
+    }
+  }
+
+  // ---- #556 T2：绝对身份、短名补查与文件集合重判 ----
+
+  /** 条目键是否为绝对身份形态（跨根/工作区外被引用目标的登记） */
+  private isAbsoluteEntry(entryPath: string): boolean {
+    return this.ops.isAbsolute(entryPath)
+  }
+
+  /** 根内相对路径的规范绝对身份（normKey 语义：resolve + 分隔符归一 +
+   *  去尾斜杠——resolvedTarget 与反链桶的统一身份域） */
+  private identityOf(state: RootIndexState, rel: string): string {
+    return this.normKey(this.absOf(state, rel))
+  }
+
+  /** 条目键（rel 或绝对身份）对应的绝对 fsPath */
+  private entryAbsOf(state: RootIndexState, entryPath: string): string {
+    return this.isAbsoluteEntry(entryPath) ? this.normKey(entryPath) : this.absOf(state, entryPath)
+  }
+
+  /** 根内相对路径的 basename（含扩展名、磁盘形态；重判触发面的受影响键） */
+  private basenameOfRel(rel: string): string {
+    return rel.slice(rel.lastIndexOf('/') + 1)
+  }
+
+  /** 派生索引重建（反链桶 + 短名依赖反查表——与边表变更同点位调用；
+   *  反查表为派生数据不持久化，重建与 buildBacklinkIndex 同阶成本） */
+  private refreshDerived(state: RootIndexState): void {
+    if (!state.model) {
+      state.backlinks = null
+      state.shortnameDeps = new Map()
+      return
+    }
+    state.backlinks = buildBacklinkIndex(state.model.edges)
+    const deps = new Map<string, Set<string>>()
+    // shortnameDepKeyOf 只消费 isWindowsHost（docDir/rootDir 不参与判定）
+    const depCtx = { docDir: state.fsPath, rootDir: state.fsPath, isWindowsHost: this.opts.isWindowsHost }
+    for (const e of state.model.edges) {
+      const key = shortnameDepKeyOf(e, depCtx)
+      if (key === null) {
+        continue
+      }
+      const folded = this.foldKey(key)
+      let set = deps.get(folded)
+      if (!set) {
+        deps.set(folded, (set = new Set()))
+      }
+      set.add(e.source)
+    }
+    state.shortnameDeps = deps
+  }
+
+  /** 清单 Markdown basename 倒排（代次缓存：catalogGen 变化时重建——
+   *  补查端口零 IO 查询的载体，R6 容量红线） */
+  private mdBasenameIndexOf(state: RootIndexState): Map<string, string[]> {
+    const catalog = state.catalog
+    if (!catalog) {
+      return new Map()
+    }
+    const cached = state.catalogNameIndex
+    if (cached && cached.gen === state.catalogGen) {
+      return cached.index
+    }
+    const index = new Map<string, string[]>()
+    for (const [rel, entry] of catalog) {
+      if (entry.category !== 'markdown') {
+        continue
+      }
+      const key = this.foldKey(rel.slice(rel.lastIndexOf('/') + 1))
+      let list = index.get(key)
+      if (!list) {
+        index.set(key, (list = []))
+      }
+      list.push(rel)
+    }
+    state.catalogNameIndex = { gen: state.catalogGen, index }
+    return index
+  }
+
+  /** 短名补查端口（#556 T2 索引侧数据面；R1 实现一处各消费方注入）：按
+   *  完整 basename 查来源根内未排除 Markdown（catalog 已按最具体根归属
+   *  过滤——嵌套根不重复归属），complete = catalogComplete（清单未完整
+   *  唯一候选不声明唯一）。 */
+  private shortnameLookupFor(state: RootIndexState): VaultEdgeShortnamePort {
+    return (basename) => {
+      const hits = this.mdBasenameIndexOf(state).get(this.foldKey(basename)) ?? []
+      const candidates: string[] = []
+      for (const rel of hits) {
+        candidates.push(this.identityOf(state, rel))
+      }
+      return { candidates, complete: state.catalogComplete }
+    }
+  }
+
+  /** 基线 resolver 对（#556 T2 身份域升级）：resolve 按根内域（越根/归属
+   *  更具体根不解析——相对链接的既有边界不放宽），resolveAbsolute 按绝对
+   *  身份统一域（根内 + 已登记外部/跨根目标，miss 收集供登记）。键域为
+   *  fold(规范绝对身份)——查询路径大小写漂移按 fold 容错。 */
+  private makeModelResolvers(state: RootIndexState, missed?: string[]): {
+    resolve: (absFsPath: string) => string | null
+    resolveAbsolute: (absFsPath: string) => string | null
+  } {
+    const foldIndex = new Map<string, string>()
+    for (const p of state.model?.files.keys() ?? []) {
+      const identity = this.isAbsoluteEntry(p) ? this.normKey(p) : this.identityOf(state, p)
+      foldIndex.set(this.foldKey(identity), identity)
+    }
+    const lookup = (absFsPath: string): string | null => {
+      const key = this.foldKey(this.normKey(absFsPath))
+      const hit = foldIndex.get(key)
+      if (hit !== undefined) {
+        return hit
+      }
+      missed?.push(absFsPath)
+      return null
+    }
+    return {
+      resolve: (absFsPath: string): string | null => {
+        const rel = this.relOf(state, absFsPath)
+        if (rel === null || this.rootOf(absFsPath) !== state) {
+          return null
+        }
+        return lookup(absFsPath)
+      },
+      resolveAbsolute: lookup,
+    }
+  }
+
+  /** 登记被明确引用的外部目标（#556 T2）：miss 收集中的根外绝对路径 stat
+   *  后按 asset 登记入 files 表（键 = 规范绝对身份；仅元数据与被引用关系，
+   *  不扫描外部目录、不递归追踪外部文档建库——Markdown 目标也不解析其
+   *  内容，kind 归 asset）。根内 miss 维持既有断链语义。返回登记数。 */
+  private async registerExternalTargets(state: RootIndexState, missed: readonly string[]): Promise<number> {
+    if (this.disposed || !state.model) {
+      return 0
+    }
+    let registered = 0
+    let n = 0
+    for (const abs of new Set(missed)) {
+      const rel = this.relOf(state, abs)
+      if (rel !== null && this.rootOf(abs) === state) {
+        continue // 根内 miss：断链（附件登记在两遍法/rename 批域）
+      }
+      const identity = this.normKey(abs)
+      if (state.model.files.has(identity)) {
+        continue
+      }
+      const stat = await this.scan.statFile(abs)
+      if (!stat || stat.type === 'dir') {
+        continue
+      }
+      const prev = state.model.files.get(identity)
+      state.model.files.set(identity, {
+        path: identity,
+        kind: 'asset',
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        contentVersion: (prev?.contentVersion ?? 0) + 1,
+        ...this.birthtimeOf(stat),
+      })
+      this.ensureGeneration(identity)
+      registered++
+      if ((++n) % this.rescanBatchFiles === 0) {
+        await this.scan.yieldToEventLoop()
+      }
+    }
+    return registered
+  }
+
+  /** 重判受影响 basename 的短名边来源（#556 T2 文件集合变化重判）：按
+   *  basename → 来源反查表定位依赖者并读盘重抽——只重抽相关来源，不全
+   *  库重扫；覆盖唯一变歧义、歧义恢复唯一、相对候选新增抢占与删除后
+   *  恢复（重抽幂等，来源为改写分支不再触发 basename 重判，无递归）。 */
+  private async rejudgeShortnameByBasenames(state: RootIndexState, basenames: Iterable<string>): Promise<void> {
+    if (this.disposed || !state.hasData || !state.model) {
+      return
+    }
+    const sources = new Set<string>()
+    for (const bn of basenames) {
+      const deps = state.shortnameDeps.get(this.foldKey(bn))
+      if (deps) {
+        for (const s of deps) {
+          sources.add(s)
+        }
+      }
+    }
+    await this.rescanSources(state, sources)
+  }
+
+  /** 全域短名重判（清单转完整 / v2 快照迁移）：全部短名边来源重抽 */
+  private async rejudgeAllShortnameSources(state: RootIndexState): Promise<void> {
+    if (this.disposed || !state.hasData || !state.model) {
+      return
+    }
+    const sources = new Set<string>()
+    for (const deps of state.shortnameDeps.values()) {
+      for (const s of deps) {
+        sources.add(s)
+      }
+    }
+    await this.rescanSources(state, sources)
+  }
+
+  private async rescanSources(state: RootIndexState, sources: ReadonlySet<string>): Promise<void> {
+    let n = 0
+    for (const rel of sources) {
+      if (this.disposed) {
+        return
+      }
+      await this.rescanFile(state, this.absOf(state, rel))
+      if ((++n) % this.rescanBatchFiles === 0) {
+        await this.scan.yieldToEventLoop()
+      }
+    }
+  }
+
+  /** 执行（或 busy 时挂起接力）短名重判：'all' 为全部短名边来源；挂起态
+   *  由 resumeAfterBusy 在扫描/核验/泵结束后消费（'all' 吸收集合态） */
+  private runShortnameRejudge(state: RootIndexState, scope: 'all' | ReadonlySet<string>): Promise<void> {
+    if (this.disposed || !state.hasData || !state.model) {
+      return Promise.resolve()
+    }
+    if (state.scanning || state.verifying || state.pumping) {
+      const cur = state.pendingShortnameRejudge
+      if (cur === 'all' || scope === 'all') {
+        state.pendingShortnameRejudge = 'all'
+      } else if (cur === null) {
+        state.pendingShortnameRejudge = new Set(scope)
+      } else {
+        state.pendingShortnameRejudge = new Set([...cur, ...scope])
+      }
+      return Promise.resolve()
+    }
+    return scope === 'all'
+      ? this.rejudgeAllShortnameSources(state)
+      : this.rejudgeShortnameByBasenames(state, scope)
   }
 
   // ---- 快照提交 ----
@@ -1171,20 +1518,24 @@ export class VaultIndexService {
       return false
     }
     const text = normalizeLf(pending.text)
-    const modelResolver = this.makeModelResolver(state)
+    const { resolve, resolveAbsolute } = this.makeModelResolvers(state)
     const edges = extractVaultEdges(rel, text, {
       docDir: this.dirname(key),
       rootDir: state.fsPath,
       isWindowsHost: this.opts.isWindowsHost,
     }, (abs) => {
       // 覆盖层解析：基线集合（md + asset，平台大小写）+ 覆盖文档自身；
-      // 未登记的附件目标按断链保留（覆盖层高频路径不做 stat IO）
-      const hit = modelResolver(abs)
+      // 未登记的附件目标按断链保留（覆盖层高频路径不做 stat IO——外部
+      // 目标的登记在保存后的增量重扫完成）
+      const hit = resolve(abs)
       if (hit !== null) {
         return hit
       }
       const target = this.relOf(state, abs)
-      return target !== null && this.foldKey(target) === this.foldKey(rel) ? rel : null
+      return target !== null && this.foldKey(target) === this.foldKey(rel) ? this.normKey(key) : null
+    }, {
+      lookupShortname: this.shortnameLookupFor(state),
+      resolveAbsolute,
     })
     return worldReapply
       ? state.overlay.reapply(rel, pending.version, edges)
@@ -1392,6 +1743,9 @@ export class VaultIndexService {
       }
       this.removeBaselineEntry(state, rel)
       this.publishTargetChange(state, rel, 'deleted', null)
+      // #556 T2：删除后重判——引用了该 basename 的短名边可能恢复唯一
+      // （歧义恢复唯一的触发面之一）
+      await this.rejudgeShortnameByBasenames(state, [this.basenameOfRel(rel)])
       return
     }
     if (access === 'inaccessible') {
@@ -1427,11 +1781,28 @@ export class VaultIndexService {
       this.retireUnsavedEntry(state, fsPath, rel)
     }
     const prevEntry = state.model.files.get(rel)
-    const edges = extractVaultEdges(rel, text, {
+    const missed: string[] = []
+    const { resolve, resolveAbsolute } = this.makeModelResolvers(state, missed)
+    let edges = extractVaultEdges(rel, text, {
       docDir: this.dirname(fsPath),
       rootDir: state.fsPath,
       isWindowsHost: this.opts.isWindowsHost,
-    }, this.makeModelResolver(state))
+    }, resolve, {
+      lookupShortname: this.shortnameLookupFor(state),
+      resolveAbsolute,
+    })
+    // 外部目标登记（#556 T2）：绝对路径目标（跨根/工作区外）stat 后登记
+    // entry；登记发生后断链边重抽一次（登记表就绪后命中）
+    if (await this.registerExternalTargets(state, missed) > 0 && edges.some((e) => e.resolvedTarget === null)) {
+      edges = extractVaultEdges(rel, text, {
+        docDir: this.dirname(fsPath),
+        rootDir: state.fsPath,
+        isWindowsHost: this.opts.isWindowsHost,
+      }, resolve, {
+        lookupShortname: this.shortnameLookupFor(state),
+        resolveAbsolute,
+      })
+    }
     state.model.files.set(rel, {
       path: rel,
       kind: 'markdown',
@@ -1441,12 +1812,17 @@ export class VaultIndexService {
       ...this.birthtimeOf(stat),
     })
     state.model.edges = state.model.edges.filter((e) => e.source !== rel).concat(edges)
-    state.backlinks = buildBacklinkIndex(state.model.edges)
+    this.refreshDerived(state)
     // #377 T02：md 增量重扫同步维护清单条目（磁盘 stat——未保存编辑不参
     // 与；changed 广播由下方既有发布承担，不双发）
     this.applyCatalogUpsert(state, rel, 'markdown', stat.mtimeMs, stat.size, false)
     if (!prevEntry || prevEntry.mtimeMs !== stat.mtimeMs || prevEntry.size !== stat.size) {
       this.publishTargetChange(state, rel, 'changed', { mtimeMs: stat.mtimeMs, size: stat.size })
+    }
+    if (!prevEntry) {
+      // #556 T2：新增登记后重判——引用了该 basename 的短名边可能接通
+      // （未解析边恢复）或被相对候选抢占
+      await this.rejudgeShortnameByBasenames(state, [this.basenameOfRel(rel)])
     }
     this.notify()
   }
@@ -1457,27 +1833,12 @@ export class VaultIndexService {
     if (hadModel) {
       state.model!.files.delete(rel)
       state.model!.edges = state.model!.edges.filter((e) => e.source !== rel)
-      state.backlinks = buildBacklinkIndex(state.model!.edges)
+      this.refreshDerived(state)
     }
     // #377 T02：清单条目随基线退场（调用方语义为删除正证据路径）
     const hadCatalog = this.removeCatalogEntry(state, rel)
     if (hadModel || hadCatalog) {
       this.notify()
-    }
-  }
-
-  /** 基线 resolver：model.files 键精确 + 平台折叠（覆盖层文档不在基线时按断链） */
-  private makeModelResolver(state: RootIndexState) {
-    const foldIndex = new Map<string, string>()
-    for (const rel of state.model?.files.keys() ?? []) {
-      foldIndex.set(this.foldKey(rel), rel)
-    }
-    return (absFsPath: string): string | null => {
-      const rel = this.relOf(state, absFsPath)
-      if (rel === null) {
-        return null
-      }
-      return foldIndex.get(this.foldKey(rel)) ?? null
     }
   }
 
@@ -1535,6 +1896,10 @@ export class VaultIndexService {
     state.catalogScanning = true
     this.notify()
     try {
+      // #556 T2：旧清单留档——发布后 diff Markdown 条目集合（排除变更/根
+      // 重划/枚举漂移都会在此现形），受影响 basename 触发短名边重判
+      const prevCatalog = state.catalog
+      const prevComplete = state.catalogComplete
       const listed = await this.scan.listAllFiles(state.fsPath, {
         skipDir: (dirFsPath) => this.isExcludedDirDeep(dirFsPath),
       })
@@ -1592,6 +1957,38 @@ export class VaultIndexService {
             return
           }
           await this.catalogFileEvent(state, fsPath, true)
+        }
+      }
+      // #556 T2 短名重判（扫描完成触发）：其一，清单转完整（false→true）
+      // ——pending 语义的短名边（唯一候选但不完整）恢复判定，全域重判；
+      // 其二，Markdown 条目集合变化（排除/根重划/漂移）——受影响 basename
+      // 定向重判。busy（扫描/核验/泵）时挂起，resumeAfterBusy 接力
+      if (!cancelled()) {
+        const mdBasenames = (catalog: Map<string, VaultCatalogEntry>): Set<string> => {
+          const out = new Set<string>()
+          for (const [rel, entry] of catalog) {
+            if (entry.category === 'markdown') {
+              out.add(this.foldKey(this.basenameOfRel(rel)))
+            }
+          }
+          return out
+        }
+        const prevNames = prevCatalog ? mdBasenames(prevCatalog) : new Set<string>()
+        const nextNames = mdBasenames(entries)
+        const affected = new Set<string>()
+        for (const name of nextNames) {
+          if (!prevNames.has(name)) {
+            affected.add(name)
+          }
+        }
+        for (const name of prevNames) {
+          if (!nextNames.has(name)) {
+            affected.add(name)
+          }
+        }
+        const completeFlipped = !prevComplete && state.catalogComplete
+        if (completeFlipped || affected.size > 0) {
+          await this.runShortnameRejudge(state, completeFlipped ? 'all' : affected)
         }
       }
     } finally {
@@ -1836,6 +2233,8 @@ export class VaultIndexService {
         if (access === 'missing') {
           this.removeBaselineEntry(state, rel)
           this.publishTargetChange(state, rel, 'deleted', null)
+          // #556 T2：删除后重判（歧义恢复唯一的核验路径触发面）
+          await this.rejudgeShortnameByBasenames(state, [this.basenameOfRel(rel)])
           touched = true
         } else if (access === 'inaccessible') {
           const prev = known.get(rel)
@@ -1855,6 +2254,61 @@ export class VaultIndexService {
         await this.rescanFile(state, this.absOf(state, pendingRels[i]!))
         touched = true
         if ((i + 1) % this.rescanBatchFiles === 0) {
+          await this.scan.yieldToEventLoop()
+        }
+      }
+      // #556 T2：跨根/外部目标条目核验（files 表绝对身份域）——外部目标
+      // 不在 watcher 域（watchRoot 只监听根内），周期核验是其唯一的失效
+      // 探测通道。三态语义与 md 域一致：missing 正证据移除并广播 deleted
+      // （引用该目标的来源随之重抽、边转断链）；inaccessible 只广播 stale
+      // （不冒充删除）；ok 时元数据变化更新条目并广播 changed
+      const externals = [...state.model.files.keys()].filter((p) => this.isAbsoluteEntry(p))
+      for (let i = 0; i < externals.length; i++) {
+        if (cancelled()) {
+          return 'cancelled'
+        }
+        const entryPath = externals[i]!
+        const prev = state.model.files.get(entryPath)
+        const access = await this.scan.accessOf(entryPath)
+        if (access === 'missing') {
+          state.model.files.delete(entryPath)
+          this.refreshDerived(state)
+          this.publishTargetChange(state, entryPath, 'deleted', null)
+          touched = true
+          // 引用该外部目标的来源重抽（边失效）：反链桶按身份聚合——fold 命中
+          const sources = new Set<string>()
+          for (const e of state.backlinks?.get(entryPath) ?? []) {
+            sources.add(e.source)
+          }
+          if (state.backlinks && sources.size === 0) {
+            for (const [key, list] of state.backlinks) {
+              if (this.foldKey(key) === this.foldKey(entryPath)) {
+                for (const e of list) {
+                  sources.add(e.source)
+                }
+              }
+            }
+          }
+          await this.rescanSources(state, sources)
+        } else if (access === 'inaccessible') {
+          this.publishTargetChange(
+            state, entryPath, 'stale',
+            prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
+          )
+        } else {
+          const stat = await this.scan.statFile(entryPath)
+          if (stat && prev && (prev.mtimeMs !== stat.mtimeMs || prev.size !== stat.size)) {
+            state.model.files.set(entryPath, {
+              ...prev,
+              mtimeMs: stat.mtimeMs,
+              size: stat.size,
+              contentVersion: prev.contentVersion + 1,
+            })
+            this.publishTargetChange(state, entryPath, 'changed', { mtimeMs: stat.mtimeMs, size: stat.size })
+            touched = true
+          }
+        }
+        if ((i + 1) % this.verifyBatchFiles === 0) {
           await this.scan.yieldToEventLoop()
         }
       }
@@ -1974,7 +2428,9 @@ export class VaultIndexService {
     status: VaultTargetChangeStatus,
     stat: { mtimeMs: number; size: number } | null,
   ): void {
-    const abs = this.absOf(state, rel)
+    // #556 T2：rel 可为规范绝对身份形态（跨根/外部目标条目）——绝对键
+    // 直接归一，不与所属根拼接；事件 relPath 如实携带该形态
+    const abs = this.isAbsoluteEntry(rel) ? this.normKey(rel) : this.absOf(state, rel)
     const key = this.normKey(abs)
     if (status === 'stale') {
       if (this.staleMarks.has(key)) {
@@ -2029,11 +2485,12 @@ export class VaultIndexService {
     if (rel === null) {
       return { status: 'outside', rootFsPath: null, incoming: [], outgoing: [] }
     }
-    // 反链桶按磁盘真实形态聚合（resolvedTarget 原文）；fsPath 大小写可能
-    // 与磁盘形态不同——fold 匹配桶键（Windows 语义）
+    // 反链桶按规范绝对身份聚合（#556 T2——resolvedTarget 身份域）；查询
+    // fsPath 大小写可能漂移——fold 匹配桶键（Windows 语义）
+    const absKey = this.normKey(oldFsPath)
     let bucketKey: string | null = null
     for (const key of state.backlinks.keys()) {
-      if (this.foldKey(key) === this.foldKey(rel)) {
+      if (this.foldKey(key) === this.foldKey(absKey)) {
         bucketKey = key
         break
       }
@@ -2041,11 +2498,11 @@ export class VaultIndexService {
     // 桶缺失不整段跳过（#269）：rename 后新目标的桶在依赖者重抽前恒空，
     // 但覆盖层在场的来源（面板打开的引用者经 will 改写只落 buffer，基线
     // 边恒指旧名、无桶可言）须仍可查——与 backlinksOf 同口径按
-    // bucketKey ?? rel 查询，覆盖层段独立遍历命中；基线桶不存在时该段
+    // bucketKey ?? 查询键查询，覆盖层段独立遍历命中；基线桶不存在时该段
     // 自然为空。fold 传参同 backlinksOf（覆盖层边大小写漂移容错）。
     const incoming = new Map<string, VaultEdge[]>()
     for (const e of queryBacklinks(
-      state.backlinks, state.overlay, bucketKey ?? rel, (p) => this.foldKey(p),
+      state.backlinks, state.overlay, bucketKey ?? absKey, (p) => this.foldKey(p),
     )) {
       const abs = this.absOf(state, e.source)
       let list = incoming.get(abs)
@@ -2104,6 +2561,9 @@ export class VaultIndexService {
     const prefix = `${this.foldKey(this.normKey(this.ops.resolve(dirFsPath)))}/`
     const out: string[] = []
     for (const rel of state.model.files.keys()) {
+      if (this.isAbsoluteEntry(rel)) {
+        continue // 跨根/外部绝对身份条目不在本根 rel 域（#556 T2）
+      }
       const abs = this.absOf(state, rel)
       if (this.foldKey(this.normKey(abs)).startsWith(prefix)) {
         out.push(abs)
@@ -2300,14 +2760,21 @@ export class VaultIndexService {
         touched = true
       }
       // 遍 2：抽边（resolver 可见遍 1/1.5 登记的完整新清单——批内互链不断链）
+      const missed: string[] = []
+      const { resolve, resolveAbsolute } = this.makeModelResolvers(state, missed)
       for (const load of mdLoads) {
         const edges = extractVaultEdges(load.rel, load.text, {
           docDir: this.dirname(load.fsPath),
           rootDir: state.fsPath,
           isWindowsHost: this.opts.isWindowsHost,
-        }, this.makeModelResolver(state))
+        }, resolve, {
+          lookupShortname: this.shortnameLookupFor(state),
+          resolveAbsolute,
+        })
         state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
       }
+      // 外部目标登记（#556 T2）：本批文档引用的未登记绝对目标 stat 后登记
+      await this.registerExternalTargets(state, missed)
       // 遍 3（#269 目标归位重抽依赖者）：引用者的 will edit 落盘早于 rename
       // 应用，其 watcher 重扫若先于本批登记（泵与 did 通道在事件循环上竞态），
       // 断链边入基线后无事件重抽——新目标桶恒空，连续 rename 静默漏改写。
@@ -2315,8 +2782,8 @@ export class VaultIndexService {
       // 改写后文本，重抽即接通、桶随归位重建）。本批被移动文件不重扫——
       // 遍 2 已按完整新清单抽边，重扫是纯冗余。
       if (registered.size > 0) {
-        const registeredFold = new Set([...registered].map((r) => this.foldKey(r)))
-        const resolver = this.makeModelResolver(state)
+        const registeredFold = new Set([...registered].map((r) => this.foldKey(this.identityOf(state, r))))
+        const resolver = this.makeModelResolvers(state)
         const dependents = new Set<string>()
         for (const e of state.model.edges) {
           if (e.resolvedTarget !== null || registered.has(e.source)) {
@@ -2326,7 +2793,10 @@ export class VaultIndexService {
             docDir: this.dirname(this.absOf(state, e.source)),
             rootDir: state.fsPath,
             isWindowsHost: this.opts.isWindowsHost,
-          }, resolver)
+          }, resolver.resolve, {
+            lookupShortname: this.shortnameLookupFor(state),
+            resolveAbsolute: resolver.resolveAbsolute,
+          })
           if (hit !== null && registeredFold.has(this.foldKey(hit))) {
             dependents.add(e.source)
           }
@@ -2351,6 +2821,16 @@ export class VaultIndexService {
     }
 
     // ---- 批末：每根一次 backlinks 重建 + 广播 + 快照提交（整批合并） ----
+    // #556 T2：旧/新位置的 Markdown basename 集合（重判触发面——唯一变
+    // 歧义、恢复唯一、相对候选抢占在 rename 后同样成立）
+    const affectedBasenames = new Set<string>()
+    for (const move of moves) {
+      for (const p of [move.oldFsPath, move.newFsPath]) {
+        if (/\.md$/i.test(p)) {
+          affectedBasenames.add(this.basenameOfRel(normalizeSeparators(this.ops.resolve(p))))
+        }
+      }
+    }
     for (const state of touchedRoots) {
       if (!state.model) {
         continue
@@ -2361,9 +2841,10 @@ export class VaultIndexService {
       for (const key of state.unsaved.keys()) {
         this.recomputeUnsaved(state, key, true)
       }
-      state.backlinks = buildBacklinkIndex(state.model.edges)
+      this.refreshDerived(state)
       this.notify()
       this.scheduleCommit(state)
+      await this.rejudgeShortnameByBasenames(state, affectedBasenames)
     }
   }
 
@@ -2425,8 +2906,12 @@ export class VaultIndexService {
         pushFile(rel, entry.mtimeMs, entry.category === 'markdown' ? 'markdown' : 'asset')
       }
     } else {
-      // 清单未就绪回退：现有索引的 Markdown 与被引用附件（可用项继续候选）
+      // 清单未就绪回退：现有索引的 Markdown 与被引用附件（可用项继续候选；
+      // 跨根/外部绝对身份条目不进候选——联想不扫描其他根或外部目录，#556）
       for (const [rel, entry] of state.model.files) {
+        if (this.isAbsoluteEntry(rel)) {
+          continue
+        }
         pushFile(
           rel,
           entry.mtimeMs,
@@ -2502,29 +2987,82 @@ export class VaultIndexService {
   async backlinksOf(fsPath: string): Promise<BacklinksResult> {
     const state = this.rootOf(fsPath)
     if (!state) {
-      return { status: 'error', reason: 'no-workspace' }
+      // #556 T2：工作区外目标身份无所属根——某根登记过该外部目标时按各根
+      // 的绝对身份桶合并查询（登记根各自贡献来源）；无任何登记维持
+      // no-workspace（与「无工作区文档」的面板契约不分叉）
+      const absKey = this.normKey(fsPath)
+      const registered = [...this.roots.values()].some((s) => s.model?.files.has(absKey))
+      if (!registered) {
+        return { status: 'error', reason: 'no-workspace' }
+      }
+      const items: BacklinkItem[] = []
+      let updating = false
+      for (const s of this.roots.values()) {
+        if (!s.hasData || !s.model || !s.backlinks) {
+          continue
+        }
+        updating = updating || s.scanning
+        items.push(...await this.collectBacklinkItems(s, fsPath))
+      }
+      return { status: 'ready', items, updating }
     }
     if (!state.hasData || !state.model || !state.backlinks) {
       return state.scanning ? { status: 'loading' } : { status: 'error', reason: 'read-error' }
     }
-    const rel = this.relOf(state, fsPath)
-    if (rel === null) {
-      return { status: 'error', reason: 'no-workspace' }
+    return {
+      status: 'ready',
+      items: await this.collectBacklinkItems(state, fsPath),
+      updating: state.scanning,
     }
-    // 反链桶按磁盘真实形态聚合（resolvedTarget 原文）；查询 fsPath 的
-    // 大小写可能漂移——fold 匹配桶键后按 fold 查询（与 renameCandidatesOf
-    // 同口径；POSIX 宿主 fold 为 identity，大小写敏感语义保持）
+  }
+
+  /** 单根内的反链条目收集（桶匹配 + 断链兜底 + 片段与行号装配） */
+  private async collectBacklinkItems(state: RootIndexState, fsPath: string): Promise<BacklinkItem[]> {
+    // 反链桶按规范绝对身份聚合（#556 T2——resolvedTarget 身份域）；查询
+    // fsPath 的大小写可能漂移——fold 匹配桶键后按 fold 查询（与
+    // renameCandidatesOf 同口径；POSIX 宿主 fold 为 identity，大小写敏感
+    // 语义保持）
+    const absKey = this.normKey(fsPath)
     let bucketKey: string | null = null
-    for (const key of state.backlinks.keys()) {
-      if (this.foldKey(key) === this.foldKey(rel)) {
+    for (const key of state.backlinks!.keys()) {
+      if (this.foldKey(key) === this.foldKey(absKey)) {
         bucketKey = key
         break
       }
     }
-    const edges = queryBacklinks(
-      state.backlinks, state.overlay, bucketKey ?? rel,
+    let edges = queryBacklinks(
+      state.backlinks!, state.overlay, bucketKey ?? absKey,
       (p) => this.foldKey(p),
     )
+    // #556 T2 断链兜底：短名边重判/接通后断链按 target 原文聚合（裸名
+    // 桶），文件身份查询按 basename（显式 .md 断链）与去扩展名 stem
+    // （省略扩展名断链）兜底命中——「哪些文件断链指向 X」对短名边保持
+    // 可见（桶键为裸名的必为断链边，解析边恒在身份桶，无双计）
+    const basename = this.basenameOfRel(absKey)
+    const fallbackKeys = basename.toLowerCase().endsWith('.md') && basename.length > 3
+      ? [basename, basename.slice(0, -3)]
+      : [basename]
+    for (const fallback of fallbackKeys) {
+      let brokenBucket: string | null = null
+      for (const key of state.backlinks!.keys()) {
+        if (this.foldKey(key) === this.foldKey(fallback)) {
+          brokenBucket = key
+          break
+        }
+      }
+      if (brokenBucket === null) {
+        continue
+      }
+      const broken = queryBacklinks(
+        state.backlinks!, state.overlay, brokenBucket,
+        (p) => this.foldKey(p),
+      ).filter((e) => e.resolvedTarget === null)
+      for (const e of broken) {
+        if (!edges.includes(e)) {
+          edges.push(e)
+        }
+      }
+    }
     // 片段与行号：来源有未保存内容优先取其文本（覆盖层边对齐覆盖层文本），
     // 其余读盘一次（OS 缓存；CRLF 归一与抽取同口径）
     const textBySource = new Map<string, string | null>()
@@ -2597,7 +3135,7 @@ export class VaultIndexService {
         snippetLongStart,
       }
     })
-    return { status: 'ready', items, updating: state.scanning }
+    return items
   }
 
   /** 查询文档的出链（出链面板数据源；含覆盖层未保存态，外链不进面板） */
@@ -2631,13 +3169,16 @@ export class VaultIndexService {
         continue
       }
       const resolved = e.resolvedTarget !== null
+      // resolvedTarget 为规范绝对身份（#556 T2）：显示名按身份 basename；
+      // targetRelPath 保持根内相对域（relOf 对根内身份还原 rel，跨根/外部
+      // 目标无根内 rel 为 null），targetFsPath 直接取身份
       const display = resolved
         ? basenameNoExt(e.resolvedTarget!)
         : e.target
       items.push({
         targetDisplay: display,
-        targetRelPath: e.resolvedTarget,
-        targetFsPath: resolved ? this.absOf(state, e.resolvedTarget!) : null,
+        targetRelPath: resolved ? this.relOf(state, e.resolvedTarget!) : null,
+        targetFsPath: resolved ? e.resolvedTarget : null,
         kind: e.kind,
         anchor: e.anchor,
         resolved,

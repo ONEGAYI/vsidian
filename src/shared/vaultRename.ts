@@ -309,7 +309,13 @@ export function planVaultRenameRewrites(
       }
       // 引用者文档：只有指向本批被移动目标的边才改写；被移动文档自身：
       // 全部出链按新目录重算
-      const targetAbsRaw = ops.resolve(norm(doc.edgeRootFsPath), ...String(edge.resolvedTarget).split('/'))
+      // #556 T2 起 resolvedTarget 为规范绝对身份——绝对形态直接归一采用，
+      // 根内相对形态（旧模型/单测 fixture）仍按 edgeRootFsPath 拼接（兼容
+      // 两域；T4 将按绝对身份重做目标推导）
+      const resolvedRaw = String(edge.resolvedTarget)
+      const targetAbsRaw = ops.isAbsolute(resolvedRaw)
+        ? norm(resolvedRaw)
+        : ops.resolve(norm(doc.edgeRootFsPath), ...resolvedRaw.split('/'))
       const move = moveByOld.get(fold(targetAbsRaw))
       if (!selfMove && move === undefined) {
         continue

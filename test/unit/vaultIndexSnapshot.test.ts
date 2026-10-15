@@ -499,8 +499,8 @@ describe('快照格式健壮性', () => {
     expect(loaded!.model.edges).toEqual(sortEdges(model.edges))
   })
 
-  it('v1 旧格式（无 kind/resolvedTarget 列）拒读并回退，格式版本常量为 2', async () => {
-    expect(SNAPSHOT_FORMAT_VERSION).toBe(2)
+  it('v1 旧格式（无 kind/resolvedTarget 列）拒读并回退，格式版本常量为 3', async () => {
+    expect(SNAPSHOT_FORMAT_VERSION).toBe(3)
     const port = makePort()
     // 手工伪造一个 v1 代：文件行 4 列、边行 6 列（旧格式）
     port.files.set(`${BASE}/CURRENT`, 'gen-000001-w000')
@@ -515,6 +515,46 @@ describe('快照格式健壮性', () => {
       v: 1, names: ['a.md'], files: [[0, 1, 2, 3]], edges: [],
     }))
     expect(await loadSnapshot(port, BASE)).toBeNull()
+  })
+
+  it('#556 T2：v2 旧格式（resolvedTarget 根内相对形态）结构兼容可加载，meta 如实回传 2 待服务层迁移', async () => {
+    const port = makePort()
+    // 手工伪造一个 v2 代：片结构与 v3 同源（shard v:2——边行 resolvedIdx 列）
+    const shard = JSON.stringify({
+      v: 2,
+      names: ['a.md', 'b.md'],
+      files: [[0, 1_700_000_000_000, 10, 1, 0]],
+      edges: [[0, 1, 0, -1, 0, 8, 1]],
+    })
+    port.files.set(`${BASE}/CURRENT`, 'gen-000001-w000')
+    port.files.set(`${BASE}/gen-000001-w000/manifest.json`, JSON.stringify({
+      formatVersion: 2,
+      generation: 1,
+      shardCount: 1,
+      shards: [{ i: 0, bytes: shard.length, checksum: stableHash(shard), inheritedFrom: null }],
+      stats: { fileCount: 1, edgeCount: 1 },
+    }))
+    port.files.set(`${BASE}/gen-000001-w000/shard-000.json`, shard)
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.meta.formatVersion).toBe(2)
+    expect(loaded!.model.edges[0]!.resolvedTarget).toBe('b.md') // 相对形态原样（迁移在服务层）
+  })
+
+  it('#556 T2：v3 新提交写 v:3 片与 formatVersion 3，绝对身份形态完整往返', async () => {
+    const port = makePort()
+    const model: VaultIndexModel = {
+      files: new Map([['a.md', file('a.md')]]),
+      edges: [edge('a.md', 'b', 0, 'wikilink', 'C:/vault/b.md')],
+    }
+    await applyWrites(port, planSnapshotCommit(model, { baseDir: BASE, shardCount: 1 }))
+    const shardRaw = JSON.parse(port.files.get(`${BASE}/gen-000001-w000/shard-000.json`)!)
+    expect(shardRaw.v).toBe(3)
+    const manifest = JSON.parse(port.files.get(`${BASE}/gen-000001-w000/manifest.json`)!)
+    expect(manifest.formatVersion).toBe(3)
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded!.meta.formatVersion).toBe(3)
+    expect(loaded!.model.edges[0]!.resolvedTarget).toBe('C:/vault/b.md')
   })
 })
 

@@ -9,6 +9,8 @@
 export type VaultFileKind = 'markdown' | 'asset'
 
 export interface VaultFileEntry {
+  /** 根内相对路径（`/` 分隔）；#556 T2 起跨根/工作区外的被引用目标存
+   *  规范绝对身份（仅登记元数据与被引用关系，不递归解析内容） */
   path: string
   kind: VaultFileKind
   /** 最后观测 mtime（毫秒）；mtime+size 仅筛选变化，不是内容一致性证明。 */
@@ -30,8 +32,10 @@ export type VaultEdgeKind = 'wikilink' | 'mdlink' | 'image' | 'refdef' | 'embed'
 
 /** 一条出链：来源文档 → 目标（保留断链原样，未命中也入索引）。
  *  target 为链接原文的目标形态（含省略扩展名、相对段等）；
- *  resolvedTarget 为按来源目录解析后的根内相对规范路径，
- *  断链、越出所属根、非文件目标（https 等）为 null。反链聚合用 resolvedTarget。 */
+ *  resolvedTarget 为解析后的**规范绝对身份**（#556 T2 起：磁盘真实形态、
+ *  `/` 分隔、normKey 归一语义——跨根/工作区外目标以其绝对形态表达，
+ *  不同根同名相对路径不合并；反链聚合键随身份走）；断链、越出所属根、
+ *  非文件目标（https 等）与补查歧义/未就绪（不归任一候选）为 null。 */
 export interface VaultEdge {
   source: string
   target: string
@@ -44,7 +48,9 @@ export interface VaultEdge {
   end: number
 }
 
-/** 全量索引模型：文件表 + 边表（反链由 buildBacklinkIndex 重建）。 */
+/** 全量索引模型：文件表 + 边表（反链由 buildBacklinkIndex 重建）。
+ *  #556 T2 起文件表键为混合域：根内条目为根内相对路径（`/` 分隔），
+ *  跨根/工作区外的被引用目标为规范绝对身份（不递归解析其内容）。 */
 export interface VaultIndexModel {
   files: Map<string, VaultFileEntry>
   edges: VaultEdge[]
@@ -59,9 +65,10 @@ export function sortEdges(edges: readonly VaultEdge[]): VaultEdge[] {
   )
 }
 
-/** 从边表构建反链索引：聚合键为解析后目标（resolvedTarget），断链
- *  （resolvedTarget=null）回退按原始目标聚合——保留「哪些文件断链指向 X」
- *  的可见性，不与任何解析目标合并。列表按 sortEdges 序稳定。 */
+/** 从边表构建反链索引：聚合键为解析后目标（resolvedTarget——#556 T2 起
+ *  为规范绝对身份），断链（resolvedTarget=null）回退按原始目标聚合——
+ *  保留「哪些文件断链指向 X」的可见性，不与任何解析目标合并。列表按
+ *  sortEdges 序稳定。 */
 export function buildBacklinkIndex(edges: readonly VaultEdge[]): Map<string, VaultEdge[]> {
   const index = new Map<string, VaultEdge[]>()
   for (const e of sortEdges(edges)) {
