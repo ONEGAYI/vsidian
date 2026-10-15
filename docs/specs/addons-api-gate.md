@@ -76,6 +76,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **组合后 T01 契约修复重锚（2026-10-15）**：`7eb4dfc3` 修正真实槽声明判定，并按已批准规格移除整数优先级的额外私有幅度限制。公开调用形状未变，但现有声明提取器对导出校验函数保留完整文本，因此优先级校验实现变化使 `validateAddonPasteRuleDeclarations` 单项触发 `signature-declaration-changed`；其余检查通过，失败证据为 `out/test/addon-batch-takeover/final-api-before-fix.json`。按现有规则以包含修复的 `9c03461b` 显式发射新候选基线，同步生成参考；仍为 33 条目、21 签名模块和未发行的 1.0.0，不改检查器或增加豁免。新锚点可信复验与完整兼容结果见 `final-api-baseline.log` / `final-api-compat.json`。
 
+**独立审查后主题回落修复重锚（2026-10-15）**：两轴审查发现选中主题失效后，同语言普通提供者仍可接管。`b252bb79` 为 `RendererThemeSelectionContext` 增加可选的不可用主题语言范围，修正 `selectEffectiveRenderers` 的内置回落；`f28a3e3d` 进一步保留当前唯一首选的派生语言 profile 快照，覆盖组件冷启动未登记时的既有选择。SDK 调用面、旧条目和发行台账不变。旧锚点可信复验通过，候选检查只在上述接口和选择函数文本报两项 `signature-declaration-changed`，证据为 `out/test/addon-batch-takeover/review-fixes-compat-red.json`。按字节冻结规则从已提交对象 `f28a3e3d` 显式重锚；33 条目、21 模块及候选 1.0.0 保持，生成参考、基线可信复验和十项兼容检查通过（`review-fixes-baseline.log`）。不改检查器、不加豁免，不把审查修复表述为实际 API 发行。
+
 ## CI 接线（代码侧，已交付）
 
 `.github/workflows/ci.yml` 新增独立 job **`addon-api-contract`**（job 名即 required status check 的 context 名），与 `style-contract` 同序同型——**先证检查器可信，再信检查结果**：
