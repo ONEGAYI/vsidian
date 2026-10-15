@@ -1171,17 +1171,35 @@ export class VaultIndexService {
     const deps = new Map<string, Set<string>>()
     // shortnameDepKeyOf 只消费 isWindowsHost（docDir/rootDir 不参与判定）
     const depCtx = { docDir: state.fsPath, rootDir: state.fsPath, isWindowsHost: this.opts.isWindowsHost }
+    // 短名依赖按「合成最终边集」构建（评审 F2）：覆盖层在场的来源其基线
+    // 边被整体替代——依赖表若只扫基线，dirty 来源的短名边不触发重判；
+    // 合成口径与 queryBacklinks 一致（overlay 条目 = 该来源的最终出链）
+    const overlayEntries = state.overlay.entriesOf()
+    const edgesBySource = new Map<string, typeof state.model.edges>()
     for (const e of state.model.edges) {
-      const key = shortnameDepKeyOf(e, depCtx)
-      if (key === null) {
-        continue
+      const list = edgesBySource.get(e.source)
+      if (list) {
+        list.push(e)
+      } else {
+        edgesBySource.set(e.source, [e])
       }
-      const folded = this.foldKey(key)
-      let set = deps.get(folded)
-      if (!set) {
-        deps.set(folded, (set = new Set()))
+    }
+    for (const [rel, entry] of overlayEntries) {
+      edgesBySource.set(rel, entry.edges)
+    }
+    for (const edges of edgesBySource.values()) {
+      for (const e of edges) {
+        const key = shortnameDepKeyOf(e, depCtx)
+        if (key === null) {
+          continue
+        }
+        const folded = this.foldKey(key)
+        let set = deps.get(folded)
+        if (!set) {
+          deps.set(folded, (set = new Set()))
+        }
+        set.add(e.source)
       }
-      set.add(e.source)
     }
     state.shortnameDeps = deps
   }
@@ -1385,7 +1403,16 @@ export class VaultIndexService {
       if (this.disposed) {
         return
       }
-      await this.rescanFile(state, this.absOf(state, rel))
+      const abs = this.absOf(state, rel)
+      await this.rescanFile(state, abs)
+      // 评审 F2：dirty 来源的覆盖层按未保存正文重算（不能退回盘面文本，
+      // 也不能让旧覆盖层压住已重判的世界）。worldReapply 语义：世界（候选
+      // 集合/登记表）变化后的同版本重算——与 rename 批末世界重算同款，
+      // apply 的同版本拒绝会把旧短名判定永久钉死
+      const key = this.normKey(abs)
+      if (state.unsaved.get(key) !== undefined && this.recomputeUnsaved(state, key, true)) {
+        this.notify()
+      }
       if ((++n) % this.rescanBatchFiles === 0) {
         await this.scan.yieldToEventLoop()
       }
@@ -2528,56 +2555,82 @@ export class VaultIndexService {
    */
   renameCandidatesOf(oldFsPath: string): {
     status: 'ready' | 'not-ready' | 'outside'
-    /** ready 时为 old 所属根（incoming/outgoing 边的 resolvedTarget 根空间） */
+    /** ready 时为 old 所属根（outgoing 边的 resolvedTarget 根空间；外部目标为 null） */
     rootFsPath: string | null
-    incoming: Array<{ fsPath: string; edges: readonly VaultEdge[] }>
+    /** 引用者分组（键 = 来源 fsPath @ 边所在根——跨根来源按根分区，
+     *  与 docsByKey 合并键同构）；边所在根经 group.edgeRootFsPath 携带 */
+    incoming: Array<{ fsPath: string; edges: readonly VaultEdge[]; edgeRootFsPath: string }>
     outgoing: readonly VaultEdge[]
   } {
     const state = this.rootOf(oldFsPath)
-    if (!state) {
+    const absKey = this.normKey(oldFsPath)
+    // 评审 F1：引用者按「规范目标身份跨来源分区」收集——目标所属根之外，
+    // 凡 files 表登记过该目标绝对身份的根，其身份桶同样贡献来源（规格：
+    // 已索引来源对跨根/外部目标的出链、反链及 VSCode 内更名更新均覆盖）；
+    // 外部目标（无所属根）无任何登记时才维持 outside。与 backlinksOf 的
+    // 跨根合并同口径（identityOnly 语义：身份桶命中，断链兜底不跨根）
+    const states: RootIndexState[] = state ? [state] : []
+    for (const s of this.roots.values()) {
+      if (s === state || !s.hasData || !s.model || !s.backlinks) {
+        continue
+      }
+      if (s.model.files.has(absKey)) {
+        states.push(s)
+      }
+    }
+    if (states.length === 0) {
       return { status: 'outside', rootFsPath: null, incoming: [], outgoing: [] }
     }
-    if (!state.hasData || !state.model || !state.backlinks) {
+    // not-ready 语义保持「目标所属根未就绪不部分更新」；他根未就绪仅跳过
+    // 该根贡献（跨根登记是渐进的，不能因一根在扫而放弃他根已就绪来源）
+    if (state && (!state.hasData || !state.model || !state.backlinks)) {
       return { status: 'not-ready', rootFsPath: null, incoming: [], outgoing: [] }
     }
-    const rel = this.relOf(state, oldFsPath)
-    if (rel === null) {
+    const rel = state ? this.relOf(state, oldFsPath) : null
+    if (state && rel === null) {
       return { status: 'outside', rootFsPath: null, incoming: [], outgoing: [] }
     }
-    // 反链桶按规范绝对身份聚合（#556 T2——resolvedTarget 身份域）；查询
-    // fsPath 大小写可能漂移——fold 匹配桶键（Windows 语义）
-    const absKey = this.normKey(oldFsPath)
-    let bucketKey: string | null = null
-    for (const key of state.backlinks.keys()) {
-      if (this.foldKey(key) === this.foldKey(absKey)) {
-        bucketKey = key
-        break
+    const incoming = new Map<string, { fsPath: string; edges: VaultEdge[]; edgeRootFsPath: string }>()
+    for (const s of states) {
+      if (!s.hasData || !s.model || !s.backlinks) {
+        continue
+      }
+      // 反链桶按规范绝对身份聚合（#556 T2——resolvedTarget 身份域）；查询
+      // fsPath 大小写可能漂移——fold 匹配桶键（Windows 语义）
+      let bucketKey: string | null = null
+      for (const key of s.backlinks.keys()) {
+        if (this.foldKey(key) === this.foldKey(absKey)) {
+          bucketKey = key
+          break
+        }
+      }
+      // 桶缺失不整段跳过（#269）：rename 后新目标的桶在依赖者重抽前恒空，
+      // 但覆盖层在场的来源（面板打开的引用者经 will 改写只落 buffer，基线
+      // 边恒指旧名、无桶可言）须仍可查——与 backlinksOf 同口径按
+      // bucketKey ?? 查询键查询，覆盖层段独立遍历命中；基线桶不存在时该段
+      // 自然为空。fold 传参同 backlinksOf（覆盖层边大小写漂移容错）。
+      for (const e of queryBacklinks(
+        s.backlinks, s.overlay, bucketKey ?? absKey, (p) => this.foldKey(p),
+      )) {
+        const abs = this.absOf(s, e.source)
+        const groupKey = `${this.normKey(abs)}@${this.normKey(s.fsPath)}`
+        let group = incoming.get(groupKey)
+        if (!group) {
+          incoming.set(groupKey, (group = { fsPath: abs, edges: [], edgeRootFsPath: s.fsPath }))
+        }
+        group.edges.push(e)
       }
     }
-    // 桶缺失不整段跳过（#269）：rename 后新目标的桶在依赖者重抽前恒空，
-    // 但覆盖层在场的来源（面板打开的引用者经 will 改写只落 buffer，基线
-    // 边恒指旧名、无桶可言）须仍可查——与 backlinksOf 同口径按
-    // bucketKey ?? 查询键查询，覆盖层段独立遍历命中；基线桶不存在时该段
-    // 自然为空。fold 传参同 backlinksOf（覆盖层边大小写漂移容错）。
-    const incoming = new Map<string, VaultEdge[]>()
-    for (const e of queryBacklinks(
-      state.backlinks, state.overlay, bucketKey ?? absKey, (p) => this.foldKey(p),
-    )) {
-      const abs = this.absOf(state, e.source)
-      let list = incoming.get(abs)
-      if (!list) {
-        incoming.set(abs, (list = []))
-      }
-      list.push(e)
-    }
-    const overlayEntry = state.overlay.get(rel)
-    const outgoing = overlayEntry
-      ? overlayEntry.edges
-      : state.model.edges.filter((e) => e.source === rel)
+    const overlayEntry = state && rel !== null ? state.overlay.get(rel) : undefined
+    const outgoing = state && rel !== null
+      ? (overlayEntry
+        ? overlayEntry.edges
+        : state.model!.edges.filter((e) => e.source === rel))
+      : []
     return {
       status: 'ready',
-      rootFsPath: state.fsPath,
-      incoming: [...incoming.entries()].map(([fsPath, edges]) => ({ fsPath, edges })),
+      rootFsPath: state ? state.fsPath : null,
+      incoming: [...incoming.values()].map(({ fsPath, edges, edgeRootFsPath }) => ({ fsPath, edges, edgeRootFsPath })),
       outgoing,
     }
   }

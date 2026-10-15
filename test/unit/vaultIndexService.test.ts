@@ -2591,6 +2591,33 @@ describe('VaultIndexService：#556 T2 短名补查与目标身份（索引接线
     expect(itemsOf(far)).toHaveLength(0)
   })
 
+  it('评审 F2：dirty 来源的短名关系随文件集合变化重判（未保存正文不退回盘面）', async () => {
+    // 盘面来源无链接——[[目标]] 只存在于未保存正文（评审复现的最小化）
+    const fs = makeFs({
+      'C:/vault/project/source.md': '# S\n',
+      'C:/vault/data/target.md': '# T\n',
+    })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 未保存正文加入短名链接：补查命中 data/target.md（根内唯一）
+    service.applyUnsaved('C:/vault/project/source.md', 2, '# S\n\n[[target]]\n')
+    await vi.advanceTimersByTimeAsync(700)
+    const before = await service.backlinksOf('C:/vault/data/target.md')
+    expect(itemsOf(before).map((i) => i.sourceRelPath)).toEqual(['project/source.md'])
+    // 新增来源目录同名文件：相对候选抢占须作用到 dirty 来源——重判按
+    // 未保存正文重算覆盖层，而不是读盘（盘面无链接会把边判没）或保留
+    // 旧覆盖层（继续指向远端目标）
+    fs.files.set('C:/vault/project/target.md', '# 近\n')
+    fs.stats.set('C:/vault/project/target.md', { mtimeMs: 1_700_000_100_000, size: 4 })
+    scan.emit('C:/vault/project/target.md')
+    await vi.advanceTimersByTimeAsync(2_000)
+    const near = await service.backlinksOf('C:/vault/project/target.md')
+    expect(itemsOf(near).map((i) => i.sourceRelPath)).toEqual(['project/source.md'])
+    const far = await service.backlinksOf('C:/vault/data/target.md')
+    expect(itemsOf(far)).toHaveLength(0)
+  })
+
   it('唯一变歧义：新增第二同名后短名边不归任一候选（断链保留）', async () => {
     const fs = makeFs({
       'C:/vault/项目/来源.md': '# 源\n\n见 [[目标]]。\n',
@@ -2807,6 +2834,34 @@ describe('VaultIndexService：#556 T2 外部与跨根目标（绝对身份登记
         targetFsPath: 'C:/vaultB/笔记.md',
         resolved: true,
       })
+    }
+  })
+
+  it('评审 F1：跨根与外部目标的更名引用者跨根分区收集（rename 候选含他根来源）', async () => {
+    const fs = makeFs({
+      'C:/vaultA/源.md': '# 源\n\n见 [[C:/vaultB/笔记.md]] 与 [[E:/外部/资料.md]]。\n',
+      'C:/vaultB/笔记.md': '# B\n',
+      'E:/外部/资料.md': '# 外\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([
+      { fsPath: 'C:/vaultA', uri: 'file:///c%3A/vaultA' },
+      { fsPath: 'C:/vaultB', uri: 'file:///c%3A/vaultB' },
+    ])
+    await vi.advanceTimersByTimeAsync(1)
+    // 跨根目标：引用边在根 A 分区（来源根），rename 候选须收集到根 A 来源
+    const cross = service.renameCandidatesOf('C:/vaultB/笔记.md')
+    expect(cross.status).toBe('ready')
+    if (cross.status === 'ready') {
+      expect(cross.incoming.map((g) => g.fsPath)).toEqual(['C:\\vaultA\\源.md'])
+      expect(cross.incoming[0]!.edgeRootFsPath).toBe('C:/vaultA')
+    }
+    // 工作区外目标（仅被根 A 绝对引用登记）：不再整段 outside——仅有
+    // 入链的外部目标参与更名更新
+    const external = service.renameCandidatesOf('E:/外部/资料.md')
+    expect(external.status).toBe('ready')
+    if (external.status === 'ready') {
+      expect(external.incoming.map((g) => g.fsPath)).toEqual(['C:\\vaultA\\源.md'])
     }
   })
 })

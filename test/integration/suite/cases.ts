@@ -11474,7 +11474,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
         return hit && hit.state === 'loaded' && hit.appliedSrc !== undefined ? hit : undefined
       }, 20000).catch(async (err) => {
         const v = (await vscode.commands.executeCommand(CMD.viewState, absUri)) as unknown
-        throw new Error(`${(err as Error).message}；imageEntries实况=${JSON.stringify((v as { imageEntries?: unknown }).imageEntries ?? null)}`)
+        // 宿主视角探针：测试进程与扩展同在宿主内，stat 直接对准
+        // resolveWorkspaceImage 的文件系统层；失败消息区分「盘上没有」与
+        // 「盘上有但解析链没送到」（CI Linux 定位用，本地恒命中）
+        let hostProbe = 'n/a'
+        try {
+          const st = await vscode.workspace.fs.stat(
+            vscode.Uri.file(nodePath.join(outsideDir, '外部图片.png')))
+          hostProbe = `type=${st.type}`
+        } catch (e) {
+          hostProbe = `ERR ${(e as Error).message}`
+        }
+        throw new Error(`${(err as Error).message}；宿主stat=${hostProbe}；imageEntries实况=${JSON.stringify((v as { imageEntries?: unknown }).imageEntries ?? null)}`)
       })
       assert(img.appliedSrc!.includes('vscode-webview-resource') || img.appliedSrc!.includes('vscode-resource'),
         `外部图片应经 webview 资源服务装载（实际 ${img.appliedSrc}）——localResourceRoots 授权面失效在此暴露`)

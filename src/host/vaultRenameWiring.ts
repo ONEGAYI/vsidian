@@ -366,7 +366,7 @@ async function buildWillRenameEdit(
       if (movedOldKeys.has(normKeyOf(group.fsPath))) {
         continue
       }
-      const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(candidates.rootFsPath!)}`
+      const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(group.edgeRootFsPath)}`
       const merged = docsByKey.get(mergeKey)
       if (merged) {
         merged.edges = [...merged.edges, ...group.edges]
@@ -476,7 +476,7 @@ async function applyAfterRenameBatch(
         if (!pending.dirtyRefs.includes(normKeyOf(group.fsPath))) {
           continue
         }
-        const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(candidates.rootFsPath!)}`
+        const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(group.edgeRootFsPath)}`
         const merged = dirtyDocsByKey.get(mergeKey)
         if (merged) {
           merged.edges = [...merged.edges, ...group.edges]
@@ -491,7 +491,7 @@ async function applyAfterRenameBatch(
           fsPath: group.fsPath,
           text: text.lf,
           edges: [...group.edges],
-          edgeRootFsPath: candidates.rootFsPath!,
+          edgeRootFsPath: group.edgeRootFsPath,
           hostText: text.host,
         })
       }
