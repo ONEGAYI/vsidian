@@ -159,7 +159,7 @@ function validateMatch(value: unknown): { ok: true; match: AddonPasteRuleMatch }
   if (typeof value.tag !== 'string' || !TAG_PATTERN.test(value.tag)) {
     return { ok: false, detail: `match.tag 非法：${String(value.tag)}` }
   }
-  const match: AddonPasteRuleMatch = { tag: value.tag.toUpperCase() }
+  let attributes: readonly AddonPasteRuleAttributeCondition[] | undefined
   if (value.attributes !== undefined) {
     if (!Array.isArray(value.attributes)) return { ok: false, detail: 'match.attributes 须为数组' }
     if (value.attributes.length > ATTRIBUTE_CONDITIONS_LIMIT) {
@@ -179,9 +179,9 @@ function validateMatch(value: unknown): { ok: true; match: AddonPasteRuleMatch }
       }
       conditions.push(raw.value === undefined ? { name: raw.name } : { name: raw.name, value: raw.value })
     }
-    match.attributes = conditions
+    attributes = conditions
   }
-  return { ok: true, match }
+  return { ok: true, match: attributes === undefined ? { tag: value.tag.toUpperCase() } : { tag: value.tag.toUpperCase(), attributes } }
 }
 
 function validateOutput(value: unknown): { ok: true; output: AddonPasteRuleOutput } | { ok: false; detail: string } {

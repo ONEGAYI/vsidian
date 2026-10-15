@@ -42,6 +42,7 @@ import { AddonBehaviorCatalogService } from './addonBehaviorCatalogService'
 import { mergeBehaviorOrderPreservingUnknown, type AddonBehaviorEnabledStateBroadcast } from '../../shared/addonBehaviors'
 import { AddonCommandService } from './addonCommandService'
 import { AddonRendererService, type AddonRendererPersistencePort } from './addonRendererService'
+import { AddonPasteRuleService } from './addonPasteRuleService'
 import { isAddonRenderersRegisteredPayload } from '../../shared/addonRenderers'
 import { createAddonRealpathGuard } from './addonRealpathGuard'
 import { t } from '../../shared/i18n'
@@ -288,6 +289,11 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     persistence: rendererPersistence,
     log: (stage, detail) => log(`addons ${stage}: ${detail}`),
   })
+  // #541 T01 粘贴规则服务：enable 生命周期登记（经 runtime 面乙注入身份），
+  // 有效快照广播编辑器面板；停用/故障/代次结束随 runtime.releaseRun 撤回
+  const pasteRuleService = new AddonPasteRuleService({
+    log: (stage, detail) => log(`addons ${stage}: ${detail}`),
+  })
   // #404 组件数据目录：base = <globalStorage>/addons（Uri 构造保证跨平台
   // 路径形态；fsPath 正斜杠归一供纯逻辑服务拼接，workspace.fs 经 Uri 回装）
   const storageBaseUri = vscode.Uri.joinPath(context.globalStorageUri, 'addons')
@@ -325,6 +331,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     preferences: preferenceStore,
     settings: settingsService,
     storage: storageService,
+    pasteRules: pasteRuleService,
     installDirOf: (addonId) => vscode.extensions.getExtension(addonId)?.extensionUri.fsPath,
     log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
   })
@@ -861,6 +868,41 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   rendererService.onChanged(() => refreshRendererTable())
   const offRendererRuntimeChanged = runtime.onChanged(() => refreshRendererTable())
 
+  // ---- #541 T01 粘贴规则有效快照广播（编辑器面板全域推送） ----
+
+  let lastPasteRulesVersion = -1
+  /** 重算有效快照并按需广播（内容变化才推送——等值幂等；面板 ready 重推
+   *  由 pushPasteRulesTo 直发承担）。面板销毁静默容忍（随 panelDisposed
+   *  回收——已结束页面不接受迟到快照） */
+  const refreshPasteRulesSnapshot = (): void => {
+    const snapshot = pasteRuleService.effectiveSnapshot()
+    if (snapshot.version === lastPasteRulesVersion) {
+      return
+    }
+    lastPasteRulesVersion = snapshot.version
+    const payload = { kind: 'addonPasteRules.snapshot' as const, snapshot }
+    for (const record of editorPanels.values()) {
+      try {
+        void record.webview.postMessage(payload).then(undefined, () => {})
+      } catch {
+        // 面板已销毁：随 panelDisposed 回收
+      }
+    }
+  }
+
+  /** 面板 ready / 状态重推时直发当前快照（新开页面拿到当前有效快照） */
+  const pushPasteRulesTo = (record: EditorPanelRecord): void => {
+    const snapshot = pasteRuleService.effectiveSnapshot()
+    lastPasteRulesVersion = snapshot.version
+    try {
+      void record.webview.postMessage({ kind: 'addonPasteRules.snapshot', snapshot }).then(undefined, () => {})
+    } catch {
+      // 面板已销毁
+    }
+  }
+
+  pasteRuleService.onChanged(() => refreshPasteRulesSnapshot())
+
   const handleEditorPanelMessage = (record: EditorPanelRecord, message: unknown): boolean => {
     if (!isWebviewToHost(message)) {
       return false
@@ -873,6 +915,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       pushEditorDirectives(record)
       // #358 T09：渲染生效表随 ready 直发（webview 重载后桥状态归零）
       pushRendererTableTo(record)
+      // #541 T01：粘贴规则快照随 ready 直发（新开页面拿到当前有效快照）
+      pushPasteRulesTo(record)
       return true
     }
     if (message.kind === 'addonRenderers.registered') {
@@ -1401,6 +1445,9 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       }),
       vscode.commands.registerCommand('onegayi.vsidian._test.addonRendererStore', () =>
         rendererService.snapshot(rendererAvailability).store),
+      // ---- #541 T01 粘贴规则（集成的宿主侧断言面：有效快照版本与规则序） ----
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonPasteRulesSnapshot', () =>
+        pasteRuleService.effectiveSnapshot()),
     )
   }
 
