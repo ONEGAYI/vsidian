@@ -981,6 +981,7 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'typography.md'), TYPOGRAPHY_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode.md'), MODE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'viewport-mermaid.md'), VIEWPORT_MERMAID_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'viewport-fast-mermaid.md'), VIEWPORT_MERMAID_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode-anchor.md'), MODE_ANCHOR_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'syntax.md'), SYNTAX_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'fence-chunk.md'), FENCE_CHUNK_DOC, 'utf8')
