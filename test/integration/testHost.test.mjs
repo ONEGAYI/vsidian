@@ -450,30 +450,37 @@ if ($env:VSIDIAN_CLIPBOARD_PROBE_PARENT_STATION -and $station -ne $env:VSIDIAN_C
 }
 [pscustomobject]@{station=$station;seesSentinel=$seesSentinel;roundTrip=$roundTrip} | ConvertTo-Json -Compress
 `
-  const stations = []
-  const sentinel = `Vsidian clipboard isolation sentinel ${process.pid}`
-  for (const mode of ['foreground', 'desktop', 'desktop', 'foreground']) {
-    let output = ''
-    let diagnostics = ''
-    const code = await runTestHost({
-      executable: path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-      args: ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      env: { ...process.env, VSIDIAN_CLIPBOARD_PROBE_PARENT_STATION: stations[0] ?? '', VSIDIAN_CLIPBOARD_PROBE_SENTINEL: sentinel },
-      mode,
-      timeoutMs: 5000,
-      stdout: { write: (chunk) => { output += chunk.toString() } },
-      stderr: { write: (chunk) => { diagnostics += chunk.toString() } },
-    })
-    assert.equal(code, 0, diagnostics)
-    const probe = JSON.parse(output)
-    if (mode === 'desktop') {
-      assert.notEqual(probe.station, stations[0], '独立宿主不能共享用户的窗口站')
-      assert.equal(probe.roundTrip, sentinel, '仍须支持真实系统剪贴板读写')
-    } else {
-      assert.equal(probe.seesSentinel, false, '测试宿主写入不能流入用户剪贴板')
+  const { build } = await import('esbuild')
+  const { outputFiles } = await build({
+    entryPoints: [path.join(here, 'suite/clipboardLock.ts')], bundle: true, write: false, platform: 'node', format: 'esm',
+  })
+  const { withClipboardLock } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`)
+  await withClipboardLock(async () => {
+    const stations = []
+    const sentinel = `Vsidian clipboard isolation sentinel ${process.pid}`
+    for (const mode of ['foreground', 'desktop', 'desktop', 'foreground']) {
+      let output = ''
+      let diagnostics = ''
+      const code = await runTestHost({
+        executable: path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        args: ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+        env: { ...process.env, VSIDIAN_CLIPBOARD_PROBE_PARENT_STATION: stations[0] ?? '', VSIDIAN_CLIPBOARD_PROBE_SENTINEL: sentinel },
+        mode,
+        timeoutMs: 5000,
+        stdout: { write: (chunk) => { output += chunk.toString() } },
+        stderr: { write: (chunk) => { diagnostics += chunk.toString() } },
+      })
+      assert.equal(code, 0, diagnostics)
+      const probe = JSON.parse(output)
+      if (mode === 'desktop') {
+        assert.notEqual(probe.station, stations[0], '独立宿主不能共享用户的窗口站')
+        assert.equal(probe.roundTrip, sentinel, '仍须支持真实系统剪贴板读写')
+      } else {
+        assert.equal(probe.seesSentinel, false, '测试宿主写入不能流入用户剪贴板')
+      }
+      stations.push(probe.station)
     }
-    stations.push(probe.station)
-  }
+  })
 })
 
 test('Windows 独立桌面超时后结束本次宿主及其子进程', { skip: skipDesktop }, async () => {
