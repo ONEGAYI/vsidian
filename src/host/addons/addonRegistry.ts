@@ -24,6 +24,7 @@ import type { AddonSettingsUpdateResult } from './addonSettingsService'
 import type { AddonSettingSource, AddonSettingValue } from '../../shared/addonSettings'
 import type { AddonStorageFacet } from '../../shared/addonStorage'
 import type { AddonPasteRulesRegisterResult } from '../../shared/addonPasteRules'
+import type { AddonThemesRegistrationFacet } from '../../shared/addonThemes'
 
 /** 注册表宿主端口（vscode 层注入） */
 export interface AddonRegistryPorts {
@@ -97,6 +98,9 @@ export interface AddonEnableContext extends AddonRegistrationContext {
   readonly pages: {
     registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle
   }
+  /** #546 T07 主题元数据登记（宿主运行功能阶段——不依赖先开编辑器页面；
+   *  登记只进目录与选择，实际渲染执行仍归页面 renderers 注册） */
+  readonly themes: AddonThemesRegistrationFacet
   /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */
   readonly storage: AddonStorageFacet
   /** 运行生命周期通道（停用即注销） */

@@ -161,7 +161,8 @@ import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from '
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
 import { resetMermaidLoadFailure, setMermaidDarkTheme, setMermaidPreset } from './mermaidRender'
-import { MERMAID_THEME_KEY } from '../shared/settings'
+import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../shared/settings'
+import { resolveThemePreferred } from '../shared/addonThemes'
 import {
   closeDiagramPopup,
   DIAGRAM_POPUP_CLASS_NAMES,
@@ -2387,7 +2388,14 @@ export class WebviewSyncController {
         // 引擎）仍在下方处理
         const previousCodeCard = this.live?.codeCardConfigSnapshot
         this.settings = message.values
-        setMermaidPreset(message.values[MERMAID_THEME_KEY] === 'codex' ? 'codex' : 'default')
+        // #546 T07 统一主题：新键（appearance.theme）权威 + 旧键过渡回显
+        // （组件主题身份经生效表挂载组件管线；选中组件主题不可用时宿主
+        // 已回 default，内置侧按 default preset 渲染）
+        const themeValue = resolveThemePreferred(
+          typeof message.values[APPEARANCE_THEME_KEY] === 'string' ? message.values[APPEARANCE_THEME_KEY] as string : undefined,
+          typeof message.values[MERMAID_THEME_KEY] === 'string' ? message.values[MERMAID_THEME_KEY] as string : undefined,
+        )
+        setMermaidPreset(themeValue === 'codex' ? 'codex' : 'default')
         this.live?.applySettings(message.values)
         const nextCodeCard = this.live?.codeCardConfigSnapshot
         if (previousCodeCard && nextCodeCard && (

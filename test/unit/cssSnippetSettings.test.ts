@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
+import { AddonThemesStore, ThemeSelectionSection } from '../../src/webview/themeSettings'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { installLocale } from '../../src/shared/i18n'
@@ -54,7 +55,8 @@ describe('分页注册与空状态', () => {
     const sent: unknown[] = []
     const bridge = { postMessage: (m: unknown) => { sent.push(m) } }
     const appearance = new AppearanceSection(
-      new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge))
+      new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge),
+      new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
     const view = new SettingsPageView({ postMessage: (m) => { sent.push(m) } }, [], [appearance])
     const root = document.createElement('div')
     view.mount(root)

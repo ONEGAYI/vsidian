@@ -53,6 +53,7 @@
     - [`syntax-experimental` 实验入口：行类型与行内标记查询（experimental.syntax）](#syntax-experimental)
     - [`host-settings-experimental` 实验入口：宿主设置白名单读取（experimental.hostSettings）](#host-settings-experimental)
     - [`ref-views-popup` 只读引用浮窗请求（refViews）](#ref-views-popup)
+    - [`theme-environment` 主题环境快照与订阅（themeEnvironment）](#theme-environment)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
@@ -66,6 +67,7 @@
   - [5. 渲染提供者](#5-渲染提供者)
     - [`renderers-register` 渲染提供者注册](#renderers-register)
     - [`renderer-selection` 确定性选择、自动接管与首选恢复](#renderer-selection)
+    - [`themes-register` 主题目录登记与唯一选择](#themes-register)
   - [6. 命令/菜单/界面](#6-命令菜单界面)
     - [`commands-register` 命令注册与统一快捷键](#commands-register)
     - [`menus-register` 菜单项注册](#menus-register)
@@ -260,6 +262,9 @@ export interface AddonEnableContext extends AddonRegistrationContext {
   readonly pages: {
     registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle
   }
+  /** #546 T07 主题元数据登记（宿主运行功能阶段——不依赖先开编辑器页面；
+   *  登记只进目录与选择，实际渲染执行仍归页面 renderers 注册） */
+  readonly themes: AddonThemesRegistrationFacet
   /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */
   readonly storage: AddonStorageFacet
   /** 运行生命周期通道（停用即注销） */
@@ -438,6 +443,11 @@ export interface VsidianAddonPageSdk {
    *  内核引用浮窗与本次请求关闭句柄（单页单浮窗，新请求替换旧请求）；
    *  T06 起在同一 facet 上扩展组件容器挂载入口 */
   readonly refViews?: AddonSdkRefViewsFacet
+  /** #546 T07 主题环境面（仅编辑器页；设置页为 undefined）：VSCode 实际
+   *  生效主题的明暗快照与变化订阅（四态两轴投影——亮色高对比不为暗；
+   *  重复值不通知；通知在缓存更新后送达——回调中 get 拿新值；代次释放
+   *  自动退订）。快照源为宿主事件推送，不由组件自行嗅探样式环境 */
+  readonly themeEnvironment?: AddonThemeEnvironmentFacet
   /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与
    *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */
   readonly ui?: AddonSdkUiFacet
@@ -1201,6 +1211,73 @@ export function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | n
 ```
 
 **验证**：`test/unit/addonRefViews.test.ts`、`test/unit/addonRefViewsRuntime.test.ts`、`test/unit/addonRefViewsPopup.test.ts`、`test/unit/embedRecursiveLive.test.ts`、`test/unit/documentSessionRefViews.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonRefViews.mjs`、`test/integration/suite/addonRefViewsCases.ts`
+
+### `theme-environment` 主题环境快照与订阅（themeEnvironment）
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#546（T07）
+
+**目标**：编辑器页 SDK 的只读主题环境面（sdk.themeEnvironment，#546/H-U06–U07）：读取 VSCode 实际生效主题的明暗快照并订阅变化——主题组件据此更新已挂载图形。不扩充为任意 VSCode configuration 读取（白名单语义与 hostSettings 同边界）。
+
+语义要点：
+- **适用模式**：仅编辑器页提供（设置页为 undefined）；不按视图模式门控（环境与 live/reading 无关）。
+- **生命周期**：快照是四态两轴投影（dark / highContrast——亮色高对比不为暗）；数据源为宿主 vscode.window.activeColorTheme 事件推送（手动固定暗色而系统变亮仍为暗；跟随系统时随系统变化）。通知在页面缓存更新后送达（回调中 get 拿到相同新状态）；重复值不重复广播（等值跳过）；代次释放自动退订（不依赖组件自觉）。组件在回调中更新已挂载文档图形，旧异步渲染结果由现有挂载代次拒收。
+- **错误与拒绝**：查询无拒绝码（同步返回快照；宿主推送未达时为初始播种值）。本面不提供任何写入成员；订阅回调抛错按既有可归因异常上报组件故障，不静默吞掉。
+
+签名事实源：`src/shared/addonThemes.ts`
+
+```ts
+/** 明暗快照（四态两轴投影；亮色高对比 ≠ 暗） */
+export interface AddonThemeEnvironment {
+  /** 暗色：dark 与暗色高对比为 true；亮色与亮色高对比为 false */
+  readonly dark: boolean
+  /** 高对比：两种高对比形态为 true */
+  readonly highContrast: boolean
+}
+
+/**
+ * VSCode 实际生效主题四态（vscode.ColorThemeKind 的可序列化投影）。
+ * 状态来源是实际生效主题——手动固定暗色时系统变亮仍为暗；跟随系统时
+ * 随系统变化（由宿主事件驱动）。
+ */
+export type AddonThemeEnvironmentKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light'
+
+/** SDK 只读面（仅编辑器页提供）：同步快照 + 变化订阅（重复值不通知；
+ *  代次释放自动退订；通知在页面缓存更新后送达——回调中 get 拿新值） */
+export interface AddonThemeEnvironmentFacet {
+  get(): AddonThemeEnvironment
+  onChange(listener: (env: AddonThemeEnvironment) => void): () => void
+}
+
+/** 四态 → 快照（纯函数；「亮色高对比不误判为暗」的单一判定点） */
+export function addonThemeEnvironmentOf(kind: AddonThemeEnvironmentKind): AddonThemeEnvironment {
+  switch (kind) {
+    case 'dark':
+      return { dark: true, highContrast: false }
+    case 'high-contrast':
+      return { dark: true, highContrast: true }
+    case 'high-contrast-light':
+      return { dark: false, highContrast: true }
+    case 'light':
+      return { dark: false, highContrast: false }
+  }
+}
+
+/** 快照相等（重复值不广播的判据） */
+export function addonThemeEnvironmentEqual(a: AddonThemeEnvironment, b: AddonThemeEnvironment): boolean {
+  return a.dark === b.dark && a.highContrast === b.highContrast
+}
+
+/** 宿主 → 编辑器 webview 明暗快照消息载荷守卫 */
+export function isAddonThemeEnvironmentPayload(value: unknown): value is AddonThemeEnvironment {
+  return (
+    isRecord(value) &&
+    typeof value['dark'] === 'boolean' &&
+    typeof value['highContrast'] === 'boolean'
+  )
+}
+```
+
+**验证**：`test/unit/addonThemeEnvironment.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonThemes.mjs`
 
 ### `channel` 页面与宿主通道
 
@@ -2143,12 +2220,12 @@ export interface AddonRendererCandidate extends AddonRendererProviderInfo {
 
 ### `renderer-selection` 确定性选择、自动接管与首选恢复
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#358（T09）
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#358（T09）、#546（T07 主题例外）
 
-**目标**：选择单位是提供者、挂载单位是某视图中的某个代码块。默认序按（发现批次升序, providerId 升序）取末位生效（内置视作批次 0）；用户显式首选优先且不可用时按默认序回退（首选记录不清除）。
+**目标**：选择单位是提供者、挂载单位是某视图中的某个代码块。默认序按（发现批次升序, providerId 升序）取末位生效（内置视作批次 0）；用户显式首选优先且不可用时按默认序回退（首选记录不清除）。#546 起主题关联提供者例外：不参与默认序与按语言首选，仅主题单选选中且可用时对其声明语言生效（RendererThemeSelectionContext 注入）。
 
 语义要点：
-- **自动规则**：新安装、兼容且已启用组件成功接入后自动替换所支持语言的现有显示（含内置）——不要求用户先选择渲染器；重启、重复注册与普通升级不当作新安装（批次一经记录不改写）。用户正常停用或整组件故障降级停用后内置接管（无图形内置则普通代码块，首选保留）；组件仍运行而渲染有 bug 时不自动接管、不承诺识别或修复；手动恢复成功后按原选择显示，旧异步结果不得重新挂载。
+- **自动规则**：新安装、兼容且已启用组件成功接入后自动替换所支持语言的现有显示（含内置）——不要求用户先选择渲染器；重启、重复注册与普通升级不当作新安装（批次一经记录不改写）。用户正常停用或整组件故障降级停用后内置接管（无图形内置则普通代码块，首选保留）；组件仍运行而渲染有 bug 时不自动接管、不承诺识别或修复；手动恢复成功后按原选择显示，旧异步结果不得重新挂载。主题例外（#546/ADR-0017）：主题关联提供者不走自动接管（安装只新增候选不切换），不能经按语言显式首选绕过主题单选；仅当前选中主题的提供者（activeThemeProviderId）对其声明语言生效（source=user），不可用时回默认序且主题首选保留、内置 default 承接显示。
 
 签名事实源：`src/shared/addonRenderers.ts`
 
@@ -2156,7 +2233,7 @@ export interface AddonRendererCandidate extends AddonRendererProviderInfo {
 /** 内置提供者稳定 ID（始终可用；对内置图形语言即 graphicRenderers 注册表） */
 export const BUILTIN_RENDERER_PROVIDER_ID = 'builtin'
 
-/** 选择输入（纯函数：候选、可用性谓词、内置语言、首选与批次） */
+/** 选择输入（纯函数：候选、可用性谓词、内置语言、首选与批次；#546 起含主题例外上下文） */
 export interface RendererSelectionInput {
   candidates: readonly AddonRendererCandidate[]
   isAvailable: (candidate: AddonRendererCandidate) => boolean
@@ -2164,6 +2241,21 @@ export interface RendererSelectionInput {
   builtinLanguages: readonly string[]
   preferred: Readonly<Record<string, string>>
   batches: Readonly<Record<string, number>>
+  /** #546 T07 主题例外（缺省无主题语义——普通渲染器行为不变） */
+  theme?: RendererThemeSelectionContext
+}
+
+/**
+ * #546 T07 主题例外输入（ADR-0017）：themedProviderIds = 主题关联的提供
+ * 者集（目录注入）——这些提供者不参与自动接管，也不接受 renderer 按语
+ * 言显式首选（不能经一般渲染候选路径绕过主题单选）；activeThemeProvider
+ * Id = 当前选中且可用的主题提供者——仅它对所声明语言生效（source='user'，
+ * 主题单选的投影）。两者缺省（空集/undefined）时选择行为与既有完全一致。
+ */
+export interface RendererThemeSelectionContext {
+  themedProviderIds: ReadonlySet<string>
+  activeThemeProviderId?: string
+  activeThemeLanguages?: readonly string[]
 }
 
 /** 单语言选择结果（effective='none' = 无可用提供者且非内置语言 → 普通代码块） */
@@ -2175,12 +2267,17 @@ export interface AddonRendererLanguageSelection {
 }
 
 /**
- * 确定性生效提供者选择（纯函数；技术方案 5.3 默认序 + 用户首选）：
+ * 确定性生效提供者选择（纯函数；技术方案 5.3 默认序 + 用户首选 + #546
+ * T07 主题例外）：
  * - 每语言候选 = 可用附加组件候选 + 内置（仅内置图形语言）；
  * - 默认序：按 (批次升序, providerId 升序) 排列取末位生效——内置批次视作
  *   0（新安装默认接管内置语言）、同批末位 = 稳定 ID 最大者、新批次覆盖旧；
  * - 用户首选优先：首选提供者当前可用（含显式选内置）即生效且 source='user'；
- *   不可用则按默认序回退（source='auto'），首选记录不在此清除（Q30 恢复）。
+ *   不可用则按默认序回退（source='auto'），首选记录不在此清除（Q30 恢复）；
+ * - 主题例外（theme 输入在场）：主题关联提供者整体退出默认序与用户首选
+ *   路径（安装只新增候选不切换）；仅 activeThemeProviderId（主题单选选中
+ *   且可用）对其声明语言生效（source='user'）。不可用主题提供者一律不参
+ *   与——宿主层保留主题首选并回落内置 default 显示。
  */
 export function selectEffectiveRenderers(input: RendererSelectionInput): { languages: AddonRendererLanguageSelection[] } {
   const languageSet = new Set<string>()
@@ -2196,25 +2293,42 @@ export function selectEffectiveRenderers(input: RendererSelectionInput): { langu
     languageSet.add(normalizeRendererLanguage(language))
   }
   const batchOf = (candidate: AddonRendererCandidate): number => input.batches[candidate.addonId] ?? 0
+  const themed = input.theme?.themedProviderIds
+  const activeThemeProvider = input.theme?.activeThemeProviderId
+  /** 主题提供者全部退出一般竞争；选中项仅在上方声明语言分支生效 */
+  const excludedByTheme = (candidate: AddonRendererCandidate): boolean =>
+    themed !== undefined && themed.has(candidate.providerId)
   const languages: AddonRendererLanguageSelection[] = []
   for (const language of [...languageSet].sort()) {
     const available = input.candidates.filter(
       (candidate) =>
         candidate.languages.some((l) => normalizeRendererLanguage(l) === language) && input.isAvailable(candidate),
     )
+    // #546 T07：选中且可用的主题提供者对其声明语言生效（主题单选投影）
+    if (activeThemeProvider !== undefined && input.theme!.activeThemeLanguages!.includes(language)) {
+      const activeThemeCandidate = available.find(
+        (c) => c.providerId === activeThemeProvider && c.languages.some((l) => normalizeRendererLanguage(l) === language),
+      )
+      if (activeThemeCandidate) {
+        languages.push({ language, effective: activeThemeCandidate.providerId, source: 'user' })
+        continue
+      }
+    }
     const builtinAvailable = input.builtinLanguages.some((l) => normalizeRendererLanguage(l) === language)
     const preferred = input.preferred[language]
     if (preferred === BUILTIN_RENDERER_PROVIDER_ID && builtinAvailable) {
       languages.push({ language, effective: BUILTIN_RENDERER_PROVIDER_ID, source: 'user' })
       continue
     }
-    const preferredCandidate = preferred === undefined ? undefined : available.find((c) => c.providerId === preferred)
+    // #546 T07：renderer 显式首选不能指向主题关联提供者（绕过主题单选）
+    const preferredCandidate = preferred === undefined ? undefined : available.find((c) => c.providerId === preferred && !excludedByTheme(c))
     if (preferredCandidate) {
       languages.push({ language, effective: preferredCandidate.providerId, source: 'user' })
       continue
     }
     // 确定性默认序：内置视作批次 0、ID 'builtin'，与组件候选合并排序取末位
-    const ordered = [...available].sort((a, b) => batchOf(a) - batchOf(b) || (a.providerId < b.providerId ? -1 : 1))
+    // （主题关联提供者退出竞争——excludedByTheme 过滤）
+    const ordered = [...available.filter((c) => !excludedByTheme(c))].sort((a, b) => batchOf(a) - batchOf(b) || (a.providerId < b.providerId ? -1 : 1))
     const last = ordered[ordered.length - 1]
     if (last !== undefined && batchOf(last) > 0) {
       languages.push({ language, effective: last.providerId, source: 'auto' })
@@ -2268,7 +2382,163 @@ export interface AddonRendererStoreV1 {
 }
 ```
 
-**验证**：`test/unit/addonRendererTakeover.test.ts`、`test/unit/addonRendererService.test.ts`、`test/browser/addonRendererTakeover.mjs`
+**验证**：`test/unit/addonRendererTakeover.test.ts`、`test/unit/addonRendererService.test.ts`、`test/unit/addonRenderers.test.ts`、`test/browser/addonRendererTakeover.mjs`
+
+### `themes-register` 主题目录登记与唯一选择
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#546（T07）
+
+**目标**：组件在 enable 生命周期经 context.themes.register 登记主题元数据（稳定身份 + 多语言名 + 本组件提供者关联）——宿主目录不依赖打开编辑器页面；主题目录与唯一首选驱动设置页「主题」页签单选与渲染生效。#546（T07）首版候选：机制随 H-U01–H-U08 落地，内核 Codex 过渡保留（迁移归 #535）。
+
+语义要点：
+- **生命周期**：enable 注册按 addonId 整组替换（空批 = 撤销）；停用/故障/注销/卸载与代次终结回收目录，主题首选保留（恢复后按原选择继续）。目录不持久化（元数据由组件代码每次接入注册）；用户唯一首选持久化在宿主设置键 appearance.theme（resolveThemePreferred：新键权威 + 旧键 appearance.mermaidTheme 过渡回显），值域 default | codex | <addonId>/<themeId>。
+- **错误与拒绝**：登记校验与批内重复拒绝属普通 API 结果（invalid-theme / duplicate-theme 整批拒绝，不算组件故障）：任一条目形状非法或同批 themeId 重复均拒绝；同组件不同主题可支持同一语言，由唯一主题首选选择。
+- **自动规则**：主题关联提供者不走一般渲染候选的自动接管（ADR-0017 例外）——目录命中但页面 renderers 候选未上报（页面未装载）时主题提供者不生效；选中主题不可用（组件停用/故障/未注册）时回落内置 default 显示（不用其他主题顶替），保留首选并回显不可用/回落状态。
+- **多语言与本地化**：label 为多语言映射时按页面语言渲染（resolveLocalizedText 候选链 zh-cn → zh → en → 规整字典序最小键兜底）；同名主题按来源徽章区分（组件显示名）。
+
+签名事实源：`src/shared/addonThemes.ts`
+
+```ts
+/** 组件声明的一个主题（enable 注册载荷的可序列化形状） */
+export interface AddonThemeDeclaration {
+  /** 组件内稳定主题 ID（非空；与组件 ID 组成持久主题身份 themeRef） */
+  themeId: string
+  /** 多语言显示名（直值或语言映射，全链路透传不预解析——渲染时按页面语言选值） */
+  label: AddonThemeLocalizedText
+  /** 关联的本组件渲染提供者（局部 rendererId；平台组合 providerId，不能跨组件） */
+  rendererId: string
+  /** 主题对该提供者生效的语言（trim 后全等口径，与 RENDERED_FENCE_LABELS 同源） */
+  languages: readonly string[]
+}
+
+/** 宿主目录条目（声明 + 归属组件注入） */
+export interface AddonThemeCandidate {
+  addonId: string
+  themeId: string
+  /** 稳定主题身份：`${addonId}/${themeId}`（持久首选与目录寻址键） */
+  themeRef: string
+  label: AddonThemeLocalizedText
+  rendererId: string
+  /** 稳定提供者 ID：`${addonId}/${rendererId}` */
+  providerId: string
+  languages: readonly string[]
+}
+
+/** enable 上下文的主题注册面（组件宿主代码声明主题元数据——目录与
+ *  选择归平台，实际渲染执行仍归页面 renderers 注册） */
+export interface AddonThemesRegistrationFacet {
+  register(declarations: readonly unknown[]): AddonThemeRegisterOutcome
+}
+
+/** 主题注册结果：ok=false 时 dispose 为 no-op（登记校验与批内重复拒绝属普通 API 结果，不算组件故障） */
+export type AddonThemeRegisterOutcome =
+  | { ok: true; dispose(): void }
+  | { ok: false; reason: 'invalid-theme' | 'duplicate-theme'; dispose(): void }
+
+/** 稳定主题身份（themeRef） */
+export function addonThemeRefOf(addonId: string, themeId: string): string {
+  return `${addonId}/${themeId}`
+}
+
+/**
+ * 批内校验（普通 API 结果的判据）：任一条目形状非法 → invalid-theme；
+ * 同批 themeId 重复（同一主题两次声明）→ duplicate-theme。整批拒绝。
+ */
+export function validateAddonThemeBatch(declarations: readonly unknown[]): 'ok' | 'invalid-theme' | 'duplicate-theme' {
+  if (!Array.isArray(declarations)) return 'invalid-theme'
+  const seenThemeIds = new Set<string>()
+  for (const value of declarations) {
+    if (!isAddonThemeDeclaration(value)) {
+      return 'invalid-theme'
+    }
+    const decl = value as AddonThemeDeclaration
+    if (seenThemeIds.has(decl.themeId)) {
+      return 'duplicate-theme'
+    }
+    seenThemeIds.add(decl.themeId)
+  }
+  return 'ok'
+}
+
+/**
+ * 首选解析（纯函数）：appearance.theme（新键）是唯一权威——值非 default
+ * 时原样生效；值为 default 且旧键（appearance.mermaidTheme）仍有效选择
+ * codex 时回 codex（升级用户旧值回显，T08 前不迁移）；设置页每次选择都
+ * 同步写旧键投影（见 appearanceThemePatch），显式选 default 会把旧键一
+ * 并落 default，两者不互相打架。
+ */
+export function resolveThemePreferred(themeValue: string | undefined, legacyMermaidValue: string | undefined): string {
+  if (typeof themeValue === 'string' && themeValue.trim() !== '' && themeValue !== DEFAULT_THEME_ID) {
+    return themeValue
+  }
+  if (legacyMermaidValue === CODEX_THEME_ID) {
+    return CODEX_THEME_ID
+  }
+  return DEFAULT_THEME_ID
+}
+
+/**
+ * 唯一选择与回落解析（纯函数）：
+ * - default / codex（内置）：恒可用、effective 同值；
+ * - themeRef：目录命中且可用 → 生效该主题（activeProviderId 给渲染选择
+ *   层注入）；命中但不可用（组件停用/故障）→ 回落内置 default 显示，
+ *   preferred 保留、available=false；目录不命中（组件卸载/未注册）→ 同
+ *   回落（保留首选，恢复注册后继续原选择）。
+ * 回落一律回 default——不用 codex 或另一组件主题顶替（规格 §3.2：不静
+ * 默选中另一主题）。
+ */
+export function resolveActiveTheme(input: AddonThemeSelectionInput): AddonThemeSelection {
+  const { preferred } = input
+  if (preferred === DEFAULT_THEME_ID || preferred === CODEX_THEME_ID) {
+    return { preferred, available: true, effective: preferred }
+  }
+  const theme = input.themes.find((t) => t.themeRef === preferred)
+  if (theme && input.isThemeAvailable(theme)) {
+    return { preferred, available: true, effective: preferred, activeProviderId: theme.providerId, activeLanguages: theme.languages }
+  }
+  return { preferred, available: false, effective: DEFAULT_THEME_ID }
+}
+
+/** 宿主 → 设置页的主题目录状态载荷 */
+export interface AddonThemesStatePayload {
+  /** 目录代次（内容变化才递增；设置页等值跳过） */
+  version: number
+  /** 组件主题目录（含不可用条目——呈现不可用状态而非隐藏） */
+  themes: readonly AddonThemeEntryState[]
+  /** 当前唯一首选（resolveThemePreferred 产物；不可用时保留） */
+  preferred: string
+  /** 首选组件主题当前可用（default/codex 恒 true） */
+  preferredAvailable: boolean
+}
+```
+
+签名事实源：`src/host/addons/addonRegistry.ts`
+
+```ts
+/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 粘贴规则 +
+ *  清理回调。开启时装配；关闭或故障时释放所属注册） */
+export interface AddonEnableContext extends AddonRegistrationContext {
+  /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，
+   *  第二个登记拒绝） */
+  readonly pages: {
+    registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle
+  }
+  /** #546 T07 主题元数据登记（宿主运行功能阶段——不依赖先开编辑器页面；
+   *  登记只进目录与选择，实际渲染执行仍归页面 renderers 注册） */
+  readonly themes: AddonThemesRegistrationFacet
+  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */
+  readonly storage: AddonStorageFacet
+  /** 运行生命周期通道（停用即注销） */
+  readonly channel: AddonChannelRegistry
+  /** #541 T01 粘贴转换规则登记（有效规则广播到已开与新开编辑器页面，
+   *  在富文本粘贴的 HTML→Markdown 遍历中消费） */
+  readonly paste: AddonPasteRulesContextApi
+  /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */
+  onDispose(callback: () => void): void
+}
+```
+
+**验证**：`test/unit/addonThemes.test.ts`、`test/unit/addonThemeService.test.ts`、`test/unit/addonRuntime.test.ts`、`test/browser/addonThemes.mjs`、`test/integration/suite/addonThemeCases.ts`
 
 ## 6. 命令/菜单/界面
 

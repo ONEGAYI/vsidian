@@ -15,6 +15,7 @@ const consumerPath = path.join(root, 'test', 'addonApi', 'publicApiConsumer.ts')
 
 /** 消费面允许值导入的公开模块（shared 层不含 vscode/DOM 依赖） */
 const VALUE_IMPORT_ALLOWED = new Set([
+  'src/shared/addonThemes',
   'src/shared/addonIdentity',
   'src/shared/addonApiCatalog',
   'src/shared/addonPage',

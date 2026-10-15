@@ -19,6 +19,7 @@ import { isAddonBehaviorEnabledStateBroadcast, isAddonBehaviorInfo, parseAddonBe
 import { parseBehaviorQueryFilter, type BehaviorQueryFilter } from './behaviorFilterQuery'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
 import { isAddonPasteRulesSnapshot } from './addonPasteRules'
+import { isAddonThemeEnvironmentPayload, isAddonThemesStatePayload } from './addonThemes'
 import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 import { isAddonDocNavLocate, isAddonDocNavResult, type AddonDocNavLocate, type AddonDocNavResult } from './addonNavApi'
@@ -1006,6 +1007,15 @@ export type HostToWebview =
    *  面板 ready 与快照变化时推送；停用/故障/代次结束的撤回同样经新快照
    *  广播——webview 侧旧版本快照迟到不回退 */
   | { kind: 'addonPasteRules.snapshot'; snapshot: import('./addonPasteRules').AddonPasteRulesSnapshot }
+  /** #546 T07 主题目录状态（宿主 → 设置页 webview）：组件主题目录 + 唯一
+   *  首选与可用性（形态与守卫的单一事实源在 shared/addonThemes）。设置页
+   *  经 addons.themesGet 拉取；目录/首选/可用性变化后主动推送，webview 等
+   *  值跳过 */
+  | { kind: 'addons.themesState' } & import('./addonThemes').AddonThemesStatePayload
+  /** #546 T07 页面明暗环境（宿主 → 编辑器 webview）：VSCode 实际生效主题
+   *  四态的两轴投影（亮色高对比不为暗）。宿主事件驱动推送（重复值不广播）
+   *  + 面板 ready 直发；webview 侧先更新缓存再分发 SDK 订阅 */
+  | { kind: 'addonThemeEnvironment.changed'; env: import('./addonThemes').AddonThemeEnvironment }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -2074,6 +2084,9 @@ export type WebviewToHost =
    *  用户级持久跨重启恢复；查询树形态由 shared 守卫把关，页码越界由
    *  webview 渲染时静默回落第 1 页，宿主不裁决） */
   | { kind: 'addons.behaviorsViewSet'; view: { page: number; query: BehaviorQueryFilter | null } }
+  /** #546 T07 主题目录拉取（设置页 → 宿主；宿主以 addons.themesState 应答
+   *  一次；目录/首选/可用性变化时亦主动推送，webview 幂等对账） */
+  | { kind: 'addons.themesGet' }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -4699,6 +4712,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addons.openExtensionsView':
     case 'addons.closeAddonPage':
     case 'addons.openLogs':
+    case 'addons.themesGet':
     case 'addonPage.ready':
       return true
     case 'addons.openExtension':
@@ -5694,6 +5708,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addons.behaviorsView':
       // #474 行为管理视图状态（null = 无存储默认态）
       return v.view === null || isBehaviorViewPayload(v.view)
+    case 'addons.themesState':
+      // #546 T07 主题目录状态（内层守卫的单一事实源在 shared/addonThemes）
+      return isAddonThemesStatePayload(v)
+    case 'addonThemeEnvironment.changed':
+      // #546 T07 页面明暗环境快照（内层守卫同上）
+      return isAddonThemeEnvironmentPayload(v.env)
     default:
       return false
   }

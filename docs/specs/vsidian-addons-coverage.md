@@ -5,7 +5,7 @@
 事实源与本文关系：
 
 - 用户故事编号与定义：[vsidian-addons.md](vsidian-addons.md) §2；子票对应关系见[批次索引](batch-2026-10-vsidian-addons.md)「用户故事覆盖」。
-- 公开接口条目 ID（下表「接口映射」列）指向语义清单 [src/shared/addonApiCatalog.ts](../../src/shared/addonApiCatalog.ts) 的 `ADDON_API_ENTRIES`（22 条目，签名不手写第二份）。
+- 公开接口条目 ID（下表「接口映射」列）指向语义清单 [src/shared/addonApiCatalog.ts](../../src/shared/addonApiCatalog.ts) 的 `ADDON_API_ENTRIES`（初版 22 条目，当前以生成参考为准；签名不手写第二份）。
 - 验证证据路径为仓库相对路径；`t18-*` 日志为 T18 全矩阵回归本轮产物（`out/test/`，不入库）。
 
 ## 两组「六组」的对应
@@ -123,3 +123,18 @@ T03 自动化运行证据随票面实施回填，人工验收仍开放。内部�
 | 切片 | 用户故事 | 接口映射 | 验证证据 |
 | --- | --- | --- | --- |
 | T05 只读引用浮窗（#544，[规格](addon-reference-views.md)） | R-U01–R-U07、R-U12 | `ref-views-popup`（`sdk.refViews.requestPopup`——来源 B 解析语境、互斥锚点、单浮窗仲裁、句柄与代次释放、错误分态透传） | 单 `addonRefViews`/`addonRefViewsRuntime`/`addonRefViewsPopup`/`documentSessionRefViews`/`addonPageLoader`；浏 `addonRefViews`（真实指针/键盘 + 绘制层）；集 `addonRefViewsCases`（绘制层与历史样式命中、来源 B、目标更新/失效、停用/页面关闭/租约回收）。R-U08–R-U11（组件容器嵌入）待 T06（#545） |
+
+## 统一主题扩展覆盖（#546 / T07）
+
+本组故事来源为 [addon-themes.md](addon-themes.md)，不改写上方 T18 历史结论。公开宿主面为 `themes-register`，页面面为 `theme-environment`；API 仍为 1.0.0 候选。
+
+| 故事 | 用户结果 | 实际验证路径 |
+| --- | --- | --- |
+| H-U01/H-U02 | 原页签统一单选，来源可区分 | `themeSettings` / `appearanceSettings` 单测；生产设置页 `addonThemes` 浏览器（真实 CSS、同名来源、单选） |
+| H-U03/H-U11 | 安装只加候选，普通渲染器规则保留 | `addonRenderers` / `addonRendererTakeover` / `addonRendererService`；`addonThemes` 浏览器（内置与主题计算色、Live/阅读） |
+| H-U04 | 保存与重开回显 | `settingsService` / `themeSettings`；`addonThemes` 浏览器正式 settings.set 回环与切页重开；真实进程重启仍待人工 |
+| H-U05 | 不可用回落、首选保留、恢复沿用 | `addonThemes` / `addonThemeService`；`addonThemes` 浏览器；`addonThemeCases` 真宿主链 |
+| H-U06/H-U07 | 实际主题四态、缓存先更新、图形重画与释放 | `addonThemeEnvironment` / `addonPageLoader`；`themeEditor` 经公开 SDK 消费；浏览器计算色与退订；`addonThemeCases` 双文档及真实主题事件 |
+| H-U08 | 中英文、来源、搜索定位 | `themeSettings`；`addonThemes` 浏览器热换语言包、搜索与主题页签路由 |
+
+本地接手验证报告为 T07 工作树 `out/test/t07-resume-*`；联合全量回归由汇总分支记录。图表弹窗继续既有 `graphicPopup` 快照验证，T08 的安装、迁移和包体收口尚未交付。

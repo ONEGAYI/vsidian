@@ -343,6 +343,16 @@ const result = await sdk.views?.openDocument({
 
 签名或语义调整必须同步：语义清单条目 → 重生成参考 → 消费样例与钉住断言 → 台账（如涉版本状态）。
 
-## 9. 后续 API 扩展规格（分批实施中）
+## 9. 统一主题与主题环境（T07 / #546）
 
-2026-10-15 批次新增能力的正式设计见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。其中声明式粘贴转换基础链路已随 #541（T01）实施，文档导航 API 已随 #543（T03）实施，只读引用浮窗已随 #544（T05）实施（见 §3.1）；正则/条件/嵌套归 T02，普通链接尾部行号语法归 T04（#534），组件容器嵌入归 T06。当前公开声明和生成参考是实际可消费能力的事实源，其他切片以各自实施记录为准。
+主题组件在宿主 `enable` 阶段调用 `context.themes.register` 登记元数据，在编辑器页面调用 `sdk.renderers.register` 提供实际渲染。目录无需先打开文档即可出现在「外观 → 主题」；安装只新增候选，用户显式选择后才接管声明语言。普通非主题渲染提供者保留安装后接管规则。
+
+`themeId` 为组件内稳定 ID，平台组合 `<addonId>/<themeId>` 作为主题首选。声明的 `rendererId` 是本组件局部提供者 ID，`languages` 限定该主题生效范围；不同主题可以支持同一语言。注册返回普通成功/拒绝结果，句柄释放撤销本次登记；旧句柄不能撤销后来的替换登记。停用与故障回落内置显示，保留主题首选，恢复后继续原选择。
+
+编辑器页面通过 `sdk.themeEnvironment.get()` 同步读取 VSCode 实际主题的 `dark` / `highContrast`，通过 `onChange` 订阅变化。回调触发前快照已更新，重复值不通知；组件代次释放自动退订，回调抛错按既有组件故障上报。设置页不提供此面，实验 `hostSettings` 白名单仍保持原范围。
+
+可直接参考[主题页面消费夹具](../../test/fixtures/addon-v02/addon/themeEditor.ts)和[宿主登记夹具](../../test/integration/addonFixtures/addon-theme/extension.js)。签名以[生成参考](api-reference.md)的 `themes-register` / `theme-environment` 条目为准，完整产品规则见[主题规格](../specs/addon-themes.md)。内核 Codex 在 T07 继续保留；替代组件的发行与内核退役由 bridge#3、#535 接续。
+
+## 10. 后续 API 扩展规格
+
+2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T03 文档导航、T05 只读引用浮窗及 T07 统一主题已实施，待用户整体验收；T02 正则/条件/嵌套、T04 普通链接尾部行号、T06 组件容器嵌入及 T08 内核退役尚未实施。当前公开声明和生成参考是实际可消费能力的事实源。

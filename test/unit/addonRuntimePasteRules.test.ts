@@ -11,6 +11,7 @@ import { AddonRuntime, type AddonPreferenceStore } from '../../src/host/addons/a
 import { AddonSettingsService, type AddonSettingsPersistencePort } from '../../src/host/addons/addonSettingsService'
 import { AddonStorageService } from '../../src/host/addons/addonStorageService'
 import { AddonPasteRuleService } from '../../src/host/addons/addonPasteRuleService'
+import { AddonThemeService } from '../../src/host/addons/addonThemeService'
 import { ADDON_API_VERSION, OFFICIAL_ADDON_EXTENSION_IDS } from '../../src/shared/addonIdentity'
 import type { AddonEnableContext, AddonDefinition } from '../../src/host/addons/addonRegistry'
 
@@ -64,6 +65,7 @@ function harness(options: { store?: ReturnType<typeof memoryStore> } = {}): Harn
       createWatcher: () => ({ dispose: () => {} }),
     }),
     pasteRules,
+    themes: new AddonThemeService({ log: () => {} }),
     installDirOf: (addonId) => (addonId === 'fixture.demo' ? (process.platform === 'win32' ? 'C:\\addons\\demo' : '/addons/demo') : undefined),
     log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
   })

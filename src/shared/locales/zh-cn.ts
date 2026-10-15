@@ -5,8 +5,14 @@
 import type { MessageKey } from './en'
 
 export const zhCn: Record<MessageKey, string> = {
-  'appearance.presets': '预设主题',
+  // #546 T07 外观第四页签原位更名「主题」（统一主题单选入口）
+  'appearance.themes': '主题',
   'appearance.codeblockRendering': '代码块渲染',
+  'setting.theme.title': '主题选择',
+  'setting.theme.description': '统一选择编辑器图形的主题：内置默认与 Codex，以及组件提供的主题（安装组件主题只新增候选，不会自动切换）。',
+  'appearance.theme.sourceBuiltin': '内置',
+  'appearance.theme.unavailable': '不可用',
+  'appearance.theme.fallbackNotice': '当前选中的组件主题不可用，已临时按默认主题渲染；选择已保留，组件恢复可用后自动继续原主题。',
   'setting.mermaidTheme.title': 'Mermaid 渲染主题',
   'setting.mermaidTheme.description': '选择内置 Mermaid 图表的外观。Codex 支持流程图、时序图、类图、状态图、ER 图、甘特图和饼图；图内样式与配置可以覆盖预设。',
   'setting.mermaidTheme.default': '默认',
@@ -224,7 +230,7 @@ export const zhCn: Record<MessageKey, string> = {
 
   // ---- appearance.（#231 外观合并分页：侧栏条目标题与描述）----
   'appearance.title': '外观',
-  'appearance.description': '管理 CSS 片段、预设主题与外观定制，查阅公开样式契约。',
+  'appearance.description': '管理 CSS 片段、主题与外观定制，查阅公开样式契约。',
 
   // ---- styleRef.（样式参考：总表/详细查询文案与骨架标签，#132；#231 起为
   // 外观合并分页的页签体，tabOverview/tabDetail 亦作外观页签文案沿用）----

@@ -11,6 +11,7 @@ import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import { isHostToWebview } from '../../src/shared/protocol'
 import { AppearanceSection, routeAppearanceTab } from '../../src/webview/appearanceSettings'
+import { AddonThemesStore, ThemeSelectionSection } from '../../src/webview/themeSettings'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { STYLE_GUIDE_VERSION } from '../../src/webview/styleGuideData'
@@ -25,7 +26,7 @@ function makeAppearance(focusEntry?: string) {
   const bridge = { postMessage: (m: unknown) => { sent.push(m) } }
   const snippets = new CssSnippetSettingsSection(bridge)
   const styleRef = new StyleReferenceSection(bridge)
-  const appearance = new AppearanceSection(snippets, styleRef)
+  const appearance = new AppearanceSection(snippets, styleRef, new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
   const parent = document.createElement('div')
   const dispose = appearance.mount(parent, focusEntry)
   return { appearance, snippets, styleRef, parent, sent, dispose }
@@ -75,7 +76,7 @@ describe('三页签结构与默认页签', () => {
     const { parent } = makeAppearance()
     const tabs = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-tab')]
     expect(tabs.map((b) => b.textContent)).toEqual([
-      zhCn['cssSnippets.title'], zhCn['styleRef.tabOverview'], zhCn['styleRef.tabDetail'], '预设主题',
+      zhCn['cssSnippets.title'], zhCn['styleRef.tabOverview'], zhCn['styleRef.tabDetail'], zhCn['appearance.themes'],
     ])
     expect(tabOf(parent, 'cssSnippets').getAttribute('aria-selected')).toBe('true')
     expect(tabOf(parent, 'overview').getAttribute('aria-selected')).toBe('false')
@@ -154,16 +155,19 @@ describe('全局搜索 entries 与定位路由', () => {
 })
 
 describe('组合接线（snippets.state 直连实例不回归）', () => {
-  it('预设主题页签可切换并恢复，设置行归外观分页的代码块渲染组', () => {
+  it('主题页签（原预设主题原位更名）可切换并恢复，主题单选为唯一选择入口', () => {
     const { appearance, parent } = makeAppearance()
     tabOf(parent, 'presets').click()
     expect(parent.querySelector('.vsidian-appearance-presets')!.hasAttribute('hidden')).toBe(false)
     expect(parent.querySelector('.vsidian-appearance-snippets')!.hasAttribute('hidden')).toBe(true)
     expect(appearance.captureState()).toEqual({ tab: 'presets' })
-    expect(appearance.defsGroups).toEqual([{
-      titleKey: 'appearance.codeblockRendering', icon: 'codeblock',
-      prefixes: ['appearance.'], target: '.vsidian-appearance-presets',
-    }])
+    // #546 T07：appearance.* 标准行退役（defsGroups 移除——唯一主题入口在
+    // 页签体单选列表），主题设置条目经 entries 进全局搜索
+    expect('defsGroups' in appearance).toBe(false)
+    expect(appearance.entries.some((entry) => entry.id === 'appearance.theme')).toBe(true)
+    // 页签体为主题单选列表（radiogroup 内置 default/codex 两项）
+    const radios = parent.querySelectorAll<HTMLInputElement>('.vsidian-appearance-presets input[type=radio]')
+    expect(radios.length).toBeGreaterThanOrEqual(2)
     appearance.restoreState({ tab: 'presets' })
     appearance.mount(parent)
     expect(tabOf(parent, 'presets').getAttribute('aria-selected')).toBe('true')

@@ -73,7 +73,7 @@ const testCacheDir = path.join(root, '.vscode-test')
 // #358 T09 渲染提供者夹具（addon-t09——页面产物经构建桥生成，renderers 面）；
 // #360 T11 界面贡献夹具（addon-t11——页面产物经构建桥生成，ui 面注册
 // 按钮/面板 + 负向对照 + target 句柄真实业务）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-storage', 'addon-t06', 'addon-t07', 'addon-bstate', 'addon-t09', 'addon-t10', 'addon-t11', 'addon-t12', 'addon-refviews', 'addon-escape', 'addon-docnav'].map((name) =>
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-storage', 'addon-t06', 'addon-t07', 'addon-bstate', 'addon-t09', 'addon-t10', 'addon-t11', 'addon-t12', 'addon-refviews', 'addon-theme', 'addon-escape', 'addon-docnav'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
 // #364 T15 三套独立消费样例（test/examples/——独立 VSCode 扩展工程，产物
@@ -100,6 +100,7 @@ console.log(`[runTest] T05 逃逸 junction 已装配：${escapeLink} -> ${escape
 // 重打包）；产物拷入 addon-t02/dist 供组件按相对入口登记（资源授权锚 =
 // 夹具安装目录）。#355 T06 同构建桥生成 t06 页面产物并拷入其夹具目录
 const addonLayout = await buildTestAddons({ log: () => {} })
+cpSync(addonLayout.themeAddon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-theme', 'dist'), { recursive: true })
 cpSync(addonLayout.t02Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t02', 'dist'), { recursive: true })
 console.log('[runTest] T02 夹具组件页面产物已构建并拷入 addonFixtures/addon-t02/dist')
 cpSync(addonLayout.t06Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t06', 'dist'), { recursive: true })

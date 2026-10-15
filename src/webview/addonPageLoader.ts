@@ -35,6 +35,7 @@ import type {
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '../shared/addonEditApi'
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
 import type { AddonHostSettingsFacet } from '../shared/addonHostSettingsApi'
+import type { AddonThemeEnvironmentFacet } from '../shared/addonThemes'
 import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
 import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
@@ -132,6 +133,9 @@ export interface AddonPageLoaderEnv {
    *  syncController 的设置快照缓存 settings.snapshot/changed 到达即更新；
    *  省略时 SDK 不提供 experimental.hostSettings 面） */
   hostSettingsSnapshot?: () => SettingsPayload | undefined
+  /** #546 T07 页面明暗环境 hub（编辑器页由 main.ts 注入；省略时 SDK 不
+   *  提供 themeEnvironment 面，releaseLoad 时亦不做回收） */
+  themeEnvironment?: Pick<import('./addonThemeEnvironment').ThemeEnvironmentHub, 'current' | 'subscribe' | 'releaseAddon'>
   /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
    *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
   attachExtensions?: (extension: Extension[] | null) => void
@@ -448,6 +452,27 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
               : { ok: false, reason: 'view-disposed' }),
           }
         : undefined
+    // #546 T07 主题环境面（仅编辑器页 + hub 在场提供）：查询与订阅同 hub；
+    // 订阅过 isLoadActive 守卫（迟到登记为 no-op 退订——与 behaviorState
+    // 同款），释放时点已有的订阅由 releaseLoad 的 releaseAddon 整组回收
+    const themeEnvironmentFacet: AddonThemeEnvironmentFacet | undefined =
+      page === 'editor' && env.themeEnvironment
+        ? {
+            get: () => env.themeEnvironment!.current(),
+            onChange: (listener) => (isLoadActive(loadRecord)
+              ? env.themeEnvironment!.subscribe(loadRecord.addonId, loadRecord.generation, (value) => {
+                  try {
+                    listener(value)
+                  } catch (error) {
+                    if (!loadRecord.faultReported) {
+                      loadRecord.faultReported = true
+                      env.send({ type: 'addon.faulted', addonId: loadRecord.addonId, generation: loadRecord.generation, page, reason: `theme-environment: ${String(error)}` })
+                    }
+                  }
+                })
+              : () => {}),
+          }
+        : undefined
     const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
       ? {
           register: (registration) => {
@@ -482,6 +507,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(behaviorStateFacet ? { behaviorState: behaviorStateFacet } : {}),
+      ...(themeEnvironmentFacet ? { themeEnvironment: themeEnvironmentFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
           register: (def, handler) => {
@@ -706,6 +732,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         // 回收异常不阻断其余释放路径
       }
     }
+    // #546 T07 主题环境订阅整组件回收（快照查询不受影响——迟到调用返回
+    // 最后已知值；订阅不滞留进已释放的旧代次）
+    env.themeEnvironment?.releaseAddon(loadRecord.addonId)
     let disposals = 0
     for (const callback of loadRecord.disposeCallbacks.splice(0)) {
       try {

@@ -714,6 +714,35 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#544（T05）',
   },
   {
+    id: 'theme-environment',
+    group: 'page-sdk',
+    title: '主题环境快照与订阅（themeEnvironment）',
+    layer: 'stable-candidate',
+    endpoints: ['editor-page'],
+    signatures: [
+      {
+        module: 'src/shared/addonThemes.ts',
+        symbols: [
+          'AddonThemeEnvironment',
+          'AddonThemeEnvironmentKind',
+          'AddonThemeEnvironmentFacet',
+          'addonThemeEnvironmentOf',
+          'addonThemeEnvironmentEqual',
+          'isAddonThemeEnvironmentPayload',
+        ],
+      },
+    ],
+    purpose:
+      '编辑器页 SDK 的只读主题环境面（sdk.themeEnvironment，#546/H-U06–U07）：读取 VSCode 实际生效主题的明暗快照并订阅变化——主题组件据此更新已挂载图形。不扩充为任意 VSCode configuration 读取（白名单语义与 hostSettings 同边界）。',
+    semantics: {
+      modes: '仅编辑器页提供（设置页为 undefined）；不按视图模式门控（环境与 live/reading 无关）。',
+      lifecycle: '快照是四态两轴投影（dark / highContrast——亮色高对比不为暗）；数据源为宿主 vscode.window.activeColorTheme 事件推送（手动固定暗色而系统变亮仍为暗；跟随系统时随系统变化）。通知在页面缓存更新后送达（回调中 get 拿到相同新状态）；重复值不重复广播（等值跳过）；代次释放自动退订（不依赖组件自觉）。组件在回调中更新已挂载文档图形，旧异步渲染结果由现有挂载代次拒收。',
+      errors: '查询无拒绝码（同步返回快照；宿主推送未达时为初始播种值）。本面不提供任何写入成员；订阅回调抛错按既有可归因异常上报组件故障，不静默吞掉。',
+    },
+    verification: ['test/unit/addonThemeEnvironment.test.ts', 'test/unit/addonPageLoader.test.ts', 'test/browser/addonThemes.mjs'],
+    introduced: '#546（T07）',
+  },
+  {
     id: 'channel',
     group: 'page-sdk',
     title: '页面与宿主通道',
@@ -929,16 +958,53 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     signatures: [
       {
         module: 'src/shared/addonRenderers.ts',
-        symbols: ['BUILTIN_RENDERER_PROVIDER_ID', 'RendererSelectionInput', 'AddonRendererLanguageSelection', 'selectEffectiveRenderers', 'assignDiscoveryBatches', 'AddonRendererStoreV1'],
+        symbols: ['BUILTIN_RENDERER_PROVIDER_ID', 'RendererSelectionInput', 'RendererThemeSelectionContext', 'AddonRendererLanguageSelection', 'selectEffectiveRenderers', 'assignDiscoveryBatches', 'AddonRendererStoreV1'],
       },
     ],
     purpose:
-      '选择单位是提供者、挂载单位是某视图中的某个代码块。默认序按（发现批次升序, providerId 升序）取末位生效（内置视作批次 0）；用户显式首选优先且不可用时按默认序回退（首选记录不清除）。',
+      '选择单位是提供者、挂载单位是某视图中的某个代码块。默认序按（发现批次升序, providerId 升序）取末位生效（内置视作批次 0）；用户显式首选优先且不可用时按默认序回退（首选记录不清除）。#546 起主题关联提供者例外：不参与默认序与按语言首选，仅主题单选选中且可用时对其声明语言生效（RendererThemeSelectionContext 注入）。',
     semantics: {
-      autoRules: '新安装、兼容且已启用组件成功接入后自动替换所支持语言的现有显示（含内置）——不要求用户先选择渲染器；重启、重复注册与普通升级不当作新安装（批次一经记录不改写）。用户正常停用或整组件故障降级停用后内置接管（无图形内置则普通代码块，首选保留）；组件仍运行而渲染有 bug 时不自动接管、不承诺识别或修复；手动恢复成功后按原选择显示，旧异步结果不得重新挂载。',
+      autoRules: '新安装、兼容且已启用组件成功接入后自动替换所支持语言的现有显示（含内置）——不要求用户先选择渲染器；重启、重复注册与普通升级不当作新安装（批次一经记录不改写）。用户正常停用或整组件故障降级停用后内置接管（无图形内置则普通代码块，首选保留）；组件仍运行而渲染有 bug 时不自动接管、不承诺识别或修复；手动恢复成功后按原选择显示，旧异步结果不得重新挂载。主题例外（#546/ADR-0017）：主题关联提供者不走自动接管（安装只新增候选不切换），不能经按语言显式首选绕过主题单选；仅当前选中主题的提供者（activeThemeProviderId）对其声明语言生效（source=user），不可用时回默认序且主题首选保留、内置 default 承接显示。',
     },
-    verification: ['test/unit/addonRendererTakeover.test.ts', 'test/unit/addonRendererService.test.ts', 'test/browser/addonRendererTakeover.mjs'],
-    introduced: '#358（T09）',
+    verification: ['test/unit/addonRendererTakeover.test.ts', 'test/unit/addonRendererService.test.ts', 'test/unit/addonRenderers.test.ts', 'test/browser/addonRendererTakeover.mjs'],
+    introduced: '#358（T09）、#546（T07 主题例外）',
+  },
+  {
+    id: 'themes-register',
+    group: 'renderers',
+    title: '主题目录登记与唯一选择',
+    layer: 'stable-candidate',
+    endpoints: ['host'],
+    signatures: [
+      {
+        module: 'src/shared/addonThemes.ts',
+        symbols: [
+          'AddonThemeDeclaration',
+          'AddonThemeCandidate',
+          'AddonThemesRegistrationFacet',
+          'AddonThemeRegisterOutcome',
+          'addonThemeRefOf',
+          'validateAddonThemeBatch',
+          'resolveThemePreferred',
+          'resolveActiveTheme',
+          'AddonThemesStatePayload',
+        ],
+      },
+      {
+        module: 'src/host/addons/addonRegistry.ts',
+        symbols: ['AddonEnableContext'],
+      },
+    ],
+    purpose:
+      '组件在 enable 生命周期经 context.themes.register 登记主题元数据（稳定身份 + 多语言名 + 本组件提供者关联）——宿主目录不依赖打开编辑器页面；主题目录与唯一首选驱动设置页「主题」页签单选与渲染生效。#546（T07）首版候选：机制随 H-U01–H-U08 落地，内核 Codex 过渡保留（迁移归 #535）。',
+    semantics: {
+      lifecycle: 'enable 注册按 addonId 整组替换（空批 = 撤销）；停用/故障/注销/卸载与代次终结回收目录，主题首选保留（恢复后按原选择继续）。目录不持久化（元数据由组件代码每次接入注册）；用户唯一首选持久化在宿主设置键 appearance.theme（resolveThemePreferred：新键权威 + 旧键 appearance.mermaidTheme 过渡回显），值域 default | codex | <addonId>/<themeId>。',
+      errors: '登记校验与批内重复拒绝属普通 API 结果（invalid-theme / duplicate-theme 整批拒绝，不算组件故障）：任一条目形状非法或同批 themeId 重复均拒绝；同组件不同主题可支持同一语言，由唯一主题首选选择。',
+      autoRules: '主题关联提供者不走一般渲染候选的自动接管（ADR-0017 例外）——目录命中但页面 renderers 候选未上报（页面未装载）时主题提供者不生效；选中主题不可用（组件停用/故障/未注册）时回落内置 default 显示（不用其他主题顶替），保留首选并回显不可用/回落状态。',
+      localization: 'label 为多语言映射时按页面语言渲染（resolveLocalizedText 候选链 zh-cn → zh → en → 规整字典序最小键兜底）；同名主题按来源徽章区分（组件显示名）。',
+    },
+    verification: ['test/unit/addonThemes.test.ts', 'test/unit/addonThemeService.test.ts', 'test/unit/addonRuntime.test.ts', 'test/browser/addonThemes.mjs', 'test/integration/suite/addonThemeCases.ts'],
+    introduced: '#546（T07）',
   },
   // ---- ⑥ 命令/菜单/界面 ----
   {

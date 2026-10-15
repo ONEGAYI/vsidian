@@ -70,6 +70,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **T05（#544）候选基线重锚说明**：实施提交 `9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 为 `VsidianAddonPageSdk` 增加可选 `refViews` facet，并新增只读浮窗契约条目。旧成员、既有语义与发行台账不删减；原基线 `8e13e78f` 可信复验通过，候选比较仅因 SDK 声明新增字段触发 `signature-declaration-changed`。按既有字节冻结规则，使用 `--emit-baseline --anchor 9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 从已提交 git 对象重新发射，再运行基线复验及完整兼容检查。独立 API 仍为未发行的 1.0.0 候选，不补发行日期，也不修改检查器或豁免规则。批次集成其他接口后须针对最终组合提交再次复验，必要时显式重锚。
 
+**T07/#546 候选重锚理由（2026-10-15）**：新增宿主主题注册与页面主题环境，扩展 `AddonEnableContext` / `VsidianAddonPageSdk`，并落实 ADR-0017 已批准的 renderer-selection 主题例外及声明语言范围。旧候选基线如实拒绝这些签名和冻结语义变化（`out/test/t07-resume-compat-before-anchor.log`，6 项失败）；在功能与公开消费用例进入提交 `59555c05` 后，以 `--emit-baseline --anchor HEAD` 显式发射并另行提交基线。保留旧锚点 git 对象及失败报告，新锚点复验和兼容全检查均通过（`t07-resume-api-baseline.log` / `t07-resume-compat.log`）；不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。最终汇总分支还需对合并后的公开声明整体重锚核对。
+
 ## CI 接线（代码侧，已交付）
 
 `.github/workflows/ci.yml` 新增独立 job **`addon-api-contract`**（job 名即 required status check 的 context 名），与 `style-contract` 同序同型——**先证检查器可信，再信检查结果**：

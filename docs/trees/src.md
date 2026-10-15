@@ -25,6 +25,7 @@ vsidian/
     │   │   ├── addonRuntime.ts                # 运行生命周期状态机
     │   │   ├── addonSettingsService.ts        # 附加组件设置服务
     │   │   ├── addonStorageService.ts         # 组件数据目录服务
+    │   │   ├── addonThemeService.ts           # 组件主题目录与代次回收
     │   │   └── addonWiring.ts                 # 宿主装配与面板桥
     │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
     │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
@@ -93,6 +94,7 @@ vsidian/
     │   ├── addonSettings.ts        # 复杂设置共享模型
     │   ├── addonStorage.ts         # 数据目录形状与守卫
     │   ├── addonSyntaxApi.ts       # 附加组件语法查询与组合判定
+    │   ├── addonThemes.ts          # 主题身份选择及环境契约
     │   ├── addonUi.ts              # 附加组件界面贡献共享形状与校验
     │   ├── behaviorFilterQuery.ts  # 行为筛选查询与分页纯函数
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
@@ -171,6 +173,7 @@ vsidian/
         ├── addonSettingsAreaSection.ts   # 设置页组件设置分页
         ├── addonSettingsControls.ts      # 基础设置控件构造器
         ├── addonSettingsSection.ts       # 设置页附加组件分页
+        ├── addonThemeEnvironment.ts      # 页面明暗快照与订阅
         ├── addonUi.ts                    # 编辑器页界面贡献运行时
         ├── addonViewIdentity.ts          # 编辑器实例身份状态字段
         ├── addonViews.ts                 # 页面级视图句柄注册表
@@ -297,6 +300,7 @@ vsidian/
         ├── targetTip.ts                  # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts                 # 任务勾选解析纯函数（#9）
         ├── textRefView.ts                # 文本只读视图（虚拟化着色渲染）
+        ├── themeSettings.ts              # 统一主题单选页签
         ├── toast.css                     # 轻提示主题与公开样式变量
         ├── toast.ts                      # 编辑器独立轻提示通道
         ├── tooltipCard.css               # 悬停提示共享样式

@@ -18,6 +18,7 @@ import { addonT07Cases } from './addonT07Cases'
 import { addonT08Cases } from './addonT08Cases'
 import { addonBehaviorStateCases } from './addonBehaviorStateCases'
 import { addonT09Cases } from './addonT09Cases'
+import { addonThemeCases } from './addonThemeCases'
 import { addonT10Cases } from './addonT10Cases'
 import { addonT11Cases } from './addonT11Cases'
 import { addonRefViewsCases } from './addonRefViewsCases'
@@ -17978,6 +17979,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
   // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
   ...addonT09Cases,
+  ...addonThemeCases,
   // #359 T10：自己的命令、菜单与统一快捷键（夹具组件经公开 SDK 注册，
   // 断言面见 addonT10Cases.ts 头注）
   ...addonT10Cases,

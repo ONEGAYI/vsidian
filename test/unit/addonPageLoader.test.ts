@@ -17,6 +17,7 @@ import { addonInstanceIdField, setAddonInstanceId } from '../../src/webview/addo
 import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
 import { installAddonRenderersBridge } from '../../src/webview/addonRenderers'
+import { installThemeEnvironmentHub } from '../../src/webview/addonThemeEnvironment'
 import {
   ADDON_PAGE_REGISTRY_GLOBAL,
   installAddonPageLoader,
@@ -1111,5 +1112,92 @@ describe('T05（#544）refViews 面：注入、释放守卫与整组件回收', 
     })
     await h.handle.load(manifest())
     expect(facet).toBeUndefined()
+  })
+})
+
+// ---- #546 T07 主题环境面（SDK themeEnvironment）----
+
+describe('T07 主题环境面', () => {
+  it('组件订阅回调异常上报归属组件故障，其他组件仍收到明暗变化', async () => {
+    const hub = installThemeEnvironmentHub({ dark: false, highContrast: false })
+    const h = harness({ themeEnvironment: hub })
+    registerFactory(h, (sdk) => {
+      sdk.themeEnvironment!.onChange(() => { throw new Error('theme callback failed') })
+    })
+    await h.handle.load(manifest())
+    let received = false
+    hub.subscribe('other.pack', 1, () => { received = true })
+    hub.applyEnvironment({ dark: true, highContrast: false })
+    expect(h.sent).toContainEqual(expect.objectContaining({ type: 'addon.faulted', addonId: ADDON_ID, reason: 'theme-environment: Error: theme callback failed' }))
+    expect(received).toBe(true)
+  })
+  function themeHubHarness() {
+    const calls: Array<{ kind: string; addonId?: string; generation?: number }> = []
+    const hub = {
+      current: () => ({ dark: true, highContrast: false }),
+      subscribe: (addonId: string, generation: number) => {
+        calls.push({ kind: 'subscribe', addonId, generation })
+        return () => calls.push({ kind: 'off', addonId })
+      },
+      releaseAddon: (addonId: string) => calls.push({ kind: 'release', addonId }),
+    }
+    const h = harness({ themeEnvironment: hub })
+    return { h, calls }
+  }
+
+  it('编辑器页提供 themeEnvironment 面：get 读 hub 快照、onChange 经 hub 按代次登记、卸载整组回收', async () => {
+    const { h, calls } = themeHubHarness()
+    let capturedSdk: VsidianAddonPageSdk | undefined
+    registerFactory(h, (sdk) => {
+      capturedSdk = sdk
+    })
+    await h.handle.load(manifest())
+    expect(capturedSdk!.themeEnvironment).toBeDefined()
+    expect(capturedSdk!.themeEnvironment!.get()).toEqual({ dark: true, highContrast: false })
+    const off = capturedSdk!.themeEnvironment!.onChange(() => {})
+    expect(typeof off).toBe('function')
+    expect(calls).toContainEqual({ kind: 'subscribe', addonId: ADDON_ID, generation: 1 })
+    await h.handle.unload(ADDON_ID, 1)
+    expect(calls).toContainEqual({ kind: 'release', addonId: ADDON_ID })
+  })
+
+  it('已释放代次的迟到订阅登记为 no-op 退订（不滞留回调）', async () => {
+    const { h, calls } = themeHubHarness()
+    let capturedSdk: VsidianAddonPageSdk | undefined
+    registerFactory(h, (sdk) => {
+      capturedSdk = sdk
+    })
+    await h.handle.load(manifest())
+    await h.handle.unload(ADDON_ID, 1)
+    const off = capturedSdk!.themeEnvironment!.onChange(() => {})
+    expect(calls.filter((c) => c.kind === 'subscribe')).toHaveLength(0)
+    expect(typeof off).toBe('function')
+  })
+
+  it('设置页不提供 themeEnvironment 面（hub 在场也不挂）', async () => {
+    const sent: AddonPageOutbound[] = []
+    const registrations: AddonPageRegistration[] = []
+    ;(globalThis as unknown as Record<string, unknown>)[ADDON_PAGE_REGISTRY_GLOBAL] = registrations
+    const handle = installAddonPageLoader({
+      page: 'settings',
+      send: (message) => sent.push(message),
+      loadScript: (uri) => Promise.resolve(uri === 'https://page.test/addon.js' ? { ok: true } : { ok: false, error: 'no fixture' }),
+      loadCss: () => Promise.resolve('authorized' as const),
+      themeEnvironment: {
+        current: () => ({ dark: false, highContrast: false }),
+        subscribe: () => () => {},
+        releaseAddon: () => {},
+      },
+    })
+    let captured: VsidianAddonPageSdk | undefined
+    registrations.push({
+      addonId: ADDON_ID,
+      factory: (sdk) => {
+        captured = sdk
+      },
+      registeredAt: 1,
+    })
+    await handle.load({ ...manifest(), page: 'settings' })
+    expect(captured?.themeEnvironment).toBeUndefined()
   })
 })

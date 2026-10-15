@@ -1,0 +1,13 @@
+{
+  "name": "addon-theme",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (Themes)",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

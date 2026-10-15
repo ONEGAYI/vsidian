@@ -32,6 +32,7 @@ import { resolveAddonPageEntry } from './addonPageRegistry'
 import type { AddonSettingsService } from './addonSettingsService'
 import { AddonStorageService } from './addonStorageService'
 import type { AddonPasteRuleService } from './addonPasteRuleService'
+import type { AddonThemeRegisterOutcome } from '../../shared/addonThemes'
 
 /** 登记成功的解析臂（settingsPages/editorPages 只收成功条目） */
 type ResolvedPageEntry = import('./addonPageRegistry').AddonPageEntryResolution & { ok: true }
@@ -58,6 +59,9 @@ export interface AddonRuntimePorts {
   storage: AddonStorageService
   /** #541 T01 粘贴规则服务（enable 生命周期登记；运行贡献释放时撤回） */
   pasteRules: AddonPasteRuleService
+  /** #546 T07 主题目录登记面（enable 注册按组件转发宿主主题服务——
+   *  runtime 注入 addonId；登记录校验在服务内，普通 API 拒绝不算故障） */
+  themes: { register(addonId: string, declarations: readonly unknown[]): AddonThemeRegisterOutcome }
   /** 组件安装目录（fsPath；解析不到时页面入口登记拒绝——资源授权无锚） */
   installDirOf(addonId: string): string | undefined
   /** 归因日志（写 VSCode 输出通道：组件 ID + 阶段 + 原因） */
@@ -631,6 +635,15 @@ export class AddonRuntime {
             return { ok: false, reason: 'released' }
           }
           return this.ports.pasteRules.registerRules(addonId, declarations)
+        },
+      },
+      themes: {
+        register: (declarations: readonly unknown[]): AddonThemeRegisterOutcome => {
+          if (!this.isLive(record, addonId) || record.run !== run) {
+            this.ports.log('late-registration-rejected', addonId, 'themes')
+            return { ok: false, reason: 'invalid-theme', dispose: () => {} }
+          }
+          return this.ports.themes.register(addonId, declarations)
         },
       },
       onDispose: (callback) => {
