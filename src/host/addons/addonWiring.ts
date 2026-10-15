@@ -338,7 +338,8 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
         try {
           await context.globalState.update(ADDON_SELECTED_THEME_LANGUAGES_KEY, value)
           return true
-        } catch {
+        } catch (error) {
+          log(`theme-languages-persist-failed theme=${value?.themeRef ?? themePreferred()}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
           return false
         }
       },
