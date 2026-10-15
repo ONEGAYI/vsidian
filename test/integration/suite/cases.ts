@@ -11420,6 +11420,27 @@ export const cases: Array<[string, () => Promise<void>]> = [
     try {
       await writeFile(nodePath.join(outsideDir, '外部图片.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
       await writeFile(nodePath.join(outsideDir, '外部目标.md'), '# 外部目标\n\n外部正文。\n', 'utf8')
+      // TODO(临时诊断，CI Linux not-found 定位后移除)：写后即三方探针——
+      // node fs 直连与宿主 workspace.fs 同时刻可见性对照（CI 上出现「写入
+      // await 完成 → 2s 后宿主 stat ENOENT → 22s 后存在」的时序鬼影）
+      {
+        const imgPath = nodePath.join(outsideDir, '外部图片.png')
+        let direct = 'n/a'
+        try {
+          const st = await (await import('node:fs/promises')).stat(imgPath)
+          direct = `type=${st.isFile() ? 1 : 2}`
+        } catch {
+          direct = 'ENOENT'
+        }
+        let viaHost = 'n/a'
+        try {
+          const st = await vscode.workspace.fs.stat(vscode.Uri.file(imgPath))
+          viaHost = `type=${st.type}`
+        } catch (e) {
+          viaHost = `ERR ${(e as Error).message}`
+        }
+        console.error(`[census-probe] writeDone direct=${direct} host=${viaHost} path=${imgPath} at=${Date.now()}`)
+      }
       await mkdir(nodePath.join(wsDir, 'dira'), { recursive: true })
       await mkdir(nodePath.join(wsDir, 'dirb'), { recursive: true })
       await writeFile(wsUri('dira/短名二义.md').fsPath, '# 歧义甲\n', 'utf8')
