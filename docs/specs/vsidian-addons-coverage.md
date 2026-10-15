@@ -5,7 +5,7 @@
 事实源与本文关系：
 
 - 用户故事编号与定义：[vsidian-addons.md](vsidian-addons.md) §2；子票对应关系见[批次索引](batch-2026-10-vsidian-addons.md)「用户故事覆盖」。
-- 公开接口条目 ID（下表「接口映射」列）指向语义清单 [src/shared/addonApiCatalog.ts](../../src/shared/addonApiCatalog.ts) 的 `ADDON_API_ENTRIES`（22 条目，签名不手写第二份）。
+- 公开接口条目 ID（下表「接口映射」列）指向语义清单 [src/shared/addonApiCatalog.ts](../../src/shared/addonApiCatalog.ts) 的 `ADDON_API_ENTRIES`（初版 22 条目，当前以生成参考为准；签名不手写第二份）。
 - 验证证据路径为仓库相对路径；`t18-*` 日志为 T18 全矩阵回归本轮产物（`out/test/`，不入库）。
 
 ## 两组「六组」的对应

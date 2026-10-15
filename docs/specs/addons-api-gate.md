@@ -34,7 +34,8 @@ node scripts/demoAddonApiGate.mjs # 负向演示（退出码 0 = 全部场景符
 
 | 路径 | 锚点 | 额外核实 | 当前状态 |
 | --- | --- | --- | --- |
-| **bootstrap**（显式初始基线） | 提交 `abcbfdd7`（T13 集成分支落地树，非发行锚点） | — | **当前生效**：`baseline-bootstrap-1.json`（22 条目 / 12 签名模块 / 台账候选快照） |
+| **bootstrap 初始** | 提交 `abcbfdd7`（T13 集成分支落地树，非发行锚点） | — | 历史初始基线：22 条目 / 12 签名模块 |
+| **bootstrap T07 重锚** | 提交 `59555c0502c4e38c41b0c29956436f3d3c7f1f3b`（主题 API 实施树，非发行锚点） | — | **当前生效**：`baseline-bootstrap-1.json`（30 条目 / 18 签名模块 / 台账仍为候选） |
 | **release**（发行基线） | 发行 tag + 台账 `released` 记录 + 实际发布日期 | tag 指向 SHA、锚点台账状态为 released、基线日期与台账一致（三者矛盾即失败） | 未启用——Vsidian 尚未发行任何稳定 API；经隔离 git fixture 验证（见下） |
 
 首个稳定 API（1.0.0）真实发行时的落账流程：人工把台账改 `status: 'released'` 并填实际发布日期 → 打发行 tag → `--emit-baseline --mode release --api-version 1.0.0 --anchor <tag>` 提交新基线（同 PR、独立说明理由）。**发行是人工落账动作**：候选版本不得冒充发行状态（`catalog-selfcheck` 拦截候选携带日期；`baseline-release-not-released` 拦截伪造的发行锚点）。
@@ -68,7 +69,7 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **语义冻结口径**：目标 / 语义字段 / 签名声明文本按**字节冻结**——自由文本无法机械区分「扩展」与「收窄」，任何变化都要求显式重锚定（`--emit-baseline` 同 PR 提交 + 独立说明），使收窄不可能静默通过。允许的演进：新增条目、扩展执行端、新增语义字段、追加签名源、追加台账版本、experimental 升稳定候选。
 
-**T07/#546 候选重锚理由（2026-10-15）**：新增宿主主题注册与页面主题环境，扩展 `AddonEnableContext` / `VsidianAddonPageSdk`，并落实 ADR-0017 已批准的 renderer-selection 主题例外及声明语言范围。旧候选基线如实拒绝这些签名和冻结语义变化（`out/test/t07-check-addoncompat.log`）；在功能与公开消费用例进入 git 后，用 `--emit-baseline --anchor <T07 实施提交>` 显式发射并另行提交基线。保留旧锚点 git 对象及失败报告，先复验新锚点，再跑全检查；不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。最终汇总分支还需对合并后的公开声明整体重锚核对。
+**T07/#546 候选重锚理由（2026-10-15）**：新增宿主主题注册与页面主题环境，扩展 `AddonEnableContext` / `VsidianAddonPageSdk`，并落实 ADR-0017 已批准的 renderer-selection 主题例外及声明语言范围。旧候选基线如实拒绝这些签名和冻结语义变化（`out/test/t07-resume-compat-before-anchor.log`，6 项失败）；在功能与公开消费用例进入提交 `59555c05` 后，以 `--emit-baseline --anchor HEAD` 显式发射并另行提交基线。保留旧锚点 git 对象及失败报告，新锚点复验和兼容全检查均通过（`t07-resume-api-baseline.log` / `t07-resume-compat.log`）；不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。最终汇总分支还需对合并后的公开声明整体重锚核对。
 
 ## CI 接线（代码侧，已交付）
 
