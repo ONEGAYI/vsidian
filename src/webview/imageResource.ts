@@ -87,6 +87,7 @@ export interface ActiveImageEntry {
   src: string
   state: 'loaded' | 'loading' | 'error'
   reason?: string
+  detail?: string
   /** 已应用的可加载地址（loading/error 时缺省） */
   appliedSrc?: string
 }
@@ -96,6 +97,8 @@ interface ImageEntry {
   /** 解析成功后的可加载地址（直连图源为原始 src） */
   src?: string
   reason?: string
+  /** 宿主回包 detail（失败时宿主实际探测路径——CI 定位探针） */
+  detail?: string
   reqId?: number
   /** 直连图源（http/https 外链）标记：不参与失效/核验管线（#201 边界） */
   direct?: boolean
@@ -298,6 +301,7 @@ export class ImageResourceManager {
     }
     matched.status = 'error'
     matched.reason = msg.reason ?? 'read-error'
+    matched.detail = msg.detail
     for (const slot of matched.waiters) {
       this.setSlotState(slot, 'error', matched.reason)
     }
@@ -334,6 +338,7 @@ export class ImageResourceManager {
         src,
         state,
         reason: entry.status === 'error' ? entry.reason : undefined,
+        detail: entry.status === 'error' ? entry.detail : undefined,
         appliedSrc: entry.status === 'ok' ? entry.src : undefined,
       })
     }
