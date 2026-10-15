@@ -12,8 +12,9 @@
 // - 显式丢弃算成功；模板空产出不算成功；
 // - 转换成功参与 hasFormatting 判定；
 // - 单次粘贴求值步数预算：超限停用规则，内置转换继续。
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown } from '../../src/webview/htmlToMarkdown'
+import * as pasteRulesModule from '../../src/shared/addonPasteRules'
 import {
   ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
   type AddonPasteRule,
@@ -312,5 +313,34 @@ describe('粘贴规则转换：边界与既有管线兼容', () => {
     expect(linkCount + plainCount).toBe(300)
     // 预算边界：noise 400 × 元素若干 —— 总步数确实超过 100k 才触发停用
     expect(400 * (plainCount + linkCount)).toBeGreaterThan(ADDON_PASTE_RULES_EVAL_STEP_BUDGET)
+  })
+
+  it('子内容超过全局节点预算后整次失败，不能用下一条静态产出掩盖', () => {
+    const rules = [
+      rule({ id: 'a-children', match: { tag: 'DIV' }, output: {
+        kind: 'template', template: '{{body}}', slots: { body: { source: { kind: 'children' } } },
+      } }),
+      rule({ id: 'b-static', match: { tag: 'DIV' }, output: {
+        kind: 'template', template: '不能插入的半成品', slots: {},
+      } }),
+    ]
+    const html = '<div>' + '<span>x</span>'.repeat(50_001) + '</div>'
+    expect(() => convert(html, rules)).toThrow('Clipboard HTML exceeds node budget')
+  })
+
+  it('模板切分只在本次转换复用，下次粘贴不持有上次规则缓存', () => {
+    const parse = vi.spyOn(pasteRulesModule, 'parseAddonPasteTemplate')
+    const textRule = rule({ id: 'scoped-cache', output: {
+      kind: 'template', template: '缓存{{label}}', slots: { label: { source: { kind: 'text' } } },
+    } })
+    try {
+      const html = '<p><span>甲</span><span>乙</span></p>'
+      expect(convert(html, [textRule]).markdown).toBe('缓存甲缓存乙')
+      expect(parse).toHaveBeenCalledTimes(1)
+      expect(convert(html, [textRule]).markdown).toBe('缓存甲缓存乙')
+      expect(parse).toHaveBeenCalledTimes(2)
+    } finally {
+      parse.mockRestore()
+    }
   })
 })

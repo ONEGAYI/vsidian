@@ -15,6 +15,7 @@ export interface HtmlToMarkdownOptions {
   addonPasteRules?: readonly AddonPasteRule[]
 }
 const ignored = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK'])
+const HTML_NODE_BUDGET = 100_000
 const blockTags = new Set(['P','DIV','UL','OL','LI','TABLE','TR','TH','TD','PRE','BLOCKQUOTE','H1','H2','H3','H4','H5','H6'])
 // HTML 解析已经还原来源文字；只保护其中的字面实体前缀，避免 Markdown 再解码。
 // 转换器后续生成的标点边界实体不经过此入口，代码原文也不做正文转义。
@@ -47,10 +48,8 @@ function safeUrl(value: string): string | null {
 
 // ---- #541 T01 附加组件粘贴规则求值（声明与切分同源 shared/addonPasteRules） ----
 
-/** 模板切分缓存（模板为不可变字符串；上限受规则数预算约束） */
-const addonPasteTemplateCache = new Map<string, readonly AddonPasteTemplatePart[]>()
-
 interface AddonPasteRuleEvaluationDeps {
+  templateCache: Map<string, readonly AddonPasteTemplatePart[]>
   /** children 槽取值：子内容按内置转换（已转换片段，不再二次转义） */
   convertChildren(el: Element): string
 }
@@ -71,11 +70,11 @@ function evaluateAddonPasteRule(rule: AddonPasteRule, el: Element, deps: AddonPa
     }
   }
   if (rule.output.kind === 'discard') return ''
-  let parts = addonPasteTemplateCache.get(rule.output.template)
+  let parts = deps.templateCache.get(rule.output.template)
   if (parts === undefined) {
     const parsed = parseAddonPasteTemplate(rule.output.template)
     if (parsed === null) return null
-    addonPasteTemplateCache.set(rule.output.template, parsed)
+    deps.templateCache.set(rule.output.template, parsed)
     parts = parsed
   }
   let output = ''
@@ -125,6 +124,8 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   // 本地保证——顺序不取决于页面装载先后）；求值步数预算超限停用规则
   //（内置转换继续），单条失败进入下一条，全部未成功回内置
   const addonRules = orderAddonPasteRules(options?.addonPasteRules ?? [])
+  // 本次粘贴结束即释放，旧注册/代次的模板不驻留到后续粘贴。
+  const templateCache = new Map<string, readonly AddonPasteTemplatePart[]>()
   let addonRuleSteps = 0
   let addonRulesExhausted = false
   let convertingBuiltinChildren = false
@@ -138,6 +139,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       }
       try {
         const output = evaluateAddonPasteRule(rule, el, {
+          templateCache,
           convertChildren: (target) => {
             convertingBuiltinChildren = true
             try {
@@ -154,7 +156,9 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
             .some(slot => slot.source.kind === 'children')
           return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)), text: output }
         }
-      } catch {
+      } catch (error) {
+        // 全局转换预算耗尽必须终止整次粘贴，不能降成单条规则失败。
+        if (visited > HTML_NODE_BUDGET) throw error
         // 规则求值异常进入下一规则（规格 §4.3）
       }
     }
@@ -169,7 +173,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     return result
   }
   function inline(node: Node, inherited: Marks, table: boolean): InlineRun[] {
-    if (++visited > 100_000) throw new Error('Clipboard HTML exceeds node budget')
+    if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
     if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeText((node.textContent ?? '').replace(/\s+/g,' '))}]
     if (!(node instanceof Element) || ignored.has(node.tagName) || node.tagName === 'INPUT') return []
     const addonOutput = addonRuleOutput(node, table, inherited)
@@ -267,7 +271,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     return leading + marker + text.trim() + marker + trailing
   }
   function render(node: Node, table = false, inherited: Marks = unmarked): string {
-    if (++visited > 100_000) throw new Error('Clipboard HTML exceeds node budget')
+    if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
     if (node.nodeType === Node.TEXT_NODE) return serialize(inline(node,inherited,table))
     if (!(node instanceof Element) && !(node instanceof DocumentFragment)) return ''
     if (node instanceof DocumentFragment) return children(node, table, inherited)
