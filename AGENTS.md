@@ -109,7 +109,8 @@ vsidian/
 │   │   ├── 0014-vscode-query-matching-for-wikilinks.md        # VSCode 查询匹配复用决策
 │   │   ├── 0015-behavior-filter-query-blocks.md               # 行为筛选积木构造器决策
 │   │   ├── 0016-two-layer-behavior-disable-semantics.md       # 行为禁用两层独立开关决策
-│   │   └── 0017-unified-addon-theme-selection.md              # 组件主题统一入口与互斥选择决策
+│   │   ├── 0017-unified-addon-theme-selection.md              # 组件主题统一入口与互斥选择决策
+│   │   └── 0018-markdown-shortname-resolution.md              # 短名与绝对引用架构决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -193,6 +194,7 @@ vsidian/
 │   │   ├── keybindings.md                        # 快捷键清单与默认值
 │   │   ├── live-table-column-width.md            # Live 表格列宽规格
 │   │   ├── manual-verification.md                # 人工验证清单
+│   │   ├── markdown-shortname-links.md           # 短名引用与链接类型规格
 │   │   ├── mvp-issues.md                         # MVP GitHub Issue 索引
 │   │   ├── mvp.md                                # MVP 规格主文档
 │   │   ├── reference-view-group.md               # 引用视图设置组与跳转目标提示规格
