@@ -18,6 +18,9 @@ import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { addonCm6LanguageSubset, installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
 import { setAddonRenderersBridge, type AddonRenderersOutboundMessage } from '../../src/webview/addonRenderers'
+import { setThemeEnvironmentHub } from '../../src/webview/addonThemeEnvironment'
+import { resolveActiveTheme } from '../../src/shared/addonThemes'
+import type { RendererThemeSelectionContext } from '../../src/shared/addonRenderers'
 import { AddonRendererService } from '../../src/host/addons/addonRendererService'
 import type { AddonRendererStoreV1 } from '../../src/shared/addonRenderers'
 import type { AddonChannelOutcome, AddonLoadOutcome, AddonPageOutbound, AddonUnloadOutcome } from '../../src/shared/addonPage'
@@ -43,6 +46,8 @@ const outbound: AddonPageOutbound[] = []
 // 消费）
 const rendererOutbox: AddonRenderersOutboundMessage[] = []
 const addonRenderers = setAddonRenderersBridge((message) => rendererOutbox.push(message))
+// #546 T07 主题环境 hub（与生产 main.ts 同款装配：页面级单例进装载器 env）
+const themeEnvironment = setThemeEnvironmentHub({ dark: false, highContrast: false })
 const loader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView, language: addonCm6LanguageSubset(cmLanguage) },
@@ -53,6 +58,7 @@ const loader: AddonPageLoaderHandle = installAddonPageLoader({
   },
   send: (message) => outbound.push(message),
   addonRenderers,
+  themeEnvironment,
 })
 // #358 T09：控制器订阅生效表变化（热切换：动态语言集/所有权扫描/live
 // 效应/阅读重渲染——生产 attachAddonRenderers 同款）
@@ -78,6 +84,8 @@ controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
 // #358 T09 宿主角色：真实渲染服务实例（内存持久层——批次幂等/首选/选择
 // 纯逻辑与生产同一实现；测试脚本经 hostRendererStep 驱动）
 let rendererStoreData: unknown
+/** #546 T07 宿主角色主题目录（测试脚本经 setThemeCatalog 注入） */
+const themeCatalog: Array<{ addonId: string; themeId: string; themeRef: string; label: { en: string }; rendererId: string; providerId: string; languages: string[] }> = []
 const rendererHost = new AddonRendererService({
   persistence: {
     read: () => rendererStoreData,
@@ -291,5 +299,105 @@ Object.assign(window, {
       viewConstructor: cmView.EditorView?.name,
       languageSyntaxTreeFn: typeof cmLanguage.syntaxTree === 'function' ? String(cmLanguage.syntaxTree).slice(0, 48) : 'missing',
     }
+  },
+  /** #546 T07 宿主角色明暗推送（生产 main.ts 的 addonThemeEnvironment.changed
+   *  消息同款链路——hub 先更新缓存再分发 SDK 订阅） */
+  pushThemeEnvironment(env: { dark: boolean; highContrast: boolean }): boolean {
+    return themeEnvironment.applyEnvironment(env)
+  },
+  /** #546 T07 主题环境快照观测（SDK get 同源） */
+  themeEnvironmentNow() {
+    return themeEnvironment.current()
+  },
+  /** #546 T07 宿主角色主题目录注入（真实宿主为 AddonThemeService 目录） */
+  setThemeCatalog(themes: Array<{ addonId: string; themeId: string; rendererId: string; languages: string[] }>): void {
+    themeCatalog.length = 0
+    themeCatalog.push(...themes.map((t) => ({
+      addonId: t.addonId,
+      themeId: t.themeId,
+      themeRef: `${t.addonId}/${t.themeId}`,
+      label: { en: t.themeId },
+      rendererId: t.rendererId,
+      providerId: `${t.addonId}/${t.rendererId}`,
+      languages: t.languages,
+    })))
+  },
+  /** #546 T07 宿主角色主题步进：消费候选上报 + 主题上下文求表并下发本页
+   *  桥（themePreferred 为 resolveThemePreferred 产物：default/codex/ref） */
+  hostThemeRendererStep(availableAddonIds: string[], themePreferred: string): {
+    version: number
+    languages: Array<{ language: string; effective: string; source: string }>
+    theme: { preferred: string; available: boolean; effective: string; activeProviderId?: string }
+  } {
+    for (const message of rendererOutbox.splice(0)) {
+      rendererHost.registerProviders(message.payload.addonId, message.payload.providers)
+    }
+    const selection = resolveActiveTheme({
+      themes: [...themeCatalog],
+      preferred: themePreferred,
+      isThemeAvailable: (theme) => availableAddonIds.includes(theme.addonId),
+    })
+    const themeContext: RendererThemeSelectionContext = {
+      themedProviderIds: new Set(themeCatalog.map((t) => t.providerId)),
+      ...(selection.activeProviderId !== undefined ? { activeThemeProviderId: selection.activeProviderId, activeThemeLanguages: selection.activeLanguages } : {}),
+    }
+    const table = rendererHost.effectiveTable(
+      (addonId) => availableAddonIds.includes(addonId),
+      themeContext,
+    )
+    addonRenderers.applyTable(table)
+    return {
+      version: table.version,
+      languages: [...table.languages],
+      theme: selection,
+    }
+  },
+  /** #546 T07 主题渲染绘制层观测：文档内 theme-box 的提供者/语言/模式/
+   *  明暗标记与计算背景色 */
+  themePaintInfo() {
+    const boxes = [...document.querySelectorAll<HTMLElement>('.theme-box')]
+    return {
+      boxes: boxes.filter((el) => el.isConnected).map((el) => ({
+        renderer: el.getAttribute('data-theme-renderer'),
+        language: el.getAttribute('data-theme-language'),
+        mode: el.getAttribute('data-theme-mode'),
+        dark: el.getAttribute('data-theme-dark'),
+        hc: el.getAttribute('data-theme-hc'),
+        text: el.textContent ?? '',
+        color: getComputedStyle(el).backgroundColor,
+        width: el.getBoundingClientRect().width,
+      })),
+      released: document.querySelectorAll('[data-theme-released]').length,
+    }
+  },
+  /** #546 T07 装载主题夹具组件（addonId 与页面工厂声明一致） */
+  async loadThemeAddon(scriptUri: string, cssUri: string | null, generation: number): Promise<AddonLoadOutcome> {
+    collectOutbound()
+    const outcome = await loader.load({
+      addonId: 'vsidian-test-fixture.addon-theme',
+      generation,
+      page: 'editor',
+      scriptUri,
+      cssUris: cssUri ? [cssUri] : [],
+    })
+    collectOutbound()
+    return outcome
+  },
+  /** #546 T07 卸载主题夹具组件（代次释放——主题环境订阅退订断言） */
+  async unloadThemeAddon(generation: number): Promise<AddonUnloadOutcome> {
+    const outcome = await loader.unload('vsidian-test-fixture.addon-theme', generation)
+    collectOutbound()
+    return outcome
+  },
+  /** #546 T07 放行主题夹具组件的渲染候选注册（页面装载时经通道询问） */
+  grantThemeProviders(): number {
+    let granted = 0
+    for (const request of channelRequests.splice(0)) {
+      if (request.topic === 'theme.providersAllowed') {
+        replyChannelRequestDirect(request.requestId, { ok: true, result: { allowed: true } })
+        granted += 1
+      }
+    }
+    return granted
   },
 })

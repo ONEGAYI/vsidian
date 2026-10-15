@@ -49,6 +49,9 @@ const T02_SETTINGS_CSS = '.t02-settings-root .t02-title { color: rgb(0, 120, 200
 /** #361 T12 夹具组件样式：渲染器容器内 t12-box（绘制层断言锚——计算色
  * rgb(12, 200, 96)，与 t02/t09 标记色区分） */
 const T12_EDITOR_CSS = '.t12-box { background-color: rgb(12, 200, 96); color: rgb(255, 255, 255); padding: 4px 8px; display: inline-block; }\n'
+/** #546 T07 主题夹具组件样式：主题渲染容器内 theme-box（绘制层断言锚——
+ * 计算色 rgb(0, 138, 123)（水青），与 t02/t09/t12 标记色区分） */
+const THEME_EDITOR_CSS = '.theme-box { background-color: rgb(0, 138, 123); color: rgb(255, 255, 255); padding: 4px 8px; display: inline-block; }\n'
 
 /** 断言产物不含 CM6 运行时标记（组件未重打包共享运行时） */
 export function assertNoCm6Runtime(productPath) {
@@ -153,6 +156,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 'host-settings-addon', 'dist', 'editor.js'),
       note: 'host-settings-addon 编辑器页',
     },
+    // #546 T07 主题夹具组件（编辑器页——renderers 面登记主题关联提供者 +
+    // themeEnvironment 面订阅明暗；通道放行门控防共享会话毒化）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'themeEditor.ts'),
+      outfile: path.join(buildRoot, 'theme-addon', 'dist', 'editor.js'),
+      note: 'theme-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -189,6 +199,10 @@ export async function buildTestAddons({ log = console.log } = {}) {
   const t12Dist = path.join(buildRoot, 't12-addon', 'dist')
   mkdirSync(t12Dist, { recursive: true })
   writeFileSync(path.join(t12Dist, 'editor.css'), T12_EDITOR_CSS)
+  // #546 T07 主题夹具组件样式（绘制层断言锚）
+  const themeDist = path.join(buildRoot, 'theme-addon', 'dist')
+  mkdirSync(themeDist, { recursive: true })
+  writeFileSync(path.join(themeDist, 'editor.css'), THEME_EDITOR_CSS)
   const outsideDir = path.join(buildRoot, 'outside')
   mkdirSync(outsideDir, { recursive: true })
   writeFileSync(path.join(outsideDir, 'denied.js'), DENIED_JS)
@@ -255,6 +269,11 @@ export async function buildTestAddons({ log = console.log } = {}) {
     hostSettingsAddon: {
       installDir: path.join(buildRoot, 'host-settings-addon'),
       distDir: path.join(buildRoot, 'host-settings-addon', 'dist'),
+    },
+    // #546：主题夹具组件布局（浏览器套件经本地 http 服务装载）
+    themeAddon: {
+      installDir: path.join(buildRoot, 'theme-addon'),
+      distDir: path.join(buildRoot, 'theme-addon', 'dist'),
     },
     outsideDir,
   }

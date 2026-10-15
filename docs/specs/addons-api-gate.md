@@ -68,6 +68,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **语义冻结口径**：目标 / 语义字段 / 签名声明文本按**字节冻结**——自由文本无法机械区分「扩展」与「收窄」，任何变化都要求显式重锚定（`--emit-baseline` 同 PR 提交 + 独立说明），使收窄不可能静默通过。允许的演进：新增条目、扩展执行端、新增语义字段、追加签名源、追加台账版本、experimental 升稳定候选。
 
+**T07/#546 候选重锚理由（2026-10-15）**：新增宿主主题注册与页面主题环境，扩展 `AddonEnableContext` / `VsidianAddonPageSdk`，并落实 ADR-0017 已批准的 renderer-selection 主题例外及声明语言范围。旧候选基线如实拒绝这些签名和冻结语义变化（`out/test/t07-check-addoncompat.log`）；在功能与公开消费用例进入 git 后，用 `--emit-baseline --anchor <T07 实施提交>` 显式发射并另行提交基线。保留旧锚点 git 对象及失败报告，先复验新锚点，再跑全检查；不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。最终汇总分支还需对合并后的公开声明整体重锚核对。
+
 ## CI 接线（代码侧，已交付）
 
 `.github/workflows/ci.yml` 新增独立 job **`addon-api-contract`**（job 名即 required status check 的 context 名），与 `style-contract` 同序同型——**先证检查器可信，再信检查结果**：

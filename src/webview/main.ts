@@ -24,6 +24,8 @@ import { AddonCommandsRuntime } from './addonCommands'
 import { AddonUiRuntime } from './addonUi'
 import { addonCm6LanguageSubset, installAddonPageLoader } from './addonPageLoader'
 import { setAddonRenderersBridge } from './addonRenderers'
+import { setThemeEnvironmentHub } from './addonThemeEnvironment'
+import { isVscodeDarkBody } from './syncController'
 import { bindAddonFaultReporter } from './graphicRenderers'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { t } from '../shared/i18n'
@@ -102,6 +104,13 @@ const addonRenderers = setAddonRenderersBridge((message) => {
     vscode.postMessage(message)
   }
 })
+// #546 T07 页面明暗环境 hub（SDK themeEnvironment 面的数据源）：初始值
+// 按 body class 就地播种（宿主 ready/事件推送到达前 SDK get 可用），
+// 权威值随 addonThemeEnvironment.changed 消息更新（等值跳过）
+const themeEnvironment = setThemeEnvironmentHub({
+  dark: isVscodeDarkBody(),
+  highContrast: document.body.classList.contains('vscode-high-contrast') || document.body.classList.contains('vscode-high-contrast-light'),
+})
 // #360 T11 附加组件界面运行时（页面级一份）：SDK ui 面的操作后端——按钮/
 // 面板挂载、目标路由（当前活动视图句柄经装载器同源构造——bindHandleFactory
 // 在装载器安装后绑定，沿 bindOpIdAllocator 先例解装配环）与回收矩阵
@@ -132,6 +141,8 @@ const addonLoader = installAddonPageLoader({
   //（controller 设置快照缓存——settings.snapshot/changed 到达即更新，
   //  保存热更后组件下次 get 即新值，无需重开面板）
   hostSettingsSnapshot: () => controller.settingsSnapshotNow(),
+  // #546 T07 主题环境面：SDK themeEnvironment 的后端（hub 页面级一份）
+  themeEnvironment,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
 // T12（#361）：故障上报槽接线（装载器在场后升级生效）——各 runtime 与
@@ -196,6 +207,11 @@ window.addEventListener('message', (event) => {
   // T09（#358）：宿主渲染提供者生效表广播（等值跳过；变化即热切换）
   if (isHostToWebview(event.data) && event.data.kind === 'addonRenderers.table') {
     addonRenderers.applyTable(event.data.table)
+    return
+  }
+  // #546 T07 宿主明暗环境推送（等值跳过；缓存先更新再分发 SDK 订阅）
+  if (isHostToWebview(event.data) && event.data.kind === 'addonThemeEnvironment.changed') {
+    themeEnvironment.applyEnvironment(event.data.env)
     return
   }
   controller.handleHostMessage(event.data)

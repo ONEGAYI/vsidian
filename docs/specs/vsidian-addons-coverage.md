@@ -80,3 +80,18 @@
 全矩阵复现命令（与 T18 票面证据同口径）：`npm run compile`、`npm run test:unit`、`npm run test:browser -- --no-reuse`、`npm run test:integration`、`npm run check:stylecontract`、`npm run check:addonapi`、`npm run check:addoncompat`；安装态与 SSH 线分别为 `node test/integration/runInstalledAddons.mjs`、`node test/integration/runRemoteSshAddons.mjs`（各票面载有前提）。
 
 本表随批次收口建立，此后接口或验证变更时由触碰对应面的票顺带更新（同 `addonApiCatalog.ts` 的维护纪律：改接口必经语义清单与本文）。29 项全绿的口径以 T18 全矩阵回归报告为准（`out/test/t18-*.log`，矩阵结论见票面 t18.md 回填）。
+
+## 统一主题扩展覆盖（#546 / T07）
+
+本组故事来源为 [addon-themes.md](addon-themes.md)，不改写上方 T18 历史结论。公开宿主面为 `themes-register`，页面面为 `theme-environment`；API 仍为 1.0.0 候选。
+
+| 故事 | 用户结果 | 实际验证路径 |
+| --- | --- | --- |
+| H-U01/H-U02 | 原页签统一单选，来源可区分 | `themeSettings` / `appearanceSettings` 单测；生产设置页 `addonThemes` 浏览器（真实 CSS、同名来源、单选） |
+| H-U03/H-U11 | 安装只加候选，普通渲染器规则保留 | `addonRenderers` / `addonRendererTakeover` / `addonRendererService`；`addonThemes` 浏览器（内置与主题计算色、Live/阅读） |
+| H-U04 | 保存与重开回显 | `settingsService` / `themeSettings`；`addonThemes` 浏览器正式 settings.set 回环与切页重开；真实进程重启仍待人工 |
+| H-U05 | 不可用回落、首选保留、恢复沿用 | `addonThemes` / `addonThemeService`；`addonThemes` 浏览器；`addonThemeCases` 真宿主链 |
+| H-U06/H-U07 | 实际主题四态、缓存先更新、图形重画与释放 | `addonThemeEnvironment` / `addonPageLoader`；`themeEditor` 经公开 SDK 消费；浏览器计算色与退订；`addonThemeCases` 双文档及真实主题事件 |
+| H-U08 | 中英文、来源、搜索定位 | `themeSettings`；`addonThemes` 浏览器热换语言包、搜索与主题页签路由 |
+
+本地接手验证报告为 T07 工作树 `out/test/t07-resume-*`；联合全量回归由汇总分支记录。图表弹窗继续既有 `graphicPopup` 快照验证，T08 的安装、迁移和包体收口尚未交付。

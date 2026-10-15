@@ -1,10 +1,12 @@
 // 设置页「外观」合并分页（#231）：侧栏「CSS 片段」与「样式参考」两条分页
 // 合并为一条「外观」（调色板图标，取 CSS 片段原槽位，位于快捷键与索引维护
 // 之间）。外观页复用样式参考现有 tablist 页签机制（pill 页签 + aria-selected
-// 单选 + hidden 面板切换）；原三页签后追加「预设主题」，仍为扁平层级——
-// 不加嵌套层级。实现形态是组合复用：CssSnippetSettingsSection 与
-// StyleReferenceSection 作为页签体原样挂载（不重写两者内部逻辑），
-// snippets.state 消息接线保持 settingsMain 直连实例不变。
+// 单选 + hidden 面板切换）；原三页签后追加第四页签——#546 T07 起原位更名
+// 「主题」，页签体为统一主题单选列表（ThemeSelectionSection，appearance.*
+// 不再走标准设置行——主题唯一选择入口）。实现形态是组合复用：
+// CssSnippetSettingsSection 与 StyleReferenceSection 作为页签体原样挂载
+// （不重写两者内部逻辑），snippets.state 消息接线保持 settingsMain 直连
+// 实例不变。
 // 搜索定位路由（工单拍板）：按条目归属落页签——片段文件与目录行 → CSS
 // 片段页签；契约总表 overview → 样式参考页签；契约条目 → 详细查询页签；
 // 无定位（侧栏进入）默认第一页签「CSS 片段」。
@@ -12,6 +14,7 @@ import { t } from '../shared/i18n'
 import type { SettingsPageSection } from './settingsPageView'
 import { CssSnippetSettingsSection } from './cssSnippetSettings'
 import { StyleReferenceSection } from './styleReferenceSettings'
+import type { ThemeSelectionSection } from './themeSettings'
 
 /** 外观页页签 id（data-tab 值；顺序即呈现顺序，CSS 片段为第一页签） */
 export type AppearanceTab = 'cssSnippets' | 'overview' | 'detail' | 'presets'
@@ -33,15 +36,12 @@ export function routeAppearanceTab(focusEntry?: string): AppearanceTab {
 export class AppearanceSection implements SettingsPageSection {
   readonly id = 'appearance'
   readonly icon = 'palette' as const
-  readonly defsGroups = [{
-    titleKey: 'appearance.codeblockRendering' as const, icon: 'codeblock' as const,
-    prefixes: ['appearance.'], target: '.vsidian-appearance-presets',
-  }]
   get title(): string { return t('appearance.title') }
   get description(): string { return t('appearance.description') }
 
   constructor(private readonly snippets: CssSnippetSettingsSection,
-    private readonly styleRef: StyleReferenceSection) {}
+    private readonly styleRef: StyleReferenceSection,
+    private readonly themes: ThemeSelectionSection) {}
 
   /** 当前页内页签（会话内恢复，PR #346）：切页签时记录；mount 无定位时
    *  按！它呈现（有 focusEntry 时定位路由优先——显式定位语义不变） */
@@ -68,9 +68,10 @@ export class AppearanceSection implements SettingsPageSection {
     }
   }
 
-  /** 全局搜索索引：聚合两子分页条目（片段域 + 契约域），点击后按归属路由 */
+  /** 全局搜索索引：聚合两子分页条目（片段域 + 契约域）与主题设置条目
+   * （#546 T07——appearance.* 标准行退役后主题入口经此进搜索） */
   get entries() {
-    return [...this.snippets.entries, ...this.styleRef.entries]
+    return [...this.snippets.entries, ...this.styleRef.entries, ...this.themes.entries]
   }
 
   mount(parent: HTMLElement, focusEntry?: string): () => void {
@@ -99,12 +100,12 @@ export class AppearanceSection implements SettingsPageSection {
     const panels: Record<AppearanceTab, HTMLElement> = {
       cssSnippets: snippetPanel, overview: overviewPanel, detail: detailPanel, presets: presetPanel,
     }
-    // 页签文案沿用现有键（工单拍板）：页签标题不新增词条
     const tabLabels: Record<AppearanceTab, string> = {
       cssSnippets: t('cssSnippets.title'),
       overview: t('styleRef.tabOverview'),
       detail: t('styleRef.tabDetail'),
-      presets: t('appearance.presets'),
+      // #546 T07：原「预设主题」页签原位更名「主题」（统一主题单选入口）
+      presets: t('appearance.themes'),
     }
     const tabs = new Map<AppearanceTab, HTMLButtonElement>()
     const setTab = (selected: AppearanceTab): void => {
@@ -139,10 +140,13 @@ export class AppearanceSection implements SettingsPageSection {
     // 命中），不匹配的一侧按「无定位」处理，与全局搜索行为一致
     const disposeSnippets = this.snippets.mount(snippetPanel, focusEntry)
     this.styleRef.mountPanels(overviewPanel, detailPanel, focusEntry)
+    // #546 T07：第四页签体为统一主题单选列表（原预设主题标准行退役）
+    const disposeThemes = this.themes.mount(presetPanel, focusEntry)
     parent.append(snippetPanel, overviewPanel, detailPanel, presetPanel)
     setTab(tab)
     return () => {
       disposeSnippets?.()
+      disposeThemes?.()
     }
   }
 }

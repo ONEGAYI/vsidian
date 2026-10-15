@@ -100,6 +100,24 @@ import type {
   AddonRendererRegistration,
   AddonRenderersFacet,
 } from '../../src/shared/addonRenderers'
+import {
+  addonThemeEnvironmentEqual,
+  addonThemeEnvironmentOf,
+  addonThemeRefOf,
+  isAddonThemeEnvironmentPayload,
+  isAddonThemesStatePayload,
+  resolveActiveTheme,
+  resolveThemePreferred,
+  validateAddonThemeBatch,
+  type AddonThemeCandidate,
+  type AddonThemeDeclaration,
+  type AddonThemeEnvironment,
+  type AddonThemeEnvironmentFacet,
+  type AddonThemeEnvironmentKind,
+  type AddonThemeRegisterOutcome,
+  type AddonThemesRegistrationFacet,
+  type AddonThemesStatePayload,
+} from '../../src/shared/addonThemes'
 import type {
   AddonCommandDefinition,
   AddonMenuItemDefinition,
@@ -416,6 +434,53 @@ export const settingSearchEntries: readonly AddonSettingSearchEntry[] = [
 
 /** 渲染与界面注册形状 */
 export type RendererShapes = { registration: AddonRendererRegistration }
+
+// ---- #546 T07 主题注册与主题环境的编译期消费（签名形状钉住） ----
+
+/** enable 上下文 themes 面的消费形态（组件作者视角） */
+export type ThemeRegistrationSurface = Pick<AddonThemesRegistrationFacet, 'register'>
+/** 注册结果两臂（普通 API 拒绝不算故障） */
+export type ThemeRegisterOutcomeArms = AddonThemeRegisterOutcome
+/** 组件作者提交的声明形状 */
+export const themeDeclarations: readonly AddonThemeDeclaration[] = [
+  {
+    themeId: 'aqua',
+    label: { 'zh-cn': '水青', en: 'Aqua' },
+    rendererId: 'aqua-renderer',
+    languages: ['mermaid'],
+  },
+]
+/** 声明 → 稳定身份/校验/选择的同源纯函数消费 */
+export const themePipeline = {
+  ref: addonThemeRefOf('pub.pack', 'aqua'),
+  batchVerdict: validateAddonThemeBatch(themeDeclarations),
+  preferred: resolveThemePreferred('pub.pack/aqua', 'default'),
+  active: resolveActiveTheme({
+    themes: [] as readonly AddonThemeCandidate[],
+    preferred: 'default',
+    isThemeAvailable: () => true,
+  }),
+}
+/** SDK themeEnvironment 面的消费形态（编辑器页） */
+export type ThemeEnvironmentSurface = Pick<AddonThemeEnvironmentFacet, 'get' | 'onChange'>
+/** 四态映射与等值判据（页面缓存先更新后通知、重复值不广播的判据源） */
+export const themeEnvironmentFacts: Record<AddonThemeEnvironmentKind, AddonThemeEnvironment> = {
+  light: addonThemeEnvironmentOf('light'),
+  dark: addonThemeEnvironmentOf('dark'),
+  'high-contrast': addonThemeEnvironmentOf('high-contrast'),
+  'high-contrast-light': addonThemeEnvironmentOf('high-contrast-light'),
+}
+export const themeEnvironmentEqualProbe = addonThemeEnvironmentEqual(
+  addonThemeEnvironmentOf('light'),
+  addonThemeEnvironmentOf('high-contrast-light'),
+)
+export const themeEnvironmentPayloadGuard = isAddonThemeEnvironmentPayload({ dark: false, highContrast: true })
+export const themesStatePayloadGuard = isAddonThemesStatePayload({
+  version: 1,
+  themes: [],
+  preferred: 'default',
+  preferredAvailable: true,
+} satisfies Pick<AddonThemesStatePayload, 'version' | 'themes' | 'preferred' | 'preferredAvailable'>)
 export type CommandShapes = { definition: AddonCommandDefinition; menuItem: AddonMenuItemDefinition }
 export type UiShapes = { button: AddonUiButtonDefinition; panel: AddonUiPanelDefinition }
 

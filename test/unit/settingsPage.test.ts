@@ -16,6 +16,7 @@ import { PRODUCTION_SETTING_DEFINITIONS, type SettingDefinition } from '../../sr
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
+import { AddonThemesStore, ThemeSelectionSection } from '../../src/webview/themeSettings'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
@@ -841,7 +842,8 @@ describe('外观合并分页（#231）', () => {
   } {
     const snippets = new CssSnippetSettingsSection({ postMessage() {} })
     const appearance = new AppearanceSection(
-      snippets, new StyleReferenceSection({ postMessage() {} }))
+      snippets, new StyleReferenceSection({ postMessage() {} }),
+      new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
     const view = new SettingsPageView({ postMessage() {} }, PRODUCTION_SETTING_DEFINITIONS, [
       new KeybindingSettingsSection({ postMessage() {} }),
       appearance,
@@ -998,7 +1000,8 @@ describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面�
     const sent: unknown[] = []
     const snippets = new CssSnippetSettingsSection({ postMessage() {} })
     const appearance = new AppearanceSection(
-      snippets, new StyleReferenceSection({ postMessage() {} }))
+      snippets, new StyleReferenceSection({ postMessage() {} }),
+      new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
     const view = new SettingsPageView(
       { postMessage: (m) => sent.push(m) },
       PRODUCTION_SETTING_DEFINITIONS,
@@ -1102,7 +1105,8 @@ describe('会话内恢复：state 载荷（分页内输入态上报与恢复，�
     const sent: unknown[] = []
     const snippets = new CssSnippetSettingsSection({ postMessage() {} })
     const appearance = new AppearanceSection(
-      snippets, new StyleReferenceSection({ postMessage() {} }))
+      snippets, new StyleReferenceSection({ postMessage() {} }),
+      new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
     const view = new SettingsPageView(
       { postMessage: (m) => sent.push(m) },
       PRODUCTION_SETTING_DEFINITIONS,

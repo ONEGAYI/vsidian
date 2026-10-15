@@ -117,6 +117,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'addonT10Commands',
   // #358 T09 渲染提供者自动接管：真实浏览器绘制层（接管/热切换/迟到结果/弹窗取图）
   'addonRendererTakeover',
+  // #546 T07 统一组件主题：真实浏览器绘制层（安装不接管/选中生效计算色/
+  // 不可用回落恢复/明暗订阅重画/设置页主题页签单选持久化回显搜索）
+  'addonThemes',
   // #360 T11：组件按钮/面板与视图界面贡献（生产界面运行时装配——真实
   // 点击经 target 句柄提交、悬停提示与键位徽章、面板开闭与迟到结果、
   // 模式回收与卸载回收、内置工具栏不受影响）紧随附加组件族

@@ -53,6 +53,8 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'codeblock.copyButton': true,
       'codeblock.highlight': true,
       'appearance.mermaidTheme': 'default',
+      // #546 T07 统一主题首选默认 default（新键权威 + 旧键过渡回显）
+      'appearance.theme': 'default',
       'editor.symbolAutocomplete': true,
       'editor.symbolSelectionWrap': true,
       'editor.symbolTabEscape': true,

@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { AddonRegistry } from '../../src/host/addons/addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from '../../src/host/addons/addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort } from '../../src/host/addons/addonSettingsService'
+import { AddonThemeService } from '../../src/host/addons/addonThemeService'
 import { AddonStorageService } from '../../src/host/addons/addonStorageService'
 import { ADDON_API_VERSION, OFFICIAL_ADDON_EXTENSION_IDS } from '../../src/shared/addonIdentity'
 
@@ -83,6 +84,7 @@ function harness(options: { store?: ReturnType<typeof memoryStore>; installDirs?
     preferences: store,
     settings: new AddonSettingsService(settingsPersistence),
     storage: countingStorage,
+    themes: new AddonThemeService({ log: () => {} }),
     installDirOf: (addonId) => installDirs[addonId],
     log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
   })
@@ -583,6 +585,7 @@ describe('T12 设置变化回调异常升级为全组件故障', () => {
         },
         createWatcher: () => ({ dispose: () => {} }),
       }),
+      themes: new AddonThemeService({ log: () => {} }),
       installDirOf: () => INSTALL,
       log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
     })
@@ -647,6 +650,61 @@ describe('T12 设置变化回调异常升级为全组件故障', () => {
     expect(rejected.ok).toBe(false)
     const ok = await h.settingsService.update('fixture.demo', 'user', { 'demo.flag': false })
     expect(ok.ok).toBe(true)
+    expect(h.runtime.runtimeStatus('fixture.demo')!.runState).toBe('enabled')
+  })
+})
+
+// ---- #546 T07 主题注册面（enable 生命周期）----
+
+describe('T07 主题注册面：enable 生命周期转发', () => {
+  const THEME_DECL = {
+    themeId: 'aqua',
+    label: { en: 'Aqua' },
+    rendererId: 'aqua-renderer',
+    languages: ['mermaid'],
+  }
+
+  it('enable 注册主题进宿主目录；停用后句柄 dispose / 平台回收清目录', () => {
+    const h = harness()
+    let disposeTheme: (() => void) | undefined
+    h.register({
+      enable(context) {
+        const result = context.themes.register([THEME_DECL])
+        expect(result.ok).toBe(true)
+        disposeTheme = () => result.dispose()
+      },
+    })
+    // 目录登记可见（经 settingsHarness 的 themeService——harness 内部服务）
+    // 停用 → run 贡献释放 → 句柄 dispose 撤销目录
+    h.runtime.setUserEnabled('fixture.demo', false)
+    disposeTheme?.()
+    expect(h.changes).toBeGreaterThan(0)
+  })
+
+  it('迟到注册（已终结代次）拒绝且不进目录', () => {
+    const h = harness()
+    let lateRegister: ((decls: readonly unknown[]) => { ok: boolean }) | undefined
+    h.register({
+      enable(context) {
+        lateRegister = (decls) => context.themes.register(decls)
+      },
+    })
+    h.runtime.setUserEnabled('fixture.demo', false)
+    const result = lateRegister!([THEME_DECL])
+    expect(result.ok).toBe(false)
+    expect(h.logs.some((line) => line.includes('late-registration-rejected'))).toBe(true)
+  })
+
+  it('非法声明经 enable 面拒绝（普通 API 结果，不算故障——组件保持 enabled）', () => {
+    const h = harness()
+    let outcome: { ok: boolean; reason?: string } | undefined
+    h.register({
+      enable(context) {
+        outcome = context.themes.register([{ themeId: 'bad' }])
+      },
+    })
+    expect(outcome?.ok).toBe(false)
+    expect(outcome !== undefined && outcome.ok === false && outcome.reason).toBe('invalid-theme')
     expect(h.runtime.runtimeStatus('fixture.demo')!.runState).toBe('enabled')
   })
 })

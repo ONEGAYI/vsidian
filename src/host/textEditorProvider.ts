@@ -428,7 +428,7 @@ export function createTextEditorProvider(
               // 的装载器已随 webview 消亡，指令对账不再需要
             }
           }
-          addons.pushDirectives(sessionId, panel.webview)
+          addons.pushDirectives(panelStateKey(entry.doc.uri.toString(), sessionId), panel.webview)
         }
       }
     }
@@ -3806,7 +3806,7 @@ export function createTextEditorProvider(
         }
         // #351 T02 附加组件页面消息（装载器就绪/出站）：桥消费即终止下发
         //（addon 指令不走会话消息管线——装载器是独立于控制器的页面级设施）
-        if (addons?.handlePanelMessage(sessionId, webviewPanel.webview, message)) {
+        if (addons?.handlePanelMessage(panelStateKey(document.uri.toString(), sessionId), webviewPanel.webview, message)) {
           return
         }
         void entry.session.handleWebviewMessage(message, sessionId)
@@ -3838,7 +3838,7 @@ export function createTextEditorProvider(
         entry.panels.delete(sessionId)
         // #351 T02：附加组件面板路由回收（视图关闭——页面装载器随 webview
         // 消亡，宿主侧不再向该面板投递指令）
-        addons?.panelDisposed(sessionId)
+        addons?.panelDisposed(panelStateKey(document.uri.toString(), sessionId))
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))

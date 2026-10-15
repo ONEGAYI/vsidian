@@ -9,6 +9,7 @@ import { KeybindingSettingsSection } from './keybindingSettings'
 import { CssSnippetSettingsSection } from './cssSnippetSettings'
 import { StyleReferenceSection } from './styleReferenceSettings'
 import { AppearanceSection } from './appearanceSettings'
+import { AddonThemesStore, ThemeSelectionSection } from './themeSettings'
 import { IndexMaintenanceSection } from './indexMaintenanceSettings'
 import { WordSegmentSection } from './wordSegmentSettings'
 import { DefaultEditorSection } from './defaultEditorSettings'
@@ -59,10 +60,16 @@ const snippets = new CssSnippetSettingsSection({ postMessage: (message) => vscod
 // #132 样式参考：离线渲染公开样式契约指南（数据模块随版本生成）；
 // #145 契约 JSON 导出：工具区按钮经消息桥请求宿主另存
 const styleRef = new StyleReferenceSection({ postMessage: (message) => vscode.postMessage(message) })
-// #231 外观合并：CSS 片段与样式参考合并为一条「外观」（扁平三页签，组合
-// 复用上述两个分页作为页签体；侧栏取 CSS 片段原槽位，位于快捷键与索引维护
-// 之间）
-const appearance = new AppearanceSection(snippets, styleRef)
+// #546 T07 主题目录 store + 主题单选页签体（目录权威在宿主，装载即拉取
+// addons.themesGet；addons.themesState 推送对账）
+const themesStore = new AddonThemesStore()
+const themeSelection = new ThemeSelectionSection(themesStore, {
+  postMessage: (message) => vscode.postMessage(message),
+})
+// #231 外观合并：CSS 片段与样式参考合并为一条「外观」（扁平四页签，组合
+// 复用上述分页作为页签体；第四页签「主题」为统一主题单选；侧栏取 CSS
+// 片段原槽位，位于快捷键与索引维护之间）
+const appearance = new AppearanceSection(snippets, styleRef, themeSelection)
 // #198 索引维护：排除模式编辑与清理/重建操作（状态权威在宿主，index.state
 // 推送回显）。#332 起分页改名「文件与链接」并承接图片/引用视图两组标准行
 // （defsGroups），本分页自有内容降为页内「索引维护」二级组
@@ -148,6 +155,9 @@ vscode.postMessage({ kind: 'addons.behaviorsGet' })
 // 模式（addons.behaviorsView 应答一次；写入经 addons.behaviorsViewSet，宿主
 // 不推送变化）
 vscode.postMessage({ kind: 'addons.behaviorsViewGet' })
+// #546 T07 主题目录：同「装载即拉取」模式（addons.themesState 应答；
+// 目录注册/回收、主题首选保存与组件可用性变化后宿主推送对账）
+vscode.postMessage({ kind: 'addons.themesGet' })
 // #351 T02 装载器就绪上报（设置页 webview 安装装载器后与面板重载后各发
 // 一次）：宿主按当前期望装载清单幂等推送组件设置页指令（addon.load）
 vscode.postMessage({ kind: 'addonPage.ready' })
@@ -187,6 +197,15 @@ window.addEventListener('message', (event) => {
     })))
     keybindings.handleCatalogChanged()
     return
+  }
+  // #546 T07 主题目录对账（等值幂等；推送变化即重渲染页签体）
+  if (isHostToWebview(event.data) && event.data.kind === 'addons.themesState') {
+    themesStore.applyThemesState(event.data)
+    return
+  }
+  // #546 T07 组件显示名表（主题来源徽章——同名主题按来源区分）
+  if (isHostToWebview(event.data) && event.data.kind === 'addons.state') {
+    themesStore.applyAddonLabels(event.data.addons.map((entry) => ({ id: entry.id, label: entry.label })))
   }
   view.handleHostMessage(event.data)
   keybindings.handleHostMessage(event.data)

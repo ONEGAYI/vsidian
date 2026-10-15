@@ -19,6 +19,7 @@ import type { AddonHeadingFoldFacet } from './addonFoldApi'
 import type { AddonHostSettingsFacet } from './addonHostSettingsApi'
 import type { AddonSyntaxFacet } from './addonSyntaxApi'
 import type { AddonRenderersFacet } from './addonRenderers'
+import type { AddonThemeEnvironmentFacet } from './addonThemes'
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from './addonEditApi'
 import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from './addonBehaviors'
 import type {
@@ -160,6 +161,11 @@ export interface VsidianAddonPageSdk {
    *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在
    *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */
   readonly renderers?: AddonRenderersFacet
+  /** #546 T07 主题环境面（仅编辑器页；设置页为 undefined）：VSCode 实际
+   *  生效主题的明暗快照与变化订阅（四态两轴投影——亮色高对比不为暗；
+   *  重复值不通知；通知在缓存更新后送达——回调中 get 拿新值；代次释放
+   *  自动退订）。快照源为宿主事件推送，不由组件自行嗅探样式环境 */
+  readonly themeEnvironment?: AddonThemeEnvironmentFacet
   /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与
    *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */
   readonly ui?: AddonSdkUiFacet
