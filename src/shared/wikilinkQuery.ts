@@ -719,11 +719,12 @@ export function planWikilinkInsertPath(
   return best
 }
 
-/** 插入路径三档（#556 规格「最短形式与三档路径」）：shortest=依次核对取最短；
- *  relative=来源相对（默认，现状风格）；absolute=宿主完整路径。档位值即
- *  设置 link.insertPathType 的值域（设置侧以此为单一事实源，不另写第二份）。 */
-export const WIKILINK_INSERT_PATH_MODES = ['shortest', 'relative', 'absolute'] as const
-export type WikilinkInsertPathMode = (typeof WIKILINK_INSERT_PATH_MODES)[number]
+import { WIKILINK_INSERT_PATH_MODES, type WikilinkInsertPathMode } from './wikilinkInsertMode'
+
+// 插入路径三档值域的单一事实源在 wikilinkInsertMode（webview 安全的零依赖
+// 模块——settings.ts 需引值域，本模块的 node:path 依赖不得传染 webview 产物）；
+// 此处 re-export 保持既有消费方引用面不变。
+export { WIKILINK_INSERT_PATH_MODES, type WikilinkInsertPathMode }
 
 /**
  * 插入路径生成选项（#556 T5）。档位由宿主侧调用点从设置快照读取传入——

@@ -16,7 +16,7 @@
 // type import，字典字节不进 webview 产物——settings.ts 被两端共享）
 import type { MessageKey } from './locales/en'
 import { JIEBA_SOURCE_MODES, type JiebaSourceMode } from './jiebaManifest'
-import { WIKILINK_INSERT_PATH_MODES, type WikilinkInsertPathMode } from './wikilinkQuery'
+import { WIKILINK_INSERT_PATH_MODES, type WikilinkInsertPathMode } from './wikilinkInsertMode'
 
 /** 协议载荷中的设置值：标量容器（协议层只约束形态，合法性由本模块按定义判定；
  *  放宽数值类型不需要改协议——「整体下发而非逐项布尔」的扩展预留） */
@@ -325,7 +325,7 @@ export const IMAGE_PASTE_LOCATION_DEFAULT: ImagePasteLocationMode = 'same-dir'
  * shortest=尽可能简短（文件名可省 .md → 来源相对 → 绝对，经统一解析器核对，
  * 唯一性走索引数据面）；relative=基于当前笔记的相对路径（默认，现状风格；
  * 跨根/外部目标回退绝对保留身份）；absolute=宿主完整路径（Windows 盘符
- * `/` 分隔）。值域与档位语义的单一事实源在 shared/wikilinkQuery
+ * `/` 分隔）。值域与档位语义的单一事实源在 shared/wikilinkInsertMode
  * （planWikilinkInsertPath 消费），此处只做键常量与注册。档位由宿主侧
  * 查询调用点从快照逐次读取传入（即时生效）；不批量转换既有正文。
  */
