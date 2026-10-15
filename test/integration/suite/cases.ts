@@ -17997,4 +17997,26 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // 阶段矩阵——R1 全装载/R2 宿主不可见负向；用例体 sshGuard 自跳过非
   // SSH 会话，发行态断言面见 addonT17RemoteSshCases.ts 头注）
   ...addonT17RemoteSshCases,
+  // 追加独立场景，保留原 Mermaid 用例的冷启动条件及既有分片位置。
+  ['Live 快速光标切标签页：Mermaid 夹具的 LF 锚点保持（#446）', async () => {
+    const file = 'viewport-fast-mermaid.md'
+    const uri = wsUri(file).toString()
+    const diskBefore = await readDisk(file)
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    // webview 全程 LF 坐标；该 fixture 为 CRLF，不能直接使用宿主 offsetAt。
+    const initial = await waitViewState(file, (v) => v.lineCount >= 123)
+    const offset = initial.text.split('\n').slice(0, 122)
+      .reduce((sum, line) => sum + line.length + 1, 0)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'viewport.test.position', cursorLine: 123 })
+    await waitViewState(file, (v) => v.selectionOffset === offset)
+    // 确认选区后立即切走，不先等待图表渲染或滚动落定。
+    await openWithEditor('mode.md')
+    await waitSessionReady('mode.md')
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    await waitViewState(file, (v) => v.selectionOffset === offset, 0, 30000)
+    assert(await readDisk(file) === diskBefore, '快速切页应保持源文零写回')
+  }],
 ]

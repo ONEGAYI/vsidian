@@ -534,3 +534,15 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 永久viewMode契约在隐藏前检查桥状态，并以独立JSON快照重建新控制器；旧实现预期偏移24、实际undefined，修正后33/33通过。原异步通道矩阵12/12通过；使用真实Mermaid产物的0/80/150/200/300ms矩阵15/15通过，已观测到实际SVG和允许的error终态。完整Vitest8048/8048与Node194/194、compile/类型通过；原生viewToggle浏览器套件通过（run-Qq9nSl），真实VSCode1.82.3原Mermaid标签切换用例通过。
 
 证据为out/test/mermaid6-public-seam-red.json/green.json、mermaid6-iframe-transport-observed.log、mermaid6-iframe-transport-green.log、mermaid6-iframe-real-paint-green.log及独立真实产物JSON、mermaid6-unit-full.log、mermaid6-native-green.log/report.log。诊断探针只在忽略目录；红轮通道JSON随后被同名绿轮覆写，原红取证以保留的带退出码日志为准，不冒充原完整JSON。自动验证不代替物理键盘/鼠标、IME与日用安装态人工验收。
+
+### 实际编辑器的快速切页回归（2026-10-15）
+
+本轮将纯光标保存窗口推进到实际VSCode1.82.3开发态路径：“定位到第123行、确认LF光标、立即打开另一标签再切回”，不先等图表或滚动稳定。永久回归采用同内容的viewport-fast-mermaid.md独立夹具，追加独立用例到清单末尾；原Mermaid用例本体、冷启动条件、围栏终态、中心行±2与光标保持断言以及已有分片位置均保留，新例仍为core、30秒恢复预算及零写回断言。
+
+只在忽略目录构建替换修复前控制器，其他产物与夹具同a3f5c188。旧控制器对象33ae2fe9dc00f5921d842a6979b8c1df3992cef5与68f5a657源码一致；诊断原型中旧实现切走前选区2029、保存定时器仍pending、API缓存无新锚点，正常切页后恢复0，原30秒预算内失败（整例32247ms）。现行控制器切走前已保存2029，切回保持2029，完整原型4227ms通过；曾将阶段放入原用例的中间版本也取得32221ms红态，最终拆为独立夹具以保留原冷启动路径。新源码不新增生产接口或私有状态断言，永久独立用例的红绿另留证。
+
+坐标以已就绪view.state.text的LF模型计算，宿主该fixture为CRLF，offsetAt第123行2151对应LF2029。诊断中未构建成功就启动的样本、使用宿主坐标导致切走前超时的样本及启动命令引号错误，均独立标为无效，不充当产品红测；原始日志保留。
+
+本轮证明实际编辑器快速定位后切页的窗口，与此前真实API/iframe销毁对照相互支持。历史失败的原用例先等待围栏和视口落定，缺逐消息时间线，不能将新增快速前序冒充其原样现场或证明每次失败的唯一原因。条目6是否按初步范围收口以独立复核和最终候选验证为准；人工验收未联动。证据为out/test/mermaid6-followup-old-native-lf.log/report.log、current-native-valid.log/report.log、permanent-red-native.log/report.log与invalid-sample.md（同组均带mermaid6-followup前缀）。
+
+最终独立用例在旧控制器下切回0，32137ms红态；正式构建去掉诊断字段/输出后，原Mermaid用例3451ms、新快速用例1114ms均通过。compile/类型、完整Vitest8051/8051与Node194/194、文件树strict通过；中间版本也做过完整回归，最终统计仅取final前缀日志。旧生产者只用于忽略目录的诊断产物，提交不包含生产控制器改动或额外协议字段。
