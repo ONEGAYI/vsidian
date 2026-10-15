@@ -418,6 +418,64 @@ test('Windows 独立桌面启动器原样传递真实进程输出和非零退出
   assert.match(diagnostics, /观察期间前台 PID/)
 })
 
+test('Windows 独立桌面宿主隔离用户窗口站与真实剪贴板', { skip: skipDesktop }, async () => {
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class StationProbe {
+  [DllImport("user32.dll")] static extern IntPtr GetProcessWindowStation();
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint size, out uint needed);
+  public static string Name() {
+    var value = new StringBuilder(512);
+    uint needed;
+    if (!GetUserObjectInformation(GetProcessWindowStation(), 2, value, 1024, out needed))
+      throw new Win32Exception(Marshal.GetLastWin32Error());
+    return value.ToString();
+  }
+}
+'@
+$station = [StationProbe]::Name()
+$roundTrip = $null
+Add-Type -AssemblyName PresentationCore
+$seesSentinel = [Windows.Clipboard]::GetText() -eq $env:VSIDIAN_CLIPBOARD_PROBE_SENTINEL
+# 旧实现仍在用户窗口站时只报告身份，红测不改写用户剪贴板。
+if ($env:VSIDIAN_CLIPBOARD_PROBE_PARENT_STATION -and $station -ne $env:VSIDIAN_CLIPBOARD_PROBE_PARENT_STATION) {
+  [Windows.Clipboard]::SetText($env:VSIDIAN_CLIPBOARD_PROBE_SENTINEL)
+  $roundTrip = [Windows.Clipboard]::GetText()
+}
+[pscustomobject]@{station=$station;seesSentinel=$seesSentinel;roundTrip=$roundTrip} | ConvertTo-Json -Compress
+`
+  const stations = []
+  const sentinel = `Vsidian clipboard isolation sentinel ${process.pid}`
+  for (const mode of ['foreground', 'desktop', 'desktop', 'foreground']) {
+    let output = ''
+    let diagnostics = ''
+    const code = await runTestHost({
+      executable: path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      args: ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+      env: { ...process.env, VSIDIAN_CLIPBOARD_PROBE_PARENT_STATION: stations[0] ?? '', VSIDIAN_CLIPBOARD_PROBE_SENTINEL: sentinel },
+      mode,
+      timeoutMs: 5000,
+      stdout: { write: (chunk) => { output += chunk.toString() } },
+      stderr: { write: (chunk) => { diagnostics += chunk.toString() } },
+    })
+    assert.equal(code, 0, diagnostics)
+    const probe = JSON.parse(output)
+    if (mode === 'desktop') {
+      assert.notEqual(probe.station, stations[0], '独立宿主不能共享用户的窗口站')
+      assert.equal(probe.roundTrip, sentinel, '仍须支持真实系统剪贴板读写')
+    } else {
+      assert.equal(probe.seesSentinel, false, '测试宿主写入不能流入用户剪贴板')
+    }
+    stations.push(probe.station)
+  }
+})
+
 test('Windows 独立桌面超时后结束本次宿主及其子进程', { skip: skipDesktop }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'vsidian-host-timeout-'))
   const markers = [path.join(dir, 'host.pid'), path.join(dir, 'child.pid')]
