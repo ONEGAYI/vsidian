@@ -160,6 +160,20 @@ try {
     assert.ok(Math.abs((await page.evaluate(() => window.liveCenterLine())) - liveCenter) <= 1,
       'live 重建后视口中心应保持同一源码行')
 
+    // 已保存过源码中心后再滚动：新像素位置不能携带上一次视口的旧中心点。
+    await page.waitForTimeout(300)
+    await page.evaluate(() => {
+      const el = document.querySelector('.cm-scroller')
+      el.scrollTop += 400
+      el.dispatchEvent(new Event('scroll'))
+    })
+    await page.waitForTimeout(80)
+    const nextLiveCenter = await page.evaluate(() => window.liveCenterLine())
+    assert.ok(nextLiveCenter > liveCenter + 2, '第二次滚动应抵达不同源码区域')
+    await page.evaluate((text) => window.reloadViewportDoc(text), longDoc)
+    await page.waitForFunction((line) =>
+      window.liveCenterLine() !== null && Math.abs(window.liveCenterLine() - line) <= 1, nextLiveCenter)
+
     await page.evaluate((text) => window.resetViewportDoc(text), longDoc)
     await page.evaluate(() => window.setViewportMode('reading'))
     await page.waitForFunction(() => {

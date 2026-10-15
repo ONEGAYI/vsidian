@@ -398,7 +398,6 @@ function scheduleFrame(fn: () => void): void {
 /** #66 高亮重算去抖（ms）：滚动事件驱动，轻于 250ms 数据刷新链路（只做
  *  定位纯函数 + 一次类切换，不解析文档） */
 const OUTLINE_HIGHLIGHT_DEBOUNCE_MS = 100
-const VIEWPORT_SAVE_DEBOUNCE_MS = 250
 
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
@@ -629,7 +628,7 @@ export class WebviewSyncController {
   private modeAnchor: number | null
   /** 当前模式的滚动像素位置；与 modeAnchor 分开，避免纯滚动移动编辑光标。 */
   private viewport: { mode: ViewMode; top: number; centerOffset?: number } | null
-  private viewportSaveTimer: ReturnType<typeof setTimeout> | undefined
+  private viewportSaveFrame: number | undefined
   private restoringViewport = false
   /** 仅测试注入后开放绘制中心探针，避免常规 view.state 改变 CM6 测量时机。 */
   private viewportProbeEnabled = false
@@ -4854,22 +4853,22 @@ export class WebviewSyncController {
     })
   }
 
-  /** 滚动事件高频到达：内存状态即时更新，bridge 写入尾随去抖。隐藏或卸载
-   *  时同步冲刷，覆盖用户滚动后立刻切标签页的窗口。 */
+  /** 滚动事件高频到达：廉价像素位置立即写入 bridge，源码中心点按帧合并采样。
+   *  隐藏或卸载时的补发不能作为新 iframe 状态的唯一来源。 */
   private scheduleViewportSave(): void {
     if (!this.sessionId || this.restoringViewport) return
     const scroller = this.viewMode === 'reading'
       ? this.readingContainer : this.view?.scrollDOM
     if (!scroller) return
-    const previous = this.viewport?.mode === this.viewMode ? this.viewport : null
-    // 高频事件只读廉价的 scrollTop；源码坐标等布局稳定后再测。
+    // 新像素位置不携带上一次视口的旧中心；布局读数每帧最多采一次。
     this.viewport = {
       mode: this.viewMode,
       top: Math.max(0, scroller.scrollTop),
-      centerOffset: previous?.centerOffset,
     }
-    if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
-    this.viewportSaveTimer = setTimeout(() => this.flushViewportSave(), VIEWPORT_SAVE_DEBOUNCE_MS)
+    this.persistState()
+    if (this.viewportSaveFrame === undefined) {
+      this.viewportSaveFrame = requestAnimationFrame(() => this.flushViewportSave())
+    }
   }
 
   private captureViewport(): void {
@@ -4884,25 +4883,24 @@ export class WebviewSyncController {
   }
 
   private flushViewportSave(): void {
-    if (this.viewportSaveTimer === undefined) return
-    clearTimeout(this.viewportSaveTimer)
-    this.viewportSaveTimer = undefined
+    if (this.viewportSaveFrame === undefined) return
+    this.viewportSaveFrame = undefined
     if (!this.restoringViewport) this.captureViewport()
     this.persistState()
   }
 
   private flushPendingViewState(): void {
-    const pending = this.viewportSaveTimer !== undefined
-    if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
-    this.viewportSaveTimer = undefined
+    const pending = this.viewportSaveFrame !== undefined
+    if (this.viewportSaveFrame !== undefined) cancelAnimationFrame(this.viewportSaveFrame)
+    this.viewportSaveFrame = undefined
     if (this.viewport && !this.restoringViewport) this.captureViewport()
     if (pending || this.viewport) this.persistState()
   }
 
   private clearViewport(): void {
-    if (this.viewportSaveTimer !== undefined) {
-      clearTimeout(this.viewportSaveTimer)
-      this.viewportSaveTimer = undefined
+    if (this.viewportSaveFrame !== undefined) {
+      cancelAnimationFrame(this.viewportSaveFrame)
+      this.viewportSaveFrame = undefined
     }
     this.viewport = null
     this.restoringViewport = false
