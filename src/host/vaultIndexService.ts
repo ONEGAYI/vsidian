@@ -1260,6 +1260,19 @@ export class VaultIndexService {
     return this.shortnameLookupFor(state)(basename)
   }
 
+  /** 评审 S1 路径存在性（rename 规划端口的数据面）：任意绝对 fsPath 是否被
+   *  任一根的 files 表登记（含 asset——磁盘存在性的索引投影，全文件清单
+   *  口径）。同步零 IO；normKey 归一后查询，大小写/分隔符漂移容错 */
+  catalogHasFile(fsPath: string): boolean {
+    const key = this.normKey(fsPath)
+    for (const s of this.roots.values()) {
+      if (s.model?.files.has(key) === true) {
+        return true
+      }
+    }
+    return false
+  }
+
   /** #556 T3（R8）：文档已解析出链的绝对身份快照——面板装配点推导 webview
    *  localResourceRoots 许可面用（探针结论：根外资源目标 401，须在 html
    *  赋值前一次性纳入目标目录）。与 outlinksOf 同源边集（覆盖层未保存态
@@ -2050,25 +2063,41 @@ export class VaultIndexService {
       // 其二，Markdown 条目集合变化（排除/根重划/漂移）——受影响 basename
       // 定向重判。busy（扫描/核验/泵）时挂起，resumeAfterBusy 接力
       if (!cancelled()) {
-        const mdBasenames = (catalog: Map<string, VaultCatalogEntry>): Set<string> => {
-          const out = new Set<string>()
+        // 评审 F4：受影响粒度 =「basename → 同名候选成员身份集合」——
+        // 排除变更（取消排除引入同名新成员）下名称集合不变而成员增减，
+        // 只比名称会漏判「唯一变歧义」；成员身份与补查候选同域（normKey
+        // 折叠），形态漂移不误判
+        const mdMembersByBasename = (
+          catalog: Map<string, VaultCatalogEntry> | null | undefined,
+        ): Map<string, Set<string>> => {
+          const out = new Map<string, Set<string>>()
+          if (!catalog) {
+            return out
+          }
           for (const [rel, entry] of catalog) {
-            if (entry.category === 'markdown') {
-              out.add(this.foldKey(this.basenameOfRel(rel)))
+            if (entry.category !== 'markdown') {
+              continue
             }
+            const name = this.foldKey(this.basenameOfRel(rel))
+            let set = out.get(name)
+            if (!set) {
+              out.set(name, (set = new Set()))
+            }
+            set.add(this.foldKey(this.normKey(this.absOf(state, rel))))
           }
           return out
         }
-        const prevNames = prevCatalog ? mdBasenames(prevCatalog) : new Set<string>()
-        const nextNames = mdBasenames(entries)
+        const prevMembers = mdMembersByBasename(prevCatalog)
+        const nextMembers = mdMembersByBasename(entries)
         const affected = new Set<string>()
-        for (const name of nextNames) {
-          if (!prevNames.has(name)) {
+        for (const [name, members] of nextMembers) {
+          const prev = prevMembers.get(name)
+          if (prev === undefined || [...members].some((m) => !prev.has(m))) {
             affected.add(name)
           }
         }
-        for (const name of prevNames) {
-          if (!nextNames.has(name)) {
+        for (const name of prevMembers.keys()) {
+          if (!nextMembers.has(name)) {
             affected.add(name)
           }
         }
@@ -2473,10 +2502,18 @@ export class VaultIndexService {
           }
         }
         if (state.catalogComplete !== completeNow) {
+          const flippedToComplete = completeNow && !state.catalogComplete
           state.catalogComplete = completeNow
           state.catalogGen++
           this.scheduleCatalogCommit(state)
           catalogTouched = true
+          // 评审 F3：完整性翻转与扫描完成点共享全域短名重判——pending 边
+          // （唯一候选但不完整）的判定依赖 complete，恢复完整必须重判。
+          // 仅 false→true 有意义（true→false 时既有边维持，下轮恢复时统一
+          // 重判）。核验态 busy：挂起接力由 finally 的 resumeAfterBusy 消费
+          if (flippedToComplete) {
+            void this.runShortnameRejudge(state, 'all')
+          }
         }
         // F14：清单核验零变化不置位 touched——周期核验/焦点回归每 10 分钟
         // 一次，无条件 touched 会触发全模型序列化提交（10 万档实测 3.72s）

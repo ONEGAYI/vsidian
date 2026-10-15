@@ -910,6 +910,51 @@ describe('vaultRename：#556 T4 短名保留与三形态决策', () => {
     expect(result.skipped).toEqual([])
   })
 
+  it('评审 S1：同目录裸名文件遮蔽候选序时短名不保留（第一个存在文件优先，不偷换目标）', () => {
+    // old/note.md 与 old/source.md 同批移至 new/；new/note（无扩展）已存在。
+    // 同批移动的引用者走 did 出链通道（selfMove，docDir = 新目录）
+    const text = '见 [[note]]。\n'
+    const moves = [
+      { oldFsPath: `${WIN_ROOT}/old/note.md`, newFsPath: `${WIN_ROOT}/new/note.md` },
+      { oldFsPath: `${WIN_ROOT}/old/source.md`, newFsPath: `${WIN_ROOT}/new/source.md` },
+    ]
+    const docs: RenameDocInput[] = [{
+      fsPath: `${WIN_ROOT}/new/source.md`,
+      text,
+      edgeRootFsPath: WIN_ROOT,
+      edges: [edge({ target: 'note', resolved: `${WIN_ROOT}/old/note.md`, kind: 'wikilink', start: 2, end: 2 + '[[note]]'.length })],
+    }]
+    // 同目录候选序 [new/note, new/note.md]：解析器「第一个存在文件优先」
+    // 命中 new/note（非目标）——保留短名会把目标偷换成另一文件
+    const exists: Record<string, true> = {
+      [`${WIN_ROOT}/new/note`.toLowerCase()]: true,
+      [`${WIN_ROOT}/new/note.md`.toLowerCase()]: true,
+    }
+    const result = planVaultRenameRewrites(
+      {
+        ...winCtx(moves),
+        shortnameLookup: shortnamePort({ byBasename: { 'note.md': [`${WIN_ROOT}/old/note.md`] } }),
+        targetExists: (p) => exists[p.replaceAll('\\', '/').toLowerCase()] === true,
+      },
+      docs,
+    )
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[note.md]]。\n')
+  })
+
+  it('评审 F5：目标移入嵌套工作区根后不再几何保留相对（最具体根归属变更 → 绝对路径）', () => {
+    // 父根来源的相对引用目标移入已登记的嵌套根：补查域随归属转移到嵌套根，
+    // 父根补查为 []/complete——保留的相对形态经解析器已 not-found
+    const text = '见 [x](../data/target.md)。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/data/target.md`, newFsPath: `${WIN_ROOT}/nested/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/project/source.md`, text, [
+      edge({ target: '../data/target.md', resolved: `${WIN_ROOT}/data/target.md`, kind: 'mdlink', start: text.indexOf('[x](../data/target.md)'), end: text.indexOf('[x](../data/target.md)') + '[x](../data/target.md)'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves, [WIN_ROOT, `${WIN_ROOT}/nested`]), docs)
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [x](C:/vault/nested/target.md)。\n')
+  })
+
   it('selfMove 出链短名保留：文档移动后其未动目标的短名出链不再批量转相对', () => {
     const text = '见 [[other]]。\n'
     const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/sub/renamed.md` }]

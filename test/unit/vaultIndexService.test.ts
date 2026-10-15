@@ -2715,6 +2715,60 @@ describe('VaultIndexService：#556 T2 短名补查与目标身份（索引接线
     const result = await ctx.service.backlinksOf('C:/vault/资料/目标.md')
     expect(itemsOf(result).map((i) => i.sourceRelPath)).toEqual(['项目/来源.md'])
   })
+
+  it('评审 F3：核验使清单恢复完整但无 Markdown 条目变化时，pending 边同样重判接通', async () => {
+    // 不可访问目录下只有非 Markdown 资产——恢复完整不带来任何 md 增量，
+    // 现有「added md → rescanFile → 新增重判」路径不触发，完整性翻转
+    // 本身必须共享全域重判入口（评审复现：仍 resolved=false）
+    const fs = makeFs({
+      'C:/vault/项目/来源.md': '# 源\n\n见 [[目标]]。\n',
+      'C:/vault/资料/目标.md': '# 标\n',
+      'C:/vault/空档/图.png': 'png',
+    })
+    const ctx = makeService(fs)
+    ;(ctx.scan as unknown as { inaccessibleDirs: Set<string> }).inaccessibleDirs.add('C:/vault/空档')
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(ctx.service.maintenanceInfo().roots[0]!.catalogComplete).toBe(false)
+    const pending = await ctx.service.outlinksOf('C:/vault/项目/来源.md')
+    if (pending.status === 'ready') {
+      expect(pending.items[0]).toMatchObject({ resolved: false })
+    }
+    // 恢复（目录可访问、无 md 变化）→ verifyNow → complete 翻转 true
+    ;(ctx.scan as unknown as { inaccessibleDirs: Set<string> }).inaccessibleDirs.delete('C:/vault/空档')
+    await ctx.service.verifyNow()
+    // 挂起重判经 resumeAfterBusy fire-and-forget 接力（微任务收敛）
+    await vi.advanceTimersByTimeAsync(1)
+    // 观测面用出链 resolved（反链查询有断链 stem 桶兜底，区分不了
+    // pending 断链与真解析——评审复现即出链仍 resolved=false）
+    const result = await ctx.service.outlinksOf('C:/vault/项目/来源.md')
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') {
+      expect(result.items[0]).toMatchObject({ resolved: true, targetFsPath: 'C:/vault/资料/目标.md' })
+    }
+  })
+
+  it('评审 F4：排除取消后同名候选成员增减触发重判（唯一变歧义不漏）', async () => {
+    const fs = makeFs({
+      'C:/vault/项目/来源.md': '# 源\n\n见 [[目标]]。\n',
+      'C:/vault/资料/目标.md': '# 标\n',
+      'C:/vault/hidden/目标.md': '# 隐\n',
+    })
+    const { service } = makeService(fs, { excludePatterns: ['hidden/**'] })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 排除期：唯一候选 → 解析到 资料/目标
+    const before = await service.backlinksOf('C:/vault/资料/目标.md')
+    expect(itemsOf(before).map((i) => i.sourceRelPath)).toEqual(['项目/来源.md'])
+    // 取消排除：重扫后 lookup 有两个候选——basename 集合前后不变（都是
+    // 目标.md），但成员身份 1→2，须重判为歧义（不归任一候选）
+    await service.setExcludePatterns([])
+    await vi.advanceTimersByTimeAsync(2_000)
+    const out = await service.outlinksOf('C:/vault/项目/来源.md')
+    if (out.status === 'ready') {
+      expect(out.items[0]).toMatchObject({ resolved: false, targetFsPath: null })
+    }
+  })
 })
 
 describe('VaultIndexService：#556 T2 外部与跨根目标（绝对身份登记与失效）', () => {

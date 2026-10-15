@@ -203,6 +203,10 @@ export interface RenamePlanContext {
   moves: readonly RenameMoveEntry[]
   /** 短名唯一性查询端口（#556 T4，可选注入；wiring 传索引查询） */
   shortnameLookup?: RenameShortnameLookupPort
+  /** 新世界路径存在性端口（评审 S1，可选注入）：候选序「第一个存在文件
+   *  优先」核对用——will 阶段 = catalog 登记 ∪ moves 新路径；did 阶段 =
+   *  catalog 登记（moves 已落盘）。未注入退化为几何比较（上游兼容） */
+  targetExists?: (fsPath: string) => boolean
 }
 
 /** 候选文档输入（wiring 按索引查询分组；边区间须与 text 对齐语义见下） */
@@ -299,6 +303,8 @@ interface EdgeTargetPlanArgs {
   moves: readonly RenameMoveEntry[]
   moveByOld: Map<string, RenameMoveEntry>
   lookup: RenameShortnameLookupPort | undefined
+  /** 新世界路径存在性（评审 S1；未注入为 undefined——候选核对退化几何比较） */
+  targetExists: ((fsPath: string) => boolean) | undefined
   /** 路径是否在应用文档所属根域内（无根恒 false） */
   insideRoot: (p: string) => boolean
   /** 改写应用文档（引用者=原路径；被移动文档=新路径）——lookup 端口的
@@ -350,24 +356,45 @@ function planEdgeTargetText(a: EdgeTargetPlanArgs): string | null {
   const shortnameKey = shortnameLookupKeyOf(decodedRaw, linkCtx, { implicitMd })
   if (shortnameKey !== null) {
     // a. 同目录相对候选直击（T1 解析序「相对候选优先」的保留面——目标
-    //    移入应用文档同目录时原文已是最短准确形态）
+    //    移入应用文档同目录时原文已是最短准确形态）。评审 S1：核对必须
+    //    遵守解析器「第一个存在文件优先」——只判断「候选含目标」会在
+    //    裸名文件遮蔽候选序时把链接偷换成另一文件；注入存在性端口时按
+    //    首个存在候选核对身份，未注入退化为几何比较（上游兼容）
     const sameDirBase = a.ops.resolve(a.docDir, decodedRaw)
     const sameDirCandidates = originalHasExt || !implicitMd
       ? [sameDirBase]
       : [sameDirBase, `${sameDirBase}.md`]
-    if (sameDirCandidates.some((c) => a.fold(a.norm(c)) === a.fold(a.targetAbs))) {
+    const sameDirHit = a.targetExists !== undefined
+      ? sameDirCandidates.find((c) => a.targetExists!(c))
+      : sameDirCandidates.find((c) => a.fold(a.norm(c)) === a.fold(a.targetAbs))
+    if (sameDirHit !== undefined && a.fold(a.norm(sameDirHit)) === a.fold(a.targetAbs)) {
       return null
     }
+    // 评审 S1：同目录第一个存在候选非目标 = 短名被遮蔽——解析器「相对
+    // 候选第一个存在文件优先」在补查之前命中，原文短名到不了补查桶
+    const shadowedBySameDir = sameDirHit !== undefined
     // b. 原短名在新世界同名集唯一命中 → 保留（唯一性须 complete——
-    //    清单不完整不声明唯一，pending 语义不冒充命中）
-    if (a.lookup !== undefined && shortnameUniqueHit(a, shortnameKey)) {
+    //    清单不完整不声明唯一，pending 语义不冒充命中；遮蔽时解析器
+    //    序到不了补查，唯一性再真也不保留）
+    if (!shadowedBySameDir && a.lookup !== undefined && shortnameUniqueHit(a, shortnameKey)) {
       return null
     }
     // c. 新短名唯一且准确 → 更新（短名 = 目标新 basename，扩展名省略
-    //    语义跟随原文；短名语义仅 Markdown）
+    //    语义跟随原文；短名语义仅 Markdown）。省略扩展的前提是「省略后
+    //    仍唯一解析」——新裸名在同目录被遮蔽或无端口可判时用显式形态
+    //    （评审 S1：省略形态会把解析偷换给遮蔽文件）
     const newBase = a.ops.basename(a.targetAbs)
     if (/\.md$/i.test(newBase) && a.lookup !== undefined && shortnameUniqueHit(a, newBase)) {
-      return originalHasExt ? newBase : newBase.replace(/\.md$/i, '')
+      const bareBase = newBase.replace(/\.md$/i, '')
+      const bareShadowed = a.targetExists !== undefined
+        && a.targetExists(a.ops.resolve(a.docDir, bareBase))
+      if (originalHasExt || (implicitMd && bareShadowed)) {
+        return newBase
+      }
+      if (implicitMd) {
+        return newBase.replace(/\.md$/i, '')
+      }
+      return newBase
     }
     // d. 无法安全保留 → 相对/绝对（下方通用分支）
   }
@@ -529,7 +556,12 @@ export function planVaultRenameRewrites(
         moves: ctx.moves,
         moveByOld,
         lookup: ctx.shortnameLookup,
-        insideRoot: (p) => docRoot !== undefined && isInside(ops, docRoot, p),
+        targetExists: ctx.targetExists,
+        // 评审 F5：根域判定按归属不按几何——目标最具体根 ≠ 应用文档根
+        // 即为跨根（嵌套根独立分区：补查域/反链域已随归属转移，几何上
+        // 仍在父根域内的相对形态与其短名语义分家）。rootOf 返回 roots
+        // 数组原元素，与 docRoot（同款 rootOf 产物）严格相等即同根
+        insideRoot: (p) => docRoot !== undefined && rootOf(p) === docRoot,
         docFsPath: doc.fsPath,
         docDir,
         docRoot,
@@ -611,15 +643,6 @@ export function lfOffsetToLineCol(
     lfAcc += segLen + 1
     searchFrom = m.index + m[0].length
   }
-}
-
-/** root 是否包含 absolute（含根本身；`..foo` 同级文件名不误判） */
-function isInside(ops: typeof path.posix, root: string, absolute: string): boolean {
-  const rel = ops.relative(ops.resolve(root), ops.resolve(absolute))
-  if (rel === '') {
-    return true
-  }
-  return rel !== '..' && !rel.startsWith(`..${ops.sep}`) && !ops.isAbsolute(rel)
 }
 
 /** 容错 percent-decode（linkTarget.tolerantDecode 同语义：非法序列原样保留） */

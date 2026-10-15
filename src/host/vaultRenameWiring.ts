@@ -403,7 +403,7 @@ async function buildWillRenameEdit(
       [...docsByKey.values()].map((d) => [d.fsPath, d.hostText]),
     )
     const plan = planVaultRenameRewrites(
-      { rootFsPaths, isWindowsHost, moves, shortnameLookup: renameShortnamePortOf(vaultIndex) },
+      { rootFsPaths, isWindowsHost, moves, shortnameLookup: renameShortnamePortOf(vaultIndex), targetExists: renameTargetExistsPortOf(vaultIndex, moves) },
       docs,
     )
     for (const docPlan of plan.docs) {
@@ -533,7 +533,7 @@ async function applyAfterRenameBatch(
       }
       if (docs.length > 0) {
         const plan = planVaultRenameRewrites(
-          { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex) },
+          { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex), targetExists: renameTargetExistsPortOf(vaultIndex, expandedMoves) },
           docs,
         )
         if (plan.docs.length > 0) {
@@ -564,7 +564,7 @@ async function applyAfterRenameBatch(
         [...dirtyDocsByKey.values()].map((d) => [d.fsPath, d.hostText]),
       )
       const plan = planVaultRenameRewrites(
-        { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex) },
+        { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex), targetExists: renameTargetExistsPortOf(vaultIndex, expandedMoves) },
         docs,
       )
       if (plan.docs.length > 0) {
@@ -665,6 +665,18 @@ function isTabHeld(fsPath: string): boolean {
  *  路径，不猜目标）。 */
 function renameShortnamePortOf(vaultIndex: VaultIndexService): RenameShortnameLookupPort {
   return (sourceFsPath, basename) => vaultIndex.shortnameLookup(sourceFsPath, basename)
+}
+
+/** 评审 S1 新世界存在性端口：catalog 登记（磁盘存在性的索引投影，含非
+ *  Markdown 资产）∪ 本批移动映射的新路径（will 阶段新路径尚未落盘、
+ *  catalog 看不到；did 阶段已登记，并集 no-op）。形态归一走 normKeyOf——
+ *  与 catalogHasFile 的 normKey 同域折叠，分隔符/大小写漂移容错 */
+function renameTargetExistsPortOf(
+  vaultIndex: VaultIndexService,
+  moves: ReadonlyArray<{ oldFsPath: string; newFsPath: string }>,
+): (fsPath: string) => boolean {
+  const newPaths = new Set(moves.map((m) => normKeyOf(m.newFsPath)))
+  return (fsPath) => newPaths.has(normKeyOf(fsPath)) || vaultIndex.catalogHasFile(fsPath)
 }
 
 /** 跳过原因的文案键（通知详情用；#556 T4 起仅剩 edge-stale 一种） */
