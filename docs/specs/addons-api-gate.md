@@ -8,7 +8,7 @@
 
 | 层 | 资产 | 职责 |
 | --- | --- | --- |
-| 事实源（T13） | `src/shared/addonApiCatalog.ts` | 语义清单 + 发行台账 + `validateAddonApiCatalog` 自洽校验（首版六组 22 条目；#541 起七组 29 条目） |
+| 事实源（T13） | `src/shared/addonApiCatalog.ts` | 语义清单 + 发行台账 + `validateAddonApiCatalog` 自洽校验（首版六组 22 条目；2026-10 首轮扩展组合后七组 33 条目） |
 | 独立基线 | `test/addon-api/baseline-bootstrap-1.json` | 从 **git 锚点对象**派生的条目 / 签名声明文本 / 台账快照 + 完整性清单；不信任候选树文件 |
 | 纯逻辑模块 | `scripts/addonApiCompatCheck.mjs` | 比较器、期限校验、基线信任验证与全套编排（可被 node --test import） |
 | CLI 壳 | `scripts/checkAddonApiCompat.mjs` | `--verify-baseline` / 全检查 / `--emit-baseline`（发射基线）三入口 |
@@ -71,6 +71,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 **T05（#544）候选基线重锚说明**：实施提交 `9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 为 `VsidianAddonPageSdk` 增加可选 `refViews` facet，并新增只读浮窗契约条目。旧成员、既有语义与发行台账不删减；原基线 `8e13e78f` 可信复验通过，候选比较仅因 SDK 声明新增字段触发 `signature-declaration-changed`。按既有字节冻结规则，使用 `--emit-baseline --anchor 9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 从已提交 git 对象重新发射，再运行基线复验及完整兼容检查。独立 API 仍为未发行的 1.0.0 候选，不补发行日期，也不修改检查器或豁免规则。批次集成其他接口后须针对最终组合提交再次复验，必要时显式重锚。
 
 **T07/#546 候选重锚理由（2026-10-15）**：新增宿主主题注册与页面主题环境，扩展 `AddonEnableContext` / `VsidianAddonPageSdk`，并落实 ADR-0017 已批准的 renderer-selection 主题例外及声明语言范围。旧候选基线如实拒绝这些签名和冻结语义变化（`out/test/t07-resume-compat-before-anchor.log`，6 项失败）；在功能与公开消费用例进入提交 `59555c05` 后，以 `--emit-baseline --anchor HEAD` 显式发射并另行提交基线。保留旧锚点 git 对象及失败报告，新锚点复验和兼容全检查均通过（`t07-resume-api-baseline.log` / `t07-resume-compat.log`）；不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。最终汇总分支还需对合并后的公开声明整体重锚核对。
+
+**四票组合重锚理由（2026-10-15）**：T01/T03/T05/T07 以真实 merge 保留各实施锚点，组合实施提交为 `8cf6a681`。旧 T01 基线可信复验通过，候选比较记录 7 项预期变化：主题选择目标与自动接管语义两项、宿主登记/页面 SDK/文档导航/渲染选择相关签名五项（`out/test/addon-batch-takeover/api-before-reanchor.json`）。按字节冻结规则执行 `--emit-baseline --anchor 8cf6a681`，从已提交组合对象发射 33 条目、21 签名模块及候选台账快照，随后独立提交并复验。重锚保留旧接口、历史对象和失败证据，不修改检查器、不加豁免，API 1.0.0 仍为未发行候选。
 
 ## CI 接线（代码侧，已交付）
 
