@@ -159,8 +159,10 @@ export interface HoverDocAccessPorts {
   /** #336（P3-04）图片目标的文件状态探测（vscode 层 = workspace.fs.stat）：
    *  文件资源版本（mtimeMs）的来源——图片不是 TextDocument 权威语义，
    *  版本取文件状态；端口缺省（node 单测替身）时 version 为 0（仅回包
-   *  排序基准，图片新鲜度权威在失效通道） */
-  statFile?(fsPath: string): Promise<{ mtimeMs: number } | null>
+   *  排序基准，图片新鲜度权威在失效通道）。#556 收口（P2-6）：isFile
+   *  标记目录身份（directTarget 存在性核验要求文件类型——目录不通过，
+   *  与 PDF 端口三态同口径；缺省 undefined 视为文件——既有桩不破） */
+  statFile?(fsPath: string): Promise<{ mtimeMs: number; isFile?: boolean } | null>
   /** #342（P3-10）外链元信息受限抓取（宿主 WebLinkMetaService 装配；测试
    *  注入替身）。signal 为消费者取消通道（webview 关浮层 → 宿主 abort） */
   fetchWebMeta?(url: string, signal?: AbortSignal): Promise<WebLinkMetaOutcome>
@@ -346,6 +348,12 @@ async function resolveHoverTargetForm(
       }
       const stat = await ports.statFile(direct.fsPath).catch(() => null)
       if (stat === null) {
+        return { ok: false, reason: 'not-found' }
+      }
+      // P2-6（#556 收口）：文件类型核验（与 PDF 端口口径一致）——目录身份
+      // 不通过（面板快照身份恒为文件；目录 stat 成功会以 not-found 回绝，
+      // 不冒充可读取目标）
+      if (stat.isFile === false) {
         return { ok: false, reason: 'not-found' }
       }
     }

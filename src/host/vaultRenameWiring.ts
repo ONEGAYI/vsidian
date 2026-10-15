@@ -108,16 +108,12 @@ interface PendingRenameBatch {
   dirtyRefs: string[]
   /** 被移动文档出链（did 阶段按新路径文本统一规划） */
   outgoing: PendingMovedOutgoing[]
-  /** will 阶段装载取文本的文档（did 收尾退役覆盖层，见 textOf） */
-  loadedDocs: string[]
-  /** will 阶段经 docsByKey 读文本的引用者（装载与面板打开混合、will 时刻
-   *  原则上全非 dirty——dirty 者已分流 dirtyRefs；URI 大小写漂移的窄径
-   *  除外：open 查找 miss 不经分流，由装载收集的 isDirty 防御与收尾的
-   *  标签豁免双网兜住）。装载子集 will edit 随宿主落盘（覆盖层=盘面，退役
-   *  即归基线）；面板子集只改 buffer 转脏不落盘（覆盖层=buffer 现状，
-   *  did 收尾按「编辑器标签仍持有」豁免，见 retireLoadedDocs）。无 tab
-   *  的缓存实例惰性重载不广播事件、onDidClose 不触发，覆盖层无退场路径
-   *  （#256）——did 时刻无标签者照退 */
+  /** will 阶段经 docsByKey 读文本的引用者（面板打开与 URI 大小写漂移窄径
+   *  混合、will 时刻原则上全非 dirty——dirty 者已分流 dirtyRefs）。面板
+   *  子集只改 buffer 转脏不落盘（覆盖层=buffer 现状，did 收尾按「编辑器
+   *  标签仍持有」豁免，见 retireLoadedDocs）；未打开子集自 #556 收口起
+   *  采集走直读盘（textOf 不装载模型），will edit 随宿主直接写盘（覆盖层
+   *  =盘面，退役即归基线；无 tab 缓存实例的滞留问题随装载消失）。 */
   rewrittenDocs: string[]
 }
 const pendingBatches = new Map<string, PendingRenameBatch>()
@@ -148,33 +144,30 @@ function normalizeLf(text: string): string {
   return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
 }
 
-/** 文档当前文本：已打开优先（含未保存内容），否则装载磁盘文本。
- *  装载态文档（openTextDocument 只装载不显示）经 loadedDocs 登记——它没有
- *  编辑器标签，后续 will/did 的 applyEdit 改写会经 onDidChangeTextDocument
- *  登记索引覆盖层，而 onDidCloseTextDocument 对装载文档永不触发（无标签
- *  可关），覆盖层边会永久滞留遮蔽基线（#256 幽灵反链）——did 收尾按清单
- *  统一退役（谁装载谁回收）。 */
+/** 文档当前文本：已打开（含未保存 buffer）优先直取；否则**直接读盘**
+ *  （fs.readFile 字节级，不装载文档模型）。不得改回 openTextDocument
+ *  装载：VSCode bulk edit（will additional edits / did applyEdit）对
+ *  「已建模型的文档」只作用 buffer 不落盘（#269 集成实证的语义）——采集
+ *  时装载会让对未打开引用者的改写滞留无标签 dirty buffer、磁盘永不变更
+ *  （无人保存即改写丢失；#556 收口：跨根用例磁盘断言暴露——同根 #199
+ *  系用例读 buffer/面板而恰好通过，掩盖了该缺陷）；不装载模型时 bulk
+ *  edit 走文件服务直接写盘（watcher 通道更新索引，不经覆盖层）。
+ *  读盘失败返回 null（调用方按 edge-stale 跳过）。 */
 async function textOf(
   uri: vscode.Uri,
-  loadedDocs?: string[],
 ): Promise<{ host: string; lf: string } | null> {
   const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString())
-  let doc = open ?? null
-  if (!doc) {
-    try {
-      doc = await vscode.workspace.openTextDocument(uri)
-    } catch {
-      return null
-    }
-    // isDirty 防御（#256 review 轮）：URI 大小写漂移时 open 查找 miss、
-    // openTextDocument 返回的是已打开的 dirty 实例——真实未保存内容不得进
-    // 退役清单；正常装载是磁盘态（非 dirty），不受影响
-    if (!doc.isDirty) {
-      loadedDocs?.push(doc.uri.fsPath)
-    }
+  if (open) {
+    const host = open.getText()
+    return { host, lf: normalizeLf(host) }
   }
-  const host = doc.getText()
-  return { host, lf: normalizeLf(host) }
+  try {
+    const bytes = await vscode.workspace.fs.readFile(uri)
+    const host = Buffer.from(bytes).toString('utf8')
+    return { host, lf: normalizeLf(host) }
+  } catch {
+    return null
+  }
 }
 
 /** 把计划文档的 edits 填入 WorkspaceEdit（LF 偏移 → 宿主 Position） */
@@ -312,12 +305,24 @@ async function buildWillRenameEdit(
   const movedOldKeys = new Set(moves.map((m) => normKeyOf(m.oldFsPath)))
 
   const rootFsPaths = vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? []
+  /** #556 收口（跨根 will edit 丢弃）：1.82.3 宿主对「跨 workspace folder
+   *  rename」事务里的 additional text edits 静默丢弃（收口对照实验实证：
+   *  手工同事务 replace 的 buffer/磁盘双验——同根事务 buffer 生效、跨根
+   *  事务的 will additional edit 连 buffer 都不变；独立 applyEdit 的纯
+   *  text edits 则跨根同款生效）。批内任一 move 跨根（old/new 最具体
+   *  workspace folder 不同，含 new 越出全部根）时整批引用改写不走 will
+   *  additional edit，延迟到 did 通道独立 applyEdit（与 dirtyRefs 同通道
+   *  同语义——did 时刻 rename 已完成、纯文本 edit 的 buffer 语义可靠）。
+   *  代价：混合批（同根+跨根同批）的同根部分失去与 rename 的撤销原子性
+   *  （撤销需两步），换跨根改写实际生效——罕见形态，接受并记录 */
+  const folderOf = (fsPath: string): string | undefined =>
+    vscode.workspace.getWorkspaceFolder(vscode.Uri.file(fsPath))?.uri.toString()
+  const batchCrossRoot = moves.some((m) => folderOf(m.newFsPath) !== folderOf(m.oldFsPath))
   /** 引用者文档合并表（键 = fsPath@edgeRoot 归一）：同文档指向批内多个
    *  目标的边并集——一次规划、同文档多目标一次 WorkspaceEdit */
   const docsByKey = new Map<string, RenameDocInput & { hostText: string }>()
   const dirtyRefs: string[] = []
   const outgoingStash: PendingMovedOutgoing[] = []
-  const loadedDocs: string[] = []
   const rewrittenDocs: string[] = []
   let hasCandidates = false
 
@@ -351,10 +356,12 @@ async function buildWillRenameEdit(
     }
     hasCandidates = true
     // 引用者：原路径应用（rename 非参与文件，will edit 实测支持），边根 =
-    // 目标所属根（反链按根分区，来源同根）。两类除外：
+    // 目标所属根（反链按根分区，来源同根）。三类除外：
     // - 本批被移动文件（movedOldKeys）：did 出链通道统一重算，不重复替换
     // - dirty 引用者：will edit 实测会回滚未保存内容（1.86 边界）——延迟
     //   到 did 通道独立 applyEdit 叠加
+    // - 跨根批（batchCrossRoot）：宿主丢弃跨根事务的 additional edits——
+    //   同样延迟 did 独立 applyEdit（见 batchCrossRoot 注释）
     for (const group of candidates.incoming) {
       if (movedOldKeys.has(normKeyOf(group.fsPath))) {
         continue
@@ -367,11 +374,11 @@ async function buildWillRenameEdit(
       }
       const uri = vscode.Uri.file(group.fsPath)
       const openDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString())
-      if (openDoc?.isDirty) {
+      if (batchCrossRoot || openDoc?.isDirty) {
         dirtyRefs.push(normKeyOf(group.fsPath))
         continue
       }
-      const text = await textOf(uri, loadedDocs)
+      const text = await textOf(uri)
       if (text === null) {
         log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
         continue
@@ -407,16 +414,14 @@ async function buildWillRenameEdit(
     log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
   }
   // 暂存至 did：rename 实际发生后合并出链与 dirty 引用者部分，统一落日志
-  // 与通知（will 后用户取消 rename 时 did 不到来，暂存悬挂由上限淘汰）。
-  // loadedDocs 计入暂存条件：装载清单须随批次到 did 才能退役覆盖层
+  // 与通知（will 后用户取消 rename 时 did 不到来，暂存悬挂由上限淘汰）
   if (log.plannedEdits > 0 || log.skipped.length > 0 || log.indexNotReady > 0 ||
-    dirtyRefs.length > 0 || outgoingStash.length > 0 || loadedDocs.length > 0) {
+    dirtyRefs.length > 0 || outgoingStash.length > 0) {
     stashBatch(batchKeyOf(files), {
       log: { ...log, moves: rawMoves },
       expandedMoves: moves,
       dirtyRefs,
       outgoing: outgoingStash,
-      loadedDocs,
       rewrittenDocs,
     })
   }
@@ -438,10 +443,10 @@ async function applyAfterRenameBatch(
   const pending = pendingBatches.get(key)
   pendingBatches.delete(key)
 
-  /** did 出链通道触达的文档（open 装载混合——did applyEdit 改写它们，收尾
-   *  退役覆盖层归基线；dirtyRefs 段的叠加改写是真实未保存内容，不在此列
-   *  ——但该段装载取盘文本的窄路径（will 后关闭丢弃 dirty）会收集，
-   *  收尾与出链清单一并退役，#256 入口一不在窄路径复活） */
+  /** did 出链通道触达的文档（did applyEdit 改写它们，收尾退役覆盖层归
+   *  基线；dirtyRefs 段的叠加改写是真实未保存内容，不在此列。#556 收口
+   *  起文本采集直读盘不装载，此处清单面向 applyEdit 在途装载的残留实例
+   *  退役——no-op 亦无害） */
   const didRewrittenDocs: string[] = []
   const rootFsPaths = vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? []
 
@@ -477,7 +482,7 @@ async function applyAfterRenameBatch(
           merged.edges = [...merged.edges, ...group.edges]
           continue
         }
-        const text = await textOf(vscode.Uri.file(group.fsPath), didRewrittenDocs)
+        const text = await textOf(vscode.Uri.file(group.fsPath))
         if (text === null) {
           pending.log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
           continue
@@ -512,7 +517,7 @@ async function applyAfterRenameBatch(
       const docs: RenameDocInput[] = []
       const hostTexts = new Map<string, string>()
       for (const item of pending.outgoing) {
-        const text = await textOf(vscode.Uri.file(item.newFsPath), didRewrittenDocs)
+        const text = await textOf(vscode.Uri.file(item.newFsPath))
         if (text === null) {
           log.skipped.push({ fsPath: item.newFsPath, reason: 'edge-stale' })
           continue
@@ -585,7 +590,7 @@ async function applyAfterRenameBatch(
       pushRenameLog(log)
     }
   } finally {
-    // 覆盖层回收（#256）：本批 will/did 触达并改写的文档（装载清单 + 引用者
+    // 覆盖层回收（#256）：本批 will/did 触达并改写的文档（引用者
     // rewrittenDocs + did 出链清单），其文本变更（will edit / did applyEdit，
     // 含宿主 bulk edit 的短暂 dirty 态）已登记覆盖层，而无 tab 的缓存文档
     // 实例没有退场事件（onDidCloseTextDocument 永不触发、惰性重载不广播）
@@ -593,8 +598,9 @@ async function applyAfterRenameBatch(
     // did 时刻仍被编辑器标签持有者豁免（retireLoadedDocs：活 buffer 的未
     // 保存内容是合法接管）；其余退役即归基线（documentSaved 同款语义）。
     // finally 内执行（#256 review 轮）：通道中途异常（IO/applyEdit 拒绝）
-    // 不丢退役
-    retireLoadedDocs(vaultIndex, [...pending.loadedDocs, ...pending.rewrittenDocs, ...didRewrittenDocs])
+    // 不丢退役。#556 收口起未打开子集采集走直读盘、宿主写盘不建模型，
+    // 退役面向面板打开与残留缓存实例
+    retireLoadedDocs(vaultIndex, [...pending.rewrittenDocs, ...didRewrittenDocs])
   }
 }
 

@@ -1,7 +1,7 @@
 // #197 宿主索引服务契约测试：扫描 / 持久化恢复 / 覆盖层 / 反链查询 /
 // 多根边界 / 生命周期。端口全注入（fake 内存文件系统），不依赖 vscode。
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { VaultIndexService, type VaultIndexScanPort, type VaultIndexStoragePort, type VaultTargetChangeEvent } from '../../src/host/vaultIndexService'
+import { VaultIndexService, normalizeSeparators, vaultIdentityToFsPath, type VaultIndexScanPort, type VaultIndexStoragePort, type VaultTargetChangeEvent } from '../../src/host/vaultIndexService'
 import { rootKeyOf } from '../../src/shared/vaultIndexSnapshot'
 
 beforeEach(() => {
@@ -2715,6 +2715,34 @@ describe('VaultIndexService：#556 T2 外部与跨根目标（绝对身份登记
     expect(itemsOf(back).map((i) => i.sourceRelPath)).toEqual(['源.md'])
   })
 
+  it('增量重扫（watcher 事件）后写入的文档：外部目标登记后重抽须接通（重建 resolver）', async () => {
+    // #556 收口回归钉：重扫路径的重抽若复用登记前的 resolver 闭包（foldIndex
+    // 快照不含新登记的外部目标），重抽 lookup 仍 miss——外部目标边在增量
+    // 重扫中恒断链（出链绝对身份快照/授权面读到空，集成「收口三面」用例
+    // 暴露）。首扫无此问题（用例 1）；本用例钉增量路径
+    const fs = makeFs({ 'C:/vault/占位.md': '# 占\n' })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 后写入：外部目标 + 引用文档（watcher 事件驱动增量重扫）
+    fs.files.set('D:/outside/笔记.md', '# 外\n')
+    fs.stats.set('D:/outside/笔记.md', { mtimeMs: 1_700_000_100_000, size: 4 })
+    fs.files.set('C:/vault/后写源.md', '# 源\n\n见 [[D:/outside/笔记.md]]。\n')
+    fs.stats.set('C:/vault/后写源.md', { mtimeMs: 1_700_000_100_000, size: 30 })
+    scan.emit('C:/vault/后写源.md')
+    await vi.advanceTimersByTimeAsync(2_000)
+    const out = await service.outlinksOf('C:/vault/后写源.md')
+    expect(out.status).toBe('ready')
+    if (out.status === 'ready') {
+      // 登记后重抽接通：resolvedTarget 为外部绝对身份（而非断链 null）
+      expect(out.items.map((i) => [i.targetFsPath, i.resolved])).toEqual([
+        ['D:/outside/笔记.md', true],
+      ])
+    }
+    // 绝对身份快照（授权面数据源）可见
+    expect(service.resolvedOutlinkTargetsOf('C:/vault/后写源.md')).toEqual(['D:/outside/笔记.md'])
+  })
+
   it('外部目标删除/不可达沿三态发布：deleted 有正证据、inaccessible 只 stale', async () => {
     const fs = makeFs({
       'C:/vault/源.md': '# 源\n\n见 [[D:/outside/笔记.md]]。\n',
@@ -2876,6 +2904,37 @@ describe('VaultIndexService：#556 T3 跳转侧补查查询与跨根反链合并
     fs.stats.set('C:/vault/私密/占位.md', { mtimeMs: 1_700_000_300_000, size: 4 })
     await ctx.service.verifyNow()
     expect(ctx.service.shortnameLookup('C:/vault/项目/来源.md', '目标.md')!.complete).toBe(false)
+  })
+
+  // ---- #556 收口：身份域 → 宿主 fsPath 转换契约（集成 s4 补查命中形态
+  // 断裂的根因钉住——跳转日志期望宿主反斜杠形态，索引身份是 `/` 抽象域，
+  // 宿主接线层转换；既有 `/` 形态 fixture 与真实宿主形态脱节曾掩盖断裂） ----
+
+  it('vaultIdentityToFsPath：`/` 身份域转宿主形态（Windows 反斜杠/POSIX 原样），与索引归一互逆', () => {
+    expect(vaultIdentityToFsPath('c:/Users/64487/目标笔记.md', true)).toBe('c:\\Users\\64487\\目标笔记.md')
+    expect(vaultIdentityToFsPath('c:/vault/子 目录/目标 二.md', true)).toBe('c:\\vault\\子 目录\\目标 二.md')
+    // POSIX：身份域即宿主域，恒等
+    expect(vaultIdentityToFsPath('/home/u/vault/目标.md', false)).toBe('/home/u/vault/目标.md')
+    // 互逆：转换结果再经索引归一回到同一身份（往返无损）
+    expect(normalizeSeparators(vaultIdentityToFsPath('c:/a/b.md', true))).toBe('c:/a/b.md')
+  })
+
+  it('shortnameLookup：真实 Windows 反斜杠根注册下候选仍为 `/` 身份域（转换责任在宿主接线层）', async () => {
+    // FakeFs 键域为 `/` 形态（NTFS 对两种分隔符形态同样接受——真实宿主
+    // 扫描端口返回磁盘真实形态，此处以 `/` 键 + 反斜杠根注册/查询模拟
+    // 「宿主反斜杠输入 × 索引身份域」的真实混布）
+    const fs = makeFs({
+      'c:/vault/子 目录/来源.md': '# 源\n',
+      'c:/vault/目标笔记.md': '# 标\n',
+    })
+    const { service } = makeService(fs, { isWindowsHost: true })
+    await service.initialize([{ fsPath: 'c:\\vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    const found = service.shortnameLookup('c:\\vault\\子 目录\\来源.md', '目标笔记.md')!
+    // 内部 API 契约：恒为身份域（`/` 分隔）——宿主接线层消费时转换
+    expect(found).toEqual({ candidates: ['c:/vault/目标笔记.md'], complete: true })
+    // 接线层转换后即跳转日志期望的宿主形态
+    expect(found.candidates.map((id) => vaultIdentityToFsPath(id, true))).toEqual(['c:\\vault\\目标笔记.md'])
   })
 
   it('跨根绝对目标反链：目标根分区外的来源根身份桶并入（#556 T2 移交）', async () => {

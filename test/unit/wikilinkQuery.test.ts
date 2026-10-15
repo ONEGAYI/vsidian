@@ -304,6 +304,19 @@ describe('planWikilinkInsertPath 三档（#556 T5：shortest / relative / absolu
     expect(insert).toBe('方案.md')
   })
 
+  it('shortest 跨目录目标被同目录无扩展名同名文件遮蔽：裸名拒后取显式 .md 短名（P2-4 梯级，短于相对形态）', () => {
+    // 目标 /root/资料/方案.md 跨目录；docDir /root/项目 存在无扩展文件
+    // 「方案」——裸名 [[方案]] 首候选直击遮蔽文件被拒；显式 [[方案.md]]
+    // 同目录候选未命中 → 短名补查唯一命中目标 → '方案.md' 梯级成立，
+    // 短于相对 '../资料/方案.md'（Markdown 显式扩展名语义）
+    const insert = planWikilinkInsertPath('/root/项目', posix.rootDir, posix.isWindowsHost, '/root/资料/方案.md', {
+      mode: 'shortest',
+      exists: existsOf(false, ['/root/项目/方案']),
+      lookupShortname: lookupOf(['/root/资料/方案.md']),
+    })
+    expect(insert).toBe('方案.md')
+  })
+
   it('shortest docDir 存在同名的其他 .md：统一解析先命中他文件 → 拒短名，退相对', () => {
     // 来源目录已有相对候选优先（相对优先规则）：[[方案]] 命中 /root/项目/方案.md
     // （非所选目标）——不因根内补查唯一而覆盖相对优先

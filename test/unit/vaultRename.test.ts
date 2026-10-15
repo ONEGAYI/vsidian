@@ -996,3 +996,55 @@ describe('vaultRename：#556 T4 短名保留与三形态决策', () => {
       .toBe('A [[keep]] B [rel](target.md) C [[C:/vault/moved/target.md]]\n')
   })
 })
+
+// ---- 真实宿主形态契约（集成 #556 T4 跨根用例失败的根因钉住）----
+// 真实宿主下三域形态混布：引用者 fsPath / 根 / moves 为宿主反斜杠形态，
+// 索引边表 resolvedTarget 为规范绝对身份（`/` 分隔——T2 契约）。既有用例
+// 全程 `/` 形态自洽，掩盖了混布形态的匹配断裂。
+
+describe('vaultRename：真实宿主形态（反斜杠 fsPath × 正斜杠身份）', () => {
+  const WS = 'c:\\ws'
+  const SECOND = 'c:\\ws-rename-second'
+  const TARGET_ID = 'c:/ws/改名目标.md'
+
+  it('跨根移动：引用者短名/mdlink/带锚边改写为明确绝对路径（省略/显式扩展名各自保持）', () => {
+    const text = [
+      '# 改名引用甲',
+      '',
+      '见 [[改名目标]] 与 [同目标](./改名目标.md)。',
+      '',
+      '带锚 [[改名目标#深处小节|别名]]。',
+      '',
+    ].join('\n')
+    const at = (needle: string): { start: number; end: number } => {
+      const start = text.indexOf(needle)
+      return { start, end: start + needle.length }
+    }
+    const moves = [{ oldFsPath: `${WS}\\改名目标.md`, newFsPath: `${SECOND}\\改名目标.md` }]
+    const docs = [refDoc(`${WS}\\rename-ref-a.md`, text, [
+      edge({ target: '改名目标', resolved: TARGET_ID, kind: 'wikilink', ...at('[[改名目标]]') }),
+      edge({ target: './改名目标.md', resolved: TARGET_ID, kind: 'mdlink', ...at('[同目标](./改名目标.md)') }),
+      edge({ target: '改名目标', resolved: TARGET_ID, kind: 'wikilink', anchor: '深处小节', ...at('[[改名目标#深处小节|别名]]') }),
+    ], WS)]
+    const result = planVaultRenameRewrites(
+      {
+        rootFsPaths: [WS, SECOND],
+        isWindowsHost: true,
+        moves,
+        // 旧世界 catalog 身份（/ 形态）——与 vaultIndex.shortnameLookup 同域
+        shortnameLookup: shortnamePort({ byBasename: { '改名目标.md': [TARGET_ID] } }),
+      },
+      docs,
+    )
+    expect(result.skipped).toEqual([])
+    expect(result.docs).toHaveLength(1)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe([
+      '# 改名引用甲',
+      '',
+      `见 [[c:/ws-rename-second/改名目标]] 与 [同目标](c:/ws-rename-second/改名目标.md)。`,
+      '',
+      `带锚 [[c:/ws-rename-second/改名目标#深处小节|别名]]。`,
+      '',
+    ].join('\n'))
+  })
+})

@@ -696,6 +696,14 @@ export function planWikilinkInsertPath(
     if (bare !== '' && bareNameResolvesToTarget(bare)) {
       rungs.push(bare)
     }
+    // 显式 .md 文件名梯级（P2-4，Markdown 显式扩展名语义）：裸名被同目录
+    // 同名无扩展文件遮蔽（首候选直击他文件）时，显式扩展名形态的候选序
+    // 不再被遮蔽（extname 非空单候选），经同款核对（含短名补查）命中
+    // 跨目录唯一目标——「方案.md」短于「../资料/方案.md」，遮蔽场景下
+    // 仍取到带扩展名的跨目录短名
+    if (bareNameResolvesToTarget(basename)) {
+      rungs.push(basename)
+    }
   }
   // 非 Markdown 不产生短名（补查只面向 Markdown）：同目录文件名即相对形态
   // 的退化形式（rel === 文件名），由相对梯级承载
@@ -737,8 +745,9 @@ export interface WikilinkInsertPathOptions {
    *  null；联想侧传索引清单数据面，R6 零 IO）。VaultLinkExistsPort 的同步
    *  收窄（本函数同步执行，不接受 Promise） */
   exists?: (fsPath: string) => string | null
-  /** 短名补查端口（最短档唯一性经索引数据面：candidates 为磁盘真实路径
-   *  形态，complete=false 时唯一候选不声明唯一——pending 不冒充命中） */
+  /** 短名补查端口（最短档唯一性经索引数据面：candidates 为端口给定形态
+   *  （内部经 ops.resolve 归一比对，形态域不敏感），complete=false 时唯一
+   *  候选不声明唯一——pending 不冒充命中） */
   lookupShortname?: (basename: string) => VaultLinkShortnameLookupResult | null
 }
 

@@ -1381,6 +1381,13 @@ describe('#556 T3：短名补查分态与绝对目标访问', () => {
     expect(out).toEqual({ ok: false, reason: 'not-found' })
   })
 
+  it('directTarget 绝对路径为目录（stat 命中但 isFile=false）→ not-found（P2-6：目录身份不通过）', async () => {
+    const h = directHarness()
+    h.ports.statFile = async () => ({ mtimeMs: 1, isFile: false })
+    const out = await readHoverDirectTarget({ fsPath: 'D:\\outside\\某个目录' }, h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'not-found' })
+  })
+
   it('directTarget 绝对路径越出根且无 statFile 端口 → escape（不可核实不放行，P1-1 边界保守）', async () => {
     const h = directHarness()
     const out = await readHoverDirectTarget({ fsPath: 'D:\\outside\\目标.md' }, h.ctx, h.ports)

@@ -96,7 +96,7 @@ import {
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetService } from './cssSnippetService'
-import type { VaultIndexService } from './vaultIndexService'
+import { vaultIdentityToFsPath, type VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
 import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator, shouldForwardHoverDocChange } from './hoverRefreshCoordinator'
@@ -2094,13 +2094,25 @@ export function createTextEditorProvider(
    *  vaultIndexService 的 catalog 倒排——provider 只做注入；R6：零 IO 内存
    *  查询，禁止点击时全库 fs 扫描）。索引不在场或来源根未就绪时返回
    *  undefined（补查不存在，解析行为与现状一致——不猜目标）。零候选与
-   *  索引无数据对消费方同为 not-found，不区分放行 */
+   *  索引无数据对消费方同为 not-found，不区分放行。候选形态在此转换为
+   *  宿主 fsPath（vaultIdentityToFsPath——索引身份是 `/` 分隔抽象域，
+   *  跳转/悬停/联想的打开目标与日志是 fsPath 语义场合；集成 #556 收口：
+   *  直接透传身份形态会在真实 Windows 宿主上断裂） */
   const shortnameLookupOf = (sourceFsPath: string): VaultLinkShortnamePort | undefined => {
     if (!vaultIndex) {
       return undefined
     }
-    return (basename) =>
-      vaultIndex!.shortnameLookup(sourceFsPath, basename) ?? { candidates: [], complete: true }
+    const isWin = process.platform === 'win32'
+    return (basename) => {
+      const found = vaultIndex!.shortnameLookup(sourceFsPath, basename)
+      if (!found) {
+        return { candidates: [], complete: true }
+      }
+      return {
+        candidates: found.candidates.map((id) => vaultIdentityToFsPath(id, isWin)),
+        complete: found.complete,
+      }
+    }
   }
 
   /** #556 T3（R8 探针结论接线）：面板装配点的绝对资源许可面推导——文档
@@ -3177,7 +3189,9 @@ export function createTextEditorProvider(
               statFile: async (fsPath: string) => {
                 try {
                   const stat = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
-                  return { mtimeMs: stat.mtime }
+                  // P2-6（#556 收口）：isFile 标记目录身份（directTarget
+                  // 存在性核验的文件类型口径——目录不通过）
+                  return { mtimeMs: stat.mtime, isFile: (stat.type & vscode.FileType.File) !== 0 }
                 } catch {
                   return null
                 }
@@ -5680,13 +5694,15 @@ async function executeLinkIntent(
   //——闭包内类型收窄失效，fragment 提前捕获
   const targetFragment = target.fragment
   for (const fsPath of target.candidates) {
-    const uri = vscode.Uri.file(fsPath)
-    try {
-      await vscode.workspace.fs.stat(uri)
-    } catch {
+    // 候选命中后经 statFileRealPath 归正（P2-3，与双链通道同口径）：探测与
+    // 打开目标取宿主真实形态（含文件类型核验），防止链接原文大小写漂移
+    // 经绝对路径门放大成身份漂移/同目标双开（NTFS 不敏感语义下 fold 不同
+    // 的形态会各开一个面板）
+    const real = await statFileRealPath(fsPath)
+    if (real === null) {
       continue
     }
-    await openDocTargetAt(fsPath)
+    await openDocTargetAt(real)
     return
   }
   // #556 T3 短名补查：doc 全候选未命中、目标仅含文件名且属 Markdown 语义

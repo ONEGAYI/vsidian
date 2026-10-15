@@ -89,9 +89,11 @@ export interface VaultLinkResolveContext extends VaultLinkPathContext {
   hasWorkspace: boolean
 }
 
-/** 短名补查端口结果（#556）：candidates 为命中目标的磁盘真实路径形态
- *  （端口持有真实身份，resolve 不做二次探测）；complete 表示端口的文件
- *  清单是否完整——不完整时唯一候选不得声明唯一（pending）。 */
+/** 短名补查端口结果（#556）：candidates 为端口给定形态——宿主接线层
+ *  （textEditorProvider.shortnameLookupOf）消费索引 `/` 身份域时转换为
+ *  宿主 fsPath（打开/日志/提示场合；vaultIdentityToFsPath），索引内部
+ *  消费（抽取/重判）保持身份域；resolve 不做二次探测。complete 表示
+ *  端口的文件清单是否完整——不完整时唯一候选不得声明唯一（pending）。 */
 export interface VaultLinkShortnameLookupResult {
   candidates: string[]
   complete: boolean
@@ -133,7 +135,7 @@ export function shortnameLookupKeyOf(
 /**
  * 短名补查结果映射（#556 T2 抽取为同步纯函数）：0 候选 not-found、多候选
  * ambiguous（无论清单是否完整，不归任一候选）、唯一且完整 target（端口
- * 给定的磁盘真实形态）、唯一但不完整 pending（不声明唯一）。与
+ * 给定的端口形态）、唯一但不完整 pending（不声明唯一）。与
  * resolveVaultLinkFile 的补查分支同一决策——索引抽取（同步）与跳转解析
  * （异步）共用，结果形态不因消费方分叉。
  */
@@ -160,7 +162,7 @@ export type VaultLinkFileResolution =
   | {
       /** 多个同名候选（#556）：不归任一候选，消费方提示补路径 */
       kind: 'ambiguous'
-      /** 端口给定的候选磁盘真实路径（提示补路径用，不猜目标） */
+      /** 端口给定的候选路径（提示补路径用，不猜目标；形态随端口实现域） */
       candidates: string[]
     }
   | {
@@ -271,7 +273,7 @@ export function planVaultLinkPath(
  * 符）且注入 lookupShortname 端口时，按完整 basename（无扩展名的双链
  * 语义补 `.md` 作查询键）查所属根内唯一同名 Markdown——0 候选 not-found、
  * 多候选 ambiguous、唯一但清单不完整 pending、唯一且完整 target（端口
- * 给定的磁盘真实形态，不做二次探测）。端口不注入时补查不存在。
+ * 的端口形态，不做二次探测）。端口不注入时补查不存在。
  * 大小写语义由 exists 端口的宿主文件系统裁决（见模块头注释）。
  */
 export async function resolveVaultLinkFile(

@@ -3281,6 +3281,9 @@ export interface OutlinksProbe {
     kind: OutlinkItemPayload['kind']
     anchor: string
     resolved: boolean
+    /** 路径行 DOM 文本（#556 收口：跨根/外部目标为绝对身份文本的断言
+     *  载体——用户看到的行 2 文字；面板未渲染/条目未挂载为 null） */
+    pathText: string | null
   }>
   /** 首个条目中心点命中自身（条目真实绘制且可点击） */
   itemPainted: boolean
@@ -5978,7 +5981,8 @@ function isOutlinksProbe(v: unknown): v is OutlinksProbe {
         (item.targetRelPath === null || isString(item.targetRelPath)) &&
         (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef' || item.kind === 'embed') &&
         isString(item.anchor) &&
-        typeof item.resolved === 'boolean',
+        typeof item.resolved === 'boolean' &&
+        (item.pathText === null || item.pathText === undefined || isString(item.pathText)),
     ) &&
     typeof v.itemPainted === 'boolean' &&
     typeof v.emptyPainted === 'boolean' &&

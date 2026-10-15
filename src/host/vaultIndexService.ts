@@ -366,6 +366,16 @@ export function normalizeSeparators(fsPath: string): string {
   return fsPath.replace(/\\/g, '/')
 }
 
+/** 规范绝对身份（索引域 `/` 分隔）→ 宿主 fsPath 形态（normalizeSeparators
+ *  的形态互逆：Windows 宿主反斜杠、POSIX 原样；大小写与内容不变）。宿主
+ *  接线层把索引身份用于「打开/探测/日志/提示」等 fsPath 语义场合前转换
+ *  （vscode.Uri.file(id).fsPath 的纯等价——集成 #556 收口钉住：跳转日志
+ *  期望宿主形态，直接透传索引 `/` 形态即断言失败）；索引与纯逻辑层不
+ *  感知（单一身份域不因此分叉）。 */
+export function vaultIdentityToFsPath(identity: string, isWindowsHost: boolean): string {
+  return isWindowsHost ? identity.replace(/\//g, '\\') : identity
+}
+
 export class VaultIndexService {
   private readonly roots = new Map<string, RootIndexState>()
   /** 按深度降序的根键列表（最具体根优先匹配） */
@@ -1837,15 +1847,19 @@ export class VaultIndexService {
       resolveAbsolute,
     })
     // 外部目标登记（#556 T2）：绝对路径目标（跨根/工作区外）stat 后登记
-    // entry；登记发生后断链边重抽一次（登记表就绪后命中）
+    // entry；登记发生后断链边重抽一次（登记表就绪后命中）。重抽须重建
+    // resolver——旧闭包的 foldIndex 快照建于登记前，不含新登记的外部
+    // 目标，复用则重抽 lookup 仍 miss（#556 收口实证：外部目标边在
+    // 增量重扫中恒断链，出链绝对身份快照与授权面读到空）
     if (await this.registerExternalTargets(state, missed) > 0 && edges.some((e) => e.resolvedTarget === null)) {
+      const reResolve = this.makeModelResolvers(state)
       edges = extractVaultEdges(rel, text, {
         docDir: this.dirname(fsPath),
         rootDir: state.fsPath,
         isWindowsHost: this.opts.isWindowsHost,
-      }, resolve, {
+      }, reResolve.resolve, {
         lookupShortname: this.shortnameLookupFor(state),
-        resolveAbsolute,
+        resolveAbsolute: reResolve.resolveAbsolute,
       })
     }
     state.model.files.set(rel, {
@@ -2805,6 +2819,7 @@ export class VaultIndexService {
         touched = true
       }
       // 遍 2：抽边（resolver 可见遍 1/1.5 登记的完整新清单——批内互链不断链）
+      const mdRels = new Set(mdLoads.map((l) => l.rel))
       const missed: string[] = []
       const { resolve, resolveAbsolute } = this.makeModelResolvers(state, missed)
       for (const load of mdLoads) {
@@ -2819,7 +2834,30 @@ export class VaultIndexService {
         state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
       }
       // 外部目标登记（#556 T2）：本批文档引用的未登记绝对目标 stat 后登记
-      await this.registerExternalTargets(state, missed)
+      const externalRegistered = await this.registerExternalTargets(state, missed)
+      // 登记后断链边重抽一次（#556 收口补齐——与扫描路径 rescanFile 的
+      // 登记后重抽同款语义：遍 2 抽边时登记表未就绪，绝对目标边以断链入
+      // 基线；增量泵此前无此重抽，外部目标边恒断链——出链绝对身份快照
+      // （localResourceRoots 授权面数据源）与跨根消费口都读到 null）。
+      // 只重抽边表里有断链边的本批文档（登记数 0 或全接通时不重解析）
+      if (externalRegistered > 0 && state.model.edges.some((e) => e.resolvedTarget === null && mdRels.has(e.source))) {
+        const reResolve = this.makeModelResolvers(state)
+        for (const load of mdLoads) {
+          if (!state.model.edges.some((e) => e.source === load.rel && e.resolvedTarget === null)) {
+            continue
+          }
+          state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(
+            extractVaultEdges(load.rel, load.text, {
+              docDir: this.dirname(load.fsPath),
+              rootDir: state.fsPath,
+              isWindowsHost: this.opts.isWindowsHost,
+            }, reResolve.resolve, {
+              lookupShortname: this.shortnameLookupFor(state),
+              resolveAbsolute: reResolve.resolveAbsolute,
+            }),
+          )
+        }
+      }
       // 遍 3（#269 目标归位重抽依赖者）：引用者的 will edit 落盘早于 rename
       // 应用，其 watcher 重扫若先于本批登记（泵与 did 通道在事件循环上竞态），
       // 断链边入基线后无事件重抽——新目标桶恒空，连续 rename 静默漏改写。
