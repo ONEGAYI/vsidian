@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "8e13e78fefe87ca6b7cc7325aa92e887c95c1ba2",
-      "ref": "8e13e78f",
+      "sha": "1a1c71a53dd6457b38995b3e3fb501a030010f80",
+      "ref": "HEAD",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -955,6 +955,54 @@
         "test/browser/addonT11Ui.mjs"
       ],
       "introduced": "#360（T11）"
+    },
+    {
+      "id": "paste-rules-register",
+      "group": "paste-conversion",
+      "title": "声明式粘贴规则注册（enable 生命周期）",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "host"
+      ],
+      "purpose": "组件在宿主运行生命周期（enable 上下文的 paste 面）登记可序列化粘贴转换规则：全部已打开与新打开的编辑器页面共用同一组有效规则，在富文本粘贴的 HTML→Markdown 遍历中消费——来源特化元素（如带私有属性的 span）可恢复为 Markdown 链接等结构，来源识别不进入内核。",
+      "semantics": {
+        "modes": "只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。",
+        "coordinates": "规则语言为可序列化数据：基础匹配（标签名相等、属性存在、属性值相等——缺失与空串区分）＋取值槽（元素文本/指定属性/子内容内置转换结果）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则、条件组合与嵌套转换属后续批次（#542）——未知字段显式拒绝，不静默当成基础声明。",
+        "lifecycle": "有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。每组件至多 256 条、表达式嵌套深度至多 16（后续批次消费）、单次粘贴求值步数至多 100,000（超限停用规则、内置转换继续）。",
+        "errors": "四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段，含后续批次的正则条件嵌套节点在未实现阶段的显式拒绝）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonPasteRules.ts",
+          "symbols": [
+            "AddonPasteRuleDeclaration",
+            "AddonPasteRuleMatch",
+            "AddonPasteRuleOutput",
+            "AddonPasteSlot",
+            "AddonPasteRulesRegisterResult",
+            "AddonPasteRulesSnapshot",
+            "ADDON_PASTE_RULES_MAX_PER_ADDON",
+            "ADDON_PASTE_RULES_MAX_DEPTH",
+            "ADDON_PASTE_RULES_EVAL_STEP_BUDGET",
+            "validateAddonPasteRuleDeclarations",
+            "orderAddonPasteRules"
+          ]
+        },
+        {
+          "module": "src/host/addons/addonRegistry.ts",
+          "symbols": [
+            "AddonPasteRulesContextApi"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonPasteRules.test.ts",
+        "test/unit/addonRuntimePasteRules.test.ts",
+        "test/unit/htmlToMarkdownPasteRules.test.ts",
+        "test/unit/richPasteAddonRules.test.ts",
+        "test/browser/addonPasteRules.mjs"
+      ],
+      "introduced": "#541（T01）"
     }
   ],
   "declarations": {
@@ -977,13 +1025,14 @@
     "src/host/addons/addonRegistry.ts": {
       "AddonDefinition": "/** 组件注册传入的定义（T02 形状：setup 轻量接入 + enable 运行装配） */\nexport interface AddonDefinition {\n  /** 轻量接入回调：注册成功时在本接入代次恰好调用一次 */\n  setup?(context: AddonSetupContext): void\n  /** 运行装配回调：按用户功能开关开启时调用；关闭或故障时释放所属注册 */\n  enable?(context: AddonEnableContext): void\n}",
       "AddonSetupContext": "/** 轻量接入上下文（setup 生命周期：设置定义 + 自己的设置入口 + 设置通信。\n *  普通功能停用后保留；故障暂停时回收组件代码——迟到注册被拒） */\nexport interface AddonSetupContext extends AddonRegistrationContext {\n  /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */\n  readonly settings: AddonSettingsContextApi\n  /** #404 组件数据目录（globalStorage 语义的隔离可写目录 + 文件监听；\n   *  富结构数据（规则对象等）归本面，不并入设置存储的一层边界） */\n  readonly storage: AddonStorageFacet\n  /** 设置生命周期通道（归 setup 所在的生命周期） */\n  readonly channel: AddonChannelRegistry\n}",
-      "AddonEnableContext": "/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 清理回调。\n *  开启时装配；关闭或故障时释放所属注册） */\nexport interface AddonEnableContext extends AddonRegistrationContext {\n  /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，\n   *  第二个登记拒绝） */\n  readonly pages: {\n    registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle\n  }\n  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */\n  readonly storage: AddonStorageFacet\n  /** 运行生命周期通道（停用即注销） */\n  readonly channel: AddonChannelRegistry\n  /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
+      "AddonEnableContext": "/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 粘贴规则 +\n *  清理回调。开启时装配；关闭或故障时释放所属注册） */\nexport interface AddonEnableContext extends AddonRegistrationContext {\n  /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，\n   *  第二个登记拒绝） */\n  readonly pages: {\n    registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle\n  }\n  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */\n  readonly storage: AddonStorageFacet\n  /** 运行生命周期通道（停用即注销） */\n  readonly channel: AddonChannelRegistry\n  /** #541 T01 粘贴转换规则登记（有效规则广播到已开与新开编辑器页面，\n   *  在富文本粘贴的 HTML→Markdown 遍历中消费） */\n  readonly paste: AddonPasteRulesContextApi\n  /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
       "AddonRegistrationHandle": "/** 注册面返回的释放句柄（重复 dispose 无害；迟到登记被拒时为 no-op） */\nexport interface AddonRegistrationHandle {\n  dispose(): void\n}",
       "AddonChannelRegistry": "/** 通道注册面（setup/enable 上下文同形状；同名 topic 重复注册拒绝） */\nexport interface AddonChannelRegistry {\n  handle(topic: string, handler: AddonChannelHandler): AddonRegistrationHandle\n}",
       "AddonChannelHandler": "/** 通道处理器（宿主组件代码注册；载荷与结果都是 JSON 数据） */\nexport type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknown>",
       "AddonSettingsContextApi": "/**\n * 设置能力面（setup 生命周期常驻——普通停用后保留；技术方案 5.5 形状）。\n * T02 先立 registerPage/registerDefinitions；T04 起接入读写与事件。\n */\nexport interface AddonSettingsContextApi {\n  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */\n  registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle\n  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings）。\n   *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段\n   *  引用其组键——引用未声明组键或组键重复整批拒绝 */\n  registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle\n  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */\n  get(): AddonSettingsGetSnapshot\n  /** 单键来源（未定义键为 undefined） */\n  getSource(key: string): AddonSettingSource | undefined\n  /** 按批校验并保存到指定层（失败不虚报；变化事件只在持久化成功后发出） */\n  update(scope: 'user' | 'workspace', patch: Record<string, unknown>): Promise<AddonSettingsUpdateResult>\n  /** 清除工作区对某键的覆盖（恢复继承用户默认，不是恢复出厂值） */\n  clearWorkspaceOverride(key: string): Promise<AddonSettingsUpdateResult>\n  /** 订阅成功保存后的变化（所属组件设置生命周期内有效） */\n  onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle\n}",
       "AddonSettingsGetSnapshot": "/** 设置读取快照（settings.get() 的结果：生效值与来源） */\nexport interface AddonSettingsGetSnapshot {\n  readonly values: Readonly<Record<string, AddonSettingValue>>\n  readonly sources: Readonly<Record<string, AddonSettingSource>>\n}",
-      "AddonSettingsChangeEventData": "/** 设置变化事件（settings.onChanged 的载荷） */\nexport interface AddonSettingsChangeEventData {\n  readonly scope: 'user' | 'workspace'\n  readonly keys: readonly string[]\n}"
+      "AddonSettingsChangeEventData": "/** 设置变化事件（settings.onChanged 的载荷） */\nexport interface AddonSettingsChangeEventData {\n  readonly scope: 'user' | 'workspace'\n  readonly keys: readonly string[]\n}",
+      "AddonPasteRulesContextApi": "/**\n * 粘贴规则注册面（#541 T01，enable 生命周期；声明式粘贴转换规格 §4.1）。\n * 声明为可序列化数据（形状见 shared/addonPasteRules）；来源组件身份由\n * 平台注入，作者不能冒充其他组件。整批校验：批内 ID 重复、未知操作或\n * 超预算声明整批拒绝（普通 API 拒绝不算组件故障），不部分安装。停用/\n * 故障/代次结束撤回本生命周期全部规则。\n */\nexport interface AddonPasteRulesContextApi {\n  /**\n   * 登记一批粘贴转换规则；返回普通注册结果与释放句柄（dispose 只移除\n   * 本批，重复调用无害）。已终结代次的迟到注册拒绝 released。\n   */\n  registerRules(declarations: readonly unknown[]): AddonPasteRulesRegisterResult\n}"
     },
     "src/shared/officialAddons.ts": {
       "OfficialAddonEntry": "/** 官方附加组件登记条目（extensionId 是判定键；label 备注不参与判定） */\nexport interface OfficialAddonEntry {\n  /** 官方组件的 VSCode 扩展 ID（publisher.name） */\n  readonly extensionId: string\n  /** 维护备注（用途或发布仓线索；仅文档性质） */\n  readonly label?: string\n}",
@@ -1130,6 +1179,19 @@
       "AddonUiButtonDefinition": "/** 组件按钮注册形状（sdk.ui.registerButton 的入参） */\nexport interface AddonUiButtonDefinition {\n  /** 组件内局部 ID（无点号；命名空间前缀由平台注入） */\n  id: string\n  /** 用户可见标题（自由文本——aria/提示承载；组件文案不进 Vsidian 内置字典；\n   *  封顶 ADDON_DISPLAY_TEXT_MAX，超限注册拒绝——#395 P3） */\n  label: string\n  /** 挂载槽位（缺省 toolbar；白名单见 ADDON_UI_BUTTON_SLOTS） */\n  slot?: AddonUiButtonSlot\n  /** 生效模式（缺省 both；不匹配模式的按钮从挂载点撤下） */\n  mode?: BindingMode\n  /** 槽内排序键（缺省 0，稳定排序） */\n  order?: number\n  /** 挂接的命令局部 ID（点击经命令体系执行——须为本组件已注册命令） */\n  command?: string\n  /** 按钮显示文本（缺省 label；单字符/emoji/短词皆可；封顶同 label） */\n  iconText?: string\n}",
       "AddonUiPanelDefinition": "/** 组件面板注册形状（sdk.ui.registerPanel 的入参；面板宿主容器是平台\n *  dock——定义形状上无挂载位置字段，界面接管在结构上不可表达） */\nexport interface AddonUiPanelDefinition {\n  /** 组件内局部 ID（无点号） */\n  id: string\n  /** 面板标题（自由文本——平台面板标题栏展示；封顶 ADDON_DISPLAY_TEXT_MAX，\n   *  超限注册拒绝——#395 P3） */\n  title: string\n  /** 生效模式（缺省 both；不匹配模式的面板强制关闭并回收挂载） */\n  mode?: BindingMode\n  /** 面板打开时调用（平台提供内容根元素；迟到结果落进已关闭面板的 root\n   *  不可见——root 已脱挂） */\n  mount(root: unknown, target: AddonUiTargetGetter): void\n  /** 面板关闭时调用（可选；重复释放无害） */\n  unmount?(root: unknown): void\n}",
       "AddonUiTargetGetter": "/** 目标句柄获取器（按钮回调与面板 mount 收到）：每次调用动态解析**当前\n *  活动视图**（焦点所在的嵌入内部 Live 或主正文——T06 句柄语义：在引用\n *  B 中操作归 B 不误改父 A）；视图不在场（面板销毁/阅读态只读时）null */\nexport type AddonUiTargetGetter = () => AddonViewHandle | null"
+    },
+    "src/shared/addonPasteRules.ts": {
+      "AddonPasteRuleDeclaration": "/** 作者提交的规则声明（来源组件与代次由平台注入，声明不带身份字段） */\nexport interface AddonPasteRuleDeclaration {\n  /** 组件内稳定规则 ID（禁点号——不伪造跨组件身份） */\n  readonly id: string\n  /** 可选整数优先级（缺省 0；排序见 orderAddonPasteRules） */\n  readonly priority?: number\n  readonly match: AddonPasteRuleMatch\n  readonly output: AddonPasteRuleOutput\n}",
+      "AddonPasteRuleMatch": "/** 基础匹配：标签名相等 + 属性条件全与（条件组合 all/any/not 属 T02） */\nexport interface AddonPasteRuleMatch {\n  /** 标签名（大写形态与 DOM tagName 对齐；校验时规整） */\n  readonly tag: string\n  /** 属性条件列表（全部满足才匹配；至多 8 条） */\n  readonly attributes?: readonly AddonPasteRuleAttributeCondition[]\n}",
+      "AddonPasteRuleOutput": "/** 产出：Markdown 结构模板或显式丢弃（空产出只有显式丢弃才算成功） */\nexport type AddonPasteRuleOutput =\n  | {\n    readonly kind: 'template'\n    /** 模板中的 {{name}} 引用槽；字面部分是作者声明的静态 Markdown 结构 */\n    readonly template: string\n    readonly slots: Readonly<Record<string, AddonPasteSlot>>\n  }\n  | { readonly kind: 'discard' }",
+      "AddonPasteSlot": "/** 模板槽：url=true 经现有 safeUrl 策略（children 来源无 URL 语义，拒绝） */\nexport interface AddonPasteSlot {\n  readonly source: AddonPasteSlotSource\n  readonly url?: boolean\n}",
+      "AddonPasteRulesRegisterResult": "/** 注册结果（普通 API 拒绝不算组件故障；dispose 重复调用无害） */\nexport type AddonPasteRulesRegisterResult =\n  | { ok: true; dispose(): void }\n  | { ok: false; reason: 'invalid-declaration' | 'duplicate-id' | 'too-many' | 'released'; detail?: string }",
+      "AddonPasteRulesSnapshot": "/** 广播到编辑器页面的有效规则快照（version 单调递增，内容等值不递增） */\nexport interface AddonPasteRulesSnapshot {\n  readonly version: number\n  readonly rules: readonly AddonPasteRule[]\n}",
+      "ADDON_PASTE_RULES_MAX_PER_ADDON": "/** 规则声明每组件数量上限（规格 §4.4：每组件至多 256 条） */\nexport const ADDON_PASTE_RULES_MAX_PER_ADDON = 256",
+      "ADDON_PASTE_RULES_MAX_DEPTH": "/** 表达式嵌套深度上限（T02 消费；常量随本模块集中定义并测试边界） */\nexport const ADDON_PASTE_RULES_MAX_DEPTH = 16",
+      "ADDON_PASTE_RULES_EVAL_STEP_BUDGET": "/** 每次粘贴累计规则/表达式求值步数上限（超限停用规则，内置转换继续） */\nexport const ADDON_PASTE_RULES_EVAL_STEP_BUDGET = 100_000",
+      "validateAddonPasteRuleDeclarations": "/**\n * 整批校验（规格 §4.1：批内 ID 重复、非法正则、未知操作或超预算声明\n * 整批拒绝，不部分安装）。输入为作者原始声明（unknown）；输出为规整后\n * 的规则（addonId 由宿主注入，不在此伪造）。\n */\nexport function validateAddonPasteRuleDeclarations(\n  declarations: readonly unknown[],\n  context: AddonPasteRuleValidationContext = {},\n): AddonPasteRuleValidationResult {\n  if (!Array.isArray(declarations)) {\n    return { ok: false, reason: 'invalid-declaration', detail: 'declarations must be an array' }\n  }\n  if (declarations.length + (context.currentCount ?? 0) > ADDON_PASTE_RULES_MAX_PER_ADDON) {\n    return { ok: false, reason: 'too-many', detail: `每组件至多 ${ADDON_PASTE_RULES_MAX_PER_ADDON} 条规则` }\n  }\n  const rules: Omit<AddonPasteRule, 'addonId'>[] = []\n  const seen = new Set<string>(context.existingIds ?? [])\n  for (const [index, raw] of declarations.entries()) {\n    if (!isObject(raw)) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条声明须为对象` }\n    const unknown = hasOnlyKeys(raw, ['id', 'priority', 'match', 'output'])\n    if (unknown) return { ok: false, reason: 'invalid-declaration', detail: `声明不支持字段 '${unknown}'（条件/嵌套属后续版本）` }\n    if (typeof raw.id !== 'string' || !RULE_ID_PATTERN.test(raw.id) || raw.id.length > RULE_ID_LIMIT) {\n      return { ok: false, reason: 'invalid-declaration', detail: `规则 ID 非法：${String(raw.id)}` }\n    }\n    if (seen.has(raw.id)) {\n      return { ok: false, reason: 'duplicate-id', detail: `规则 ID 重复：${raw.id}` }\n    }\n    let priority = 0\n    if (raw.priority !== undefined) {\n      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority) || Math.abs(raw.priority) > PRIORITY_LIMIT) {\n        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为 |n|≤${PRIORITY_LIMIT} 的整数：${String(raw.priority)}` }\n      }\n      priority = raw.priority\n    }\n    const match = validateMatch(raw.match)\n    if (!match.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${match.detail}` }\n    const output = validateOutput(raw.output)\n    if (!output.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${output.detail}` }\n    seen.add(raw.id)\n    rules.push({ id: raw.id, priority, match: match.match, output: output.output })\n  }\n  return { ok: true, rules }\n}",
+      "orderAddonPasteRules": "/**\n * 有效规则确定性排序（规格 §4.3）：优先级降序、组件稳定 ID 升序、规则\n * 稳定 ID 升序；缺省优先级 0。顺序不取决于异步页面脚本装载先后——宿主\n * 构造快照与页面求值共用本函数。\n */\nexport function orderAddonPasteRules(rules: readonly AddonPasteRule[]): readonly AddonPasteRule[] {\n  return [...rules].sort((a, b) =>\n    b.priority - a.priority ||\n    (a.addonId < b.addonId ? -1 : a.addonId > b.addonId ? 1 : 0) ||\n    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),\n  )\n}"
     }
   },
   "releases": [
