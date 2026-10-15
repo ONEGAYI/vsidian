@@ -1282,7 +1282,7 @@ describe('#553 详情自绘页优先：首屏形态与打开语义', () => {
     openSettingsAreaPage(h)
     h.dispatch(customAddonsState(ADDON_ID))
     h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
-    context.deliverLocateTarget({ kind: 'def', key: 'flag' })
+    context.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'flag' })
     // 切到无自绘页组件 B：详情为整页表单，host 移出分页内容（内容保留不销毁）
     h.dispatch(addonsState([
       { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true },
@@ -1292,7 +1292,7 @@ describe('#553 详情自绘页优先：首屏形态与打开语义', () => {
     expect(h.parent.querySelector('[data-addon-setting="flag"]')).toBeTruthy()
     expect(h.parent.contains(host)).toBe(false)
     expect(host.contains(mounted)).toBe(true)
-    expect(context.currentLocateTarget()).toBeNull()
+    expect(context.currentLocateTarget(ADDON_ID)).toBeNull()
     // 无自绘页组件不触发 openAddonPage
     expect(h.sent.filter((m) => (m as { kind?: string; addonId?: string }).kind === 'addons.openAddonPage' && (m as { addonId: string }).addonId === 'b.plain')).toEqual([])
   })
@@ -1379,7 +1379,7 @@ describe('#553 设置页上下文交付（作用域与定位目标）', () => {
     h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
     openSettingsAreaPage(h)
     locateByAddonSearch(h, '开关项')
-    expect(context.currentLocateTarget()).toEqual({ kind: 'def', key: 'flag' })
+    expect(context.currentLocateTarget(ADDON_ID)).toEqual({ kind: 'def', key: 'flag' })
     // 自绘页视图保持（平台不切回表单、不描表单行——落点交给组件）
     expect(h.parent.querySelector('.vsidian-addons-detail-tab')!.getAttribute('aria-selected')).toBe('true')
     expect(h.parent.querySelector('.vsidian-settings-item-located')).toBeNull()
@@ -1394,17 +1394,22 @@ describe('#553 设置页上下文交付（作用域与定位目标）', () => {
     }]))
     locateByAddonSearch(h, '开关项')
     expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: ADDON_ID })
-    expect(context.currentLocateTarget()).toBeNull()
+    expect(context.currentLocateTarget(ADDON_ID)).toBeNull()
     // 宿主应答（open + 挂载）：挂起目标交付
     h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
-    expect(context.currentLocateTarget()).toEqual({ kind: 'def', key: 'flag' })
+    expect(context.currentLocateTarget(ADDON_ID)).toEqual({ kind: 'def', key: 'flag' })
   })
 
-  it('样式契约：详情双视图页签归档（pill 容器 + 选中态 activeSelection 规则在场）', async () => {
+  it('样式契约：详情双视图页签归档（pill 容器 + 选中态 activeSelection 规则在场）；页签焦点环特例 1px/offset 1px（ui-patterns §1.6 登记——作用域标签同款，仅选中态呈现）', async () => {
     const { readFileSync } = await import('node:fs')
     const css = readFileSync('src/webview/settingsPage.css', 'utf8')
     expect(css).toMatch(/\.vsidian-addons-detail-tabs\s*\{[^}]*display:\s*inline-flex/)
     expect(css).toMatch(/\.vsidian-addons-detail-tab\s*\{[^}]*border-radius:\s*6px/)
     expect(css).toMatch(/\.vsidian-addons-detail-tab\[aria-selected='true'\]\s*\{[^}]*background:\s*var\(--vscode-list-activeSelectionBackground/)
+    // #555 P3：页签焦点环档位登记（ui-patterns §1.6 特例）——详情页签与
+    // 作用域标签同为 1px outline + offset 1px，且只对选中态生效（未选中
+    // 页签的焦点环走全局 button:focus-visible 2px 档）
+    expect(css).toMatch(/\.vsidian-addons-detail-tab\[aria-selected='true'\]:focus-visible\s*\{\s*outline:\s*1px solid var\(--vscode-focusBorder[^;]*;\s*outline-offset:\s*1px/)
+    expect(css).toMatch(/\.vsidian-addons-scope-tab\[aria-selected='true'\]:focus-visible\s*\{\s*outline:\s*1px solid var\(--vscode-focusBorder[^;]*;\s*outline-offset:\s*1px/)
   })
 })

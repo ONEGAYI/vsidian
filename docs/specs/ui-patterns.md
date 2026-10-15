@@ -67,7 +67,7 @@
 
 ### 1.6 焦点环
 
-全局 `:focus-visible`：`outline: 2px solid var(--vscode-focusBorder)`、`offset 3px`。特例：悬停提示小卡片用 `1px`（可选中文字的紧凑卡，不抢内容）。新元素默认走全局规则，不自带焦点样式。
+全局 `:focus-visible`：`outline: 2px solid var(--vscode-focusBorder)`、`offset 3px`。特例：悬停提示小卡片用 `1px`（可选中文字的紧凑卡，不抢内容）；设置页的选中态页签（作用域标签 `.vsidian-addons-scope-tab[aria-selected='true']` 与详情双视图页签 `.vsidian-addons-detail-tab[aria-selected='true']`）用 `1px + offset 1px` 且仅选中态呈现焦点环（#353 引入、#553 沿用——pill 页签自带 activeSelection 底色与外壳描边，2px 环叠底色过重；契约由 `addonSettingsArea.test.ts` 样式契约用例钉住）。新元素默认走全局规则，不自带焦点样式。
 
 ## 2. 设置页元素模式
 

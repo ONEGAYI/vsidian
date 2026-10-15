@@ -134,6 +134,12 @@ export class AddonRuntime {
   private settingsOpenAddon: string | undefined
   /** #353 T04 基础设置区当前打开的组件（定义驱动的平台控件区） */
   private settingsAreaAddon: string | undefined
+  /** #555 重试窗口期的详情恢复意图：手动重试先释放旧注册（release 清
+   *  settingsAreaAddon），重新注册成功前记住「重试发起时详情在场」——
+   *  重注册成功恢复（settingsState 推送回显详情，自绘页经 webview 渲染
+   *  对账自动重开，见 docs/specs/addon-settings-detail.md §2 故障行）；
+   *  显式关闭丢弃；重试失败保留（重试可再发起——再次成功仍恢复） */
+  private pendingDetailRestore: string | undefined
 
   constructor(private readonly ports: AddonRuntimePorts) {}
 
@@ -251,7 +257,7 @@ export class AddonRuntime {
   // ---- #353 T04 基础设置区（平台定义驱动；停用与故障后保留） ----
 
   /**
-   * 打开某组件的基础设置区（双标签作用范围 + 平台基础控件 + 自定义页
+   * #353 T04 打开某组件的基础设置区（双标签作用范围 + 平台基础控件 + 自定义页
    * 入口）。有设置定义或有设置页入口即可打开；故障暂停时定义仍在
    * （ADR Q23：已有定义时平台供基础控件供用户修正参数）——仅「无定义
    * 且无自定义页」或未注册拒绝。
@@ -266,11 +272,23 @@ export class AddonRuntime {
     return 'ok'
   }
 
-  /** 关闭基础设置区（重复关闭无害） */
+  /** 关闭基础设置区（重复关闭无害）。#555：显式关闭同时丢弃重试详情恢复
+   *  意图（用户已表明不要这个详情——重试成功也不再自动打开） */
   closeSettingsArea(): void {
+    this.pendingDetailRestore = undefined
     if (this.settingsAreaAddon === undefined) return
     this.settingsAreaAddon = undefined
     this.notify()
+  }
+
+  /** #555 手动重试发起（wiring 的 retry 入口在释放旧注册前调用）：详情
+   *  打开指向该组件时记录恢复意图。重试失败（无重注册到达）意图保留
+   *  ——用户再次发起重试成功后仍恢复；详情已撤（上次 release 已清空，
+   *  settingsAreaAddon 不再指向该组件）时不覆盖既有意图 */
+  preserveSettingsDetailForRetry(addonId: string): void {
+    if (this.settingsAreaAddon === addonId) {
+      this.pendingDetailRestore = addonId
+    }
   }
 
   /** 基础设置区当前打开的组件 ID（无打开项为 undefined） */
@@ -431,6 +449,7 @@ export class AddonRuntime {
     for (const addonId of [...this.records.keys()]) {
       this.releaseGeneration(addonId)
     }
+    this.pendingDetailRestore = undefined
     this.listeners.clear()
   }
 
@@ -460,6 +479,17 @@ export class AddonRuntime {
       return
     }
     this.syncRunState(record)
+    // #555 重试成功重新注册：消费详情恢复意图——重试发起时详情在场则恢复
+    // 打开态（openSettingsArea 语义：有定义或有页才可打开；新注册形态变化
+    // 为无设置能力时空壳详情不恢复）。故障中的恢复与正常路径一致（faulted
+    // 期间定义保留——排障块与基础控件可承接，ADR Q23）
+    if (this.pendingDetailRestore === addonId) {
+      this.pendingDetailRestore = undefined
+      const capable = this.ports.settings.hasDefinitions(addonId) || record.settingsPages.length > 0
+      if (this.settingsAreaAddon === undefined && capable) {
+        this.settingsAreaAddon = addonId
+      }
+    }
     this.notify()
   }
 

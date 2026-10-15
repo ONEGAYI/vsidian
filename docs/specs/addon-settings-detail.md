@@ -18,10 +18,10 @@
 | --- | --- |
 | 打开详情（有自绘页、未故障） | `renderSettingsArea` 渲染时自动上送 `addons.openAddonPage`（`reconcileAddonPage`，转移守卫幂等——应答未达期间重复推送不重发，防 `settingsGeneration` 世代抖动）；宿主推 `addon.load` 指令，工厂装载后挂载区并入详情首屏 |
 | 已开重开 / addonPage.ready 对账 | `openAddonSettingsPage === addonId` 即挂载呈现（already-loaded 幂等由装载器既有机制兜底） |
-| 切换组件 A → B（B 有页） | 详情 B 渲染自动 open B；宿主 `settingsOpenAddon = B` → 指令对账 unload A / load B；共享挂载容器 `addonSettingsHost` 单份搬运（A 的 mountRoots 随 releaseLoad 移除） |
+| 切换组件 A → B（B 有页） | 详情 B 渲染**先上送 `addons.closeAddonPage` 撤 A、再上送 `addons.openAddonPage` 开 B**（#555 修复：此前只发 open——宿主 `openSettingsPage(B)` 直接覆盖单一 `settingsOpenAddon`，A 的 unload 永不推出，装载器侧新旧组件并存）；close 先于 open 的发送顺序使宿主对账 desired 依次经 null → B，unload A / load B 指令顺序天然正确；共享挂载容器 `addonSettingsHost` 单份搬运（A 的 mountRoots 随 releaseLoad 移除）。切换窗口期（close 应答已到、load B 未到）详情渲染自绘页视图但挂载区暂空——收敛正确终态即可 |
 | 切换组件 A → B（B 无页） | `reconcileAddonPage` 上送 `addons.closeAddonPage` 撤下 A 的残留挂载（单一组件身份——不留隐身装载）；详情 B 为整页表单 |
 | 关闭详情（返回组件列表） | `addons.settingsClose` 与 `addons.closeAddonPage` 同发（详情即页——不再保留无详情的裸挂载态；T02 回退挂载渲染保留为瞬态/安全网路径） |
-| 故障 | 不自动开页（请求标记清空）；恢复推送后再次自动开页（重试成功的再装载入口） |
+| 故障 | 不自动开页（请求标记清空）；恢复推送后再次自动开页（重试成功的再装载入口）。重试的详情恢复（#555）：宿主 runtime 在重试入口释放旧注册前记录「详情恢复意图」（`preserveSettingsDetailForRetry`——仅当重试发起时详情指向该组件）；重新注册成功且新注册仍有设置能力（有定义或有页）即恢复 `settingsAreaAddon` 并推送（webview 经 settingsState 回显详情，自绘页走上面的自动开页链）；显式关闭详情丢弃意图，重试失败意图保留（重试可再发起——再次成功仍恢复），无设置能力的新注册不恢复（空壳详情不出现），普通注销（无重试意图）行为不变 |
 
 ## 3. 页面上下文（SDK `settingsContext` 面）
 
@@ -45,13 +45,13 @@
   └─ 目标组件详情已开 → deliverLocateToPage（立即）
 deliverLocateToPage（有自绘页且未故障时）：
   detailView = 'page'（视图保持/切回自绘页——平台不切回自己的表单）
-  settingsContext.deliverLocateTarget({ kind, key }) → runtime 广播 → facet 订阅者
+  settingsContext.deliverLocateTarget(addonId, { kind, key }) → runtime 定向交付（目标组件）→ facet 订阅者
 ```
 
 - 无自绘页组件沿用既有表单 located 描边 + 滚动（#472 语义不动）。
-- 定位目标在 runtime 内按「最新一份」持有，直到被替换或清除（详情关闭/切换组件时 `deliverLocateTarget(null)`——不把上一组件的目标串给下一组件）；不设一次性消费时限（慢装载由订阅回放覆盖）。页面重装载会重新收到当前目标（罕见且无害，已知边界）。
+- 定位目标在 runtime 内按「最新一份」持有并记录归属组件（addonId），直到被替换或清除（详情关闭/切换组件时 `clearLocateTarget()`——不把上一组件的目标串给下一组件）；不设一次性消费时限（慢装载由订阅回放覆盖）。页面重装载会重新收到当前目标（罕见且无害，已知边界）。
 - 定位交付不做等值去重：重复定位（用户重复点击同一搜索命中）是有效信号，组件需据此重新滚动/高亮，幂等处理由组件自行承担（与 `applyScope` 的「等值不分发」口径刻意不同）。
-- 定位广播面向全部组件订阅者集（不分 addonId）：挂载容器单份——同一时刻至多一个组件挂载，单容器约束下不存在跨组件串扰；若未来支持多组件同时挂载，需收紧为按 addonId 定向。
+- 定位交付**按 addonId 定向**（#555 修复：此前向全部组件订阅者集广播——切换窗口期旧组件未及卸载时会收到别人的目标，归属正确性失守）；目标组件未装载时目标按归属缓存，其装载后经「订阅即回放」补投；查询（`locateTarget()`）同样按归属过滤——组件只看到自己的目标，null 清除只投给上一归属组件。
 - 全局搜索索引不新增内容：继续只索引已注册定义/分组（#472 边界）——规则文件与组件私有业务数据不进索引。
 
 ## 4. 明确不包含
@@ -71,4 +71,4 @@ deliverLocateToPage（有自绘页且未故障时）：
 
 ## 6. 验收对照
 
-见票面 #553 验收标准；单测（`addonSettingsArea.test.ts` #553 组、`addonPageLoader.test.ts` #553 组）、浏览器（`addonSettingsContext.mjs`）、门禁（page-settings-context 条目 + 基线重锚）构成证据链。人工验收项登记于 `manual-verification.md`。
+见票面 #553 验收标准；单测（`addonSettingsArea.test.ts` #553 组、`addonPageLoader.test.ts` #553 组、`addonSettingsLifecycle.test.ts` #555 评审二轮组——切换卸载/定向定位/重试恢复的生产模块链）、浏览器（`addonSettingsContext.mjs`）、门禁（page-settings-context 条目 + 基线重锚）构成证据链。人工验收项登记于 `manual-verification.md`。

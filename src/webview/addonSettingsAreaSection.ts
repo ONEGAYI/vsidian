@@ -205,7 +205,7 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
         this.detailView = 'page'
         this.openPageRequested = undefined
         this.closePageRequested = undefined
-        this.settingsContext?.deliverLocateTarget(null)
+        this.settingsContext?.clearLocateTarget()
       }
       this.settingsState = message
       // #472 挂起定位消费：目标组件设置区已开（settingsOpen 应答到达）——
@@ -246,15 +246,17 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
   }
 
   /** #553 定位目标交给自绘页（有自绘页且未故障时）：详情切自绘页视图，
-   *  目标经上下文面交付——平台不切回自己的表单（表单 located 描边只留
-   *  给无自绘页组件，见 appendDefinitionGroups 的 markLocated 短路） */
+   *  目标经上下文面按 addonId 定向交付（#555：只投给目标组件——切换窗口
+   *  期仍装载的旧组件不收别人的目标）——平台不切回自己的表单（表单
+   *  located 描边只留给无自绘页组件，见 appendDefinitionGroups 的
+   *  markLocated 短路） */
   private deliverLocateToPage(target: AddonFocusTarget, payload: AddonSettingsStateMessage | undefined): void {
     const addon = payload?.addon
     if (!addon || addon.addonId !== target.addonId || !addon.hasCustomPage || addon.faulted) {
       return
     }
     this.detailView = 'page'
-    this.settingsContext?.deliverLocateTarget({ kind: target.kind, key: target.key })
+    this.settingsContext?.deliverLocateTarget(target.addonId, { kind: target.kind, key: target.key })
   }
 
   /** #553 自绘页挂载中的组件 ID（addons.state 与 settingsState 双源取
@@ -271,9 +273,13 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
 
   /** #553 自绘页开合对账（渲染副作用，转移守卫幂等）：
    *  - 详情渲染（有自绘页且未故障）→ 自动上送 openAddonPage（打开详情即
-   *    自绘页——消除额外「打开自定义页」操作）；应答未达期间不重发；
-   *  - 故障/无自绘页 → 清请求标记（重试恢复后可再次自动打开）；他组件
-   *    挂载残留 → 上送 closeAddonPage 撤下（挂载容器单份，不留隐身装载） */
+   *    自绘页——消除额外「打开自定义设置页」操作）；应答未达期间不重发；
+   *  - 故障/无自绘页 → 清请求标记（重试恢复后可再次自动打开）；
+   *  - 他组件挂载残留 → 先上送 closeAddonPage 撤下再开新组件（#555：切换
+   *    到有自绘页的组件同样先关旧组件——宿主 openSettingsPage 直接覆盖单一
+   *    settingsOpenAddon，不先关则旧组件的 unload 永不推出，装载器侧新旧
+   *    并存；close 先于 open 发送使宿主对账依次经 null → 新组件，unload
+   *    旧 / load 新指令顺序天然正确）。 */
   private reconcileAddonPage(payload: AddonSettingsStateMessage): void {
     const addon = payload.addon
     if (!addon) {
@@ -285,18 +291,18 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     if (mounted === self) {
       this.openPageRequested = undefined
     }
-    if (wantPage && mounted !== self && this.openPageRequested !== self) {
-      this.openPageRequested = self
-      this.send({ kind: 'addons.openAddonPage', addonId: self })
-    }
     if (!wantPage && this.openPageRequested === self) {
       this.openPageRequested = undefined
     }
     if (mounted === null || mounted === self) {
       this.closePageRequested = undefined
-    } else if (!wantPage && this.closePageRequested !== mounted) {
+    } else if (this.closePageRequested !== mounted) {
       this.closePageRequested = mounted
       this.send({ kind: 'addons.closeAddonPage' })
+    }
+    if (wantPage && mounted !== self && this.openPageRequested !== self) {
+      this.openPageRequested = self
+      this.send({ kind: 'addons.openAddonPage', addonId: self })
     }
   }
 

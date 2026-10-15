@@ -1254,10 +1254,10 @@ describe('#553 设置页上下文面（settingsContext）：作用域与定位�
     expect(lateSeen).toEqual([])
   })
 
-  it('定位目标：订阅即回放挂起目标（页面装载晚于定位到达的补投）；后续广播与 null 清除', async () => {
+  it('定位目标：订阅即回放归属组件的挂起目标（页面装载晚于定位到达的补投）；后续定向交付与 null 清除', async () => {
     const runtime = new AddonSettingsContextRuntime()
     // 定位先于页面装载到达（搜索跳转在装载完成前发起）
-    runtime.deliverLocateTarget({ kind: 'def', key: 'theme' })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'theme' })
     const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
     const seen: unknown[] = []
     registerFactory(h, (sdk) => {
@@ -1265,17 +1265,39 @@ describe('#553 设置页上下文面（settingsContext）：作用域与定位�
       sdk.settingsContext?.onLocateTarget((target) => seen.push(target))
     })
     await h.handle.load(manifest({ page: 'settings' }))
-    // 订阅即回放当前挂起目标
+    // 订阅即回放归属本组件的挂起目标
     expect(seen).toEqual([{ kind: 'def', key: 'theme' }])
-    runtime.deliverLocateTarget({ kind: 'group', key: 'appearance' })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'group', key: 'appearance' })
     expect(seen).toEqual([{ kind: 'def', key: 'theme' }, { kind: 'group', key: 'appearance' }])
     // null = 清除（组件据此退场页内定位态）
-    runtime.deliverLocateTarget(null)
+    runtime.clearLocateTarget()
     expect(seen[2]).toBeNull()
     expect(h.sent.length).toBeGreaterThan(0)
   })
 
-  it('释放整组回收：unload 后广播不触达旧订阅（查询仍返回当前值）；已释放代次的迟到订阅为 no-op', async () => {
+  it('#555 定向交付：他组件的定位目标不投递、不回放（归属正确性）', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    // 他组件（B）的目标先到达——本组件（A）装载后不得回放、不得投递
+    runtime.deliverLocateTarget('other.addon', { kind: 'def', key: 'only-b' })
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    const seen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      expect(sdk.settingsContext!.locateTarget()).toBeNull()
+      sdk.settingsContext?.onLocateTarget((target) => seen.push(target))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    expect(seen).toEqual([])
+    // 他组件目标的后续交付与本组件的清除都不到本组件订阅者
+    runtime.deliverLocateTarget('other.addon', { kind: 'group', key: 'g' })
+    runtime.clearLocateTarget()
+    expect(seen).toEqual([])
+    // 归属本组件的目标正常到达（重复交付不去重——等值也是有效信号）
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'flag' })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'flag' })
+    expect(seen).toEqual([{ kind: 'def', key: 'flag' }, { kind: 'def', key: 'flag' }])
+  })
+
+  it('释放整组回收：unload 后定向交付不触达旧订阅（查询仍返回归属当前值）；已释放代次的迟到订阅为 no-op', async () => {
     const runtime = new AddonSettingsContextRuntime()
     const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
     let facet: import('../../src/shared/addonSettingsContextApi').AddonSettingsContextFacet | undefined
@@ -1288,22 +1310,22 @@ describe('#553 设置页上下文面（settingsContext）：作用域与定位�
     })
     await h.handle.load(manifest({ page: 'settings' }))
     runtime.applyScope({ scope: 'workspace', hasWorkspace: true })
-    runtime.deliverLocateTarget({ kind: 'def', key: 'flag' })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'flag' })
     expect(scopeSeen).toHaveLength(1)
     expect(locateSeen).toEqual([{ kind: 'def', key: 'flag' }])
     await h.handle.unload(ADDON_ID, 1)
     // 卸载后页面级 runtime 仍可用（新代次还会消费）：旧代次订阅不再分发
     runtime.applyScope({ scope: 'user', hasWorkspace: true })
-    runtime.deliverLocateTarget({ kind: 'group', key: 'behavior' })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'group', key: 'behavior' })
     expect(scopeSeen).toHaveLength(1)
     expect(locateSeen).toEqual([{ kind: 'def', key: 'flag' }])
-    // 查询路径不受代次影响（只读无副作用——拉到的是页面级当前值）
+    // 查询路径不受代次影响（只读无副作用——拉到的是归属该组件的当前值）
     expect(facet!.scopeState()).toEqual({ scope: 'user', hasWorkspace: true })
     expect(facet!.locateTarget()).toEqual({ kind: 'group', key: 'behavior' })
     // 已释放代次的迟到登记为 no-op 退订（isLoadActive 守卫——回放也不触发）
     const lateSeen: unknown[] = []
     facet!.onLocateTarget((target) => lateSeen.push(target))
-    runtime.deliverLocateTarget({ kind: 'def', key: 'late' })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'late' })
     expect(lateSeen).toEqual([])
   })
 })

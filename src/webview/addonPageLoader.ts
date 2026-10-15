@@ -510,8 +510,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     // 与搜索定位目标的拉取 + 订阅。生命周期与 behaviorState 同款两分：查询
     // 不做代次守卫（只读快照无副作用），订阅过 isLoadActive 守卫（迟到登记
     // 为 no-op 退订），释放时已有的订阅由 releaseLoad 的 releaseAddon 整组
-    // 回收。onLocateTarget 订阅即回放当前挂起目标——页面装载晚于定位到达
-    // 的补投（搜索跳转可在装载完成前发起）
+    // 回收。onLocateTarget 订阅即回放归属本组件的挂起目标——页面装载晚于
+    // 定位到达的补投（搜索跳转可在装载完成前发起）；#555 起定位目标按
+    // addonId 归属过滤，他组件的目标对本组件不可见
     const settingsContextFacet: AddonSettingsContextFacet | undefined =
       page === 'settings' && env.addonSettingsContext
         ? {
@@ -519,13 +520,13 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             onScopeChange: (listener) => (isLoadActive(loadRecord)
               ? env.addonSettingsContext!.subscribeScope(loadRecord.addonId, listener)
               : () => {}),
-            locateTarget: () => env.addonSettingsContext!.currentLocateTarget(),
+            locateTarget: () => env.addonSettingsContext!.currentLocateTarget(loadRecord.addonId),
             onLocateTarget: (listener) => {
               if (!isLoadActive(loadRecord)) {
                 return () => {}
               }
               const unsubscribe = env.addonSettingsContext!.subscribeLocate(loadRecord.addonId, listener)
-              const pending = env.addonSettingsContext!.currentLocateTarget()
+              const pending = env.addonSettingsContext!.currentLocateTarget(loadRecord.addonId)
               if (pending !== null) {
                 // 补投经 runtime 的吞异常口径外直调（订阅者异常不升级故障）
                 try {

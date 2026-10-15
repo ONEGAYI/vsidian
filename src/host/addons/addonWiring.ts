@@ -1315,6 +1315,9 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
         return true
       }
       case 'addons.retry': {
+        // #555 详情恢复意图先于旧代次释放记录（coordinator.retry 内的
+        // registry.release 会清 settingsAreaAddon——重注册成功后据此恢复）
+        runtime.preserveSettingsDetailForRetry(message.addonId)
         void coordinator.retry(message.addonId)
         return true
       }
@@ -1401,8 +1404,12 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     openLogs: () => {
       channel.show()
     },
-    // #354 T05 故障手动重试：释放旧代次 + 重新唤醒（协调器如实呈现结局）
-    retryFaulted: (addonId) => coordinator.retry(addonId),
+    // #354 T05 故障手动重试：释放旧代次 + 重新唤醒（协调器如实呈现结局）；
+    // #555 详情恢复意图先于释放记录（同 addons.retry 分支）
+    retryFaulted: (addonId) => {
+      runtime.preserveSettingsDetailForRetry(addonId)
+      return coordinator.retry(addonId)
+    },
     settingsResourceRoots: settingsCapableRoots,
     attachSettingsPanel: (webview) => {
       settingsPanel = { webview, pushed: null, pendingVerify: null }
@@ -1586,9 +1593,12 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
         return { result, state: getState() }
       }),
       // #354 T05 故障手动重试（设置页 UI 的宿主侧等价入口——释放旧代次
-      // 并重新唤醒；activation-failed 短路被手动意图越过）
-      vscode.commands.registerCommand('onegayi.vsidian._test.addonRetry', (args: { addonId: string }) =>
-        coordinator.retry(args.addonId)),
+      // 并重新唤醒；activation-failed 短路被手动意图越过）；#555 详情恢复
+      // 意图先于释放记录（与 addons.retry 分支同款接线）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonRetry', (args: { addonId: string }) => {
+        runtime.preserveSettingsDetailForRetry(args.addonId)
+        return coordinator.retry(args.addonId)
+      }),
       // ---- T07（#356）行为状态（排序/开关）的宿主侧读写面：管理 UI 的
       // 等价入口（完整 UI 属 T08）；写入成功即推送全部活跃编辑器面板 ----
       vscode.commands.registerCommand('onegayi.vsidian._test.addonBehaviorState', () => {
