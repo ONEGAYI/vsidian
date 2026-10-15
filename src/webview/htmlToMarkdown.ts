@@ -128,7 +128,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   let addonRuleSteps = 0
   let addonRulesExhausted = false
   let convertingBuiltinChildren = false
-  function addonRuleOutput(el: Element, table: boolean, inherited: Marks): string | null {
+  function addonRuleOutput(el: Element, table: boolean, inherited: Marks): InlineRun | null {
     if (addonRules.length === 0 || addonRulesExhausted || convertingBuiltinChildren) return null
     for (const rule of addonRules) {
       addonRuleSteps += 1
@@ -147,7 +147,13 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
             }
           },
         })
-        if (output !== null) return output
+        if (output !== null) {
+          // children 槽已由内置转换编码当前/继承格式；其余模板沿用行内
+          // run 的格式合并，避免规则命中的文字脱离父层粗体等标记。
+          const convertedChildren = rule.output.kind === 'template' && Object.values(rule.output.slots)
+            .some(slot => slot.source.kind === 'children')
+          return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)), text: output }
+        }
       } catch {
         // 规则求值异常进入下一规则（规格 §4.3）
       }
@@ -169,7 +175,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const addonOutput = addonRuleOutput(node, table, inherited)
     if (addonOutput !== null) {
       hasFormatting = true
-      return [{...unmarked, text: addonOutput}]
+      return [addonOutput]
     }
     const marks = effectiveMarks(node, inherited)
     const tag = node.tagName
@@ -271,7 +277,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       const addonOutput = addonRuleOutput(node, table, inherited)
       if (addonOutput !== null) {
         hasFormatting = true
-        return addonOutput
+        return serialize([addonOutput])
       }
     }
     if (!blockTags.has(tag)) return isBlockContainer(node) ? children(node,table,inherited) : serialize(inline(node,inherited,table))

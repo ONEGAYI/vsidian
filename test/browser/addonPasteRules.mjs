@@ -91,6 +91,14 @@ try {
   const paint=await page.evaluate(()=>window.paint());assert.equal(paint.toast.visible,false)
   console.log('[PASS] 首次撤销只撤格式、第二次撤文字；分步历史不经规则另建')
 
+  // ---- 来源特化链接位于粗体内：同层格式不能在规则边界断开 ----
+  await write('前中后', '<p><strong>前<span data-prompt-link-url="https://example.com/inherited">中</span>后</strong></p>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('**前[中](https://example.com/inherited)后**')
+  await page.keyboard.press('Control+Z'); await waitBoth('前中后')
+  await page.keyboard.press('Control+Z'); await waitBoth('原文')
+  console.log('[PASS] 来源链接保留父级粗体，连续文本格式与分步撤销保持')
+
   // ---- 复制按钮丢弃：chrome 元素不进入结果 ----
   await write('正文', '<p>正文<span data-copy-button>复制</span></p>')
   await selectAll(); await page.keyboard.press('Control+V'); await waitBoth('正文')

@@ -194,6 +194,36 @@ describe('粘贴规则转换：边界与既有管线兼容', () => {
     expect(result.hasFormatting).toBe(true)
   })
 
+  it.each([
+    ['strong', '**'],
+    ['em', '*'],
+    ['del', '~~'],
+  ])('链接模板保留 %s 父元素的继承格式', (tag, marker) => {
+    expect(convert(
+      `<p><${tag}>前<span data-prompt-link-url="https://e.com/a">中</span>后</${tag}></p>`,
+      [promptLinkRule()],
+    ).markdown).toBe(`${marker}前[中](https://e.com/a)后${marker}`)
+  })
+
+  it('链接模板保留当前元素的格式，并尊重显式常规字重', () => {
+    expect(convert(
+      '<p><span style="font-weight:bold" data-prompt-link-url="https://e.com/a">中</span></p>',
+      [promptLinkRule()],
+    ).markdown).toBe('**[中](https://e.com/a)**')
+    expect(convert(
+      '<p><strong>前<span style="font-weight:normal" data-prompt-link-url="https://e.com/a">中</span>后</strong></p>',
+      [promptLinkRule()],
+    ).markdown).toBe('**前**[中](https://e.com/a)**后**')
+  })
+
+  it('children 槽已含继承格式，不重复套用同一层标记', () => {
+    const childrenRule = rule({
+      id: 'builtin-children',
+      output: { kind: 'template', template: '{{body}}', slots: { body: { source: { kind: 'children' } } } },
+    })
+    expect(convert('<p><strong><span>中</span></strong></p>', [childrenRule]).markdown).toBe('**中**')
+  })
+
   it('模板字面按内置规则转义（来源文本中的 Markdown 特殊字符不二次解释）', () => {
     const result = convert(
       '<p><span data-prompt-link-url="https://e.com/a(b)">*字面*</span></p>',
