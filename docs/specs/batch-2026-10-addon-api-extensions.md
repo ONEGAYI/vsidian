@@ -57,19 +57,23 @@ bridge#2 的粘贴规则仍消费 #530 的实现；本文不额外改造该组�
 
 ## 首轮组合实现与验证（2026-10-15）
 
-组合分支为 `addon-api-batch`（[PR #548](https://github.com/ONEGAYI/vsidian/pull/548)）。T01 已在分支内，随后按 T03 → T05 → T07 真实合并，组合实施锚点为 `8cf6a681`；各票历史对象保持可达。后续补齐了组合测试的前置状态隔离、来源 B 文件基线，以及 T01 真实槽声明和整数优先级校验。当前候选 API 锚点为 `9c03461b`，重锚理由与失败证据见[API 门禁记录](addons-api-gate.md)。独立双轴审查与用户整体验收另行收口，不据此关闭规格父票。
+组合分支为 `addon-api-batch`（[PR #548](https://github.com/ONEGAYI/vsidian/pull/548)）。T01 已在分支内，随后按 T03 → T05 → T07 真实合并，组合实施锚点为 `8cf6a681`；各票历史对象保持可达。后续补齐测试隔离、来源 B 文件基线，以及 T01 槽声明、整数优先级与继承格式。同步主线视口修复后，独立双轴审查及修复均已完成；用户整体验收仍未完成。当前候选 API 锚点为 `f28a3e3d`，重锚理由与失败证据见[API 门禁记录](addons-api-gate.md)，不据此关闭规格父票。
 
 以下日志位于联合工作树 `D:/CODE/Project/_Extensions/vsidian-addon-batch` 的 `out/test/addon-batch-takeover/`，只留本地，不随 VSIX 分发。结果按实际轮次记账，失败报告不覆盖：
 
 | 检查 | 结果与证据 |
 | --- | --- |
-| 编译与生成产物 | 最终 `final-compile.log` exit 0；API 参考由生成器更新 |
-| 全量单元与 Node 契约 | 静态用例清单登记修复后，367 文件 / 8300 项 Vitest 通过（`full-unit-fixed.log`）；Node 契约 188 通过、7 项桌面专项初次跳过；后以默认 desktop 补跑 `testHost.test.mjs` 33/33、0 跳过（`final-desktop-testHost.log`），覆盖原 7 项。T01 后续校验修复红 5 项 → 定向 74/74 绿（`t01-registration-contract-red.log` / `t01-registration-contract-green.log`） |
-| 全量浏览器 | 全量 102 套中 101 通过，唯一 `languageSwitch` 漏登记合法主题查询，修复后定向通过（`full-browser.log` / `full-browser-language-fixed.log`，报告 `browser-runs/run-Kdo10W` / `run-tZw2Yg`）；T05 夹具改为显式开面板后，引用浏览器定向通过（`t05-explicit-panel-browser.log`，`run-KX6rhg`） |
+| 编译与生成产物 | 审查修复后 `review-fixes-compile.log` exit 0；API 参考由生成器更新 |
+| 全量单元与 Node 契约 | 最新主线同步与审查修复后，367 文件 / 8337 项 Vitest、195 项 Node/桌面契约通过，0 跳过（`review-fixes-full-unit.log`）。首次清单解析和后续 T01/T07 红绿证据均保留；早期 7 项桌面跳过已由默认 desktop 全套实跑补齐 |
+| 全量浏览器 | 同步主线与继承格式修复后 102/102 套全绿（`final-browser-before-review.log`，报告 `browser-runs/run-b7CptW`）；后续审查补丁定向复验 `addonPasteRules`、`addonThemes`、`graphicPopup`、`addonRendererTakeover` 全绿（`review-fixes-*-browser.log`）。早期 101/102 失败和修复记录保留于 `full-browser.log` / `full-browser-language-fixed.log` |
 | 全量真实宿主 | `all` 组四片首轮 423/430 通过；隔离夹具面板、事件缓存和渲染首选后，二轮 429/430。唯一来源 B 失败经状态证实为前序目录 move 清理删除 `sub`；本例重建两个自有目标后，先验证目录 move → 来源 B 两例，再完整重跑分片 1 的 108 项全绿。分片 2–4 的 322 项二轮已全绿，本次未改其执行代码；430 项全部取得 PASS。证据：`integration-first-run/`、`integration-second-run/`、`integration-with-predecessors.log`（37/37）、`integration-directory-predecessor.log`（2/2）、`full-integration-s1-fixed.log`（108/108） |
 | T01 宿主历史链 | `final-t01-real-host.log` exit 0：真实组件登记、已开/新开双面板广播、纯文本旁路、两阶段 Undo/Redo、停用回收与重启登记 |
-| 样式与 API 门禁 | `final-style-baseline.log` / `final-style.log`：历史样式基线复验及 8 项检查通过；`final-api-reference.log`、`final-api-baseline.log` / `final-api-compat.json`：生成新鲜度、候选锚点可信复验及 10 项兼容检查通过 |
-| 文件树 | `final-tree.log` strict 通过；未新增第二份文件树或手写生成参考 |
+| 样式与 API 门禁 | `delivery-gates.log`：生成新鲜度、候选锚点可信复验及 10 项 API 兼容检查通过；独立历史样式基线复验及 8 项检查通过。主题修复的旧锚失败和显式重锚证据在 `review-fixes-compat-red.json` / `review-fixes-baseline.log` |
+| 文件树 | `delivery-gates.log` strict 通过，当前首选派生语言快照的职责已通过维护工具补齐；未新增第二份文件树或手写生成参考 |
+
+真实宿主全量的上述 430 项为组合回归阶段证据。最终主题审查补丁后，`review-fixes-theme-host.log` 通过增强的 #546 场景：真实同语言普通提供者竞争、双文档绘制、主题停用/撤销/整组件故障回内置、声明外语言保留普通规则及恢复。profile 共用存储重建的冷启动回落由 `t07-profile-red.log` → `t07-profile-focused-unit.log` 覆盖，后者 148/148；不将该单测表述为真实 VSCode 重启已由用户验收。
+
+独立审查按固定 HEAD `9e49fad0` 分离 Standards / Spec 两轴。Standards 的模板缓存寿命、主题名称对象所有权及补丁新增的持久化原始诊断三项 P2，Spec 的全局节点预算终止、失效主题语言回落两项 P2 均已修复；各轴对自己的发现独立复核，未遗留已确认问题。粘贴预算/缓存红两项 → 49 项定向绿（`review-paste-budget-cache-*.log`）；主题同语言竞争及名称快照红四项 → 定向绿（`t07-review-*.log`）。最终 Standards 复核锚点 `9dfb10ad`，Spec 主题复核锚点 `f28a3e3d`，之后仅生成参考、基线和交付文档变化。
 
 样式旧契约固定于 v0.4.0（`75c3df79074bdeaec0f02a38d40124f0cd66f857`），组合前目标分支清单对象另存 `style-before-merges.json`；保留既有浮窗选择器和变量，设置页沿用原位置与控件档位。自动化运行的是开发态宿主，安装态 T16 与 Remote SSH T17 按既有阶段门控跳过，本轮未执行 VSIX 安装或 SSH 矩阵。
 
