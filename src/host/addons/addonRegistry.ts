@@ -23,6 +23,8 @@ import type { AddonPageEntryInput } from './addonPageRegistry'
 import type { AddonSettingsUpdateResult } from './addonSettingsService'
 import type { AddonSettingSource, AddonSettingValue } from '../../shared/addonSettings'
 import type { AddonStorageFacet } from '../../shared/addonStorage'
+import type { AddonPasteRulesRegisterResult } from '../../shared/addonPasteRules'
+import type { AddonThemesRegistrationFacet } from '../../shared/addonThemes'
 
 /** 注册表宿主端口（vscode 层注入） */
 export interface AddonRegistryPorts {
@@ -88,18 +90,24 @@ export interface AddonSetupContext extends AddonRegistrationContext {
   readonly channel: AddonChannelRegistry
 }
 
-/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 清理回调。
- *  开启时装配；关闭或故障时释放所属注册） */
+/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 粘贴规则 +
+ *  清理回调。开启时装配；关闭或故障时释放所属注册） */
 export interface AddonEnableContext extends AddonRegistrationContext {
   /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，
    *  第二个登记拒绝） */
   readonly pages: {
     registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle
   }
+  /** #546 T07 主题元数据登记（宿主运行功能阶段——不依赖先开编辑器页面；
+   *  登记只进目录与选择，实际渲染执行仍归页面 renderers 注册） */
+  readonly themes: AddonThemesRegistrationFacet
   /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */
   readonly storage: AddonStorageFacet
   /** 运行生命周期通道（停用即注销） */
   readonly channel: AddonChannelRegistry
+  /** #541 T01 粘贴转换规则登记（有效规则广播到已开与新开编辑器页面，
+   *  在富文本粘贴的 HTML→Markdown 遍历中消费） */
+  readonly paste: AddonPasteRulesContextApi
   /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */
   onDispose(callback: () => void): void
 }
@@ -107,6 +115,21 @@ export interface AddonEnableContext extends AddonRegistrationContext {
 /** 通道注册面（setup/enable 上下文同形状；同名 topic 重复注册拒绝） */
 export interface AddonChannelRegistry {
   handle(topic: string, handler: AddonChannelHandler): AddonRegistrationHandle
+}
+
+/**
+ * 粘贴规则注册面（#541 T01，enable 生命周期；声明式粘贴转换规格 §4.1）。
+ * 声明为可序列化数据（形状见 shared/addonPasteRules）；来源组件身份由
+ * 平台注入，作者不能冒充其他组件。整批校验：批内 ID 重复、未知操作或
+ * 超预算声明整批拒绝（普通 API 拒绝不算组件故障），不部分安装。停用/
+ * 故障/代次结束撤回本生命周期全部规则。
+ */
+export interface AddonPasteRulesContextApi {
+  /**
+   * 登记一批粘贴转换规则；返回普通注册结果与释放句柄（dispose 只移除
+   * 本批，重复调用无害）。已终结代次的迟到注册拒绝 released。
+   */
+  registerRules(declarations: readonly unknown[]): AddonPasteRulesRegisterResult
 }
 
 /** 组件注册传入的定义（T02 形状：setup 轻量接入 + enable 运行装配） */

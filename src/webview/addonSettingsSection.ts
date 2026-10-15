@@ -1,7 +1,7 @@
 // 「附加组件」设置分页（#350 T01 / #351 T02；#465 IA 分页起收敛为组件级
 // 管理）：组件状态列表（官方/第三方分组）+ 功能开关（启用/停用）+ 各入
-// 口（基础设置/组件设置页/扩展详情/故障重试）+ 市场搜索 + VSCode 扩展管
-// 理入口。接入现有 Vsidian 自有设置页（SettingsPageSection）。
+// 口（设置/扩展详情/故障重试）+ 市场搜索 + VSCode 扩展管理入口。接入现
+// 有 Vsidian 自有设置页（SettingsPageSection）。
 //
 // #465 IA 分页（2026-10-13 用户指令，二轮收紧）：本分页**禁止**出现启用
 // 开关以外的任何组件设置项——基础设置区（#353 T04）与组件设置页挂载
@@ -376,23 +376,17 @@ export class AddonSection implements SettingsPageSection {
         this.send({ kind: 'addons.setEnabled', addonId: entry.id, enabled: !entry.enabled })
       }, '', { [REBUILD_FOCUS_ATTR]: `entry-toggle:${entry.id}` }))
     }
-    // #353 T04 基础设置入口：有定义即可配置（故障暂停仍保留——定义在）。
-    // #465 二轮：入口只导航，设置内容在「组件设置」分页呈现
-    if (entry.hasSettingsDefinitions) {
+    // #353 T04 设置入口 → #553 起唯一设置入口：有设置定义**或有自己的设置
+    // 页**即可配置（打开详情——有自绘页时详情首屏即自绘内容，openAddonPage
+    // 由详情渲染自动对账发出，本页不再保留独立「打开组件设置页」入口）。
+    // #465 二轮：入口只导航，设置内容在「组件设置」分页呈现。故障暂停仍
+    // 保留（定义在——ADR Q23：已有定义时平台供基础控件修正参数）
+    if (entry.hasSettingsDefinitions || entry.hasSettingsPage) {
       buttons.append(this.button(t('addons.openSettingsArea'), () => {
         this.openAddonSettings(() => {
           this.send({ kind: 'addons.settingsOpen', addonId: entry.id })
         })
       }, '', { [REBUILD_FOCUS_ATTR]: `entry-settings:${entry.id}` }))
-    }
-    // #351 组件设置页入口：hasSettingsPage 由宿主按运行状态给出（故障
-    // 暂停撤下——不可打开时入口消失而非禁用占位）。挂载在「组件设置」分页
-    if (entry.hasSettingsPage) {
-      buttons.append(this.button(t('addons.openSettingsPage'), () => {
-        this.openAddonSettings(() => {
-          this.send({ kind: 'addons.openAddonPage', addonId: entry.id })
-        })
-      }))
     }
     // #354 T05 故障排障：状态行手动重试（先释放旧代次再重新唤醒；结局经
     // addons.state 推送回显）；日志入口在工具组与「组件设置」分页排障块

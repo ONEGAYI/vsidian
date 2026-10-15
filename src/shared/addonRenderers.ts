@@ -144,7 +144,23 @@ export interface AddonRenderersTablePayload {
   languages: readonly AddonRendererLanguageSelection[]
 }
 
-/** 选择输入（纯函数：候选、可用性谓词、内置语言、首选与批次） */
+/**
+ * #546 T07 主题例外输入（ADR-0017）：themedProviderIds = 主题关联的提供
+ * 者集（目录注入）——这些提供者不参与自动接管，也不接受 renderer 按语
+ * 言显式首选（不能经一般渲染候选路径绕过主题单选）；activeThemeProvider
+ * Id = 当前选中且可用的主题提供者——仅它对所声明语言生效（source='user'，
+ * 主题单选的投影）；unavailableThemeLanguages = 已选主题失效前已知的
+ * 声明语言，仅这些语言回落内置（无内置则普通代码块）。未声明语言与未知
+ * 首选的语言范围继续一般规则。
+ */
+export interface RendererThemeSelectionContext {
+  themedProviderIds: ReadonlySet<string>
+  activeThemeProviderId?: string
+  activeThemeLanguages?: readonly string[]
+  unavailableThemeLanguages?: readonly string[]
+}
+
+/** 选择输入（纯函数：候选、可用性谓词、内置语言、首选与批次；#546 起含主题例外上下文） */
 export interface RendererSelectionInput {
   candidates: readonly AddonRendererCandidate[]
   isAvailable: (candidate: AddonRendererCandidate) => boolean
@@ -152,15 +168,23 @@ export interface RendererSelectionInput {
   builtinLanguages: readonly string[]
   preferred: Readonly<Record<string, string>>
   batches: Readonly<Record<string, number>>
+  /** #546 T07 主题例外（缺省无主题语义——普通渲染器行为不变） */
+  theme?: RendererThemeSelectionContext
 }
 
 /**
- * 确定性生效提供者选择（纯函数；技术方案 5.3 默认序 + 用户首选）：
+ * 确定性生效提供者选择（纯函数；技术方案 5.3 默认序 + 用户首选 + #546
+ * T07 主题例外）：
  * - 每语言候选 = 可用附加组件候选 + 内置（仅内置图形语言）；
  * - 默认序：按 (批次升序, providerId 升序) 排列取末位生效——内置批次视作
  *   0（新安装默认接管内置语言）、同批末位 = 稳定 ID 最大者、新批次覆盖旧；
  * - 用户首选优先：首选提供者当前可用（含显式选内置）即生效且 source='user'；
- *   不可用则按默认序回退（source='auto'），首选记录不在此清除（Q30 恢复）。
+ *   不可用则按默认序回退（source='auto'），首选记录不在此清除（Q30 恢复）；
+ * - 主题例外（theme 输入在场）：主题关联提供者整体退出默认序与用户首选
+ *   路径（安装只新增候选不切换）；仅 activeThemeProviderId（主题单选选中
+ *   且可用）对其声明语言生效（source='user'）。声明语言的主题提供者不
+ *   可用时回落内置 default 显示（无内置则普通代码块），不由同语言普通
+ *   提供者接管；宿主层保留主题首选与本会话已知语言范围。
  */
 export function selectEffectiveRenderers(input: RendererSelectionInput): { languages: AddonRendererLanguageSelection[] } {
   const languageSet = new Set<string>()
@@ -175,7 +199,15 @@ export function selectEffectiveRenderers(input: RendererSelectionInput): { langu
   for (const language of input.builtinLanguages) {
     languageSet.add(normalizeRendererLanguage(language))
   }
+  for (const language of [...(input.theme?.activeThemeLanguages ?? []), ...(input.theme?.unavailableThemeLanguages ?? [])]) {
+    languageSet.add(normalizeRendererLanguage(language))
+  }
   const batchOf = (candidate: AddonRendererCandidate): number => input.batches[candidate.addonId] ?? 0
+  const themed = input.theme?.themedProviderIds
+  const activeThemeProvider = input.theme?.activeThemeProviderId
+  /** 主题提供者全部退出一般竞争；选中项仅在上方声明语言分支生效 */
+  const excludedByTheme = (candidate: AddonRendererCandidate): boolean =>
+    themed !== undefined && themed.has(candidate.providerId)
   const languages: AddonRendererLanguageSelection[] = []
   for (const language of [...languageSet].sort()) {
     const available = input.candidates.filter(
@@ -183,18 +215,33 @@ export function selectEffectiveRenderers(input: RendererSelectionInput): { langu
         candidate.languages.some((l) => normalizeRendererLanguage(l) === language) && input.isAvailable(candidate),
     )
     const builtinAvailable = input.builtinLanguages.some((l) => normalizeRendererLanguage(l) === language)
+    // #546 T07：已选主题的声明语言由主题/内置二选一；不可用时不进入
+    // 普通提供者竞争（其余语言继续下方一般规则）。
+    if (input.theme?.activeThemeLanguages?.includes(language) || input.theme?.unavailableThemeLanguages?.includes(language)) {
+      const activeThemeCandidate = activeThemeProvider === undefined ? undefined : available.find(
+        (c) => c.providerId === activeThemeProvider && c.languages.some((l) => normalizeRendererLanguage(l) === language),
+      )
+      languages.push({
+        language,
+        effective: activeThemeCandidate?.providerId ?? (builtinAvailable ? BUILTIN_RENDERER_PROVIDER_ID : 'none'),
+        source: activeThemeCandidate ? 'user' : 'auto',
+      })
+      continue
+    }
     const preferred = input.preferred[language]
     if (preferred === BUILTIN_RENDERER_PROVIDER_ID && builtinAvailable) {
       languages.push({ language, effective: BUILTIN_RENDERER_PROVIDER_ID, source: 'user' })
       continue
     }
-    const preferredCandidate = preferred === undefined ? undefined : available.find((c) => c.providerId === preferred)
+    // #546 T07：renderer 显式首选不能指向主题关联提供者（绕过主题单选）
+    const preferredCandidate = preferred === undefined ? undefined : available.find((c) => c.providerId === preferred && !excludedByTheme(c))
     if (preferredCandidate) {
       languages.push({ language, effective: preferredCandidate.providerId, source: 'user' })
       continue
     }
     // 确定性默认序：内置视作批次 0、ID 'builtin'，与组件候选合并排序取末位
-    const ordered = [...available].sort((a, b) => batchOf(a) - batchOf(b) || (a.providerId < b.providerId ? -1 : 1))
+    // （主题关联提供者退出竞争——excludedByTheme 过滤）
+    const ordered = [...available.filter((c) => !excludedByTheme(c))].sort((a, b) => batchOf(a) - batchOf(b) || (a.providerId < b.providerId ? -1 : 1))
     const last = ordered[ordered.length - 1]
     if (last !== undefined && batchOf(last) > 0) {
       languages.push({ language, effective: last.providerId, source: 'auto' })

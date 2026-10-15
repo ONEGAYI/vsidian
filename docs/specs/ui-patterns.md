@@ -67,7 +67,7 @@
 
 ### 1.6 焦点环
 
-全局 `:focus-visible`：`outline: 2px solid var(--vscode-focusBorder)`、`offset 3px`。特例：悬停提示小卡片用 `1px`（可选中文字的紧凑卡，不抢内容）。新元素默认走全局规则，不自带焦点样式。
+全局 `:focus-visible`：`outline: 2px solid var(--vscode-focusBorder)`、`offset 3px`。特例：悬停提示小卡片用 `1px`（可选中文字的紧凑卡，不抢内容）；设置页的选中态页签（作用域标签 `.vsidian-addons-scope-tab[aria-selected='true']` 与详情双视图页签 `.vsidian-addons-detail-tab[aria-selected='true']`）用 `1px + offset 1px` 且仅选中态呈现焦点环（#353 引入、#553 沿用——pill 页签自带 activeSelection 底色与外壳描边，2px 环叠底色过重；契约由 `addonSettingsArea.test.ts` 样式契约用例钉住）。新元素默认走全局规则，不自带焦点样式。
 
 ## 2. 设置页元素模式
 
@@ -99,11 +99,13 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（输入行为管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
 - 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。整页单卡片的管理型分页（如输入行为管理页）可把说明句升为分页副题（`vsidian-settings-subtitle`）而不在卡内重复——副题即页级说明位，不算悬空。
 - #472 附加组件设置区分组沿用本节结构：组卡片直挂设置区（bare 分页同口径，组间 `20px` 档位——设置区容器为 flex column，实际间距 = flex gap 10px + 组卡 margin 10px 合成，#477 归位；此前 margin 20px 与 gap 叠加为 30px 偏离档位），组标题不配图标（组件声明的组无语义字形——不发明）；组描述即上一条「组说明句」模式（`.vsidian-addons-group-description`，卡片内首行说明色）。首容器（功能开关行 + 未分组定义）无组标题恒置顶，组容器按声明序随后。
+- #553 组件设置详情双视图页签（`vsidian-addons-detail-tabs` 容器 + `vsidian-addons-detail-tab` 页签，`role=tablist/tab` + `aria-selected`）：有自绘设置页的组件详情以自绘内容为主视图，基础设置表单转次级视图——两视图经页内页签切换，形态复用作用域标签（`.vsidian-addons-scope-*`）同款档位（容器 inline-flex + 8px 外壳描边，页签 6px 圆角 pill、选中态 activeSelection 前景/背景）。平台外壳（标题/返回、作用域标签、总开关组卡）恒在场不随页签切换隐藏；故障暂停与无自绘页组件退回整页基础表单（页签不渲染）。
 
 ### 2.3 设置行与控件
 
 - 设置行 `vsidian-settings-item`：`padding 18px 0`、行间分隔线、末行无线；label 两侧布局（文字 copy 左、控件右，gap 28px）；依赖灰化（opacity 0.55 + 控件禁用）由注册表 `dependsOn` 驱动。
 - 控件：拨动开关 36×20 pill（`appearance:none` 纯 CSS，选中 focusBorder，120ms 过渡，保留 checkbox 语义）；select/text 圆角 2px（dropdown/input 变量族）；range 用 `accent-color` + 值文本 `tabular-nums`。**新控件类型先在本节登记形态再实现。**
+- 主题单选（#546）：原生 radio 保留键盘语义，16×16px、`accent-color: var(--vscode-focusBorder)`；选项行用 18px 上下留白、8px gap、前景 tint 8% 分隔线，11px pill 来源/不可用徽章沿用既有档位。组头由外观大卡片承载，不嵌套新卡片；浏览器 `addonThemes` 钉住行距、控件几何、单选/禁用及语言切换。
 - 多行文本（#475 附加组件设置区，内部类 `vsidian-addons-setting-item > textarea`）：圆角 2px + `--vscode-input-*` 变量族对齐 select/text 档位；`width 100%` / `min-height 72px`（rows=4 语义兜底）/ `resize: vertical` 可拖高；占定义行整行（label 行下方），不进右槽。
 - 附加组件设置区定义行（#477 归型）：内部类 `vsidian-addons-setting-item` 复用本节标准设置行形态——`padding 18px 0`、行间分隔线（tint 8%）、末行无线，label 两侧布局沿用 `vsidian-settings-item-label`（copy 左、控件右）；标题行容器 `vsidian-addons-setting-title-row`（flex、gap 8px）承载标题 + 来源徽章同左列同行，描述独占行（三行挤压修复——徽章不挤占描述行）；布尔控件复用拨动开关档位类 `vsidian-settings-checkbox`（定义行、数组项、对象字段三路统一，语义仍 checkbox）；行内多段（label 行与整行控件、清除覆盖钮）纵排 gap 8px。
 
@@ -114,7 +116,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 徽章：pill、11px；警示徽章用 `statusBarItem-error*`（侧栏故障）；行内状态徽章 panel-border 描边 + 说明色。
 - 空态：说明色、`padding 24px 0`；状态行（保存反馈）12px 说明色、`role=status`。
 - callout：圆角 8px + 左强调条 3px（focusBorder）+ `inputValidation-infoBackground`，承载说明性长文案。
-- 外观页「预设主题」沿用现有 pill 页签；「代码块渲染」组头与标准设置行直接放入页签面板，外观页的大卡片承载组头负边距，不再套一层组卡片。Mermaid 的 Codex 图表配色与 16px 节点圆角属于用户选择的图内容预设，不用于设置控件或其他界面元素。
+- 外观页第四页签原位更名「主题」（#546），沿用 pill 页签；主题组头和单选行直接放入页签面板，外观大卡片承载组头负边距，不再套一层组卡片。Mermaid 的 Codex 图表配色与 16px 节点圆角属于用户选择的图内容预设，不用于设置控件或其他界面元素。
 - 定位高亮（搜索/路由跳转落点）：`outline 1px focusBorder + offset 8px`、圆角 3px，类名 `vsidian-settings-item-located`。档位语义是**一次性导航反馈**：显式定位时呈现，约 1.5s 后退场，退场后不重现；定位落点唯一——容器级与条目级描边互斥，定位到具体条目只标条目行，列表级定位才描容器本身。当前落地范围是**附加组件页的列表级与条目级两处**（#462 先例）：条目级高亮经定位态跨推送重渲染保持（时限内不延长寿命）；列表级容器描边仅在定位渲染当次呈现（推送重建即消）；同分页 manage 入口、输入行为管理页 behaviors 入口与其他分页的定位高亮维持既有语义（常驻至下次重渲染），迁移到本档位语义另行落档。
 
 ### 2.5 积木式查询构造器（输入行为管理页搜索区，#474）
@@ -151,11 +153,13 @@ div.vsidian-behavior-query                        ← 查询区（组卡片内�
 | 查找面板 | 绝对定位右上、圆角 4px、widget 变量族、z-index 40 | `main.css` 查找面板段；chromeContract 探针与 `findPanel` 浏览器用例 |
 | 悬停弹窗（hover-popup） | 480px 宽、圆角 8px、阴影 §1.3、z-index 9000 | [hover-preview-embed.md](hover-preview-embed.md) |
 | 模态（图片/图表弹窗） | 全屏 overlay z-10000 + 背板 `blur(16px) saturate(150%)` 55% 黑 | [image-popup.md](image-popup.md)、[graphic-code-block-interaction.md](graphic-code-block-interaction.md) |
-| toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影）。#474 形态演进（两 webview 通用）：气泡顶部倒计时条（深色右端锚定向左收缩、悬停/聚焦暂停）+ 气泡内撤销按钮（次级按钮 6px 档）；pointer-events 仅对带撤销按钮的气泡放开（` :has(action)` 限定，无按钮气泡保持穿透） | toast.css 头注；styleContract toast 类目 |
+| toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影）。#474 形态演进（两 webview 通用）：气泡顶部倒计时条（深色左端锚定、右端向左收缩，悬停/聚焦暂停；2026-10-15 方向修正）+ 气泡内撤销按钮（次级按钮 6px 档）；pointer-events 仅对带撤销按钮的气泡放开（` :has(action)` 限定，无按钮气泡保持穿透） | toast.css 头注；styleContract toast 类目 |
 
 图表弹窗的透明 SVG 画布衬取图时的 `--vscode-editor-background`，与图形配色一起保留为快照，刷新时同步更新；图内主题自带背景优先。Codex 的白色／深灰背景及明暗配色属于图内容预设，参考色板统一定义于 `mermaidTheme.ts`，按宿主明暗选择；不扩展浮层 UI 的色彩档位。图片弹窗不补这层 SVG 画布。弹窗左键拖动仅平移；常态图形仍可选字，交互口径见上述图形化代码块规格。
 
 新增浮层：先查上表归型；同型复用变量族与档位，新形态先登记本表。
+
+T05（#544）组件引用请求复用悬停弹窗模式：位置由有效触发区域与 hoverPopupGeometry 决定，仍为单页单浮窗；只读路径隐藏内部编辑/保存入口，不新增浮层样式档位。绘制与旧选择器命中由 `addonRefViews` 浏览器套件及宿主 `paint.hoverPopup` 断言覆盖。
 
 ## 4. 新增 UI 三步接入清单
 

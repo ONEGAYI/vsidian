@@ -17,6 +17,7 @@ import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
+import { AddonThemesStore, ThemeSelectionSection } from '../../src/webview/themeSettings'
 import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
 import { WordSegmentSection } from '../../src/webview/wordSegmentSettings'
 import {
@@ -39,7 +40,8 @@ function makeProductionView(): {
   const sent: unknown[] = []
   const bridge = { postMessage: (m: unknown) => sent.push(m) }
   const appearance = new AppearanceSection(
-    new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge))
+    new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge),
+    new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
   const wordSegment = new WordSegmentSection(bridge)
   const defaultEditor = new DefaultEditorSection(bridge)
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,

@@ -8,7 +8,7 @@
 // - 模式与锚点经 bridge.setState 持久化（与 seq 合并），webview 重载后
 //   init 恢复模式（retainContextWhenHidden 关闭场景）
 // - 阅读模式下外部增量照常同步并重建阅读视图
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { WebviewToHost } from '../../src/shared/protocol'
 
@@ -250,6 +250,26 @@ describe('视图容器显隐与稳定类名', () => {
 })
 
 describe('持久化与 webview 重载恢复', () => {
+  it('纯光标移动在隐藏前写入桥状态，重载不依赖销毁时的最后一次回包', () => {
+    const h = makeBridge()
+    const c1 = mountMode(h)
+    const target = DOC.indexOf('中部二级标题')
+    let c2: WebviewSyncController | undefined
+    try {
+      c1.getView()!.dispatch({ selection: { anchor: target } })
+      expect(h.saved()?.anchor).toBe(target)
+      // VSCode 销毁 iframe 后不再消费其消息；新实例只能使用隐藏前已收到的 JSON。
+      const received = JSON.parse(JSON.stringify(h.saved())) as Record<string, unknown>
+      const restored = makeBridge(received)
+      c2 = mountMode(restored)
+      expect(viewState(c2, restored).selectionOffset).toBe(target)
+      expect(sentEditRequests(h)).toBe(0)
+    } finally {
+      c1.dispose()
+      c2?.dispose()
+    }
+  })
+
   it('纯光标移动后立即切页，落盘并在重载后恢复光标', () => {
     const h = makeBridge()
     const c1 = mountMode(h)
@@ -280,6 +300,78 @@ describe('持久化与 webview 重载恢复', () => {
     expect(c2.getView()!.scrollDOM.scrollTop).toBe(180)
     expect(viewState(c2, h).selectionOffset).toBe(0)
     c2.dispose()
+  })
+
+  it.each(['live', 'reading'] as const)('%s 滚动在隐藏前写入桥状态，重载不依赖销毁时的最后一次回包', (mode) => {
+    const h = makeBridge()
+    const longDoc = DOC.repeat(30)
+    const parent1 = document.createElement('div')
+    const c1 = new WebviewSyncController(h.bridge)
+    let c2: WebviewSyncController | undefined
+    try {
+      c1.mount(parent1)
+      c1.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: longDoc })
+      const target = DOC.indexOf('中部二级标题')
+      c1.getView()!.dispatch({ selection: { anchor: target } })
+      if (mode === 'reading') c1.handleHostMessage({ kind: 'view.mode.set', mode })
+      const scroller1 = mode === 'live'
+        ? c1.getView()!.scrollDOM : parent1.querySelector<HTMLElement>('.vsidian-view-reading')!
+      scroller1.scrollTop = 180
+      scroller1.dispatchEvent(new Event('scroll'))
+      expect(h.saved()?.viewport).toEqual({ mode, top: 180 })
+      // 固定为隐藏前的桥缓存；pagehide/dispose 的尾随发送不进入新实例。
+      const received = JSON.parse(JSON.stringify(h.saved())) as Record<string, unknown>
+      c1.dispose()
+      const restored = makeBridge(received)
+      const parent2 = document.createElement('div')
+      c2 = new WebviewSyncController(restored.bridge)
+      c2.mount(parent2)
+      c2.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: longDoc })
+      const scroller2 = mode === 'live'
+        ? c2.getView()!.scrollDOM : parent2.querySelector<HTMLElement>('.vsidian-view-reading')!
+      expect(scroller2.scrollTop).toBe(180)
+      expect(viewState(c2, restored).viewMode).toBe(mode)
+      if (mode === 'live') expect(viewState(c2, restored).selectionOffset).toBe(target)
+      expect(sentEditRequests(h)).toBe(0)
+      expect(sentEditRequests(restored)).toBe(0)
+    } finally {
+      c1.dispose()
+      c2?.dispose()
+    }
+  })
+
+  it('同帧滚动只采一次最新源码中心，下一帧前已写入桥状态', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] })
+    const h = makeBridge()
+    const c = mountMode(h, DOC.repeat(30))
+    const view = c.getView()!
+    const center = DOC.length * 2
+    const coords = vi.spyOn(view, 'posAtCoords').mockReturnValue(center)
+    vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 640, 480))
+    try {
+      for (const top of [180, 200, 220]) {
+        view.scrollDOM.scrollTop = top
+        view.scrollDOM.dispatchEvent(new Event('scroll'))
+      }
+      expect(h.saved()?.viewport).toEqual({ mode: 'live', top: 220 })
+      vi.advanceTimersByTime(20)
+      expect(h.saved()?.viewport).toEqual({ mode: 'live', top: 220, centerOffset: center })
+      expect(coords).toHaveBeenCalledTimes(1)
+
+      const next = center + 30
+      coords.mockReturnValue(next)
+      view.scrollDOM.scrollTop = 420
+      view.scrollDOM.dispatchEvent(new Event('scroll'))
+      expect(h.saved()?.viewport).toEqual({ mode: 'live', top: 420 })
+      vi.advanceTimersByTime(20)
+      expect(h.saved()?.viewport).toEqual({ mode: 'live', top: 420, centerOffset: next })
+      expect(coords).toHaveBeenCalledTimes(2)
+      expect(sentEditRequests(h)).toBe(0)
+    } finally {
+      c.dispose()
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
   })
 
   it('reading 纯滚动后立即销毁重建，恢复独立视口位置', () => {

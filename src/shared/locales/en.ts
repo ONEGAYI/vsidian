@@ -9,7 +9,12 @@
 // decor）；#95 补设置页框架、快捷键分页、设置项定义（setting.*）与宿主消息
 // （host.*）词条（键前缀分组见规格「字典架构」表）。
 export const en = {
-  'appearance.presets': 'Preset themes',
+  'appearance.themes': 'Themes',
+  'setting.theme.title': 'Theme selection',
+  'setting.theme.description': 'Choose the unified theme for editor graphics: built-in Default and Codex, plus themes provided by add-ons (installing an add-on theme only adds a candidate; it never switches automatically).',
+  'appearance.theme.sourceBuiltin': 'Built-in',
+  'appearance.theme.unavailable': 'Unavailable',
+  'appearance.theme.fallbackNotice': 'The selected add-on theme is unavailable; content is temporarily rendered with the Default theme. Your choice is kept and resumes automatically once the add-on is available again.',
   'appearance.codeblockRendering': 'Code block rendering',
   'setting.mermaidTheme.title': 'Mermaid rendering theme',
   'setting.mermaidTheme.description': 'Choose the appearance of built-in Mermaid diagrams. Codex supports flowcharts, sequence, class, state, ER, Gantt, and pie diagrams; diagram styles and configuration can override the preset.',
@@ -247,7 +252,7 @@ export const en = {
 
   // ---- appearance.（#231 外观合并分页：侧栏条目标题与描述）----
   'appearance.title': 'Appearance',
-  'appearance.description': 'Manage CSS snippets, preset themes and appearance customization, and browse the public style contract.',
+  'appearance.description': 'Manage CSS snippets, themes and appearance customization; browse the public style contract.',
 
   // ---- styleRef.（样式参考：总表/详细查询文案与骨架标签，#132；#231 起为
   // 外观合并分页的页签体，tabOverview/tabDetail 亦作外观页签文案沿用）----
@@ -1065,7 +1070,6 @@ export const en = {
   // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
   'addons.enable': 'Enable',
   'addons.disable': 'Disable',
-  'addons.openSettingsPage': 'Open add-on settings page',
   'addons.closeSettingsPage': 'Close add-on settings page',
   'addons.addonSettingsTitle': 'Add-on settings: {label}',
   'addons.statusEnabledRuntime': 'Enabled',
@@ -1074,6 +1078,9 @@ export const en = {
   // ---- #353 T04 basic settings area (scope tabs / basic controls / save notice) ----
   'addons.openSettingsArea': 'Settings',
   'addons.settingsAreaTitle': 'Basic settings: {label}',
+  'addons.settingsDetailTitle': '{label} settings',
+  'addons.detailCustomViewTab': 'Custom settings page',
+  'addons.detailBasicsViewTab': 'Basic settings',
   'addons.closeSettingsArea': 'Back to add-on list',
   'addons.scopeUserDefault': 'User default',
   'addons.scopeWorkspace': 'Current workspace',
@@ -1094,7 +1101,6 @@ export const en = {
   'addons.saveFailedNoWorkspace': 'No workspace open',
   'addons.saveFailedStore': 'Storage write failed',
   'addons.saveFailedRejected': 'Add-on generation ended',
-  'addons.openCustomPage': 'Open custom settings page',
   'addons.settingsEmpty': 'This add-on registered no setting definitions',
   /** #465 组件设置分页：组件清单（hub）形态 */
   'addons.settingsHubTitle': 'Configurable add-ons',

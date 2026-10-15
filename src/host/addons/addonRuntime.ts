@@ -31,6 +31,8 @@ import type {
 import { resolveAddonPageEntry } from './addonPageRegistry'
 import type { AddonSettingsService } from './addonSettingsService'
 import { AddonStorageService } from './addonStorageService'
+import type { AddonPasteRuleService } from './addonPasteRuleService'
+import type { AddonThemeRegisterOutcome } from '../../shared/addonThemes'
 
 /** 登记成功的解析臂（settingsPages/editorPages 只收成功条目） */
 type ResolvedPageEntry = import('./addonPageRegistry').AddonPageEntryResolution & { ok: true }
@@ -55,6 +57,11 @@ export interface AddonRuntimePorts {
   settings: AddonSettingsService
   /** #404 组件数据目录服务（隔离可写目录 + 文件监听） */
   storage: AddonStorageService
+  /** #541 T01 粘贴规则服务（enable 生命周期登记；运行贡献释放时撤回） */
+  pasteRules: AddonPasteRuleService
+  /** #546 T07 主题目录登记面（enable 注册按组件转发宿主主题服务——
+   *  runtime 注入 addonId；登记录校验在服务内，普通 API 拒绝不算故障） */
+  themes: { register(addonId: string, declarations: readonly unknown[]): AddonThemeRegisterOutcome }
   /** 组件安装目录（fsPath；解析不到时页面入口登记拒绝——资源授权无锚） */
   installDirOf(addonId: string): string | undefined
   /** 归因日志（写 VSCode 输出通道：组件 ID + 阶段 + 原因） */
@@ -127,6 +134,12 @@ export class AddonRuntime {
   private settingsOpenAddon: string | undefined
   /** #353 T04 基础设置区当前打开的组件（定义驱动的平台控件区） */
   private settingsAreaAddon: string | undefined
+  /** #555 重试窗口期的详情恢复意图：手动重试先释放旧注册（release 清
+   *  settingsAreaAddon），重新注册成功前记住「重试发起时详情在场」——
+   *  重注册成功恢复（settingsState 推送回显详情，自绘页经 webview 渲染
+   *  对账自动重开，见 docs/specs/addon-settings-detail.md §2 故障行）；
+   *  显式关闭丢弃；重试失败保留（重试可再发起——再次成功仍恢复） */
+  private pendingDetailRestore: string | undefined
 
   constructor(private readonly ports: AddonRuntimePorts) {}
 
@@ -244,7 +257,7 @@ export class AddonRuntime {
   // ---- #353 T04 基础设置区（平台定义驱动；停用与故障后保留） ----
 
   /**
-   * 打开某组件的基础设置区（双标签作用范围 + 平台基础控件 + 自定义页
+   * #353 T04 打开某组件的基础设置区（双标签作用范围 + 平台基础控件 + 自定义页
    * 入口）。有设置定义或有设置页入口即可打开；故障暂停时定义仍在
    * （ADR Q23：已有定义时平台供基础控件供用户修正参数）——仅「无定义
    * 且无自定义页」或未注册拒绝。
@@ -259,11 +272,23 @@ export class AddonRuntime {
     return 'ok'
   }
 
-  /** 关闭基础设置区（重复关闭无害） */
+  /** 关闭基础设置区（重复关闭无害）。#555：显式关闭同时丢弃重试详情恢复
+   *  意图（用户已表明不要这个详情——重试成功也不再自动打开） */
   closeSettingsArea(): void {
+    this.pendingDetailRestore = undefined
     if (this.settingsAreaAddon === undefined) return
     this.settingsAreaAddon = undefined
     this.notify()
+  }
+
+  /** #555 手动重试发起（wiring 的 retry 入口在释放旧注册前调用）：详情
+   *  打开指向该组件时记录恢复意图。重试失败（无重注册到达）意图保留
+   *  ——用户再次发起重试成功后仍恢复；详情已撤（上次 release 已清空，
+   *  settingsAreaAddon 不再指向该组件）时不覆盖既有意图 */
+  preserveSettingsDetailForRetry(addonId: string): void {
+    if (this.settingsAreaAddon === addonId) {
+      this.pendingDetailRestore = addonId
+    }
   }
 
   /** 基础设置区当前打开的组件 ID（无打开项为 undefined） */
@@ -299,6 +324,17 @@ export class AddonRuntime {
       cssFsPaths: page.cssFsPaths,
       resourceBaseFsPath: page.resourceBaseFsPath,
     }
+  }
+
+  /** #543 T03 编辑器面代次校验：请求携带的代次是否仍是该组件编辑器页
+   *  当前代次（未注册/换代/故障均 false——旧代次在途导航请求在宿主侧
+   *  拒收，与 dispatchChannelRequest 的 from 校验同一硬边界） */
+  isEditorGenerationCurrent(addonId: string, generation: number): boolean {
+    const record = this.records.get(addonId)
+    if (!record || record.runState !== 'enabled') {
+      return false
+    }
+    return record.editorGeneration === generation
   }
 
   // ---- webview 出站消息（面板桥转发） ----
@@ -413,6 +449,7 @@ export class AddonRuntime {
     for (const addonId of [...this.records.keys()]) {
       this.releaseGeneration(addonId)
     }
+    this.pendingDetailRestore = undefined
     this.listeners.clear()
   }
 
@@ -442,6 +479,17 @@ export class AddonRuntime {
       return
     }
     this.syncRunState(record)
+    // #555 重试成功重新注册：消费详情恢复意图——重试发起时详情在场则恢复
+    // 打开态（openSettingsArea 语义：有定义或有页才可打开；新注册形态变化
+    // 为无设置能力时空壳详情不恢复）。故障中的恢复与正常路径一致（faulted
+    // 期间定义保留——排障块与基础控件可承接，ADR Q23）
+    if (this.pendingDetailRestore === addonId) {
+      this.pendingDetailRestore = undefined
+      const capable = this.ports.settings.hasDefinitions(addonId) || record.settingsPages.length > 0
+      if (this.settingsAreaAddon === undefined && capable) {
+        this.settingsAreaAddon = addonId
+      }
+    }
     this.notify()
   }
 
@@ -608,6 +656,26 @@ export class AddonRuntime {
         },
       },
       channel: this.buildChannelRegistry(addonId, record, 'run', run.handlers),
+      // #541 T01 粘贴规则：enable 生命周期登记面（身份注入 + 代次守卫；
+      // 运行贡献释放时整组件撤回——见 releaseRun）
+      paste: {
+        registerRules: (declarations) => {
+          if (!this.isLive(record, addonId) || record.run !== run) {
+            this.ports.log('late-registration-rejected', addonId, 'paste-rules')
+            return { ok: false, reason: 'released' }
+          }
+          return this.ports.pasteRules.registerRules(addonId, declarations)
+        },
+      },
+      themes: {
+        register: (declarations: readonly unknown[]): AddonThemeRegisterOutcome => {
+          if (!this.isLive(record, addonId) || record.run !== run) {
+            this.ports.log('late-registration-rejected', addonId, 'themes')
+            return { ok: false, reason: 'invalid-theme', dispose: () => {} }
+          }
+          return this.ports.themes.register(addonId, declarations)
+        },
+      },
       onDispose: (callback) => {
         if (!this.isLive(record, addonId) || record.run !== run) {
           // 已终结代次的迟到登记：立即执行（重复释放无害，对齐页面侧语义）
@@ -703,6 +771,9 @@ export class AddonRuntime {
     const run = record.run
     if (!run) return
     record.run = null
+    // #541 T01 粘贴规则随运行贡献释放整组件撤回（停用/故障/代次结束与
+    // enable 半初始化回收共用本收口；幂等——releaseAddon 对无规则组件无操作）
+    this.ports.pasteRules.releaseAddon(this.entryOf(record))
     for (const callback of run.disposeCallbacks.splice(0)) {
       try {
         callback()

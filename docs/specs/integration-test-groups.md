@@ -76,7 +76,7 @@ tableCaret 的原始两次失败已确认是 `handle-hover` 读隐藏新增带 o
 - 新 job `browser-sensitive` 设 `VSIDIAN_TEST_BROWSER_GROUP=sensitive`，不在任何 needs 链上：不用 continue-on-error、不自动重试、不放宽断言——失败保留红灯、逐套件报告与非零退出码，整轮 workflow 可为 failure，但不阻断必需检查。
 - 本地默认（不设环境变量）仍是全量，回归习惯与全量验证口径不变；`VSIDIAN_TEST_BROWSER_GROUP=sensitive npm run test:browser` 单跑敏感组（Git Bash），PowerShell 用 `$env:VSIDIAN_TEST_BROWSER_GROUP='sensitive'` 后清除。
 
-此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组本身不修复产品行为、不修改套件断言；名单内两套件的归因排查仍开放，跟踪 #446。
+此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组本身不修复产品行为、不修改套件断言；名单内两套件的共享构建互删已由 PR #520 初步修复，敏感分组仍保留，历史归因与处置见 #446 条目5/9。#446 已关闭归档，后续新增未定性失败统一记录于[跟踪集合 #552](https://github.com/ONEGAYI/vsidian/issues/552)。
 
 ### Windows 剪贴板族诊断与互斥（2026-10-10）
 
@@ -85,11 +85,17 @@ tableCaret 的原始两次失败已确认是 `handle-hover` 读隐藏新增带 o
 - #318 的旧哨兵以 NUL 开头，Windows `CF_UNICODETEXT` 在 NUL 处终止。独立宿主探针与 Win32 回读均得到空串，9 次采样全部复现；普通文本哨兵能完整回读。生产哨兵改为普通文本，定义归 `host/searchReveal.ts`，单测钉住 Windows 回读兼容性与「不能冒充匹配输出」两项约束。
 - #318 的测试只等待任意含查询词的条目，现场实际选中、打开 `proto-b.md`，却等待 `proto-a.md`。就绪条件改为甲文件的具体匹配，首条断言核对完整行列与行文本。
 - #69 只等剪贴板相对前值变化，会误收迟到的前一次文本；现按 fixture 的独立预期成品等待。#183 的 copy/cut 载荷相同，剪切前写不同哨兵，避免旧复制值冒充剪切完成；粘贴后的成品改为等待回读，保留文本全等要求。
-- Windows 的隐藏桌面仍在 `WinSta0`，剪贴板属于窗口站，多个宿主共享它（[微软窗口站文档](https://learn.microsoft.com/en-us/windows/win32/winstation/window-stations)）。四宿主对照中 #69 与 #291 失败，单宿主同组 7/7 通过；加入跨进程互斥后，四宿主同组 7/7 通过。普通文本探针也出现过延后回读旧值，尚未识别具体来源，不能把所有历史失败都归给同一进程。
+- 2026-10-10 的 Windows 隐藏桌面仍在 `WinSta0`，剪贴板属于窗口站，多个宿主共享它（[微软窗口站文档](https://learn.microsoft.com/en-us/windows/win32/winstation/window-stations)）。四宿主对照中 #69 与 #291 失败，单宿主同组 7/7 通过；加入跨进程互斥后，四宿主同组 7/7 通过。当时普通文本探针也出现过延后回读旧值，尚未识别具体来源，不能把所有历史失败都归给同一进程。
 
-`test/integration/suite/clipboardLock.ts` 的 `CLIPBOARD_CASE_NAMES` 是互斥名单唯一入口，覆盖 #69、Live/阅读代码卡复制、#183 菜单与块链接、#291 和 #318 七项。Windows runner 仅在这些用例正文期间持有会话内命名互斥量；其余用例继续并发，切片位置、core/sensitive 归属与 Linux 调度不变。新增真实宿主剪贴板用例时同步登记名单；契约检查名称存在且唯一、保持 core 归属，并用真实 Windows 子进程验证互斥与抛错释放。
+`test/integration/suite/clipboardLock.ts` 的 `CLIPBOARD_CASE_NAMES` 是互斥名单唯一入口，覆盖 #69、Live/阅读代码卡复制、#183 菜单与块链接、#291、#318，以及 #438 图形块复制源码与 #439 链接复制九项。Windows runner 仅在这些用例正文期间持有会话内命名互斥量；其余用例继续并发，切片位置、core/sensitive 归属与 Linux 调度不变。新增真实宿主剪贴板用例时同步登记名单；契约检查名称存在且唯一、保持 core 归属，并检查 `cases.ts` 中直接调用宿主剪贴板的用例没有漏录，再用真实 Windows 子进程验证互斥与抛错释放。2026-10-15 补齐 #438/#439 的遗漏（独立缺陷 #538）；#446 条目14历史失败未记录覆盖写或最后读值，不能据此将该历史现场直接归因于名单遗漏。
 
-互斥量协调参与本机制的测试进程，不隔离用户桌面的其他剪贴板程序。用例结束或调用方退出关闭 stdin 时释放；获取、释放失败均报错，不自动重执行用例、不扩大等待预算。命名窗口站隔离在本机普通权限下被拒绝，未纳入实现，也不要求提权。
+互斥量协调参与本机制的测试进程，不阻止同一窗口站内的其他剪贴板程序。用例结束或调用方退出关闭 stdin 时释放；获取、释放失败均报错，不自动重执行用例、不扩大等待预算。
+
+**2026-10-15 窗口站隔离（#540，承接 #446 条目14）**：原 #69 在正确写入后仍两次实际出现 `copyChildren` 超时。只读 Win32 序列号/窗口所有者采样确认，正确写完后43ms/30ms，所有者是微信输入法3.0.0.34的 `wetype_server.exe`，读值随后变回前序复制文本。经用户授权，临时暂停同一引擎时原例通过，恢复后原超时重现；不把自动重启后的退出尝试算作有效关闭对照。原历史92e14a01没有所有者与最后读值，不能逐帧补写当时唯一原因。
+
+Windows `desktop` 路径改用 `CreateWindowStation(null, …)`，由系统按登录会话命名非交互窗口站，再将真实宿主放到其中的独立桌面；用户的 `WinSta0` 剪贴板不再与该测试路径共享。自定义命名窗口站在普通权限下被拒绝，修复不要求提权。并行宿主可共享系统生成的测试窗口站，九项真实剪贴板用例仍须持有既有会话内互斥。`foreground` 路径继续使用当前桌面，Linux 调度、分组、切片算法和复制等待预算不变。
+
+永久契约从公开 `runTestHost` 启动真实 Windows 子进程：直接查询窗口站身份，验证与用户窗口站不同、真实系统剪贴板可读写，且测试哨兵不流入用户剪贴板。探针也持有既有剪贴板互斥，避免同机单测与集成同时运行时互相覆盖。旧启动器在窗口站身份断言失败，候选通过；原 #69 亦在输入法保持运行时通过。输入法引擎已恢复，管理服务经用户授权的 UAC 启动后恢复 Running/Automatic；退出/暂停输入法仅用于诊断，不是日常测试前置要求。完整回归与交付证据见 #540，不将本机通过替代 Linux CI 或用户人工验收。
 
 单测使用每例独立的随机锁名，同一用例内的两个真实子进程仍争用同一把锁。这样可以验证互斥与释放，又不会排队等待正在运行的集成用例；不同锁名可独立执行也有断言。2026-10-11 的并行复验曾因单测使用固定集成锁名而在 5 秒超时，隔离红测与绿测分别保存在 `lock-isolation-red.log` / `lock-isolation-green.log`。
 
@@ -447,6 +453,20 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 
 本轮证明测试观测缺口，历史CI缺少完整目标事件时间线，尚不能把条目7/17每次失败都归为日志淘汰，两项继续未定因跟踪。其余条目5/6/9/12/14本机对照均通过，已在Issue补证据，未拿到目标红的路径未修改或勾销。证据为out/test/t15-ring-red.log、ring-green.log、target-contract-red.log、final-callback.log、all-native.log / all-native-report.log、compile.log及ring-diagnosis.md（同组文件均带t15前缀）；候选CI与本机结果分开记录。
 
+### 真实宿主补充：T12空轮询淹没装载事件（2026-10-15）
+
+**已复现原装载等待的完整红态**。在b7aec94c基线、VSCode1.82.3独立桌面保留五项T12前序用例，再运行T15目标。只在忽略目录的集成bundle恢复旧事件等待，保留原30秒预算及目标后续断言，输入/UI分别30628/30618ms超时；超时快照确认各自目标页面仍在addonPage.active。此前700ms观察段中，T12 nextCalls增加1396–1850，200条缓冲有197–200条为t12.next；当前状态等待完成时，旧成功事件已经不可见。
+
+**真实根因链由两部分构成**：旧等待将短期装载事件当作当前页面状态；T12夹具在无命令的成功应答后立即重新查询，持续挤掉成功事件。T12页面源码git对象90291ad6f0943541276b9b30503cf764a7bad37c、宿主夹具对象1782b9a2ae3570a2d6643adabff099904d80a383，在条目7的d96b9b5e、条目17的c71caaab与本轮b7aec94c三个提交相同。历史报告尾部与本轮阶段形态相同，支持该链路；旧CI仍缺消息逐帧记录，不声称测得其实际轮询速率或每次失败的唯一原因。
+
+**本轮只修正T12夹具空轮询**：无命令时等待100ms；有命令时继续立即处理并消费队列，arm回执照常发送，释放标记阻止后续请求。代价是空队列之后的新命令最多多等一个100ms查询间隔。保留PR #517的目标页面当前状态等待，不回退到事件日志；本轮旧等待绿测也观察到“旧成功事件仍在、当前页面尚未活跃”的提前放行，说明旧谓词的另一边界仍存在。
+
+永久契约执行完整T12页面入口，在公开defineAddonPage与channel.request边界驱动应答：空应答原实现立即出现第二次请求，期望1/实际2先红；修正验证100ms节奏、有命令立即回报与释放时不再出站，3/3通过。真实宿主只改变上述轮询分支、仍使用旧等待，原七项从5/7变为7/7；改回当前等待并保留六处700ms观测的T12/T15整组11/11通过，T12增量降到1–8次，目标页面保持活跃。诊断时增加的采样延迟与输出仅在忽略目录bundle，提交不携带。
+
+证据为out/test/t15-followup-native.log/report.log、old-native.log/report.log、old-wait-green.log/report.log、current-native-green.log/report.log、poll-red.json与poll-final-green.json（同组文件均带t15-followup前缀）。新增时间线与本轮红绿独立于旧CI；原报告、旧失败预算、core归组以及目标的输入/行为/命令/菜单/绘制断言均保留。
+
+最终去掉诊断bundle，原样T12/T15 core整组11/11通过；真实键盘T12故障暂停/编辑继续/手动恢复四场景通过。compile/类型、完整Vitest8051/8051与Node194/194、文件树strict通过。仅提交空轮询分支、公开SDK契约与本节记录，探针未进入正式集成产物。
+
 基线56e03882上完整Vitest8026/8026与Node193/193通过。文件树相关职责由维护入口更新；全树严格检查仍仅为前节列出的五项主线既有漏录，没有新增漏录。
 
 独立审查发现永久测试不应绑定生产私有recordEvent变量名。实际记录器抽取回放留在忽略目录作为诊断证据；永久回归通过公开命令mock提供独立截断快照，并执行真实等待函数。公开边界旧等待仍先红（t15-public-red.log），修正后10/10通过（t15-public-green.log），不为测试新增生产接口。
@@ -478,3 +498,71 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 **公开回推红绿**。原Locator回调内经已有addons.settingsState消息触发生产设置页重建，稳定得到相同空串/0与当前2px/78px对照。候选改在同一页面回调内查询当前textarea并测量，十次真实状态回推后逐次验证原可见性、2px圆角、vertical及最小72px；原多行键盘输入、保存、数组粘贴及其余设置场景保留。没有改生产重建、DOM、CSS、样式契约、预算或分组。
 
 完整addonSettings套件通过（run-UdDzwz，2.41s），诊断输出只在忽略目录。证据为out/test/446-note-normal-loop.log、446-note-forced-red.log、446-note-browser-green.log与对应浏览器报告；历史全量没有节点代次快照，本轮原路径补齐连接状态。该条目与条目12的mermaid.md宿主状态超时独立，不联动勾销。
+
+## #446 条目22：图片总高变化先于锚点补偿完成（初步修正，2026-10-15）
+
+主线548397c7的CI38591628850 attempt1第4片102/103，动态图片增高用例1898ms失败：240px增高后锚点视觉位置0.921875→220.71875。相同代码树的候选CI38590389656第4片同用例1320ms通过，原主线失败未重跑。此前等待只检查总高增量达到236px，随即断言锚点位置稳定；总高变化没有涵盖ResizeObserver排队、后续帧测量和滚动补偿。
+
+**同形态快照已取得**。同一生产控制器、CSS、400块样本生成器、view.locate与reading.test.image公开钩子，受控时钟下仅改变定位后0/32/80ms的起步时机：内容总高已增长243px（仍在原±4px容差内），目标锚点6832保持，但视觉位置从−0.078125变为219.71875，旧等待已经放行。后续帧scrollTop从6450补到6670，视觉位置回到−0.28125；过渡中还会出现当前锚点身份尚未恢复的快照。直接执行实际等待回调，候选拒绝这些快照，等原目标身份、尺寸增长和视觉补偿齐备才完成。历史CI没有逐帧日志，不把本轮时钟阶段当作旧现场时间线；本机原用例单次2113ms通过，不能以此排除原竞态。
+
+**修正只补齐集成采样条件**。原15秒预算、240px增高、目标锚点身份、2px视觉容差、总高±4px以及零写回断言保留；生产图片钩子、RO调度、补偿、DOM/CSS和core分组均未修改。该修正证明测试不得把尺寸抵达当作补偿完成，不证明所有过渡帧都不可见；持续不补偿或目标身份不恢复仍在原预算失败，最终断言继续执行。
+
+永久契约执行真实采样回调，拒绝高度已增长但尚未补偿、仅初始20px、错误目标身份及缺少目标布局；旧实现先红，修正后整份就绪契约11/11绿。首次红测日志记录EXIT1，当轮JSON读出10过/1失败，目标期望undefined但实际放行快照；完整JSON随后被绿测覆盖，只保留读回观测摘要，不冒充原完整JSON。完整Vitest8035/8035、Node194/194与compile/类型通过。三用例烟测一度误用竖线分隔，筛选未命中、未执行用例，单独保留启动错误；正确入口使用逗号。
+
+证据在out/test/image22-native-original.log / report.log、image22-browser-timeline.log、image22-browser-controlled-green.log、image22-readiness-red.log / red-observation.json / green.log、image22-unit-full.log、image22-compile.log与image22-native-final.log。诊断夹具和逐帧探针只在忽略目录；候选CI与本机证据分开，其他未归因条目不联动勾销。
+
+推送前同步main38be3c75的Mermaid暗色/Live图形修正，compile/类型、文件树strict及真实阅读三例3/3通过（目标1082ms）。新基线全量首次与compile同机运行时两个Vitest worker异常退出3221226505，位于webLinkMetaService/proxyAgent，8022/8046完成、24项未完成，未进入Node阶段；无断言失败记录，另记条目23，不归为本票已修复。两文件单worker77/77、Node契约另跑194/194通过；无compile并行的一次独立全量8046/8046与Node194/194通过。原失败保留，条件相关不等于因果，不据独立通过勾销23；当轮旧JSON仍为此前11项报告，仅取带退出码的日志统计。
+
+## #446 条目12：历史弹窗等待阶段定位与诊断补全（2026-10-15）
+
+**后续入口已迁移**：本节保留历史调查记录；条目12仍未定因、未修复，现于[#552](https://github.com/ONEGAYI/vsidian/issues/552)等待新证据。旧 #446 已按用户要求归档关闭。
+
+**已定位到第二段弹窗SVG等待**。原主线696a1668的CI38521864148第2片在60841ms超时。按原提交归档源码及原lockfile重新安装依赖，只重建集成入口（esbuild0.28.2、原node18/cjs配置）；lockfile与构建脚本git对象分别为7f1bd52c656cfd847a4ca35bc774a3700f79bcc9、b3685f5936b4c43823780365ff71db115176c78f。旧堆栈70875:13、76270:20、85812:9三处均与重建bundle对齐，source map对应cases.ts:1345、7464与index.ts:168；7464是弹窗请求之后等待overlay与overlaySvg的第二段。由此排除首次frame等待与后续reading等待为这一次超时所在阶段，不据此判定弹窗未打开还是取图失败。
+
+当前12163dcf基线的真实Chromium/生产控制器、CSS、Mermaid产物和原五围栏fixture，在首次frame就绪后0/250/1000ms三种点击时机均装载SVG。首次快照可为5个frame、0个渲染终态，立即点击仍成功；不能把pending frame本身认定为根因。这是HTTP夹具对照，未复刻VSCode iframe与完整宿主条件，不替代旧Linux现场。初次探针误用不存在的media类名，后验overlaySvg实际为true；该装配错误单独保留，修正选择器后的三组均通过，不作为目标红。
+
+**已修正的缺陷是超时报告丢失现有探针**。waitViewState原摘要省略live/reading Mermaid计数和paint中的Mermaid/graphic字段；即使最后采样已携带overlay、overlaySvg与渲染分态，报错仍只留下模式和光标等字段。永久契约直接执行实际waitViewState，用公开宿主采样边界提供两帧，验证超时报告保留最后一帧的图形字段与原错误文本；旧实现187ms稳定失败，最小修正只追加上述现有字段，12项就绪/诊断契约通过。生产取图、弹窗、DOM/CSS、原60秒预算、装载/绘制断言与分组均不动。此修正改善下一次失败的可归因性，条目12继续未勾销。
+
+条目14另做保留前序用例的完整大纲组对照：Windows独立桌面、VSCode1.82.3开发态15/15，复制用例3865ms通过。旧copyChildren超时21795ms，没有最后实际剪贴板值或写入完成时间线；本次通过不作为根治，未改复制、互斥、预算或成品断言，仍未勾销。
+
+日志为out/test/graphic12-historical-install.log、graphic12-historical-build.log、graphic12-stage-map.json、graphic12-browser-probe.log（装配错误）/corrected.log、graphic12-diagnostics-red.log/green.log和clipboard14-group-control.log/report.log。历史源码与source map仅为忽略目录中的诊断证据，不加入发行产物；临时DEBUG-graphic12探针不进入提交。
+
+本地验证：compile/类型、完整Vitest8047/8047与Node194/194、文件树strict通过；真实VSCode1.82.3三项图形集成3/3（目标1933ms），graphicPopup完整原生浏览器套件通过（run-dTCq50，14.27s）。这些通过验证诊断补全未破坏原链路，不据此关闭条目12或14。
+
+## #446 条目6：光标状态延迟与iframe销毁的交叠（初步修复，2026-10-15）
+
+**异步传输下取得2029→0的确定性红**。使用VSCode1.82.3安装目录中的原API注入脚本、生产控制器与CSS、原viewport-mermaid.md及真实嵌套iframe。API先同步更新iframe内state，再经MessageChannel发送JSON；对照按该版本webviewElement.dispose的顺序移除iframe并停止接收。纯光标定位后0/80/200ms销毁的六次均恢复到0，300ms两次均保持2029。保留接收器只改一个变量，前三档各一次均恢复2029。
+
+**销毁时补发已发送，但没有抵达被撤销的接收器**。pagehide和visibilitychange均触发生产flush，发送的anchor为2029；原250ms光标保存尚未到期，隐藏前宿主仍没有该锚点。保留接收器的对照收到补发，而按销毁顺序撤销接收器的对照未收到。这补齐了此前同一JS环境、同步内存桥的对照所缺失的边界。原失败CI38141117256没有消息时间线，本轮没有重新复现原生宿主的历史失败，不能将上述边界实验当作旧现场；条目6继续保留未勾选状态。
+
+对应上游事实源为[1.82.3的API注入与MessageChannel](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/webview/browser/pre/index.html)、[状态接收与iframe销毁](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/webview/browser/webviewElement.ts)及[隐藏时释放webview](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/webview/browser/overlayWebview.ts)。这些源码支持传输与释放机制，不包含旧CI的事件时序。
+
+**修正为Live纯选区变化立即提交锚点**。移除对应250ms计时器，只复用既有persistState；光标变化不测量布局，滚动视口采样与恢复仍走原去抖。取舍是每次锚点变化会多发小型状态JSON，减少等待窗口；不宣称同一任务内发送后立刻销毁的异步消息必然送达。文本同步、历史、持久化格式、DOM/CSS及原用例预算与分组均不改。
+
+永久viewMode契约在隐藏前检查桥状态，并以独立JSON快照重建新控制器；旧实现预期偏移24、实际undefined，修正后33/33通过。原异步通道矩阵12/12通过；使用真实Mermaid产物的0/80/150/200/300ms矩阵15/15通过，已观测到实际SVG和允许的error终态。完整Vitest8048/8048与Node194/194、compile/类型通过；原生viewToggle浏览器套件通过（run-Qq9nSl），真实VSCode1.82.3原Mermaid标签切换用例通过。
+
+证据为out/test/mermaid6-public-seam-red.json/green.json、mermaid6-iframe-transport-observed.log、mermaid6-iframe-transport-green.log、mermaid6-iframe-real-paint-green.log及独立真实产物JSON、mermaid6-unit-full.log、mermaid6-native-green.log/report.log。诊断探针只在忽略目录；红轮通道JSON随后被同名绿轮覆写，原红取证以保留的带退出码日志为准，不冒充原完整JSON。自动验证不代替物理键盘/鼠标、IME与日用安装态人工验收。
+
+### 实际编辑器的快速切页回归（2026-10-15）
+
+本轮将纯光标保存窗口推进到实际VSCode1.82.3开发态路径：“定位到第123行、确认LF光标、立即打开另一标签再切回”，不先等图表或滚动稳定。永久回归采用同内容的viewport-fast-mermaid.md独立夹具，追加独立用例到清单末尾；原Mermaid用例本体、冷启动条件、围栏终态、中心行±2与光标保持断言以及已有分片位置均保留，新例仍为core、30秒恢复预算及零写回断言。
+
+只在忽略目录构建替换修复前控制器，其他产物与夹具同a3f5c188。旧控制器对象33ae2fe9dc00f5921d842a6979b8c1df3992cef5与68f5a657源码一致；诊断原型中旧实现切走前选区2029、保存定时器仍pending、API缓存无新锚点，正常切页后恢复0，原30秒预算内失败（整例32247ms）。现行控制器切走前已保存2029，切回保持2029，完整原型4227ms通过；曾将阶段放入原用例的中间版本也取得32221ms红态，最终拆为独立夹具以保留原冷启动路径。新源码不新增生产接口或私有状态断言，永久独立用例的红绿另留证。
+
+坐标以已就绪view.state.text的LF模型计算，宿主该fixture为CRLF，offsetAt第123行2151对应LF2029。诊断中未构建成功就启动的样本、使用宿主坐标导致切走前超时的样本及启动命令引号错误，均独立标为无效，不充当产品红测；原始日志保留。
+
+本轮证明实际编辑器快速定位后切页的窗口，与此前真实API/iframe销毁对照相互支持。历史失败的原用例先等待围栏和视口落定，缺逐消息时间线，不能将新增快速前序冒充其原样现场或证明每次失败的唯一原因。条目6是否按初步范围收口以独立复核和最终候选验证为准；人工验收未联动。证据为out/test/mermaid6-followup-old-native-lf.log/report.log、current-native-valid.log/report.log、permanent-red-native.log/report.log与invalid-sample.md（同组均带mermaid6-followup前缀）。
+
+最终独立用例在旧控制器下切回0，32137ms红态；正式构建去掉诊断字段/输出后，原Mermaid用例3451ms、新快速用例1114ms均通过。compile/类型、完整Vitest8051/8051与Node194/194、文件树strict通过；中间版本也做过完整回归，最终统计仅取final前缀日志。旧生产者只用于忽略目录的诊断产物，提交不包含生产控制器改动或额外协议字段。
+
+## #446 条目24 / #550：视口保存窗口与源码中心（2026-10-15）
+
+CI38684976209候选802d582a的原Mermaid切标签例62144ms超时，光标已为2029、围栏容器为0；同源测试堆栈定位到光标恢复后的围栏终态等待。main及精确候选的本机完整第1分片均通过，只作为负样本。
+
+真实VSCode1.82.3的acquireVsCodeApi、MessageChannel及iframe销毁对照补齐了保存边界。生产控制器和真实Mermaid在围栏到终态后立即切走，隐藏前父端缓存只有anchor2029、没有viewport；销毁时flush已发出完整viewport，但接收器已撤销而未收到。重建后光标2029、scrollTop0、围栏为空。仅等待300ms或仅保留旧接收器的对照均正常。只保存像素值的中间实现仍使源码中心116→133，保留旧centerOffset也会回到上一次滚动区域。
+
+修正为滚动像素位置立即写入桥缓存，新滚动清除旧源码中心提示；源码中心每帧最多读取一次并补写，替代250ms尾随采样。隐藏、销毁与模式切换取消在途采样。持久化格式、光标/文本编辑管线、DOM/CSS和原core分组、等待预算与绘制断言保持。
+
+永久viewMode契约固定隐藏前JSON、覆盖Live/reading恢复及同帧三次滚动只读取一次最新中心。viewToggle夹具以销毁前缓存重建，销毁中补发不进入新实例；明暗主题继续验证两模式位置，新增第二次滚动不重放旧中心的场景。真实API/真实Mermaid修正后0/300ms对照均恢复4个围栏到既有终态、光标2029和中心行116。
+
+历史CI缺少父端缓存与逐帧滚动记录，不证明本机制是该轮唯一原因；也不承诺同一JS任务发送后立刻销毁的异步消息必然送达。本项按已复现保存缺口初步修复，条目12的弹窗SVG等待另查，人工验收独立。证据为out/test/mermaid24-viewport-contract-red.log、frame-contract-red.log、viewtoggle-browser-red.log、iframe-viewport-real-baseline.log、iframe-viewport-real-keep-observer.log、iframe-real-frame-green.log及frame前缀回归日志；中间只保存像素值的失败另存，不充当最终验证。

@@ -14,7 +14,9 @@ import { describe, expect, it } from 'vitest'
 import { AddonRegistry, type AddonDefinition } from '../../src/host/addons/addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from '../../src/host/addons/addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort } from '../../src/host/addons/addonSettingsService'
+import { AddonThemeService } from '../../src/host/addons/addonThemeService'
 import { AddonStorageService } from '../../src/host/addons/addonStorageService'
+import { AddonPasteRuleService } from '../../src/host/addons/addonPasteRuleService'
 import { ADDON_API_VERSION, OFFICIAL_ADDON_EXTENSION_IDS } from '../../src/shared/addonIdentity'
 
 function memoryPreference(initial: { user?: Record<string, boolean>; workspace?: Record<string, boolean> | null } = {}): AddonPreferenceStore & { user: Record<string, boolean>; workspace: Record<string, boolean> | null } {
@@ -83,6 +85,8 @@ function harness(options: { preference?: ReturnType<typeof memoryPreference> | A
       },
       createWatcher: () => ({ dispose: () => {} }),
     }),
+    pasteRules: new AddonPasteRuleService({ log: () => {} }),
+    themes: new AddonThemeService({ log: () => {} }),
     installDirOf: () => 'C:\\addons\\demo',
     log: () => {},
   })

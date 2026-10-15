@@ -13,12 +13,15 @@ import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
 import { addonStorageCases } from './addonStorageCases'
 import { addonT06Cases } from './addonT06Cases'
+import { addonDocNavCases } from './addonDocNavCases'
 import { addonT07Cases } from './addonT07Cases'
 import { addonT08Cases } from './addonT08Cases'
 import { addonBehaviorStateCases } from './addonBehaviorStateCases'
 import { addonT09Cases } from './addonT09Cases'
+import { addonThemeCases } from './addonThemeCases'
 import { addonT10Cases } from './addonT10Cases'
 import { addonT11Cases } from './addonT11Cases'
+import { addonRefViewsCases } from './addonRefViewsCases'
 import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
@@ -1342,6 +1345,7 @@ async function waitViewState(
     if (lastSeen !== undefined) {
       const s = lastSeen as unknown as Record<string, unknown>
       const hover = s['hoverPreview'] as Record<string, unknown> | undefined
+      const paint = s['paint'] as Record<string, unknown> | undefined
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
@@ -1352,6 +1356,10 @@ async function waitViewState(
         readingEmbed: s['readingEmbed'],
         liveEmbedReveal: s['liveEmbedReveal'],
         readingWikilinkCount: s['readingWikilinkCount'],
+        liveMermaidCount: s['liveMermaidCount'],
+        readingMermaidCount: s['readingMermaidCount'],
+        mermaid: paint?.['mermaid'],
+        graphic: paint?.['graphic'],
         // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
         readingBlockCount: s['readingBlockCount'],
         readingMountedBlocks: s['readingMountedBlocks'],
@@ -2758,6 +2766,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const imageText = '第 191 段 阅读段落样本文本，固定宽度内容，用于体量对比测试。'
     const imageOffset = doc.getText().indexOf(imageText)
     const grow = 240 // 初始占位 20px + 加载后增长 220px = 内容总高增量
+    const offsetBefore = (before.readingAnchorTopPx ?? 0) - (before.readingScrollTopPx ?? 0)
     const ok = (await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'reading.test.image',
       srcStart: imageOffset,
@@ -2769,12 +2778,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const after = await poll('图片尺寸变化生效', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
       const grew = (v?.readingScrollHeightPx ?? 0) - (before.readingScrollHeightPx ?? 0)
-      return v && grew >= grow - 4 ? v : undefined
+      // DOM 总高先变化，ResizeObserver 排队的滚动补偿在后续帧完成。
+      return v && grew >= grow - 4 && v.readingAnchorStart === anchorOffset &&
+        v.readingAnchorTopPx !== undefined && v.readingScrollTopPx !== undefined &&
+        Math.abs(v.readingAnchorTopPx - v.readingScrollTopPx - offsetBefore) <= 2 ? v : undefined
     }, 15000)
     // 源位置锚点不变（仍是同一块的 start）
     assert(after.readingAnchorStart === anchorOffset, `图片变化后锚点块不应漂移：${before.readingAnchorStart} → ${after.readingAnchorStart}`)
     // 视觉位置稳定：锚点块顶与 scrollTop 的差保持不变（上方内容增高由滚动补偿）
-    const offsetBefore = (before.readingAnchorTopPx ?? 0) - (before.readingScrollTopPx ?? 0)
     const offsetAfter = (after.readingAnchorTopPx ?? 0) - (after.readingScrollTopPx ?? 0)
     assert(
       Math.abs(offsetAfter - offsetBefore) <= 2,
@@ -17952,6 +17963,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
   // 断言面见 addonT06Cases.ts 头注）
   ...addonT06Cases,
+  // #543 T03：附加组件文档打开与定位 API（夹具组件经公开 views.openDocument
+  // 消费，断言面见 addonDocNavCases.ts 头注）
+  ...addonDocNavCases,
   // #356 T07：可组合输入行为与逐项注册状态（夹具组件经公开 behaviors 面
   // 注册行为链，断言面见 addonT07Cases.ts 头注）
   ...addonT07Cases,
@@ -17965,12 +17979,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
   // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
   ...addonT09Cases,
+  ...addonThemeCases,
   // #359 T10：自己的命令、菜单与统一快捷键（夹具组件经公开 SDK 注册，
   // 断言面见 addonT10Cases.ts 头注）
   ...addonT10Cases,
   // #360 T11：所属按钮、面板与视图界面贡献（夹具组件经公开 ui 面注册，
   // 断言面见 addonT11Cases.ts 头注）
   ...addonT11Cases,
+  // T05（#544）：附加组件只读引用浮窗（断言面见 addonRefViewsCases.ts 头注）
+  ...addonRefViewsCases,
   // #361 T12：诊断、全组件故障暂停与手动恢复（四态负向对照、贡献全撤
   // 与首选恢复，断言面见 addonT12Cases.ts 头注）
   ...addonT12Cases,
@@ -17989,4 +18006,26 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // 阶段矩阵——R1 全装载/R2 宿主不可见负向；用例体 sshGuard 自跳过非
   // SSH 会话，发行态断言面见 addonT17RemoteSshCases.ts 头注）
   ...addonT17RemoteSshCases,
+  // 追加独立场景，保留原 Mermaid 用例的冷启动条件及既有分片位置。
+  ['Live 快速光标切标签页：Mermaid 夹具的 LF 锚点保持（#446）', async () => {
+    const file = 'viewport-fast-mermaid.md'
+    const uri = wsUri(file).toString()
+    const diskBefore = await readDisk(file)
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    // webview 全程 LF 坐标；该 fixture 为 CRLF，不能直接使用宿主 offsetAt。
+    const initial = await waitViewState(file, (v) => v.lineCount >= 123)
+    const offset = initial.text.split('\n').slice(0, 122)
+      .reduce((sum, line) => sum + line.length + 1, 0)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'viewport.test.position', cursorLine: 123 })
+    await waitViewState(file, (v) => v.selectionOffset === offset)
+    // 确认选区后立即切走，不先等待图表渲染或滚动落定。
+    await openWithEditor('mode.md')
+    await waitSessionReady('mode.md')
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    await waitViewState(file, (v) => v.selectionOffset === offset, 0, 30000)
+    assert(await readDisk(file) === diskBefore, '快速切页应保持源文零写回')
+  }],
 ]

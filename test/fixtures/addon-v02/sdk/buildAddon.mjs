@@ -49,6 +49,12 @@ const T02_SETTINGS_CSS = '.t02-settings-root .t02-title { color: rgb(0, 120, 200
 /** #361 T12 夹具组件样式：渲染器容器内 t12-box（绘制层断言锚——计算色
  * rgb(12, 200, 96)，与 t02/t09 标记色区分） */
 const T12_EDITOR_CSS = '.t12-box { background-color: rgb(12, 200, 96); color: rgb(255, 255, 255); padding: 4px 8px; display: inline-block; }\n'
+/** #546 T07 主题夹具组件样式：主题渲染容器内 theme-box（绘制层断言锚——
+ * 计算色 rgb(0, 138, 123)（水青），与 t02/t09/t12 标记色区分） */
+const THEME_EDITOR_CSS = '.theme-box { background-color: rgb(0, 138, 123); color: rgb(255, 255, 255); padding: 4px 8px; display: inline-block; }\n'
+/** #553 设置页上下文夹具组件样式：作用域回显行（绘制层断言锚——计算色
+ * rgb(178, 74, 214)（紫），与 t02/t09/t12/theme 标记色区分） */
+const SETTINGS_CONTEXT_CSS = '.scx-scope { color: rgb(178, 74, 214); }\n.scx-locate { color: rgb(178, 74, 214); }\n'
 
 /** 断言产物不含 CM6 运行时标记（组件未重打包共享运行时） */
 export function assertNoCm6Runtime(productPath) {
@@ -153,6 +159,34 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 'host-settings-addon', 'dist', 'editor.js'),
       note: 'host-settings-addon 编辑器页',
     },
+    // #543 T03 文档导航夹具组件（编辑器页——views.openDocument 的公开
+    // API 消费；短轮询驱动与 hostSettings 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'docNavEditor.ts'),
+      outfile: path.join(buildRoot, 'docnav-addon', 'dist', 'editor.js'),
+      note: 'docnav-addon 编辑器页',
+    },
+    // T05（#544）只读引用浮窗夹具组件（编辑器页——refViews 面 + ui 面
+    // 面板承载触发控件；短轮询驱动与 T11 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'refViewsEditor.ts'),
+      outfile: path.join(buildRoot, 'refviews-addon', 'dist', 'editor.js'),
+      note: 'refviews-addon 编辑器页',
+    },
+    // #546 T07 主题夹具组件（编辑器页——renderers 面登记主题关联提供者 +
+    // themeEnvironment 面订阅明暗；通道放行门控防共享会话毒化）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'themeEditor.ts'),
+      outfile: path.join(buildRoot, 'theme-addon', 'dist', 'editor.js'),
+      note: 'theme-addon 编辑器页',
+    },
+    // #553 设置页上下文夹具组件（设置页——settingsContext 面的作用域/
+    // 定位目标消费回显；浏览器套件经本地 http 服务装载）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'settingsContextSettings.ts'),
+      outfile: path.join(buildRoot, 'settings-context-addon', 'dist', 'settings.js'),
+      note: 'settings-context-addon 设置页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -189,6 +223,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
   const t12Dist = path.join(buildRoot, 't12-addon', 'dist')
   mkdirSync(t12Dist, { recursive: true })
   writeFileSync(path.join(t12Dist, 'editor.css'), T12_EDITOR_CSS)
+  // #546 T07 主题夹具组件样式（绘制层断言锚）
+  const themeDist = path.join(buildRoot, 'theme-addon', 'dist')
+  mkdirSync(themeDist, { recursive: true })
+  writeFileSync(path.join(themeDist, 'editor.css'), THEME_EDITOR_CSS)
+  // #553 设置页上下文夹具组件样式（绘制层断言锚）
+  const settingsContextDist = path.join(buildRoot, 'settings-context-addon', 'dist')
+  writeFileSync(path.join(settingsContextDist, 'settings.css'), SETTINGS_CONTEXT_CSS)
   const outsideDir = path.join(buildRoot, 'outside')
   mkdirSync(outsideDir, { recursive: true })
   writeFileSync(path.join(outsideDir, 'denied.js'), DENIED_JS)
@@ -255,6 +296,28 @@ export async function buildTestAddons({ log = console.log } = {}) {
     hostSettingsAddon: {
       installDir: path.join(buildRoot, 'host-settings-addon'),
       distDir: path.join(buildRoot, 'host-settings-addon', 'dist'),
+    },
+    // #543 T03：文档导航夹具组件布局（浏览器套件经本地 http 服务装载；
+    // 集成经 runTest.mjs 拷入 addonFixtures/addon-docnav）
+    docNavAddon: {
+      installDir: path.join(buildRoot, 'docnav-addon'),
+      distDir: path.join(buildRoot, 'docnav-addon', 'dist'),
+    },
+    // T05（#544）：夹具组件布局（浏览器夹具直读 dist；runTest.mjs 拷入
+    // addonFixtures/addon-refviews）
+    refViewsAddon: {
+      installDir: path.join(buildRoot, 'refviews-addon'),
+      distDir: path.join(buildRoot, 'refviews-addon', 'dist'),
+    },
+    // #546：主题夹具组件布局（浏览器套件经本地 http 服务装载）
+    themeAddon: {
+      installDir: path.join(buildRoot, 'theme-addon'),
+      distDir: path.join(buildRoot, 'theme-addon', 'dist'),
+    },
+    // #553：设置页上下文夹具组件布局（浏览器套件经本地 http 服务装载）
+    settingsContextAddon: {
+      installDir: path.join(buildRoot, 'settings-context-addon'),
+      distDir: settingsContextDist,
     },
     outsideDir,
   }

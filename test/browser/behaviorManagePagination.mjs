@@ -220,14 +220,14 @@ try {
   const toast = page.locator('.vsidian-toast')
   await toast.waitFor()
   assert.match(await toast.innerText(), new RegExp(zhCn['addons.behaviorsQueryCleared']))
-  // 倒计时条几何（右端锚定顶部）与动画运行
+  // 倒计时条几何（左端锚定顶部）与动画运行
   const timerPaint = await toast.locator('.vsidian-toast-timer').evaluate((el) => {
     const cs = getComputedStyle(el)
-    return { position: cs.position, top: cs.top, right: cs.right, height: cs.height, playState: cs.animationPlayState }
+    return { position: cs.position, top: cs.top, left: cs.left, height: cs.height, playState: cs.animationPlayState }
   })
   assert.equal(timerPaint.position, 'absolute')
   assert.equal(timerPaint.top, '0px')
-  assert.equal(timerPaint.right, '0px')
+  assert.equal(timerPaint.left, '0px')
   assert.equal(timerPaint.height, '2px', '倒计时条应为 2px 高')
   assert.equal(timerPaint.playState, 'running', '常态倒计时动画运行')
   // 悬停暂停（形态演进关键行为：CSS 与 JS 计时同步暂停）

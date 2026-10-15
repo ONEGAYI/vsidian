@@ -17,6 +17,8 @@ import type {
   AddonViewMode,
 } from '../shared/addonEditApi'
 import { isAddonApplyEditsRequest } from '../shared/addonEditApi'
+import { isAddonDocNavRequest, type AddonDocNavRequest, type AddonDocNavResult } from '../shared/addonNavApi'
+import type { WebviewToHost } from '../shared/protocol'
 import type {
   AddonHeadingFoldApplyOptions,
   AddonHeadingFoldCommandResult,
@@ -34,6 +36,9 @@ export interface AddonLiveViewEntry {
   viewType: 'main' | 'embed'
   instanceId: string
   targetDocUri: string
+  /** T05（#544）引用请求的来源身份：目标 fsPath（embed = 引用目标）；
+   *  main 省略（面板主正文——宿主按面板文档解析，无需覆盖） */
+  targetFsPath?: string
   /** 模式查询（主正文随面板双态；嵌入恒 live） */
   mode: () => AddonViewMode
   instance: LiveEditorInstance
@@ -44,9 +49,33 @@ export interface AddonReadonlyViewEntry {
   viewType: 'hover'
   instanceId: string
   targetDocUri: string
+  /** T05（#544）引用请求的来源身份：目标 fsPath（hover.result 送达身份） */
+  targetFsPath?: string
   text: string
   version: number
 }
+
+/** #543 T03 导航出站端口（main.ts 注入：send = 宿主消息桥；panelIdentity =
+ *  控制器 init 握手后的面板身份——请求不携带作者可伪造的面板字段） */
+export interface AddonDocNavPort {
+  send(message: WebviewToHost): void
+  panelIdentity(): { sessionId: string; docUri: string } | null
+}
+
+/** 导航在途请求（有界终态：回执配对 / 来源注销 / 代次释放 / 超时四径） */
+interface DocNavPending {
+  addonId: string
+  generation: number
+  sourceInstanceId: string
+  settled: boolean
+  resolve: (result: AddonDocNavResult) => void
+  cancelTimer: () => void
+  cancelHost: () => void
+}
+
+/** #543 T03 导航请求超时上限（宿主最长链路 openWith + 面板就绪等待 5s +
+ *  定位送达；超窗按 delivery-failed 终结——有界终态兜底） */
+const ADDON_DOC_NAV_TIMEOUT_MS = 15_000
 
 /** SDK → 注册表的操作面（装载器 buildSdk 消费；opId 由装载器生成注入） */
 export interface AddonViewsRuntime {
@@ -81,6 +110,25 @@ export interface AddonViewsRuntime {
   syntaxLineTypeOf(instanceId: string, pos: number): AddonSyntaxLineTypeResult
   /** #433 位置级行内标记查询（同上口径） */
   syntaxInlineOf(instanceId: string, pos: number): AddonSyntaxInlineResult
+  /** #543 T03 文档打开与定位（宿主执行）：来源实例解析为注册表目标 URI、
+   *  面板身份注入后出站；在途请求经 handleDocNavResult 配对终结 */
+  openDocumentOf(input: {
+    addonId: string
+    generation: number
+    instanceId: string
+    request: AddonDocNavRequest
+  }): Promise<AddonDocNavResult>
+  /** #543 T03 导航回执路由（消息桥 addonDocNav.result 的转发终点；
+   *  reqId+addonId+generation 三重配对，迟到/换代回包丢弃） */
+  handleDocNavResult(message: {
+    reqId: number
+    addonId: string
+    generation: number
+    result: AddonDocNavResult
+  }): void
+  /** #543 T03 代次终结：该组件当前代次的在途导航请求以 view-disposed
+   *  终结（装载器 releaseLoad 调用——旧请求不抢回定位） */
+  releaseDocNavOf(addonId: string, generation: number): void
   onCreated(callback: (info: AddonViewInfo) => void): () => void
   onDisposed(callback: (info: AddonViewInfo) => void): () => void
 }
@@ -95,6 +143,10 @@ export class AddonViewRegistry implements AddonViewsRuntime {
   private readonly readonlyViews = new Map<string, AddonReadonlyViewEntry>()
   private readonly createdHandlers = new Set<(info: AddonViewInfo) => void>()
   private readonly disposedHandlers = new Set<(info: AddonViewInfo) => void>()
+  // ---- #543 T03 导航在途表（页面级；reqId 单调配对） ----
+  private readonly docNavPending = new Map<number, DocNavPending>()
+  private docNavReqSeq = 0
+  private docNavPort: AddonDocNavPort | null = null
 
   /** 注册可写视图（同 ID 重复注册以新代旧——实例重建场景，旧条目触发
    *  onDisposed 后新条目触发 onCreated，订阅方按序刷新） */
@@ -115,11 +167,17 @@ export class AddonViewRegistry implements AddonViewsRuntime {
     this.emitCreated(this.infoOf(entry.instanceId)!)
   }
 
-  /** 注销视图（实例销毁 / 浮层关闭 / 切回 Reading） */
+  /** 注销视图（实例销毁 / 浮层关闭 / 切回 Reading）。#543 T03：以该视图
+   *  为来源的在途导航请求即时 view-disposed 终结（来源失效——旧偏移不
+   *  抢回定位） */
   unregister(instanceId: string): void {
     const info = this.infoOf(instanceId)
     this.liveViews.delete(instanceId)
     this.readonlyViews.delete(instanceId)
+    this.settleDocNavPending(
+      (entry) => entry.sourceInstanceId === instanceId,
+      { ok: false, reason: 'view-disposed', opened: false },
+    )
     if (info) {
       for (const handler of this.disposedHandlers) {
         try {
@@ -143,6 +201,21 @@ export class AddonViewRegistry implements AddonViewsRuntime {
     }
     const readonly = this.readonlyViews.get(instanceId)
     return readonly ? this.readonlyInfoOf(readonly) : undefined
+  }
+
+  /** T05（#544）引用请求的来源 fsPath（embed/hover = 目标身份；main 与
+   *  未登记 fsPath 的条目为 null；实例不在场为 undefined）——refViews
+   *  运行时的来源解析入口 */
+  targetFsPathOf(instanceId: string): string | null | undefined {
+    const live = this.liveViews.get(instanceId)
+    if (live) {
+      return live.targetFsPath ?? null
+    }
+    const readonly = this.readonlyViews.get(instanceId)
+    if (readonly) {
+      return readonly.targetFsPath ?? null
+    }
+    return undefined
   }
 
   snapshotOf(instanceId: string): AddonSnapshotResult {
@@ -314,6 +387,117 @@ export class AddonViewRegistry implements AddonViewsRuntime {
     }
     const judged = live.instance.syntaxInlineForAddon(pos)
     return judged === 'view-disposed' ? { ok: false, reason: 'view-disposed' } : { ok: true, ...judged }
+  }
+
+  // ---- #543 T03 文档打开与定位（views.openDocument 的注册表分派） ----
+  // 拒绝分层对齐其他面：来源实例不在场 view-disposed；请求形状非法
+  // invalid-request；端口未绑定或面板未握手 view-disposed（来源无法可靠
+  // 归属——有界终态，不出站）。
+
+  /** 绑定宿主传输端口（main.ts 装配期注入；生产 send = vscode.postMessage） */
+  attachDocNavPort(port: AddonDocNavPort): void {
+    this.docNavPort = port
+  }
+
+  async openDocumentOf(input: {
+    addonId: string
+    generation: number
+    instanceId: string
+    request: AddonDocNavRequest
+  }): Promise<AddonDocNavResult> {
+    if (!isAddonDocNavRequest(input.request)) {
+      return { ok: false, reason: 'invalid-request', opened: false }
+    }
+    const source =
+      this.liveViews.get(input.instanceId) ?? this.readonlyViews.get(input.instanceId)
+    if (source === undefined) {
+      return { ok: false, reason: 'view-disposed', opened: false }
+    }
+    const identity = this.docNavPort?.panelIdentity()
+    if (identity === null || identity === undefined) {
+      return { ok: false, reason: 'view-disposed', opened: false }
+    }
+    this.settleDocNavPending((entry) => entry.addonId === input.addonId &&
+      entry.generation === input.generation && entry.sourceInstanceId === input.instanceId,
+    { ok: false, reason: 'view-disposed', opened: false })
+    const reqId = ++this.docNavReqSeq
+    return new Promise<AddonDocNavResult>((resolve) => {
+      const entry: DocNavPending = {
+        addonId: input.addonId,
+        generation: input.generation,
+        sourceInstanceId: input.instanceId,
+        settled: false,
+        resolve,
+        cancelTimer: () => {},
+        cancelHost: () => this.docNavPort!.send({ kind: 'addonDocNav.cancel',
+          sessionId: identity.sessionId, docUri: identity.docUri, reqId }),
+      }
+      this.docNavPending.set(reqId, entry)
+      // 有界终态兜底：宿主最长链路（openWith + 面板就绪等待 5s + 定位）远低
+      // 于 15s；超时按 delivery-failed 终结（回执迟到被 reqId 配对拒收）
+      const timer = setTimeout(() => {
+        this.settleDocNavPending(
+          (candidate) => candidate === entry,
+          { ok: false, reason: 'delivery-failed', opened: false },
+        )
+      }, ADDON_DOC_NAV_TIMEOUT_MS)
+      entry.cancelTimer = () => clearTimeout(timer)
+      this.docNavPort!.send({
+        kind: 'addonDocNav.request',
+        sessionId: identity.sessionId,
+        docUri: identity.docUri,
+        reqId,
+        addonId: input.addonId,
+        generation: input.generation,
+        // 来源文档 URI 取注册表值（main/embed 目标、hover 登记目标）——
+        // 组件请求不携带来源身份，伪来源结构上不可表达
+        sourceDocUri: source.targetDocUri,
+        sourceInstanceId: input.instanceId,
+        target: input.request.target,
+        ...(input.request.locate !== undefined ? { locate: input.request.locate } : {}),
+      })
+    })
+  }
+
+  handleDocNavResult(message: {
+    reqId: number
+    addonId: string
+    generation: number
+    result: AddonDocNavResult
+  }): void {
+    const entry = this.docNavPending.get(message.reqId)
+    if (
+      entry === undefined || entry.settled ||
+      entry.addonId !== message.addonId || entry.generation !== message.generation
+    ) {
+      // 迟到/换代/未知回包不回挂（与装载器迟到通道回执同一代次硬边界）
+      return
+    }
+    entry.resolve(message.result)
+    entry.settled = true
+    entry.cancelTimer()
+    this.docNavPending.delete(message.reqId)
+  }
+
+  releaseDocNavOf(addonId: string, generation: number): void {
+    this.settleDocNavPending(
+      (entry) => entry.addonId === addonId && entry.generation === generation,
+      { ok: false, reason: 'view-disposed', opened: false },
+    )
+  }
+
+  /** 按谓词批量终结在途请求（来源注销 / 代次释放 / 超时共用） */
+  private settleDocNavPending(match: (entry: DocNavPending) => boolean, result: AddonDocNavResult): void {
+    for (const [reqId, entry] of [...this.docNavPending.entries()]) {
+      if (entry.settled || !match(entry)) {
+        continue
+      }
+      entry.resolve(result)
+      entry.cancelHost()
+      entry.settled = true
+      entry.cancelTimer()
+      this.docNavPending.delete(reqId)
+    }
   }
 
   private foldKeysOf(instanceId: string, keys: readonly number[], fold: boolean): AddonHeadingFoldCommandResult {

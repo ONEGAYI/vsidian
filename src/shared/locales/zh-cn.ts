@@ -5,8 +5,14 @@
 import type { MessageKey } from './en'
 
 export const zhCn: Record<MessageKey, string> = {
-  'appearance.presets': '预设主题',
+  // #546 T07 外观第四页签原位更名「主题」（统一主题单选入口）
+  'appearance.themes': '主题',
   'appearance.codeblockRendering': '代码块渲染',
+  'setting.theme.title': '主题选择',
+  'setting.theme.description': '统一选择编辑器图形的主题：内置默认与 Codex，以及组件提供的主题（安装组件主题只新增候选，不会自动切换）。',
+  'appearance.theme.sourceBuiltin': '内置',
+  'appearance.theme.unavailable': '不可用',
+  'appearance.theme.fallbackNotice': '当前选中的组件主题不可用，已临时按默认主题渲染；选择已保留，组件恢复可用后自动继续原主题。',
   'setting.mermaidTheme.title': 'Mermaid 渲染主题',
   'setting.mermaidTheme.description': '选择内置 Mermaid 图表的外观。Codex 支持流程图、时序图、类图、状态图、ER 图、甘特图和饼图；图内样式与配置可以覆盖预设。',
   'setting.mermaidTheme.default': '默认',
@@ -224,7 +230,7 @@ export const zhCn: Record<MessageKey, string> = {
 
   // ---- appearance.（#231 外观合并分页：侧栏条目标题与描述）----
   'appearance.title': '外观',
-  'appearance.description': '管理 CSS 片段、预设主题与外观定制，查阅公开样式契约。',
+  'appearance.description': '管理 CSS 片段、主题与外观定制，查阅公开样式契约。',
 
   // ---- styleRef.（样式参考：总表/详细查询文案与骨架标签，#132；#231 起为
   // 外观合并分页的页签体，tabOverview/tabDetail 亦作外观页签文案沿用）----
@@ -1011,7 +1017,6 @@ export const zhCn: Record<MessageKey, string> = {
   // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
   'addons.enable': '启用',
   'addons.disable': '停用',
-  'addons.openSettingsPage': '打开组件设置页',
   'addons.closeSettingsPage': '关闭组件设置页',
   'addons.addonSettingsTitle': '组件设置页：{label}',
   'addons.statusEnabledRuntime': '已启用',
@@ -1020,6 +1025,9 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #353 T04 基础设置区（双标签作用范围 / 基础控件 / 保存反馈） ----
   'addons.openSettingsArea': '设置',
   'addons.settingsAreaTitle': '基础设置：{label}',
+  'addons.settingsDetailTitle': '{label} 设置',
+  'addons.detailCustomViewTab': '自定义设置页',
+  'addons.detailBasicsViewTab': '基础设置',
   'addons.closeSettingsArea': '返回组件列表',
   'addons.scopeUserDefault': '用户默认',
   'addons.scopeWorkspace': '当前工作区',
@@ -1040,7 +1048,6 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.saveFailedNoWorkspace': '当前无工作区',
   'addons.saveFailedStore': '存储写入失败',
   'addons.saveFailedRejected': '组件代次已终结',
-  'addons.openCustomPage': '打开自定义设置页',
   'addons.settingsEmpty': '该组件未注册设置定义',
   /** #465 组件设置分页：组件清单（hub）形态 */
   'addons.settingsHubTitle': '可配置的组件',

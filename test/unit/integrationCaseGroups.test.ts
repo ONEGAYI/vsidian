@@ -183,12 +183,15 @@ function productionCases(): Array<[string, null]> {
     ['addonT05Cases', parseCaseArray('addonT05Cases.ts', 'addonT05Cases')],
     ['addonStorageCases', parseCaseArray('addonStorageCases.ts', 'addonStorageCases')],
     ['addonT06Cases', parseCaseArray('addonT06Cases.ts', 'addonT06Cases')],
+    ['addonDocNavCases', parseCaseArray('addonDocNavCases.ts', 'addonDocNavCases')],
     ['addonT07Cases', parseCaseArray('addonT07Cases.ts', 'addonT07Cases')],
     ['addonT08Cases', parseCaseArray('addonT08Cases.ts', 'addonT08Cases')],
     ['addonBehaviorStateCases', parseCaseArray('addonBehaviorStateCases.ts', 'addonBehaviorStateCases')],
     ['addonT09Cases', parseCaseArray('addonT09Cases.ts', 'addonT09Cases')],
+    ['addonThemeCases', parseCaseArray('addonThemeCases.ts', 'addonThemeCases')],
     ['addonT10Cases', parseCaseArray('addonT10Cases.ts', 'addonT10Cases')],
     ['addonT11Cases', parseCaseArray('addonT11Cases.ts', 'addonT11Cases')],
+    ['addonRefViewsCases', parseCaseArray('addonRefViewsCases.ts', 'addonRefViewsCases')],
     ['addonT12Cases', parseCaseArray('addonT12Cases.ts', 'addonT12Cases')],
     ['addonT15InputCases', parseCaseArray('addonT15Cases.ts', 'addonT15InputCases')],
     ['addonT15RendererCases', parseCaseArray('addonT15Cases.ts', 'addonT15RendererCases')],
@@ -232,6 +235,30 @@ it('剪贴板互斥清单登记真实用例且全部保持 core 归属', () => {
     expect(cases.filter(([caseName]) => caseName === name)).toHaveLength(1)
     expect(core).toContain(name)
   }
+})
+
+it('直接调用宿主剪贴板的集成用例全部进入互斥清单', () => {
+  const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const declaration = source.statements.filter(ts.isVariableStatement)
+    .flatMap((statement) => [...statement.declarationList.declarations])
+    .find((entry) => ts.isIdentifier(entry.name) && entry.name.text === 'cases')!
+  const array = declaration.initializer as ts.ArrayLiteralExpression
+  const missing: string[] = []
+  for (const entry of array.elements) {
+    if (!ts.isArrayLiteralExpression(entry)) continue
+    let usesClipboard = false
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && /^vscode\.env\.clipboard\.(readText|writeText)$/.test(node.expression.getText(source))) {
+        usesClipboard = true
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(entry.elements[1]!)
+    const name = (entry.elements[0] as ts.StringLiteral).text
+    if (usesClipboard && !CLIPBOARD_CASE_NAMES.has(name)) missing.push(name)
+  }
+  expect(missing).toEqual([])
 })
 
 it('四个 core 分片与第五组无交集、无漏项，其他同领域用例仍保留强制检查', () => {

@@ -5,12 +5,12 @@
 事实源与本文关系：
 
 - 用户故事编号与定义：[vsidian-addons.md](vsidian-addons.md) §2；子票对应关系见[批次索引](batch-2026-10-vsidian-addons.md)「用户故事覆盖」。
-- 公开接口条目 ID（下表「接口映射」列）指向语义清单 [src/shared/addonApiCatalog.ts](../../src/shared/addonApiCatalog.ts) 的 `ADDON_API_ENTRIES`（22 条目，签名不手写第二份）。
+- 公开接口条目 ID（下表「接口映射」列）指向语义清单 [src/shared/addonApiCatalog.ts](../../src/shared/addonApiCatalog.ts) 的 `ADDON_API_ENTRIES`（初版 22 条目，当前以生成参考为准；签名不手写第二份）。
 - 验证证据路径为仓库相对路径；`t18-*` 日志为 T18 全矩阵回归本轮产物（`out/test/`，不入库）。
 
 ## 两组「六组」的对应
 
-规格宣传的六组能力面（视图与编辑、内容渲染、操作与界面、设置、生命周期与通信、诊断）与 API 目录的六个分组（`discovery` / `page-sdk` / `behaviors` / `settings` / `renderers` / `commands-menus-ui`，按实现模块面分组）不是一套切法。对应关系：
+规格宣传的六组能力面（视图与编辑、内容渲染、操作与界面、设置、生命周期与通信、诊断）与 API 目录首版的六个分组（`discovery` / `page-sdk` / `behaviors` / `settings` / `renderers` / `commands-menus-ui`，按实现模块面分组）不是一套切法；2026-10 批次起 API 目录追加新分组（首项 `paste-conversion`，#541）。对应关系：
 
 | 规格能力面 | API 目录承载条目 |
 | --- | --- |
@@ -57,6 +57,26 @@
 | 28 | 正常/整组件故障停用后内置显示 | #358、#361、#367 | `renderer-selection`（Q30 接管条件表） | 浏 `addonRendererTakeover`；集 `addonT09Cases`/`addonT12Cases`；装 B；样 renderer（正常停用降级 + 首选保留 + 恢复、故障降级 + 重试） | 过；真机观感待验 A64 |
 | 29 | 仍运行组件负责自身渲染 bug | #358、#361、#367 | `renderer-selection`（仍运行不自动接管） | 单 `addonRendererTakeover`；样 renderer（flow-buggy 自处理降级占位不被换回）；集 `addonT09Cases` | 过 |
 
+## 粘贴转换批次故事映射（2026-10 批次，#530 规格冻结）
+
+[声明式粘贴转换规格](addon-paste-conversion.md)的 11 项用户故事（P-U01–P-U11）按切片交付：T01（#541）覆盖 P-U01–P-U06、P-U09–P-U11 的基础链路；P-U07/P-U08（正则/条件/嵌套）归 T02（#542），复验全部基础故事。验证层缩写同上表；T01 证据截至本票实施轮。
+
+| 故事 | 用户结果（摘要） | 切片 | 接口映射 | 验证证据 |
+| --- | --- | --- | --- | --- |
+| P-U01 | 宿主登记规则，已开与新开页面共用 | T01 | `paste-rules-register`（enable 生命周期 `paste.registerRules`，身份平台注入） | 单 `addonRuntimePasteRules`（enable 面乙/停用回收/迟到拒绝）；真 `richPasteUndoHost`（真实组件宿主登记，已开/新开双面板消费有效规则） |
+| P-U02 | 来源特化 span 恢复为链接 | T01 | `paste-rules-register`（模板槽：字面转义/URL safeUrl/children 拼接） | 单 `htmlToMarkdownPasteRules`（命中/转义/URL）；浏 `addonPasteRules`（双载荷真实键盘） |
+| P-U03 | 邻接 strong/code/pre 不被破坏 | T01 | 同上（单条成功只接管命中元素） | 单 `htmlToMarkdownPasteRules`（邻接保持用例）；浏 `addonPasteRules` |
+| P-U04 | 不匹配/缺属性/输出非法回内置 | T01 | `paste-rules-register` errors（首条成功接管、失败继续、全失败回内置） | 单 `htmlToMarkdownPasteRules`（缺属性/非法 URL/失败回退）；浏 `addonPasteRules`（撤回后回退） |
+| P-U05 | 关闭组件立即恢复内置 | T01 | `paste-rules-register` lifecycle（停用/故障/代次结束撤回并广播） | 单 `addonRuntimePasteRules`（停用/故障/代次回收，新代次登记后旧句柄不能撤回新规则）；浏 `addonPasteRules`（快照撤回与迟到旧版本不复活）；真 `richPasteUndoHost`（停用回内置、重启登记） |
+| P-U06 | 纯文本粘贴绕过规则、富文本保留分步撤销 | T01 | `paste-rules-register` modes（纯文本/代码上下文不经规则；等值守卫） | 单 `richPasteAddonRules`（纯文本旁路/两阶段/等值单笔）；浏 `addonPasteRules`（Ctrl+Shift+V、首撤格式次撤文字）；真 `richPasteUndoHost`（真实规则 Ctrl+Shift+V 旁路、两笔 TextDocument Undo、双面板回流） |
+| P-U09 | 多组件命中结果稳定 | T01 | `paste-rules-register`（优先级降序、组件 ID 升序、规则 ID 升序确定性序） | 单 `addonPasteRules`（排序）+ `htmlToMarkdownPasteRules`（冲突顺序首条接管） |
+| P-U10 | 危险链接仍受 URL 策略限制 | T01 | `paste-rules-register` coordinates（URL 槽经既有 safeUrl） | 单 `htmlToMarkdownPasteRules`（javascript: 拒绝回内置） |
+| P-U11 | 错误声明可辨认拒绝 | T01 | `paste-rules-register` errors（invalid-declaration/duplicate-id/too-many/released 整批拒绝） | 单 `addonPasteRules`（校验矩阵）+ `addonRuntimePasteRules`（拒绝不算故障） |
+| P-U07 | 正则取值与条件组合 | T02（未实施） | 未实现节点在 T01 阶段显式拒绝（invalid-declaration） | 单 `addonPasteRules`（regex/condition/nested 未知字段拒绝） |
+| P-U08 | 子元素嵌套转换 | T02（未实施） | 同上；T01 的 children 槽只取内置转换结果 | 单 `addonPasteRules`（nested 字段拒绝） |
+
+本批次的公开接入路径：宿主注册面经 `AddonEnableContext.paste`（编译期消费 `test/addonApi/publicApiConsumer.ts` 钉住）；浏览器夹具 `addonPasteRulesFixture` 模拟快照广播，真实宿主探针 `richPasteUndoHost` 则加载 `addon-paste-rules` 夹具，经公开宿主登记→生产快照广播→生产页面粘贴→TextDocument 撤销与停用回收全链。该探针不直接注入规则快照；安装态与人工体验验收另行记录。
+
 ## 公开接入路径声明（不以内部 mock 代替）
 
 覆盖表中的行为验证均满足以下之一，未以内部控制器直接充当 SDK：
@@ -66,6 +86,21 @@
 3. **单测仅覆盖纯逻辑**（选择算法、解析、状态机），不承担「公开接入」语义的验收；表内凡单测独证的条目（如 `settings-definitions` 的形状校验）另有浏/集/样层的路径验证同故事整体。
 
 内部模块（`src/host/addons/` 各服务）不经由组件可达：`test/unit/addonApiSurface.test.ts` 钉住消费导入白名单与 type-only 边界。
+
+## 2026-10 扩展批次：文档导航（#543 / T03）
+
+以下故事定义见 [addon-navigation.md](addon-navigation.md)，公开接口映射为 `document-navigation`；普通链接语法 N-U08–N-U11 仍归 #534。
+
+| 故事 | 公开接入与验证 |
+| --- | --- |
+| N-U01 / N-U02 / N-U05 | 夹具经公开 `views.openDocument` 请求；`addonDocNavCases` 验证未开 Markdown、重显与标题/块/行真实落点；`addonDocNav` 单测覆盖命中/缺失 |
+| N-U03 | `addonDocNavCases` 断言原生编辑器与实际行选区 |
+| N-U04 | `addonViews` 注册表验证 embed 来源；`addonDocNavCases` 从引用 B 跳到仅 B 目录存在的文件，并用 A 来源 not-found 对照 |
+| N-U06 | `addonDocNav` 单测与集成验证 CRLF；`addonDocNav.mjs` 经生产 SDK/控制器验证阅读高亮与折叠目标重新可见 |
+| N-U07 | `addonNavApi` / `addonDocNav` 单测验证无工作区、越根、缺失、非法定位、越界与失败分类；集成补真实宿主拒绝矩阵 |
+| N-U12 | `addonViews` / `addonDocNav` / `addonDocNavDelivery` 钉住来源注销、旧代次、等待中改短、取消/超时与有界 ack；浏览器经卸载再装载验证旧回包不接入新代次 |
+
+T03 自动化运行证据随票面实施回填，人工验收仍开放。内部端口单测验证确定性时序，公开组件夹具承担实际消费；不把模拟宿主等同于真宿主证明。
 
 ## 未验项与限制（如实保留）
 
@@ -80,3 +115,38 @@
 全矩阵复现命令（与 T18 票面证据同口径）：`npm run compile`、`npm run test:unit`、`npm run test:browser -- --no-reuse`、`npm run test:integration`、`npm run check:stylecontract`、`npm run check:addonapi`、`npm run check:addoncompat`；安装态与 SSH 线分别为 `node test/integration/runInstalledAddons.mjs`、`node test/integration/runRemoteSshAddons.mjs`（各票面载有前提）。
 
 本表随批次收口建立，此后接口或验证变更时由触碰对应面的票顺带更新（同 `addonApiCatalog.ts` 的维护纪律：改接口必经语义清单与本文）。29 项全绿的口径以 T18 全矩阵回归报告为准（`out/test/t18-*.log`，矩阵结论见票面 t18.md 回填）。
+
+## 2026-10 扩展批次增补（#530–#533 规格）
+
+2026-10-15 起的扩展批次按各自规格另行登记覆盖（首版 29 项之外）。首条：
+
+| 切片 | 用户故事 | 接口映射 | 验证证据 |
+| --- | --- | --- | --- |
+| T05 只读引用浮窗（#544，[规格](addon-reference-views.md)） | R-U01–R-U07、R-U12 | `ref-views-popup`（`sdk.refViews.requestPopup`——来源 B 解析语境、互斥锚点、单浮窗仲裁、句柄与代次释放、错误分态透传） | 单 `addonRefViews`/`addonRefViewsRuntime`/`addonRefViewsPopup`/`documentSessionRefViews`/`addonPageLoader`；浏 `addonRefViews`（真实指针/键盘 + 绘制层）；集 `addonRefViewsCases`（绘制层与历史样式命中、来源 B、目标更新/失效、停用/页面关闭/租约回收）。R-U08–R-U11（组件容器嵌入）待 T06（#545） |
+
+## 组件设置详情自绘页优先覆盖（#553）
+
+本票改设置详情呈现关系并新增页面上下文面，公开接口映射为 `page-settings-context`（`sdk.settingsContext`——仅设置页）；呈现规格见 [addon-settings-detail.md](addon-settings-detail.md)。29 项故事中的 13/14/16/18（作用域、清除继承、停用可配置、故障排障）语义不变，呈现载体随本票演进。
+
+| 场景 | 公开接入与验证 |
+| --- | --- |
+| 详情首屏自绘页（自动装载、无重复表单） | 单 `addonSettingsArea`（#553 组：自动 openAddonPage/应答去重/次级页签/外壳保留）；浏 `addonSettingsContext`（真实 defineAddonPage 夹具装载进详情 + 首屏绘制层断言） |
+| 作用域真实传至组件 | 浏 `addonSettingsContext`（夹具经 facet 回显 scope=workspace——显示值与写入目标一致）；单 `addonSettingsArea`/`addonPageLoader`（applyScope 等值不分发、订阅退订） |
+| 搜索定位交给自绘页（未开/已开两态） | 单 `addonSettingsArea`（pendingFocus 消费路径与已开路径均交付 runtime、平台不描自己表单）；浏 `addonSettingsContext`（搜索点击 → 夹具回显 locate=def:flag） |
+| 生命周期（切换/重开/停用可配置/故障恢复/迟到） | 单 `addonPageLoader`（#553 组：释放整组回收、迟到订阅 no-op、查询不受代次影响）；浏 `addonSettingsContext`（故障撤下/重试恢复/切换组件残留撤除）；停用可配置沿用 `addonT05Cases`（宿主机制未改） |
+| 消费编译与门禁 | `publicApiConsumer`（SettingsPageContextSurface 钉住 + union/样例）；`addonApiSurface`（导入白名单 + 防回潮）；基线重锚随票（page-sdk 声明文本变更） |
+
+## 统一主题扩展覆盖（#546 / T07）
+
+本组故事来源为 [addon-themes.md](addon-themes.md)，不改写上方 T18 历史结论。公开宿主面为 `themes-register`，页面面为 `theme-environment`；API 仍为 1.0.0 候选。
+
+| 故事 | 用户结果 | 实际验证路径 |
+| --- | --- | --- |
+| H-U01/H-U02 | 原页签统一单选，来源可区分 | `themeSettings` / `appearanceSettings` 单测；生产设置页 `addonThemes` 浏览器（真实 CSS、同名来源、单选） |
+| H-U03/H-U11 | 安装只加候选，普通渲染器规则保留 | `addonRenderers` / `addonRendererTakeover` / `addonRendererService`；`addonThemes` 浏览器（内置与主题计算色、Live/阅读） |
+| H-U04 | 保存与重开回显 | `settingsService` / `themeSettings`；`addonThemes` 浏览器正式 settings.set 回环与切页重开；真实进程重启仍待人工 |
+| H-U05 | 不可用回落、首选保留、恢复沿用 | `addonThemes` / `addonThemeService`；`addonThemes` 浏览器；`addonThemeCases` 真宿主链 |
+| H-U06/H-U07 | 实际主题四态、缓存先更新、图形重画与释放 | `addonThemeEnvironment` / `addonPageLoader`；`themeEditor` 经公开 SDK 消费；浏览器计算色与退订；`addonThemeCases` 双文档及真实主题事件 |
+| H-U08 | 中英文、来源、搜索定位 | `themeSettings`；`addonThemes` 浏览器热换语言包、搜索与主题页签路由 |
+
+本地接手验证报告为 T07 工作树 `out/test/t07-resume-*`；联合全量回归由汇总分支记录。图表弹窗继续既有 `graphicPopup` 快照验证，T08 的安装、迁移和包体收口尚未交付。

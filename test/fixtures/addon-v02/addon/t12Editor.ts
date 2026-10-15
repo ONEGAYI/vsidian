@@ -202,6 +202,9 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
       if (answer.command) {
         const result = await runOp(answer.command.op)
         void sdk.channel.request('t12.result', { seq: answer.command.seq, outcome: result })
+      } else {
+        // 空应答立即重查会淹没共享宿主的事件缓冲；有命令时仍连续消费队列。
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
     }
   })()

@@ -14,6 +14,7 @@
 // - 旧快照、只读、已释放或失活写入明确拒绝（可辨认拒绝类型枚举）。
 import type { SerChange } from './protocol'
 import { isSerChange } from './protocol'
+import type { AddonDocNavRequest, AddonDocNavResult } from './addonNavApi'
 
 /** 视图种类：main = 面板主正文；embed = 嵌入内部 Live；hover = 悬停引用
  *  （只读预览，无写端口） */
@@ -128,12 +129,17 @@ export interface AddonViewHandle {
 }
 
 /** SDK views 面（views.list / views.get / 变化订阅——设计 §5.1）。
- *  仅编辑器页提供（设置页无编辑视图，views 为 undefined） */
+ *  仅编辑器页提供（设置页无编辑视图，views 为 undefined）。
+ *  #543 T03 起 views.openDocument 提供文档打开与定位请求（宿主解析与
+ *  执行——来源身份由 SDK 层注入，组件请求不携带身份字段） */
 export interface AddonViewsFacet {
   list(): readonly AddonViewInfo[]
   get(instanceId: string): AddonViewHandle | null
   onCreated(callback: (info: AddonViewInfo) => void): () => void
   onDisposed(callback: (info: AddonViewInfo) => void): () => void
+  /** 文档打开与定位请求（异步——宿主执行；结果区分 opened 与 located，
+   *  拒绝面见 AddonDocNavRejection；请求具有有界终态） */
+  openDocument(request: AddonDocNavRequest): Promise<AddonDocNavResult>
 }
 
 /** #426 视图身份反查面（experimental.viewIdentity 的内容）：CM6

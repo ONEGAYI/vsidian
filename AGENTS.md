@@ -38,7 +38,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **webview 端**（`src/webview/`）：CM6 EditorView + `acquireVsCodeApi` 消息桥；`src/shared/` 为两端共享的消息协议单一事实源（不依赖 vscode/DOM）。协议约定 webview 全程 LF 坐标（CM6 内部把 `\r\n` 规范化为 `\n`，宿主侧 `NewlineCoordinator` 负责双向坐标与文本转换）。
 - **构建**：esbuild 多产物——宿主 `out/extension.js`（node18/cjs/external vscode）、编辑器 webview `out/webview/main.js` 与设置页 webview `out/webview/settings.js`（#33；chrome118/iife，CSS 随 import 打包为同名 `.css`）；`npm run compile` 另跑 `tsc --noEmit` 做类型检查（esbuild 不查类型）。worktree 依赖预置：`node scripts/linkDeps.mjs <工作树>` 把 `node_modules` junction 到 `<父目录>/.deps/<lockfile哈希前12位>` 共享缓存（junction 在场禁 `npm ci/install`，防写穿缓存；真实 node_modules 在场时脚本中止不删）。
 - **测试**：`npm run test:unit`（vitest + `node --test` 启动器契约，纯逻辑 + jsdom 控制器，无宿主依赖；`VSIDIAN_TEST_HOST_MODE=foreground` 跳过独立桌面探针）；`npm run test:browser`（Playwright headless Chromium 以原生键盘/IME 驱动生产控制器——**涉及 webview 输入/光标行为的变更合并前必跑**，首次需 `npx playwright install chromium`；`VSIDIAN_TEST_BROWSER_CHANNEL=msedge` 仅本机借 Edge 调试）；`npm run test:integration`（1.82.3 真宿主，fixture 由 `test/integration/fixtures.mjs` 统一生成，三条启动器共用 `testHost.mjs` 策略——Windows 默认独立桌面不抢前台，完整逐例输出与退出码自动落盘 `.vscode-test/` 报告（`integration-dev.log` / `integration-installed.log` / `settings-activation.log`），**复核与追查失败优先读报告，不为补看信息重跑**；手动自跑的验证命令日志（含退出码）统一落 `out/test/`）。`_test.*` 注入命令仅 `VSIDIAN_TEST_HOOKS=1` 时注册、宿主侧门控（webview 被动接收的分层设计与「勿误判未设防」辨析见 [docs/specs/integration-test-groups.md](docs/specs/integration-test-groups.md)「测试钩子与消息通道门控」节）。
-- **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认三并发运行全部脚本（清单即 `names` 数组）；`-- --workers=1` 回退串行，`-- --suite=<名称>` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入 `out/test/browser-runs/run-*/`（report.json / report.md / 逐脚本日志），任一失败整体非零、单脚本 120 秒超时。**分组（2026-10-14 用户授权，仿集成第五组）**：本地缺省仍全量；CI 的 `browser` job 设 `VSIDIAN_TEST_BROWSER_GROUP=core`（全量减敏感名单），独立非必需的 `browser-sensitive` job 设 `sensitive`（失败红灯不吞退出码、不阻断必需检查）——敏感名单单一事实源在 `test/browser/groups.mjs`，维护口径与证据见 [docs/specs/integration-test-groups.md](docs/specs/integration-test-groups.md)「浏览器测试分组」节，未归因跟踪 #446。CI 无论成败均上传报告（artifact `browser-core-reports-a<attempt>` / `browser-sensitive-reports-a<attempt>`，attempt 从 1 起）——CI 失败时 `gh run view` 只有脚本名级结论，断言栈与逐脚本日志先 `gh run download <run-id> -n <组别>-reports-a<attempt>` 取报告，再决定是否本地复现。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
+- **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认三并发运行全部脚本（清单即 `names` 数组）；`-- --workers=1` 回退串行，`-- --suite=<名称>` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入 `out/test/browser-runs/run-*/`（report.json / report.md / 逐脚本日志），任一失败整体非零、单脚本 120 秒超时。**分组（2026-10-14 用户授权，仿集成第五组）**：本地缺省仍全量；CI 的 `browser` job 设 `VSIDIAN_TEST_BROWSER_GROUP=core`（全量减敏感名单），独立非必需的 `browser-sensitive` job 设 `sensitive`（失败红灯不吞退出码、不阻断必需检查）——敏感名单单一事实源在 `test/browser/groups.mjs`，维护口径与证据见 [docs/specs/integration-test-groups.md](docs/specs/integration-test-groups.md)「浏览器测试分组」节，新增未定性失败统一跟踪 #552。CI 无论成败均上传报告（artifact `browser-core-reports-a<attempt>` / `browser-sensitive-reports-a<attempt>`，attempt 从 1 起）——CI 失败时 `gh run view` 只有脚本名级结论，断言栈与逐脚本日志先 `gh run download <run-id> -n <组别>-reports-a<attempt>` 取报告，再决定是否本地复现。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
 - **集成测试分组与分片（2026-10-01 用户授权）**：本地默认全量，`VSIDIAN_ITEST_SHARDS=4` 可起四个独立便携宿主；CI 四片设置 `VSIDIAN_TEST_GROUP=core` 与 `VSIDIAN_TEST_SHARD=k/4`，第五组 `integration-sensitive` 独立运行 `VSIDIAN_TEST_GROUP=sensitive`（失败红灯、暂不纳入强制汇总）。**本地全量的时长预算（2026-10-14 retro）**：宿主默认超时 15 分钟按分片口径设定，全量单宿主接近预算上限——与其他重负载验证（如 browser 全量三并发）同机并行必击穿；全量跑须 `VSIDIAN_ITEST_TIMEOUT_MS`（秒）放宽预算或改分片，超时被杀时输出自带「最近输出」快照（断点用例名就在其中）。完整名称名单、证据、报告留存与本地入口只维护于 [docs/specs/integration-test-groups.md](docs/specs/integration-test-groups.md)；分组不代表根因已排除，不自动扩大豁免。
 - **历史契约门禁 job（#135）**：ci.yml 的 `style-contract` job 跑 `npm run check:stylecontract:baseline`（git 锚定基线复验，须在契约检查**之前**——先证检查器可信，再信检查结果）+ `npm run check:stylecontract`（八项全检查），变更统计写 step summary、报告经 artifact（`style-contract-report`）保留。checkout 须 `fetch-depth: 0` + `fetch-tags: true`（浅克隆即缺）；job 名是远端必需检查的 context 候选，改名视同变更保护规则。远端名单现状与授权后操作步骤见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)。
 - **打包与安装态回归（#15）**：`npx @vscode/vsce package --no-dependencies` 产出 VSIX（esbuild bundle 自包含，不带 node_modules；`.vscodeignore` 排除 src/test/docs）。`node test/integration/runInstalled.mjs` 把 VSIX 经 `--install-extension` 装入隔离 profile 的 1.82.3 便携宿主（#255 下界矩阵），安装注册链路真实走通；宿主测试模式要求 `--extensionTestsPath` 依赖 `--extensionDevelopmentPath` 同时存在（1.86.2 实测缺则静默挂起，1.82.3 同型装配），故 dev path 指向安装解压目录——加载代码仍是 VSIX 产物而非仓库源码树——后跑同一集成套件。
@@ -108,7 +108,8 @@ vsidian/
 │   │   ├── 0013-wikilink-completion-file-catalog.md           # 全文件登记与联想架构决策
 │   │   ├── 0014-vscode-query-matching-for-wikilinks.md        # VSCode 查询匹配复用决策
 │   │   ├── 0015-behavior-filter-query-blocks.md               # 行为筛选积木构造器决策
-│   │   └── 0016-two-layer-behavior-disable-semantics.md       # 行为禁用两层独立开关决策
+│   │   ├── 0016-two-layer-behavior-disable-semantics.md       # 行为禁用两层独立开关决策
+│   │   └── 0017-unified-addon-theme-selection.md              # 组件主题统一入口与互斥选择决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -141,64 +142,79 @@ vsidian/
 │   │   ├── vsidian-addons-v02-page-sdk-probe.md   # V02 页面 SDK 探针结论
 │   │   └── wikilink-completion-v01-probe.md       # V01 补 ID 与尽力撤销探针报告
 │   ├── specs/      # 产品规格
-│   │   ├── addon-behavior-disabled-state.md     # 组件行为禁用态可见性规格
-│   │   ├── addon-settings-grouping.md           # 附加组件设置分组规格
-│   │   ├── addons-api-gate.md                   # API 契约门禁 CI 接线规格
-│   │   ├── anchor-navigation.md                 # 锚点跳转规格（标题/块引用/复制块链接）
-│   │   ├── appearance-merge.md                  # 外观合并分页规格
-│   │   ├── batch-2026-09-menu.md                # 右键菜单批次总览与决策回执
-│   │   ├── batch-2026-09.md                     # 2026-09 开票批次总览
-│   │   ├── batch-2026-10-heading-fold.md        # 标题折叠批次索引
-│   │   ├── batch-2026-10-menu-scenes.md         # 右键菜单场景差异化批次切片记录
-│   │   ├── batch-2026-10-settings-sections.md   # 2026-10 设置页批次实施树
-│   │   ├── batch-2026-10-vscode-ops.md          # 2026-10 编辑器操作批次实施树
-│   │   ├── batch-2026-10-vsidian-addons.md      # 附加组件验证与实施批次索引
-│   │   ├── batch-2026-10-wikilink-completion.md # 双链输入联想实施批次
-│   │   ├── behavior-manage-pagination.md        # 行为管理分页与筛选规格
-│   │   ├── blockquote-accent-bar.md             # 引用块紫色提示边条规格
-│   │   ├── blockquote-table.md                  # 引用块内表格规格
-│   │   ├── code-block-card.md                   # 代码块卡片功能规格
-│   │   ├── code-language-sources.md             # 新词法来源许可与边界
-│   │   ├── context-menu.md                      # 统一右键菜单规格（正文全域接管）
-│   │   ├── css-snippets.md                      # CSS片段与样式兼容规格
-│   │   ├── default-editor-guard.md              # 默认编辑器守护规格
-│   │   ├── frontmatter-table.md                 # frontmatter 表格化规格
-│   │   ├── graphic-code-block-interaction.md    # 图形化代码块交互规格
-│   │   ├── heading-fold.md                      # 正文标题折叠实施规格
-│   │   ├── hover-embed-phase2-tickets/…         # 二期票据正文与依赖
-│   │   ├── hover-embed-phase3-tickets/…         # 三期票据正文与依赖
-│   │   ├── hover-preview-embed.md               # 悬停预览与文档嵌入规格
-│   │   ├── html-comment-support.md              # HTML 注释快捷键与呈现规格
-│   │   ├── i18n.md                              # 全局 i18n 适配规格
-│   │   ├── image-paste.md                       # 图片粘贴插入与资产文件夹规格
-│   │   ├── image-popup.md                       # 图片弹窗查看与防误触规格
-│   │   ├── integration-host-teardown-noise.md   # CI 收尾退出噪声边界（#211）
-│   │   ├── integration-test-groups.md           # 四片强制与第五敏感组规格
-│   │   ├── keybindings.md                       # 快捷键清单与默认值
-│   │   ├── live-table-column-width.md           # Live 表格列宽规格
-│   │   ├── manual-verification.md               # 人工验证清单
-│   │   ├── mvp-issues.md                        # MVP GitHub Issue 索引
-│   │   ├── mvp.md                               # MVP 规格主文档
-│   │   ├── reference-view-group.md              # 引用视图设置组与跳转目标提示规格
-│   │   ├── rich-text-paste.md                   # 富文本粘贴与分步撤销规格
-│   │   ├── search-reveal.md                     # 外部搜索导航定位恢复规格
-│   │   ├── settings-page-visual-refresh.md      # 设置页视觉刷新规格（#155）
-│   │   ├── skeleton-screen.md                   # 编辑器初开骨架屏加载规格
-│   │   ├── style-contract-gate.md               # 契约门禁 CI 接线与远端配置文档
-│   │   ├── style-reference-i18n.md              # 样式参考条目双语化规格
-│   │   ├── symbol-input.md                      # 符号输入与行内围栏扩展约定落档
-│   │   ├── table-interaction-rework.md          # 表格交互重做规格
-│   │   ├── toolbar-refresh.md                   # 工具栏刷新按钮与缓存刷新规格
-│   │   ├── toolbar-view-toggle.md               # 工具栏双态切换按钮规格
-│   │   ├── tooltip.md                           # 统一自绘悬停提示规格
-│   │   ├── ui-patterns.md                       # UI元素形态契约目录（单一事实源）
-│   │   ├── vault-index-backlinks.md             # 引用索引与反链实施规格
-│   │   ├── viewport-width.md                    # 可读行宽与双模式列布局规格
-│   │   ├── vsidian-addons-coverage.md           # 29 用户故事覆盖映射
-│   │   ├── vsidian-addons-tickets/…             # 附加组件验证与实施票面
-│   │   ├── vsidian-addons.md                    # 附加组件接入与公开API规格草案
-│   │   ├── wikilink-completion-tickets/…        # 双链联想验证与实施票面
-│   │   └── wikilink-completion.md               # 双链文件输入联想规格
+│   │   ├── addon-api-extension-tickets/          # 附加组件API扩展实施票据
+│   │   │   ├── t01-paste-registration.md  # 基础粘贴规则实施票
+│   │   │   ├── t02-paste-expressions.md   # 复杂粘贴表达式实施票
+│   │   │   ├── t03-document-navigation.md # 文档导航API实施票
+│   │   │   ├── t04-link-line-suffix.md    # 普通链接行号实施票
+│   │   │   ├── t05-reference-popup.md     # 只读引用浮窗实施票
+│   │   │   ├── t06-reference-embed.md     # 组件容器引用嵌入实施票
+│   │   │   ├── t07-theme-system.md        # 统一主题机制实施票
+│   │   │   └── t08-codex-retirement.md    # Codex内核退役实施票
+│   │   ├── addon-behavior-disabled-state.md      # 组件行为禁用态可见性规格
+│   │   ├── addon-navigation.md                   # 组件导航与普通链接行号规格
+│   │   ├── addon-paste-conversion.md             # 组件声明式粘贴转换规格
+│   │   ├── addon-reference-views.md              # 组件只读引用浮窗与嵌入规格
+│   │   ├── addon-settings-detail.md              # 组件设置详情自绘页优先规格
+│   │   ├── addon-settings-grouping.md            # 附加组件设置分组规格
+│   │   ├── addon-themes.md                       # 组件主题与内核退役规格
+│   │   ├── addons-api-gate.md                    # API 契约门禁 CI 接线规格
+│   │   ├── anchor-navigation.md                  # 锚点跳转规格（标题/块引用/复制块链接）
+│   │   ├── appearance-merge.md                   # 外观合并分页规格
+│   │   ├── batch-2026-09-menu.md                 # 右键菜单批次总览与决策回执
+│   │   ├── batch-2026-09.md                      # 2026-09 开票批次总览
+│   │   ├── batch-2026-10-addon-api-extensions.md # 附加组件API扩展批次索引
+│   │   ├── batch-2026-10-heading-fold.md         # 标题折叠批次索引
+│   │   ├── batch-2026-10-menu-scenes.md          # 右键菜单场景差异化批次切片记录
+│   │   ├── batch-2026-10-settings-sections.md    # 2026-10 设置页批次实施树
+│   │   ├── batch-2026-10-vscode-ops.md           # 2026-10 编辑器操作批次实施树
+│   │   ├── batch-2026-10-vsidian-addons.md       # 附加组件验证与实施批次索引
+│   │   ├── batch-2026-10-wikilink-completion.md  # 双链输入联想实施批次
+│   │   ├── behavior-manage-pagination.md         # 行为管理分页与筛选规格
+│   │   ├── blockquote-accent-bar.md              # 引用块紫色提示边条规格
+│   │   ├── blockquote-table.md                   # 引用块内表格规格
+│   │   ├── code-block-card.md                    # 代码块卡片功能规格
+│   │   ├── code-language-sources.md              # 新词法来源许可与边界
+│   │   ├── context-menu.md                       # 统一右键菜单规格（正文全域接管）
+│   │   ├── css-snippets.md                       # CSS片段与样式兼容规格
+│   │   ├── default-editor-guard.md               # 默认编辑器守护规格
+│   │   ├── frontmatter-table.md                  # frontmatter 表格化规格
+│   │   ├── graphic-code-block-interaction.md     # 图形化代码块交互规格
+│   │   ├── heading-fold.md                       # 正文标题折叠实施规格
+│   │   ├── hover-embed-phase2-tickets/…          # 二期票据正文与依赖
+│   │   ├── hover-embed-phase3-tickets/…          # 三期票据正文与依赖
+│   │   ├── hover-preview-embed.md                # 悬停预览与文档嵌入规格
+│   │   ├── html-comment-support.md               # HTML 注释快捷键与呈现规格
+│   │   ├── i18n.md                               # 全局 i18n 适配规格
+│   │   ├── image-paste.md                        # 图片粘贴插入与资产文件夹规格
+│   │   ├── image-popup.md                        # 图片弹窗查看与防误触规格
+│   │   ├── integration-host-teardown-noise.md    # CI 收尾退出噪声边界（#211）
+│   │   ├── integration-test-groups.md            # 四片强制与第五敏感组规格
+│   │   ├── keybindings.md                        # 快捷键清单与默认值
+│   │   ├── live-table-column-width.md            # Live 表格列宽规格
+│   │   ├── manual-verification.md                # 人工验证清单
+│   │   ├── mvp-issues.md                         # MVP GitHub Issue 索引
+│   │   ├── mvp.md                                # MVP 规格主文档
+│   │   ├── reference-view-group.md               # 引用视图设置组与跳转目标提示规格
+│   │   ├── rich-text-paste.md                    # 富文本粘贴与分步撤销规格
+│   │   ├── search-reveal.md                      # 外部搜索导航定位恢复规格
+│   │   ├── settings-page-visual-refresh.md       # 设置页视觉刷新规格（#155）
+│   │   ├── skeleton-screen.md                    # 编辑器初开骨架屏加载规格
+│   │   ├── style-contract-gate.md                # 契约门禁 CI 接线与远端配置文档
+│   │   ├── style-reference-i18n.md               # 样式参考条目双语化规格
+│   │   ├── symbol-input.md                       # 符号输入与行内围栏扩展约定落档
+│   │   ├── table-interaction-rework.md           # 表格交互重做规格
+│   │   ├── toolbar-refresh.md                    # 工具栏刷新按钮与缓存刷新规格
+│   │   ├── toolbar-view-toggle.md                # 工具栏双态切换按钮规格
+│   │   ├── tooltip.md                            # 统一自绘悬停提示规格
+│   │   ├── ui-patterns.md                        # UI元素形态契约目录（单一事实源）
+│   │   ├── vault-index-backlinks.md              # 引用索引与反链实施规格
+│   │   ├── viewport-width.md                     # 可读行宽与双模式列布局规格
+│   │   ├── vsidian-addons-coverage.md            # 29 用户故事覆盖映射
+│   │   ├── vsidian-addons-tickets/…              # 附加组件验证与实施票面
+│   │   ├── vsidian-addons.md                     # 附加组件接入与公开API规格草案
+│   │   ├── wikilink-completion-tickets/…         # 双链联想验证与实施票面
+│   │   └── wikilink-completion.md                # 双链文件输入联想规格
 │   └── trees/      # 文件树子视图承载目录
 │       ├── perf.md # 性能实测归档视图
 │       └── src.md  # 源码结构视图：三端全量展开

@@ -28,6 +28,7 @@ import {
   type AddonRendererProviderInfo,
   type AddonRendererStoreV1,
   type AddonRenderersTablePayload,
+  type RendererThemeSelectionContext,
 } from '../../shared/addonRenderers'
 
 /** 持久层端口（vscode 层实现：globalState 键 vsidian.addons.renderers） */
@@ -99,9 +100,15 @@ export class AddonRendererService {
   /**
    * 用户按语言显式首选。provider 传 null = 清除（回确定性默认序）；
    * 'builtin' 仅对内置图形语言可选（其余语言无内置管线，选内置不可执行
-   * ——拒绝）；未知提供者（非本会话候选、非内置）拒绝。
+   * ——拒绝）；未知提供者（非本会话候选、非内置）拒绝。#546 T07：
+   * themedProviderIds 在场时主题关联提供者拒绝（不能经一般渲染候选
+   * 路径绕过主题单选——主题提供者的生效只能由主题首选驱动）。
    */
-  setPreferred(language: string, provider: string | null): 'ok' | 'unknown-provider' {
+  setPreferred(
+    language: string,
+    provider: string | null,
+    themedProviderIds?: ReadonlySet<string>,
+  ): 'ok' | 'unknown-provider' {
     const lang = language.trim()
     if (provider === null) {
       if (!(lang in this.store.preferred)) {
@@ -114,7 +121,7 @@ export class AddonRendererService {
       this.refreshTableAndNotify()
       return 'ok'
     }
-    if (!this.isSelectableProvider(lang, provider)) {
+    if (!this.isSelectableProvider(lang, provider, themedProviderIds)) {
       return 'unknown-provider'
     }
     if (this.store.preferred[lang] === provider) {
@@ -143,10 +150,15 @@ export class AddonRendererService {
   }
 
   /**
-   * 当前生效表（可用性谓词由 wiring 按 runtime 状态注入）。内容与上次
-   * 相同则返回旧表（version 不递增、不通知——等值广播幂等）。
+   * 当前生效表（可用性谓词由 wiring 按 runtime 状态注入；#546 T07 起
+   * themeContext 由 wiring 按主题目录与唯一首选注入——主题关联提供者的
+   * 选择例外见 selectEffectiveRenderers）。内容与上次相同则返回旧表
+   * （version 不递增、不通知——等值广播幂等）。
    */
-  effectiveTable(isAddonAvailable: (addonId: string) => boolean): AddonRenderersTablePayload {
+  effectiveTable(
+    isAddonAvailable: (addonId: string) => boolean,
+    themeContext?: RendererThemeSelectionContext,
+  ): AddonRenderersTablePayload {
     const candidates: AddonRendererCandidate[] = []
     for (const [addonId, providers] of this.candidates) {
       for (const info of providers) {
@@ -159,6 +171,7 @@ export class AddonRendererService {
       builtinLanguages: builtinRendererLanguages(),
       preferred: this.store.preferred,
       batches: this.store.batches,
+      ...(themeContext ? { theme: themeContext } : {}),
     })
     if (this.lastTable !== null && tablesEqual(this.lastTable, { providers: candidates, languages: selection.languages })) {
       return this.lastTable
@@ -198,10 +211,18 @@ export class AddonRendererService {
     return emptyAddonRendererStore()
   }
 
-  private isSelectableProvider(language: string, provider: string): boolean {
+  private isSelectableProvider(
+    language: string,
+    provider: string,
+    themedProviderIds?: ReadonlySet<string>,
+  ): boolean {
     if (provider === BUILTIN_RENDERER_PROVIDER_ID) {
       // 内置只对内置图形语言可选（其余语言无内置管线）
       return builtinRendererLanguages().includes(language)
+    }
+    // #546 T07：主题关联提供者不接受 renderer 按语言首选（主题单选例外）
+    if (themedProviderIds?.has(provider)) {
+      return false
     }
     const separator = provider.indexOf('/')
     if (separator <= 0) {

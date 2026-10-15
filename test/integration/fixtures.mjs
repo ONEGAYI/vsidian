@@ -878,6 +878,52 @@ const HR_DOC = [
  */
 export async function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
   writeFileSync(path.join(wsDir, 'lf.md'), LF_DOC, 'utf8')
+  // #543 T03 附加组件文档导航样例（独立文件——导航零写回但会被打开，
+  // 不与既有用例样本共用）：
+  // - nav-target.md：标题/块锚点与行号定位的 Markdown 目标（LF）；
+  // - nav-target-crlf.md：CRLF 行号换算落点断言（UTF-8 文本保留 \r\n）；
+  // - nav-target.ts：原生编辑器行定位目标（可读文本）；
+  // - nav-opener.md + sub/：来源面板载体与嵌入来源（N-U04——sub/nav-deep.md
+  //   只在 sub/ 下存在，从外层 A 解析必 not-found，嵌入 B 为基准才命中）
+  writeFileSync(path.join(wsDir, 'nav-target.md'), [
+    '# 导航目标首行标题',
+    '',
+    '第一段正文。',
+    '',
+    '## 深处标题',
+    '',
+    '深处标题下正文。 ^navblk',
+    '',
+    '# 结尾标题',
+    '',
+    '结尾段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'nav-target-crlf.md'), 'CRLF甲行\r\nCRLF乙行\r\nCRLF丙行\r\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'nav-target.ts'), 'export const a = 1\nexport const b = 2\nexport const c = 3\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'nav-opener.md'), [
+    '# 开面板标题',
+    '',
+    '打开面板的载体文档。',
+    '',
+    '![[sub/nav-b.md]]',
+    '',
+    '结尾段。',
+    '',
+  ].join('\n'), 'utf8')
+  mkdirSync(path.join(wsDir, 'sub'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'sub', 'nav-b.md'), [
+    '# 嵌入目标 B',
+    '',
+    '嵌入内部 Live 的正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'sub', 'nav-deep.md'), [
+    '# 深层标题',
+    '',
+    '深层目标正文。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'find.md'), FIND_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find-hidden-source.md'),
     '| name | state |\n| --- | --- |\n| build | ok |\n\nBelow the table.\n', 'utf8')
@@ -981,6 +1027,7 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'typography.md'), TYPOGRAPHY_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode.md'), MODE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'viewport-mermaid.md'), VIEWPORT_MERMAID_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'viewport-fast-mermaid.md'), VIEWPORT_MERMAID_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode-anchor.md'), MODE_ANCHOR_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'syntax.md'), SYNTAX_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'fence-chunk.md'), FENCE_CHUNK_DOC, 'utf8')

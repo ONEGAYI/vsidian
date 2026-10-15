@@ -18,7 +18,10 @@ import type { Extension } from '@codemirror/state'
 import type { AddonHeadingFoldFacet } from './addonFoldApi'
 import type { AddonHostSettingsFacet } from './addonHostSettingsApi'
 import type { AddonSyntaxFacet } from './addonSyntaxApi'
+import type { AddonSdkRefViewsFacet } from './addonRefViews'
 import type { AddonRenderersFacet } from './addonRenderers'
+import type { AddonThemeEnvironmentFacet } from './addonThemes'
+import type { AddonSettingsContextFacet } from './addonSettingsContextApi'
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from './addonEditApi'
 import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from './addonBehaviors'
 import type {
@@ -109,6 +112,9 @@ export interface AddonSdkMenusFacet {
  *  #436 起快照含三类可选场景命中负载（table/link/graphic），组成类型一并
  *  透出——组件谓词按 zone 消费负载字段（如 ctx.link?.kind） */
 export type { MenuContextSnapshot, TableMenuHit, LinkMenuHit, MenuLinkKind, GraphicMenuHit }
+// T05（#544）refViews 面 facet 的再导出（公开声明在 addonRefViews 单一
+// 事实源；SDK 聚合面按页注入——签名提取与消费样例经本模块可达）
+export type { AddonSdkRefViewsFacet } from './addonRefViews'
 
 /** 通道请求结果：普通拒绝与组件异常分开（装载器只报协议性结束态；
  *  rejected = 宿主侧未注册 topic 或业务拒绝；timeout/released 由装载器
@@ -152,6 +158,13 @@ export interface VsidianAddonPageSdk {
    *  分开（register 在设置页无意义，本面只报事实）。组件被停用后设置
    *  页不卸载，本面仍可查询与订阅（灰态消费场景） */
   readonly behaviorState?: AddonBehaviorStateFacet
+  /** #553 设置页上下文面（仅设置页提供；编辑器页为 undefined）：「组件
+   *  设置」详情的平台侧上下文——作用域标签状态（user/workspace + 工作
+   *  区在场）与搜索定位目标（def/group 键）的快照读取与变化订阅。数据
+   *  源是设置页的平台外壳（作用域切换与 #472 定位链路），组件经本面
+   *  取得这些信息而不读取平台私有 DOM。onLocateTarget 订阅即回放当前
+   *  挂起目标（页面装载晚于定位到达的补投；null 表示清除） */
+  readonly settingsContext?: AddonSettingsContextFacet
   /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */
   readonly commands?: AddonSdkCommandsFacet
   /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */
@@ -160,6 +173,15 @@ export interface VsidianAddonPageSdk {
    *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在
    *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */
   readonly renderers?: AddonRenderersFacet
+  /** T05（#544）只读引用视图面（仅编辑器页；设置页为 undefined）：请求
+   *  内核引用浮窗与本次请求关闭句柄（单页单浮窗，新请求替换旧请求）；
+   *  T06 起在同一 facet 上扩展组件容器挂载入口 */
+  readonly refViews?: AddonSdkRefViewsFacet
+  /** #546 T07 主题环境面（仅编辑器页；设置页为 undefined）：VSCode 实际
+   *  生效主题的明暗快照与变化订阅（四态两轴投影——亮色高对比不为暗；
+   *  重复值不通知；通知在缓存更新后送达——回调中 get 拿新值；代次释放
+   *  自动退订）。快照源为宿主事件推送，不由组件自行嗅探样式环境 */
+  readonly themeEnvironment?: AddonThemeEnvironmentFacet
   /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与
    *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */
   readonly ui?: AddonSdkUiFacet

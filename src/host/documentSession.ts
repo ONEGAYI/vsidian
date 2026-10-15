@@ -121,7 +121,11 @@ export interface PanelPort {
    *  （成功携带身份/版本/全文/范围，失败为错误分态）。只读交互，不进
    *  edit.request 通道，暂停态同样放行 */
   readHoverTarget?(
-    payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
+    payload: HoverPreviewRequestPayload & {
+      verifiedSource?: { fsPath: string; version: number }
+      /** T05（#544）附加组件来源覆盖（会话层已核验成员资格的来源 fsPath） */
+      resolvedSource?: { fsPath: string }
+    },
     report: (result: RefReadOutcome) => void,
   ): void
   /** #342（P3-10）悬停请求取消（vscode 层注入：定位在途 web 抓取消费者
@@ -547,6 +551,7 @@ export class DocumentSession {
    * 面板关闭与 SSH 断连（dispose）都走这里，不得静默丢弃用户输入。
    */
   detachPanel(sessionId: string): void {
+    if (this.pendingLocate?.sessionId === sessionId) this.pendingLocate.finish(false)
     const panel = this.panels.get(sessionId)
     if (panel) {
       const fragments = [...panel.conflictFragments]
@@ -598,6 +603,7 @@ export class DocumentSession {
   }
 
   dispose(): void {
+    this.pendingLocate?.finish(false)
     this.disposed = true
     this.panels.clear()
     this.versionLog.length = 0
@@ -1129,7 +1135,11 @@ export class DocumentSession {
       case 'view.locate.ack':
         // 定位送达确认（#163 验收反馈）：offset 对账后清除待送达意图——
         // 陈旧 ack（连续跳转中前一次的迟到回执）不得误清后一次的意图
-        if (message.offset === this.lastLocate?.offset) {
+        if (message.locateId !== undefined && message.locateId === this.pendingLocate?.locateId &&
+          this.pendingLocate.sessionId === sessionId && message.offset === this.lastLocate?.offset) {
+          this.pendingLocate.finish(this.pendingLocate.version === this.doc.version)
+        } else if (message.locateId === undefined && this.lastLocate?.locateId === undefined &&
+          message.offset === this.lastLocate?.offset) {
           this.lastLocate = null
         }
         return Promise.resolve()
@@ -1286,6 +1296,27 @@ export class DocumentSession {
             return
           }
           verifiedSource = { fsPath: parent.fsPath, version: parent.version }
+        }
+        // T05（#544）附加组件引用请求的来源覆盖：以来源实例（views 面）的
+        // 目标文档为解析语境（R-U02——embed B 内请求不误用父 A 目录）。
+        // 信任边界：sourceFsPath 须为本会话已送达目标（hoverSourceFsPaths
+        // 成员——与 image.request/hover.tokens.request 的 sourceDocUri 守卫
+        // 同一口径），被攻陷 webview 不能借本通道接任意 URI；'main' 恒空串
+        // = 面板文档自身（回落常规根请求，不进覆盖路径）。与 child-source
+        // （message.source）及 linkHref/directTarget 形态互斥
+        let addonResolvedSource: { fsPath: string; version: number } | undefined
+        if (message.addonSource !== undefined && message.addonSource.sourceFsPath !== '') {
+          if (message.source !== undefined || message.linkHref !== undefined || message.directTarget !== undefined ||
+            !panel.hoverSourceFsPaths.has(message.addonSource.sourceFsPath)) {
+            reject('source-expired')
+            return
+          }
+          const current = await panel.port.readHoverSource?.(message.addonSource.sourceFsPath)
+          if (!current) {
+            reject('source-expired')
+            return
+          }
+          addonResolvedSource = { fsPath: message.addonSource.sourceFsPath, version: current.version }
         }
         const depth = parent ? parent.depth + 1 : 1
         const treeId = parent?.treeId ?? message.occurrenceId ?? message.instanceId
@@ -1495,11 +1526,16 @@ export class DocumentSession {
         // Service）内管理——会话级 shapeKey 按目标文本形态区分，URL 微差
         // 产生不同键，合并口径以服务层归一为准。此处仅按 href scheme 预
         // 判路由（安全边界仍由 resolveHoverTargetForm 的开关/准入复核）
+        const addonPortPayload = {
+          ...message,
+          ...(verifiedSource ? { verifiedSource } : {}),
+          ...(addonResolvedSource ? { resolvedSource: { fsPath: addonResolvedSource.fsPath } } : {}),
+        }
         if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
-          port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, report)
+          port(addonPortPayload, report)
           return Promise.resolve()
         }
-        const shapeKey = hoverShapeKeyOf(message, verifiedSource)
+        const shapeKey = hoverShapeKeyOf(message, verifiedSource ?? addonResolvedSource)
         const cached = this.hoverReadCache.get(shapeKey)
         if (cached) {
           this.hoverCacheHits++
@@ -1516,7 +1552,7 @@ export class DocumentSession {
           const epoch = this.hoverEpochs.get(shapeKey) ?? 0
           const requestClock = this.hoverClock
           pending = new Promise<RefReadOutcome>((resolve) => {
-            port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, resolve)
+            port(addonPortPayload, resolve)
           })
           this.hoverReadInFlight.set(shapeKey, pending)
           void pending.then((outcome) => {
@@ -2037,12 +2073,37 @@ export class DocumentSession {
    *  为「待送达定位意图」（webview LF 坐标原样）——送达确认（ack）到达前
    *  面板重握手时补发兜底 */
   postToPanel(sessionId: string, message: HostToWebview): void {
-    this.panels.get(sessionId)?.port.send(message)
     if (message.kind === 'view.locate') {
+      if (this.pendingLocate?.locateId !== message.locateId) this.pendingLocate?.finish(false)
       // head（#318）随定位意图一并留存——补发不降级为单点
-      this.lastLocate = { offset: message.offset, head: message.head }
+      this.lastLocate = { offset: message.offset, head: message.head, locateId: message.locateId }
     }
+    this.panels.get(sessionId)?.port.send(message)
   }
+
+  /** 组件导航须等页面处理定位并确认；关闭、取消、后续定位和超时均终结旧意图。 */
+  locateAndWait(sessionId: string, offset: number, signal: AbortSignal): Promise<boolean> {
+    this.pendingLocate?.finish(false)
+    if (!this.panels.get(sessionId)?.ready || signal.aborted) return Promise.resolve(false)
+    const locateId = ++this.nextLocateId
+    return new Promise((resolve) => {
+      const cancel = () => finish(false)
+      const timer = setTimeout(cancel, 5000)
+      const finish = (delivered: boolean) => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', cancel)
+        if (this.lastLocate?.locateId === locateId) this.lastLocate = null
+        this.pendingLocate = undefined
+        resolve(delivered)
+      }
+      this.pendingLocate = { sessionId, locateId, version: this.doc.version, finish }
+      signal.addEventListener('abort', cancel, { once: true })
+      this.postToPanel(sessionId, { kind: 'view.locate', offset, locateId })
+    })
+  }
+
+  private nextLocateId = 0
+  private pendingLocate?: { sessionId: string; locateId: number; version: number; finish(delivered: boolean): void }
 
   /** 待送达定位意图（null=无未送达意图）。面板重载（retainContextWhenHidden
    *  关闭，隐藏即销毁）可能让 view.locate 随旧 webview 实例丢失——重握手
@@ -2050,9 +2111,10 @@ export class DocumentSession {
    *  对账清除（#163 验收反馈）：此后不再补发，重载恢复交给 webview 持久化
    *  锚点（定位点随 locateOffset 落盘）——用户送达后的手动移位不被历史
    *  程序定位重播 */
-  private lastLocate: { offset: number; head?: number } | null = null
+  private lastLocate: { offset: number; head?: number; locateId?: number } | null = null
 
   private sendInit(panel: PanelEntry): void {
+    if (this.pendingLocate && this.pendingLocate.version !== this.doc.version) this.pendingLocate.finish(false)
     panel.ready = true
     panel.port.send({
       kind: 'init',
@@ -2067,6 +2129,7 @@ export class DocumentSession {
       panel.port.send({
         kind: 'view.locate',
         offset: this.lastLocate.offset,
+        ...(this.lastLocate.locateId !== undefined ? { locateId: this.lastLocate.locateId } : {}),
         ...(this.lastLocate.head !== undefined ? { head: this.lastLocate.head } : {}),
       })
     }

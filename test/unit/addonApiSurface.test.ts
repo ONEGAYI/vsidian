@@ -15,10 +15,12 @@ const consumerPath = path.join(root, 'test', 'addonApi', 'publicApiConsumer.ts')
 
 /** 消费面允许值导入的公开模块（shared 层不含 vscode/DOM 依赖） */
 const VALUE_IMPORT_ALLOWED = new Set([
+  'src/shared/addonThemes',
   'src/shared/addonIdentity',
   'src/shared/addonApiCatalog',
   'src/shared/addonPage',
   'src/shared/addonEditApi',
+  'src/shared/addonNavApi',
   'src/shared/addonFoldApi',
   'src/shared/addonSyntaxApi',
   'src/shared/addonHostSettingsApi',
@@ -28,6 +30,9 @@ const VALUE_IMPORT_ALLOWED = new Set([
   'src/shared/addonRenderers',
   'src/shared/addonCommands',
   'src/shared/addonUi',
+  'src/shared/addonPasteRules',
+  'src/shared/addonRefViews',
+  'src/shared/addonSettingsContextApi',
   'src/shared/officialAddons',
 ])
 
@@ -156,6 +161,19 @@ describe('附加组件公开声明消费面（T13）', () => {
     expect(symbols.has('AddonSettingSearchEntry'), '消费面应导入 AddonSettingSearchEntry（#472 搜索摘要条目形状）').toBe(true)
     expect(source.includes('group:'), '消费面应含定义 group 字段消费样例').toBe(true)
     expect(source.includes('settingGroupDeclarations'), '消费面应含组声明消费样例').toBe(true)
+  })
+
+  it('#553 设置页上下文面已进消费面（settingsContext 进 SdkSurface 与 facet 钉住防回潮）', () => {
+    // 从消费面移除 settingsContext 的任一消费（SdkSurface Pick 键、facet
+    // 形状钉住、union 钉住、消费样例）即红——设置页上下文的公开消费由
+    // 本断言钉住
+    const source = readFileSync(consumerPath, 'utf8')
+    expect(source.includes("'settingsContext'"), 'SdkSurface 应 Pick settingsContext 键').toBe(true)
+    expect(source.includes('SettingsPageContextSurface'), '消费面应含 SettingsPageContextSurface 钉住').toBe(true)
+    expect(source.includes('AddonSettingsScopeSnapshot'), '消费面应导入 AddonSettingsScopeSnapshot（作用域快照形状）').toBe(true)
+    expect(source.includes('AddonSettingsLocateTarget'), '消费面应导入 AddonSettingsLocateTarget（定位目标形状）').toBe(true)
+    expect(source.includes('settingsLocateKindsPinned'), '消费面应钉住定位目标 kind union').toBe(true)
+    expect(source.includes('settingsScopeSample'), '消费面应含作用域快照消费样例').toBe(true)
   })
 
   it('开发文档与生成器不进 Vsidian VSIX（.vscodeignore 排除 docs 与 scripts）', () => {

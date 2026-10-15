@@ -18,8 +18,11 @@ import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from '.
 import { isAddonBehaviorEnabledStateBroadcast, isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
 import { parseBehaviorQueryFilter, type BehaviorQueryFilter } from './behaviorFilterQuery'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
+import { isAddonPasteRulesSnapshot } from './addonPasteRules'
+import { isAddonThemeEnvironmentPayload, isAddonThemesStatePayload } from './addonThemes'
 import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
+import { isAddonDocNavLocate, isAddonDocNavResult, type AddonDocNavLocate, type AddonDocNavResult } from './addonNavApi'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -226,7 +229,18 @@ export type HostToWebview =
    *  head（#318）：选区右端（LF 坐标），携带时 live 落位为
    *  区间选区 [offset, head)——外部搜索导航恢复匹配选区用；缺省单点，
    *  既有单点语义不变 */
-  | { kind: 'view.locate'; offset: number; head?: number }
+  | { kind: 'view.locate'; offset: number; head?: number; locateId?: number }
+  /** #543 T03 附加组件文档导航回执（addonDocNav.request 的应答；reqId 与
+   *  请求配对，addonId+generation 供 webview 在途表拒收迟到/换代回包）。
+   *  result 区分 opened 与 located——打开成功但锚点未命中/越界/未送达
+   *  不谎称完整成功（形状守卫 isAddonDocNavResult） */
+  | {
+      kind: 'addonDocNav.result'
+      reqId: number
+      addonId: string
+      generation: number
+      result: AddonDocNavResult
+    }
   /** 阅读视图性能探针（#7）：reading 模式下对阅读容器往返滚动并回报
    *  挂载/回收/解析次数。要求当前处于 reading 模式，否则回报失败态 */
   | { kind: 'reading.perf'; scrollRounds: number }
@@ -987,6 +1001,21 @@ export type HostToWebview =
    *  的单一事实源在 shared/addonRenderers）。面板 ready 与表内容变化时
    *  幂等推送；webview 等值跳过 */
   | { kind: 'addonRenderers.table'; table: import('./addonRenderers').AddonRenderersTablePayload }
+  /** #541 T01 附加组件粘贴规则有效快照（宿主 → 编辑器 webview，广播）：
+   *  enable 生命周期登记的规则经确定性排序后的当前有效集（version 单调、
+   *  内容等值不递增；形态与守卫的单一事实源在 shared/addonPasteRules）。
+   *  面板 ready 与快照变化时推送；停用/故障/代次结束的撤回同样经新快照
+   *  广播——webview 侧旧版本快照迟到不回退 */
+  | { kind: 'addonPasteRules.snapshot'; snapshot: import('./addonPasteRules').AddonPasteRulesSnapshot }
+  /** #546 T07 主题目录状态（宿主 → 设置页 webview）：组件主题目录 + 唯一
+   *  首选与可用性（形态与守卫的单一事实源在 shared/addonThemes）。设置页
+   *  经 addons.themesGet 拉取；目录/首选/可用性变化后主动推送，webview 等
+   *  值跳过 */
+  | { kind: 'addons.themesState' } & import('./addonThemes').AddonThemesStatePayload
+  /** #546 T07 页面明暗环境（宿主 → 编辑器 webview）：VSCode 实际生效主题
+   *  四态的两轴投影（亮色高对比不为暗）。宿主事件驱动推送（重复值不广播）
+   *  + 面板 ready 直发；webview 侧先更新缓存再分发 SDK 订阅 */
+  | { kind: 'addonThemeEnvironment.changed'; env: import('./addonThemes').AddonThemeEnvironment }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -1099,6 +1128,30 @@ export type RefEditHostEvent = Extract<
 /** webview → 宿主消息 */
 export type WebviewToHost =
   | { kind: 'paste.preferences.set'; reqId: number; preserveFormatting: boolean }
+  /** #543 T03 附加组件文档打开与定位请求（页面级——views 面 openDocument
+   *  的宿主投递形态）：来源实例文档 URI 由 webview 视图注册表按
+   *  sourceInstanceId 解析（组件请求不携带来源身份——不按宿主活动标签
+   *  猜测来源，也不接受作者伪造）；面板身份（sessionId/docUri）由
+   *  webview 侧传输层注入，宿主按本面板校验。宿主解析目标
+   *  （vaultLink 同一解析器）、打开（md=openWith 重显 / text=原生编辑器）
+   *  与定位（view.locate 管线），以 addonDocNav.result 回执 */
+  | {
+      kind: 'addonDocNav.request'
+      sessionId: string
+      docUri: string
+      /** 面板内请求序号（回执配对；webview 侧在途表键） */
+      reqId: number
+      addonId: string
+      generation: number
+      /** 来源实例目标文档 URI（注册表值——非作者载荷） */
+      sourceDocUri: string
+      sourceInstanceId: string
+      /** 目标路径（来源文档目录相对；空串 = 同文件锚点） */
+      target: string
+      /** 定位描述（互斥三形态；缺省仅打开） */
+      locate?: AddonDocNavLocate
+    }
+  | { kind: 'addonDocNav.cancel'; sessionId: string; docUri: string; reqId: number }
   /** webview 脚本加载完成，请求 init。
    *  已知限制（C-8）：ready 与 init 之间的毫秒级窗口内到达的 doc.changed
    *  会被未 ready 面板丢弃——装载以 init 全文为准，内容不丢；仅当窗口内
@@ -1230,7 +1283,7 @@ export type WebviewToHost =
   /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
-  | { kind: 'view.locate.ack'; offset: number }
+  | { kind: 'view.locate.ack'; offset: number; locateId?: number }
   /** 视图诊断回报 */
   | {
       kind: 'view.state'
@@ -1596,6 +1649,13 @@ export type WebviewToHost =
        *  缺失不构成失败，回成功全文（range 退化为全文区间，无初始定位点）。
        *  首开不带本字段：锚点缺失仍 anchor-missing 分态（重开再验证原锚点） */
       anchorOptional?: boolean
+      /** T05（#544）附加组件只读引用请求的来源覆盖：以来源实例（views 面
+       *  instanceId）的目标文档为解析语境——R-U02：embed B 内的请求不误用
+       *  父文档 A 的目录。sourceFsPath 为 webview 侧注册表记录的目标 fsPath
+       *  （'main' 恒空串 = 面板文档自身，宿主按常规根请求处理）；宿主校验
+       *  成员资格（本会话已送达目标集合），不接受任意 URI 接入无来源读取。
+       *  与 source（子引用链）/linkHref/directTarget 互斥 */
+      addonSource?: { instanceId: string; sourceFsPath: string }
     }
   /** 悬停目标订阅（#224 引用视图同步，只读消息）：webview 侧视图实例
    *  （浮层/嵌入卡片）成功装载目标后登记——宿主对该目标的文档修改与磁盘
@@ -2024,6 +2084,9 @@ export type WebviewToHost =
    *  用户级持久跨重启恢复；查询树形态由 shared 守卫把关，页码越界由
    *  webview 渲染时静默回落第 1 页，宿主不裁决） */
   | { kind: 'addons.behaviorsViewSet'; view: { page: number; query: BehaviorQueryFilter | null } }
+  /** #546 T07 主题目录拉取（设置页 → 宿主；宿主以 addons.themesState 应答
+   *  一次；目录/首选/可用性变化时亦主动推送，webview 幂等对账） */
+  | { kind: 'addons.themesGet' }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -2555,6 +2618,15 @@ export interface ReadingFoldPaintProbe {
 export interface PaintProbe {
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
   toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
+  /** T05（#544）悬停引用浮窗绘制观测（无浮窗时缺省）：elementFromPoint
+   *  命中浮窗容器（真实布局可见，非 DOM 存在性）+ computed 背景/边框
+   *  （hover-popup 历史样式命中证据——样式注入失效时任一失守） */
+  hoverPopup?: {
+    hit: boolean
+    background: string | null
+    borderWidth: string | null
+    errorState: boolean
+  }
   /** #414 T03 标题折叠 UI 绘制观测（无 Live 视图时缺省） */
   headingFold?: HeadingFoldPaintProbe
   /** #419 阅读态标题折叠绘制观测（仅 reading 模式采集；无折叠交互装配
@@ -3988,6 +4060,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
   switch (v.kind) {
     case 'ready':
       return true
+    case 'addonDocNav.request':
+      // #543 T03 附加组件文档导航请求：面板身份 + 来源文档 URI + 互斥定位
+      // 描述（内层守卫单一事实源在 shared/addonNavApi）
+      return isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.addonId === 'string' && v.addonId.length > 0 &&
+        isNonNegativeInt(v.generation) &&
+        typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0 &&
+        typeof v.sourceInstanceId === 'string' && v.sourceInstanceId.length > 0 &&
+        typeof v.target === 'string' &&
+        (v.locate === undefined || isAddonDocNavLocate(v.locate))
+    case 'addonDocNav.cancel':
+      return isString(v.sessionId) && isString(v.docUri) && isPositiveInt(v.reqId)
     case '_test.skeleton.report':
       // #292 骨架状态回报：测试钩子通道，仅校验字段类型
       return typeof v.present === 'boolean' &&
@@ -4179,7 +4265,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       }
     }
     case 'view.locate.ack':
-      return isNonNegativeInt(v.offset)
+      return isNonNegativeInt(v.offset) && (v.locateId === undefined || isPositiveInt(v.locateId))
     case 'view.state':
       return (
         (v.diagnostics === undefined || isDiagnosticSnapshot(v.diagnostics)) &&
@@ -4466,7 +4552,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           (isObject(v.directTarget) &&
             isString(v.directTarget.fsPath) &&
             (v.directTarget.anchor === undefined || isString(v.directTarget.anchor)))) &&
-        (v.anchorOptional === undefined || typeof v.anchorOptional === 'boolean')
+        (v.anchorOptional === undefined || typeof v.anchorOptional === 'boolean') &&
+        (v.addonSource === undefined ||
+          (isObject(v.addonSource) &&
+            typeof v.addonSource.instanceId === 'string' && v.addonSource.instanceId.length > 0 &&
+            typeof v.addonSource.sourceFsPath === 'string'))
       )
     case 'hover.watch':
     case 'hover.unwatch':
@@ -4622,6 +4712,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'addons.openExtensionsView':
     case 'addons.closeAddonPage':
     case 'addons.openLogs':
+    case 'addons.themesGet':
     case 'addonPage.ready':
       return true
     case 'addons.openExtension':
@@ -4724,6 +4815,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case '_test.skeleton.release':
       // #292 骨架测试钩子：无字段的触发型消息
       return true
+    case 'addonDocNav.result':
+      // #543 T03 导航回执：结果形状守卫（shared/addonNavApi 单一事实源）
+      return isPositiveInt(v.reqId) &&
+        typeof v.addonId === 'string' && v.addonId.length > 0 &&
+        isNonNegativeInt(v.generation) &&
+        isAddonDocNavResult(v.result)
     case 'diagram.export.result':
       return isPositiveInt(v.reqId) && typeof v.ok === 'boolean' &&
         (v.reason === undefined || v.reason === 'cancelled' || v.reason === 'invalid' || v.reason === 'writeFailed')
@@ -4972,7 +5069,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'view.mode.set':
       return v.mode === 'live' || v.mode === 'reading' || v.mode === 'toggle'
     case 'view.locate':
-      return isNonNegativeInt(v.offset) && (v.head === undefined || isNonNegativeInt(v.head))
+      return isNonNegativeInt(v.offset) && (v.head === undefined || isNonNegativeInt(v.head)) &&
+        (v.locateId === undefined || isPositiveInt(v.locateId))
     case 'reading.perf':
       return isPositiveInt(v.scrollRounds)
     case 'reading.test.image':
@@ -5594,6 +5692,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addonRenderers.table':
       // #358 T09 生效表内层守卫（单一事实源在 shared/addonRenderers）
       return isAddonRenderersTablePayload(v.table)
+    case 'addonPasteRules.snapshot':
+      // #541 T01 粘贴规则快照内层守卫（单一事实源在 shared/addonPasteRules）
+      return isAddonPasteRulesSnapshot(v.snapshot)
     case 'addons.behaviors':
       // T08（#357）行为冲突管理载荷（注册表内层守卫在 shared/addonBehaviors；
       // notice 为最近一次写操作结局，常规推送缺省不残留）
@@ -5607,6 +5708,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addons.behaviorsView':
       // #474 行为管理视图状态（null = 无存储默认态）
       return v.view === null || isBehaviorViewPayload(v.view)
+    case 'addons.themesState':
+      // #546 T07 主题目录状态（内层守卫的单一事实源在 shared/addonThemes）
+      return isAddonThemesStatePayload(v)
+    case 'addonThemeEnvironment.changed':
+      // #546 T07 页面明暗环境快照（内层守卫同上）
+      return isAddonThemeEnvironmentPayload(v.env)
     default:
       return false
   }

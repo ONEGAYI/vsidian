@@ -83,6 +83,8 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 })
 ```
 
+- **设置页上下文（#553，仅设置页提供）**：有自绘设置页的组件，详情打开即呈现自绘内容（平台外壳保留导航/作用域标签/总开关）。`sdk.settingsContext` 承接平台侧上下文——`scopeState()` 拉取当前作用域快照（`{ scope: 'user' | 'workspace', hasWorkspace }`），`onScopeChange` 订阅变化（返回退订）；`locateTarget()` 与 `onLocateTarget` 承接全局设置搜索的定位目标（`{ kind: 'def' | 'group', key }` 或 null 清除——订阅即回放当前挂起目标，页面装载晚于定位到达也能收到）。组件据此切自己的页内 Tab 并定位控件、并让自绘控件的显示值与写入目标（作用域层）一致，不读取平台私有 DOM。
+
 - **行为名的多语言形态（#464）**：`name` 除单语言字符串外可传「语言键 → 名称」映射。键推荐小写 BCP47 连字符形（如 `en`、`zh-cn`），匹配时规整 trim + 小写；页面语言以 `zh` 开头的候选链为 `zh-cn` → `zh` → `en`，其余页面语言只试 `en`；全部候选缺失时取字典序最小的键的值兜底（非空呈现）。映射全链路透传（注册、上报、设置页目录均不预解析），**语言切换后已注册行为名即时跟随**。纯字符串是历史兼容形态，不随语言切换。映射条目上限 32、键规整后至多 64 字符、值与单语言同名口径（非空、≤256 字符）；规整后重复键（`zh` 与 `ZH` 共存）会被拒绝。**注册后不得修改传入的 `name` 对象（含映射对象）**——平台不复制注册载荷，修改会影响后续上报与呈现。`description` / `examples` 仍是单语言字符串（多语言形态后续另行演进）。
 
 - 构建桥是 esbuild 插件：解析期注入 `vsidian-addon-sdk` shim（**不是真实 npm 包**——SDK 载体未发布，当前从主仓库测试夹具复制，见[示例仓库准备](example-repo-plan.md)）。
@@ -100,9 +102,9 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **工厂允许 async 形态**（官方样例即「await 通道握手后再注册」）：装载结局按工厂同步段判定（返回 pending 的 promise 即报装载成功），但工厂 promise 的 rejection 会与同步异常**同路径归因 `factory-error`**——整代次立即回滚（`onDispose` 回调、扩展、命令等全部回收）并上报宿主触发全组件故障暂停；rejection 迟到（代次已被卸载或替换）则静默丢弃。工厂内部的长等待或驻留循环不会挂起装载指令流。
 - 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental)、[`syntax-experimental`](api-reference.md#syntax-experimental)、[`host-settings-experimental`](api-reference.md#host-settings-experimental) 与 [`behavior-enabled-state`](api-reference.md#behavior-enabled-state) 条目。
 
-## 3. 六组能力速览
+## 3. 能力分组速览
 
-逐条签名、语义与验证定位见[公开 API 参考](api-reference.md)；此处只给「用哪组做什么」的路标。
+逐条签名、语义与验证定位见[公开 API 参考](api-reference.md)；此处只给「用哪组做什么」的路标（首版六组随 #362 批次落地，粘贴转换组自 #541 起追加）。
 
 | 组 | 用途 | 关键入口 | 页面/宿主 |
 | --- | --- | --- | --- |
@@ -110,9 +112,12 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 页面 SDK | 装载协议、视图/快照/文本提交、通道 | `sdk.views`、`sdk.channel`、`defineAddonPage` | 两端 |
 | 输入行为 | 可组合输入处理 | `sdk.behaviors.register` | 编辑器页 |
 | 输入行为 | 行为禁用态只读可见（灰态同步） | `sdk.behaviorState.enabledState` / `onEnabledChange` | 两端页面 |
+| 页面 SDK（设置上下文） | 详情自绘页的作用域对齐与搜索定位承接 | `sdk.settingsContext.*` | 设置页 |
 | 设置 | 定义、读写、作用范围、设置页 | `ctx.settings.*` | 宿主 |
 | 渲染提供者 | 代码块渲染候选与自动接管 | `sdk.renderers.register` | 编辑器页 |
 | 命令/菜单/界面 | 命令、菜单项、按钮、面板 | `sdk.commands` / `sdk.menus` / `sdk.ui` | 编辑器页 |
+| 粘贴转换 | 声明式粘贴规则：来源特化元素恢复为 Markdown 结构 | `ctx.paste.registerRules`（enable 生命周期） | 宿主 |
+| 页面 SDK（引用） | 只读引用浮窗请求与本次请求关闭句柄 | `sdk.refViews.requestPopup` | 编辑器页 |
 
 几个高频语义提醒（完整版在参考各条目）：
 
@@ -123,12 +128,43 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **渲染接管**：新安装的兼容且已启用组件自动替换所支持语言的显示（含内置）；重启/重复注册/普通升级不当作新安装；组件仍运行而渲染有 bug 时平台不自动接管。
 - **设置呈现形态**（#473/#475）：string 定义可声明 `enumLabels`（枚举档位显示标签——直值或 `{ 'zh-cn': '…', en: '…' }` 多语言映射，缺失标签回退枚举值本身，随设置页语言切换）与 `multiline: true`（渲染多行文本域，换行符参与持久化值）；`array<string>` 的自由文本项支持批量粘贴拆分（多行剪贴板逐行拆项：trim、空行丢弃、超长按 maxLength 截断——拼接结果同样截断，enum 项不适用；maxItems 不在控件层拦截，由保存时校验兜底——与手输一致）。`multiline` 仅自由文本适用，enum 定义（档位下拉）拒绝与它组合。两者仅作用呈现层，值校验与存储语义不变。
 - **设置定义分组**（#472，引用式）：定义可选 `group` 字段引用组键，组元数据经 `registerDefinitions(defs, groups)` 第二参声明一次（`groups: [{ key, title, description? }]`，`title`/`description` 直值或 `{ 'zh-cn': '…', en: '…' }` 多语言映射——与 `enumLabels` 同构）。声明序即设置页呈现序；组键组件内唯一、定义引用未声明组键或组键重复**整批拒绝**。无分组声明的组件保持既有平铺（向后兼容）；未分组定义与功能开关行恒居首容器。定义级与组级条目进设置页全局搜索（命中跨组件定位——`addon:<组件 ID>/def:<定义键>` 与 `addon:<组件 ID>/group:<组键>`）；object 定义字段级不进。组声明随 `addons.settingsState` 既有链路透传，不新增消息通道。
+- **详情自绘页优先**（#553）：有自绘设置页且未故障的组件，设置详情首屏即自绘内容（打开详情由平台自动装载，无「打开自定义设置页」操作）；基础设置表单转为详情内次级页签（定义注册/值校验/存储与清除覆盖入口保留）。作用域切换与搜索定位经 `sdk.settingsContext` 交付；无自绘页组件与故障暂停维持平台表单 + 排障块（重试成功后自动重新装载自绘页）。语义细节见[组件设置详情规格](../specs/addon-settings-detail.md)。
 - **命名空间**：命令/菜单/按钮/面板的公开 ID 由平台注入 `<addonId>.<localId>`（局部 ID 禁点号）；不存在覆写、隐藏或接管内置菜单项的入口。
 - **按键拦截与优先级**（#402，实验入口契约）：经 `registerExtension` 挂 CM6 keymap 有两层位置——**普通 keymap**（扩展槽为平台扩展数组末位，平台 Tab 三段/列表续行等情境链先试，addon keymap 在平台不处理时落空接手，适合 Tabout 兜底类）与**抢先层**（用 `Prec.high` 包裹——高于平台普通键位，可替代平台处理如智能退格；返回 `false` 即落穿平台链，透传语义）。**保留键面不可越过**：撤销/重做（`Mod-z` / `Shift-Mod-z` / `Mod-y`）是 `Prec.highest` 的平台保留键闸（撤销栈归宿主文本管线），addon 即便用 `Prec.highest` 也抢不掉（同为 highest 时平台闸在扩展序上先注册、先者先匹配）；Esc 与宿主级快捷键（`Ctrl+P` 等命令面板键不经编辑器）同理不开放抢先。多组件同层按键按装载顺序仲裁（先装载先试）；逐项关闭=停用组件（实验层 keymap 不进统一快捷键管理，稳定化路线另行设计）。
 - **行为禁用态只读可见**（#476）：`sdk.behaviorState` 在编辑器页与设置页均提供——`enabledState()` 返回本组件快照（`addonRunState: 'enabled' | 'user-disabled'` + 本组件被禁行为局部 id 集），`onEnabledChange(cb)` 在宿主落库后即时通知（返回退订；组件释放时订阅由平台整组回收，不依赖自觉退订，查询仍返回最后已知快照）。宿主层开关（组件停用或单项禁用）与组件层开关（自己的规则配置）是两层独立开关，生效 = 两层都开启——组件页对宿主层任一为真的行为行可呈灰态；被停用后设置页不卸载，本面仍可查询与订阅。本面只读，无任何写入成员。
 - **标题折叠**（#410，实验入口）：查询只读派生视图（原始键集不对外）；命令选区驱动三操作与全文档两操作共用用户触发执行体（effect 直驱）；`upToLevel` 仅 `foldAll` 接受（1–6 整数），其他操作携带即 `invalid-request`。
 - **视图身份与扩展槽**（#426/#427/#428，契约）：扩展槽仅装配主正文 Live 实例；view → instanceId 反查走 `experimental.viewIdentity`；命令回调携带目标视图句柄——完整条款与移植换算见 §4。
 - **行为链触发面**（#399/#400/#401）：普通键入（`input.type`）与删除白名单（`delete.backward` / `forward` / `selection` / `cut` / `line`——`delete.dedent` 属缩进命令族不纳入）驱动；IME 候选期不驱动，**组合定稿驱动一次**（`userEvent='input.type.compose'`、`inputText` 为净定稿文本；取消/空白格组合/代码上下文不驱动）。上下文 `inputText` 为插入侧净文本；`replaced` 携带替换/删除侧（键入替换选区 = 被替换内容，delete = 被删文本，事务前 LF 坐标，IME 定稿恒 null）；`docUri` 为当前目标文档 URI（多视图语义：embed 触发时是引用目标的 URI）。
+- **粘贴转换规则**（#541 T01，enable 生命周期）：`ctx.paste.registerRules([...])` 登记可序列化规则（标签/属性匹配 + `{{槽}}` 模板或显式丢弃），身份由平台注入；整批校验（批内重复 ID、未知操作、超预算——每组件至多 256 条——整批拒绝不部分安装）。有效规则广播到全部编辑器页面，在富文本粘贴的 HTML→Markdown 遍历中按优先级降序、组件 ID 升序、规则 ID 升序确定性执行：首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 忽略与纯文本/代码上下文路径不经规则。停用/故障/代次结束撤回规则。正则、条件与嵌套属后续批次——未实现节点显式拒绝，不静默当成基础声明。
+
+## 3.1 只读引用浮窗（sdk.refViews，T05）
+
+请求内核在触发位置旁打开目标引用浮窗（T05 #544）。两句话分工：**看内容用 refViews，编辑目标用「打开独立文档」**——refViews 打开的是只读预览浮窗（单页单浮窗、随触发位置摆放、Esc/移出关闭）；要把目标文档开成编辑器面板，仍走宿主导航或用户自己的跳转链路，本面不提供打开/写入能力。
+
+```ts
+defineAddonPage(ADDON_ID, async (sdk) => {
+  const refViews = sdk.refViews!  // 仅编辑器页提供
+  const outcome = await refViews.requestPopup({
+    source: 'main',                        // views 面实例 ID：相对路径按该实例目标文档解析
+    target: { path: 'notes/ref.md', anchor: { kind: 'heading', heading: '第二章' } },
+    trigger: myButtonEl,                   // 本页在树元素（组件自有控件或文字元素——脱树即拒绝）
+    keyboard: false,                       // true = 键盘路径：焦点进入浮层，Esc 归还原焦点
+  })
+  if (outcome.ok) {
+    // outcome.handle.close() 只关本次请求的浮窗（被替换/已关返回 false）
+    // outcome.handle.isActive() 报告本请求浮窗是否在场
+  } else {
+    // outcome.reason：invalid-request / view-disposed / released
+    // 或目标真实失败（not-found / escape / anchor-invalid / file-too-large …）
+  }
+})
+```
+
+语义要点（完整版见 API 参考 `ref-views-popup` 条目）：
+
+- **目标与锚点**：路径 + 互斥锚点（`heading` 标题 / `block` 块 ID / `line` 行号 / `range` 行范围）。Markdown 目标用既有全文/标题/块语义；`line` / `range` 只对非 Markdown 文本生效（Markdown 目标携带时按标题原文解析——沿用双链行为，锚点缺失即真实失败）。大文件与超限走既有准入（`file-too-large` 等真实原因码）。
+- **单页单浮窗**：新请求替换旧请求；旧句柄随之后失效（`close()` 返回 false，不误关后来的浮窗）。缺省鼠标语义零抢焦点；触发位置脱树、组件停用、页面关闭都释放实例。
+- **只读边界**：本面创建的实例及递归内容恒只读，没有写端口；不给浮窗注入自定义 DOM 的入口。
 
 ## 4. 视图身份与扩展槽（契约）
 
@@ -264,6 +300,22 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 
 **独立消费样例（T15，2026-10-08 起）**：`test/examples/` 另有三套完整独立扩展工程（输入/渲染/界面——`input-behavior`、`renderer`、`ui-command`），只使用公开 SDK、可独立构建，是「从零写一个组件」的最佳参考（比测试夹具更贴近真实业务形态：无短轮询驱动协议、有自己的设置与 i18n 字典、共享构建脚本与产物扫描）。构建与复制清单见 [test/examples/README](../../test/examples/README.md)。
 
+## 文档打开与定位（扩展批次 T03 / #543）
+
+编辑器页面的 `sdk.views.openDocument()` 接收有效来源视图 ID、相对目标路径和可选定位；设置页不提供此面。导航可从 Live、阅读态、嵌入或悬停引用发起；在 A 的引用 B 内调用时，以 B 的目录解析路径。
+
+```ts
+const result = await sdk.views?.openDocument({
+  sourceInstanceId: 'main',
+  target: 'notes/target.md',
+  locate: { kind: 'line', line: 3 },
+})
+```
+
+`target: ''` 表示来源文档自身。定位可选 `line`（1-based 正整数）、`heading` 或 `block`（块 ID 不带 `^`），只能选择一种；标题与块定位仅用于 Markdown。Markdown 通过 Vsidian 打开或重显并保留模式，其他可读文本通过原生编辑器打开；图片/PDF 不属于本 API。
+
+结果分别报告 `opened` 与 `located`。首次行号越界不钳到末行；锚点未命中、定位未送达与文件缺失有不同失败原因。来源释放、页面重载、组件停用或换代后在途请求失效；调用方自行呈现失败，平台不重复弹通知。结构化 API 不接受普通链接尾部行号语法。签名与失败枚举见参考的 [`document-navigation`](api-reference.md#document-navigation) 条目，公开消费夹具为 `test/fixtures/addon-v02/addon/docNavEditor.ts`。
+
 ## 6. 调试
 
 调试复用 VSCode 工具，不另建开发者控制台：
@@ -294,3 +346,17 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 用户故事覆盖映射 | `docs/specs/vsidian-addons-coverage.md`（接口或验证变更时同步更新） |
 
 签名或语义调整必须同步：语义清单条目 → 重生成参考 → 消费样例与钉住断言 → 台账（如涉版本状态）。
+
+## 9. 统一主题与主题环境（T07 / #546）
+
+主题组件在宿主 `enable` 阶段调用 `context.themes.register` 登记元数据，在编辑器页面调用 `sdk.renderers.register` 提供实际渲染。目录无需先打开文档即可出现在「外观 → 主题」；安装只新增候选，用户显式选择后才接管声明语言。普通非主题渲染提供者保留安装后接管规则。
+
+`themeId` 为组件内稳定 ID，平台组合 `<addonId>/<themeId>` 作为主题首选。声明的 `rendererId` 是本组件局部提供者 ID，`languages` 限定该主题生效范围；不同主题可以支持同一语言。注册返回普通成功/拒绝结果，句柄释放撤销本次登记；旧句柄不能撤销后来的替换登记。停用与故障回落内置显示，保留主题首选，恢复后继续原选择。
+
+编辑器页面通过 `sdk.themeEnvironment.get()` 同步读取 VSCode 实际主题的 `dark` / `highContrast`，通过 `onChange` 订阅变化。回调触发前快照已更新，重复值不通知；组件代次释放自动退订，回调抛错按既有组件故障上报。设置页不提供此面，实验 `hostSettings` 白名单仍保持原范围。
+
+可直接参考[主题页面消费夹具](../../test/fixtures/addon-v02/addon/themeEditor.ts)和[宿主登记夹具](../../test/integration/addonFixtures/addon-theme/extension.js)。签名以[生成参考](api-reference.md)的 `themes-register` / `theme-environment` 条目为准，完整产品规则见[主题规格](../specs/addon-themes.md)。内核 Codex 在 T07 继续保留；替代组件的发行与内核退役由 bridge#3、#535 接续。
+
+## 10. 后续 API 扩展规格
+
+2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T03 文档导航、T05 只读引用浮窗及 T07 统一主题已实施，待用户整体验收；T02 正则/条件/嵌套、T04 普通链接尾部行号、T06 组件容器嵌入及 T08 内核退役尚未实施。当前公开声明和生成参考是实际可消费能力的事实源。

@@ -9,6 +9,7 @@ import { KeybindingSettingsSection } from './keybindingSettings'
 import { CssSnippetSettingsSection } from './cssSnippetSettings'
 import { StyleReferenceSection } from './styleReferenceSettings'
 import { AppearanceSection } from './appearanceSettings'
+import { AddonThemesStore, ThemeSelectionSection } from './themeSettings'
 import { IndexMaintenanceSection } from './indexMaintenanceSettings'
 import { WordSegmentSection } from './wordSegmentSettings'
 import { DefaultEditorSection } from './defaultEditorSettings'
@@ -17,6 +18,7 @@ import { AddonBehaviorManageSection } from './addonBehaviorManageSection'
 import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from './addonSettingsAreaSection'
 import { installAddonPageLoader, type AddonPageLoaderHandle } from './addonPageLoader'
 import { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
+import { AddonSettingsContextRuntime } from './addonSettingsContext'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
 import { ToastChannel } from './toast'
@@ -47,10 +49,15 @@ const addonSettingsHost = document.createElement('div')
 // 同样提供（两端点同形——组件规则页灰态消费场景：被停用后设置页不卸载，
 // 仍可查询与订阅；广播经 addon.behaviorEnabledState 到达）
 const addonBehaviorEnabledState = new AddonBehaviorEnabledStateRuntime()
+// #553 设置页上下文 runtime（设置页一份）：作用域标签状态与 #472 搜索
+// 定位目标的页面级缓存——AddOn 设置区分节上抛写入，装载器转成 SDK
+// settingsContext 面交付自绘页（组件不读平台私有 DOM）
+const addonSettingsContext = new AddonSettingsContextRuntime()
 const addonLoader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'settings',
   mountContainer: addonSettingsHost,
   addonBehaviorEnabledState,
+  addonSettingsContext,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
 
@@ -59,10 +66,16 @@ const snippets = new CssSnippetSettingsSection({ postMessage: (message) => vscod
 // #132 样式参考：离线渲染公开样式契约指南（数据模块随版本生成）；
 // #145 契约 JSON 导出：工具区按钮经消息桥请求宿主另存
 const styleRef = new StyleReferenceSection({ postMessage: (message) => vscode.postMessage(message) })
-// #231 外观合并：CSS 片段与样式参考合并为一条「外观」（扁平三页签，组合
-// 复用上述两个分页作为页签体；侧栏取 CSS 片段原槽位，位于快捷键与索引维护
-// 之间）
-const appearance = new AppearanceSection(snippets, styleRef)
+// #546 T07 主题目录 store + 主题单选页签体（目录权威在宿主，装载即拉取
+// addons.themesGet；addons.themesState 推送对账）
+const themesStore = new AddonThemesStore()
+const themeSelection = new ThemeSelectionSection(themesStore, {
+  postMessage: (message) => vscode.postMessage(message),
+})
+// #231 外观合并：CSS 片段与样式参考合并为一条「外观」（扁平四页签，组合
+// 复用上述分页作为页签体；第四页签「主题」为统一主题单选；侧栏取 CSS
+// 片段原槽位，位于快捷键与索引维护之间）
+const appearance = new AppearanceSection(snippets, styleRef, themeSelection)
 // #198 索引维护：排除模式编辑与清理/重建操作（状态权威在宿主，index.state
 // 推送回显）。#332 起分页改名「文件与链接」并承接图片/引用视图两组标准行
 // （defsGroups），本分页自有内容降为页内「索引维护」二级组
@@ -100,10 +113,14 @@ const addonBehaviors = new AddonBehaviorManageSection(
 )
 // #465 组件设置独立分页：基础设置区（T04）与组件设置页挂载（T02）的
 // 唯一承载方——附加组件页通道堵死后，addons.settingsState /
-// openAddonSettingsPage 在此消费（addonSettingsHost 装载器容器随迁）
+// openAddonSettingsPage 在此消费（addonSettingsHost 装载器容器随迁）。
+// #554 settingsState 推送（当前打开组件切换/关闭）经回调触发侧栏重建；
+// #553 详情自绘页优先：作用域/定位目标经 addonSettingsContext 上抛
 const addonSettingsArea = new AddonSettingsAreaSection(
   { postMessage: (message) => vscode.postMessage(message) },
   addonSettingsHost,
+  () => refreshSidebar(),
+  addonSettingsContext,
 )
 
 const view = new SettingsPageView(
@@ -112,6 +129,10 @@ const view = new SettingsPageView(
   [keybindings, appearance, indexMaintenance, addons, addonBehaviors, addonSettingsArea],
   [wordSegment],
   [defaultEditor],
+  // #554 组件条目唯一选中：详情分页（addon-settings）下以「组件设置」
+  // 分页的权威状态（settingsState.open 派生）为当前条目；其余分页不选中
+  // 组件条目（列表/管理页由选项按钮按 active 高亮，不再整组点亮）
+  (activeId) => (activeId === ADDON_SETTINGS_SECTION_ID ? addonSettingsArea.currentSidebarEntryId() : undefined),
 )
 refreshSidebar = () => view.refreshSidebar()
 // 微任务延迟与 ui-patterns §2.1 契约及单测 harness 同口径：AddonSection.mount
@@ -148,6 +169,9 @@ vscode.postMessage({ kind: 'addons.behaviorsGet' })
 // 模式（addons.behaviorsView 应答一次；写入经 addons.behaviorsViewSet，宿主
 // 不推送变化）
 vscode.postMessage({ kind: 'addons.behaviorsViewGet' })
+// #546 T07 主题目录：同「装载即拉取」模式（addons.themesState 应答；
+// 目录注册/回收、主题首选保存与组件可用性变化后宿主推送对账）
+vscode.postMessage({ kind: 'addons.themesGet' })
 // #351 T02 装载器就绪上报（设置页 webview 安装装载器后与面板重载后各发
 // 一次）：宿主按当前期望装载清单幂等推送组件设置页指令（addon.load）
 vscode.postMessage({ kind: 'addonPage.ready' })
@@ -187,6 +211,15 @@ window.addEventListener('message', (event) => {
     })))
     keybindings.handleCatalogChanged()
     return
+  }
+  // #546 T07 主题目录对账（等值幂等；推送变化即重渲染页签体）
+  if (isHostToWebview(event.data) && event.data.kind === 'addons.themesState') {
+    themesStore.applyThemesState(event.data)
+    return
+  }
+  // #546 T07 组件显示名表（主题来源徽章——同名主题按来源区分）
+  if (isHostToWebview(event.data) && event.data.kind === 'addons.state') {
+    themesStore.applyAddonLabels(event.data.addons.map((entry) => ({ id: entry.id, label: entry.label })))
   }
   view.handleHostMessage(event.data)
   keybindings.handleHostMessage(event.data)

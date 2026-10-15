@@ -13,10 +13,12 @@ import { EditorView } from '@codemirror/view'
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 import { AddonBehaviorRuntime } from '../../src/webview/addonBehaviors'
 import { AddonBehaviorEnabledStateRuntime } from '../../src/webview/addonBehaviorEnabledState'
+import { AddonSettingsContextRuntime } from '../../src/webview/addonSettingsContext'
 import { addonInstanceIdField, setAddonInstanceId } from '../../src/webview/addonViewIdentity'
 import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
 import { installAddonRenderersBridge } from '../../src/webview/addonRenderers'
+import { installThemeEnvironmentHub } from '../../src/webview/addonThemeEnvironment'
 import {
   ADDON_PAGE_REGISTRY_GLOBAL,
   installAddonPageLoader,
@@ -457,6 +459,91 @@ describe('T02 生产装载器：代次硬边界', () => {
     })
     expect(results).toEqual([])
     expect(h.handle.stats().counters.lateChannelRepliesDropped).toBe(1)
+  })
+})
+
+describe('#559 异常登记隔离：迟到/重复登记不误伤他组件', () => {
+  const OTHER_ID = 'onegayi.vsidian-test-other-addon'
+
+  it('他人装载批次不吞同拍到达的他组件登记：双方各自消费自己的登记', async () => {
+    const h = harness()
+    const identities: string[] = []
+    // 同栈调度两个并行装载（跨组件不阻塞）：A 的批次先消费登记表
+    const loadA = h.handle.load(manifest())
+    registerFactory(h, (sdk) => identities.push(`a-factory:${sdk.addon.id}`), ADDON_ID)
+    const loadB = h.handle.load(manifest({ addonId: OTHER_ID }))
+    registerFactory(h, (sdk) => identities.push(`b-factory:${sdk.addon.id}`), OTHER_ID)
+    const [outcomeA, outcomeB] = await Promise.all([loadA, loadB])
+    // 原缺陷：A 的批次把 B 的登记当「同批多余」吞掉 → B no-factory-registered
+    expect(outcomeA).toEqual({ ok: true, css: [] })
+    expect(outcomeB).toEqual({ ok: true, css: [] })
+    // 各自工厂收到各自身份（A 的批次不消费 B 的工厂，反之亦然）
+    expect(identities).toEqual([`a-factory:${ADDON_ID}`, `b-factory:${OTHER_ID}`])
+    // B 的登记保留给属主：不计入 A 批次的丢弃统计
+    expect(h.handle.stats().counters.unsolicitedRegistrationsDropped).toBe(0)
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(0)
+  })
+
+  it('他组件装载窗口内的登记不被晚开的他人批次当旧条目丢弃（B 脚本慢于 A 批次）', async () => {
+    // B 的装载先开始但脚本结算慢（真实浏览器中脚本 load 回调时序错开的抽象），
+    // A 的批次在其间完成登记消费——原缺陷把 B 的登记当「装载开始前的遗留」丢弃
+    let releaseB!: () => void
+    const bScript = new Promise<{ ok: true }>((resolve) => {
+      releaseB = () => resolve({ ok: true })
+    })
+    const h = harness({
+      loadScript: (uri) => (uri.endsWith('/b.js') ? bScript : Promise.resolve({ ok: true })),
+    })
+    const loadB = h.handle.load(manifest({ addonId: OTHER_ID, scriptUri: 'https://page.test/b.js' }))
+    // 让 B 的装载流跑到脚本挂起点（loadStartedAt 在 loadImpl 内取——微任务）
+    await settle()
+    // B 的登记发生在 B 自己的装载窗口内（对 B 是 fresh）
+    registerFactory(h, () => {}, OTHER_ID)
+    h.advance(10)
+    // A 的装载窗口晚于 B 的登记时刻：B 的登记对 A 是「旧时刻」条目
+    const loadA = h.handle.load(manifest())
+    registerFactory(h, () => {}, ADDON_ID)
+    const outcomeA = await loadA
+    expect(outcomeA).toEqual({ ok: true, css: [] })
+    // A 的批次不替 B 丢弃也不计数（原缺陷此处 lateRegistrationsDropped=1 且吞掉 B 的登记）
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(0)
+    releaseB()
+    const outcomeB = await loadB
+    // B 的登记保留在表中，属主批次正常消费（原缺陷：no-factory-registered）
+    expect(outcomeB).toEqual({ ok: true, css: [] })
+    expect(h.handle.stats().active).toEqual([
+      { addonId: ADDON_ID, generation: 1 },
+      { addonId: OTHER_ID, generation: 1 },
+    ])
+  })
+
+  it('身份不符拒绝后，他组件登记保留可被属主正常装载（identity-mismatch 语义保持）', async () => {
+    const h = harness()
+    // 本次装载窗口内唯一登记属于他组件且本组件无自己的登记 → 既有身份核对拒绝
+    registerFactory(h, () => {}, OTHER_ID)
+    const outcomeA = await h.handle.load(manifest())
+    expect(outcomeA).toEqual({ ok: false, reason: 'identity-mismatch', detail: `registered=${OTHER_ID}` })
+    expect(h.handle.stats().active).toEqual([])
+    // 原缺陷：该登记被 mismatch 批次消费掉 → 属主装载 no-factory-registered
+    const outcomeB = await h.handle.load(manifest({ addonId: OTHER_ID }))
+    expect(outcomeB).toEqual({ ok: true, css: [] })
+  })
+
+  it('他组件的迟到登记只由属主批次按既有语义丢弃计数（只影响自身）', async () => {
+    const h = harness()
+    // B 的登记早于一切窗口：属主批次已结束的迟到登记
+    registerFactory(h, () => {
+      throw new Error('B 的迟到工厂不得执行')
+    }, OTHER_ID, 900)
+    registerFactory(h, () => {}, ADDON_ID)
+    const outcomeA = await h.handle.load(manifest())
+    expect(outcomeA).toEqual({ ok: true, css: [] })
+    // A 的批次不替 B 计数（原缺陷：A 批次就地丢弃 B 的登记并计入 late=1）
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(0)
+    // B 随后装载：登记早于 B 的窗口 → 既有迟到归宿（旧条目丢弃计数 + 拒绝）
+    const outcomeB = await h.handle.load(manifest({ addonId: OTHER_ID }))
+    expect(outcomeB).toEqual({ ok: false, reason: 'no-factory-registered' })
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(1)
   })
 })
 
@@ -1070,5 +1157,260 @@ describe('#476 行为禁用态只读面（behaviorState）：编辑器页与设�
     facet!.onEnabledChange((state) => lateNotified.push(state))
     runtime.applyBroadcast({ disabled: [], addons: [{ addonId: ADDON_ID, addonRunState: 'user-disabled' }] })
     expect(lateNotified).toEqual([])
+  })
+})
+
+describe('T05（#544）refViews 面：注入、释放守卫与整组件回收', () => {
+  it('编辑器页 + 运行时在场 → facet 注入并转发（身份由装载器注入）；释放后代次迟到请求拒绝 released', async () => {
+    const calls: Array<{ addonId: string; generation: number }> = []
+    const released: string[] = []
+    const runtime = {
+      requestPopup: (addonId: string, generation: number) => {
+        calls.push({ addonId, generation })
+        return Promise.resolve({ ok: true as const, handle: { close: () => true, isActive: () => true } })
+      },
+      releaseAddon: (addonId: string) => {
+        released.push(addonId)
+      },
+    }
+    const h = harness({ addonRefViews: runtime })
+    let facet: import('../../src/shared/addonRefViews').AddonSdkRefViewsFacet | undefined
+    registerFactory(h, (sdk) => {
+      facet = sdk.refViews
+    })
+    await h.handle.load(manifest())
+    expect(facet).toBeDefined()
+    const outcome = await facet!.requestPopup({ source: 'main', target: { path: 'b.md' }, trigger: {} as HTMLElement })
+    expect(outcome.ok).toBe(true)
+    expect(calls).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+    // 卸载：整组件回收（浮窗关闭经 releaseAddon）+ 迟到请求拒绝 released
+    await h.handle.unload(ADDON_ID, 1)
+    expect(released).toEqual([ADDON_ID])
+    expect(await facet!.requestPopup({ source: 'main', target: { path: 'b.md' }, trigger: {} as HTMLElement }))
+      .toEqual({ ok: false, reason: 'released' })
+  })
+
+  it('运行时缺席（最小装配）→ facet 为 undefined（旧装配兼容）', async () => {
+    const h = harness()
+    let facet: import('../../src/shared/addonRefViews').AddonSdkRefViewsFacet | undefined = 'unset' as unknown as undefined
+    registerFactory(h, (sdk) => {
+      facet = sdk.refViews
+    })
+    await h.handle.load(manifest())
+    expect(facet).toBeUndefined()
+  })
+})
+
+// ---- #546 T07 主题环境面（SDK themeEnvironment）----
+
+describe('T07 主题环境面', () => {
+  it('组件订阅回调异常上报归属组件故障，其他组件仍收到明暗变化', async () => {
+    const hub = installThemeEnvironmentHub({ dark: false, highContrast: false })
+    const h = harness({ themeEnvironment: hub })
+    registerFactory(h, (sdk) => {
+      sdk.themeEnvironment!.onChange(() => { throw new Error('theme callback failed') })
+    })
+    await h.handle.load(manifest())
+    let received = false
+    hub.subscribe('other.pack', 1, () => { received = true })
+    hub.applyEnvironment({ dark: true, highContrast: false })
+    expect(h.sent).toContainEqual(expect.objectContaining({ type: 'addon.faulted', addonId: ADDON_ID, reason: 'theme-environment: Error: theme callback failed' }))
+    expect(received).toBe(true)
+  })
+  function themeHubHarness() {
+    const calls: Array<{ kind: string; addonId?: string; generation?: number }> = []
+    const hub = {
+      current: () => ({ dark: true, highContrast: false }),
+      subscribe: (addonId: string, generation: number) => {
+        calls.push({ kind: 'subscribe', addonId, generation })
+        return () => calls.push({ kind: 'off', addonId })
+      },
+      releaseAddon: (addonId: string) => calls.push({ kind: 'release', addonId }),
+    }
+    const h = harness({ themeEnvironment: hub })
+    return { h, calls }
+  }
+
+  it('编辑器页提供 themeEnvironment 面：get 读 hub 快照、onChange 经 hub 按代次登记、卸载整组回收', async () => {
+    const { h, calls } = themeHubHarness()
+    let capturedSdk: VsidianAddonPageSdk | undefined
+    registerFactory(h, (sdk) => {
+      capturedSdk = sdk
+    })
+    await h.handle.load(manifest())
+    expect(capturedSdk!.themeEnvironment).toBeDefined()
+    expect(capturedSdk!.themeEnvironment!.get()).toEqual({ dark: true, highContrast: false })
+    const off = capturedSdk!.themeEnvironment!.onChange(() => {})
+    expect(typeof off).toBe('function')
+    expect(calls).toContainEqual({ kind: 'subscribe', addonId: ADDON_ID, generation: 1 })
+    await h.handle.unload(ADDON_ID, 1)
+    expect(calls).toContainEqual({ kind: 'release', addonId: ADDON_ID })
+  })
+
+  it('已释放代次的迟到订阅登记为 no-op 退订（不滞留回调）', async () => {
+    const { h, calls } = themeHubHarness()
+    let capturedSdk: VsidianAddonPageSdk | undefined
+    registerFactory(h, (sdk) => {
+      capturedSdk = sdk
+    })
+    await h.handle.load(manifest())
+    await h.handle.unload(ADDON_ID, 1)
+    const off = capturedSdk!.themeEnvironment!.onChange(() => {})
+    expect(calls.filter((c) => c.kind === 'subscribe')).toHaveLength(0)
+    expect(typeof off).toBe('function')
+  })
+
+  it('设置页不提供 themeEnvironment 面（hub 在场也不挂）', async () => {
+    const sent: AddonPageOutbound[] = []
+    const registrations: AddonPageRegistration[] = []
+    ;(globalThis as unknown as Record<string, unknown>)[ADDON_PAGE_REGISTRY_GLOBAL] = registrations
+    const handle = installAddonPageLoader({
+      page: 'settings',
+      send: (message) => sent.push(message),
+      loadScript: (uri) => Promise.resolve(uri === 'https://page.test/addon.js' ? { ok: true } : { ok: false, error: 'no fixture' }),
+      loadCss: () => Promise.resolve('authorized' as const),
+      themeEnvironment: {
+        current: () => ({ dark: false, highContrast: false }),
+        subscribe: () => () => {},
+        releaseAddon: () => {},
+      },
+    })
+    let captured: VsidianAddonPageSdk | undefined
+    registrations.push({
+      addonId: ADDON_ID,
+      factory: (sdk) => {
+        captured = sdk
+      },
+      registeredAt: 1,
+    })
+    await handle.load({ ...manifest(), page: 'settings' })
+    expect(captured?.themeEnvironment).toBeUndefined()
+  })
+})
+
+// ---- #553 设置页上下文面（settingsContext）：仅设置页提供 ----
+
+describe('#553 设置页上下文面（settingsContext）：作用域与定位目标', () => {
+  it('设置页注入：工厂收到 sdk.settingsContext（默认快照 user + 无定位）；编辑器页与 env 未注入时为 undefined', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    let facet: import('../../src/shared/addonSettingsContextApi').AddonSettingsContextFacet | undefined
+    registerFactory(h, (sdk) => { facet = sdk.settingsContext })
+    await h.handle.load(manifest({ page: 'settings' }))
+    expect(facet).toBeTruthy()
+    expect(facet!.scopeState()).toEqual({ scope: 'user', hasWorkspace: true })
+    expect(facet!.locateTarget()).toBeNull()
+    // 编辑器页不提供（同 behaviors 面的仅编辑器页对照）
+    const h2 = harness()
+    let facet2: unknown = 'unset'
+    registerFactory(h2, (sdk) => { facet2 = sdk.settingsContext })
+    await h2.handle.load(manifest())
+    expect(facet2).toBeUndefined()
+    // 设置页但 env 未注入 runtime（旧装配/最小夹具兼容）
+    const h3 = harness({ page: 'settings' })
+    let facet3: unknown = 'unset'
+    registerFactory(h3, (sdk) => { facet3 = sdk.settingsContext })
+    await h3.handle.load(manifest({ page: 'settings' }))
+    expect(facet3).toBeUndefined()
+  })
+
+  it('作用域：applyScope 变化经订阅分发（等值不分发）；退订后不再收；查询恒返回当前快照', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    const seen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      sdk.settingsContext?.onScopeChange((state) => seen.push(state))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: true })
+    expect(seen).toEqual([{ scope: 'workspace', hasWorkspace: true }])
+    // 等值重复不分发
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: true })
+    expect(seen).toHaveLength(1)
+    // hasWorkspace 变化分发（无工作区状态随宿主推送）
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: false })
+    expect(seen).toHaveLength(2)
+    // 退订生效（facet 自身订阅仍在——变化继续到达它；已退订的独立订阅不再收）
+    const lateSeen: unknown[] = []
+    const unsubscribe = runtime.subscribeScope(ADDON_ID, () => lateSeen.push('late'))
+    unsubscribe()
+    runtime.applyScope({ scope: 'user', hasWorkspace: true })
+    expect(seen).toHaveLength(3)
+    expect(lateSeen).toEqual([])
+  })
+
+  it('定位目标：订阅即回放归属组件的挂起目标（页面装载晚于定位到达的补投）；后续定向交付与 null 清除', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    // 定位先于页面装载到达（搜索跳转在装载完成前发起）
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'theme' })
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    const seen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      expect(sdk.settingsContext!.locateTarget()).toEqual({ kind: 'def', key: 'theme' })
+      sdk.settingsContext?.onLocateTarget((target) => seen.push(target))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    // 订阅即回放归属本组件的挂起目标
+    expect(seen).toEqual([{ kind: 'def', key: 'theme' }])
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'group', key: 'appearance' })
+    expect(seen).toEqual([{ kind: 'def', key: 'theme' }, { kind: 'group', key: 'appearance' }])
+    // null = 清除（组件据此退场页内定位态）
+    runtime.clearLocateTarget()
+    expect(seen[2]).toBeNull()
+    expect(h.sent.length).toBeGreaterThan(0)
+  })
+
+  it('#555 定向交付：他组件的定位目标不投递、不回放（归属正确性）', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    // 他组件（B）的目标先到达——本组件（A）装载后不得回放、不得投递
+    runtime.deliverLocateTarget('other.addon', { kind: 'def', key: 'only-b' })
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    const seen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      expect(sdk.settingsContext!.locateTarget()).toBeNull()
+      sdk.settingsContext?.onLocateTarget((target) => seen.push(target))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    expect(seen).toEqual([])
+    // 他组件目标的后续交付与本组件的清除都不到本组件订阅者
+    runtime.deliverLocateTarget('other.addon', { kind: 'group', key: 'g' })
+    runtime.clearLocateTarget()
+    expect(seen).toEqual([])
+    // 归属本组件的目标正常到达（重复交付不去重——等值也是有效信号）
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'flag' })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'flag' })
+    expect(seen).toEqual([{ kind: 'def', key: 'flag' }, { kind: 'def', key: 'flag' }])
+  })
+
+  it('释放整组回收：unload 后定向交付不触达旧订阅（查询仍返回归属当前值）；已释放代次的迟到订阅为 no-op', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    let facet: import('../../src/shared/addonSettingsContextApi').AddonSettingsContextFacet | undefined
+    const scopeSeen: unknown[] = []
+    const locateSeen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      facet = sdk.settingsContext
+      sdk.settingsContext?.onScopeChange((state) => scopeSeen.push(state))
+      sdk.settingsContext?.onLocateTarget((target) => locateSeen.push(target))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: true })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'flag' })
+    expect(scopeSeen).toHaveLength(1)
+    expect(locateSeen).toEqual([{ kind: 'def', key: 'flag' }])
+    await h.handle.unload(ADDON_ID, 1)
+    // 卸载后页面级 runtime 仍可用（新代次还会消费）：旧代次订阅不再分发
+    runtime.applyScope({ scope: 'user', hasWorkspace: true })
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'group', key: 'behavior' })
+    expect(scopeSeen).toHaveLength(1)
+    expect(locateSeen).toEqual([{ kind: 'def', key: 'flag' }])
+    // 查询路径不受代次影响（只读无副作用——拉到的是归属该组件的当前值）
+    expect(facet!.scopeState()).toEqual({ scope: 'user', hasWorkspace: true })
+    expect(facet!.locateTarget()).toEqual({ kind: 'group', key: 'behavior' })
+    // 已释放代次的迟到登记为 no-op 退订（isLoadActive 守卫——回放也不触发）
+    const lateSeen: unknown[] = []
+    facet!.onLocateTarget((target) => lateSeen.push(target))
+    runtime.deliverLocateTarget(ADDON_ID, { kind: 'def', key: 'late' })
+    expect(lateSeen).toEqual([])
   })
 })

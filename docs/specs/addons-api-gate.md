@@ -8,7 +8,7 @@
 
 | 层 | 资产 | 职责 |
 | --- | --- | --- |
-| 事实源（T13） | `src/shared/addonApiCatalog.ts` | 六组 22 条目语义清单 + 发行台账 + `validateAddonApiCatalog` 自洽校验 |
+| 事实源（T13） | `src/shared/addonApiCatalog.ts` | 语义清单 + 发行台账 + `validateAddonApiCatalog` 自洽校验（首版六组 22 条目；2026-10 首轮扩展组合后七组 33 条目） |
 | 独立基线 | `test/addon-api/baseline-bootstrap-1.json` | 从 **git 锚点对象**派生的条目 / 签名声明文本 / 台账快照 + 完整性清单；不信任候选树文件 |
 | 纯逻辑模块 | `scripts/addonApiCompatCheck.mjs` | 比较器、期限校验、基线信任验证与全套编排（可被 node --test import） |
 | CLI 壳 | `scripts/checkAddonApiCompat.mjs` | `--verify-baseline` / 全检查 / `--emit-baseline`（发射基线）三入口 |
@@ -34,7 +34,7 @@ node scripts/demoAddonApiGate.mjs # 负向演示（退出码 0 = 全部场景符
 
 | 路径 | 锚点 | 额外核实 | 当前状态 |
 | --- | --- | --- | --- |
-| **bootstrap**（显式初始基线） | 提交 `abcbfdd7`（T13 集成分支落地树，非发行锚点） | — | **当前生效**：`baseline-bootstrap-1.json`（22 条目 / 12 签名模块 / 台账候选快照） |
+| **bootstrap**（显式初始基线） | `baseline-bootstrap-1.json` 的 `meta.anchor` 指向实际实施提交（非发行锚点） | 从 git 对象重派生并逐项复验 | **当前生效**；条目、签名与候选台账数量以该快照为准 |
 | **release**（发行基线） | 发行 tag + 台账 `released` 记录 + 实际发布日期 | tag 指向 SHA、锚点台账状态为 released、基线日期与台账一致（三者矛盾即失败） | 未启用——Vsidian 尚未发行任何稳定 API；经隔离 git fixture 验证（见下） |
 
 首个稳定 API（1.0.0）真实发行时的落账流程：人工把台账改 `status: 'released'` 并填实际发布日期 → 打发行 tag → `--emit-baseline --mode release --api-version 1.0.0 --anchor <tag>` 提交新基线（同 PR、独立说明理由）。**发行是人工落账动作**：候选版本不得冒充发行状态（`catalog-selfcheck` 拦截候选携带日期；`baseline-release-not-released` 拦截伪造的发行锚点）。
@@ -67,6 +67,16 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 **弃用期限双门槛**（`ADDON_API_REMOVAL_RULE` 的机械执行）：移除须「距弃用版本实际发布满 30 天」**且**「弃用版本之后已发行 ≥ 2 个后续 API 次版本」两项同时满足；补丁版本、候选版本、移除版本自身（等待期不能由执行移除的版本自己充当）均不计入跨度。版本跨度按台账（独立 API 版本）计算——检查器不读取 Vsidian 本体版本与 CHANGELOG，结构上不可能把本体版本当 API 跨度。
 
 **语义冻结口径**：目标 / 语义字段 / 签名声明文本按**字节冻结**——自由文本无法机械区分「扩展」与「收窄」，任何变化都要求显式重锚定（`--emit-baseline` 同 PR 提交 + 独立说明），使收窄不可能静默通过。允许的演进：新增条目、扩展执行端、新增语义字段、追加签名源、追加台账版本、experimental 升稳定候选。
+
+**T05（#544）候选基线重锚说明**：实施提交 `9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 为 `VsidianAddonPageSdk` 增加可选 `refViews` facet，并新增只读浮窗契约条目。旧成员、既有语义与发行台账不删减；原基线 `8e13e78f` 可信复验通过，候选比较仅因 SDK 声明新增字段触发 `signature-declaration-changed`。按既有字节冻结规则，使用 `--emit-baseline --anchor 9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 从已提交 git 对象重新发射，再运行基线复验及完整兼容检查。独立 API 仍为未发行的 1.0.0 候选，不补发行日期，也不修改检查器或豁免规则。批次集成其他接口后须针对最终组合提交再次复验，必要时显式重锚。
+
+**T07/#546 候选重锚理由（2026-10-15）**：新增宿主主题注册与页面主题环境，扩展 `AddonEnableContext` / `VsidianAddonPageSdk`，并落实 ADR-0017 已批准的 renderer-selection 主题例外及声明语言范围。旧候选基线如实拒绝这些签名和冻结语义变化（`out/test/t07-resume-compat-before-anchor.log`，6 项失败）；在功能与公开消费用例进入提交 `59555c05` 后，以 `--emit-baseline --anchor HEAD` 显式发射并另行提交基线。保留旧锚点 git 对象及失败报告，新锚点复验和兼容全检查均通过（`t07-resume-api-baseline.log` / `t07-resume-compat.log`）；不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。最终汇总分支还需对合并后的公开声明整体重锚核对。
+
+**四票组合重锚理由（2026-10-15）**：T01/T03/T05/T07 以真实 merge 保留各实施锚点，组合实施提交为 `8cf6a681`。旧 T01 基线可信复验通过，候选比较记录 7 项预期变化：主题选择目标与自动接管语义两项、宿主登记/页面 SDK/文档导航/渲染选择相关签名五项（`out/test/addon-batch-takeover/api-before-reanchor.json`）。按字节冻结规则执行 `--emit-baseline --anchor 8cf6a681`，从已提交组合对象发射 33 条目、21 签名模块及候选台账快照，随后独立提交并复验。重锚保留旧接口、历史对象和失败证据，不修改检查器、不加豁免，API 1.0.0 仍为未发行候选。
+
+**组合后 T01 契约修复重锚（2026-10-15）**：`7eb4dfc3` 修正真实槽声明判定，并按已批准规格移除整数优先级的额外私有幅度限制。公开调用形状未变，但现有声明提取器对导出校验函数保留完整文本，因此优先级校验实现变化使 `validateAddonPasteRuleDeclarations` 单项触发 `signature-declaration-changed`；其余检查通过，失败证据为 `out/test/addon-batch-takeover/final-api-before-fix.json`。按现有规则以包含修复的 `9c03461b` 显式发射新候选基线，同步生成参考；仍为 33 条目、21 签名模块和未发行的 1.0.0，不改检查器或增加豁免。新锚点可信复验与完整兼容结果见 `final-api-baseline.log` / `final-api-compat.json`。
+
+**独立审查后主题回落修复重锚（2026-10-15）**：两轴审查发现选中主题失效后，同语言普通提供者仍可接管。`b252bb79` 为 `RendererThemeSelectionContext` 增加可选的不可用主题语言范围，修正 `selectEffectiveRenderers` 的内置回落；`f28a3e3d` 进一步保留当前唯一首选的派生语言 profile 快照，覆盖组件冷启动未登记时的既有选择。SDK 调用面、旧条目和发行台账不变。旧锚点可信复验通过，候选检查只在上述接口和选择函数文本报两项 `signature-declaration-changed`，证据为 `out/test/addon-batch-takeover/review-fixes-compat-red.json`。按字节冻结规则从已提交对象 `f28a3e3d` 显式重锚；33 条目、21 模块及候选 1.0.0 保持，生成参考、基线可信复验和十项兼容检查通过（`review-fixes-baseline.log`）。不改检查器、不加豁免，不把审查修复表述为实际 API 发行。
 
 ## CI 接线（代码侧，已交付）
 
