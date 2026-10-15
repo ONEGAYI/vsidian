@@ -49,7 +49,8 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
   }, unmount() {
     triggerEl = null
   } })
-  panel.open()
+  // 共享宿主默认不打开面板；仅本套用例经 openPanel 显式触发，避免干扰
+  // 其他组件对默认关闭态的断言。
 
   const request = async (args: Record<string, unknown>): Promise<unknown> => {
     const id = String(args['id'] ?? 'r0')

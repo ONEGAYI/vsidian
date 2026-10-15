@@ -291,6 +291,7 @@ export const addonT07Cases: Array<[string, () => Promise<void>]> = [
 
     // 键入 ^：tilde（组内前置适用）插 ~，dash（组外）再插 -，space 组内
     // 被占跳过 → word^~-（调整顺序导致可预期结果；组外行为不受组影响）
+    await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
     const orderInbox = new EventInbox()
     await typeAt(file, 4, '^')
     await poll('调序后修饰落地', async () => ((await docText(file)) === 'word^~-\n' ? true : undefined))

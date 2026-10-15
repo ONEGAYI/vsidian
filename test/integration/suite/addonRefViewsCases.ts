@@ -100,6 +100,7 @@ async function openDoc(name: string): Promise<void> {
       | { found: boolean; panels: { ready: boolean }[] }
     return state.found && state.panels.some((panel) => panel.ready) ? state : undefined
   })
+  await runOp('openPanel')
 }
 
 /** 夹具指令（queue + collect 单条配对） */

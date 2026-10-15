@@ -33,6 +33,7 @@ async function paint(uri: vscode.Uri): Promise<Paint | undefined> {
 export const addonThemeCases: Array<[string, () => Promise<void>]> = [
   ['附加组件主题 T07：无编辑器目录、双文档单选、明暗四态与停用恢复（#546）', async () => {
     const previous = await vscode.commands.executeCommand<Record<string, unknown>>(`${PREFIX}getSettings`)
+    const previousRenderers = await vscode.commands.executeCommand<{ preferred: Record<string, string> }>(`${PREFIX}addonRendererStore`)
     const config = vscode.workspace.getConfiguration('workbench')
     const previousColor = config.inspect<string>('colorTheme')!.globalValue
     const root = vscode.workspace.workspaceFolders![0]!.uri
@@ -41,6 +42,9 @@ export const addonThemeCases: Array<[string, () => Promise<void>]> = [
       'appearance.theme': value, 'appearance.mermaidTheme': value === 'codex' ? 'codex' : 'default',
     })
     try {
+      // 普通提供者可保留前序用例的用户首选；以显式 builtin 建立本场景的
+      // 默认显示。选中组件主题仍须覆盖该普通首选，停用后再恢复 builtin。
+      await vscode.commands.executeCommand(`${PREFIX}addonRendererPrefer`, { language: 'mermaid', provider: 'builtin' })
       await vscode.commands.executeCommand('workbench.action.closeAllEditors')
       const directory = await wait('无编辑器时主题目录已登记', async () => {
         const current = await state()
@@ -93,6 +97,7 @@ export const addonThemeCases: Array<[string, () => Promise<void>]> = [
       await vscode.commands.executeCommand(`${ID}.arm`, false)
       await vscode.commands.executeCommand(`${PREFIX}addonSetEnabled`, { addonId: ID, enabled: true })
       await vscode.commands.executeCommand(`${PREFIX}setSettings`, { 'appearance.theme': previous!['appearance.theme'], 'appearance.mermaidTheme': previous!['appearance.mermaidTheme'] })
+      await vscode.commands.executeCommand(`${PREFIX}addonRendererPrefer`, { language: 'mermaid', provider: previousRenderers!.preferred['mermaid'] ?? null })
       await config.update('colorTheme', previousColor, vscode.ConfigurationTarget.Global)
     }
   }],

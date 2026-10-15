@@ -101,6 +101,7 @@ interface ViewState {
   selectionOffset?: number
   readingAnchorStart?: number
   addonPage?: { active: unknown[] }
+  readingEmbed?: Array<{ inner: string; state: string; liveBound?: boolean }>
 }
 
 async function viewStateOf(file: string): Promise<ViewState | undefined> {
@@ -262,7 +263,18 @@ export const addonDocNavCases: Array<[string, () => Promise<void>]> = [
     await ensureEnabled()
     await closeAllEditors()
     await openEditorAndWait('nav-opener.md')
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
     await probePageReady('nav-opener.md')
+    let sourceState: ViewState | undefined
+    try {
+      await poll('来源 Live 嵌入内容与端口就绪', async () => {
+        sourceState = await viewStateOf('nav-opener.md')
+        const card = sourceState?.readingEmbed?.find((entry) => entry.inner === 'sub/nav-b.md')
+        return sourceState?.viewMode === 'live' && card?.state === 'content' && card.liveBound ? sourceState : undefined
+      })
+    } catch (error) {
+      throw new Error(`${String(error)}; source=${JSON.stringify(sourceState)}; views=${JSON.stringify(await runNav('listViews'))}`)
+    }
     // 嵌入 B（sub/nav-b.md）的 Live 实例进入 views 注册表
     await poll('嵌入视图在场', async () => {
       const views = (await runNav('listViews')) as unknown as Array<{ instanceId: string; viewType: string }>

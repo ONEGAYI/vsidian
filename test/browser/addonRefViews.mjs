@@ -96,8 +96,6 @@ try {
   const loadOutcome = await page.evaluate((uri) => window.rvLoad('vsidian-test-fixture.addon-refviews', uri), scriptUrl)
   assert.ok(loadOutcome.ok, `组件装载应成功（${JSON.stringify(loadOutcome)}）`)
   await page.waitForFunction(() => window.rvRegistrations().length > 0)
-  await page.waitForSelector('.rv-trigger', { state: 'attached' })
-  passed++; console.log('[T05][ok] 组件装载、面板挂载与触发控件在场')
 
   const pumpUntil = async (pred, label, timeoutMs = 6000) => {
     const start = Date.now()
@@ -116,6 +114,10 @@ try {
     assert.notEqual(outcome, undefined, `rv.${op} 应有结局`)
     return outcome
   }
+
+  await runOp('openPanel')
+  await page.waitForSelector('.rv-trigger', { state: 'attached' })
+  passed++; console.log('[T05][ok] 组件装载、显式打开面板与触发控件在场')
 
   // ---- 场景 1：触发位置旁的实际浮窗（绘制层） ----
   const triggerBox = await page.locator('.rv-trigger').boundingBox()

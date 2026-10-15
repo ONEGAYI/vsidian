@@ -278,6 +278,9 @@ async function waitForProviderPaint(file: string, provider: string, language: st
 
 export const addonT15RendererCases: Array<[string, () => Promise<void>]> = [
   ['附加组件 T15：渲染样例安装自动接管与用户首选按需调整（#364）', async () => {
+    // 自动接管场景从无用户首选开始，前序 T09 的显式选择不属于本场景。
+    await prefer('mermaid', null)
+    await prefer('sampleflow', null)
     await ensureEnabled(RENDERER_ID)
     await vscode.commands.executeCommand(`${RENDERER_ID}.armProviders`)
     await openEditorPanel('t15-render.md')
