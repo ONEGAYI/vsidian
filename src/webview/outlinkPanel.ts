@@ -144,8 +144,13 @@ function buildOutlinkItem(item: OutlinkItemPayload): HTMLButtonElement {
   el.appendChild(nameRow)
   const pathRow = document.createElement('span')
   pathRow.className = OUTLINK_CLASS_NAMES.itemPath
-  pathRow.textContent = item.resolved && item.targetRelPath !== null
-    ? outlinkPathLabel(item.targetRelPath)
+  // #556 T3：命中条目的行 2——根内目标显示去 .md 相对路径；跨根/外部目标
+  // （无根内 rel）显示绝对身份（T2 移交的呈现精化：不再重复目标名）；断链
+  // 条目无身份，显示目标原文（链接写了什么就呈现什么）
+  pathRow.textContent = item.resolved
+    ? item.targetRelPath !== null
+      ? outlinkPathLabel(item.targetRelPath)
+      : item.targetFsPath ?? item.targetDisplay
     : item.targetDisplay
   el.appendChild(pathRow)
   return el

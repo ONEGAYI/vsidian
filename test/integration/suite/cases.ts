@@ -4512,7 +4512,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('wikilinks.md') === diskBefore, '双链跳转不得改写源文档')
   }],
 
-  ['双链根内相对路径边界：子目录来源短名不命中根目录同名、../ 根内上行命中、../../ 越界拦截（#196）', async () => {
+  ['双链根内相对路径边界：子目录来源短名补查命中根目录唯一同名、../ 根内上行命中、../../ 越界拦截（#196/#556）', async () => {
     // 源文档在 子 目录/ 下：docDir = <ws>/子 目录，所属根 = <ws>（多根
     // 互不补查、basename 搜索与根相对兜底废除后的新语义边界）
     await openWithEditor('子 目录/目标 二.md')
@@ -4520,10 +4520,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const uri = wsUri('子 目录/目标 二.md').toString()
     const diskBefore = await readDisk('子 目录/目标 二.md')
 
-    // 短名跨目录不命中：[[目标笔记]] 只认 子 目录/目标笔记(.md)，根目录的
-    // 目标笔记.md 不再命中（旧 basename 全根搜索的集成级反例）
+    // #556 短名补查（正向场景）：[[目标笔记]] 同目录候选未命中后，所属根
+    // 内唯一同名（根/目标笔记.md）经补查命中——Vsidian 面板打开（#196 时
+    // 代的「跨目录不命中」反例随 #556 反转；多根互不补查仍由所属根划界）
     await injectWikilink(uri, '目标笔记')
-    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === '目标笔记')
+    const shortLog = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === '目标笔记')
+    assert(shortLog!.path === wsUri('目标笔记.md').fsPath, `补查命中目标不符：${shortLog!.path}`)
+    await waitSessionReady('目标笔记.md')
+    await waitActiveCustomTab('目标笔记.md')
 
     // 越出所属根：../../ 被拦截，与不存在分开反馈（outside-root）
     await injectWikilink(uri, '../../目标笔记')
@@ -4536,11 +4540,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSessionReady('目标笔记.md')
     await waitActiveCustomTab('目标笔记.md')
 
-    // 拦截两态（not-found / outside-root）不得打开编辑器：wikilink-doc 恰一条
+    // 两形态命中（补查/明确相对）各开一次；越界态不得打开编辑器
     const logAll = (await vscode.commands.executeCommand(CMD.linkLog, uri)) as LinkLogData
     assert(
-      logAll.log.filter((e) => e.kind === 'wikilink-doc').length === 1,
-      `拦截类双链意图不得打开编辑器，实际 ${JSON.stringify(logAll.log)}`,
+      logAll.log.filter((e) => e.kind === 'wikilink-doc').length === 2,
+      `越界双链意图不得打开编辑器，实际 ${JSON.stringify(logAll.log)}`,
     )
     assert(await readDisk('子 目录/目标 二.md') === diskBefore, '跳转不得改写源文档')
   }],
@@ -4794,18 +4798,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
       `二次重载不得漂移（期望 LF offset ${ANCHOR_BLK_LF_OFFSET}，实际 ${again.selectionOffset}）`)
   }],
 
-  ['双链缺失与同名隔离：子目录同名不再命中（多候选选择废除）、缺失提示、不支持降级、不自动建文件（#11/#196）', async () => {
+  ['双链缺失与同名分态：多候选歧义不归任一候选、缺失提示、不支持降级、不自动建文件（#11/#196/#556）', async () => {
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
     const uri = wsUri('wikilinks.md').toString()
     const diskBefore = await readDisk('wikilinks.md')
     const versionBefore = (await vscode.workspace.openTextDocument(wsUri('wikilinks.md'))).version
 
-    // 短名只认来源同目录（#196）：dup/甲.md 与 other/甲.md 都在子目录，
-    // 来源目录（工作区根）下没有 甲.md → not-found。旧 basename 全根搜索
-    // 与同名 QuickPick 选择已废除
+    // #556 短名补查分态：dup/甲.md 与 other/甲.md 两个同名候选 → 歧义
+    // （不归任一候选、提示补路径，不冒充不存在；#196 时代为 not-found，
+    // 旧 basename 全根搜索与同名 QuickPick 选择维持废除）
     await injectWikilink(uri, '甲')
-    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === '甲')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-ambiguous' && e.target === '甲')
     // 缺失目标：not-found（不自动创建文件）
     await injectWikilink(uri, '不存在的笔记')
     await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === '不存在的笔记')

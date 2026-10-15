@@ -106,7 +106,7 @@ function respondHeading(
 function respondHeadingUnavailable(
   c: ReturnType<typeof setup>['controller'],
   sent: WebviewToHost[],
-  reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error',
+  reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' | 'target-ambiguous' | 'target-pending',
 ) {
   const q = lastHeadingQuery(sent)
   if (!q) {
@@ -888,6 +888,22 @@ describe('标题阶段会话：候选、键盘与确认（#379 T04）', () => {
       deleteAt(view, 14, 15)
       respondHeading(controller, sent, [])
       expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingEmpty'])
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('#556 T3：短名补查分态呈现（同名不唯一提示补路径 / 清单更新中）', () => {
+    const { controller, sent, view } = setup('[[方案#]]')
+    try {
+      locate(controller, 5)
+      typeAt(view, 5, 'x')
+      respondHeadingUnavailable(controller, sent, 'target-ambiguous')
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.targetAmbiguous'])
+      deleteAt(view, 5, 6)
+      typeAt(view, 5, 'y')
+      respondHeadingUnavailable(controller, sent, 'target-pending')
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.targetPending'])
     } finally {
       controller.dispose()
     }

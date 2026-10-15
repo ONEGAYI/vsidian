@@ -2800,3 +2800,107 @@ describe('VaultIndexService：#556 T2 快照 v2 恢复迁移（轻量重建绝�
     expect(manifestAfter.formatVersion).toBe(3)
   })
 })
+
+describe('VaultIndexService：#556 T3 跳转侧补查查询与跨根反链合并', () => {
+  it('shortnameLookup：按来源根分区查 catalog 倒排；索引未建/来源无根返回 null（不作 fs 补查）', async () => {
+    const fs = makeFs({
+      'C:/vault/项目/来源.md': '# 源\n',
+      'C:/vault/资料/目标.md': '# 标\n',
+    })
+    const { service } = makeService(fs)
+    // 索引未建立（未 initialize）：无补查数据面——null（消费方不注入补查）
+    expect(service.shortnameLookup('C:/vault/项目/来源.md', '目标.md')).toBeNull()
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(service.shortnameLookup('C:/vault/项目/来源.md', '目标.md')).toEqual({
+      candidates: ['C:/vault/资料/目标.md'],
+      complete: true,
+    })
+    // 查询键为完整 basename：带扩展名直查
+    expect(service.shortnameLookup('C:/vault/项目/来源.md', '目标')).toEqual({
+      candidates: [],
+      complete: true,
+    })
+    // 来源不在任何根分区：null（不猜其他根）
+    expect(service.shortnameLookup('D:/elsewhere/a.md', '目标.md')).toBeNull()
+  })
+
+  it('shortnameLookup：多候选与不完整清单如实透传（歧义/pending 分态由消费方经 vaultLink 映射）', async () => {
+    const fs = makeFs({
+      'C:/vault/项目/来源.md': '# 源\n',
+      'C:/vault/资料/目标.md': '# 标\n',
+      'C:/vault/归档/目标.md': '# 二\n',
+    })
+    const ctx = makeService(fs)
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    const ambiguous = ctx.service.shortnameLookup('C:/vault/项目/来源.md', '目标.md')!
+    expect(ambiguous.candidates.sort()).toEqual(['C:/vault/归档/目标.md', 'C:/vault/资料/目标.md'])
+    expect(ambiguous.complete).toBe(true)
+    // 清单不完整：complete=false 如实透传（唯一候选不声明唯一）
+    ;(ctx.scan as unknown as { inaccessibleDirs: Set<string> }).inaccessibleDirs.add('C:/vault/私密')
+    fs.files.set('C:/vault/私密/占位.md', '# 私\n')
+    fs.stats.set('C:/vault/私密/占位.md', { mtimeMs: 1_700_000_300_000, size: 4 })
+    await ctx.service.verifyNow()
+    expect(ctx.service.shortnameLookup('C:/vault/项目/来源.md', '目标.md')!.complete).toBe(false)
+  })
+
+  it('跨根绝对目标反链：目标根分区外的来源根身份桶并入（#556 T2 移交）', async () => {
+    const fs = makeFs({
+      'C:/vaultA/源.md': '# 源\n\n见 [[C:/vaultB/笔记.md]]。\n',
+      'C:/vaultB/笔记.md': '# B\n',
+      'C:/vaultB/本地.md': '# 本\n\n也见 [[笔记]]。\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([
+      { fsPath: 'C:/vaultA', uri: 'file:///c%3A/vaultA' },
+      { fsPath: 'C:/vaultB', uri: 'file:///c%3A/vaultB' },
+    ])
+    await vi.advanceTimersByTimeAsync(1)
+    // 目标在 B 根：B 根自身短名边（本地.md）+ A 根绝对身份边（源.md）都计入
+    const back = await service.backlinksOf('C:/vaultB/笔记.md')
+    expect(itemsOf(back).map((i) => i.sourceFsPath).sort()).toEqual([
+      'C:\\vaultA\\源.md',
+      'C:\\vaultB\\本地.md',
+    ])
+  })
+
+  it('跨根同名不串：他根 basename 断链兜底不并入（补查限来源所属根）', async () => {
+    const fs = makeFs({
+      // A 根：断链 [[断名]]（A 根无同名文件）+ 绝对链到 B 根
+      'C:/vaultA/源.md': '# 源\n\n见 [[C:/vaultB/笔记.md]] 与 [[断名]]。\n',
+      // B 根：笔记.md（绝对目标）与 断名.md（B 根内 [[断名]] 解析命中）
+      'C:/vaultB/笔记.md': '# 笔\n',
+      'C:/vaultB/断名.md': '# 占\n',
+      'C:/vaultB/他文.md': '# 他\n\n见 [[断名]]。\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([
+      { fsPath: 'C:/vaultA', uri: 'file:///c%3A/vaultA' },
+      { fsPath: 'C:/vaultB', uri: 'file:///c%3A/vaultB' },
+    ])
+    await vi.advanceTimersByTimeAsync(1)
+    // B 根 断名.md 的反链：只有 B 根内解析边（他文.md）；A 根断链 [[断名]]
+    // 不跨根串入（A 根短名补查永远不可能命中 B 根文件）
+    const back = await service.backlinksOf('C:/vaultB/断名.md')
+    expect(itemsOf(back).map((i) => i.sourceFsPath)).toEqual(['C:\\vaultB\\他文.md'])
+    // 绝对目标合并查询不受影响：A 根身份桶照常并入
+    const abs = await service.backlinksOf('C:/vaultB/笔记.md')
+    expect(itemsOf(abs).map((i) => i.sourceFsPath)).toEqual(['C:\\vaultA\\源.md'])
+  })
+
+  it('外部目标（无根分区）：贡献根只按身份桶并入，根内 basename 断链兜底不跨边界串', async () => {
+    const fs = makeFs({
+      // A 根：绝对链到工作区外 + 断链 [[笔记]]（A 根无同名文件）
+      'C:/vaultA/源.md': '# 源\n\n见 [[D:/outside/笔记.md]] 与 [[笔记]]。\n',
+      'D:/outside/笔记.md': '# 外\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vaultA', uri: 'file:///c%3A/vaultA' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 外部目标的反链：只有绝对身份边；A 根断链 [[笔记]] 按 basename 兜底
+    // 不串入（根内短名不可能解析到工作区外目标）
+    const back = await service.backlinksOf('D:/outside/笔记.md')
+    expect(itemsOf(back).map((i) => i.sourceFsPath)).toEqual(['C:\\vaultA\\源.md'])
+  })
+})

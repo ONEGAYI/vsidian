@@ -123,3 +123,33 @@ describe('辅助口径', () => {
     expect(outlinkPathLabel('pic.png')).toBe('pic.png')
   })
 })
+
+describe('#556 T3：跨根/外部目标呈现（targetRelPath=null 的命中条目）', () => {
+  it('命中但无根内相对路径：行 2 显示绝对身份（不再重复目标名）', () => {
+    const panel = buildOutlinksDom().panel
+    renderOutlinksState(panel, {
+      state: 'ready',
+      updating: false,
+      items: [
+        itemOf({ targetDisplay: '外部笔记', targetRelPath: null, targetFsPath: 'D:/outside/外部笔记.md', start: 30, end: 60 }),
+      ],
+    })
+    const item = panel.querySelector(`.${OUTLINK_CLASS_NAMES.item}`)! as HTMLElement
+    expect(item.querySelector(`.${OUTLINK_CLASS_NAMES.itemPath}`)!.textContent)
+      .toBe('D:/outside/外部笔记.md')
+    // 命中条目仍可点（跳转数据携带绝对身份）
+    expect(item.dataset['vsidianTarget']).toBe('D:/outside/外部笔记.md')
+    expect(item.classList.contains(OUTLINK_CLASS_NAMES.broken)).toBe(false)
+  })
+
+  it('断链条目（无身份）维持目标名呈现', () => {
+    const panel = buildOutlinksDom().panel
+    renderOutlinksState(panel, {
+      state: 'ready',
+      updating: false,
+      items: [itemOf({ targetDisplay: '不存在的笔记', targetRelPath: null, targetFsPath: null, resolved: false })],
+    })
+    const item = panel.querySelector(`.${OUTLINK_CLASS_NAMES.item}`)! as HTMLElement
+    expect(item.querySelector(`.${OUTLINK_CLASS_NAMES.itemPath}`)!.textContent).toBe('不存在的笔记')
+  })
+})

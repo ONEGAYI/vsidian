@@ -1342,3 +1342,83 @@ describe('#336 image 分派：RefImageContent 载荷', () => {
     }
   })
 })
+
+describe('#556 T3：短名补查分态与绝对目标访问', () => {
+  it('resolveVaultFile 回 ambiguous → 失败分态 reason=ambiguous（提示补路径载荷，不冒充不存在）', async () => {
+    const h = makeHarness(new Map([['D:\\notes\\a.md', note('x')]]))
+    h.ports.resolveVaultFile = async () => ({ kind: 'ambiguous', candidates: ['D:\\notes\\资料\\目标.md', 'D:\\notes\\归档\\目标.md'] })
+    const out = await readHoverDocTarget('目标', h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'ambiguous' })
+  })
+
+  it('resolveVaultFile 回 pending → 失败分态 reason=pending（清单未就绪不声明唯一）', async () => {
+    const h = makeHarness(new Map([['D:\\notes\\a.md', note('x')]]))
+    h.ports.resolveVaultFile = async () => ({ kind: 'pending' })
+    const out = await readHoverMdLinkTarget('目标', h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'pending' })
+  })
+
+  it('directTarget 绝对路径越出根：真实存在（statFile 命中）→ 放行读取（#556 绝对目标可达）', async () => {
+    const h = directHarness()
+    h.ports.statFile = async () => ({ mtimeMs: 1 })
+    const out = await readHoverDirectTarget({ fsPath: 'D:\\outside\\目标.md' }, h.ctx, h.ports)
+    // 盘上无该文件：openTextDocument 失败 → read-failed（放行后按真实读取结果分态）
+    expect(out).toEqual({ ok: false, reason: 'read-failed' })
+    // 盘上存在：读取成功
+    const h2 = directHarness(new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\outside\\目标.md', note('# 外部目标\n')],
+    ]))
+    h2.ports.statFile = async () => ({ mtimeMs: 1 })
+    const ok = await readHoverDirectTarget({ fsPath: 'D:\\outside\\目标.md' }, h2.ctx, h2.ports)
+    expect(ok).toMatchObject({ ok: true, fsPath: 'D:\\outside\\目标.md' })
+  })
+
+  it('directTarget 绝对路径越出根且不存在 → not-found（防伪造边界：不存在的绝对身份不放行）', async () => {
+    const h = directHarness()
+    h.ports.statFile = async () => null
+    const out = await readHoverDirectTarget({ fsPath: 'D:\\outside\\伪造.md' }, h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'not-found' })
+  })
+
+  it('directTarget 绝对路径越出根且无 statFile 端口 → escape（不可核实不放行，P1-1 边界保守）', async () => {
+    const h = directHarness()
+    const out = await readHoverDirectTarget({ fsPath: 'D:\\outside\\目标.md' }, h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'escape' })
+  })
+
+  it('directTarget 相对形态与根内路径口径不变（相对不放行、根内照常）', async () => {
+    const h = directHarness()
+    const rel = await readHoverDirectTarget({ fsPath: '..\\..\\etc\\passwd' }, h.ctx, h.ports)
+    expect(rel).toEqual({ ok: false, reason: 'escape' })
+    const inside = await readHoverDirectTarget({ fsPath: 'D:\\notes\\目标.md' }, h.ctx, h.ports)
+    expect(inside).toMatchObject({ ok: true, fsPath: 'D:\\notes\\目标.md' })
+  })
+
+  it('image 目标越出根：图源用绝对形态（相对 ../ 形态会被图片解析的根边界拦截）', async () => {
+    const disk = new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\outside\\图.png', note('binary')],
+    ])
+    const h = makeHarness(disk)
+    h.ports.resolveVaultFile = async () => ({ kind: 'target', fsPath: 'D:\\outside\\图.png' })
+    h.ports.statFile = async () => ({ mtimeMs: 42 })
+    const out = await readRefContentTarget({ target: '图.png' }, h.ctx, h.ports)
+    expect(out).toMatchObject({
+      ok: true,
+      fsPath: 'D:\\outside\\图.png',
+      content: { kind: 'image', src: 'D:/outside/图.png', version: 42 },
+    })
+  })
+
+  it('tip：绝对路径目标显示绝对身份（不因越出根而静默不出）', async () => {
+    const h = directHarness()
+    const direct = await resolveHoverTargetTip({ directTarget: { fsPath: 'D:\\outside\\目标.md', anchor: '节' } }, h.ctx)
+    expect(direct).toEqual({ ok: true, relPath: 'D:/outside/目标.md', anchor: '#节' })
+    const wikilink = await resolveHoverTargetTip({ target: 'D:/outside/目标.md' }, h.ctx)
+    expect(wikilink).toEqual({ ok: true, relPath: 'D:/outside/目标.md', anchor: '' })
+    const mdlink = await resolveHoverTargetTip({ linkHref: 'D:/outside/目标.md#节' }, h.ctx)
+    expect(mdlink).toEqual({ ok: true, relPath: 'D:/outside/目标.md', anchor: '#节' })
+  })
+})
+

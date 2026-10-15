@@ -704,7 +704,7 @@ export type HostToWebview =
       reqId: number
       generation: number
       status: 'ready' | 'unavailable'
-      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error'
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' | 'target-ambiguous' | 'target-pending'
       targetVersion?: number
       items?: WikilinkHeadingItem[]
     }
@@ -723,7 +723,7 @@ export type HostToWebview =
       reqId: number
       generation: number
       status: 'ready' | 'unavailable'
-      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error'
+      reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' | 'target-ambiguous' | 'target-pending'
       targetVersion?: number
       items?: WikilinkBlockItem[]
     }
@@ -744,7 +744,7 @@ export type HostToWebview =
       generation: number
       ok: boolean
       reason?: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' |
-        'target-changed' | 'apply-failed'
+        'target-changed' | 'apply-failed' | 'target-ambiguous' | 'target-pending'
       /** 最终块 id（ok=true 在场；复用或新生成） */
       blockId?: string
       /** 源与目标同一文档（ok=true 在场）：宿主未写入，标记由 webview 合笔 */
@@ -2337,6 +2337,9 @@ export interface HoverTextNavPayload {
  *  （编码以宿主打开文档的解码结果为准——探测只拦宿主解码必然无意义的
  *  形态）；file-too-large=超单文件准入上限；line-too-long=单行超上限
  *  （不悄悄截断）；text 锚点段非法细分见 anchor-detail，附锚点原文。
+ *  #556（T3）短名补查分态：ambiguous=根内多个同名候选（不归任一候选，
+ *  提示补路径）；pending=清单未就绪且只发现一个候选（不声明唯一，显示
+ *  更新中状态）。两态不冒充 not-found。
  *  失败均提供原生打开入口继续 */
 export type HoverPreviewFailReason =
   | 'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' | 'anchor-invalid'
@@ -2346,6 +2349,8 @@ export type HoverPreviewFailReason =
   // #342（P3-10）外链卡片失败分态族：真实网络失败如实呈现（就地 i18n），
   // 不伪装成文件缺失；语义与矩阵见 shared/webLink 的 WebLinkFailReason
   | 'web-disabled' | 'web-invalid-address' | 'web-timeout' | 'web-too-large' | 'web-not-html' | 'web-redirects' | 'web-unreachable'
+  // #556（T3）短名补查分态（见上方注释）
+  | 'ambiguous' | 'pending'
 
 /** #340 anchor-invalid 的细分原因（错误分态文案参数；shared/refText 的
  *  TextAnchorInvalidCode 同源——协议侧为消息形态单一事实源） */
@@ -5382,7 +5387,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
         (v.status === 'ready' || v.status === 'unavailable') &&
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
-          v.reason === 'target-not-md' || v.reason === 'read-error') &&
+          v.reason === 'target-not-md' || v.reason === 'read-error' ||
+          v.reason === 'target-ambiguous' || v.reason === 'target-pending') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkHeadingItem))) &&
         (v.targetVersion === undefined || isNonNegativeInt(v.targetVersion))
       )
@@ -5393,7 +5399,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         isNonNegativeInt(v.reqId) && isNonNegativeInt(v.generation) &&
         (v.status === 'ready' || v.status === 'unavailable') &&
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
-          v.reason === 'target-not-md' || v.reason === 'read-error') &&
+          v.reason === 'target-not-md' || v.reason === 'read-error' ||
+          v.reason === 'target-ambiguous' || v.reason === 'target-pending') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isWikilinkBlockItem))) &&
         (v.targetVersion === undefined || isNonNegativeInt(v.targetVersion))
       )
@@ -5406,7 +5413,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         typeof v.ok === 'boolean' &&
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'target-not-found' ||
           v.reason === 'target-not-md' || v.reason === 'read-error' ||
-          v.reason === 'target-changed' || v.reason === 'apply-failed') &&
+          v.reason === 'target-changed' || v.reason === 'apply-failed' ||
+          v.reason === 'target-ambiguous' || v.reason === 'target-pending') &&
         (v.blockId === undefined || isString(v.blockId)) &&
         (v.sameDoc === undefined || typeof v.sameDoc === 'boolean') &&
         (v.markerLfOffset === undefined || isNonNegativeInt(v.markerLfOffset)) &&
@@ -5544,7 +5552,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           // #342（P3-10）web 失败分态族（真实网络失败，不伪装成文件缺失）
           v.reason === 'web-disabled' || v.reason === 'web-invalid-address' || v.reason === 'web-timeout' ||
           v.reason === 'web-too-large' || v.reason === 'web-not-html' || v.reason === 'web-redirects' ||
-          v.reason === 'web-unreachable') &&
+          v.reason === 'web-unreachable' ||
+          // #556（T3）短名补查分态（多候选/清单未就绪，不冒充不存在）
+          v.reason === 'ambiguous' || v.reason === 'pending') &&
         (v.anchor === undefined || isString(v.anchor)) &&
         (v.anchorDetail === undefined ||
           (v.reason === 'anchor-invalid' &&

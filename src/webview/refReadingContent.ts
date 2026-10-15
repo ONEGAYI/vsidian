@@ -259,6 +259,12 @@ export function refErrorText(
       return t('hover.errorTextTooLarge', { target, maxMb: '2' })
     case 'line-too-long':
       return t('hover.errorTextLongLine', { target })
+    // #556（T3）短名补查分态：多候选提示补路径、清单未就绪提示更新中
+    //——不冒充文件缺失（就地 i18n；错误卡片的原生打开入口保持可用）
+    case 'ambiguous':
+      return t('hover.errorAmbiguous', { target })
+    case 'pending':
+      return t('hover.errorPending', { target })
   }
 }
 

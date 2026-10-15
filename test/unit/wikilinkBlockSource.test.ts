@@ -109,3 +109,30 @@ describe('queryWikilinkBlocks：同文档锚点（空目标=当前文档，2026-
     }
   })
 })
+
+describe('queryWikilinkBlocks：#556 T3 短名补查分态（真实状态不伪装）', () => {
+  it('补查端口注入：唯一且完整 → 命中目标并枚举块', async () => {
+    const h = harness()
+    h.diskDocs.set('/vault/资料/方案.md', { text: '# 甲\n\n段落一 ^blk-a\n', version: 3 })
+    const result = await queryWikilinkBlocks('方案', '', CTX, h.ports, undefined, {
+      lookupShortname: async () => ({ candidates: ['/vault/资料/方案.md'], complete: true }),
+    })
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') {
+      expect(result.targetFsPath).toBe('/vault/资料/方案.md')
+      expect(result.items.map((i) => i.blockId)).toContain('blk-a')
+    }
+  })
+
+  it('多候选 → target-ambiguous；唯一但清单不完整 → target-pending', async () => {
+    const h = harness()
+    const ambiguous = await queryWikilinkBlocks('方案', '', CTX, h.ports, undefined, {
+      lookupShortname: async () => ({ candidates: ['/vault/资料/方案.md', '/vault/归档/方案.md'], complete: true }),
+    })
+    expect(ambiguous).toEqual({ status: 'unavailable', reason: 'target-ambiguous' })
+    const pending = await queryWikilinkBlocks('方案', '', CTX, h.ports, undefined, {
+      lookupShortname: async () => ({ candidates: ['/vault/资料/方案.md'], complete: false }),
+    })
+    expect(pending).toEqual({ status: 'unavailable', reason: 'target-pending' })
+  })
+})

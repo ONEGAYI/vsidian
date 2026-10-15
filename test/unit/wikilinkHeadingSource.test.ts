@@ -239,3 +239,44 @@ describe('queryWikilinkHeadings：同文档锚点（空目标=当前文档，202
     }
   })
 })
+
+describe('queryWikilinkHeadings：#556 T3 短名补查分态（真实状态不伪装）', () => {
+  it('补查端口注入：唯一且完整 → 命中目标并枚举标题', async () => {
+    const h = harness()
+    h.diskDocs.set('/vault/资料/方案.md', { text: '# 甲\n## 乙\n', version: 3 })
+    const result = await queryWikilinkHeadings('方案', '', CTX, h.ports, undefined, {
+      lookupShortname: async () => ({ candidates: ['/vault/资料/方案.md'], complete: true }),
+    })
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') {
+      expect(result.targetFsPath).toBe('/vault/资料/方案.md')
+      expect(result.items.map((i) => i.heading)).toEqual(['甲', '乙'])
+    }
+  })
+
+  it('多候选 → target-ambiguous（不按部分文件名猜目标，真实分态）', async () => {
+    const h = harness()
+    const result = await queryWikilinkHeadings('方案', '', CTX, h.ports, undefined, {
+      lookupShortname: async () => ({ candidates: ['/vault/资料/方案.md', '/vault/归档/方案.md'], complete: true }),
+    })
+    expect(result).toEqual({ status: 'unavailable', reason: 'target-ambiguous' })
+  })
+
+  it('唯一但清单不完整 → target-pending（不声明唯一）', async () => {
+    const h = harness()
+    const result = await queryWikilinkHeadings('方案', '', CTX, h.ports, undefined, {
+      lookupShortname: async () => ({ candidates: ['/vault/资料/方案.md'], complete: false }),
+    })
+    expect(result).toEqual({ status: 'unavailable', reason: 'target-pending' })
+  })
+
+  it('零候选 → 维持 target-not-found；端口不注入行为不变', async () => {
+    const h = harness()
+    const zero = await queryWikilinkHeadings('方案', '', CTX, h.ports, undefined, {
+      lookupShortname: async () => ({ candidates: [], complete: true }),
+    })
+    expect(zero).toEqual({ status: 'unavailable', reason: 'target-not-found' })
+    const noPort = await queryWikilinkHeadings('方案', '', CTX, h.ports)
+    expect(noPort).toEqual({ status: 'unavailable', reason: 'target-not-found' })
+  })
+})

@@ -11,7 +11,7 @@
 // 失败分真实状态（target-not-found / target-not-md / read-error /
 // no-workspace），不伪装空结果。
 import * as path from 'node:path'
-import { resolveVaultLinkFile, type VaultLinkExistsPort, type VaultLinkResolveContext } from '../shared/vaultLink'
+import { resolveVaultLinkFile, type VaultLinkExistsPort, type VaultLinkResolveContext, type VaultLinkShortnamePort } from '../shared/vaultLink'
 import { classifyVaultFileCategory } from '../shared/vaultFileCategory'
 import { defaultAliasOf, wikilinkHeadingCandidateSafe } from '../shared/wikilinkQuery'
 import { enumerateAtxHeadings, filterWikilinkHeadings } from '../shared/wikilinkHeading'
@@ -30,8 +30,16 @@ export interface WikilinkHeadingSourcePorts {
 export type { WikilinkHeadingItem }
 
 export type WikilinkHeadingQueryResult =
-  | { status: 'unavailable'; reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' }
+  | { status: 'unavailable'; reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' | 'target-ambiguous' | 'target-pending' }
   | { status: 'ready'; targetFsPath: string; targetVersion: number; items: WikilinkHeadingItem[] }
+
+/** #556 T3 查询选项：短名补查端口（跳转/悬停同源数据面注入——provider
+ *  侧为 vaultIndex 的 catalog 倒排查询；不注入时补查不存在，行为与现状
+ *  一致）。多候选/清单未就绪以真实状态回传（target-ambiguous/
+ *  target-pending），不冒充 target-not-found */
+export interface WikilinkHeadingQueryOptions {
+  lookupShortname?: VaultLinkShortnamePort
+}
 
 /**
  * 查询明确 Markdown 目标的标题候选：targetRaw 为双链文件字段原文（宿主按
@@ -51,6 +59,7 @@ export async function queryWikilinkHeadings(
   ctx: VaultLinkResolveContext,
   ports: WikilinkHeadingSourcePorts,
   sameDocFsPath?: string,
+  options?: WikilinkHeadingQueryOptions,
 ): Promise<WikilinkHeadingQueryResult> {
   // 本文件锚点：省略文件名 = 当前文档（文档在编辑中即在场，不走存在性探测）
   const selfAnchor = targetRaw.trim() === '' && sameDocFsPath !== undefined
@@ -58,19 +67,24 @@ export async function queryWikilinkHeadings(
   if (selfAnchor) {
     targetFsPath = sameDocFsPath
   } else {
-    const resolution = await resolveVaultLinkFile(targetRaw, ctx, ports.exists)
+    const resolution = await resolveVaultLinkFile(targetRaw, ctx, ports.exists, undefined, options?.lookupShortname)
     if (resolution.kind === 'no-workspace') {
       return { status: 'unavailable', reason: 'no-workspace' }
     }
     if (
       resolution.kind === 'escape' ||
-      resolution.kind === 'not-found' ||
-      resolution.kind === 'ambiguous' ||
-      resolution.kind === 'pending'
+      resolution.kind === 'not-found'
     ) {
       // 越界与未命中都归「无法定位明确目标」：不按部分文件名猜目标
-      //（ambiguous/pending 由短名补查端口产生，#556 未接线，不可达）
       return { status: 'unavailable', reason: 'target-not-found' }
+    }
+    // #556 T3 短名补查分态：多候选（不归任一候选）/清单未就绪（不声明
+    // 唯一）真实回传——提示补路径/更新中，不冒充不存在
+    if (resolution.kind === 'ambiguous') {
+      return { status: 'unavailable', reason: 'target-ambiguous' }
+    }
+    if (resolution.kind === 'pending') {
+      return { status: 'unavailable', reason: 'target-pending' }
     }
     targetFsPath = resolution.fsPath
   }

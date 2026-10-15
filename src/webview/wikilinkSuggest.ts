@@ -139,12 +139,14 @@ type SuggestResult =
     }
   | {
       stage: 'heading'
-      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError'
+      /** #556 T3 增补 targetAmbiguous（同名不唯一，提示补路径）与
+       *  targetPending（清单更新中，不声明唯一）两分态 */
+      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError' | 'targetAmbiguous' | 'targetPending'
       items: WikilinkHeadingItem[]
     }
   | {
       stage: 'block'
-      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError'
+      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError' | 'targetAmbiguous' | 'targetPending'
       items: WikilinkBlockItem[]
       /** 查询依据的目标版本（无 ID 块接受时回传——宿主核对淘汰旧候选） */
       targetVersion: number
@@ -378,6 +380,8 @@ export class WikilinkSuggestController {
         status: message.reason === 'no-workspace' ? 'noWorkspace'
           : message.reason === 'target-not-md' ? 'notMd'
           : message.reason === 'read-error' ? 'readError'
+          : message.reason === 'target-ambiguous' ? 'targetAmbiguous'
+          : message.reason === 'target-pending' ? 'targetPending'
           : 'notFound',
         items: [],
       }
@@ -406,6 +410,8 @@ export class WikilinkSuggestController {
         status: message.reason === 'no-workspace' ? 'noWorkspace'
           : message.reason === 'target-not-md' ? 'notMd'
           : message.reason === 'read-error' ? 'readError'
+          : message.reason === 'target-ambiguous' ? 'targetAmbiguous'
+          : message.reason === 'target-pending' ? 'targetPending'
           : 'notFound',
         items: [],
         targetVersion: 0,
@@ -1271,6 +1277,10 @@ export class WikilinkSuggestController {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotMd')))
       } else if (result.status === 'readError') {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockReadError')))
+      } else if (result.status === 'targetAmbiguous') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetAmbiguous')))
+      } else if (result.status === 'targetPending') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetPending')))
       } else {
         for (let i = 0; i < result.items.length; i++) {
           list.appendChild(this.buildBlockRow(result.items[i]!, i === this.activeIndex))
@@ -1290,6 +1300,10 @@ export class WikilinkSuggestController {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingNotMd')))
       } else if (result.status === 'readError') {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingReadError')))
+      } else if (result.status === 'targetAmbiguous') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetAmbiguous')))
+      } else if (result.status === 'targetPending') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetPending')))
       } else {
         for (let i = 0; i < result.items.length; i++) {
           list.appendChild(this.buildHeadingRow(result.items[i]!, i === this.activeIndex))

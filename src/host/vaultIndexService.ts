@@ -64,6 +64,7 @@ import {
   type VaultEdgeExtractOptions,
   type VaultEdgeShortnamePort,
 } from './vaultLinkExtract'
+import type { VaultLinkShortnameLookupResult } from '../shared/vaultLink'
 import type { LinkContext } from './linkTarget'
 import { queryBacklinks, VaultIndexOverlay } from './vaultIndexOverlay'
 import {
@@ -1213,6 +1214,48 @@ export class VaultIndexService {
       }
       return { candidates, complete: state.catalogComplete }
     }
+  }
+
+  /** #556 T3 跳转/悬停侧短名补查查询（R6 容量红线：catalog 倒排零 IO、
+   *  禁止点击时全库 fs 扫描；R1 与索引抽取共用 shortnameLookupFor 数据面）：
+   *  按来源 fsPath 定位所属根分区后查询。根未登记、索引无数据或清单不可
+   *  用时返回 null——消费方不注入补查（不猜目标、行为与无补查语义一致）。
+   *  多候选与清单不完整如实透传，分态映射（ambiguous/pending）由消费方经
+   *  shared/vaultLink 的 shortnameLookupResolution 单一事实源完成。 */
+  shortnameLookup(sourceFsPath: string, basename: string): VaultLinkShortnameLookupResult | null {
+    const state = this.rootOf(sourceFsPath)
+    if (!state || !state.hasData || !state.model) {
+      return null
+    }
+    return this.shortnameLookupFor(state)(basename)
+  }
+
+  /** #556 T3（R8）：文档已解析出链的绝对身份快照——面板装配点推导 webview
+   *  localResourceRoots 许可面用（探针结论：根外资源目标 401，须在 html
+   *  赋值前一次性纳入目标目录）。与 outlinksOf 同源边集（覆盖层未保存态
+   *  优先，基线按 fold 匹配来源），只取 resolvedTarget 非空者；跳过面板
+   *  呈现过滤（外链边恒 resolvedTarget=null，天然不进快照）。同步纯模型
+   *  读取（装配不引入 IO 等待）；根未登记或索引无数据返回 null */
+  resolvedOutlinkTargetsOf(fsPath: string): readonly string[] | null {
+    const state = this.rootOf(fsPath)
+    if (!state || !state.hasData || !state.model || !state.backlinks) {
+      return null
+    }
+    const rel = this.relOf(state, fsPath)
+    if (rel === null) {
+      return null
+    }
+    const overlayEntry = state.overlay.get(rel)
+    const sourceEdges = overlayEntry
+      ? overlayEntry.edges
+      : state.model.edges.filter((e) => this.foldKey(e.source) === this.foldKey(rel))
+    const targets: string[] = []
+    for (const e of sourceEdges) {
+      if (e.resolvedTarget !== null) {
+        targets.push(e.resolvedTarget)
+      }
+    }
+    return targets
   }
 
   /** 基线 resolver 对（#556 T2 身份域升级）：resolve 按根内域（越根/归属
@@ -3002,22 +3045,45 @@ export class VaultIndexService {
           continue
         }
         updating = updating || s.scanning
-        items.push(...await this.collectBacklinkItems(s, fsPath))
+        items.push(...await this.collectBacklinkItems(s, fsPath, { identityOnly: true }))
       }
       return { status: 'ready', items, updating }
     }
     if (!state.hasData || !state.model || !state.backlinks) {
       return state.scanning ? { status: 'loading' } : { status: 'error', reason: 'read-error' }
     }
-    return {
-      status: 'ready',
-      items: await this.collectBacklinkItems(state, fsPath),
-      updating: state.scanning,
+    const items = await this.collectBacklinkItems(state, fsPath)
+    let updating = state.scanning
+    // #556 T3 跨根合并（T2 移交）：目标位于本根分区，但**他根来源**以显式
+    // 绝对路径登记了指向本目标的边（边在他根的 backlinks 身份桶里，本根
+    // 分区查不到）——规格「已索引来源对跨根目标的反链覆盖」。凡 files 表
+    // 登记了该目标绝对身份的他根分区，其身份桶贡献并入（identityOnly——
+    // 断链 basename 兜底不跨根，见下）。分区不串：身份桶按规范绝对身份
+    // 聚合，不同根同名相对路径天然不撞桶
+    const absKey = this.normKey(fsPath)
+    for (const s of this.roots.values()) {
+      if (s === state || !s.hasData || !s.model || !s.backlinks) {
+        continue
+      }
+      if (!s.model.files.has(absKey)) {
+        continue
+      }
+      updating = updating || s.scanning
+      items.push(...await this.collectBacklinkItems(s, fsPath, { identityOnly: true }))
     }
+    return { status: 'ready', items, updating }
   }
 
-  /** 单根内的反链条目收集（桶匹配 + 断链兜底 + 片段与行号装配） */
-  private async collectBacklinkItems(state: RootIndexState, fsPath: string): Promise<BacklinkItem[]> {
+  /** 单根内的反链条目收集（桶匹配 + 断链兜底 + 片段与行号装配）。
+   *  identityOnly（#556 T3 跨根/外部合并查询专用）：只取绝对身份桶，跳过
+   *  basename/stem 断链兜底——断链兜底的语义是「同根内短名本可命中该
+   *  目标」（补查限来源所属根），跨根/跨边界按名匹配恰是「不同根的同名
+   *  路径不串反链」要拦的形态；目标所属根自身的查询保持兜底不变 */
+  private async collectBacklinkItems(
+    state: RootIndexState,
+    fsPath: string,
+    opts: { identityOnly?: boolean } = {},
+  ): Promise<BacklinkItem[]> {
     // 反链桶按规范绝对身份聚合（#556 T2——resolvedTarget 身份域）；查询
     // fsPath 的大小写可能漂移——fold 匹配桶键后按 fold 查询（与
     // renameCandidatesOf 同口径；POSIX 宿主 fold 为 identity，大小写敏感
@@ -3037,7 +3103,11 @@ export class VaultIndexService {
     // #556 T2 断链兜底：短名边重判/接通后断链按 target 原文聚合（裸名
     // 桶），文件身份查询按 basename（显式 .md 断链）与去扩展名 stem
     // （省略扩展名断链）兜底命中——「哪些文件断链指向 X」对短名边保持
-    // 可见（桶键为裸名的必为断链边，解析边恒在身份桶，无双计）
+    // 可见（桶键为裸名的必为断链边，解析边恒在身份桶，无双计）。
+    // identityOnly（#556 T3 跨根合并）：兜底不跨根（见函数头注释）
+    if (opts.identityOnly === true) {
+      return this.assembleBacklinkItems(state, edges)
+    }
     const basename = this.basenameOfRel(absKey)
     const fallbackKeys = basename.toLowerCase().endsWith('.md') && basename.length > 3
       ? [basename, basename.slice(0, -3)]
@@ -3065,6 +3135,11 @@ export class VaultIndexService {
     }
     // 片段与行号：来源有未保存内容优先取其文本（覆盖层边对齐覆盖层文本），
     // 其余读盘一次（OS 缓存；CRLF 归一与抽取同口径）
+    return this.assembleBacklinkItems(state, edges)
+  }
+
+  /** 反链条目装配（片段/行号/长片段与文件元数据；读来源正文一次） */
+  private async assembleBacklinkItems(state: RootIndexState, edges: VaultEdge[]): Promise<BacklinkItem[]> {
     const textBySource = new Map<string, string | null>()
     for (const e of edges) {
       if (textBySource.has(e.source)) {

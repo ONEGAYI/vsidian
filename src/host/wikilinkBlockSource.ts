@@ -8,7 +8,7 @@
 // 查询读取时核对当前 TextDocument / 磁盘内容。失败分真实状态，不伪装
 // 空结果。
 import path from 'node:path'
-import { resolveVaultLinkFile, type VaultLinkExistsPort, type VaultLinkResolveContext } from '../shared/vaultLink'
+import { resolveVaultLinkFile, type VaultLinkExistsPort, type VaultLinkResolveContext, type VaultLinkShortnamePort } from '../shared/vaultLink'
 import { classifyVaultFileCategory } from '../shared/vaultFileCategory'
 import { defaultAliasOf } from '../shared/wikilinkQuery'
 import { enumerateReferableBlocks, filterWikilinkBlocks } from '../shared/wikilinkBlock'
@@ -27,8 +27,14 @@ export interface WikilinkBlockSourcePorts {
 export type { WikilinkBlockItem }
 
 export type WikilinkBlockQueryResult =
-  | { status: 'unavailable'; reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' }
+  | { status: 'unavailable'; reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' | 'target-ambiguous' | 'target-pending' }
   | { status: 'ready'; targetFsPath: string; targetVersion: number; items: WikilinkBlockItem[] }
+
+/** #556 T3 查询选项：短名补查端口（与 wikilinkHeadingSource 同源语义——
+ *  provider 侧注入 vaultIndex 的 catalog 倒排查询；不注入时补查不存在） */
+export interface WikilinkBlockQueryOptions {
+  lookupShortname?: VaultLinkShortnamePort
+}
 
 /**
  * 查询明确 Markdown 目标的块候选：targetRaw 为双链文件字段原文（宿主按
@@ -50,6 +56,7 @@ export async function queryWikilinkBlocks(
   ctx: VaultLinkResolveContext,
   ports: WikilinkBlockSourcePorts,
   sameDocFsPath?: string,
+  options?: WikilinkBlockQueryOptions,
 ): Promise<WikilinkBlockQueryResult> {
   // 本文件锚点：省略文件名 = 当前文档（文档在编辑中即在场，不走存在性探测）
   const selfAnchor = targetRaw.trim() === '' && sameDocFsPath !== undefined
@@ -57,19 +64,23 @@ export async function queryWikilinkBlocks(
   if (selfAnchor) {
     targetFsPath = sameDocFsPath
   } else {
-    const resolution = await resolveVaultLinkFile(targetRaw, ctx, ports.exists)
+    const resolution = await resolveVaultLinkFile(targetRaw, ctx, ports.exists, undefined, options?.lookupShortname)
     if (resolution.kind === 'no-workspace') {
       return { status: 'unavailable', reason: 'no-workspace' }
     }
     if (
       resolution.kind === 'escape' ||
-      resolution.kind === 'not-found' ||
-      resolution.kind === 'ambiguous' ||
-      resolution.kind === 'pending'
+      resolution.kind === 'not-found'
     ) {
       // 越界与未命中都归「无法定位明确目标」：不按部分文件名猜目标
-      //（ambiguous/pending 由短名补查端口产生，#556 未接线，不可达）
       return { status: 'unavailable', reason: 'target-not-found' }
+    }
+    // #556 T3 短名补查分态：多候选/清单未就绪真实回传（与标题源同口径）
+    if (resolution.kind === 'ambiguous') {
+      return { status: 'unavailable', reason: 'target-ambiguous' }
+    }
+    if (resolution.kind === 'pending') {
+      return { status: 'unavailable', reason: 'target-pending' }
     }
     targetFsPath = resolution.fsPath
   }

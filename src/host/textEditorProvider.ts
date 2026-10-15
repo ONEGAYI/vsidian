@@ -21,6 +21,8 @@ import {
   classifyImageTarget,
   classifyLinkTarget,
   imageBlockReasonOf,
+  planPathTextOf,
+  splitHrefFragment,
   type ImageResolution,
   type LinkContext,
 } from './linkTarget'
@@ -36,7 +38,10 @@ import { classifyVaultFileCategory } from '../shared/vaultFileCategory'
 import { defaultAliasOf } from '../shared/wikilinkQuery'
 import {
   resolveVaultLinkFile,
+  shortnameLookupKeyOf,
+  shortnameLookupResolution,
   type VaultLinkResolveContext,
+  type VaultLinkShortnamePort,
 } from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { classifyLocalRefContentKind } from '../shared/refContent'
@@ -45,6 +50,7 @@ import { NewlineCoordinator } from '../shared/newline'
 import type { AddonDocNavResult } from '../shared/addonNavApi'
 import { executeAddonDocNav, type AddonDocNavExecPorts } from './addonDocNav'
 import { buildEditorCsp } from './editorCsp'
+import { absoluteResourceGrantDirs } from './absoluteResourceRoots'
 // #292 骨架屏内联装配（样式/#app 开标签含骨架标记/可读行宽预注入取值）
 import {
   buildAppOpenTag,
@@ -201,7 +207,7 @@ const imageExportTestLog = new Map<string, ImageExportPayload[]>()
 /** 链接跳转执行日志（#10 测试钩子观测：VSIDIAN_TEST_HOOKS 下集成测试断言
  *  宿主收到的跳转意图与处置结果） */
 export interface LinkLogEntry {
-  kind: 'external' | 'doc' | 'anchor' | 'blocked' | 'not-found'
+  kind: 'external' | 'doc' | 'anchor' | 'blocked' | 'not-found' | 'ambiguous' | 'pending'
   href: string
   /** blocked 的原因码 */
   reason?: string
@@ -218,7 +224,9 @@ export interface LinkLogEntry {
 }
 
 /** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道；#196 起
- *  同名歧义条目随 QuickPick 选择废除，新增越界条目） */
+ *  同名歧义条目随 QuickPick 选择废除，新增越界条目；#556 T3 起新增
+ *  ambiguous（短名补查多候选，不归任一候选）与 pending（清单未就绪
+ *  不声明唯一）两分态） */
 export interface WikilinkLogEntry {
   kind:
     | 'wikilink-doc'
@@ -226,6 +234,8 @@ export interface WikilinkLogEntry {
     | 'wikilink-no-workspace'
     | 'wikilink-unsupported'
     | 'wikilink-outside-root'
+    | 'wikilink-ambiguous'
+    | 'wikilink-pending'
   /** 上报的原始 target（| 之前） */
   target: string
   /** wikilink-doc 的目标绝对路径 */
@@ -246,6 +256,10 @@ interface SessionEntry {
   appliedEdits: number
   /** #10/#11 链接跳转执行日志（容量有界） */
   linkLog: Array<LinkLogEntry | WikilinkLogEntry>
+  /** #556 T3（R8）：文档绝对资源目标的授权目录（面板装配点一次性推导，
+   *  供 webview.options 的三处赋值/重赋共用——扩根重赋会整页重载，运行中
+   *  不动态追加，见 absoluteResourceRoots.ts 头注释） */
+  extraResourceRoots: vscode.Uri[]
   /** T06（#355）历史协调器（附加组件修饰的分组撤回/重做；每目标一份） */
   historyCoordinator?: AddonHistoryCoordinator
   /** T06：协调器快照防抖保存（回流后调度） */
@@ -423,6 +437,9 @@ export function createTextEditorProvider(
                 localResourceRoots: [
                   ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
                   ...grantedAddonRoots,
+                  // #556 T3：装配点授予的绝对资源目录一并拼回（否则扩根
+                  // 重赋会丢弃已授面——外部图片/PDF 加载回退 401）
+                  ...entry.extraResourceRoots,
                 ],
               }
             } catch {
@@ -1587,7 +1604,7 @@ export function createTextEditorProvider(
     if (entry) {
       return entry
     }
-    const fresh: SessionEntry = { session: undefined as never, doc, panels: new Map(), appliedEdits: 0, linkLog: [] }
+    const fresh: SessionEntry = { session: undefined as never, doc, panels: new Map(), appliedEdits: 0, linkLog: [], extraResourceRoots: [] }
     // T06（#355）历史协调器：条目流重建/归属闸门/外部回流补完/持久化恢复。
     // 端口闭包引用 fresh.session（首次调用在 session 构造完成后——回流/
     // 提交都在其后）；持久化快照存 workspaceState（保存态文本指纹对账）
@@ -1743,7 +1760,9 @@ export function createTextEditorProvider(
         imageRefresh.verify(items, {
           resolveTarget: (src) => {
             const target = classifyImageTarget(src, linkContextOf(doc))
-            return target.kind === 'workspace' ? target.fsPath : null
+            // #556 T3：绝对图源（跨根/外部）同经失效通道核验（T2 的外部
+            // 目标 onTargetChange 三态覆盖到图片版本戳——stale/删除后刷新）
+            return target.kind === 'workspace' || target.kind === 'absolute' ? target.fsPath : null
           },
         }),
       // #96 R1 ready 即校准：每次 ready 按当前生效语言幂等补发 locale.changed。
@@ -2057,6 +2076,43 @@ export function createTextEditorProvider(
     }
   }
 
+  /** #556 T3 短名补查端口工厂（R1：解析规则在 shared/vaultLink，数据面在
+   *  vaultIndexService 的 catalog 倒排——provider 只做注入；R6：零 IO 内存
+   *  查询，禁止点击时全库 fs 扫描）。索引不在场或来源根未就绪时返回
+   *  undefined（补查不存在，解析行为与现状一致——不猜目标）。零候选与
+   *  索引无数据对消费方同为 not-found，不区分放行 */
+  const shortnameLookupOf = (sourceFsPath: string): VaultLinkShortnamePort | undefined => {
+    if (!vaultIndex) {
+      return undefined
+    }
+    return (basename) =>
+      vaultIndex!.shortnameLookup(sourceFsPath, basename) ?? { candidates: [], complete: true }
+  }
+
+  /** #556 T3（R8 探针结论接线）：面板装配点的绝对资源许可面推导——文档
+   *  出链中的 image/pdf 类绝对目标（跨根/工作区外）所在目录，越出既有
+   *  授权根（扩展产物/工作区图片根/片段目录/附加组件根）才计入（许可面
+   *  最小化）。索引不在场或未就绪时无授予（资源按既有口径加载）。推导纯
+   *  逻辑在 absoluteResourceRoots（node 单测直驱），此处只做装配换算 */
+  const absoluteGrantRootsOf = (doc: vscode.TextDocument): vscode.Uri[] => {
+    if (!vaultIndex) {
+      return []
+    }
+    const targets = vaultIndex.resolvedOutlinkTargetsOf(doc.uri.fsPath)
+    if (targets === null) {
+      return []
+    }
+    const existingRoots = [
+      ...editorResourceRoots(context, doc, snippets?.getState().directory ?? null).map((u) => u.fsPath),
+      ...addons?.editorResourceRoots().map((u) => u.fsPath) ?? [],
+    ]
+    return absoluteResourceGrantDirs(
+      targets.map((fsPath) => ({ targetFsPath: fsPath })),
+      existingRoots,
+      process.platform === 'win32',
+    ).map((dir) => vscode.Uri.file(dir))
+  }
+
   // ---- #379 T04 双链联想：标题查询应答（面板级查询意图的执行体） ----
 
   /** 双链联想标题查询应答（wikilink.heading.query 异步执行——目标解析与
@@ -2099,7 +2155,11 @@ export function createTextEditorProvider(
         const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
         return { text: opened.getText(), version: opened.version }
       },
-    }, doc.uri.fsPath)
+    }, doc.uri.fsPath, {
+      // #556 T3：目标短名补查（与跳转同一数据面——vaultIndex catalog 倒排，
+      // 零 IO）；歧义/未就绪以 target-ambiguous/target-pending 真实回传
+      lookupShortname: shortnameLookupOf(doc.uri.fsPath),
+    })
     const base = {
       kind: 'wikilink.heading.query.result' as const,
       sessionId: message.sessionId,
@@ -2219,7 +2279,10 @@ export function createTextEditorProvider(
         const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
         return { text: opened.getText(), version: opened.version }
       },
-    }, doc.uri.fsPath)
+    }, doc.uri.fsPath, {
+      // #556 T3：与标题查询同源的短名补查注入
+      lookupShortname: shortnameLookupOf(doc.uri.fsPath),
+    })
     const base = {
       kind: 'wikilink.block.query.result' as const,
       sessionId: message.sessionId,
@@ -2244,7 +2307,7 @@ export function createTextEditorProvider(
   ): Promise<void> => {
     await entry.session.whenEditsSettled()
     const fail = (reason: 'no-workspace' | 'target-not-found' | 'target-not-md' | 'read-error' |
-      'target-changed' | 'apply-failed'): void => {
+      'target-changed' | 'apply-failed' | 'target-ambiguous' | 'target-pending'): void => {
       entry.session.postToPanel(sessionId, {
         kind: 'wikilink.block.accept.result',
         sessionId: message.sessionId,
@@ -2262,18 +2325,25 @@ export function createTextEditorProvider(
     if (message.target.trim() === '') {
       targetFsPath = doc.uri.fsPath
     } else {
-      const resolution = await resolveVaultLinkFile(message.target, vaultResolveCtxOf(doc), statFileRealPath)
+      const resolution = await resolveVaultLinkFile(
+        message.target,
+        vaultResolveCtxOf(doc),
+        statFileRealPath,
+        undefined,
+        shortnameLookupOf(doc.uri.fsPath),
+      )
       if (resolution.kind === 'no-workspace') {
         return fail('no-workspace')
       }
-      if (
-        resolution.kind === 'escape' ||
-        resolution.kind === 'not-found' ||
-        resolution.kind === 'ambiguous' ||
-        resolution.kind === 'pending'
-      ) {
-        // ambiguous/pending 由短名补查端口产生（#556）；本通道未注入端口，
-        // 运行时不可达，与未命中同口径（接线票分化提示形态）
+      // #556 T3 短名补查分态：多候选/清单未就绪时无法定位明确目标，真实
+      // 回传（webview 接受失败走既有提示路径，不按部分文件名猜目标）
+      if (resolution.kind === 'ambiguous') {
+        return fail('target-ambiguous')
+      }
+      if (resolution.kind === 'pending') {
+        return fail('target-pending')
+      }
+      if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
         return fail('target-not-found')
       }
       targetFsPath = resolution.fsPath
@@ -2595,9 +2665,12 @@ export function createTextEditorProvider(
 
   /**
    * 双链跳转执行（#11；#159 块引用定位与本文件锚点；#196 根内相对路径
-   * 解析）：目标一律按来源文档相对路径解析（shared/vaultLink，docDir 基准、
-   * 越出所属根拦截、多根互不补查），经 fs.stat 端口探测存在性后打开并定位
-   * 锚点（标题或块 id，互斥）。
+   * 解析；#556 T3 短名补查与显式绝对路径）：目标按来源文档相对路径解析
+   * （shared/vaultLink，docDir 基准、越出所属根拦截、多根互不补查），候选
+   * 全未命中且目标仅含文件名时经注入端口查**所属根内**唯一同名 Markdown
+   * （vaultIndex catalog 倒排零 IO——多候选提示补路径、清单未就绪提示
+   * 更新中，不归任一候选）；显式绝对路径独立解析（跨根/工作区外可达）。
+   * 经 fs.stat 端口探测存在性后打开并定位锚点（标题或块 id，互斥）。
    * 空 path（[[#标题]] / [[#^块id]]）：目标即当前文档，不查文件。
    * 目标一律由 Vsidian 面板打开（vscode.openWith 对已开面板是重显），
    * 面板就绪后发 view.locate；reading 模式经 #14 的块挂载定位。
@@ -2639,7 +2712,13 @@ export function createTextEditorProvider(
         isWindowsHost: process.platform === 'win32',
         hasWorkspace: folder !== undefined,
       }
-      const resolution = await resolveVaultLinkFile(parsed.path, ctx, statFileRealPath)
+      const resolution = await resolveVaultLinkFile(
+        parsed.path,
+        ctx,
+        statFileRealPath,
+        undefined,
+        shortnameLookupOf(document.uri.fsPath),
+      )
       if (resolution.kind === 'no-workspace') {
         pushLog({ kind: 'wikilink-no-workspace', target: parsed.path })
         void vscode.window.showWarningMessage(t('host.wikilinkNoWorkspace'))
@@ -2650,9 +2729,19 @@ export function createTextEditorProvider(
         void vscode.window.showWarningMessage(t('host.wikilinkOutsideRoot', { target: parsed.path }))
         return
       }
-      if (resolution.kind === 'not-found' || resolution.kind === 'ambiguous' || resolution.kind === 'pending') {
-        // ambiguous/pending 由短名补查端口产生（#556）；本通道未注入端口，
-        // 运行时不可达，暂与未命中同词条（接线票换专用提示形态）
+      // #556 T3 短名补查分态：多候选不归任一候选（提示补路径）、清单未
+      // 就绪不声明唯一（提示更新中）——不冒充不存在
+      if (resolution.kind === 'ambiguous') {
+        pushLog({ kind: 'wikilink-ambiguous', target: parsed.path })
+        void vscode.window.showWarningMessage(t('host.wikilinkAmbiguous', { target: parsed.path }))
+        return
+      }
+      if (resolution.kind === 'pending') {
+        pushLog({ kind: 'wikilink-pending', target: parsed.path })
+        void vscode.window.showWarningMessage(t('host.wikilinkPending', { target: parsed.path }))
+        return
+      }
+      if (resolution.kind === 'not-found') {
         pushLog({ kind: 'wikilink-not-found', target: parsed.path, heading: parsed.heading ?? undefined })
         void vscode.window.showWarningMessage(
           t('host.wikilinkNotFound', { target: parsed.path }),
@@ -2907,6 +2996,7 @@ export function createTextEditorProvider(
                 intent,
                 entry.linkLog,
                 { waitForReadyPanel },
+                shortnameLookupOf(sourceDoc.uri.fsPath),
               )
             } catch {
               // 来源文档不可装载：跳转意图无从解析，丢弃（不回退到面板
@@ -2917,7 +3007,7 @@ export function createTextEditorProvider(
         }
         void executeLinkIntent(document, linkCtx, intent, entry.linkLog, {
           waitForReadyPanel,
-        })
+        }, shortnameLookupOf(document.uri.fsPath))
       }
       // #11 双链跳转执行端口（按需 findFiles 解析 + 打开/定位/反馈）。
       // #220 来源双链（悬停浮层内）：以 B 文档为解析基准（[[#锚点]] 自
@@ -2999,8 +3089,17 @@ export function createTextEditorProvider(
               }, { once: true })
             }
             const ports = {
+              // #556 T3：注入短名补查端口（与跳转同一数据面——vaultIndex
+              // catalog 倒排零 IO；歧义/未就绪分态经 hoverDocAccess 映射为
+              // ambiguous/pending 就地呈现）
               resolveVaultFile: (rawPath: string) =>
-                resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
+                resolveVaultLinkFile(
+                  rawPath,
+                  access.resolve,
+                  statFileRealPath,
+                  undefined,
+                  shortnameLookupOf(sourceDoc.uri.fsPath),
+                ),
               openTextDocument: async (fsPath: string) => {
                 try {
                   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
@@ -3677,7 +3776,7 @@ export function createTextEditorProvider(
                   openLink: (intent) => {
                     void executeLinkIntent(bDoc, bLinkCtx, intent, bEntry.linkLog, {
                       waitForReadyPanel,
-                    })
+                    }, shortnameLookupOf(bDoc.uri.fsPath))
                   },
                   openWikilink: (intent) => {
                     void executeWikilinkIntent(bDoc, intent, bEntry.linkLog)
@@ -4016,12 +4115,19 @@ export function createTextEditorProvider(
       // #128 增补 CSS 片段目录（须在 html 赋值前设置——webview.options
       // 是 html 装载时的资源许可面快照）；#351 T02 增补附加组件页面目录
       //（期望装载组件的入口/样式/资源子目录——隔离由资源服务按请求面板
-      // 的 localResourceRoots 包含性实现，V02 实测）
+      // 的 localResourceRoots 包含性实现，V02 实测）。
+      // #556 T3（R8 探针结论）：增补文档绝对资源目标（image/pdf 类跨根/
+      // 工作区外目标）所在目录——资源服务对根外目标 401，扩根重赋会整页
+      // 重载，故只在装配点一次性授予（数据源：索引出链绝对身份快照，
+      // resolvedOutlinkTargetsOf 同步纯模型读取）；运行中新增的绝对目标
+      // 待面板下次重建生效（边界见 absoluteResourceRoots.ts 头注释）
+      entry.extraResourceRoots = absoluteGrantRootsOf(document)
       webviewPanel.webview.options = {
         enableScripts: true,
         localResourceRoots: [
           ...editorResourceRoots(context, document, snippets?.getState().directory ?? null),
           ...addons?.editorResourceRoots() ?? [],
+          ...entry.extraResourceRoots,
         ],
       }
       // #351 T02 新面板初次授权即计入「已授面」：后续状态变化的许可面
@@ -4316,6 +4422,8 @@ export function createTextEditorProvider(
                 localResourceRoots: [
                   ...editorResourceRoots(context, entry.doc, state.directory),
                   ...grantedAddonRoots,
+                  // #556 T3：与 refreshAddonPanels 同口径拼回绝对资源目录
+                  ...entry.extraResourceRoots,
                 ],
               }
             } catch {
@@ -5498,6 +5606,10 @@ async function executeLinkIntent(
   intent: { href: string; srcStart: number; srcEnd: number },
   log: Array<LinkLogEntry | WikilinkLogEntry>,
   anchors: LinkAnchorPort,
+  /** #556 T3：短名补查端口（provider 闭包的 vaultIndex catalog 倒排；不注入
+   *  时补查不存在——模块级函数无工作区判定语境，doc 候选探测行为与现状
+   *  逐字节一致，普链在无工作区下同目录相对目标照常可开） */
+  shortname?: VaultLinkShortnamePort,
 ): Promise<void> {
   const pushLog = (entry: LinkLogEntry): void => {
     log.push(entry)
@@ -5550,6 +5662,9 @@ async function executeLinkIntent(
     }
     return
   }
+  // 此处 target 已收窄为 doc | absolute（external/blocked/anchor 皆已 return）
+  //——闭包内类型收窄失效，fragment 提前捕获
+  const targetFragment = target.fragment
   for (const fsPath of target.candidates) {
     const uri = vscode.Uri.file(fsPath)
     try {
@@ -5557,6 +5672,46 @@ async function executeLinkIntent(
     } catch {
       continue
     }
+    await openDocTargetAt(fsPath)
+    return
+  }
+  // #556 T3 短名补查：doc 全候选未命中、目标仅含文件名且属 Markdown 语义
+  // 时按完整 basename 查所属根内唯一同名（R1：域判定与结果映射复用
+  // vaultLink 同步帮手，与双链跳转/索引抽取同一语义；absolute 目标不补查
+  //——规格「绝对路径无需短名补查」）。多候选不归任一候选（提示补路径）、
+  // 清单未就绪不声明唯一（提示更新中），均不冒充不存在
+  if (target.kind === 'doc' && shortname !== undefined) {
+    const { pathText } = splitHrefFragment(intent.href.trim())
+    const key = shortnameLookupKeyOf(planPathTextOf(pathText), ctx, { implicitMd: true })
+    if (key !== null) {
+      const resolution = shortnameLookupResolution(await shortname(key))
+      if (resolution.kind === 'target') {
+        await openDocTargetAt(resolution.fsPath)
+        return
+      }
+      if (resolution.kind === 'ambiguous') {
+        pushLog({ kind: 'ambiguous', href: intent.href })
+        void vscode.window.showWarningMessage(t('host.linkAmbiguous', { href: intent.href }))
+        return
+      }
+      if (resolution.kind === 'pending') {
+        pushLog({ kind: 'pending', href: intent.href })
+        void vscode.window.showWarningMessage(t('host.linkPending', { href: intent.href }))
+        return
+      }
+      // not-found：落入下方既有未命中提示（词条与日志口径不变）
+    }
+  }
+  pushLog({ kind: 'not-found', href: intent.href })
+  void vscode.window.showWarningMessage(
+    t('host.linkNotFound', { href: intent.href }),
+  )
+
+  /** 打开已探明存在的 doc 目标（候选命中与短名补查命中共用——text 目标
+   *  原生编辑器、其余 Vsidian 面板 + fragment 定位；日志与锚点缺失提示
+   *  语义与既有实现逐字一致） */
+  async function openDocTargetAt(fsPath: string): Promise<void> {
+    const uri = vscode.Uri.file(fsPath)
     // #340（P3-08）text 目标（普链）：原生编辑器打开——fragment 不解析
     //（锚点控制仅双链可用，普链 fragment 原样交宿主打开，2026-10-04 规范
     // 修订口径），不带行定位、不弹锚点警告
@@ -5565,7 +5720,7 @@ async function executeLinkIntent(
         kind: 'doc',
         href: intent.href,
         path: fsPath,
-        fragment: target.fragment ?? undefined,
+        fragment: targetFragment ?? undefined,
         locate: 'none',
       })
       await vscode.window.showTextDocument(uri, { preview: false })
@@ -5573,30 +5728,25 @@ async function executeLinkIntent(
     }
     // openTextDocument 只装载不显示；fragment 定位区间与日志先于打开动作
     const targetDoc = await vscode.workspace.openTextDocument(uri)
-    const isBlock = target.fragment !== null && isBlockIdFragment(target.fragment)
+    const isBlock = targetFragment !== null && isBlockIdFragment(targetFragment)
     const targetText = targetDoc.getText()
     const offset =
-      target.fragment === null ? null
+      targetFragment === null ? null
         : isBlock
-          ? findBlockOffset(targetText, target.fragment.slice(1))
-          : findHeadingOffset(targetText, target.fragment)
+          ? findBlockOffset(targetText, targetFragment.slice(1))
+          : findHeadingOffset(targetText, targetFragment)
     pushLog({
       kind: 'doc',
       href: intent.href,
       path: fsPath,
-      fragment: target.fragment ?? undefined,
+      fragment: targetFragment ?? undefined,
       locate: offset ? 'custom-panel' : 'none',
     })
     await revealLinkAnchor(anchors, uri, targetDoc, offset)
-    if (target.fragment !== null && offset === null) {
-      void vscode.window.showWarningMessage(fragmentMissingMessage(target.fragment))
+    if (targetFragment !== null && offset === null) {
+      void vscode.window.showWarningMessage(fragmentMissingMessage(targetFragment))
     }
-    return
   }
-  pushLog({ kind: 'not-found', href: intent.href })
-  void vscode.window.showWarningMessage(
-    t('host.linkNotFound', { href: intent.href }),
-  )
 }
 
 /**
