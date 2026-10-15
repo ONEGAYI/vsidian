@@ -1017,7 +1017,6 @@ export const zhCn: Record<MessageKey, string> = {
   // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
   'addons.enable': '启用',
   'addons.disable': '停用',
-  'addons.openSettingsPage': '打开组件设置页',
   'addons.closeSettingsPage': '关闭组件设置页',
   'addons.addonSettingsTitle': '组件设置页：{label}',
   'addons.statusEnabledRuntime': '已启用',
@@ -1026,6 +1025,9 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #353 T04 基础设置区（双标签作用范围 / 基础控件 / 保存反馈） ----
   'addons.openSettingsArea': '设置',
   'addons.settingsAreaTitle': '基础设置：{label}',
+  'addons.settingsDetailTitle': '{label} 设置',
+  'addons.detailCustomViewTab': '自定义设置页',
+  'addons.detailBasicsViewTab': '基础设置',
   'addons.closeSettingsArea': '返回组件列表',
   'addons.scopeUserDefault': '用户默认',
   'addons.scopeWorkspace': '当前工作区',
@@ -1046,7 +1048,6 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.saveFailedNoWorkspace': '当前无工作区',
   'addons.saveFailedStore': '存储写入失败',
   'addons.saveFailedRejected': '组件代次已终结',
-  'addons.openCustomPage': '打开自定义设置页',
   'addons.settingsEmpty': '该组件未注册设置定义',
   /** #465 组件设置分页：组件清单（hub）形态 */
   'addons.settingsHubTitle': '可配置的组件',

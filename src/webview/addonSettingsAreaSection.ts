@@ -8,9 +8,19 @@
 // 本分页两种形态（同页切换，宿主权威态驱动）：
 // - 组件清单（缺省）：列出可配置组件（有设置定义或有自己的设置页），
 //   点击进入该组件的基础设置；无可配置组件时空态提示。
-// - 组件详情：settingsState.open 指向组件时呈现基础设置区；设置区未开
+// - 组件详情：settingsState.open 指向组件时呈现设置区；设置区未开
 //   但 openAddonSettingsPage 在场时呈现 T02 挂载回退。「返回组件列表」
-//   上送 addons.settingsClose 回清单形态。
+//   上送 addons.settingsClose（#553 详情即页：连带 closeAddonPage）回
+//   清单形态。
+//
+// #553 详情自绘页优先：有自绘设置页且未故障的组件，详情首屏即自绘内容
+//（渲染时自动对账上送 addons.openAddonPage——消除额外「打开自定义页」
+// 操作），平台保留外壳（标题/返回、作用域标签、总开关、故障排障块），
+// 基础设置表单转为页内次级视图（双视图页签）；作用域状态与 #472 搜索
+// 定位目标经 AddonSettingsContextRuntime 上抛（settingsMain 构造注入，
+// 装载器转成 SDK settingsContext 面），定位落点交给自绘页消费——平台
+// 不切回自己的表单（located 描边只留给无自绘页组件）。无自绘页组件与
+// 故障暂停（desiredSettingsLoad 撤下自绘代码）维持整页基础表单。
 //
 // 状态权威在宿主（addons.state / addons.settingsState 推送回显；装载经
 // addons.get / addons.settingsGet 拉取，由 settingsMain 装载点统一发送）；
@@ -24,6 +34,7 @@ import type { AddonSettingDefinition, AddonSettingGroup, AddonSettingValue } fro
 import { groupIcon, type SettingsPageBridge, type SettingsPageSection } from './settingsPageView'
 import { createScalarDefinitionControl, createScalarItemControl, scalarItemFallback } from './addonSettingsControls'
 import { captureSectionRebuildAnchor, restoreSectionRebuildAnchor, captureLocalFocusKey, restoreLocalFocusKey, REBUILD_FOCUS_ATTR } from './sectionRebuildGuard'
+import type { AddonSettingsContextRuntime } from './addonSettingsContext'
 
 type AddonsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.state' }>
 type AddonSettingsStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'addons.settingsState' }>
@@ -85,6 +96,14 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
   private locatedTarget: AddonFocusTarget | undefined
   /** #472 定位高亮退场计时器（实例级，跨分页挂载/卸载存续，保证最终退场） */
   private locatedFadeTimer: ReturnType<typeof setTimeout> | undefined
+  /** #553 详情内容视图（有自绘页组件）：page = 自绘页优先；basics = 基础
+   *  设置次级表单。本地 UI 态（推送重渲染保持；切换组件/重开复位 page） */
+  private detailView: 'page' | 'basics' = 'page'
+  /** #553 自绘页自动打开的请求去重（已发 openAddonPage 但应答未达期间不
+   *  重发——宿主 openSettingsPage 会递增装载代次，重发即世代抖动） */
+  private openPageRequested: string | undefined
+  /** #553 关闭他组件残留挂载的请求去重（同款口径——应答未达不重发） */
+  private closePageRequested: string | undefined
   private parent: HTMLElement | undefined
 
   constructor(
@@ -96,6 +115,10 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
      *  addons.settingsState 推送（当前打开组件切换/关闭）后触发侧栏重建，
      *  分页自身不直接改侧栏 DOM（与 AddonSection 的 onSidebarChange 同构） */
     private readonly onSidebarCurrentChange?: () => void,
+    /** #553 设置页上下文 runtime（作用域状态与搜索定位目标的页面桥——
+     *  生产 settingsMain 构造注入，与装载器 env 同一实例；缺省时详情
+     *  仍优先呈现自绘页，只是不向页面交付上下文） */
+    private readonly settingsContext?: AddonSettingsContextRuntime,
   ) {}
 
   /** #554 侧栏组件条目当前项（settingsState.open 的只读派生视图）：
@@ -146,6 +169,9 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       if (this.settingsState?.open !== target.addonId) {
         this.pendingFocus = target
         this.send({ kind: 'addons.settingsOpen', addonId: target.addonId })
+      } else {
+        // #553 详情已开：定位目标立即交给自绘页（有自绘页且未故障时）
+        this.deliverLocateToPage(target, this.settingsState)
       }
     }
     this.render(focusEntry)
@@ -174,6 +200,12 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       const previous = this.settingsState?.open
       if (previous !== undefined && previous !== message.open) {
         this.drafts.clear()
+        // #553 切换/关闭组件：详情视图复位自绘页优先、自绘页开合请求标记
+        // 清空、定位交付清除（不把上一组件的目标串给下一组件）
+        this.detailView = 'page'
+        this.openPageRequested = undefined
+        this.closePageRequested = undefined
+        this.settingsContext?.deliverLocateTarget(null)
       }
       this.settingsState = message
       // #472 挂起定位消费：目标组件设置区已开（settingsOpen 应答到达）——
@@ -185,6 +217,9 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
           this.locatedTarget = this.pendingFocus
           this.scheduleLocatedFade()
         }
+        // #553 挂起定位到达：目标交给自绘页（有自绘页且未故障时——否则
+        // 走既有表单 located 描边，见 appendDefinitionGroups）
+        this.deliverLocateToPage(this.pendingFocus, message)
         this.pendingFocus = undefined
         this.consumingPendingFocus = true
       }
@@ -208,6 +243,56 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
         el.classList.remove('vsidian-settings-item-located')
       })
     }, LOCATED_FADE_MS)
+  }
+
+  /** #553 定位目标交给自绘页（有自绘页且未故障时）：详情切自绘页视图，
+   *  目标经上下文面交付——平台不切回自己的表单（表单 located 描边只留
+   *  给无自绘页组件，见 appendDefinitionGroups 的 markLocated 短路） */
+  private deliverLocateToPage(target: AddonFocusTarget, payload: AddonSettingsStateMessage | undefined): void {
+    const addon = payload?.addon
+    if (!addon || addon.addonId !== target.addonId || !addon.hasCustomPage || addon.faulted) {
+      return
+    }
+    this.detailView = 'page'
+    this.settingsContext?.deliverLocateTarget({ kind: target.kind, key: target.key })
+  }
+
+  /** #553 自绘页挂载中的组件 ID（addons.state 与 settingsState 双源取
+   *  available——openAddonPage 应答经 runtime notify 即时推 addons.state，
+   *  settingsState 随写操作应答到达；任一在场即视为挂载） */
+  private mountedPageOf(payload: AddonSettingsStateMessage): string | null {
+    return this.state?.openAddonSettingsPage ?? payload.openAddonSettingsPage ?? null
+  }
+
+  /** #553 自绘页开合对账（渲染副作用，转移守卫幂等）：
+   *  - 详情渲染（有自绘页且未故障）→ 自动上送 openAddonPage（打开详情即
+   *    自绘页——消除额外「打开自定义页」操作）；应答未达期间不重发；
+   *  - 故障/无自绘页 → 清请求标记（重试恢复后可再次自动打开）；他组件
+   *    挂载残留 → 上送 closeAddonPage 撤下（挂载容器单份，不留隐身装载） */
+  private reconcileAddonPage(payload: AddonSettingsStateMessage): void {
+    const addon = payload.addon
+    if (!addon) {
+      return
+    }
+    const self = addon.addonId
+    const mounted = this.mountedPageOf(payload)
+    const wantPage = addon.hasCustomPage && !addon.faulted
+    if (mounted === self) {
+      this.openPageRequested = undefined
+    }
+    if (wantPage && mounted !== self && this.openPageRequested !== self) {
+      this.openPageRequested = self
+      this.send({ kind: 'addons.openAddonPage', addonId: self })
+    }
+    if (!wantPage && this.openPageRequested === self) {
+      this.openPageRequested = undefined
+    }
+    if (mounted === null || mounted === self) {
+      this.closePageRequested = undefined
+    } else if (!wantPage && this.closePageRequested !== mounted) {
+      this.closePageRequested = mounted
+      this.send({ kind: 'addons.closeAddonPage' })
+    }
   }
 
   private send(message: object): void {
@@ -317,12 +402,22 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     return area
   }
 
-  /** 基础设置区（open 且载荷在场时非 null；组件已注销的空载荷时为 null） */
+  /** 基础设置区（open 且载荷在场时非 null；组件已注销的空载荷时为 null）。
+   *  #553 起详情分两形态：有自绘页且未故障 → 自绘页优先（平台外壳 + 页内
+   *  双视图页签，基础表单转次级）；否则维持整页基础表单（无自绘页组件，
+   *  或故障暂停——desiredSettingsLoad 已撤下自绘代码，基础控件供修正参数） */
   private renderSettingsArea(focusEntry?: string): HTMLElement | null {
     const payload = this.settingsState
     if (!payload || payload.open === null || payload.addon === null) {
       return null
     }
+    const addon = payload.addon
+    const customFirst = addon.hasCustomPage && !addon.faulted
+    // #553 打开语义对账（自动开页/残留撤除）与上下文快照同步（渲染副作用，
+    // 转移守卫幂等——重复推送不重发消息、等值不分发）
+    this.reconcileAddonPage(payload)
+    this.settingsContext?.applyScope({ scope: this.scope, hasWorkspace: payload.hasWorkspace })
+
     const area = document.createElement('section')
     area.className = 'vsidian-addons-settings'
     if (focusEntry === ADDON_SETTINGS_SECTION_AREA_ENTRY) {
@@ -330,24 +425,32 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       area.scrollIntoView?.({ block: 'nearest' })
     }
 
-    // 头部：标题 + 关闭
+    // 头部：标题（自绘页优先形态下详情即组件设置本体，用「{label} 设置」；
+    // 基础表单形态维持「基础设置：{label}」）+ 关闭（#553 详情即页：关闭
+    // 详情连带撤下自绘页——不留无详情的裸挂载态）
     const head = document.createElement('div')
     head.className = 'vsidian-addons-settings-head'
     const heading = document.createElement('h3')
     heading.className = 'vsidian-settings-group-title'
-    heading.textContent = t('addons.settingsAreaTitle', { label: payload.addon.label })
+    heading.textContent = t(customFirst ? 'addons.settingsDetailTitle' : 'addons.settingsAreaTitle', { label: addon.label })
     head.append(heading, this.button(t('addons.closeSettingsArea'), () => {
       this.send({ kind: 'addons.settingsClose' })
+      if (this.mountedPageOf(payload) === addon.addonId) {
+        this.send({ kind: 'addons.closeAddonPage' })
+      }
     }, '', { [REBUILD_FOCUS_ATTR]: 'close-settings-area' }))
     area.append(head)
 
-    // 双标签（用户默认 / 当前工作区；无工作区禁用 + 提示）
+    // 双标签（用户默认 / 当前工作区；无工作区禁用 + 提示）——平台外壳恒
+    // 在场；#553 切换经上下文面上抛（作用域真实传至组件，自绘控件据此
+    // 对齐显示值与写入目标）
     const tabs = document.createElement('div')
     tabs.className = 'vsidian-addons-scope-tabs'
     tabs.setAttribute('role', 'tablist')
     for (const scope of ['user', 'workspace'] as const) {
       const tab = this.button(t(scope === 'user' ? 'addons.scopeUserDefault' : 'addons.scopeWorkspace'), () => {
         this.scope = scope
+        this.settingsContext?.applyScope({ scope, hasWorkspace: payload.hasWorkspace })
         this.render()
       }, 'vsidian-addons-scope-tab')
       tab.setAttribute('role', 'tab')
@@ -368,7 +471,7 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
 
     // 故障排障块（#354 T05：状态呈现 + 日志入口 + 手动重试；完整诊断归
     // T12——自定义页已撤下，已有定义时下方基础控件保留）
-    if (payload.addon.faulted) {
+    if (addon.faulted) {
       const troubleshoot = document.createElement('div')
       troubleshoot.className = 'vsidian-addons-fault-troubleshoot'
       const faultTitle = document.createElement('h4')
@@ -376,7 +479,7 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       faultTitle.textContent = t('addons.faultTroubleshootTitle')
       const reason = document.createElement('p')
       reason.className = 'vsidian-addons-fault-hint'
-      reason.textContent = t('addons.statusFaulted', { detail: payload.addon.faultReason ?? '' })
+      reason.textContent = t('addons.statusFaulted', { detail: addon.faultReason ?? '' })
       const hint = document.createElement('p')
       hint.className = 'vsidian-addons-fault-hint'
       hint.textContent = t('addons.faultTroubleshootHint')
@@ -387,37 +490,89 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
           this.send({ kind: 'addons.openLogs' })
         }),
         this.button(t('addons.retryFaulted'), () => {
-          this.send({ kind: 'addons.retry', addonId: payload.addon!.addonId })
-        }, 'vsidian-addons-retry', { [REBUILD_FOCUS_ATTR]: `settings-retry:${payload.addon!.addonId}` }),
+          this.send({ kind: 'addons.retry', addonId: addon.addonId })
+        }, 'vsidian-addons-retry', { [REBUILD_FOCUS_ATTR]: `settings-retry:${addon.addonId}` }),
       )
       troubleshoot.append(faultTitle, reason, hint, faultActions)
       area.append(troubleshoot)
     }
 
-    // 控件组（#472 分组呈现）：首容器无组标题——功能开关行恒居首 + 未分组
-    // 定义聚拢（按注册序）；组容器按声明序随后（组标题档位 + 组内定义按
-    // 注册序聚拢不散插；空组仍渲染）。无组声明时单容器平铺（向后兼容）。
-    // 宿主注册批已保证组键唯一，重复键只可能来自损坏载荷——按首见去重，
-    // 防同一定义在同名组卡片重复渲染
-    const definitions = payload.addon.definitions
+    if (customFirst) {
+      // ---- #553 自绘页优先形态 ----
+      // 总开关行（平台外壳——组件主开关不随视图切换隐藏；两层作用范围随
+      // 标签、workspace 已覆盖可清除）
+      const enabledCard = document.createElement('div')
+      enabledCard.className = 'vsidian-settings-group'
+      enabledCard.append(this.renderEnabledRow(addon))
+      area.append(enabledCard)
+      // 详情双视图页签（自定义设置页 / 基础设置——ui-patterns §2.2 pill
+      // 页签档位，与作用域标签同款形态）
+      const viewTabs = document.createElement('div')
+      viewTabs.className = 'vsidian-addons-detail-tabs'
+      viewTabs.setAttribute('role', 'tablist')
+      for (const view of ['page', 'basics'] as const) {
+        const tab = this.button(t(view === 'page' ? 'addons.detailCustomViewTab' : 'addons.detailBasicsViewTab'), () => {
+          this.detailView = view
+          this.render()
+        }, 'vsidian-addons-detail-tab')
+        tab.setAttribute('role', 'tab')
+        tab.setAttribute(REBUILD_FOCUS_ATTR, `detail-view:${view}`)
+        tab.setAttribute('aria-selected', this.detailView === view ? 'true' : 'false')
+        viewTabs.append(tab)
+      }
+      area.append(viewTabs)
+      if (this.detailView === 'page') {
+        // 自绘页挂载区（详情主视图）：标题与关闭在外壳——这里只搬 host
+        // （持久容器移动节点不销毁，装载器 mountRoot 的挂载点）
+        if (this.addonSettingsHost) {
+          const wrap = document.createElement('div')
+          wrap.className = 'vsidian-addons-addonpage'
+          wrap.append(this.addonSettingsHost)
+          area.append(wrap)
+        }
+      } else {
+        // 基础设置（次级视图）：定义注册、值校验、存储与清除覆盖入口保留
+        this.appendDefinitionGroups(area, payload, { includeEnabledRow: false, markLocated: false })
+        this.appendNotice(area, payload)
+      }
+    } else {
+      // ---- 基础表单整页形态（无自绘页，或故障暂停） ----
+      this.appendDefinitionGroups(area, payload, { includeEnabledRow: true, markLocated: true })
+      this.appendNotice(area, payload)
+    }
+    return area
+  }
+
+  /** 控件组（#472 分组呈现；#553 起 customFirst 形态不含总开关行——总开关
+   *  升入平台外壳）。located 描边只留给无自绘页组件（#553：定位目标交给
+   *  自绘页，平台不描自己的表单） */
+  private appendDefinitionGroups(
+    area: HTMLElement,
+    payload: AddonSettingsStateMessage,
+    options: { includeEnabledRow: boolean; markLocated: boolean },
+  ): void {
+    const addon = payload.addon!
+    const definitions = addon.definitions
     const declaredGroups: AddonSettingGroup[] = []
-    for (const group of payload.addon.groups ?? []) {
+    for (const group of addon.groups ?? []) {
       if (!declaredGroups.some((seen) => seen.key === group.key)) {
         declaredGroups.push(group)
       }
     }
     // #472 定位落点（目标组件匹配时）：def 级描定义行、group 级描组容器
     //（互斥——落点唯一；渲染循环内按 key 比对标记，避免选择器转义）
-    const located = this.locatedTarget
+    const located = options.markLocated ? this.locatedTarget : undefined
     const locatedRowOf = (def: AddonSettingDefinition): boolean =>
-      located !== undefined && located.kind === 'def' && located.addonId === payload.addon!.addonId && located.key === def.key
+      located !== undefined && located.kind === 'def' && located.addonId === addon.addonId && located.key === def.key
     // 引用键不在声明集（异常载荷，宿主校验后不应出现）时回落首容器——
     // 不吞呈现
     const declaredKeys = new Set(declaredGroups.map((group) => group.key))
     const belongsToFirst = (def: AddonSettingDefinition): boolean => def.group === undefined || !declaredKeys.has(def.group)
     const firstGroup = document.createElement('div')
     firstGroup.className = 'vsidian-settings-group'
-    firstGroup.append(this.renderEnabledRow(payload.addon))
+    if (options.includeEnabledRow) {
+      firstGroup.append(this.renderEnabledRow(addon))
+    }
     if (definitions.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'vsidian-settings-empty'
@@ -426,7 +581,7 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     }
     for (const def of definitions) {
       if (belongsToFirst(def)) {
-        const row = this.renderDefinitionRow(payload.addon, def)
+        const row = this.renderDefinitionRow(addon, def)
         if (locatedRowOf(def)) {
           row.classList.add('vsidian-settings-item-located')
         }
@@ -447,12 +602,12 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
         desc.textContent = resolveLocalizedText(group.description, currentLocaleLang())
         card.append(desc)
       }
-      if (located !== undefined && located.kind === 'group' && located.addonId === payload.addon.addonId && located.key === group.key) {
+      if (located !== undefined && located.kind === 'group' && located.addonId === addon.addonId && located.key === group.key) {
         card.classList.add('vsidian-settings-item-located')
       }
       for (const def of definitions) {
         if (def.group === group.key) {
-          const row = this.renderDefinitionRow(payload.addon, def)
+          const row = this.renderDefinitionRow(addon, def)
           if (locatedRowOf(def)) {
             row.classList.add('vsidian-settings-item-located')
           }
@@ -461,34 +616,18 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
       }
       area.append(card)
     }
+  }
 
-    // 保存反馈（notice 由宿主应答推送；常规推送清空——不残留旧结局）
-    if (payload.notice !== undefined) {
-      const notice = document.createElement('p')
-      notice.className = `vsidian-addons-settings-notice vsidian-addons-settings-notice-${payload.notice.kind}`
-      notice.setAttribute('role', 'status')
-      notice.textContent = this.noticeText(payload.notice)
-      area.append(notice)
+  /** 保存反馈（notice 由宿主应答推送；常规推送清空——不残留旧结局） */
+  private appendNotice(area: HTMLElement, payload: AddonSettingsStateMessage): void {
+    if (payload.notice === undefined) {
+      return
     }
-
-    // 自定义设置页入口与挂载区（故障暂停撤下；T02 挂载逻辑并入设置区）
-    if (payload.addon.hasCustomPage) {
-      const mounted = payload.openAddonSettingsPage === payload.addon.addonId
-      const customRow = document.createElement('div')
-      customRow.className = 'vsidian-addons-custompage-actions'
-      customRow.append(this.button(t(mounted ? 'addons.closeSettingsPage' : 'addons.openCustomPage'), () => {
-        this.send(mounted ? { kind: 'addons.closeAddonPage' } : { kind: 'addons.openAddonPage', addonId: payload.addon!.addonId })
-      }))
-      area.append(customRow)
-      if (mounted && this.addonSettingsHost) {
-        const state = this.state
-        const openEntry = state?.addons.find((entry) => entry.id === payload.addon!.addonId)
-        if (openEntry) {
-          area.append(this.renderAddonPageMount(openEntry))
-        }
-      }
-    }
-    return area
+    const notice = document.createElement('p')
+    notice.className = `vsidian-addons-settings-notice vsidian-addons-settings-notice-${payload.notice.kind}`
+    notice.setAttribute('role', 'status')
+    notice.textContent = this.noticeText(payload.notice)
+    area.append(notice)
   }
 
   /** notice 组句（失败不虚报——原因码经 i18n 组句，键名原文列出） */

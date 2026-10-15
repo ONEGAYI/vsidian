@@ -13,6 +13,7 @@ import { EditorView } from '@codemirror/view'
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 import { AddonBehaviorRuntime } from '../../src/webview/addonBehaviors'
 import { AddonBehaviorEnabledStateRuntime } from '../../src/webview/addonBehaviorEnabledState'
+import { AddonSettingsContextRuntime } from '../../src/webview/addonSettingsContext'
 import { addonInstanceIdField, setAddonInstanceId } from '../../src/webview/addonViewIdentity'
 import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
@@ -1199,5 +1200,110 @@ describe('T07 主题环境面', () => {
     })
     await handle.load({ ...manifest(), page: 'settings' })
     expect(captured?.themeEnvironment).toBeUndefined()
+  })
+})
+
+// ---- #553 设置页上下文面（settingsContext）：仅设置页提供 ----
+
+describe('#553 设置页上下文面（settingsContext）：作用域与定位目标', () => {
+  it('设置页注入：工厂收到 sdk.settingsContext（默认快照 user + 无定位）；编辑器页与 env 未注入时为 undefined', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    let facet: import('../../src/shared/addonSettingsContextApi').AddonSettingsContextFacet | undefined
+    registerFactory(h, (sdk) => { facet = sdk.settingsContext })
+    await h.handle.load(manifest({ page: 'settings' }))
+    expect(facet).toBeTruthy()
+    expect(facet!.scopeState()).toEqual({ scope: 'user', hasWorkspace: true })
+    expect(facet!.locateTarget()).toBeNull()
+    // 编辑器页不提供（同 behaviors 面的仅编辑器页对照）
+    const h2 = harness()
+    let facet2: unknown = 'unset'
+    registerFactory(h2, (sdk) => { facet2 = sdk.settingsContext })
+    await h2.handle.load(manifest())
+    expect(facet2).toBeUndefined()
+    // 设置页但 env 未注入 runtime（旧装配/最小夹具兼容）
+    const h3 = harness({ page: 'settings' })
+    let facet3: unknown = 'unset'
+    registerFactory(h3, (sdk) => { facet3 = sdk.settingsContext })
+    await h3.handle.load(manifest({ page: 'settings' }))
+    expect(facet3).toBeUndefined()
+  })
+
+  it('作用域：applyScope 变化经订阅分发（等值不分发）；退订后不再收；查询恒返回当前快照', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    const seen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      sdk.settingsContext?.onScopeChange((state) => seen.push(state))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: true })
+    expect(seen).toEqual([{ scope: 'workspace', hasWorkspace: true }])
+    // 等值重复不分发
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: true })
+    expect(seen).toHaveLength(1)
+    // hasWorkspace 变化分发（无工作区状态随宿主推送）
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: false })
+    expect(seen).toHaveLength(2)
+    // 退订生效（facet 自身订阅仍在——变化继续到达它；已退订的独立订阅不再收）
+    const lateSeen: unknown[] = []
+    const unsubscribe = runtime.subscribeScope(ADDON_ID, () => lateSeen.push('late'))
+    unsubscribe()
+    runtime.applyScope({ scope: 'user', hasWorkspace: true })
+    expect(seen).toHaveLength(3)
+    expect(lateSeen).toEqual([])
+  })
+
+  it('定位目标：订阅即回放挂起目标（页面装载晚于定位到达的补投）；后续广播与 null 清除', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    // 定位先于页面装载到达（搜索跳转在装载完成前发起）
+    runtime.deliverLocateTarget({ kind: 'def', key: 'theme' })
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    const seen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      expect(sdk.settingsContext!.locateTarget()).toEqual({ kind: 'def', key: 'theme' })
+      sdk.settingsContext?.onLocateTarget((target) => seen.push(target))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    // 订阅即回放当前挂起目标
+    expect(seen).toEqual([{ kind: 'def', key: 'theme' }])
+    runtime.deliverLocateTarget({ kind: 'group', key: 'appearance' })
+    expect(seen).toEqual([{ kind: 'def', key: 'theme' }, { kind: 'group', key: 'appearance' }])
+    // null = 清除（组件据此退场页内定位态）
+    runtime.deliverLocateTarget(null)
+    expect(seen[2]).toBeNull()
+    expect(h.sent.length).toBeGreaterThan(0)
+  })
+
+  it('释放整组回收：unload 后广播不触达旧订阅（查询仍返回当前值）；已释放代次的迟到订阅为 no-op', async () => {
+    const runtime = new AddonSettingsContextRuntime()
+    const h = harness({ page: 'settings', cm6: undefined, attachExtensions: undefined, addonSettingsContext: runtime })
+    let facet: import('../../src/shared/addonSettingsContextApi').AddonSettingsContextFacet | undefined
+    const scopeSeen: unknown[] = []
+    const locateSeen: unknown[] = []
+    registerFactory(h, (sdk) => {
+      facet = sdk.settingsContext
+      sdk.settingsContext?.onScopeChange((state) => scopeSeen.push(state))
+      sdk.settingsContext?.onLocateTarget((target) => locateSeen.push(target))
+    })
+    await h.handle.load(manifest({ page: 'settings' }))
+    runtime.applyScope({ scope: 'workspace', hasWorkspace: true })
+    runtime.deliverLocateTarget({ kind: 'def', key: 'flag' })
+    expect(scopeSeen).toHaveLength(1)
+    expect(locateSeen).toEqual([{ kind: 'def', key: 'flag' }])
+    await h.handle.unload(ADDON_ID, 1)
+    // 卸载后页面级 runtime 仍可用（新代次还会消费）：旧代次订阅不再分发
+    runtime.applyScope({ scope: 'user', hasWorkspace: true })
+    runtime.deliverLocateTarget({ kind: 'group', key: 'behavior' })
+    expect(scopeSeen).toHaveLength(1)
+    expect(locateSeen).toEqual([{ kind: 'def', key: 'flag' }])
+    // 查询路径不受代次影响（只读无副作用——拉到的是页面级当前值）
+    expect(facet!.scopeState()).toEqual({ scope: 'user', hasWorkspace: true })
+    expect(facet!.locateTarget()).toEqual({ kind: 'group', key: 'behavior' })
+    // 已释放代次的迟到登记为 no-op 退订（isLoadActive 守卫——回放也不触发）
+    const lateSeen: unknown[] = []
+    facet!.onLocateTarget((target) => lateSeen.push(target))
+    runtime.deliverLocateTarget({ kind: 'def', key: 'late' })
+    expect(lateSeen).toEqual([])
   })
 })

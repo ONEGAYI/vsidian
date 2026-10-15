@@ -22,12 +22,13 @@ import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSetti
 import { AddonSection } from '../../src/webview/addonSettingsSection'
 import { AddonBehaviorManageSection } from '../../src/webview/addonBehaviorManageSection'
 import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from '../../src/webview/addonSettingsAreaSection'
+import { AddonSettingsContextRuntime } from '../../src/webview/addonSettingsContext'
 
 installLocale('zh-cn', zhCn)
 
 const ADDON_ID = 'fixture.demo'
 
-function makeView(addonSettingsHost?: HTMLElement): {
+function makeView(addonSettingsHost?: HTMLElement, settingsContext?: AddonSettingsContextRuntime): {
   view: SettingsPageView
   settingsArea: AddonSettingsAreaSection
   sent: unknown[]
@@ -44,7 +45,8 @@ function makeView(addonSettingsHost?: HTMLElement): {
   const addons = new AddonSection(bridge, () => refreshSidebar(), () => navigateToAddonSettings())
   const behaviors = new AddonBehaviorManageSection(bridge)
   // #554 生产接线同形：settingsState 推送（当前组件切换/关闭）→ 侧栏重建
-  const settingsArea = new AddonSettingsAreaSection(bridge, addonSettingsHost, () => refreshSidebar())
+  // #553 设置页上下文 runtime（作用域/定位目标的页面桥——生产 settingsMain 构造注入）
+  const settingsArea = new AddonSettingsAreaSection(bridge, addonSettingsHost, () => refreshSidebar(), settingsContext)
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
@@ -629,7 +631,7 @@ describe('T04 设置区：保存反馈（失败不虚报）', () => {
 })
 
 describe('T04 设置区：故障态与自定义页', () => {
-  it('故障暂停：显示原因与基础配置提示；自定义页入口消失；控件仍可用', () => {
+  it('故障暂停（无自定义页形态）：显示原因与基础配置提示；控件仍可用', () => {
     const h = makeView()
     openSettingsAreaPage(h)
     h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }], ADDON_ID))
@@ -637,34 +639,8 @@ describe('T04 设置区：故障态与自定义页', () => {
     const text = area(h)!.textContent ?? ''
     expect(text).toContain('故障暂停')
     expect(text).toContain('enable 异常：boom')
-    expect(buttons(h, '打开自定义设置页')).toEqual([])
     // 控件在场：平台基础控件保留（修正参数入口）
     expect(h.parent.querySelector('input[data-addon-setting="threshold"]')).toBeTruthy()
-  })
-
-  it('hasCustomPage：入口按钮上送 openAddonPage；挂载区并入设置区', () => {
-    const host = document.createElement('div')
-    const mounted = document.createElement('span')
-    mounted.textContent = '组件自定义内容'
-    host.appendChild(mounted)
-    const h = makeView(host)
-    openSettingsAreaPage(h)
-    h.dispatch(addonsState([
-      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true },
-    ], ADDON_ID))
-    h.dispatch(settingsState({ hasCustomPage: true }))
-    const open = buttons(h, '打开自定义设置页')[0]
-    expect(open).toBeTruthy()
-    open!.click()
-    expect(h.sent).toContainEqual({ kind: 'addons.openAddonPage', addonId: ADDON_ID })
-    // 自定义页打开后：挂载区出现在设置区内（host 子树保留），T02 关闭按钮复用
-    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
-    const wrap = h.parent.querySelector('.vsidian-addons-addonpage')
-    expect(wrap).toBeTruthy()
-    expect(wrap!.contains(host)).toBe(true)
-    expect(wrap!.contains(mounted)).toBe(true)
-    const close = [...wrap!.querySelectorAll('button')].find((b) => b.textContent === '关闭组件设置页')
-    expect(close).toBeTruthy()
   })
 })
 
@@ -1195,5 +1171,224 @@ describe('侧栏组件条目唯一选中（#554）', () => {
     expect(currentOf(h, 'Core B')).toBe('page')
     expect(currentOf(h, 'Core A')).toBe('false')
     expect(currentOf(h, 'Third A')).toBe('false')
+  })
+})
+
+// ---- #553 详情自绘页优先：首屏形态、打开语义与设置上下文交付 ----
+
+describe('#553 详情自绘页优先：首屏形态与打开语义', () => {
+  /** 自绘页详情夹具：host 内预置组件挂载内容（装载器 mountRoot 的替身） */
+  function customHost(): { host: HTMLElement; mounted: HTMLElement } {
+    const host = document.createElement('div')
+    const mounted = document.createElement('span')
+    mounted.textContent = '组件自定义内容'
+    host.appendChild(mounted)
+    return { host, mounted }
+  }
+
+  /** 自绘页组件的 addons.state 清单（含设置页声明） */
+  function customAddonsState(openAddonSettingsPage?: string | null): HostToWebview {
+    return addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true },
+    ], openAddonSettingsPage ?? null)
+  }
+
+  it('hasCustomPage 详情渲染即自动上送 openAddonPage（无需用户点击）；应答未达期间重复推送不重发', () => {
+    const { host } = customHost()
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(customAddonsState())
+    h.dispatch(settingsState({ hasCustomPage: true }))
+    expect(h.sent).toContainEqual({ kind: 'addons.openAddonPage', addonId: ADDON_ID })
+    // 应答未达期间的常规推送不重发（宿主 openSettingsPage 会递增代次——重发即世代抖动）
+    h.dispatch(settingsState({ hasCustomPage: true }))
+    h.dispatch(settingsState({ hasCustomPage: true }))
+    expect(h.sent.filter((m) => (m as { kind?: string }).kind === 'addons.openAddonPage')).toHaveLength(1)
+  })
+
+  it('openAddonSettingsPage 应答后挂载区并入详情首屏；无「打开自定义设置页」开闭按钮（重复入口消除）', () => {
+    const { host, mounted } = customHost()
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(customAddonsState(ADDON_ID))
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+    const wrap = h.parent.querySelector('.vsidian-addons-settings .vsidian-addons-addonpage')
+    expect(wrap).toBeTruthy()
+    expect(wrap!.contains(host)).toBe(true)
+    expect(wrap!.contains(mounted)).toBe(true)
+    // 旧「打开自定义设置页」开闭入口随本票退役（详情即页——不再有额外操作）
+    expect(buttons(h, '打开自定义设置页')).toEqual([])
+    expect(buttons(h, '关闭组件设置页')).toEqual([])
+  })
+
+  it('基础设置转次级视图：首屏无定义控件；「基础设置」页签切换后表单呈现（定义/校验/清除入口保留）；外壳恒在场', () => {
+    const { host } = customHost()
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(customAddonsState(ADDON_ID))
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+    // 首屏：自绘页为主内容，同一批设置项不重复呈现默认表单
+    expect(h.parent.querySelector('[data-addon-setting="flag"]')).toBeNull()
+    expect(h.parent.querySelector('[data-addon-array-item="replacements"]')).toBeNull()
+    expect(buttons(h, '保存')).toEqual([])
+    // 外壳保留：作用域标签 + 总开关恒在场（平台职责不迁移）
+    expect(h.parent.querySelectorAll('.vsidian-addons-scope-tab')).toHaveLength(2)
+    expect(h.parent.querySelector('input[data-addon-setting="__enabled__"]')).toBeTruthy()
+    // 切到「基础设置」页签：表单呈现（定义行在场——注册/校验/存储清除入口不迁移）
+    const tabs = [...h.parent.querySelectorAll('.vsidian-addons-detail-tab')] as HTMLButtonElement[]
+    expect(tabs.map((tab) => tab.getAttribute('aria-selected'))).toEqual(['true', 'false'])
+    tabs[1]!.click()
+    expect(h.parent.querySelector('[data-addon-setting="flag"]')).toBeTruthy()
+    expect(h.parent.querySelector('input[data-addon-array-item="replacements"]')).toBeTruthy()
+    // 工作区标签下已覆盖项的清除入口仍在次级表单内
+    const scopeTabs = [...h.parent.querySelectorAll('.vsidian-addons-scope-tab')] as HTMLButtonElement[]
+    scopeTabs[1]!.click()
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID, values: { threshold: { workspace: 77, source: 'workspace' } } }))
+    expect(buttons(h, '使用用户默认').some((b) => b.dataset.addonSettingKey === 'threshold')).toBe(true)
+  })
+
+  it('详情标题随形态：自绘页优先时用「{label} 设置」；返回时 settingsClose 与 closeAddonPage 同发（详情即页）', () => {
+    const { host } = customHost()
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(customAddonsState(ADDON_ID))
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+    expect(area(h)!.textContent ?? '').toContain(zhCn['addons.settingsDetailTitle'].replace('{label}', 'Demo'))
+    buttons(h, '返回组件列表')[0]!.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsClose' })
+    expect(h.sent).toContainEqual({ kind: 'addons.closeAddonPage' })
+  })
+
+  it('切换组件：自绘页组件 → 无自绘页组件，挂载区让位、表单呈现且定位交付清空', () => {
+    const { host, mounted } = customHost()
+    const context = new AddonSettingsContextRuntime()
+    const h = makeView(host, context)
+    openSettingsAreaPage(h)
+    h.dispatch(customAddonsState(ADDON_ID))
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+    context.deliverLocateTarget({ kind: 'def', key: 'flag' })
+    // 切到无自绘页组件 B：详情为整页表单，host 移出分页内容（内容保留不销毁）
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true },
+      { id: 'b.plain', label: 'PlainB', official: false, status: 'registered', hasSettingsDefinitions: true },
+    ], null))
+    h.dispatch(settingsState({ addonId: 'b.plain', hasCustomPage: false, openAddonSettingsPage: null }))
+    expect(h.parent.querySelector('[data-addon-setting="flag"]')).toBeTruthy()
+    expect(h.parent.contains(host)).toBe(false)
+    expect(host.contains(mounted)).toBe(true)
+    expect(context.currentLocateTarget()).toBeNull()
+    // 无自绘页组件不触发 openAddonPage
+    expect(h.sent.filter((m) => (m as { kind?: string; addonId?: string }).kind === 'addons.openAddonPage' && (m as { addonId: string }).addonId === 'b.plain')).toEqual([])
+  })
+
+  it('故障态：自绘页视图退场（无页签/挂载），基础表单与排障块在场；不自动上送 openAddonPage；重试恢复后再次自动上送', () => {
+    const { host } = customHost()
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    h.dispatch(customAddonsState())
+    h.dispatch(settingsState({ hasCustomPage: true }))
+    const openedCount = () => h.sent.filter((m) => (m as { kind?: string }).kind === 'addons.openAddonPage').length
+    expect(openedCount()).toBe(1)
+    // 故障推送：desiredSettingsLoad 归 null（宿主撤载），详情退回基础表单 + 排障
+    h.dispatch(settingsState({
+      addonId: ADDON_ID, hasCustomPage: true, openAddonSettingsPage: null,
+      faulted: true, faultReason: 'setup 异常：bad',
+    }))
+    expect(h.parent.querySelector('.vsidian-addons-detail-tab')).toBeNull()
+    expect(h.parent.querySelector('.vsidian-addons-addonpage')).toBeNull()
+    expect(h.parent.querySelector('.vsidian-addons-fault-troubleshoot')).toBeTruthy()
+    expect(h.parent.querySelector('input[data-addon-setting="threshold"]')).toBeTruthy()
+    // 故障期间不自动开页（请求标记已清）
+    h.dispatch(settingsState({
+      addonId: ADDON_ID, hasCustomPage: true, openAddonSettingsPage: null,
+      faulted: true, faultReason: 'setup 异常：bad',
+    }))
+    expect(openedCount()).toBe(1)
+    // 重试成功（faulted 恢复、设置区仍开）：再次自动上送 openAddonPage
+    h.dispatch(settingsState({ addonId: ADDON_ID, hasCustomPage: true, openAddonSettingsPage: null }))
+    expect(openedCount()).toBe(2)
+  })
+
+  it('无自绘页组件维持默认表单（无页签、无自动开页）', () => {
+    const h = makeView()
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([{ id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true }]))
+    h.dispatch(settingsState({}))
+    expect(h.parent.querySelector('.vsidian-addons-detail-tab')).toBeNull()
+    expect(h.parent.querySelector('input[data-addon-setting="flag"]')).toBeTruthy()
+    expect(h.sent.filter((m) => (m as { kind?: string }).kind === 'addons.openAddonPage')).toEqual([])
+  })
+})
+
+describe('#553 设置页上下文交付（作用域与定位目标）', () => {
+  it('作用域切换上抛：详情渲染同步快照；切工作区标签 → runtime 快照更新且订阅回调收到；无工作区经宿主推送同步', () => {
+    const context = new AddonSettingsContextRuntime()
+    const seen: Array<{ scope: string; hasWorkspace: boolean }> = []
+    context.subscribeScope('probe.addon', (s) => seen.push({ scope: s.scope, hasWorkspace: s.hasWorkspace }))
+    const h = makeView(document.createElement('div'), context)
+    openSettingsAreaPage(h)
+    h.dispatch(addonsState([
+      { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true },
+    ], ADDON_ID))
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+    // 详情首帧默认 user
+    expect(context.scopeSnapshot()).toEqual({ scope: 'user', hasWorkspace: true })
+    const tabs = [...h.parent.querySelectorAll('.vsidian-addons-scope-tab')] as HTMLButtonElement[]
+    tabs[1]!.click()
+    expect(context.scopeSnapshot()).toEqual({ scope: 'workspace', hasWorkspace: true })
+    expect(seen).toEqual([{ scope: 'workspace', hasWorkspace: true }])
+    // 无工作区载荷经 settingsState 推送同步（快照 hasWorkspace 跟随宿主权威值）
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID, hasWorkspace: false }))
+    expect(context.scopeSnapshot()).toEqual({ scope: 'workspace', hasWorkspace: false })
+  })
+
+  /** 经全局搜索点击「组件设置」分组的命中条目（真实用户链路） */
+  function locateByAddonSearch(h: ReturnType<typeof makeView>, text: string): void {
+    const search = h.parent.querySelector<HTMLInputElement>('input.vsidian-settings-search')!
+    search.value = text
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    const [hit] = [...h.parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+      .filter((b) => b.querySelector('.vsidian-settings-result-category')?.textContent === zhCn['settings.addonSettingsSection'])
+    expect(hit, `搜索应有命中: ${text}`).toBeTruthy()
+    hit!.click()
+  }
+
+  it('定位目标交给自绘页：已开详情时搜索定位 def → runtime 收到目标、详情保持自绘页视图（平台不切回自己表单）', () => {
+    const context = new AddonSettingsContextRuntime()
+    const h = makeView(document.createElement('div'), context)
+    h.dispatch(addonsState([{
+      id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true,
+      settingsSearchIndex: { definitions: [{ key: 'flag', title: '开关项' }], groups: [] },
+    }]))
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+    openSettingsAreaPage(h)
+    locateByAddonSearch(h, '开关项')
+    expect(context.currentLocateTarget()).toEqual({ kind: 'def', key: 'flag' })
+    // 自绘页视图保持（平台不切回表单、不描表单行——落点交给组件）
+    expect(h.parent.querySelector('.vsidian-addons-detail-tab')!.getAttribute('aria-selected')).toBe('true')
+    expect(h.parent.querySelector('.vsidian-settings-item-located')).toBeNull()
+  })
+
+  it('未开区定位（pendingFocus 消费路径）：应答到达后目标交付 runtime', () => {
+    const context = new AddonSettingsContextRuntime()
+    const h = makeView(document.createElement('div'), context)
+    h.dispatch(addonsState([{
+      id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true,
+      settingsSearchIndex: { definitions: [{ key: 'flag', title: '开关项' }], groups: [] },
+    }]))
+    locateByAddonSearch(h, '开关项')
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: ADDON_ID })
+    expect(context.currentLocateTarget()).toBeNull()
+    // 宿主应答（open + 挂载）：挂起目标交付
+    h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+    expect(context.currentLocateTarget()).toEqual({ kind: 'def', key: 'flag' })
+  })
+
+  it('样式契约：详情双视图页签归档（pill 容器 + 选中态 activeSelection 规则在场）', async () => {
+    const { readFileSync } = await import('node:fs')
+    const css = readFileSync('src/webview/settingsPage.css', 'utf8')
+    expect(css).toMatch(/\.vsidian-addons-detail-tabs\s*\{[^}]*display:\s*inline-flex/)
+    expect(css).toMatch(/\.vsidian-addons-detail-tab\s*\{[^}]*border-radius:\s*6px/)
+    expect(css).toMatch(/\.vsidian-addons-detail-tab\[aria-selected='true'\]\s*\{[^}]*background:\s*var\(--vscode-list-activeSelectionBackground/)
   })
 })

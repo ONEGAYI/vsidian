@@ -43,6 +43,7 @@
     - [`addon-status` 组件状态模型与设置页呈现](#addon-status)
   - [2. 页面 SDK](#2-页面-sdk)
     - [`page-sdk` 注入组件工厂的页面 SDK](#page-sdk)
+    - [`page-settings-context` 设置页上下文面（settingsContext）](#page-settings-context)
     - [`page-load-protocol` 页面装载协议（指令与出站消息）](#page-load-protocol)
     - [`page-bridge` SDK 构建桥（vsidian-addon-sdk 虚拟模块）](#page-bridge)
     - [`document-navigation` 文档打开与定位（views.openDocument）](#document-navigation)
@@ -385,13 +386,13 @@ export type AddonStatusKind =
 
 ### `page-sdk` 注入组件工厂的页面 SDK
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页、设置页 · **引入**：#351（T02），facet 随 T06–T11 增补
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页、设置页 · **引入**：#351（T02），facet 随 T06–T11 与 #553 增补
 
-**目标**：装载器核对入口身份后调用工厂注入 SDK：装载身份（组件 ID + 代次 + 页面种类）、六个能力 facet、CM6 扩展登记、设置页挂载根、资源地址与释放回调。
+**目标**：装载器核对入口身份后调用工厂注入 SDK：装载身份（组件 ID + 代次 + 页面种类）、七个能力 facet（views/behaviors/behaviorState/settingsContext/commands/menus/renderers 等）、CM6 扩展登记、设置页挂载根、资源地址与释放回调。
 
 语义要点：
 - **生命周期**：代次是硬边界：旧工厂注册、旧消息、迟到结果不能接入新代次；onDispose 回调在停用/故障/代次回收时执行（重复释放无害）。
-- **错误与拒绝**：views/behaviors/commands/menus/renderers/ui 六个 facet 仅编辑器页提供（设置页为 undefined）；resourceUri 越出资源子目录返回 null（组件不得自造越界地址）。
+- **错误与拒绝**：views/behaviors/commands/menus/renderers/ui 六个 facet 仅编辑器页提供（设置页为 undefined）；behaviorState 与 settingsContext 两面两端点分布——前者编辑器页与设置页均提供、后者仅设置页提供；resourceUri 越出资源子目录返回 null（组件不得自造越界地址）。
 
 签名事实源：`src/shared/addonPage.ts`
 
@@ -431,6 +432,13 @@ export interface VsidianAddonPageSdk {
    *  分开（register 在设置页无意义，本面只报事实）。组件被停用后设置
    *  页不卸载，本面仍可查询与订阅（灰态消费场景） */
   readonly behaviorState?: AddonBehaviorStateFacet
+  /** #553 设置页上下文面（仅设置页提供；编辑器页为 undefined）：「组件
+   *  设置」详情的平台侧上下文——作用域标签状态（user/workspace + 工作
+   *  区在场）与搜索定位目标（def/group 键）的快照读取与变化订阅。数据
+   *  源是设置页的平台外壳（作用域切换与 #472 定位链路），组件经本面
+   *  取得这些信息而不读取平台私有 DOM。onLocateTarget 订阅即回放当前
+   *  挂起目标（页面装载晚于定位到达的补投；null 表示清除） */
+  readonly settingsContext?: AddonSettingsContextFacet
   /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */
   readonly commands?: AddonSdkCommandsFacet
   /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */
@@ -475,6 +483,50 @@ export type AddonPageKind = 'editor' | 'settings'
 ```
 
 **验证**：`test/unit/addonPageLoader.test.ts`、`test/browser/addonPageSdk.mjs`、`test/integration/suite/addonT02Cases.ts`
+
+### `page-settings-context` 设置页上下文面（settingsContext）
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：设置页 · **引入**：#553
+
+**目标**：#553 详情自绘页优先起设置页提供的平台上下文：作用域标签状态（用户默认/当前工作区 + 工作区在场）与全局设置搜索的定位目标（定义/分组键）的快照读取与变化订阅——组件自绘设置页据此对齐「当前写到哪一层」并承接搜索跳转的页内定位（切自己的页内 Tab 并定位控件），不读取平台私有 DOM。
+
+语义要点：
+- **适用模式**：仅设置页提供（编辑器页为 undefined）；数据源是设置页的平台外壳——作用域切换点击与 #472 定位链路经页面级 runtime 上抛。
+- **生命周期**：查询（scopeState/locateTarget）不做代次守卫（只读无副作用）；订阅（onScopeChange/onLocateTarget）过 isLoadActive 守卫——已释放代次的迟到登记为 no-op 退订，释放时已有的订阅由 releaseLoad 整组回收。onLocateTarget 订阅即回放当前挂起目标（页面装载晚于定位到达的补投；null 表示清除）。
+
+签名事实源：`src/shared/addonSettingsContextApi.ts`
+
+```ts
+/** 设置页上下文面（仅设置页提供；编辑器页为 undefined） */
+export interface AddonSettingsContextFacet {
+  /** 当前作用域快照（拉取式——重复读取同代次内一致，页面级当前值） */
+  scopeState(): AddonSettingsScopeSnapshot
+  /** 订阅作用域/工作区状态变化；返回退订函数（重复退订无害） */
+  onScopeChange(listener: (state: AddonSettingsScopeSnapshot) => void): () => void
+  /** 当前未消费的定位目标（null = 无挂起目标） */
+  locateTarget(): AddonSettingsLocateTarget | null
+  /** 订阅定位目标交付：订阅时如有挂起目标先回放一次（补投），此后每次
+   *  交付（含 null 清除）通知；返回退订函数（重复退订无害） */
+  onLocateTarget(listener: (target: AddonSettingsLocateTarget | null) => void): () => void
+}
+
+/** 作用域快照：当前生效的作用范围标签 + 工作区在场状态 */
+export interface AddonSettingsScopeSnapshot {
+  /** 平台作用域标签的当前选中值（user = 用户默认层；workspace = 当前工作区层） */
+  readonly scope: 'user' | 'workspace'
+  /** 宿主是否打开了工作区（false 时工作区层不可用——组件据此呈现明确状态） */
+  readonly hasWorkspace: boolean
+}
+
+/** 搜索定位目标（全局设置搜索命中定义/分组后交给自绘页的落点） */
+export interface AddonSettingsLocateTarget {
+  /** def = 设置定义键；group = 设置分组键（与平台注册的 keys 同空间） */
+  readonly kind: 'def' | 'group'
+  readonly key: string
+}
+```
+
+**验证**：`test/unit/addonPageLoader.test.ts`、`test/browser/addonSettingsContext.mjs`
 
 ### `page-load-protocol` 页面装载协议（指令与出站消息）
 

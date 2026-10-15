@@ -102,6 +102,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 双标签作用范围、标量/数组/对象基础控件、清除覆盖与保存反馈；标签
   // 选中态与失败提示的绘制层断言）紧随 addonPageSdk（同附加组件族）
   'addonSettings',
+  // #553 详情自绘页优先：生产设置页入口 + 真实 defineAddonPage 夹具
+  //（详情首屏装载/次级页签/settingsContext 作用域与定位交付/故障恢复/
+  // 切换组件——夹具回显行计算色绘制层断言）紧随 addonSettings
+  'addonSettingsContext',
   // #354 T05：侧栏三组与故障排障（绘制层断言）+ 开关热切换 IME 收尾
   // （CDP composition 驱动，复用 addonPageSdkFixture 生产链路）
   'addonSidebar',

@@ -99,6 +99,7 @@ div.vsidian-settings-group            ← 卡片：10px 圆角、1px 描边、�
 - 几何钉住：settingsPage 浏览器用例（编辑器页五组）与 T08 用例（输入行为管理组）断言图标 16px、贴左缘 20px、文字 44px、负边距与下边线——**新组头沿用同一断言口径**。
 - 组内提示文案（组说明句）作卡片内首行（`margin-top 10px`、说明色），不悬在卡片外。整页单卡片的管理型分页（如输入行为管理页）可把说明句升为分页副题（`vsidian-settings-subtitle`）而不在卡内重复——副题即页级说明位，不算悬空。
 - #472 附加组件设置区分组沿用本节结构：组卡片直挂设置区（bare 分页同口径，组间 `20px` 档位——设置区容器为 flex column，实际间距 = flex gap 10px + 组卡 margin 10px 合成，#477 归位；此前 margin 20px 与 gap 叠加为 30px 偏离档位），组标题不配图标（组件声明的组无语义字形——不发明）；组描述即上一条「组说明句」模式（`.vsidian-addons-group-description`，卡片内首行说明色）。首容器（功能开关行 + 未分组定义）无组标题恒置顶，组容器按声明序随后。
+- #553 组件设置详情双视图页签（`vsidian-addons-detail-tabs` 容器 + `vsidian-addons-detail-tab` 页签，`role=tablist/tab` + `aria-selected`）：有自绘设置页的组件详情以自绘内容为主视图，基础设置表单转次级视图——两视图经页内页签切换，形态复用作用域标签（`.vsidian-addons-scope-*`）同款档位（容器 inline-flex + 8px 外壳描边，页签 6px 圆角 pill、选中态 activeSelection 前景/背景）。平台外壳（标题/返回、作用域标签、总开关组卡）恒在场不随页签切换隐藏；故障暂停与无自绘页组件退回整页基础表单（页签不渲染）。
 
 ### 2.3 设置行与控件
 

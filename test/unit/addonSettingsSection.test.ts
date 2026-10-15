@@ -359,16 +359,19 @@ describe('附加组件分页：通道堵死与设置入口导航（#465）', () 
     expect(harness.parent.querySelector('.vsidian-addons-list')).toBeNull()
   })
 
-  it('行内「打开组件设置页」入口：上送 openAddonPage 并导航到「组件设置」分页', async () => {
+  it('行内「设置」入口（#553 起唯一设置入口——仅有设置页组件同现）：上送 settingsOpen 并导航到「组件设置」分页', async () => {
     const harness = makeView()
     openAddonsPage(harness)
     harness.dispatch(addonsState([
       { id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: true, hasSettingsPage: true },
     ]))
-    const open = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '打开组件设置页')
+    const open = [...harness.parent.querySelectorAll('button')].find((b) => b.textContent === '设置')
     expect(open).toBeTruthy()
+    // #553 详情自绘页优先：打开详情即自绘页（openAddonPage 由详情渲染自动
+    // 发出），管理页不再保留独立「打开组件设置页」入口
+    expect([...harness.parent.querySelectorAll('button')].some((b) => b.textContent === '打开组件设置页')).toBe(false)
     open!.click()
-    expect(harness.sent).toContainEqual({ kind: 'addons.openAddonPage', addonId: 'fixture.demo' })
+    expect(harness.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: 'fixture.demo' })
     await harness.settle()
     expect(harness.parent.querySelector('.vsidian-settings-heading')?.textContent).toBe('组件设置')
   })
@@ -381,7 +384,6 @@ describe('附加组件分页：通道堵死与设置入口导航（#465）', () 
     ]))
     const buttons = [...harness.parent.querySelectorAll('button')].map((b) => b.textContent)
     expect(buttons).not.toContain('设置')
-    expect(buttons).not.toContain('打开组件设置页')
   })
 })
 

@@ -584,6 +584,18 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-addons-scope-tab[aria-selected='true']:focus-visible { outline: 1px solid var(--vscode-focusBorder, #2687d4); outline-offset: 1px; }
 .vsidian-addons-scope-tab:disabled { opacity: 0.5; cursor: default; }
 .vsidian-addons-scope-hint { margin: 0; color: var(--vscode-descriptionForeground, #666); }
+/* #553 详情双视图页签（自定义设置页 / 基础设置）：与作用域标签同档——
+   pill 容器（8px 外壳 + 6px 页签）+ activeSelection 选中态（ui-patterns
+   §2.2 pill 页签档位，内部类名不入公开契约） */
+.vsidian-addons-detail-tabs { display: inline-flex; gap: 4px; padding: 3px;
+  border: 1px solid var(--vscode-panel-border, #cbd0d8); border-radius: 8px;
+  width: fit-content; }
+.vsidian-addons-detail-tab { min-height: 24px; padding: 2px 12px; border: none; border-radius: 6px;
+  color: var(--vscode-descriptionForeground, #666); background: transparent; cursor: pointer; }
+.vsidian-addons-detail-tab[aria-selected='true'] {
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+  background: var(--vscode-list-activeSelectionBackground, #0060c0); }
+.vsidian-addons-detail-tab[aria-selected='true']:focus-visible { outline: 1px solid var(--vscode-focusBorder, #2687d4); outline-offset: 1px; }
 .vsidian-addons-fault-hint { margin: 0; color: var(--vscode-errorForeground, #f66); }
 /* #354 T05 故障排障块：状态 + 日志入口 + 手动重试（完整诊断归 T12） */
 .vsidian-addons-fault-troubleshoot {

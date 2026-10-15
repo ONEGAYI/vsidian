@@ -124,6 +124,18 @@ T03 自动化运行证据随票面实施回填，人工验收仍开放。内部�
 | --- | --- | --- | --- |
 | T05 只读引用浮窗（#544，[规格](addon-reference-views.md)） | R-U01–R-U07、R-U12 | `ref-views-popup`（`sdk.refViews.requestPopup`——来源 B 解析语境、互斥锚点、单浮窗仲裁、句柄与代次释放、错误分态透传） | 单 `addonRefViews`/`addonRefViewsRuntime`/`addonRefViewsPopup`/`documentSessionRefViews`/`addonPageLoader`；浏 `addonRefViews`（真实指针/键盘 + 绘制层）；集 `addonRefViewsCases`（绘制层与历史样式命中、来源 B、目标更新/失效、停用/页面关闭/租约回收）。R-U08–R-U11（组件容器嵌入）待 T06（#545） |
 
+## 组件设置详情自绘页优先覆盖（#553）
+
+本票改设置详情呈现关系并新增页面上下文面，公开接口映射为 `page-settings-context`（`sdk.settingsContext`——仅设置页）；呈现规格见 [addon-settings-detail.md](addon-settings-detail.md)。29 项故事中的 13/14/16/18（作用域、清除继承、停用可配置、故障排障）语义不变，呈现载体随本票演进。
+
+| 场景 | 公开接入与验证 |
+| --- | --- |
+| 详情首屏自绘页（自动装载、无重复表单） | 单 `addonSettingsArea`（#553 组：自动 openAddonPage/应答去重/次级页签/外壳保留）；浏 `addonSettingsContext`（真实 defineAddonPage 夹具装载进详情 + 首屏绘制层断言） |
+| 作用域真实传至组件 | 浏 `addonSettingsContext`（夹具经 facet 回显 scope=workspace——显示值与写入目标一致）；单 `addonSettingsArea`/`addonPageLoader`（applyScope 等值不分发、订阅退订） |
+| 搜索定位交给自绘页（未开/已开两态） | 单 `addonSettingsArea`（pendingFocus 消费路径与已开路径均交付 runtime、平台不描自己表单）；浏 `addonSettingsContext`（搜索点击 → 夹具回显 locate=def:flag） |
+| 生命周期（切换/重开/停用可配置/故障恢复/迟到） | 单 `addonPageLoader`（#553 组：释放整组回收、迟到订阅 no-op、查询不受代次影响）；浏 `addonSettingsContext`（故障撤下/重试恢复/切换组件残留撤除）；停用可配置沿用 `addonT05Cases`（宿主机制未改） |
+| 消费编译与门禁 | `publicApiConsumer`（SettingsPageContextSurface 钉住 + union/样例）；`addonApiSurface`（导入白名单 + 防回潮）；基线重锚随票（page-sdk 声明文本变更） |
+
 ## 统一主题扩展覆盖（#546 / T07）
 
 本组故事来源为 [addon-themes.md](addon-themes.md)，不改写上方 T18 历史结论。公开宿主面为 `themes-register`，页面面为 `theme-environment`；API 仍为 1.0.0 候选。

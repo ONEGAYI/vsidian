@@ -18,6 +18,7 @@ import { AddonBehaviorManageSection } from './addonBehaviorManageSection'
 import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from './addonSettingsAreaSection'
 import { installAddonPageLoader, type AddonPageLoaderHandle } from './addonPageLoader'
 import { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
+import { AddonSettingsContextRuntime } from './addonSettingsContext'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
 import { ToastChannel } from './toast'
@@ -48,10 +49,15 @@ const addonSettingsHost = document.createElement('div')
 // 同样提供（两端点同形——组件规则页灰态消费场景：被停用后设置页不卸载，
 // 仍可查询与订阅；广播经 addon.behaviorEnabledState 到达）
 const addonBehaviorEnabledState = new AddonBehaviorEnabledStateRuntime()
+// #553 设置页上下文 runtime（设置页一份）：作用域标签状态与 #472 搜索
+// 定位目标的页面级缓存——AddOn 设置区分节上抛写入，装载器转成 SDK
+// settingsContext 面交付自绘页（组件不读平台私有 DOM）
+const addonSettingsContext = new AddonSettingsContextRuntime()
 const addonLoader: AddonPageLoaderHandle = installAddonPageLoader({
   page: 'settings',
   mountContainer: addonSettingsHost,
   addonBehaviorEnabledState,
+  addonSettingsContext,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
 
@@ -108,11 +114,13 @@ const addonBehaviors = new AddonBehaviorManageSection(
 // #465 组件设置独立分页：基础设置区（T04）与组件设置页挂载（T02）的
 // 唯一承载方——附加组件页通道堵死后，addons.settingsState /
 // openAddonSettingsPage 在此消费（addonSettingsHost 装载器容器随迁）。
-// #554 settingsState 推送（当前打开组件切换/关闭）经回调触发侧栏重建
+// #554 settingsState 推送（当前打开组件切换/关闭）经回调触发侧栏重建；
+// #553 详情自绘页优先：作用域/定位目标经 addonSettingsContext 上抛
 const addonSettingsArea = new AddonSettingsAreaSection(
   { postMessage: (message) => vscode.postMessage(message) },
   addonSettingsHost,
   () => refreshSidebar(),
+  addonSettingsContext,
 )
 
 const view = new SettingsPageView(

@@ -155,6 +155,7 @@ vsidian/
 │   │   ├── addon-navigation.md                   # 组件导航与普通链接行号规格
 │   │   ├── addon-paste-conversion.md             # 组件声明式粘贴转换规格
 │   │   ├── addon-reference-views.md              # 组件只读引用浮窗与嵌入规格
+│   │   ├── addon-settings-detail.md              # 组件设置详情自绘页优先规格
 │   │   ├── addon-settings-grouping.md            # 附加组件设置分组规格
 │   │   ├── addon-themes.md                       # 组件主题与内核退役规格
 │   │   ├── addons-api-gate.md                    # API 契约门禁 CI 接线规格
