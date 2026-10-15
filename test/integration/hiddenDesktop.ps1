@@ -1,5 +1,5 @@
-# 在当前交互式 Windows Station 中创建不显示的桌面，并在其中运行真实测试宿主。
-# CreateProcess 的 lpDesktop 是关键：窗口属于这个桌面，不能遮挡当前桌面。
+# 在独立 Windows Station 中创建不显示的桌面，隔离真实测试宿主的剪贴板。
+# CreateProcess 的 lpDesktop 同时指定窗口站和桌面，不影响用户当前桌面。
 param([Parameter(Mandatory = $true)][string]$ConfigBase64)
 
 $ErrorActionPreference = 'Stop'
@@ -50,6 +50,16 @@ public static class HiddenDesktopHost {
         public IO_COUNTERS IoInfo;
         public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
     }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr CreateWindowStation(string name, uint flags, uint access, IntPtr attributes);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool CloseWindowStation(IntPtr station);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern IntPtr GetProcessWindowStation();
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool SetProcessWindowStation(IntPtr station);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint size, out uint needed);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern IntPtr CreateDesktop(string name, IntPtr device, IntPtr devmode, int flags, uint access, IntPtr attributes);
     [DllImport("user32.dll", SetLastError = true)]
@@ -121,14 +131,30 @@ public static class HiddenDesktopHost {
     public static int Run(string executable, string[] args, string cwd, string mode, int parentPid) {
         if (mode != "desktop" && mode != "foreground") throw new ArgumentException("Unknown host mode: " + mode);
         string name = "VsidianTest-" + Guid.NewGuid().ToString("N");
-        IntPtr desktop = IntPtr.Zero, job = IntPtr.Zero, parent = IntPtr.Zero;
+        string stationName = null;
+        IntPtr station = IntPtr.Zero, desktop = IntPtr.Zero, job = IntPtr.Zero, parent = IntPtr.Zero;
         IntPtr input = IntPtr.Zero, output = IntPtr.Zero, error = IntPtr.Zero;
         PROCESS_INFORMATION process = new PROCESS_INFORMATION();
         bool assigned = false;
         try {
             if (mode == "desktop") {
-                desktop = CreateDesktop(name, IntPtr.Zero, IntPtr.Zero, 0, 0x10000000, IntPtr.Zero);
-                if (desktop == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateDesktop failed");
+                IntPtr originalStation = GetProcessWindowStation();
+                if (originalStation == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "GetProcessWindowStation failed");
+                // 普通权限只能由系统按登录会话命名；并行宿主仍经会话内互斥协调剪贴板。
+                station = CreateWindowStation(null, 0, 0x10000000, IntPtr.Zero); // GENERIC_ALL
+                if (station == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateWindowStation failed");
+                var stationNameBuffer = new StringBuilder(512);
+                uint needed;
+                if (!GetUserObjectInformation(station, 2, stationNameBuffer, 1024, out needed))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Get window station name failed");
+                stationName = stationNameBuffer.ToString();
+                if (!SetProcessWindowStation(station)) throw new Win32Exception(Marshal.GetLastWin32Error(), "SetProcessWindowStation failed");
+                try {
+                    desktop = CreateDesktop(name, IntPtr.Zero, IntPtr.Zero, 0, 0x10000000, IntPtr.Zero);
+                    if (desktop == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateDesktop failed");
+                } finally {
+                    if (!SetProcessWindowStation(originalStation)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Restore window station failed");
+                }
             }
             parent = OpenProcess(0x00100000, false, unchecked((uint)parentPid)); // SYNCHRONIZE
             if (parent == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess(parent) failed");
@@ -143,7 +169,7 @@ public static class HiddenDesktopHost {
             error = InheritableStdHandle(-12);
             var startup = new STARTUPINFO();
             startup.cb = Marshal.SizeOf(typeof(STARTUPINFO));
-            if (mode == "desktop") startup.lpDesktop = "WinSta0\\" + name;
+            if (mode == "desktop") startup.lpDesktop = stationName + "\\" + name;
             startup.dwFlags = 0x100; // STARTF_USESTDHANDLES
             startup.hStdInput = input;
             startup.hStdOutput = output;
@@ -203,6 +229,7 @@ public static class HiddenDesktopHost {
             if (output != IntPtr.Zero) CloseHandle(output);
             if (error != IntPtr.Zero) CloseHandle(error);
             if (desktop != IntPtr.Zero) CloseDesktop(desktop);
+            if (station != IntPtr.Zero) CloseWindowStation(station);
         }
     }
 }

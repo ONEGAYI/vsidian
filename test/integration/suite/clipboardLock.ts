@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 
-/** Windows 的隐藏桌面共用 WinSta0 剪贴板；这些用例必须跨宿主互斥。 */
+/** Windows 同一测试窗口站内的宿主共享剪贴板；这些用例必须跨宿主互斥。 */
 export const CLIPBOARD_CASE_NAMES: ReadonlySet<string> = new Set([
   '大纲复制五项经宿主剪贴板：端到端读写对拍（#69）',
   '图形块右键簇：graphicOps 呈现/置灰与导出直发链路（#438）',
