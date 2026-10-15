@@ -1019,13 +1019,6 @@ export class WikilinkSuggestController {
     if (!guard) {
       return false
     }
-    // 评审 F7：失效已到达、去抖重查未完成——当前枚举可能已不指向用户
-    // 所选（短名候选被新文件抢占），不提交；吞键的同时立即重查，下一
-    // 次按键即有新鲜候选
-    if (this.resultStale) {
-      this.requeryNow()
-      return true
-    }
     const { view, session, field, head } = guard
     if (field.stage === 'block') {
       // #380 T05 块确认：有 ID 块本地直确认（零宿主往返）；无 ID 块出站
@@ -1056,6 +1049,14 @@ export class WikilinkSuggestController {
     }
     if (field.stage !== 'file') {
       return false // 防御：非文件/标题/块阶段的形态不接管
+    }
+    // 评审 F7：失效已到达、去抖重查未完成——文件枚举可能已不指向用户
+    // 所选（短名候选被新文件抢占），不提交；吞键的同时立即重查，下一
+    // 次按键即有新鲜候选。仅 file 阶段拦截——标题/块候选是目标内容
+    // 枚举，过期接受由宿主侧目标版本守卫淘汰（#380 T05 既有语义）
+    if (this.resultStale) {
+      this.requeryNow()
+      return true
     }
     const item = this.result?.stage === 'file' && this.result.status === 'ready' && this.activeIndex !== null
       ? this.result.items[this.activeIndex]
@@ -1162,6 +1163,13 @@ export class WikilinkSuggestController {
     }
     if (key === '^' && field.stage === 'block') {
       return false
+    }
+    // 评审 F7（阶段转换入口）：file 阶段失效窗内不锁定旧候选进锚点/
+    // 显示文字（同 confirm 口径——吞键并立即重查；标题/块阶段不拦，
+    // 过期接受由宿主侧目标版本守卫淘汰）
+    if (this.resultStale && field.stage === 'file') {
+      this.requeryNow()
+      return true
     }
     const item: WikilinkPlanItem | null = field.stage === 'file' &&
       this.result?.stage === 'file' && this.result.status === 'ready' && this.activeIndex !== null
