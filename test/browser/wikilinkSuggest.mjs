@@ -827,6 +827,54 @@ try {
     assert.equal((await popup(page)).open, false)
   })
 
+  // #503：合笔的「单笔撤销」性质此前只有最终文本弱断言守护——若未来把
+  // marker 拆成第二次 dispatch，最终文本不变、弱断言仍绿。本场景真实按
+  // 一次 Ctrl+Z（生产链路：keymap → history.request → 宿主权威 undo →
+  // doc.changed 回流），断言链接与标记**同时**回退到确认前基线；拆两笔
+  // 时一步只退一笔（半态），此处必红。redo 按 Mod-y 表达：Playwright
+  // 合成 Shift+字母的 key 保持小写，Ctrl+Shift+z 会先命中 Mod-z 绑定
+  // 变成第二次 undo（真实键盘 key='Z' 走 base 键名分支无此问题）；
+  // Mod-y 是生产 keymap 的等价 redo 入口。
+  await scenario('sameDoc 确认合笔单笔撤销：Ctrl+Z 一步同退链接与标记，redo 同复（#503）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => window.lastBlockAccept() !== undefined)
+    // 确认前基线：accept 结果尚未回灌，正文即用户原样输入
+    const baseline = (await read(page)).text
+    await page.evaluate(() => window.respondBlockAccept({
+      ok: true, blockId: 'same001', sameDoc: true, alias: '方案',
+      markerLfOffset: 17, markerText: '\n\n^same001',
+    }))
+    // 确认落地：链接与标记两段都在（与上一场景同口径的弱断言）
+    await page.waitForFunction(() => {
+      const text = window.readEditor().text
+      return text.includes('[[../资料/方案.md#^same001|方案]]') && text.includes('\n\n^same001')
+    })
+    const confirmed = (await read(page)).text
+    // 拆两笔回归下判据恒假，等待只会拖到超时：显式短超时快红，并在失败时
+    // 补读当前正文——给失败报告留下「半态文本」直接证据而非通用超时报错
+    const settleText = async (expect, what) => {
+      try {
+        await page.waitForFunction((target) => window.readEditor().text === target, expect, { timeout: 8000 })
+      } catch (error) {
+        const current = (await read(page)).text
+        assert.fail(`${what}：正文未达预期。当前=${JSON.stringify(current)} 预期=${JSON.stringify(expect)}（${error.message}）`)
+      }
+    }
+    // 真实键盘一次 undo：一步同时回退链接补全与块 ID 补写（正文回基线）
+    await page.keyboard.press('Control+z')
+    await settleText(baseline, '一次 Ctrl+Z 回到确认前基线（两段同退）')
+    assert.equal((await read(page)).text, baseline, '一次 Ctrl+Z 回到确认前基线（两段同退）')
+    // redo：一步同时恢复两段
+    await page.keyboard.press('Control+y')
+    await settleText(confirmed, '一次 redo 两段同复')
+    assert.equal((await read(page)).text, confirmed, '一次 redo 两段同复')
+    assert.equal((await popup(page)).open, false, 'undo/redo 后候选浮层不回潮')
+  })
+
   await scenario('F4：target-changed 失败不 toast——重发查询刷新版本基准，重试即成功', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
