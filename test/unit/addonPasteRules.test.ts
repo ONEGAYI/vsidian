@@ -76,6 +76,16 @@ describe('粘贴规则声明校验', () => {
     }
   })
 
+  it.each([-10001, 10001, 100001])('接受规格允许的整数优先级 %i，不另设量级上限', (priority) => {
+    const result = validateAddonPasteRuleDeclarations([{ ...linkDeclaration(), priority }])
+    expect(result).toMatchObject({ ok: true, rules: [{ priority }] })
+  })
+
+  it('接受显式声明的 constructor 槽', () => {
+    const declaration = templateRule('own-slot', '{{constructor}}', { constructor: { source: { kind: 'text' } } })
+    expect(validateAddonPasteRuleDeclarations([declaration]).ok).toBe(true)
+  })
+
   it('缺失与空字符串区分：属性值空串是合法条件值，缺失 value 才是存在性条件', () => {
     const result = validateAddonPasteRuleDeclarations([{
       id: 'empty-ok',
@@ -92,7 +102,7 @@ describe('粘贴规则声明校验', () => {
     ['id 非法字符', [{ ...linkDeclaration(), id: 'bad id' }]],
     ['id 含点号伪造跨组件身份', [{ ...linkDeclaration(), id: 'other.addon#x' }]],
     ['优先级非整数', [{ ...linkDeclaration(), priority: 1.5 }]],
-    ['优先级越界', [{ ...linkDeclaration(), priority: 100001 }]],
+    ['优先级非有限数', [{ ...linkDeclaration(), priority: Infinity }]],
     ['未知顶层字段', [{ ...linkDeclaration(), note: 'x' }]],
     ['match 缺标签', [{ id: 'a', match: {}, output: { kind: 'discard' } }]],
     ['标签名非法', [{ id: 'a', match: { tag: 'SP AN' }, output: { kind: 'discard' } }]],
@@ -103,6 +113,8 @@ describe('粘贴规则声明校验', () => {
     ['模板缺失', [{ id: 'a', match: { tag: 'SPAN' }, output: { kind: 'template', slots: {} } }]],
     ['模板空串', [{ id: 'a', match: { tag: 'SPAN' }, output: { kind: 'template', template: '', slots: {} } }]],
     ['模板引用未定义槽', [{ id: 'a', match: { tag: 'SPAN' }, output: { kind: 'template', template: '{{miss}}', slots: {} } }]],
+    ['模板引用继承的 constructor 而未声明槽', [templateRule('inherited-constructor', '{{constructor}}', {})]],
+    ['模板引用继承的 toString 而未声明槽', [templateRule('inherited-tostring', '{{toString}}', {})]],
     ['模板槽未被引用', [linkDeclaration(), {
       id: 'b', match: { tag: 'SPAN' },
       output: { kind: 'template', template: 'x', slots: { unused: { source: { kind: 'text' } } } },

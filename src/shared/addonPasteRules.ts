@@ -28,8 +28,6 @@ export const ADDON_PASTE_RULES_EVAL_STEP_BUDGET = 100_000
 const RULE_ID_LIMIT = 128
 /** 局部 ID 字符集（首字符字母数字；禁点号——防伪造跨组件身份） */
 const RULE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
-/** 优先级量级边界（防滥用；缺省 0，规格允许任意整数优先级语义） */
-const PRIORITY_LIMIT = 10_000
 /** 标签名：字母开头，字母数字连字符（自定义元素）；比较用大写形态 */
 const TAG_PATTERN = /^[A-Za-z][A-Za-z0-9-]*$/
 /** 属性名：排除空白、引号、尖括号、斜杠与等号（HTML 属性名字符约束） */
@@ -241,7 +239,7 @@ function validateOutput(value: unknown): { ok: true; output: AddonPasteRuleOutpu
     slots[name] = rawSlot.url === true ? { source, url: true } : { source }
   }
   for (const name of referenced) {
-    if (!(name in slots)) return { ok: false, detail: `模板引用未定义槽 '${name}'` }
+    if (!Object.hasOwn(slots, name)) return { ok: false, detail: `模板引用未定义槽 '${name}'` }
   }
   for (const name of Object.keys(slots)) {
     if (!referenced.has(name)) return { ok: false, detail: `槽 '${name}' 未被模板引用` }
@@ -278,8 +276,8 @@ export function validateAddonPasteRuleDeclarations(
     }
     let priority = 0
     if (raw.priority !== undefined) {
-      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority) || Math.abs(raw.priority) > PRIORITY_LIMIT) {
-        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为 |n|≤${PRIORITY_LIMIT} 的整数：${String(raw.priority)}` }
+      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority)) {
+        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为整数：${String(raw.priority)}` }
       }
       priority = raw.priority
     }
