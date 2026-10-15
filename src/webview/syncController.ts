@@ -2151,6 +2151,14 @@ export class WebviewSyncController {
     }
   }
 
+  /** #543 T03 面板会话身份（init 握手后可用；导航请求的面板身份注入源。
+   *  未握手返回 null——注册表侧按来源无法可靠归属拒绝） */
+  sessionIdentityNow(): { sessionId: string; docUri: string } | null {
+    return this.sessionId !== '' && this.docUri !== ''
+      ? { sessionId: this.sessionId, docUri: this.docUri }
+      : null
+  }
+
   /** #359 T10：挂接组件命令注册表（main.ts 构造后注入；快捷键本地分支与
    *  宿主 addonCommand.execute 回发两入口共用 runAddonCommand） */
   attachAddonCommands(registry: import('./addonCommands').AddonCommandsRuntime): void {
@@ -3560,7 +3568,8 @@ export class WebviewSyncController {
         // 送达确认（#163 验收反馈）：offset 原样回发（对账不受 clamp/块化
         // 影响）——宿主停发补发，此后重载恢复走持久化锚点，历史程序定位
         // 不再重播、不拉回用户已手动离开的位置
-        this.bridge.postMessage({ kind: 'view.locate.ack', offset: message.offset })
+        this.bridge.postMessage({ kind: 'view.locate.ack', offset: message.offset,
+          ...(message.locateId !== undefined ? { locateId: message.locateId } : {}) })
         break
       }
       case 'reading.perf': {

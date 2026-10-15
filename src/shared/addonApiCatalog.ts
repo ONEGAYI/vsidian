@@ -491,6 +491,25 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#349（V02 验证）、#351（T02 生产化）',
   },
   {
+    id: 'document-navigation',
+    group: 'page-sdk',
+    title: '文档打开与定位（views.openDocument）',
+    layer: 'stable-candidate',
+    endpoints: ['editor-page'],
+    signatures: [{ module: 'src/shared/addonNavApi.ts', symbols: [
+      'AddonDocNavLocate', 'AddonDocNavRequest', 'AddonDocNavRejection', 'AddonDocNavResult',
+    ] }],
+    purpose: '组件提交来源实例、目标路径与互斥定位，由宿主打开 Markdown 或原生文本并报告实际打开与定位结果；不提供任意文件读取面。',
+    semantics: {
+      modes: '仅编辑器页，Live 与阅读态均可调用；来源可为 main/embed/hover 的有效视图，设置页不提供。',
+      coordinates: '目标以来源视图的目标文档目录解析；行号为 1-based 正整数，标题与块 ID 互斥。空 target 为来源文档自身；首次越界不钳末行。CRLF 经 NewlineCoordinator 换算为 LF 行首。',
+      lifecycle: '组件身份与代次由 SDK 注入，来源必须仍在当前页面注册表；来源释放、页面重载、代次结束和超时终结在途请求，拒收迟到回包与定位。Markdown 经既有 view.locate/ack 确认，等待面板就绪后重读权威文本。',
+      errors: '成功区分 opened 与 located；失败携带 opened 与 invalid-request/no-workspace/escape/not-found/view-disposed/anchor-not-found/out-of-bounds/delivery-failed/error 原因。普通拒绝不触发组件故障，API 不重复弹通知。',
+    },
+    verification: ['test/unit/addonNavApi.test.ts', 'test/unit/addonDocNav.test.ts', 'test/unit/addonDocNavDelivery.test.ts', 'test/unit/addonViews.test.ts', 'test/browser/addonDocNav.mjs', 'test/integration/suite/addonDocNavCases.ts'],
+    introduced: '#543（扩展批次 T03）',
+  },
+  {
     id: 'views-editor',
     group: 'page-sdk',
     title: '统一视图与编辑面（views / editor）',

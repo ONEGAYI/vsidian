@@ -13,6 +13,7 @@ import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
 import { addonStorageCases } from './addonStorageCases'
 import { addonT06Cases } from './addonT06Cases'
+import { addonDocNavCases } from './addonDocNavCases'
 import { addonT07Cases } from './addonT07Cases'
 import { addonT08Cases } from './addonT08Cases'
 import { addonBehaviorStateCases } from './addonBehaviorStateCases'
@@ -17960,6 +17961,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
   // 断言面见 addonT06Cases.ts 头注）
   ...addonT06Cases,
+  // #543 T03：附加组件文档打开与定位 API（夹具组件经公开 views.openDocument
+  // 消费，断言面见 addonDocNavCases.ts 头注）
+  ...addonDocNavCases,
   // #356 T07：可组合输入行为与逐项注册状态（夹具组件经公开 behaviors 面
   // 注册行为链，断言面见 addonT07Cases.ts 头注）
   ...addonT07Cases,

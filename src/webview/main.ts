@@ -148,6 +148,12 @@ addonCommands.bindActiveTarget((addonId) => {
 })
 controller.attachAddonUi(addonUi)
 controller.attachAddonViews(addonViews)
+// #543 T03 导航出站端口：面板身份取控制器 init 握手后的会话（未握手时
+// 注册表侧按来源无法归属拒绝）；回执经下方消息监听路由进注册表
+addonViews.attachDocNavPort({
+  send: (message) => vscode.postMessage(message),
+  panelIdentity: () => controller.sessionIdentityNow(),
+})
 controller.attachAddonBehaviorDrive((input) => {
   void addonBehaviors.driveInput(input.instanceId, {
     userEvent: input.userEvent,
@@ -196,6 +202,12 @@ window.addEventListener('message', (event) => {
   // T09（#358）：宿主渲染提供者生效表广播（等值跳过；变化即热切换）
   if (isHostToWebview(event.data) && event.data.kind === 'addonRenderers.table') {
     addonRenderers.applyTable(event.data.table)
+    return
+  }
+  // #543 T03：附加组件文档导航回执（页面级——注册表在途表配对终结，
+  // 迟到/换代回包在注册表侧拒收）
+  if (isHostToWebview(event.data) && event.data.kind === 'addonDocNav.result') {
+    addonViews.handleDocNavResult(event.data)
     return
   }
   controller.handleHostMessage(event.data)

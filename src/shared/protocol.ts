@@ -21,6 +21,7 @@ import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from 
 import { isAddonPasteRulesSnapshot } from './addonPasteRules'
 import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
+import { isAddonDocNavLocate, isAddonDocNavResult, type AddonDocNavLocate, type AddonDocNavResult } from './addonNavApi'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -227,7 +228,18 @@ export type HostToWebview =
    *  head（#318）：选区右端（LF 坐标），携带时 live 落位为
    *  区间选区 [offset, head)——外部搜索导航恢复匹配选区用；缺省单点，
    *  既有单点语义不变 */
-  | { kind: 'view.locate'; offset: number; head?: number }
+  | { kind: 'view.locate'; offset: number; head?: number; locateId?: number }
+  /** #543 T03 附加组件文档导航回执（addonDocNav.request 的应答；reqId 与
+   *  请求配对，addonId+generation 供 webview 在途表拒收迟到/换代回包）。
+   *  result 区分 opened 与 located——打开成功但锚点未命中/越界/未送达
+   *  不谎称完整成功（形状守卫 isAddonDocNavResult） */
+  | {
+      kind: 'addonDocNav.result'
+      reqId: number
+      addonId: string
+      generation: number
+      result: AddonDocNavResult
+    }
   /** 阅读视图性能探针（#7）：reading 模式下对阅读容器往返滚动并回报
    *  挂载/回收/解析次数。要求当前处于 reading 模式，否则回报失败态 */
   | { kind: 'reading.perf'; scrollRounds: number }
@@ -1106,6 +1118,30 @@ export type RefEditHostEvent = Extract<
 /** webview → 宿主消息 */
 export type WebviewToHost =
   | { kind: 'paste.preferences.set'; reqId: number; preserveFormatting: boolean }
+  /** #543 T03 附加组件文档打开与定位请求（页面级——views 面 openDocument
+   *  的宿主投递形态）：来源实例文档 URI 由 webview 视图注册表按
+   *  sourceInstanceId 解析（组件请求不携带来源身份——不按宿主活动标签
+   *  猜测来源，也不接受作者伪造）；面板身份（sessionId/docUri）由
+   *  webview 侧传输层注入，宿主按本面板校验。宿主解析目标
+   *  （vaultLink 同一解析器）、打开（md=openWith 重显 / text=原生编辑器）
+   *  与定位（view.locate 管线），以 addonDocNav.result 回执 */
+  | {
+      kind: 'addonDocNav.request'
+      sessionId: string
+      docUri: string
+      /** 面板内请求序号（回执配对；webview 侧在途表键） */
+      reqId: number
+      addonId: string
+      generation: number
+      /** 来源实例目标文档 URI（注册表值——非作者载荷） */
+      sourceDocUri: string
+      sourceInstanceId: string
+      /** 目标路径（来源文档目录相对；空串 = 同文件锚点） */
+      target: string
+      /** 定位描述（互斥三形态；缺省仅打开） */
+      locate?: AddonDocNavLocate
+    }
+  | { kind: 'addonDocNav.cancel'; sessionId: string; docUri: string; reqId: number }
   /** webview 脚本加载完成，请求 init。
    *  已知限制（C-8）：ready 与 init 之间的毫秒级窗口内到达的 doc.changed
    *  会被未 ready 面板丢弃——装载以 init 全文为准，内容不丢；仅当窗口内
@@ -1237,7 +1273,7 @@ export type WebviewToHost =
   /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
-  | { kind: 'view.locate.ack'; offset: number }
+  | { kind: 'view.locate.ack'; offset: number; locateId?: number }
   /** 视图诊断回报 */
   | {
       kind: 'view.state'
@@ -3995,6 +4031,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
   switch (v.kind) {
     case 'ready':
       return true
+    case 'addonDocNav.request':
+      // #543 T03 附加组件文档导航请求：面板身份 + 来源文档 URI + 互斥定位
+      // 描述（内层守卫单一事实源在 shared/addonNavApi）
+      return isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.addonId === 'string' && v.addonId.length > 0 &&
+        isNonNegativeInt(v.generation) &&
+        typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0 &&
+        typeof v.sourceInstanceId === 'string' && v.sourceInstanceId.length > 0 &&
+        typeof v.target === 'string' &&
+        (v.locate === undefined || isAddonDocNavLocate(v.locate))
+    case 'addonDocNav.cancel':
+      return isString(v.sessionId) && isString(v.docUri) && isPositiveInt(v.reqId)
     case '_test.skeleton.report':
       // #292 骨架状态回报：测试钩子通道，仅校验字段类型
       return typeof v.present === 'boolean' &&
@@ -4186,7 +4236,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       }
     }
     case 'view.locate.ack':
-      return isNonNegativeInt(v.offset)
+      return isNonNegativeInt(v.offset) && (v.locateId === undefined || isPositiveInt(v.locateId))
     case 'view.state':
       return (
         (v.diagnostics === undefined || isDiagnosticSnapshot(v.diagnostics)) &&
@@ -4731,6 +4781,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case '_test.skeleton.release':
       // #292 骨架测试钩子：无字段的触发型消息
       return true
+    case 'addonDocNav.result':
+      // #543 T03 导航回执：结果形状守卫（shared/addonNavApi 单一事实源）
+      return isPositiveInt(v.reqId) &&
+        typeof v.addonId === 'string' && v.addonId.length > 0 &&
+        isNonNegativeInt(v.generation) &&
+        isAddonDocNavResult(v.result)
     case 'diagram.export.result':
       return isPositiveInt(v.reqId) && typeof v.ok === 'boolean' &&
         (v.reason === undefined || v.reason === 'cancelled' || v.reason === 'invalid' || v.reason === 'writeFailed')
@@ -4979,7 +5035,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'view.mode.set':
       return v.mode === 'live' || v.mode === 'reading' || v.mode === 'toggle'
     case 'view.locate':
-      return isNonNegativeInt(v.offset) && (v.head === undefined || isNonNegativeInt(v.head))
+      return isNonNegativeInt(v.offset) && (v.head === undefined || isNonNegativeInt(v.head)) &&
+        (v.locateId === undefined || isPositiveInt(v.locateId))
     case 'reading.perf':
       return isPositiveInt(v.scrollRounds)
     case 'reading.test.image':

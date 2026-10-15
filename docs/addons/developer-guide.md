@@ -266,6 +266,22 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 
 **独立消费样例（T15，2026-10-08 起）**：`test/examples/` 另有三套完整独立扩展工程（输入/渲染/界面——`input-behavior`、`renderer`、`ui-command`），只使用公开 SDK、可独立构建，是「从零写一个组件」的最佳参考（比测试夹具更贴近真实业务形态：无短轮询驱动协议、有自己的设置与 i18n 字典、共享构建脚本与产物扫描）。构建与复制清单见 [test/examples/README](../../test/examples/README.md)。
 
+## 文档打开与定位（扩展批次 T03 / #543）
+
+编辑器页面的 `sdk.views.openDocument()` 接收有效来源视图 ID、相对目标路径和可选定位；设置页不提供此面。导航可从 Live、阅读态、嵌入或悬停引用发起；在 A 的引用 B 内调用时，以 B 的目录解析路径。
+
+```ts
+const result = await sdk.views?.openDocument({
+  sourceInstanceId: 'main',
+  target: 'notes/target.md',
+  locate: { kind: 'line', line: 3 },
+})
+```
+
+`target: ''` 表示来源文档自身。定位可选 `line`（1-based 正整数）、`heading` 或 `block`（块 ID 不带 `^`），只能选择一种；标题与块定位仅用于 Markdown。Markdown 通过 Vsidian 打开或重显并保留模式，其他可读文本通过原生编辑器打开；图片/PDF 不属于本 API。
+
+结果分别报告 `opened` 与 `located`。首次行号越界不钳到末行；锚点未命中、定位未送达与文件缺失有不同失败原因。来源释放、页面重载、组件停用或换代后在途请求失效；调用方自行呈现失败，平台不重复弹通知。结构化 API 不接受普通链接尾部行号语法。签名与失败枚举见参考的 [`document-navigation`](api-reference.md#document-navigation) 条目，公开消费夹具为 `test/fixtures/addon-v02/addon/docNavEditor.ts`。
+
 ## 6. 调试
 
 调试复用 VSCode 工具，不另建开发者控制台：
@@ -299,4 +315,4 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 
 ## 9. 后续 API 扩展规格（分批实施中）
 
-2026-10-15 批次新增能力的正式设计见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。其中**声明式粘贴转换的基础链路已随 #541（T01）实施**（`paste-rules-register` 条目——宿主注册、快照广播与基础转换；正则/条件/嵌套与 Codex 消费方规则归后续切片）；其余能力以公开声明和生成参考为实际可消费性的事实源——不能因规格已定稿就调用尚未实现的接口。
+2026-10-15 批次新增能力的正式设计见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。其中声明式粘贴转换基础链路已随 #541（T01）实施，文档导航 API 已随 #543（T03）实施；正则/条件/嵌套归 T02，普通链接尾部行号语法归 T04（#534）。当前公开声明和生成参考是实际可消费能力的事实源，其他切片以各自实施记录为准。

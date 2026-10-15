@@ -87,6 +87,21 @@
 
 内部模块（`src/host/addons/` 各服务）不经由组件可达：`test/unit/addonApiSurface.test.ts` 钉住消费导入白名单与 type-only 边界。
 
+## 2026-10 扩展批次：文档导航（#543 / T03）
+
+以下故事定义见 [addon-navigation.md](addon-navigation.md)，公开接口映射为 `document-navigation`；普通链接语法 N-U08–N-U11 仍归 #534。
+
+| 故事 | 公开接入与验证 |
+| --- | --- |
+| N-U01 / N-U02 / N-U05 | 夹具经公开 `views.openDocument` 请求；`addonDocNavCases` 验证未开 Markdown、重显与标题/块/行真实落点；`addonDocNav` 单测覆盖命中/缺失 |
+| N-U03 | `addonDocNavCases` 断言原生编辑器与实际行选区 |
+| N-U04 | `addonViews` 注册表验证 embed 来源；`addonDocNavCases` 从引用 B 跳到仅 B 目录存在的文件，并用 A 来源 not-found 对照 |
+| N-U06 | `addonDocNav` 单测与集成验证 CRLF；`addonDocNav.mjs` 经生产 SDK/控制器验证阅读高亮与折叠目标重新可见 |
+| N-U07 | `addonNavApi` / `addonDocNav` 单测验证无工作区、越根、缺失、非法定位、越界与失败分类；集成补真实宿主拒绝矩阵 |
+| N-U12 | `addonViews` / `addonDocNav` / `addonDocNavDelivery` 钉住来源注销、旧代次、等待中改短、取消/超时与有界 ack；浏览器经卸载再装载验证旧回包不接入新代次 |
+
+T03 自动化运行证据随票面实施回填，人工验收仍开放。内部端口单测验证确定性时序，公开组件夹具承担实际消费；不把模拟宿主等同于真宿主证明。
+
 ## 未验项与限制（如实保留）
 
 - **跨会话持久保留**（故事 6、12、24 相关）：测试模式宿主 storage 为 in-memory（T16 已知边界，三途径实证），重启/升级后偏好与首选的读取面不可自动化——写入链路、会话内闭环与权威清单已自动验证，真实重启保留归人工（A62②）。
