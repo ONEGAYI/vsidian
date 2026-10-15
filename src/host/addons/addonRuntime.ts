@@ -301,6 +301,17 @@ export class AddonRuntime {
     }
   }
 
+  /** #543 T03 编辑器面代次校验：请求携带的代次是否仍是该组件编辑器页
+   *  当前代次（未注册/换代/故障均 false——旧代次在途导航请求在宿主侧
+   *  拒收，与 dispatchChannelRequest 的 from 校验同一硬边界） */
+  isEditorGenerationCurrent(addonId: string, generation: number): boolean {
+    const record = this.records.get(addonId)
+    if (!record || record.runState !== 'enabled') {
+      return false
+    }
+    return record.editorGeneration === generation
+  }
+
   // ---- webview 出站消息（面板桥转发） ----
 
   handleOutbound(message: AddonPageOutbound): void {

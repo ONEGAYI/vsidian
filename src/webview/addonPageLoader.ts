@@ -369,6 +369,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             buildViewHandleFor(loadRecord.addonId, loadRecord.generation, instanceId),
           onCreated: (callback) => env.addonViews!.onCreated(callback),
           onDisposed: (callback) => env.addonViews!.onDisposed(callback),
+          // #543 T03 文档打开与定位：来源身份（组件 ID + 代次）在此注入，
+          // 组件请求只携带来源实例/目标/定位描述——伪来源结构上不可表达；
+          // 已终结代次的迟到调用拒绝 view-disposed（与 applyEdits 同口径）
+          openDocument: (request) => {
+            if (!isLoadActive(loadRecord)) {
+              return Promise.resolve({ ok: false, reason: 'view-disposed' as const, opened: false })
+            }
+            return env.addonViews!.openDocumentOf({
+              addonId: loadRecord.addonId,
+              generation: loadRecord.generation,
+              instanceId: request?.sourceInstanceId,
+              request,
+            })
+          },
         }
       : undefined
     // #410 标题折叠实验入口（仅编辑器页 + 视图注册表在场提供；对齐 cm6
@@ -640,6 +654,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     // T07（#356）行为注册整组注销（opId 分配器随卸载解绑——释放后该组件
     // 的行为不再有可注入来源，提交路径结构上不可用）
     env.addonBehaviors?.unregisterAddon(loadRecord.addonId)
+    // #543 T03 导航在途请求整代次终结（旧请求不抢回定位——迟到回包经
+    // reqId 配对拒收）
+    env.addonViews?.releaseDocNavOf(loadRecord.addonId, loadRecord.generation)
     // #476 行为禁用态订阅整组件回收（查询不受影响——迟到调用返回最后
     // 已知快照；订阅不滞留进已脱离 active 的旧代次闭包）
     env.addonBehaviorEnabledState?.releaseAddon(loadRecord.addonId)

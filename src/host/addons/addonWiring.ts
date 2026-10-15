@@ -85,6 +85,9 @@ export interface AddonEditorBridge {
   /** #359 T10 活动面板投递注入（provider 装配后调用：宿主组件命令执行
    *  转发 addonCommand.execute 到活动 Vsidian 编辑器面板；返回是否投递） */
   setActivePanelForwarder(fn: (commandId: string) => boolean): void
+  /** #543 T03 编辑器面代次校验（导航请求的代次硬边界：旧代次在途请求
+   *  拒收 view-disposed；未接入附加组件时恒 false） */
+  isEditorGenerationCurrent(addonId: string, generation: number): boolean
 }
 
 /** 设置页面板接线（settingsPage 消费） */
@@ -945,6 +948,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     setActivePanelForwarder: (fn) => {
       activePanelForwarder = fn
     },
+    // #543 T03：导航请求的代次校验（runtime 硬边界——旧代次拒收）
+    isEditorGenerationCurrent: (addonId, generation) => runtime.isEditorGenerationCurrent(addonId, generation),
   }
 
   // ---- 设置页面板桥（#351；单面板，隐藏即销毁重开重载） ----

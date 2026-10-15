@@ -110,6 +110,16 @@ function harness(options: { store?: ReturnType<typeof memoryStore>; installDirs?
 }
 
 const EDITOR_ENTRY = { entry: 'dist/editor.js', css: ['dist/editor.css'], resources: ['dist/assets'] }
+
+it('#543 导航代次只在组件启用且相同编辑器代次时有效', () => {
+  const h = harness()
+  h.register({ enable(ctx) { ctx.pages.registerEditor(EDITOR_ENTRY) } })
+  const generation = h.runtime.desiredEditorLoads()[0]!.generation
+  expect(h.runtime.isEditorGenerationCurrent('fixture.demo', generation)).toBe(true)
+  expect(h.runtime.isEditorGenerationCurrent('fixture.demo', generation + 1)).toBe(false)
+  h.runtime.setUserEnabled('fixture.demo', false)
+  expect(h.runtime.isEditorGenerationCurrent('fixture.demo', generation)).toBe(false)
+})
 const SETTINGS_ENTRY = { entry: 'dist/settings.js', css: ['dist/settings.css'], resources: ['dist/assets'] }
 
 describe('T02 运行生命周期：注册与两阶段装配', () => {

@@ -8,6 +8,7 @@ vsidian/
 └── src/ # 扩展源码
     ├── extension.ts # 扩展激活入口
     ├── host/        # 宿主端实现
+    │   ├── addonDocNav.ts                # 附加组件文档导航执行
     │   ├── addonHistoryCoordinator.ts    # 附加组件历史协调器
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
     │   ├── addons/                       # 附加组件宿主端实现
@@ -83,6 +84,7 @@ vsidian/
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
     │   ├── addonHostSettingsApi.ts # 宿主设置读取面白名单事实源
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
+    │   ├── addonNavApi.ts          # 文档导航公开类型
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
     │   ├── addonRenderers.ts       # 渲染提供者共享契约
     │   ├── addonSettings.ts        # 复杂设置共享模型

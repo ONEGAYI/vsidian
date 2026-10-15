@@ -22,6 +22,7 @@ import {
   type AddonStatusKind,
 } from '../../src/shared/addonIdentity'
 import type { AddonApiEntry, AddonApiGroup, AddonApiReleaseRecord } from '../../src/shared/addonApiCatalog'
+import type { AddonDocNavRequest, AddonDocNavResult, AddonDocNavLocate, AddonDocNavRejection } from '../../src/shared/addonNavApi'
 import type {
   AddonChannelOutcome,
   AddonCm6Runtime,
@@ -210,7 +211,10 @@ export type SdkSurface = Pick<
 >
 
 /** views 面（枚举/获取/创建/销毁订阅） */
-export type ViewsSurface = Pick<AddonViewsFacet, 'list' | 'get' | 'onCreated' | 'onDisposed'>
+export type ViewsSurface = Pick<AddonViewsFacet, 'list' | 'get' | 'onCreated' | 'onDisposed' | 'openDocument'>
+export type DocumentNavigationShapes = { request: AddonDocNavRequest; result: AddonDocNavResult; locate: AddonDocNavLocate; rejection: AddonDocNavRejection }
+export const documentNavigationSample: AddonDocNavRequest = { sourceInstanceId: 'main', target: 'notes/target.md', locate: { kind: 'line', line: 3 } }
+export const documentNavigationConsume = (views: AddonViewsFacet, request: AddonDocNavRequest): Promise<AddonDocNavResult> => views.openDocument(request)
 /** 实验入口 cm6 运行时（state/view 整命名空间 + #406 language 语法树子集） */
 export type Cm6RuntimeSurface = Pick<AddonCm6Runtime, 'state' | 'view' | 'language'>
 export type Cm6LanguageSurface = Pick<

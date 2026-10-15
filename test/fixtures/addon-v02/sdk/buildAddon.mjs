@@ -153,6 +153,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 'host-settings-addon', 'dist', 'editor.js'),
       note: 'host-settings-addon 编辑器页',
     },
+    // #543 T03 文档导航夹具组件（编辑器页——views.openDocument 的公开
+    // API 消费；短轮询驱动与 hostSettings 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'docNavEditor.ts'),
+      outfile: path.join(buildRoot, 'docnav-addon', 'dist', 'editor.js'),
+      note: 'docnav-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -255,6 +262,12 @@ export async function buildTestAddons({ log = console.log } = {}) {
     hostSettingsAddon: {
       installDir: path.join(buildRoot, 'host-settings-addon'),
       distDir: path.join(buildRoot, 'host-settings-addon', 'dist'),
+    },
+    // #543 T03：文档导航夹具组件布局（浏览器套件经本地 http 服务装载；
+    // 集成经 runTest.mjs 拷入 addonFixtures/addon-docnav）
+    docNavAddon: {
+      installDir: path.join(buildRoot, 'docnav-addon'),
+      distDir: path.join(buildRoot, 'docnav-addon', 'dist'),
     },
     outsideDir,
   }

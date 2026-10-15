@@ -19,6 +19,7 @@ const VALUE_IMPORT_ALLOWED = new Set([
   'src/shared/addonApiCatalog',
   'src/shared/addonPage',
   'src/shared/addonEditApi',
+  'src/shared/addonNavApi',
   'src/shared/addonFoldApi',
   'src/shared/addonSyntaxApi',
   'src/shared/addonHostSettingsApi',

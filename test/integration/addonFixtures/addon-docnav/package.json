@@ -1,0 +1,22 @@
+{
+  "name": "addon-docnav",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T03 Document Navigation API)",
+  "description": "Integration fixture: Vsidian add-on consuming the public views.openDocument API on the editor page (T03, #543).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-docnav.stats", "title": "Fixture docnav: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-docnav.queue", "title": "Fixture docnav: queue a page command" },
+      { "command": "vsidian-test-fixture.addon-docnav.collect", "title": "Fixture docnav: collect page results" },
+      { "command": "vsidian-test-fixture.addon-docnav.reset", "title": "Fixture docnav: reset queues" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

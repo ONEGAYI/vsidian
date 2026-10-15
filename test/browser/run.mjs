@@ -108,6 +108,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'addonHotSwitch',
   // T08（#357）：行为冲突管理（注册行为调序/逐项开关——真实键盘 + 绘制层）
   'addonT08BehaviorsManage',
+  // #543 T03：附加组件文档导航（views.openDocument 公开 SDK 消费——请求
+  // 形状/回执闭环/live 光标真实落点/阅读 flash 绘制层/折叠隐藏区展开/
+  // 迟到回包代次拒收）
+  'addonDocNav',
   // #474：行为管理分页与积木筛选（分页控件/积木键盘构建/发光选中/toast
   // 倒计时条——真实键盘 + 绘制层 + 视图持久往返）紧随 T08（同行为族）
   'behaviorManagePagination',
