@@ -11925,21 +11925,23 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await new Promise((r) => setTimeout(r, 400))
   }],
 
-  ['rename 引用改写：move 出链按新目录重算与附件扩展名保持（#199）', async () => {
+  ['rename 引用改写：move 出链短名保留与相对重算（#556 T4）', async () => {
     await waitRenameIndexReady()
     // 目标子目录先建（renameFile 不自动创建父目录）
     await vscode.workspace.fs.createDirectory(wsUri('notes/deep'))
     try {
-      // move：被移动 Markdown 自身的相对出链按新目录重算
+      // move：被移动 Markdown 自身的出链——#556 T4 起短名出链保留（did
+      // 通道 lookup 新世界唯一命中「改名目标.md」→ 不改写），明确相对
+      // 出链按新目录重算
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('rename-moved.md'), wsUri('notes/deep/moved-2.md'), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), 'move 应成功应用')
-      const movedText = await poll('被移动文档出链重算', async () => {
+      const movedText = await poll('被移动文档出链改写', async () => {
         const text = (await vscode.workspace.openTextDocument(wsUri('notes/deep/moved-2.md'))).getText()
-        return text.includes('[[../../改名目标]]') && text.includes('[子文档](../rename-note.md)') ? text : undefined
+        return text.includes('[[改名目标]]') && text.includes('[子文档](../rename-note.md)') ? text : undefined
       })
-      assert(movedText.includes('见 [[../../改名目标]] 与 [子文档](../rename-note.md)。'),
-        `出链应按 notes/deep 重算（实际 ${movedText}` + '）')
+      assert(movedText.includes('见 [[改名目标]] 与 [子文档](../rename-note.md)。'),
+        `短名出链应保留、相对出链按 notes/deep 重算（实际 ${movedText}` + '）')
       // 等索引增量把 move 后的盘文本重扫（did 通道 + watcher 双保险）
       await new Promise((r) => setTimeout(r, 1600))
       // 附件 rename：显式扩展名保持、不补 .md；引用甲的 image 边改写
@@ -12179,7 +12181,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
   }],
 
-  ['rename 引用改写：跨根移动不改写并明确报告（#199）', async () => {
+  ['rename 引用改写：跨根移动改写为明确绝对路径（#556 T4）', async () => {
     await waitRenameIndexReady()
     const secondDir = `${wsDir}-rename-second`
     await mkdir(secondDir, { recursive: true })
@@ -12248,23 +12250,29 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('改名目标.md'), vscode.Uri.file(`${secondDir}/改名目标.md`), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), '跨根 rename 应成功应用')
-      // 引用者文本原样（不生成 ../.. 跨根相对引用）。断言语义是磁盘落盘
-      // 文本：直读盘（fs.readFile），不经 openTextDocument——前序 rename
-      // 用例改写过的文档缓存 reconcile 异步，单宿主全量下（多边型/漂移与
-      // 本用例同宿主先后跑）缓存里还是改写后的旧文本，会误报为跨根改写
+      // #556 T4：越出所属根 → 引用者改写为明确绝对路径（短名省略/显式
+      // 扩展名各自保持），不再跳过。断言语义是磁盘落盘文本：直读盘
+      // （fs.readFile），不经 openTextDocument——前序 rename 用例改写过的
+      // 文档缓存 reconcile 异步，单宿主全量下（多边型/漂移与本用例同宿主
+      // 先后跑）缓存里还是改写前的旧文本，会误报为未改写
       const readDisk = (rel: string) => Promise.resolve(vscode.workspace.fs.readFile(wsUri(rel)))
         .then((data) => Buffer.from(data).toString('utf8'))
+      // 绝对形态文本为 `/` 分隔（Windows 盘符形态，ADR-0018）
+      const secondTarget = (name: string) => `${secondDir}/${name}`.replace(/\\/g, '/')
       const textA = await readDisk('rename-ref-a.md')
       const textB = await readDisk('notes/rename-ref-b.md')
-      assert(textA.includes('[同目标](./改名目标.md)') && !textA.includes('rename-second'),
-        `跨根不得改写引用甲（实际 ${textA}` + '）')
-      assert(textB.includes('[[../改名目标]]'), `跨根不得改写引用乙（实际 ${textB}` + '）')
-      // 反馈：全部跳过（cross-root）、零更新
-      await poll('跨根跳过上报', async () => {
+      assert(
+        textA.includes(`[[${secondTarget('改名目标')}]]`) &&
+        textA.includes(`[同目标](${secondTarget('改名目标.md')})`) &&
+        textA.includes(`[[${secondTarget('改名目标')}#深处小节|别名]]`),
+        `跨根应改写引用甲为绝对路径（实际 ${textA}` + '）',
+      )
+      assert(textB.includes(`[[${secondTarget('改名目标')}]]`), `跨根应改写引用乙为绝对路径（实际 ${textB}` + '）')
+      // 反馈：全部更新（跨根不再跳过）、零跳过项
+      await poll('跨根改写上报', async () => {
         const last = await lastRenameRefLog()
-        return last && last.plannedEdits === 0 && last.skipped.length >= 2 &&
-          last.skipped.every((s) => s.reason === 'cross-root') &&
-          last.notice === 'host.renameRefsSkippedAll' ? last : undefined
+        return last && last.plannedEdits >= 4 && last.skipped.length === 0 &&
+          last.notice === 'host.renameRefsUpdated' ? last : undefined
       }).catch(async (err) => {
         const log = await vscode.commands.executeCommand('onegayi.vsidian._test.getRenameRefLog')
         throw new Error(`${(err as Error).message}；log实况=${JSON.stringify(log)}`)
@@ -12272,6 +12280,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } finally {
       // 现场还原：外部 fs 通道移回（不触发 will），按身份移除第二根，等索引稳定
       await Promise.resolve(restoreRename(vscode.Uri.file(`${secondDir}/改名目标.md`), wsUri('改名目标.md'))).catch(() => {})
+      // 引用者文本已被 will 通道改写为绝对路径（T4）：外部 fs 通道写回起始
+      // 文本（watcher 增量重扫归位基线，防止绝对路径形态泄漏给后续 rename
+      // 用例的索引边）
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-ref-b.md'), Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
       // 还原判据须含文件级终态：只查索引就绪时，restoreRename 失败被
       // catch 吞掉会静默放过（改名目标.md 仍滞留 secondDir），随后
       // rm(secondDir) 连唯一副本一起删掉、泄漏给后续用例——本用例 FAIL

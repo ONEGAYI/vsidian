@@ -275,7 +275,8 @@ describe('vaultRename：被移动文档自身的出链重算', () => {
 })
 
 describe('vaultRename：跳过项与保护', () => {
-  it('跨根移动：不生成跨根相对引用，引用者与出链均跳过并报告', () => {
+  it('跨根移动：短名原文改写为明确绝对路径（不再跳过，省略扩展名维持省略）', () => {
+    // #556 T4：目标越出来源根 → 明确绝对路径保留身份（替代 cross-root 跳过）
     const textRef = '见 [[target]]。\n'
     const textMoved = '见 [[other]]。\n'
     const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: 'C:/other-root/target.md' }]
@@ -283,20 +284,18 @@ describe('vaultRename：跳过项与保护', () => {
       refDoc(`${WIN_ROOT}/ref.md`, textRef, [
         edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
       ]),
-      // 被移动文档自身移出根（无根空间）：其出链无法保持根内引用
+      // 被移动文档自身移出根（新根空间）：其出链对旧根目标的相对路径越界 → 绝对
       { fsPath: 'C:/other-root/target.md', text: textMoved, edgeRootFsPath: WIN_ROOT, edges: [
         edge({ target: 'other', resolved: 'other.md', kind: 'wikilink', start: 2, end: 2 + '[[other]]'.length }),
       ] },
     ]
     const result = planVaultRenameRewrites(winCtx(moves, [WIN_ROOT, 'C:/other-root']), docs)
-    expect(result.docs).toEqual([])
-    expect(result.skipped).toHaveLength(2)
-    expect(result.skipped.every((s) => s.reason === 'cross-root')).toBe(true)
-    // 原文未变（计划为空即无改写）
-    expect(applyEdits(textRef, [])).toBe(textRef)
+    expect(result.skipped).toEqual([]) // 跨根不再跳过
+    expect(applyEdits(textRef, result.docs[0]!.edits)).toBe('见 [[C:/other-root/target]]。\n')
+    expect(applyEdits(textMoved, result.docs[1]!.edits)).toBe('见 [[C:/vault/other]]。\n')
   })
 
-  it('移出全部根（工作区外）：出链全部跳过', () => {
+  it('移出全部根（工作区外）：出链同样改写为绝对路径（无根不等于无解）', () => {
     const text = '见 [[other]]。\n'
     const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: 'D:/outside/target.md' }]
     const docs: RenameDocInput[] = [{
@@ -306,8 +305,8 @@ describe('vaultRename：跳过项与保护', () => {
       edges: [edge({ target: 'other', resolved: 'other.md', kind: 'wikilink', start: 2, end: 2 + '[[other]]'.length })],
     }]
     const result = planVaultRenameRewrites(winCtx(moves), docs)
-    expect(result.docs).toEqual([])
-    expect(result.skipped[0]!.reason).toBe('cross-root')
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[C:/vault/other]]。\n')
   })
 
   it('区间漂移：当前文本与索引基线不一致时整文档跳过（edge-stale）', () => {
@@ -749,5 +748,251 @@ describe('#248 表格格内嵌入边的改写（转义管道保真）', () => {
     // resolved=null 不构成 rename 映射命中：无编辑（断链边按原文保留）
     const result = planVaultRenameRewrites(winCtx(moves), docs)
     expect(result.docs[0]?.edits ?? []).toHaveLength(0)
+  })
+})
+
+// ---- #556 T4：短名保留决策与三类链接形态更新 ----
+
+/** 短名唯一性查询端口 fake（host 侧 = vaultIndex.shortnameLookup）：
+ *  byBasename 为旧世界（will 时刻）catalog 快照——完整 basename → 绝对身份
+ *  候选；notReady=true 模拟索引未就绪（null） */
+function shortnamePort(o: {
+  byBasename?: Record<string, string[]>
+  complete?: boolean
+  notReady?: boolean
+}): NonNullable<RenamePlanContext['shortnameLookup']> {
+  return (_sourceFsPath, basename) => {
+    if (o.notReady) {
+      return null
+    }
+    return { candidates: o.byBasename?.[basename] ?? [], complete: o.complete ?? true }
+  }
+}
+
+describe('vaultRename：#556 T4 短名保留与三形态决策', () => {
+  it('纯移动（不改名）：原短名在新状态仍唯一命中同一目标 → 保留不改', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: `${WIN_ROOT}/target.md`, kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    // will 时刻旧世界 catalog：target.md 仍在根（端口返回旧路径，规划器按映射校正）
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/target.md`] } }) },
+      docs,
+    )
+    expect(result.docs).toEqual([]) // 短名保留：零编辑、零跳过
+    expect(result.skipped).toEqual([])
+  })
+
+  it('纯移动（did 新世界视角）：端口直接返回新路径同样保留（校正 no-op）', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: `${WIN_ROOT}/target.md`, kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/notes/target.md`] } }) },
+      docs,
+    )
+    expect(result.docs).toEqual([])
+  })
+
+  it('改名后新短名唯一 → 更新短名（省略与显式 .md 两形态各自保持）', () => {
+    const text = '见 [[target]] 与 [[target.md]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: text.indexOf('[[target]]'), end: text.indexOf('[[target]]') + '[[target]]'.length }),
+      edge({ target: 'target.md', resolved: 'target.md', kind: 'wikilink', start: text.indexOf('[[target.md]]'), end: text.indexOf('[[target.md]]') + '[[target.md]]'.length }),
+    ])]
+    // 旧世界：target.md 在根（B2 校正后同名集为空——改名退出）；renamed 尚不存在
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/target.md`] } }) },
+      docs,
+    )
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[renamed]] 与 [[renamed.md]]。\n')
+  })
+
+  it('新短名与根内既有同名冲突 → 降级为明确相对路径', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/dup.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    // 旧世界已有 other/dup.md：新短名 dup 二候选 → 不唯一 → 相对路径
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/target.md`], 'dup.md': [`${WIN_ROOT}/other/dup.md`] } }) },
+      docs,
+    )
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[notes/dup]]。\n')
+  })
+
+  it('同批移入同名文件使短名失唯一（selfMove 出链视角）→ 相对降级', () => {
+    // ref 移入 sub/ 的同批还把外部 dup.md 移进 notes/：ref 的 [[dup]] 原先
+    // 唯一命中根内 dup.md，新状态二候选 → 无法安全保留 → 相对路径
+    const text = '见 [[dup]]。\n'
+    const moves = [
+      { oldFsPath: `${WIN_ROOT}/ref.md`, newFsPath: `${WIN_ROOT}/sub/ref.md` },
+      { oldFsPath: 'C:/external/dup.md', newFsPath: `${WIN_ROOT}/notes/dup.md` },
+    ]
+    const docs: RenameDocInput[] = [{
+      fsPath: `${WIN_ROOT}/sub/ref.md`,
+      text,
+      edgeRootFsPath: WIN_ROOT,
+      edges: [edge({ target: 'dup', resolved: `${WIN_ROOT}/dup.md`, kind: 'wikilink', start: 2, end: 2 + '[[dup]]'.length })],
+    }]
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'dup.md': [`${WIN_ROOT}/dup.md`] } }) },
+      docs,
+    )
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[../dup]]。\n')
+  })
+
+  it('跨根移动：短名无法保留（同名集被移出根域剔除）→ 明确绝对路径', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: 'C:/other-root/target.md' }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves, [WIN_ROOT, 'C:/other-root']), shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/target.md`] } }) },
+      docs,
+    )
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[C:/other-root/target]]。\n')
+  })
+
+  it('清单不完整（complete=false）：唯一候选不声明唯一 → 相对降级', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/target.md`] }, complete: false }) },
+      docs,
+    )
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[notes/target]]。\n')
+  })
+
+  it('端口未就绪（null）：不注入短名语义 → 退相对路径（不猜目标）', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ notReady: true }) },
+      docs,
+    )
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[notes/target]]。\n')
+  })
+
+  it('不注入端口：短名边走相对重算（上游兼容，行为与既有语义一致）', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[notes/target]]。\n')
+  })
+
+  it('目标移入引用者同目录：同目录相对候选直击 → 保留（不依赖端口）', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/notes/target.md`, newFsPath: `${WIN_ROOT}/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: `${WIN_ROOT}/notes/target.md`, kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs) // 无端口
+    expect(result.docs).toEqual([])
+    expect(result.skipped).toEqual([])
+  })
+
+  it('selfMove 出链短名保留：文档移动后其未动目标的短名出链不再批量转相对', () => {
+    const text = '见 [[other]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/sub/renamed.md` }]
+    const docs: RenameDocInput[] = [{
+      fsPath: `${WIN_ROOT}/sub/renamed.md`,
+      text,
+      edgeRootFsPath: WIN_ROOT,
+      edges: [edge({ target: 'other', resolved: `${WIN_ROOT}/other.md`, kind: 'wikilink', start: 2, end: 2 + '[[other]]'.length })],
+    }]
+    const keep = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'other.md': [`${WIN_ROOT}/other.md`] } }) },
+      docs,
+    )
+    expect(keep.docs).toEqual([]) // 注入端口：短名保留（对照下方无端口行为）
+
+    const legacy = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, legacy.docs[0]!.edits)).toBe('见 [[../other]]。\n') // 无端口：现状相对重算
+  })
+
+  it('绝对路径原文随目标更名更新绝对形态（省略/显式扩展名各自保持）', () => {
+    const text = '见 [[C:/vault/target]] 与 [[C:/vault/target.md]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = (needle: string): { start: number; end: number } => {
+      const start = text.indexOf(needle)
+      return { start, end: start + needle.length }
+    }
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'C:/vault/target', resolved: `${WIN_ROOT}/target.md`, kind: 'wikilink', ...at('[[C:/vault/target]]') }),
+      edge({ target: 'C:/vault/target.md', resolved: `${WIN_ROOT}/target.md`, kind: 'wikilink', ...at('[[C:/vault/target.md]]') }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[C:/vault/renamed]] 与 [[C:/vault/renamed.md]]。\n')
+  })
+
+  it('mdlink 绝对路径改写：字面风格直写、含空格时保持 <> 包裹', () => {
+    const text = '[x](<C:/vault/my note.md>)\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/my note.md`, newFsPath: `${WIN_ROOT}/your note.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'C:/vault/my note.md', resolved: `${WIN_ROOT}/my note.md`, kind: 'mdlink', start: 0, end: text.length - 1 }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('[x](<C:/vault/your note.md>)\n')
+  })
+
+  it('POSIX：跨根绝对形态原样（无盘符转换）', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: '/vault/target.md', newFsPath: '/other/target.md' }]
+    const docs = [refDoc('/vault/ref.md', text, [
+      edge({ target: 'target', resolved: '/vault/target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ], '/vault')]
+    const result = planVaultRenameRewrites(
+      { rootFsPaths: ['/vault', '/other'], isWindowsHost: false, moves },
+      docs,
+    )
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[/other/target]]。\n')
+  })
+
+  it('混合形态批次：同一文档内短名保留（零编辑）与相对、绝对改写并存', () => {
+    // 三条边：[[keep]]（未动目标，selfMove 出链短名，保留）、[rel](target.md)
+    // （明确相对路径仍有效 → 保持相对并按新目录重算）、绝对路径随更名
+    const text = 'A [[keep]] B [rel](target.md) C [[C:/vault/target.md]]\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/moved/target.md` }]
+    const at = (needle: string): { start: number; end: number } => {
+      const start = text.indexOf(needle)
+      return { start, end: start + needle.length }
+    }
+    const docs: RenameDocInput[] = [{
+      fsPath: `${WIN_ROOT}/moved/renamed-self.md`, // selfMove：全部出链参与决策
+      text,
+      edgeRootFsPath: WIN_ROOT,
+      edges: [
+        edge({ target: 'keep', resolved: `${WIN_ROOT}/keep.md`, kind: 'wikilink', ...at('[[keep]]') }),
+        edge({ target: 'target.md', resolved: `${WIN_ROOT}/target.md`, kind: 'mdlink', ...at('[rel](target.md)') }),
+        edge({ target: 'C:/vault/target.md', resolved: `${WIN_ROOT}/target.md`, kind: 'wikilink', ...at('[[C:/vault/target.md]]') }),
+      ],
+    }]
+    const result = planVaultRenameRewrites(
+      { ...winCtx(moves), shortnameLookup: shortnamePort({ byBasename: { 'keep.md': [`${WIN_ROOT}/keep.md`] } }) },
+      docs,
+    )
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits))
+      .toBe('A [[keep]] B [rel](target.md) C [[C:/vault/moved/target.md]]\n')
   })
 })

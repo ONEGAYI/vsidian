@@ -46,6 +46,7 @@ import {
   renameNoticeKeyOf,
   type RenameDocInput,
   type RenameMoveEntry,
+  type RenameShortnameLookupPort,
 } from '../shared/vaultRename'
 import { normalizeSeparators, type VaultIndexService } from './vaultIndexService'
 import type { VaultEdge } from '../shared/vaultIndexModel'
@@ -60,7 +61,8 @@ export interface RenameRefLogEntry {
    *  在 did 后独立应用） */
   plannedEdits: number
   plannedFiles: number
-  /** 跳过项（cross-root / edge-stale，含 fsPath） */
+  /** 跳过项（edge-stale，含 fsPath；#556 T4 起 cross-root 越界改为绝对
+   *  路径改写、不再是跳过原因） */
   skipped: Array<{ fsPath: string; reason: string }>
   /** 索引未就绪而被整体放弃的移动数（目录按目录计、文件按条计） */
   indexNotReady: number
@@ -393,7 +395,10 @@ async function buildWillRenameEdit(
     const hostTexts = new Map<string, string>(
       [...docsByKey.values()].map((d) => [d.fsPath, d.hostText]),
     )
-    const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves }, docs)
+    const plan = planVaultRenameRewrites(
+      { rootFsPaths, isWindowsHost, moves, shortnameLookup: renameShortnamePortOf(vaultIndex) },
+      docs,
+    )
     for (const docPlan of plan.docs) {
       fillEdit(edit, docPlan, hostTexts)
     }
@@ -522,7 +527,10 @@ async function applyAfterRenameBatch(
         didRewrittenDocs.push(item.newFsPath)
       }
       if (docs.length > 0) {
-        const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
+        const plan = planVaultRenameRewrites(
+          { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex) },
+          docs,
+        )
         if (plan.docs.length > 0) {
           const edit = new vscode.WorkspaceEdit()
           for (const docPlan of plan.docs) {
@@ -550,7 +558,10 @@ async function applyAfterRenameBatch(
       const hostTexts = new Map<string, string>(
         [...dirtyDocsByKey.values()].map((d) => [d.fsPath, d.hostText]),
       )
-      const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
+      const plan = planVaultRenameRewrites(
+        { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex) },
+        docs,
+      )
       if (plan.docs.length > 0) {
         const dirtyEdit = new vscode.WorkspaceEdit()
         for (const docPlan of plan.docs) {
@@ -641,9 +652,19 @@ function isTabHeld(fsPath: string): boolean {
   return false
 }
 
-/** 跳过原因的文案键（通知详情用） */
+/** #556 T4 短名唯一性端口（R1/R6：与跳转/悬停共用 vaultIndex.shortnameLookup
+ *  的 catalog 倒排查询，零 IO）：will 阶段返回旧世界 catalog——规划器按
+ *  moves 映射校正为新世界同名集；did 阶段（refreshRenamedBatch 之后）已
+ *  是新世界，校正自然 no-op。未就绪返回 null → 不注入短名语义（退相对
+ *  路径，不猜目标）。 */
+function renameShortnamePortOf(vaultIndex: VaultIndexService): RenameShortnameLookupPort {
+  return (sourceFsPath, basename) => vaultIndex.shortnameLookup(sourceFsPath, basename)
+}
+
+/** 跳过原因的文案键（通知详情用；#556 T4 起仅剩 edge-stale 一种） */
 function skipReasonKeyOf(reason: string): string {
-  return reason === 'cross-root' ? 'host.renameRefsSkipCrossRoot' : 'host.renameRefsSkipEdgeStale'
+  void reason
+  return 'host.renameRefsSkipEdgeStale'
 }
 
 function notifyOf(log: RenameRefLogEntry): void {

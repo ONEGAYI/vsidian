@@ -412,15 +412,17 @@ export const en = {
   'host.searchRevealHint': 'Opened from search results? Jump to the selected match here.',
   'host.searchRevealHintLocate': 'Locate',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
+  // #556 T4: targets outside the source root are now rewritten to explicit
+  // absolute paths (no longer a skip reason); the only skip reason left is
+  // edge-stale (content changed)
   'host.renameRefsUpdated': 'Renamed "{file}" and updated {count} reference(s) in {files} file(s).',
-  'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (out of root or content changed) — not fully updated.',
-  'host.renameRefsSkippedAll': 'Renamed "{file}"; references were NOT updated: {skipped} skipped (out of root or content changed).',
+  'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (content changed) — not fully updated.',
+  'host.renameRefsSkippedAll': 'Renamed "{file}"; references were NOT updated: {skipped} skipped (content changed).',
   'host.renameRefsIndexNotReady': 'Renamed "{file}", but the reference index is not ready yet, so references were left unchanged (rebuild the index later from the settings page if needed).',
   // ---- #200 batch/folder moves: skipped-item detail line and reasons ----
   'host.renameRefsSkippedDetail': 'Not updated: {items}',
   'host.renameRefsSkipItem': '{file} ({reason})',
   'host.renameRefsSkipMore': ' … {count}',
-  'host.renameRefsSkipCrossRoot': 'outside its root',
   'host.renameRefsSkipEdgeStale': 'content changed',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',

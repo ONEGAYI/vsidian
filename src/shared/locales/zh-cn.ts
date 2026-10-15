@@ -388,15 +388,16 @@ export const zhCn: Record<MessageKey, string> = {
   'host.searchRevealHint': '从搜索结果打开？点此定位到选中的匹配处。',
   'host.searchRevealHintLocate': '定位',
   // ---- #199 更名/移动引用自动更新（宿主通知；批量操作合并提示）----
+  // #556 T4：越出所属根改为明确绝对路径改写（不再是跳过原因），跳过仅余
+  // 内容变化（edge-stale）一类
   'host.renameRefsUpdated': '已更名「{file}」并更新 {count} 处引用（{files} 个文件）。',
-  'host.renameRefsPartiallyUpdated': '已更名「{file}」并更新 {count} 处引用；{skipped} 处因越界或内容变化跳过，未全部更新。',
-  'host.renameRefsSkippedAll': '已更名「{file}」，引用未更新：{skipped} 处因越界或内容变化被跳过。',
+  'host.renameRefsPartiallyUpdated': '已更名「{file}」并更新 {count} 处引用；{skipped} 处因内容变化跳过，未全部更新。',
+  'host.renameRefsSkippedAll': '已更名「{file}」，引用未更新：{skipped} 处因内容变化被跳过。',
   'host.renameRefsIndexNotReady': '已更名「{file}」，但引用索引尚未就绪，本次未更新引用（可稍后在设置页重建索引后手动修正）。',
   // ---- #200 目录/批量移动：未更新项详情行与跳过原因 ----
   'host.renameRefsSkippedDetail': '未更新项：{items}',
   'host.renameRefsSkipItem': '{file}（{reason}）',
   'host.renameRefsSkipMore': ' … {count}',
-  'host.renameRefsSkipCrossRoot': '越出所属根',
   'host.renameRefsSkipEdgeStale': '内容已变化',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
