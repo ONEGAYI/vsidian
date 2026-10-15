@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "8e13e78fefe87ca6b7cc7325aa92e887c95c1ba2",
-      "ref": "8e13e78f",
+      "sha": "0f63da6c70139c6963e3db70b4f3c56fa069c692",
+      "ref": "0f63da6c70139c6963e3db70b4f3c56fa069c692",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -277,6 +277,42 @@
         "test/browser/addonPageSdk.mjs"
       ],
       "introduced": "#349（V02 验证）、#351（T02 生产化）"
+    },
+    {
+      "id": "document-navigation",
+      "group": "page-sdk",
+      "title": "文档打开与定位（views.openDocument）",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "editor-page"
+      ],
+      "purpose": "组件提交来源实例、目标路径与互斥定位，由宿主打开 Markdown 或原生文本并报告实际打开与定位结果；不提供任意文件读取面。",
+      "semantics": {
+        "modes": "仅编辑器页，Live 与阅读态均可调用；来源可为 main/embed/hover 的有效视图，设置页不提供。",
+        "coordinates": "目标以来源视图的目标文档目录解析；行号为 1-based 正整数，标题与块 ID 互斥。空 target 为来源文档自身；首次越界不钳末行。CRLF 经 NewlineCoordinator 换算为 LF 行首。",
+        "lifecycle": "组件身份与代次由 SDK 注入，来源必须仍在当前页面注册表；来源释放、页面重载、代次结束和超时终结在途请求，拒收迟到回包与定位。Markdown 经既有 view.locate/ack 确认，等待面板就绪后重读权威文本。",
+        "errors": "成功区分 opened 与 located；失败携带 opened 与 invalid-request/no-workspace/escape/not-found/view-disposed/anchor-not-found/out-of-bounds/delivery-failed/error 原因。普通拒绝不触发组件故障，API 不重复弹通知。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonNavApi.ts",
+          "symbols": [
+            "AddonDocNavLocate",
+            "AddonDocNavRequest",
+            "AddonDocNavRejection",
+            "AddonDocNavResult"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonNavApi.test.ts",
+        "test/unit/addonDocNav.test.ts",
+        "test/unit/addonDocNavDelivery.test.ts",
+        "test/unit/addonViews.test.ts",
+        "test/browser/addonDocNav.mjs",
+        "test/integration/suite/addonDocNavCases.ts"
+      ],
+      "introduced": "#543（扩展批次 T03）"
     },
     {
       "id": "views-editor",
@@ -1011,8 +1047,14 @@
       "defineAddonPage": "/** 组件页面入口登记：IIFE 执行时调用，装载器核对身份后注入 SDK 调工厂 */\nexport function defineAddonPage(\n  addonId: string,\n  factory: (sdk: VsidianAddonPageSdk) => void,\n): void",
       "currentSdk": "/** 模块作用域取当前 SDK（装载器调用工厂前注入；仅工厂执行期可靠） */\nexport function currentSdk(): VsidianAddonPageSdk | undefined"
     },
+    "src/shared/addonNavApi.ts": {
+      "AddonDocNavLocate": "/** 定位描述（互斥三形态；缺省 = 无定位仅打开）。\n *  行号为 1-based 正整数；标题为不含 `#` 前缀的文本（与双链 [[目标#标题]]\n *  解析后形态一致）；块 ID 不含 `^` 前缀（与 [[目标#^id]] 解析后形态一致）。 */\nexport type AddonDocNavLocate =\n  | { readonly kind: 'line'; readonly line: number }\n  | { readonly kind: 'heading'; readonly heading: string }\n  | { readonly kind: 'block'; readonly blockId: string }",
+      "AddonDocNavRequest": "/** 文档打开与定位请求（views.openDocument 的入参形状；来源身份由 SDK 注入）。\n *  target 为相对路径（按来源实例目标文档目录解析，越出所属根拦截）；\n *  空串 = 同文件锚点（目标即来源文档，沿双链 [[#锚点]] 语义，无需工作区）。 */\nexport interface AddonDocNavRequest {\n  /** 来源视图实例 ID（views 面有效句柄；相对路径解析与来源存活判定基准） */\n  readonly sourceInstanceId: string\n  /** 目标路径（来源文档目录相对；空串 = 来源文档自身） */\n  readonly target: string\n  /** 可选定位描述（互斥；缺省仅打开） */\n  readonly locate?: AddonDocNavLocate\n}",
+      "AddonDocNavRejection": "/** 可辨认拒绝类型（规格 §4.3 失败语义表；接口冻结面） */\nexport type AddonDocNavRejection =\n  /** 非法形状、非正整数行号或冲突定位；目标为附件类型（图片/PDF）也不\n   *  在本面——一律不执行打开 */\n  | 'invalid-request'\n  /** 无工作区的跨文档请求（对齐双链 no-workspace 口径） */\n  | 'no-workspace'\n  /** 越出来源所属根 */\n  | 'escape'\n  /** 目标不存在（扩展名候选全未命中） */\n  | 'not-found'\n  /** 来源视图或请求代次失效（迟到执行拒收——旧偏移不抢回定位） */\n  | 'view-disposed'\n  /** 目标存在但标题/块 ID 未命中（opened 报告实际打开状态） */\n  | 'anchor-not-found'\n  /** 行号越出目标总行数（不自动钳到末行；opened 报告实际打开状态） */\n  | 'out-of-bounds'\n  /** 定位未送达（面板未就绪/已关闭或请求超时） */\n  | 'delivery-failed'\n  /** 宿主执行失败（打开/读取抛错） */\n  | 'error'",
+      "AddonDocNavResult": "/** 导航结果：成功分支区分 opened（目标已打开或重显）与 located（定位\n *  描述存在且已送达）；失败分支的 opened 报告失败前的实际打开状态。 */\nexport type AddonDocNavResult =\n  | { ok: true; opened: boolean; located: boolean }\n  | { ok: false; reason: AddonDocNavRejection; opened: boolean }"
+    },
     "src/shared/addonEditApi.ts": {
-      "AddonViewsFacet": "/** SDK views 面（views.list / views.get / 变化订阅——设计 §5.1）。\n *  仅编辑器页提供（设置页无编辑视图，views 为 undefined） */\nexport interface AddonViewsFacet {\n  list(): readonly AddonViewInfo[]\n  get(instanceId: string): AddonViewHandle | null\n  onCreated(callback: (info: AddonViewInfo) => void): () => void\n  onDisposed(callback: (info: AddonViewInfo) => void): () => void\n}",
+      "AddonViewsFacet": "/** SDK views 面（views.list / views.get / 变化订阅——设计 §5.1）。\n *  仅编辑器页提供（设置页无编辑视图，views 为 undefined）。\n *  #543 T03 起 views.openDocument 提供文档打开与定位请求（宿主解析与\n *  执行——来源身份由 SDK 层注入，组件请求不携带身份字段） */\nexport interface AddonViewsFacet {\n  list(): readonly AddonViewInfo[]\n  get(instanceId: string): AddonViewHandle | null\n  onCreated(callback: (info: AddonViewInfo) => void): () => void\n  onDisposed(callback: (info: AddonViewInfo) => void): () => void\n  /** 文档打开与定位请求（异步——宿主执行；结果区分 opened 与 located，\n   *  拒绝面见 AddonDocNavRejection；请求具有有界终态） */\n  openDocument(request: AddonDocNavRequest): Promise<AddonDocNavResult>\n}",
       "AddonViewHandle": "/** SDK views 面返回的视图句柄（info 快照 + 编辑面） */\nexport interface AddonViewHandle {\n  readonly info: AddonViewInfo\n  readonly editor: AddonViewEditorFacet\n}",
       "AddonViewInfo": "/** views.list() 返回的有效实例句柄信息（设计 §5.1：实例/目标/模式/可编辑） */\nexport interface AddonViewInfo {\n  /** 页面内稳定实例 ID：main 恒 'main'；embed/hover 为 occurrence 键 */\n  instanceId: string\n  /** 目标文档 URI（主正文 = 面板文档；embed/hover = 引用目标） */\n  targetDocUri: string\n  mode: AddonViewMode\n  viewType: AddonViewType\n  editable: boolean\n}",
       "AddonViewEditorFacet": "/** 视图句柄的编辑面（view.editor.*）：目标从有效句柄取得；来源身份由\n *  SDK 层注入（组件请求不携带），伪来源请求结构上不可表达 */\nexport interface AddonViewEditorFacet {\n  getSnapshot(): AddonSnapshotResult\n  applyEdits(request: AddonApplyEditsRequest): Promise<AddonApplyEditsResult>\n  /** 设置选区（零文本变更：不出站、不造文本撤销项）；拒绝返回 false */\n  setSelection(ranges: AddonSelectionRange[]): boolean\n  /** 滚动定位（零文本变更；不移动光标）；拒绝返回 false */\n  reveal(offset: number): boolean\n}",

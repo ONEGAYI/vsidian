@@ -93,6 +93,8 @@ T03 覆盖 N-U01–N-U07、N-U12，并提供内部可复用定位执行体；T04
 
 公开声明在 `src/shared/addonNavApi.ts`，入口为 `AddonViewsFacet.openDocument`。执行体 `src/host/addonDocNav.ts` 通过端口复用根内路径解析与标题/块定位；provider 装配 Vsidian/原生编辑器，等待面板就绪后重新读取权威文本。Markdown 定位经可选 `locateId` 关联的 `view.locate/ack` 确认，取消、超时或关闭均清除未送达意图。
 
+**候选基线重锚理由**：`AddonViewsFacet` 追加 `openDocument` 命中声明字节冻结，其余原有接口语义保持。按门禁约定用 `--emit-baseline --anchor 0f63da6c70139c6963e3db70b4f3c56fa069c692` 显式生成 bootstrap 基线（实现提交，不是发行标签）；API 仍为 1.0.0 candidate，未添加发行日期。生成后的 git 对象复验、兼容检查和参考新鲜度均通过；批次合并时须保留该可达提交，或对集成后的实现提交重新显式锚定。
+
 来源 URI 来自页面视图注册表，宿主复核主文档或已送达引用；页面释放来源、替换同来源请求或卸载代次时同步取消宿主执行。组件桥的面板键使用文档 URI 与面板 ID 组合，避免不同文档的 `panel-1` 相互覆盖。新增能力没有独立用户操作或默认快捷键。
 
 验证：`t03-resume-red.log`、`t03-delivery-red.log`、`t03-path-red.log`、`t03-error-red.log`、`t03-supersede-red.log` 保存行为红测；相关单测、`compile` 与 `addonDocNav` 浏览器通过；`t03-resume-integration-4.log` 记录真实 1.82.3 宿主六项全绿（含未开/已开、原生文本、引用 B、CRLF、阅读与失败矩阵）。日志均在 `out/test/`，不随包分发。合并后的全量回归与最终 code-review 由批次集成执行；真机交互观感仍待用户验收。
