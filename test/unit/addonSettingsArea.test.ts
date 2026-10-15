@@ -1259,6 +1259,22 @@ describe('#553 详情自绘页优先：首屏形态与打开语义', () => {
     expect(h.sent).toContainEqual({ kind: 'addons.closeAddonPage' })
   })
 
+  it('open 请求在途时点返回：closeAddonPage 无条件同发（不依赖挂载应答可见性——漏发即落入 T02 裸挂载回退）', () => {
+    const { host } = customHost()
+    const h = makeView(host)
+    openSettingsAreaPage(h)
+    // open 在途：openAddonPage 已上送，但宿主应答（addons.state 推
+    // openAddonSettingsPage）未达——渲染闭包 payload 的挂载源仍为 null，
+    // 按挂载可见性判定会漏发 close（宿主随后照常开页，详情已关只剩裸挂载）
+    h.dispatch(customAddonsState())
+    h.dispatch(settingsState({ hasCustomPage: true }))
+    expect(h.sent).toContainEqual({ kind: 'addons.openAddonPage', addonId: ADDON_ID })
+    expect(h.sent.filter((m) => (m as { kind?: string }).kind === 'addons.closeAddonPage')).toHaveLength(0)
+    buttons(h, '返回组件列表')[0]!.click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsClose' })
+    expect(h.sent).toContainEqual({ kind: 'addons.closeAddonPage' })
+  })
+
   it('切换组件：自绘页组件 → 无自绘页组件，挂载区让位、表单呈现且定位交付清空', () => {
     const { host, mounted } = customHost()
     const context = new AddonSettingsContextRuntime()

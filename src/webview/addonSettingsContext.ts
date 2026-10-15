@@ -48,9 +48,15 @@ export class AddonSettingsContextRuntime {
     }
   }
 
-  /** 定位目标交付（null = 清除——组件据此退场页内定位态） */
+  /** 定位目标交付（null = 清除——组件据此退场页内定位态）。与 applyScope
+   *  的「等值不分发」口径不同，这里**刻意不做等值去重**：重复交付同一
+   *  目标（用户重复点击同一搜索命中）是有效信号——组件需据此重新滚动/
+   *  高亮，重复定位的幂等处理由组件自行承担 */
   deliverLocateTarget(target: AddonSettingsLocateTarget | null): void {
     this.locate = target
+    // 广播给全部组件订阅者集（不分 addonId）：挂载容器单份——同一时刻至
+    // 多一个组件挂载，当前单容器约束下不存在跨组件串扰；若未来支持多组
+    // 件同时挂载，需收紧为按 addonId 定向分发
     for (const callbacks of [...this.locateListeners.values()]) {
       for (const callback of [...callbacks]) {
         try {

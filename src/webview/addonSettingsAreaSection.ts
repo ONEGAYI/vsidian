@@ -259,7 +259,12 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
 
   /** #553 自绘页挂载中的组件 ID（addons.state 与 settingsState 双源取
    *  available——openAddonPage 应答经 runtime notify 即时推 addons.state，
-   *  settingsState 随写操作应答到达；任一在场即视为挂载） */
+   *  settingsState 随写操作应答到达；任一在场即视为挂载）。
+   *  取非空者的正确性依赖两个跨模块不变量，宿主侧改动前须核对：
+   *  - 宿主每次关页（closeSettingsPage / faultRecord / releaseGeneration）
+   *    都同步 notify 推新鲜 addons.state——本端 this.state 不驻留旧挂载值；
+   *  - 单一 postMessage 管道 FIFO——两源消息的处理顺序与宿主发送顺序
+   *    一致，payload 兜底读取不会盖掉更晚的关页推送 */
   private mountedPageOf(payload: AddonSettingsStateMessage): string | null {
     return this.state?.openAddonSettingsPage ?? payload.openAddonSettingsPage ?? null
   }
@@ -434,10 +439,12 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     heading.className = 'vsidian-settings-group-title'
     heading.textContent = t(customFirst ? 'addons.settingsDetailTitle' : 'addons.settingsAreaTitle', { label: addon.label })
     head.append(heading, this.button(t('addons.closeSettingsArea'), () => {
+      // closeAddonPage 无条件连带发（不按 mountedPageOf 判定）：open 请求
+      // 在途（应答未达）时渲染闭包 payload 看不到挂载，按挂载可见性判定
+      // 会漏发 close——宿主侧页仍会挂载，回退落入 T02 裸挂载视图。宿主
+      // closeSettingsPage 对未开页有 undefined 早退守卫，重复关闭无害
       this.send({ kind: 'addons.settingsClose' })
-      if (this.mountedPageOf(payload) === addon.addonId) {
-        this.send({ kind: 'addons.closeAddonPage' })
-      }
+      this.send({ kind: 'addons.closeAddonPage' })
     }, '', { [REBUILD_FOCUS_ATTR]: 'close-settings-area' }))
     area.append(head)
 
