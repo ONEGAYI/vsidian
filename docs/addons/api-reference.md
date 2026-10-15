@@ -51,6 +51,7 @@
     - [`view-identity-experimental` 实验入口：视图身份反查（experimental.viewIdentity）](#view-identity-experimental)
     - [`syntax-experimental` 实验入口：行类型与行内标记查询（experimental.syntax）](#syntax-experimental)
     - [`host-settings-experimental` 实验入口：宿主设置白名单读取（experimental.hostSettings）](#host-settings-experimental)
+    - [`ref-views-popup` 只读引用浮窗请求（refViews）](#ref-views-popup)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
     - [`behaviors-register` 输入行为注册与观察](#behaviors-register)
@@ -427,6 +428,10 @@ export interface VsidianAddonPageSdk {
    *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在
    *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */
   readonly renderers?: AddonRenderersFacet
+  /** T05（#544）只读引用视图面（仅编辑器页；设置页为 undefined）：请求
+   *  内核引用浮窗与本次请求关闭句柄（单页单浮窗，新请求替换旧请求）；
+   *  T06 起在同一 facet 上扩展组件容器挂载入口 */
+  readonly refViews?: AddonSdkRefViewsFacet
   /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与
    *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */
   readonly ui?: AddonSdkUiFacet
@@ -984,6 +989,141 @@ export function addonHostSettingGet(
 ```
 
 **验证**：`test/unit/addonHostSettingsApi.test.ts`、`test/unit/addonHostSettingsSdk.test.ts`、`test/unit/addonRegistry.test.ts`、`test/browser/addonHostSettings.mjs`
+
+### `ref-views-popup` 只读引用浮窗请求（refViews）
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#544（T05）
+
+**目标**：组件请求内核只读引用浮窗（T05 #544，规格 addon-reference-views.md）：在触发文字或自有控件旁打开目标引用浮窗，获取本次请求的关闭句柄。宿主复用 hoverDocAccess/refContent 的来源、准入、读取、租约与刷新链——组件不重新实现内容渲染，也不因请求呈现取得写目标文档的能力。
+
+语义要点：
+- **适用模式**：仅编辑器页提供（设置页为 undefined）。缺省鼠标语义（零抢焦点、移出延迟关闭、单页单浮窗经 popupMutex 仲裁）；keyboard:true 显式键盘请求复用既有键盘浮窗路径（焦点进入可操作域，Esc 关闭后归还原有效焦点）。不经悬停总开关（#298 门控的是鼠标悬停触发规则——显式请求面不改写它）。
+- **坐标与数据形状**：目标 = 根内路径 + 可选互斥锚点（heading 标题原文 / block 块 ID / line 1-based 行号 / range 1-based 闭区间行范围）。结构化目标在平台侧合成双链目标原文（buildAddonRefHoverTarget），走既有三形态解析——Markdown 用全文/标题/块语义（line/range 锚点按标题原文解析，缺失即真实失败，不引入 fragment 新语法）；非 Markdown 文本走 refText 的 #line=/#range= 与 REF_TEXT_LIMITS 准入。来源实例（views 面 ID：main/embed/hover）决定解析语境——B 中的相对路径按 B 目录，不误用父文档 A（请求带 addonSource，宿主校验成员资格为本面板文档或已送达目标，不接受任意 URI）。
+- **生命周期**：单页单浮窗：新请求替换旧请求，旧句柄随之失效（close 返回 false，不误关后来的浮窗）；迟到回包经 reqId/instanceId 配对守卫丢弃。句柄 close/isActive 只认本请求的浮窗实例身份。触发位置脱树、Esc、既有关闭动作、组件停用/故障/代次释放、页面结束均释放实例；pending 请求以 view-disposed 终结。所创建实例及递归内容恒只读（复用错误视图、刷新与释放链；T06 组件容器嵌入复用同一目标访问与来源语义）。
+- **错误与拒绝**：普通拒绝与真实失败分开：invalid-request（形状/触发位置非法——不创建空浮窗）/ view-disposed（来源实例不在场或请求被关闭）/ released（组件代次终结）/ HoverPreviewFailReason 透传（not-found / escape 越界 / anchor-invalid / anchor-missing / file-too-large / budget 等——浮窗同时以现有错误分态就地显示真实原因）。目标失败不折叠为 not-found。
+
+签名事实源：`src/shared/addonRefViews.ts`
+
+```ts
+/** 结构化锚点（互斥四形态；缺省 = 无锚点全文/全文窗口） */
+export type AddonRefAnchor =
+  /** Markdown 标题章节（标题原文；空 path 时为来源文档页内锚点） */
+  | { kind: 'heading'; heading: string }
+  /** Markdown 块 ID（`^id` 的 id 段；字符集同双链形态学） */
+  | { kind: 'block'; blockId: string }
+  /** 1-based 行号（非 Markdown 文本目标：#line= 语义；Markdown 目标按
+   *  标题语义解析「line=N」原文——沿用既有双链行为，不新增片段语法） */
+  | { kind: 'line'; line: number }
+  /** 1-based 闭区间行范围（非 Markdown 文本目标：#range= 语义；同上，
+   *  Markdown 目标不改变既有语义） */
+  | { kind: 'range'; startLine: number; endLine: number }
+
+/** 只读引用目标：根内路径 + 可选锚点 */
+export interface AddonRefTargetSpec {
+  /** 目标路径（vault 语义：相对来源文档目录或根内 `/` 绝对形态，无扩展
+   *  名按双链意图补 .md——与既有解析同源）。空串仅在带锚点时合法（页内） */
+  path: string
+  anchor?: AddonRefAnchor
+}
+
+/** 只读引用浮窗请求（公共载荷：来源实例 + 目标 + 触发位置；组件身份与
+ *  代次由 SDK 注入——请求结构上不携带身份字段） */
+export interface AddonRefPopupRequest {
+  /** 来源实例（views 面 instanceId：'main' / 'embed:<hostId>' /
+   *  'hover:<instanceId>'）。相对路径以该实例的目标文档解析（R-U02：
+   *  B 中的请求不误用父文档 A 的目录） */
+  source: string
+  /** 目标（结构化路径 + 可选锚点） */
+  target: AddonRefTargetSpec
+  /** 触发位置：本页在树元素（文字对应元素或组件自有控件）。脱树元素
+   *  非法——不猜测另一处位置，不创建无锚点空浮窗 */
+  trigger: HTMLElement
+  /** 显式键盘请求：焦点进入浮层可操作域，Esc 关闭后归还原焦点；缺省
+   *  鼠标语义（零抢焦点、移出延迟关闭） */
+  keyboard?: boolean
+}
+
+/** 本次请求的关闭句柄：身份只针对本组件本代次的这一次请求（规格 §7） */
+export interface AddonRefPopupHandle {
+  /** 关闭本请求的浮窗（幂等；浮窗已换主或已关时返回 false——旧句柄不
+   *  误关后来另一组件的浮窗） */
+  close(): boolean
+  /** 本请求的浮窗是否仍在场（被替换/Esc/移出/域失效关闭后为 false） */
+  isActive(): boolean
+}
+
+/** 可辨认拒绝（规格 §7：普通结果区分；不折叠为 not-found）：
+ *  - invalid-request：形状/来源/触发位置非法（不创建浮窗）；
+ *  - view-disposed：来源实例不存在或已销毁、请求被替换/关闭（迟到结果
+ *    与旧句柄的终结口径）；
+ *  - released：组件代次已终结（装载器守卫——旧代次请求不再有有效来源）；
+ *  - HoverPreviewFailReason 透传：目标解析/读取/锚点/准入超限的真实原因
+ *    （not-found / escape（越出所属根）/ anchor-invalid / file-too-large …），
+ *    浮窗同时以现有引用错误视图就地显示（invalid-request 除外）。 */
+export type AddonRefPopupRejection =
+  | 'invalid-request'
+  | 'view-disposed'
+  | 'released'
+  | HoverPreviewFailReason
+
+export type AddonRefPopupOutcome =
+  | { ok: true; handle: AddonRefPopupHandle }
+  | { ok: false; reason: AddonRefPopupRejection }
+
+/** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）
+ *  首版只含浮窗请求；T06 在同一 facet 上扩展组件容器挂载入口 */
+export interface AddonSdkRefViewsFacet {
+  /** 请求只读引用浮窗（单页单浮窗：新请求替换旧请求，旧请求句柄随之
+   *  失效）。结果在读取结局落定时兑现：内容装载成功 → ok + 句柄；目标
+   *  解析/读取/锚点失败 → 失败原因（浮窗若在场显示真实错误分态）；请求
+   *  被替换或关闭 → view-disposed */
+  requestPopup(request: AddonRefPopupRequest): Promise<AddonRefPopupOutcome>
+}
+
+export function isAddonRefTargetSpec(v: unknown): v is AddonRefTargetSpec {
+  if (!isRecord(v) || typeof v.path !== 'string') {
+    return false
+  }
+  if (v.anchor !== undefined && !isAddonRefAnchor(v.anchor)) {
+    return false
+  }
+  // 空 path 仅在带锚点时合法（页内锚点——目标即来源文档自身）
+  if (v.path === '' && v.anchor === undefined) {
+    return false
+  }
+  return isExpressibleRefText(v.path)
+}
+
+/**
+ * 结构化目标 → 双链目标原文（hover.request 的 target 形态）：路径与锚点
+ * 按既有形态学拼装——heading `路径#标题`、block `路径#^id`、line
+ * `路径#line=N`、range `路径#range=A-B`、无锚点即路径本身。返回 null =
+ * 形态不可表达（守卫已拦；防御性兜底，不静默降级）。合成原文走与真实
+ * 双链完全相同的解析与准入链路（R-U03：行号/范围/大小限制均为既有规则）。
+ */
+export function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | null {
+  if (!isAddonRefTargetSpec(target)) {
+    return null
+  }
+  const path = target.path
+  const anchor = target.anchor
+  if (anchor === undefined) {
+    return path
+  }
+  switch (anchor.kind) {
+    case 'heading':
+      return `${path}#${anchor.heading}`
+    case 'block':
+      return `${path}#^${anchor.blockId}`
+    case 'line':
+      return `${path}#line=${anchor.line}`
+    case 'range':
+      return `${path}#range=${anchor.startLine}-${anchor.endLine}`
+  }
+}
+```
+
+**验证**：`test/unit/addonRefViews.test.ts`、`test/unit/addonRefViewsRuntime.test.ts`、`test/unit/addonRefViewsPopup.test.ts`、`test/unit/embedRecursiveLive.test.ts`、`test/unit/documentSessionRefViews.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonRefViews.mjs`、`test/integration/suite/addonRefViewsCases.ts`
 
 ### `channel` 页面与宿主通道
 

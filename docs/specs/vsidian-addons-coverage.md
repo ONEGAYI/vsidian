@@ -80,3 +80,11 @@
 全矩阵复现命令（与 T18 票面证据同口径）：`npm run compile`、`npm run test:unit`、`npm run test:browser -- --no-reuse`、`npm run test:integration`、`npm run check:stylecontract`、`npm run check:addonapi`、`npm run check:addoncompat`；安装态与 SSH 线分别为 `node test/integration/runInstalledAddons.mjs`、`node test/integration/runRemoteSshAddons.mjs`（各票面载有前提）。
 
 本表随批次收口建立，此后接口或验证变更时由触碰对应面的票顺带更新（同 `addonApiCatalog.ts` 的维护纪律：改接口必经语义清单与本文）。29 项全绿的口径以 T18 全矩阵回归报告为准（`out/test/t18-*.log`，矩阵结论见票面 t18.md 回填）。
+
+## 2026-10 扩展批次增补（#530–#533 规格）
+
+2026-10-15 起的扩展批次按各自规格另行登记覆盖（首版 29 项之外）。首条：
+
+| 切片 | 用户故事 | 接口映射 | 验证证据 |
+| --- | --- | --- | --- |
+| T05 只读引用浮窗（#544，[规格](addon-reference-views.md)） | R-U01–R-U07、R-U12 | `ref-views-popup`（`sdk.refViews.requestPopup`——来源 B 解析语境、互斥锚点、单浮窗仲裁、句柄与代次释放、错误分态透传） | 单 `addonRefViews`/`addonRefViewsRuntime`/`addonRefViewsPopup`/`documentSessionRefViews`/`addonPageLoader`；浏 `addonRefViews`（真实指针/键盘 + 绘制层）；集 `addonRefViewsCases`（绘制层与历史样式命中、来源 B、目标更新/失效、停用/页面关闭/租约回收）。R-U08–R-U11（组件容器嵌入）待 T06（#545） |

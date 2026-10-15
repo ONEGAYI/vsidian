@@ -37,6 +37,15 @@ import type {
   VsidianAddonPageSdk,
 } from '../../src/shared/addonPage'
 import type {
+  AddonRefAnchor,
+  AddonRefPopupHandle,
+  AddonRefPopupOutcome,
+  AddonRefPopupRejection,
+  AddonRefPopupRequest,
+  AddonRefTargetSpec,
+  AddonSdkRefViewsFacet,
+} from '../../src/shared/addonRefViews'
+import type {
   AddonApplyEditsRequest,
   AddonApplyEditsResult,
   AddonEditCredential,
@@ -189,8 +198,7 @@ export const loadFailureReasonsPinned: Equals<AddonLoadFailureReason, PinnedLoad
 
 // ---- facet 形状钉住（Pick 键不存在即编译失败——删除/改名公开成员被发现） ----
 
-/** 页面 SDK 十四个公开面（六个能力 facet + 装配/资源/通信/释放；#476 起
- *  含 behaviorState 只读面） */
+/** 页面 SDK 公开面（含 behaviorState 与 refViews 只读面）。 */
 export type SdkSurface = Pick<
   VsidianAddonPageSdk,
   | 'addon'
@@ -201,6 +209,7 @@ export type SdkSurface = Pick<
   | 'commands'
   | 'menus'
   | 'renderers'
+  | 'refViews'
   | 'ui'
   | 'registerExtension'
   | 'mountRoot'
@@ -413,6 +422,22 @@ export const settingSearchEntries: readonly AddonSettingSearchEntry[] = [
   { key: 'theme', title: '主题', description: '配色主题' },
   { key: 'flag', title: '开关项' },
 ]
+
+/** T05（#544）只读引用浮窗请求形状：目标（路径 + 互斥锚点）与请求/句柄/
+ *  结局联合——字段改名、锚点 kind 收窄或拒绝枚举收缩即编译失败 */
+export type RefViewShapes = {
+  anchor: AddonRefAnchor
+  target: AddonRefTargetSpec
+  request: AddonRefPopupRequest
+  outcome: AddonRefPopupOutcome
+  rejection: AddonRefPopupRejection
+  handle: AddonRefPopupHandle
+}
+/** refViews 面方法形状（编辑器页 facet——设置页为 undefined） */
+export type RefViewsFacetShape = Pick<AddonSdkRefViewsFacet, 'requestPopup'>
+export const refPopupTargetSample: AddonRefTargetSpec = {
+  path: 'notes/ref.md', anchor: { kind: 'heading', heading: '第二章' },
+}
 
 /** 渲染与界面注册形状 */
 export type RendererShapes = { registration: AddonRendererRegistration }

@@ -153,6 +153,13 @@ export async function buildTestAddons({ log = console.log } = {}) {
       outfile: path.join(buildRoot, 'host-settings-addon', 'dist', 'editor.js'),
       note: 'host-settings-addon 编辑器页',
     },
+    // T05（#544）只读引用浮窗夹具组件（编辑器页——refViews 面 + ui 面
+    // 面板承载触发控件；短轮询驱动与 T11 同款）
+    {
+      entry: path.join(fixtureRoot, 'addon', 'refViewsEditor.ts'),
+      outfile: path.join(buildRoot, 'refviews-addon', 'dist', 'editor.js'),
+      note: 'refviews-addon 编辑器页',
+    },
   ]
   for (const target of targets) {
     const result = await build({
@@ -255,6 +262,12 @@ export async function buildTestAddons({ log = console.log } = {}) {
     hostSettingsAddon: {
       installDir: path.join(buildRoot, 'host-settings-addon'),
       distDir: path.join(buildRoot, 'host-settings-addon', 'dist'),
+    },
+    // T05（#544）：夹具组件布局（浏览器夹具直读 dist；runTest.mjs 拷入
+    // addonFixtures/addon-refviews）
+    refViewsAddon: {
+      installDir: path.join(buildRoot, 'refviews-addon'),
+      distDir: path.join(buildRoot, 'refviews-addon', 'dist'),
     },
     outsideDir,
   }

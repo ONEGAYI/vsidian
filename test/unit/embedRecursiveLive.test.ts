@@ -406,6 +406,39 @@ describe('P2-09 浮窗内孙卡解除范围锁', () => {
     } as Extract<HoverPreviewResult, { ok: true }>)
   }
 
+  it('T05 API 引用的子卡与更深后代在父 Live 下保持只读，模式调用不创建写端口', () => {
+    const h = makeHarness('live')
+    const host = document.createElement('div')
+    host.dataset['vsidianEmbedInner'] = C_INNER
+    host.dataset['vsidianSrcStart'] = String(C_FROM)
+    host.dataset['vsidianSrcEnd'] = String(C_TO)
+    document.body.appendChild(host)
+    h.manager.mountPopupChild('hover-readonly', host, {
+      fsPath: B_FS, relPath: '目标笔记.md', version: 5, text: B_TEXT,
+      range: { start: 0, end: B_TEXT.length }, scope: 'full', depth: 1,
+    }, true)
+    const req = [...h.sent].reverse().find((m) => m.kind === 'hover.request')
+    if (!req || req.kind !== 'hover.request') throw new Error('子卡请求缺失')
+    const text = '![[更深]]\n'
+    h.manager.notifyResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      target: { fsPath: C_FS, relPath: '孙目标.md' }, version: 1, text,
+      range: { start: 0, end: text.length }, scope: { kind: 'full' },
+      depth: 2, expansionPath: [], sourceLeaseId: 'readonly-c',
+    })
+    const descendant = host.querySelector<HTMLElement>('[data-vsidian-embed-inner="更深"]')
+    expect(descendant).not.toBeNull()
+    for (const el of [host, descendant!]) {
+      const button = modeButtonOf(el)!
+      expect(button.style.display).toBe('none')
+      button.click()
+    }
+    h.setParentMode('reading')
+    h.setParentMode('live')
+    expect(bindRequestsOf(h)).toHaveLength(0)
+    h.manager.dispose()
+  })
+
   it('浮窗根手动 Live 后孙卡跟随：模式按钮可见且孙卡 bind 出站（occurrence 前缀 = 浮窗根语义键）', () => {
     const h = makePopupHarness('reading')
     h.open()

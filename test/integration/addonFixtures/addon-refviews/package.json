@@ -1,0 +1,22 @@
+{
+  "name": "addon-refviews",
+  "publisher": "vsidian-test-fixture",
+  "displayName": "Fixture Add-on (T05 Reference Views)",
+  "description": "Integration fixture: Vsidian add-on consuming the public refViews SDK (read-only reference popup) on the editor page (T05, #544).",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.3" },
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["onegayi.vsidian"],
+  "keywords": ["vsidian-addon"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "vsidian-test-fixture.addon-refviews.stats", "title": "Fixture T05: add-on stats" },
+      { "command": "vsidian-test-fixture.addon-refviews.queue", "title": "Fixture T05: queue a page command" },
+      { "command": "vsidian-test-fixture.addon-refviews.collect", "title": "Fixture T05: collect page results" },
+      { "command": "vsidian-test-fixture.addon-refviews.reset", "title": "Fixture T05: reset queues" }
+    ]
+  },
+  "vsidianAddon": { "manifestVersion": 1, "api": "^1.0.0" },
+  "main": "./extension.js"
+}

@@ -113,6 +113,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 设置 | 定义、读写、作用范围、设置页 | `ctx.settings.*` | 宿主 |
 | 渲染提供者 | 代码块渲染候选与自动接管 | `sdk.renderers.register` | 编辑器页 |
 | 命令/菜单/界面 | 命令、菜单项、按钮、面板 | `sdk.commands` / `sdk.menus` / `sdk.ui` | 编辑器页 |
+| 页面 SDK（引用） | 只读引用浮窗请求与本次请求关闭句柄 | `sdk.refViews.requestPopup` | 编辑器页 |
 
 几个高频语义提醒（完整版在参考各条目）：
 
@@ -129,6 +130,35 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **标题折叠**（#410，实验入口）：查询只读派生视图（原始键集不对外）；命令选区驱动三操作与全文档两操作共用用户触发执行体（effect 直驱）；`upToLevel` 仅 `foldAll` 接受（1–6 整数），其他操作携带即 `invalid-request`。
 - **视图身份与扩展槽**（#426/#427/#428，契约）：扩展槽仅装配主正文 Live 实例；view → instanceId 反查走 `experimental.viewIdentity`；命令回调携带目标视图句柄——完整条款与移植换算见 §4。
 - **行为链触发面**（#399/#400/#401）：普通键入（`input.type`）与删除白名单（`delete.backward` / `forward` / `selection` / `cut` / `line`——`delete.dedent` 属缩进命令族不纳入）驱动；IME 候选期不驱动，**组合定稿驱动一次**（`userEvent='input.type.compose'`、`inputText` 为净定稿文本；取消/空白格组合/代码上下文不驱动）。上下文 `inputText` 为插入侧净文本；`replaced` 携带替换/删除侧（键入替换选区 = 被替换内容，delete = 被删文本，事务前 LF 坐标，IME 定稿恒 null）；`docUri` 为当前目标文档 URI（多视图语义：embed 触发时是引用目标的 URI）。
+
+## 3.1 只读引用浮窗（sdk.refViews，T05）
+
+请求内核在触发位置旁打开目标引用浮窗（T05 #544）。两句话分工：**看内容用 refViews，编辑目标用「打开独立文档」**——refViews 打开的是只读预览浮窗（单页单浮窗、随触发位置摆放、Esc/移出关闭）；要把目标文档开成编辑器面板，仍走宿主导航或用户自己的跳转链路，本面不提供打开/写入能力。
+
+```ts
+defineAddonPage(ADDON_ID, async (sdk) => {
+  const refViews = sdk.refViews!  // 仅编辑器页提供
+  const outcome = await refViews.requestPopup({
+    source: 'main',                        // views 面实例 ID：相对路径按该实例目标文档解析
+    target: { path: 'notes/ref.md', anchor: { kind: 'heading', heading: '第二章' } },
+    trigger: myButtonEl,                   // 本页在树元素（组件自有控件或文字元素——脱树即拒绝）
+    keyboard: false,                       // true = 键盘路径：焦点进入浮层，Esc 归还原焦点
+  })
+  if (outcome.ok) {
+    // outcome.handle.close() 只关本次请求的浮窗（被替换/已关返回 false）
+    // outcome.handle.isActive() 报告本请求浮窗是否在场
+  } else {
+    // outcome.reason：invalid-request / view-disposed / released
+    // 或目标真实失败（not-found / escape / anchor-invalid / file-too-large …）
+  }
+})
+```
+
+语义要点（完整版见 API 参考 `ref-views-popup` 条目）：
+
+- **目标与锚点**：路径 + 互斥锚点（`heading` 标题 / `block` 块 ID / `line` 行号 / `range` 行范围）。Markdown 目标用既有全文/标题/块语义；`line` / `range` 只对非 Markdown 文本生效（Markdown 目标携带时按标题原文解析——沿用双链行为，锚点缺失即真实失败）。大文件与超限走既有准入（`file-too-large` 等真实原因码）。
+- **单页单浮窗**：新请求替换旧请求；旧句柄随之后失效（`close()` 返回 false，不误关后来的浮窗）。缺省鼠标语义零抢焦点；触发位置脱树、组件停用、页面关闭都释放实例。
+- **只读边界**：本面创建的实例及递归内容恒只读，没有写端口；不给浮窗注入自定义 DOM 的入口。
 
 ## 4. 视图身份与扩展槽（契约）
 
@@ -298,3 +328,5 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 ## 9. 后续 API 扩展规格（已定稿，尚未实施）
 
 2026-10-15 批次新增能力的正式设计见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。当前公开声明和生成参考仍是实际可消费能力的事实源；不能因规格已定稿就调用尚未实现的接口。
+
+实施进度：**只读引用浮窗（T05，#544）已实施**——`sdk.refViews.requestPopup` 随本批次可用（见 §3.1）；同规格其余切片（组件容器嵌入 T06 等）尚未实施。

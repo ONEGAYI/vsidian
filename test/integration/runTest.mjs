@@ -73,7 +73,7 @@ const testCacheDir = path.join(root, '.vscode-test')
 // #358 T09 渲染提供者夹具（addon-t09——页面产物经构建桥生成，renderers 面）；
 // #360 T11 界面贡献夹具（addon-t11——页面产物经构建桥生成，ui 面注册
 // 按钮/面板 + 负向对照 + target 句柄真实业务）
-const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-storage', 'addon-t06', 'addon-t07', 'addon-bstate', 'addon-t09', 'addon-t10', 'addon-t11', 'addon-t12', 'addon-escape'].map((name) =>
+const ADDON_FIXTURE_PATHS = ['addon-ok', 'addon-incompatible', 'addon-fail', 'addon-t02', 'addon-t04', 'addon-storage', 'addon-t06', 'addon-t07', 'addon-bstate', 'addon-t09', 'addon-t10', 'addon-t11', 'addon-t12', 'addon-refviews', 'addon-escape'].map((name) =>
   path.join(root, 'test', 'integration', 'addonFixtures', name))
 
 // #364 T15 三套独立消费样例（test/examples/——独立 VSCode 扩展工程，产物
@@ -116,6 +116,8 @@ cpSync(addonLayout.t11Addon.distDir, path.join(root, 'test', 'integration', 'add
 console.log('[runTest] T11 夹具组件页面产物已构建并拷入 addonFixtures/addon-t11/dist')
 cpSync(addonLayout.t12Addon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-t12', 'dist'), { recursive: true })
 console.log('[runTest] T12 夹具组件页面产物已构建并拷入 addonFixtures/addon-t12/dist')
+cpSync(addonLayout.refViewsAddon.distDir, path.join(root, 'test', 'integration', 'addonFixtures', 'addon-refviews', 'dist'), { recursive: true })
+console.log('[runTest] T05 引用浮窗夹具组件页面产物已构建并拷入 addonFixtures/addon-refviews/dist')
 // #364 T15：三套独立消费样例构建（页面 IIFE + 宿主 CJS + 产物扫描——
 // 构建通过即扫描通过；产物在各工程 dist/，git 忽略不入库）
 await buildAllExamples({ log: () => {} })

@@ -28,6 +28,7 @@ const VALUE_IMPORT_ALLOWED = new Set([
   'src/shared/addonRenderers',
   'src/shared/addonCommands',
   'src/shared/addonUi',
+  'src/shared/addonRefViews',
   'src/shared/officialAddons',
 ])
 

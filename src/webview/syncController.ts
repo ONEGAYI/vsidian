@@ -1182,8 +1182,8 @@ export class WebviewSyncController {
       codeHighlight: () => this.live?.codeCardHighlightEnabled ?? true,
       // #298 悬停总开关投影（hover.enabled；门控收敛在 hoverPopup 入口）
       hoverPreviewEnabled: () => this.hoverPreviewEnabled(),
-      mountEmbedChild: (parentInstanceId, block, target) =>
-        this.embedCards?.mountPopupChild(parentInstanceId, block, target),
+      mountEmbedChild: (parentInstanceId, block, target, readOnly) =>
+        this.embedCards?.mountPopupChild(parentInstanceId, block, target, readOnly),
       unmountEmbedChild: (block) => this.embedCards?.unmountBlock(block),
       admitRootContent: (instanceId, target, bytes) =>
         this.embedCards?.admitPopupRoot(instanceId, target, bytes) ?? false,
@@ -2576,6 +2576,8 @@ export class WebviewSyncController {
             viewType: 'hover',
             instanceId: `hover:${message.instanceId}`,
             targetDocUri: `file:///${message.target.fsPath.replace(/\\/g, '/')}`,
+            // T05（#544）引用请求来源身份（hover.result 送达的目标 fsPath）
+            targetFsPath: message.target.fsPath,
             text: message.text,
             version: message.version,
           })
@@ -10006,6 +10008,8 @@ export class WebviewSyncController {
         gutterUserSelect: null,
         darkTheme: false,
         caretColor: null,
+        // T05（#544）浮窗绘制观测不依赖正文 view（早退路径同报）
+        hoverPopup: collectHoverPopupPaint(),
         // 组件按钮/面板不依赖正文 view（无 init 也可注册挂载）——早退路径
         // 同样上报（按钮挂载态与面板开态的集成断言不因无正文而缺字段）
         ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
@@ -10650,6 +10654,8 @@ export class WebviewSyncController {
       darkTheme: view.state.facet(EditorView.darkTheme),
       caretColor,
       drawnCursorColor,
+      // T05（#544）悬停引用浮窗绘制观测（不依赖正文 view；无浮窗缺省）
+      hoverPopup: collectHoverPopupPaint(),
       readingFindSource: {
         visible: !!findSourceCurrent && paintedWithVisibleBackground(findSourceCurrent),
         text: findSource?.querySelector('code')?.textContent ?? '',
@@ -11470,6 +11476,36 @@ function isSvgPainted(svg: SVGSVGElement): boolean {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/** T05（#544）悬停引用浮窗绘制观测：elementFromPoint 命中浮窗容器
+ *  （真实布局可见——含组件请求打开的浮窗）+ computed 背景/边框与错误分态
+ *  修饰（hover-popup 历史样式命中证据；无浮窗时缺省，jsdom 布局缺失时
+ *  hit=false 但样式字段仍可观测）。纯 DOM 探测，不依赖控制器状态 */
+function collectHoverPopupPaint(): PaintProbe['hoverPopup'] {
+  const el = document.querySelector<HTMLElement>('.vsidian-hover-popup')
+  if (!el) {
+    return undefined
+  }
+  let hit = false
+  if (typeof document.elementFromPoint === 'function') {
+    const rect = el.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      const point = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + Math.min(rect.height / 2, 40),
+      )
+      hit = point !== null && el.contains(point)
+    }
+  }
+  const style = getComputedStyle(el)
+  const stateEl = el.querySelector<HTMLElement>('.vsidian-hover-popup-state')
+  return {
+    hit,
+    background: style.backgroundColor,
+    borderWidth: style.borderTopWidth,
+    errorState: stateEl !== null && stateEl.classList.contains('vsidian-hover-popup-state-error'),
+  }
+}
 
 /** 绘制层命中探测（#53 起 sidebar/outline 探针共用）：元素中心点
  *  elementFromPoint 命中 scope（缺省元素自身）才算真实绘制——display:none、

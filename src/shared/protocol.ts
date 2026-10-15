@@ -1596,6 +1596,13 @@ export type WebviewToHost =
        *  缺失不构成失败，回成功全文（range 退化为全文区间，无初始定位点）。
        *  首开不带本字段：锚点缺失仍 anchor-missing 分态（重开再验证原锚点） */
       anchorOptional?: boolean
+      /** T05（#544）附加组件只读引用请求的来源覆盖：以来源实例（views 面
+       *  instanceId）的目标文档为解析语境——R-U02：embed B 内的请求不误用
+       *  父文档 A 的目录。sourceFsPath 为 webview 侧注册表记录的目标 fsPath
+       *  （'main' 恒空串 = 面板文档自身，宿主按常规根请求处理）；宿主校验
+       *  成员资格（本会话已送达目标集合），不接受任意 URI 接入无来源读取。
+       *  与 source（子引用链）/linkHref/directTarget 互斥 */
+      addonSource?: { instanceId: string; sourceFsPath: string }
     }
   /** 悬停目标订阅（#224 引用视图同步，只读消息）：webview 侧视图实例
    *  （浮层/嵌入卡片）成功装载目标后登记——宿主对该目标的文档修改与磁盘
@@ -2555,6 +2562,15 @@ export interface ReadingFoldPaintProbe {
 export interface PaintProbe {
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
   toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
+  /** T05（#544）悬停引用浮窗绘制观测（无浮窗时缺省）：elementFromPoint
+   *  命中浮窗容器（真实布局可见，非 DOM 存在性）+ computed 背景/边框
+   *  （hover-popup 历史样式命中证据——样式注入失效时任一失守） */
+  hoverPopup?: {
+    hit: boolean
+    background: string | null
+    borderWidth: string | null
+    errorState: boolean
+  }
   /** #414 T03 标题折叠 UI 绘制观测（无 Live 视图时缺省） */
   headingFold?: HeadingFoldPaintProbe
   /** #419 阅读态标题折叠绘制观测（仅 reading 模式采集；无折叠交互装配
@@ -4466,7 +4482,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           (isObject(v.directTarget) &&
             isString(v.directTarget.fsPath) &&
             (v.directTarget.anchor === undefined || isString(v.directTarget.anchor)))) &&
-        (v.anchorOptional === undefined || typeof v.anchorOptional === 'boolean')
+        (v.anchorOptional === undefined || typeof v.anchorOptional === 'boolean') &&
+        (v.addonSource === undefined ||
+          (isObject(v.addonSource) &&
+            typeof v.addonSource.instanceId === 'string' && v.addonSource.instanceId.length > 0 &&
+            typeof v.addonSource.sourceFsPath === 'string'))
       )
     case 'hover.watch':
     case 'hover.unwatch':

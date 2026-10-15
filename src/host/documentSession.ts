@@ -121,7 +121,11 @@ export interface PanelPort {
    *  （成功携带身份/版本/全文/范围，失败为错误分态）。只读交互，不进
    *  edit.request 通道，暂停态同样放行 */
   readHoverTarget?(
-    payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
+    payload: HoverPreviewRequestPayload & {
+      verifiedSource?: { fsPath: string; version: number }
+      /** T05（#544）附加组件来源覆盖（会话层已核验成员资格的来源 fsPath） */
+      resolvedSource?: { fsPath: string }
+    },
     report: (result: RefReadOutcome) => void,
   ): void
   /** #342（P3-10）悬停请求取消（vscode 层注入：定位在途 web 抓取消费者
@@ -1287,6 +1291,27 @@ export class DocumentSession {
           }
           verifiedSource = { fsPath: parent.fsPath, version: parent.version }
         }
+        // T05（#544）附加组件引用请求的来源覆盖：以来源实例（views 面）的
+        // 目标文档为解析语境（R-U02——embed B 内请求不误用父 A 目录）。
+        // 信任边界：sourceFsPath 须为本会话已送达目标（hoverSourceFsPaths
+        // 成员——与 image.request/hover.tokens.request 的 sourceDocUri 守卫
+        // 同一口径），被攻陷 webview 不能借本通道接任意 URI；'main' 恒空串
+        // = 面板文档自身（回落常规根请求，不进覆盖路径）。与 child-source
+        // （message.source）及 linkHref/directTarget 形态互斥
+        let addonResolvedSource: { fsPath: string; version: number } | undefined
+        if (message.addonSource !== undefined && message.addonSource.sourceFsPath !== '') {
+          if (message.source !== undefined || message.linkHref !== undefined || message.directTarget !== undefined ||
+            !panel.hoverSourceFsPaths.has(message.addonSource.sourceFsPath)) {
+            reject('source-expired')
+            return
+          }
+          const current = await panel.port.readHoverSource?.(message.addonSource.sourceFsPath)
+          if (!current) {
+            reject('source-expired')
+            return
+          }
+          addonResolvedSource = { fsPath: message.addonSource.sourceFsPath, version: current.version }
+        }
         const depth = parent ? parent.depth + 1 : 1
         const treeId = parent?.treeId ?? message.occurrenceId ?? message.instanceId
         const occurrenceId = message.occurrenceId
@@ -1495,11 +1520,16 @@ export class DocumentSession {
         // Service）内管理——会话级 shapeKey 按目标文本形态区分，URL 微差
         // 产生不同键，合并口径以服务层归一为准。此处仅按 href scheme 预
         // 判路由（安全边界仍由 resolveHoverTargetForm 的开关/准入复核）
+        const addonPortPayload = {
+          ...message,
+          ...(verifiedSource ? { verifiedSource } : {}),
+          ...(addonResolvedSource ? { resolvedSource: { fsPath: addonResolvedSource.fsPath } } : {}),
+        }
         if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
-          port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, report)
+          port(addonPortPayload, report)
           return Promise.resolve()
         }
-        const shapeKey = hoverShapeKeyOf(message, verifiedSource)
+        const shapeKey = hoverShapeKeyOf(message, verifiedSource ?? addonResolvedSource)
         const cached = this.hoverReadCache.get(shapeKey)
         if (cached) {
           this.hoverCacheHits++
@@ -1516,7 +1546,7 @@ export class DocumentSession {
           const epoch = this.hoverEpochs.get(shapeKey) ?? 0
           const requestClock = this.hoverClock
           pending = new Promise<RefReadOutcome>((resolve) => {
-            port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, resolve)
+            port(addonPortPayload, resolve)
           })
           this.hoverReadInFlight.set(shapeKey, pending)
           void pending.then((outcome) => {

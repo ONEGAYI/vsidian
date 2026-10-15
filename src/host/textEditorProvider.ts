@@ -2838,7 +2838,12 @@ export function createTextEditorProvider(
       // #333（P3-01）起读取走 readRefContentTarget 类型化分派入口（成功
       // 载荷按 kind 标记；旧扁平入口保留为兼容适配）
       const readHoverTargetPort = (
-        payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
+        payload: HoverPreviewRequestPayload & {
+          verifiedSource?: { fsPath: string; version: number }
+          /** T05（#544）附加组件来源覆盖：会话已校验成员资格（面板文档或
+           *  已送达目标）的来源 fsPath——读取以该文档为解析语境（R-U02） */
+          resolvedSource?: { fsPath: string }
+        },
         report: (result: RefReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
@@ -2854,6 +2859,15 @@ export function createTextEditorProvider(
               }
               sourceDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(payload.verifiedSource.fsPath))
               if (sourceDoc.version !== payload.verifiedSource.version) {
+                report({ ok: false, reason: 'source-expired' })
+                return
+              }
+            } else if (payload.resolvedSource !== undefined) {
+              // T05：附加组件来源覆盖——来源文档是解析语境（目录/根边界），
+              // 不钉版本（目录不随文本版本变化；成员资格已在会话层核验）
+              try {
+                sourceDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(payload.resolvedSource.fsPath))
+              } catch {
                 report({ ok: false, reason: 'source-expired' })
                 return
               }

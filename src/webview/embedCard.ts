@@ -932,12 +932,12 @@ export class EmbedCardManager {
 
   private mountChildBlock(parent: EmbedEntry, el: HTMLElement, target: RefLoadedContent): void {
     this.mountChildFrom(parent.hostId, parent.content.source.treeId ?? parent.hostId,
-      parent.content.source.depth ?? 1, el, target)
+      parent.content.source.depth ?? 1, el, target, parent.content.source.readOnly === true)
   }
 
   /** 浮层根 B 与正文卡片共用同一子卡状态库、来源链和面板预算。 */
-  mountPopupChild(parentInstanceId: string, el: HTMLElement, target: RefLoadedContent): void {
-    this.mountChildFrom(parentInstanceId, parentInstanceId, 1, el, target)
+  mountPopupChild(parentInstanceId: string, el: HTMLElement, target: RefLoadedContent, readOnly = false): void {
+    this.mountChildFrom(parentInstanceId, parentInstanceId, 1, el, target, readOnly)
   }
 
   // ---- P2-06（#283）悬停浮窗根引用的内部 Live 宿主 ----
@@ -1115,7 +1115,7 @@ export class EmbedCardManager {
   }
 
   private mountChildFrom(parentKey: string, treeId: string, parentDepth: number,
-    el: HTMLElement, target: RefLoadedContent): void {
+    el: HTMLElement, target: RefLoadedContent, readOnly = false): void {
     const inner = el.dataset['vsidianEmbedInner']
     if (inner === undefined) return
     const start = Number(el.dataset['vsidianSrcStart'] ?? -1)
@@ -1129,6 +1129,7 @@ export class EmbedCardManager {
       parentInstanceId: parentKey,
       depth: (target.depth ?? parentDepth) + 1,
       treeId,
+      ...(readOnly ? { readOnly: true } : {}),
     }
     this.mountCardInto(el, inner, start, end, 'reading', source)
   }
@@ -1619,7 +1620,7 @@ export class EmbedCardManager {
    *  装载恒 reading——只读文本不建编辑端口，父模式/覆盖/父切换均不改变
    *  （「父文档模式改变不使 PDF／图片／文本／网页可写」的规格口径） */
   private effectiveMode(entry: EmbedEntry): 'reading' | 'live' {
-    if (isTextLoaded(entry.loaded)) {
+    if (entry.content.source.readOnly || isTextLoaded(entry.loaded)) {
       return 'reading'
     }
     if (entry.modeOverride) {
@@ -1637,7 +1638,7 @@ export class EmbedCardManager {
    *  忆，父模式切换不回滚。#341：text 装载零操作（只读边界——按钮已在
    *  refreshModeChrome 隐藏，此处为调用面防御） */
   private toggleMode(entry: EmbedEntry): void {
-    if (isTextLoaded(entry.loaded)) {
+    if (entry.content.source.readOnly || isTextLoaded(entry.loaded)) {
       return
     }
     entry.modeOverride = this.effectiveMode(entry) === 'live' ? 'reading' : 'live'
@@ -2035,6 +2036,8 @@ export class EmbedCardManager {
       viewType: 'embed',
       instanceId: `embed:${entry.hostId}`,
       targetDocUri: live.docUri!,
+      // T05（#544）引用请求来源身份（embed 目标 fsPath——R-U02 解析语境）
+      ...(live.fsPath ? { targetFsPath: live.fsPath } : {}),
       mode: () => 'live',
       instance: inst,
     })
@@ -2542,7 +2545,7 @@ export class EmbedCardManager {
    *  P2-09 范围锁（dataset['locked']——父不在状态库的锁 Reading 不被本
    *  刷新翻转） */
   private refreshModeChrome(handle: EmbedCardHandle): void {
-    if (isTextLoaded(handle.entry.loaded)) {
+    if (handle.entry.content.source.readOnly || isTextLoaded(handle.entry.loaded)) {
       handle.modeBtn.style.display = 'none'
       handle.modeBtn.tabIndex = -1
       return
