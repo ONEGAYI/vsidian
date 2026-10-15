@@ -34,9 +34,9 @@ describe('轻提示公开样式入口', () => {
     expect(css).toContain(':where(.vscode-dark #app)')
     expect(css).toContain('overflow-wrap: anywhere')
   })
-  it('倒计时条右端锚定向左收缩，悬停/聚焦暂停，减少动画时静态满格', () => {
+  it('倒计时条左端锚定、右端向左收缩，悬停/聚焦暂停，减少动画时静态满格', () => {
     expect(css).toContain(':where(.vsidian-toast-timer)')
-    expect(css).toContain('right: 0')
+    expect(css).toContain('left: 0')
     expect(css).toContain('height: 2px')
     expect(css).toContain('@keyframes vsidian-toast-timer-shrink')
     expect(css).toContain('from { width: 100%; }')
