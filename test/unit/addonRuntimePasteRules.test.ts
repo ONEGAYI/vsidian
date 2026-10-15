@@ -198,18 +198,22 @@ describe('粘贴规则运行生命周期（enable 面乙）', () => {
 
   it('停用撤回规则；重新启用后同 ID 可再登记（无旧代次残留）', () => {
     const h = harness()
-    let handle: import('../../src/shared/addonPasteRules').AddonPasteRulesRegisterResult | undefined
+    const handles: import('../../src/shared/addonPasteRules').AddonPasteRulesRegisterResult[] = []
     h.register({
-      enable(context) { handle = context.paste.registerRules([promptLinkRule()]) },
+      enable(context) { handles.push(context.paste.registerRules([promptLinkRule()])) },
     })
     expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(1)
     h.runtime.setUserEnabled('fixture.demo', false)
     expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(0)
-    // 旧代次句柄迟到 dispose 不影响新代次
-    if (handle?.ok) handle.dispose()
     h.runtime.setUserEnabled('fixture.demo', true)
-    const second = registerFromEnable()
-    expect(second.results[0]!.ok).toBe(true)
+    expect(handles[1]?.ok).toBe(true)
+    expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(1)
+    const version = h.pasteRules.effectiveSnapshot().version
+    // 新代次已登记同 ID 后，旧句柄的迟到 dispose 不能撤掉新规则。
+    const oldHandle = handles[0]!
+    if (oldHandle.ok) oldHandle.dispose()
+    expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(1)
+    expect(h.pasteRules.effectiveSnapshot().version).toBe(version)
   })
 
   it('迟到注册（停用后）拒绝 released，不算故障', () => {

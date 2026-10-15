@@ -65,8 +65,8 @@ export class AddonPasteRuleService {
         batch.disposed = true
         const current = this.byAddon.get(batch.addonId)
         if (!current) return
-        const ids = new Set(batch.rules.map((rule) => rule.id))
-        const next = current.filter((rule) => !ids.has(rule.id))
+        const registered = new Set(batch.rules)
+        const next = current.filter((rule) => !registered.has(rule))
         if (next.length === 0) this.byAddon.delete(batch.addonId)
         else this.byAddon.set(batch.addonId, next)
         this.refresh()

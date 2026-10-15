@@ -2459,7 +2459,7 @@ export interface AddonPasteRulesContextApi {
 }
 ```
 
-**验证**：`test/unit/addonPasteRules.test.ts`、`test/unit/addonRuntimePasteRules.test.ts`、`test/unit/htmlToMarkdownPasteRules.test.ts`、`test/unit/richPasteAddonRules.test.ts`、`test/browser/addonPasteRules.mjs`
+**验证**：`test/unit/addonPasteRules.test.ts`、`test/unit/addonRuntimePasteRules.test.ts`、`test/unit/htmlToMarkdownPasteRules.test.ts`、`test/unit/richPasteAddonRules.test.ts`、`test/browser/addonPasteRules.mjs`、`test/browser/richPasteUndoHost.mjs`、`test/integration/richPasteHostSuite.ts`、`test/integration/addonFixtures/addon-paste-rules/extension.js`
 
 
 ---

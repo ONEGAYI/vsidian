@@ -63,19 +63,19 @@
 
 | 故事 | 用户结果（摘要） | 切片 | 接口映射 | 验证证据 |
 | --- | --- | --- | --- | --- |
-| P-U01 | 宿主登记规则，已开与新开页面共用 | T01 | `paste-rules-register`（enable 生命周期 `paste.registerRules`，身份平台注入） | 单 `addonRuntimePasteRules`（enable 面乙/停用回收/迟到拒绝）；真宿主页面广播链经 `_test.addonPasteRulesSnapshot` 钩子可观测（集成用例归后续验证轮） |
+| P-U01 | 宿主登记规则，已开与新开页面共用 | T01 | `paste-rules-register`（enable 生命周期 `paste.registerRules`，身份平台注入） | 单 `addonRuntimePasteRules`（enable 面乙/停用回收/迟到拒绝）；真 `richPasteUndoHost`（真实组件宿主登记，已开/新开双面板消费有效规则） |
 | P-U02 | 来源特化 span 恢复为链接 | T01 | `paste-rules-register`（模板槽：字面转义/URL safeUrl/children 拼接） | 单 `htmlToMarkdownPasteRules`（命中/转义/URL）；浏 `addonPasteRules`（双载荷真实键盘） |
 | P-U03 | 邻接 strong/code/pre 不被破坏 | T01 | 同上（单条成功只接管命中元素） | 单 `htmlToMarkdownPasteRules`（邻接保持用例）；浏 `addonPasteRules` |
 | P-U04 | 不匹配/缺属性/输出非法回内置 | T01 | `paste-rules-register` errors（首条成功接管、失败继续、全失败回内置） | 单 `htmlToMarkdownPasteRules`（缺属性/非法 URL/失败回退）；浏 `addonPasteRules`（撤回后回退） |
-| P-U05 | 关闭组件立即恢复内置 | T01 | `paste-rules-register` lifecycle（停用/故障/代次结束撤回并广播） | 单 `addonRuntimePasteRules`（停用/故障/代次回收）；浏 `addonPasteRules`（快照撤回与迟到旧版本不复活） |
-| P-U06 | 纯文本粘贴绕过规则、富文本保留分步撤销 | T01 | `paste-rules-register` modes（纯文本/代码上下文不经规则；等值守卫） | 单 `richPasteAddonRules`（纯文本旁路/两阶段/等值单笔）；浏 `addonPasteRules`（Ctrl+Shift+V、首撤格式次撤文字） |
+| P-U05 | 关闭组件立即恢复内置 | T01 | `paste-rules-register` lifecycle（停用/故障/代次结束撤回并广播） | 单 `addonRuntimePasteRules`（停用/故障/代次回收，新代次登记后旧句柄不能撤回新规则）；浏 `addonPasteRules`（快照撤回与迟到旧版本不复活）；真 `richPasteUndoHost`（停用回内置、重启登记） |
+| P-U06 | 纯文本粘贴绕过规则、富文本保留分步撤销 | T01 | `paste-rules-register` modes（纯文本/代码上下文不经规则；等值守卫） | 单 `richPasteAddonRules`（纯文本旁路/两阶段/等值单笔）；浏 `addonPasteRules`（Ctrl+Shift+V、首撤格式次撤文字）；真 `richPasteUndoHost`（真实规则 Ctrl+Shift+V 旁路、两笔 TextDocument Undo、双面板回流） |
 | P-U09 | 多组件命中结果稳定 | T01 | `paste-rules-register`（优先级降序、组件 ID 升序、规则 ID 升序确定性序） | 单 `addonPasteRules`（排序）+ `htmlToMarkdownPasteRules`（冲突顺序首条接管） |
 | P-U10 | 危险链接仍受 URL 策略限制 | T01 | `paste-rules-register` coordinates（URL 槽经既有 safeUrl） | 单 `htmlToMarkdownPasteRules`（javascript: 拒绝回内置） |
 | P-U11 | 错误声明可辨认拒绝 | T01 | `paste-rules-register` errors（invalid-declaration/duplicate-id/too-many/released 整批拒绝） | 单 `addonPasteRules`（校验矩阵）+ `addonRuntimePasteRules`（拒绝不算故障） |
 | P-U07 | 正则取值与条件组合 | T02（未实施） | 未实现节点在 T01 阶段显式拒绝（invalid-declaration） | 单 `addonPasteRules`（regex/condition/nested 未知字段拒绝） |
 | P-U08 | 子元素嵌套转换 | T02（未实施） | 同上；T01 的 children 槽只取内置转换结果 | 单 `addonPasteRules`（nested 字段拒绝） |
 
-本批次的公开接入路径：宿主注册面经 `AddonEnableContext.paste`（编译期消费 `test/addonApi/publicApiConsumer.ts` 钉住）；webview 消费经生产快照通道（浏览器夹具 `addonPasteRulesFixture` 模拟宿主广播驱动生产控制器）。真宿主集成验证（宿主登记→页面广播→停用回收全链）与安装态链路归本批次整体验收轮。
+本批次的公开接入路径：宿主注册面经 `AddonEnableContext.paste`（编译期消费 `test/addonApi/publicApiConsumer.ts` 钉住）；浏览器夹具 `addonPasteRulesFixture` 模拟快照广播，真实宿主探针 `richPasteUndoHost` 则加载 `addon-paste-rules` 夹具，经公开宿主登记→生产快照广播→生产页面粘贴→TextDocument 撤销与停用回收全链。该探针不直接注入规则快照；安装态与人工体验验收另行记录。
 
 ## 公开接入路径声明（不以内部 mock 代替）
 

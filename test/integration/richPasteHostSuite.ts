@@ -34,7 +34,7 @@ export async function run(): Promise<void> {
   for (let i = 0; i < 1800 && !existsSync(done); i++) {
     if (existsSync(request)) {
       const message = JSON.parse(readFileSync(request, 'utf8')) as {
-        id: number; action: string; operationId?: string; bindings?: string[]; text?: string; values?: Record<string, boolean>; panelIndex?: number
+        id: number; action: string; operationId?: string; bindings?: string[]; text?: string; values?: Record<string, boolean>; panelIndex?: number; enabled?: boolean
       }
       unlinkSync(request)
       let result: unknown
@@ -45,6 +45,9 @@ export async function run(): Promise<void> {
       if (message.action === 'text') result = doc.getText()
       if (message.action === 'settings') result = await vscode.commands.executeCommand('onegayi.vsidian._test.getSettings')
       if (message.action === 'preferences') result = await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', message.values)
+      if (message.action === 'pasteRuleStats') result = await vscode.commands.executeCommand('vsidian-test-fixture.addon-paste-rules.stats')
+      if (message.action === 'pasteRuleEnabled') result = await vscode.commands.executeCommand(
+        'onegayi.vsidian._test.addonSetEnabled', { addonId: 'vsidian-test-fixture.addon-paste-rules', enabled: message.enabled })
       if (message.action === 'events') result = events
       if (message.action === 'undo') { await vscode.commands.executeCommand('undo'); result = doc.getText() }
       if (message.action === 'redo') { await vscode.commands.executeCommand('redo'); result = doc.getText() }
