@@ -1,4 +1,4 @@
-// 宿主侧链接/图片目标分类契约（工单 #10）：
+// 宿主侧链接/图片目标分类契约（工单 #10，#556 增补显式绝对路径分类）：
 // webview 只上报原始 href/src，宿主负责 URI 解析与路径拼接——分类器是
 // 该职责的纯逻辑核心，必须先于执行层被钉死：
 // - scheme 白名单：仅 http/https 外开，其余带 scheme 的一律拦截（file://、
@@ -6,6 +6,10 @@
 // - 工作区路径：基于当前文档所在目录解析，不得越过资源根（工作区文件夹
 //   根；无工作区时为文档目录）；Windows 盘符路径只在 Windows 宿主生效，
 //   远程（POSIX 宿主）不得把 Windows 路径当工作区路径（两类 URI 不混用）
+// - 显式绝对路径（#556，ADR-0018）：Windows 宿主盘符形态与 POSIX 宿主
+//   根路径归 absolute 分类（携带候选/fsPath 与 fragment，允许跨根与
+//   工作区外目标）；Win32 怪 basename（ADS/尾随点）拦截继续适用；
+//   UNC 与 POSIX 宿主上的盘符维持拦截
 // - 相对路径、空格、中文与 %编码（%20/%E5…）都有明确期望
 // - 无扩展名的文档链接按「精确优先，其次补 .md」给候选（#11 双链同语义
 //   的便捷形态）
@@ -166,23 +170,25 @@ describe('工作区相对路径解析（基于当前文档所在目录）', () =
     expect(enc).toEqual(r)
   })
 
-  it('POSIX 宿主：绝对路径限资源根内', () => {
+  it('POSIX 宿主：绝对路径归 absolute 分类（#556 允许根外目标）', () => {
     const inside = classifyLinkTarget('/home/u/notes/a.md', POSIX)
-    expect(inside).toEqual({ kind: 'doc', candidates: ['/home/u/notes/a.md'], fragment: null })
-    const outside = classifyLinkTarget('/etc/passwd', POSIX)
-    expect(outside.kind === 'blocked' && outside.reason).toBe('escape')
+    expect(inside).toEqual({ kind: 'absolute', candidates: ['/home/u/notes/a.md'], fragment: null })
+    const outside = classifyLinkTarget('/etc/目标.md', POSIX)
+    expect(outside).toEqual({ kind: 'absolute', candidates: ['/etc/目标.md'], fragment: null })
   })
 })
 
 describe('Windows 与远程（POSIX 宿主）不混用', () => {
-  it('Windows 宿主：反斜杠分隔符与盘符绝对路径按 Windows 语义解析', () => {
+  it('Windows 宿主：反斜杠分隔符归一；盘符绝对路径归 absolute（#556）', () => {
     const bs = classifyLinkTarget('嵌套\\深层.md', WIN)
     expect(bs).toEqual({ kind: 'doc', candidates: ['d:\\notes\\子目录\\嵌套\\深层.md'], fragment: null })
+    // 根内盘符路径也走 absolute（独立解析语义，候选即该路径）
     const drive = classifyLinkTarget('d:\\notes\\绝对.md', WIN)
-    expect(drive).toEqual({ kind: 'doc', candidates: ['d:\\notes\\绝对.md'], fragment: null })
-    const driveEsc = classifyLinkTarget('e:\\别的盘\\x.md', WIN)
-    expect(driveEsc.kind === 'blocked' && driveEsc.reason).toBe('escape')
-    // UNC 路径不在资源根内
+    expect(drive).toEqual({ kind: 'absolute', candidates: ['d:\\notes\\绝对.md'], fragment: null })
+    // 根外/跨盘绝对路径不再拦截（允许工作区外目标）
+    const driveOut = classifyLinkTarget('e:\\别的盘\\x.md', WIN)
+    expect(driveOut).toEqual({ kind: 'absolute', candidates: ['e:\\别的盘\\x.md'], fragment: null })
+    // UNC 路径不在资源根内：维持拦截
     const unc = classifyLinkTarget('\\\\server\\share\\a.md', WIN)
     expect(unc.kind === 'blocked' && unc.reason).toBe('escape')
   })
@@ -202,12 +208,64 @@ describe('Windows 与远程（POSIX 宿主）不混用', () => {
   })
 
   it('单字母 scheme 不误判：Windows 宿主上 c:\\x.md 是盘符而非 scheme', () => {
-    // 盘符在资源根内 → 文档目标（而非被当 scheme 拦截）
+    // 盘符路径归 absolute 分类（#556 独立解析语义，而非被当 scheme 拦截）
     const inside = classifyLinkTarget('d:\\notes\\盘符.md', WIN)
-    expect(inside.kind).toBe('doc')
-    // 资源根外的盘符路径：拦截原因是越界（escape），不是 scheme 误判
+    expect(inside.kind).toBe('absolute')
+    // 根外盘符路径同样归 absolute（不再按越界拦截）
     const other = classifyLinkTarget('c:\\notes\\a.md', WIN)
-    expect(other.kind === 'blocked' && other.reason).toBe('escape')
+    expect(other).toEqual({ kind: 'absolute', candidates: ['c:\\notes\\a.md'], fragment: null })
+  })
+})
+
+describe('#556 显式绝对路径目标（跨根与工作区外，ADR-0018）', () => {
+  it('Windows 盘符：absolute 分类携带候选与 fragment；%编码与字面原文同目标', () => {
+    const raw = classifyLinkTarget('e:\\外部库\\资料 目标.md#小节', WIN)
+    expect(raw).toEqual({
+      kind: 'absolute',
+      candidates: ['e:\\外部库\\资料 目标.md'],
+      fragment: '小节',
+    })
+    const enc = classifyLinkTarget('e:/外部库/%E8%B5%84%E6%96%99%20%E7%9B%AE%E6%A0%87.md', WIN)
+    expect(enc).toEqual({
+      kind: 'absolute',
+      candidates: ['e:\\外部库\\资料 目标.md'],
+      fragment: null,
+    })
+  })
+
+  it('Windows 盘符：无扩展名候选补 .md（与相对路径同规则）', () => {
+    const r = classifyLinkTarget('e:/外部库/笔记', WIN)
+    expect(r).toEqual({
+      kind: 'absolute',
+      candidates: ['e:\\外部库\\笔记', 'e:\\外部库\\笔记.md'],
+      fragment: null,
+    })
+  })
+
+  it('盘符路径的 Win32 怪 basename（ADS/尾随点）继续拦截：不因 absolute 放行', () => {
+    // basename 含 ':'（NTFS 备用数据流）与尾随 '.'/空格：两通道同口径拦截
+    for (const href of ['c:\\外部\\note.md::$DATA', 'c:\\外部\\note.', 'c:\\外部\\note.md ']) {
+      const t = classifyLinkTarget(href, WIN)
+      expect(t).toMatchObject({ kind: 'blocked', reason: 'escape' })
+      const img = classifyImageTarget(href, WIN)
+      expect(img).toMatchObject({ kind: 'blocked' })
+    }
+  })
+
+  it('图片：Windows 盘符与 POSIX 根路径归 absolute fsPath（单候选，不补 .md）', () => {
+    expect(classifyImageTarget('f:\\assets\\图 片.png', WIN)).toEqual({
+      kind: 'absolute',
+      fsPath: 'f:\\assets\\图 片.png',
+    })
+    expect(classifyImageTarget('/srv/assets/%E5%9B%BE.png', POSIX)).toEqual({
+      kind: 'absolute',
+      fsPath: '/srv/assets/图.png',
+    })
+    // 无扩展名图片语义单候选
+    expect(classifyImageTarget('f:/assets/shot', WIN)).toEqual({
+      kind: 'absolute',
+      fsPath: 'f:\\assets\\shot',
+    })
   })
 })
 

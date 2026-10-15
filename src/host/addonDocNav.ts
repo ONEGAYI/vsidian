@@ -116,7 +116,16 @@ export async function executeAddonDocNav(
       )
       if (resolution.kind !== 'target') {
         // no-workspace / escape / not-found：对齐既有解析口径，不新增 fs 权限
-        return { ok: false, reason: resolution.kind, opened: false }
+        //（ambiguous/pending 由短名补查端口产生，#556 未接线不可达，折射为
+        //  not-found——公开 API 拒绝枚举的扩面留待接线票评估）
+        return {
+          ok: false,
+          reason:
+            resolution.kind === 'ambiguous' || resolution.kind === 'pending'
+              ? 'not-found'
+              : resolution.kind,
+          opened: false,
+        }
       }
       if (!isVaultPathInsideRoot(resolution.fsPath, context)) {
         return { ok: false, reason: 'escape', opened: false }

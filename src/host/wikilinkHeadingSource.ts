@@ -62,8 +62,14 @@ export async function queryWikilinkHeadings(
     if (resolution.kind === 'no-workspace') {
       return { status: 'unavailable', reason: 'no-workspace' }
     }
-    if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
+    if (
+      resolution.kind === 'escape' ||
+      resolution.kind === 'not-found' ||
+      resolution.kind === 'ambiguous' ||
+      resolution.kind === 'pending'
+    ) {
       // 越界与未命中都归「无法定位明确目标」：不按部分文件名猜目标
+      //（ambiguous/pending 由短名补查端口产生，#556 未接线，不可达）
       return { status: 'unavailable', reason: 'target-not-found' }
     }
     targetFsPath = resolution.fsPath

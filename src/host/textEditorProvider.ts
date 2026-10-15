@@ -2266,7 +2266,14 @@ export function createTextEditorProvider(
       if (resolution.kind === 'no-workspace') {
         return fail('no-workspace')
       }
-      if (resolution.kind === 'escape' || resolution.kind === 'not-found') {
+      if (
+        resolution.kind === 'escape' ||
+        resolution.kind === 'not-found' ||
+        resolution.kind === 'ambiguous' ||
+        resolution.kind === 'pending'
+      ) {
+        // ambiguous/pending 由短名补查端口产生（#556）；本通道未注入端口，
+        // 运行时不可达，与未命中同口径（接线票分化提示形态）
         return fail('target-not-found')
       }
       targetFsPath = resolution.fsPath
@@ -2643,7 +2650,9 @@ export function createTextEditorProvider(
         void vscode.window.showWarningMessage(t('host.wikilinkOutsideRoot', { target: parsed.path }))
         return
       }
-      if (resolution.kind === 'not-found') {
+      if (resolution.kind === 'not-found' || resolution.kind === 'ambiguous' || resolution.kind === 'pending') {
+        // ambiguous/pending 由短名补查端口产生（#556）；本通道未注入端口，
+        // 运行时不可达，暂与未命中同词条（接线票换专用提示形态）
         pushLog({ kind: 'wikilink-not-found', target: parsed.path, heading: parsed.heading ?? undefined })
         void vscode.window.showWarningMessage(
           t('host.wikilinkNotFound', { target: parsed.path }),

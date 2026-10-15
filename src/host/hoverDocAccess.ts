@@ -376,7 +376,9 @@ async function resolveHoverTargetForm(
     if (resolution.kind === 'escape') {
       return { ok: false, reason: 'escape' }
     }
-    if (resolution.kind === 'not-found') {
+    if (resolution.kind === 'not-found' || resolution.kind === 'ambiguous' || resolution.kind === 'pending') {
+      // ambiguous/pending 由短名补查端口产生（#556）；本通道未注入端口，
+      // 运行时不可达，按 not-found 同口径（接线票分化提示形态）
       return { ok: false, reason: 'not-found' }
     }
     return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfFragment(classified.fragment), formKind: 'mdlink' }
@@ -397,7 +399,9 @@ async function resolveHoverTargetForm(
   if (resolution.kind === 'escape') {
     return { ok: false, reason: 'escape' }
   }
-  if (resolution.kind === 'not-found') {
+  if (resolution.kind === 'not-found' || resolution.kind === 'ambiguous' || resolution.kind === 'pending') {
+    // ambiguous/pending 由短名补查端口产生（#556）；本通道未注入端口，
+    // 运行时不可达，按 not-found 同口径（接线票分化提示形态）
     return { ok: false, reason: 'not-found' }
   }
   return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfWikilink(parsed), formKind: 'wikilink' }
