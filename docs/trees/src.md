@@ -17,6 +17,7 @@ vsidian/
     │   │   ├── addonBehaviorViewService.ts    # 行为管理视图状态持久服务
     │   │   ├── addonCommandService.ts         # 宿主命令目录服务与命令面板注册
     │   │   ├── addonCoordinator.ts            # 附加组件发现协调与唤醒
+    │   │   ├── addonEditorPanelReconcile.ts   # 编辑器面板装载对账纯模块
     │   │   ├── addonPageRegistry.ts           # 页面入口登记校验
     │   │   ├── addonPasteRuleService.ts       # 粘贴规则宿主服务
     │   │   ├── addonRealpathGuard.ts          # realpath 逃逸守卫
