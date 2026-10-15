@@ -44,8 +44,10 @@ let controller = new WebviewSyncController(bridge)
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
 
 function mountViewportDoc(text: string, clearState: boolean): void {
+  // 新 iframe 使用父端在销毁前已接纳的缓存；不依赖销毁中的最后一次发送。
+  const received = structuredClone(persistedState)
   controller.dispose()
-  if (clearState) persistedState = undefined
+  persistedState = clearState ? undefined : received
   controller = new WebviewSyncController(bridge)
   controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
   controller.handleHostMessage({ kind: 'init', sessionId: 'view-toggle',

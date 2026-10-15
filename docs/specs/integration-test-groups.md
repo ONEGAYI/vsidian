@@ -552,3 +552,15 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 本轮证明实际编辑器快速定位后切页的窗口，与此前真实API/iframe销毁对照相互支持。历史失败的原用例先等待围栏和视口落定，缺逐消息时间线，不能将新增快速前序冒充其原样现场或证明每次失败的唯一原因。条目6是否按初步范围收口以独立复核和最终候选验证为准；人工验收未联动。证据为out/test/mermaid6-followup-old-native-lf.log/report.log、current-native-valid.log/report.log、permanent-red-native.log/report.log与invalid-sample.md（同组均带mermaid6-followup前缀）。
 
 最终独立用例在旧控制器下切回0，32137ms红态；正式构建去掉诊断字段/输出后，原Mermaid用例3451ms、新快速用例1114ms均通过。compile/类型、完整Vitest8051/8051与Node194/194、文件树strict通过；中间版本也做过完整回归，最终统计仅取final前缀日志。旧生产者只用于忽略目录的诊断产物，提交不包含生产控制器改动或额外协议字段。
+
+## #446 条目24 / #550：视口保存窗口与源码中心（2026-10-15）
+
+CI38684976209候选802d582a的原Mermaid切标签例62144ms超时，光标已为2029、围栏容器为0；同源测试堆栈定位到光标恢复后的围栏终态等待。main及精确候选的本机完整第1分片均通过，只作为负样本。
+
+真实VSCode1.82.3的acquireVsCodeApi、MessageChannel及iframe销毁对照补齐了保存边界。生产控制器和真实Mermaid在围栏到终态后立即切走，隐藏前父端缓存只有anchor2029、没有viewport；销毁时flush已发出完整viewport，但接收器已撤销而未收到。重建后光标2029、scrollTop0、围栏为空。仅等待300ms或仅保留旧接收器的对照均正常。只保存像素值的中间实现仍使源码中心116→133，保留旧centerOffset也会回到上一次滚动区域。
+
+修正为滚动像素位置立即写入桥缓存，新滚动清除旧源码中心提示；源码中心每帧最多读取一次并补写，替代250ms尾随采样。隐藏、销毁与模式切换取消在途采样。持久化格式、光标/文本编辑管线、DOM/CSS和原core分组、等待预算与绘制断言保持。
+
+永久viewMode契约固定隐藏前JSON、覆盖Live/reading恢复及同帧三次滚动只读取一次最新中心。viewToggle夹具以销毁前缓存重建，销毁中补发不进入新实例；明暗主题继续验证两模式位置，新增第二次滚动不重放旧中心的场景。真实API/真实Mermaid修正后0/300ms对照均恢复4个围栏到既有终态、光标2029和中心行116。
+
+历史CI缺少父端缓存与逐帧滚动记录，不证明本机制是该轮唯一原因；也不承诺同一JS任务发送后立刻销毁的异步消息必然送达。本项按已复现保存缺口初步修复，条目12的弹窗SVG等待另查，人工验收独立。证据为out/test/mermaid24-viewport-contract-red.log、frame-contract-red.log、viewtoggle-browser-red.log、iframe-viewport-real-baseline.log、iframe-viewport-real-keep-observer.log、iframe-real-frame-green.log及frame前缀回归日志；中间只保存像素值的失败另存，不充当最终验证。
