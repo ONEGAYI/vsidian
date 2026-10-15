@@ -2,9 +2,9 @@
 
 ## 状态
 
-2026-10-15 用户最终确认共识并结束访谈，本文已冻结为 #556 的实施规格；功能尚未实现。需求票：[#556](https://github.com/ONEGAYI/vsidian/issues/556)，可按本文范围认领实施。
+2026-10-15 用户最终确认共识并结束访谈，本文冻结为 #556 的实施规格；同日实施完成全部五票与收口修复（见文末「实施落档」节），**已实施待用户验收**。需求票：[#556](https://github.com/ONEGAYI/vsidian/issues/556)。
 
-架构原则记录于 [ADR-0018](../adr/0018-markdown-shortname-resolution.md)。当前已实施规则仍见 [ADR-0008](../adr/0008-workspace-reference-index.md) 与[引用索引规格](vault-index-backlinks.md)，不能将本访谈中的新设计写成现有功能。
+架构原则记录于 [ADR-0018](../adr/0018-markdown-shortname-resolution.md)。历史规则见 [ADR-0008](../adr/0008-workspace-reference-index.md) 与[引用索引规格](vault-index-backlinks.md)——本文实施落档节记录的差异即为对其的替代条款。
 
 ## 缺口与源码依据
 
@@ -138,3 +138,53 @@
 - [#374](https://github.com/ONEGAYI/vsidian/issues/374) 与[双链联想规格](wikilink-completion.md)提供现有插入、查询和引用内部归属基础。
 - 本轮开票与设计记录不包含功能代码推送、合并或产品发布。自动化验证与用户验收仍分别记录。
 - 附加组件 API／SDK 不作为前置；共用内部路径改动若影响公开语义，按现有 API 维护纪律评估并同步契约，不静默扩大公开能力。
+
+## #556 实施落档（2026-10-15）
+
+五票串行实施（提交 T1 `2c415e61` / T2 `362e8e0e` / T3 `6cfe2055` / T4 `27d3df05` / T5 `13a845e3`）加收口修复（`821ea405` webview 打包、`d567b4c5` 形态与跨根通道、`3577efc3` 测试期望）。以下为落地事实与边界。
+
+### 统一解析器（T1）
+
+- `src/shared/vaultLink.ts` 保持五处消费（跳转/悬停/索引/更名/联想）的单一解析事实源：`VaultLinkPathPlan` 新增 `absolute` 分支（Windows 宿主盘符形态——裸 `X:` 前缀的「盘内当前目录相对」怪语义不按绝对处理；POSIX 宿主根路径），不接 docDir、不受 rootDir 边界、无工作区独立解析、不做短名补查。UNC 越出本地根维持 escape（根内 UNC 目标照常 inside）；POSIX 宿主上的盘符维持相对文件名语义，跨宿主拦截在 linkTarget 层（`windows-drive-on-posix`）。
+- 短名补查经可选端口注入（`resolveVaultLinkFile` 第 5 参数）：查询键为**完整 basename（含扩展名）**，无扩展名双链由 resolve 层补 `.md` 后查询；仅 Markdown 语义触发（显式 `.md` 或省略扩展名的 implicitMd；图片通道与非 Markdown 扩展不补查）；含分隔符（`./`、`../`、子路径）不补查。四态决策：0 候选 not-found、多候选 ambiguous、唯一但清单不完整 pending、唯一且完整 target（取端口给定磁盘真实形态，不做二次探测）。**端口不注入时解析行为与 #196 现状逐字节一致**。
+- `VaultLinkFileResolution` 新增 `ambiguous`（携带候选列表，提示补路径用）与 `pending` 两 kind。
+
+### 索引身份与补查数据面（T2）
+
+- `VaultEdge.resolvedTarget` 语义域升级为**规范绝对身份**（磁盘真实形态、`/` 分隔、normKey 归一语义）：跨根/工作区外目标以绝对形态表达，不同根同名相对路径不合并；files 表键域扩为混合域（外部被引用目标存绝对身份，一律 asset——含 `.md`，仅登记元数据与被引用关系，不递归解析、不扫描外部目录）。反链聚合键随身份走，`backlinksOf` 另以 basename/stem 断链桶兜底「谁断链指向 X」可见性（不跨根——按名跨界匹配正是「不同根同名不串反链」要拦的形态）。
+- 快照 `SNAPSHOT_FORMAT_VERSION` 2→3：v3 片标旧代码拒读走重建（降级安全）；v2 片结构兼容加载（结构同源仅语义域不同），服务层恢复时按其根轻量迁移为绝对身份（不触发重扫），清单就绪后全域重判一次。混合代不可能出现——片继承按内容 checksum 判定，片标差异使 v2 片永不继承进 v3 代。
+- 补查数据面：catalog 的 Markdown basename 倒排（代次缓存零 IO），`complete = catalogComplete`——清单未完整时唯一候选不声明唯一（pending）。跳转/悬停/联想/索引抽取共用同一数据面端口。
+- 文件集合变化重判：basename → 短名边来源的内存反查表（派生不持久化），触发面覆盖 rescanFile 新增/删除、verifyRoot 移除、rename 批新旧 basename、清单 Markdown 条目集合变化与 complete 翻转；busy 时挂起由 `resumeAfterBusy` 接力；唯一变歧义、歧义恢复唯一、相对候选新增抢占、删除后恢复四态均有单测钉住。
+- 提取侧 `shortnameLookupKeyOf`/`shortnameLookupResolution` 为同步纯函数（resolve 与 extract 共用，补查规则单一事实源）；ambiguous/pending 边 `resolvedTarget=null` 与断链共用，分态提示由消费入口经同一解析器实时判定。
+
+### 消费入口与资源许可面（T3）
+
+- 跳转（双链/普链/refEdit 虚拟面板）、悬停/嵌入读取、标题/块联想与块接受全部注入补查端口并分化 ambiguous（提示补充路径）/pending（更新中）提示；普链 `executeLinkIntent` 未改走 `resolveVaultLinkFile`（避免 no-workspace 早退翻转普链同目录可开的既有行为），补查经同步帮手复用同一组纯函数。
+- **CSP/localResourceRoots（1.82.3 真宿主探针实测，`notes/t3-csp-probe/`）**：根外绝对路径资源一律 401（fetch 与 `<img>` 同口径）；扩根重赋 options 触发**整页重载**（同值重赋无副作用）。接线：面板装配点（html 赋值前）经索引出链快照一次性授予 image/pdf 类绝对目标目录（`src/host/absoluteResourceRoots.ts`，最小许可面：只授目标所在目录、去重稳定）。**知情边界**：运行中新增的绝对目标与索引未就绪时打开的面板，资源在面板下次重建前不可达（不混报不存在）；动态扩根因整页重载打断输入不采用。
+- 跨根反链合并：目标所属根照常查询，他根凡登记过该目标绝对身份的分区按身份桶并入（updating 取并集）。
+- 出链面板跨根/外部条目第二行显示绝对身份。
+
+### 改名与移动三形态（T4）
+
+- `planEdgeTargetText` 按原文形态分派（形态判定复用规划器口径）：**绝对原文**随目标更新绝对形态（编码风格跟随、扩展名省略跟随原文）；**短名原文**依次判同目录直击（保留零编辑）→ 原短名新世界唯一命中（保留）→ 新短名唯一且准确（更新短名）→ 降级相对；**明确相对原文**根域内保持相对，越出根域改**明确绝对路径**（替代 cross-root 跳过报告，`RenameSkipReason` 收窄为仅 `edge-stale`）。
+- will 阶段唯一性校正：端口返回旧世界 catalog，按 moves 映射校正新世界同名集（改名者退出、移出根域剔除、移入根域并入）——补齐「will 阶段移入同名使短名失唯一」盲区；did 阶段在 `refreshRenamedBatch` 后查询天然新世界。端口未注入/未就绪/清单不完整均不冒充命中（退相对路径）。
+- dirty 剔除、undo 一步恢复、外部工具不改写、同批统一规划、别名/锚点/编码/无关正文保留语义不变。**已知代价**：1.82.3 对跨 workspace folder rename 事务的 additional text edits 静默丢弃（对照实验实证）——跨根批改写整批延迟到 did 通道独立 applyEdit，混合批失去撤销原子性（两步撤销）。
+
+### 三档设置与联想生成（T5）
+
+- `link.insertPathType` 三档枚举（shortest/relative/absolute，默认 relative），沿内置设置的 profile 级持久化、跨窗口广播与逐次读取即时生效；设置页「文件与链接」分页首组「内部链接」（链环内联字形，ui-patterns §2.2 登记）。档位值域单一事实源在 `src/shared/wikilinkInsertMode.ts`（webview 安全零依赖模块——settings.ts 需引值域，wikilinkQuery 的 node:path 依赖不得传染 webview 产物）。
+- `planWikilinkInsertPath` 三档（纯函数、档位由宿主调用点传入）：relative 现状风格不变（跨根/外部目标回退绝对保留身份）；absolute 宿主完整路径（Windows 含盘符 `/` 分隔）；shortest 候选序为**文件名裸形态（Markdown 核对通过时省 .md）→ 文件名+.md 形态 → 来源相对 → 绝对**，依次经统一解析器同步镜像核对（首个存在者须恰为所选目标；0/多候选/清单不完整/命中他目标均不通过）取最短。端口缺任一不冒充短名（退相对/绝对）。
+- 写回语法校验（`wikilinkFileCandidateSafe`）与身份核对链路保持；别名/锚点/默认显示文字规则不变。
+
+### 收口修复（评审与集成暴露）
+
+- **webview 打包**：settings→wikilinkQuery 引用曾把 node:path 拖进 browser 产物（单测不覆盖 esbuild 产物链，收口 compile 才暴露）——值域常量抽 `wikilinkInsertMode.ts` 断开传染边。
+- **身份形态转换**：catalog 绝对身份（`/` 分隔）与宿主 fsPath（Windows 反斜杠）在跳转/悬停/联想端口工厂统一转换（`vaultIdentityToFsPath`，七个注入点的唯一汇聚处）；纯逻辑层自带归一、形态不敏感。
+- **普链大小写归正**：普链候选命中后过 `statFileRealPath`（含 FileType.File 核验），与双链通道同口径，防绝对路径门放大的身份漂移。
+- **外部目标授权链**：增量重扫登记外部目标后的重抽复用登记前 resolver 闭包会使外部边恒断链——两路径重抽前重建 resolver。
+
+### 已知边界与待验
+
+- image 通道指向 `.md` 目标的短名域冗余（多触发无行为错误的冗余重抽）；补查门槛以引用索引 hasData 为界（首扫窗口期退 not-found 而非 pending，窗口短）；运行中新增绝对图源/PDF 待面板重建生效——三项为知情边界，不阻断验收。
+- Remote SSH/真 POSIX 宿主的资源服务与盘符行为由同代码路径推断，属人工验证清单待验项。
+- 验证记录：全量单测 8462 例、生产浏览器 102 套件（含设置页绘制层断言）、compile 全链、集成四分片（#556 全部翻转/新增用例绿）——日志与退出码见工作树 `notes/`（实施期证据，不入仓库）。自动化通过不等于用户验收。

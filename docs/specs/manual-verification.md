@@ -6,6 +6,8 @@
 
 ## 当前执行记录
 
+2026-10-15 短名链接、三档内部链接类型与绝对路径引用（#556，实施待用户验收）：独立工作树 `D:/.codex/worktrees/markdown-shortname-design/vscode-obsidian-like-editor`、分支 `codex/markdown-shortname-design`（基线 f2497d2d，五票+收口共 9 提交）实施，TDD 先红后绿。自动化证据：全量 Vitest 8462 例、`npm run compile` 全链、生产浏览器 102 套件（含「内部链接」设置页三档真实保存链路与链环字形绘制层断言）、真宿主集成四分片（#556 翻转/新增用例全部通过；1.82.3 便携宿主，`notes/` 留有日志与退出码，实施期证据不入仓库）。CSP/localResourceRoots 经 1.82.3 真宿主探针实测（根外资源 401、扩根重赋触发整页重载），工作区外绝对路径图片/PDF 经面板装配点一次性授权。**待用户人工验收项**：① Remote SSH/真 POSIX 宿主上绝对路径与资源服务行为（本机仅 Windows，同代码路径推断未实测远程）；② 工作区外图片/PDF 嵌入的真实观感与「运行中新增绝对目标须重开面板才可见」边界体验；③ 短名歧义提示（点击/悬停）与「更新中」状态的观感；④ 跨根移动后引用改写为绝对路径的正文效果与混合批两步撤销体验；⑤ 三档设置切换后联想插入的实际手感。实施事实与已知边界见[专项规格](markdown-shortname-links.md)「实施落档」节；代理自检不等于人工验收。
+
 2026-10-15 附加组件只读引用浮窗（T05，#544）：待用户使用真实组件按钮/文字触发，确认浮窗贴邻位置、鼠标移出延迟和键盘进入/Esc 归还焦点的手感；在 Live 父文档及递归引用中确认编辑、保存入口不出现。自动化验证定位见[只读引用规格](addon-reference-views.md)与[覆盖映射](vsidian-addons-coverage.md)，代理自检不等于人工验收。
 
 2026-10-14 Mermaid 限宽居中与拖放落点光标修复：可读行宽限宽档下阅读视图 Mermaid 块与其他阅读块同列居中（此前贴内容区左缘，铺满档不可见故长期未暴露）；Live 拖动选中文本悬停时显示 `.cm-dropCursor` 落点插入指示（此前缺 CM6 dropCursor 扩展；评审跟进补暗色轮提亮——baseTheme dark 变体只提亮 `.cm-cursor`，暗底黑线不可见）。worktree `vsidian-wt-mermaid-dropcursor`、分支 `fix/2026-10-mermaid-centering-dropcursor`（基线 5f2929ea）实施，TDD 先红后绿（CSS 契约测试、readingWidthProbe A7b 左缘一致、dropCursorPaint D1/D1b 绘制层与明暗颜色）；全量 Vitest 8001 通过、浏览器 96/97（`addonSettings` 为 #446 已知 textarea 空串抖动，定向重跑通过）、`check:stylecontract` 与类型检查通过。物理鼠标拖放落位手感、限宽档 Mermaid 居中观感与暗色轮落点光标可见性待用户验收。

@@ -2,7 +2,7 @@
 
 ## 状态
 
-已接受，2026-10-15 用户在 [#556](https://github.com/ONEGAYI/vsidian/issues/556) 设计访谈后最终确认以下决定并结束访谈。功能尚未实施，交互与验收要求见[实施规格](../specs/markdown-shortname-links.md)。
+已接受，2026-10-15 用户在 [#556](https://github.com/ONEGAYI/vsidian/issues/556) 设计访谈后最终确认以下决定并结束访谈。同日实施完成（五票+收口，实施事实与已知边界见[实施规格](../specs/markdown-shortname-links.md)「实施落档」节），**已实施待用户验收**；交互与验收要求见该规格。
 
 ## 背景
 
