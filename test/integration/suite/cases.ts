@@ -15508,7 +15508,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
         assert(doc.isDirty && doc.getText() === inserted + baseline, `${label}：未保存插入应精确应用一次`)
         await poll(`${label}：覆盖层登记丢弃链接`, async () => {
           const edges = await overlayOf()
-          return edges?.includes('rename-moved.md') ? true : undefined
+          // T2（#556）起 resolvedTarget 为规范绝对身份（`/` 分隔）——
+          // 相对旧形态与绝对新身份双兼容（同 11992 行口径）
+          return edges?.some((e) => e === 'rename-moved.md' || e?.endsWith('/rename-moved.md'))
+            ? true
+            : undefined
         })
         await vscode.commands.executeCommand(closeCommand)
         await poll(`${label}：丢弃/还原后覆盖层退役`, async () =>
