@@ -874,7 +874,12 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     const selection = themeSelection()
     return {
       themedProviderIds: themeService.themedProviderIds(),
-      ...(selection.activeProviderId !== undefined ? { activeThemeProviderId: selection.activeProviderId, activeThemeLanguages: selection.activeLanguages } : {}),
+      ...(selection.activeProviderId !== undefined ? {
+        activeThemeProviderId: selection.activeProviderId,
+        activeThemeLanguages: selection.activeLanguages,
+      } : {
+        unavailableThemeLanguages: selection.available ? undefined : themeService.knownLanguages(selection.preferred),
+      }),
     }
   }
 

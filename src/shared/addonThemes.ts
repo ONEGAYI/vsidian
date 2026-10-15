@@ -125,7 +125,7 @@ export function addonThemeCandidateOf(addonId: string, decl: AddonThemeDeclarati
     addonId,
     themeId: decl.themeId,
     themeRef: addonThemeRefOf(addonId, decl.themeId),
-    label: decl.label,
+    label: typeof decl.label === 'string' ? decl.label : { ...decl.label },
     rendererId: decl.rendererId,
     providerId: rendererProviderId(addonId, decl.rendererId),
     languages: decl.languages.map((l) => normalizeRendererLanguage(l)),

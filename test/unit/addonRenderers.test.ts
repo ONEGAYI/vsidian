@@ -322,7 +322,7 @@ describe('#546 T07 主题关联提供者的选择例外', () => {
     expect(result.languages.find((entry) => entry.language === 'plantuml')!.effective).toBe('none')
   })
 
-  it('主题选中但提供者不可用：语言回默认序（排除主题提供者），首选记录不清除的语义由宿主层保留', () => {
+  it('主题选中但提供者不可用：声明语言回内置，首选记录不清除的语义由宿主层保留', () => {
     const result = selectEffectiveRenderers({
       ...baseInput,
       isAvailable: (c) => c.addonId !== 'pub.theme-pack',
@@ -332,6 +332,27 @@ describe('#546 T07 主题关联提供者的选择例外', () => {
     expect(mermaid.effective).toBe(BUILTIN_RENDERER_PROVIDER_ID)
     const plantuml = result.languages.find((l) => l.language === 'plantuml')!
     expect(plantuml.effective).toBe('none')
+  })
+
+  it.each<Readonly<Record<string, string>>>([{}, { mermaid: 'pub.plain/mermaid' }])('选中主题失效时同语言普通提供者不能接管（普通首选 %j）', (preferred) => {
+    const competingProvider = candidate('pub.plain', 'mermaid', ['mermaid', 'plantuml'])
+    const input = { ...baseInput, candidates: [...baseInput.candidates, competingProvider], preferred }
+    const activeTheme = { themedProviderIds, activeThemeProviderId: themeProvider.providerId, activeThemeLanguages: themeProvider.languages }
+    expect(selectEffectiveRenderers({ ...input, theme: activeTheme }).languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(themeProvider.providerId)
+
+    for (const theme of [
+      activeTheme,
+      { themedProviderIds: new Set<string>(), unavailableThemeLanguages: themeProvider.languages },
+    ]) {
+      const result = selectEffectiveRenderers({ ...input, isAvailable: (c) => c.addonId !== 'pub.theme-pack', theme })
+      expect(result.languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(BUILTIN_RENDERER_PROVIDER_ID)
+      expect(result.languages.find((entry) => entry.language === 'plantuml')!.effective).toBe('none')
+      expect(result.languages.find((entry) => entry.language === 't09draw')!.effective).toBe(plainProvider.providerId)
+    }
+
+    expect(selectEffectiveRenderers({ ...input, theme: activeTheme }).languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(themeProvider.providerId)
+    const unselected = selectEffectiveRenderers({ ...input, theme: { themedProviderIds } })
+    expect(unselected.languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(competingProvider.providerId)
   })
 
   it('renderer 按语言显式首选不能指向主题关联提供者（不能经候选路径绕过主题单选）', () => {

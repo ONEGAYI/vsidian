@@ -9,7 +9,9 @@
 //  驱动）与注册句柄 dispose（整组撤销）；
 // - 目录版本：内容变化才递增（等值幂等——重复注册不产生广播噪声）；
 // - themedProviderIds：当前运行代次登记过的提供者 ID 集（目录撤销不会让
-//  页面残留候选变成普通自动接管；代次结束与候选一起回收）。
+//  页面残留候选变成普通自动接管；代次结束与候选一起回收）；
+// - 已知声明语言：会话内保留最后一次登记值，供主题失效时限定内置回落
+//  范围；它不使目录/提供者保持可用，也不持久化未知主题元数据。
 //
 // 目录不持久化：主题元数据由组件代码在每次接入时注册（加载模型 A——
 // 代码是能力单一事实源）；用户首选持久化在宿主设置键（appearance.theme，
@@ -29,6 +31,7 @@ export interface AddonThemeServicePorts {
 export class AddonThemeService {
   private readonly byAddon = new Map<string, readonly AddonThemeCandidate[]>()
   private readonly providerIds = new Map<string, Set<string>>()
+  private readonly languagesByTheme = new Map<string, readonly string[]>()
   private currentVersion = 0
   private readonly listeners = new Set<() => void>()
 
@@ -47,7 +50,10 @@ export class AddonThemeService {
     }
     const candidates = (declarations as readonly AddonThemeDeclaration[]).map((decl) => addonThemeCandidateOf(addonId, decl))
     const declared = this.providerIds.get(addonId) ?? new Set<string>()
-    for (const candidate of candidates) declared.add(candidate.providerId)
+    for (const candidate of candidates) {
+      declared.add(candidate.providerId)
+      this.languagesByTheme.set(candidate.themeRef, candidate.languages)
+    }
     this.providerIds.set(addonId, declared)
     const known = this.byAddon.get(addonId)
     if (candidates.length === 0) {
@@ -82,6 +88,11 @@ export class AddonThemeService {
       out.push(...themes)
     }
     return out
+  }
+
+  /** 本会话已登记主题的最后语言快照；目录回收后仍用于原首选的内置回落。 */
+  knownLanguages(themeRef: string): readonly string[] | undefined {
+    return this.languagesByTheme.get(themeRef)
   }
 
   /** 目录版本（内容变化才递增；设置页载荷 version 用） */

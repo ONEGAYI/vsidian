@@ -99,6 +99,24 @@ describe('整组替换、回收与幂等', () => {
     expect(changes).toBe(2)
   })
 
+  it('登记复制本地化名称：作者改原映射后旧快照不变，再登记广播新名称', () => {
+    const service = new AddonThemeService({ log: () => {} })
+    const labels = { en: 'A', 'zh-cn': '水青' }
+    const theme = declaration({ label: labels })
+    const seen: unknown[] = []
+    service.onChanged(() => seen.push(service.catalog()[0]?.label))
+    service.register('pub.pack', [theme])
+    const original = service.catalog()
+
+    labels.en = 'B'
+    service.register('pub.pack', [theme])
+
+    expect(original[0]!.label).toEqual({ en: 'A', 'zh-cn': '水青' })
+    expect(service.version()).toBe(2)
+    expect(seen).toEqual([{ en: 'A', 'zh-cn': '水青' }, { en: 'B', 'zh-cn': '水青' }])
+    expect(service.catalog()[0]!.label).toEqual({ en: 'B', 'zh-cn': '水青' })
+  })
+
   it('空数组注册 = 该组件目录整体撤销（等价回收，经通知）', () => {
     const service = new AddonThemeService({ log: () => {} })
     service.register('pub.pack', [declaration()])
@@ -109,6 +127,24 @@ describe('整组替换、回收与幂等', () => {
     service.register('pub.pack', [])
     expect(service.catalog()).toEqual([])
     expect(changes).toBe(1)
+  })
+
+  it('撤销/代次回收保留会话内已知声明语言，同身份重登记替换，未知首选不猜语言', () => {
+    const service = new AddonThemeService({ log: () => {} })
+    const handle = service.register('pub.pack', [declaration()])
+    const original = service.knownLanguages('pub.pack/aqua')
+    handle.dispose()
+    expect(service.catalog()).toEqual([])
+    expect(service.knownLanguages('pub.pack/aqua')).toEqual(['mermaid'])
+    service.releaseAddon('pub.pack')
+    expect(service.knownLanguages('pub.pack/aqua')).toEqual(['mermaid'])
+
+    service.register('pub.pack', [declaration({ languages: ['plantuml'] })])
+    service.register('pub.pack', [])
+    expect(service.knownLanguages('pub.pack/aqua')).toEqual(['plantuml'])
+    expect(original).toEqual(['mermaid'])
+    expect(service.knownLanguages('unknown/theme')).toBeUndefined()
+    expect(new AddonThemeService({ log: () => {} }).knownLanguages('pub.pack/aqua')).toBeUndefined()
   })
 })
 
