@@ -5831,7 +5831,11 @@ async function resolveWorkspaceImage(
   let stat: vscode.FileStat
   try {
     stat = await vscode.workspace.fs.stat(uri)
+    // TODO(临时诊断，CI Linux not-found 定位后移除)：请求时刻的 stat 实况
+    console.error(`[vsidian-img-stat] OK ${target.fsPath} type=${stat.type}`)
   } catch (err) {
+    // TODO(临时诊断，同上)
+    console.error(`[vsidian-img-stat] ERR ${target.fsPath} code=${(err as { code?: string }).code ?? ''} name=${(err as Error).name} msg=${(err as Error).message}`)
     if (isFileNotFound(err)) {
       versions.recordMissing(target.fsPath)
       return { ok: false, reason: 'not-found', detail: target.fsPath, fsPath: target.fsPath }
