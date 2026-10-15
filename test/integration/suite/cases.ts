@@ -11410,15 +11410,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
   ['#556 收口三面：外部绝对图片授权绘制、歧义悬停错误卡与出链绝对路径行', async () => {
     // 动态 fixture：外部资产目录在 wsDir 之外（绝对路径目标与
-    // localResourceRoots 授权面的真实素材——路径依赖运行时 mkdtemp）
-    const outsideDir = await mkdtemp(`${wsDir.slice(0, Math.max(3, wsDir.lastIndexOf('\\'))) || wsDir}-abs-`)
+    // localResourceRoots 授权面的真实素材——路径依赖运行时 mkdtemp）。
+    // 父目录取法必须平台无关：CI Linux 上 wsDir 无反斜杠，lastIndexOf 截
+    // 断会把模板落到文件系统根（EACCES），join/dirname 两端一致
+    const nodePath = require('path') as typeof import('path')
+    const outsideDir = await mkdtemp(nodePath.join(nodePath.dirname(wsDir), 'abs-'))
     const outsideAbsPosix = outsideDir.replace(/\\/g, '/').toLowerCase()
     const eqFold = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
     try {
-      await writeFile(`${outsideDir}\\外部图片.png`, Buffer.from(TINY_PNG_BASE64, 'base64'))
-      await writeFile(`${outsideDir}\\外部目标.md`, '# 外部目标\n\n外部正文。\n', 'utf8')
-      await mkdir(`${wsDir}\\dira`, { recursive: true })
-      await mkdir(`${wsDir}\\dirb`, { recursive: true })
+      await writeFile(nodePath.join(outsideDir, '外部图片.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+      await writeFile(nodePath.join(outsideDir, '外部目标.md'), '# 外部目标\n\n外部正文。\n', 'utf8')
+      await mkdir(nodePath.join(wsDir, 'dira'), { recursive: true })
+      await mkdir(nodePath.join(wsDir, 'dirb'), { recursive: true })
       await writeFile(wsUri('dira/短名二义.md').fsPath, '# 歧义甲\n', 'utf8')
       await writeFile(wsUri('dirb/短名二义.md').fsPath, '# 歧义乙\n', 'utf8')
       // 断言载体文档：外部绝对图片嵌入 + 外部 Markdown 绝对目标 + 歧义短名
@@ -11510,8 +11513,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       for (const rel of ['绝对观测.md', 'dira/短名二义.md', 'dirb/短名二义.md']) {
         await rm(wsUri(rel).fsPath, { force: true }).catch(() => {})
       }
-      await rm(`${wsDir}\\dira`, { recursive: true, force: true }).catch(() => {})
-      await rm(`${wsDir}\\dirb`, { recursive: true, force: true }).catch(() => {})
+      await rm(nodePath.join(wsDir, 'dira'), { recursive: true, force: true }).catch(() => {})
+      await rm(nodePath.join(wsDir, 'dirb'), { recursive: true, force: true }).catch(() => {})
       await rm(outsideDir, { recursive: true, force: true }).catch(() => {})
     }
   }],
