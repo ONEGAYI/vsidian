@@ -2893,8 +2893,8 @@ export function validateAddonPasteRuleDeclarations(
     }
     let priority = 0
     if (raw.priority !== undefined) {
-      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority) || Math.abs(raw.priority) > PRIORITY_LIMIT) {
-        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为 |n|≤${PRIORITY_LIMIT} 的整数：${String(raw.priority)}` }
+      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority)) {
+        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为整数：${String(raw.priority)}` }
       }
       priority = raw.priority
     }

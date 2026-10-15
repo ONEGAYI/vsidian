@@ -74,6 +74,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **四票组合重锚理由（2026-10-15）**：T01/T03/T05/T07 以真实 merge 保留各实施锚点，组合实施提交为 `8cf6a681`。旧 T01 基线可信复验通过，候选比较记录 7 项预期变化：主题选择目标与自动接管语义两项、宿主登记/页面 SDK/文档导航/渲染选择相关签名五项（`out/test/addon-batch-takeover/api-before-reanchor.json`）。按字节冻结规则执行 `--emit-baseline --anchor 8cf6a681`，从已提交组合对象发射 33 条目、21 签名模块及候选台账快照，随后独立提交并复验。重锚保留旧接口、历史对象和失败证据，不修改检查器、不加豁免，API 1.0.0 仍为未发行候选。
 
+**组合后 T01 契约修复重锚（2026-10-15）**：`7eb4dfc3` 修正真实槽声明判定，并按已批准规格移除整数优先级的额外私有幅度限制。公开调用形状未变，但现有声明提取器对导出校验函数保留完整文本，因此优先级校验实现变化使 `validateAddonPasteRuleDeclarations` 单项触发 `signature-declaration-changed`；其余检查通过，失败证据为 `out/test/addon-batch-takeover/final-api-before-fix.json`。按现有规则以包含修复的 `9c03461b` 显式发射新候选基线，同步生成参考；仍为 33 条目、21 签名模块和未发行的 1.0.0，不改检查器或增加豁免。新锚点可信复验与完整兼容结果见 `final-api-baseline.log` / `final-api-compat.json`。
+
 ## CI 接线（代码侧，已交付）
 
 `.github/workflows/ci.yml` 新增独立 job **`addon-api-contract`**（job 名即 required status check 的 context 名），与 `style-contract` 同序同型——**先证检查器可信，再信检查结果**：
