@@ -1632,9 +1632,51 @@ export class VaultIndexService {
       lookupShortname: this.shortnameLookupFor(state),
       resolveAbsolute,
     })
-    return worldReapply
+    const prevOverlayEdges = state.overlay.get(rel)?.edges ?? []
+    const accepted = worldReapply
       ? state.overlay.reapply(rel, pending.version, edges)
       : state.overlay.apply(rel, pending.version, edges)
+    if (accepted) {
+      // 评审 F6：覆盖层重算的 retarget 同款补发（与 rescanFile 基线通道一致）
+      this.publishVanishedTargets(state, prevOverlayEdges, edges)
+    }
+    return accepted
+  }
+
+  /** 评审 F6：来源边重抽（基线或覆盖层）后消失的旧解析身份补发失效——
+   *  短名 retarget、相对候选抢占等场景，旧身份文件本身无变化、只有引用
+   *  解析语义变化，既有通道只发新身份事件；订阅旧身份的挂载悬停/嵌入
+   *  由此收到 changed（stat null）并重发解析。身份去重后逐个发布 */
+  private publishVanishedTargets(
+    state: RootIndexState,
+    prevEdges: readonly VaultEdge[],
+    nextEdges: readonly VaultEdge[],
+  ): void {
+    if (prevEdges.length === 0) {
+      return
+    }
+    const next = new Set(
+      nextEdges.map((e) => e.resolvedTarget).filter((t): t is string => t !== null),
+    )
+    const vanished = new Set<string>()
+    for (const e of prevEdges) {
+      if (e.resolvedTarget !== null && !next.has(e.resolvedTarget)) {
+        vanished.add(e.resolvedTarget)
+      }
+    }
+    for (const target of vanished) {
+      // 已从登记表移除的身份走删除/失效通道（deleted/stale 已发，消费方
+      // 收到正确分态），不重复补发——补发面是「文件仍在、仅引用解析转移」。
+      // 根内条目键为 rel、外部/跨根条目键为 normKey 绝对身份，双形态查表
+      const relForm = this.relOf(state, target)
+      const registered = relForm !== null
+        ? state.model!.files.has(relForm)
+        : state.model!.files.has(this.normKey(target))
+      if (!registered) {
+        continue
+      }
+      this.publishTargetChange(state, target, 'changed', null)
+    }
   }
 
   /** 文档保存：覆盖层退役 + 增量队列重扫（有界；等待排空） */
@@ -1910,8 +1952,14 @@ export class VaultIndexService {
       contentVersion: (prevEntry?.contentVersion ?? 0) + 1,
       ...this.birthtimeOf(stat),
     })
+    const prevEdges = state.model.edges.filter((e) => e.source === rel)
     state.model.edges = state.model.edges.filter((e) => e.source !== rel).concat(edges)
     this.refreshDerived(state)
+    // 评审 F6：重抽使该来源部分边的解析身份消失（短名 retarget、相对候选
+    // 抢占）——订阅旧身份的挂载悬停/嵌入须收到失效才能重发解析；新身份
+    // 的 changed 已由目标登记/重扫发布，旧身份无文件变化、只有解析语义
+    // 变化，在此按身份补发（幂等，代次推进触发 webview 重发）
+    this.publishVanishedTargets(state, prevEdges, edges)
     // #377 T02：md 增量重扫同步维护清单条目（磁盘 stat——未保存编辑不参
     // 与；changed 广播由下方既有发布承担，不双发）
     this.applyCatalogUpsert(state, rel, 'markdown', stat.mtimeMs, stat.size, false)

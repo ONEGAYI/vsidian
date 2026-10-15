@@ -559,6 +559,33 @@ describe('确认与光标位置（文件字段整体替换）', () => {
       controller.dispose()
     }
   })
+
+  it('评审 F7：失效到达后的 300ms 重查窗内 Enter 不提交旧候选（吞键并立即重查）', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    const { controller, sent, view } = setup('[[Aa]]')
+    try {
+      locate(controller, 4)
+      typeAt(view, 4, 'x')
+      deleteAt(view, 4, 5)
+      respond(controller, sent, [FANGAN])
+      const reqBeforeInvalidate = lastQuery(sent)!.reqId
+      // 索引变更（如新增同目录同名目标）：失效到达，重查被 300ms 去抖——
+      // 窗内旧候选可能已不指向用户所选（评审复现：仍写入旧 insertPath）
+      controller.handleHostMessage({ kind: 'wikilink.invalidate' })
+      const docBefore = view.state.doc.toString()
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe(docBefore) // 不提交旧候选
+      // 吞键的同时立即触发重查（不等去抖窗）
+      expect(lastQuery(sent)!.reqId).toBeGreaterThan(reqBeforeInvalidate)
+      // 新结果到达后可正常确认（无别名时补默认别名——既有行为）
+      respond(controller, sent, [FANGAN])
+      press(view, 'Enter')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md|方案]]')
+    } finally {
+      controller.dispose()
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('异步列表更新按候选身份保留手动高亮', () => {

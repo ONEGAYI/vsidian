@@ -2769,6 +2769,26 @@ describe('VaultIndexService：#556 T2 短名补查与目标身份（索引接线
       expect(out.items[0]).toMatchObject({ resolved: false, targetFsPath: null })
     }
   })
+
+  it('评审 F6：短名 retarget 后消失的旧解析身份收到失效事件（挂载预览不陈旧）', async () => {
+    const fs = makeFs({
+      'C:/vault/项目/来源.md': '# 源\n\n见 [[目标]]。\n',
+      'C:/vault/资料/目标.md': '# 标\n',
+    })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    const events: string[] = []
+    service.onTargetChange((e) => events.push(`${e.relPath}:${e.status}`))
+    // 相对候选抢占：新增来源目录同名文件，边从 资料/目标 retarget 到
+    // 项目/目标——旧身份（资料/目标）必须收到事件（订阅旧目标的悬停/
+    // 嵌入据此重发解析），仅有新身份的 changed 不刷新旧订阅
+    fs.files.set('C:/vault/项目/目标.md', '# 近\n')
+    fs.stats.set('C:/vault/项目/目标.md', { mtimeMs: 1_700_000_100_000, size: 4 })
+    scan.emit('C:/vault/项目/目标.md')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(events).toContain('C:/vault/资料/目标.md:changed')
+  })
 })
 
 describe('VaultIndexService：#556 T2 外部与跨根目标（绝对身份登记与失效）', () => {
