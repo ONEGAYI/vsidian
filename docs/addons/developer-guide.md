@@ -294,3 +294,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 用户故事覆盖映射 | `docs/specs/vsidian-addons-coverage.md`（接口或验证变更时同步更新） |
 
 签名或语义调整必须同步：语义清单条目 → 重生成参考 → 消费样例与钉住断言 → 台账（如涉版本状态）。
+
+## 9. 后续 API 扩展规格（已定稿，尚未实施）
+
+2026-10-15 批次新增能力的正式设计见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。当前公开声明和生成参考仍是实际可消费能力的事实源；不能因规格已定稿就调用尚未实现的接口。

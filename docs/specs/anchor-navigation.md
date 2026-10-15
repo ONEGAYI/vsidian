@@ -1,5 +1,7 @@
 # 规格：锚点跳转（标题引用、块引用与复制块链接）
 
+> 2026-10-15 新增普通链接尾部行号与组件导航的正式规格见[文档导航与普通链接行号](addon-navigation.md)（#531/#534，尚未实施）。本文已有标题/块引用语义继续适用，新批次不为普通链接开放文本附件 fragment 语法。
+
 状态：已共识待实施。本文是锚点跳转能力的单一事实源，覆盖本批次三张实施票：[#159](https://github.com/ONEGAYI/vsidian/issues/159)（wikilink 锚点）、[#160](https://github.com/ONEGAYI/vsidian/issues/160)（普通链接锚点）、[#162](https://github.com/ONEGAYI/vsidian/issues/162)（复制块链接入口，Blocked by #159）。母题为 #16 的锚点切片；反链面板、链接索引、重命名更新引用与 Markdown 嵌入**明确不在本批**（维持 ADR-0002 按需解析路线，无索引）。
 
 ## 范围
