@@ -198,6 +198,9 @@ const ADDON_SETTINGS_KEY = 'vsidian.addons.settings'
  *  冻结——shared/addonRenderers；globalState 用户层，跨窗口幂等） */
 const ADDON_RENDERERS_KEY = 'vsidian.addons.renderers'
 
+/** 当前主题首选的派生语言快照（profile 单记录，不是第二份可写首选）。 */
+const ADDON_SELECTED_THEME_LANGUAGES_KEY = 'vsidian.addons.selectedThemeLanguages'
+
 /** #353 T04 无工作区判定：文件夹或多根工作区任一在场（空窗口 false） */
 function hostHasWorkspace(): boolean {
   return vscode.workspace.workspaceFolders !== undefined || vscode.workspace.workspaceFile !== undefined
@@ -253,6 +256,15 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
   const channel = vscode.window.createOutputChannel(t('host.addonsChannelName'))
   const log = (message: string): void => {
     channel.appendLine(`[${new Date().toISOString()}] ${message}`)
+  }
+
+  /** 主题唯一首选（宿主设置快照解析：新键权威 + 旧键过渡回显） */
+  const themePreferred = (): string => {
+    const snapshot = hostSettings.getSnapshot()
+    return resolveThemePreferred(
+      typeof snapshot[APPEARANCE_THEME_KEY] === 'string' ? snapshot[APPEARANCE_THEME_KEY] : undefined,
+      typeof snapshot[MERMAID_THEME_KEY] === 'string' ? snapshot[MERMAID_THEME_KEY] : undefined,
+    )
   }
 
   // 注册表 + 运行生命周期：findExtension 核对「当前扩展宿主注册表中的记录」
@@ -315,10 +327,22 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
   const pasteRuleService = new AddonPasteRuleService({
     log: (stage, detail) => log(`addons ${stage}: ${detail}`),
   })
-  // #546 T07 主题目录服务（enable 生命周期注册；不持久化——元数据由
-  // 组件代码每次接入注册，用户首选在宿主设置键）
+  // #546 T07 主题目录按 enable 生命周期注册；只持久化当前首选的派生
+  // 语言，使组件冷启动不可用时仍按已知声明范围回落（首选仍在设置键）。
   const themeService = new AddonThemeService({
     log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
+    preferred: themePreferred,
+    persistence: {
+      read: () => context.globalState.get(ADDON_SELECTED_THEME_LANGUAGES_KEY),
+      write: async (value) => {
+        try {
+          await context.globalState.update(ADDON_SELECTED_THEME_LANGUAGES_KEY, value)
+          return true
+        } catch {
+          return false
+        }
+      },
+    },
   })
   // #404 组件数据目录：base = <globalStorage>/addons（Uri 构造保证跨平台
   // 路径形态；fsPath 正斜杠归一供纯逻辑服务拼接，workspace.fs 经 Uri 回装）
@@ -852,15 +876,6 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
 
   // ---- #546 T07 主题上下文与目录载荷 ----
 
-  /** 主题唯一首选（宿主设置快照解析：新键权威 + 旧键过渡回显） */
-  const themePreferred = (): string => {
-    const snapshot = hostSettings.getSnapshot()
-    return resolveThemePreferred(
-      typeof snapshot[APPEARANCE_THEME_KEY] === 'string' ? snapshot[APPEARANCE_THEME_KEY] : undefined,
-      typeof snapshot[MERMAID_THEME_KEY] === 'string' ? snapshot[MERMAID_THEME_KEY] : undefined,
-    )
-  }
-
   /** 主题选择解析（目录 + 首选 + 组件可用性） */
   const themeSelection = () =>
     resolveActiveTheme({
@@ -997,6 +1012,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     postThemesState()
   })
   const offSettingsChangedForThemes = hostSettings.onChange(() => {
+    themeService.refreshPreferred()
     refreshRendererTable()
     postThemesState()
   })

@@ -4,6 +4,22 @@
 import { describe, expect, it } from 'vitest'
 import { AddonThemeService } from '../../src/host/addons/addonThemeService'
 import { isAddonThemesStatePayload, themedProviderIdsOf, type AddonThemeDeclaration } from '../../src/shared/addonThemes'
+import { selectEffectiveRenderers } from '../../src/shared/addonRenderers'
+import { SettingsService, type SettingsStorage } from '../../src/host/settingsService'
+import { APPEARANCE_THEME_KEY, appearanceThemePatch, PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
+
+function memoryPort(initial: unknown = undefined) {
+  return {
+    data: initial,
+    writes: [] as unknown[],
+    read(): unknown { return this.data },
+    async write(value: unknown): Promise<boolean> {
+      this.data = value
+      this.writes.push(value)
+      return true
+    },
+  }
+}
 
 function declaration(opts: Partial<AddonThemeDeclaration> = {}): AddonThemeDeclaration {
   return {
@@ -129,8 +145,8 @@ describe('整组替换、回收与幂等', () => {
     expect(changes).toBe(1)
   })
 
-  it('撤销/代次回收保留会话内已知声明语言，同身份重登记替换，未知首选不猜语言', () => {
-    const service = new AddonThemeService({ log: () => {} })
+  it('撤销/代次回收保留当前已选主题语言，同身份重登记替换，未知首选不猜语言', () => {
+    const service = new AddonThemeService({ log: () => {}, preferred: () => 'pub.pack/aqua' })
     const handle = service.register('pub.pack', [declaration()])
     const original = service.knownLanguages('pub.pack/aqua')
     handle.dispose()
@@ -145,6 +161,136 @@ describe('整组替换、回收与幂等', () => {
     expect(original).toEqual(['mermaid'])
     expect(service.knownLanguages('unknown/theme')).toBeUndefined()
     expect(new AddonThemeService({ log: () => {} }).knownLanguages('pub.pack/aqua')).toBeUndefined()
+  })
+})
+
+describe('当前首选的 profile 派生语言快照', () => {
+  it('真实主题停用后使用同一 profile 重建宿主：未登记主题仍回内置，未声明语言继续普通规则', async () => {
+    const profile = new Map<string, unknown>()
+    const storage: SettingsStorage = {
+      get: <T>(key: string) => profile.get(key) as T | undefined,
+      update: async (key, value) => { profile.set(key, value) },
+    }
+    const firstSettings = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
+    const persistence = {
+      read: () => profile.get('theme-languages'),
+      write: async (value: unknown) => { profile.set('theme-languages', value); return true },
+    }
+    const first = new AddonThemeService({
+      log: () => {}, persistence,
+      preferred: () => firstSettings.getSnapshot()[APPEARANCE_THEME_KEY] as string,
+    })
+    firstSettings.onChange(() => first.refreshPreferred())
+    first.register('pub.pack', [declaration()])
+    expect(profile.get('theme-languages')).toBeUndefined()
+    await firstSettings.apply(appearanceThemePatch('pub.pack/aqua'))
+    first.releaseAddon('pub.pack')
+
+    const reopenedSettings = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
+    const preferred = reopenedSettings.getSnapshot()[APPEARANCE_THEME_KEY] as string
+    const reopened = new AddonThemeService({ log: () => {}, persistence, preferred: () => preferred })
+    const ordinary = {
+      addonId: 'pub.plain', rendererId: 'renderer', providerId: 'pub.plain/renderer', label: 'Plain',
+      languages: ['mermaid', 't09draw'], modes: ['live' as const], exportFormats: ['svg' as const],
+    }
+    const table = selectEffectiveRenderers({
+      candidates: [ordinary], isAvailable: () => true, builtinLanguages: ['mermaid'],
+      preferred: { mermaid: ordinary.providerId }, batches: { 'pub.plain': 1 },
+      theme: { themedProviderIds: reopened.themedProviderIds(), unavailableThemeLanguages: reopened.knownLanguages(preferred) },
+    })
+    expect(preferred).toBe('pub.pack/aqua')
+    expect(reopened.catalog()).toEqual([])
+    expect(table.languages.find((entry) => entry.language === 'mermaid')!.effective).toBe('builtin')
+    expect(table.languages.find((entry) => entry.language === 't09draw')!.effective).toBe(ordinary.providerId)
+    expect(profile.get('theme-languages')).toEqual({ version: 1, themeRef: preferred, languages: ['mermaid'] })
+    expect(profile.get('vsidian.settings')).toEqual(appearanceThemePatch(preferred))
+  })
+
+  it('只保留有效目录与当前首选快照，切换后丢弃已回收的历史主题语言', () => {
+    const persistence = memoryPort()
+    let preferred = 'pub.pack/aqua'
+    const service = new AddonThemeService({ log: () => {}, persistence, preferred: () => preferred })
+    service.register('pub.pack', [declaration()])
+    service.register('pub.other', [declaration({ languages: ['plantuml'] })])
+    service.releaseAddon('pub.pack')
+    expect(service.knownLanguages('pub.pack/aqua')).toEqual(['mermaid'])
+    expect(service.knownLanguages('pub.other/aqua')).toEqual(['plantuml'])
+
+    preferred = 'pub.other/aqua'
+    service.refreshPreferred()
+    expect(service.knownLanguages('pub.pack/aqua')).toBeUndefined()
+    service.releaseAddon('pub.other')
+    expect(service.knownLanguages('pub.other/aqua')).toEqual(['plantuml'])
+    expect(persistence.data).toEqual({ version: 1, themeRef: preferred, languages: ['plantuml'] })
+
+    preferred = 'unknown/theme'
+    service.refreshPreferred()
+    expect(service.knownLanguages('unknown/theme')).toBeUndefined()
+    expect(service.knownLanguages('pub.other/aqua')).toBeUndefined()
+    expect(persistence.data).toBeUndefined()
+  })
+
+  it('当前首选同身份更新替换持久语言，等值重登记不重复写，内置选择清空派生快照', () => {
+    const persistence = memoryPort()
+    let preferred = 'pub.pack/aqua'
+    const service = new AddonThemeService({ log: () => {}, persistence, preferred: () => preferred })
+    service.register('pub.pack', [declaration()])
+    service.register('pub.pack', [declaration()])
+    expect(persistence.writes).toHaveLength(1)
+    service.register('pub.pack', [declaration({ languages: ['plantuml'] })])
+    expect(persistence.data).toEqual({ version: 1, themeRef: preferred, languages: ['plantuml'] })
+    preferred = 'default'
+    service.refreshPreferred()
+    expect(persistence.data).toBeUndefined()
+    service.releaseAddon('pub.pack')
+    expect(service.knownLanguages('pub.pack/aqua')).toBeUndefined()
+  })
+
+  it.each([
+    null,
+    [],
+    { version: 2, themeRef: 'pub.pack/aqua', languages: ['mermaid'] },
+    { version: 1, themeRef: 'pub.pack/aqua', languages: [] },
+    { version: 1, themeRef: 'pub.pack/aqua', languages: [''] },
+    { version: 1, themeRef: 'pub.pack/aqua', languages: [1] },
+    { version: 1, themeRef: 'pub.pack/aqua', languages: ['x'.repeat(65)] },
+    { version: 1, themeRef: 'pub.pack/aqua', languages: Array(9).fill('mermaid') },
+    { version: 1, themeRef: 'default', languages: ['mermaid'] },
+    { version: 1, themeRef: `pub.pack/${'x'.repeat(65)}`, languages: ['mermaid'] },
+    { version: 1, themeRef: `${'x'.repeat(193)}/aqua`, languages: ['mermaid'] },
+    { version: 1, themeRef: 'pub.other/aqua', languages: ['mermaid'] },
+  ])('非法或与唯一首选不匹配的存储快照不提供语言（%j）', (stored) => {
+    const service = new AddonThemeService({
+      log: () => {}, preferred: () => 'pub.pack/aqua', persistence: memoryPort(stored),
+    })
+    expect(service.knownLanguages('pub.pack/aqua')).toBeUndefined()
+  })
+
+  it('真正未知的首选没有可信语言，不抑制普通提供者', () => {
+    const service = new AddonThemeService({ log: () => {}, preferred: () => 'unknown/theme', persistence: memoryPort() })
+    const table = selectEffectiveRenderers({
+      candidates: [{
+        addonId: 'pub.plain', rendererId: 'r', providerId: 'pub.plain/r', label: 'Plain',
+        languages: ['mermaid', 't09draw'], modes: ['live'], exportFormats: ['svg'],
+      }],
+      isAvailable: () => true, builtinLanguages: ['mermaid'], preferred: {}, batches: { 'pub.plain': 1 },
+      theme: { themedProviderIds: service.themedProviderIds(), unavailableThemeLanguages: service.knownLanguages('unknown/theme') },
+    })
+    expect(table.languages.map((entry) => entry.effective)).toEqual(['pub.plain/r', 'pub.plain/r'])
+  })
+
+  it('持久化失败记录日志，不改写权威首选或阻断当前会话的回落', async () => {
+    const logs: string[] = []
+    const service = new AddonThemeService({
+      preferred: () => 'pub.pack/aqua',
+      persistence: { read: () => undefined, write: async () => false },
+      log: (stage) => logs.push(stage),
+    })
+    service.register('pub.pack', [declaration()])
+    service.releaseAddon('pub.pack')
+    await Promise.resolve()
+    expect(logs).toEqual(['theme-languages-persist-failed'])
+    expect(service.knownLanguages('pub.pack/aqua')).toEqual(['mermaid'])
   })
 })
 
