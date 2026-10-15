@@ -103,4 +103,6 @@ T07 覆盖 H-U01–H-U08、H-U11；T08 覆盖 H-U09/H-U10/H-U12 并复验降级�
 
 界面沿用外观第四个 pill 页签、组头图标、标准设置行和徽章，原生 radio 为 16px，未增加卡片层级。新增 UI 档位说明位于 [ui-patterns §2.3](ui-patterns.md)。公开 `.vsidian-mermaid` 族、阅读入口及 CSS 变量未改，历史对照保持 `v0.4.0`（`75c3df79074bdeaec0f02a38d40124f0cd66f857`）；本票起点 `84e91ea028ac64d5f7fab38d51b6b7472494ca3f` 固定未发布实现。样式基线复验与八项门禁仍使用独立历史材料，不改写样式基线。
 
+既有 `settingsPage` 浏览器回归同步改为主题 radio 和新页签名称，保留组头图标、负边距、描边及持久回显断言；亮暗两轮通过（`t07-resume-settings-browser-green.log`）。`addonRendererTakeover` 与 `graphicPopup` 定向回归通过（`t07-resume-graphics-browser.log`），分别保护普通提供者规则和内核 default/Codex 的弹窗快照、配色与导出。
+
 接手续作证据保留在 T07 工作树的 `out/test/t07-resume-*`：边界和回调先红后绿，17 个 focused 单测文件 360 项、compile、`addonThemes` 浏览器五场景及样式契约通过。真宿主 `t07-resume-integration2.log` 为 1/1 通过，覆盖无文档目录、两文档图形计算色、四态主题事件与停用恢复；首轮夹具光标落在围栏导致源码态等待超时，已改为定位到尾段后复验。多文档接线复用 T03 确认的 `panelStateKey(docUri, sessionId)`，避免不同文档的同名 panel ID 相撞。联合全量回归由汇总分支执行；人工检查主题列表与真实系统跟随体验仍待用户验收。API 仍为 1.0.0 候选，不添加发行日期；签名及 renderer-selection 主题例外显式重锚候选兼容基线，理由见 [API 门禁规格](addons-api-gate.md)。

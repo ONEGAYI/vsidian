@@ -31,6 +31,13 @@ try {
         window.sentMessages.push(message)
         setTimeout(() => {
           if (message.kind === 'settings.set') Object.assign(window.savedSettings, message.values)
+          if (message.kind === 'addons.themesGet' || (message.kind === 'settings.set' && 'appearance.theme' in message.values)) {
+            window.dispatchEvent(new MessageEvent('message', { source: window, data: {
+              kind: 'addons.themesState', version: 0, themes: [],
+              preferred: window.savedSettings['appearance.theme'] ?? window.savedSettings['appearance.mermaidTheme'] ?? 'default', preferredAvailable: true,
+            } }))
+            if (message.kind === 'addons.themesGet') return
+          }
           // 通知型消息（uiState 等宿主不回执）不产生回包——真实宿主对
           // uiState 无应答；对请求/保存类回 snapshot/changed
           if (message.kind === 'settings.uiState') return
@@ -326,14 +333,15 @@ try {
     assert.equal(await refTabs.nth(0).textContent(), zhCn['cssSnippets.title'])
     assert.equal(await refTabs.nth(1).textContent(), zhCn['styleRef.tabOverview'])
     assert.equal(await refTabs.nth(2).textContent(), zhCn['styleRef.tabDetail'])
-    assert.equal(await refTabs.nth(3).textContent(), zhCn['appearance.presets'])
+    assert.equal(await refTabs.nth(3).textContent(), zhCn['appearance.themes'])
     await refTabs.nth(3).click()
-    const mermaidTheme = page.getByRole('combobox', { name: zhCn['setting.mermaidTheme.title'], exact: true })
-    assert.equal(await mermaidTheme.isVisible(), true)
-    assert.equal(await mermaidTheme.inputValue(), 'default')
-    await mermaidTheme.selectOption('codex')
+    const codexRadio = page.locator('.vsidian-appearance-presets input[value=codex]')
+    const defaultRadio = page.locator('.vsidian-appearance-presets input[value=default]')
+    assert.equal(await codexRadio.isVisible(), true)
+    assert.equal(await defaultRadio.isChecked(), true)
+    await codexRadio.check()
     await page.waitForFunction(() => window.savedSettings['appearance.mermaidTheme'] === 'codex')
-    const presetPaint = await mermaidTheme.evaluate(el => {
+    const presetPaint = await codexRadio.evaluate(el => {
       const h3 = el.closest('[role="tabpanel"]').querySelector('h3')
       const headingBox = h3.getBoundingClientRect()
       const icon = h3.querySelector('svg')
@@ -341,7 +349,7 @@ try {
       const range = document.createRange()
       range.selectNodeContents([...h3.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim()))
       const headingStyle = getComputedStyle(h3)
-      return { radius: getComputedStyle(el).borderRadius, fg: getComputedStyle(el).color,
+      return { width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, fg: getComputedStyle(el).color,
         bg: getComputedStyle(el).backgroundColor, heading: h3.textContent,
         headingBorder: headingStyle.borderBottomWidth,
         marginLeft: headingStyle.marginLeft, marginRight: headingStyle.marginRight,
@@ -350,9 +358,10 @@ try {
         textLeft: range.getBoundingClientRect().left - headingBox.left,
         iconStroke: getComputedStyle(icon).stroke, iconFill: getComputedStyle(icon).fill }
     })
-    assert.equal(presetPaint.radius, '2px')
+    assert.equal(presetPaint.width, 16)
+    assert.equal(presetPaint.height, 16)
     assert.notEqual(presetPaint.fg, presetPaint.bg)
-    assert.equal(presetPaint.heading, zhCn['appearance.codeblockRendering'])
+    assert.equal(presetPaint.heading, zhCn['appearance.themes'])
     assert.equal(presetPaint.headingBorder, '1px')
     assert.equal(presetPaint.marginLeft, '-20px')
     assert.equal(presetPaint.marginRight, '-20px')
@@ -366,15 +375,15 @@ try {
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     assert.equal(await page.locator('[data-setting-key="appearance.mermaidTheme"]').count(), 0)
     await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
-    assert.equal(await mermaidTheme.inputValue(), 'codex', '重开外观页应回显已保存的 Codex')
-    await search.fill('Mermaid')
-    const presetResult = page.locator('.vsidian-settings-result').filter({ hasText: zhCn['setting.mermaidTheme.title'] })
+    assert.equal(await codexRadio.isChecked(), true, '重开外观页应回显已保存的 Codex')
+    await search.fill(zhCn['setting.theme.title'])
+    const presetResult = page.locator('.vsidian-settings-result').filter({ hasText: zhCn['setting.theme.title'] })
     assert.equal(await presetResult.count(), 1)
     assert.match(await presetResult.innerText(), new RegExp(escapeRegExp(zhCn['appearance.title'])))
     await presetResult.click()
     assert.equal(await refTabs.nth(3).getAttribute('aria-selected'), 'true')
-    assert.equal(await mermaidTheme.isVisible(), true, '搜索定位应进入预设主题页签')
-    await mermaidTheme.selectOption('default')
+    assert.equal(await codexRadio.isVisible(), true, '搜索定位应进入主题页签')
+    await defaultRadio.check()
     await refTabs.nth(0).click()
     // 默认落 CSS 片段页签：总表与详细查询面板均隐藏；进「样式参考」总表后
     // 总表可见、详细查询仍隐藏；页签 pill 形态（绘制层）
