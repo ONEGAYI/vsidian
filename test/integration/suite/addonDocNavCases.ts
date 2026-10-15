@@ -262,6 +262,10 @@ export const addonDocNavCases: Array<[string, () => Promise<void>]> = [
   ['附加组件 T03：来源为嵌入 B 时以 B 目录解析（N-U04，#543）', async () => {
     await ensureEnabled()
     await closeAllEditors()
+    // 本例自行建立 B 与其相对目标，不能依赖共享 sub 目录在前序用例清理后仍存在。
+    await vscode.workspace.fs.createDirectory(wsUri('sub'))
+    await vscode.workspace.fs.writeFile(wsUri('sub/nav-b.md'), Buffer.from('# 嵌入目标 B\n\n嵌入内部 Live 的正文。\n', 'utf8'))
+    await vscode.workspace.fs.writeFile(wsUri('sub/nav-deep.md'), Buffer.from('# 深层标题\n\n深层目标正文。\n', 'utf8'))
     await openEditorAndWait('nav-opener.md')
     await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
     await probePageReady('nav-opener.md')
