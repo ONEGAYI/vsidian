@@ -146,10 +146,47 @@ try {
   assert.notEqual(detailPaint.color, detailPaint.background, '组件设置文字与背景应有可见色差')
   assert.match(await detail.innerText(), new RegExp(zhCn['addons.settingsAreaTitle'].replace('{label}', 'Third On')))
   assert.equal(await page.locator('.vsidian-addons-list').count(), 0, '组件设置分页不混装管理列表（#465 通道堵死）')
+
+  // ---- 3a. #554 侧栏组件条目唯一选中（宿主 settingsState.open 权威驱动）：
+  //      点击 Third On 应答到达后仅其条目 aria-current=page；跨组切到
+  //      Core A 后 Third On 熄灭。绘制层断言（选中底色/未选中透明——非
+  //      DOM 存在性）。鼠标移开再取样式，避免 hover 底色干扰 ----
+  const pageItems = page.locator('.vsidian-settings-nav-item[aria-current="page"]')
+  const navItemPaints = async () => {
+    await page.mouse.move(2, 2)
+    return page.evaluate(() => [...document.querySelectorAll('.vsidian-settings-nav-item')].map((el) => ({
+      text: el.textContent ?? '',
+      current: el.getAttribute('aria-current'),
+      bg: getComputedStyle(el).backgroundColor,
+    })))
+  }
+  await page.locator('.vsidian-settings-nav-item[aria-current="page"]', { hasText: 'Third On' }).waitFor()
+  assert.equal(await pageItems.count(), 1, '#554 同一时刻仅一个导航条目 aria-current=page')
+  let paints = await navItemPaints()
+  assert.equal(paints.filter((p) => p.current === 'page').length, 1)
+  assert.ok(paints.find((p) => p.current === 'page')?.text.includes('Third On'), '当前项是刚打开的组件')
+  assert.equal(paints.find((p) => p.current === 'page')?.bg, 'rgb(224, 228, 235)', '选中条目应绘制主题选中底色（绘制层）')
+  for (const p of paints.filter((x) => x.current === 'false' && x.text !== '')) {
+    assert.equal(p.bg, 'rgba(0, 0, 0, 0)', `未选中条目「${p.text}」应保持透明底（不整组点亮）`)
+  }
+  // 跨核心/第三方分组切换：Core A（核心组）点亮、Third On（第三方组）熄灭
+  await nav.getByRole('button', { name: /Core A/ }).click()
+  await page.locator('.vsidian-settings-nav-item[aria-current="page"]', { hasText: 'Core A' }).waitFor()
+  assert.equal(await pageItems.count(), 1, '切换后仍仅一个条目选中')
+  paints = await navItemPaints()
+  const selected = paints.find((p) => p.current === 'page')
+  assert.ok(selected?.text.includes('Core A'), '切换后当前项落 Core A')
+  assert.equal(selected?.bg, 'rgb(224, 228, 235)', '切换后选中条目绘制主题选中底色')
+  const thirdAfter = paints.find((p) => p.text.includes('Third On'))
+  assert.equal(thirdAfter?.current, 'false', '被切走的组件取消高亮')
+  assert.equal(thirdAfter?.bg, 'rgba(0, 0, 0, 0)', '被切走的组件恢复透明底（无旧组件残留）')
+
   // 「返回组件列表」回本页组件清单（hub 形态）
   await page.getByRole('button', { name: zhCn['addons.closeSettingsArea'], exact: true }).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsClose'))
   await page.locator('.vsidian-addons-settings-hub').waitFor()
+  // #554 关闭设置区（open=null 推送）：高亮摘除，无旧组件残留
+  assert.equal(await pageItems.count(), 0, '关闭设置区后侧栏不得残留组件条目高亮')
   // 纯运行组件条目（Third Off——无定义无设置页）：回附加组件页只定位列表行
   await nav.getByRole('button', { name: /Third Off/ }).click()
   const located = page.locator('.vsidian-addons-list .vsidian-settings-item-located')
@@ -185,6 +222,23 @@ try {
     0,
     '定位高亮应在约 1.5s 后一次性退场',
   )
+  // #554 纯运行组件条目点击：不开设置区、组件条目不整组点亮——「附加组件」
+  // 选项按钮按当前页高亮（绘制层：选中底色），全部组件条目保持透明底
+  assert.equal(await pageItems.count(), 1, '纯运行组件点击后唯一选中是「附加组件」选项按钮')
+  paints = await navItemPaints()
+  {
+    const addonsOption = paints.find((p) => p.text === zhCn['settings.addonsSection'])
+    assert.equal(addonsOption?.current, 'page', '「附加组件」选项按钮按当前页标记')
+    assert.equal(addonsOption?.bg, 'rgb(224, 228, 235)', '「附加组件」选项按钮绘制主题选中底色（绘制层）')
+  }
+  for (const p of paints.filter((x) => x.current === 'false')) {
+    if (/Core A|Core B|Third On|Third Off/.test(p.text)) {
+      assert.equal(p.bg, 'rgba(0, 0, 0, 0)', `组件条目「${p.text}」不得整组点亮`)
+    }
+  }
+  // 本段新增的 Core A 切换点击会遗留 settingsOpen 记录——清空后续段落
+  // 的消息等待基准（第 4 段按「点击后新到达」等待 onegayi.core）
+  await page.evaluate(() => { window.sentMessages = [] })
 
   // ---- 4. 故障组件设置区排障块（状态 + 日志入口 + 重试入口） ----
   await nav.getByRole('button', { name: /Core A/ }).click()

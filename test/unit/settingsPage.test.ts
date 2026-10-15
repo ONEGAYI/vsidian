@@ -457,6 +457,82 @@ describe('设置项依赖灰化（#155 跟进：dependsOn 注册表驱动联动�
   })
 })
 
+describe('侧栏组件条目唯一选中（#554：renderNav 判定契约）', () => {
+  /** 轻量双分页装配：'addons' 贡献核心/第三方两组条目，'addon-settings'
+   * 是 hideFromNavigation 的详情承载分页；provider 复刻生产接线语义——
+   * 详情分页下报告当前组件条目 id，其余分页不选中 */
+  function makeSidebarHarness(current: () => string | undefined): {
+    view: SettingsPageView
+    parent: HTMLElement
+  } {
+    const addonDetail: SettingsPageSection = {
+      id: 'addon-settings', title: '组件设置', description: '详情承载分页', icon: 'sliders',
+      hideFromNavigation: true, entries: [], mount() {},
+    }
+    const addonsList: SettingsPageSection = {
+      id: 'addons', title: '附加组件', description: '管理页', icon: 'blocks',
+      entries: [], mount() {},
+      sidebarGroups: () => [
+        { label: '核心组件', subgroups: [{ label: '已启用', entries: [
+          { id: 'addon:core-a', title: 'Core A' }, { id: 'addon:core-b', title: 'Core B' },
+        ] }] },
+        { label: '第三方组件', subgroups: [{ label: '已启用', entries: [
+          { id: 'addon:third-a', title: 'Third A' },
+        ] }] },
+      ],
+    }
+    const view = new SettingsPageView({ postMessage() {} }, FIXTURE_DEFS, [addonsList, addonDetail], [], [],
+      (activeId) => (activeId === 'addon-settings' ? current() : undefined))
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, parent }
+  }
+  const currentOf = (parent: HTMLElement, title: string): string | null =>
+    [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === title)?.getAttribute('aria-current') ?? null
+
+  it('详情分页（hideFromNavigation）下：provider 报告的条目唯一 aria-current=page，同组与跨组其余条目全 false', () => {
+    const h = makeSidebarHarness(() => 'addon:core-b')
+    h.view.selectSection('addon-settings')
+    expect(currentOf(h.parent, 'Core B')).toBe('page')
+    expect(currentOf(h.parent, 'Core A')).toBe('false')
+    expect(currentOf(h.parent, 'Third A')).toBe('false')
+    // 详情分页不在「选项」内，选项按钮不点亮
+    expect(currentOf(h.parent, '附加组件')).toBe('false')
+  })
+
+  it('列表/选项分页：组件条目不整组点亮（provider 非详情态返回 undefined），选项按钮按 active 高亮', () => {
+    const h = makeSidebarHarness(() => 'addon:core-a')
+    h.view.selectSection('addons')
+    expect(currentOf(h.parent, 'Core A')).toBe('false')
+    expect(currentOf(h.parent, 'Core B')).toBe('false')
+    expect(currentOf(h.parent, 'Third A')).toBe('false')
+    expect(currentOf(h.parent, '附加组件')).toBe('page')
+  })
+
+  it('停留搜索结果列表：组件条目不标当前（沿用既有搜索态策略）', () => {
+    const h = makeSidebarHarness(() => 'addon:core-a')
+    h.view.selectSection('addon-settings')
+    const search = h.parent.querySelector<HTMLInputElement>('input[type=search]')!
+    search.value = '留白带'
+    search.dispatchEvent(new Event('input'))
+    expect(currentOf(h.parent, 'Core A')).toBe('false')
+    expect(currentOf(h.parent, 'Core B')).toBe('false')
+    expect(currentOf(h.parent, 'Third A')).toBe('false')
+  })
+
+  it('当前项切换经 refreshSidebar 同步：A 取消、B 高亮（宿主推送链路的视图侧半段）', () => {
+    let current: string | undefined = 'addon:core-a'
+    const h = makeSidebarHarness(() => current)
+    h.view.selectSection('addon-settings')
+    expect(currentOf(h.parent, 'Core A')).toBe('page')
+    current = 'addon:core-b'
+    h.view.refreshSidebar()
+    expect(currentOf(h.parent, 'Core B')).toBe('page')
+    expect(currentOf(h.parent, 'Core A')).toBe('false')
+  })
+})
+
 describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编辑器，编辑器页内小节分类）', () => {
   const navTitles = (parent: HTMLElement): string[] =>
     [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]

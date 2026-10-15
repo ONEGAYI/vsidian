@@ -43,7 +43,8 @@ function makeView(addonSettingsHost?: HTMLElement): {
   let navigateToAddonSettings: () => void = () => {}
   const addons = new AddonSection(bridge, () => refreshSidebar(), () => navigateToAddonSettings())
   const behaviors = new AddonBehaviorManageSection(bridge)
-  const settingsArea = new AddonSettingsAreaSection(bridge, addonSettingsHost)
+  // #554 生产接线同形：settingsState 推送（当前组件切换/关闭）→ 侧栏重建
+  const settingsArea = new AddonSettingsAreaSection(bridge, addonSettingsHost, () => refreshSidebar())
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
@@ -53,7 +54,9 @@ function makeView(addonSettingsHost?: HTMLElement): {
       behaviors,
       settingsArea,
     ],
-    [], [])
+    [], [],
+    // #554 生产接线同形：详情分页下侧栏组件条目以本分页权威状态为唯一选中源
+    (activeId) => (activeId === ADDON_SETTINGS_SECTION_ID ? settingsArea.currentSidebarEntryId() : undefined))
   refreshSidebar = () => view.refreshSidebar()
   navigateToAddonSettings = () => queueMicrotask(() => view.selectSection(ADDON_SETTINGS_SECTION_ID))
   const parent = document.createElement('div')
@@ -109,6 +112,7 @@ const DEFINITIONS = [
 /** 构造 addons.settingsState 载荷（默认全 default 来源；可注入自定义定义集） */
 function settingsState(options: {
   open?: string | null
+  addonId?: string
   hasWorkspace?: boolean
   values?: Record<string, { effective?: unknown; user?: unknown; workspace?: unknown; source?: string }>
   enabled?: { effective?: boolean; userExplicit?: boolean | null; workspaceExplicit?: boolean | null; source?: string }
@@ -143,10 +147,10 @@ function settingsState(options: {
     kind: 'addons.settingsState',
     apiVersion: '1.0.0',
     draft: true,
-    open: options.open ?? ADDON_ID,
+    open: options.open ?? options.addonId ?? ADDON_ID,
     hasWorkspace: options.hasWorkspace ?? true,
     addon: options.open === null ? null : {
-      addonId: ADDON_ID,
+      addonId: options.addonId ?? ADDON_ID,
       label: 'Demo',
       faulted: options.faulted ?? false,
       ...(options.faultReason !== undefined ? { faultReason: options.faultReason } : {}),
@@ -1079,5 +1083,117 @@ describe('#472 跨组件定位（focusEntry：addon:<id>/def:<键> 与 addon:<id
       spy.restore()
       vi.useRealTimers()
     }
+  })
+})
+
+// ---- #554：侧栏组件条目唯一选中（settingsState.open 权威状态驱动） ----
+
+describe('侧栏组件条目唯一选中（#554）', () => {
+  const CORE_A = 'onegayi.core-a'
+  const CORE_B = 'onegayi.core-b'
+  const THIRD_A = 'a.third'
+  /** 两组件三态清单：核心组 A/B + 第三方组 A（跨核心/第三方分组的切换矩阵） */
+  function groupedAddonsState(): HostToWebview {
+    return addonsState([
+      { id: CORE_A, label: 'Core A', official: true, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      { id: CORE_B, label: 'Core B', official: true, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      { id: THIRD_A, label: 'Third A', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ])
+  }
+  /** 侧栏导航条目（选项按钮与组件条目同法：按显示文本定位） */
+  function navItem(h: ReturnType<typeof makeView>, title: string): HTMLButtonElement {
+    const item = [...h.parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === title)
+    expect(item, `侧栏条目「${title}」应在场`).toBeTruthy()
+    return item!
+  }
+  const currentOf = (h: ReturnType<typeof makeView>, title: string): string =>
+    navItem(h, title).getAttribute('aria-current') ?? ''
+
+  it('点击组件条目并收到宿主 settingsState 应答后：仅该组件 aria-current=page（同组/跨组其余条目与选项按钮均 false）', async () => {
+    const h = makeView()
+    h.dispatch(groupedAddonsState())
+    navItem(h, 'Core A').click()
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: CORE_A })
+    await h.settle()
+    // 宿主应答（真实时序：settingsOpen → postSettingsState 推送回显）
+    h.dispatch(settingsState({ addonId: CORE_A }))
+    expect(currentOf(h, 'Core A')).toBe('page')
+    expect(currentOf(h, 'Core B')).toBe('false')
+    expect(currentOf(h, 'Third A')).toBe('false')
+    expect(currentOf(h, zhCn['settings.addonsSection'])).toBe('false')
+  })
+
+  it('从组件 A 切到 B：A 取消高亮、B 高亮；同组与跨核心/第三方分组均正确', async () => {
+    const h = makeView()
+    h.dispatch(groupedAddonsState())
+    navItem(h, 'Core A').click()
+    await h.settle()
+    h.dispatch(settingsState({ addonId: CORE_A }))
+    expect(currentOf(h, 'Core A')).toBe('page')
+    // 同组切换（核心 A → 核心 B）
+    navItem(h, 'Core B').click()
+    await h.settle()
+    h.dispatch(settingsState({ addonId: CORE_B }))
+    expect(currentOf(h, 'Core B')).toBe('page')
+    expect(currentOf(h, 'Core A')).toBe('false')
+    // 跨组切换（核心 B → 第三方 A）
+    navItem(h, 'Third A').click()
+    await h.settle()
+    h.dispatch(settingsState({ addonId: THIRD_A }))
+    expect(currentOf(h, 'Third A')).toBe('page')
+    expect(currentOf(h, 'Core B')).toBe('false')
+    expect(currentOf(h, 'Core A')).toBe('false')
+  })
+
+  it('纯运行组件条目点击：不开设置区、组件条目不整组点亮，「附加组件」选项按钮按当前页高亮', async () => {
+    const h = makeView()
+    h.dispatch(addonsState([
+      { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+      { id: CORE_A, label: 'Core A', official: true, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+    ]))
+    navItem(h, 'Plain').click()
+    expect(h.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toEqual([])
+    await h.settle()
+    expect(currentOf(h, 'Plain')).toBe('false')
+    expect(currentOf(h, 'Core A')).toBe('false')
+    expect(currentOf(h, zhCn['settings.addonsSection'])).toBe('page')
+  })
+
+  it('关闭设置区（open=null 推送）：组件条目高亮摘除，无旧组件残留', async () => {
+    const h = makeView()
+    h.dispatch(groupedAddonsState())
+    navItem(h, 'Core A').click()
+    await h.settle()
+    h.dispatch(settingsState({ addonId: CORE_A }))
+    expect(currentOf(h, 'Core A')).toBe('page')
+    h.dispatch(settingsState({ open: null }))
+    expect(currentOf(h, 'Core A')).toBe('false')
+    expect(currentOf(h, 'Core B')).toBe('false')
+    expect(currentOf(h, 'Third A')).toBe('false')
+  })
+
+  it('全局搜索跳入组件详情（#472 定位链路）：settingsState 应答后对应组件标记为当前项', async () => {
+    const h = makeView()
+    h.dispatch(groupedAddonsState())
+    // 搜索结果点击的等价形态：active 落详情分页、mount 携带 def 级定位条目
+    h.view.selectSection(ADDON_SETTINGS_SECTION_ID, `addon:${CORE_A}/def:flag`)
+    expect(h.sent).toContainEqual({ kind: 'addons.settingsOpen', addonId: CORE_A })
+    await h.settle()
+    h.dispatch(settingsState({ addonId: CORE_A }))
+    expect(currentOf(h, 'Core A')).toBe('page')
+    expect(currentOf(h, 'Core B')).toBe('false')
+  })
+
+  it('重新打开的装载时序：状态先到、focusSection 恢复后到——侧栏收敛到当前组件高亮', () => {
+    const h = makeView()
+    h.dispatch(groupedAddonsState())
+    // 装载即拉取的 settingsState 应答先到（此时不在详情分页，无高亮）
+    h.dispatch(settingsState({ addonId: CORE_B }))
+    // 宿主按会话内记忆补发 focusSection 恢复到详情分页
+    h.view.handleHostMessage({ kind: 'settings.focusSection', section: ADDON_SETTINGS_SECTION_ID })
+    expect(currentOf(h, 'Core B')).toBe('page')
+    expect(currentOf(h, 'Core A')).toBe('false')
+    expect(currentOf(h, 'Third A')).toBe('false')
   })
 })

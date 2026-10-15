@@ -107,10 +107,12 @@ const addonBehaviors = new AddonBehaviorManageSection(
 )
 // #465 组件设置独立分页：基础设置区（T04）与组件设置页挂载（T02）的
 // 唯一承载方——附加组件页通道堵死后，addons.settingsState /
-// openAddonSettingsPage 在此消费（addonSettingsHost 装载器容器随迁）
+// openAddonSettingsPage 在此消费（addonSettingsHost 装载器容器随迁）。
+// #554 settingsState 推送（当前打开组件切换/关闭）经回调触发侧栏重建
 const addonSettingsArea = new AddonSettingsAreaSection(
   { postMessage: (message) => vscode.postMessage(message) },
   addonSettingsHost,
+  () => refreshSidebar(),
 )
 
 const view = new SettingsPageView(
@@ -119,6 +121,10 @@ const view = new SettingsPageView(
   [keybindings, appearance, indexMaintenance, addons, addonBehaviors, addonSettingsArea],
   [wordSegment],
   [defaultEditor],
+  // #554 组件条目唯一选中：详情分页（addon-settings）下以「组件设置」
+  // 分页的权威状态（settingsState.open 派生）为当前条目；其余分页不选中
+  // 组件条目（列表/管理页由选项按钮按 active 高亮，不再整组点亮）
+  (activeId) => (activeId === ADDON_SETTINGS_SECTION_ID ? addonSettingsArea.currentSidebarEntryId() : undefined),
 )
 refreshSidebar = () => view.refreshSidebar()
 // 微任务延迟与 ui-patterns §2.1 契约及单测 harness 同口径：AddonSection.mount
