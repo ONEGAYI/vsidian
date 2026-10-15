@@ -6,17 +6,25 @@
 //   不得收到 B 的目标；等值不去重口径不回归）；
 // - P2：手动重试成功后自动恢复详情打开态（registry release → 重新注册
 //   的真实链，不允许 mock faulted=false 的假链）。
+// #555 评审第三轮 P1（验证在途竞态）：宿主对账改用生产模块本体
+// （addonSettingsPanelReconcile——addonWiring 的 pushSettingsDirectives /
+// postSettingsLoadIfVerified 提取物），realpath 验证注入可控 deferred：
+// 二轮把验证环节同步化的「忠实翻译」掩盖了「A 验证在途时切 B/关详情，
+// A 的迟到验证仍推 load 并覆盖 pushed」的竞态（评审 :238-260 定位）。
 //
 // 链路组合：真实 AddonSettingsAreaSection + 真实装载器
 // （installAddonPageLoader，page='settings'）+ 真实 AddonSettingsContext
-// Runtime + 真实 AddonRuntime/AddonRegistry/AddonSettingsService。宿主侧
-// 设置面板桥（addonWiring 的 handleSettingsMessage 开合分支与
-// pushSettingsDirectives 单值对账段）以忠实替身内联——单值 desired 与
-// pushed 记录的卸载/装载判定语义与生产一字不差（vscode 依赖剥除；真宿主
-// 全链在集成套件）。断言对象是用户可见结局（挂载根、消息序列、详情态）。
+// Runtime + 真实 AddonRuntime/AddonRegistry/AddonSettingsService + 生产
+// 对账模块 addonSettingsPanelReconcile（vscode 依赖剥除；真宿主全链在
+// 集成套件）。断言对象是用户可见结局（挂载根、消息序列、详情态）。
 import { beforeEach, describe, expect, it } from 'vitest'
 import { AddonRegistry, type AddonDefinition } from '../../src/host/addons/addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from '../../src/host/addons/addonRuntime'
+import {
+  createSettingsPanelRecord,
+  pushSettingsPanelDirectives,
+  type SettingsPanelReconcilePorts,
+} from '../../src/host/addons/addonSettingsPanelReconcile'
 import { AddonSettingsService, type AddonSettingsPersistencePort } from '../../src/host/addons/addonSettingsService'
 import { AddonThemeService } from '../../src/host/addons/addonThemeService'
 import { AddonStorageService } from '../../src/host/addons/addonStorageService'
@@ -133,10 +141,19 @@ interface PanelHarness {
   sentHistory: Array<Record<string, unknown>>
   /** 宿主 → webview 的装载指令序列（unload/load 全留痕） */
   directives: Array<Record<string, unknown>>
+  /** 宿主对账事件留痕（directive.load/unload、load-rejected-realpath、load-dropped-stale） */
+  events: Array<{ kind: string; addonId: string; generation?: number }>
   /** 模拟用户/宿主入口把一条 webview→宿主消息交给宿主桥处理 */
   hostReceive(message: Record<string, unknown>): void
-  /** 泵：处理上送消息 → 指令喂装载器 → 状态推送回 webview，直到不动点 */
+  /** 泵：处理上送消息 → 指令喂装载器 → 状态推送回 webview，直到不动点；
+   *  默认自动放行在途 realpath 验证（holdVerify 后只搬运消息不验证） */
   pump(): Promise<void>
+  /** 进入手动验证控制（pump 不再自动放行——测试显式 resolve 构造在途窗口） */
+  holdVerify(): void
+  /** 放行某组件的在途验证（队列中首个匹配，verdict 缺省 ok）；返回是否命中 */
+  releaseVerify(addonId: string, verdict?: 'ok' | 'escape'): boolean
+  /** 在途验证队列的计划组件序列（断言验证窗口用） */
+  pendingVerifyPlans(): string[]
 }
 
 /**
@@ -144,8 +161,9 @@ interface PanelHarness {
  * 依赖剥除）：
  * - handleSettingsMessage 的 settingsOpen/settingsClose/openAddonPage/
  *   closeAddonPage 分支（1259-1311 行语义）；
- * - pushSettingsDirectives 的单值对账（1157-1177 行语义）：desired=null 且
- *   pushed 在场 → 推 unload 并清 pushed；desired 变化 → 推 load 并记 pushed。
+ * - 装载对账直接运行生产模块 addonSettingsPanelReconcile（不写第二份对
+ *   账逻辑）；realpath 验证以 deferred promise 注入——默认 pump 自动放行
+ *   （既有用例等价于「验证即刻通过」），holdVerify 后由测试控制完成顺序。
  */
 function panelHarness(ids: string[], options: { definitions?: Record<string, AddonDefinition> } = {}): PanelHarness {
   const { registry, runtime, settings } = runtimeHarness()
@@ -233,31 +251,36 @@ function panelHarness(ids: string[], options: { definitions?: Record<string, Add
     if (!isHostToWebview(message)) throw new Error('addons.state 载荷未通过协议守卫')
     return message
   }
-  // addonWiring pushSettingsDirectives 的单值对账忠实翻译（#555 评审定位段）
-  let pushed: { addonId: string; generation: number } | null = null
+  // 装载对账：生产模块本体（addonWiring pushSettingsDirectives/
+  // postSettingsLoadIfVerified 的提取物），验证 promise 可控注入
+  const panelRecord = createSettingsPanelRecord()
+  const verifyQueue: Array<{ plan: { addonId: string }; resolve: (verdict: 'ok' | 'escape') => void }> = []
+  const panelEvents: Array<{ kind: string; addonId: string; generation?: number }> = []
+  let holdVerify = false
+  const settingsPorts: SettingsPanelReconcilePorts = {
+    desiredLoad: () => runtime.desiredSettingsLoad(),
+    isEscapedDir: () => false,
+    verifyLoadPlan: (plan) => new Promise((resolve) => { verifyQueue.push({ plan, resolve }) }),
+    blockEscapePlanRoots: () => {},
+    buildLoadDirective: (plan) => ({
+      type: 'addon.load',
+      manifest: {
+        addonId: plan.addonId,
+        generation: plan.generation,
+        page: 'settings',
+        scriptUri: `https://page.test/${plan.addonId}/settings.js`,
+        cssUris: [],
+      },
+    }),
+    postDirective: (directive) => {
+      directives.push(directive as unknown as Record<string, unknown>)
+      loader.handleDirective(directive)
+    },
+    recordEvent: (event) => { panelEvents.push(event) },
+    postBehaviorEnabledState: () => {},
+  }
   const pushSettingsDirectives = (): void => {
-    const desired = runtime.desiredSettingsLoad()
-    if (desired === null) {
-      if (pushed) {
-        directives.push({ type: 'addon.unload', addonId: pushed.addonId, generation: pushed.generation })
-        loader.handleDirective({ type: 'addon.unload', addonId: pushed.addonId, generation: pushed.generation })
-        pushed = null
-      }
-      return
-    }
-    if (pushed && pushed.addonId === desired.addonId && pushed.generation === desired.generation) {
-      return
-    }
-    const manifest = {
-      addonId: desired.addonId,
-      generation: desired.generation,
-      page: 'settings' as const,
-      scriptUri: `https://page.test/${desired.addonId}/settings.js`,
-      cssUris: [],
-    }
-    directives.push({ type: 'addon.load', manifest })
-    loader.handleDirective({ type: 'addon.load', manifest })
-    pushed = { addonId: desired.addonId, generation: desired.generation }
+    pushSettingsPanelDirectives(settingsPorts, panelRecord)
   }
   // addonWiring handleSettingsMessage 开合分支忠实翻译 + onRuntimeChanged 推送
   // （extension.ts 的 onRuntimeChanged → notifyAddonsChanged/notifyAddonSettings
@@ -297,7 +320,19 @@ function panelHarness(ids: string[], options: { definitions?: Record<string, Add
   area.mount(parent)
   return {
     loader, area, context, runtime, registry, settings, host, parent, sentHistory, directives,
+    events: panelEvents,
     hostReceive: (message) => { handleHostMessage(message) },
+    holdVerify: () => { holdVerify = true },
+    releaseVerify: (addonId, verdict = 'ok') => {
+      const index = verifyQueue.findIndex((entry) => entry.plan.addonId === addonId)
+      if (index === -1) {
+        return false
+      }
+      const [entry] = verifyQueue.splice(index, 1)
+      entry!.resolve(verdict)
+      return true
+    },
+    pendingVerifyPlans: () => verifyQueue.map((entry) => entry.plan.addonId),
     pump: async () => {
       for (let round = 0; round < 40; round += 1) {
         let worked = false
@@ -308,6 +343,14 @@ function panelHarness(ids: string[], options: { definitions?: Record<string, Add
         while (hostOutbox.length > 0) {
           area.handleHostMessage(hostOutbox.shift()!)
           worked = true
+        }
+        if (!holdVerify) {
+          // 自动放行在途验证（真实宿主的 realpath 复核很快完成——既有用例
+          // 不感知验证异步性；holdVerify 后验证完成顺序归测试控制）
+          while (verifyQueue.length > 0) {
+            verifyQueue.shift()!.resolve('ok')
+            worked = true
+          }
         }
         await settle()
         if (!worked && webviewSent.length === 0 && hostOutbox.length === 0) {
@@ -400,6 +443,101 @@ describe('#555 评审二轮 P1：自绘组件切换的旧组件卸载（生产�
     expect(h.host.querySelectorAll('[data-addon-id]')).toHaveLength(0)
     expect(h.runtime.settingsAreaAddonId()).toBeUndefined()
     expect(h.runtime.openSettingsAddonId()).toBeUndefined()
+  })
+})
+
+// ---- #555 评审三轮 P1：realpath 验证在途时切换/关闭，迟到验证不得装载旧页 ----
+
+describe('#555 评审三轮 P1：验证在途的迟到结果严格失效（deferred 验证）', () => {
+  it('A 验证在途 → 切 B → B 装载完成 → A 迟到完成：不推 load A、装载只含 B、单挂载根', async () => {
+    const h = panelHarness(['addon.a', 'addon.b'])
+    h.holdVerify()
+    await openPanel(h)
+    await userOpensDetail(h, 'addon.a')
+    // A 的 realpath 验证在途：尚未装载（此窗口内 close 不产生 unload——A 未
+    // 推送过 load，宿主对账无卸载基线，属正确中间态）
+    expect(h.pendingVerifyPlans()).toEqual(['addon.a'])
+    expect(h.loader.stats().active).toEqual([])
+
+    // 切 B：经 close→open（二轮修复的发送顺序）；B 的验证进入队列
+    await userOpensDetail(h, 'addon.b')
+    expect(h.pendingVerifyPlans()).toEqual(['addon.a', 'addon.b'])
+
+    // B 先完成验证并装载
+    expect(h.releaseVerify('addon.b')).toBe(true)
+    await h.pump()
+    expect(h.loader.stats().active.map((a) => a.addonId)).toEqual(['addon.b'])
+
+    // A 的迟到验证完成——不得推 load A（修复前：旧计划覆盖 pushed，装载器
+    // 双组件并存，共享挂载容器出现双根）
+    expect(h.releaseVerify('addon.a')).toBe(true)
+    await h.pump()
+    const loadIds = h.directives
+      .filter((d) => d.type === 'addon.load')
+      .map((d) => (d.manifest as { addonId: string }).addonId)
+    expect(loadIds).toEqual(['addon.b'])
+    expect(h.loader.stats().active.map((a) => a.addonId)).toEqual(['addon.b'])
+    // B 详情 DOM 仅一个挂载根（无 A 的残留根）
+    const roots = [...h.host.querySelectorAll('[data-addon-id]')]
+    expect(roots).toHaveLength(1)
+    expect(roots[0]!.getAttribute('data-addon-id')).toBe('addon.b')
+    expect(h.parent.querySelector('.vsidian-addons-settings')).toBeTruthy()
+  })
+
+  it('A 验证在途 → 关闭详情 → A 迟到完成：零装载零残留', async () => {
+    const h = panelHarness(['addon.a'])
+    h.holdVerify()
+    await openPanel(h)
+    await userOpensDetail(h, 'addon.a')
+    expect(h.pendingVerifyPlans()).toEqual(['addon.a'])
+
+    // 用户点「返回组件列表」（真实 DOM 入口；二轮修复的连带关页链）
+    const back = [...h.parent.querySelectorAll('button')].find((b) => b.textContent === zhCn['addons.closeSettingsArea'])
+    expect(back).toBeTruthy()
+    back!.click()
+    await h.pump()
+    expect(h.runtime.openSettingsAddonId()).toBeUndefined()
+
+    // A 的迟到验证完成——不推任何 load、无挂载根残留
+    expect(h.releaseVerify('addon.a')).toBe(true)
+    await h.pump()
+    expect(h.directives.filter((d) => d.type === 'addon.load')).toEqual([])
+    expect(h.loader.stats().active).toEqual([])
+    expect(h.host.querySelectorAll('[data-addon-id]')).toHaveLength(0)
+  })
+
+  it('A→B→A 快速往返（三轮验证全部在途，按发起序完成）：仅最后一次开页装载，代次取新', async () => {
+    const h = panelHarness(['addon.a', 'addon.b'])
+    h.holdVerify()
+    await openPanel(h)
+    await userOpensDetail(h, 'addon.a')
+    await userOpensDetail(h, 'addon.b')
+    await userOpensDetail(h, 'addon.a')
+    // 三次开页的验证均在途（A(g1) → B(g1) → A(g2)，按发起序排队）
+    expect(h.pendingVerifyPlans()).toEqual(['addon.a', 'addon.b', 'addon.a'])
+
+    // 按发起序逐个放行：前两次验证发起后 desired 已离开，迟到即失效；
+    // 只有最后一次开页的验证仍然有效
+    expect(h.releaseVerify('addon.a')).toBe(true)
+    await h.pump()
+    expect(h.directives.filter((d) => d.type === 'addon.load')).toEqual([])
+    expect(h.loader.stats().active).toEqual([])
+
+    expect(h.releaseVerify('addon.b')).toBe(true)
+    await h.pump()
+    expect(h.directives.filter((d) => d.type === 'addon.load')).toEqual([])
+
+    expect(h.releaseVerify('addon.a')).toBe(true)
+    await h.pump()
+    const loads = h.directives.filter((d) => d.type === 'addon.load')
+    expect(loads).toHaveLength(1)
+    expect((loads[0]!.manifest as { addonId: string; generation: number }).addonId).toBe('addon.a')
+    // 代次取新（第二次打开 A——旧验证的 g1 不得复用）
+    expect((loads[0]!.manifest as { addonId: string; generation: number }).generation).toBe(2)
+    expect(h.loader.stats().active).toEqual([{ addonId: 'addon.a', generation: 2 }])
+    const roots = [...h.host.querySelectorAll('[data-addon-id]')]
+    expect(roots).toHaveLength(1)
+    expect(roots[0]!.getAttribute('data-addon-id')).toBe('addon.a')
   })
 })
 

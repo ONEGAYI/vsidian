@@ -33,7 +33,14 @@ import type { AddonSettingsStatePayload, AddonSettingsAreaPayload } from '../../
 import { isWebviewToHost } from '../../shared/protocol'
 import { AddonCoordinator, type AddonExtensionLike } from './addonCoordinator'
 import { AddonRegistry, createDefaultRegistryPorts, type AddonDefinition } from './addonRegistry'
-import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan, type AddonSettingsLoadPlan } from './addonRuntime'
+import { AddonRuntime, type AddonPreferenceStore, type AddonEditorLoadPlan } from './addonRuntime'
+import {
+  createSettingsPanelRecord,
+  directiveEventOf,
+  pushSettingsPanelDirectives,
+  type SettingsPanelReconcilePorts,
+  type SettingsPanelReconcileRecord,
+} from './addonSettingsPanelReconcile'
 import { AddonSettingsService, type AddonSettingsPersistencePort, type AddonSettingsUpdateResult } from './addonSettingsService'
 import { AddonStorageService } from './addonStorageService'
 import { AddonBehaviorStateService } from './addonBehaviorStateService'
@@ -705,16 +712,8 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
       addonPageEvents.splice(0, addonPageEvents.length - 200)
     }
   }
-  const directiveEventOf = (directive: AddonPageDirective): { kind: string; addonId: string; generation?: number } => {
-    switch (directive.type) {
-      case 'addon.load':
-        return { kind: 'directive.load', addonId: directive.manifest.addonId, generation: directive.manifest.generation }
-      case 'addon.unload':
-        return { kind: 'directive.unload', addonId: directive.addonId, generation: directive.generation }
-      default:
-        return { kind: `directive.${directive.type}`, addonId: directive.addonId, generation: directive.generation }
-    }
-  }
+  // directiveEventOf（指令 → 事件留痕）随设置面板对账逻辑移驻
+  // addonSettingsPanelReconcile（两面板共用形状）
 
   /** 面板指令投递（disposed webview 不炸状态机链路——记录后吞掉异常） */
   const postDirective = (webview: vscode.Webview, directive: AddonPageDirective): void => {
@@ -1146,61 +1145,28 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
   }
 
   // ---- 设置页面板桥（#351；单面板，隐藏即销毁重开重载） ----
-  interface SettingsPanelRecord {
+  // 对账逻辑（pushSettingsDirectives/postSettingsLoadIfVerified）驻留纯模块
+  // addonSettingsPanelReconcile（#555 三轮起——含验证在途竞态的纪元失效），
+  // 此处注入 webview 绑定端口运行同一实现（单元测试以可控验证 promise 复用）
+  interface SettingsPanelRecord extends SettingsPanelReconcileRecord {
     webview: vscode.Webview
-    pushed: { addonId: string; generation: number } | null
-    /** #354 T05 realpath 验证在途（null = 无） */
-    pendingVerify: { addonId: string; generation: number } | null
   }
   let settingsPanel: SettingsPanelRecord | undefined
 
-  const pushSettingsDirectives = (record: SettingsPanelRecord): void => {
-    // #476 行为禁用态广播（先于装载指令到达——同 webview postMessage 保
-    // 序：停用后新装载/保持装载的设置页，工厂里 enabledState() 即读到
-    // user-disabled，不等下一次状态变化）
-    postBehaviorEnabledState(record.webview)
-    const desired = runtime.desiredSettingsLoad()
-    if (desired === null) {
-      if (record.pushed) {
-        const directive: AddonPageDirective = { type: 'addon.unload', addonId: record.pushed.addonId, generation: record.pushed.generation }
-        recordEvent('settings', directiveEventOf(directive))
-        postDirective(record.webview, directive)
-        record.pushed = null
-      }
-      return
-    }
-    if (record.pushed && record.pushed.addonId === desired.addonId && record.pushed.generation === desired.generation) {
-      return
-    }
-    // #354 T05 realpath 装载门控（同编辑器面板：逃逸计划不装载）
-    void postSettingsLoadIfVerified(record, desired)
-  }
+  /** 设置面板对账端口（指令/广播经面板 webview；manifest 地址由其铸造） */
+  const settingsReconcilePortsOf = (record: SettingsPanelRecord): SettingsPanelReconcilePorts => ({
+    desiredLoad: () => runtime.desiredSettingsLoad(),
+    isEscapedDir: (fsPath) => realpathGuard.isEscapedDir(fsPath),
+    verifyLoadPlan,
+    blockEscapePlanRoots,
+    buildLoadDirective: (plan) => ({ type: 'addon.load', manifest: buildManifest(record.webview, plan) }),
+    postDirective: (directive) => postDirective(record.webview, directive),
+    recordEvent: (event) => recordEvent('settings', event),
+    postBehaviorEnabledState: () => postBehaviorEnabledState(record.webview),
+  })
 
-  /** #354 T05 设置面板的 realpath 门控推送（验证在途去重；escape 拒绝并登记目录排除） */
-  const postSettingsLoadIfVerified = async (record: SettingsPanelRecord, plan: AddonSettingsLoadPlan): Promise<void> => {
-    if (record.pushed?.addonId === plan.addonId && record.pushed.generation === plan.generation) return
-    if (record.pendingVerify?.addonId === plan.addonId && record.pendingVerify.generation === plan.generation) return
-    if (
-      realpathGuard.isEscapedDir(plan.entryFsPath) ||
-      plan.cssFsPaths.some((css) => realpathGuard.isEscapedDir(css)) ||
-      (plan.resourceBaseFsPath !== null && realpathGuard.isEscapedDir(plan.resourceBaseFsPath))
-    ) {
-      recordEvent('settings', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
-      return
-    }
-    record.pendingVerify = { addonId: plan.addonId, generation: plan.generation }
-    const verdict = await verifyLoadPlan(plan)
-    record.pendingVerify = null
-    if (verdict === 'escape') {
-      blockEscapePlanRoots(plan)
-      recordEvent('settings', { kind: 'directive.load-rejected-realpath', addonId: plan.addonId, generation: plan.generation })
-      return
-    }
-    if (record.pushed?.addonId === plan.addonId && record.pushed.generation === plan.generation) return
-    const directive: AddonPageDirective = { type: 'addon.load', manifest: buildManifest(record.webview, plan) }
-    recordEvent('settings', directiveEventOf(directive))
-    postDirective(record.webview, directive)
-    record.pushed = { addonId: plan.addonId, generation: plan.generation }
+  const pushSettingsDirectives = (record: SettingsPanelRecord): void => {
+    pushSettingsPanelDirectives(settingsReconcilePortsOf(record), record)
   }
 
   /** 全部可打开设置页的组件资源根（面板 open 时并入许可面——避免运行中
@@ -1224,7 +1190,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     }
     const ensureRecord = (): SettingsPanelRecord => {
       if (!settingsPanel || settingsPanel.webview !== webview) {
-        settingsPanel = { webview, pushed: null, pendingVerify: null }
+        settingsPanel = { webview, ...createSettingsPanelRecord() }
       }
       return settingsPanel
     }
@@ -1412,7 +1378,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     },
     settingsResourceRoots: settingsCapableRoots,
     attachSettingsPanel: (webview) => {
-      settingsPanel = { webview, pushed: null, pendingVerify: null }
+      settingsPanel = { webview, ...createSettingsPanelRecord() }
     },
     settingsPanelDisposed: () => {
       settingsPanel = undefined
