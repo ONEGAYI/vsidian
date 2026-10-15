@@ -95,3 +95,5 @@ T05 覆盖 R-U01–R-U07、R-U12，建立可复用只读目标访问与释放链
 API 浮窗不挂载可写根会话。递归引用的 `RefSourceContext.readOnly` 逐层传递，模式查询、切换与编辑入口共同遵守只读能力；不能借父 Live 或历史模式覆盖获得写端口。B 来源首次读取与后续刷新均携带相同来源身份。普通目标错误保留浮窗所有权，组件停用仍能回收错误实例。
 
 样式与元素形态采用既有 hover-popup（480px、8px 圆角、阴影与 z-index 9000 档），未增加公开样式入口、档位或快捷键。对照基线为实施前 `84e91ea028ac64d5f7fab38d51b6b7472494ca3f`；原选择器与变量均保留。浏览器以独立 `#app > .vsidian-hover-popup` 片段检查实际计算色，宿主 `paint.hoverPopup` 检查绘制命中与背景/边框。测试定位见覆盖映射的 T05 行；物理指针与键盘手感保留为人工待验。
+
+2026-10-15 本切片验证：定向单测 174 项与邻近 hover/embed 回归 130 项通过（含重叠用例，不合计为独立覆盖数）；编译、构建桥/浏览器调度契约 13 项、API 门禁负向测试 45 项、样式基线与契约检查通过。浏览器 `addonRefViews` 通过，覆盖原生指针进入保活、移出延迟关闭、键盘 Esc 与历史选择器片段命中，报告 `out/test/browser-runs/run-G1bmZW/`。真宿主 `VSIDIAN_TEST_CASES=#544` 增强回归 4/4 通过、宿主退出码 0，日志 `out/test/t05-resume-integration.log`；覆盖 Live 父只读、B 来源刷新保持、合法/越界文本行号、目标更新/删除、内容与错误浮窗停用及租约回收。红测证据为 `out/test/t05-red-lifecycle.log`、`t05-red-readonly.log` 与 `t05-red-trigger.log`。本切片未单独跑全量回归；组合分支的全量回归与独立评审另行执行。

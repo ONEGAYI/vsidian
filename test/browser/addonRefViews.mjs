@@ -208,6 +208,18 @@ try {
   assert.ok(focusBack !== null && focusBack.focused, `Esc 后焦点归还触发控件（实际 ${JSON.stringify(focusBack)}）`)
   passed++; console.log('[T05][ok] 键盘路径：焦点进入浮层，Esc 关闭并归还原焦点')
 
+  // ---- 原生指针：触发位置与浮窗联合域保活，移出后沿既有延迟关闭 ----
+  await page.hover('.rv-trigger')
+  await runOp('request', { id: 'pointer', path: 'notes/b.md' })
+  const pointerPopup = await page.locator('.vsidian-hover-popup').boundingBox()
+  assert.ok(pointerPopup, '鼠标请求应打开浮窗')
+  await page.mouse.move(pointerPopup.x + pointerPopup.width / 2, pointerPopup.y + 20)
+  await page.waitForTimeout(400) // 超过既有 350ms 关闭延迟，域内应仍保活
+  assert.ok(await page.evaluate(() => window.readRvPopup().open), '指针进入浮窗后保持在场')
+  await page.mouse.move(2, 2)
+  await pumpUntil(() => page.evaluate(() => !window.readRvPopup().open), '鼠标离开联合域后延迟关闭')
+  passed++; console.log('[T05][ok] 原生指针：浮窗内保活，移出联合域后延迟关闭')
+
   assert.deepEqual(errors, [], `页面零未捕获异常（${errors.join(' | ')}）`)
 } finally {
   await browser.close()
