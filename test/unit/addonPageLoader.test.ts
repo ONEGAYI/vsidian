@@ -462,6 +462,91 @@ describe('T02 生产装载器：代次硬边界', () => {
   })
 })
 
+describe('#559 异常登记隔离：迟到/重复登记不误伤他组件', () => {
+  const OTHER_ID = 'onegayi.vsidian-test-other-addon'
+
+  it('他人装载批次不吞同拍到达的他组件登记：双方各自消费自己的登记', async () => {
+    const h = harness()
+    const identities: string[] = []
+    // 同栈调度两个并行装载（跨组件不阻塞）：A 的批次先消费登记表
+    const loadA = h.handle.load(manifest())
+    registerFactory(h, (sdk) => identities.push(`a-factory:${sdk.addon.id}`), ADDON_ID)
+    const loadB = h.handle.load(manifest({ addonId: OTHER_ID }))
+    registerFactory(h, (sdk) => identities.push(`b-factory:${sdk.addon.id}`), OTHER_ID)
+    const [outcomeA, outcomeB] = await Promise.all([loadA, loadB])
+    // 原缺陷：A 的批次把 B 的登记当「同批多余」吞掉 → B no-factory-registered
+    expect(outcomeA).toEqual({ ok: true, css: [] })
+    expect(outcomeB).toEqual({ ok: true, css: [] })
+    // 各自工厂收到各自身份（A 的批次不消费 B 的工厂，反之亦然）
+    expect(identities).toEqual([`a-factory:${ADDON_ID}`, `b-factory:${OTHER_ID}`])
+    // B 的登记保留给属主：不计入 A 批次的丢弃统计
+    expect(h.handle.stats().counters.unsolicitedRegistrationsDropped).toBe(0)
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(0)
+  })
+
+  it('他组件装载窗口内的登记不被晚开的他人批次当旧条目丢弃（B 脚本慢于 A 批次）', async () => {
+    // B 的装载先开始但脚本结算慢（真实浏览器中脚本 load 回调时序错开的抽象），
+    // A 的批次在其间完成登记消费——原缺陷把 B 的登记当「装载开始前的遗留」丢弃
+    let releaseB!: () => void
+    const bScript = new Promise<{ ok: true }>((resolve) => {
+      releaseB = () => resolve({ ok: true })
+    })
+    const h = harness({
+      loadScript: (uri) => (uri.endsWith('/b.js') ? bScript : Promise.resolve({ ok: true })),
+    })
+    const loadB = h.handle.load(manifest({ addonId: OTHER_ID, scriptUri: 'https://page.test/b.js' }))
+    // 让 B 的装载流跑到脚本挂起点（loadStartedAt 在 loadImpl 内取——微任务）
+    await settle()
+    // B 的登记发生在 B 自己的装载窗口内（对 B 是 fresh）
+    registerFactory(h, () => {}, OTHER_ID)
+    h.advance(10)
+    // A 的装载窗口晚于 B 的登记时刻：B 的登记对 A 是「旧时刻」条目
+    const loadA = h.handle.load(manifest())
+    registerFactory(h, () => {}, ADDON_ID)
+    const outcomeA = await loadA
+    expect(outcomeA).toEqual({ ok: true, css: [] })
+    // A 的批次不替 B 丢弃也不计数（原缺陷此处 lateRegistrationsDropped=1 且吞掉 B 的登记）
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(0)
+    releaseB()
+    const outcomeB = await loadB
+    // B 的登记保留在表中，属主批次正常消费（原缺陷：no-factory-registered）
+    expect(outcomeB).toEqual({ ok: true, css: [] })
+    expect(h.handle.stats().active).toEqual([
+      { addonId: ADDON_ID, generation: 1 },
+      { addonId: OTHER_ID, generation: 1 },
+    ])
+  })
+
+  it('身份不符拒绝后，他组件登记保留可被属主正常装载（identity-mismatch 语义保持）', async () => {
+    const h = harness()
+    // 本次装载窗口内唯一登记属于他组件且本组件无自己的登记 → 既有身份核对拒绝
+    registerFactory(h, () => {}, OTHER_ID)
+    const outcomeA = await h.handle.load(manifest())
+    expect(outcomeA).toEqual({ ok: false, reason: 'identity-mismatch', detail: `registered=${OTHER_ID}` })
+    expect(h.handle.stats().active).toEqual([])
+    // 原缺陷：该登记被 mismatch 批次消费掉 → 属主装载 no-factory-registered
+    const outcomeB = await h.handle.load(manifest({ addonId: OTHER_ID }))
+    expect(outcomeB).toEqual({ ok: true, css: [] })
+  })
+
+  it('他组件的迟到登记只由属主批次按既有语义丢弃计数（只影响自身）', async () => {
+    const h = harness()
+    // B 的登记早于一切窗口：属主批次已结束的迟到登记
+    registerFactory(h, () => {
+      throw new Error('B 的迟到工厂不得执行')
+    }, OTHER_ID, 900)
+    registerFactory(h, () => {}, ADDON_ID)
+    const outcomeA = await h.handle.load(manifest())
+    expect(outcomeA).toEqual({ ok: true, css: [] })
+    // A 的批次不替 B 计数（原缺陷：A 批次就地丢弃 B 的登记并计入 late=1）
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(0)
+    // B 随后装载：登记早于 B 的窗口 → 既有迟到归宿（旧条目丢弃计数 + 拒绝）
+    const outcomeB = await h.handle.load(manifest({ addonId: OTHER_ID }))
+    expect(outcomeB).toEqual({ ok: false, reason: 'no-factory-registered' })
+    expect(h.handle.stats().counters.lateRegistrationsDropped).toBe(1)
+  })
+})
+
 describe('T02 生产装载器：真实 CM6 扩展接入与释放', () => {
   it('registerExtension 经装配槽挂载真实 StateField；卸载后摘除且文档不变', async () => {
     const sent: AddonPageOutbound[] = []
