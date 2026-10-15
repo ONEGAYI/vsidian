@@ -1,8 +1,19 @@
 import MarkdownIt from 'markdown-it'
 import { clipboardPlainText } from './clipboardPaste'
+import {
+  ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
+  orderAddonPasteRules,
+  parseAddonPasteTemplate,
+  type AddonPasteRule,
+  type AddonPasteTemplatePart,
+} from '../shared/addonPasteRules'
 
 const urlPolicy = new MarkdownIt()
 export interface ConvertedHtml { markdown: string; hasFormatting: boolean }
+/** 转换选项：addonPasteRules 为本次粘贴开始时捕获的有效规则序（快照） */
+export interface HtmlToMarkdownOptions {
+  addonPasteRules?: readonly AddonPasteRule[]
+}
 const ignored = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK'])
 const blockTags = new Set(['P','DIV','UL','OL','LI','TABLE','TR','TH','TD','PRE','BLOCKQUOTE','H1','H2','H3','H4','H5','H6'])
 // HTML 解析已经还原来源文字；只保护其中的字面实体前缀，避免 Markdown 再解码。
@@ -34,14 +45,107 @@ function safeUrl(value: string): string | null {
   return escapeEntityPrefixes(url).replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29')
 }
 
+// ---- #541 T01 附加组件粘贴规则求值（声明与切分同源 shared/addonPasteRules） ----
+
+/** 模板切分缓存（模板为不可变字符串；上限受规则数预算约束） */
+const addonPasteTemplateCache = new Map<string, readonly AddonPasteTemplatePart[]>()
+
+interface AddonPasteRuleEvaluationDeps {
+  /** children 槽取值：子内容按内置转换（已转换片段，不再二次转义） */
+  convertChildren(el: Element): string
+}
+
+/**
+ * 单条规则求值：成功返回产出（discard 为空串）；不匹配、必需取值缺失、
+ * URL 拒绝或产出为空（模板非显式丢弃）返回 null（进入下一条规则）。
+ * 模板字面是作者声明的静态 Markdown 结构不转义；文本/属性槽按内置
+ * escapeText 转义；URL 槽经既有 safeUrl 策略。
+ */
+function evaluateAddonPasteRule(rule: AddonPasteRule, el: Element, deps: AddonPasteRuleEvaluationDeps): string | null {
+  if (el.tagName !== rule.match.tag) return null
+  for (const condition of rule.match.attributes ?? []) {
+    if (condition.value === undefined) {
+      if (!el.hasAttribute(condition.name)) return null
+    } else if (el.getAttribute(condition.name) !== condition.value) {
+      return null
+    }
+  }
+  if (rule.output.kind === 'discard') return ''
+  let parts = addonPasteTemplateCache.get(rule.output.template)
+  if (parts === undefined) {
+    const parsed = parseAddonPasteTemplate(rule.output.template)
+    if (parsed === null) return null
+    addonPasteTemplateCache.set(rule.output.template, parsed)
+    parts = parsed
+  }
+  let output = ''
+  for (const part of parts) {
+    if ('literal' in part) {
+      output += part.literal
+      continue
+    }
+    const slot = rule.output.slots[part.slot]
+    if (!slot) return null
+    // 取值：属性缺失（null）与文本/子内容空串都是必需取值缺失——本规则失败
+    let raw: string | null
+    if (slot.source.kind === 'text') {
+      raw = el.textContent ?? ''
+      if (raw === '') raw = null
+    } else if (slot.source.kind === 'attribute') {
+      raw = el.getAttribute(slot.source.name)
+    } else {
+      raw = deps.convertChildren(el)
+      if (raw === '') raw = null
+    }
+    if (raw === null) return null
+    if (slot.url === true) {
+      const safe = safeUrl(raw)
+      if (safe === null) return null
+      output += safe
+    } else if (slot.source.kind === 'children') {
+      output += raw
+    } else {
+      output += escapeText(raw)
+    }
+  }
+  if (output === '') return null
+  return output
+}
+
 /** 脱离活动文档解析，不执行HTML或加载其资源；只输出Markdown支持的语义。 */
-export function htmlToMarkdown(html: string): ConvertedHtml {
+export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): ConvertedHtml {
   if (html.length > 2_000_000) throw new Error('Clipboard HTML exceeds conversion budget')
   const template = document.createElement('template')
   template.innerHTML = html
   let hasFormatting = false
   const literalBlocks: string[] = []
   let visited = 0
+  // #541 T01 附加组件粘贴规则：本次粘贴使用开始时捕获的有效快照（调用方
+  // 传入），转换中不拼接两个注册代次；入口统一应用确定性排序（快照序的
+  // 本地保证——顺序不取决于页面装载先后）；求值步数预算超限停用规则
+  //（内置转换继续），单条失败进入下一条，全部未成功回内置
+  const addonRules = orderAddonPasteRules(options?.addonPasteRules ?? [])
+  let addonRuleSteps = 0
+  let addonRulesExhausted = false
+  function addonRuleOutput(el: Element, table: boolean, inherited: Marks): string | null {
+    if (addonRules.length === 0 || addonRulesExhausted) return null
+    for (const rule of addonRules) {
+      addonRuleSteps += 1
+      if (addonRuleSteps > ADDON_PASTE_RULES_EVAL_STEP_BUDGET) {
+        addonRulesExhausted = true
+        return null
+      }
+      try {
+        const output = evaluateAddonPasteRule(rule, el, {
+          convertChildren: (target) => children(target, table, inherited),
+        })
+        if (output !== null) return output
+      } catch {
+        // 规则求值异常进入下一规则（规格 §4.3）
+      }
+    }
+    return null
+  }
   const blockContainers = new WeakMap<Element, boolean>()
   function isBlockContainer(el: Element): boolean {
     const cached = blockContainers.get(el)
@@ -54,6 +158,11 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
     if (++visited > 100_000) throw new Error('Clipboard HTML exceeds node budget')
     if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeText((node.textContent ?? '').replace(/\s+/g,' '))}]
     if (!(node instanceof Element) || ignored.has(node.tagName) || node.tagName === 'INPUT') return []
+    const addonOutput = addonRuleOutput(node, table, inherited)
+    if (addonOutput !== null) {
+      hasFormatting = true
+      return [{...unmarked, text: addonOutput}]
+    }
     const marks = effectiveMarks(node, inherited)
     const tag = node.tagName
     if (tag === 'BR') return [{...unmarked,text:table ? '<br>' : '  \n'}]
@@ -150,6 +259,13 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
     if (node instanceof DocumentFragment) return children(node, table, inherited)
     const tag = node.tagName
     if (ignored.has(tag)) return ''
+    if (blockTags.has(tag) || isBlockContainer(node)) {
+      const addonOutput = addonRuleOutput(node, table, inherited)
+      if (addonOutput !== null) {
+        hasFormatting = true
+        return addonOutput
+      }
+    }
     if (!blockTags.has(tag)) return isBlockContainer(node) ? children(node,table,inherited) : serialize(inline(node,inherited,table))
     if (tag === 'PRE') {
       const text = node.textContent ?? ''

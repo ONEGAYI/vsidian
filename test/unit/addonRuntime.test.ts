@@ -14,6 +14,7 @@ import { AddonRegistry } from '../../src/host/addons/addonRegistry'
 import { AddonRuntime, type AddonPreferenceStore } from '../../src/host/addons/addonRuntime'
 import { AddonSettingsService, type AddonSettingsPersistencePort } from '../../src/host/addons/addonSettingsService'
 import { AddonStorageService } from '../../src/host/addons/addonStorageService'
+import { AddonPasteRuleService } from '../../src/host/addons/addonPasteRuleService'
 import { ADDON_API_VERSION, OFFICIAL_ADDON_EXTENSION_IDS } from '../../src/shared/addonIdentity'
 
 const INSTALL = process.platform === 'win32' ? 'C:\\addons\\demo-addon' : '/addons/demo-addon'
@@ -83,6 +84,7 @@ function harness(options: { store?: ReturnType<typeof memoryStore>; installDirs?
     preferences: store,
     settings: new AddonSettingsService(settingsPersistence),
     storage: countingStorage,
+    pasteRules: new AddonPasteRuleService({ log: () => {} }),
     installDirOf: (addonId) => installDirs[addonId],
     log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
   })
@@ -583,6 +585,7 @@ describe('T12 设置变化回调异常升级为全组件故障', () => {
         },
         createWatcher: () => ({ dispose: () => {} }),
       }),
+      pasteRules: new AddonPasteRuleService({ log: () => {} }),
       installDirOf: () => INSTALL,
       log: (stage, addonId, detail) => logs.push(`${stage}:${addonId}:${detail}`),
     })

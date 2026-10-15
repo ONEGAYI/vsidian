@@ -8,7 +8,7 @@
 
 | 层 | 资产 | 职责 |
 | --- | --- | --- |
-| 事实源（T13） | `src/shared/addonApiCatalog.ts` | 六组 22 条目语义清单 + 发行台账 + `validateAddonApiCatalog` 自洽校验 |
+| 事实源（T13） | `src/shared/addonApiCatalog.ts` | 语义清单 + 发行台账 + `validateAddonApiCatalog` 自洽校验（首版六组 22 条目；#541 起七组 29 条目） |
 | 独立基线 | `test/addon-api/baseline-bootstrap-1.json` | 从 **git 锚点对象**派生的条目 / 签名声明文本 / 台账快照 + 完整性清单；不信任候选树文件 |
 | 纯逻辑模块 | `scripts/addonApiCompatCheck.mjs` | 比较器、期限校验、基线信任验证与全套编排（可被 node --test import） |
 | CLI 壳 | `scripts/checkAddonApiCompat.mjs` | `--verify-baseline` / 全检查 / `--emit-baseline`（发射基线）三入口 |
@@ -34,7 +34,7 @@ node scripts/demoAddonApiGate.mjs # 负向演示（退出码 0 = 全部场景符
 
 | 路径 | 锚点 | 额外核实 | 当前状态 |
 | --- | --- | --- | --- |
-| **bootstrap**（显式初始基线） | 提交 `abcbfdd7`（T13 集成分支落地树，非发行锚点） | — | **当前生效**：`baseline-bootstrap-1.json`（22 条目 / 12 签名模块 / 台账候选快照） |
+| **bootstrap**（显式初始基线） | 提交 `1a1c71a5`（#541 粘贴规则批次重锚点；初始锚 `abcbfdd7` T13 落地树，非发行锚点） | — | **当前生效**：`baseline-bootstrap-1.json`（29 条目 / 18 签名模块 / 台账候选快照）。首版（22 条目 / 12 模块）后历次重锚：#541（新增第七组 paste-conversion 与 `AddonEnableContext.paste` 面乙——候选期加法，重锚理由随同 PR 提交说明） |
 | **release**（发行基线） | 发行 tag + 台账 `released` 记录 + 实际发布日期 | tag 指向 SHA、锚点台账状态为 released、基线日期与台账一致（三者矛盾即失败） | 未启用——Vsidian 尚未发行任何稳定 API；经隔离 git fixture 验证（见下） |
 
 首个稳定 API（1.0.0）真实发行时的落账流程：人工把台账改 `status: 'released'` 并填实际发布日期 → 打发行 tag → `--emit-baseline --mode release --api-version 1.0.0 --anchor <tag>` 提交新基线（同 PR、独立说明理由）。**发行是人工落账动作**：候选版本不得冒充发行状态（`catalog-selfcheck` 拦截候选携带日期；`baseline-release-not-released` 拦截伪造的发行锚点）。

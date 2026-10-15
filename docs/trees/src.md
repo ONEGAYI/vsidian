@@ -17,6 +17,7 @@ vsidian/
     │   │   ├── addonCommandService.ts         # 宿主命令目录服务与命令面板注册
     │   │   ├── addonCoordinator.ts            # 附加组件发现协调与唤醒
     │   │   ├── addonPageRegistry.ts           # 页面入口登记校验
+    │   │   ├── addonPasteRuleService.ts       # 粘贴规则宿主服务
     │   │   ├── addonRealpathGuard.ts          # realpath 逃逸守卫
     │   │   ├── addonRegistry.ts               # 附加组件注册表校验链
     │   │   ├── addonRendererService.ts        # 宿主渲染服务
@@ -84,6 +85,7 @@ vsidian/
     │   ├── addonHostSettingsApi.ts # 宿主设置读取面白名单事实源
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
+    │   ├── addonPasteRules.ts      # 粘贴规则共享契约
     │   ├── addonRenderers.ts       # 渲染提供者共享契约
     │   ├── addonSettings.ts        # 复杂设置共享模型
     │   ├── addonStorage.ts         # 数据目录形状与守卫

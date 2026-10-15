@@ -10,7 +10,7 @@
 
 | API 版本 | 状态 | 实际发布日期 | 说明 |
 | --- | --- | --- | --- |
-| 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 首个候选稳定 API：六组能力面（发现与安装/页面 SDK/输入行为/设置/渲染提供者/命令菜单界面）已随 T01–T12 实施与消费样例收敛。候选 = 形状已冻结待发行，尚未对外发布——发行前不产生兼容承诺；升级为 released 须在真实发行时人工落账并填实际发布日期。 |
+| 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 首个候选稳定 API：首版六组能力面（发现与安装/页面 SDK/输入行为/设置/渲染提供者/命令菜单界面）已随 T01–T12 实施与消费样例收敛；候选期内追加粘贴转换组（#541 T01 基础链路起）。候选 = 形状已冻结待发行，尚未对外发布——发行前不产生兼容承诺；升级为 released 须在真实发行时人工落账并填实际发布日期。 |
 
 **实验入口兼容清单**（使用须在清单 `experimental` 声明对应入口与兼容范围；实验入口可能随版本调整，不随稳定 API 弃用期限承诺）：
 
@@ -68,6 +68,8 @@
     - [`commands-register` 命令注册与统一快捷键](#commands-register)
     - [`menus-register` 菜单项注册](#menus-register)
     - [`ui-buttons-panels` 工具栏按钮与面板](#ui-buttons-panels)
+  - [7. 粘贴转换](#7-粘贴转换)
+    - [`paste-rules-register` 声明式粘贴规则注册（enable 生命周期）](#paste-rules-register)
 
 ## 1. 发现与安装
 
@@ -248,8 +250,8 @@ export interface AddonSetupContext extends AddonRegistrationContext {
   readonly channel: AddonChannelRegistry
 }
 
-/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 清理回调。
- *  开启时装配；关闭或故障时释放所属注册） */
+/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 粘贴规则 +
+ *  清理回调。开启时装配；关闭或故障时释放所属注册） */
 export interface AddonEnableContext extends AddonRegistrationContext {
   /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，
    *  第二个登记拒绝） */
@@ -260,6 +262,9 @@ export interface AddonEnableContext extends AddonRegistrationContext {
   readonly storage: AddonStorageFacet
   /** 运行生命周期通道（停用即注销） */
   readonly channel: AddonChannelRegistry
+  /** #541 T01 粘贴转换规则登记（有效规则广播到已开与新开编辑器页面，
+   *  在富文本粘贴的 HTML→Markdown 遍历中消费） */
+  readonly paste: AddonPasteRulesContextApi
   /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */
   onDispose(callback: () => void): void
 }
@@ -2303,6 +2308,158 @@ export interface AddonSdkUiFacet {
 ```
 
 **验证**：`test/unit/addonUi.test.ts`、`test/unit/addonUiRuntime.test.ts`、`test/integration/suite/addonT11Cases.ts`、`test/browser/addonT11Ui.mjs`
+
+## 7. 粘贴转换
+
+**能力范围**：声明式粘贴规则注册与富文本粘贴的 HTML→Markdown 转换接管（#541 T01 基础链路）
+
+### `paste-rules-register` 声明式粘贴规则注册（enable 生命周期）
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#541（T01）
+
+**目标**：组件在宿主运行生命周期（enable 上下文的 paste 面）登记可序列化粘贴转换规则：全部已打开与新打开的编辑器页面共用同一组有效规则，在富文本粘贴的 HTML→Markdown 遍历中消费——来源特化元素（如带私有属性的 span）可恢复为 Markdown 链接等结构，来源识别不进入内核。
+
+语义要点：
+- **适用模式**：只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。
+- **坐标与数据形状**：规则语言为可序列化数据：基础匹配（标签名相等、属性存在、属性值相等——缺失与空串区分）＋取值槽（元素文本/指定属性/子内容内置转换结果）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则、条件组合与嵌套转换属后续批次（#542）——未知字段显式拒绝，不静默当成基础声明。
+- **生命周期**：有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。每组件至多 256 条、表达式嵌套深度至多 16（后续批次消费）、单次粘贴求值步数至多 100,000（超限停用规则、内置转换继续）。
+- **错误与拒绝**：四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段，含后续批次的正则条件嵌套节点在未实现阶段的显式拒绝）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。
+
+签名事实源：`src/shared/addonPasteRules.ts`
+
+```ts
+/** 作者提交的规则声明（来源组件与代次由平台注入，声明不带身份字段） */
+export interface AddonPasteRuleDeclaration {
+  /** 组件内稳定规则 ID（禁点号——不伪造跨组件身份） */
+  readonly id: string
+  /** 可选整数优先级（缺省 0；排序见 orderAddonPasteRules） */
+  readonly priority?: number
+  readonly match: AddonPasteRuleMatch
+  readonly output: AddonPasteRuleOutput
+}
+
+/** 基础匹配：标签名相等 + 属性条件全与（条件组合 all/any/not 属 T02） */
+export interface AddonPasteRuleMatch {
+  /** 标签名（大写形态与 DOM tagName 对齐；校验时规整） */
+  readonly tag: string
+  /** 属性条件列表（全部满足才匹配；至多 8 条） */
+  readonly attributes?: readonly AddonPasteRuleAttributeCondition[]
+}
+
+/** 产出：Markdown 结构模板或显式丢弃（空产出只有显式丢弃才算成功） */
+export type AddonPasteRuleOutput =
+  | {
+    readonly kind: 'template'
+    /** 模板中的 {{name}} 引用槽；字面部分是作者声明的静态 Markdown 结构 */
+    readonly template: string
+    readonly slots: Readonly<Record<string, AddonPasteSlot>>
+  }
+  | { readonly kind: 'discard' }
+
+/** 模板槽：url=true 经现有 safeUrl 策略（children 来源无 URL 语义，拒绝） */
+export interface AddonPasteSlot {
+  readonly source: AddonPasteSlotSource
+  readonly url?: boolean
+}
+
+/** 注册结果（普通 API 拒绝不算组件故障；dispose 重复调用无害） */
+export type AddonPasteRulesRegisterResult =
+  | { ok: true; dispose(): void }
+  | { ok: false; reason: 'invalid-declaration' | 'duplicate-id' | 'too-many' | 'released'; detail?: string }
+
+/** 广播到编辑器页面的有效规则快照（version 单调递增，内容等值不递增） */
+export interface AddonPasteRulesSnapshot {
+  readonly version: number
+  readonly rules: readonly AddonPasteRule[]
+}
+
+/** 规则声明每组件数量上限（规格 §4.4：每组件至多 256 条） */
+export const ADDON_PASTE_RULES_MAX_PER_ADDON = 256
+
+/** 表达式嵌套深度上限（T02 消费；常量随本模块集中定义并测试边界） */
+export const ADDON_PASTE_RULES_MAX_DEPTH = 16
+
+/** 每次粘贴累计规则/表达式求值步数上限（超限停用规则，内置转换继续） */
+export const ADDON_PASTE_RULES_EVAL_STEP_BUDGET = 100_000
+
+/**
+ * 整批校验（规格 §4.1：批内 ID 重复、非法正则、未知操作或超预算声明
+ * 整批拒绝，不部分安装）。输入为作者原始声明（unknown）；输出为规整后
+ * 的规则（addonId 由宿主注入，不在此伪造）。
+ */
+export function validateAddonPasteRuleDeclarations(
+  declarations: readonly unknown[],
+  context: AddonPasteRuleValidationContext = {},
+): AddonPasteRuleValidationResult {
+  if (!Array.isArray(declarations)) {
+    return { ok: false, reason: 'invalid-declaration', detail: 'declarations must be an array' }
+  }
+  if (declarations.length + (context.currentCount ?? 0) > ADDON_PASTE_RULES_MAX_PER_ADDON) {
+    return { ok: false, reason: 'too-many', detail: `每组件至多 ${ADDON_PASTE_RULES_MAX_PER_ADDON} 条规则` }
+  }
+  const rules: Omit<AddonPasteRule, 'addonId'>[] = []
+  const seen = new Set<string>(context.existingIds ?? [])
+  for (const [index, raw] of declarations.entries()) {
+    if (!isObject(raw)) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条声明须为对象` }
+    const unknown = hasOnlyKeys(raw, ['id', 'priority', 'match', 'output'])
+    if (unknown) return { ok: false, reason: 'invalid-declaration', detail: `声明不支持字段 '${unknown}'（条件/嵌套属后续版本）` }
+    if (typeof raw.id !== 'string' || !RULE_ID_PATTERN.test(raw.id) || raw.id.length > RULE_ID_LIMIT) {
+      return { ok: false, reason: 'invalid-declaration', detail: `规则 ID 非法：${String(raw.id)}` }
+    }
+    if (seen.has(raw.id)) {
+      return { ok: false, reason: 'duplicate-id', detail: `规则 ID 重复：${raw.id}` }
+    }
+    let priority = 0
+    if (raw.priority !== undefined) {
+      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority) || Math.abs(raw.priority) > PRIORITY_LIMIT) {
+        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为 |n|≤${PRIORITY_LIMIT} 的整数：${String(raw.priority)}` }
+      }
+      priority = raw.priority
+    }
+    const match = validateMatch(raw.match)
+    if (!match.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${match.detail}` }
+    const output = validateOutput(raw.output)
+    if (!output.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${output.detail}` }
+    seen.add(raw.id)
+    rules.push({ id: raw.id, priority, match: match.match, output: output.output })
+  }
+  return { ok: true, rules }
+}
+
+/**
+ * 有效规则确定性排序（规格 §4.3）：优先级降序、组件稳定 ID 升序、规则
+ * 稳定 ID 升序；缺省优先级 0。顺序不取决于异步页面脚本装载先后——宿主
+ * 构造快照与页面求值共用本函数。
+ */
+export function orderAddonPasteRules(rules: readonly AddonPasteRule[]): readonly AddonPasteRule[] {
+  return [...rules].sort((a, b) =>
+    b.priority - a.priority ||
+    (a.addonId < b.addonId ? -1 : a.addonId > b.addonId ? 1 : 0) ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  )
+}
+```
+
+签名事实源：`src/host/addons/addonRegistry.ts`
+
+```ts
+/**
+ * 粘贴规则注册面（#541 T01，enable 生命周期；声明式粘贴转换规格 §4.1）。
+ * 声明为可序列化数据（形状见 shared/addonPasteRules）；来源组件身份由
+ * 平台注入，作者不能冒充其他组件。整批校验：批内 ID 重复、未知操作或
+ * 超预算声明整批拒绝（普通 API 拒绝不算组件故障），不部分安装。停用/
+ * 故障/代次结束撤回本生命周期全部规则。
+ */
+export interface AddonPasteRulesContextApi {
+  /**
+   * 登记一批粘贴转换规则；返回普通注册结果与释放句柄（dispose 只移除
+   * 本批，重复调用无害）。已终结代次的迟到注册拒绝 released。
+   */
+  registerRules(declarations: readonly unknown[]): AddonPasteRulesRegisterResult
+}
+```
+
+**验证**：`test/unit/addonPasteRules.test.ts`、`test/unit/addonRuntimePasteRules.test.ts`、`test/unit/htmlToMarkdownPasteRules.test.ts`、`test/unit/richPasteAddonRules.test.ts`、`test/browser/addonPasteRules.mjs`
 
 
 ---

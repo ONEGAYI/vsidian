@@ -31,6 +31,7 @@ import type {
 import { resolveAddonPageEntry } from './addonPageRegistry'
 import type { AddonSettingsService } from './addonSettingsService'
 import { AddonStorageService } from './addonStorageService'
+import type { AddonPasteRuleService } from './addonPasteRuleService'
 
 /** 登记成功的解析臂（settingsPages/editorPages 只收成功条目） */
 type ResolvedPageEntry = import('./addonPageRegistry').AddonPageEntryResolution & { ok: true }
@@ -55,6 +56,8 @@ export interface AddonRuntimePorts {
   settings: AddonSettingsService
   /** #404 组件数据目录服务（隔离可写目录 + 文件监听） */
   storage: AddonStorageService
+  /** #541 T01 粘贴规则服务（enable 生命周期登记；运行贡献释放时撤回） */
+  pasteRules: AddonPasteRuleService
   /** 组件安装目录（fsPath；解析不到时页面入口登记拒绝——资源授权无锚） */
   installDirOf(addonId: string): string | undefined
   /** 归因日志（写 VSCode 输出通道：组件 ID + 阶段 + 原因） */
@@ -608,6 +611,17 @@ export class AddonRuntime {
         },
       },
       channel: this.buildChannelRegistry(addonId, record, 'run', run.handlers),
+      // #541 T01 粘贴规则：enable 生命周期登记面（身份注入 + 代次守卫；
+      // 运行贡献释放时整组件撤回——见 releaseRun）
+      paste: {
+        registerRules: (declarations) => {
+          if (!this.isLive(record, addonId) || record.run !== run) {
+            this.ports.log('late-registration-rejected', addonId, 'paste-rules')
+            return { ok: false, reason: 'released' }
+          }
+          return this.ports.pasteRules.registerRules(addonId, declarations)
+        },
+      },
       onDispose: (callback) => {
         if (!this.isLive(record, addonId) || record.run !== run) {
           // 已终结代次的迟到登记：立即执行（重复释放无害，对齐页面侧语义）
@@ -703,6 +717,9 @@ export class AddonRuntime {
     const run = record.run
     if (!run) return
     record.run = null
+    // #541 T01 粘贴规则随运行贡献释放整组件撤回（停用/故障/代次结束与
+    // enable 半初始化回收共用本收口；幂等——releaseAddon 对无规则组件无操作）
+    this.ports.pasteRules.releaseAddon(this.entryOf(record))
     for (const callback of run.disposeCallbacks.splice(0)) {
       try {
         callback()

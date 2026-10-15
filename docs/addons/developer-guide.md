@@ -100,9 +100,9 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **工厂允许 async 形态**（官方样例即「await 通道握手后再注册」）：装载结局按工厂同步段判定（返回 pending 的 promise 即报装载成功），但工厂 promise 的 rejection 会与同步异常**同路径归因 `factory-error`**——整代次立即回滚（`onDispose` 回调、扩展、命令等全部回收）并上报宿主触发全组件故障暂停；rejection 迟到（代次已被卸载或替换）则静默丢弃。工厂内部的长等待或驻留循环不会挂起装载指令流。
 - 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental)、[`syntax-experimental`](api-reference.md#syntax-experimental)、[`host-settings-experimental`](api-reference.md#host-settings-experimental) 与 [`behavior-enabled-state`](api-reference.md#behavior-enabled-state) 条目。
 
-## 3. 六组能力速览
+## 3. 能力分组速览
 
-逐条签名、语义与验证定位见[公开 API 参考](api-reference.md)；此处只给「用哪组做什么」的路标。
+逐条签名、语义与验证定位见[公开 API 参考](api-reference.md)；此处只给「用哪组做什么」的路标（首版六组随 #362 批次落地，粘贴转换组自 #541 起追加）。
 
 | 组 | 用途 | 关键入口 | 页面/宿主 |
 | --- | --- | --- | --- |
@@ -113,6 +113,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 设置 | 定义、读写、作用范围、设置页 | `ctx.settings.*` | 宿主 |
 | 渲染提供者 | 代码块渲染候选与自动接管 | `sdk.renderers.register` | 编辑器页 |
 | 命令/菜单/界面 | 命令、菜单项、按钮、面板 | `sdk.commands` / `sdk.menus` / `sdk.ui` | 编辑器页 |
+| 粘贴转换 | 声明式粘贴规则：来源特化元素恢复为 Markdown 结构 | `ctx.paste.registerRules`（enable 生命周期） | 宿主 |
 
 几个高频语义提醒（完整版在参考各条目）：
 
@@ -129,6 +130,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **标题折叠**（#410，实验入口）：查询只读派生视图（原始键集不对外）；命令选区驱动三操作与全文档两操作共用用户触发执行体（effect 直驱）；`upToLevel` 仅 `foldAll` 接受（1–6 整数），其他操作携带即 `invalid-request`。
 - **视图身份与扩展槽**（#426/#427/#428，契约）：扩展槽仅装配主正文 Live 实例；view → instanceId 反查走 `experimental.viewIdentity`；命令回调携带目标视图句柄——完整条款与移植换算见 §4。
 - **行为链触发面**（#399/#400/#401）：普通键入（`input.type`）与删除白名单（`delete.backward` / `forward` / `selection` / `cut` / `line`——`delete.dedent` 属缩进命令族不纳入）驱动；IME 候选期不驱动，**组合定稿驱动一次**（`userEvent='input.type.compose'`、`inputText` 为净定稿文本；取消/空白格组合/代码上下文不驱动）。上下文 `inputText` 为插入侧净文本；`replaced` 携带替换/删除侧（键入替换选区 = 被替换内容，delete = 被删文本，事务前 LF 坐标，IME 定稿恒 null）；`docUri` 为当前目标文档 URI（多视图语义：embed 触发时是引用目标的 URI）。
+- **粘贴转换规则**（#541 T01，enable 生命周期）：`ctx.paste.registerRules([...])` 登记可序列化规则（标签/属性匹配 + `{{槽}}` 模板或显式丢弃），身份由平台注入；整批校验（批内重复 ID、未知操作、超预算——每组件至多 256 条——整批拒绝不部分安装）。有效规则广播到全部编辑器页面，在富文本粘贴的 HTML→Markdown 遍历中按优先级降序、组件 ID 升序、规则 ID 升序确定性执行：首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 忽略与纯文本/代码上下文路径不经规则。停用/故障/代次结束撤回规则。正则、条件与嵌套属后续批次——未实现节点显式拒绝，不静默当成基础声明。
 
 ## 4. 视图身份与扩展槽（契约）
 
@@ -295,6 +297,6 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 
 签名或语义调整必须同步：语义清单条目 → 重生成参考 → 消费样例与钉住断言 → 台账（如涉版本状态）。
 
-## 9. 后续 API 扩展规格（已定稿，尚未实施）
+## 9. 后续 API 扩展规格（分批实施中）
 
-2026-10-15 批次新增能力的正式设计见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。当前公开声明和生成参考仍是实际可消费能力的事实源；不能因规格已定稿就调用尚未实现的接口。
+2026-10-15 批次新增能力的正式设计见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。其中**声明式粘贴转换的基础链路已随 #541（T01）实施**（`paste-rules-register` 条目——宿主注册、快照广播与基础转换；正则/条件/嵌套与 Codex 消费方规则归后续切片）；其余能力以公开声明和生成参考为实际可消费性的事实源——不能因规格已定稿就调用尚未实现的接口。

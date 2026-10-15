@@ -10,7 +10,7 @@
 
 ## 两组「六组」的对应
 
-规格宣传的六组能力面（视图与编辑、内容渲染、操作与界面、设置、生命周期与通信、诊断）与 API 目录的六个分组（`discovery` / `page-sdk` / `behaviors` / `settings` / `renderers` / `commands-menus-ui`，按实现模块面分组）不是一套切法。对应关系：
+规格宣传的六组能力面（视图与编辑、内容渲染、操作与界面、设置、生命周期与通信、诊断）与 API 目录首版的六个分组（`discovery` / `page-sdk` / `behaviors` / `settings` / `renderers` / `commands-menus-ui`，按实现模块面分组）不是一套切法；2026-10 批次起 API 目录追加新分组（首项 `paste-conversion`，#541）。对应关系：
 
 | 规格能力面 | API 目录承载条目 |
 | --- | --- |
@@ -56,6 +56,26 @@
 | 27 | 非原子随上次原子撤回 | #348、#352、#355、#356、#367 | `views-editor` history（joinPrevious + history-boundary 四形态） | V01 探针；集 `addonHistoryCases`；样 input-behavior（括号补全 joinPrevious） | 过 |
 | 28 | 正常/整组件故障停用后内置显示 | #358、#361、#367 | `renderer-selection`（Q30 接管条件表） | 浏 `addonRendererTakeover`；集 `addonT09Cases`/`addonT12Cases`；装 B；样 renderer（正常停用降级 + 首选保留 + 恢复、故障降级 + 重试） | 过；真机观感待验 A64 |
 | 29 | 仍运行组件负责自身渲染 bug | #358、#361、#367 | `renderer-selection`（仍运行不自动接管） | 单 `addonRendererTakeover`；样 renderer（flow-buggy 自处理降级占位不被换回）；集 `addonT09Cases` | 过 |
+
+## 粘贴转换批次故事映射（2026-10 批次，#530 规格冻结）
+
+[声明式粘贴转换规格](addon-paste-conversion.md)的 11 项用户故事（P-U01–P-U11）按切片交付：T01（#541）覆盖 P-U01–P-U06、P-U09–P-U11 的基础链路；P-U07/P-U08（正则/条件/嵌套）归 T02（#542），复验全部基础故事。验证层缩写同上表；T01 证据截至本票实施轮。
+
+| 故事 | 用户结果（摘要） | 切片 | 接口映射 | 验证证据 |
+| --- | --- | --- | --- | --- |
+| P-U01 | 宿主登记规则，已开与新开页面共用 | T01 | `paste-rules-register`（enable 生命周期 `paste.registerRules`，身份平台注入） | 单 `addonRuntimePasteRules`（enable 面乙/停用回收/迟到拒绝）；真宿主页面广播链经 `_test.addonPasteRulesSnapshot` 钩子可观测（集成用例归后续验证轮） |
+| P-U02 | 来源特化 span 恢复为链接 | T01 | `paste-rules-register`（模板槽：字面转义/URL safeUrl/children 拼接） | 单 `htmlToMarkdownPasteRules`（命中/转义/URL）；浏 `addonPasteRules`（双载荷真实键盘） |
+| P-U03 | 邻接 strong/code/pre 不被破坏 | T01 | 同上（单条成功只接管命中元素） | 单 `htmlToMarkdownPasteRules`（邻接保持用例）；浏 `addonPasteRules` |
+| P-U04 | 不匹配/缺属性/输出非法回内置 | T01 | `paste-rules-register` errors（首条成功接管、失败继续、全失败回内置） | 单 `htmlToMarkdownPasteRules`（缺属性/非法 URL/失败回退）；浏 `addonPasteRules`（撤回后回退） |
+| P-U05 | 关闭组件立即恢复内置 | T01 | `paste-rules-register` lifecycle（停用/故障/代次结束撤回并广播） | 单 `addonRuntimePasteRules`（停用/故障/代次回收）；浏 `addonPasteRules`（快照撤回与迟到旧版本不复活） |
+| P-U06 | 纯文本粘贴绕过规则、富文本保留分步撤销 | T01 | `paste-rules-register` modes（纯文本/代码上下文不经规则；等值守卫） | 单 `richPasteAddonRules`（纯文本旁路/两阶段/等值单笔）；浏 `addonPasteRules`（Ctrl+Shift+V、首撤格式次撤文字） |
+| P-U09 | 多组件命中结果稳定 | T01 | `paste-rules-register`（优先级降序、组件 ID 升序、规则 ID 升序确定性序） | 单 `addonPasteRules`（排序）+ `htmlToMarkdownPasteRules`（冲突顺序首条接管） |
+| P-U10 | 危险链接仍受 URL 策略限制 | T01 | `paste-rules-register` coordinates（URL 槽经既有 safeUrl） | 单 `htmlToMarkdownPasteRules`（javascript: 拒绝回内置） |
+| P-U11 | 错误声明可辨认拒绝 | T01 | `paste-rules-register` errors（invalid-declaration/duplicate-id/too-many/released 整批拒绝） | 单 `addonPasteRules`（校验矩阵）+ `addonRuntimePasteRules`（拒绝不算故障） |
+| P-U07 | 正则取值与条件组合 | T02（未实施） | 未实现节点在 T01 阶段显式拒绝（invalid-declaration） | 单 `addonPasteRules`（regex/condition/nested 未知字段拒绝） |
+| P-U08 | 子元素嵌套转换 | T02（未实施） | 同上；T01 的 children 槽只取内置转换结果 | 单 `addonPasteRules`（nested 字段拒绝） |
+
+本批次的公开接入路径：宿主注册面经 `AddonEnableContext.paste`（编译期消费 `test/addonApi/publicApiConsumer.ts` 钉住）；webview 消费经生产快照通道（浏览器夹具 `addonPasteRulesFixture` 模拟宿主广播驱动生产控制器）。真宿主集成验证（宿主登记→页面广播→停用回收全链）与安装态链路归本批次整体验收轮。
 
 ## 公开接入路径声明（不以内部 mock 代替）
 

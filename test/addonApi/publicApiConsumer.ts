@@ -96,6 +96,14 @@ import type {
   AddonSettingValue,
 } from '../../src/shared/addonSettings'
 import type { AddonStorageFacet, AddonStorageRejection } from '../../src/shared/addonStorage'
+import {
+  ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
+  ADDON_PASTE_RULES_MAX_DEPTH,
+  ADDON_PASTE_RULES_MAX_PER_ADDON,
+  type AddonPasteRuleDeclaration,
+  type AddonPasteRulesRegisterResult,
+  type AddonPasteRulesSnapshot,
+} from '../../src/shared/addonPasteRules'
 import type {
   AddonRendererRegistration,
   AddonRenderersFacet,
@@ -177,6 +185,30 @@ export const channelOutcomePinned: Equals<FailureReason<AddonChannelOutcome>, Pi
 /** T07 行为注册拒绝码 */
 export type PinnedBehaviorReasons = 'invalid-registration' | 'duplicate-id' | 'not-editor-page' | 'released'
 export const behaviorReasonsPinned: Equals<FailureReason<AddonBehaviorRegisterResult>, PinnedBehaviorReasons> = true
+
+/** #541 T01 粘贴规则注册拒绝码 */
+export type PinnedPasteRulesReasons = 'invalid-declaration' | 'duplicate-id' | 'too-many' | 'released'
+export const pasteRulesReasonsPinned: Equals<FailureReason<AddonPasteRulesRegisterResult>, PinnedPasteRulesReasons> = true
+/** 粘贴规则预算常量（规格 §4.4 集中定义——宿主与页面同源） */
+export const pasteRulesBudgetsPinned: [
+  number, number, number,
+] = [
+  ADDON_PASTE_RULES_MAX_PER_ADDON, ADDON_PASTE_RULES_MAX_DEPTH, ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
+]
+/** 声明与快照形态的编译期消费（作者提交声明 / 平台广播快照） */
+export const pasteRuleDeclarationSample: AddonPasteRuleDeclaration = {
+  id: 'sample-link',
+  match: { tag: 'span', attributes: [{ name: 'data-sample-url' }] },
+  output: {
+    kind: 'template',
+    template: '[{{label}}]({{url}})',
+    slots: {
+      label: { source: { kind: 'text' } },
+      url: { source: { kind: 'attribute', name: 'data-sample-url' }, url: true },
+    },
+  },
+}
+export const pasteRulesSnapshotSample: AddonPasteRulesSnapshot = { version: 1, rules: [] }
 
 /** T02 五种装载失败原因 */
 export type PinnedLoadFailureReasons =

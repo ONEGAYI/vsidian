@@ -18,6 +18,7 @@ import { isAddonLoaderStats, isAddonPageDirective, isAddonPageOutbound } from '.
 import { isAddonBehaviorEnabledStateBroadcast, isAddonBehaviorInfo, parseAddonBehaviorStateStore } from './addonBehaviors'
 import { parseBehaviorQueryFilter, type BehaviorQueryFilter } from './behaviorFilterQuery'
 import { isAddonRenderersRegisteredPayload, isAddonRenderersTablePayload } from './addonRenderers'
+import { isAddonPasteRulesSnapshot } from './addonPasteRules'
 import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 
@@ -987,6 +988,12 @@ export type HostToWebview =
    *  的单一事实源在 shared/addonRenderers）。面板 ready 与表内容变化时
    *  幂等推送；webview 等值跳过 */
   | { kind: 'addonRenderers.table'; table: import('./addonRenderers').AddonRenderersTablePayload }
+  /** #541 T01 附加组件粘贴规则有效快照（宿主 → 编辑器 webview，广播）：
+   *  enable 生命周期登记的规则经确定性排序后的当前有效集（version 单调、
+   *  内容等值不递增；形态与守卫的单一事实源在 shared/addonPasteRules）。
+   *  面板 ready 与快照变化时推送；停用/故障/代次结束的撤回同样经新快照
+   *  广播——webview 侧旧版本快照迟到不回退 */
+  | { kind: 'addonPasteRules.snapshot'; snapshot: import('./addonPasteRules').AddonPasteRulesSnapshot }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -5594,6 +5601,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'addonRenderers.table':
       // #358 T09 生效表内层守卫（单一事实源在 shared/addonRenderers）
       return isAddonRenderersTablePayload(v.table)
+    case 'addonPasteRules.snapshot':
+      // #541 T01 粘贴规则快照内层守卫（单一事实源在 shared/addonPasteRules）
+      return isAddonPasteRulesSnapshot(v.snapshot)
     case 'addons.behaviors':
       // T08（#357）行为冲突管理载荷（注册表内层守卫在 shared/addonBehaviors；
       // notice 为最近一次写操作结局，常规推送缺省不残留）

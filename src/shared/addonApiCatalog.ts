@@ -13,12 +13,12 @@
 // 不进任何 webview bundle（仅生成器与测试消费）。
 //
 // 维护纪律（改接口必经此处）：
-// - 新增/修改六组接口：同步本清单条目（含 semantics 与 verification）、
+// - 新增/修改分组接口：同步本清单条目（含 semantics 与 verification）、
 //   重跑 npm run gen:addonapi 提交产物、按需更新开发指南与消费样例；
 // - 台账如实：候选（candidate）与草案（draft）不携带发布日期——未真正
 //   发行不得伪造稳定历史；实际发行时改 status=released 并填 releasedAt。
 
-/** 六组公开能力面的分组 ID（票面 #362 口径：按实现模块面分组） */
+/** 公开能力面的分组 ID（票面 #362 口径：按实现模块面分组；#541 起追加粘贴转换组） */
 export type AddonApiGroupId =
   /** ① 发现与安装：宿主清单发现、身份声明、兼容判定、注册入口、官方登记 */
   | 'discovery'
@@ -32,6 +32,8 @@ export type AddonApiGroupId =
   | 'renderers'
   /** ⑥ 命令/菜单/界面：命令、菜单项、按钮与面板及快捷键 */
   | 'commands-menus-ui'
+  /** ⑦ 粘贴转换：声明式粘贴规则注册与富文本粘贴的 HTML→Markdown 接管（#541 起） */
+  | 'paste-conversion'
 
 /** 分组定义（参考文档的章节骨架） */
 export interface AddonApiGroup {
@@ -252,7 +254,7 @@ export function validateAddonApiCatalog(
   return problems
 }
 
-/** 六组公开能力面 */
+/** 公开能力面分组（#362 首版六组；#541 起追加粘贴转换组） */
 export const ADDON_API_GROUPS: readonly AddonApiGroup[] = [
   {
     id: 'discovery',
@@ -290,9 +292,15 @@ export const ADDON_API_GROUPS: readonly AddonApiGroup[] = [
     scope: '命令、菜单项、工具栏按钮与面板及统一快捷键',
     order: 6,
   },
+  {
+    id: 'paste-conversion',
+    title: '粘贴转换',
+    scope: '声明式粘贴规则注册与富文本粘贴的 HTML→Markdown 转换接管（#541 T01 基础链路）',
+    order: 7,
+  },
 ]
 
-/** 语义清单条目（六组全量） */
+/** 语义清单条目（全部分组） */
 export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
   // ---- ① 发现与安装 ----
   {
@@ -962,6 +970,54 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     verification: ['test/unit/addonUi.test.ts', 'test/unit/addonUiRuntime.test.ts', 'test/integration/suite/addonT11Cases.ts', 'test/browser/addonT11Ui.mjs'],
     introduced: '#360（T11）',
   },
+  // ---- ⑦ 粘贴转换 ----
+  {
+    id: 'paste-rules-register',
+    group: 'paste-conversion',
+    title: '声明式粘贴规则注册（enable 生命周期）',
+    layer: 'stable-candidate',
+    endpoints: ['host'],
+    signatures: [
+      {
+        module: 'src/shared/addonPasteRules.ts',
+        symbols: [
+          'AddonPasteRuleDeclaration',
+          'AddonPasteRuleMatch',
+          'AddonPasteRuleOutput',
+          'AddonPasteSlot',
+          'AddonPasteRulesRegisterResult',
+          'AddonPasteRulesSnapshot',
+          'ADDON_PASTE_RULES_MAX_PER_ADDON',
+          'ADDON_PASTE_RULES_MAX_DEPTH',
+          'ADDON_PASTE_RULES_EVAL_STEP_BUDGET',
+          'validateAddonPasteRuleDeclarations',
+          'orderAddonPasteRules',
+        ],
+      },
+      {
+        module: 'src/host/addons/addonRegistry.ts',
+        symbols: ['AddonPasteRulesContextApi'],
+      },
+    ],
+    purpose:
+      '组件在宿主运行生命周期（enable 上下文的 paste 面）登记可序列化粘贴转换规则：全部已打开与新打开的编辑器页面共用同一组有效规则，在富文本粘贴的 HTML→Markdown 遍历中消费——来源特化元素（如带私有属性的 span）可恢复为 Markdown 链接等结构，来源识别不进入内核。',
+    semantics: {
+      modes: '只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。',
+      coordinates:
+        '规则语言为可序列化数据：基础匹配（标签名相等、属性存在、属性值相等——缺失与空串区分）＋取值槽（元素文本/指定属性/子内容内置转换结果）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则、条件组合与嵌套转换属后续批次（#542）——未知字段显式拒绝，不静默当成基础声明。',
+      lifecycle:
+        '有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。每组件至多 256 条、表达式嵌套深度至多 16（后续批次消费）、单次粘贴求值步数至多 100,000（超限停用规则、内置转换继续）。',
+      errors: '四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段，含后续批次的正则条件嵌套节点在未实现阶段的显式拒绝）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。',
+    },
+    verification: [
+      'test/unit/addonPasteRules.test.ts',
+      'test/unit/addonRuntimePasteRules.test.ts',
+      'test/unit/htmlToMarkdownPasteRules.test.ts',
+      'test/unit/richPasteAddonRules.test.ts',
+      'test/browser/addonPasteRules.mjs',
+    ],
+    introduced: '#541（T01）',
+  },
 ]
 
 /** 发行台账（API 版本独立于 Vsidian 本体版本号；如实区分候选与已发布） */
@@ -970,7 +1026,7 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
     version: '1.0.0',
     status: 'candidate',
     summary:
-      '首个候选稳定 API：六组能力面（发现与安装/页面 SDK/输入行为/设置/渲染提供者/命令菜单界面）已随 T01–T12 实施与消费样例收敛。候选 = 形状已冻结待发行，尚未对外发布——发行前不产生兼容承诺；升级为 released 须在真实发行时人工落账并填实际发布日期。',
+      '首个候选稳定 API：首版六组能力面（发现与安装/页面 SDK/输入行为/设置/渲染提供者/命令菜单界面）已随 T01–T12 实施与消费样例收敛；候选期内追加粘贴转换组（#541 T01 基础链路起）。候选 = 形状已冻结待发行，尚未对外发布——发行前不产生兼容承诺；升级为 released 须在真实发行时人工落账并填实际发布日期。',
     experimental: [
       {
         entry: 'cm6',
