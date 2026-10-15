@@ -92,7 +92,20 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
     /** #351 T02 组件设置页挂载宿主元素（settingsMain 创建的持久容器——
      *  装载器 mountRoot 挂进它；不随分页重渲染销毁，重渲染只移动节点） */
     private readonly addonSettingsHost?: HTMLElement,
+    /** #554 组件条目选中态变化回调（settingsMain 接视图 refreshSidebar）：
+     *  addons.settingsState 推送（当前打开组件切换/关闭）后触发侧栏重建，
+     *  分页自身不直接改侧栏 DOM（与 AddonSection 的 onSidebarChange 同构） */
+    private readonly onSidebarCurrentChange?: () => void,
   ) {}
+
+  /** #554 侧栏组件条目当前项（settingsState.open 的只读派生视图）：
+   *  设置区打开的组件非空时返回 'addon:<id>'，否则 undefined——不引入
+   *  第二份组件状态源；挂载回退（openAddonSettingsPage）不作高亮源
+   *  （只开自绘页而未开基础设置区时不冒充选中） */
+  currentSidebarEntryId(): string | undefined {
+    const open = this.settingsState?.open
+    return open === null || open === undefined ? undefined : `addon:${open}`
+  }
 
   get entries() {
     // #472 定义级与组级条目进全局搜索（全部已注册组件——addons.state 携带
@@ -176,6 +189,9 @@ export class AddonSettingsAreaSection implements SettingsPageSection {
         this.consumingPendingFocus = true
       }
       this.render()
+      // #554 当前组件变化（或关闭）→ 侧栏组件条目唯一选中同步重建（宿主
+      // 推送链路：settingsMain 接视图 refreshSidebar——本分页不直接改侧栏）
+      this.onSidebarCurrentChange?.()
     }
   }
 

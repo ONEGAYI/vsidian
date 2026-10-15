@@ -301,7 +301,13 @@ export class SettingsPageView {
     private readonly editorGroups: readonly SettingsPageDelegateGroup[] = [],
     /** #323 常规页二级组委托（默认编辑器守护）：挂常规页标准行之后，
      *  不占侧栏槽位（常规页装配扩展——委托组机制此前只挂编辑器页尾） */
-    private readonly generalGroups: readonly SettingsPageDelegateGroup[] = []) {
+    private readonly generalGroups: readonly SettingsPageDelegateGroup[] = [],
+    /** #554 组件条目当前项查询：分页贡献的侧栏大组内，条目选中不再按
+     *  贡献分页匹配整组点亮，改由本回调按当前渲染上下文（active 分页 id）
+     *  报告应唯一选中的条目 id（settingsMain 接「组件设置」分页的权威
+     *  状态——详情分页下取 settingsState.open 派生的 'addon:<id>'）。
+     *  返回 undefined = 不选中任何组件条目 */
+    private readonly currentSidebarEntry?: (activeId: string | undefined) => string | undefined) {
     // PR #346：分页内输入态变化的上报钩子——分页捕获态一变即重报 uiState
     //（携带最新 state 载荷），宿主记忆与分页现场保持同步
     for (const section of sections) {
@@ -595,6 +601,9 @@ export class SettingsPageView {
     const nav = this.nav
     if (!nav) return
     nav.replaceChildren()
+    // #554 组件条目当前项：分页贡献大组的条目选中以注入回调的报告为准
+    //（唯一条目 id，非 section 匹配）；搜索态沿用既有约定不标当前
+    const currentSidebarEntry = !query ? this.currentSidebarEntry?.(active?.id) : undefined
     // 「选项」大组：现有内建分组与附加分页（快捷键/外观/附加组件管理页
     // 等——组件设置入口在下方大组，管理分页本身属选项）
     const optionsSection = element('div', 'vsidian-settings-nav-section')
@@ -632,7 +641,9 @@ export class SettingsPageView {
           for (const entry of subgroup.entries) {
             const button = element('button', 'vsidian-settings-nav-item')
             button.type = 'button'
-            button.setAttribute('aria-current', !query && active?.id === section.id ? 'page' : 'false')
+            // #554 条目级唯一选中：不按贡献分页匹配（多条目共享 section 会
+            // 整组点亮），当前打开组件的条目与回调报告的 id 精确相等才标记
+            button.setAttribute('aria-current', currentSidebarEntry !== undefined && currentSidebarEntry === entry.id ? 'page' : 'false')
             button.append(document.createTextNode(entry.title))
             if (entry.faulted) {
               const badge = element('span', 'vsidian-settings-nav-item-badge', t('addons.sidebarFaultBadge'))
