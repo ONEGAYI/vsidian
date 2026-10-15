@@ -78,90 +78,91 @@ vsidian/
     │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
     │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
-    │   ├── addonApiCatalog.ts      # 附加组件 API 语义清单与台账
-    │   ├── addonBehaviors.ts       # 输入行为共享契约事实源
-    │   ├── addonCommands.ts        # 附加组件命令/菜单共享形状与校验
-    │   ├── addonEditApi.ts         # 统一视图编辑API共享形状
-    │   ├── addonFoldApi.ts         # 折叠 API 形状事实源
-    │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
-    │   ├── addonHostSettingsApi.ts # 宿主设置读取面白名单事实源
-    │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
-    │   ├── addonNavApi.ts          # 文档导航公开类型
-    │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
-    │   ├── addonPasteRules.ts      # 粘贴规则共享契约
-    │   ├── addonRefViews.ts        # 组件只读引用请求契约
-    │   ├── addonRenderers.ts       # 渲染提供者共享契约
-    │   ├── addonSettings.ts        # 复杂设置共享模型
-    │   ├── addonStorage.ts         # 数据目录形状与守卫
-    │   ├── addonSyntaxApi.ts       # 附加组件语法查询与组合判定
-    │   ├── addonThemes.ts          # 主题身份选择及环境契约
-    │   ├── addonUi.ts              # 附加组件界面贡献共享形状与校验
-    │   ├── behaviorFilterQuery.ts  # 行为筛选查询与分页纯函数
-    │   ├── blockId.ts              # 块 id 与块边界单一事实源
-    │   ├── changeMapping.ts        # 变更重定位纯函数
-    │   ├── chromeContract.ts       # 界面域样式契约探针表
-    │   ├── codeLangs.ts            # 代码块语言注册表与别名路由
-    │   ├── contextMenu.ts          # 统一右键菜单内核纯函数单一事实源
-    │   ├── cssSnippetEnv.ts        # CSS 片段环境身份与分桶戳（#131）
-    │   ├── cssSnippetImports.ts    # CSS 片段依赖导入形态学单一事实源
-    │   ├── cssSnippets.ts          # CSS 片段纯逻辑单一事实源
-    │   ├── editorGuard.ts          # 默认编辑器守护共享纯逻辑
-    │   ├── editOrigin.ts           # T03可选编辑来源元数据
-    │   ├── findOptions.ts          # 查找选项三开关单一事实源
-    │   ├── formatOperations.ts     # 格式操作注册清单
-    │   ├── frontmatterTable.ts     # frontmatter 表格化纯逻辑
-    │   ├── globLiteral.ts          # watcher 文件名 glob 转义
-    │   ├── hoverRefresh.ts         # 引用视图同步参数与订阅注册表
-    │   ├── i18n.ts                 # t() 取词与语言包装配状态模块
-    │   ├── imageRefresh.ts         # 图片刷新共享常量与核验决策
-    │   ├── jiebaManifest.ts        # jieba 锁定版本与下载源清单
-    │   ├── keybindings.ts          # 快捷键操作与冲突模型
-    │   ├── listPrefix.ts           # 列表引用前缀形态学（#119）
-    │   ├── locales/                # 语言包字典单一事实源
+    │   ├── addonApiCatalog.ts         # 附加组件 API 语义清单与台账
+    │   ├── addonBehaviors.ts          # 输入行为共享契约事实源
+    │   ├── addonCommands.ts           # 附加组件命令/菜单共享形状与校验
+    │   ├── addonEditApi.ts            # 统一视图编辑API共享形状
+    │   ├── addonFoldApi.ts            # 折叠 API 形状事实源
+    │   ├── addonHistoryGrouping.ts    # V01历史分组纯逻辑状态机
+    │   ├── addonHostSettingsApi.ts    # 宿主设置读取面白名单事实源
+    │   ├── addonIdentity.ts           # 附加组件身份与兼容判定
+    │   ├── addonNavApi.ts             # 文档导航公开类型
+    │   ├── addonPage.ts               # 页面 SDK 与装载协议契约
+    │   ├── addonPasteRules.ts         # 粘贴规则共享契约
+    │   ├── addonRefViews.ts           # 组件只读引用请求契约
+    │   ├── addonRenderers.ts          # 渲染提供者共享契约
+    │   ├── addonSettings.ts           # 复杂设置共享模型
+    │   ├── addonSettingsContextApi.ts # 设置页上下文面公开契约
+    │   ├── addonStorage.ts            # 数据目录形状与守卫
+    │   ├── addonSyntaxApi.ts          # 附加组件语法查询与组合判定
+    │   ├── addonThemes.ts             # 主题身份选择及环境契约
+    │   ├── addonUi.ts                 # 附加组件界面贡献共享形状与校验
+    │   ├── behaviorFilterQuery.ts     # 行为筛选查询与分页纯函数
+    │   ├── blockId.ts                 # 块 id 与块边界单一事实源
+    │   ├── changeMapping.ts           # 变更重定位纯函数
+    │   ├── chromeContract.ts          # 界面域样式契约探针表
+    │   ├── codeLangs.ts               # 代码块语言注册表与别名路由
+    │   ├── contextMenu.ts             # 统一右键菜单内核纯函数单一事实源
+    │   ├── cssSnippetEnv.ts           # CSS 片段环境身份与分桶戳（#131）
+    │   ├── cssSnippetImports.ts       # CSS 片段依赖导入形态学单一事实源
+    │   ├── cssSnippets.ts             # CSS 片段纯逻辑单一事实源
+    │   ├── editorGuard.ts             # 默认编辑器守护共享纯逻辑
+    │   ├── editOrigin.ts              # T03可选编辑来源元数据
+    │   ├── findOptions.ts             # 查找选项三开关单一事实源
+    │   ├── formatOperations.ts        # 格式操作注册清单
+    │   ├── frontmatterTable.ts        # frontmatter 表格化纯逻辑
+    │   ├── globLiteral.ts             # watcher 文件名 glob 转义
+    │   ├── hoverRefresh.ts            # 引用视图同步参数与订阅注册表
+    │   ├── i18n.ts                    # t() 取词与语言包装配状态模块
+    │   ├── imageRefresh.ts            # 图片刷新共享常量与核验决策
+    │   ├── jiebaManifest.ts           # jieba 锁定版本与下载源清单
+    │   ├── keybindings.ts             # 快捷键操作与冲突模型
+    │   ├── listPrefix.ts              # 列表引用前缀形态学（#119）
+    │   ├── locales/                   # 语言包字典单一事实源
     │   │   ├── en.ts     # 英文语言包（类型基准）
     │   │   ├── index.ts  # 语言注册表与解析（仅宿主可引）
     │   │   ├── island.ts # 语言数据岛构建与解析
     │   │   └── zh-cn.ts  # 简体中文语言包（编译期 parity）
-    │   ├── localizedText.ts        # 组件多语言文本选值与守卫
-    │   ├── looseLink.ts            # 宽松内联链接/图片形态学单一事实源
-    │   ├── markdownDoc.ts          # Markdown 文档工具与树查询
-    │   ├── math.ts                 # 公式形态学纯函数（#59）
-    │   ├── mermaid.ts              # Mermaid 围栏形态学（#60）
-    │   ├── newline.ts              # CRLF/LF 换行协调器
-    │   ├── obsidianAlias.ts        # Obsidian 别名桥实现同源表
-    │   ├── officialAddons.ts       # 官方组件登记表事实源
-    │   ├── pdfNav.ts               # PDF 导航锚点解析纯逻辑
-    │   ├── protocol.ts             # 消息协议单一事实源
-    │   ├── refContent.ts           # 引用内容类型分派共享内核（#333）
-    │   ├── refExpansion.ts         # 引用递归路径与容量预算
-    │   ├── refText.ts              # 可读文本锚点与准入共享内核
-    │   ├── relocationScan.ts       # 嵌入重定位逐字检索预算
-    │   ├── semverRange.ts          # API 版本范围语义子集求值器
-    │   ├── settings.ts             # 设置定义与读写纯逻辑
-    │   ├── skeletonTiming.ts       # 骨架屏撤除计算与装配常量（#292）
-    │   ├── styleContract.ts        # 公开样式契约清单单一事实源
-    │   ├── styleContractEn.ts      # 样式参考条目英文覆盖单一事实源
-    │   ├── symbols.ts              # 符号注册表单一事实源（#123）
-    │   ├── symbolWrap.ts           # 选区包裹计划纯函数（#124）
-    │   ├── tabEscape.ts            # Tab 越界定位纯函数（#125）
-    │   ├── tableCellEmbed.ts       # 表格格内嵌入三套区间映射
-    │   ├── tableCells.ts           # 表格单元格边界、换行与转义
-    │   ├── testDiagnostics.ts      # 测试传播诊断有界日志
-    │   ├── vaultFileCatalog.ts     # 全文件清单快照纯逻辑
-    │   ├── vaultFileCategory.ts    # 全文件清单分类声明
-    │   ├── vaultIndexExclude.ts    # 索引排除模式纯逻辑单一事实源
-    │   ├── vaultIndexModel.ts      # 引用索引内存模型纯逻辑
-    │   ├── vaultIndexSchedule.ts   # 索引维护调度纯逻辑与初值常量
-    │   ├── vaultIndexSnapshot.ts   # 分片快照存储纯逻辑（#195 选型基线）
-    │   ├── vaultLink.ts            # 根内相对路径解析单一事实源（#196）
-    │   ├── vaultRename.ts          # 引用改写计划纯逻辑（#199）
-    │   ├── webLink.ts              # 外链 URL 准入与归一（两端共享）
-    │   ├── wikilink.ts             # 双链形态学单一事实源（#11）
-    │   ├── wikilinkBlock.ts        # 块候选纯逻辑（#380 T05）
-    │   ├── wikilinkField.ts        # 双链目标字段阶段化识别与编辑计划
-    │   ├── wikilinkHeading.ts      # 标题候选枚举与前缀过滤
-    │   ├── wikilinkQuery.ts        # 双链联想查询评分移植
-    │   └── wordSegment.ts          # 中文分词形态学与移动规划纯函数
+    │   ├── localizedText.ts           # 组件多语言文本选值与守卫
+    │   ├── looseLink.ts               # 宽松内联链接/图片形态学单一事实源
+    │   ├── markdownDoc.ts             # Markdown 文档工具与树查询
+    │   ├── math.ts                    # 公式形态学纯函数（#59）
+    │   ├── mermaid.ts                 # Mermaid 围栏形态学（#60）
+    │   ├── newline.ts                 # CRLF/LF 换行协调器
+    │   ├── obsidianAlias.ts           # Obsidian 别名桥实现同源表
+    │   ├── officialAddons.ts          # 官方组件登记表事实源
+    │   ├── pdfNav.ts                  # PDF 导航锚点解析纯逻辑
+    │   ├── protocol.ts                # 消息协议单一事实源
+    │   ├── refContent.ts              # 引用内容类型分派共享内核（#333）
+    │   ├── refExpansion.ts            # 引用递归路径与容量预算
+    │   ├── refText.ts                 # 可读文本锚点与准入共享内核
+    │   ├── relocationScan.ts          # 嵌入重定位逐字检索预算
+    │   ├── semverRange.ts             # API 版本范围语义子集求值器
+    │   ├── settings.ts                # 设置定义与读写纯逻辑
+    │   ├── skeletonTiming.ts          # 骨架屏撤除计算与装配常量（#292）
+    │   ├── styleContract.ts           # 公开样式契约清单单一事实源
+    │   ├── styleContractEn.ts         # 样式参考条目英文覆盖单一事实源
+    │   ├── symbols.ts                 # 符号注册表单一事实源（#123）
+    │   ├── symbolWrap.ts              # 选区包裹计划纯函数（#124）
+    │   ├── tabEscape.ts               # Tab 越界定位纯函数（#125）
+    │   ├── tableCellEmbed.ts          # 表格格内嵌入三套区间映射
+    │   ├── tableCells.ts              # 表格单元格边界、换行与转义
+    │   ├── testDiagnostics.ts         # 测试传播诊断有界日志
+    │   ├── vaultFileCatalog.ts        # 全文件清单快照纯逻辑
+    │   ├── vaultFileCategory.ts       # 全文件清单分类声明
+    │   ├── vaultIndexExclude.ts       # 索引排除模式纯逻辑单一事实源
+    │   ├── vaultIndexModel.ts         # 引用索引内存模型纯逻辑
+    │   ├── vaultIndexSchedule.ts      # 索引维护调度纯逻辑与初值常量
+    │   ├── vaultIndexSnapshot.ts      # 分片快照存储纯逻辑（#195 选型基线）
+    │   ├── vaultLink.ts               # 根内相对路径解析单一事实源（#196）
+    │   ├── vaultRename.ts             # 引用改写计划纯逻辑（#199）
+    │   ├── webLink.ts                 # 外链 URL 准入与归一（两端共享）
+    │   ├── wikilink.ts                # 双链形态学单一事实源（#11）
+    │   ├── wikilinkBlock.ts           # 块候选纯逻辑（#380 T05）
+    │   ├── wikilinkField.ts           # 双链目标字段阶段化识别与编辑计划
+    │   ├── wikilinkHeading.ts         # 标题候选枚举与前缀过滤
+    │   ├── wikilinkQuery.ts           # 双链联想查询评分移植
+    │   └── wordSegment.ts             # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
         ├── addonBehaviorEnabledState.ts  # 行为禁用态只读面 runtime
         ├── addonBehaviorManageSection.ts # 设置页输入行为管理分页
@@ -171,6 +172,7 @@ vsidian/
         ├── addonRefViews.ts              # 组件引用浮窗请求运行时
         ├── addonRenderers.ts             # webview 渲染桥
         ├── addonSettingsAreaSection.ts   # 设置页组件设置分页
+        ├── addonSettingsContext.ts       # 设置页上下文页面级 runtime
         ├── addonSettingsControls.ts      # 基础设置控件构造器
         ├── addonSettingsSection.ts       # 设置页附加组件分页
         ├── addonThemeEnvironment.ts      # 页面明暗快照与订阅

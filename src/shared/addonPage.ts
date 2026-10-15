@@ -21,6 +21,7 @@ import type { AddonSyntaxFacet } from './addonSyntaxApi'
 import type { AddonSdkRefViewsFacet } from './addonRefViews'
 import type { AddonRenderersFacet } from './addonRenderers'
 import type { AddonThemeEnvironmentFacet } from './addonThemes'
+import type { AddonSettingsContextFacet } from './addonSettingsContextApi'
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from './addonEditApi'
 import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from './addonBehaviors'
 import type {
@@ -157,6 +158,13 @@ export interface VsidianAddonPageSdk {
    *  分开（register 在设置页无意义，本面只报事实）。组件被停用后设置
    *  页不卸载，本面仍可查询与订阅（灰态消费场景） */
   readonly behaviorState?: AddonBehaviorStateFacet
+  /** #553 设置页上下文面（仅设置页提供；编辑器页为 undefined）：「组件
+   *  设置」详情的平台侧上下文——作用域标签状态（user/workspace + 工作
+   *  区在场）与搜索定位目标（def/group 键）的快照读取与变化订阅。数据
+   *  源是设置页的平台外壳（作用域切换与 #472 定位链路），组件经本面
+   *  取得这些信息而不读取平台私有 DOM。onLocateTarget 订阅即回放当前
+   *  挂起目标（页面装载晚于定位到达的补投；null 表示清除） */
+  readonly settingsContext?: AddonSettingsContextFacet
   /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */
   readonly commands?: AddonSdkCommandsFacet
   /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */

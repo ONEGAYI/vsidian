@@ -440,13 +440,34 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       },
     ],
     purpose:
-      '装载器核对入口身份后调用工厂注入 SDK：装载身份（组件 ID + 代次 + 页面种类）、六个能力 facet、CM6 扩展登记、设置页挂载根、资源地址与释放回调。',
+      '装载器核对入口身份后调用工厂注入 SDK：装载身份（组件 ID + 代次 + 页面种类）、七个能力 facet（views/behaviors/behaviorState/settingsContext/commands/menus/renderers 等）、CM6 扩展登记、设置页挂载根、资源地址与释放回调。',
     semantics: {
       lifecycle: '代次是硬边界：旧工厂注册、旧消息、迟到结果不能接入新代次；onDispose 回调在停用/故障/代次回收时执行（重复释放无害）。',
-      errors: 'views/behaviors/commands/menus/renderers/ui 六个 facet 仅编辑器页提供（设置页为 undefined）；resourceUri 越出资源子目录返回 null（组件不得自造越界地址）。',
+      errors: 'views/behaviors/commands/menus/renderers/ui 六个 facet 仅编辑器页提供（设置页为 undefined）；behaviorState 与 settingsContext 两面两端点分布——前者编辑器页与设置页均提供、后者仅设置页提供；resourceUri 越出资源子目录返回 null（组件不得自造越界地址）。',
     },
     verification: ['test/unit/addonPageLoader.test.ts', 'test/browser/addonPageSdk.mjs', 'test/integration/suite/addonT02Cases.ts'],
-    introduced: '#351（T02），facet 随 T06–T11 增补',
+    introduced: '#351（T02），facet 随 T06–T11 与 #553 增补',
+  },
+  {
+    id: 'page-settings-context',
+    group: 'page-sdk',
+    title: '设置页上下文面（settingsContext）',
+    layer: 'stable-candidate',
+    endpoints: ['settings-page'],
+    signatures: [
+      {
+        module: 'src/shared/addonSettingsContextApi.ts',
+        symbols: ['AddonSettingsContextFacet', 'AddonSettingsScopeSnapshot', 'AddonSettingsLocateTarget'],
+      },
+    ],
+    purpose:
+      '#553 详情自绘页优先起设置页提供的平台上下文：作用域标签状态（用户默认/当前工作区 + 工作区在场）与全局设置搜索的定位目标（定义/分组键）的快照读取与变化订阅——组件自绘设置页据此对齐「当前写到哪一层」并承接搜索跳转的页内定位（切自己的页内 Tab 并定位控件），不读取平台私有 DOM。',
+    semantics: {
+      lifecycle: '查询（scopeState/locateTarget）不做代次守卫（只读无副作用）；订阅（onScopeChange/onLocateTarget）过 isLoadActive 守卫——已释放代次的迟到登记为 no-op 退订，释放时已有的订阅由 releaseLoad 整组回收。onLocateTarget 订阅即回放当前挂起目标（页面装载晚于定位到达的补投；null 表示清除）。',
+      modes: '仅设置页提供（编辑器页为 undefined）；数据源是设置页的平台外壳——作用域切换点击与 #472 定位链路经页面级 runtime 上抛。',
+    },
+    verification: ['test/unit/addonPageLoader.test.ts', 'test/browser/addonSettingsContext.mjs'],
+    introduced: '#553',
   },
   {
     id: 'page-load-protocol',

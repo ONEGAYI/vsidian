@@ -38,6 +38,7 @@ import type { AddonHostSettingsFacet } from '../shared/addonHostSettingsApi'
 import type { AddonThemeEnvironmentFacet } from '../shared/addonThemes'
 import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
 import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from '../shared/addonBehaviors'
+import type { AddonSettingsContextFacet } from '../shared/addonSettingsContextApi'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
 import type { AddonSdkRefViewsFacet } from '../shared/addonRefViews'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
@@ -46,6 +47,7 @@ import type { AddonViewsRuntime } from './addonViews'
 import { addonInstanceIdField } from './addonViewIdentity'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
 import type { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
+import type { AddonSettingsContextRuntime } from './addonSettingsContext'
 import type { AddonCommandsRuntime } from './addonCommands'
 import type { AddonUiRuntime } from './addonUi'
 import { addonHostSettingGet } from '../shared/addonHostSettingsApi'
@@ -117,6 +119,9 @@ export interface AddonPageLoaderEnv {
   /** #476 行为禁用态 runtime（编辑器页与设置页均由各自入口构造注入；
    *  省略时 SDK 不提供 behaviorState 面——旧装配与最小测试夹具兼容） */
   addonBehaviorEnabledState?: AddonBehaviorEnabledStateRuntime
+  /** #553 设置页上下文 runtime（设置页由 settingsMain 构造注入；省略时
+   *  SDK 不提供 settingsContext 面——编辑器页与旧装配/最小夹具兼容） */
+  addonSettingsContext?: AddonSettingsContextRuntime
   /** T10（#359）命令与菜单注册表（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 commands/menus 面，releaseLoad 时亦不做回收） */
   addonCommands?: AddonCommandsRuntime
@@ -501,12 +506,46 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             : () => {}),
         }
       : undefined
+    // #553 设置页上下文面（仅设置页 + runtime 在场提供）：作用域/工作区快照
+    // 与搜索定位目标的拉取 + 订阅。生命周期与 behaviorState 同款两分：查询
+    // 不做代次守卫（只读快照无副作用），订阅过 isLoadActive 守卫（迟到登记
+    // 为 no-op 退订），释放时已有的订阅由 releaseLoad 的 releaseAddon 整组
+    // 回收。onLocateTarget 订阅即回放归属本组件的挂起目标——页面装载晚于
+    // 定位到达的补投（搜索跳转可在装载完成前发起）；#555 起定位目标按
+    // addonId 归属过滤，他组件的目标对本组件不可见
+    const settingsContextFacet: AddonSettingsContextFacet | undefined =
+      page === 'settings' && env.addonSettingsContext
+        ? {
+            scopeState: () => env.addonSettingsContext!.scopeSnapshot(),
+            onScopeChange: (listener) => (isLoadActive(loadRecord)
+              ? env.addonSettingsContext!.subscribeScope(loadRecord.addonId, listener)
+              : () => {}),
+            locateTarget: () => env.addonSettingsContext!.currentLocateTarget(loadRecord.addonId),
+            onLocateTarget: (listener) => {
+              if (!isLoadActive(loadRecord)) {
+                return () => {}
+              }
+              const unsubscribe = env.addonSettingsContext!.subscribeLocate(loadRecord.addonId, listener)
+              const pending = env.addonSettingsContext!.currentLocateTarget(loadRecord.addonId)
+              if (pending !== null) {
+                // 补投经 runtime 的吞异常口径外直调（订阅者异常不升级故障）
+                try {
+                  listener(pending)
+                } catch {
+                  // 观察者异常不阻断、不升级
+                }
+              }
+              return unsubscribe
+            },
+          }
+        : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
       experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet, hostSettings: hostSettingsFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(behaviorStateFacet ? { behaviorState: behaviorStateFacet } : {}),
+      ...(settingsContextFacet ? { settingsContext: settingsContextFacet } : {}),
       ...(themeEnvironmentFacet ? { themeEnvironment: themeEnvironmentFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
@@ -704,6 +743,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     // #476 行为禁用态订阅整组件回收（查询不受影响——迟到调用返回最后
     // 已知快照；订阅不滞留进已脱离 active 的旧代次闭包）
     env.addonBehaviorEnabledState?.releaseAddon(loadRecord.addonId)
+    // #553 设置页上下文订阅整组件回收（同款口径——查询返回页面级当前值，
+    // 订阅不滞留进已释放的旧代次）
+    env.addonSettingsContext?.releaseAddon(loadRecord.addonId)
     // T10（#359）命令与菜单整组件回收（本页闭环——不依赖宿主消息到达）：
     // 撤命令、菜单与运行期操作表，并向宿主上报空表
     if (env.addonCommands) {

@@ -38,6 +38,11 @@ import type {
   VsidianAddonPageSdk,
 } from '../../src/shared/addonPage'
 import type {
+  AddonSettingsContextFacet,
+  AddonSettingsLocateTarget,
+  AddonSettingsScopeSnapshot,
+} from '../../src/shared/addonSettingsContextApi'
+import type {
   AddonRefAnchor,
   AddonRefPopupHandle,
   AddonRefPopupOutcome,
@@ -257,6 +262,7 @@ export type SdkSurface = Pick<
   | 'views'
   | 'behaviors'
   | 'behaviorState'
+  | 'settingsContext'
   | 'commands'
   | 'menus'
   | 'renderers'
@@ -284,6 +290,26 @@ export type Cm6LanguageSurface = Pick<
 export type BehaviorsSurface = Pick<AddonBehaviorsFacet, 'register' | 'onChanged'>
 /** #476 行为禁用态只读面（查询 + 订阅双件——无写入成员） */
 export type BehaviorStateSurface = Pick<AddonBehaviorStateFacet, 'enabledState' | 'onEnabledChange'>
+
+/** #553 设置页上下文面（查询 + 订阅双件——作用域快照与定位目标） */
+export type SettingsPageContextSurface = Pick<
+  AddonSettingsContextFacet,
+  'scopeState' | 'onScopeChange' | 'locateTarget' | 'onLocateTarget'
+>
+/** 作用域快照与定位目标的消费样例（scope union 与 kind union 钉住——
+ *  扩态是契约变更，须同步台账/文档后在此放宽钉住） */
+export type PinnedSettingsScopeKinds = 'user' | 'workspace'
+export const settingsScopeKindsPinned: Equals<AddonSettingsScopeSnapshot['scope'], PinnedSettingsScopeKinds> = true
+export type PinnedSettingsLocateKinds = 'def' | 'group'
+export const settingsLocateKindsPinned: Equals<AddonSettingsLocateTarget['kind'], PinnedSettingsLocateKinds> = true
+export const settingsScopeSample: AddonSettingsScopeSnapshot = { scope: 'workspace', hasWorkspace: true }
+export const settingsLocateSample: AddonSettingsLocateTarget = { kind: 'def', key: 'theme' }
+/** 订阅回退签名（返回退订函数——两面同形） */
+export type SettingsContextShapes = {
+  scopeCallbackParam: Parameters<Parameters<AddonSettingsContextFacet['onScopeChange']>[0]>[0]
+  locateCallbackParam: Parameters<Parameters<AddonSettingsContextFacet['onLocateTarget']>[0]>[0]
+  unsubscribeReturn: ReturnType<AddonSettingsContextFacet['onLocateTarget']>
+}
 /** renderers 面 */
 export type RenderersSurface = Pick<AddonRenderersFacet, 'register'>
 /** 宿主导出 API */

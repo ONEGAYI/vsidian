@@ -1070,7 +1070,6 @@ export const en = {
   // #351 T02：运行生命周期（功能开关 / 组件设置页 / 故障暂停）
   'addons.enable': 'Enable',
   'addons.disable': 'Disable',
-  'addons.openSettingsPage': 'Open add-on settings page',
   'addons.closeSettingsPage': 'Close add-on settings page',
   'addons.addonSettingsTitle': 'Add-on settings: {label}',
   'addons.statusEnabledRuntime': 'Enabled',
@@ -1079,6 +1078,9 @@ export const en = {
   // ---- #353 T04 basic settings area (scope tabs / basic controls / save notice) ----
   'addons.openSettingsArea': 'Settings',
   'addons.settingsAreaTitle': 'Basic settings: {label}',
+  'addons.settingsDetailTitle': '{label} settings',
+  'addons.detailCustomViewTab': 'Custom settings page',
+  'addons.detailBasicsViewTab': 'Basic settings',
   'addons.closeSettingsArea': 'Back to add-on list',
   'addons.scopeUserDefault': 'User default',
   'addons.scopeWorkspace': 'Current workspace',
@@ -1099,7 +1101,6 @@ export const en = {
   'addons.saveFailedNoWorkspace': 'No workspace open',
   'addons.saveFailedStore': 'Storage write failed',
   'addons.saveFailedRejected': 'Add-on generation ended',
-  'addons.openCustomPage': 'Open custom settings page',
   'addons.settingsEmpty': 'This add-on registered no setting definitions',
   /** #465 组件设置分页：组件清单（hub）形态 */
   'addons.settingsHubTitle': 'Configurable add-ons',
