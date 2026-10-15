@@ -219,6 +219,11 @@ describe('粘贴规则转换：边界与既有管线兼容', () => {
     )
     expect(result.markdown).toBe('> **粗**文字')
     expect(result.hasFormatting).toBe(true)
+    // T01 的 children 只取内置转换结果；子元素不得继续调用组件规则。
+    expect(convert(
+      '<div data-card><span data-prompt-link-url="https://e.com/a">子文字</span></div>',
+      [wrap, promptLinkRule()],
+    ).markdown).toBe('> 子文字')
   })
 
   it('块级与行内元素都消费规则；INPUT 不经规则', () => {

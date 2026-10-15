@@ -127,8 +127,9 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   const addonRules = orderAddonPasteRules(options?.addonPasteRules ?? [])
   let addonRuleSteps = 0
   let addonRulesExhausted = false
+  let convertingBuiltinChildren = false
   function addonRuleOutput(el: Element, table: boolean, inherited: Marks): string | null {
-    if (addonRules.length === 0 || addonRulesExhausted) return null
+    if (addonRules.length === 0 || addonRulesExhausted || convertingBuiltinChildren) return null
     for (const rule of addonRules) {
       addonRuleSteps += 1
       if (addonRuleSteps > ADDON_PASTE_RULES_EVAL_STEP_BUDGET) {
@@ -137,7 +138,14 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       }
       try {
         const output = evaluateAddonPasteRule(rule, el, {
-          convertChildren: (target) => children(target, table, inherited),
+          convertChildren: (target) => {
+            convertingBuiltinChildren = true
+            try {
+              return children(target, table, inherited)
+            } finally {
+              convertingBuiltinChildren = false
+            }
+          },
         })
         if (output !== null) return output
       } catch {
