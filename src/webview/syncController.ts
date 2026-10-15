@@ -57,6 +57,7 @@ import { ToastChannel } from './toast'
 import { RichPasteDialog } from './richPasteDialog'
 import { htmlToMarkdown } from './htmlToMarkdown'
 import { planRichPaste, richPasteDistributionMatches } from './richPastePlan'
+import type { AddonPasteRule } from '../shared/addonPasteRules'
 import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
 import { isHttpLinkHref } from '../shared/webLink'
@@ -829,6 +830,10 @@ export class WebviewSyncController {
   private pasteModeRevision = 0
   private toast: ToastChannel | undefined
   private richPasteDialog: RichPasteDialog | undefined
+  /** #541 T01 附加组件粘贴规则：当前有效快照（宿主广播缓存；粘贴开始时
+   *  捕获引用，转换中不拼接两个注册代次） */
+  private addonPasteRules: readonly AddonPasteRule[] = []
+  private addonPasteRulesVersion = -1
   private pastePreferenceReqId = 0
   /** #438 右键导出直发的 reqId 序列（与弹窗工具条导出各自的计数独立，
    *  宿主只按面板会话关联应答——两序列不要求全局唯一） */
@@ -2352,6 +2357,16 @@ export class WebviewSyncController {
         // #414 T03 折叠箭头/省略号的键位徽章数据源（同 quickBindingHints
         // 源注入：widget 与 marker 物化时读取）
         setHeadingFoldBindingHints((op) => getEffectiveBindings(overrides, op))
+        break
+      }
+      case 'addonPasteRules.snapshot': {
+        // #541 T01 附加组件粘贴规则有效快照：缓存当前有效集（版本守卫——
+        // 旧版本迟到快照不回退已撤回的规则代次）；粘贴使用开始时捕获，
+        // 转换中不拼接两个注册代次（processRichPaste 捕获点）
+        if (message.snapshot.version >= this.addonPasteRulesVersion) {
+          this.addonPasteRulesVersion = message.snapshot.version
+          this.addonPasteRules = [...message.snapshot.rules]
+        }
         break
       }
       case 'settings.snapshot':
@@ -7999,6 +8014,9 @@ export class WebviewSyncController {
   private async processRichPaste(snapshot: ClipboardSnapshot, target: NonNullable<WebviewSyncController['clipboardReadTarget']>, reqId: number): Promise<void> {
     const valid = () => reqId === this.clipboardReadReqId && this.clipboardTargetValid(target)
     if (!valid()) return
+    // #541 T01 粘贴规则快照在使用开始时捕获一次：转换与后续询问全程用
+    // 同一有效集，不拼接两个注册代次（广播到达只更新下次粘贴的捕获值）
+    const addonPasteRules = this.addonPasteRules
     let plain: string
     try { plain = clipboardPlainText(snapshot) } catch { this.toast?.show(t('toast.pasteNoText'), 'error'); return }
     const state = target.view.state
@@ -8011,7 +8029,7 @@ export class WebviewSyncController {
       return
     }
     let converted: ReturnType<typeof htmlToMarkdown>
-    try { converted = htmlToMarkdown(snapshot.html) }
+    try { converted = htmlToMarkdown(snapshot.html, { addonPasteRules }) }
     catch {
       if (plain) this.applyRichPaste(plain, plain, 'fallback', target.view)
       else this.toast?.show(t('toast.pasteNoText'), 'error')

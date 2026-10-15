@@ -153,7 +153,7 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
 }
 
 function validateMatch(value: unknown): { ok: true; match: AddonPasteRuleMatch } | { ok: false; detail: string } {
-  if (!isObject(value)) return { ok: false, detail: 'match 须为对象' }
+  if (!isObject(value)) return { ok: false, detail: 'match must be an object' }
   const unknown = hasOnlyKeys(value, ['tag', 'attributes'])
   if (unknown) return { ok: false, detail: `match 不支持字段 '${unknown}'（正则/条件/嵌套属后续版本）` }
   if (typeof value.tag !== 'string' || !TAG_PATTERN.test(value.tag)) {
@@ -161,19 +161,19 @@ function validateMatch(value: unknown): { ok: true; match: AddonPasteRuleMatch }
   }
   let attributes: readonly AddonPasteRuleAttributeCondition[] | undefined
   if (value.attributes !== undefined) {
-    if (!Array.isArray(value.attributes)) return { ok: false, detail: 'match.attributes 须为数组' }
+    if (!Array.isArray(value.attributes)) return { ok: false, detail: 'match.attributes must be an array' }
     if (value.attributes.length > ATTRIBUTE_CONDITIONS_LIMIT) {
       return { ok: false, detail: `match.attributes 至多 ${ATTRIBUTE_CONDITIONS_LIMIT} 条` }
     }
     const conditions: AddonPasteRuleAttributeCondition[] = []
     for (const raw of value.attributes) {
-      if (!isObject(raw)) return { ok: false, detail: '属性条件须为对象' }
+      if (!isObject(raw)) return { ok: false, detail: 'attribute condition must be an object' }
       const unknownCondition = hasOnlyKeys(raw, ['name', 'value'])
       if (unknownCondition) return { ok: false, detail: `属性条件不支持字段 '${unknownCondition}'` }
       if (typeof raw.name !== 'string' || !ATTRIBUTE_NAME_PATTERN.test(raw.name) || raw.name.length > ATTRIBUTE_NAME_LIMIT) {
         return { ok: false, detail: `属性名非法：${String(raw.name)}` }
       }
-      if (raw.value !== undefined && typeof raw.value !== 'string') return { ok: false, detail: '属性条件 value 须为字符串' }
+      if (raw.value !== undefined && typeof raw.value !== 'string') return { ok: false, detail: 'attribute condition value must be a string' }
       if (typeof raw.value === 'string' && raw.value.length > ATTRIBUTE_VALUE_LIMIT) {
         return { ok: false, detail: `属性值超长（>${ATTRIBUTE_VALUE_LIMIT}）` }
       }
@@ -185,7 +185,7 @@ function validateMatch(value: unknown): { ok: true; match: AddonPasteRuleMatch }
 }
 
 function validateOutput(value: unknown): { ok: true; output: AddonPasteRuleOutput } | { ok: false; detail: string } {
-  if (!isObject(value)) return { ok: false, detail: 'output 须为对象' }
+  if (!isObject(value)) return { ok: false, detail: 'output must be an object' }
   if (value.kind === 'discard') {
     const unknown = hasOnlyKeys(value, ['kind'])
     if (unknown) return { ok: false, detail: `discard 产出不支持字段 '${unknown}'` }
@@ -202,7 +202,7 @@ function validateOutput(value: unknown): { ok: true; output: AddonPasteRuleOutpu
   const parts = parseAddonPasteTemplate(value.template)
   if (parts === null) return { ok: false, detail: `模板引用形态非法：${value.template}` }
   const referenced = new Set(parts.filter((part): part is { slot: string } => 'slot' in part).map((part) => part.slot))
-  if (!isObject(value.slots)) return { ok: false, detail: 'slots 须为对象' }
+  if (!isObject(value.slots)) return { ok: false, detail: 'slots must be an object' }
   const slots: Record<string, AddonPasteSlot> = {}
   for (const [name, rawSlot] of Object.entries(value.slots)) {
     if (!SLOT_NAME_PATTERN.test(name) || name.length > SLOT_NAME_LIMIT) {
@@ -259,7 +259,7 @@ export function validateAddonPasteRuleDeclarations(
   context: AddonPasteRuleValidationContext = {},
 ): AddonPasteRuleValidationResult {
   if (!Array.isArray(declarations)) {
-    return { ok: false, reason: 'invalid-declaration', detail: '声明列表须为数组' }
+    return { ok: false, reason: 'invalid-declaration', detail: 'declarations must be an array' }
   }
   if (declarations.length + (context.currentCount ?? 0) > ADDON_PASTE_RULES_MAX_PER_ADDON) {
     return { ok: false, reason: 'too-many', detail: `每组件至多 ${ADDON_PASTE_RULES_MAX_PER_ADDON} 条规则` }
