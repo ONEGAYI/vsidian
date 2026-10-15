@@ -36,6 +36,9 @@ export interface AddonLiveViewEntry {
   viewType: 'main' | 'embed'
   instanceId: string
   targetDocUri: string
+  /** T05（#544）引用请求的来源身份：目标 fsPath（embed = 引用目标）；
+   *  main 省略（面板主正文——宿主按面板文档解析，无需覆盖） */
+  targetFsPath?: string
   /** 模式查询（主正文随面板双态；嵌入恒 live） */
   mode: () => AddonViewMode
   instance: LiveEditorInstance
@@ -46,6 +49,8 @@ export interface AddonReadonlyViewEntry {
   viewType: 'hover'
   instanceId: string
   targetDocUri: string
+  /** T05（#544）引用请求的来源身份：目标 fsPath（hover.result 送达身份） */
+  targetFsPath?: string
   text: string
   version: number
 }
@@ -196,6 +201,21 @@ export class AddonViewRegistry implements AddonViewsRuntime {
     }
     const readonly = this.readonlyViews.get(instanceId)
     return readonly ? this.readonlyInfoOf(readonly) : undefined
+  }
+
+  /** T05（#544）引用请求的来源 fsPath（embed/hover = 目标身份；main 与
+   *  未登记 fsPath 的条目为 null；实例不在场为 undefined）——refViews
+   *  运行时的来源解析入口 */
+  targetFsPathOf(instanceId: string): string | null | undefined {
+    const live = this.liveViews.get(instanceId)
+    if (live) {
+      return live.targetFsPath ?? null
+    }
+    const readonly = this.readonlyViews.get(instanceId)
+    if (readonly) {
+      return readonly.targetFsPath ?? null
+    }
+    return undefined
   }
 
   snapshotOf(instanceId: string): AddonSnapshotResult {

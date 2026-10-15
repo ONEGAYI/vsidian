@@ -20,6 +20,7 @@ import { addonBehaviorStateCases } from './addonBehaviorStateCases'
 import { addonT09Cases } from './addonT09Cases'
 import { addonT10Cases } from './addonT10Cases'
 import { addonT11Cases } from './addonT11Cases'
+import { addonRefViewsCases } from './addonRefViewsCases'
 import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
@@ -17983,6 +17984,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #360 T11：所属按钮、面板与视图界面贡献（夹具组件经公开 ui 面注册，
   // 断言面见 addonT11Cases.ts 头注）
   ...addonT11Cases,
+  // T05（#544）：附加组件只读引用浮窗（断言面见 addonRefViewsCases.ts 头注）
+  ...addonRefViewsCases,
   // #361 T12：诊断、全组件故障暂停与手动恢复（四态负向对照、贡献全撤
   // 与首选恢复，断言面见 addonT12Cases.ts 头注）
   ...addonT12Cases,

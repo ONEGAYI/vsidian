@@ -34,7 +34,7 @@ node scripts/demoAddonApiGate.mjs # 负向演示（退出码 0 = 全部场景符
 
 | 路径 | 锚点 | 额外核实 | 当前状态 |
 | --- | --- | --- | --- |
-| **bootstrap**（显式初始基线） | 提交 `1a1c71a5`（#541 粘贴规则批次重锚点；初始锚 `abcbfdd7` T13 落地树，非发行锚点） | — | **当前生效**：`baseline-bootstrap-1.json`（29 条目 / 18 签名模块 / 台账候选快照）。首版（22 条目 / 12 模块）后历次重锚：#541（新增第七组 paste-conversion 与 `AddonEnableContext.paste` 面乙——候选期加法，重锚理由随同 PR 提交说明） |
+| **bootstrap**（显式初始基线） | `baseline-bootstrap-1.json` 的 `meta.anchor` 指向实际实施提交（非发行锚点） | 从 git 对象重派生并逐项复验 | **当前生效**；条目、签名与候选台账数量以该快照为准 |
 | **release**（发行基线） | 发行 tag + 台账 `released` 记录 + 实际发布日期 | tag 指向 SHA、锚点台账状态为 released、基线日期与台账一致（三者矛盾即失败） | 未启用——Vsidian 尚未发行任何稳定 API；经隔离 git fixture 验证（见下） |
 
 首个稳定 API（1.0.0）真实发行时的落账流程：人工把台账改 `status: 'released'` 并填实际发布日期 → 打发行 tag → `--emit-baseline --mode release --api-version 1.0.0 --anchor <tag>` 提交新基线（同 PR、独立说明理由）。**发行是人工落账动作**：候选版本不得冒充发行状态（`catalog-selfcheck` 拦截候选携带日期；`baseline-release-not-released` 拦截伪造的发行锚点）。
@@ -67,6 +67,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 **弃用期限双门槛**（`ADDON_API_REMOVAL_RULE` 的机械执行）：移除须「距弃用版本实际发布满 30 天」**且**「弃用版本之后已发行 ≥ 2 个后续 API 次版本」两项同时满足；补丁版本、候选版本、移除版本自身（等待期不能由执行移除的版本自己充当）均不计入跨度。版本跨度按台账（独立 API 版本）计算——检查器不读取 Vsidian 本体版本与 CHANGELOG，结构上不可能把本体版本当 API 跨度。
 
 **语义冻结口径**：目标 / 语义字段 / 签名声明文本按**字节冻结**——自由文本无法机械区分「扩展」与「收窄」，任何变化都要求显式重锚定（`--emit-baseline` 同 PR 提交 + 独立说明），使收窄不可能静默通过。允许的演进：新增条目、扩展执行端、新增语义字段、追加签名源、追加台账版本、experimental 升稳定候选。
+
+**T05（#544）候选基线重锚说明**：实施提交 `9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 为 `VsidianAddonPageSdk` 增加可选 `refViews` facet，并新增只读浮窗契约条目。旧成员、既有语义与发行台账不删减；原基线 `8e13e78f` 可信复验通过，候选比较仅因 SDK 声明新增字段触发 `signature-declaration-changed`。按既有字节冻结规则，使用 `--emit-baseline --anchor 9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 从已提交 git 对象重新发射，再运行基线复验及完整兼容检查。独立 API 仍为未发行的 1.0.0 候选，不补发行日期，也不修改检查器或豁免规则。批次集成其他接口后须针对最终组合提交再次复验，必要时显式重锚。
 
 ## CI 接线（代码侧，已交付）
 

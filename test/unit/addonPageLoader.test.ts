@@ -1072,3 +1072,44 @@ describe('#476 行为禁用态只读面（behaviorState）：编辑器页与设�
     expect(lateNotified).toEqual([])
   })
 })
+
+describe('T05（#544）refViews 面：注入、释放守卫与整组件回收', () => {
+  it('编辑器页 + 运行时在场 → facet 注入并转发（身份由装载器注入）；释放后代次迟到请求拒绝 released', async () => {
+    const calls: Array<{ addonId: string; generation: number }> = []
+    const released: string[] = []
+    const runtime = {
+      requestPopup: (addonId: string, generation: number) => {
+        calls.push({ addonId, generation })
+        return Promise.resolve({ ok: true as const, handle: { close: () => true, isActive: () => true } })
+      },
+      releaseAddon: (addonId: string) => {
+        released.push(addonId)
+      },
+    }
+    const h = harness({ addonRefViews: runtime })
+    let facet: import('../../src/shared/addonRefViews').AddonSdkRefViewsFacet | undefined
+    registerFactory(h, (sdk) => {
+      facet = sdk.refViews
+    })
+    await h.handle.load(manifest())
+    expect(facet).toBeDefined()
+    const outcome = await facet!.requestPopup({ source: 'main', target: { path: 'b.md' }, trigger: {} as HTMLElement })
+    expect(outcome.ok).toBe(true)
+    expect(calls).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+    // 卸载：整组件回收（浮窗关闭经 releaseAddon）+ 迟到请求拒绝 released
+    await h.handle.unload(ADDON_ID, 1)
+    expect(released).toEqual([ADDON_ID])
+    expect(await facet!.requestPopup({ source: 'main', target: { path: 'b.md' }, trigger: {} as HTMLElement }))
+      .toEqual({ ok: false, reason: 'released' })
+  })
+
+  it('运行时缺席（最小装配）→ facet 为 undefined（旧装配兼容）', async () => {
+    const h = harness()
+    let facet: import('../../src/shared/addonRefViews').AddonSdkRefViewsFacet | undefined = 'unset' as unknown as undefined
+    registerFactory(h, (sdk) => {
+      facet = sdk.refViews
+    })
+    await h.handle.load(manifest())
+    expect(facet).toBeUndefined()
+  })
+})

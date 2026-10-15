@@ -22,9 +22,15 @@ import { AddonBehaviorRuntime } from './addonBehaviors'
 import { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
 import { AddonCommandsRuntime } from './addonCommands'
 import { AddonUiRuntime } from './addonUi'
+import { AddonRefViewsRuntime } from './addonRefViews'
 import { addonCm6LanguageSubset, installAddonPageLoader } from './addonPageLoader'
 import { setAddonRenderersBridge } from './addonRenderers'
 import { bindAddonFaultReporter } from './graphicRenderers'
+import {
+  closeHoverPopup,
+  currentHoverPopupInstanceId,
+  openHoverPopupForAddonRef,
+} from './hoverPopup'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { t } from '../shared/i18n'
 import { installTooltipCard } from './tooltipCard'
@@ -116,6 +122,27 @@ const addonUi = new AddonUiRuntime({
   log: (detail) => console.warn(`[vsidian-addon-ui] ${detail}`),
   reportFault: (addonId, stage, detail) => reportAddonRuntimeFault(addonId, stage, detail),
 })
+// T05（#544）只读引用视图运行时：来源解析走 views 注册表（main 面板正文
+// / embed 与 hover 引用目标），浮窗本体复用 hoverPopup 既有入口（几何/
+// 互斥/保活/Esc/键盘焦点/watch 与租约同链路）
+const addonRefViews = new AddonRefViewsRuntime({
+  resolveSource: (instanceId) => {
+    const info = addonViews.infoOf(instanceId)
+    if (!info) {
+      return undefined
+    }
+    if (info.viewType === 'main') {
+      return { viewType: 'main' }
+    }
+    const fsPath = addonViews.targetFsPathOf(instanceId)
+    return fsPath ? { viewType: info.viewType === 'embed' ? 'embed' : 'hover', fsPath } : undefined
+  },
+  openPopup: ({ trigger, spec, keyboard, addonSource, onSettled }) =>
+    openHoverPopupForAddonRef(trigger, spec, { keyboard, addonSource, onSettled }),
+  currentPopupInstanceId: () => currentHoverPopupInstanceId(),
+  closePopup: () => closeHoverPopup(),
+})
+addonViews.onDisposed((info) => addonRefViews.releaseSource(info.instanceId))
 const addonLoader = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView, language: addonCm6LanguageSubset(cmLanguage) },
@@ -128,6 +155,7 @@ const addonLoader = installAddonPageLoader({
   addonCommands,
   addonRenderers,
   addonUi,
+  addonRefViews,
   // #457 宿主设置白名单读取面：SDK experimental.hostSettings 的数据源
   //（controller 设置快照缓存——settings.snapshot/changed 到达即更新，
   //  保存热更后组件下次 get 即新值，无需重开面板）

@@ -106,6 +106,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // （CDP composition 驱动，复用 addonPageSdkFixture 生产链路）
   'addonSidebar',
   'addonHotSwitch',
+  // T05（#544）：附加组件只读引用浮窗（生产引用视图运行时 + 真实指针/
+  // 键盘驱动——几何邻近/单实例仲裁/Esc/键盘焦点/来源消失/只读绘制/错误）
+  'addonRefViews',
   // T08（#357）：行为冲突管理（注册行为调序/逐项开关——真实键盘 + 绘制层）
   'addonT08BehaviorsManage',
   // #543 T03：附加组件文档导航（views.openDocument 公开 SDK 消费——请求

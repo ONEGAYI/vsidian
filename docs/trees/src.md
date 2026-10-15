@@ -88,6 +88,7 @@ vsidian/
     │   ├── addonNavApi.ts          # 文档导航公开类型
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
     │   ├── addonPasteRules.ts      # 粘贴规则共享契约
+    │   ├── addonRefViews.ts        # 组件只读引用请求契约
     │   ├── addonRenderers.ts       # 渲染提供者共享契约
     │   ├── addonSettings.ts        # 复杂设置共享模型
     │   ├── addonStorage.ts         # 数据目录形状与守卫
@@ -165,6 +166,7 @@ vsidian/
         ├── addonBehaviors.ts             # 输入行为页面级链执行
         ├── addonCommands.ts              # 编辑器页命令/菜单注册表运行时
         ├── addonPageLoader.ts            # 页面装载器生产实现
+        ├── addonRefViews.ts              # 组件引用浮窗请求运行时
         ├── addonRenderers.ts             # webview 渲染桥
         ├── addonSettingsAreaSection.ts   # 设置页组件设置分页
         ├── addonSettingsControls.ts      # 基础设置控件构造器

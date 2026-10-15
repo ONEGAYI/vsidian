@@ -6,6 +6,8 @@
 
 ## 当前执行记录
 
+2026-10-15 附加组件只读引用浮窗（T05，#544）：待用户使用真实组件按钮/文字触发，确认浮窗贴邻位置、鼠标移出延迟和键盘进入/Esc 归还焦点的手感；在 Live 父文档及递归引用中确认编辑、保存入口不出现。自动化验证定位见[只读引用规格](addon-reference-views.md)与[覆盖映射](vsidian-addons-coverage.md)，代理自检不等于人工验收。
+
 2026-10-14 Mermaid 限宽居中与拖放落点光标修复：可读行宽限宽档下阅读视图 Mermaid 块与其他阅读块同列居中（此前贴内容区左缘，铺满档不可见故长期未暴露）；Live 拖动选中文本悬停时显示 `.cm-dropCursor` 落点插入指示（此前缺 CM6 dropCursor 扩展；评审跟进补暗色轮提亮——baseTheme dark 变体只提亮 `.cm-cursor`，暗底黑线不可见）。worktree `vsidian-wt-mermaid-dropcursor`、分支 `fix/2026-10-mermaid-centering-dropcursor`（基线 5f2929ea）实施，TDD 先红后绿（CSS 契约测试、readingWidthProbe A7b 左缘一致、dropCursorPaint D1/D1b 绘制层与明暗颜色）；全量 Vitest 8001 通过、浏览器 96/97（`addonSettings` 为 #446 已知 textarea 空串抖动，定向重跑通过）、`check:stylecontract` 与类型检查通过。物理鼠标拖放落位手感、限宽档 Mermaid 居中观感与暗色轮落点光标可见性待用户验收。
 
 2026-10-14 双链联想本文件锚点修复（省略文件名）：`[[#`／`[[#^` 不再只显占位提示——标题/块阶段对空目标按**当前文档**出真实候选，确认生成 `[[#标题]]`／`[[#^块ID]]` 且不补默认别名（显式自引仍补，既有集成用例钉住）。worktree `wt-wikilink-same-doc`、分支 `fix/wikilink-same-doc-anchor`（基线 c71caaab）实施，TDD 先红后绿；验证矩阵与四分片 5 例失败的定性证据见下方批次段；真机 IME/物理键盘与观感待用户验收（A75）。

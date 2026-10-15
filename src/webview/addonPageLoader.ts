@@ -38,7 +38,9 @@ import type { AddonHostSettingsFacet } from '../shared/addonHostSettingsApi'
 import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
 import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
+import type { AddonSdkRefViewsFacet } from '../shared/addonRefViews'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
+import type { AddonRefViewsRuntime } from './addonRefViews'
 import type { AddonViewsRuntime } from './addonViews'
 import { addonInstanceIdField } from './addonViewIdentity'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
@@ -120,6 +122,9 @@ export interface AddonPageLoaderEnv {
   /** T09（#358）渲染提供者桥（编辑器页由 main.ts 构造注入；省略时 SDK
    *  不提供 renderers 面——注册拒绝为 no-op 句柄） */
   addonRenderers?: Pick<AddonRenderersBridgeHandle, 'register' | 'disposeRenderer' | 'releaseGeneration'>
+  /** T05（#544）只读引用视图运行时（编辑器页由 main.ts 构造注入；省略
+   *  时 SDK 不提供 refViews 面；releaseLoad 时整组件回收其浮窗） */
+  addonRefViews?: Pick<AddonRefViewsRuntime, 'requestPopup' | 'releaseAddon'>
   /** T11（#360）附加组件界面运行时（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 ui 面，releaseLoad 时亦不做回收） */
   addonUi?: AddonUiRuntime
@@ -528,6 +533,19 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             },
           }
         : {}),
+      // T05（#544）只读引用视图面（仅编辑器页且运行时在场；其余页面
+      // undefined）。方法过 isLoadActive 守卫：已终结代次的迟到请求拒绝
+      // released（旧代次请求不再有有效来源——身份由本装载器注入）
+      ...(page === 'editor' && env.addonRefViews
+        ? {
+            refViews: {
+              requestPopup: (request: Parameters<AddonSdkRefViewsFacet['requestPopup']>[0]) =>
+                (isLoadActive(loadRecord)
+                  ? env.addonRefViews!.requestPopup(loadRecord.addonId, loadRecord.generation, request)
+                  : Promise.resolve({ ok: false as const, reason: 'released' as const })),
+            } satisfies AddonSdkRefViewsFacet,
+          }
+        : {}),
       // T11（#360）界面面：按钮/面板注册转发 runtime；目标句柄经
       // buildViewHandleFor 与 views.get 同源构造（代次存活 + opId 注入）
       ...(env.addonUi && page === 'editor' ? {
@@ -676,6 +694,10 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     } catch {
       // 候选撤销异常不阻断其余回收
     }
+    // T05（#544）：本页该组件的引用浮窗整组回收（浮窗已换主/已关时不
+    // 误关——运行时按当前浮窗实例身份比对；pending 请求以 view-disposed
+    // 终结）
+    env.addonRefViews?.releaseAddon(loadRecord.addonId, loadRecord.generation)
     // T11（#360）界面贡献整组件回收（本页闭环）：撤按钮、关面板、清注册
     if (env.addonUi) {
       try {

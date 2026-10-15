@@ -682,6 +682,38 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#457',
   },
   {
+    id: 'ref-views-popup',
+    group: 'page-sdk',
+    title: '只读引用浮窗请求（refViews）',
+    layer: 'stable-candidate',
+    endpoints: ['editor-page'],
+    signatures: [
+      {
+        module: 'src/shared/addonRefViews.ts',
+        symbols: ['AddonRefAnchor', 'AddonRefTargetSpec', 'AddonRefPopupRequest', 'AddonRefPopupHandle', 'AddonRefPopupRejection', 'AddonRefPopupOutcome', 'AddonSdkRefViewsFacet', 'isAddonRefTargetSpec', 'buildAddonRefHoverTarget'],
+      },
+    ],
+    purpose:
+      '组件请求内核只读引用浮窗（T05 #544，规格 addon-reference-views.md）：在触发文字或自有控件旁打开目标引用浮窗，获取本次请求的关闭句柄。宿主复用 hoverDocAccess/refContent 的来源、准入、读取、租约与刷新链——组件不重新实现内容渲染，也不因请求呈现取得写目标文档的能力。',
+    semantics: {
+      modes: '仅编辑器页提供（设置页为 undefined）。缺省鼠标语义（零抢焦点、移出延迟关闭、单页单浮窗经 popupMutex 仲裁）；keyboard:true 显式键盘请求复用既有键盘浮窗路径（焦点进入可操作域，Esc 关闭后归还原有效焦点）。不经悬停总开关（#298 门控的是鼠标悬停触发规则——显式请求面不改写它）。',
+      coordinates: '目标 = 根内路径 + 可选互斥锚点（heading 标题原文 / block 块 ID / line 1-based 行号 / range 1-based 闭区间行范围）。结构化目标在平台侧合成双链目标原文（buildAddonRefHoverTarget），走既有三形态解析——Markdown 用全文/标题/块语义（line/range 锚点按标题原文解析，缺失即真实失败，不引入 fragment 新语法）；非 Markdown 文本走 refText 的 #line=/#range= 与 REF_TEXT_LIMITS 准入。来源实例（views 面 ID：main/embed/hover）决定解析语境——B 中的相对路径按 B 目录，不误用父文档 A（请求带 addonSource，宿主校验成员资格为本面板文档或已送达目标，不接受任意 URI）。',
+      lifecycle: '单页单浮窗：新请求替换旧请求，旧句柄随之失效（close 返回 false，不误关后来的浮窗）；迟到回包经 reqId/instanceId 配对守卫丢弃。句柄 close/isActive 只认本请求的浮窗实例身份。触发位置脱树、Esc、既有关闭动作、组件停用/故障/代次释放、页面结束均释放实例；pending 请求以 view-disposed 终结。所创建实例及递归内容恒只读（复用错误视图、刷新与释放链；T06 组件容器嵌入复用同一目标访问与来源语义）。',
+      errors: '普通拒绝与真实失败分开：invalid-request（形状/触发位置非法——不创建空浮窗）/ view-disposed（来源实例不在场或请求被关闭）/ released（组件代次终结）/ HoverPreviewFailReason 透传（not-found / escape 越界 / anchor-invalid / anchor-missing / file-too-large / budget 等——浮窗同时以现有错误分态就地显示真实原因）。目标失败不折叠为 not-found。',
+    },
+    verification: [
+      'test/unit/addonRefViews.test.ts',
+      'test/unit/addonRefViewsRuntime.test.ts',
+      'test/unit/addonRefViewsPopup.test.ts',
+      'test/unit/embedRecursiveLive.test.ts',
+      'test/unit/documentSessionRefViews.test.ts',
+      'test/unit/addonPageLoader.test.ts',
+      'test/browser/addonRefViews.mjs',
+      'test/integration/suite/addonRefViewsCases.ts',
+    ],
+    introduced: '#544（T05）',
+  },
+  {
     id: 'channel',
     group: 'page-sdk',
     title: '页面与宿主通道',
