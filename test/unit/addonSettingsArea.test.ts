@@ -17,6 +17,7 @@ import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { AppearanceSection } from '../../src/webview/appearanceSettings'
+import { AddonThemesStore, ThemeSelectionSection } from '../../src/webview/themeSettings'
 import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
 import { AddonSection } from '../../src/webview/addonSettingsSection'
 import { AddonBehaviorManageSection } from '../../src/webview/addonBehaviorManageSection'
@@ -46,7 +47,7 @@ function makeView(addonSettingsHost?: HTMLElement): {
   const view = new SettingsPageView(bridge, PRODUCTION_SETTING_DEFINITIONS,
     [
       new KeybindingSettingsSection(bridge),
-      new AppearanceSection(new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge)),
+      new AppearanceSection(new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge), new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} })),
       new IndexMaintenanceSection(bridge),
       addons,
       behaviors,

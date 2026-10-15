@@ -5,7 +5,7 @@
 // - applyEdits 的来源注入（addonId/opId 由 SDK 层添加，作者请求不携带）
 //   与拒绝矩阵（read-only / stale-snapshot / invalid-request）
 // - 装载器 views 面的生命周期边界（卸载后句柄拒绝、设置页无 views 面）
-import { describe, expect, it, afterEach } from 'vitest'
+import { describe, expect, it, afterEach, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import { AddonViewRegistry } from '../../src/webview/addonViews'
 import { LiveEditorInstance, type LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
@@ -275,5 +275,181 @@ describe('装载器 SDK views 面（生命周期边界）', () => {
     registrations.push({ addonId: 'pub.addon', factory: (sdk) => { captured = sdk }, registeredAt: 1_000 })
     await handle.load({ addonId: 'pub.addon', generation: 1, page: 'settings', scriptUri: 'https://x/a.js' })
     expect(captured?.views).toBeUndefined()
+  })
+})
+
+// ---- #543 T03 文档打开与定位（views.openDocument）----
+
+describe('AddonViewRegistry：文档导航请求', () => {
+  function navSetup() {
+    const sent: WebviewToHost[] = []
+    const registry = new AddonViewRegistry()
+    const instance = mountLive(sent, 's1')
+    registry.registerLive({ viewType: 'main', instanceId: 'main', targetDocUri: 'file:///a.md', mode: () => 'live', instance })
+    const embed = mountLive(sent, 's2')
+    registry.registerLive({ viewType: 'embed', instanceId: 'embed:h1', targetDocUri: 'file:///sub/b.md', mode: () => 'live', instance: embed })
+    registry.attachDocNavPort({
+      send: (message) => sent.push(message),
+      panelIdentity: () => ({ sessionId: 's1', docUri: 'file:///a.md' }),
+    })
+    return { sent, registry, instance, embed }
+  }
+
+  it('openDocumentOf：来源实例解析为注册表目标 URI（embed B 不误用 A），请求形状携带面板身份与代次', async () => {
+    const { sent, registry } = navSetup()
+    const pending = registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 2, instanceId: 'embed:h1',
+      request: { sourceInstanceId: 'embed:h1', target: 'c.md', locate: { kind: 'line', line: 3 } },
+    })
+    const req = sent.find((m) => m.kind === 'addonDocNav.request') as Extract<WebviewToHost, { kind: 'addonDocNav.request' }>
+    expect(req).toMatchObject({
+      kind: 'addonDocNav.request', sessionId: 's1', docUri: 'file:///a.md',
+      addonId: 'pub.addon', generation: 2, sourceDocUri: 'file:///sub/b.md', target: 'c.md',
+      locate: { kind: 'line', line: 3 },
+    })
+    expect(req.reqId).toBeGreaterThanOrEqual(1)
+    registry.handleDocNavResult({ reqId: req.reqId, addonId: 'pub.addon', generation: 2, result: { ok: true, opened: true, located: true } })
+    expect(await pending).toEqual({ ok: true, opened: true, located: true })
+  })
+
+  it('未知来源实例：view-disposed 不出站', async () => {
+    const { sent, registry } = navSetup()
+    expect(await registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 1, instanceId: 'nope',
+      request: { sourceInstanceId: 'nope', target: 'c.md' },
+    })).toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    expect(sent.find((m) => m.kind === 'addonDocNav.request')).toBeUndefined()
+  })
+
+  it('非法请求形状：invalid-request 不出站', async () => {
+    const { sent, registry } = navSetup()
+    expect(await registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 1, instanceId: 'main',
+      request: { sourceInstanceId: 'main', target: 'c.md', locate: { kind: 'line', line: 0 } } as never,
+    })).toEqual({ ok: false, reason: 'invalid-request', opened: false })
+    expect(sent.find((m) => m.kind === 'addonDocNav.request')).toBeUndefined()
+  })
+
+  it('未绑定传输端口或面板未握手：view-disposed（有界终态，不出站）', async () => {
+    const sent: WebviewToHost[] = []
+    const registry = new AddonViewRegistry()
+    const instance = mountLive(sent, 's1')
+    registry.registerLive({ viewType: 'main', instanceId: 'main', targetDocUri: 'file:///a.md', mode: () => 'live', instance })
+    expect(await registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 1, instanceId: 'main',
+      request: { sourceInstanceId: 'main', target: 'c.md' },
+    })).toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    // 端口在场但面板身份不可得（init 未达）
+    registry.attachDocNavPort({ send: (m) => sent.push(m), panelIdentity: () => null })
+    expect(await registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 1, instanceId: 'main',
+      request: { sourceInstanceId: 'main', target: 'c.md' },
+    })).toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    expect(sent.find((m) => m.kind === 'addonDocNav.request')).toBeUndefined()
+    instance.destroy()
+  })
+
+  it('回执配对守卫：reqId 未知 / addonId 不符 / 代次不符均丢弃（promise 不终结于他者回执）', async () => {
+    const { sent, registry } = navSetup()
+    const pending = registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 1, instanceId: 'main',
+      request: { sourceInstanceId: 'main', target: 'c.md' },
+    })
+    const req = sent.find((m) => m.kind === 'addonDocNav.request') as Extract<WebviewToHost, { kind: 'addonDocNav.request' }>
+    registry.handleDocNavResult({ reqId: req.reqId, addonId: 'other.addon', generation: 1, result: { ok: true, opened: true, located: false } })
+    registry.handleDocNavResult({ reqId: req.reqId, addonId: 'pub.addon', generation: 99, result: { ok: true, opened: true, located: false } })
+    registry.handleDocNavResult({ reqId: 9999, addonId: 'pub.addon', generation: 1, result: { ok: true, opened: true, located: false } })
+    registry.handleDocNavResult({ reqId: req.reqId, addonId: 'pub.addon', generation: 1, result: { ok: false, reason: 'not-found', opened: false } })
+    expect(await pending).toEqual({ ok: false, reason: 'not-found', opened: false })
+  })
+
+  it('N-U12 来源视图注销：其名下在途请求即时 view-disposed 终结', async () => {
+    const { sent, registry } = navSetup()
+    const pending = registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 1, instanceId: 'embed:h1',
+      request: { sourceInstanceId: 'embed:h1', target: 'c.md' },
+    })
+    const req = sent.find((m) => m.kind === 'addonDocNav.request') as Extract<WebviewToHost, { kind: 'addonDocNav.request' }>
+    registry.unregister('embed:h1')
+    expect(await pending).toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    expect(sent).toContainEqual({ kind: 'addonDocNav.cancel', sessionId: 's1', docUri: 'file:///a.md', reqId: req.reqId })
+    // 迟到回包不再接入（已终结）
+    registry.handleDocNavResult({ reqId: req.reqId, addonId: 'pub.addon', generation: 1, result: { ok: true, opened: true, located: true } })
+  })
+
+  it('同组件同来源的下一请求替换未完成请求，旧请求取消宿主执行', async () => {
+    const { sent, registry } = navSetup()
+    const input = { addonId: 'pub.addon', generation: 1, instanceId: 'main',
+      request: { sourceInstanceId: 'main', target: 'b.md' } }
+    const first = registry.openDocumentOf(input)
+    const second = registry.openDocumentOf({ ...input, request: { ...input.request, target: 'c.md' } })
+    expect(await first).toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    expect(sent.some((m) => m.kind === 'addonDocNav.cancel')).toBe(true)
+    registry.releaseDocNavOf('pub.addon', 1)
+    await second
+  })
+
+  it('N-U12 代次终结（releaseDocNavOf）：在途请求 view-disposed，其他组件不受牵连', async () => {
+    const { sent, registry } = navSetup()
+    const mine = registry.openDocumentOf({
+      addonId: 'pub.addon', generation: 1, instanceId: 'main',
+      request: { sourceInstanceId: 'main', target: 'c.md' },
+    })
+    const other = registry.openDocumentOf({
+      addonId: 'other.addon', generation: 1, instanceId: 'main',
+      request: { sourceInstanceId: 'main', target: 'd.md' },
+    })
+    registry.releaseDocNavOf('pub.addon', 1)
+    expect(await mine).toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    const reqs = sent.filter((m) => m.kind === 'addonDocNav.request') as Array<Extract<WebviewToHost, { kind: 'addonDocNav.request' }>>
+    const otherReq = reqs.find((r) => r.addonId === 'other.addon')!
+    registry.handleDocNavResult({ reqId: otherReq.reqId, addonId: 'other.addon', generation: 1, result: { ok: true, opened: true, located: false } })
+    expect(await other).toEqual({ ok: true, opened: true, located: false })
+  })
+
+  it('请求超时：delivery-failed 有界终态', async () => {
+    vi.useFakeTimers()
+    try {
+      const { registry } = navSetup()
+      const pending = registry.openDocumentOf({
+        addonId: 'pub.addon', generation: 1, instanceId: 'main',
+        request: { sourceInstanceId: 'main', target: 'c.md' },
+      })
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(await pending).toEqual({ ok: false, reason: 'delivery-failed', opened: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('SDK 面 openDocument：卸载后代次拒绝 view-disposed；经装载器注入 addonId/代次', async () => {
+    const sent: WebviewToHost[] = []
+    const registry = new AddonViewRegistry()
+    const instance = mountLive(sent, 's1')
+    registry.registerLive({ viewType: 'main', instanceId: 'main', targetDocUri: 'file:///a.md', mode: () => 'live', instance })
+    registry.attachDocNavPort({ send: (m) => sent.push(m), panelIdentity: () => ({ sessionId: 's1', docUri: 'file:///a.md' }) })
+    const registrations: AddonPageRegistration[] = []
+    ;(globalThis as unknown as Record<string, unknown>)[ADDON_PAGE_REGISTRY_GLOBAL] = registrations
+    let sdk: VsidianAddonPageSdk | undefined
+    const handle = installAddonPageLoader({
+      page: 'editor', addonViews: registry,
+      send: (message) => { sent.push(message as never) },
+      loadScript: () => Promise.resolve({ ok: true }),
+      loadCss: () => Promise.resolve('denied'),
+      now: () => 1_000,
+      scheduleTimeout: (callback) => ({ cancel: () => void callback() }),
+    })
+    registrations.push({ addonId: 'pub.addon', factory: (s) => { sdk = s }, registeredAt: 1_000 })
+    await handle.load({ addonId: 'pub.addon', generation: 1, page: 'editor', scriptUri: 'https://x/a.js' })
+    const pending = sdk!.views!.openDocument({ sourceInstanceId: 'main', target: 'c.md' })
+    const req = sent.find((m) => m.kind === 'addonDocNav.request') as Extract<WebviewToHost, { kind: 'addonDocNav.request' }>
+    expect(req).toMatchObject({ addonId: 'pub.addon', generation: 1, sourceDocUri: 'file:///a.md' })
+    // 卸载（代次终结）→ 在途请求 view-disposed；装载器侧释放钩子驱动
+    await handle.unload('pub.addon', 1)
+    expect(await pending).toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    // 已释放代次的迟到 SDK 调用直接拒绝
+    expect(await sdk!.views!.openDocument({ sourceInstanceId: 'main', target: 'c.md' }))
+      .toEqual({ ok: false, reason: 'view-disposed', opened: false })
+    instance.destroy()
   })
 })

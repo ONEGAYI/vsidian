@@ -13,12 +13,15 @@ import { addonT04Cases } from './addonT04Cases'
 import { addonT05Cases } from './addonT05Cases'
 import { addonStorageCases } from './addonStorageCases'
 import { addonT06Cases } from './addonT06Cases'
+import { addonDocNavCases } from './addonDocNavCases'
 import { addonT07Cases } from './addonT07Cases'
 import { addonT08Cases } from './addonT08Cases'
 import { addonBehaviorStateCases } from './addonBehaviorStateCases'
 import { addonT09Cases } from './addonT09Cases'
+import { addonThemeCases } from './addonThemeCases'
 import { addonT10Cases } from './addonT10Cases'
 import { addonT11Cases } from './addonT11Cases'
+import { addonRefViewsCases } from './addonRefViewsCases'
 import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
@@ -17960,6 +17963,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #355 T06：统一视图编辑 API 与原子修饰历史（夹具组件经公开 SDK 消费，
   // 断言面见 addonT06Cases.ts 头注）
   ...addonT06Cases,
+  // #543 T03：附加组件文档打开与定位 API（夹具组件经公开 views.openDocument
+  // 消费，断言面见 addonDocNavCases.ts 头注）
+  ...addonDocNavCases,
   // #356 T07：可组合输入行为与逐项注册状态（夹具组件经公开 behaviors 面
   // 注册行为链，断言面见 addonT07Cases.ts 头注）
   ...addonT07Cases,
@@ -17973,12 +17979,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #358 T09：代码块自动接管、多提供者与内置恢复（真宿主生产链路——绘制层
   // 断言经 view.state.paint.renderers，见 addonT09Cases.ts 头注）
   ...addonT09Cases,
+  ...addonThemeCases,
   // #359 T10：自己的命令、菜单与统一快捷键（夹具组件经公开 SDK 注册，
   // 断言面见 addonT10Cases.ts 头注）
   ...addonT10Cases,
   // #360 T11：所属按钮、面板与视图界面贡献（夹具组件经公开 ui 面注册，
   // 断言面见 addonT11Cases.ts 头注）
   ...addonT11Cases,
+  // T05（#544）：附加组件只读引用浮窗（断言面见 addonRefViewsCases.ts 头注）
+  ...addonRefViewsCases,
   // #361 T12：诊断、全组件故障暂停与手动恢复（四态负向对照、贡献全撤
   // 与首选恢复，断言面见 addonT12Cases.ts 头注）
   ...addonT12Cases,

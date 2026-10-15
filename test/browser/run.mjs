@@ -71,7 +71,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 三期 #343 合入列：webPageView（外链原网页形态——受控可嵌入站点真实
 // iframe 内容可见与滚轮滚动、退回矩阵、恶意子页消息注入丢弃、设置联动
 // 销毁）紧随 webLinkCard（同外链悬停族）。
-const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'outlineJump', 'outlineCollapse', 'outlineHover',
+const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 
@@ -106,8 +106,15 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // （CDP composition 驱动，复用 addonPageSdkFixture 生产链路）
   'addonSidebar',
   'addonHotSwitch',
+  // T05（#544）：附加组件只读引用浮窗（生产引用视图运行时 + 真实指针/
+  // 键盘驱动——几何邻近/单实例仲裁/Esc/键盘焦点/来源消失/只读绘制/错误）
+  'addonRefViews',
   // T08（#357）：行为冲突管理（注册行为调序/逐项开关——真实键盘 + 绘制层）
   'addonT08BehaviorsManage',
+  // #543 T03：附加组件文档导航（views.openDocument 公开 SDK 消费——请求
+  // 形状/回执闭环/live 光标真实落点/阅读 flash 绘制层/折叠隐藏区展开/
+  // 迟到回包代次拒收）
+  'addonDocNav',
   // #474：行为管理分页与积木筛选（分页控件/积木键盘构建/发光选中/toast
   // 倒计时条——真实键盘 + 绘制层 + 视图持久往返）紧随 T08（同行为族）
   'behaviorManagePagination',
@@ -117,6 +124,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'addonT10Commands',
   // #358 T09 渲染提供者自动接管：真实浏览器绘制层（接管/热切换/迟到结果/弹窗取图）
   'addonRendererTakeover',
+  // #546 T07 统一组件主题：真实浏览器绘制层（安装不接管/选中生效计算色/
+  // 不可用回落恢复/明暗订阅重画/设置页主题页签单选持久化回显搜索）
+  'addonThemes',
   // #360 T11：组件按钮/面板与视图界面贡献（生产界面运行时装配——真实
   // 点击经 target 句柄提交、悬停提示与键位徽章、面板开闭与迟到结果、
   // 模式回收与卸载回收、内置工具栏不受影响）紧随附加组件族

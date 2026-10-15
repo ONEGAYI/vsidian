@@ -91,7 +91,8 @@ export function activate(context: vscode.ExtensionContext): VsidianAddonExports 
   // #350 T01 附加组件：注册表 + 发现协调 + 公开 registerAddon 导出。
   // start() 内部 fire-and-forget（先订阅 extensions.onDidChange 再扫描；
   // 协调先等自身 API 公布——不被下方 activate 返回等待，无互等）
-  const addons = createAddonWiring(context)
+  // #546 T07 起注入设置服务：主题唯一首选经标准设置链路读取与订阅
+  const addons = createAddonWiring(context, settingsService)
   const settingsPage = createSettingsPage(
     context,
     settingsService,

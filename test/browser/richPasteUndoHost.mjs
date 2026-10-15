@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,7 @@ import { createServer } from 'node:net'
 import { buildTestHostArgs, runTestHost } from '../integration/testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+mkdirSync(path.join(root, 'out/test/307'), { recursive: true })
 const dir = mkdtempSync(path.join(root, 'out/test/307/host-fixture-'))
 writeFileSync(path.join(dir, 'keyboard.md'), 'word')
 await build({ entryPoints: [path.join(root, 'test/integration/richPasteHostSuite.ts')],
@@ -26,7 +27,8 @@ const executable = overrideExecutable || await downloadAndUnzipVSCode({ version:
 const args = buildTestHostArgs({ workspaceDir: dir,
   testsPath: path.join(root, 'out/test/integration/richPasteHost.js'),
   extensionPath: root, extensionsDir: path.join(root, '.vscode-test/extensions'),
-  userDataDir: path.join(dir, 'user-data'), disableExtensions: true })
+  userDataDir: path.join(dir, 'user-data'), disableExtensions: true,
+  extraExtensionPaths: [path.join(root, 'test/integration/addonFixtures/addon-paste-rules')] })
 args.push(`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1')
 console.log(`[键盘宿主] 独立桌面，回环 CDP 端口 ${port}，fixture ${dir}；测试宿主：${executable}${overrideExecutable ? '（VSIDIAN_TEST_VSCODE_PATH 覆盖）' : ''}`)
 const host = runTestHost({ executable, args, env: { ...process.env, WORKSPACE_DIR: dir,
@@ -165,6 +167,27 @@ try {
     socket=selectedSocket;contextId=selectedContext;assert(contexts.length);return contexts
   }
   await command('preferences',{values:{'editor.pasteAskBefore':false,'editor.pasteSplitUndo':true}})
+  // #541：登记来自真正附加组件的宿主 enable 生命周期，转换、停用和历史
+  // 均经生产页面/消息桥/TextDocument；不向页面直接注入规则快照。
+  const ruleHtml = '<span data-vsidian-paste-fixture="https://example.com/t01">点我</span>'
+  const ruleMarkdown = '[点我](https://example.com/t01)'
+  const ruleStats = await command('pasteRuleStats')
+  assert.equal(ruleStats.lastRegistration.ok, true)
+  assert.equal(ruleStats.enableCount, 1)
+  await paste('点我', ruleHtml);await waitText(ruleMarkdown)
+  const ruleUndoBefore = (await command('events')).filter(e=>e.reason===1).length
+  await press('z');await waitText('点我');await press('z');await waitText('word')
+  assert.equal((await command('events')).filter(e=>e.reason===1).length-ruleUndoBefore, 2)
+  await clipboard('点我',ruleHtml);await press('a');await press('v',true);await waitText('点我')
+  await press('z');await waitText('word')
+  await command('pasteRuleEnabled',{enabled:false});await state('word')
+  assert.equal((await command('pasteRuleStats')).disposeCount,1)
+  await paste('点我',ruleHtml);await waitText('点我');await press('z');await waitText('word')
+  await command('pasteRuleEnabled',{enabled:true});await state('word')
+  assert.equal((await command('pasteRuleStats')).enableCount,2)
+  await paste('点我',ruleHtml);await waitText(ruleMarkdown)
+  await press('z');await waitText('点我');await press('z');await waitText('word')
+  console.log('[PASS] #541 真实组件宿主登记/快照广播、纯文本旁路、两笔Undo与停用回收/重启登记')
   await paste('new','<b>new</b>');await waitText('**new**')
   let value=await state('**new**');assert.equal(value.paint.toast.visible,true);assert.equal(value.paint.toast.severity,'neutral')
   let undoCount=(await command('events')).filter(e=>e.reason===1).length
@@ -208,6 +231,10 @@ try {
   console.log('[多面板探针]',JSON.stringify(panelInfo))
   assert.equal(panelInfo?.panels?.filter(p=>p.ready).length,2)
   const contexts=await refreshContexts();assert.equal(contexts.length,2)
+  await paste('点我',ruleHtml);await waitText(ruleMarkdown)
+  await state(ruleMarkdown,0);await state(ruleMarkdown,1)
+  await press('z');await waitText('点我');await press('z');await waitText('new')
+  console.log('[PASS] #541 新开的真实面板取得现有规则，格式/纯文本阶段在两个面板同步')
   await paste('peer','<b>peer</b>');await waitText('**peer**');await state('**peer**',0);await state('**peer**',1)
   await press('z');await waitText('peer');await state('peer',0);await state('peer',1)
   await press('z');await waitText('new');await state('new',0);await state('new',1)

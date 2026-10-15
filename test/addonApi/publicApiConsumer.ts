@@ -22,6 +22,7 @@ import {
   type AddonStatusKind,
 } from '../../src/shared/addonIdentity'
 import type { AddonApiEntry, AddonApiGroup, AddonApiReleaseRecord } from '../../src/shared/addonApiCatalog'
+import type { AddonDocNavRequest, AddonDocNavResult, AddonDocNavLocate, AddonDocNavRejection } from '../../src/shared/addonNavApi'
 import type {
   AddonChannelOutcome,
   AddonCm6Runtime,
@@ -36,6 +37,15 @@ import type {
   TableMenuHit,
   VsidianAddonPageSdk,
 } from '../../src/shared/addonPage'
+import type {
+  AddonRefAnchor,
+  AddonRefPopupHandle,
+  AddonRefPopupOutcome,
+  AddonRefPopupRejection,
+  AddonRefPopupRequest,
+  AddonRefTargetSpec,
+  AddonSdkRefViewsFacet,
+} from '../../src/shared/addonRefViews'
 import type {
   AddonApplyEditsRequest,
   AddonApplyEditsResult,
@@ -96,10 +106,36 @@ import type {
   AddonSettingValue,
 } from '../../src/shared/addonSettings'
 import type { AddonStorageFacet, AddonStorageRejection } from '../../src/shared/addonStorage'
+import {
+  ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
+  ADDON_PASTE_RULES_MAX_DEPTH,
+  ADDON_PASTE_RULES_MAX_PER_ADDON,
+  type AddonPasteRuleDeclaration,
+  type AddonPasteRulesRegisterResult,
+  type AddonPasteRulesSnapshot,
+} from '../../src/shared/addonPasteRules'
 import type {
   AddonRendererRegistration,
   AddonRenderersFacet,
 } from '../../src/shared/addonRenderers'
+import {
+  addonThemeEnvironmentEqual,
+  addonThemeEnvironmentOf,
+  addonThemeRefOf,
+  isAddonThemeEnvironmentPayload,
+  isAddonThemesStatePayload,
+  resolveActiveTheme,
+  resolveThemePreferred,
+  validateAddonThemeBatch,
+  type AddonThemeCandidate,
+  type AddonThemeDeclaration,
+  type AddonThemeEnvironment,
+  type AddonThemeEnvironmentFacet,
+  type AddonThemeEnvironmentKind,
+  type AddonThemeRegisterOutcome,
+  type AddonThemesRegistrationFacet,
+  type AddonThemesStatePayload,
+} from '../../src/shared/addonThemes'
 import type {
   AddonCommandDefinition,
   AddonMenuItemDefinition,
@@ -178,6 +214,30 @@ export const channelOutcomePinned: Equals<FailureReason<AddonChannelOutcome>, Pi
 export type PinnedBehaviorReasons = 'invalid-registration' | 'duplicate-id' | 'not-editor-page' | 'released'
 export const behaviorReasonsPinned: Equals<FailureReason<AddonBehaviorRegisterResult>, PinnedBehaviorReasons> = true
 
+/** #541 T01 粘贴规则注册拒绝码 */
+export type PinnedPasteRulesReasons = 'invalid-declaration' | 'duplicate-id' | 'too-many' | 'released'
+export const pasteRulesReasonsPinned: Equals<FailureReason<AddonPasteRulesRegisterResult>, PinnedPasteRulesReasons> = true
+/** 粘贴规则预算常量（规格 §4.4 集中定义——宿主与页面同源） */
+export const pasteRulesBudgetsPinned: [
+  number, number, number,
+] = [
+  ADDON_PASTE_RULES_MAX_PER_ADDON, ADDON_PASTE_RULES_MAX_DEPTH, ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
+]
+/** 声明与快照形态的编译期消费（作者提交声明 / 平台广播快照） */
+export const pasteRuleDeclarationSample: AddonPasteRuleDeclaration = {
+  id: 'sample-link',
+  match: { tag: 'span', attributes: [{ name: 'data-sample-url' }] },
+  output: {
+    kind: 'template',
+    template: '[{{label}}]({{url}})',
+    slots: {
+      label: { source: { kind: 'text' } },
+      url: { source: { kind: 'attribute', name: 'data-sample-url' }, url: true },
+    },
+  },
+}
+export const pasteRulesSnapshotSample: AddonPasteRulesSnapshot = { version: 1, rules: [] }
+
 /** T02 五种装载失败原因 */
 export type PinnedLoadFailureReasons =
   | 'already-loaded'
@@ -189,8 +249,7 @@ export const loadFailureReasonsPinned: Equals<AddonLoadFailureReason, PinnedLoad
 
 // ---- facet 形状钉住（Pick 键不存在即编译失败——删除/改名公开成员被发现） ----
 
-/** 页面 SDK 十四个公开面（六个能力 facet + 装配/资源/通信/释放；#476 起
- *  含 behaviorState 只读面） */
+/** 页面 SDK 公开面（含 behaviorState 与 refViews 只读面）。 */
 export type SdkSurface = Pick<
   VsidianAddonPageSdk,
   | 'addon'
@@ -201,6 +260,7 @@ export type SdkSurface = Pick<
   | 'commands'
   | 'menus'
   | 'renderers'
+  | 'refViews'
   | 'ui'
   | 'registerExtension'
   | 'mountRoot'
@@ -210,7 +270,10 @@ export type SdkSurface = Pick<
 >
 
 /** views 面（枚举/获取/创建/销毁订阅） */
-export type ViewsSurface = Pick<AddonViewsFacet, 'list' | 'get' | 'onCreated' | 'onDisposed'>
+export type ViewsSurface = Pick<AddonViewsFacet, 'list' | 'get' | 'onCreated' | 'onDisposed' | 'openDocument'>
+export type DocumentNavigationShapes = { request: AddonDocNavRequest; result: AddonDocNavResult; locate: AddonDocNavLocate; rejection: AddonDocNavRejection }
+export const documentNavigationSample: AddonDocNavRequest = { sourceInstanceId: 'main', target: 'notes/target.md', locate: { kind: 'line', line: 3 } }
+export const documentNavigationConsume = (views: AddonViewsFacet, request: AddonDocNavRequest): Promise<AddonDocNavResult> => views.openDocument(request)
 /** 实验入口 cm6 运行时（state/view 整命名空间 + #406 language 语法树子集） */
 export type Cm6RuntimeSurface = Pick<AddonCm6Runtime, 'state' | 'view' | 'language'>
 export type Cm6LanguageSurface = Pick<
@@ -414,8 +477,71 @@ export const settingSearchEntries: readonly AddonSettingSearchEntry[] = [
   { key: 'flag', title: '开关项' },
 ]
 
+/** T05（#544）只读引用浮窗请求形状：目标（路径 + 互斥锚点）与请求/句柄/
+ *  结局联合——字段改名、锚点 kind 收窄或拒绝枚举收缩即编译失败 */
+export type RefViewShapes = {
+  anchor: AddonRefAnchor
+  target: AddonRefTargetSpec
+  request: AddonRefPopupRequest
+  outcome: AddonRefPopupOutcome
+  rejection: AddonRefPopupRejection
+  handle: AddonRefPopupHandle
+}
+/** refViews 面方法形状（编辑器页 facet——设置页为 undefined） */
+export type RefViewsFacetShape = Pick<AddonSdkRefViewsFacet, 'requestPopup'>
+export const refPopupTargetSample: AddonRefTargetSpec = {
+  path: 'notes/ref.md', anchor: { kind: 'heading', heading: '第二章' },
+}
+
 /** 渲染与界面注册形状 */
 export type RendererShapes = { registration: AddonRendererRegistration }
+
+// ---- #546 T07 主题注册与主题环境的编译期消费（签名形状钉住） ----
+
+/** enable 上下文 themes 面的消费形态（组件作者视角） */
+export type ThemeRegistrationSurface = Pick<AddonThemesRegistrationFacet, 'register'>
+/** 注册结果两臂（普通 API 拒绝不算故障） */
+export type ThemeRegisterOutcomeArms = AddonThemeRegisterOutcome
+/** 组件作者提交的声明形状 */
+export const themeDeclarations: readonly AddonThemeDeclaration[] = [
+  {
+    themeId: 'aqua',
+    label: { 'zh-cn': '水青', en: 'Aqua' },
+    rendererId: 'aqua-renderer',
+    languages: ['mermaid'],
+  },
+]
+/** 声明 → 稳定身份/校验/选择的同源纯函数消费 */
+export const themePipeline = {
+  ref: addonThemeRefOf('pub.pack', 'aqua'),
+  batchVerdict: validateAddonThemeBatch(themeDeclarations),
+  preferred: resolveThemePreferred('pub.pack/aqua', 'default'),
+  active: resolveActiveTheme({
+    themes: [] as readonly AddonThemeCandidate[],
+    preferred: 'default',
+    isThemeAvailable: () => true,
+  }),
+}
+/** SDK themeEnvironment 面的消费形态（编辑器页） */
+export type ThemeEnvironmentSurface = Pick<AddonThemeEnvironmentFacet, 'get' | 'onChange'>
+/** 四态映射与等值判据（页面缓存先更新后通知、重复值不广播的判据源） */
+export const themeEnvironmentFacts: Record<AddonThemeEnvironmentKind, AddonThemeEnvironment> = {
+  light: addonThemeEnvironmentOf('light'),
+  dark: addonThemeEnvironmentOf('dark'),
+  'high-contrast': addonThemeEnvironmentOf('high-contrast'),
+  'high-contrast-light': addonThemeEnvironmentOf('high-contrast-light'),
+}
+export const themeEnvironmentEqualProbe = addonThemeEnvironmentEqual(
+  addonThemeEnvironmentOf('light'),
+  addonThemeEnvironmentOf('high-contrast-light'),
+)
+export const themeEnvironmentPayloadGuard = isAddonThemeEnvironmentPayload({ dark: false, highContrast: true })
+export const themesStatePayloadGuard = isAddonThemesStatePayload({
+  version: 1,
+  themes: [],
+  preferred: 'default',
+  preferredAvailable: true,
+} satisfies Pick<AddonThemesStatePayload, 'version' | 'themes' | 'preferred' | 'preferredAvailable'>)
 export type CommandShapes = { definition: AddonCommandDefinition; menuItem: AddonMenuItemDefinition }
 export type UiShapes = { button: AddonUiButtonDefinition; panel: AddonUiPanelDefinition }
 

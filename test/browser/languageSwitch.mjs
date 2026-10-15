@@ -110,12 +110,13 @@ try {
   // addons.commandCatalogGet 是 #359 T10 组件命令目录的 init 拉取（设置页
   // 快捷键分页合并展示组件命令），同属合法后台通道；
   // addons.behaviorsGet 是 T08（#357）行为冲突管理载荷的 init 拉取，同上；
-  // addons.behaviorsViewGet 是 #474 行为管理视图状态的 init 拉取，同上
+  // addons.behaviorsViewGet 是 #474 行为管理视图状态的 init 拉取，同上；
+  // addons.themesGet 是 #546 主题目录的 init 拉取，同上
   assert.deepEqual(
     (await page.evaluate(() => window.sent.filter((m) => m.kind !== 'settings.get' && m.kind !== 'keybindings.get' && m.kind !== 'snippets.get' &&
       m.kind !== 'wordSegment.get' && m.kind !== 'index.get' && m.kind !== 'defaultEditor.get' && m.kind !== 'addons.get' &&
       m.kind !== 'addons.settingsGet' && m.kind !== 'addonPage.ready' && m.kind !== 'addons.commandCatalogGet' && m.kind !== 'addons.behaviorsGet' &&
-      m.kind !== 'addons.behaviorsViewGet')))
+      m.kind !== 'addons.behaviorsViewGet' && m.kind !== 'addons.themesGet')))
       .map((m) => m.values['general.language']),
     ['en', 'zh-cn', 'auto'],
   )

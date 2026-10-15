@@ -35,10 +35,13 @@ import type {
 import type { AddonViewHandle, AddonViewsFacet, AddonViewIdentityFacet } from '../shared/addonEditApi'
 import type { AddonHeadingFoldFacet } from '../shared/addonFoldApi'
 import type { AddonHostSettingsFacet } from '../shared/addonHostSettingsApi'
+import type { AddonThemeEnvironmentFacet } from '../shared/addonThemes'
 import type { AddonSyntaxFacet } from '../shared/addonSyntaxApi'
 import type { AddonBehaviorsFacet, AddonBehaviorStateFacet } from '../shared/addonBehaviors'
 import type { AddonRendererRegistration } from '../shared/addonRenderers'
+import type { AddonSdkRefViewsFacet } from '../shared/addonRefViews'
 import type { AddonRenderersBridgeHandle } from './addonRenderers'
+import type { AddonRefViewsRuntime } from './addonRefViews'
 import type { AddonViewsRuntime } from './addonViews'
 import { addonInstanceIdField } from './addonViewIdentity'
 import type { AddonBehaviorRuntime } from './addonBehaviors'
@@ -120,6 +123,9 @@ export interface AddonPageLoaderEnv {
   /** T09（#358）渲染提供者桥（编辑器页由 main.ts 构造注入；省略时 SDK
    *  不提供 renderers 面——注册拒绝为 no-op 句柄） */
   addonRenderers?: Pick<AddonRenderersBridgeHandle, 'register' | 'disposeRenderer' | 'releaseGeneration'>
+  /** T05（#544）只读引用视图运行时（编辑器页由 main.ts 构造注入；省略
+   *  时 SDK 不提供 refViews 面；releaseLoad 时整组件回收其浮窗） */
+  addonRefViews?: Pick<AddonRefViewsRuntime, 'requestPopup' | 'releaseAddon'>
   /** T11（#360）附加组件界面运行时（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 ui 面，releaseLoad 时亦不做回收） */
   addonUi?: AddonUiRuntime
@@ -127,6 +133,9 @@ export interface AddonPageLoaderEnv {
    *  syncController 的设置快照缓存 settings.snapshot/changed 到达即更新；
    *  省略时 SDK 不提供 experimental.hostSettings 面） */
   hostSettingsSnapshot?: () => SettingsPayload | undefined
+  /** #546 T07 页面明暗环境 hub（编辑器页由 main.ts 注入；省略时 SDK 不
+   *  提供 themeEnvironment 面，releaseLoad 时亦不做回收） */
+  themeEnvironment?: Pick<import('./addonThemeEnvironment').ThemeEnvironmentHub, 'current' | 'subscribe' | 'releaseAddon'>
   /** 编辑器页：扩展挂载槽（null = 摘除全部；生产实现为 liveInstance 的
    *  附加组件 Compartment 槽 reconfigure，见 liveInstance.reconfigureAddonExtensions） */
   attachExtensions?: (extension: Extension[] | null) => void
@@ -369,6 +378,20 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
             buildViewHandleFor(loadRecord.addonId, loadRecord.generation, instanceId),
           onCreated: (callback) => env.addonViews!.onCreated(callback),
           onDisposed: (callback) => env.addonViews!.onDisposed(callback),
+          // #543 T03 文档打开与定位：来源身份（组件 ID + 代次）在此注入，
+          // 组件请求只携带来源实例/目标/定位描述——伪来源结构上不可表达；
+          // 已终结代次的迟到调用拒绝 view-disposed（与 applyEdits 同口径）
+          openDocument: (request) => {
+            if (!isLoadActive(loadRecord)) {
+              return Promise.resolve({ ok: false, reason: 'view-disposed' as const, opened: false })
+            }
+            return env.addonViews!.openDocumentOf({
+              addonId: loadRecord.addonId,
+              generation: loadRecord.generation,
+              instanceId: request?.sourceInstanceId,
+              request,
+            })
+          },
         }
       : undefined
     // #410 标题折叠实验入口（仅编辑器页 + 视图注册表在场提供；对齐 cm6
@@ -429,6 +452,27 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
               : { ok: false, reason: 'view-disposed' }),
           }
         : undefined
+    // #546 T07 主题环境面（仅编辑器页 + hub 在场提供）：查询与订阅同 hub；
+    // 订阅过 isLoadActive 守卫（迟到登记为 no-op 退订——与 behaviorState
+    // 同款），释放时点已有的订阅由 releaseLoad 的 releaseAddon 整组回收
+    const themeEnvironmentFacet: AddonThemeEnvironmentFacet | undefined =
+      page === 'editor' && env.themeEnvironment
+        ? {
+            get: () => env.themeEnvironment!.current(),
+            onChange: (listener) => (isLoadActive(loadRecord)
+              ? env.themeEnvironment!.subscribe(loadRecord.addonId, loadRecord.generation, (value) => {
+                  try {
+                    listener(value)
+                  } catch (error) {
+                    if (!loadRecord.faultReported) {
+                      loadRecord.faultReported = true
+                      env.send({ type: 'addon.faulted', addonId: loadRecord.addonId, generation: loadRecord.generation, page, reason: `theme-environment: ${String(error)}` })
+                    }
+                  }
+                })
+              : () => {}),
+          }
+        : undefined
     const behaviorsFacet: AddonBehaviorsFacet | undefined = env.addonBehaviors
       ? {
           register: (registration) => {
@@ -463,6 +507,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
       ...(behaviorStateFacet ? { behaviorState: behaviorStateFacet } : {}),
+      ...(themeEnvironmentFacet ? { themeEnvironment: themeEnvironmentFacet } : {}),
       ...(env.addonCommands && page === 'editor' ? {
         commands: {
           register: (def, handler) => {
@@ -512,6 +557,19 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
                 }
               },
             },
+          }
+        : {}),
+      // T05（#544）只读引用视图面（仅编辑器页且运行时在场；其余页面
+      // undefined）。方法过 isLoadActive 守卫：已终结代次的迟到请求拒绝
+      // released（旧代次请求不再有有效来源——身份由本装载器注入）
+      ...(page === 'editor' && env.addonRefViews
+        ? {
+            refViews: {
+              requestPopup: (request: Parameters<AddonSdkRefViewsFacet['requestPopup']>[0]) =>
+                (isLoadActive(loadRecord)
+                  ? env.addonRefViews!.requestPopup(loadRecord.addonId, loadRecord.generation, request)
+                  : Promise.resolve({ ok: false as const, reason: 'released' as const })),
+            } satisfies AddonSdkRefViewsFacet,
           }
         : {}),
       // T11（#360）界面面：按钮/面板注册转发 runtime；目标句柄经
@@ -640,6 +698,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     // T07（#356）行为注册整组注销（opId 分配器随卸载解绑——释放后该组件
     // 的行为不再有可注入来源，提交路径结构上不可用）
     env.addonBehaviors?.unregisterAddon(loadRecord.addonId)
+    // #543 T03 导航在途请求整代次终结（旧请求不抢回定位——迟到回包经
+    // reqId 配对拒收）
+    env.addonViews?.releaseDocNavOf(loadRecord.addonId, loadRecord.generation)
     // #476 行为禁用态订阅整组件回收（查询不受影响——迟到调用返回最后
     // 已知快照；订阅不滞留进已脱离 active 的旧代次闭包）
     env.addonBehaviorEnabledState?.releaseAddon(loadRecord.addonId)
@@ -659,6 +720,10 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     } catch {
       // 候选撤销异常不阻断其余回收
     }
+    // T05（#544）：本页该组件的引用浮窗整组回收（浮窗已换主/已关时不
+    // 误关——运行时按当前浮窗实例身份比对；pending 请求以 view-disposed
+    // 终结）
+    env.addonRefViews?.releaseAddon(loadRecord.addonId, loadRecord.generation)
     // T11（#360）界面贡献整组件回收（本页闭环）：撤按钮、关面板、清注册
     if (env.addonUi) {
       try {
@@ -667,6 +732,9 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         // 回收异常不阻断其余释放路径
       }
     }
+    // #546 T07 主题环境订阅整组件回收（快照查询不受影响——迟到调用返回
+    // 最后已知值；订阅不滞留进已释放的旧代次）
+    env.themeEnvironment?.releaseAddon(loadRecord.addonId)
     let disposals = 0
     for (const callback of loadRecord.disposeCallbacks.splice(0)) {
       try {

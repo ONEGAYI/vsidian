@@ -57,6 +57,7 @@ import { ToastChannel } from './toast'
 import { RichPasteDialog } from './richPasteDialog'
 import { htmlToMarkdown } from './htmlToMarkdown'
 import { planRichPaste, richPasteDistributionMatches } from './richPastePlan'
+import type { AddonPasteRule } from '../shared/addonPasteRules'
 import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
 import { isHttpLinkHref } from '../shared/webLink'
@@ -160,7 +161,8 @@ import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from '
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
 import { resetMermaidLoadFailure, setMermaidDarkTheme, setMermaidPreset } from './mermaidRender'
-import { MERMAID_THEME_KEY } from '../shared/settings'
+import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../shared/settings'
+import { resolveThemePreferred } from '../shared/addonThemes'
 import {
   closeDiagramPopup,
   DIAGRAM_POPUP_CLASS_NAMES,
@@ -828,6 +830,10 @@ export class WebviewSyncController {
   private pasteModeRevision = 0
   private toast: ToastChannel | undefined
   private richPasteDialog: RichPasteDialog | undefined
+  /** #541 T01 附加组件粘贴规则：当前有效快照（宿主广播缓存；粘贴开始时
+   *  捕获引用，转换中不拼接两个注册代次） */
+  private addonPasteRules: readonly AddonPasteRule[] = []
+  private addonPasteRulesVersion = -1
   private pastePreferenceReqId = 0
   /** #438 右键导出直发的 reqId 序列（与弹窗工具条导出各自的计数独立，
    *  宿主只按面板会话关联应答——两序列不要求全局唯一） */
@@ -1181,8 +1187,8 @@ export class WebviewSyncController {
       codeHighlight: () => this.live?.codeCardHighlightEnabled ?? true,
       // #298 悬停总开关投影（hover.enabled；门控收敛在 hoverPopup 入口）
       hoverPreviewEnabled: () => this.hoverPreviewEnabled(),
-      mountEmbedChild: (parentInstanceId, block, target) =>
-        this.embedCards?.mountPopupChild(parentInstanceId, block, target),
+      mountEmbedChild: (parentInstanceId, block, target, readOnly) =>
+        this.embedCards?.mountPopupChild(parentInstanceId, block, target, readOnly),
       unmountEmbedChild: (block) => this.embedCards?.unmountBlock(block),
       admitRootContent: (instanceId, target, bytes) =>
         this.embedCards?.admitPopupRoot(instanceId, target, bytes) ?? false,
@@ -2145,6 +2151,14 @@ export class WebviewSyncController {
     }
   }
 
+  /** #543 T03 面板会话身份（init 握手后可用；导航请求的面板身份注入源。
+   *  未握手返回 null——注册表侧按来源无法可靠归属拒绝） */
+  sessionIdentityNow(): { sessionId: string; docUri: string } | null {
+    return this.sessionId !== '' && this.docUri !== ''
+      ? { sessionId: this.sessionId, docUri: this.docUri }
+      : null
+  }
+
   /** #359 T10：挂接组件命令注册表（main.ts 构造后注入；快捷键本地分支与
    *  宿主 addonCommand.execute 回发两入口共用 runAddonCommand） */
   attachAddonCommands(registry: import('./addonCommands').AddonCommandsRuntime): void {
@@ -2353,6 +2367,16 @@ export class WebviewSyncController {
         setHeadingFoldBindingHints((op) => getEffectiveBindings(overrides, op))
         break
       }
+      case 'addonPasteRules.snapshot': {
+        // #541 T01 附加组件粘贴规则有效快照：缓存当前有效集（版本守卫——
+        // 旧版本迟到快照不回退已撤回的规则代次）；粘贴使用开始时捕获，
+        // 转换中不拼接两个注册代次（processRichPaste 捕获点）
+        if (message.snapshot.version >= this.addonPasteRulesVersion) {
+          this.addonPasteRulesVersion = message.snapshot.version
+          this.addonPasteRules = [...message.snapshot.rules]
+        }
+        break
+      }
       case 'settings.snapshot':
       case 'settings.changed': {
         // 设置快照与变更广播共用同一处理（#33）：snapshot 为设置页请求-
@@ -2363,7 +2387,14 @@ export class WebviewSyncController {
         // 引擎）仍在下方处理
         const previousCodeCard = this.live?.codeCardConfigSnapshot
         this.settings = message.values
-        setMermaidPreset(message.values[MERMAID_THEME_KEY] === 'codex' ? 'codex' : 'default')
+        // #546 T07 统一主题：新键（appearance.theme）权威 + 旧键过渡回显
+        // （组件主题身份经生效表挂载组件管线；选中组件主题不可用时宿主
+        // 已回 default，内置侧按 default preset 渲染）
+        const themeValue = resolveThemePreferred(
+          typeof message.values[APPEARANCE_THEME_KEY] === 'string' ? message.values[APPEARANCE_THEME_KEY] as string : undefined,
+          typeof message.values[MERMAID_THEME_KEY] === 'string' ? message.values[MERMAID_THEME_KEY] as string : undefined,
+        )
+        setMermaidPreset(themeValue === 'codex' ? 'codex' : 'default')
         this.live?.applySettings(message.values)
         const nextCodeCard = this.live?.codeCardConfigSnapshot
         if (previousCodeCard && nextCodeCard && (
@@ -2575,6 +2606,8 @@ export class WebviewSyncController {
             viewType: 'hover',
             instanceId: `hover:${message.instanceId}`,
             targetDocUri: `file:///${message.target.fsPath.replace(/\\/g, '/')}`,
+            // T05（#544）引用请求来源身份（hover.result 送达的目标 fsPath）
+            targetFsPath: message.target.fsPath,
             text: message.text,
             version: message.version,
           })
@@ -3544,7 +3577,8 @@ export class WebviewSyncController {
         // 送达确认（#163 验收反馈）：offset 原样回发（对账不受 clamp/块化
         // 影响）——宿主停发补发，此后重载恢复走持久化锚点，历史程序定位
         // 不再重播、不拉回用户已手动离开的位置
-        this.bridge.postMessage({ kind: 'view.locate.ack', offset: message.offset })
+        this.bridge.postMessage({ kind: 'view.locate.ack', offset: message.offset,
+          ...(message.locateId !== undefined ? { locateId: message.locateId } : {}) })
         break
       }
       case 'reading.perf': {
@@ -7997,6 +8031,9 @@ export class WebviewSyncController {
   private async processRichPaste(snapshot: ClipboardSnapshot, target: NonNullable<WebviewSyncController['clipboardReadTarget']>, reqId: number): Promise<void> {
     const valid = () => reqId === this.clipboardReadReqId && this.clipboardTargetValid(target)
     if (!valid()) return
+    // #541 T01 粘贴规则快照在使用开始时捕获一次：转换与后续询问全程用
+    // 同一有效集，不拼接两个注册代次（广播到达只更新下次粘贴的捕获值）
+    const addonPasteRules = this.addonPasteRules
     let plain: string
     try { plain = clipboardPlainText(snapshot) } catch { this.toast?.show(t('toast.pasteNoText'), 'error'); return }
     const state = target.view.state
@@ -8009,7 +8046,7 @@ export class WebviewSyncController {
       return
     }
     let converted: ReturnType<typeof htmlToMarkdown>
-    try { converted = htmlToMarkdown(snapshot.html) }
+    try { converted = htmlToMarkdown(snapshot.html, { addonPasteRules }) }
     catch {
       if (plain) this.applyRichPaste(plain, plain, 'fallback', target.view)
       else this.toast?.show(t('toast.pasteNoText'), 'error')
@@ -10004,6 +10041,8 @@ export class WebviewSyncController {
         gutterUserSelect: null,
         darkTheme: false,
         caretColor: null,
+        // T05（#544）浮窗绘制观测不依赖正文 view（早退路径同报）
+        hoverPopup: collectHoverPopupPaint(),
         // 组件按钮/面板不依赖正文 view（无 init 也可注册挂载）——早退路径
         // 同样上报（按钮挂载态与面板开态的集成断言不因无正文而缺字段）
         ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
@@ -10648,6 +10687,8 @@ export class WebviewSyncController {
       darkTheme: view.state.facet(EditorView.darkTheme),
       caretColor,
       drawnCursorColor,
+      // T05（#544）悬停引用浮窗绘制观测（不依赖正文 view；无浮窗缺省）
+      hoverPopup: collectHoverPopupPaint(),
       readingFindSource: {
         visible: !!findSourceCurrent && paintedWithVisibleBackground(findSourceCurrent),
         text: findSource?.querySelector('code')?.textContent ?? '',
@@ -11468,6 +11509,36 @@ function isSvgPainted(svg: SVGSVGElement): boolean {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/** T05（#544）悬停引用浮窗绘制观测：elementFromPoint 命中浮窗容器
+ *  （真实布局可见——含组件请求打开的浮窗）+ computed 背景/边框与错误分态
+ *  修饰（hover-popup 历史样式命中证据；无浮窗时缺省，jsdom 布局缺失时
+ *  hit=false 但样式字段仍可观测）。纯 DOM 探测，不依赖控制器状态 */
+function collectHoverPopupPaint(): PaintProbe['hoverPopup'] {
+  const el = document.querySelector<HTMLElement>('.vsidian-hover-popup')
+  if (!el) {
+    return undefined
+  }
+  let hit = false
+  if (typeof document.elementFromPoint === 'function') {
+    const rect = el.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      const point = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + Math.min(rect.height / 2, 40),
+      )
+      hit = point !== null && el.contains(point)
+    }
+  }
+  const style = getComputedStyle(el)
+  const stateEl = el.querySelector<HTMLElement>('.vsidian-hover-popup-state')
+  return {
+    hit,
+    background: style.backgroundColor,
+    borderWidth: style.borderTopWidth,
+    errorState: stateEl !== null && stateEl.classList.contains('vsidian-hover-popup-state-error'),
+  }
+}
 
 /** 绘制层命中探测（#53 起 sidebar/outline 探针共用）：元素中心点
  *  elementFromPoint 命中 scope（缺省元素自身）才算真实绘制——display:none、

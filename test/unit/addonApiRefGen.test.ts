@@ -43,8 +43,9 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
     expect(validateAddonApiCatalog(ADDON_API_GROUPS, ADDON_API_ENTRIES, ADDON_API_RELEASES)).toEqual([])
   })
 
-  it('六组各有条目、条目分组全部合法', () => {
-    expect(ADDON_API_GROUPS).toHaveLength(6)
+  it('全部分组各有条目、条目分组全部合法', () => {
+    // #362 首版六组；#541 起追加 paste-conversion（第七组）
+    expect(ADDON_API_GROUPS).toHaveLength(7)
     for (const group of ADDON_API_GROUPS) {
       const count = ADDON_API_ENTRIES.filter((entry) => entry.group === group.id).length
       expect(count, `分组 ${group.id} 应有条目`).toBeGreaterThan(0)

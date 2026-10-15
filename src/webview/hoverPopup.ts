@@ -102,7 +102,10 @@ import {
 } from './refReadingContent'
 import { t } from '../shared/i18n'
 import { shouldApplyHoverVersion } from '../shared/hoverRefresh'
-import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
+import type { HoverPreviewFailReason, HoverPreviewResult, WebviewToHost } from '../shared/protocol'
+// T05（#544）附加组件只读引用请求的结局回调形态（type-only——运行时模块
+// addonRefViews 只消费 shared 纯逻辑，无环）
+import type { AddonRefPopupSettle } from './addonRefViews'
 import {
   HOVER_POPUP_DEFAULT_WIDTH,
   HOVER_POPUP_MAX_HEIGHT,
@@ -279,7 +282,7 @@ export interface HoverPreviewContext {
    *  入口同门（命令执行但静默不弹浮层）；缺省（未提供）视为开 */
   hoverPreviewEnabled?(): boolean
   /** #245 复用正文卡片管理器升级浮层内子引用，不创建第二个浮窗。 */
-  mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent): void
+  mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent, readOnly?: boolean): void
   unmountEmbedChild?(block: HTMLElement): void
   /** #336/#340：target 联合收宽——图片（小常数计量）与 text（窗口正文
    *  计量）载荷同样经面板预算准入 */
@@ -368,6 +371,10 @@ interface HoverPopupState {
   prevFocus: HTMLElement | null
   closeTimer: number | undefined
   cleanups: Array<() => void>
+  /** T05（#544）附加组件引用请求（null = 非 addon 路径）：来源覆盖随
+   *  hover.request 出站；结局回调至多一次（content/error/closed——装载中
+   *  一切关闭路径统一 closed，由 settled 守卫幂等） */
+  addon: { source: { instanceId: string; sourceFsPath: string }; onSettled: (settle: AddonRefPopupSettle) => void; settled: boolean } | null
 }
 
 let context: HoverPreviewContext | null = null
@@ -793,9 +800,16 @@ function position(state: HoverPopupState): void {
   state.liveEl.style.maxHeight = `${Math.max(140, placement.height - chromeH)}px`
 }
 
-function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | 'error', note: string): void {
+function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | 'error', note: string, errorReason?: HoverPreviewFailReason): void {
   state.display = display
   state.note = note
+  // T05（#544）附加组件请求的结局回调：首落定（content/error）一次性兑现
+  // ——刷新重放（同实例 invalidated 驱动）不重复回调；error 携带真实原因
+  // 码（预算/读取/锚点失败的分态来源），无码防御性归 read-failed
+  if (state.addon !== null && !state.addon.settled && display !== 'loading') {
+    state.addon.settled = true
+    state.addon.onSettled(display === 'content' ? { phase: 'content' } : { phase: 'error', reason: errorReason ?? 'read-failed' })
+  }
   // 错误分态挂错误修饰类（主题错误色），loading/content 摘除
   state.stateEl.classList.toggle(HOVER_POPUP_CLASS_NAMES.stateError, display === 'error')
   if (display === 'content') {
@@ -817,6 +831,12 @@ function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | '
 interface HoverPopupOpenOptions {
   keyboard?: boolean
   prevFocus?: HTMLElement | null
+  /** T05（#544）附加组件只读引用请求：来源覆盖（随 hover.request 出站）
+   *  与结局回调（content/error/closed 至多一次） */
+  addon?: {
+    source: { instanceId: string; sourceFsPath: string }
+    onSettled: (settle: AddonRefPopupSettle) => void
+  }
 }
 
 /**
@@ -840,11 +860,12 @@ function hoverSpecTargetsImage(spec: HoverPopupTargetSpec): boolean {
 
 /** 打开浮层（三入口共用核心）：目标规格由调用方给出——Reading 锚点路径
  *  经 hoverPopupSpecOfAnchor 提取，Live 装饰/面板条目由 syncController 组装（见
- *  HoverPopupTargetSpec）。非法目标（null spec）不开 */
-function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, options?: HoverPopupOpenOptions): void {
+ *  HoverPopupTargetSpec）。非法目标（null spec）不开。返回浮层实例身份
+ *  （T05 起附加组件路径据此配对句柄；旧调用方忽略返回值） */
+function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, options?: HoverPopupOpenOptions): string {
   const session = context?.session()
   if (!context || !session?.sessionId || !session.docUri || spec === null) {
-    return
+    return ''
   }
   closeTargetTip() // #299 浮层打开：提示收起（键盘/显式入口兜底联动）
   closeHoverPopup()
@@ -944,7 +965,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     send: (message: WebviewToHost) => ctx.send(message),
     codeHighlight: () => ctx.codeHighlight?.() ?? true,
     onEmbedBlockMounted: (block: HTMLElement, target: RefLoadedContent) =>
-      ctx.mountEmbedChild?.(embedParentIdentity, block, target),
+      ctx.mountEmbedChild?.(embedParentIdentity, block, target, options?.addon !== undefined),
     onEmbedBlockUnmounted: (block: HTMLElement) => ctx.unmountEmbedChild?.(block),
   }
   // #340（P3-08）text 目标预判（扩展名本地分类）：非权威——权威类型由
@@ -961,7 +982,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // #337（P3-05）PDF 形态同样恒不接入（只读内容无编辑语义）
   const targetsImage = hoverSpecTargetsImage(spec)
   const rootKey = hoverRootKey(spec)
-  const mounted = targetsImage || pdfForm || textTarget
+  // API 引用不接可写根会话，不能继承父 Live 或驻留模式覆盖。
+  const mounted = options?.addon !== undefined || targetsImage || pdfForm || textTarget
     ? null
     : ctx.mountPopupRoot?.({
       key: rootKey,
@@ -1072,6 +1094,9 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     prevFocus: options?.prevFocus ?? null,
     closeTimer: undefined,
     cleanups: [],
+    addon: options?.addon !== undefined
+      ? { source: options.addon.source, onSettled: options.addon.onSettled, settled: false }
+      : null,
   }
   popup = state
   claimPopup(closeHoverPopup)
@@ -1317,10 +1342,27 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     state.cleanups.push(() => observer.disconnect())
   }
 
+  // 触发位置消失即释放（T05 #544 显式化——面板条目等既有路径经
+  // closeHoverPopupIfAnchorWithin 域释放，组件自有控件/正文元素的脱树
+  // 无 mouseout 事件可依赖）：文档级 childList/subtree 观测 + 在树性廉价
+  // 判定，浮窗在场期间每批 DOM 变更复核一次锚点连接性。面板重渲染等
+  // 既有关闭路径先到先关（幂等），此处补齐无事件路径
+  if (typeof MutationObserver === 'function') {
+    const anchorObserver = new MutationObserver(() => {
+      if (popup === state && !state.anchor.isConnected) {
+        closeHoverPopup()
+      }
+    })
+    anchorObserver.observe(document.documentElement ?? document, { childList: true, subtree: true })
+    state.cleanups.push(() => anchorObserver.disconnect())
+  }
+
   // 出站读取请求（只读消息：不进 edit.request 通道）。#219 普通链接形态
   // 附 linkHref（宿主走 readHoverMdLinkTarget）；#221 面板直接目标附
   // directTarget（宿主直读）；target 恒为目标原文（双链即 `|` 前原文，
-  // 链接即 href，面板条目即显示名——错误分态文案的目标原文来源）
+  // 链接即 href，面板条目即显示名——错误分态文案的目标原文来源）。
+  // T05（#544）：附加组件请求附 addonSource（来源覆盖——宿主按来源实例
+  // 的目标文档解析相对路径，R-U02）
   context.send({
     kind: 'hover.request',
     retainSource: true,
@@ -1334,6 +1376,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     sourceStart: spec.sourceStart,
     sourceEnd: spec.sourceEnd,
     target: spec.target,
+    ...(state.addon !== null ? { addonSource: state.addon.source } : {}),
     ...(spec.linkHref !== undefined ? { linkHref: spec.linkHref } : {}),
     ...(spec.directFsPath !== undefined
       ? {
@@ -1344,6 +1387,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
         }
       : {}),
   })
+  return instanceId
 }
 
 /** #221 显式目标入口（Live 装饰 / 面板条目 / 键盘命令共用）：目标形态由
@@ -1351,6 +1395,42 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
  *  判定——与 Reading 路径同口径） */
 export function openHoverPopupFor(anchor: HTMLElement, spec: HoverPopupTargetSpec): void {
   openPopup(anchor, spec)
+}
+
+/**
+ * T05（#544）附加组件只读引用浮窗入口（addonRefViews 运行时专用）：
+ * 打开浮窗并返回实例身份（供请求句柄配对——旧句柄据此判定「浮窗仍是
+ * 自己的」）；页面上下文/会话缺失（未 init/已 dispose）返回 null。
+ * 与 openHoverPopupFor 同为显式目标入口——不经悬停总开关（#298 门控的
+ * 是鼠标悬停触发规则，规格 §9 组件请求面不改写它）；键盘路径复用既有
+ * 模态（焦点进入浮层、Esc 归还原焦点——prevFocus 在此捕获）。
+ */
+export function openHoverPopupForAddonRef(
+  anchor: HTMLElement,
+  spec: HoverPopupTargetSpec,
+  options: {
+    keyboard?: boolean
+    addonSource: { instanceId: string; sourceFsPath: string }
+    onSettled: (settle: AddonRefPopupSettle) => void
+  },
+): string | null {
+  const session = context?.session()
+  if (!context || !session?.sessionId || !session.docUri) {
+    return null
+  }
+  const prev = options.keyboard === true
+    ? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    : undefined
+  return openPopup(anchor, spec, {
+    keyboard: options.keyboard,
+    prevFocus: prev,
+    addon: { source: options.addonSource, onSettled: options.onSettled },
+  }) || null
+}
+
+/** 当前浮窗实例身份（null = 无浮窗）——T05 请求句柄的活性判定锚 */
+export function currentHoverPopupInstanceId(): string | null {
+  return popup?.instanceId ?? null
 }
 
 /** #221 键盘命令入口（「预览当前链接」的手动打开）：记录触发处焦点，
@@ -1421,6 +1501,13 @@ export function closeHoverPopup(): void {
     return
   }
   popup = null
+  // T05（#544）附加组件请求：装载中被关闭（替换/移出/域失效/Esc/停用/
+  // 页面释放）统一结算 closed——settled 守卫幂等（已按 content/error 兑现
+  // 的请求不重复回调，内容态关闭不产生第二结局）
+  if (state.addon !== null && !state.addon.settled) {
+    state.addon.settled = true
+    state.addon.onSettled({ phase: 'closed' })
+  }
   // T06（#355）：关闭收口通知（悬停只读句柄注销——instanceId 取自关闭
   // 前浮层，与打开时的注册配对；一切关闭路径都经过本函数）
   context?.onPopupClosed?.(state.instanceId)
@@ -1504,7 +1591,7 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
       state.watchedFsPath = null
       state.watchLeaseId = null
     }
-    applyDisplay(state, 'error', t('hover.errorBudget'))
+    applyDisplay(state, 'error', t('hover.errorBudget'), 'budget')
     return
   }
   applyDisplay(state, 'content', message.target.relPath)
@@ -1711,7 +1798,7 @@ function applyHoverImageContent(
       state.watchedFsPath = null
       state.watchLeaseId = null
     }
-    applyDisplay(state, 'error', t('hover.errorBudget'))
+    applyDisplay(state, 'error', t('hover.errorBudget'), 'budget')
     return
   }
   ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
@@ -1745,6 +1832,7 @@ function requestReload(state: HoverPopupState, silent: boolean): void {
     sourceStart: state.spec.sourceStart,
     sourceEnd: state.spec.sourceEnd,
     target: state.spec.target,
+    ...(state.addon !== null ? { addonSource: state.addon.source } : {}),
     ...(state.spec.linkHref !== undefined ? { linkHref: state.spec.linkHref } : {}),
     ...(state.spec.directFsPath !== undefined
       ? {
@@ -1936,7 +2024,7 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
     }
   } else {
     // #221 目标原文取 state（三入口同源——面板条目/Live 装饰无 href 属性）
-    applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor, message.anchorDetail))
+    applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor, message.anchorDetail), message.reason)
   }
   position(popup)
   return true
@@ -1995,7 +2083,8 @@ export function notifyHoverWatchRejected(message: {
   state.pdfView?.discardContent()
   state.content.clear()
   context?.clearRootContent?.(state.instanceId)
-  applyDisplay(state, 'error', t(message.reason === 'capacity' ? 'hover.errorWatchCapacity' : 'hover.errorSourceExpired'))
+  applyDisplay(state, 'error', t(message.reason === 'capacity' ? 'hover.errorWatchCapacity' : 'hover.errorSourceExpired'),
+    message.reason === 'capacity' ? 'budget' : 'source-expired')
   position(state)
 }
 

@@ -22,9 +22,17 @@ import { AddonBehaviorRuntime } from './addonBehaviors'
 import { AddonBehaviorEnabledStateRuntime } from './addonBehaviorEnabledState'
 import { AddonCommandsRuntime } from './addonCommands'
 import { AddonUiRuntime } from './addonUi'
+import { AddonRefViewsRuntime } from './addonRefViews'
 import { addonCm6LanguageSubset, installAddonPageLoader } from './addonPageLoader'
 import { setAddonRenderersBridge } from './addonRenderers'
+import { setThemeEnvironmentHub } from './addonThemeEnvironment'
+import { isVscodeDarkBody } from './syncController'
 import { bindAddonFaultReporter } from './graphicRenderers'
+import {
+  closeHoverPopup,
+  currentHoverPopupInstanceId,
+  openHoverPopupForAddonRef,
+} from './hoverPopup'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { t } from '../shared/i18n'
 import { installTooltipCard } from './tooltipCard'
@@ -102,6 +110,13 @@ const addonRenderers = setAddonRenderersBridge((message) => {
     vscode.postMessage(message)
   }
 })
+// #546 T07 页面明暗环境 hub（SDK themeEnvironment 面的数据源）：初始值
+// 按 body class 就地播种（宿主 ready/事件推送到达前 SDK get 可用），
+// 权威值随 addonThemeEnvironment.changed 消息更新（等值跳过）
+const themeEnvironment = setThemeEnvironmentHub({
+  dark: isVscodeDarkBody(),
+  highContrast: document.body.classList.contains('vscode-high-contrast') || document.body.classList.contains('vscode-high-contrast-light'),
+})
 // #360 T11 附加组件界面运行时（页面级一份）：SDK ui 面的操作后端——按钮/
 // 面板挂载、目标路由（当前活动视图句柄经装载器同源构造——bindHandleFactory
 // 在装载器安装后绑定，沿 bindOpIdAllocator 先例解装配环）与回收矩阵
@@ -116,6 +131,27 @@ const addonUi = new AddonUiRuntime({
   log: (detail) => console.warn(`[vsidian-addon-ui] ${detail}`),
   reportFault: (addonId, stage, detail) => reportAddonRuntimeFault(addonId, stage, detail),
 })
+// T05（#544）只读引用视图运行时：来源解析走 views 注册表（main 面板正文
+// / embed 与 hover 引用目标），浮窗本体复用 hoverPopup 既有入口（几何/
+// 互斥/保活/Esc/键盘焦点/watch 与租约同链路）
+const addonRefViews = new AddonRefViewsRuntime({
+  resolveSource: (instanceId) => {
+    const info = addonViews.infoOf(instanceId)
+    if (!info) {
+      return undefined
+    }
+    if (info.viewType === 'main') {
+      return { viewType: 'main' }
+    }
+    const fsPath = addonViews.targetFsPathOf(instanceId)
+    return fsPath ? { viewType: info.viewType === 'embed' ? 'embed' : 'hover', fsPath } : undefined
+  },
+  openPopup: ({ trigger, spec, keyboard, addonSource, onSettled }) =>
+    openHoverPopupForAddonRef(trigger, spec, { keyboard, addonSource, onSettled }),
+  currentPopupInstanceId: () => currentHoverPopupInstanceId(),
+  closePopup: () => closeHoverPopup(),
+})
+addonViews.onDisposed((info) => addonRefViews.releaseSource(info.instanceId))
 const addonLoader = installAddonPageLoader({
   page: 'editor',
   cm6: { state: cmState, view: cmView, language: addonCm6LanguageSubset(cmLanguage) },
@@ -128,10 +164,13 @@ const addonLoader = installAddonPageLoader({
   addonCommands,
   addonRenderers,
   addonUi,
+  addonRefViews,
   // #457 宿主设置白名单读取面：SDK experimental.hostSettings 的数据源
   //（controller 设置快照缓存——settings.snapshot/changed 到达即更新，
   //  保存热更后组件下次 get 即新值，无需重开面板）
   hostSettingsSnapshot: () => controller.settingsSnapshotNow(),
+  // #546 T07 主题环境面：SDK themeEnvironment 的后端（hub 页面级一份）
+  themeEnvironment,
   send: (outbound) => vscode.postMessage({ kind: 'addonPage.outbound', outbound }),
 })
 // T12（#361）：故障上报槽接线（装载器在场后升级生效）——各 runtime 与
@@ -148,6 +187,12 @@ addonCommands.bindActiveTarget((addonId) => {
 })
 controller.attachAddonUi(addonUi)
 controller.attachAddonViews(addonViews)
+// #543 T03 导航出站端口：面板身份取控制器 init 握手后的会话（未握手时
+// 注册表侧按来源无法归属拒绝）；回执经下方消息监听路由进注册表
+addonViews.attachDocNavPort({
+  send: (message) => vscode.postMessage(message),
+  panelIdentity: () => controller.sessionIdentityNow(),
+})
 controller.attachAddonBehaviorDrive((input) => {
   void addonBehaviors.driveInput(input.instanceId, {
     userEvent: input.userEvent,
@@ -196,6 +241,17 @@ window.addEventListener('message', (event) => {
   // T09（#358）：宿主渲染提供者生效表广播（等值跳过；变化即热切换）
   if (isHostToWebview(event.data) && event.data.kind === 'addonRenderers.table') {
     addonRenderers.applyTable(event.data.table)
+    return
+  }
+  // #543 T03：附加组件文档导航回执（页面级——注册表在途表配对终结，
+  // 迟到/换代回包在注册表侧拒收）
+  if (isHostToWebview(event.data) && event.data.kind === 'addonDocNav.result') {
+    addonViews.handleDocNavResult(event.data)
+    return
+  }
+  // #546 T07 宿主明暗环境推送（等值跳过；缓存先更新再分发 SDK 订阅）
+  if (isHostToWebview(event.data) && event.data.kind === 'addonThemeEnvironment.changed') {
+    themeEnvironment.applyEnvironment(event.data.env)
     return
   }
   controller.handleHostMessage(event.data)

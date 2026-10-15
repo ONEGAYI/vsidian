@@ -8,6 +8,7 @@ vsidian/
 └── src/ # 扩展源码
     ├── extension.ts # 扩展激活入口
     ├── host/        # 宿主端实现
+    │   ├── addonDocNav.ts                # 附加组件文档导航执行
     │   ├── addonHistoryCoordinator.ts    # 附加组件历史协调器
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
     │   ├── addons/                       # 附加组件宿主端实现
@@ -17,12 +18,14 @@ vsidian/
     │   │   ├── addonCommandService.ts         # 宿主命令目录服务与命令面板注册
     │   │   ├── addonCoordinator.ts            # 附加组件发现协调与唤醒
     │   │   ├── addonPageRegistry.ts           # 页面入口登记校验
+    │   │   ├── addonPasteRuleService.ts       # 粘贴规则宿主服务
     │   │   ├── addonRealpathGuard.ts          # realpath 逃逸守卫
     │   │   ├── addonRegistry.ts               # 附加组件注册表校验链
     │   │   ├── addonRendererService.ts        # 宿主渲染服务
     │   │   ├── addonRuntime.ts                # 运行生命周期状态机
     │   │   ├── addonSettingsService.ts        # 附加组件设置服务
     │   │   ├── addonStorageService.ts         # 组件数据目录服务
+    │   │   ├── addonThemeService.ts           # 组件主题目录与代次回收
     │   │   └── addonWiring.ts                 # 宿主装配与面板桥
     │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
     │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
@@ -83,11 +86,15 @@ vsidian/
     │   ├── addonHistoryGrouping.ts # V01历史分组纯逻辑状态机
     │   ├── addonHostSettingsApi.ts # 宿主设置读取面白名单事实源
     │   ├── addonIdentity.ts        # 附加组件身份与兼容判定
+    │   ├── addonNavApi.ts          # 文档导航公开类型
     │   ├── addonPage.ts            # 页面 SDK 与装载协议契约
+    │   ├── addonPasteRules.ts      # 粘贴规则共享契约
+    │   ├── addonRefViews.ts        # 组件只读引用请求契约
     │   ├── addonRenderers.ts       # 渲染提供者共享契约
     │   ├── addonSettings.ts        # 复杂设置共享模型
     │   ├── addonStorage.ts         # 数据目录形状与守卫
     │   ├── addonSyntaxApi.ts       # 附加组件语法查询与组合判定
+    │   ├── addonThemes.ts          # 主题身份选择及环境契约
     │   ├── addonUi.ts              # 附加组件界面贡献共享形状与校验
     │   ├── behaviorFilterQuery.ts  # 行为筛选查询与分页纯函数
     │   ├── blockId.ts              # 块 id 与块边界单一事实源
@@ -161,10 +168,12 @@ vsidian/
         ├── addonBehaviors.ts             # 输入行为页面级链执行
         ├── addonCommands.ts              # 编辑器页命令/菜单注册表运行时
         ├── addonPageLoader.ts            # 页面装载器生产实现
+        ├── addonRefViews.ts              # 组件引用浮窗请求运行时
         ├── addonRenderers.ts             # webview 渲染桥
         ├── addonSettingsAreaSection.ts   # 设置页组件设置分页
         ├── addonSettingsControls.ts      # 基础设置控件构造器
         ├── addonSettingsSection.ts       # 设置页附加组件分页
+        ├── addonThemeEnvironment.ts      # 页面明暗快照与订阅
         ├── addonUi.ts                    # 编辑器页界面贡献运行时
         ├── addonViewIdentity.ts          # 编辑器实例身份状态字段
         ├── addonViews.ts                 # 页面级视图句柄注册表
@@ -291,6 +300,7 @@ vsidian/
         ├── targetTip.ts                  # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts                 # 任务勾选解析纯函数（#9）
         ├── textRefView.ts                # 文本只读视图（虚拟化着色渲染）
+        ├── themeSettings.ts              # 统一主题单选页签
         ├── toast.css                     # 轻提示主题与公开样式变量
         ├── toast.ts                      # 编辑器独立轻提示通道
         ├── tooltipCard.css               # 悬停提示共享样式

@@ -258,3 +258,129 @@ describe('#395 P3 提供者声明封顶（isAddonRendererProviderInfo）', () =>
     expect(isAddonRendererProviderInfo({ ...legal, languages: ['a'.repeat(65)] })).toBe(false)
   })
 })
+
+// ---- #546 T07 主题例外：主题关联提供者不走自动接管（ADR-0017）----
+
+describe('#546 T07 主题关联提供者的选择例外', () => {
+  // 场景基线：pub.theme-pack 提供主题关联渲染器（mermaid+plantuml）、
+  // pub.plain 提供普通渲染器（t09draw 类比）；内置语言 mermaid
+  const themeProvider = candidate('pub.theme-pack', 'aqua-renderer', ['mermaid', 'plantuml'])
+  const plainProvider = candidate('pub.plain', 'draw', ['t09draw'])
+  const builtinLanguages = ['mermaid']
+  const batches = { 'pub.theme-pack': 1, 'pub.plain': 2 }
+  const baseInput = {
+    candidates: [themeProvider, plainProvider],
+    isAvailable: () => true,
+    builtinLanguages,
+    preferred: {},
+    batches,
+  }
+  const themedProviderIds = new Set([themeProvider.providerId])
+
+  it('无主题输入时行为与既有完全一致（向后兼容：普通提供者不受影响）', () => {
+    const result = selectEffectiveRenderers(baseInput)
+    const mermaid = result.languages.find((l) => l.language === 'mermaid')!
+    // 既有默认序：批次 1 主题包提供者是末位可用候选 → auto 接管（旧语义）
+    expect(mermaid.effective).toBe('pub.theme-pack/aqua-renderer')
+    expect(mermaid.source).toBe('auto')
+    const draw = result.languages.find((l) => l.language === 't09draw')!
+    expect(draw.effective).toBe('pub.plain/draw')
+  })
+
+  it('主题关联提供者不参与自动接管（安装只新增候选不切换）', () => {
+    const result = selectEffectiveRenderers({ ...baseInput, theme: { themedProviderIds } })
+    const mermaid = result.languages.find((l) => l.language === 'mermaid')!
+    expect(mermaid.effective).toBe(BUILTIN_RENDERER_PROVIDER_ID)
+    expect(mermaid.source).toBe('auto')
+    // 非内置语言无可用候选 → none（普通代码块），主题提供者也不顶上
+    const plantuml = result.languages.find((l) => l.language === 'plantuml')!
+    expect(plantuml.effective).toBe('none')
+    // 普通提供者仍按既有规则接管
+    const draw = result.languages.find((l) => l.language === 't09draw')!
+    expect(draw.effective).toBe('pub.plain/draw')
+  })
+
+  it('主题选中且提供者可用：其声明语言生效该提供者（source=user）', () => {
+    const result = selectEffectiveRenderers({
+      ...baseInput,
+      theme: { themedProviderIds, activeThemeProviderId: themeProvider.providerId, activeThemeLanguages: themeProvider.languages },
+    })
+    const mermaid = result.languages.find((l) => l.language === 'mermaid')!
+    expect(mermaid.effective).toBe(themeProvider.providerId)
+    expect(mermaid.source).toBe('user')
+    const plantuml = result.languages.find((l) => l.language === 'plantuml')!
+    expect(plantuml.effective).toBe(themeProvider.providerId)
+    expect(plantuml.source).toBe('user')
+  })
+
+  it('提供者额外支持的语言不超出选中主题声明范围', () => {
+    const result = selectEffectiveRenderers({
+      ...baseInput,
+      theme: { themedProviderIds, activeThemeProviderId: themeProvider.providerId, activeThemeLanguages: ['mermaid'] },
+    })
+    expect(result.languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(themeProvider.providerId)
+    expect(result.languages.find((entry) => entry.language === 'plantuml')!.effective).toBe('none')
+  })
+
+  it('主题选中但提供者不可用：声明语言回内置，首选记录不清除的语义由宿主层保留', () => {
+    const result = selectEffectiveRenderers({
+      ...baseInput,
+      isAvailable: (c) => c.addonId !== 'pub.theme-pack',
+      theme: { themedProviderIds, activeThemeProviderId: themeProvider.providerId, activeThemeLanguages: themeProvider.languages },
+    })
+    const mermaid = result.languages.find((l) => l.language === 'mermaid')!
+    expect(mermaid.effective).toBe(BUILTIN_RENDERER_PROVIDER_ID)
+    const plantuml = result.languages.find((l) => l.language === 'plantuml')!
+    expect(plantuml.effective).toBe('none')
+  })
+
+  it.each<Readonly<Record<string, string>>>([{}, { mermaid: 'pub.plain/mermaid' }])('选中主题失效时同语言普通提供者不能接管（普通首选 %j）', (preferred) => {
+    const competingProvider = candidate('pub.plain', 'mermaid', ['mermaid', 'plantuml'])
+    const input = { ...baseInput, candidates: [...baseInput.candidates, competingProvider], preferred }
+    const activeTheme = { themedProviderIds, activeThemeProviderId: themeProvider.providerId, activeThemeLanguages: themeProvider.languages }
+    expect(selectEffectiveRenderers({ ...input, theme: activeTheme }).languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(themeProvider.providerId)
+
+    for (const theme of [
+      activeTheme,
+      { themedProviderIds: new Set<string>(), unavailableThemeLanguages: themeProvider.languages },
+    ]) {
+      const result = selectEffectiveRenderers({ ...input, isAvailable: (c) => c.addonId !== 'pub.theme-pack', theme })
+      expect(result.languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(BUILTIN_RENDERER_PROVIDER_ID)
+      expect(result.languages.find((entry) => entry.language === 'plantuml')!.effective).toBe('none')
+      expect(result.languages.find((entry) => entry.language === 't09draw')!.effective).toBe(plainProvider.providerId)
+    }
+
+    expect(selectEffectiveRenderers({ ...input, theme: activeTheme }).languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(themeProvider.providerId)
+    const unselected = selectEffectiveRenderers({ ...input, theme: { themedProviderIds } })
+    expect(unselected.languages.find((entry) => entry.language === 'mermaid')!.effective).toBe(competingProvider.providerId)
+  })
+
+  it('renderer 按语言显式首选不能指向主题关联提供者（不能经候选路径绕过主题单选）', () => {
+    const result = selectEffectiveRenderers({
+      ...baseInput,
+      preferred: { mermaid: themeProvider.providerId },
+      theme: { themedProviderIds },
+    })
+    const mermaid = result.languages.find((l) => l.language === 'mermaid')!
+    expect(mermaid.effective).toBe(BUILTIN_RENDERER_PROVIDER_ID)
+    // 显式选内置仍可（非主题路径不受影响）
+    const builtinChoice = selectEffectiveRenderers({
+      ...baseInput,
+      preferred: { mermaid: BUILTIN_RENDERER_PROVIDER_ID },
+      theme: { themedProviderIds },
+    })
+    expect(builtinChoice.languages.find((l) => l.language === 'mermaid')!.source).toBe('user')
+  })
+
+  it('普通提供者的用户首选与默认序不受主题输入影响', () => {
+    const result = selectEffectiveRenderers({
+      ...baseInput,
+      preferred: { t09draw: BUILTIN_RENDERER_PROVIDER_ID },
+      theme: { themedProviderIds, activeThemeProviderId: themeProvider.providerId, activeThemeLanguages: themeProvider.languages },
+    })
+    // t09draw 非内置图形语言，选内置不可执行 → 回默认序
+    const draw = result.languages.find((l) => l.language === 't09draw')!
+    expect(draw.effective).toBe('pub.plain/draw')
+    expect(draw.source).toBe('auto')
+  })
+})

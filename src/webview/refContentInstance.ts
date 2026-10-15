@@ -107,6 +107,8 @@ export interface RefSourceContext {
   parentInstanceId?: string
   depth?: number
   treeId?: string
+  /** 只读请求的能力随引用树传递，任何后代均不得建立目标编辑端口。 */
+  readOnly?: boolean
   expansionPath?: readonly RefTargetIdentity[]
   /** 后续预算控制器的注入点，本票不作展开或预算判定。 */
   budget?: { acquire(identity: RefTargetIdentity): (() => void) | null }

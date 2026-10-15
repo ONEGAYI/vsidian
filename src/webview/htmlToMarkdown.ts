@@ -1,9 +1,21 @@
 import MarkdownIt from 'markdown-it'
 import { clipboardPlainText } from './clipboardPaste'
+import {
+  ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
+  orderAddonPasteRules,
+  parseAddonPasteTemplate,
+  type AddonPasteRule,
+  type AddonPasteTemplatePart,
+} from '../shared/addonPasteRules'
 
 const urlPolicy = new MarkdownIt()
 export interface ConvertedHtml { markdown: string; hasFormatting: boolean }
+/** 转换选项：addonPasteRules 为本次粘贴开始时捕获的有效规则序（快照） */
+export interface HtmlToMarkdownOptions {
+  addonPasteRules?: readonly AddonPasteRule[]
+}
 const ignored = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK'])
+const HTML_NODE_BUDGET = 100_000
 const blockTags = new Set(['P','DIV','UL','OL','LI','TABLE','TR','TH','TD','PRE','BLOCKQUOTE','H1','H2','H3','H4','H5','H6'])
 // HTML 解析已经还原来源文字；只保护其中的字面实体前缀，避免 Markdown 再解码。
 // 转换器后续生成的标点边界实体不经过此入口，代码原文也不做正文转义。
@@ -34,14 +46,124 @@ function safeUrl(value: string): string | null {
   return escapeEntityPrefixes(url).replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29')
 }
 
+// ---- #541 T01 附加组件粘贴规则求值（声明与切分同源 shared/addonPasteRules） ----
+
+interface AddonPasteRuleEvaluationDeps {
+  templateCache: Map<string, readonly AddonPasteTemplatePart[]>
+  /** children 槽取值：子内容按内置转换（已转换片段，不再二次转义） */
+  convertChildren(el: Element): string
+}
+
+/**
+ * 单条规则求值：成功返回产出（discard 为空串）；不匹配、必需取值缺失、
+ * URL 拒绝或产出为空（模板非显式丢弃）返回 null（进入下一条规则）。
+ * 模板字面是作者声明的静态 Markdown 结构不转义；文本/属性槽按内置
+ * escapeText 转义；URL 槽经既有 safeUrl 策略。
+ */
+function evaluateAddonPasteRule(rule: AddonPasteRule, el: Element, deps: AddonPasteRuleEvaluationDeps): string | null {
+  if (el.tagName !== rule.match.tag) return null
+  for (const condition of rule.match.attributes ?? []) {
+    if (condition.value === undefined) {
+      if (!el.hasAttribute(condition.name)) return null
+    } else if (el.getAttribute(condition.name) !== condition.value) {
+      return null
+    }
+  }
+  if (rule.output.kind === 'discard') return ''
+  let parts = deps.templateCache.get(rule.output.template)
+  if (parts === undefined) {
+    const parsed = parseAddonPasteTemplate(rule.output.template)
+    if (parsed === null) return null
+    deps.templateCache.set(rule.output.template, parsed)
+    parts = parsed
+  }
+  let output = ''
+  for (const part of parts) {
+    if ('literal' in part) {
+      output += part.literal
+      continue
+    }
+    const slot = rule.output.slots[part.slot]
+    if (!slot) return null
+    // 取值：属性缺失（null）与文本/子内容空串都是必需取值缺失——本规则失败
+    let raw: string | null
+    if (slot.source.kind === 'text') {
+      raw = el.textContent ?? ''
+      if (raw === '') raw = null
+    } else if (slot.source.kind === 'attribute') {
+      raw = el.getAttribute(slot.source.name)
+    } else {
+      raw = deps.convertChildren(el)
+      if (raw === '') raw = null
+    }
+    if (raw === null) return null
+    if (slot.url === true) {
+      const safe = safeUrl(raw)
+      if (safe === null) return null
+      output += safe
+    } else if (slot.source.kind === 'children') {
+      output += raw
+    } else {
+      output += escapeText(raw)
+    }
+  }
+  if (output === '') return null
+  return output
+}
+
 /** 脱离活动文档解析，不执行HTML或加载其资源；只输出Markdown支持的语义。 */
-export function htmlToMarkdown(html: string): ConvertedHtml {
+export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): ConvertedHtml {
   if (html.length > 2_000_000) throw new Error('Clipboard HTML exceeds conversion budget')
   const template = document.createElement('template')
   template.innerHTML = html
   let hasFormatting = false
   const literalBlocks: string[] = []
   let visited = 0
+  // #541 T01 附加组件粘贴规则：本次粘贴使用开始时捕获的有效快照（调用方
+  // 传入），转换中不拼接两个注册代次；入口统一应用确定性排序（快照序的
+  // 本地保证——顺序不取决于页面装载先后）；求值步数预算超限停用规则
+  //（内置转换继续），单条失败进入下一条，全部未成功回内置
+  const addonRules = orderAddonPasteRules(options?.addonPasteRules ?? [])
+  // 本次粘贴结束即释放，旧注册/代次的模板不驻留到后续粘贴。
+  const templateCache = new Map<string, readonly AddonPasteTemplatePart[]>()
+  let addonRuleSteps = 0
+  let addonRulesExhausted = false
+  let convertingBuiltinChildren = false
+  function addonRuleOutput(el: Element, table: boolean, inherited: Marks): InlineRun | null {
+    if (addonRules.length === 0 || addonRulesExhausted || convertingBuiltinChildren) return null
+    for (const rule of addonRules) {
+      addonRuleSteps += 1
+      if (addonRuleSteps > ADDON_PASTE_RULES_EVAL_STEP_BUDGET) {
+        addonRulesExhausted = true
+        return null
+      }
+      try {
+        const output = evaluateAddonPasteRule(rule, el, {
+          templateCache,
+          convertChildren: (target) => {
+            convertingBuiltinChildren = true
+            try {
+              return children(target, table, inherited)
+            } finally {
+              convertingBuiltinChildren = false
+            }
+          },
+        })
+        if (output !== null) {
+          // children 槽已由内置转换编码当前/继承格式；其余模板沿用行内
+          // run 的格式合并，避免规则命中的文字脱离父层粗体等标记。
+          const convertedChildren = rule.output.kind === 'template' && Object.values(rule.output.slots)
+            .some(slot => slot.source.kind === 'children')
+          return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)), text: output }
+        }
+      } catch (error) {
+        // 全局转换预算耗尽必须终止整次粘贴，不能降成单条规则失败。
+        if (visited > HTML_NODE_BUDGET) throw error
+        // 规则求值异常进入下一规则（规格 §4.3）
+      }
+    }
+    return null
+  }
   const blockContainers = new WeakMap<Element, boolean>()
   function isBlockContainer(el: Element): boolean {
     const cached = blockContainers.get(el)
@@ -51,9 +173,14 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
     return result
   }
   function inline(node: Node, inherited: Marks, table: boolean): InlineRun[] {
-    if (++visited > 100_000) throw new Error('Clipboard HTML exceeds node budget')
+    if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
     if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeText((node.textContent ?? '').replace(/\s+/g,' '))}]
     if (!(node instanceof Element) || ignored.has(node.tagName) || node.tagName === 'INPUT') return []
+    const addonOutput = addonRuleOutput(node, table, inherited)
+    if (addonOutput !== null) {
+      hasFormatting = true
+      return [addonOutput]
+    }
     const marks = effectiveMarks(node, inherited)
     const tag = node.tagName
     if (tag === 'BR') return [{...unmarked,text:table ? '<br>' : '  \n'}]
@@ -144,12 +271,19 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
     return leading + marker + text.trim() + marker + trailing
   }
   function render(node: Node, table = false, inherited: Marks = unmarked): string {
-    if (++visited > 100_000) throw new Error('Clipboard HTML exceeds node budget')
+    if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
     if (node.nodeType === Node.TEXT_NODE) return serialize(inline(node,inherited,table))
     if (!(node instanceof Element) && !(node instanceof DocumentFragment)) return ''
     if (node instanceof DocumentFragment) return children(node, table, inherited)
     const tag = node.tagName
     if (ignored.has(tag)) return ''
+    if (blockTags.has(tag) || isBlockContainer(node)) {
+      const addonOutput = addonRuleOutput(node, table, inherited)
+      if (addonOutput !== null) {
+        hasFormatting = true
+        return serialize([addonOutput])
+      }
+    }
     if (!blockTags.has(tag)) return isBlockContainer(node) ? children(node,table,inherited) : serialize(inline(node,inherited,table))
     if (tag === 'PRE') {
       const text = node.textContent ?? ''

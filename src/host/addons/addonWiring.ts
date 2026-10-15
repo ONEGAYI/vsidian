@@ -42,7 +42,20 @@ import { AddonBehaviorCatalogService } from './addonBehaviorCatalogService'
 import { mergeBehaviorOrderPreservingUnknown, type AddonBehaviorEnabledStateBroadcast } from '../../shared/addonBehaviors'
 import { AddonCommandService } from './addonCommandService'
 import { AddonRendererService, type AddonRendererPersistencePort } from './addonRendererService'
-import { isAddonRenderersRegisteredPayload } from '../../shared/addonRenderers'
+import { AddonPasteRuleService } from './addonPasteRuleService'
+import { isAddonRenderersRegisteredPayload, type RendererThemeSelectionContext } from '../../shared/addonRenderers'
+import {
+  addonThemeEnvironmentEqual,
+  addonThemeEnvironmentOf,
+  resolveActiveTheme,
+  resolveThemePreferred,
+  type AddonThemeEnvironment,
+  type AddonThemeEnvironmentKind,
+  type AddonThemesStatePayload,
+} from '../../shared/addonThemes'
+import { AddonThemeService } from './addonThemeService'
+import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../../shared/settings'
+import type { SettingsService } from '../settingsService'
 import { createAddonRealpathGuard } from './addonRealpathGuard'
 import { t } from '../../shared/i18n'
 import type { AddonCommandReport } from '../../shared/addonCommands'
@@ -85,6 +98,9 @@ export interface AddonEditorBridge {
   /** #359 T10 活动面板投递注入（provider 装配后调用：宿主组件命令执行
    *  转发 addonCommand.execute 到活动 Vsidian 编辑器面板；返回是否投递） */
   setActivePanelForwarder(fn: (commandId: string) => boolean): void
+  /** #543 T03 编辑器面代次校验（导航请求的代次硬边界：旧代次在途请求
+   *  拒收 view-disposed；未接入附加组件时恒 false） */
+  isEditorGenerationCurrent(addonId: string, generation: number): boolean
 }
 
 /** 设置页面板接线（settingsPage 消费） */
@@ -104,6 +120,9 @@ export interface AddonPageWiring {
    *  查询树的用户级持久快照；view 为 null = 无存储默认态——webview 拉取
    *  应答一次，变化写入经 addons.behaviorsViewSet 走 handleSettingsMessage） */
   getBehaviorsViewState(): { kind: 'addons.behaviorsView'; view: { page: number; query: import('../../shared/behaviorFilterQuery').BehaviorQueryFilter | null } | null }
+  /** #546 T07 addons.themesState 消息载荷（主题目录 + 唯一首选与可用性；
+   *  设置页拉取应答与变化推送共用） */
+  getThemesState(): { kind: 'addons.themesState' } & AddonThemesStatePayload
   /** 市场搜索（关键词仅搜索辅助：vsidian-addon） */
   openSearch(): void
   /** VSCode 扩展管理视图 */
@@ -179,6 +198,9 @@ const ADDON_SETTINGS_KEY = 'vsidian.addons.settings'
  *  冻结——shared/addonRenderers；globalState 用户层，跨窗口幂等） */
 const ADDON_RENDERERS_KEY = 'vsidian.addons.renderers'
 
+/** 当前主题首选的派生语言快照（profile 单记录，不是第二份可写首选）。 */
+const ADDON_SELECTED_THEME_LANGUAGES_KEY = 'vsidian.addons.selectedThemeLanguages'
+
 /** #353 T04 无工作区判定：文件夹或多根工作区任一在场（空窗口 false） */
 function hostHasWorkspace(): boolean {
   return vscode.workspace.workspaceFolders !== undefined || vscode.workspace.workspaceFile !== undefined
@@ -227,10 +249,22 @@ function createSettingsPersistence(context: vscode.ExtensionContext): AddonSetti
   }
 }
 
-export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring {
+/** #546 T07 起接收宿主设置服务（hostSettings——与下方组件设置服务
+ * settingsService 是两个服务）：主题唯一首选（appearance.theme）经标准
+ * 设置链路持久化，本接线读快照驱动生效表与设置页目录载荷，并订阅变化。 */
+export function createAddonWiring(context: vscode.ExtensionContext, hostSettings: SettingsService): AddonWiring {
   const channel = vscode.window.createOutputChannel(t('host.addonsChannelName'))
   const log = (message: string): void => {
     channel.appendLine(`[${new Date().toISOString()}] ${message}`)
+  }
+
+  /** 主题唯一首选（宿主设置快照解析：新键权威 + 旧键过渡回显） */
+  const themePreferred = (): string => {
+    const snapshot = hostSettings.getSnapshot()
+    return resolveThemePreferred(
+      typeof snapshot[APPEARANCE_THEME_KEY] === 'string' ? snapshot[APPEARANCE_THEME_KEY] : undefined,
+      typeof snapshot[MERMAID_THEME_KEY] === 'string' ? snapshot[MERMAID_THEME_KEY] : undefined,
+    )
   }
 
   // 注册表 + 运行生命周期：findExtension 核对「当前扩展宿主注册表中的记录」
@@ -288,6 +322,29 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     persistence: rendererPersistence,
     log: (stage, detail) => log(`addons ${stage}: ${detail}`),
   })
+  // #541 T01 粘贴规则服务：enable 生命周期登记（经 runtime 面乙注入身份），
+  // 有效快照广播编辑器面板；停用/故障/代次结束随 runtime.releaseRun 撤回
+  const pasteRuleService = new AddonPasteRuleService({
+    log: (stage, detail) => log(`addons ${stage}: ${detail}`),
+  })
+  // #546 T07 主题目录按 enable 生命周期注册；只持久化当前首选的派生
+  // 语言，使组件冷启动不可用时仍按已知声明范围回落（首选仍在设置键）。
+  const themeService = new AddonThemeService({
+    log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
+    preferred: themePreferred,
+    persistence: {
+      read: () => context.globalState.get(ADDON_SELECTED_THEME_LANGUAGES_KEY),
+      write: async (value) => {
+        try {
+          await context.globalState.update(ADDON_SELECTED_THEME_LANGUAGES_KEY, value)
+          return true
+        } catch (error) {
+          log(`theme-languages-persist-failed theme=${value?.themeRef ?? themePreferred()}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+          return false
+        }
+      },
+    },
+  })
   // #404 组件数据目录：base = <globalStorage>/addons（Uri 构造保证跨平台
   // 路径形态；fsPath 正斜杠归一供纯逻辑服务拼接，workspace.fs 经 Uri 回装）
   const storageBaseUri = vscode.Uri.joinPath(context.globalStorageUri, 'addons')
@@ -325,6 +382,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     preferences: preferenceStore,
     settings: settingsService,
     storage: storageService,
+    pasteRules: pasteRuleService,
+    themes: themeService,
     installDirOf: (addonId) => vscode.extensions.getExtension(addonId)?.extensionUri.fsPath,
     log: (stage, addonId, detail) => log(`addon ${addonId} ${stage}: ${detail}`),
   })
@@ -816,11 +875,59 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     return status !== undefined && status.runState === 'enabled'
   }
 
+  // ---- #546 T07 主题上下文与目录载荷 ----
+
+  /** 主题选择解析（目录 + 首选 + 组件可用性） */
+  const themeSelection = () =>
+    resolveActiveTheme({
+      themes: themeService.catalog(),
+      preferred: themePreferred(),
+      isThemeAvailable: (theme) => rendererAvailability(theme.addonId),
+    })
+
+  /** 渲染选择的主题例外上下文（排除表 + 选中主题提供者） */
+  const themeContextOf = (): RendererThemeSelectionContext => {
+    const selection = themeSelection()
+    return {
+      themedProviderIds: themeService.themedProviderIds(),
+      ...(selection.activeProviderId !== undefined ? {
+        activeThemeProviderId: selection.activeProviderId,
+        activeThemeLanguages: selection.activeLanguages,
+      } : {
+        unavailableThemeLanguages: selection.available ? undefined : themeService.knownLanguages(selection.preferred),
+      }),
+    }
+  }
+
+  /** 主题目录状态载荷（设置页 addons.themesState；version 目录内容变化才递增） */
+  const buildThemesState = (): { kind: 'addons.themesState' } & AddonThemesStatePayload => {
+    const selection = themeSelection()
+    return {
+      kind: 'addons.themesState',
+      version: themeService.version(),
+      themes: themeService.catalog().map((theme) => ({ ...theme, available: rendererAvailability(theme.addonId) })),
+      preferred: selection.preferred,
+      preferredAvailable: selection.available,
+    }
+  }
+
+  /** 主题目录状态推送（目录/首选/可用性变化后；面板销毁静默容忍） */
+  const postThemesState = (): void => {
+    if (!settingsPanel) {
+      return
+    }
+    try {
+      void settingsPanel.webview.postMessage(buildThemesState()).then(undefined, (error) => log(`themes-state-send: ${String(error)}`))
+    } catch (error) {
+      log(`themes-state-send: ${String(error)}`)
+    }
+  }
+
   let lastRendererTableVersion = 0
   /** 重算生效表并按需广播（内容变化才推送——等值幂等；面板 ready 重推
    *  由 pushRendererTableTo 直发承担） */
   const refreshRendererTable = (): void => {
-    const table = rendererService.effectiveTable(rendererAvailability)
+    const table = rendererService.effectiveTable(rendererAvailability, themeContextOf())
     if (table.version === lastRendererTableVersion) {
       return
     }
@@ -838,13 +945,51 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
 
   /** 面板 ready / 状态重推时直发当前表（同版本幂等——webview 等值跳过） */
   const pushRendererTableTo = (record: EditorPanelRecord): void => {
-    const table = rendererService.effectiveTable(rendererAvailability)
+    const table = rendererService.effectiveTable(rendererAvailability, themeContextOf())
     try {
       void record.webview.postMessage({ kind: 'addonRenderers.table', table }).then(undefined, () => {})
     } catch {
       // 面板已销毁
     }
   }
+
+  // ---- #546 T07 页面明暗环境（编辑器 webview 快照源与事件推送） ----
+
+  /** 实际生效主题四态 → 两轴投影（亮色高对比不为暗） */
+  const themeEnvironmentSnapshot = (): AddonThemeEnvironment => {
+    const kind = vscode.window.activeColorTheme.kind
+    const mapped: AddonThemeEnvironmentKind =
+      kind === vscode.ColorThemeKind.Dark ? 'dark'
+        : kind === vscode.ColorThemeKind.HighContrast ? 'high-contrast'
+          : kind === vscode.ColorThemeKind.HighContrastLight ? 'high-contrast-light'
+            : 'light'
+    return addonThemeEnvironmentOf(mapped)
+  }
+
+  let lastThemeEnvironment = themeEnvironmentSnapshot()
+
+  /** 明暗快照直发某面板（ready 对账；面板销毁静默容忍） */
+  const postThemeEnvironmentTo = (webview: vscode.Webview): void => {
+    try {
+      void webview.postMessage({ kind: 'addonThemeEnvironment.changed', env: lastThemeEnvironment }).then(undefined, (error) => log(`theme-environment-send: ${String(error)}`))
+    } catch (error) {
+      log(`theme-environment-send: ${String(error)}`)
+    }
+  }
+
+  /** VSCode 实际生效主题变化（手动固定/跟随系统同源）：重复值不广播 */
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveColorTheme(() => {
+      const next = themeEnvironmentSnapshot()
+      if (addonThemeEnvironmentEqual(next, lastThemeEnvironment)) {
+        return
+      }
+      lastThemeEnvironment = next
+      for (const record of editorPanels.values()) {
+        postThemeEnvironmentTo(record.webview)
+      }
+    }),
+  )
 
   /** webview 候选上报路由（addonRenderers.registered）：按 addonId 整组
    *  替换候选（发现批次幂等分配并持久化），重算广播 */
@@ -860,6 +1005,53 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
   // 候选/首选变化与 runtime 状态变化（启停/故障/恢复→可用性变化）都重算表
   rendererService.onChanged(() => refreshRendererTable())
   const offRendererRuntimeChanged = runtime.onChanged(() => refreshRendererTable())
+  // #546 T07：主题目录变化（注册/回收）与主题首选变化（设置保存）→ 重算
+  // 生效表（主题提供者例外/生效注入）+ 推送设置页目录状态；组件可用性
+  // 变化经 runtime.onChanged 的 refreshRendererTable 与 reconcile 覆盖
+  themeService.onChanged(() => {
+    refreshRendererTable()
+    postThemesState()
+  })
+  const offSettingsChangedForThemes = hostSettings.onChange(() => {
+    themeService.refreshPreferred()
+    refreshRendererTable()
+    postThemesState()
+  })
+
+  // ---- #541 T01 粘贴规则有效快照广播（编辑器面板全域推送） ----
+
+  let lastPasteRulesVersion = -1
+  /** 重算有效快照并按需广播（内容变化才推送——等值幂等；面板 ready 重推
+   *  由 pushPasteRulesTo 直发承担）。面板销毁静默容忍（随 panelDisposed
+   *  回收——已结束页面不接受迟到快照） */
+  const refreshPasteRulesSnapshot = (): void => {
+    const snapshot = pasteRuleService.effectiveSnapshot()
+    if (snapshot.version === lastPasteRulesVersion) {
+      return
+    }
+    lastPasteRulesVersion = snapshot.version
+    const payload = { kind: 'addonPasteRules.snapshot' as const, snapshot }
+    for (const record of editorPanels.values()) {
+      try {
+        void record.webview.postMessage(payload).then(undefined, () => {})
+      } catch {
+        // 面板已销毁：随 panelDisposed 回收
+      }
+    }
+  }
+
+  /** 面板 ready / 状态重推时直发当前快照（新开页面拿到当前有效快照） */
+  const pushPasteRulesTo = (record: EditorPanelRecord): void => {
+    const snapshot = pasteRuleService.effectiveSnapshot()
+    lastPasteRulesVersion = snapshot.version
+    try {
+      void record.webview.postMessage({ kind: 'addonPasteRules.snapshot', snapshot }).then(undefined, () => {})
+    } catch {
+      // 面板已销毁
+    }
+  }
+
+  pasteRuleService.onChanged(() => refreshPasteRulesSnapshot())
 
   const handleEditorPanelMessage = (record: EditorPanelRecord, message: unknown): boolean => {
     if (!isWebviewToHost(message)) {
@@ -873,6 +1065,10 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       pushEditorDirectives(record)
       // #358 T09：渲染生效表随 ready 直发（webview 重载后桥状态归零）
       pushRendererTableTo(record)
+      // #541 T01：粘贴规则快照随 ready 直发（新开页面拿到当前有效快照）
+      pushPasteRulesTo(record)
+      // #546 T07：页面明暗环境随 ready 直发（webview 重载后 SDK 缓存归零）
+      postThemeEnvironmentTo(record.webview)
       return true
     }
     if (message.kind === 'addonRenderers.registered') {
@@ -945,6 +1141,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     setActivePanelForwarder: (fn) => {
       activePanelForwarder = fn
     },
+    // #543 T03：导航请求的代次校验（runtime 硬边界——旧代次拒收）
+    isEditorGenerationCurrent: (addonId, generation) => runtime.isEditorGenerationCurrent(addonId, generation),
   }
 
   // ---- 设置页面板桥（#351；单面板，隐藏即销毁重开重载） ----
@@ -1133,6 +1331,17 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         }
         return true
       }
+      // ---- #546 T07 主题目录拉取（设置页装载/重载回填；变化后由
+      // postThemesState 主动推送，webview 幂等对账） ----
+      case 'addons.themesGet': {
+        const record = ensureRecord()
+        try {
+          void record.webview.postMessage(buildThemesState()).then(undefined, (error) => log(`themes-state-send: ${String(error)}`))
+        } catch (error) {
+          log(`themes-state-send: ${String(error)}`)
+        }
+        return true
+      }
       // ---- T08（#357）行为冲突管理写入（设置页 UI 的正式通道；拉取由
       // settingsPage 经 page.getBehaviorsState 直接应答，同 addons.get 模式） ----
       case 'addons.behaviorsSetDisabled': {
@@ -1176,6 +1385,8 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
     getBehaviorsState: (notice) => buildBehaviorsState(notice),
     // #474 视图状态快照现算（null = 无存储默认态；装载拉取应答用）
     getBehaviorsViewState: () => ({ kind: 'addons.behaviorsView', view: behaviorViewService.snapshot() }),
+    // #546 T07 主题目录状态现算（目录 + 首选 + 可用性）
+    getThemesState: () => buildThemesState(),
     openSearch: () => {
       // 关键词仅帮助市场寻找（vsidian-addon）；不代表接入协议或官方身份
       void vscode.commands.executeCommand('workbench.extensions.search', '@keyword:"vsidian-addon"')
@@ -1250,7 +1461,15 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
         rendererService.clearProviders(addonId)
       }
     }
+    // #546 T07 主题目录对账：非 enabled（停用/故障/代次终结）回收该组件
+    // 目录（首选保留——组件恢复后重新注册按原首选继续）
+    for (const addonId of themeService.registeredAddonIds()) {
+      if (runtime.runtimeStatus(addonId)?.runState !== 'enabled') {
+        themeService.releaseAddon(addonId)
+      }
+    }
     notifyAddonPanels()
+    postThemesState()
   })
   // #359 T10：命令目录变化 → 设置页目录推送（快捷键分页合并展示对账）
   const postCommandCatalog = (): void => {
@@ -1393,14 +1612,24 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       // ---- #358 T09 渲染提供者（集成的宿主侧断言面；用户调整 UI 入口归
       //  后续设置页票据——机制面经钩子先行验证） ----
       vscode.commands.registerCommand('onegayi.vsidian._test.addonRendererTable', () =>
-        rendererService.effectiveTable(rendererAvailability)),
+        rendererService.effectiveTable(rendererAvailability, themeContextOf())),
       vscode.commands.registerCommand('onegayi.vsidian._test.addonRendererPrefer', (args: { language: string; provider: string | null }) => {
-        const result = rendererService.setPreferred(args.language, args.provider)
+        // #546 T07：主题关联提供者不接受 renderer 按语言首选（主题单选例外）
+        const result = rendererService.setPreferred(args.language, args.provider, themeService.themedProviderIds())
         refreshRendererTable()
-        return { result, table: rendererService.effectiveTable(rendererAvailability) }
+        return { result, table: rendererService.effectiveTable(rendererAvailability, themeContextOf()) }
       }),
       vscode.commands.registerCommand('onegayi.vsidian._test.addonRendererStore', () =>
         rendererService.snapshot(rendererAvailability).store),
+      // ---- #541 T01 粘贴规则（集成的宿主侧断言面：有效快照版本与规则序） ----
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonPasteRulesSnapshot', () =>
+        pasteRuleService.effectiveSnapshot()),
+      // #546 T07 主题目录/生效快照（集成断言面：目录 + 首选解析 + 生效表）
+      vscode.commands.registerCommand('onegayi.vsidian._test.addonThemes', () => ({
+        ...buildThemesState(),
+        selection: themeSelection(),
+        table: rendererService.effectiveTable(rendererAvailability, themeContextOf()),
+      })),
     )
   }
 
@@ -1425,6 +1654,7 @@ export function createAddonWiring(context: vscode.ExtensionContext): AddonWiring
       offBehaviorCatalogChanged()
       commandService.dispose()
       offRendererRuntimeChanged()
+      offSettingsChangedForThemes()
       runtime.dispose()
       coordinator.dispose()
     },

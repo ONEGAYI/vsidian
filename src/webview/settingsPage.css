@@ -616,6 +616,30 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] {
 .vsidian-addons-source-badge { display: inline-block; padding: 0 6px; min-height: 16px;
   border: 1px solid var(--vscode-panel-border, #cbd0d8); border-radius: 999px;
   color: var(--vscode-descriptionForeground, #666); font-size: 11px; line-height: 16px; }
+
+/* ---- #546 T07 外观「主题」页签体：统一主题单选列表（ui-patterns §2.2
+ * 组卡片 + §2.3 设置行节奏；主题变量取色，无硬编码色值） ---- */
+.vsidian-theme-options { display: flex; flex-direction: column; margin-top: 6px; }
+.vsidian-theme-option {
+  display: flex; align-items: center; gap: 8px; padding: 18px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent);
+  cursor: pointer;
+}
+.vsidian-theme-option:last-child { border-bottom: none; }
+/* 真 radio 键盘可达（不隐藏控件——focus-visible 焦点环走浏览器原生 accent
+ * 形态，与既有 checkbox 拨动开关的可达性基线一致） */
+.vsidian-theme-option input[type='radio'] {
+  accent-color: var(--vscode-focusBorder);
+  width: 16px; height: 16px; flex: none; margin: 0;
+}
+.vsidian-theme-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vsidian-theme-option-source { flex: none; }
+.vsidian-theme-option:has(input:disabled) { opacity: 0.55; cursor: default; }
+.vsidian-theme-option-unavailable { flex: none; color: var(--vscode-descriptionForeground); }
+.vsidian-theme-fallback { margin: 10px 0 0; }
+/* 搜索定位高亮（组容器级——appearance.theme 条目落点；复用 §2.4 定位
+ * 档位：outline 1px focusBorder + offset 8px、圆角 3px） */
+.vsidian-theme-group-located { outline: 1px solid var(--vscode-focusBorder); outline-offset: 8px; border-radius: 3px; }
 .vsidian-addons-array { display: flex; flex-direction: column; gap: 6px; }
 .vsidian-addons-array-rows { display: flex; flex-direction: column; gap: 4px; }
 .vsidian-addons-array-row { display: flex; align-items: center; gap: 6px; }

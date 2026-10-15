@@ -42,6 +42,8 @@ import { parseWikilinkInner } from '../shared/wikilink'
 import { classifyLocalRefContentKind } from '../shared/refContent'
 import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
+import type { AddonDocNavResult } from '../shared/addonNavApi'
+import { executeAddonDocNav, type AddonDocNavExecPorts } from './addonDocNav'
 import { buildEditorCsp } from './editorCsp'
 // #292 骨架屏内联装配（样式/#app 开标签含骨架标记/可读行宽预注入取值）
 import {
@@ -428,7 +430,7 @@ export function createTextEditorProvider(
               // 的装载器已随 webview 消亡，指令对账不再需要
             }
           }
-          addons.pushDirectives(sessionId, panel.webview)
+          addons.pushDirectives(panelStateKey(entry.doc.uri.toString(), sessionId), panel.webview)
         }
       }
     }
@@ -2482,6 +2484,108 @@ export function createTextEditorProvider(
     }
   }
 
+  // ---- #543 T03 附加组件文档导航（views.openDocument 的宿主执行体接线） ----
+  // 执行逻辑（解析/分派/定位/失败矩阵）在 src/host/addonDocNav.ts（端口
+  // 注入，node 单测直驱）；本段是 vscode 装配：openWith/waitForReadyPanel/
+  // showTextDocument/权威文本读取与来源·代次存活复核。代次校验经附加组件
+  // 面板桥（runtime 硬边界）；来源面板存活按本面板在 sessions 的注册在场。
+
+  const respondAddonDocNav = async (
+    entry: SessionEntry,
+    sessionId: string,
+    message: Extract<WebviewToHost, { kind: 'addonDocNav.request' }>,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const reply = (result: AddonDocNavResult): void => {
+      entry.session.postToPanel(sessionId, {
+        kind: 'addonDocNav.result',
+        reqId: message.reqId,
+        addonId: message.addonId,
+        generation: message.generation,
+        result,
+      })
+    }
+    // 代次硬边界：未接入附加组件（无桥）或旧代次在途请求一律拒收
+    if (!addons || !addons.isEditorGenerationCurrent(message.addonId, message.generation)) {
+      reply({ ok: false, reason: 'view-disposed', opened: false })
+      return
+    }
+    const sourceUri = vscode.Uri.parse(message.sourceDocUri)
+    const sourceIsLive = (): boolean => !signal.aborted &&
+      sessions.get(entry.doc.uri.toString()) === entry && entry.panels.has(sessionId) &&
+      sourceUri.scheme === 'file' && (message.sourceInstanceId === 'main'
+        ? sourceUri.toString() === entry.doc.uri.toString()
+        : /^(?:embed|hover):/.test(message.sourceInstanceId) && entry.session.hasHoverSource(sessionId, sourceUri.fsPath))
+    let targetPanel: Awaited<ReturnType<typeof waitForReadyPanel>>
+    let targetEditor: vscode.TextEditor
+    const ports: AddonDocNavExecPorts = {
+      statRealPath: statFileRealPath,
+      resolveContext: (sourceFsPath) => {
+        const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(sourceFsPath))
+        return {
+          docDir: path.dirname(sourceFsPath),
+          rootDir: (folder ? folder.uri : vscode.Uri.file(sourceFsPath).with({ path: path.dirname(sourceFsPath) })).fsPath,
+          isWindowsHost: process.platform === 'win32',
+          hasWorkspace: folder !== undefined,
+        }
+      },
+      isSourceLive: sourceIsLive,
+      isGenerationLive: () => addons !== undefined && addons.isEditorGenerationCurrent(message.addonId, message.generation),
+      readDocText: async (fsPath) => {
+        try {
+          // 已打开 TextDocument 优先（未保存内容不被磁盘替代；Windows 大小写
+          // 折叠兜底——与 respondWikilinkHeadingQuery 同口径）
+          const fold = process.platform === 'win32'
+            ? (p: string) => p.toLowerCase()
+            : (p: string) => p
+          const hit = vscode.workspace.textDocuments.find((d) =>
+            d.uri.scheme === 'file' && (d.uri.fsPath === fsPath || fold(d.uri.fsPath) === fold(fsPath)))
+          if (hit) {
+            return hit.getText()
+          }
+          return (await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))).getText()
+        } catch {
+          return null
+        }
+      },
+      openMarkdown: async (fsPath) => {
+        try {
+          await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(fsPath), VIEW_TYPE)
+          return true
+        } catch {
+          return false
+        }
+      },
+      waitForMarkdownReady: async (fsPath) => {
+        targetPanel = await waitForReadyPanel(vscode.Uri.file(fsPath))
+        return targetPanel !== undefined
+      },
+      locateMarkdown: async (_fsPath, lfOffset) => {
+        // 等待发生在读取权威文本之前；此处不再等待，也不复用等待前的偏移。
+        return targetPanel!.entry.session.locateAndWait(targetPanel!.sessionId, lfOffset, signal)
+      },
+      openTextAtLine: async (fsPath, lineIdx0) => {
+        try {
+          if (lineIdx0 === null) {
+            targetEditor = await vscode.window.showTextDocument(vscode.Uri.file(fsPath), { preview: false })
+            return true
+          }
+          // 落点行首并居中（真实落点：选区随行定位，reveal 滚动到可见）
+          const line = targetEditor.document.lineAt(lineIdx0)
+          targetEditor.selection = new vscode.Selection(line.range.start, line.range.start)
+          targetEditor.revealRange(line.range, vscode.TextEditorRevealType.InCenter)
+          return true
+        } catch {
+          return false
+        }
+      },
+    }
+    reply(await executeAddonDocNav(
+      { sourceFsPath: sourceUri.fsPath, target: message.target, locate: message.locate },
+      ports,
+    ))
+  }
+
   /**
    * 双链跳转执行（#11；#159 块引用定位与本文件锚点；#196 根内相对路径
    * 解析）：目标一律按来源文档相对路径解析（shared/vaultLink，docDir 基准、
@@ -2838,7 +2942,12 @@ export function createTextEditorProvider(
       // #333（P3-01）起读取走 readRefContentTarget 类型化分派入口（成功
       // 载荷按 kind 标记；旧扁平入口保留为兼容适配）
       const readHoverTargetPort = (
-        payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
+        payload: HoverPreviewRequestPayload & {
+          verifiedSource?: { fsPath: string; version: number }
+          /** T05（#544）附加组件来源覆盖：会话已校验成员资格（面板文档或
+           *  已送达目标）的来源 fsPath——读取以该文档为解析语境（R-U02） */
+          resolvedSource?: { fsPath: string }
+        },
         report: (result: RefReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
@@ -2854,6 +2963,15 @@ export function createTextEditorProvider(
               }
               sourceDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(payload.verifiedSource.fsPath))
               if (sourceDoc.version !== payload.verifiedSource.version) {
+                report({ ok: false, reason: 'source-expired' })
+                return
+              }
+            } else if (payload.resolvedSource !== undefined) {
+              // T05：附加组件来源覆盖——来源文档是解析语境（目录/根边界），
+              // 不钉版本（目录不随文本版本变化；成员资格已在会话层核验）
+              try {
+                sourceDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(payload.resolvedSource.fsPath))
+              } catch {
                 report({ ok: false, reason: 'source-expired' })
                 return
               }
@@ -3194,8 +3312,14 @@ export function createTextEditorProvider(
         pendingReadingRestore.add(panelStateKey(document.uri.toString(), sessionId))
       }
 
+      const docNavRequests = new Map<number, AbortController>()
+      const cancelDocNavRequests = (): void => {
+        for (const controller of docNavRequests.values()) controller.abort()
+        docNavRequests.clear()
+      }
       const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
+        if (isWebviewToHost(message) && message.kind === 'ready') cancelDocNavRequests()
         // 粘贴模态记忆只允许更新两个既定偏好，复用现有持久化与广播。
         if (isWebviewToHost(message) && message.kind === 'paste.preferences.set') {
           void (settings?.service.apply({ [PASTE_PRESERVE_FORMATTING_KEY]: message.preserveFormatting,
@@ -3280,6 +3404,25 @@ export function createTextEditorProvider(
         }
         if (isWebviewToHost(message) && message.kind === 'backlink.activate') {
           void openBacklinkSource(message.sourceUri, message.offset)
+          return
+        }
+        // #543 T03 附加组件文档导航请求（面板级意图在 provider 层拦截——
+        // 打开/定位执行体与代次校验都在 provider 域）。面板身份先认证
+        // （与 wikilink.query 同边界）；来源文档 URI 是 webview 视图注册表
+        // 派生值（组件请求不携带来源——伪来源结构上不可表达）
+        if (isWebviewToHost(message) && message.kind === 'addonDocNav.request' &&
+          message.sessionId === sessionId && message.docUri === document.uri.toString()) {
+          const controller = new AbortController()
+          docNavRequests.set(message.reqId, controller)
+          void respondAddonDocNav(entry, sessionId, message, controller.signal).finally(() => {
+            if (docNavRequests.get(message.reqId) === controller) docNavRequests.delete(message.reqId)
+          })
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'addonDocNav.cancel' &&
+          message.sessionId === sessionId && message.docUri === document.uri.toString()) {
+          docNavRequests.get(message.reqId)?.abort()
+          docNavRequests.delete(message.reqId)
           return
         }
         // 出链面板（与反链镜像）：快照拉取应答与条目跳转意图
@@ -3806,7 +3949,7 @@ export function createTextEditorProvider(
         }
         // #351 T02 附加组件页面消息（装载器就绪/出站）：桥消费即终止下发
         //（addon 指令不走会话消息管线——装载器是独立于控制器的页面级设施）
-        if (addons?.handlePanelMessage(sessionId, webviewPanel.webview, message)) {
+        if (addons?.handlePanelMessage(panelStateKey(document.uri.toString(), sessionId), webviewPanel.webview, message)) {
           return
         }
         void entry.session.handleWebviewMessage(message, sessionId)
@@ -3834,11 +3977,12 @@ export function createTextEditorProvider(
         }
       })
       const closeSub = webviewPanel.onDidDispose(() => {
+        cancelDocNavRequests()
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
         // #351 T02：附加组件面板路由回收（视图关闭——页面装载器随 webview
         // 消亡，宿主侧不再向该面板投递指令）
-        addons?.panelDisposed(sessionId)
+        addons?.panelDisposed(panelStateKey(document.uri.toString(), sessionId))
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))

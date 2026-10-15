@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "8e13e78fefe87ca6b7cc7325aa92e887c95c1ba2",
-      "ref": "8e13e78f",
+      "sha": "f28a3e3d31be7db86251b661d893fb173423af62",
+      "ref": "f28a3e3d31be7db86251b661d893fb173423af62",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -279,6 +279,42 @@
       "introduced": "#349（V02 验证）、#351（T02 生产化）"
     },
     {
+      "id": "document-navigation",
+      "group": "page-sdk",
+      "title": "文档打开与定位（views.openDocument）",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "editor-page"
+      ],
+      "purpose": "组件提交来源实例、目标路径与互斥定位，由宿主打开 Markdown 或原生文本并报告实际打开与定位结果；不提供任意文件读取面。",
+      "semantics": {
+        "modes": "仅编辑器页，Live 与阅读态均可调用；来源可为 main/embed/hover 的有效视图，设置页不提供。",
+        "coordinates": "目标以来源视图的目标文档目录解析；行号为 1-based 正整数，标题与块 ID 互斥。空 target 为来源文档自身；首次越界不钳末行。CRLF 经 NewlineCoordinator 换算为 LF 行首。",
+        "lifecycle": "组件身份与代次由 SDK 注入，来源必须仍在当前页面注册表；来源释放、页面重载、代次结束和超时终结在途请求，拒收迟到回包与定位。Markdown 经既有 view.locate/ack 确认，等待面板就绪后重读权威文本。",
+        "errors": "成功区分 opened 与 located；失败携带 opened 与 invalid-request/no-workspace/escape/not-found/view-disposed/anchor-not-found/out-of-bounds/delivery-failed/error 原因。普通拒绝不触发组件故障，API 不重复弹通知。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonNavApi.ts",
+          "symbols": [
+            "AddonDocNavLocate",
+            "AddonDocNavRequest",
+            "AddonDocNavRejection",
+            "AddonDocNavResult"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonNavApi.test.ts",
+        "test/unit/addonDocNav.test.ts",
+        "test/unit/addonDocNavDelivery.test.ts",
+        "test/unit/addonViews.test.ts",
+        "test/browser/addonDocNav.mjs",
+        "test/integration/suite/addonDocNavCases.ts"
+      ],
+      "introduced": "#543（扩展批次 T03）"
+    },
+    {
       "id": "views-editor",
       "group": "page-sdk",
       "title": "统一视图与编辑面（views / editor）",
@@ -493,6 +529,83 @@
         "test/browser/addonHostSettings.mjs"
       ],
       "introduced": "#457"
+    },
+    {
+      "id": "ref-views-popup",
+      "group": "page-sdk",
+      "title": "只读引用浮窗请求（refViews）",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "editor-page"
+      ],
+      "purpose": "组件请求内核只读引用浮窗（T05 #544，规格 addon-reference-views.md）：在触发文字或自有控件旁打开目标引用浮窗，获取本次请求的关闭句柄。宿主复用 hoverDocAccess/refContent 的来源、准入、读取、租约与刷新链——组件不重新实现内容渲染，也不因请求呈现取得写目标文档的能力。",
+      "semantics": {
+        "modes": "仅编辑器页提供（设置页为 undefined）。缺省鼠标语义（零抢焦点、移出延迟关闭、单页单浮窗经 popupMutex 仲裁）；keyboard:true 显式键盘请求复用既有键盘浮窗路径（焦点进入可操作域，Esc 关闭后归还原有效焦点）。不经悬停总开关（#298 门控的是鼠标悬停触发规则——显式请求面不改写它）。",
+        "coordinates": "目标 = 根内路径 + 可选互斥锚点（heading 标题原文 / block 块 ID / line 1-based 行号 / range 1-based 闭区间行范围）。结构化目标在平台侧合成双链目标原文（buildAddonRefHoverTarget），走既有三形态解析——Markdown 用全文/标题/块语义（line/range 锚点按标题原文解析，缺失即真实失败，不引入 fragment 新语法）；非 Markdown 文本走 refText 的 #line=/#range= 与 REF_TEXT_LIMITS 准入。来源实例（views 面 ID：main/embed/hover）决定解析语境——B 中的相对路径按 B 目录，不误用父文档 A（请求带 addonSource，宿主校验成员资格为本面板文档或已送达目标，不接受任意 URI）。",
+        "lifecycle": "单页单浮窗：新请求替换旧请求，旧句柄随之失效（close 返回 false，不误关后来的浮窗）；迟到回包经 reqId/instanceId 配对守卫丢弃。句柄 close/isActive 只认本请求的浮窗实例身份。触发位置脱树、Esc、既有关闭动作、组件停用/故障/代次释放、页面结束均释放实例；pending 请求以 view-disposed 终结。所创建实例及递归内容恒只读（复用错误视图、刷新与释放链；T06 组件容器嵌入复用同一目标访问与来源语义）。",
+        "errors": "普通拒绝与真实失败分开：invalid-request（形状/触发位置非法——不创建空浮窗）/ view-disposed（来源实例不在场或请求被关闭）/ released（组件代次终结）/ HoverPreviewFailReason 透传（not-found / escape 越界 / anchor-invalid / anchor-missing / file-too-large / budget 等——浮窗同时以现有错误分态就地显示真实原因）。目标失败不折叠为 not-found。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonRefViews.ts",
+          "symbols": [
+            "AddonRefAnchor",
+            "AddonRefTargetSpec",
+            "AddonRefPopupRequest",
+            "AddonRefPopupHandle",
+            "AddonRefPopupRejection",
+            "AddonRefPopupOutcome",
+            "AddonSdkRefViewsFacet",
+            "isAddonRefTargetSpec",
+            "buildAddonRefHoverTarget"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonRefViews.test.ts",
+        "test/unit/addonRefViewsRuntime.test.ts",
+        "test/unit/addonRefViewsPopup.test.ts",
+        "test/unit/embedRecursiveLive.test.ts",
+        "test/unit/documentSessionRefViews.test.ts",
+        "test/unit/addonPageLoader.test.ts",
+        "test/browser/addonRefViews.mjs",
+        "test/integration/suite/addonRefViewsCases.ts"
+      ],
+      "introduced": "#544（T05）"
+    },
+    {
+      "id": "theme-environment",
+      "group": "page-sdk",
+      "title": "主题环境快照与订阅（themeEnvironment）",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "editor-page"
+      ],
+      "purpose": "编辑器页 SDK 的只读主题环境面（sdk.themeEnvironment，#546/H-U06–U07）：读取 VSCode 实际生效主题的明暗快照并订阅变化——主题组件据此更新已挂载图形。不扩充为任意 VSCode configuration 读取（白名单语义与 hostSettings 同边界）。",
+      "semantics": {
+        "modes": "仅编辑器页提供（设置页为 undefined）；不按视图模式门控（环境与 live/reading 无关）。",
+        "lifecycle": "快照是四态两轴投影（dark / highContrast——亮色高对比不为暗）；数据源为宿主 vscode.window.activeColorTheme 事件推送（手动固定暗色而系统变亮仍为暗；跟随系统时随系统变化）。通知在页面缓存更新后送达（回调中 get 拿到相同新状态）；重复值不重复广播（等值跳过）；代次释放自动退订（不依赖组件自觉）。组件在回调中更新已挂载文档图形，旧异步渲染结果由现有挂载代次拒收。",
+        "errors": "查询无拒绝码（同步返回快照；宿主推送未达时为初始播种值）。本面不提供任何写入成员；订阅回调抛错按既有可归因异常上报组件故障，不静默吞掉。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonThemes.ts",
+          "symbols": [
+            "AddonThemeEnvironment",
+            "AddonThemeEnvironmentKind",
+            "AddonThemeEnvironmentFacet",
+            "addonThemeEnvironmentOf",
+            "addonThemeEnvironmentEqual",
+            "isAddonThemeEnvironmentPayload"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonThemeEnvironment.test.ts",
+        "test/unit/addonPageLoader.test.ts",
+        "test/browser/addonThemes.mjs"
+      ],
+      "introduced": "#546（T07）"
     },
     {
       "id": "channel",
@@ -816,9 +929,9 @@
       "endpoints": [
         "host"
       ],
-      "purpose": "选择单位是提供者、挂载单位是某视图中的某个代码块。默认序按（发现批次升序, providerId 升序）取末位生效（内置视作批次 0）；用户显式首选优先且不可用时按默认序回退（首选记录不清除）。",
+      "purpose": "选择单位是提供者、挂载单位是某视图中的某个代码块。默认序按（发现批次升序, providerId 升序）取末位生效（内置视作批次 0）；用户显式首选优先且不可用时按默认序回退（首选记录不清除）。#546 起主题关联提供者例外：不参与默认序与按语言首选，仅主题单选选中且可用时对其声明语言生效（RendererThemeSelectionContext 注入）。",
       "semantics": {
-        "autoRules": "新安装、兼容且已启用组件成功接入后自动替换所支持语言的现有显示（含内置）——不要求用户先选择渲染器；重启、重复注册与普通升级不当作新安装（批次一经记录不改写）。用户正常停用或整组件故障降级停用后内置接管（无图形内置则普通代码块，首选保留）；组件仍运行而渲染有 bug 时不自动接管、不承诺识别或修复；手动恢复成功后按原选择显示，旧异步结果不得重新挂载。"
+        "autoRules": "新安装、兼容且已启用组件成功接入后自动替换所支持语言的现有显示（含内置）——不要求用户先选择渲染器；重启、重复注册与普通升级不当作新安装（批次一经记录不改写）。用户正常停用或整组件故障降级停用后内置接管（无图形内置则普通代码块，首选保留）；组件仍运行而渲染有 bug 时不自动接管、不承诺识别或修复；手动恢复成功后按原选择显示，旧异步结果不得重新挂载。主题例外（#546/ADR-0017）：主题关联提供者不走自动接管（安装只新增候选不切换），不能经按语言显式首选绕过主题单选；仅当前选中主题的提供者（activeThemeProviderId）对其声明语言生效（source=user），不可用时回默认序且主题首选保留、内置 default 承接显示。"
       },
       "signatures": [
         {
@@ -826,6 +939,7 @@
           "symbols": [
             "BUILTIN_RENDERER_PROVIDER_ID",
             "RendererSelectionInput",
+            "RendererThemeSelectionContext",
             "AddonRendererLanguageSelection",
             "selectEffectiveRenderers",
             "assignDiscoveryBatches",
@@ -836,9 +950,56 @@
       "verification": [
         "test/unit/addonRendererTakeover.test.ts",
         "test/unit/addonRendererService.test.ts",
+        "test/unit/addonRenderers.test.ts",
         "test/browser/addonRendererTakeover.mjs"
       ],
-      "introduced": "#358（T09）"
+      "introduced": "#358（T09）、#546（T07 主题例外）"
+    },
+    {
+      "id": "themes-register",
+      "group": "renderers",
+      "title": "主题目录登记与唯一选择",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "host"
+      ],
+      "purpose": "组件在 enable 生命周期经 context.themes.register 登记主题元数据（稳定身份 + 多语言名 + 本组件提供者关联）——宿主目录不依赖打开编辑器页面；主题目录与唯一首选驱动设置页「主题」页签单选与渲染生效。#546（T07）首版候选：机制随 H-U01–H-U08 落地，内核 Codex 过渡保留（迁移归 #535）。",
+      "semantics": {
+        "lifecycle": "enable 注册按 addonId 整组替换（空批 = 撤销）；停用/故障/注销/卸载与代次终结回收目录，主题首选保留（恢复后按原选择继续）。目录不持久化（元数据由组件代码每次接入注册）；用户唯一首选持久化在宿主设置键 appearance.theme（resolveThemePreferred：新键权威 + 旧键 appearance.mermaidTheme 过渡回显），值域 default | codex | <addonId>/<themeId>。",
+        "errors": "登记校验与批内重复拒绝属普通 API 结果（invalid-theme / duplicate-theme 整批拒绝，不算组件故障）：任一条目形状非法或同批 themeId 重复均拒绝；同组件不同主题可支持同一语言，由唯一主题首选选择。",
+        "autoRules": "主题关联提供者不走一般渲染候选的自动接管（ADR-0017 例外）——目录命中但页面 renderers 候选未上报（页面未装载）时主题提供者不生效；选中主题不可用（组件停用/故障/未注册）时回落内置 default 显示（不用其他主题顶替），保留首选并回显不可用/回落状态。",
+        "localization": "label 为多语言映射时按页面语言渲染（resolveLocalizedText 候选链 zh-cn → zh → en → 规整字典序最小键兜底）；同名主题按来源徽章区分（组件显示名）。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonThemes.ts",
+          "symbols": [
+            "AddonThemeDeclaration",
+            "AddonThemeCandidate",
+            "AddonThemesRegistrationFacet",
+            "AddonThemeRegisterOutcome",
+            "addonThemeRefOf",
+            "validateAddonThemeBatch",
+            "resolveThemePreferred",
+            "resolveActiveTheme",
+            "AddonThemesStatePayload"
+          ]
+        },
+        {
+          "module": "src/host/addons/addonRegistry.ts",
+          "symbols": [
+            "AddonEnableContext"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonThemes.test.ts",
+        "test/unit/addonThemeService.test.ts",
+        "test/unit/addonRuntime.test.ts",
+        "test/browser/addonThemes.mjs",
+        "test/integration/suite/addonThemeCases.ts"
+      ],
+      "introduced": "#546（T07）"
     },
     {
       "id": "commands-register",
@@ -955,6 +1116,57 @@
         "test/browser/addonT11Ui.mjs"
       ],
       "introduced": "#360（T11）"
+    },
+    {
+      "id": "paste-rules-register",
+      "group": "paste-conversion",
+      "title": "声明式粘贴规则注册（enable 生命周期）",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "host"
+      ],
+      "purpose": "组件在宿主运行生命周期（enable 上下文的 paste 面）登记可序列化粘贴转换规则：全部已打开与新打开的编辑器页面共用同一组有效规则，在富文本粘贴的 HTML→Markdown 遍历中消费——来源特化元素（如带私有属性的 span）可恢复为 Markdown 链接等结构，来源识别不进入内核。",
+      "semantics": {
+        "modes": "只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。",
+        "coordinates": "规则语言为可序列化数据：基础匹配（标签名相等、属性存在、属性值相等——缺失与空串区分）＋取值槽（元素文本/指定属性/子内容内置转换结果）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则、条件组合与嵌套转换属后续批次（#542）——未知字段显式拒绝，不静默当成基础声明。",
+        "lifecycle": "有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。每组件至多 256 条、表达式嵌套深度至多 16（后续批次消费）、单次粘贴求值步数至多 100,000（超限停用规则、内置转换继续）。",
+        "errors": "四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段，含后续批次的正则条件嵌套节点在未实现阶段的显式拒绝）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonPasteRules.ts",
+          "symbols": [
+            "AddonPasteRuleDeclaration",
+            "AddonPasteRuleMatch",
+            "AddonPasteRuleOutput",
+            "AddonPasteSlot",
+            "AddonPasteRulesRegisterResult",
+            "AddonPasteRulesSnapshot",
+            "ADDON_PASTE_RULES_MAX_PER_ADDON",
+            "ADDON_PASTE_RULES_MAX_DEPTH",
+            "ADDON_PASTE_RULES_EVAL_STEP_BUDGET",
+            "validateAddonPasteRuleDeclarations",
+            "orderAddonPasteRules"
+          ]
+        },
+        {
+          "module": "src/host/addons/addonRegistry.ts",
+          "symbols": [
+            "AddonPasteRulesContextApi"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonPasteRules.test.ts",
+        "test/unit/addonRuntimePasteRules.test.ts",
+        "test/unit/htmlToMarkdownPasteRules.test.ts",
+        "test/unit/richPasteAddonRules.test.ts",
+        "test/browser/addonPasteRules.mjs",
+        "test/browser/richPasteUndoHost.mjs",
+        "test/integration/richPasteHostSuite.ts",
+        "test/integration/addonFixtures/addon-paste-rules/extension.js"
+      ],
+      "introduced": "#541（T01）"
     }
   ],
   "declarations": {
@@ -977,13 +1189,14 @@
     "src/host/addons/addonRegistry.ts": {
       "AddonDefinition": "/** 组件注册传入的定义（T02 形状：setup 轻量接入 + enable 运行装配） */\nexport interface AddonDefinition {\n  /** 轻量接入回调：注册成功时在本接入代次恰好调用一次 */\n  setup?(context: AddonSetupContext): void\n  /** 运行装配回调：按用户功能开关开启时调用；关闭或故障时释放所属注册 */\n  enable?(context: AddonEnableContext): void\n}",
       "AddonSetupContext": "/** 轻量接入上下文（setup 生命周期：设置定义 + 自己的设置入口 + 设置通信。\n *  普通功能停用后保留；故障暂停时回收组件代码——迟到注册被拒） */\nexport interface AddonSetupContext extends AddonRegistrationContext {\n  /** 设置能力面（T04 起含读写与事件；定义归组件隔离范围） */\n  readonly settings: AddonSettingsContextApi\n  /** #404 组件数据目录（globalStorage 语义的隔离可写目录 + 文件监听；\n   *  富结构数据（规则对象等）归本面，不并入设置存储的一层边界） */\n  readonly storage: AddonStorageFacet\n  /** 设置生命周期通道（归 setup 所在的生命周期） */\n  readonly channel: AddonChannelRegistry\n}",
-      "AddonEnableContext": "/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 清理回调。\n *  开启时装配；关闭或故障时释放所属注册） */\nexport interface AddonEnableContext extends AddonRegistrationContext {\n  /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，\n   *  第二个登记拒绝） */\n  readonly pages: {\n    registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle\n  }\n  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */\n  readonly storage: AddonStorageFacet\n  /** 运行生命周期通道（停用即注销） */\n  readonly channel: AddonChannelRegistry\n  /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
+      "AddonEnableContext": "/** 运行上下文（enable 生命周期：编辑器页面入口 + 运行通道 + 粘贴规则 +\n *  清理回调。开启时装配；关闭或故障时释放所属注册） */\nexport interface AddonEnableContext extends AddonRegistrationContext {\n  /** 编辑器页入口登记（自身安装目录内的相对路径；每组件一个编辑器入口，\n   *  第二个登记拒绝） */\n  readonly pages: {\n    registerEditor(entry: AddonPageEntryInput): AddonRegistrationHandle\n  }\n  /** #546 T07 主题元数据登记（宿主运行功能阶段——不依赖先开编辑器页面；\n   *  登记只进目录与选择，实际渲染执行仍归页面 renderers 注册） */\n  readonly themes: AddonThemesRegistrationFacet\n  /** #404 组件数据目录（与 setup 上下文同一实例——数据能力与功能开关无关） */\n  readonly storage: AddonStorageFacet\n  /** 运行生命周期通道（停用即注销） */\n  readonly channel: AddonChannelRegistry\n  /** #541 T01 粘贴转换规则登记（有效规则广播到已开与新开编辑器页面，\n   *  在富文本粘贴的 HTML→Markdown 遍历中消费） */\n  readonly paste: AddonPasteRulesContextApi\n  /** 登记清理回调（停用/故障/代次终结时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
       "AddonRegistrationHandle": "/** 注册面返回的释放句柄（重复 dispose 无害；迟到登记被拒时为 no-op） */\nexport interface AddonRegistrationHandle {\n  dispose(): void\n}",
       "AddonChannelRegistry": "/** 通道注册面（setup/enable 上下文同形状；同名 topic 重复注册拒绝） */\nexport interface AddonChannelRegistry {\n  handle(topic: string, handler: AddonChannelHandler): AddonRegistrationHandle\n}",
       "AddonChannelHandler": "/** 通道处理器（宿主组件代码注册；载荷与结果都是 JSON 数据） */\nexport type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknown>",
       "AddonSettingsContextApi": "/**\n * 设置能力面（setup 生命周期常驻——普通停用后保留；技术方案 5.5 形状）。\n * T02 先立 registerPage/registerDefinitions；T04 起接入读写与事件。\n */\nexport interface AddonSettingsContextApi {\n  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */\n  registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle\n  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings）。\n   *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段\n   *  引用其组键——引用未声明组键或组键重复整批拒绝 */\n  registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle\n  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */\n  get(): AddonSettingsGetSnapshot\n  /** 单键来源（未定义键为 undefined） */\n  getSource(key: string): AddonSettingSource | undefined\n  /** 按批校验并保存到指定层（失败不虚报；变化事件只在持久化成功后发出） */\n  update(scope: 'user' | 'workspace', patch: Record<string, unknown>): Promise<AddonSettingsUpdateResult>\n  /** 清除工作区对某键的覆盖（恢复继承用户默认，不是恢复出厂值） */\n  clearWorkspaceOverride(key: string): Promise<AddonSettingsUpdateResult>\n  /** 订阅成功保存后的变化（所属组件设置生命周期内有效） */\n  onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle\n}",
       "AddonSettingsGetSnapshot": "/** 设置读取快照（settings.get() 的结果：生效值与来源） */\nexport interface AddonSettingsGetSnapshot {\n  readonly values: Readonly<Record<string, AddonSettingValue>>\n  readonly sources: Readonly<Record<string, AddonSettingSource>>\n}",
-      "AddonSettingsChangeEventData": "/** 设置变化事件（settings.onChanged 的载荷） */\nexport interface AddonSettingsChangeEventData {\n  readonly scope: 'user' | 'workspace'\n  readonly keys: readonly string[]\n}"
+      "AddonSettingsChangeEventData": "/** 设置变化事件（settings.onChanged 的载荷） */\nexport interface AddonSettingsChangeEventData {\n  readonly scope: 'user' | 'workspace'\n  readonly keys: readonly string[]\n}",
+      "AddonPasteRulesContextApi": "/**\n * 粘贴规则注册面（#541 T01，enable 生命周期；声明式粘贴转换规格 §4.1）。\n * 声明为可序列化数据（形状见 shared/addonPasteRules）；来源组件身份由\n * 平台注入，作者不能冒充其他组件。整批校验：批内 ID 重复、未知操作或\n * 超预算声明整批拒绝（普通 API 拒绝不算组件故障），不部分安装。停用/\n * 故障/代次结束撤回本生命周期全部规则。\n */\nexport interface AddonPasteRulesContextApi {\n  /**\n   * 登记一批粘贴转换规则；返回普通注册结果与释放句柄（dispose 只移除\n   * 本批，重复调用无害）。已终结代次的迟到注册拒绝 released。\n   */\n  registerRules(declarations: readonly unknown[]): AddonPasteRulesRegisterResult\n}"
     },
     "src/shared/officialAddons.ts": {
       "OfficialAddonEntry": "/** 官方附加组件登记条目（extensionId 是判定键；label 备注不参与判定） */\nexport interface OfficialAddonEntry {\n  /** 官方组件的 VSCode 扩展 ID（publisher.name） */\n  readonly extensionId: string\n  /** 维护备注（用途或发布仓线索；仅文档性质） */\n  readonly label?: string\n}",
@@ -991,7 +1204,7 @@
       "OFFICIAL_ADDON_EXTENSION_IDS": "/** 判定用 ID 清单（登记表的投影视，供 isOfficialAddon 与文档消费） */\nexport const OFFICIAL_ADDON_EXTENSION_IDS: readonly string[] = OFFICIAL_ADDON_REGISTRY.map(\n  (entry) => entry.extensionId,\n)"
     },
     "src/shared/addonPage.ts": {
-      "VsidianAddonPageSdk": "/** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信\n * 生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与\n * 文本提交；T07（#356）起编辑器页提供 behaviors 面——可组合输入行为的\n * 注册与观察；T09（#358）起提供 renderers 面——代码块渲染提供者候选\n * 登记；六组稳定能力的其余部分属后续票） */\nexport interface VsidianAddonPageSdk {\n  /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */\n  readonly addon: { id: string; generation: number; page: AddonPageKind }\n  /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享\n   *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =\n   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）；\n   *  hostSettings = 宿主设置白名单读取（#457）。使用前须在清单\n   *  experimental 声明对应入口的兼容范围 */\n  readonly experimental: {\n    readonly cm6?: AddonCm6Runtime\n    readonly headingFold?: AddonHeadingFoldFacet\n    readonly viewIdentity?: AddonViewIdentityFacet\n    readonly syntax?: AddonSyntaxFacet\n    readonly hostSettings?: AddonHostSettingsFacet\n  }\n  /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、\n   *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子\n   *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */\n  readonly views?: AddonViewsFacet\n  /** T07（#356）输入行为面（仅编辑器页；设置页为 undefined）：注册可\n   *  组合输入行为（按有效序依次修饰同次操作，后续行为读取前序结果，\n   *  每次修饰按自己的原子声明提交）与只读输入观察——注册与观察分开，\n   *  onChanged 不是原操作的第二写入口 */\n  readonly behaviors?: AddonBehaviorsFacet\n  /** #476 行为禁用态只读面（编辑器页与设置页**均提供**）：查询本组件\n   *  行为启用快照（运行态 + 被禁行为局部 id 集）与订阅变化（宿主落库\n   *  后即时通知）。只读——无任何写入宿主状态的成员；与 behaviors 面\n   *  分开（register 在设置页无意义，本面只报事实）。组件被停用后设置\n   *  页不卸载，本面仍可查询与订阅（灰态消费场景） */\n  readonly behaviorState?: AddonBehaviorStateFacet\n  /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */\n  readonly commands?: AddonSdkCommandsFacet\n  /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */\n  readonly menus?: AddonSdkMenusFacet\n  /** T09（#358）渲染提供者面（仅编辑器页；设置页为 undefined）：登记\n   *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在\n   *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */\n  readonly renderers?: AddonRenderersFacet\n  /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与\n   *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */\n  readonly ui?: AddonSdkUiFacet\n  /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */\n  registerExtension(extension: Extension): boolean\n  /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */\n  mountRoot(): HTMLElement | null\n  /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；\n   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面\n   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；\n   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */\n  resourceUri(relativePath: string): string | null\n  /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */\n  readonly channel: {\n    request(topic: string, payload: unknown, opts?: { timeoutMs?: number }): Promise<AddonChannelOutcome>\n  }\n  /** 登记释放回调（停用/故障/代次回收时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
+      "VsidianAddonPageSdk": "/** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信\n * 生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与\n * 文本提交；T07（#356）起编辑器页提供 behaviors 面——可组合输入行为的\n * 注册与观察；T09（#358）起提供 renderers 面——代码块渲染提供者候选\n * 登记；六组稳定能力的其余部分属后续票） */\nexport interface VsidianAddonPageSdk {\n  /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */\n  readonly addon: { id: string; generation: number; page: AddonPageKind }\n  /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享\n   *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =\n   *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）；\n   *  hostSettings = 宿主设置白名单读取（#457）。使用前须在清单\n   *  experimental 声明对应入口的兼容范围 */\n  readonly experimental: {\n    readonly cm6?: AddonCm6Runtime\n    readonly headingFold?: AddonHeadingFoldFacet\n    readonly viewIdentity?: AddonViewIdentityFacet\n    readonly syntax?: AddonSyntaxFacet\n    readonly hostSettings?: AddonHostSettingsFacet\n  }\n  /** T06（#355）统一视图面（仅编辑器页；设置页为 undefined）：主正文、\n   *  嵌入内部 Live 与悬停引用的句柄列表、快照读取、文本提交（默认原子\n   *  或显式 joinPrevious）与选区/定位——来源身份由 SDK 注入 */\n  readonly views?: AddonViewsFacet\n  /** T07（#356）输入行为面（仅编辑器页；设置页为 undefined）：注册可\n   *  组合输入行为（按有效序依次修饰同次操作，后续行为读取前序结果，\n   *  每次修饰按自己的原子声明提交）与只读输入观察——注册与观察分开，\n   *  onChanged 不是原操作的第二写入口 */\n  readonly behaviors?: AddonBehaviorsFacet\n  /** #476 行为禁用态只读面（编辑器页与设置页**均提供**）：查询本组件\n   *  行为启用快照（运行态 + 被禁行为局部 id 集）与订阅变化（宿主落库\n   *  后即时通知）。只读——无任何写入宿主状态的成员；与 behaviors 面\n   *  分开（register 在设置页无意义，本面只报事实）。组件被停用后设置\n   *  页不卸载，本面仍可查询与订阅（灰态消费场景） */\n  readonly behaviorState?: AddonBehaviorStateFacet\n  /** T10（#359）命令面（仅编辑器页；设置页为 undefined） */\n  readonly commands?: AddonSdkCommandsFacet\n  /** T10（#359）菜单面（仅编辑器页；设置页为 undefined） */\n  readonly menus?: AddonSdkMenusFacet\n  /** T09（#358）渲染提供者面（仅编辑器页；设置页为 undefined）：登记\n   *  代码块渲染候选——可序列化声明上报宿主参与确定性选择，回调留在\n   *  本页执行；生效表广播回来后才承担挂载（顺序不靠装载竞速） */\n  readonly renderers?: AddonRenderersFacet\n  /** T05（#544）只读引用视图面（仅编辑器页；设置页为 undefined）：请求\n   *  内核引用浮窗与本次请求关闭句柄（单页单浮窗，新请求替换旧请求）；\n   *  T06 起在同一 facet 上扩展组件容器挂载入口 */\n  readonly refViews?: AddonSdkRefViewsFacet\n  /** #546 T07 主题环境面（仅编辑器页；设置页为 undefined）：VSCode 实际\n   *  生效主题的明暗快照与变化订阅（四态两轴投影——亮色高对比不为暗；\n   *  重复值不通知；通知在缓存更新后送达——回调中 get 拿新值；代次释放\n   *  自动退订）。快照源为宿主事件推送，不由组件自行嗅探样式环境 */\n  readonly themeEnvironment?: AddonThemeEnvironmentFacet\n  /** T11（#360）界面面（仅编辑器页；设置页为 undefined）：工具栏按钮与\n   *  面板的挂载注册（平台预定义挂载点——不接管内核容器） */\n  readonly ui?: AddonSdkUiFacet\n  /** 编辑器页：登记 CM6 扩展（经页面装配槽挂载；返回是否被接受） */\n  registerExtension(extension: Extension): boolean\n  /** 设置页：取得本组件的挂载根（编辑器页返回 null；重复调用各建新根） */\n  mountRoot(): HTMLElement | null\n  /** 取组件安装目录内资源的本页地址（宿主装载时已按本 webview 授权；\n   *  字面 `..` 等越界相对路径返回 null——#395 P3 措辞降级：本层只拦字面\n   *  形态，是防呆层而非安全边界，编码变形与同 realm 直连不在防线内；\n   *  有效边界是 localResourceRoots 包含性 + 宿主 realpath 守卫） */\n  resourceUri(relativePath: string): string | null\n  /** 页面 → 宿主 JSON 请求（载荷与结果可序列化；结束态见 AddonChannelOutcome） */\n  readonly channel: {\n    request(topic: string, payload: unknown, opts?: { timeoutMs?: number }): Promise<AddonChannelOutcome>\n  }\n  /** 登记释放回调（停用/故障/代次回收时执行；重复释放无害） */\n  onDispose(callback: () => void): void\n}",
       "AddonPageFactory": "/** 组件工厂：由构建辅助工具的 defineAddonPage 登记，装载器注入 SDK 调用 */\nexport type AddonPageFactory = (sdk: VsidianAddonPageSdk) => void",
       "AddonPageKind": "export type AddonPageKind = 'editor' | 'settings'",
       "AddonLoadManifest": "/** 宿主下发的装载指令载荷（URI 均由宿主经本 webview 的 asWebviewUri 构造） */\nexport interface AddonLoadManifest {\n  addonId: string\n  generation: number\n  page: AddonPageKind\n  /** 入口脚本的本页地址（须在 localResourceRoots 许可面内，否则资源服务拒绝） */\n  scriptUri: string\n  /** 随装载注入的样式表地址（逐条独立装载，互不牵连） */\n  cssUris?: string[]\n  /** 资源子目录的本页基址（resourceUri 的解析锚；缺省时 resourceUri 恒 null） */\n  resourceBase?: string\n}",
@@ -1011,8 +1224,14 @@
       "defineAddonPage": "/** 组件页面入口登记：IIFE 执行时调用，装载器核对身份后注入 SDK 调工厂 */\nexport function defineAddonPage(\n  addonId: string,\n  factory: (sdk: VsidianAddonPageSdk) => void,\n): void",
       "currentSdk": "/** 模块作用域取当前 SDK（装载器调用工厂前注入；仅工厂执行期可靠） */\nexport function currentSdk(): VsidianAddonPageSdk | undefined"
     },
+    "src/shared/addonNavApi.ts": {
+      "AddonDocNavLocate": "/** 定位描述（互斥三形态；缺省 = 无定位仅打开）。\n *  行号为 1-based 正整数；标题为不含 `#` 前缀的文本（与双链 [[目标#标题]]\n *  解析后形态一致）；块 ID 不含 `^` 前缀（与 [[目标#^id]] 解析后形态一致）。 */\nexport type AddonDocNavLocate =\n  | { readonly kind: 'line'; readonly line: number }\n  | { readonly kind: 'heading'; readonly heading: string }\n  | { readonly kind: 'block'; readonly blockId: string }",
+      "AddonDocNavRequest": "/** 文档打开与定位请求（views.openDocument 的入参形状；来源身份由 SDK 注入）。\n *  target 为相对路径（按来源实例目标文档目录解析，越出所属根拦截）；\n *  空串 = 同文件锚点（目标即来源文档，沿双链 [[#锚点]] 语义，无需工作区）。 */\nexport interface AddonDocNavRequest {\n  /** 来源视图实例 ID（views 面有效句柄；相对路径解析与来源存活判定基准） */\n  readonly sourceInstanceId: string\n  /** 目标路径（来源文档目录相对；空串 = 来源文档自身） */\n  readonly target: string\n  /** 可选定位描述（互斥；缺省仅打开） */\n  readonly locate?: AddonDocNavLocate\n}",
+      "AddonDocNavRejection": "/** 可辨认拒绝类型（规格 §4.3 失败语义表；接口冻结面） */\nexport type AddonDocNavRejection =\n  /** 非法形状、非正整数行号或冲突定位；目标为附件类型（图片/PDF）也不\n   *  在本面——一律不执行打开 */\n  | 'invalid-request'\n  /** 无工作区的跨文档请求（对齐双链 no-workspace 口径） */\n  | 'no-workspace'\n  /** 越出来源所属根 */\n  | 'escape'\n  /** 目标不存在（扩展名候选全未命中） */\n  | 'not-found'\n  /** 来源视图或请求代次失效（迟到执行拒收——旧偏移不抢回定位） */\n  | 'view-disposed'\n  /** 目标存在但标题/块 ID 未命中（opened 报告实际打开状态） */\n  | 'anchor-not-found'\n  /** 行号越出目标总行数（不自动钳到末行；opened 报告实际打开状态） */\n  | 'out-of-bounds'\n  /** 定位未送达（面板未就绪/已关闭或请求超时） */\n  | 'delivery-failed'\n  /** 宿主执行失败（打开/读取抛错） */\n  | 'error'",
+      "AddonDocNavResult": "/** 导航结果：成功分支区分 opened（目标已打开或重显）与 located（定位\n *  描述存在且已送达）；失败分支的 opened 报告失败前的实际打开状态。 */\nexport type AddonDocNavResult =\n  | { ok: true; opened: boolean; located: boolean }\n  | { ok: false; reason: AddonDocNavRejection; opened: boolean }"
+    },
     "src/shared/addonEditApi.ts": {
-      "AddonViewsFacet": "/** SDK views 面（views.list / views.get / 变化订阅——设计 §5.1）。\n *  仅编辑器页提供（设置页无编辑视图，views 为 undefined） */\nexport interface AddonViewsFacet {\n  list(): readonly AddonViewInfo[]\n  get(instanceId: string): AddonViewHandle | null\n  onCreated(callback: (info: AddonViewInfo) => void): () => void\n  onDisposed(callback: (info: AddonViewInfo) => void): () => void\n}",
+      "AddonViewsFacet": "/** SDK views 面（views.list / views.get / 变化订阅——设计 §5.1）。\n *  仅编辑器页提供（设置页无编辑视图，views 为 undefined）。\n *  #543 T03 起 views.openDocument 提供文档打开与定位请求（宿主解析与\n *  执行——来源身份由 SDK 层注入，组件请求不携带身份字段） */\nexport interface AddonViewsFacet {\n  list(): readonly AddonViewInfo[]\n  get(instanceId: string): AddonViewHandle | null\n  onCreated(callback: (info: AddonViewInfo) => void): () => void\n  onDisposed(callback: (info: AddonViewInfo) => void): () => void\n  /** 文档打开与定位请求（异步——宿主执行；结果区分 opened 与 located，\n   *  拒绝面见 AddonDocNavRejection；请求具有有界终态） */\n  openDocument(request: AddonDocNavRequest): Promise<AddonDocNavResult>\n}",
       "AddonViewHandle": "/** SDK views 面返回的视图句柄（info 快照 + 编辑面） */\nexport interface AddonViewHandle {\n  readonly info: AddonViewInfo\n  readonly editor: AddonViewEditorFacet\n}",
       "AddonViewInfo": "/** views.list() 返回的有效实例句柄信息（设计 §5.1：实例/目标/模式/可编辑） */\nexport interface AddonViewInfo {\n  /** 页面内稳定实例 ID：main 恒 'main'；embed/hover 为 occurrence 键 */\n  instanceId: string\n  /** 目标文档 URI（主正文 = 面板文档；embed/hover = 引用目标） */\n  targetDocUri: string\n  mode: AddonViewMode\n  viewType: AddonViewType\n  editable: boolean\n}",
       "AddonViewEditorFacet": "/** 视图句柄的编辑面（view.editor.*）：目标从有效句柄取得；来源身份由\n *  SDK 层注入（组件请求不携带），伪来源请求结构上不可表达 */\nexport interface AddonViewEditorFacet {\n  getSnapshot(): AddonSnapshotResult\n  applyEdits(request: AddonApplyEditsRequest): Promise<AddonApplyEditsResult>\n  /** 设置选区（零文本变更：不出站、不造文本撤销项）；拒绝返回 false */\n  setSelection(ranges: AddonSelectionRange[]): boolean\n  /** 滚动定位（零文本变更；不移动光标）；拒绝返回 false */\n  reveal(offset: number): boolean\n}",
@@ -1051,6 +1270,34 @@
       "AddonHostSettingGetResult": "/** 读取结果（可辨认拒绝，不抛出） */\nexport type AddonHostSettingGetResult =\n  | { ok: true; value: AddonHostSettingValue }\n  | { ok: false; reason: AddonHostSettingsRejection }",
       "AddonHostSettingsFacet": "/** 读取面（experimental.hostSettings 的内容；仅编辑器页提供）。get 同步\n *  返回——keymap/输入行为等热路径可直接消费 */\nexport interface AddonHostSettingsFacet {\n  /** 读白名单宿主设置的当前生效值（类型收窄为白名单键；JS 组件传入\n   *  任意值时运行时校验拒绝 invalid-key） */\n  get(key: AddonHostSettingKey): AddonHostSettingGetResult\n}",
       "addonHostSettingGet": "/** 读取组合（装载器 facet 的实现体）：白名单校验 + 值解析 */\nexport function addonHostSettingGet(\n  snapshot: SettingsPayload | undefined,\n  key: string,\n): AddonHostSettingGetResult {\n  if (!isAddonHostSettingKey(key)) {\n    return { ok: false, reason: 'invalid-key' }\n  }\n  return { ok: true, value: resolveAddonHostSettingValue(snapshot, key) }\n}"
+    },
+    "src/shared/addonRefViews.ts": {
+      "AddonRefAnchor": "/** 结构化锚点（互斥四形态；缺省 = 无锚点全文/全文窗口） */\nexport type AddonRefAnchor =\n  /** Markdown 标题章节（标题原文；空 path 时为来源文档页内锚点） */\n  | { kind: 'heading'; heading: string }\n  /** Markdown 块 ID（`^id` 的 id 段；字符集同双链形态学） */\n  | { kind: 'block'; blockId: string }\n  /** 1-based 行号（非 Markdown 文本目标：#line= 语义；Markdown 目标按\n   *  标题语义解析「line=N」原文——沿用既有双链行为，不新增片段语法） */\n  | { kind: 'line'; line: number }\n  /** 1-based 闭区间行范围（非 Markdown 文本目标：#range= 语义；同上，\n   *  Markdown 目标不改变既有语义） */\n  | { kind: 'range'; startLine: number; endLine: number }",
+      "AddonRefTargetSpec": "/** 只读引用目标：根内路径 + 可选锚点 */\nexport interface AddonRefTargetSpec {\n  /** 目标路径（vault 语义：相对来源文档目录或根内 `/` 绝对形态，无扩展\n   *  名按双链意图补 .md——与既有解析同源）。空串仅在带锚点时合法（页内） */\n  path: string\n  anchor?: AddonRefAnchor\n}",
+      "AddonRefPopupRequest": "/** 只读引用浮窗请求（公共载荷：来源实例 + 目标 + 触发位置；组件身份与\n *  代次由 SDK 注入——请求结构上不携带身份字段） */\nexport interface AddonRefPopupRequest {\n  /** 来源实例（views 面 instanceId：'main' / 'embed:<hostId>' /\n   *  'hover:<instanceId>'）。相对路径以该实例的目标文档解析（R-U02：\n   *  B 中的请求不误用父文档 A 的目录） */\n  source: string\n  /** 目标（结构化路径 + 可选锚点） */\n  target: AddonRefTargetSpec\n  /** 触发位置：本页在树元素（文字对应元素或组件自有控件）。脱树元素\n   *  非法——不猜测另一处位置，不创建无锚点空浮窗 */\n  trigger: HTMLElement\n  /** 显式键盘请求：焦点进入浮层可操作域，Esc 关闭后归还原焦点；缺省\n   *  鼠标语义（零抢焦点、移出延迟关闭） */\n  keyboard?: boolean\n}",
+      "AddonRefPopupHandle": "/** 本次请求的关闭句柄：身份只针对本组件本代次的这一次请求（规格 §7） */\nexport interface AddonRefPopupHandle {\n  /** 关闭本请求的浮窗（幂等；浮窗已换主或已关时返回 false——旧句柄不\n   *  误关后来另一组件的浮窗） */\n  close(): boolean\n  /** 本请求的浮窗是否仍在场（被替换/Esc/移出/域失效关闭后为 false） */\n  isActive(): boolean\n}",
+      "AddonRefPopupRejection": "/** 可辨认拒绝（规格 §7：普通结果区分；不折叠为 not-found）：\n *  - invalid-request：形状/来源/触发位置非法（不创建浮窗）；\n *  - view-disposed：来源实例不存在或已销毁、请求被替换/关闭（迟到结果\n *    与旧句柄的终结口径）；\n *  - released：组件代次已终结（装载器守卫——旧代次请求不再有有效来源）；\n *  - HoverPreviewFailReason 透传：目标解析/读取/锚点/准入超限的真实原因\n *    （not-found / escape（越出所属根）/ anchor-invalid / file-too-large …），\n *    浮窗同时以现有引用错误视图就地显示（invalid-request 除外）。 */\nexport type AddonRefPopupRejection =\n  | 'invalid-request'\n  | 'view-disposed'\n  | 'released'\n  | HoverPreviewFailReason",
+      "AddonRefPopupOutcome": "export type AddonRefPopupOutcome =\n  | { ok: true; handle: AddonRefPopupHandle }\n  | { ok: false; reason: AddonRefPopupRejection }",
+      "AddonSdkRefViewsFacet": "/** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）\n *  首版只含浮窗请求；T06 在同一 facet 上扩展组件容器挂载入口 */\nexport interface AddonSdkRefViewsFacet {\n  /** 请求只读引用浮窗（单页单浮窗：新请求替换旧请求，旧请求句柄随之\n   *  失效）。结果在读取结局落定时兑现：内容装载成功 → ok + 句柄；目标\n   *  解析/读取/锚点失败 → 失败原因（浮窗若在场显示真实错误分态）；请求\n   *  被替换或关闭 → view-disposed */\n  requestPopup(request: AddonRefPopupRequest): Promise<AddonRefPopupOutcome>\n}",
+      "isAddonRefTargetSpec": "export function isAddonRefTargetSpec(v: unknown): v is AddonRefTargetSpec {\n  if (!isRecord(v) || typeof v.path !== 'string') {\n    return false\n  }\n  if (v.anchor !== undefined && !isAddonRefAnchor(v.anchor)) {\n    return false\n  }\n  // 空 path 仅在带锚点时合法（页内锚点——目标即来源文档自身）\n  if (v.path === '' && v.anchor === undefined) {\n    return false\n  }\n  return isExpressibleRefText(v.path)\n}",
+      "buildAddonRefHoverTarget": "/**\n * 结构化目标 → 双链目标原文（hover.request 的 target 形态）：路径与锚点\n * 按既有形态学拼装——heading `路径#标题`、block `路径#^id`、line\n * `路径#line=N`、range `路径#range=A-B`、无锚点即路径本身。返回 null =\n * 形态不可表达（守卫已拦；防御性兜底，不静默降级）。合成原文走与真实\n * 双链完全相同的解析与准入链路（R-U03：行号/范围/大小限制均为既有规则）。\n */\nexport function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | null {\n  if (!isAddonRefTargetSpec(target)) {\n    return null\n  }\n  const path = target.path\n  const anchor = target.anchor\n  if (anchor === undefined) {\n    return path\n  }\n  switch (anchor.kind) {\n    case 'heading':\n      return `${path}#${anchor.heading}`\n    case 'block':\n      return `${path}#^${anchor.blockId}`\n    case 'line':\n      return `${path}#line=${anchor.line}`\n    case 'range':\n      return `${path}#range=${anchor.startLine}-${anchor.endLine}`\n  }\n}"
+    },
+    "src/shared/addonThemes.ts": {
+      "AddonThemeEnvironment": "/** 明暗快照（四态两轴投影；亮色高对比 ≠ 暗） */\nexport interface AddonThemeEnvironment {\n  /** 暗色：dark 与暗色高对比为 true；亮色与亮色高对比为 false */\n  readonly dark: boolean\n  /** 高对比：两种高对比形态为 true */\n  readonly highContrast: boolean\n}",
+      "AddonThemeEnvironmentKind": "/**\n * VSCode 实际生效主题四态（vscode.ColorThemeKind 的可序列化投影）。\n * 状态来源是实际生效主题——手动固定暗色时系统变亮仍为暗；跟随系统时\n * 随系统变化（由宿主事件驱动）。\n */\nexport type AddonThemeEnvironmentKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light'",
+      "AddonThemeEnvironmentFacet": "/** SDK 只读面（仅编辑器页提供）：同步快照 + 变化订阅（重复值不通知；\n *  代次释放自动退订；通知在页面缓存更新后送达——回调中 get 拿新值） */\nexport interface AddonThemeEnvironmentFacet {\n  get(): AddonThemeEnvironment\n  onChange(listener: (env: AddonThemeEnvironment) => void): () => void\n}",
+      "addonThemeEnvironmentOf": "/** 四态 → 快照（纯函数；「亮色高对比不误判为暗」的单一判定点） */\nexport function addonThemeEnvironmentOf(kind: AddonThemeEnvironmentKind): AddonThemeEnvironment {\n  switch (kind) {\n    case 'dark':\n      return { dark: true, highContrast: false }\n    case 'high-contrast':\n      return { dark: true, highContrast: true }\n    case 'high-contrast-light':\n      return { dark: false, highContrast: true }\n    case 'light':\n      return { dark: false, highContrast: false }\n  }\n}",
+      "addonThemeEnvironmentEqual": "/** 快照相等（重复值不广播的判据） */\nexport function addonThemeEnvironmentEqual(a: AddonThemeEnvironment, b: AddonThemeEnvironment): boolean {\n  return a.dark === b.dark && a.highContrast === b.highContrast\n}",
+      "isAddonThemeEnvironmentPayload": "/** 宿主 → 编辑器 webview 明暗快照消息载荷守卫 */\nexport function isAddonThemeEnvironmentPayload(value: unknown): value is AddonThemeEnvironment {\n  return (\n    isRecord(value) &&\n    typeof value['dark'] === 'boolean' &&\n    typeof value['highContrast'] === 'boolean'\n  )\n}",
+      "AddonThemeDeclaration": "/** 组件声明的一个主题（enable 注册载荷的可序列化形状） */\nexport interface AddonThemeDeclaration {\n  /** 组件内稳定主题 ID（非空；与组件 ID 组成持久主题身份 themeRef） */\n  themeId: string\n  /** 多语言显示名（直值或语言映射，全链路透传不预解析——渲染时按页面语言选值） */\n  label: AddonThemeLocalizedText\n  /** 关联的本组件渲染提供者（局部 rendererId；平台组合 providerId，不能跨组件） */\n  rendererId: string\n  /** 主题对该提供者生效的语言（trim 后全等口径，与 RENDERED_FENCE_LABELS 同源） */\n  languages: readonly string[]\n}",
+      "AddonThemeCandidate": "/** 宿主目录条目（声明 + 归属组件注入） */\nexport interface AddonThemeCandidate {\n  addonId: string\n  themeId: string\n  /** 稳定主题身份：`${addonId}/${themeId}`（持久首选与目录寻址键） */\n  themeRef: string\n  label: AddonThemeLocalizedText\n  rendererId: string\n  /** 稳定提供者 ID：`${addonId}/${rendererId}` */\n  providerId: string\n  languages: readonly string[]\n}",
+      "AddonThemesRegistrationFacet": "/** enable 上下文的主题注册面（组件宿主代码声明主题元数据——目录与\n *  选择归平台，实际渲染执行仍归页面 renderers 注册） */\nexport interface AddonThemesRegistrationFacet {\n  register(declarations: readonly unknown[]): AddonThemeRegisterOutcome\n}",
+      "AddonThemeRegisterOutcome": "/** 主题注册结果：ok=false 时 dispose 为 no-op（登记校验与批内重复拒绝属普通 API 结果，不算组件故障） */\nexport type AddonThemeRegisterOutcome =\n  | { ok: true; dispose(): void }\n  | { ok: false; reason: 'invalid-theme' | 'duplicate-theme'; dispose(): void }",
+      "addonThemeRefOf": "/** 稳定主题身份（themeRef） */\nexport function addonThemeRefOf(addonId: string, themeId: string): string {\n  return `${addonId}/${themeId}`\n}",
+      "validateAddonThemeBatch": "/**\n * 批内校验（普通 API 结果的判据）：任一条目形状非法 → invalid-theme；\n * 同批 themeId 重复（同一主题两次声明）→ duplicate-theme。整批拒绝。\n */\nexport function validateAddonThemeBatch(declarations: readonly unknown[]): 'ok' | 'invalid-theme' | 'duplicate-theme' {\n  if (!Array.isArray(declarations)) return 'invalid-theme'\n  const seenThemeIds = new Set<string>()\n  for (const value of declarations) {\n    if (!isAddonThemeDeclaration(value)) {\n      return 'invalid-theme'\n    }\n    const decl = value as AddonThemeDeclaration\n    if (seenThemeIds.has(decl.themeId)) {\n      return 'duplicate-theme'\n    }\n    seenThemeIds.add(decl.themeId)\n  }\n  return 'ok'\n}",
+      "resolveThemePreferred": "/**\n * 首选解析（纯函数）：appearance.theme（新键）是唯一权威——值非 default\n * 时原样生效；值为 default 且旧键（appearance.mermaidTheme）仍有效选择\n * codex 时回 codex（升级用户旧值回显，T08 前不迁移）；设置页每次选择都\n * 同步写旧键投影（见 appearanceThemePatch），显式选 default 会把旧键一\n * 并落 default，两者不互相打架。\n */\nexport function resolveThemePreferred(themeValue: string | undefined, legacyMermaidValue: string | undefined): string {\n  if (typeof themeValue === 'string' && themeValue.trim() !== '' && themeValue !== DEFAULT_THEME_ID) {\n    return themeValue\n  }\n  if (legacyMermaidValue === CODEX_THEME_ID) {\n    return CODEX_THEME_ID\n  }\n  return DEFAULT_THEME_ID\n}",
+      "resolveActiveTheme": "/**\n * 唯一选择与回落解析（纯函数）：\n * - default / codex（内置）：恒可用、effective 同值；\n * - themeRef：目录命中且可用 → 生效该主题（activeProviderId 给渲染选择\n *   层注入）；命中但不可用（组件停用/故障）→ 回落内置 default 显示，\n *   preferred 保留、available=false；目录不命中（组件卸载/未注册）→ 同\n *   回落（保留首选，恢复注册后继续原选择）。\n * 回落一律回 default——不用 codex 或另一组件主题顶替（规格 §3.2：不静\n * 默选中另一主题）。\n */\nexport function resolveActiveTheme(input: AddonThemeSelectionInput): AddonThemeSelection {\n  const { preferred } = input\n  if (preferred === DEFAULT_THEME_ID || preferred === CODEX_THEME_ID) {\n    return { preferred, available: true, effective: preferred }\n  }\n  const theme = input.themes.find((t) => t.themeRef === preferred)\n  if (theme && input.isThemeAvailable(theme)) {\n    return { preferred, available: true, effective: preferred, activeProviderId: theme.providerId, activeLanguages: theme.languages }\n  }\n  return { preferred, available: false, effective: DEFAULT_THEME_ID }\n}",
+      "AddonThemesStatePayload": "/** 宿主 → 设置页的主题目录状态载荷 */\nexport interface AddonThemesStatePayload {\n  /** 目录代次（内容变化才递增；设置页等值跳过） */\n  version: number\n  /** 组件主题目录（含不可用条目——呈现不可用状态而非隐藏） */\n  themes: readonly AddonThemeEntryState[]\n  /** 当前唯一首选（resolveThemePreferred 产物；不可用时保留） */\n  preferred: string\n  /** 首选组件主题当前可用（default/codex 恒 true） */\n  preferredAvailable: boolean\n}"
     },
     "src/shared/addonStorage.ts": {
       "AddonStorageFacet": "/** 组件数据目录面（宿主侧 setup/enable 上下文同形状；组件页面侧经\n * channel 桥接宿主消费）。全部相对路径先过 isSafeAddonStoragePath，\n * 越界形态明确拒绝（普通 API 拒绝，不算组件故障）。 */\nexport interface AddonStorageFacet {\n  /** 本组件数据目录的 URI（显示与同步工具配置用） */\n  uri(): string\n  /** 读 UTF-8 文本文件 */\n  readFile(relativePath: string): Promise<AddonStorageResult<string>>\n  /** 覆盖写 UTF-8 文本文件（父目录按需创建；content 超单文件上限拒绝） */\n  writeFile(relativePath: string, content: string): Promise<AddonStorageResult<null>>\n  /** 列目录（相对路径缺省根；recursive 缺省 false 只列一层；目标目录不\n   * 存在——含根目录未建——返回空清单：未建目录 = 空存储，#461） */\n  list(relativePath?: string, recursive?: boolean): Promise<AddonStorageListResult>\n  /** 删文件（不删目录——目录生命周期归卸载策略） */\n  deleteFile(relativePath: string): Promise<AddonStorageResult<null>>\n  /** 订阅目录内文件变化（外部同步工具改写/新建文件后自动重载的支撑面）；\n   * 回调回相对路径与变化类型（change = 改写或新建，delete = 删除）；\n   * 返回取消函数；组件停用/故障/代次终结时平台统一注销 watcher */\n  onDidChangeFile(callback: (relativePath: string, kind: 'change' | 'delete') => void): AddonStorageWatchHandle\n}",
@@ -1110,9 +1357,10 @@
       "AddonRendererMountContext": "/** 渲染挂载上下文（mount/refresh/release 回调入参；页面端执行） */\nexport interface AddonRendererMountContext {\n  language: string\n  /** 目标视图模式（组件未支持的模式不会收到调用） */\n  mode: AddonRendererMode\n}",
       "AddonRendererCandidate": "/** 宿主侧已知候选（声明 + 归属组件） */\nexport interface AddonRendererCandidate extends AddonRendererProviderInfo {\n  addonId: string\n  /** 稳定提供者 ID：`${addonId}/${rendererId}` */\n  providerId: string\n}",
       "BUILTIN_RENDERER_PROVIDER_ID": "/** 内置提供者稳定 ID（始终可用；对内置图形语言即 graphicRenderers 注册表） */\nexport const BUILTIN_RENDERER_PROVIDER_ID = 'builtin'",
-      "RendererSelectionInput": "/** 选择输入（纯函数：候选、可用性谓词、内置语言、首选与批次） */\nexport interface RendererSelectionInput {\n  candidates: readonly AddonRendererCandidate[]\n  isAvailable: (candidate: AddonRendererCandidate) => boolean\n  /** 内置图形语言（graphicRenderers 注册表键集） */\n  builtinLanguages: readonly string[]\n  preferred: Readonly<Record<string, string>>\n  batches: Readonly<Record<string, number>>\n}",
+      "RendererSelectionInput": "/** 选择输入（纯函数：候选、可用性谓词、内置语言、首选与批次；#546 起含主题例外上下文） */\nexport interface RendererSelectionInput {\n  candidates: readonly AddonRendererCandidate[]\n  isAvailable: (candidate: AddonRendererCandidate) => boolean\n  /** 内置图形语言（graphicRenderers 注册表键集） */\n  builtinLanguages: readonly string[]\n  preferred: Readonly<Record<string, string>>\n  batches: Readonly<Record<string, number>>\n  /** #546 T07 主题例外（缺省无主题语义——普通渲染器行为不变） */\n  theme?: RendererThemeSelectionContext\n}",
+      "RendererThemeSelectionContext": "/**\n * #546 T07 主题例外输入（ADR-0017）：themedProviderIds = 主题关联的提供\n * 者集（目录注入）——这些提供者不参与自动接管，也不接受 renderer 按语\n * 言显式首选（不能经一般渲染候选路径绕过主题单选）；activeThemeProvider\n * Id = 当前选中且可用的主题提供者——仅它对所声明语言生效（source='user'，\n * 主题单选的投影）；unavailableThemeLanguages = 已选主题失效前已知的\n * 声明语言，仅这些语言回落内置（无内置则普通代码块）。未声明语言与未知\n * 首选的语言范围继续一般规则。\n */\nexport interface RendererThemeSelectionContext {\n  themedProviderIds: ReadonlySet<string>\n  activeThemeProviderId?: string\n  activeThemeLanguages?: readonly string[]\n  unavailableThemeLanguages?: readonly string[]\n}",
       "AddonRendererLanguageSelection": "/** 单语言选择结果（effective='none' = 无可用提供者且非内置语言 → 普通代码块） */\nexport interface AddonRendererLanguageSelection {\n  language: string\n  effective: string\n  /** 生效来源：'user' = 用户显式首选且当前可用；'auto' = 确定性默认序 */\n  source: 'user' | 'auto'\n}",
-      "selectEffectiveRenderers": "/**\n * 确定性生效提供者选择（纯函数；技术方案 5.3 默认序 + 用户首选）：\n * - 每语言候选 = 可用附加组件候选 + 内置（仅内置图形语言）；\n * - 默认序：按 (批次升序, providerId 升序) 排列取末位生效——内置批次视作\n *   0（新安装默认接管内置语言）、同批末位 = 稳定 ID 最大者、新批次覆盖旧；\n * - 用户首选优先：首选提供者当前可用（含显式选内置）即生效且 source='user'；\n *   不可用则按默认序回退（source='auto'），首选记录不在此清除（Q30 恢复）。\n */\nexport function selectEffectiveRenderers(input: RendererSelectionInput): { languages: AddonRendererLanguageSelection[] } {\n  const languageSet = new Set<string>()\n  for (const candidate of input.candidates) {\n    for (const language of candidate.languages) {\n      const normalized = normalizeRendererLanguage(language)\n      if (normalized !== '') {\n        languageSet.add(normalized)\n      }\n    }\n  }\n  for (const language of input.builtinLanguages) {\n    languageSet.add(normalizeRendererLanguage(language))\n  }\n  const batchOf = (candidate: AddonRendererCandidate): number => input.batches[candidate.addonId] ?? 0\n  const languages: AddonRendererLanguageSelection[] = []\n  for (const language of [...languageSet].sort()) {\n    const available = input.candidates.filter(\n      (candidate) =>\n        candidate.languages.some((l) => normalizeRendererLanguage(l) === language) && input.isAvailable(candidate),\n    )\n    const builtinAvailable = input.builtinLanguages.some((l) => normalizeRendererLanguage(l) === language)\n    const preferred = input.preferred[language]\n    if (preferred === BUILTIN_RENDERER_PROVIDER_ID && builtinAvailable) {\n      languages.push({ language, effective: BUILTIN_RENDERER_PROVIDER_ID, source: 'user' })\n      continue\n    }\n    const preferredCandidate = preferred === undefined ? undefined : available.find((c) => c.providerId === preferred)\n    if (preferredCandidate) {\n      languages.push({ language, effective: preferredCandidate.providerId, source: 'user' })\n      continue\n    }\n    // 确定性默认序：内置视作批次 0、ID 'builtin'，与组件候选合并排序取末位\n    const ordered = [...available].sort((a, b) => batchOf(a) - batchOf(b) || (a.providerId < b.providerId ? -1 : 1))\n    const last = ordered[ordered.length - 1]\n    if (last !== undefined && batchOf(last) > 0) {\n      languages.push({ language, effective: last.providerId, source: 'auto' })\n      continue\n    }\n    languages.push({\n      language,\n      effective: builtinAvailable ? BUILTIN_RENDERER_PROVIDER_ID : 'none',\n      source: 'auto',\n    })\n  }\n  return { languages }\n}",
+      "selectEffectiveRenderers": "/**\n * 确定性生效提供者选择（纯函数；技术方案 5.3 默认序 + 用户首选 + #546\n * T07 主题例外）：\n * - 每语言候选 = 可用附加组件候选 + 内置（仅内置图形语言）；\n * - 默认序：按 (批次升序, providerId 升序) 排列取末位生效——内置批次视作\n *   0（新安装默认接管内置语言）、同批末位 = 稳定 ID 最大者、新批次覆盖旧；\n * - 用户首选优先：首选提供者当前可用（含显式选内置）即生效且 source='user'；\n *   不可用则按默认序回退（source='auto'），首选记录不在此清除（Q30 恢复）；\n * - 主题例外（theme 输入在场）：主题关联提供者整体退出默认序与用户首选\n *   路径（安装只新增候选不切换）；仅 activeThemeProviderId（主题单选选中\n *   且可用）对其声明语言生效（source='user'）。声明语言的主题提供者不\n *   可用时回落内置 default 显示（无内置则普通代码块），不由同语言普通\n *   提供者接管；宿主层保留主题首选与本会话已知语言范围。\n */\nexport function selectEffectiveRenderers(input: RendererSelectionInput): { languages: AddonRendererLanguageSelection[] } {\n  const languageSet = new Set<string>()\n  for (const candidate of input.candidates) {\n    for (const language of candidate.languages) {\n      const normalized = normalizeRendererLanguage(language)\n      if (normalized !== '') {\n        languageSet.add(normalized)\n      }\n    }\n  }\n  for (const language of input.builtinLanguages) {\n    languageSet.add(normalizeRendererLanguage(language))\n  }\n  for (const language of [...(input.theme?.activeThemeLanguages ?? []), ...(input.theme?.unavailableThemeLanguages ?? [])]) {\n    languageSet.add(normalizeRendererLanguage(language))\n  }\n  const batchOf = (candidate: AddonRendererCandidate): number => input.batches[candidate.addonId] ?? 0\n  const themed = input.theme?.themedProviderIds\n  const activeThemeProvider = input.theme?.activeThemeProviderId\n  /** 主题提供者全部退出一般竞争；选中项仅在上方声明语言分支生效 */\n  const excludedByTheme = (candidate: AddonRendererCandidate): boolean =>\n    themed !== undefined && themed.has(candidate.providerId)\n  const languages: AddonRendererLanguageSelection[] = []\n  for (const language of [...languageSet].sort()) {\n    const available = input.candidates.filter(\n      (candidate) =>\n        candidate.languages.some((l) => normalizeRendererLanguage(l) === language) && input.isAvailable(candidate),\n    )\n    const builtinAvailable = input.builtinLanguages.some((l) => normalizeRendererLanguage(l) === language)\n    // #546 T07：已选主题的声明语言由主题/内置二选一；不可用时不进入\n    // 普通提供者竞争（其余语言继续下方一般规则）。\n    if (input.theme?.activeThemeLanguages?.includes(language) || input.theme?.unavailableThemeLanguages?.includes(language)) {\n      const activeThemeCandidate = activeThemeProvider === undefined ? undefined : available.find(\n        (c) => c.providerId === activeThemeProvider && c.languages.some((l) => normalizeRendererLanguage(l) === language),\n      )\n      languages.push({\n        language,\n        effective: activeThemeCandidate?.providerId ?? (builtinAvailable ? BUILTIN_RENDERER_PROVIDER_ID : 'none'),\n        source: activeThemeCandidate ? 'user' : 'auto',\n      })\n      continue\n    }\n    const preferred = input.preferred[language]\n    if (preferred === BUILTIN_RENDERER_PROVIDER_ID && builtinAvailable) {\n      languages.push({ language, effective: BUILTIN_RENDERER_PROVIDER_ID, source: 'user' })\n      continue\n    }\n    // #546 T07：renderer 显式首选不能指向主题关联提供者（绕过主题单选）\n    const preferredCandidate = preferred === undefined ? undefined : available.find((c) => c.providerId === preferred && !excludedByTheme(c))\n    if (preferredCandidate) {\n      languages.push({ language, effective: preferredCandidate.providerId, source: 'user' })\n      continue\n    }\n    // 确定性默认序：内置视作批次 0、ID 'builtin'，与组件候选合并排序取末位\n    // （主题关联提供者退出竞争——excludedByTheme 过滤）\n    const ordered = [...available.filter((c) => !excludedByTheme(c))].sort((a, b) => batchOf(a) - batchOf(b) || (a.providerId < b.providerId ? -1 : 1))\n    const last = ordered[ordered.length - 1]\n    if (last !== undefined && batchOf(last) > 0) {\n      languages.push({ language, effective: last.providerId, source: 'auto' })\n      continue\n    }\n    languages.push({\n      language,\n      effective: builtinAvailable ? BUILTIN_RENDERER_PROVIDER_ID : 'none',\n      source: 'auto',\n    })\n  }\n  return { languages }\n}",
       "assignDiscoveryBatches": "/**\n * 发现批次分配（幂等）：未见过的 addonId 依次取 nextBatch 起的递增批次；\n * 已记录的不改写（重启、重复注册与普通升级不产生新批次——新安装语义只\n * 认 Vsidian 自己的记录，不声称拿到真实安装时间）。无变化时原引用返回。\n */\nexport function assignDiscoveryBatches(\n  store: AddonRendererStoreV1,\n  addonIds: readonly string[],\n): { store: AddonRendererStoreV1; changed: boolean } {\n  const missing = addonIds.filter((addonId) => !(addonId in store.batches))\n  if (missing.length === 0) {\n    return { store, changed: false }\n  }\n  let nextBatch = store.nextBatch\n  const batches = { ...store.batches }\n  for (const addonId of missing) {\n    batches[addonId] = nextBatch\n    nextBatch += 1\n  }\n  return {\n    store: { version: store.version, batches, nextBatch, preferred: { ...store.preferred } },\n    changed: true,\n  }\n}",
       "AddonRendererStoreV1": "/** 发现批次与用户首选的持久化形状（v1 冻结 fail-safe） */\nexport interface AddonRendererStoreV1 {\n  version: 1\n  /** 已记录组件的发现批次（addonId → 批次号；一经记录不改写——重启/重复\n   *  注册/普通升级不重新分配，新安装语义据此识别） */\n  batches: Record<string, number>\n  /** 下一批次号（从 1 起单调递增） */\n  nextBatch: number\n  /** 用户按语言的显式首选（language → providerId，含 'builtin'）；\n   *  内置接管不清除——恢复后按原选择显示 */\n  preferred: Record<string, string>\n}"
     },
@@ -1130,6 +1378,19 @@
       "AddonUiButtonDefinition": "/** 组件按钮注册形状（sdk.ui.registerButton 的入参） */\nexport interface AddonUiButtonDefinition {\n  /** 组件内局部 ID（无点号；命名空间前缀由平台注入） */\n  id: string\n  /** 用户可见标题（自由文本——aria/提示承载；组件文案不进 Vsidian 内置字典；\n   *  封顶 ADDON_DISPLAY_TEXT_MAX，超限注册拒绝——#395 P3） */\n  label: string\n  /** 挂载槽位（缺省 toolbar；白名单见 ADDON_UI_BUTTON_SLOTS） */\n  slot?: AddonUiButtonSlot\n  /** 生效模式（缺省 both；不匹配模式的按钮从挂载点撤下） */\n  mode?: BindingMode\n  /** 槽内排序键（缺省 0，稳定排序） */\n  order?: number\n  /** 挂接的命令局部 ID（点击经命令体系执行——须为本组件已注册命令） */\n  command?: string\n  /** 按钮显示文本（缺省 label；单字符/emoji/短词皆可；封顶同 label） */\n  iconText?: string\n}",
       "AddonUiPanelDefinition": "/** 组件面板注册形状（sdk.ui.registerPanel 的入参；面板宿主容器是平台\n *  dock——定义形状上无挂载位置字段，界面接管在结构上不可表达） */\nexport interface AddonUiPanelDefinition {\n  /** 组件内局部 ID（无点号） */\n  id: string\n  /** 面板标题（自由文本——平台面板标题栏展示；封顶 ADDON_DISPLAY_TEXT_MAX，\n   *  超限注册拒绝——#395 P3） */\n  title: string\n  /** 生效模式（缺省 both；不匹配模式的面板强制关闭并回收挂载） */\n  mode?: BindingMode\n  /** 面板打开时调用（平台提供内容根元素；迟到结果落进已关闭面板的 root\n   *  不可见——root 已脱挂） */\n  mount(root: unknown, target: AddonUiTargetGetter): void\n  /** 面板关闭时调用（可选；重复释放无害） */\n  unmount?(root: unknown): void\n}",
       "AddonUiTargetGetter": "/** 目标句柄获取器（按钮回调与面板 mount 收到）：每次调用动态解析**当前\n *  活动视图**（焦点所在的嵌入内部 Live 或主正文——T06 句柄语义：在引用\n *  B 中操作归 B 不误改父 A）；视图不在场（面板销毁/阅读态只读时）null */\nexport type AddonUiTargetGetter = () => AddonViewHandle | null"
+    },
+    "src/shared/addonPasteRules.ts": {
+      "AddonPasteRuleDeclaration": "/** 作者提交的规则声明（来源组件与代次由平台注入，声明不带身份字段） */\nexport interface AddonPasteRuleDeclaration {\n  /** 组件内稳定规则 ID（禁点号——不伪造跨组件身份） */\n  readonly id: string\n  /** 可选整数优先级（缺省 0；排序见 orderAddonPasteRules） */\n  readonly priority?: number\n  readonly match: AddonPasteRuleMatch\n  readonly output: AddonPasteRuleOutput\n}",
+      "AddonPasteRuleMatch": "/** 基础匹配：标签名相等 + 属性条件全与（条件组合 all/any/not 属 T02） */\nexport interface AddonPasteRuleMatch {\n  /** 标签名（大写形态与 DOM tagName 对齐；校验时规整） */\n  readonly tag: string\n  /** 属性条件列表（全部满足才匹配；至多 8 条） */\n  readonly attributes?: readonly AddonPasteRuleAttributeCondition[]\n}",
+      "AddonPasteRuleOutput": "/** 产出：Markdown 结构模板或显式丢弃（空产出只有显式丢弃才算成功） */\nexport type AddonPasteRuleOutput =\n  | {\n    readonly kind: 'template'\n    /** 模板中的 {{name}} 引用槽；字面部分是作者声明的静态 Markdown 结构 */\n    readonly template: string\n    readonly slots: Readonly<Record<string, AddonPasteSlot>>\n  }\n  | { readonly kind: 'discard' }",
+      "AddonPasteSlot": "/** 模板槽：url=true 经现有 safeUrl 策略（children 来源无 URL 语义，拒绝） */\nexport interface AddonPasteSlot {\n  readonly source: AddonPasteSlotSource\n  readonly url?: boolean\n}",
+      "AddonPasteRulesRegisterResult": "/** 注册结果（普通 API 拒绝不算组件故障；dispose 重复调用无害） */\nexport type AddonPasteRulesRegisterResult =\n  | { ok: true; dispose(): void }\n  | { ok: false; reason: 'invalid-declaration' | 'duplicate-id' | 'too-many' | 'released'; detail?: string }",
+      "AddonPasteRulesSnapshot": "/** 广播到编辑器页面的有效规则快照（version 单调递增，内容等值不递增） */\nexport interface AddonPasteRulesSnapshot {\n  readonly version: number\n  readonly rules: readonly AddonPasteRule[]\n}",
+      "ADDON_PASTE_RULES_MAX_PER_ADDON": "/** 规则声明每组件数量上限（规格 §4.4：每组件至多 256 条） */\nexport const ADDON_PASTE_RULES_MAX_PER_ADDON = 256",
+      "ADDON_PASTE_RULES_MAX_DEPTH": "/** 表达式嵌套深度上限（T02 消费；常量随本模块集中定义并测试边界） */\nexport const ADDON_PASTE_RULES_MAX_DEPTH = 16",
+      "ADDON_PASTE_RULES_EVAL_STEP_BUDGET": "/** 每次粘贴累计规则/表达式求值步数上限（超限停用规则，内置转换继续） */\nexport const ADDON_PASTE_RULES_EVAL_STEP_BUDGET = 100_000",
+      "validateAddonPasteRuleDeclarations": "/**\n * 整批校验（规格 §4.1：批内 ID 重复、非法正则、未知操作或超预算声明\n * 整批拒绝，不部分安装）。输入为作者原始声明（unknown）；输出为规整后\n * 的规则（addonId 由宿主注入，不在此伪造）。\n */\nexport function validateAddonPasteRuleDeclarations(\n  declarations: readonly unknown[],\n  context: AddonPasteRuleValidationContext = {},\n): AddonPasteRuleValidationResult {\n  if (!Array.isArray(declarations)) {\n    return { ok: false, reason: 'invalid-declaration', detail: 'declarations must be an array' }\n  }\n  if (declarations.length + (context.currentCount ?? 0) > ADDON_PASTE_RULES_MAX_PER_ADDON) {\n    return { ok: false, reason: 'too-many', detail: `每组件至多 ${ADDON_PASTE_RULES_MAX_PER_ADDON} 条规则` }\n  }\n  const rules: Omit<AddonPasteRule, 'addonId'>[] = []\n  const seen = new Set<string>(context.existingIds ?? [])\n  for (const [index, raw] of declarations.entries()) {\n    if (!isObject(raw)) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条声明须为对象` }\n    const unknown = hasOnlyKeys(raw, ['id', 'priority', 'match', 'output'])\n    if (unknown) return { ok: false, reason: 'invalid-declaration', detail: `声明不支持字段 '${unknown}'（条件/嵌套属后续版本）` }\n    if (typeof raw.id !== 'string' || !RULE_ID_PATTERN.test(raw.id) || raw.id.length > RULE_ID_LIMIT) {\n      return { ok: false, reason: 'invalid-declaration', detail: `规则 ID 非法：${String(raw.id)}` }\n    }\n    if (seen.has(raw.id)) {\n      return { ok: false, reason: 'duplicate-id', detail: `规则 ID 重复：${raw.id}` }\n    }\n    let priority = 0\n    if (raw.priority !== undefined) {\n      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority)) {\n        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为整数：${String(raw.priority)}` }\n      }\n      priority = raw.priority\n    }\n    const match = validateMatch(raw.match)\n    if (!match.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${match.detail}` }\n    const output = validateOutput(raw.output)\n    if (!output.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${output.detail}` }\n    seen.add(raw.id)\n    rules.push({ id: raw.id, priority, match: match.match, output: output.output })\n  }\n  return { ok: true, rules }\n}",
+      "orderAddonPasteRules": "/**\n * 有效规则确定性排序（规格 §4.3）：优先级降序、组件稳定 ID 升序、规则\n * 稳定 ID 升序；缺省优先级 0。顺序不取决于异步页面脚本装载先后——宿主\n * 构造快照与页面求值共用本函数。\n */\nexport function orderAddonPasteRules(rules: readonly AddonPasteRule[]): readonly AddonPasteRule[] {\n  return [...rules].sort((a, b) =>\n    b.priority - a.priority ||\n    (a.addonId < b.addonId ? -1 : a.addonId > b.addonId ? 1 : 0) ||\n    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),\n  )\n}"
     }
   },
   "releases": [

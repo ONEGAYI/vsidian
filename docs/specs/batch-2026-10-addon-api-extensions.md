@@ -2,7 +2,7 @@
 
 ## 状态与计数
 
-2026-10-15 用户批准：四张规格/父票 + 八张实施票，共十二张；旧票 #530–#533 改造为规格/父票，#534/#535 保留为实施票，新增六张实施票。四份规格已由访谈共识定稿，新旧票据均按下表登记并互链。代码尚未实施，规格完成、自动化与用户验收分别记账。
+2026-10-15 用户批准：四张规格/父票 + 八张实施票，共十二张；旧票 #530–#533 改造为规格/父票，#534/#535 保留为实施票，新增六张实施票。T01/T03/T05/T07 已在组合分支实现，待用户整体验收；T02/T04/T06/T08 尚未实现。四份规格覆盖整个批次，当前四票交付不代表全部规格完成；规格父票保持开放，自动化与用户验收分别记账。
 
 ## 四份规格与父票
 
@@ -28,7 +28,7 @@
 | T07 | [#546](https://github.com/ONEGAYI/vsidian/issues/546) | [统一主题完整链路](addon-api-extension-tickets/t07-theme-system.md) | 无 | H-U01–H-U08、H-U11 |
 | T08 | [#535](https://github.com/ONEGAYI/vsidian/issues/535) | [Codex 内核退役与迁移](addon-api-extension-tickets/t08-codex-retirement.md) | [#546](https://github.com/ONEGAYI/vsidian/issues/546)、[bridge#3](https://github.com/ONEGAYI/vsidian-codex-bridge/issues/3)、可安装产物 | H-U09/H-U10/H-U12，复验主题 |
 
-四份规格共 47 条用户故事：粘贴 11、导航 12、引用视图 12、主题 12；上表覆盖全部故事。T01/T03/T05/T07 在规格文档进入 main 后为初始可认领票，才加 ready-for-agent；其他票等待明确前置，不因所有票都已建立而提前认领。
+四份规格共 47 条用户故事：粘贴 11、导航 12、引用视图 12、主题 12；上表是全部故事的实施规划。首轮仅交付 T01/T03/T05/T07，各故事实际覆盖见[API 覆盖映射](vsidian-addons-coverage.md)。后续票仍按前置结果认领，不能把本轮回归通过写成全部 47 条故事已实现。
 
 ## 依赖关系
 
@@ -51,6 +51,35 @@ bridge#2 的粘贴规则仍消费 #530 的实现；本文不额外改造该组�
 
 - 公共 API 声明、语义目录、生成参考、消费样例和覆盖映射随各实施票维护。历史兼容的显式重锚定须同 PR 独立说明，不改台账伪造发行。
 - TDD 优先现有公开 SDK/生产控制器接缝，UI 断言落绘制层；输入/光标变更跑 browser，宿主路径跑真实宿主。长命令首次落日志和退出码，后续复核读报告。
-- 呈现票执行 ui-patterns / style-contract；#535 另外执行 release 打包体积与包内容检查。当前仅发布规格，不生成未来实现或视觉已通过的证据。
+- 呈现票执行 ui-patterns / style-contract；#535 另外执行 release 打包体积与包内容检查。实施证据只覆盖已交付切片，不生成未来实现或用户视觉已验收的结论。
 - 各实施 PR 引用实施票，不用自动关闭语句关闭规格父票。父票在实施与整体验收记录齐全后收口，真实视觉/IME/物理鼠标待验按人工清单保留。
 - 文档提交按仓库纯文档约定进入 main；本批代码实施仍走 PR 与对应必需检查，不继承文档豁免。
+
+## 首轮组合实现与验证（2026-10-15）
+
+组合分支为 `addon-api-batch`（[PR #548](https://github.com/ONEGAYI/vsidian/pull/548)）。T01 已在分支内，随后按 T03 → T05 → T07 真实合并，组合实施锚点为 `8cf6a681`；各票历史对象保持可达。后续补齐测试隔离、来源 B 文件基线，以及 T01 槽声明、整数优先级与继承格式。同步主线视口修复后，独立双轴审查及修复均已完成；用户整体验收仍未完成。当前候选 API 锚点为 `f28a3e3d`，重锚理由与失败证据见[API 门禁记录](addons-api-gate.md)，不据此关闭规格父票。
+
+以下日志位于联合工作树 `D:/CODE/Project/_Extensions/vsidian-addon-batch` 的 `out/test/addon-batch-takeover/`，只留本地，不随 VSIX 分发。结果按实际轮次记账，失败报告不覆盖：
+
+| 检查 | 结果与证据 |
+| --- | --- |
+| 编译与生成产物 | 审查修复后 `review-fixes-compile.log` exit 0；API 参考由生成器更新 |
+| 全量单元与 Node 契约 | 最新主线同步与审查修复后，367 文件 / 8337 项 Vitest、195 项 Node/桌面契约通过，0 跳过（`review-fixes-full-unit.log`）。首次清单解析和后续 T01/T07 红绿证据均保留；早期 7 项桌面跳过已由默认 desktop 全套实跑补齐 |
+| 全量浏览器 | 同步主线与继承格式修复后 102/102 套全绿（`final-browser-before-review.log`，报告 `browser-runs/run-b7CptW`）；后续审查补丁定向复验 `addonPasteRules`、`addonThemes`、`graphicPopup`、`addonRendererTakeover` 全绿（`review-fixes-*-browser.log`）。早期 101/102 失败和修复记录保留于 `full-browser.log` / `full-browser-language-fixed.log` |
+| 全量真实宿主 | `all` 组四片首轮 423/430 通过；隔离夹具面板、事件缓存和渲染首选后，二轮 429/430。唯一来源 B 失败经状态证实为前序目录 move 清理删除 `sub`；本例重建两个自有目标后，先验证目录 move → 来源 B 两例，再完整重跑分片 1 的 108 项全绿。分片 2–4 的 322 项二轮已全绿，本次未改其执行代码；430 项全部取得 PASS。证据：`integration-first-run/`、`integration-second-run/`、`integration-with-predecessors.log`（37/37）、`integration-directory-predecessor.log`（2/2）、`full-integration-s1-fixed.log`（108/108） |
+| T01 宿主历史链 | `final-t01-real-host.log` exit 0：真实组件登记、已开/新开双面板广播、纯文本旁路、两阶段 Undo/Redo、停用回收与重启登记 |
+| 样式与 API 门禁 | `delivery-gates.log`：生成新鲜度、候选锚点可信复验及 10 项 API 兼容检查通过；独立历史样式基线复验及 8 项检查通过。主题修复的旧锚失败和显式重锚证据在 `review-fixes-compat-red.json` / `review-fixes-baseline.log` |
+| 文件树 | `delivery-gates.log` strict 通过，当前首选派生语言快照的职责已通过维护工具补齐；未新增第二份文件树或手写生成参考 |
+
+真实宿主全量的上述 430 项为组合回归阶段证据。最终主题审查补丁后，`review-fixes-theme-host.log` 通过增强的 #546 场景：真实同语言普通提供者竞争、双文档绘制、主题停用/撤销/整组件故障回内置、声明外语言保留普通规则及恢复。profile 共用存储重建的冷启动回落由 `t07-profile-red.log` → `t07-profile-focused-unit.log` 覆盖，后者 148/148；不将该单测表述为真实 VSCode 重启已由用户验收。
+
+独立审查按固定 HEAD `9e49fad0` 分离 Standards / Spec 两轴。Standards 的模板缓存寿命、主题名称对象所有权及补丁新增的持久化原始诊断三项 P2，Spec 的全局节点预算终止、失效主题语言回落两项 P2 均已修复；各轴对自己的发现独立复核，未遗留已确认问题。粘贴预算/缓存红两项 → 49 项定向绿（`review-paste-budget-cache-*.log`）；主题同语言竞争及名称快照红四项 → 定向绿（`t07-review-*.log`）。最终 Standards 复核锚点 `9dfb10ad`，Spec 主题复核锚点 `f28a3e3d`，之后仅生成参考、基线和交付文档变化。
+
+样式旧契约固定于 v0.4.0（`75c3df79074bdeaec0f02a38d40124f0cd66f857`），组合前目标分支清单对象另存 `style-before-merges.json`；保留既有浮窗选择器和变量，设置页沿用原位置与控件档位。自动化运行的是开发态宿主，安装态 T16 与 Remote SSH T17 按既有阶段门控跳过，本轮未执行 VSIX 安装或 SSH 矩阵。
+
+人工待验继续由[人工验证清单](manual-verification.md)和各规格实施段承载，以下项目仍未由用户验收：
+
+- T01：真实来源内容的粘贴结果、纯文本选择，以及物理键盘操作下的两阶段撤销手感。
+- T03：实际组件控件打开 Markdown / 原生文本、保留目标模式，及引用 B 内相对路径导航的使用体验。
+- T05：真实按钮/文字旁的浮窗位置、鼠标联合域保活、键盘进入与 Esc 归还焦点，递归内容只读。
+- T07：主题单选与来源标识、真实 VSCode 重启回显、跟随系统与固定 VSCode 主题的明暗行为、高对比可读性。Codex 内核继续保留，替代组件分发与退役不在本轮完成范围。
