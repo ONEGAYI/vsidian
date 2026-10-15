@@ -81,12 +81,12 @@
   pointer-events: auto;
 }
 
-/* 倒计时条：右端锚定满格，随呈现时长线性向左收缩至零（宽度动画）；时长由 toast.ts 按气泡内联注入。
+/* 倒计时条：左端锚定满格，右端随呈现时长线性向左收缩至零（宽度动画）；时长由 toast.ts 按气泡内联注入。
  * 内部形态（颜色/几何）硬编码于此，不进公开样式契约。 */
 :where(.vsidian-toast-timer) {
   position: absolute;
   top: 0;
-  right: 0;
+  left: 0;
   height: 2px;
   width: 100%;
   border-radius: 1px;
