@@ -117,6 +117,7 @@ vsidian/
     │   ├── globLiteral.ts             # watcher 文件名 glob 转义
     │   ├── hoverRefresh.ts            # 引用视图同步参数与订阅注册表
     │   ├── htmlBlock.ts               # 块级 HTML 边界共享事实源
+    │   ├── htmlInline.ts              # 行内 HTML 片段边界共享事实源
     │   ├── i18n.ts                    # t() 取词与语言包装配状态模块
     │   ├── imageRefresh.ts            # 图片刷新共享常量与核验决策
     │   ├── jiebaManifest.ts           # jieba 锁定版本与下载源清单
@@ -221,7 +222,7 @@ vsidian/
         ├── hoverPopup.ts                 # 悬停预览浮层单例
         ├── hoverPopupGeometry.ts         # 悬停浮层几何纯函数
         ├── htmlComment.ts                # 阅读侧 HTML 注释剥离纯函数
-        ├── htmlSanitize.ts               # HTML 块专用净化边界
+        ├── htmlSanitize.ts               # HTML 净化边界（块级+行内装配）
         ├── htmlToMarkdown.ts             # 富文本HTML到Markdown转换
         ├── imagePaste.ts                 # 图片粘贴拦截适配层（#161）
         ├── imagePopup.ts                 # 图片弹窗全屏浮层单例
@@ -238,6 +239,7 @@ vsidian/
         ├── liveDecorations.ts            # 语法树驱动 Live 装饰（#8）
         ├── liveEmbed.ts                  # Live 嵌入装饰与源码显隐
         ├── liveHtml.ts                   # Live 块级 HTML 片段替换装饰
+        ├── liveInlineHtml.ts             # Live 行内 HTML 片段替换装饰
         ├── liveInstance.ts               # Live 编辑器可复用实例
         ├── liveLineNumbers.ts            # 表格段首行号与绘制探针
         ├── liveLinks.ts                  # live 链接装饰与跳转（#10）

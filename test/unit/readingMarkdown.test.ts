@@ -29,13 +29,19 @@ function renderToDom(md: ReturnType<typeof createMarkdownRenderer>, src: string)
 }
 
 describe('createMarkdownRenderer：安全配置', () => {
-  it('html:false——源文中的 HTML 标签按纯文本转义，不产生元素', () => {
+  it('合规行内 HTML 净化后渲染；script/执行类仍拒绝（#568 规格差异改版）', () => {
+    // 旧产品约束（HTML 一律转义字面）按 #565/#568 规格调整为「允许合规
+    // HTML、仍拒绝执行与越权」：行内 <b> 渲染为净化元素；行内 script
+    // 净化为空回退转义源码（可访问原始源码，不执行）；负向证据保留
     const md = createMarkdownRenderer()
-    const host = renderToDom(md, '<script>alert(1)</script>\n\n<b>加粗</b>\n')
+    const host = renderToDom(md, '前 <script>alert(1)</script> 中 <b>加粗</b> 后\n')
     expect(host.querySelector('script')).toBeNull()
-    expect(host.querySelector('b')).toBeNull()
+    expect(host.querySelector('b')!.textContent).toBe('加粗')
     expect(host.textContent).toContain('<script>alert(1)</script>')
-    expect(host.textContent).toContain('<b>加粗</b>')
+    // 块级 script（独占行）走 T02 块路径：净化为空回退转义源码
+    const blockHost = renderToDom(md, '<script>alert(1)</script>\n\n段落\n')
+    expect(blockHost.querySelector('script')).toBeNull()
+    expect(blockHost.textContent).toContain('<script>alert(1)</script>')
   })
 
   it('javascript: 协议链接不产生可执行 href（validateLink 默认拦截）', () => {

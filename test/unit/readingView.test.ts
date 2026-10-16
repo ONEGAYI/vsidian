@@ -104,13 +104,15 @@ describe('任务语义入口（#9：可交互勾选）', () => {
 })
 
 describe('源文本安全注入', () => {
-  it('HTML 形态的源文本按纯文本呈现，不产生元素节点', () => {
+  it('合规 HTML 净化后渲染；script/执行类仍拒绝（#568 规格差异改版）', () => {
+    // 旧产品约束（HTML 一律纯文本）按 #565/#568 规格调整为「允许合规
+    // HTML、仍拒绝执行与越权」：块级 script 净化为空回退转义源码；
+    // 行内 <b> 渲染为净化元素；负向证据保留
     const container = createReadingContainer()
-    renderReadingBlocks(container, '<script>alert(1)</script>\n\n<b>加粗</b>\n')
+    renderReadingBlocks(container, '<script>alert(1)</script>\n\n前 <b>加粗</b> 后\n')
     expect(container.querySelector('script')).toBeNull()
-    expect(container.querySelector('b')).toBeNull()
+    expect(container.querySelector('b')!.textContent).toBe('加粗')
     expect(container.textContent).toContain('<script>alert(1)</script>')
-    expect(container.textContent).toContain('<b>加粗</b>')
   })
 
   it('javascript: 链接不产生可执行 href', () => {

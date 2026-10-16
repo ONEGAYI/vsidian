@@ -1,10 +1,12 @@
 // 阅读视图 markdown-it 渲染层（工单 #8）：安全配置 + 源锚点 + DOM 净化。
 //
-// 安全边界（规格「不将 Markdown 原文作为可执行 HTML」；#567/T02 改版）：
+// 安全边界（规格「不将 Markdown 原文作为可执行 HTML」；#567/T02、#568/T03 改版）：
 // - html:true 供块级 HTML 接入（html:false 下 markdown-it 不产 html_block
-//   token，15.0.2 实测）；行内 HTML 经 html_inline 渲染规则覆盖为转义
-//   （字面呈现，T03 行内混排前语义不变）；顶层 html_block 由切块层走
-//   专用净化边界（htmlSanitize），容器内 html_block 经渲染规则覆盖转义
+//   token，15.0.2 实测）；**完整行内片段**（#568/T03）经 vsidian_inline_html
+//   规则整段消费、htmlSanitize 净化后原位渲染；不成型行内（未闭合/孤立
+//   闭/跨行）仍经 html_inline 渲染规则覆盖为转义字面（降级方向安全）。
+//   顶层 html_block 由切块层走专用净化边界（htmlSanitize），容器内
+//   html_block 经渲染规则覆盖转义
 // - linkify/typographer 关闭：URL 自动发现与排版替换均不启用
 // - markdown-it 默认 validateLink 拦截 javascript:/vbscript: 等危险协议
 // - sanitizeReadingDom：进入 DOM 后的防御性二次清洗（纵深防御——清洗
@@ -26,6 +28,8 @@ import { renderMathHtml } from './mathRenderCache'
 import { highlightFlankOk } from '../shared/markdownDoc'
 import { tableCellBreakLength } from '../shared/tableCells'
 import { decodeCellView } from '../shared/tableCellEmbed'
+import { matchInlineHtmlFragmentAt } from '../shared/htmlInline'
+import { htmlInlineRenderHtml } from './htmlSanitize'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
 export interface ReadingRenderEnv {
@@ -381,14 +385,17 @@ function embedSlotHtml(inner: string): string {
 
 /**
  * 创建阅读渲染器（安全配置锁定；渲染规则一次性装配，实例应复用）。
- * 安全锁定的边界（#423 重协商；#567/T02 块级 HTML 接入改版）：
+ * 安全锁定的边界（#423 重协商；#567/T02 块级、#568/T03 行内接入改版）：
  * - **html:true（#567）**：markdown-it 在 html:false 下完全不产 html_block
  *   token（块级 HTML 退化为段落转义文本——15.0.2 实测），块级接入必须
- *   放行块层。行内 HTML 维持字面：html_inline 渲染规则覆盖为转义（T03
- *   行内混排前的既有语义）；**非顶层**（引用/列表容器内）的 html_block
- *   同样经渲染规则覆盖转义——顶层 html_block 在 readingBlocks 切块层走
- *   专用净化边界（htmlSanitize 白名单 + sanitizeReadingDom 纵深），容器
- *   内维持源码降级（两端一致边界，容器接入归后续票）。
+ *   放行块层。**完整行内片段（#568/T03）**：vsidian_inline_html 规则
+ *   （html_inline 之前）整段消费 → htmlSanitize 净化原位渲染（span 内联
+ *   颜色、br 换行等），片段内不递归 Markdown；不成型行内（未闭合/孤立
+ *   闭/跨行标签）维持 html_inline 渲染覆盖转义——字面降级。**非顶层**
+ *   （引用/列表容器内）的 html_block 同样经渲染规则覆盖转义——顶层
+ *   html_block 在 readingBlocks 切块层走专用净化边界（htmlSanitize
+ *   白名单 + sanitizeReadingDom 纵深），容器内维持源码降级（两端一致
+ *   边界，容器接入归后续票）。
  * - linkify/typographer 关闭：URL 自动发现与排版替换均不启用（恒锁）。
  * - markdown-it 默认 validateLink 拦截 javascript:/vbscript: 等危险协议。
  * - sanitizeReadingDom：进入 DOM 后的防御性二次清洗（纵深防御——清洗
@@ -462,6 +469,32 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
       }
     }
   })
+  // #568（T03）行内 HTML 混排：插在 html_inline 之前（vsidian_table_break
+  // 之后——表格格内 bare <br> 的既有放行优先，片段内的 br 由本规则整段
+  // 消费后照常渲染）。完整片段（同行配对/原子标签，shared/htmlInline 单一
+  // 事实源——与 Lezer HTMLTag 树派生对拍钉住）消费为单个 token 整段净化
+  // 渲染；不成型（未闭合/孤立闭/跨行/非法语法）不命中，留给 html_inline
+  // 默认链走 #567 的转义字面降级。片段内不递归 Markdown（规格红线——
+  // **bold** 等标记字面呈现）。
+  md.inline.ruler.before('html_inline', 'vsidian_inline_html', (state: StateInline, silent: boolean) => {
+    if (state.src[state.pos] !== '<') {
+      return false
+    }
+    const end = matchInlineHtmlFragmentAt(state.src, state.pos)
+    if (end === null) {
+      return false
+    }
+    if (!silent) {
+      const token = state.push('vsidian_inline_html', '', 0)
+      token.content = state.src.slice(state.pos, end)
+    }
+    state.pos = end
+    return true
+  })
+  // #568（T03）行内片段渲染：净化装配（DOMPurify 单一事实源复用，
+  // 行内降级回退为转义源码 span）；无包装容器类——原位渲染保持用户
+  // DOM 形态（Q4=B：CSS 按实际 DOM 匹配，不引入额外包装干扰选择器语义）
+  md.renderer.rules['vsidian_inline_html'] = (tokens, idx) => htmlInlineRenderHtml(tokens[idx]!.content)
   md.renderer.rules['list_item_open'] = (tokens, idx, _options, env) => {
     const map = (tokens[idx] as Token).map
     const bounds = env as unknown as ReadingRenderEnv | undefined

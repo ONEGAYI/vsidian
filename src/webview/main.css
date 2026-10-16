@@ -5673,6 +5673,27 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   display: none;
 }
 
+/* ---- #568（T03）行内原生 HTML（样式契约 content 域 live-inline-html-widget
+   / reading-inline-html 条目）----
+   Live：宿主是行内片段 inline replace widget 的替换物（span，
+   display:inline——前后正文同行流不断行，不隐藏前后正文）；无悬停边框
+   与编辑按钮（规格悬停 chrome 行只对块级渲染区——行内是正文文字流，
+   不加浮层噪音）。内容保持原生语义 DOM，不加生产类（Q4=B）。Reading：
+   原位渲染无包装容器类；降级源码回退为转义源码 span（等宽呈现）。 */
+#app .cm-editor .cm-content .vsidian-live-inline-html {
+  display: inline;
+}
+
+/* 行内降级源码回退（span 变体——净化为空的行内片段，如行内 script）：
+   等宽呈现；Live 宿主内与 Reading 段落内同款（与块级 pre 回退同类名，
+   仅行内形态不加 pre 的块级间距规则） */
+#app .vsidian-live-inline-html .vsidian-html-source-fallback,
+#app .vsidian-view-reading span.vsidian-html-source-fallback {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
 /* ---- #340（P3-08）可读文本悬停视图：类编辑器只读呈现 ----
    观感口径（原生对齐）：字体/字号/连字来自语言级生效值（TextRefView 内联
    写入，缺席回落编辑器默认变量族）；token 颜色全部内联（宿主外观服务计

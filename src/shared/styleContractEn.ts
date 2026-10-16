@@ -363,6 +363,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'A block-level div in the reading container (vsidian-reading-block + vsidian-reading-html, carrying the data-vsidian-src-start/end source anchors); the inside is sanitized native HTML (whitelist first gate + sanitizeReadingDom defense-in-depth second gate).',
     obsidian: { counterpart: 'Native HTML blocks rendered inside .markdown-preview-view (no dedicated container class)' },
   },
+  'reading-inline-html': {
+    purpose:
+      'Reading-view inline native HTML fragments (#568/T03): a complete fragment is consumed whole by the vsidian_inline_html rule and rendered in place after htmlSanitize sanitization — no wrapper container class (Q4=B: CSS matches the actual DOM and honors selector intent; no extra wrapper disturbs structural selectors like p > span). Span inline colors, br line breaks and other native semantics take effect; surrounding Markdown text, list/blockquote containers, and in-table semantics are preserved; Markdown is not recursively parsed inside a fragment. Malformed fragments (unclosed/orphan close/crossing lines) stay escaped literals; a fragment that sanitizes to nothing falls back to an escaped source span (.vsidian-html-source-fallback, the same class as the block-level degraded state). Find/anchor navigation is unaffected (inline fragments never change the block sequence).',
+    states:
+      'Normal in-place rendering (no dedicated class); the degraded state span.vsidian-html-source-fallback renders monospaced.',
+    dom: 'Native inline elements (span/u/b/a/img/br and so on, sanitized products) inside reading content blocks (paragraphs/headings/lists/blockquotes/table cells); the degraded fallback is a span.',
+    obsidian: { counterpart: 'Natively rendered inline HTML inside .markdown-preview-view (no dedicated container class)' },
+  },
 
   // ---- 链接、图片与双链（link-image-wikilink，7 条）----
   'live-link': {
@@ -1183,6 +1191,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Hidden form (untouched: an inline replacement widget with the surrounding cm-widgetBuffer pair zero-height block-levelized — visually hidden while the layout boxes remain as coordinate anchors) / revealed form (touched: no widget, the source is present); the hover border and button visibility are carried by CSS :hover (the button also has a :focus-visible keyboard-reachable state).',
     dom: 'A block-levelized host div inside a .cm-line in the live-view .cm-content (position:relative provides the button positioning context); the inner .vsidian-live-html-content holds the sanitized native HTML and the .vsidian-graphic-chrome button group is a trailing child (edit only). Mounted identically in the main document and inside embedded live editors (B document html blocks render too).',
     obsidian: { counterpart: 'No dedicated class (Obsidian live HTML blocks toggle between source and rendering; internal structure is closed-source and not promised)' },
+  },
+  'live-inline-html-widget': {
+    purpose:
+      'The live-view inline native HTML fragment-replacement host (#568/T03): a complete inline fragment derived from the Lezer HTMLTag tree (paired via shared/htmlInline — same-line, outermost; nested pairs take the outermost, void/self-closing tags are single-tag fragments) renders as sanitized native semantic DOM in an exact-range [from, to] inline replace widget while the cursor/selection does not touch the source range (span inline colors, br line breaks and beyond); the host is display:inline — surrounding body text stays in the same line flow, never hidden. When touched (selectionTouchesRange semantics: a collapsed cursor inside or on either end, a non-empty selection strictly overlapping, or any one selection range hitting; find/anchor hits trigger the same way) the widget is withdrawn and the editable source shows, and fully leaving restores the rendering — reveal only affects the visual presentation, zero write-back and no separate undo entry. A plain click on the rendered content selects the complete source of that fragment (sharing the block-level mousedown interceptor factory; modified clicks pass through so cross-fragment selections never extend); keyboard entry keeps the cursor position. The click/reveal granularity of nested fragments is the outermost complete source (deterministic ranges). No hover border or edit button (the spec hover-chrome row covers block-level render regions only — inline fragments are body text flow). The content root carries the data-vsidian-doc-scope document identity marker (consuming the #567 channel); a fragment that sanitizes to nothing (inline script and the like) falls back to an escaped source span (.vsidian-html-source-fallback).',
+    states:
+      'Hidden form (untouched: an inline replacement widget in the line flow) / revealed form (touched: no widget, the source is present); no hover state (chrome is block-level only).',
+    dom: 'An inline host span (display:inline) inside a .cm-line in the live-view .cm-content; the inner .vsidian-live-inline-html-content holds the sanitized native HTML. Mounted identically in the main document and inside embedded live editors.',
+    obsidian: { counterpart: 'No dedicated class (Obsidian inline HTML toggles between source and rendering; internal structure is closed-source and not promised)' },
   },
   'reading-embed-ref': {
     purpose:

@@ -368,7 +368,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'list-task': 5,
   'line-syntax': 5,
   table: 12,
-  'reading-structure': 14,
+  'reading-structure': 16,
   'link-image-wikilink': 17,
   'content-variables': 12,
   'content-limits': 11,

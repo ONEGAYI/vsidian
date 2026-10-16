@@ -3975,6 +3975,54 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#567（2026-10-16）"
   },
   {
+    "id": "live-inline-html-widget",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "container",
+    "target": ".vsidian-live-inline-html（Live 行内 HTML 宿主 widget；.vsidian-live-inline-html-content 为净化内容根）",
+    "purpose": "Live 视图的行内原生 HTML 片段替换宿主（#568/T03）：Lezer HTMLTag 树派生的完整行内片段（shared/htmlInline 配对——同行、最外层；成对嵌套取最外层，void/自闭合单标签即片段）在光标/选区未触及源码区间时以**精确区间 [from, to] inline replace widget** 呈现净化后的原生语义 DOM（span 内联颜色、br 换行等）；宿主 display:inline——前后正文同行流不断行，不隐藏前后正文。触及（selectionTouchesRange 语义：折叠光标含两端、非空选区严格相交、任一选区命中；查找/锚点命中同列）时撤下 widget 源码显形可编辑，完全离开恢复渲染——显隐只作用于视觉呈现，零写回零独立撤销项。普通点击渲染内容 = 选中该片段完整源码（与块级共用 mousedown 拦截器工厂，修饰键放行默认链——跨片段选择不扩选）；键盘进入保留原落点。嵌套片段的点击/显形粒度为最外层完整源码（确定性区间）。无悬停边框与编辑按钮（规格悬停 chrome 行只对块级渲染区——行内是正文文字流）。内容根携带 data-vsidian-doc-scope 文档身份标记（消费 #567 已挂通道）；净化后为空的片段（行内 script 等）回退转义源码 span（.vsidian-html-source-fallback）。",
+    "views": [
+      "live"
+    ],
+    "states": "隐藏态（未触及：inline 替换 widget，行内流呈现）/ 显形态（触及：无 widget，源文在场）；无悬停态（chrome 仅块级）。",
+    "dom": "Live 视图 .cm-content 内 .cm-line 中的行内宿主 span（display:inline）；内部 .vsidian-live-inline-html-content 挂净化后的原生 HTML。主文与嵌入内部 Live 统一装配。",
+    "example": "#app .cm-editor .cm-content .vsidian-live-inline-html {\n  /* 宿主行内化是前后正文不断行的前提 */\n}",
+    "obsidian": {
+      "counterpart": "无专用类（Obsidian 行内 HTML 按源文/渲染切换，内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 htmlInline/liveInlineHtml（#568）：片段矩阵（成对嵌套/自闭合/未闭合/孤立闭/转义尖括号/引号属性/跨行降级）+ 两端对拍（Lezer HTMLTag ↔ markdown-it 规则 token）、显隐谓词、嵌套最外层唯一、净化负向",
+      "浏览器 liveInlineHtml（#568）：真实点击 = 完整源码选区、方向键落点、双向跨片段选择、多选区、IME 组合、编辑/粘贴生产链路、阅读态内联颜色绘制",
+      "集成「行内 HTML 双模式内联颜色与换行绘制」（#568）：paint.html.inline（live 宿主命中 + computed color + br 计数）"
+    ],
+    "introduced": "#568（2026-10-16）"
+  },
+  {
+    "id": "reading-inline-html",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "selector",
+    "target": "行内原生元素（无专用容器类）+ span.vsidian-html-source-fallback（降级态）",
+    "purpose": "阅读视图的行内原生 HTML 片段（#568/T03）：完整片段经 vsidian_inline_html 规则整段消费、htmlSanitize 净化后**原位渲染**——无包装容器类（Q4=B：CSS 按实际 DOM 匹配、尊重选择器原意，不引入额外包装干扰 p > span 等结构选择器语义）。span 内联颜色、br 换行等按原生语义生效；前后 Markdown 文字、列表/引用容器、Markdown 表格内语义不丢；片段内不递归 Markdown。不成型片段（未闭合/孤立闭/跨行）维持转义字面；净化后为空的片段回退转义源码 span（.vsidian-html-source-fallback，与块级降级同类名）。标注查找/锚点不受影响（行内片段不改变块序列）。",
+    "views": [
+      "reading"
+    ],
+    "states": "常态原位渲染（无专用类）；降级态 span.vsidian-html-source-fallback 等宽呈现。",
+    "dom": "阅读容器各内容块（段落/标题/列表/引用/表格格）内的原生行内元素（span/u/b/a/img/br 等，净化产物）；降级回退为 span。",
+    "example": ".markdown-preview-view p span[style] {\n  /* 原生元素按实际 DOM 命中（无包装层） */\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view 内原生渲染的行内 HTML（无专用容器类）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 readingInlineHtml（#568）：原位渲染（颜色元素/br 不拆段/嵌套/片段内不递归 Markdown/标题引用列表表格上下文）、不成型字面降级、净化负向（事件属性/伪造锚点/危险协议）",
+      "浏览器 liveInlineHtml 阅读态（#568）：内联颜色 computed + br 换行绘制、表格/引用上下文不回退",
+      "集成（#568）：paint.html.inline（reading 侧颜色元素命中与 computed color）"
+    ],
+    "introduced": "#568（2026-10-16）"
+  },
+  {
     "id": "reading-embed-ref",
     "domain": "content",
     "category": "link-image-wikilink",
@@ -5918,6 +5966,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
       "counterpart": "Native HTML blocks rendered inside .markdown-preview-view (no dedicated container class)"
     }
   },
+  "reading-inline-html": {
+    "purpose": "Reading-view inline native HTML fragments (#568/T03): a complete fragment is consumed whole by the vsidian_inline_html rule and rendered in place after htmlSanitize sanitization — no wrapper container class (Q4=B: CSS matches the actual DOM and honors selector intent; no extra wrapper disturbs structural selectors like p > span). Span inline colors, br line breaks and other native semantics take effect; surrounding Markdown text, list/blockquote containers, and in-table semantics are preserved; Markdown is not recursively parsed inside a fragment. Malformed fragments (unclosed/orphan close/crossing lines) stay escaped literals; a fragment that sanitizes to nothing falls back to an escaped source span (.vsidian-html-source-fallback, the same class as the block-level degraded state). Find/anchor navigation is unaffected (inline fragments never change the block sequence).",
+    "states": "Normal in-place rendering (no dedicated class); the degraded state span.vsidian-html-source-fallback renders monospaced.",
+    "dom": "Native inline elements (span/u/b/a/img/br and so on, sanitized products) inside reading content blocks (paragraphs/headings/lists/blockquotes/table cells); the degraded fallback is a span.",
+    "obsidian": {
+      "counterpart": "Natively rendered inline HTML inside .markdown-preview-view (no dedicated container class)"
+    }
+  },
   "live-link": {
     "purpose": "Content span for live links (always decorated; when the cursor or selection enters the range of a link, its [ and ](url) source is revealed while other links on the same line stay formatted); the hidden tail corresponds to the direction of .cm-formatting-link / .cm-string.cm-url in Obsidian — vsidian presents it by hiding, with no separate styling class.",
     "states": "The source is revealed while the cursor or selection is inside the link range.",
@@ -6766,6 +6822,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A block-levelized host div inside a .cm-line in the live-view .cm-content (position:relative provides the button positioning context); the inner .vsidian-live-html-content holds the sanitized native HTML and the .vsidian-graphic-chrome button group is a trailing child (edit only). Mounted identically in the main document and inside embedded live editors (B document html blocks render too).",
     "obsidian": {
       "counterpart": "No dedicated class (Obsidian live HTML blocks toggle between source and rendering; internal structure is closed-source and not promised)"
+    }
+  },
+  "live-inline-html-widget": {
+    "purpose": "The live-view inline native HTML fragment-replacement host (#568/T03): a complete inline fragment derived from the Lezer HTMLTag tree (paired via shared/htmlInline — same-line, outermost; nested pairs take the outermost, void/self-closing tags are single-tag fragments) renders as sanitized native semantic DOM in an exact-range [from, to] inline replace widget while the cursor/selection does not touch the source range (span inline colors, br line breaks and beyond); the host is display:inline — surrounding body text stays in the same line flow, never hidden. When touched (selectionTouchesRange semantics: a collapsed cursor inside or on either end, a non-empty selection strictly overlapping, or any one selection range hitting; find/anchor hits trigger the same way) the widget is withdrawn and the editable source shows, and fully leaving restores the rendering — reveal only affects the visual presentation, zero write-back and no separate undo entry. A plain click on the rendered content selects the complete source of that fragment (sharing the block-level mousedown interceptor factory; modified clicks pass through so cross-fragment selections never extend); keyboard entry keeps the cursor position. The click/reveal granularity of nested fragments is the outermost complete source (deterministic ranges). No hover border or edit button (the spec hover-chrome row covers block-level render regions only — inline fragments are body text flow). The content root carries the data-vsidian-doc-scope document identity marker (consuming the #567 channel); a fragment that sanitizes to nothing (inline script and the like) falls back to an escaped source span (.vsidian-html-source-fallback).",
+    "states": "Hidden form (untouched: an inline replacement widget in the line flow) / revealed form (touched: no widget, the source is present); no hover state (chrome is block-level only).",
+    "dom": "An inline host span (display:inline) inside a .cm-line in the live-view .cm-content; the inner .vsidian-live-inline-html-content holds the sanitized native HTML. Mounted identically in the main document and inside embedded live editors.",
+    "obsidian": {
+      "counterpart": "No dedicated class (Obsidian inline HTML toggles between source and rendering; internal structure is closed-source and not promised)"
     }
   },
   "reading-embed-ref": {

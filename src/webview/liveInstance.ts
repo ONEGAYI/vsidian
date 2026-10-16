@@ -68,6 +68,7 @@ import {
 } from './headingFold'
 import { liveEmbed } from './liveEmbed'
 import { liveHtml } from './liveHtml'
+import { liveInlineHtml } from './liveInlineHtml'
 import { liveBlockId } from './liveBlockId'
 import { anchorFlash } from './anchorFlash'
 import { codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
@@ -2666,6 +2667,12 @@ export class LiveEditorInstance {
       // 实例统一装配（B 的 html 块同渲染）；docScope 标记由视图装配层
       // 注入（T04 隔离基座）
       liveHtml,
+      // #568（T03）行内原生 HTML 混排：片段表（Lezer HTMLTag 树派生 +
+      // shared/htmlInline 配对）+ 行内片段替换装饰（未触及 = 行内
+      // inline replace 渲染净化 HTML——前后正文同行流不断行；触及 =
+      // 源码显形，selectionTouchesRange 语义；查找命中同列）+ 点击拦截
+      // 与块级共用工厂（选中该片段完整源码）。主文/嵌入实例统一装配
+      liveInlineHtml,
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
       // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
       liveBlockId,

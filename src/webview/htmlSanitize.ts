@@ -68,3 +68,17 @@ export function htmlBlockRenderHtml(source: string): string {
   }
   return `<pre class="${HTML_SOURCE_FALLBACK_CLASS}">${escapeHtml(source)}</pre>`
 }
+
+/**
+ * **行内** HTML 片段的渲染 HTML 装配（#568/T03）：净化复用
+ * sanitizeHtmlBlockMarkup（单一事实源，不建第二份——仅装配形态差异：
+ * 行内降级回退是转义源码 **span** 而非 pre，避免行内混排被块级元素
+ * 拆行）。行内 `<script>` 等净化为空片段同样回退源码（可访问原始源码）。
+ */
+export function htmlInlineRenderHtml(source: string): string {
+  const sanitized = sanitizeHtmlBlockMarkup(source)
+  if (sanitized !== '' || source.trim() === '') {
+    return sanitized
+  }
+  return `<span class="${HTML_SOURCE_FALLBACK_CLASS}">${escapeHtml(source)}</span>`
+}

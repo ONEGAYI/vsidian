@@ -159,6 +159,7 @@ import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtP
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
 import { liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
+import { revealInlineHtmlSourceAtCursor } from './liveInlineHtml'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
@@ -9888,13 +9889,18 @@ export class WebviewSyncController {
 
   /** #567（T02）「编辑当前 HTML 源码」：光标所在 html 块 → 选中完整源码
    *  区间（与渲染内容点击、编辑按钮三入口同一执行体；纯选区事务零写
-   *  回——显形由既有装饰管线按选区触及接管）。无命中静默不动作 */
+   *  回——显形由既有装饰管线按选区触及接管）。无命中静默不动作。
+   *  #568（T03）行内片段同源：块级无命中时按行内片段表解析（同一命令
+   *  覆盖两种片段形态） */
   private runHtmlEditSourceCommand(): void {
     const resolved = this.actionTarget()
     if (!resolved || !this.targetEditable(resolved.view, resolved.embed)) {
       return
     }
-    revealHtmlSourceAtCursor(resolved.view)
+    if (revealHtmlSourceAtCursor(resolved.view)) {
+      return
+    }
+    revealInlineHtmlSourceAtCursor(resolved.view)
   }
 
   /**
@@ -10541,6 +10547,52 @@ export class WebviewSyncController {
     const mergedCellEl = htmlRootEls
       .flatMap((root) => [...root.querySelectorAll<HTMLElement>('td[colspan], td[rowspan], th[colspan], th[rowspan]')])
       [0] ?? null
+    // #568（T03）行内原生 HTML 绘制探针：live 侧行内宿主
+    //（.vsidian-live-inline-html）计数 + 可见性 + 行内颜色绘制证据（首个
+    // 带行内颜色样式的元素 computed color）+ br 换行计数 + 净化负向
+    //（宿主子树 script/on* 残留期望恒 0；live 态光标在片段外才有 widget）
+    // Reading 侧无包装类（原位渲染——Q4=B 最小 DOM 侵入），观测面 = 容器
+    // 内带行内颜色样式的原生元素（净化负向取其所在 reading 块子树）。
+    // jsdom 无布局（rect 恒 0），visible 恒 false——只作真宿主/浏览器依据
+    const inlineHostEls = htmlScope && this.viewMode !== 'reading'
+      ? [...htmlScope.querySelectorAll<HTMLElement>('.vsidian-live-inline-html')]
+      : []
+    const inlineColorEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLElement>('[style*="color"]')]
+        .filter((el) => (this.viewMode === 'reading'
+          ? el.closest('.vsidian-reading-html') === null // 块级 html 块归 paint.html 口径
+          : el.closest('.vsidian-live-inline-html') !== null))
+      : []
+    let inlineVisible = false
+    for (const el of inlineColorEls) {
+      if (hitPaintedElement(el)) {
+        inlineVisible = true
+        break
+      }
+    }
+    const inlineNegScope = this.viewMode === 'reading'
+      ? [...new Set(inlineColorEls.map((el) => el.closest<HTMLElement>('.vsidian-reading-block')))]
+        .filter((el): el is HTMLElement => el !== null)
+      : inlineHostEls
+    const inlinePaint = {
+      roots: this.viewMode === 'reading' ? inlineColorEls.length : inlineHostEls.length,
+      visible: inlineVisible,
+      color: inlineColorEls[0] ? getComputedStyle(inlineColorEls[0]).color : null,
+      // br 换行绘制证据：live 取行内宿主子树；reading 取容器内全部 br
+      //（原子 br 片段无颜色元素——颜色圈定不到；排除代码块，代码区 br
+      // 属既有代码呈现不是行内 HTML 证据）
+      brs: this.viewMode === 'reading'
+        ? (htmlScope
+          ? [...htmlScope.querySelectorAll('br')]
+            .filter((br) => br.closest('.vsidian-reading-code-block') === null).length
+          : 0)
+        : inlineHostEls.reduce((n, el) => n + el.querySelectorAll('br').length, 0),
+      scripts: inlineNegScope.reduce((n, r) => n + r.querySelectorAll('script').length, 0),
+      eventAttrs: inlineNegScope.reduce(
+        (n, r) => n + [...r.querySelectorAll('*')]
+          .reduce((m, el) => m + [...el.attributes].filter((a) => a.name.toLowerCase().startsWith('on')).length, 0),
+        0),
+    }
     const htmlPaint = {
       roots: htmlRoots,
       visible: htmlVisible,
@@ -10552,6 +10604,7 @@ export class WebviewSyncController {
         (n, r) => n + [...r.querySelectorAll('*')]
           .reduce((m, el) => m + [...el.attributes].filter((a) => a.name.toLowerCase().startsWith('on')).length, 0),
         0),
+      inline: inlinePaint,
     }
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
@@ -10839,7 +10892,8 @@ export class WebviewSyncController {
       imageChrome,
       // #567（T02）块级原生 HTML 绘制观测（live：.vsidian-live-html /
       // reading：.vsidian-reading-html；无渲染根时缺省）
-      ...(htmlRoots > 0 ? { html: htmlPaint } : {}),
+      // #568 起 html 探针含行内面：块或行内任一在场即产出
+      ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: htmlPaint } : {}),
       quickActions,
       code,
       fm,

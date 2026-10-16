@@ -148,6 +148,12 @@ export function liveHtmlDocScope(scope: string): Extension {
   return liveHtmlDocScopeFacet.of(scope)
 }
 
+/** docScope 读取面（#568/T03 行内装饰消费同一通道——不新建装载面；
+ *  未装配（嵌入实例，随 T04 接线）时为 null） */
+export function liveHtmlDocScopeOf(state: import('@codemirror/state').EditorState): string | null {
+  return state.facet(liveHtmlDocScopeFacet)
+}
+
 /**
  * 装饰构建（纯数据输入，可单测直驱）：逐块发射——未触及且非纯 style →
  * 精确区间 inline replace widget；触及（选区或命中显形）或纯 style →
@@ -315,36 +321,44 @@ export const liveHtmlDecorations = StateField.define<DecorationSet>({
 })
 
 /**
- * 普通点击进入源码（mousedown 拦截器）：无修饰左键落在 HTML widget 渲染
- * 内容上 → 选中该片段完整源码并显形（返回 true 吞掉 CM6 默认光标落位）。
- * 修饰键（shift 扩选/ctrl/alt/meta）与右键放行默认链——正反向跨块选择
- * 不扩选、上下文菜单不受影响；按钮组自有 mousedown（preventDefault），
- * 先排除避免双发。
+ * HTML widget 普通点击拦截器工厂（#568/T03 起块级与行内共用同一执行体
+ * 形状）：无修饰左键落在指定宿主类的 widget 渲染内容上 → 选中该片段
+ * 完整源码并显形（返回 true 吞掉 CM6 默认光标落位）。修饰键（shift
+ * 扩选/ctrl/alt/meta）与右键放行默认链——正反向跨片段选择不扩选、上下
+ * 文菜单不受影响；按钮组自有 mousedown（preventDefault），先排除避免
+ * 双发。
  */
-function htmlWidgetMousedown(event: MouseEvent, view: EditorView): boolean {
-  if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
-    return false
+export function makeHtmlWidgetMousedown(
+  hostClass: string,
+): (event: MouseEvent, view: EditorView) => boolean {
+  return (event, view) => {
+    if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+      return false
+    }
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return false
+    }
+    if (target.closest(`.${GRAPHIC_CHROME_CLASS_NAMES.chrome}`) !== null) {
+      return false // 编辑按钮自有处理（onEdit 同一执行体）
+    }
+    const host = target.closest<HTMLElement>(`.${hostClass}`)
+    if (host === null) {
+      return false
+    }
+    const from = Number(host.dataset['vsidianHtmlFrom'])
+    const to = Number(host.dataset['vsidianHtmlTo'])
+    if (!Number.isInteger(from) || !Number.isInteger(to) || to <= from || to > view.state.doc.length) {
+      return false
+    }
+    view.dispatch({ selection: { anchor: from, head: to } })
+    view.focus()
+    return true
   }
-  const target = event.target
-  if (!(target instanceof Element)) {
-    return false
-  }
-  if (target.closest(`.${GRAPHIC_CHROME_CLASS_NAMES.chrome}`) !== null) {
-    return false // 编辑按钮自有处理（onEdit 同一执行体）
-  }
-  const host = target.closest<HTMLElement>(`.${LIVE_HTML_CLASS_NAMES.host}`)
-  if (host === null) {
-    return false
-  }
-  const from = Number(host.dataset['vsidianHtmlFrom'])
-  const to = Number(host.dataset['vsidianHtmlTo'])
-  if (!Number.isInteger(from) || !Number.isInteger(to) || to <= from || to > view.state.doc.length) {
-    return false
-  }
-  view.dispatch({ selection: { anchor: from, head: to } })
-  view.focus()
-  return true
 }
+
+/** 块级宿主的点击拦截器（行内版由 liveInlineHtml 以本工厂装配） */
+const htmlWidgetMousedown = makeHtmlWidgetMousedown(LIVE_HTML_CLASS_NAMES.host)
 
 /**
  * 「编辑当前 HTML 源码」执行体（键位操作/编辑按钮/内容点击三入口同源）：

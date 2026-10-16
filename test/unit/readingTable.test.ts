@@ -30,15 +30,22 @@ const TABLE_DOC = [
 ].join('\n')
 
 describe('阅读块模型：表格独立成块', () => {
-  it('格内换行显示为 br，行内代码和带属性的 HTML 保持字面文本', () => {
+  it('格内换行显示为 br；行内代码字面；带属性的 br 净化后渲染（#568 规格差异改版）', () => {
+    // 旧产品约束（带属性 HTML 一律字面）按 #565/#568 规格调整为「允许
+    // 合规 HTML、仍拒绝执行与越权」：格内 `<br onclick=...>` 是完整行内
+    // 片段（void 单标签）→ 净化渲染为换行，事件属性被第一道闸剥离；
+    // 负向证据保留（onclick 不进场）
     const text = '| 上<br>下 | `a<br>b` |\n| --- | --- |\n| 甲<br/>乙<br />丙 | <br onclick="x()"> |'
     const table = splitReadingBlocks(text).find((b) => b.kind === 'table')!
     const el = createReadingBlockElement(table, text)
     expect(el.querySelectorAll('th')[0]!.querySelectorAll('br')).toHaveLength(1)
     expect(el.querySelectorAll('th')[1]!.textContent).toBe('a<br>b')
     expect(el.querySelectorAll('td')[0]!.querySelectorAll('br')).toHaveLength(2)
-    expect(el.querySelectorAll('td')[1]!.querySelector('br')).toBeNull()
-    expect(el.querySelectorAll('td')[1]!.textContent).toContain('<br onclick="x()">')
+    // 带属性 br：渲染为换行元素，onclick 剥离（不再字面）
+    const attrBr = el.querySelectorAll('td')[1]!.querySelector('br')
+    expect(attrBr).not.toBeNull()
+    expect(attrBr!.getAttribute('onclick')).toBeNull()
+    expect(el.querySelectorAll('td')[1]!.textContent).not.toContain('<br')
   })
   it('表格切为 kind=table 的块，区间覆盖表头到末行，带源锚点', () => {
     const blocks = splitReadingBlocks(TABLE_DOC)

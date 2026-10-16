@@ -2842,6 +2842,24 @@ export interface PaintProbe {
     scripts: number
     /** 净化负向：渲染根内 on* 事件属性数（期望 0） */
     eventAttrs: number
+    /** #568（T03）行内原生 HTML 绘制面：live 行内宿主 / reading 原位
+     *  渲染的行内颜色元素观测（无包装类——按 [style*=color] 圈定） */
+    inline: {
+      /** live：.vsidian-live-inline-html 宿主数；reading：容器内带行内
+       *  颜色样式且不在块级 html 块内的原生元素数 */
+      roots: number
+      /** 任一观测元素 rect 有面积且 elementFromPoint 命中自身子树 */
+      visible: boolean
+      /** 首个观测元素 computed color（span 内联颜色绘制证据；无则 null） */
+      color: string | null
+      /** br 换行绘制证据：live = 行内宿主子树 br 数；reading = 容器内
+       *  非代码块 br 数（原子 br 片段无颜色元素，颜色圈定不到） */
+      brs: number
+      /** 净化负向：观测面子树内 script 元素数（期望 0） */
+      scripts: number
+      /** 净化负向：观测面子树内 on* 事件属性数（期望 0） */
+      eventAttrs: number
+    }
   }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
   quickActions?: {

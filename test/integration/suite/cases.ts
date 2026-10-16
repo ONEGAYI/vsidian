@@ -845,6 +845,16 @@ interface ViewState {
       mergedCell: { hit: boolean; borderWidth: string | null } | null
       scripts: number
       eventAttrs: number
+      /** #568（T03）行内原生 HTML 绘制面：live 宿主 / reading 原位颜色
+       *  元素观测（[style*=color] 圈定——无包装类） */
+      inline: {
+        roots: number
+        visible: boolean
+        color: string | null
+        brs: number
+        scripts: number
+        eventAttrs: number
+      }
     }
     /** #106 分割线绘制：当前激活视图内首个渲染态横线的可见性与计数 */
     hr?: {
@@ -18865,6 +18875,62 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert((reading.readingBlockCount ?? 0) >= 4, 'Reading 块序列含 html 块（标题/表格/恶意/结尾）')
 
       // 零写回：渲染与模式切换不写磁盘、不改源文
+      assert(await readDisk(file) === diskBefore, '渲染与切换零磁盘写回')
+      assert(reading.text === doc, '源文逐字节不变（不序列化浏览器修复 DOM）')
+    } finally {
+      await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
+    }
+  }],
+
+  // ---- #568（T03）行内 HTML 混排双模式渲染 ----
+  // 真宿主 webview 内验证：行内片段（span 内联颜色 / br 换行）在 Live
+  //（行内 inline replace 装饰）与 Reading（原位渲染）两模式的绘制层证据
+  //（paint.html.inline：宿主/颜色元素命中 + computed color + br 计数——
+  // 「仅元素数量不通过」的验收口径）与净化负向（script/on* 残留恒 0、
+  // 未闭合字面降级、磁盘零写回）。
+  ['行内 HTML：双模式内联颜色与换行绘制（#568）', async () => {
+    const file = 'inline-html-568.md'
+    const doc = [
+      '# 行内 HTML 样例',
+      '',
+      '正文 <span style="color:red">红字</span> 与 <span style="color:blue">蓝字</span> 混排，换行 a<br>b 尾。',
+      '',
+      '恶意 <span style="color:red" onclick="evil()">恶</span> 与未闭合 <span style="color:red">尾巴',
+      '',
+      '结尾段落。',
+    ].join('\n')
+    await writeFile(nodePath.join(wsDir!, file), doc, 'utf8')
+    const diskBefore = await readDisk(file)
+    try {
+      await openWithEditor(file)
+      await waitSessionReady(file)
+      // Live 起步：光标在文档首（片段外）——行内片段以装饰渲染
+      const live = await waitViewState(file, (v) =>
+        v.viewMode === 'live' && v.paint?.html !== undefined && v.paint.html.inline !== undefined &&
+        v.paint.html.inline.roots >= 4, 0, 30000)
+      const liveInline = live.paint!.html!.inline!
+      assert(liveInline.visible === true,
+        `Live 行内颜色元素实际可见（elementFromPoint 命中，实际 ${JSON.stringify(liveInline)}）`)
+      assert(liveInline.color === 'rgb(255, 0, 0)',
+        `Live span 内联颜色绘制（computed color，实际 ${liveInline.color}）`)
+      assert(liveInline.brs >= 1, `Live br 换行绘制（实际 ${liveInline.brs}）`)
+      assert(liveInline.scripts === 0 && liveInline.eventAttrs === 0,
+        `Live 净化负向：script/on* 残留恒 0（实际 ${liveInline.scripts}/${liveInline.eventAttrs}）`)
+
+      // Reading：原位渲染（颜色元素 + br + 负向同口径）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
+      const reading = await waitViewState(file, (v) =>
+        v.viewMode === 'reading' && v.paint?.html !== undefined && v.paint.html.inline !== undefined &&
+        v.paint.html.inline.roots >= 2, 0, 30000)
+      const readingInline = reading.paint!.html!.inline!
+      assert(readingInline.visible === true, 'Reading 行内颜色元素实际可见')
+      assert(readingInline.color === 'rgb(255, 0, 0)',
+        `Reading span 内联颜色绘制（实际 ${readingInline.color}）`)
+      assert(readingInline.brs >= 1, `Reading br 换行绘制（实际 ${readingInline.brs}）`)
+      assert(readingInline.scripts === 0 && readingInline.eventAttrs === 0,
+        `Reading 净化负向恒 0（实际 ${readingInline.scripts}/${readingInline.eventAttrs}）`)
+
+      // 零写回：渲染与模式切换不写磁盘、不改源文（未闭合片段字面降级可访问）
       assert(await readDisk(file) === diskBefore, '渲染与切换零磁盘写回')
       assert(reading.text === doc, '源文逐字节不变（不序列化浏览器修复 DOM）')
     } finally {
