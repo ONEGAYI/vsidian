@@ -257,3 +257,135 @@ describe('粘贴规则运行生命周期（enable 面乙）', () => {
     expect(h.runtime.runtimeStatus('fixture.demo')).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// #542 T02：高级声明（正则/条件/嵌套）经同一登记面进入有效快照
+// ---------------------------------------------------------------------------
+
+describe('T02 高级声明登记', () => {
+  it('正则/条件/嵌套声明经同一登记面校验并进入有效快照（JSON 可序列化）', () => {
+    const h = harness()
+    h.register({
+      enable(context) {
+        context.paste.registerRules([{
+          id: 'advanced-card',
+          match: {
+            tag: 'div',
+            condition: { all: [{ kind: 'attribute-regex', name: 'data-kind', regex: { pattern: '^(card|note)$' } }] },
+          },
+          output: {
+            kind: 'template',
+            template: '> {{body}}',
+            slots: {
+              body: { source: { kind: 'children', rules: [{
+                id: 'inner-link',
+                match: { tag: 'span', attributes: [{ name: 'data-inner-url' }] },
+                output: {
+                  kind: 'template',
+                  template: '[{{t}}]({{u}})',
+                  slots: {
+                    t: { source: { kind: 'text-regex', regex: { pattern: '^(?<t>\S+)$' }, group: 't' } },
+                    u: { source: { kind: 'attribute', name: 'data-inner-url' }, url: true },
+                  },
+                },
+              }] } },
+            },
+          },
+        }])
+      },
+    })
+    const snapshot = h.pasteRules.effectiveSnapshot()
+    expect(snapshot.rules).toHaveLength(1)
+    // 快照是可序列化纯数据（广播与页面守卫的既有前提）
+    expect(() => JSON.parse(JSON.stringify(snapshot))).not.toThrow()
+    const parsed = JSON.parse(JSON.stringify(snapshot)) as { rules: Array<{ id: string; output: { slots: { body: { source: { rules: Array<{ id: string }> } } } } }> }
+    expect(parsed.rules[0]!.output.slots.body!.source.rules![0]!.id).toBe('inner-link')
+    // 停用撤回照旧生效（T01 生命周期不因高级形态改变）
+    h.runtime.setUserEnabled('fixture.demo', false)
+    expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(0)
+  })
+
+  it('嵌套深度超限的高级声明整批拒绝（可辨认 invalid-declaration，不算故障）', () => {
+    const h = harness()
+    let result: import('../../src/shared/addonPasteRules').AddonPasteRulesRegisterResult | undefined
+    const chain = (depth: number): unknown => depth === 0
+      ? { id: 'leaf', match: { tag: 'span' }, output: { kind: 'discard' } }
+      : { id: `level-${depth}`, match: { tag: 'div' }, output: { kind: 'template', template: '{{b}}', slots: { b: { source: { kind: 'children', rules: [chain(depth - 1)] } } } } }
+    h.register({
+      enable(context) { result = context.paste.registerRules([chain(17)]) },
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-declaration' })
+    expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(0)
+    expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('enabled')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PR #564 评审 P2：每组件 256 条上限按「顶层 + 嵌套子规则合计」跨批计量
+// ---------------------------------------------------------------------------
+
+describe('跨批递归计数（256 条含嵌套合计）', () => {
+  /** 一批声明：1 条顶层（children 槽携带 childCount 条平铺子规则） */
+  const batchOf = (topId: string, childCount: number): unknown[] => [{
+    id: topId,
+    match: { tag: 'DIV', attributes: [{ name: 'data-card' }] },
+    output: {
+      kind: 'template',
+      template: '{{body}}',
+      slots: {
+        body: {
+          source: {
+            kind: 'children',
+            rules: Array.from({ length: childCount }, (_, i) => ({
+              id: `${topId}-child-${i}`,
+              match: { tag: 'SPAN' },
+              output: { kind: 'discard' },
+            })),
+          },
+        },
+      },
+    },
+  }]
+
+  it('分批登记不能绕过总量：首批 1 顶层 + 255 子规则成功，第二批再 2 条 too-many', () => {
+    const h = harness()
+    // 首批共 256 条（1 顶层 + 255 子规则）：恰好占满预算
+    const first = h.pasteRules.registerRules('a.addon', batchOf('batch-1', 255))
+    expect(first.ok).toBe(true)
+    // 第二批 1 顶层 + 1 子规则 = 再添 2 条 → 越过 256 总量 → too-many
+    //（修复前服务只数顶层 1 条，第二批被误放行 → 有效快照 258 条绕过上限）
+    const second = h.pasteRules.registerRules('a.addon', batchOf('batch-2', 1))
+    expect(second).toMatchObject({ ok: false, reason: 'too-many' })
+    // 快照不被拒绝批次污染：仍是首批 1 条顶层规则（嵌套在槽内）
+    expect(h.pasteRules.effectiveSnapshot().rules.map((rule) => rule.id)).toEqual(['batch-1'])
+  })
+
+  it('释放首批后计数回收：同组件第二批可重新登记', () => {
+    const h = harness()
+    const first = h.pasteRules.registerRules('a.addon', batchOf('batch-1', 255))
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    first.dispose()
+    // dispose 移除本批（含嵌套子规则）→ 递归计数归零 → 第二批可登记
+    const second = h.pasteRules.registerRules('a.addon', batchOf('batch-2', 1))
+    expect(second.ok).toBe(true)
+    expect(h.pasteRules.effectiveSnapshot().rules.map((rule) => rule.id)).toEqual(['batch-2'])
+  })
+
+  it('平铺 256 条顶层后第 257 条 too-many 维持（收口不放宽平铺口径）', () => {
+    const h = harness()
+    const flat = (from: number, count: number) => Array.from({ length: count }, (_, i) => ({
+      id: `flat-${from + i}`,
+      match: { tag: 'SPAN' },
+      output: { kind: 'discard' },
+    }))
+    expect(h.pasteRules.registerRules('a.addon', flat(0, 256)).ok).toBe(true)
+    expect(h.pasteRules.registerRules('a.addon', flat(256, 1)))
+      .toMatchObject({ ok: false, reason: 'too-many' })
+    // 混合口径：平铺 255 条 + 1 顶层带 1 子规则（合计 257）同样拒绝
+    const h2 = harness()
+    expect(h2.pasteRules.registerRules('a.addon', flat(0, 255)).ok).toBe(true)
+    expect(h2.pasteRules.registerRules('a.addon', batchOf('batch-2', 1)))
+      .toMatchObject({ ok: false, reason: 'too-many' })
+  })
+})

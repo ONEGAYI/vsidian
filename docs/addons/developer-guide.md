@@ -118,6 +118,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 命令/菜单/界面 | 命令、菜单项、按钮、面板 | `sdk.commands` / `sdk.menus` / `sdk.ui` | 编辑器页 |
 | 粘贴转换 | 声明式粘贴规则：来源特化元素恢复为 Markdown 结构 | `ctx.paste.registerRules`（enable 生命周期） | 宿主 |
 | 页面 SDK（引用） | 只读引用浮窗请求与本次请求关闭句柄 | `sdk.refViews.requestPopup` | 编辑器页 |
+| 页面 SDK（引用） | 组件自有容器挂载只读引用视图与释放句柄 | `sdk.refViews.mountEmbed` | 编辑器页 |
 
 几个高频语义提醒（完整版在参考各条目）：
 
@@ -135,7 +136,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **标题折叠**（#410，实验入口）：查询只读派生视图（原始键集不对外）；命令选区驱动三操作与全文档两操作共用用户触发执行体（effect 直驱）；`upToLevel` 仅 `foldAll` 接受（1–6 整数），其他操作携带即 `invalid-request`。
 - **视图身份与扩展槽**（#426/#427/#428，契约）：扩展槽仅装配主正文 Live 实例；view → instanceId 反查走 `experimental.viewIdentity`；命令回调携带目标视图句柄——完整条款与移植换算见 §4。
 - **行为链触发面**（#399/#400/#401）：普通键入（`input.type`）与删除白名单（`delete.backward` / `forward` / `selection` / `cut` / `line`——`delete.dedent` 属缩进命令族不纳入）驱动；IME 候选期不驱动，**组合定稿驱动一次**（`userEvent='input.type.compose'`、`inputText` 为净定稿文本；取消/空白格组合/代码上下文不驱动）。上下文 `inputText` 为插入侧净文本；`replaced` 携带替换/删除侧（键入替换选区 = 被替换内容，delete = 被删文本，事务前 LF 坐标，IME 定稿恒 null）；`docUri` 为当前目标文档 URI（多视图语义：embed 触发时是引用目标的 URI）。
-- **粘贴转换规则**（#541 T01，enable 生命周期）：`ctx.paste.registerRules([...])` 登记可序列化规则（标签/属性匹配 + `{{槽}}` 模板或显式丢弃），身份由平台注入；整批校验（批内重复 ID、未知操作、超预算——每组件至多 256 条——整批拒绝不部分安装）。有效规则广播到全部编辑器页面，在富文本粘贴的 HTML→Markdown 遍历中按优先级降序、组件 ID 升序、规则 ID 升序确定性执行：首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 忽略与纯文本/代码上下文路径不经规则。停用/故障/代次结束撤回规则。正则、条件与嵌套属后续批次——未实现节点显式拒绝，不静默当成基础声明。
+- **粘贴转换规则**（#541 T01 + #542 T02，enable 生命周期）：`ctx.paste.registerRules([...])` 登记可序列化规则（标签/属性匹配 + 可选 `all/any/not` 条件树 + `{{槽}}` 模板或显式丢弃），身份由平台注入；整批校验（批内重复 ID、未知操作、非法正则、空条件组合、超预算——每组件至多 256 条声明，嵌套子规则计入——整批拒绝不部分安装）。取值槽支持元素文本、属性、子内容转换结果与正则捕获组（整匹/数字组/命名组；flags 限 `i/m/s/u`，注册时编译校验）。children 槽可声明嵌套子规则集（与顶层同一语言、ID 槽内局部；子元素先子规则后内置，只沿子节点下降）。有效规则广播到全部编辑器页面，在富文本粘贴的 HTML→Markdown 遍历中按优先级降序、组件 ID 升序、规则 ID 升序确定性执行：首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 忽略与纯文本/代码上下文路径不经规则。停用/故障/代次结束撤回规则。预算集中定义：条件树与规则嵌套各至多 16 层、单条规则条件树至多 64 节点、单次粘贴求值步数至多 100,000（规则尝试/条件节点/正则执行各计一步）；正则为原生 RegExp（同步、单次执行不可中断——步数预算计执行次数不是超时），正则输入超 4,096 字符按必需取值缺失回退。未知字段显式拒绝，不静默当成已声明形态。
 
 ## 3.1 只读引用浮窗（sdk.refViews，T05）
 
@@ -165,6 +166,35 @@ defineAddonPage(ADDON_ID, async (sdk) => {
 - **目标与锚点**：路径 + 互斥锚点（`heading` 标题 / `block` 块 ID / `line` 行号 / `range` 行范围）。Markdown 目标用既有全文/标题/块语义；`line` / `range` 只对非 Markdown 文本生效（Markdown 目标携带时按标题原文解析——沿用双链行为，锚点缺失即真实失败）。大文件与超限走既有准入（`file-too-large` 等真实原因码）。
 - **单页单浮窗**：新请求替换旧请求；旧句柄随之后失效（`close()` 返回 false，不误关后来的浮窗）。缺省鼠标语义零抢焦点；触发位置脱树、组件停用、页面关闭都释放实例。
 - **只读边界**：本面创建的实例及递归内容恒只读，没有写端口；不给浮窗注入自定义 DOM 的入口。
+
+## 3.2 只读引用组件容器嵌入（sdk.refViews.mountEmbed，T06）
+
+在自己的面板或渲染内容里复用内核的只读引用展示（T06 #545）：`mountEmbed` 把内核引用卡片（与正文 `![[…]]` 嵌入同款装配）挂进**本组件已取得的容器**——`ui.registerPanel` 面板的内容根、`renderers.register` 生效容器，或它们的后代。展示请求零正文写入、零撤销项；要在正文里插入 `![[…]]`，仍由你已获授权的编辑 API 显式执行。
+
+```ts
+defineAddonPage(ADDON_ID, async (sdk) => {
+  const refViews = sdk.refViews!  // 仅编辑器页提供
+  const outcome = await refViews.mountEmbed({
+    source: 'main',                        // 与浮窗请求同源：相对路径按该实例目标文档解析
+    target: { path: 'notes/ref.md' },
+    container: myPanelRootEl,              // 本组件面板内容根（或其后代）——脱树/非自有即拒绝
+  })
+  if (outcome.ok) {
+    // outcome.handle.release() 撤下本次挂载（幂等；重复调用返回 false）
+    // outcome.handle.isActive() 报告本次挂载是否在场
+  } else {
+    // outcome.reason：invalid-request / view-disposed / duplicate-mount / released
+    // 或目标真实失败（not-found / anchor-invalid / budget …——错误就地显示在挂载位）
+  }
+})
+```
+
+语义要点（完整版见 API 参考 `ref-views-embed` 条目）：
+
+- **容器归属**：只接受本组件自己的面板内容根或渲染内容根（可为其后代）；正文、其他组件的容器与平台管理的引用内容一律 `invalid-request`。平台在容器里创建并管理引用子根，不覆盖容器其他内容。
+- **挂载仲裁与释放**：同一容器一次只属一次有效挂载（未释放前重复挂载 `duplicate-mount`）；句柄释放、容器或外层面板/渲染根卸载脱树、组件停用、页面结束都会整组释放（订阅、预算与内容实例彻底终结，迟到回包不重挂）。
+- **同目标多处挂载**：解析缓存共享，实例/滚动/属性状态各自独立——一处释放不影响另一处。
+- **只读与失效**：挂载的引用树及递归内容恒只读（无模式切换/保存/编辑入口）；目标更新沿既有 watch 通道刷新，删除/失效按现有分态就地显示，不生成写会话。
 
 ## 4. 视图身份与扩展槽（契约）
 
@@ -359,4 +389,4 @@ const result = await sdk.views?.openDocument({
 
 ## 10. 后续 API 扩展规格
 
-2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T03 文档导航、T05 只读引用浮窗及 T07 统一主题已实施，待用户整体验收；T02 正则/条件/嵌套、T04 普通链接尾部行号、T06 组件容器嵌入及 T08 内核退役尚未实施。当前公开声明和生成参考是实际可消费能力的事实源。
+2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T02 正则/条件/嵌套、T03 文档导航、T04 普通链接尾部行号、T05 只读引用浮窗、T06 组件容器嵌入及 T07 统一主题已实施，待用户整体验收；T08 内核退役为仅存未实施票。当前公开声明和生成参考是实际可消费能力的事实源。

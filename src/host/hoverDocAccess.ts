@@ -62,7 +62,8 @@ import {
   sniffTextHead,
   splitLfLines,
 } from '../shared/refText'
-import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
+import { hostLineStart } from './addonDocNav'
+import { classifyLinkTarget, linkPathTextOf, splitHrefFragment, splitLineSuffix } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
 import type { HoverAnchorInvalidDetail, HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
 import type { WebLinkMetaOutcome } from './webLinkMetaService'
@@ -206,13 +207,16 @@ function scopeOf(spec: AnchorSpec): HoverPreviewScope {
  *  内容边界）；锚点缺失 → anchor-missing 分态（不以全文替代，重开再验
  *  证）；anchorOptional（刷新重载）时锚点缺失不构成失败——回成功全文，
  *  定位区间退化为全文区间（已打开实例继续可用）；无锚点 → 全文与 full
- *  选择器 */
+ *  选择器。
+ *  #534 行号（与锚点互斥——混合定位在解析层已拒）：越界（> LF 总行数，
+ *  与 lineCount 同口径）anchor-invalid(out-of-bounds) 分态（刷新宽容钳
+ *  到末行，与锚点缺失同口径）；合法回全文 + 行首初始定位区间 */
 async function readMarkdownContent(
   fsPath: string,
   spec: AnchorSpec | null,
   ports: HoverDocAccessPorts,
-  opts?: { anchorOptional?: boolean },
-): Promise<{ ok: true; content: RefMarkdownContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }> {
+  opts?: { anchorOptional?: boolean; line?: number },
+): Promise<{ ok: true; content: RefMarkdownContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string; anchorDetail?: HoverAnchorInvalidDetail }> {
   const doc = await ports.openTextDocument(fsPath)
   if (!doc) {
     return { ok: false, reason: 'read-failed' }
@@ -221,9 +225,36 @@ async function readMarkdownContent(
   const lfText = coord.toLfText(doc.text)
   const base = { kind: 'markdown' as const, version: doc.version, lfText }
   if (spec === null) {
+    if (opts?.line === undefined) {
+      return {
+        ok: true,
+        content: { ...base, range: { start: 0, end: lfText.length }, selector: { kind: 'full' } },
+      }
+    }
+    // #534 行号落位（1-based；LF 正文行数与宿主 lineCount 同口径；
+    // 行首偏移复用 hostLineStart 单一实现，调用点已验证行号合法）
+    const lines = splitLfLines(lfText)
+    if (opts.line > lines.length) {
+      // 刷新宽容：已打开实例重载时越界钳到末行（初次打开仍按报错口径）
+      if (opts.anchorOptional === true) {
+        return {
+          ok: true,
+          content: {
+            ...base,
+            range: { start: hostLineStart(lfText, lines.length) ?? 0, end: lfText.length },
+            selector: { kind: 'full' },
+          },
+        }
+      }
+      return { ok: false, reason: 'anchor-invalid', anchor: `:${opts.line}`, anchorDetail: 'out-of-bounds' }
+    }
     return {
       ok: true,
-      content: { ...base, range: { start: 0, end: lfText.length }, selector: { kind: 'full' } },
+      content: {
+        ...base,
+        range: { start: hostLineStart(lfText, opts.line) ?? 0, end: lfText.length },
+        selector: { kind: 'full' },
+      },
     }
   }
   const hostRange = spec.kind === 'heading'
@@ -297,11 +328,13 @@ export interface HoverTargetForm {
  *  标记**（#337：PDF 锚点语法双链限定——mdlink/direct 不解析 #page=N，
  *  fragment 原样交宿主，悬停预览从第一页开始）；web 目标（#342）携带
  *  归一 URL（webUrl 在场 = 外链卡片通道，无本地文件身份，不带 formKind）；
- *  失败为解析层错误分态（unsupported/no-workspace/escape/not-found） */
+ *  失败为解析层错误分态（unsupported/no-workspace/escape/not-found）；
+ *  #534 起成功形态可携带行号（普通链接尾部 `:正整数` 剥出），混合定位
+ *  （行号 + fragment）返回 anchor-conflict 分态（整次语法非法） */
 type HoverTargetResolution =
-  | { ok: true; fsPath: string; spec: AnchorSpec | null; formKind: 'wikilink' | 'mdlink' | 'direct' }
+  | { ok: true; fsPath: string; spec: AnchorSpec | null; formKind: 'wikilink' | 'mdlink' | 'direct'; line?: number }
   | { ok: true; webUrl: string }
-  | { ok: false; reason: HoverPreviewFailReason }
+  | { ok: false; reason: HoverPreviewFailReason; /** #534 anchor-conflict 的定位冲突原文（fragment） */ anchor?: string }
 
 /**
  * 解析目标三形态为 fsPath + 锚点规格（#333 从旧三入口提炼的共用解析层
@@ -384,7 +417,16 @@ async function resolveHoverTargetForm(
       return { ok: true, webUrl: check.url }
     }
     if (classified.kind === 'blocked') {
-      // 越出所属根单独分态；其余拦截形态（scheme/空目标/跨宿主盘符）不接入
+      // #534 混合定位（行号 + 非空 fragment）：整次语法非法，就地分态
+      // 报错（不静默、不择一定位）；越出所属根单独分态；其余拦截形态
+      //（scheme/空目标/跨宿主盘符）不接入
+      if (classified.reason === 'line-anchor-conflict') {
+        return {
+          ok: false,
+          reason: 'anchor-conflict',
+          anchor: splitHrefFragment(form.linkHref.trim()).fragment ?? undefined,
+        }
+      }
       return { ok: false, reason: classified.reason === 'escape' ? 'escape' : 'unsupported' }
     }
     if (classified.kind === 'anchor') {
@@ -393,10 +435,10 @@ async function resolveHoverTargetForm(
     }
     // doc：路径探测经同一 resolveVaultFile 端口（内部与双链共用
     // resolveVaultLinkFile——候选规划、越界判别、补 .md 同一实现；此处
-    // 喂「剥 fragment/query 后容错解码」的路径文本，与 classifyLinkTarget
-    // 的 planPathTextOf 同一口径）
-    const { pathText } = splitHrefFragment(form.linkHref.trim())
-    const resolution = await ports.resolveVaultFile(planPathTextOf(pathText))
+    // 喂「剥行号 + 剥 fragment/query 后容错解码」的路径文本（#534 行号
+    // 从 href 剥出随成功形态携带，路径不携带 `:行号` 段），与
+    // classifyLinkTarget 的 linkPathTextOf 同一口径）
+    const resolution = await ports.resolveVaultFile(linkPathTextOf(form.linkHref.trim()))
     if (resolution.kind === 'no-workspace') {
       return { ok: false, reason: 'no-workspace' }
     }
@@ -411,7 +453,13 @@ async function resolveHoverTargetForm(
     if (resolution.kind === 'not-found') {
       return { ok: false, reason: 'not-found' }
     }
-    return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfFragment(classified.fragment), formKind: 'mdlink' }
+    return {
+      ok: true,
+      fsPath: resolution.fsPath,
+      spec: anchorSpecOfFragment(classified.fragment),
+      formKind: 'mdlink',
+      ...(classified.line !== undefined ? { line: classified.line } : {}),
+    }
   }
   const target = form.target ?? ''
   const parsed = parseWikilinkInner(target.trim())
@@ -517,6 +565,9 @@ async function readPdfContent(
  * 普通链接 fragment 与面板直接目标锚点不解析（按无锚点全文，规范「锚点
  * 控制仅双链可用」）。anchorOptional（刷新重载）时越界钳制（已打开视图
  * 合法收口，初次打开仍按报错口径）。
+ * #534 行号（line）：普通链接尾部 `:正整数` 剥出后转同源 TextAnchorSpec
+ * （与双链 #line=N 同一 resolveTextNav 判定与窗口规划——越界
+ * out-of-bounds 分态、合法定位 locateLine）。
  */
 async function readTextContent(
   fsPath: string,
@@ -524,6 +575,7 @@ async function readTextContent(
   anchorSource: 'wikilink' | 'mdlink' | 'direct',
   ports: HoverDocAccessPorts,
   opts?: { anchorOptional?: boolean },
+  line?: number,
 ): Promise<{ ok: true; content: RefTextContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string; anchorDetail?: HoverAnchorInvalidDetail }> {
   // 1. 大小准入（不打开文件）
   if (ports.statFileSize !== undefined) {
@@ -559,7 +611,8 @@ async function readTextContent(
     }
   }
   const totalLines = lines.length
-  // 5. 锚点（双链限定）：非双链来源的锚点段不生效（无锚点全文）
+  // 5. 锚点（双链限定）：非双链来源的锚点段不生效（无锚点全文）；
+  //    #534 行号转同源 TextAnchorSpec（与锚点互斥——混合定位在解析层已拒）
   let anchorSpec: ReturnType<typeof parseTextAnchorSpec>
   if (spec !== null && anchorSource === 'wikilink') {
     if (spec.kind === 'block') {
@@ -572,12 +625,19 @@ async function readTextContent(
     }
     anchorSpec = parsed
   } else {
-    anchorSpec = {}
+    anchorSpec = line !== undefined ? { line } : {}
   }
   // 6. 校验与窗口规划（初次打开严格报错；anchorOptional 刷新钳制）
   const resolved = resolveTextNav(anchorSpec, totalLines, opts?.anchorOptional === true ? 'clamp' : 'strict')
   if (!resolved.ok) {
-    return { ok: false, reason: 'anchor-invalid', anchor: spec !== null && anchorSource === 'wikilink' && spec.kind === 'heading' ? spec.anchor : undefined, anchorDetail: resolved.code }
+    return {
+      ok: false,
+      reason: 'anchor-invalid',
+      anchor: spec !== null && anchorSource === 'wikilink' && spec.kind === 'heading'
+        ? spec.anchor
+        : line !== undefined ? `:${line}` : undefined,
+      anchorDetail: resolved.code,
+    }
   }
   const nav = resolved.nav
   // 7. 窗口裁剪（#range 硬窗口：范围外不进载荷——结构性不可滚达）
@@ -716,13 +776,16 @@ export async function readRefContentTarget(
   if (kind === 'text') {
     const anchorSource: 'wikilink' | 'mdlink' | 'direct' =
       form.directTarget !== undefined ? 'direct' : form.linkHref !== undefined ? 'mdlink' : 'wikilink'
-    const content = await readTextContent(resolution.fsPath, resolution.spec, anchorSource, ports, opts)
+    const content = await readTextContent(resolution.fsPath, resolution.spec, anchorSource, ports, opts, resolution.line)
     if (!content.ok) {
       return content
     }
     return { ok: true, fsPath: resolution.fsPath, relPath, content: content.content }
   }
-  const content = await readMarkdownContent(resolution.fsPath, resolution.spec, ports, opts)
+  const content = await readMarkdownContent(resolution.fsPath, resolution.spec, ports, {
+    ...opts,
+    line: resolution.line,
+  })
   if (!content.ok) {
     return content
   }
@@ -852,15 +915,21 @@ export async function resolveHoverTargetTip(
       // 页内锚点：目标即来源文档自身（与 readHoverMdLinkTarget 同口径）
       return { ok: true, relPath: relPathOf(ctx.sourceFsPath), anchor: `#${classified.fragment}` }
     }
-    const { pathText } = splitHrefFragment(spec.linkHref.trim())
-    const fsPath = intentPathOf(planPathTextOf(pathText))
+    // #534：意图路径按剥行号后的路径文本规划（note.md:103 呈现 note.md）；
+    // 行号并入锚点列呈现（`:103` 与源码形态一致）
+    const stripped = splitLineSuffix(spec.linkHref.trim())
+    const fsPath = intentPathOf(linkPathTextOf(stripped.text))
     if (fsPath === null) {
       return { ok: false }
     }
     return {
       ok: true,
       relPath: relPathOf(fsPath),
-      anchor: classified.fragment ? `#${classified.fragment}` : '',
+      anchor: classified.fragment !== null
+        ? `#${classified.fragment}`
+        : stripped.line !== null
+          ? `:${stripped.line}`
+          : '',
     }
   }
 

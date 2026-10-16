@@ -399,6 +399,198 @@ describe('#160 锚点 fragment：含空格路径矩阵与接管边界', () => {
   })
 })
 
+describe('#534 普通链接尾部行号：本地路径剥 :正整数（早于 ADS 拦截）', () => {
+  // 规格 addon-navigation.md §5.1：仅普通 Markdown 链接的本地路径段支持
+  // `:正整数` 行号后缀；剥离必须早于 Win32 ADS/怪异 basename 拦截
+  //（note.md:103 的 basename 含 ':'，不先剥会被当 NTFS 备用数据流拦截）。
+  // 图片通道无行号语义，不受剥离影响。
+  it('md 与非 md 目标剥尾部行号并携带 line（Windows 宿主不再被 ADS 拦截）', () => {
+    expect(classifyLinkTarget('note.md:103', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\note.md'],
+      fragment: null,
+      line: 103,
+    })
+    expect(classifyLinkTarget('file.ts:103', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\file.ts'],
+      fragment: null,
+      line: 103,
+    })
+    expect(classifyLinkTarget('file.ts:1', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\file.ts'],
+      fragment: null,
+      line: 1,
+    })
+  })
+
+  it('POSIX 宿主：相对路径与根路径同样剥行号', () => {
+    expect(classifyLinkTarget('./deep/file.md:42', POSIX)).toEqual({
+      kind: 'doc',
+      candidates: ['/home/u/notes/sub/deep/file.md'],
+      fragment: null,
+      line: 42,
+    })
+    expect(classifyLinkTarget('/etc/目标.md:7', POSIX)).toEqual({
+      kind: 'absolute',
+      candidates: ['/etc/目标.md'],
+      fragment: null,
+      line: 7,
+    })
+  })
+
+  it('Windows 盘符绝对路径剥行号归 absolute（盘符边界保持）', () => {
+    expect(classifyLinkTarget('c:\\外部\\note.md:103', WIN)).toEqual({
+      kind: 'absolute',
+      candidates: ['c:\\外部\\note.md'],
+      fragment: null,
+      line: 103,
+    })
+    expect(classifyLinkTarget('e:/外部库/资料 目标.md:5', WIN)).toEqual({
+      kind: 'absolute',
+      candidates: ['e:\\外部库\\资料 目标.md'],
+      fragment: null,
+      line: 5,
+    })
+  })
+
+  it('空格宽松路径与 %编码：剥行号后两种写法解析到同一目标', () => {
+    const raw = classifyLinkTarget('./目标 二.md:103', WIN)
+    expect(raw).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\目标 二.md'],
+      fragment: null,
+      line: 103,
+    })
+    const enc = classifyLinkTarget('.%2F%E7%9B%AE%E6%A0%87%20%E4%BA%8C.md:103', WIN)
+    expect(enc).toEqual(raw)
+  })
+
+  it('无扩展名目标剥行号后沿既有候选规则补 .md', () => {
+    expect(classifyLinkTarget('./隔壁笔记:12', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\隔壁笔记', 'd:\\notes\\子目录\\隔壁笔记.md'],
+      fragment: null,
+      line: 12,
+    })
+  })
+
+  it('query 与行号共存：行号不从 query 提取，query 照常剥除', () => {
+    expect(classifyLinkTarget('note.md:103?x=1', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\note.md'],
+      fragment: null,
+      line: 103,
+    })
+    // 行号后缀必须紧跟路径段：query 里写行号不构成定位
+    expect(classifyLinkTarget('note.md?line=103', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\note.md'],
+      fragment: null,
+    })
+  })
+
+  it('前导零行号按值语义剥（与 refText isPositiveDecimal 同口径）', () => {
+    expect(classifyLinkTarget('note.md:0103', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\note.md'],
+      fragment: null,
+      line: 103,
+    })
+  })
+
+  it('混合定位（行号 + 非空 fragment）整次语法非法：blocked 且不误作标题', () => {
+    for (const ctx of [WIN, POSIX]) {
+      const r = classifyLinkTarget('note.md:20#第二章', ctx)
+      expect(r).toMatchObject({ kind: 'blocked', reason: 'line-anchor-conflict' })
+      const blk = classifyLinkTarget('note.md:20#^blkid', ctx)
+      expect(blk).toMatchObject({ kind: 'blocked', reason: 'line-anchor-conflict' })
+    }
+  })
+
+  it('行号 + 空 fragment（note.md:103#）等价纯行号定位', () => {
+    expect(classifyLinkTarget('note.md:103#', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\note.md'],
+      fragment: null,
+      line: 103,
+    })
+  })
+
+  it(':0 / 全零 / 负数 / 非数字不构成行号：保持既有分类不宽容修正', () => {
+    // Windows 宿主：basename 含 ':' 仍按 ADS 口径拦截
+    for (const href of ['note.md:0', 'note.md:00', 'note.md:-5', 'note.md:abc', 'note.md:1x']) {
+      const r = classifyLinkTarget(href, WIN)
+      expect(r).toMatchObject({ kind: 'blocked', reason: 'escape' })
+    }
+    // POSIX 宿主：这些是合法文件名字符，按原文件名分类（候选含原文）
+    expect(classifyLinkTarget('note.md:0', POSIX)).toEqual({
+      kind: 'doc',
+      candidates: ['/home/u/notes/sub/note.md:0'],
+      fragment: null,
+    })
+    expect(classifyLinkTarget('note.md:abc', POSIX)).toEqual({
+      kind: 'doc',
+      candidates: ['/home/u/notes/sub/note.md:abc'],
+      fragment: null,
+    })
+  })
+
+  it('a:b.md 等单字母 scheme 形态不受影响（尾部非纯数字不剥）', () => {
+    expect(classifyLinkTarget('a:b.md', WIN)).toMatchObject({ kind: 'blocked', reason: 'escape' })
+    expect(classifyLinkTarget('a:b.md', POSIX)).toMatchObject({ kind: 'doc' })
+    // a:103 剥为文件 a 第 103 行（无扩展名候选补 .md）
+    expect(classifyLinkTarget('a:103', POSIX)).toEqual({
+      kind: 'doc',
+      candidates: ['/home/u/notes/sub/a', '/home/u/notes/sub/a.md'],
+      fragment: null,
+      line: 103,
+    })
+  })
+
+  it('外链协议与端口不受影响：https://host:443 原样 external', () => {
+    expect(classifyLinkTarget('https://host.example:443/path', WIN)).toEqual({
+      kind: 'external',
+      url: 'https://host.example:443/path',
+    })
+    expect(classifyLinkTarget('https://host.example:443', POSIX)).toEqual({
+      kind: 'external',
+      url: 'https://host.example:443',
+    })
+    // 真白名单外的 scheme 照旧拦截（mailto:103 不剥端口数字）
+    const mailto = classifyLinkTarget('mailto:a@b.c:103', WIN)
+    expect(mailto).toMatchObject({ kind: 'blocked', reason: 'scheme' })
+  })
+
+  it('页内锚点不受行号剥离影响（#frag 原样）', () => {
+    expect(classifyLinkTarget('#sec:103', WIN)).toEqual({ kind: 'anchor', fragment: 'sec:103' })
+    expect(classifyLinkTarget('#第103节', POSIX)).toEqual({ kind: 'anchor', fragment: '第103节' })
+  })
+
+  it('尾随空白宽容：note.md:103␠ 剥行号后保留尾空白（Windows 仍按尾空白拦截）', () => {
+    // 宽松链接 <note.md:103 > 的字面目标：行号后尾空白不属行号，剥离
+    // 容忍；剥后尾空白保留——Windows 的 Win32 规范化拦截口径不变
+    const r = classifyLinkTarget('note.md:103 ', WIN)
+    expect(r).toMatchObject({ kind: 'blocked', reason: 'escape' })
+    const p = classifyLinkTarget('note.md:103 ', POSIX)
+    expect(p).toEqual({
+      kind: 'doc',
+      candidates: ['/home/u/notes/sub/note.md'],
+      fragment: null,
+      line: 103,
+    })
+  })
+
+  it('图片通道不剥行号（photo.png:103 保持既有 ADS 拦截/文件名分类）', () => {
+    expect(classifyImageTarget('photo.png:103', WIN)).toMatchObject({ kind: 'blocked' })
+    expect(classifyImageTarget('photo.png:103', POSIX)).toEqual({
+      kind: 'workspace',
+      fsPath: '/home/u/notes/sub/photo.png:103',
+    })
+  })
+})
+
 describe('#208 图片 webview URI 的资源代次戳（手动刷新缓存击穿）', () => {
   it('代次 ≥ 1 时追加 ?v=<代次>（CSS 片段 ?v= 同式）', () => {
     expect(appendImageVersionStamp('vscode-webview://res/a.png', 1)).toBe(

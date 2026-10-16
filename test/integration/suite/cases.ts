@@ -1184,13 +1184,15 @@ interface LinkLogData {
     path?: string
     /** #160 doc/anchor 条目的锚点目标 */
     fragment?: string
+    /** #534 doc 条目的尾部行号 */
+    line?: number
     /** #11 双链条目字段 */
     target?: string
     heading?: string
     /** #159 块引用目标（与 heading 互斥） */
     blockId?: string
     candidates?: string[]
-    locate?: 'custom-panel' | 'none'
+    locate?: 'custom-panel' | 'native' | 'none'
   }>
 }
 
@@ -3303,6 +3305,114 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const diskAfter = await readDisk('links2.md')
     assert(diskAfter === diskBefore, '链接执行不得改写源文档')
     assert(session.appliedEdits === 0, `链接执行不得产生 applyEdit，实际 ${session.appliedEdits}`)
+  }],
+
+  ['普通链接尾部行号：md 落位（LF/折叠隐藏区/CRLF/阅读态）零写回（#534）', async () => {
+    await openWithEditor('line-links.md')
+    await waitSessionReady('line-links.md')
+    const uri = wsUri('line-links.md').toString()
+    const diskBefore = await readDisk('line-links.md')
+    const navDoc = await vscode.workspace.openTextDocument(wsUri('nav-target.md'))
+    const navLines = navDoc.getText().split('\n')
+    /** 目标行首 LF 偏移（1-based → 前缀行累计 + 换行） */
+    const lineStart = (line1: number): number =>
+      navLines.slice(0, line1 - 1).reduce((acc, l) => acc + l.length + 1, 0)
+
+    // LF：md 行 5 落位 Vsidian 面板（行首 LF 偏移——LF/CRLF 由 NewlineCoordinator 收口）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target.md:5', srcStart: 0, srcEnd: 5,
+    })
+    await waitSessionReady('nav-target.md')
+    const lf = await waitViewState('nav-target.md', (v) => v.selectionOffset === lineStart(5))
+    assert(lf.viewMode === 'live', '首次打开默认 live')
+    await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.line === 5 && e.locate === 'custom-panel')
+
+    // 折叠隐藏区：foldAll 折起后行号定位到隐藏行——#412 落点展开管线展开路径
+    await vscode.commands.executeCommand('onegayi.vsidian.heading.foldAll')
+    await waitViewState('nav-target.md', (v) => (v.renderedLines ?? Infinity) < navLines.length)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target.md:7', srcStart: 0, srcEnd: 5,
+    })
+    // 已开面板重显：selection 落行 7（隐藏区行——展开后可见）
+    await waitViewState('nav-target.md', (v) => v.selectionOffset === lineStart(7))
+    await vscode.commands.executeCommand('onegayi.vsidian.heading.unfoldAll')
+
+    // CRLF：行号换算落点（LF 系行 3 首 = 14；与 T03 行号定位同口径）。
+    // 放在切阅读之前——无模式记忆的文档继承最近全局模式，此刻仍 live，
+    // selection 断言才有意义
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target-crlf.md:3', srcStart: 0, srcEnd: 5,
+    })
+    await waitSessionReady('nav-target-crlf.md')
+    await waitViewState('nav-target-crlf.md', (v) => v.selectionOffset === 14)
+
+    // 阅读态：重显激活 nav-target.md（toggleViewMode 作用于活动编辑器）后
+    // 切阅读，再从链接点击重显——三态记忆沿用 + 阅读块锚定
+    //（readingAnchorStart = 行 5 标题块首 LF 偏移，阅读视图按块滚动定位）
+    await openWithEditor('nav-target.md')
+    await waitSessionReady('nav-target.md')
+    await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+    await waitViewState('nav-target.md', (v) => v.viewMode === 'reading')
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target.md:5', srcStart: 0, srcEnd: 5,
+    })
+    await waitViewState('nav-target.md', (v) =>
+      v.viewMode === 'reading' && v.readingAnchorStart === lineStart(5))
+
+    // 跳转全程只读：源文档与目标磁盘零变化
+    assert(await readDisk('line-links.md') === diskBefore, '行号跳转不得改写源文档')
+    assert(await readDisk('nav-target.md') === navDoc.getText(), '行号跳转不得改写目标文档')
+  }],
+
+  ['普通链接尾部行号：text 原生 reveal 与失败矩阵（混合/零行/越界）（#534）', async () => {
+    await openWithEditor('line-links.md')
+    await waitSessionReady('line-links.md')
+    const uri = wsUri('line-links.md').toString()
+
+    // text 目标：原生编辑器打开并 reveal 到行（0-based line 1）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target.ts:2', srcStart: 0, srcEnd: 5,
+    })
+    const editor = await poll('原生编辑器行定位', async () => {
+      const e = vscode.window.activeTextEditor
+      return e && e.document.uri.fsPath === wsUri('nav-target.ts').fsPath &&
+        e.selection.active.line === 1 && e.selection.active.character === 0 ? e : undefined
+    })
+    assert(editor.document.getText().startsWith('export const a'), 'text 目标应原生打开')
+    await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.line === 2 && e.locate === 'native')
+
+    // 混合定位（行号 + fragment）：整次语法非法——blocked 且不执行打开
+    //（断言止于执行日志；跨用例标签状态不在此重复断言）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target.md:3#无效', srcStart: 0, srcEnd: 5,
+    })
+    await waitWikilinkLog(uri, (e) => e.kind === 'blocked' && e.reason === 'line-anchor-conflict')
+
+    // 零行（:0 不构成行号）：既有分类拦截——Windows=ADS escape、POSIX=按
+    // 字面文件名 not-found，两平台都不产出合法行定位
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target.md:0', srcStart: 0, srcEnd: 5,
+    })
+    await waitWikilinkLog(uri, (e) => e.href === 'nav-target.md:0' &&
+      (e.kind === 'blocked' || e.kind === 'not-found'))
+
+    // 越界：目标可打开但定位失败——打开照常、locate none、不静默钳到末行
+    //（失败提示为宿主 toast，集成以执行日志断言；可见文案由浏览器浮窗
+    // 分态用例钉住）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: 'nav-target.md:9999', srcStart: 0, srcEnd: 5,
+    })
+    await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.line === 9999 && e.locate === 'none')
+    // 已开面板重显照常（可打开但定位失败则提示——面板仍在场）
+    await waitSessionReady('nav-target.md')
   }],
 
   ['图片显示：本地工作区图片经宿主通道装载，缺失图进入可重试错误态，零写回（#10）', async () => {
@@ -18505,7 +18615,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // #360 T11：所属按钮、面板与视图界面贡献（夹具组件经公开 ui 面注册，
   // 断言面见 addonT11Cases.ts 头注）
   ...addonT11Cases,
-  // T05（#544）：附加组件只读引用浮窗（断言面见 addonRefViewsCases.ts 头注）
+  // T05（#544）/T06（#545）：附加组件只读引用浮窗与组件容器嵌入（断言面
+  // 见 addonRefViewsCases.ts 头注）
   ...addonRefViewsCases,
   // #361 T12：诊断、全组件故障暂停与手动恢复（四态负向对照、贡献全撤
   // 与首选恢复，断言面见 addonT12Cases.ts 头注）

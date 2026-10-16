@@ -54,6 +54,7 @@
     - [`syntax-experimental` 实验入口：行类型与行内标记查询（experimental.syntax）](#syntax-experimental)
     - [`host-settings-experimental` 实验入口：宿主设置白名单读取（experimental.hostSettings）](#host-settings-experimental)
     - [`ref-views-popup` 只读引用浮窗请求（refViews）](#ref-views-popup)
+    - [`ref-views-embed` 只读引用组件容器嵌入（refViews.mountEmbed）](#ref-views-embed)
     - [`theme-environment` 主题环境快照与订阅（themeEnvironment）](#theme-environment)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
@@ -1210,13 +1211,18 @@ export type AddonRefPopupOutcome =
   | { ok: false; reason: AddonRefPopupRejection }
 
 /** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）
- *  首版只含浮窗请求；T06 在同一 facet 上扩展组件容器挂载入口 */
+ *  浮窗请求 + T06（#545）组件容器嵌入挂载——两者共用来源解析与目标语义 */
 export interface AddonSdkRefViewsFacet {
   /** 请求只读引用浮窗（单页单浮窗：新请求替换旧请求，旧请求句柄随之
    *  失效）。结果在读取结局落定时兑现：内容装载成功 → ok + 句柄；目标
    *  解析/读取/锚点失败 → 失败原因（浮窗若在场显示真实错误分态）；请求
    *  被替换或关闭 → view-disposed */
   requestPopup(request: AddonRefPopupRequest): Promise<AddonRefPopupOutcome>
+  /** 在组件自有容器挂载内核只读引用子根（R-U08）。结果在首次读取结局
+   *  落定时兑现：内容装载成功 → ok + 释放句柄；目标失败 → 失败原因
+   *  （子根留在场显示错误分态，随容器/组件生命周期整组释放）。多处同
+   *  目标各挂各的（实例/滚动/属性状态独立，读取数据共享缓存） */
+  mountEmbed(request: AddonRefEmbedRequest): Promise<AddonRefEmbedOutcome>
 }
 
 export function isAddonRefTargetSpec(v: unknown): v is AddonRefTargetSpec {
@@ -1263,6 +1269,79 @@ export function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | n
 ```
 
 **验证**：`test/unit/addonRefViews.test.ts`、`test/unit/addonRefViewsRuntime.test.ts`、`test/unit/addonRefViewsPopup.test.ts`、`test/unit/embedRecursiveLive.test.ts`、`test/unit/documentSessionRefViews.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonRefViews.mjs`、`test/integration/suite/addonRefViewsCases.ts`
+
+### `ref-views-embed` 只读引用组件容器嵌入（refViews.mountEmbed）
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#545（T06）
+
+**目标**：组件在自有容器挂载内核只读引用子根（T06 #545，规格 addon-reference-views.md §6）：sdk.refViews.mountEmbed 把内核引用卡片（与正文 ![[…]] 嵌入同款装配）挂进本组件已取得的面板内容根或渲染内容根（可为其后代），复用成熟的内容展示与既有目标访问链（来源解析/只读能力/预算/订阅/释放），不重新实现渲染，也不因请求呈现取得写目标文档的能力。本请求零正文写入、零撤销项——插入 ![[…]] 仍由既有编辑 API 显式执行。
+
+语义要点：
+- **适用模式**：仅编辑器页提供（设置页为 undefined）。容器须为本组件已取得的面板内容根（ui.registerPanel 的内容根）或渲染内容根（renderers.register 生效容器的后代）——正文根、其他组件容器与平台管理的引用子根内容一律 invalid-request（不建子根，不猜测位置）。内核卡片观感与正文嵌入同源（引用竖条/限高同规则），呈现在组件容器内不接管正文与其他组件容器。
+- **坐标与数据形状**：目标与来源语义和 requestPopup 完全同源（同一目标合成器与 addonSource 来源覆盖——R-U02 的 B 目录解析、行号/范围/大小准入沿既有规则）。多处同目标挂载共享解析缓存（读取数据层），但每次挂载有独立 occurrence——实例、滚动与属性展示状态互不共享，一处释放不销毁其他同目标挂载。
+- **生命周期**：promise 在首次读取结局落定时兑现：内容装载成功 → ok + 释放句柄；目标解析/读取/锚点/准入失败 → 失败原因（子根留在场以既有错误分态就地显示，随组释放）。释放触发整组（句柄 release、容器/外层面板/渲染根卸载或脱树、组件停用/故障/代次终结、页面结束）：订阅 unwatch、预算与内容实例彻底终结，pending 以 view-disposed 终结，迟到回包不重挂不复活缓存。重复挂载同一容器（含错误分态挂载）→ duplicate-mount，先释放旧实例才可重挂。目标更新沿既有 watch 通道静默刷新；删除/失效按现有引用视图分态就地显示（R-U11），失效不生成新写会话。所创建引用树及递归内容恒只读（readOnly 逐层传递——模式切换/保存/编辑入口不出现或不生效，不能借父 Live 或历史模式获得写端口）。
+- **错误与拒绝**：自有拒绝与浮窗同族另加容器占位冲突：invalid-request（形状/容器脱树或非本组件所有/容器在引用子根内）/ view-disposed（来源实例不在场、页面会话缺失，或结局落定前挂载被释放）/ duplicate-mount（容器已被有效挂载占用）/ released（组件代次终结）；HoverPreviewFailReason 透传（not-found / anchor-invalid / file-too-large / budget 等——真实原因就地显示，不折叠为 not-found）。
+
+签名事实源：`src/shared/addonRefViews.ts`
+
+```ts
+/** 只读引用嵌入挂载请求：公共载荷 = 来源实例 + 目标 + 本组件自有容器。
+ *  组件身份与代次由 SDK 注入；容器必须是本组件已取得的面板内容根或
+ *  渲染内容根（可为其后代）——正文根、其他组件容器与平台管理的引用
+ *  子根内容都不是合法容器（运行时校验，归属外一律 invalid-request） */
+export interface AddonRefEmbedRequest {
+  /** 来源实例（views 面 instanceId：'main' / 'embed:<hostId>' /
+   *  'hover:<instanceId>'；与浮窗请求同源语义——R-U02） */
+  source: string
+  /** 目标（结构化路径 + 可选锚点；与浮窗请求共用目标语义，不建第二套） */
+  target: AddonRefTargetSpec
+  /** 挂载容器：本页在树元素。平台在其中创建引用子根，不覆盖容器其他内容 */
+  container: HTMLElement
+}
+
+/** 本次挂载的释放句柄：身份只针对本组件本代次的这一次挂载 */
+export interface AddonRefEmbedHandle {
+  /** 释放本次挂载（幂等；整组释放路径——句柄释放、容器/父根脱树、
+   *  组件停用、页面结束——效果等价）。错误分态挂载不发放句柄 */
+  release(): boolean
+  /** 本次挂载是否仍在场（已释放/子根脱树后为 false） */
+  isActive(): boolean
+}
+
+/** 嵌入挂载可辨认拒绝（规格 §7；与浮窗请求同族，另含容器占位冲突）：
+ *  - invalid-request：形状非法 / 容器脱树或非本组件所有 / 容器在平台
+ *    管理的引用子根内（不创建子根）；
+ *  - view-disposed：来源实例不在场、页面会话缺失，或挂载在结局落定前
+ *    被释放（迟到结果的终结口径）；
+ *  - duplicate-mount：该容器已被一次有效挂载占用（含错误分态挂载——
+ *    重复挂载同一位置须先释放旧实例）；
+ *  - released：组件代次已终结（装载器守卫）；
+ *  - HoverPreviewFailReason 透传：目标解析/读取/锚点/准入超限的真实原因
+ *    （子根留在场以现有引用错误视图就地显示，随组释放）。 */
+export type AddonRefEmbedRejection =
+  | 'invalid-request'
+  | 'view-disposed'
+  | 'duplicate-mount'
+  | 'released'
+  | HoverPreviewFailReason
+
+export type AddonRefEmbedOutcome =
+  | { ok: true; handle: AddonRefEmbedHandle }
+  | { ok: false; reason: AddonRefEmbedRejection }
+
+/** 请求形状守卫（container 在共享层只钉对象在场性——元素身份、在树性
+ *  与归属由 webview 运行时校验，共享模块不依赖 DOM） */
+export function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {
+  if (!isRecord(v)) {
+    return false
+  }
+  return typeof v.source === 'string' && v.source !== '' &&
+    isAddonRefTargetSpec(v.target) &&
+    v.container !== null && typeof v.container === 'object'
+}
+```
+
+**验证**：`test/unit/addonRefViews.test.ts`、`test/unit/addonRefViewsEmbed.test.ts`、`test/unit/addonRefViewsEmbedCard.test.ts`、`test/unit/embedCardCssContract.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonRefViewsEmbed.mjs`、`test/integration/suite/addonRefViewsCases.ts`
 
 ### `theme-environment` 主题环境快照与订阅（themeEnvironment）
 
@@ -2859,15 +2938,15 @@ export interface AddonSdkUiFacet {
 
 ### `paste-rules-register` 声明式粘贴规则注册（enable 生命周期）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#541（T01）
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#541（T01）；#542（T02 正则/条件/嵌套）
 
 **目标**：组件在宿主运行生命周期（enable 上下文的 paste 面）登记可序列化粘贴转换规则：全部已打开与新打开的编辑器页面共用同一组有效规则，在富文本粘贴的 HTML→Markdown 遍历中消费——来源特化元素（如带私有属性的 span）可恢复为 Markdown 链接等结构，来源识别不进入内核。
 
 语义要点：
 - **适用模式**：只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。
-- **坐标与数据形状**：规则语言为可序列化数据：基础匹配（标签名相等、属性存在、属性值相等——缺失与空串区分）＋取值槽（元素文本/指定属性/子内容内置转换结果）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则、条件组合与嵌套转换属后续批次（#542）——未知字段显式拒绝，不静默当成基础声明。
-- **生命周期**：有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。每组件至多 256 条、表达式嵌套深度至多 16（后续批次消费）、单次粘贴求值步数至多 100,000（超限停用规则、内置转换继续）。
-- **错误与拒绝**：四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段，含后续批次的正则条件嵌套节点在未实现阶段的显式拒绝）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。
+- **坐标与数据形状**：规则语言为可序列化数据：匹配（标签名相等、属性条件全与——缺失与空串区分——＋可选条件树）＋取值槽（元素文本/指定属性/子内容转换结果/正则捕获组）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性/捕获组槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则为数据声明 pattern＋受限 flags（i/m/s/u，禁 g/y 有状态修饰符），注册时编译校验；捕获组取值支持整匹（组 0）/数字组/命名组，组引用越界或命名组缺失即拒绝。条件为 all/any/not 树（叶子：属性存在/相等、属性值正则、元素文本正则；空组合、非法节点与隐式真值形态拒绝）。嵌套转换在 children 槽声明子规则集（与顶层同一声明语言，ID 为槽内局部；子元素先子规则后内置，只沿子节点下降）。未知字段一律显式拒绝，不静默当成已声明形态。
+- **生命周期**：有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后；children 子规则集递归同序）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点；嵌套求值期间外层规则集不参与（不按规则 ID 回跳或再次转换自身）。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。预算集中定义：每组件至多 256 条规则声明（含嵌套子规则合计）、条件组合层级与规则嵌套层级各至多 16、单条规则条件树至多 64 节点、单次粘贴求值步数至多 100,000（规则尝试/条件节点/正则执行各计一步，超限停用规则、内置转换继续）。正则实现为运行环境原生 RegExp：同步、单次执行不可中断——步数预算计执行次数不是可中断超时；正则输入（元素文本/属性值）超过 4,096 字符按必需取值缺失处理（本规则失败，不截断不改写）。
+- **错误与拒绝**：四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段/非法正则——编译失败、flags 越集、组引用越界或命名组缺失——/空条件组合/条件或嵌套超深超节点数）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。
 
 签名事实源：`src/shared/addonPasteRules.ts`
 
@@ -2882,12 +2961,14 @@ export interface AddonPasteRuleDeclaration {
   readonly output: AddonPasteRuleOutput
 }
 
-/** 基础匹配：标签名相等 + 属性条件全与（条件组合 all/any/not 属 T02） */
+/** 匹配：标签名相等 + 属性条件全与 + 可选条件树（三处同时满足才匹配） */
 export interface AddonPasteRuleMatch {
   /** 标签名（大写形态与 DOM tagName 对齐；校验时规整） */
   readonly tag: string
   /** 属性条件列表（全部满足才匹配；至多 8 条） */
   readonly attributes?: readonly AddonPasteRuleAttributeCondition[]
+  /** 条件树（#542 T02；根可为组合节点或叶子谓词，与 attributes 全与组合） */
+  readonly condition?: AddonPasteConditionNode
 }
 
 /** 产出：Markdown 结构模板或显式丢弃（空产出只有显式丢弃才算成功） */
@@ -2906,6 +2987,52 @@ export interface AddonPasteSlot {
   readonly url?: boolean
 }
 
+/** 槽取值来源：元素文本 / 指定属性 / 子内容转换结果 / 正则捕获组 */
+export type AddonPasteSlotSource =
+  | { readonly kind: 'text' }
+  | { readonly kind: 'attribute'; readonly name: string }
+  | {
+    /** 子内容转换结果；rules 声明嵌套子规则集（先子规则后内置，仅沿子节点下降） */
+    readonly kind: 'children'
+    readonly rules?: readonly AddonPasteNestedRule[]
+  }
+  | { readonly kind: 'text-regex'; readonly regex: AddonPasteRegex; readonly group: number | string }
+  | { readonly kind: 'attribute-regex'; readonly name: string; readonly regex: AddonPasteRegex; readonly group: number | string }
+
+/** 正则声明：数据形态 pattern 与受限 flags（注册时编译校验，不执行字符串代码） */
+export interface AddonPasteRegex {
+  readonly pattern: string
+  readonly flags?: string
+}
+
+/** 条件叶子谓词：属性存在/相等（基础谓词）或正则谓词（属性值/元素文本） */
+export type AddonPastePredicate =
+  | { readonly kind: 'attribute'; readonly name: string; readonly value?: string }
+  | { readonly kind: 'attribute-regex'; readonly name: string; readonly regex: AddonPasteRegex }
+  | { readonly kind: 'text-regex'; readonly regex: AddonPasteRegex }
+
+/** 条件组合节点：all/any/not（空组合与非法节点在注册时拒绝） */
+export type AddonPasteCondition =
+  | { readonly all: readonly AddonPasteConditionNode[] }
+  | { readonly any: readonly AddonPasteConditionNode[] }
+  | { readonly not: AddonPasteConditionNode }
+
+/** 条件树节点：叶子谓词或组合节点 */
+export type AddonPasteConditionNode = AddonPastePredicate | AddonPasteCondition
+
+/**
+ * 嵌套规则（children 槽子规则集成员；与顶层规则同一声明语言，id 为槽内
+ * 局部）。作者声明形态：priority 可选（缺省 0，排序语义同顶层规则）。
+ */
+export interface AddonPasteNestedRule {
+  /** 槽内局部规则 ID（同集合内唯一；不与顶层或其他集合冲突） */
+  readonly id: string
+  /** 可选整数优先级（缺省 0；子集内按优先级降序、ID 升序） */
+  readonly priority?: number
+  readonly match: AddonPasteRuleMatch
+  readonly output: AddonPasteRuleOutput
+}
+
 /** 注册结果（普通 API 拒绝不算组件故障；dispose 重复调用无害） */
 export type AddonPasteRulesRegisterResult =
   | { ok: true; dispose(): void }
@@ -2917,19 +3044,46 @@ export interface AddonPasteRulesSnapshot {
   readonly rules: readonly AddonPasteRule[]
 }
 
-/** 规则声明每组件数量上限（规格 §4.4：每组件至多 256 条） */
+/** 规则声明每组件数量上限（规格 §4.4：每组件至多 256 条；嵌套子规则计入总量） */
 export const ADDON_PASTE_RULES_MAX_PER_ADDON = 256
 
-/** 表达式嵌套深度上限（T02 消费；常量随本模块集中定义并测试边界） */
+/** 表达式嵌套深度上限（条件组合层级与规则嵌套层级共用；叶子谓词不另计层） */
 export const ADDON_PASTE_RULES_MAX_DEPTH = 16
 
 /** 每次粘贴累计规则/表达式求值步数上限（超限停用规则，内置转换继续） */
 export const ADDON_PASTE_RULES_EVAL_STEP_BUDGET = 100_000
 
+/** 单个正则 pattern 长度上限 */
+export const ADDON_PASTE_RULES_REGEX_PATTERN_LIMIT = 1024
+
+/** 单次正则执行的输入长度上限（元素文本/属性值超限 → 本规则失败，不截断） */
+export const ADDON_PASTE_RULES_REGEX_INPUT_LIMIT = 4096
+
+/** 单条规则条件树节点总数上限（组合节点与叶子谓词合计） */
+export const ADDON_PASTE_RULES_CONDITION_NODES_LIMIT = 64
+
+/**
+ * 捕获组探测（注册校验消费；宿主与页面同源事实）。编译失败返回 null；
+ * 成功返回捕获组数与命名组名集合。实现：以 `(?:pattern)|` 包装后对空串
+ * 执行一次——空右枝保证匹配必然成功，结果数组长度减一即捕获组数，
+ * groups 键即命名组集合。
+ */
+export function addonPasteRegexGroupInfo(pattern: string, flags?: string): { count: number; names: ReadonlySet<string> } | null {
+  try {
+    const probe = new RegExp(`(?:${pattern})|`, flags ?? '')
+    const result = probe.exec('')
+    if (result === null) return null
+    return { count: result.length - 1, names: new Set(result.groups ? Object.keys(result.groups) : []) }
+  } catch {
+    return null
+  }
+}
+
 /**
  * 整批校验（规格 §4.1：批内 ID 重复、非法正则、未知操作或超预算声明
  * 整批拒绝，不部分安装）。输入为作者原始声明（unknown）；输出为规整后
- * 的规则（addonId 由宿主注入，不在此伪造）。
+ * 的规则（addonId 由宿主注入，不在此伪造）。规则总量按「顶层 + 嵌套
+ * 子规则」合计对照每组件 256 条预算。
  */
 export function validateAddonPasteRuleDeclarations(
   declarations: readonly unknown[],
@@ -2941,46 +3095,23 @@ export function validateAddonPasteRuleDeclarations(
   if (declarations.length + (context.currentCount ?? 0) > ADDON_PASTE_RULES_MAX_PER_ADDON) {
     return { ok: false, reason: 'too-many', detail: `每组件至多 ${ADDON_PASTE_RULES_MAX_PER_ADDON} 条规则` }
   }
-  const rules: Omit<AddonPasteRule, 'addonId'>[] = []
-  const seen = new Set<string>(context.existingIds ?? [])
-  for (const [index, raw] of declarations.entries()) {
-    if (!isObject(raw)) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条声明须为对象` }
-    const unknown = hasOnlyKeys(raw, ['id', 'priority', 'match', 'output'])
-    if (unknown) return { ok: false, reason: 'invalid-declaration', detail: `声明不支持字段 '${unknown}'（条件/嵌套属后续版本）` }
-    if (typeof raw.id !== 'string' || !RULE_ID_PATTERN.test(raw.id) || raw.id.length > RULE_ID_LIMIT) {
-      return { ok: false, reason: 'invalid-declaration', detail: `规则 ID 非法：${String(raw.id)}` }
-    }
-    if (seen.has(raw.id)) {
-      return { ok: false, reason: 'duplicate-id', detail: `规则 ID 重复：${raw.id}` }
-    }
-    let priority = 0
-    if (raw.priority !== undefined) {
-      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority)) {
-        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为整数：${String(raw.priority)}` }
-      }
-      priority = raw.priority
-    }
-    const match = validateMatch(raw.match)
-    if (!match.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${match.detail}` }
-    const output = validateOutput(raw.output)
-    if (!output.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${output.detail}` }
-    seen.add(raw.id)
-    rules.push({ id: raw.id, priority, match: match.match, output: output.output })
-  }
-  return { ok: true, rules }
+  const budget: OutputBudget = { count: { value: context.currentCount ?? 0 }, depth: 1 }
+  return validateRuleBatch(declarations, new Set(context.existingIds ?? []), budget)
 }
 
 /**
  * 有效规则确定性排序（规格 §4.3）：优先级降序、组件稳定 ID 升序、规则
  * 稳定 ID 升序；缺省优先级 0。顺序不取决于异步页面脚本装载先后——宿主
- * 构造快照与页面求值共用本函数。
+ * 构造快照与页面求值共用本函数；children 槽的嵌套子规则集同步递归规整
+ * （子集内同序语义，#542 T02）。
  */
 export function orderAddonPasteRules(rules: readonly AddonPasteRule[]): readonly AddonPasteRule[] {
-  return [...rules].sort((a, b) =>
-    b.priority - a.priority ||
-    (a.addonId < b.addonId ? -1 : a.addonId > b.addonId ? 1 : 0) ||
-    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  )
+  const ordered = [...rules].sort(compareRuleOrder)
+  // 嵌套子规则集递归排序（仅当存在 children 槽携带规则时重建对象）
+  return ordered.map((rule) => {
+    const normalized = normalizeNestedRule(rule)
+    return normalized === (rule as unknown as AddonPasteNestedRule) ? rule : ({ ...normalized, addonId: rule.addonId } as AddonPasteRule)
+  })
 }
 ```
 

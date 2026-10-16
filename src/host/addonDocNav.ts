@@ -54,8 +54,10 @@ function countHostLines(text: string): number {
   return text.split('\n').length
 }
 
-/** 宿主系行首偏移（1-based line；越界返回 null——调用方按 out-of-bounds 分派） */
-function hostLineStart(text: string, line1: number): number | null {
+/** 宿主系行首偏移（1-based line；越界返回 null——调用方按 out-of-bounds 分派）。
+ *  #534 起公开导出：普通链接尾部行号（executeLinkIntent 的 md 落位）复用
+ *  同一行号→宿主偏移换算，不建第二套（CRLF 语义由 NewlineCoordinator 收口） */
+export function hostLineStart(text: string, line1: number): number | null {
   let offset = 0
   let n = 1
   for (const rawLine of text.split('\n')) {
@@ -66,6 +68,81 @@ function hostLineStart(text: string, line1: number): number | null {
     n++
   }
   return null
+}
+
+/**
+ * #564 普链 md 行号落位执行体（普通链接 `note.md:3` 的面板定位管线；
+ * executeLinkIntent 的 md 分支装配）：初判（打开时文本）→ openWith →
+ * 就绪等待 → **执行时权威文本重算行首偏移** → LF 换算出站。
+ *
+ * 时序契约（规格 addon-navigation.md §4.2「就绪等待先于权威文本读取，
+ * 等待中变化不发送旧偏移」——与 executeAddonDocNav 的 md line 分支同
+ * 一时序，评审 #564 P2 修复）：偏移不在等待前算死——等待期间文档变化
+ * 按重校文本出站；行消失 → out-of-range（totalLines 为重校文本行数，
+ * 首次越界严格反馈），不出站（调用方据此记 locate none + 越界 toast，
+ * 不误记 custom-panel）。初判越界时面板照常打开（目标可打开但定位
+ * 失败则提示的导航原则）、不等待面板。
+ *
+ * 端口与 AddonDocNavExecPorts 的 md 四端口同签名（两条装配面共享同一
+ * 管线语义）；无 vscode 依赖，node 单测直驱。
+ */
+export interface MdLineRevealPorts {
+  /** 打开/重显 Vsidian 面板（vscode.openWith） */
+  openMarkdown(fsPath: string): Promise<boolean>
+  /** 面板就绪等待（waitForReadyPanel；false = 无就绪面板） */
+  waitForMarkdownReady(fsPath: string): Promise<boolean>
+  /** 目标权威全文（执行时读取——已打开 TextDocument 的 getText 恒最新）；
+   *  null = 读取失败 */
+  readDocText(fsPath: string): Promise<string | null>
+  /** 投递 view.locate（LF 偏移；送达管线由装配方决定——链接路径为
+   *  postToPanel，组件路径为 locateAndWait） */
+  locateMarkdown(fsPath: string, lfOffset: number): Promise<boolean>
+}
+
+/** 行号落位结果：sent = 已出站；out-of-range = 行不存在（totalLines 为
+ *  判定所据文本的行数，调用方按新文本行数提示）；no-panel = 无就绪
+ *  面板（不出站）；error = 打开或读取失败 */
+export type MdLineRevealResult =
+  | { outcome: 'sent' }
+  | { outcome: 'out-of-range'; totalLines: number }
+  | { outcome: 'no-panel' }
+  | { outcome: 'error' }
+
+/** 见 {@link MdLineRevealPorts}（纯端口编排，无 vscode 依赖） */
+export async function revealMdLineAnchor(
+  fsPath: string,
+  line: number,
+  ports: MdLineRevealPorts,
+): Promise<MdLineRevealResult> {
+  const initialText = await ports.readDocText(fsPath)
+  if (initialText === null) {
+    return { outcome: 'error' }
+  }
+  if (hostLineStart(initialText, line) === null) {
+    // 初判越界：面板照常打开（目标可打开但定位失败则提示），不等待
+    if (!(await ports.openMarkdown(fsPath))) {
+      return { outcome: 'error' }
+    }
+    return { outcome: 'out-of-range', totalLines: countHostLines(initialText) }
+  }
+  if (!(await ports.openMarkdown(fsPath))) {
+    return { outcome: 'error' }
+  }
+  if (!(await ports.waitForMarkdownReady(fsPath))) {
+    return { outcome: 'no-panel' }
+  }
+  // 执行时权威文本：等待中目标变化在此重校，不发送旧偏移
+  const freshText = await ports.readDocText(fsPath)
+  if (freshText === null) {
+    return { outcome: 'error' }
+  }
+  const hostOffset = hostLineStart(freshText, line)
+  if (hostOffset === null) {
+    return { outcome: 'out-of-range', totalLines: countHostLines(freshText) }
+  }
+  const lfOffset = new NewlineCoordinator(freshText).hostOffsetToLf(hostOffset)
+  await ports.locateMarkdown(fsPath, lfOffset)
+  return { outcome: 'sent' }
 }
 
 /**

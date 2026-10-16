@@ -390,6 +390,8 @@ export const en = {
   'host.blockedLinkScheme': 'Link protocol "{scheme}" is not allowed: only http/https and in-workspace paths are supported',
   'host.blockedLinkEscape': 'The link points outside the workspace and was blocked: {detail}',
   'host.blockedLinkWindowsDrive': 'Windows drive-letter path links are not supported on remote (POSIX) workspaces',
+  'host.blockedLinkMixedAnchor': 'The link combines a line number with an anchor, which is an invalid location (neither is used): {detail}',
+  'host.linkLineOutOfRange': 'Line number exceeds the target length: {href} line {line} (target has {total} lines; target opened but not located)',
   'host.externalOpenFailed': 'Failed to open the external link: {url}',
   'host.linkNotFound': 'Link target not found: {href} (resolved relative to the current document directory)',
   /** #128 CSS 片段：宿主侧用户提示 */
@@ -576,6 +578,7 @@ export const en = {
   'hover.errorNotFound': 'Target not found: {target} (resolved relative to the current document; files are never created automatically)',
   'hover.errorAmbiguous': 'Multiple targets share this name: {target} (add a path to disambiguate)',
   'hover.errorPending': 'File catalog is updating, the unique same-name target cannot be confirmed yet: {target}',
+  'hover.errorAnchorConflict': 'The link combines a line number with an anchor, which is an invalid location (neither is used): {target} #{anchor}',
   'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
   'hover.errorReadFailed': 'Failed to read the target document',
   'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',

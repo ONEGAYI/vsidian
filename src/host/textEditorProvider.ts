@@ -27,8 +27,7 @@ import {
   classifyImageTarget,
   classifyLinkTarget,
   imageBlockReasonOf,
-  planPathTextOf,
-  splitHrefFragment,
+  linkPathTextOf,
   type ImageResolution,
   type LinkContext,
 } from './linkTarget'
@@ -54,7 +53,7 @@ import { classifyLocalRefContentKind } from '../shared/refContent'
 import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
 import type { AddonDocNavResult } from '../shared/addonNavApi'
-import { executeAddonDocNav, type AddonDocNavExecPorts } from './addonDocNav'
+import { executeAddonDocNav, revealMdLineAnchor, type AddonDocNavExecPorts } from './addonDocNav'
 import { buildEditorCsp } from './editorCsp'
 import { absoluteResourceGrantDirs } from './absoluteResourceRoots'
 // #292 骨架屏内联装配（样式/#app 开标签含骨架标记/可读行宽预注入取值）
@@ -223,10 +222,13 @@ export interface LinkLogEntry {
   path?: string
   /** #160 doc/anchor 的锚点目标（容错解码后原文） */
   fragment?: string
+  /** #534 doc 目标的尾部行号（分类层剥出的 1-based 行号） */
+  line?: number
   /** #160 doc/anchor 的定位方式：custom-panel=本扩展面板挂载定位；
-   *  none=无定位（无锚点、
+   *  native=原生编辑器行定位（#534 text 目标）；
+   *  none=无定位（无锚点无行号、
    *  `#^` 块引用定位器缺席降级或目标标题缺失） */
-  locate?: 'custom-panel' | 'none'
+  locate?: 'custom-panel' | 'native' | 'none'
 }
 
 /** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道；#196 起
@@ -5545,6 +5547,9 @@ function blockedLinkMessage(
       return t('host.blockedLinkEscape', { detail: target.detail ?? '' })
     case 'windows-drive-on-posix':
       return t('host.blockedLinkWindowsDrive')
+    case 'line-anchor-conflict':
+      // #534 混合定位：行号与 fragment 同报，整次语法非法
+      return t('host.blockedLinkMixedAnchor', { detail: target.detail ?? '' })
   }
 }
 
@@ -5691,8 +5696,9 @@ async function executeLinkIntent(
     return
   }
   // 此处 target 已收窄为 doc | absolute（external/blocked/anchor 皆已 return）
-  //——闭包内类型收窄失效，fragment 提前捕获
+  //——闭包内类型收窄失效，fragment/line 提前捕获
   const targetFragment = target.fragment
+  const targetLine = target.line ?? null
   for (const fsPath of target.candidates) {
     // 候选命中后经 statFileRealPath 归正（P2-3，与双链通道同口径）：探测与
     // 打开目标取宿主真实形态（含文件类型核验），防止链接原文大小写漂移
@@ -5711,8 +5717,8 @@ async function executeLinkIntent(
   //——规格「绝对路径无需短名补查」）。多候选不归任一候选（提示补路径）、
   // 清单未就绪不声明唯一（提示更新中），均不冒充不存在
   if (target.kind === 'doc' && shortname !== undefined) {
-    const { pathText } = splitHrefFragment(intent.href.trim())
-    const key = shortnameLookupKeyOf(planPathTextOf(pathText), ctx, { implicitMd: true })
+    // #534：补查域键取「剥行号后」的路径文本（note.md:103 补查 note.md）
+    const key = shortnameLookupKeyOf(linkPathTextOf(intent.href.trim()), ctx, { implicitMd: true })
     if (key !== null) {
       const resolution = shortnameLookupResolution(await shortname(key))
       if (resolution.kind === 'target') {
@@ -5738,30 +5744,96 @@ async function executeLinkIntent(
   )
 
   /** 打开已探明存在的 doc 目标（候选命中与短名补查命中共用——text 目标
-   *  原生编辑器、其余 Vsidian 面板 + fragment 定位；日志与锚点缺失提示
-   *  语义与既有实现逐字一致） */
+   *  原生编辑器、其余 Vsidian 面板 + fragment/行号定位；日志与锚点缺失/
+   *  行号越界提示语义与既有实现一致。#534 行号定位：md 经 T03 宿主定位
+   *  执行体换算 LF 偏移落位（#564 起面板就绪后按执行时权威文本重校——
+   *  等待中文档变化不发送旧偏移），text 经 resolveTextNav 同源校验后原生
+   *  reveal；首次越界严格失败（i18n toast，不静默钳到末行），「目标可
+   *  打开但定位失败则提示」沿既有导航原则 */
   async function openDocTargetAt(fsPath: string): Promise<void> {
     const uri = vscode.Uri.file(fsPath)
     // #340（P3-08）text 目标（普链）：原生编辑器打开——fragment 不解析
     //（锚点控制仅双链可用，普链 fragment 原样交宿主打开，2026-10-04 规范
-    // 修订口径），不带行定位、不弹锚点警告
+    // 修订口径），不带行定位、不弹锚点警告；#534 行号例外：转同源
+    // TextAnchorSpec 经 resolveTextNav 判定后 reveal（越界提示不打开失败）
     if (classifyLocalRefContentKind(fsPath) === 'text') {
+      let locate: 'native' | 'none' = 'none'
+      const editor = await vscode.window.showTextDocument(uri, { preview: false })
+      if (targetLine !== null) {
+        // lineCount 与 refText splitLfLines 同口径（空文件为 1 空行）
+        const nav = resolveTextNav({ line: targetLine }, editor.document.lineCount, 'strict')
+        if (nav.ok) {
+          const pos = new vscode.Position(nav.nav.jumpLine - 1, 0)
+          editor.selection = new vscode.Selection(pos, pos)
+          editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter)
+          locate = 'native'
+        } else {
+          // 首次越界严格失败：目标已打开（可打开），定位失败按导航原则提示
+          void vscode.window.showWarningMessage(t('host.linkLineOutOfRange', {
+            href: intent.href, line: String(targetLine), total: String(editor.document.lineCount),
+          }))
+        }
+      }
       pushLog({
         kind: 'doc',
         href: intent.href,
         path: fsPath,
         fragment: targetFragment ?? undefined,
-        locate: 'none',
+        ...(targetLine !== null ? { line: targetLine } : {}),
+        locate,
       })
-      await vscode.window.showTextDocument(uri, { preview: false })
       return
     }
-    // openTextDocument 只装载不显示；fragment 定位区间与日志先于打开动作
+    // openTextDocument 只装载不显示；fragment/行号定位区间与日志先于打开动作
     const targetDoc = await vscode.workspace.openTextDocument(uri)
     const isBlock = targetFragment !== null && isBlockIdFragment(targetFragment)
+    // #564 行号落位：面板就绪后按**执行时权威文本**重校（T03 addonDocNav
+    // §4.2 同一时序——就绪等待先于权威文本读取，等待中文档变化不发送旧
+    // 偏移；行消失 → 越界 toast（重校文本行数）+ locate none，不误记
+    // custom-panel）。fragment/块锚点路径维持既有一次性解析（规格未要求
+    // 重校，评审只点行号——不顺手扩）；行号与 fragment 互斥（混合定位
+    // 已在分类层整次拦截），此处 targetLine !== null 时 targetFragment 恒 null
+    if (targetLine !== null) {
+      let readyPanel: Awaited<ReturnType<typeof anchors.waitForReadyPanel>>
+      const result = await revealMdLineAnchor(fsPath, targetLine, {
+        openMarkdown: async () => {
+          try {
+            await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+            return true
+          } catch {
+            return false
+          }
+        },
+        waitForMarkdownReady: async () => {
+          readyPanel = await anchors.waitForReadyPanel(uri)
+          return readyPanel !== undefined
+        },
+        readDocText: async () => targetDoc.getText(),
+        locateMarkdown: async (_fsPath, lfOffset) => {
+          // 链接路径沿用既有 postToPanel 送达管线（组件路径才走 locateAndWait）
+          readyPanel!.entry.session.postToPanel(readyPanel!.sessionId, { kind: 'view.locate', offset: lfOffset })
+          return true
+        },
+      })
+      pushLog({
+        kind: 'doc',
+        href: intent.href,
+        path: fsPath,
+        fragment: targetFragment ?? undefined,
+        line: targetLine,
+        locate: result.outcome === 'sent' ? 'custom-panel' : 'none',
+      })
+      if (result.outcome === 'out-of-range') {
+        void vscode.window.showWarningMessage(t('host.linkLineOutOfRange', {
+          href: intent.href, line: String(targetLine), total: String(result.totalLines),
+        }))
+      }
+      return
+    }
     const targetText = targetDoc.getText()
     const offset =
-      targetFragment === null ? null
+      targetFragment === null
+        ? null
         : isBlock
           ? findBlockOffset(targetText, targetFragment.slice(1))
           : findHeadingOffset(targetText, targetFragment)

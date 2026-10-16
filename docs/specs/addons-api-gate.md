@@ -70,13 +70,19 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **T05（#544）候选基线重锚说明**：实施提交 `9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 为 `VsidianAddonPageSdk` 增加可选 `refViews` facet，并新增只读浮窗契约条目。旧成员、既有语义与发行台账不删减；原基线 `8e13e78f` 可信复验通过，候选比较仅因 SDK 声明新增字段触发 `signature-declaration-changed`。按既有字节冻结规则，使用 `--emit-baseline --anchor 9510d9899bc4e146ef4929af7395f1d3b6d0e8c5` 从已提交 git 对象重新发射，再运行基线复验及完整兼容检查。独立 API 仍为未发行的 1.0.0 候选，不补发行日期，也不修改检查器或豁免规则。批次集成其他接口后须针对最终组合提交再次复验，必要时显式重锚。
 
+**T02/#542 候选重锚理由（2026-10-16）**：粘贴规则条目 `paste-rules-register` 落地正则捕获组、all/any/not 条件与 children 槽子规则集（P-U07/P-U08）。旧候选基线如实拒绝语义改写与签名文本变化（`out/test/t02-compat-pre-reanchor.log`，8 项失败：coordinates/lifecycle/errors 三处语义文本改写＋`AddonPasteRuleMatch`、`ADDON_PASTE_RULES_MAX_PER_ADDON`、`ADDON_PASTE_RULES_MAX_DEPTH`、`validateAddonPasteRuleDeclarations`、`orderAddonPasteRules` 五个签名声明文本变化——扩展均为可选字段/新增分支/文档注释与函数体实现，公开调用形状未收窄，语义改写是把「属后续批次、显式拒绝」的占位表述更新为已实现能力与预算边界）。在功能、测试与公开消费用例进入提交 `abc2257` 后，以 `--emit-baseline --anchor HEAD` 显式发射并另行提交基线。不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。
+
 **T07/#546 候选重锚理由（2026-10-15）**：新增宿主主题注册与页面主题环境，扩展 `AddonEnableContext` / `VsidianAddonPageSdk`，并落实 ADR-0017 已批准的 renderer-selection 主题例外及声明语言范围。旧候选基线如实拒绝这些签名和冻结语义变化（`out/test/t07-resume-compat-before-anchor.log`，6 项失败）；在功能与公开消费用例进入提交 `59555c05` 后，以 `--emit-baseline --anchor HEAD` 显式发射并另行提交基线。保留旧锚点 git 对象及失败报告，新锚点复验和兼容全检查均通过（`t07-resume-api-baseline.log` / `t07-resume-compat.log`）；不改检查器、不豁免条目、不伪造 API 已发行，API 台账仍为 1.0.0 候选。最终汇总分支还需对合并后的公开声明整体重锚核对。
+
+**T06/#545 候选重锚理由（2026-10-16）**：组件容器只读引用嵌入为 `AddonSdkRefViewsFacet` 追加 `mountEmbed` 成员并新增 `ref-views-embed` 条目。旧候选基线如实拒绝该签名文本变化（`signature-declaration-changed`，重锚前失败报告 `out/test/t06-addoncompat.log` 与 `out/test/addon-api-compat-report.json`）；在功能、测试与文档同步进入提交 `5eb3f39d` 后，以 `--emit-baseline --anchor 5eb3f39d` 显式发射（35 条目 / 22 签名模块 / 候选台账）。追加成员与新增条目属允许演进（SDK 侧 facet 由平台提供、组件只消费），旧接口、历史锚点对象与失败证据保留；不改检查器、不加豁免、不伪造发行，API 仍为 1.0.0 候选。组合分支合并后须再次复验，必要时重锚。
 
 **四票组合重锚理由（2026-10-15）**：T01/T03/T05/T07 以真实 merge 保留各实施锚点，组合实施提交为 `8cf6a681`。旧 T01 基线可信复验通过，候选比较记录 7 项预期变化：主题选择目标与自动接管语义两项、宿主登记/页面 SDK/文档导航/渲染选择相关签名五项（`out/test/addon-batch-takeover/api-before-reanchor.json`）。按字节冻结规则执行 `--emit-baseline --anchor 8cf6a681`，从已提交组合对象发射 33 条目、21 签名模块及候选台账快照，随后独立提交并复验。重锚保留旧接口、历史对象和失败证据，不修改检查器、不加豁免，API 1.0.0 仍为未发行候选。
 
 **组合后 T01 契约修复重锚（2026-10-15）**：`7eb4dfc3` 修正真实槽声明判定，并按已批准规格移除整数优先级的额外私有幅度限制。公开调用形状未变，但现有声明提取器对导出校验函数保留完整文本，因此优先级校验实现变化使 `validateAddonPasteRuleDeclarations` 单项触发 `signature-declaration-changed`；其余检查通过，失败证据为 `out/test/addon-batch-takeover/final-api-before-fix.json`。按现有规则以包含修复的 `9c03461b` 显式发射新候选基线，同步生成参考；仍为 33 条目、21 签名模块和未发行的 1.0.0，不改检查器或增加豁免。新锚点可信复验与完整兼容结果见 `final-api-baseline.log` / `final-api-compat.json`。
 
 **独立审查后主题回落修复重锚（2026-10-15）**：两轴审查发现选中主题失效后，同语言普通提供者仍可接管。`b252bb79` 为 `RendererThemeSelectionContext` 增加可选的不可用主题语言范围，修正 `selectEffectiveRenderers` 的内置回落；`f28a3e3d` 进一步保留当前唯一首选的派生语言 profile 快照，覆盖组件冷启动未登记时的既有选择。SDK 调用面、旧条目和发行台账不变。旧锚点可信复验通过，候选检查只在上述接口和选择函数文本报两项 `signature-declaration-changed`，证据为 `out/test/addon-batch-takeover/review-fixes-compat-red.json`。按字节冻结规则从已提交对象 `f28a3e3d` 显式重锚；33 条目、21 模块及候选 1.0.0 保持，生成参考、基线可信复验和十项兼容检查通过（`review-fixes-baseline.log`）。不改检查器、不加豁免，不把审查修复表述为实际 API 发行。
+
+**两票并行重锚合并后的组合重锚（2026-10-16）**：T02（#542）与 T06（#545）从同一主线切出并各自重锚候选基线（锚 `abc22572` / `5eb3f39d`），两侧基线互不含对方新增符号，合并时手工融合无意义。第二批次集成分支真实 merge 合入 T06（组合提交 `7cfbb8b3`）后，旧 T06 侧基线可信复验通过，候选比较如实记录 8 项预期失败——全部为 T02 侧符号（coordinates/lifecycle/errors 三处语义文本改写＋`AddonPasteRuleMatch`、`ADDON_PASTE_RULES_MAX_PER_ADDON`、`ADDON_PASTE_RULES_MAX_DEPTH`、`validateAddonPasteRuleDeclarations`、`orderAddonPasteRules` 五个签名声明文本变化，`out/test/t06-merge-compat-pre-reanchor.log`，与 T02 单票重锚时的失败清单一致，无第三方漂移）。按字节冻结规则从已提交合并对象执行 `--emit-baseline --anchor 7cfbb8b3`，发射 35 条目 / 22 签名模块及候选台账快照，随后独立提交并复验。重锚保留两侧旧锚点 git 对象与失败证据，不修改检查器、不加豁免，API 1.0.0 仍为未发行候选。T04 合入后须对最终组合再次整体复验，必要时重锚。
 
 ## CI 接线（代码侧，已交付）
 

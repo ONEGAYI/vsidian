@@ -107,6 +107,11 @@ export interface RefSourceContext {
   parentInstanceId?: string
   depth?: number
   treeId?: string
+  /** T06（#545 评审修复）：sourceDocUri 是显式声明的直接来源文档身份
+   *  （fsPath 形态——组件容器嵌入携带，与 parentInstanceId 的递归父链
+   *  无关）。链接执行通道（卡片右上角「打开」）按它出站 sourceDocUri，
+   *  宿主以直接来源文档解析相对路径（R-U02——不回落面板文档目录）。 */
+  explicitSourceDoc?: boolean
   /** 只读请求的能力随引用树传递，任何后代均不得建立目标编辑端口。 */
   readOnly?: boolean
   expansionPath?: readonly RefTargetIdentity[]
@@ -544,9 +549,10 @@ export class RefContentMount {
       }
     }
     // P2-03 首开定位：标题/块引用且无保存滚动位置时定位到锚点区间起点；
-    // 刷新/重挂（有保存位置）优先恢复阅读位置，不重新定位
-    if (this.instance.scrollTop === 0 && mdLoaded.selector !== undefined &&
-      mdLoaded.selector.kind !== 'full' && mdLoaded.range.start > 0) {
+    // 刷新/重挂（有保存位置）优先恢复阅读位置，不重新定位。
+    // #534 行号定位：range 驱动（full + 行首 range.start > 0 同样定位——
+    // 宿主行号装载即 full + 行首区间；现状 full 恒 start=0 不受影响）
+    if (this.instance.scrollTop === 0 && mdLoaded.range.start > 0) {
       const locateAt = mdLoaded.range.start
       this.scheduleRefLocate(() => {
         if (this.released || this.target !== loaded) return

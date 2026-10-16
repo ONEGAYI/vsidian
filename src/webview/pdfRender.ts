@@ -517,10 +517,13 @@ interface PdfPageSlot {
  * canvas 池。一个视图实例 = 一个 occurrence 的滚动/视口状态；同 URI 多
  * 视图经共享文档存储复用文档数据。
  *
- * show() 幂等重入：同 URI 重入只滚动定位（文档复用，不重复装载）；换
- * URI 先释放旧引用再装载新文档（当前浏览页合法钳制恢复——文件替换后
- * `?v=` 推进的新 URI 是新键，旧文档随旧引用归零销毁）。dispose() 后一
- * 切迟到结果不落地。
+ * show() 幂等重入：同 URI 重入只滚动定位（文档复用，不重复装载）——呈
+ * 现落定前与初始 show 共享等待同一呈现事件，不作废在途绘制；换 URI 先
+ * 释放旧引用再装载新文档（当前浏览页合法钳制恢复——文件替换后 `?v=` 推
+ * 进的新 URI 是新键，旧文档随旧引用归零销毁）。**resolve 契约**（评审
+ * P2 收紧）：resolve(true) 时 phase ∈ {content, error}（定位页呈现或错误
+ * 分态落定——取消不解除等待、重排取消由替代绘制接续）；被取代/释放 →
+ * false。dispose() 后一切迟到结果不落地。
  */
 export class PdfHoverView {
   private renderSeq = 0
@@ -557,8 +560,14 @@ export class PdfHoverView {
   private contentPage = 0
   private readonly listeners: Array<() => void> = []
   private resizeObserver: ResizeObserver | null = null
-  /** show 等待定位页渲染完成的 resolver（定位页完成/错误/取消时 flush） */
-  private contentWaiter: (() => void) | null = null
+  /** 装载落定等待（多订阅：初始 show 与同 URI 重入共享同一事件；定位页
+   *  呈现或错误分态落定时一次全解。取消点不解除——评审 P2：取消不等于
+   *  完成，取消点解除会让首载在替代绘制完成前提前兑现） */
+  private contentWaiters: Array<() => void> = []
+  /** 装载进行中（定位页呈现/错误分态落定前为 true）。同 URI 重入的等待
+   *  判据与 scrollToPage 快速兑现的守卫：phase 会被「窗口内非定位页先行
+   *  完成」宽松置 content（1090 段），不构成装载落定（评审 P2） */
+  private contentPending = false
   /** 内容容器（公开只读：浮层的尺寸观察挂此——canvas 绘制增高触发重定位） */
   readonly root: HTMLDivElement
   private readonly topSpacer: HTMLDivElement
@@ -703,13 +712,60 @@ export class PdfHoverView {
       this.setError('load-failed')
       return true
     }
-    const seq = ++this.renderSeq
-    this.flushContentWaiter() // 被取代的旧 show 解除等待（其 seq 配对失败返回 false）
     const target = page ?? 1
     this.requestedPage = target
     this.renderWidth = renderWidth
+    // 同文档重入：只滚动定位（文档复用——快速切换页码不重复装载）；呈现
+    // 落定前（首载/重排在途）共享等待同一呈现事件——不推进代次、不作废
+    // 在途绘制（作废即丢结果且无替代 → 永久 loading，评审复现 B）；幂等
+    // 重入不清呈现态（此前 phase 打回 loading 是复现 B 的前置）。idle
+    //（内容被撤下）落装载路径重建
+    if (this.doc !== null && this.docUri === uri && this.phase !== 'idle') {
+      const effective = resume && this.totalPages > 0
+        ? Math.min(Math.max(1, target), this.totalPages)
+        : target
+      if (effective < 1 || effective > this.totalPages) {
+        // 越界就地报错（双链初始页契约）：错误分态接管——作废在途装载
+        //（不作废则旧协程复活覆盖 error 态）
+        this.renderSeq++
+        this.setError('page-range')
+        return true
+      }
+      if (this.phase === 'error' && !this.contentPending) {
+        // 错误分态后的同 URI 重入＝重试（评审第三轮 P2-2）：临时 getPage/
+        // resource 错误不由内容版本决定——重建装载等待周期（保留文档引用，
+        // 重建塔与呈现等待）；重试落定（content 或再次 error）后经落定事件
+        // 同步外层消费（旧实现在此以「内容未变必再失败」原地早退，绘制
+        // 实际恢复后无通知 → 卡片停留错误态）。本调用是新的尝试：推进
+        // 尝试身份作废在途旧协程（评审第四轮 P2——多页并发时一页失败清
+        // 塔、另一页 getPage 仍在途；不推进则塔重建后旧任务的 seq/repaint
+        // 守卫全相等，旧失败清掉新塔、旧成功写脱树旧槽仍 flush 新等待）。
+        // 首结局一次性：不改写已兑现的旧结局（本调用自身 promise 是新的
+        // 等待）
+        const seq = ++this.renderSeq
+        this.phase = 'loading'
+        this.errorReason = ''
+        this.contentPending = true
+        this.contentPage = effective
+        this.stickyPage = effective
+        this.scrollToPage(effective) // error 时塔已清：重挂可见页并排队重绘
+        await new Promise<void>((resolve) => { this.contentWaiters.push(resolve) })
+        return seq === this.renderSeq && !this.disposed
+      }
+      this.scrollToPage(effective)
+      if (!this.contentPending) {
+        // 呈现已落定（content 态）：定位即完成，幂等快路径
+        return true
+      }
+      const seq = this.renderSeq
+      await new Promise<void>((resolve) => { this.contentWaiters.push(resolve) })
+      return seq === this.renderSeq && !this.disposed
+    }
+    const seq = ++this.renderSeq
+    this.flushContentWaiters() // 被取代的旧 show 解除等待（其 seq 配对失败返回 false）
     this.phase = 'loading'
     this.errorReason = ''
+    this.contentPending = true
     let lib: PdfjsGlobal
     try {
       lib = await ensurePdfjs(assets)
@@ -722,19 +778,6 @@ export class PdfHoverView {
     this.lib = lib // #339：文本层/链接层的消费面缓存（装配成功后常驻）
     if (seq !== this.renderSeq || this.disposed) {
       return false
-    }
-    // 同文档重入：只滚动定位（文档复用——快速切换页码不重复装载）；resume
-    // 记忆路径越界钳制（恢复语义），双链初始页保持就地报错
-    if (this.doc !== null && this.docUri === uri) {
-      const effective = resume && this.totalPages > 0
-        ? Math.min(Math.max(1, target), this.totalPages)
-        : target
-      if (effective >= 1 && effective <= this.totalPages) {
-        this.scrollToPage(effective)
-      } else {
-        this.setError('page-range')
-      }
-      return seq === this.renderSeq
     }
     // 换目标：刷新路径的浏览位置恢复（当前页合法钳制）
     const restorePage = this.phase === 'loading' && this.page > 0
@@ -781,11 +824,12 @@ export class PdfHoverView {
     this.scrollToPage(initial)
     this.contentPage = initial
     this.updateWindow()
-    // 等定位页真实呈现（#337 语义延续：await show 即 content/错误分态就绪）
+    // 等定位页真实呈现（#337 语义延续：await show 即 content/错误分态就绪
+    // ——resolve(true) 时 phase ∈ {content, error}；取消不解除等待，被取代
+    // 由换目标路径的 flush 终结并经 seq 配对返回 false）
     await new Promise<void>((resolve) => {
-      this.contentWaiter = resolve
+      this.contentWaiters.push(resolve)
     })
-    this.contentWaiter = null
     return seq === this.renderSeq
   }
 
@@ -842,11 +886,14 @@ export class PdfHoverView {
     }
     this.scrollEl.scrollTop = top
     this.updateWindow()
-    // 定位页已在窗且已绘成（同 URI 重入快速翻页）：show 无需等待
-    if (this.slots.get(pageNo)?.canvas !== undefined && this.slots.get(pageNo)?.canvas !== null) {
+    // 定位页已在窗且已绘成（同 URI 重入快速翻页）：show 无需等待。装载
+    // 未落定（contentPending——首载/重排等待中）时不兑现：在途绘制才是
+    // 共享的待等事件（评审 P2）
+    if (!this.contentPending &&
+      this.slots.get(pageNo)?.canvas !== undefined && this.slots.get(pageNo)?.canvas !== null) {
       this.phase = 'content'
       this.errorReason = ''
-      this.flushContentWaiter()
+      this.flushContentWaiters()
     }
   }
 
@@ -957,6 +1004,20 @@ export class PdfHoverView {
       this.page = this.currentPageFromScroll()
     }
     this.updatePageInfo()
+    // 装载等待期的目标跟随（评审第三轮 P2-1）：定位页离窗（用户滚动）时
+    // 等待不得悬空——取消离窗不是完成通知，把有效目标转移到当前可见页；
+    // 新目标已绘成（滚动来回场景）当场落定，否则等其呈现或错误分态落定
+    if (this.contentPending && this.contentPage >= 1 &&
+      (this.contentPage < first || this.contentPage > last)) {
+      this.contentPage = Math.min(Math.max(first, this.page), last)
+      const target = this.slots.get(this.contentPage)
+      if (target !== undefined && target.canvas !== null) {
+        this.phase = 'content'
+        this.errorReason = ''
+        this.contentPending = false
+        this.flushContentWaiters()
+      }
+    }
     // 卸载离窗页
     for (const [pageNo, slot] of [...this.slots.entries()]) {
       if (pageNo < first || pageNo > last) {
@@ -1011,8 +1072,11 @@ export class PdfHoverView {
     const repaint = this.repaintSeq
     try {
       const page = await doc.getPage(pageNo)
+      // 页槽同一性（评审第四轮 P2）：比对协程捕获的 slot 对象而非仅页号
+      // 在场——塔重建（重试/换目标）或离窗重入后同页号已是新槽，旧协程
+      // 的成功/失败/完成通知均不得落到新代次
       if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
-        this.disposed || !this.slots.has(pageNo)) {
+        this.disposed || this.slots.get(pageNo) !== slot) {
         return
       }
       const base = page.getViewport({ scale: 1 })
@@ -1062,8 +1126,12 @@ export class PdfHoverView {
       }
       slot.task = null
       if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
-        this.disposed || !this.slots.has(pageNo)) {
-        this.flushContentWaiter()
+        this.disposed || this.slots.get(pageNo) !== slot) {
+        // 被取代/释放/重排取消/塔重建：本协程结果作废（页槽同一性同上），
+        // 但不解除等待（评审 P2：取消不等于完成——此前的取消点 flush 会让
+        // 首载在替代绘制完成前提前兑现）。等待由取代方自身 flush（换目标
+        // show / discardContent / dispose / setError），或由替代绘制完成
+        // 事件兑现
         return
       }
       // 原子换入：#339 页体包裹重建（画布 + 文本层 + 链接层共用一个定位
@@ -1092,25 +1160,31 @@ export class PdfHoverView {
         this.errorReason = ''
       }
       if (pageNo === this.contentPage) {
-        this.flushContentWaiter()
+        // 定位页真实呈现：装载落定——一次解除全部等待（初始 show 与同 URI
+        // 重入共享本事件）
+        this.contentPending = false
+        this.flushContentWaiters()
       }
     } catch {
-      if (seq !== this.renderSeq || repaint !== this.repaintSeq) return
-      if (this.slots.has(pageNo)) {
-        this.setError('resource')
-        this.flushContentWaiter()
+      if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
+        this.disposed || this.slots.get(pageNo) !== slot) {
+        // 被取代/离窗/塔重建（同页号新槽）：本协程的失败不落到新代次
+        // （评审第四轮 P2——旧失败曾命中新塔页号清掉重试）
+        return
       }
+      this.setError('resource') // 内含落定 flush（错误分态即等待解除）
     } finally {
       this.rendering = Math.max(0, this.rendering - 1)
       if (!this.disposed) this.pumpRenderQueue()
     }
   }
 
-  /** show 的等待解除（定位页完成/取消/错误——被取代时旧 show 返回 false） */
-  private flushContentWaiter(): void {
-    const waiter = this.contentWaiter
-    this.contentWaiter = null
-    waiter?.()
+  /** show 的等待解除（定位页呈现/错误分态落定，或装载被取代/释放——多
+   *  订阅一次全解；被取代时各 show 按自身捕获的 seq 配对判定返回值） */
+  private flushContentWaiters(): void {
+    const waiters = this.contentWaiters
+    this.contentWaiters = []
+    for (const waiter of waiters) waiter()
   }
 
   /**
@@ -1471,6 +1545,10 @@ export class PdfHoverView {
     this.errorReason = ''
     this.clearPages()
     this.pageInfo.textContent = ''
+    // 撤下即终结在途 show 的等待（seq 已推进——醒后配对失败返回 false、
+    // 不兑现；释放语义的 view-disposed 由运行时层按自身结算兑现）
+    this.contentPending = false
+    this.flushContentWaiters()
   }
 
   /** 当前渲染宽（翻页操作的 scale 输入——滚动区内容宽） */
@@ -1485,7 +1563,8 @@ export class PdfHoverView {
     this.page = 0 // 失败态诚实显示：清乐观/残留页码（画布已清，页码不冒充在场——波次二·失败页码语义）
     this.clearPages()
     this.pageInfo.textContent = ''
-    this.flushContentWaiter()
+    this.contentPending = false
+    this.flushContentWaiters() // 错误分态落定：其中等待者醒后 probe 读到 error
   }
 
   /** 清空页塔（cancel 在途、回收画布、归零 spacer——root 骨架保留） */
@@ -1517,10 +1596,10 @@ export class PdfHoverView {
     }
     slot.width = 0
     slot.height = 0
-    if (slot.pageNo === this.contentPage) {
-      // 定位页被离窗取消：等待中的 show 解除（迟到绘制不冒充在场）
-      this.flushContentWaiter()
-    }
+    // 定位页被离窗取消：取消不等于完成——等待不在此解除（解除而无落定会
+    // 让 resolve(true) 时 phase 仍 loading，消费侧不兑现且再无通知 → 首载
+    // 结算永久挂起，评审第三轮 P2-1）。离窗路径由 updateWindow 的目标转移
+    // 接住；其余调用源（clearPages 各系与装载换目标）在调用点自行落定 flush
   }
 
   private releaseDocRef(): void {
@@ -1543,7 +1622,8 @@ export class PdfHoverView {
     }
     this.disposed = true
     this.renderSeq++
-    this.flushContentWaiter()
+    this.contentPending = false
+    this.flushContentWaiters()
     this.clearPages()
     this.releaseDocRef()
     this.phase = 'idle'

@@ -2,7 +2,7 @@
 
 ## 1. 状态与范围
 
-2026-10-15 用户确认产品决策与拆票。#531 为规格/父票；T03（#543）组件文档打开与定位已实现，待用户整体验收；T04（#534）普通链接尾部行号尚未实现。依赖、票号和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。当前 API 仍为未发行候选。
+2026-10-15 用户确认产品决策与拆票。#531 为规格/父票；T03（#543）组件文档打开与定位已实现，待用户整体验收；T04（#534）普通链接尾部行号已于 2026-10-16 实现（实施落档见 §9），待用户整体验收。依赖、票号和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。当前 API 仍为未发行候选。
 
 两种入口共用目标解析与行定位语义：组件请求是结构化导航，普通 Markdown 链接是源码语法入口；不通过组件 API 间接模拟点击，也不把来源特化协议放入内核。
 
@@ -98,3 +98,15 @@ T03 覆盖 N-U01–N-U07、N-U12，并提供内部可复用定位执行体；T04
 来源 URI 来自页面视图注册表，宿主复核主文档或已送达引用；页面释放来源、替换同来源请求或卸载代次时同步取消宿主执行。组件桥的面板键使用文档 URI 与面板 ID 组合，避免不同文档的 `panel-1` 相互覆盖。新增能力没有独立用户操作或默认快捷键。
 
 验证：`t03-resume-red.log`、`t03-delivery-red.log`、`t03-path-red.log`、`t03-error-red.log`、`t03-supersede-red.log` 保存行为红测；相关单测、`compile` 与 `addonDocNav` 浏览器通过；`t03-resume-integration-4.log` 记录真实 1.82.3 宿主六项全绿（含未开/已开、原生文本、引用 B、CRLF、阅读与失败矩阵）。日志均在 `out/test/`，不随包分发。合并后的全量回归与最终 code-review 由批次集成执行；真机交互观感仍待用户验收。
+
+## 9. T04 实施落档（#534）
+
+形态学单一事实源在 `src/host/linkTarget.ts` 的 `splitLineSuffix`（导出复用）与 `classifyLinkTarget`：本地路径段剥尾部 `:十进制正整数` 发生于 `preClassify` 的盘符/文件名分支、**先于** `isWin32OddBasename` ADS 拦截（`note.md:103` 不再被当 NTFS 备用数据流拦截）；只认明文冒号（`%3A` 编码形态维持既有文件名分类）、0/全零/负数/非数字不构成行号（前导零按值语义，与 refText `isPositiveDecimal` 同口径）、行号后尾随空白容忍但剥后保留（Win32 尾空白拦截口径不变）、真 scheme（含 `https://host:443` 端口）不剥；行号与 fragment 同报归 blocked 新 reason `line-anchor-conflict`（doc/absolute 分类携带可选 `line`，`toEqual` 既有断言零破坏）；图片通道 `lineSuffix` 关闭（无行号语义）。`linkPathTextOf`（剥行号→fragment 拆分→剥 query→容错解码）为「手动重拆路径喂 resolveVaultFile」消费方的统一口径：hoverDocAccess、vaultLinkExtract 三处与 executeLinkIntent 短名补查键均已切换，不建第二套剥离。
+
+执行分派（`executeLinkIntent` / `openDocTargetAt`）：md 行号复用 T03 执行体的 `hostLineStart`（#534 起自 addonDocNav 公开导出——同一 1-based 行→宿主行首换算，LF 收口仍经 NewlineCoordinator）+ 既有 `revealLinkAnchor` 管线；text 行号转 `{ line }` TextAnchorSpec 经 `resolveTextNav` strict 判定（与双链 `#line=` 同源），合法则原生编辑器 `selection` + `revealRange` 居中（LinkLogEntry.locate 新值 `native`）。首次越界严格失败：目标照常打开 + i18n toast（`host.linkLineOutOfRange`），不静默钳位；混合定位点击 toast（`host.blockedLinkMixedAnchor`）、不执行打开。
+
+浮窗（hoverDocAccess）：mdlink 解析喂 `linkPathTextOf` 剥后路径、成功形态携带 `line`；text 通道行号走 `resolveTextNav`（越界 `anchor-invalid(out-of-bounds)` 既有分态）、md 通道行号越界同分态（anchor 附 `:N` 原文）、合法回全文 + 行首初始定位区间（`anchorOptional` 刷新宽容钳末行，与锚点缺失同口径）。协议新增 `HoverPreviewFailReason` 值 `anchor-conflict`（混合定位，浮窗就地文案 `hover.errorAnchorConflict` 双语）。webview 侧两处配套：`isHoverableMdLinkHref` 预滤放通「含点 scheme 段 + `:纯数字`」形态（`https:443` 等无点真形态维持外链预滤——与宿主「真 scheme 不含点」口径对齐，此前 `note.md:3` 被预滤误拦无法悬停）；阅读浮窗与 live 嵌入的首开定位条件从「selector 非 full」放宽为「range.start > 0」（P2-03 的 range 即初始定位区间语义——现状 full 恒 start=0 零回归，行号装载 full+行首区间触发定位；反方向「非 full 且 range.start = 0」（锚点目标恰在文档偏移 0、锚点缺失宽容重载）的旧定位到 0 是 no-op——浮窗侧 `scrollTop === 0` 门槛下定位 0 即已在顶，嵌入侧新视图初始即顶且 CM6 初始选区即 [0,0]，故收窄为 `start > 0` 不改变任何可观察行为）。`isHoverableMdLinkHref` 的行号正则显式放通 `./`、`../` 相对路径前缀（该形态本走外链预滤默认放行分支，正则化后语义完整且有单测钉住）。跳转提示（#299 tip）行号并入锚点列（`:3` 源码形态）。索引抽取（vaultLinkExtract）的短名补查/依赖反查键按剥后路径（出链登记目标 href 原文保留）。
+
+验证（TDD 先红后绿，日志 `out/test/t04-*.log`）：`linkTarget.test.ts` 形态矩阵 11 例先红（md/text、盘符、空格宽松与 %编码、query、前导零、混合、`:0`/负数/非数字、`a:b.md`、外链端口、锚点、尾空白、图片不剥）→ 全绿；hoverDocAccess 行号分态 6 例；全量 vitest 8556→8580 例全绿。浏览器 `lineSuffix` 套件 5 场景（悬停 linkHref 原文保真、anchor-conflict 与越界文案就地可见与语言包同源、md 行号预览行首 range 滚动定位、text 上报、点击 href 原文）；定向回归 hoverPreview/hoverLive/embedLive/textHover 全绿。真宿主 1.82.3 集成两用例（md 落位 LF/折叠隐藏区（foldAll 后行号定位经 #412 展开管线）/CRLF/阅读态 readingAnchorStart 块锚定/零写回；text reveal + 混合 blocked + `:0` 平台二态 + 越界 locate none）与链接/悬停/出链/反链/双链/T03 导航定向回归全绿。真机观感项见人工清单 A78。
+
+已知边界：组件 API 面（`executeAddonDocNav`）的 target 原样喂 `resolveVaultLinkFile`——组件请求 `note.md:103` 形态维持 not-found（组件行号走结构化 `locate.line`，不引入 href 语法）；引用式链接 `[t][ref]` 不支持（票面不含）；`a:103` 单字母+行号形态 webview 预滤未放通（悬停无浮窗、点击照常——`a:b.md` 既有预滤偏差不因本票放宽，台账外边界不顺手改）。

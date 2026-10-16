@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "78b04f3e52eff71b676effdb7aa975a2f290eb9b",
-      "ref": "78b04f3e",
+      "sha": "7cfbb8b32a1a53fe657501161da14fe3211b71b8",
+      "ref": "7cfbb8b3",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -603,6 +603,44 @@
       "introduced": "#544（T05）"
     },
     {
+      "id": "ref-views-embed",
+      "group": "page-sdk",
+      "title": "只读引用组件容器嵌入（refViews.mountEmbed）",
+      "layer": "stable-candidate",
+      "endpoints": [
+        "editor-page"
+      ],
+      "purpose": "组件在自有容器挂载内核只读引用子根（T06 #545，规格 addon-reference-views.md §6）：sdk.refViews.mountEmbed 把内核引用卡片（与正文 ![[…]] 嵌入同款装配）挂进本组件已取得的面板内容根或渲染内容根（可为其后代），复用成熟的内容展示与既有目标访问链（来源解析/只读能力/预算/订阅/释放），不重新实现渲染，也不因请求呈现取得写目标文档的能力。本请求零正文写入、零撤销项——插入 ![[…]] 仍由既有编辑 API 显式执行。",
+      "semantics": {
+        "modes": "仅编辑器页提供（设置页为 undefined）。容器须为本组件已取得的面板内容根（ui.registerPanel 的内容根）或渲染内容根（renderers.register 生效容器的后代）——正文根、其他组件容器与平台管理的引用子根内容一律 invalid-request（不建子根，不猜测位置）。内核卡片观感与正文嵌入同源（引用竖条/限高同规则），呈现在组件容器内不接管正文与其他组件容器。",
+        "coordinates": "目标与来源语义和 requestPopup 完全同源（同一目标合成器与 addonSource 来源覆盖——R-U02 的 B 目录解析、行号/范围/大小准入沿既有规则）。多处同目标挂载共享解析缓存（读取数据层），但每次挂载有独立 occurrence——实例、滚动与属性展示状态互不共享，一处释放不销毁其他同目标挂载。",
+        "lifecycle": "promise 在首次读取结局落定时兑现：内容装载成功 → ok + 释放句柄；目标解析/读取/锚点/准入失败 → 失败原因（子根留在场以既有错误分态就地显示，随组释放）。释放触发整组（句柄 release、容器/外层面板/渲染根卸载或脱树、组件停用/故障/代次终结、页面结束）：订阅 unwatch、预算与内容实例彻底终结，pending 以 view-disposed 终结，迟到回包不重挂不复活缓存。重复挂载同一容器（含错误分态挂载）→ duplicate-mount，先释放旧实例才可重挂。目标更新沿既有 watch 通道静默刷新；删除/失效按现有引用视图分态就地显示（R-U11），失效不生成新写会话。所创建引用树及递归内容恒只读（readOnly 逐层传递——模式切换/保存/编辑入口不出现或不生效，不能借父 Live 或历史模式获得写端口）。",
+        "errors": "自有拒绝与浮窗同族另加容器占位冲突：invalid-request（形状/容器脱树或非本组件所有/容器在引用子根内）/ view-disposed（来源实例不在场、页面会话缺失，或结局落定前挂载被释放）/ duplicate-mount（容器已被有效挂载占用）/ released（组件代次终结）；HoverPreviewFailReason 透传（not-found / anchor-invalid / file-too-large / budget 等——真实原因就地显示，不折叠为 not-found）。"
+      },
+      "signatures": [
+        {
+          "module": "src/shared/addonRefViews.ts",
+          "symbols": [
+            "AddonRefEmbedRequest",
+            "AddonRefEmbedHandle",
+            "AddonRefEmbedRejection",
+            "AddonRefEmbedOutcome",
+            "isAddonRefEmbedRequest"
+          ]
+        }
+      ],
+      "verification": [
+        "test/unit/addonRefViews.test.ts",
+        "test/unit/addonRefViewsEmbed.test.ts",
+        "test/unit/addonRefViewsEmbedCard.test.ts",
+        "test/unit/embedCardCssContract.test.ts",
+        "test/unit/addonPageLoader.test.ts",
+        "test/browser/addonRefViewsEmbed.mjs",
+        "test/integration/suite/addonRefViewsCases.ts"
+      ],
+      "introduced": "#545（T06）"
+    },
+    {
       "id": "theme-environment",
       "group": "page-sdk",
       "title": "主题环境快照与订阅（themeEnvironment）",
@@ -1157,9 +1195,9 @@
       "purpose": "组件在宿主运行生命周期（enable 上下文的 paste 面）登记可序列化粘贴转换规则：全部已打开与新打开的编辑器页面共用同一组有效规则，在富文本粘贴的 HTML→Markdown 遍历中消费——来源特化元素（如带私有属性的 span）可恢复为 Markdown 链接等结构，来源识别不进入内核。",
       "semantics": {
         "modes": "只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。",
-        "coordinates": "规则语言为可序列化数据：基础匹配（标签名相等、属性存在、属性值相等——缺失与空串区分）＋取值槽（元素文本/指定属性/子内容内置转换结果）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则、条件组合与嵌套转换属后续批次（#542）——未知字段显式拒绝，不静默当成基础声明。",
-        "lifecycle": "有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。每组件至多 256 条、表达式嵌套深度至多 16（后续批次消费）、单次粘贴求值步数至多 100,000（超限停用规则、内置转换继续）。",
-        "errors": "四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段，含后续批次的正则条件嵌套节点在未实现阶段的显式拒绝）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。"
+        "coordinates": "规则语言为可序列化数据：匹配（标签名相等、属性条件全与——缺失与空串区分——＋可选条件树）＋取值槽（元素文本/指定属性/子内容转换结果/正则捕获组）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性/捕获组槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则为数据声明 pattern＋受限 flags（i/m/s/u，禁 g/y 有状态修饰符），注册时编译校验；捕获组取值支持整匹（组 0）/数字组/命名组，组引用越界或命名组缺失即拒绝。条件为 all/any/not 树（叶子：属性存在/相等、属性值正则、元素文本正则；空组合、非法节点与隐式真值形态拒绝）。嵌套转换在 children 槽声明子规则集（与顶层同一声明语言，ID 为槽内局部；子元素先子规则后内置，只沿子节点下降）。未知字段一律显式拒绝，不静默当成已声明形态。",
+        "lifecycle": "有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后；children 子规则集递归同序）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点；嵌套求值期间外层规则集不参与（不按规则 ID 回跳或再次转换自身）。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。预算集中定义：每组件至多 256 条规则声明（含嵌套子规则合计）、条件组合层级与规则嵌套层级各至多 16、单条规则条件树至多 64 节点、单次粘贴求值步数至多 100,000（规则尝试/条件节点/正则执行各计一步，超限停用规则、内置转换继续）。正则实现为运行环境原生 RegExp：同步、单次执行不可中断——步数预算计执行次数不是可中断超时；正则输入（元素文本/属性值）超过 4,096 字符按必需取值缺失处理（本规则失败，不截断不改写）。",
+        "errors": "四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段/非法正则——编译失败、flags 越集、组引用越界或命名组缺失——/空条件组合/条件或嵌套超深超节点数）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。"
       },
       "signatures": [
         {
@@ -1169,11 +1207,21 @@
             "AddonPasteRuleMatch",
             "AddonPasteRuleOutput",
             "AddonPasteSlot",
+            "AddonPasteSlotSource",
+            "AddonPasteRegex",
+            "AddonPastePredicate",
+            "AddonPasteCondition",
+            "AddonPasteConditionNode",
+            "AddonPasteNestedRule",
             "AddonPasteRulesRegisterResult",
             "AddonPasteRulesSnapshot",
             "ADDON_PASTE_RULES_MAX_PER_ADDON",
             "ADDON_PASTE_RULES_MAX_DEPTH",
             "ADDON_PASTE_RULES_EVAL_STEP_BUDGET",
+            "ADDON_PASTE_RULES_REGEX_PATTERN_LIMIT",
+            "ADDON_PASTE_RULES_REGEX_INPUT_LIMIT",
+            "ADDON_PASTE_RULES_CONDITION_NODES_LIMIT",
+            "addonPasteRegexGroupInfo",
             "validateAddonPasteRuleDeclarations",
             "orderAddonPasteRules"
           ]
@@ -1195,7 +1243,7 @@
         "test/integration/richPasteHostSuite.ts",
         "test/integration/addonFixtures/addon-paste-rules/extension.js"
       ],
-      "introduced": "#541（T01）"
+      "introduced": "#541（T01）；#542（T02 正则/条件/嵌套）"
     }
   ],
   "declarations": {
@@ -1312,9 +1360,14 @@
       "AddonRefPopupHandle": "/** 本次请求的关闭句柄：身份只针对本组件本代次的这一次请求（规格 §7） */\nexport interface AddonRefPopupHandle {\n  /** 关闭本请求的浮窗（幂等；浮窗已换主或已关时返回 false——旧句柄不\n   *  误关后来另一组件的浮窗） */\n  close(): boolean\n  /** 本请求的浮窗是否仍在场（被替换/Esc/移出/域失效关闭后为 false） */\n  isActive(): boolean\n}",
       "AddonRefPopupRejection": "/** 可辨认拒绝（规格 §7：普通结果区分；不折叠为 not-found）：\n *  - invalid-request：形状/来源/触发位置非法（不创建浮窗）；\n *  - view-disposed：来源实例不存在或已销毁、请求被替换/关闭（迟到结果\n *    与旧句柄的终结口径）；\n *  - released：组件代次已终结（装载器守卫——旧代次请求不再有有效来源）；\n *  - HoverPreviewFailReason 透传：目标解析/读取/锚点/准入超限的真实原因\n *    （not-found / escape（越出所属根）/ anchor-invalid / file-too-large …），\n *    浮窗同时以现有引用错误视图就地显示（invalid-request 除外）。 */\nexport type AddonRefPopupRejection =\n  | 'invalid-request'\n  | 'view-disposed'\n  | 'released'\n  | HoverPreviewFailReason",
       "AddonRefPopupOutcome": "export type AddonRefPopupOutcome =\n  | { ok: true; handle: AddonRefPopupHandle }\n  | { ok: false; reason: AddonRefPopupRejection }",
-      "AddonSdkRefViewsFacet": "/** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）\n *  首版只含浮窗请求；T06 在同一 facet 上扩展组件容器挂载入口 */\nexport interface AddonSdkRefViewsFacet {\n  /** 请求只读引用浮窗（单页单浮窗：新请求替换旧请求，旧请求句柄随之\n   *  失效）。结果在读取结局落定时兑现：内容装载成功 → ok + 句柄；目标\n   *  解析/读取/锚点失败 → 失败原因（浮窗若在场显示真实错误分态）；请求\n   *  被替换或关闭 → view-disposed */\n  requestPopup(request: AddonRefPopupRequest): Promise<AddonRefPopupOutcome>\n}",
+      "AddonSdkRefViewsFacet": "/** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）\n *  浮窗请求 + T06（#545）组件容器嵌入挂载——两者共用来源解析与目标语义 */\nexport interface AddonSdkRefViewsFacet {\n  /** 请求只读引用浮窗（单页单浮窗：新请求替换旧请求，旧请求句柄随之\n   *  失效）。结果在读取结局落定时兑现：内容装载成功 → ok + 句柄；目标\n   *  解析/读取/锚点失败 → 失败原因（浮窗若在场显示真实错误分态）；请求\n   *  被替换或关闭 → view-disposed */\n  requestPopup(request: AddonRefPopupRequest): Promise<AddonRefPopupOutcome>\n  /** 在组件自有容器挂载内核只读引用子根（R-U08）。结果在首次读取结局\n   *  落定时兑现：内容装载成功 → ok + 释放句柄；目标失败 → 失败原因\n   *  （子根留在场显示错误分态，随容器/组件生命周期整组释放）。多处同\n   *  目标各挂各的（实例/滚动/属性状态独立，读取数据共享缓存） */\n  mountEmbed(request: AddonRefEmbedRequest): Promise<AddonRefEmbedOutcome>\n}",
       "isAddonRefTargetSpec": "export function isAddonRefTargetSpec(v: unknown): v is AddonRefTargetSpec {\n  if (!isRecord(v) || typeof v.path !== 'string') {\n    return false\n  }\n  if (v.anchor !== undefined && !isAddonRefAnchor(v.anchor)) {\n    return false\n  }\n  // 空 path 仅在带锚点时合法（页内锚点——目标即来源文档自身）\n  if (v.path === '' && v.anchor === undefined) {\n    return false\n  }\n  return isExpressibleRefText(v.path)\n}",
-      "buildAddonRefHoverTarget": "/**\n * 结构化目标 → 双链目标原文（hover.request 的 target 形态）：路径与锚点\n * 按既有形态学拼装——heading `路径#标题`、block `路径#^id`、line\n * `路径#line=N`、range `路径#range=A-B`、无锚点即路径本身。返回 null =\n * 形态不可表达（守卫已拦；防御性兜底，不静默降级）。合成原文走与真实\n * 双链完全相同的解析与准入链路（R-U03：行号/范围/大小限制均为既有规则）。\n */\nexport function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | null {\n  if (!isAddonRefTargetSpec(target)) {\n    return null\n  }\n  const path = target.path\n  const anchor = target.anchor\n  if (anchor === undefined) {\n    return path\n  }\n  switch (anchor.kind) {\n    case 'heading':\n      return `${path}#${anchor.heading}`\n    case 'block':\n      return `${path}#^${anchor.blockId}`\n    case 'line':\n      return `${path}#line=${anchor.line}`\n    case 'range':\n      return `${path}#range=${anchor.startLine}-${anchor.endLine}`\n  }\n}"
+      "buildAddonRefHoverTarget": "/**\n * 结构化目标 → 双链目标原文（hover.request 的 target 形态）：路径与锚点\n * 按既有形态学拼装——heading `路径#标题`、block `路径#^id`、line\n * `路径#line=N`、range `路径#range=A-B`、无锚点即路径本身。返回 null =\n * 形态不可表达（守卫已拦；防御性兜底，不静默降级）。合成原文走与真实\n * 双链完全相同的解析与准入链路（R-U03：行号/范围/大小限制均为既有规则）。\n */\nexport function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | null {\n  if (!isAddonRefTargetSpec(target)) {\n    return null\n  }\n  const path = target.path\n  const anchor = target.anchor\n  if (anchor === undefined) {\n    return path\n  }\n  switch (anchor.kind) {\n    case 'heading':\n      return `${path}#${anchor.heading}`\n    case 'block':\n      return `${path}#^${anchor.blockId}`\n    case 'line':\n      return `${path}#line=${anchor.line}`\n    case 'range':\n      return `${path}#range=${anchor.startLine}-${anchor.endLine}`\n  }\n}",
+      "AddonRefEmbedRequest": "/** 只读引用嵌入挂载请求：公共载荷 = 来源实例 + 目标 + 本组件自有容器。\n *  组件身份与代次由 SDK 注入；容器必须是本组件已取得的面板内容根或\n *  渲染内容根（可为其后代）——正文根、其他组件容器与平台管理的引用\n *  子根内容都不是合法容器（运行时校验，归属外一律 invalid-request） */\nexport interface AddonRefEmbedRequest {\n  /** 来源实例（views 面 instanceId：'main' / 'embed:<hostId>' /\n   *  'hover:<instanceId>'；与浮窗请求同源语义——R-U02） */\n  source: string\n  /** 目标（结构化路径 + 可选锚点；与浮窗请求共用目标语义，不建第二套） */\n  target: AddonRefTargetSpec\n  /** 挂载容器：本页在树元素。平台在其中创建引用子根，不覆盖容器其他内容 */\n  container: HTMLElement\n}",
+      "AddonRefEmbedHandle": "/** 本次挂载的释放句柄：身份只针对本组件本代次的这一次挂载 */\nexport interface AddonRefEmbedHandle {\n  /** 释放本次挂载（幂等；整组释放路径——句柄释放、容器/父根脱树、\n   *  组件停用、页面结束——效果等价）。错误分态挂载不发放句柄 */\n  release(): boolean\n  /** 本次挂载是否仍在场（已释放/子根脱树后为 false） */\n  isActive(): boolean\n}",
+      "AddonRefEmbedRejection": "/** 嵌入挂载可辨认拒绝（规格 §7；与浮窗请求同族，另含容器占位冲突）：\n *  - invalid-request：形状非法 / 容器脱树或非本组件所有 / 容器在平台\n *    管理的引用子根内（不创建子根）；\n *  - view-disposed：来源实例不在场、页面会话缺失，或挂载在结局落定前\n *    被释放（迟到结果的终结口径）；\n *  - duplicate-mount：该容器已被一次有效挂载占用（含错误分态挂载——\n *    重复挂载同一位置须先释放旧实例）；\n *  - released：组件代次已终结（装载器守卫）；\n *  - HoverPreviewFailReason 透传：目标解析/读取/锚点/准入超限的真实原因\n *    （子根留在场以现有引用错误视图就地显示，随组释放）。 */\nexport type AddonRefEmbedRejection =\n  | 'invalid-request'\n  | 'view-disposed'\n  | 'duplicate-mount'\n  | 'released'\n  | HoverPreviewFailReason",
+      "AddonRefEmbedOutcome": "export type AddonRefEmbedOutcome =\n  | { ok: true; handle: AddonRefEmbedHandle }\n  | { ok: false; reason: AddonRefEmbedRejection }",
+      "isAddonRefEmbedRequest": "/** 请求形状守卫（container 在共享层只钉对象在场性——元素身份、在树性\n *  与归属由 webview 运行时校验，共享模块不依赖 DOM） */\nexport function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {\n  if (!isRecord(v)) {\n    return false\n  }\n  return typeof v.source === 'string' && v.source !== '' &&\n    isAddonRefTargetSpec(v.target) &&\n    v.container !== null && typeof v.container === 'object'\n}"
     },
     "src/shared/addonThemes.ts": {
       "AddonThemeEnvironment": "/** 明暗快照（四态两轴投影；亮色高对比 ≠ 暗） */\nexport interface AddonThemeEnvironment {\n  /** 暗色：dark 与暗色高对比为 true；亮色与亮色高对比为 false */\n  readonly dark: boolean\n  /** 高对比：两种高对比形态为 true */\n  readonly highContrast: boolean\n}",
@@ -1415,16 +1468,26 @@
     },
     "src/shared/addonPasteRules.ts": {
       "AddonPasteRuleDeclaration": "/** 作者提交的规则声明（来源组件与代次由平台注入，声明不带身份字段） */\nexport interface AddonPasteRuleDeclaration {\n  /** 组件内稳定规则 ID（禁点号——不伪造跨组件身份） */\n  readonly id: string\n  /** 可选整数优先级（缺省 0；排序见 orderAddonPasteRules） */\n  readonly priority?: number\n  readonly match: AddonPasteRuleMatch\n  readonly output: AddonPasteRuleOutput\n}",
-      "AddonPasteRuleMatch": "/** 基础匹配：标签名相等 + 属性条件全与（条件组合 all/any/not 属 T02） */\nexport interface AddonPasteRuleMatch {\n  /** 标签名（大写形态与 DOM tagName 对齐；校验时规整） */\n  readonly tag: string\n  /** 属性条件列表（全部满足才匹配；至多 8 条） */\n  readonly attributes?: readonly AddonPasteRuleAttributeCondition[]\n}",
+      "AddonPasteRuleMatch": "/** 匹配：标签名相等 + 属性条件全与 + 可选条件树（三处同时满足才匹配） */\nexport interface AddonPasteRuleMatch {\n  /** 标签名（大写形态与 DOM tagName 对齐；校验时规整） */\n  readonly tag: string\n  /** 属性条件列表（全部满足才匹配；至多 8 条） */\n  readonly attributes?: readonly AddonPasteRuleAttributeCondition[]\n  /** 条件树（#542 T02；根可为组合节点或叶子谓词，与 attributes 全与组合） */\n  readonly condition?: AddonPasteConditionNode\n}",
       "AddonPasteRuleOutput": "/** 产出：Markdown 结构模板或显式丢弃（空产出只有显式丢弃才算成功） */\nexport type AddonPasteRuleOutput =\n  | {\n    readonly kind: 'template'\n    /** 模板中的 {{name}} 引用槽；字面部分是作者声明的静态 Markdown 结构 */\n    readonly template: string\n    readonly slots: Readonly<Record<string, AddonPasteSlot>>\n  }\n  | { readonly kind: 'discard' }",
       "AddonPasteSlot": "/** 模板槽：url=true 经现有 safeUrl 策略（children 来源无 URL 语义，拒绝） */\nexport interface AddonPasteSlot {\n  readonly source: AddonPasteSlotSource\n  readonly url?: boolean\n}",
+      "AddonPasteSlotSource": "/** 槽取值来源：元素文本 / 指定属性 / 子内容转换结果 / 正则捕获组 */\nexport type AddonPasteSlotSource =\n  | { readonly kind: 'text' }\n  | { readonly kind: 'attribute'; readonly name: string }\n  | {\n    /** 子内容转换结果；rules 声明嵌套子规则集（先子规则后内置，仅沿子节点下降） */\n    readonly kind: 'children'\n    readonly rules?: readonly AddonPasteNestedRule[]\n  }\n  | { readonly kind: 'text-regex'; readonly regex: AddonPasteRegex; readonly group: number | string }\n  | { readonly kind: 'attribute-regex'; readonly name: string; readonly regex: AddonPasteRegex; readonly group: number | string }",
+      "AddonPasteRegex": "/** 正则声明：数据形态 pattern 与受限 flags（注册时编译校验，不执行字符串代码） */\nexport interface AddonPasteRegex {\n  readonly pattern: string\n  readonly flags?: string\n}",
+      "AddonPastePredicate": "/** 条件叶子谓词：属性存在/相等（基础谓词）或正则谓词（属性值/元素文本） */\nexport type AddonPastePredicate =\n  | { readonly kind: 'attribute'; readonly name: string; readonly value?: string }\n  | { readonly kind: 'attribute-regex'; readonly name: string; readonly regex: AddonPasteRegex }\n  | { readonly kind: 'text-regex'; readonly regex: AddonPasteRegex }",
+      "AddonPasteCondition": "/** 条件组合节点：all/any/not（空组合与非法节点在注册时拒绝） */\nexport type AddonPasteCondition =\n  | { readonly all: readonly AddonPasteConditionNode[] }\n  | { readonly any: readonly AddonPasteConditionNode[] }\n  | { readonly not: AddonPasteConditionNode }",
+      "AddonPasteConditionNode": "/** 条件树节点：叶子谓词或组合节点 */\nexport type AddonPasteConditionNode = AddonPastePredicate | AddonPasteCondition",
+      "AddonPasteNestedRule": "/**\n * 嵌套规则（children 槽子规则集成员；与顶层规则同一声明语言，id 为槽内\n * 局部）。作者声明形态：priority 可选（缺省 0，排序语义同顶层规则）。\n */\nexport interface AddonPasteNestedRule {\n  /** 槽内局部规则 ID（同集合内唯一；不与顶层或其他集合冲突） */\n  readonly id: string\n  /** 可选整数优先级（缺省 0；子集内按优先级降序、ID 升序） */\n  readonly priority?: number\n  readonly match: AddonPasteRuleMatch\n  readonly output: AddonPasteRuleOutput\n}",
       "AddonPasteRulesRegisterResult": "/** 注册结果（普通 API 拒绝不算组件故障；dispose 重复调用无害） */\nexport type AddonPasteRulesRegisterResult =\n  | { ok: true; dispose(): void }\n  | { ok: false; reason: 'invalid-declaration' | 'duplicate-id' | 'too-many' | 'released'; detail?: string }",
       "AddonPasteRulesSnapshot": "/** 广播到编辑器页面的有效规则快照（version 单调递增，内容等值不递增） */\nexport interface AddonPasteRulesSnapshot {\n  readonly version: number\n  readonly rules: readonly AddonPasteRule[]\n}",
-      "ADDON_PASTE_RULES_MAX_PER_ADDON": "/** 规则声明每组件数量上限（规格 §4.4：每组件至多 256 条） */\nexport const ADDON_PASTE_RULES_MAX_PER_ADDON = 256",
-      "ADDON_PASTE_RULES_MAX_DEPTH": "/** 表达式嵌套深度上限（T02 消费；常量随本模块集中定义并测试边界） */\nexport const ADDON_PASTE_RULES_MAX_DEPTH = 16",
+      "ADDON_PASTE_RULES_MAX_PER_ADDON": "/** 规则声明每组件数量上限（规格 §4.4：每组件至多 256 条；嵌套子规则计入总量） */\nexport const ADDON_PASTE_RULES_MAX_PER_ADDON = 256",
+      "ADDON_PASTE_RULES_MAX_DEPTH": "/** 表达式嵌套深度上限（条件组合层级与规则嵌套层级共用；叶子谓词不另计层） */\nexport const ADDON_PASTE_RULES_MAX_DEPTH = 16",
       "ADDON_PASTE_RULES_EVAL_STEP_BUDGET": "/** 每次粘贴累计规则/表达式求值步数上限（超限停用规则，内置转换继续） */\nexport const ADDON_PASTE_RULES_EVAL_STEP_BUDGET = 100_000",
-      "validateAddonPasteRuleDeclarations": "/**\n * 整批校验（规格 §4.1：批内 ID 重复、非法正则、未知操作或超预算声明\n * 整批拒绝，不部分安装）。输入为作者原始声明（unknown）；输出为规整后\n * 的规则（addonId 由宿主注入，不在此伪造）。\n */\nexport function validateAddonPasteRuleDeclarations(\n  declarations: readonly unknown[],\n  context: AddonPasteRuleValidationContext = {},\n): AddonPasteRuleValidationResult {\n  if (!Array.isArray(declarations)) {\n    return { ok: false, reason: 'invalid-declaration', detail: 'declarations must be an array' }\n  }\n  if (declarations.length + (context.currentCount ?? 0) > ADDON_PASTE_RULES_MAX_PER_ADDON) {\n    return { ok: false, reason: 'too-many', detail: `每组件至多 ${ADDON_PASTE_RULES_MAX_PER_ADDON} 条规则` }\n  }\n  const rules: Omit<AddonPasteRule, 'addonId'>[] = []\n  const seen = new Set<string>(context.existingIds ?? [])\n  for (const [index, raw] of declarations.entries()) {\n    if (!isObject(raw)) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条声明须为对象` }\n    const unknown = hasOnlyKeys(raw, ['id', 'priority', 'match', 'output'])\n    if (unknown) return { ok: false, reason: 'invalid-declaration', detail: `声明不支持字段 '${unknown}'（条件/嵌套属后续版本）` }\n    if (typeof raw.id !== 'string' || !RULE_ID_PATTERN.test(raw.id) || raw.id.length > RULE_ID_LIMIT) {\n      return { ok: false, reason: 'invalid-declaration', detail: `规则 ID 非法：${String(raw.id)}` }\n    }\n    if (seen.has(raw.id)) {\n      return { ok: false, reason: 'duplicate-id', detail: `规则 ID 重复：${raw.id}` }\n    }\n    let priority = 0\n    if (raw.priority !== undefined) {\n      if (typeof raw.priority !== 'number' || !Number.isInteger(raw.priority)) {\n        return { ok: false, reason: 'invalid-declaration', detail: `优先级须为整数：${String(raw.priority)}` }\n      }\n      priority = raw.priority\n    }\n    const match = validateMatch(raw.match)\n    if (!match.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${match.detail}` }\n    const output = validateOutput(raw.output)\n    if (!output.ok) return { ok: false, reason: 'invalid-declaration', detail: `第 ${index + 1} 条（${raw.id}）：${output.detail}` }\n    seen.add(raw.id)\n    rules.push({ id: raw.id, priority, match: match.match, output: output.output })\n  }\n  return { ok: true, rules }\n}",
-      "orderAddonPasteRules": "/**\n * 有效规则确定性排序（规格 §4.3）：优先级降序、组件稳定 ID 升序、规则\n * 稳定 ID 升序；缺省优先级 0。顺序不取决于异步页面脚本装载先后——宿主\n * 构造快照与页面求值共用本函数。\n */\nexport function orderAddonPasteRules(rules: readonly AddonPasteRule[]): readonly AddonPasteRule[] {\n  return [...rules].sort((a, b) =>\n    b.priority - a.priority ||\n    (a.addonId < b.addonId ? -1 : a.addonId > b.addonId ? 1 : 0) ||\n    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),\n  )\n}"
+      "ADDON_PASTE_RULES_REGEX_PATTERN_LIMIT": "/** 单个正则 pattern 长度上限 */\nexport const ADDON_PASTE_RULES_REGEX_PATTERN_LIMIT = 1024",
+      "ADDON_PASTE_RULES_REGEX_INPUT_LIMIT": "/** 单次正则执行的输入长度上限（元素文本/属性值超限 → 本规则失败，不截断） */\nexport const ADDON_PASTE_RULES_REGEX_INPUT_LIMIT = 4096",
+      "ADDON_PASTE_RULES_CONDITION_NODES_LIMIT": "/** 单条规则条件树节点总数上限（组合节点与叶子谓词合计） */\nexport const ADDON_PASTE_RULES_CONDITION_NODES_LIMIT = 64",
+      "addonPasteRegexGroupInfo": "/**\n * 捕获组探测（注册校验消费；宿主与页面同源事实）。编译失败返回 null；\n * 成功返回捕获组数与命名组名集合。实现：以 `(?:pattern)|` 包装后对空串\n * 执行一次——空右枝保证匹配必然成功，结果数组长度减一即捕获组数，\n * groups 键即命名组集合。\n */\nexport function addonPasteRegexGroupInfo(pattern: string, flags?: string): { count: number; names: ReadonlySet<string> } | null {\n  try {\n    const probe = new RegExp(`(?:${pattern})|`, flags ?? '')\n    const result = probe.exec('')\n    if (result === null) return null\n    return { count: result.length - 1, names: new Set(result.groups ? Object.keys(result.groups) : []) }\n  } catch {\n    return null\n  }\n}",
+      "validateAddonPasteRuleDeclarations": "/**\n * 整批校验（规格 §4.1：批内 ID 重复、非法正则、未知操作或超预算声明\n * 整批拒绝，不部分安装）。输入为作者原始声明（unknown）；输出为规整后\n * 的规则（addonId 由宿主注入，不在此伪造）。规则总量按「顶层 + 嵌套\n * 子规则」合计对照每组件 256 条预算。\n */\nexport function validateAddonPasteRuleDeclarations(\n  declarations: readonly unknown[],\n  context: AddonPasteRuleValidationContext = {},\n): AddonPasteRuleValidationResult {\n  if (!Array.isArray(declarations)) {\n    return { ok: false, reason: 'invalid-declaration', detail: 'declarations must be an array' }\n  }\n  if (declarations.length + (context.currentCount ?? 0) > ADDON_PASTE_RULES_MAX_PER_ADDON) {\n    return { ok: false, reason: 'too-many', detail: `每组件至多 ${ADDON_PASTE_RULES_MAX_PER_ADDON} 条规则` }\n  }\n  const budget: OutputBudget = { count: { value: context.currentCount ?? 0 }, depth: 1 }\n  return validateRuleBatch(declarations, new Set(context.existingIds ?? []), budget)\n}",
+      "orderAddonPasteRules": "/**\n * 有效规则确定性排序（规格 §4.3）：优先级降序、组件稳定 ID 升序、规则\n * 稳定 ID 升序；缺省优先级 0。顺序不取决于异步页面脚本装载先后——宿主\n * 构造快照与页面求值共用本函数；children 槽的嵌套子规则集同步递归规整\n * （子集内同序语义，#542 T02）。\n */\nexport function orderAddonPasteRules(rules: readonly AddonPasteRule[]): readonly AddonPasteRule[] {\n  const ordered = [...rules].sort(compareRuleOrder)\n  // 嵌套子规则集递归排序（仅当存在 children 槽携带规则时重建对象）\n  return ordered.map((rule) => {\n    const normalized = normalizeNestedRule(rule)\n    return normalized === (rule as unknown as AddonPasteNestedRule) ? rule : ({ ...normalized, addonId: rule.addonId } as AddonPasteRule)\n  })\n}"
     }
   },
   "releases": [

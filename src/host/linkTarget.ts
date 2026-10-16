@@ -17,6 +17,15 @@
 //   整段为 fragment，结构化保留供执行层定位（不再静默丢弃）；仅锚点
 //   （#frag）解析为本文件锚点目标；外部 scheme（http/https 等）的 `#`
 //   是网页锚点语义不接管，照旧外开；图片通道无锚点语义，`#` 开头维持拦截
+// - 尾部行号后缀（#534，规格 addon-navigation.md §5）：仅普通 Markdown
+//   链接（含宽松链接）的**本地路径段**支持 `:十进制正整数` 行号后缀，
+//   剥离早于 Win32 ADS/怪异 basename 拦截（note.md:103 的 basename 含
+//   ':' 不先剥会被当 NTFS 备用数据流拦截）；0/负数/非数字不构成行号，
+//   编码冒号（%3A）不剥——行号仅认明文冒号（工具输出复制的是明文，
+//   normalizeLink 对 ':' 原样保留）；真 scheme 形态（外链端口
+//   https://host:443 与拦截协议）不剥；行号与 fragment 同报为混合定位
+//   整次非法（blocked，不丢弃 fragment 也不误作标题）；图片通道无行号
+//   语义不剥
 //
 // 本模块不依赖 vscode（可在 node 单测直驱）；fsPath 语义由注入的
 // LinkContext 提供，vscode 层负责 Uri ↔ fsPath 的双向换算（同一扩展宿主
@@ -33,7 +42,13 @@
 // 怪 basename（ADS/尾随点）拦截对盘符路径继续适用；UNC 与 POSIX 宿主
 // 上的 Windows 盘符维持拦截（两类 URI 不混用）。
 import * as path from 'node:path'
-import { planVaultLinkPath } from '../shared/vaultLink'
+import { planVaultLinkPath, splitLineSuffix } from '../shared/vaultLink'
+
+// #564 起 splitLineSuffix 的实现在 shared/vaultLink（路径规则单一事实源
+// ——rename 改写等 shared 消费方与链接解析同一剥离实现）；此处 re-export
+// 保持既有导入面（hoverDocAccess / vaultLinkExtract / textEditorProvider
+// 仍从本模块取），返回值增补 suffixText（行号后缀原文，改写拼回保真）
+export { splitLineSuffix } from '../shared/vaultLink'
 
 /** 目标解析上下文（宿主文件系统语义由注入方描述） */
 export interface LinkContext {
@@ -48,7 +63,14 @@ export interface LinkContext {
 /** 链接目标分类结果 */
 export type LinkTarget =
   | { kind: 'external'; url: string }
-  | { kind: 'doc'; candidates: string[]; fragment: string | null }
+  | {
+      kind: 'doc'
+      candidates: string[]
+      fragment: string | null
+      /** #534 尾部行号后缀（1-based；仅普通链接本地路径段剥出时携带，
+       *  供执行层落位——越界判定在执行层按权威文本校验，不静默钳位） */
+      line?: number
+    }
   | {
       /** 显式绝对路径目标（#556）：Windows 宿主盘符形态 / POSIX 宿主根路径——
        *  允许跨根与工作区外，按宿主文件系统解释 */
@@ -57,6 +79,8 @@ export type LinkTarget =
       candidates: string[]
       /** 结构化锚点（与 doc 同口径，供执行层定位） */
       fragment: string | null
+      /** #534 尾部行号后缀（与 doc 同口径） */
+      line?: number
     }
   | {
       /** 本文件锚点目标（#160：`#frag` 省略路径，目标即当前文档） */
@@ -66,7 +90,14 @@ export type LinkTarget =
     }
   | {
       kind: 'blocked'
-      reason: 'empty' | 'scheme' | 'escape' | 'windows-drive-on-posix'
+      reason:
+        | 'empty'
+        | 'scheme'
+        | 'escape'
+        | 'windows-drive-on-posix'
+        /** #534 混合定位：路径已含冒号行号再带非空 fragment——整次语法
+         *  非法（不丢弃 fragment、不误作标题、不执行打开） */
+        | 'line-anchor-conflict'
       /** scheme 拦截时的协议名（小写；协议相对为空串） */
       scheme?: string
       detail?: string
@@ -177,20 +208,36 @@ function isWin32OddBasename(raw: string): boolean {
   return base.includes(':') || /[.\s]$/.test(base)
 }
 
-/** 通用分类前半段：外链放行 / 空白拦截 / 锚点放行 / scheme 拦截 / 盘符拦截 */
+/**
+ * #534 普通链接喂规划器的路径文本完整口径：剥尾部行号后缀 → fragment
+ * 拆分 → 剥 query → 容错解码（与 classifyLinkTarget 内部同一语义——
+ * hoverDocAccess / vaultLinkExtract 等「手动重拆路径喂 resolveVaultFile」
+ * 的消费方复用本口径，不建第二套行号剥离实现）。
+ */
+export function linkPathTextOf(href: string): string {
+  return planPathTextOf(splitHrefFragment(splitLineSuffix(href).text).pathText)
+}
+
+/** 通用分类前半段：外链放行 / 空白拦截 / 锚点放行 / scheme 拦截 / 盘符拦截。
+ *  lineSuffix（#534，仅普通链接开）：本地路径段剥尾部行号后缀——在
+ *  Win32 ADS/怪异 basename 拦截**之前**（否则 note.md:103 被 basename
+ *  含 ':' 误拦）；图片等无行号语义的通道关闭（保持既有分类） */
 function preClassify(
   raw: string,
   ctx: LinkContext,
+  opts?: { lineSuffix?: boolean },
 ):
   | { kind: 'external'; url: string }
   | { kind: 'anchor'; fragment: string }
   | {
+      /** preClassify 不产出 line-anchor-conflict——混合定位判定在
+       *  classifyLinkTarget（需要 fragment 拆分结果） */
       kind: 'blocked'
       reason: 'empty' | 'scheme' | 'escape' | 'windows-drive-on-posix'
       scheme?: string
       detail?: string
     }
-  | { kind: 'path'; pathText: string } {
+  | { kind: 'path'; pathText: string; line: number | null } {
   const href = raw.trim()
   if (href.startsWith('#')) {
     // #160 仅锚点目标：本文件页内跳转；空锚点（裸 #）无可定位目标维持拦截
@@ -208,15 +255,20 @@ function preClassify(
   // 协议相对 //host/...：无显式 scheme 但按外站目标处理，一律拦截
   if (href.startsWith('//')) {
     return { kind: 'blocked', reason: 'scheme', scheme: '' }
-  }
+  }  // 行号剥离是否启用（#534）：后续本地路径分支共用。剥离对象是 **trim 前
+  // 的原文**——尾空白经 basename 检查后不可恢复（与 isWin32OddBasename 的
+  // 原文判定口径一致）；图片模式（strip=null）text 恒为原样，行为不变
+  const strip = opts?.lineSuffix === true ? splitLineSuffix : null
   // Windows 宿主上盘符是路径而非 scheme（c:\x）；POSIX 宿主上同形态只能是
   // 单字母 scheme（怪异且非白名单）——按"Windows 路径出现在远程宿主"拦截
   if (WINDOWS_DRIVE_RE.test(href)) {
     if (ctx.isWindowsHost) {
-      if (isWin32OddBasename(raw)) {
+      // 盘符本地路径：剥行号先于 ADS 拦截（c:\x\note.md:103 归 note.md）
+      const stripped = strip !== null ? strip(raw) : { text: raw, line: null }
+      if (isWin32OddBasename(stripped.text)) {
         return { kind: 'blocked', reason: 'escape', detail: href }
       }
-      return { kind: 'path', pathText: href }
+      return { kind: 'path', pathText: stripped.text.trim(), line: stripped.line }
     }
     return { kind: 'blocked', reason: 'windows-drive-on-posix' }
   }
@@ -225,29 +277,34 @@ function preClassify(
   // 文件名形态：a:b.md / note.md:stream——POSIX 宿主上是合法相对文件名，
   // Windows 宿主上属 NTFS ADS 怪异形态（下方统一拦截）
   if (s && s.scheme.length > 1 && !s.scheme.includes('.')) {
+    // 真 scheme（含外链 https://host:443 的端口语义与 file: 等拦截协议）
+    // 不剥行号——external 原样放行、其余照旧拦截
     if (s.scheme === 'http' || s.scheme === 'https') {
       return { kind: 'external', url: href }
     }
     return { kind: 'blocked', reason: 'scheme', scheme: s.scheme }
   }
-  // 文件名形态（无 scheme，或单字母/含点 scheme）：Windows 宿主上 basename
-  // 含 ':' 或尾随 '.'/空格的一律按越界口径拦截（POSIX 上这些是合法文件名字符）
-  if (ctx.isWindowsHost && isWin32OddBasename(raw)) {
+  // 文件名形态（无 scheme，或单字母/含点 scheme）：剥行号先于 ADS 拦截
+  //（note.md:103 归 note.md + 行号；note.md:0/abc 等非行号形态维持拦截）；
+  // POSIX 宿主剥后按剥除路径解析（:103 字面文件名几乎必为 not-found）
+  const strippedFn = strip !== null ? strip(raw) : { text: raw, line: null }
+  if (ctx.isWindowsHost && isWin32OddBasename(strippedFn.text)) {
     return { kind: 'blocked', reason: 'escape', detail: href }
   }
-  return { kind: 'path', pathText: href }
+  return { kind: 'path', pathText: strippedFn.text.trim(), line: strippedFn.line }
 }
 
 /**
  * 链接目标分类：external → openExternal（URL 原样含 `#`，网页锚点语义
  * 不接管）；anchor → 本文件锚点目标（#160 页内跳转）；doc → 候选绝对
  * 路径 + 结构化 fragment（存在性由 vscode 层探测，精确优先、无扩展名
- * 其次补 .md；fragment 供执行层定位）；absolute → 显式绝对路径目标
- * （#556，候选与 fragment 同 doc 口径，不受资源根边界）；blocked →
- * 用户可见反馈。
+ * 其次补 .md；fragment 供执行层定位）+ 可选行号（#534 尾部 `:正整数`
+ * 后缀，越界判定在执行层）；absolute → 显式绝对路径目标（#556，候选
+ * 与 fragment/line 同 doc 口径，不受资源根边界）；blocked → 用户可见
+ * 反馈（#534：行号 + 非空 fragment 的混合定位整次非法，不执行打开）。
  */
 export function classifyLinkTarget(href: string, ctx: LinkContext): LinkTarget {
-  const pre = preClassify(href, ctx)
+  const pre = preClassify(href, ctx, { lineSuffix: true })
   if (pre.kind !== 'path') {
     return pre
   }
@@ -255,14 +312,19 @@ export function classifyLinkTarget(href: string, ctx: LinkContext): LinkTarget {
   // fragment 结构化保留——含空格的宽松字面目标在此层同样拆分。
   // 候选规划（docDir 基准、越界判别、无扩展名补 .md）统一走 vaultLink（#196）
   const { pathText, fragment } = splitHrefFragment(pre.pathText)
+  if (pre.line !== null && fragment !== null) {
+    // #534 混合定位（note.md:20#第二章）：路径已含冒号行号再带非空
+    // fragment——整次语法非法（不丢弃 fragment、不误作标题、不执行打开）
+    return { kind: 'blocked', reason: 'line-anchor-conflict', detail: pre.pathText }
+  }
   const plan = planVaultLinkPath(planPathTextOf(pathText), ctx, { implicitMd: true })
   if (plan.kind === 'escape') {
     return { kind: 'blocked', reason: 'escape', detail: pre.pathText }
   }
   if (plan.kind === 'absolute') {
-    return { kind: 'absolute', candidates: plan.candidates, fragment }
+    return { kind: 'absolute', candidates: plan.candidates, fragment, ...(pre.line !== null ? { line: pre.line } : {}) }
   }
-  return { kind: 'doc', candidates: plan.candidates, fragment }
+  return { kind: 'doc', candidates: plan.candidates, fragment, ...(pre.line !== null ? { line: pre.line } : {}) }
 }
 
 /** 图片目标分类：仅工作区内相对路径可经宿主读取；显式绝对路径归

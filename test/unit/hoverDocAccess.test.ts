@@ -1429,3 +1429,81 @@ describe('#556 T3：短名补查分态与绝对目标访问', () => {
   })
 })
 
+
+describe('#534 普通链接尾部行号：浮窗解析与分派（md/text 通道与提示）', () => {
+  function lineHarness(): Harness {
+    return makeHarness(new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\notes\\目标.md', note('# 标题\n\n第一段\n\n第二段\n', 5)],
+      ['D:\\notes\\代码.ts', note('export const a = 1\nexport const b = 2\nexport const c = 3\n', 3)],
+    ]))
+  }
+
+  it('md 目标行号：路径按剥后文本探测、全文 + 行首初始定位区间', async () => {
+    const h = lineHarness()
+    const out = await readRefContentTarget({ linkHref: '目标.md:3' }, h.ctx, h.ports)
+    // 解析入口收到剥行号后的路径文本（:3 不进路径）
+    expect(h.resolvedCalls).toEqual(['目标.md'])
+    expect(out).toMatchObject({ ok: true, fsPath: 'D:\\notes\\目标.md' })
+    if (out.ok && out.content.kind === 'markdown') {
+      // LF 全文行 3 = '第一段'，行首偏移 = '# 标题\n\n'.length = 8
+      expect(out.content.lfText.split('\n')[2]).toBe('第一段')
+      expect(out.content.range.start).toBe('# 标题\n\n'.length)
+      expect(out.content.range.end).toBe(out.content.lfText.length)
+      expect(out.content.selector).toEqual({ kind: 'full' })
+    } else {
+      expect.unreachable('md 行号应回 markdown 载荷')
+    }
+  })
+
+  it('md 目标行号越界：anchor-invalid(out-of-bounds) 分态（不静默回顶）', async () => {
+    const h = lineHarness()
+    const out = await readRefContentTarget({ linkHref: '目标.md:99' }, h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'anchor-invalid', anchor: ':99', anchorDetail: 'out-of-bounds' })
+  })
+
+  it('md 目标行号越界 + anchorOptional（刷新重载）：钳到末行不构成失败', async () => {
+    const h = lineHarness()
+    const out = await readRefContentTarget({ linkHref: '目标.md:99' }, h.ctx, h.ports, { anchorOptional: true })
+    expect(out).toMatchObject({ ok: true })
+    if (out.ok && out.content.kind === 'markdown') {
+      // 末行（第 5 行空行）行首 = 前四行累计
+      const lines = out.content.lfText.split('\n')
+      let last = 0
+      for (let i = 0; i < lines.length - 1; i++) {
+        last += lines[i]!.length + 1
+      }
+      expect(out.content.range.start).toBe(last)
+    }
+  })
+
+  it('混合定位（行号 + 非空 fragment）：anchor-conflict 分态附 fragment 原文', async () => {
+    const h = lineHarness()
+    const out = await readRefContentTarget({ linkHref: '目标.md:2#标题' }, h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'anchor-conflict', anchor: '标题' })
+    // 语法非法不执行任何读取（openTextDocument 零调用）
+    expect(h.opened).toEqual([])
+  })
+
+  it('text 目标行号：转同源 TextAnchorSpec 定位（越界 out-of-bounds 分态）', async () => {
+    const h = lineHarness()
+    const ok = await readRefContentTarget({ linkHref: '代码.ts:2' }, h.ctx, h.ports)
+    expect(ok).toMatchObject({ ok: true, fsPath: 'D:\\notes\\代码.ts' })
+    if (ok.ok && ok.content.kind === 'text') {
+      expect(ok.content.locateLine).toBe(2)
+      expect(ok.content.jumpLine).toBe(2)
+      expect(ok.content.selector).toEqual({ kind: 'text', line: 2 })
+    }
+    const bad = await readRefContentTarget({ linkHref: '代码.ts:99' }, h.ctx, h.ports)
+    expect(bad).toEqual({ ok: false, reason: 'anchor-invalid', anchor: ':99', anchorDetail: 'out-of-bounds' })
+  })
+
+  it('tip：行号并入锚点列呈现（:3），意图路径按剥后文本', async () => {
+    const h = lineHarness()
+    const tip = await resolveHoverTargetTip({ linkHref: '目标.md:3' }, h.ctx)
+    expect(tip).toEqual({ ok: true, relPath: '目标.md', anchor: ':3' })
+    // 混合定位的 tip 静默不出（形态学非法，与 external/blocked 同口径）
+    const bad = await resolveHoverTargetTip({ linkHref: '目标.md:3#节' }, h.ctx)
+    expect(bad).toEqual({ ok: false })
+  })
+})

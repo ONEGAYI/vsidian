@@ -10,6 +10,7 @@
 //   代次结束由 AddonRuntime 的运行生命周期统一驱动）。
 // 规则不持久化：注册在宿主运行功能阶段，扩展重启后组件重新 enable 登记。
 import {
+  countAddonPasteRuleDeclarations,
   orderAddonPasteRules,
   validateAddonPasteRuleDeclarations,
   type AddonPasteRule,
@@ -42,7 +43,10 @@ export class AddonPasteRuleService {
     const existing = this.byAddon.get(addonId) ?? []
     const validation = validateAddonPasteRuleDeclarations(declarations, {
       existingIds: new Set(existing.map((rule) => rule.id)),
-      currentCount: existing.length,
+      // 256 总量按「顶层 + 嵌套子规则合计」跨批计量（PR #564 评审：只数
+      // 顶层可被分批登记绕过）；dispose 移除本批、releaseAddon 撤回整组
+      // 后存量随之回收，代次更迭不重复计。
+      currentCount: countAddonPasteRuleDeclarations(existing),
     })
     if (!validation.ok) {
       this.ports.log('paste-rules-rejected', `${addonId} ${validation.reason}${validation.detail ? `: ${validation.detail}` : ''}`)

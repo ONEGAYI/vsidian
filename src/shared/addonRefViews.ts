@@ -91,14 +91,76 @@ export type AddonRefPopupOutcome =
   | { ok: true; handle: AddonRefPopupHandle }
   | { ok: false; reason: AddonRefPopupRejection }
 
+// ---- T06（#545）组件容器嵌入挂载（规格 §6 嵌入契约） ----
+
+/** 只读引用嵌入挂载请求：公共载荷 = 来源实例 + 目标 + 本组件自有容器。
+ *  组件身份与代次由 SDK 注入；容器必须是本组件已取得的面板内容根或
+ *  渲染内容根（可为其后代）——正文根、其他组件容器与平台管理的引用
+ *  子根内容都不是合法容器（运行时校验，归属外一律 invalid-request） */
+export interface AddonRefEmbedRequest {
+  /** 来源实例（views 面 instanceId：'main' / 'embed:<hostId>' /
+   *  'hover:<instanceId>'；与浮窗请求同源语义——R-U02） */
+  source: string
+  /** 目标（结构化路径 + 可选锚点；与浮窗请求共用目标语义，不建第二套） */
+  target: AddonRefTargetSpec
+  /** 挂载容器：本页在树元素。平台在其中创建引用子根，不覆盖容器其他内容 */
+  container: HTMLElement
+}
+
+/** 嵌入挂载可辨认拒绝（规格 §7；与浮窗请求同族，另含容器占位冲突）：
+ *  - invalid-request：形状非法 / 容器脱树或非本组件所有 / 容器在平台
+ *    管理的引用子根内（不创建子根）；
+ *  - view-disposed：来源实例不在场、页面会话缺失，或挂载在结局落定前
+ *    被释放（迟到结果的终结口径）；
+ *  - duplicate-mount：该容器已被一次有效挂载占用（含错误分态挂载——
+ *    重复挂载同一位置须先释放旧实例）；
+ *  - released：组件代次已终结（装载器守卫）；
+ *  - HoverPreviewFailReason 透传：目标解析/读取/锚点/准入超限的真实原因
+ *    （子根留在场以现有引用错误视图就地显示，随组释放）。 */
+export type AddonRefEmbedRejection =
+  | 'invalid-request'
+  | 'view-disposed'
+  | 'duplicate-mount'
+  | 'released'
+  | HoverPreviewFailReason
+
+/** 本次挂载的释放句柄：身份只针对本组件本代次的这一次挂载 */
+export interface AddonRefEmbedHandle {
+  /** 释放本次挂载（幂等；整组释放路径——句柄释放、容器/父根脱树、
+   *  组件停用、页面结束——效果等价）。错误分态挂载不发放句柄 */
+  release(): boolean
+  /** 本次挂载是否仍在场（已释放/子根脱树后为 false） */
+  isActive(): boolean
+}
+
+export type AddonRefEmbedOutcome =
+  | { ok: true; handle: AddonRefEmbedHandle }
+  | { ok: false; reason: AddonRefEmbedRejection }
+
+/** 请求形状守卫（container 在共享层只钉对象在场性——元素身份、在树性
+ *  与归属由 webview 运行时校验，共享模块不依赖 DOM） */
+export function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {
+  if (!isRecord(v)) {
+    return false
+  }
+  return typeof v.source === 'string' && v.source !== '' &&
+    isAddonRefTargetSpec(v.target) &&
+    v.container !== null && typeof v.container === 'object'
+}
+
 /** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）
- *  首版只含浮窗请求；T06 在同一 facet 上扩展组件容器挂载入口 */
+ *  浮窗请求 + T06（#545）组件容器嵌入挂载——两者共用来源解析与目标语义 */
 export interface AddonSdkRefViewsFacet {
   /** 请求只读引用浮窗（单页单浮窗：新请求替换旧请求，旧请求句柄随之
    *  失效）。结果在读取结局落定时兑现：内容装载成功 → ok + 句柄；目标
    *  解析/读取/锚点失败 → 失败原因（浮窗若在场显示真实错误分态）；请求
    *  被替换或关闭 → view-disposed */
   requestPopup(request: AddonRefPopupRequest): Promise<AddonRefPopupOutcome>
+  /** 在组件自有容器挂载内核只读引用子根（R-U08）。结果在首次读取结局
+   *  落定时兑现：内容装载成功 → ok + 释放句柄；目标失败 → 失败原因
+   *  （子根留在场显示错误分态，随容器/组件生命周期整组释放）。多处同
+   *  目标各挂各的（实例/滚动/属性状态独立，读取数据共享缓存） */
+  mountEmbed(request: AddonRefEmbedRequest): Promise<AddonRefEmbedOutcome>
 }
 
 // ---- 守卫（SDK 请求入口与测试共用；非法请求不进入浮窗管线） ----

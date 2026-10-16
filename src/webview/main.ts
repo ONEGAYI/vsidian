@@ -27,7 +27,7 @@ import { addonCm6LanguageSubset, installAddonPageLoader } from './addonPageLoade
 import { setAddonRenderersBridge } from './addonRenderers'
 import { setThemeEnvironmentHub } from './addonThemeEnvironment'
 import { isVscodeDarkBody } from './syncController'
-import { bindAddonFaultReporter } from './graphicRenderers'
+import { bindAddonFaultReporter, graphicProviderAddonOwnerOf } from './graphicRenderers'
 import {
   closeHoverPopup,
   currentHoverPopupInstanceId,
@@ -133,7 +133,10 @@ const addonUi = new AddonUiRuntime({
 })
 // T05（#544）只读引用视图运行时：来源解析走 views 注册表（main 面板正文
 // / embed 与 hover 引用目标），浮窗本体复用 hoverPopup 既有入口（几何/
-// 互斥/保活/Esc/键盘焦点/watch 与租约同链路）
+// 互斥/保活/Esc/键盘焦点/watch 与租约同链路）。T06（#545）组件容器嵌入：
+// 容器归属 = T11 面板内容根（addonUi）或 T09 渲染容器（graphicRenderers
+// 所有权标记）；卡片挂载/整组释放经 syncController 的 EmbedCardManager
+// 只读端口（readOnly 来源 + addonSource 覆盖同链路）
 const addonRefViews = new AddonRefViewsRuntime({
   resolveSource: (instanceId) => {
     const info = addonViews.infoOf(instanceId)
@@ -150,6 +153,11 @@ const addonRefViews = new AddonRefViewsRuntime({
     openHoverPopupForAddonRef(trigger, spec, { keyboard, addonSource, onSettled }),
   currentPopupInstanceId: () => currentHoverPopupInstanceId(),
   closePopup: () => closeHoverPopup(),
+  ownsContainer: (addonId, el) =>
+    addonUi.panelAddonOwnerOf(el) === addonId ||
+    graphicProviderAddonOwnerOf(el) === addonId,
+  mountEmbedCard: (input) => controller.mountAddonRefEmbed(input),
+  releaseEmbedCard: (subRoot) => controller.releaseAddonRefEmbed(subRoot),
 })
 addonViews.onDisposed((info) => addonRefViews.releaseSource(info.instanceId))
 const addonLoader = installAddonPageLoader({

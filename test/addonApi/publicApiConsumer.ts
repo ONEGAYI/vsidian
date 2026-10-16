@@ -44,6 +44,10 @@ import type {
 } from '../../src/shared/addonSettingsContextApi'
 import type {
   AddonRefAnchor,
+  AddonRefEmbedHandle,
+  AddonRefEmbedOutcome,
+  AddonRefEmbedRejection,
+  AddonRefEmbedRequest,
   AddonRefPopupHandle,
   AddonRefPopupOutcome,
   AddonRefPopupRejection,
@@ -112,9 +116,16 @@ import type {
 } from '../../src/shared/addonSettings'
 import type { AddonStorageFacet, AddonStorageRejection } from '../../src/shared/addonStorage'
 import {
+  ADDON_PASTE_RULES_CONDITION_NODES_LIMIT,
   ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
   ADDON_PASTE_RULES_MAX_DEPTH,
   ADDON_PASTE_RULES_MAX_PER_ADDON,
+  ADDON_PASTE_RULES_REGEX_INPUT_LIMIT,
+  ADDON_PASTE_RULES_REGEX_PATTERN_LIMIT,
+  type AddonPasteCondition,
+  type AddonPasteConditionNode,
+  type AddonPasteNestedRule,
+  type AddonPastePredicate,
   type AddonPasteRuleDeclaration,
   type AddonPasteRulesRegisterResult,
   type AddonPasteRulesSnapshot,
@@ -224,9 +235,10 @@ export type PinnedPasteRulesReasons = 'invalid-declaration' | 'duplicate-id' | '
 export const pasteRulesReasonsPinned: Equals<FailureReason<AddonPasteRulesRegisterResult>, PinnedPasteRulesReasons> = true
 /** 粘贴规则预算常量（规格 §4.4 集中定义——宿主与页面同源） */
 export const pasteRulesBudgetsPinned: [
-  number, number, number,
+  number, number, number, number, number, number,
 ] = [
   ADDON_PASTE_RULES_MAX_PER_ADDON, ADDON_PASTE_RULES_MAX_DEPTH, ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
+  ADDON_PASTE_RULES_REGEX_PATTERN_LIMIT, ADDON_PASTE_RULES_REGEX_INPUT_LIMIT, ADDON_PASTE_RULES_CONDITION_NODES_LIMIT,
 ]
 /** 声明与快照形态的编译期消费（作者提交声明 / 平台广播快照） */
 export const pasteRuleDeclarationSample: AddonPasteRuleDeclaration = {
@@ -242,6 +254,68 @@ export const pasteRuleDeclarationSample: AddonPasteRuleDeclaration = {
   },
 }
 export const pasteRulesSnapshotSample: AddonPasteRulesSnapshot = { version: 1, rules: [] }
+
+/** #542 T02 高级声明的编译期消费：条件树、正则谓词与捕获组、嵌套子规则 */
+export const pasteRuleConditionSample: AddonPasteCondition = {
+  all: [
+    { kind: 'attribute', name: 'data-kind', value: 'card' },
+    {
+      any: [
+        { kind: 'attribute-regex', name: 'data-src', regex: { pattern: '^https://', flags: 'i' } },
+        { not: { kind: 'text-regex', regex: { pattern: '^\s*$' } } },
+      ],
+    },
+  ],
+}
+export const pasteRuleConditionNodeSample: AddonPasteConditionNode = { kind: 'attribute', name: 'data-x' }
+export const pasteRulePredicateSample: AddonPastePredicate = { kind: 'text-regex', regex: { pattern: 'a+', flags: 'm' } }
+export const pasteRuleRegexSlotDeclaration: AddonPasteRuleDeclaration = {
+  id: 'sample-regex-slot',
+  match: {
+    tag: 'span',
+    condition: { all: [{ kind: 'attribute-regex', name: 'data-sample-ref', regex: { pattern: '^refs?/' } }] },
+  },
+  output: {
+    kind: 'template',
+    template: '§{{no}}',
+    slots: {
+      no: { source: { kind: 'attribute-regex', name: 'data-sample-ref', regex: { pattern: '^refs/(?<no>\d+)$' }, group: 'no' } },
+    },
+  },
+}
+export const pasteRuleNestedDeclaration: AddonPasteRuleDeclaration = {
+  id: 'sample-nested-card',
+  match: { tag: 'div', attributes: [{ name: 'data-sample-card' }] },
+  output: {
+    kind: 'template',
+    template: '> {{body}}',
+    slots: {
+      body: {
+        source: {
+          kind: 'children',
+          rules: [{
+            id: 'inner-link',
+            match: { tag: 'span', attributes: [{ name: 'data-sample-inner-url' }] },
+            output: {
+              kind: 'template',
+              template: '[{{t}}]({{u}})',
+              slots: {
+                t: { source: { kind: 'text-regex', regex: { pattern: '^\S+$' }, group: 0 } },
+                u: { source: { kind: 'attribute', name: 'data-sample-inner-url' }, url: true },
+              },
+            },
+          }],
+        },
+      },
+    },
+  },
+}
+export const pasteRuleNestedRuleSample: AddonPasteNestedRule = {
+  id: 'inner-standalone',
+  priority: 1,
+  match: { tag: 'span' },
+  output: { kind: 'discard' },
+}
 
 /** T02 五种装载失败原因 */
 export type PinnedLoadFailureReasons =
@@ -513,11 +587,30 @@ export type RefViewShapes = {
   rejection: AddonRefPopupRejection
   handle: AddonRefPopupHandle
 }
-/** refViews 面方法形状（编辑器页 facet——设置页为 undefined） */
-export type RefViewsFacetShape = Pick<AddonSdkRefViewsFacet, 'requestPopup'>
+/** T06（#545）组件容器嵌入挂载形状：请求（来源/目标/容器）与句柄/结局
+ *  联合——容器字段改名、拒绝枚举（含 duplicate-mount）收缩即编译失败 */
+export type RefEmbedShapes = {
+  request: AddonRefEmbedRequest
+  outcome: AddonRefEmbedOutcome
+  rejection: AddonRefEmbedRejection
+  handle: AddonRefEmbedHandle
+}
+/** refViews 面方法形状（编辑器页 facet——设置页为 undefined；T05 浮窗 +
+ *  T06 嵌入挂载两成员） */
+export type RefViewsFacetShape = Pick<AddonSdkRefViewsFacet, 'requestPopup' | 'mountEmbed'>
 export const refPopupTargetSample: AddonRefTargetSpec = {
   path: 'notes/ref.md', anchor: { kind: 'heading', heading: '第二章' },
 }
+/** T06 消费样例：面板内容根内挂载只读引用（结局联合两臂的消费面） */
+export const refEmbedConsume = (
+  facet: AddonSdkRefViewsFacet,
+  container: HTMLElement,
+): Promise<AddonRefEmbedOutcome> => facet.mountEmbed({ source: 'main', target: { path: 'notes/ref.md' }, container })
+/** 嵌入挂载自有拒绝成员钉住（HoverPreviewFailReason 透传族之外的四个自有
+ *  成员在场——移除即编译失败；扩态须同步台账/文档） */
+export type RefEmbedOwnRejectionsPresent = ['invalid-request', 'view-disposed', 'duplicate-mount', 'released'] extends
+  Array<AddonRefEmbedRejection> ? true : false
+export const refEmbedOwnRejectionsPinned: RefEmbedOwnRejectionsPresent = true
 
 /** 渲染与界面注册形状 */
 export type RendererShapes = { registration: AddonRendererRegistration }

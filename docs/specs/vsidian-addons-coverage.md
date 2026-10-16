@@ -59,7 +59,7 @@
 
 ## 粘贴转换批次故事映射（2026-10 批次，#530 规格冻结）
 
-[声明式粘贴转换规格](addon-paste-conversion.md)的 11 项用户故事（P-U01–P-U11）按切片交付：T01（#541）覆盖 P-U01–P-U06、P-U09–P-U11 的基础链路；P-U07/P-U08（正则/条件/嵌套）归 T02（#542），复验全部基础故事。验证层缩写同上表；T01 证据截至本票实施轮。
+[声明式粘贴转换规格](addon-paste-conversion.md)的 11 项用户故事（P-U01–P-U11）按切片交付：T01（#541）覆盖 P-U01–P-U06、P-U09–P-U11 的基础链路；P-U07/P-U08（正则/条件/嵌套）归 T02（#542），复验全部基础故事。验证层缩写同上表；T01/T02 证据截至 T02 实施轮（基础故事随 T02 全量复验通过）。
 
 | 故事 | 用户结果（摘要） | 切片 | 接口映射 | 验证证据 |
 | --- | --- | --- | --- | --- |
@@ -72,8 +72,8 @@
 | P-U09 | 多组件命中结果稳定 | T01 | `paste-rules-register`（优先级降序、组件 ID 升序、规则 ID 升序确定性序） | 单 `addonPasteRules`（排序）+ `htmlToMarkdownPasteRules`（冲突顺序首条接管） |
 | P-U10 | 危险链接仍受 URL 策略限制 | T01 | `paste-rules-register` coordinates（URL 槽经既有 safeUrl） | 单 `htmlToMarkdownPasteRules`（javascript: 拒绝回内置） |
 | P-U11 | 错误声明可辨认拒绝 | T01 | `paste-rules-register` errors（invalid-declaration/duplicate-id/too-many/released 整批拒绝） | 单 `addonPasteRules`（校验矩阵）+ `addonRuntimePasteRules`（拒绝不算故障） |
-| P-U07 | 正则取值与条件组合 | T02（未实施） | 未实现节点在 T01 阶段显式拒绝（invalid-declaration） | 单 `addonPasteRules`（regex/condition/nested 未知字段拒绝） |
-| P-U08 | 子元素嵌套转换 | T02（未实施） | 同上；T01 的 children 槽只取内置转换结果 | 单 `addonPasteRules`（nested 字段拒绝） |
+| P-U07 | 正则取值与条件组合 | T02 | `paste-rules-register` coordinates（正则槽：整匹/数字组/命名组捕获，受限 flags，注册时编译与组引用校验；条件树 all/any/not 组合基础/正则谓词；输入超限按取值缺失回退） | 单 `addonPasteRules`（正则校验矩阵/条件矩阵/深度与节点预算/常量钉住）+ `htmlToMarkdownPasteRules`（捕获组命中/无匹配回退/组未参与/输入超限/URL 槽 safeUrl/转义/编译失败回退；条件真值矩阵；多组件冲突确定性；步计费 101 步/段预算推导）；浏 `addonPasteRules`（真实键盘回放） |
+| P-U08 | 子元素嵌套转换 | T02 | `paste-rules-register` coordinates（children 槽子规则集：与顶层同语言、ID 槽内局部、先子规则后内置、只向子节点下降；嵌套求值期间外层规则集不参与） | 单 `addonPasteRules`（嵌套深度 16/17、局部 ID、总量并入 256、非法嵌套矩阵）+ `htmlToMarkdownPasteRules`（嵌套命中/内置回退/内外规则不串味/不越出子树/表格上下文/15 层深链/求值异常不放大）；单 `addonRuntimePasteRules`（高级声明经同一登记面进快照、超深整批拒绝不算故障）；浏 `addonPasteRules`（嵌套 HTML 真实回放与分步撤销） |
 
 本批次的公开接入路径：宿主注册面经 `AddonEnableContext.paste`（编译期消费 `test/addonApi/publicApiConsumer.ts` 钉住）；浏览器夹具 `addonPasteRulesFixture` 模拟快照广播，真实宿主探针 `richPasteUndoHost` 则加载 `addon-paste-rules` 夹具，经公开宿主登记→生产快照广播→生产页面粘贴→TextDocument 撤销与停用回收全链。该探针不直接注入规则快照；安装态与人工体验验收另行记录。
 
@@ -89,7 +89,7 @@
 
 ## 2026-10 扩展批次：文档导航（#543 / T03）
 
-以下故事定义见 [addon-navigation.md](addon-navigation.md)，公开接口映射为 `document-navigation`；普通链接语法 N-U08–N-U11 仍归 #534。
+以下故事定义见 [addon-navigation.md](addon-navigation.md)，公开接口映射为 `document-navigation`；普通链接语法 N-U08–N-U11 由 T04（#534）交付，无新增公开 API 面（形态学解析在宿主链接通道内）。
 
 | 故事 | 公开接入与验证 |
 | --- | --- |
@@ -98,9 +98,12 @@
 | N-U04 | `addonViews` 注册表验证 embed 来源；`addonDocNavCases` 从引用 B 跳到仅 B 目录存在的文件，并用 A 来源 not-found 对照 |
 | N-U06 | `addonDocNav` 单测与集成验证 CRLF；`addonDocNav.mjs` 经生产 SDK/控制器验证阅读高亮与折叠目标重新可见 |
 | N-U07 | `addonNavApi` / `addonDocNav` 单测验证无工作区、越根、缺失、非法定位、越界与失败分类；集成补真实宿主拒绝矩阵 |
+| N-U08 / N-U09 | `linkTarget` 形态矩阵（`splitLineSuffix` 先于 ADS 拦截、前导零/负数/非数字不构成行号、真 scheme 不剥）；md 行号复用 T03 `hostLineStart` 执行体，text 行号经 `resolveTextNav` strict 判定原生编辑器落位；浏 `lineSuffix`（md/text 行号定位与 href 原文保真）；集成两用例（md 落位含折叠展开/CRLF/阅读态、text reveal + 平台二态） |
+| N-U10 | 越界严格失败（目标照常打开 + i18n toast 不静默钳位）、混合定位 blocked（`line-anchor-conflict` 新 reason）；浮窗行号越界同 `anchor-invalid` 分态；单 `linkTarget`/`hoverDocAccess` + 浏 `lineSuffix`（文案就地可见与语言包同源） |
+| N-U11 | 无行号外链/普通链接/双链与图片通道维持既有行为（`linkTarget.test.ts` 既有断言零破坏 + T03 导航/链接/悬停/出链/反链/双链定向回归） |
 | N-U12 | `addonViews` / `addonDocNav` / `addonDocNavDelivery` 钉住来源注销、旧代次、等待中改短、取消/超时与有界 ack；浏览器经卸载再装载验证旧回包不接入新代次 |
 
-T03 自动化运行证据随票面实施回填，人工验收仍开放。内部端口单测验证确定性时序，公开组件夹具承担实际消费；不把模拟宿主等同于真宿主证明。
+T03 自动化运行证据随票面实施回填，人工验收仍开放。内部端口单测验证确定性时序，公开组件夹具承担实际消费；不把模拟宿主等同于真宿主证明。T04 证据截至本票实施轮（含 T03 定位复验），真机观感项见人工清单 A78。
 
 ## 未验项与限制（如实保留）
 
@@ -122,7 +125,8 @@ T03 自动化运行证据随票面实施回填，人工验收仍开放。内部�
 
 | 切片 | 用户故事 | 接口映射 | 验证证据 |
 | --- | --- | --- | --- |
-| T05 只读引用浮窗（#544，[规格](addon-reference-views.md)） | R-U01–R-U07、R-U12 | `ref-views-popup`（`sdk.refViews.requestPopup`——来源 B 解析语境、互斥锚点、单浮窗仲裁、句柄与代次释放、错误分态透传） | 单 `addonRefViews`/`addonRefViewsRuntime`/`addonRefViewsPopup`/`documentSessionRefViews`/`addonPageLoader`；浏 `addonRefViews`（真实指针/键盘 + 绘制层）；集 `addonRefViewsCases`（绘制层与历史样式命中、来源 B、目标更新/失效、停用/页面关闭/租约回收）。R-U08–R-U11（组件容器嵌入）待 T06（#545） |
+| T05 只读引用浮窗（#544，[规格](addon-reference-views.md)） | R-U01–R-U07、R-U12 | `ref-views-popup`（`sdk.refViews.requestPopup`——来源 B 解析语境、互斥锚点、单浮窗仲裁、句柄与代次释放、错误分态透传） | 单 `addonRefViews`/`addonRefViewsRuntime`/`addonRefViewsPopup`/`documentSessionRefViews`/`addonPageLoader`；浏 `addonRefViews`（真实指针/键盘 + 绘制层）；集 `addonRefViewsCases`（绘制层与历史样式命中、来源 B、目标更新/失效、停用/页面关闭/租约回收）。R-U08–R-U11（组件容器嵌入）由 T06（#545）交付 |
+| T06 组件容器嵌入（#545，[规格](addon-reference-views.md)） | R-U08–R-U11（复验 R-U03/R-U04/R-U07） | `ref-views-embed`（`sdk.refViews.mountEmbed`——容器归属（面板内容根/渲染内容根及其后代）、同容器重复挂载仲裁、独立 occurrence 双实例、整组释放（句柄/脱树/停用/页面结束）、readOnly 递归传递、addonSource 来源覆盖与既有 watch/预算/错误分态复用） | 单 `addonRefViews`（嵌入守卫）/`addonRefViewsEmbed`（容器归属/重复挂载/双实例/释放矩阵/迟到结局）/`addonRefViewsEmbedCard`（只读挂载/首结局兑现/watch 失效恢复/整组释放/孙卡只读继承）/`embedCardCssContract`（卡片壳四锚点并列）/`addonPageLoader`（mountEmbed 注入与 released 守卫）；浏 `addonRefViewsEmbed`（真实面板挂载绘制层——竖条计算色与命中、双实例滚动独立、零写通道、重复挂载、面板关闭整组释放）；集 `addonRefViewsCases`（真宿主目标更新/删除/恢复、释放无残留订阅、文档版本不变） |
 
 ## 组件设置详情自绘页优先覆盖（#553）
 

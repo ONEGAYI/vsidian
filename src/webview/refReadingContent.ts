@@ -265,6 +265,10 @@ export function refErrorText(
       return t('hover.errorAmbiguous', { target })
     case 'pending':
       return t('hover.errorPending', { target })
+    // #534（T04）混合定位分态：普通链接同时带冒号行号与 fragment——整次
+    // 语法非法，不丢弃 fragment 也不择一定位
+    case 'anchor-conflict':
+      return t('hover.errorAnchorConflict', { target, anchor: anchor ?? '' })
   }
 }
 
