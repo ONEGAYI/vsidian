@@ -17536,11 +17536,23 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assertConverged(shortCard, 'web 短卡片')
       await leaveAndClose()
 
-      const longCard = await hoverAndInject({
+      // 长内容长度自适应环境字体度量：CI Linux 容器的中文渲染与 Windows
+      // 不同，固定字数未必超过 400px 浮层上限——不溢出则翻倍重试，确保
+      // 「溢出态」场景被真实测到后再断言收敛
+      let longDesc = 600
+      let longCard = await hoverAndInject({
         url: 'https://example.com/page', domain: 'example.com',
-        title: '示例站点标题', description: '概'.repeat(600),
+        title: '示例站点标题', description: '概'.repeat(longDesc),
       })
-      assert(longCard.overflow > 0, `长内容溢出（滚动语义未破坏，实际 overflow=${longCard.overflow}）`)
+      for (let retry = 0; longCard.overflow <= 0 && retry < 4; retry++) {
+        await leaveAndClose()
+        longDesc *= 2
+        longCard = await hoverAndInject({
+          url: 'https://example.com/page', domain: 'example.com',
+          title: '示例站点标题', description: '概'.repeat(longDesc),
+        })
+      }
+      assert(longCard.overflow > 0, `长内容溢出（滚动语义未破坏，desc=${longDesc}，实际 overflow=${longCard.overflow}）`)
       assertConverged(longCard, 'web 长卡片')
       await leaveAndClose()
       console.log('[回归] web 卡片高度收敛 ✓')
