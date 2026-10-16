@@ -83,13 +83,20 @@ function runAddonPasteRegex(regex: AddonPasteRegex, input: string, deps: AddonPa
 }
 
 /**
- * 条件树求值（#542 T02）：叶子谓词与 all/any/not 组合，每节点计一步。
+ * 条件树三值求值（#542 T02；PR #564 评审改为三值）：命中 true / 不匹配
+ * false / 求值失败 'fail'，每节点计一步（已花费的步不因失败退回）。
  * - attribute：存在性/值相等（与 T01 match.attributes 同语义）；
- * - 正则谓词：属性缺失、文本/属性值为空或超过输入上限按假值处理
- *   （不匹配，进入下一条规则——与槽取值的「必需取值缺失」口径互补）；
- * - 组合节点短路求值（all/every、any/some）。
+ * - 正则谓词：属性缺失是「不匹配」（false，空串仍执行正则）；输入超过
+ *   ADDON_PASTE_RULES_REGEX_INPUT_LIMIT 是「求值失败」（fail）——失败与
+ *   不匹配不同：fail 在 not/all/any 中立即向上传播（整树不再继续求值，
+ *   不能被 not 反转成命中），顶层收到 fail 时本条规则失败跳过，与槽取值
+ *   的「必需取值缺失」同边界（进入下一条规则，不截断不改写）；
+ * - 组合节点短路求值（all 遇 false 短路、any 遇 true 短路、遇 fail 立即
+ *   传播）。
  */
-function evaluateAddonPasteCondition(node: AddonPasteConditionNode, el: Element, deps: AddonPasteRuleEvaluationDeps): boolean {
+type AddonPasteConditionEval = boolean | 'fail'
+
+function evaluateAddonPasteCondition(node: AddonPasteConditionNode, el: Element, deps: AddonPasteRuleEvaluationDeps): AddonPasteConditionEval {
   deps.spendStep()
   if ('kind' in node) {
     if (node.kind === 'attribute') {
@@ -97,16 +104,32 @@ function evaluateAddonPasteCondition(node: AddonPasteConditionNode, el: Element,
     }
     if (node.kind === 'attribute-regex') {
       const value = el.getAttribute(node.name)
-      if (value === null || value.length > ADDON_PASTE_RULES_REGEX_INPUT_LIMIT) return false
+      if (value === null) return false
+      if (value.length > ADDON_PASTE_RULES_REGEX_INPUT_LIMIT) return 'fail'
       return runAddonPasteRegex(node.regex, value, deps) !== null
     }
     const text = el.textContent ?? ''
-    if (text.length > ADDON_PASTE_RULES_REGEX_INPUT_LIMIT) return false
+    if (text.length > ADDON_PASTE_RULES_REGEX_INPUT_LIMIT) return 'fail'
     return runAddonPasteRegex(node.regex, text, deps) !== null
   }
-  if ('all' in node) return node.all.every((child) => evaluateAddonPasteCondition(child, el, deps))
-  if ('any' in node) return node.any.some((child) => evaluateAddonPasteCondition(child, el, deps))
-  return !evaluateAddonPasteCondition(node.not, el, deps)
+  if ('all' in node) {
+    for (const child of node.all) {
+      const result = evaluateAddonPasteCondition(child, el, deps)
+      if (result === 'fail') return 'fail'
+      if (result === false) return false
+    }
+    return true
+  }
+  if ('any' in node) {
+    for (const child of node.any) {
+      const result = evaluateAddonPasteCondition(child, el, deps)
+      if (result === 'fail') return 'fail'
+      if (result === true) return true
+    }
+    return false
+  }
+  const inner = evaluateAddonPasteCondition(node.not, el, deps)
+  return inner === 'fail' ? 'fail' : !inner
 }
 
 /**
@@ -126,7 +149,9 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
       return null
     }
   }
-  if (rule.match.condition !== undefined && !evaluateAddonPasteCondition(rule.match.condition, el, deps)) return null
+  // 条件不满足（false）或条件树求值失败（fail：正则输入超限等）都让本条
+  // 规则让位——前者是不匹配、后者是规则失败，边界效果一致（进入下一条）。
+  if (rule.match.condition !== undefined && evaluateAddonPasteCondition(rule.match.condition, el, deps) !== true) return null
   if (rule.output.kind === 'discard') return ''
   let parts = deps.templateCache.get(rule.output.template)
   if (parts === undefined) {

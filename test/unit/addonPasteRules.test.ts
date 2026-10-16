@@ -7,6 +7,7 @@
 //（all/any/not、空组合、深度与节点预算）与嵌套规则（局部 ID、深度、
 // 总量并入 256 预算）的校验矩阵与常量钉住。
 import { describe, expect, it } from 'vitest'
+import { isHostToWebview } from '../../src/shared/protocol'
 import {
   ADDON_PASTE_RULES_CONDITION_NODES_LIMIT,
   ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
@@ -455,6 +456,62 @@ describe('T02 快照守卫与嵌套排序', () => {
     ['嵌套深度超限（敌意载荷）', { version: 1, rules: [deepHostileRule(ADDON_PASTE_RULES_MAX_DEPTH + 1)] }],
   ])('拒绝：%s', (_name, value) => {
     expect(isAddonPasteRulesSnapshot(value)).toBe(false)
+  })
+
+  /** 守卫用宿主形态规则（条件树可注入；模拟宿主→webview 快照成员） */
+  const hostileConditionRule = (condition: unknown): unknown => ({
+    addonId: 'a.addon',
+    id: 'cond-rule',
+    priority: 0,
+    match: { tag: 'SPAN', condition },
+    output: { kind: 'discard' },
+  })
+
+  it('注册成功的合法声明必能穿过协议守卫：16 层条件组合不被拒收（PR #564 评审 P2）', () => {
+    const nest = (depth: number): unknown =>
+      depth === 0 ? { kind: 'attribute', name: 'data-x' } : { not: nest(depth - 1) }
+    const allChain = (depth: number): unknown =>
+      depth === 0 ? { kind: 'attribute', name: 'data-x' } : { all: [allChain(depth - 1)] }
+    const snapshotOf = (rules: readonly { id: string; priority: number; match: unknown; output: unknown }[]) => ({
+      version: 1,
+      rules: rules.map((rule) => ({ ...rule, addonId: 'a.addon' })),
+    })
+    // 16 层 not 链与 all 链：注册端接受（合法最大深度）→ 守卫族与 isHostToWebview
+    // 协议守卫必须接纳——否则组件合法注册后全量快照被拒收、页面规则整体失效
+    for (const chain of [nest(16), allChain(16)]) {
+      const declared = validateAddonPasteRuleDeclarations([conditionDeclaration(chain)])
+      expect(declared.ok).toBe(true)
+      if (declared.ok) {
+        const snapshot = snapshotOf(declared.rules)
+        expect(isAddonPasteRulesSnapshot(snapshot)).toBe(true)
+        expect(isHostToWebview({ kind: 'addonPasteRules.snapshot', snapshot })).toBe(true)
+      }
+    }
+    // 15 层控制例（修复前唯一能穿过守卫的最大深度）不回归
+    const declared15 = validateAddonPasteRuleDeclarations([conditionDeclaration(nest(15))])
+    expect(declared15.ok).toBe(true)
+    if (declared15.ok) expect(isAddonPasteRulesSnapshot(snapshotOf(declared15.rules))).toBe(true)
+    // 17 层：注册端拒绝维持，守卫同样拒绝（敌意载荷不因放行第 16 层而混入第 17 层）
+    expect(validateAddonPasteRuleDeclarations([conditionDeclaration(nest(17))]).ok).toBe(false)
+    expect(isAddonPasteRulesSnapshot({ version: 1, rules: [hostileConditionRule(nest(17))] })).toBe(false)
+    expect(isAddonPasteRulesSnapshot({ version: 1, rules: [hostileConditionRule(allChain(17))] })).toBe(false)
+  })
+
+  it('注册成功的 16 层嵌套规则快照必能穿过协议守卫（规则嵌套两端同口径）', () => {
+    const nestedLeaf = { id: 'leaf', match: { tag: 'SPAN' }, output: { kind: 'discard' } }
+    const chain = (depth: number): unknown => depth === 0 ? nestedLeaf : {
+      id: `level-${depth}`,
+      match: { tag: 'DIV' },
+      output: { kind: 'template', template: '{{body}}', slots: { body: { source: { kind: 'children', rules: [chain(depth - 1)] } } } },
+    }
+    // 顶层 1 层 + 嵌套 15 层 = 深度 16（合法最大深度）：注册接受 → 守卫接纳
+    const declared = validateAddonPasteRuleDeclarations([chain(15)])
+    expect(declared.ok).toBe(true)
+    if (declared.ok) {
+      const snapshot = { version: 1, rules: declared.rules.map((rule) => ({ ...rule, addonId: 'a.addon' })) }
+      expect(isAddonPasteRulesSnapshot(snapshot)).toBe(true)
+      expect(isHostToWebview({ kind: 'addonPasteRules.snapshot', snapshot })).toBe(true)
+    }
   })
 
   it('嵌套子规则集按优先级降序、ID 升序递归排序（页面求值同源）', () => {

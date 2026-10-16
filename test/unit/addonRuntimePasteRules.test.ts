@@ -319,3 +319,73 @@ describe('T02 高级声明登记', () => {
     expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('enabled')
   })
 })
+
+// ---------------------------------------------------------------------------
+// PR #564 评审 P2：每组件 256 条上限按「顶层 + 嵌套子规则合计」跨批计量
+// ---------------------------------------------------------------------------
+
+describe('跨批递归计数（256 条含嵌套合计）', () => {
+  /** 一批声明：1 条顶层（children 槽携带 childCount 条平铺子规则） */
+  const batchOf = (topId: string, childCount: number): unknown[] => [{
+    id: topId,
+    match: { tag: 'DIV', attributes: [{ name: 'data-card' }] },
+    output: {
+      kind: 'template',
+      template: '{{body}}',
+      slots: {
+        body: {
+          source: {
+            kind: 'children',
+            rules: Array.from({ length: childCount }, (_, i) => ({
+              id: `${topId}-child-${i}`,
+              match: { tag: 'SPAN' },
+              output: { kind: 'discard' },
+            })),
+          },
+        },
+      },
+    },
+  }]
+
+  it('分批登记不能绕过总量：首批 1 顶层 + 255 子规则成功，第二批再 2 条 too-many', () => {
+    const h = harness()
+    // 首批共 256 条（1 顶层 + 255 子规则）：恰好占满预算
+    const first = h.pasteRules.registerRules('a.addon', batchOf('batch-1', 255))
+    expect(first.ok).toBe(true)
+    // 第二批 1 顶层 + 1 子规则 = 再添 2 条 → 越过 256 总量 → too-many
+    //（修复前服务只数顶层 1 条，第二批被误放行 → 有效快照 258 条绕过上限）
+    const second = h.pasteRules.registerRules('a.addon', batchOf('batch-2', 1))
+    expect(second).toMatchObject({ ok: false, reason: 'too-many' })
+    // 快照不被拒绝批次污染：仍是首批 1 条顶层规则（嵌套在槽内）
+    expect(h.pasteRules.effectiveSnapshot().rules.map((rule) => rule.id)).toEqual(['batch-1'])
+  })
+
+  it('释放首批后计数回收：同组件第二批可重新登记', () => {
+    const h = harness()
+    const first = h.pasteRules.registerRules('a.addon', batchOf('batch-1', 255))
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    first.dispose()
+    // dispose 移除本批（含嵌套子规则）→ 递归计数归零 → 第二批可登记
+    const second = h.pasteRules.registerRules('a.addon', batchOf('batch-2', 1))
+    expect(second.ok).toBe(true)
+    expect(h.pasteRules.effectiveSnapshot().rules.map((rule) => rule.id)).toEqual(['batch-2'])
+  })
+
+  it('平铺 256 条顶层后第 257 条 too-many 维持（收口不放宽平铺口径）', () => {
+    const h = harness()
+    const flat = (from: number, count: number) => Array.from({ length: count }, (_, i) => ({
+      id: `flat-${from + i}`,
+      match: { tag: 'SPAN' },
+      output: { kind: 'discard' },
+    }))
+    expect(h.pasteRules.registerRules('a.addon', flat(0, 256)).ok).toBe(true)
+    expect(h.pasteRules.registerRules('a.addon', flat(256, 1)))
+      .toMatchObject({ ok: false, reason: 'too-many' })
+    // 混合口径：平铺 255 条 + 1 顶层带 1 子规则（合计 257）同样拒绝
+    const h2 = harness()
+    expect(h2.pasteRules.registerRules('a.addon', flat(0, 255)).ok).toBe(true)
+    expect(h2.pasteRules.registerRules('a.addon', batchOf('batch-2', 1)))
+      .toMatchObject({ ok: false, reason: 'too-many' })
+  })
+})
