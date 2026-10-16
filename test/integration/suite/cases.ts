@@ -846,6 +846,15 @@ interface ViewState {
       scripts: number
       eventAttrs: number
     }
+    /** #569（T04）文档样式绘制：产物键集 + Reading 直接子块计算色 +
+     *  工具栏排除面基线（无产物缺省） */
+    docStyle?: {
+      scopes: string[]
+      mainRules: number
+      readingParagraphColor: string | null
+      readingHeadingColor: string | null
+      toolbarColor: string | null
+    }
     /** #106 分割线绘制：当前激活视图内首个渲染态横线的可见性与计数 */
     hr?: {
       visible: boolean
@@ -18867,6 +18876,64 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // 零写回：渲染与模式切换不写磁盘、不改源文
       assert(await readDisk(file) === diskBefore, '渲染与切换零磁盘写回')
       assert(reading.text === doc, '源文逐字节不变（不序列化浏览器修复 DOM）')
+    } finally {
+      await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
+    }
+  }],
+
+  // ---- #569（T04）全文文档样式装载与隔离 ----
+  // 真宿主（最低 1.82.3 = Chromium 114）验证 b2 路线：head 产物在场 +
+  // Reading 语义标签直中（h1/p 计算色）+ 工具栏排除面（定向规则不得
+  // 改写）+ 删除 style 块产物回收（无残留）——绘制层断言（paint.docStyle）。
+  ['文档样式：Reading 标签直中、工具栏排除与产物回收（#569）', async () => {
+    const file = 'doc-style-569.md'
+    const doc = [
+      '# 文档样式样例标题',
+      '',
+      '导语段落。',
+      '',
+      '<style>',
+      'p { color: rgb(0, 0, 205); }',
+      'h1 { color: rgb(75, 0, 130); }',
+      '.vsidian-toolbar { color: rgb(250, 100, 0); }',
+      '</style>',
+      '',
+      '结尾段落。',
+    ].join('\n')
+    await writeFile(nodePath.join(wsDir!, file), doc, 'utf8')
+    const diskBefore = await readDisk(file)
+    try {
+      await openWithEditor(file)
+      await waitSessionReady(file)
+      // Reading：产物在场 + 标签直中 + 排除面
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
+      const reading = await waitViewState(file, (v) =>
+        v.viewMode === 'reading' && v.paint?.docStyle !== undefined && v.paint.docStyle.mainRules > 0, 0, 30000)
+      const probe = reading.paint!.docStyle!
+      assert(probe.scopes.includes('doc'), `主文档产物在场（实际键集 ${JSON.stringify(probe.scopes)}）`)
+      assert(probe.readingParagraphColor === 'rgb(0, 0, 205)',
+        `Reading 段落被 p{} 直染（实际 ${probe.readingParagraphColor}）`)
+      assert(probe.readingHeadingColor === 'rgb(75, 0, 130)',
+        `Reading 标题被 h1{} 直染（实际 ${probe.readingHeadingColor}）`)
+      assert(probe.toolbarColor !== 'rgb(250, 100, 0)',
+        `工具栏不被定向规则染指（实际 ${probe.toolbarColor}）`)
+
+      // 删除 style 块（宿主编辑链路——WorkspaceEdit 外部增量广播）：
+      // 源文更新驱动产物回收（无残留规则），撤销链同源
+      const styleBlock = '<style>\np { color: rgb(0, 0, 205); }\nh1 { color: rgb(75, 0, 130); }\n.vsidian-toolbar { color: rgb(250, 100, 0); }\n</style>'
+      const stripped = doc.replace(`${styleBlock}\n\n`, '')
+      assert(await readDisk(file) === diskBefore, '装载与模式切换零磁盘写回')
+      const textDoc = await vscode.workspace.openTextDocument(wsUri(file))
+      const delEdit = new vscode.WorkspaceEdit()
+      const at = doc.indexOf(styleBlock)
+      assert(at >= 0, '定位 style 块')
+      delEdit.replace(wsUri(file), new vscode.Range(textDoc.positionAt(at), textDoc.positionAt(at + styleBlock.length + 2)), '')
+      assert(await vscode.workspace.applyEdit(delEdit), '删除 style 块应成功')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri(file))
+      const after = await waitViewState(file, (v) =>
+        v.viewMode === 'live' && v.text === stripped && v.paint?.docStyle === undefined, 0, 30000)
+      assert(after.text === stripped, '删除后的源文同步（外部增量）')
+      assert(after.paint?.docStyle === undefined, 'style 块删除后产物移除（无残留规则）')
     } finally {
       await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
     }

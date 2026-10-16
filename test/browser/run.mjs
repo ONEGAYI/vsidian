@@ -85,6 +85,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #567（T02）块级原生 HTML：紧随 liveEmbed（同片段替换装饰族——真实
   // 点击/方向键/跨块选区/多选区/纯 style 常显/净化负向/阅读态渲染）
   'liveHtml',
+  // #569（T04）全文文档样式装载：紧随 liveHtml（同 HTML 族——b2 隔离装载/
+  // 层叠/排除面/虚拟化/多实例/A→B→C 隔离/编辑撤销重做同步）
+  'docStyle',
   'dropCursorPaint', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',

@@ -209,6 +209,16 @@ export class VirtualReadingView {
     }
   }
 
+  /**
+   * #569（T04）docScope 更新（嵌入实例：构造时目标键未知——装载内容
+   * 到达（render）时才可从 fsPath 派生）。仅作用于**随后 setDocument
+   * 重建的块**（主文档构造时固定，不调用本方法）；已挂块不追溯改标
+   * （render 流程恒为 clear → setDocument，无已挂块窗口）。
+   */
+  setDocScope(scope: string | undefined): void {
+    this.hooks.docScope = scope
+  }
+
   /** 全文装载/重建（init、resync、外部增量后的重建路径）：全文切块一次。
    *  解析吃全文（保留全文解析上下文，不丢章节外引用式链接定义）。P2-03
    * （#280）起引用内容不再按区间过滤——标题/块引用全文可达，初始定位由

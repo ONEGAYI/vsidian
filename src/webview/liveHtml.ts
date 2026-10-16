@@ -20,12 +20,14 @@
 //   selectionTouchesRange 在组合期内恒命中已显形区间）。
 import { Facet, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
+import { ViewPlugin, ViewUpdate } from '@codemirror/view'
 import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree, type HtmlBlockSpan } from '../shared/htmlBlock'
 import { htmlBlockRenderHtml } from './htmlSanitize'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
+import { DocumentStyleBinding } from './docStyleLoader'
 import { t } from '../shared/i18n'
 import type { Tree } from '@lezer/common'
 
@@ -372,3 +374,40 @@ export const liveHtml: Extension = [
   liveHtmlDecorations,
   EditorView.domEventHandlers({ mousedown: htmlWidgetMousedown }),
 ]
+
+/**
+ * 文档样式装载 ViewPlugin（#569/T04）：docChanged 或语法树推进（增量解析
+ * 换树引用——掩码判定可能更新）时按全文源文重收集并同步产物。装载在
+ * ViewPlugin（不进 StateField——DOM 副作用不属编辑器状态）；destroy 随
+ * 视图销毁释放（主文 dispose 链、嵌入内部 Live teardown 同一出口）。
+ * Reading 主文档与 Live 共享同一 CM6 doc（双模式单一权威文本），本插件
+ * 常驻即覆盖两模式。树缺席或与文本长度不符时收集器内部独立全文 parse
+ * （坐标安全前提）。
+ */
+export function liveDocStyle(docScope: string): Extension {
+  return ViewPlugin.fromClass(class {
+    private readonly binding = new DocumentStyleBinding(docScope)
+
+    constructor(view: EditorView) {
+      this.syncNow(view)
+    }
+
+    update(update: ViewUpdate): void {
+      const treeAdvanced =
+        update.startState.field(liveDecorationsField, false) !== update.state.field(liveDecorationsField, false)
+      if (!update.docChanged && !treeAdvanced) {
+        return
+      }
+      this.syncNow(update.view)
+    }
+
+    private syncNow(view: EditorView): void {
+      const deco = view.state.field(liveDecorationsField, false)
+      this.binding.sync(view.state.doc.toString(), deco?.tree ?? null)
+    }
+
+    destroy(): void {
+      this.binding.dispose()
+    }
+  })
+}

@@ -130,20 +130,22 @@ function blockClassNames(block: ReadingBlock): string[] {
  * 创建单个阅读块元素（结构契约：稳定类名 + data-vsidian-src-start/end 锚点；
  * 内部 HTML 为 markdown-it 产物，进 DOM 前净化并转换任务项）。
  * #7 全量渲染与按需挂载共用此构建器，保证两种路径的块结构逐字节一致。
- * #567（T02）：docScope 在场时 html 块渲染根挂 data-vsidian-doc-scope
- * 标记（T01 探针 b2 隔离路线的基座——值 = 文档身份；嵌入实例的标记接线
- * 随 T04 装载器落地）。
+ * #567（T02）起 html 块渲染根挂 data-vsidian-doc-scope 标记（T01 探针
+ * b2 隔离路线的基座——值 = 文档身份）；#569（T04）铺开到**全部内容块根**
+ * （Markdown 块同挂——b2「逐块标记」纪律：嵌入卡是内容流中的兄弟块而
+ * 非后代，标记只挂文档自有内容根才能兑现排除语义；系统 chrome——卡壳/
+ * 工具栏/gutter——不挂）。
  */
 export function createReadingBlockElement(block: ReadingBlock, text: string, docScope?: string): HTMLElement {
   const el = document.createElement('div')
   el.className = blockClassNames(block).join(' ')
   el.dataset['vsidianSrcStart'] = String(block.start)
   el.dataset['vsidianSrcEnd'] = String(block.end)
-  el.innerHTML = block.html
-  sanitizeReadingDom(el)
-  if (docScope !== undefined && block.kind === 'html') {
+  if (docScope !== undefined) {
     el.dataset['vsidianDocScope'] = docScope
   }
+  el.innerHTML = block.html
+  sanitizeReadingDom(el)
   bindReadingCodeContext(el, text, block.codeContext)
   if (block.kind === 'list') {
     convertTaskItems(el, text)
