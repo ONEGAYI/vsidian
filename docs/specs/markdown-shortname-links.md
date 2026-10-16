@@ -182,9 +182,11 @@
 - **身份形态转换**：catalog 绝对身份（`/` 分隔）与宿主 fsPath（Windows 反斜杠）在跳转/悬停/联想端口工厂统一转换（`vaultIdentityToFsPath`，七个注入点的唯一汇聚处）；纯逻辑层自带归一、形态不敏感。
 - **普链大小写归正**：普链候选命中后过 `statFileRealPath`（含 FileType.File 核验），与双链通道同口径，防绝对路径门放大的身份漂移。
 - **外部目标授权链**：增量重扫登记外部目标后的重抽复用登记前 resolver 闭包会使外部边恒断链——两路径重抽前重建 resolver。
+- **files 身份门盘符折叠（#562）**：登记身份键随链接文本（资源管理器复制的大写盘符形态）、rename/查询事件路径随宿主 URI（盘符小写）——`normKey` 不折叠大小写，files 身份门（rename 候选、反链 no-workspace 判定与跨根合并、`catalogHasFile` 存在性端口）精确匹配漂移 miss、外部/跨根目标 rename 静默跳过。收口：`filesHasIdentity` 精确快路径 + Windows 绝对键折叠慢路径（与 backlinks 桶同口径，POSIX fold 恒等语义保持）、`rootOf` 前缀定位同款折叠兜底、登记侧折叠去重（fullScan 附件段走 assetFold、`registerExternalTargets` 走 filesHasIdentity，双形态链接不双登记）；写入侧键形态不变（旧快照天然兼容）。
 
 ### 已知边界与待验
 
 - image 通道指向 `.md` 目标的短名域冗余（多触发无行为错误的冗余重抽）；补查门槛以引用索引 hasData 为界（首扫窗口期退 not-found 而非 pending，窗口短）；运行中新增绝对图源/PDF 待面板重建生效——三项为知情边界，不阻断验收。
 - Remote SSH/真 POSIX 宿主的资源服务与盘符行为由同代码路径推断，属人工验证清单待验项。
+- #562 盘符折叠的知情边界：其一，升级前旧快照已含同一外部目标的两种盘符形态条目时，快照恢复路径不去重（核验周期对双条目各探测一次、fileCount 虚高；消费点全部折叠容错，无行为差异），下一次全量扫描自然收敛；其二，多根工作区以手输大写路径注册根键（code-workspace folders 数组）时，根定位可折叠接通但其后 rel 键域为精确匹配，呈现空结果而非 no-workspace——VSCode 对 folder URI 通常有规范化，属罕见形态，rel 域折叠不在本次扩面。
 - 验证记录：全量单测 8462 例、生产浏览器 102 套件（含设置页绘制层断言）、compile 全链、集成四分片（#556 全部翻转/新增用例绿）——日志与退出码见工作树 `notes/`（实施期证据，不入仓库）。自动化通过不等于用户验收。
