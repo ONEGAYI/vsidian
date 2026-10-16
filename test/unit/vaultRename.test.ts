@@ -449,7 +449,8 @@ describe('vaultRename：LF 偏移 → 宿主行/列换算（vscode 层坐标桥�
 // ---- #200 目录/批量移动映射展开 ----
 
 /** 展开端口 fake：dirs 显式目录集合；filesUnder = listFilesUnder 返回；
- *  indexed = 索引清单（null = 根未就绪；缺省该前缀无登记） */
+ *  indexed = 索引清单（null = 根未就绪；缺省该前缀无登记）；scope 缺省
+ *  全域内（域外行为由 spy 端口用例专门钉） */
 function expandPort(o: {
   dirs?: readonly string[]
   filesUnder?: Record<string, string[]>
@@ -466,6 +467,9 @@ function expandPort(o: {
     indexedFilesUnder(dirFsPath: string) {
       const value = o.indexed?.[dirFsPath]
       return value === undefined ? [] : value
+    },
+    isIndexedScope() {
+      return true
     },
   }
 }
@@ -680,12 +684,13 @@ describe('vaultRename：三审 P2 存在性预取计划（外部不扫描，定�
   it('域内目录整列举；域外目录不列举、其 move 用有界定点（本体 + 去 .md 变体）', () => {
     const plan = planRenameExistsProbes(
       true,
+      ['C:/vault'],
       [
         { oldFsPath: 'C:\\vault\\data\\old.md', newFsPath: 'C:\\vault\\data\\renamed.md' },
         { oldFsPath: 'E:\\ext\\old\\target.md', newFsPath: 'E:\\ext\\new\\target.md' },
         { oldFsPath: 'E:\\ext\\pic.png', newFsPath: 'E:\\ext\\pic2.png' },
       ],
-      ['C:\\vault\\notes\\source.md'],
+      [{ fsPath: 'C:\\vault\\notes\\source.md', edgeRootFsPath: 'C:/vault', edges: [] }],
       inVault,
     )
     expect(plan.listDirs.map((d) => d.replaceAll('\\', '/')).sort()).toEqual([
@@ -700,18 +705,150 @@ describe('vaultRename：三审 P2 存在性预取计划（外部不扫描，定�
     ])
   })
 
-  it('域外 doc 目录不列举（移出根的 selfMove 文本恒绝对，定点由 move 覆盖）；去重稳定', () => {
+  it('域外 doc 目录不列举（无根文档决策恒绝对）；去重稳定', () => {
     const plan = planRenameExistsProbes(
       false,
+      ['/vault'],
       [
         { oldFsPath: '/vault/a.md', newFsPath: '/vault/b.md' },
         { oldFsPath: '/vault/x.md', newFsPath: '/vault/sub/x.md' },
       ],
-      ['/external/docs/moved.md', '/vault/ref.md'],
-      (p) => p.startsWith('/vault'),
+      [
+        { fsPath: '/external/docs/moved.md', edgeRootFsPath: '/vault', edges: [] },
+        { fsPath: '/vault/ref.md', edgeRootFsPath: '/vault', edges: [] },
+      ],
+      (p: string) => p.startsWith('/vault'),
     )
     expect([...plan.listDirs].sort()).toEqual(['/vault', '/vault/sub'])
     expect(plan.statFiles).toEqual([]) // 域内 move：readDirectory ∪ moves 覆盖，无定点
+  })
+})
+
+describe('vaultRename：四审 P2-2 预取候选覆盖待规划边（未移动目标遮蔽探测）', () => {
+  it('来源单独移出根、目标未动：目标目录的裸名/显式候选进定点集（目录集覆盖不到）', () => {
+    const plan = planRenameExistsProbes(
+      false,
+      ['/vault'],
+      [{ oldFsPath: '/vault/notes/source.md', newFsPath: '/external/source.md' }],
+      [{
+        fsPath: '/external/source.md',
+        edgeRootFsPath: '/vault',
+        edges: [edge({ target: 'target', resolved: '/vault/data/target.md', kind: 'wikilink', start: 0, end: 11 })],
+      }],
+      (p: string) => p.startsWith('/vault'),
+    )
+    // move 域外、doc（新来源）域外 → 无目录列举
+    expect(plan.listDirs).toEqual([])
+    const stats = plan.statFiles.map((p) => p)
+    // 未移动目标的遮蔽候选（评审反例：目标目录被排除的无扩展遮蔽物——
+    // catalog 域外，目录集也覆盖不到，只能定点 stat）
+    expect(stats).toContain('/vault/data/target')
+    expect(stats).toContain('/vault/data/target.md')
+    // 域外 move 定点（本体 + 去 .md 变体）
+    expect(stats).toContain('/external/source')
+    expect(stats).toContain('/external/source.md')
+    // 无根 selfMove 的绝对文本候选（新 basename 同目录落点）
+    expect(stats).toContain('/external/target')
+    expect(stats).toContain('/external/target.md')
+  })
+
+  it('来源移到另一根：目标未动的去 .md 绝对文本被遮蔽 → 终审降级显式 .md 绝对', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: 'C:/vault/notes/source.md', newFsPath: 'D:/other/source.md' }]
+    const docs = [{
+      fsPath: 'D:/other/source.md',
+      text,
+      edgeRootFsPath: 'C:/vault',
+      edges: [edge({ target: 'target', resolved: 'C:/vault/data/target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length })],
+    }]
+    // 存在集模拟接线端口（定点 stat 可见被排除遮蔽物 C:/vault/data/target）
+    const ctx = (shadow: boolean): RenamePlanContext => ({
+      rootFsPaths: ['C:/vault', 'D:/other'],
+      isWindowsHost: true,
+      moves,
+      shortnameLookup: () => ({ candidates: [], complete: true }),
+      targetExists: (p: string) => {
+        const norm = p.replaceAll('\\', '/').toLowerCase()
+        if (norm === 'c:/vault/data/target.md') {
+          return true
+        }
+        return shadow && norm === 'c:/vault/data/target'
+      },
+    })
+    // 控制例（无遮蔽）：去 .md 绝对文本候选序直击目标 → 裸绝对形态
+    const bare = planVaultRenameRewrites(ctx(false), docs)
+    expect(applyEdits(text, bare.docs[0]!.edits)).toBe('见 [[C:/vault/data/target]]。\n')
+    // 反例（遮蔽在场，catalog 域外）：裸绝对命中遮蔽物 → 显式 .md 绝对
+    const explicit = planVaultRenameRewrites(ctx(true), docs)
+    expect(applyEdits(text, explicit.docs[0]!.edits)).toBe('见 [[C:/vault/data/target.md]]。\n')
+  })
+})
+
+describe('vaultRename：四审 P2-3 无根文档不保留短名/相对（消费层 no-workspace）', () => {
+  it('来源目标同批移出根：短名改写为明确绝对路径（同目录命中不构成可解析）', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [
+      { oldFsPath: 'C:/vault/notes/source.md', newFsPath: 'E:/ext/source.md' },
+      { oldFsPath: 'C:/vault/data/target.md', newFsPath: 'E:/ext/target.md' },
+    ]
+    const docs = [{
+      fsPath: 'E:/ext/source.md',
+      text,
+      edgeRootFsPath: 'C:/vault',
+      edges: [edge({ target: 'target', resolved: 'C:/vault/data/target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length })],
+    }]
+    // did 时刻存在集：新路径已落盘（含 moves 新路径）；无遮蔽
+    const noShadow = planVaultRenameRewrites({
+      rootFsPaths: ['C:/vault'], isWindowsHost: true, moves,
+      targetExists: (p) => p.replaceAll('\\', '/').toLowerCase() === 'e:/ext/target.md',
+    }, docs)
+    // 无根文档：短名不可保留 → 绝对形态；原文省略扩展 → 裸绝对（候选序
+    // [.md 变体] 命中目标，消费层绝对形态无根也独立解析）
+    expect(applyEdits(text, noShadow.docs[0]!.edits)).toBe('见 [[E:/ext/target]]。\n')
+    // 反例：新目录有无扩展遮蔽物 → 显式 .md 绝对（裸候选被抢占）
+    const shadowed = planVaultRenameRewrites({
+      rootFsPaths: ['C:/vault'], isWindowsHost: true, moves,
+      targetExists: (p) => {
+        const norm = p.replaceAll('\\', '/').toLowerCase()
+        return norm === 'e:/ext/target.md' || norm === 'e:/ext/target'
+      },
+    }, docs)
+    expect(applyEdits(text, shadowed.docs[0]!.edits)).toBe('见 [[E:/ext/target.md]]。\n')
+  })
+
+  it('无根文档的相对原文同样改写为绝对（不进入相对重算）', () => {
+    const text = '上行 [[../c-out]]。\n'
+    const moves = [{ oldFsPath: 'C:/vault/notes/source.md', newFsPath: 'E:/ext/source.md' }]
+    const docs = [{
+      fsPath: 'E:/ext/source.md',
+      text,
+      edgeRootFsPath: 'C:/vault',
+      edges: [edge({ target: '../c-out', resolved: 'C:/vault/c-out.md', kind: 'wikilink', start: 3, end: 3 + '[[../c-out]]'.length })],
+    }]
+    const result = planVaultRenameRewrites({
+      rootFsPaths: ['C:/vault'], isWindowsHost: true, moves,
+      targetExists: (p) => p.replaceAll('\\', '/').toLowerCase() === 'c:/vault/c-out.md',
+    }, docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('上行 [[C:/vault/c-out]]。\n')
+  })
+
+  it('控制例：文档仍在根内时短名/相对域照常（无根守卫不误伤）', () => {
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: 'C:/vault/notes/target.md', newFsPath: 'C:/vault/data/target.md' }]
+    const docs = [{
+      fsPath: 'C:/vault/notes/source.md',
+      text,
+      edgeRootFsPath: 'C:/vault',
+      edges: [edge({ target: 'target', resolved: 'notes/target.md', kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length })],
+    }]
+    // 同根纯移动 + 短名补查唯一 → 保留短名（零编辑）
+    const result = planVaultRenameRewrites({
+      rootFsPaths: ['C:/vault'], isWindowsHost: true, moves,
+      shortnameLookup: (_src: string, basename: string) =>
+        basename === 'target.md' ? { candidates: ['C:/vault/data/target.md'], complete: true } : { candidates: [], complete: true },
+      targetExists: (p) => p.replaceAll('\\', '/').toLowerCase() === 'c:/vault/data/target.md',
+    }, docs)
+    expect(result.docs).toEqual([])
   })
 })
 

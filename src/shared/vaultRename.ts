@@ -78,11 +78,14 @@ export interface RenameExpandPort {
   listFilesUnder(dirFsPath: string): Promise<string[]>
   /** 索引清单：目录前缀下全部已登记文件（.md + asset）；根未就绪 null */
   indexedFilesUnder(dirFsPath: string): string[] | null
-  /** 目录是否索引扫描域内（三审 P2，可选；缺省 true）。域外（工作区外）
-   *  目录跳过 fs 递归列举——#556 冻结规格「外部只登记明确引用目标，不
-   *  扫描目录」：映射只来自 indexedFilesUnder 的已登记身份前缀，未引用
-   *  外部文件无引用边、无需映射，也不为其引入外部 I/O 与权限面 */
-  isIndexedScope?(fsPath: string): boolean
+  /** 目录是否索引扫描域内（三审 P2 引入，四审 P2-1 起必填——接线漏接由
+   *  编译器暴露，不再有「缺省域内」的默许分支）。域外（工作区外）目录
+   *  跳过 fs 递归列举——#556 冻结规格「外部只登记明确引用目标，不扫描
+   *  目录」：映射只来自 indexedFilesUnder 的已登记身份前缀，未引用外部
+   *  文件无引用边、无需映射，也不为其引入外部 I/O 与权限面。以**旧目录**
+   *  判定：旧路径在外、新路径在根内的移入同样不回扫旧外部树（新位置的
+   *  根内登记由既有根扫描流程负责） */
+  isIndexedScope(fsPath: string): boolean
 }
 
 /** 展开结果：逐文件映射（原始文件条目原样保留；目录条目被其内容替换）；
@@ -147,10 +150,11 @@ export async function expandRenameMoves(
     const newDir = norm(move.newFsPath)
     // 清单合流：fs 递归列举的 .md（权威兜底）∪ 索引清单全部登记类型
     //（asset 只在索引有登记——被引用才有引用边，未引用附件无需映射）。
-    // 三审 P2：索引域外目录跳过 fs 列举（外部不扫描——登记域即引用域）
-    const fsFiles = port.isIndexedScope?.(move.oldFsPath) === false
-      ? []
-      : await port.listFilesUnder(move.oldFsPath)
+    // 三审 P2：索引域外目录跳过 fs 列举（外部不扫描——登记域即引用域）；
+    // 旧目录在域外时不因新路径在根内而回扫（四审 P2-1 生产接线）
+    const fsFiles = port.isIndexedScope(move.oldFsPath)
+      ? await port.listFilesUnder(move.oldFsPath)
+      : []
     const seen = new Set<string>()
     const add = (absFsPath: string): void => {
       const key = fold(norm(absFsPath))
@@ -190,6 +194,104 @@ export async function expandRenameMoves(
   }
 }
 
+/** 宿主路径语义闭包（主计划循环与预取候选收集共用，见 pathSemanticsOf） */
+interface PathSemantics {
+  ops: typeof path.posix
+  fold: (p: string) => string
+  norm: (p: string) => string
+  isWindowsHost: boolean
+}
+
+/** isWindowsHost 描述的宿主语义三件套（与 vaultLink 的 pathOps 同约定，
+ *  与运行进程平台无关） */
+function pathSemanticsOf(isWindowsHost: boolean): PathSemantics {
+  const ops = isWindowsHost ? path.win32 : path.posix
+  return {
+    ops,
+    fold: (p: string): string => (isWindowsHost ? p.toLowerCase() : p),
+    norm: (p: string): string => ops.resolve(p),
+    isWindowsHost,
+  }
+}
+
+/** 最具体根（最长前缀命中；无根 undefined）——planVaultRenameRewrites 的
+ *  根域判定与 planRenameExistsProbes 的候选收集共用同一口径（评审 F5：
+ *  归属判定不按几何） */
+function mostSpecificRootOf(
+  sem: PathSemantics,
+  roots: readonly string[],
+  fsPath: string,
+): string | undefined {
+  const key = sem.fold(sem.norm(fsPath))
+  for (const root of [...roots].sort((a, b) => sem.fold(sem.norm(b)).length - sem.fold(sem.norm(a)).length)) {
+    const rk = sem.fold(sem.norm(root))
+    if (key === rk || key.startsWith(`${rk}/`) || key.startsWith(`${rk}\\`)) {
+      return root
+    }
+  }
+  return undefined
+}
+
+/** 边目标身份转换（主计划循环与预取候选收集共用）：#556 T2 起
+ *  resolvedTarget 为规范绝对身份——绝对形态直接归一采用；根内相对形态
+ *  （旧快照迁移期/单测 fixture）按 edgeRootFsPath 拼接（兼容两域）。
+ *  moved = 该目标是本批被移动文件 */
+function edgeTargetAbsOf(
+  sem: PathSemantics,
+  moveByOld: ReadonlyMap<string, { oldFsPath: string; newFsPath: string }>,
+  edge: VaultEdge,
+  edgeRootFsPath: string,
+): { targetAbs: string; moved: boolean } {
+  const resolvedRaw = String(edge.resolvedTarget)
+  const base = sem.ops.isAbsolute(resolvedRaw)
+    ? sem.norm(resolvedRaw)
+    : sem.norm(sem.ops.resolve(sem.norm(edgeRootFsPath), ...resolvedRaw.split('/')))
+  const move = moveByOld.get(sem.fold(base))
+  return { targetAbs: move !== undefined ? sem.norm(move.newFsPath) : base, moved: move !== undefined }
+}
+
+/** 单边决策文本方案集（四审 P2-2）：planEdgeTargetText 与终审回验可能
+ *  产出或探测的有限文本族——原文（保留决策与遮蔽核对）、目标新 basename
+ *  （短名更新：省略/显式扩展）、按应用文档目录重算的相对路径（省略/显式；
+ *  仅文档有所属根时存在该形态）、绝对形态（省略/显式——无根文档的唯一下落）。
+ *  superset 性保证：决策分支换序/降级产生的文本都在此集合内，探测面不随
+ *  分支组合膨胀（每边常数个文本） */
+function renameDecisionTexts(
+  sem: PathSemantics,
+  docDir: string,
+  docRoot: string | undefined,
+  targetAbs: string,
+  edge: VaultEdge,
+): string[] {
+  const pathRaw = splitHrefParts(edge.target).pathRaw
+  const decodedRaw = decodeLoose(pathRaw)
+  const texts = new Set<string>()
+  const addIf = (t: string): void => {
+    if (t.trim() !== '') {
+      texts.add(t)
+    }
+  }
+  addIf(decodedRaw)
+  const newBase = sem.ops.basename(targetAbs)
+  addIf(newBase)
+  if (/\.md$/i.test(newBase)) {
+    addIf(newBase.slice(0, -3))
+  }
+  if (docRoot !== undefined) {
+    const rel = relativePathOf(sem.ops, docDir, targetAbs)
+    addIf(rel)
+    if (/\.md$/i.test(rel)) {
+      addIf(rel.slice(0, -3))
+    }
+  }
+  const absFull = sem.isWindowsHost ? sem.norm(targetAbs).replace(/\\/g, '/') : sem.norm(targetAbs)
+  addIf(absFull)
+  if (/\.md$/i.test(absFull)) {
+    addIf(absFull.slice(0, -3))
+  }
+  return [...texts]
+}
+
 /** 短名唯一性查询端口（#556 T4）：按来源 fsPath（定位最具体根分区）与 *  完整 basename（含扩展名）查该根内未排除 Markdown 的候选（绝对身份
  *  形态——host 侧 catalog 倒排，零 IO，R6）；null = 索引未就绪/来源无
  *  分区——不注入短名语义（保留与更新两决策均不冒充命中，退相对路径）。
@@ -201,44 +303,58 @@ export interface RenameShortnameLookupPort {
     | null
 }
 
-/** 存在性预取计划（三审 P2：外部不扫描）——wiring 存在性端口的数据面：
- *  索引域内目录整目录列举（合法——根内扫描域本来就有）；域外（工作区外）
- *  不做目录枚举（#556 冻结规格「外部只登记明确引用目标，不扫描目录」）
- *  ——外部目标改写的存在性核对改用**有界定点查询**：新路径本体与其
- *  去 .md 变体（绝对形态文本回验候选序的落点，≤2 个/外部目标），逐文件
- *  stat。域外应用文档目录同样不列举：移出根的 selfMove 其文本决策恒为
- *  绝对形态（无根即无相对/短名域），定点由 move 集覆盖。isIndexedScope
- *  由接线层注入（vscode：getWorkspaceFolder） */
+/** 存在性预取计划（三审 P2：外部不扫描；四审 P2-2：覆盖待规划边）——
+ *  wiring 存在性端口的数据面，两个来源：
+ *  - **目录整列举**：索引域内目录（应用文档目录 ∪ 域内 move 新路径目录）
+ *    ——合法（根内扫描域本来就有），readDirectory 一次覆盖候选序核对与终审
+ *    回验所需的「第一个存在文件优先」裁决；
+ *  - **有界定点 stat**：域外（工作区外）不枚举目录（#556 冻结规格「外部
+ *    只登记明确引用目标，不扫描目录」）；域外 move 定点 = 新路径本体 +
+ *    去 .md 变体。四审 P2-2 起**每条待规划边**的决策文本方案（见
+ *    renameDecisionTexts）经 planVaultLinkPath 展开为文件候选——未移动
+ *    目标所在目录（如目标目录被排除的无扩展遮蔽物）与移出根文档的同目录
+ *    候选都不在目录集内，逐个定点补齐。候选数随边数线性增长，与目录内容
+ *    无关（外部目录仍零枚举）。isIndexedScope 由接线层注入（vscode：
+ *    getWorkspaceFolder） */
 export interface RenameExistsPrefetchPlan {
   /** 索引域内目录（readDirectory 整列举；norm 归一形态） */
   listDirs: string[]
-  /** 域外定点候选（逐文件 stat；域内 move 不进——listDirs ∪ moves 覆盖） */
+  /** 定点 stat 候选（域外 move 定点 ∪ 边决策候选中目录集覆盖不到者） */
   statFiles: string[]
 }
 
-/** 预取计划纯函数（同步、无 IO）：目录集 = 应用文档目录 ∪ 新路径目录，
- *  按域分流；定点集 = 域外 move 的 {newFsPath, 去 .md 变体}（.md 尾）。
- *  去重 + 排序稳定（Set 无序性不外泄给断言与日志） */
+/** 预取计划纯函数（同步、无 IO）：目录集 = 应用文档目录 ∪ 域内新路径目录，
+ *  按域分流；定点集 = 域外 move 的 {newFsPath, 去 .md 变体} ∪ 每条待规划边
+ *  （跳过条件与 planVaultRenameRewrites 主循环镜像：断链/锚点边、非
+ *  selfMove 且目标未动的引用边不参与改写，也无探测面）的决策文本候选中
+ *  目录集覆盖不到者。去重 + 排序稳定（Set 无序性不外泄给断言与日志） */
 export function planRenameExistsProbes(
   isWindowsHost: boolean,
+  rootFsPaths: readonly string[],
   moves: ReadonlyArray<{ oldFsPath: string; newFsPath: string }>,
-  docFsPaths: readonly string[],
+  docs: ReadonlyArray<Pick<RenameDocInput, 'fsPath' | 'edges' | 'edgeRootFsPath'>>,
   isIndexedScope: (fsPath: string) => boolean,
 ): RenameExistsPrefetchPlan {
-  const ops = isWindowsHost ? path.win32 : path.posix
+  const sem = pathSemanticsOf(isWindowsHost)
+  const moveByOld = new Map<string, { oldFsPath: string; newFsPath: string }>()
+  const moveByNew = new Set<string>()
+  for (const move of moves) {
+    moveByOld.set(sem.fold(sem.norm(move.oldFsPath)), move)
+    moveByNew.add(sem.fold(sem.norm(move.newFsPath)))
+  }
   const listDirs = new Set<string>()
   const statFiles = new Set<string>()
   const addDir = (fsPath: string): void => {
-    const dir = ops.dirname(ops.resolve(fsPath))
+    const dir = sem.ops.dirname(sem.norm(fsPath))
     if (isIndexedScope(dir)) {
       listDirs.add(dir)
     }
   }
   for (const m of moves) {
-    const newPath = ops.resolve(m.newFsPath)
-    if (isIndexedScope(ops.dirname(newPath))) {
+    const newPath = sem.norm(m.newFsPath)
+    if (isIndexedScope(sem.ops.dirname(newPath))) {
       addDir(newPath)
-      continue // 域内 move：整目录列举（moves 集补未落盘新路径）
+      continue // 域内 move：整目录列举（moves 集合补未落盘新路径）
     }
     // 域外 move：不列举外部目录；定点 = 本体 + 去 .md 变体（遮蔽探测）
     statFiles.add(newPath)
@@ -246,8 +362,45 @@ export function planRenameExistsProbes(
       statFiles.add(newPath.slice(0, -3))
     }
   }
-  for (const doc of docFsPaths) {
-    addDir(doc)
+  for (const doc of docs) {
+    addDir(doc.fsPath)
+  }
+  /** 候选是否已被目录整列举覆盖（覆盖者不重复定点） */
+  const covered = (fsPath: string): boolean => listDirs.has(sem.ops.dirname(sem.norm(fsPath)))
+  for (const doc of docs) {
+    const docAbs = sem.norm(doc.fsPath)
+    const selfMove = moveByNew.has(sem.fold(docAbs))
+    const docRoot = mostSpecificRootOf(sem, rootFsPaths, docAbs)
+    const docDir = sem.ops.dirname(docAbs)
+    const linkCtx: VaultLinkPathContext = {
+      docDir,
+      rootDir: docRoot ?? docDir,
+      isWindowsHost,
+    }
+    for (const edge of doc.edges) {
+      if (edge.resolvedTarget === null || edge.target.trim() === '') {
+        continue
+      }
+      const { targetAbs, moved } = edgeTargetAbsOf(sem, moveByOld, edge, doc.edgeRootFsPath)
+      if (!selfMove && !moved) {
+        continue
+      }
+      if (targetAbs.trim() === '') {
+        continue
+      }
+      const implicitMd = edge.kind !== 'image'
+      for (const text of renameDecisionTexts(sem, docDir, docRoot, targetAbs, edge)) {
+        const plan = planVaultLinkPath(text, linkCtx, { implicitMd })
+        if (plan.kind === 'escape') {
+          continue
+        }
+        for (const candidate of plan.candidates) {
+          if (!covered(candidate)) {
+            statFiles.add(sem.norm(candidate))
+          }
+        }
+      }
+    }
   }
   return {
     listDirs: [...listDirs].sort(),
@@ -413,6 +566,15 @@ function planEdgeTargetText(a: EdgeTargetPlanArgs): string | null {
     return absoluteTextOf(a, originalHasExt)
   }
 
+  // 四审 P2-3：应用文档无所属根（移出全部工作区根）——消费层对非绝对
+  // 路径一律 no-workspace（resolveVaultLinkFile 的 hasWorkspace 判定先于
+  // 候选探测与补查），相对/短名域不存在，同目录命中也不构成「可解析」
+  //（此前同目录命中分支先于无根绝对化，产出保留短名却点击即死）。
+  // 直接明确绝对形态（扩展名省略语义照旧，裸形态遮蔽由终审回验兜底）
+  if (a.docRoot === undefined) {
+    return absoluteTextOf(a, originalHasExt)
+  }
+
   // 形态 2：短名（仅文件名 + Markdown 语义——image 边无隐式 .md 意图）
   const implicitMd = a.edge.kind !== 'image'
   const shortnameKey = shortnameLookupKeyOf(decodedRaw, linkCtx, { implicitMd })
@@ -501,6 +663,10 @@ function shortnameUniqueHit(a: EdgeTargetPlanArgs, key: string): boolean {
  * 探测（同目录候选序、裸名遮蔽）覆盖不到的组合面（降级分支剥 .md 后的
  * 相对/绝对遮蔽、端口数据面缺口）在此统一拦截，不建第二套规则（R1）。
  * 存在性端口未注入不回验（上游兼容，决策分支自身已退化为几何比较）。
+ * 四审 P2-3：与消费层 resolveVaultLinkFile 同序——绝对形态无根也独立
+ * 解析；**非绝对路径在文档无所属根时消费层返回 no-workspace**（先于一切
+ * 候选探测），此处同样判不可用，不以 docDir 顶替根语义造成「回验通过却
+ * 点击即死」。
  */
 function resolvesToTargetText(a: EdgeTargetPlanArgs, text: string): boolean {
   if (a.targetExists === undefined) {
@@ -513,6 +679,9 @@ function resolvesToTargetText(a: EdgeTargetPlanArgs, text: string): boolean {
     isWindowsHost: a.isWindowsHost,
   }
   const plan = planVaultLinkPath(text, linkCtx, { implicitMd })
+  if (plan.kind !== 'absolute' && a.docRoot === undefined) {
+    return false // 无根文档的非绝对文本：消费层 no-workspace，不可解析
+  }
   if (plan.kind === 'escape') {
     return false // 生成的文本越出解析域（防御：正常三形态产物不会到达）
   }
@@ -598,22 +767,10 @@ export function planVaultRenameRewrites(
   ctx: RenamePlanContext,
   docs: readonly RenameDocInput[],
 ): RenamePlanResult {
-  const ops = ctx.isWindowsHost ? path.win32 : path.posix
-  const fold = (p: string): string => (ctx.isWindowsHost ? p.toLowerCase() : p)
-  const norm = (p: string): string => ops.resolve(p)
-  const roots = [...ctx.rootFsPaths].sort((a, b) => fold(norm(b)).length - fold(norm(a)).length)
-
-  /** 最具体根（最长前缀）；无根 undefined */
-  const rootOf = (fsPath: string): string | undefined => {
-    const key = fold(norm(fsPath))
-    for (const root of roots) {
-      const rk = fold(norm(root))
-      if (key === rk || key.startsWith(`${rk}/`) || key.startsWith(`${rk}\\`)) {
-        return root
-      }
-    }
-    return undefined
-  }
+  const sem = pathSemanticsOf(ctx.isWindowsHost)
+  const { ops, fold, norm } = sem
+  /** 最具体根（最长前缀命中）；无根 undefined */
+  const rootOf = (fsPath: string): string | undefined => mostSpecificRootOf(sem, ctx.rootFsPaths, fsPath)
 
   const moveByOld = new Map<string, RenameMoveEntry>()
   for (const move of ctx.moves) {
@@ -644,19 +801,12 @@ export function planVaultRenameRewrites(
         continue
       }
       // 引用者文档：只有指向本批被移动目标的边才改写；被移动文档自身：
-      // 全部出链按新目录重算
-      // #556 T2 起 resolvedTarget 为规范绝对身份——绝对形态直接归一采用
-      // （本票起为语义主域）；根内相对形态（旧快照迁移期/单测 fixture）
-      // 仍按 edgeRootFsPath 拼接（兼容两域）
-      const resolvedRaw = String(edge.resolvedTarget)
-      const targetAbsRaw = ops.isAbsolute(resolvedRaw)
-        ? norm(resolvedRaw)
-        : ops.resolve(norm(doc.edgeRootFsPath), ...resolvedRaw.split('/'))
-      const move = moveByOld.get(fold(targetAbsRaw))
-      if (!selfMove && move === undefined) {
+      // 全部出链按新目录重算。目标身份经 edgeTargetAbsOf（与预取候选收集
+      // 共用的转换——绝对身份归一 / 根内相对按 edgeRoot 拼接 / moves 映射）
+      const { targetAbs, moved } = edgeTargetAbsOf(sem, moveByOld, edge, doc.edgeRootFsPath)
+      if (!selfMove && !moved) {
         continue
       }
-      const targetAbs = move !== undefined ? norm(move.newFsPath) : targetAbsRaw
       if (targetAbs.trim() === '') {
         continue
       }

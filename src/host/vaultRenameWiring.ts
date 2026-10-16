@@ -25,7 +25,8 @@
 //
 // #200 批量语义：
 // - 目录 rename/move 的 event.files 只给目录级 old→new——经
-//   expandRenameMoves（fs 递归列举 .md ∪ 索引清单）展开为逐文件映射，
+//   expandRenameMoves（fs 递归列举 .md ∪ 索引清单；索引域外目录不列举，
+//   映射只来自已登记身份——#556 冻结规格「外部不扫描」）展开为逐文件映射，
 //   整批**一次** planVaultRenameRewrites（映射表统一，不逐条重复替换）
 // - 同一引用者指向批内多个目标：边并集合并为单文档输入（一次规划、同
 //   文档多目标一次 WorkspaceEdit）
@@ -37,6 +38,7 @@
 // 文本获取：已打开文档优先（TextDocument.getText 含未保存内容——区间
 // 验证与替换对齐当前文本，漂移即文档级跳过）；未打开文档 openTextDocument
 // 只装载不显示。LF 偏移计划经 lfOffsetToLineCol 转宿主 Position。
+import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { t } from '../shared/i18n'
 import {
@@ -46,6 +48,7 @@ import {
   planVaultRenameRewrites,
   renameNoticeKeyOf,
   type RenameDocInput,
+  type RenameExpandPort,
   type RenameMoveEntry,
   type RenameShortnameLookupPort,
 } from '../shared/vaultRename'
@@ -187,12 +190,10 @@ function fillEdit(
 }
 
 /** 展开端口（will 与 did 保底共用）：stat 判目录、递归列举（排除子树
- *  剪枝）、索引清单 */
-function expandPortOf(vaultIndex: VaultIndexService): {
-  isDirectory(fsPath: string): Promise<boolean>
-  listFilesUnder(dirFsPath: string): Promise<string[]>
-  indexedFilesUnder(dirFsPath: string): string[] | null
-} {
+ *  剪枝）、索引清单、索引域判定。四审 P2-1：isIndexedScope 接入生产接线
+ *  （与存在性预取同一工作区归属口径）——域外目录不递归扫描，#556 冻结
+ *  规格「外部不扫描」在真实链路生效（端口必填，漏接由编译器暴露） */
+function expandPortOf(vaultIndex: VaultIndexService): RenameExpandPort {
   return {
     async isDirectory(fsPath: string) {
       try {
@@ -231,6 +232,9 @@ function expandPortOf(vaultIndex: VaultIndexService): {
     },
     indexedFilesUnder(dirFsPath: string) {
       return vaultIndex.indexedFilesUnder(dirFsPath)
+    },
+    isIndexedScope(fsPath: string) {
+      return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(fsPath)) !== undefined
     },
   }
 }
@@ -409,7 +413,7 @@ async function buildWillRenameEdit(
         isWindowsHost,
         moves,
         shortnameLookup: renameShortnamePortOf(vaultIndex),
-        targetExists: await buildRenameTargetExistsPort(vaultIndex, isWindowsHost, moves, [...docsByKey.values()].map((d) => d.fsPath)),
+        targetExists: await buildRenameTargetExistsPort(vaultIndex, isWindowsHost, rootFsPaths, moves, [...docsByKey.values()]),
       },
       docs,
     )
@@ -545,7 +549,7 @@ async function applyAfterRenameBatch(
             isWindowsHost,
             moves: expandedMoves,
             shortnameLookup: renameShortnamePortOf(vaultIndex),
-            targetExists: await buildRenameTargetExistsPort(vaultIndex, isWindowsHost, expandedMoves, docs.map((d) => d.fsPath)),
+            targetExists: await buildRenameTargetExistsPort(vaultIndex, isWindowsHost, rootFsPaths, expandedMoves, docs),
           },
           docs,
         )
@@ -582,7 +586,7 @@ async function applyAfterRenameBatch(
           isWindowsHost,
           moves: expandedMoves,
           shortnameLookup: renameShortnamePortOf(vaultIndex),
-          targetExists: await buildRenameTargetExistsPort(vaultIndex, isWindowsHost, expandedMoves, [...dirtyDocsByKey.values()].map((d) => d.fsPath)),
+          targetExists: await buildRenameTargetExistsPort(vaultIndex, isWindowsHost, rootFsPaths, expandedMoves, [...dirtyDocsByKey.values()]),
         },
         docs,
       )
@@ -686,27 +690,36 @@ function renameShortnamePortOf(vaultIndex: VaultIndexService): RenameShortnameLo
   return (sourceFsPath, basename) => vaultIndex.shortnameLookup(sourceFsPath, basename)
 }
 
-/** 复审 S1 存在性端口数据面（真实 fs 预取）+ 三审 P2（外部不扫描）：
- *  预取计划经 planRenameExistsProbes（纯函数，shared）——索引域内目录
- *  readDirectory 整列举（候选序核对与终审回验需要「第一个存在文件优先」
- *  的真实裁决，catalog 投影不含未引用的无扩展遮蔽物）；域外不列举目录
- *  （#556 冻结规格「外部不扫描」），外部 move 改用有界定点 stat（本体 +
- *  去 .md 变体）。只把普通文件入集（目录不算存在——解析器 exists 端口
- *  对非普通文件返回 null 的同款语义）。catalog 登记仍并入（外部/跨根
- *  绝对目标的存在性由引用登记承载）。will 时刻未落盘的新路径由 moves
- *  集合补 */
+/** 复审 S1 存在性端口数据面（真实 fs 预取）+ 三审 P2（外部不扫描）+ 四审
+ *  P2-2（预取输入覆盖待规划边）：预取计划经 planRenameExistsProbes（纯
+ *  函数，shared）——
+ *  - 索引域内目录 readDirectory 整列举（候选序核对与终审回验需要「第一个
+ *    存在文件优先」的真实裁决，catalog 投影不含未引用的无扩展遮蔽物）；
+ *  - 定点 stat：域外 move（本体 + 去 .md 变体）与**每条待规划边**的决策
+ *    文本候选（原文/新短名/同根相对/绝对及其显式扩展回退——未移动目标
+ *    所在目录的遮蔽物、移出根文档的同目录候选都在其中），数量随边数线性；
+ *  - 域外一律不列举目录（#556 冻结规格「外部不扫描」）。
+ *  只把普通文件入集（目录不算存在）；**未知 IO 保守**：readDirectory/stat
+ *  失败仅 FileNotFound 视为确定不存在，权限/IO 未知按「可能存在」处理
+ *  （不得当作「无裸名遮蔽」的证明——宁可退显式扩展形态）。catalog 登记并
+ *  入（外部/跨根绝对目标的存在性由引用登记承载）。**新世界视图**：will
+ *  时刻盘面与 catalog 仍是旧世界（rename 未执行），移出原位的旧身份不再
+ *  存在（movedAwayOld 排除；did 时刻盘面已更新，排除自然 no-op），
+ *  未落盘的新路径由 moves 集合补 */
 async function buildRenameTargetExistsPort(
   vaultIndex: VaultIndexService,
   isWindowsHost: boolean,
+  rootFsPaths: readonly string[],
   moves: ReadonlyArray<{ oldFsPath: string; newFsPath: string }>,
-  docFsPaths: readonly string[],
+  docs: ReadonlyArray<Pick<RenameDocInput, 'fsPath' | 'edges' | 'edgeRootFsPath'>>,
 ): Promise<(fsPath: string) => boolean> {
-  // 三审 P2-1：docFsPaths 必须是文档实际 fsPath——调用方的合并表键
-  //（fsPath@root）不是路径，传入会污染目录集（dirname 截到 `@` 段）
   const isIndexedScope = (fsPath: string): boolean =>
     vscode.workspace.getWorkspaceFolder(vscode.Uri.file(fsPath)) !== undefined
-  const plan = planRenameExistsProbes(isWindowsHost, moves, docFsPaths, isIndexedScope)
+  const plan = planRenameExistsProbes(isWindowsHost, rootFsPaths, moves, docs, isIndexedScope)
   const exists = new Set<string>()
+  const unknownDirs = new Set<string>()
+  const isDefiniteMissing = (err: unknown): boolean =>
+    (err as { code?: string } | null | undefined)?.code === 'FileNotFound'
   await Promise.all([
     ...plan.listDirs.map(async (dir) => {
       try {
@@ -716,8 +729,12 @@ async function buildRenameTargetExistsPort(
             exists.add(normKeyOf(`${dir}/${name}`))
           }
         }
-      } catch {
-        // 目录不存在（will 时刻新目录未建）：该目录的文件由 moves 集合补
+      } catch (err) {
+        if (isDefiniteMissing(err)) {
+          return // will 时刻新目录未建：该目录的文件由 moves 集合补
+        }
+        // 权限/IO 未知：目录内容不可枚举——其下候选按「可能存在」保守处理
+        unknownDirs.add(normKeyOf(dir))
       }
     }),
     ...plan.statFiles.map(async (file) => {
@@ -726,14 +743,33 @@ async function buildRenameTargetExistsPort(
         if (st.type === vscode.FileType.File) {
           exists.add(normKeyOf(file))
         }
-      } catch {
-        // 定点不存在：非遮蔽（候选序继续探 .md 变体）
+      } catch (err) {
+        if (!isDefiniteMissing(err)) {
+          exists.add(normKeyOf(file)) // 未知 ≠ 不存在：按遮蔽在场保守处理
+        }
       }
     }),
   ])
   const newPaths = new Set(moves.map((m) => normKeyOf(m.newFsPath)))
-  return (fsPath) =>
-    newPaths.has(normKeyOf(fsPath)) || exists.has(normKeyOf(fsPath)) || vaultIndex.catalogHasFile(fsPath)
+  const movedAwayOld = new Set(
+    moves
+      .filter((m) => normKeyOf(m.oldFsPath) !== normKeyOf(m.newFsPath))
+      .map((m) => normKeyOf(m.oldFsPath)),
+  )
+  const ops = isWindowsHost ? path.win32 : path.posix
+  return (fsPath) => {
+    const key = normKeyOf(fsPath)
+    if (newPaths.has(key)) {
+      return true
+    }
+    if (movedAwayOld.has(key)) {
+      return false
+    }
+    if (exists.has(key) || vaultIndex.catalogHasFile(fsPath)) {
+      return true
+    }
+    return unknownDirs.has(normKeyOf(ops.dirname(fsPath)))
+  }
 }
 
 /** 跳过原因的文案键（通知详情用；#556 T4 起仅剩 edge-stale 一种） */
