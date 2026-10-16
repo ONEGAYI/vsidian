@@ -52,12 +52,22 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
     }
   })
 
-  it('当前全部版本与实验入口均为候选——无任何已发布状态或日期（发行时须显式更新本断言并人工落账）', () => {
+  it('台账诚实性：已发行版本必有日期，未发行与实验入口恒为候选无日期（再次发行时显式更新本断言并人工落账）', () => {
+    // 1.1.0（2026-10-16）为首个随本体发行的版本；1.0.0 候选记录与全部
+    // 实验入口保留候选口径——candidate 携带日期 = 伪造发行史。
+    const byVersion = new Map(ADDON_API_RELEASES.map((r) => [r.version, r]))
+    expect(byVersion.get('1.0.0')?.status).toBe('candidate')
+    expect(byVersion.get('1.0.0')?.releasedAt).toBeUndefined()
+    expect(byVersion.get('1.1.0')?.status).toBe('released')
+    expect(byVersion.get('1.1.0')?.releasedAt).toBe('2026-10-16')
     for (const record of ADDON_API_RELEASES) {
-      expect(record.status).toBe('candidate')
-      expect(record.releasedAt).toBeUndefined()
+      if (record.status === 'released') {
+        expect(record.releasedAt, `已发行版本 ${record.version} 须携带日期`).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      } else {
+        expect(record.releasedAt, `未发行版本 ${record.version} 不得携带日期`).toBeUndefined()
+      }
       for (const exp of record.experimental) {
-        expect(exp.status).toBe('candidate')
+        expect(exp.status, `实验入口 ${exp.entry} 恒为候选`).toBe('candidate')
         expect(exp.releasedAt).toBeUndefined()
       }
     }

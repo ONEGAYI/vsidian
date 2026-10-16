@@ -45,7 +45,7 @@ VSIX 解压总量警告 14.5 MiB / 上限 15.0 MiB（#85 代码块高亮后基�
 
 - `CHANGELOG-API.md`：Unreleased 段转正为 `## <API 版本> - <日期>`（日期 = 本体发布日），顶部重建空 Unreleased 段；候选期存量面（`## 1.0.0 - 候选面` 段）在**首次**发行时并入首个发行版本段。
 - 发行台账（`src/shared/addonApiCatalog.ts` 的 `ADDON_API_RELEASES`）：**追加**新版本记录（status=released、releasedAt、summary；experimental 留空数组——实验入口跨版本唯一锚定，既有清单保留在原记录，参考文档按全台账合并呈现）。不改写任何历史记录——改已登记记录触发 `release-history-mutated`。
-- 宿主版本常量：`src/shared/addonIdentity.ts` 的 `ADDON_API_VERSION` 同笔升到同一版本（台账超前宿主即 `ledger-ahead-of-host` 失败）；`test/unit/addonIdentity.test.ts` 钉住该值的断言同步更新。
+- 宿主版本常量：`src/shared/addonIdentity.ts` 的 `ADDON_API_VERSION` 同笔升到同一版本（台账超前宿主即 `ledger-ahead-of-host` 失败）；两处落账绊线同步更新——`test/unit/addonIdentity.test.ts` 钉住常量值，`test/unit/addonApiRefGen.test.ts` 的台账诚实性断言（全部候选 → 已发行版本必有日期；v1.1.0 实证后者会拦下落账）。
 - **基线重锚（升版必做）**：`ADDON_API_VERSION` 的声明文本被基线钉为签名，升号必然触发 `signature-declaration-changed`——先提交携带新声明的发布提交，再 `node scripts/checkAddonApiCompat.mjs --emit-baseline --anchor <发布提交 sha>` 并随后笔提交基线文件（锚点必须指向已包含新声明的提交，verify 从 git 对象复验）；tag 打在基线提交上。重锚理由随提交说明（v1.1.0 实证）。不改宿主版本常量与签名的变更（纯台账 summary、CHANGELOG-API 条目）才免重锚。
 - 重新生成与门禁：`npm run compile`（含 genNls/genStyleGuide/genAddonApiRef——styleguide 版本戳须在版本段落定后生成）→ `npm run check:addonapi`、`node scripts/checkAddonApiCompat.mjs`、`npm run test:unit`、`npm run release:check` 全绿才推送。
 - 文档口径翻转：`docs/features.md` 开发者资源、`docs/addons/developer-guide.md` §7、README 双语「开发者 API」行、AGENTS.md 附加组件 API 条目中「1.0.0 候选阶段／尚未对外发行、暂无兼容承诺」的表述，改为已发行版本与兼容承诺口径。

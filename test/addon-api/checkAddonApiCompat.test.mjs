@@ -33,7 +33,10 @@ import {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const BASELINE = JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
-const CTX = { baselineLabel: `${BASELINE.meta.baselineVersion} (${BASELINE.meta.anchor.sha.slice(0, 7)})`, apiVersion: '1.0.0' }
+// 宿主版本从台账末条派生（台账按版本演进追加）：夹具不随真实升版漂移；
+// 合成"超前/追加"版本一律用 9.9.9，避免与真实台账版本撞名。
+const HOST_API_VERSION = BASELINE.releases.at(-1).version
+const CTX = { baselineLabel: `${BASELINE.meta.baselineVersion} (${BASELINE.meta.anchor.sha.slice(0, 7)})`, apiVersion: HOST_API_VERSION }
 
 function failureCodes(failures) {
   return failures.map((f) => f.code)
@@ -167,7 +170,7 @@ test('台账历史被当前树改写被拒：release-history-mutated（改状态
 test('台账追加新版本放行（正常演进；新版本自身受自洽与期限校验约束）', () => {
   const grown = [
     ...structuredClone(BASELINE.releases),
-    { version: '1.1.0', status: 'candidate', summary: '新增', experimental: [] },
+    { version: '9.9.9', status: 'candidate', summary: '新增', experimental: [] },
   ]
   assert.deepEqual(compareReleases(BASELINE.releases, grown, CTX), [])
 })
@@ -294,13 +297,13 @@ test('宿主 API 版本不在台账被拒：api-version-not-in-ledger', () => {
 test('台账超前宿主实现被拒：ledger-ahead-of-host（文档不得声称宿主未提供的面）', () => {
   const releases = [
     ...structuredClone(BASELINE.releases),
-    { version: '1.1.0', status: 'candidate', summary: '超前', experimental: [] },
+    { version: '9.9.9', status: 'candidate', summary: '超前', experimental: [] },
   ]
-  assert.ok(checkApiVersionBinding('1.0.0', releases, CTX).some((f) => f.code === 'ledger-ahead-of-host'))
+  assert.ok(checkApiVersionBinding(HOST_API_VERSION, releases, CTX).some((f) => f.code === 'ledger-ahead-of-host'))
 })
 
 test('宿主版本与台账一致时零失败（正向基准）', () => {
-  assert.deepEqual(checkApiVersionBinding('1.0.0', BASELINE.releases, CTX), [])
+  assert.deepEqual(checkApiVersionBinding(HOST_API_VERSION, BASELINE.releases, CTX), [])
 })
 
 // ---------------------------------------------------------------------------
