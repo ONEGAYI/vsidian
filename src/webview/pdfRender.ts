@@ -736,9 +736,13 @@ export class PdfHoverView {
         // resource 错误不由内容版本决定——重建装载等待周期（保留文档引用，
         // 重建塔与呈现等待）；重试落定（content 或再次 error）后经落定事件
         // 同步外层消费（旧实现在此以「内容未变必再失败」原地早退，绘制
-        // 实际恢复后无通知 → 卡片停留错误态）。首结局一次性：不改写已
-        // 兑现的旧结局（本调用自身 promise 是新的等待）
-        const seq = this.renderSeq
+        // 实际恢复后无通知 → 卡片停留错误态）。本调用是新的尝试：推进
+        // 尝试身份作废在途旧协程（评审第四轮 P2——多页并发时一页失败清
+        // 塔、另一页 getPage 仍在途；不推进则塔重建后旧任务的 seq/repaint
+        // 守卫全相等，旧失败清掉新塔、旧成功写脱树旧槽仍 flush 新等待）。
+        // 首结局一次性：不改写已兑现的旧结局（本调用自身 promise 是新的
+        // 等待）
+        const seq = ++this.renderSeq
         this.phase = 'loading'
         this.errorReason = ''
         this.contentPending = true
@@ -1068,8 +1072,11 @@ export class PdfHoverView {
     const repaint = this.repaintSeq
     try {
       const page = await doc.getPage(pageNo)
+      // 页槽同一性（评审第四轮 P2）：比对协程捕获的 slot 对象而非仅页号
+      // 在场——塔重建（重试/换目标）或离窗重入后同页号已是新槽，旧协程
+      // 的成功/失败/完成通知均不得落到新代次
       if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
-        this.disposed || !this.slots.has(pageNo)) {
+        this.disposed || this.slots.get(pageNo) !== slot) {
         return
       }
       const base = page.getViewport({ scale: 1 })
@@ -1119,11 +1126,12 @@ export class PdfHoverView {
       }
       slot.task = null
       if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
-        this.disposed || !this.slots.has(pageNo)) {
-        // 被取代/释放/重排取消：本协程结果作废，但不解除等待（评审 P2：
-        // 取消不等于完成——此前的取消点 flush 会让首载在替代绘制完成前
-        // 提前兑现）。等待由取代方自身 flush（换目标 show / discardContent
-        // / dispose / setError），或由替代绘制完成事件兑现
+        this.disposed || this.slots.get(pageNo) !== slot) {
+        // 被取代/释放/重排取消/塔重建：本协程结果作废（页槽同一性同上），
+        // 但不解除等待（评审 P2：取消不等于完成——此前的取消点 flush 会让
+        // 首载在替代绘制完成前提前兑现）。等待由取代方自身 flush（换目标
+        // show / discardContent / dispose / setError），或由替代绘制完成
+        // 事件兑现
         return
       }
       // 原子换入：#339 页体包裹重建（画布 + 文本层 + 链接层共用一个定位
@@ -1158,10 +1166,13 @@ export class PdfHoverView {
         this.flushContentWaiters()
       }
     } catch {
-      if (seq !== this.renderSeq || repaint !== this.repaintSeq) return
-      if (this.slots.has(pageNo)) {
-        this.setError('resource') // 内含落定 flush（错误分态即等待解除）
+      if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
+        this.disposed || this.slots.get(pageNo) !== slot) {
+        // 被取代/离窗/塔重建（同页号新槽）：本协程的失败不落到新代次
+        // （评审第四轮 P2——旧失败曾命中新塔页号清掉重试）
+        return
       }
+      this.setError('resource') // 内含落定 flush（错误分态即等待解除）
     } finally {
       this.rendering = Math.max(0, this.rendering - 1)
       if (!this.disposed) this.pumpRenderQueue()

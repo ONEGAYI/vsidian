@@ -33,12 +33,17 @@ const ASSETS: PdfAssetsConfig = {
  *  **不提供 destroy**——pdfjs 6.x 的 PDFDocumentProxy 没有 destroy 方法
  *  （销毁正道是 loadingTask.destroy，#334 结论）：产品代码若回潮调
  *  doc.destroy 会在本替身上以 TypeError 暴露 */
+/** 页替身最小消费面（makeFakePage 家族的结构基座） */
+interface FakePage {
+  getViewport(params: { scale: number }): { width: number; height: number }
+  render(params: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }): { promise: Promise<void>; cancel(): void }
+}
+
 interface FakeDoc {
   numPages: number
-  getPage(pageNumber: number): {
-    getViewport(params: { scale: number }): { width: number; height: number }
-    render(params: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }): { promise: Promise<void>; cancel(): void }
-  }
+  /** 同步返回（既有替身）或 Promise（第四轮 P2 受控 getPage——按调用序
+   *  挂起/拒绝/成功；生产消费面 `await doc.getPage(n)` 两者通吃） */
+  getPage(pageNumber: number): FakePage | Promise<FakePage>
 }
 
 function makeFakePage(width = 612, height = 792, renderImpl?: () => Promise<void>) {
@@ -1772,5 +1777,264 @@ describe('装载等待期目标跟随与错误重试（评审第三轮 P2）', (
     expect(await retry).toBe(true)
     expect(await again).toBe(true)
     expect(view.probe().phase).toBe('content')
+  })
+})
+
+// ---- 第四轮评审 P2：错误后重试的旧任务隔离（多页并发迟到结果） ----
+//
+// 缺口（对 7c9d1060 定点）：setError/clearPages 不推进 renderSeq，重试路径
+// 也未建立独立尝试身份——多页并发时一页失败清塔、另一页 getPage 仍在途；
+// 重试重建塔后同页号再现，旧任务的守卫（seq/repaint 相等 + slots.has）全部
+// 通过：旧失败 catch 命中新页号清掉新塔；旧成功协程写脱树旧槽却仍置
+// content 并 flush 新等待（canvas 未呈现的假 content）。修复＝重试推进尝试
+// 身份（作废在途旧协程）+ 页槽同一性守卫（slots.get(pageNo) === 协程捕获
+// 的 slot，而非仅同页号存在）。
+
+describe('错误后重试的旧任务隔离（评审第四轮 P2）', () => {
+  let scrollEl: HTMLElement
+  let cleanupFns: Array<() => void> = []
+
+  function mockViewport(): void {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset['pdfScrollPort'] === '1' ? 400 : 0
+    })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset['pdfScrollPort'] === '1' ? 448 : 0
+    })
+  }
+
+  /** 受控 getPage 文档（第四轮 P2 矩阵）：按调用序决定返回形态——'ok'
+   *  直接成功（pageFor 构造页对象）；'fail' 直接拒绝；'hold' 挂起由
+   *  release 放行为成功/失败（迟到旧任务的精确卡点）。pageFor 按
+   *  (页号, 调用序) 取页——同页的新旧协程拿不同页对象（旧成功与新绘制
+   *  的 render 受控面互不串）。*/
+  function makeGetPageControlledDoc(
+    numPages: number,
+    pageFor: (pageNo: number, call: number) => ReturnType<typeof makeFakePage>,
+    modeFor: (call: number, pageNo: number) => 'ok' | 'fail' | 'hold' = () => 'ok',
+  ) {
+    let calls = 0
+    const holds = new Map<number, { pageNo: number; resolve: (p: ReturnType<typeof makeFakePage>) => void; reject: (e: Error) => void }>()
+    const doc: FakeDoc = {
+      numPages,
+      getPage: (pageNo: number): Promise<ReturnType<typeof makeFakePage>> => {
+        calls++
+        const call = calls
+        const mode = modeFor(call, pageNo)
+        if (mode === 'ok') {
+          return Promise.resolve(pageFor(pageNo, call))
+        }
+        if (mode === 'fail') {
+          return Promise.reject(new Error(`getPage-fail:${pageNo}`))
+        }
+        return new Promise((resolve, reject) => {
+          holds.set(call, { pageNo, resolve, reject })
+        })
+      },
+    }
+    return {
+      doc,
+      callCount: () => calls,
+      pending: () => [...holds.keys()].sort((a, b) => a - b),
+      /** 放行第 call 次挂起的 getPage：'ok' 成功（按 (页号, 调用序) 构造
+       *  页对象）/ 'fail' 拒绝 */
+      release: (call: number, mode: 'ok' | 'fail'): void => {
+        const held = holds.get(call)
+        if (held === undefined) {
+          throw new Error(`getPage 调用 ${call} 不在挂起态`)
+        }
+        holds.delete(call)
+        if (mode === 'ok') {
+          held.resolve(pageFor(held.pageNo, call))
+        } else {
+          held.reject(new Error(`getPage-late-fail:${held.pageNo}`))
+        }
+      },
+    }
+  }
+
+  beforeEach(() => {
+    __setPdfAssetsForTest(ASSETS)
+    ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = undefined
+    scrollEl = document.createElement('div')
+    scrollEl.dataset['pdfScrollPort'] = '1'
+    document.body.appendChild(scrollEl)
+  })
+
+  afterEach(() => {
+    for (const fn of cleanupFns.splice(0)) fn()
+    scrollEl.remove()
+    __resetPdfjsSingletonsForTest()
+    __setPdfAssetsForTest(null)
+    ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = undefined
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('重试期间旧页失败迟到：不破坏重试（旧失败不污染新塔）', async () => {
+    mockViewport()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    // 两页并发挂起：先放行页 1 失败触发错误分态，页 2 的失败在重试开始后
+    // 才迟到（评审复现形态 1——多页并发失败后的重试）
+    const control = makeGetPageControlledDoc(2, () => makeControlledPage(releases),
+      (call) => (call <= 2 ? 'hold' : 'ok'))
+    installFakePdfjs(control.doc)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const first = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => control.pending().length === 2)
+    control.release(1, 'fail') // 页 1 失败 → 错误分态（页 2 仍挂起）
+    expect(await first).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    // 同 URI 重入＝重试：推进尝试身份，新塔与新的两个页协程
+    const retry = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    expect(view.probe().phase).toBe('loading')
+    let settled = false
+    void retry.then(() => { settled = true })
+    await pumpUntil(() => control.callCount() >= 3) // 新尝试页 1 发起（调用 3）
+    control.release(2, 'fail') // 迟到旧失败
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(settled, '旧页迟到失败不得清掉重试（修复前 setError 命中新塔并落定错误）').toBe(false)
+    await pumpUntil(() => control.callCount() >= 4) // 旧协程退出 → 队列接续（调用 4）
+    await pumpUntil(() => releases.length >= 2) // 新两页绘制均在途
+    releases[0]!.resolve() // 定位页（1）绘制完成 → 呈现落定
+    await pumpUntil(() => settled)
+    expect(await retry).toBe(true)
+    const probe = view.probe()
+    expect(probe.phase, '重试在新绘制呈现后落定 content').toBe('content')
+    expect(probe.canvasBytes, 'canvas 实际呈现（非假 content）').toBeGreaterThan(0)
+  })
+
+  it('重试期间旧页成功迟到：不冒充新尝试完成（canvas 未呈现不落定）', async () => {
+    mockViewport()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    // 调用 1（页 1，旧）挂起——重试后放行为「迟到成功」，其页对象非受控
+    // （render 立即完成：放行 getPage 即走到换入与落定，无需再放行绘制）；
+    // 调用 2（页 2）先失败触发错误分态；调用 3+（重试的新协程）受控挂起
+    const control = makeGetPageControlledDoc(2,
+      (_pageNo, call) => (call === 1 ? makeFakePage() : makeControlledPage(releases)),
+      (call) => (call <= 2 ? 'hold' : 'ok'))
+    installFakePdfjs(control.doc)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const first = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => control.pending().length === 2)
+    control.release(2, 'fail') // 页 2 先失败 → 错误分态（页 1 仍挂起）
+    expect(await first).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    const retry = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    let settled = false
+    void retry.then(() => { settled = true })
+    await pumpUntil(() => releases.length >= 1) // 新尝试页 1 绘制挂起（未呈现）
+    control.release(1, 'ok') // 迟到旧成功：放行旧协程 getPage
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(settled, '旧成功迟到不得冒充新尝试完成（修复前旧协程写脱树旧槽仍置 content 并 flush——canvas 未呈现的假 content）').toBe(false)
+    releases[0]!.resolve() // 新尝试绘制完成
+    await pumpUntil(() => settled)
+    expect(await retry).toBe(true)
+    expect(view.probe().phase).toBe('content')
+    expect(view.probe().canvasBytes).toBeGreaterThan(0)
+  })
+
+  it('旧成功迟到 × 新尝试失败：错误分态如实落定（假 content 不得抢先）', async () => {
+    mockViewport()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    // 调用 1（页 1，旧）挂起→迟到成功；调用 2（页 2）失败触发错误分态；
+    // 重试页 1（调用 3）挂起→晚放行——其页对象 getViewport 首次抛错（新尝试
+    // 自身失败）
+    const control = makeGetPageControlledDoc(2,
+      (_pageNo, call) => (call === 1 ? makeFakePage() : makeControlledPage(releases, call === 3 ? 1 : undefined)),
+      (call) => (call <= 3 ? 'hold' : 'ok'))
+    installFakePdfjs(control.doc)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const first = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => control.pending().length === 2)
+    control.release(2, 'fail')
+    expect(await first).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    const retry = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    let settled = false
+    void retry.then(() => { settled = true })
+    await pumpUntil(() => control.pending().includes(3)) // 重试页 1 挂起
+    control.release(1, 'ok') // 迟到旧成功
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(settled, '旧成功迟到不得冒充新尝试完成（修复前假 content 抢先落定）').toBe(false)
+    control.release(3, 'ok') // 新尝试页 1：getViewport 失败 → 错误分态落定
+    await pumpUntil(() => settled)
+    expect(await retry).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    expect(view.probe().errorReason).toBe('resource')
+  })
+
+  it('重试等待期释放：在途旧任务不落定（show 以 false 终结）', async () => {
+    mockViewport()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    // 调用 1（页 1，旧成功）挂起；调用 2（页 2）失败触发错误分态；重试后
+    // 立即释放——释放推进代次 + flush；随后放行旧成功与重试页均不落定
+    const control = makeGetPageControlledDoc(2,
+      (_pageNo, call) => (call === 1 ? makeFakePage() : makeControlledPage(releases)),
+      (call) => (call <= 3 ? 'hold' : 'ok'))
+    installFakePdfjs(control.doc)
+    const view = new PdfHoverView(scrollEl)
+    const first = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => control.pending().length === 2)
+    control.release(2, 'fail')
+    expect(await first).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    const retry = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => control.pending().includes(3)) // 重试页 1 挂起
+    view.dispose()
+    expect(await retry).toBe(false)
+    control.release(1, 'ok') // 释放后的迟到旧成功不落定（disposed 拒收）
+    control.release(3, 'ok')
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    expect(view.probe().phase).toBe('idle')
+  })
+
+  it('连续重试：每次重建尝试身份，前次失败不影响后次成功', async () => {
+    mockViewport()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    // 调用 1（首载）失败；调用 2（重试 1）失败；调用 3（重试 2）成功
+    const control = makeGetPageControlledDoc(1, () => makeControlledPage(releases),
+      (call) => (call <= 2 ? 'fail' : 'ok'))
+    installFakePdfjs(control.doc)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    expect(await view.show('https://files.test/a.pdf?v=1', 1, 448)).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    expect(await view.show('https://files.test/a.pdf?v=1', 1, 448)).toBe(true)
+    expect(view.probe().phase, '重试 1 再次失败：明确落定错误分态').toBe('error')
+    const retry2 = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    expect(view.probe().phase).toBe('loading')
+    await pumpUntil(() => releases.length >= 1)
+    releases[0]!.resolve()
+    await pumpUntil(() => view.probe().phase === 'content')
+    expect(await retry2).toBe(true)
+    expect(view.probe().phase).toBe('content')
+  })
+
+  it('控制组：旧任务在重试前已结算——重试正常恢复（隔离不误伤正常路径）', async () => {
+    mockViewport()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    const control = makeGetPageControlledDoc(2, () => makeControlledPage(releases),
+      (call) => (call <= 2 ? 'hold' : 'ok'))
+    installFakePdfjs(control.doc)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const first = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => control.pending().length === 2)
+    control.release(1, 'fail')
+    control.release(2, 'fail') // 两页均在重试前失败结算（无在途旧任务）
+    expect(await first).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    const retry = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => releases.length >= 1) // 重试绘制（调用 3）在途
+    expect(view.probe().phase).toBe('loading')
+    releases[0]!.resolve()
+    await pumpUntil(() => view.probe().phase === 'content')
+    expect(await retry).toBe(true)
+    expect(view.probe().phase).toBe('content')
+    expect(view.probe().canvasBytes).toBeGreaterThan(0)
   })
 })

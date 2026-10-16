@@ -386,7 +386,7 @@ const PDF_ASSETS: PdfAssetsConfig = {
 
 interface FakePdfDoc {
   numPages: number
-  getPage(): unknown
+  getPage(pageNo: number): unknown
 }
 
 /** 受控 pdfjs：getDocument 的 promise 由测试手动 resolve（成功文档）/reject
@@ -396,17 +396,22 @@ interface FakePdfDoc {
  *  opts.failRenderAt / failViewportAt：第 N 次调用同步抛错（明确失败
  *  路径经外层 catch → setError('resource')）；failViewportThrough：前 N 次
  *  getViewport 全失败（瞬时故障重试矩阵）；failViewportFrom：第 N 次起
- *  全失败（滚动后新窗口页失败矩阵）。*/
+ *  全失败（滚动后新窗口页失败矩阵）；getPageModeFor：getPage 调用序受控
+ *  （'ok' 默认同步返回/'fail' 立即拒绝/'hold' 挂起由 releaseGetPage 放行
+ *  ——第四轮 P2 多页并发迟到旧任务的精确卡点）。*/
 function installControllablePdfjs(opts?: {
   holdRender?: boolean
   failRenderAt?: number
   failViewportAt?: number
   failViewportThrough?: number
   failViewportFrom?: number
+  getPageModeFor?: (call: number, pageNo: number) => 'ok' | 'fail' | 'hold'
 }): {
   resolveDoc: (numPages: number) => void
   rejectDoc: (err: unknown) => void
   renderReleases: Array<() => void>
+  getPageCalls: () => number
+  releaseGetPage: (call: number, mode: 'ok' | 'fail') => void
 } {
   let settleResolve: ((doc: FakePdfDoc) => void) | null = null
   let settleReject: ((err: unknown) => void) | null = null
@@ -417,6 +422,52 @@ function installControllablePdfjs(opts?: {
   const renderReleases: Array<() => void> = []
   let renderCalls = 0
   let viewportCalls = 0
+  let getPageCalls = 0
+  const getPageHolds = new Map<number, { build: () => unknown; resolve: (v: unknown) => void; reject: (e: Error) => void }>()
+  const makePage = () => ({
+    getViewport: ({ scale }: { scale: number }) => {
+      viewportCalls++
+      if ((opts?.failViewportAt !== undefined && viewportCalls === opts.failViewportAt) ||
+        (opts?.failViewportThrough !== undefined && viewportCalls <= opts.failViewportThrough) ||
+        (opts?.failViewportFrom !== undefined && viewportCalls >= opts.failViewportFrom)) {
+        throw new Error('viewport-fail')
+      }
+      return { width: 612 * scale, height: 792 * scale }
+    },
+    render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => {
+      renderCalls++
+      if (opts?.failRenderAt !== undefined && renderCalls === opts.failRenderAt) {
+        throw new Error('render-fail')
+      }
+      const paint = (): void => {
+        canvas.width = Math.floor(viewport.width)
+        canvas.height = Math.floor(viewport.height)
+      }
+      if (opts?.holdRender !== true) {
+        return {
+          promise: Promise.resolve().then(paint),
+          cancel: () => {},
+        }
+      }
+      let rejectOuter: ((err: Error) => void) | undefined
+      const task = {
+        promise: new Promise<void>((resolve, reject) => {
+          rejectOuter = reject
+          renderReleases.push(() => {
+            paint()
+            resolve()
+          })
+        }),
+        cancel: () => {
+          const err = new Error('cancelled')
+          err.name = 'RenderingCancelledException'
+          task.promise.catch(() => {})
+          rejectOuter?.(err)
+        },
+      }
+      return task
+    },
+  })
   const lib = {
     GlobalWorkerOptions: { workerSrc: '' },
     getDocument: () => ({
@@ -447,53 +498,36 @@ function installControllablePdfjs(opts?: {
   return {
     resolveDoc: (numPages) => settleResolve!({
       numPages,
-      getPage: () => ({
-        getViewport: ({ scale }: { scale: number }) => {
-          viewportCalls++
-          if ((opts?.failViewportAt !== undefined && viewportCalls === opts.failViewportAt) ||
-            (opts?.failViewportThrough !== undefined && viewportCalls <= opts.failViewportThrough) ||
-            (opts?.failViewportFrom !== undefined && viewportCalls >= opts.failViewportFrom)) {
-            throw new Error('viewport-fail')
-          }
-          return { width: 612 * scale, height: 792 * scale }
-        },
-        render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => {
-          renderCalls++
-          if (opts?.failRenderAt !== undefined && renderCalls === opts.failRenderAt) {
-            throw new Error('render-fail')
-          }
-          const paint = (): void => {
-            canvas.width = Math.floor(viewport.width)
-            canvas.height = Math.floor(viewport.height)
-          }
-          if (opts?.holdRender !== true) {
-            return {
-              promise: Promise.resolve().then(paint),
-              cancel: () => {},
-            }
-          }
-          let rejectOuter: ((err: Error) => void) | undefined
-          const task = {
-            promise: new Promise<void>((resolve, reject) => {
-              rejectOuter = reject
-              renderReleases.push(() => {
-                paint()
-                resolve()
-              })
-            }),
-            cancel: () => {
-              const err = new Error('cancelled')
-              err.name = 'RenderingCancelledException'
-              task.promise.catch(() => {})
-              rejectOuter?.(err)
-            },
-          }
-          return task
-        },
-      }),
+      getPage: (pageNo: number) => {
+        getPageCalls++
+        const call = getPageCalls
+        const mode = opts?.getPageModeFor?.(call, pageNo) ?? 'ok'
+        if (mode === 'fail') {
+          return Promise.reject(new Error('getPage-fail'))
+        }
+        if (mode === 'hold') {
+          return new Promise((resolve, reject) => {
+            getPageHolds.set(call, { build: makePage, resolve, reject })
+          })
+        }
+        return makePage()
+      },
     }),
     rejectDoc: (err) => settleReject!(err),
     renderReleases,
+    getPageCalls: () => getPageCalls,
+    releaseGetPage: (call, mode) => {
+      const held = getPageHolds.get(call)
+      if (held === undefined) {
+        throw new Error(`getPage 调用 ${call} 不在挂起态`)
+      }
+      getPageHolds.delete(call)
+      if (mode === 'ok') {
+        held.resolve(held.build())
+      } else {
+        held.reject(new Error('getPage-late-fail'))
+      }
+    },
   }
 }
 
@@ -877,6 +911,104 @@ describe('PDF 首载结算时序（评审 P2：show 完成才兑现首结局）'
     }
     expect(outcomes).toHaveLength(1)
     expect(state.classList.contains(EMBED_CARD_CLASS_NAMES.stateError)).toBe(true)
+    h.manager.dispose()
+  })
+
+  // ---- 第四轮评审 P2：错误后重试的旧任务隔离（多页并发迟到结果全链） ----
+
+  it('重试期间旧页失败迟到：不破坏重试，卡片恢复内容态（评审第四轮 P2 形态 1）', async () => {
+    // 两页并发挂起：页1（调用1）失败触发错误分态；页2（调用2）的失败在
+    // changed 重试开始后才迟到——修复前旧 catch 命中新塔 setError 清掉
+    // 重试 → 卡片回错误态
+    const pdfjs = installControllablePdfjs({ getPageModeFor: (call) => (call <= 4 ? 'hold' : 'ok') })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(2)
+    await pumpUntil(() => pdfjs.getPageCalls() >= 2, '两页并发 getPage 就位')
+    pdfjs.releaseGetPage(1, 'fail') // 页1 失败 → 首结局 {ok:false} 就地错误分态
+    await pumpUntil(() => outcomes.length === 1, '失败首结局兑现')
+    expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
+    // 同版本 changed 刷新 → 重试（旧页2 的 getPage 仍挂起——评审场景）
+    h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    await pumpUntil(() => pdfjs.getPageCalls() >= 3, '重试页1 发起（调用3）')
+    pdfjs.releaseGetPage(2, 'fail') // 迟到旧失败
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve()
+    }
+    const mid = h.manager.probe().find((c) => c.pdf !== null)
+    expect(mid?.pdf?.phase, '旧失败迟到不得清掉重试（修复前 setError 命中新塔 → error 落定）').toBe('loading')
+    await pumpUntil(() => pdfjs.getPageCalls() >= 4, '旧协程退出后重试队列接续（调用4）')
+    pdfjs.releaseGetPage(3, 'ok') // 重试页1 绘制（render 立即）→ 呈现落定
+    await pumpUntil(() => {
+      const c = h.manager.probe().find((x) => x.pdf !== null)
+      return c?.pdf?.phase === 'content'
+    }, '重试呈现落定 content')
+    const card = h.manager.probe().find((c) => c.pdf !== null)!
+    expect(card.pdf?.canvasBytes, 'canvas 实际呈现（非假 content）').toBeGreaterThan(0)
+    expect(card.state, '卡片错误态已解除').toBe('content')
+    expect(outcomes, '首结局一次性：不重复兑现').toHaveLength(1)
+    h.manager.dispose()
+  })
+
+  it('重试期间旧页成功迟到：不冒充新完成，评定以实际呈现为准（评审第四轮 P2 形态 2）', async () => {
+    // 页1（调用1）挂起→迟到成功（其旧槽已脱树）；页2（调用2）先失败触发
+    // 错误分态；重试页1（调用3）挂起→晚放行——其绘制是唯一的真实呈现。
+    // 修复前旧协程写脱树旧槽却仍把 phase 置 content 并 flush（卡片「content」
+    // 但 canvasBytes=0）
+    const pdfjs = installControllablePdfjs({ getPageModeFor: (call) => (call <= 4 ? 'hold' : 'ok') })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(2)
+    await pumpUntil(() => pdfjs.getPageCalls() >= 2, '两页并发 getPage 就位')
+    pdfjs.releaseGetPage(2, 'fail') // 页2 先失败 → 错误分态（页1 仍挂起）
+    await pumpUntil(() => outcomes.length === 1, '失败首结局兑现')
+    h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    await pumpUntil(() => pdfjs.getPageCalls() >= 3, '重试页1 发起（调用3）')
+    pdfjs.releaseGetPage(1, 'ok') // 迟到旧成功
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve()
+    }
+    const mid = h.manager.probe().find((c) => c.pdf !== null)
+    expect(mid?.pdf?.phase, '旧成功迟到不得冒充新完成（修复前假 content、canvas 未呈现）').toBe('loading')
+    expect(mid?.pdf?.canvasBytes, '新尝试绘制尚未呈现（canvas 为空）').toBe(0)
+    pdfjs.releaseGetPage(3, 'ok') // 真实呈现：重试页1 绘制（render 立即）
+    await pumpUntil(() => {
+      const c = h.manager.probe().find((x) => x.pdf !== null)
+      return c?.pdf?.phase === 'content'
+    }, '真实呈现落定 content')
+    const card = h.manager.probe().find((c) => c.pdf !== null)!
+    expect(card.pdf?.canvasBytes).toBeGreaterThan(0)
+    expect(card.state).toBe('content')
+    expect(outcomes, '首结局一次性：不重复兑现').toHaveLength(1)
+    h.manager.dispose()
+  })
+
+  it('重试等待期释放：在途旧任务不兑现（首结局一次性维持）', async () => {
+    const pdfjs = installControllablePdfjs({ getPageModeFor: (call) => (call <= 3 ? 'hold' : 'ok') })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(2)
+    await pumpUntil(() => pdfjs.getPageCalls() >= 2, '两页并发 getPage 就位')
+    pdfjs.releaseGetPage(1, 'fail')
+    await pumpUntil(() => outcomes.length === 1, '失败首结局兑现')
+    h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    await pumpUntil(() => pdfjs.getPageCalls() >= 3, '重试页1 发起')
+    h.manager.releaseEmbedMount(host) // 重试等待期整组释放
+    pdfjs.releaseGetPage(2, 'fail') // 释放后的迟到旧失败不兑现（守卫拒收）
+    pdfjs.releaseGetPage(3, 'ok') // 释放后的重试放行不兑现
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toHaveLength(1)
     h.manager.dispose()
   })
 })
