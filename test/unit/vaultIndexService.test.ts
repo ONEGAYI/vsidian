@@ -3088,6 +3088,85 @@ describe('VaultIndexService：#556 T2 外部与跨根目标（绝对身份登记
     }
   })
 
+  it('外部目标登记键随链接文本大写、事件路径小写：rename 候选与反链跨形态命中（#562）', async () => {
+    const fs = makeFs({
+      'C:/vault/源.md': '# 源\n\n见 [[E:/外部/资料.md]]。\n',
+      'E:/外部/资料.md': '# 外\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 登记身份键随链接文本（大写盘符——资源管理器复制形态）；rename 事件
+    // 路径由宿主 URI 派生（盘符小写）——身份门跨形态命中（outside 即
+    // #562 的静默跳过形态）
+    const cands = service.renameCandidatesOf('e:/外部/资料.md')
+    expect(cands.status).toBe('ready')
+    if (cands.status === 'ready') {
+      expect(cands.incoming.map((g) => g.fsPath)).toEqual(['C:\\vault\\源.md'])
+    }
+    // 反链同款（外部目标 no-workspace 判定的身份门）：漂移查询可查
+    const back = await service.backlinksOf('e:/外部/资料.md')
+    expect(itemsOf(back).map((i) => i.sourceRelPath)).toEqual(['源.md'])
+  })
+
+  it('catalogHasFile：登记键与查询盘符形态漂移仍判存在（rename 规划端口数据面，#562）', async () => {
+    const fs = makeFs({
+      'C:/vault/源.md': '# 源\n\n见 [[E:/外部/资料.md]]。\n',
+      'E:/外部/资料.md': '# 外\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(service.catalogHasFile('e:/外部/资料.md')).toBe(true)
+    // 同形态查询与未登记路径保持原语义
+    expect(service.catalogHasFile('E:/外部/资料.md')).toBe(true)
+    expect(service.catalogHasFile('E:/外部/其他.md')).toBe(false)
+  })
+
+  it('登记去重折叠：同一外部目标的两种盘符形态链接不双登记（#562）', async () => {
+    const fs = makeFs({
+      'C:/vault/源.md': '# 源\n\n见 [[E:/外部/资料.md]]。\n',
+      'C:/vault/源2.md': '# 源二\n\n见 [[e:/外部/资料.md]]。\n',
+      'E:/外部/资料.md': '# 外\n',
+      'e:/外部/资料.md': '# 外', // FakeFs 键精确匹配：两种形态都可 stat 命中
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 2 个 md 源 + 1 个外部条目（两种链接形态折叠为同一身份，不双登记）
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(3)
+  })
+
+  it('rootOf：查询盘符大小写与根键漂移仍定位（根内查询不退 no-workspace，#562）', async () => {
+    // 根键按 vscode fsPath 形态（盘符小写）注册；查询携带大写盘符
+    // （链接文本派生路径形态）
+    const fs = makeFs({
+      'c:/vault/a.md': '# A\n\n见 [[b]]。\n',
+      'c:/vault/b.md': '# B\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'c:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    const back = await service.backlinksOf('C:/vault/b.md')
+    expect(itemsOf(back).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+  })
+
+  it('POSIX 宿主：大小写恒区分（身份门不折叠，精确语义保持，#562）', async () => {
+    const fs = makeFs({
+      '/vault/源.md': '# 源\n\n见 [[/Ext/X.md]]。\n',
+      '/Ext/X.md': '# 外\n',
+    })
+    const { service } = makeService(fs, { isWindowsHost: false })
+    await service.initialize([{ fsPath: '/vault', uri: 'file:///vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 登记形态精确命中
+    const same = service.renameCandidatesOf('/Ext/X.md')
+    expect(same.status).toBe('ready')
+    // 大小写不同在 POSIX 是不同文件：不得折叠命中
+    const drifted = service.renameCandidatesOf('/ext/x.md')
+    expect(drifted.status).toBe('outside')
+  })
+
   it('评审 F1：跨根与外部目标的更名引用者跨根分区收集（rename 候选含他根来源）', async () => {
     const fs = makeFs({
       'C:/vaultA/源.md': '# 源\n\n见 [[C:/vaultB/笔记.md]] 与 [[E:/外部/资料.md]]。\n',

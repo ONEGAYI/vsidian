@@ -182,6 +182,7 @@
 - **身份形态转换**：catalog 绝对身份（`/` 分隔）与宿主 fsPath（Windows 反斜杠）在跳转/悬停/联想端口工厂统一转换（`vaultIdentityToFsPath`，七个注入点的唯一汇聚处）；纯逻辑层自带归一、形态不敏感。
 - **普链大小写归正**：普链候选命中后过 `statFileRealPath`（含 FileType.File 核验），与双链通道同口径，防绝对路径门放大的身份漂移。
 - **外部目标授权链**：增量重扫登记外部目标后的重抽复用登记前 resolver 闭包会使外部边恒断链——两路径重抽前重建 resolver。
+- **files 身份门盘符折叠（#562）**：登记身份键随链接文本（资源管理器复制的大写盘符形态）、rename/查询事件路径随宿主 URI（盘符小写）——`normKey` 不折叠大小写，files 身份门（rename 候选、反链 no-workspace 判定与跨根合并、`catalogHasFile` 存在性端口）精确匹配漂移 miss、外部/跨根目标 rename 静默跳过。收口：`filesHasIdentity` 精确快路径 + Windows 绝对键折叠慢路径（与 backlinks 桶同口径，POSIX fold 恒等语义保持）、`rootOf` 前缀定位同款折叠兜底、登记侧折叠去重（fullScan 附件段走 assetFold、`registerExternalTargets` 走 filesHasIdentity，双形态链接不双登记）；写入侧键形态不变（旧快照天然兼容）。
 
 ### 已知边界与待验
 

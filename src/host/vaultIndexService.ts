@@ -1026,12 +1026,15 @@ export class VaultIndexService {
         const rel = this.relOf(state, abs)
         const inRoot = rel !== null && this.rootOf(abs) === state
         const key = inRoot ? rel! : this.normKey(abs)
-        if (files.has(key)) {
+        const identity = inRoot ? this.identityOf(state, rel!) : this.normKey(abs)
+        // 折叠去重（#562）：files 精确键查不到仅大小写/盘符形态不同的候选
+        //（Windows 链接文本大写盘符 vs 枚举小写形态）；assetFold 键域为
+        // fold(身份)，跨形态命中
+        if (files.has(key) || assetFold.has(this.foldKey(identity))) {
           continue
         }
         const stat = await this.scan.statFile(abs)
         if (stat && (inRoot || stat.type !== 'dir')) {
-          const identity = inRoot ? this.identityOf(state, rel!) : this.normKey(abs)
           files.set(key, {
             path: key, kind: 'asset', mtimeMs: stat.mtimeMs, size: stat.size, contentVersion: 1,
             ...this.birthtimeOf(stat),
@@ -1154,6 +1157,31 @@ export class VaultIndexService {
     return this.isAbsoluteEntry(entryPath) ? this.normKey(entryPath) : this.absOf(state, entryPath)
   }
 
+  /** files 表绝对身份查询（#562）：外部/跨根登记键形态随链接文本（normKey
+   *  不折叠大小写），rename/查询事件路径随宿主 URI（盘符小写）——Windows
+   *  宿主两形态漂移时精确匹配 miss（身份门静默跳过）。先精确快路径，miss
+   *  后仅 Windows 对绝对形态键折叠比对（与 backlinks 桶同口径；POSIX fold
+   *  恒等，折叠遍历不执行，大小写敏感语义保持）。根内 rel 键无绝对形态，
+   *  折叠比对域限定绝对键，不误命中 */
+  private filesHasIdentity(files: ReadonlyMap<string, unknown> | undefined, absKey: string): boolean {
+    if (files === undefined) {
+      return false
+    }
+    if (files.has(absKey)) {
+      return true
+    }
+    if (!this.opts.isWindowsHost) {
+      return false
+    }
+    const folded = this.foldKey(absKey)
+    for (const key of files.keys()) {
+      if (this.isAbsoluteEntry(key) && this.foldKey(key) === folded) {
+        return true
+      }
+    }
+    return false
+  }
+
   /** 根内相对路径的 basename（含扩展名、磁盘形态；重判触发面的受影响键） */
   private basenameOfRel(rel: string): string {
     return rel.slice(rel.lastIndexOf('/') + 1)
@@ -1270,7 +1298,7 @@ export class VaultIndexService {
     const key = this.normKey(fsPath)
     const owner = this.rootOf(fsPath)
     for (const s of this.roots.values()) {
-      if (s.model?.files.has(key) === true) {
+      if (this.filesHasIdentity(s.model?.files, key)) {
         return true
       }
       if (s === owner && s.catalog) {
@@ -1361,8 +1389,8 @@ export class VaultIndexService {
         continue // 根内 miss：断链（附件登记在两遍法/rename 批域）
       }
       const identity = this.normKey(abs)
-      if (state.model.files.has(identity)) {
-        continue
+      if (this.filesHasIdentity(state.model.files, identity)) {
+        continue // 已登记（含仅盘符大小写不同的形态——折叠去重，#562）
       }
       const stat = await this.scan.statFile(abs)
       if (!stat || stat.type === 'dir') {
@@ -2692,7 +2720,7 @@ export class VaultIndexService {
       if (s === state || !s.hasData || !s.model || !s.backlinks) {
         continue
       }
-      if (s.model.files.has(absKey)) {
+      if (this.filesHasIdentity(s.model.files, absKey)) {
         states.push(s)
       }
     }
@@ -3292,7 +3320,7 @@ export class VaultIndexService {
       // 的绝对身份桶合并查询（登记根各自贡献来源）；无任何登记维持
       // no-workspace（与「无工作区文档」的面板契约不分叉）
       const absKey = this.normKey(fsPath)
-      const registered = [...this.roots.values()].some((s) => s.model?.files.has(absKey))
+      const registered = [...this.roots.values()].some((s) => this.filesHasIdentity(s.model?.files, absKey))
       if (!registered) {
         return { status: 'error', reason: 'no-workspace' }
       }
@@ -3323,7 +3351,7 @@ export class VaultIndexService {
       if (s === state || !s.hasData || !s.model || !s.backlinks) {
         continue
       }
-      if (!s.model.files.has(absKey)) {
+      if (!this.filesHasIdentity(s.model.files, absKey)) {
         continue
       }
       updating = updating || s.scanning
@@ -3534,11 +3562,23 @@ export class VaultIndexService {
     return { status: 'ready', items, updating: state.scanning }
   }
 
-  /** 根定位：最具体（最长前缀）根；归一比较（Windows 折叠） */
+  /** 根定位：最具体（最长前缀）根；归一比较（Windows 折叠——根键随宿主
+   *  URI 形态，查询路径可能携带链接文本形态的大写盘符，#562 起精确快路径
+   *  miss 后折叠慢路径兜底；POSIX fold 恒等，精确语义保持） */
   private rootOf(fsPath: string): RootIndexState | undefined {
     const key = this.normKey(fsPath)
     for (const rootKey of this.rootOrder) {
       if (key === rootKey || key.startsWith(`${rootKey}/`)) {
+        return this.roots.get(rootKey)
+      }
+    }
+    if (!this.opts.isWindowsHost) {
+      return undefined
+    }
+    const folded = this.foldKey(key)
+    for (const rootKey of this.rootOrder) {
+      const foldRoot = this.foldKey(rootKey)
+      if (folded === foldRoot || folded.startsWith(`${foldRoot}/`)) {
         return this.roots.get(rootKey)
       }
     }
