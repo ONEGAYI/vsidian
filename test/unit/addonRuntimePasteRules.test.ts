@@ -257,3 +257,65 @@ describe('粘贴规则运行生命周期（enable 面乙）', () => {
     expect(h.runtime.runtimeStatus('fixture.demo')).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// #542 T02：高级声明（正则/条件/嵌套）经同一登记面进入有效快照
+// ---------------------------------------------------------------------------
+
+describe('T02 高级声明登记', () => {
+  it('正则/条件/嵌套声明经同一登记面校验并进入有效快照（JSON 可序列化）', () => {
+    const h = harness()
+    h.register({
+      enable(context) {
+        context.paste.registerRules([{
+          id: 'advanced-card',
+          match: {
+            tag: 'div',
+            condition: { all: [{ kind: 'attribute-regex', name: 'data-kind', regex: { pattern: '^(card|note)$' } }] },
+          },
+          output: {
+            kind: 'template',
+            template: '> {{body}}',
+            slots: {
+              body: { source: { kind: 'children', rules: [{
+                id: 'inner-link',
+                match: { tag: 'span', attributes: [{ name: 'data-inner-url' }] },
+                output: {
+                  kind: 'template',
+                  template: '[{{t}}]({{u}})',
+                  slots: {
+                    t: { source: { kind: 'text-regex', regex: { pattern: '^(?<t>\S+)$' }, group: 't' } },
+                    u: { source: { kind: 'attribute', name: 'data-inner-url' }, url: true },
+                  },
+                },
+              }] } },
+            },
+          },
+        }])
+      },
+    })
+    const snapshot = h.pasteRules.effectiveSnapshot()
+    expect(snapshot.rules).toHaveLength(1)
+    // 快照是可序列化纯数据（广播与页面守卫的既有前提）
+    expect(() => JSON.parse(JSON.stringify(snapshot))).not.toThrow()
+    const parsed = JSON.parse(JSON.stringify(snapshot)) as { rules: Array<{ id: string; output: { slots: { body: { source: { rules: Array<{ id: string }> } } } } }> }
+    expect(parsed.rules[0]!.output.slots.body!.source.rules![0]!.id).toBe('inner-link')
+    // 停用撤回照旧生效（T01 生命周期不因高级形态改变）
+    h.runtime.setUserEnabled('fixture.demo', false)
+    expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(0)
+  })
+
+  it('嵌套深度超限的高级声明整批拒绝（可辨认 invalid-declaration，不算故障）', () => {
+    const h = harness()
+    let result: import('../../src/shared/addonPasteRules').AddonPasteRulesRegisterResult | undefined
+    const chain = (depth: number): unknown => depth === 0
+      ? { id: 'leaf', match: { tag: 'span' }, output: { kind: 'discard' } }
+      : { id: `level-${depth}`, match: { tag: 'div' }, output: { kind: 'template', template: '{{b}}', slots: { b: { source: { kind: 'children', rules: [chain(depth - 1)] } } } } }
+    h.register({
+      enable(context) { result = context.paste.registerRules([chain(17)]) },
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-declaration' })
+    expect(h.pasteRules.effectiveSnapshot().rules).toHaveLength(0)
+    expect(h.runtime.runtimeStatus('fixture.demo')?.runState).toBe('enabled')
+  })
+})

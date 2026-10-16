@@ -1,10 +1,12 @@
-// #541 T01 附加组件粘贴规则——浏览器契约套件（生产控制器 + 真实键盘）。
+// #541 T01 / #542 T02 附加组件粘贴规则——浏览器契约套件（生产控制器 + 真实键盘）。
 // 钉住票面验收：
 // - 双载荷样本：来源特化链接恢复，旁边 strong/code/pre 保持原格式；
 // - 纯文本操作（Ctrl+Shift+V）不经过规则；
 // - 首次撤销只撤格式、第二次撤文字（宿主分步历史不变）；转换结果等于
 //   plain 时只有一次撤销；
 // - 停用撤回（空快照）与迟到旧版本快照不复活旧代次规则。
+// T02 追加：正则捕获组与条件组合命中（含嵌套规则集回放嵌套 HTML——
+// 子规则先于内置、外层规则不串味；既有格式与分步撤销保持）。
 // 规则载荷只模拟来源 HTML 形态（Codex 形态样例），不把专属规则写入
 // 生产内核——消费样例经生产快照通道注入。
 import assert from 'node:assert/strict'
@@ -46,6 +48,71 @@ const snapshotV1 = {
   ],
 }
 const snapshotEmpty = { version: 2, rules: [] }
+/** T02 段末停用用（版本须高于此前一切快照——迟到旧版本不回退） */
+const snapshotEmptyAfterT02 = { version: 5, rules: [] }
+
+/** #542 T02 形态规则快照（v4）：正则捕获组 + 条件组合 + 嵌套子规则集 */
+const snapshotT02 = {
+  version: 4,
+  rules: [
+    {
+      // 正则 + 条件：data-ref="refs/12" 形态 → 「§12」（命名组捕获，条件
+      // 同时要求属性正则与文本非空）
+      addonId: 'fixture.paste-demo',
+      id: 'ref-regex',
+      priority: 1,
+      match: {
+        tag: 'SPAN',
+        condition: { all: [
+          { kind: 'attribute-regex', name: 'data-ref', regex: { pattern: '^refs/' } },
+          { not: { kind: 'text-regex', regex: { pattern: '^\\s*$' } } },
+        ] },
+      },
+      output: {
+        kind: 'template',
+        template: '§{{no}}',
+        slots: {
+          no: { source: { kind: 'attribute-regex', name: 'data-ref', regex: { pattern: '^refs/(?<no>\\d+)$' }, group: 'no' } },
+        },
+      },
+    },
+    {
+      // 嵌套：data-card 容器 → 引用块；子规则集恢复容器内特化 span，
+      // 其余子元素走内置（粗体/行内代码保持）
+      addonId: 'fixture.paste-demo',
+      id: 'card-nested',
+      priority: 0,
+      match: { tag: 'DIV', attributes: [{ name: 'data-card' }] },
+      output: {
+        kind: 'template',
+        template: '> {{body}}',
+        slots: {
+          body: { source: { kind: 'children', rules: [
+            {
+              id: 'inner-link',
+              priority: 0,
+              match: { tag: 'SPAN', attributes: [{ name: 'data-inner-url' }] },
+              output: {
+                kind: 'template',
+                template: '[{{t}}]({{u}})',
+                slots: {
+                  t: { source: { kind: 'text' } },
+                  u: { source: { kind: 'attribute', name: 'data-inner-url' }, url: true },
+                },
+              },
+            },
+            {
+              id: 'drop-chrome',
+              priority: 0,
+              match: { tag: 'SPAN', condition: { all: [{ kind: 'attribute', name: 'data-chrome' }] } },
+              output: { kind: 'discard' },
+            },
+          ] } },
+        },
+      },
+    },
+  ],
+}
 
 try {
   const context = await browser.newContext({ permissions:['clipboard-read','clipboard-write'], viewport:{width:900,height:560} })
@@ -132,4 +199,48 @@ try {
   await selectAll(); await page.keyboard.press('Control+V')
   await waitBoth('[恢复链接](https://example.com/r)')
   console.log('[PASS] 新快照版本恢复规则生效')
+
+  // ---- #542 T02：正则捕获组与条件组合（真实键盘回放） ----
+  await page.evaluate(snapshot=>window.pasteRules(snapshot), snapshotT02)
+  await write('参考 7', '<p><span data-ref="refs/7">参考 7</span> 尾注</p>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('§7 尾注')
+  // 条件不满足（data-ref 缺失）回内置纯文本
+  await write('普通词', '<p><span>普通词</span></p>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('普通词')
+  // 条件满足但正则不匹配（refs/ 后非数字）→ 取值缺失回内置
+  await write('参考 x', '<p><span data-ref="refs/x">参考 x</span></p>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('参考 x')
+  console.log('[PASS] T02 正则捕获组与条件组合命中/不命中回退')
+
+  // ---- #542 T02：嵌套 HTML 回放（子规则集先于内置，外层规则不串味） ----
+  // 重置文档与历史：本用例的撤销二应回到前置的「原文」
+  await page.evaluate(()=>window.replace('原文'))
+  await write('内链 粗词复制', [
+    '<div data-card><p>',
+    '<span data-inner-url="https://example.com/deep">内链</span>',
+    ' <strong>粗词</strong>',
+    '<span data-chrome>复制</span>',
+    '</p></div>',
+  ].join(''))
+  await selectAll(); await page.keyboard.press('Control+V')
+  // 子规则集恢复内链（URL 槽）、丢弃 chrome；strong 走内置；容器模板成引用块
+  await waitBoth('> [内链](https://example.com/deep) **粗词**')
+  assert.equal(await dialog.count(), 0)
+  console.log('[PASS] T02 嵌套子规则集命中且其余子元素按内置转换')
+
+  // ---- T02 嵌套转换的分步撤销：首撤格式、次撤文字（宿主历史不变） ----
+  await page.keyboard.press('Control+Z')
+  await waitBoth('内链 粗词复制')
+  await page.keyboard.press('Control+Z'); await waitBoth('原文')
+  console.log('[PASS] T02 嵌套转换沿用既有分步撤销')
+
+  // ---- T02 停用撤回：嵌套与正则规则一并失效 ----
+  await page.evaluate(snapshot=>window.pasteRules(snapshot), snapshotEmptyAfterT02)
+  // builtin 转换无格式 → 走 plain 等值路径（载荷对齐 builtin 文本，同 T01「回退文字」形态）
+  await write('内链', '<div data-card><p><span data-inner-url="https://example.com/z">内链</span></p></div>')
+  await selectAll(); await page.keyboard.press('Control+V'); await waitBoth('内链')
+  console.log('[PASS] T02 停用后嵌套链路整体回内置')
 } finally { await browser.close() }
