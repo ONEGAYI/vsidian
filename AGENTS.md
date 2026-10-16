@@ -111,7 +111,8 @@ vsidian/
 │   │   ├── 0015-behavior-filter-query-blocks.md               # 行为筛选积木构造器决策
 │   │   ├── 0016-two-layer-behavior-disable-semantics.md       # 行为禁用两层独立开关决策
 │   │   ├── 0017-unified-addon-theme-selection.md              # 组件主题统一入口与互斥选择决策
-│   │   └── 0018-markdown-shortname-resolution.md              # 短名与绝对引用架构决策
+│   │   ├── 0018-markdown-shortname-resolution.md              # 短名与绝对引用架构决策
+│   │   └── 0019-document-html-and-style-scope.md              # 文档HTML与样式作用域决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -188,6 +189,7 @@ vsidian/
 │   │   ├── hover-embed-phase3-tickets/…          # 三期票据正文与依赖
 │   │   ├── hover-preview-embed.md                # 悬停预览与文档嵌入规格
 │   │   ├── html-comment-support.md               # HTML 注释快捷键与呈现规格
+│   │   ├── html-rendering.md                     # 原生HTML与文档样式规格
 │   │   ├── i18n.md                               # 全局 i18n 适配规格
 │   │   ├── image-paste.md                        # 图片粘贴插入与资产文件夹规格
 │   │   ├── image-popup.md                        # 图片弹窗查看与防误触规格
