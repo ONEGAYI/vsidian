@@ -59,7 +59,7 @@
 
 ## 粘贴转换批次故事映射（2026-10 批次，#530 规格冻结）
 
-[声明式粘贴转换规格](addon-paste-conversion.md)的 11 项用户故事（P-U01–P-U11）按切片交付：T01（#541）覆盖 P-U01–P-U06、P-U09–P-U11 的基础链路；P-U07/P-U08（正则/条件/嵌套）归 T02（#542），复验全部基础故事。验证层缩写同上表；T01 证据截至本票实施轮。
+[声明式粘贴转换规格](addon-paste-conversion.md)的 11 项用户故事（P-U01–P-U11）按切片交付：T01（#541）覆盖 P-U01–P-U06、P-U09–P-U11 的基础链路；P-U07/P-U08（正则/条件/嵌套）归 T02（#542），复验全部基础故事。验证层缩写同上表；T01/T02 证据截至 T02 实施轮（基础故事随 T02 全量复验通过）。
 
 | 故事 | 用户结果（摘要） | 切片 | 接口映射 | 验证证据 |
 | --- | --- | --- | --- | --- |
@@ -72,8 +72,8 @@
 | P-U09 | 多组件命中结果稳定 | T01 | `paste-rules-register`（优先级降序、组件 ID 升序、规则 ID 升序确定性序） | 单 `addonPasteRules`（排序）+ `htmlToMarkdownPasteRules`（冲突顺序首条接管） |
 | P-U10 | 危险链接仍受 URL 策略限制 | T01 | `paste-rules-register` coordinates（URL 槽经既有 safeUrl） | 单 `htmlToMarkdownPasteRules`（javascript: 拒绝回内置） |
 | P-U11 | 错误声明可辨认拒绝 | T01 | `paste-rules-register` errors（invalid-declaration/duplicate-id/too-many/released 整批拒绝） | 单 `addonPasteRules`（校验矩阵）+ `addonRuntimePasteRules`（拒绝不算故障） |
-| P-U07 | 正则取值与条件组合 | T02（未实施） | 未实现节点在 T01 阶段显式拒绝（invalid-declaration） | 单 `addonPasteRules`（regex/condition/nested 未知字段拒绝） |
-| P-U08 | 子元素嵌套转换 | T02（未实施） | 同上；T01 的 children 槽只取内置转换结果 | 单 `addonPasteRules`（nested 字段拒绝） |
+| P-U07 | 正则取值与条件组合 | T02 | `paste-rules-register` coordinates（正则槽：整匹/数字组/命名组捕获，受限 flags，注册时编译与组引用校验；条件树 all/any/not 组合基础/正则谓词；输入超限按取值缺失回退） | 单 `addonPasteRules`（正则校验矩阵/条件矩阵/深度与节点预算/常量钉住）+ `htmlToMarkdownPasteRules`（捕获组命中/无匹配回退/组未参与/输入超限/URL 槽 safeUrl/转义/编译失败回退；条件真值矩阵；多组件冲突确定性；步计费 101 步/段预算推导）；浏 `addonPasteRules`（真实键盘回放） |
+| P-U08 | 子元素嵌套转换 | T02 | `paste-rules-register` coordinates（children 槽子规则集：与顶层同语言、ID 槽内局部、先子规则后内置、只向子节点下降；嵌套求值期间外层规则集不参与） | 单 `addonPasteRules`（嵌套深度 16/17、局部 ID、总量并入 256、非法嵌套矩阵）+ `htmlToMarkdownPasteRules`（嵌套命中/内置回退/内外规则不串味/不越出子树/表格上下文/15 层深链/求值异常不放大）；单 `addonRuntimePasteRules`（高级声明经同一登记面进快照、超深整批拒绝不算故障）；浏 `addonPasteRules`（嵌套 HTML 真实回放与分步撤销） |
 
 本批次的公开接入路径：宿主注册面经 `AddonEnableContext.paste`（编译期消费 `test/addonApi/publicApiConsumer.ts` 钉住）；浏览器夹具 `addonPasteRulesFixture` 模拟快照广播，真实宿主探针 `richPasteUndoHost` 则加载 `addon-paste-rules` 夹具，经公开宿主登记→生产快照广播→生产页面粘贴→TextDocument 撤销与停用回收全链。该探针不直接注入规则快照；安装态与人工体验验收另行记录。
 

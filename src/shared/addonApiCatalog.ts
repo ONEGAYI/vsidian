@@ -1123,11 +1123,21 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
           'AddonPasteRuleMatch',
           'AddonPasteRuleOutput',
           'AddonPasteSlot',
+          'AddonPasteSlotSource',
+          'AddonPasteRegex',
+          'AddonPastePredicate',
+          'AddonPasteCondition',
+          'AddonPasteConditionNode',
+          'AddonPasteNestedRule',
           'AddonPasteRulesRegisterResult',
           'AddonPasteRulesSnapshot',
           'ADDON_PASTE_RULES_MAX_PER_ADDON',
           'ADDON_PASTE_RULES_MAX_DEPTH',
           'ADDON_PASTE_RULES_EVAL_STEP_BUDGET',
+          'ADDON_PASTE_RULES_REGEX_PATTERN_LIMIT',
+          'ADDON_PASTE_RULES_REGEX_INPUT_LIMIT',
+          'ADDON_PASTE_RULES_CONDITION_NODES_LIMIT',
+          'addonPasteRegexGroupInfo',
           'validateAddonPasteRuleDeclarations',
           'orderAddonPasteRules',
         ],
@@ -1142,10 +1152,10 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     semantics: {
       modes: '只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。',
       coordinates:
-        '规则语言为可序列化数据：基础匹配（标签名相等、属性存在、属性值相等——缺失与空串区分）＋取值槽（元素文本/指定属性/子内容内置转换结果）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则、条件组合与嵌套转换属后续批次（#542）——未知字段显式拒绝，不静默当成基础声明。',
+        '规则语言为可序列化数据：匹配（标签名相等、属性条件全与——缺失与空串区分——＋可选条件树）＋取值槽（元素文本/指定属性/子内容转换结果/正则捕获组）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性/捕获组槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则为数据声明 pattern＋受限 flags（i/m/s/u，禁 g/y 有状态修饰符），注册时编译校验；捕获组取值支持整匹（组 0）/数字组/命名组，组引用越界或命名组缺失即拒绝。条件为 all/any/not 树（叶子：属性存在/相等、属性值正则、元素文本正则；空组合、非法节点与隐式真值形态拒绝）。嵌套转换在 children 槽声明子规则集（与顶层同一声明语言，ID 为槽内局部；子元素先子规则后内置，只沿子节点下降）。未知字段一律显式拒绝，不静默当成已声明形态。',
       lifecycle:
-        '有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。每组件至多 256 条、表达式嵌套深度至多 16（后续批次消费）、单次粘贴求值步数至多 100,000（超限停用规则、内置转换继续）。',
-      errors: '四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段，含后续批次的正则条件嵌套节点在未实现阶段的显式拒绝）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。',
+        '有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后；children 子规则集递归同序）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点；嵌套求值期间外层规则集不参与（不按规则 ID 回跳或再次转换自身）。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。预算集中定义：每组件至多 256 条规则声明（含嵌套子规则合计）、条件组合层级与规则嵌套层级各至多 16、单条规则条件树至多 64 节点、单次粘贴求值步数至多 100,000（规则尝试/条件节点/正则执行各计一步，超限停用规则、内置转换继续）。正则实现为运行环境原生 RegExp：同步、单次执行不可中断——步数预算计执行次数不是可中断超时；正则输入（元素文本/属性值）超过 4,096 字符按必需取值缺失处理（本规则失败，不截断不改写）。',
+      errors: '四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段/非法正则——编译失败、flags 越集、组引用越界或命名组缺失——/空条件组合/条件或嵌套超深超节点数）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。',
     },
     verification: [
       'test/unit/addonPasteRules.test.ts',
@@ -1157,7 +1167,7 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       'test/integration/richPasteHostSuite.ts',
       'test/integration/addonFixtures/addon-paste-rules/extension.js',
     ],
-    introduced: '#541（T01）',
+    introduced: '#541（T01）；#542（T02 正则/条件/嵌套）',
   },
 ]
 
