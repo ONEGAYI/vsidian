@@ -1386,3 +1386,85 @@ describe('vaultRename：真实宿主形态（反斜杠 fsPath × 正斜杠身份
     ].join('\n'))
   })
 })
+
+describe('vaultRename：#564 普链行号后缀保留（`:N` 是定位语义，rename 只重算路径）', () => {
+  // PR #564 评审缺陷：rename 改写只把 `#`/`?` 后部分当保留后缀，`:N` 行号
+  // 被当路径的一部分整体覆盖——`[x](target.md:2)` 重命名后行号静默丢失。
+  // 契约（addon-navigation.md §5 + markdown-shortname-links.md 更名契约）：
+  // 行号是定位语义非路径成分——路径参与候选探测与重算，`:N` 与 `#`/`?`
+  // 后缀一并原样保留拼回；无行号与纯 fragment 形态不受影响。
+  it('Windows：md 目标带行号，rename 后路径重算、行号保留', () => {
+    const text = '见 [x](target.md:2)。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target.md:2', resolved: 'target.md', kind: 'mdlink', start: text.indexOf('[x](target.md:2)'), end: text.indexOf('[x](target.md:2)') + '[x](target.md:2)'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [x](renamed.md:2)。\n')
+  })
+
+  it('POSIX：同语义（大小写敏感宿主）', () => {
+    const text = '见 [x](target.md:2)。\n'
+    const moves = [{ oldFsPath: '/vault/target.md', newFsPath: '/vault/renamed.md' }]
+    const docs = [refDoc('/vault/ref.md', text, [
+      edge({ target: 'target.md:2', resolved: 'target.md', kind: 'mdlink', start: text.indexOf('[x](target.md:2)'), end: text.indexOf('[x](target.md:2)') + '[x](target.md:2)'.length }),
+    ], '/vault')]
+    const result = planVaultRenameRewrites({ rootFsPaths: ['/vault'], isWindowsHost: false, moves }, docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [x](renamed.md:2)。\n')
+  })
+
+  it('非 md 可读文本目标（code.ts:2）：路径重算、行号保留', () => {
+    const text = '见 [x](code.ts:2)。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/code.ts`, newFsPath: `${WIN_ROOT}/renamed.ts` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'code.ts:2', resolved: 'code.ts', kind: 'mdlink', start: text.indexOf('[x](code.ts:2)'), end: text.indexOf('[x](code.ts:2)') + '[x](code.ts:2)'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [x](renamed.ts:2)。\n')
+  })
+
+  it('行号与 query 共存：两者都保留（路径段重算不动后缀）', () => {
+    const text = '见 [x](t.md:2?q=1)。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/t.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 't.md:2?q=1', resolved: 't.md', kind: 'mdlink', start: text.indexOf('[x](t.md:2?q=1)'), end: text.indexOf('[x](t.md:2?q=1)') + '[x](t.md:2?q=1)'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [x](renamed.md:2?q=1)。\n')
+  })
+
+  it('对照：无行号与纯 fragment 形态不受影响', () => {
+    const text = 'A [x](target.md) B [y](target.md#heading) C [z](target.md:3)。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = (needle: string): { start: number; end: number } => {
+      const start = text.indexOf(needle)
+      return { start, end: start + needle.length }
+    }
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target.md', resolved: 'target.md', kind: 'mdlink', ...at('[x](target.md)') }),
+      edge({ target: 'target.md#heading', resolved: 'target.md', kind: 'mdlink', anchor: 'heading', ...at('[y](target.md#heading)') }),
+      edge({ target: 'target.md:3', resolved: 'target.md', kind: 'mdlink', ...at('[z](target.md:3)') }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits))
+      .toBe('A [x](renamed.md) B [y](renamed.md#heading) C [z](renamed.md:3)。\n')
+  })
+
+  it('对照：纯移动（同目录结构不变）行号形态恒等零编辑', () => {
+    // 目录整体平移：相对路径不变 → 带行号原文恒等，不产生丢行号的多余编辑
+    const text = '见 [x](sub/target.md:5)。\n'
+    const moves = [
+      { oldFsPath: `${WIN_ROOT}/ref.md`, newFsPath: 'C:/vault2/ref.md' },
+      { oldFsPath: `${WIN_ROOT}/sub/target.md`, newFsPath: 'C:/vault2/sub/target.md' },
+    ]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'sub/target.md:5', resolved: 'sub/target.md', kind: 'mdlink', start: text.indexOf('[x](sub/target.md:5)'), end: text.indexOf('[x](sub/target.md:5)') + '[x](sub/target.md:5)'.length }),
+    ])]
+    const result = planVaultRenameRewrites(
+      { rootFsPaths: [WIN_ROOT, 'C:/vault2'], isWindowsHost: true, moves },
+      docs.map((d) => ({ ...d, fsPath: 'C:/vault2/ref.md' })),
+    )
+    expect(result.docs).toEqual([])
+  })
+})

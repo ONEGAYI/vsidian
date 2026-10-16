@@ -13,7 +13,12 @@
 // - 送达失败（无就绪面板）与宿主执行失败（error）分开；
 // - 打开与定位结果区分：ok 成功分支 opened/located、失败分支带 opened。
 import { describe, expect, it } from 'vitest'
-import { executeAddonDocNav, type AddonDocNavExecPorts } from '../../src/host/addonDocNav'
+import {
+  executeAddonDocNav,
+  revealMdLineAnchor,
+  type AddonDocNavExecPorts,
+  type MdLineRevealPorts,
+} from '../../src/host/addonDocNav'
 
 const WS_ROOT = '/ws'
 const A_MD = `${WS_ROOT}/notes/a.md`
@@ -430,5 +435,99 @@ describe('executeAddonDocNav：异步边界', () => {
     expect(await executeAddonDocNav({ sourceFsPath: A_MD, target: 'sub/b.md' }, h.ports))
       .toEqual({ ok: false, reason: 'view-disposed', opened: false })
     expect(h.openedMarkdown).toEqual([])
+  })
+})
+
+describe('#564 普链 md 行号落位执行体（revealMdLineAnchor：面板就绪后按执行时权威文本重校）', () => {
+  // PR #564 评审缺陷：行号偏移在等待面板就绪**之前**计算，等待期间文档
+  // 变化仍发送旧偏移；行消失时无越界反馈、log 误记 custom-panel。
+  // 契约（addon-navigation.md §4.2「就绪等待先于权威文本读取」同一时序）：
+  // 初判（打开时文本）→ openWith → 就绪等待 → 执行时权威文本重算行首
+  // 偏移 → LF 换算出站；行消失 → out-of-range（totalLines = 重校文本
+  // 行数），不出站（调用方据此记 locate none + 越界 toast，不误记
+  // custom-panel）。
+  const NOTE_MD = `${WS_ROOT}/notes/note.md`
+
+  interface LineHarness {
+    ports: MdLineRevealPorts
+    located: number[]
+    opened: number
+    waited: number
+  }
+
+  /** 端口 harness：texts 为 readDocText 的逐次返回值（初判与重校各读一次，
+   *  按调用次序消费——模拟等待期文本变化） */
+  function lineHarness(opts: { texts?: string[]; ready?: boolean } = {}): LineHarness {
+    const h = {} as LineHarness
+    h.located = []
+    h.opened = 0
+    h.waited = 0
+    let read = 0
+    h.ports = {
+      openMarkdown: async () => {
+        h.opened += 1
+        return true
+      },
+      waitForMarkdownReady: async () => {
+        h.waited += 1
+        return opts.ready ?? true
+      },
+      readDocText: async () => (opts.texts ?? [])[Math.min(read++, (opts.texts ?? []).length - 1)] ?? null,
+      locateMarkdown: async (_fsPath, lfOffset) => {
+        h.located.push(lfOffset)
+        return true
+      },
+    }
+    return h
+  }
+
+  it('等待期文本变化：出站偏移按执行时文本重算（不发送旧偏移）', async () => {
+    // 打开时 3 行短文本（行 3 偏移 4）；等待期间首行变长——执行时行 3
+    // 偏移 16，旧偏移 4 不得出站（评审探针实测缺陷）
+    const h = lineHarness({ texts: ['a\nb\nc', 'long line one\nb\nc'] })
+    const result = await revealMdLineAnchor(NOTE_MD, 3, h.ports)
+    expect(result).toEqual({ outcome: 'sent' })
+    expect(h.located).toEqual([16])
+  })
+
+  it('等待期行消失：不出站、按重校文本行数报越界', async () => {
+    // 等待期间文档改为单行——第 3 行已不存在：不出站、totalLines 为
+    // 重校文本行数（首次越界严格反馈，不静默、不误记定位成功）
+    const h = lineHarness({ texts: ['a\nb\nc', 'onlyone'] })
+    const result = await revealMdLineAnchor(NOTE_MD, 3, h.ports)
+    expect(result).toEqual({ outcome: 'out-of-range', totalLines: 1 })
+    expect(h.located).toEqual([])
+  })
+
+  it('等待期文本未变：原偏移维持（既有行为不回归）', async () => {
+    const h = lineHarness({ texts: ['a\nb\nc', 'a\nb\nc'] })
+    const result = await revealMdLineAnchor(NOTE_MD, 3, h.ports)
+    expect(result).toEqual({ outcome: 'sent' })
+    expect(h.located).toEqual([4])
+  })
+
+  it('初判越界（打开时行已不存在）：面板照常打开、不等待面板、按初判文本行数报越界', async () => {
+    const h = lineHarness({ texts: ['a\nb'] })
+    const result = await revealMdLineAnchor(NOTE_MD, 3, h.ports)
+    expect(result).toEqual({ outcome: 'out-of-range', totalLines: 2 })
+    expect(h.opened).toBe(1)
+    expect(h.waited).toBe(0)
+    expect(h.located).toEqual([])
+  })
+
+  it('面板未就绪：no-panel，不出站、不做执行时重校读取', async () => {
+    const h = lineHarness({ texts: ['a\nb\nc'], ready: false })
+    const result = await revealMdLineAnchor(NOTE_MD, 3, h.ports)
+    expect(result).toEqual({ outcome: 'no-panel' })
+    expect(h.located).toEqual([])
+  })
+
+  it('执行时文本为 CRLF：LF 偏移经 NewlineCoordinator 收口', async () => {
+    const h = lineHarness({ texts: ['a\r\nb\r\nc\r\n', 'a\r\nlong line two\r\nc'] })
+    const result = await revealMdLineAnchor(NOTE_MD, 3, h.ports)
+    expect(result).toEqual({ outcome: 'sent' })
+    // 重校文本行 3 宿主偏移 18（a\r\n + long line two\r\n，每段 13 字符）；
+    // LF 偏移 16（前方 2 个 \r 各剥 1）
+    expect(h.located).toEqual([16])
   })
 })
