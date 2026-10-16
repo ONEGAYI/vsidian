@@ -113,6 +113,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // T05（#544）：附加组件只读引用浮窗（生产引用视图运行时 + 真实指针/
   // 键盘驱动——几何邻近/单实例仲裁/Esc/键盘焦点/来源消失/只读绘制/错误）
   'addonRefViews',
+  // T06（#545）：附加组件只读引用嵌入（真实组件面板挂载/绘制层/双实例
+  // 滚动独立/只读硬边界/重复挂载仲裁/容器归属/整组释放）
+  'addonRefViewsEmbed',
   // T08（#357）：行为冲突管理（注册行为调序/逐项开关——真实键盘 + 绘制层）
   'addonT08BehaviorsManage',
   // #543 T03：附加组件文档导航（views.openDocument 公开 SDK 消费——请求

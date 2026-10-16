@@ -35,6 +35,11 @@ function makePorts(sources: Record<string, { viewType: 'main' } | { viewType: 'e
       // settle ——由调用方在测试里手动模拟 settle('closed')）
       popupInstance = null
     },
+    // T06（#545）嵌入端口：浮窗契约测试不驱动（嵌入契约在
+    // addonRefViewsEmbed.test.ts 承载）——桩实现即可
+    ownsContainer: () => false,
+    mountEmbedCard: () => false,
+    releaseEmbedCard: () => {},
   }
   return { ports, calls, get closeCalls() { return closeCalls }, setPopup: (id: string | null) => { popupInstance = id } }
 }

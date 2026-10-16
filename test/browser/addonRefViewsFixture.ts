@@ -1,13 +1,14 @@
-// T05（#544）附加组件只读引用浮窗浏览器夹具：装配**生产** WebviewSync
-// Controller、**生产**装载器、**生产**界面运行时与**生产**引用视图运行时
-// （src/webview/addonRefViews——与生产 main.js 同源装配），组件产物
-// （.build/refviews-addon/dist）经本地 http 服务以真实 URL 装载。夹具扮演
-// 宿主角色：
+// T05（#544）/T06（#545）附加组件只读引用视图浏览器夹具：装配**生产**
+// WebviewSyncController、**生产**装载器、**生产**界面运行时与**生产**引用
+// 视图运行时（src/webview/addonRefViews——与生产 main.js 同源装配），组件
+// 产物（.build/refviews-addon/dist）经本地 http 服务以真实 URL 装载。夹具
+// 扮演宿主角色：
 // - rv 通道指令队列（rv.next 回执待发指令——request/close/active/
-//   closePanel/openPanel）；
+//   closePanel/openPanel/embed/embedRelease/embedActive）；
 // - hover.request 自动回包（目标文本 → markdown 成功 / missing → not-found
 //   ——与真实 handleHostMessage 同入口注入）；
-// - 浮窗绘制观测（元素/几何/命中/文本）与出站消息快照。
+// - 浮窗与嵌入挂载的绘制观测（元素/几何/命中/计算色/文本/滚动）与出站
+//   消息快照。
 import 'katex/dist/katex.min.css'
 import * as cmState from '@codemirror/state'
 import * as cmView from '@codemirror/view'
@@ -21,6 +22,7 @@ import { AddonCommandsRuntime } from '../../src/webview/addonCommands'
 import { AddonUiRuntime } from '../../src/webview/addonUi'
 import { AddonRefViewsRuntime } from '../../src/webview/addonRefViews'
 import { closeHoverPopup, currentHoverPopupInstanceId, openHoverPopupForAddonRef } from '../../src/webview/hoverPopup'
+import { graphicProviderAddonOwnerOf } from '../../src/webview/graphicRenderers'
 import type { AddonChannelOutcome, AddonPageOutbound } from '../../src/shared/addonPage'
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
@@ -63,7 +65,9 @@ const addonUi = new AddonUiRuntime({
   panelCloseLabel: () => '关闭面板',
   log: (detail) => console.warn(`[rv-fixture] ${detail}`),
 })
-// 生产引用视图运行时（与 main.js 同源装配——来源解析/浮窗入口/句柄簿记）
+// 生产引用视图运行时（与 main.js 同源装配——来源解析/浮窗入口/句柄簿记；
+// T06 嵌入：容器归属 = 面板内容根（addonUi）/渲染容器（graphicRenderers），
+// 卡片挂载与整组释放经控制器的 EmbedCardManager 只读端口）
 const addonRefViews = new AddonRefViewsRuntime({
   resolveSource: (instanceId) => {
     const info = addonViews.infoOf(instanceId)
@@ -76,6 +80,11 @@ const addonRefViews = new AddonRefViewsRuntime({
     openHoverPopupForAddonRef(trigger, spec, { keyboard, addonSource, onSettled }),
   currentPopupInstanceId: () => currentHoverPopupInstanceId(),
   closePopup: () => closeHoverPopup(),
+  ownsContainer: (addonId, el) =>
+    addonUi.panelAddonOwnerOf(el) === addonId ||
+    graphicProviderAddonOwnerOf(el) === addonId,
+  mountEmbedCard: (input) => controller.mountAddonRefEmbed(input),
+  releaseEmbedCard: (subRoot) => controller.releaseAddonRefEmbed(subRoot),
 })
 addonViews.onDisposed((info) => addonRefViews.releaseSource(info.instanceId))
 const loader: AddonPageLoaderHandle = installAddonPageLoader({
@@ -96,7 +105,7 @@ controller.attachAddonCommands(addonCommands)
 controller.attachAddonUi(addonUi)
 
 // ---- 宿主角色：文档 init + hover.request 自动回包 ----
-const TARGET_TEXT = ['# B 目标标题', '', ...Array.from({ length: 12 }, (_, i) => `B 文档第 ${i + 1} 段正文，用于撑出可滚动内容。`), '', '## 小节', '', '小节正文。', ''].join('\n')
+const TARGET_TEXT = ['# B 目标标题', '', ...Array.from({ length: 40 }, (_, i) => `B 文档第 ${i + 1} 段正文，用于撑出可滚动内容（嵌入双实例滚动独立性断言的载体）。`), '', '## 小节', '', '小节正文。', ''].join('\n')
 
 /** 已回包的 hover.request（reqId+instanceId 配对——防重复回包） */
 const replied = new Set<string>()
@@ -250,5 +259,53 @@ Object.assign(window, {
   rvFocusInPopup(): boolean {
     const el = document.querySelector<HTMLElement>('.vsidian-hover-popup')
     return el !== null && el.contains(document.activeElement)
+  },
+  /** T06 嵌入挂载观测（绘制层：容器内卡片/计算色/命中/文本/滚动/只读 chrome） */
+  readRvEmbed(slot: 1 | 2) {
+    const host = document.querySelector<HTMLElement>(`.rv-embed-slot-${slot}`)
+    if (!host) return { present: false as const }
+    const card = host.querySelector<HTMLElement>('.vsidian-embed-card')
+    if (!card) return { present: true as const, card: false as const, childCount: host.childElementCount }
+    const scroll = card.querySelector<HTMLElement>('.vsidian-embed-card-scroll')
+    const state = card.querySelector<HTMLElement>('.vsidian-embed-card-state')
+    const modeBtn = card.querySelector<HTMLElement>('.vsidian-embed-card-mode')
+    const rect = card.getBoundingClientRect()
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + Math.min(rect.height / 2, 40))
+    const style = getComputedStyle(card)
+    return {
+      present: true as const,
+      card: true as const,
+      childCount: host.childElementCount,
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      hitInside: hit !== null && card.contains(hit),
+      // 绘制层：引用竖条与标题条边框的实际计算色（样式注入失效时透明）
+      borderLeftColor: style.borderLeftColor,
+      borderLeftWidth: style.borderLeftWidth,
+      headerBorderBottom: getComputedStyle(card.querySelector<HTMLElement>('.vsidian-embed-card-header')!).borderBottomColor,
+      text: (card.textContent ?? '').trim(),
+      stateText: (state?.textContent ?? '').trim(),
+      stateError: state?.classList.contains('vsidian-embed-card-state-error') ?? false,
+      stateHidden: state !== null && state.style.display === 'none',
+      modeDisplay: modeBtn !== null ? getComputedStyle(modeBtn).display : 'missing',
+      scrollTop: scroll?.scrollTop ?? -1,
+      scrollHeight: scroll?.scrollHeight ?? -1,
+      clientHeight: scroll?.clientHeight ?? -1,
+    }
+  },
+  /** T06 嵌入滚动写入（双实例独立性断言的驱动面——滚容器 1 不动容器 2） */
+  rvEmbedScroll(slot: 1 | 2, top: number): boolean {
+    const scroll = document.querySelector<HTMLElement>(`.rv-embed-slot-${slot} .vsidian-embed-card-scroll`)
+    if (!scroll) return false
+    scroll.scrollTop = top
+    return true
+  },
+  /** 主正文用户可见文本快照（Live cm-content 或 Reading 容器——「展示请求
+   *  零正文写入」的浏览器侧观测面；撤销历史属宿主文本管线，由真宿主用例
+   *  按文档版本断言） */
+  rvMainText(): string {
+    const live = document.querySelector<HTMLElement>('.cm-content')
+    if (live !== null) return live.textContent ?? ''
+    const reading = document.querySelector<HTMLElement>('.vsidian-view-reading')
+    return (reading?.textContent ?? '').trim()
   },
 })
