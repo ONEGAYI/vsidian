@@ -18622,7 +18622,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(stats.registerCount === 1, `夹具应恰注册一次（两路径共用幂等 activate），实际 ${stats.registerCount}`)
     assert(stats.setupCount === 1, `setup 应恰执行一次，实际 ${stats.setupCount}`)
     assert(stats.lastRegisterResult?.ok === true, `首次注册应成功，实际 ${JSON.stringify(stats.lastRegisterResult)}`)
-    assert(stats.apiVersionAtRegister === '1.0.0', `注册时 API 应可访问（版本随行），实际 ${String(stats.apiVersionAtRegister)}`)
+    assert(stats.apiVersionAtRegister === ADDON_API_VERSION,
+      `注册时 API 应可访问（版本随行），实际 ${String(stats.apiVersionAtRegister)}`)
 
     // 路径二（Vsidian 主动唤醒）与状态判定：轮询协调器状态收敛
     const state = async () =>
@@ -18646,8 +18647,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(ok?.status === 'registered', `兼容夹具应为 registered，实际 ${JSON.stringify(ok)}`)
     const incompatible = settled.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-incompatible')
     assert(incompatible?.apiRange === '^2.0.0', `不兼容状态应携带声明范围，实际 ${JSON.stringify(incompatible)}`)
-    assert(settled.apiVersion === '1.0.0' && settled.draft === true,
-      `载荷应含候选版本与草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
+    assert(settled.apiVersion === ADDON_API_VERSION && settled.draft === true,
+      `载荷应含宿主稳定 API 版本与草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
 
     // 普通扩展不入列表：内置扩展（vscode.* / ms-*）无身份声明，一律不在场
     for (const entry of settled.addons) {
