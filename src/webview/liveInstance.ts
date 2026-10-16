@@ -67,6 +67,7 @@ import {
   type HeadingFoldOperationId,
 } from './headingFold'
 import { liveEmbed } from './liveEmbed'
+import { liveHtml } from './liveHtml'
 import { liveBlockId } from './liveBlockId'
 import { anchorFlash } from './anchorFlash'
 import { codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
@@ -2657,6 +2658,14 @@ export class LiveEditorInstance {
       // （EmbedCardManager）与 Reading 侧同状态库装载（接线归根，
       // P2-11 迁移实例化）
       liveEmbed,
+      // #567（T02）块级原生 HTML：块表（Lezer HTMLBlock 派生）+ 片段替换
+      // 装饰（未触及 = 精确区间 inline replace 渲染净化 HTML；触及 =
+      // 源码显形，selectionTouchesRange 语义）+ 无修饰左键点击转完整
+      // 源码选区（普通点击进入源码）。纯 <style> 块恒源码常显不占位
+      // （Q6A）；净化经 htmlSanitize（与 Reading 同一规则）。主文/嵌入
+      // 实例统一装配（B 的 html 块同渲染）；docScope 标记由视图装配层
+      // 注入（T04 隔离基座）
+      liveHtml,
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
       // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
       liveBlockId,

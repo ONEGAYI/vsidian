@@ -2,7 +2,7 @@
 // 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
 // （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
 // 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
-// docs/specs/style-reference-i18n.md）。153 条（content 84 + chrome 69）
+// docs/specs/style-reference-i18n.md）。227 条（content 91 + chrome 136）
 // 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
@@ -356,6 +356,13 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'Placeholder divs at the head/tail of the reading container.',
     obsidian: { counterpart: 'No counterpart (Obsidian handles virtualization internally)' },
   },
+  'reading-html-block': {
+    purpose:
+      'The reading-view block-level native HTML block (#567/T02): a top-level html_block token renders as sanitized native semantic DOM (structures Markdown cannot express, such as tables with merged cells). The content keeps native tag semantics — no production markdown block classes are added (e.g. vsidian-reading-heading-1); styles match the actual DOM (the Q4=B stance). A pure <style> block is hidden (Q6A — in-document styles are loaded from the source by a later release, zero footprint in the reading area); a fragment that sanitizes to nothing (script-only, etc.) falls back to an escaped-source pre (.vsidian-html-source-fallback). Blocks join the existing virtualized mount window (mount/unmount per block); the render root carries the data-vsidian-doc-scope document identity marker (the substrate for document style isolation — source text cannot forge it, since the sanitize boundary strips source-provided data-vsidian-*).',
+    states: 'A pure <style> block (empty inner HTML) is display:none with zero footprint; everything else renders normally.',
+    dom: 'A block-level div in the reading container (vsidian-reading-block + vsidian-reading-html, carrying the data-vsidian-src-start/end source anchors); the inside is sanitized native HTML (whitelist first gate + sanitizeReadingDom defense-in-depth second gate).',
+    obsidian: { counterpart: 'Native HTML blocks rendered inside .markdown-preview-view (no dedicated container class)' },
+  },
 
   // ---- 链接、图片与双链（link-image-wikilink，7 条）----
   'live-link': {
@@ -636,7 +643,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   // ---- 图形化按钮与弹窗（graphic-interact，2 条；#111）----
   'graphic-chrome': {
     purpose:
-      "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); images inside links or table grids do not carry it (explicitly out of scope). The button background is a two-layer composite (a solid-color gradient layer of the theme face + a solid editor-background underlay; editorWidget-background at rest, button-secondaryBackground on hover): theme variables may be translucent (glass-style themes), and with the buttons floating directly over mottled content such as images a translucent face lets the content color bleed through; the solid underlay keeps the face opaque under any theme, while solid theme values are fully covered by the gradient layer with no visual change.",
+      "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); Since #567 (T02) the live host of block-level native HTML reuses the same button family DOM/CSS (edit only — the buildGraphicChrome form where onPopup may be omitted; the host .vsidian-live-html carries its own positioning rules and is not part of the frame class). Images inside links or table grids do not carry it (explicitly out of scope). The button background is a two-layer composite (a solid-color gradient layer of the theme face + a solid editor-background underlay; editorWidget-background at rest, button-secondaryBackground on hover): theme variables may be translucent (glass-style themes), and with the buttons floating directly over mottled content such as images a translucent face lets the content color bleed through; the solid underlay keeps the face opaque under any theme, while solid theme values are fully covered by the gradient layer with no visual change.",
     states:
       'The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side. Image form: shown in the loaded state (driven by sibling/descendant selectors on data-vsidian-img-state); frame.vsidian-image takes an inline layout (inline mixed flow is not broken).',
     dom: "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
@@ -1168,6 +1175,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Active (Ctrl/Cmd held — the body carries the class, hovering a link picks up underline + cursor:pointer) / inactive (no class, links render exactly as before); window blur forces the fallback (a keyup may have been lost).',
     dom: 'A class on body; the rule selectors cover .vsidian-wikilink / .vsidian-link / reading anchors under :hover.',
     obsidian: { counterpart: 'the Obsidian pointer and underline feedback while holding Ctrl over internal links' },
+  },
+  'live-html-widget': {
+    purpose:
+      'The live-view block-level native HTML fragment-replacement host (#567/T02): a top-level html block derived from the Lezer HTMLBlock node renders as sanitized native semantic DOM in an exact-range [from, to] inline replace widget while the cursor/selection does not touch the source range (merged-cell tables and beyond); when touched (selectionTouchesRange semantics: a collapsed cursor inside or on either end, a non-empty selection strictly overlapping, or any one selection range hitting; find/anchor hits trigger the same way) the widget is withdrawn and the editable source shows, and fully leaving restores the rendering — reveal only affects the visual presentation, zero write-back and no separate undo entry (the host swallows events opposite to the embed card: ignoreEvent=false, so clicks land in the parent editor selection pipeline). Hovering shows a border (a focusBorder outline) plus a top-right edit button (reusing the graphic-chrome button family DOM/CSS, edit only); a plain click on the rendered content or the button selects the complete source of that fragment; keyboard entry keeps the cursor position (the inline replacement is the prerequisite for vertical navigation to enter the line — a block-level replacement gets skipped wholesale by CM6). A pure <style> block always shows its source with no placeholder (Q6A). The content root carries the data-vsidian-doc-scope document identity marker (the isolation substrate; source-provided data-vsidian-* is stripped by the sanitizer and cannot be forged); a fragment that sanitizes to nothing falls back to escaped source (.vsidian-html-source-fallback, the same class as the reading-html-block degraded state).',
+    states:
+      'Hidden form (untouched: an inline replacement widget with the surrounding cm-widgetBuffer pair zero-height block-levelized — visually hidden while the layout boxes remain as coordinate anchors) / revealed form (touched: no widget, the source is present); the hover border and button visibility are carried by CSS :hover (the button also has a :focus-visible keyboard-reachable state).',
+    dom: 'A block-levelized host div inside a .cm-line in the live-view .cm-content (position:relative provides the button positioning context); the inner .vsidian-live-html-content holds the sanitized native HTML and the .vsidian-graphic-chrome button group is a trailing child (edit only). Mounted identically in the main document and inside embedded live editors (B document html blocks render too).',
+    obsidian: { counterpart: 'No dedicated class (Obsidian live HTML blocks toggle between source and rendering; internal structure is closed-source and not promised)' },
   },
   'reading-embed-ref': {
     purpose:

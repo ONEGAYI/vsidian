@@ -20,8 +20,9 @@ export interface GraphicChromeActions {
   /** 编辑源码（仅实时预览装配——派发选区进围栏触发源码显形；阅读视图
    *  不提供该按钮） */
   onEdit?: () => void
-  /** 弹窗预览（打开图表弹窗） */
-  onPopup: () => void
+  /** 弹窗预览（打开图表弹窗）。#567（T02）起可缺省——仅 edit 的按钮组
+   *  （块级 HTML 复用同款按钮族 DOM/CSS，无弹窗语义） */
+  onPopup?: () => void
   /** #358 T09 弹窗按钮装配位（缺省 true）：生效提供者声明无 svg 取图
    *  能力时不装 popup 按钮（弹窗内容无从取得——按钮不虚设） */
   popupEnabled?: boolean
@@ -63,7 +64,8 @@ const POPUP_ICON =
   '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"></rect>' +
   '<path d="M6 2.5v3M2.5 6h3"></path><path d="M9.5 13.5v-3M13.5 9.5h-3"></path></svg>'
 
-/** 按钮组 DOM：edit（可选，居左）+ popup（居右；popupEnabled=false 时省略） */
+/** 按钮组 DOM：edit（可选，居左）+ popup（可选，居右；popupEnabled=false
+ *  或 onPopup 缺省时省略——#567 起支持仅 edit 形态） */
 export function buildGraphicChrome(actions: GraphicChromeActions): HTMLElement {
   const chrome = document.createElement('div')
   chrome.className = GRAPHIC_CHROME_CLASS_NAMES.chrome
@@ -73,7 +75,7 @@ export function buildGraphicChrome(actions: GraphicChromeActions): HTMLElement {
       buildChromeButton(GRAPHIC_CHROME_CLASS_NAMES.edit, 'graphic.editSource', EDIT_ICON, actions.onEdit),
     )
   }
-  if (actions.popupEnabled !== false) {
+  if (actions.onPopup && actions.popupEnabled !== false) {
     chrome.appendChild(
       buildChromeButton(GRAPHIC_CHROME_CLASS_NAMES.popup, 'graphic.popup', POPUP_ICON, actions.onPopup),
     )

@@ -5611,6 +5611,68 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   height: 0;
 }
 
+/* ---- #567（T02）块级原生 HTML（样式契约 content 域 live-html-widget /
+   reading-html-block 条目）----
+   Live：宿主是 inline replace widget 的块级替换物（live-embed #247 同款
+   ——保持 inline 是键盘垂直导航可进入该行的前提）；悬停边框
+   （focusBorder——ui-patterns §1.1 焦点强调档）+ 右上角编辑按钮（复用
+   图形块按钮族 DOM/CSS，仅 edit 钮）。内容保持原生语义 DOM，不加生产
+   Markdown 块类（Q4=B）。Reading：块元素沿用 vsidian-reading-block 基础
+   规则（限宽/居中/间距）；纯 <style> 块隐藏（Q6A——T04 从源文装载）。 */
+#app .cm-editor .cm-content .vsidian-live-html {
+  display: block;
+  position: relative;
+  /* 上下间距由宿主 padding 承担（#217 高度记账口径：padding 计入盒子高，
+     margin 折叠出行盒会漏记——live-embed 同款） */
+  padding: 7px 0;
+  border-radius: 6px;
+}
+
+/* 悬停边框：辨识渲染区编辑范围（规格 U03）。outline 不占布局，悬停不
+   引起内容位移；focusBorder 是 ui-patterns §1.1「焦点与选中强调」档 */
+#app .cm-editor .cm-content .vsidian-live-html:hover {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+/* 行内块替换的前后 cm-widgetBuffer 零高块级化（live-embed 同款：观感
+   等同隐藏、布局盒保留作 posAtCoords 垂直坐标锚——display:none 会让
+   ArrowDown 从上进入越过整块） */
+#app .cm-editor .cm-content .cm-line > .cm-widgetBuffer:has(+ .vsidian-live-html),
+#app .cm-editor .cm-content .cm-line > .vsidian-live-html + .cm-widgetBuffer {
+  display: block;
+  height: 0;
+}
+
+/* 按钮组：复用图形块按钮族（vsidian-graphic-chrome 的定位/尺寸/底色规则
+   随类名命中，宿主 position:relative 承担定位上下文），此处只钉显隐——
+   HTML 块无「渲染成功态」数据属性，按钮组常驻 display:flex（按钮透明度
+   悬停显隐仍由既有按钮规则承担，此处补宿主悬停与键盘焦点两态） */
+#app .cm-editor .cm-content .vsidian-live-html > .vsidian-graphic-chrome {
+  display: flex;
+}
+
+#app .cm-editor .cm-content .vsidian-live-html:hover > .vsidian-graphic-chrome button,
+#app .cm-editor .cm-content .vsidian-live-html > .vsidian-graphic-chrome button:focus-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 净化后为空的降级源码回退（script-only 等）：转义源码 pre 的等宽呈现
+   （Live widget 与 Reading 块共用） */
+#app .vsidian-live-html .vsidian-html-source-fallback,
+#app .vsidian-view-reading .vsidian-reading-html .vsidian-html-source-fallback {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Reading：纯 <style> 块隐藏（html 为空——Q6A 源码常显不占位的 Reading
+   对偶：样式装载归 T04，阅读区零占位） */
+#app .vsidian-view-reading .vsidian-reading-html:empty {
+  display: none;
+}
+
 /* ---- #340（P3-08）可读文本悬停视图：类编辑器只读呈现 ----
    观感口径（原生对齐）：字体/字号/连字来自语言级生效值（TextRefView 内联
    写入，缺席回落编辑器默认变量族）；token 颜色全部内联（宿主外观服务计

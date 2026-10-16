@@ -2824,6 +2824,25 @@ export interface PaintProbe {
     /** 浮层内图片已装载（img 元素在场且 loaded 态） */
     overlayImgLoaded: boolean
   }
+  /** #567（T02）块级原生 HTML 绘制观测：当前激活视图内 html 块渲染根的
+   *  计数与真实可见性（elementFromPoint 命中——jsdom 无布局恒 false，
+   *  只作真宿主集成断言依据）。mergedCell 是合并单元格的绘制层证据
+   *  （colspan/rowspan 格命中 + computed 边框宽——「仅元素数量不通过」
+   *  的验收口径）；scripts/eventAttrs 为净化负向证据（渲染根内 script
+   *  元素与 on* 属性残留计数，期望恒 0）。无 html 块时整个字段缺省。 */
+  html?: {
+    /** 当前激活视图内渲染根数（live：.vsidian-live-html / reading：
+     *  .vsidian-reading-html） */
+    roots: number
+    /** 任一渲染根 rect 有面积且 elementFromPoint 命中自身子树 */
+    visible: boolean
+    /** 首个带 colspan/rowspan 的表格格命中证据（无合并单元格为 null） */
+    mergedCell: { hit: boolean; borderWidth: string | null } | null
+    /** 净化负向：渲染根内 script 元素数（期望 0） */
+    scripts: number
+    /** 净化负向：渲染根内 on* 事件属性数（期望 0） */
+    eventAttrs: number
+  }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
   quickActions?: {
     open: boolean

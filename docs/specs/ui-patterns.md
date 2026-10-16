@@ -161,6 +161,8 @@ div.vsidian-behavior-query                        ← 查询区（组卡片内�
 
 T05（#544）组件引用请求复用悬停弹窗模式：位置由有效触发区域与 hoverPopupGeometry 决定，仍为单页单浮窗；只读路径隐藏内部编辑/保存入口，不新增浮层样式档位。绘制与旧选择器命中由 `addonRefViews` 浏览器套件及宿主 `paint.hoverPopup` 断言覆盖。
 
+**内容流内悬停辨识框（#567/T02）**：块级原生 HTML 的 Live 渲染宿主（`.vsidian-live-html`，非浮层——内容流内块）悬停呈现 1px `--vscode-focusBorder` outline（§1.1 焦点强调档，offset 2px、圆角 6px 档）；右上角编辑按钮**复用图形块按钮族**（`.vsidian-graphic-chrome` 的尺寸/底色/悬停透明度规则随类名命中，DOM 经 buildGraphicChrome 的仅 edit 形态，#567 起 onPopup 可缺省）——不发明新按钮档位，按钮组定位由宿主自身 position:relative 承担（不入 graphic-frame 类，探针计数不混）。悬停词走 `data-tooltip`（html.blockTooltip 词条）。绘制层断言在 `liveHtml` 浏览器套件（outline 非透明 + 按钮透明度两态）。
+
 ## 4. 新增 UI 三步接入清单
 
 1. **定形态**：对照 §1 基元与 §2/§3 模式选定档位与结构；没有合型的新元素，先在本文档登记（模式表加行/小节补写）再实现——评审拦「未登记的新形态」。

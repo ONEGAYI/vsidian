@@ -158,6 +158,7 @@ import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
+import { liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
@@ -1060,6 +1061,12 @@ export class WebviewSyncController {
         id === 'headingFoldAll' || id === 'headingUnfoldAll') {
         this.runHeadingFoldCommand(id)
       }
+      // #567（T02）编辑当前 HTML 源码：本地分支直执行（纯选区事务零写
+      // 回，不出站宿主往返）；命令面板经 ui.command 回发共用
+      // runHtmlEditSourceCommand（目标按焦点实例光标解析，无命中静默）
+      else if (id === 'htmlEditSource') {
+        this.runHtmlEditSourceCommand()
+      }
       // #439 链接场景三项：本地分支直执行（目标 = 焦点实例光标处链接命中，
       // 与「预览当前链接」同一目标推导口径；无命中静默不误动）。菜单入口
       // 经 runContextMenuCommand 快照负载（打开时捕获），键位入口按光标即
@@ -1254,6 +1261,10 @@ export class WebviewSyncController {
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
     this.readingView = new VirtualReadingView(this.readingContainer, {
+      // #567（T02）主文档身份标记（T01 探针 b2 隔离基座）：html 块渲染根
+      // 挂 data-vsidian-doc-scope="doc"（嵌入实例的目标身份键随 T04 装载
+      // 器接线）
+      docScope: 'doc',
       // #419 阅读态折叠交互：翻转主文 Live 的折叠 StateField（单一事实源
       // ——阅读与 Live 共享同一折叠状态集）；阅读呈现刷新经下方折叠侦测
       // updateListener 闭环（dispatch → 折叠集变化 → syncReadingFolds）
@@ -1811,6 +1822,10 @@ export class WebviewSyncController {
       // P2-04（#281）挂卡宿主标记：根正文才发射嵌入卡片装饰（嵌入内部
       // Live 编辑器不挂卡——嵌套结构与命令接线归 P2-10）
       liveEmbedCardsHostMark,
+      // #567（T02）主文档身份标记：根正文的 HTML 块渲染根挂
+      // data-vsidian-doc-scope="doc"（T01 探针 b2 隔离基座；嵌入内部
+      // Live 的目标身份键随 T04 装载器接线）
+      liveHtmlDocScope('doc'),
       // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
       // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
       ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
@@ -3105,6 +3120,11 @@ export class WebviewSyncController {
           case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
           case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
           case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
+          // #567（T02）编辑当前 HTML 源码：命令面板入口（快捷键走 router
+          // 本地分支直达），两入口共用 runHtmlEditSourceCommand——目标按
+          // 焦点实例光标解析（焦点在嵌入内部 Live 时落 B 的 html 块），
+          // 无命中静默
+          case 'htmlEditSource': this.runHtmlEditSourceCommand(); break
           // #439 链接场景三项：命令面板入口（快捷键走 router 本地分支直达），
           // 与菜单入口共用 runLinkSceneCommand 执行体（目标按光标即时推导）
           case 'openLink': this.runLinkSceneKeyCommand('openLink'); break
@@ -9866,6 +9886,17 @@ export class WebviewSyncController {
     applyHeadingFoldOperation(resolved.view, op)
   }
 
+  /** #567（T02）「编辑当前 HTML 源码」：光标所在 html 块 → 选中完整源码
+   *  区间（与渲染内容点击、编辑按钮三入口同一执行体；纯选区事务零写
+   *  回——显形由既有装饰管线按选区触及接管）。无命中静默不动作 */
+  private runHtmlEditSourceCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved || !this.targetEditable(resolved.view, resolved.embed)) {
+      return
+    }
+    revealHtmlSourceAtCursor(resolved.view)
+  }
+
   /**
    * 应用可读行宽设置（#175；settings.snapshot / settings.changed 到达时）：
    * - 非 0 档：把两模式限宽变量（--vsidian-reading-max-width /
@@ -10491,6 +10522,37 @@ export class WebviewSyncController {
           overlayImgLoaded: imageOverlayImgLoaded,
         }
       : undefined
+    // #567（T02）块级原生 HTML 绘制探针：渲染根计数 + 可见性（任一根
+    // rect 有面积且 elementFromPoint 命中自身子树）+ 合并单元格命中证据
+    // + 净化负向计数（script/on* 残留，期望恒 0）。live 态光标在块外才
+    // 有 widget（触及显形是规格行为，非样式失效）
+    const htmlScope = this.viewMode === 'reading' ? this.readingContainer : view.contentDOM
+    const htmlRootEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLElement>('.vsidian-live-html, .vsidian-reading-html')]
+      : []
+    const htmlRoots = htmlRootEls.length
+    let htmlVisible = false
+    for (const root of htmlRootEls) {
+      if (hitPaintedElement(root)) {
+        htmlVisible = true
+        break
+      }
+    }
+    const mergedCellEl = htmlRootEls
+      .flatMap((root) => [...root.querySelectorAll<HTMLElement>('td[colspan], td[rowspan], th[colspan], th[rowspan]')])
+      [0] ?? null
+    const htmlPaint = {
+      roots: htmlRoots,
+      visible: htmlVisible,
+      mergedCell: mergedCellEl
+        ? { hit: hitPaintedElement(mergedCellEl), borderWidth: getComputedStyle(mergedCellEl).borderTopWidth }
+        : null,
+      scripts: htmlRootEls.reduce((n, r) => n + r.querySelectorAll('script').length, 0),
+      eventAttrs: htmlRootEls.reduce(
+        (n, r) => n + [...r.querySelectorAll('*')]
+          .reduce((m, el) => m + [...el.attributes].filter((a) => a.name.toLowerCase().startsWith('on')).length, 0),
+        0),
+    }
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
     // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。分组线
@@ -10775,6 +10837,9 @@ export class WebviewSyncController {
         dynamicLanguages: [...dynamicRenderedFenceLanguageSnapshot()],
       },
       imageChrome,
+      // #567（T02）块级原生 HTML 绘制观测（live：.vsidian-live-html /
+      // reading：.vsidian-reading-html；无渲染根时缺省）
+      ...(htmlRoots > 0 ? { html: htmlPaint } : {}),
       quickActions,
       code,
       fm,

@@ -1,0 +1,374 @@
+// Live 块级原生 HTML 装饰（#567/T02，规格「Live 的状态与选区」表）：
+// - 块表：Lezer HTMLBlock 节点派生（shared/htmlBlock 的顶层扫描——与
+//   Reading 侧 markdown-it html_block token 两端对拍钉住），增量重建
+//   （种子 = 变更区间 ∪ 相交旧块，窗口内树扫描、窗口外映射保留）。
+// - 片段替换装饰：未触及 = **精确区间 [from, to] inline replace widget**
+//   （liveEmbed #247 同款——保持 inline 是键盘垂直导航可进入该行的前提，
+//   块级 replace 会被 CM6 跳过整行）；触及（selectionTouchesRange 语义：
+//   折叠光标含两端、非空选区严格相交、任一 range 命中）= 撤下 widget
+//   源码显形，**不扩大到相邻文字/整行**，兄弟块独立显隐；命中显形
+//   （hitIntersectsRange，查找定位/锚点导航抵达源码区间）同列触发。
+// - 纯 <style> 块（Q6A）：恒不发射装饰——源码常显可直接编辑，不占位。
+// - 普通点击进入源码：widget ignoreEvent=false（点击落父编辑器选区管
+//   线），另有 mousedown 拦截器把**无修饰左键**点击转成「选中该片段完整
+//   源码」（规格「普通点击渲染内容或编辑按钮 → 选中完整源码」）；修饰
+//   键点击（shift 扩选等）放行默认链——正反向跨块选择不扩选。
+// - 显隐切换不产生文档修改或独立撤销历史（纯装饰派生，零写回）。
+// - IME：组合发生在 CM6 文本层（组合期光标在已显形源码内 → 触及恒成立
+//   不重挂 widget；组合在片段外 → widget 与组合节点不同 DOM 区域）——
+//   与 liveInstance 组合门控族无交叉，无需额外冻结（推断依据：
+//   selectionTouchesRange 在组合期内恒命中已显形区间）。
+import { Facet, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
+import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
+import { selectionTouchesRange } from './liveDecorations'
+import { liveDecorationsField } from './liveDecorations'
+import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
+import { isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree, type HtmlBlockSpan } from '../shared/htmlBlock'
+import { htmlBlockRenderHtml } from './htmlSanitize'
+import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
+import { t } from '../shared/i18n'
+import type { Tree } from '@lezer/common'
+
+/** #567 Live HTML 块宿主稳定类名（样式契约 content 域 live-html-widget
+ *  条目同源；宿主兼任 hover 边框与编辑按钮的定位包裹层） */
+export const LIVE_HTML_CLASS_NAMES = {
+  /** widget 根宿主（inline replace 的替换物，块级呈现；携带源码区间
+   *  dataset 供点击拦截器定位） */
+  host: 'vsidian-live-html',
+  /** 净化内容容器（原生语义 DOM 的直接父级——docScope 标记面） */
+  content: 'vsidian-live-html-content',
+} as const
+
+/** 装饰实例缓存上限（键 = 源文 + 区间 + docScope；与 liveEmbed 同量级） */
+export const liveHtmlDecoCacheLimit = 64
+
+/** 一个 Live HTML 块（LF 全文 offset，end 不含；source 为源文全量） */
+export interface LiveHtmlSpan extends HtmlBlockSpan {
+  source: string
+}
+
+/** 树窗口内顶层 HTMLBlock 扫描（表构建/增量重建共用） */
+function scanHtmlSpans(doc: Text, tree: Tree, from: number, to: number): LiveHtmlSpan[] {
+  const spans = topLevelHtmlBlockSpansOfTree(tree)
+    .filter((s) => s.to > from && s.from < to)
+  return spans.map((s) => ({ from: s.from, to: s.to, source: doc.sliceString(s.from, s.to) }))
+}
+
+/** 全树扫描（文档装载/resync 的全量路径） */
+function scanAllHtmlSpans(doc: Text, tree: Tree | null): LiveHtmlSpan[] {
+  if (!tree) {
+    return []
+  }
+  return topLevelHtmlBlockSpansOfTree(tree)
+    .map((s) => ({ from: s.from, to: s.to, source: doc.sliceString(s.from, s.to) }))
+}
+
+/**
+ * 块表增量重建（liveEmbed.rebuildEmbedSpans 同款纪律）：种子 = 变更区间
+ * （新坐标）∪ 映射后与之相交的旧块；窗口内树扫描（树是权威——HTMLBlock
+ * 的界定来自解析器，不猜嵌套），窗口外映射保留。坍缩条目（区间倒挂）
+ * 丢弃。树缺席（liveDecorationsField 未初始化）时保持旧表——发射层仍有
+ * 语法兜底。
+ */
+export function rebuildHtmlSpans(
+  doc: Text,
+  tr: Transaction,
+  prev: readonly LiveHtmlSpan[],
+  tree: Tree | null,
+): LiveHtmlSpan[] {
+  const changes = tr.changes
+  let seedFrom = doc.length + 1
+  let seedTo = -1
+  changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+    seedFrom = Math.min(seedFrom, fromB)
+    seedTo = Math.max(seedTo, toB)
+  })
+  if (seedTo < 0) {
+    return prev as LiveHtmlSpan[]
+  }
+  const mapped = prev.map((s) => ({
+    from: changes.mapPos(s.from, 1),
+    to: changes.mapPos(s.to, -1),
+    source: s.source,
+  }))
+  for (const m of mapped) {
+    if (m.to + 1 >= seedFrom && m.from <= seedTo + 1) {
+      seedFrom = Math.min(seedFrom, m.from)
+      seedTo = Math.max(seedTo, m.to)
+    }
+  }
+  if (tree === null) {
+    // 树缺席（理论不可达——docChanged 时 liveDecorationsField 先行重建）：
+    // 保守只做映射，不产新块（降级方向 = 不渲染新 html，源码可见）
+    return mapped.filter((m) => m.to > m.from)
+  }
+  const out: LiveHtmlSpan[] = []
+  for (const m of mapped) {
+    if (m.to <= m.from) {
+      continue // 坍缩产物（整块删除）
+    }
+    if (m.to < seedFrom || m.from > seedTo) {
+      out.push(m) // 窗口外保留（映射语义：未受变更影响的块）
+    }
+  }
+  out.push(...scanHtmlSpans(doc, tree, Math.max(0, seedFrom), Math.min(doc.length, seedTo)))
+  out.sort((a, b) => a.from - b.from)
+  return out
+}
+
+/** 全文档 HTML 块表：docChanged 时增量重建；树变化（增量解析推进）同样
+ *  重建；纯选区移动零成本。树取自 liveDecorationsField（装配序在其后） */
+export const liveHtmlSpansField = StateField.define<readonly LiveHtmlSpan[]>({
+  create(state) {
+    return scanAllHtmlSpans(state.doc, state.field(liveDecorationsField, false)?.tree ?? null)
+  },
+  update(value, tr) {
+    const treeChanged =
+      tr.startState.field(liveDecorationsField, false) !== tr.state.field(liveDecorationsField, false)
+    if (!tr.docChanged && !treeChanged) {
+      return value
+    }
+    if (!tr.docChanged && treeChanged) {
+      // 树推进（解析追上文档）：全树重扫对齐（低频路径——resync/装载）
+      return scanAllHtmlSpans(tr.state.doc, tr.state.field(liveDecorationsField, false)?.tree ?? null)
+    }
+    return rebuildHtmlSpans(tr.state.doc, tr, value,
+      tr.state.field(liveDecorationsField, false)?.tree ?? null)
+  },
+})
+
+/** 文档身份标记（T01 探针 b2 隔离基座）：根正文注入 'doc'，嵌入内部
+ *  Live 的目标身份键随 T04 装载器接线；缺省不挂标记 */
+const liveHtmlDocScopeFacet = Facet.define<string | null, string | null>({
+  combine: (values) => values[values.length - 1] ?? null,
+})
+
+/** docScope 装配扩展（syncController 经 extraExtensions 注入根正文） */
+export function liveHtmlDocScope(scope: string): Extension {
+  return liveHtmlDocScopeFacet.of(scope)
+}
+
+/**
+ * 装饰构建（纯数据输入，可单测直驱）：逐块发射——未触及且非纯 style →
+ * 精确区间 inline replace widget；触及（选区或命中显形）或纯 style →
+ * 不发射（源码可见）。frontmatter 内不发射（头区不产正文装饰）。
+ */
+export function buildLiveHtmlDecorationRanges(
+  selection: import('@codemirror/state').EditorSelection,
+  spans: readonly LiveHtmlSpan[],
+  fm: { end: number } | null,
+  docScope: string | null,
+  hits: readonly HitRange[] = [],
+): Array<Range<Decoration>> {
+  const out: Array<Range<Decoration>> = []
+  for (const span of spans) {
+    if (fm && span.from < fm.end) {
+      continue
+    }
+    if (isPureStyleHtmlBlock(span.source)) {
+      continue // Q6A：纯 style 块源码常显，不占位
+    }
+    const touched = selectionTouchesRange(selection, span.from, span.to) ||
+      hitIntersectsRange(hits, span.from, span.to)
+    if (!touched) {
+      out.push(liveHtmlWidgetDeco(span.source, span.from, span.to, docScope).range(span.from, span.to))
+    }
+  }
+  return out
+}
+
+// ---- widget 与装饰实例缓存 ----
+
+/**
+ * Live HTML 块 widget：宿主 div（块级呈现 + hover 边框 + 右上角编辑按钮
+ * ——复用图形块按钮族 DOM/CSS，仅 edit 钮）内挂净化后的原生语义 DOM。
+ * ignoreEvent=false：点击落父编辑器选区管线（规格「HTML 内部普通点击仍
+ * 优先进入源码」）；无修饰左键由 mousedown 拦截器转完整源码选区。
+ * 宿主携带源码区间 dataset（拦截器与编辑按钮的目标面）与 docScope
+ * 标记（T04 隔离基座——挂在内容语义根上，系统 chrome 不挂）。
+ */
+export class LiveHtmlWidget extends WidgetType {
+  constructor(
+    readonly source: string,
+    readonly from: number,
+    readonly to: number,
+    readonly docScope: string | null,
+  ) {
+    super()
+  }
+
+  eq(other: LiveHtmlWidget): boolean {
+    return other.source === this.source && other.from === this.from &&
+      other.to === this.to && other.docScope === this.docScope
+  }
+
+  get lineBreaks(): number {
+    return 1
+  }
+
+  toDOM(): HTMLElement {
+    const host = document.createElement('div')
+    host.className = LIVE_HTML_CLASS_NAMES.host
+    host.dataset['vsidianHtmlFrom'] = String(this.from)
+    host.dataset['vsidianHtmlTo'] = String(this.to)
+    const content = document.createElement('div')
+    content.className = LIVE_HTML_CLASS_NAMES.content
+    if (this.docScope !== null) {
+      content.dataset['vsidianDocScope'] = this.docScope
+    }
+    content.innerHTML = htmlBlockRenderHtml(this.source)
+    const chrome = buildGraphicChrome({
+      // 编辑源码：与内容点击/键位操作同一执行体——选中完整源码区间
+      // （selectionTouchesRange 命中 → 既有源码显形管线接管）
+      onEdit: () => {
+        const view = EditorView.findFromDOM(host)
+        if (view) {
+          view.dispatch({ selection: { anchor: this.from, head: this.to } })
+          view.focus()
+        }
+      },
+    })
+    host.append(content, chrome)
+    // 悬停提示（tooltip 规格接管机制：data-tooltip 唯一承载）
+    host.setAttribute('data-tooltip', t('html.blockTooltip'))
+    return host
+  }
+
+  ignoreEvent(): boolean {
+    return false // 点击不吞——普通点击进入源码（规格红线）
+  }
+}
+
+const decoCache = new Map<string, ReturnType<typeof Decoration.replace>>()
+
+/** widget 装饰实例缓存（同键复用，RangeSet.eq 前提；liveEmbed 同款 LRU） */
+export function liveHtmlWidgetDeco(
+  source: string,
+  from: number,
+  to: number,
+  docScope: string | null,
+): ReturnType<typeof Decoration.replace> {
+  const key = `${docScope ?? ''}::${from}::${to}::${source}`
+  const hit = decoCache.get(key)
+  if (hit) {
+    decoCache.delete(key)
+    decoCache.set(key, hit)
+    return hit
+  }
+  const deco = Decoration.replace({ widget: new LiveHtmlWidget(source, from, to, docScope) })
+  decoCache.set(key, deco)
+  while (decoCache.size > liveHtmlDecoCacheLimit) {
+    const oldest = decoCache.keys().next().value
+    if (oldest === undefined) {
+      break
+    }
+    decoCache.delete(oldest)
+  }
+  return deco
+}
+
+/** HTML 块装饰（StateField，CM6 硬约束——跨行 replace 只能来自
+ *  StateField）；块表/树/选区/命中集任一变化时重建 */
+export const liveHtmlDecorations = StateField.define<DecorationSet>({
+  create(state) {
+    const deco = state.field(liveDecorationsField, false)
+    if (!deco) {
+      return RangeSet.empty
+    }
+    return RangeSet.of(
+      buildLiveHtmlDecorationRanges(
+        state.selection,
+        state.field(liveHtmlSpansField, false) ?? [],
+        deco.fm,
+        state.facet(liveHtmlDocScopeFacet),
+        hitRangesOf(state),
+      ),
+      true,
+    )
+  },
+  update(value, tr) {
+    const spansChanged =
+      tr.startState.field(liveHtmlSpansField, false) !== tr.state.field(liveHtmlSpansField, false)
+    const liveDecoChanged =
+      tr.startState.field(liveDecorationsField, false) !== tr.state.field(liveDecorationsField, false)
+    const hitsChanged =
+      tr.startState.field(hitRevealField, false) !== tr.state.field(hitRevealField, false)
+    if (!tr.docChanged && tr.selection === undefined && !spansChanged && !liveDecoChanged && !hitsChanged) {
+      return value
+    }
+    const deco = tr.state.field(liveDecorationsField, false)
+    if (!deco) {
+      return RangeSet.empty
+    }
+    return RangeSet.of(
+      buildLiveHtmlDecorationRanges(
+        tr.state.selection,
+        tr.state.field(liveHtmlSpansField, false) ?? [],
+        deco.fm,
+        tr.state.facet(liveHtmlDocScopeFacet),
+        hitRangesOf(tr.state),
+      ),
+      true,
+    )
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})
+
+/**
+ * 普通点击进入源码（mousedown 拦截器）：无修饰左键落在 HTML widget 渲染
+ * 内容上 → 选中该片段完整源码并显形（返回 true 吞掉 CM6 默认光标落位）。
+ * 修饰键（shift 扩选/ctrl/alt/meta）与右键放行默认链——正反向跨块选择
+ * 不扩选、上下文菜单不受影响；按钮组自有 mousedown（preventDefault），
+ * 先排除避免双发。
+ */
+function htmlWidgetMousedown(event: MouseEvent, view: EditorView): boolean {
+  if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+    return false
+  }
+  const target = event.target
+  if (!(target instanceof Element)) {
+    return false
+  }
+  if (target.closest(`.${GRAPHIC_CHROME_CLASS_NAMES.chrome}`) !== null) {
+    return false // 编辑按钮自有处理（onEdit 同一执行体）
+  }
+  const host = target.closest<HTMLElement>(`.${LIVE_HTML_CLASS_NAMES.host}`)
+  if (host === null) {
+    return false
+  }
+  const from = Number(host.dataset['vsidianHtmlFrom'])
+  const to = Number(host.dataset['vsidianHtmlTo'])
+  if (!Number.isInteger(from) || !Number.isInteger(to) || to <= from || to > view.state.doc.length) {
+    return false
+  }
+  view.dispatch({ selection: { anchor: from, head: to } })
+  view.focus()
+  return true
+}
+
+/**
+ * 「编辑当前 HTML 源码」执行体（键位操作/编辑按钮/内容点击三入口同源）：
+ * 光标（主 range head）落在任一 html 块区间内（含边界）→ 选中该片段完整
+ * 源码；无命中静默不动作（选区不变）。
+ */
+export function revealHtmlSourceAtCursor(view: EditorView): boolean {
+  const spans = view.state.field(liveHtmlSpansField, false)
+  if (!spans || spans.length === 0) {
+    return false
+  }
+  const head = view.state.selection.main.head
+  const hit = spans.find((s) => s.from <= head && head <= s.to)
+  if (!hit) {
+    return false
+  }
+  view.dispatch({ selection: { anchor: hit.from, head: hit.to } })
+  return true
+}
+
+/** Live HTML 扩展装配：块表 + 装饰 + 点击拦截（纯装饰无键位语义，装配于
+ *  liveEmbed 之后同组；docScope 由视图装配层经 liveHtmlDocScope 注入） */
+export const liveHtml: Extension = [
+  liveHtmlSpansField,
+  liveHtmlDecorations,
+  EditorView.domEventHandlers({ mousedown: htmlWidgetMousedown }),
+]

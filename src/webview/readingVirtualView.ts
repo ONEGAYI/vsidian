@@ -85,6 +85,10 @@ export interface VirtualReadingViewOptions {
    *  链路——阅读与 Live 共享同一折叠状态集）；缺省无折叠交互（引用
    *  内容等只读场景）。 */
   onFoldToggle?: (key: number) => void
+  /** #567（T02）文档身份标记（T01 探针 b2 隔离基座）：在场时 html 块
+   *  渲染根挂 data-vsidian-doc-scope；嵌入实例接目标身份键随 T04 装载
+   *  器落地，缺省不挂。 */
+  docScope?: string
 }
 
 /** 实测块外高：offsetHeight + 上下 margin（jsdom 无计算值时 margin 记 0） */
@@ -326,7 +330,7 @@ export class VirtualReadingView {
       // 无布局回退：#6 全量渲染路径（结构与锚点语义不变；图片照常预备）
       this.virtualized = false
       for (const block of this.blocks) {
-        const el = createReadingBlockElement(block, this.text)
+        const el = createReadingBlockElement(block, this.text, this.hooks.docScope)
         this.decorateFoldControls(el, block)
         this.container.appendChild(el)
         this.hooks.onBlockMounted?.(el)
@@ -910,7 +914,7 @@ export class VirtualReadingView {
 
   private mountBlock(i: number): void {
     const block = this.blocks[i]!
-    const el = createReadingBlockElement(block, this.text)
+    const el = createReadingBlockElement(block, this.text, this.hooks.docScope)
     this.decorateFoldControls(el, block)
     if (block.start === this.highlightSrcStart) {
       // #14 查找命中块：滚动窗口平移导致重挂载后高亮保持

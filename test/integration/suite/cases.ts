@@ -837,6 +837,15 @@ interface ViewState {
       error: number
       count: number
     }
+    /** #567（T02）块级原生 HTML 绘制：渲染根可见性 + 合并单元格命中 +
+     *  净化负向计数（script/on* 残留期望恒 0） */
+    html?: {
+      roots: number
+      visible: boolean
+      mergedCell: { hit: boolean; borderWidth: string | null } | null
+      scripts: number
+      eventAttrs: number
+    }
     /** #106 分割线绘制：当前激活视图内首个渲染态横线的可见性与计数 */
     hr?: {
       visible: boolean
@@ -18799,5 +18808,67 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSessionReady(file)
     await waitViewState(file, (v) => v.selectionOffset === offset, 0, 30000)
     assert(await readDisk(file) === diskBefore, '快速切页应保持源文零写回')
+  }],
+
+  // ---- #567（T02）块级原生 HTML 双模式渲染 ----
+  // 真宿主 webview 内验证首条用户路径：带 colspan/rowspan 的 HTML 表格在
+  // Live（片段替换 widget）与 Reading（净化块渲染）两模式的绘制层证据
+  // （paint.html：渲染根命中 + 合并单元格 elementFromPoint 命中——「仅
+  // 元素数量不通过」的验收口径）与净化负向（渲染根内 script/on* 残留
+  // 恒 0、磁盘零写回）。
+  ['块级 HTML：双模式合并单元格绘制与净化负向（#567）', async () => {
+    const file = 'block-html-567.md'
+    const htmlTable = [
+      '<table>',
+      '  <tr>',
+      '    <td colspan="2" rowspan="3">合并单元格</td>',
+      '    <td onclick="evil()">普通格</td>',
+      '  </tr>',
+      '</table>',
+    ].join('\n')
+    const doc = [
+      '# 块级 HTML 样例',
+      '',
+      htmlTable,
+      '',
+      '<div onclick="evil()">可点击</div><script>evil()</script>',
+      '',
+      '结尾段落。',
+    ].join('\n')
+    await writeFile(nodePath.join(wsDir!, file), doc, 'utf8')
+    const diskBefore = await readDisk(file)
+    try {
+      await openWithEditor(file)
+      await waitSessionReady(file)
+      // Live 起步：光标在文档首（块外）——表格块以片段替换 widget 渲染
+      const live = await waitViewState(file, (v) =>
+        v.viewMode === 'live' && v.paint?.html !== undefined && v.paint.html.roots >= 2, 0, 30000)
+      const liveHtml = live.paint!.html!
+      assert(liveHtml.visible === true, `Live 渲染根实际可见（elementFromPoint 命中，实际 ${JSON.stringify(liveHtml)}）`)
+      assert(liveHtml.mergedCell !== null && liveHtml.mergedCell.hit === true,
+        `Live 合并单元格绘制层命中（实际 ${JSON.stringify(liveHtml.mergedCell)}）`)
+      // 边框宽为观测字段（原生表格默认无边框，0px 合法）；合并单元格的
+      // 绘制层证据 = 合并格中心 elementFromPoint 命中（上方断言）
+      assert(liveHtml.scripts === 0, `Live 渲染根内 script 残留应为 0（实际 ${liveHtml.scripts}）`)
+      assert(liveHtml.eventAttrs === 0, `Live 渲染根内 on* 事件属性残留应为 0（实际 ${liveHtml.eventAttrs}）`)
+
+      // Reading：html 块净化渲染（合并单元格 + 负向同口径）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
+      const reading = await waitViewState(file, (v) =>
+        v.viewMode === 'reading' && v.paint?.html !== undefined && v.paint.html.roots >= 2, 0, 30000)
+      const readingHtml = reading.paint!.html!
+      assert(readingHtml.visible === true, 'Reading 渲染根实际可见')
+      assert(readingHtml.mergedCell !== null && readingHtml.mergedCell.hit === true,
+        `Reading 合并单元格绘制层命中（实际 ${JSON.stringify(readingHtml.mergedCell)}）`)
+      assert(readingHtml.scripts === 0 && readingHtml.eventAttrs === 0,
+        `Reading 净化负向：script/on* 残留恒 0（实际 ${readingHtml.scripts}/${readingHtml.eventAttrs}）`)
+      assert((reading.readingBlockCount ?? 0) >= 4, 'Reading 块序列含 html 块（标题/表格/恶意/结尾）')
+
+      // 零写回：渲染与模式切换不写磁盘、不改源文
+      assert(await readDisk(file) === diskBefore, '渲染与切换零磁盘写回')
+      assert(reading.text === doc, '源文逐字节不变（不序列化浏览器修复 DOM）')
+    } finally {
+      await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
+    }
   }],
 ]

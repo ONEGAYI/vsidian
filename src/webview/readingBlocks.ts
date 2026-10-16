@@ -10,14 +10,19 @@
 // - 语义来源换成 markdown-it token 流（规格「阅读渲染用 markdown-it」）：
 //   嵌套引用/列表、setext 标题、围栏语言等按真实 Markdown 语义切块渲染；
 //   行内粗斜体/行内代码经渲染器输出语义标签（em/strong/code）
-// - 安全：html:false + 渲染后 DOM 纵深净化（见 readingMarkdown.ts）；
-//   frontmatter 手工提取为源码块（两视图共用 markdownDoc.frontmatterRange，
-//   头块内 `#` 等不作为 Markdown 解析——语义一致的边界）
+// - 安全：html:false（行内 HTML 转义、表格 br 局部放行——T03 前行内混排
+//   不变）+ 块级 HTML 专用净化边界（#567/T02：htmlSanitize 白名单第一道
+//   闸）+ 渲染后 DOM 纵深净化（sanitizeReadingDom 第二道闸，见
+//   readingMarkdown.ts）；frontmatter 手工提取为源码块（两视图共用
+//   markdownDoc.frontmatterRange，头块内 `#` 等不作为 Markdown 解析——
+//   语义一致的边界）
 // - 大围栏按行细分：超过 FENCE_CHUNK_LINES 行的围栏按块切分为多个挂载
 //   单位（#7「超大单块」限制的缓解；细分后仍按 #7 机制挂载/回收）
 // - 未支持语法（脚注 [^1]、定义列表等）由 markdown-it 按普通段落文本
 //   渲染——保留原文的局部源码降级，不触发整篇改写
 import { frontmatterRange } from '../shared/markdownDoc'
+import { isPureStyleHtmlBlock } from '../shared/htmlBlock'
+import { htmlBlockRenderHtml } from './htmlSanitize'
 import { maskCodeSpanPipes, quoteTableRowsDegraded } from '../shared/tableCells'
 import { stripHtmlComments } from './htmlComment'
 // #163 验收反馈：块 id 标记阅读隐藏（渲染前剥离，行数不变保锚点坐标系）
@@ -37,7 +42,8 @@ import {
 import type { Env, Token } from 'markdown-it'
 
 /** 阅读块种类（#8：完整 Markdown 语义；#12 表格独立成块；#59 公式块；
- *  #60 Mermaid 围栏整块成块；#222 嵌入独占行成块） */
+ *  #60 Mermaid 围栏整块成块；#222 嵌入独占行成块；#567（T02）块级原生
+ *  HTML 成块——html_block token 不再跳过，净化后渲染） */
 export type ReadingBlockKind =
   | 'frontmatter'
   | 'heading'
@@ -50,6 +56,7 @@ export type ReadingBlockKind =
   | 'math'
   | 'mermaid'
   | 'embed'
+  | 'html'
 
 /** 完整围栏的代码体坐标；同一围栏的所有分片共享，不存逐片全文。 */
 export interface ReadingCodeFence {
@@ -342,9 +349,9 @@ function splitBody(
       i = j + 1
       continue
     }
-    // 叶子块（fence / hr / code_block / html_block 等）
+    // 叶子块（fence / hr / code_block / html_block …）
     const map = token.map
-    if (map && token.type !== 'html_block') {
+    if (map) {
       pushBlock(text, env, baseLine, blocks, lines, [token], map, token)
     }
     i += 1
@@ -378,6 +385,25 @@ function pushBlock(
   }
   const start = env.lineStarts[startLine] ?? 0
   const end = env.lineEnds[endLine] ?? Math.max(start, text.length - 1)
+
+  if (opener.type === 'html_block') {
+    // #567（T02）块级原生 HTML：不再跳过——token.content 是 html:false 下
+    // 未转义的原块源文（Reading 的解析前注释剥离已在 splitBody 先行，此
+    // 处内容即注释已剥离的形态——两端差异按既有基线钉住）；渲染走专用
+    // 净化边界（htmlSanitize，白名单第一道闸 + 挂载层 sanitizeReadingDom
+    // 第二道闸），纯 <style> 块隐藏（Q6A，T04 从源文装载）。html:false
+    // 维持锁定：行内 HTML 转义与表格 br 局部放行语义不因块级接入改变
+    // （行内混排归 T03）
+    blocks.push({
+      kind: 'html',
+      start,
+      end,
+      html: isPureStyleHtmlBlock(opener.content ?? '')
+        ? ''
+        : htmlBlockRenderHtml(opener.content ?? ''),
+    })
+    return
+  }
 
   if (opener.type === 'fence') {
     // #60：mermaid 围栏整块成块（html 为挂载后渲染的容器，见 fence 渲染

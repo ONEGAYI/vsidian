@@ -82,6 +82,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 2026-10 修复合入列：dropCursorPaint（拖放落点光标——拖动选中文本悬停
   // 期间 .cm-dropCursor 真实画出/定位、落位后撤下、文本真实落位）紧随
   // multicursor 族（同选区/光标绘制层）
+  // #567（T02）块级原生 HTML：紧随 liveEmbed（同片段替换装饰族——真实
+  // 点击/方向键/跨块选区/多选区/纯 style 常显/净化负向/阅读态渲染）
+  'liveHtml',
   'dropCursorPaint', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',

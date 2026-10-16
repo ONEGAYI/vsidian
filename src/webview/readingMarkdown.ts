@@ -1,7 +1,10 @@
 // 阅读视图 markdown-it 渲染层（工单 #8）：安全配置 + 源锚点 + DOM 净化。
 //
-// 安全边界（规格「不将 Markdown 原文作为可执行 HTML」）：
-// - html:false：Markdown 内联 HTML 转义为纯文本；仅表格内无属性 br 作为换行处理
+// 安全边界（规格「不将 Markdown 原文作为可执行 HTML」；#567/T02 改版）：
+// - html:true 供块级 HTML 接入（html:false 下 markdown-it 不产 html_block
+//   token，15.0.2 实测）；行内 HTML 经 html_inline 渲染规则覆盖为转义
+//   （字面呈现，T03 行内混排前语义不变）；顶层 html_block 由切块层走
+//   专用净化边界（htmlSanitize），容器内 html_block 经渲染规则覆盖转义
 // - linkify/typographer 关闭：URL 自动发现与排版替换均不启用
 // - markdown-it 默认 validateLink 拦截 javascript:/vbscript: 等危险协议
 // - sanitizeReadingDom：进入 DOM 后的防御性二次清洗（纵深防御——清洗
@@ -378,18 +381,32 @@ function embedSlotHtml(inner: string): string {
 
 /**
  * 创建阅读渲染器（安全配置锁定；渲染规则一次性装配，实例应复用）。
- * 安全锁定的边界（#423 重协商）：html/linkify/typographer 恒锁定——
- * 它们分别引入 HTML 注入、自动链接化与改写排版的攻击/语义面；breaks
- * 只影响段内换行的呈现语义（软换行是否渲染 <br>），不引入新的 HTML、
- * 链接化或排版改写面，#423 起作为用户设置开放（默认 false 维持严格）。
+ * 安全锁定的边界（#423 重协商；#567/T02 块级 HTML 接入改版）：
+ * - **html:true（#567）**：markdown-it 在 html:false 下完全不产 html_block
+ *   token（块级 HTML 退化为段落转义文本——15.0.2 实测），块级接入必须
+ *   放行块层。行内 HTML 维持字面：html_inline 渲染规则覆盖为转义（T03
+ *   行内混排前的既有语义）；**非顶层**（引用/列表容器内）的 html_block
+ *   同样经渲染规则覆盖转义——顶层 html_block 在 readingBlocks 切块层走
+ *   专用净化边界（htmlSanitize 白名单 + sanitizeReadingDom 纵深），容器
+ *   内维持源码降级（两端一致边界，容器接入归后续票）。
+ * - linkify/typographer 关闭：URL 自动发现与排版替换均不启用（恒锁）。
+ * - markdown-it 默认 validateLink 拦截 javascript:/vbscript: 等危险协议。
+ * - sanitizeReadingDom：进入 DOM 后的防御性二次清洗（纵深防御——清洗
+ *   script/iframe/style、行内事件属性、javascript: 链接）
  */
 export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceType<typeof MarkdownIt> {
   const md = new MarkdownIt({
-    html: false,
+    html: true,
     linkify: false,
     typographer: false,
     breaks: opts?.breaks === true,
   })
+  // #567（T02）行内 HTML 字面化：html_inline 渲染覆盖为转义（与 html:false
+  // 的呈现逐字节同观感；识别仍由解析层完成，token 边界不进渲染产物）
+  md.renderer.rules['html_inline'] = (tokens, idx) => escapeHtml(tokens[idx]!.content)
+  // #567（T02）容器内 html_block 字面化：顶层块由切块层消费（不进本渲染
+  // 器）；引用/列表等容器内到达本规则的块保持转义源文（降级方向安全）
+  md.renderer.rules['html_block'] = (tokens, idx) => escapeHtml(tokens[idx]!.content)
   // #11 双链规则先于 link（[t](u)）：`[[…]]` 在 CommonMark 中只是普通文本，
   // 必须在文本规则消费前拦截
   md.inline.ruler.before('link', 'vsidian_wikilink', vsidianWikilinkInlineRule)
@@ -414,7 +431,8 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
   // #60 Mermaid：fence 规则覆盖为容器输出（挂载后经 DOM API 渲染 SVG）
   installMermaidFenceRenderer(md)
   // 编辑态把格内回车存成 br。阅读态只在表格 inline token 里重新解析
-  // 无属性 br；全局 html:false 继续转义其他 HTML，代码片段由解析器保留字面值。
+  // 无属性 br；#567 起 html:true 下其余 HTML 经 html_inline 渲染覆盖转义
+  // （含格内重解析产物——全局字面，代码片段由解析器保留字面值）。
   // #248 格内嵌入：cell 内容含 `![[` 且含 `\|` 时，先按格内语义解码转义
   // 管道（decodeCellView——跳过行内代码 span）再重解析——否则 markdown-it
   // 的 escape 规则先消费 `\|`，把 `![[B\|别名]]` 拆断为 `![[B` + `|` + `别名]]`，
