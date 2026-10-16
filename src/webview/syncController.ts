@@ -63,6 +63,7 @@ import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_K
 import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage } from '../shared/protocol'
 import type { TableEditOp } from '../shared/protocol'
+import type { AddonRefEmbedCardInput } from './addonRefViews'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
@@ -2163,15 +2164,12 @@ export class WebviewSyncController {
    * T06（#545）组件容器嵌入挂载端口（addonRefViews 运行时接线）：经同一
    * EmbedCardManager 只读挂载引用子根——readOnly 来源 + addonSource 覆盖 +
    * 首次装载结局回调（R-U08/R-U04）。会话未握手返回 false（不挂载）。
+   * 输入形状从 AddonRefEmbedCardInput 导入（runtime 端口同源——不手抄第二
+   * 份）。host 固定 'reading'：组件容器是独立宿主形态（非正文 Reading 块/
+   * Live widget），mountCardInto 的 host 类型面无第三值；该值消费面（浮窗
+   * 根判断/双容器移交挑选/probe 观测）对组件嵌入单宿主场景均无行为影响。
    */
-  mountAddonRefEmbed(input: {
-    subRoot: HTMLElement
-    occurrence: string
-    targetText: string
-    sourceDocUri: string
-    addonSource: { instanceId: string; sourceFsPath: string }
-    onFirstOutcome: (outcome: { ok: true } | { ok: false; reason: import('../shared/protocol').HoverPreviewFailReason }) => void
-  }): boolean {
+  mountAddonRefEmbed(input: AddonRefEmbedCardInput): boolean {
     const manager = this.embedCards
     if (!manager || this.sessionId === '' || this.docUri === '') {
       return false
@@ -2180,6 +2178,11 @@ export class WebviewSyncController {
       panelDocUri: this.docUri,
       // main 来源按面板文档解析；embed/hover 来源按其目标文档（R-U02）
       sourceDocUri: input.sourceDocUri !== '' ? input.sourceDocUri : this.docUri,
+      ...(input.sourceDocUri !== ''
+        // 打开通道按直接来源身份出站（embed/hover 来源的 fsPath 形态）；
+        // main 来源不设——面板文档兜底值是 docUri 形态，携带反而会被宿主
+        // hoverSourceFsPaths 守卫丢弃（宁可不动作），不带则正确按面板解析
+        ? { explicitSourceDoc: true } : {}),
       range: { start: 0, end: 0 },
       occurrence: input.occurrence,
       depth: 1,

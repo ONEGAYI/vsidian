@@ -5,6 +5,8 @@
 //（changed 静默重载携带同一 addonSource、deleted 撤内容就地错误、恢复重载）、
 // 整组释放（hover.unwatch 出站、条目彻底终结不复活、重挂同 occurrence 是
 // 全新实例）。真实布局/指针在 test/browser；真宿主租约与回收在集成层。
+// 评审 P2 修复：打开按钮来源身份（组件根卡直接来源 B）与 PDF 首载结算时序
+//（show 完成才兑现首结局——预布局可见态不算内容装载成功）。
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HoverPreviewResult, WebviewToHost } from '../../src/shared/protocol'
@@ -17,6 +19,11 @@ import {
   type EmbedAddonMountOptions,
 } from '../../src/webview/embedCard'
 import type { RefSourceContext } from '../../src/webview/refContentInstance'
+import {
+  __resetPdfjsSingletonsForTest,
+  __setPdfAssetsForTest,
+  type PdfAssetsConfig,
+} from '../../src/webview/pdfRender'
 
 installLocale('zh-cn', zhCn)
 
@@ -300,6 +307,249 @@ describe('整组释放（R-U07 复验）', () => {
     } as Extract<HoverPreviewResult, { ok: true }>)
     const scrollEls = document.querySelectorAll(`.${EMBED_CARD_CLASS_NAMES.scroll}`)
     expect(scrollEls).toHaveLength(2)
+    h.manager.dispose()
+  })
+})
+
+describe('打开按钮来源身份（评审 P2：组件根卡直接来源 B）', () => {
+  const B_SUB_FS = 'D:\\notes\\sub\\b.md'
+  const C_SUB_FS = 'D:\\notes\\sub\\c.md'
+  const C_SUB_TEXT = ['# C 子目录目标', '', '同名目标按 B 目录解析。', ''].join('\n')
+
+  /** A/B 不同目录且面板目录存在同名目标（/notes/c.md 与 /notes/sub/c.md
+   *  都在场）——宿主按 sourceDocUri=B 才解析到 sub 侧；webview 侧契约是
+   *  打开消息携带 B 身份（fsPath 形态） */
+  it('组件根卡（explicitSourceDoc）：打开消息携带 sourceDocUri=B（embed 来源 fsPath，非面板文档）', () => {
+    const h = makeHarness()
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.md', {}, {
+      sourceDocUri: B_SUB_FS,
+      explicitSourceDoc: true,
+    })
+    loadOk(h, 'c.md', C_SUB_TEXT, C_SUB_FS)
+    const openBtn = host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)
+    expect(openBtn).not.toBeNull()
+    openBtn!.click()
+    const activate = h.sent.find((m) => m.kind === 'wikilink.activate')
+    expect(activate && activate.kind === 'wikilink.activate' && activate.sourceDocUri)
+      .toBe(B_SUB_FS)
+    h.manager.dispose()
+  })
+
+  it('组件根卡无显式来源（main 来源兜底面板文档）：打开消息不带 sourceDocUri（按面板目录解析，与正文根卡同语义）', () => {
+    const h = makeHarness()
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.md')
+    loadOk(h, 'c.md', C_SUB_TEXT, C_SUB_FS)
+    host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!.click()
+    const activate = h.sent.find((m) => m.kind === 'wikilink.activate')
+    expect(activate && activate.kind === 'wikilink.activate' && 'sourceDocUri' in activate)
+      .toBe(false)
+    h.manager.dispose()
+  })
+
+  it('递归孙卡对照不回归：打开消息携带 sourceDocUri=父装载目标（parentInstanceId 链）', () => {
+    const h = makeHarness()
+    mountAddonEmbed(h, 'addon-ref-1', 'b.md', {}, { sourceDocUri: B_SUB_FS, explicitSourceDoc: true })
+    loadOk(h, 'b.md', ['# B 目标标题', '', '![[c.md]]', ''].join('\n'), B_SUB_FS)
+    // 孙卡（c.md）装载：child source（parentInstanceId 链）
+    const childReq = requestOf(h, 'c.md')
+    h.manager.notifyResult({
+      kind: 'hover.result', reqId: childReq.reqId, instanceId: childReq.instanceId, ok: true,
+      target: { fsPath: C_SUB_FS, relPath: 'c.md' }, version: 2, text: C_SUB_TEXT,
+      range: { start: 0, end: C_SUB_TEXT.length }, scope: { kind: 'full' },
+      depth: 2, expansionPath: [], sourceLeaseId: `panel-1:source-${childReq.reqId}`,
+    } as Extract<HoverPreviewResult, { ok: true }>)
+    // 孙卡的打开按钮（孙卡卡壳内的 open，非根卡的）
+    const cards = document.body.querySelectorAll(`.${EMBED_CARD_CLASS_NAMES.card}`)
+    expect(cards.length).toBe(2)
+    const childOpen = cards[1]!.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)
+    expect(childOpen).not.toBeNull()
+    childOpen!.click()
+    const activates = h.sent.filter((m) => m.kind === 'wikilink.activate')
+    expect(activates.length).toBe(1) // 根卡 open 未点击——只有孙卡一次
+    expect(activates[0]!.kind === 'wikilink.activate' && activates[0]!.sourceDocUri).toBe(B_SUB_FS)
+    h.manager.dispose()
+  })
+})
+
+// ---- 评审 P2：PDF 首载结算时序（mountEmbed 的 promise 兑现） ----
+// jsdom 以受控 pdfjs 替身驱动：文档 promise 手动兑现，精确卡住「show 完成
+// 前」的时刻。真实绘制在浏览器/集成层（embedCardPdf 同款替身口径）。
+
+const PDF_ASSETS: PdfAssetsConfig = {
+  mainJs: 'https://assets.test/pdfMain.js',
+  workerJs: 'https://assets.test/pdfWorker.js',
+  cMapUrl: 'https://assets.test/cmaps',
+  fontUrl: 'https://assets.test/fonts',
+  wasmUrl: 'https://assets.test/wasm',
+  iccUrl: 'https://assets.test/iccs',
+}
+
+interface FakePdfDoc {
+  numPages: number
+  getPage(): unknown
+}
+
+/** 受控 pdfjs：getDocument 的 promise 由测试手动 resolve（成功文档）/reject
+ *  （InvalidPDF 等——err.name 分态与生产 classifyLoadError 同源） */
+function installControllablePdfjs(): {
+  resolveDoc: (numPages: number) => void
+  rejectDoc: (err: unknown) => void
+} {
+  let settleResolve: ((doc: FakePdfDoc) => void) | null = null
+  let settleReject: ((err: unknown) => void) | null = null
+  const pending = new Promise<FakePdfDoc>((resolve, reject) => {
+    settleResolve = resolve
+    settleReject = reject
+  })
+  const lib = {
+    GlobalWorkerOptions: { workerSrc: '' },
+    getDocument: () => ({
+      promise: pending,
+      destroy: async () => {},
+    }),
+  }
+  ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = lib
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    arrayBuffer: async () => new TextEncoder().encode('fake-pdf-bytes').buffer,
+    text: async () => 'worker-text',
+  })))
+  vi.stubGlobal('Blob', class {})
+  vi.stubGlobal('URL', Object.assign(URL, {
+    createObjectURL: vi.fn(() => 'blob:fake-worker-url'),
+    revokeObjectURL: vi.fn(),
+  }))
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+    return {
+      fillStyle: '',
+      fillRect: () => {},
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4).fill(200),
+      }),
+    } as unknown as CanvasRenderingContext2D
+  })
+  return {
+    resolveDoc: (numPages) => settleResolve!({
+      numPages,
+      getPage: () => ({
+        getViewport: ({ scale }: { scale: number }) => ({ width: 612 * scale, height: 792 * scale }),
+        render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => ({
+          promise: Promise.resolve().then(() => {
+            canvas.width = Math.floor(viewport.width)
+            canvas.height = Math.floor(viewport.height)
+          }),
+          cancel: () => {},
+        }),
+      }),
+    }),
+    rejectDoc: (err) => settleReject!(err),
+  }
+}
+
+/** PDF 载荷成功回包（组件嵌入目标） */
+function pdfReply(
+  req: Extract<WebviewToHost, { kind: 'hover.request' }>,
+): Extract<HoverPreviewResult, { ok: true }> {
+  return {
+    kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+    contentKind: 'pdf',
+    target: { fsPath: 'D:\\notes\\sub\\c.pdf', relPath: 'c.pdf' },
+    version: 2, text: '',
+    range: { start: 0, end: 0 }, scope: { kind: 'pdf' },
+    pdf: { uri: 'https://files.test/c.pdf?v=2', bytes: 1234 },
+    sourceLeaseId: `panel-1:source-${req.reqId}`,
+  } as Extract<HoverPreviewResult, { ok: true }>
+}
+
+/** microtask 泵：推进 show 的装载链直到谓词成立（超时即失败） */
+async function pumpUntil(pred: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 200 && !pred(); i++) {
+    await Promise.resolve()
+  }
+  expect(pred(), label).toBe(true)
+}
+
+describe('PDF 首载结算时序（评审 P2：show 完成才兑现首结局）', () => {
+  beforeEach(() => {
+    __setPdfAssetsForTest(PDF_ASSETS)
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains(EMBED_CARD_CLASS_NAMES.scroll) && this.style.display !== 'none' ? 448 : 0
+    })
+  })
+
+  afterEach(() => {
+    __resetPdfjsSingletonsForTest()
+    __setPdfAssetsForTest(null)
+    ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = undefined
+    vi.unstubAllGlobals()
+  })
+
+  it('文档 promise pending 期间不结算首结局（预布局可见态不算内容装载成功）', async () => {
+    const pdfjs = installControllablePdfjs()
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    // 文档 promise 悬而未决：无论 pump 多少个 microtask，首结局都不得兑现
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toEqual([])
+    // 收尾：成功兑现（避免悬挂的 loading show 影响后续用例）
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => outcomes.length === 1, '成功装载后应兑现 {ok:true}')
+    expect(outcomes).toEqual([{ ok: true }])
+    h.manager.dispose()
+  })
+
+  it('InvalidPDFException → 首结局 {ok:false}（异步失败翻得回来，就地错误分态）', async () => {
+    const pdfjs = installControllablePdfjs()
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.rejectDoc(Object.assign(new Error('invalid pdf'), { name: 'InvalidPDFException' }))
+    await pumpUntil(() => outcomes.length === 1, '装载失败后应兑现 {ok:false}')
+    expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
+    // 错误分态就地呈现（状态行进入错误显示）
+    const state = host.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.state}`)
+    expect(state?.classList.contains(EMBED_CARD_CLASS_NAMES.stateError)).toBe(true)
+    expect(state?.style.display).toBe('')
+    h.manager.dispose()
+  })
+
+  it('成功 load → 首结局 {ok:true}（内容装载成功才返回成功句柄）', async () => {
+    const pdfjs = installControllablePdfjs()
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    // 等内容真实呈现且首结局兑现（probe 的 content 置位先于 show().then
+    // 回调一个 microtask——谓词同时覆盖两者）
+    await pumpUntil(() => h.manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'content') &&
+      outcomes.length === 1, 'PDF 内容呈现且首结局兑现')
+    expect(outcomes).toEqual([{ ok: true }])
+    h.manager.dispose()
+  })
+
+  it('释放后迟到失败不兑现（代次守卫契约维持）', async () => {
+    const pdfjs = installControllablePdfjs()
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toEqual([])
+    // show pending 期间整组释放：firstOutcome 作废
+    h.manager.releaseEmbedMount(host)
+    pdfjs.rejectDoc(Object.assign(new Error('invalid pdf'), { name: 'InvalidPDFException' }))
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toEqual([])
     h.manager.dispose()
   })
 })

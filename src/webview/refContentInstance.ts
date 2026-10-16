@@ -107,6 +107,11 @@ export interface RefSourceContext {
   parentInstanceId?: string
   depth?: number
   treeId?: string
+  /** T06（#545 评审修复）：sourceDocUri 是显式声明的直接来源文档身份
+   *  （fsPath 形态——组件容器嵌入携带，与 parentInstanceId 的递归父链
+   *  无关）。链接执行通道（卡片右上角「打开」）按它出站 sourceDocUri，
+   *  宿主以直接来源文档解析相对路径（R-U02——不回落面板文档目录）。 */
+  explicitSourceDoc?: boolean
   /** 只读请求的能力随引用树传递，任何后代均不得建立目标编辑端口。 */
   readOnly?: boolean
   expansionPath?: readonly RefTargetIdentity[]

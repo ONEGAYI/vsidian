@@ -908,8 +908,10 @@ export class EmbedCardManager {
       }
     })
 
-    // 右上角打开入口：按父文档身份解析（不带 sourceDocUri，与正文双链
-    // 点击同语义）；打开不改写引用原文
+    // 右上角打开入口：按直接来源身份解析——递归子卡（parentInstanceId 链）
+    // 与组件容器嵌入（explicitSourceDoc——评审 P2）带 sourceDocUri（宿主按
+    // 直接来源文档解析相对路径，R-U02）；正文/浮窗根卡不带（与正文双链点击
+    // 同语义，按面板文档解析）；打开不改写引用原文
     handle.content.listen(openBtn, 'click', (event) => {
       event.stopPropagation()
       const session = this.context.session()
@@ -923,7 +925,8 @@ export class EmbedCardManager {
         target: targetOfInner(entry!.inner),
         srcStart: entry!.sourceStart,
         srcEnd: entry!.sourceEnd,
-        ...(entry!.content.source.parentInstanceId !== undefined
+        ...((entry!.content.source.parentInstanceId !== undefined ||
+              entry!.content.source.explicitSourceDoc === true)
           ? { sourceDocUri: entry!.content.source.sourceDocUri } : {}),
       })
     })
@@ -4015,8 +4018,10 @@ export class EmbedCardManager {
       })
     }
     // 先建视口再装载（loading 期滚动区隐藏会取不到内容宽——content 态
-    // 建立视口后 ResizeObserver 兜底宽度变化的重排）
-    this.applyDisplay(handle, 'content', loaded.relPath)
+    // 建立视口后 ResizeObserver 兜底宽度变化的重排）。评审 P2：这是预布局
+    // 可见态而非首载终态——deferFirstOutcome 不兑现首结局（PDF 失败时才
+    // 翻得回来；show 完成后按最终 phase 兑现，T05 浮窗 show 后结算同款）
+    this.applyDisplay(handle, 'content', loaded.relPath, undefined, { deferFirstOutcome: true })
     const inner = handle.scrollEl.clientWidth
     const width = inner > 0 ? inner - 16 : 400
     // occurrence 浏览位置（entry.pdfPage）优先于载荷初始页——resume 语义
@@ -4028,6 +4033,8 @@ export class EmbedCardManager {
     void handle.pdfView.show(loaded.uri, page, width, resume).then((applied) => {
       const view = handle.pdfView
       if (!applied || view === null) {
+        // 被取代/已释放的迟到结果：不兑现（释放路径已作废首结局；新代次
+        // show 由自己的回调兑现——既有代次守卫契约）
         if (view === null) releaseRefSourceLease(this.context, sourceLeaseId)
         return
       }
@@ -4036,13 +4043,18 @@ export class EmbedCardManager {
         releaseRefSourceLease(this.context, sourceLeaseId)
         this.applyDisplay(handle, 'error',
           pdfErrorText(probe.errorReason === '' ? 'resource' : probe.errorReason, probe.requestedPage, probe.totalPages))
-      } else if (probe.phase === 'content' && page !== undefined && page > 1 && probe.page !== page) {
-        // #338：loading 期滚动区布局未定（挂载瞬间 clientHeight 不足使
-        // scrollToPage 的 scrollTop 写入被钳回 0——页码观感退回第一页）。
-        // 内容态建立后重定位到目标页（重定位钳制语义，与浮层 applyHover
-        // PdfContent 的 locateTo 同口径，非初次非法页码报错路径）；resume
-        // 记忆页越界时 show 已钳制呈现，重定位同样按钳制后目标
-        view.locateTo(resume ? Math.min(page, probe.totalPages) : page)
+      } else {
+        // 首载终态：内容装载成功才兑现成功句柄（markdown/text 无异步尾巴
+        // 不经此路径——时序不被拖慢）
+        this.settleFirstOutcomeIfPending(handle.entry, { ok: true })
+        if (probe.phase === 'content' && page !== undefined && page > 1 && probe.page !== page) {
+          // #338：loading 期滚动区布局未定（挂载瞬间 clientHeight 不足使
+          // scrollToPage 的 scrollTop 写入被钳回 0——页码观感退回第一页）。
+          // 内容态建立后重定位到目标页（重定位钳制语义，与浮层 applyHover
+          // PdfContent 的 locateTo 同口径，非初次非法页码报错路径）；resume
+          // 记忆页越界时 show 已钳制呈现，重定位同样按钳制后目标
+          view.locateTo(resume ? Math.min(page, probe.totalPages) : page)
+        }
       }
       this.context.requestMeasure?.()
     })
@@ -4066,12 +4078,15 @@ export class EmbedCardManager {
    *  态（content/error）是附加组件嵌入挂载首结局的唯一兑现漏斗——全部
    *  装载路径（回包成功/失败、预算与深度准入、不可应用载荷）都经本方法
    *  落显示态，reason 由各调用点携带（缺省 read-failed）；一次性兑现，
-   *  loading 不兑现 */
+   *  loading 不兑现。评审 P2：PDF 路径的预布局 content 态（视口建立——
+   *  装载仍未完成）传 deferFirstOutcome 不兑现，show 按最终 phase 落定后
+   *  经 settleFirstOutcomeIfPending 兑现（markdown/text 无异步尾巴不走此路） */
   private applyDisplay(
     handle: EmbedCardHandle,
     display: 'loading' | 'content' | 'error',
     note: string,
     reason?: HoverPreviewFailReason,
+    opts?: { deferFirstOutcome?: boolean },
   ): void {
     handle.display = display
     handle.note = note
@@ -4088,10 +4103,20 @@ export class EmbedCardManager {
       handle.scrollEl.style.display = 'none'
       handle.stateEl.textContent = note
     }
-    if (display !== 'loading' && handle.entry.firstOutcome !== null) {
-      const settle = handle.entry.firstOutcome
-      handle.entry.firstOutcome = null
-      settle(display === 'content' ? { ok: true } : { ok: false, reason: reason ?? 'read-failed' })
+    if (display !== 'loading' && !opts?.deferFirstOutcome) {
+      this.settleFirstOutcomeIfPending(handle.entry, display === 'content'
+        ? { ok: true }
+        : { ok: false, reason: reason ?? 'read-failed' })
+    }
+  }
+
+  /** 首结局漏斗（applyDisplay 结算段的抽出——PDF 异步终态路径在 show 完成
+   *  后单独调用；一次性，pending 已被释放路径作废时 no-op） */
+  private settleFirstOutcomeIfPending(entry: EmbedEntry, outcome: EmbedAddonFirstOutcome): void {
+    if (entry.firstOutcome !== null) {
+      const settle = entry.firstOutcome
+      entry.firstOutcome = null
+      settle(outcome)
     }
   }
 

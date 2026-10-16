@@ -1276,3 +1276,86 @@ describe('附加组件扩展热切换安全收尾（T05）', () => {
     c.dispose()
   })
 })
+
+describe('T06 组件容器嵌入挂载端口（mountAddonRefEmbed）', () => {
+  const B_SUB_FS = 'D:\\notes\\sub\\b.md'
+
+  function mountAddonEmbed(
+    c: WebviewSyncController,
+    sent: WebviewToHost[],
+    over: { sourceDocUri?: string; targetText?: string } = {},
+  ): HTMLElement {
+    const subRoot = document.createElement('div')
+    document.body.appendChild(subRoot)
+    const ok = c.mountAddonRefEmbed({
+      subRoot,
+      occurrence: 'addon-ref-1',
+      targetText: over.targetText ?? 'c.md',
+      sourceDocUri: over.sourceDocUri ?? '',
+      addonSource: { instanceId: 'embed:b', sourceFsPath: B_SUB_FS },
+      onFirstOutcome: () => {},
+    })
+    expect(ok).toBe(true)
+    void sent
+    return subRoot
+  }
+
+  it('embed 来源（B fsPath）：打开按钮出站携带 sourceDocUri=B（直接来源身份，非面板文档）', async () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c)
+      // 组件来源 B=/notes/sub/b.md：请求经 addonSource 出站（宿主按 B 解析）
+      const subRoot = mountAddonEmbed(c, sent, { sourceDocUri: B_SUB_FS })
+      const req = sent.find((m) => m.kind === 'hover.request')
+      expect(req && req.kind === 'hover.request' && req.addonSource)
+        .toEqual({ instanceId: 'embed:b', sourceFsPath: B_SUB_FS })
+      // 点击卡片「打开」：消息携带 B 身份（宿主按 B 目录解析相对目标）
+      const openBtn = subRoot.querySelector<HTMLElement>('.vsidian-embed-card-open')
+      expect(openBtn).not.toBeNull()
+      openBtn!.click()
+      const activate = sent.find((m) => m.kind === 'wikilink.activate')
+      expect(activate && activate.kind === 'wikilink.activate' && activate.sourceDocUri).toBe(B_SUB_FS)
+    } finally {
+      document.body.innerHTML = ''
+      c.dispose()
+    }
+  })
+
+  it('main 来源（sourceDocUri 空串）：打开消息不带 sourceDocUri（按面板文档解析，不回落错误形态）', async () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c)
+      const subRoot = mountAddonEmbed(c, sent, {})
+      const openBtn = subRoot.querySelector<HTMLElement>('.vsidian-embed-card-open')
+      openBtn!.click()
+      const activate = sent.find((m) => m.kind === 'wikilink.activate')
+      expect(activate && activate.kind === 'wikilink.activate' && 'sourceDocUri' in activate).toBe(false)
+    } finally {
+      document.body.innerHTML = ''
+      c.dispose()
+    }
+  })
+
+  it('会话未握手（未 init）：返回 false 不挂载', () => {
+    const { bridge } = makeBridge()
+    const c = mount(bridge)
+    try {
+      const subRoot = document.createElement('div')
+      const ok = c.mountAddonRefEmbed({
+        subRoot,
+        occurrence: 'addon-ref-1',
+        targetText: 'c.md',
+        sourceDocUri: B_SUB_FS,
+        addonSource: { instanceId: 'embed:b', sourceFsPath: B_SUB_FS },
+        onFirstOutcome: () => {},
+      })
+      expect(ok).toBe(false)
+      expect(subRoot.childElementCount).toBe(0)
+    } finally {
+      document.body.innerHTML = ''
+      c.dispose()
+    }
+  })
+})
