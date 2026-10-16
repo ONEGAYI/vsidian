@@ -125,6 +125,22 @@ export class AddonUiRuntime {
     this.makeHandleFn = make
   }
 
+  /**
+   * T06（#545）容器归属查询：元素是否落在该组件**已打开面板的内容根**
+   * （root 本体或其后代——refViews 嵌入挂载的容器合法性判定之一）。
+   * 关闭的面板 root 已置 null 不再归属；面板 chrome（标题栏等平台区）
+   * 不算组件容器空间（root 之外）。
+   */
+  panelAddonOwnerOf(el: HTMLElement): string | null {
+    for (const entry of this.panels.values()) {
+      const root = entry.root
+      if (root !== null && (root === el || root.contains(el))) {
+        return entry.addonId
+      }
+    }
+    return null
+  }
+
   /** SDK ui.registerButton 后端：校验 → 存管 → 模式匹配即挂载 */
   registerButton(
     addonId: string,

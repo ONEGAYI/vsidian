@@ -17,19 +17,22 @@ function rule(selector: string, declaration?: RegExp): string {
   return found[0]!
 }
 
-describe('嵌入卡片 CSS 契约（#222；#223 起卡片壳规则并列 Live 宿主）', () => {
+describe('嵌入卡片 CSS 契约（#222；#223 起卡片壳规则并列 Live 宿主；#545 起并列 T06 组件容器锚点）', () => {
   it('卡片壳：只保留左引用竖条（#217 验收反馈——无底色/无边框/无圆角，与 Reading 正文观感对齐）', () => {
-    // #223 两选择器并列（Reading 块 + Live widget 宿主同款绘制）；组以
-    // Live 选择器置尾，断言组文本同时包含两侧选择器
-    const card = rule('#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card')
+    // #223 两选择器并列（Reading 块 + Live widget 宿主同款绘制）；T06
+    //（#545）追加组件容器锚点（面板内容根 + 渲染提供者容器）并列——组以
+    // 渲染容器选择器置尾，断言组文本同时包含全部四侧选择器
+    const card = rule('#app [data-vsidian-graphic-provider] .vsidian-embed-card')
     expect(card).toMatch(/border-left:\s*3px solid var\(--vsidian-quote-bar-color\)/)
     // 验收反馈改版：整圈边框取消（border: none 后仅左边条重立）、底色透明、
     // 圆角规则不再发射（默认直角）
     expect(card).toMatch(/border:\s*none/)
     expect(card).toMatch(/background-color:\s*transparent/)
     expect(card).not.toMatch(/border-radius/)
-    expect(card.split('{')[0])
-      .toContain('#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card')
+    const group = card.split('{')[0]!
+    expect(group).toContain('#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card')
+    expect(group).toContain('#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card')
+    expect(group).toContain('#app .vsidian-addon-panel-root .vsidian-embed-card')
   })
 
   it('Live 嵌套 Reading 容器重置 white-space（#217 验收反馈：行距对齐）', () => {

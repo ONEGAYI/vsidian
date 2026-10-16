@@ -2159,6 +2159,44 @@ export class WebviewSyncController {
       : null
   }
 
+  /**
+   * T06（#545）组件容器嵌入挂载端口（addonRefViews 运行时接线）：经同一
+   * EmbedCardManager 只读挂载引用子根——readOnly 来源 + addonSource 覆盖 +
+   * 首次装载结局回调（R-U08/R-U04）。会话未握手返回 false（不挂载）。
+   */
+  mountAddonRefEmbed(input: {
+    subRoot: HTMLElement
+    occurrence: string
+    targetText: string
+    sourceDocUri: string
+    addonSource: { instanceId: string; sourceFsPath: string }
+    onFirstOutcome: (outcome: { ok: true } | { ok: false; reason: import('../shared/protocol').HoverPreviewFailReason }) => void
+  }): boolean {
+    const manager = this.embedCards
+    if (!manager || this.sessionId === '' || this.docUri === '') {
+      return false
+    }
+    manager.mountCardInto(input.subRoot, input.targetText, 0, 0, 'reading', {
+      panelDocUri: this.docUri,
+      // main 来源按面板文档解析；embed/hover 来源按其目标文档（R-U02）
+      sourceDocUri: input.sourceDocUri !== '' ? input.sourceDocUri : this.docUri,
+      range: { start: 0, end: 0 },
+      occurrence: input.occurrence,
+      depth: 1,
+      treeId: input.occurrence,
+      readOnly: true,
+    }, {
+      addonSource: input.addonSource,
+      onFirstOutcome: input.onFirstOutcome,
+    })
+    return true
+  }
+
+  /** T06（#545）组件容器嵌入整组释放端口（订阅/预算/实例彻底终结） */
+  releaseAddonRefEmbed(subRoot: HTMLElement): void {
+    this.embedCards?.releaseEmbedMount(subRoot)
+  }
+
   /** #359 T10：挂接组件命令注册表（main.ts 构造后注入；快捷键本地分支与
    *  宿主 addonCommand.execute 回发两入口共用 runAddonCommand） */
   attachAddonCommands(registry: import('./addonCommands').AddonCommandsRuntime): void {

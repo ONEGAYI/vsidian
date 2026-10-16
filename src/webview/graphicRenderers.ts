@@ -166,6 +166,22 @@ function addonRegistrationAsGraphicRenderer(
 
 // ---- 挂载与所有权（#358 T09） ----
 
+/**
+ * T06（#545）容器归属查询：元素是否落在某附加组件渲染提供者的容器内
+ * （GRAPHIC_PROVIDER_ATTR 标记的容器本体或其后代——refViews 嵌入挂载的
+ * 容器合法性判定之一）。providerId 形态 `${addonId}/${rendererId}`；
+ * 内置标记（'builtin'，无 `/`）不属于任何组件，返回 null。
+ */
+export function graphicProviderAddonOwnerOf(el: HTMLElement): string | null {
+  const host = el.closest<HTMLElement>(`[${GRAPHIC_PROVIDER_ATTR}]`)
+  if (host === null) {
+    return null
+  }
+  const providerId = host.getAttribute(GRAPHIC_PROVIDER_ATTR) ?? ''
+  const separator = providerId.indexOf('/')
+  return separator > 0 ? providerId.slice(0, separator) : null
+}
+
 /** 释放容器当前的附加组件所有者（内置无释放语义）；重复释放无害。
  *  release 与 mount/refresh 同为组件回调，异常同等隔离（上报 + 不中断
  *  本轮其余容器的联动/热切换）——劣质组件 refresh 抛错后走兜底重挂的

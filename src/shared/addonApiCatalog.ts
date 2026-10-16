@@ -735,6 +735,37 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#544（T05）',
   },
   {
+    id: 'ref-views-embed',
+    group: 'page-sdk',
+    title: '只读引用组件容器嵌入（refViews.mountEmbed）',
+    layer: 'stable-candidate',
+    endpoints: ['editor-page'],
+    signatures: [
+      {
+        module: 'src/shared/addonRefViews.ts',
+        symbols: ['AddonRefEmbedRequest', 'AddonRefEmbedHandle', 'AddonRefEmbedRejection', 'AddonRefEmbedOutcome', 'isAddonRefEmbedRequest'],
+      },
+    ],
+    purpose:
+      '组件在自有容器挂载内核只读引用子根（T06 #545，规格 addon-reference-views.md §6）：sdk.refViews.mountEmbed 把内核引用卡片（与正文 ![[…]] 嵌入同款装配）挂进本组件已取得的面板内容根或渲染内容根（可为其后代），复用成熟的内容展示与既有目标访问链（来源解析/只读能力/预算/订阅/释放），不重新实现渲染，也不因请求呈现取得写目标文档的能力。本请求零正文写入、零撤销项——插入 ![[…]] 仍由既有编辑 API 显式执行。',
+    semantics: {
+      modes: '仅编辑器页提供（设置页为 undefined）。容器须为本组件已取得的面板内容根（ui.registerPanel 的内容根）或渲染内容根（renderers.register 生效容器的后代）——正文根、其他组件容器与平台管理的引用子根内容一律 invalid-request（不建子根，不猜测位置）。内核卡片观感与正文嵌入同源（引用竖条/限高同规则），呈现在组件容器内不接管正文与其他组件容器。',
+      coordinates: '目标与来源语义和 requestPopup 完全同源（同一目标合成器与 addonSource 来源覆盖——R-U02 的 B 目录解析、行号/范围/大小准入沿既有规则）。多处同目标挂载共享解析缓存（读取数据层），但每次挂载有独立 occurrence——实例、滚动与属性展示状态互不共享，一处释放不销毁其他同目标挂载。',
+      lifecycle: 'promise 在首次读取结局落定时兑现：内容装载成功 → ok + 释放句柄；目标解析/读取/锚点/准入失败 → 失败原因（子根留在场以既有错误分态就地显示，随组释放）。释放触发整组（句柄 release、容器/外层面板/渲染根卸载或脱树、组件停用/故障/代次终结、页面结束）：订阅 unwatch、预算与内容实例彻底终结，pending 以 view-disposed 终结，迟到回包不重挂不复活缓存。重复挂载同一容器（含错误分态挂载）→ duplicate-mount，先释放旧实例才可重挂。目标更新沿既有 watch 通道静默刷新；删除/失效按现有引用视图分态就地显示（R-U11），失效不生成新写会话。所创建引用树及递归内容恒只读（readOnly 逐层传递——模式切换/保存/编辑入口不出现或不生效，不能借父 Live 或历史模式获得写端口）。',
+      errors: '自有拒绝与浮窗同族另加容器占位冲突：invalid-request（形状/容器脱树或非本组件所有/容器在引用子根内）/ view-disposed（来源实例不在场、页面会话缺失，或结局落定前挂载被释放）/ duplicate-mount（容器已被有效挂载占用）/ released（组件代次终结）；HoverPreviewFailReason 透传（not-found / anchor-invalid / file-too-large / budget 等——真实原因就地显示，不折叠为 not-found）。',
+    },
+    verification: [
+      'test/unit/addonRefViews.test.ts',
+      'test/unit/addonRefViewsEmbed.test.ts',
+      'test/unit/addonRefViewsEmbedCard.test.ts',
+      'test/unit/embedCardCssContract.test.ts',
+      'test/unit/addonPageLoader.test.ts',
+      'test/browser/addonRefViewsEmbed.mjs',
+      'test/integration/suite/addonRefViewsCases.ts',
+    ],
+    introduced: '#545（T06）',
+  },
+  {
     id: 'theme-environment',
     group: 'page-sdk',
     title: '主题环境快照与订阅（themeEnvironment）',

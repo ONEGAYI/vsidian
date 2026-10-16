@@ -1,15 +1,19 @@
-// T05（#544）附加组件只读引用浮窗——真宿主生产路径用例。
+// T05（#544）/T06（#545）附加组件只读引用视图——真宿主生产路径用例。
 //
-// 与浏览器回归（test/browser/addonRefViews.mjs——真实指针/键盘与绘制层）
-// 分工：本组走真宿主链路——夹具组件 vsidian-test-fixture.addon-refviews 经
-// 公开 registerAddon 注册编辑器页，页面产物（构建桥 refViewsEditor.ts）经
-// SDK refViews 面请求只读引用浮窗；断言面：
-// - 夹具通道结局（request/close 的 ok 与真实拒绝原因码）；
+// 与浏览器回归（test/browser/addonRefViews.mjs / addonRefViewsEmbed.mjs——
+// 真实指针/键盘与绘制层）分工：本组走真宿主链路——夹具组件
+// vsidian-test-fixture.addon-refviews 经公开 registerAddon 注册编辑器页，
+// 页面产物（构建桥 refViewsEditor.ts）经 SDK refViews 面请求只读引用浮窗
+// （T05）与组件容器嵌入挂载（T06）；断言面：
+// - 夹具通道结局（request/close/embed/embedRelease 的 ok 与真实拒绝原因码）；
 // - view.state 的 hoverPreview 探针（开态/内容态/块数/错误分态）与
 //   paint.hoverPopup 绘制层（elementFromPoint 命中 + computed 背景/边框
 //   ——hover-popup 历史样式命中证据，样式注入失效时任一失守）；
-// - 宿主 _test.hoverWatchStats（租约回收：订阅计数随浮窗开闭回落）；
-// - 目标更新/失效沿既有 hover.invalidated 通道；
+// - view.state 的 readingEmbed 探针（T06：rootHost='addon' 的嵌入卡内容态/
+//   只读标记/递归只读）与宿主 TextDocument 版本（展示请求零正文写入）；
+// - 宿主 _test.hoverWatchStats（租约回收：订阅计数随挂载/释放/停用回落）；
+// - 目标更新/删除/恢复沿既有 hover.invalidated 通道；释放后迟到目标变更
+//   不重挂；
 // - 组件停用与页面关闭的整组回收。
 import * as vscode from 'vscode'
 
@@ -111,9 +115,10 @@ async function runOp<T>(op: string, args?: Record<string, unknown>): Promise<T |
   return results[0]?.outcome
 }
 
-/** view.state 探针（hoverPreview + paint.hoverPopup） */
+/** view.state 探针（hoverPreview + readingEmbed + paint.hoverPopup） */
 async function viewProbe(file: string): Promise<{
   hoverPreview?: { open: boolean; state: string; blocks: number; note: string; scope: string; internalMode: string; liveBound: boolean; viewStats?: { totalBlocks: number } | null }
+  readingEmbed?: Array<{ inner: string; state: string; note: string; blocks: number; rootHost?: string; readOnly?: boolean; internalMode?: string; liveBound?: boolean; textLen?: number }>
   paint?: { hoverPopup?: { hit: boolean; background: string | null; borderWidth: string | null; errorState: boolean } }
 } | undefined> {
   return (await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', wsUri(file).toString(), 0)) as never
@@ -325,5 +330,165 @@ export const addonRefViewsCases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: true })
     await closeAllEditors()
     console.log('[#544] 句柄关闭、页面关闭与租约回收、组件停用通过')
+  }],
+
+  ['附加组件 T06：面板容器嵌入挂载、只读边界与零正文写入（R-U08/R-U09/R-U04，#545）', async () => {
+    await ensureEnabled()
+    await writeDoc('rv-embed-target.md', '# 嵌入目标标题\n\n目标第一段。\n\n目标第二段。\n')
+    await writeDoc('rv-embed-panel-host.md', '正文一段，展示请求不改写正文。\n')
+    await closeAllEditors()
+    const hostDocBefore = await vscode.workspace.openTextDocument(wsUri('rv-embed-panel-host.md'))
+    const versionBefore = hostDocBefore.version
+    const textBefore = hostDocBefore.getText()
+    await openDoc('rv-embed-panel-host.md')
+
+    // 挂载成功 → rootHost='addon' 的嵌入卡内容态 + 只读标记 + 零写端口
+    const mounted = await runOp<{ ok: boolean; reason?: string }>('embed', { id: 'e1', path: 'rv-embed-target.md' })
+    assert(mounted !== undefined && mounted.ok === true, `面板容器挂载应成功（${JSON.stringify(mounted)}）`)
+    const card = await poll('嵌入卡内容态（rootHost=addon）', async () => {
+      const probe = await viewProbe('rv-embed-panel-host.md')
+      return probe?.readingEmbed?.find((c) => c.rootHost === 'addon' && c.state === 'content')
+    })
+    assert(card.inner === 'rv-embed-target.md', `嵌入卡目标原文（实际 ${card.inner}）`)
+    assert(card.readOnly === true, '组件嵌入卡应携带只读来源标记')
+    assert(card.internalMode === 'reading' && !card.liveBound, '组件嵌入卡恒只读且无目标写端口')
+    assert(card.blocks >= 3, `嵌入卡应渲染目标块（实际 ${card.blocks}）`)
+
+    // R-U09：展示请求零正文写入——宿主 TextDocument 版本与文本不变
+    const hostDocAfter = await vscode.workspace.openTextDocument(wsUri('rv-embed-panel-host.md'))
+    assert(hostDocAfter.version === versionBefore, `展示请求不得推进宿主文档版本（${versionBefore} → ${hostDocAfter.version}——写入经文本管线必然推进版本，撤销历史随版本不变）`)
+    assert(hostDocAfter.getText() === textBefore, '展示请求不得改变宿主文档文本')
+
+    // 重复挂载仲裁（同容器未释放前拒绝）
+    const dup = await runOp<{ ok: boolean; reason?: string }>('embed', { id: 'e2', path: 'rv-embed-target.md' })
+    assert(dup !== undefined && dup.ok === false && dup.reason === 'duplicate-mount',
+      `同容器重复挂载应回 duplicate-mount（实际 ${JSON.stringify(dup)}）`)
+
+    // 容器归属：正文外容器（body）拒绝 invalid-request
+    const outside = await runOp<{ ok: boolean; reason?: string }>('embed', { id: 'e3', path: 'rv-embed-target.md', container: 'body' })
+    assert(outside !== undefined && outside.ok === false && outside.reason === 'invalid-request',
+      `非组件容器应回 invalid-request（实际 ${JSON.stringify(outside)}）`)
+
+    // 句柄释放 → 嵌入卡离场
+    const released = await runOp<boolean>('embedRelease', { id: 'e1' })
+    assert(released === true, '句柄释放应成功')
+    await poll('释放后嵌入卡离场', async () => {
+      const probe = await viewProbe('rv-embed-panel-host.md')
+      return probe?.readingEmbed?.every((c) => c.rootHost !== 'addon') ? probe : undefined
+    })
+    const hostDocEnd = await vscode.workspace.openTextDocument(wsUri('rv-embed-panel-host.md'))
+    assert(hostDocEnd.version === versionBefore, '释放全程零正文写入（宿主文档版本不变）')
+    await closeAllEditors()
+    console.log('[#545] 面板容器嵌入挂载、只读边界与零正文写入通过')
+  }],
+
+  ['附加组件 T06：目标更新/删除/恢复沿既有分态，释放后无残留订阅或迟到重挂载（R-U11/R-U07，#545）', async () => {
+    await ensureEnabled()
+    const v1 = ['# 嵌入目标 v1', '', 'v1 正文段落。', ''].join('\n')
+    // v2 异构块结构（标题/段落/列表/二级标题）——块模型数必然增长
+    const v2 = ['# 嵌入目标 v2', '', 'v2 正文段落。', '', '- 列表一', '- 列表二', '- 列表三', '', '## 小节', '', '小节正文。', ''].join('\n')
+    const v3 = ['# 嵌入目标 v3（恢复）', '', '恢复后的正文。', ''].join('\n')
+    await writeDoc('rv-embed-watch.md', v1)
+    await writeDoc('rv-embed-watch-host.md', '正文一段。\n')
+    await closeAllEditors()
+    await openDoc('rv-embed-watch-host.md')
+
+    const base = await hoverWatchStats()
+    const mounted = await runOp<{ ok: boolean }>('embed', { id: 'e1', path: 'rv-embed-watch.md' })
+    assert(mounted?.ok === true, '挂载应成功')
+    const first = await poll('嵌入卡装载', async () => {
+      const probe = await viewProbe('rv-embed-watch-host.md')
+      return probe?.readingEmbed?.find((c) => c.rootHost === 'addon' && c.state === 'content')
+    })
+    const blocksBefore = first.blocks
+    const watching = await hoverWatchStats()
+    assert(watching.subscriptions > base.subscriptions, `挂载应登记目标订阅（${base.subscriptions} → ${watching.subscriptions}）`)
+
+    // 目标更新 → hover.invalidated changed → 静默重载（块模型数增长）
+    await writeDoc('rv-embed-watch.md', v2)
+    await poll('目标更新刷新', async () => {
+      const probe = await viewProbe('rv-embed-watch-host.md')
+      const card = probe?.readingEmbed?.find((c) => c.rootHost === 'addon')
+      return card !== undefined && card.state === 'content' && card.blocks > blocksBefore ? card : undefined
+    })
+
+    // 删除 → deleted → 就地错误分态（不无限保留旧内容）
+    await vscode.workspace.fs.delete(wsUri('rv-embed-watch.md'))
+    await poll('删除后错误分态', async () => {
+      const probe = await viewProbe('rv-embed-watch-host.md')
+      return probe?.readingEmbed?.find((c) => c.rootHost === 'addon' && c.state === 'error') ? probe : undefined
+    })
+
+    // 恢复（重写文件）→ 订阅保持感知恢复 → changed 重载回内容态
+    await writeDoc('rv-embed-watch.md', v3)
+    await poll('恢复后重载', async () => {
+      const probe = await viewProbe('rv-embed-watch-host.md')
+      const card = probe?.readingEmbed?.find((c) => c.rootHost === 'addon')
+      return card !== undefined && card.state === 'content' ? card : undefined
+    })
+
+    // 释放 → 订阅回落 + 迟到目标变更不重挂
+    const released = await runOp<boolean>('embedRelease', { id: 'e1' })
+    assert(released === true, '句柄释放应成功')
+    await poll('释放后订阅回落（租约回收）', async () => {
+      const stats = await hoverWatchStats()
+      return stats.subscriptions <= base.subscriptions ? stats : undefined
+    })
+    await writeDoc('rv-embed-watch.md', v2)
+    await new Promise((r) => setTimeout(r, 600))
+    const afterLate = await viewProbe('rv-embed-watch-host.md')
+    assert(afterLate?.readingEmbed?.every((c) => c.rootHost !== 'addon') === true,
+      `释放后迟到目标变更不得重挂（实际 ${JSON.stringify(afterLate?.readingEmbed?.filter((c) => c.rootHost === 'addon'))}）`)
+    await closeAllEditors()
+    console.log('[#545] 目标更新/删除/恢复与释放无残留通过')
+  }],
+
+  ['附加组件 T06：组件停用与页面关闭的整组释放（R-U07，#545）', async () => {
+    await ensureEnabled()
+    await writeDoc('rv-embed-release.md', '# 释放目标\n\n正文。\n')
+    await writeDoc('rv-embed-release-host.md', '正文一段。\n')
+    await closeAllEditors()
+    await openDoc('rv-embed-release-host.md')
+
+    const base = await hoverWatchStats()
+    const mounted = await runOp<{ ok: boolean }>('embed', { id: 'e1', path: 'rv-embed-release.md' })
+    assert(mounted?.ok === true, '挂载应成功')
+    await poll('嵌入卡装载', async () => {
+      const probe = await viewProbe('rv-embed-release-host.md')
+      return probe?.readingEmbed?.some((c) => c.rootHost === 'addon' && c.state === 'content') ? probe : undefined
+    })
+
+    // 组件停用 → 装载器 releaseAddon 整组回收（含嵌入挂载）
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: false })
+    await poll('停用后嵌入卡回收', async () => {
+      const probe = await viewProbe('rv-embed-release-host.md')
+      return probe?.readingEmbed?.every((c) => c.rootHost !== 'addon') ? probe : undefined
+    })
+    await poll('停用后订阅回落', async () => {
+      const stats = await hoverWatchStats()
+      return stats.subscriptions <= base.subscriptions ? stats : undefined
+    })
+    await vscode.commands.executeCommand('onegayi.vsidian._test.addonSetEnabled', { addonId: ADDON_ID, enabled: true })
+    await poll('组件恢复 enabled', async () => {
+      const status = (await vscode.commands.executeCommand('onegayi.vsidian._test.addonRuntimeStatus', { addonId: ADDON_ID })) as
+        | { runState: string } | null
+      return status?.runState === 'enabled' ? status : undefined
+    })
+
+    // 页面关闭（closeAllEditors）→ 容器随面板卸载整组释放（停用回收已关
+    // 面板——重开面板后再挂一次，覆盖「容器脱树自动释放」之外的页面结束通道）
+    await runOp('openPanel')
+    const remounted = await runOp<{ ok: boolean }>('embed', { id: 'e2', path: 'rv-embed-release.md' })
+    assert(remounted?.ok === true, '重挂应成功')
+    await poll('重挂装载', async () => {
+      const probe = await viewProbe('rv-embed-release-host.md')
+      return probe?.readingEmbed?.some((c) => c.rootHost === 'addon' && c.state === 'content') ? probe : undefined
+    })
+    await closeAllEditors()
+    await poll('页面关闭后订阅整组回落', async () => {
+      const stats = await hoverWatchStats()
+      return stats.subscriptions <= base.subscriptions ? stats : undefined
+    })
+    console.log('[#545] 组件停用与页面关闭的整组释放通过')
   }],
 ]

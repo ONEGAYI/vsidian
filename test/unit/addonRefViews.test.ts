@@ -8,6 +8,7 @@ import {
   ADDON_REF_BLOCK_ID_RE,
   buildAddonRefHoverTarget,
   isAddonRefAnchor,
+  isAddonRefEmbedRequest,
   isAddonRefPopupRequest,
   isAddonRefTargetSpec,
 } from '../../src/shared/addonRefViews'
@@ -79,6 +80,22 @@ describe('目标形状守卫', () => {
     expect(isAddonRefPopupRequest({ ...base, source: '' })).toBe(false)
     expect(isAddonRefPopupRequest({ ...base, target: { path: '' } })).toBe(false)
     expect(isAddonRefPopupRequest({ ...base, trigger: undefined })).toBe(false)
+  })
+})
+
+describe('嵌入挂载请求守卫（T06）', () => {
+  it('source 非空 + target 合法 + container 对象在场', () => {
+    const base = { source: 'main', target: { path: 'b.md' }, container: {} }
+    expect(isAddonRefEmbedRequest(base)).toBe(true)
+    expect(isAddonRefEmbedRequest({ ...base, source: '' })).toBe(false)
+    expect(isAddonRefEmbedRequest({ ...base, target: { path: '' } })).toBe(false)
+    expect(isAddonRefEmbedRequest({ ...base, container: undefined })).toBe(false)
+    expect(isAddonRefEmbedRequest({ ...base, container: 'panel' })).toBe(false)
+    expect(isAddonRefEmbedRequest({ source: 'main', target: { path: 'b.md' } })).toBe(false)
+  })
+
+  it('非法键多余不致命（形状守卫只钉必需字段；在树性/归属归运行时）', () => {
+    expect(isAddonRefEmbedRequest({ source: 'main', target: { path: 'b.md' }, container: {}, extra: 1 })).toBe(true)
   })
 })
 

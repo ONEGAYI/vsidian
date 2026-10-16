@@ -2,7 +2,7 @@
 
 ## 1. 状态与目标
 
-2026-10-15 用户确认同时开放浮窗与嵌入，并接受 Q9/Q10 的容器与生命周期规则。#532 为规格/父票；T05 引用浮窗已实现，待用户整体验收；T06 组件容器嵌入尚未实现，将复用同一目标访问链路。票号、依赖和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。当前 API 仍为未发行候选。
+2026-10-15 用户确认同时开放浮窗与嵌入，并接受 Q9/Q10 的容器与生命周期规则。#532 为规格/父票；T05 引用浮窗与 T06 组件容器嵌入均已实现，待用户整体验收。票号、依赖和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。当前 API 仍为未发行候选。
 
 目标是让组件请求内核引用内容视图，不需要重新实现 Markdown、代码文本或附件预览，也不因请求呈现而取得写目标文档的能力。
 
@@ -97,3 +97,13 @@ API 浮窗不挂载可写根会话。递归引用的 `RefSourceContext.readOnly`
 样式与元素形态采用既有 hover-popup（480px、8px 圆角、阴影与 z-index 9000 档），未增加公开样式入口、档位或快捷键。对照基线为实施前 `84e91ea028ac64d5f7fab38d51b6b7472494ca3f`；原选择器与变量均保留。浏览器以独立 `#app > .vsidian-hover-popup` 片段检查实际计算色，宿主 `paint.hoverPopup` 检查绘制命中与背景/边框。测试定位见覆盖映射的 T05 行；物理指针与键盘手感保留为人工待验。
 
 2026-10-15 本切片验证：定向单测 174 项与邻近 hover/embed 回归 130 项通过（含重叠用例，不合计为独立覆盖数）；编译、构建桥/浏览器调度契约 13 项、API 门禁负向测试 45 项、样式基线与契约检查通过。浏览器 `addonRefViews` 通过，覆盖原生指针进入保活、移出延迟关闭、键盘 Esc 与历史选择器片段命中，报告 `out/test/browser-runs/run-G1bmZW/`。真宿主 `VSIDIAN_TEST_CASES=#544` 增强回归 4/4 通过、宿主退出码 0，日志 `out/test/t05-resume-integration.log`；覆盖 Live 父只读、B 来源刷新保持、合法/越界文本行号、目标更新/删除、内容与错误浮窗停用及租约回收。红测证据为 `out/test/t05-red-lifecycle.log`、`t05-red-readonly.log` 与 `t05-red-trigger.log`。本切片未单独跑全量回归；组合分支的全量回归与独立评审另行执行。
+
+## T06 实施落档
+
+公开声明在 `src/shared/addonRefViews.ts`（`AddonRefEmbedRequest/Handle/Rejection/Outcome` + `isAddonRefEmbedRequest` 守卫），编辑器页面经 `sdk.refViews.mountEmbed` 挂载。SDK 注入组件身份与代次（迟到/停用后调用拒绝 `released`）；`AddonRefViewsRuntime.mountEmbed` 校验形状、在树性与**容器归属**（本组件面板内容根或渲染内容根及其后代——`AddonUiRuntime.panelAddonOwnerOf` 与 `graphicProviderAddonOwnerOf` 经 main.ts 组装为 `ownsContainer` 端口；平台管理的引用子根内容不算组件容器空间），同容器重复挂载仲裁 `duplicate-mount`，创建引用子根（裸 div，无公开类名）并经 `syncController.mountAddonRefEmbed` 端口以 **readOnly 来源 + addonSource 覆盖**走 `EmbedCardManager.mountCardInto` 只读挂载——不建第二套读取通道，watch/预算/错误分态/递归孙卡全部沿正文嵌入既有链路。
+
+promise 在首次装载结局兑现（`EmbedEntry.firstOutcome` 经 `applyDisplay` 的 terminal 态一次性漏斗——content/真实失败原因/预算与深度准入拒绝）；错误分态挂载留在场随组释放（组件停用仍能回收）。释放矩阵（句柄 release、容器/外层面板/渲染根卸载脱树——文档级 MutationObserver 仅挂载期间观测、组件停用/故障/代次终结、页面结束）统一走 runtime 的 `releaseEmbedRecord` → 端口 `releaseEmbedCard` → `EmbedCardManager.releaseEmbedMount`：卸载卡片并彻底终结 entry（unwatch/预算/内容实例，pending 首结局作废，迟到回包不重挂、重挂同 occurrence 是全新实例）。嵌入挂载不随来源实例销毁释放（§6 释放触发不含来源关闭——订阅按 fsPath 绑定，来源视图销毁后目标身份仍有效）。挂载观测挂进 `readingEmbed` 探针（`rootHost: 'addon'` + `readOnly` 字段）。
+
+样式零新增公开入口：卡片壳规则（`#app … .vsidian-embed-card` 引用竖条组）并列两个既有锚点 `.vsidian-addon-panel-root` 与 `[data-vsidian-graphic-provider]`，styleContract `reading-embed-card` 条目的 example/dom/purpose 同步扩展（历史选择器与语义保留，target 类名 token 不变），英文覆盖与生成指南随 `npm run gen:styleguide` 更新；`embedCardCssContract` 钉住四锚点并列。零新 i18n 词条（loading/错误文案沿 embed.hover 既有字典）、零新快捷键与命令。
+
+2026-10-16 本切片验证：TDD 红测证据 `out/test/t06-red-unit.log`（23 项先红后绿：容器归属/重复挂载/双实例/释放矩阵/迟到结局/首结局漏斗）。定向单测 `addonRefViews`（共享守卫）+ `addonRefViewsEmbed`（runtime 契约 17 项）+ `addonRefViewsEmbedCard`（EmbedCardManager 只读挂载 10 项）+ `addonPageLoader`（mountEmbed 注入与 released 守卫）通过；全量单测与 `npm run compile` 通过。浏览器 `addonRefViewsEmbed` 6 组通过（真实组件面板挂载、绘制层——引用竖条计算色/命中/内容文本、双实例滚动独立、零写通道、duplicate-mount → 释放 → 重挂、面板关闭整组释放），报告见 `out/test/browser-runs/run-j0BFRI/`；`addonRefViews`（T05）回归通过（夹具目标文本加高后无碍）。真宿主 `VSIDIAN_TEST_CASES=#545` 3/3 通过、宿主退出码 0（日志 `out/test/t06-integration.log`）：面板容器挂载只读与零正文写入（宿主 TextDocument 版本与文本不变——撤销历史随版本不变的结构性证据）、duplicate-mount/invalid-request、目标更新/删除/恢复沿既有分态、释放后订阅回落且迟到目标变更不重挂、停用与页面关闭整组释放；`VSIDIAN_TEST_CASES=#544`（T05）回归通过（日志 `out/test/t06-t05-integration-regression.log`）。样式契约检查与指南一致性、API 目录/生成参考/编译期消费者/兼容门禁随票通过（见提交说明）。本切片未单独跑全量回归；组合分支的全量回归与独立评审另行执行。

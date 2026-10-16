@@ -5153,9 +5153,14 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 /* 卡片壳：只保留左侧引用竖条（#217 验收反馈：与 Reading 正观感对齐——
    去整圈边框/圆角/灰底，白底直角 + 紫竖条，同正文引用块方向）。
    #223 Live 挂载的宿主（.cm-content 内 widget）同款命中；display:block
-   使 inline 替换形态（span 宿主）内的卡片独立成块占满行宽 */
+   使 inline 替换形态（span 宿主）内的卡片独立成块占满行宽。
+   T06（#545）组件容器挂载（refViews.mountEmbed）同款命中：附加组件
+   面板内容根（.vsidian-addon-panel-root）与渲染提供者容器
+   （data-vsidian-graphic-provider）内的只读卡片与正文卡片同观感 */
 #app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card,
-#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card {
+#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card,
+#app .vsidian-addon-panel-root .vsidian-embed-card,
+#app [data-vsidian-graphic-provider] .vsidian-embed-card {
   display: block;
   margin: 0.5em 0;
   border: none;

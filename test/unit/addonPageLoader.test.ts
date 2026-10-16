@@ -1169,6 +1169,7 @@ describe('T05（#544）refViews 面：注入、释放守卫与整组件回收', 
         calls.push({ addonId, generation })
         return Promise.resolve({ ok: true as const, handle: { close: () => true, isActive: () => true } })
       },
+      mountEmbed: () => Promise.resolve({ ok: false as const, reason: 'invalid-request' as const }),
       releaseAddon: (addonId: string) => {
         released.push(addonId)
       },
@@ -1187,6 +1188,33 @@ describe('T05（#544）refViews 面：注入、释放守卫与整组件回收', 
     await h.handle.unload(ADDON_ID, 1)
     expect(released).toEqual([ADDON_ID])
     expect(await facet!.requestPopup({ source: 'main', target: { path: 'b.md' }, trigger: {} as HTMLElement }))
+      .toEqual({ ok: false, reason: 'released' })
+  })
+
+  it('T06（#545）mountEmbed 同款注入与守卫：转发身份注入、释放后迟到挂载拒绝 released', async () => {
+    const calls: Array<{ addonId: string; generation: number }> = []
+    const runtime = {
+      requestPopup: () => Promise.resolve({ ok: false as const, reason: 'view-disposed' as const }),
+      mountEmbed: (addonId: string, generation: number) => {
+        calls.push({ addonId, generation })
+        return Promise.resolve({
+          ok: true as const,
+          handle: { release: () => true, isActive: () => true },
+        })
+      },
+      releaseAddon: () => {},
+    }
+    const h = harness({ addonRefViews: runtime })
+    let facet: import('../../src/shared/addonRefViews').AddonSdkRefViewsFacet | undefined
+    registerFactory(h, (sdk) => {
+      facet = sdk.refViews
+    })
+    await h.handle.load(manifest())
+    const outcome = await facet!.mountEmbed({ source: 'main', target: { path: 'b.md' }, container: {} as HTMLElement })
+    expect(outcome.ok).toBe(true)
+    expect(calls).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+    await h.handle.unload(ADDON_ID, 1)
+    expect(await facet!.mountEmbed({ source: 'main', target: { path: 'b.md' }, container: {} as HTMLElement }))
       .toEqual({ ok: false, reason: 'released' })
   })
 
