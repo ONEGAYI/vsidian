@@ -2,7 +2,7 @@
 
 ## 状态与依据
 
-2026-10-16 用户已确认产品范围与拆票粒度，规格总票 [#565](https://github.com/ONEGAYI/vsidian/issues/565) 及 9 张子票已发布，功能未实施、未验收。完整规格同时保存在本文件与总票正文。
+2026-10-16 用户已确认产品范围与拆票粒度，规格总票 [#565](https://github.com/ONEGAYI/vsidian/issues/565) 及 9 张子票已发布，功能未实施、未验收。同日实施启动：集成分支 `spec/565-html-rendering` 按 T01–T09 任务图逐票推进，进度以子票状态为准。完整规格同时保存在本文件与总票正文。
 
 架构与术语入口：[ADR-0019](../adr/0019-document-html-and-style-scope.md)、[CONTEXT.md](../../CONTEXT.md)。既有基线为[源文本双视图](../adr/0003-source-text-dual-view-editor.md)、[视口渲染](../adr/0005-viewport-rendering.md)、[HTML 注释](html-comment-support.md)、[CSS 片段](css-snippets.md)。
 
