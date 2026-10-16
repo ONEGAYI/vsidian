@@ -4043,11 +4043,13 @@ export class EmbedCardManager {
         releaseRefSourceLease(this.context, sourceLeaseId)
         this.applyDisplay(handle, 'error',
           pdfErrorText(probe.errorReason === '' ? 'resource' : probe.errorReason, probe.requestedPage, probe.totalPages))
-      } else {
-        // 首载终态：内容装载成功才兑现成功句柄（markdown/text 无异步尾巴
+      } else if (probe.phase === 'content') {
+        // 首载终态：定位页呈现落定才兑现成功句柄（show 契约：resolve(true)
+        // ⟹ phase ∈ {content, error}——取消不解除等待、重排取消由替代绘制
+        // 接续、同 URI 重入等待当前绘制，评审 P2。markdown/text 无异步尾巴
         // 不经此路径——时序不被拖慢）
         this.settleFirstOutcomeIfPending(handle.entry, { ok: true })
-        if (probe.phase === 'content' && page !== undefined && page > 1 && probe.page !== page) {
+        if (page !== undefined && page > 1 && probe.page !== page) {
           // #338：loading 期滚动区布局未定（挂载瞬间 clientHeight 不足使
           // scrollToPage 的 scrollTop 写入被钳回 0——页码观感退回第一页）。
           // 内容态建立后重定位到目标页（重定位钳制语义，与浮层 applyHover
@@ -4056,6 +4058,8 @@ export class EmbedCardManager {
           view.locateTo(resume ? Math.min(page, probe.totalPages) : page)
         }
       }
+      // phase === 'loading' 不可达（show 契约见上）——若上游契约被破坏，
+      // 宁可不兑现也不冒充成功（浮层侧 probe 检查同款形态）
       this.context.requestMeasure?.()
     })
     this.context.requestMeasure?.()

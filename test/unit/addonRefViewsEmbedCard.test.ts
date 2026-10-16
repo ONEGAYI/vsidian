@@ -390,10 +390,19 @@ interface FakePdfDoc {
 }
 
 /** 受控 pdfjs：getDocument 的 promise 由测试手动 resolve（成功文档）/reject
- *  （InvalidPDF 等——err.name 分态与生产 classifyLoadError 同源） */
-function installControllablePdfjs(): {
+ *  （InvalidPDF 等——err.name 分态与生产 classifyLoadError 同源）。
+ *  opts.holdRender：页渲染 promise 挂起，由 renderReleases 队列手动释放
+ *  （cancel 以 RenderingCancelledException 拒绝——首帧在途/重排矩阵）；
+ *  opts.failRenderAt / failViewportAt：第 N 次调用同步抛错（明确失败
+ *  路径经外层 catch → setError('resource')）。*/
+function installControllablePdfjs(opts?: {
+  holdRender?: boolean
+  failRenderAt?: number
+  failViewportAt?: number
+}): {
   resolveDoc: (numPages: number) => void
   rejectDoc: (err: unknown) => void
+  renderReleases: Array<() => void>
 } {
   let settleResolve: ((doc: FakePdfDoc) => void) | null = null
   let settleReject: ((err: unknown) => void) | null = null
@@ -401,6 +410,9 @@ function installControllablePdfjs(): {
     settleResolve = resolve
     settleReject = reject
   })
+  const renderReleases: Array<() => void> = []
+  let renderCalls = 0
+  let viewportCalls = 0
   const lib = {
     GlobalWorkerOptions: { workerSrc: '' },
     getDocument: () => ({
@@ -432,17 +444,50 @@ function installControllablePdfjs(): {
     resolveDoc: (numPages) => settleResolve!({
       numPages,
       getPage: () => ({
-        getViewport: ({ scale }: { scale: number }) => ({ width: 612 * scale, height: 792 * scale }),
-        render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => ({
-          promise: Promise.resolve().then(() => {
+        getViewport: ({ scale }: { scale: number }) => {
+          viewportCalls++
+          if (opts?.failViewportAt !== undefined && viewportCalls === opts.failViewportAt) {
+            throw new Error('viewport-fail')
+          }
+          return { width: 612 * scale, height: 792 * scale }
+        },
+        render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => {
+          renderCalls++
+          if (opts?.failRenderAt !== undefined && renderCalls === opts.failRenderAt) {
+            throw new Error('render-fail')
+          }
+          const paint = (): void => {
             canvas.width = Math.floor(viewport.width)
             canvas.height = Math.floor(viewport.height)
-          }),
-          cancel: () => {},
-        }),
+          }
+          if (opts?.holdRender !== true) {
+            return {
+              promise: Promise.resolve().then(paint),
+              cancel: () => {},
+            }
+          }
+          let rejectOuter: ((err: Error) => void) | undefined
+          const task = {
+            promise: new Promise<void>((resolve, reject) => {
+              rejectOuter = reject
+              renderReleases.push(() => {
+                paint()
+                resolve()
+              })
+            }),
+            cancel: () => {
+              const err = new Error('cancelled')
+              err.name = 'RenderingCancelledException'
+              task.promise.catch(() => {})
+              rejectOuter?.(err)
+            },
+          }
+          return task
+        },
       }),
     }),
     rejectDoc: (err) => settleReject!(err),
+    renderReleases,
   }
 }
 
@@ -467,6 +512,27 @@ async function pumpUntil(pred: () => boolean, label: string): Promise<void> {
     await Promise.resolve()
   }
   expect(pred(), label).toBe(true)
+}
+
+/** ResizeObserver 替身（jsdom 无实现）：捕获观察回调并手动触发宽度变化
+ *  （卡片挂载前置入——PdfHoverView 构造按 typeof 探测装配） */
+function installResizeObserverStub(): { trigger: (width: number) => void } {
+  const callbacks: ResizeObserverCallback[] = []
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) {
+      callbacks.push(callback)
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  })
+  return {
+    trigger: (width) => {
+      for (const callback of callbacks) {
+        callback([{ contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+      }
+    },
+  }
 }
 
 describe('PDF 首载结算时序（评审 P2：show 完成才兑现首结局）', () => {
@@ -550,6 +616,121 @@ describe('PDF 首载结算时序（评审 P2：show 完成才兑现首结局）'
       await Promise.resolve()
     }
     expect(outcomes).toEqual([])
+    h.manager.dispose()
+  })
+
+  // ---- 第二轮评审 P2 复现矩阵：重排 / 同版本刷新 × 成功 / 失败 / 释放 ----
+
+  it('首帧在途期间容器重排：不提前兑现，替代绘制完成后 {ok:true} 一次（评审复现 A）', async () => {
+    const ro = installResizeObserverStub()
+    const pdfjs = installControllablePdfjs({ holdRender: true })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => pdfjs.renderReleases.length >= 1, '首帧绘制已启动')
+    const base = pdfjs.renderReleases.length
+    // 容器宽度变化（ResizeObserver 重排）：取消旧绘制 + 替代绘制入队
+    ro.trigger(300)
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes, '重排取消不得提前兑现（评审 P2）').toEqual([])
+    await pumpUntil(() => pdfjs.renderReleases.length > base, '替代绘制已启动')
+    const end = pdfjs.renderReleases.length
+    for (let i = base; i < end; i++) {
+      pdfjs.renderReleases[i]!()
+    }
+    await pumpUntil(() => outcomes.length === 1, '替代绘制完成后兑现首结局')
+    expect(outcomes).toEqual([{ ok: true }])
+    h.manager.dispose()
+  })
+
+  it('首帧在途期间同版本刷新：不提前兑现、不永久 loading；内容呈现后 {ok:true} 一次（评审复现 B）', async () => {
+    const pdfjs = installControllablePdfjs({ holdRender: true })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => pdfjs.renderReleases.length >= 1, '首帧绘制已启动')
+    const base = pdfjs.renderReleases.length
+    // 同版本刷新：changed 失效触发重发，资源 URI 不变（版本表同 mtime/size）
+    h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes, '同 URI 重入不得提前兑现（评审 P2）').toEqual([])
+    // 在途首绘完成——两路 show 共享的待等呈现事件（不被重入作废）
+    for (let i = 0; i < base; i++) {
+      pdfjs.renderReleases[i]!()
+    }
+    await pumpUntil(() => outcomes.length === 1, '呈现落定后兑现首结局')
+    expect(outcomes).toEqual([{ ok: true }])
+    expect(
+      h.manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'content'),
+      '不永久 loading（评审复现 B 的第二失败形态）',
+    ).toBe(true)
+    h.manager.dispose()
+  })
+
+  it('重排等待期间释放：释放终结等待（不兑现成功、不冒充内容）', async () => {
+    const ro = installResizeObserverStub()
+    const pdfjs = installControllablePdfjs({ holdRender: true })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => pdfjs.renderReleases.length >= 1, '首帧绘制已启动')
+    ro.trigger(300)
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve()
+    }
+    // 整组释放（content.onDispose → 视图 dispose → 等待终结）
+    h.manager.releaseEmbedMount(host)
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toEqual([])
+    h.manager.dispose()
+  })
+
+  it('重排替代绘制失败：首结局 {ok:false} 一次（明确失败不冒充成功）', async () => {
+    const ro = installResizeObserverStub()
+    // 第 3 次 render 调用（替代绘制的首页——首帧页 1/2 已耗 2 次）同步抛错
+    const pdfjs = installControllablePdfjs({ holdRender: true, failRenderAt: 3 })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => pdfjs.renderReleases.length >= 1, '首帧绘制已启动')
+    ro.trigger(300)
+    await pumpUntil(() => outcomes.length === 1, '替代绘制失败后兑现首结局')
+    expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
+    h.manager.dispose()
+  })
+
+  it('失败后同 URI 刷新：不重复兑现、不冒充成功（error 态重入早退路径）', async () => {
+    const pdfjs = installControllablePdfjs({ failViewportAt: 1 })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => outcomes.length === 1, '绘制失败后兑现 {ok:false}')
+    expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
+    // 同 URI 刷新到达：首结局一次性——不重复兑现，也不因重试渲染可能自愈
+    // 而补发成功（已兑现的失败结局不回改）
+    h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toHaveLength(1)
     h.manager.dispose()
   })
 })

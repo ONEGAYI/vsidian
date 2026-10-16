@@ -261,6 +261,69 @@ async function pumpUntil(pred: () => boolean): Promise<void> {
   expect(pred(), '挂起点应就位（装载链推进超时）').toBe(true)
 }
 
+/** ResizeObserver 替身（jsdom 无实现）：捕获观察回调并手动触发宽度变化
+ *  （视图创建前置入——生产构造按 typeof 探测装配） */
+function installResizeObserverStub(): { trigger: (width: number) => void } {
+  const callbacks: ResizeObserverCallback[] = []
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) {
+      callbacks.push(callback)
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  })
+  return {
+    trigger: (width) => {
+      for (const callback of callbacks) {
+        callback([{ contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+      }
+    },
+  }
+}
+
+/** 可控渲染页：每次 render 调用登记释放器（releases[n].resolve() 完成第
+ *  n+1 次调用）；cancel 以 RenderingCancelledException 拒绝（同
+ *  makeFakePage 取消语义）。viewportFailAt：第 N 次 getViewport 同步抛错
+ *  （外层 catch → setError('resource') 的明确失败路径）。*/
+function makeControlledPage(
+  releases: Array<{ resolve: () => void; reject: (err: Error) => void }>,
+  viewportFailAt?: number,
+): ReturnType<typeof makeFakePage> {
+  let viewports = 0
+  return {
+    getViewport: ({ scale }: { scale: number }) => {
+      viewports++
+      if (viewportFailAt !== undefined && viewports === viewportFailAt) {
+        throw new Error('viewport-fail')
+      }
+      return {
+        width: 612 * scale,
+        height: 792 * scale,
+        scale,
+        transform: [scale, 0, 0, -scale, 0, 792 * scale],
+      }
+    },
+    render: () => {
+      const entry = { resolve: () => {}, reject: (_err: Error) => {} }
+      const task = {
+        promise: new Promise<void>((resolve, reject) => {
+          entry.resolve = resolve
+          entry.reject = reject
+        }),
+        cancel: () => {
+          const err = new Error('cancelled')
+          err.name = 'RenderingCancelledException'
+          task.promise.catch(() => {})
+          entry.reject(err)
+        },
+      }
+      releases.push(entry)
+      return task
+    },
+  }
+}
+
 describe('PDF 悬停渲染器（#337）', () => {
   let container: HTMLElement
   let cleanupFns: Array<() => void> = []
@@ -366,30 +429,81 @@ describe('PDF 悬停渲染器（#337）', () => {
     expect(container.children.length, 'dispose 清空 DOM').toBe(0)
   })
 
-  it('重入取代：新 show 使旧的在途绘制不落地（同 URI 换页码复用文档翻页）', async () => {
-    let releaseRender!: () => void
-    const hangingPage = {
-      getViewport: ({ scale }: { scale: number }) => ({ width: 612 * scale, height: 792 * scale }),
-      render: () => ({
-        promise: new Promise<void>((resolve) => {
-          releaseRender = resolve
-        }),
-        cancel: () => {
-          releaseRender()
-        },
-      }),
-    }
-    const doc = makeFakeDoc(4, { 1: hangingPage as unknown as ReturnType<typeof makeFakePage> })
+  it('同 URI 重入共享等待：呈现落定前两者均不兑现，落定后均返回 true（审查复现 B：在途绘制不得被重入作废）', async () => {
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    const doc = makeFakeDoc(4, { 1: makeControlledPage(releases) })
     installFakePdfjs(doc)
     const view = new PdfHoverView(container)
     cleanupFns.push(() => view.dispose())
     const first = view.show('https://files.test/a.pdf?v=1', 1, 448)
-    await pumpUntil(() => typeof releaseRender === 'function')
+    await pumpUntil(() => releases.length === 1)
+    // 首帧绘制在途：同 URI 重入（同版本刷新链）
     const second = view.show('https://files.test/a.pdf?v=1', 2, 448)
-    releaseRender()
-    expect(await first).toBe(false)
+    let settled = 0
+    void first.then(() => { settled++ })
+    void second.then(() => { settled++ })
+    for (let i = 0; i < 20; i++) { await Promise.resolve() }
+    expect(settled, '呈现落定前不得兑现（旧实现 second 同步 true 提前兑现）').toBe(0)
+    // 在途绘制完成——它是两次 show 共享的待等呈现事件（不被重入作废）
+    releases[0]!.resolve()
+    expect(await first).toBe(true)
     expect(await second).toBe(true)
-    expect(view.probe().page).toBe(2)
+    const probe = view.probe()
+    expect(probe.phase).toBe('content')
+    expect(probe.page).toBe(2)
+  })
+
+  it('重排取消不兑现：首帧期间宽度变化，取消的旧绘制不结算，替代绘制完成后才返回 true（审查复现 A）', async () => {
+    const ro = installResizeObserverStub()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    const doc = makeFakeDoc(3, { 1: makeControlledPage(releases) })
+    installFakePdfjs(doc)
+    const view = new PdfHoverView(container)
+    cleanupFns.push(() => view.dispose())
+    const promise = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => releases.length === 1)
+    let settled = false
+    void promise.then(() => { settled = true })
+    for (let i = 0; i < 10; i++) { await Promise.resolve() }
+    expect(settled).toBe(false)
+    // 容器重排：旧绘制取消 + 替代绘制入队（refreshMountedScale）
+    ro.trigger(300)
+    for (let i = 0; i < 10; i++) { await Promise.resolve() }
+    expect(settled, '取消不得当作完成（旧实现取消点解除等待 → 提前兑现）').toBe(false)
+    await pumpUntil(() => releases.length === 2)
+    releases[1]!.resolve()
+    expect(await promise).toBe(true)
+    expect(view.probe().phase).toBe('content')
+  })
+
+  it('重排替代绘制失败：setError 落定错误分态（show resolve 时 phase=error——明确失败不冒充成功）', async () => {
+    const ro = installResizeObserverStub()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    // 替代绘制的 base getViewport 抛错（首绘已耗 2 次调用）
+    const doc = makeFakeDoc(3, { 1: makeControlledPage(releases, 3) })
+    installFakePdfjs(doc)
+    const view = new PdfHoverView(container)
+    cleanupFns.push(() => view.dispose())
+    const promise = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => releases.length === 1)
+    ro.trigger(300)
+    await pumpUntil(() => view.probe().phase === 'error')
+    expect(await promise).toBe(true)
+    expect(view.probe().errorReason).toBe('resource')
+  })
+
+  it('重排等待期间释放：show 以 false 终结（释放不兑现成功）', async () => {
+    const ro = installResizeObserverStub()
+    const releases: Array<{ resolve: () => void; reject: (err: Error) => void }> = []
+    const doc = makeFakeDoc(3, { 1: makeControlledPage(releases) })
+    installFakePdfjs(doc)
+    const view = new PdfHoverView(container)
+    const promise = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => releases.length === 1)
+    ro.trigger(300)
+    for (let i = 0; i < 10; i++) { await Promise.resolve() }
+    view.dispose()
+    expect(await promise).toBe(false)
   })
 
   it('翻页操作：next/prev 推进页码，翻出界为无操作（只读——不改任何文档）', async () => {
