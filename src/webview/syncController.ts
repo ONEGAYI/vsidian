@@ -158,7 +158,7 @@ import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
-import { liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
+import { liveDocStyle, liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
 import { revealInlineHtmlSourceAtCursor } from './liveInlineHtml'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
@@ -1824,9 +1824,11 @@ export class WebviewSyncController {
       // Live 编辑器不挂卡——嵌套结构与命令接线归 P2-10）
       liveEmbedCardsHostMark,
       // #567（T02）主文档身份标记：根正文的 HTML 块渲染根挂
-      // data-vsidian-doc-scope="doc"（T01 探针 b2 隔离基座；嵌入内部
-      // Live 的目标身份键随 T04 装载器接线）
+      // data-vsidian-doc-scope="doc"（T01 探针 b2 隔离基座）；#569（T04）
+      // 起同键装载全文 <style> 产物（Reading 共享同一 CM6 doc——双模式
+      // 单一装载链；dispose 随视图销毁释放）
       liveHtmlDocScope('doc'),
+      liveDocStyle('doc'),
       // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
       // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
       ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
@@ -10109,6 +10111,12 @@ export class WebviewSyncController {
    * 首字符命中测试落在内容区内（DOM 数量与几何坐标探针测不出的"真的
    * 可见"），附带 CM6 baseTheme 存活与行号禁选观测。
    */
+  /** #569（T04）Reading 主容器直接子块的计算色探针（无命中 null） */
+  private readingProbeColor(selector: string, prop: string): string | null {
+    const el = this.readingContainer?.querySelector<HTMLElement>(selector)
+    return el ? getComputedStyle(el).getPropertyValue(prop).trim() : null
+  }
+
   private collectPaint(): PaintProbe {
     const view = this.view
     const contentEl = view?.dom.querySelector<HTMLElement>('.cm-content')
@@ -10606,6 +10614,25 @@ export class WebviewSyncController {
         0),
       inline: inlinePaint,
     }
+    // #569（T04）文档样式绘制探针：head 产物键集 + Reading 主容器直接
+    // 子块计算色（文档样式命中证据）+ 工具栏排除面基线。直接子块限定：
+    // 嵌入卡内段落挂引用键不计入主文档读值
+    const docStyleEls = [...document.querySelectorAll<HTMLStyleElement>('style[data-vsidian-doc-style]')]
+    const docStyleProbe = docStyleEls.length > 0
+      ? {
+          scopes: docStyleEls.map((el) => el.getAttribute('data-vsidian-doc-style') ?? ''),
+          mainRules: (document.querySelector<HTMLStyleElement>('style[data-vsidian-doc-style="doc"]')?.sheet?.cssRules.length ?? 0),
+          readingParagraphColor: this.readingContainer
+            ? this.readingProbeColor(':scope > .vsidian-reading-paragraph p', 'color')
+            : null,
+          readingHeadingColor: this.readingContainer
+            ? this.readingProbeColor(':scope > .vsidian-reading-heading-1 h1', 'color')
+            : null,
+          toolbarColor: this.toolbar
+            ? getComputedStyle(this.toolbar).color
+            : null,
+        }
+      : undefined
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
     // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。分组线
@@ -10894,6 +10921,8 @@ export class WebviewSyncController {
       // reading：.vsidian-reading-html；无渲染根时缺省）
       // #568 起 html 探针含行内面：块或行内任一在场即产出
       ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: htmlPaint } : {}),
+      // #569（T04）文档样式隔离观测（无产物缺省）
+      ...(docStyleProbe ? { docStyle: docStyleProbe } : {}),
       quickActions,
       code,
       fm,

@@ -109,6 +109,7 @@ vsidian/
     │   ├── cssSnippetEnv.ts           # CSS 片段环境身份与分桶戳（#131）
     │   ├── cssSnippetImports.ts       # CSS 片段依赖导入形态学单一事实源
     │   ├── cssSnippets.ts             # CSS 片段纯逻辑单一事实源
+    │   ├── docStyle.ts                # 文档样式收集/改写核心与身份键（纯逻辑）
     │   ├── editorGuard.ts             # 默认编辑器守护共享纯逻辑
     │   ├── editOrigin.ts              # T03可选编辑来源元数据
     │   ├── findOptions.ts             # 查找选项三开关单一事实源
@@ -206,6 +207,7 @@ vsidian/
         ├── diagramExport.ts              # 图表导出序列化与光栅化
         ├── diagramPopup.ts               # 图表弹窗全屏浮层
         ├── diagramPopupGeometry.ts       # 弹窗几何纯函数
+        ├── docStyleLoader.ts             # 文档样式装载器（产物生命周期）
         ├── embedCard.ts                  # Reading 嵌入卡片管理器
         ├── embedSlots.ts                 # 混排嵌入识别配对与DOM提升纯逻辑
         ├── fenceEscape.ts                # 围栏 Tab 越界适配层（#125）

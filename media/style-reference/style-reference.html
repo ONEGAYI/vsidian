@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（93 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（94 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -770,7 +770,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="reading-html-block">
       <h3><code>.vsidian-reading-html</code><span class="eid">reading-html-block</span></h3>
-      <p class="purpose">阅读视图的块级原生 HTML 块（#567/T02）：顶层 html_block token 净化后渲染为原生语义 DOM（合并单元格表格等 Markdown 无法表达的结构）。内容保持原生标签语义——不加生产 Markdown 块类（如 vsidian-reading-heading-1），样式按实际 DOM 匹配（Q4=B）；纯 &lt;style&gt; 块隐藏（Q6A——文档内样式由后续版本从源文装载，渲染区零占位）；净化后为空的片段（script-only 等）回退转义源码 pre（.vsidian-html-source-fallback）。块进入既有虚拟化挂载窗口（挂载/回收以块为单位）；渲染根携带 data-vsidian-doc-scope 文档身份标记（文档样式隔离的基座，源文不可伪造——净化边界剥离源文自带的 data-vsidian-*）。</p>
+      <p class="purpose">阅读视图的块级原生 HTML 块（#567/T02）：顶层 html_block token 净化后渲染为原生语义 DOM（合并单元格表格等 Markdown 无法表达的结构）。内容保持原生标签语义——不加生产 Markdown 块类（如 vsidian-reading-heading-1），样式按实际 DOM 匹配（Q4=B）；纯 &lt;style&gt; 块隐藏（Q6A——文档内样式自 #569/T04 起从源文装载生效，渲染区零占位）；净化后为空的片段（script-only 等）回退转义源码 pre（.vsidian-html-source-fallback）。块进入既有虚拟化挂载窗口（挂载/回收以块为单位）；#569 起标记铺开到全部内容块根（Markdown 块同挂 data-vsidian-doc-scope——逐块标记是 b2 隔离的结构前提），源文不可伪造——净化边界剥离源文自带的 data-vsidian-*。</p>
       <p class="views"><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
 <p class="states">状态：纯 &lt;style&gt; 块（内部 HTML 为空）display:none 零占位；其余常态渲染。</p>
       <p class="obsidian">Obsidian 对应：.markdown-preview-view 内原生渲染的 HTML 块（无专用容器类）</p>
@@ -1234,7 +1234,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元：CSS 源不再含该变量定义（迁移历史断言）</p>
       <p class="life">引入：#5（2026-09-23） · 移除：v0.2.x 周期内随 #55（2026-09-25）移除；移除时该变量仅随内部测试片段使用，无用户迁移负担</p>
     </article>
-    <h2>正文域 · 不支持与限制（11）</h2>
+    <h2>正文域 · 不支持与限制（12）</h2>
     <article class="entry" id="limit-hashtag">
       <h3><code>.cm-hashtag / .tag</code><span class="eid">limit-hashtag</span></h3>
       <p class="purpose">标签（#tag）语法未实现：出现在片段中不命中（不报错也不生效）。</p>
@@ -1245,6 +1245,21 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="dom">DOM 关系：无标签节点。</p>
       <p class="verify">验证：清单即边界：未实现即不承诺</p>
       <p class="life">引入：#11（2026-09-24，随双链节如实记录）</p>
+    </article>
+    <article class="entry" id="doc-style-scope">
+      <h3><code>文档内 &lt;style&gt;（data-vsidian-doc-scope 标记面 / style[data-vsidian-doc-style] 产物元素）</code><span class="eid">doc-style-scope</span></h3>
+      <p class="purpose">文档内 &lt;style&gt; 的隔离装载（#569/T04，T01 探针 b2 路线）：全文源码顺序收集（块级与行内、含容器内降级块；代码/注释/frontmatter 内的字面 &lt;style&gt; 不收集）经 CSSOM 逐选择器改写为 :where([data-vsidian-doc-scope=…]) :is(原选择器)（:where 归零前缀特异性、:is 保留原特异性、伪元素拆 :is 之外；@media/@supports/@layer/@container 递归下钻、CSS 嵌套 &amp; 代换、@keyframes/@font-face/@import/@property 原样保留——文档级名字空间，嵌套同名冲突属既有 CSS 语义）。产物挂 head 末尾**后置于 CSS 片段链**（同特异性文档胜——就近直觉；片段启停/排序/契约不受影响）。作用域：仅本篇渲染正文（Markdown 块与原生 HTML 块的渲染根逐块携带标记，系统 chrome——工具栏/源码层/嵌入卡壳——不携带）；嵌入视图按 canonicalRefTargetKey 派生键各守容器，同一目标多实例共享产物、释放归零移除。**:root/body/html 改写后失活**（不翻译选择器语义——Obsidian 式文档根映射留待用户反馈，登记在案）。:where 前缀使文档规则特异性=原选择器特异性——片段类(0,1,0) 仍胜文档标签(0,0,1)。样式失配不提示错误（正常 CSS 结果）；url()/@import 资源按样式所属 Markdown 解析归后续票。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：装载不依赖样式块 DOM 在场（离屏/显形/虚拟化卸载不移除）；视图释放回收。</p>
+      <p class="obsidian">Obsidian 对应：Obsidian 文档内 &lt;style&gt; 全局生效（无隔离改写）</p>
+
+      <p class="dom">DOM 关系：主文档标记值 &quot;doc&quot;；嵌入实例为 ref:&lt;64bit hex&gt;（fsPath 规范身份派生）；产物元素观测属性 data-vsidian-doc-style=&lt;docScope&gt;。源文自带 data-vsidian-* 被净化剥离，不可伪造标记。</p>
+      <pre><code>&lt;style&gt;
+.mark-x { color: red; }  /* 命中本篇内容（两模式渲染 DOM）*/
+.cm-content { color: red; }  /* 不命中：源码层无标记祖先 */
+&lt;/style&gt;</code></pre>
+      <p class="verify">验证：单元 docStyle（#569）：收集顺序/代码注释排除/改写矩阵（选择器形态/at-rule/嵌套&amp;/伪元素/:root 失活）/身份键；单元 docStyleLoader（#569）：产物挂 head 末尾、多实例共享、释放无残留、源文更新同步；浏览器 docStyle（#569）：层叠/双模式命中/工具栏与源码层排除/A→B→C 隔离与多 B 实例/虚拟化稳定/编辑撤销重做/片段兼容；集成「文档样式」（#569）：paint.docStyle（Reading 标签直中计算色 + 工具栏基线 + 产物回收）</p>
+      <p class="life">引入：#569（2026-10-16）</p>
     </article>
     <article class="entry" id="limit-callout">
       <h3><code>.callout 及其 data 属性</code><span class="eid">limit-callout</span></h3>

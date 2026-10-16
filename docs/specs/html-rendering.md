@@ -6,7 +6,7 @@
 
 架构与术语入口：[ADR-0019](../adr/0019-document-html-and-style-scope.md)、[CONTEXT.md](../../CONTEXT.md)。
 
-实施进度（2026-10-16，T02/#567 首批落地）：块级 HTML 双模式渲染与 Live 源码编辑闭环已实施——两端区间对拍（Lezer HTMLBlock ↔ markdown-it html_block，`src/shared/htmlBlock.ts` 顶层扫描 + `readingBlocks` 顶层 token 消费，容器内两端一致降级源码）、净化边界（`src/webview/htmlSanitize.ts`，DOMPurify 白名单第一道闸 + sanitizeReadingDom 第二道闸；markdown-it 实测 html:false 不产 html_block token，已按票面换 html:true + html_inline/html_block 渲染规则转义维持行内与容器字面）、Live 片段替换（`src/webview/liveHtml.ts`，liveEmbed 模板）、纯 `<style>` 块 Live 常显/Reading 隐藏、渲染根 data-vsidian-doc-scope 标记（主文档 'doc'，嵌入实例随 T04）。行内混排（T03/#568）已实施：行内区间事实源（`src/shared/htmlInline.ts`——Lezer HTMLTag 实测节点名 + 栈式配对、单行成型、最外层语义，两端对拍钉住）、Reading 行内原位渲染（markdown-it `vsidian_inline_html` 规则整段消费 + 净化，无包装类，片段内不递归 Markdown；不成型维持 T02 转义字面）、Live 行内装饰（`src/webview/liveInlineHtml.ts`——行内 inline replace、selectionTouchesRange 显隐、点击选中完整源码、查找命中同列；「编辑当前 HTML 源码」覆盖块级与行内）、paint 探针 `paint.html.inline`。`<style>` 装载（T04）与资源（T05）未实施。既有基线为[源文本双视图](../adr/0003-source-text-dual-view-editor.md)、[视口渲染](../adr/0005-viewport-rendering.md)、[HTML 注释](html-comment-support.md)、[CSS 片段](css-snippets.md)。
+实施进度（2026-10-16，T02/#567 首批落地）：块级 HTML 双模式渲染与 Live 源码编辑闭环已实施——两端区间对拍（Lezer HTMLBlock ↔ markdown-it html_block，`src/shared/htmlBlock.ts` 顶层扫描 + `readingBlocks` 顶层 token 消费，容器内两端一致降级源码）、净化边界（`src/webview/htmlSanitize.ts`，DOMPurify 白名单第一道闸 + sanitizeReadingDom 第二道闸；markdown-it 实测 html:false 不产 html_block token，已按票面换 html:true + html_inline/html_block 渲染规则转义维持行内与容器字面）、Live 片段替换（`src/webview/liveHtml.ts`，liveEmbed 模板）、纯 `<style>` 块 Live 常显/Reading 隐藏、渲染根 data-vsidian-doc-scope 标记（主文档 'doc'，嵌入实例随 T04）。行内混排（T03/#568）已实施：行内区间事实源（`src/shared/htmlInline.ts`——Lezer HTMLTag 实测节点名 + 栈式配对、单行成型、最外层语义，两端对拍钉住）、Reading 行内原位渲染（markdown-it `vsidian_inline_html` 规则整段消费 + 净化，无包装类，片段内不递归 Markdown；不成型维持 T02 转义字面）、Live 行内装饰（`src/webview/liveInlineHtml.ts`——行内 inline replace、selectionTouchesRange 显隐、点击选中完整源码、查找命中同列；「编辑当前 HTML 源码」覆盖块级与行内）、paint 探针 `paint.html.inline`。全文 `<style>` 装载已实施（T04/#569，b2 路线：`src/shared/docStyle.ts` 收集/改写核心 + `src/webview/docStyleLoader.ts` 产物生命周期；标记铺开到全部内容块根，嵌入实例按 canonicalRefTargetKey 派生键装载；两个决策点已定案——`:root`/`body`/`html` 改写后**维持失活**并文档化、文档样式**后置**于 CSS 片段链；@media/@supports/@layer/@container 递归改写、@keyframes/@font-face/@import/@property 原样保留（文档级语义）、CSS 嵌套 & 递归代换）资源（T05，url()/@import 解析基准与字体装载）未实施。既有基线为[源文本双视图](../adr/0003-source-text-dual-view-editor.md)、[视口渲染](../adr/0005-viewport-rendering.md)、[HTML 注释](html-comment-support.md)、[CSS 片段](css-snippets.md)。
 
 用户确认记录：块级与行内 HTML 一起做；支持 `style`、`class` 与 `<style>`；文档内规则作用于本篇渲染正文；Q4 选 B，按实际 DOM 匹配、尊重 CSS 原意；Q5 选 C，全量 HTML；Q6 选 A，纯样式块在 Live 源码常显。
 
@@ -74,6 +74,14 @@ HTML 内部的普通点击仍优先进入源码，包含其链接、控件与媒
 - 隔离机制不得借机改变选择器本来的含义。先验证层叠顺序、特异性、继承、自定义属性及嵌套引用，再确定装载方案。仅追加容器前缀、仅屏蔽某几个类名不自动构成隔离证据。
 - CSS 的 `@media`、`@supports`、动画、字体、`url()`、依赖导入等纳入逐类核对。远程引用遵循已有 HTTPS、CSP 和浏览器限制；文档相对路径以样式所属 Markdown 为基准，不误用主文档或全局 CSS 片段目录。不能以正则替换 CSS 文本代替语法处理。
 - 样式失配与装载失败分开：选择器没有匹配实际 DOM 是正常 CSS 结果，不提示错误，也不自动改写；资源请求确实失败时按真实原因呈现。
+
+#### 文档样式实施落档（T04/#569）
+
+- **决策点 1（`:root`/`body`/`html`）定案：维持改写后失活**。逐块标记改写下这三类选择器永不命中（标记块不是根/文档元素的祖先）——最忠实于「不翻译选择器语义」；Obsidian 式「文档根」映射（把 `:root` 受控翻译到标记块）留待用户反馈驱动，须在规格层另行登记后才可实施。
+- **决策点 2（与 CSS 片段先后序）定案：文档样式后置**。产物挂 head 末尾（片段链之后）——同特异性时文档胜（就近直觉：文档特定覆盖全局配置）；实测与探针一致。片段的启停、排序与历史契约不因本功能改写。
+- **模式差异（U10 口径）**：同一规则在 Reading 直中 Markdown 语义标签（`h1{}` 命中真实 `h1` 元素）；Live 的 Markdown 是 CM6 的 `div/span` 行结构，标签选择器**不命中** Markdown 部分（`h1{}` 不命中标题行）——这是按实际 DOM 匹配（Q4=B）的既定差异，不是缺陷；原生 HTML 片段两模式同一规则命中（widget 渲染根挂标记）。类/属性选择器命中任何携带该类/属性的实际 DOM。
+- **at-rule 矩阵去向**：`@media`/`@supports`/`@layer`/`@container` 递归改写内层（组块头原样保留）；`@keyframes`/`@font-face`/`@property`/`@import` 原样保留（文档级名字空间——嵌套场景同名冲突属既有 CSS 语义；`@import` 位置规则按 CSS 原生行为，多块拼接产物中非首位的 `@import` 失效）；CSS 嵌套 `&` 递归代换（含多层与组块内嵌套）；未知 at-rule 保守保留。`url()`/`@import` 的**来源文档解析基准**与字体资源装载归 T05。
+- **收集口径**：全文源码顺序收集（块级与行内出现的 style 标签源文；含容器内降级块的样式——降级是呈现边界，与「纯 style 块 Live 常显且生效」同语义）；代码（围栏/缩进/行内）、HTML 注释、frontmatter 内的字面 `<style>` 不收集。配对词法为 HTML raw text 语义（首个 `</style` 闭合，与浏览器一致）。
 
 ### 资源与原生交互
 

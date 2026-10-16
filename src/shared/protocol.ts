@@ -2824,6 +2824,21 @@ export interface PaintProbe {
     /** 浮层内图片已装载（img 元素在场且 loaded 态） */
     overlayImgLoaded: boolean
   }
+  /** #569（T04）文档样式绘制观测：head 产物元素键集（装载面在场）与
+   *  Reading 主容器直接子块的计算色（文档样式命中的绘制层证据——
+   *  「仅产物元素在场不通过」的验收口径）。无产物时整个字段缺省。 */
+  docStyle?: {
+    /** head 内全部产物元素的 docScope 键（主文档 'doc' + 嵌入派生键） */
+    scopes: string[]
+    /** 主文档产物规则数 */
+    mainRules: number
+    /** Reading 主容器直接子首个段落的计算色（无 Reading 视图为 null） */
+    readingParagraphColor: string | null
+    /** Reading 主容器直接子首个标题的计算色（无 Reading 视图为 null） */
+    readingHeadingColor: string | null
+    /** 工具栏计算色（排除面基线对照——定向规则不得改写它） */
+    toolbarColor: string | null
+  }
   /** #567（T02）块级原生 HTML 绘制观测：当前激活视图内 html 块渲染根的
    *  计数与真实可见性（elementFromPoint 命中——jsdom 无布局恒 false，
    *  只作真宿主集成断言依据）。mergedCell 是合并单元格的绘制层证据

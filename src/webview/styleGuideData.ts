@@ -1476,7 +1476,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "reading-structure",
     "kind": "container",
     "target": ".vsidian-reading-html",
-    "purpose": "阅读视图的块级原生 HTML 块（#567/T02）：顶层 html_block token 净化后渲染为原生语义 DOM（合并单元格表格等 Markdown 无法表达的结构）。内容保持原生标签语义——不加生产 Markdown 块类（如 vsidian-reading-heading-1），样式按实际 DOM 匹配（Q4=B）；纯 <style> 块隐藏（Q6A——文档内样式由后续版本从源文装载，渲染区零占位）；净化后为空的片段（script-only 等）回退转义源码 pre（.vsidian-html-source-fallback）。块进入既有虚拟化挂载窗口（挂载/回收以块为单位）；渲染根携带 data-vsidian-doc-scope 文档身份标记（文档样式隔离的基座，源文不可伪造——净化边界剥离源文自带的 data-vsidian-*）。",
+    "purpose": "阅读视图的块级原生 HTML 块（#567/T02）：顶层 html_block token 净化后渲染为原生语义 DOM（合并单元格表格等 Markdown 无法表达的结构）。内容保持原生标签语义——不加生产 Markdown 块类（如 vsidian-reading-heading-1），样式按实际 DOM 匹配（Q4=B）；纯 <style> 块隐藏（Q6A——文档内样式自 #569/T04 起从源文装载生效，渲染区零占位）；净化后为空的片段（script-only 等）回退转义源码 pre（.vsidian-html-source-fallback）。块进入既有虚拟化挂载窗口（挂载/回收以块为单位）；#569 起标记铺开到全部内容块根（Markdown 块同挂 data-vsidian-doc-scope——逐块标记是 b2 隔离的结构前提），源文不可伪造——净化边界剥离源文自带的 data-vsidian-*。",
     "views": [
       "reading"
     ],
@@ -2029,6 +2029,32 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "清单即边界：未实现即不承诺"
     ],
     "introduced": "#11（2026-09-24，随双链节如实记录）"
+  },
+  {
+    "id": "doc-style-scope",
+    "domain": "content",
+    "category": "content-limits",
+    "kind": "limitation",
+    "target": "文档内 <style>（data-vsidian-doc-scope 标记面 / style[data-vsidian-doc-style] 产物元素）",
+    "purpose": "文档内 <style> 的隔离装载（#569/T04，T01 探针 b2 路线）：全文源码顺序收集（块级与行内、含容器内降级块；代码/注释/frontmatter 内的字面 <style> 不收集）经 CSSOM 逐选择器改写为 :where([data-vsidian-doc-scope=…]) :is(原选择器)（:where 归零前缀特异性、:is 保留原特异性、伪元素拆 :is 之外；@media/@supports/@layer/@container 递归下钻、CSS 嵌套 & 代换、@keyframes/@font-face/@import/@property 原样保留——文档级名字空间，嵌套同名冲突属既有 CSS 语义）。产物挂 head 末尾**后置于 CSS 片段链**（同特异性文档胜——就近直觉；片段启停/排序/契约不受影响）。作用域：仅本篇渲染正文（Markdown 块与原生 HTML 块的渲染根逐块携带标记，系统 chrome——工具栏/源码层/嵌入卡壳——不携带）；嵌入视图按 canonicalRefTargetKey 派生键各守容器，同一目标多实例共享产物、释放归零移除。**:root/body/html 改写后失活**（不翻译选择器语义——Obsidian 式文档根映射留待用户反馈，登记在案）。:where 前缀使文档规则特异性=原选择器特异性——片段类(0,1,0) 仍胜文档标签(0,0,1)。样式失配不提示错误（正常 CSS 结果）；url()/@import 资源按样式所属 Markdown 解析归后续票。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "装载不依赖样式块 DOM 在场（离屏/显形/虚拟化卸载不移除）；视图释放回收。",
+    "dom": "主文档标记值 \"doc\"；嵌入实例为 ref:<64bit hex>（fsPath 规范身份派生）；产物元素观测属性 data-vsidian-doc-style=<docScope>。源文自带 data-vsidian-* 被净化剥离，不可伪造标记。",
+    "example": "<style>\n.mark-x { color: red; }  /* 命中本篇内容（两模式渲染 DOM）*/\n.cm-content { color: red; }  /* 不命中：源码层无标记祖先 */\n</style>",
+    "obsidian": {
+      "counterpart": "Obsidian 文档内 <style> 全局生效（无隔离改写）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 docStyle（#569）：收集顺序/代码注释排除/改写矩阵（选择器形态/at-rule/嵌套&/伪元素/:root 失活）/身份键",
+      "单元 docStyleLoader（#569）：产物挂 head 末尾、多实例共享、释放无残留、源文更新同步",
+      "浏览器 docStyle（#569）：层叠/双模式命中/工具栏与源码层排除/A→B→C 隔离与多 B 实例/虚拟化稳定/编辑撤销重做/片段兼容",
+      "集成「文档样式」（#569）：paint.docStyle（Reading 标签直中计算色 + 工具栏基线 + 产物回收）"
+    ],
+    "introduced": "#569（2026-10-16）"
   },
   {
     "id": "limit-callout",
@@ -5959,7 +5985,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "reading-html-block": {
-    "purpose": "The reading-view block-level native HTML block (#567/T02): a top-level html_block token renders as sanitized native semantic DOM (structures Markdown cannot express, such as tables with merged cells). The content keeps native tag semantics — no production markdown block classes are added (e.g. vsidian-reading-heading-1); styles match the actual DOM (the Q4=B stance). A pure <style> block is hidden (Q6A — in-document styles are loaded from the source by a later release, zero footprint in the reading area); a fragment that sanitizes to nothing (script-only, etc.) falls back to an escaped-source pre (.vsidian-html-source-fallback). Blocks join the existing virtualized mount window (mount/unmount per block); the render root carries the data-vsidian-doc-scope document identity marker (the substrate for document style isolation — source text cannot forge it, since the sanitize boundary strips source-provided data-vsidian-*).",
+    "purpose": "The reading-view block-level native HTML block (#567/T02): a top-level html_block token renders as sanitized native semantic DOM (structures Markdown cannot express, such as tables with merged cells). The content keeps native tag semantics — no production markdown block classes are added (e.g. vsidian-reading-heading-1); styles match the actual DOM (the Q4=B stance). A pure <style> block is hidden (Q6A — in-document styles have been loaded from the source since #569/T04, zero footprint in the reading area); a fragment that sanitizes to nothing (script-only, etc.) falls back to an escaped-source pre (.vsidian-html-source-fallback). Blocks join the existing virtualized mount window (mount/unmount per block); since #569 the marker is laid out on every content block root (Markdown blocks also carry data-vsidian-doc-scope — per-block marking is the structural premise of the b2 isolation), and source text cannot forge it, since the sanitize boundary strips source-provided data-vsidian-*.",
     "states": "A pure <style> block (empty inner HTML) is display:none with zero footprint; everything else renders normally.",
     "dom": "A block-level div in the reading container (vsidian-reading-block + vsidian-reading-html, carrying the data-vsidian-src-start/end source anchors); the inside is sanitized native HTML (whitelist first gate + sanitizeReadingDom defense-in-depth second gate).",
     "obsidian": {
@@ -6814,6 +6840,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A class on body; the rule selectors cover .vsidian-wikilink / .vsidian-link / reading anchors under :hover.",
     "obsidian": {
       "counterpart": "the Obsidian pointer and underline feedback while holding Ctrl over internal links"
+    }
+  },
+  "doc-style-scope": {
+    "purpose": "Isolated loading of in-document <style> (#569/T04, the T01 probe b2 route): styles are collected in full-document source order (block-level and inline, including degraded blocks inside containers; literal <style> inside code/comment/frontmatter contexts is not collected) and rewritten selector-by-selector via CSSOM into :where([data-vsidian-doc-scope=…]) :is(original selector) (:where zeroes the prefix specificity, :is keeps the original, pseudo-elements are split outside :is; @media/@supports/@layer/@container recurse into inner rules, CSS nesting & is substituted, @keyframes/@font-face/@import/@property are kept verbatim — document-level namespaces, nested name collisions are stock CSS semantics). The product style element is appended at the end of head, after the CSS snippet chain (at equal specificity the document wins — proximity intuition; snippet enable/order/contracts are untouched). Scope: only the rendered body content of this document (the render roots of Markdown and native-HTML blocks each carry the marker; system chrome — toolbar, source layer, embed card shells — does not); embedded views each keep to their container via a key derived from canonicalRefTargetKey, multiple instances of the same target share one product, released at zero refcount. **:root/body/html are inert after the rewrite** (selector semantics are not translated — an Obsidian-style document-root mapping is left to user feedback, on record). The :where prefix keeps document-rule specificity equal to the original selector's — a snippet class (0,1,0) still beats a document tag (0,0,1). Style mismatch is never reported as an error (a normal CSS outcome); url()/@import resource resolution against the owning Markdown is deferred to a later ticket.",
+    "states": "Loading never depends on the style-block DOM being present (offscreen/reveal/virtualization unmount never removes rules); the view release reclaims them.",
+    "dom": "Main-document marker value \"doc\"; embedded instances use ref:<64bit hex> derived from the canonical fsPath identity; the product element carries the observable attribute data-vsidian-doc-style=<docScope>. Source-provided data-vsidian-* is stripped by the sanitizer — markers cannot be forged.",
+    "obsidian": {
+      "counterpart": "Obsidian in-document <style> applies globally (no isolation rewrite)"
     }
   },
   "live-html-widget": {
