@@ -135,6 +135,7 @@ vsidian/
 │   │   ├── obsidian-properties-nested-yaml.md     # Obsidian 嵌套 YAML 调查
 │   │   ├── obsidian-viewport-rendering.md         # 视口渲染性能补充调研
 │   │   ├── pdf-engine-compatibility-probe.md      # P3-02 PDF 引擎兼容性探针报告
+│   │   ├── t02-regex-budget-probe.md              # T02 正则实现预算与选型探针报告
 │   │   ├── vscode-1823-host-route-probes.md       # P2-01 宿主路线探针结论
 │   │   ├── vscode-addon-discovery.md              # 附加组件发现与调用边界调研
 │   │   ├── vscode-native-text-appearance-probe.md # 原生文字外观复用探针报告
