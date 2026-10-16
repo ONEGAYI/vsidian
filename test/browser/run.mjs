@@ -85,6 +85,8 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   'dropCursorPaint', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',
+  // #534（T04）普通链接尾部行号：紧随悬停族（同链接悬停——原文上报保真、错误分态就地可见与行号预览定位）
+  'lineSuffix',
   // #341（P3-09）文本嵌入容器矩阵：紧随嵌入族（textHover 之后的嵌入侧消费）
   'textEmbed',
   // #338（P3-06）PDF 全文滚动与正文嵌入：容器矩阵 + 双 occurrence 共享 + 窗口回收

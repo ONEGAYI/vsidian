@@ -54,8 +54,10 @@ function countHostLines(text: string): number {
   return text.split('\n').length
 }
 
-/** 宿主系行首偏移（1-based line；越界返回 null——调用方按 out-of-bounds 分派） */
-function hostLineStart(text: string, line1: number): number | null {
+/** 宿主系行首偏移（1-based line；越界返回 null——调用方按 out-of-bounds 分派）。
+ *  #534 起公开导出：普通链接尾部行号（executeLinkIntent 的 md 落位）复用
+ *  同一行号→宿主偏移换算，不建第二套（CRLF 语义由 NewlineCoordinator 收口） */
+export function hostLineStart(text: string, line1: number): number | null {
   let offset = 0
   let n = 1
   for (const rawLine of text.split('\n')) {
