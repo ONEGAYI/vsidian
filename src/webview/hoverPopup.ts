@@ -170,9 +170,11 @@ export const HOVER_POPUP_CLOSE_DELAY_MS = 350
  *  如 note.md:103）不是外链——宿主按文件名 + 行号解析（行号剥离与形态
  *  判定的单一事实源在 host/linkTarget，此处只放通预滤不复制解析）；含点
  *  限定与宿主「真 scheme 不含点」口径对齐——`https:443` 等无点真形态
- *  维持外链预滤 */
+ *  维持外链预滤。相对路径前缀（./ ../）显式放通：`./note.md:3` 的
+ *  scheme 段含路径分隔符，字面正则不匹配，但宿主同样按相对路径 + 行号
+ *  解析，与裸 `note.md:3` 同属可悬停形态 */
 const EXTERNAL_LINK_HREF_RE = /^(?:[a-zA-Z][a-zA-Z0-9+.\-]*:|\/\/)/
-const LINE_SUFFIX_HREF_RE = /^[a-zA-Z][a-zA-Z0-9+.\-]*\.[a-zA-Z0-9+.\-]*:\d+(?:[#?].*)?$/
+const LINE_SUFFIX_HREF_RE = /^(?:\.{1,2}\/)?[a-zA-Z][a-zA-Z0-9+.\-]*\.[a-zA-Z0-9+.\-]*:\d+(?:[#?].*)?$/
 export function isHoverableMdLinkHref(href: string): boolean {
   if (LINE_SUFFIX_HREF_RE.test(href)) {
     return true

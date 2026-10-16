@@ -62,6 +62,7 @@ import {
   sniffTextHead,
   splitLfLines,
 } from '../shared/refText'
+import { hostLineStart } from './addonDocNav'
 import { classifyLinkTarget, linkPathTextOf, splitHrefFragment, splitLineSuffix } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
 import type { HoverAnchorInvalidDetail, HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
@@ -230,15 +231,9 @@ async function readMarkdownContent(
         content: { ...base, range: { start: 0, end: lfText.length }, selector: { kind: 'full' } },
       }
     }
-    // #534 行号落位（1-based；LF 正文行数与宿主 lineCount 同口径）
+    // #534 行号落位（1-based；LF 正文行数与宿主 lineCount 同口径；
+    // 行首偏移复用 hostLineStart 单一实现，调用点已验证行号合法）
     const lines = splitLfLines(lfText)
-    const lineOf = (line1: number): number => {
-      let start = 0
-      for (let i = 0; i < line1 - 1; i++) {
-        start += lines[i]!.length + 1
-      }
-      return start
-    }
     if (opts.line > lines.length) {
       // 刷新宽容：已打开实例重载时越界钳到末行（初次打开仍按报错口径）
       if (opts.anchorOptional === true) {
@@ -246,7 +241,7 @@ async function readMarkdownContent(
           ok: true,
           content: {
             ...base,
-            range: { start: lineOf(lines.length), end: lfText.length },
+            range: { start: hostLineStart(lfText, lines.length) ?? 0, end: lfText.length },
             selector: { kind: 'full' },
           },
         }
@@ -257,7 +252,7 @@ async function readMarkdownContent(
       ok: true,
       content: {
         ...base,
-        range: { start: lineOf(opts.line), end: lfText.length },
+        range: { start: hostLineStart(lfText, opts.line) ?? 0, end: lfText.length },
         selector: { kind: 'full' },
       },
     }

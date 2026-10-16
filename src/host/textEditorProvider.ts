@@ -5817,7 +5817,8 @@ async function executeLinkIntent(
     await revealLinkAnchor(anchors, uri, targetDoc, offset)
     if (lineOutOfRange) {
       // 行首区间在 LF 全文的行数语义：splitLfLines 与 lineCount 同口径
-      const totalLines = targetDoc.getText().split('\n').length
+      //（targetText 即本次已取的宿主全文，不重复 getText）
+      const totalLines = targetText.split('\n').length
       void vscode.window.showWarningMessage(t('host.linkLineOutOfRange', {
         href: intent.href, line: String(targetLine), total: String(totalLines),
       }))

@@ -15,6 +15,7 @@ import {
   hoverPopupProbe,
   hoverPreviewAnchorEnter,
   hoverPreviewAnchorLeave,
+  isHoverableMdLinkHref,
   invalidateHoverPopupImages,
   isHoverPopupOpen,
   notifyHoverExternalSettings,
@@ -1783,5 +1784,24 @@ describe('#343 外链原网页形态（page iframe 与退回）', () => {
     expect(after.web?.shape).toBe('card')
     expect(after.web?.frameMounted).toBe(false)
     closeHoverPopup()
+  })
+})
+
+// #534 尾部行号形态的可悬停预滤矩阵：含点行号形态（含相对路径前缀）
+// 不被外链预滤拦截；无点真 scheme:port 维持外链拦截。钉住「合法行号
+// 目标可悬停」的行为（相对路径走默认放行分支，正则显式化双保险）。
+describe('#534 行号形态悬停预滤', () => {
+  it('含点行号形态放行：裸名、./ 与 ../ 相对路径、可带 hash/query', () => {
+    expect(isHoverableMdLinkHref('note.md:103')).toBe(true)
+    expect(isHoverableMdLinkHref('./note.md:3')).toBe(true)
+    expect(isHoverableMdLinkHref('../x.md:3')).toBe(true)
+    expect(isHoverableMdLinkHref('note.md:103#frag')).toBe(true)
+    expect(isHoverableMdLinkHref('code.ts:2?q=1')).toBe(true)
+  })
+  it('真 scheme:port 与外部形态维持拦截：无点 scheme、http、协议相对', () => {
+    expect(isHoverableMdLinkHref('https:443')).toBe(false)
+    expect(isHoverableMdLinkHref('https://example.com/x')).toBe(false)
+    expect(isHoverableMdLinkHref('//example.com/x')).toBe(false)
+    expect(isHoverableMdLinkHref('')).toBe(false)
   })
 })
