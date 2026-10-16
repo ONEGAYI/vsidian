@@ -12766,7 +12766,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const ext = (p: string): vscode.Uri => vscode.Uri.file(`${extDir}/${p}`)
     const extAbs = (p: string): string => `${extDir.replaceAll('\\', '/')}/${p}`
     // 链接文本用资源管理器复制形态（大写盘符）：登记身份键随链接文本、
-    // rename 事件路径随宿主 URI（小写）——身份门折叠命中是本用例的钉面
+    // rename 事件路径随宿主 URI（小写）——身份门折叠命中是本用例的钉面。
+    // 盘符转换仅 Windows 宿主生效（CI 集成 job 为 Linux，本用例在 CI 上退
+    // 化为归一形态主链路重复——折叠逻辑面由单测 vaultIndexService #562 组
+    // 钉住，本用例钉本地 Windows 真宿主的端到端接线）
     const extAbsUpper = (p: string): string => extAbs(p).replace(/^([a-z]):/, (m) => m.toUpperCase())
     const containsFold = (haystack: string, needle: string): boolean =>
       haystack.toLowerCase().includes(needle.toLowerCase())
@@ -12805,7 +12808,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(!containsFold(refNew, 'old/target.md'), `引用应改写到 moved（实际 ${refNew}` + '）')
       await poll('562 改写反馈落账', async () => {
         const last = await lastRenameRefLog()
-        return last && last.plannedEdits >= 1 ? last : undefined
+        return last && last.plannedEdits >= 1 &&
+          last.moves.some((m) => normFsPath(m.oldFsPath) === normFsPath(ext('old/target.md').fsPath))
+          ? last : undefined
       })
     } finally {
       await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})

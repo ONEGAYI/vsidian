@@ -3167,6 +3167,46 @@ describe('VaultIndexService：#556 T2 外部与跨根目标（绝对身份登记
     expect(drifted.status).toBe('outside')
   })
 
+  it('折叠缓存失效：增量登记的外部新形态立即可漂移命中（#562）', async () => {
+    const fs = makeFs({ 'C:/vault/占位.md': '# 占\n' })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 先触发一次折叠慢路径（此刻无外部登记，绝对键缓存以空集建立）
+    expect(service.renameCandidatesOf('e:/外部/新目标.md').status).toBe('outside')
+    // 后写入：外部目标 + 大写盘符引用（watcher 增量通道 → registerExternalTargets
+    // 登记新绝对键——登记点必须失效缓存，否则漂移查询恒 outside）
+    fs.files.set('E:/外部/新目标.md', '# 外\n')
+    fs.stats.set('E:/外部/新目标.md', { mtimeMs: 1_700_000_100_000, size: 4 })
+    fs.files.set('C:/vault/后写源.md', '# 源\n\n见 [[E:/外部/新目标.md]]。\n')
+    fs.stats.set('C:/vault/后写源.md', { mtimeMs: 1_700_000_100_000, size: 30 })
+    scan.emit('C:/vault/后写源.md')
+    await vi.advanceTimersByTimeAsync(2_000)
+    const cands = service.renameCandidatesOf('e:/外部/新目标.md')
+    expect(cands.status).toBe('ready')
+    if (cands.status === 'ready') {
+      expect(cands.incoming.map((g) => g.fsPath)).toEqual(['C:\\vault\\后写源.md'])
+    }
+  })
+
+  it('折叠缓存失效：核验删除的外部条目立即退 outside（陈旧键集不得假阳性，#562）', async () => {
+    const fs = makeFs({
+      'C:/vault/源.md': '# 源\n\n见 [[E:/外部/资料.md]]。\n',
+      'E:/外部/资料.md': '# 外\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    // 先触发缓存构建（键集含 e:/外部/资料.md 的 fold 形态）
+    expect(service.renameCandidatesOf('e:/外部/资料.md').status).toBe('ready')
+    // 外部删除：verifyRoot externals 段移除绝对条目（删除点必须失效缓存，
+    // 否则身份门仍命中陈旧键集 → 假阳性 ready）
+    fs.files.delete('E:/外部/资料.md')
+    fs.stats.delete('E:/外部/资料.md')
+    await service.verifyNow()
+    expect(service.renameCandidatesOf('e:/外部/资料.md').status).toBe('outside')
+  })
+
   it('评审 F1：跨根与外部目标的更名引用者跨根分区收集（rename 候选含他根来源）', async () => {
     const fs = makeFs({
       'C:/vaultA/源.md': '# 源\n\n见 [[C:/vaultB/笔记.md]] 与 [[E:/外部/资料.md]]。\n',
