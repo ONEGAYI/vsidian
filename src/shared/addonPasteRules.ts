@@ -167,9 +167,10 @@ export type AddonPasteRulesRegisterResult =
   | { ok: true; dispose(): void }
   | { ok: false; reason: 'invalid-declaration' | 'duplicate-id' | 'too-many' | 'released'; detail?: string }
 
-/** 校验上下文：现有计数与已占用 ID（重复与超预算判定用） */
+/** 校验上下文：现有递归声明总数与已占用 ID（重复与超预算判定用） */
 export interface AddonPasteRuleValidationContext {
   existingIds?: ReadonlySet<string>
+  /** 既有规则的递归声明总数（顶层 + 嵌套子规则合计；宿主按此口径传入） */
   currentCount?: number
 }
 
@@ -566,6 +567,27 @@ export function validateAddonPasteRuleDeclarations(
   return validateRuleBatch(declarations, new Set(context.existingIds ?? []), budget)
 }
 
+/**
+ * 递归统计规则声明总数（顶层 + children 槽内嵌套子规则逐层合计）。这是
+ * 「每组件至多 256 条规则（含嵌套子规则合计）」预算的计量口径单一事实
+ * 源：宿主登记簿跨批、释放与代次更迭都按本函数对当前存量计数（PR #564
+ * 评审：登记簿曾只数顶层，分批登记可绕过总量上限）。
+ */
+export function countAddonPasteRuleDeclarations(rules: readonly (AddonPasteRule | AddonPasteNestedRule)[]): number {
+  let count = 0
+  const visit = (rule: AddonPasteRule | AddonPasteNestedRule): void => {
+    count += 1
+    if (rule.output.kind !== 'template') return
+    for (const slot of Object.values(rule.output.slots)) {
+      if (slot.source.kind === 'children' && slot.source.rules !== undefined) {
+        for (const nested of slot.source.rules) visit(nested)
+      }
+    }
+  }
+  for (const rule of rules) visit(rule)
+  return count
+}
+
 /** 求值序比较：优先级降序、（组件稳定 ID 升序）、规则稳定 ID 升序 */
 const compareRuleOrder = (
   a: { priority?: number; addonId?: string; id: string },
@@ -614,7 +636,12 @@ export interface AddonPasteRulesSnapshot {
   readonly rules: readonly AddonPasteRule[]
 }
 
-/** 条件树形状检查（守卫用，深度受 MAX_DEPTH 约束——敌意载荷不无限递归） */
+/**
+ * 条件树形状检查（守卫用，深度受 MAX_DEPTH 约束——敌意载荷不无限递归）。
+ * 层号语义与注册端 validateConditionNode 对齐：组合层号从 1 起计（叶子
+ * 谓词不占层号），第 16 层组合合法、第 17 层拒绝——注册成功的合法声明
+ * 必能穿过本守卫（PR #564 评审：两端口径不一致曾使 16 层全量快照被弃）。
+ */
 function isConditionShape(value: unknown, depth: number): boolean {
   if (!isObject(value)) return false
   const keys = Object.keys(value)
@@ -630,9 +657,9 @@ function isConditionShape(value: unknown, depth: number): boolean {
     return false
   }
   if (keys.length !== 1) return false
-  if (keys[0] === 'not') return depth < ADDON_PASTE_RULES_MAX_DEPTH && isConditionShape(value.not, depth + 1)
+  if (keys[0] === 'not') return depth <= ADDON_PASTE_RULES_MAX_DEPTH && isConditionShape(value.not, depth + 1)
   if (keys[0] === 'all' || keys[0] === 'any') {
-    if (depth >= ADDON_PASTE_RULES_MAX_DEPTH) return false
+    if (depth > ADDON_PASTE_RULES_MAX_DEPTH) return false
     const items = value[keys[0]]
     return Array.isArray(items) && items.length > 0 && items.every((item) => isConditionShape(item, depth + 1))
   }

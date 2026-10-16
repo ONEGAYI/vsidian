@@ -7,6 +7,8 @@
 // - 停用撤回（空快照）与迟到旧版本快照不复活旧代次规则。
 // T02 追加：正则捕获组与条件组合命中（含嵌套规则集回放嵌套 HTML——
 // 子规则先于内置、外层规则不串味；既有格式与分步撤销保持）。
+// PR #564 评审修复追加：16 层条件组合（合法最大深度）快照穿过协议守卫
+// 并被生产控制器接纳（注册与守卫深度口径统一）。
 // 规则载荷只模拟来源 HTML 形态（Codex 形态样例），不把专属规则写入
 // 生产内核——消费样例经生产快照通道注入。
 import assert from 'node:assert/strict'
@@ -243,4 +245,22 @@ try {
   await write('内链', '<div data-card><p><span data-inner-url="https://example.com/z">内链</span></p></div>')
   await selectAll(); await page.keyboard.press('Control+V'); await waitBoth('内链')
   console.log('[PASS] T02 停用后嵌套链路整体回内置')
+
+  // ---- PR #564 评审：16 层条件组合（合法最大深度）注册口径快照必被生产控制器接纳 ----
+  // 16 层 not 链（偶数次否定 → 等价要求 data-deep 存在）：修复前协议守卫拒收
+  // 第 16 层，全量快照被弃、页面规则整体失效；修复后穿过守卫并参与转换。
+  let deepCondition = { kind: 'attribute', name: 'data-deep' }
+  for (let i = 0; i < 16; i++) deepCondition = { not: deepCondition }
+  const snapshotDeep = { version: 6, rules: [{
+    addonId: 'fixture.paste-demo',
+    id: 'deep-condition',
+    priority: 0,
+    match: { tag: 'SPAN', condition: deepCondition },
+    output: { kind: 'template', template: '[D16]', slots: {} },
+  }] }
+  await page.evaluate(snapshot=>window.pasteRules(snapshot), snapshotDeep)
+  await write('深条件', '<p><span data-deep>深条件</span></p>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('[D16]')
+  console.log('[PASS] 16 层条件组合快照穿过协议守卫并被生产控制器接纳')
 } finally { await browser.close() }

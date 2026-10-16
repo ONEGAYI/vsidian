@@ -502,10 +502,75 @@ describe('T02 粘贴规则转换：条件组合', () => {
     expect(convert('<p><span data-kind="card">词</span></p>', [conditionRule(condition)]).markdown).toBe('词')
   })
 
-  it('正则谓词输入超上限按假值处理（不匹配该规则）', () => {
+  it('正则谓词输入超限：本条规则失败跳过（回内置，不截断不改写）', () => {
     const longText = 'x'.repeat(ADDON_PASTE_RULES_REGEX_INPUT_LIMIT + 1)
     const condition = { all: [{ kind: 'text-regex', regex: { pattern: '^x+$' } }] }
     expect(convert(`<p><span>${longText}</span></p>`, [conditionRule(condition)]).markdown).toBe(longText)
+  })
+
+  it('not 包裹的正则谓词输入超限：未求值不得反转为命中——整条规则失败跳过，进入下一条（PR #564 评审 P2）', () => {
+    // 评审场景：高优先级 not(text-regex /^keep:/) + discard，粘贴 4097 字符
+    // keep: 开头文本——谓词超限未求值，not 不能把「未求值」变「命中」丢弃
+    const over = 'keep:' + 'x'.repeat(ADDON_PASTE_RULES_REGEX_INPUT_LIMIT - 4)
+    expect(over.length).toBe(ADDON_PASTE_RULES_REGEX_INPUT_LIMIT + 1)
+    const guard = rule({
+      id: 'keep-guard',
+      priority: 100,
+      match: { tag: 'SPAN', condition: { not: { kind: 'text-regex', regex: { pattern: '^keep:' } } } as never },
+      output: { kind: 'discard' },
+    })
+    const fallback = rule({
+      id: 'mark-fallback',
+      output: { kind: 'template', template: '[{{t}}]', slots: { t: { source: { kind: 'text' } } } },
+    })
+    // 失败传播：guard 规则失败跳过 → 下一条 fallback 命中（文本保留）
+    expect(convert(`<p><span>${over}</span></p>`, [guard, fallback]).markdown).toBe(`[${over}]`)
+    // 无下一条规则时回内置转换（同样保留）
+    expect(convert(`<p><span>${over}</span></p>`, [guard]).markdown).toBe(over)
+    // 边界值 4096 恰好可求值：^keep: 命中 → not 为假 → 不命中丢弃 → fallback
+    const edge = 'keep:' + 'x'.repeat(ADDON_PASTE_RULES_REGEX_INPUT_LIMIT - 5)
+    expect(edge.length).toBe(ADDON_PASTE_RULES_REGEX_INPUT_LIMIT)
+    expect(convert(`<p><span>${edge}</span></p>`, [guard, fallback]).markdown).toBe(`[${edge}]`)
+  })
+
+  it('all/any 嵌套下的超限失败传播：整树不再求值，规则失败进入下一条', () => {
+    const over = 'y'.repeat(ADDON_PASTE_RULES_REGEX_INPUT_LIMIT + 1)
+    const fallback = rule({
+      id: 'mark-fallback',
+      output: { kind: 'template', template: '[{{t}}]', slots: { t: { source: { kind: 'text' } } } },
+    })
+    // all：基础谓词命中后遇 not(超限正则) → fail 传播整树 → 规则失败（非命中丢弃）
+    const allFail = rule({
+      id: 'all-fail',
+      priority: 100,
+      match: {
+        tag: 'SPAN',
+        condition: {
+          all: [
+            { kind: 'attribute', name: 'data-x' },
+            { not: { kind: 'text-regex', regex: { pattern: '.' } } },
+          ],
+        } as never,
+      },
+      output: { kind: 'discard' },
+    })
+    expect(convert(`<p><span data-x>${over}</span></p>`, [allFail, fallback]).markdown).toBe(`[${over}]`)
+    // any：首子超限 → 立即 fail（不再看第二个子）→ 规则失败进入下一条
+    const anyFail = rule({
+      id: 'any-fail',
+      priority: 100,
+      match: {
+        tag: 'SPAN',
+        condition: {
+          any: [
+            { kind: 'text-regex', regex: { pattern: '^y+$' } },
+            { kind: 'attribute', name: 'data-x' },
+          ],
+        } as never,
+      },
+      output: { kind: 'discard' },
+    })
+    expect(convert(`<p><span data-x>${over}</span></p>`, [anyFail, fallback]).markdown).toBe(`[${over}]`)
   })
 
   it('条件不满足进入下一条规则；属性缺失的谓词为假', () => {
