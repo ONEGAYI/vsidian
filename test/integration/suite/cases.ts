@@ -12578,13 +12578,23 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // 匹配是精确的——漂移容错在 backlinks 桶的 fold 通道，files 门不在）
       const refText = `[外部目标](${ext('old/target.md').fsPath.replaceAll('\\', '/')})\n`
       await vscode.workspace.fs.writeFile(wsUri('r4-ext-ref.md'), Buffer.from(refText, 'utf8'))
+      // 等外部目标的引用登记（绝对身份桶 incoming 含引用者）。慢 runner 上
+      // watcher 事件偶发滞后：周期性重写引用者（新鲜 mtime → 新事件 → 重抽
+      // 重登记）自愈（跨根用例同款 kick 模式）
+      let healKick = 0
       await poll('外部目标引用登记', async () => {
         const c = (await vscode.commands.executeCommand(
           'onegayi.vsidian._test.getRenameCandidates', ext('old/target.md').fsPath,
         )) as { status: string; incomingFsPaths: string[] } | undefined
-        return c?.status === 'ready' &&
-          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('r4-ext-ref.md').fsPath)) ? true : undefined
-      })
+        if (c?.status === 'ready' &&
+          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('r4-ext-ref.md').fsPath))) {
+          return true
+        }
+        if (healKick++ % 40 === 20) {
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('r4-ext-ref.md'), Buffer.from(refText, 'utf8'))).catch(() => {})
+        }
+        return undefined
+      }, 40000)
       // 外部目录 rename：old → new（索引域外——fs 递归列举跳过，映射只来
       // 自已登记身份前缀；isDirectory 定点 stat 允许）
       const edit = new vscode.WorkspaceEdit()
@@ -12620,14 +12630,22 @@ export const cases: Array<[string, () => Promise<void>]> = [
     try {
       await vscode.workspace.fs.writeFile(wsUri('data/r4-target.md'), Buffer.from('# 四审目标\n', 'utf8'))
       await vscode.workspace.fs.writeFile(wsUri('notes/r4-source.md'), Buffer.from('见 [[r4-target]]。\n', 'utf8'))
-      // 等短名边登记（[[r4-target]] 经短名补查解析到 data/r4-target.md）
+      // 等短名边登记（[[r4-target]] 经短名补查解析到 data/r4-target.md）；
+      // 慢 runner 自愈 kick（同上）
+      let healKick = 0
       await poll('短名出链登记', async () => {
         const c = (await vscode.commands.executeCommand(
           'onegayi.vsidian._test.getRenameCandidates', wsUri('data/r4-target.md').fsPath,
         )) as { status: string; incomingFsPaths: string[] } | undefined
-        return c?.status === 'ready' &&
-          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/r4-source.md').fsPath)) ? true : undefined
-      })
+        if (c?.status === 'ready' &&
+          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/r4-source.md').fsPath))) {
+          return true
+        }
+        if (healKick++ % 40 === 20) {
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/r4-source.md'), Buffer.from('见 [[r4-target]]。\n', 'utf8'))).catch(() => {})
+        }
+        return undefined
+      }, 40000)
       // 同批移出根：来源与目标一起 → 外部目录（无根文档——短名/相对域
       // 不存在，消费层 no-workspace；did 出链通道改写为明确绝对路径）
       const edit = new vscode.WorkspaceEdit()
@@ -12685,17 +12703,29 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const containsFold = (haystack: string, needle: string): boolean =>
       haystack.toLowerCase().includes(needle.toLowerCase())
     try {
+      // 写前沉淀：排除模式重扫的尾段与写事件解耦（CI 慢 runner 上紧邻写入
+      // 曾与重扫窗口竞争——watcher 事件滞后导致登记前置超时，#552 时序族）
+      await new Promise((r) => setTimeout(r, 1600))
       await vscode.workspace.fs.writeFile(wsUri('data/r4-target2.md'), Buffer.from('# 目标二\n', 'utf8'))
       await vscode.workspace.fs.writeFile(wsUri('data/r4-target2'), Buffer.from('shadow', 'utf8'))
       await vscode.workspace.fs.writeFile(wsUri('notes/r4-source2.md'), Buffer.from('见 [[r4-target2]]。\n', 'utf8'))
-      // 等短名边登记（遮蔽物被排除，短名补查不受影响）
+      // 等短名边登记（遮蔽物被排除，短名补查不受影响）；慢 runner 自愈
+      // kick：周期性重写来源与目标（新鲜 mtime → 新事件 → 重抽/重判）
+      let healKick = 0
       await poll('短名出链登记', async () => {
         const c = (await vscode.commands.executeCommand(
           'onegayi.vsidian._test.getRenameCandidates', wsUri('data/r4-target2.md').fsPath,
         )) as { status: string; incomingFsPaths: string[] } | undefined
-        return c?.status === 'ready' &&
-          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/r4-source2.md').fsPath)) ? true : undefined
-      })
+        if (c?.status === 'ready' &&
+          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/r4-source2.md').fsPath))) {
+          return true
+        }
+        if (healKick++ % 40 === 20) {
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('data/r4-target2.md'), Buffer.from('# 目标二\n', 'utf8'))).catch(() => {})
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/r4-source2.md'), Buffer.from('见 [[r4-target2]]。\n', 'utf8'))).catch(() => {})
+        }
+        return undefined
+      }, 40000)
       // 仅移动来源到根外（目标不动）：无根文档 → 绝对形态；裸绝对候选序
       // 首个存在 = 被排除遮蔽物（定点 stat 可见）→ 显式 .md 绝对
       const edit = new vscode.WorkspaceEdit()
