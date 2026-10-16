@@ -17447,6 +17447,148 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
   }],
 
+  // ---- 悬停浮窗高度自适应写入消抖 ----
+  // position() 的 maxHeight 写入消抖（≤1px 不重写）：测量取整与虚拟
+  // 视图估计/实测过渡的亚像素差不再触发样式写入。断言面为 webview 探针
+  // hoverPreview.scrollProbe（position 决策序列与滚动区终态）：
+  // ① 滚动语义未破坏（短内容不溢出/长内容溢出）；② position 决策序列
+  // 收敛（决策值无回访 + 终态安定两条）。web 回包经注入（回环地址准入
+  // 拒绝后同配对身份注入，与 #343 同款）；markdown 为真实读取链路。
+  ['悬停浮窗高度自适应写入消抖', async () => {
+    const docFile = '滚动条稳定性回归.md'
+    try {
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': true, 'hover.externalShape': 'card' })
+      await writeFile(nodePath.join(wsDir, docFile),
+        '# 滚动条稳定性回归\n\n外链 [样本](https://127.0.0.1:9/emb)。\n', 'utf8')
+      await openWithEditor(docFile)
+      await waitSessionReady(docFile)
+      const uri = wsUri(docFile).toString()
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+      await waitViewState(docFile, (v) => v.viewMode === 'reading')
+
+      type ScrollProbe = {
+        clientWidth: number
+        gutter: number
+        overflow: number
+        maxHeight: string
+        positionLog: Array<{ t: number; measured: number; wrote: string }>
+      }
+      const readScrollProbe = async (): Promise<ScrollProbe | null> => {
+        const sampled = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+        return (sampled as unknown as { hoverPreview?: { scrollProbe?: ScrollProbe | null } })
+          .hoverPreview?.scrollProbe ?? null
+      }
+      const hoverAndInject = async (web: Record<string, unknown>): Promise<ScrollProbe> => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri,
+          { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'md' })
+        const errored = await waitViewState(docFile, (v) =>
+          v.hoverPreview?.open === true && v.hoverPreview?.state === 'error')
+        assert(errored.hoverPreview?.instanceId && errored.hoverPreview.reqId,
+          `准入拒绝态应暴露请求配对身份（实际 ${JSON.stringify(errored.hoverPreview)}）`)
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'hover.result',
+          reqId: errored.hoverPreview.reqId,
+          instanceId: errored.hoverPreview.instanceId!,
+          ok: true,
+          contentKind: 'web',
+          web,
+          target: { fsPath: '', relPath: '' },
+          version: 0,
+          text: '',
+          range: { start: 0, end: 0 },
+          scope: { kind: 'full' },
+        })
+        await waitViewState(docFile, (v) => v.hoverPreview?.open === true && v.hoverPreview?.state === 'content')
+        await new Promise((r) => setTimeout(r, 900)) // 收敛余量（虚拟视图/重定位安定）
+        const probe = await readScrollProbe()
+        assert(probe, 'scrollProbe 观测在场')
+        return probe!
+      }
+      const leaveAndClose = async (): Promise<void> => {
+        await vscode.commands.executeCommand(CMD.postToPanel, uri,
+          { kind: 'hover.test.pointer', action: 'leave', index: 0, link: 'md' })
+        await waitViewState(docFile, (v) => v.hoverPreview?.open === false)
+      }
+      /** 收敛断言：决策值无回访（振荡形态 = 某值在另一值之后再次出现）
+       * + 末 2 条一致（终态安定）。正常序列如 [85×3, 169×2]（loading →
+       * 内容）合法；[85, 169, 85, 169, …] 的往复才是闪烁回路形态。 */
+      const assertConverged = (probe: ScrollProbe, label: string): void => {
+        const log = probe.positionLog
+        assert(log.length >= 2, `${label}：position 决策序列应有记录（实际 ${JSON.stringify(log)}）`)
+        const lastAt = new Map<string, number>()
+        log.forEach((entry, i) => { lastAt.set(entry.wrote, i) })
+        const order = [...lastAt.values()]
+        for (let i = 1; i < order.length; i++) {
+          assert(order[i]! > order[i - 1]!,
+            `${label}：position 决策值不得回访（振荡形态，实际 ${JSON.stringify(log.map((e) => e.wrote))}）`)
+        }
+        assert(log[log.length - 1]!.wrote === log[log.length - 2]!.wrote,
+          `${label}：末 2 条决策应一致（终态安定，实际 ${JSON.stringify(log.slice(-3).map((e) => e.wrote))}）`)
+      }
+
+      // —— web 卡片：短内容（无溢出）与长内容（溢出）——
+      const shortCard = await hoverAndInject({
+        url: 'https://example.com/page', domain: 'example.com',
+        title: '示例站点标题', description: '概'.repeat(100),
+      })
+      assert(shortCard.overflow <= 0, `短内容不溢出（实际 overflow=${shortCard.overflow}）`)
+      assertConverged(shortCard, 'web 短卡片')
+      await leaveAndClose()
+
+      // 长内容长度自适应环境字体度量：CI Linux 容器的中文渲染与 Windows
+      // 不同，固定字数未必超过 400px 浮层上限——不溢出则翻倍重试，确保
+      // 「溢出态」场景被真实测到后再断言收敛
+      let longDesc = 600
+      let longCard = await hoverAndInject({
+        url: 'https://example.com/page', domain: 'example.com',
+        title: '示例站点标题', description: '概'.repeat(longDesc),
+      })
+      for (let retry = 0; longCard.overflow <= 0 && retry < 4; retry++) {
+        await leaveAndClose()
+        longDesc *= 2
+        longCard = await hoverAndInject({
+          url: 'https://example.com/page', domain: 'example.com',
+          title: '示例站点标题', description: '概'.repeat(longDesc),
+        })
+      }
+      assert(longCard.overflow > 0, `长内容溢出（滚动语义未破坏，desc=${longDesc}，实际 overflow=${longCard.overflow}）`)
+      assertConverged(longCard, 'web 长卡片')
+      await leaveAndClose()
+      console.log('[回归] web 卡片高度收敛 ✓')
+
+      // —— markdown 引用浮窗（真实读取链路）：估计→实测回落收敛 ——
+      const mdTarget = '滚动条稳定性目标.md'
+      await writeFile(nodePath.join(wsDir, mdTarget),
+        Array.from({ length: 6 }, (_, i) => `${String(i + 1).padStart(2, '0')} ${'概'.repeat(40)}`).join('\n') + '\n', 'utf8')
+      await writeFile(nodePath.join(wsDir, docFile),
+        `# 滚动条稳定性回归\n\n外链 [样本](https://127.0.0.1:9/emb) 与本地 [目标](${mdTarget})。\n`, 'utf8')
+      // 磁盘重写不保证已打开文档重载：关旧开新拿新链接索引
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(undefined, () => undefined)
+      await openWithEditor(docFile)
+      await waitSessionReady(docFile)
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+      await waitViewState(docFile, (v) => v.viewMode === 'reading')
+      await vscode.commands.executeCommand(CMD.postToPanel, uri,
+        { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'md' })
+      await waitViewState(docFile, (v) => v.hoverPreview?.open === true && v.hoverPreview?.state === 'content')
+      await new Promise((r) => setTimeout(r, 1500)) // 估计→实测回填余量
+      const mdProbe = await readScrollProbe()
+      assert(mdProbe, 'markdown 浮窗 scrollProbe 在场')
+      assertConverged(mdProbe!, 'markdown 浮窗')
+      await vscode.commands.executeCommand(CMD.postToPanel, uri,
+        { kind: 'hover.test.pointer', action: 'leave', index: 1, link: 'md' })
+      await waitViewState(docFile, (v) => v.hoverPreview?.open === false)
+      console.log('[回归] markdown 浮窗估计→实测收敛 ✓')
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('onegayi.vsidian._test.setSettings',
+        { 'hover.externalEnabled': false, 'hover.externalShape': 'card' }))
+        .catch(() => undefined)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri(docFile), { useTrash: false })).catch(() => undefined)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('滚动条稳定性目标.md'), { useTrash: false })).catch(() => undefined)
+    }
+  }],
+
   // ---- B-1（review-loops 波次一）：text/pdf 引用目标失效推送事件源 ----
 
   // 三场景验收「宿主事件源 → hover.invalidated → webview 重载」对 text/pdf

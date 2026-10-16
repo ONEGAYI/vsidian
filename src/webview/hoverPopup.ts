@@ -394,6 +394,37 @@ let pendingOpen: { anchor: HTMLElement; timer: number; spec?: HoverPopupTargetSp
 let instanceSeq = 0
 let reqSeq = 0
 
+// 悬停浮窗高度稳定性观测（集成回归断言面）：记录浮层
+// 生命周期内 position() 的 maxHeight 决策序列（纯数值追加，零额外布局
+// 读取——测量值本就在 position() 内读过）；hoverPopupProbe 请求时再对
+// 滚动区做一次终态读取。回归断言：高度写值收敛（position() 消抖，
+// 决策值无回访 + 终态安定）。
+let scrollStabilityLog: Array<{ t: number; measured: number; wrote: string }> = []
+function resetScrollStabilityLog(): void {
+  scrollStabilityLog = []
+}
+function logScrollPosition(measured: number, wrote: string): void {
+  scrollStabilityLog.push({ t: Math.round(performance.now()), measured, wrote })
+  if (scrollStabilityLog.length > 200) {
+    scrollStabilityLog.shift()
+  }
+}
+function scrollStabilityProbe(state: HoverPopupState): {
+  clientWidth: number
+  gutter: number
+  overflow: number
+  maxHeight: string
+  positionLog: Array<{ t: number; measured: number; wrote: string }>
+} {
+  return {
+    clientWidth: state.scrollEl.clientWidth,
+    gutter: state.scrollEl.offsetWidth - state.scrollEl.clientWidth,
+    overflow: state.scrollEl.scrollHeight - state.scrollEl.clientHeight,
+    maxHeight: state.container.style.maxHeight,
+    positionLog: [...scrollStabilityLog],
+  }
+}
+
 /** 注入/清空出站上下文（syncController mount/dispose） */
 export function setHoverPreviewContext(ctx: HoverPreviewContext | null): void {
   context = ctx
@@ -512,6 +543,8 @@ export function hoverPopupProbe(): {
     fallbackButton: boolean
     note: string
   } | null
+  /** 滚动条稳定性观测（回归断言面：内容宽/槽位/溢出终态 + maxHeight 决策序列；无浮层 null） */
+  scrollProbe: ReturnType<typeof scrollStabilityProbe> | null
 } {
   const liveProbe = () => {
     const st = popup?.root?.liveState()
@@ -596,6 +629,7 @@ export function hoverPopupProbe(): {
       pdf: pdfProbe(),
       text: null,
       web: webProbe(),
+      scrollProbe: popup ? scrollStabilityProbe(popup) : null,
     }
   }
   const fmSection = popup.contentEl.querySelector(`.${REF_FM_CLASS_NAMES.section}`)
@@ -628,6 +662,7 @@ export function hoverPopupProbe(): {
     pdf: pdfProbe(),
     text: textProbe(),
     web: webProbe(),
+    scrollProbe: scrollStabilityProbe(popup),
   }
 }
 
@@ -806,9 +841,16 @@ function position(state: HoverPopupState): void {
   state.container.style.left = `${placement.left}px`
   state.container.style.top = `${placement.top}px`
   state.container.style.width = `${placement.width}px`
-  // 最大高由几何计划钳制（常规 = 400 上限；小视口收缩）
-  state.container.style.maxHeight = `${placement.height}px`
+  // 最大高由几何计划钳制（常规 = 400 上限；小视口收缩）。写入消抖
+  // （滚动条稳定性配套）：高度差 ≤1px 不重写——测量取整与虚拟视图
+  // 估计/实测过渡的亚像素差不再触发样式写入，切断 ResizeObserver ↔
+  // maxHeight 的临界抖动回路；首次（空值）与显著变化照常写
+  const prevMax = parseFloat(state.container.style.maxHeight)
+  if (!Number.isFinite(prevMax) || Math.abs(prevMax - placement.height) > 1) {
+    state.container.style.maxHeight = `${placement.height}px`
+  }
   state.liveEl.style.maxHeight = `${Math.max(140, placement.height - chromeH)}px`
+  logScrollPosition(measured, `${placement.height}px`)
 }
 
 function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | 'error', note: string, errorReason?: HoverPreviewFailReason): void {
@@ -1111,6 +1153,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   }
   popup = state
   claimPopup(closeHoverPopup)
+  resetScrollStabilityLog()
   applyDisplay(state, 'loading', t('hover.loading'))
   position(state)
   if (state.keyboardOpened) {
