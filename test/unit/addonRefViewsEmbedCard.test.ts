@@ -394,11 +394,15 @@ interface FakePdfDoc {
  *  opts.holdRender：页渲染 promise 挂起，由 renderReleases 队列手动释放
  *  （cancel 以 RenderingCancelledException 拒绝——首帧在途/重排矩阵）；
  *  opts.failRenderAt / failViewportAt：第 N 次调用同步抛错（明确失败
- *  路径经外层 catch → setError('resource')）。*/
+ *  路径经外层 catch → setError('resource')）；failViewportThrough：前 N 次
+ *  getViewport 全失败（瞬时故障重试矩阵）；failViewportFrom：第 N 次起
+ *  全失败（滚动后新窗口页失败矩阵）。*/
 function installControllablePdfjs(opts?: {
   holdRender?: boolean
   failRenderAt?: number
   failViewportAt?: number
+  failViewportThrough?: number
+  failViewportFrom?: number
 }): {
   resolveDoc: (numPages: number) => void
   rejectDoc: (err: unknown) => void
@@ -446,7 +450,9 @@ function installControllablePdfjs(opts?: {
       getPage: () => ({
         getViewport: ({ scale }: { scale: number }) => {
           viewportCalls++
-          if (opts?.failViewportAt !== undefined && viewportCalls === opts.failViewportAt) {
+          if ((opts?.failViewportAt !== undefined && viewportCalls === opts.failViewportAt) ||
+            (opts?.failViewportThrough !== undefined && viewportCalls <= opts.failViewportThrough) ||
+            (opts?.failViewportFrom !== undefined && viewportCalls >= opts.failViewportFrom)) {
             throw new Error('viewport-fail')
           }
           return { width: 612 * scale, height: 792 * scale }
@@ -723,14 +729,154 @@ describe('PDF 首载结算时序（评审 P2：show 完成才兑现首结局）'
     pdfjs.resolveDoc(3)
     await pumpUntil(() => outcomes.length === 1, '绘制失败后兑现 {ok:false}')
     expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
-    // 同 URI 刷新到达：首结局一次性——不重复兑现，也不因重试渲染可能自愈
-    // 而补发成功（已兑现的失败结局不回改）
+    // 同 URI 刷新到达：首结局一次性——不重复兑现。第三轮 P2 后此处重试
+    // 会真实重建（瞬时故障经重试渲染可能自愈、卡片恢复内容态），但已
+    // 兑现的失败结局不回改、不补发成功
     h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
     h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
     for (let i = 0; i < 40; i++) {
       await Promise.resolve()
     }
     expect(outcomes).toHaveLength(1)
+    h.manager.dispose()
+  })
+
+  // ---- 第三轮评审 P2 复现矩阵：等待期滚离定位页 / 瞬时失败后同版本重试 ----
+
+  /** 卡片内 PDF 滚动区（滚动矩阵用例专用） */
+  function pdfScrollOf(host: HTMLElement): HTMLElement {
+    const el = host.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`)
+    expect(el).not.toBeNull()
+    return el!
+  }
+
+  /** 驱动 PDF 滚动区滚动（jsdom 无布局滚动）；400px 视口 mock——真实观感
+   *  由浏览器/集成套件覆盖 */
+  function installScrollViewport(): void {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains(EMBED_CARD_CLASS_NAMES.scroll) && this.style.display !== 'none' ? 400 : 0
+    })
+  }
+
+  function scrollPdf(host: HTMLElement, top: number): void {
+    const el = pdfScrollOf(host)
+    el.scrollTop = top
+    el.dispatchEvent(new Event('scroll'))
+  }
+
+  it('首帧在途滚动离开定位页：等待跟随新可见页，呈现后 {ok:true} 一次（评审第三轮 P2-1）', async () => {
+    installScrollViewport()
+    const pdfjs = installControllablePdfjs({ holdRender: true })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(20)
+    await pumpUntil(() => pdfjs.renderReleases.length >= 1, '首帧绘制已启动')
+    // 先解除初始定位粘性，再滚到文档远端（定位页离窗——真机为用户滚动）
+    scrollPdf(host, 1)
+    scrollPdf(host, 1e6)
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes, '取消离窗不得提前兑现（旧实现：取消点解除等待且再无落定通知 → 永不兑现）').toEqual([])
+    // 释放新窗口页绘制（含等待跟随的新有效目标页）——呈现后首结局兑现一次
+    await pumpUntil(() => pdfjs.renderReleases.length >= 2, '新窗口绘制已启动')
+    for (const release of pdfjs.renderReleases) release()
+    await pumpUntil(() => outcomes.length === 1, '转移目标页呈现后兑现首结局')
+    expect(outcomes).toEqual([{ ok: true }])
+    h.manager.dispose()
+  })
+
+  it('首帧在途滚动离开定位页：新可见页绘制失败 → {ok:false} 一次（评审第三轮 P2-1 失败格）', async () => {
+    installScrollViewport()
+    // 首帧窗口（1/2 页）4 次 getViewport 正常；滚动后新窗口页（第 5 次起）全失败
+    const pdfjs = installControllablePdfjs({ holdRender: true, failViewportFrom: 5 })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(20)
+    await pumpUntil(() => pdfjs.renderReleases.length >= 1, '首帧绘制已启动')
+    scrollPdf(host, 1)
+    scrollPdf(host, 1e6)
+    // 结果钉：滚动后新可见页失败 → 等待随目标转移并落定错误分态，首结局
+    // {ok:false} 一次（不得悬空、不得冒充成功）
+    await pumpUntil(() => h.manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'error'),
+      '新窗口页失败 → 错误分态')
+    await pumpUntil(() => outcomes.length === 1, '错误落定后兑现首结局')
+    expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
+    h.manager.dispose()
+  })
+
+  it('首帧在途滚动离开定位页：等待期释放 → 零兑现（评审第三轮 P2-1 释放格）', async () => {
+    installScrollViewport()
+    const pdfjs = installControllablePdfjs({ holdRender: true })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(20)
+    await pumpUntil(() => pdfjs.renderReleases.length >= 1, '首帧绘制已启动')
+    scrollPdf(host, 1)
+    scrollPdf(host, 1e6)
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve()
+    }
+    // 整组释放：等待终结，首结局零兑现（由运行时层兑现 view-disposed）
+    h.manager.releaseEmbedMount(host)
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toEqual([])
+    h.manager.dispose()
+  })
+
+  it('瞬时错误后同版本 changed 刷新：重试呈现成功，卡片恢复内容态（评审第三轮 P2-2）', async () => {
+    // 第 1 次 getViewport 抛错（瞬时故障）→ 首载失败；重试（第 2 次起）成功
+    const pdfjs = installControllablePdfjs({ failViewportAt: 1 })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => outcomes.length === 1, '绘制失败后兑现 {ok:false}')
+    expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
+    const state = host.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.state}`)!
+    expect(state.classList.contains(EMBED_CARD_CLASS_NAMES.stateError)).toBe(true)
+    // changed 同版本刷新（资源 URI 不变）：重试必须真实重建并呈现——外层
+    // 经 show 落定事件同步（旧实现：快路径原地返回旧 error，绘制成功后
+    // 卡片仍停留错误态、滚动区隐藏）
+    h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    await pumpUntil(() => h.manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'content'),
+      '重试后真实呈现 content')
+    await pumpUntil(() => !state.classList.contains(EMBED_CARD_CLASS_NAMES.stateError), '卡片错误态清除')
+    expect(pdfScrollOf(host).style.display).not.toBe('none')
+    expect(outcomes, '首结局一次性：不改写已兑现的失败结局').toHaveLength(1)
+    h.manager.dispose()
+  })
+
+  it('瞬时错误后同版本 changed 重试再次失败：不重复兑现、卡片保持错误态（评审第三轮 P2-2 再失败格）', async () => {
+    // 前 2 次 getViewport 全失败（首载 + 重试各一次）
+    const pdfjs = installControllablePdfjs({ failViewportThrough: 2 })
+    const h = makeHarness()
+    const outcomes: Array<{ ok: boolean; reason?: string }> = []
+    const host = mountAddonEmbed(h, 'addon-ref-1', 'c.pdf', { onFirstOutcome: (o) => outcomes.push(o) })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    pdfjs.resolveDoc(3)
+    await pumpUntil(() => outcomes.length === 1, '绘制失败后兑现 {ok:false}')
+    expect(outcomes).toEqual([{ ok: false, reason: 'read-failed' }])
+    const state = host.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.state}`)!
+    h.manager.notifyInvalidated({ fsPath: 'D:\\notes\\sub\\c.pdf', status: 'changed', generation: 1 })
+    h.manager.notifyResult(pdfReply(requestOf(h, 'c.pdf')))
+    await pumpUntil(() => h.manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'error'),
+      '重试再次失败 → 错误分态落定')
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve()
+    }
+    expect(outcomes).toHaveLength(1)
+    expect(state.classList.contains(EMBED_CARD_CLASS_NAMES.stateError)).toBe(true)
     h.manager.dispose()
   })
 })

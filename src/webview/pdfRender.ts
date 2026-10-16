@@ -731,10 +731,26 @@ export class PdfHoverView {
         this.setError('page-range')
         return true
       }
+      if (this.phase === 'error' && !this.contentPending) {
+        // 错误分态后的同 URI 重入＝重试（评审第三轮 P2-2）：临时 getPage/
+        // resource 错误不由内容版本决定——重建装载等待周期（保留文档引用，
+        // 重建塔与呈现等待）；重试落定（content 或再次 error）后经落定事件
+        // 同步外层消费（旧实现在此以「内容未变必再失败」原地早退，绘制
+        // 实际恢复后无通知 → 卡片停留错误态）。首结局一次性：不改写已
+        // 兑现的旧结局（本调用自身 promise 是新的等待）
+        const seq = this.renderSeq
+        this.phase = 'loading'
+        this.errorReason = ''
+        this.contentPending = true
+        this.contentPage = effective
+        this.stickyPage = effective
+        this.scrollToPage(effective) // error 时塔已清：重挂可见页并排队重绘
+        await new Promise<void>((resolve) => { this.contentWaiters.push(resolve) })
+        return seq === this.renderSeq && !this.disposed
+      }
       this.scrollToPage(effective)
       if (!this.contentPending) {
-        // 呈现已落定（content/error 态；错误分态同早退——同 URI 内容未变
-        // 必再失败，不重建）：定位即完成，幂等快路径
+        // 呈现已落定（content 态）：定位即完成，幂等快路径
         return true
       }
       const seq = this.renderSeq
@@ -984,6 +1000,20 @@ export class PdfHoverView {
       this.page = this.currentPageFromScroll()
     }
     this.updatePageInfo()
+    // 装载等待期的目标跟随（评审第三轮 P2-1）：定位页离窗（用户滚动）时
+    // 等待不得悬空——取消离窗不是完成通知，把有效目标转移到当前可见页；
+    // 新目标已绘成（滚动来回场景）当场落定，否则等其呈现或错误分态落定
+    if (this.contentPending && this.contentPage >= 1 &&
+      (this.contentPage < first || this.contentPage > last)) {
+      this.contentPage = Math.min(Math.max(first, this.page), last)
+      const target = this.slots.get(this.contentPage)
+      if (target !== undefined && target.canvas !== null) {
+        this.phase = 'content'
+        this.errorReason = ''
+        this.contentPending = false
+        this.flushContentWaiters()
+      }
+    }
     // 卸载离窗页
     for (const [pageNo, slot] of [...this.slots.entries()]) {
       if (pageNo < first || pageNo > last) {
@@ -1555,11 +1585,10 @@ export class PdfHoverView {
     }
     slot.width = 0
     slot.height = 0
-    if (slot.pageNo === this.contentPage) {
-      // 定位页被离窗取消：等待中的 show 解除（迟到绘制不冒充在场；装载
-      // 等待期滚动区隐藏 + 窗口以定位页为中心，离窗不可达——防御面保留）
-      this.flushContentWaiters()
-    }
+    // 定位页被离窗取消：取消不等于完成——等待不在此解除（解除而无落定会
+    // 让 resolve(true) 时 phase 仍 loading，消费侧不兑现且再无通知 → 首载
+    // 结算永久挂起，评审第三轮 P2-1）。离窗路径由 updateWindow 的目标转移
+    // 接住；其余调用源（clearPages 各系与装载换目标）在调用点自行落定 flush
   }
 
   private releaseDocRef(): void {
