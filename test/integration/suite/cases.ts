@@ -18810,8 +18810,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(ok?.status === 'registered', `兼容夹具应为 registered，实际 ${JSON.stringify(ok)}`)
     const incompatible = settled.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-incompatible')
     assert(incompatible?.apiRange === '^2.0.0', `不兼容状态应携带声明范围，实际 ${JSON.stringify(incompatible)}`)
-    assert(settled.apiVersion === ADDON_API_VERSION && settled.draft === true,
-      `载荷应含宿主稳定 API 版本与草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
+    assert(settled.apiVersion === ADDON_API_VERSION && settled.draft === false,
+      `载荷应含宿主稳定 API 版本与非草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
 
     // 普通扩展不入列表：内置扩展（vscode.* / ms-*）无身份声明，一律不在场
     for (const entry of settled.addons) {

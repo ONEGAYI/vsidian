@@ -126,7 +126,7 @@ try {
     window.__cssUrl = css
     window.__loadGeneration = 0
     window.__addonsState = () => ({
-      kind: 'addons.state', apiVersion: '1.0.0', draft: true,
+      kind: 'addons.state', apiVersion: '1.0.0', draft: false,
       openAddonSettingsPage: window.__hostState.mountedPage, openAddonSettings: window.__hostState.open,
       addons: [
         {
@@ -146,7 +146,7 @@ try {
       }
       const open = window.__hostState.open
       return {
-        kind: 'addons.settingsState', apiVersion: '1.0.0', draft: true,
+        kind: 'addons.settingsState', apiVersion: '1.0.0', draft: false,
         open, hasWorkspace: window.__hostState.hasWorkspace,
         addon: open === null ? null : {
           addonId: open, label: open === 'vsidian-test-fixture.settings-context' ? 'SCX' : 'PlainB',
