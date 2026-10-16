@@ -1,6 +1,6 @@
 ---
 name: release
-description: 在 vsidian 仓库准备或执行版本发布时使用：升版本与 CHANGELOG 段落校验、VSIX 打包、体积红线与包内容双重防线、图标约定、发版步骤、CI 自动发布（v* 标签触发）、marketplace 发布配置与失败兜底、README 双语镜像。日常开发不涉及发版时不需要。
+description: 在 vsidian 仓库准备或执行版本发布时使用：升版本与 CHANGELOG 段落校验、VSIX 打包、体积红线与包内容双重防线、图标约定、发版步骤、附加组件 API 变更日志（CHANGELOG-API.md）维护与 API 版本嗅探、CI 自动发布（v* 标签触发）、marketplace 发布配置与失败兜底、README 双语镜像。日常开发不涉及发版时不需要。
 ---
 
 # 打包与发布
@@ -21,7 +21,7 @@ VSIX 解压总量警告 14.5 MiB / 上限 15.0 MiB（#85 代码块高亮后基�
 
 ## 发布流程
 
-`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明；顶部常驻的 `## Unreleased` 段被提取跳过，可与版本段共存）。发版步骤：先按「CHANGELOG 用户可见性自查」过完 Unreleased 段自查 → 升 `version` + **Unreleased 段转正**为 `## <版本> - <日期>`，并**同笔在顶部重建空的 `## Unreleased - 开发中` 段**（发布后批次条目自断有段可记——v0.5.0 后无人重建，四个批次把条目回填进已定案的 0.5.0 段，靠 0.6.0 手工迁回）→ **重跑 `npm run gen:styleguide`**（三份指南产物内嵌版本戳与 `generatedAt` 随版本段变化，须在版本段落定后跑——v0.5.0 实证漏跑 tag 推送失败；v0.6.0 实证转正前跑产出 fallback 日期，同样被 guide-consistency 拦）→ 连同指南产物提交 → `npm run release:check` 本地过检查（含与 CI 发布链相同的契约复验链）→ `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。已发布版本段落随 tag 定案不得回填删改：契约检查器 `changelog-section-mutated` 以 tag 时点快照比对段落正文（排版与折行差异豁免，条目增删必拦），本地与 CI 同拦。发布提交直推 main 会 bypass 远端必需状态检查——推送后跟踪该次 CI 运行至全绿再离手（失败先 `gh run rerun <id> --failed` 判别间歇性，非间歇失败需修复并重新评估 tag 指向）。
+`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明；顶部常驻的 `## Unreleased` 段被提取跳过，可与版本段共存）。发版步骤：先按「CHANGELOG 用户可见性自查」过完 Unreleased 段自查，并按「API 变更日志与版本嗅探」记录 API 账与嗅探升版结论 → 升 `version` + **Unreleased 段转正**为 `## <版本> - <日期>`，并**同笔在顶部重建空的 `## Unreleased - 开发中` 段**（发布后批次条目自断有段可记——v0.5.0 后无人重建，四个批次把条目回填进已定案的 0.5.0 段，靠 0.6.0 手工迁回）→ **重跑 `npm run gen:styleguide`**（三份指南产物内嵌版本戳与 `generatedAt` 随版本段变化，须在版本段落定后跑——v0.5.0 实证漏跑 tag 推送失败；v0.6.0 实证转正前跑产出 fallback 日期，同样被 guide-consistency 拦）→ 连同指南产物提交 → `npm run release:check` 本地过检查（含与 CI 发布链相同的契约复验链）→ `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。已发布版本段落随 tag 定案不得回填删改：契约检查器 `changelog-section-mutated` 以 tag 时点快照比对段落正文（排版与折行差异豁免，条目增删必拦），本地与 CI 同拦。发布提交直推 main 会 bypass 远端必需状态检查——推送后跟踪该次 CI 运行至全绿再离手（失败先 `gh run rerun <id> --failed` 判别间歇性，非间歇失败需修复并重新评估 tag 指向）。
 
 ## CHANGELOG 用户可见性自查
 
@@ -32,6 +32,23 @@ VSIX 解压总量警告 14.5 MiB / 上限 15.0 MiB（#85 代码块高亮后基�
 - **内部称谓**：代码侧词汇，如「扩展宿主」「管线」「链路」「iframe 最小能力」——换成用户词：扩展、呈现行为一致、网页视图
 
 判断标准是用户拿这条日志能做什么：删「怎么做到的」，留可感知的行为与现象，以及用户用得上的信息——量化边界（超时 8 秒／2 MiB）、日志失败归因（DNS／TLS）、上游缺口编号（vscode#289785）、副作用告知（剪贴板占用）。已定案版本段的同类问题不回填（tag 快照拦截），自查只在 Unreleased 段进行。完成判据：三类逐条过完，再以关键词扫描收尾（宿主／管线／链路／验收／裁决／归一／识别表等仓内高频词），命中逐条人工裁决——词表是线索，不是禁词表。
+
+## API 变更日志与版本嗅探
+
+附加组件公开 API 有独立于本体的变更日志 `CHANGELOG-API.md`（仓库根目录），记录口径是**调用者可见的行为变更**（新能力面、语义与参数修订、拒绝原因、预算与兼容边界）；内部实现（模块拆分、性能手段、测试与文档调整）不记。**本体发布即 API 发行点**——API 随 VSIX 分发，发布时 Unreleased 段非空即随发版升版（2026-10-16 用户确立）。每次发版准备与 `CHANGELOG.md` 的 Unreleased 自查同轮做三件事：
+
+1. **记 API 账**：对照上一 tag 盘点本周期 API 面增删改（`git diff <tag>..HEAD -- src/shared/addonApiCatalog.ts src/host/addons/`，配合清单条目的 `introduced` 字段），调用者可见的变更记入 `CHANGELOG-API.md` 的 `## Unreleased` 段；纯内部实现、测试与文档调整不记。追加能力组时同步更新发行台账（`ADDON_API_RELEASES`）相应版本的 summary，保持面描述与实际一致。
+2. **嗅探升版**：Unreleased 段非空（本周期有调用者可见的 API 变更）→ 本体发版时 API 同笔升版，幅度按变更性质（新增与兼容性修订 = 次版本 +1；破坏性变更 = 主版本，并按移除规则双门槛评估）。Unreleased 段为空 → 本周期无 API 版本动作，只发本体。
+3. **与本体 CHANGELOG 分工**：本体 `CHANGELOG.md` 只保留用户可感知的简条目（装了组件能多做什么）；语义、预算、拒绝原因等 API 细节写 `CHANGELOG-API.md`。`docs/features.md` 附加组件一节对 API 变更统一引用该日志，不重复展开细节。
+
+**升版转正清单**（并入发布提交，逐项执行）：
+
+- `CHANGELOG-API.md`：Unreleased 段转正为 `## <API 版本> - <日期>`（日期 = 本体发布日），顶部重建空 Unreleased 段；候选期存量面（`## 1.0.0 - 候选面` 段）在**首次**发行时并入首个发行版本段。
+- 发行台账（`src/shared/addonApiCatalog.ts` 的 `ADDON_API_RELEASES`）：**追加**新版本记录（status=released、releasedAt、summary；experimental 留空数组——实验入口跨版本唯一锚定，既有清单保留在原记录，参考文档按全台账合并呈现）。不改写任何历史记录——改已登记记录触发 `release-history-mutated`。
+- 宿主版本常量：`src/shared/addonIdentity.ts` 的 `ADDON_API_VERSION` 同笔升到同一版本（台账超前宿主即 `ledger-ahead-of-host` 失败）；`test/unit/addonIdentity.test.ts` 钉住该值的断言同步更新。
+- **基线重锚（升版必做）**：`ADDON_API_VERSION` 的声明文本被基线钉为签名，升号必然触发 `signature-declaration-changed`——先提交携带新声明的发布提交，再 `node scripts/checkAddonApiCompat.mjs --emit-baseline --anchor <发布提交 sha>` 并随后笔提交基线文件（锚点必须指向已包含新声明的提交，verify 从 git 对象复验）；tag 打在基线提交上。重锚理由随提交说明（v1.1.0 实证）。不改宿主版本常量与签名的变更（纯台账 summary、CHANGELOG-API 条目）才免重锚。
+- 重新生成与门禁：`npm run compile`（含 genNls/genStyleGuide/genAddonApiRef——styleguide 版本戳须在版本段落定后生成）→ `npm run check:addonapi`、`node scripts/checkAddonApiCompat.mjs`、`npm run test:unit`、`npm run release:check` 全绿才推送。
+- 文档口径翻转：`docs/features.md` 开发者资源、`docs/addons/developer-guide.md` §7、README 双语「开发者 API」行、AGENTS.md 附加组件 API 条目中「1.0.0 候选阶段／尚未对外发行、暂无兼容承诺」的表述，改为已发行版本与兼容承诺口径。
 
 ## CI 自动发布
 

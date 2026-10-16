@@ -66,11 +66,11 @@ describe('附加组件身份声明解析', () => {
     })).toEqual({ kind: 'invalid', reason: 'experimental-invalid' })
   })
 
-  it('常量：字段名与首个候选 API 版本（^1.0.0 语义基准）', () => {
+  it('常量：字段名与宿主稳定 API 版本（^1.0.0 语义基准）', () => {
     expect(ADDON_MANIFEST_FIELD).toBe('vsidianAddon')
     expect(ADDON_IDENTITY_MANIFEST_VERSION).toBe(1)
-    // 首个候选稳定 API 版本为 1.0.0（草案，尚未发布——不能冒充已发布契约）
-    expect(ADDON_API_VERSION).toBe('1.0.0')
+    // 1.1.0（2026-10-16）随本体发行，首个产生兼容承诺的稳定 API 版本
+    expect(ADDON_API_VERSION).toBe('1.1.0')
     // 官方组件清单：主仓库维护的明确扩展 ID 清单（#463 已登记首个官方组件）
     expect(OFFICIAL_ADDON_EXTENSION_IDS).toEqual(['ONEGAYI.vsidian-easy-typing'])
     expect(isOfficialAddon('anything.else')).toBe(false)
