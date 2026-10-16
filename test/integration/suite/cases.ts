@@ -32,6 +32,7 @@ import * as nodeHttps from 'node:https'
 import * as nodePath from 'node:path'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import type { HoverPreviewPdfProbe, ReadingEmbedPdfProbe } from '../../../src/shared/protocol'
+import { ADDON_API_VERSION } from '../../../src/shared/addonIdentity'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
 import { CHROME_CONTRACT_PROBES } from '../../../src/shared/chromeContract'
@@ -18606,8 +18607,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const exports = (await host.activate()) as
       | { apiVersion: string; registerAddon: (owner: unknown, definition?: unknown) => unknown }
       | undefined
-    assert(exports && exports.apiVersion === '1.0.0',
-      `导出 API 应含 apiVersion 1.0.0，实际 ${JSON.stringify(exports && exports.apiVersion)}`)
+    assert(exports && exports.apiVersion === ADDON_API_VERSION,
+      `导出 API 应含 apiVersion ${ADDON_API_VERSION}（宿主稳定 API 版本常量），实际 ${JSON.stringify(exports && exports.apiVersion)}`)
     assert(typeof exports!.registerAddon === 'function', '导出 API 应含 registerAddon 函数')
 
     // 路径一（VSCode 原生激活）：contributes.commands 自动派生激活事件，
