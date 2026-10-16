@@ -25,13 +25,15 @@ export class IndexMaintenanceSection implements SettingsPageSection {
   /** 文件夹+齿轮字形（#332 二轮：用户指定意象，自链环 glyph 换装——
    *  文件/链接域与索引维护的合体意象；一轮曾为 'links' 链环） */
   readonly icon = 'folderCog' as const
-  /** #332 页内嵌标准设置行组：图片（image.*，自编辑器页迁入）与引用视图
+  /** #332 页内嵌标准设置行组：内部链接（#556，link.*——分页首组，链接生成
+   *  是文件与链接域的核心行为）、图片（image.*，自编辑器页迁入）与引用视图
    *  （hover.* 与 embed.* 两前缀，#298 自编辑器页迁组、#332 随分页迁移）。
    *  视图装配 h3 组容器与标准行，条目进全局搜索并归本分页分组命中；前缀
    *  过滤以视图定义表为源（本类不引用生产注册表，fixture 场景自然为空组）。
    *  #332 二轮：引用视图组标题换「手型指针+链接下划线」字形（占位链环
    *  退役，#298「正式图标后补」兑现） */
   readonly defsGroups = [
+    { titleKey: 'settings.groupLink', icon: 'link' as const, prefixes: ['link.'] },
     { titleKey: 'settings.groupImage', icon: 'image' as const, prefixes: ['image.'] },
     { titleKey: 'settings.groupRefview', icon: 'pointerLink' as const, prefixes: ['hover.', 'embed.'] },
   ] as const

@@ -4512,7 +4512,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('wikilinks.md') === diskBefore, '双链跳转不得改写源文档')
   }],
 
-  ['双链根内相对路径边界：子目录来源短名不命中根目录同名、../ 根内上行命中、../../ 越界拦截（#196）', async () => {
+  ['双链根内相对路径边界：子目录来源短名补查命中根目录唯一同名、../ 根内上行命中、../../ 越界拦截（#196/#556）', async () => {
     // 源文档在 子 目录/ 下：docDir = <ws>/子 目录，所属根 = <ws>（多根
     // 互不补查、basename 搜索与根相对兜底废除后的新语义边界）
     await openWithEditor('子 目录/目标 二.md')
@@ -4520,10 +4520,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const uri = wsUri('子 目录/目标 二.md').toString()
     const diskBefore = await readDisk('子 目录/目标 二.md')
 
-    // 短名跨目录不命中：[[目标笔记]] 只认 子 目录/目标笔记(.md)，根目录的
-    // 目标笔记.md 不再命中（旧 basename 全根搜索的集成级反例）
+    // #556 短名补查（正向场景）：[[目标笔记]] 同目录候选未命中后，所属根
+    // 内唯一同名（根/目标笔记.md）经补查命中——Vsidian 面板打开（#196 时
+    // 代的「跨目录不命中」反例随 #556 反转；多根互不补查仍由所属根划界）
     await injectWikilink(uri, '目标笔记')
-    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === '目标笔记')
+    const shortLog = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === '目标笔记')
+    assert(shortLog!.path === wsUri('目标笔记.md').fsPath, `补查命中目标不符：${shortLog!.path}`)
+    await waitSessionReady('目标笔记.md')
+    await waitActiveCustomTab('目标笔记.md')
 
     // 越出所属根：../../ 被拦截，与不存在分开反馈（outside-root）
     await injectWikilink(uri, '../../目标笔记')
@@ -4536,11 +4540,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSessionReady('目标笔记.md')
     await waitActiveCustomTab('目标笔记.md')
 
-    // 拦截两态（not-found / outside-root）不得打开编辑器：wikilink-doc 恰一条
+    // 两形态命中（补查/明确相对）各开一次；越界态不得打开编辑器
     const logAll = (await vscode.commands.executeCommand(CMD.linkLog, uri)) as LinkLogData
     assert(
-      logAll.log.filter((e) => e.kind === 'wikilink-doc').length === 1,
-      `拦截类双链意图不得打开编辑器，实际 ${JSON.stringify(logAll.log)}`,
+      logAll.log.filter((e) => e.kind === 'wikilink-doc').length === 2,
+      `越界双链意图不得打开编辑器，实际 ${JSON.stringify(logAll.log)}`,
     )
     assert(await readDisk('子 目录/目标 二.md') === diskBefore, '跳转不得改写源文档')
   }],
@@ -4794,18 +4798,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
       `二次重载不得漂移（期望 LF offset ${ANCHOR_BLK_LF_OFFSET}，实际 ${again.selectionOffset}）`)
   }],
 
-  ['双链缺失与同名隔离：子目录同名不再命中（多候选选择废除）、缺失提示、不支持降级、不自动建文件（#11/#196）', async () => {
+  ['双链缺失与同名分态：多候选歧义不归任一候选、缺失提示、不支持降级、不自动建文件（#11/#196/#556）', async () => {
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
     const uri = wsUri('wikilinks.md').toString()
     const diskBefore = await readDisk('wikilinks.md')
     const versionBefore = (await vscode.workspace.openTextDocument(wsUri('wikilinks.md'))).version
 
-    // 短名只认来源同目录（#196）：dup/甲.md 与 other/甲.md 都在子目录，
-    // 来源目录（工作区根）下没有 甲.md → not-found。旧 basename 全根搜索
-    // 与同名 QuickPick 选择已废除
+    // #556 短名补查分态：dup/甲.md 与 other/甲.md 两个同名候选 → 歧义
+    // （不归任一候选、提示补路径，不冒充不存在；#196 时代为 not-found，
+    // 旧 basename 全根搜索与同名 QuickPick 选择维持废除）
     await injectWikilink(uri, '甲')
-    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === '甲')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-ambiguous' && e.target === '甲')
     // 缺失目标：not-found（不自动创建文件）
     await injectWikilink(uri, '不存在的笔记')
     await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === '不存在的笔记')
@@ -11404,6 +11408,134 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '断链条目不可点：活动面板应保持源文档')
   }],
 
+  ['#556 收口三面：外部绝对图片授权绘制、歧义悬停错误卡与出链绝对路径行', async () => {
+    // 动态 fixture：外部资产目录在 wsDir 之外（绝对路径目标与
+    // localResourceRoots 授权面的真实素材——路径依赖运行时 mkdtemp）。
+    // 父目录取法必须平台无关：CI Linux 上 wsDir 无反斜杠，lastIndexOf 截
+    // 断会把模板落到文件系统根（EACCES），join/dirname 两端一致
+    const nodePath = require('path') as typeof import('path')
+    const outsideDir = await mkdtemp(nodePath.join(nodePath.dirname(wsDir), 'abs-'))
+    // 正文里的绝对路径形态：Windows 折叠大小写对齐 normKey（NTFS 不敏感，
+    // 折叠无损）；POSIX 原样——mkdtemp 后缀含大写字母，Linux 大小写敏感
+    // 文件系统上折叠会指向不存在的路径（CI 三方探针实证：直连/宿主 stat
+    // 原始形态 type=1，折叠形态 ENOENT）
+    const outsideAbsPosix = process.platform === 'win32'
+      ? outsideDir.replace(/\\/g, '/').toLowerCase()
+      : outsideDir
+    const eqFold = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
+    try {
+      await writeFile(nodePath.join(outsideDir, '外部图片.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+      await writeFile(nodePath.join(outsideDir, '外部目标.md'), '# 外部目标\n\n外部正文。\n', 'utf8')
+      await mkdir(nodePath.join(wsDir, 'dira'), { recursive: true })
+      await mkdir(nodePath.join(wsDir, 'dirb'), { recursive: true })
+      await writeFile(wsUri('dira/短名二义.md').fsPath, '# 歧义甲\n', 'utf8')
+      await writeFile(wsUri('dirb/短名二义.md').fsPath, '# 歧义乙\n', 'utf8')
+      // 断言载体文档：外部绝对图片嵌入 + 外部 Markdown 绝对目标 + 歧义短名
+      await writeFile(wsUri('绝对观测.md').fsPath, [
+        '# 绝对观测',
+        '',
+        `![外图](${outsideAbsPosix}/外部图片.png)`,
+        '',
+        `外文 [[${outsideAbsPosix}/外部目标.md]] 与歧义 [[短名二义]]。`,
+        '',
+      ].join('\n'), 'utf8')
+      // 等主根索引扫入新文档与外部目标登记。观测口径用 fileCount/edgeCount
+      // 双增：fileCount +3（绝对观测.md + 外部图片/外部目标两个 asset 登记）
+      // 佐证 registerExternalTargets 已跑——同一次重扫内登记后断链边重抽
+      // 一次（vaultIndexService 扫描路径的既有语义），重抽后图片边
+      // resolvedTarget 命中，面板装配点的 localResourceRoots 授权面才有
+      // 数据源（授权只在 html 赋值前一次性推导，运行中不扩根——须先等
+      // 边命中再开面板）
+      const idxState = async (): Promise<{ fileCount: number; edgeCount: number }> => {
+        const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+          roots: Array<{ fsPath: string; fileCount: number; edgeCount: number }>
+        }
+        const main = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+        return main ?? { fileCount: -1, edgeCount: -1 }
+      }
+      const base = await idxState()
+      await poll('索引扫入绝对观测（边表+外部登记）', async () => {
+        const s = await idxState()
+        return s.fileCount >= base.fileCount + 3 && s.edgeCount >= base.edgeCount + 3 ? true : undefined
+      }, 30000)
+      // 登记后断链边重抽与登记在同一增量泵批内完成，但 fileCount/edgeCount
+      // 计数在重抽前即可满足（遍 2 抽边先于登记）——留稳定窗确保重抽落定
+      //（resolvedTarget 接通后，面板装配点的授权面才有数据源）
+      await new Promise((r) => setTimeout(r, 1000))
+
+      // ① 外部绝对图片：绘制层断言（imageEntries 的 appliedSrc/加载态——
+      // localResourceRoots 授权生效的观测面；授权缺失时 webview 资源服务
+      // 401 → error 态而非 loaded）
+      await openWithEditor('绝对观测.md')
+      await waitSessionReady('绝对观测.md')
+      const absUri = wsUri('绝对观测.md').toString()
+      // 切阅读模式（悬停双链 pointer 走 a 元素序；图片嵌入在阅读侧渲染）
+      await vscode.commands.executeCommand(CMD.postToPanel, absUri, { kind: 'view.mode.set', mode: 'reading' })
+      await waitViewState('绝对观测.md', (v) => v.viewMode === 'reading')
+      const img = await poll('外部图片加载', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, absUri)) as
+          | { imageEntries?: Array<{ src: string; state: string; appliedSrc?: string }> }
+          | undefined
+        const hit = v?.imageEntries?.find((e) => e.src.includes('外部图片'))
+        return hit && hit.state === 'loaded' && hit.appliedSrc !== undefined ? hit : undefined
+      }, 20000).catch(async (err) => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, absUri)) as unknown
+        // 宿主视角探针：测试进程与扩展同在宿主内，stat 直接对准
+        // resolveWorkspaceImage 的文件系统层；失败消息区分「盘上没有」与
+        // 「盘上有但解析链没送到」（CI Linux 定位用，本地恒命中）
+        let hostProbe = 'n/a'
+        try {
+          const st = await vscode.workspace.fs.stat(
+            vscode.Uri.file(nodePath.join(outsideDir, '外部图片.png')))
+          hostProbe = `type=${st.type}`
+        } catch (e) {
+          hostProbe = `ERR ${(e as Error).message}`
+        }
+        throw new Error(`${(err as Error).message}；宿主stat=${hostProbe}；imageEntries实况=${JSON.stringify((v as { imageEntries?: unknown }).imageEntries ?? null)}`)
+      })
+      assert(img.appliedSrc!.includes('vscode-webview-resource') || img.appliedSrc!.includes('vscode-resource'),
+        `外部图片应经 webview 资源服务装载（实际 ${img.appliedSrc}）——localResourceRoots 授权面失效在此暴露`)
+
+      // ② 歧义目标悬停：错误卡文案就地呈现（refErrorText 的 ambiguous
+      // 分态——hoverPreview.note 即用户看到的错误卡文字，含目标名）
+      await vscode.commands.executeCommand(CMD.postToPanel, absUri,
+        { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+      const amb = await poll('歧义悬停错误卡', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, absUri)) as
+          | { hoverPreview?: { open: boolean; state: string; note: string } }
+          | undefined
+        return v?.hoverPreview?.open === true && v.hoverPreview.state === 'error' &&
+          v.hoverPreview.note.includes('短名二义') ? v.hoverPreview : undefined
+      }, 10000)
+      assert(amb!.note.includes('短名二义'), `歧义错误卡文案应含目标名（实际 ${amb!.note}）`)
+      await vscode.commands.executeCommand(CMD.postToPanel, absUri,
+        { kind: 'hover.test.pointer', action: 'leave', index: 1 })
+
+      // ③ 出链面板跨根条目：路径行文本为绝对路径（`.vsidian-outlink-item-path`
+      // 的 DOM 文本——外部目标无根内 rel，行 2 呈现绝对身份）
+      await vscode.commands.executeCommand(CMD.postToPanel, absUri, { kind: 'sidebar.test.click' })
+      await vscode.commands.executeCommand(CMD.postToPanel, absUri, { kind: 'outlinks.test.click' })
+      const outlinks = await poll('出链就绪（含外部目标条目）', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, absUri)) as
+          | { outlinks?: { state: string; items: Array<{ targetDisplay: string; resolved: boolean; pathText: string | null }> } }
+          | undefined
+        const items = v?.outlinks?.state === 'ready' ? v.outlinks.items : []
+        return items.some((i) => i.resolved && i.targetDisplay === '外部目标') ? items : undefined
+      }, 10000)
+      const external = outlinks.find((i) => i.targetDisplay === '外部目标')!
+      assert(external.pathText !== null && eqFold(external.pathText, outsideAbsPosix + '/外部目标.md'),
+        `外部目标条目路径行应为绝对路径（实际 ${String(external.pathText)}）`)
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      for (const rel of ['绝对观测.md', 'dira/短名二义.md', 'dirb/短名二义.md']) {
+        await rm(wsUri(rel).fsPath, { force: true }).catch(() => {})
+      }
+      await rm(nodePath.join(wsDir, 'dira'), { recursive: true, force: true }).catch(() => {})
+      await rm(nodePath.join(wsDir, 'dirb'), { recursive: true, force: true }).catch(() => {})
+      await rm(outsideDir, { recursive: true, force: true }).catch(() => {})
+    }
+  }],
+
   ['反链面板新形态：分组卡片与命中高亮真实绘制（形态改版批次）', async () => {
     await openWithEditor('反链目标.md')
     await waitSessionReady('反链目标.md')
@@ -11921,21 +12053,23 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await new Promise((r) => setTimeout(r, 400))
   }],
 
-  ['rename 引用改写：move 出链按新目录重算与附件扩展名保持（#199）', async () => {
+  ['rename 引用改写：move 出链短名保留与相对重算（#556 T4）', async () => {
     await waitRenameIndexReady()
     // 目标子目录先建（renameFile 不自动创建父目录）
     await vscode.workspace.fs.createDirectory(wsUri('notes/deep'))
     try {
-      // move：被移动 Markdown 自身的相对出链按新目录重算
+      // move：被移动 Markdown 自身的出链——#556 T4 起短名出链保留（did
+      // 通道 lookup 新世界唯一命中「改名目标.md」→ 不改写），明确相对
+      // 出链按新目录重算
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('rename-moved.md'), wsUri('notes/deep/moved-2.md'), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), 'move 应成功应用')
-      const movedText = await poll('被移动文档出链重算', async () => {
+      const movedText = await poll('被移动文档出链改写', async () => {
         const text = (await vscode.workspace.openTextDocument(wsUri('notes/deep/moved-2.md'))).getText()
-        return text.includes('[[../../改名目标]]') && text.includes('[子文档](../rename-note.md)') ? text : undefined
+        return text.includes('[[改名目标]]') && text.includes('[子文档](../rename-note.md)') ? text : undefined
       })
-      assert(movedText.includes('见 [[../../改名目标]] 与 [子文档](../rename-note.md)。'),
-        `出链应按 notes/deep 重算（实际 ${movedText}` + '）')
+      assert(movedText.includes('见 [[改名目标]] 与 [子文档](../rename-note.md)。'),
+        `短名出链应保留、相对出链按 notes/deep 重算（实际 ${movedText}` + '）')
       // 等索引增量把 move 后的盘文本重扫（did 通道 + watcher 双保险）
       await new Promise((r) => setTimeout(r, 1600))
       // 附件 rename：显式扩展名保持、不补 .md；引用甲的 image 边改写
@@ -12175,7 +12309,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
   }],
 
-  ['rename 引用改写：跨根移动不改写并明确报告（#199）', async () => {
+  ['rename 引用改写：跨根移动改写为明确绝对路径（#556 T4）', async () => {
     await waitRenameIndexReady()
     const secondDir = `${wsDir}-rename-second`
     await mkdir(secondDir, { recursive: true })
@@ -12244,23 +12378,45 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('改名目标.md'), vscode.Uri.file(`${secondDir}/改名目标.md`), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), '跨根 rename 应成功应用')
-      // 引用者文本原样（不生成 ../.. 跨根相对引用）。断言语义是磁盘落盘
-      // 文本：直读盘（fs.readFile），不经 openTextDocument——前序 rename
-      // 用例改写过的文档缓存 reconcile 异步，单宿主全量下（多边型/漂移与
-      // 本用例同宿主先后跑）缓存里还是改写后的旧文本，会误报为跨根改写
-      const readDisk = (rel: string) => Promise.resolve(vscode.workspace.fs.readFile(wsUri(rel)))
-        .then((data) => Buffer.from(data).toString('utf8'))
-      const textA = await readDisk('rename-ref-a.md')
-      const textB = await readDisk('notes/rename-ref-b.md')
-      assert(textA.includes('[同目标](./改名目标.md)') && !textA.includes('rename-second'),
-        `跨根不得改写引用甲（实际 ${textA}` + '）')
-      assert(textB.includes('[[../改名目标]]'), `跨根不得改写引用乙（实际 ${textB}` + '）')
-      // 反馈：全部跳过（cross-root）、零更新
-      await poll('跨根跳过上报', async () => {
+      // #556 T4：越出所属根 → 引用者改写为明确绝对路径（短名省略/显式
+      // 扩展名各自保持），不再跳过。断言语义是文档模型文本
+      // （openTextDocument.getText——buffer 口径）：1.82.3 平台上 bulk edit
+      // 的 text edits 只作用于文档模型 buffer（收口对照实验实证：手工
+      // 同事务 replace 的盘面不变、buffer 生效；#199 引用乙「改写落盘」
+      // 同口径——其 openTextDocument 读的也是 buffer），落盘发生在用户
+      // 保存时。且跨根批的改写不走 will additional edit（宿主对跨根
+      // rename 事务的 additional edits 静默丢弃——vaultRenameWiring 的
+      // batchCrossRoot 注释），did 通道独立 applyEdit 异步应用——poll 等
+      // 落定（与 #199 引用乙 poll 同型）
+      const readDoc = (rel: string) => Promise.resolve(vscode.workspace.openTextDocument(wsUri(rel)))
+        .then((doc) => doc.getText())
+      // 绝对形态文本为 `/` 分隔（Windows 盘符形态，ADR-0018）。比较折叠
+      // 大小写：改写文本的盘符随 VSCode URI fsPath 小写（c:/…），测试侧
+      // secondDir 来自 mkdtemp 原生形态（C:\…）——NTFS 大小写不敏感语义
+      // 下同一路径的两种书写不得判为不符
+      const secondTarget = (name: string) => `${secondDir}/${name}`.replace(/\\/g, '/')
+      const containsFold = (haystack: string, needle: string): boolean =>
+        haystack.toLowerCase().includes(needle.toLowerCase())
+      const textA = await poll('跨根引用甲改写（did 通道）', async () => {
+        const text = await readDoc('rename-ref-a.md')
+        return containsFold(text, `[[${secondTarget('改名目标')}]]`) ? text : undefined
+      }).catch(async () => readDoc('rename-ref-a.md'))
+      assert(
+        containsFold(textA, `[[${secondTarget('改名目标')}]]`) &&
+        containsFold(textA, `[同目标](${secondTarget('改名目标.md')})`) &&
+        containsFold(textA, `[[${secondTarget('改名目标')}#深处小节|别名]]`),
+        `跨根应改写引用甲为绝对路径（实际 ${textA}` + '）',
+      )
+      const textB = await poll('跨根引用乙改写（did 通道）', async () => {
+        const text = await readDoc('notes/rename-ref-b.md')
+        return containsFold(text, `[[${secondTarget('改名目标')}]]`) ? text : undefined
+      }).catch(async () => readDoc('notes/rename-ref-b.md'))
+      assert(containsFold(textB, `[[${secondTarget('改名目标')}]]`), `跨根应改写引用乙为绝对路径（实际 ${textB}` + '）')
+      // 反馈：全部更新（跨根不再跳过）、零跳过项
+      await poll('跨根改写上报', async () => {
         const last = await lastRenameRefLog()
-        return last && last.plannedEdits === 0 && last.skipped.length >= 2 &&
-          last.skipped.every((s) => s.reason === 'cross-root') &&
-          last.notice === 'host.renameRefsSkippedAll' ? last : undefined
+        return last && last.plannedEdits >= 4 && last.skipped.length === 0 &&
+          last.notice === 'host.renameRefsUpdated' ? last : undefined
       }).catch(async (err) => {
         const log = await vscode.commands.executeCommand('onegayi.vsidian._test.getRenameRefLog')
         throw new Error(`${(err as Error).message}；log实况=${JSON.stringify(log)}`)
@@ -12268,6 +12424,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } finally {
       // 现场还原：外部 fs 通道移回（不触发 will），按身份移除第二根，等索引稳定
       await Promise.resolve(restoreRename(vscode.Uri.file(`${secondDir}/改名目标.md`), wsUri('改名目标.md'))).catch(() => {})
+      // 引用者文本已被 will 通道改写为绝对路径（T4）：外部 fs 通道写回起始
+      // 文本（watcher 增量重扫归位基线，防止绝对路径形态泄漏给后续 rename
+      // 用例的索引边）
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-ref-b.md'), Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
       // 还原判据须含文件级终态：只查索引就绪时，restoreRename 失败被
       // catch 吞掉会静默放过（改名目标.md 仍滞留 secondDir），随后
       // rm(secondDir) 连唯一副本一起删掉、泄漏给后续用例——本用例 FAIL
@@ -12305,6 +12466,299 @@ export const cases: Array<[string, () => Promise<void>]> = [
   }],
 
   // ---- #200 目录与批量移动的引用更新 ----
+
+  ['rename 引用改写：同目录被排除遮蔽物下新短名显式化（三审 P2 生产接线）', async () => {
+    await waitRenameIndexReady()
+    await ensureBatchFixture()
+    type IndexState = {
+      excludePatterns: string[]
+      roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean; verifying: boolean; queued: number }>
+    }
+    const state = async (): Promise<IndexState> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
+    const quiet = async (): Promise<boolean> => {
+      const s = await state()
+      const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+      return !!root?.hasData && !root.scanning && !root.verifying && root.queued === 0
+    }
+    // 排除根目录无扩展遮蔽物（catalog 域不可见——只有 will 通道 readDirectory
+    // 预取能看到；这正是存在性端口目录集的生产接线面）
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+      kind: 'index.setPatterns', patterns: ['**/.git/**', '**/node_modules/**', '**/批遮蔽物'],
+    })
+    await poll('排除生效且重算完成', async () => {
+      const s = await state()
+      return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**', '**/批遮蔽物']) &&
+        (await quiet()) ? s : undefined
+    })
+    try {
+      // 根目录无扩展普通文件（被排除）：目标改名后的新裸短名/裸相对候选
+      // 被它抢占（解析器「第一个存在文件优先」）
+      await vscode.workspace.fs.writeFile(wsUri('批遮蔽物'), Buffer.from('shadow', 'utf8'))
+      // 子目录遮蔽物 + 短名引用者：遮蔽物在**应用文档目录**而非目标目录——
+      // 存在性端口的「文档目录」预取面（接线键修复的钉子场景，目标目录
+      // 预取覆盖不到这里）
+      await vscode.workspace.fs.writeFile(wsUri('notes/批遮蔽物'), Buffer.from('shadow2', 'utf8'))
+      await vscode.workspace.fs.writeFile(wsUri('notes/p2-ref.md'), Buffer.from('# P2 引用\n\n短名 [[批目标]]。\n', 'utf8'))
+      // watcher 去抖（800ms）+ 增量抽边：短名引用者的边须先进索引才会成为
+      // rename 候选来源（ensureBatchFixture 同款 1400ms 收口）
+      await new Promise((r) => setTimeout(r, 1_600))
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(wsUri('批目标.md'), wsUri('批遮蔽物.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
+      // 未打开引用者的 will 改写作用宿主 lazy 装载的 dirty buffer（1.82.3
+      // 语义，#269 落档——盘面保持原文，did 收尾按 dirty 缓存实例豁免退役；
+      // 断言面与 #199/#200 系用例同为文档模型文本）
+      const refA = await poll('引用甲显式化改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('batch-ref-a.md'))).getText()
+        return text.includes('[[批遮蔽物.md]]') &&
+          text.includes('[同目标](批遮蔽物.md)') &&
+          text.includes('[[批遮蔽物.md#深处小节|别名]]') ? text : undefined
+      })
+      assert(!refA.includes('[[批遮蔽物]]'), `裸短名被遮蔽物抢占，不得保留（实际 ${refA}` + '）')
+      assert(!refA.includes('[[批遮蔽物#'), `裸短名锚边同样不得保留（实际 ${refA}` + '）')
+      // 子目录引用乙的相对重算同样不得剥 .md（裸相对候选被根遮蔽物抢占）
+      const refB = await poll('引用乙相对显式化改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/batch-ref-b.md'))).getText()
+        return text.includes('[[../批遮蔽物.md]]') ? text : undefined
+      })
+      assert(!refB.includes('[[../批遮蔽物]]'), `裸相对被遮蔽物抢占，不得保留（实际 ${refB}` + '）')
+      // 短名引用者：新裸短名被**其来源目录**的遮蔽物抢占——显式化
+      const p2Ref = await poll('短名引用者显式化改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/p2-ref.md'))).getText()
+        return text.includes('[[批遮蔽物.md]]') ? text : undefined
+      })
+      assert(!p2Ref.includes('[[批遮蔽物]]'), `裸短名被来源目录遮蔽物抢占，不得保留（实际 ${p2Ref}` + '）')
+      // 反馈落账（did 通道尾部合并 will 暂存——poll 等待而非立即断言）
+      await poll('改写反馈落账', async () => {
+        const last = await lastRenameRefLog()
+        return last !== null && last.plannedEdits >= 5 ? last : undefined
+      })
+    } finally {
+      // will 改写滞留的 dirty 缓存实例先清（无标签实例的还原走盘面覆盖，
+      // close 先于还原——#199 漂移用例同款顺序）
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('批遮蔽物')).then(() => undefined, () => undefined))
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('notes/批遮蔽物')).then(() => undefined, () => undefined))
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('notes/p2-ref.md')).then(() => undefined, () => undefined))
+      await Promise.resolve(restoreRename(wsUri('批遮蔽物.md'), wsUri('批目标.md'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-ref-a.md'), Buffer.from(BATCH_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/batch-ref-b.md'), Buffer.from(BATCH_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+      // 排除恢复默认（覆盖范围重算，遮蔽物也已删除）
+      await Promise.resolve(vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+        kind: 'index.resetPatterns',
+      })).catch(() => {})
+      await poll('排除恢复默认且重算完成', async () => {
+        const s = await state()
+        return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']) &&
+          (await quiet()) ? s : undefined
+      }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
+  ['rename 引用改写：外部目录更名不扫描（登记身份映射 + 未引用不展开，四审 P2-1 生产接线）', async () => {
+    await waitRenameIndexReady()
+    const extDir = `${wsDir}-r4-extdir`
+    const ext = (p: string): vscode.Uri => vscode.Uri.file(`${extDir}/${p}`)
+    const extAbs = (p: string): string => `${extDir.replaceAll('\\', '/')}/${p}`
+    const containsFold = (haystack: string, needle: string): boolean =>
+      haystack.toLowerCase().includes(needle.toLowerCase())
+    try {
+      // 外部 fixture：被根内引用的 target.md + 未引用的嵌套 md。若生产
+      // 展开误递归扫描外部目录，unreferenced.md 会进映射 → expandedMoves=2
+      //（isIndexedScope 已接入 expandPortOf——四审 P2-1 的生产接线面）
+      await vscode.workspace.fs.createDirectory(ext('old/nested'))
+      await vscode.workspace.fs.writeFile(ext('old/target.md'), Buffer.from('# 外部目标\n', 'utf8'))
+      await vscode.workspace.fs.writeFile(ext('old/nested/unreferenced.md'), Buffer.from('# 未引用\n', 'utf8'))
+      // 根内引用者：绝对路径 mdlink（外部目标经绝对身份登记进引用桶）。
+      // 链接文本取 vscode.Uri fsPath 归一形态（Windows 盘符小写）——登记
+      // 身份键随链接文本走、rename 事件路径由宿主 URI 派生，两端同形才进
+      // 精确身份门（normKey 不折叠大小写：NTFS 大小写不敏感，但身份键
+      // 匹配是精确的——漂移容错在 backlinks 桶的 fold 通道，files 门不在）
+      const refText = `[外部目标](${ext('old/target.md').fsPath.replaceAll('\\', '/')})\n`
+      await vscode.workspace.fs.writeFile(wsUri('r4-ext-ref.md'), Buffer.from(refText, 'utf8'))
+      // 等外部目标的引用登记（绝对身份桶 incoming 含引用者）。慢 runner 上
+      // watcher 事件偶发滞后：周期性重写引用者（新鲜 mtime → 新事件 → 重抽
+      // 重登记）自愈（跨根用例同款 kick 模式）
+      let healKick = 0
+      await poll('外部目标引用登记', async () => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', ext('old/target.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        if (c?.status === 'ready' &&
+          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('r4-ext-ref.md').fsPath))) {
+          return true
+        }
+        if (healKick++ % 40 === 20) {
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('r4-ext-ref.md'), Buffer.from(refText, 'utf8'))).catch(() => {})
+        }
+        return undefined
+      }, 40000)
+      // 外部目录 rename：old → new（索引域外——fs 递归列举跳过，映射只来
+      // 自已登记身份前缀；isDirectory 定点 stat 允许）
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(ext('old'), ext('new'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), '外部目录 rename 应成功应用')
+      // 引用者改写为 new 绝对路径（生产 will 通道；断言面为文档模型文本）
+      const refNew = await poll('外部引用者绝对路径改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('r4-ext-ref.md'))).getText()
+        return containsFold(text, `(${extAbs('new/target.md')})`) ? text : undefined
+      })
+      assert(!refNew.includes('/old/'), `外部目录引用应全部改写到 new（实际 ${refNew}` + '）')
+      // 展开映射钉子：仅登记身份 1 条（unreferenced.md 无登记不展开——
+      // 若误枚举外部目录则 expandedMoves=2）
+      await poll('外部目录展开落账（expandedMoves=1）', async () => {
+        const last = await lastRenameRefLog()
+        return last && last.moves.length === 1 && last.expandedMoves === 1 ? last : undefined
+      })
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(restoreRename(ext('new'), ext('old'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('r4-ext-ref.md')).then(() => undefined, () => undefined))
+      await rm(extDir, { recursive: true, force: true }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
+  ['rename 引用改写：来源目标同批移出根改写为明确绝对路径（四审 P2-3）', async () => {
+    await waitRenameIndexReady()
+    const extDir = `${wsDir}-r4-out`
+    const extAbs = (p: string): string => `${extDir.replaceAll('\\', '/')}/${p}`
+    const containsFold = (haystack: string, needle: string): boolean =>
+      haystack.toLowerCase().includes(needle.toLowerCase())
+    try {
+      await vscode.workspace.fs.writeFile(wsUri('data/r4-target.md'), Buffer.from('# 四审目标\n', 'utf8'))
+      await vscode.workspace.fs.writeFile(wsUri('notes/r4-source.md'), Buffer.from('见 [[r4-target]]。\n', 'utf8'))
+      // 等短名边登记（[[r4-target]] 经短名补查解析到 data/r4-target.md）；
+      // 慢 runner 自愈 kick（同上）
+      let healKick = 0
+      await poll('短名出链登记', async () => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('data/r4-target.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        if (c?.status === 'ready' &&
+          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/r4-source.md').fsPath))) {
+          return true
+        }
+        if (healKick++ % 40 === 20) {
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/r4-source.md'), Buffer.from('见 [[r4-target]]。\n', 'utf8'))).catch(() => {})
+        }
+        return undefined
+      }, 40000)
+      // 同批移出根：来源与目标一起 → 外部目录（无根文档——短名/相对域
+      // 不存在，消费层 no-workspace；did 出链通道改写为明确绝对路径）
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(wsUri('notes/r4-source.md'), vscode.Uri.file(`${extDir}/r4-source.md`), { overwrite: false })
+      edit.renameFile(wsUri('data/r4-target.md'), vscode.Uri.file(`${extDir}/r4-target.md`), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), '同批移出根 rename 应成功应用')
+      // 短名不得保留（同目录命中不构成可解析）：原文省略扩展 → 裸绝对形态
+      const text = await poll('移出根出链绝对化', async () => {
+        const t = (await vscode.workspace.openTextDocument(vscode.Uri.file(`${extDir}/r4-source.md`))).getText()
+        return containsFold(t, `[[${extAbs('r4-target')}]]`) ? t : undefined
+      })
+      assert(!text.includes('[[r4-target]]'), `裸短名在无根文档不可解析，不得保留（实际 ${text}` + '）')
+      // 反馈落账（did 出链通道合并 will 暂存）
+      await poll('移出根改写反馈落账', async () => {
+        const last = await lastRenameRefLog()
+        return last && last.plannedEdits >= 1 ? last : undefined
+      })
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(restoreRename(vscode.Uri.file(`${extDir}/r4-target.md`), wsUri('data/r4-target.md'))).catch(() => {})
+      await Promise.resolve(restoreRename(vscode.Uri.file(`${extDir}/r4-source.md`), wsUri('notes/r4-source.md'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/r4-source.md'), Buffer.from('见 [[r4-target]]。\n', 'utf8'))).catch(() => {})
+      await rm(extDir, { recursive: true, force: true }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
+  ['rename 引用改写：来源移出根未移动目标的遮蔽候选显式化（四审 P2-2）', async () => {
+    await waitRenameIndexReady()
+    type IndexState = {
+      excludePatterns: string[]
+      roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean; verifying: boolean; queued: number }>
+    }
+    const state = async (): Promise<IndexState> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
+    const quiet = async (): Promise<boolean> => {
+      const s = await state()
+      const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+      return !!root?.hasData && !root.scanning && !root.verifying && root.queued === 0
+    }
+    // 排除目标目录的无扩展遮蔽物（catalog 域不可见——存在性只能来自
+    // 四审 P2-2 的 per-edge 定点 stat 预取：目标未动、其目录不在目录集）。
+    // 遮蔽物与目标同名去 .md（r4-target2 无扩展）：绝对候选序 [裸, .md]
+    // 的首个存在者被它抢占——正是评审反例形态
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+      kind: 'index.setPatterns', patterns: ['**/.git/**', '**/node_modules/**', 'data/r4-target2'],
+    })
+    await poll('排除生效且重算完成', async () => {
+      const s = await state()
+      return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**', 'data/r4-target2']) &&
+        (await quiet()) ? s : undefined
+    })
+    const extDir = `${wsDir}-r4-out2`
+    const dataAbs = `${wsDir.replaceAll('\\', '/')}/data`
+    const containsFold = (haystack: string, needle: string): boolean =>
+      haystack.toLowerCase().includes(needle.toLowerCase())
+    try {
+      // 写前沉淀：排除模式重扫的尾段与写事件解耦（CI 慢 runner 上紧邻写入
+      // 曾与重扫窗口竞争——watcher 事件滞后导致登记前置超时，#552 时序族）
+      await new Promise((r) => setTimeout(r, 1600))
+      await vscode.workspace.fs.writeFile(wsUri('data/r4-target2.md'), Buffer.from('# 目标二\n', 'utf8'))
+      await vscode.workspace.fs.writeFile(wsUri('data/r4-target2'), Buffer.from('shadow', 'utf8'))
+      await vscode.workspace.fs.writeFile(wsUri('notes/r4-source2.md'), Buffer.from('见 [[r4-target2]]。\n', 'utf8'))
+      // 等短名边登记（遮蔽物被排除，短名补查不受影响）；慢 runner 自愈
+      // kick：周期性重写来源与目标（新鲜 mtime → 新事件 → 重抽/重判）
+      let healKick = 0
+      await poll('短名出链登记', async () => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('data/r4-target2.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        if (c?.status === 'ready' &&
+          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/r4-source2.md').fsPath))) {
+          return true
+        }
+        if (healKick++ % 40 === 20) {
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('data/r4-target2.md'), Buffer.from('# 目标二\n', 'utf8'))).catch(() => {})
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/r4-source2.md'), Buffer.from('见 [[r4-target2]]。\n', 'utf8'))).catch(() => {})
+        }
+        return undefined
+      }, 40000)
+      // 仅移动来源到根外（目标不动）：无根文档 → 绝对形态；裸绝对候选序
+      // 首个存在 = 被排除遮蔽物（定点 stat 可见）→ 显式 .md 绝对
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(wsUri('notes/r4-source2.md'), vscode.Uri.file(`${extDir}/r4-source2.md`), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), '来源移出根 rename 应成功应用')
+      const text = await poll('未移动目标显式 .md 绝对化', async () => {
+        const t = (await vscode.workspace.openTextDocument(vscode.Uri.file(`${extDir}/r4-source2.md`))).getText()
+        return containsFold(t, `[[${dataAbs}/r4-target2.md]]`) ? t : undefined
+      })
+      // 裸绝对形态（闭合括号、无 .md）不得出现——被遮蔽物抢占候选序
+      const bareForm = new RegExp(
+        String.raw`\[\[` + dataAbs.replaceAll('\\', '/').replaceAll('.', '\\.') + String.raw`/r4-target2\]\]`,
+        'i',
+      )
+      assert(!bareForm.test(text), `去 .md 绝对形态被遮蔽物抢占，不得出现（实际 ${text}` + '）')
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(restoreRename(vscode.Uri.file(`${extDir}/r4-source2.md`), wsUri('notes/r4-source2.md'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/r4-source2.md'), Buffer.from('见 [[r4-target2]]。\n', 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('data/r4-target2')).then(() => undefined, () => undefined))
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('data/r4-target2.md')).then(() => undefined, () => undefined))
+      await Promise.resolve(vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+        kind: 'index.resetPatterns',
+      })).catch(() => {})
+      await poll('排除恢复默认且重算完成', async () => {
+        const s = await state()
+        return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']) &&
+          (await quiet()) ? s : undefined
+      }).catch(() => {})
+      await rm(extDir, { recursive: true, force: true }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
 
   ['rename 引用改写：目录 rename 批量改写、互链恒等与一步撤销（#200）', async () => {
     await waitRenameIndexReady()
@@ -15367,7 +15821,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
         assert(doc.isDirty && doc.getText() === inserted + baseline, `${label}：未保存插入应精确应用一次`)
         await poll(`${label}：覆盖层登记丢弃链接`, async () => {
           const edges = await overlayOf()
-          return edges?.includes('rename-moved.md') ? true : undefined
+          // T2（#556）起 resolvedTarget 为规范绝对身份（`/` 分隔）——
+          // 相对旧形态与绝对新身份双兼容（同 11992 行口径）
+          return edges?.some((e) => e === 'rename-moved.md' || e?.endsWith('/rename-moved.md'))
+            ? true
+            : undefined
         })
         await vscode.commands.executeCommand(closeCommand)
         await poll(`${label}：丢弃/还原后覆盖层退役`, async () =>

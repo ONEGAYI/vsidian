@@ -312,6 +312,46 @@ try {
     assert.equal(await dbGlyph.count(), 1, '索引维护组标题应挂 dbLink 生图资产')
     const dbInk = await countInk(await dbGlyph.screenshot())
     assert.ok(dbInk > 5, `数据库图标在${theme}主题下应真实绘制（命中${dbInk}像素）`)
+    // #556 T5 内部链接类型（分页首组「内部链接」）：三档枚举走真实保存
+    // 链路（select → settings.set → 宿主合并 → 回推回显）；组标题链环为
+    // 内联字形——绘制层核验（currentColor 解析 + 16px 槽位 + 文字 44px 起点）
+    const linkGroup = page.locator('.vsidian-settings-group').filter({
+      has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['settings.groupLink'] }) })
+    await linkGroup.waitFor()
+    const linkSelect = linkGroup.getByRole('combobox', { name: zhCn['setting.linkInsertPathType.title'], exact: true })
+    assert.equal(await linkSelect.isVisible(), true, '内部链接类型应渲染枚举下拉')
+    assert.equal(await linkSelect.inputValue(), 'relative', '默认第二档（相对路径）')
+    const linkOptionTexts = await linkGroup.locator('select[data-setting-key="link.insertPathType"] option').allInnerTexts()
+    assert.deepEqual(linkOptionTexts.map((t) => t.trim()), [
+      zhCn['setting.linkInsertPathTypeShortest'],
+      zhCn['setting.linkInsertPathTypeRelative'],
+      zhCn['setting.linkInsertPathTypeAbsolute'],
+    ], '三档选项文案与 zh 字典同源（用户给定文案）')
+    await linkSelect.selectOption('absolute')
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await page.evaluate(() => window.savedSettings['link.insertPathType']), 'absolute',
+      '内部链接类型经消息桥持久化（settings.set → 宿主侧合并）')
+    assert.equal(await linkSelect.inputValue(), 'absolute', '保存回推后就地回显')
+    await linkSelect.selectOption('relative')
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await page.evaluate(() => window.savedSettings['link.insertPathType']), 'relative',
+      '切回默认档，持久化值随保存链路更新')
+    const linkGlyphPaint = await linkGroup.locator('.vsidian-settings-group-title svg').evaluate((svg) => {
+      const h3 = svg.parentElement
+      const headingBox = h3.getBoundingClientRect()
+      const iconBox = svg.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents([...h3.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()))
+      return { stroke: getComputedStyle(svg).stroke, fg: getComputedStyle(svg).color,
+        iconWidth: iconBox.width, iconHeight: iconBox.height,
+        iconLeft: iconBox.left - headingBox.left,
+        textLeft: range.getBoundingClientRect().left - headingBox.left }
+    })
+    assert.equal(linkGlyphPaint.stroke, linkGlyphPaint.fg, `链环字形描边应随主题前景色（currentColor，${theme} 主题绘制层）`)
+    assert.equal(linkGlyphPaint.iconWidth, 16, '图标 16px 槽位')
+    assert.equal(linkGlyphPaint.iconHeight, 16)
+    assert.equal(linkGlyphPaint.iconLeft, 20, '图标贴左缘 20px')
+    assert.equal(linkGlyphPaint.textLeft, 44, '标题文字起点 44px（20 padding + 16 图标 + 8 gap）')
     await search.focus()
     // 等待此前页面交互（页签滚动、切页复位）的在途 scroll handler 落地，
     // 避免其延迟上报污染清零后的全长断言

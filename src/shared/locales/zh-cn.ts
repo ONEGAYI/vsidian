@@ -68,6 +68,8 @@ export const zhCn: Record<MessageKey, string> = {
   'wikilinkSuggest.status.blockNotFound': '未找到目标文档——可继续手写块引用',
   'wikilinkSuggest.status.blockNotMd': '目标不是 Markdown 文件——无块候选',
   'wikilinkSuggest.status.blockReadError': '目标文档读取失败——可继续手写块引用',
+  'wikilinkSuggest.status.targetAmbiguous': '同名目标不唯一——补全路径以明确目标',
+  'wikilinkSuggest.status.targetPending': '索引更新中——同名目标暂不能确认',
   'wikilinkSuggest.status.blockAccepting': '正在补写块 ID…',
   'wikilinkSuggest.block.meta': '行 {line} · {count} 行',
   'wikilinkSuggest.toast.blockAcceptFailed': '未能补写块 ID——已保留输入',
@@ -110,6 +112,8 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.groupCodeblock': '代码块',
   /** 「文件与链接」分页内小节（#332 自编辑器页迁入）：image.* 图片粘贴设置 */
   'settings.groupImage': '图片',
+  /** 「文件与链接」分页内小节（#556）：link.* 内部链接生成设置 */
+  'settings.groupLink': '内部链接',
   /** 「文件与链接」分页内小节（#298 建组、#332 随分页迁移）：hover.* 悬停
    *  预览族与 embed.* 正文嵌入族 */
   'settings.groupRefview': '引用视图',
@@ -345,6 +349,10 @@ export const zhCn: Record<MessageKey, string> = {
   'host.wikilinkNoWorkspace': '当前文档不在任何工作区文件夹内：双链目标按来源文档的相对路径解析，未打开文件夹时无法跳转（链接文本保留）',
   'host.wikilinkNotFound': '双链目标不存在：[[{target}]]（已按来源文档所在目录解析；不会自动创建文件）',
   'host.wikilinkOutsideRoot': '双链目标越出来源所属的工作区根：[[{target}]]（相对路径不得越出所属根）',
+  'host.wikilinkAmbiguous': '同名目标不唯一：[[{target}]]（请补充路径以明确目标；不会自动创建文件）',
+  'host.wikilinkPending': '文件清单更新中：[[{target}]] 的唯一同名目标暂不能确认，请稍后重试',
+  'host.linkAmbiguous': '同名目标不唯一：{href}（请补充路径以明确目标）',
+  'host.linkPending': '文件清单更新中：{href} 的唯一同名目标暂不能确认，请稍后重试',
   'host.wikilinkHeadingMissing': '已在目标文档中打开{link}，但未找到标题「{heading}」（标题匹配：trim + 空白折叠 + 大小写不敏感的 ATX 标题）',
   'host.rejectDiffContext': '对比视图不支持视图切换',
   'host.rejectPanelNotReady': 'Vsidian 面板尚未就绪，请稍后重试',
@@ -382,15 +390,16 @@ export const zhCn: Record<MessageKey, string> = {
   'host.searchRevealHint': '从搜索结果打开？点此定位到选中的匹配处。',
   'host.searchRevealHintLocate': '定位',
   // ---- #199 更名/移动引用自动更新（宿主通知；批量操作合并提示）----
+  // #556 T4：越出所属根改为明确绝对路径改写（不再是跳过原因），跳过仅余
+  // 内容变化（edge-stale）一类
   'host.renameRefsUpdated': '已更名「{file}」并更新 {count} 处引用（{files} 个文件）。',
-  'host.renameRefsPartiallyUpdated': '已更名「{file}」并更新 {count} 处引用；{skipped} 处因越界或内容变化跳过，未全部更新。',
-  'host.renameRefsSkippedAll': '已更名「{file}」，引用未更新：{skipped} 处因越界或内容变化被跳过。',
+  'host.renameRefsPartiallyUpdated': '已更名「{file}」并更新 {count} 处引用；{skipped} 处因内容变化跳过，未全部更新。',
+  'host.renameRefsSkippedAll': '已更名「{file}」，引用未更新：{skipped} 处因内容变化被跳过。',
   'host.renameRefsIndexNotReady': '已更名「{file}」，但引用索引尚未就绪，本次未更新引用（可稍后在设置页重建索引后手动修正）。',
   // ---- #200 目录/批量移动：未更新项详情行与跳过原因 ----
   'host.renameRefsSkippedDetail': '未更新项：{items}',
   'host.renameRefsSkipItem': '{file}（{reason}）',
   'host.renameRefsSkipMore': ' … {count}',
-  'host.renameRefsSkipCrossRoot': '越出所属根',
   'host.renameRefsSkipEdgeStale': '内容已变化',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
@@ -527,6 +536,8 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorNoWorkspace': '当前文档不在任何工作区文件夹内：无法解析链接目标进行预览',
   'hover.errorEscape': '目标越出来源所属的工作区根，无法预览',
   'hover.errorNotFound': '目标不存在：{target}（按当前文档所在目录解析；不会自动创建文件）',
+  'hover.errorAmbiguous': '同名目标不唯一：{target}（请补充路径以明确目标）',
+  'hover.errorPending': '文件清单更新中，唯一同名目标暂不能确认：{target}',
   'hover.errorNonMarkdown': '{target} 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
   'hover.errorReadFailed': '读取目标文档失败',
   'hover.errorAnchorMissing': '目标笔记中不存在锚点：{target}#{anchor}（不会以全文替代显示）',
@@ -834,6 +845,13 @@ export const zhCn: Record<MessageKey, string> = {
   'host.imagePasteInvalidLocation': '粘贴图片未保存：子路径 {subpath} 非法（不允许绝对路径或 ..）。',
   'host.imagePasteNoWorkspaceFallback': '未打开工作区文件夹，粘贴图片已保存到当前文件同目录。',
   'host.imagePasteWriteFailed': '粘贴图片保存失败。',
+
+  // ---- #556 内部链接类型（三档枚举；文案为用户给定中文，逐字）----
+  'setting.linkInsertPathType.title': '内部链接类型',
+  'setting.linkInsertPathType.description': '设置在笔记中链接其他文件时插入“[[ ]]”中的文件路径类型。',
+  'setting.linkInsertPathTypeShortest': '尽可能简短的形式',
+  'setting.linkInsertPathTypeRelative': '基于当前笔记的相对路径',
+  'setting.linkInsertPathTypeAbsolute': '基于文件系统的绝对路径',
  
   // ---- #183 统一右键菜单（Live 正文全域接管；块链接两项自 #162 迁入）----
   /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */

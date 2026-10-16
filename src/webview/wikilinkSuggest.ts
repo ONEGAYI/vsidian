@@ -139,12 +139,14 @@ type SuggestResult =
     }
   | {
       stage: 'heading'
-      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError'
+      /** #556 T3 增补 targetAmbiguous（同名不唯一，提示补路径）与
+       *  targetPending（清单更新中，不声明唯一）两分态 */
+      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError' | 'targetAmbiguous' | 'targetPending'
       items: WikilinkHeadingItem[]
     }
   | {
       stage: 'block'
-      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError'
+      status: 'ready' | 'noWorkspace' | 'notFound' | 'notMd' | 'readError' | 'targetAmbiguous' | 'targetPending'
       items: WikilinkBlockItem[]
       /** 查询依据的目标版本（无 ID 块接受时回传——宿主核对淘汰旧候选） */
       targetVersion: number
@@ -183,6 +185,9 @@ export class WikilinkSuggestController {
   private morePending = false
   /** 失效信号去抖定时器（#377 T02 wikilink.invalidate） */
   private invalidateTimer: ReturnType<typeof setTimeout> | undefined
+  /** 评审 F7：失效已到达、去抖重查未完成——当前 result 为过期枚举，
+   *  确认入口不得提交（短名候选可能已被新文件抢占）；新结果回包复位 */
+  private resultStale = false
   private result: SuggestResult | null = null
   /** 键盘高亮行（null = 无高亮；空查询初始即 null） */
   private activeIndex: number | null = null
@@ -296,6 +301,7 @@ export class WikilinkSuggestController {
     if (!this.resultAdmissible(message, 'file')) {
       return // 守卫不符即迟到/错位响应（五重守卫见 resultAdmissible）
     }
+    this.resultStale = false // 新枚举到达：失效窗关闭（评审 F7）
     this.lastFileQueryCostMs = Date.now() - this.fileQuerySentAt
     // 同一查询的更新帧（此前已有该代次结果）：手动高亮按候选身份保留
     const sameQueryUpdate = this.result !== null
@@ -370,6 +376,7 @@ export class WikilinkSuggestController {
     if (!this.resultAdmissible(message, 'heading')) {
       return // 守卫不符即迟到/错位响应（五重守卫见 resultAdmissible）
     }
+    this.resultStale = false // 新枚举到达：失效窗关闭（评审 F7）
     const sameQueryUpdate = this.result !== null
     const prevActiveId = this.activeId
     if (message.status === 'unavailable') {
@@ -378,6 +385,8 @@ export class WikilinkSuggestController {
         status: message.reason === 'no-workspace' ? 'noWorkspace'
           : message.reason === 'target-not-md' ? 'notMd'
           : message.reason === 'read-error' ? 'readError'
+          : message.reason === 'target-ambiguous' ? 'targetAmbiguous'
+          : message.reason === 'target-pending' ? 'targetPending'
           : 'notFound',
         items: [],
       }
@@ -398,6 +407,7 @@ export class WikilinkSuggestController {
     if (!this.resultAdmissible(message, 'block')) {
       return // 守卫不符即迟到/错位响应（五重守卫见 resultAdmissible）
     }
+    this.resultStale = false // 新枚举到达：失效窗关闭（评审 F7）
     const sameQueryUpdate = this.result !== null
     const prevActiveId = this.activeId
     if (message.status === 'unavailable') {
@@ -406,6 +416,8 @@ export class WikilinkSuggestController {
         status: message.reason === 'no-workspace' ? 'noWorkspace'
           : message.reason === 'target-not-md' ? 'notMd'
           : message.reason === 'read-error' ? 'readError'
+          : message.reason === 'target-ambiguous' ? 'targetAmbiguous'
+          : message.reason === 'target-pending' ? 'targetPending'
           : 'notFound',
         items: [],
         targetVersion: 0,
@@ -535,6 +547,9 @@ export class WikilinkSuggestController {
     if (!this.session || this.deps.isSuspended() || !this.deps.isLiveActive()) {
       return
     }
+    // 评审 F7：失效即时生效——去抖窗内旧候选不得被确认提交（确认入口
+    // 拦截并触发立即重查），新结果回包才复位新鲜度
+    this.resultStale = true
     if (this.invalidateTimer !== undefined) {
       clearTimeout(this.invalidateTimer)
     }
@@ -554,6 +569,29 @@ export class WikilinkSuggestController {
         this.sendBlockQuery(session.query, session.target, session.generation)
       }
     }, 300)
+  }
+
+  /** 失效重查立即执行（评审 F7 确认拦截时用——吞掉本次按键的同时把
+   *  新枚举拉起来，用户下一次按键即有新鲜候选） */
+  private requeryNow(): void {
+    if (this.invalidateTimer === undefined) {
+      return
+    }
+    clearTimeout(this.invalidateTimer)
+    this.invalidateTimer = undefined
+    const session = this.session
+    if (!session || this.deps.isSuspended() || !this.deps.isLiveActive()) {
+      return
+    }
+    this.morePending = false
+    const curStage = session.origin.stage
+    if (curStage === 'file') {
+      this.sendQuery(session.query, session.generation, 0)
+    } else if (curStage === 'heading') {
+      this.sendHeadingQuery(session.query, session.target, session.generation)
+    } else {
+      this.sendBlockQuery(session.query, session.target, session.generation)
+    }
   }
 
   /** 显式关闭（模式切换/暂停/实例收尾由调用方触发；幂等） */
@@ -1012,6 +1050,14 @@ export class WikilinkSuggestController {
     if (field.stage !== 'file') {
       return false // 防御：非文件/标题/块阶段的形态不接管
     }
+    // 评审 F7：失效已到达、去抖重查未完成——文件枚举可能已不指向用户
+    // 所选（短名候选被新文件抢占），不提交；吞键的同时立即重查，下一
+    // 次按键即有新鲜候选。仅 file 阶段拦截——标题/块候选是目标内容
+    // 枚举，过期接受由宿主侧目标版本守卫淘汰（#380 T05 既有语义）
+    if (this.resultStale) {
+      this.requeryNow()
+      return true
+    }
     const item = this.result?.stage === 'file' && this.result.status === 'ready' && this.activeIndex !== null
       ? this.result.items[this.activeIndex]
       : undefined
@@ -1117,6 +1163,13 @@ export class WikilinkSuggestController {
     }
     if (key === '^' && field.stage === 'block') {
       return false
+    }
+    // 评审 F7（阶段转换入口）：file 阶段失效窗内不锁定旧候选进锚点/
+    // 显示文字（同 confirm 口径——吞键并立即重查；标题/块阶段不拦，
+    // 过期接受由宿主侧目标版本守卫淘汰）
+    if (this.resultStale && field.stage === 'file') {
+      this.requeryNow()
+      return true
     }
     const item: WikilinkPlanItem | null = field.stage === 'file' &&
       this.result?.stage === 'file' && this.result.status === 'ready' && this.activeIndex !== null
@@ -1271,6 +1324,10 @@ export class WikilinkSuggestController {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockNotMd')))
       } else if (result.status === 'readError') {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.blockReadError')))
+      } else if (result.status === 'targetAmbiguous') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetAmbiguous')))
+      } else if (result.status === 'targetPending') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetPending')))
       } else {
         for (let i = 0; i < result.items.length; i++) {
           list.appendChild(this.buildBlockRow(result.items[i]!, i === this.activeIndex))
@@ -1290,6 +1347,10 @@ export class WikilinkSuggestController {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingNotMd')))
       } else if (result.status === 'readError') {
         list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.headingReadError')))
+      } else if (result.status === 'targetAmbiguous') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetAmbiguous')))
+      } else if (result.status === 'targetPending') {
+        list.appendChild(this.buildStatusRow(t('wikilinkSuggest.status.targetPending')))
       } else {
         for (let i = 0; i < result.items.length; i++) {
           list.appendChild(this.buildHeadingRow(result.items[i]!, i === this.activeIndex))

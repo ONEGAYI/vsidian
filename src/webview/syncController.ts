@@ -10943,12 +10943,17 @@ export class WebviewSyncController {
       panelPainted: hitPaintedElement(panel, panel),
       state: this.outlinksActive ? this.outlinksSnapshot.state : 'none',
       updating: this.outlinksActive ? this.outlinksSnapshot.updating : false,
-      items: items.map((item) => ({
+      items: items.map((item, index) => ({
         targetDisplay: item.targetDisplay,
         targetRelPath: item.targetRelPath,
         kind: item.kind,
         anchor: item.anchor,
         resolved: item.resolved,
+        // #556 收口：路径行 DOM 文本（快照序与条目 DOM 序同源；面板未
+        // 渲染时 null——跨根/外部目标在此呈现绝对身份文本）
+        pathText: panel?.querySelectorAll<HTMLElement>(
+          `.${OUTLINK_CLASS_NAMES.item} .${OUTLINK_CLASS_NAMES.itemPath}`,
+        )[index]?.textContent ?? null,
       })),
       itemPainted: hitPaintedElement(
         panel?.querySelector<HTMLElement>(`.${OUTLINK_CLASS_NAMES.item}`) ?? null,

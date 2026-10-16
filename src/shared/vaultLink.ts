@@ -1,11 +1,27 @@
-// 根内相对路径目标解析（工单 #196，父规格 #194「路径与范围」）：
-// 双链与普通链接/图片共用的**纯逻辑**解析核心——目标一律按来源文档目录
-// （docDir）相对解析，越出来源所属根（rootDir）不得解析。
+// 双链与普通链接/图片**共用的纯逻辑**解析核心：目标先按来源文档目录
+// （docDir）相对解析、越出来源所属根（rootDir）不得解析（工单 #196，
+// ADR-0008）；#556（ADR-0018）增补两条语义——**显式绝对路径**独立解析
+// 与**根内短名补查**。
+//
+// 显式绝对路径（#556）：Windows 宿主盘符形态（X:/…、X:\…，反斜杠先
+// 归一）与 POSIX 宿主根路径（/…）规划为 absolute——不接 docDir、不受
+// rootDir 边界、不做短名补查、无工作区也独立解析（允许跨根与工作区外
+// 目标，按宿主文件系统解释）。UNC 形态不在此列（越出本地根即 escape，
+// UNC 根内目标照常 inside）；POSIX 宿主上的盘符形态是普通文件名字符
+// （远程语义不转换；跨宿主盘符的拦截在 linkTarget 层）。
+//
+// 根内短名补查（#556）：相对候选全未命中且路径仅含文件名（归一后无
+// 分隔符）时，经注入端口查来源所属根内未被排除的唯一同名 Markdown——
+// 相对候选优先（同目录命中不打扰补查）；补查仅面向 Markdown 语义
+// （显式 .md 或省略扩展名的双链/文档链接），非 Markdown 不跨目录补查。
+// 多候选 ambiguous（不归任一候选）、唯一但清单不完整 pending（不声明
+// 唯一）。端口不注入则补查不存在（解析行为与无补查语义一致）。
 //
 // 取代旧 ADR-0002 的按需查找范围（basename 全根搜索 / 文档相对+根相对
 // 双候选 / 同名 QuickPick 选择，详见 ADR-0008）：
-// - [[设计]] = docDir/设计(.md)：同目录短名；子目录或其他根的同名文件
-//   不命中（多根互不补查，嵌套根按文档实际所属的最具体根划界）
+// - [[设计]] = docDir/设计(.md)：同目录短名优先，未命中经补查端口查
+//   所属根内唯一同名 Markdown（多根互不补查，嵌套根按文档实际所属的
+//   最具体根划界——补查范围即最具体根）
 // - [[项目甲/设计]] 明确子路径；[[../设计]] 允许根内上行；[[../../x]]
 //   越出所属根 → escape
 // - 扩展名语义：显式扩展名（.md/.pdf/.png…）单候选精确解析；无扩展名
@@ -21,7 +37,9 @@
 // 分层（「路径解析和权限校验分离」）：本模块只做路径计算与判别，不做
 // IO——存在性经 exists 端口注入（vscode 层传 fs.stat 适配；#197 引用
 // 索引可换传索引查询，#199/#200 重命名规划共用同一解析器，不建重复
-// 实现）。本模块不依赖 vscode/DOM（node 单测直驱）。
+// 实现；#556 短名补查经 lookupShortname 端口注入，跳转/悬停传索引查询
+// 端口、索引侧传 catalog 查询——实现在一处，各消费方注入）。本模块
+// 不依赖 vscode/DOM（node 单测直驱）。
 import * as path from 'node:path'
 
 /** 路径解析上下文（宿主文件系统语义由注入方描述） */
@@ -48,6 +66,13 @@ export interface VaultLinkPlanOptions {
 /** 路径规划结果（纯路径计算，无 IO） */
 export type VaultLinkPathPlan =
   | { kind: 'inside'; /** 按优先序的候选绝对 fsPath */ candidates: string[] }
+  | {
+      /** 显式绝对路径（#556）：Windows 宿主盘符形态 / POSIX 宿主根路径——
+       *  不接 docDir、不受 rootDir 边界（允许跨根与工作区外目标） */
+      kind: 'absolute'
+      /** 按优先序的候选绝对 fsPath（扩展名规则与 inside 一致） */
+      candidates: string[]
+    }
   | { kind: 'escape'; /** 越界时的目标原文 */ detail: string }
 
 /** 存在性探测端口：返回目标**真实路径**（存在；Windows 宿主须做大小写
@@ -59,8 +84,73 @@ export type VaultLinkExistsPort = (fsPath: string) => string | null | Promise<st
 
 /** 存在性解析上下文（跳转链路用：含无工作区判定） */
 export interface VaultLinkResolveContext extends VaultLinkPathContext {
-  /** 来源文档是否属于某个工作区文件夹（未打开文件夹时为 false——双链不猜测目标） */
+  /** 来源文档是否属于某个工作区文件夹（未打开文件夹时为 false——双链不猜测目标；
+   *  显式绝对路径不受此限：无工作区也独立解析） */
   hasWorkspace: boolean
+}
+
+/** 短名补查端口结果（#556）：candidates 为端口给定形态——宿主接线层
+ *  （textEditorProvider.shortnameLookupOf）消费索引 `/` 身份域时转换为
+ *  宿主 fsPath（打开/日志/提示场合；vaultIdentityToFsPath），索引内部
+ *  消费（抽取/重判）保持身份域；resolve 不做二次探测。complete 表示
+ *  端口的文件清单是否完整——不完整时唯一候选不得声明唯一（pending）。 */
+export interface VaultLinkShortnameLookupResult {
+  candidates: string[]
+  complete: boolean
+}
+
+/** 短名补查端口（#556）：按完整 basename（含扩展名）查来源所属根内未被
+ *  排除的 Markdown。零 IO 原则的延续——端口由消费方注入（跳转/悬停传
+ *  索引查询，索引侧传 catalog 查询；**禁止点击时全库 fs 扫描**）。 */
+export type VaultLinkShortnamePort = (
+  basename: string,
+) => VaultLinkShortnameLookupResult | Promise<VaultLinkShortnameLookupResult>
+
+/**
+ * 短名补查域判定与查询键（#556 T2 抽取为同步纯函数）：目标归一后**仅含
+ * 文件名**（无分隔符）且属 Markdown 语义（显式 `.md` 或省略扩展名的
+ * implicitMd）时在补查域内，返回查询键（完整 basename，无扩展名补
+ * `.md`）；含分隔符的明确相对路径、非 Markdown 扩展、`implicitMd=false`
+ * 与空路径不在补查域（返回 null）。resolveVaultLinkFile（跳转/悬停）与
+ * extractVaultEdges（索引抽取）共用——补查域形态学的单一事实源，不在
+ * 消费方各自内联复制。
+ */
+export function shortnameLookupKeyOf(
+  rawPath: string,
+  ctx: VaultLinkPathContext,
+  options?: VaultLinkPlanOptions,
+): string | null {
+  const normalized = (ctx.isWindowsHost ? rawPath.replace(/\\/g, '/') : rawPath).trim()
+  if (normalized === '' || normalized.includes('/')) {
+    return null
+  }
+  const ext = path.posix.extname(normalized)
+  const markdownIntent = ext === '.md' || (ext === '' && (options?.implicitMd ?? true))
+  if (!markdownIntent) {
+    return null
+  }
+  return ext === '' ? `${normalized}.md` : normalized
+}
+
+/**
+ * 短名补查结果映射（#556 T2 抽取为同步纯函数）：0 候选 not-found、多候选
+ * ambiguous（无论清单是否完整，不归任一候选）、唯一且完整 target（端口
+ * 给定的端口形态）、唯一但不完整 pending（不声明唯一）。与
+ * resolveVaultLinkFile 的补查分支同一决策——索引抽取（同步）与跳转解析
+ * （异步）共用，结果形态不因消费方分叉。
+ */
+export function shortnameLookupResolution(
+  found: VaultLinkShortnameLookupResult,
+): Extract<VaultLinkFileResolution, { kind: 'target' | 'not-found' | 'ambiguous' | 'pending' }> {
+  if (found.candidates.length === 0) {
+    return { kind: 'not-found' }
+  }
+  if (found.candidates.length > 1) {
+    return { kind: 'ambiguous', candidates: found.candidates }
+  }
+  return found.complete
+    ? { kind: 'target', fsPath: found.candidates[0]! }
+    : { kind: 'pending' }
 }
 
 /** 存在性解析结果（vscode 层按 kind 分派：打开/提示） */
@@ -69,12 +159,27 @@ export type VaultLinkFileResolution =
   | { kind: 'not-found' }
   | { kind: 'escape'; detail: string }
   | { kind: 'no-workspace' }
+  | {
+      /** 多个同名候选（#556）：不归任一候选，消费方提示补路径 */
+      kind: 'ambiguous'
+      /** 端口给定的候选路径（提示补路径用，不猜目标；形态随端口实现域） */
+      candidates: string[]
+    }
+  | {
+      /** 清单未完整且只发现一个候选（#556）：不声明唯一，显示更新中状态 */
+      kind: 'pending'
+    }
 
 /** 按注入语义选择路径实现：Windows/POSIX 分类不得依赖运行进程的平台
  *  （在 Windows 上跑单测也必须能验 POSIX 远程语义，反之亦然） */
 function pathOps(ctx: VaultLinkPathContext) {
   return ctx.isWindowsHost ? path.win32 : path.posix
 }
+
+/** Windows 盘符绝对路径（归一后 `X:/…` 形态）。`X:` 后必须跟分隔符——
+ *  裸 `X:` 前缀（如 `d:目标`）是「盘内当前目录相对」的 Win32 怪语义，
+ *  不按绝对处理，维持相对解析口径 */
+const WINDOWS_DRIVE_ABSOLUTE_RE = /^[a-zA-Z]:\//
 
 /** absolute 是否位于 root 内（含 root 本身）。`..foo.md` 是同级合法
  *  文件名，粗判 startsWith('..') 会误判越界——须用 relative 精确判定 */
@@ -106,16 +211,29 @@ export function isVaultPathInsideRoot(absolute: string, ctx: VaultLinkPathContex
   return isInsideRoot(absolute, ctx.rootDir, ops)
 }
 
+/** 扩展名候选（absolute 与 inside 同一规则）：显式扩展名单候选精确
+ *  解析；无扩展名且 implicitMd 时候选 [精确, 精确.md]（不产生 x.pdf.md） */
+function candidatesOf(
+  base: string,
+  ops: ReturnType<typeof pathOps>,
+  implicitMd: boolean,
+): string[] {
+  return ops.extname(base) ? [base] : implicitMd ? [base, `${base}.md`] : [base]
+}
+
 /**
- * 规划根内相对目标的候选绝对路径（纯路径计算，无 IO）。
+ * 规划目标的候选绝对路径（纯路径计算，无 IO）。
  *
  * 输入 rawPath 为**已解码**的路径文本（percent-decode、fragment/query
  * 剥除由调用方完成——双链形态学 path 部分原样、普通链接先容错解码）；
  * 本函数负责 trim、分隔符归一（仅 Windows 宿主）、docDir 基准拼接、
  * 越界判别与扩展名候选。
  *
- * 空路径与越出 rootDir 一律 escape（无可定位目标，与 #10 普通链接的
- * blocked(escape) 同口径）。
+ * 显式绝对路径（#556）：Windows 宿主盘符形态与 POSIX 宿主根路径归
+ * absolute——不接 docDir、不受 rootDir 边界（扩展名候选规则与 inside
+ * 一致）。UNC 形态不属此类（越出本地根 escape、UNC 根内照常 inside）；
+ * 空路径与越出 rootDir 的相对路径一律 escape（无可定位目标，与 #10
+ * 普通链接的 blocked(escape) 同口径）。
  */
 export function planVaultLinkPath(
   rawPath: string,
@@ -130,21 +248,32 @@ export function planVaultLinkPath(
     return { kind: 'escape', detail: rawPath }
   }
   const ops = pathOps(ctx)
+  if (ctx.isWindowsHost ? WINDOWS_DRIVE_ABSOLUTE_RE.test(p) : p.startsWith('/')) {
+    return { kind: 'absolute', candidates: candidatesOf(ops.resolve(p), ops, implicitMd) }
+  }
   const base = ops.resolve(ctx.docDir, p)
   if (!isInsideRoot(base, ctx.rootDir, ops)) {
     return { kind: 'escape', detail: rawPath }
   }
-  const candidates = ops.extname(base) ? [base] : implicitMd ? [base, `${base}.md`] : [base]
-  return { kind: 'inside', candidates }
+  return { kind: 'inside', candidates: candidatesOf(base, ops, implicitMd) }
 }
 
 /**
- * 解析根内相对目标的文件存在性（跳转链路入口）。
+ * 解析目标的文件存在性（跳转链路入口）。
  *
- * 无工作区 → no-workspace（不猜测目标，维持双链既有边界）；空目标 →
- * not-found（双链本文件锚点在形态学层已分流，此处防御）；其余经
- * {@link planVaultLinkPath} 规划候选后按优先序探测，取首个存在者的
+ * 显式绝对路径（#556）先于一切判定独立解析——无工作区也成立，候选按
+ * 优先序探测取首个存在者的真实路径；绝对路径不做短名补查。
+ *
+ * 相对目标：无工作区 → no-workspace（不猜测目标，维持双链既有边界）；
+ * 空目标 → not-found（双链本文件锚点在形态学层已分流，此处防御）；其余
+ * 经 {@link planVaultLinkPath} 规划候选后按优先序探测，取首个存在者的
  * **真实路径**（端口归正后形态）作为 target。
+ *
+ * 短名补查（#556）：inside 全候选未命中、路径仅含文件名（归一后无分隔
+ * 符）且注入 lookupShortname 端口时，按完整 basename（无扩展名的双链
+ * 语义补 `.md` 作查询键）查所属根内唯一同名 Markdown——0 候选 not-found、
+ * 多候选 ambiguous、唯一但清单不完整 pending、唯一且完整 target（端口
+ * 的端口形态，不做二次探测）。端口不注入时补查不存在。
  * 大小写语义由 exists 端口的宿主文件系统裁决（见模块头注释）。
  */
 export async function resolveVaultLinkFile(
@@ -152,14 +281,24 @@ export async function resolveVaultLinkFile(
   ctx: VaultLinkResolveContext,
   exists: VaultLinkExistsPort,
   options?: VaultLinkPlanOptions,
+  lookupShortname?: VaultLinkShortnamePort,
 ): Promise<VaultLinkFileResolution> {
+  const plan = planVaultLinkPath(rawPath, ctx, options)
+  if (plan.kind === 'absolute') {
+    for (const candidate of plan.candidates) {
+      const realPath = await exists(candidate)
+      if (realPath !== null) {
+        return { kind: 'target', fsPath: realPath }
+      }
+    }
+    return { kind: 'not-found' }
+  }
   if (!ctx.hasWorkspace) {
     return { kind: 'no-workspace' }
   }
   if (rawPath.trim() === '') {
     return { kind: 'not-found' }
   }
-  const plan = planVaultLinkPath(rawPath, ctx, options)
   if (plan.kind === 'escape') {
     return { kind: 'escape', detail: plan.detail }
   }
@@ -167,6 +306,14 @@ export async function resolveVaultLinkFile(
     const realPath = await exists(candidate)
     if (realPath !== null) {
       return { kind: 'target', fsPath: realPath }
+    }
+  }
+  // 短名补查：域判定与结果映射经 shortnameLookupKeyOf / shortnameLookupResolution
+  // （与索引抽取共用的同步单一事实源）
+  if (lookupShortname !== undefined) {
+    const key = shortnameLookupKeyOf(rawPath, ctx, options)
+    if (key !== null) {
+      return shortnameLookupResolution(await lookupShortname(key))
     }
   }
   return { kind: 'not-found' }

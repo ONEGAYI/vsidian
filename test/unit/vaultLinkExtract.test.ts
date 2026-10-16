@@ -3,30 +3,35 @@
 // 字面量与 frontmatter——抽取规则与 live 装饰（liveLinks）同源：树驱动走
 // markdownTreeParser 同一解析器，行扫描走 shared/wikilink 与 shared/looseLink
 // 同一形态学。差异（引用式使用形态不单独产边等）在对应用例注释钉住。
-import { describe, expect, it } from 'vitest'
+//
+// #556 T2 起 resolvedTarget 为**规范绝对身份**（磁盘真实形态、`/` 分隔）
+// ——断言全按绝对形态书写；短名补查与显式绝对路径目标的抽取契约在文末
+// 两 describe（补查域形态学复用 vaultLink 的单一事实源，不在本文件复制）。
+import { describe, expect, it, vi } from 'vitest'
 import * as path from 'node:path'
-import { extractVaultEdges } from '../../src/host/vaultLinkExtract'
+import { extractVaultEdges, shortnameDepKeyOf } from '../../src/host/vaultLinkExtract'
 import type { VaultLinkPathContext } from '../../src/shared/vaultLink'
 
 /** 根内文件集合（相对路径 / 分隔，真实大小写形态）→ resolver：绝对 fsPath
- *  先转根内相对（宿主平台语义）再查集合，命中返回根内相对规范路径，未命中
- *  null（与宿主服务的存在性端口同型） */
+ *  先转根内相对（宿主平台语义）再查集合，命中返回**规范绝对身份**，未命中
+ *  null（与宿主服务的存在性端口同型——#556 T2 起端口返回绝对身份） */
 function resolverOf(files: readonly string[], ctx: VaultLinkPathContext): (abs: string) => string | null {
   const ops = ctx.isWindowsHost ? path.win32 : path.posix
   const norm = (p: string): string => ops.relative(ops.resolve(ctx.rootDir), ops.resolve(p)).replace(/\\/g, '/')
+  const identity = (rel: string): string => ops.resolve(ops.resolve(ctx.rootDir), ...rel.split('/')).replace(/\\/g, '/')
   const insensitive = ctx.isWindowsHost
   const set = new Map<string, string>()
   for (const f of files) {
     const key = insensitive ? f.toLowerCase() : f
     set.set(key, f)
   }
-  return (abs: string) => {
+  return (abs) => {
     const rel = norm(abs)
     if (rel.startsWith('..')) {
       return null
     }
     const hit = set.get(insensitive ? rel.toLowerCase() : rel)
-    return hit ?? null
+    return hit !== undefined ? identity(hit) : null
   }
 }
 
@@ -35,6 +40,9 @@ const CTX: VaultLinkPathContext = {
   rootDir: 'C:/vault',
   isWindowsHost: true,
 }
+
+/** 断言用规范绝对身份形态（rootDir + rel，/ 分隔） */
+const ABS = (rel: string): string => `C:/vault/${rel}`
 
 /** Windows 宿主形态的文件集合（正斜杠书写，与 CTX 分隔符一致） */
 const FILES = [
@@ -46,14 +54,14 @@ const FILES = [
 ]
 
 describe('extractVaultEdges：双链', () => {
-  it('同目录短名、显式子路径、别名与标题/块锚均产边（resolvedTarget 为根内相对真实路径）', () => {
+  it('同目录短名、显式子路径、别名与标题/块锚均产边（resolvedTarget 为规范绝对身份）', () => {
     const text = '见 [[设计]] 与 [[项目甲/设计|别名]] 与 [[目标笔记#深处标题]] 与 [[目标笔记#^blk-1]]。\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget, e.anchor])).toEqual([
-      ['wikilink', '设计', 'notes/设计.md', ''],
-      ['wikilink', '项目甲/设计', 'notes/项目甲/设计.md', ''],
-      ['wikilink', '目标笔记', 'notes/目标笔记.md', '深处标题'],
-      ['wikilink', '目标笔记', 'notes/目标笔记.md', '^blk-1'],
+      ['wikilink', '设计', ABS('notes/设计.md'), ''],
+      ['wikilink', '项目甲/设计', ABS('notes/项目甲/设计.md'), ''],
+      ['wikilink', '目标笔记', ABS('notes/目标笔记.md'), '深处标题'],
+      ['wikilink', '目标笔记', ABS('notes/目标笔记.md'), '^blk-1'],
     ])
   })
 
@@ -66,11 +74,11 @@ describe('extractVaultEdges：双链', () => {
     ])
   })
 
-  it('本文件锚点（path 空）产自引用边（resolvedTarget=来源自身）', () => {
+  it('本文件锚点（path 空）产自引用边（resolvedTarget=来源自身绝对身份）', () => {
     const text = '页内 [[#本节标题]] 引用。\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges).toHaveLength(1)
-    expect(edges[0]).toMatchObject({ kind: 'wikilink', resolvedTarget: 'notes/源.md', anchor: '本节标题' })
+    expect(edges[0]).toMatchObject({ kind: 'wikilink', resolvedTarget: ABS('notes/源.md'), anchor: '本节标题' })
   })
 
   it('降级形态不产边（嵌入产边语义 #222 起迁移——详见嵌入 describe；此处只钉降级）', () => {
@@ -84,9 +92,9 @@ describe('extractVaultEdges：普通内联链接与图片', () => {
     const text = '[文内](./设计.md) 与 [编码](./%E7%9B%AE%E6%A0%87%E7%AC%94%E8%AE%B0.md) 与 [锚点](./设计.md#结论)。\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget, e.anchor])).toEqual([
-      ['mdlink', './设计.md', 'notes/设计.md', ''],
-      ['mdlink', './%E7%9B%AE%E6%A0%87%E7%AC%94%E8%AE%B0.md', 'notes/目标笔记.md', ''],
-      ['mdlink', './设计.md#结论', 'notes/设计.md', '结论'],
+      ['mdlink', './设计.md', ABS('notes/设计.md'), ''],
+      ['mdlink', './%E7%9B%AE%E6%A0%87%E7%AC%94%E8%AE%B0.md', ABS('notes/目标笔记.md'), ''],
+      ['mdlink', './设计.md#结论', ABS('notes/设计.md'), '结论'],
     ])
   })
 
@@ -94,8 +102,8 @@ describe('extractVaultEdges：普通内联链接与图片', () => {
     const text = '[省略](./目标笔记) 与 [显式](./文档.pdf)。\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.map((e) => [e.target, e.resolvedTarget])).toEqual([
-      ['./目标笔记', 'notes/目标笔记.md'],
-      ['./文档.pdf', 'notes/文档.pdf'],
+      ['./目标笔记', ABS('notes/目标笔记.md')],
+      ['./文档.pdf', ABS('notes/文档.pdf')],
     ])
   })
 
@@ -104,7 +112,7 @@ describe('extractVaultEdges：普通内联链接与图片', () => {
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.map((e) => [e.target, e.resolvedTarget, e.anchor])).toEqual([
       ['https://example.com/a#b', null, ''],
-      ['#本节', 'notes/源.md', '本节'],
+      ['#本节', ABS('notes/源.md'), '本节'],
     ])
   })
 
@@ -112,7 +120,7 @@ describe('extractVaultEdges：普通内联链接与图片', () => {
     const text = '![好图](./assets/图片%20一.png) 与 ![断图](./assets/缺失.png)。\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget])).toEqual([
-      ['image', './assets/图片%20一.png', 'notes/assets/图片 一.png'],
+      ['image', './assets/图片%20一.png', ABS('notes/assets/图片 一.png')],
       ['image', './assets/缺失.png', null],
     ])
   })
@@ -130,7 +138,7 @@ describe('extractVaultEdges：引用式定义与宽松链接', () => {
     const text = '段落。\n\n[r1]: ./设计.md "标题"\n\n[r2]: https://example.com/x\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget])).toEqual([
-      ['refdef', './设计.md', 'notes/设计.md'],
+      ['refdef', './设计.md', ABS('notes/设计.md')],
       ['refdef', 'https://example.com/x', null],
     ])
   })
@@ -147,8 +155,8 @@ describe('extractVaultEdges：引用式定义与宽松链接', () => {
     const files = [...FILES, 'notes/设计 备份.md', 'notes/assets/图 片.png']
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(files, CTX))
     expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget])).toEqual([
-      ['mdlink', './设计 备份.md', 'notes/设计 备份.md'],
-      ['image', './assets/图 片.png', 'notes/assets/图 片.png'],
+      ['mdlink', './设计 备份.md', ABS('notes/设计 备份.md')],
+      ['image', './assets/图 片.png', ABS('notes/assets/图 片.png')],
     ])
   })
 
@@ -156,7 +164,7 @@ describe('extractVaultEdges：引用式定义与宽松链接', () => {
     const text = '[编码空格](./assets/%E5%9B%BE%E7%89%87%20%E4%B8%80.png)。\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges).toHaveLength(1)
-    expect(edges[0]).toMatchObject({ kind: 'mdlink', resolvedTarget: 'notes/assets/图片 一.png' })
+    expect(edges[0]).toMatchObject({ kind: 'mdlink', resolvedTarget: ABS('notes/assets/图片 一.png') })
   })
 })
 
@@ -207,7 +215,7 @@ describe('extractVaultEdges：POSIX 宿主语义', () => {
     const resolve = resolverOf(files, posixCtx)
     // Windows 分隔符写法在 POSIX 宿主上不解析（与 #196 跳转链路同语义）
     const edges = extractVaultEdges('notes/源.md', '[[设计]] 与 [b](a.md)。\n', posixCtx, resolve)
-    expect(edges.map((e) => e.resolvedTarget)).toEqual(['notes/设计.md', 'notes/a.md'])
+    expect(edges.map((e) => e.resolvedTarget)).toEqual(['/vault/notes/设计.md', '/vault/notes/a.md'])
     const edgesCase = extractVaultEdges('notes/源.md', '[[设计.MD]]。\n', posixCtx, resolve)
     expect(edgesCase[0]!.resolvedTarget).toBeNull()
   })
@@ -222,7 +230,7 @@ describe('extractVaultEdges：嵌入（#222 独立扫描器接入）', () => {
     expect(embed).toMatchObject({
       source: 'notes/源.md',
       target: '设计',
-      resolvedTarget: 'notes/设计.md',
+      resolvedTarget: ABS('notes/设计.md'),
       anchor: '',
       start: text.indexOf('![[设计]]'),
       end: text.indexOf('![[设计]]') + '![[设计]]'.length,
@@ -250,7 +258,7 @@ describe('extractVaultEdges：嵌入（#222 独立扫描器接入）', () => {
     const text = '![[assets/图片 一.png]]\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.filter((e) => e.kind === 'embed').map((e) => e.resolvedTarget))
-      .toEqual(['notes/assets/图片 一.png'])
+      .toEqual([ABS('notes/assets/图片 一.png')])
   })
 
   it('断链/越界/本文件锚点嵌入：断链保留边、本文件锚点自引用', () => {
@@ -260,7 +268,7 @@ describe('extractVaultEdges：嵌入（#222 独立扫描器接入）', () => {
       // 本文件锚点与双链同构：path 空串 + anchor 拆列，resolved 自引用
       ['不存在的目标', '', null],
       ['../设计', '', null], // 越出所属根（notes/../设计 落根外解析失败为断链形态）
-      ['', '本文件锚', 'notes/源.md'],
+      ['', '本文件锚', ABS('notes/源.md')],
     ])
   })
 
@@ -292,10 +300,10 @@ describe('#246 混排嵌入边与注释排除（呈现同源核对）', () => {
     const text = '前文 ![[设计]] 后文\n- 项 ![[目标笔记]] 余\n> 引 ![[项目甲/设计]] 文\n- [ ] 任务 ![[设计]] 毕\n'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
     expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget])).toEqual([
-      ['embed', '设计', 'notes/设计.md'],
-      ['embed', '目标笔记', 'notes/目标笔记.md'],
-      ['embed', '项目甲/设计', 'notes/项目甲/设计.md'],
-      ['embed', '设计', 'notes/设计.md'],
+      ['embed', '设计', ABS('notes/设计.md')],
+      ['embed', '目标笔记', ABS('notes/目标笔记.md')],
+      ['embed', '项目甲/设计', ABS('notes/项目甲/设计.md')],
+      ['embed', '设计', ABS('notes/设计.md')],
     ])
     for (const e of edges) {
       expect(text.slice(e.start, e.end)).toBe(`![[${e.target}]]`)
@@ -332,7 +340,7 @@ describe('#248 表格格内嵌入边（转义映射保真）', () => {
     const embed = edges.find((e) => e.kind === 'embed')
     expect(embed).toBeDefined()
     expect(embed!.target).toBe('设计')
-    expect(embed!.resolvedTarget).toBe('notes/设计.md')
+    expect(embed!.resolvedTarget).toBe(ABS('notes/设计.md'))
     expect(embed!.anchor).toBe('')
     // 区间 slice 回源文恰为嵌入原文（含 \\|）
     expect(text.slice(embed!.start, embed!.end)).toBe('![[设计\\|别名]]')
@@ -380,5 +388,158 @@ describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的嵌入边端�
     expect(embed!.target).toBe('设计')
     expect(text.slice(embed!.start, embed!.end)).toBe('![[设计]]')
     expect(text[embed!.end]).toBe('\\')
+  })
+})
+
+describe('#556 T2：短名补查（端口注入时纯文件名 Markdown 目标接通）', () => {
+  /** 补查端口工厂：basename → 候选绝对形态（磁盘真实形态语义） */
+  const lookupOf = (byName: Record<string, string[]>, complete = true) => {
+    const spy = vi.fn((basename: string) => ({ candidates: byName[basename] ?? [], complete }))
+    return spy
+  }
+
+  it('相对候选全未命中且根内唯一同名 Markdown：命中该目标（端口给定的绝对形态）', () => {
+    const lookup = lookupOf({ '目标.md': [ABS('资料/目标.md')] })
+    const text = '见 [[目标]]。\n'
+    const edges = extractVaultEdges('项目/来源.md', text, {
+      docDir: 'C:/vault/项目',
+      rootDir: 'C:/vault',
+      isWindowsHost: true,
+    }, resolverOf(['项目/来源.md'], CTX), { lookupShortname: lookup })
+    expect(edges.map((e) => [e.target, e.resolvedTarget])).toEqual([['目标', ABS('资料/目标.md')]])
+    expect(lookup).toHaveBeenCalledWith('目标.md')
+  })
+
+  it('多个候选不归任一：resolvedTarget=null（与断链共用 null，不猜目标）', () => {
+    const lookup = lookupOf({ '目标.md': [ABS('资料/目标.md'), ABS('归档/目标.md')] })
+    const text = '见 [[目标]]。\n'
+    const edges = extractVaultEdges('项目/来源.md', text, {
+      docDir: 'C:/vault/项目', rootDir: 'C:/vault', isWindowsHost: true,
+    }, resolverOf(['项目/来源.md'], CTX), { lookupShortname: lookup })
+    expect(edges[0]!.resolvedTarget).toBeNull()
+  })
+
+  it('唯一候选但清单不完整（pending 语义）：不声明唯一，边为 null', () => {
+    const lookup = lookupOf({ '目标.md': [ABS('资料/目标.md')] }, false)
+    const text = '见 [[目标]]。\n'
+    const edges = extractVaultEdges('项目/来源.md', text, {
+      docDir: 'C:/vault/项目', rootDir: 'C:/vault', isWindowsHost: true,
+    }, resolverOf(['项目/来源.md'], CTX), { lookupShortname: lookup })
+    expect(edges[0]!.resolvedTarget).toBeNull()
+  })
+
+  it('相对优先：同目录候选命中时不触发补查（端口不被调用）', () => {
+    const lookup = lookupOf({ '设计.md': [ABS('notes/设计.md')] })
+    const text = '见 [[设计]]。\n'
+    extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX), { lookupShortname: lookup })
+    expect(lookup).not.toHaveBeenCalled()
+  })
+
+  it('含分隔符的明确相对路径不补查（./ ../ 与子路径——端口不被调用）', () => {
+    const lookup = lookupOf({ '目标.md': [ABS('资料/目标.md')] })
+    const text = '见 [[./目标]] 与 [[资料/目标]]。\n'
+    const edges = extractVaultEdges('项目/来源.md', text, {
+      docDir: 'C:/vault/项目', rootDir: 'C:/vault', isWindowsHost: true,
+    }, resolverOf(['项目/来源.md'], CTX), { lookupShortname: lookup })
+    expect(lookup).not.toHaveBeenCalled()
+    // ./目标 与 资料/目标 都按来源目录解析（C:/vault/项目/目标(.md) 与
+    // C:/vault/项目/资料/目标(.md)）——两者都不在磁盘上，断链保留
+    expect(edges.map((e) => e.resolvedTarget)).toEqual([null, null])
+  })
+
+  it('显式 .md 短名查询键原样；mdlink 纯文件名同口径补查；image 不补查', () => {
+    const lookup = lookupOf({ '目标.md': [ABS('资料/目标.md')] })
+    const text = '见 [[目标.md]] 与 [链](目标) 与 ![图](目标)。\n'
+    const edges = extractVaultEdges('项目/来源.md', text, {
+      docDir: 'C:/vault/项目', rootDir: 'C:/vault', isWindowsHost: true,
+    }, resolverOf(['项目/来源.md'], CTX), { lookupShortname: lookup })
+    expect(edges.map((e) => [e.kind, e.resolvedTarget])).toEqual([
+      ['wikilink', ABS('资料/目标.md')],
+      ['mdlink', ABS('资料/目标.md')],
+      ['image', null], // 非 Markdown 不跨目录补查（implicitMd=false）
+    ])
+    expect(lookup).toHaveBeenCalledTimes(2)
+  })
+
+  it('端口不注入时纯文件名目标维持断链（上游兼容——与现状一致）', () => {
+    const text = '见 [[目标]]。\n'
+    const edges = extractVaultEdges('项目/来源.md', text, {
+      docDir: 'C:/vault/项目', rootDir: 'C:/vault', isWindowsHost: true,
+    }, resolverOf(['项目/来源.md', '资料/目标.md'], CTX))
+    expect(edges[0]!.resolvedTarget).toBeNull()
+  })
+})
+
+describe('#556 T2：显式绝对路径目标（跨根/工作区外经 resolveAbsolute 端口）', () => {
+  /** 绝对端口：根内文件与外部文件统一命中（返回磁盘真实绝对形态） */
+  const absolutePortOf = (extra: readonly string[] = []) => (abs: string): string | null => {
+    const identity = path.win32.resolve(abs).replace(/\\/g, '/')
+    const all = [...FILES.map((f) => ABS(f)), ...extra]
+    const hit = all.find((f) => f.toLowerCase() === identity.toLowerCase())
+    return hit ?? null
+  }
+
+  it('盘符绝对 wikilink 命中根内目标（不受 docDir/rootDir 边界）', () => {
+    const text = '见 [[C:/vault/notes/设计.md]]。\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX), {
+      resolveAbsolute: absolutePortOf(),
+    })
+    expect(edges.map((e) => [e.target, e.resolvedTarget])).toEqual([
+      ['C:/vault/notes/设计.md', ABS('notes/设计.md')],
+    ])
+  })
+
+  it('绝对目标无扩展名补 .md 候选（与 inside 同规则）', () => {
+    const text = '见 [[C:/vault/notes/设计]]。\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX), {
+      resolveAbsolute: absolutePortOf(),
+    })
+    expect(edges[0]!.resolvedTarget).toBe(ABS('notes/设计.md'))
+  })
+
+  it('工作区外目标经绝对端口命中（登记语义在服务侧，抽取只产边）', () => {
+    const text = '见 [[D:/outside/目标.md]] 与 [链](D:/outside/目标.md) 与 ![图](D:/outside/图.png)。\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX), {
+      resolveAbsolute: absolutePortOf(['D:/outside/目标.md', 'D:/outside/图.png']),
+    })
+    expect(edges.map((e) => [e.kind, e.resolvedTarget])).toEqual([
+      ['wikilink', 'D:/outside/目标.md'],
+      ['mdlink', 'D:/outside/目标.md'],
+      ['image', 'D:/outside/图.png'],
+    ])
+  })
+
+  it('mdlink 绝对目标带锚点：anchor 拆列保留', () => {
+    const text = '见 [链](D:/outside/目标.md#结论)。\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX), {
+      resolveAbsolute: absolutePortOf(['D:/outside/目标.md']),
+    })
+    expect(edges[0]).toMatchObject({ kind: 'mdlink', resolvedTarget: 'D:/outside/目标.md', anchor: '结论' })
+  })
+
+  it('resolveAbsolute 缺省回落主端口：外部目标恒 miss（断链保留）', () => {
+    const text = '见 [[D:/outside/目标.md]]。\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges[0]!.resolvedTarget).toBeNull()
+  })
+})
+
+describe('#556 T2：shortnameDepKeyOf（文件集合变化重判的反查键）', () => {
+  it('纯文件名 Markdown 目标返回补查键（无扩展名补 .md）', () => {
+    expect(shortnameDepKeyOf({ target: '目标', kind: 'wikilink' }, CTX)).toBe('目标.md')
+    expect(shortnameDepKeyOf({ target: '目标.md', kind: 'embed' }, CTX)).toBe('目标.md')
+    expect(shortnameDepKeyOf({ target: '目标', kind: 'mdlink' }, CTX)).toBe('目标.md')
+  })
+
+  it('mdlink/refdef 剥 fragment 与编码后判定（与解析同形态）', () => {
+    expect(shortnameDepKeyOf({ target: '目标#章节', kind: 'mdlink' }, CTX)).toBe('目标.md')
+    expect(shortnameDepKeyOf({ target: './目标', kind: 'refdef' }, CTX)).toBeNull()
+  })
+
+  it('含分隔符、非 Markdown 扩展与 image 边不在重判域', () => {
+    expect(shortnameDepKeyOf({ target: '资料/目标', kind: 'wikilink' }, CTX)).toBeNull()
+    expect(shortnameDepKeyOf({ target: '目标.pdf', kind: 'wikilink' }, CTX)).toBeNull()
+    expect(shortnameDepKeyOf({ target: '图.png', kind: 'image' }, CTX)).toBeNull()
+    expect(shortnameDepKeyOf({ target: '', kind: 'wikilink' }, CTX)).toBeNull()
   })
 })

@@ -16,6 +16,7 @@
 // type import，字典字节不进 webview 产物——settings.ts 被两端共享）
 import type { MessageKey } from './locales/en'
 import { JIEBA_SOURCE_MODES, type JiebaSourceMode } from './jiebaManifest'
+import { WIKILINK_INSERT_PATH_MODES, type WikilinkInsertPathMode } from './wikilinkInsertMode'
 
 /** 协议载荷中的设置值：标量容器（协议层只约束形态，合法性由本模块按定义判定；
  *  放宽数值类型不需要改协议——「整体下发而非逐项布尔」的扩展预留） */
@@ -318,6 +319,20 @@ export const IMAGE_PASTE_LOCATION_KEY = 'image.pasteLocation'
 export const IMAGE_PASTE_LOCATION_MODES = ['same-dir', 'workspace-root', 'relative-to-file'] as const
 export type ImagePasteLocationMode = (typeof IMAGE_PASTE_LOCATION_MODES)[number]
 export const IMAGE_PASTE_LOCATION_DEFAULT: ImagePasteLocationMode = 'same-dir'
+
+/**
+ * #556「内部链接类型」：双链联想确认时插入 `[[ ]]` 的文件路径形态三档。
+ * shortest=尽可能简短（文件名可省 .md → 来源相对 → 绝对，经统一解析器核对，
+ * 唯一性走索引数据面）；relative=基于当前笔记的相对路径（默认，现状风格；
+ * 跨根/外部目标回退绝对保留身份）；absolute=宿主完整路径（Windows 盘符
+ * `/` 分隔）。值域与档位语义的单一事实源在 shared/wikilinkInsertMode
+ * （planWikilinkInsertPath 消费），此处只做键常量与注册。档位由宿主侧
+ * 查询调用点从快照逐次读取传入（即时生效）；不批量转换既有正文。
+ */
+export const LINK_INSERT_PATH_TYPE_KEY = 'link.insertPathType'
+export const LINK_INSERT_PATH_TYPE_MODES = WIKILINK_INSERT_PATH_MODES
+export type LinkInsertPathTypeMode = WikilinkInsertPathMode
+export const LINK_INSERT_PATH_TYPE_DEFAULT: LinkInsertPathTypeMode = 'relative'
 
 /**
  * #298「悬停预览引用文档」总开关：悬停触发引用视图浮层的全域启停。关闭后
@@ -745,6 +760,23 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.embedMaxHeight.title',
     descriptionKey: 'setting.embedMaxHeight.description',
     unit: 'px',
+  },
+  {
+    // #556 内部链接类型（link.* 域 → 「文件与链接」分页「内部链接」组——
+    // indexMaintenanceSettings 的 defsGroups 首组；编辑器页 editorDefs 排除
+    // link. 前缀防重复呈现）：三档枚举，默认 relative（升级后既有插入风格
+    // 零变化）
+    key: LINK_INSERT_PATH_TYPE_KEY,
+    type: 'string',
+    default: LINK_INSERT_PATH_TYPE_DEFAULT,
+    enum: LINK_INSERT_PATH_TYPE_MODES,
+    titleKey: 'setting.linkInsertPathType.title',
+    descriptionKey: 'setting.linkInsertPathType.description',
+    optionLabelKeys: {
+      shortest: 'setting.linkInsertPathTypeShortest',
+      relative: 'setting.linkInsertPathTypeRelative',
+      absolute: 'setting.linkInsertPathTypeAbsolute',
+    },
   },
   // #239 中文分词三件（引擎/下载源/自定义基址）：设置页呈现归编辑器页
   // 「中文分词」委托组（#264 起为编辑器页尾二级组，wordSegmentSettings

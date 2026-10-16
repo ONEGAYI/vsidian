@@ -26,6 +26,12 @@
 // 经 src/shared/vaultLink.ts 的 planVaultLinkPath（双链跳转与后续索引/
 // 重命名共用的同一解析器，不建重复实现）——本模块保留 scheme 白名单、
 // fragment 拆分与容错解码等链接语法层职责。
+//
+// #556 起（ADR-0018）：显式绝对路径（Windows 宿主盘符形态 / POSIX 宿主
+// 根路径）归 absolute 分类——携带候选/fsPath 与 fragment，允许跨根与
+// 工作区外目标，按宿主文件系统解释（Remote SSH 用服务器路径）。Win32
+// 怪 basename（ADS/尾随点）拦截对盘符路径继续适用；UNC 与 POSIX 宿主
+// 上的 Windows 盘符维持拦截（两类 URI 不混用）。
 import * as path from 'node:path'
 import { planVaultLinkPath } from '../shared/vaultLink'
 
@@ -44,6 +50,15 @@ export type LinkTarget =
   | { kind: 'external'; url: string }
   | { kind: 'doc'; candidates: string[]; fragment: string | null }
   | {
+      /** 显式绝对路径目标（#556）：Windows 宿主盘符形态 / POSIX 宿主根路径——
+       *  允许跨根与工作区外，按宿主文件系统解释 */
+      kind: 'absolute'
+      /** 按优先序的候选绝对 fsPath（扩展名规则与 doc 一致） */
+      candidates: string[]
+      /** 结构化锚点（与 doc 同口径，供执行层定位） */
+      fragment: string | null
+    }
+  | {
       /** 本文件锚点目标（#160：`#frag` 省略路径，目标即当前文档） */
       kind: 'anchor'
       /** 容错 percent-decode 后的锚点文本（空串已被拦截） */
@@ -60,6 +75,12 @@ export type LinkTarget =
 /** 图片目标分类结果（webview 只对非 http(s) 图源走宿主通道） */
 export type ImageTarget =
   | { kind: 'workspace'; fsPath: string }
+  | {
+      /** 显式绝对路径图源（#556）：允许跨根与工作区外（加载口径由资源
+       *  服务/localResourceRoots 决定，分类层只负责形态判别） */
+      kind: 'absolute'
+      fsPath: string
+    }
   | {
       kind: 'blocked'
       reason: 'empty' | 'scheme' | 'escape' | 'windows-drive-on-posix'
@@ -221,7 +242,9 @@ function preClassify(
  * 链接目标分类：external → openExternal（URL 原样含 `#`，网页锚点语义
  * 不接管）；anchor → 本文件锚点目标（#160 页内跳转）；doc → 候选绝对
  * 路径 + 结构化 fragment（存在性由 vscode 层探测，精确优先、无扩展名
- * 其次补 .md；fragment 供执行层定位）；blocked → 用户可见反馈。
+ * 其次补 .md；fragment 供执行层定位）；absolute → 显式绝对路径目标
+ * （#556，候选与 fragment 同 doc 口径，不受资源根边界）；blocked →
+ * 用户可见反馈。
  */
 export function classifyLinkTarget(href: string, ctx: LinkContext): LinkTarget {
   const pre = preClassify(href, ctx)
@@ -236,11 +259,16 @@ export function classifyLinkTarget(href: string, ctx: LinkContext): LinkTarget {
   if (plan.kind === 'escape') {
     return { kind: 'blocked', reason: 'escape', detail: pre.pathText }
   }
+  if (plan.kind === 'absolute') {
+    return { kind: 'absolute', candidates: plan.candidates, fragment }
+  }
   return { kind: 'doc', candidates: plan.candidates, fragment }
 }
 
-/** 图片目标分类：仅工作区内相对路径可经宿主读取；外链/危险 scheme 拦截
- *  （webview 只应对非 http(s) 图源走宿主通道；http(s) 到达此处按拦截防御） */
+/** 图片目标分类：仅工作区内相对路径可经宿主读取；显式绝对路径归
+ *  absolute（#556 允许工作区外图源，形态判别在此、加载口径在资源服务）；
+ *  外链/危险 scheme 拦截（webview 只应对非 http(s) 图源走宿主通道；
+ *  http(s) 到达此处按拦截防御） */
 export function classifyImageTarget(src: string, ctx: LinkContext): ImageTarget {
   const pre = preClassify(src, ctx)
   if (pre.kind === 'external') {
@@ -257,6 +285,9 @@ export function classifyImageTarget(src: string, ctx: LinkContext): ImageTarget 
   const plan = planVaultLinkPath(planPathTextOf(pre.pathText), ctx, { implicitMd: false })
   if (plan.kind === 'escape') {
     return { kind: 'blocked', reason: 'escape', detail: pre.pathText }
+  }
+  if (plan.kind === 'absolute') {
+    return { kind: 'absolute', fsPath: plan.candidates[0]! }
   }
   return { kind: 'workspace', fsPath: plan.candidates[0]! }
 }

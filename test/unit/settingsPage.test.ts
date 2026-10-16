@@ -1296,12 +1296,13 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     [...sectionByTitle(parent, title).querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .map((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ?? '')
 
-  it('页内三组：图片/引用视图标准行组在前，索引维护二级组（分页自有内容）收尾', () => {
+  it('页内四组：内部链接/图片/引用视图标准行组在前，索引维护二级组（分页自有内容）收尾', () => {
     const { parent } = makeFilesView()
     clickNav(parent, zhCn['settings.filesLinksSection'])
     expect(parent.querySelector('.vsidian-settings-heading')?.textContent)
       .toBe(zhCn['settings.filesLinksSection'])
     expect(sectionTitlesOf(parent)).toEqual([
+      zhCn['settings.groupLink'],
       zhCn['settings.groupImage'],
       zhCn['settings.groupRefview'],
       zhCn['indexMaintenance.title'],
@@ -1319,9 +1320,44 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     expect(content!.querySelector('.vsidian-index-patterns')).toBeTruthy()
   })
 
-  it('组标题图标：图片=内联山形相框、引用视图/索引维护=生图资产槽（#332 二轮 pointerLink/dbLink）', () => {
+  it('内部链接组（#556 T5）：三档下拉逐字 zh 文案、默认 relative、变更上送与快照回显', () => {
+    const { view, sent, parent } = makeFilesView()
+    clickNav(parent, zhCn['settings.filesLinksSection'])
+    const group = sectionByTitle(parent, zhCn['settings.groupLink'])
+    const select = group.querySelector<HTMLSelectElement>(
+      `select.${SETTINGS_PAGE_CLASS_NAMES.select}[data-setting-key="link.insertPathType"]`)!
+    expect(select, '内部链接类型应渲染枚举下拉').toBeTruthy()
+    expect([...select.options].map((o) => o.value)).toEqual(['shortest', 'relative', 'absolute'])
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      zhCn['setting.linkInsertPathTypeShortest'],
+      zhCn['setting.linkInsertPathTypeRelative'],
+      zhCn['setting.linkInsertPathTypeAbsolute'],
+    ])
+    expect(select.value).toBe('relative')
+    // 变更上送 settings.set 携带所选档位
+    select.value = 'shortest'
+    select.dispatchEvent(new Event('change'))
+    expect(sent).toContainEqual({
+      kind: 'settings.set',
+      values: { 'link.insertPathType': 'shortest' },
+    })
+    // 快照回显：宿主权威（重开/他窗口改值）更新下拉当前值
+    view.handleHostMessage({ kind: 'settings.snapshot', values: { 'link.insertPathType': 'absolute' } })
+    expect(select.value).toBe('absolute')
+  })
+
+  it('组标题图标：内部链接=内联链环字形、图片=内联山形相框、引用视图/索引维护=生图资产槽（#332 二轮 pointerLink/dbLink）', () => {
     const { parent } = makeFilesView()
     clickNav(parent, zhCn['settings.filesLinksSection'])
+    // #556 T5 内部链接组：内联链环字形（ICON_PATHS 注册表登记的 link 字形）
+    const linkTitle = sectionByTitle(parent, zhCn['settings.groupLink'])
+      .querySelector('.vsidian-settings-group-title')!
+    const linkSvg = linkTitle.querySelector('svg')!
+    expect(linkSvg, '内部链接组标题应带内联字形').toBeTruthy()
+    expect(linkTitle.firstElementChild).toBe(linkSvg)
+    expect(linkSvg.getAttribute('aria-hidden')).toBe('true')
+    expect(linkSvg.querySelector('path')!.getAttribute('d')).toBe(
+      'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71')
     // 图片组仍是内联字形（山形相框）
     const dOf = (title: string) =>
       sectionByTitle(parent, title).querySelector('.vsidian-settings-group-title svg path')!

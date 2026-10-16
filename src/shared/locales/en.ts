@@ -72,6 +72,8 @@ export const en = {
   'wikilinkSuggest.status.blockNotFound': 'Target document not found — type the block reference manually',
   'wikilinkSuggest.status.blockNotMd': 'Target is not a Markdown file — no block candidates',
   'wikilinkSuggest.status.blockReadError': 'Failed to read target document — type the block reference manually',
+  'wikilinkSuggest.status.targetAmbiguous': 'Multiple targets share this name — complete the path to disambiguate',
+  'wikilinkSuggest.status.targetPending': 'Index is updating — same-name targets cannot be confirmed yet',
   'wikilinkSuggest.status.blockAccepting': 'Inserting block ID…',
   'wikilinkSuggest.block.meta': 'line {line} · {count} lines',
   'wikilinkSuggest.toast.blockAcceptFailed': 'Failed to insert the block ID — input kept',
@@ -118,6 +120,8 @@ export const en = {
   'settings.groupCodeblock': 'Code blocks',
   /** Files-and-links page section (moved from editor page in #332): image.* paste settings */
   'settings.groupImage': 'Images',
+  /** Files-and-links page section (#556): link.* internal link generation settings */
+  'settings.groupLink': 'Internal links',
   /** Files-and-links page section (#298 created, moved with the page in #332):
    *  hover.* preview family and embed.* family */
   'settings.groupRefview': 'Reference views',
@@ -369,6 +373,10 @@ export const en = {
   'host.wikilinkNoWorkspace': 'The current document is not in any workspace folder: wikilink targets resolve relative to the source document, so jumping is unavailable with no folder open (the link text is kept)',
   'host.wikilinkNotFound': 'Wikilink target not found: [[{target}]] (resolved relative to the source document directory; files are never created automatically)',
   'host.wikilinkOutsideRoot': 'Wikilink target escapes the owning workspace root: [[{target}]] (relative paths must stay inside their root)',
+  'host.wikilinkAmbiguous': 'Multiple targets share this name: [[{target}]] (add a path to disambiguate; files are never created automatically)',
+  'host.wikilinkPending': 'File catalog is updating: the unique same-name target for [[{target}]] cannot be confirmed yet, please retry shortly',
+  'host.linkAmbiguous': 'Multiple targets share this name: {href} (add a path to disambiguate)',
+  'host.linkPending': 'File catalog is updating: the unique same-name target for {href} cannot be confirmed yet, please retry shortly',
   'host.wikilinkHeadingMissing': 'Opened {link} in the target document, but the heading "{heading}" was not found (heading matching: trimmed, whitespace-collapsed, case-insensitive ATX headings)',
   'host.rejectDiffContext': 'View switching is not supported in diff views',
   'host.rejectPanelNotReady': 'The Vsidian panel is not ready yet; please retry shortly',
@@ -406,15 +414,17 @@ export const en = {
   'host.searchRevealHint': 'Opened from search results? Jump to the selected match here.',
   'host.searchRevealHintLocate': 'Locate',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
+  // #556 T4: targets outside the source root are now rewritten to explicit
+  // absolute paths (no longer a skip reason); the only skip reason left is
+  // edge-stale (content changed)
   'host.renameRefsUpdated': 'Renamed "{file}" and updated {count} reference(s) in {files} file(s).',
-  'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (out of root or content changed) — not fully updated.',
-  'host.renameRefsSkippedAll': 'Renamed "{file}"; references were NOT updated: {skipped} skipped (out of root or content changed).',
+  'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (content changed) — not fully updated.',
+  'host.renameRefsSkippedAll': 'Renamed "{file}"; references were NOT updated: {skipped} skipped (content changed).',
   'host.renameRefsIndexNotReady': 'Renamed "{file}", but the reference index is not ready yet, so references were left unchanged (rebuild the index later from the settings page if needed).',
   // ---- #200 batch/folder moves: skipped-item detail line and reasons ----
   'host.renameRefsSkippedDetail': 'Not updated: {items}',
   'host.renameRefsSkipItem': '{file} ({reason})',
   'host.renameRefsSkipMore': ' … {count}',
-  'host.renameRefsSkipCrossRoot': 'outside its root',
   'host.renameRefsSkipEdgeStale': 'content changed',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
@@ -564,6 +574,8 @@ export const en = {
   'hover.errorNoWorkspace': 'The current document is not in any workspace folder: link targets cannot be resolved for preview',
   'hover.errorEscape': 'The link target escapes the owning workspace root and cannot be previewed',
   'hover.errorNotFound': 'Target not found: {target} (resolved relative to the current document; files are never created automatically)',
+  'hover.errorAmbiguous': 'Multiple targets share this name: {target} (add a path to disambiguate)',
+  'hover.errorPending': 'File catalog is updating, the unique same-name target cannot be confirmed yet: {target}',
   'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
   'hover.errorReadFailed': 'Failed to read the target document',
   'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',
@@ -888,6 +900,13 @@ export const en = {
   'host.imagePasteInvalidLocation': 'Pasted image was not saved: the configured subpath "{subpath}" is invalid (absolute paths and ".." are not allowed).',
   'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
   'host.imagePasteWriteFailed': 'Failed to save the pasted image.',
+
+  // ---- #556 Internal link type (three-mode enum; zh copy is user-given) ----
+  'setting.linkInsertPathType.title': 'Internal link type',
+  'setting.linkInsertPathType.description': 'The kind of file path inserted inside "[[ ]]" when linking to another file from a note.',
+  'setting.linkInsertPathTypeShortest': 'Shortest form whenever possible',
+  'setting.linkInsertPathTypeRelative': 'Relative to the current note',
+  'setting.linkInsertPathTypeAbsolute': 'Absolute file system path',
 
   // ---- #183 统一右键菜单（Live 正文全域接管；块链接两项自 #162 迁入）----
   /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */

@@ -8,6 +8,7 @@ vsidian/
 └── src/ # 扩展源码
     ├── extension.ts # 扩展激活入口
     ├── host/        # 宿主端实现
+    │   ├── absoluteResourceRoots.ts      # 绝对路径资源许可面推导
     │   ├── addonDocNav.ts                # 附加组件文档导航执行
     │   ├── addonHistoryCoordinator.ts    # 附加组件历史协调器
     │   ├── addonHistoryProbe.ts          # V01历史分组宿主探针
@@ -163,6 +164,7 @@ vsidian/
     │   ├── wikilinkBlock.ts           # 块候选纯逻辑（#380 T05）
     │   ├── wikilinkField.ts           # 双链目标字段阶段化识别与编辑计划
     │   ├── wikilinkHeading.ts         # 标题候选枚举与前缀过滤
+    │   ├── wikilinkInsertMode.ts      # 插入路径三档值域单一事实源
     │   ├── wikilinkQuery.ts           # 双链联想查询评分移植
     │   └── wordSegment.ts             # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现

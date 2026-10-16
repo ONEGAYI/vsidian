@@ -17,6 +17,10 @@
 //   （页内锚点不跨文档）；
 // - 根内相对路径 resolveVaultLinkFile（ADR-0008 语义：docDir 基准、越出
 //   所属根拦截、多根互不补查）；外部网页（http/https 等 scheme）不接入；
+// - #556（T3）：纯文件名目标经注入的短名补查端口查所属根内唯一同名
+//   Markdown（多候选/清单未就绪以 ambiguous/pending 分态回传，不冒充
+//   not-found）；显式绝对路径目标独立解析（跨根/工作区外可达）；面板
+//   直供绝对身份越出根时须 stat 核验真实存在（防伪造边界）；
 // - 正文读取 openTextDocument+getText（宿主 TextDocument 是权威事实源，
 //   未保存修改天然可见；不创建每引用 WebviewPanel）；
 // - LF 坐标经 NewlineCoordinator 转换（webview 全程 LF）。
@@ -155,8 +159,10 @@ export interface HoverDocAccessPorts {
   /** #336（P3-04）图片目标的文件状态探测（vscode 层 = workspace.fs.stat）：
    *  文件资源版本（mtimeMs）的来源——图片不是 TextDocument 权威语义，
    *  版本取文件状态；端口缺省（node 单测替身）时 version 为 0（仅回包
-   *  排序基准，图片新鲜度权威在失效通道） */
-  statFile?(fsPath: string): Promise<{ mtimeMs: number } | null>
+   *  排序基准，图片新鲜度权威在失效通道）。#556 收口（P2-6）：isFile
+   *  标记目录身份（directTarget 存在性核验要求文件类型——目录不通过，
+   *  与 PDF 端口三态同口径；缺省 undefined 视为文件——既有桩不破） */
+  statFile?(fsPath: string): Promise<{ mtimeMs: number; isFile?: boolean } | null>
   /** #342（P3-10）外链元信息受限抓取（宿主 WebLinkMetaService 装配；测试
    *  注入替身）。signal 为消费者取消通道（webview 关浮层 → 宿主 abort） */
   fetchWebMeta?(url: string, signal?: AbortSignal): Promise<WebLinkMetaOutcome>
@@ -327,8 +333,29 @@ async function resolveHoverTargetForm(
     // resolveVaultFile 的 escape 拦截天然带界，直供身份在此补同一根内语义
     // （所属根 = 当前文档的 workspaceFolder；索引按根分区、跨根目标不解析，
     // 面板快照身份恒在所属根内，合法条目不受影响）。越界/相对形态归 escape。
+    // #556 T3：显式绝对身份（跨根/工作区外目标）放行——**须真实存在于宿主
+    // FS**（statFile 端口核验；索引登记的外部目标在快照生成时已探测存在，
+    // 伪造的任意路径过不了存在性核验）。端口缺席（纯 Markdown 消费端）无法
+    // 核验，保守维持 escape（P1-1 边界不因缺席而软化）；核验不存在归
+    // not-found（不冒充读取失败）
     if (!isVaultPathInsideRoot(direct.fsPath, ctx.resolve)) {
-      return { ok: false, reason: 'escape' }
+      const ops = ctx.resolve.isWindowsHost ? path.win32 : path.posix
+      if (!ops.isAbsolute(direct.fsPath)) {
+        return { ok: false, reason: 'escape' }
+      }
+      if (ports.statFile === undefined) {
+        return { ok: false, reason: 'escape' }
+      }
+      const stat = await ports.statFile(direct.fsPath).catch(() => null)
+      if (stat === null) {
+        return { ok: false, reason: 'not-found' }
+      }
+      // P2-6（#556 收口）：文件类型核验（与 PDF 端口口径一致）——目录身份
+      // 不通过（面板快照身份恒为文件；目录 stat 成功会以 not-found 回绝，
+      // 不冒充可读取目标）
+      if (stat.isFile === false) {
+        return { ok: false, reason: 'not-found' }
+      }
     }
     return { ok: true, fsPath: direct.fsPath, spec: direct.anchor ? anchorSpecOfFragment(direct.anchor) : null, formKind: 'direct' }
   }
@@ -376,6 +403,11 @@ async function resolveHoverTargetForm(
     if (resolution.kind === 'escape') {
       return { ok: false, reason: 'escape' }
     }
+    // #556 T3 短名补查分态：多候选/清单未就绪不冒充不存在（webview 就地
+    // i18n 呈现提示补路径/更新中）
+    if (resolution.kind === 'ambiguous' || resolution.kind === 'pending') {
+      return { ok: false, reason: resolution.kind }
+    }
     if (resolution.kind === 'not-found') {
       return { ok: false, reason: 'not-found' }
     }
@@ -396,6 +428,11 @@ async function resolveHoverTargetForm(
   }
   if (resolution.kind === 'escape') {
     return { ok: false, reason: 'escape' }
+  }
+  // #556 T3 短名补查分态：多候选/清单未就绪不冒充不存在（与 mdlink 分支
+  // 同口径）
+  if (resolution.kind === 'ambiguous' || resolution.kind === 'pending') {
+    return { ok: false, reason: resolution.kind }
   }
   if (resolution.kind === 'not-found') {
     return { ok: false, reason: 'not-found' }
@@ -625,13 +662,20 @@ export async function readRefContentTarget(
   // 相对化而回退绝对路径（#346 修复轮 2 回归钉子见 hoverDocAccessPlatform.test.ts）
   const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
   const dirnameOf = ctx.resolve.isWindowsHost ? path.win32.dirname : path.posix.dirname
+  /** 平台语义的 resolve + `/` 归一（绝对图源形态——webview 侧图片解析按
+   *  宿主语义归一反斜杠，此处统一 `/` 形态保证两端稳定往返） */
+  const opsResolve = (isWindowsHost: boolean, fsPath: string): string =>
+    (isWindowsHost ? path.win32.resolve(fsPath) : path.posix.resolve(fsPath)).replace(/\\/g, '/')
   const relPath = relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/')
   if (kind === 'image') {
     // #336（P3-04）image 分派登记：图源 = 解析出的规范 fsPath 相对**来源
     // 文档目录**（ctx.sourceFsPath 的父目录——链接所在文档；webview 以面
     // 板文档身份发非来源化 image.request，同一基准解析回同一目标）。stat
     // 端口给出文件资源版本（mtimeMs）；探测失败不构成读取失败（版本退 0
-    // ——排序基准缺失优于误报错误；图片存在性已由 resolveVaultFile 证实）
+    // ——排序基准缺失优于误报错误；图片存在性已由 resolveVaultFile 证实）。
+    // #556 T3：越出所属根的目标（显式绝对/跨根）图源改用**绝对形态**——
+    // 相对 ../ 形态会被 webview 侧图片解析的根内边界（classifyImageTarget
+    // 的 escape 拦截）误伤，绝对形态走 #556 absolute 分类照常装载
     let version = 0
     if (ports.statFile !== undefined) {
       const stat = await ports.statFile(resolution.fsPath).catch(() => null)
@@ -639,13 +683,18 @@ export async function readRefContentTarget(
         version = stat.mtimeMs
       }
     }
+    const insideRoot = isVaultPathInsideRoot(resolution.fsPath, ctx.resolve)
+    const src = (insideRoot
+      ? relOf(dirnameOf(ctx.sourceFsPath), resolution.fsPath)
+      : opsResolve(ctx.resolve.isWindowsHost, resolution.fsPath)
+    ).replaceAll('\\', '/')
     return {
       ok: true,
       fsPath: resolution.fsPath,
       relPath,
       content: {
         kind: 'image',
-        src: relOf(dirnameOf(ctx.sourceFsPath), resolution.fsPath).replaceAll('\\', '/'),
+        src,
         version,
       },
     }
@@ -754,16 +803,21 @@ export async function resolveHoverTargetTip(
   ctx: HoverDocAccessContext,
 ): Promise<HoverTargetTipOutcome> {
   const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
+  const opsOf = ctx.resolve.isWindowsHost ? path.win32 : path.posix
+  /** #556 T3：根内目标呈现所属根相对路径；越出根的绝对身份呈现绝对形态
+   *  （`/` 归一）——绝对路径目标同样有位置可报，不再静默不出 */
   const relPathOf = (fsPath: string): string =>
-    relOf(ctx.rootFsPath, fsPath).replaceAll('\\', '/')
+    isVaultPathInsideRoot(fsPath, ctx.resolve)
+      ? relOf(ctx.rootFsPath, fsPath).replaceAll('\\', '/')
+      : opsOf.resolve(fsPath).replace(/\\/g, '/')
 
   if (spec.directTarget !== undefined) {
     // 面板直接目标：fsPath 直取（宿主快照身份，无形态学歧义；不读正文
-    // 所以无 not-found 分态）
+    // 所以无 not-found 分态；提示是纯展示，绝对身份不做出入性核验）
     if (spec.directTarget.fsPath === '') {
       return { ok: false }
     }
-    if (!isVaultPathInsideRoot(spec.directTarget.fsPath, ctx.resolve)) {
+    if (!isVaultPathInsideRoot(spec.directTarget.fsPath, ctx.resolve) && !opsOf.isAbsolute(spec.directTarget.fsPath)) {
       return { ok: false }
     }
     return {
@@ -775,10 +829,11 @@ export async function resolveHoverTargetTip(
   }
 
   // 链接目标的意图路径：候选规划取末位——无扩展名时即补 .md 的双链意图
-  // 候选，有扩展名时为唯一候选（自身）；escape（越界）无从呈现根内相对路径
+  // 候选，有扩展名时为唯一候选（自身）；escape（越界相对路径）无从呈现
+  // 根内相对路径；absolute（#556）按末位候选呈现（意图路径含 .md 补全）
   const intentPathOf = (rawPath: string): string | null => {
     const plan = planVaultLinkPath(rawPath, ctx.resolve)
-    if (plan.kind !== 'inside') {
+    if (plan.kind === 'escape') {
       return null
     }
     return plan.candidates[plan.candidates.length - 1] ?? null
