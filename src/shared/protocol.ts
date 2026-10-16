@@ -62,8 +62,11 @@ export type TableEditOp =
 /** 宿主 → webview 消息 */
 export type HostToWebview =
   | { kind: 'paste.preferences.result'; reqId: number; ok: boolean }
-  /** ready 后首发：全文 + 当前权威版本 */
-  | { kind: 'init'; sessionId: string; docUri: string; version: number; text: string }
+  /** ready 后首发：全文 + 当前权威版本。fsPath（#577，可选）：当前文档的
+   *  宿主权威 fsPath——webview 无法从 docUri 自行无歧义转换（盘符/UNC 的
+   *  平台形态只有宿主知道），面板条目组装 directTarget（悬停预览直接目标）
+   *  时取用；缺省（旧宿主/测试装配）时消费方安全降级不弹 */
+  | { kind: 'init'; sessionId: string; docUri: string; fsPath?: string; version: number; text: string }
   /** 编辑请求已应用（或被拒绝）。
    *  失败语义（#4 起）：conflict = 不可安全应用（重定位失败/版本异常/日志缺口），
    *  宿主已保留该请求的输入并暂停面板写回；error = 写回通道失败（applyEdit）。
@@ -518,25 +521,29 @@ export type HostToWebview =
    * Live 与面板入口：'live-wikilink' / 'live-md' 对 Live 正文第 index
    * 个双链/普通链接装饰派发（ctrlKey 模拟 Ctrl+悬停修饰位，缺省不带
    * = 直接悬停口径），'backlink' / 'outlink' 对面板第 index 个条目
-   * 派发（面板直接悬停，无修饰语义）。action='modkey' 对 document 派发
-   * 真实 keydown Control（先 enter 后 modkey 走「悬停后再按 Ctrl」的
-   * 补触发路径；index/link 忽略） */
+   * 派发（面板直接悬停，无修饰语义）。#577 起 'outline' 对大纲面板第
+   * index 个条目派发（Ctrl+悬停语义——ctrlKey 修饰位透传，缺省不带
+   * 不触发）。action='modkey' 对 document 派发真实 keydown Control
+   * （先 enter 后 modkey 走「悬停后再按 Ctrl」的补触发路径；index/link
+   * 忽略；大纲补触发同样经此通道——悬停现场按面板入口记录） */
   | {
       kind: 'hover.test.pointer'
       action: 'enter' | 'leave' | 'modkey'
       index: number
-      link?: 'wikilink' | 'md' | 'live-wikilink' | 'live-md' | 'backlink' | 'outlink'
-      /** Live 入口的 Ctrl 修饰位（派发 mouseover 时透传；仅 live-* 有意义） */
+      link?: 'wikilink' | 'md' | 'live-wikilink' | 'live-md' | 'backlink' | 'outlink' | 'outline'
+      /** Live/大纲入口的 Ctrl 修饰位（派发 mouseover 时透传） */
       ctrlKey?: boolean
     }
   /** P2-06（#283）测试钩子：悬停浮窗根引用内部 Live 的操作族——与浮窗
    *  头部按钮（mode/save/close）/编辑器事务管线同一处理器链路（宿主测试
    *  无法向 webview 派发真实点击或键入）。type 向浮窗内编辑器注入一笔
    *  输入事务；focus 聚焦浮窗内编辑器（可选设置选区）；close 携带
-   *  intent（close/escape 与头部按钮/Esc 消隐同径） */
+   *  intent（close/escape 与头部按钮/Esc 隐退同径）。#577 增 action='open'：
+   *  点击浮窗标题条「打开」按钮（真实 click 同一监听——面板形态经
+   *  spec.openAction 闭包、纯 Reading 浮窗无内部 Live 同样可用） */
   | {
       kind: 'hover.test.live'
-      action: 'mode' | 'type' | 'focus' | 'save' | 'close'
+      action: 'mode' | 'type' | 'focus' | 'save' | 'close' | 'open'
       intent?: 'close' | 'escape'
       pos?: number
       to?: number
@@ -4857,6 +4864,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
+        // #577 可选 fsPath（宿主权威的当前文档身份；缺省向后兼容）
+        (v.fsPath === undefined || isString(v.fsPath)) &&
         isNonNegativeInt(v.version) &&
         isString(v.text)
       )
@@ -5289,17 +5298,19 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // #218 测试钩子：真实双链序号 + 进/离动作枚举；#219 link 选择器
       // （缺省 wikilink，'md' 对普通 Markdown 链接派发）；#221 扩展
       // Live（live-wikilink / live-md，ctrlKey 修饰位可选）与面板
-      // （backlink / outlink）入口；'modkey' 对 document 派发 keydown
+      // （backlink / outlink）入口；#577 扩展大纲面板条目（outline，
+      // ctrlKey 修饰位可选）；'modkey' 对 document 派发 keydown
       // Control（「悬停后按 Ctrl」补触发路径）
       return (v.action === 'enter' || v.action === 'leave' || v.action === 'modkey') && isNonNegativeInt(v.index) &&
         (v.link === undefined || v.link === 'wikilink' || v.link === 'md' ||
           v.link === 'live-wikilink' || v.link === 'live-md' ||
-          v.link === 'backlink' || v.link === 'outlink') &&
+          v.link === 'backlink' || v.link === 'outlink' || v.link === 'outline') &&
         (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
     case 'hover.test.live':
-      // P2-06（#283）测试钩子：操作枚举 + 可选 intent/选区/文本
+      // P2-06（#283）测试钩子：操作枚举 + 可选 intent/选区/文本（#577 增
+      // 'open'——浮窗标题条打开按钮）
       return (v.action === 'mode' || v.action === 'type' || v.action === 'focus' ||
-          v.action === 'save' || v.action === 'close') &&
+          v.action === 'save' || v.action === 'close' || v.action === 'open') &&
         (v.intent === undefined || v.intent === 'close' || v.intent === 'escape') &&
         (v.pos === undefined || isNonNegativeInt(v.pos)) &&
         (v.to === undefined || isNonNegativeInt(v.to)) &&

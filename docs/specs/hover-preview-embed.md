@@ -32,6 +32,7 @@
 
 - 正文双链、本地 Markdown 普通链接、反链／出链面板均支持预览；外部网页不接入本功能。
 - 父文档 Live 默认 Ctrl+悬停，插件自有设置页可开启直接悬停；Reading 和反链／出链面板直接悬停，面板不随正文模式改变触发规则。
+- 大纲面板条目为 Ctrl+悬停触发（#577 起，「面板不随正文模式改变触发规则」的大纲分支——大纲条目本身即导航目标，直接悬停会与条目点击的轻量交互冲突，修饰触发与 Live 正文同族）：按住 Ctrl/Cmd 悬停弹出该标题的引用浮窗，先悬停后按 Ctrl 补触发；内容为当前文档全文渲染 + 标题锚点初始定位（directTarget 形态：fsPath 为宿主 init 下发的当前文档权威身份，锚点取条目标题字面文本——与大纲 copyLink 拼锚点同源），标题条「打开」按钮执行与条目点击相同的大纲跳转；松开 Ctrl 或移出按既有 300/350ms 时序关闭，Esc 可关——松开即关与 Live 正文「松开修饰键不关」的既有行为是入口间刻意差异；不按 Ctrl 悬停不出浮窗、也不出「跳转目标提示」浮标（提示语义归正文引用）。设置项 `hover.outlinePreview`（默认开）只辖大纲入口，受 `hover.enabled` 总开关管辖。悬停条目时滚动大纲面板会立即关浮窗（浮窗祖先滚动关窗机制，普通鼠标路径不在保活豁免内）；同名标题浮窗定位取首个（锚点文本匹配固有语义，大纲自身跳转用行号精确——已知差异）。
 - Live 鼠标悬停按实际命中的链接装饰 DOM 起点解析源码目标，整段可见文字均为热区（含长路径、别名与相邻链接）；「先悬停再按 Ctrl/Cmd」同样采用该映射。不能用替换 widget 的 `posAtCoords` 结果直接判定：右半段会落在源码区间的结束位置。键盘预览仍按光标的精确源码位置判定，不扩展原有区间边界。（2026-09-30 验收跟进）
 - 登记“预览当前链接”可绑定操作，默认未绑定。Live 以光标处的合法普通链接／双链为目标；Reading／面板以键盘聚焦链接为目标。原生源码编辑器不接管。
 - 键盘命令是手动打开悬停浮层，不是光标进入链接就自动弹出。`![[…]]` 已有常驻嵌入内容，不再通过此命令生成重复浮层。
@@ -191,6 +192,7 @@ A 嵌入 B：显示 B；B 内的 `![[C]]` 只显示可打开的引用占位，�
 | #223 | 父文档 Live 嵌入挂载与光标驱动源码显隐 | `webview/liveEmbed`（spans/装饰 StateField + widget LRU）、共用 EmbedCardManager |
 | #224 | 目标变更订阅、失效恢复与有界缓存 | `shared/hoverRefresh`、`host/hoverRefreshCoordinator`、`hoverReadCache`、消息 hover.watch/invalidated |
 | #225 | 一期整体验证（U1–U12 核对、全量回归、性能实测）与交付文档收口 | 本节与 manual-verification 一期总清单 |
+| #577 | 大纲面板 Ctrl 悬停弹出标题引用浮窗（directTarget：当前文档全文 + 标题锚点；`hover.outlinePreview` 设置；hover.test.pointer 的 outline 档与 hover.test.live 的 open 动作） | `webview/syncController`（handleOutlineHover/补触发/重渲染释放）、协议 init.fsPath 与 hover.test 扩展、`host/documentSession` fsPath 下发 |
 
 一期边界核对结论（#225）：递归展开、混排/列表/引用/表格容器内嵌入、引用内容 Live 编辑与 PDF 均未提前实现（嵌入内容视图无 EditorView 创建点；文档访问层仅接 Markdown 并以 non-markdown 分态拒绝；嵌入扫描器与挂载适配按容器无关分层保留 1.5 期接入面）；所有引用内容 Reading 禁写（任务 checkbox 禁用、frontmatter 无编辑入口、只读消息不进 edit.request 通道——各票集成用例以双零 dirty 与零 applyEdit 钉住）。
 

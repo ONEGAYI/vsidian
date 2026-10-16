@@ -1746,6 +1746,8 @@ export function createTextEditorProvider(
     fresh.session = new DocumentSession(sessionPort, {
       docUri: key,
       rootFsPath: doc.uri.fsPath,
+      // #577 当前文档 fsPath：init 下发（大纲条目 directTarget 悬停身份）
+      docFsPath: doc.uri.fsPath,
       // T03（#352）归属确认接线：T06 起生产消费——历史协调器按 ack version
       // 对位来源（迟到归属兜底）；TEST_HOOKS 下同时喂探针 hub（验证工件
       // 与生产协调器并存，互不替代）。addon 提交后持久化快照（保存态
