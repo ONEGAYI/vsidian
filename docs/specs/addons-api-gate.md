@@ -82,6 +82,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **独立审查后主题回落修复重锚（2026-10-15）**：两轴审查发现选中主题失效后，同语言普通提供者仍可接管。`b252bb79` 为 `RendererThemeSelectionContext` 增加可选的不可用主题语言范围，修正 `selectEffectiveRenderers` 的内置回落；`f28a3e3d` 进一步保留当前唯一首选的派生语言 profile 快照，覆盖组件冷启动未登记时的既有选择。SDK 调用面、旧条目和发行台账不变。旧锚点可信复验通过，候选检查只在上述接口和选择函数文本报两项 `signature-declaration-changed`，证据为 `out/test/addon-batch-takeover/review-fixes-compat-red.json`。按字节冻结规则从已提交对象 `f28a3e3d` 显式重锚；33 条目、21 模块及候选 1.0.0 保持，生成参考、基线可信复验和十项兼容检查通过（`review-fixes-baseline.log`）。不改检查器、不加豁免，不把审查修复表述为实际 API 发行。
 
+**两票并行重锚合并后的组合重锚（2026-10-16）**：T02（#542）与 T06（#545）从同一主线切出并各自重锚候选基线（锚 `abc22572` / `5eb3f39d`），两侧基线互不含对方新增符号，合并时手工融合无意义。第二批次集成分支真实 merge 合入 T06（组合提交 `7cfbb8b3`）后，旧 T06 侧基线可信复验通过，候选比较如实记录 8 项预期失败——全部为 T02 侧符号（coordinates/lifecycle/errors 三处语义文本改写＋`AddonPasteRuleMatch`、`ADDON_PASTE_RULES_MAX_PER_ADDON`、`ADDON_PASTE_RULES_MAX_DEPTH`、`validateAddonPasteRuleDeclarations`、`orderAddonPasteRules` 五个签名声明文本变化，`out/test/t06-merge-compat-pre-reanchor.log`，与 T02 单票重锚时的失败清单一致，无第三方漂移）。按字节冻结规则从已提交合并对象执行 `--emit-baseline --anchor 7cfbb8b3`，发射 35 条目 / 22 签名模块及候选台账快照，随后独立提交并复验。重锚保留两侧旧锚点 git 对象与失败证据，不修改检查器、不加豁免，API 1.0.0 仍为未发行候选。T04 合入后须对最终组合再次整体复验，必要时重锚。
+
 ## CI 接线（代码侧，已交付）
 
 `.github/workflows/ci.yml` 新增独立 job **`addon-api-contract`**（job 名即 required status check 的 context 名），与 `style-contract` 同序同型——**先证检查器可信，再信检查结果**：
