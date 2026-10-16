@@ -77,6 +77,8 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'hover.enabled': true,
       // #221 Live 直接悬停（默认关 = Ctrl+悬停）
       'hover.liveDirect': false,
+      // #577 大纲面板 Ctrl 悬停预览（默认开 = 升级后直接可用）
+      'hover.outlinePreview': true,
       // #299 跳转目标提示（默认开 = 升级后新提示直接可用）
       'hover.targetTip': true,
       // #342（P3-10）外链预览两件：总开关默认关（关闭态零请求）、形态默认卡片

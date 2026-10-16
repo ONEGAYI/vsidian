@@ -606,13 +606,15 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
     expect(editorItemTitles).not.toContain(zhCn['setting.hoverEnabled.title'])
   })
 
-  it('引用视图组（#298/#299）组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度（#332 起在文件与链接页）', () => {
+  it('引用视图组（#298/#299）组内顺序：总开关 → 直接悬停显示 → 大纲悬停 → 跳转目标提示 → 外链 → 嵌入两项（#332 起在文件与链接页；#577 增大纲悬停）', () => {
     const { parent } = makeViewWithFilesPage(PRODUCTION_SETTING_DEFINITIONS)
     clickNav(parent, zhCn['settings.filesLinksSection'])
     expect(groupItemTitles(parent, zhCn['settings.groupRefview'])).toEqual([
       zhCn['setting.hoverEnabled.title'],
       // #298 改名后标题经同一词条键取词（值见 settings.test 词条契约）
       zhCn['setting.hoverLiveDirect.title'],
+      // #577 大纲面板 Ctrl 悬停预览（触发方式调节项与 liveDirect 相邻）
+      zhCn['setting.hoverOutlinePreview.title'],
       // #299 跳转目标提示：独立于总开关不灰化（词条见 settings.test 注册契约）
       zhCn['setting.hoverTargetTip.title'],
       // #342（P3-10）外链预览总开关 + 形态（跳转目标提示之后、嵌入两项之前）
@@ -1400,6 +1402,27 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     expect(liveDirect.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
       .contains('vsidian-settings-item-disabled')).toBe(false)
     expect(liveDirect.checked).toBe(true)
+  })
+
+  it('outlinePreview 灰化联动（#577）：随悬停总开关禁用/解灰，值不清除；呈现于引用视图组', () => {
+    const { view, parent } = makeFilesView()
+    clickNav(parent, zhCn['settings.filesLinksSection'])
+    view.handleHostMessage({ kind: 'settings.snapshot', values: {
+      'hover.enabled': false, 'hover.outlinePreview': true,
+    } })
+    const outlinePreview = parent.querySelector<HTMLInputElement>('input[data-setting-key="hover.outlinePreview"]')!
+    expect(outlinePreview, '引用视图组应含大纲悬停开关').not.toBeNull()
+    expect(outlinePreview.disabled).toBe(true)
+    expect(outlinePreview.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
+      .contains('vsidian-settings-item-disabled')).toBe(true)
+    expect(outlinePreview.checked).toBe(true) // 灰化不清除值
+    // 总开关开启：changed 广播就地解灰
+    view.handleHostMessage({ kind: 'settings.changed', values: {
+      'hover.enabled': true, 'hover.outlinePreview': true,
+    } })
+    expect(outlinePreview.disabled).toBe(false)
+    expect(outlinePreview.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
+      .contains('vsidian-settings-item-disabled')).toBe(false)
   })
 
   it('全局搜索路由：引用视图/图片条目落文件与链接分组并定位组内行', () => {

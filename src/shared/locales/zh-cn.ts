@@ -200,6 +200,9 @@ export const zhCn: Record<MessageKey, string> = {
   /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停）；#298 改名并重写描述 */
   'setting.hoverLiveDirect.title': '实时预览中直接悬停显示',
   'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可直接打开引用视图浮层，无需修饰键；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停，或悬停中补按 Ctrl。关闭「悬停预览引用文档」总开关后本设置不再生效。',
+  /** #577 大纲面板 Ctrl 悬停预览 */
+  'setting.hoverOutlinePreview.title': '大纲面板按 Ctrl 悬停预览标题',
+  'setting.hoverOutlinePreview.description': '开启后在大纲面板按住 Ctrl（macOS 为 Cmd）悬停条目，弹出该标题的引用浮窗：当前文档全文渲染、初始定位到对应标题，浮窗标题条的「打开」按钮执行与条目点击相同的跳转；悬停中补按 Ctrl 同样触发。关闭后大纲悬停不再弹出浮窗。关闭「悬停预览引用文档」总开关后本设置不再生效。',
   'setting.codeblockCard.title': '代码块卡片',
   'setting.codeblockCard.description': '围栏代码块在光标离开时收起为卡片：隐藏围栏标记，显示语言头部横带。关闭后回到朴素源码围栏外观。',
   'setting.codeblockLineNumbers.title': '卡内行号',

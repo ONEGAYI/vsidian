@@ -230,6 +230,10 @@ export interface DocumentSessionOptions {
   docUri?: string
   /** Root A's filesystem identity, supplied by the provider rather than webview. */
   rootFsPath?: string
+  /** #577 当前文档 fsPath（provider 注入——webview 无法从 docUri 自行无歧义
+   *  转换盘符/UNC 平台形态）：init 下发供面板条目组装悬停预览 directTarget；
+   *  缺省不下发（webview 侧安全降级） */
+  docFsPath?: string
   getEmbedDepthLimit?: () => number
   onNotice?: (notice: SessionNotice) => void
   /** #38 面板视图状态回报回调：view.state 缓存后触发（宿主维护
@@ -2120,6 +2124,10 @@ export class DocumentSession {
       kind: 'init',
       sessionId: panel.sessionId,
       docUri: this.docUri,
+      // #577 当前文档宿主权威 fsPath：面板条目组装悬停预览 directTarget 用
+      //（webview 不自行从 docUri 转换——盘符/UNC 平台形态只有宿主知道；
+      // 可选字段，旧 webview 忽略；未注入不下发）
+      ...(this.options.docFsPath !== undefined ? { fsPath: this.options.docFsPath } : {}),
       version: this.doc.version,
       text: this.newline.toLfText(this.doc.getText()),
     })

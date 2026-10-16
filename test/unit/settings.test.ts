@@ -540,6 +540,42 @@ describe('Live 直接悬停设置（#221）', () => {
   })
 })
 
+describe('大纲 Ctrl 悬停预览设置（#577）', () => {
+  it('hover.outlinePreview 注册为布尔项（默认 true = 开）；词条键落 hoverOutlinePreview；受总开关管辖', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.outlinePreview')
+    expect(def).toMatchObject({ type: 'boolean', default: true })
+    expect(def?.titleKey).toBe('setting.hoverOutlinePreview.title')
+    expect(def?.descriptionKey).toBe('setting.hoverOutlinePreview.description')
+    // 票面决策 3：受 hover.enabled 总开关管辖（dependsOn 灰化联动）
+    expect(def?.dependsOn).toBe('hover.enabled')
+    expect(validateSettingDependencies(PRODUCTION_SETTING_DEFINITIONS)).toEqual([])
+    // 默认快照含新键；非法存量恢复默认 true（升级零迁移）
+    expect(settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)['hover.outlinePreview']).toBe(true)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.outlinePreview': 'no' })['hover.outlinePreview'])
+      .toBe(true)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.outlinePreview': false })['hover.outlinePreview'])
+      .toBe(false)
+  })
+
+  it('isSettingEnabled：总开关关闭时灰化、开启恢复；缺值不灰化（全新安装默认可用）', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.outlinePreview')!
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { 'hover.enabled': false }, def)).toBe(false)
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { 'hover.enabled': true }, def)).toBe(true)
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, {}, def)).toBe(true)
+  })
+
+  it('注册表顺序：引用视图组内大纲悬停开关位于直接悬停显示之后、跳转目标提示之前', () => {
+    const keys = PRODUCTION_SETTING_DEFINITIONS.map((d) => d.key)
+    const indexOf = (key: string) => {
+      const index = keys.indexOf(key)
+      expect(index, `注册表应含 ${key}`).toBeGreaterThanOrEqual(0)
+      return index
+    }
+    expect(indexOf('hover.liveDirect')).toBeLessThan(indexOf('hover.outlinePreview'))
+    expect(indexOf('hover.outlinePreview')).toBeLessThan(indexOf('hover.targetTip'))
+  })
+})
+
 describe('引用视图设置组（#298：总开关 + liveDirect 改名 + embed 迁组）', () => {
   it('hover.enabled 注册为布尔项（默认 true = 悬停预览开）；词条键落 hoverEnabled', () => {
     const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.enabled')

@@ -221,6 +221,8 @@ export const en = {
   'setting.hoverExternalShapePage': 'Live page (rendered in the popup)',
   'setting.hoverLiveDirect.title': 'Show previews directly on hover in the live view',
   'setting.hoverLiveDirect.description': 'Point at a link in the live preview to open the reference popup directly, without a modifier key. When off, hold Ctrl (Cmd on macOS) while hovering, or press Ctrl mid-hover. Has no effect while "Preview references on hover" is off.',
+  'setting.hoverOutlinePreview.title': 'Preview headings on hover in the outline panel',
+  'setting.hoverOutlinePreview.description': 'Hold Ctrl (Cmd on macOS) while hovering an entry in the outline panel to open a reference popup of that heading: the current document fully rendered, initially scrolled to the heading, with an open button that jumps like clicking the entry. Pressing Ctrl mid-hover also works. When off, hovering outline entries never opens the popup. Has no effect while "Preview references on hover" is off.',
   'setting.codeblockCard.title': 'Code block card',
   'setting.codeblockCard.description': 'Collapse a fenced code block into a card when the cursor leaves it: hide the fence markers and show a language header bar. Turn off to restore the plain source fence look.',
   'setting.codeblockLineNumbers.title': 'Line numbers inside cards',

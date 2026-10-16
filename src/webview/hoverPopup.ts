@@ -2302,6 +2302,23 @@ export function hoverPopupLiveTestAction(
   }
 }
 
+/** #577 测试钩子：点击在场浮窗标题条的「打开」按钮（真实 click 同一
+ *  监听——openAction/linkHref/双链三形态分派在监听内收敛；纯 Reading
+ *  浮窗无内部 Live，不走 hoverPopupLiveTestAction 的 root 守卫）；无
+ *  浮窗或按钮不在场返回 false */
+export function hoverPopupTestOpenAction(): boolean {
+  const state = popup
+  if (!state) {
+    return false
+  }
+  const btn = state.container.querySelector<HTMLButtonElement>(`.${HOVER_POPUP_CLASS_NAMES.open}`)
+  if (!btn) {
+    return false
+  }
+  btn.click()
+  return true
+}
+
 /** 浮窗内编辑器视图（测试钩子与观测共用；不在场 null） */
 function popupEditorView(state: HoverPopupState): EditorView | null {
   const editor = state.liveEl.querySelector('.cm-editor')

@@ -1222,6 +1222,31 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
+  // #577 大纲 Ctrl 悬停：独立样例（多级标题 + 行内标记标题——锚点取标题
+  // 字面文本与 copyLink 同源口径的直接证据；不与共享样本的双链/大纲断言
+  // 互相干扰）。全文 10 块：H1/段/H2甲/段/H3甲子/段/H2乙/段/H2加粗/段
+  writeFileSync(path.join(wsDir, '悬停 大纲.md'), [
+    '# 大纲悬停样例',
+    '',
+    '开篇段落。',
+    '',
+    '## 甲章节',
+    '',
+    '甲正文段落一。',
+    '',
+    '### 甲子节',
+    '',
+    '甲子节正文。',
+    '',
+    '## 乙章节',
+    '',
+    '乙正文段落。',
+    '',
+    '## **加粗**乙二',
+    '',
+    '加粗标题正文。',
+    '',
+  ].join('\n'), 'utf8')
   // #337 悬停 PDF：三页色样本（红/绿/蓝——页身份供「指定页图像与样本
   // 正确对应」的像素断言；脚本生成不引入二进制样本入库）与悬停文档
   // （双链全文/指定页/非法锚点 + 普通链接 fragment 不解析）
