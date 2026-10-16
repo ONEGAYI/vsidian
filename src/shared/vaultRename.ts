@@ -71,12 +71,18 @@ export interface RenameMoveEntry {
  *  实现 = workspace.fs.stat/readDirectory + 索引服务；单测注入 fake） */
 export interface RenameExpandPort {
   /** 路径是否目录（will 阶段旧路径有效；did 保底时旧路径可能已不存在——
-   *  实现应同时探测新路径） */
+   *  实现应同时探测新路径）。定点 stat，不属目录扫描 */
   isDirectory(fsPath: string): Promise<boolean>
-  /** 递归列举目录下全部文件（绝对 fsPath；目录不存在返回空） */
+  /** 递归列举目录下全部文件（绝对 fsPath；目录不存在返回空）——**仅索引
+   *  域内目录会被调用**（isIndexedScope 为 false 的目录跳过，见下） */
   listFilesUnder(dirFsPath: string): Promise<string[]>
   /** 索引清单：目录前缀下全部已登记文件（.md + asset）；根未就绪 null */
   indexedFilesUnder(dirFsPath: string): string[] | null
+  /** 目录是否索引扫描域内（三审 P2，可选；缺省 true）。域外（工作区外）
+   *  目录跳过 fs 递归列举——#556 冻结规格「外部只登记明确引用目标，不
+   *  扫描目录」：映射只来自 indexedFilesUnder 的已登记身份前缀，未引用
+   *  外部文件无引用边、无需映射，也不为其引入外部 I/O 与权限面 */
+  isIndexedScope?(fsPath: string): boolean
 }
 
 /** 展开结果：逐文件映射（原始文件条目原样保留；目录条目被其内容替换）；
@@ -140,8 +146,11 @@ export async function expandRenameMoves(
     const oldDir = norm(move.oldFsPath)
     const newDir = norm(move.newFsPath)
     // 清单合流：fs 递归列举的 .md（权威兜底）∪ 索引清单全部登记类型
-    //（asset 只在索引有登记——未引用附件无引用边，不产生映射）
-    const fsFiles = await port.listFilesUnder(move.oldFsPath)
+    //（asset 只在索引有登记——被引用才有引用边，未引用附件无需映射）。
+    // 三审 P2：索引域外目录跳过 fs 列举（外部不扫描——登记域即引用域）
+    const fsFiles = port.isIndexedScope?.(move.oldFsPath) === false
+      ? []
+      : await port.listFilesUnder(move.oldFsPath)
     const seen = new Set<string>()
     const add = (absFsPath: string): void => {
       const key = fold(norm(absFsPath))
@@ -181,8 +190,7 @@ export async function expandRenameMoves(
   }
 }
 
-/** 短名唯一性查询端口（#556 T4）：按来源 fsPath（定位最具体根分区）与
- *  完整 basename（含扩展名）查该根内未排除 Markdown 的候选（绝对身份
+/** 短名唯一性查询端口（#556 T4）：按来源 fsPath（定位最具体根分区）与 *  完整 basename（含扩展名）查该根内未排除 Markdown 的候选（绝对身份
  *  形态——host 侧 catalog 倒排，零 IO，R6）；null = 索引未就绪/来源无
  *  分区——不注入短名语义（保留与更新两决策均不冒充命中，退相对路径）。
  *  与 vaultIndexService.shortnameLookup / VaultLinkShortnameLookupResult
@@ -191,6 +199,60 @@ export interface RenameShortnameLookupPort {
   (sourceFsPath: string, basename: string):
     | { candidates: readonly string[]; complete: boolean }
     | null
+}
+
+/** 存在性预取计划（三审 P2：外部不扫描）——wiring 存在性端口的数据面：
+ *  索引域内目录整目录列举（合法——根内扫描域本来就有）；域外（工作区外）
+ *  不做目录枚举（#556 冻结规格「外部只登记明确引用目标，不扫描目录」）
+ *  ——外部目标改写的存在性核对改用**有界定点查询**：新路径本体与其
+ *  去 .md 变体（绝对形态文本回验候选序的落点，≤2 个/外部目标），逐文件
+ *  stat。域外应用文档目录同样不列举：移出根的 selfMove 其文本决策恒为
+ *  绝对形态（无根即无相对/短名域），定点由 move 集覆盖。isIndexedScope
+ *  由接线层注入（vscode：getWorkspaceFolder） */
+export interface RenameExistsPrefetchPlan {
+  /** 索引域内目录（readDirectory 整列举；norm 归一形态） */
+  listDirs: string[]
+  /** 域外定点候选（逐文件 stat；域内 move 不进——listDirs ∪ moves 覆盖） */
+  statFiles: string[]
+}
+
+/** 预取计划纯函数（同步、无 IO）：目录集 = 应用文档目录 ∪ 新路径目录，
+ *  按域分流；定点集 = 域外 move 的 {newFsPath, 去 .md 变体}（.md 尾）。
+ *  去重 + 排序稳定（Set 无序性不外泄给断言与日志） */
+export function planRenameExistsProbes(
+  isWindowsHost: boolean,
+  moves: ReadonlyArray<{ oldFsPath: string; newFsPath: string }>,
+  docFsPaths: readonly string[],
+  isIndexedScope: (fsPath: string) => boolean,
+): RenameExistsPrefetchPlan {
+  const ops = isWindowsHost ? path.win32 : path.posix
+  const listDirs = new Set<string>()
+  const statFiles = new Set<string>()
+  const addDir = (fsPath: string): void => {
+    const dir = ops.dirname(ops.resolve(fsPath))
+    if (isIndexedScope(dir)) {
+      listDirs.add(dir)
+    }
+  }
+  for (const m of moves) {
+    const newPath = ops.resolve(m.newFsPath)
+    if (isIndexedScope(ops.dirname(newPath))) {
+      addDir(newPath)
+      continue // 域内 move：整目录列举（moves 集补未落盘新路径）
+    }
+    // 域外 move：不列举外部目录；定点 = 本体 + 去 .md 变体（遮蔽探测）
+    statFiles.add(newPath)
+    if (/\.md$/i.test(newPath)) {
+      statFiles.add(newPath.slice(0, -3))
+    }
+  }
+  for (const doc of docFsPaths) {
+    addDir(doc)
+  }
+  return {
+    listDirs: [...listDirs].sort(),
+    statFiles: [...statFiles].sort(),
+  }
 }
 
 /** 改写规划上下文 */

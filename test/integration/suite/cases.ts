@@ -12467,6 +12467,96 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
   // ---- #200 目录与批量移动的引用更新 ----
 
+  ['rename 引用改写：同目录被排除遮蔽物下新短名显式化（三审 P2 生产接线）', async () => {
+    await waitRenameIndexReady()
+    await ensureBatchFixture()
+    type IndexState = {
+      excludePatterns: string[]
+      roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean; verifying: boolean; queued: number }>
+    }
+    const state = async (): Promise<IndexState> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
+    const quiet = async (): Promise<boolean> => {
+      const s = await state()
+      const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+      return !!root?.hasData && !root.scanning && !root.verifying && root.queued === 0
+    }
+    // 排除根目录无扩展遮蔽物（catalog 域不可见——只有 will 通道 readDirectory
+    // 预取能看到；这正是存在性端口目录集的生产接线面）
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+      kind: 'index.setPatterns', patterns: ['**/.git/**', '**/node_modules/**', '**/批遮蔽物'],
+    })
+    await poll('排除生效且重算完成', async () => {
+      const s = await state()
+      return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**', '**/批遮蔽物']) &&
+        (await quiet()) ? s : undefined
+    })
+    try {
+      // 根目录无扩展普通文件（被排除）：目标改名后的新裸短名/裸相对候选
+      // 被它抢占（解析器「第一个存在文件优先」）
+      await vscode.workspace.fs.writeFile(wsUri('批遮蔽物'), Buffer.from('shadow', 'utf8'))
+      // 子目录遮蔽物 + 短名引用者：遮蔽物在**应用文档目录**而非目标目录——
+      // 存在性端口的「文档目录」预取面（接线键修复的钉子场景，目标目录
+      // 预取覆盖不到这里）
+      await vscode.workspace.fs.writeFile(wsUri('notes/批遮蔽物'), Buffer.from('shadow2', 'utf8'))
+      await vscode.workspace.fs.writeFile(wsUri('notes/p2-ref.md'), Buffer.from('# P2 引用\n\n短名 [[批目标]]。\n', 'utf8'))
+      // watcher 去抖（800ms）+ 增量抽边：短名引用者的边须先进索引才会成为
+      // rename 候选来源（ensureBatchFixture 同款 1400ms 收口）
+      await new Promise((r) => setTimeout(r, 1_600))
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(wsUri('批目标.md'), wsUri('批遮蔽物.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
+      // 未打开引用者的 will 改写作用宿主 lazy 装载的 dirty buffer（1.82.3
+      // 语义，#269 落档——盘面保持原文，did 收尾按 dirty 缓存实例豁免退役；
+      // 断言面与 #199/#200 系用例同为文档模型文本）
+      const refA = await poll('引用甲显式化改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('batch-ref-a.md'))).getText()
+        return text.includes('[[批遮蔽物.md]]') &&
+          text.includes('[同目标](批遮蔽物.md)') &&
+          text.includes('[[批遮蔽物.md#深处小节|别名]]') ? text : undefined
+      })
+      assert(!refA.includes('[[批遮蔽物]]'), `裸短名被遮蔽物抢占，不得保留（实际 ${refA}` + '）')
+      assert(!refA.includes('[[批遮蔽物#'), `裸短名锚边同样不得保留（实际 ${refA}` + '）')
+      // 子目录引用乙的相对重算同样不得剥 .md（裸相对候选被根遮蔽物抢占）
+      const refB = await poll('引用乙相对显式化改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/batch-ref-b.md'))).getText()
+        return text.includes('[[../批遮蔽物.md]]') ? text : undefined
+      })
+      assert(!refB.includes('[[../批遮蔽物]]'), `裸相对被遮蔽物抢占，不得保留（实际 ${refB}` + '）')
+      // 短名引用者：新裸短名被**其来源目录**的遮蔽物抢占——显式化
+      const p2Ref = await poll('短名引用者显式化改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/p2-ref.md'))).getText()
+        return text.includes('[[批遮蔽物.md]]') ? text : undefined
+      })
+      assert(!p2Ref.includes('[[批遮蔽物]]'), `裸短名被来源目录遮蔽物抢占，不得保留（实际 ${p2Ref}` + '）')
+      // 反馈落账（did 通道尾部合并 will 暂存——poll 等待而非立即断言）
+      await poll('改写反馈落账', async () => {
+        const last = await lastRenameRefLog()
+        return last !== null && last.plannedEdits >= 5 ? last : undefined
+      })
+    } finally {
+      // will 改写滞留的 dirty 缓存实例先清（无标签实例的还原走盘面覆盖，
+      // close 先于还原——#199 漂移用例同款顺序）
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('批遮蔽物')).then(() => undefined, () => undefined))
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('notes/批遮蔽物')).then(() => undefined, () => undefined))
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('notes/p2-ref.md')).then(() => undefined, () => undefined))
+      await Promise.resolve(restoreRename(wsUri('批遮蔽物.md'), wsUri('批目标.md'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-ref-a.md'), Buffer.from(BATCH_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/batch-ref-b.md'), Buffer.from(BATCH_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+      // 排除恢复默认（覆盖范围重算，遮蔽物也已删除）
+      await Promise.resolve(vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+        kind: 'index.resetPatterns',
+      })).catch(() => {})
+      await poll('排除恢复默认且重算完成', async () => {
+        const s = await state()
+        return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']) &&
+          (await quiet()) ? s : undefined
+      }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
   ['rename 引用改写：目录 rename 批量改写、互链恒等与一步撤销（#200）', async () => {
     await waitRenameIndexReady()
     await ensureDirMoveFixture()

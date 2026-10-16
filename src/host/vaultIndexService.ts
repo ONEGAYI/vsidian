@@ -2181,9 +2181,12 @@ export class VaultIndexService {
             affected.add(name)
           }
         }
-        const completeFlipped = !prevComplete && state.catalogComplete
-        if (completeFlipped || affected.size > 0) {
-          await this.runShortnameRejudge(state, completeFlipped ? 'all' : affected)
+        // 三审 P2：完整性变化**双向**重判——与核验路径同语义。下降
+        //（true→false，如排除变更重扫时附件目录不可访问而 Markdown 成员
+        // 集合不变）时已解析短名边须回退 pending，成员差分不触发也不能漏
+        const completeChanged = prevComplete !== state.catalogComplete
+        if (completeChanged || affected.size > 0) {
+          await this.runShortnameRejudge(state, completeChanged ? 'all' : affected)
         }
       }
     } finally {

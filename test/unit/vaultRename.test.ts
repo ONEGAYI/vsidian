@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   expandRenameMoves,
   lfOffsetToLineCol,
+  planRenameExistsProbes,
   planVaultRenameRewrites,
   renameNoticeKeyOf,
   type RenameDocInput,
@@ -607,6 +608,110 @@ describe('vaultRename：#200 目录移动映射展开（expandRenameMoves）', (
     expect(movesOf(result.moves)).toEqual([
       [`${WIN_ROOT}/dir-old/a.md`, 'D:/other-root/dir-new/a.md'],
     ])
+  })
+
+  it('三审 P2：外部目录（索引域外）不做 fs 递归列举——登记身份前缀仍映射', async () => {
+    // #556 冻结规格「外部只登记明确引用目标，不扫描目录」：域外目录跳过
+    // listFilesUnder（isDirectory 定点 stat 允许），映射只来自已登记身份
+    const listCalls: string[] = []
+    const port: RenameExpandPort = {
+      async isDirectory(fsPath: string) {
+        return fsPath.replaceAll('\\', '/') === 'E:/ext/old'
+      },
+      async listFilesUnder(dirFsPath: string) {
+        listCalls.push(dirFsPath)
+        return []
+      },
+      indexedFilesUnder(dirFsPath: string) {
+        return dirFsPath.replaceAll('\\', '/') === 'E:/ext/old'
+          ? ['E:/ext/old/target.md', 'E:/ext/old/nested/other.png']
+          : []
+      },
+      isIndexedScope(fsPath: string) {
+        return !fsPath.replaceAll('\\', '/').startsWith('E:/')
+      },
+    }
+    const result = await expandRenameMoves(true, [{ oldFsPath: 'E:\\ext\\old', newFsPath: 'E:\\ext\\new' }], port)
+    expect(listCalls).toEqual([]) // 不调用外部目录扫描
+    expect(result.notReadyMoves).toBe(0)
+    expect(result.moves.map((m) => [m.oldFsPath, m.newFsPath].map((p) => p.replaceAll('\\', '/')) as [string, string])
+      .sort((a, b) => a[0]!.localeCompare(b[0]!))).toEqual([
+      ['E:/ext/old/nested/other.png', 'E:/ext/new/nested/other.png'],
+      ['E:/ext/old/target.md', 'E:/ext/new/target.md'],
+    ])
+  })
+
+  it('三审 P2：索引域内目录照常 fs 递归列举（域内外合批互不干扰）', async () => {
+    const listCalls: string[] = []
+    const port: RenameExpandPort = {
+      async isDirectory() {
+        return true
+      },
+      async listFilesUnder(dirFsPath: string) {
+        listCalls.push(dirFsPath)
+        return dirFsPath === '/vault/dir' ? ['/vault/dir/fs-only.md'] : []
+      },
+      indexedFilesUnder(dirFsPath: string) {
+        if (dirFsPath === '/vault/dir') {
+          return ['/vault/dir/referenced.png']
+        }
+        return dirFsPath === '/external/old' ? ['/external/old/x.md'] : []
+      },
+      isIndexedScope(fsPath: string) {
+        return fsPath.startsWith('/vault')
+      },
+    }
+    const result = await expandRenameMoves(false, [
+      { oldFsPath: '/vault/dir', newFsPath: '/vault/moved' },
+      { oldFsPath: '/external/old', newFsPath: '/external/new' },
+    ], port)
+    expect(listCalls).toEqual(['/vault/dir']) // 仅域内目录列举
+    expect(result.moves.map((m) => [m.oldFsPath, m.newFsPath].join('=>')).sort()).toEqual([
+      '/external/old/x.md=>/external/new/x.md',
+      '/vault/dir/fs-only.md=>/vault/moved/fs-only.md',
+      '/vault/dir/referenced.png=>/vault/moved/referenced.png',
+    ])
+  })
+})
+
+describe('vaultRename：三审 P2 存在性预取计划（外部不扫描，定点 stat）', () => {
+  const inVault = (p: string): boolean => p.replaceAll('\\', '/').toLowerCase().startsWith('c:/vault/')
+
+  it('域内目录整列举；域外目录不列举、其 move 用有界定点（本体 + 去 .md 变体）', () => {
+    const plan = planRenameExistsProbes(
+      true,
+      [
+        { oldFsPath: 'C:\\vault\\data\\old.md', newFsPath: 'C:\\vault\\data\\renamed.md' },
+        { oldFsPath: 'E:\\ext\\old\\target.md', newFsPath: 'E:\\ext\\new\\target.md' },
+        { oldFsPath: 'E:\\ext\\pic.png', newFsPath: 'E:\\ext\\pic2.png' },
+      ],
+      ['C:\\vault\\notes\\source.md'],
+      inVault,
+    )
+    expect(plan.listDirs.map((d) => d.replaceAll('\\', '/')).sort()).toEqual([
+      'C:/vault/data',
+      'C:/vault/notes',
+    ])
+    // 外部 move 定点：本体 + .md 去 tail 变体（回验候选序落点）；非 .md 无变体
+    expect(plan.statFiles.map((p) => p.replaceAll('\\', '/')).sort()).toEqual([
+      'E:/ext/new/target', // 去 .md 变体（无扩展遮蔽物探测；字典序前缀短者在前）
+      'E:/ext/new/target.md',
+      'E:/ext/pic2.png',
+    ])
+  })
+
+  it('域外 doc 目录不列举（移出根的 selfMove 文本恒绝对，定点由 move 覆盖）；去重稳定', () => {
+    const plan = planRenameExistsProbes(
+      false,
+      [
+        { oldFsPath: '/vault/a.md', newFsPath: '/vault/b.md' },
+        { oldFsPath: '/vault/x.md', newFsPath: '/vault/sub/x.md' },
+      ],
+      ['/external/docs/moved.md', '/vault/ref.md'],
+      (p) => p.startsWith('/vault'),
+    )
+    expect([...plan.listDirs].sort()).toEqual(['/vault', '/vault/sub'])
+    expect(plan.statFiles).toEqual([]) // 域内 move：readDirectory ∪ moves 覆盖，无定点
   })
 })
 

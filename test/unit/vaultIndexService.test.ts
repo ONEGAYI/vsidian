@@ -2920,7 +2920,37 @@ describe('VaultIndexService：#556 T2 短名补查与目标身份（索引接线
     expect(service.catalogHasFile('E:/ext/old/target.md')).toBe(true)
   })
 
-  it('复审外部目录更名：indexedFilesUnder 按已登记绝对身份前缀返回（不再整体放弃）', async () => {
+  it('三审 P2：scanCatalog 完整性下降（Markdown 成员不变）同样全域重判——短名边回退 pending', async () => {
+    // 排除变更触发 fullScan + scanCatalog 重扫：重扫时附件目录不可访问而
+    // Markdown 候选集合完全不变（成员差分不触发）——完整性 true→false
+    // 本身须重判（旧实现只检测 false→true，出链保持 resolved=true 违反
+    // 「未完整不得声明唯一」）
+    const fs = makeFs({
+      'C:/vault/项目/来源.md': '# 源\n\n见 [[目标]]。\n',
+      'C:/vault/资料/目标.md': '# 标\n',
+      'C:/vault/空档/图.png': 'png',
+    })
+    const ctx = makeService(fs)
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(1)
+    const ok = await ctx.service.outlinksOf('C:/vault/项目/来源.md')
+    if (ok.status === 'ready') {
+      expect(ok.items[0]).toMatchObject({ resolved: true })
+    }
+    // 附件目录转不可访问 + 排除变更（重扫入口）→ scanCatalog 见 complete=false
+    // 且 Markdown 成员集合不变 → 完整性下降须触发全域重判
+    ;(ctx.scan as unknown as { inaccessibleDirs: Set<string> }).inaccessibleDirs.add('C:/vault/空档')
+    await ctx.service.setExcludePatterns(['nothing/**'])
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(ctx.service.maintenanceInfo().roots[0]!.catalogComplete).toBe(false)
+    const degraded = await ctx.service.outlinksOf('C:/vault/项目/来源.md')
+    expect(degraded.status).toBe('ready')
+    if (degraded.status === 'ready') {
+      expect(degraded.items[0]).toMatchObject({ resolved: false, targetFsPath: null })
+    }
+  })
+
+  it('三审 P2：外部目录映射不做 fs 递归列举（登记域即引用域，无登记子目录空数组）', async () => {
     const fs = makeFs({
       'C:/vault/来源.md': '# 源\n\n见 [[E:/ext/old/target.md]]。\n',
       'E:/ext/old/target.md': '# T\n',
@@ -2929,7 +2959,7 @@ describe('VaultIndexService：#556 T2 短名补查与目标身份（索引接线
     await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
     await vi.advanceTimersByTimeAsync(1)
     // 外部目录（工作区外）：绝对身份条目前缀收集——目录 rename 的映射
-    // 展开据此生成逐文件映射（评审复现：返回 null 导致整目录跳过）
+    // 展开据此生成逐文件映射（复审复现：返回 null 导致整目录跳过）
     const hits = service.indexedFilesUnder('E:/ext/old')
     expect(hits).not.toBeNull()
     expect(hits!.map((p) => p.toLowerCase())).toEqual(['e:/ext/old/target.md'])
