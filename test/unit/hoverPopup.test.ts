@@ -1131,6 +1131,101 @@ describe('#221 显式目标入口与键盘模态', () => {
   })
 })
 
+// ---- #577 验收轮 P2：域释放同时取消域内待开计时 ----
+// 时序（大纲重建早于待开计时）：编辑标题 → 100ms 按住 Ctrl 悬停旧条目
+// （启动 300ms 待开）→ 250ms 大纲去抖重建（先调域释放、后 replaceChildren
+// 移除旧条目）→ 400ms 旧条目待开计时仍执行：openPopup 的 position() 因锚点
+// 脱树先关实例，但后续代码仍注册 document 捕获 keydown 监听并发出
+// hover.request——留下 hover.cancel → hover.request 孤儿序列与 dispose
+// 清不掉的 keydown 监听（浮窗不在场时 Escape 被吞，影响正文键盘操作）。
+// 修复：域释放（closeHoverPopupIfAnchorWithin）同时覆盖「锚点在该域内的
+// pendingOpen」——取消待开计时；大纲两处与反链/出链面板既有调用点共用。
+describe('#577 域释放同时取消域内待开计时（重建早于待开）', () => {
+  function makePanelHarness(): { sent: WebviewToHost[]; anchor: HTMLElement; panelScope: HTMLElement } {
+    const sent: WebviewToHost[] = []
+    setHoverPreviewContext({
+      session: () => SESSION,
+      send: (message) => {
+        sent.push(message)
+      },
+      codeHighlight: () => true,
+    })
+    const panelScope = document.createElement('div')
+    const anchor = document.createElement('span')
+    anchor.className = 'vsidian-outline-item'
+    panelScope.appendChild(anchor)
+    document.body.appendChild(panelScope)
+    return { sent, anchor, panelScope }
+  }
+
+  /** document 上 keydown 监听净计数（注册-移除配对跟踪；本套件内只有
+   * hoverPopup 模块会在 document 上挂 keydown） */
+  function trackDocumentKeydown(): () => number {
+    const active = new Set<EventListenerOrEventListenerObject>()
+    const realAdd = document.addEventListener.bind(document)
+    const realRemove = document.removeEventListener.bind(document)
+    vi.spyOn(document, 'addEventListener').mockImplementation(((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      if (type === 'keydown') active.add(listener)
+      return realAdd(type as never, listener as never, options)
+    }) as typeof document.addEventListener)
+    vi.spyOn(document, 'removeEventListener').mockImplementation(((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+      if (type === 'keydown') active.delete(listener)
+      return realRemove(type as never, listener as never, options)
+    }) as typeof document.removeEventListener)
+    return () => active.size
+  }
+
+  it('重建脱树 + 域释放后待开计时不执行：零出站请求、无遗留 keydown 监听、Escape 正常传播', () => {
+    vi.useFakeTimers()
+    const keydownCount = trackDocumentKeydown()
+    const h = makePanelHarness()
+    hoverPreviewAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 0 })
+    // 大纲去抖重建（250ms < 300ms 待开延迟）：生产顺序 = 先域释放、后
+    // replaceChildren 重建（syncController outlineEnsureFresh 同款）
+    closeHoverPopupIfAnchorWithin(h.panelScope)
+    h.panelScope.replaceChildren()
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS * 2)
+    expect(isHoverPopupOpen()).toBe(false)
+    expect(h.sent, '待开被取消：零出站（无 hover.request，也无孤儿 hover.cancel）').toEqual([])
+    closeHoverPopup() // dispose 兜底后复核监听计数
+    expect(keydownCount(), 'dispose 后 document keydown 监听计数归零').toBe(0)
+    // Escape 在浮窗不在场时须正常传播（旧缺陷：泄漏的捕获监听 stopPropagation 吞掉 Esc）
+    let reached = false
+    const witness = (): void => {
+      reached = true
+    }
+    window.addEventListener('keydown', witness)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    window.removeEventListener('keydown', witness)
+    expect(reached, 'Escape 传播到 window（未被吞）').toBe(true)
+  })
+
+  it('域外待开不受影响（悬停条目 A 后重建不含 A 的域 B：A 的待开正常打开）', () => {
+    vi.useFakeTimers()
+    const h = makePanelHarness()
+    const otherScope = document.createElement('div')
+    document.body.appendChild(otherScope)
+    hoverPreviewAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 0 })
+    closeHoverPopupIfAnchorWithin(otherScope)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    expect(isHoverPopupOpen(), '域外待开照常打开').toBe(true)
+    expect(h.sent.some((m) => m.kind === 'hover.request'), '请求照常发出').toBe(true)
+    closeHoverPopup()
+  })
+
+  it('旁路脱树（条目 DOM 重建不经域释放——大纲搜索重渲染同型）：计时执行时防御性放弃', () => {
+    vi.useFakeTimers()
+    const keydownCount = trackDocumentKeydown()
+    const h = makePanelHarness()
+    hoverPreviewAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 0 })
+    h.panelScope.replaceChildren() // 旁路重建：只移除旧条目，未调域释放
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS * 2)
+    expect(isHoverPopupOpen()).toBe(false)
+    expect(h.sent, '脱树锚点不开浮层：零出站').toEqual([])
+    expect(keydownCount(), '零遗留 keydown 监听').toBe(0)
+  })
+})
+
 // ---- #224 引用视图同步：目标订阅、失效分态与版本仲裁 ----
 // 订阅生命周期（成功装载登记 hover.watch、关闭配对 hover.unwatch）、
 // hover.invalidated 三分态（changed 同实例静默重载 / deleted 撤内容显示

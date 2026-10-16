@@ -27,7 +27,9 @@
 //   销毁键盘操作现场（#220 已知张力的调整——纯键盘遍历不应触发鼠标域
 //   的关闭规则）；鼠标悬停路径零抢焦点契约不变。
 // - 面板/切模式等触发上下文失效：closeHoverPopupIfAnchorWithin 按锚点
-//   所在域释放（面板重渲染 replaceChildren 后锚点脱树，不依赖迟到检测）。
+//   所在域释放（面板重渲染 replaceChildren 后锚点脱树，不依赖迟到检测）；
+//   #577 验收轮起域内待开计时（pendingOpen）一并取消（重建可早于待开，
+//   详见该函数注释）。
 //
 // #220 引用 Reading 内容：
 // - 来源资源：浮层内容（B 文档）的图片以 **B 身份资源管理器** 装载——
@@ -1528,6 +1530,15 @@ export function hoverPreviewAnchorEnter(anchor: HTMLElement, spec?: HoverPopupTa
   }
   const timer = window.setTimeout(() => {
     pendingOpen = null
+    // #577 验收轮 P2 兜底：域释放（closeHoverPopupIfAnchorWithin）覆盖先于
+    // 重建调用的既有路径（大纲/反链/出链重渲染均为先释放后 replaceChildren），
+    // 但存在「条目 DOM 重建不经域释放」的旁路（如大纲搜索重渲染直接
+    // renderOutlineItems）——已开浮窗有 MutationObserver 补齐，待开计时没有。
+    // 脱树锚点上执行 openPopup 会经 position() 关实例后继续注册 document
+    // 捕获监听并发出请求（dispose 不掉的泄漏）：此处防御性放弃待开
+    if (!anchor.isConnected) {
+      return
+    }
     openPopup(anchor, spec ?? hoverPopupSpecOfAnchor(anchor))
   }, HOVER_POPUP_OPEN_DELAY_MS)
   pendingOpen = { anchor, timer, spec }
@@ -1605,8 +1616,17 @@ export function closeHoverPopup(): void {
 
 /** #221 触发上下文失效的域释放（面板重渲染 replaceChildren / 面板隐藏 /
  *  切面板）：在场浮层的锚点落在失效域内即释放实例；域外浮层不动。面板
- *  条目 DOM 重建不派发 mouseout，依赖此处显式释放 */
+ *  条目 DOM 重建不派发 mouseout，依赖此处显式释放。
+ *  #577 验收轮 P2：锚点落在失效域内的**待开计时**（pendingOpen）同样取消
+ *  ——大纲去抖重建可早于 300ms 待开计时（编辑标题 → 100ms 按住 Ctrl 悬停
+ *  旧条目 → 250ms 重建 → 400ms 待开照旧执行）：openPopup 的 position()
+ *  因锚点脱树先关实例，但后续代码仍注册 document 捕获监听并发出请求，
+ *  留下 hover.cancel → hover.request 孤儿序列与 dispose 清不掉的 keydown
+ *  监听（浮窗不在场时 Escape 被吞）。域外待开不受影响（域释放只辖本域） */
 export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
+  if (pendingOpen !== null && scope.contains(pendingOpen.anchor)) {
+    cancelPendingOpen()
+  }
   if (popup && scope.contains(popup.anchor)) {
     closeHoverPopup()
   }

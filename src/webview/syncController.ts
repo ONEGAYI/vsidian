@@ -6983,8 +6983,10 @@ export class WebviewSyncController {
     }
     if (changed && this.outlinePanelEl) {
       // #577 在场悬停浮层的锚点随旧条目 DOM 脱树（replaceChildren 不派发
-      // mouseout）：先释放再重建（反链面板 rerenderBacklinks 同先例）；
-      // 补触发现场一并清空（新 DOM 是新元素，旧现场不可复用）
+      // mouseout）：先释放再重建（反链面板 rerenderBacklinks 同先例）；域内
+      // 待开计时一并取消（去抖重建可早于 300ms 待开——防孤儿请求与泄漏
+      // 监听，hoverPopup 域释放语义）；补触发现场一并清空（新 DOM 是新
+      // 元素，旧现场不可复用）
       closeHoverPopupIfAnchorWithin(this.outlinePanelEl)
       this.lastOutlineHover = null
       // #69：条目 DOM 重建使菜单锚点与重命名编辑态过期——先关闭再重建
@@ -7399,7 +7401,7 @@ export class WebviewSyncController {
       return
     }
     // #577 重建前释放域内悬停浮层（锚点脱树防悬挂；与 outlineEnsureFresh
-    // 重建分支同款）并清补触发现场
+    // 重建分支同款；域内待开计时一并取消——域释放语义）并清补触发现场
     closeHoverPopupIfAnchorWithin(panel)
     this.lastOutlineHover = null
     this.cancelOutlineDrag()
