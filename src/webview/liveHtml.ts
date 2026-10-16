@@ -27,7 +27,9 @@ import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from '
 import { isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree, type HtmlBlockSpan } from '../shared/htmlBlock'
 import { htmlBlockRenderHtml } from './htmlSanitize'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
-import { DocumentStyleBinding } from './docStyleLoader'
+import { DocumentStyleBinding, type DocStyleResourcePort } from './docStyleLoader'
+import { prepareHtmlResources } from './htmlResourceMount'
+import { liveImagesOfView } from './liveLinks'
 import { t } from '../shared/i18n'
 import type { Tree } from '@lezer/common'
 
@@ -156,6 +158,24 @@ export function liveHtmlDocScopeOf(state: import('@codemirror/state').EditorStat
   return state.facet(liveHtmlDocScopeFacet)
 }
 
+/** #570（T05）资源解析的来源文档身份（嵌入内部 Live = B 的 fsPath；主文
+ *  缺省 null = 面板自身文档 A）。与 docScope facet 同款注入面——widget
+ *  toDOM 按所属视图读取，srcset/媒体属性与 CSS 资源按此身份订阅解析 */
+const liveHtmlResourceSourceFacet = Facet.define<string | null, string | null>({
+  combine: (values) => values[values.length - 1] ?? null,
+})
+
+/** 嵌入内部 Live 的资源来源装配（embedCard createLiveInstance 注入 B 的
+ *  fsPath；主文不装配——hub 订阅 sourceDocUri 缺省即面板文档） */
+export function liveHtmlResourceSource(fsPath: string | null): Extension {
+  return liveHtmlResourceSourceFacet.of(fsPath)
+}
+
+/** 视图的资源来源身份读取面（widget toDOM 消费） */
+export function liveHtmlResourceSourceOf(state: import('@codemirror/state').EditorState): string | null {
+  return state.facet(liveHtmlResourceSourceFacet)
+}
+
 /**
  * 装饰构建（纯数据输入，可单测直驱）：逐块发射——未触及且非纯 style →
  * 精确区间 inline replace widget；触及（选区或命中显形）或纯 style →
@@ -188,6 +208,40 @@ export function buildLiveHtmlDecorationRanges(
 // ---- widget 与装饰实例缓存 ----
 
 /**
+ * #570（T05）HTML widget 内容的资源装配 + 链接防跳转（块级与行内 widget
+ * 共用执行体）：
+ * - img/srcset/媒体属性按**所属视图**的资源身份装配（liveImagesOfView——
+ *   根正文 = A 面板管理器、嵌入内部 Live = B 实例管理器；srcset/媒体属性
+ *   经 hub 订阅，sourceDocUri 取视图的资源来源 facet）。
+ * - `<a>` 点击一律 preventDefault：Live 普通点击优先源码显形（mousedown
+ *   拦截器已转完整源码选区），修饰键点击保持选区语义——任何情形都不让
+ *   webview 原生导航接管（相对路径在本 origin 必坏 + https 会整页跳走，
+ *   均为「意外跳转」）。
+ */
+export function prepareHtmlWidgetContent(
+  content: HTMLElement,
+  view: import('@codemirror/view').EditorView | undefined,
+): void {
+  if (view !== undefined) {
+    const sourceDocUri = liveHtmlResourceSourceOf(view.state)
+    prepareHtmlResources(content, {
+      images: liveImagesOfView(view) ?? null,
+      sourceDocUri: sourceDocUri ?? undefined,
+      live: true,
+    })
+  } else {
+    // 裸构造（单测直驱无视图）：仅图片管理器绑定面缺席，属性资源照走 hub
+    prepareHtmlResources(content, { images: null, live: true })
+  }
+  content.addEventListener('click', (event) => {
+    const target = event.target
+    if (target instanceof Element && target.closest('a[href]') !== null) {
+      event.preventDefault() // 不意外跳转（规格「Live 的状态与选区」红线）
+    }
+  })
+}
+
+/**
  * Live HTML 块 widget：宿主 div（块级呈现 + hover 边框 + 右上角编辑按钮
  * ——复用图形块按钮族 DOM/CSS，仅 edit 钮）内挂净化后的原生语义 DOM。
  * ignoreEvent=false：点击落父编辑器选区管线（规格「HTML 内部普通点击仍
@@ -214,7 +268,7 @@ export class LiveHtmlWidget extends WidgetType {
     return 1
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view?: import('@codemirror/view').EditorView): HTMLElement {
     const host = document.createElement('div')
     host.className = LIVE_HTML_CLASS_NAMES.host
     host.dataset['vsidianHtmlFrom'] = String(this.from)
@@ -225,14 +279,15 @@ export class LiveHtmlWidget extends WidgetType {
       content.dataset['vsidianDocScope'] = this.docScope
     }
     content.innerHTML = htmlBlockRenderHtml(this.source)
+    prepareHtmlWidgetContent(content, view)
     const chrome = buildGraphicChrome({
       // 编辑源码：与内容点击/键位操作同一执行体——选中完整源码区间
       // （selectionTouchesRange 命中 → 既有源码显形管线接管）
       onEdit: () => {
-        const view = EditorView.findFromDOM(host)
-        if (view) {
-          view.dispatch({ selection: { anchor: this.from, head: this.to } })
-          view.focus()
+        const editorView = EditorView.findFromDOM(host)
+        if (editorView) {
+          editorView.dispatch({ selection: { anchor: this.from, head: this.to } })
+          editorView.focus()
         }
       },
     })
@@ -398,9 +453,9 @@ export const liveHtml: Extension = [
  * 常驻即覆盖两模式。树缺席或与文本长度不符时收集器内部独立全文 parse
  * （坐标安全前提）。
  */
-export function liveDocStyle(docScope: string): Extension {
+export function liveDocStyle(docScope: string, resourcePort?: DocStyleResourcePort | null): Extension {
   return ViewPlugin.fromClass(class {
-    private readonly binding = new DocumentStyleBinding(docScope)
+    private readonly binding = new DocumentStyleBinding(docScope, resourcePort)
 
     constructor(view: EditorView) {
       this.syncNow(view)

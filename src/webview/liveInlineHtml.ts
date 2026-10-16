@@ -25,7 +25,7 @@ import { liveDecorationsField } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { inlineHtmlFragmentsOfTree, type HtmlInlineFragment } from '../shared/htmlInline'
 import { htmlInlineRenderHtml } from './htmlSanitize'
-import { makeHtmlWidgetMousedown, liveHtmlDocScopeOf } from './liveHtml'
+import { makeHtmlWidgetMousedown, liveHtmlDocScopeOf, prepareHtmlWidgetContent } from './liveHtml'
 import type { Tree } from '@lezer/common'
 
 /** #568 Live 行内 HTML 宿主稳定类名（样式契约 live-inline-html-widget
@@ -185,7 +185,7 @@ export class LiveInlineHtmlWidget extends WidgetType {
       other.to === this.to && other.docScope === this.docScope
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view?: import('@codemirror/view').EditorView): HTMLElement {
     const host = document.createElement('span')
     host.className = LIVE_INLINE_HTML_CLASS_NAMES.host
     host.dataset['vsidianHtmlFrom'] = String(this.from)
@@ -196,6 +196,9 @@ export class LiveInlineHtmlWidget extends WidgetType {
       content.dataset['vsidianDocScope'] = this.docScope
     }
     content.innerHTML = htmlInlineRenderHtml(this.source)
+    // #570（T05）：资源装配与链接防跳转——与块级 widget 同一执行体
+    //（行内 img/srcset/媒体属性按视图身份解析；a 点击不意外跳转）
+    prepareHtmlWidgetContent(content, view)
     host.append(content)
     return host
   }

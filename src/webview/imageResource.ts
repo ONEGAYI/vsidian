@@ -111,6 +111,9 @@ interface SlotRecord {
   /** 实际承载图片的元素（阅读 = 槽位自身；live = render 回调创建的 img） */
   img: HTMLImageElement | null
   render?: (slot: HTMLElement, src: string) => HTMLImageElement
+  /** #570（T05）显式 sweep 标记（HTML widget 内容的 img 槽位——无 render
+   *  回调但生命周期随 widget DOM 离场，需 sweep 兜底清理） */
+  sweepOnDisconnect?: boolean
   onLoad: (event: Event) => void
   onError: (event: Event) => void
   onClick: (event: MouseEvent) => void
@@ -135,11 +138,15 @@ export class ImageResourceManager {
    * 绑定一个图片槽位。阅读视图：槽位即 <img>（原 src 已剥离），解析成功
    * 后直接写回 src 属性。live 视图：传 render 回调构建内部 <img>
    * （widget 重建时由回调恢复），返回值用于监听 load/error。
+   * #570（T05）：opts.sweepOnDisconnect 为无 render 回调但生命周期随
+   * widget DOM 离场的槽位（HTML widget 内容的 img）开启 sweep 兜底清理
+   * （CM6 widget 移出视口无销毁回调）。
    */
   attach(
     slot: HTMLElement,
     rawSrc: string,
     render?: (slot: HTMLElement, src: string) => HTMLImageElement,
+    opts?: { sweepOnDisconnect?: boolean },
   ): void {
     if (this.slots.has(slot)) {
       return
@@ -173,6 +180,7 @@ export class ImageResourceManager {
       entry,
       img: null,
       render,
+      sweepOnDisconnect: opts?.sweepOnDisconnect === true,
       // #201 代次守卫：load/error 只对「当前承载图片的元素」生效（事件目标
       // 不是 record.img 时为旧世代在途事件——阅读槽位 img 即 slot、监听与
       // 槽位同生命周期，invalidate 撤下旧图后 slot 上迟到的旧事件须忽略）
@@ -346,13 +354,14 @@ export class ImageResourceManager {
   }
 
   /** 清理已脱离文档的槽位（CM6 widget 移出视口无销毁回调的兜底）。
-   *  只清理 live 视图槽位（attach 时带 render 回调者）：阅读视图槽位的
+   *  只清理 live 视图槽位（attach 时带 render 回调者，或 #570 显式
+   *  sweepOnDisconnect 标记者——HTML widget 内容的 img）：阅读视图槽位的
    *  生命周期由块挂载/卸载钩子显式管理，且 jsdom 测试环境容器可不在
    *  文档树内（isConnected 不可作为阅读槽位的存活判据） */
   sweep(): void {
     for (const slot of [...this.slots.keys()]) {
       const record = this.slots.get(slot)
-      if (record && record.render !== undefined && !slot.isConnected) {
+      if (record && (record.render !== undefined || record.sweepOnDisconnect === true) && !slot.isConnected) {
         this.detach(slot)
       }
     }

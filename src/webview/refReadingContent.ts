@@ -15,7 +15,8 @@ import {
   ImageResourceManager,
   isDirectImageSrc,
 } from './imageResource'
-import { prepareReadingImages, READING_CLASS_NAMES } from './readingView'
+import { prepareHtmlResources, type HtmlResourceBinding, type HtmlResourceSubscribe } from './htmlResourceMount'
+import { READING_CLASS_NAMES } from './readingView'
 import { renderGraphicBlockInto } from './graphicRenderers'
 import { decorateReadingCodeCard, isReadingCodeBlock } from './readingCodeCard'
 import { buildFrontmatterHeaderHtml, escapeHtml } from '../shared/frontmatterTable'
@@ -95,8 +96,10 @@ export function createSourcedImageManager(deps: {
 }
 
 /** 引用内容块挂载装配（虚拟化与无布局回退两路径共用）：只读装配 +
- *  B 身份图片 + 图形块渲染 + 代码高亮 + 笔记属性区（fm 控制器存在时施加
- *  ——P2-03 起内容恒全文，调用方一律提供；null 仅用于无目标装配） */
+ * B 身份图片 + 图形块渲染 + 代码高亮 + 笔记属性区（fm 控制器存在时施加
+ * ——P2-03 起内容恒全文，调用方一律提供；null 仅用于无目标装配）。
+ * #570（T05）起 opts.htmlResources 提供属性资源订阅端口与来源身份
+ * （srcset/媒体属性按 B 解析）；返回 binding 供调用方配对释放。 */
 export function mountRefContentBlock(
   el: HTMLElement,
   opts: {
@@ -107,14 +110,19 @@ export function mountRefContentBlock(
     fm: RefFmController | null
     /** 内容挂载的配对释放入口；旧调用方可继续只做装配。 */
     onDispose?: (cleanup: () => void) => void
+    /** #570（T05）属性资源订阅端口 + 来源文档身份（B/C 的 fsPath） */
+    htmlResources?: { subscribe: HtmlResourceSubscribe; sourceDocUri: string }
   },
-): void {
+): HtmlResourceBinding {
   for (const box of Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
     box.disabled = true
   }
-  if (opts.images) {
-    prepareReadingImages(el, opts.images)
-  }
+  const binding = prepareHtmlResources(el, {
+    images: opts.images,
+    subscribe: opts.htmlResources?.subscribe,
+    sourceDocUri: opts.htmlResources?.sourceDocUri,
+  })
+  opts.onDispose?.(() => binding.dispose())
   renderGraphicBlockInto(el)
   // #220 代码高亮：朴素形态（card=false——无头部/行号/按钮；token span
   // 直接注入 code）。卡片工具条不进引用内容：复制按钮的会话语义
@@ -123,6 +131,7 @@ export function mountRefContentBlock(
   if (opts.fm) {
     applyRefFmSection(el, opts.fm, opts.onDispose)
   }
+  return binding
 }
 
 /** Recolor an already mounted Markdown code block without touching resources,

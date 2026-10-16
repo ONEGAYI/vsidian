@@ -855,6 +855,19 @@ interface ViewState {
         scripts: number
         eventAttrs: number
       }
+      /** #570（T05）HTML/CSS 资源绘制面：图片装载态、srcset 重组、媒体
+       *  属性改写与文档样式产物 url() 解析计数（A/B 归属按 scope 分别检） */
+      resources?: {
+        imgs: number
+        imgLoaded: number
+        imgAppliedSrc: string | null
+        imgAppliedSrcs: string[]
+        srcsetApplied: number
+        srcsetPending: number
+        mediaResolved: number
+        docStyleProducts: Array<{ scope: string; resolvedUrls: number; totalUrls: number }>
+        firstResolvedCssUrl: string | null
+      }
     }
     /** #569（T04）文档样式绘制：产物键集 + Reading 直接子块计算色 +
      *  工具栏排除面基线（无产物缺省） */
@@ -19002,6 +19015,128 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(after.paint?.docStyle === undefined, 'style 块删除后产物移除（无残留规则）')
     } finally {
       await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
+    }
+  }],
+
+  ['HTML 资源：链接图片与 CSS 的文档归属、失效刷新与释放（#570）', async () => {
+    const fileA = 't5-res-570.md'
+    const fileB = 't5-sub/t5-b-570.md'
+    const docA = [
+      '# 资源归属主文档',
+      '',
+      '<div>',
+      '  <img src="t5-a-only.png" alt="A 图">',
+      '  <img srcset="t5-sa.png 1x, t5-sb.png 2x" alt="多候选">',
+      '  <video src="t5-clip.mp4" poster="t5-a-only.png" controls></video>',
+      '</div>',
+      '',
+      '![[t5-sub/t5-b-570]]',
+      '',
+      '<style>',
+      '.t5-hero { background: url(t5-bg.png); }',
+      '.t5-raw { background: url(t5-sub/t5-b-only.png); }',
+      '</style>',
+      '',
+      '<div class="t5-hero">背景</div>',
+    ].join('\n')
+    // B：img 引用 sub 专属文件（A 目录解析必 404——串源负向）；style 的
+    // 第二条规则引用 root 专属文件（B 目录解析必 404——双向串源检）
+    const docB = [
+      '# 嵌入目标 B',
+      '',
+      '<div><img src="t5-b-only.png" alt="B 图"></div>',
+      '',
+      '<style>',
+      '.t5-b-hero { background: url(t5-b-bg.png); }',
+      '.t5-b-raw { background: url(t5-a-only.png); }',
+      '</style>',
+    ].join('\n')
+    await mkdir(nodePath.join(wsDir!, 't5-sub'), { recursive: true }).catch(() => undefined)
+    const pngA = Buffer.from(TINY_PNG_BASE64, 'base64')
+    const pngB = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+    await Promise.all([
+      writeFile(nodePath.join(wsDir!, fileA), docA, 'utf8'),
+      writeFile(nodePath.join(wsDir!, fileB), docB, 'utf8'),
+      writeFile(nodePath.join(wsDir!, 't5-a-only.png'), pngA),
+      writeFile(nodePath.join(wsDir!, 't5-sa.png'), pngA),
+      writeFile(nodePath.join(wsDir!, 't5-sb.png'), pngB),
+      writeFile(nodePath.join(wsDir!, 't5-bg.png'), pngA),
+      writeFile(nodePath.join(wsDir!, 't5-clip.mp4'), Buffer.from('fake-mp4-bytes')),
+      writeFile(nodePath.join(wsDir!, 't5-sub/t5-b-only.png'), pngB),
+      writeFile(nodePath.join(wsDir!, 't5-sub/t5-b-bg.png'), pngB),
+    ])
+    try {
+      await openWithEditor(fileA)
+      await waitSessionReady(fileA)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      // Reading：A 与 B（嵌入卡内）的资源全部按各自文档身份装载（谓词直等
+      // B 图应用——嵌入装载与目录解析完成后才进入断言）
+      const reading = await waitViewState(fileA, (v) => {
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && r !== undefined &&
+          r.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-a-only.png')) &&
+          r.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-b-only.png')) &&
+          r.srcsetApplied >= 1 && r.mediaResolved >= 1
+      }, 0, 45000)
+      const res = reading.paint!.html!.resources!
+      assert(res.imgLoaded >= 2, `A/B 图装载完成（实际 ${JSON.stringify(res)}）`)
+      // A/B 归属（串源负向）：A 图来自根目录、B 图来自 t5-sub（各自目录
+      // 才有对方没有的文件——src 应用地址按路径段区分）
+      assert(res.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-a-only.png')),
+        `A 图按根目录解析（实际 ${JSON.stringify(res.imgAppliedSrcs)}）`)
+      assert(res.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-sub') && decodeURIComponent(s).includes('t5-b-only.png')),
+        `B 图按 sub 目录解析（实际 ${JSON.stringify(res.imgAppliedSrcs)}）`)
+      // CSS url() 归属（双向串源检）：A 产物 2 条全部解析；B 产物 2 条只
+      // 解析 1 条（b-bg 命中、a-only 在 B 目录不存在保持原文——串源即 2）
+      const docProd = res.docStyleProducts.find((p) => p.scope === 'doc')
+      const refProd = res.docStyleProducts.find((p) => p.scope.startsWith('ref:'))
+      assert(docProd !== undefined && docProd.totalUrls === 2 && docProd.resolvedUrls === 2,
+        `A 产物 url 双解析（实际 ${JSON.stringify(res.docStyleProducts)}）`)
+      assert(refProd !== undefined && refProd.totalUrls === 2 && refProd.resolvedUrls === 1,
+        `B 产物 url 单解析（b-bg 命中 / a-only 404 保持原文——串源即漂移；实际 ${JSON.stringify(res.docStyleProducts)}）`)
+      const urlBefore = res.firstResolvedCssUrl
+
+      // 失效刷新：覆写 A 的背景图（不同字节）→ watcher 失效广播 → 产物
+      // 重取到新代次 URI（地址文本变化）
+      await writeFile(nodePath.join(wsDir!, 't5-bg.png'), pngB)
+      const refreshed = await waitViewState(fileA, (v) => {
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && r !== undefined && r.firstResolvedCssUrl !== null &&
+          r.firstResolvedCssUrl !== urlBefore
+      }, 0, 30000)
+      const res2 = refreshed.paint!.html!.resources!
+      assert(res2.firstResolvedCssUrl !== urlBefore, '背景图覆写后产物取到新地址（失效重取）')
+      assert(res2.imgLoaded >= 2, '失效重取不破坏既有装载面')
+
+      // 释放无迟到污染：删除嵌入行（WorkspaceEdit 外部增量）→ B 实例释放
+      // （img 计数回落、ref 产物移除——释放链路正向证据）
+      const embedLine = '![[t5-sub/t5-b-570]]'
+      const at = docA.indexOf(embedLine)
+      assert(at >= 0, '定位嵌入行')
+      const textDoc = await vscode.workspace.openTextDocument(wsUri(fileA))
+      const delEdit = new vscode.WorkspaceEdit()
+      delEdit.replace(wsUri(fileA), new vscode.Range(textDoc.positionAt(at), textDoc.positionAt(at + embedLine.length + 1)), '')
+      assert(await vscode.workspace.applyEdit(delEdit), '删除嵌入行应成功')
+      const released = await waitViewState(fileA, (v) => {
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && r !== undefined && r.imgs === 2 &&
+          !r.docStyleProducts.some((p) => p.scope.startsWith('ref:'))
+      }, 0, 30000)
+      const res3 = released.paint!.html!.resources!
+      assert(res3.imgs === 2, `B 嵌入释放后 img 计数回落（实际 ${res3.imgs}）`)
+      assert(!res3.docStyleProducts.some((p) => p.scope.startsWith('ref:')),
+        `B 文档样式产物随释放回收（实际 ${JSON.stringify(res3.docStyleProducts)}）`)
+    } finally {
+      await Promise.all([
+        rm(nodePath.join(wsDir!, fileA), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-sub'), { force: true, recursive: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-a-only.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-sa.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-sb.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-bg.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-clip.mp4'), { force: true }).catch(() => undefined),
+      ])
     }
   }],
 ]

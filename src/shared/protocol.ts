@@ -304,6 +304,19 @@ export type HostToWebview =
    *  会话全部面板（多面板一致）。webview 对命中条目撤下旧图、作废重发
    *  image.request（新版本 URL）；旧 reqId 在途结果被代次守卫丢弃 */
   | { kind: 'image.invalidate'; srcs: string[] }
+  /** #570（T05）HTML/CSS 资源 URL 解析结果：reqId 对应 htmlResource.request。
+   *  独立消息种（不并入 image.result——webview 侧 reqId 路由空间按消息种
+   *  隔离，杜绝与各 ImageResourceManager 自增 reqId 的误配对）。ok 时 url
+   *  为可直接进属性/产物文本的 webview 资源 URI；失败附原因码（语义与
+   *  image.result 对齐），调用侧保持原文不编造地址 */
+  | { kind: 'htmlResource.result'; reqId: number; ok: true; url: string }
+  | {
+      kind: 'htmlResource.result'
+      reqId: number
+      ok: false
+      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error' | 'inaccessible'
+      detail?: string
+    }
   /** 图片核验唤醒（#201）：窗口焦点回归/远程重连后由宿主广播，webview
    *  有活跃图源时立即触发一轮周期核验（及时核验，不等下一周期） */
   | { kind: 'image.wake' }
@@ -1579,6 +1592,22 @@ export type WebviewToHost =
       reqId: number
       src: string
       /** #220 来源文档（悬停浮层内图片） */
+      sourceDocUri?: string
+    }
+  /** #570（T05）HTML/CSS 资源 URL 解析请求：原生 HTML 的 srcset/媒体属性
+   *  与文档样式 url()/@import/@font-face 的相对目标按**来源文档**解析为
+   *  webview 可装载地址。会话守卫与 image.request 同款（就绪且 docUri 匹
+   *  配）；sourceDocUri 语义同款（嵌入 B/C 身份，宿主与已读取的悬停/嵌入
+   *  目标比对，不匹配即丢弃——不信任前端任意 URI）。reqId 为 webview 侧
+   *  本消息种独立自增空间（路由按消息种隔离）。宿主侧解析复用同一
+   *  classifyImageTarget 白名单与 asWebviewUri 机制（路径规则不建第二份） */
+  | {
+      kind: 'htmlResource.request'
+      sessionId: string
+      docUri: string
+      reqId: number
+      url: string
+      /** 来源文档（嵌入/悬停 B/C 身份；缺省 = 面板自身文档） */
       sourceDocUri?: string
     }
   /** 图片周期核验（#201）：webview 活跃挂载图源（非直连）合并上报，宿主
@@ -2874,6 +2903,23 @@ export interface PaintProbe {
       scripts: number
       /** 净化负向：观测面子树内 on* 事件属性数（期望 0） */
       eventAttrs: number
+    }
+    /** #570（T05）HTML/CSS 资源绘制面：图片装载态（管理器回包应用 +
+     *  loaded 确认）、srcset 重组、媒体属性改写（成功解析后属性为绝对
+     *  地址）与文档样式产物 url() 解析应用计数 */
+    resources: {
+      imgs: number
+      imgLoaded: number
+      imgAppliedSrc: string | null
+      /** 全部已应用地址（A/B 归属断言——按路径段区分来源文档） */
+      imgAppliedSrcs: string[]
+      srcsetApplied: number
+      srcsetPending: number
+      mediaResolved: number
+      /** 各 docScope 产物的 url() 解析计数（归属断言按 scope 分别检） */
+      docStyleProducts: Array<{ scope: string; resolvedUrls: number; totalUrls: number }>
+      /** 首个已解析 CSS URL（失效重取的地址变化断言） */
+      firstResolvedCssUrl: string | null
     }
   }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
@@ -4552,6 +4598,17 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.src) &&
         (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
+    case 'htmlResource.request':
+      // #570（T05）HTML/CSS 资源解析：字段形态与 image.request 同款（url
+      // 非空；sourceDocUri 可选非空字符串）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.url === 'string' &&
+        v.url.length > 0 &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
+      )
     case 'image.verify':
       // #201 周期核验：条目形态（state 枚举 + 可选 reason 码）
       return (
@@ -5192,6 +5249,26 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'image.invalidate':
       // #201 失效通知：src 非空数组（空批无广播意义，防御放行不收紧）
       return Array.isArray(v.srcs) && v.srcs.every(isString)
+    case 'htmlResource.result':
+      // #570（T05）HTML/CSS 资源解析结果：reqId 配对 + ok/失败形态
+      //（reason 枚举与 image.result 对齐）
+      if (!isPositiveInt(v.reqId)) {
+        return false
+      }
+      if (v.ok === true) {
+        return isString(v.url)
+      }
+      if (v.ok === false) {
+        return (
+          (v.reason === 'blocked' ||
+            v.reason === 'outside-workspace' ||
+            v.reason === 'not-found' ||
+            v.reason === 'read-error' ||
+            v.reason === 'inaccessible') &&
+          (v.detail === undefined || isString(v.detail))
+        )
+      }
+      return false
     case 'image.wake':
       return true
     case 'image.paste.result':

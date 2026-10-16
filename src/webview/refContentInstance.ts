@@ -16,6 +16,7 @@ import { splitReadingBlocks } from './readingBlocks'
 import { createReadingBlockElement } from './readingView'
 import { VirtualReadingView, type ReadingViewStats } from './readingVirtualView'
 import { createSourcedImageManager, mountRefContentBlock, refreshRefCodeHighlight } from './refReadingContent'
+import { hubResourcePort, subscribeHtmlResource, type HtmlResourceSubscribe } from './htmlResourceHub'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { TextRefView } from './textRefView'
 import type { ImageResourceManager } from './imageResource'
@@ -385,6 +386,9 @@ export class RefContentMount {
   private released = false
   private target: RefLoadedContent | RefLoadedTextContent | null = null
   private images: ImageResourceManager | null = null
+  /** #570（T05）属性资源订阅面（B 身份——srcset/媒体属性经 hub 以目标
+   *  fsPath 订阅；render 随装载目标建立） */
+  private htmlResources: { subscribe: HtmlResourceSubscribe; sourceDocUri: string } | null = null
   private view: VirtualReadingView | null
   /** #340（P3-08）text 内容视图（与 markdown 的 VirtualReadingView 互斥） */
   private textView: TextRefView | null = null
@@ -541,6 +545,12 @@ export class RefContentMount {
       send: this.options.send,
       sourceDocUri: () => this.target?.fsPath ?? '',
     })
+    // #570（T05）：属性资源订阅面（B 身份）+ 文档样式资源端口（同身份——
+    // B 的 <style> 产物内 url()/字体按 B 目录解析，与 img 管理器同一身份面）
+    this.htmlResources = {
+      subscribe: subscribeHtmlResource,
+      sourceDocUri: mdLoaded.fsPath,
+    }
     // #569（T04）文档样式装载：目标键从 B 的 fsPath 派生（canonical
     // 身份域单向派生）；同一 B 多实例（嵌入卡 + 悬停浮层 + 内部 Live）
     // 共享同一产物。标记随 setDocument 重建的块铺开（render 流程恒
@@ -548,7 +558,7 @@ export class RefContentMount {
     const scopeKey = docScopeKeyOf(mdLoaded.fsPath)
     if (this.docStyle === null || this.docScope !== scopeKey) {
       this.docStyle?.dispose()
-      this.docStyle = new DocumentStyleBinding(scopeKey)
+      this.docStyle = new DocumentStyleBinding(scopeKey, hubResourcePort(mdLoaded.fsPath))
       this.docScope = scopeKey
     }
     this.docStyle.sync(mdLoaded.text)
@@ -759,6 +769,7 @@ export class RefContentMount {
     for (const el of [...this.blocks.keys()]) this.unmountBlock(el)
     this.images?.dispose()
     this.images = null
+    this.htmlResources = null // #570：随装载目标清退（块级订阅已随 unmount 退订）
     this.target = null
     if (!this.view) this.options.contentEl.textContent = ''
   }
@@ -829,6 +840,9 @@ export class RefContentMount {
         toggle: () => (this.instance.fmExpanded = !this.instance.fmExpanded),
       } : null,
       onDispose: (cleanup) => cleanups.push(cleanup),
+      // #570（T05）：HTML 资源（srcset/媒体属性）按装载目标 B/C 身份订阅
+      //（docStyle 产物同身份——B 的 url() 以 B 目录解析）
+      ...(this.htmlResources ? { htmlResources: this.htmlResources } : {}),
     })
     // #340：text 内容无 Markdown 嵌入块语义（块挂载仅 markdown 路径可达）
     const mdTarget = this.target !== null && !('kind' in this.target) ? this.target : null

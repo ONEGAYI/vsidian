@@ -159,6 +159,15 @@ import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtP
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
 import { liveDocStyle, liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
+import {
+  hubResourcePort,
+  invalidateAllHtmlResources,
+  notifyHtmlResourceInvalidate,
+  notifyHtmlResourceResult,
+  registerHtmlResourcePort,
+} from './htmlResourceHub'
+import { disposeHtmlResourcesOf, prepareHtmlResources } from './htmlResourceMount'
+import { documentStyleRegistry } from './docStyleLoader'
 import { revealInlineHtmlSourceAtCursor } from './liveInlineHtml'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
@@ -247,7 +256,7 @@ import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './ima
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
-import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
+import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
 import {
   BACKLINK_CLASS_NAMES,
@@ -1160,6 +1169,12 @@ export class WebviewSyncController {
       onBecomeActive: () => this.imageVerify?.onBecomeActive(),
       onBecomeIdle: () => this.imageVerify?.onBecomeIdle(),
     })
+    // #570（T05）HTML/CSS 资源解析端口注册（A 面板身份——htmlResource.request
+    // 经主桥出站；嵌入 B/C 的订阅以 sourceDocUri 区分，宿主按来源目录解析）
+    registerHtmlResourcePort({
+      session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
+      send: (message) => this.bridge.postMessage(message),
+    })
     // #201 周期核验：活跃图源合并上报（间隔约 30 秒，工程初值；无活跃停表；
     // 面板恢复可见/宿主唤醒立即核验）。visibilitychange 常驻监听随 dispose 摘除
     this.imageVerify = new ImageVerifyScheduler(
@@ -1278,7 +1293,9 @@ export class WebviewSyncController {
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
       onBlockMounted: (el) => {
         if (this.images) {
-          prepareReadingImages(el, this.images)
+          // #570（T05）：HTML 资源装配（img/srcset/媒体属性——A 面板身份；
+          // 内部覆盖既有 prepareReadingImages 的 img[src] 面并扩展属性矩阵）
+          prepareHtmlResources(el, { images: this.images })
         }
         // #111 渲染分派走注册表（登记即继承）：容器语言有管线即渲染，
         // 无管线停留 pending 降级（live 侧由发射 gate 直接降级源码+卡片）
@@ -1297,6 +1314,7 @@ export class WebviewSyncController {
       },
       onBlockUnmounted: (el) => {
         this.images?.detachWithin(el)
+        disposeHtmlResourcesOf(el) // #570：块级资源订阅退订（迟到结果不回写）
         this.embedCards?.unmountBlock(el)
       },
     })
@@ -1826,9 +1844,10 @@ export class WebviewSyncController {
       // #567（T02）主文档身份标记：根正文的 HTML 块渲染根挂
       // data-vsidian-doc-scope="doc"（T01 探针 b2 隔离基座）；#569（T04）
       // 起同键装载全文 <style> 产物（Reading 共享同一 CM6 doc——双模式
-      // 单一装载链；dispose 随视图销毁释放）
+      // 单一装载链；dispose 随视图销毁释放）；#570（T05）产物 url()/字体
+      // 经 hub 端口按 A 身份解析（sourceDocUri 缺省 = 面板文档）
       liveHtmlDocScope('doc'),
-      liveDocStyle('doc'),
+      liveDocStyle('doc', hubResourcePort()),
       // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
       // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
       ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
@@ -3792,6 +3811,15 @@ export class WebviewSyncController {
         this.images?.invalidate(message.srcs)
         notifyHoverImageInvalidate(message.srcs)
         this.embedCards?.notifyImageInvalidate(message.srcs)
+        // #570（T05）：HTML/CSS 资源同口径失效重取（srcset/媒体属性经 hub；
+        // 文档样式 url()/字体经注册表——清映射回退原文后新代次 URI 重渲染）
+        notifyHtmlResourceInvalidate(message.srcs)
+        documentStyleRegistry.notifyResourceInvalidate(message.srcs)
+        break
+      case 'htmlResource.result':
+        // #570（T05）HTML/CSS 资源解析结果路由（独立消息种——reqId 空间
+        // 与 image.result 隔离；未知/迟到 reqId 由 hub 丢弃）
+        notifyHtmlResourceResult(message)
         break
       case 'image.wake':
         // #201 及时核验：窗口焦点回归/远程重连，有活跃图源立即触发一轮
@@ -3813,6 +3841,9 @@ export class WebviewSyncController {
         invalidateHoverPopupImages()
         // #222 嵌入卡片内 B 图片同口径全量重挂
         this.embedCards?.invalidateImages()
+        // #570（T05）：HTML/CSS 资源同口径全量失效重取（新代次戳 URI）
+        invalidateAllHtmlResources()
+        documentStyleRegistry.invalidateAllResources()
         resetMermaidLoadFailure()
         break
       case 'view.state.request': {
@@ -10614,6 +10645,14 @@ export class WebviewSyncController {
         0),
       inline: inlinePaint,
     }
+    // #570（T05）HTML/CSS 资源绘制探针：HTML 块/行内内容里的图片装载态
+    //（管理器回包后 src 已应用 + loaded 事件确认）、srcset 重组应用计数、
+    // 媒体属性改写计数（成功解析后属性以绝对地址存在），文档样式产物的
+    // url() 解析应用计数（绝对地址 vs 仍为相对原文——后者为未解析/失败，
+    // 按语义不报错）。docStyleEls 在下方声明后并入（避免 TDZ）。
+    const htmlImgEls = htmlRootEls.flatMap((r) => [...r.querySelectorAll<HTMLImageElement>('img')])
+    const attrResolved = (value: string | null): boolean =>
+      value !== null && /^(https?:|vscode-webview:|vscode-resource:)/i.test(value)
     // #569（T04）文档样式绘制探针：head 产物键集 + Reading 主容器直接
     // 子块计算色（文档样式命中证据）+ 工具栏排除面基线。直接子块限定：
     // 嵌入卡内段落挂引用键不计入主文档读值
@@ -10633,6 +10672,35 @@ export class WebviewSyncController {
             : null,
         }
       : undefined
+    // #570（T05）HTML/CSS 资源绘制探针（并入 htmlPaint.resources；docStyleEls
+    // 已在上文声明）：图片装载态（回包应用 + loaded 确认）、srcset 重组、
+    // 媒体属性改写（成功解析后为绝对地址）、产物 url() 解析应用（绝对地址
+    // 计数与仍为相对原文的计数——后者是未解析/失败，按语义不报错）
+    const htmlResourcesPaint = {
+      imgs: htmlImgEls.length,
+      imgLoaded: htmlImgEls.filter((el) => el.dataset['vsidianImgState'] === 'loaded').length,
+      imgAppliedSrc: htmlImgEls.map((el) => el.getAttribute('src')).find((s) => s !== null) ?? null,
+      /** 全部已应用地址（A/B 归属断言——按路径段区分来源文档） */
+      imgAppliedSrcs: htmlImgEls.map((el) => el.getAttribute('src')).filter((s): s is string => s !== null),
+      srcsetApplied: htmlRootEls.reduce(
+        (n, r) => n + [...r.querySelectorAll('[srcset]')].filter((el) => attrResolved(el.getAttribute('srcset'))).length, 0),
+      srcsetPending: htmlRootEls.reduce(
+        (n, r) => n + r.querySelectorAll('[data-vsidian-srcset]').length, 0),
+      mediaResolved: htmlRootEls.reduce(
+        (n, r) => n + [...r.querySelectorAll('video[src], audio[src], source[src], video[poster]')]
+          .filter((el) => [...el.attributes].some((a) => attrResolved(a.value))).length, 0),
+      /** 各 docScope 产物的 url() 解析计数（A/B 归属断言——按 scope 分别
+       *  断言解析数，串源时计数漂移可检）；firstResolvedCssUrl 供失效
+       *  重取的地址变化断言 */
+      docStyleProducts: docStyleEls.map((el) => ({
+        scope: el.getAttribute('data-vsidian-doc-style') ?? '',
+        resolvedUrls: (el.textContent?.match(/url\("https?:/g)?.length ?? 0),
+        totalUrls: (el.textContent?.match(/url\("/g)?.length ?? 0),
+      })),
+      firstResolvedCssUrl: docStyleEls
+        .map((el) => el.textContent?.match(/url\("(https?:[^"]+)"\)/)?.[1] ?? null)
+        .find((u): u is string => u !== null) ?? null,
+    }
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
     // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。分组线
@@ -10920,7 +10988,8 @@ export class WebviewSyncController {
       // #567（T02）块级原生 HTML 绘制观测（live：.vsidian-live-html /
       // reading：.vsidian-reading-html；无渲染根时缺省）
       // #568 起 html 探针含行内面：块或行内任一在场即产出
-      ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: htmlPaint } : {}),
+      // #570（T05）起附资源面 resources（图片装载/srcset/媒体属性/产物 url）
+      ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: { ...htmlPaint, resources: htmlResourcesPaint } } : {}),
       // #569（T04）文档样式隔离观测（无产物缺省）
       ...(docStyleProbe ? { docStyle: docStyleProbe } : {}),
       quickActions,

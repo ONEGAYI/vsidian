@@ -1205,6 +1205,40 @@ export class DocumentSession {
         }
         return this.resolveImageRequest(panel, message.reqId, message.src)
       }
+      case 'htmlResource.request': {
+        // #570（T05）HTML/CSS 资源解析请求（srcset/媒体属性/文档样式
+        // url()/字体）：会话守卫与 image.request 同款；来源守卫与
+        // resolveSourcedImageRequest 同款（sourceDocUri 须为本面板已读取
+        // 的悬停/嵌入目标——不信任前端任意 URI）。解析复用同一
+        // resolveImage 端口（classifyImageTarget 白名单 + asWebviewUri，
+        // 路径规则不建第二份），成功登记失效反查（文件变化 →
+        // image.invalidate 广播命中 webview 侧 hub 重取）。独立 reqId
+        // 空间（webview 按消息种路由，与本会话图片请求互不干扰）。
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
+          return Promise.resolve() // 来源守卫：静默丢弃
+        }
+        const resolver = panel.port.resolveImage
+        const resolution = resolver
+          ? await resolver(message.url, message.sourceDocUri)
+              .catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
+          : ({ ok: false, reason: 'read-error' } as ImageResolution)
+        if (resolution.fsPath) {
+          this.registerImageSrcTarget(message.url, resolution.fsPath)
+        }
+        panel.port.send(resolution.ok
+          ? { kind: 'htmlResource.result', reqId: message.reqId, ok: true, url: resolution.src }
+          : {
+            kind: 'htmlResource.result',
+            reqId: message.reqId,
+            ok: false,
+            reason: resolution.reason,
+            detail: resolution.detail,
+          })
+        return Promise.resolve()
+      }
       case 'image.verify': {
         // #201 周期核验：会话守卫对齐 image.request；items 透传注入端口
         // （决策与失效由 provider 协调器执行），串行合并保证并发有界
