@@ -12572,10 +12572,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await vscode.workspace.fs.writeFile(ext('old/target.md'), Buffer.from('# 外部目标\n', 'utf8'))
       await vscode.workspace.fs.writeFile(ext('old/nested/unreferenced.md'), Buffer.from('# 未引用\n', 'utf8'))
       // 根内引用者：绝对路径 mdlink（外部目标经绝对身份登记进引用桶）。
-      // 链接文本取 vscode.Uri fsPath 归一形态（Windows 盘符小写）——登记
-      // 身份键随链接文本走、rename 事件路径由宿主 URI 派生，两端同形才进
-      // 精确身份门（normKey 不折叠大小写：NTFS 大小写不敏感，但身份键
-      // 匹配是精确的——漂移容错在 backlinks 桶的 fold 通道，files 门不在）
+      // 链接文本取 vscode.Uri fsPath 归一形态（Windows 盘符小写）；登记
+      // 身份键随链接文本走、rename 事件路径由宿主 URI 派生——#562 起
+      // files 身份门对 Windows 盘符大小写漂移折叠容错（大写盘符形态的
+      // 命中面由 #562 专项用例钉住，本用例保持归一形态主链路）
       const refText = `[外部目标](${ext('old/target.md').fsPath.replaceAll('\\', '/')})\n`
       await vscode.workspace.fs.writeFile(wsUri('r4-ext-ref.md'), Buffer.from(refText, 'utf8'))
       // 等外部目标的引用登记（绝对身份桶 incoming 含引用者）。慢 runner 上
@@ -12755,6 +12755,67 @@ export const cases: Array<[string, () => Promise<void>]> = [
         return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']) &&
           (await quiet()) ? s : undefined
       }).catch(() => {})
+      await rm(extDir, { recursive: true, force: true }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
+  ['rename 引用改写：大写盘符绝对链接的外部目标身份门命中（#562）', async () => {
+    await waitRenameIndexReady()
+    const extDir = `${wsDir}-r562-ext`
+    const ext = (p: string): vscode.Uri => vscode.Uri.file(`${extDir}/${p}`)
+    const extAbs = (p: string): string => `${extDir.replaceAll('\\', '/')}/${p}`
+    // 链接文本用资源管理器复制形态（大写盘符）：登记身份键随链接文本、
+    // rename 事件路径随宿主 URI（小写）——身份门折叠命中是本用例的钉面。
+    // 盘符转换仅 Windows 宿主生效（CI 集成 job 为 Linux，本用例在 CI 上退
+    // 化为归一形态主链路重复——折叠逻辑面由单测 vaultIndexService #562 组
+    // 钉住，本用例钉本地 Windows 真宿主的端到端接线）
+    const extAbsUpper = (p: string): string => extAbs(p).replace(/^([a-z]):/, (m) => m.toUpperCase())
+    const containsFold = (haystack: string, needle: string): boolean =>
+      haystack.toLowerCase().includes(needle.toLowerCase())
+    try {
+      await vscode.workspace.fs.createDirectory(ext('old'))
+      await vscode.workspace.fs.writeFile(ext('old/target.md'), Buffer.from('# 562 外部目标\n', 'utf8'))
+      const refText = `[562 外部目标](${extAbsUpper('old/target.md')})\n`
+      await vscode.workspace.fs.writeFile(wsUri('r562-ref.md'), Buffer.from(refText, 'utf8'))
+      // 等外部目标引用登记（登记身份键 = 大写盘符链接形态；查询用 vscode
+      // 小写形态——修复前身份门精确匹配 miss 恒 outside）。慢 runner 自愈
+      // kick（四审用例同款）
+      let healKick = 0
+      await poll('大写盘符链接的身份门命中', async () => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', ext('old/target.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        if (c?.status === 'ready' &&
+          c.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('r562-ref.md').fsPath))) {
+          return true
+        }
+        if (healKick++ % 40 === 20) {
+          await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('r562-ref.md'), Buffer.from(refText, 'utf8'))).catch(() => {})
+        }
+        return undefined
+      }, 40000)
+      // 外部目标 rename：old/target.md → old/moved.md（事件路径小写盘符——
+      // 与登记键形态漂移）
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(ext('old/target.md'), ext('old/moved.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), '外部目标 rename 应成功应用')
+      // 引用者改写到 moved（改写产物含新名；形态大小写无关——fold 断言）
+      const refNew = await poll('大写盘符链接改写到新名', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('r562-ref.md'))).getText()
+        return containsFold(text, `(${extAbs('old/moved.md')})`) ? text : undefined
+      })
+      assert(!containsFold(refNew, 'old/target.md'), `引用应改写到 moved（实际 ${refNew}` + '）')
+      await poll('562 改写反馈落账', async () => {
+        const last = await lastRenameRefLog()
+        return last && last.plannedEdits >= 1 &&
+          last.moves.some((m) => normFsPath(m.oldFsPath) === normFsPath(ext('old/target.md').fsPath))
+          ? last : undefined
+      })
+    } finally {
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(restoreRename(ext('old/moved.md'), ext('old/target.md'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('r562-ref.md')).then(() => undefined, () => undefined))
       await rm(extDir, { recursive: true, force: true }).catch(() => {})
       await new Promise((r) => setTimeout(r, 400))
     }
