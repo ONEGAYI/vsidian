@@ -2342,6 +2342,8 @@ export interface HoverTextNavPayload {
  *  #556（T3）短名补查分态：ambiguous=根内多个同名候选（不归任一候选，
  *  提示补路径）；pending=清单未就绪且只发现一个候选（不声明唯一，显示
  *  更新中状态）。两态不冒充 not-found。
+ *  #534（T04）anchor-conflict=普通链接同时带冒号行号与非空 fragment 的
+ *  混合定位（整次语法非法，附定位冲突原文）。
  *  失败均提供原生打开入口继续 */
 export type HoverPreviewFailReason =
   | 'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' | 'anchor-invalid'
@@ -2353,6 +2355,8 @@ export type HoverPreviewFailReason =
   | 'web-disabled' | 'web-invalid-address' | 'web-timeout' | 'web-too-large' | 'web-not-html' | 'web-redirects' | 'web-unreachable'
   // #556（T3）短名补查分态（见上方注释）
   | 'ambiguous' | 'pending'
+  // #534（T04）普通链接混合定位分态（行号 + fragment，见上方注释）
+  | 'anchor-conflict'
 
 /** #340 anchor-invalid 的细分原因（错误分态文案参数；shared/refText 的
  *  TextAnchorInvalidCode 同源——协议侧为消息形态单一事实源） */
@@ -5560,7 +5564,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           v.reason === 'web-too-large' || v.reason === 'web-not-html' || v.reason === 'web-redirects' ||
           v.reason === 'web-unreachable' ||
           // #556（T3）短名补查分态（多候选/清单未就绪，不冒充不存在）
-          v.reason === 'ambiguous' || v.reason === 'pending') &&
+          v.reason === 'ambiguous' || v.reason === 'pending' ||
+          // #534（T4）混合定位分态（行号 + fragment，整次语法非法）
+          v.reason === 'anchor-conflict') &&
         (v.anchor === undefined || isString(v.anchor)) &&
         (v.anchorDetail === undefined ||
           (v.reason === 'anchor-invalid' &&

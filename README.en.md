@@ -45,6 +45,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Feature | Description |
 | --- | --- |
 | Wikilinks & anchors | Five `[[wikilink]]` forms; `#heading` and `#^block-id` jumps land on the target, with a highlight flash on arrival |
+| Line-number links | Clicking `[jump](note.md:103)` lands on line 103 in the Vsidian panel for Markdown targets, or reveals that line in the native editor for code/config files (`file.ts:103` works the same). Out-of-range line numbers open the target and report honestly instead of silently clamping; mixing a line number with an anchor (`note.md:20#heading`) is reported as an invalid location |
 | Wikilink completion | Typing `[[]]` pops up file candidates (every common file type — images, PDFs, and more); `#` / `^` then list the target's headings and blocks; works in table cells and embedded editors too |
 | Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
 | Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable |

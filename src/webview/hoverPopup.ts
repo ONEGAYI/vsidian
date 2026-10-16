@@ -165,9 +165,18 @@ export const HOVER_POPUP_CLOSE_DELAY_MS = 350
 /** 普通链接可预览性预滤（#219）：外部网页（带 scheme 或协议相对地址）与
  *  空 href 不接入悬停预览——本地相对路径与页内锚点（#frag）放行，宿主侧
  *  classifyLinkTarget 复核兜底（预滤与宿主判定同口径，双保险）。双链不
- *  经此判定（vsidian-wikilink 类即双链形态，目标原文不是 URL） */
+ *  经此判定（vsidian-wikilink 类即双链形态，目标原文不是 URL）。
+ *  #534：尾部行号形态（含点 scheme 段 + `:纯数字` + 可选 hash/query，
+ *  如 note.md:103）不是外链——宿主按文件名 + 行号解析（行号剥离与形态
+ *  判定的单一事实源在 host/linkTarget，此处只放通预滤不复制解析）；含点
+ *  限定与宿主「真 scheme 不含点」口径对齐——`https:443` 等无点真形态
+ *  维持外链预滤 */
 const EXTERNAL_LINK_HREF_RE = /^(?:[a-zA-Z][a-zA-Z0-9+.\-]*:|\/\/)/
+const LINE_SUFFIX_HREF_RE = /^[a-zA-Z][a-zA-Z0-9+.\-]*\.[a-zA-Z0-9+.\-]*:\d+(?:[#?].*)?$/
 export function isHoverableMdLinkHref(href: string): boolean {
+  if (LINE_SUFFIX_HREF_RE.test(href)) {
+    return true
+  }
   return href !== '' && !EXTERNAL_LINK_HREF_RE.test(href)
 }
 

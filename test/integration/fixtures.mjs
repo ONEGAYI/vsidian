@@ -901,6 +901,18 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'nav-target-crlf.md'), 'CRLF甲行\r\nCRLF乙行\r\nCRLF丙行\r\n', 'utf8')
   writeFileSync(path.join(wsDir, 'nav-target.ts'), 'export const a = 1\nexport const b = 2\nexport const c = 3\n', 'utf8')
+  // #534 T04 普通链接尾部行号样例（复用 nav-target 族目标；独立来源文档
+  // ——导航零写回但会打开目标）：行号/混合/零行/越界形态
+  writeFileSync(path.join(wsDir, 'line-links.md'), [
+    '# 行号链接',
+    '',
+    'md 行定位 [md 五行](nav-target.md:5) 与 [折叠区七行](nav-target.md:7)。',
+    '',
+    'CRLF [三行](nav-target-crlf.md:3) 与文本 [二行](nav-target.ts:2)。',
+    '',
+    '非法：[混合](nav-target.md:3#无效) 与 [零行](nav-target.md:0) 与 [越界](nav-target.md:9999)。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'nav-opener.md'), [
     '# 开面板标题',
     '',

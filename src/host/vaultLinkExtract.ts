@@ -39,7 +39,7 @@
 // 套规则（R1 单一解析语义）。
 import * as path from 'node:path'
 import type { SyntaxNode, Tree } from '@lezer/common'
-import { classifyImageTarget, classifyLinkTarget, planPathTextOf, splitHrefFragment, type LinkContext } from './linkTarget'
+import { classifyImageTarget, classifyLinkTarget, linkPathTextOf, type LinkContext } from './linkTarget'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
 import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
 import { scanLooseLinksInLine } from '../shared/looseLink'
@@ -255,8 +255,9 @@ export function extractVaultEdges(
     if (target.kind === 'doc') {
       let resolved = resolveDocTarget(target.candidates, resolve)
       if (resolved === null) {
-        // 短名补查的路径文本与跳转链路同形态（剥 fragment/query 后容错解码）
-        resolved = resolveShortnameTarget(planPathTextOf(splitHrefFragment(href).pathText), true)
+        // 短名补查的路径文本与跳转链路同形态（#534 起剥尾部行号后
+        // 剥 fragment/query 容错解码——note.md:103 的补查域是 note.md）
+        resolved = resolveShortnameTarget(linkPathTextOf(href), true)
       }
       edges.push({
         source: sourceRelPath,
@@ -548,7 +549,7 @@ export function reresolveVaultEdgeTarget(
       const target = classifyLinkTarget(edge.target, ctx)
       if (target.kind === 'doc') {
         return probe(target.candidates)
-          ?? probeShortname(planPathTextOf(splitHrefFragment(edge.target).pathText), true)
+          ?? probeShortname(linkPathTextOf(edge.target), true)
       }
       if (target.kind === 'absolute') {
         return probe(target.candidates, resolveAbsolutePort)
@@ -584,7 +585,7 @@ export function shortnameDepKeyOf(
       return shortnameLookupKeyOf(edge.target, ctx, { implicitMd: true })
     case 'mdlink':
     case 'refdef':
-      return shortnameLookupKeyOf(planPathTextOf(splitHrefFragment(edge.target).pathText), ctx, { implicitMd: true })
+      return shortnameLookupKeyOf(linkPathTextOf(edge.target), ctx, { implicitMd: true })
     case 'image':
       return shortnameLookupKeyOf(edge.target, ctx, { implicitMd: false })
   }

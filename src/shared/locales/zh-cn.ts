@@ -366,6 +366,8 @@ export const zhCn: Record<MessageKey, string> = {
   'host.blockedLinkScheme': '不允许打开的链接协议「{scheme}」：仅支持 http/https 与工作区内路径',
   'host.blockedLinkEscape': '链接指向工作区之外，已拦截：{detail}',
   'host.blockedLinkWindowsDrive': '远程（POSIX）工作区不支持 Windows 盘符路径链接',
+  'host.blockedLinkMixedAnchor': '链接同时带行号与锚点，属非法定位（不二选一）：{detail}',
+  'host.linkLineOutOfRange': '行号超出目标总行数：{href} 第 {line} 行（目标共 {total} 行；已打开目标但未定位）',
   'host.externalOpenFailed': '无法打开外部链接：{url}',
   'host.linkNotFound': '链接目标不存在：{href}（已按相对当前文档目录解析）',
   /** #128 CSS 片段：宿主侧用户提示 */
@@ -538,6 +540,7 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorNotFound': '目标不存在：{target}（按当前文档所在目录解析；不会自动创建文件）',
   'hover.errorAmbiguous': '同名目标不唯一：{target}（请补充路径以明确目标）',
   'hover.errorPending': '文件清单更新中，唯一同名目标暂不能确认：{target}',
+  'hover.errorAnchorConflict': '链接同时带行号与锚点，属非法定位（不二选一）：{target} #{anchor}',
   'hover.errorNonMarkdown': '{target} 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
   'hover.errorReadFailed': '读取目标文档失败',
   'hover.errorAnchorMissing': '目标笔记中不存在锚点：{target}#{anchor}（不会以全文替代显示）',

@@ -389,4 +389,4 @@ const result = await sdk.views?.openDocument({
 
 ## 10. 后续 API 扩展规格
 
-2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T02 正则/条件/嵌套、T03 文档导航、T05 只读引用浮窗、T06 组件容器嵌入及 T07 统一主题已实施，待用户整体验收；T04 普通链接尾部行号及 T08 内核退役尚未实施。当前公开声明和生成参考是实际可消费能力的事实源。
+2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T02 正则/条件/嵌套、T03 文档导航、T04 普通链接尾部行号、T05 只读引用浮窗、T06 组件容器嵌入及 T07 统一主题已实施，待用户整体验收；T08 内核退役为仅存未实施票。当前公开声明和生成参考是实际可消费能力的事实源。

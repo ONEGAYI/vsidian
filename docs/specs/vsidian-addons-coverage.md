@@ -89,7 +89,7 @@
 
 ## 2026-10 扩展批次：文档导航（#543 / T03）
 
-以下故事定义见 [addon-navigation.md](addon-navigation.md)，公开接口映射为 `document-navigation`；普通链接语法 N-U08–N-U11 仍归 #534。
+以下故事定义见 [addon-navigation.md](addon-navigation.md)，公开接口映射为 `document-navigation`；普通链接语法 N-U08–N-U11 由 T04（#534）交付，无新增公开 API 面（形态学解析在宿主链接通道内）。
 
 | 故事 | 公开接入与验证 |
 | --- | --- |
@@ -98,9 +98,12 @@
 | N-U04 | `addonViews` 注册表验证 embed 来源；`addonDocNavCases` 从引用 B 跳到仅 B 目录存在的文件，并用 A 来源 not-found 对照 |
 | N-U06 | `addonDocNav` 单测与集成验证 CRLF；`addonDocNav.mjs` 经生产 SDK/控制器验证阅读高亮与折叠目标重新可见 |
 | N-U07 | `addonNavApi` / `addonDocNav` 单测验证无工作区、越根、缺失、非法定位、越界与失败分类；集成补真实宿主拒绝矩阵 |
+| N-U08 / N-U09 | `linkTarget` 形态矩阵（`splitLineSuffix` 先于 ADS 拦截、前导零/负数/非数字不构成行号、真 scheme 不剥）；md 行号复用 T03 `hostLineStart` 执行体，text 行号经 `resolveTextNav` strict 判定原生编辑器落位；浏 `lineSuffix`（md/text 行号定位与 href 原文保真）；集成两用例（md 落位含折叠展开/CRLF/阅读态、text reveal + 平台二态） |
+| N-U10 | 越界严格失败（目标照常打开 + i18n toast 不静默钳位）、混合定位 blocked（`line-anchor-conflict` 新 reason）；浮窗行号越界同 `anchor-invalid` 分态；单 `linkTarget`/`hoverDocAccess` + 浏 `lineSuffix`（文案就地可见与语言包同源） |
+| N-U11 | 无行号外链/普通链接/双链与图片通道维持既有行为（`linkTarget.test.ts` 既有断言零破坏 + T03 导航/链接/悬停/出链/反链/双链定向回归） |
 | N-U12 | `addonViews` / `addonDocNav` / `addonDocNavDelivery` 钉住来源注销、旧代次、等待中改短、取消/超时与有界 ack；浏览器经卸载再装载验证旧回包不接入新代次 |
 
-T03 自动化运行证据随票面实施回填，人工验收仍开放。内部端口单测验证确定性时序，公开组件夹具承担实际消费；不把模拟宿主等同于真宿主证明。
+T03 自动化运行证据随票面实施回填，人工验收仍开放。内部端口单测验证确定性时序，公开组件夹具承担实际消费；不把模拟宿主等同于真宿主证明。T04 证据截至本票实施轮（含 T03 定位复验），真机观感项见人工清单 A78。
 
 ## 未验项与限制（如实保留）
 

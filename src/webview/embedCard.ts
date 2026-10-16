@@ -2321,9 +2321,10 @@ export class EmbedCardManager {
     // #338/#341：EmbedLoaded 联合收宽后此处只对 markdown 形态定位（text
     // 装载无 Markdown 选择器/端口、PDF 无文本坐标——live 视图本就不为
     // 二者建立，locateLiveInstance 只在 live 端口 init 后到达，结构性
-    // 不可达，窄化为防御性跳过）
+    // 不可达，窄化为防御性跳过）。
+    // #534 行号定位：range 驱动（full + 行首 range.start > 0 同样定位；
+    // 现状 full 恒 start=0 不受影响）
     if (loaded !== null && isRefLoadedMarkdown(loaded) &&
-      loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
       loaded.range.start > 0 && loaded.range.start <= view.state.doc.length) {
       const at = loaded.range.start
       view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at) })
