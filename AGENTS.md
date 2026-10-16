@@ -129,9 +129,13 @@ vsidian/
 │   │   ├── addon-csp-dynamic-eval-probe.md        # 动态代码 CSP 探针报告
 │   │   ├── addon-fold-capability-probe.md         # 折叠能力载体盘点探针
 │   │   ├── data/                                  # 探针证据数据目录
-│   │   │   ├── addon-v02-probe-results.json        # V02 探针证据数据
-│   │   │   ├── appearance-probe-dark-custom.json   # 外观探针暗色轮证据
-│   │   │   └── appearance-probe-light-default.json # 外观探针亮色轮证据
+│   │   │   ├── addon-v02-probe-results.json                  # V02 探针证据数据
+│   │   │   ├── appearance-probe-dark-custom.json             # 外观探针暗色轮证据
+│   │   │   ├── appearance-probe-light-default.json           # 外观探针亮色轮证据
+│   │   │   ├── html-css-scope-probe-b2-evidence.png          # 探针b2获选路线视觉取证截图
+│   │   │   ├── html-css-scope-probe-browser-chromium151.json # 探针浏览器Chromium151证据数据
+│   │   │   └── html-css-scope-probe-host-1.82.3.json         # 探针宿主1.82.3证据数据
+│   │   ├── html-css-scope-probe.md                # 文档内CSS作用域隔离探针报告
 │   │   ├── obsidian-live-preview-editor.md        # Obsidian 技术栈与选型调研
 │   │   ├── obsidian-properties-nested-yaml.md     # Obsidian 嵌套 YAML 调查
 │   │   ├── obsidian-viewport-rendering.md         # 视口渲染性能补充调研
