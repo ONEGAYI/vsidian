@@ -434,6 +434,58 @@ function shortnameUniqueHit(a: EdgeTargetPlanArgs, key: string): boolean {
 }
 
 /**
+ * 复审 S1 终审回验：目标文本按**解析器语义**（候选序「第一个存在文件优先」
+ * + 短名补查）回算命中身份，必须等于决策目标——决策分支对存在性的局部
+ * 探测（同目录候选序、裸名遮蔽）覆盖不到的组合面（降级分支剥 .md 后的
+ * 相对/绝对遮蔽、端口数据面缺口）在此统一拦截，不建第二套规则（R1）。
+ * 存在性端口未注入不回验（上游兼容，决策分支自身已退化为几何比较）。
+ */
+function resolvesToTargetText(a: EdgeTargetPlanArgs, text: string): boolean {
+  if (a.targetExists === undefined) {
+    return true
+  }
+  const implicitMd = a.edge.kind !== 'image'
+  const linkCtx: VaultLinkPathContext = {
+    docDir: a.docDir,
+    rootDir: a.docRoot ?? a.docDir,
+    isWindowsHost: a.isWindowsHost,
+  }
+  const plan = planVaultLinkPath(text, linkCtx, { implicitMd })
+  if (plan.kind === 'escape') {
+    return false // 生成的文本越出解析域（防御：正常三形态产物不会到达）
+  }
+  for (const candidate of plan.candidates) {
+    if (a.targetExists(candidate)) {
+      return a.fold(a.norm(candidate)) === a.fold(a.targetAbs)
+    }
+  }
+  // 候选全未命中：短名补查域按唯一命中核对（与 b/c 分支同一端口与校正）
+  const key = shortnameLookupKeyOf(text, linkCtx, { implicitMd })
+  if (key !== null) {
+    return shortnameUniqueHit(a, key)
+  }
+  return false // 目标存在而生成文本解析为空（断链）——不可用
+}
+
+/**
+ * planEdgeTargetText 的终审回验包装（复审 S1）：决策文本（null=保留原文）
+ * 经解析器语义回验，命中身份≠目标即降级为显式扩展形态——根域内相对路径
+ * 不剥 .md（单候选直击目标，候选序无从被遮蔽）、越根明确绝对路径不剥。
+ * 兜底形态本身不再回验降级（无更安全形态，尽力而为）。
+ */
+function planEdgeTargetTextVerified(a: EdgeTargetPlanArgs): string | null {
+  const decided = planEdgeTargetText(a)
+  const candidate = decided ?? decodeLoose(splitHrefParts(a.edge.target).pathRaw)
+  if (resolvesToTargetText(a, candidate)) {
+    return decided
+  }
+  if (a.insideRoot(a.targetAbs)) {
+    return relativePathOf(a.ops, a.docDir, a.targetAbs)
+  }
+  return absoluteTextOf(a, true)
+}
+
+/**
  * 短名 key 的新世界同名候选集（will/did 同一语义）：旧世界候选经 moves
  * 映射后**仅保留 basename 仍等于 key 者**（改名者退出同名集——原短名的
  * 「仍命中」与新短名的「唯一」都按新名字判定），移出应用文档根域者剔除
@@ -547,8 +599,9 @@ export function planVaultRenameRewrites(
         continue
       }
 
-      // #556 T4：目标文本三形态决策（短名保留/更新 → 相对/绝对）
-      const newTargetText = planEdgeTargetText({
+      // #556 T4：目标文本三形态决策（短名保留/更新 → 相对/绝对）+ 复审 S1
+      // 终审回验（决策文本经解析器语义核对命中身份，失败降级显式扩展形态）
+      const newTargetText = planEdgeTargetTextVerified({
         ops,
         fold,
         norm,

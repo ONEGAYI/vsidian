@@ -403,7 +403,13 @@ async function buildWillRenameEdit(
       [...docsByKey.values()].map((d) => [d.fsPath, d.hostText]),
     )
     const plan = planVaultRenameRewrites(
-      { rootFsPaths, isWindowsHost, moves, shortnameLookup: renameShortnamePortOf(vaultIndex), targetExists: renameTargetExistsPortOf(vaultIndex, moves) },
+      {
+        rootFsPaths,
+        isWindowsHost,
+        moves,
+        shortnameLookup: renameShortnamePortOf(vaultIndex),
+        targetExists: await buildRenameTargetExistsPort(vaultIndex, moves, [...docsByKey.keys()]),
+      },
       docs,
     )
     for (const docPlan of plan.docs) {
@@ -533,7 +539,13 @@ async function applyAfterRenameBatch(
       }
       if (docs.length > 0) {
         const plan = planVaultRenameRewrites(
-          { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex), targetExists: renameTargetExistsPortOf(vaultIndex, expandedMoves) },
+          {
+            rootFsPaths,
+            isWindowsHost,
+            moves: expandedMoves,
+            shortnameLookup: renameShortnamePortOf(vaultIndex),
+            targetExists: await buildRenameTargetExistsPort(vaultIndex, expandedMoves, docs.map((d) => d.fsPath)),
+          },
           docs,
         )
         if (plan.docs.length > 0) {
@@ -564,7 +576,13 @@ async function applyAfterRenameBatch(
         [...dirtyDocsByKey.values()].map((d) => [d.fsPath, d.hostText]),
       )
       const plan = planVaultRenameRewrites(
-        { rootFsPaths, isWindowsHost, moves: expandedMoves, shortnameLookup: renameShortnamePortOf(vaultIndex), targetExists: renameTargetExistsPortOf(vaultIndex, expandedMoves) },
+        {
+          rootFsPaths,
+          isWindowsHost,
+          moves: expandedMoves,
+          shortnameLookup: renameShortnamePortOf(vaultIndex),
+          targetExists: await buildRenameTargetExistsPort(vaultIndex, expandedMoves, [...dirtyDocsByKey.keys()]),
+        },
         docs,
       )
       if (plan.docs.length > 0) {
@@ -667,16 +685,43 @@ function renameShortnamePortOf(vaultIndex: VaultIndexService): RenameShortnameLo
   return (sourceFsPath, basename) => vaultIndex.shortnameLookup(sourceFsPath, basename)
 }
 
-/** 评审 S1 新世界存在性端口：catalog 登记（磁盘存在性的索引投影，含非
- *  Markdown 资产）∪ 本批移动映射的新路径（will 阶段新路径尚未落盘、
- *  catalog 看不到；did 阶段已登记，并集 no-op）。形态归一走 normKeyOf——
- *  与 catalogHasFile 的 normKey 同域折叠，分隔符/大小写漂移容错 */
-function renameTargetExistsPortOf(
+/** 复审 S1 存在性端口数据面（真实 fs 预取）：规划器的候选序核对与终审
+ *  回验需要「第一个存在文件优先」的**真实**裁决——catalog 投影不含未引用
+ *  的无扩展遮蔽物（model.files 只有 md 与被引用 asset），只查登记会漏
+ *  遮蔽。预取面 = 应用文档目录 ∪ 移动新路径目录（短名候选、降级与兜底
+ *  文本的全部落点），readDirectory 一次列齐（will 时刻新路径未落盘——由
+ *  moves 集合补；目录尚不存在时列举为空，同样由 moves 补）。只把普通
+ *  文件入集（目录不算存在——解析器 exists 端口对非普通文件返回 null 的
+ *  同款语义）。catalog 登记仍并入（外部/跨根绝对目标目录不在预取面内，
+ *  其存在性由引用登记承载） */
+async function buildRenameTargetExistsPort(
   vaultIndex: VaultIndexService,
   moves: ReadonlyArray<{ oldFsPath: string; newFsPath: string }>,
-): (fsPath: string) => boolean {
+  docFsPaths: readonly string[],
+): Promise<(fsPath: string) => boolean> {
+  const dirs = new Set<string>()
+  for (const m of moves) {
+    dirs.add(dirnameOf(m.newFsPath))
+  }
+  for (const p of docFsPaths) {
+    dirs.add(dirnameOf(p))
+  }
+  const exists = new Set<string>()
+  await Promise.all([...dirs].map(async (dir) => {
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir))
+      for (const [name, type] of entries) {
+        if (type === vscode.FileType.File) {
+          exists.add(normKeyOf(`${dir}/${name}`))
+        }
+      }
+    } catch {
+      // 目录不存在（will 时刻新目录未建）：该目录的文件由 moves 集合补
+    }
+  }))
   const newPaths = new Set(moves.map((m) => normKeyOf(m.newFsPath)))
-  return (fsPath) => newPaths.has(normKeyOf(fsPath)) || vaultIndex.catalogHasFile(fsPath)
+  return (fsPath) =>
+    newPaths.has(normKeyOf(fsPath)) || exists.has(normKeyOf(fsPath)) || vaultIndex.catalogHasFile(fsPath)
 }
 
 /** 跳过原因的文案键（通知详情用；#556 T4 起仅剩 edge-stale 一种） */
@@ -728,6 +773,13 @@ function normKeyOf(fsPath: string): string {
 function basenameOf(fsPath: string): string {
   const norm = normalizeSeparators(fsPath)
   return norm.slice(norm.lastIndexOf('/') + 1)
+}
+
+/** 目录部分（/ 分隔归一形态；根路径退化为自身）——存在性预取的目录集 */
+function dirnameOf(fsPath: string): string {
+  const norm = normalizeSeparators(fsPath)
+  const cut = norm.lastIndexOf('/')
+  return cut > 0 ? norm.slice(0, cut) : norm
 }
 
 function firstBasenameOf(moves: Array<{ oldFsPath: string }>): string {

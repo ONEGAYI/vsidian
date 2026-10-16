@@ -942,6 +942,57 @@ describe('vaultRename：#556 T4 短名保留与三形态决策', () => {
     expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[note.md]]。\n')
   })
 
+  it('复审 S1：降级相对路径剥 .md 后被异目录无扩展文件遮蔽 → 回验失败退显式扩展形态', () => {
+    // 目标移入 notes/，新短名与根内既有 other/target.md 冲突（c 不唯一）→
+    // 降级相对剥 .md 生成 notes/target；解析器候选序 [notes/target, notes/target.md]
+    // 第一个存在者是目录下既有的无扩展遮蔽文件——终审回验拦截，退显式
+    // notes/target.md（单候选直击目标身份）
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/target.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: `${WIN_ROOT}/target.md`, kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const exists: Record<string, true> = {
+      [`${WIN_ROOT}/notes/target`.toLowerCase()]: true,   // 无扩展遮蔽物（未引用、不在 catalog）
+      [`${WIN_ROOT}/notes/target.md`.toLowerCase()]: true, // 目标新路径（moves）
+      [`${WIN_ROOT}/other/target.md`.toLowerCase()]: true, // 根内既有同名（使新短名不唯一）
+    }
+    const result = planVaultRenameRewrites(
+      {
+        ...winCtx(moves),
+        shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/target.md`, `${WIN_ROOT}/other/target.md`] } }),
+        targetExists: (p) => exists[p.replaceAll('\\', '/').toLowerCase()] === true,
+      },
+      docs,
+    )
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[notes/target.md]]。\n')
+  })
+
+  it('复审 S1：越根绝对形态剥 .md 后被新目录无扩展文件遮蔽 → 回验失败退显式绝对路径', () => {
+    // 跨根移动且新目录已有同名无扩展文件：绝对兜底剥 .md 的 C:/other-root/target
+    // 候选序 [target（遮蔽）, target.md]——终审回验拦截，退不剥形态
+    const text = '见 [[target]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: 'C:/other-root/target.md' }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: `${WIN_ROOT}/target.md`, kind: 'wikilink', start: 2, end: 2 + '[[target]]'.length }),
+    ])]
+    const exists: Record<string, true> = {
+      ['c:/other-root/target']: true,
+      ['c:/other-root/target.md']: true,
+    }
+    const result = planVaultRenameRewrites(
+      {
+        ...winCtx(moves, [WIN_ROOT, 'C:/other-root']),
+        shortnameLookup: shortnamePort({ byBasename: { 'target.md': [`${WIN_ROOT}/target.md`] } }),
+        targetExists: (p) => exists[p.replaceAll('\\', '/').toLowerCase()] === true,
+      },
+      docs,
+    )
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 [[C:/other-root/target.md]]。\n')
+  })
+
   it('评审 F5：目标移入嵌套工作区根后不再几何保留相对（最具体根归属变更 → 绝对路径）', () => {
     // 父根来源的相对引用目标移入已登记的嵌套根：补查域随归属转移到嵌套根，
     // 父根补查为 []/complete——保留的相对形态经解析器已 not-found

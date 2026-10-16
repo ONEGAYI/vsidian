@@ -1260,14 +1260,24 @@ export class VaultIndexService {
     return this.shortnameLookupFor(state)(basename)
   }
 
-  /** 评审 S1 路径存在性（rename 规划端口的数据面）：任意绝对 fsPath 是否被
-   *  任一根的 files 表登记（含 asset——磁盘存在性的索引投影，全文件清单
-   *  口径）。同步零 IO；normKey 归一后查询，大小写/分隔符漂移容错 */
+  /** 复审 S1 路径存在性（rename 规划端口的数据面）：任意绝对 fsPath 是否被
+   *  索引登记为磁盘上的普通文件。两域合查——files 表的绝对身份条目（跨根/
+   *  外部被引用目标的登记，normKey 键——旧实现只用绝对键查 rel 键表，根内
+   *  条目恒 miss）与所属根的全文件清单（未排除普通文件的完整投影：未引用
+   *  的无扩展遮蔽物只在清单域——model.files 只有 md 与被引用 asset）。
+   *  同步零 IO；normKey/fold 归一容错 */
   catalogHasFile(fsPath: string): boolean {
     const key = this.normKey(fsPath)
+    const owner = this.rootOf(fsPath)
     for (const s of this.roots.values()) {
       if (s.model?.files.has(key) === true) {
         return true
+      }
+      if (s === owner && s.catalog) {
+        const rel = this.relOf(s, fsPath)
+        if (rel !== null && s.catalog.has(rel)) {
+          return true
+        }
       }
     }
     return false
@@ -1637,16 +1647,24 @@ export class VaultIndexService {
       ? state.overlay.reapply(rel, pending.version, edges)
       : state.overlay.apply(rel, pending.version, edges)
     if (accepted) {
+      // 复审 F2 残余：覆盖层采信后派生表同步重建——dirty-only 新短名（基线
+      // 无该边）的依赖登记只存在于覆盖层，不重建则完整性恢复/文件集合变化
+      // 的全域重判找不到该来源，pending 边永久滞留（重判的 basename 反查
+      // 依赖表是唯一入口）
+      this.refreshDerived(state)
       // 评审 F6：覆盖层重算的 retarget 同款补发（与 rescanFile 基线通道一致）
       this.publishVanishedTargets(state, prevOverlayEdges, edges)
     }
     return accepted
   }
 
-  /** 评审 F6：来源边重抽（基线或覆盖层）后消失的旧解析身份补发失效——
+  /** 评审 F6：来源边重抽（基线或覆盖层）后解析转移的旧身份补发失效——
    *  短名 retarget、相对候选抢占等场景，旧身份文件本身无变化、只有引用
    *  解析语义变化，既有通道只发新身份事件；订阅旧身份的挂载悬停/嵌入
-   *  由此收到 changed（stat null）并重发解析。身份去重后逐个发布 */
+   *  由此收到 changed（stat null）并重发解析。复审 F6 残余：判据是**边级
+   *  身份变化**——同一旧身份仍被其他边引用（多链接来源部分换目标）时，
+   *  指向它的边已减少，同样属于解析转移，按身份计数 prev>next 判定（不能
+   *  以「旧身份从来源边集整体消失」代替）。身份去重后逐个发布 */
   private publishVanishedTargets(
     state: RootIndexState,
     prevEdges: readonly VaultEdge[],
@@ -1655,13 +1673,21 @@ export class VaultIndexService {
     if (prevEdges.length === 0) {
       return
     }
-    const next = new Set(
-      nextEdges.map((e) => e.resolvedTarget).filter((t): t is string => t !== null),
-    )
+    const countBy = (edges: readonly VaultEdge[]): Map<string, number> => {
+      const counts = new Map<string, number>()
+      for (const e of edges) {
+        if (e.resolvedTarget !== null) {
+          counts.set(e.resolvedTarget, (counts.get(e.resolvedTarget) ?? 0) + 1)
+        }
+      }
+      return counts
+    }
+    const prevCounts = countBy(prevEdges)
+    const nextCounts = countBy(nextEdges)
     const vanished = new Set<string>()
-    for (const e of prevEdges) {
-      if (e.resolvedTarget !== null && !next.has(e.resolvedTarget)) {
-        vanished.add(e.resolvedTarget)
+    for (const [target, count] of prevCounts) {
+      if (count > (nextCounts.get(target) ?? 0)) {
+        vanished.add(target)
       }
     }
     for (const target of vanished) {
@@ -2114,7 +2140,9 @@ export class VaultIndexService {
         // 评审 F4：受影响粒度 =「basename → 同名候选成员身份集合」——
         // 排除变更（取消排除引入同名新成员）下名称集合不变而成员增减，
         // 只比名称会漏判「唯一变歧义」；成员身份与补查候选同域（normKey
-        // 折叠），形态漂移不误判
+        // 折叠），形态漂移不误判。复审 F4 残余：差分须**对称**——重新排除
+        // 移除同名成员（名称保留、成员减少）同样改变候选集，漏掉会保留
+        // 歧义态的断链（「歧义恢复唯一」不触发）
         const mdMembersByBasename = (
           catalog: Map<string, VaultCatalogEntry> | null | undefined,
         ): Map<string, Set<string>> => {
@@ -2140,7 +2168,11 @@ export class VaultIndexService {
         const affected = new Set<string>()
         for (const [name, members] of nextMembers) {
           const prev = prevMembers.get(name)
-          if (prev === undefined || [...members].some((m) => !prev.has(m))) {
+          if (
+            prev === undefined ||
+            [...members].some((m) => !prev.has(m)) ||
+            [...prev].some((m) => !members.has(m))
+          ) {
             affected.add(name)
           }
         }
@@ -2550,18 +2582,16 @@ export class VaultIndexService {
           }
         }
         if (state.catalogComplete !== completeNow) {
-          const flippedToComplete = completeNow && !state.catalogComplete
           state.catalogComplete = completeNow
           state.catalogGen++
           this.scheduleCatalogCommit(state)
           catalogTouched = true
-          // 评审 F3：完整性翻转与扫描完成点共享全域短名重判——pending 边
-          // （唯一候选但不完整）的判定依赖 complete，恢复完整必须重判。
-          // 仅 false→true 有意义（true→false 时既有边维持，下轮恢复时统一
-          // 重判）。核验态 busy：挂起接力由 finally 的 resumeAfterBusy 消费
-          if (flippedToComplete) {
-            void this.runShortnameRejudge(state, 'all')
-          }
+          // 评审 F3 + 复审 F3：完整性翻转**双向**触发全域短名重判——恢复
+          // （false→true）接通 pending 边；失去完整（true→false）按规格
+          // 「未完整不得声明唯一」，已解析短名边须回退 pending（重抽经
+          // shortnameLookupFor 读到新 complete 值，重算自然回退）。核验态
+          // busy：挂起接力由 finally 的 resumeAfterBusy 消费
+          void this.runShortnameRejudge(state, 'all')
         }
         // F14：清单核验零变化不置位 touched——周期核验/焦点回归每 10 分钟
         // 一次，无条件 touched 会触发全模型序列化提交（10 万档实测 3.72s）
@@ -2747,26 +2777,47 @@ export class VaultIndexService {
 
   /**
    * 目录前缀下已登记文件清单（#200 映射展开与 did 保底刷新的索引侧数据
-   * 面）：.md 与 asset 全量返回。根未就绪（无数据）或路径在索引域外返回
-   * null——调用方（expandRenameMoves）以 fs 列举兜底。
+   * 面）：.md 与 asset 全量返回。根内目录按所属根 rel 域返回，所属根未
+   * 就绪（无数据）返回 null——调用方（expandRenameMoves）以 fs 列举兜底。
+   * 复审外部目录更名：目录在工作区外（rootOf 无归属）时不再整段放弃——
+   * 其下**已被引用登记**的绝对身份条目按前缀收集（各根 files 表绝对键域，
+   * 不扫描外部目录，登记域即引用域），目录 rename 的映射展开据此生成逐
+   * 文件映射；空数组是合法答案（该目录下无已登记文件，无引用边可改）。
+   * 全部根未就绪才返回 null（无法诚实回答，与根内 not-ready 同语义）。
    */
   indexedFilesUnder(dirFsPath: string): string[] | null {
-    const state = this.rootOf(dirFsPath)
-    if (!state || !state.hasData || !state.model) {
-      return null
-    }
     const prefix = `${this.foldKey(this.normKey(this.ops.resolve(dirFsPath)))}/`
-    const out: string[] = []
-    for (const rel of state.model.files.keys()) {
-      if (this.isAbsoluteEntry(rel)) {
-        continue // 跨根/外部绝对身份条目不在本根 rel 域（#556 T2）
+    const state = this.rootOf(dirFsPath)
+    if (state) {
+      if (!state.hasData || !state.model) {
+        return null
       }
-      const abs = this.absOf(state, rel)
-      if (this.foldKey(this.normKey(abs)).startsWith(prefix)) {
-        out.push(abs)
+      const out: string[] = []
+      for (const rel of state.model.files.keys()) {
+        if (this.isAbsoluteEntry(rel)) {
+          continue // 跨根/外部绝对身份条目不在本根 rel 域（#556 T2）
+        }
+        const abs = this.absOf(state, rel)
+        if (this.foldKey(this.normKey(abs)).startsWith(prefix)) {
+          out.push(abs)
+        }
+      }
+      return out
+    }
+    let anyReady = false
+    const out: string[] = []
+    for (const s of this.roots.values()) {
+      if (!s.hasData || !s.model) {
+        continue // 他根未就绪仅跳过（跨根/外部登记是渐进的，同 renameCandidatesOf 口径）
+      }
+      anyReady = true
+      for (const p of s.model.files.keys()) {
+        if (this.isAbsoluteEntry(p) && this.foldKey(this.normKey(p)).startsWith(prefix)) {
+          out.push(this.normKey(p))
+        }
       }
     }
-    return out
+    return anyReady ? out : null
   }
 
   /**
