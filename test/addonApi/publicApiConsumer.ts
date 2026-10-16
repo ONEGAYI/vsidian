@@ -44,6 +44,10 @@ import type {
 } from '../../src/shared/addonSettingsContextApi'
 import type {
   AddonRefAnchor,
+  AddonRefEmbedHandle,
+  AddonRefEmbedOutcome,
+  AddonRefEmbedRejection,
+  AddonRefEmbedRequest,
   AddonRefPopupHandle,
   AddonRefPopupOutcome,
   AddonRefPopupRejection,
@@ -513,11 +517,30 @@ export type RefViewShapes = {
   rejection: AddonRefPopupRejection
   handle: AddonRefPopupHandle
 }
-/** refViews 面方法形状（编辑器页 facet——设置页为 undefined） */
-export type RefViewsFacetShape = Pick<AddonSdkRefViewsFacet, 'requestPopup'>
+/** T06（#545）组件容器嵌入挂载形状：请求（来源/目标/容器）与句柄/结局
+ *  联合——容器字段改名、拒绝枚举（含 duplicate-mount）收缩即编译失败 */
+export type RefEmbedShapes = {
+  request: AddonRefEmbedRequest
+  outcome: AddonRefEmbedOutcome
+  rejection: AddonRefEmbedRejection
+  handle: AddonRefEmbedHandle
+}
+/** refViews 面方法形状（编辑器页 facet——设置页为 undefined；T05 浮窗 +
+ *  T06 嵌入挂载两成员） */
+export type RefViewsFacetShape = Pick<AddonSdkRefViewsFacet, 'requestPopup' | 'mountEmbed'>
 export const refPopupTargetSample: AddonRefTargetSpec = {
   path: 'notes/ref.md', anchor: { kind: 'heading', heading: '第二章' },
 }
+/** T06 消费样例：面板内容根内挂载只读引用（结局联合两臂的消费面） */
+export const refEmbedConsume = (
+  facet: AddonSdkRefViewsFacet,
+  container: HTMLElement,
+): Promise<AddonRefEmbedOutcome> => facet.mountEmbed({ source: 'main', target: { path: 'notes/ref.md' }, container })
+/** 嵌入挂载自有拒绝成员钉住（HoverPreviewFailReason 透传族之外的四个自有
+ *  成员在场——移除即编译失败；扩态须同步台账/文档） */
+export type RefEmbedOwnRejectionsPresent = ['invalid-request', 'view-disposed', 'duplicate-mount', 'released'] extends
+  Array<AddonRefEmbedRejection> ? true : false
+export const refEmbedOwnRejectionsPinned: RefEmbedOwnRejectionsPresent = true
 
 /** 渲染与界面注册形状 */
 export type RendererShapes = { registration: AddonRendererRegistration }

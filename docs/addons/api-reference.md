@@ -54,6 +54,7 @@
     - [`syntax-experimental` 实验入口：行类型与行内标记查询（experimental.syntax）](#syntax-experimental)
     - [`host-settings-experimental` 实验入口：宿主设置白名单读取（experimental.hostSettings）](#host-settings-experimental)
     - [`ref-views-popup` 只读引用浮窗请求（refViews）](#ref-views-popup)
+    - [`ref-views-embed` 只读引用组件容器嵌入（refViews.mountEmbed）](#ref-views-embed)
     - [`theme-environment` 主题环境快照与订阅（themeEnvironment）](#theme-environment)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
@@ -1210,13 +1211,18 @@ export type AddonRefPopupOutcome =
   | { ok: false; reason: AddonRefPopupRejection }
 
 /** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）
- *  首版只含浮窗请求；T06 在同一 facet 上扩展组件容器挂载入口 */
+ *  浮窗请求 + T06（#545）组件容器嵌入挂载——两者共用来源解析与目标语义 */
 export interface AddonSdkRefViewsFacet {
   /** 请求只读引用浮窗（单页单浮窗：新请求替换旧请求，旧请求句柄随之
    *  失效）。结果在读取结局落定时兑现：内容装载成功 → ok + 句柄；目标
    *  解析/读取/锚点失败 → 失败原因（浮窗若在场显示真实错误分态）；请求
    *  被替换或关闭 → view-disposed */
   requestPopup(request: AddonRefPopupRequest): Promise<AddonRefPopupOutcome>
+  /** 在组件自有容器挂载内核只读引用子根（R-U08）。结果在首次读取结局
+   *  落定时兑现：内容装载成功 → ok + 释放句柄；目标失败 → 失败原因
+   *  （子根留在场显示错误分态，随容器/组件生命周期整组释放）。多处同
+   *  目标各挂各的（实例/滚动/属性状态独立，读取数据共享缓存） */
+  mountEmbed(request: AddonRefEmbedRequest): Promise<AddonRefEmbedOutcome>
 }
 
 export function isAddonRefTargetSpec(v: unknown): v is AddonRefTargetSpec {
@@ -1263,6 +1269,79 @@ export function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | n
 ```
 
 **验证**：`test/unit/addonRefViews.test.ts`、`test/unit/addonRefViewsRuntime.test.ts`、`test/unit/addonRefViewsPopup.test.ts`、`test/unit/embedRecursiveLive.test.ts`、`test/unit/documentSessionRefViews.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonRefViews.mjs`、`test/integration/suite/addonRefViewsCases.ts`
+
+### `ref-views-embed` 只读引用组件容器嵌入（refViews.mountEmbed）
+
+**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#545（T06）
+
+**目标**：组件在自有容器挂载内核只读引用子根（T06 #545，规格 addon-reference-views.md §6）：sdk.refViews.mountEmbed 把内核引用卡片（与正文 ![[…]] 嵌入同款装配）挂进本组件已取得的面板内容根或渲染内容根（可为其后代），复用成熟的内容展示与既有目标访问链（来源解析/只读能力/预算/订阅/释放），不重新实现渲染，也不因请求呈现取得写目标文档的能力。本请求零正文写入、零撤销项——插入 ![[…]] 仍由既有编辑 API 显式执行。
+
+语义要点：
+- **适用模式**：仅编辑器页提供（设置页为 undefined）。容器须为本组件已取得的面板内容根（ui.registerPanel 的内容根）或渲染内容根（renderers.register 生效容器的后代）——正文根、其他组件容器与平台管理的引用子根内容一律 invalid-request（不建子根，不猜测位置）。内核卡片观感与正文嵌入同源（引用竖条/限高同规则），呈现在组件容器内不接管正文与其他组件容器。
+- **坐标与数据形状**：目标与来源语义和 requestPopup 完全同源（同一目标合成器与 addonSource 来源覆盖——R-U02 的 B 目录解析、行号/范围/大小准入沿既有规则）。多处同目标挂载共享解析缓存（读取数据层），但每次挂载有独立 occurrence——实例、滚动与属性展示状态互不共享，一处释放不销毁其他同目标挂载。
+- **生命周期**：promise 在首次读取结局落定时兑现：内容装载成功 → ok + 释放句柄；目标解析/读取/锚点/准入失败 → 失败原因（子根留在场以既有错误分态就地显示，随组释放）。释放触发整组（句柄 release、容器/外层面板/渲染根卸载或脱树、组件停用/故障/代次终结、页面结束）：订阅 unwatch、预算与内容实例彻底终结，pending 以 view-disposed 终结，迟到回包不重挂不复活缓存。重复挂载同一容器（含错误分态挂载）→ duplicate-mount，先释放旧实例才可重挂。目标更新沿既有 watch 通道静默刷新；删除/失效按现有引用视图分态就地显示（R-U11），失效不生成新写会话。所创建引用树及递归内容恒只读（readOnly 逐层传递——模式切换/保存/编辑入口不出现或不生效，不能借父 Live 或历史模式获得写端口）。
+- **错误与拒绝**：自有拒绝与浮窗同族另加容器占位冲突：invalid-request（形状/容器脱树或非本组件所有/容器在引用子根内）/ view-disposed（来源实例不在场、页面会话缺失，或结局落定前挂载被释放）/ duplicate-mount（容器已被有效挂载占用）/ released（组件代次终结）；HoverPreviewFailReason 透传（not-found / anchor-invalid / file-too-large / budget 等——真实原因就地显示，不折叠为 not-found）。
+
+签名事实源：`src/shared/addonRefViews.ts`
+
+```ts
+/** 只读引用嵌入挂载请求：公共载荷 = 来源实例 + 目标 + 本组件自有容器。
+ *  组件身份与代次由 SDK 注入；容器必须是本组件已取得的面板内容根或
+ *  渲染内容根（可为其后代）——正文根、其他组件容器与平台管理的引用
+ *  子根内容都不是合法容器（运行时校验，归属外一律 invalid-request） */
+export interface AddonRefEmbedRequest {
+  /** 来源实例（views 面 instanceId：'main' / 'embed:<hostId>' /
+   *  'hover:<instanceId>'；与浮窗请求同源语义——R-U02） */
+  source: string
+  /** 目标（结构化路径 + 可选锚点；与浮窗请求共用目标语义，不建第二套） */
+  target: AddonRefTargetSpec
+  /** 挂载容器：本页在树元素。平台在其中创建引用子根，不覆盖容器其他内容 */
+  container: HTMLElement
+}
+
+/** 本次挂载的释放句柄：身份只针对本组件本代次的这一次挂载 */
+export interface AddonRefEmbedHandle {
+  /** 释放本次挂载（幂等；整组释放路径——句柄释放、容器/父根脱树、
+   *  组件停用、页面结束——效果等价）。错误分态挂载不发放句柄 */
+  release(): boolean
+  /** 本次挂载是否仍在场（已释放/子根脱树后为 false） */
+  isActive(): boolean
+}
+
+/** 嵌入挂载可辨认拒绝（规格 §7；与浮窗请求同族，另含容器占位冲突）：
+ *  - invalid-request：形状非法 / 容器脱树或非本组件所有 / 容器在平台
+ *    管理的引用子根内（不创建子根）；
+ *  - view-disposed：来源实例不在场、页面会话缺失，或挂载在结局落定前
+ *    被释放（迟到结果的终结口径）；
+ *  - duplicate-mount：该容器已被一次有效挂载占用（含错误分态挂载——
+ *    重复挂载同一位置须先释放旧实例）；
+ *  - released：组件代次已终结（装载器守卫）；
+ *  - HoverPreviewFailReason 透传：目标解析/读取/锚点/准入超限的真实原因
+ *    （子根留在场以现有引用错误视图就地显示，随组释放）。 */
+export type AddonRefEmbedRejection =
+  | 'invalid-request'
+  | 'view-disposed'
+  | 'duplicate-mount'
+  | 'released'
+  | HoverPreviewFailReason
+
+export type AddonRefEmbedOutcome =
+  | { ok: true; handle: AddonRefEmbedHandle }
+  | { ok: false; reason: AddonRefEmbedRejection }
+
+/** 请求形状守卫（container 在共享层只钉对象在场性——元素身份、在树性
+ *  与归属由 webview 运行时校验，共享模块不依赖 DOM） */
+export function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {
+  if (!isRecord(v)) {
+    return false
+  }
+  return typeof v.source === 'string' && v.source !== '' &&
+    isAddonRefTargetSpec(v.target) &&
+    v.container !== null && typeof v.container === 'object'
+}
+```
+
+**验证**：`test/unit/addonRefViews.test.ts`、`test/unit/addonRefViewsEmbed.test.ts`、`test/unit/addonRefViewsEmbedCard.test.ts`、`test/unit/embedCardCssContract.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonRefViewsEmbed.mjs`、`test/integration/suite/addonRefViewsCases.ts`
 
 ### `theme-environment` 主题环境快照与订阅（themeEnvironment）
 

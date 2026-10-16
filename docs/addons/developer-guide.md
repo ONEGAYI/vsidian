@@ -118,6 +118,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 命令/菜单/界面 | 命令、菜单项、按钮、面板 | `sdk.commands` / `sdk.menus` / `sdk.ui` | 编辑器页 |
 | 粘贴转换 | 声明式粘贴规则：来源特化元素恢复为 Markdown 结构 | `ctx.paste.registerRules`（enable 生命周期） | 宿主 |
 | 页面 SDK（引用） | 只读引用浮窗请求与本次请求关闭句柄 | `sdk.refViews.requestPopup` | 编辑器页 |
+| 页面 SDK（引用） | 组件自有容器挂载只读引用视图与释放句柄 | `sdk.refViews.mountEmbed` | 编辑器页 |
 
 几个高频语义提醒（完整版在参考各条目）：
 
@@ -165,6 +166,35 @@ defineAddonPage(ADDON_ID, async (sdk) => {
 - **目标与锚点**：路径 + 互斥锚点（`heading` 标题 / `block` 块 ID / `line` 行号 / `range` 行范围）。Markdown 目标用既有全文/标题/块语义；`line` / `range` 只对非 Markdown 文本生效（Markdown 目标携带时按标题原文解析——沿用双链行为，锚点缺失即真实失败）。大文件与超限走既有准入（`file-too-large` 等真实原因码）。
 - **单页单浮窗**：新请求替换旧请求；旧句柄随之后失效（`close()` 返回 false，不误关后来的浮窗）。缺省鼠标语义零抢焦点；触发位置脱树、组件停用、页面关闭都释放实例。
 - **只读边界**：本面创建的实例及递归内容恒只读，没有写端口；不给浮窗注入自定义 DOM 的入口。
+
+## 3.2 只读引用组件容器嵌入（sdk.refViews.mountEmbed，T06）
+
+在自己的面板或渲染内容里复用内核的只读引用展示（T06 #545）：`mountEmbed` 把内核引用卡片（与正文 `![[…]]` 嵌入同款装配）挂进**本组件已取得的容器**——`ui.registerPanel` 面板的内容根、`renderers.register` 生效容器，或它们的后代。展示请求零正文写入、零撤销项；要在正文里插入 `![[…]]`，仍由你已获授权的编辑 API 显式执行。
+
+```ts
+defineAddonPage(ADDON_ID, async (sdk) => {
+  const refViews = sdk.refViews!  // 仅编辑器页提供
+  const outcome = await refViews.mountEmbed({
+    source: 'main',                        // 与浮窗请求同源：相对路径按该实例目标文档解析
+    target: { path: 'notes/ref.md' },
+    container: myPanelRootEl,              // 本组件面板内容根（或其后代）——脱树/非自有即拒绝
+  })
+  if (outcome.ok) {
+    // outcome.handle.release() 撤下本次挂载（幂等；重复调用返回 false）
+    // outcome.handle.isActive() 报告本次挂载是否在场
+  } else {
+    // outcome.reason：invalid-request / view-disposed / duplicate-mount / released
+    // 或目标真实失败（not-found / anchor-invalid / budget …——错误就地显示在挂载位）
+  }
+})
+```
+
+语义要点（完整版见 API 参考 `ref-views-embed` 条目）：
+
+- **容器归属**：只接受本组件自己的面板内容根或渲染内容根（可为其后代）；正文、其他组件的容器与平台管理的引用内容一律 `invalid-request`。平台在容器里创建并管理引用子根，不覆盖容器其他内容。
+- **挂载仲裁与释放**：同一容器一次只属一次有效挂载（未释放前重复挂载 `duplicate-mount`）；句柄释放、容器或外层面板/渲染根卸载脱树、组件停用、页面结束都会整组释放（订阅、预算与内容实例彻底终结，迟到回包不重挂）。
+- **同目标多处挂载**：解析缓存共享，实例/滚动/属性状态各自独立——一处释放不影响另一处。
+- **只读与失效**：挂载的引用树及递归内容恒只读（无模式切换/保存/编辑入口）；目标更新沿既有 watch 通道刷新，删除/失效按现有分态就地显示，不生成写会话。
 
 ## 4. 视图身份与扩展槽（契约）
 
@@ -359,4 +389,4 @@ const result = await sdk.views?.openDocument({
 
 ## 10. 后续 API 扩展规格
 
-2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T03 文档导航、T05 只读引用浮窗及 T07 统一主题已实施，待用户整体验收；T02 正则/条件/嵌套、T04 普通链接尾部行号、T06 组件容器嵌入及 T08 内核退役尚未实施。当前公开声明和生成参考是实际可消费能力的事实源。
+2026-10-15 批次设计与各票交付状态见[批次索引](../specs/batch-2026-10-addon-api-extensions.md)：[声明式粘贴转换](../specs/addon-paste-conversion.md)、[文档导航与行号](../specs/addon-navigation.md)、[只读引用浮窗/嵌入](../specs/addon-reference-views.md)、[统一主题与明暗状态](../specs/addon-themes.md)。T01 基础粘贴、T03 文档导航、T05 只读引用浮窗、T06 组件容器嵌入及 T07 统一主题已实施，待用户整体验收；T02 正则/条件/嵌套、T04 普通链接尾部行号及 T08 内核退役尚未实施。当前公开声明和生成参考是实际可消费能力的事实源。
