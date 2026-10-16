@@ -53,7 +53,7 @@ import { classifyLocalRefContentKind } from '../shared/refContent'
 import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
 import type { AddonDocNavResult } from '../shared/addonNavApi'
-import { executeAddonDocNav, hostLineStart, type AddonDocNavExecPorts } from './addonDocNav'
+import { executeAddonDocNav, revealMdLineAnchor, type AddonDocNavExecPorts } from './addonDocNav'
 import { buildEditorCsp } from './editorCsp'
 import { absoluteResourceGrantDirs } from './absoluteResourceRoots'
 // #292 骨架屏内联装配（样式/#app 开标签含骨架标记/可读行宽预注入取值）
@@ -5746,9 +5746,10 @@ async function executeLinkIntent(
   /** 打开已探明存在的 doc 目标（候选命中与短名补查命中共用——text 目标
    *  原生编辑器、其余 Vsidian 面板 + fragment/行号定位；日志与锚点缺失/
    *  行号越界提示语义与既有实现一致。#534 行号定位：md 经 T03 宿主定位
-   *  执行体的 hostLineStart 换算 LF 偏移落位，text 经 resolveTextNav 同源
-   *  校验后原生 reveal；首次越界严格失败（i18n toast，不静默钳到末行），
-   *  「目标可打开但定位失败则提示」沿既有导航原则 */
+   *  执行体换算 LF 偏移落位（#564 起面板就绪后按执行时权威文本重校——
+   *  等待中文档变化不发送旧偏移），text 经 resolveTextNav 同源校验后原生
+   *  reveal；首次越界严格失败（i18n toast，不静默钳到末行），「目标可
+   *  打开但定位失败则提示」沿既有导航原则 */
   async function openDocTargetAt(fsPath: string): Promise<void> {
     const uri = vscode.Uri.file(fsPath)
     // #340（P3-08）text 目标（普链）：原生编辑器打开——fragment 不解析
@@ -5786,23 +5787,53 @@ async function executeLinkIntent(
     // openTextDocument 只装载不显示；fragment/行号定位区间与日志先于打开动作
     const targetDoc = await vscode.workspace.openTextDocument(uri)
     const isBlock = targetFragment !== null && isBlockIdFragment(targetFragment)
-    const targetText = targetDoc.getText()
-    let lineOffset: { offset: number; end: number } | null = null
-    let lineOutOfRange = false
+    // #564 行号落位：面板就绪后按**执行时权威文本**重校（T03 addonDocNav
+    // §4.2 同一时序——就绪等待先于权威文本读取，等待中文档变化不发送旧
+    // 偏移；行消失 → 越界 toast（重校文本行数）+ locate none，不误记
+    // custom-panel）。fragment/块锚点路径维持既有一次性解析（规格未要求
+    // 重校，评审只点行号——不顺手扩）；行号与 fragment 互斥（混合定位
+    // 已在分类层整次拦截），此处 targetLine !== null 时 targetFragment 恒 null
     if (targetLine !== null) {
-      // #534 行号落位：T03 执行体同一 hostLineStart 换算（1-based → 宿主
-      // 行首；CRLF 行数与 LF 一一对应，LF 偏移由 revealLinkAnchor 内的
-      // NewlineCoordinator 收口）；越界 null → 打开照常、定位失败提示
-      const hostOffset = hostLineStart(targetText, targetLine)
-      if (hostOffset === null) {
-        lineOutOfRange = true
-      } else {
-        lineOffset = { offset: hostOffset, end: hostOffset }
+      let readyPanel: Awaited<ReturnType<typeof anchors.waitForReadyPanel>>
+      const result = await revealMdLineAnchor(fsPath, targetLine, {
+        openMarkdown: async () => {
+          try {
+            await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+            return true
+          } catch {
+            return false
+          }
+        },
+        waitForMarkdownReady: async () => {
+          readyPanel = await anchors.waitForReadyPanel(uri)
+          return readyPanel !== undefined
+        },
+        readDocText: async () => targetDoc.getText(),
+        locateMarkdown: async (_fsPath, lfOffset) => {
+          // 链接路径沿用既有 postToPanel 送达管线（组件路径才走 locateAndWait）
+          readyPanel!.entry.session.postToPanel(readyPanel!.sessionId, { kind: 'view.locate', offset: lfOffset })
+          return true
+        },
+      })
+      pushLog({
+        kind: 'doc',
+        href: intent.href,
+        path: fsPath,
+        fragment: targetFragment ?? undefined,
+        line: targetLine,
+        locate: result.outcome === 'sent' ? 'custom-panel' : 'none',
+      })
+      if (result.outcome === 'out-of-range') {
+        void vscode.window.showWarningMessage(t('host.linkLineOutOfRange', {
+          href: intent.href, line: String(targetLine), total: String(result.totalLines),
+        }))
       }
+      return
     }
+    const targetText = targetDoc.getText()
     const offset =
       targetFragment === null
-        ? lineOffset
+        ? null
         : isBlock
           ? findBlockOffset(targetText, targetFragment.slice(1))
           : findHeadingOffset(targetText, targetFragment)
@@ -5811,18 +5842,10 @@ async function executeLinkIntent(
       href: intent.href,
       path: fsPath,
       fragment: targetFragment ?? undefined,
-      ...(targetLine !== null ? { line: targetLine } : {}),
       locate: offset ? 'custom-panel' : 'none',
     })
     await revealLinkAnchor(anchors, uri, targetDoc, offset)
-    if (lineOutOfRange) {
-      // 行首区间在 LF 全文的行数语义：splitLfLines 与 lineCount 同口径
-      //（targetText 即本次已取的宿主全文，不重复 getText）
-      const totalLines = targetText.split('\n').length
-      void vscode.window.showWarningMessage(t('host.linkLineOutOfRange', {
-        href: intent.href, line: String(targetLine), total: String(totalLines),
-      }))
-    } else if (targetFragment !== null && offset === null) {
+    if (targetFragment !== null && offset === null) {
       void vscode.window.showWarningMessage(fragmentMissingMessage(targetFragment))
     }
   }

@@ -153,6 +153,52 @@ export function shortnameLookupResolution(
     : { kind: 'pending' }
 }
 
+/**
+ * #534 尾部行号后缀剥离：对 href 的**本地路径段**（首个 `#`/`?` 之前、
+ * 容忍行号后紧跟的尾随空白）剥 `:十进制正整数`。仅普通 Markdown 链接语
+ * 义调用（图片与页内锚点不走此入口）。
+ *
+ * #564 起自 host/linkTarget 迁入（路径规则单一事实源——rename 改写等
+ * shared 消费方与链接解析同一剥离实现，host/linkTarget re-export 保持
+ * 既有导入面），并增补 suffixText：行号后缀**原文**（如 `':0103'`，含
+ * 前导零形态）——改写拼回按原文保真，不用数值重建。
+ *
+ * 边界（规格 addon-navigation.md §5.1）：
+ * - 只认**明文**冒号：编码冒号（`note.md%3A103`）不构成行号（工具输出
+ *   复制的是明文，normalizeLink 对 ':' 原样保留——两种写法都不会产生
+ *   编码形态，编码冒号维持既有文件名分类）；
+ * - `0`/全零不是行号（负数天然不匹配 `:数字$`，无绝对值/截断/宽容修正）；
+ *   前导零按值语义（`0103` = 103，与 refText isPositiveDecimal 同口径）；
+ * - 行号后缀的尾随空白容忍（宽松链接字面目标 `<note.md:103 >`），剥后
+ *   **保留尾空白**——Windows 的 Win32 尾空白拦截口径不变；
+ * - hash/query 段原样保留在 text 中（fragment 拆分与混合定位判定在
+ *   消费方，本函数不拆语义）；
+ * - 真 scheme 形态（多字母且不含点——外链 https://host:443 的端口与
+ *   file:/mailto: 等拦截协议）由调用侧先行排除，本函数不重复判定。
+ * 返回剥后完整 href（无行号时原样）、1-based 行号（无后缀为 null）与
+ * 行号后缀原文（无后缀为 null）。
+ */
+export function splitLineSuffix(href: string): {
+  text: string
+  line: number | null
+  suffixText: string | null
+} {
+  const hashIdx = href.indexOf('#')
+  const queryIdx = href.indexOf('?')
+  const cut = hashIdx >= 0 ? (queryIdx >= 0 ? Math.min(hashIdx, queryIdx) : hashIdx) : queryIdx
+  const rawPath = cut >= 0 ? href.slice(0, cut) : href
+  // 行号后紧跟的尾随空白不属行号（匹配容忍）；剥除点在去空白后的末尾
+  const trimmedPath = rawPath.replace(/\s+$/, '')
+  const m = /:(\d+)$/.exec(trimmedPath)
+  if (m === null || Number(m[1]!) === 0) {
+    return { text: href, line: null, suffixText: null }
+  }
+  const trailingWs = rawPath.slice(trimmedPath.length)
+  const text =
+    href.slice(0, trimmedPath.length - m[0]!.length) + trailingWs + href.slice(rawPath.length)
+  return { text, line: Number(m[1]!), suffixText: m[0] }
+}
+
 /** 存在性解析结果（vscode 层按 kind 分派：打开/提示） */
 export type VaultLinkFileResolution =
   | { kind: 'target'; fsPath: string }

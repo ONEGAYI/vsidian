@@ -7,7 +7,9 @@
 // - **目标子串替换**：别名、标题/块锚点、URL 编码与无关正文原样保留——
 //   wikilink 只替换 `[[` 后的路径段（`#`/`|` 之前），embed 只替换 `![[`
 //   后的路径段（#222，与 wikilink 同构），mdlink/image/refdef 只替换
-//   href 的路径部分（首个 `#`/`?` 之前），query/fragment 原样
+//   href 的路径部分（首个 `#`/`?` 之前），query/fragment 原样；mdlink/
+//   refdef 的尾部行号 `:N`（#534 定位语义）同属保留后缀——路径段剥行号
+//   参与重算，`:N` 与 query/fragment 原样拼回（#564 rename 不吞行号）
 // - **目标文本三形态决策（#556 T4，规格「改名与移动」节）**：保留更名前
 //   已确定的目标——
 //   1. 原短名在新状态（映射应用后的世界）仍准确命中同一目标 → 不改正文
@@ -58,7 +60,7 @@
 // 本模块不依赖 vscode/DOM（node 单测直驱）；路径平台语义由 isWindowsHost
 // 注入（与 vaultLink 同约定，与运行进程平台无关）。
 import * as path from 'node:path'
-import { planVaultLinkPath, shortnameLookupKeyOf, type VaultLinkPathContext } from './vaultLink'
+import { planVaultLinkPath, shortnameLookupKeyOf, splitLineSuffix, type VaultLinkPathContext } from './vaultLink'
 import type { VaultEdge } from './vaultIndexModel'
 
 /** 单条移动映射（单文件 rename/move 传 1 条；批量/目录移动传多条） */
@@ -263,7 +265,7 @@ function renameDecisionTexts(
   targetAbs: string,
   edge: VaultEdge,
 ): string[] {
-  const pathRaw = splitHrefParts(edge.target).pathRaw
+  const pathRaw = edgePathRawOf(edge)
   const decodedRaw = decodeLoose(pathRaw)
   const texts = new Set<string>()
   const addIf = (t: string): void => {
@@ -482,6 +484,18 @@ function splitHrefParts(href: string): { pathRaw: string; suffix: string } {
   return { pathRaw: href.slice(0, cut), suffix: href.slice(cut) }
 }
 
+/** mdlink/refdef 边目标的路径原文：先剥尾部行号后缀（#564——`:N` 是
+ *  定位语义非路径成分，路径参与候选探测与三形态重算；行号与 `#`/`?`
+ *  后缀由 buildHrefEdit 原样保留拼回，rename 不吞行号）。wikilink/embed/
+ *  image 无行号语义不剥（`[[a:2]]` 的 `:2` 是文件名成分——规格：双链
+ *  不增加冒号行号）。 */
+function edgePathRawOf(edge: Pick<VaultEdge, 'kind' | 'target'>): string {
+  if (edge.kind !== 'mdlink' && edge.kind !== 'refdef') {
+    return splitHrefParts(edge.target).pathRaw
+  }
+  return splitHrefParts(splitLineSuffix(edge.target).text).pathRaw
+}
+
 /** 百分号编码形态探测：含 %XX 序列视为编码风格（跟随生成侧惯例） */
 function isPercentEncodedForm(text: string): boolean {
   return /%[0-9A-Fa-f]{2}/.test(text)
@@ -552,7 +566,7 @@ interface EdgeTargetPlanArgs {
  * （will 阶段端口返回旧世界 catalog，经 newWorldShortnameCandidates 校正）。
  */
 function planEdgeTargetText(a: EdgeTargetPlanArgs): string | null {
-  const pathRaw = splitHrefParts(a.edge.target).pathRaw
+  const pathRaw = edgePathRawOf(a.edge)
   const decodedRaw = decodeLoose(pathRaw)
   const originalHasExt = a.ops.extname(decodedRaw) !== ''
   const linkCtx: VaultLinkPathContext = {
@@ -706,7 +720,7 @@ function resolvesToTargetText(a: EdgeTargetPlanArgs, text: string): boolean {
  */
 function planEdgeTargetTextVerified(a: EdgeTargetPlanArgs): string | null {
   const decided = planEdgeTargetText(a)
-  const candidate = decided ?? decodeLoose(splitHrefParts(a.edge.target).pathRaw)
+  const candidate = decided ?? decodeLoose(edgePathRawOf(a.edge))
   if (resolvesToTargetText(a, candidate)) {
     return decided
   }
@@ -1072,12 +1086,18 @@ function buildHrefEdit(
   if (innerText !== edge.target) {
     return null
   }
-  // 生成新目标文本：编码风格跟随 + query/fragment 原样保留
-  const { suffix } = splitHrefParts(innerText)
-  const replacementPath = isPercentEncodedForm(splitHrefParts(edge.target).pathRaw)
+  // 生成新目标文本：编码风格跟随 + 行号/query/fragment 原样保留。
+  // #564：`:N` 行号是定位语义非路径成分——mdlink/refdef 先剥行号取路径
+  //（探测编码风格）再与 `#`/`?` 后缀一并按原文拼回（前导零形态保真），
+  // 路径重算不吞行号；image 边无行号语义不剥（既有行为）
+  const stripped = edge.kind === 'mdlink' || edge.kind === 'refdef'
+    ? splitLineSuffix(innerText)
+    : { text: innerText, line: null, suffixText: null }
+  const { suffix } = splitHrefParts(stripped.text)
+  const replacementPath = isPercentEncodedForm(edgePathRawOf(edge))
     ? encodeRelativePath(newTargetText)
     : newTargetText
-  const body = `${replacementPath}${suffix}`
+  const body = `${replacementPath}${stripped.suffixText ?? ''}${suffix}`
   const replacement = angleWrapped && /[ \t]/.test(replacementPath) ? `<${body}>` : body
   return {
     start: baseOffset + destStart,

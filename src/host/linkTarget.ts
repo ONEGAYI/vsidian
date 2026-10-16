@@ -42,7 +42,13 @@
 // 怪 basename（ADS/尾随点）拦截对盘符路径继续适用；UNC 与 POSIX 宿主
 // 上的 Windows 盘符维持拦截（两类 URI 不混用）。
 import * as path from 'node:path'
-import { planVaultLinkPath } from '../shared/vaultLink'
+import { planVaultLinkPath, splitLineSuffix } from '../shared/vaultLink'
+
+// #564 起 splitLineSuffix 的实现在 shared/vaultLink（路径规则单一事实源
+// ——rename 改写等 shared 消费方与链接解析同一剥离实现）；此处 re-export
+// 保持既有导入面（hoverDocAccess / vaultLinkExtract / textEditorProvider
+// 仍从本模块取），返回值增补 suffixText（行号后缀原文，改写拼回保真）
+export { splitLineSuffix } from '../shared/vaultLink'
 
 /** 目标解析上下文（宿主文件系统语义由注入方描述） */
 export interface LinkContext {
@@ -200,42 +206,6 @@ function isWin32OddBasename(raw: string): boolean {
   const rawPath = raw.split('#')[0]!.split('?')[0]!
   const base = path.win32.basename(rawPath)
   return base.includes(':') || /[.\s]$/.test(base)
-}
-
-/**
- * #534 尾部行号后缀剥离：对 href 的**本地路径段**（首个 `#`/`?` 之前、
- * 容忍行号后紧跟的尾随空白）剥 `:十进制正整数`。仅普通 Markdown 链接语
- * 义调用（图片与页内锚点不走此入口）。
- *
- * 边界（规格 §5.1）：
- * - 只认**明文**冒号：编码冒号（`note.md%3A103`）不构成行号（工具输出
- *   复制的是明文，normalizeLink 对 ':' 原样保留——两种写法都不会产生
- *   编码形态，编码冒号维持既有文件名分类）；
- * - `0`/全零不是行号（负数天然不匹配 `:数字$`，无绝对值/截断/宽容修正）；
- *   前导零按值语义（`0103` = 103，与 refText isPositiveDecimal 同口径）；
- * - 行号后缀的尾随空白容忍（宽松链接字面目标 `<note.md:103 >`），剥后
- *   **保留尾空白**——Windows 的 Win32 尾空白拦截口径不变；
- * - hash/query 段原样保留在 text 中（fragment 拆分与混合定位判定在
- *   classifyLinkTarget，本函数不拆语义）；
- * - 真.scheme 形态（多字母且不含点——外链 https://host:443 的端口与
- *   file:/mailto: 等拦截协议）由调用侧先行排除，本函数不重复判定。
- * 返回剥后完整 href（无行号时原样）与 1-based 行号（无后缀为 null）。
- */
-export function splitLineSuffix(href: string): { text: string; line: number | null } {
-  const hashIdx = href.indexOf('#')
-  const queryIdx = href.indexOf('?')
-  const cut = hashIdx >= 0 ? (queryIdx >= 0 ? Math.min(hashIdx, queryIdx) : hashIdx) : queryIdx
-  const rawPath = cut >= 0 ? href.slice(0, cut) : href
-  // 行号后紧跟的尾随空白不属行号（匹配容忍）；剥除点在去空白后的末尾
-  const trimmedPath = rawPath.replace(/\s+$/, '')
-  const m = /:(\d+)$/.exec(trimmedPath)
-  if (m === null || Number(m[1]!) === 0) {
-    return { text: href, line: null }
-  }
-  const trailingWs = rawPath.slice(trimmedPath.length)
-  const text =
-    href.slice(0, trimmedPath.length - m[0]!.length) + trailingWs + href.slice(rawPath.length)
-  return { text, line: Number(m[1]!) }
 }
 
 /**
