@@ -82,7 +82,7 @@ function addonsState(addons: Array<Record<string, unknown>>): HostToWebview {
   const message = {
     kind: 'addons.state',
     apiVersion: '1.0.0',
-    draft: true,
+    draft: false,
     addons,
   }
   if (!isHostToWebview(message)) {

@@ -118,7 +118,7 @@ export interface AddonEditorBridge {
 /** 设置页面板接线（settingsPage 消费） */
 export interface AddonPageWiring {
   /** addons.state 消息载荷（宿主权威状态现算；合并运行生命周期状态） */
-  getState(): { kind: 'addons.state' } & { apiVersion: string; draft: true; addons: readonly AddonStatusEntry[]; openAddonSettingsPage: string | null; openAddonSettings: string | null }
+  getState(): { kind: 'addons.state' } & { apiVersion: string; draft: false; addons: readonly AddonStatusEntry[]; openAddonSettingsPage: string | null; openAddonSettings: string | null }
   /** #353 T04 addons.settingsState 消息载荷（基础设置区权威状态现算） */
   getSettingsState(): { kind: 'addons.settingsState' } & AddonSettingsStatePayload
   /** T08（#357）addons.behaviors 消息载荷（行为冲突管理权威状态现算：
@@ -503,7 +503,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
   const getState = () => ({
     kind: 'addons.state' as const,
     apiVersion: ADDON_API_VERSION,
-    draft: true as const,
+    draft: false as const,
     addons: [...coordinator.stateEntries()].map(mergeRuntimeStatus),
     // #351 T02 当前打开的组件设置页（权威在 runtime；设置页分页挂载区依据）
     openAddonSettingsPage: runtime.openSettingsAddonId() ?? null,
@@ -561,7 +561,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     return {
       kind: 'addons.settingsState',
       apiVersion: ADDON_API_VERSION,
-      draft: true,
+      draft: false,
       open,
       hasWorkspace: hostHasWorkspace(),
       addon: open === null ? null : buildSettingsArea(open),

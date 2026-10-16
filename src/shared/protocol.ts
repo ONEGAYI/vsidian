@@ -950,9 +950,9 @@ export type HostToWebview =
    *  推送。守护开关值不经本消息（随 settings.snapshot/changed 回显）。 */
   | { kind: 'defaultEditor.state' } & DefaultEditorDisplayState
   /** #350 T01 附加组件状态（宿主权威）：设置页「附加组件」分页消费；
-   *  apiVersion 为宿主当前提供的稳定 API 版本（首个候选 1.0.0）；draft
-   *  恒为 true——API 形状仍是草案，未发布。设置页经 addons.get 拉取；
-   *  协调器状态变化后经 notifyAddonsChanged 推送 */
+   *  apiVersion 为宿主当前提供的稳定 API 版本（1.1.0 起随本体发行）；
+   *  draft 恒为 false——API 已发行并提供兼容承诺。设置页经 addons.get
+   *  拉取；协调器状态变化后经 notifyAddonsChanged 推送 */
   | { kind: 'addons.state' } & AddonsStatePayload
   /** #353 T04 附加组件基础设置区载荷（宿主权威）：设置页经
    *  addons.settingsGet 拉取；定义注册/成功保存/设置区开合后推送 */
@@ -1020,10 +1020,10 @@ export type HostToWebview =
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
 export interface AddonsStatePayload {
-  /** 宿主当前提供的稳定 API 版本（首个候选 1.0.0） */
+  /** 宿主当前提供的稳定 API 版本（1.1.0 起随本体发行） */
   apiVersion: string
-  /** API 形状仍是草案、未发布——呈现层据此标注，不冒充已发布契约 */
-  draft: true
+  /** API 是否仍处草案期（未发行、无兼容承诺）——1.1.0（2026-10-16）起随本体发行，恒为 false */
+  draft: false
   /** 发现/注册协调合并后的组件状态列表（官方在前，其余按 ID 排序） */
   addons: readonly AddonStatusEntry[]
   /** #351 T02 当前打开的组件设置页（组件 ID；无打开项为 null——权威在
@@ -1071,10 +1071,10 @@ export interface AddonSettingsAreaPayload {
 
 /** #353 T04 附加组件基础设置区载荷（addons.settingsState 消息体） */
 export interface AddonSettingsStatePayload {
-  /** 宿主当前提供的稳定 API 版本（首个候选 1.0.0） */
+  /** 宿主当前提供的稳定 API 版本（1.1.0 起随本体发行） */
   apiVersion: string
-  /** API 形状仍是草案、未发布——呈现层据此标注，不冒充已发布契约 */
-  draft: true
+  /** API 是否仍处草案期（未发行、无兼容承诺）——1.1.0（2026-10-16）起随本体发行，恒为 false */
+  draft: false
   /** 设置区当前打开的组件（无打开项为 null） */
   open: string | null
   /** 是否存在工作区（无工作区时「当前工作区」标签禁用） */
@@ -5655,11 +5655,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.label === null || isString(v.label))
       )
     case 'addons.state':
-      // #350 T01 附加组件状态：apiVersion/draft 恒真标记 + 列表条目形态
+      // #350 T01 附加组件状态：apiVersion/非草案标记 + 列表条目形态
       // （AddonStatusEntry 单一事实源在 shared/addonIdentity）
       return (
         isString(v.apiVersion) &&
-        v.draft === true &&
+        v.draft === false &&
         Array.isArray(v.addons) &&
         v.addons.every(isAddonStatusEntry) &&
         // #351 T02 当前打开的组件设置页（可选字段；旧载荷缺省容忍）
@@ -5671,7 +5671,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // #353 T04 基础设置区载荷（定义与两层值形态由 isAddonSettingsArea 守卫）
       return (
         isString(v.apiVersion) &&
-        v.draft === true &&
+        v.draft === false &&
         (v.open === null || isString(v.open)) &&
         typeof v.hasWorkspace === 'boolean' &&
         (v.addon === null || isAddonSettingsArea(v.addon)) &&

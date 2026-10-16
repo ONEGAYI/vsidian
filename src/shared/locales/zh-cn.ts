@@ -1008,7 +1008,7 @@ export const zhCn: Record<MessageKey, string> = {
   /** #350 T01 附加组件：设置页「附加组件」分页（状态列表与 VSCode 管理入口）。
    *  #465 IA 分页起本页收敛为组件级管理，行为管理独立成页 */
   'settings.addonsSection': '附加组件',
-  'settings.addonsSectionDescription': 'Vsidian 附加组件是独立的 VSCode 扩展：安装、卸载与禁用由 VSCode 管理，能力由组件代码经附加组件 API 注册。该 API 仍为草案。',
+  'settings.addonsSectionDescription': 'Vsidian 附加组件是独立的 VSCode 扩展：安装、卸载与禁用由 VSCode 管理，能力由组件代码经附加组件 API 注册。该 API 随 Vsidian 版本一同发行。',
   /** #465/#466 输入行为管理独立分页（原「行为冲突管理」更名迁出） */
   'settings.addonsBehaviorsSection': '输入行为管理',
   'settings.addonsBehaviorsSectionDescription': '管理附加组件注册的输入行为：适用的行为默认按序依次触发，可调整顺序或逐项关闭；关闭单项不会停用整个组件。',
@@ -1025,7 +1025,7 @@ export const zhCn: Record<MessageKey, string> = {
   'addons.statusActivationFailed': '激活失败：{detail}',
   'addons.statusHostUnavailable': '当前扩展宿主中查不到该扩展——请在 VSCode 扩展管理中检查安装状态或运行位置',
   'addons.statusInvalidDeclaration': '身份声明不合法：{detail}',
-  'addons.apiVersionLabel': '附加组件 API 版本 {version}（草案，未发布稳定 API）',
+  'addons.apiVersionLabel': '附加组件 API 版本 {version}',
   'addons.searchMarketplace': '在市场搜索附加组件',
   'addons.openExtensionsView': '在 VSCode 管理扩展',
   'addons.openDetail': '扩展详情',

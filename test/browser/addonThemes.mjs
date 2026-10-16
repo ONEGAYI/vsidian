@@ -284,7 +284,7 @@ await page.evaluate((state) => {
       }
       if (message.kind === 'addons.get') {
         window.dispatchEvent(new MessageEvent('message', { source: window, data: {
-          kind: 'addons.state', apiVersion: '1.0.0', draft: true, addons: [
+          kind: 'addons.state', apiVersion: '1.0.0', draft: false, addons: [
             { id: 'vsidian-test-fixture.addon-theme', label: '主题夹具', official: false, status: 'registered' },
             { id: 'other.publisher.pack', label: '第三方主题包', official: false, status: 'registered' },
           ], openAddonSettingsPage: null, openAddonSettings: null,

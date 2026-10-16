@@ -13,8 +13,8 @@
 //
 // 边界（票面）：安装、卸载与整个扩展的禁用继续由 VSCode 管理——本分页
 // 只呈现状态并提供 VSCode 入口；市场关键词（vsidian-addon）仅帮助寻找，
-// 不代表接入协议或官方身份。API 版本行保持草案标注（draft 恒真），不把
-// 声明能力冒充已发布稳定 API。#351 起：开关只切换运行贡献（enable 生命
+// 不代表接入协议或官方身份。API 版本行按已发行口径标注（1.1.0 起随
+// 本体发行并提供兼容承诺）。#351 起：开关只切换运行贡献（enable 生命
 // 周期），停用后设置能力保留（「组件设置」分页仍可用）；故障暂停撤下组件
 // 设置页入口（hasSettingsPage=false）并显示原因——状态句呈现「故障暂停」。
 //
@@ -329,7 +329,7 @@ export class AddonSection implements SettingsPageSection {
     )
     parent.append(actions)
 
-    // ---- API 版本行（草案标注——不冒充已发布稳定 API） ----
+    // ---- API 版本行（已发行口径——1.1.0 起随本体发行） ----
     if (state) {
       const api = document.createElement('p')
       api.className = 'vsidian-addons-apiversion'
