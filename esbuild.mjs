@@ -151,10 +151,11 @@ const targets = [
   {
     // Mermaid 独立产物（#60）：经 ESM 源打包（官方 UMD 的模块作用域下
     // 全局自赋值会落空抛错，见 mermaidEntry.ts 头注释），入口显式挂
-    // globalThis.mermaid；图类型和 ELK 经 ESM 分块按需加载
+    // globalThis.mermaid；图类型经 ESM 分块按需加载
+    //（#535 T08：ELK 引擎已随内核 Codex 退役删除，分块机制保留）
     entryPoints: ['src/webview/mermaidEntry.ts'],
     ...webviewBase,
-    // ELK 引擎独立动态块：主入口与各图类型按需加载，保持单文件体积红线。
+    // 图类型独立动态块：主入口与各图类型按需加载，保持单文件体积红线。
     outfile: undefined,
     outdir: 'out/webview',
     entryNames: 'mermaid',
