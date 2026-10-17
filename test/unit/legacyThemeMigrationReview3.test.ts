@@ -16,7 +16,6 @@ import { promises as fsp } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
-  parseLegacyThemeMigrationMarker,
   runLegacyThemeMigration,
   type LegacyThemeMigrationMarker,
   type LegacyThemeMigrationPorts,
@@ -184,26 +183,9 @@ const nodeFs: LockFsLike = {
   listDirFiles: (dir) => fsp.readdir(dir),
 }
 
-/** 磁盘权威 marker 端口（与 wiring 同语义：tmp+rename 原子写、损坏按无标记） */
-function makeDiskMarkerStore(dir: string): Pick<LegacyThemeMigrationPorts, 'readMarker' | 'writeMarker'> {
-  const statePath = (profileId: string) =>
-    path.join(dir, `legacy-theme-migration.${profileId}.state.json`)
-  return {
-    readMarker: async (profileId) => {
-      try {
-        return parseLegacyThemeMigrationMarker(JSON.parse(await fsp.readFile(statePath(profileId), 'utf8')))
-      } catch {
-        return null
-      }
-    },
-    writeMarker: async (profileId, marker) => {
-      const target = statePath(profileId)
-      const tmp = `${target}.tmp`
-      await fsp.writeFile(tmp, JSON.stringify(marker), 'utf8')
-      await fsp.rename(tmp, target)
-    },
-  }
-}
+// 磁盘 marker 夹具六审抽取为共享单一事实源（test/unit/legacyDiskMarkerStore.ts；
+// tmp 竞态修复随六审落档）——六审前为本文件本地等价实现
+import { makeDiskMarkerStore } from './legacyDiskMarkerStore'
 
 /**
  * 预置崩溃残留锁（模拟胜者残留；mtime 回拨 ageMs）。同时播种两代协议
