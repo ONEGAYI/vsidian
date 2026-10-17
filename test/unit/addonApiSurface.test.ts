@@ -176,6 +176,34 @@ describe('附加组件公开声明消费面（T13）', () => {
     expect(source.includes('settingsScopeSample'), '消费面应含作用域快照消费样例').toBe(true)
   })
 
+  it('v1.1.0 主题公开符号兼容形状已进消费面（PR #581 评审发现 3：双参调用与 deprecated 常量防回潮）', () => {
+    // 从消费面移除任一兼容消费（CODEX_THEME_ID 值导入、双参调用样例、
+    // 兼容钉住字段）或再收窄公开签名即红——弃用路径而非删除由本断言与
+    // 兼容基线（check:addoncompat）共同钉住
+    const source = readFileSync(consumerPath, 'utf8')
+    const sf = ts.createSourceFile(consumerPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const symbols = new Set<string>()
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text.endsWith('/addonThemes') &&
+        node.importClause?.namedBindings !== undefined &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const element of node.importClause.namedBindings.elements) {
+          symbols.add(element.name.text)
+        }
+      }
+      node.forEachChild(visit)
+    }
+    sf.forEachChild(visit)
+    expect(symbols.has('CODEX_THEME_ID'), '消费面应导入 CODEX_THEME_ID（v1.1.0 deprecated 兼容常量）').toBe(true)
+    expect(source.includes("resolveThemePreferred('pub.pack/aqua', 'codex')"), '消费面应含 v1.1.0 双参调用形状样例').toBe(true)
+    expect(source.includes('preferredLegacyShape'), '消费面应钉住双参兼容字段').toBe(true)
+    expect(source.includes('retiredCodexIdentity'), '消费面应钉住 deprecated 常量消费字段').toBe(true)
+  })
+
   it('开发文档与生成器不进 Vsidian VSIX（.vscodeignore 排除 docs 与 scripts）', () => {
     const ignore = readFileSync(path.join(root, '.vscodeignore'), 'utf8')
     for (const pattern of ['docs/', 'scripts/', 'src/', 'test/']) {

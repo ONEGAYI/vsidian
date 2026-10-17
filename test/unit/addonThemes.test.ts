@@ -2,11 +2,14 @@
 // 解析与页面明暗四态的纯逻辑单测（TDD 先立预期）。规则来源：
 // docs/specs/addon-themes.md §3（宿主目录/唯一选择）与 §4（页面明暗四
 // 态）；ADR-0017（安装只新增候选、唯一互斥、回落保留首选）。
-// #535 T08：内核 Codex 已退役——旧键回显分支与 CODEX_THEME_ID 删除，
-// 迁移语义见 codexMigration.test.ts；本文件钉迁移后的解析口径。
+// #535 T08：内核 Codex 已退役——旧键回显分支删除（迁移语义见
+// codexMigration.test.ts）；本文件钉迁移后的解析口径。v1.1.0 已发行的
+// 公开符号（CODEX_THEME_ID 常量、resolveThemePreferred 双参形状）按
+// PR #581 评审发现 3 恢复兼容形状并标 @deprecated，由本文件钉住。
 import { describe, expect, it } from 'vitest'
 import {
   ADDON_THEME_ID_MAX,
+  CODEX_THEME_ID,
   DEFAULT_THEME_ID,
   addonThemeCandidateOf,
   addonThemeEnvironmentEqual,
@@ -199,6 +202,31 @@ describe('resolveThemePreferred（新键权威、空值兜底 default）', () =>
     expect(resolveThemePreferred(undefined)).toBe(DEFAULT_THEME_ID)
     expect(resolveThemePreferred('')).toBe(DEFAULT_THEME_ID)
     expect(resolveThemePreferred('  ')).toBe(DEFAULT_THEME_ID)
+  })
+
+  it('v1.1.0 双参调用形状兼容：legacyMermaidValue 传任何值（含 codex）都不再影响结果', () => {
+    // PR #581 评审发现 3：第二参保留为 deprecated 兼容形状——旧消费者
+    // 双参调用编译通过且语义收窄为「回落 default」（codex 回显→default
+    // 即迁移语义本身），防再收窄由本断言与 addonApiSurface 钉住
+    expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT, 'codex')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred(undefined, 'codex')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred('', 'default')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred('pub.two/aqua', 'codex')).toBe('pub.two/aqua')
+  })
+})
+
+describe('CODEX_THEME_ID（v1.1.0 兼容常量，deprecated）', () => {
+  it('值恒为历史字面量（不再是内置身份，仅兼容保留）', () => {
+    expect(CODEX_THEME_ID).toBe('codex')
+    // 作为未知首选走目录不命中回落（resolveActiveTheme 既有语义）
+    const selection = resolveActiveTheme({
+      themes: [],
+      preferred: CODEX_THEME_ID,
+      isThemeAvailable: () => true,
+    })
+    expect(selection.available).toBe(false)
+    expect(selection.effective).toBe(DEFAULT_THEME_ID)
+    expect(selection.preferred).toBe('codex')
   })
 })
 

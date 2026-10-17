@@ -1037,6 +1037,7 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
           'AddonThemeRegisterOutcome',
           'addonThemeRefOf',
           'validateAddonThemeBatch',
+          'CODEX_THEME_ID',
           'resolveThemePreferred',
           'resolveActiveTheme',
           'AddonThemesStatePayload',
@@ -1050,7 +1051,7 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     purpose:
       '组件在 enable 生命周期经 context.themes.register 登记主题元数据（稳定身份 + 多语言名 + 本组件提供者关联）——宿主目录不依赖打开编辑器页面；主题目录与唯一首选驱动设置页「主题」页签单选与渲染生效。#546（T07）首版候选；#535（T08）内核 Codex 退役：存量旧值迁移回落 default 并一次性引导，Codex 改由附加组件提供。',
     semantics: {
-      lifecycle: 'enable 注册按 addonId 整组替换（空批 = 撤销）；停用/故障/注销/卸载与代次终结回收目录，主题首选保留（恢复后按原选择继续）。目录不持久化（元数据由组件代码每次接入注册）；用户唯一首选持久化在宿主设置键 appearance.theme（resolveThemePreferred：新键权威、空值兜底 default），值域 default | <addonId>/<themeId>。#535 后旧键 appearance.mermaidTheme 不再参与解析（定义删除、快照不含）；存量 codex 在扩展激活时经原始 overlay 迁移回落 default（一次性引导，不覆盖已选组件主题）。',
+      lifecycle: 'enable 注册按 addonId 整组替换（空批 = 撤销）；停用/故障/注销/卸载与代次终结回收目录，主题首选保留（恢复后按原选择继续）。目录不持久化（元数据由组件代码每次接入注册）；用户唯一首选持久化在宿主设置键 appearance.theme（resolveThemePreferred：新键权威、空值兜底 default），值域 default | <addonId>/<themeId>。#535 后旧键 appearance.mermaidTheme 不再参与解析（定义删除、快照不含）；存量 codex 在扩展激活时经原始 overlay 迁移回落 default（一次性引导，不覆盖已选组件主题）。v1.1.0 兼容形状保留：resolveThemePreferred 双参调用仍编译通过（第二参 legacyMermaidValue 已退役、传任何值含 codex 均不再影响结果，deprecated——语义收窄即迁移语义本身）；CODEX_THEME_ID 常量恢复为 deprecated 兼容导出（值恒 codex，不再是内置身份，作未知首选走目录不命中回落）。',
       errors: '登记校验与批内重复拒绝属普通 API 结果（invalid-theme / duplicate-theme 整批拒绝，不算组件故障）：任一条目形状非法或同批 themeId 重复均拒绝；同组件不同主题可支持同一语言，由唯一主题首选选择。',
       autoRules: '主题关联提供者不走一般渲染候选的自动接管（ADR-0017 例外）——目录命中但页面 renderers 候选未上报（页面未装载）时主题提供者不生效；选中主题不可用（组件停用/故障/未注册）时回落内置 default 显示（不用其他主题顶替），保留首选并回显不可用/回落状态。',
       localization: 'label 为多语言映射时按页面语言渲染（resolveLocalizedText 候选链 zh-cn → zh → en → 规整字典序最小键兜底）；同名主题按来源徽章区分（组件显示名）。',

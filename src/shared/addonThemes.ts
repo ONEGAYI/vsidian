@@ -139,17 +139,42 @@ export function addonThemeCandidateOf(addonId: string, decl: AddonThemeDeclarati
 export const DEFAULT_THEME_ID = 'default'
 
 /**
- * 首选解析（纯函数）：appearance.theme 是唯一权威——值非 default 且非空
- * 时原样生效；default / 缺失 / 空串回落 default。#546 T07 曾有「新键
- * default 且旧 Mermaid 键 codex 回显 codex」的过渡分支，#535 T08 迁移
- * 落地后删除（存量旧值在激活时回落 default 并引导，见
- * shared/codexMigration）。
+ * 内核过渡 Codex 主题身份（v1.1.0 已发行导出）。
+ *
+ * @deprecated #535 T08 内核 Codex 退役：'codex' 不再是内置主题身份，
+ * 本常量仅为 v1.1.0 调用形状兼容保留（弃用与移除受双门槛约束：两个
+ * 后续 API 次版本且满 30 天）。存量旧值在扩展激活时经原始 overlay
+ * 迁移回落 default 并引导（shared/codexMigration）；新代码不要引用。
  */
-export function resolveThemePreferred(themeValue: string | undefined): string {
+export const CODEX_THEME_ID = 'codex'
+
+/**
+ * 首选解析现行语义（内部实现，非导出面）：appearance.theme 是唯一权威
+ * ——值非 default 且非空时原样生效；default / 缺失 / 空串回落 default。
+ */
+function resolvePreferredThemeValue(themeValue: string | undefined): string {
   if (typeof themeValue === 'string' && themeValue.trim() !== '' && themeValue !== DEFAULT_THEME_ID) {
     return themeValue
   }
   return DEFAULT_THEME_ID
+}
+
+/**
+ * 首选解析（纯函数；v1.1.0 兼容调用形状）。#546 T07 曾有「新键 default
+ * 且旧 Mermaid 键 codex 回显 codex」的过渡分支，#535 T08 迁移落地后
+ * 删除：存量旧值在激活时回落 default 并引导（见 shared/codexMigration）。
+ *
+ * @param legacyMermaidValue 旧键 `appearance.mermaidTheme` 的取值。
+ *   @deprecated #535 后旧键设置定义已删除、不再参与首选解析——传任何
+ *   值（含 'codex'）都不影响结果，参数仅为 v1.1.0 双参调用形状兼容
+ *   保留；新代码单参调用即可。
+ */
+export function resolveThemePreferred(
+  themeValue: string | undefined,
+  legacyMermaidValue?: string | undefined,
+): string {
+  void legacyMermaidValue
+  return resolvePreferredThemeValue(themeValue)
 }
 
 /** 主题选择解析输入 */
