@@ -19,9 +19,8 @@ import {
   type CodexMigrationPorts,
 } from '../shared/codexMigration'
 import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../shared/settings'
-import { SETTINGS_STORAGE_KEY } from './settingsService'
+import { SETTINGS_STORAGE_KEY, SettingsService } from './settingsService'
 import { t } from '../shared/i18n'
-
 /** globalStorage 内的迁移锁文件名（多窗口原子认领；mtime 为陈旧判据） */
 const CODEX_MIGRATION_LOCK_FILE = 'codex-theme-migration.lock'
 
@@ -44,7 +43,10 @@ export interface CodexMigrationWiring {
   run(): Promise<{ action: string; guide: boolean }>
 }
 
-export function createCodexMigrationWiring(context: vscode.ExtensionContext): CodexMigrationWiring {
+export function createCodexMigrationWiring(
+  context: vscode.ExtensionContext,
+  settingsService: SettingsService,
+): CodexMigrationWiring {
   // 集成测试宿主通知短路（判据与 editorGuardWiring 一致，见文件头注释）
   const testHooks = process.env.VSIDIAN_TEST_HOOKS === '1'
   let guideCount = 0
@@ -56,7 +58,9 @@ export function createCodexMigrationWiring(context: vscode.ExtensionContext): Co
   }
   const ports: CodexMigrationPorts = {
     readRawOverlay: () => context.globalState.get(SETTINGS_STORAGE_KEY),
-    writeRawOverlay: (value) => Promise.resolve(context.globalState.update(SETTINGS_STORAGE_KEY, value)),
+    // P2-A（PR #581 三审）：读-判-写经 SettingsService 串行链——与设置页
+    // 保存（apply）互斥，等待窗口内的用户写入不被旧快照覆盖
+    applyExclusiveOverlayStep: (step) => settingsService.runExclusiveOverlayStep(step),
     readMarker: () => context.globalState.get(CODEX_MIGRATION_MARKER_KEY),
     writeMarker: (marker) => Promise.resolve(context.globalState.update(CODEX_MIGRATION_MARKER_KEY, marker)),
     extensionVersion: () => String(

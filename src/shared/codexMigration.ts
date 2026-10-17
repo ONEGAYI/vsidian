@@ -120,8 +120,16 @@ export function planCodexThemeMigration(rawOverlay: unknown, migrationDone: bool
 export interface CodexMigrationPorts {
   /** globalState.get('vsidian.settings')——原始 overlay，未经 sanitize */
   readRawOverlay(): unknown
-  /** globalState.update('vsidian.settings', ...)——迁移唯一写设置通道 */
-  writeRawOverlay(value: Record<string, unknown>): Promise<void>
+  /**
+   * P2-A（PR #581 三审）：与 SettingsService.apply 同一进程内串行化的
+   * 「读-判-写」——step 在互斥内收到**当前**原始 overlay，返回最小主题
+   * 键补丁（null = 不写）与回传值。pending 持久化的等待窗口内，用户
+   * 保存与迁移写回经同一互斥串行：重判基于最新快照、只合并主题键，
+   * 用户的新选择（组件主题/其他设置）不再被 await 前捕获的旧快照覆盖。
+   */
+  applyExclusiveOverlayStep<R>(
+    step: (overlay: unknown) => { patch: Record<string, unknown> | null; result: R },
+  ): Promise<R>
   /** globalState.get(标记键)——undefined 即未迁移（形态见 parseCodexMigrationMarker） */
   readMarker(): unknown
   /** globalState.update(标记键, marker)——pending/done 状态机的唯一写入通道 */
@@ -192,21 +200,40 @@ async function executeOwnerSequence(ports: CodexMigrationPorts): Promise<CodexMi
     }
     const rawOverlay = ports.readRawOverlay()
     const plan = planCodexThemeMigration(rawOverlay, false)
-    const overlay = isRecord(rawOverlay) ? rawOverlay : {}
     const version = ports.extensionVersion()
 
     if (plan.action === 'migrate') {
       // 持久化顺序（发现 1）：pending 先于设置改写落盘——中途任何失败都
       // 能从 pending 恢复，引导不会永久丢失
       await ports.writeMarker({ state: 'pending', version })
-      await ports.writeRawOverlay({ ...overlay, ...plan.overlayPatch })
-      // 引导 fire 与 done 写之间无 await（同步序）：残余崩溃窗口见文件头
-      ports.requestGuide()
+      // P2-A（PR #581 三审）：pending 落盘后在串行化路径内重读最新
+      // overlay 并按三档矩阵重新判定，只写主题相关键的最小补丁（不做
+      // 全量 overlay 回写）——等待窗口内用户经 SettingsService.apply
+      // 保存的新选择与其他设置都在互斥内的最新快照上合并
+      const revisedAction = await ports.applyExclusiveOverlayStep((latest) => {
+        const revised = planCodexThemeMigration(latest, false)
+        if (revised.action === 'none') {
+          return { patch: null, result: 'none' as const }
+        }
+        return { patch: revised.overlayPatch, result: revised.action }
+      })
+      if (revisedAction === 'migrate') {
+        // 引导 fire 与 done 写之间无 await（同步序）：残余崩溃窗口见文件头
+        ports.requestGuide()
+        await ports.writeMarker({ state: 'done', version })
+        return { action: plan.action, guide: true }
+      }
+      // 等待期间用户已自行处置（改选组件主题 → 档 2 清旧键、保留新键；
+      // 双键到位 → 档 3 无操作）：按重判档位语义不引导——引导的原始
+      // 理由（旧 codex 待回落并告知去向）已消失，用户的选择优先。本次
+      // pending 非历史欠账（是本运行刚写），直接写 done 收口
       await ports.writeMarker({ state: 'done', version })
-      return { action: plan.action, guide: true }
+      return revisedAction === 'clean-legacy'
+        ? { action: 'clean-legacy', guide: false }
+        : NONE_RESULT
     }
     if (plan.action === 'clean-legacy') {
-      await ports.writeRawOverlay({ ...overlay, ...plan.overlayPatch })
+      await ports.applyExclusiveOverlayStep(() => ({ patch: plan.overlayPatch, result: undefined }))
       if (marker?.state === 'pending') {
         // pending = 引导欠账：清旧键之外补发引导并收口
         ports.requestGuide()

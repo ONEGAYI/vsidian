@@ -40,8 +40,10 @@ export function activate(context: vscode.ExtensionContext): VsidianAddonExports 
   // #535 T08 Codex 内核退役：激活时迁移旧 codex 设置（读 globalState 原始
   // overlay 判档，双键回落 default + 一次性安装引导；标记与迁移同批持久
   // 化——重开/重启/多窗口不重复引导。语言装配之后，保证引导文案按用户
-  // 偏好语言取词；编辑器/设置页面板此时尚未建立，拉快照时已读到迁移后值）
-  createCodexMigrationWiring(context)
+  // 偏好语言取词；编辑器/设置页面板此时尚未建立，拉快照时已读到迁移后值。
+  // 迁移的主题键写回经 settingsService 串行链——与设置页保存互斥（PR #581
+  // 三审 P2-A：等待窗口内的用户写入不被旧快照覆盖））
+  createCodexMigrationWiring(context, settingsService)
   const keybindingService = new KeybindingService(context.globalState)
   // #128 CSS 片段：用户级目录 + 逐片段开关的宿主权威服务（globalState 独立
   // key；文件系统/监听经 vscode 层端口注入）。initialScan 在监听者（编辑器

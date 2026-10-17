@@ -45,6 +45,14 @@ export interface AddDefinitionsResult {
 export class SettingsService {
   private readonly defs = new Map<string, SettingDefinition>()
   private readonly listeners = new Set<SettingsListener>()
+  /**
+   * overlay 读-改-写段的进程内串行链（#535 T08 PR #581 三审 P2-A）：
+   * apply 与迁移的互斥写步骤共用同一链——迁移在 pending 持久化的等待
+   * 窗口内，用户保存与迁移写回若各自基于旧读全量写会互相覆盖（丢失
+   * 更新，评审方 pending 屏障反例）。链式互斥：每段等待前一段落定后再
+   * 进入；只覆盖「读-合并-写」段，通知（listeners）留在链外。
+   */
+  private overlayWriteChain: Promise<unknown> = Promise.resolve()
 
   constructor(
     private readonly storage: SettingsStorage,
@@ -109,13 +117,18 @@ export class SettingsService {
     if (!result.ok) {
       return { ok: false, rejected: result.rejected, reason: 'invalid' }
     }
-    const overlay = {
-      ...this.storage.get<Record<string, unknown>>(this.storageKey),
-      // applySettingsPatch 已验证 patch 为对象且键全部已定义（收窄安全）
-      ...(patch as Record<string, SettingsPayloadValue>),
-    }
     try {
-      await this.storage.update(this.storageKey, overlay)
+      // P2-A（PR #581 三审）：读-合并-写经串行链执行——与迁移的互斥写
+      // 步骤串行，双方都在最新 overlay 上合并，等待窗口内的用户保存不再
+      // 被迁移的旧快照覆盖（也不反向覆盖迁移补丁）
+      await this.enqueueOverlayWrite(async () => {
+        const overlay = {
+          ...this.storage.get<Record<string, unknown>>(this.storageKey),
+          // applySettingsPatch 已验证 patch 为对象且键全部已定义（收窄安全）
+          ...(patch as Record<string, SettingsPayloadValue>),
+        }
+        await this.storage.update(this.storageKey, overlay)
+      })
     } catch {
       return { ok: false, rejected: [], reason: 'storage' }
     }
@@ -124,6 +137,34 @@ export class SettingsService {
       listener(values)
     }
     return { ok: true, values }
+  }
+
+  /**
+   * 迁移接线的互斥读-判-写步骤（#535 T08 PR #581 三审 P2-A；仅供
+   * codexMigrationWiring 消费）：step 在串行链内收到**当前**原始
+   * overlay（未经 sanitize），返回要落盘的最小补丁（null = 不写）与
+   * 回传值。不做定义校验——迁移要写的旧 Mermaid 键定义已删，经 apply
+   * 的整批校验会被拒（判据见 shared/codexMigration 头注释）。step 必须
+   * 是同步纯函数，不得再入本服务写路径（链式互斥不可重入）。
+   */
+  async runExclusiveOverlayStep<R>(
+    step: (overlay: unknown) => { patch: Record<string, unknown> | null; result: R },
+  ): Promise<R> {
+    return this.enqueueOverlayWrite(async () => {
+      const overlay = this.storage.get<Record<string, unknown>>(this.storageKey)
+      const { patch, result } = step(overlay)
+      if (patch !== null) {
+        await this.storage.update(this.storageKey, { ...overlay, ...patch })
+      }
+      return result
+    })
+  }
+
+  /** 把「读-合并-写」段排入串行链（P2-A）：后进者等待先进者落定 */
+  private enqueueOverlayWrite<T>(step: () => Promise<T>): Promise<T> {
+    const next = this.overlayWriteChain.then(step, step)
+    this.overlayWriteChain = next.catch(() => undefined)
+    return next
   }
 
   /** 订阅变更；返回取消函数 */

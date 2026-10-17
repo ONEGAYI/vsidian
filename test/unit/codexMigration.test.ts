@@ -125,6 +125,10 @@ interface FakeLock {
   isHeld(): boolean
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function fakePorts(
   rawOverlay: unknown,
   marker: CodexMigrationMarker | undefined = undefined,
@@ -144,9 +148,15 @@ function fakePorts(
   }
   const ports: CodexMigrationPorts = {
     readRawOverlay: () => state.overlay,
-    writeRawOverlay: async (value) => {
-      state.events.push('write-overlay')
-      state.overlay = value
+    // P2-A（PR #581 三审）：端口为互斥「读-判-写」——fake 以同快照合成；
+    // 覆写点（写失败/写后崩场景）由用例替换整个方法
+    applyExclusiveOverlayStep: async (step) => {
+      const { patch, result } = step(state.overlay)
+      if (patch !== null) {
+        state.events.push('write-overlay')
+        state.overlay = { ...(isRecord(state.overlay) ? state.overlay : {}), ...patch }
+      }
+      return result
     },
     readMarker: () => state.marker,
     writeMarker: async (markerToWrite) => {
@@ -230,7 +240,7 @@ describe('runCodexThemeMigration（宿主编排：持久化顺序）', () => {
 
   it('设置写失败：异常传播、引导未发（pending 已写——下次激活按恢复规则重走完整迁移）', async () => {
     const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
-    ports.writeRawOverlay = async () => {
+    ports.applyExclusiveOverlayStep = async () => {
       throw new Error('storage down')
     }
     await expect(runCodexThemeMigration(ports)).rejects.toThrow('storage down')
@@ -247,9 +257,13 @@ describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 
     // 后，设置已回落但引导永不补发。新序列把该中断点落在 write-overlay 成功
     // 之后（引导未发、done 未写）——恢复存储后重跑必须补发恰一次。
     const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
-    ports.writeRawOverlay = async (value) => {
-      state.overlay = value
-      throw new Error('simulated crash after overlay write')
+    ports.applyExclusiveOverlayStep = async (step) => {
+      const { patch, result } = step(state.overlay)
+      if (patch !== null) {
+        state.overlay = { ...(isRecord(state.overlay) ? state.overlay : {}), ...patch }
+        throw new Error('simulated crash after overlay write')
+      }
+      return result
     }
     await expect(runCodexThemeMigration(ports)).rejects.toThrow('simulated crash after overlay write')
     expect(state.guides).toBe(0)
@@ -268,7 +282,7 @@ describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 
 
   it('场景 B：pending 写成功、设置写失败 → 恢复重跑走完整迁移（幂等）', async () => {
     const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
-    ports.writeRawOverlay = async () => {
+    ports.applyExclusiveOverlayStep = async () => {
       throw new Error('storage down')
     }
     await expect(runCodexThemeMigration(ports)).rejects.toThrow('storage down')
@@ -276,8 +290,12 @@ describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 
     expect(state.overlay).toEqual({ [MERMAID_THEME_KEY]: 'codex' })
     expect(state.marker).toEqual({ state: 'pending', version: '1.2.3-test' })
     // 恢复存储重跑：原始 overlay 仍是 codex → 完整迁移重走（幂等）
-    ports.writeRawOverlay = async (value) => {
-      state.overlay = value
+    ports.applyExclusiveOverlayStep = async (step) => {
+      const { patch, result } = step(state.overlay)
+      if (patch !== null) {
+        state.overlay = { ...(isRecord(state.overlay) ? state.overlay : {}), ...patch }
+      }
+      return result
     }
     const retry = await runCodexThemeMigration(ports)
     expect(retry).toEqual({ action: 'migrate', guide: true })
@@ -334,10 +352,10 @@ describe('runCodexThemeMigration（多窗口并发——PR #581 评审发现 2�
     const barrier = new Promise<void>((resolve) => {
       releaseBarrier = resolve
     })
-    const originalWrite = ports.writeRawOverlay
-    ports.writeRawOverlay = async (value) => {
+    const originalWrite = ports.applyExclusiveOverlayStep
+    ports.applyExclusiveOverlayStep = async (step) => {
       await barrier // 受控写入屏障：挂起胜者的设置写（评审方同款手法）
-      await originalWrite(value)
+      return originalWrite(step)
     }
     // 两个窗口并发激活（同一 profile：同 overlay、同标记、同锁）
     const runA = runCodexThemeMigration(ports, { pollIntervalMs: 10 })
