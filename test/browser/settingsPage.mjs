@@ -377,13 +377,13 @@ try {
     assert.equal(await refTabs.nth(2).textContent(), zhCn['styleRef.tabDetail'])
     assert.equal(await refTabs.nth(3).textContent(), zhCn['appearance.themes'])
     await refTabs.nth(3).click()
-    const codexRadio = page.locator('.vsidian-appearance-presets input[value=codex]')
+    // #535 T08：内置单选只剩 default（旧预设已随内核退役）
     const defaultRadio = page.locator('.vsidian-appearance-presets input[value=default]')
-    assert.equal(await codexRadio.isVisible(), true)
+    const retiredRadio = page.locator('.vsidian-appearance-presets input[value=retired-preset]')
+    assert.equal(await defaultRadio.isVisible(), true)
+    assert.equal(await retiredRadio.count(), 0, '退役预设不应出现内置单选项')
     assert.equal(await defaultRadio.isChecked(), true)
-    await codexRadio.check()
-    await page.waitForFunction(() => window.savedSettings['appearance.mermaidTheme'] === 'codex')
-    const presetPaint = await codexRadio.evaluate(el => {
+    const presetPaint = await defaultRadio.evaluate(el => {
       const h3 = el.closest('[role="tabpanel"]').querySelector('h3')
       const headingBox = h3.getBoundingClientRect()
       const icon = h3.querySelector('svg')
@@ -417,15 +417,14 @@ try {
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     assert.equal(await page.locator('[data-setting-key="appearance.mermaidTheme"]').count(), 0)
     await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
-    assert.equal(await codexRadio.isChecked(), true, '重开外观页应回显已保存的 Codex')
+    assert.equal(await defaultRadio.isChecked(), true, '重开外观页应回显已保存的 default')
     await search.fill(zhCn['setting.theme.title'])
     const presetResult = page.locator('.vsidian-settings-result').filter({ hasText: zhCn['setting.theme.title'] })
     assert.equal(await presetResult.count(), 1)
     assert.match(await presetResult.innerText(), new RegExp(escapeRegExp(zhCn['appearance.title'])))
     await presetResult.click()
     assert.equal(await refTabs.nth(3).getAttribute('aria-selected'), 'true')
-    assert.equal(await codexRadio.isVisible(), true, '搜索定位应进入主题页签')
-    await defaultRadio.check()
+    assert.equal(await defaultRadio.isVisible(), true, '搜索定位应进入主题页签')
     await refTabs.nth(0).click()
     // 默认落 CSS 片段页签：总表与详细查询面板均隐藏；进「样式参考」总表后
     // 总表可见、详细查询仍隐藏；页签 pill 形态（绘制层）

@@ -85,7 +85,7 @@ try {
     }
     return {
       fenceTopX: window.textX(fence),
-      codeX: window.textX(code),
+      glyphX: window.textX(code),
       numberX: number ? number.getBoundingClientRect().left : null,
       numberTextRight,
       numberBoxRight: number ? number.getBoundingClientRect().right : null,
@@ -93,8 +93,8 @@ try {
       fencePad: getComputedStyle(fence).paddingLeft,
     }
   })
-  assert(Math.abs((small.fenceTopX ?? -1) - (small.codeX ?? -2)) < 1,
-    `#189 开围栏符号应与代码文本列同 x：围栏 ${small.fenceTopX} vs 文本 ${small.codeX}`)
+  assert(Math.abs((small.fenceTopX ?? -1) - (small.glyphX ?? -2)) < 1,
+    `#189 开围栏符号应与代码文本列同 x：围栏 ${small.fenceTopX} vs 文本 ${small.glyphX}`)
   // 行号边距 8+16 重分配：行号左缘让出 8px（数字右移，列总占与代码列 x 不变）
   assert(Math.abs(((small.numberX ?? -1) - (small.codeLineX ?? -2)) - 8) < 1,
     `#189 代码行行号左缘应距行左缘 8px：行号 ${small.numberX} vs 行左缘 ${small.codeLineX}`)
@@ -118,12 +118,12 @@ try {
     const code = fence.nextElementSibling
     return {
       fenceX: window.textX(fence),
-      codeX: window.textX(code),
+      glyphX: window.textX(code),
       fencePad: getComputedStyle(fence).paddingLeft,
     }
   })
-  assert(Math.abs((big.fenceX ?? -1) - (big.codeX ?? -2)) < 1,
-    `#189 120 行块（3ch）围栏与代码文本同 x：${big.fenceX} vs ${big.codeX}`)
+  assert(Math.abs((big.fenceX ?? -1) - (big.glyphX ?? -2)) < 1,
+    `#189 120 行块（3ch）围栏与代码文本同 x：${big.fenceX} vs ${big.glyphX}`)
   const bigPad = Number.parseFloat(big.fencePad ?? '')
   assert.ok(Number.isFinite(bigPad) && bigPad > smallPad,
     `3ch 档围栏缩进应大于 2ch 档（对齐公式随块）：${big.fencePad} vs ${small.fencePad}`)

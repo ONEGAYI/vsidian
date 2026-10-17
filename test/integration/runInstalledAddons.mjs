@@ -42,7 +42,7 @@ import {
   packageMainVsix,
   phaseHostEnv,
   writeDevAnchor,
-} from './t16Package.mjs'
+} from './installSupport.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 

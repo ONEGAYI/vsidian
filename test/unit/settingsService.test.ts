@@ -52,8 +52,8 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'codeblock.lineNumbers': true,
       'codeblock.copyButton': true,
       'codeblock.highlight': true,
-      'appearance.mermaidTheme': 'default',
-      // #546 T07 统一主题首选默认 default（新键权威 + 旧键过渡回显）
+      // #535 T08：旧 Mermaid 预设键定义已删除，快照不再含该键；统一主题
+      // 首选默认 default（新键唯一权威）
       'appearance.theme': 'default',
       'editor.symbolAutocomplete': true,
       'editor.symbolSelectionWrap': true,
@@ -111,14 +111,17 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
 })
 
 describe('补丁保存（apply）', () => {
-  it('Mermaid 主题默认为 default，Codex 选项保存后重开回显，未知主题拒绝', async () => {
+  it('#535 后旧 Mermaid 主题键定义已删除：未知键被拒（任意值），新主题键走受限自由文本', async () => {
     const storage = makeStorage()
     const first = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
-    expect(first.getSnapshot()['appearance.mermaidTheme']).toBe('default')
-    expect((await first.apply({ 'appearance.mermaidTheme': 'codex' })).ok).toBe(true)
-    const reopened = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
-    expect(reopened.getSnapshot()['appearance.mermaidTheme']).toBe('codex')
-    expect((await reopened.apply({ 'appearance.mermaidTheme': 'unknown' })).ok).toBe(false)
+    // 旧键不再是已定义设置：任何写入（值不限）都按未知键整批拒绝
+    const rejected = await first.apply({ 'appearance.mermaidTheme': 'anything-unknown' })
+    expect(rejected.ok).toBe(false)
+    expect(rejected.ok === false && rejected.rejected).toContain('appearance.mermaidTheme')
+    // 快照也不再有该键（sanitize 忽略未知键——定义删除的键不进快照）
+    expect(first.getSnapshot()).not.toHaveProperty('appearance.mermaidTheme')
+    // 新主题键（受限自由文本）不受影响
+    expect((await first.apply({ 'appearance.theme': 'pub.two/aqua' })).ok).toBe(true)
   })
   it('#244 引用深度在自有设置中保存 1/3 并重开回显，越界值拒绝', async () => {
     const storage = makeStorage()

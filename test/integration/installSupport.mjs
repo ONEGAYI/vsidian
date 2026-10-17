@@ -1,4 +1,6 @@
-// #365 T16 附加组件安装态回归——打包与阶段装配库（启动器与单测共用）。
+// 安装态回归支撑库——VSIX 打包与阶段装配（启动器与单测共用）。
+// 原 t16Package.mjs（#365 T16 起源），因现被 t16（runInstalledAddons）、
+// runInstalled、runRemoteSshAddons 多启动器共享，2026-10-17 评审更名。
 //
 // 双 VSIX 安装态：主 Vsidian VSIX + 三套 T15 独立样例 VSIX（+ 两枚负向
 // 夹具 VSIX）经 VSCode 1.82.3 CLI --install-extension 装入隔离 profile，
@@ -227,10 +229,16 @@ export function writeDevAnchor(dir) {
 }
 
 
-/** 通配展开安装目录下的扩展解压目录（publisher.name-<version> 形态） */
+/** 通配展开安装目录下的扩展解压目录（publisher.name-<version> 形态）。
+ * 版本段须以数字开头才算命中：防止同发布者前缀的其他扩展被误取
+ * （T08 #535 实证——`onegayi.vsidian-` 前缀同时命中 bridge 的
+ * `onegayi.vsidian-sample-addon-0.1.0`，旧实现字典序取尾恰好拿错）。 */
 export function installedExtensionDir(extensionsDir, extensionId) {
   const prefix = `${extensionId.toLowerCase()}-`
-  const hit = readdirSync(extensionsDir).filter((d) => d.toLowerCase().startsWith(prefix))
+  const hit = readdirSync(extensionsDir).filter((d) => {
+    const lower = d.toLowerCase()
+    return lower.startsWith(prefix) && /^[0-9]/.test(lower.slice(prefix.length))
+  })
   if (hit.length === 0) {
     return null
   }

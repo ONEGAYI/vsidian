@@ -4,20 +4,22 @@
 // 数据流（目录与首选权威在宿主）：
 // - 目录：装载即拉取 addons.themesGet → 宿主应答/推送 addons.themesState
 //   （目录 + 唯一首选 + 可用性；等值幂等）→ store 更新并重渲染；
-// - 选中写入：radio change → settings.set（appearanceThemePatch 双键同拍
-//   ——新键 appearance.theme 写完整主题身份，旧键写 mermaid preset 投影）
-//   → 宿主 settings.changed 回推 + themesState 对账（本地乐观选中先行）；
-// - 来源徽章：default/codex 标「内置」；组件主题标组件显示名（经
+// - 选中写入：radio change → settings.set（appearanceThemePatch 单键——
+//   #535 T08 后旧 Mermaid 键投影退役）→ 宿主 settings.changed 回推 +
+//   themesState 对账（本地乐观选中先行）；
+// - 来源徽章：default 标「内置」；组件主题标组件显示名（经
 //   addons.state 的组件清单解析——同名主题按来源区分的落点）；
 // - 不可用主题：radio 禁用 + 「不可用」徽章（条目保留呈现，不隐藏）；
 //   首选组件主题不可用时列表上方回落提示 callout（保留首选的回显）。
+//
+// #535 T08：内置旧预设单选项已随内核退役删除（组件版经附加组件
+// 提供并出现在目录主题列表中）。
 //
 // 呈现形态（ui-patterns §2.2/§2.3）：h3 组头挂外观大卡片内（负边距全幅）、
 // 单选行复用设置行节奏（radio 键盘可达 + 名称 + 来源徽章 11px pill）。
 import { currentLocaleLang, onLocaleChanged, t } from '../shared/i18n'
 import { resolveLocalizedText } from '../shared/localizedText'
 import {
-  CODEX_THEME_ID,
   DEFAULT_THEME_ID,
   isAddonThemesStatePayload,
   parseAddonThemeRef,
@@ -85,7 +87,7 @@ function themesStateEqual(a: AddonThemesStatePayload, b: AddonThemesStatePayload
 }
 
 interface ThemeOption {
-  /** 单选值（default / codex / themeRef） */
+  /** 单选值（default / 退役裸词 / themeRef 历史形态） */
   value: string
   /** 显示名（组件主题按页面语言解析） */
   title: string
@@ -95,11 +97,10 @@ interface ThemeOption {
   unavailable: boolean
 }
 
-/** 目录 + 首选 → 单选选项集（内置两项置前，目录按 themeRef 稳定序） */
+/** 目录 + 首选 → 单选选项集（内置 default 置前，目录按 themeRef 稳定序） */
 export function themeOptionsOf(state: AddonThemesStatePayload | null, addonLabelOf: (addonId: string) => string | undefined, locale: string): ThemeOption[] {
   const builtin: ThemeOption[] = [
-    { value: DEFAULT_THEME_ID, title: t('setting.mermaidTheme.default'), source: t('appearance.theme.sourceBuiltin'), unavailable: false },
-    { value: CODEX_THEME_ID, title: t('setting.mermaidTheme.codex'), source: t('appearance.theme.sourceBuiltin'), unavailable: false },
+    { value: DEFAULT_THEME_ID, title: t('setting.theme.defaultOption'), source: t('appearance.theme.sourceBuiltin'), unavailable: false },
   ]
   if (!state) {
     return builtin
@@ -181,7 +182,7 @@ export class ThemeSelectionSection {
     const options = themeOptionsOf(state, (id) => this.store.addonLabelOf(id), currentLocaleLang())
     const preferred = this.preferredValue()
     const elements: HTMLElement[] = []
-    const focused = focusEntry === 'appearance.theme' || focusEntry === 'appearance.mermaidTheme'
+    const focused = focusEntry === 'appearance.theme'
 
     // 外观大卡片承载组头，不在页签面板内再套卡片。
     const group = document.createElement('div')
@@ -195,8 +196,9 @@ export class ThemeSelectionSection {
       group.setAttribute('tabindex', '-1')
     }
 
-    // 首选不可用回落提示（保留首选的回显——不静默换主题）
-    if (state && state.preferred !== DEFAULT_THEME_ID && state.preferred !== CODEX_THEME_ID && !state.preferredAvailable) {
+    // 首选不可用回落提示（保留首选的回显——不静默换主题；#535 后退役的
+    // 退役历史值同样按「未知首选不可用」呈现）
+    if (state && state.preferred !== DEFAULT_THEME_ID && !state.preferredAvailable) {
       const callout = document.createElement('p')
       callout.className = 'vsidian-settings-callout vsidian-theme-fallback'
       callout.setAttribute('role', 'note')
@@ -222,7 +224,7 @@ export class ThemeSelectionSection {
         if (!radio.checked) {
           return
         }
-        // 双键同拍写入（新键完整身份 + 旧键 preset 投影）——保存回执经
+        // 单键写入（新键完整主题身份）——保存回执经
         // settings.changed 回推，目录 preferred 随 themesState 对账
         this.ports.postMessage({ kind: 'settings.set', values: appearanceThemePatch(option.value) })
       })

@@ -1,99 +1,16 @@
 // Mermaid 暗色主题装配契约（工单 #110）：themeVariables 映射纯函数——
 // VSCode 色板（--vscode-* 计算值）→ mermaid 暗色取值；空色板回退到与
 // Dark Modern 量级一致的暗色兜底；关键墨水色对画布底满足 WCAG AA。
+// #535 T08：旧预设截图参考配色（预设构建器）已随内核退役删除——组件
+// 版主题由附加组件提供，本文件只保留 default 暗色链路。
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {
   MERMAID_DARK_FALLBACK_PALETTE,
   buildDarkMermaidThemeVariables,
-  buildCodexMermaidConfig,
   resolveVscodeMermaidPalette,
   type VscodeMermaidPalette,
 } from '../../src/webview/mermaidTheme'
-
-describe('Codex Mermaid 截图参考配色', () => {
-  it.each(['sequence', 'class', 'classDiagram', 'state', 'stateDiagram', 'er', 'gantt', 'pie'])(
-    '%s 暗色模式按参考图使用深蓝节点、白字与深灰画布',
-    (type) => {
-      const config = buildCodexMermaidConfig(type, true)!
-      expect(config).toMatchObject({
-        theme: 'base',
-        themeVariables: {
-          darkMode: true, background: '#181818',
-          primaryColor: '#1a283d', primaryBorderColor: '#1f4e94',
-          primaryTextColor: '#ffffff', lineColor: '#8b8b8b',
-        },
-      })
-      expect(config.themeCSS).toContain('& { background-color:#181818; }')
-      expect(config).not.toHaveProperty('layout')
-    },
-  )
-
-  it('暗色 ER 表格的两种行底色都保持白字可读，饼图保留深色六色盘', () => {
-    const config = buildCodexMermaidConfig('er', true)!
-    const tv = config.themeVariables as Record<string, string>
-    expect(tv.rowOdd).toBe('#1a283d')
-    expect(tv.rowEven).toBe('#22344f')
-    for (const background of [tv.primaryColor!, tv.attributeBackgroundColorOdd!, tv.attributeBackgroundColorEven!, tv.rowOdd!, tv.rowEven!]) {
-      expect(contrast(tv.primaryTextColor!, background)).toBeGreaterThanOrEqual(4.5)
-    }
-    expect(buildCodexMermaidConfig('pie', true)).toMatchObject({
-      themeVariables: { pie1: '#1f4e94', pie2: '#3a843f', pieSectionTextColor: '#ffffff', pieStrokeColor: '#181818' },
-    })
-  })
-
-  it.each(['sequence', 'class', 'classDiagram', 'state', 'stateDiagram', 'er', 'gantt', 'pie'])(
-    '%s 使用六张参考图的浅蓝边框与深灰文字，不沿用流程图 ELK 布局',
-    (type) => {
-      const config = buildCodexMermaidConfig(type)
-      expect(config).toMatchObject({
-        theme: 'base',
-        themeVariables: {
-          primaryColor: '#e0edfe',
-          primaryBorderColor: '#539af8',
-          primaryTextColor: '#1a1c1f',
-          lineColor: '#8e8f90',
-        },
-      })
-      expect(config).not.toHaveProperty('layout')
-      expect(config).not.toHaveProperty('elk')
-    },
-  )
-
-  it('甘特分区按原生 0.2 透明度叠加成参考中的深灰条带', () => {
-    expect(buildCodexMermaidConfig('gantt', true)).toMatchObject({
-      themeVariables: { sectionBkgColor: '#222222', sectionBkgColor2: '#18273b', altSectionBkgColor: '#ffffff' },
-    })
-  })
-
-  it('保留既有流程图预设，未采集参考的图类型不套用预设', () => {
-    expect(buildCodexMermaidConfig('flowchart-v2')).toMatchObject({
-      layout: 'elk', themeVariables: {
-        primaryColor: '#e5f3ff', primaryTextColor: '#004f99',
-        primaryBorderColor: '#b8b9ba', lineColor: '#b8b9ba',
-      },
-    })
-    expect(buildCodexMermaidConfig('mindmap')).toBeUndefined()
-  })
-
-  it('流程图的固定蓝色文字配白色画布，弹窗与导出保持同一背景', () => {
-    const config = buildCodexMermaidConfig('flowchart-v2')!
-    expect(config.themeCSS).toContain('& { background-color:#ffffff; }')
-    expect(contrast('#004f99', '#ffffff')).toBeGreaterThanOrEqual(4.5)
-  })
-
-  it('流程图暗色使用深蓝节点和白字，保留 ELK 布局与指定辅助灰', () => {
-    const config = buildCodexMermaidConfig('flowchart-v2', true)!
-    expect(config).toMatchObject({
-      layout: 'elk', themeVariables: {
-        darkMode: true, primaryColor: '#1a283d', primaryTextColor: '#ffffff',
-        primaryBorderColor: '#b8b9ba', lineColor: '#b8b9ba', clusterBorder: '#b8b9ba',
-      },
-    })
-    expect(config.themeCSS).toContain('& { background-color:#181818; }')
-    expect(contrast('#ffffff', '#1a283d')).toBeGreaterThanOrEqual(4.5)
-  })
-})
 
 /** 相对亮度（WCAG）：sRGB → 线性 → L */
 function luminance(hex: string): number {

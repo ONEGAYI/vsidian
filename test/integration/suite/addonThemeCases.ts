@@ -39,8 +39,9 @@ export const addonThemeCases: Array<[string, () => Promise<void>]> = [
     const previousColor = config.inspect<string>('colorTheme')!.globalValue
     const root = vscode.workspace.workspaceFolders![0]!.uri
     const uris = ['theme-a.md', 'theme-b.md'].map((name) => vscode.Uri.joinPath(root, name))
+    // #535 T08：旧 Mermaid 键退役——setPreferred 只写新键（appearanceThemePatch 同款）
     const setPreferred = (value: string) => vscode.commands.executeCommand(`${PREFIX}setSettings`, {
-      'appearance.theme': value, 'appearance.mermaidTheme': value === 'codex' ? 'codex' : 'default',
+      'appearance.theme': value,
     })
     const waitForTheme = async () => {
       await wait('恢复继续原主题', async () => (await state())?.table.languages.find((entry) => entry.language === 'mermaid')?.effective === `${ID}/aqua-renderer` ? true : undefined)
@@ -130,7 +131,7 @@ export const addonThemeCases: Array<[string, () => Promise<void>]> = [
       await vscode.commands.executeCommand(`${ID}.arm`, false)
       await vscode.commands.executeCommand(`${PREFIX}addonSetEnabled`, { addonId: ID, enabled: true })
       await vscode.commands.executeCommand(`${PLAIN_ID}.disarmProviders`)
-      await vscode.commands.executeCommand(`${PREFIX}setSettings`, { 'appearance.theme': previous!['appearance.theme'], 'appearance.mermaidTheme': previous!['appearance.mermaidTheme'] })
+      await vscode.commands.executeCommand(`${PREFIX}setSettings`, { 'appearance.theme': previous!['appearance.theme'] })
       await vscode.commands.executeCommand(`${PREFIX}addonRendererPrefer`, { language: 'mermaid', provider: previousRenderers!.preferred['mermaid'] ?? null })
       await vscode.commands.executeCommand(`${PREFIX}addonRendererPrefer`, { language: 't09draw', provider: previousRenderers!.preferred['t09draw'] ?? null })
       await vscode.commands.executeCommand(`${PLAIN_ID}.releaseAndReRegister`)

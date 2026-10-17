@@ -32,7 +32,7 @@ const templateRule = (id: string, template: string, slots: Record<string, unknow
   output: { kind: 'template', template, slots },
 })
 
-/** 最小合法声明（Codex 形态样例：来源特化 span → Markdown 链接） */
+/** 最小合法声明（来源特化形态样例：特化 span → Markdown 链接） */
 const linkDeclaration = () => ({
   id: 'prompt-link',
   match: {

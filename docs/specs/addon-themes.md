@@ -2,7 +2,7 @@
 
 ## 1. 状态与交付顺序
 
-2026-10-15 用户确认主题统一单选、安装只新增候选、跟随 VSCode 生效明暗，以及替代组件先可安装可用、内核 Codex 后移除。#533 为规格/父票；T07（#546）统一主题机制已实现，待用户整体验收；T08（#535）迁移与退役尚未实现，内置 Codex 保留。依赖、票号和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。当前 API 仍为未发行候选。
+2026-10-15 用户确认主题统一单选、安装只新增候选、跟随 VSCode 生效明暗，以及替代组件先可安装可用、内核 Codex 后移除。#533 为规格/父票；T07（#546）统一主题机制已实现，待用户整体验收；T08（#535）已于 2026-10-17 实施（旧设置迁移与一次性引导落地，安装态组件版验证、包体实测与阈值重估均已落档，见 §10/§10.1），整体待用户验收。依赖、票号和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。
 
 架构事实源为 [ADR-0017](../adr/0017-unified-addon-theme-selection.md) 与 [ADR-0012 的主题例外](../adr/0012-vsidian-addons-distribution-api-governance.md)。本规格细化接入和验证，不复制 API 签名或伪称组件已经发行。
 
@@ -17,7 +17,7 @@
 7. **H-U07**：作为组件作者，我希望读取明暗当前值并收到变化通知，以便更新已挂载图形。
 8. **H-U08**：作为用户，我希望显示名称随界面语言变化且能搜索定位主题设置，以便找到正确选项。
 9. **H-U09**：作为 Codex 用户，我希望替代组件可安装可用后再移除内置主题，以便不会出现无替代实现的空档。
-10. **H-U10**：作为升级用户，我希望旧 codex 设置回落 default 并只收到一次安装引导，以便知道主题的新去向。
+10. **H-U10**（已取消，2026-10-17 用户终局裁决）：原期望「旧 codex 设置回落 default 并只收到一次安装引导」；现无老用户存量，不迁移不提示（旧键写入按未知键拒绝，存量裸词值自然回落 default 显示，见 §6.2/§10.0）。
 11. **H-U11**：作为用户，我希望 default 主题及普通非主题渲染组件保持既有行为，以便主题迁移不扩大影响范围。
 12. **H-U12**：作为维护者，我希望移除 ELK 与 Codex 内核适配后实测包体并保持样式兼容，以便发布预算和旧片段仍可信。
 
@@ -41,9 +41,9 @@
 
 选择 default 使用内置显示；选中组件主题不可用时回落内置，保留原主题首选并明确回显不可用/当前回落状态，不静默选中另一主题。恢复或手动重试成功后按原首选显示；不自动重试故障组件，不把仍运行的输出 bug 当作降级条件。
 
-### 3.3 过渡内核 Codex
+### 3.3 过渡内核 Codex（历史）
 
-T07 属于扩展阶段：内核 codex 枚举与实现暂时保留，旧值仍可回显并使用；组件主题按自身稳定身份新增，同名项按来源区分。只有 T08 执行旧值迁移与删除，不能在主题 API 票中提前清掉 Codex 实现或依赖。
+T07 属于扩展阶段：内核 codex 枚举与实现暂时保留，旧值仍可回显并使用。T08（2026-10-17）已执行退役删除：无老用户存量、不做激活迁移与引导（2026-10-17 用户终局裁决，见 §10.0）——旧键定义删除（写入按未知键拒绝），存量裸词值按目录不命中的未知首选自然回落 default 显示且首选保留；内核枚举、色板、图类适配与 ELK 依赖已删除，组件版 Codex 由替代扩展（vsidian-codex-bridge）提供。
 
 ## 4. 页面明暗状态
 
@@ -59,7 +59,7 @@ T07 属于扩展阶段：内核 codex 枚举与实现暂时保留，旧值仍可
 
 采用 ui-patterns 的既有 pill 页签、组头与标准设置行；沿现有外观大卡片承载组头，不嵌套新卡片或发明档位。选择控件保持单选、键盘可达与清晰不可用状态，必要说明走既有 callout/状态行。
 
-显示名使用组件多语言映射，平台标签、错误、迁移提示与页签名称经双语 i18n。搜索路由、选项定位、持久化与重新打开回显同步更新。主题设置不是编辑操作，不新增默认快捷键。
+显示名使用组件多语言映射，平台标签、错误与页签名称经双语 i18n。搜索路由、选项定位、持久化与重新打开回显同步更新。主题设置不是编辑操作，不新增默认快捷键。
 
 公开 `.vsidian-mermaid` 族、阅读侧入口和错误态语义保持。样式技能的历史基线使用现有 v0.4.0 独立锚点；不能仅保留空壳类名却把图形绘制移动到旧片段无法命中的节点。
 
@@ -73,9 +73,8 @@ T07 完成后，bridge#3 可实现并验证组件主题，不依赖 #535 的删�
 
 ### 6.2 迁移与删除
 
-- 对仍有效选择旧内核 codex 的 profile，迁移为 default，并提供一次性安装引导；已明确选择组件主题或 default 的用户不被残留旧键覆盖。
-- 一次性标记与设置同 profile 持久化，重开设置/文档、重启与多窗口不重复发同一迁移引导；不自动安装组件，不自动替用户选组件主题。
-- 回落与迁移完成后删除内核专属枚举、色板、图类适配、ELK 依赖及构建分块；内置 default 渲染和公开样式入口保持。
+- **不做迁移、不做提示（2026-10-17 用户终局裁决，见 §10.0）**：产品没有需要从旧内核 codex 设置迁移的老用户存量，原「回落迁移 + 一次性安装引导」设计（方案 A 及一至十轮评审打磨的并发恰一次协议）整体退役删除。旧键 `appearance.mermaidTheme` 定义删除后：任何写入按未知键整批拒绝、快照不含此键；`appearance.theme` 的存量退役裸词值（如存在）按「目录不命中的未知首选」回落 default 显示且首选保留（既有解析语义，无需激活迁移）。
+- 删除内核专属枚举、色板、图类适配、ELK 依赖及构建分块；内置 default 渲染和公开样式入口保持。
 - 打包实测移除后的总体积与单文件最大值，再重估 scripts/release.mjs 的 SIZE_LIMITS，不能拍脑袋恢复某个旧阈值。预算变更需同步项目 release 技能及包内容检查。
 
 ## 7. 验证与门禁
@@ -83,7 +82,7 @@ T07 完成后，bridge#3 可实现并验证组件主题，不依赖 #535 的删�
 - T07 先写单测钉住宿主目录注册/回收、稳定身份、多语言、全局唯一首选、安装不抢占、主题/普通提供者区分、不可用回落与恢复；明暗订阅覆盖缓存先更新、四态与释放。
 - 浏览器使用真实设置页与组件消费夹具验证页签更名、单选、来源、搜索定位、保存与重开回显，以及文档图形实际配色。至少一条断言落在绘制层，不能只查选项存在。
 - 真宿主验证无编辑器时目录可见、已开多文档切换、主题事件广播与组件停用；API 清单、参考、消费者、覆盖映射及兼容重锚定随实施票维护。
-- T08 使用旧设置升级夹具和已安装组件产物，验证 default 回落、引导一次性与组件版 Codex 可选；对流程图及六类适配保留亮暗、布局、画布和导出对照证据。
+- T08 验证口径（2026-10-17 改判后）：旧键写入整批拒绝、default 双模式管线与组件版 Codex 可选（安装态产物验证归线 2）；对流程图及六类适配保留亮暗、布局、画布和导出对照证据（实施口径：本仓自动化收敛为选路正确 + 渲染成功 + default 弹窗/导出回归，六类视觉对照由 bridge 仓逐值对拍与人工待验承载，详见 §10.1）。
 - T08 执行 compile、unit、browser、integration，以及 release 打包/包内容与样式契约检查；首次长命令落日志和退出码，复核读报告，不为补看信息重跑。全量宿主按分片或放宽预算，不与 browser 全量同机争抢预算。
 - 两票均按项目 ui-patterns/style-contract 要求留证，不能因未改变选择器名字就省略实际命中验证。真实视觉、物理鼠标与安装体验仍记录人工验收状态，不把自动化当作用户验收。
 
@@ -91,7 +90,7 @@ T07 完成后，bridge#3 可实现并验证组件主题，不依赖 #535 的删�
 
 不开放组件接管整个外观页、任意配置读取、自动安装、自动发布、第二个主题选择入口或独立操作系统主题覆盖。本文不新增 CSS 主题变量系统，也不把任意代码块渲染组件都改成主题。
 
-T07 覆盖 H-U01–H-U08、H-U11；T08 覆盖 H-U09/H-U10/H-U12 并复验降级与明暗。#533 在 T07、T08 及对应验收完成前保持开放；#535 不因规格定稿而提前关闭。
+T07 覆盖 H-U01–H-U08、H-U11；T08 覆盖 H-U09/H-U12 并复验降级与明暗（H-U10 随 2026-10-17 用户终局裁决取消，见 §2）。#533 在 T07、T08 及对应验收完成前保持开放；#535 不因规格定稿而提前关闭。
 
 ## 9. T07 实施落档（#546）
 
@@ -108,3 +107,96 @@ T07 覆盖 H-U01–H-U08、H-U11；T08 覆盖 H-U09/H-U10/H-U12 并复验降级�
 既有 `settingsPage` 浏览器回归同步改为主题 radio 和新页签名称，保留组头图标、负边距、描边及持久回显断言；亮暗两轮通过（`t07-resume-settings-browser-green.log`）。`addonRendererTakeover` 与 `graphicPopup` 定向回归通过（`t07-resume-graphics-browser.log`），分别保护普通提供者规则和内核 default/Codex 的弹窗快照、配色与导出。
 
 接手续作证据保留在 T07 工作树的 `out/test/t07-resume-*`：边界和回调先红后绿，17 个 focused 单测文件 360 项、compile、`addonThemes` 浏览器五场景及样式契约通过。真宿主 `t07-resume-integration2.log` 为 1/1 通过，覆盖无文档目录、两文档图形计算色、四态主题事件与停用恢复；首轮夹具光标落在围栏导致源码态等待超时，已改为定位到尾段后复验。多文档接线复用 T03 确认的 `panelStateKey(docUri, sessionId)`，避免不同文档的同名 panel ID 相撞。联合全量回归由汇总分支执行；人工检查主题列表与真实系统跟随体验仍待用户验收。API 仍为 1.0.0 候选，不添加发行日期；签名及 renderer-selection 主题例外显式重锚候选兼容基线，理由见 [API 门禁规格](addons-api-gate.md)。
+
+## 10. T08 实施落档（#535，线 1：迁移与删除，2026-10-17）
+
+### 10.0 终局裁决：迁移机制整体退役（2026-10-17，用户裁决）
+
+R10 复审（4 项 P2：临时身份被第三窗误认、排队预算按总时长放弃、EIO 读取 null 未阻断编排副作用、墓碑先行致提示永久漏发）待修复之际，用户做出产品裁决：**没有老用户存量——不迁移、不提示、不为该机制引入更多复杂度**。据此整个旧主题迁移机制删除退役：
+
+- **删除面**：`src/shared/legacyThemeMigration.ts`、`legacyThemeMigrationLock.ts`、`legacyThemeMarkerFiles.ts`、`src/host/legacyThemeMigrationWiring.ts` 四文件与 extension.ts 装配、`SettingsService.runExclusiveOverlayStep`（迁移专用串行步骤，apply 链本体不受影响）、`MERMAID_THEME_KEY` 常量、`host.legacyThemeMigrated` 引导文案与 `_test` 四钩子（getLegacyThemeMigrationState / injectLegacyThemeOverlay / resetLegacyThemeMigration / runLegacyThemeMigration）全部移除；单测 legacy* 族 13 文件删除；集成用例改写为「旧主题键退役：写入拒绝与 default 双模式管线（#535）」（保留旧键写入拒绝、default 双模式绘制与快照无旧键断言）。
+- **退役后语义边界**：旧键定义已删除——任何写入按未知键整批拒绝、快照不含此键；`appearance.theme` 的存量退役裸词值按「目录不命中的未知首选」回落 default 显示且首选保留（`resolveThemePreferred` 既有语义，无需迁移）。R1-R10 全部迁移面修复（方案 A、代次锁、状态文件族、身份两窗、收敛观察等）随机制删除失效；本节下方与 §10.2-§10.5 的机制描述、以及红绿证据链段落转为**历史存档**（记录真实发生过的评审与修复，不再描述现行实现）。
+- **删除验证**：tsc 0；全量单测 392 文件 9149 例绿；集成定向（改写用例）1/1 绿（独立桌面）；宿主/两 webview 三产物 grep 零迁移符号；addonapi 参考一致（35 条目无变化——迁移机制不在公开 API 面）。
+
+内核删除面：旧键 `appearance.mermaidTheme` 定义条目与 `MermaidPreset` 类型删除（快照不再含旧键、写入按未知键拒绝；`MERMAID_THEME_KEY` 常量随迁移机制退役一并删除——无读者）；`CODEX_THEME_ID` 与 `resolveThemePreferred` 的 **v1.1.0 兼容形状保留**（PR #581 评审发现 3 恢复兼容壳：前者为 `@deprecated` 常量、值恒 'codex' 不再代表内置身份；后者保留可选第二参 `legacyMermaidValue` 同标 `@deprecated`、传任何值不再影响解析结果——退役 codex 历史值按「目录不命中的未知首选」回落且首选保留）；`buildCodexMermaidConfig`、mermaidEntry 的 ELK import/注册与 codex 分支、mermaidRender 的 preset 机制、设置页内置 codex 单选项、locales `setting.mermaidTheme.*` 四键（两包同步退役，新增 `setting.theme.defaultOption`）全部删除。保留面：default 暗色链路（`MERMAID_DARK_FALLBACK_PALETTE`/`resolveVscodeMermaidPalette`/`buildDarkMermaidThemeVariables`）、站点配置恢复机制（frontmatter/classDef 覆写语义不变）、mermaid-chunks 分块机制、图表弹窗快照语义、公开 `.vsidian-mermaid` 样式族（样式契约基线 v0.4.0 改前改后八项检查均零失败）。`@mermaid-js/layout-elk` 依赖与 lockfile 已收口（306 包共享缓存重建）。
+
+API 面：themes-register 条目 lifecycle 值域收窄为 `default | <addonId>/<themeId>`，候选兼容基线按门禁规格显式重锚（重锚前红证据与理由见重锚定提交及 [API 门禁规格](addons-api-gate.md)）；CHANGELOG-API Unreleased 记账——兼容形状保留（deprecated 常量 + 可选双参）后签名不再破坏，升版幅度预判**倾向次版本 1.2.0**（兼容性修订：语义收窄 + 弃用标注），留发行轮最终裁决，发行日期不在开发段预填。
+
+（历史存档——以下为退役前形态，引导文案与 `_test` 钩子已随机制删除，两语言包键已移除）引导文案 `host.legacyThemeMigrated`（双语，五审前键名 host.codexThemeMigrated；文案不变——告诉用户 Codex 去向是 codex 唯一合法存活地）：说明去向、当前回落 default、安装与选择归用户（不自动安装、不代选）；VSIDIAN_TEST_HOOKS=1 时通知短路（计数先于短路，集成断言「只引导一次」经 `_test.getLegacyThemeMigrationState` 观测）。`_test` 四钩子（getLegacyThemeMigrationState / injectLegacyThemeOverlay / resetLegacyThemeMigration / runLegacyThemeMigration）按 VSIDIAN_TEST_HOOKS 门控注册，runner 每用例重置面并入标记清理（身份双载体与按前缀全族状态文件一并清理）。
+
+先红后绿证据（日志在 T08 工作树 `out/test/`，均含退出码）：迁移纯函数 15 例（`t08-red-codexMigration.log` EXIT=1 → `t08-green1-codexMigration.log` EXIT=0）；既有单测翻转（`t08-red-flip-unit.log` 8 失败 → `t08-green-flip-unit.log` 132 例）；全量单测 375 文件 8773+ 例（`t08-unit-slice3b.log`，vitest 侧全绿；node --test 侧契约测试在重锚定提交后随 `t08-unit-final.log` 全绿）；API 重锚定红→绿（`t08-addoncompat-pre-reanchor.log` EXIT=1 → `t08-addoncompat-post.log` 10 项零失败）；浏览器 graphicPopup/settingsPage/addonThemes 及相邻 settingsPageRestore+mermaidPaint 全过；集成迁移用例与 T07 主题用例定向通过（默认独立桌面）。三审轮（PR #581 复审修复）：三项反例红 5 例（`t08-review3-red.log` EXIT=1，P2-A 两项 + P2-B/锁竞态）→ 修复后全绿（`t08-review3-commit2b.log` 四文件 54 项）+ 全量单测 377 文件 8776 例（`t08-review3-unit-full.log` EXIT=0）。四审轮（P2-D 锁协议）：受控调度反例红 12 例（`t08-review4-red.log` EXIT=1，对三审实现跑——生产链三窗口 guides=2、协议级接管/释放双 owner，经 `codexLockTestGate` 在每个 fs 原语边界注入第三方认领）→ 代次锁实现后全绿（`t08-review4-green.log` 三文件 41 项）+ compile（`t08-review4-compile.log` EXIT=0）+ 全量单测 377 文件 8779 例（`t08-review4-unit-full.log` EXIT=0）。安装态组件版 Codex 验证（真实安装 bridge VSIX 后经统一主题页选择）与包体实测/SIZE_LIMITS 重估不在本线，归后续线（线 2）。五审轮（P2-C 方案 B' + 存在感清理）：双 profile 反例红（`t08-review5-p2c-red.log` EXIT=1——固定名状态文件让 profile B 被永久短路）→ B' 实现后迁移四文件全绿；值无关化红 2 例（`t08-review5-valuefree-red.log` EXIT=1）→ 结构判定后全绿（等价性对拍：既有用例值不变全绿）；改名脱敏后全量单测 378 文件 8789 例 + node 侧 196 例（`t08-review5-unit-3.log` EXIT=0，删 t08CodexBridge.test.mjs 后 199→196）；API 三门禁全过（addonapi:baseline / addonapi / addoncompat，`t08-review5-addonapi-baseline.log`）；dev 迁移集成用例（改名后「旧主题值迁移：回落 default 与一次性引导（#535）」）定向通过（`t08-review5-integration-migration.log` EXIT=0，独立桌面；中途暴露 Node 18 宿主无 globalThis.crypto，已改工厂注入）。存在感清理自查 `git grep -ri codex -- src/ test/`：除 locales 引导文案与 v1.1.0 公开 API 兼容锚定面（addonApiCatalog 语义台账、addonThemes 的 CODEX_THEME_ID / resolveThemePreferred / resolveActiveTheme 声明快照、baseline JSON、publicApiConsumer 与 addonApiSurface 钉住面——addoncompat 按声明文本比对基线，改动即须重锚）外零命中；docs/ 历史记载不清理。六审轮（P2-E 锁协议 + R5-1 身份失败关闭 + R5-2 首屏刷新 + CI tmp 竞态，四项明细见 §10.2）：CI tmp 竞态红（`t08-review6-marker-red.log` EXIT=1，ENOENT 与 CI run 39026659483 同型的确定性受控交错）→ 绿（`t08-review6-marker-green.log`）；P2-E 四场景红（`t08-review6-lock-red.log` EXIT=1——协议级指针回退 effectiveMax=1、生产链 guides=2）→ 绿（`t08-review6-lock-green.log` 56 例，调度场景连跑 5 轮稳定）；R5-1 红（`t08-review6-identity-red.log` EXIT=1，reviewer 三窗复现 guides=3）→ 绿（`t08-review6-identity-green.log`，review5 双 profile/边界用例随六审语义改判）；R5-2 红（`t08-review6-notify-red.log` EXIT=1，seen=0 无补推）→ 绿（`t08-review6-notify-green.log` + 消费面 `t08-review6-notify-consumers.log` 59 例）。全量：compile（`t08-review6-compile.log` EXIT=0）、全量单测 382 文件 8798 例 + node 侧 196 例（`t08-review6-unit-full.log` EXIT=0）、dev 迁移集成用例定向连跑 3 轮全绿（`t08-review6-integration-migration-run1..3.log`，独立桌面；六审轮首跑曾翻红一次——迁移写回通知链的他键写入（主题语言派生快照持久化）落入 settingsService 头注释记载的「紧邻他键写入可把刚写的 overlay 盖回旧值」环境怪癖窗口，按 #38 先例为用例恢复步骤补 `waitSettings` 读回校验加固，非语义回归）。
+
+### 10.1 线 2 落档：安装态验证、包体实测与阈值重估（2026-10-17）
+
+> **台账性质说明（2026-10-17 五审起）**：本节所载安装态 bridge 专属链（`runInstalledCodexBridge.mjs` / `t08CodexBridge.mjs` / `t08CodexBridge.test.mjs` / `codexBridgeInstalledCases.ts`）已于验收留证后**移出仓库**（T08 五审「codex 与其组件在本仓像从未存在过」口径——bridge 组件与本仓内核的长期存在面分离）；放行证据以本台账与 `out/test/t08-phase-legacy.log` / `out/test/t08-phase-upgraded.log` 为准，不复跑。三档矩阵共享断言助手内联进 `suite/cases.ts` 供 dev 迁移用例继续消费。
+
+**组件产物与安装验证记录（#535 验收标准 1 的一览）**：
+
+| 项 | 值 |
+| --- | --- |
+| 组件 | vsidian-codex-bridge（ONEGAYI.vsidian-codex-bridge） |
+| 版本 / 提交 | 0.1.0 / `75a0e5d2eb8bc73eace04881066fe7d1824d7bc4` |
+| VSIX sha256 | `e0b6eda5242786b7c96cb8cd31f190517042fc6503f5b7e500faa8cf8f8c5bc3`（本仓实测复核一致） |
+| 渠道 | GitHub Release（2026-10-16，组件仓自带独立桌面四层安装验证） |
+| 旧版对照物 | 本仓 v1.1.0 VSIX（sha256 `0ab6b8182374c9edc9832cc113c0e73cc103c4e56f94f5f2623e1a5feb944ae9`，升级路径的「旧实物」） |
+| 安装验证 | `test/integration/runInstalledCodexBridge.mjs` 两阶段真安装链全过（报告 `out/test/t08-phase-legacy.log` / `t08-phase-upgraded.log`，宿主默认独立桌面） |
+
+安装态断言面（`test/integration/suite/codexBridgeInstalledCases.ts`，`VSIDIAN_T08_PHASE` 阶段门控）：legacy 阶段装 v1.1.0 旧 VSIX 证实旧枚举 codex 在旧版语义内合法可保存（升级前状态真实成立）；upgraded 阶段以 `--force` 同版本覆盖为本分支 VSIX + bridge 同装（本分支未升版本号，同版本覆盖承载安装链升级面，版本差异化升级链由 T16 E 先例覆盖），验证 bridge 经真实安装链被发现并注册 Codex 主题、选择后渲染选路走组件（`paint.renderers` 容器 provider 为 `ONEGAYI.vsidian-codex-bridge/codex-mermaid` 且真实绘制）、停用回落 default 且保留首选、恢复重新生效；升级迁移语义（旧键残留回落 default、引导恰一次、不覆盖已选组件主题）在安装产物上复验。
+
+**通道取舍（已如实施行）**：1.82.3 测试宿主的 storage 完全 in-memory（T16 D/E 票面三途径实证，写入/预置均不落盘也不读盘），legacy 会话写入的 globalState 无法跨会话带到 upgraded 会话——升级残留以 `_test.injectCodexLegacyOverlay` 直写原始 overlay 承载（模拟磁盘上的旧键残留），真实跨会话落盘归人工验证清单（安装版真实升级路径）。
+
+**六类图对照口径**：bridge v0.1.0 发行说明已载明其独立契约测试对拍内核色板（逐值迁移），本仓不重复对拍色板值；本仓安装态断言收敛为「选路正确 + 渲染成功 + 弹窗快照/导出链路不回归」（default 路径 graphicPopup 浏览器回归线 1 已覆盖）。完整视觉对照（六类图型亮暗、ELK 布局、画布、导出、显式配置）列为人工待验项（[manual-verification.md](manual-verification.md) T08 线 2 节）。
+
+**包体实测与阈值重估（#535 验收标准 6）**：ELK 分块移除后实测 VSIX 413 文件、解压 12,916 KB ≈ 12.62 MiB（2026-10-17，日志 `out/test/t08-release-package.log` EXIT=0；ELK 在场时约 13.80 MiB）。据此提案总量两线各下调 1.0 MiB 至警告 13.5 / 上限 14.0 MiB（余量 0.88/1.38 MiB，沿 #338 与 ELK 两次裁决的余量风格），单文件 3/4 MiB 与图标 100 KB 不受影响不动；mermaid.js 经 ELK 剥离缩为 25,682 B 按需加载壳（渲染主体移入 mermaid-chunks 分块，最大 chunk 约 443 KB），单文件线锚定对象改为最大单项 main.js（2,573,352 B ≈ 2.46 MB）。**阈值下调无先例、属用户裁决面：上述数值已依据 #535 验收口径（依据实测重估）以提案值生效，发版/验收轮用户可整体回调**；三处同步已按提案值落齐（`scripts/release.mjs` SIZE_LIMITS 与注释史、release 技能「体积红线」节、`test/release/release.test.mjs` 钉值先红后绿）。
+
+### 10.2 六审轮落档：认领协议闭环、身份失败关闭、首屏刷新与 CI tmp 竞态（2026-10-17，PR #581 六审）
+
+四项修复的完整设计论证与不变量保持记录（正文协议描述已在 §10 主体同步为六审现状；实现层论证见 `src/shared/legacyThemeMigrationLock.ts` 与 `src/shared/legacyThemeMigration.ts` 文件头六审节）：
+
+**P2-E 锁认领协议闭环（R4 提出、R5 复审确认仍开放）**。两处空隙：普通认领 `tryAcquire` 以 `staleMs:0` 步进候选，另一窗口刚创建的在途新鲜候选被当陈旧孤儿越过（fail-open）；U2 单调性校验的 readPointer 与 pushPointer 的 rename 之间存在暂停窗口，滞后者按先前校验把指针写回旧值（R4 实测 2→1 回退、双 owner、`guides=['B','A']`、第三窗可再获锁）。修复采用「方向 A + 方向 B」组合：
+
+- **方向 A（提交点 = O_EXCL 单调标记族，消灭回退）**：单机文件系统没有通用 compare-and-swap，评审方已论证「仅再读一次指针 + rename 原子替换」不构成原子仲裁；文件系统保证原子性的创建语义只有 O_EXCL（名字由创建方选定、同名恰一赢家、败者 EEXIST）。第 n 代的提交 = O_EXCL 创建标记 `g<n>`，**有效代次指针 = 标记族 max**——「把指针写回旧值」变形为「创建一个更低的标记」，max 不受影响，回退在结构上不存在；EEXIST 即仲裁败诉（该代次已被历史认领者提交、自己的读数过时）→ 删自己的候选文件撤退；提交后核验（重读 max）拦截「已提交却被更高代次超越」的滞后者（如慢 owner 被陈旧接管）。旧单文件指针 `.gen` 降级为兼容视图（恒 ≤ 标记族 max，不参与仲裁）。
+- **空隙 1 修复（普通认领 fail-closed）**：tryAcquire 的候选新鲜度阈值改为 Infinity——候选文件存在（无论年龄）即返回 false 让位，永不以时间判定越过；时间语义（陈旧阈值越过孤儿）只属于接管路径，两条路径的过期语义不混用。被孤儿挡住不锁死：调用方等待环经 takeoverIfStale 阈值兜底（`runLegacyThemeMigration` 既有衔接）。
+- **方向 B（资源端 fencing，拦滞后 owner 的副作用）**：锁句柄新增 `isCurrentGeneration`（ownGen === 标记族 max），owner 序列每个关键副作用（写 pending、发引导，含恢复补发路径）前复核，失效即静默撤退。R4 已论证单纯 fencing 挡不住指针回退（指针被拉回自己代次后误判有效）——本实现建立在方向 A 的「指针不可回退」之上，误判形态不存在。
+- **不变量保持**：U1（标记族生产路径永不删除，指针语义永久单调，公开锁路径恒在场）、U2（每代恰一个 O_EXCL 提交者，提交与所有权成立是同一原子动作）、U3（释放只删自己代次的确切文件名，标记不删）、U4（前代清理只删严格更低代次的纯数字后缀文件，`g<n>` 标记天然不在清理面）。四审全部既有断言原样保持绿（`legacyThemeMigrationLock.test.ts` 未改一行断言）。
+- **声明的有界边界**：fence 核验与副作用之间为同步序窗口——绕过需「滞缓超陈旧阈值（默认 10s）+ 微秒级交错」同时成立，较六审前的「24ms 交错即双 owner」严格多个数量级，与既有「引导 fire 与 done 写之间的同步序残余窗口」同类取舍。
+
+**R5-1 身份等待超时失败关闭**。五审的「超窗自生成 + 一次性多引导」边界声明不成立：R5 复审以三窗错开激活 + 5s 广播延迟实测 guides=3（次数 = 未收到广播的窗口数），违反 §6.2 多窗口不重复。修复：超窗不再自生成——共享磁盘已有任一迁移状态（新端口 `hasAnyMigrationState`）即让位（不迁移、不引导、不写迁移状态），下次激活 memento 从 db 读到已收敛身份后短路或正常迁移；「宁可不引导也不重复」。**让位可逃逸**（跨 profile 活性，五审 P2-C 修复面保持）：全新 profile 在他 profile 已迁移的磁盘上首次激活也会让位，不可逃逸即永久让位（P2-C 形态回退）——逃逸通道为 overlay 让位记号（PROFILE 域持久、跨 profile 域隔离、生成后复位），下次激活恢复生成资格；磁盘全净的首次认领仍即时生成（单窗升级主路径零额外激活成本）。残余边界：让位判据不能区分「身份不在 db」与「身份已入 db 但本窗缓存跨激活过期」，后者在跨激活交错且并发时仍可能多引导一次（严格收窄，见 §10 主体声明）。review5 的双 profile 与广播丢失边界用例随收紧语义改判（B 首次让位/下次激活恰一次）——这是协议收紧导致的等待路径行为变化，非回归。（七审 R7 复审推翻「让位 + 记号恢复资格」机制本身：让位记号写即是旧缓存整对象覆盖的载体，现行分级两窗语义见 §10.3。）
+
+**R5-2 迁移完成后的首屏刷新**。迁移写回走 `runExclusiveOverlayStep`（P2-A 串行互斥写）但该路径原不通知，主题推送只订阅 `SettingsService.onChange`——页面已完成首读时停留在迁移前残留值直到重开。修复：`runExclusiveOverlayStep` 在补丁落盘后走与 apply 成功路径同构的变更通知（链外、新快照回调、null 补丁不打扰）；调用方唯一（迁移 wiring，既有注释已声明仅供迁移消费），下游主题推送与 apply 共用同一通道，零新通道零新状态源。
+
+**CI tmp 竞态（run 39026659483，六审追加）**。review5「正常双窗即时镜像」在 CI Linux 挂 1 例 ENOENT：双窗收敛同一 profileId 后并发 writeMarker，测试夹具的固定 tmp 名 `${target}.tmp` 让先 rename 方消费共享 tmp、后 rename 方 ENOENT。修复：tmp 名按写入唯一化——共享夹具（六审抽取为 `test/unit/legacyDiskMarkerStore.ts` 单一事实源）带 UUID 片段；生产 wiring 在 pid 片段之上补 UUID 片段（生产锁内单 owner 常态单 writer，唯一化为防御纵深）。**定性**：tmp 竞态是锁失效（P2-E）的症状面而非根因——R5 复审明确「不能仅改测试 tmp 名作为锁问题闭环」，闭环以 P2-E 的协议修复 + 调度测试为准；本项让测试在锁修复落地前后都能稳定表达失败。
+
+### 10.3 七审轮落档：让位机制废除与身份等待分级、状态文件代次化（2026-10-17，PR #581 七审）
+
+七审三项 P2 的修复记录（六审语义被推翻的部分已在 §10 主体同步改写；实现层论证见 `src/shared/legacyThemeMigration.ts` 文件头七审节）：
+
+**R7-1 让位记号从旧 Memento 写回，抹掉已完成的身份与设置（P2）**。审查方直接导入未改的 1.82.3 `ExtensionMemento` 类复现：update 向 storage 发送**整个扩展对象**、存储端整体序列化落盘（非按 key 合并）——旧窗口让位写 `_legacyThemeMigration.identityWaitDeferred` 时，以其过期缓存整对象覆盖 DB，抹掉他窗已落盘的双载体身份与 default 设置；等全部广播送达后从最新 DB 重开的窗口已无身份，按记号另造 UUID 二次迁移引导。**修复：废除让位记号（常量删除），让位/等待路径零写入**——身份未定期间不从本窗缓存写回任何 profile 机制状态；配合 R7 分级两窗（见下），同 profile 广播在收敛窗内到达时迟到窗零写入即短路。「等全部广播送达后从最新 DB 真正重开」的回归用例落在 `legacyThemeMigrationReview7.test.ts` 的 R7-1（共享 DB + 整对象覆盖语义模拟）与 R7-1b（声明边界）。
+
+**R7-2 其他 profile 的任意状态文件阻塞本 profile 首迁（P2）**。`hasAnyMigrationState` 跨 profile 扫描整个共享目录，独立新 profile（缓存新鲜、无广播在途）首次激活也被让位，需再激活一次才迁移——审查方实测 B 首次激活结束仍为退役值、marker=null、guideCount=0。**修复：身份等待分级两窗**（`resolveProfileIdOrDefer` 改判，新选项 `profileIdSettleMs` 默认 10s）：第一窗（1s）超时后查磁盘信号——全净即生成首迁；有状态文件则进收敛窗等广播（同 profile 他窗身份在有限延迟内必达），收敛即用既有身份（done 短路）；收敛窗尽仍无身份则**生成自己的身份并在同次激活内完成迁移**（跨 profile 无同域写入，本窗缓存对本 profile 的 DB 新鲜，写入无损）。代价：他 profile 状态在场时本 profile 首迁最长延迟第一窗 + 收敛窗（异步非阻塞激活）。
+
+**R7-3 失效 owner 的异步 pending 提交覆写继任者 done（P2，R6 未修）**。fence 检查在 `await writeMarker` 之前，writer 内 mkdir/writeFile/rename 异步链未按代次拒绝——审查方以真实 fs + 默认 10s 阈值复现：A 挂起于 pending 临时文件写完后，B 约 10s 接管提交 done，A 恢复把 done 覆回 pending，下次激活补发（累计 2 次引导）。**修复：状态提交纳入代次单调性**——状态文件按锁代次分居（`p<gen>`/`d<gen>` O_EXCL 创建、读取取 max 代次、同代 d 优先；写入收尾清理同身份更低代次文件，残留无害），锁句柄新增 `getOwnedGeneration` 供 wiring 取本 owner 代次。滞后 owner 的迟到提交只创建低代次文件，被 max 读取结构性忽略——「迟到的 rename 覆写」路径不存在，与锁的「标记族 max 不可回退」同一仲裁哲学。六审的「tmp 名唯一化」修复面随 tmp+rename 写入器退役：O_EXCL 文件名按（身份,状态,代次）天然唯一，共享 tmp 在结构上不存在（六审 CI 竞态契约由 `legacyThemeMigrationReview6Marker` 改钉代次分居语义）。
+
+**声明的残余边界（R7-1b 用例钉住形状）**：同 profile 广播延迟超过收敛窗（默认 10s）或永久丢失（平台故障形态）时，迟到窗换身份重迁、多引导一次，此后系统收敛（新身份 done 短路、旧身份状态文件原样保留、重开不再增长）——该形态源于「profile 隔离 + 跨窗即时」双满足通道缺位与 memento 整对象覆盖不可绕过，与「进程 kill 的同步序残余窗口」同类取舍，不宣称恰 1。
+
+**测试面同步改写**：review5（双 profile 单次激活恰一次、广播延迟落收敛窗内零写入）、review6Identity（三窗错开 + 60ms 广播在收敛窗内收敛、跨 profile 同次激活）、review6Marker（tmp 竞态改钉代次分居）、review6Lock/review6Notify/review3/主单测（夹具绑定锁代次）。红态证据 `out/test/t08-review7-red.log`（四例全红对六审尾实现）；绿态 `t08-review7-legacy-green.log`（legacy 九文件 64 例）、全量单测 9213、tsc 0、集成定向「旧主题值迁移」1/1（独立桌面）。本轮基点含 origin/main 前移（#576 合入）后的 merge，file-tree 冲突按 ours 决策解（六审 5 个测试文件收录保持）。
+
+### 10.4 八审轮落档：等待期锁心跳、状态文件原子发布与读取回退；R8-1 提请裁决（2026-10-17，PR #581 八审）
+
+八审三项 P2 的处置记录（R8-2/R8-3 已修复，R8-1 为规格裁决项未单方面实施）：
+
+**R8-2 正常身份等待长于锁租期 → 等待期心跳（已修）**。他 profile 的 done 在场时，本 profile 的身份等待长达第一窗 + 收敛窗（默认 1+10s），而锁陈旧阈值默认 10s——并发启动的他 profile 窗口会在等待中段按「陈旧」接管，等待者生成身份后被 fence 静默退出，本 profile 本次激活迁移被跳过（审查方实测 B/C 双 profile 并发，B 需再激活恢复）。修复：锁句柄新增 `keepalive()`（fs 端口新增 `utimes` 原语），身份等待两窗的每轮轮询刷新自己代次文件的 mtime——陈旧判定语义从「距认领」改为「距最后心跳」，合法等待中的 owner 不被并发窗口当失效逐出；心跳停止（owner 真死亡/崩溃）超过阈值后接管兜底不变。等待者被接管逐出的成因消失后，「丢失所有权后重试」不再必要——败者静默退出与下次激活恢复是既有的锁竞争常态语义（R8 反例中 C 在 B 释放后经等待环接管完成自己的迁移，双 profile 各恰一次）。契约测试 `legacyThemeMigrationReview8`（双 profile 并发 B 长等待持锁 + C 稍后启动：B/C 各恰一次迁移引导、B 不被 fence）与锁级 keepalive 用例（心跳内接管被拒、心跳停止超阈值放行）。
+
+**R8-3 O_EXCL 先发布文件名后写内容，空/残缺高代文件遮蔽 pending 债务 → 原子发布 + 读取降级回退（已修）**。`open(target,'wx')` 先暴露正式文件名再写 JSON——写入失败/中断（审查方注入两次受控瞬时 EIO）在最终名留下空/残缺**高代**文件，reader 按最高代取值解析失败返回 null，低代有效 pending 的引导欠账丢失（连续恢复均不引导，累计 0 次）。修复：写入改为**完整内容先写 tmp、再 rename 到最终名**（最终名不存在「先创建后填充」窗口；发布失败只可能留下 tmp 残缺，不参与读取、随下次写入清理；同（身份,状态,代次）名已在按幂等发布完成处理）；读取按（代次 desc，同代 done 优先）**降级回退**——逐个解析直至首个合法 marker，空/残缺/形态不符的高代文件被跳过，不消除低代有效状态。同时把状态文件族的命名/扫描/读取/写入从 wiring 与测试夹具的双实现抽取为**单一实现** `src/shared/legacyThemeMarkerFiles.ts`（wiring 注入 fsp 适配器、测试夹具注入可替换 fs），消除测试镜像与生产漂移。契约测试：空 p2/残缺 d3 + 有效 p1 → 读取回退 pending（红态 null）；发布 rename 失败 → 最终名无文件、低代 pending 不受影响；正常写入无 tmp 残留、同名幂等。
+
+**R8-1 有限广播延迟仍生成第二身份重复引导 → 提请规格裁决（未实施）**。审查方以 15s 有限广播延迟 + 生产默认超时复现：B 等满 1+10s 后另造 UUID 再次引导（累计 2 次、磁盘两个 done），指出收敛窗只是把阈值延后，§10.3 的边界声明属实现方取舍、不能替代规格验收；建议「同一 profile 可确认的稳定权威身份，不能把等待超时视为不同 profile 的证据」。**平台事实使该建议无阈值化实现**：globalState（PROFILE 域）是唯一携带 profile 亲和的通道，但跨窗读取走缓存、一致靠广播（有限延迟、无事件订阅 API）；磁盘（globalStorageUri）是唯一即时通道，但跨 profile 共享、无 profile 标记可写。「广播延迟 T 的同 profile」与「永不广播的他 profile」在任意 < T 的有限观察窗内不可区分——任何有限超时都把「超时 = 他 profile」当证据（审查方反对），任何无限等待都让他 profile 的首次引导延迟到下次激活（R7-2 反对）。候选方案提请裁决：**方案 A**——超时不立即引导，迁移照做 + 引导延迟到「身份收敛或激活窗口结束」，同 profile 任意有限延迟收敛（恰 1 次），他 profile 引导可能顺延到下次激活（用户可见契约变更，需规格批准）；**方案 B**——维持现行（收敛窗默认 10s + 声明边界），把窗长与边界作为规格显式批准的参数；**方案 C**——收紧窗到更小值换取更快首迁、以更多重复引导为代价。R8-1b（七审）钉住的「恰 2 次并收敛」形状在裁决前维持为已声明的实现现状。
+
+### 10.5 九审轮落档：方案 A 实施、败者排队预算与读取错误中止（2026-10-17，PR #581 九审 + 用户裁决）
+
+**方案 A（R8-1/R9-1 闭环，2026-10-17 用户裁决批准方向）**。平台不可区分性（§10.4 论证）经裁决后按方案 A 实施：`resolveProfileIdOrDefer` 收敛窗尽后生成**临时身份**并标记「未定」（unresolved）——迁移与 pending 债务照常落盘（迁移同次激活生效），**本次激活不发引导**；owner 序列释放锁后进入**收敛观察**（`watchAndReconcile`，`convergeWatchMs` 默认 120s，不持锁、不阻塞他 profile）。判据（裁决要求明确定义）：**身份收敛** = readProfileId 返回非空且 ≠ 临时身份（同 profile 他窗身份载体经广播到达本窗缓存——真实平台按写时值快照投递，晚写覆盖 DB 不改先入队事件的到达值，legacyThemeMigrationReview9 的 makeSharedDb 以此语义建模）；**激活窗口结束** = 收敛观察预算耗尽。收敛收尾：临时身份的 pending 封存为 **done 墓碑**（后续读到临时身份的窗口不再补发；封存写落在本窗旧代次名，属被 max 读取保护的滞后写——锁的 getOwnedGeneration 相应放宽为「最后持有代次」），随后按收敛身份**重跑**编排（done → 零写入短路，恰一次；pending → 恢复补发恰一次，覆盖「他窗崩溃于 pending 后」的欠账承接）。预算尽（独立 profile/广播超预算）：本次激活不引导结束，pending 债务留存——**下次激活按恢复规则必达补发**。**剩余取舍（如实声明，属「宁可双弹不可丢失」取舍的延伸）**：同 profile 窗口在收敛到达前关闭（或第三窗在收敛间隙经被覆写的 DB 读到临时身份）时，下次激活可能多补发一次——恰 1 严格成立的条件是「同 profile 广播在收敛观察窗内到达且窗口保持打开」；独立 profile 的引导稳定落于第二次激活（迁移第一次即生效）。
+
+**R9-2 败者排队预算**。R8-2 心跳修复了接管时序，但普通并发（A 留 done、B 首激活默认 1+10s 等待持锁、C 2s 后启动）下败者默认 5s 等待预算先于 owner 最坏占用（11s）耗尽而静默退出，C 的首迁移被跳到下次激活——属首激活契约缺口（旧 R8 与 R9 均复现）。修复：`waitTimeoutMs` 默认 5s → **30s**（败者排队预算 ≥ owner 身份等待最坏占用的余量；等待环内身份/done 出现即早退、锁陈旧可接管，预算只在真无人推进时兜底退出）。生产默认参数组合的红绿证据在 `legacyThemeMigrationReview9`（R9-2 用例：B/C 首激活均完成迁移、C 不再 none）。
+
+**R9-3 读取错误与内容残缺分流**。R8-3 的读取降级回退把 readFile 的 I/O 失败与「读取成功但 JSON 残缺」混为一类：done 的瞬时 EIO 会回退取同代 p1 的 pending，把已收口状态误判为引导欠账而重复引导（审查方生产接线 + 两次受控 EIO 实测累计 2 次）。修复：`readLegacyMarkerFile` 分流——**内容残缺**（读取成功、解析失败：发布前故障的残缺文件）继续降级回退（R8-3 债务保护不回退）；**readFile 抛错**（EIO 等无法确认权威状态的失败）整体 fail-closed 返回 null、不降级采用旧 pending——磁盘状态未被消费，下次激活重读即恢复（故障后 done 正常读取即短路，无重复、无丢失）；ENOENT（列目录后文件被并发清理）跳过继续。红绿证据：review9 R9-3 用例（d2 EIO + p1 在场 → null；I/O 恢复 → done）。
+
+**验证**：tsc 0；legacy 十一文件 75 例全绿（`t08-r9-legacy-green.log`，含方案 A 五路径：生产默认 15s 延迟收敛恰 1、独立 profile 迁移即生效引导延至下次激活且第三激活短路、收敛承接他窗 pending 欠账、R9-2 生产默认并发、R9-3 EIO 分流）；全量单测 403 文件 9224 例；集成定向「旧主题值迁移」1/1（独立桌面）。review5/review6Identity/review7/review8 的跨 profile 首迁与边界用例随方案 A 改判（迁移同激活 + 引导延至下次激活补发），文件头注明改判依据。

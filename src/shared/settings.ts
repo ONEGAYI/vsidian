@@ -173,19 +173,14 @@ export const CODEBLOCK_COPY_BUTTON_DEFAULT = true
  */
 export const CODEBLOCK_HIGHLIGHT_KEY = 'codeblock.highlight'
 export const CODEBLOCK_HIGHLIGHT_DEFAULT = true
-/** 外观页预设主题：仅内置 Mermaid 流程图消费，默认保留既有渲染。 */
-export const MERMAID_THEME_KEY = 'appearance.mermaidTheme'
-export type MermaidPreset = 'default' | 'codex'
-
 /**
- * #546 T07「统一主题」首选键：值 = 'default' | 'codex' | `<addonId>/<themeId>`
+ * #546 T07「统一主题」首选键：值 = 'default' | `<addonId>/<themeId>`
  * （组件主题稳定身份）。值域动态（组件主题随安装变化），schema 用受限
  * 自由文本承载——合法性由主题目录运行时解析（未命中目录的存量回落
  * default 显示，首选保留）。**唯一主题选择入口**：设置页外观第四页签
  * 「主题」自绘单选列表呈现，不走标准设置行（防第二入口）；渲染链路经
- * resolveThemePreferred 消费。写入恒与旧键投影同拍（见
- * appearanceThemePatch——旧键仍是内置渲染管线的事实输入；旧键迁移与
- * 删除归 T08/#535，本键先立不动旧值）。
+ * resolveThemePreferred 消费。#535 T08 后退役预设不再是合法主题身份
+ * （无老用户存量，不做迁移——裸词旧值按未知首选走目录不命中回落）。
  */
 export const APPEARANCE_THEME_KEY = 'appearance.theme'
 export const APPEARANCE_THEME_DEFAULT = 'default'
@@ -193,17 +188,13 @@ export const APPEARANCE_THEME_DEFAULT = 'default'
 export const APPEARANCE_THEME_MAX_LENGTH = 192
 
 /**
- * 主题首选写入补丁（设置页单选保存的纯逻辑）：新键写完整主题身份，旧键
- * 同步写 mermaid preset 投影（codex → 'codex'，其余 → 'default'）。双键
- * 同拍落库保证两条渲染链路一致；显式选 default 会把旧键一并落 default
- * （resolveThemePreferred 据此区分「显式 default」与「从未设置」——后者
- * 升级用户旧 codex 值仍回显生效）。不是 #535 的迁移：不搬运旧值、不删
- * 除旧键。
+ * 主题首选写入补丁（设置页单选保存的纯逻辑）：只写新键完整主题身份。
+ * #546 T07 曾以双键同拍投影旧 Mermaid 键；#535 T08 旧键定义删除后投影
+ * 退役（写旧键会被定义校验拒绝；无老用户存量，不做迁移清理）。
  */
 export function appearanceThemePatch(themeRef: string): Record<string, string> {
   return {
     [APPEARANCE_THEME_KEY]: themeRef,
-    [MERMAID_THEME_KEY]: themeRef === 'codex' ? 'codex' : 'default',
   }
 }
 
@@ -563,19 +554,12 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.codeblockHighlight.description',
   },
   {
-    key: MERMAID_THEME_KEY,
-    type: 'string', default: 'default', enum: ['default', 'codex'],
-    titleKey: 'setting.mermaidTheme.title',
-    descriptionKey: 'setting.mermaidTheme.description',
-    optionLabelKeys: {
-      default: 'setting.mermaidTheme.default', codex: 'setting.mermaidTheme.codex',
-    },
-  },
-  {
-    // #546 T07 统一主题首选：动态值域（default/codex/组件主题身份）用受限
+    // #546 T07 统一主题首选：动态值域（default/组件主题身份）用受限
     // 自由文本承载；设置页呈现归外观「主题」页签自绘单选（AppearanceSection
     // 排除标准行——同 wordSegment 先例「键进注册表 + 标准行排除 + 委托组
-    // 自绘」形态），持久化/快照/广播走标准链路
+    // 自绘」形态），持久化/快照/广播走标准链路。
+    // #535 T08：旧 Mermaid 预设键的定义条目已随旧预设退役删除（快
+    // 照不再含旧键）；本键为唯一主题选择键。
     key: APPEARANCE_THEME_KEY,
     type: 'string',
     default: APPEARANCE_THEME_DEFAULT,

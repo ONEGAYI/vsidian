@@ -9,14 +9,12 @@ export const zhCn: Record<MessageKey, string> = {
   'appearance.themes': '主题',
   'appearance.codeblockRendering': '代码块渲染',
   'setting.theme.title': '主题选择',
-  'setting.theme.description': '统一选择编辑器图形的主题：内置默认与 Codex，以及组件提供的主题（安装组件主题只新增候选，不会自动切换）。',
+  // #535 T08：内核 Codex 退役后值域不再含内置 Codex（组件版经附加组件提供）
+  'setting.theme.description': '统一选择编辑器图形的主题：内置默认与组件提供的主题（安装组件主题只新增候选，不会自动切换）。',
+  'setting.theme.defaultOption': '默认',
   'appearance.theme.sourceBuiltin': '内置',
   'appearance.theme.unavailable': '不可用',
   'appearance.theme.fallbackNotice': '当前选中的组件主题不可用，已临时按默认主题渲染；选择已保留，组件恢复可用后自动继续原主题。',
-  'setting.mermaidTheme.title': 'Mermaid 渲染主题',
-  'setting.mermaidTheme.description': '选择内置 Mermaid 图表的外观。Codex 支持流程图、时序图、类图、状态图、ER 图、甘特图和饼图；图内样式与配置可以覆盖预设。',
-  'setting.mermaidTheme.default': '默认',
-  'setting.mermaidTheme.codex': 'Codex',
   'setting.pastePreserveFormatting.title': '粘贴保留富文本',
   'setting.pastePreserveFormatting.description': '普通粘贴时，将支持的富文本格式转换为 Markdown。',
   'setting.pasteAskBefore.title': '粘贴前询问',
@@ -1002,6 +1000,7 @@ export const zhCn: Record<MessageKey, string> = {
   'host.defaultEditorDismissLabel': '忽略',
   'host.defaultEditorFixed': 'Vsidian 已恢复为 Markdown 文件的默认编辑器。',
   'host.defaultEditorFixFailed': '未能自动恢复默认编辑器（可能被工作区设置覆盖），即将打开编辑器关联设置供手动处理。',
+  /** #535 T08 Codex 内核退役：升级用户旧 codex 设置的一次性安装引导（不自动安装、不代选） */
   /** #323 设置页常规页「默认编辑器」委托组：组标题、状态行四形态与手动按钮 */
   'defaultEditor.title': '默认编辑器',
   'defaultEditor.statusLabel': '当前默认编辑器',

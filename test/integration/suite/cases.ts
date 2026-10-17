@@ -1439,6 +1439,7 @@ async function waitViewState(
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
+        settings: s['settings'],
         jiebaEngine: s['jiebaEngine'],
         find: s['find'],
         imageStates: s['imageStates'],
@@ -1560,6 +1561,7 @@ const TASK_DOC_SECOND_TOGGLED = [
 ].join('\n')
 
 /** 用例表：名称 -> 执行函数 */
+
 export const cases: Array<[string, () => Promise<void>]> = [
   // #278（P2-01）真宿主探针组：目标历史/丢弃/临时对比/关闭交接的公开路线
   // 验证——研究工件独立成文件，定向复现：VSIDIAN_TEST_CASES='P2-01'
@@ -7555,31 +7557,46 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('math.md', (v) => v.viewMode === 'reading' && (v.readingMathCount ?? -1) === 8)
   }],
   // ---- 工单 #60：Mermaid 围栏块双模式渲染（live/reading/降级/一致性） ----
-  ['Mermaid Codex 预设：设置保存、双模式绘制与重开回显', async () => {
+  // #535 T08：旧预设退役且不做激活迁移（2026-10-17 用户裁决：无老用户存
+  // 量、不迁移不提示）——用例钉退役后边界：写旧键被设置层拒绝 + 面板
+  // default 快照与双模式 default 绘制 + 快照不含旧键。
+  ['旧主题键退役：写入拒绝与 default 双模式管线（#535）', async () => {
     const previous = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
     try {
+      // 枚举收窄后：旧键定义已删除，任何写入（值不限）按未知键整批拒绝
+      const rejected = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'retired-preset' })) as { ok: boolean; rejected?: string[] }
+      assert(rejected.ok === false, '旧 Mermaid 键写入应被设置层拒绝（定义已删除）')
+      assert(rejected.rejected?.includes('appearance.mermaidTheme'), '拒绝清单应点名旧键')
+      // 正式设置链路锚定 default（同 runner 重置面语义），再走面板链路：
+      // 面板装载拉取应读到 default 快照。经 waitSettings 读回校验防 storage
+      // 迟到回翻（设置键附近的他键写入可能落入「紧邻他键写入可把刚写的
+      // overlay 盖回旧值」环境怪癖窗口，#38 先例）
+      const restored = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.theme': 'default' })) as { ok: boolean }
+      assert(restored.ok, '恢复 default 应经正式设置链路保存')
+      await waitSettings({ 'appearance.theme': 'default' })
+      // 真宿主链路：面板快照读 default，双模式绘制走 default 管线
       await openWithEditor('mermaid.md')
       await waitSessionReady('mermaid.md')
       const uri = wsUri('mermaid.md').toString()
       const text = await readDisk('mermaid.md')
-      const saved = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'codex' })) as { ok: boolean }
-      assert(saved.ok, 'Codex 主题应经正式设置链路保存')
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: text.indexOf('结尾段落') })
       const live = await waitViewState('mermaid.md', v =>
-        v.settings?.['appearance.mermaidTheme'] === 'codex' && v.paint?.mermaid?.rendered === 4, 0, 60000)
-      assert(live.paint?.mermaid?.visible === true, 'Codex 预设在 Live 中应真实绘制')
+        v.settings?.['appearance.theme'] === 'default' && v.paint?.mermaid?.rendered === 4, 0, 60000)
+      assert(live.paint?.mermaid?.visible === true, 'default 在 Live 中应真实绘制')
       assert(live.paint?.mermaid?.error === 1, '无效图仍经原管线降级')
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
       const reading = await waitViewState('mermaid.md', v => v.viewMode === 'reading' && v.paint?.mermaid?.rendered === 4, 0, 60000)
-      assert(reading.paint?.mermaid?.visible === true, 'Codex 预设在阅读模式应真实绘制')
+      assert(reading.paint?.mermaid?.visible === true, 'default 在阅读模式应真实绘制')
       await vscode.commands.executeCommand('workbench.action.closeAllEditors')
       await openWithEditor('mermaid.md')
       await waitSessionReady('mermaid.md')
-      const reopened = await waitViewState('mermaid.md', v => v.settings?.['appearance.mermaidTheme'] === 'codex')
-      assert(reopened.settings?.['appearance.mermaidTheme'] === 'codex', '重开面板应回显持久化主题')
-      assert(await readDisk('mermaid.md') === text, '主题切换不得改写图源码')
+      const reopened = await waitViewState('mermaid.md', v => v.settings?.['appearance.theme'] === 'default')
+      assert(reopened.settings?.['appearance.mermaidTheme'] === undefined, '快照不再含已退役的旧 Mermaid 键')
+      assert(await readDisk('mermaid.md') === text, '设置退役不得改写图源码')
     } finally {
-      await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': previous['appearance.mermaidTheme'] })
+      // 清理：主题键恢复用例前取值
+      const current = previous['appearance.theme']
+      await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.theme': typeof current === 'string' ? current : 'default' })
     }
   }],
 

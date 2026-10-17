@@ -165,9 +165,10 @@ describe('组合接线（snippets.state 直连实例不回归）', () => {
     // 页签体单选列表），主题设置条目经 entries 进全局搜索
     expect('defsGroups' in appearance).toBe(false)
     expect(appearance.entries.some((entry) => entry.id === 'appearance.theme')).toBe(true)
-    // 页签体为主题单选列表（radiogroup 内置 default/codex 两项）
+    // 页签体为主题单选列表（#535 后内置仅 default，目录主题经 store 推送追加）
     const radios = parent.querySelectorAll<HTMLInputElement>('.vsidian-appearance-presets input[type=radio]')
-    expect(radios.length).toBeGreaterThanOrEqual(2)
+    expect(radios.length).toBeGreaterThanOrEqual(1)
+    expect([...radios].some((r) => r.value === 'default')).toBe(true)
     appearance.restoreState({ tab: 'presets' })
     appearance.mount(parent)
     expect(tabOf(parent, 'presets').getAttribute('aria-selected')).toBe('true')

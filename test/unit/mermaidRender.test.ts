@@ -24,7 +24,6 @@ import {
   renderMermaidInto,
   resetMermaidLoadFailure,
   setMermaidDarkTheme,
-  setMermaidPreset,
   type MermaidApi,
 } from '../../src/webview/mermaidRender'
 
@@ -73,28 +72,22 @@ afterEach(() => {
 })
 
 describe('renderMermaidInto：成功渲染与容器状态', () => {
-  it('预设切换清缓存并重画，SVG 导出消费同一预设；默认值恢复原管线', async () => {
-    const presets: unknown[] = []
+  it('SVG 导出消费同一渲染缓存：同源码不重复 render（#535 后 preset 机制已随旧预设退役删除）', async () => {
+    const codes: unknown[] = []
     __setMermaidApiForTest({
       initialize() {},
-      async render(_id, code, preset) {
-        presets.push(preset)
+      async render(_id, code) {
+        codes.push(code)
         return { svg: SAMPLE_SVG(code) }
       },
     })
     const el = makeContainer('flowchart LR\nA-->B')
     renderMermaidInto(el, el.getAttribute(MERMAID_CODE_ATTR)!)
     await settle()
-    setMermaidPreset('codex')
-    await settle()
-    expect(presets).toEqual(['default', 'codex'])
     expect(el.getAttribute(MERMAID_STATE_ATTR)).toBe('rendered')
     const { renderMermaidSvg } = await import('../../src/webview/mermaidRender')
     expect((await renderMermaidSvg('flowchart LR\nA-->B')).ok).toBe(true)
-    expect(presets).toHaveLength(2)
-    setMermaidPreset('default')
-    await settle()
-    expect(presets).toEqual(['default', 'codex', 'default'])
+    expect(codes).toEqual(['flowchart LR\nA-->B'])
   })
   it('渲染成功：容器内插入 SVG，状态 rendered', async () => {
     __setMermaidApiForTest(makeApi(SAMPLE_SVG))

@@ -66,7 +66,7 @@ describe('登记与校验（普通 API 结果）', () => {
 describe('整组替换、回收与幂等', () => {
   it('未安装主题时空目录载荷仍可经消息桥回显内置首选', () => {
     const service = new AddonThemeService({ log: () => {} })
-    expect(isAddonThemesStatePayload({ version: service.version(), themes: service.catalog(), preferred: 'codex', preferredAvailable: true })).toBe(true)
+    expect(isAddonThemesStatePayload({ version: service.version(), themes: service.catalog(), preferred: 'default', preferredAvailable: true })).toBe(true)
   })
 
   it('旧注册句柄释放不撤销随后替换的目录', () => {

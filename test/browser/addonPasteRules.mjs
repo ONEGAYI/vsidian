@@ -9,7 +9,7 @@
 // 子规则先于内置、外层规则不串味；既有格式与分步撤销保持）。
 // PR #564 评审修复追加：16 层条件组合（合法最大深度）快照穿过协议守卫
 // 并被生产控制器接纳（注册与守卫深度口径统一）。
-// 规则载荷只模拟来源 HTML 形态（Codex 形态样例），不把专属规则写入
+// 规则载荷只模拟来源 HTML 形态（来源特化样例），不把专属规则写入
 // 生产内核——消费样例经生产快照通道注入。
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -22,7 +22,7 @@ await build({ entryPoints: [path.join(root,'test/browser/addonPasteRulesFixture.
 const { islandHtml } = await buildZhLocaleIsland(root)
 const browser = await chromium.launch({ headless: true, channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 
-/** Codex 形态规则快照（v1：来源特化链接 + 复制按钮丢弃） */
+/** 来源特化规则快照（v1：特化链接 + 复制按钮丢弃） */
 const snapshotV1 = {
   version: 1,
   rules: [

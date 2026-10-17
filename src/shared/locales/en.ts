@@ -11,15 +11,13 @@
 export const en = {
   'appearance.themes': 'Themes',
   'setting.theme.title': 'Theme selection',
-  'setting.theme.description': 'Choose the unified theme for editor graphics: built-in Default and Codex, plus themes provided by add-ons (installing an add-on theme only adds a candidate; it never switches automatically).',
+  // #535 T08：内核 Codex 退役后值域不再含内置 Codex（组件版经附加组件提供）
+  'setting.theme.description': 'Choose the unified theme for editor graphics: the built-in Default plus themes provided by add-ons (installing an add-on theme only adds a candidate; it never switches automatically).',
+  'setting.theme.defaultOption': 'Default',
   'appearance.theme.sourceBuiltin': 'Built-in',
   'appearance.theme.unavailable': 'Unavailable',
   'appearance.theme.fallbackNotice': 'The selected add-on theme is unavailable; content is temporarily rendered with the Default theme. Your choice is kept and resumes automatically once the add-on is available again.',
   'appearance.codeblockRendering': 'Code block rendering',
-  'setting.mermaidTheme.title': 'Mermaid rendering theme',
-  'setting.mermaidTheme.description': 'Choose the appearance of built-in Mermaid diagrams. Codex supports flowcharts, sequence, class, state, ER, Gantt, and pie diagrams; diagram styles and configuration can override the preset.',
-  'setting.mermaidTheme.default': 'Default',
-  'setting.mermaidTheme.codex': 'Codex',
   'setting.pastePreserveFormatting.title': 'Preserve formatting when pasting',
   'setting.pastePreserveFormatting.description': 'Convert supported rich text formatting to Markdown during ordinary paste.',
   'setting.pasteAskBefore.title': 'Ask before pasting',
@@ -1055,6 +1053,7 @@ export const en = {
   'host.defaultEditorDismissLabel': 'Dismiss',
   'host.defaultEditorFixed': 'Vsidian is again the default editor for Markdown files.',
   'host.defaultEditorFixFailed': 'Could not restore the default editor automatically (a workspace setting may override it). Opening the editor associations setting for manual review.',
+  /** #535 T08 Codex 内核退役：升级用户旧 codex 设置的一次性安装引导（不自动安装、不代选） */
   /** #323 设置页常规页「默认编辑器」委托组：组标题、状态行四形态与手动按钮 */
   'defaultEditor.title': 'Default Editor',
   'defaultEditor.statusLabel': 'Current default editor',

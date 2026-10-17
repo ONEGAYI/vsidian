@@ -135,6 +135,7 @@ import type {
   AddonRenderersFacet,
 } from '../../src/shared/addonRenderers'
 import {
+  CODEX_THEME_ID,
   addonThemeEnvironmentEqual,
   addonThemeEnvironmentOf,
   addonThemeRefOf,
@@ -630,11 +631,17 @@ export const themeDeclarations: readonly AddonThemeDeclaration[] = [
     languages: ['mermaid'],
   },
 ]
-/** 声明 → 稳定身份/校验/选择的同源纯函数消费 */
+/** 声明 → 稳定身份/校验/选择的同源纯函数消费。首选解析两形态并存
+ *  （PR #581 评审发现 3）：现行单参（新键权威）与 v1.1.0 双参调用形状
+ *  （legacyMermaidValue 已退役、传任何值不再影响结果——deprecated 兼容） */
 export const themePipeline = {
   ref: addonThemeRefOf('pub.pack', 'aqua'),
   batchVerdict: validateAddonThemeBatch(themeDeclarations),
-  preferred: resolveThemePreferred('pub.pack/aqua', 'default'),
+  preferred: resolveThemePreferred('pub.pack/aqua'),
+  preferredLegacyShape: resolveThemePreferred('pub.pack/aqua', 'codex'),
+  /** v1.1.0 已发行常量兼容保留（deprecated）：值恒为 'codex'，仅历史
+   *  调用形状编译通过；作为未知首选走目录不命中回落 */
+  retiredCodexIdentity: CODEX_THEME_ID,
   active: resolveActiveTheme({
     themes: [] as readonly AddonThemeCandidate[],
     preferred: 'default',

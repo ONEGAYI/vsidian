@@ -32,8 +32,8 @@ export async function run(): Promise<void> {
   // 本身是用例断言面；依赖缺失阶段主扩展干脆缺席）。探测一次而非逐条
   // try/catch：缺席会话跳过全部 _test.* 前置重置（这些重置只在测试会话
   // 有意义），finally 的 closeAllEditors 是宿主内置命令，不受影响。
-  const hooksReady = ext !== undefined
-    && (await vscode.commands.getCommands()).includes('onegayi.vsidian._test.resetLastMode')
+  const availableCommands = ext !== undefined ? await vscode.commands.getCommands() : []
+  const hooksReady = availableCommands.includes('onegayi.vsidian._test.resetLastMode')
   console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项（分组 ${group}）${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}${hooksReady ? '' : '（_test 钩子缺席——跳过测试前置重置）'}`)
   let done = 0
   for (const [name, fn] of sharded) {

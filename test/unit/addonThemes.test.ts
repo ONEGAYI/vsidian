@@ -1,7 +1,12 @@
 // #546 T07 统一组件主题——目录校验、稳定身份、唯一选择与回落、首选
 // 解析与页面明暗四态的纯逻辑单测（TDD 先立预期）。规则来源：
-// docs/specs/addon-themes.md §3（宿主目录/唯一选择/过渡内核）与 §4（页面
-// 明暗四态）；ADR-0017（安装只新增候选、唯一互斥、回落保留首选）。
+// docs/specs/addon-themes.md §3（宿主目录/唯一选择）与 §4（页面明暗四
+// 态）；ADR-0017（安装只新增候选、唯一互斥、回落保留首选）。
+// #535 T08：旧预设已退役——旧键回显分支删除、不做激活迁移（旧键写入
+// 拒绝断言见 settingsService.test.ts）；本文件钉退役后的解析口径。v1.1.0
+// 已发行的
+// 公开符号（CODEX_THEME_ID 常量、resolveThemePreferred 双参形状）按
+// PR #581 评审发现 3 恢复兼容形状并标 @deprecated，由本文件钉住。
 import { describe, expect, it } from 'vitest'
 import {
   ADDON_THEME_ID_MAX,
@@ -21,7 +26,7 @@ import {
   validateAddonThemeBatch,
   type AddonThemeCandidate,
 } from '../../src/shared/addonThemes'
-import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, appearanceThemePatch, MERMAID_THEME_KEY } from '../../src/shared/settings'
+import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, appearanceThemePatch } from '../../src/shared/settings'
 
 function declaration(opts: Partial<Parameters<typeof addonThemeCandidateOf>[1]> = {}) {
   return {
@@ -128,11 +133,14 @@ describe('resolveActiveTheme（唯一首选与回落）', () => {
     theme('pub.two', 'aqua', { languages: ['mermaid', 'plantuml'] }),
   ]
 
-  it('default / codex（内置）恒可用且生效', () => {
+  it('default（内置）恒可用且生效；退役预设身份走目录不命中（保留首选、回落显示）', () => {
     expect(resolveActiveTheme({ themes, preferred: DEFAULT_THEME_ID, isThemeAvailable: () => true }))
       .toEqual({ preferred: DEFAULT_THEME_ID, available: true, effective: DEFAULT_THEME_ID })
-    expect(resolveActiveTheme({ themes, preferred: CODEX_THEME_ID, isThemeAvailable: () => true }))
-      .toEqual({ preferred: CODEX_THEME_ID, available: true, effective: CODEX_THEME_ID })
+    // #535 T08：退役预设不再是内置身份——目录不命中即回落 default 且保留首选
+    const retired = resolveActiveTheme({ themes, preferred: 'retired-preset', isThemeAvailable: () => true })
+    expect(retired.available).toBe(false)
+    expect(retired.effective).toBe(DEFAULT_THEME_ID)
+    expect(retired.preferred).toBe('retired-preset')
   })
 
   it('选中组件主题可用时生效并给出关联提供者', () => {
@@ -183,42 +191,56 @@ describe('themedProviderIdsOf（渲染选择排除表）', () => {
   })
 })
 
-// ---- 首选解析（新键权威 + 旧键过渡回显） ----
+// ---- 首选解析（新键权威；#535 后旧键不再参与） ----
 
-describe('resolveThemePreferred（新键权威、旧键过渡回显）', () => {
-  it('新键 codex / 组件主题原样生效', () => {
-    expect(resolveThemePreferred(CODEX_THEME_ID, 'default')).toBe(CODEX_THEME_ID)
-    expect(resolveThemePreferred('pub.two/aqua', 'codex')).toBe('pub.two/aqua')
+describe('resolveThemePreferred（新键权威、空值兜底 default）', () => {
+  it('组件主题身份原样生效', () => {
+    expect(resolveThemePreferred('pub.two/aqua')).toBe('pub.two/aqua')
   })
 
-  it('新键 default 且旧键有效选择 codex：回 codex（升级用户旧值回显，T08 前不迁移）', () => {
-    expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT, 'codex')).toBe(CODEX_THEME_ID)
+  it('新键 default / 缺失 / 空串：default（迁移后旧键退役值已在激活时回落，不再回显）', () => {
+    expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT)).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred(undefined)).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred('')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred('  ')).toBe(DEFAULT_THEME_ID)
   })
 
-  it('新键 default 且旧键 default/未设置：default（显式选 default 已把旧键落 default）', () => {
-    expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT, 'default')).toBe(DEFAULT_THEME_ID)
-    expect(resolveThemePreferred(undefined, undefined)).toBe(DEFAULT_THEME_ID)
+  it('v1.1.0 双参调用形状兼容：legacyMermaidValue 传任何值（含退役值）都不再影响结果', () => {
+    // PR #581 评审发现 3：第二参保留为 deprecated 兼容形状——旧消费者
+    // 双参调用编译通过且语义收窄为「回落 default」（退役值回显→default
+    // 即迁移语义本身），防再收窄由本断言与 addonApiSurface 钉住
+    expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT, 'retired-preset')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred(undefined, 'retired-preset')).toBe(DEFAULT_THEME_ID)
     expect(resolveThemePreferred('', 'default')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred('pub.two/aqua', 'retired-preset')).toBe('pub.two/aqua')
   })
 })
 
-describe('appearanceThemePatch（双键同拍写入）', () => {
-  it('组件主题身份：新键写完整身份，旧键落 default 投影', () => {
+describe('CODEX_THEME_ID（v1.1.0 兼容常量，deprecated）', () => {
+  it('值恒为历史字面量（不再是内置身份，仅兼容保留）', () => {
+    expect(CODEX_THEME_ID).toBe('codex')
+    // 作为未知首选走目录不命中回落（resolveActiveTheme 既有语义）
+    const selection = resolveActiveTheme({
+      themes: [],
+      preferred: CODEX_THEME_ID,
+      isThemeAvailable: () => true,
+    })
+    expect(selection.available).toBe(false)
+    expect(selection.effective).toBe(DEFAULT_THEME_ID)
+    expect(selection.preferred).toBe('codex')
+  })
+})
+
+describe('appearanceThemePatch（单键写入——旧 Mermaid 键定义已随 #535 删除）', () => {
+  it('只写新键完整身份（组件主题与 default 同形）', () => {
     expect(appearanceThemePatch('pub.two/aqua')).toEqual({
       [APPEARANCE_THEME_KEY]: 'pub.two/aqua',
-      [MERMAID_THEME_KEY]: 'default',
-    })
-  })
-
-  it('codex 与 default 的投影', () => {
-    expect(appearanceThemePatch('codex')).toEqual({
-      [APPEARANCE_THEME_KEY]: 'codex',
-      [MERMAID_THEME_KEY]: 'codex',
     })
     expect(appearanceThemePatch('default')).toEqual({
       [APPEARANCE_THEME_KEY]: 'default',
-      [MERMAID_THEME_KEY]: 'default',
     })
+    // 旧键不再出现在补丁（写旧键会被定义校验拒绝）
+    expect(appearanceThemePatch('default')).not.toHaveProperty('appearance.mermaidTheme')
   })
 })
 

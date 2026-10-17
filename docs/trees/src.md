@@ -260,7 +260,7 @@ vsidian/
         ├── mathRenderCache.ts            # KaTeX 渲染 LRU 缓存共享模块
         ├── mermaidEntry.ts               # Mermaid模块与ELK入口
         ├── mermaidRender.ts              # Mermaid 渲染管线（#60）
-        ├── mermaidTheme.ts               # Mermaid主题与Codex预设
+        ├── mermaidTheme.ts               # Mermaid 主题与暗色链路
         ├── multicursor.ts                # 多光标扩展组单一事实源（#237）
         ├── nextOccurrence.ts             # 选下一处相同词选区计划纯函数
         ├── outline.ts                    # 大纲全文解析与面板装配

@@ -13,8 +13,9 @@
 //   候选路径（renderer-selection 的自动接管或用户按语言首选）绕过主题
 //   单选；选中主题不可用时回落内置 default（不用其他主题顶替），保留
 //   原首选并回显不可用/回落状态；恢复后按原首选继续。
-// - §3.3 过渡内核 Codex：内核 codex 枚举与实现保留，旧值仍可回显并使
-//   用（appearance.mermaidTheme）；T08（#535）才执行迁移与删除。
+// - §3.3 过渡内置预设（#535 T08 已退役）：内置枚举与实现删除，退役后
+//   裸词预设值不再是内置身份，作为未知首选走目录不命中回落（保留首选；
+//   无老用户存量，不做激活迁移）。
 // - §4 页面明暗：四态取得亮/暗及高对比事实（亮色高对比不为暗）；通知
 //   在页面缓存更新后送达（回调中再读拿到相同新状态）；重复值不重复广
 //   播；代次释放自动退订；不扩充为任意 VSCode configuration 读取。
@@ -136,31 +137,52 @@ export function addonThemeCandidateOf(addonId: string, decl: AddonThemeDeclarati
 
 /** 内置默认主题身份（内置显示；始终可用） */
 export const DEFAULT_THEME_ID = 'default'
-/** 内核过渡 Codex 主题身份（T08/#535 前保留） */
+
+/**
+ * 内核过渡 Codex 主题身份（v1.1.0 已发行导出）。
+ *
+ * @deprecated #535 T08 内核 Codex 退役：'codex' 不再是内置主题身份，
+ * 本常量仅为 v1.1.0 调用形状兼容保留（弃用与移除受双门槛约束：两个
+ * 后续 API 次版本且满 30 天）。存量旧值在扩展激活时经原始 overlay
+ * 迁移回落 default 并引导（shared/codexMigration）；新代码不要引用。
+ */
 export const CODEX_THEME_ID = 'codex'
 
 /**
- * 首选解析（纯函数）：appearance.theme（新键）是唯一权威——值非 default
- * 时原样生效；值为 default 且旧键（appearance.mermaidTheme）仍有效选择
- * codex 时回 codex（升级用户旧值回显，T08 前不迁移）；设置页每次选择都
- * 同步写旧键投影（见 appearanceThemePatch），显式选 default 会把旧键一
- * 并落 default，两者不互相打架。
+ * 首选解析现行语义（内部实现，非导出面）：appearance.theme 是唯一权威
+ * ——值非 default 且非空时原样生效；default / 缺失 / 空串回落 default。
  */
-export function resolveThemePreferred(themeValue: string | undefined, legacyMermaidValue: string | undefined): string {
+function resolvePreferredThemeValue(themeValue: string | undefined): string {
   if (typeof themeValue === 'string' && themeValue.trim() !== '' && themeValue !== DEFAULT_THEME_ID) {
     return themeValue
   }
-  if (legacyMermaidValue === CODEX_THEME_ID) {
-    return CODEX_THEME_ID
-  }
   return DEFAULT_THEME_ID
+}
+
+/**
+ * 首选解析（纯函数；v1.1.0 兼容调用形状）。#546 T07 曾有「新键 default
+ * 且旧 Mermaid 键 codex 回显 codex」的过渡分支，#535 T08 退役后删除：
+ * 不做激活迁移与引导（2026-10-17 用户终局裁决，规格 addon-themes.md
+ * §10.0）——存量旧值按目录不命中的未知首选回落 default 显示。
+ *
+ * @param legacyMermaidValue 旧键 `appearance.mermaidTheme` 的取值。
+ *   @deprecated #535 后旧键设置定义已删除、不再参与首选解析——传任何
+ *   值（含 'codex'）都不影响结果，参数仅为 v1.1.0 双参调用形状兼容
+ *   保留；新代码单参调用即可。
+ */
+export function resolveThemePreferred(
+  themeValue: string | undefined,
+  legacyMermaidValue?: string | undefined,
+): string {
+  void legacyMermaidValue
+  return resolvePreferredThemeValue(themeValue)
 }
 
 /** 主题选择解析输入 */
 export interface AddonThemeSelectionInput {
   /** 宿主目录全集 */
   themes: readonly AddonThemeCandidate[]
-  /** 用户唯一首选（resolveThemePreferred 的产物：default / codex / themeRef） */
+  /** 用户唯一首选（resolveThemePreferred 的产物：default / themeRef） */
   preferred: string
   /** 目录条目可用性（组件 enabled 且未故障；候选是否已上报由渲染选择层另行判定） */
   isThemeAvailable: (theme: AddonThemeCandidate) => boolean
@@ -170,9 +192,9 @@ export interface AddonThemeSelectionInput {
 export interface AddonThemeSelection {
   /** 原样保留的首选（不可用不清除——恢复后按原选择继续） */
   preferred: string
-  /** 首选组件主题当前是否可用（default/codex 恒 true） */
+  /** 首选组件主题当前是否可用（default 恒 true） */
   available: boolean
-  /** 实际生效主题（回落后）：default / codex / themeRef */
+  /** 实际生效主题（回落后）：default / themeRef */
   effective: string
   /** 生效主题关联的提供者 ID（仅组件主题生效时在场；渲染选择层注入） */
   activeProviderId?: string
@@ -182,17 +204,18 @@ export interface AddonThemeSelection {
 
 /**
  * 唯一选择与回落解析（纯函数）：
- * - default / codex（内置）：恒可用、effective 同值；
+ * - default（内置）：恒可用、effective 同值；
  * - themeRef：目录命中且可用 → 生效该主题（activeProviderId 给渲染选择
  *   层注入）；命中但不可用（组件停用/故障）→ 回落内置 default 显示，
- *   preferred 保留、available=false；目录不命中（组件卸载/未注册）→ 同
- *   回落（保留首选，恢复注册后继续原选择）。
- * 回落一律回 default——不用 codex 或另一组件主题顶替（规格 §3.2：不静
- * 默选中另一主题）。
+ *   preferred 保留、available=false；目录不命中（组件卸载/未注册，含
+ *   #535 退役后的 codex 历史值）→ 同回落（保留首选，恢复注册后继续原
+ *   选择）。
+ * 回落一律回 default——不用另一组件主题顶替（规格 §3.2：不静默选中另
+ * 一主题）。
  */
 export function resolveActiveTheme(input: AddonThemeSelectionInput): AddonThemeSelection {
   const { preferred } = input
-  if (preferred === DEFAULT_THEME_ID || preferred === CODEX_THEME_ID) {
+  if (preferred === DEFAULT_THEME_ID) {
     return { preferred, available: true, effective: preferred }
   }
   const theme = input.themes.find((t) => t.themeRef === preferred)
@@ -279,7 +302,7 @@ export interface AddonThemesStatePayload {
   themes: readonly AddonThemeEntryState[]
   /** 当前唯一首选（resolveThemePreferred 产物；不可用时保留） */
   preferred: string
-  /** 首选组件主题当前可用（default/codex 恒 true） */
+  /** 首选组件主题当前可用（default 恒 true） */
   preferredAvailable: boolean
 }
 

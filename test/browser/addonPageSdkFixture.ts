@@ -323,7 +323,8 @@ Object.assign(window, {
     })))
   },
   /** #546 T07 宿主角色主题步进：消费候选上报 + 主题上下文求表并下发本页
-   *  桥（themePreferred 为 resolveThemePreferred 产物：default/codex/ref） */
+   *  桥（themePreferred 为 resolveThemePreferred 产物：default/ref——
+   *  #535 后值域不含退役预设值） */
   hostThemeRendererStep(availableAddonIds: string[], themePreferred: string): {
     version: number
     languages: Array<{ language: string; effective: string; source: string }>
