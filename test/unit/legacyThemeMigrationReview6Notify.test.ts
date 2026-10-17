@@ -75,7 +75,7 @@ describe('六审 R5-2：迁移写回 overlay 后经 SettingsService.onChange 补
     const diskMarker = makeDiskMarkerStore(dir)
     const { memento } = makeMemento()
     // 升级残留形态：新键显式退役内置值 + 旧键退役残留（reviewer 场景的
-    // preferred:'codex' 同构——首读快照携带旧值而非 default）
+    // preferred 历史退役值同构——首读快照携带旧值而非 default）
     memento.update(SETTINGS_STORAGE_KEY, {
       [APPEARANCE_THEME_KEY]: 'retired-builtin',
       [MERMAID_THEME_KEY]: 'retired-preset',
@@ -109,7 +109,7 @@ describe('六审 R5-2：迁移写回 overlay 后经 SettingsService.onChange 补
     expect(result).toEqual({ action: 'migrate', guide: true })
     expect(guides).toBe(1)
     // 持久值已回落
-    const overlay = memento.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY)
+    const overlay = memento.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY) ?? {}
     expect(overlay[APPEARANCE_THEME_KEY]).toBe('default')
     expect(overlay[MERMAID_THEME_KEY]).toBe('default')
     // R5-2 核心：迁移写回必须触发与 apply 同构的变更通知——订阅者（主题
