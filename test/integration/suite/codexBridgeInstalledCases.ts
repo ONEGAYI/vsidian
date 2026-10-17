@@ -22,6 +22,7 @@
 // （view.state.paint.renderers 容器 provider 身份）。
 import * as vscode from 'vscode'
 import { strict as assert } from 'node:assert'
+import type { CodexMigrationMarker } from '../../../src/shared/codexMigration'
 
 const BRIDGE_ID = 'ONEGAYI.vsidian-codex-bridge'
 const BRIDGE_THEME_REF = `${BRIDGE_ID}/codex`
@@ -66,8 +67,9 @@ async function renderersPaint(uri: vscode.Uri): Promise<RenderersPaint | undefin
 }
 
 /** 迁移状态观测形态（_test.getCodexMigrationState 的回包；三档矩阵共享
- * 断言的观测对象，dev 用例一并引用） */
-export interface CodexMigrationState { marker: string | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
+ * 断言的观测对象，dev 用例一并引用）。marker 为可恢复状态机（PR #581
+ * 评审修复）：pending = 引导欠账 / done = 迁移收口 */
+export interface CodexMigrationState { marker: CodexMigrationMarker | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
 
 /** 三档矩阵共享断言的命令通道：dev 用例（cases.ts，_test 命令全名）与
  * 安装态用例（本文件，PREFIX 拼接）各按自身常量风格注入——两侧通道值
@@ -89,7 +91,7 @@ export interface CodexMigrationChannel {
  *   断等于安装产物的扩展版本）。 */
 export async function assertCodexMigrationMatrix(
   channel: CodexMigrationChannel,
-  options: { componentThemeRef: string; assertMarker: (marker: string | null) => void },
+  options: { componentThemeRef: string; assertMarker: (marker: CodexMigrationMarker | null) => void },
 ): Promise<void> {
   // 档 1（升级用户主路径）：注入原始 overlay 旧键 codex（模拟升级残留——
   // 绕过定义校验）→ 迁移 → 双键回落 + 引导恰一次
@@ -227,7 +229,7 @@ export const codexBridgeInstalledCases: Array<[string, () => Promise<void>]> = [
         readState: () => vscode.commands.executeCommand<CodexMigrationState>(`${PREFIX}getCodexMigrationState`),
       }, {
         componentThemeRef: BRIDGE_THEME_REF,
-        assertMarker: (marker) => assert(marker === (vscode.extensions.getExtension('onegayi.vsidian')!.packageJSON as { version: string }).version,
+        assertMarker: (marker) => assert(marker?.state === 'done' && marker.version === (vscode.extensions.getExtension('onegayi.vsidian')!.packageJSON as { version: string }).version,
           '一次性标记应记录安装产物的扩展版本'),
       })
     } finally {

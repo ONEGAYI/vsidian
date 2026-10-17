@@ -9,20 +9,32 @@
 // 按定义表校验，旧键定义删除后任何写入都会被拒）。
 //
 // 一次性标记（globalState 独立键，与设置同 profile 持久化——参照
-// editorGuard #322 版本锁先例：写锁不依赖用户对通知的响应）：标记与
-// 迁移同批写入，重开设置/文档、重启、多窗口（globalState 跨窗口共享，
-// 首窗写入后其余窗口读同值）不重复同一引导。已知边界：多窗口在升级
-// 后同一毫秒窗内并发激活时存在双弹竞态（与 editorGuard 版本锁同款
-// 既定边界，不做分布式锁）。
+// editorGuard #322 版本锁先例：写锁不依赖用户对通知的响应）：标记为
+// 可恢复状态机（PR #581 评审修复，发现 1）——
+//   undefined          未迁移
+//   { state: pending } 迁移已认领、引导欠账（恢复时必补发）
+//   { state: done }    迁移收口（幂等短路，不再引导）
+// 持久化顺序：**先写 pending、再改设置、发引导、写 done**——任何一次
+// 写失败或进程中断后，下次激活都能从 pending 恢复（设置已迁移 → 补发
+// 引导；设置未迁移 → 重走完整迁移），引导不会因中途失败而永久丢失。
+// 残余崩溃窗口（声明的极端边界）：引导 fire 与 done 写之间无 await
+// （同步序）——该窗口内进程被 kill 或 done 持久化失败时，恢复只能按
+// pending 补发，可能双弹一次；这比「引导永久丢失」代价小。
+//
+// 多窗口并发（PR #581 评审修复，发现 2）：迁移与恢复均经 globalStorage
+// 目录内锁文件原子认领（fs.open 'wx' = O_EXCL，跨进程原子原语）。认领
+// 成功者执行完整序列；认领失败者短等待 done 出现后静默退出（绝不通知），
+// 超时也静默退出（本次不引导，待下次激活恢复）。胜者崩溃后锁残留由
+// mtime 陈旧接管兜底（超阈值删除重抢），不会永久锁死。
 import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from './settings'
 
 /** 一次性迁移标记的 globalState 键（vsidian.<域> 命名习惯） */
 export const CODEX_MIGRATION_MARKER_KEY = 'vsidian.codexThemeMigration'
 
 /**
- * 迁移判定用的旧内核主题身份字面量。addonThemes 的 CODEX_THEME_ID 已随
- * 内核退役删除，此常量只为迁移判定自持（原始 overlay 中的历史值），
- * 不再是可选主题身份。
+ * 迁移判定用的旧内核主题身份字面量。addonThemes 的 CODEX_THEME_ID 已降为
+ * v1.1.0 兼容的 deprecated 常量（不再代表内置身份），迁移判定自持字面量、
+ * 不依赖它的存废（原始 overlay 中的历史值）。
  */
 export const CODEX_MIGRATION_LEGACY_THEME_ID = 'codex'
 
@@ -34,6 +46,26 @@ export interface CodexMigrationPlan {
   action: CodexMigrationAction
   overlayPatch: Record<string, string>
   guide: boolean
+}
+
+/**
+ * 一次性标记（可恢复状态机）：pending = 迁移已认领、引导欠账（恢复时必
+ * 补发后收口）；done = 迁移收口（重开/重启/多窗口的幂等短路判据）。
+ * version 记录迁移执行时的扩展版本（诊断用）。
+ */
+export interface CodexMigrationMarker {
+  state: 'pending' | 'done'
+  version: string
+}
+
+/** 标记形态守卫（非对象/未知状态/版本非字符串 → null，视为无标记） */
+export function parseCodexMigrationMarker(value: unknown): CodexMigrationMarker | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const state = (value as Record<string, unknown>)['state']
+  const version = (value as Record<string, unknown>)['version']
+  if (state !== 'pending' && state !== 'done') return null
+  if (typeof version !== 'string') return null
+  return { state, version }
 }
 
 const NOOP_PLAN: CodexMigrationPlan = { action: 'none', overlayPatch: {}, guide: false }
@@ -49,17 +81,16 @@ function meaningfulThemeValue(value: unknown): string | undefined {
 }
 
 /**
- * 三档迁移矩阵（纯函数；判定只看原始 overlay 与标记，不看快照）：
+ * 三档迁移矩阵（纯函数；判定只看原始 overlay 与完成标记，不看快照）：
  * 1. 新键为旧内核 codex 身份（T07 过渡内置项），或新键 default/缺失且
  *    原始旧 Mermaid 键 = 'codex' → 双键回落 'default' + 一次性引导；
  * 2. 新键为组件主题身份（用户已作新选择）→ 不动新键；旧键残留 'codex'
  *    清为 'default'；不引导；
  * 3. 其余 → 无操作。
  */
-export function planCodexThemeMigration(rawOverlay: unknown, markerPresent: boolean): CodexMigrationPlan {
-  if (markerPresent) {
-    // 标记与迁移同批写入（见 runCodexThemeMigration），标记在场即迁移
-    // 已完成——幂等短路，保证引导只发一次
+export function planCodexThemeMigration(rawOverlay: unknown, migrationDone: boolean): CodexMigrationPlan {
+  if (migrationDone) {
+    // done 标记在场即迁移已收口——幂等短路，保证引导只发一次
     return NOOP_PLAN
   }
   if (!isRecord(rawOverlay)) {
@@ -91,14 +122,20 @@ export interface CodexMigrationPorts {
   readRawOverlay(): unknown
   /** globalState.update('vsidian.settings', ...)——迁移唯一写设置通道 */
   writeRawOverlay(value: Record<string, unknown>): Promise<void>
-  /** globalState.get(标记键)——undefined 即未迁移 */
+  /** globalState.get(标记键)——undefined 即未迁移（形态见 parseCodexMigrationMarker） */
   readMarker(): unknown
-  /** globalState.update(标记键, 版本)——与迁移同批 */
-  writeMarker(version: string): Promise<void>
+  /** globalState.update(标记键, marker)——pending/done 状态机的唯一写入通道 */
+  writeMarker(marker: CodexMigrationMarker): Promise<void>
   /** context.extension.packageJSON.version（标记值，诊断用） */
   extensionVersion(): string
   /** 一次性安装引导通知（VSIDIAN_TEST_HOOKS=1 时短路，wiring 层实现） */
   requestGuide(): void
+  /** 原子认领锁文件（O_EXCL）：true = 认领成功（本窗口为迁移胜者） */
+  tryAcquireLock(): Promise<boolean>
+  /** 锁文件年龄（ms；不存在 = null）——陈旧接管判据 */
+  lockAgeMs(): Promise<number | null>
+  /** 删除锁文件（陈旧接管 / 胜者正常完成或异常退出时释放） */
+  releaseLock(): Promise<void>
 }
 
 /** 编排结果：action 同计划；guide = 本次是否请求了引导 */
@@ -107,22 +144,137 @@ export interface CodexMigrationRunResult {
   guide: boolean
 }
 
+/** 并发认领参数（默认值见 runCodexThemeMigration；单测注入小间隔/超时） */
+export interface CodexMigrationRunOptions {
+  /** 锁 mtime 陈旧阈值（ms）：超过即视胜者已崩溃，删除重抢 */
+  lockStaleMs?: number
+  /** 认领失败者等待 done 的超时（ms）：超时静默退出（本次不引导） */
+  waitTimeoutMs?: number
+  /** 等待轮询间隔（ms） */
+  pollIntervalMs?: number
+}
+
+const NONE_RESULT: CodexMigrationRunResult = { action: 'none', guide: false }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 尝试认领；失败时检查陈旧并接管（删除重抢）。true = 认领成功 */
+async function tryAcquireOrTakeover(
+  ports: CodexMigrationPorts,
+  staleMs: number,
+): Promise<boolean> {
+  if (await ports.tryAcquireLock()) return true
+  const age = await ports.lockAgeMs()
+  if (age !== null && age > staleMs) {
+    await ports.releaseLock()
+    return ports.tryAcquireLock()
+  }
+  return false
+}
+
 /**
- * 宿主编排：计划 → 写原始 overlay → 写标记（migrate 档）→ 请求引导。
- * 顺序上持久化先于引导（迁移结果不依赖通知成败）；overlay 写失败时异常
- * 向调用方传播、不写标记不引导（下次激活重试）。
+ * 胜者序列（认领成功后执行）：重读状态 → 按恢复规则补完。
+ * - plan migrate → 完整序列：写 pending → 改设置 → 发引导（同步序）→ 写 done；
+ * - plan clean-legacy → 只清旧键（pending 欠账则补发引导并收口）；
+ * - plan none 且 pending 在场 → 补发引导后写 done（引导欠账必达）；
+ * - plan none 且无 pending → 静默收尾。
+ * 异常时立即释放锁（下次激活可立即重试）；真实进程崩溃不走 finally，
+ * 锁残留由 mtime 陈旧接管兜底。
  */
-export async function runCodexThemeMigration(ports: CodexMigrationPorts): Promise<CodexMigrationRunResult> {
-  const rawOverlay = ports.readRawOverlay()
-  const plan = planCodexThemeMigration(rawOverlay, ports.readMarker() !== undefined)
-  if (plan.action === 'none') {
-    return { action: plan.action, guide: false }
+async function executeOwnerSequence(ports: CodexMigrationPorts): Promise<CodexMigrationRunResult> {
+  try {
+    // 认领后重读状态（等待期间其他窗口可能已完成收口）
+    const marker = parseCodexMigrationMarker(ports.readMarker())
+    if (marker?.state === 'done') {
+      return NONE_RESULT
+    }
+    const rawOverlay = ports.readRawOverlay()
+    const plan = planCodexThemeMigration(rawOverlay, false)
+    const overlay = isRecord(rawOverlay) ? rawOverlay : {}
+    const version = ports.extensionVersion()
+
+    if (plan.action === 'migrate') {
+      // 持久化顺序（发现 1）：pending 先于设置改写落盘——中途任何失败都
+      // 能从 pending 恢复，引导不会永久丢失
+      await ports.writeMarker({ state: 'pending', version })
+      await ports.writeRawOverlay({ ...overlay, ...plan.overlayPatch })
+      // 引导 fire 与 done 写之间无 await（同步序）：残余崩溃窗口见文件头
+      ports.requestGuide()
+      await ports.writeMarker({ state: 'done', version })
+      return { action: plan.action, guide: true }
+    }
+    if (plan.action === 'clean-legacy') {
+      await ports.writeRawOverlay({ ...overlay, ...plan.overlayPatch })
+      if (marker?.state === 'pending') {
+        // pending = 引导欠账：清旧键之外补发引导并收口
+        ports.requestGuide()
+        await ports.writeMarker({ state: 'done', version })
+        return { action: plan.action, guide: true }
+      }
+      return { action: plan.action, guide: false }
+    }
+    // plan none：设置已迁移（或本就无需迁移）——只有 pending 欠账需要补发
+    if (marker?.state === 'pending') {
+      ports.requestGuide()
+      await ports.writeMarker({ state: 'done', version })
+      return { action: 'none', guide: true }
+    }
+    return NONE_RESULT
+  } finally {
+    // 释放失败不传播（陈旧接管兜底；done 标记才是收口判据）
+    await ports.releaseLock().catch(() => undefined)
   }
-  const overlay = isRecord(rawOverlay) ? rawOverlay : {}
-  await ports.writeRawOverlay({ ...overlay, ...plan.overlayPatch })
-  if (plan.guide) {
-    await ports.writeMarker(ports.extensionVersion())
-    ports.requestGuide()
+}
+
+/**
+ * 宿主编排：done 短路（快速路径不抢锁）→ 需迁移或恢复时跨进程原子认领
+ * （发现 2）→ 胜者执行 owner 序列；败者短等待 done 出现后静默退出
+ * （绝不通知），等待期间锁陈旧则接管补完。超时静默退出：本次不引导，
+ * 待下次激活按恢复规则补完。
+ */
+export async function runCodexThemeMigration(
+  ports: CodexMigrationPorts,
+  options: CodexMigrationRunOptions = {},
+): Promise<CodexMigrationRunResult> {
+  const lockStaleMs = options.lockStaleMs ?? 10_000
+  const waitTimeoutMs = options.waitTimeoutMs ?? 5_000
+  const pollIntervalMs = options.pollIntervalMs ?? 100
+
+  // 快速路径：done 在场（重开/重启/多窗口常规形态）——不抢锁直接退出
+  const marker = parseCodexMigrationMarker(ports.readMarker())
+  if (marker?.state === 'done') {
+    return NONE_RESULT
   }
-  return { action: plan.action, guide: plan.guide }
+  const pending = marker?.state === 'pending'
+  const plan = planCodexThemeMigration(ports.readRawOverlay(), false)
+  if (plan.action === 'none' && !pending) {
+    return NONE_RESULT
+  }
+
+  if (await tryAcquireOrTakeover(ports, lockStaleMs)) {
+    return executeOwnerSequence(ports)
+  }
+  // 认领失败：等待 done（期间锁陈旧则接管补完——胜者崩溃不留死锁）
+  const start = Date.now()
+  for (;;) {
+    if (parseCodexMigrationMarker(ports.readMarker())?.state === 'done') {
+      return NONE_RESULT
+    }
+    if (Date.now() - start > waitTimeoutMs) {
+      // 超时静默退出：绝不通知（本次不引导，待下次激活恢复）
+      return NONE_RESULT
+    }
+    const age = await ports.lockAgeMs()
+    if (age === null || age > lockStaleMs) {
+      // 锁不存在（胜者异常退出已释放）或已陈旧（胜者崩溃残留）——接力或
+      // 接管：owner 序列重读状态，幂等安全
+      if (age !== null) await ports.releaseLock()
+      if (await ports.tryAcquireLock()) {
+        return executeOwnerSequence(ports)
+      }
+    }
+    await sleep(pollIntervalMs)
+  }
 }

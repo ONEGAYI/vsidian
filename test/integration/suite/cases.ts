@@ -7493,7 +7493,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
         readState: () => vscode.commands.executeCommand<CodexMigrationState>('onegayi.vsidian._test.getCodexMigrationState'),
       }, {
         componentThemeRef: 'vsidian-test-fixture.addon-theme/aqua',
-        assertMarker: (marker) => assert(marker !== null, '一次性标记应与迁移同批写入'),
+        assertMarker: (marker) => assert(marker?.state === 'done', '一次性标记应在迁移收口后为 done 态'),
       })
       // 档 2 后恢复 default（正式设置链路——同 runner 重置面语义），再走
       // 面板链路：面板装载拉取应读到 default 快照

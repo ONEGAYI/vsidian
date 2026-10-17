@@ -4,11 +4,19 @@
 // （未经 sanitize）——枚举收窄后 sanitize 会把残留 'codex' 静默变
 // 'default'，快照层无法区分「曾是 codex」与「从未设置」，一次性引导
 // 将永不触发（探索笔记 theme-settings-flow 第一节的推论）。
+//
+// PR #581 评审修复（发现 1/2）：迁移持久化改为「pending-guide 可恢复
+// 状态机」（先写 pending → 改设置 → 发引导 → 写 done），并发迁移经
+// globalStorage 锁文件原子认领（O_EXCL）——败者等待或超时均静默退出，
+// 陈旧锁（mtime 超阈值）由后续激活接管。以下恢复与并发场景为评审
+// 方复现用例的契约化。
 import { describe, expect, it } from 'vitest'
 import {
   CODEX_MIGRATION_MARKER_KEY,
+  parseCodexMigrationMarker,
   planCodexThemeMigration,
   runCodexThemeMigration,
+  type CodexMigrationMarker,
   type CodexMigrationPorts,
 } from '../../src/shared/codexMigration'
 import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../../src/shared/settings'
@@ -80,7 +88,7 @@ describe('planCodexThemeMigration（三档迁移矩阵，原始 overlay 判据�
     expect(planCodexThemeMigration('codex', false)).toEqual({ action: 'none', overlayPatch: {}, guide: false })
   })
 
-  it('一次性标记在场 → 无操作（不再迁移、不再引导——重开/重启/多窗口只一次的判据）', () => {
+  it('迁移已完成（done 标记）→ 无操作（不再迁移、不再引导——重开/重启/多窗口只一次的判据）', () => {
     expect(planCodexThemeMigration({ [MERMAID_THEME_KEY]: 'codex' }, true))
       .toEqual({ action: 'none', overlayPatch: {}, guide: false })
     expect(planCodexThemeMigration({ [APPEARANCE_THEME_KEY]: 'codex' }, true))
@@ -88,42 +96,95 @@ describe('planCodexThemeMigration（三档迁移矩阵，原始 overlay 判据�
   })
 })
 
+// ---- 标记形态（pending-guide 状态机） ----
+
+describe('parseCodexMigrationMarker（标记形态守卫）', () => {
+  it('合法形态：{ state, version }（pending = 引导欠账，done = 迁移收口）', () => {
+    expect(parseCodexMigrationMarker({ state: 'pending', version: '1.2.3' }))
+      .toEqual({ state: 'pending', version: '1.2.3' })
+    expect(parseCodexMigrationMarker({ state: 'done', version: '1.2.3' }))
+      .toEqual({ state: 'done', version: '1.2.3' })
+  })
+
+  it('非对象/未知状态/版本非字符串 → null（视为无标记：恢复按 overlay 判据走）', () => {
+    expect(parseCodexMigrationMarker(undefined)).toBeNull()
+    expect(parseCodexMigrationMarker('1.1.0')).toBeNull()
+    expect(parseCodexMigrationMarker(null)).toBeNull()
+    expect(parseCodexMigrationMarker({ state: 'unknown', version: '1.2.3' })).toBeNull()
+    expect(parseCodexMigrationMarker({ state: 'done' })).toBeNull()
+    expect(parseCodexMigrationMarker({ state: 'done', version: 3 })).toBeNull()
+    expect(parseCodexMigrationMarker(['done'])).toBeNull()
+  })
+})
+
 // ---- 宿主编排 ----
 
-function fakePorts(rawOverlay: unknown, marker: unknown = undefined): { ports: CodexMigrationPorts; state: { overlay: unknown; marker: unknown; guides: number; events: string[] } } {
+interface FakeLock {
+  /** 预置一个已占用锁；ageMs 供陈旧判定（默认 0 = 活跃） */
+  hold(ageMs?: number): void
+  isHeld(): boolean
+}
+
+function fakePorts(
+  rawOverlay: unknown,
+  marker: CodexMigrationMarker | undefined = undefined,
+): {
+  ports: CodexMigrationPorts
+  state: { overlay: unknown; marker: CodexMigrationMarker | undefined; guides: number; events: string[] }
+  lock: FakeLock
+} {
   const state = { overlay: rawOverlay, marker, guides: 0, events: [] as string[] }
-  const ports: CodexMigrationPorts = {
-    readRawOverlay: () => {
-      return state.overlay
+  const lockState = { held: false, ageMs: 0 }
+  const lock: FakeLock = {
+    hold(ageMs = 0) {
+      lockState.held = true
+      lockState.ageMs = ageMs
     },
+    isHeld: () => lockState.held,
+  }
+  const ports: CodexMigrationPorts = {
+    readRawOverlay: () => state.overlay,
     writeRawOverlay: async (value) => {
       state.events.push('write-overlay')
       state.overlay = value
     },
     readMarker: () => state.marker,
-    writeMarker: async () => {
-      state.events.push('write-marker')
-      state.marker = '1.2.3-test'
+    writeMarker: async (markerToWrite) => {
+      state.events.push(`write-marker:${markerToWrite.state}`)
+      state.marker = markerToWrite
     },
     extensionVersion: () => '1.2.3-test',
     requestGuide: () => {
       state.events.push('guide')
       state.guides += 1
     },
+    tryAcquireLock: async () => {
+      if (lockState.held) return false
+      lockState.held = true
+      lockState.ageMs = 0
+      return true
+    },
+    lockAgeMs: async () => (lockState.held ? lockState.ageMs : null),
+    releaseLock: async () => {
+      lockState.held = false
+      lockState.ageMs = 0
+    },
   }
-  return { ports, state }
+  return { ports, state, lock }
 }
 
-describe('runCodexThemeMigration（宿主编排）', () => {
-  it('迁移：直接改写原始 overlay 双键、写标记、请求引导；持久化先于引导（写锁不依赖用户响应）', async () => {
-    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+describe('runCodexThemeMigration（宿主编排：持久化顺序）', () => {
+  it('迁移：先写 pending 标记、再改设置、发引导、写 done——持久化先于引导（写锁不依赖用户响应）', async () => {
+    const { ports, state, lock } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
     const result = await runCodexThemeMigration(ports)
     expect(result).toEqual({ action: 'migrate', guide: true })
     expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
-    expect(state.marker).toBe('1.2.3-test')
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
     expect(state.guides).toBe(1)
-    // 顺序：先持久化（overlay → marker）再引导——迁移结果不依赖通知成败
-    expect(state.events).toEqual(['write-overlay', 'write-marker', 'guide'])
+    // 顺序：pending → overlay → guide → done（引导前已有 pending 兜底——
+    // 中断后可恢复补发；done 收口后不再引导）
+    expect(state.events).toEqual(['write-marker:pending', 'write-overlay', 'guide', 'write-marker:done'])
+    expect(lock.isHeld()).toBe(false)
   })
 
   it('迁移保留原始 overlay 中的无关键（增量补丁语义）', async () => {
@@ -145,16 +206,21 @@ describe('runCodexThemeMigration（宿主编排）', () => {
     expect(state.guides).toBe(0)
   })
 
-  it('无操作：不读不写不引导', async () => {
-    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'default' })
+  it('无操作：不读不写不引导、不碰锁', async () => {
+    const { ports, state, lock } = fakePorts({ [MERMAID_THEME_KEY]: 'default' })
     const result = await runCodexThemeMigration(ports)
     expect(result).toEqual({ action: 'none', guide: false })
     expect(state.events).toEqual([])
     expect(state.guides).toBe(0)
+    expect(lock.isHeld()).toBe(false)
   })
 
-  it('标记在场：无操作（重开/重启/多窗口不重复引导）', async () => {
-    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' }, '1.1.0')
+  it('done 标记在场：无操作（重开/重启/多窗口不重复引导；快速路径不抢锁）', async () => {
+    const { ports, state, lock } = fakePorts(
+      { [MERMAID_THEME_KEY]: 'codex' },
+      { state: 'done', version: '1.1.0' },
+    )
+    lock.hold() // 锁被他人占用也不影响——done 短路在认领之前
     const result = await runCodexThemeMigration(ports)
     expect(result).toEqual({ action: 'none', guide: false })
     expect(state.overlay).toEqual({ [MERMAID_THEME_KEY]: 'codex' })
@@ -162,25 +228,167 @@ describe('runCodexThemeMigration（宿主编排）', () => {
     expect(state.events).toEqual([])
   })
 
-  it('overlay 写失败：异常传播、不写标记不引导（下次激活重试）', async () => {
-    const state = { marker: undefined as unknown, guides: 0 }
-    const ports: CodexMigrationPorts = {
-      readRawOverlay: () => ({ [MERMAID_THEME_KEY]: 'codex' }),
-      writeRawOverlay: async () => {
-        throw new Error('storage down')
-      },
-      readMarker: () => state.marker,
-      writeMarker: async () => {
-        state.marker = '1.2.3-test'
-      },
-      extensionVersion: () => '1.2.3-test',
-      requestGuide: () => {
-        state.guides += 1
-      },
+  it('设置写失败：异常传播、引导未发（pending 已写——下次激活按恢复规则重走完整迁移）', async () => {
+    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+    ports.writeRawOverlay = async () => {
+      throw new Error('storage down')
     }
     await expect(runCodexThemeMigration(ports)).rejects.toThrow('storage down')
-    expect(state.marker).toBeUndefined()
+    expect(state.marker).toEqual({ state: 'pending', version: '1.2.3-test' })
     expect(state.guides).toBe(0)
+  })
+})
+
+// ---- 发现 1：pending-guide 恢复语义（评审场景契约化） ----
+
+describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 1）', () => {
+  it('场景 A（评审复现）：设置已迁移、引导发出前中断 → 恢复重跑补发引导恰一次', async () => {
+    // 构造评审方场景的等价状态：旧代码在「改设置成功、标记写失败/进程退出」
+    // 后，设置已回落但引导永不补发。新序列把该中断点落在 write-overlay 成功
+    // 之后（引导未发、done 未写）——恢复存储后重跑必须补发恰一次。
+    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+    ports.writeRawOverlay = async (value) => {
+      state.overlay = value
+      throw new Error('simulated crash after overlay write')
+    }
+    await expect(runCodexThemeMigration(ports)).rejects.toThrow('simulated crash after overlay write')
+    expect(state.guides).toBe(0)
+    expect(state.marker).toEqual({ state: 'pending', version: '1.2.3-test' })
+    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    // 恢复存储重跑（模拟下次激活）：已迁移（plan none）+ pending → 补发引导 + done
+    const retry = await runCodexThemeMigration(ports)
+    expect(retry).toEqual({ action: 'none', guide: true })
+    expect(state.guides).toBe(1)
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
+    // 再跑：done 收口 → 不再引导（引导恰一次）
+    const third = await runCodexThemeMigration(ports)
+    expect(third).toEqual({ action: 'none', guide: false })
+    expect(state.guides).toBe(1)
+  })
+
+  it('场景 B：pending 写成功、设置写失败 → 恢复重跑走完整迁移（幂等）', async () => {
+    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+    ports.writeRawOverlay = async () => {
+      throw new Error('storage down')
+    }
+    await expect(runCodexThemeMigration(ports)).rejects.toThrow('storage down')
+    expect(state.guides).toBe(0)
+    expect(state.overlay).toEqual({ [MERMAID_THEME_KEY]: 'codex' })
+    expect(state.marker).toEqual({ state: 'pending', version: '1.2.3-test' })
+    // 恢复存储重跑：原始 overlay 仍是 codex → 完整迁移重走（幂等）
+    ports.writeRawOverlay = async (value) => {
+      state.overlay = value
+    }
+    const retry = await runCodexThemeMigration(ports)
+    expect(retry).toEqual({ action: 'migrate', guide: true })
+    expect(state.guides).toBe(1)
+    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
+  })
+
+  it('残余边界（文档化）：done 写失败时引导已发，恢复重跑会再补发一次（总 2 次）', async () => {
+    // 引导 fire 与 done 写之间无 await（同步序）——该窗口内进程被 kill 或
+    // done 持久化失败时，恢复路径只能按 pending 补发，可能双弹一次。这是
+    // 声明的极端边界（与「进程级 kill 的同步序残余窗口」同类），比「引导
+    // 永久丢失」（发现 1 修复前的行为）代价小。
+    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+    let failDoneOnce = true
+    const originalWriteMarker = ports.writeMarker
+    ports.writeMarker = async (marker) => {
+      if (marker.state === 'done' && failDoneOnce) {
+        failDoneOnce = false
+        throw new Error('marker write down')
+      }
+      await originalWriteMarker(marker)
+    }
+    await expect(runCodexThemeMigration(ports)).rejects.toThrow('marker write down')
+    expect(state.guides).toBe(1)
+    expect(state.marker).toEqual({ state: 'pending', version: '1.2.3-test' })
+    const retry = await runCodexThemeMigration(ports)
+    expect(retry).toEqual({ action: 'none', guide: true })
+    expect(state.guides).toBe(2)
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
+  })
+
+  it('pending 残留且 overlay 处于档 2（用户在窗口期改选组件主题）：清旧键并补发引导收口', async () => {
+    // pending = 引导欠账：无论恢复时计划落在哪一档，认领成功后补发引导并
+    // 写 done 收口；clean-legacy 自身的清旧键语义照走
+    const { ports, state } = fakePorts(
+      { [APPEARANCE_THEME_KEY]: 'pub.two/aqua', [MERMAID_THEME_KEY]: 'codex' },
+      { state: 'pending', version: '1.2.3-test' },
+    )
+    const result = await runCodexThemeMigration(ports)
+    expect(result).toEqual({ action: 'clean-legacy', guide: true })
+    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'pub.two/aqua', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.guides).toBe(1)
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
+  })
+})
+
+// ---- 发现 2：多窗口并发认领（评审场景契约化） ----
+
+describe('runCodexThemeMigration（多窗口并发——PR #581 评审发现 2）', () => {
+  it('并发两次调用（写入屏障挂起胜者）→ 引导恰一次，败者静默等待 done', async () => {
+    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+    let releaseBarrier: (() => void) | undefined
+    const barrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve
+    })
+    const originalWrite = ports.writeRawOverlay
+    ports.writeRawOverlay = async (value) => {
+      await barrier // 受控写入屏障：挂起胜者的设置写（评审方同款手法）
+      await originalWrite(value)
+    }
+    // 两个窗口并发激活（同一 profile：同 overlay、同标记、同锁）
+    const runA = runCodexThemeMigration(ports, { pollIntervalMs: 10 })
+    const runB = runCodexThemeMigration(ports, { pollIntervalMs: 10 })
+    await new Promise((resolve) => setTimeout(resolve, 20)) // 胜者挂起在屏障、败者进入等待
+    releaseBarrier!()
+    const [a, b] = await Promise.all([runA, runB])
+    // 恰一个窗口完成迁移并引导，另一个静默退出（绝不通告）
+    const results = [a, b].map((r) => `${r.action}:${r.guide}`).sort()
+    expect(results).toEqual(['migrate:true', 'none:false'])
+    expect(state.guides).toBe(1)
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
+    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+  })
+
+  it('胜者崩溃（锁残留且 mtime 陈旧）→ 后续激活接管补完（引导欠账必达）', async () => {
+    // 胜者写 pending 后被 kill：finally 不执行、锁残留。锁 mtime 超过陈旧
+    // 阈值后，后续激活删除重抢并按恢复规则补完
+    const { ports, state, lock } = fakePorts(
+      { [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' },
+      { state: 'pending', version: '1.2.3-test' },
+    )
+    lock.hold(60_000) // 残留锁，mtime 已陈旧（远超阈值）
+    const result = await runCodexThemeMigration(ports)
+    expect(result).toEqual({ action: 'none', guide: true })
+    expect(state.guides).toBe(1)
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
+    expect(lock.isHeld()).toBe(false)
+  })
+
+  it('胜者崩溃且 overlay 未迁移（锁陈旧）→ 接管者重走完整迁移', async () => {
+    const { ports, state, lock } = fakePorts(
+      { [MERMAID_THEME_KEY]: 'codex' },
+      { state: 'pending', version: '1.2.3-test' },
+    )
+    lock.hold(60_000)
+    const result = await runCodexThemeMigration(ports)
+    expect(result).toEqual({ action: 'migrate', guide: true })
+    expect(state.guides).toBe(1)
+    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
+  })
+
+  it('认领失败且等待超时：静默退出、绝不通知（本次不引导，待下次激活恢复）', async () => {
+    const { ports, state, lock } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+    lock.hold() // 活跃胜者持有（mtime 新鲜）
+    const result = await runCodexThemeMigration(ports, { waitTimeoutMs: 40, pollIntervalMs: 10 })
+    expect(result).toEqual({ action: 'none', guide: false })
+    expect(state.guides).toBe(0)
+    expect(state.events).toEqual([])
+    expect(lock.isHeld()).toBe(true)
   })
 })
 
