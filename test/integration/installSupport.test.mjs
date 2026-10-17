@@ -125,16 +125,16 @@ test('扩展目录定位：精确 id 不误取同发布者前缀的其他扩展�
   const base = mkdtempSync(path.join(tmpdir(), 't16-extdir-'))
   try {
     // 同发布者双扩展同装（T08 组件对照安装态的目录形态）：
-    // onegayi.vsidian-1.2.3（主）与 onegayi.vsidian-codex-bridge-0.1.0（bridge）
-    mkdirSync(path.join(base, 'onegayi.vsidian-codex-bridge-0.1.0'))
+    // onegayi.vsidian-1.2.3（主）与 onegayi.vsidian-sample-addon-0.1.0（组件）
+    mkdirSync(path.join(base, 'onegayi.vsidian-sample-addon-0.1.0'))
     mkdirSync(path.join(base, 'onegayi.vsidian-1.2.3'))
     const main = installedExtensionDir(base, 'onegayi.vsidian')
     assert.ok(main, '主扩展必须命中')
     assert.equal(path.basename(main.dir), 'onegayi.vsidian-1.2.3', `主扩展取精确 id 目录而非字典序取尾（实际 ${main.dir}）`)
     assert.equal(main.count, 1, '同前缀 bridge 不计入主扩展命中数')
-    const bridge = installedExtensionDir(base, 'onegayi.vsidian-codex-bridge')
+    const bridge = installedExtensionDir(base, 'onegayi.vsidian-sample-addon')
     assert.ok(bridge, 'bridge 按自身精确 id 命中')
-    assert.equal(path.basename(bridge.dir), 'onegayi.vsidian-codex-bridge-0.1.0')
+    assert.equal(path.basename(bridge.dir), 'onegayi.vsidian-sample-addon-0.1.0')
     assert.equal(installedExtensionDir(base, 'onegayi.missing'), null, '未安装 id 返回 null')
   } finally {
     rmSync(base, { recursive: true, force: true })

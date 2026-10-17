@@ -1,13 +1,13 @@
-// #535 T08 旧内核 Codex 设置迁移——vscode 层装配：globalState 原始
+// #535 T08 旧主题预设迁移——vscode 层装配：globalState 原始
 // overlay 读端口 + 经 SettingsService 串行链的最小主题键补丁写端口
 // （PR #581 三审 P2-A）、按 profile 身份命名的磁盘权威完成状态（P2-B +
 // 五审 P2-C 方案 B'：globalStorageUri 下 `legacy-theme-migration.<id>.
 // state.json`——1.82.3 平台无双满足通道，globalStorageUri 磁盘即时但
 // **恒为默认 profile 目录**（跨 profile 共享），故以 globalState PROFILE
 // 域持久化的 profileId 命名分居；身份生成在锁内、双载体持久化，有界
-// 边界见 codexMigration 文件头）、代次锁（fencing）认领协议（四审
+// 边界见 legacyThemeMigration 文件头）、代次锁（fencing）认领协议（四审
 // P2-D：指针 tmp+rename 原子推进、O_EXCL 认领 gen+1、按名释放——协议见
-// codexMigrationLock 文件头）、一次性安装引导通知与 _test 钩子
+// legacyThemeMigrationLock 文件头）、一次性安装引导通知与 _test 钩子
 // （VSIDIAN_TEST_HOOKS 门控，判据与 editorGuardWiring 一致）。
 //
 // 集成测试宿主的通知短路：VSIDIAN_TEST_HOOKS=1 时引导通知 no-op（独立
@@ -18,44 +18,44 @@ import { randomUUID } from 'node:crypto'
 import { promises as fsp } from 'fs'
 import * as path from 'path'
 import {
-  CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY,
-  parseCodexMigrationMarker,
-  runCodexThemeMigration,
-  type CodexMigrationMarker,
-  type CodexMigrationPorts,
-} from '../shared/codexMigration'
+  LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY,
+  parseLegacyThemeMigrationMarker,
+  runLegacyThemeMigration,
+  type LegacyThemeMigrationMarker,
+  type LegacyThemeMigrationPorts,
+} from '../shared/legacyThemeMigration'
 import {
-  createCodexMigrationLock,
-  type CodexLockFilesystem,
-} from '../shared/codexMigrationLock'
+  createLegacyThemeMigrationLock,
+  type LegacyLockFilesystem,
+} from '../shared/legacyThemeMigrationLock'
 import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../shared/settings'
 import { SETTINGS_STORAGE_KEY, SettingsService } from './settingsService'
 import { t } from '../shared/i18n'
 
-/** globalStorage 内的迁移锁文件族基名（多窗口原子认领；协议见 codexMigrationLock） */
-const CODEX_MIGRATION_LOCK_FILE = 'codex-theme-migration.lock'
+/** globalStorage 内的迁移锁文件族基名（多窗口原子认领；协议见 legacyThemeMigrationLock） */
+const LEGACY_THEME_MIGRATION_LOCK_FILE = 'legacy-theme-migration'
 
 /**
  * globalStorage 内按 profile 身份命名的迁移状态文件（P2-B + 五审 P2-C
  * B'）：globalStorageUri 磁盘读写即时跨窗一致，但 1.82.3 上它**不是按
  * profile 隔离的**（恒指向默认 profile 的扩展存储目录，跨 profile 共享）
  * ——profile 隔离由文件名携带的 profileId 承载（身份经 globalState
- * PROFILE 域持久化，见 CODEX_MIGRATION_PROFILE_ID_STATE_KEY）
+ * PROFILE 域持久化，见 LEGACY_THEME_MIGRATION_PROFILE_ID_STATE_KEY）
  */
-const CODEX_MIGRATION_STATE_FILE_PREFIX = 'codex-theme-migration.'
+const LEGACY_THEME_MIGRATION_STATE_FILE_PREFIX = 'legacy-theme-migration.'
 
 /**
  * profileId 的 globalState 独立键（B' 第一载体；PROFILE 域）。第二载体
  * 为原始 overlay 内部键（迁移补丁同批原子写，键名见
- * CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY）——两载体同域，其一丢失仍可
+ * LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY）——两载体同域，其一丢失仍可
  * 恢复身份、状态文件名不漂移
  */
-const CODEX_MIGRATION_PROFILE_ID_STATE_KEY = 'vsidian.legacyThemeMigration.profileId'
+const LEGACY_THEME_MIGRATION_PROFILE_ID_STATE_KEY = 'vsidian.legacyThemeMigration.profileId'
 
 /** 迁移运行时状态（_test 观测面；原始 overlay 两键为原始层值非快照值） */
-export interface CodexMigrationRuntimeState {
+export interface LegacyThemeMigrationRuntimeState {
   /** 一次性标记（pending = 引导欠账 / done = 迁移收口；null = 未迁移） */
-  marker: CodexMigrationMarker | null
+  marker: LegacyThemeMigrationMarker | null
   /** 引导已决定次数（含被测试短路挡下的 UI） */
   guideCount: number
   /** 原始 overlay 中的新键值（未经 sanitize） */
@@ -64,30 +64,30 @@ export interface CodexMigrationRuntimeState {
   overlayMermaid: unknown
 }
 
-export interface CodexMigrationWiring {
+export interface LegacyThemeMigrationWiring {
   /** _test / 诊断观测面（marker 从磁盘权威状态文件读取） */
-  stateFor(): Promise<CodexMigrationRuntimeState>
+  stateFor(): Promise<LegacyThemeMigrationRuntimeState>
   /** 重跑迁移（_test 专用：模拟重启后的再次激活；生产只在 activate 跑一次） */
   run(): Promise<{ action: string; guide: boolean }>
 }
 
-export function createCodexMigrationWiring(
+export function createLegacyThemeMigrationWiring(
   context: vscode.ExtensionContext,
   settingsService: SettingsService,
-): CodexMigrationWiring {
+): LegacyThemeMigrationWiring {
   // 集成测试宿主通知短路（判据与 editorGuardWiring 一致，见文件头注释）
   const testHooks = process.env.VSIDIAN_TEST_HOOKS === '1'
   let guideCount = 0
 
   const storageDir = context.globalStorageUri.fsPath
-  const lockPath = path.join(storageDir, CODEX_MIGRATION_LOCK_FILE)
+  const lockPath = path.join(storageDir, LEGACY_THEME_MIGRATION_LOCK_FILE)
   /** B'：按 profile 身份命名的状态文件（身份隔离语义见常量注释） */
   const stateFilePath = (profileId: string): string =>
-    path.join(storageDir, `${CODEX_MIGRATION_STATE_FILE_PREFIX}${profileId}.state.json`)
+    path.join(storageDir, `${LEGACY_THEME_MIGRATION_STATE_FILE_PREFIX}${profileId}.state.json`)
 
   // ---- B'：profile 身份读写（两载体：globalState 独立键 + 原始 overlay
   // 内部键——后者由迁移补丁同批原子写，此处只读；生成唯一入口在锁内
-  // owner 序列，见 codexMigration.resolveOrGenerateProfileId） ----
+  // owner 序列，见 legacyThemeMigration.resolveOrGenerateProfileId） ----
   const readOverlayRecord = (): Record<string, unknown> | null => {
     const overlay = context.globalState.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY)
     if (typeof overlay === 'object' && overlay !== null && !Array.isArray(overlay)) {
@@ -96,23 +96,23 @@ export function createCodexMigrationWiring(
     return null
   }
   const readProfileIdFromState = (): string | null => {
-    const direct = context.globalState.get(CODEX_MIGRATION_PROFILE_ID_STATE_KEY)
+    const direct = context.globalState.get(LEGACY_THEME_MIGRATION_PROFILE_ID_STATE_KEY)
     if (typeof direct === 'string' && direct !== '') return direct
-    const fromOverlay = readOverlayRecord()?.[CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]
+    const fromOverlay = readOverlayRecord()?.[LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY]
     if (typeof fromOverlay === 'string' && fromOverlay !== '') return fromOverlay
     return null
   }
 
   // ---- P2-B/P2-C：磁盘权威完成状态（tmp+rename 原子写；损坏按无标记处理，
   // 恢复语义兜底——rename 原子性保证正常路径不会读到半截内容） ----
-  const readMarkerFromDisk = async (profileId: string): Promise<CodexMigrationMarker | null> => {
+  const readMarkerFromDisk = async (profileId: string): Promise<LegacyThemeMigrationMarker | null> => {
     try {
-      return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(stateFilePath(profileId), 'utf8')))
+      return parseLegacyThemeMigrationMarker(JSON.parse(await fsp.readFile(stateFilePath(profileId), 'utf8')))
     } catch {
       return null
     }
   }
-  const writeMarkerToDisk = async (profileId: string, marker: CodexMigrationMarker): Promise<void> => {
+  const writeMarkerToDisk = async (profileId: string, marker: LegacyThemeMigrationMarker): Promise<void> => {
     const statePath = stateFilePath(profileId)
     await fsp.mkdir(storageDir, { recursive: true })
     const tmp = `${statePath}.${process.pid}.tmp`
@@ -121,8 +121,8 @@ export function createCodexMigrationWiring(
   }
 
   // ---- 跨窗口锁（fs 原语端口 + 代次锁协议；token 为本窗口本次激活的
-  // 认领标识，代次文件内容携带，见 codexMigrationLock） ----
-  const lockFs: CodexLockFilesystem = {
+  // 认领标识，代次文件内容携带，见 legacyThemeMigrationLock） ----
+  const lockFs: LegacyLockFilesystem = {
     writeFileExclusive: async (target, data) => {
       // 首次认领前 globalStorage 父目录可能尚不存在（激活早期）——先建
       // 目录再 O_EXCL 创建（沿旧 tryAcquireLock 的 mkdir 先例）
@@ -149,19 +149,19 @@ export function createCodexMigrationWiring(
     readFile: (target) => fsp.readFile(target, 'utf8'),
     listDirFiles: (dir) => fsp.readdir(dir),
   }
-  const migrationLock = createCodexMigrationLock(lockFs, lockPath, {
+  const migrationLock = createLegacyThemeMigrationLock(lockFs, lockPath, {
     token: randomUUID(),
     pid: process.pid,
   })
 
-  const ports: CodexMigrationPorts = {
+  const ports: LegacyThemeMigrationPorts = {
     readRawOverlay: () => context.globalState.get(SETTINGS_STORAGE_KEY),
     // P2-A（PR #581 三审）：读-判-写经 SettingsService 串行链——与设置页
     // 保存（apply）互斥，等待窗口内的用户写入不被旧快照覆盖
     applyExclusiveOverlayStep: (step) => settingsService.runExclusiveOverlayStep(step),
     readProfileId: async () => readProfileIdFromState(),
     writeProfileId: async (id) => {
-      await context.globalState.update(CODEX_MIGRATION_PROFILE_ID_STATE_KEY, id)
+      await context.globalState.update(LEGACY_THEME_MIGRATION_PROFILE_ID_STATE_KEY, id)
     },
     readMarker: (profileId) => readMarkerFromDisk(profileId),
     writeMarker: (profileId, marker) => writeMarkerToDisk(profileId, marker),
@@ -175,12 +175,12 @@ export function createCodexMigrationWiring(
       }
       // 不自动安装组件、不自动替用户选主题（规格 §6.2）：通知只说明去向
       // 与当前回落，安装与选择归用户
-      void vscode.window.showInformationMessage(t('host.codexThemeMigrated'))
+      void vscode.window.showInformationMessage(t('host.legacyThemeMigrated'))
     },
     lock: migrationLock,
   }
 
-  const stateFor = async (): Promise<CodexMigrationRuntimeState> => {
+  const stateFor = async (): Promise<LegacyThemeMigrationRuntimeState> => {
     const profileId = readProfileIdFromState()
     const marker = profileId !== null ? await readMarkerFromDisk(profileId) : null
     const overlay = readOverlayRecord()
@@ -198,8 +198,10 @@ export function createCodexMigrationWiring(
 
   // 激活即迁移一次（早于编辑器/设置页面板建立——面板拉快照时已读到迁移
   // 后值；不阻塞激活返回，失败仅丢一次迁移，下次激活重试）
-  void runCodexThemeMigration(ports).catch((error) => {
-    console.warn('[vsidian] Codex 主题迁移失败（下次激活重试）:', error)
+  // B'：身份生成工厂注入 node:crypto（1.82.3 宿主 Node 18 无 globalThis.crypto）
+  const profileIdFactory = () => randomUUID()
+  void runLegacyThemeMigration(ports, { profileIdFactory }).catch((error) => {
+    console.warn('[vsidian] 旧主题迁移失败（下次激活重试）:', error)
   })
 
   // ---- 测试钩子命令：仅 VSIDIAN_TEST_HOOKS=1 注册（判据与
@@ -207,13 +209,13 @@ export function createCodexMigrationWiring(
   if (testHooks) {
     context.subscriptions.push(
       vscode.commands.registerCommand(
-        'onegayi.vsidian._test.getCodexMigrationState',
-        (): Promise<CodexMigrationRuntimeState> => stateFor(),
+        'onegayi.vsidian._test.getLegacyThemeMigrationState',
+        (): Promise<LegacyThemeMigrationRuntimeState> => stateFor(),
       ),
       // 用例造数：直写原始 overlay 双键（绕过定义校验，模拟升级残留；
       // null = 删除该键——「从未设置」形态）
       vscode.commands.registerCommand(
-        'onegayi.vsidian._test.injectCodexLegacyOverlay',
+        'onegayi.vsidian._test.injectLegacyThemeOverlay',
         async (values: { theme?: string | null; mermaid?: string | null }) => {
           const overlay = {
             ...context.globalState.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY),
@@ -239,23 +241,23 @@ export function createCodexMigrationWiring(
       // 走注入钩子；runner 每用例前调用，防止迁移状态与锁残留跨用例污染
       // ——崩溃注入场景的残留锁在此收口）
       vscode.commands.registerCommand(
-        'onegayi.vsidian._test.resetCodexMigration',
+        'onegayi.vsidian._test.resetLegacyThemeMigration',
         async () => {
           try {
             const names = await fsp.readdir(storageDir)
             for (const name of names) {
-              if (name.startsWith(CODEX_MIGRATION_STATE_FILE_PREFIX) && name.endsWith('.state.json')) {
+              if (name.startsWith(LEGACY_THEME_MIGRATION_STATE_FILE_PREFIX) && name.endsWith('.state.json')) {
                 await fsp.rm(path.join(storageDir, name), { force: true })
               }
             }
           } catch {
             // 目录不存在（从未迁移）——无状态可清
           }
-          await context.globalState.update(CODEX_MIGRATION_PROFILE_ID_STATE_KEY, undefined)
+          await context.globalState.update(LEGACY_THEME_MIGRATION_PROFILE_ID_STATE_KEY, undefined)
           const overlay = readOverlayRecord()
-          if (overlay !== null && CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY in overlay) {
+          if (overlay !== null && LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY in overlay) {
             const cleaned = { ...overlay }
-            delete cleaned[CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]
+            delete cleaned[LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY]
             await context.globalState.update(SETTINGS_STORAGE_KEY, cleaned)
           }
           await migrationLock.forceCleanup()
@@ -264,14 +266,14 @@ export function createCodexMigrationWiring(
         },
       ),
       vscode.commands.registerCommand(
-        'onegayi.vsidian._test.runCodexMigration',
-        () => runCodexThemeMigration(ports),
+        'onegayi.vsidian._test.runLegacyThemeMigration',
+        () => runLegacyThemeMigration(ports, { profileIdFactory }),
       ),
     )
   }
 
   return {
     stateFor,
-    run: () => runCodexThemeMigration(ports),
+    run: () => runLegacyThemeMigration(ports, { profileIdFactory }),
   }
 }

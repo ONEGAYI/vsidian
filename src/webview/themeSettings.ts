@@ -12,7 +12,7 @@
 // - 不可用主题：radio 禁用 + 「不可用」徽章（条目保留呈现，不隐藏）；
 //   首选组件主题不可用时列表上方回落提示 callout（保留首选的回显）。
 //
-// #535 T08：内置 Codex 单选项已随内核退役删除（组件版 Codex 经附加组件
+// #535 T08：内置旧预设单选项已随内核退役删除（组件版经附加组件
 // 提供并出现在目录主题列表中）。
 //
 // 呈现形态（ui-patterns §2.2/§2.3）：h3 组头挂外观大卡片内（负边距全幅）、
@@ -87,7 +87,7 @@ function themesStateEqual(a: AddonThemesStatePayload, b: AddonThemesStatePayload
 }
 
 interface ThemeOption {
-  /** 单选值（default / codex / themeRef） */
+  /** 单选值（default / 退役裸词 / themeRef 历史形态） */
   value: string
   /** 显示名（组件主题按页面语言解析） */
   title: string
@@ -197,7 +197,7 @@ export class ThemeSelectionSection {
     }
 
     // 首选不可用回落提示（保留首选的回显——不静默换主题；#535 后退役的
-    // codex 历史值同样按「未知首选不可用」呈现）
+    // 退役历史值同样按「未知首选不可用」呈现）
     if (state && state.preferred !== DEFAULT_THEME_ID && !state.preferredAvailable) {
       const callout = document.createElement('p')
       callout.className = 'vsidian-settings-callout vsidian-theme-fallback'

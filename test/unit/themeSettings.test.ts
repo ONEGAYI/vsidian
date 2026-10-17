@@ -1,7 +1,7 @@
 // #546 T07 设置页「主题」页签体契约：选项构建（内置 + 目录 + 多语言名 +
 // 来源）、单选写入、不可用呈现与回落提示、目录对账重渲染
 //（jsdom；断言落在用户可见层——radio 选中/禁用状态与文案，非纯 DOM 存在）。
-// #535 T08：内置 Codex 单选项已随内核退役删除，写入退化为单键（新键）。
+// #535 T08：内置旧预设单选项已随内核退役删除，写入退化为单键（新键）。
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { installLocale } from '../../src/shared/i18n'
@@ -36,7 +36,7 @@ function statePayload(overrides: Partial<Parameters<AddonThemesStore['applyTheme
 }
 
 describe('themeOptionsOf（选项构建）', () => {
-  it('无目录时仅内置 default 一项（来源标「内置」——#535 后 Codex 已退役）', () => {
+  it('无目录时仅内置 default 一项（来源标「内置」——#535 后旧预设已退役）', () => {
     const options = themeOptionsOf(null, () => undefined, 'zh-cn')
     expect(options.map((o) => o.value)).toEqual(['default'])
     expect(options[0]!.title).toBe(zhCn['setting.theme.defaultOption'])

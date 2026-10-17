@@ -72,7 +72,7 @@ afterEach(() => {
 })
 
 describe('renderMermaidInto：成功渲染与容器状态', () => {
-  it('SVG 导出消费同一渲染缓存：同源码不重复 render（#535 后 preset 机制已随 Codex 退役删除）', async () => {
+  it('SVG 导出消费同一渲染缓存：同源码不重复 render（#535 后 preset 机制已随旧预设退役删除）', async () => {
     const codes: unknown[] = []
     __setMermaidApiForTest({
       initialize() {},

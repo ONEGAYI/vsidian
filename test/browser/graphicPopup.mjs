@@ -243,9 +243,9 @@ try {
   await page.waitForFunction(() => document.querySelector('.vsidian-diagram-overlay') === null)
 
   await page.close()
-  // #535 T08：内核 Codex 预设退役——原「Codex 预设：真实产物与 CSP 下的
+  // #535 T08：旧预设退役——原「预设主题：真实产物与 CSP 下的
   // 双模式、缓存切换、弹窗导出」验证段与六类截图参考配色段整体删除
-  //（配色断言钉的是已删除的 buildCodexMermaidConfig 色板）；preset 无关
+  //（配色断言钉的是已删除的旧预设色板）；preset 无关
   // 的「预设不改写源码」语义平移为 default 形态继续钉住。
   const presetArtifacts = artifactPath(root, 'screenshots/mermaidPreset')
   await mkdir(presetArtifacts, { recursive: true })

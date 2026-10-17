@@ -111,15 +111,15 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
 })
 
 describe('补丁保存（apply）', () => {
-  it('#535 后旧 Mermaid 主题键定义已删除：未知键被拒（含历史值 codex），新主题键走受限自由文本', async () => {
+  it('#535 后旧 Mermaid 主题键定义已删除：未知键被拒（任意值），新主题键走受限自由文本', async () => {
     const storage = makeStorage()
     const first = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
-    // 旧键不再是已定义设置：任何写入（含退役前的 codex）都按未知键整批拒绝
-    const codex = await first.apply({ 'appearance.mermaidTheme': 'codex' })
-    expect(codex.ok).toBe(false)
-    expect(codex.ok === false && codex.rejected).toContain('appearance.mermaidTheme')
+    // 旧键不再是已定义设置：任何写入（值不限）都按未知键整批拒绝
+    const rejected = await first.apply({ 'appearance.mermaidTheme': 'anything-unknown' })
+    expect(rejected.ok).toBe(false)
+    expect(rejected.ok === false && rejected.rejected).toContain('appearance.mermaidTheme')
     // 快照也不再有该键（sanitize 忽略未知键——迁移判据须读原始 overlay，
-    // 见 codexMigration.test.ts）
+    // 见 legacyThemeMigration.test.ts）
     expect(first.getSnapshot()).not.toHaveProperty('appearance.mermaidTheme')
     // 新主题键（受限自由文本）不受影响
     expect((await first.apply({ 'appearance.theme': 'pub.two/aqua' })).ok).toBe(true)

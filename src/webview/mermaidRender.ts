@@ -361,7 +361,7 @@ export async function renderMermaidSvg(code: string): Promise<MermaidSvgResult> 
 /** 主题联动：切换明暗时递增主题代次、以新主题重新 initialize、清空缓存
  *  并重渲染当前在文档中的全部容器（等值跳过；真实切换由
  *  syncController.applyHostTheme 驱动）。#535 T08：preset 机制已随内核
- *  Codex 退役删除（内核恒 default 渲染；组件主题经渲染提供者接管）。 */
+ *  旧预设退役删除（内核恒 default 渲染；组件主题经渲染提供者接管）。 */
 export function setMermaidDarkTheme(next: boolean): void {
   if (next === dark) {
     return

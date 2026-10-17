@@ -96,7 +96,7 @@ try {
   // 解压产物（受 .vscodeignore 过滤后的真实文件集合），而非仓库源码树；
   // 安装注册链路（清单解析/目录注册）已由第一步 CLI 安装单独验证。
   // 精确 id 定位（T08 #535）：同发布者前缀过滤 + 字典序取尾会在与
-  // bridge（onegayi.vsidian-codex-bridge）同装时误取后者。
+  // 组件扩展同装时误取后者。
   const installed = installedExtensionDir(extensionsDir, 'onegayi.vsidian')
   if (!installed) {
     throw new Error(`安装目录中未找到主扩展 onegayi.vsidian：${extensionsDir}`)

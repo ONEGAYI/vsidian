@@ -9,8 +9,8 @@
 // 作用域局部变量——globalThis 引用落空抛 TypeError，全局永远挂不上。经
 // ESM 源（dist/mermaid.core.mjs）打包并由本入口显式挂全局即可，且 minify
 // 后核心与图类型分别按需加载。
-// #535 T08：内核 Codex 预设与 ELK 布局引擎已退役删除（替代实现归组件
-// vsidian-codex-bridge）；本入口只保留 default 渲染的站点配置恢复机制。
+// #535 T08：内置旧预设与 ELK 布局引擎已退役删除（替代实现归附加组件
+// 提供）；本入口只保留 default 渲染的站点配置恢复机制。
 import mermaid from 'mermaid'
 import type { MermaidApi } from './mermaidRender'
 

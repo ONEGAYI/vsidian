@@ -6,26 +6,26 @@
 // - P2-B（三审）：两「窗口」各自独立 memento 缓存 + 延迟跨窗广播 + 共享
 //   同一磁盘状态目录（真实 fs）→ 引导恰一次（评审方受控缓存模拟
 //   guides=2 反例——完成判据必须是磁盘权威，不依赖各窗口 memento）；
-// - P2-D（四审）：生产 runCodexThemeMigration + 真实磁盘 state + 三
+// - P2-D（四审）：生产 runLegacyThemeMigration + 真实磁盘 state + 三
 //   「窗口」独立缓存 + 受控调度（C 的每个锁原语边界注入 B 的完整激
 //   活）→ 引导恰一次（评审方接入生产链实测 guides=['C','A'] 的反例
 //   ——旧协议 rename 窗口让活锁路径暂时消失，第三窗口获锁成双 owner）。
-//   锁协议原语级双调度（接管 A/C、释放 B/C）见 codexMigrationLock.test.ts。
+//   锁协议原语级双调度（接管 A/C、释放 B/C）见 legacyThemeMigrationLock.test.ts。
 import { afterAll, describe, expect, it } from 'vitest'
 import { promises as fsp } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
-  parseCodexMigrationMarker,
-  runCodexThemeMigration,
-  type CodexMigrationMarker,
-  type CodexMigrationPorts,
-} from '../../src/shared/codexMigration'
+  parseLegacyThemeMigrationMarker,
+  runLegacyThemeMigration,
+  type LegacyThemeMigrationMarker,
+  type LegacyThemeMigrationPorts,
+} from '../../src/shared/legacyThemeMigration'
 import {
-  createCodexMigrationLock,
-  type CodexMigrationLockHandle,
-} from '../../src/shared/codexMigrationLock'
-import { LockFsGate, runGated, type LockFsLike } from './codexLockTestGate'
+  createLegacyThemeMigrationLock,
+  type LegacyThemeMigrationLockHandle,
+} from '../../src/shared/legacyThemeMigrationLock'
+import { LockFsGate, runGated, type LockFsLike } from './legacyLockTestGate'
 import {
   SettingsService,
   SETTINGS_STORAGE_KEY,
@@ -42,8 +42,9 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 
 installLocale('zh-cn', zhCn)
 
-const BRIDGE_THEME_REF = 'ONEGAYI.vsidian-codex-bridge/codex'
-const LOCK_FILE = 'codex-theme-migration.lock'
+// 等价性对拍用中性组件主题身份（判定按命名空间形态，不依赖具体组件）
+const COMPONENT_THEME_REF = 'pub.two/aqua'
+const LOCK_FILE = 'legacy-theme-migration'
 
 /** 内存 memento（globalState 语义：update 完成后 get 可见新值——同窗口） */
 function makeMemento(): { memento: SettingsStorage; store: Map<string, unknown> } {
@@ -73,10 +74,10 @@ function mementoExclusiveStep(memento: SettingsStorage) {
   }
 }
 
-/** 内存锁句柄（P2-A 场景——锁协议细节由 codexMigrationLock.test.ts 钉住） */
-function makeMemLock(): CodexMigrationLockHandle {
+/** 内存锁句柄（P2-A 场景——锁协议细节由 legacyThemeMigrationLock.test.ts 钉住） */
+function makeMemLock(): LegacyThemeMigrationLockHandle {
   const state = { held: false }
-  const handle: CodexMigrationLockHandle = {
+  const handle: LegacyThemeMigrationLockHandle = {
     tryAcquire: async () => {
       if (state.held) return false
       state.held = true
@@ -99,12 +100,12 @@ function makeMemLock(): CodexMigrationLockHandle {
  * 完成之后（评审方同款手法——挂起胜者于等待窗口） */
 function makeReview3Ports(options: {
   memento: SettingsStorage
-  exclusiveStep: CodexMigrationPorts['applyExclusiveOverlayStep']
-  markerBox: { value: CodexMigrationMarker | undefined }
+  exclusiveStep: LegacyThemeMigrationPorts['applyExclusiveOverlayStep']
+  markerBox: { value: LegacyThemeMigrationMarker | undefined }
   guides: { count: number }
-  lock: CodexMigrationLockHandle
+  lock: LegacyThemeMigrationLockHandle
 }): {
-  ports: CodexMigrationPorts
+  ports: LegacyThemeMigrationPorts
   barrier: { entered: Promise<void>; release: () => void }
 } {
   let releaseBarrier: (() => void) | undefined
@@ -118,7 +119,7 @@ function makeReview3Ports(options: {
   const pendingGate = new Promise<void>((resolve) => {
     releaseBarrier = resolve
   })
-  const ports: CodexMigrationPorts = {
+  const ports: LegacyThemeMigrationPorts = {
     readRawOverlay: () => options.memento.get(SETTINGS_STORAGE_KEY),
     applyExclusiveOverlayStep: options.exclusiveStep,
     // B'：身份已收敛的常态（本场景焦点在 memento 缓存延迟非身份生成）
@@ -144,7 +145,7 @@ function makeReview3Ports(options: {
 
 // ---- 真实 fs 帮手（P2-B / 锁竞态：共享磁盘状态目录 + 文件锁） ----
 
-const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'vsidian-codex-review3-'))
+const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'vsidian-legacy-review3-'))
 afterAll(async () => {
   await fsp.rm(tmpRoot, { recursive: true, force: true })
 })
@@ -184,13 +185,13 @@ const nodeFs: LockFsLike = {
 }
 
 /** 磁盘权威 marker 端口（与 wiring 同语义：tmp+rename 原子写、损坏按无标记） */
-function makeDiskMarkerStore(dir: string): Pick<CodexMigrationPorts, 'readMarker' | 'writeMarker'> {
+function makeDiskMarkerStore(dir: string): Pick<LegacyThemeMigrationPorts, 'readMarker' | 'writeMarker'> {
   const statePath = (profileId: string) =>
-    path.join(dir, `codex-theme-migration.${profileId}.state.json`)
+    path.join(dir, `legacy-theme-migration.${profileId}.state.json`)
   return {
     readMarker: async (profileId) => {
       try {
-        return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(statePath(profileId), 'utf8')))
+        return parseLegacyThemeMigrationMarker(JSON.parse(await fsp.readFile(statePath(profileId), 'utf8')))
       } catch {
         return null
       }
@@ -230,9 +231,9 @@ async function seedStaleLock(dir: string, ageMs: number): Promise<string> {
 describe('P2-A：pending 持久化等待窗口内的用户写入（真实 SettingsService.apply）', () => {
   it('等待期间保存组件主题 → 保留新键、清旧键、不引导、收口 done', async () => {
     const { memento, store } = makeMemento()
-    store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
+    store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'retired-preset' })
     const settingsService = new SettingsService(memento, PRODUCTION_SETTING_DEFINITIONS)
-    const markerBox: { value: CodexMigrationMarker | undefined } = { value: undefined }
+    const markerBox: { value: LegacyThemeMigrationMarker | undefined } = { value: undefined }
     const guides = { count: 0 }
     const { ports, barrier } = makeReview3Ports({
       memento,
@@ -240,17 +241,17 @@ describe('P2-A：pending 持久化等待窗口内的用户写入（真实 Settin
       markerBox, guides, lock: makeMemLock(),
     })
 
-    const run = runCodexThemeMigration(ports)
+    const run = runLegacyThemeMigration(ports)
     await barrier.entered // 胜者挂起在 pending 写入之后（等待窗口敞开）
 
-    const applied = await settingsService.apply({ [APPEARANCE_THEME_KEY]: BRIDGE_THEME_REF })
+    const applied = await settingsService.apply({ [APPEARANCE_THEME_KEY]: COMPONENT_THEME_REF })
     expect(applied.ok).toBe(true) // 真实 apply 保存组件主题成功
 
     barrier.release()
     const result = await run
     expect(result).toEqual({ action: 'clean-legacy', guide: false })
     const overlay = store.get(SETTINGS_STORAGE_KEY) as Record<string, unknown>
-    expect(overlay[APPEARANCE_THEME_KEY]).toBe(BRIDGE_THEME_REF) // 新选择保留
+    expect(overlay[APPEARANCE_THEME_KEY]).toBe(COMPONENT_THEME_REF) // 新选择保留
     expect(overlay[MERMAID_THEME_KEY]).toBe('default') // 旧键残留清除
     expect(guides.count).toBe(0) // 用户已自行选择，不再打扰
     expect(markerBox.value).toEqual({ state: 'done', version: '1.2.3-test' })
@@ -258,9 +259,9 @@ describe('P2-A：pending 持久化等待窗口内的用户写入（真实 Settin
 
   it('等待期间修改其他设置 → 迁移回落照常且其他设置不被覆盖', async () => {
     const { memento, store } = makeMemento()
-    store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
+    store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'retired-preset' })
     const settingsService = new SettingsService(memento, PRODUCTION_SETTING_DEFINITIONS)
-    const markerBox: { value: CodexMigrationMarker | undefined } = { value: undefined }
+    const markerBox: { value: LegacyThemeMigrationMarker | undefined } = { value: undefined }
     const guides = { count: 0 }
     const { ports, barrier } = makeReview3Ports({
       memento,
@@ -268,7 +269,7 @@ describe('P2-A：pending 持久化等待窗口内的用户写入（真实 Settin
       markerBox, guides, lock: makeMemLock(),
     })
 
-    const run = runCodexThemeMigration(ports)
+    const run = runLegacyThemeMigration(ports)
     await barrier.entered
     const applied = await settingsService.apply({ [READABLE_LINE_WIDTH_KEY]: 800 })
     expect(applied.ok).toBe(true)
@@ -286,9 +287,9 @@ describe('P2-A：pending 持久化等待窗口内的用户写入（真实 Settin
 
   it('等待期间双键被自行处置到位 → 重判 none：不写不引导、直接收口 done', async () => {
     const { memento, store } = makeMemento()
-    store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
+    store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'retired-preset' })
     const settingsService = new SettingsService(memento, PRODUCTION_SETTING_DEFINITIONS)
-    const markerBox: { value: CodexMigrationMarker | undefined } = { value: undefined }
+    const markerBox: { value: LegacyThemeMigrationMarker | undefined } = { value: undefined }
     const guides = { count: 0 }
     const { ports, barrier } = makeReview3Ports({
       memento,
@@ -296,7 +297,7 @@ describe('P2-A：pending 持久化等待窗口内的用户写入（真实 Settin
       markerBox, guides, lock: makeMemLock(),
     })
 
-    const run = runCodexThemeMigration(ports)
+    const run = runLegacyThemeMigration(ports)
     await barrier.entered
     // 双键到位无法经 apply 完成（旧键定义已删，写旧键被拒）——直写存储层
     // 模拟外部处置（防御性收口语义：pending 已写则收口 done）
@@ -324,14 +325,14 @@ describe('P2-B：双窗口独立 memento 缓存 + 延迟广播 + 共享磁盘状
     const windowA = makeMemento()
     const windowB = makeMemento()
     for (const w of [windowA, windowB]) {
-      w.store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
+      w.store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'retired-preset' })
     }
     const guides = { A: 0, B: 0 }
     const windowPorts = (
       window: ReturnType<typeof makeMemento>,
-      lock: CodexMigrationLockHandle,
+      lock: LegacyThemeMigrationLockHandle,
       guideKey: 'A' | 'B',
-    ): CodexMigrationPorts => ({
+    ): LegacyThemeMigrationPorts => ({
       readRawOverlay: () => window.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
       readProfileId: async () => 'review3-profile',
@@ -343,16 +344,16 @@ describe('P2-B：双窗口独立 memento 缓存 + 延迟广播 + 共享磁盘状
       },
       lock,
     })
-    const portsA = windowPorts(windowA, createCodexMigrationLock(nodeFs, lockPath, { token: 'token-a', pid: 1000 }), 'A')
-    const portsB = windowPorts(windowB, createCodexMigrationLock(nodeFs, lockPath, { token: 'token-b', pid: 1000 }), 'B')
+    const portsA = windowPorts(windowA, createLegacyThemeMigrationLock(nodeFs, lockPath, { token: 'token-a', pid: 1000 }), 'A')
+    const portsB = windowPorts(windowB, createLegacyThemeMigrationLock(nodeFs, lockPath, { token: 'token-b', pid: 1000 }), 'B')
 
     // 窗口 A 激活：完整迁移并收口（done 落盘、锁释放）
-    const a = await runCodexThemeMigration(portsA)
+    const a = await runLegacyThemeMigration(portsA)
     expect(a).toEqual({ action: 'migrate', guide: true })
     expect(await nodeFs.statMtimeMs(lockPath)).toBeNull() // 锁已释放
     // 窗口 B 随后激活：overlay 缓存仍旧（延迟广播）、memento 无标记——
     // 完成判据来自共享磁盘权威状态，B 必须短路
-    const b = await runCodexThemeMigration(portsB)
+    const b = await runLegacyThemeMigration(portsB)
     expect(b).toEqual({ action: 'none', guide: false })
     expect(guides.A + guides.B).toBe(1) // 引导恰一次
     expect((await diskMarker.readMarker('review3-profile'))?.state).toBe('done')
@@ -371,14 +372,14 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     const windowB = makeMemento()
     const windowC = makeMemento()
     for (const w of [windowA, windowB, windowC]) {
-      w.store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
+      w.store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'retired-preset' })
     }
     const guides = { A: 0, B: 0, C: 0 }
     const windowPorts = (
       window: ReturnType<typeof makeMemento>,
-      lock: CodexMigrationLockHandle,
+      lock: LegacyThemeMigrationLockHandle,
       guideKey: 'A' | 'B' | 'C',
-    ): CodexMigrationPorts => ({
+    ): LegacyThemeMigrationPorts => ({
       readRawOverlay: () => window.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
       readProfileId: async () => 'review3-profile',
@@ -400,7 +401,7 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     const aEnteredPromise = new Promise<void>((resolve) => {
       aEntered = resolve
     })
-    const portsA: CodexMigrationPorts = {
+    const portsA: LegacyThemeMigrationPorts = {
       readRawOverlay: () => windowA.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(windowA.memento),
       readProfileId: async () => 'review3-profile',
@@ -418,18 +419,18 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
       requestGuide: () => {
         guides.A += 1
       },
-      lock: createCodexMigrationLock(nodeFs, lockPath, { token: 'token-a', pid: 1000 }),
+      lock: createLegacyThemeMigrationLock(nodeFs, lockPath, { token: 'token-a', pid: 1000 }),
     }
     const portsB = windowPorts(
       windowB,
-      createCodexMigrationLock(nodeFs, lockPath, { token: 'token-b', pid: 1000 }),
+      createLegacyThemeMigrationLock(nodeFs, lockPath, { token: 'token-b', pid: 1000 }),
       'B',
     )
     // C：门控端口——C 的每个锁原语边界都是第三方（B）的完整激活入场点
     const gate = new LockFsGate()
     const portsC = windowPorts(
       windowC,
-      createCodexMigrationLock(gate.wrap(nodeFs), lockPath, { token: 'token-c', pid: 1000 }),
+      createLegacyThemeMigrationLock(gate.wrap(nodeFs), lockPath, { token: 'token-c', pid: 1000 }),
       'C',
     )
 
@@ -437,7 +438,7 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     let aStarted = false
     const cResult = await runGated(
       gate,
-      () => runCodexThemeMigration(portsC, {
+      () => runLegacyThemeMigration(portsC, {
         lockStaleMs: 10_000, waitTimeoutMs: 150, pollIntervalMs: 5,
       }),
       async (_index, op) => {
@@ -446,13 +447,13 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
           // 起在 pending 屏障（持有新鲜锁）——评审方同款「陈旧观察后世界
           // 已被 A 重建」调度
           aStarted = true
-          runA = runCodexThemeMigration(portsA)
+          runA = runLegacyThemeMigration(portsA)
           await aEnteredPromise
           return
         }
         if (aStarted) {
           // 任意边界：B 完整激活一次（短超时静默退出）
-          await runCodexThemeMigration(portsB, {
+          await runLegacyThemeMigration(portsB, {
             lockStaleMs: 10_000, waitTimeoutMs: 30, pollIntervalMs: 5,
           })
         }

@@ -141,10 +141,10 @@ export class SettingsService {
 
   /**
    * 迁移接线的互斥读-判-写步骤（#535 T08 PR #581 三审 P2-A；仅供
-   * codexMigrationWiring 消费）：step 在串行链内收到**当前**原始
+   * legacyThemeMigrationWiring 消费）：step 在串行链内收到**当前**原始
    * overlay（未经 sanitize），返回要落盘的最小补丁（null = 不写）与
    * 回传值。不做定义校验——迁移要写的旧 Mermaid 键定义已删，经 apply
-   * 的整批校验会被拒（判据见 shared/codexMigration 头注释）。step 必须
+   * 的整批校验会被拒（判据见 shared/legacyThemeMigration 头注释）。step 必须
    * 是同步纯函数，不得再入本服务写路径（链式互斥不可重入）。
    */
   async runExclusiveOverlayStep<R>(

@@ -266,7 +266,7 @@ await page.setContent(`<html lang="zh-CN"><body class="">${islandHtml}<div id="a
 await page.addStyleTag({ path: settingsOutput.replace(/\.js$/, '.css') })
 await page.addStyleTag({ content: `:root { --vscode-font-family: "Segoe UI", "Microsoft YaHei", sans-serif; --vscode-editor-background:#ffffff; --vscode-editor-foreground:#30343b; --vscode-sideBar-background:#f5f6f8; --vscode-descriptionForeground:#59616d; --vscode-list-activeSelectionBackground:#e0e4eb; --vscode-list-activeSelectionForeground:#26313e; --vscode-input-background:#ffffff; --vscode-input-foreground:#30343b; --vscode-panel-border:#d7dce3; --vscode-focusBorder:#2687d4; }` })
 await page.evaluate((state) => {
-  // #535 T08：旧键 codex 已在激活迁移清理，浏览器桩模拟迁移后干净 profile
+  // #535 T08：旧键退役值已在激活迁移清理，浏览器桩模拟迁移后干净 profile
   window.savedSettings = {}
   window.sentMessages = []
   window.themesState = state
@@ -306,11 +306,11 @@ try {
   await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
   await page.getByRole('tab', { name: zhCn['appearance.themes'], exact: true }).click()
   // 单选列表：内置 default + 两个组件主题（同名主题按来源区分——H-U01/H-U08；
-  // #535 后无内置 codex 项）
+  // #535 后无内置退役项）
   await page.waitForFunction(() => document.querySelectorAll('.vsidian-appearance-presets input[type=radio]').length >= 3, null, { timeout: 8000 })
   const radios = page.locator('.vsidian-appearance-presets input[type=radio]')
   assert.equal(await radios.count(), 3, 'default + 两个组件主题')
-  assert.equal(await page.locator('.vsidian-appearance-presets input[value=codex]').count(), 0, '内置 Codex 单选项应随内核退役消失')
+  assert.equal(await page.locator('.vsidian-appearance-presets input[value=retired-preset]').count(), 0, '退役预设不应出现内置单选项')
   // 宿主 mock preferred=default：default 选中——H-U04 回显走宿主推送
   assert.equal(await radios.nth(0).isChecked(), true, 'preferred=default 选中')
 

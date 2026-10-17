@@ -12,21 +12,21 @@
 // - 双 profile 各自独立完成迁移与引导（四审反例场景的修复验证）；
 // - 有界边界的有界性（广播丢失 → 败者自生成多引导一次；后续激活从
 //   db 读到已收敛身份，永不重复——**不写**「任意延迟下恰 1」断言，
-//   平台不可满足，见 codexMigration 文件头声明）。
+//   平台不可满足，见 legacyThemeMigration 文件头声明）。
 import { afterAll, describe, expect, it } from 'vitest'
 import { promises as fsp } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
-  CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY,
-  parseCodexMigrationMarker,
-  runCodexThemeMigration,
-  type CodexMigrationPorts,
-} from '../../src/shared/codexMigration'
+  LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY,
+  parseLegacyThemeMigrationMarker,
+  runLegacyThemeMigration,
+  type LegacyThemeMigrationPorts,
+} from '../../src/shared/legacyThemeMigration'
 import {
-  createCodexMigrationLock,
-  type CodexMigrationLockHandle,
-} from '../../src/shared/codexMigrationLock'
+  createLegacyThemeMigrationLock,
+  type LegacyThemeMigrationLockHandle,
+} from '../../src/shared/legacyThemeMigrationLock'
 import {
   SETTINGS_STORAGE_KEY,
   type SettingsStorage,
@@ -34,7 +34,7 @@ import {
 import { MERMAID_THEME_KEY } from '../../src/shared/settings'
 
 const PROFILE_ID_STATE_KEY = 'vsidian.legacyThemeMigration.profileId'
-const LOCK_FILE = 'codex-theme-migration.lock'
+const LOCK_FILE = 'legacy-theme-migration'
 
 /** 内存 memento（globalState 语义：update 完成后 get 可见新值——同窗口） */
 function makeMemento(): { memento: SettingsStorage; store: Map<string, unknown> } {
@@ -99,7 +99,7 @@ function makeMirroredMementos(delayMs: number): {
 
 // ---- 真实 fs（1.82.3 宿主形态：globalStorageUri 跨 profile 共享同一目录） ----
 
-const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'vsidian-codex-review5-'))
+const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'vsidian-legacy-review5-'))
 afterAll(async () => {
   await fsp.rm(tmpRoot, { recursive: true, force: true })
 })
@@ -137,13 +137,13 @@ const nodeFs = {
 }
 
 /** B' wiring 同款：按身份命名分居的磁盘 marker 端口 */
-function makeDiskMarkerStore(dir: string): Pick<CodexMigrationPorts, 'readMarker' | 'writeMarker'> {
+function makeDiskMarkerStore(dir: string): Pick<LegacyThemeMigrationPorts, 'readMarker' | 'writeMarker'> {
   const statePath = (profileId: string) =>
-    path.join(dir, `codex-theme-migration.${profileId}.state.json`)
+    path.join(dir, `legacy-theme-migration.${profileId}.state.json`)
   return {
     readMarker: async (profileId) => {
       try {
-        return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(statePath(profileId), 'utf8')))
+        return parseLegacyThemeMigrationMarker(JSON.parse(await fsp.readFile(statePath(profileId), 'utf8')))
       } catch {
         return null
       }
@@ -157,8 +157,8 @@ function makeDiskMarkerStore(dir: string): Pick<CodexMigrationPorts, 'readMarker
   }
 }
 
-function makeLock(dir: string, token: string): CodexMigrationLockHandle {
-  return createCodexMigrationLock(nodeFs, path.join(dir, LOCK_FILE), { token, pid: 1000 })
+function makeLock(dir: string, token: string): LegacyThemeMigrationLockHandle {
+  return createLegacyThemeMigrationLock(nodeFs, path.join(dir, LOCK_FILE), { token, pid: 1000 })
 }
 
 /** 身份端口（独立键读写——本测试不预置身份，生成走锁内唯一入口） */
@@ -168,7 +168,7 @@ const profileIdPorts = (memento: SettingsStorage) => ({
     if (typeof direct === 'string' && direct !== '') return direct
     const overlay = memento.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY)
     if (typeof overlay === 'object' && overlay !== null && !Array.isArray(overlay)) {
-      const fromOverlay = overlay[CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]
+      const fromOverlay = overlay[LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY]
       if (typeof fromOverlay === 'string' && fromOverlay !== '') return fromOverlay
     }
     return null
@@ -183,7 +183,7 @@ function windowPorts(
   dir: string,
   token: string,
   onGuide: () => void,
-): CodexMigrationPorts {
+): LegacyThemeMigrationPorts {
   const diskMarker = makeDiskMarkerStore(dir)
   return {
     readRawOverlay: () => memento.get(SETTINGS_STORAGE_KEY),
@@ -196,7 +196,8 @@ function windowPorts(
   }
 }
 
-const CODEX_OVERLAY = { [MERMAID_THEME_KEY]: 'codex' }
+/** 迁移夹具：退役预设值形态（裸词非 default） */
+const RETIRED_OVERLAY = { [MERMAID_THEME_KEY]: 'retired-preset' }
 
 describe("B'（五审 P2-C）：双 profile 共享 globalStorage 磁盘目录", () => {
   it('profile A 完成迁移后 profile B 激活 → B 仍须完成自己的迁移与引导（不被 A 的完成状态短路）', async () => {
@@ -205,17 +206,17 @@ describe("B'（五审 P2-C）：双 profile 共享 globalStorage 磁盘目录", 
     const profileA = makeMemento()
     const profileB = makeMemento()
     for (const p of [profileA, profileB]) {
-      p.store.set(SETTINGS_STORAGE_KEY, CODEX_OVERLAY)
+      p.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     }
     const guides = { A: 0, B: 0 }
     // 无镜像（profile 域隔离）；身份等待窗注入小值让 B 快速自生成（同
     // profile 广播永不到达——等待窗只收窄同 profile 双窗竞态）
-    const a = await runCodexThemeMigration(windowPorts(profileA.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
+    const a = await runLegacyThemeMigration(windowPorts(profileA.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
     expect(a).toEqual({ action: 'migrate', guide: true })
     expect(guides.A).toBe(1)
 
     // 四审反例（固定名状态文件让 B 读到 A 的 done）：B' 后按身份分居
-    const b = await runCodexThemeMigration(windowPorts(profileB.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
+    const b = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
     expect(b).toEqual({ action: 'migrate', guide: true })
     expect(guides.B).toBe(1) // B 的迁移引导不得被 A 的完成状态吞掉
 
@@ -234,12 +235,12 @@ describe("B'（五审 P2-C）：同 profile 双窗首启（身份生成竞态）
   it('正常双窗（广播即时镜像）→ 引导恰一次，败者收敛到胜者身份', async () => {
     const dir = await newDir()
     const { A, B } = makeMirroredMementos(0) // 即时广播
-    A.store.set(SETTINGS_STORAGE_KEY, CODEX_OVERLAY)
-    B.store.set(SETTINGS_STORAGE_KEY, CODEX_OVERLAY)
+    A.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
+    B.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     const guides = { A: 0, B: 0 }
     const [a, b] = await Promise.all([
-      runCodexThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 200, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
-      runCodexThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 200, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
+      runLegacyThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 200, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
+      runLegacyThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 200, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
     ])
     const results = [`${a.action}:${a.guide}`, `${b.action}:${b.guide}`].sort()
     expect(results).toEqual(['migrate:true', 'none:false'])
@@ -254,12 +255,12 @@ describe("B'（五审 P2-C）：同 profile 双窗首启（身份生成竞态）
   it('广播延迟在身份等待窗内 → 败者等待窗内收敛到胜者身份，引导仍恰一次', async () => {
     const dir = await newDir()
     const { A, B } = makeMirroredMementos(50) // 广播延迟 50ms < 等待窗 300ms
-    A.store.set(SETTINGS_STORAGE_KEY, CODEX_OVERLAY)
-    B.store.set(SETTINGS_STORAGE_KEY, CODEX_OVERLAY)
+    A.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
+    B.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     const guides = { A: 0, B: 0 }
     const [a, b] = await Promise.all([
-      runCodexThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 300, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
-      runCodexThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 300, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
+      runLegacyThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 300, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
+      runLegacyThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 300, profileIdPollMs: 10, waitTimeoutMs: 2_000, pollIntervalMs: 10 }),
     ])
     const results = [`${a.action}:${a.guide}`, `${b.action}:${b.guide}`].sort()
     expect(results).toEqual(['migrate:true', 'none:false'])
@@ -272,15 +273,15 @@ describe("B'（五审 P2-C）：同 profile 双窗首启（身份生成竞态）
   it('有界边界（声明的极端形态）：广播丢失 → 败者自生成多引导一次；后续激活从 db 收敛，永不重复', async () => {
     const dir = await newDir()
     const { A, B } = makeMirroredMementos(Infinity) // 广播丢失（评审方缓存模拟同款）
-    A.store.set(SETTINGS_STORAGE_KEY, CODEX_OVERLAY)
-    B.store.set(SETTINGS_STORAGE_KEY, CODEX_OVERLAY)
+    A.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
+    B.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     const guides = { A: 0, B: 0 }
     // 顺序激活（A 完成后 B 首启）——B 的身份等待窗内广播永不到达
-    const a = await runCodexThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
+    const a = await runLegacyThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
     expect(a).toEqual({ action: 'migrate', guide: true })
-    const b = await runCodexThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
+    const b = await runLegacyThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
     // 有界边界如实呈现：B 自生成另一身份、多引导一次（总计 2，相对正常
-    // 双窗恰 1 多出一次——平台通道固有缺口，见 codexMigration 文件头）
+    // 双窗恰 1 多出一次——平台通道固有缺口，见 legacyThemeMigration 文件头）
     expect(b).toEqual({ action: 'migrate', guide: true })
     expect(guides.A + guides.B).toBe(2)
     const idA = A.store.get(PROFILE_ID_STATE_KEY) as string
@@ -291,7 +292,7 @@ describe("B'（五审 P2-C）：同 profile 双窗首启（身份生成竞态）
     // 收敛身份与磁盘 done → 短路，引导计数不再增长（有界性的收敛面）
     const restarted = makeMemento()
     for (const [key, value] of B.store) restarted.store.set(key, value)
-    const again = await runCodexThemeMigration(windowPorts(restarted.memento, dir, 'token-b2', () => { guides.B += 1 }))
+    const again = await runLegacyThemeMigration(windowPorts(restarted.memento, dir, 'token-b2', () => { guides.B += 1 }))
     expect(again).toEqual({ action: 'none', guide: false })
     expect(guides.A + guides.B).toBe(2) // 永不重复
   })

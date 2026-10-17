@@ -2439,7 +2439,7 @@ export class WebviewSyncController {
         // 引擎）仍在下方处理
         const previousCodeCard = this.live?.codeCardConfigSnapshot
         this.settings = message.values
-        // #546 T07 统一主题 → #535 T08 内核 Codex 退役：内核 Mermaid 恒按
+        // #546 T07 统一主题 → #535 T08 内置旧预设退役：内核 Mermaid 恒按
         // default 渲染（明暗联动仍经 setMermaidDarkTheme）；组件主题身份经
         // 生效表挂载组件管线，选中组件主题不可用时宿主已回 default。
         this.live?.applySettings(message.values)

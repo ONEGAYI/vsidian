@@ -89,7 +89,7 @@ function harness(options: { store?: ReturnType<typeof memoryStore> } = {}): Harn
   }
 }
 
-/** Codex 形态规则声明（宿主组件代码形态的提交物） */
+/** 来源特化形态规则声明（宿主组件代码形态的提交物） */
 const promptLinkRule = () => ({
   id: 'prompt-link',
   match: { tag: 'span', attributes: [{ name: 'data-prompt-link-url' }] },

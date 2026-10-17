@@ -232,7 +232,7 @@ export function writeDevAnchor(dir) {
 /** 通配展开安装目录下的扩展解压目录（publisher.name-<version> 形态）。
  * 版本段须以数字开头才算命中：防止同发布者前缀的其他扩展被误取
  * （T08 #535 实证——`onegayi.vsidian-` 前缀同时命中 bridge 的
- * `onegayi.vsidian-codex-bridge-0.1.0`，旧实现字典序取尾恰好拿错）。 */
+ * `onegayi.vsidian-sample-addon-0.1.0`，旧实现字典序取尾恰好拿错）。 */
 export function installedExtensionDir(extensionsDir, extensionId) {
   const prefix = `${extensionId.toLowerCase()}-`
   const hit = readdirSync(extensionsDir).filter((d) => {

@@ -43,7 +43,7 @@ function ack(sent: WebviewToHost[]) {
   c.handleHostMessage({ kind: 'edit.ack', seq: edit.seq, ok: true, version: 2 })
 }
 
-/** Codex 形态规则（data-prompt-link-url span → Markdown 链接） */
+/** 来源特化形态规则（data-prompt-link-url span → Markdown 链接） */
 const PROMPT_LINK_SNAPSHOT = (version: number) => ({
   version,
   rules: [{

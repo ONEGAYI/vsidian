@@ -26,7 +26,7 @@ import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
-import type { CodexMigrationMarker } from '../../../src/shared/codexMigration'
+import type { LegacyThemeMigrationMarker } from '../../../src/shared/legacyThemeMigration'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -1479,33 +1479,33 @@ const TASK_DOC_SECOND_TOGGLED = [
 
 /** 用例表：名称 -> 执行函数 */
 
-/** 迁移状态观测形态（_test.getCodexMigrationState 的回包）。marker 为可
+/** 迁移状态观测形态（_test.getLegacyThemeMigrationState 的回包）。marker 为可
  * 恢复状态机（PR #581 评审修复）：pending = 引导欠账 / done = 迁移收口 */
-interface CodexMigrationState { marker: CodexMigrationMarker | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
+interface LegacyThemeMigrationState { marker: LegacyThemeMigrationMarker | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
 
 /** 旧设置迁移三档矩阵断言的命令通道：_test 命令经参数化注入（通道语义
  * 与被移出仓库的安装态用例原一致——安装态 bridge 专属链已于验收留证后
  * 移出仓库，证据见 addon-themes.md §10.1 台账） */
-interface CodexMigrationChannel {
+interface LegacyThemeMigrationChannel {
   reset(): PromiseLike<unknown>
   injectLegacyOverlay(patch: { theme: string | null; mermaid: string | null }): PromiseLike<unknown>
   runMigration(): PromiseLike<{ action: string; guide: boolean }>
-  readState(): PromiseLike<CodexMigrationState>
+  readState(): PromiseLike<LegacyThemeMigrationState>
 }
 
-/** Codex 旧设置迁移三档矩阵断言（#535，单一事实源）：档 1 升级残留迁移
+/** 旧主题值迁移三档矩阵断言（#535，单一事实源）：档 1 升级残留迁移
  * 回落 default + 引导恰一次、标记在场重跑无操作、档 2 已选组件主题不被
  * 覆盖只清旧键。 */
-async function assertCodexMigrationMatrix(
-  channel: CodexMigrationChannel,
-  options: { componentThemeRef: string; assertMarker: (marker: CodexMigrationMarker | null) => void },
+async function assertLegacyThemeMigrationMatrix(
+  channel: LegacyThemeMigrationChannel,
+  options: { componentThemeRef: string; assertMarker: (marker: LegacyThemeMigrationMarker | null) => void },
 ): Promise<void> {
-  // 档 1（升级用户主路径）：注入原始 overlay 旧键 codex（模拟升级残留——
+  // 档 1（升级用户主路径）：注入原始 overlay 旧键退役值（模拟升级残留——
   // 绕过定义校验）→ 迁移 → 双键回落 + 引导恰一次
   await channel.reset()
-  await channel.injectLegacyOverlay({ theme: null, mermaid: 'codex' })
+  await channel.injectLegacyOverlay({ theme: null, mermaid: 'retired-preset' })
   const first = await channel.runMigration()
-  assert(first.action === 'migrate' && first.guide === true, `旧键 codex 应触发迁移与引导（实际 ${JSON.stringify(first)}）`)
+  assert(first.action === 'migrate' && first.guide === true, `旧键退役值应触发迁移与引导（实际 ${JSON.stringify(first)}）`)
   let state = await channel.readState()
   assert(state.overlayTheme === 'default' && state.overlayMermaid === 'default', '迁移后原始 overlay 双键应回落 default')
   options.assertMarker(state.marker)
@@ -1516,9 +1516,9 @@ async function assertCodexMigrationMatrix(
   state = await channel.readState()
   assert(state.guideCount === 1, '重跑不得再次请求引导')
   assert(state.overlayTheme === 'default', '重跑不得改写已迁移的设置')
-  // 档 2（不覆盖已选组件主题）：新键组件身份 + 旧键 codex 残留 → 只清旧键
+  // 档 2（不覆盖已选组件主题）：新键组件身份 + 旧键退役残留 → 只清旧键
   await channel.reset()
-  await channel.injectLegacyOverlay({ theme: options.componentThemeRef, mermaid: 'codex' })
+  await channel.injectLegacyOverlay({ theme: options.componentThemeRef, mermaid: 'retired-preset' })
   const third = await channel.runMigration()
   assert(third.action === 'clean-legacy' && third.guide === false, `已选组件主题只清旧键残留、不引导（实际 ${JSON.stringify(third)}）`)
   state = await channel.readState()
@@ -7522,24 +7522,24 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('math.md', (v) => v.viewMode === 'reading' && (v.readingMathCount ?? -1) === 8)
   }],
   // ---- 工单 #60：Mermaid 围栏块双模式渲染（live/reading/降级/一致性） ----
-  // #535 T08：内核 Codex 退役——原「Codex 预设：设置保存、双模式绘制与重开
-  // 回显」用例改写为迁移语义用例（写 codex 被设置层拒绝 + 原始 overlay
-  // 迁移回落 + 一次性引导只发一次 + 不覆盖已选组件主题）。
-  ['Codex 旧设置迁移：写 codex 被拒、原始 overlay 回落 default、引导只一次且不覆盖组件选择', async () => {
+  // #535 T08：旧预设退役——原「预设保存、双模式绘制与重开回显」用例改写
+  // 为迁移语义用例（写旧键被设置层拒绝 + 原始 overlay 迁移回落 + 一次性
+  // 引导只发一次 + 不覆盖已选组件主题）。
+  ['旧主题值迁移：回落 default 与一次性引导（#535）', async () => {
     const previous = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
     try {
-      // 枚举收窄后：旧键定义已删除，任何写入（含 codex）按未知键整批拒绝
-      const rejected = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'codex' })) as { ok: boolean; rejected?: string[] }
+      // 枚举收窄后：旧键定义已删除，任何写入（值不限）按未知键整批拒绝
+      const rejected = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'retired-preset' })) as { ok: boolean; rejected?: string[] }
       assert(rejected.ok === false, '旧 Mermaid 键写入应被设置层拒绝（定义已删除）')
       assert(rejected.rejected?.includes('appearance.mermaidTheme'), '拒绝清单应点名旧键')
       // 三档矩阵（共享断言助手，与安装态用例同语义）：重置注入与迁移经
       // _test 命令通道；档 2 已选主题用 fixture 主题；标记断非空（dev 会话
       // 无安装产物版本凭证）
-      await assertCodexMigrationMatrix({
-        reset: () => vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration'),
-        injectLegacyOverlay: (patch) => vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', patch),
-        runMigration: () => vscode.commands.executeCommand<{ action: string; guide: boolean }>('onegayi.vsidian._test.runCodexMigration'),
-        readState: () => vscode.commands.executeCommand<CodexMigrationState>('onegayi.vsidian._test.getCodexMigrationState'),
+      await assertLegacyThemeMigrationMatrix({
+        reset: () => vscode.commands.executeCommand('onegayi.vsidian._test.resetLegacyThemeMigration'),
+        injectLegacyOverlay: (patch) => vscode.commands.executeCommand('onegayi.vsidian._test.injectLegacyThemeOverlay', patch),
+        runMigration: () => vscode.commands.executeCommand<{ action: string; guide: boolean }>('onegayi.vsidian._test.runLegacyThemeMigration'),
+        readState: () => vscode.commands.executeCommand<LegacyThemeMigrationState>('onegayi.vsidian._test.getLegacyThemeMigrationState'),
       }, {
         componentThemeRef: 'vsidian-test-fixture.addon-theme/aqua',
         assertMarker: (marker) => assert(marker?.state === 'done', '一次性标记应在迁移收口后为 done 态'),
@@ -7569,8 +7569,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(await readDisk('mermaid.md') === text, '迁移不得改写图源码')
     } finally {
       // 清理：注入的原始 overlay 双键恢复（删除 = 未设置态）+ 标记清空
-      await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
-      await vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', { theme: null, mermaid: null })
+      await vscode.commands.executeCommand('onegayi.vsidian._test.resetLegacyThemeMigration')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.injectLegacyThemeOverlay', { theme: null, mermaid: null })
       const current = previous['appearance.theme']
       await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.theme': typeof current === 'string' ? current : 'default' })
     }

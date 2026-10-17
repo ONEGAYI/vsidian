@@ -1,7 +1,7 @@
 // #535 T08 迁移锁协议契约测试（PR #581 四审 P2-D：代次锁/fencing）：
 // 真实文件系统（os.tmpdir 临时目录 + fs.open 'wx'/rename/rm/utimes）钉
-// 住 codexMigrationLock 的认领/接管/释放不变量，并以受控调度（每个 fs
-// 原语边界注入第三方认领尝试，见 codexLockTestGate）复现评审方四审实测
+// 住 legacyThemeMigrationLock 的认领/接管/释放不变量，并以受控调度（每个 fs
+// 原语边界注入第三方认领尝试，见 legacyLockTestGate）复现评审方四审实测
 // 的双调度反例——「接管先 rename 候选再核验：rename 把 A 的活锁从公开
 // 路径移走，恢复前 C 可 open('wx') 成功 → 双 owner」「释放先 rename 后
 // 核验 token 的同型空隙」。两个调度在旧协议（三审实现）上必须红（红证
@@ -11,15 +11,15 @@ import { promises as fsp } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
-  createCodexMigrationLock,
-  parseCodexMigrationLockInfo,
-  type CodexMigrationLockHandle,
-} from '../../src/shared/codexMigrationLock'
-import { LockFsGate, runGated, type LockFsLike } from './codexLockTestGate'
+  createLegacyThemeMigrationLock,
+  parseLegacyThemeMigrationLockInfo,
+  type LegacyThemeMigrationLockHandle,
+} from '../../src/shared/legacyThemeMigrationLock'
+import { LockFsGate, runGated, type LockFsLike } from './legacyLockTestGate'
 
-const LOCK_BASE = 'codex-theme-migration.lock'
+const LOCK_BASE = 'legacy-theme-migration'
 
-const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'vsidian-codex-lock4-'))
+const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'vsidian-legacy-lock4-'))
 afterAll(async () => {
   await fsp.rm(tmpRoot, { recursive: true, force: true })
 })
@@ -122,7 +122,7 @@ async function findLockByToken(dir: string, token: string): Promise<string | nul
   for (const name of await fsp.readdir(dir)) {
     if (!name.startsWith(`${LOCK_BASE}`)) continue
     try {
-      const info = parseCodexMigrationLockInfo(await fsp.readFile(path.join(dir, name), 'utf8'))
+      const info = parseLegacyThemeMigrationLockInfo(await fsp.readFile(path.join(dir, name), 'utf8'))
       if (info?.token === token) return name
     } catch {
       // 非锁文件（指针 tmp 等）——跳过
@@ -131,8 +131,8 @@ async function findLockByToken(dir: string, token: string): Promise<string | nul
   return null
 }
 
-const lockAt = (dir: string, token: string): CodexMigrationLockHandle =>
-  createCodexMigrationLock(nodeFs, legacyOf(dir), identity(token))
+const lockAt = (dir: string, token: string): LegacyThemeMigrationLockHandle =>
+  createLegacyThemeMigrationLock(nodeFs, legacyOf(dir), identity(token))
 
 // ---- 基本认领 / 释放 / 接管（代次协议形态） ----
 
@@ -143,10 +143,10 @@ describe('锁协议（真实 fs）：认领、指针与内容形态', () => {
     const b = lockAt(dir, 'token-b')
     expect(await a.tryAcquire()).toBe(true)
     expect(await b.tryAcquire()).toBe(false)
-    expect(parseCodexMigrationLockInfo(await fsp.readFile(genOf(dir, 1), 'utf8')))
+    expect(parseLegacyThemeMigrationLockInfo(await fsp.readFile(genOf(dir, 1), 'utf8')))
       .toMatchObject({ token: 'token-a', pid: 1000, gen: 1 })
     expect(await readPointerRaw(dir)).toBe('1')
-    expect(typeof parseCodexMigrationLockInfo(await fsp.readFile(genOf(dir, 1), 'utf8'))?.createdAt)
+    expect(typeof parseLegacyThemeMigrationLockInfo(await fsp.readFile(genOf(dir, 1), 'utf8'))?.createdAt)
       .toBe('number')
   })
 
@@ -159,7 +159,7 @@ describe('锁协议（真实 fs）：认领、指针与内容形态', () => {
     expect(await readPointerRaw(dir)).toBe('1') // 指针不清空——公开路径在场
     const b = lockAt(dir, 'token-b')
     expect(await b.tryAcquire()).toBe(true)
-    expect(parseCodexMigrationLockInfo(await fsp.readFile(genOf(dir, 2), 'utf8'))?.token)
+    expect(parseLegacyThemeMigrationLockInfo(await fsp.readFile(genOf(dir, 2), 'utf8'))?.token)
       .toBe('token-b')
     expect(await readPointerRaw(dir)).toBe('2')
   })
@@ -185,7 +185,7 @@ describe('锁协议（真实 fs）：陈旧接管与孤儿自愈', () => {
     const dir = await seedDir({ pointer: 3, staleGens: [3] })
     const taker = lockAt(dir, 'token-taker')
     expect(await taker.takeoverIfStale(10_000)).toBe(true)
-    expect(parseCodexMigrationLockInfo(await fsp.readFile(genOf(dir, 4), 'utf8'))?.token)
+    expect(parseLegacyThemeMigrationLockInfo(await fsp.readFile(genOf(dir, 4), 'utf8'))?.token)
       .toBe('token-taker')
     expect(await readPointerRaw(dir)).toBe('4')
     expect(await nodeFs.statMtimeMs(genOf(dir, 3))).toBeNull() // U4：前代清理
@@ -195,7 +195,7 @@ describe('锁协议（真实 fs）：陈旧接管与孤儿自愈', () => {
   it('新鲜锁 → 不接管、锁文件原样在位（不被移走）', async () => {
     const dir = await seedDir({ pointer: 1, freshGens: [1] })
     expect(await lockAt(dir, 'token-taker').takeoverIfStale(10_000)).toBe(false)
-    expect(parseCodexMigrationLockInfo(await fsp.readFile(genOf(dir, 1), 'utf8'))?.token)
+    expect(parseLegacyThemeMigrationLockInfo(await fsp.readFile(genOf(dir, 1), 'utf8'))?.token)
       .toBe('live-1')
     expect(await readPointerRaw(dir)).toBe('1')
   })
@@ -213,7 +213,7 @@ describe('锁协议（真实 fs）：陈旧接管与孤儿自愈', () => {
     expect(await readPointerRaw(dir)).toBe('3') // 跳过孤儿 gen 2 直接落 3
     expect(await nodeFs.statMtimeMs(genOf(dir, 1))).toBeNull()
     expect(await nodeFs.statMtimeMs(genOf(dir, 2))).toBeNull()
-    expect(parseCodexMigrationLockInfo(await fsp.readFile(genOf(dir, 3), 'utf8'))?.token)
+    expect(parseLegacyThemeMigrationLockInfo(await fsp.readFile(genOf(dir, 3), 'utf8'))?.token)
       .toBe('token-healer')
   })
 
@@ -223,7 +223,7 @@ describe('锁协议（真实 fs）：陈旧接管与孤儿自愈', () => {
     // 空闲）——提交前重读指针 2 ≥ 2，必须撤退且不回退指针
     const dir = await seedDir({ pointer: 1, staleGens: [1] })
     const gate = new LockFsGate()
-    const c = createCodexMigrationLock(gate.wrap(nodeFs), legacyOf(dir), identity('token-c'))
+    const c = createLegacyThemeMigrationLock(gate.wrap(nodeFs), legacyOf(dir), identity('token-c'))
     const a = lockAt(dir, 'token-a')
     let started = false
     const cResult = await runGated(
@@ -247,7 +247,7 @@ describe('锁协议（真实 fs）：陈旧接管与孤儿自愈', () => {
 describe('锁协议（真实 fs）：_test 隔离清理', () => {
   it('forceCleanup：清指针与全代次文件（含旧协议残留），不动 state 文件', async () => {
     const dir = await seedDir({ pointer: 2, staleGens: [1], freshGens: [2], legacy: 'fresh' })
-    const stateFile = path.join(dir, 'codex-theme-migration.state.json')
+    const stateFile = path.join(dir, 'legacy-theme-migration.state.json')
     await fsp.writeFile(stateFile, '{"state":"done","version":"1.2.3"}', 'utf8')
     await lockAt(dir, 'token-taker').forceCleanup()
     expect(await readPointerRaw(dir)).toBeNull()
@@ -269,7 +269,7 @@ describe('受控调度（评审方四审 P2-D）：任意 fs 原语边界注入�
     // 边界注入 X 的 tryAcquire——协议必须在所有边界上拒绝 X
     const dir = await seedDir({ pointer: 1, staleGens: [1], legacy: 'stale' })
     const gate = new LockFsGate()
-    const c = createCodexMigrationLock(gate.wrap(nodeFs), legacyOf(dir), identity('token-c'))
+    const c = createLegacyThemeMigrationLock(gate.wrap(nodeFs), legacyOf(dir), identity('token-c'))
     const a = lockAt(dir, 'token-a')
     const x = lockAt(dir, 'token-x')
     let aStarted = false
@@ -307,7 +307,7 @@ describe('受控调度（评审方四审 P2-D）：任意 fs 原语边界注入�
     // 自己代次文件，任何原语边界都不产生空窗
     const dir = await newDir()
     const gate = new LockFsGate()
-    const b = createCodexMigrationLock(gate.wrap(nodeFs), legacyOf(dir), identity('token-b'))
+    const b = createLegacyThemeMigrationLock(gate.wrap(nodeFs), legacyOf(dir), identity('token-b'))
     const x = lockAt(dir, 'token-x')
     const xResults: boolean[] = []
     let injecting = false

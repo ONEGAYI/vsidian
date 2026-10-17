@@ -1,8 +1,8 @@
 // Mermaid 暗色主题装配契约（工单 #110）：themeVariables 映射纯函数——
 // VSCode 色板（--vscode-* 计算值）→ mermaid 暗色取值；空色板回退到与
 // Dark Modern 量级一致的暗色兜底；关键墨水色对画布底满足 WCAG AA。
-// #535 T08：Codex 截图参考配色（buildCodexMermaidConfig）已随内核退役
-// 删除——组件版 Codex 由替代扩展提供，本文件只保留 default 暗色链路。
+// #535 T08：旧预设截图参考配色（预设构建器）已随内核退役删除——组件
+// 版主题由附加组件提供，本文件只保留 default 暗色链路。
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {

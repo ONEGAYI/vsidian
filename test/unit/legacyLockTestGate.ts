@@ -6,7 +6,7 @@
 //
 // 驱动方式为回调订阅（非 promise 竞速）：同一 gate 可被多个 runGated
 // 阶段顺序复用（如「先门控认领、再门控释放」），不留未消费的等待者。
-import type { CodexLockFilesystem } from '../../src/shared/codexMigrationLock'
+import type { LegacyLockFilesystem } from '../../src/shared/legacyThemeMigrationLock'
 
 /** 检查点：一次已完成的 fs 原语（op 为方法名），release() 放行挂起方 */
 export interface GateCheckpoint {
@@ -15,10 +15,10 @@ export interface GateCheckpoint {
 }
 
 /**
- * 端口形态：CodexLockFilesystem 并上旧协议原语（link）——红态（三审
+ * 端口形态：LegacyLockFilesystem 并上旧协议原语（link）——红态（三审
  * 实现）与绿态（代次锁）共用同一测试体与同一调度脚本
  */
-export type LockFsLike = CodexLockFilesystem & {
+export type LockFsLike = LegacyLockFilesystem & {
   link?(from: string, to: string): Promise<void>
 }
 

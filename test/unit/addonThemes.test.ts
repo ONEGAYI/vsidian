@@ -2,8 +2,8 @@
 // 解析与页面明暗四态的纯逻辑单测（TDD 先立预期）。规则来源：
 // docs/specs/addon-themes.md §3（宿主目录/唯一选择）与 §4（页面明暗四
 // 态）；ADR-0017（安装只新增候选、唯一互斥、回落保留首选）。
-// #535 T08：内核 Codex 已退役——旧键回显分支删除（迁移语义见
-// codexMigration.test.ts）；本文件钉迁移后的解析口径。v1.1.0 已发行的
+// #535 T08：旧预设已退役——旧键回显分支删除（迁移语义见
+// legacyThemeMigration.test.ts）；本文件钉迁移后的解析口径。v1.1.0 已发行的
 // 公开符号（CODEX_THEME_ID 常量、resolveThemePreferred 双参形状）按
 // PR #581 评审发现 3 恢复兼容形状并标 @deprecated，由本文件钉住。
 import { describe, expect, it } from 'vitest'
@@ -132,14 +132,14 @@ describe('resolveActiveTheme（唯一首选与回落）', () => {
     theme('pub.two', 'aqua', { languages: ['mermaid', 'plantuml'] }),
   ]
 
-  it('default（内置）恒可用且生效；退役 codex 身份走目录不命中（保留首选、回落显示）', () => {
+  it('default（内置）恒可用且生效；退役预设身份走目录不命中（保留首选、回落显示）', () => {
     expect(resolveActiveTheme({ themes, preferred: DEFAULT_THEME_ID, isThemeAvailable: () => true }))
       .toEqual({ preferred: DEFAULT_THEME_ID, available: true, effective: DEFAULT_THEME_ID })
-    // #535 T08：codex 不再是内置身份——目录不命中即回落 default 且保留首选
-    const retired = resolveActiveTheme({ themes, preferred: 'codex', isThemeAvailable: () => true })
+    // #535 T08：退役预设不再是内置身份——目录不命中即回落 default 且保留首选
+    const retired = resolveActiveTheme({ themes, preferred: 'retired-preset', isThemeAvailable: () => true })
     expect(retired.available).toBe(false)
     expect(retired.effective).toBe(DEFAULT_THEME_ID)
-    expect(retired.preferred).toBe('codex')
+    expect(retired.preferred).toBe('retired-preset')
   })
 
   it('选中组件主题可用时生效并给出关联提供者', () => {
@@ -197,21 +197,21 @@ describe('resolveThemePreferred（新键权威、空值兜底 default）', () =>
     expect(resolveThemePreferred('pub.two/aqua')).toBe('pub.two/aqua')
   })
 
-  it('新键 default / 缺失 / 空串：default（迁移后旧键 codex 已在激活时回落，不再回显）', () => {
+  it('新键 default / 缺失 / 空串：default（迁移后旧键退役值已在激活时回落，不再回显）', () => {
     expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT)).toBe(DEFAULT_THEME_ID)
     expect(resolveThemePreferred(undefined)).toBe(DEFAULT_THEME_ID)
     expect(resolveThemePreferred('')).toBe(DEFAULT_THEME_ID)
     expect(resolveThemePreferred('  ')).toBe(DEFAULT_THEME_ID)
   })
 
-  it('v1.1.0 双参调用形状兼容：legacyMermaidValue 传任何值（含 codex）都不再影响结果', () => {
+  it('v1.1.0 双参调用形状兼容：legacyMermaidValue 传任何值（含退役值）都不再影响结果', () => {
     // PR #581 评审发现 3：第二参保留为 deprecated 兼容形状——旧消费者
-    // 双参调用编译通过且语义收窄为「回落 default」（codex 回显→default
+    // 双参调用编译通过且语义收窄为「回落 default」（退役值回显→default
     // 即迁移语义本身），防再收窄由本断言与 addonApiSurface 钉住
-    expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT, 'codex')).toBe(DEFAULT_THEME_ID)
-    expect(resolveThemePreferred(undefined, 'codex')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred(APPEARANCE_THEME_DEFAULT, 'retired-preset')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemePreferred(undefined, 'retired-preset')).toBe(DEFAULT_THEME_ID)
     expect(resolveThemePreferred('', 'default')).toBe(DEFAULT_THEME_ID)
-    expect(resolveThemePreferred('pub.two/aqua', 'codex')).toBe('pub.two/aqua')
+    expect(resolveThemePreferred('pub.two/aqua', 'retired-preset')).toBe('pub.two/aqua')
   })
 })
 

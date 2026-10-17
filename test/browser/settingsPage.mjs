@@ -377,11 +377,11 @@ try {
     assert.equal(await refTabs.nth(2).textContent(), zhCn['styleRef.tabDetail'])
     assert.equal(await refTabs.nth(3).textContent(), zhCn['appearance.themes'])
     await refTabs.nth(3).click()
-    // #535 T08：内置单选只剩 default（Codex 已随内核退役，无 codex 单选项）
+    // #535 T08：内置单选只剩 default（旧预设已随内核退役）
     const defaultRadio = page.locator('.vsidian-appearance-presets input[value=default]')
-    const codexRadio = page.locator('.vsidian-appearance-presets input[value=codex]')
+    const retiredRadio = page.locator('.vsidian-appearance-presets input[value=retired-preset]')
     assert.equal(await defaultRadio.isVisible(), true)
-    assert.equal(await codexRadio.count(), 0, '内置 Codex 单选项应随内核退役消失')
+    assert.equal(await retiredRadio.count(), 0, '退役预设不应出现内置单选项')
     assert.equal(await defaultRadio.isChecked(), true)
     const presetPaint = await defaultRadio.evaluate(el => {
       const h3 = el.closest('[role="tabpanel"]').querySelector('h3')

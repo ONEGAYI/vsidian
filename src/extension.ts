@@ -25,7 +25,7 @@ import { installRenameRefUpdater } from './host/vaultRenameWiring'
 import { createIndexMaintenance, createIndexSettingsStore, initialExcludePatterns } from './host/vaultIndexMaintenance'
 import { createJiebaWiring } from './host/jiebaResourceWiring'
 import { createEditorGuardWiring } from './host/editorGuardWiring'
-import { createCodexMigrationWiring } from './host/codexMigrationWiring'
+import { createLegacyThemeMigrationWiring } from './host/legacyThemeMigrationWiring'
 import { createFindOptionsStore } from './host/findOptionsStore'
 import { createAddonWiring, type VsidianAddonExports } from './host/addons/addonWiring'
 import { t } from './shared/i18n'
@@ -37,13 +37,13 @@ export function activate(context: vscode.ExtensionContext): VsidianAddonExports 
   const settingsService = new SettingsService(context.globalState, PRODUCTION_SETTING_DEFINITIONS)
   // #93 语言装配（宿主路径）：en 包同时登记为运行时回退
   installHostLocale(hostLocale(settingsService.getSnapshot()))
-  // #535 T08 Codex 内核退役：激活时迁移旧 codex 设置（读 globalState 原始
+  // #535 T08 旧主题预设迁移：激活时迁移退役预设值设置（读 globalState 原始
   // overlay 判档，双键回落 default + 一次性安装引导；标记与迁移同批持久
   // 化——重开/重启/多窗口不重复引导。语言装配之后，保证引导文案按用户
   // 偏好语言取词；编辑器/设置页面板此时尚未建立，拉快照时已读到迁移后值。
   // 迁移的主题键写回经 settingsService 串行链——与设置页保存互斥（PR #581
   // 三审 P2-A：等待窗口内的用户写入不被旧快照覆盖））
-  createCodexMigrationWiring(context, settingsService)
+  createLegacyThemeMigrationWiring(context, settingsService)
   const keybindingService = new KeybindingService(context.globalState)
   // #128 CSS 片段：用户级目录 + 逐片段开关的宿主权威服务（globalState 独立
   // key；文件系统/监听经 vscode 层端口注入）。initialScan 在监听者（编辑器

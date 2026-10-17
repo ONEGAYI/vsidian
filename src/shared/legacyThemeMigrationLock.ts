@@ -1,4 +1,4 @@
-// #535 T08 Codex 迁移锁——代次锁（fencing）协议（PR #581 四审 P2-D 修
+// #535 T08 旧主题迁移锁——代次锁（fencing）协议（PR #581 四审 P2-D 修
 // 复；不依赖 vscode/DOM，fs 原语经端口注入——宿主接线用 node fs，单测
 // 注入真实 fs 或受控门控复现评审方调度）。
 //
@@ -51,12 +51,12 @@
 // owner 在场时造成指针回退与双 owner。
 
 /** errno 形态错误（code 判定用；不引 node 类型保持 webview 边界纯净） */
-export interface CodexLockFsError {
+export interface LegacyLockFsError {
   code?: string
 }
 
 /** 锁协议依赖的 fs 原语端口（宿主 wiring 用 node fs.promises 实现） */
-export interface CodexLockFilesystem {
+export interface LegacyLockFilesystem {
   /** O_EXCL 创建并整体写入（目标已存在抛 code=EEXIST） */
   writeFileExclusive(path: string, data: string): Promise<void>
   /** 原子改名替换（指针推进：tmp → 指针；同卷 rename 原子替换） */
@@ -72,13 +72,13 @@ export interface CodexLockFilesystem {
 }
 
 /** 认领者身份：token 为本代次唯一标识（生成方保证唯一） */
-export interface CodexMigrationLockIdentity {
+export interface LegacyThemeMigrationLockIdentity {
   token: string
   pid: number
 }
 
 /** 锁协议句柄（语义见文件头不变量注释） */
-export interface CodexMigrationLockHandle {
+export interface LegacyThemeMigrationLockHandle {
   /** O_EXCL 认领（当前代次在位即 false）：true = 本代次持有 */
   tryAcquire(): Promise<boolean>
   /** 陈旧接管（协议见文件头）：true = 接管成功（本代次持有） */
@@ -96,7 +96,7 @@ export interface CodexMigrationLockHandle {
 }
 
 /** 锁文件内容形态 */
-export interface CodexMigrationLockInfo {
+export interface LegacyThemeMigrationLockInfo {
   token: string
   pid: number
   createdAt: number
@@ -106,11 +106,11 @@ export interface CodexMigrationLockInfo {
 
 function isErrnoLike(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null &&
-    (error as CodexLockFsError).code === code
+    (error as LegacyLockFsError).code === code
 }
 
 /** 锁内容解析（非 JSON / 字段形态不符 → null，调用方按「无法核对」处理） */
-export function parseCodexMigrationLockInfo(content: string): CodexMigrationLockInfo | null {
+export function parseLegacyThemeMigrationLockInfo(content: string): LegacyThemeMigrationLockInfo | null {
   try {
     const value = JSON.parse(content) as Record<string, unknown>
     if (typeof value['token'] !== 'string' ||
@@ -142,12 +142,12 @@ function baseOfFile(file: string): string {
   return file.slice(index + 1)
 }
 
-export function createCodexMigrationLock(
-  fs: CodexLockFilesystem,
+export function createLegacyThemeMigrationLock(
+  fs: LegacyLockFilesystem,
   lockPath: string,
-  identity: CodexMigrationLockIdentity,
+  identity: LegacyThemeMigrationLockIdentity,
   now: () => number = Date.now,
-): CodexMigrationLockHandle {
+): LegacyThemeMigrationLockHandle {
   const pointerPath = `${lockPath}.gen`
   const genPath = (gen: number) => `${lockPath}.${gen}`
   const lockDir = dirOfFile(lockPath)
@@ -165,7 +165,7 @@ export function createCodexMigrationLock(
     }
     const text = content.trim()
     if (!/^\d+$/.test(text)) {
-      throw new Error(`[vsidian] Codex 迁移锁指针内容损坏: ${JSON.stringify(text)}`)
+      throw new Error(`[vsidian] 旧主题迁移锁指针内容损坏: ${JSON.stringify(text)}`)
     }
     return Number.parseInt(text, 10)
   }
@@ -225,7 +225,7 @@ export function createCodexMigrationLock(
       if (now() - mtime <= options.staleMs) return false
       candidate += 1
     }
-    const info: CodexMigrationLockInfo = {
+    const info: LegacyThemeMigrationLockInfo = {
       token: identity.token,
       pid: identity.pid,
       createdAt: now(),
@@ -286,9 +286,16 @@ export function createCodexMigrationLock(
         return
       }
       for (const name of names) {
-        if (name === lockBase || name.startsWith(`${lockBase}.`)) {
-          await fs.rm(`${lockDir}/${name}`).catch(() => undefined)
+        // 只删锁族文件：基名本身、代次（纯数字后缀）、指针（.gen）与指针
+        // tmp（.tmp 结尾）——**不含**同前缀的状态文件（<base>.<profileId>.
+        // state.json：五审改名后锁基名与状态文件前缀同族，须按后缀分族）
+        const suffix = name === lockBase ? ''
+          : name.startsWith(`${lockBase}.`) ? name.slice(lockBase.length + 1) : null
+        if (suffix === null) continue
+        if (suffix !== '' && suffix !== 'gen' && !suffix.endsWith('.tmp') && !/^\d+$/.test(suffix)) {
+          continue
         }
+        await fs.rm(`${lockDir}/${name}`).catch(() => undefined)
       }
     },
   }

@@ -355,11 +355,11 @@ test('VSIX 检查：快速操作制作源不得混入 VSIX', () => {
   }
 })
 
-test('VSIX 检查：未知顶层条目报错（本地工具/日志混入防线——2026-10 实证 .zcode、.codex-remote-attachments 与历史发布日志混入且黑名单拦不住）', () => {
+test('VSIX 检查：未知顶层条目报错（本地工具/日志混入防线——2026-10 实证本地工具产物目录与历史发布日志混入且黑名单拦不住）', () => {
   for (const name of [
     'extension/.zcode/plans/plan.md',
     'extension/.zcodeignore',
-    'extension/.codex-remote-attachments/01a0e708/attachment.bin',
+    'extension/.tool-remote-attachments/01a0e708/attachment.bin',
     'extension/release-ci-watch-0.4.0.log',
     'extension/未知新目录/asset.png',
   ]) {

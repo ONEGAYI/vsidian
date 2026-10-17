@@ -33,7 +33,7 @@ const rule = (init: Partial<AddonPasteRule> & Pick<AddonPasteRule, 'id' | 'outpu
   ...init,
 })
 
-/** Codex 形态：data-prompt-link-url span → Markdown 链接 */
+/** 来源特化形态：data-prompt-link-url span → Markdown 链接 */
 const promptLinkRule = (override: Partial<AddonPasteRule> = {}): AddonPasteRule =>
   rule({
     id: 'prompt-link',
