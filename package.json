@@ -600,7 +600,7 @@
     "compile": "node scripts/genNls.mjs && node scripts/genStyleGuide.mjs && node scripts/genAddonApiRef.mjs && node esbuild.mjs && tsc --noEmit",
     "watch": "node scripts/genNls.mjs && node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run && node --test test/fixtures/addon-v02/sdk/buildAddon.test.mjs test/integration/testHost.test.mjs test/integration/installSupport.test.mjs test/integration/t17RemoteSsh.test.mjs test/release/release.test.mjs test/browser/runner.test.mjs test/browser/groups.test.mjs test/browser/buildBroker.test.mjs test/style-contract/checkStyleContract.test.mjs test/addon-api/checkAddonApiCompat.test.mjs",
+    "test:unit": "vitest run && node --test test/fixtures/addon-v02/sdk/buildAddon.test.mjs test/integration/testHost.test.mjs test/integration/installSupport.test.mjs test/integration/t08CodexBridge.test.mjs test/integration/t17RemoteSsh.test.mjs test/release/release.test.mjs test/browser/runner.test.mjs test/browser/groups.test.mjs test/browser/buildBroker.test.mjs test/style-contract/checkStyleContract.test.mjs test/addon-api/checkAddonApiCompat.test.mjs",
     "test:integration": "node esbuild.mjs && node ./test/integration/runTest.mjs",
     "test:browser": "node test/browser/run.mjs",
     "test:keybindings-host": "node test/browser/keybindingsHost.mjs",
