@@ -112,6 +112,9 @@ export function mountRefContentBlock(
     onDispose?: (cleanup: () => void) => void
     /** #570（T05）属性资源订阅端口 + 来源文档身份（B/C 的 fsPath） */
     htmlResources?: { subscribe: HtmlResourceSubscribe; sourceDocUri: string }
+    /** #573（T08）文档身份键（B/C 的 docScope）：ID 文档作用域前缀化；
+     *  缺省 = 主文 A 口径（零改写） */
+    docScope?: string
   },
 ): HtmlResourceBinding {
   for (const box of Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
@@ -121,6 +124,7 @@ export function mountRefContentBlock(
     images: opts.images,
     subscribe: opts.htmlResources?.subscribe,
     sourceDocUri: opts.htmlResources?.sourceDocUri,
+    ...(opts.docScope !== undefined ? { docScope: opts.docScope } : {}),
   })
   opts.onDispose?.(() => binding.dispose())
   renderGraphicBlockInto(el)

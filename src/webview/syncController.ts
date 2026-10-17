@@ -10645,6 +10645,44 @@ export class WebviewSyncController {
         0),
       inline: inlinePaint,
     }
+    // #573（T08）SVG/MathML 绘制探针：全域（reading 容器 / cm-content——
+    // 覆盖块级、行内 widget 与 reading 行内原位三种形态）svg/math 元素计数
+    // 与绘制证据（非 DOM 存在性——真宿主/浏览器下 rect 有面积即实际排版
+    // 绘制；jsdom 无布局恒 0，只作回归计数面）+ foreignObject 计数 +
+    // url(#id) 渐变引用计数 + ID 作用域观测（B 产物 id 前缀化计数、前缀
+    // 引用计数、带前缀 id 元素的描边绘制计数——B 的 CSS #id 协同命中证据）
+    const svgMathScope = htmlScope
+    const svgEls = svgMathScope ? [...svgMathScope.querySelectorAll<SVGElement>('svg')] : []
+    const mathEls = svgMathScope ? [...svgMathScope.querySelectorAll<HTMLElement>('math')] : []
+    const elPainted = (el: Element): boolean => {
+      const rect = el.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    }
+    const gradientAttrOf = (el: Element): string =>
+      el.getAttribute('fill') ?? el.getAttribute('stroke') ?? el.getAttribute('filter') ?? el.getAttribute('clip-path') ?? ''
+    const paintEls = svgMathScope
+      ? [...svgMathScope.querySelectorAll<HTMLElement>('[fill], [stroke], [filter], [clip-path]')]
+      : []
+    const gradientRefs = paintEls.filter((el) => /url\(#/.test(gradientAttrOf(el))).length
+    const scopedGradientRefs = paintEls.filter((el) => /url\(#vs[-A-Za-z0-9_]+--/.test(gradientAttrOf(el))).length
+    const scopedIdEls = svgMathScope
+      ? [...svgMathScope.querySelectorAll<HTMLElement>('[id]')]
+        .filter((el) => /^vs[-A-Za-z0-9_]+--/.test(el.id))
+      : []
+    const svgMathPaint = {
+      svgs: svgEls.length,
+      svgPainted: svgEls.some(elPainted),
+      maths: mathEls.length,
+      mathPainted: mathEls.some(elPainted),
+      foreignObjects: svgMathScope ? svgMathScope.querySelectorAll('foreignObject').length : 0,
+      gradientRefs,
+      /** 带作用域前缀的 url(#…) 引用计数（B 域引用不指向 A 的直接证据） */
+      scopedGradientRefs,
+      scopedIds: scopedIdEls.length,
+      /** 带前缀 id 元素中 computed stroke 非 none 的计数（B 的 CSS #id
+       *  选择器协同命中并绘制的证据） */
+      scopedStrokePainted: scopedIdEls.filter((el) => getComputedStyle(el).stroke !== 'none').length,
+    }
     // #570（T05）HTML/CSS 资源绘制探针：HTML 块/行内内容里的图片装载态
     //（管理器回包后 src 已应用 + loaded 事件确认）、srcset 重组应用计数、
     // 媒体属性改写计数（成功解析后属性以绝对地址存在），文档样式产物的
@@ -10989,7 +11027,11 @@ export class WebviewSyncController {
       // reading：.vsidian-reading-html；无渲染根时缺省）
       // #568 起 html 探针含行内面：块或行内任一在场即产出
       // #570（T05）起附资源面 resources（图片装载/srcset/媒体属性/产物 url）
-      ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: { ...htmlPaint, resources: htmlResourcesPaint } } : {}),
+      // #573（T08）起附 SVG/MathML 面 svgMath（绘制证据/foreignObject/渐变
+      // 引用/作用域前缀——真宿主与浏览器断言面，jsdom 恒计数）
+      ...(htmlRoots > 0 || inlinePaint.roots > 0
+        ? { html: { ...htmlPaint, resources: htmlResourcesPaint, svgMath: svgMathPaint } }
+        : {}),
       // #569（T04）文档样式隔离观测（无产物缺省）
       ...(docStyleProbe ? { docStyle: docStyleProbe } : {}),
       quickActions,

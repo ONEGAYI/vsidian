@@ -868,6 +868,20 @@ interface ViewState {
         docStyleProducts: Array<{ scope: string; resolvedUrls: number; totalUrls: number }>
         firstResolvedCssUrl: string | null
       }
+      /** #573（T08）SVG/MathML 与混合命名空间绘制面（全域圈定：块级/
+       *  行内/Reading 原位三形态）：实际绘制证据 + foreignObject/渐变引用/
+       *  ID 作用域前缀观测 */
+      svgMath?: {
+        svgs: number
+        svgPainted: boolean
+        maths: number
+        mathPainted: boolean
+        foreignObjects: number
+        gradientRefs: number
+        scopedGradientRefs: number
+        scopedIds: number
+        scopedStrokePainted: number
+      }
     }
     /** #569（T04）文档样式绘制：产物键集 + Reading 直接子块计算色 +
      *  工具栏排除面基线（无产物缺省） */
@@ -19136,6 +19150,129 @@ export const cases: Array<[string, () => Promise<void>]> = [
         rm(nodePath.join(wsDir!, 't5-sb.png'), { force: true }).catch(() => undefined),
         rm(nodePath.join(wsDir!, 't5-bg.png'), { force: true }).catch(() => undefined),
         rm(nodePath.join(wsDir!, 't5-clip.mp4'), { force: true }).catch(() => undefined),
+      ])
+    }
+  }],
+
+  ['SVG/MathML 与混合命名空间：双模式绘制、净化与文档 ID 归属（#573）', async () => {
+    const fileA = 't8-svg-573.md'
+    const fileB = 't8-sub/t8-b-573.md'
+    // A：块级 SVG（渐变/文字/foreignObject，多行成型块级）+ MathML 块 +
+    // 行内 SVG 混排 + 恶意载荷块 + 本篇 style 类块 + 嵌入 B（id="shared"
+    // 与 B 同名——串目标检测：A 橙渐变 / B 绿渐变）
+    const svgMain = [
+      '<svg width="160" height="80" viewBox="0 0 160 80">',
+      '  <defs>',
+      '    <linearGradient id="shared">',
+      '      <stop offset="0" stop-color="#ff8800"/>',
+      '      <stop offset="1" stop-color="#ffcc00"/>',
+      '    </linearGradient>',
+      '  </defs>',
+      '  <rect x="2" y="2" width="120" height="50" fill="url(#shared)"/>',
+      '  <text x="6" y="20" font-size="14">SVG 文字</text>',
+      '  <foreignObject x="124" y="4" width="32" height="18"><div xmlns="http://www.w3.org/1999/xhtml" style="color: rgb(178, 34, 34)">FO</div></foreignObject>',
+      '</svg>',
+    ].join('\n')
+    const evil = '<svg width="10" height="10"><rect onload="window.__t8evil = 1" width="5" height="5"/><script>486</script><a><text>e</text><animate attributeName="href" values="486"></animate></a></svg>'
+    const docA = [
+      '# SVG MathML 主文档',
+      '',
+      svgMain,
+      '',
+      '<math display="block"><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><mfrac><mn>1</mn><mi>y</mi></mfrac></mrow></math>',
+      '',
+      '行内 <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" fill="#0a880a"></circle></svg> 混排。',
+      '',
+      evil,
+      '',
+      '![[t8-sub/t8-b-573]]',
+      '',
+      '<style>',
+      '.t8-cls { fill: #0055aa; }',
+      '</style>',
+      '',
+      '<svg width="30" height="30"><rect class="t8-cls" width="24" height="24"></rect></svg>',
+      '',
+    ].join('\n')
+    // B：id="shared" 同名渐变（绿色）+ CSS #id 选择器目标（协同命中证据）
+    const docB = [
+      '# B 目标',
+      '',
+      '<svg width="90" height="50"><defs><linearGradient id="shared"><stop offset="0" stop-color="#00aa44"/><stop offset="1" stop-color="#00cc66"/></linearGradient></defs><rect fill="url(#shared)" width="70" height="36"/></svg>',
+      '',
+      '<style>',
+      '#t8-b-rect { stroke: #aa00aa; stroke-width: 2; }',
+      '</style>',
+      '',
+      '<svg width="60" height="34"><rect id="t8-b-rect" width="50" height="26" fill="none"/></svg>',
+      '',
+    ].join('\n')
+    await mkdir(nodePath.join(wsDir!, 't8-sub'), { recursive: true }).catch(() => undefined)
+    await Promise.all([
+      writeFile(nodePath.join(wsDir!, fileA), docA, 'utf8'),
+      writeFile(nodePath.join(wsDir!, fileB), docB, 'utf8'),
+    ])
+    try {
+      await openWithEditor(fileA)
+      await waitSessionReady(fileA)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      // Reading：SVG/MathML 实际绘制（Chromium 114——MathML Core 能力
+      // 实测记录点）+ foreignObject + 渐变引用 + B 前缀化与 CSS 协同。
+      // 谓词含 B 就绪条件（scopedIds/gradientRefs）——嵌入卡异步装载在
+      // 高负载时段晚于 A 侧完成，不带 B 条件会在 B 未挂载时提前命中
+      const reading = await waitViewState(fileA, (v) => {
+        const m = v.paint?.html?.svgMath
+        return v.viewMode === 'reading' && m !== undefined && m.svgs >= 5 &&
+          m.svgPainted && m.maths >= 1 && m.mathPainted &&
+          m.scopedIds >= 2 && m.gradientRefs >= 2 && m.scopedStrokePainted >= 1
+      }, 0, 45000)
+      const m1 = reading.paint!.html!.svgMath!
+      assert(m1.svgs >= 5, `SVG 全量渲染（块级 + 行内 + B；实际 ${JSON.stringify(m1)}）`)
+      assert(m1.svgPainted, 'SVG 实际绘制（rect 有面积——非 DOM 存在性）')
+      assert(m1.mathPainted, `MathML 实际绘制（Chromium 114 MathML Core；实际 ${JSON.stringify(m1)}）`)
+      assert(m1.foreignObjects >= 1, 'foreignObject 混合内容在场')
+      assert(m1.gradientRefs >= 2, `A/B 渐变引用在场（实际 ${m1.gradientRefs}）`)
+      // A/B 相同 ID 不串目标：B 的 id 与引用全部前缀化、前缀描边绘制命中
+      assert(m1.scopedIds >= 2, `B 产物 id 前缀化（shared + t8-b-rect；实际 ${m1.scopedIds}）`)
+      assert(m1.scopedGradientRefs >= 1, `B 的 url(#shared) 引用已前缀化——不串 A（实际 ${m1.scopedGradientRefs}）`)
+      assert(m1.scopedStrokePainted >= 1, `B 的 CSS #id 选择器协同命中并绘制（实际 ${m1.scopedStrokePainted}）`)
+      const h1 = reading.paint!.html!
+      assert(h1.scripts === 0 && h1.eventAttrs === 0,
+        `净化负向：svg script/事件零残留（实际 scripts=${h1.scripts} events=${h1.eventAttrs}）`)
+
+      // Live：widget 绘制 + MathML 结构 + 模式切换存续（主文 contentDOM 内
+      // 4 个 svg：块级 1 + 行内 3——嵌入卡 B 是独立 Live 实例不计入）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri(fileA))
+      const live = await waitViewState(fileA, (v) => {
+        const m = v.paint?.html?.svgMath
+        return v.viewMode === 'live' && m !== undefined && m.svgs >= 4 &&
+          m.svgPainted && m.maths >= 1 && m.mathPainted
+      }, 0, 45000)
+      const m2 = live.paint!.html!.svgMath!
+      assert(m2.svgPainted && m2.mathPainted,
+        `Live：SVG 与 MathML widget 实际绘制（实际 ${JSON.stringify(m2)}）`)
+      assert(live.paint!.html!.scripts === 0, 'Live 净化负向零残留')
+
+      // 释放：删除嵌入行（外部增量）→ B 释放，作用域前缀 id 归零
+      const embedLine = '![[t8-sub/t8-b-573]]'
+      const at = docA.indexOf(embedLine)
+      assert(at >= 0, '定位嵌入行')
+      const textDoc = await vscode.workspace.openTextDocument(wsUri(fileA))
+      const delEdit = new vscode.WorkspaceEdit()
+      delEdit.replace(wsUri(fileA), new vscode.Range(textDoc.positionAt(at), textDoc.positionAt(at + embedLine.length + 1)), '')
+      assert(await vscode.workspace.applyEdit(delEdit), '删除嵌入行应成功')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      const released = await waitViewState(fileA, (v) => {
+        const m = v.paint?.html?.svgMath
+        return v.viewMode === 'reading' && m !== undefined && m.scopedIds === 0 && m.svgs >= 4
+      }, 0, 45000)
+      const m3 = released.paint!.html!.svgMath!
+      assert(m3.scopedIds === 0, `B 嵌入释放后前缀 id 归零（实际 ${m3.scopedIds}）`)
+      assert(m3.svgs >= 4, `A 侧 SVG 不受释放影响（实际 ${m3.svgs}）`)
+    } finally {
+      await Promise.all([
+        rm(nodePath.join(wsDir!, fileA), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't8-sub'), { force: true, recursive: true }).catch(() => undefined),
       ])
     }
   }],

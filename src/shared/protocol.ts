@@ -2921,6 +2921,30 @@ export interface PaintProbe {
       /** 首个已解析 CSS URL（失效重取的地址变化断言） */
       firstResolvedCssUrl: string | null
     }
+    /** #573（T08）SVG/MathML 与混合命名空间绘制面：实际绘制证据（真宿主
+     *  /浏览器断言面——rect 有面积即真实排版；jsdom 无布局恒 false 只作
+     *  计数回归）+ foreignObject/渐变引用/ID 作用域前缀观测 */
+    svgMath: {
+      /** 渲染根内 svg 元素数 */
+      svgs: number
+      /** 任一 svg rect 有面积（实际绘制，非 DOM 存在性） */
+      svgPainted: boolean
+      /** 渲染根内 math 元素数 */
+      maths: number
+      /** 任一 math rect 有面积（MathML 结构实际绘制） */
+      mathPainted: boolean
+      /** foreignObject 混合内容计数 */
+      foreignObjects: number
+      /** fill/stroke/filter/clip-path 属性含 url(#id) 的渐变/引用计数 */
+      gradientRefs: number
+      /** 带作用域前缀的 url(#…) 引用计数（B 域引用不指向 A 的证据） */
+      scopedGradientRefs: number
+      /** 带 ID 作用域前缀（vs<scope>--）的产物 id 计数（B/C 前缀化证据） */
+      scopedIds: number
+      /** 带前缀 id 元素中 computed stroke 非 none 的计数（B 的 CSS #id
+       *  选择器协同命中并绘制的证据） */
+      scopedStrokePainted: number
+    }
   }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
   quickActions?: {

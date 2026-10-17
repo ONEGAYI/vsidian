@@ -228,6 +228,9 @@ export function prepareHtmlWidgetContent(
       images: liveImagesOfView(view) ?? null,
       sourceDocUri: sourceDocUri ?? undefined,
       live: true,
+      // #573（T08）ID 文档作用域：docScope facet（主文 'doc' 零改写，
+      // 嵌入内部 Live = B 的 docScope 键——B 产物 id 前缀化）
+      docScope: liveHtmlDocScopeOf(view.state),
     })
   } else {
     // 裸构造（单测直驱无视图）：仅图片管理器绑定面缺席，属性资源照走 hub

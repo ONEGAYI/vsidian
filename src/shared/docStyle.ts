@@ -32,6 +32,7 @@
 // - 未知 at-rule：原样保留（保守：不猜语义）。
 import { canonicalRefTargetKey } from './refExpansion'
 import { frontmatterRange, markdownTreeParser } from './markdownDoc'
+import { htmlIdScopePrefix, scopeCssFragmentRefs, scopeSelectorIdTokens } from './htmlFragment'
 import type { Tree } from '@lezer/common'
 
 // ---------------------------------------------------------------------------
@@ -194,12 +195,16 @@ export interface DocStyleRule {
  * ——:where 归零前缀特异性（层叠语义保持）、:is 保留项内特异性。伪元素
  * 后缀拆到 :is() 之外（:is() 参数禁伪元素，整条规则会被静默丢弃——T01
  * 探针实测警示）。纯伪元素项（::selection）主体回退 *。
+ * #573（T08）起引用文档（非主文 scope）的 `#id` 选择器项同步加 ID 作用
+ * 域前缀（渲染产物侧 id 已前缀化——两侧同前缀对齐，id 选择器含义保持；
+ * 属性选择器字符串与 CSS 转义 id 不改写）。
  */
 export function scopeDocStyleSelector(selector: string, docScope: string): string {
   const pe = splitPseudoElement(selector.trim())
   const head = pe === null ? selector.trim() : pe.head || '*'
   const suffix = pe === null ? '' : pe.suffix
-  return `:where([${DOC_SCOPE_ATTR}="${docScope}"]) :is(${head})${suffix}`
+  const scopedHead = scopeSelectorIdTokens(head, htmlIdScopePrefix(docScope))
+  return `:where([${DOC_SCOPE_ATTR}="${docScope}"]) :is(${scopedHead})${suffix}`
 }
 
 /** 伪元素后缀拆分（双冒号任意名 + 单冒号遗留四名；带参数形态兼容） */
@@ -298,7 +303,11 @@ function rewriteGroup(
     }
     const decl = (rule.declarations ?? '').trim()
     if (decl !== '') {
-      lines.push(`${fulls.map((f) => scopeDocStyleSelector(f, docScope)).join(', ')} { ${decl} }`)
+      // #573（T08）引用文档的 url(#id) 声明同步加 ID 作用域前缀（渲染
+      // 产物侧 id 已前缀化——CSS 引用与 DOM 目标同前缀对齐；主文档 null
+      // 原样）
+      const scopedDecl = scopeCssFragmentRefs(decl, htmlIdScopePrefix(docScope))
+      lines.push(`${fulls.map((f) => scopeDocStyleSelector(f, docScope)).join(', ')} { ${scopedDecl} }`)
     }
     if (rule.cssRules !== undefined && rule.cssRules.length > 0) {
       lines.push(...rewriteGroup(rule.cssRules, fulls, docScope))
