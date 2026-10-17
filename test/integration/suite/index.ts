@@ -32,8 +32,12 @@ export async function run(): Promise<void> {
   // 本身是用例断言面；依赖缺失阶段主扩展干脆缺席）。探测一次而非逐条
   // try/catch：缺席会话跳过全部 _test.* 前置重置（这些重置只在测试会话
   // 有意义），finally 的 closeAllEditors 是宿主内置命令，不受影响。
-  const hooksReady = ext !== undefined
-    && (await vscode.commands.getCommands()).includes('onegayi.vsidian._test.resetLastMode')
+  const availableCommands = ext !== undefined ? await vscode.commands.getCommands() : []
+  const hooksReady = availableCommands.includes('onegayi.vsidian._test.resetLastMode')
+  // #535 T08：迁移面重置钩子按在场探测——安装态 legacy 阶段的宿主扩展是
+  // v1.1.0 旧物（resetLastMode 等 #38 时代钩子在，迁移钩子不在），缺席时
+  // 跳过该重置而非让全部用例挂在 runner 前置
+  const codexMigrationHooksReady = availableCommands.includes('onegayi.vsidian._test.resetCodexMigration')
   console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项（分组 ${group}）${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}${hooksReady ? '' : '（_test 钩子缺席——跳过测试前置重置）'}`)
   let done = 0
   for (const [name, fn] of sharded) {
@@ -162,8 +166,11 @@ export async function run(): Promise<void> {
         }
         // #535 迁移面重置（globalState 与设置同层）：一次性标记与引导计数
         // 跨用例共享会让迁移用例的「首迁检测」被前序写锁污染（与守护面
-        // 同一防护口径；原始 overlay 双键的造数归用例自身注入/清理）
-        await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
+        // 同一防护口径；原始 overlay 双键的造数归用例自身注入/清理）。
+        // legacy 旧物会话无迁移钩子（见上方 codexMigrationHooksReady 探测）
+        if (codexMigrationHooksReady) {
+          await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
+        }
         await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', diagnose)
       }
       if (process.platform === 'win32' && CLIPBOARD_CASE_NAMES.has(name)) {
