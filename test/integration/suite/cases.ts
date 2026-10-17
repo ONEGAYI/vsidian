@@ -7545,9 +7545,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
         assertMarker: (marker) => assert(marker?.state === 'done', '一次性标记应在迁移收口后为 done 态'),
       })
       // 档 2 后恢复 default（正式设置链路——同 runner 重置面语义），再走
-      // 面板链路：面板装载拉取应读到 default 快照
+      // 面板链路：面板装载拉取应读到 default 快照。恢复经 waitSettings 读
+      // 回校验防 storage 迟到回翻：迁移写回的变更通知会在设置键附近触发
+      // 他键写入（主题语言的派生快照持久化），可能落入 settingsService 头
+      // 注释记载的「紧邻他键写入可把刚写的 overlay 盖回旧值」环境怪癖窗
+      // 口（#38 先例，六审轮实测一次翻红）
       const restored = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.theme': 'default' })) as { ok: boolean }
       assert(restored.ok, '恢复 default 应经正式设置链路保存')
+      await waitSettings({ 'appearance.theme': 'default' })
       // 迁移后真宿主链路：面板快照读迁移后值，双模式绘制走 default 管线
       await openWithEditor('mermaid.md')
       await waitSessionReady('mermaid.md')
