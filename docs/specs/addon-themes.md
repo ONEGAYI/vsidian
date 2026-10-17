@@ -2,7 +2,7 @@
 
 ## 1. 状态与交付顺序
 
-2026-10-15 用户确认主题统一单选、安装只新增候选、跟随 VSCode 生效明暗，以及替代组件先可安装可用、内核 Codex 后移除。#533 为规格/父票；T07（#546）统一主题机制已实现，待用户整体验收；T08（#535）迁移与退役尚未实现，内置 Codex 保留。依赖、票号和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。当前 API 仍为未发行候选。
+2026-10-15 用户确认主题统一单选、安装只新增候选、跟随 VSCode 生效明暗，以及替代组件先可安装可用、内核 Codex 后移除。#533 为规格/父票；T07（#546）统一主题机制已实现，待用户整体验收；T08（#535）内核 Codex 已于 2026-10-17 退役（旧设置迁移与一次性引导落地，见 §10 实施落档；安装态组件版验证与包体实测收口仍在进行）。依赖、票号和组合验证记录见[批次索引](batch-2026-10-addon-api-extensions.md)。
 
 架构事实源为 [ADR-0017](../adr/0017-unified-addon-theme-selection.md) 与 [ADR-0012 的主题例外](../adr/0012-vsidian-addons-distribution-api-governance.md)。本规格细化接入和验证，不复制 API 签名或伪称组件已经发行。
 
@@ -41,9 +41,9 @@
 
 选择 default 使用内置显示；选中组件主题不可用时回落内置，保留原主题首选并明确回显不可用/当前回落状态，不静默选中另一主题。恢复或手动重试成功后按原首选显示；不自动重试故障组件，不把仍运行的输出 bug 当作降级条件。
 
-### 3.3 过渡内核 Codex
+### 3.3 过渡内核 Codex（历史）
 
-T07 属于扩展阶段：内核 codex 枚举与实现暂时保留，旧值仍可回显并使用；组件主题按自身稳定身份新增，同名项按来源区分。只有 T08 执行旧值迁移与删除，不能在主题 API 票中提前清掉 Codex 实现或依赖。
+T07 属于扩展阶段：内核 codex 枚举与实现暂时保留，旧值仍可回显并使用。T08（2026-10-17）已执行旧值迁移与删除：存量 codex 设置在激活时经 globalState 原始 overlay 迁移回落 default 并收到一次性安装引导；内核枚举、色板、图类适配与 ELK 依赖已删除，组件版 Codex 由替代扩展（vsidian-codex-bridge）提供。
 
 ## 4. 页面明暗状态
 
@@ -108,3 +108,17 @@ T07 覆盖 H-U01–H-U08、H-U11；T08 覆盖 H-U09/H-U10/H-U12 并复验降级�
 既有 `settingsPage` 浏览器回归同步改为主题 radio 和新页签名称，保留组头图标、负边距、描边及持久回显断言；亮暗两轮通过（`t07-resume-settings-browser-green.log`）。`addonRendererTakeover` 与 `graphicPopup` 定向回归通过（`t07-resume-graphics-browser.log`），分别保护普通提供者规则和内核 default/Codex 的弹窗快照、配色与导出。
 
 接手续作证据保留在 T07 工作树的 `out/test/t07-resume-*`：边界和回调先红后绿，17 个 focused 单测文件 360 项、compile、`addonThemes` 浏览器五场景及样式契约通过。真宿主 `t07-resume-integration2.log` 为 1/1 通过，覆盖无文档目录、两文档图形计算色、四态主题事件与停用恢复；首轮夹具光标落在围栏导致源码态等待超时，已改为定位到尾段后复验。多文档接线复用 T03 确认的 `panelStateKey(docUri, sessionId)`，避免不同文档的同名 panel ID 相撞。联合全量回归由汇总分支执行；人工检查主题列表与真实系统跟随体验仍待用户验收。API 仍为 1.0.0 候选，不添加发行日期；签名及 renderer-selection 主题例外显式重锚候选兼容基线，理由见 [API 门禁规格](addons-api-gate.md)。
+
+## 10. T08 实施落档（#535，线 1：迁移与删除，2026-10-17）
+
+迁移单一事实源在 `src/shared/codexMigration.ts`（三档矩阵纯函数 `planCodexThemeMigration` + 宿主编排 `runCodexThemeMigration`），vscode 层装配在 `src/host/codexMigrationWiring.ts`。**判据读 globalState `vsidian.settings` 原始 overlay**（未经 sanitize）——旧键定义删除后 sanitize 会把残留 codex 当未知键吞掉，快照层无法区分「曾是 codex」与「从未设置」，一次性引导将永不触发。迁移直写原始 overlay 层（不经 SettingsService.apply——旧键定义删除后任何经 apply 写旧键的补丁都会被定义校验整批拒绝）。
+
+三档矩阵（激活时执行，extension.ts 语言装配后面板建立前）：新键为 codex 身份，或新键 default/缺失且原始旧键 = 'codex' → 双键回落 default + 一次性引导；新键为组件主题身份 → 不动新键、只清旧键残留、不引导；其余无操作。一次性标记 `vsidian.codexThemeMigration`（globalState 独立键，值 = 迁移执行时的扩展版本）与迁移同批写入（参照 editorGuard #322「写锁不依赖用户响应」先例）；持久化先于引导，overlay 写失败不写标记不引导（下次激活重试）。已知边界：多窗口在升级后同一毫秒窗并发激活存在双弹竞态（与 editorGuard 版本锁同款既定边界）；迁移不广播 settings.changed——生产时序上面板建立晚于激活，装载拉取（settings.get）读到迁移后值。
+
+内核删除面：旧键 `appearance.mermaidTheme` 定义条目与 `MermaidPreset` 类型删除（快照不再含旧键、写入按未知键拒绝；`MERMAID_THEME_KEY` 常量保留供迁移读写原始层）；`CODEX_THEME_ID` 与 `resolveThemePreferred` 旧键回显分支删除（签名收窄单参，退役 codex 历史值按「目录不命中的未知首选」回落且首选保留）；`buildCodexMermaidConfig`、mermaidEntry 的 ELK import/注册与 codex 分支、mermaidRender 的 preset 机制、设置页内置 codex 单选项、locales `setting.mermaidTheme.*` 四键（两包同步退役，新增 `setting.theme.defaultOption`）全部删除。保留面：default 暗色链路（`MERMAID_DARK_FALLBACK_PALETTE`/`resolveVscodeMermaidPalette`/`buildDarkMermaidThemeVariables`）、站点配置恢复机制（frontmatter/classDef 覆写语义不变）、mermaid-chunks 分块机制、图表弹窗快照语义、公开 `.vsidian-mermaid` 样式族（样式契约基线 v0.4.0 改前改后八项检查均零失败）。`@mermaid-js/layout-elk` 依赖与 lockfile 已收口（306 包共享缓存重建）。
+
+API 面：themes-register 条目 lifecycle 值域收窄为 `default | <addonId>/<themeId>`，候选兼容基线按门禁规格显式重锚（重锚前红证据与理由见重锚定提交及 [API 门禁规格](addons-api-gate.md)）；CHANGELOG-API Unreleased 记账，版本幅度两判读（规则字面主版本 vs 符号不经 activate 导出面暴露的次版本判读）已写明，发版时裁决。
+
+引导文案 `host.codexThemeMigrated`（双语）：说明去向、当前回落 default、安装与选择归用户（不自动安装、不代选）；VSIDIAN_TEST_HOOKS=1 时通知短路（计数先于短路，集成断言「只引导一次」经 `_test.getCodexMigrationState` 观测）。`_test` 四钩子（get/inject/reset/run）按 VSIDIAN_TEST_HOOKS 门控注册，runner 每用例重置面并入标记清理。
+
+先红后绿证据（日志在 T08 工作树 `out/test/`，均含退出码）：迁移纯函数 15 例（`t08-red-codexMigration.log` EXIT=1 → `t08-green1-codexMigration.log` EXIT=0）；既有单测翻转（`t08-red-flip-unit.log` 8 失败 → `t08-green-flip-unit.log` 132 例）；全量单测 375 文件 8773+ 例（`t08-unit-slice3b.log`，vitest 侧全绿；node --test 侧契约测试在重锚定提交后随 `t08-unit-final.log` 全绿）；API 重锚定红→绿（`t08-addoncompat-pre-reanchor.log` EXIT=1 → `t08-addoncompat-post.log` 10 项零失败）；浏览器 graphicPopup/settingsPage/addonThemes 及相邻 settingsPageRestore+mermaidPaint 全过；集成迁移用例与 T07 主题用例定向通过（默认独立桌面）。安装态组件版 Codex 验证（真实安装 bridge VSIX 后经统一主题页选择）与包体实测/SIZE_LIMITS 重估不在本线，归后续线（线 2）。
