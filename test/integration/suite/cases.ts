@@ -26,7 +26,7 @@ import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
-import { assertCodexMigrationMatrix, codexBridgeInstalledCases, type CodexMigrationState } from './codexBridgeInstalledCases'
+import type { CodexMigrationMarker } from '../../../src/shared/codexMigration'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -1478,6 +1478,55 @@ const TASK_DOC_SECOND_TOGGLED = [
 ].join('\n')
 
 /** 用例表：名称 -> 执行函数 */
+
+/** 迁移状态观测形态（_test.getCodexMigrationState 的回包）。marker 为可
+ * 恢复状态机（PR #581 评审修复）：pending = 引导欠账 / done = 迁移收口 */
+interface CodexMigrationState { marker: CodexMigrationMarker | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
+
+/** 旧设置迁移三档矩阵断言的命令通道：_test 命令经参数化注入（通道语义
+ * 与被移出仓库的安装态用例原一致——安装态 bridge 专属链已于验收留证后
+ * 移出仓库，证据见 addon-themes.md §10.1 台账） */
+interface CodexMigrationChannel {
+  reset(): PromiseLike<unknown>
+  injectLegacyOverlay(patch: { theme: string | null; mermaid: string | null }): PromiseLike<unknown>
+  runMigration(): PromiseLike<{ action: string; guide: boolean }>
+  readState(): PromiseLike<CodexMigrationState>
+}
+
+/** Codex 旧设置迁移三档矩阵断言（#535，单一事实源）：档 1 升级残留迁移
+ * 回落 default + 引导恰一次、标记在场重跑无操作、档 2 已选组件主题不被
+ * 覆盖只清旧键。 */
+async function assertCodexMigrationMatrix(
+  channel: CodexMigrationChannel,
+  options: { componentThemeRef: string; assertMarker: (marker: CodexMigrationMarker | null) => void },
+): Promise<void> {
+  // 档 1（升级用户主路径）：注入原始 overlay 旧键 codex（模拟升级残留——
+  // 绕过定义校验）→ 迁移 → 双键回落 + 引导恰一次
+  await channel.reset()
+  await channel.injectLegacyOverlay({ theme: null, mermaid: 'codex' })
+  const first = await channel.runMigration()
+  assert(first.action === 'migrate' && first.guide === true, `旧键 codex 应触发迁移与引导（实际 ${JSON.stringify(first)}）`)
+  let state = await channel.readState()
+  assert(state.overlayTheme === 'default' && state.overlayMermaid === 'default', '迁移后原始 overlay 双键应回落 default')
+  options.assertMarker(state.marker)
+  assert(state.guideCount === 1, '迁移应请求一次引导')
+  // 重开/重启/多窗口语义：标记在场时重跑（模拟再次激活）→ 无操作不重复引导
+  const second = await channel.runMigration()
+  assert(second.action === 'none' && second.guide === false, '标记在场时重跑应无操作')
+  state = await channel.readState()
+  assert(state.guideCount === 1, '重跑不得再次请求引导')
+  assert(state.overlayTheme === 'default', '重跑不得改写已迁移的设置')
+  // 档 2（不覆盖已选组件主题）：新键组件身份 + 旧键 codex 残留 → 只清旧键
+  await channel.reset()
+  await channel.injectLegacyOverlay({ theme: options.componentThemeRef, mermaid: 'codex' })
+  const third = await channel.runMigration()
+  assert(third.action === 'clean-legacy' && third.guide === false, `已选组件主题只清旧键残留、不引导（实际 ${JSON.stringify(third)}）`)
+  state = await channel.readState()
+  assert(state.overlayTheme === options.componentThemeRef, '迁移不得覆盖已选组件主题')
+  assert(state.overlayMermaid === 'default', '旧键残留应清为 default')
+  assert(state.marker === null && state.guideCount === 0, 'clean-legacy 不写标记不引导')
+}
+
 export const cases: Array<[string, () => Promise<void>]> = [
   // #278（P2-01）真宿主探针组：目标历史/丢弃/临时对比/关闭交接的公开路线
   // 验证——研究工件独立成文件，定向复现：VSIDIAN_TEST_CASES='P2-01'
@@ -18971,11 +19020,6 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // 阶段矩阵——R1 全装载/R2 宿主不可见负向；用例体 sshGuard 自跳过非
   // SSH 会话，发行态断言面见 addonT17RemoteSshCases.ts 头注）
   ...addonT17RemoteSshCases,
-  // #535 T08：安装态组件对照与升级路径（runInstalledCodexBridge.mjs 阶段
-  // 矩阵——legacy v1.1.0 旧物基线/upgraded 本分支+bridge 同装；用例体
-  // phaseGuard 自跳过非本阶段与非安装态会话，断言面见
-  // codexBridgeInstalledCases.ts 头注）
-  ...codexBridgeInstalledCases,
   // 追加独立场景，保留原 Mermaid 用例的冷启动条件及既有分片位置。
   ['Live 快速光标切标签页：Mermaid 夹具的 LF 锚点保持（#446）', async () => {
     const file = 'viewport-fast-mermaid.md'

@@ -125,6 +125,8 @@ API 面：themes-register 条目 lifecycle 值域收窄为 `default | <addonId>/
 
 ### 10.1 线 2 落档：安装态验证、包体实测与阈值重估（2026-10-17）
 
+> **台账性质说明（2026-10-17 五审起）**：本节所载安装态 bridge 专属链（`runInstalledCodexBridge.mjs` / `t08CodexBridge.mjs` / `t08CodexBridge.test.mjs` / `codexBridgeInstalledCases.ts`）已于验收留证后**移出仓库**（T08 五审「codex 与其组件在本仓像从未存在过」口径——bridge 组件与本仓内核的长期存在面分离）；放行证据以本台账与 `out/test/t08-phase-legacy.log` / `out/test/t08-phase-upgraded.log` 为准，不复跑。三档矩阵共享断言助手内联进 `suite/cases.ts` 供 dev 迁移用例继续消费。
+
 **组件产物与安装验证记录（#535 验收标准 1 的一览）**：
 
 | 项 | 值 |
