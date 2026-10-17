@@ -19332,11 +19332,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await waitSessionReady(fileA)
       await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
       // Reading：SVG/MathML 实际绘制（Chromium 114——MathML Core 能力
-      // 实测记录点）+ foreignObject + 渐变引用 + B 前缀化与 CSS 协同
+      // 实测记录点）+ foreignObject + 渐变引用 + B 前缀化与 CSS 协同。
+      // 谓词含 B 就绪条件（scopedIds/gradientRefs）——嵌入卡异步装载在
+      // 高负载时段晚于 A 侧完成，不带 B 条件会在 B 未挂载时提前命中
       const reading = await waitViewState(fileA, (v) => {
         const m = v.paint?.html?.svgMath
         return v.viewMode === 'reading' && m !== undefined && m.svgs >= 5 &&
-          m.svgPainted && m.maths >= 1 && m.mathPainted
+          m.svgPainted && m.maths >= 1 && m.mathPainted &&
+          m.scopedIds >= 2 && m.gradientRefs >= 2 && m.scopedStrokePainted >= 1
       }, 0, 45000)
       const m1 = reading.paint!.html!.svgMath!
       assert(m1.svgs >= 5, `SVG 全量渲染（块级 + 行内 + B；实际 ${JSON.stringify(m1)}）`)
@@ -19388,15 +19391,6 @@ export const cases: Array<[string, () => Promise<void>]> = [
       ])
     }
   }],
-  // ---- #572（T07）iframe 子文档装载隔离与源码显形 ----
-  // 真宿主 webview 内验证：净化白名单放行 iframe 后的装配面（sandbox 系统
-  // 强制矩阵 + 本地页 src 归属改写 + Live shield 计数 + Reading 无 shield
-  // + 帧盒绘制命中——paint.html.iframes）；https 远端帧的 CSP frame-src
-  // https: 放行（受控服务器网络层差分——连接到达即导航被许可，#343 同款
-  // 证据口径）；恶意子页 postMessage 不被消息桥消费（宿主桥隔离）；换文
-  // 档释放零残留。帧内内容可见性由 browser 套件 htmlIframe572 以 CDP 帧
-  // 读取钉住（沙箱帧对父文档不可读——真宿主层不可证内容，仅证装配与许
-  // 可，不把 load 事件当可见证据）。
   ['HTML iframe：装载矩阵、宿主桥隔离与释放（#572）', async () => {
     // 受控 https 服务器：装载即向父窗口注入伪造宿主消息（守卫失效则
     // view.mode.set 会把视图切走——在场状态即隔离证据）
