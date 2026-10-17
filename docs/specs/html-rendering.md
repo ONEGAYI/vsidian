@@ -157,6 +157,117 @@ HTML 内部的普通点击仍优先进入源码，包含其链接、控件与媒
 
 探针至少覆盖正文／源码层分离、工具栏排除、父子引用相互隔离、继承与 CSS 变量、原生选择器匹配、全文规则顺序、虚拟化及历史片段。记录失败候选与可用路线，不先锁定 Shadow DOM、iframe、`@scope` 或简单选择器前缀方案。与已确认目标不能兼得时，报告证据并暂停依赖该结论的实现，不静默缩减范围。
 
+## T09 收口落档：全量覆盖矩阵（#574）
+
+汇总 T02–T08 各票落档为单一收口矩阵，逐项标注去向与证据。**状态分三档**：
+
+- **已验证**：有自动化证据落地。证据层级缩写——u=unit（vitest/jsdom，无布局）、b=browser（Playwright Chromium 生产控制器，真实布局与指针/IME）、i=integration（1.82.3 真宿主，绘制层断言落 `view.state.paint`）。
+- **平台限制**：运行时（Chromium/Electron/宿主 CSP/站点策略）拒绝或未实现，已取证并如实呈现，非本扩展缺陷。
+- **待验证（人工）**：物理环境依赖（真实 IME 候选窗、扬声器、物理鼠标、肉眼观感），已列入 [manual-verification.md](manual-verification.md) 对应节，代理自动化通过不构成用户验收。
+
+### A. 元素类别矩阵
+
+| 类别 | 去向 | 证据 | 状态 |
+|---|---|---|---|
+| 文本结构族（div/span/p/h1–h6/br/hr/em/strong/ul/ol/li/blockquote 等白名单全量） | 双模式净化渲染（DOMPurify 默认白名单第一道闸 + sanitizeReadingDom 第二道闸） | u `htmlSanitize.test.ts`（29 例）/ b `liveHtml`/`liveInlineHtml` / i #567 | 已验证 |
+| 表格（table/thead/tbody/tr/td/th + colspan/rowspan 合并单元格） | 原生语义渲染（不转 Markdown 表格网格） | b `liveHtml` / i #567 paint.html（合并格 elementFromPoint 命中） | 已验证 |
+| 行内 HTML（span/b/br/img 等单标签与成对嵌套） | 原位渲染、最外层成片段、不成型降级源码 | u `htmlInline`/`readingInlineHtml` / b `liveInlineHtml` / i #568 paint.html.inline | 已验证 |
+| 链接 `a[href]` | 属性不改写；Live 点击一律源码显形（preventDefault 不跳转），Reading 走既有导航委托 | b `htmlResources` E/F | 已验证 |
+| 图片 `img`（src/srcset）与 `picture>source` | 按所属文档解析改写；srcset 规范算法逐候选 | u `htmlResource`（24 例）/ b `htmlResources` A/B / i #570 | 已验证 |
+| 表单族（form/input/select/textarea/button/fieldset 等全族） | Reading 原生交互（临时态零写回）；Live 控件点击=完整源码选区；提交 document 守卫恒拦 | u `htmlInteract` / b `html-controls-571` / i #571 | 已验证 |
+| 媒体（audio/video/source/track） | 归属解析装载（CSP media-src）；生命周期停播链（卸载/退场/模式切换） | b `html-controls-571`（合成 WAV 真实解码）/ i #571（readyState≥2、muted autoplay 推进） | 已验证；远端 https 媒体走浏览器原生管线（沿 img 远端面语义，逐格式不承诺——编码支持=运行时解码面） |
+| iframe | T07 五类处理矩阵（本地页/https/srcdoc/站点拒绝/无效地址）；sandbox 系统强制；Live 外层 shield 命中 | u `htmlSanitize`（sandbox 矩阵）/ b `htmlIframe572`（CDP 帧读取）/ i #572（CSP 差分+宿主桥隔离） | 已验证；真实站点登录态/各站策略面 → 人工 |
+| SVG（几何/文字/渐变/滤镜/clipPath/use/SMIL/foreignObject） | 命名空间净化 + ID 文档作用域 + 资源条目 | u `htmlSvgMathml`（25 例）/ b `svgMathml-573` / i #573 paint.html.svgMath（双环境 rect 面积） | 已验证；外部 use 文档引用 → 平台限制（Chromium 禁用，属性保持原生失败） |
+| MathML（mrow/msup/mfrac/msqrt/mi/mo/mn + 属性） | 同上管线 | b `svgMathml-573` / i #573（双环境） | 已验证；`maction` 交互 → 平台限制（Chromium 114 未实现，actiontype 净化层拒） |
+| script/事件属性/危险协议（javascript:、data:text/html 等） | 恒拒（含 SVG/MathML/foreignObject/srcdoc 命名空间内负向矩阵） | u 各净化测试 / b 各套件负向场景 | 已验证（负向） |
+| 纯 `<style>` 块 | Live 源码常显可直接编辑、Reading 隐藏零占位；内容进全文装载 | b `liveHtml`/`docStyle` / i #569 | 已验证 |
+| HTML 注释 | 沿既有规则（Live 淡化、Reading 字符串级剥离）——不随本批重定义 | u `htmlCommentStrip`/`htmlCommentCssContract`（既有） | 已验证（既有） |
+| 代码围栏/缩进代码/行内代码中的 HTML | 字面语义不变 | u `htmlBlock`/`htmlInline` 排除集 | 已验证 |
+| 畸形边界（未闭合/孤立闭/跨行/容器内降级） | 保守降级为可访问源码，不吞邻接 Markdown | u `htmlBlock`（7 例）/`htmlInline`（9 例）+ b `liveHtml` 边界场景 | 已验证 |
+| 明确不可见元素（head 类/style/meta 等） | 按片段语义处理，不新增占位卡片 | u `htmlSanitize`（容器包裹防丢） | 已验证 |
+
+### B. 关键属性与命名空间矩阵
+
+| 项 | 去向 | 证据 | 状态 |
+|---|---|---|---|
+| `style` 属性 | 元素级样式保留生效 | b `liveInlineHtml`（颜色计算值）/ `htmlCross574` 场景 4（悬停浮层内） | 已验证 |
+| `class` 属性 | 可消费 CSS 片段与本篇 `<style>` | b `docStyle` / `svgMathml-573`（`.cls` fill） | 已验证 |
+| 源文 `data-vsidian-*` | 净化剥离（系统标记不可伪造；系统标记在过滤后写入） | u `htmlSanitize` / i #567 | 已验证（负向） |
+| `formaction`/`autofocus` | 净化层剥离钉住 | u `htmlInteract` | 已验证 |
+| iframe `sandbox`/`allow`/`allowfullscreen`/`allowpaymentrequest` | 系统强制覆盖作者值；权限面零授予 | u `htmlSanitize` / b `htmlIframe572` | 已验证 |
+| iframe `srcdoc` | 属性值递归净化（SAFE_FOR_XML 闭合标签二分坑绕过）；嵌套帧 FORBID | u `htmlSanitize` / b `htmlIframe572`（帧内脚本零执行） | 已验证 |
+| SMIL `attributeName`（href 族/on*） | hook 整体移除（动画目标劫持向量） | u `htmlSvgMathml` | 已验证（负向） |
+| `xlink:href`（旧形态） | setAttributeNS 保命名空间改写 | u `htmlResourceMount` / b `svgMathml-573` | 已验证 |
+| 文档内部 ID（B/C 渲染产物） | `vs<scope>--` 前缀化（id/`url(#id)`/`href="#frag"` + CSS 侧同前缀协同）；主文档零改写 | u `htmlFragment`（18 例）/`htmlIdScope`（15 例） / b `svgMathml-573` | 已验证；同 B 多实例重复前缀 id（url() 解析首实例）为已记录边界 |
+| SANITIZE_DOM 撞名 id（如 id="title"） | DOMPurify 既定剥除行为 | u `htmlSvgMathml` | 平台限制（DOMPurify 防护语义） |
+
+### C. 资源能力矩阵
+
+| 通道 | 去向 | 证据 | 状态 |
+|---|---|---|---|
+| img `src`/`srcset` | 剥离-解析-回写（srcset 逐候选重组，失败候选保原文） | b `htmlResources` A/B / i #570（A/B 串源负向） | 已验证 |
+| 媒体 `src`/`poster`/`source[src]` | 剥离-回写-失败恢复原文 | u `htmlResourceMount` / b `html-controls-571` | 已验证 |
+| CSS `url()`/`@import`/`@font-face` src | 词法扫描改写（跳过注释/字符串），按样式所属 Markdown 解析 | u `htmlResource`/`docStyleResources` / b `htmlResources` C（背景绘制+字体装载） | 已验证（jsdom CSSOM 丢 @font-face src 描述符——全链字体断言在 b/i 层） |
+| SVG `image/use` href（两形态） | 沿媒体同款管线订阅改写；`#` 片段归 ID 管线 | u `htmlResourceMount` / b `svgMathml-573` | 已验证；外部 use 文档引用 → 平台限制 |
+| iframe `src` | 本地相对路径按来源文档解析改写（srcdoc 在场跳过） | b `htmlIframe572`（CDP 帧内容可见）/ i #572（地址已改写+导航无拒绝） | 已验证；改写落地前首跳相对地址有一次无可见影响失败导航（记录的既有语义） |
+| `a[href]` | 一律不改写（导航归点击委托/宿主分类） | b `htmlResources` F | 已验证 |
+| 请求通道 | 独立消息种 `htmlResource.request`（reqId 与 image.result 隔离）+ 失效重取 + 释放迟到丢弃 | u `docStyleResources` / b `htmlResources` G/H / i #570（覆写失效刷新） | 已验证 |
+| 资源根/CSP | `localResourceRoots` 零扩；CSP 增量仅 `media-src ${cspSource} https:`（T06）与 `frame-src` 增 `${cspSource}`（T07），词法钉住 | u `editorCsp.test` | 已验证（词法契约） |
+
+### D. CSS 能力矩阵（文档内 `<style>`）
+
+| 能力 | 去向 | 证据 | 状态 |
+|---|---|---|---|
+| 选择器形态（标签/类/属性/伪类/伪元素/`#id`） | b2 路线逐块标记改写（`:where()` 零特异性），按实际 DOM 匹配不翻译语义 | u `docStyle`（42 例）/ b `docStyle` / i #569（Reading 标签直中+工具栏排除） | 已验证 |
+| `:root`/`body`/`html` | 改写后失活（既定口径，文档化） | u `docStyle` | 已验证（按失活语义） |
+| at-rule：`@media`/`@supports`/`@layer`/`@container` | 递归改写内层 | u `docStyle` / i #569 | 已验证 |
+| `@keyframes`/`@font-face`/`@property`/`@import` | 原样保留（文档级名字空间；`@import` 非首位失效属 CSS 原生位置规则） | u `docStyle` | 已验证 |
+| CSS 嵌套 `&` | 递归代换（多层/组块内） | u `docStyle` | 已验证 |
+| 自定义属性定义与继承 | 原意生效 | b `docStyle` | 已验证 |
+| 层叠与片段先后序 | 文档样式后置于 CSS 片段链（同特异性文档胜）；片段启停/排序/历史契约不改写 | b `docStyle`（snippetLinkAfter + 特异性共存） | 已验证 |
+| 作用域隔离 | 主/子/孙（A/B/C）各自 docScope；源码层与工具栏排除；同 B 多实例共享产物互不污染；释放回收无残留 | b `docStyle`（B 卡/C 孙卡/多实例） / i #569（删除回收）/ i #570（释放回收） | 已验证 |
+| 模式差异（U10 口径） | 标签选择器 Reading 直中 Markdown 语义标签、Live 不命中 CM6 行结构——按实际 DOM 匹配的既定差异 | i #569 + 规格「文档样式实施落档」 | 已验证（文档化差异，非缺陷） |
+| 样式存续 | 不因离屏/虚拟化卸载/源码显形失效；Live 编辑/撤销/重做/外部更新实时同步 | b `docStyle`（撤销重做往返） / i #569（WorkspaceEdit 增量） | 已验证 |
+
+### E. 交叉场景矩阵（本票补齐）
+
+| 场景 | 证据 | 状态 |
+|---|---|---|
+| 主文档 × Live/Reading | b `liveHtml`/`liveInlineHtml`（11+10 场景）/ i #567/#568 | 已验证 |
+| 嵌入 B × Reading（含 C 孙卡、同 B 多实例） | b `docStyle` / i #570 | 已验证 |
+| 嵌入 B 内部 Live（widget + 资源 + 样式排除） | b `docStyle`（嵌入内部 Live）/ u `embedLiveResources` | 已验证 |
+| 悬停浮层 × HTML（B 身份渲染+隔离） | b `htmlCross574` 场景 4（本票新增：表格渲染、行内样式生效、脚本零执行、docScope 非 doc） | 已验证（本票补） |
+| 多层引用（A→B→C 递归） | b `docStyle`（C 孙卡）/ `hoverRecursive`（既有） | 已验证 |
+| 不同来源样式（文档样式 vs CSS 片段） | b `docStyle`（后置序+特异性）/ `cssSnippet*`（既有） | 已验证 |
+| 查找定位命中 HTML 源码范围 | b `htmlCross574` 场景 1/2（本票新增：真实 Ctrl+F 命中块级/行内 → 显形；移出恢复） | 已验证（本票补） |
+| 标题折叠区间含 HTML 块 | b `htmlCross574` 场景 3（本票新增：折叠隐藏 widget、view.locate 落点自动展开恢复渲染） | 已验证（本票补） |
+| IME × 行内 HTML | b `liveInlineHtml` 场景 G（CDP 组合定稿） | 已验证 |
+| IME × 块级 HTML | b `htmlCross574` 场景 5（本票新增：CDP 组合定稿落源文、显形保持） | 已验证（本票补） |
+| 撤销历史（样式/片段编辑） | b `docStyle`（撤销重做）/ `liveHtml`（选区撤销恢复渲染）/ u 各编辑链路 | 已验证 |
+| 锚点导航/搜索 reveal 抵达 HTML | `htmlCross574` 场景 1–3（locate/查找通道）+ 既有 #534 行号落位族 | 已验证（经共同汇聚通道） |
+| 模式切换（媒体停播/样式存续/折叠存续） | b `html-controls-571`/`docStyle`/`headingFoldReveal`（既有） | 已验证 |
+
+### F. 收口验证与产物
+
+见下方「T09 收口验证记录」。性能见 [docs/perf/2026-10-html-rendering-perf.md](../perf/2026-10-html-rendering-perf.md)。父票 #565 保持开放用于整体验收；**代理自动化通过不构成用户验收**——人工项清单见 [manual-verification.md](manual-verification.md) 各票专项节与 #565 批次总览节。
+
+### T09 收口验证记录（2026-10-17，工作树 vsidian-565-t09-final @ 1ef411c5）
+
+| 检查 | 命令 | 结果 | 日志 |
+|---|---|---|---|
+| 编译全链（tsc + esbuild + 生成物） | `npm run compile` | EXIT=0 | `out/test/t09-compile.log` |
+| unit 全量 | `npm run test:unit`（foreground） | EXIT=0：390 文件 9061 例通过；node 启动器契约 188 通过/7 跳过 | `out/test/t09-unit-full.log` |
+| browser 全量 | `npm run test:browser`（3 并发） | EXIT=0：113/113 套件通过（298s，含本票新增 htmlCross574 五场景） | `out/test/t09-browser-full.log`、`out/test/browser-runs/run-kon4js/` |
+| 真宿主集成（dev，1.82.3 本地缓存宿主） | `VSIDIAN_ITEST_SHARDS=4 npm run test:integration` | 分片 1/2/4 退出码 0（113+112+112 例）；分片 3 两例失败——#202 批量索引收敛与 #364 渲染样例降级，均在敏感组登记的既有抖动族；**定向重跑 2/2 通过**（EXIT=0） | `out/test/t09-integration-shards.log`、`out/test/t09-integration-jitter-rerun2.log` |
+| VSIX 打包 | `npx @vscode/vsce package --no-dependencies` | EXIT=0：vsidian-1.0.2.vsix（416 文件，5.47 MB，红线内） | `out/test/t09-vsce-package.log` |
+| VSIX 安装态回归 | `node test/integration/runInstalled.mjs`（VSIX 装入隔离 profile 便携宿主跑同一套件） | 374/449 通过，**#567–#573 HTML 族 7 例全部在安装产物上通过**；75 失败中 73 例为附加组件夹具族（`vsidian-test-fixture.*` 命令缺失——`runInstalled` 启动器不携带附加组件夹具扩展，先于本批的既有缺口，附加组件安装态路径归 `runInstalledAddons.mjs`/T16 阶段矩阵，不属本批回归面），2 例 #198/#200 索引抖动族——**安装态定向重跑 2/2 通过**（EXIT=0） | `out/test/t09-installed-shards.log`、`out/test/t09-installed-jitter-rerun.log` |
+| 性能（HTML 档） | `PERF_SCOPES=html node test/perf/runPerf.mjs docs/perf/data/html-574` | EXIT=0：五档数据与结论见[性能报告](../perf/2026-10-html-rendering-perf.md)（视口有界性与虚拟化边界保持） | `out/test/t09-perf-html.log`、`docs/perf/data/html-574/perf-report.json` |
+| 样式契约基线复验 | `npm run check:stylecontract:baseline` | EXIT=0（基线与 git 锚定一致） | `out/test/t09-stylecontract-baseline.log` |
+| 样式契约八项 | `npm run check:stylecontract` | EXIT=0（8 项零失败） | `out/test/t09-stylecontract.log` |
+| file-tree | `tree_tool.py check --strict` | EXIT=0（新文件已登记） | `out/test/t09-filetree-check3.log` |
+
+**契约面结论**：i18n 两语言包 parity 经编译链把关（compile 全链含 parity 与 nls 生成），本票零新增用户文案；键位注册表本票零新增操作（批次唯一新增操作「编辑当前 HTML 源码」在 #567/#568 已登记落档，keybindings.md 有评估记录）；CHANGELOG 批次用户可见条目（#567–#573 七组）齐全，T09 为收口票零新增用户可见变更。**遗留（如实记录）**：`runInstalled.mjs` 不携带附加组件夹具扩展导致附加组件 73 例在通用安装态回归中确定性失败，属启动器既有缺口（非本批引入、不影响 HTML 族）；修复需另立票据（沿 `runInstalledAddons.mjs` 打包路线或给通用启动器补夹具装载）。
+
 ## 验证与完成条件
 
 - 可执行行为遵循 TDD。单测钉源码边界、净化、选区、规则顺序和资源语法；不能只测试与实现同形的字符串常量。

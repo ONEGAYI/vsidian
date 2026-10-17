@@ -107,6 +107,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 族——SVG 几何/文字/渐变/foreignObject 实际绘制、MathML 结构、行内
   // 混排不吞正文、点击选区精确、净化负向、A/B 相同 ID 不串目标）
   'svgMathml-573',
+  // #574（T09）交叉场景收口：紧随 HTML 族（查找面板定位命中 HTML 源码
+  // 范围、标题折叠区间含 HTML 块的隐藏与落点展开恢复、悬停浮层内 HTML
+  // 渲染与 B 身份隔离、块级源文内真实 IME 组合定稿）
+  'htmlCross574',
   'dropCursorPaint', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',

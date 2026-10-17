@@ -20,6 +20,10 @@ import {
   generateMermaidDenseSample,
   generateCodeDenseSample,
   generateCodeGiantFenceSample,
+  generateHtmlDenseSample,
+  generateHtmlGiantTableSample,
+  generateHtmlStyleSample,
+  generateHtmlImageDenseSample,
 } from './gen-sample.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -61,6 +65,13 @@ try {
   writeFileSync(path.join(wsDir, 'perf-code.md'), generateCodeDenseSample(), 'utf8')
   // #85 超大代码围栏（>4096 行）：着色跳过降级与块内击键成本
   writeFileSync(path.join(wsDir, 'perf-code-giant.md'), generateCodeGiantFenceSample(), 'utf8')
+  // #574（T09）HTML 族档位：大量片段（双体量档）/ 单大表格 / 文档样式
+  // 密集 / HTML 图片密集（离屏回收）。报告经 PERF_SCOPES=html 定向消费。
+  writeFileSync(path.join(wsDir, 'perf-html-many.md'), generateHtmlDenseSample(600), 'utf8')
+  writeFileSync(path.join(wsDir, 'perf-html-long.md'), generateHtmlDenseSample(2000), 'utf8')
+  writeFileSync(path.join(wsDir, 'perf-html-giant-table.md'), generateHtmlGiantTableSample(400), 'utf8')
+  writeFileSync(path.join(wsDir, 'perf-html-style.md'), generateHtmlStyleSample(400), 'utf8')
+  writeFileSync(path.join(wsDir, 'perf-html-images.md'), generateHtmlImageDenseSample(300), 'utf8')
   for (let i = 0; i < 24; i++) {
     const width = 320 + (i % 4) * 80
     const height = 180 + (i % 6) * 60
@@ -83,6 +94,9 @@ try {
       WORKSPACE_DIR: wsDir,
       PERF_REPORT_DIR: outDir,
       PERF_SIZES: SIZES.map((sample) => sample.name).join(','),
+      // #574：测量范围门控（base=体量档,boundary=边界形态,html=HTML 族）；
+      // 缺省全跑。定向复测：PERF_SCOPES=html node test/perf/runPerf.mjs <目录>
+      PERF_SCOPES: process.env['PERF_SCOPES'] ?? 'base,boundary,html',
       // 测量经 _test.* 钩子命令驱动探针（与集成测试同一开关）
       VSIDIAN_TEST_HOOKS: '1',
     },
