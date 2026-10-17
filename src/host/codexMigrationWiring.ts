@@ -3,9 +3,10 @@
 // （PR #581 三审 P2-A）、profile 作用域磁盘权威完成状态（P2-B：
 // globalStorageUri 下 state JSON，跨窗口一致、不依赖各窗口 memento
 // 缓存——1.82.3 的 Memento.get 只读本地 _value，写入与跨窗广播分离）、
-// token/rename 安全接管锁（codexMigrationLock 协议）、一次性安装引导
-// 通知与 _test 钩子（VSIDIAN_TEST_HOOKS 门控，判据与 editorGuardWiring
-// 一致）。
+// 代次锁（fencing）认领协议（四审 P2-D：指针 tmp+rename 原子推进、
+// O_EXCL 认领 gen+1、按名释放——协议见 codexMigrationLock 文件头）、
+// 一次性安装引导通知与 _test 钩子（VSIDIAN_TEST_HOOKS 门控，判据与
+// editorGuardWiring 一致）。
 //
 // 集成测试宿主的通知短路：VSIDIAN_TEST_HOOKS=1 时引导通知 no-op（独立
 // 桌面测试宿主无法交互 toast，与 editorGuardWiring 同一口径）；引导计
@@ -28,7 +29,7 @@ import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../shared/settings'
 import { SETTINGS_STORAGE_KEY, SettingsService } from './settingsService'
 import { t } from '../shared/i18n'
 
-/** globalStorage 内的迁移锁文件名（多窗口原子认领；协议见 codexMigrationLock） */
+/** globalStorage 内的迁移锁文件族基名（多窗口原子认领；协议见 codexMigrationLock） */
 const CODEX_MIGRATION_LOCK_FILE = 'codex-theme-migration.lock'
 
 /**
@@ -85,8 +86,8 @@ export function createCodexMigrationWiring(
     await fsp.rename(tmp, statePath)
   }
 
-  // ---- 跨窗口锁（fs 原语端口 + 协议实现；token 为本窗口本次激活的
-  // 认领代次标识——释放与接管都经它核对，见 codexMigrationLock） ----
+  // ---- 跨窗口锁（fs 原语端口 + 代次锁协议；token 为本窗口本次激活的
+  // 认领标识，代次文件内容携带，见 codexMigrationLock） ----
   const lockFs: CodexLockFilesystem = {
     writeFileExclusive: async (target, data) => {
       // 首次认领前 globalStorage 父目录可能尚不存在（激活早期）——先建
@@ -100,7 +101,6 @@ export function createCodexMigrationWiring(
       }
     },
     rename: (from, to) => fsp.rename(from, to),
-    link: (from, to) => fsp.link(from, to),
     rm: async (target) => {
       await fsp.rm(target, { force: true })
     },
@@ -113,6 +113,7 @@ export function createCodexMigrationWiring(
       }
     },
     readFile: (target) => fsp.readFile(target, 'utf8'),
+    listDirFiles: (dir) => fsp.readdir(dir),
   }
   const migrationLock = createCodexMigrationLock(lockFs, lockPath, {
     token: randomUUID(),
@@ -192,10 +193,10 @@ export function createCodexMigrationWiring(
           return true
         },
       ),
-      // 用例隔离：清磁盘权威状态 + 隔离式清锁（rename 夺走即删，无观察/
-      // 动作窗口）+ 引导计数归零（overlay 不动——造数走注入钩子；runner
-      // 每用例前调用，防止迁移状态与锁残留跨用例污染——崩溃注入场景的
-      // 残留锁在此收口）
+      // 用例隔离：清磁盘权威状态 + 锁全族清理（指针与所有代次文件；
+      // _test 专用原语，生产路径不调用）+ 引导计数归零（overlay 不动
+      // ——造数走注入钩子；runner 每用例前调用，防止迁移状态与锁残留
+      // 跨用例污染——崩溃注入场景的残留锁在此收口）
       vscode.commands.registerCommand(
         'onegayi.vsidian._test.resetCodexMigration',
         async () => {

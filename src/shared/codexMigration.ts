@@ -26,12 +26,13 @@
 // （同步序）——该窗口内进程被 kill 或 done 持久化失败时，恢复只能按
 // pending 补发，可能双弹一次；这比「引导永久丢失」代价小。
 //
-// 多窗口并发（PR #581 评审修复发现 2 + 三审同修）：迁移与恢复经
-// globalStorage 目录锁文件原子认领（fs.open 'wx' = O_EXCL）+ 安全接管
-// 协议（token 代次校验 + rename 隔离验证，见 codexMigrationLock 文件头
-// 不变量）。认领成功者执行完整序列；认领失败者短等待磁盘 done 出现后
-// 静默退出（绝不通知），超时也静默退出（本次不引导，待下次激活恢复）。
-// 胜者崩溃后锁残留由 mtime 陈旧接管兜底（超阈值接管），不会永久锁死。
+// 多窗口并发（PR #581 评审修复发现 2 + 三审同修 + 四审 P2-D）：迁移与
+// 恢复经 globalStorage 目录的代次锁（fencing）原子认领（当前代次指针
+// tmp+rename 原子推进 + 对 lock.<gen+1> 的 fs.open 'wx' = O_EXCL，见
+// codexMigrationLock 文件头不变量）。认领成功者执行完整序列；认领失败
+// 者短等待磁盘 done 出现后静默退出（绝不通知），超时也静默退出（本次
+// 不引导，待下次激活恢复）。胜者崩溃后锁残留由 mtime 陈旧接管兜底
+// （超阈值接管），不会永久锁死。
 import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from './settings'
 import type { CodexMigrationLockHandle } from './codexMigrationLock'
 
@@ -145,7 +146,7 @@ export interface CodexMigrationPorts {
   extensionVersion(): string
   /** 一次性安装引导通知（VSIDIAN_TEST_HOOKS=1 时短路，wiring 层实现） */
   requestGuide(): void
-  /** 跨窗口锁句柄（token/rename 接管协议见 codexMigrationLock） */
+  /** 跨窗口锁句柄（代次锁/fencing 协议见 codexMigrationLock） */
   lock: CodexMigrationLockHandle
 }
 
@@ -249,7 +250,8 @@ async function executeOwnerSequence(ports: CodexMigrationPorts): Promise<CodexMi
 
 /**
  * 宿主编排：磁盘 done 短路（快速路径不抢锁，P2-B：判据不依赖 memento
- * 缓存）→ 需迁移或恢复时跨进程原子认领（O_EXCL + 安全接管协议）→
+ * 缓存）→ 需迁移或恢复时跨进程原子认领（代次锁协议：O_EXCL 认领
+ * gen+1 + 指针原子推进）→
  * 胜者执行 owner 序列；败者短等待磁盘 done 出现后静默退出（绝不通知），
  * 等待期间锁陈旧/消失则接管补完。超时静默退出：本次不引导，待下次激活
  * 按恢复规则补完。
@@ -281,7 +283,7 @@ export async function runCodexThemeMigration(
     return executeOwnerSequence(ports)
   }
   // 认领失败：等待磁盘 done（期间锁陈旧/消失则接管补完——胜者崩溃不留
-  // 死锁；接管协议带 owner/代次校验，不按过期观察删新锁）
+  // 死锁；代次锁按文件名代次行动，不按过期观察删新锁）
   const start = Date.now()
   for (;;) {
     if ((await ports.readMarker())?.state === 'done') {

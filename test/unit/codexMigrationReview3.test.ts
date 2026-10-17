@@ -1,15 +1,16 @@
-// #535 T08 迁移 PR #581 第三轮审查修复的契约测试（P2-A / P2-B / 锁接管
-// 竞态同修）。三个场景先以审查锁定时点的实现形态跑红（红证据见
-// out/test/t08-review3-red.log，5 项全红），修复后为绿形态：
-// - P2-A：pending 写入期间用户经**真实 SettingsService.apply** 保存的新
-//   选择（组件主题/其他设置）不得被 await 前捕获的旧 overlay 快照覆盖
-//   （评审方在 pending 写入处设屏障复现主题被改回 default）；
-// - P2-B：两「窗口」各自独立 memento 缓存 + 延迟跨窗广播 + 共享同一
-//   磁盘状态目录（真实 fs）→ 引导恰一次（评审方受控缓存模拟 guides=2
-//   反例——完成判据必须是磁盘权威，不依赖各窗口 memento）；
-// - 锁接管竞态（同修）：A 接管重建新锁后，B 持旧 stat（过期观察）尝试
-//   接管 → 不得删 A 新锁，至多一方完成迁移（评审方真实 fs 受控调度
-//   两边均 migrate）。锁协议细节另见 codexMigrationLock.test.ts。
+// #535 T08 迁移 PR #581 审查修复的契约测试（三审 P2-A / P2-B + 四审
+// P2-D 生产链调度）。场景先以对应轮次的旧实现形态跑红，修复后为绿：
+// - P2-A（三审）：pending 写入期间用户经**真实 SettingsService.apply**
+//   保存的新选择（组件主题/其他设置）不得被 await 前捕获的旧 overlay
+//   快照覆盖（评审方在 pending 写入处设屏障复现主题被改回 default）；
+// - P2-B（三审）：两「窗口」各自独立 memento 缓存 + 延迟跨窗广播 + 共享
+//   同一磁盘状态目录（真实 fs）→ 引导恰一次（评审方受控缓存模拟
+//   guides=2 反例——完成判据必须是磁盘权威，不依赖各窗口 memento）；
+// - P2-D（四审）：生产 runCodexThemeMigration + 真实磁盘 state + 三
+//   「窗口」独立缓存 + 受控调度（C 的每个锁原语边界注入 B 的完整激
+//   活）→ 引导恰一次（评审方接入生产链实测 guides=['C','A'] 的反例
+//   ——旧协议 rename 窗口让活锁路径暂时消失，第三窗口获锁成双 owner）。
+//   锁协议原语级双调度（接管 A/C、释放 B/C）见 codexMigrationLock.test.ts。
 import { afterAll, describe, expect, it } from 'vitest'
 import { promises as fsp } from 'node:fs'
 import * as os from 'node:os'
@@ -22,9 +23,9 @@ import {
 } from '../../src/shared/codexMigration'
 import {
   createCodexMigrationLock,
-  type CodexLockFilesystem,
   type CodexMigrationLockHandle,
 } from '../../src/shared/codexMigrationLock'
+import { LockFsGate, runGated, type LockFsLike } from './codexLockTestGate'
 import {
   SettingsService,
   SETTINGS_STORAGE_KEY,
@@ -153,8 +154,8 @@ async function newDir(): Promise<string> {
   return dir
 }
 
-/** 与 wiring 相同的 node fs 端口（真实原语） */
-const nodeFs: CodexLockFilesystem = {
+/** 与 wiring 同族的真实 fs 端口（含两代协议原语并集——红绿两态共用） */
+const nodeFs: LockFsLike = {
   writeFileExclusive: async (target, data) => {
     const handle = await fsp.open(target, 'wx')
     try {
@@ -177,6 +178,7 @@ const nodeFs: CodexLockFilesystem = {
     }
   },
   readFile: (target) => fsp.readFile(target, 'utf8'),
+  listDirFiles: (dir) => fsp.readdir(dir),
 }
 
 /** 磁盘权威 marker 端口（与 wiring 同语义：tmp+rename 原子写、损坏按无标记） */
@@ -198,13 +200,24 @@ function makeDiskMarkerStore(dir: string): Pick<CodexMigrationPorts, 'readMarker
   }
 }
 
-/** 预置陈旧锁文件（模拟崩溃残留；mtime 回拨 ageMs） */
+/**
+ * 预置崩溃残留锁（模拟胜者残留；mtime 回拨 ageMs）。同时播种两代协议
+ * 形态（旧协议单锁文件 + 代次锁指针与 gen 文件）——红态（三审实现）
+ * 与绿态（代次锁）共用同一调度脚本
+ */
 async function seedStaleLock(dir: string, ageMs: number): Promise<string> {
   const lockPath = path.join(dir, LOCK_FILE)
   const payload = JSON.stringify({ token: 'stale-owner', pid: 4242, createdAt: Date.now() - ageMs })
   await fsp.writeFile(lockPath, payload, 'utf8')
   const old = new Date(Date.now() - ageMs)
   await fsp.utimes(lockPath, old, old)
+  // 代次锁形态：指针 "1" + 陈旧 gen 1
+  await fsp.writeFile(path.join(dir, `${LOCK_FILE}.gen`), '1', 'utf8')
+  const gen1 = path.join(dir, `${LOCK_FILE}.1`)
+  await fsp.writeFile(gen1, JSON.stringify({
+    token: 'stale-owner', pid: 4242, createdAt: Date.now() - ageMs, gen: 1,
+  }), 'utf8')
+  await fsp.utimes(gen1, old, old)
   return lockPath
 }
 
@@ -340,21 +353,37 @@ describe('P2-B：双窗口独立 memento 缓存 + 延迟广播 + 共享磁盘状
   })
 })
 
-// ---- 同修：锁接管竞态（不得按过期观察删除新锁） ----
+// ---- 四审 P2-D：生产链受控调度（三「窗口」→ 引导恰一次） ----
 
-describe('锁接管竞态：A 接管重建新锁后 B 持旧 stat 尝试接管（真实 fs 受控调度）', () => {
-  it('不得删 A 新锁：至多一方完成迁移（评审方受控调度）', async () => {
+describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独立缓存 + 受控调度 → 引导恰一次', () => {
+  it('A 挂起于 owner 序列（pending 已落盘）、C 持陈旧观察接管、任意锁原语边界注入 B 完整激活 → guides 恰 1', async () => {
     const dir = await newDir()
-    // 1. 预置陈旧锁（上一次崩溃残留，mtime 远超阈值）——B 的「旧观察」对象
     const lockPath = await seedStaleLock(dir, 60_000)
     const diskMarker = makeDiskMarkerStore(dir)
+    // 三「窗口」各自独立 overlay 缓存（跨窗广播延迟/丢失——同 P2-B 形态）
     const windowA = makeMemento()
-    windowA.store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
     const windowB = makeMemento()
-    windowB.store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
-    const guides = { A: 0, B: 0 }
+    const windowC = makeMemento()
+    for (const w of [windowA, windowB, windowC]) {
+      w.store.set(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'codex' })
+    }
+    const guides = { A: 0, B: 0, C: 0 }
+    const windowPorts = (
+      window: ReturnType<typeof makeMemento>,
+      lock: CodexMigrationLockHandle,
+      guideKey: 'A' | 'B' | 'C',
+    ): CodexMigrationPorts => ({
+      readRawOverlay: () => window.memento.get(SETTINGS_STORAGE_KEY),
+      applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
+      ...diskMarker,
+      extensionVersion: () => '1.2.3-test',
+      requestGuide: () => {
+        guides[guideKey] += 1
+      },
+      lock,
+    })
 
-    // A 的 writeMarker(pending) 屏障：把 A 停在其迁移序列中段（持有新锁）
+    // A 的 writeMarker(pending) 屏障：把 A 停在其 owner 序列中段（持有锁）
     let releaseA: (() => void) | undefined
     let aEntered: (() => void) | undefined
     const aGate = new Promise<void>((resolve) => {
@@ -381,53 +410,53 @@ describe('锁接管竞态：A 接管重建新锁后 B 持旧 stat 尝试接管�
       },
       lock: createCodexMigrationLock(nodeFs, lockPath, { token: 'token-a', pid: 1000 }),
     }
-    // B 持旧 stat：对 lockPath 的**首次** stat 返回 60s 前的伪造值（模拟
-    // B 在旧锁时代完成陈旧观察、之后未重读）；其余原语与后续 stat 真实
-    let staleObservationsLeft = 1
-    const staleObservingFs: CodexLockFilesystem = {
-      ...nodeFs,
-      statMtimeMs: async (target) => {
-        if (target === lockPath && staleObservationsLeft > 0) {
-          staleObservationsLeft -= 1
-          return Date.now() - 60_000
+    const portsB = windowPorts(
+      windowB,
+      createCodexMigrationLock(nodeFs, lockPath, { token: 'token-b', pid: 1000 }),
+      'B',
+    )
+    // C：门控端口——C 的每个锁原语边界都是第三方（B）的完整激活入场点
+    const gate = new LockFsGate()
+    const portsC = windowPorts(
+      windowC,
+      createCodexMigrationLock(gate.wrap(nodeFs), lockPath, { token: 'token-c', pid: 1000 }),
+      'C',
+    )
+
+    let runA: Promise<{ action: string; guide: boolean }> | undefined
+    let aStarted = false
+    const cResult = await runGated(
+      gate,
+      () => runCodexThemeMigration(portsC, {
+        lockStaleMs: 10_000, waitTimeoutMs: 150, pollIntervalMs: 5,
+      }),
+      async (_index, op) => {
+        if (!aStarted && op === 'statMtimeMs') {
+          // C 完成首次陈旧观察（真实陈旧值）后世界前进：A 接管胜出并挂
+          // 起在 pending 屏障（持有新鲜锁）——评审方同款「陈旧观察后世界
+          // 已被 A 重建」调度
+          aStarted = true
+          runA = runCodexThemeMigration(portsA)
+          await aEnteredPromise
+          return
         }
-        return nodeFs.statMtimeMs(target)
+        if (aStarted) {
+          // 任意边界：B 完整激活一次（短超时静默退出）
+          await runCodexThemeMigration(portsB, {
+            lockStaleMs: 10_000, waitTimeoutMs: 30, pollIntervalMs: 5,
+          })
+        }
       },
-    }
-    const portsB: CodexMigrationPorts = {
-      readRawOverlay: () => windowB.memento.get(SETTINGS_STORAGE_KEY),
-      applyExclusiveOverlayStep: mementoExclusiveStep(windowB.memento),
-      ...diskMarker,
-      extensionVersion: () => '1.2.3-test',
-      requestGuide: () => {
-        guides.B += 1
-      },
-      lock: createCodexMigrationLock(staleObservingFs, lockPath, { token: 'token-b', pid: 1000 }),
-    }
-
-    // 2. A 接管陈旧锁（删旧建新）→ 迁移序列挂起在 pending（A 持有新锁）
-    const runA = runCodexThemeMigration(portsA)
-    await aEnteredPromise
-    // A 的新锁在位（内容为 A 的 token）
-    expect(JSON.parse(await fsp.readFile(lockPath, 'utf8')).token).toBe('token-a')
-
-    // 3. B 按过期观察尝试接管：rename 夺走 A 新锁 → 对夺走对象自身验证
-    // （真实 mtime 新鲜）→ 原位恢复、不接管、不删除
-    const runB = runCodexThemeMigration(portsB, { pollIntervalMs: 5, waitTimeoutMs: 60 })
+    )
+    // C 落定后放 A 出屏障、收尾
     releaseA?.()
-    const [a, b] = await Promise.all([runA, runB])
+    const a = await runA
 
-    // 至多一方完成迁移；A 的新锁未被 B 的过期观察删除
+    // 四审反例（旧协议）：C 的 rename 窗口让 B 获锁成 owner、A 随后补走
+    // 序列 → guides = 2。代次锁上 C/B 在 A 活锁在场时永远进不来
+    expect(guides.A + guides.B + guides.C).toBe(1)
     expect(a).toEqual({ action: 'migrate', guide: true })
-    expect(b).toEqual({ action: 'none', guide: false })
-    expect(guides.A + guides.B).toBe(1)
+    expect(cResult).toEqual({ action: 'none', guide: false })
     expect((await diskMarker.readMarker())?.state).toBe('done')
-    // 收尾锁位：正常路径 A 释放即净；若与 B 的恢复交错（协议不变量 3
-    // 声明的边界），允许残留一把幽灵锁——但内容必须是 A 的代次（B 从
-    // 未取得认领），且由 mtime 陈旧接管兜底清理
-    const lockStat = await nodeFs.statMtimeMs(lockPath)
-    if (lockStat !== null) {
-      expect(JSON.parse(await fsp.readFile(lockPath, 'utf8')).token).toBe('token-a')
-    }
   })
 })
