@@ -1,12 +1,14 @@
 // #535 T08 旧内核 Codex 设置迁移——vscode 层装配：globalState 原始
 // overlay 读端口 + 经 SettingsService 串行链的最小主题键补丁写端口
-// （PR #581 三审 P2-A）、profile 作用域磁盘权威完成状态（P2-B：
-// globalStorageUri 下 state JSON，跨窗口一致、不依赖各窗口 memento
-// 缓存——1.82.3 的 Memento.get 只读本地 _value，写入与跨窗广播分离）、
-// 代次锁（fencing）认领协议（四审 P2-D：指针 tmp+rename 原子推进、
-// O_EXCL 认领 gen+1、按名释放——协议见 codexMigrationLock 文件头）、
-// 一次性安装引导通知与 _test 钩子（VSIDIAN_TEST_HOOKS 门控，判据与
-// editorGuardWiring 一致）。
+// （PR #581 三审 P2-A）、按 profile 身份命名的磁盘权威完成状态（P2-B +
+// 五审 P2-C 方案 B'：globalStorageUri 下 `legacy-theme-migration.<id>.
+// state.json`——1.82.3 平台无双满足通道，globalStorageUri 磁盘即时但
+// **恒为默认 profile 目录**（跨 profile 共享），故以 globalState PROFILE
+// 域持久化的 profileId 命名分居；身份生成在锁内、双载体持久化，有界
+// 边界见 codexMigration 文件头）、代次锁（fencing）认领协议（四审
+// P2-D：指针 tmp+rename 原子推进、O_EXCL 认领 gen+1、按名释放——协议见
+// codexMigrationLock 文件头）、一次性安装引导通知与 _test 钩子
+// （VSIDIAN_TEST_HOOKS 门控，判据与 editorGuardWiring 一致）。
 //
 // 集成测试宿主的通知短路：VSIDIAN_TEST_HOOKS=1 时引导通知 no-op（独立
 // 桌面测试宿主无法交互 toast，与 editorGuardWiring 同一口径）；引导计
@@ -16,6 +18,7 @@ import { randomUUID } from 'node:crypto'
 import { promises as fsp } from 'fs'
 import * as path from 'path'
 import {
+  CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY,
   parseCodexMigrationMarker,
   runCodexThemeMigration,
   type CodexMigrationMarker,
@@ -33,11 +36,21 @@ import { t } from '../shared/i18n'
 const CODEX_MIGRATION_LOCK_FILE = 'codex-theme-migration.lock'
 
 /**
- * globalStorage 内的迁移完成状态文件（P2-B：profile 作用域磁盘权威——
- * globalStorageUri 本身按 profile 隔离，不用跨 profile 共享目录；判据
- * 不依赖各窗口 globalState memento 缓存）
+ * globalStorage 内按 profile 身份命名的迁移状态文件（P2-B + 五审 P2-C
+ * B'）：globalStorageUri 磁盘读写即时跨窗一致，但 1.82.3 上它**不是按
+ * profile 隔离的**（恒指向默认 profile 的扩展存储目录，跨 profile 共享）
+ * ——profile 隔离由文件名携带的 profileId 承载（身份经 globalState
+ * PROFILE 域持久化，见 CODEX_MIGRATION_PROFILE_ID_STATE_KEY）
  */
-const CODEX_MIGRATION_STATE_FILE = 'codex-theme-migration.state.json'
+const CODEX_MIGRATION_STATE_FILE_PREFIX = 'codex-theme-migration.'
+
+/**
+ * profileId 的 globalState 独立键（B' 第一载体；PROFILE 域）。第二载体
+ * 为原始 overlay 内部键（迁移补丁同批原子写，键名见
+ * CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY）——两载体同域，其一丢失仍可
+ * 恢复身份、状态文件名不漂移
+ */
+const CODEX_MIGRATION_PROFILE_ID_STATE_KEY = 'vsidian.legacyThemeMigration.profileId'
 
 /** 迁移运行时状态（_test 观测面；原始 overlay 两键为原始层值非快照值） */
 export interface CodexMigrationRuntimeState {
@@ -68,18 +81,39 @@ export function createCodexMigrationWiring(
 
   const storageDir = context.globalStorageUri.fsPath
   const lockPath = path.join(storageDir, CODEX_MIGRATION_LOCK_FILE)
-  const statePath = path.join(storageDir, CODEX_MIGRATION_STATE_FILE)
+  /** B'：按 profile 身份命名的状态文件（身份隔离语义见常量注释） */
+  const stateFilePath = (profileId: string): string =>
+    path.join(storageDir, `${CODEX_MIGRATION_STATE_FILE_PREFIX}${profileId}.state.json`)
 
-  // ---- P2-B：磁盘权威完成状态（tmp+rename 原子写；损坏按无标记处理，
+  // ---- B'：profile 身份读写（两载体：globalState 独立键 + 原始 overlay
+  // 内部键——后者由迁移补丁同批原子写，此处只读；生成唯一入口在锁内
+  // owner 序列，见 codexMigration.resolveOrGenerateProfileId） ----
+  const readOverlayRecord = (): Record<string, unknown> | null => {
+    const overlay = context.globalState.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY)
+    if (typeof overlay === 'object' && overlay !== null && !Array.isArray(overlay)) {
+      return overlay
+    }
+    return null
+  }
+  const readProfileIdFromState = (): string | null => {
+    const direct = context.globalState.get(CODEX_MIGRATION_PROFILE_ID_STATE_KEY)
+    if (typeof direct === 'string' && direct !== '') return direct
+    const fromOverlay = readOverlayRecord()?.[CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]
+    if (typeof fromOverlay === 'string' && fromOverlay !== '') return fromOverlay
+    return null
+  }
+
+  // ---- P2-B/P2-C：磁盘权威完成状态（tmp+rename 原子写；损坏按无标记处理，
   // 恢复语义兜底——rename 原子性保证正常路径不会读到半截内容） ----
-  const readMarkerFromDisk = async (): Promise<CodexMigrationMarker | null> => {
+  const readMarkerFromDisk = async (profileId: string): Promise<CodexMigrationMarker | null> => {
     try {
-      return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(statePath, 'utf8')))
+      return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(stateFilePath(profileId), 'utf8')))
     } catch {
       return null
     }
   }
-  const writeMarkerToDisk = async (marker: CodexMigrationMarker): Promise<void> => {
+  const writeMarkerToDisk = async (profileId: string, marker: CodexMigrationMarker): Promise<void> => {
+    const statePath = stateFilePath(profileId)
     await fsp.mkdir(storageDir, { recursive: true })
     const tmp = `${statePath}.${process.pid}.tmp`
     await fsp.writeFile(tmp, JSON.stringify(marker), 'utf8')
@@ -125,8 +159,12 @@ export function createCodexMigrationWiring(
     // P2-A（PR #581 三审）：读-判-写经 SettingsService 串行链——与设置页
     // 保存（apply）互斥，等待窗口内的用户写入不被旧快照覆盖
     applyExclusiveOverlayStep: (step) => settingsService.runExclusiveOverlayStep(step),
-    readMarker: readMarkerFromDisk,
-    writeMarker: writeMarkerToDisk,
+    readProfileId: async () => readProfileIdFromState(),
+    writeProfileId: async (id) => {
+      await context.globalState.update(CODEX_MIGRATION_PROFILE_ID_STATE_KEY, id)
+    },
+    readMarker: (profileId) => readMarkerFromDisk(profileId),
+    writeMarker: (profileId, marker) => writeMarkerToDisk(profileId, marker),
     extensionVersion: () => String(
       (context.extension.packageJSON as { version?: unknown }).version ?? ''),
     requestGuide: () => {
@@ -143,8 +181,9 @@ export function createCodexMigrationWiring(
   }
 
   const stateFor = async (): Promise<CodexMigrationRuntimeState> => {
-    const marker = await readMarkerFromDisk()
-    const overlay = context.globalState.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY)
+    const profileId = readProfileIdFromState()
+    const marker = profileId !== null ? await readMarkerFromDisk(profileId) : null
+    const overlay = readOverlayRecord()
     return {
       marker,
       guideCount,
@@ -193,14 +232,32 @@ export function createCodexMigrationWiring(
           return true
         },
       ),
-      // 用例隔离：清磁盘权威状态 + 锁全族清理（指针与所有代次文件；
-      // _test 专用原语，生产路径不调用）+ 引导计数归零（overlay 不动
-      // ——造数走注入钩子；runner 每用例前调用，防止迁移状态与锁残留
-      // 跨用例污染——崩溃注入场景的残留锁在此收口）
+      // 用例隔离：清磁盘权威状态（按身份前缀的全族状态文件——历史用例
+      // 可能生成过多个身份）+ profileId 双载体（globalState 独立键 + 原始
+      // overlay 内部键）+ 锁全族清理（指针与所有代次文件；_test 专用
+      // 原语，生产路径不调用）+ 引导计数归零（其余 overlay 不动——造数
+      // 走注入钩子；runner 每用例前调用，防止迁移状态与锁残留跨用例污染
+      // ——崩溃注入场景的残留锁在此收口）
       vscode.commands.registerCommand(
         'onegayi.vsidian._test.resetCodexMigration',
         async () => {
-          await fsp.rm(statePath, { force: true })
+          try {
+            const names = await fsp.readdir(storageDir)
+            for (const name of names) {
+              if (name.startsWith(CODEX_MIGRATION_STATE_FILE_PREFIX) && name.endsWith('.state.json')) {
+                await fsp.rm(path.join(storageDir, name), { force: true })
+              }
+            }
+          } catch {
+            // 目录不存在（从未迁移）——无状态可清
+          }
+          await context.globalState.update(CODEX_MIGRATION_PROFILE_ID_STATE_KEY, undefined)
+          const overlay = readOverlayRecord()
+          if (overlay !== null && CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY in overlay) {
+            const cleaned = { ...overlay }
+            delete cleaned[CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]
+            await context.globalState.update(SETTINGS_STORAGE_KEY, cleaned)
+          }
           await migrationLock.forceCleanup()
           guideCount = 0
           return true

@@ -43,7 +43,6 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 installLocale('zh-cn', zhCn)
 
 const BRIDGE_THEME_REF = 'ONEGAYI.vsidian-codex-bridge/codex'
-const STATE_FILE = 'codex-theme-migration.state.json'
 const LOCK_FILE = 'codex-theme-migration.lock'
 
 /** 内存 memento（globalState 语义：update 完成后 get 可见新值——同窗口） */
@@ -122,8 +121,11 @@ function makeReview3Ports(options: {
   const ports: CodexMigrationPorts = {
     readRawOverlay: () => options.memento.get(SETTINGS_STORAGE_KEY),
     applyExclusiveOverlayStep: options.exclusiveStep,
+    // B'：身份已收敛的常态（本场景焦点在 memento 缓存延迟非身份生成）
+    readProfileId: async () => 'review3-profile',
+    writeProfileId: async () => {},
     readMarker: async () => options.markerBox.value ?? null,
-    writeMarker: async (marker) => {
+    writeMarker: async (_profileId, marker) => {
       options.markerBox.value = marker
       if (marker.state === 'pending') {
         markEntered?.()
@@ -183,19 +185,21 @@ const nodeFs: LockFsLike = {
 
 /** 磁盘权威 marker 端口（与 wiring 同语义：tmp+rename 原子写、损坏按无标记） */
 function makeDiskMarkerStore(dir: string): Pick<CodexMigrationPorts, 'readMarker' | 'writeMarker'> {
-  const statePath = path.join(dir, STATE_FILE)
+  const statePath = (profileId: string) =>
+    path.join(dir, `codex-theme-migration.${profileId}.state.json`)
   return {
-    readMarker: async () => {
+    readMarker: async (profileId) => {
       try {
-        return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(statePath, 'utf8')))
+        return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(statePath(profileId), 'utf8')))
       } catch {
         return null
       }
     },
-    writeMarker: async (marker) => {
-      const tmp = `${statePath}.tmp`
+    writeMarker: async (profileId, marker) => {
+      const target = statePath(profileId)
+      const tmp = `${target}.tmp`
       await fsp.writeFile(tmp, JSON.stringify(marker), 'utf8')
-      await fsp.rename(tmp, statePath)
+      await fsp.rename(tmp, target)
     },
   }
 }
@@ -330,6 +334,8 @@ describe('P2-B：双窗口独立 memento 缓存 + 延迟广播 + 共享磁盘状
     ): CodexMigrationPorts => ({
       readRawOverlay: () => window.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
+      readProfileId: async () => 'review3-profile',
+      writeProfileId: async () => {},
       ...diskMarker,
       extensionVersion: () => '1.2.3-test',
       requestGuide: () => {
@@ -349,7 +355,7 @@ describe('P2-B：双窗口独立 memento 缓存 + 延迟广播 + 共享磁盘状
     const b = await runCodexThemeMigration(portsB)
     expect(b).toEqual({ action: 'none', guide: false })
     expect(guides.A + guides.B).toBe(1) // 引导恰一次
-    expect((await diskMarker.readMarker())?.state).toBe('done')
+    expect((await diskMarker.readMarker('review3-profile'))?.state).toBe('done')
   })
 })
 
@@ -375,6 +381,8 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     ): CodexMigrationPorts => ({
       readRawOverlay: () => window.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
+      readProfileId: async () => 'review3-profile',
+      writeProfileId: async () => {},
       ...diskMarker,
       extensionVersion: () => '1.2.3-test',
       requestGuide: () => {
@@ -395,9 +403,11 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     const portsA: CodexMigrationPorts = {
       readRawOverlay: () => windowA.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(windowA.memento),
+      readProfileId: async () => 'review3-profile',
+      writeProfileId: async () => {},
       readMarker: diskMarker.readMarker,
-      writeMarker: async (marker) => {
-        await diskMarker.writeMarker(marker)
+      writeMarker: async (profileId, marker) => {
+        await diskMarker.writeMarker(profileId, marker)
         if (marker.state === 'pending') {
           aEntered?.()
           aEntered = undefined
@@ -457,6 +467,6 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     expect(guides.A + guides.B + guides.C).toBe(1)
     expect(a).toEqual({ action: 'migrate', guide: true })
     expect(cResult).toEqual({ action: 'none', guide: false })
-    expect((await diskMarker.readMarker())?.state).toBe('done')
+    expect((await diskMarker.readMarker('review3-profile'))?.state).toBe('done')
   })
 })

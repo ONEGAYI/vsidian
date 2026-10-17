@@ -12,6 +12,7 @@
 // 方复现用例的契约化。
 import { describe, expect, it } from 'vitest'
 import {
+  CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY,
   parseCodexMigrationMarker,
   planCodexThemeMigration,
   runCodexThemeMigration,
@@ -20,6 +21,16 @@ import {
 } from '../../src/shared/codexMigration'
 import type { CodexMigrationLockHandle } from '../../src/shared/codexMigrationLock'
 import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../../src/shared/settings'
+
+/**
+ * 编排用例默认预置的 profile 身份（B' 五审 P2-C）：身份生成/等待窗/按身份
+ * 分居磁盘的语义由 codexMigrationReview5.test.ts 以真实 fs 钉住，此处预置
+ * 身份让用例聚焦迁移矩阵与持久化顺序本身
+ */
+const TEST_PROFILE_ID = 'test-profile-1'
+
+/** 迁移补丁同批落 overlay 的身份键期望（与生产 CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY 同键） */
+const PROFILE_ID_IN_OVERLAY = { [CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]: TEST_PROFILE_ID }
 
 // ---- 三档迁移矩阵（规格 addon-themes.md §6.2 / 任务书语义矩阵） ----
 
@@ -171,15 +182,33 @@ function fakePorts(
   marker: CodexMigrationMarker | undefined = undefined,
 ): {
   ports: CodexMigrationPorts
-  state: { overlay: unknown; marker: CodexMigrationMarker | undefined; guides: number; events: string[] }
+  state: {
+    overlay: unknown
+    marker: CodexMigrationMarker | undefined
+    markers: Map<string, CodexMigrationMarker>
+    guides: number
+    events: string[]
+    profileId: string | null
+  }
   lock: FakeLock
 } {
-  const state = { overlay: rawOverlay, marker, guides: 0, events: [] as string[] }
+  const state = {
+    overlay: rawOverlay,
+    /** B'：按身份分箱的 marker 读箱（真实 fs 分居语义的内存等价） */
+    markers: new Map<string, CodexMigrationMarker>(
+      marker !== undefined ? [[TEST_PROFILE_ID, marker]] : [],
+    ),
+    /** 最后写入的 marker（诊断面；读判走 markers 分箱） */
+    marker,
+    guides: 0,
+    events: [] as string[],
+    profileId: TEST_PROFILE_ID as string | null,
+  }
   const lock = makeFakeLock()
   const ports: CodexMigrationPorts = {
     readRawOverlay: () => state.overlay,
     // P2-A（PR #581 三审）：端口为互斥「读-判-写」——fake 以同快照合成；
-    // 覆写点（写失败/写后崩场景）由用例替换整个方法
+    // 覆盖点（写失败/写后崩场景）由用例替换整个方法
     applyExclusiveOverlayStep: async (step) => {
       const { patch, result } = step(state.overlay)
       if (patch !== null) {
@@ -188,9 +217,21 @@ function fakePorts(
       }
       return result
     },
-    readMarker: async () => state.marker ?? null,
-    writeMarker: async (markerToWrite) => {
+    // B' 身份端口：读序同生产（独立键 → overlay 载体）；marker 按身份分箱
+    readProfileId: async () => {
+      if (state.profileId !== null) return state.profileId
+      const fromOverlay = isRecord(state.overlay)
+        ? state.overlay[CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]
+        : undefined
+      return typeof fromOverlay === 'string' && fromOverlay !== '' ? fromOverlay : null
+    },
+    writeProfileId: async (id) => {
+      state.profileId = id
+    },
+    readMarker: async (profileId) => state.markers.get(profileId) ?? null,
+    writeMarker: async (profileId, markerToWrite) => {
       state.events.push(`write-marker:${markerToWrite.state}`)
+      state.markers.set(profileId, markerToWrite)
       state.marker = markerToWrite
     },
     extensionVersion: () => '1.2.3-test',
@@ -208,7 +249,11 @@ describe('runCodexThemeMigration（宿主编排：持久化顺序）', () => {
     const { ports, state, lock } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
     const result = await runCodexThemeMigration(ports)
     expect(result).toEqual({ action: 'migrate', guide: true })
-    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.overlay).toEqual({
+      [APPEARANCE_THEME_KEY]: 'default',
+      [MERMAID_THEME_KEY]: 'default',
+      ...PROFILE_ID_IN_OVERLAY, // B'：身份随迁移补丁同批落 overlay（第二载体）
+    })
     expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
     expect(state.guides).toBe(1)
     // 顺序：pending → overlay → guide → done（引导前已有 pending 兜底——
@@ -224,6 +269,7 @@ describe('runCodexThemeMigration（宿主编排：持久化顺序）', () => {
       [APPEARANCE_THEME_KEY]: 'default',
       [MERMAID_THEME_KEY]: 'default',
       'editor.readableLineWidth': 800,
+      ...PROFILE_ID_IN_OVERLAY,
     })
   })
 
@@ -231,7 +277,11 @@ describe('runCodexThemeMigration（宿主编排：持久化顺序）', () => {
     const { ports, state } = fakePorts({ [APPEARANCE_THEME_KEY]: 'pub.two/aqua', [MERMAID_THEME_KEY]: 'codex' })
     const result = await runCodexThemeMigration(ports)
     expect(result).toEqual({ action: 'clean-legacy', guide: false })
-    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'pub.two/aqua', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.overlay).toEqual({
+      [APPEARANCE_THEME_KEY]: 'pub.two/aqua',
+      [MERMAID_THEME_KEY]: 'default',
+      ...PROFILE_ID_IN_OVERLAY,
+    })
     expect(state.marker).toBeUndefined()
     expect(state.guides).toBe(0)
   })
@@ -288,7 +338,11 @@ describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 
     await expect(runCodexThemeMigration(ports)).rejects.toThrow('simulated crash after overlay write')
     expect(state.guides).toBe(0)
     expect(state.marker).toEqual({ state: 'pending', version: '1.2.3-test' })
-    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.overlay).toEqual({
+      [APPEARANCE_THEME_KEY]: 'default',
+      [MERMAID_THEME_KEY]: 'default',
+      ...PROFILE_ID_IN_OVERLAY,
+    })
     // 恢复存储重跑（模拟下次激活）：已迁移（plan none）+ pending → 补发引导 + done
     const retry = await runCodexThemeMigration(ports)
     expect(retry).toEqual({ action: 'none', guide: true })
@@ -320,7 +374,11 @@ describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 
     const retry = await runCodexThemeMigration(ports)
     expect(retry).toEqual({ action: 'migrate', guide: true })
     expect(state.guides).toBe(1)
-    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.overlay).toEqual({
+      [APPEARANCE_THEME_KEY]: 'default',
+      [MERMAID_THEME_KEY]: 'default',
+      ...PROFILE_ID_IN_OVERLAY,
+    })
     expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
   })
 
@@ -332,12 +390,12 @@ describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 
     const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
     let failDoneOnce = true
     const originalWriteMarker = ports.writeMarker
-    ports.writeMarker = async (marker) => {
+    ports.writeMarker = async (profileId, marker) => {
       if (marker.state === 'done' && failDoneOnce) {
         failDoneOnce = false
         throw new Error('marker write down')
       }
-      await originalWriteMarker(marker)
+      await originalWriteMarker(profileId, marker)
     }
     await expect(runCodexThemeMigration(ports)).rejects.toThrow('marker write down')
     expect(state.guides).toBe(1)
@@ -357,7 +415,11 @@ describe('runCodexThemeMigration（迁移中断恢复——PR #581 评审发现 
     )
     const result = await runCodexThemeMigration(ports)
     expect(result).toEqual({ action: 'clean-legacy', guide: true })
-    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'pub.two/aqua', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.overlay).toEqual({
+      [APPEARANCE_THEME_KEY]: 'pub.two/aqua',
+      [MERMAID_THEME_KEY]: 'default',
+      ...PROFILE_ID_IN_OVERLAY,
+    })
     expect(state.guides).toBe(1)
     expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
   })
@@ -388,7 +450,11 @@ describe('runCodexThemeMigration（多窗口并发——PR #581 评审发现 2�
     expect(results).toEqual(['migrate:true', 'none:false'])
     expect(state.guides).toBe(1)
     expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
-    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.overlay).toEqual({
+      [APPEARANCE_THEME_KEY]: 'default',
+      [MERMAID_THEME_KEY]: 'default',
+      ...PROFILE_ID_IN_OVERLAY,
+    })
   })
 
   it('胜者崩溃（锁残留且 mtime 陈旧）→ 后续激活接管补完（引导欠账必达）', async () => {
@@ -415,7 +481,11 @@ describe('runCodexThemeMigration（多窗口并发——PR #581 评审发现 2�
     const result = await runCodexThemeMigration(ports)
     expect(result).toEqual({ action: 'migrate', guide: true })
     expect(state.guides).toBe(1)
-    expect(state.overlay).toEqual({ [APPEARANCE_THEME_KEY]: 'default', [MERMAID_THEME_KEY]: 'default' })
+    expect(state.overlay).toEqual({
+      [APPEARANCE_THEME_KEY]: 'default',
+      [MERMAID_THEME_KEY]: 'default',
+      ...PROFILE_ID_IN_OVERLAY,
+    })
     expect(state.marker).toEqual({ state: 'done', version: '1.2.3-test' })
   })
 
@@ -430,6 +500,46 @@ describe('runCodexThemeMigration（多窗口并发——PR #581 评审发现 2�
   })
 })
 
+// ---- B'（PR #581 五审 P2-C）：profile 身份快速路径与锁内生成 ----
+
+describe("runCodexThemeMigration（B' 身份解析）", () => {
+  it('无身份且无迁移负担 → 零开销退出：不生成身份、不碰锁、不写盘', async () => {
+    const { ports, state, lock } = fakePorts({ [MERMAID_THEME_KEY]: 'default' })
+    state.profileId = null // 尚无身份
+    const result = await runCodexThemeMigration(ports, { profileIdWaitMs: 0 })
+    expect(result).toEqual({ action: 'none', guide: false })
+    expect(state.profileId).toBeNull() // 未生成（无需迁移的 profile 零负担）
+    expect(state.events).toEqual([])
+    expect(lock.isHeld()).toBe(false)
+  })
+
+  it('无身份且需要迁移 → 锁内生成身份，并随迁移补丁同批落 overlay（第二载体）', async () => {
+    const { ports, state } = fakePorts({ [MERMAID_THEME_KEY]: 'codex' })
+    state.profileId = null
+    const result = await runCodexThemeMigration(ports, { profileIdWaitMs: 0, profileIdPollMs: 1 })
+    expect(result).toEqual({ action: 'migrate', guide: true })
+    expect(state.profileId).not.toBeNull()
+    const overlay = state.overlay as Record<string, unknown>
+    expect(overlay[CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]).toBe(state.profileId)
+    expect(state.markers.get(state.profileId!)).toEqual({ state: 'done', version: '1.2.3-test' })
+  })
+
+  it('独立键丢失、overlay 载体在场 → 身份从载体恢复，读到既有 done 快速短路', async () => {
+    const { ports, state } = fakePorts(
+      { [MERMAID_THEME_KEY]: 'codex', [CODEX_MIGRATION_PROFILE_ID_OVERLAY_KEY]: TEST_PROFILE_ID },
+      { state: 'done', version: '1.1.0' },
+    )
+    state.profileId = null // 独立键丢失
+    const result = await runCodexThemeMigration(ports, { profileIdWaitMs: 0 })
+    expect(result).toEqual({ action: 'none', guide: false })
+    // 身份恢复成功 → 既有 done 短路；若身份丢失则生成新身份 → 无 done →
+    // 重走迁移并引导（本用例反向钉住载体恢复语义）
+    expect(state.guides).toBe(0)
+    expect(state.events).toEqual([])
+  })
+})
+
 // P2-B（PR #581 三审）：完成标记的 globalState 独立键已随磁盘权威化退役
-// （state JSON 于 globalStorageUri 下，跨窗口一致、不依赖 memento 缓存）——
-// 双窗口独立缓存场景见 codexMigrationReview3.test.ts。
+// （state JSON 于 globalStorageUri 下，跨窗口一致、不依赖 memento 缓存；
+// 五审 B' 起按 profile 身份命名分居）——双窗口独立缓存场景见
+// codexMigrationReview3.test.ts，双 profile 分居场景见 codexMigrationReview5.test.ts。
