@@ -250,6 +250,33 @@ if (!production) {
     sourcemap: true,
     logLevel: 'info',
   })
+  // #566（T01）文档内 CSS 作用域探针双产物（研究票，不进 VSIX）：
+  // - suite：宿主侧套件（node18/cjs，复用生产 editorCsp 纯逻辑，由
+  //   test/integration/htmlCssScopeProbe/runProbe.mjs 以 1.82.3 宿主启动）
+  // - main：webview 侧探针核心桥（browser/iife，target chrome114 对齐下界
+  //   宿主 Electron 25/Chromium 114；本机浏览器由 runBrowserProbe.mjs 注入
+  //   同一 bundle 双环境对照）
+  targets.push({
+    entryPoints: ['test/integration/htmlCssScopeProbe/suite.ts'],
+    outfile: 'out/test/integration/htmlCssScopeProbe/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/htmlCssScopeProbe/webviewMain.ts'],
+    outfile: 'out/test/integration/htmlCssScopeProbe/main.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    logLevel: 'info',
+  })
   targets.push({
     // 空窗口命令激活实测套件（#33）：由 test/integration/runSettingsActivation.mjs
     // 以空启动参数运行（套件内不得显式 activate 扩展）

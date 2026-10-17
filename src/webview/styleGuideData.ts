@@ -1471,6 +1471,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#7（2026-09-24）"
   },
   {
+    "id": "reading-html-block",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "container",
+    "target": ".vsidian-reading-html",
+    "purpose": "阅读视图的块级原生 HTML 块（#567/T02）：顶层 html_block token 净化后渲染为原生语义 DOM（合并单元格表格等 Markdown 无法表达的结构）。内容保持原生标签语义——不加生产 Markdown 块类（如 vsidian-reading-heading-1），样式按实际 DOM 匹配（Q4=B）；纯 <style> 块隐藏（Q6A——文档内样式自 #569/T04 起从源文装载生效，渲染区零占位）；净化后为空的片段（script-only 等）回退转义源码 pre（.vsidian-html-source-fallback）。块进入既有虚拟化挂载窗口（挂载/回收以块为单位）；#569 起标记铺开到全部内容块根（Markdown 块同挂 data-vsidian-doc-scope——逐块标记是 b2 隔离的结构前提），源文不可伪造——净化边界剥离源文自带的 data-vsidian-*。",
+    "views": [
+      "reading"
+    ],
+    "states": "纯 <style> 块（内部 HTML 为空）display:none 零占位；其余常态渲染。",
+    "dom": "阅读容器内块级 div（vsidian-reading-block + vsidian-reading-html，携带 data-vsidian-src-start/end 源锚点）；内部为净化后的原生 HTML（白名单第一道闸 + sanitizeReadingDom 纵深第二道闸）。",
+    "example": ".markdown-preview-view .vsidian-reading-html table {\n  /* 原生 table 语义：标签选择器按实际 DOM 命中 */\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view 内原生渲染的 HTML 块（无专用容器类）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 readingHtmlBlocks（#567）：块化区间/锚点、净化契约、纯 style 隐藏、script-only 回退、docScope 标记",
+      "单元 htmlBlock（#567）：两端 HTML 块区间对拍（Lezer HTMLBlock ↔ markdown-it html_block）",
+      "集成「块级 HTML 双模式渲染」（#567）：paint.html.roots / visible / mergedCell（合并单元格绘制层命中）"
+    ],
+    "introduced": "#567（2026-10-16）"
+  },
+  {
     "id": "live-link",
     "domain": "content",
     "category": "link-image-wikilink",
@@ -2007,6 +2031,32 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#11（2026-09-24，随双链节如实记录）"
   },
   {
+    "id": "doc-style-scope",
+    "domain": "content",
+    "category": "content-limits",
+    "kind": "limitation",
+    "target": "文档内 <style>（data-vsidian-doc-scope 标记面 / style[data-vsidian-doc-style] 产物元素）",
+    "purpose": "文档内 <style> 的隔离装载（#569/T04，T01 探针 b2 路线）：全文源码顺序收集（块级与行内、含容器内降级块；代码/注释/frontmatter 内的字面 <style> 不收集）经 CSSOM 逐选择器改写为 :where([data-vsidian-doc-scope=…]) :is(原选择器)（:where 归零前缀特异性、:is 保留原特异性、伪元素拆 :is 之外；@media/@supports/@layer/@container 递归下钻、CSS 嵌套 & 代换、@keyframes/@font-face/@import/@property 原样保留——文档级名字空间，嵌套同名冲突属既有 CSS 语义）。产物挂 head 末尾**后置于 CSS 片段链**（同特异性文档胜——就近直觉；片段启停/排序/契约不受影响）。作用域：仅本篇渲染正文（Markdown 块与原生 HTML 块的渲染根逐块携带标记，系统 chrome——工具栏/源码层/嵌入卡壳——不携带）；嵌入视图按 canonicalRefTargetKey 派生键各守容器，同一目标多实例共享产物、释放归零移除。**:root/body/html 改写后失活**（不翻译选择器语义——Obsidian 式文档根映射留待用户反馈，登记在案）。:where 前缀使文档规则特异性=原选择器特异性——片段类(0,1,0) 仍胜文档标签(0,0,1)。样式失配不提示错误（正常 CSS 结果）；url()/@import 资源按样式所属 Markdown 解析归后续票。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "装载不依赖样式块 DOM 在场（离屏/显形/虚拟化卸载不移除）；视图释放回收。",
+    "dom": "主文档标记值 \"doc\"；嵌入实例为 ref:<64bit hex>（fsPath 规范身份派生）；产物元素观测属性 data-vsidian-doc-style=<docScope>。源文自带 data-vsidian-* 被净化剥离，不可伪造标记。",
+    "example": "<style>\n.mark-x { color: red; }  /* 命中本篇内容（两模式渲染 DOM）*/\n.cm-content { color: red; }  /* 不命中：源码层无标记祖先 */\n</style>",
+    "obsidian": {
+      "counterpart": "Obsidian 文档内 <style> 全局生效（无隔离改写）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 docStyle（#569）：收集顺序/代码注释排除/改写矩阵（选择器形态/at-rule/嵌套&/伪元素/:root 失活）/身份键",
+      "单元 docStyleLoader（#569）：产物挂 head 末尾、多实例共享、释放无残留、源文更新同步",
+      "浏览器 docStyle（#569）：层叠/双模式命中/工具栏与源码层排除/A→B→C 隔离与多 B 实例/虚拟化稳定/编辑撤销重做/片段兼容",
+      "集成「文档样式」（#569）：paint.docStyle（Reading 标签直中计算色 + 工具栏基线 + 产物回收）"
+    ],
+    "introduced": "#569（2026-10-16）"
+  },
+  {
     "id": "limit-callout",
     "domain": "content",
     "category": "content-limits",
@@ -2433,7 +2483,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "graphic-interact",
     "kind": "selector",
     "target": ".vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）",
-    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。按钮底色为「主题面纯色渐变层 + 编辑器底实垫」双层合成（常态 editorWidget-background、悬停 button-secondaryBackground）：主题变量可能半透明（玻璃风主题），按钮直浮图片等斑驳内容时半透明面透出内容色，垫实底后任何主题不透底；主题值为实色时渐变层全覆盖、观感与单层等同。",
+    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#567（T02）起块级原生 HTML 的 Live 宿主复用同款按钮族 DOM/CSS（仅 edit 钮——buildGraphicChrome 的 onPopup 可缺省形态；宿主 .vsidian-live-html 自有定位规则，不入 frame 类）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。按钮底色为「主题面纯色渐变层 + 编辑器底实垫」双层合成（常态 editorWidget-background、悬停 button-secondaryBackground）：主题变量可能半透明（玻璃风主题），按钮直浮图片等斑驳内容时半透明面透出内容色，垫实底后任何主题不透底；主题值为实色时渐变层全覆盖、观感与单层等同。",
     "views": [
       "live",
       "reading"
@@ -3925,6 +3975,105 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 tableEmbed（#248 新增）：Live/Reading 双模式表头与数据格卡绘制、转义别名形态、卡内真实指针选字不启动格区选取、区域复制序列化父文档源文、窄列不撑破"
     ],
     "introduced": "#223（2026-09-30）"
+  },
+  {
+    "id": "live-html-widget",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "container",
+    "target": ".vsidian-live-html（Live HTML 块宿主 widget；.vsidian-live-html-content 为净化内容根；.vsidian-live-html-frame 与 .vsidian-live-html-frame-shield 为 #572 iframe 命中接管结构——行内宿主 .vsidian-live-inline-html 同款复用）",
+    "purpose": "Live 视图的块级原生 HTML 片段替换宿主（#567/T02）：Lezer HTMLBlock 派生的顶层 html 块在光标/选区未触及源码区间时以**精确区间 [from, to] inline replace widget** 呈现净化后的原生语义 DOM（合并单元格表格等）；触及（selectionTouchesRange 语义：折叠光标含两端、非空选区严格相交、任一选区命中；查找/锚点命中同列）时撤下 widget 源码显形可编辑，完全离开恢复渲染——显隐只作用于视觉呈现，零写回零独立撤销项（宿主吞事件反向于嵌入卡片：ignoreEvent=false，点击落父编辑器选区管线）。悬停显示边框（focusBorder outline）与右上角编辑按钮（复用 graphic-chrome 按钮族 DOM/CSS，仅 edit 钮）；普通点击渲染内容或按钮 = 选中该片段完整源码；键盘进入保留原落点（inline replace 是垂直导航可进入该行的前提——块级 replace 会被 CM6 跳过整行）。纯 <style> 块恒源码常显不占位（Q6A）。#572（T07）起 iframe 经净化白名单放行（sandbox 系统强制：https 远端帧仅 allow-scripts、其余形态零 token），Live widget 内以透明 shield 盖帧兑现「单击 iframe 可视区域 → 选中完整源码」——沙箱/跨域子文档是独立 document，帧内指针事件不冒泡到父文档，外层命中机制是结构载体而非事件自监听；Reading 侧不接管（U13 原生交互归阅读态）。内容根携带 data-vsidian-doc-scope 文档身份标记（隔离基座，源文 data-vsidian-* 被净化剥离不可伪造）；净化后为空的片段回退转义源码（.vsidian-html-source-fallback，与 reading-html-block 的降级态同类名）。",
+    "views": [
+      "live"
+    ],
+    "states": "隐藏态（未触及：inline 替换 widget，前后 cm-widgetBuffer 零高块级化——观感等同隐藏、布局盒保留作坐标锚）/ 显形态（触及：无 widget，源文在场）；悬停边框与按钮显隐由 CSS :hover 承担（按钮另有 :focus-visible 键盘可达态）；shield 常驻（iframe 在场即覆盖，透明零观感、无状态切换）。",
+    "dom": "Live 视图 .cm-content 内 .cm-line 中的块级化宿主 div（position:relative 承担按钮定位上下文）；内部 .vsidian-live-html-content 挂净化后的原生 HTML，按钮组 .vsidian-graphic-chrome 为后置子级（仅 edit）。#572 起内容内的 iframe 各包一层 .vsidian-live-html-frame（position:relative；行内宿主内 display:inline-block 不断行），后置子级 .vsidian-live-html-frame-shield（absolute + inset:0 + z-index:1 透明压顶）。主文与嵌入内部 Live 统一装配（B 的 html 块同渲染）。",
+    "example": "#app .cm-editor .cm-content .vsidian-live-html {\n  /* 宿主是片段定位入口（悬停边框与间距在此） */\n}",
+    "obsidian": {
+      "counterpart": "无专用类（Obsidian Live 的 HTML 块按源文/渲染切换，内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveHtml（#567）：块表派生（容器/代码/frontmatter 排除）、显隐谓词矩阵（端点/内部/相交/跨块/多选区）、纯 style 恒显、widget DOM 净化负向、revealHtmlSourceAtCursor 选区契约",
+      "浏览器 liveHtml（#567）：真实点击（内容与按钮两入口 = 完整源码选区）、方向键进出保留落点、正反向跨块选择不扩选、多选区不坍缩、零写回、悬停边框绘制",
+      "单元 liveHtmlCssContract（#572）：wrapper 定位上下文、行内 inline-block、shield 全覆盖压顶（absolute + inset:0 + z-index）三规则钉住",
+      "浏览器 htmlIframe572（#572）：iframe 内容真实可见（CDP 帧读取）、srcdoc 脚本零执行、Live 单击帧区选中完整源码（shield 命中）、释放无残留",
+      "集成「块级 HTML 双模式渲染」（#567）：paint.html（live 侧 widget 渲染根命中）；#572 起 paint.html.iframes（帧装配面 + sandbox 面 + shield 计数）"
+    ],
+    "introduced": "#567（2026-10-16）"
+  },
+  {
+    "id": "live-inline-html-widget",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "container",
+    "target": ".vsidian-live-inline-html（Live 行内 HTML 宿主 widget；.vsidian-live-inline-html-content 为净化内容根）",
+    "purpose": "Live 视图的行内原生 HTML 片段替换宿主（#568/T03）：Lezer HTMLTag 树派生的完整行内片段（shared/htmlInline 配对——同行、最外层；成对嵌套取最外层，void/自闭合单标签即片段）在光标/选区未触及源码区间时以**精确区间 [from, to] inline replace widget** 呈现净化后的原生语义 DOM（span 内联颜色、br 换行等）；宿主 display:inline——前后正文同行流不断行，不隐藏前后正文。触及（selectionTouchesRange 语义：折叠光标含两端、非空选区严格相交、任一选区命中；查找/锚点命中同列）时撤下 widget 源码显形可编辑，完全离开恢复渲染——显隐只作用于视觉呈现，零写回零独立撤销项。普通点击渲染内容 = 选中该片段完整源码（与块级共用 mousedown 拦截器工厂，修饰键放行默认链——跨片段选择不扩选）；键盘进入保留原落点。嵌套片段的点击/显形粒度为最外层完整源码（确定性区间）。无悬停边框与编辑按钮（规格悬停 chrome 行只对块级渲染区——行内是正文文字流）。内容根携带 data-vsidian-doc-scope 文档身份标记（消费 #567 已挂通道）；净化后为空的片段（行内 script 等）回退转义源码 span（.vsidian-html-source-fallback）。",
+    "views": [
+      "live"
+    ],
+    "states": "隐藏态（未触及：inline 替换 widget，行内流呈现）/ 显形态（触及：无 widget，源文在场）；无悬停态（chrome 仅块级）。",
+    "dom": "Live 视图 .cm-content 内 .cm-line 中的行内宿主 span（display:inline）；内部 .vsidian-live-inline-html-content 挂净化后的原生 HTML；#572 起内容内 iframe 同款包 .vsidian-live-html-frame + shield（live-html-widget 条目的命中接管结构，行内形态 inline-block）。主文与嵌入内部 Live 统一装配。",
+    "example": "#app .cm-editor .cm-content .vsidian-live-inline-html {\n  /* 宿主行内化是前后正文不断行的前提 */\n}",
+    "obsidian": {
+      "counterpart": "无专用类（Obsidian 行内 HTML 按源文/渲染切换，内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 htmlInline/liveInlineHtml（#568）：片段矩阵（成对嵌套/自闭合/未闭合/孤立闭/转义尖括号/引号属性/跨行降级）+ 两端对拍（Lezer HTMLTag ↔ markdown-it 规则 token）、显隐谓词、嵌套最外层唯一、净化负向",
+      "浏览器 liveInlineHtml（#568）：真实点击 = 完整源码选区、方向键落点、双向跨片段选择、多选区、IME 组合、编辑/粘贴生产链路、阅读态内联颜色绘制",
+      "集成「行内 HTML 双模式内联颜色与换行绘制」（#568）：paint.html.inline（live 宿主命中 + computed color + br 计数）"
+    ],
+    "introduced": "#568（2026-10-16）"
+  },
+  {
+    "id": "reading-inline-html",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "selector",
+    "target": "行内原生元素（无专用容器类）+ span.vsidian-html-source-fallback（降级态）",
+    "purpose": "阅读视图的行内原生 HTML 片段（#568/T03）：完整片段经 vsidian_inline_html 规则整段消费、htmlSanitize 净化后**原位渲染**——无包装容器类（Q4=B：CSS 按实际 DOM 匹配、尊重选择器原意，不引入额外包装干扰 p > span 等结构选择器语义）。span 内联颜色、br 换行等按原生语义生效；前后 Markdown 文字、列表/引用容器、Markdown 表格内语义不丢；片段内不递归 Markdown。不成型片段（未闭合/孤立闭/跨行）维持转义字面；净化后为空的片段回退转义源码 span（.vsidian-html-source-fallback，与块级降级同类名）。标注查找/锚点不受影响（行内片段不改变块序列）。",
+    "views": [
+      "reading"
+    ],
+    "states": "常态原位渲染（无专用类）；降级态 span.vsidian-html-source-fallback 等宽呈现。",
+    "dom": "阅读容器各内容块（段落/标题/列表/引用/表格格）内的原生行内元素（span/u/b/a/img/br 等，净化产物）；降级回退为 span。",
+    "example": ".markdown-preview-view p span[style] {\n  /* 原生元素按实际 DOM 命中（无包装层） */\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view 内原生渲染的行内 HTML（无专用容器类）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 readingInlineHtml（#568）：原位渲染（颜色元素/br 不拆段/嵌套/片段内不递归 Markdown/标题引用列表表格上下文）、不成型字面降级、净化负向（事件属性/伪造锚点/危险协议）",
+      "浏览器 liveInlineHtml 阅读态（#568）：内联颜色 computed + br 换行绘制、表格/引用上下文不回退",
+      "集成（#568）：paint.html.inline（reading 侧颜色元素命中与 computed color）"
+    ],
+    "introduced": "#568（2026-10-16）"
+  },
+  {
+    "id": "html-native-media",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "selector",
+    "target": "HTML 内容内的 video 元素（.vsidian-live-html / .vsidian-live-inline-html / .vsidian-reading-block 三面；无自有类）",
+    "purpose": "原生 HTML 片段内 video 的列宽约束（#571/T06）：超宽视频钳制在正文列内不溢出（与图片槽位 max-width:100% 同族语义；作者 width/height 属性保留，仅钳制溢出）。audio 控件条无溢出面，不加规则。媒体装载面：本地资源经来源文档归属解析（asWebviewUri 产物）、远端 https 直连，CSP media-src 放行（#571）；Reading 承载原生播放/暂停交互，Live 普通点击命中区仍优先源码显形（不因控件例外），块卸载/widget 退场/模式切换即停（DOM 移除不自动暂停）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "常态钳制呈现；源码显形（Live 触及）时随 widget 退场释放（pause + 断流）；Reading 虚拟化回收同释放，重挂载从块源文重建。",
+    "dom": "HTML 块/行内片段内的原生 <video> 元素（净化产物，controls/autoplay/loop/muted/preload/poster 等属性按净化白名单保留）；Reading 行内片段的 video 在内容块（如段落）内。",
+    "example": ".markdown-preview-view video {\n  max-width: 100%;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view video（阅读；Live 内联视频 Obsidian 无公开稳定类）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 liveHtmlCssContract（#571）：video max-width 三面规则形态钉住（Live 块级/行内宿主 + Reading 内容块）",
+      "单元 htmlInteract/htmlResourceMount（#571）：媒体释放（pause + 断流 + 记忆清理）与幂等、装载剥离语义",
+      "浏览器 html-controls-571（#571）：Reading 媒体真实播放观测（readyState/currentTime）、释放后无持续播放、模式切换暂停"
+    ],
+    "introduced": "#571（2026-10-16）"
   },
   {
     "id": "reading-embed-ref",
@@ -5862,6 +6011,22 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
       "counterpart": "No counterpart (Obsidian handles virtualization internally)"
     }
   },
+  "reading-html-block": {
+    "purpose": "The reading-view block-level native HTML block (#567/T02): a top-level html_block token renders as sanitized native semantic DOM (structures Markdown cannot express, such as tables with merged cells). The content keeps native tag semantics — no production markdown block classes are added (e.g. vsidian-reading-heading-1); styles match the actual DOM (the Q4=B stance). A pure <style> block is hidden (Q6A — in-document styles have been loaded from the source since #569/T04, zero footprint in the reading area); a fragment that sanitizes to nothing (script-only, etc.) falls back to an escaped-source pre (.vsidian-html-source-fallback). Blocks join the existing virtualized mount window (mount/unmount per block); since #569 the marker is laid out on every content block root (Markdown blocks also carry data-vsidian-doc-scope — per-block marking is the structural premise of the b2 isolation), and source text cannot forge it, since the sanitize boundary strips source-provided data-vsidian-*.",
+    "states": "A pure <style> block (empty inner HTML) is display:none with zero footprint; everything else renders normally.",
+    "dom": "A block-level div in the reading container (vsidian-reading-block + vsidian-reading-html, carrying the data-vsidian-src-start/end source anchors); the inside is sanitized native HTML (whitelist first gate + sanitizeReadingDom defense-in-depth second gate).",
+    "obsidian": {
+      "counterpart": "Native HTML blocks rendered inside .markdown-preview-view (no dedicated container class)"
+    }
+  },
+  "reading-inline-html": {
+    "purpose": "Reading-view inline native HTML fragments (#568/T03): a complete fragment is consumed whole by the vsidian_inline_html rule and rendered in place after htmlSanitize sanitization — no wrapper container class (Q4=B: CSS matches the actual DOM and honors selector intent; no extra wrapper disturbs structural selectors like p > span). Span inline colors, br line breaks and other native semantics take effect; surrounding Markdown text, list/blockquote containers, and in-table semantics are preserved; Markdown is not recursively parsed inside a fragment. Malformed fragments (unclosed/orphan close/crossing lines) stay escaped literals; a fragment that sanitizes to nothing falls back to an escaped source span (.vsidian-html-source-fallback, the same class as the block-level degraded state). Find/anchor navigation is unaffected (inline fragments never change the block sequence).",
+    "states": "Normal in-place rendering (no dedicated class); the degraded state span.vsidian-html-source-fallback renders monospaced.",
+    "dom": "Native inline elements (span/u/b/a/img/br and so on, sanitized products) inside reading content blocks (paragraphs/headings/lists/blockquotes/table cells); the degraded fallback is a span.",
+    "obsidian": {
+      "counterpart": "Natively rendered inline HTML inside .markdown-preview-view (no dedicated container class)"
+    }
+  },
   "live-link": {
     "purpose": "Content span for live links (always decorated; when the cursor or selection enters the range of a link, its [ and ](url) source is revealed while other links on the same line stay formatted); the hidden tail corresponds to the direction of .cm-formatting-link / .cm-string.cm-url in Obsidian — vsidian presents it by hiding, with no separate styling class.",
     "states": "The source is revealed while the cursor or selection is inside the link range.",
@@ -6160,7 +6325,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "graphic-chrome": {
-    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); images inside links or table grids do not carry it (explicitly out of scope). The button background is a two-layer composite (a solid-color gradient layer of the theme face + a solid editor-background underlay; editorWidget-background at rest, button-secondaryBackground on hover): theme variables may be translucent (glass-style themes), and with the buttons floating directly over mottled content such as images a translucent face lets the content color bleed through; the solid underlay keeps the face opaque under any theme, while solid theme values are fully covered by the gradient layer with no visual change.",
+    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); Since #567 (T02) the live host of block-level native HTML reuses the same button family DOM/CSS (edit only — the buildGraphicChrome form where onPopup may be omitted; the host .vsidian-live-html carries its own positioning rules and is not part of the frame class). Images inside links or table grids do not carry it (explicitly out of scope). The button background is a two-layer composite (a solid-color gradient layer of the theme face + a solid editor-background underlay; editorWidget-background at rest, button-secondaryBackground on hover): theme variables may be translucent (glass-style themes), and with the buttons floating directly over mottled content such as images a translucent face lets the content color bleed through; the solid underlay keeps the face opaque under any theme, while solid theme values are fully covered by the gradient layer with no visual change.",
     "states": "The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side. Image form: shown in the loaded state (driven by sibling/descendant selectors on data-vsidian-img-state); frame.vsidian-image takes an inline layout (inline mixed flow is not broken).",
     "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
     "obsidian": {
@@ -6702,6 +6867,38 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A class on body; the rule selectors cover .vsidian-wikilink / .vsidian-link / reading anchors under :hover.",
     "obsidian": {
       "counterpart": "the Obsidian pointer and underline feedback while holding Ctrl over internal links"
+    }
+  },
+  "doc-style-scope": {
+    "purpose": "Isolated loading of in-document <style> (#569/T04, the T01 probe b2 route): styles are collected in full-document source order (block-level and inline, including degraded blocks inside containers; literal <style> inside code/comment/frontmatter contexts is not collected) and rewritten selector-by-selector via CSSOM into :where([data-vsidian-doc-scope=…]) :is(original selector) (:where zeroes the prefix specificity, :is keeps the original, pseudo-elements are split outside :is; @media/@supports/@layer/@container recurse into inner rules, CSS nesting & is substituted, @keyframes/@font-face/@import/@property are kept verbatim — document-level namespaces, nested name collisions are stock CSS semantics). The product style element is appended at the end of head, after the CSS snippet chain (at equal specificity the document wins — proximity intuition; snippet enable/order/contracts are untouched). Scope: only the rendered body content of this document (the render roots of Markdown and native-HTML blocks each carry the marker; system chrome — toolbar, source layer, embed card shells — does not); embedded views each keep to their container via a key derived from canonicalRefTargetKey, multiple instances of the same target share one product, released at zero refcount. **:root/body/html are inert after the rewrite** (selector semantics are not translated — an Obsidian-style document-root mapping is left to user feedback, on record). The :where prefix keeps document-rule specificity equal to the original selector's — a snippet class (0,1,0) still beats a document tag (0,0,1). Style mismatch is never reported as an error (a normal CSS outcome); url()/@import resource resolution against the owning Markdown is deferred to a later ticket.",
+    "states": "Loading never depends on the style-block DOM being present (offscreen/reveal/virtualization unmount never removes rules); the view release reclaims them.",
+    "dom": "Main-document marker value \"doc\"; embedded instances use ref:<64bit hex> derived from the canonical fsPath identity; the product element carries the observable attribute data-vsidian-doc-style=<docScope>. Source-provided data-vsidian-* is stripped by the sanitizer — markers cannot be forged.",
+    "obsidian": {
+      "counterpart": "Obsidian in-document <style> applies globally (no isolation rewrite)"
+    }
+  },
+  "live-html-widget": {
+    "purpose": "The live-view block-level native HTML fragment-replacement host (#567/T02): a top-level html block derived from the Lezer HTMLBlock node renders as sanitized native semantic DOM in an exact-range [from, to] inline replace widget while the cursor/selection does not touch the source range (merged-cell tables and beyond); when touched (selectionTouchesRange semantics: a collapsed cursor inside or on either end, a non-empty selection strictly overlapping, or any one selection range hitting; find/anchor hits trigger the same way) the widget is withdrawn and the editable source shows, and fully leaving restores the rendering — reveal only affects the visual presentation, zero write-back and no separate undo entry (the host swallows events opposite to the embed card: ignoreEvent=false, so clicks land in the parent editor selection pipeline). Hovering shows a border (a focusBorder outline) plus a top-right edit button (reusing the graphic-chrome button family DOM/CSS, edit only); a plain click on the rendered content or the button selects the complete source of that fragment; keyboard entry keeps the cursor position (the inline replacement is the prerequisite for vertical navigation to enter the line — a block-level replacement gets skipped wholesale by CM6). A pure <style> block always shows its source with no placeholder (Q6A). Since #572 (T07) iframes pass the sanitizer whitelist (sandbox system-enforced: https remote frames get allow-scripts only, every other form zero tokens), and inside live widgets a transparent shield covers the frame to deliver \"plain click on the iframe visible area selects the complete source\" — a sandboxed/cross-origin subdocument is a separate document whose in-frame pointer events never bubble to the parent, so the outer hit mechanism is a structural carrier rather than event self-listening; reading never takes over (U13 native interaction belongs to the reading mode). The content root carries the data-vsidian-doc-scope document identity marker (the isolation substrate; source-provided data-vsidian-* is stripped by the sanitizer and cannot be forged); a fragment that sanitizes to nothing falls back to escaped source (.vsidian-html-source-fallback, the same class as the reading-html-block degraded state).",
+    "states": "Hidden form (untouched: an inline replacement widget with the surrounding cm-widgetBuffer pair zero-height block-levelized — visually hidden while the layout boxes remain as coordinate anchors) / revealed form (touched: no widget, the source is present); the hover border and button visibility are carried by CSS :hover (the button also has a :focus-visible keyboard-reachable state); the shield is always present while an iframe is mounted (transparent, no visual state).",
+    "dom": "A block-levelized host div inside a .cm-line in the live-view .cm-content (position:relative provides the button positioning context); the inner .vsidian-live-html-content holds the sanitized native HTML and the .vsidian-graphic-chrome button group is a trailing child (edit only). Since #572 each iframe in the content is wrapped in a .vsidian-live-html-frame (position:relative; display:inline-block inside inline hosts to avoid breaking the line flow) with a trailing .vsidian-live-html-frame-shield child (absolute + inset:0 + z-index:1 transparent top cover). Mounted identically in the main document and inside embedded live editors (B document html blocks render too).",
+    "obsidian": {
+      "counterpart": "No dedicated class (Obsidian live HTML blocks toggle between source and rendering; internal structure is closed-source and not promised)"
+    }
+  },
+  "live-inline-html-widget": {
+    "purpose": "The live-view inline native HTML fragment-replacement host (#568/T03): a complete inline fragment derived from the Lezer HTMLTag tree (paired via shared/htmlInline — same-line, outermost; nested pairs take the outermost, void/self-closing tags are single-tag fragments) renders as sanitized native semantic DOM in an exact-range [from, to] inline replace widget while the cursor/selection does not touch the source range (span inline colors, br line breaks and beyond); the host is display:inline — surrounding body text stays in the same line flow, never hidden. When touched (selectionTouchesRange semantics: a collapsed cursor inside or on either end, a non-empty selection strictly overlapping, or any one selection range hitting; find/anchor hits trigger the same way) the widget is withdrawn and the editable source shows, and fully leaving restores the rendering — reveal only affects the visual presentation, zero write-back and no separate undo entry. A plain click on the rendered content selects the complete source of that fragment (sharing the block-level mousedown interceptor factory; modified clicks pass through so cross-fragment selections never extend); keyboard entry keeps the cursor position. The click/reveal granularity of nested fragments is the outermost complete source (deterministic ranges). No hover border or edit button (the spec hover-chrome row covers block-level render regions only — inline fragments are body text flow). The content root carries the data-vsidian-doc-scope document identity marker (consuming the #567 channel); a fragment that sanitizes to nothing (inline script and the like) falls back to an escaped source span (.vsidian-html-source-fallback).",
+    "states": "Hidden form (untouched: an inline replacement widget in the line flow) / revealed form (touched: no widget, the source is present); no hover state (chrome is block-level only).",
+    "dom": "An inline host span (display:inline) inside a .cm-line in the live-view .cm-content; the inner .vsidian-live-inline-html-content holds the sanitized native HTML; since #572 iframes in the content get the same .vsidian-live-html-frame + shield wrap (the hit-taking-over structure of the live-html-widget entry, inline form as inline-block). Mounted identically in the main document and inside embedded live editors.",
+    "obsidian": {
+      "counterpart": "No dedicated class (Obsidian inline HTML toggles between source and rendering; internal structure is closed-source and not promised)"
+    }
+  },
+  "html-native-media": {
+    "purpose": "Column-width constraint for video elements inside native HTML fragments (#571/T06): an oversized video is clamped inside the body column instead of overflowing (the same family of semantics as the image-slot max-width:100%; author width/height attributes are preserved, only overflow is clamped). Audio control bars have no overflow surface, so no rule is added. Media loading surface: local resources resolve against the owning source document (asWebviewUri products), remote https URLs load directly, and CSP media-src admits them (#571); Reading carries native play/pause interaction while a plain click on the Live hit area still prioritizes source reveal (no exception for controls), and block unmount / widget teardown / mode switch stop playback immediately (DOM removal does not auto-pause).",
+    "states": "Clamped presentation by default; revealed source (Live touched) releases the media as the widget withdraws (pause + stream cut); Reading virtualization recycling releases the same way, and remounting rebuilds from the block source text.",
+    "dom": "Native <video> elements inside HTML blocks/inline fragments (sanitizer products; controls/autoplay/loop/muted/preload/poster and other attributes survive the sanitizer whitelist); an inline-fragment video in Reading lives inside its content block (a paragraph, for example).",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view video (reading) / inline video in live (no public stable Obsidian class)"
     }
   },
   "reading-embed-ref": {

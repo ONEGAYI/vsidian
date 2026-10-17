@@ -105,5 +105,6 @@
   "command.graphic.popup.title": "Open Popup Preview for Graphic at Cursor",
   "command.graphic.exportSvg.title": "Export Graphic at Cursor as SVG",
   "command.graphic.exportPng.title": "Export Graphic at Cursor as PNG",
-  "command.graphic.copySource.title": "Copy Source of Graphic at Cursor"
+  "command.graphic.copySource.title": "Copy Source of Graphic at Cursor",
+  "command.html.editSource.title": "Edit Current HTML Source"
 }

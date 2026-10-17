@@ -5,7 +5,8 @@
 // - 输入延迟：逐字符 dispatch + 等待两个 rAF（含 CM6 异步测量/视口重算），
 //  与真实键入同构（同一 dispatch 路径），但带 externalSync 注解——探针
 //  编辑不产生 edit.request 写回，测量不污染宿主文档
-// - 长任务：PerformanceObserver('longtask')（宿主 Chromium 支持；不支持为 null）
+// - 长任务：PerformanceObserver 回调 + observe({entryTypes:['longtask']})
+//  （标准构造签名；宿主 Chromium 支持，不支持为 null）
 // - 滚动回收：scrollIntoView 往返 N 次后回顶，对比基线快照（节点应回到基线附近）
 //
 // 探针结束后文档文本与选区还原；headingStats 一并回报（键入路径重扫行数
@@ -79,8 +80,10 @@ interface LongTaskTracker {
 
 function startLongTaskTracker(): LongTaskTracker {
   interface PerformanceObserverCtor {
+    // 标准 PerformanceObserver 构造签名：首参为回调（W3C performance-
+    // timeline；#576 三轮复审前的实现把 'longtask' 传作首参——构造
+    // 即抛 TypeError 被外层 catch 吞掉，longTasks 恒 null）
     new (
-      type: string,
       cb: (list: { getEntries(): Array<{ duration: number }> }) => void,
     ): {
       observe(options: unknown): void
@@ -98,7 +101,7 @@ function startLongTaskTracker(): LongTaskTracker {
     let count = 0
     let maxMs = 0
     let totalMs = 0
-    const observer = new Ctor('longtask', (list) => {
+    const observer = new Ctor((list) => {
       for (const entry of list.getEntries()) {
         count += 1
         maxMs = Math.max(maxMs, entry.duration)
@@ -115,7 +118,7 @@ function startLongTaskTracker(): LongTaskTracker {
       stop: () => ({ count, maxMs, totalMs }),
     }
   } catch {
-    // 浏览器不支持 longtask 条目类型
+    // 浏览器不支持 longtask 条目类型（observe 抛出——宿主 Chromium 支持）
     return { stop: () => null }
   }
 }

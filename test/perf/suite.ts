@@ -145,11 +145,16 @@ async function openWithTiming(
 }
 
 export async function run(): Promise<void> {
-  const samples = process.env['PERF_SIZES']?.split(',').map((s) => s.trim()) ?? ['1k', '10k', '100k']
+  const samples = process.env['PERF_SIZES']?.split(',').map((s) => s.trim()).filter(Boolean) ?? ['1k', '10k', '100k']
+  // #574：测量范围门控（base=体量档 / boundary=边界形态 / html=HTML 族），
+  // 缺省全跑；PERF_SCOPES=html 定向复测 HTML 档
+  const scopes = new Set(
+    (process.env['PERF_SCOPES'] ?? 'base,boundary,html').split(',').map((s) => s.trim()).filter(Boolean),
+  )
   const results: Record<string, unknown> = { startedAt: new Date().toISOString(), samples: {} }
   const sampleStore = results['samples'] as Record<string, Record<string, unknown>>
 
-  for (const size of samples) {
+  for (const size of scopes.has('base') ? samples : []) {
     const file = `perf-${size}.md`
     const { uri, view, byteSize, openToReadyMs, openToEditableMs, openToFirstInputMs, pollIntervalMs } = await openWithTiming(file)
     const report = (await vscode.commands.executeCommand(
@@ -248,7 +253,7 @@ export async function run(): Promise<void> {
   // #8 起：大围栏按行细分（FENCE_CHUNK_LINES=60）。2 万行围栏切块后的实测——
   // 块模型从 3 块变为约 336 块，挂载窗口只覆盖视口附近的片，进入 reading 的
   // 首屏挂载成本与整块文本布局成本解耦（对照 #7 的整块实测记录）
-  {
+  if (scopes.has('boundary')) {
     const file = 'reading-giant.md'
     const { uri } = await openWithTiming(file) // 打开等待统一走计时辅助（耗时字段本段不采用）
     await vscode.commands.executeCommand(CMD.modeToReading)
@@ -274,7 +279,7 @@ export async function run(): Promise<void> {
   // #23：超长行与图片密集文档分别测两种视图。两类不是同构短行档，
   // 数据单列，避免把大块布局例外混入 1k/10k/100k 的 DOM 比率比较。
   const boundaryShapes: Record<string, unknown> = {}
-  for (const [shape, file] of [
+  for (const [shape, file] of scopes.has('boundary') ? [
     ['longLine', 'perf-longline.md'],
     ['imageDense', 'perf-images.md'],
     // #59 公式密集档：与图片档同构的两种视图探针（渲染缓存的宿主车道数据）
@@ -285,7 +290,7 @@ export async function run(): Promise<void> {
     ['codeDense', 'perf-code.md'],
     // #85 超大代码围栏（>4096 行）：着色跳过降级与块内击键成本
     ['codeGiantFence', 'perf-code-giant.md'],
-  ]) {
+  ] : []) {
     const { uri, view, byteSize, openToReadyMs, openToEditableMs, openToFirstInputMs, pollIntervalMs } = await openWithTiming(file)
     const liveReport = (await vscode.commands.executeCommand(CMD.perfProbe, uri.toString(),
       { typingRounds: 10, scrollRounds: 6 })) as PerfReport | undefined
@@ -333,6 +338,78 @@ export async function run(): Promise<void> {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors')
   }
   results['boundaryShapes'] = boundaryShapes
+
+  // #574（T09）HTML 族档位：大量片段（双体量档对比 DOM 有界性）/ 单大
+  // 表格 / 文档样式密集 / HTML 图片密集。每档 Live（perfProbe：视口 DOM
+  // 有界性 + 输入延迟 + 滚动回收）与 Reading（readingPerf：块挂载窗口 +
+  // 滚动回收）各测一轮；图片档额外记录滚动前后的 imageStates——块卸载后
+  // 槽位计数回落即「离屏资源回收」的 DOM 级证据（常驻全文 DOM 不可过关）。
+  // 样式档的探针键入按 fixture 设计落在顶部大 <style> 块源文内（见
+  // gen-sample.mjs generateHtmlStyleSample 注释），输入延迟即样式源文
+  // 编辑驱动全文收集/改写/产物更新的往返成本。
+  if (scopes.has('html')) {
+    const htmlShapes: Record<string, unknown> = {}
+    for (const [shape, file] of [
+      ['htmlMany', 'perf-html-many.md'],
+      ['htmlLong', 'perf-html-long.md'],
+      ['htmlGiantTable', 'perf-html-giant-table.md'],
+      ['htmlStyle', 'perf-html-style.md'],
+      ['htmlImageDense', 'perf-html-images.md'],
+    ] as const) {
+      const { uri, view, byteSize, openToReadyMs, openToEditableMs, openToFirstInputMs, pollIntervalMs } = await openWithTiming(file)
+      const liveReport = (await vscode.commands.executeCommand(CMD.perfProbe, uri.toString(),
+        { typingRounds: 10, scrollRounds: 6 })) as PerfReport | undefined
+      if (!liveReport) {
+        throw new Error(`HTML 档 live 探针无报告：${file}`)
+      }
+      const toReadingStart = Date.now()
+      await vscode.commands.executeCommand(CMD.modeToReading)
+      const readingView = await poll(`HTML 档阅读装载 ${file}`, async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, uri.toString())) as
+          | (ViewState & ReadingViewState) | undefined
+        return v?.viewMode === 'reading' && v.readingVirtualized === true ? v : undefined
+      }, 30000, 25)
+      const toReadingMs = Date.now() - toReadingStart
+      // 图片档：装载完成后记录 imageStates 基线（滚动前）
+      const imagesBaseline = shape === 'htmlImageDense'
+        ? await poll(`HTML 图片档装载 ${file}`, async () => {
+            const v = (await vscode.commands.executeCommand(CMD.viewState, uri.toString())) as ViewState | undefined
+            const states = v?.imageStates
+            return states && states.loaded > 0 && states.loading === 0 ? states : undefined
+          }, 15000, 100)
+        : undefined
+      const readingReport = (await vscode.commands.executeCommand(CMD.readingPerf, uri.toString(),
+        { scrollRounds: 6 })) as ReadingPerfReport | undefined
+      if (!readingReport?.ok) {
+        throw new Error(`HTML 档 reading 探针无报告：${file}`)
+      }
+      // 图片档：滚动回收后再读 imageStates——块卸载后计数应显著回落
+      const imagesAfterScroll = shape === 'htmlImageDense'
+        ? ((await vscode.commands.executeCommand(CMD.viewState, uri.toString())) as ViewState | undefined)?.imageStates
+        : undefined
+      const toLiveStart = Date.now()
+      await vscode.commands.executeCommand(CMD.modeToLive, uri)
+      await poll(`HTML 档返回 live ${file}`, async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, uri.toString())) as ViewState | undefined
+        return v?.viewMode === 'live' && v.renderedLines > 0 ? v : undefined
+      }, 30000, 25)
+      htmlShapes[shape] = {
+        file, byteSize, lineCount: view.lineCount,
+        open: { openToReadyMs, openToEditableMs, openToFirstInputMs, pollIntervalMs },
+        live: liveReport,
+        reading: {
+          totalBlocks: readingView.readingTotalBlocks,
+          imageStatesBaseline: imagesBaseline,
+          imageStatesAfterScroll: imagesAfterScroll,
+          report: readingReport,
+        },
+        modeSwitch: { toReadingMs, toLiveMs: Date.now() - toLiveStart, pollIntervalMs: 25 },
+      }
+      console.log(`[perf] ${shape}：${byteSize} bytes；live DOM ${liveReport.baseline.contentDomCount}→${liveReport.afterScroll.contentDomCount}（输入 avg ${liveReport.inputDelayMs.avgMs.toFixed(1)}ms）；reading 挂载 ${readingReport.baseline.mountedBlocks}→${readingReport.afterScroll.mountedBlocks}（max ${readingReport.maxMountedBlocks}）${imagesBaseline && imagesAfterScroll ? `；图片槽位 ${imagesBaseline.loaded}→${imagesAfterScroll.loaded}` : ''}`)
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+    }
+    results['htmlShapes'] = htmlShapes
+  }
 
   const { writeFileSync } = await import('node:fs')
   const { join } = await import('node:path')

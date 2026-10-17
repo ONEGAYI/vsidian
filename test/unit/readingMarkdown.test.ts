@@ -29,13 +29,19 @@ function renderToDom(md: ReturnType<typeof createMarkdownRenderer>, src: string)
 }
 
 describe('createMarkdownRenderer：安全配置', () => {
-  it('html:false——源文中的 HTML 标签按纯文本转义，不产生元素', () => {
+  it('合规行内 HTML 净化后渲染；script/执行类仍拒绝（#568 规格差异改版）', () => {
+    // 旧产品约束（HTML 一律转义字面）按 #565/#568 规格调整为「允许合规
+    // HTML、仍拒绝执行与越权」：行内 <b> 渲染为净化元素；行内 script
+    // 净化为空回退转义源码（可访问原始源码，不执行）；负向证据保留
     const md = createMarkdownRenderer()
-    const host = renderToDom(md, '<script>alert(1)</script>\n\n<b>加粗</b>\n')
+    const host = renderToDom(md, '前 <script>alert(1)</script> 中 <b>加粗</b> 后\n')
     expect(host.querySelector('script')).toBeNull()
-    expect(host.querySelector('b')).toBeNull()
+    expect(host.querySelector('b')!.textContent).toBe('加粗')
     expect(host.textContent).toContain('<script>alert(1)</script>')
-    expect(host.textContent).toContain('<b>加粗</b>')
+    // 块级 script（独占行）走 T02 块路径：净化为空回退转义源码
+    const blockHost = renderToDom(md, '<script>alert(1)</script>\n\n段落\n')
+    expect(blockHost.querySelector('script')).toBeNull()
+    expect(blockHost.textContent).toContain('<script>alert(1)</script>')
   })
 
   it('javascript: 协议链接不产生可执行 href（validateLink 默认拦截）', () => {
@@ -396,7 +402,7 @@ describe('宽松内联链接/图片行内规则（#152：目标含未编码空�
 })
 
 describe('sanitizeReadingDom：DOM 纵深净化', () => {
-  it('移除 script/iframe/style 元素、行内事件属性与 javascript: 链接', () => {
+  it('移除 script/style 元素、行内事件属性与 javascript: 链接；未标记 iframe 照删（防御纵深语义不变）', () => {
     const host = document.createElement('div')
     // 模拟"渲染器被绕过"的极端输入（html:false 下不应出现；此为防御层验证）
     host.innerHTML =
@@ -404,6 +410,9 @@ describe('sanitizeReadingDom：DOM 纵深净化', () => {
       '<style>body{}</style><a href="javascript:evil()">链</a><a href="https://ok">好</a>'
     sanitizeReadingDom(host)
     expect(host.querySelector('script')).toBeNull()
+    // #572（T07）规格差异：白名单净化产物（第一道闸已强制 sandbox + 系统
+    // 标记）的 iframe 豁免移除（下一用例）；**未经白名单的 iframe（本用例
+    // 的绕过形态——无系统标记）维持移除**，负向证据独立保留
     expect(host.querySelector('iframe')).toBeNull()
     expect(host.querySelector('style')).toBeNull()
     expect(host.querySelector('p')!.getAttribute('onclick')).toBeNull()
@@ -411,6 +420,24 @@ describe('sanitizeReadingDom：DOM 纵深净化', () => {
     expect(links).toHaveLength(2)
     expect(links[0]!.getAttribute('href')).toBeNull() // 危险链接摘除 href 后保留惰性元素
     expect(links[1]!.getAttribute('href')).toBe('https://ok')
+  })
+
+  it('#572（T07）系统标记 + sandbox 在场的 iframe 豁免移除（白名单产物的第二道闸放行）', () => {
+    const host = document.createElement('div')
+    host.innerHTML =
+      `<iframe src="page.html" sandbox="" data-vsidian-iframe="1"></iframe>` +
+      `<iframe src="https://example.com" sandbox="allow-scripts" data-vsidian-iframe="1"></iframe>` +
+      // 有标记但 sandbox 缺失（不变量破坏形态）：防御性移除
+      `<iframe src="page.html" data-vsidian-iframe="1"></iframe>` +
+      // 有 sandbox 但无标记（伪造形态）：维持移除
+      `<iframe src="page.html" sandbox=""></iframe>`
+    sanitizeReadingDom(host)
+    const frames = Array.from(host.querySelectorAll('iframe'))
+    expect(frames).toHaveLength(2)
+    expect(frames[0]!.getAttribute('src')).toBe('page.html')
+    expect(frames[0]!.getAttribute('sandbox')).toBe('')
+    expect(frames[1]!.getAttribute('src')).toBe('https://example.com')
+    expect(frames[1]!.getAttribute('sandbox')).toBe('allow-scripts')
   })
 })
 

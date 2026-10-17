@@ -39,11 +39,40 @@
 // #343 变更（外链原网页 iframe）：
 // - frame-src 追加 `https:`——悬停浮层 page 形态以跨源沙箱 iframe 装载
 //   远程站点（sandbox 只给 allow-scripts，见 src/webview/webPage.ts 模块
-//   头的隔离边界）。只放行 https 源表达式：HTTP 最终地址在宿主预检层已
-//   判 reason=http 退回卡片（安全上下文中的混合内容无法安全内嵌），
-//   生产路径不会也不得挂 http iframe。iframe 子文档自身的资源装载由
-//   目标站点响应自带的 CSP 管辖（父文档 CSP 不作用于子文档），故本指令
-//   只约束「iframe 能导航到哪」，不扩大父文档的 script/connect 面。
+//   头的隔离边界）。HTTP 最终地址在宿主预检层已判 reason=http 退回卡片
+//   （安全上下文中的混合内容无法安全内嵌），生产路径不会也不得挂 http
+//   iframe。iframe 子文档自身的资源装载由目标站点响应自带的 CSP 管辖
+//   （父文档 CSP 不作用于网络 scheme 子文档），故本指令只约束「iframe
+//   能导航到哪」，不扩大父文档的 script/connect 面。
+//
+// #572 变更（文档内 iframe——本地可控页面）：
+// - frame-src 追加 `${cspSource}`：笔记 HTML `<iframe src="page.html">` 的
+//   相对地址经 T05 资源归属管线（classifyImageTarget + asWebviewUri）解析
+//   到 webview 自有资源域——与 img-src/font-src 消费同一信任面（vault 文件，
+//   localResourceRoots 已界定的授权范围），不加此源则本地页面帧被 CSP
+//   拦截（矩阵「本地可控页面」不可达）。安全面不变的部分：帧 sandbox
+//   由净化层强制为零 token（srcdoc/本地内容结构性禁脚本——htmlSanitize
+//   模块头 #572 节），帧内脚本面不因本源表达式扩大；明文 `http:` 仍不放行。
+// - srcdoc 帧不受 frame-src 约束（帧 URL=about:srcdoc，T01 探针 d 候选
+//   两环境实测）——其许可以 sandbox 零 token + 净化层递归净化兜底，不依
+//   赖 CSP（无 CSP 环境仍成立）。
+//
+// #571 变更（表单 details 与音视频——T06）：
+// - 新增独立指令 `media-src ${cspSource} https:`——笔记 HTML 的原生
+//   audio/video（含 source 子元素与 track 字幕）装载面。此前无该指令，
+//   default-src 'none' 回落拦截全部媒体装载（T05 只改写属性不装载的
+//   原因）。逐项理由：
+//   - `${cspSource}`：本地媒体经 T05 归属解析（htmlResourceMount 媒体
+//     管线）改写为 asWebviewUri 产物——该形态是 cspSource 域下的 https
+//     资源地址，与 img/font 同一装载面（既有授权路径，不新增根）。
+//   - `https:`：远端直连媒体（needsDocumentBaseResolution 判定直连、
+//     属性保持 https 原文）由浏览器原生管线装载——与 img-src/style-src/
+//     font-src 的远端面同口径。
+//   - 不放行 `http:`（明文混合内容红线，与全部既有指令一致）；不放行
+//     `data:`/`blob:`（无已知生产需求，不预防性扩面——与 img-src 的
+//     data:〔图表弹窗光栅化用〕不同，媒体无等价消费方）。
+//   - 不涉脚本/connect 面：媒体解码不执行页面脚本，track 字幕是文本
+//     资源（同受 media-src 管辖）。
 //
 // 不放宽的面（验收红线）：
 // - script-src 维持 nonce 门控——不因字体/样式需求扩大脚本权限，不放行
@@ -72,7 +101,11 @@ export function buildEditorCsp(cspSource: string, nonce: string): string {
     // #337 PDF.js worker：单文件产物经 Blob URL 装配（自有 worker 文本；
     // 移除即 new Worker(blob:) SecurityError——#334 探针实证）
     `worker-src blob:`,
-    // #343 外链原网页 iframe：只放行 https 源（见文件头 #343 变更说明）
-    `frame-src https:`,
+    // #343 远端 iframe（https:）+ #572 本地可控页面帧（cspSource——见
+    // 文件头 #343/#572 变更说明；明文 http 不放行）
+    `frame-src ${cspSource} https:`,
+    // #571 原生媒体装载：cspSource（本地经 asWebviewUri 归属解析产物）+
+    // https:（远端直连）；逐项理由见文件头 #571 变更说明（track 同受管辖）
+    `media-src ${cspSource} https:`,
   ].join('; ')
 }

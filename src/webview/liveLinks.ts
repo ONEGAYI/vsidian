@@ -27,6 +27,7 @@ import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
+import { sweepHtmlResourceBindings } from './htmlResourceMount'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } from './graphicBlockChrome'
 import { imagePopupOptsOfView, openImagePopup } from './imagePopup'
 import {
@@ -946,6 +947,9 @@ export function createLinkInteractions(opts: {
         }
         // 视口外移除的 widget 无销毁回调：以 isConnected 兜底释放图片槽位
         opts.images.sweep()
+        // #570（T05）：HTML widget 内容的属性资源订阅同款兜底（widget
+        // DOM 离场退订——迟到结果不回写已移除的元素）
+        sweepHtmlResourceBindings()
       }
       private build(view: EditorView): DecorationSet {
         const field = view.state.field(liveDecorationsField, false)

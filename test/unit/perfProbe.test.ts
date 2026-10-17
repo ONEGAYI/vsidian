@@ -104,6 +104,47 @@ describe('runPerfProbe：测量与还原', () => {
     view.destroy()
   })
 
+  // #576 三轮复审 Standards：构造签名契约——首参必须是回调（旧实现误传
+  // 'longtask' 字符串，构造抛 TypeError 被吞，longTasks 恒 null 被误记为 0 条）
+  it('longtask 观测用标准构造：回调为首参 + observe 携带 entryTypes', async () => {
+    const calls: Array<{ ctorFirstArg: unknown; observeArg: unknown }> = []
+    const Real = (globalThis as Record<string, unknown>)['PerformanceObserver']
+    class ObserverStub {
+      private cb: unknown
+      constructor(cb: unknown) {
+        if (typeof cb !== 'function') {
+          throw new TypeError('callback required')
+        }
+        this.cb = cb
+        calls.push({ ctorFirstArg: cb, observeArg: null })
+      }
+      observe(options: unknown) {
+        calls[calls.length - 1]!.observeArg = options
+        const list = { getEntries: () => [{ duration: 80 }] }
+        ;(this.cb as (l: unknown) => void)(list)
+      }
+      disconnect() {}
+      takeRecords() {
+        return []
+      }
+    }
+    ;(globalThis as Record<string, unknown>)['PerformanceObserver'] = ObserverStub
+    try {
+      const view = makeView(makeDoc())
+      const report = await runPerfProbe(view, { typingRounds: 1, scrollRounds: 1 })
+      expect(calls.length).toBeGreaterThanOrEqual(1)
+      expect(typeof calls[0]!.ctorFirstArg).toBe('function')
+      expect(calls[0]!.observeArg).toEqual({ entryTypes: ['longtask'] })
+      // 回调收到的条目被聚合进报告（count/max/total）
+      expect(report.longTasks).not.toBeNull()
+      expect(report.longTasks!.count).toBeGreaterThanOrEqual(1)
+      expect(report.longTasks!.maxMs).toBeGreaterThanOrEqual(80)
+      view.destroy()
+    } finally {
+      ;(globalThis as Record<string, unknown>)['PerformanceObserver'] = Real
+    }
+  })
+
   // #15：快照可选携带 webview JS 堆读数（Chromium performance.memory）
   it('快照 jsHeapBytes：有 performance.memory 时为正整数，否则为 null', async () => {
     const view = makeView(makeDoc())
