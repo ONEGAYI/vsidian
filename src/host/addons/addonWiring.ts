@@ -135,7 +135,7 @@ export interface AddonPageWiring {
   /** #546 T07 addons.themesState 消息载荷（主题目录 + 唯一首选与可用性；
    *  设置页拉取应答与变化推送共用） */
   getThemesState(): { kind: 'addons.themesState' } & AddonThemesStatePayload
-  /** 市场搜索（关键词仅搜索辅助：vsidian-addon） */
+  /** 市场搜索（@tag 查询 vsidian-addon——keywords 上架 Marketplace 后被索引为 tag） */
   openSearch(): void
   /** VSCode 扩展管理视图 */
   openExtensionsView(): void
@@ -1320,8 +1320,10 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     // #546 T07 主题目录状态现算（目录 + 首选 + 可用性）
     getThemesState: () => buildThemesState(),
     openSearch: () => {
-      // 关键词仅帮助市场寻找（vsidian-addon）；不代表接入协议或官方身份
-      void vscode.commands.executeCommand('workbench.extensions.search', '@keyword:"vsidian-addon"')
+      // @tag 修饰符：package.json keywords 上架 Marketplace 后被索引为 tag
+      //（@keyword 非法语法，整串按字面搜索恒为空，#579）；仅搜索辅助，
+      // 不代表接入协议或官方身份
+      void vscode.commands.executeCommand('workbench.extensions.search', '@tag:"vsidian-addon"')
     },
     openExtensionsView: () => {
       void vscode.commands.executeCommand('workbench.view.extensions')
