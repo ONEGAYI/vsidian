@@ -66,7 +66,7 @@ import {
   type AddonThemesStatePayload,
 } from '../../shared/addonThemes'
 import { AddonThemeService } from './addonThemeService'
-import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../../shared/settings'
+import { APPEARANCE_THEME_KEY } from '../../shared/settings'
 import type { SettingsService } from '../settingsService'
 import { createAddonRealpathGuard } from './addonRealpathGuard'
 import { t } from '../../shared/i18n'
@@ -270,12 +270,11 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     channel.appendLine(`[${new Date().toISOString()}] ${message}`)
   }
 
-  /** 主题唯一首选（宿主设置快照解析：新键权威 + 旧键过渡回显） */
+  /** 主题唯一首选（宿主设置快照解析：新键权威；#535 后旧键不再参与） */
   const themePreferred = (): string => {
     const snapshot = hostSettings.getSnapshot()
     return resolveThemePreferred(
       typeof snapshot[APPEARANCE_THEME_KEY] === 'string' ? snapshot[APPEARANCE_THEME_KEY] : undefined,
-      typeof snapshot[MERMAID_THEME_KEY] === 'string' ? snapshot[MERMAID_THEME_KEY] : undefined,
     )
   }
 

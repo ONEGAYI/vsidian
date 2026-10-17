@@ -630,11 +630,11 @@ export const themeDeclarations: readonly AddonThemeDeclaration[] = [
     languages: ['mermaid'],
   },
 ]
-/** 声明 → 稳定身份/校验/选择的同源纯函数消费 */
+/** 声明 → 稳定身份/校验/选择的同源纯函数消费（#535 后首选解析单参——新键权威） */
 export const themePipeline = {
   ref: addonThemeRefOf('pub.pack', 'aqua'),
   batchVerdict: validateAddonThemeBatch(themeDeclarations),
-  preferred: resolveThemePreferred('pub.pack/aqua', 'default'),
+  preferred: resolveThemePreferred('pub.pack/aqua'),
   active: resolveActiveTheme({
     themes: [] as readonly AddonThemeCandidate[],
     preferred: 'default',

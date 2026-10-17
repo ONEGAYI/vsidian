@@ -8,6 +8,13 @@
 
 ## Unreleased - 开发中
 
+### 语义与签名修订（#535 / T08：内核 Codex 退役）
+
+- `resolveThemePreferred` 签名收窄为单参（`themeValue`）：删除旧 Mermaid 键过渡回显参数。#535 后旧键 `appearance.mermaidTheme` 的设置定义删除、不再参与首选解析，存量 codex 值在扩展激活时经 globalState 原始 overlay 迁移回落 default（一次性安装引导；不覆盖已选组件主题、不自动安装）。首选值域由 `default | codex | <addonId>/<themeId>` 收窄为 `default | <addonId>/<themeId>`。
+- `resolveActiveTheme` 语义修订：preferred 为退役的 codex 历史值不再「内置恒可用」，按目录不命中的未知首选处理（`available=false`、`effective=default`、`preferred` 保留）。
+- `AddonThemesStatePayload.preferredAvailable` 语义收窄：仅 default 恒 true（原「default/codex 恒 true」）。
+- 升版幅度预判（发版时裁决）：按本文件升版规则「签名/语义不兼容升主版本」，本段预判随下次本体发行升 **2.0.0**；另一判读为次版本 1.2.0——上述符号不经扩展 activate 导出面暴露，组件运行时不可达，签名变化仅影响按公开参考编写的编译期消费者与文档锚点。候选兼容基线已按 addons-api-gate 规格随本变更显式重锚定（独立提交说明理由）。
+
 ## 1.1.0 - 2026-10-16
 
 首个随本体发行的 API 版本（随 Vsidian 1.1.0 发布）：1.0.0 候选面与候选期增补并入本版本，自本发行日起产生兼容承诺——弃用与移除受双门槛约束（两个后续 API 次版本且满 30 天）；此前各本体版本携带的候选面不追溯兼容承诺。

@@ -31,13 +31,12 @@
 // syncController mount 时播种（observer 只覆盖运行中的变化）。
 import { GRAPHIC_PROVIDER_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { t } from '../shared/i18n'
-import type { MermaidPreset } from '../shared/settings'
 import { buildDarkMermaidThemeVariables, resolveVscodeMermaidPalette } from './mermaidTheme'
 
 /** mermaid API 面（仅本模块消费的能力；真实实现来自懒加载的全局） */
 export interface MermaidApi {
   initialize(config: Record<string, unknown>): void
-  render(id: string, code: string, preset?: MermaidPreset): Promise<{ svg: string }>
+  render(id: string, code: string): Promise<{ svg: string }>
 }
 
 /** 渲染缓存上限（键是图源码，无上限会随大文档滚动无限累积） */
@@ -62,7 +61,6 @@ let loadPromise: Promise<MermaidApi | null> | null = null
 let loadFailed = false
 let initialized = false
 let dark = false
-let preset: MermaidPreset = 'default'
 /** 主题代次戳：setMermaidDarkTheme 递增；缓存条目记录写入时的代次 */
 let themeGen = 0
 let renderSeq = 0
@@ -284,7 +282,7 @@ function renderCached(target: MermaidApi, code: string): Promise<CacheEntry> {
     renderSeq += 1
     mermaidRenderStats.renders += 1
     try {
-      const { svg } = await target.render(`vsidian-mmd-r${renderSeq}`, code, preset)
+      const { svg } = await target.render(`vsidian-mmd-r${renderSeq}`, code)
       const entry: CacheEntry = { kind: 'ok', svg, ids: extractSvgIds(svg), gen: startGen }
       if (startGen === themeGen) {
         cache.set(code, entry)
@@ -362,19 +360,13 @@ export async function renderMermaidSvg(code: string): Promise<MermaidSvgResult> 
 
 /** 主题联动：切换明暗时递增主题代次、以新主题重新 initialize、清空缓存
  *  并重渲染当前在文档中的全部容器（等值跳过；真实切换由
- *  syncController.applyHostTheme 驱动）。 */
+ *  syncController.applyHostTheme 驱动）。#535 T08：preset 机制已随内核
+ *  Codex 退役删除（内核恒 default 渲染；组件主题经渲染提供者接管）。 */
 export function setMermaidDarkTheme(next: boolean): void {
   if (next === dark) {
     return
   }
   dark = next
-  invalidateMermaidRender()
-}
-
-/** 设置变更与明暗切换共用代次和重渲扫描，附加组件仍独立管理。 */
-export function setMermaidPreset(next: MermaidPreset): void {
-  if (next === preset) return
-  preset = next
   invalidateMermaidRender()
 }
 
@@ -470,7 +462,6 @@ export function __resetMermaidRenderStateForTest(): void {
   loadFailed = false
   initialized = false
   dark = false
-  preset = 'default'
   themeGen = 0
   renderSeq = 0
   instanceSeq = 0

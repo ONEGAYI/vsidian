@@ -8,27 +8,22 @@
 // 该内部命名空间在独立脚本里是全局 var、被 esbuild 模块包裹后变成模块
 // 作用域局部变量——globalThis 引用落空抛 TypeError，全局永远挂不上。经
 // ESM 源（dist/mermaid.core.mjs）打包并由本入口显式挂全局即可，且 minify
-// 后核心与图类型、ELK 引擎分别按需加载。
+// 后核心与图类型分别按需加载。
+// #535 T08：内核 Codex 预设与 ELK 布局引擎已退役删除（替代实现归组件
+// vsidian-codex-bridge）；本入口只保留 default 渲染的站点配置恢复机制。
 import mermaid from 'mermaid'
-import elkLayouts from '@mermaid-js/layout-elk'
 import type { MermaidApi } from './mermaidRender'
-import { buildCodexMermaidConfig } from './mermaidTheme'
 
-mermaid.registerLayoutLoaders(elkLayouts)
 let baseConfig: Record<string, unknown> = {}
-// 每张图先恢复站点配置，再按 Mermaid 自身识别结果应用对应图形预设。
-// 预设不改写源码：init/frontmatter、classDef 与 style 仍由 Mermaid 解析。
+// 每张图先恢复站点配置再渲染（预设不改写源码的语义保持：init/frontmatter、
+// classDef 与 style 仍由 Mermaid 解析）。
 const api: MermaidApi = {
   initialize(config) {
     baseConfig = config
     mermaid.initialize(config)
   },
-  async render(id, code, preset = 'default') {
+  async render(id, code) {
     mermaid.initialize(baseConfig)
-    if (preset === 'codex') {
-      const config = buildCodexMermaidConfig(mermaid.detectType(code), baseConfig.theme === 'dark')
-      if (config) mermaid.initialize({ ...baseConfig, ...config })
-    }
     return mermaid.render(id, code)
   },
 }
