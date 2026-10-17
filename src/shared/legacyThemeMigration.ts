@@ -247,8 +247,23 @@ export interface LegacyThemeMigrationRunResult {
 export interface LegacyThemeMigrationRunOptions {
   /** 锁 mtime 陈旧阈值（ms）：超过即视胜者已崩溃，安全接管重抢 */
   lockStaleMs?: number
-  /** 认领失败者等待 done 的超时（ms）：超时静默退出（本次不引导） */
+  /**
+   * 认领失败者（败者）的排队预算（ms）：owner 的身份等待最坏占用第一窗
+   * + 收敛窗（默认 1+10s），败者在等待环内排队（身份/done 出现即早退、
+   * 锁陈旧可接管）——预算须覆盖 owner 最坏占用（九审 R9-2：默认 5s 小
+   * 于 11s，普通并发下败者会超时静默退出、本 profile 首迁移被跳到下次
+   * 激活；默认 30s = 最坏占用的排队余量），超时才静默退出（本次不引
+   * 导，待下次激活恢复）
+   */
   waitTimeoutMs?: number
+  /**
+   * 方案 A 收敛观察预算（ms，默认 120s）：临时身份未定的 owner 释放锁
+   * 后观察同 profile 身份广播到达的窗口（2026-10-17 用户裁决批准）——
+   * 观察内收敛则按收敛身份收尾（重复引导被取消），预算尽仍未收敛（独
+   * 立 profile / 广播超预算）则本次激活不引导，pending 债务留存磁盘由
+   * 下次激活补发（引导可延至下次激活）
+   */
+  convergeWatchMs?: number
   /** 等待轮询间隔（ms） */
   pollIntervalMs?: number
   /**
@@ -284,27 +299,33 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * 锁内 profile 身份解析（七审 R7 改判：两窗分级，等待路径零写入）。
- * 判定链（按序）：
+ * 锁内 profile 身份解析（七审 R7 两窗分级；九审起叠加方案 A「未定」标
+ * 记，2026-10-17 用户裁决批准）。判定链（按序）：
  * 1. 两载体读序（globalState 独立键 → overlay 内部键）+ 第一窗内轮询
  *    重读——同 profile 他窗刚生成、广播在途时收敛为同一 id；
  * 2. 第一窗超时后查磁盘信号 hasAnyMigrationState：
  *    - 磁盘全净（无任何 profile 曾认领）→ 无并发在途 → 直接生成（
- *      单窗升级主路径零额外等待）；
+ *      首任认领，锁保证唯一性——视为已定）；
  *    - 有任一状态文件 → 进入第二窗（收敛窗）继续等身份出现；
- * 3. 收敛窗内身份出现 → 用既有身份（他窗若已收口，随后的 done 短路
- *    使本窗**零写入**——身份未定期间不从本窗缓存写回任何 profile 机
+ * 3. 收敛窗内身份出现 → 用既有身份（已定；他窗若已收口，随后的 done
+ *    短路使本窗零写入——身份未定期间不从本窗缓存写回任何 profile 机
  *    制状态：1.82.3 的 memento update 以本窗缓存整对象覆盖 DB，任何
- *    让位记号/机制写都会抹掉他窗已持久化的身份载体，七审 R7-1）；
- * 4. 收敛窗尽仍无身份 → 生成自己的身份并继续完整迁移（R7-2：他
- *    profile 的状态不阻塞本 profile——本窗缓存对本 profile 的 DB 新鲜
- *    （跨 profile 无同域写入），生成与迁移写入无损；同 profile 广播
- *    超窗的平台故障边界见文件头七审声明）。
+ *    机制写都会抹掉他窗已持久化的身份载体，七审 R7-1）；
+ * 4. 收敛窗尽仍无身份 → 生成**临时身份**并继续迁移，但标记「未定」
+ *    （unresolved）：迁移与 pending 照做（R7-2：他 profile 的状态不阻
+ *    塞本 profile；跨 profile 无同域写入，本窗缓存对本 profile 的 DB
+ *    新鲜，写入无损），**本次激活不引导**——锁释放后进入收敛观察
+ *    （watchAndReconcile）：观察窗内同 profile 身份广播到达（有限延迟）
+ *    则按收敛身份收尾（临时身份封存为 done 墓碑 + 重跑：done → 零引
+ *    导收尾，pending → 恢复补发恰一次）；观察预算尽仍未收敛（独立
+ *    profile / 广播超预算）则本次激活不引导，pending 债务留存磁盘，
+ *    **下次激活按 pending 恢复规则补发**（引导可延至下次激活——用户
+ *    批准的可见行为变更；最终补发条件可验证，不无限延期）。
  */
 async function resolveProfileIdOrDefer(
   ports: LegacyThemeMigrationPorts,
   options: LegacyThemeMigrationRunOptions,
-): Promise<string> {
+): Promise<{ id: string; unresolved: boolean }> {
   const waitMs = options.profileIdWaitMs ?? 1_000
   const settleMs = options.profileIdSettleMs ?? 10_000
   const pollMs = options.profileIdPollMs ?? 50
@@ -324,20 +345,84 @@ async function resolveProfileIdOrDefer(
   }
   const converged = await pollIdentityWithin(waitMs)
   if (converged !== null) {
-    return converged
+    return { id: converged, unresolved: false }
   }
   if (await ports.hasAnyMigrationState()) {
     const settled = await pollIdentityWithin(settleMs)
     if (settled !== null) {
-      return settled
+      return { id: settled, unresolved: false }
     }
-    // 收敛窗尽仍无身份：他 profile 状态不阻塞本 profile（R7-2）——落到
-    // 下方生成首迁；同 profile 广播超窗的多引导一次为文件头声明边界
+    // 收敛窗尽仍无身份：生成临时身份继续首迁，标记未定（方案 A——本
+    // 次激活不引导，锁释放后进入收敛观察；他 profile 状态不阻塞本
+    // profile 的迁移本身，R7-2）
+    const factory = options.profileIdFactory ?? (() => globalThis.crypto.randomUUID())
+    const id = factory()
+    await ports.writeProfileId(id)
+    return { id, unresolved: true }
   }
+  // 磁盘全净：首任认领（锁保证唯一性）——视为已定，正常引导
   const factory = options.profileIdFactory ?? (() => globalThis.crypto.randomUUID())
   const id = factory()
   await ports.writeProfileId(id)
-  return id
+  return { id, unresolved: false }
+}
+
+/** owner 序列调用包装：序列内标记「未定身份」时，锁释放后进入收敛观察 */
+async function runOwnerSequence(
+  ports: LegacyThemeMigrationPorts,
+  profileId: string | null,
+  options: LegacyThemeMigrationRunOptions,
+): Promise<LegacyThemeMigrationRunResult> {
+  const { result, watchId } = await executeOwnerSequence(ports, profileId, options)
+  if (watchId !== null) {
+    const reconciled = await watchAndReconcile(ports, options, watchId)
+    // 未收敛结束（预算尽）沿用序列结果（迁移已完成、引导已延）；收敛则
+    // 以重跑的最终结果为准（done 短路 none / pending 恢复补发）
+    return reconciled ?? result
+  }
+  return result
+}
+
+/**
+ * 方案 A 收敛观察（2026-10-17 用户裁决批准；锁已释放后运行，不阻塞他
+ * profile 排队）。判据与收尾：
+ * - **身份收敛判据** = readProfileId 返回非空且 ≠ 本窗临时身份（同
+ *   profile 他窗的身份载体到达本窗缓存——广播有限延迟内必达）；
+ * - 收敛 → 临时身份的 pending 封存为 **done 墓碑**（任何读到临时身份
+ *   的后续窗口不再补发——债务已由收敛身份侧了结或于重跑中补发；封存
+ *   写落在本窗旧代次名上，属滞后写，被 max 读取语义天然保护），随后
+ *   **按收敛身份重跑** runLegacyThemeMigration：done 在场 → 零写入短
+ *   路（恰一次保持）；pending 在场（他窗崩溃于 pending 后）→ 恢复补
+ *   发恰一次；
+ * - **激活窗口结束判据** = 收敛观察预算 convergeWatchMs（默认 120s）
+ *   耗尽仍未收敛（独立 profile / 广播超预算）→ 本次激活不引导结束，
+ *   pending 债务留存——**下次激活**读到临时身份与 pending，按恢复规
+ *   则补发（可验证的最终补发条件，不无限延期）。
+ */
+async function watchAndReconcile(
+  ports: LegacyThemeMigrationPorts,
+  options: LegacyThemeMigrationRunOptions,
+  provisionalId: string,
+): Promise<LegacyThemeMigrationRunResult | null> {
+  const budgetMs = options.convergeWatchMs ?? 120_000
+  const pollMs = options.pollIntervalMs ?? 100
+  const deadline = Date.now() + budgetMs
+  for (;;) {
+    const id = await ports.readProfileId()
+    if (id !== null && id !== provisionalId) {
+      await ports.writeMarker(provisionalId, {
+        state: 'done', version: ports.extensionVersion(),
+      }).catch(() => undefined)
+      return runLegacyThemeMigration(ports, options)
+    }
+    if (Date.now() >= deadline) {
+      // 预算尽未收敛：本次激活到此为止（迁移已在 owner 序列完成落盘），
+      // 结果沿用 owner 序列的返回——调用方以 null 区分「未收敛结束」与
+      // 「收敛后重跑的最终结果」
+      return null
+    }
+    await sleep(pollMs)
+  }
 }
 
 /**
@@ -357,7 +442,7 @@ async function executeOwnerSequence(
   ports: LegacyThemeMigrationPorts,
   profileId: string | null,
   options: LegacyThemeMigrationRunOptions,
-): Promise<LegacyThemeMigrationRunResult> {
+): Promise<{ result: LegacyThemeMigrationRunResult; watchId: string | null }> {
   try {
     // 六审 P2-E 方向 B（fencing）：owner 序列的每个关键副作用（写 pending、
     // 发引导）前复核自己仍是最高已提交代次——被更高代次接管（自身滞缓/
@@ -375,15 +460,18 @@ async function executeOwnerSequence(
         return false
       }
     }
-    if (!(await stillCurrent())) return NONE_RESULT
+    if (!(await stillCurrent())) return { result: NONE_RESULT, watchId: null }
     // B'：身份缺失时在锁内解析（快速路径可能带着 null 进来——那是需要
     // 迁移但尚无身份的首次激活；两窗分级与零写入语义见 resolveProfileIdOrDefer，
     // 七审 R7 起解析总能给出身份：收敛窗尽后生成自己的身份继续首迁）
-    const id = profileId ?? await resolveProfileIdOrDefer(ports, options)
+    const resolution = profileId !== null
+      ? { id: profileId, unresolved: false }
+      : await resolveProfileIdOrDefer(ports, options)
+    const id = resolution.id
     // 认领后从磁盘重读权威状态（P2-B：等待期间其他窗口可能已完成收口）
     const marker = await ports.readMarker(id)
     if (marker?.state === 'done') {
-      return NONE_RESULT
+      return { result: NONE_RESULT, watchId: null }
     }
     const recoveredPending = marker?.state === 'pending'
     const rawOverlay = ports.readRawOverlay()
@@ -394,7 +482,7 @@ async function executeOwnerSequence(
       // 持久化顺序（发现 1）：pending 先于设置改写落盘——中途任何失败都
       // 能从 pending 恢复，引导不会永久丢失。fence：滞后 owner 不得把
       // 状态机从 done 拉回 pending（写前复核代次）
-      if (!(await stillCurrent())) return NONE_RESULT
+      if (!(await stillCurrent())) return { result: NONE_RESULT, watchId: null }
       await ports.writeMarker(id, { state: 'pending', version })
       // P2-A（PR #581 三审）：pending 落盘后在串行化路径内重读最新
       // overlay 并按三档矩阵重新判定，只写主题相关键的最小补丁（不做
@@ -412,12 +500,20 @@ async function executeOwnerSequence(
         }
       })
       if (revisedAction === 'migrate') {
+        if (resolution.unresolved) {
+          // 方案 A（2026-10-17 用户裁决批准）：临时身份未定（收敛窗尽后
+          // 生成）→ 本次激活**不引导**——pending 债务已落盘（可恢复），
+          // 锁在 finally 释放后进入收敛观察（watchAndReconcile）：收敛
+          // 则按收敛身份收尾（done 墓碑封存临时身份 + 重跑），观察预算
+          // 尽则留待下次激活按 pending 恢复补发（引导可延至下次激活）
+          return { result: { action: plan.action, guide: false }, watchId: id }
+        }
         // fence：引导是面向用户的不可撤回副作用，滞后 owner 不得发出
-        if (!(await stillCurrent())) return NONE_RESULT
+        if (!(await stillCurrent())) return { result: NONE_RESULT, watchId: null }
         // 引导 fire 与 done 写之间无 await（同步序）：残余崩溃窗口见文件头
         ports.requestGuide()
         await ports.writeMarker(id, { state: 'done', version })
-        return { action: plan.action, guide: true }
+        return { result: { action: plan.action, guide: true }, watchId: null }
       }
       // 等待期间用户已自行处置（改选组件主题 → 档 2 清旧键、保留新键；
       // 双键到位 → 档 3 无操作）：按重判档位语义不引导——引导的原始
@@ -425,8 +521,8 @@ async function executeOwnerSequence(
       // pending 非历史欠账（是本运行刚写），直接写 done 收口
       await ports.writeMarker(id, { state: 'done', version })
       return revisedAction === 'clean-legacy'
-        ? { action: 'clean-legacy', guide: false }
-        : NONE_RESULT
+        ? { result: { action: 'clean-legacy', guide: false }, watchId: null }
+        : { result: NONE_RESULT, watchId: null }
     }
     if (plan.action === 'clean-legacy') {
       await ports.applyExclusiveOverlayStep(() => ({
@@ -436,21 +532,21 @@ async function executeOwnerSequence(
       if (recoveredPending) {
         // pending = 引导欠账：清旧键之外补发引导并收口（fence：滞后 owner
         // 不得补发——接管者会按同一欠账规则补发，不会丢）
-        if (!(await stillCurrent())) return NONE_RESULT
+        if (!(await stillCurrent())) return { result: NONE_RESULT, watchId: null }
         ports.requestGuide()
         await ports.writeMarker(id, { state: 'done', version })
-        return { action: plan.action, guide: true }
+        return { result: { action: plan.action, guide: true }, watchId: null }
       }
-      return { action: plan.action, guide: false }
+      return { result: { action: plan.action, guide: false }, watchId: null }
     }
     // plan none：设置已迁移（或本就无需迁移）——只有 pending 欠账需要补发
     if (recoveredPending) {
-      if (!(await stillCurrent())) return NONE_RESULT
+      if (!(await stillCurrent())) return { result: NONE_RESULT, watchId: null }
       ports.requestGuide()
       await ports.writeMarker(id, { state: 'done', version })
-      return { action: 'none', guide: true }
+      return { result: { action: 'none', guide: true }, watchId: null }
     }
-    return NONE_RESULT
+    return { result: NONE_RESULT, watchId: null }
   } finally {
     // 释放失败不传播（陈旧接管兜底；磁盘 done 状态才是收口判据）
     await ports.lock.release().catch(() => undefined)
@@ -473,7 +569,7 @@ export async function runLegacyThemeMigration(
   options: LegacyThemeMigrationRunOptions = {},
 ): Promise<LegacyThemeMigrationRunResult> {
   const lockStaleMs = options.lockStaleMs ?? 10_000
-  const waitTimeoutMs = options.waitTimeoutMs ?? 5_000
+  const waitTimeoutMs = options.waitTimeoutMs ?? 30_000
   const pollIntervalMs = options.pollIntervalMs ?? 100
 
   // ---- B'：profile 身份 → 磁盘权威状态 → 快速路径 ----
@@ -500,10 +596,10 @@ export async function runLegacyThemeMigration(
   }
 
   if (await ports.lock.tryAcquire()) {
-    return executeOwnerSequence(ports, profileId, options)
+    return await runOwnerSequence(ports, profileId, options)
   }
   if (await ports.lock.takeoverIfStale(lockStaleMs)) {
-    return executeOwnerSequence(ports, profileId, options)
+    return await runOwnerSequence(ports, profileId, options)
   }
   // 认领失败：等待身份出现（同 profile 胜者刚生成、广播在途）与磁盘 done
   // （期间锁陈旧/消失则接管补完——胜者崩溃不留死锁；代次锁按文件名代次
@@ -525,7 +621,7 @@ export async function runLegacyThemeMigration(
       // 锁不在位（胜者异常退出已释放）或已陈旧（胜者崩溃残留）——接力或
       // 接管：owner 序列重读磁盘状态，幂等安全
       if (await ports.lock.takeoverIfStale(lockStaleMs)) {
-        return executeOwnerSequence(ports, profileId, options)
+        return await runOwnerSequence(ports, profileId, options)
       }
     }
     await sleep(pollIntervalMs)

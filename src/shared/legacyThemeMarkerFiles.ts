@@ -85,9 +85,17 @@ export async function legacyListMarkerFileEntries(
 }
 
 /**
- * 读取本身份的权威状态（R8-3 降级回退）：候选按（代次 desc，同代
- * done 优先）排序，逐个解析直至首个合法 marker——空/残缺/形态不符的
- * 高代文件被跳过，不消除低代有效状态；全部不可解析或无文件 = null
+ * 读取本身份的权威状态（R8-3 降级回退 + R9-3 读取错误中止）：候选按
+ * （代次 desc，同代 done 优先）排序，逐个处理——
+ * - 读取成功但内容空/残缺/形态不符（发布前故障的残缺文件，R8-3）→
+ *   跳过该候选，继续降级到次高代（不完整高代不消除低代有效 pending）；
+ * - readFile 抛 ENOENT（列目录后文件被并发清理）→ 跳过继续；
+ * - readFile 抛其他错误（EIO 等瞬时 I/O 故障，R9-3）→ **整体按无标记
+ *   fail-closed 返回 null，不降级采用旧 pending**——权威状态未知时不
+ *   伪造欠账判断（降级取旧 pending 会把「已收口的 done」误判成待补发
+ *   债务而重复引导）；本次激活放弃判定，磁盘状态未被消费，下次激活
+ *   重读即恢复（故障后 done 正常读取 → 短路，无重复）。
+ * 全部候选不可解析或无文件 = null
  */
 export async function readLegacyMarkerFile(
   fs: LegacyMarkerFilesystem,
@@ -99,12 +107,18 @@ export async function readLegacyMarkerFile(
     .filter((entry) => entry.profileId === profileId)
     .sort((a, b) => (b.gen - a.gen) || (doneRank(a) - doneRank(b)))
   for (const entry of entries) {
+    let content: string
     try {
-      const marker = parseLegacyThemeMigrationMarker(
-        JSON.parse(await fs.readFile(`${dir}/${entry.name}`)))
+      content = await fs.readFile(`${dir}/${entry.name}`)
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') continue
+      return null
+    }
+    try {
+      const marker = parseLegacyThemeMigrationMarker(JSON.parse(content))
       if (marker !== null) return marker
     } catch {
-      // 跳过不可解析候选，继续降级
+      // 内容残缺：跳过该候选，继续降级（R8-3）
     }
   }
   return null

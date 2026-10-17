@@ -249,24 +249,29 @@ describe('七审 R7-1b（声明边界）：同 profile 广播延迟超过收敛�
     // 生成自己的身份并在同次激活内完成迁移（边界形态：换身份重迁）
     const b = await runLegacyThemeMigration(
       makeWindowPorts(wB.memento, dir, 'token-b', () => { guides.push('B') }),
-      { profileIdWaitMs: 20, profileIdPollMs: 2, profileIdSettleMs: 100 },
+      { profileIdWaitMs: 20, profileIdPollMs: 2, profileIdSettleMs: 100, convergeWatchMs: 100 },
     )
-    expect(b).toEqual({ action: 'migrate', guide: true })
-    expect(guides).toEqual(['A', 'B'])
+    // 方案 A 后的边界形状：收敛窗尽 → 迁移照做、**本次激活不引导**（临
+    // 时身份 pending 留存）；重复引导从「同激活第二弹」变为「下次激活
+    // 的恢复补发」——总量仍为 2（平台故障形态的声明残余，见文件头）
+    expect(b).toEqual({ action: 'migrate', guide: false })
+    expect(guides).toEqual(['A'])
     const idB = db.get(PROFILE_ID_STATE_KEY)
     expect(idB).not.toBe(idA) // 收敛失败 → 换身份（边界形状）
-    expect((await markerReader(dir)(String(idB)))?.state).toBe('done')
+    expect((await markerReader(dir)(String(idB)))?.state).toBe('pending')
     // 旧身份的状态文件原样保留（迟到窗不覆写他身份的磁盘状态）
     expect((await markerReader(dir)(String(idA)))?.state).toBe('done')
-    // 等全部广播送达后重开：新身份 done 短路，引导数不再增长（收敛）
+    // 等全部广播送达后重开（从 db 读到临时身份 + pending 债务）：恢复
+    // 补发一次后收敛，再不增长
     await sleep(700)
     const wC = openWindow()
     const c = await runLegacyThemeMigration(
       makeWindowPorts(wC.memento, dir, 'token-c', () => { guides.push('C') }),
       { profileIdWaitMs: 20, profileIdPollMs: 2, profileIdSettleMs: 100 },
     )
-    expect(c).toEqual({ action: 'none', guide: false })
-    expect(guides).toEqual(['A', 'B'])
+    expect(c).toEqual({ action: 'none', guide: true })
+    expect(guides).toEqual(['A', 'C'])
+    expect((await markerReader(dir)(String(idB)))?.state).toBe('done')
   })
 })
 
@@ -290,16 +295,25 @@ describe('七审 R7-2：他 profile 状态文件不得阻塞本 profile 首次�
     wB.memento.update(SETTINGS_STORAGE_KEY, { ...RETIRED_OVERLAY })
     const b = await runLegacyThemeMigration(
       makeWindowPorts(wB.memento, dir, 'token-b', () => { guides.push('B') }),
-      { profileIdWaitMs: 5, profileIdPollMs: 1, profileIdSettleMs: 30 },
+      { profileIdWaitMs: 5, profileIdPollMs: 1, profileIdSettleMs: 30, convergeWatchMs: 50 },
     )
-    // 同次激活完成：迁移 + 引导 + done（R7 反例：让位 → guides=0、marker=null）
-    expect(b).toEqual({ action: 'migrate', guide: true })
-    expect(guides).toEqual(['A', 'B'])
+    // 方案 A（2026-10-17 裁决）：同次激活完成**迁移**（R7 反例：让位 →
+    // guides=0、marker=null、overlay 不动），临时身份未定 → 不发引导、
+    // pending 债务留存（观察预算尽）
+    expect(b).toEqual({ action: 'migrate', guide: false })
+    expect(guides).toEqual(['A'])
     const bId = storageB.db.get(PROFILE_ID_STATE_KEY)
     expect(typeof bId).toBe('string')
-    expect((await markerReader(dir)(String(bId)))?.state).toBe('done')
+    expect((await markerReader(dir)(String(bId)))?.state).toBe('pending')
     expect((storageB.db.get(SETTINGS_STORAGE_KEY) as Record<string, unknown>)[APPEARANCE_THEME_KEY])
       .toBe('default')
+    // 下次激活（同 profile 缓存已有临时身份）：pending 恢复补发恰一次
+    const b2 = await runLegacyThemeMigration(
+      makeWindowPorts(wB.memento, dir, 'token-b2', () => { guides.push('B') }), {},
+    )
+    expect(b2).toEqual({ action: 'none', guide: true })
+    expect(guides).toEqual(['A', 'B'])
+    expect((await markerReader(dir)(String(bId)))?.state).toBe('done')
   })
 })
 

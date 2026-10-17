@@ -212,9 +212,14 @@ describe("B'（五审 P2-C）：双 profile 共享 globalStorage 磁盘目录", 
     // PROFILE 域隔离）→ 第一窗尽 → 收敛窗尽仍无身份 → 生成自己的身份
     // 并在**同次激活**内完成迁移与引导（七审 R7-2：他 profile 的状态文
     // 件不阻塞本 profile；六审的「让位等下次激活」已按 R7 复审改判）
-    const b = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2, profileIdSettleMs: 30 })
-    expect(b).toEqual({ action: 'migrate', guide: true })
-    expect(guides.B).toBe(1) // B 的迁移引导不被 A 的完成状态吞掉，恰一次
+    const b = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2, profileIdSettleMs: 30, convergeWatchMs: 50 })
+    // 方案 A：迁移同次激活生效（不被 A 的完成状态吞掉），临时身份未定
+    // → 本次激活不引导（pending 债务留存）
+    expect(b).toEqual({ action: 'migrate', guide: false })
+    expect(guides.B).toBe(0)
+    const b2 = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b2', () => { guides.B += 1 }), {})
+    expect(b2).toEqual({ action: 'none', guide: true })
+    expect(guides.B).toBe(1) // 下次激活恢复补发恰一次
 
     // 两身份各自落盘（共享目录、按身份分文件——数身份数不数文件数：
     // 一身份可有 pending/done 两个代次文件）

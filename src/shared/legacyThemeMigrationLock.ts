@@ -118,10 +118,11 @@ export interface LegacyThemeMigrationLockHandle {
    */
   isCurrentGeneration(): Promise<boolean>
   /**
-   * 本句柄认领的代次（七审 R7-3）：owner 写迁移状态文件时以 ownGen 为
-   * 文件名代次（O_EXCL 创建、读取取 max）——滞后 owner 的迟到提交只创建
-   * 低代次文件，被 max 读取结构性忽略。未认领（含 release 后）抛错：
-   * 状态写入只属于在位 owner。
+   * 本句柄认领过的代次（七审 R7-3；八审 R9-3 收敛收尾放宽）：owner 写
+   * 迁移状态文件时以自己代次为文件名代次（滞后 owner 的迟到提交只落低
+   * 代次文件，被 max 读取结构性忽略）——release 后仍返回最后持有的代
+   * 次（收敛收尾的封存写属于「滞后写」，落在自己旧代次名上恰是被
+   * max 语义保护的形态）；从未认领过才抛错。
    */
   getOwnedGeneration(): Promise<number>
   /**
@@ -198,6 +199,8 @@ export function createLegacyThemeMigrationLock(
   const lockDir = dirOfFile(lockPath)
   const lockBase = baseOfFile(lockPath)
   let ownGen: number | null = null
+  /** 最后一次成功认领的代次（release 后保留——getOwnedGeneration 供收敛收尾的封存写；从未认领为 null） */
+  let lastGen: number | null = null
 
   /** 兼容视图读取（缺失 = 0；损坏抛错 fail-closed，见文件头） */
   const readPointerHint = async (): Promise<number> => {
@@ -328,6 +331,7 @@ export function createLegacyThemeMigrationLock(
       return false
     }
     ownGen = candidate
+    lastGen = candidate
     await pushPointerHint(candidate).catch(() => undefined)
     await cleanupOlderGens(candidate).catch(() => undefined)
     return true
@@ -360,10 +364,10 @@ export function createLegacyThemeMigrationLock(
     },
 
     getOwnedGeneration: async () => {
-      if (ownGen === null) {
+      if (lastGen === null) {
         throw new Error('[vsidian] 旧主题迁移状态写入需先认领锁（代次未知）')
       }
-      return ownGen
+      return lastGen
     },
 
     keepalive: async () => {

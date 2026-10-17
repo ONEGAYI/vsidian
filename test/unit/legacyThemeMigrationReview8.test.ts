@@ -166,7 +166,7 @@ describe('八审 R8-2：合法身份等待期间 owner 不被陈旧接管逐出'
     b.memento.update(SETTINGS_STORAGE_KEY, { ...RETIRED_OVERLAY })
     const runB = runLegacyThemeMigration(
       makeWindowPorts(b.memento, dir, 'token-b', () => { guides.push('B') }),
-      { profileIdWaitMs: 150, profileIdPollMs: 25, profileIdSettleMs: 900, lockStaleMs: 300, waitTimeoutMs: 5_000, pollIntervalMs: 25 },
+      { profileIdWaitMs: 150, profileIdPollMs: 25, profileIdSettleMs: 900, lockStaleMs: 300, waitTimeoutMs: 5_000, pollIntervalMs: 25, convergeWatchMs: 100 },
     )
     await sleep(250) // B 进入收敛窗等待（锁在握、mtime 停留在认领时刻）
     // profile C：独立 profile，同需迁移；等待环内按陈旧阈值尝试接管
@@ -174,13 +174,23 @@ describe('八审 R8-2：合法身份等待期间 owner 不被陈旧接管逐出'
     c.memento.update(SETTINGS_STORAGE_KEY, { ...RETIRED_OVERLAY })
     const runC = runLegacyThemeMigration(
       makeWindowPorts(c.memento, dir, 'token-c', () => { guides.push('C') }),
-      { profileIdWaitMs: 150, profileIdPollMs: 25, profileIdSettleMs: 900, lockStaleMs: 300, waitTimeoutMs: 1_500, pollIntervalMs: 25 },
+      { profileIdWaitMs: 150, profileIdPollMs: 25, profileIdSettleMs: 900, lockStaleMs: 300, waitTimeoutMs: 1_500, pollIntervalMs: 25, convergeWatchMs: 100 },
     )
     const [bResult, cResult] = await Promise.all([runB, runC])
     // R8 反例（红态）：C 在 ~300ms 以陈旧接管夺取 gen2，B 在 ~1050ms 生成
-    // 身份后被 fence 静默退出（none）——B 的本次迁移被跳过
-    expect(bResult).toEqual({ action: 'migrate', guide: true })
-    expect(cResult).toEqual({ action: 'migrate', guide: true })
+    // 身份后被 fence 静默退出（none）——B 的本次迁移被跳过。绿态（心跳）：
+    // B/C 首次激活都完成**迁移**（方案 A：临时身份未定 → 不发引导）
+    expect(bResult).toEqual({ action: 'migrate', guide: false })
+    expect(cResult).toEqual({ action: 'migrate', guide: false })
+    expect(guides).toEqual(['A'])
+    // 下次激活各按 pending 恢复补发恰一次（B 不被逐出 = 迁移已在本激
+    // 活落盘，第二激活只是还引导欠账）
+    const b2 = await runLegacyThemeMigration(
+      makeWindowPorts(b.memento, dir, 'token-b2', () => { guides.push('B') }), {})
+    const c2 = await runLegacyThemeMigration(
+      makeWindowPorts(c.memento, dir, 'token-c2', () => { guides.push('C') }), {})
+    expect(b2).toEqual({ action: 'none', guide: true })
+    expect(c2).toEqual({ action: 'none', guide: true })
     // 双 profile 各恰一次（C 在 B 释放后经等待环接管完成自己的迁移）
     expect(guides).toEqual(['A', 'B', 'C'])
     const bOverlay = b.memento.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY)

@@ -244,9 +244,16 @@ describe('R5-1 → 七审 R7-2（跨 profile 活性）：全新 profile 在他 p
     const b = await runLegacyThemeMigration(
       windowPorts(profileB.memento, dir, 'token-b', () => {
         guidesB += 1
-      }), RUN_OPTS_FAST)
-    expect(b).toEqual({ action: 'migrate', guide: true })
-    expect(guidesB).toBe(1)
+      }), { ...RUN_OPTS_FAST, convergeWatchMs: 50 })
+    // 方案 A：迁移同次激活完成，临时身份未定 → 不引导（pending 留存）
+    expect(b).toEqual({ action: 'migrate', guide: false })
+    expect(guidesB).toBe(0)
+    const b2 = await runLegacyThemeMigration(
+      windowPorts(profileB.memento, dir, 'token-b2', () => {
+        guidesB += 1
+      }), {})
+    expect(b2).toEqual({ action: 'none', guide: true })
+    expect(guidesB).toBe(1) // 下次激活恢复补发恰一次
     const idB = profileB.store.get(PROFILE_ID_STATE_KEY) as string
     expect(idB).not.toBe(idA)
     // 双身份各自落盘（共享目录、按身份分文件——数身份数不数文件数）
