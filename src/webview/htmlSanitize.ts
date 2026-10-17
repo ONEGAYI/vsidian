@@ -26,7 +26,9 @@
 //   渲染所需最小能力；无 allow-same-origin → 不透明源零 cookie/存储、
 //   不可达父窗口与 acquireVsCodeApi；无 allow-top-navigation/forms/
 //   popups/modals/downloads）+ referrerpolicy=no-referrer；**其余全部形态
-//   （srcdoc / 相对路径→本地解析 / 明文 http / 无 src）= 零 token**——
+//   （srcdoc〔含与 https src 组合——浏览器按规范 srcdoc 优先渲染、忽略
+//   src，分派依据不得取 src〕/ 相对路径→本地解析 / 明文 http / 无 src）
+//   = 零 token**——
 //   笔记可控内容（笔记本体与 vault 文件）结构性禁脚本，与「笔记本体
 //   script 不获得执行能力」同一红线（明文 http 帧在生产另被 CSP
 //   frame-src 拦截装载）。
@@ -77,8 +79,10 @@ const SVG_ANIMATION_TAGS = new Set(['animate', 'animatemotion', 'animatetransfor
  * afterSanitizeAttributes 净化后回写——递归净化不受该防护影响（内层是
  * 标签层输入，不是属性值）。字符串输入的 sanitize 是解析树原位清洗，
  * 节点引用跨两阶段稳定。
+ * WeakMap 异常路径卫生：净化中途抛出（before 捕获后、after 回写前）
+ * 时残留以已脱离节点为键的条目——弱引用不阻塞节点回收（Map 强引用会泄漏）。
  */
-const pendingSrcdoc = new Map<Element, string>()
+const pendingSrcdoc = new WeakMap<Element, string>()
 
 /** #573（T08）SVG/MathML ADD_TAGS 放行面（主净化与 #572 srcdoc 递归净化
  *  共用一份——帧内 SVG 与正文 SVG 同口径，不建第二份清单） */
@@ -162,8 +166,13 @@ function purifyInstance(): typeof DOMPurify | null {
       node.removeAttribute('allow')
       node.removeAttribute('allowfullscreen')
       node.removeAttribute('allowpaymentrequest')
+      // srcdoc 捕获判定提前（sandbox 分派依据）：净化前 srcdoc 在场
+      //（含空串）= srcdoc 形态——浏览器按 HTML 规范 srcdoc 优先渲染、
+      // 忽略 src，组合形态下帧实际渲染递归净化的笔记可控内容，不得取
+      // src 分派（否则借 https src 换来 allow-scripts 违反零 token 矩阵）
+      const captured = pendingSrcdoc.get(node)
       // sandbox 系统强制：作者值不可选（远端 https = allow-scripts；其余零 token）
-      const remote = isHttpsFrameSrc(node.getAttribute('src') ?? '')
+      const remote = captured === undefined && isHttpsFrameSrc(node.getAttribute('src') ?? '')
       node.setAttribute('sandbox', remote ? IFRAME_REMOTE_SANDBOX : IFRAME_STATIC_SANDBOX)
       if (remote) {
         node.setAttribute('referrerpolicy', 'no-referrer')
@@ -171,7 +180,6 @@ function purifyInstance(): typeof DOMPurify | null {
         node.removeAttribute('referrerpolicy')
       }
       // srcdoc 回写（捕获原文 → 递归净化；空值保持空——帧空文档语义）
-      const captured = pendingSrcdoc.get(node)
       if (captured !== undefined) {
         pendingSrcdoc.delete(node)
         node.setAttribute('srcdoc', captured === '' ? '' : sanitizeSrcdocContent(captured))

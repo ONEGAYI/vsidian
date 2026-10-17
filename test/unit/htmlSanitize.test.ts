@@ -214,6 +214,21 @@ describe('#572（T07）iframe：白名单放行与 sandbox/权限面系统强制
     expect(iframeOf(out).getAttribute('sandbox')).toBe('')
   })
 
+  it('src=https + srcdoc 组合形态：sandbox 零 token（浏览器按规范 srcdoc 优先渲染、忽略 src——分派依据不得取 src）', () => {
+    // 非空 srcdoc：组合形态下帧实际渲染递归净化的笔记可控内容，不得借 https src 换来 allow-scripts
+    const nonEmpty = sanitizeHtmlBlockMarkup('<iframe src="https://example.com" srcdoc="<b>x</b>"></iframe>')
+    const frameA = iframeOf(nonEmpty)
+    expect(frameA.getAttribute('sandbox')).toBe('')
+    expect(frameA.getAttribute('sandbox')).not.toBe(IFRAME_REMOTE_SANDBOX)
+    // 渲染依据仍是 srcdoc（回写链路不因 src 在场失效）
+    expect(frameA.getAttribute('srcdoc')).toContain('<b>x</b>')
+    // 空 srcdoc 同为「净化前 srcdoc 在场」形态——零 token 口径一致
+    const emptyDoc = sanitizeHtmlBlockMarkup('<iframe src="https://example.com" srcdoc=""></iframe>')
+    const frameB = iframeOf(emptyDoc)
+    expect(frameB.getAttribute('sandbox')).toBe('')
+    expect(frameB.getAttribute('srcdoc')).toBe('')
+  })
+
   it('明文 http 与无 src 形态：sandbox 零 token（http 帧生产被 CSP 拦截，不放行脚本面）', () => {
     const out = sanitizeHtmlBlockMarkup('<div><iframe src="http://example.com"></iframe><iframe loading="lazy"></iframe></div>')
     const frames = new DOMParser().parseFromString(out, 'text/html').querySelectorAll('iframe')
