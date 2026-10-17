@@ -6,7 +6,7 @@
     "anchor": {
       "kind": "commit",
       "sha": "f408950b0360fcf4994e4a051baa9d44a17b7f9b",
-      "ref": "HEAD",
+      "ref": "f408950b0360fcf4994e4a051baa9d44a17b7f9b",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
