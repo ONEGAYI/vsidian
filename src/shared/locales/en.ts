@@ -1054,7 +1054,6 @@ export const en = {
   'host.defaultEditorFixed': 'Vsidian is again the default editor for Markdown files.',
   'host.defaultEditorFixFailed': 'Could not restore the default editor automatically (a workspace setting may override it). Opening the editor associations setting for manual review.',
   /** #535 T08 Codex 内核退役：升级用户旧 codex 设置的一次性安装引导（不自动安装、不代选） */
-  'host.legacyThemeMigrated': 'The Codex diagram theme has moved to an installable add-on; diagrams now render with the Default theme. Install the Codex theme add-on and pick it on the Appearance → Themes page in settings.',
   /** #323 设置页常规页「默认编辑器」委托组：组标题、状态行四形态与手动按钮 */
   'defaultEditor.title': 'Default Editor',
   'defaultEditor.statusLabel': 'Current default editor',

@@ -118,8 +118,7 @@ describe('补丁保存（apply）', () => {
     const rejected = await first.apply({ 'appearance.mermaidTheme': 'anything-unknown' })
     expect(rejected.ok).toBe(false)
     expect(rejected.ok === false && rejected.rejected).toContain('appearance.mermaidTheme')
-    // 快照也不再有该键（sanitize 忽略未知键——迁移判据须读原始 overlay，
-    // 见 legacyThemeMigration.test.ts）
+    // 快照也不再有该键（sanitize 忽略未知键——定义删除的键不进快照）
     expect(first.getSnapshot()).not.toHaveProperty('appearance.mermaidTheme')
     // 新主题键（受限自由文本）不受影响
     expect((await first.apply({ 'appearance.theme': 'pub.two/aqua' })).ok).toBe(true)

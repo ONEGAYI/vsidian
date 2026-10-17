@@ -2,8 +2,9 @@
 // 解析与页面明暗四态的纯逻辑单测（TDD 先立预期）。规则来源：
 // docs/specs/addon-themes.md §3（宿主目录/唯一选择）与 §4（页面明暗四
 // 态）；ADR-0017（安装只新增候选、唯一互斥、回落保留首选）。
-// #535 T08：旧预设已退役——旧键回显分支删除（迁移语义见
-// legacyThemeMigration.test.ts）；本文件钉迁移后的解析口径。v1.1.0 已发行的
+// #535 T08：旧预设已退役——旧键回显分支删除、不做激活迁移（旧键写入
+// 拒绝断言见 settingsService.test.ts）；本文件钉退役后的解析口径。v1.1.0
+// 已发行的
 // 公开符号（CODEX_THEME_ID 常量、resolveThemePreferred 双参形状）按
 // PR #581 评审发现 3 恢复兼容形状并标 @deprecated，由本文件钉住。
 import { describe, expect, it } from 'vitest'
@@ -25,7 +26,7 @@ import {
   validateAddonThemeBatch,
   type AddonThemeCandidate,
 } from '../../src/shared/addonThemes'
-import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, appearanceThemePatch, MERMAID_THEME_KEY } from '../../src/shared/settings'
+import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, appearanceThemePatch } from '../../src/shared/settings'
 
 function declaration(opts: Partial<Parameters<typeof addonThemeCandidateOf>[1]> = {}) {
   return {
@@ -239,7 +240,7 @@ describe('appearanceThemePatch（单键写入——旧 Mermaid 键定义已随 #
       [APPEARANCE_THEME_KEY]: 'default',
     })
     // 旧键不再出现在补丁（写旧键会被定义校验拒绝）
-    expect(appearanceThemePatch('default')).not.toHaveProperty(MERMAID_THEME_KEY)
+    expect(appearanceThemePatch('default')).not.toHaveProperty('appearance.mermaidTheme')
   })
 })
 

@@ -1001,7 +1001,6 @@ export const zhCn: Record<MessageKey, string> = {
   'host.defaultEditorFixed': 'Vsidian 已恢复为 Markdown 文件的默认编辑器。',
   'host.defaultEditorFixFailed': '未能自动恢复默认编辑器（可能被工作区设置覆盖），即将打开编辑器关联设置供手动处理。',
   /** #535 T08 Codex 内核退役：升级用户旧 codex 设置的一次性安装引导（不自动安装、不代选） */
-  'host.legacyThemeMigrated': 'Codex 图表主题已迁移为可安装的附加组件，图表当前按默认主题渲染。可安装 Codex 主题组件，并在设置的「外观 → 主题」页中选择它。',
   /** #323 设置页常规页「默认编辑器」委托组：组标题、状态行四形态与手动按钮 */
   'defaultEditor.title': '默认编辑器',
   'defaultEditor.statusLabel': '当前默认编辑器',

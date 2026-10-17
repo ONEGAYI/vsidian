@@ -139,40 +139,6 @@ export class SettingsService {
     return { ok: true, values }
   }
 
-  /**
-   * 迁移接线的互斥读-判-写步骤（#535 T08 PR #581 三审 P2-A；仅供
-   * legacyThemeMigrationWiring 消费）：step 在串行链内收到**当前**原始
-   * overlay（未经 sanitize），返回要落盘的最小补丁（null = 不写）与
-   * 回传值。不做定义校验——迁移要写的旧 Mermaid 键定义已删，经 apply
-   * 的整批校验会被拒（判据见 shared/legacyThemeMigration 头注释）。step 必须
-   * 是同步纯函数，不得再入本服务写路径（链式互斥不可重入）。
-   * 六审 R5-2：补丁落盘后走与 apply 成功路径同构的变更通知（链外、以
-   * 新快照回调监听者）——迁移是 fire-and-forget，页面可能已完成首读；
-   * 主题推送只订阅 onChange，不通知则首屏停留在迁移前的残留值直到重开。
-   * 通知只随实际落盘的补丁发生（null 补丁不打扰）。
-   */
-  async runExclusiveOverlayStep<R>(
-    step: (overlay: unknown) => { patch: Record<string, unknown> | null; result: R },
-  ): Promise<R> {
-    let patched = false
-    const result = await this.enqueueOverlayWrite(async () => {
-      const overlay = this.storage.get<Record<string, unknown>>(this.storageKey)
-      const { patch, result } = step(overlay)
-      if (patch !== null) {
-        await this.storage.update(this.storageKey, { ...overlay, ...patch })
-        patched = true
-      }
-      return result
-    })
-    if (patched) {
-      const values = this.getSnapshot()
-      for (const listener of this.listeners) {
-        listener(values)
-      }
-    }
-    return result
-  }
-
   /** 把「读-合并-写」段排入串行链（P2-A）：后进者等待先进者落定 */
   private enqueueOverlayWrite<T>(step: () => Promise<T>): Promise<T> {
     const next = this.overlayWriteChain.then(step, step)

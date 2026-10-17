@@ -174,21 +174,13 @@ export const CODEBLOCK_COPY_BUTTON_DEFAULT = true
 export const CODEBLOCK_HIGHLIGHT_KEY = 'codeblock.highlight'
 export const CODEBLOCK_HIGHLIGHT_DEFAULT = true
 /**
- * #59 起的旧 Mermaid 预设键（appearance.mermaidTheme）。#535 T08 内核
- * 旧预设退役后**不再是可设置键**（定义表条目与枚举已删除，快照
- * 不再含此键、任何写入按未知键拒绝）；常量保留供迁移读写原始 overlay
- * 残留（shared/legacyThemeMigration——判据须读未经 sanitize 的原始层）。
- */
-export const MERMAID_THEME_KEY = 'appearance.mermaidTheme'
-
-/**
  * #546 T07「统一主题」首选键：值 = 'default' | `<addonId>/<themeId>`
  * （组件主题稳定身份）。值域动态（组件主题随安装变化），schema 用受限
  * 自由文本承载——合法性由主题目录运行时解析（未命中目录的存量回落
  * default 显示，首选保留）。**唯一主题选择入口**：设置页外观第四页签
  * 「主题」自绘单选列表呈现，不走标准设置行（防第二入口）；渲染链路经
  * resolveThemePreferred 消费。#535 T08 后退役预设不再是合法主题身份
- * （历史值经激活迁移回落 default，见 shared/legacyThemeMigration）。
+ * （无老用户存量，不做迁移——裸词旧值按未知首选走目录不命中回落）。
  */
 export const APPEARANCE_THEME_KEY = 'appearance.theme'
 export const APPEARANCE_THEME_DEFAULT = 'default'
@@ -198,8 +190,7 @@ export const APPEARANCE_THEME_MAX_LENGTH = 192
 /**
  * 主题首选写入补丁（设置页单选保存的纯逻辑）：只写新键完整主题身份。
  * #546 T07 曾以双键同拍投影旧 Mermaid 键；#535 T08 旧键定义删除后投影
- * 退役（写旧键会被定义校验拒绝），存量旧值由激活时的旧主题迁移清理
- * （shared/legacyThemeMigration）。
+ * 退役（写旧键会被定义校验拒绝；无老用户存量，不做迁移清理）。
  */
 export function appearanceThemePatch(themeRef: string): Record<string, string> {
   return {
