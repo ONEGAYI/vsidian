@@ -285,3 +285,19 @@ describe('revealInlineHtmlSourceAtCursor：编辑当前 HTML 源码（行内目�
     }
   })
 })
+
+describe('#576 评审 P2-5：前文语法变化（围栏开闭）使行内片段重分类——增量窗口外不残留/不缺失', () => {
+  it('文首形成围栏：行内片段重分类为代码字面，旧片段条目不残留', () => {
+    const state = buildState('前 <span style="color:red">x</span> 后\n\n尾段\n', EditorSelection.single(0))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    const next = state.update({ changes: { from: 0, insert: '```\n' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+
+  it('拆除文首围栏：行内片段重新出现', () => {
+    const state = buildState('```\n前 <span style="color:red">x</span> 后\n\n尾段\n', EditorSelection.single(0))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 0, to: 4 } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
+  })
+})

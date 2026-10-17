@@ -25,7 +25,7 @@ import { liveDecorationsField } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { inlineHtmlFragmentsOfTree, type HtmlInlineFragment } from '../shared/htmlInline'
 import { htmlInlineRenderHtml } from './htmlSanitize'
-import { makeHtmlWidgetMousedown, liveHtmlDocScopeOf, prepareHtmlWidgetContent } from './liveHtml'
+import { makeHtmlWidgetMousedown, liveHtmlDocScopeOf, prepareHtmlWidgetContent, topLevelStructureStable } from './liveHtml'
 import { disposeHtmlResourcesOf } from './htmlResourceMount'
 import type { Tree } from '@lezer/common'
 
@@ -67,13 +67,16 @@ function scanAllInlineHtmlSpans(doc: Text, tree: Tree | null): LiveInlineHtmlSpa
  * 片段表增量重建（liveHtml.rebuildHtmlSpans 同款纪律）：种子 = 变更区间
  * ∪ 映射后与之相交的旧片段；窗口内树扫描（片段界定来自解析器 + 共享
  * 配对，不猜嵌套），窗口外映射保留；坍缩条目丢弃。树缺席时保守只做
- * 映射（降级方向 = 不渲染新片段，源码可见）。
+ * 映射（降级方向 = 不渲染新片段，源码可见）。#576 评审 P2-5：prevTree
+ * 在场且顶层结构签名不稳定时退全量重扫（围栏开闭使行内片段随所在块
+ * 整体重分类为代码字面，窗口外旧片段与缺口都不在变更区间内）。
  */
 export function rebuildInlineHtmlSpans(
   doc: Text,
   tr: Transaction,
   prev: readonly LiveInlineHtmlSpan[],
   tree: Tree | null,
+  prevTree?: Tree | null,
 ): LiveInlineHtmlSpan[] {
   const changes = tr.changes
   let seedFrom = doc.length + 1
@@ -98,6 +101,10 @@ export function rebuildInlineHtmlSpans(
   }
   if (tree === null) {
     return mapped.filter((m) => m.to > m.from)
+  }
+  if (prevTree != null && tree !== prevTree && !topLevelStructureStable(changes, prevTree, tree)) {
+    // 块级重分类（围栏开闭的传播影响）：窗口策略不安全——全量重扫
+    return scanAllInlineHtmlSpans(doc, tree)
   }
   const out: LiveInlineHtmlSpan[] = []
   for (const m of mapped) {
@@ -129,7 +136,8 @@ export const liveInlineHtmlSpansField = StateField.define<readonly LiveInlineHtm
       return scanAllInlineHtmlSpans(tr.state.doc, tr.state.field(liveDecorationsField, false)?.tree ?? null)
     }
     return rebuildInlineHtmlSpans(tr.state.doc, tr, value,
-      tr.state.field(liveDecorationsField, false)?.tree ?? null)
+      tr.state.field(liveDecorationsField, false)?.tree ?? null,
+      tr.startState.field(liveDecorationsField, false)?.tree ?? null)
   },
 })
 

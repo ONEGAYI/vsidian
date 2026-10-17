@@ -893,8 +893,12 @@ interface ViewState {
       svgMath?: {
         svgs: number
         svgPainted: boolean
+        svgPaintedCount: number
         maths: number
         mathPainted: boolean
+        mathPaintedCount: number
+        hiddenControls: number
+        hiddenPainted: number
         foreignObjects: number
         gradientRefs: number
         scopedGradientRefs: number
@@ -19465,6 +19469,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '',
       evil,
       '',
+      // 隐藏负向对照（#576 Standards）：绘制探针的可见性钉子——
+      // visibility:hidden 的 svg 与 display:none 的 math 不得产生绘制证据
+      '<svg style="visibility:hidden" width="20" height="20"><rect width="10" height="10"/></svg>',
+      '',
+      '<math style="display:none"><mi>h</mi></math>',
+      '',
       '![[t8-sub/t8-b-573]]',
       '',
       '<style>',
@@ -19519,6 +19529,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const h1 = reading.paint!.html!
       assert(h1.scripts === 0 && h1.eventAttrs === 0,
         `净化负向：svg script/事件零残留（实际 scripts=${h1.scripts} events=${h1.eventAttrs}）`)
+      // #576 Standards 负向控制：隐藏对照在场且不产生绘制证据（探针非恒真）
+      assert(m1.hiddenControls >= 2, `隐藏负向对照在场（visibility:hidden svg + display:none math；实际 ${m1.hiddenControls}）`)
+      assert(m1.hiddenPainted === 0, `隐藏元素不产生绘制证据（实际 ${m1.hiddenPainted}）`)
 
       // Live：widget 绘制 + MathML 结构 + 模式切换存续（主文 contentDOM 内
       // 4 个 svg：块级 1 + 行内 3——嵌入卡 B 是独立 Live 实例不计入）
@@ -19532,6 +19545,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(m2.svgPainted && m2.mathPainted,
         `Live：SVG 与 MathML widget 实际绘制（实际 ${JSON.stringify(m2)}）`)
       assert(live.paint!.html!.scripts === 0, 'Live 净化负向零残留')
+      assert(m2.hiddenControls >= 2 && m2.hiddenPainted === 0,
+        `Live 隐藏负向对照不产生绘制证据（实际 ${JSON.stringify(m2)}）`)
 
       // 释放：删除嵌入行（外部增量）→ B 释放，作用域前缀 id 归零
       const embedLine = '![[t8-sub/t8-b-573]]'

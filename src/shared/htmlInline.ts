@@ -5,12 +5,12 @@
 //   `HTMLTag` 节点（每标签一个，Paragraph/Heading/TableCell/引用与列表
 //   内段落皆产；FencedCode/InlineCode/HTMLBlock 内不产——解析器先行
 //   消费或整块吞噬，天然排除代码与块级区域）。
-// - 配对范围由**栈派生**（token 级标签语法识别是两端解析器自身的规则
-//   ——markdown-it html_inline tokenizer 与 Lezer HTMLTag 的产出形态；
-//   不用正则猜测嵌套范围）。两端共用本模块：Lezer 侧
-//   `inlineHtmlFragmentsOfTree`（树节点 → 同行分组 → 配对），markdown-it
-//   侧 `matchInlineHtmlFragmentAt`（行内规则的消费驱动面）——两端一致
-//   性由对拍测试钉住（test/unit/htmlInline.test.ts）。
+// - 配对范围由**原始 HTML 语法扫描**确定（token 级标签识别是两端解析器
+//   自身的规则；不用正则猜测嵌套范围）。两端共用本模块：Lezer 侧
+//   `inlineHtmlFragmentsOfTree`（树 HTMLTag 节点作候选起点 + 原始文本
+//   定范围——#576 评审 P2-6：树配对会被片段内 Escape 吞标签误判未
+//   闭合），markdown-it 侧 `matchInlineHtmlFragmentAt`（行内规则的消费
+//   驱动面）——两端一致性由对拍测试钉住（test/unit/htmlInline.test.ts）。
 // - **单行成型边界**：片段不跨行（开标签与匹配闭标签须同行）。理由：
 //   CM6 行内 replace 装饰不得跨换行（Live 硬约束），跨行配对两端一致
 //   降级为源码字面（含属性内换行的标签同理不成型）。
@@ -182,62 +182,20 @@ export function matchInlineHtmlFragmentAt(src: string, pos: number): number | nu
 }
 
 /**
- * 一组标签 token（同行、升序）→ 完整片段集合（最外层）：栈式配对——
- * 闭标签匹配栈内最近的同名开标签（其上未闭合的开标签出栈丢弃）；
- * atomic 单标签即片段；孤立闭标签忽略；行末栈中残留的未闭合开标签
- * 丢弃。嵌套只保留最外层（内层被包含）。
- */
-export function pairInlineHtmlTags(tags: readonly HtmlTagToken[]): HtmlInlineFragment[] {
-  const complete: HtmlInlineFragment[] = []
-  const stack: HtmlTagToken[] = []
-  for (const tag of tags) {
-    if (tag.kind === 'open') {
-      stack.push(tag)
-    } else if (tag.kind === 'close') {
-      let hit = -1
-      for (let i = stack.length - 1; i >= 0; i -= 1) {
-        if (stack[i]!.name === tag.name) {
-          hit = i
-          break
-        }
-      }
-      if (hit >= 0) {
-        complete.push({ from: stack[hit]!.from, to: tag.to })
-        stack.length = hit // 弹出到匹配层（其上未闭合开标签不成交换）
-      }
-    } else {
-      complete.push({ from: tag.from, to: tag.to })
-    }
-  }
-  // 最外层过滤：被其他完整片段包含的内层片段移除
-  const out: HtmlInlineFragment[] = []
-  for (const frag of complete) {
-    const contained = complete.some(
-      (other) => other !== frag && other.from <= frag.from && frag.to <= other.to,
-    )
-    if (!contained) {
-      out.push(frag)
-    }
-  }
-  out.sort((a, b) => a.from - b.from)
-  return out
-}
-
-/**
- * Lezer 树的行内 HTML 片段（最外层、单行）：HTMLTag 节点按行分组后
- * 栈式配对（shared/htmlInline 单一事实源——与 markdown-it 侧
- * matchInlineHtmlFragmentAt 对拍钉住）。代码与块级区域不产 HTMLTag
- * 节点（解析器语义，探针实测），无需排除表。
+ * Lezer 树的行内 HTML 片段（最外层、单行）：HTMLTag 节点是**候选起点**
+ * （解析器语义面——代码与块级区域不产 HTMLTag，天然排除），片段范围在
+ * **原始文本**上按 HTML 语法确定（matchInlineHtmlFragmentAt——与
+ * markdown-it 侧同一驱动面，两端一致由对拍钉住）。不配对树节点的原因
+ * （#576 评审 P2-6）：Lezer 会把片段内的 `\` 组合成 Escape 节点吞掉后续
+ * 标签的 `<`（`a <span>\</span>` 的闭标签不再产 HTMLTag），只配对剩余
+ * 节点会把两端一致的片段误判为未闭合。HTML 外部的真转义（`\<span>`）
+ * 不产 HTMLTag 候选，排除语义保持。
  */
 export function inlineHtmlFragmentsOfTree(tree: Tree, doc: Text): HtmlInlineFragment[] {
-  const tags: HtmlTagToken[] = []
+  const starts: number[] = []
   const visit = (node: SyntaxNode): void => {
     if (node.name === 'HTMLTag') {
-      const text = doc.sliceString(node.from, node.to)
-      const matched = matchHtmlTagAt(text, 0, text.length)
-      if (matched !== null) {
-        tags.push({ from: node.from, to: node.to, name: matched.name, kind: matched.kind })
-      }
+      starts.push(node.from)
       return // 叶子节点（解析器界定的单标签）
     }
     for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -245,23 +203,26 @@ export function inlineHtmlFragmentsOfTree(tree: Tree, doc: Text): HtmlInlineFrag
     }
   }
   visit(tree.topNode)
-  if (tags.length === 0) {
+  if (starts.length === 0) {
     return []
   }
-  // 同行分组（单行成型边界），行内按序配对
+  // 候选升序逐个起扫：从最左候选在原始文本上确定完整片段，已成交片段
+  // 内的后续候选跳过（嵌套只保留最外层；孤立闭标签起点不成型）
   const out: HtmlInlineFragment[] = []
-  let lineOf = -1
-  let group: HtmlTagToken[] = []
-  for (const tag of tags) {
-    const line = doc.lineAt(tag.from).number
-    if (line !== lineOf) {
-      out.push(...pairInlineHtmlTags(group))
-      group = []
-      lineOf = line
+  let coveredTo = -1
+  for (const from of starts) {
+    if (from < coveredTo) {
+      continue // 已含在前一片段内
     }
-    group.push(tag)
+    const line = doc.lineAt(from)
+    const lineText = doc.sliceString(line.from, line.to)
+    const end = matchInlineHtmlFragmentAt(lineText, from - line.from)
+    if (end === null) {
+      continue
+    }
+    const to = line.from + end
+    out.push({ from, to })
+    coveredTo = to
   }
-  out.push(...pairInlineHtmlTags(group))
-  out.sort((a, b) => a.from - b.from)
   return out
 }

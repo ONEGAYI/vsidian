@@ -144,8 +144,10 @@ interface RegistryEntry {
   /** #570（T05）资源状态（按 docScope 共享——同一 B 多实例共享产物与解析） */
   resourceMap: Map<string, string>
   resourceFailed: Set<string>
-  /** 在途订阅的退订句柄（release 归零时全退——迟到结果丢弃） */
-  resourcePending: Map<string, () => void>
+  /** 资源订阅表（raw → 退订句柄；#576 评审 P2）：订阅期间**持续保留**
+   *  ——成功回调不删（hub 的失效重取经同一 listener 再回调，删了即泄漏
+   *  且失效链路断）；release 归零时全部退订（迟到结果按无条目丢弃） */
+  resourceSubs: Map<string, () => void>
   /** 资源代次（映射变化推进——memo 连同计入，结果到达触发重渲染） */
   resourceGen: number
   /** 已渲染产物对应的资源代次（memo 的一部分） */
@@ -176,7 +178,7 @@ class DocStyleRegistry {
       lastOutput: '',
       resourceMap: new Map(),
       resourceFailed: new Set(),
-      resourcePending: new Map(),
+      resourceSubs: new Map(),
       resourceGen: 0,
       renderedGen: 0,
       resourcePort: null,
@@ -191,10 +193,10 @@ class DocStyleRegistry {
     if (--entry.refCount > 0) {
       return
     }
-    for (const unsub of entry.resourcePending.values()) {
-      unsub() // 在途退订：迟到结果按无条目丢弃（「释放后无迟到结果污染」）
+    for (const unsub of entry.resourceSubs.values()) {
+      unsub() // 订阅全退（含已完成的——#576 评审 P2：完成后不删句柄）；退订后迟到结果按无条目丢弃
     }
-    entry.resourcePending.clear()
+    entry.resourceSubs.clear()
     entry.styleEl?.remove()
     entry.styleEl = null
     this.entries.delete(docScope)
@@ -236,7 +238,10 @@ class DocStyleRegistry {
     }
   }
 
-  /** 产物内缺失映射的相对目标发起订阅（去重：map/failed/pending 三查） */
+  /** 产物内缺失映射且**无既有订阅**的相对目标发起订阅（去重：map/
+   *  failed/subs 三查——已订阅的 raw 由 hub 失效链路经同一 listener 重取，
+   *  重复 subscribe 会累积监听器）。登记先于 subscribe：端口可能同步回调
+   *  （hub 缓存命中形态），回调守卫依赖订阅表在场。 */
   private subscribeMissingResources(entry: RegistryEntry, input: string): void {
     const port = entry.resourcePort
     if (port === null) {
@@ -247,19 +252,18 @@ class DocStyleRegistry {
         continue
       }
       const raw = token.url
-      if (entry.resourceMap.has(raw) || entry.resourceFailed.has(raw) || entry.resourcePending.has(raw)) {
+      if (entry.resourceMap.has(raw) || entry.resourceFailed.has(raw) || entry.resourceSubs.has(raw)) {
         continue
       }
+      // 先占位再 subscribe（#576 评审 P2）：同步回调（缓存命中）到达时
+      // 订阅表已在场；subscribe 返回后替换为真实退订句柄
+      const placeholder: () => void = () => undefined
+      entry.resourceSubs.set(raw, placeholder)
       const unsub = port.subscribe(raw, (outcome) => {
-        // 迟到守卫：条目仍在场且该 raw 仍在本 entry 的 pending 表（release
-        // 后 entry 已删除；同 raw 被失效重建时旧退订句柄已被替换）
+        // 迟到守卫：release 后 entry 已删除（订阅表已全退）——结果丢弃
         if (this.entries.get(entry.docScope) !== entry) {
           return
         }
-        if (!entry.resourcePending.has(raw)) {
-          return
-        }
-        entry.resourcePending.delete(raw)
         if (outcome.ok) {
           entry.resourceMap.set(raw, outcome.url)
           entry.resourceGen++
@@ -268,7 +272,9 @@ class DocStyleRegistry {
           entry.resourceFailed.add(raw) // 失败登记：不重试风暴；文本保持原文
         }
       })
-      entry.resourcePending.set(raw, unsub)
+      if (entry.resourceSubs.get(raw) === placeholder) {
+        entry.resourceSubs.set(raw, unsub)
+      }
     }
   }
 

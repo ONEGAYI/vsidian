@@ -147,17 +147,53 @@ describe('DocumentStyleBinding 资源生命周期（按 docScope 共享）', () 
     expect(document.querySelector('style[data-vsidian-doc-style="doc"]')).toBe(null)
   })
 
-  it('失效通知重置解析映射并重取（文件修改/删除刷新链路）', () => {
+  it('#576 P2-2：端口同步回调（hub 缓存命中形态）不当作迟到丢弃——先登记订阅状态再 subscribe', () => {
+    const port = {
+      subscribe(raw: string, apply: Apply) {
+        apply({ ok: true, url: `https://sync-cache/${raw}` }) // 同步回包（htmlResourceHub 缓存命中语义）
+        return () => undefined
+      },
+    }
+    const binding = new DocumentStyleBinding('doc', port)
+    binding.sync(styleTextOf('.x { background: url(cached.png); }'))
+    const el = document.querySelector<HTMLStyleElement>('style[data-vsidian-doc-style="doc"]')
+    expect(el?.textContent).toContain('https://sync-cache/cached.png')
+    binding.dispose()
+  })
+
+  it('#576 P2-3：已完成的订阅持续保留（成功回调不删退订句柄），dispose 全退订不泄漏', () => {
+    let unsubCalls = 0
+    const waiters: Array<Apply | undefined> = []
+    const port = {
+      subscribe(_raw: string, apply: Apply) {
+        waiters.push(apply)
+        return () => {
+          unsubCalls += 1
+        }
+      },
+    }
+    const binding = new DocumentStyleBinding('doc', port)
+    binding.sync(styleTextOf('.x { background: url(keep.png); }'))
+    waiters[0]!({ ok: true, url: 'https://resolved/keep.png' })
+    const el = document.querySelector<HTMLStyleElement>('style[data-vsidian-doc-style="doc"]')
+    expect(el?.textContent).toContain('https://resolved/keep.png')
+    binding.dispose()
+    expect(unsubCalls).toBe(1)
+  })
+
+  it('失效通知重置解析映射并重取（hub 经既有订阅重取——不重复 subscribe 防监听器累积）', () => {
     const rec = portRecorder()
     const binding = new DocumentStyleBinding('doc', rec.port)
     binding.sync(styleTextOf('.x { background: url(changed.png); }'))
     rec.reply(0, 'https://resolved/changed.png?v=1')
     expect(rec.requests).toHaveLength(1)
     documentStyleRegistry.notifyResourceInvalidate(['changed.png'])
-    // 失效后：重取（新请求）
-    expect(rec.requests).toHaveLength(2)
-    rec.reply(1, 'https://resolved/changed.png?v=2')
+    // 失效后：hub 对仍有订阅者的条目经既有 listener 重取（真 hub 语义），
+    // registry 不重复 subscribe——重复订阅会向 hub 累积监听器（#576 P2-3）
+    expect(rec.requests).toHaveLength(1)
     const el = document.querySelector<HTMLStyleElement>('style[data-vsidian-doc-style="doc"]')
+    expect(el?.textContent).toContain('url("changed.png")') // 映射清除即回退原文
+    rec.reply(0, 'https://resolved/changed.png?v=2') // hub 重取结果经同一订阅回调
     expect(el?.textContent).toContain('?v=2')
     binding.dispose()
   })

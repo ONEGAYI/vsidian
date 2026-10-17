@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   htmlIdScopePrefix,
-  rewriteFragmentReference,
+  rewriteHrefFragmentValue,
   scopeCssFragmentRefs,
   scopeSelectorIdTokens,
 } from '../../src/shared/htmlFragment'
@@ -29,31 +29,30 @@ describe('htmlIdScopePrefix：前缀派生', () => {
   })
 })
 
-describe('rewriteFragmentReference：属性值片段引用替换', () => {
+describe('rewriteHrefFragmentValue：href 属性的整值片段引用（URI 值语法）', () => {
   const prefix = 'vsref_1a2b3c4d--'
 
   it('整值片段引用（#id）加前缀', () => {
-    expect(rewriteFragmentReference('#g1', prefix)).toBe(`#${prefix}g1`)
-  })
-
-  it('url(#id) 值内引用加前缀（多引用各自替换）', () => {
-    expect(rewriteFragmentReference('url(#grad)', prefix)).toBe(`url(#${prefix}grad)`)
-    expect(rewriteFragmentReference('url(#a) url(#b)', prefix)).toBe(`url(#${prefix}a) url(#${prefix}b)`)
-  })
-
-  it('style 属性形态（fill: url(#g); stroke: red）', () => {
-    expect(rewriteFragmentReference('fill: url(#g); stroke: red', prefix)).toBe(`fill: url(#${prefix}g); stroke: red`)
+    expect(rewriteHrefFragmentValue('#g1', prefix)).toBe(`#${prefix}g1`)
   })
 
   it('空串与空片段（#）不动作', () => {
-    expect(rewriteFragmentReference('', prefix)).toBe('')
-    expect(rewriteFragmentReference('#', prefix)).toBe('#')
+    expect(rewriteHrefFragmentValue('', prefix)).toBe('')
+    expect(rewriteHrefFragmentValue('#', prefix)).toBe('#')
   })
 
   it('外部 URL 与非引用值不动作（http/相对路径/data:）', () => {
-    expect(rewriteFragmentReference('https://example.com/a.svg#frag', prefix)).toBe('https://example.com/a.svg#frag')
-    expect(rewriteFragmentReference('pic.png', prefix)).toBe('pic.png')
-    expect(rewriteFragmentReference('data:image/png;base64,iVBORw0KGgo=', prefix)).toBe('data:image/png;base64,iVBORw0KGgo=')
+    expect(rewriteHrefFragmentValue('https://example.com/a.svg#frag', prefix)).toBe('https://example.com/a.svg#frag')
+    expect(rewriteHrefFragmentValue('pic.png', prefix)).toBe('pic.png')
+    expect(rewriteHrefFragmentValue('data:image/png;base64,iVBORw0KGgo=', prefix)).toBe('data:image/png;base64,iVBORw0KGgo=')
+  })
+
+  it('值内 url(#id) 不是 href 语义（URL 属性不含 CSS 函数——归 CSS 值面处理，此处不动作）', () => {
+    expect(rewriteHrefFragmentValue('url(#grad)', prefix)).toBe('url(#grad)')
+  })
+
+  it('前缀为 null（主文档）原样返回', () => {
+    expect(rewriteHrefFragmentValue('#g1', null)).toBe('#g1')
   })
 })
 
@@ -78,6 +77,20 @@ describe('scopeCssFragmentRefs：CSS 文本内 url(#id) 协同', () => {
 
   it('前缀为 null（主文档）原样返回', () => {
     expect(scopeCssFragmentRefs('.a { fill: url(#g) }', null)).toBe('.a { fill: url(#g) }')
+  })
+
+  it('paint 属性值面（#576 评审 P2）：整值 #rrggbb 是颜色不是片段引用——零动作', () => {
+    expect(scopeCssFragmentRefs('#ff0000', 'vsref_1a2b3c4d--')).toBe('#ff0000')
+    expect(scopeCssFragmentRefs('#0f0', 'vsref_1a2b3c4d--')).toBe('#0f0')
+  })
+
+  it('paint 属性值面：url(#id) 引号形态改写且引号保形（单双引号）', () => {
+    expect(scopeCssFragmentRefs("url('#g')", 'vsref_1a2b3c4d--')).toBe(`url('#vsref_1a2b3c4d--g')`)
+    expect(scopeCssFragmentRefs('url("#g")', 'vsref_1a2b3c4d--')).toBe(`url("#vsref_1a2b3c4d--g")`)
+  })
+
+  it('paint 属性值面：颜色与片段引用共存只动引用（url(#g1) #fff）', () => {
+    expect(scopeCssFragmentRefs('url(#g1) #fff', 'vsref_1a2b3c4d--')).toBe(`url(#vsref_1a2b3c4d--g1) #fff`)
   })
 })
 

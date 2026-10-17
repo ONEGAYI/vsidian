@@ -230,6 +230,20 @@ describe('行内 HTML 片段：识别与配对矩阵（两端一致）', () => {
       const mixed = lezerFragments('前 <span style="color:red">x</span> 后')
       expect(mixed).toHaveLength(1)
     })
+
+  it('#576 评审 P2-6：片段内的反斜杠 escape 不吞闭标签（Lezer 把 \\< 组合成 Escape 吞掉 </span> 的 <，树配对遗漏闭标签而两端原始语法一致）', () => {
+    const text = 'a <span style="color:red">\\</span> tail'
+    const lezer = lezerFragments(text)
+    expect(lezer.map((f) => text.slice(f.from, f.to))).toEqual(['<span style="color:red">\\</span>'])
+    // 两端对拍：Reading 生产管线同产完整片段
+    expect(mdRuleFragments(text)).toEqual(['<span style="color:red">\\</span>'])
+  })
+
+  it('#576 评审 P2-6 边界：HTML 外部的转义开标签不成片段（真正的外部 escape 排除保持）', () => {
+    // \\< 的 < 被 escape 吞——不是行内 HTML 起点，两端一致降级为字面
+    expect(lezerFragments('a \\<span>x\\</span> b')).toEqual([])
+    expect(mdRuleFragments('a \\<span>x\\</span> b')).toEqual([])
+  })
 })
 
 describe('matchHtmlTagAt：token 级标签语法（CommonMark 原始 HTML 标签形态）', () => {

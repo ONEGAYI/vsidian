@@ -2954,17 +2954,29 @@ export interface PaintProbe {
       mediaReadyStates: number[]
     }
     /** #573（T08）SVG/MathML 与混合命名空间绘制面：实际绘制证据（真宿主
-     *  /浏览器断言面——rect 有面积即真实排版；jsdom 无布局恒 false 只作
-     *  计数回归）+ foreignObject/渐变引用/ID 作用域前缀观测 */
+     *  /浏览器断言面——可见且 rect 有面积即真实排版；jsdom 无布局恒
+     *  false 只作计数回归）+ foreignObject/渐变引用/ID 作用域前缀观测
+     *  与隐藏负向对照（#576 Standards：探针不恒真的钉子） */
     svgMath: {
       /** 渲染根内 svg 元素数 */
       svgs: number
-      /** 任一 svg rect 有面积（实际绘制，非 DOM 存在性） */
+      /** 任一 svg 可见且 rect 有面积（实际绘制，非 DOM 存在性；可见 =
+       *  visibility 非 hidden 且 opacity 非 0——隐藏元素 rect 仍可能有
+       *  面积，不当作绘制证据） */
       svgPainted: boolean
+      /** 可见且绘制的 svg 计数（量化面） */
+      svgPaintedCount: number
       /** 渲染根内 math 元素数 */
       maths: number
-      /** 任一 math rect 有面积（MathML 结构实际绘制） */
+      /** 任一 math 可见且 rect 有面积（MathML 结构实际绘制） */
       mathPainted: boolean
+      /** 可见且绘制的 math 计数 */
+      mathPaintedCount: number
+      /** 隐藏对照元素计数（display:none 或 visibility:hidden 的 svg/math
+       *  ——集成用例负向控制在场面） */
+      hiddenControls: number
+      /** 隐藏对照中被误判绘制的计数（**应恒 0**——探针不恒真的钉子） */
+      hiddenPainted: number
       /** foreignObject 混合内容计数 */
       foreignObjects: number
       /** fill/stroke/filter/clip-path 属性含 url(#id) 的渐变/引用计数 */

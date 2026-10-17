@@ -276,3 +276,32 @@ describe('revealHtmlSourceAtCursor：编辑当前 HTML 源码（键位/按钮同
     }
   })
 })
+
+describe('#576 评审 P2-5：前文语法变化（围栏开闭）使后文块重分类——增量窗口外不残留/不缺失', () => {
+  it('文首形成围栏：后文 HTML 块重分类为代码字面，旧块条目不残留（widget 不再渲染）', () => {
+    const state = buildState('<div>x</div>\n\n尾段\n', EditorSelection.single(0))
+    expect(state.field(liveHtmlSpansField)).toHaveLength(1)
+    // 文首插入开围栏（逐字符三反引号 + 换行的最终态，单事务等价）
+    const next = state.update({ changes: { from: 0, insert: '```\n' } }).state
+    expect(next.field(liveHtmlSpansField)).toHaveLength(0)
+  })
+
+  it('拆除文首围栏：HTML 块重新出现（widget 恢复渲染）', () => {
+    const state = buildState('```\n<div>x</div>\n\n尾段\n', EditorSelection.single(0))
+    expect(state.field(liveHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 0, to: 4 } }).state
+    const spans = next.field(liveHtmlSpansField)
+    expect(spans).toHaveLength(1)
+    expect(next.doc.sliceString(spans[0].from, spans[0].to)).toBe('<div>x</div>')
+  })
+
+  it('窗口外结构未变的普通编辑仍走增量（同文档双块只重扫变更区所在块）', () => {
+    const text = '<div>a</div>\n\n中间段\n\n<div>b</div>\n'
+    const state = buildState(text, EditorSelection.single(0))
+    expect(state.field(liveHtmlSpansField)).toHaveLength(2)
+    const next = state.update({ changes: { from: 17, insert: 'X' } }).state // 编辑中间段
+    const spans = next.field(liveHtmlSpansField)
+    expect(spans).toHaveLength(2)
+    expect(next.doc.sliceString(spans[1].from, spans[1].to)).toBe('<div>b</div>')
+  })
+})

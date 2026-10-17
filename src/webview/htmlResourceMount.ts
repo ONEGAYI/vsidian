@@ -23,6 +23,9 @@
 // - #572（T07）iframe[src]：相对路径沿同款订阅改写为解析地址（本地可控
 //   页面）；srcdoc 在场跳过（内容非资源引用 + 浏览器忽略 src）；https
 //   直连不改写（sandbox 已在净化层按形态强制）。
+// - #576 评审 P2-4 style 属性：值是 CSS 声明列表——url() 产按 CSS 词法
+//   扫描（引号形态同产），相对目标沿媒体同款订阅改写（成功重装为解析
+//   地址、失败保持原文）；片段 url(#id) 归 ID 作用域管线。
 // - a[href]：**不改写**（导航归 Reading 点击委托/宿主 linkTarget 分类
 //   ——单一权威，Live 侧点击显形优先）；唯一例外是 B 域内 `#frag` 锚点
 //   经 ID 作用域前缀化（锚点归属 B——不伪造宿主 A 的锚跳目标）。
@@ -45,8 +48,10 @@ import {
   buildSrcsetValue,
   needsDocumentBaseResolution,
   parseSrcsetCandidates,
+  rewriteCssUrls,
+  scanCssUrls,
 } from '../shared/htmlResource'
-import { htmlIdScopePrefix, rewriteFragmentReference } from '../shared/htmlFragment'
+import { htmlIdScopePrefix, rewriteHrefFragmentValue, scopeCssFragmentRefs } from '../shared/htmlFragment'
 import { subscribeHtmlResource, type HtmlResourceOutcome, type HtmlResourceSubscribe } from './htmlResourceHub'
 
 export type { HtmlResourceOutcome, HtmlResourceSubscribe } from './htmlResourceHub'
@@ -88,10 +93,13 @@ const XLINK_NS = 'http://www.w3.org/1999/xlink'
 
 /**
  * #573（T08）ID 文档作用域（B/C 单侧前缀化，模块头注释）：产物内全部
- * id 加 scope 前缀；`href`/`xlink:href` 的整值 `#frag` 与任意属性值内的
- * `url(#id)`（SVG 呈现属性与 style 属性）同步前缀化。xlink 命名空间
- * 保形（setAttributeNS）。主文档前缀为 null 时零动作。同步纯 DOM 变换
- * （无订阅、无生命周期——幂等由 PREPARED_ATTR 咽喉挡重复）。
+ * id 加 scope 前缀。引用改写按属性语法分派（#576 评审 P2）：href/
+ * xlink:href 是 URI 值语法——整值 `#frag` 前缀化；style 与 SVG paint
+ * 属性（fill、stroke、clip、mask、marker 前缀族与 filter）是 CSS 值语法——只改
+ * `url(#id)` 产（引号保形，词法复用 scanCssUrls），整值 `#rrggbb` 是
+ * 颜色零动作。xlink 命名空间保形（setAttributeNS）。主文档前缀为 null
+ * 时零动作。同步纯 DOM 变换（无订阅、无生命周期——幂等由 PREPARED_ATTR
+ * 咽喉挡重复）。
  */
 function applyHtmlIdScope(root: HTMLElement, docScope: string | null | undefined): void {
   const prefix = htmlIdScopePrefix(docScope)
@@ -112,13 +120,17 @@ function applyHtmlIdScope(root: HTMLElement, docScope: string | null | undefined
       }
       if (attr.name === 'xlink:href' && attr.namespaceURI === XLINK_NS) {
         // namespaced xlink：保形改写（qualified name 带前缀）
-        el.setAttributeNS(XLINK_NS, 'xlink:href', rewriteFragmentReference(value, prefix))
+        el.setAttributeNS(XLINK_NS, 'xlink:href', rewriteHrefFragmentValue(value, prefix))
         continue
       }
-      if (attr.name === 'href' || attr.name === 'style' || attr.name.startsWith('fill') ||
+      if (attr.name === 'href') {
+        el.setAttribute('href', rewriteHrefFragmentValue(value, prefix))
+        continue
+      }
+      if (attr.name === 'style' || attr.name.startsWith('fill') ||
         attr.name.startsWith('stroke') || attr.name.startsWith('clip') || attr.name.startsWith('mask') ||
         attr.name.startsWith('marker') || attr.name === 'filter') {
-        el.setAttribute(attr.name, rewriteFragmentReference(value, prefix))
+        el.setAttribute(attr.name, scopeCssFragmentRefs(value, prefix))
       }
     }
   }
@@ -153,6 +165,51 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
   // ---- #573（T08）ID 文档作用域（B/C 单侧前缀化，先于资源订阅——
   // href="#id" 已前缀化后不再命中下方相对路径订阅）----
   applyHtmlIdScope(root, deps.docScope)
+
+  // ---- #576 评审 P2-4：style 属性的相对 URL（CSS URL 语法面）----
+  // style 属性值是 CSS 声明列表：url() 产按 CSS 词法扫描（引号形态同
+  // 产，非单字符串拆分），相对目标接入与媒体同款的订阅管线；全部落定
+  // 后以**装配时刻属性值**为基底重装（成功者替换为解析地址、失败者保持
+  // 原文——不编造地址），片段 url(#id) 已由上方 ID 作用域改写（base 取
+  // 改写后值，重装不冲掉前缀）；直连 URL 与无产属性零动作。hub 订阅持
+  // 续活跃：资源失效经同一 listener 重取再回调（重装幂等）。
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[style]'))) {
+    const base = el.getAttribute('style') ?? ''
+    const raws = new Set(
+      scanCssUrls(base)
+        .filter((t) => t.url !== '' && needsDocumentBaseResolution(t.url))
+        .map((t) => t.url),
+    )
+    if (raws.size === 0) {
+      continue
+    }
+    owners.push(el)
+    const resolved = new Map<string, string>()
+    let pending = 0
+    const apply = (): void => {
+      if (pending > 0) {
+        return
+      }
+      el.setAttribute('style', rewriteCssUrls(base, (t) => {
+        const hit = resolved.get(t.url)
+        if (hit === undefined) {
+          return null // 失败/未解析：保持原文
+        }
+        // 重装为引号形态（解析地址可能含 '?' 等——引号形态最稳）
+        return t.form === 'import-string' ? `"${hit}"` : `url("${hit}")`
+      }))
+    }
+    for (const raw of raws) {
+      pending += 1
+      track(subscribe(raw, guard((o) => {
+        if (o.ok) {
+          resolved.set(raw, o.url)
+        }
+        pending -= 1
+        apply()
+      }), sourceDocUri))
+    }
+  }
 
   // ---- srcset 管线（img 与 picture source）----
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('img[srcset], source[srcset]'))) {

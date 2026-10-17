@@ -10864,9 +10864,34 @@ export class WebviewSyncController {
     const svgMathScope = htmlScope
     const svgEls = svgMathScope ? [...svgMathScope.querySelectorAll<SVGElement>('svg')] : []
     const mathEls = svgMathScope ? [...svgMathScope.querySelectorAll<HTMLElement>('math')] : []
+    /** computed 读取防御：未挂载元素/宿主边界拿不到时返回 null（探针在
+     *  jsdom 无布局环境不抛——只作计数回归） */
+    const computedOf = (el: Element): CSSStyleDeclaration | null => {
+      if (!el.isConnected) {
+        return null
+      }
+      try {
+        return getComputedStyle(el)
+      } catch {
+        return null
+      }
+    }
     const elPainted = (el: Element): boolean => {
       const rect = el.getBoundingClientRect()
-      return rect.width > 0 && rect.height > 0
+      if (rect.width <= 0 || rect.height <= 0) {
+        return false
+      }
+      // 可见性负向控制（#576 Standards）：visibility:hidden 与 opacity:0
+      // 的元素 rect 仍有面积但不绘制——隐藏元素不产生绘制证据
+      const cs = computedOf(el)
+      if (cs === null) {
+        return true // computed 不可得（宿主边界）：rect 有面积即证据
+      }
+      return cs.visibility !== 'hidden' && cs.opacity !== '0'
+    }
+    const elHidden = (el: Element): boolean => {
+      const cs = computedOf(el)
+      return cs !== null && (cs.display === 'none' || cs.visibility === 'hidden')
     }
     const gradientAttrOf = (el: Element): string =>
       el.getAttribute('fill') ?? el.getAttribute('stroke') ?? el.getAttribute('filter') ?? el.getAttribute('clip-path') ?? ''
@@ -10879,11 +10904,18 @@ export class WebviewSyncController {
       ? [...svgMathScope.querySelectorAll<HTMLElement>('[id]')]
         .filter((el) => /^vs[-A-Za-z0-9_]+--/.test(el.id))
       : []
+    const hiddenProbeEls = [...svgEls, ...mathEls]
     const svgMathPaint = {
       svgs: svgEls.length,
       svgPainted: svgEls.some(elPainted),
+      svgPaintedCount: svgEls.filter(elPainted).length,
       maths: mathEls.length,
       mathPainted: mathEls.some(elPainted),
+      mathPaintedCount: mathEls.filter(elPainted).length,
+      /** 隐藏负向对照（display:none/visibility:hidden 的 svg/math）——集成
+       *  断言 hiddenPainted === 0 钉住探针「非恒真」 */
+      hiddenControls: hiddenProbeEls.filter(elHidden).length,
+      hiddenPainted: hiddenProbeEls.filter((el) => elHidden(el) && elPainted(el)).length,
       foreignObjects: svgMathScope ? svgMathScope.querySelectorAll('foreignObject').length : 0,
       gradientRefs,
       /** 带作用域前缀的 url(#…) 引用计数（B 域引用不指向 A 的直接证据） */

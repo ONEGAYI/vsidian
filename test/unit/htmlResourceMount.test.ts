@@ -315,3 +315,66 @@ describe('#572（T07）iframe src：归属改写（本地可控页面经资源�
     expect(root.querySelector('iframe')!.getAttribute('src')).toBe('late.html')
   })
 })
+
+describe('#576 评审 P2-4：style 属性的相对 URL 接入来源资源管线（CSS URL 语法面）', () => {
+  it('background-image 相对 URL 经订阅解析改写（携带来源文档身份，重装引号形态）', () => {
+    const seen: Array<{ url: string; sourceDocUri?: string }> = []
+    const sub = recorderSubscribe()
+    const subscribe: HtmlResourceSubscribe = (url, apply, sourceDocUri) => {
+      seen.push({ url, ...(sourceDocUri !== undefined ? { sourceDocUri } : {}) })
+      return sub.subscribe(url, apply, sourceDocUri)
+    }
+    const root = document.createElement('div')
+    root.innerHTML = '<div style="background-image:url(bg.png)">x</div>'
+    prepareHtmlResources(root, { images: null, subscribe, sourceDocUri: '/B/note.md' })
+    expect(seen).toEqual([{ url: 'bg.png', sourceDocUri: '/B/note.md' }])
+    sub.reply(0, 'https://resolved/bg.png')
+    expect(root.querySelector('div')!.getAttribute('style')).toBe('background-image:url("https://resolved/bg.png")')
+  })
+
+  it('引号形态 url(＇b.png＇) 同样扫描订阅；直连 URL 不请求', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<div style="background:url(\'b.png\');border-image:url(https://cdn.example/x.png)">x</div>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    expect(sub.requests).toEqual(['b.png'])
+    sub.reply(0, 'https://resolved/b.png')
+    const style = root.querySelector('div')!.getAttribute('style')!
+    expect(style).toContain('url("https://resolved/b.png")')
+    expect(style).toContain('url(https://cdn.example/x.png)')
+  })
+
+  it('解析失败保持原文（不编造地址）；多 URL 部分失败只改成功者', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<div style="background:url(a.png);mask-image:url(bad.png)">x</div>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    sub.reply(0, 'https://resolved/a.png')
+    sub.fail(1)
+    const style = root.querySelector('div')!.getAttribute('style')!
+    expect(style).toContain('url("https://resolved/a.png")')
+    expect(style).toContain('url(bad.png)')
+  })
+
+  it('B scope：片段引用（ID 作用域）与相对资源共存——前缀化与订阅改写互不冲掉', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<svg><style>.k{fill:url(#g)}</style></svg><rect style="fill:url(#g);background:url(bg.png)" width="4" height="4"/>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe, docScope: 'ref:1a2b3c4d' })
+    expect(sub.requests).toEqual(['bg.png'])
+    sub.reply(0, 'https://resolved/bg.png')
+    const style = root.querySelector('rect')!.getAttribute('style')!
+    expect(style).toContain('fill:url(#vsref_1a2b3c4d--g)')
+    expect(style).toContain('url("https://resolved/bg.png")')
+  })
+
+  it('迟到结果不写回（style 订阅随 binding 退订）', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<div style="background:url(late.png)">x</div>'
+    const binding = prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    binding.dispose()
+    sub.reply(0, 'https://resolved/late.png')
+    expect(root.querySelector('div')!.getAttribute('style')).toBe('background:url(late.png)')
+  })
+})

@@ -46,6 +46,20 @@ describe('ID 文档作用域装配（applyHtmlIdScope 经 prepareHtmlResources �
     expect(root.querySelector('rect')!.getAttribute('style')).toBe('fill: url(#vsref_1a2b3c4d--r2)')
   })
 
+  it('B scope（#576 评审 P2）：paint 整值颜色不是片段引用（fill="#ff0000" 零改写）；url 引用引号形态改写保形', () => {
+    const root = mount(
+      '<svg><defs><linearGradient id="g"><stop/></linearGradient></defs>' +
+      '<rect fill="#ff0000" stroke="#00ff00" width="5" height="5"/>' +
+      '<rect fill="url(\'#g\')" width="5" height="5"/></svg>',
+      { docScope: 'ref:1a2b3c4d' },
+    )
+    const rects = root.querySelectorAll('rect')
+    expect(rects[0]!.getAttribute('fill')).toBe('#ff0000')
+    expect(rects[0]!.getAttribute('stroke')).toBe('#00ff00')
+    expect(rects[1]!.getAttribute('fill')).toBe(`url('#vsref_1a2b3c4d--g')`)
+    expect(root.querySelector('linearGradient')!.id).toBe('vsref_1a2b3c4d--g')
+  })
+
   it('B scope：未命中的 # 引用同样限定 B 域（不外溢到 A 的同名锚点）', () => {
     const root = mount('<svg><rect fill="url(#nope)" width="4" height="4"/></svg><a href="#nope">x</a>', { docScope: 'ref:1a2b3c4d' })
     expect(root.querySelector('rect')!.getAttribute('fill')).toBe('url(#vsref_1a2b3c4d--nope)')

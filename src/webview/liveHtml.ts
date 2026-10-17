@@ -18,7 +18,7 @@
 //   不重挂 widget；组合在片段外 → widget 与组合节点不同 DOM 区域）——
 //   与 liveInstance 组合门控族无交叉，无需额外冻结（推断依据：
 //   selectionTouchesRange 在组合期内恒命中已显形区间）。
-import { Facet, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
+import { Facet, RangeSet, StateField, type ChangeSet, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import { ViewPlugin, ViewUpdate } from '@codemirror/view'
 import { selectionTouchesRange } from './liveDecorations'
@@ -97,17 +97,47 @@ function scanAllHtmlSpans(doc: Text, tree: Tree | null): LiveHtmlSpan[] {
 }
 
 /**
+ * #576 评审 P2-5：顶层结构签名守卫（块级与行内增量重建共用）。
+ * 窗口化增量的安全前提是「变更区之外解析结构不变」；块级结构开关
+ * （围栏开闭等）的传播影响会使**变更区之外**的块整体重分类
+ * （HTMLBlock ↔ FencedCode——重解析后树是正确的，错的是窗口外保留的
+ * 旧条目与缺口）。守卫：旧树顶层块经变更映射后与新树顶层逐一对照
+ * （节点名 + 边界），全一致 = 变更区外无重分类（窗口外旧条目可信，
+ * 纯增量保持——普通打字的顶层结构通常不变）；任一不一致（含块数增减）
+ * = 退全量重扫（树是权威）。树未推进（同引用）由调用方短路。
+ */
+export function topLevelStructureStable(
+  changes: ChangeSet,
+  oldTree: Tree,
+  newTree: Tree,
+): boolean {
+  let o = oldTree.topNode.firstChild
+  let n = newTree.topNode.firstChild
+  for (; o !== null && n !== null; o = o.nextSibling, n = n.nextSibling) {
+    if (o.name !== n.name) {
+      return false
+    }
+    if (changes.mapPos(o.from, 1) !== n.from || changes.mapPos(o.to, -1) !== n.to) {
+      return false
+    }
+  }
+  return o === null && n === null
+}
+
+/**
  * 块表增量重建（liveEmbed.rebuildEmbedSpans 同款纪律）：种子 = 变更区间
  * （新坐标）∪ 映射后与之相交的旧块；窗口内树扫描（树是权威——HTMLBlock
  * 的界定来自解析器，不猜嵌套），窗口外映射保留。坍缩条目（区间倒挂）
  * 丢弃。树缺席（liveDecorationsField 未初始化）时保持旧表——发射层仍有
- * 语法兜底。
+ * 语法兜底。#576 评审 P2-5：prevTree 在场且顶层结构签名不稳定时退
+ * 全量重扫（围栏开闭的传播重分类覆盖窗口外）。
  */
 export function rebuildHtmlSpans(
   doc: Text,
   tr: Transaction,
   prev: readonly LiveHtmlSpan[],
   tree: Tree | null,
+  prevTree?: Tree | null,
 ): LiveHtmlSpan[] {
   const changes = tr.changes
   let seedFrom = doc.length + 1
@@ -134,6 +164,10 @@ export function rebuildHtmlSpans(
     // 树缺席（理论不可达——docChanged 时 liveDecorationsField 先行重建）：
     // 保守只做映射，不产新块（降级方向 = 不渲染新 html，源码可见）
     return mapped.filter((m) => m.to > m.from)
+  }
+  if (prevTree != null && tree !== prevTree && !topLevelStructureStable(changes, prevTree, tree)) {
+    // 块级重分类（围栏开闭的传播影响）：窗口策略不安全——全量重扫
+    return scanAllHtmlSpans(doc, tree)
   }
   const out: LiveHtmlSpan[] = []
   for (const m of mapped) {
@@ -166,7 +200,8 @@ export const liveHtmlSpansField = StateField.define<readonly LiveHtmlSpan[]>({
       return scanAllHtmlSpans(tr.state.doc, tr.state.field(liveDecorationsField, false)?.tree ?? null)
     }
     return rebuildHtmlSpans(tr.state.doc, tr, value,
-      tr.state.field(liveDecorationsField, false)?.tree ?? null)
+      tr.state.field(liveDecorationsField, false)?.tree ?? null,
+      tr.startState.field(liveDecorationsField, false)?.tree ?? null)
   },
 })
 

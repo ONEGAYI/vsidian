@@ -34,28 +34,27 @@ export function htmlIdScopePrefix(docScope: string | null | undefined): string |
 }
 
 /**
- * 属性值的片段引用替换（DOM 装配侧消费）：整值 `#id`（use/a 的 href）
- * 与值内 `url(#id)`（SVG 呈现属性 fill/filter/… 与 style 属性）是文档内
- * 引用，加前缀；外部 URL（含其 #frag——`https://…/a.svg#f`）与 data:、
- * 相对路径不是文档内引用，不动作。
+ * `href`/`xlink:href` 属性值的整值片段引用替换（DOM 装配侧消费——URI
+ * 值语法面）：整值 `#id`（use/a/image 的文档内引用）加前缀；外部 URL
+ * （含其 #frag）、相对路径、data: 不是文档内引用，不动作。值内
+ * `url(#id)` 函数不属于 URL 属性语法（paint/style 走 CSS 值面
+ * scopeCssFragmentRefs），不在此处理。
  */
-export function rewriteFragmentReference(value: string, prefix: string | null): string {
-  if (prefix === null || value === '' || !value.includes('#')) {
+export function rewriteHrefFragmentValue(value: string, prefix: string | null): string {
+  if (prefix === null || value === '' || !value.startsWith('#') || value.length <= 1) {
     return value
   }
-  if (value.startsWith('#') && value.length > 1) {
-    return `#${prefix}${value.slice(1)}`
-  }
-  // 值内 url(#id) 产（# 后 ident 字符序列，容忍产内空白）
-  return value.replace(/url\(\s*#([-A-Za-z0-9_\u00a0-\uffff]+)\s*\)/g, (_m, id: string) => `url(#${prefix}${id})`)
+  return `#${prefix}${value.slice(1)}`
 }
 
 /**
- * CSS 文本内 `url(#id)` 的前缀协同（docStyle 装载侧消费）：只改写**片段
- * 引用形态**的 url 产（`url(#x)`/`url("#x")`）；http/相对路径的 url() 是
+ * CSS 值文本内 `url(#id)` 的前缀协同（docStyle 装载侧与 DOM 装配侧的
+ * paint/style 属性值共用——CSS 值语法面）：只改写**片段引用形态**的 url
+ * 产（`url(#x)`/`url("#x")`/`url('#x')`，词法复用 htmlResource.
+ * scanCssUrls——共享规则只维护一份）；paint 属性的整值 `#rrggbb` 是
+ * 颜色不是引用（无 url() 产，天然零动作）；http/相对路径的 url() 是
  * 资源引用（T05 管线），字符串字面量（content: "url(#x)"）与注释不是
- * 产，均不动作（词法复用 htmlResource.scanCssUrls——共享规则只维护一
- * 份）。prefix 为 null（主文档）原样返回。
+ * 产，均不动作。prefix 为 null（主文档）原样返回。
  */
 export function scopeCssFragmentRefs(css: string, prefix: string | null): string {
   if (prefix === null || !css.includes('#')) {
