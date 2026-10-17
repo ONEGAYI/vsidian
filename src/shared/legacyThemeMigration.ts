@@ -313,6 +313,11 @@ async function resolveProfileIdOrDefer(
     const deadline = Date.now() + budgetMs
     while (id === null && Date.now() < deadline) {
       await sleep(pollMs)
+      // 八审 R8-2：等待期心跳——身份等待（第一窗 + 收敛窗）总长可超锁
+      // 陈旧阈值，owner 每轮刷新自己代次文件的 mtime：陈旧判定按「距最
+      // 后心跳」，并发窗口不会把合法等待中的 owner 当失效接管逐出（心
+      // 跳停止 > 阈值后接管兜底不变）
+      await ports.lock.keepalive()
       id = await ports.readProfileId()
     }
     return id

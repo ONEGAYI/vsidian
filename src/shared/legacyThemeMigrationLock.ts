@@ -85,6 +85,8 @@ export interface LegacyLockFilesystem {
   rm(path: string): Promise<void>
   /** 目标 mtime（ms；不存在 = null） */
   statMtimeMs(path: string): Promise<number | null>
+  /** 设置目标 mtime（ms 纪元值；八审 R8-2 keepalive 心跳——把「代次文件年龄」从距认领改为距最后心跳） */
+  utimes(path: string, mtimeMs: number): Promise<void>
   /** 读文本内容（指针视图读取；不存在/不可读抛错） */
   readFile(path: string): Promise<string>
   /** 列目录条目名（标记族扫描、前代残留清理与 _test 隔离；不存在抛错） */
@@ -122,6 +124,13 @@ export interface LegacyThemeMigrationLockHandle {
    * 状态写入只属于在位 owner。
    */
   getOwnedGeneration(): Promise<number>
+  /**
+   * 心跳（八审 R8-2）：owner 在长等待（身份等待第一窗/收敛窗）期间刷新
+   * 自己代次文件的 mtime——陈旧接管按「距最后心跳」而非「距认领」判
+   * 定，合法等待中的 owner 不被并发窗口当失效逐出。未认领时为无害
+   * no-op；失败尽力而为不传播（接管路径自身 fail-closed）。
+   */
+  keepalive(): Promise<void>
   /**
    * 全族清理（_test 隔离钩子专用）：删除指针视图与所有 <lockPath> 家族
    * 文件（含提交标记与旧协议形态残留）；生产路径不调用（生产释放走
@@ -355,6 +364,17 @@ export function createLegacyThemeMigrationLock(
         throw new Error('[vsidian] 旧主题迁移状态写入需先认领锁（代次未知）')
       }
       return ownGen
+    },
+
+    keepalive: async () => {
+      if (ownGen === null) return
+      try {
+        const at = new Date(now())
+        await fs.utimes(genPath(ownGen), at.getTime())
+      } catch {
+        // 尽力而为：心跳失败不传播（无心跳时 mtime 停在认领/上次成功
+        // 心跳，接管按陈旧兜底——方向与 fail-closed 一致）
+      }
     },
 
     forceCleanup: async () => {

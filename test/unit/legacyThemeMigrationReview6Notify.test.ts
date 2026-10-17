@@ -62,6 +62,7 @@ function makeMemLock() {
     },
     ageMs: async () => (state.held ? 0 : null),
     isCurrentGeneration: async () => state.held,
+    keepalive: async () => {},
     getOwnedGeneration: async () => 1,
     forceCleanup: async () => {
       state.held = false

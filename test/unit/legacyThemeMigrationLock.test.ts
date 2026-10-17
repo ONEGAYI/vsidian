@@ -49,6 +49,10 @@ const nodeFs: LockFsLike = {
   rm: async (target) => {
     await fsp.rm(target, { force: true })
   },
+  utimes: async (target, mtimeMs) => {
+    const at = new Date(mtimeMs)
+    await fsp.utimes(target, at, at)
+  },
   statMtimeMs: async (target) => {
     try {
       return (await fsp.stat(target)).mtimeMs

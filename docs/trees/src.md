@@ -126,6 +126,7 @@ vsidian/
     │   ├── imageRefresh.ts             # 图片刷新共享常量与核验决策
     │   ├── jiebaManifest.ts            # jieba 锁定版本与下载源清单
     │   ├── keybindings.ts              # 快捷键操作与冲突模型
+    │   ├── legacyThemeMarkerFiles.ts   # 迁移状态文件族单一实现
     │   ├── legacyThemeMigration.ts     # 旧主题迁移纯函数与编排
     │   ├── legacyThemeMigrationLock.ts # 旧主题迁移代次锁协议
     │   ├── listPrefix.ts               # 列表引用前缀形态学（#119）

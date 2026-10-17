@@ -88,6 +88,7 @@ function makeMemLock(): LegacyThemeMigrationLockHandle {
     },
     ageMs: async () => (state.held ? 0 : null),
     isCurrentGeneration: async () => state.held,
+    keepalive: async () => {},
     getOwnedGeneration: async () => 1,
     forceCleanup: async () => {
       state.held = false
@@ -174,6 +175,10 @@ const nodeFs: LockFsLike = {
   link: (from, to) => fsp.link(from, to),
   rm: async (target) => {
     await fsp.rm(target, { force: true })
+  },
+  utimes: async (target, mtimeMs) => {
+    const at = new Date(mtimeMs)
+    await fsp.utimes(target, at, at)
   },
   statMtimeMs: async (target) => {
     try {

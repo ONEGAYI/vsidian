@@ -152,6 +152,10 @@ function createLock(dir: string, token: string) {
     rm: async (target: string) => {
       await fsp.rm(target, { force: true })
     },
+    utimes: async (target: string, mtimeMs: number) => {
+      const at = new Date(mtimeMs)
+      await fsp.utimes(target, at, at)
+    },
     statMtimeMs: async (target: string) => {
       try {
         return (await fsp.stat(target)).mtimeMs
