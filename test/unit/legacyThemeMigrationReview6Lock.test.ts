@@ -188,12 +188,15 @@ function windowPorts(options: {
   doneBarrier?: DoneBarrier
   gatedFs?: LockFsLike
 }): LegacyThemeMigrationPorts {
-  const diskMarker = makeDiskMarkerStore(options.dir)
   const lock = createLegacyThemeMigrationLock(
     options.gatedFs ?? nodeFs,
     legacyOf(options.dir),
     identity(options.token),
   )
+  // 状态文件按写入者锁代次分居（七审 R7-3，与生产 wiring 同构）
+  const diskMarker = makeDiskMarkerStore(options.dir, {
+    ownedGeneration: () => lock.getOwnedGeneration(),
+  })
   const barrier = options.doneBarrier
   return {
     readRawOverlay: () => options.memento.get(SETTINGS_STORAGE_KEY),

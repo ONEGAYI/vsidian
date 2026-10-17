@@ -88,6 +88,7 @@ function makeMemLock(): LegacyThemeMigrationLockHandle {
     },
     ageMs: async () => (state.held ? 0 : null),
     isCurrentGeneration: async () => state.held,
+    getOwnedGeneration: async () => 1,
     forceCleanup: async () => {
       state.held = false
     },
@@ -322,9 +323,10 @@ describe('P2-B：双窗口独立 memento 缓存 + 延迟广播 + 共享磁盘状
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
       readProfileId: async () => 'review3-profile',
       writeProfileId: async () => {},
-      // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+      // 固定预置身份——身份等待分级判定不可达，桩值即可
       hasAnyMigrationState: async () => false,
-      ...diskMarker,
+      // 状态文件按写入者锁代次分居（七审 R7-3，与生产 wiring 同构）
+      ...makeDiskMarkerStore(dir, { ownedGeneration: () => lock.getOwnedGeneration() }),
       extensionVersion: () => '1.2.3-test',
       requestGuide: () => {
         guides[guideKey] += 1
@@ -371,9 +373,10 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
       readProfileId: async () => 'review3-profile',
       writeProfileId: async () => {},
-      // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+      // 固定预置身份——身份等待分级判定不可达，桩值即可
       hasAnyMigrationState: async () => false,
-      ...diskMarker,
+      // 状态文件按写入者锁代次分居（七审 R7-3，与生产 wiring 同构）
+      ...makeDiskMarkerStore(dir, { ownedGeneration: () => lock.getOwnedGeneration() }),
       extensionVersion: () => '1.2.3-test',
       requestGuide: () => {
         guides[guideKey] += 1
@@ -390,16 +393,18 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     const aEnteredPromise = new Promise<void>((resolve) => {
       aEntered = resolve
     })
+    const lockA = createLegacyThemeMigrationLock(nodeFs, lockPath, { token: 'token-a', pid: 1000 })
+    const diskMarkerA = makeDiskMarkerStore(dir, { ownedGeneration: () => lockA.getOwnedGeneration() })
     const portsA: LegacyThemeMigrationPorts = {
       readRawOverlay: () => windowA.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(windowA.memento),
     readProfileId: async () => 'review3-profile',
     writeProfileId: async () => {},
-    // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+    // 固定预置身份——身份等待分级判定不可达，桩值即可
     hasAnyMigrationState: async () => false,
-    readMarker: diskMarker.readMarker,
+    readMarker: diskMarkerA.readMarker,
       writeMarker: async (profileId, marker) => {
-        await diskMarker.writeMarker(profileId, marker)
+        await diskMarkerA.writeMarker(profileId, marker)
         if (marker.state === 'pending') {
           aEntered?.()
           aEntered = undefined
@@ -410,7 +415,7 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
       requestGuide: () => {
         guides.A += 1
       },
-      lock: createLegacyThemeMigrationLock(nodeFs, lockPath, { token: 'token-a', pid: 1000 }),
+      lock: lockA,
     }
     const portsB = windowPorts(
       windowB,

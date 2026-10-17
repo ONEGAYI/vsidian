@@ -5,17 +5,18 @@
 // A 的 done 短路 profile B，B 的迁移与引导被永久跳过。B' 修复：状态文件
 // 名携带 profile 身份（globalState PROFILE 域持久化、锁内生成、双载体）。
 //
-// 绿态场景（任务口径）：
+// 绿态场景（任务口径；七审 R7 起身份等待分级语义同步改写）：
 // - 正常双窗恰 1（同 profile 双窗首启，广播即时镜像）；
-// - 延迟在等待窗内恰 1（广播延迟 &lt; 锁内身份等待窗 → 败者收敛到胜者
-//   身份，不重复引导）；
-// - 双 profile 各自独立完成迁移与引导（四审反例场景的修复验证；六审
-//   R5-1 后全新 profile 首次激活在他 profile 已迁移的磁盘上让位一次，
-//   下次激活恢复生成资格完成迁移——恰一次）；
-// - 广播丢失（六审 R5-1 改判）：超窗不再自生成——让位不引导不写状态，
-//   重开窗从 db 读到已收敛身份与磁盘 done 短路，迁移与引导恰一次
-//   （**不写**「任意延迟下恰 1」断言——跨激活交错的残余边界见
-//   legacyThemeMigration 文件头六审声明）。
+// - 延迟在第一窗内恰 1（广播延迟 < 第一窗 → 败者收敛到胜者身份）；
+// - 双 profile 各自独立完成迁移与引导（四审反例场景的修复验证；七审
+//   R7-2 起他 profile 状态在场时本 profile 收敛窗尽后**同次激活**完成
+//   迁移——恰一次）；
+// - 广播延迟超出第一窗但在收敛窗内（七审 R7-1）：身份未定窗零写入，
+//   收敛窗内收敛 → done 短路，迁移与引导恰一次；重开窗从 db 短路
+//   （**不写**「任意延迟下恰 1」断言——广播超收敛窗的残余边界见
+//   legacyThemeMigration 文件头七审声明与 legacyThemeMigrationReview7）。
+// 整对象存储覆盖语义（1.82.3 ExtensionMemento）由 review7 的
+// makeSharedStorage 钉住；本文件的按键镜像夹具只承载身份收敛观测。
 import { afterAll, describe, expect, it } from 'vitest'
 import { promises as fsp } from 'node:fs'
 import * as os from 'node:os'
@@ -25,7 +26,7 @@ import {
   runLegacyThemeMigration,
   type LegacyThemeMigrationPorts,
 } from '../../src/shared/legacyThemeMigration'
-import { makeDiskMarkerStore, legacyHasAnyMarkerState } from './legacyDiskMarkerStore'
+import { legacyHasAnyMarkerState, legacyMarkerIdentitiesOnDisk, makeDiskMarkerStore } from './legacyDiskMarkerStore'
 import {
   createLegacyThemeMigrationLock,
   type LegacyThemeMigrationLockHandle,
@@ -169,7 +170,9 @@ function windowPorts(
   token: string,
   onGuide: () => void,
 ): LegacyThemeMigrationPorts {
-  const diskMarker = makeDiskMarkerStore(dir)
+  const lock = makeLock(dir, token)
+  // 状态文件按写入者锁代次分居（七审 R7-3，与生产 wiring 同构）
+  const diskMarker = makeDiskMarkerStore(dir, { ownedGeneration: () => lock.getOwnedGeneration() })
   return {
     readRawOverlay: () => memento.get(SETTINGS_STORAGE_KEY),
     applyExclusiveOverlayStep: mementoExclusiveStep(memento),
@@ -178,7 +181,7 @@ function windowPorts(
     hasAnyMigrationState: () => legacyHasAnyMarkerState(dir),
     extensionVersion: () => '1.2.3-test',
     requestGuide: onGuide,
-    lock: makeLock(dir, token),
+    lock,
   }
 }
 
@@ -186,7 +189,7 @@ function windowPorts(
 const RETIRED_OVERLAY = { [MERMAID_THEME_KEY]: 'retired-preset' }
 
 describe("B'（五审 P2-C）：双 profile 共享 globalStorage 磁盘目录", () => {
-  it('profile A 完成迁移后 profile B 激活 → B 首次让位（六审 R5-1），下次激活生成身份完成自己的迁移与引导', async () => {
+  it('profile A 完成迁移后 profile B 激活 → 收敛窗尽后同次激活完成自己的迁移与引导（恰一次）', async () => {
     const dir = await newDir()
     // 双 profile：各自独立 globalState（PROFILE 域隔离，storage 广播亦不互通）
     const profileA = makeMemento()
@@ -195,28 +198,24 @@ describe("B'（五审 P2-C）：双 profile 共享 globalStorage 磁盘目录", 
       p.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     }
     const guides = { A: 0, B: 0 }
-    // 无镜像（profile 域隔离）；身份等待窗注入小值让让位/生成判定快速到达
+    // 无镜像（profile 域隔离）；身份等待窗注入小值让分级判定快速到达
     const a = await runLegacyThemeMigration(windowPorts(profileA.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
     expect(a).toEqual({ action: 'migrate', guide: true })
     expect(guides.A).toBe(1)
     const idA = profileA.store.get(PROFILE_ID_STATE_KEY) as string
 
     // B 首次激活：磁盘已有 A 的迁移状态（身份永不到达 B 的 memento——
-    // PROFILE 域隔离）→ 六审 R5-1 让位：不迁移、不引导、不写迁移状态。
-    // 红态（五审实现）：立即自生成并迁移引导（吞不掉迁移但与 R5-1 的同
-    // profile 重复引导同一根因——超窗自生成）
-    const b1 = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b1', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
-    expect(b1).toEqual({ action: 'none', guide: false })
-    expect(guides.B).toBe(0)
-    // B 下次激活：读到自己的让位记号（overlay，同 profile 域可见）→ 恢复
-    // 生成资格，完成自己的迁移与引导（跨 profile 活性不回退——B' 语义保持）
-    const b2 = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b2', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
-    expect(b2).toEqual({ action: 'migrate', guide: true })
+    // PROFILE 域隔离）→ 第一窗尽 → 收敛窗尽仍无身份 → 生成自己的身份
+    // 并在**同次激活**内完成迁移与引导（七审 R7-2：他 profile 的状态文
+    // 件不阻塞本 profile；六审的「让位等下次激活」已按 R7 复审改判）
+    const b = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2, profileIdSettleMs: 30 })
+    expect(b).toEqual({ action: 'migrate', guide: true })
     expect(guides.B).toBe(1) // B 的迁移引导不被 A 的完成状态吞掉，恰一次
 
-    // 两身份各自落盘（共享目录、按身份分文件）
-    const stateFiles = (await fsp.readdir(dir)).filter((n) => n.includes('.state.json'))
-    expect(stateFiles.length).toBe(2)
+    // 两身份各自落盘（共享目录、按身份分文件——数身份数不数文件数：
+    // 一身份可有 pending/done 两个代次文件）
+    const identities = await legacyMarkerIdentitiesOnDisk(dir)
+    expect(identities.length).toBe(2)
     const idB = profileB.store.get(PROFILE_ID_STATE_KEY) as string
     expect(idA).not.toBe(idB) // 双 profile 双身份
     expect((await makeDiskMarkerStore(dir).readMarker(idA))?.state).toBe('done')
@@ -263,27 +262,25 @@ describe("B'（五审 P2-C）：同 profile 双窗首启（身份生成竞态）
     expect(idA).toBe(idB) // 延迟到达但仍在窗内 → 同一身份（磁盘状态不分裂）
   })
 
-  it('边界形态（六审 R5-1 改判）：广播丢失 → 让位不重复引导；重开窗从 db 收敛短路；迁移恰一次', async () => {
+  it('广播延迟超出第一窗但在收敛窗内（七审 R7-1）→ 收敛窗内收敛身份零写入；重开窗从 db 短路；迁移恰一次', async () => {
     const dir = await newDir()
-    const { A, B } = makeMirroredMementos(Infinity) // 广播丢失（评审方缓存模拟同款）
+    const { A, B } = makeMirroredMementos(50) // 广播延迟 50ms：第一窗 30ms 外、收敛窗 300ms 内
     A.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     B.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     const guides = { A: 0, B: 0 }
-    // 顺序激活（A 完成后 B 首启）——B 的身份等待窗内广播永不到达
-    const a = await runLegacyThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
+    // 顺序激活（A 完成后 B 首启）——B 的第一窗内广播尚未到达
+    const a = await runLegacyThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 30, profileIdPollMs: 5 })
     expect(a).toEqual({ action: 'migrate', guide: true })
     const idA = A.store.get(PROFILE_ID_STATE_KEY) as string
-    const b = await runLegacyThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
-    // 六审 R5-1：超窗不再自生成——磁盘已有 A 的迁移状态 → 让位（不迁移、
-    // 不引导、不写迁移状态）。红态（五审实现）：自生成另一身份并引导，
-    // guides=2（R5 复审的重复引导反例同根因）
+    const b = await runLegacyThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 30, profileIdPollMs: 5, profileIdSettleMs: 300 })
+    // 七审 R7-1：第一窗尽时身份广播在途（磁盘已有 A 的状态）→ 收敛窗内
+    // 身份镜像到达 → 收敛为胜者身份 → 磁盘 done 短路——不迁移、不引导、
+    // 零写入（红态六审实现：让位写记号 → 过期缓存整对象覆盖 DB → 重开
+    // 另造身份二次引导，整对象语义反例见 legacyThemeMigrationReview7）
     expect(b).toEqual({ action: 'none', guide: false })
     expect(guides.A + guides.B).toBe(1)
-    const idB = B.store.get(PROFILE_ID_STATE_KEY)
-    expect(idB).toBeUndefined() // 让位者不生成第二身份
-    // 让位者不写迁移状态：磁盘状态文件仍只有 A 的身份一份
-    const stateFiles = (await fsp.readdir(dir)).filter((n) => n.endsWith('.state.json'))
-    expect(stateFiles.length).toBe(1)
+    // 收敛窗不生成第二身份：磁盘身份仍只有 A 的一个
+    expect(await legacyMarkerIdentitiesOnDisk(dir)).toEqual([idA])
 
     // 「重开」B：新窗口 memento 从 db 初始化（同 profile 共享 db——A 的
     // 身份与迁移后 overlay 已持久化，广播丢失不影响重开窗口的 db 读）→

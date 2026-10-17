@@ -116,6 +116,13 @@ export interface LegacyThemeMigrationLockHandle {
    */
   isCurrentGeneration(): Promise<boolean>
   /**
+   * 本句柄认领的代次（七审 R7-3）：owner 写迁移状态文件时以 ownGen 为
+   * 文件名代次（O_EXCL 创建、读取取 max）——滞后 owner 的迟到提交只创建
+   * 低代次文件，被 max 读取结构性忽略。未认领（含 release 后）抛错：
+   * 状态写入只属于在位 owner。
+   */
+  getOwnedGeneration(): Promise<number>
+  /**
    * 全族清理（_test 隔离钩子专用）：删除指针视图与所有 <lockPath> 家族
    * 文件（含提交标记与旧协议形态残留）；生产路径不调用（生产释放走
    * release 的按名删除协议）。
@@ -343,6 +350,13 @@ export function createLegacyThemeMigrationLock(
       return p === ownGen
     },
 
+    getOwnedGeneration: async () => {
+      if (ownGen === null) {
+        throw new Error('[vsidian] 旧主题迁移状态写入需先认领锁（代次未知）')
+      }
+      return ownGen
+    },
+
     forceCleanup: async () => {
       ownGen = null
       let names: string[]
@@ -354,8 +368,8 @@ export function createLegacyThemeMigrationLock(
       for (const name of names) {
         // 只删锁族文件：基名本身、代次（纯数字后缀）、指针视图（.gen）、
         // 提交标记（g<数字>）与指针 tmp（.tmp 结尾）——**不含**同前缀的状
-        // 态文件（<base>.<profileId>.state.json：五审改名后锁基名与状态
-        // 文件前缀同族，须按后缀分族）
+        // 态文件（<base>.<profileId>.p<gen>/.d<gen>.json：锁基名与状态文件
+        // 前缀同族，须按后缀分族）
         const suffix = name === lockBase ? ''
           : name.startsWith(`${lockBase}.`) ? name.slice(lockBase.length + 1) : null
         if (suffix === null) continue

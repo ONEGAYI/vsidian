@@ -47,7 +47,7 @@ function makeMemento(): { memento: SettingsStorage; store: Map<string, unknown> 
   return { memento, store }
 }
 
-/** 内存锁（通知接缝测试不涉锁协议，细节由 review6Lock 钉住） */
+/** 内存锁（通知接缝测试不涉锁协议，细节由 review6Lock 钉住；单 owner 恒代次 1——状态文件分居语义由 review6Marker/review7 钉住） */
 function makeMemLock() {
   const state = { held: false }
   return {
@@ -62,6 +62,7 @@ function makeMemLock() {
     },
     ageMs: async () => (state.held ? 0 : null),
     isCurrentGeneration: async () => state.held,
+    getOwnedGeneration: async () => 1,
     forceCleanup: async () => {
       state.held = false
     },
@@ -72,7 +73,8 @@ describe('六审 R5-2：迁移写回 overlay 后经 SettingsService.onChange 补
   it('先订阅（页面首读后）、后迁移完成 → 订阅者收到含回落值的新快照；无补丁路径不打扰', async () => {
     const dir = path.join(tmpRoot, 'case-1')
     await fsp.mkdir(dir, { recursive: true })
-    const diskMarker = makeDiskMarkerStore(dir)
+    const memLock = makeMemLock()
+    const diskMarker = makeDiskMarkerStore(dir, { ownedGeneration: () => memLock.getOwnedGeneration() })
     const { memento } = makeMemento()
     // 升级残留形态：新键显式退役内置值 + 旧键退役残留（reviewer 场景的
     // preferred 历史退役值同构——首读快照携带旧值而非 default）
@@ -103,7 +105,7 @@ describe('六审 R5-2：迁移写回 overlay 后经 SettingsService.onChange 补
       requestGuide: () => {
         guides += 1
       },
-      lock: makeMemLock(),
+      lock: memLock,
     }
     const result = await runLegacyThemeMigration(ports)
     expect(result).toEqual({ action: 'migrate', guide: true })
@@ -123,7 +125,8 @@ describe('六审 R5-2：迁移写回 overlay 后经 SettingsService.onChange 补
   it('无补丁步骤（plan none 且无 pending）不打扰订阅者——通知只随实际落盘的补丁发生', async () => {
     const dir = path.join(tmpRoot, 'case-2')
     await fsp.mkdir(dir, { recursive: true })
-    const diskMarker = makeDiskMarkerStore(dir)
+    const memLock = makeMemLock()
+    const diskMarker = makeDiskMarkerStore(dir, { ownedGeneration: () => memLock.getOwnedGeneration() })
     const { memento } = makeMemento()
     memento.update(SETTINGS_STORAGE_KEY, { [MERMAID_THEME_KEY]: 'default' })
     const settingsService = new SettingsService(memento, PRODUCTION_SETTING_DEFINITIONS)
@@ -139,7 +142,7 @@ describe('六审 R5-2：迁移写回 overlay 后经 SettingsService.onChange 补
       writeMarker: diskMarker.writeMarker,
       extensionVersion: () => '1.2.3-test',
       requestGuide: () => {},
-      lock: makeMemLock(),
+      lock: memLock,
     }
     // plan none 且无 pending：快速路径零副作用（不抢锁不写盘）
     const result = await runLegacyThemeMigration(ports)
