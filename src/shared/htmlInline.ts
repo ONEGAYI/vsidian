@@ -21,9 +21,14 @@
 //   整段扫描），容器边界重置；单行 HTML 片段的成型边界不变（片段
 //   不跨行是 CM6 行内 replace 装饰的硬约束）。
 // - **树上下文排除（#576 三轮复审 P2-2/P2-3）**：块级结构五节点名按
-//   **行末字符**与**片段端点**的祖先链排除（行首点查不到缩进后才开
-//   始的 CodeBlock）；行内结构字面区（LinkTitle/LinkReference——title
-//   是字面串不内解析、定义被块级消费）按片段端点祖先链排除。
+//   **行末字符**（行首点查不到缩进后才开始的 CodeBlock）与**片段起点**
+//   的祖先链排除；行内结构字面区（LinkTitle/LinkReference——title 是
+//   字面串不内解析、定义被块级消费）按片段**起点**祖先链排除
+//   （#576 五轮复审 P2-2：终点落入字面区只是树把片段内部文本误标为
+//   链接——md-it 位置序先消费片段、链接从未存在，不否决已成型片段）。
+// - **孤岛行字面区（#576 五轮复审 P2-1）**：ATX 标题/表格单元格等
+//   单行上下文同样接入扫描期跳过（title/目的地/autolink 内的反引号
+//   是字面——与容器行同口径）。
 // - **单行成型边界**：片段不跨行（开标签与匹配闭标签须同行）；未闭合
 //   开标签/孤立闭标签不成片段，降级为源码字面（保守方向与 htmlBlock
 //   一致——显源码优先）。
@@ -392,19 +397,24 @@ export function inlineContextOfLine(tree: Tree, lineFrom: number, lineTo: number
   return { excluded: false, container }
 }
 
-/** 片段端点的上下文排除（行内结构字面区 + 块级双保险） */
-function fragmentExcludedByContext(tree: Tree, from: number, to: number): boolean {
-  const excludedAt = (pos: number): boolean => {
-    let node: SyntaxNode | null = tree.resolveInner(Math.max(0, Math.min(pos, tree.length - 1)), 1)
-    while (node !== null) {
-      if (INLINE_EXCLUDED_CONTEXT_NODES.has(node.name)) {
-        return true
-      }
-      node = node.parent
+/**
+ * 片段起点的上下文排除（行内结构字面区 + 块级双保险）。**只认起点**
+ * （#576 五轮复审 P2-2）：字面区是「开界」结构——span 起点落在
+ * LinkTitle/URL/Autolink/块级内才说明它不是正文 HTML；片段**终点**落入
+ * LinkTitle 只是树把片段内部文本误标为链接（md-it 位置序先消费整段
+ * 片段、链接从未存在——Lezer 树却解析出链接），未经 HTML 语义修正的
+ * Markdown 树不得否决扫描器已按两端一致语义成型的片段。块级结构整块
+ * 先行消费，片段起点在块级内则整段都在——起点判定即充分。
+ */
+function fragmentExcludedByContext(tree: Tree, from: number): boolean {
+  let node: SyntaxNode | null = tree.resolveInner(Math.max(0, Math.min(from, tree.length - 1)), 1)
+  while (node !== null) {
+    if (INLINE_EXCLUDED_CONTEXT_NODES.has(node.name)) {
+      return true
     }
-    return false
+    node = node.parent
   }
-  return excludedAt(from) || excludedAt(to - 1)
+  return false
 }
 
 /** 容器子树内**不参与正文内联解析**的字面区节点名（探针实测）：链接
@@ -433,6 +443,29 @@ function literalContextRangesOf(node: SyntaxNode): Array<{ from: number; to: num
     visit(c)
     c = c.nextSibling
   }
+  return out
+}
+
+/**
+ * 孤岛行（ATX 标题/表格单元格等单行上下文）行区间的字面区收集
+ * （#576 五轮复审 P2-1：孤岛行同样可能含链接 title/目的地/autolink，
+ * 其反引号是字面——不参与本行配对）。按区间相交迭代收集（不依赖具体
+ * 承载节点名——标题/表格格/未来单行上下文统一覆盖；信任面与容器分支
+ * 同一：树只对真正解析成功的链接产节点）。
+ */
+function literalRangesOfIslandLine(tree: Tree, lineFrom: number, lineTo: number): Array<{ from: number; to: number }> {
+  const out: Array<{ from: number; to: number }> = []
+  tree.iterate({
+    from: lineFrom,
+    to: lineTo,
+    enter: (node) => {
+      if (INLINE_LITERAL_CONTEXT_NODES.has(node.name)) {
+        out.push({ from: node.from, to: node.to })
+        return false
+      }
+      return true
+    },
+  })
   return out
 }
 
@@ -474,7 +507,7 @@ export function inlineHtmlFragmentsOfTree(
         const skips = literalContextRangesOf(containerNode)
           .map((r) => ({ from: r.from - base, to: r.to - base }))
         scanned.set(key, scanInlineHtmlFragmentsInText(text, 0, text.length, skips)
-          .filter((f) => !fragmentExcludedByContext(tree, base + f.from, base + f.to)))
+          .filter((f) => !fragmentExcludedByContext(tree, base + f.from)))
       }
       if (!emitted.has(key)) {
         emitted.add(key)
@@ -488,12 +521,16 @@ export function inlineHtmlFragmentsOfTree(
       }
       continue
     }
-    // 孤岛行（无行内容器）：本行独立扫描（无跨行状态——单行容器语义等价）
+    // 孤岛行（无行内容器）：本行独立扫描（无跨行状态——单行容器语义等价）；
+    // 字面区同容器口径在扫描期跳过（#576 五轮复审 P2-1：标题/表格格内
+    // title 等的反引号是字面，不参与本行配对）
     const text = doc.sliceString(line.from, line.to)
-    for (const f of scanInlineHtmlFragmentsInText(text, 0, text.length)) {
+    const skips = literalRangesOfIslandLine(tree, line.from, line.to)
+      .map((r) => ({ from: r.from - line.from, to: r.to - line.from }))
+    for (const f of scanInlineHtmlFragmentsInText(text, 0, text.length, skips)) {
       const absFrom = line.from + f.from
       const absTo = line.from + f.to
-      if (absTo > from && absFrom < to && !fragmentExcludedByContext(tree, absFrom, absTo)) {
+      if (absTo > from && absFrom < to && !fragmentExcludedByContext(tree, absFrom)) {
         out.push({ from: absFrom, to: absTo })
       }
     }

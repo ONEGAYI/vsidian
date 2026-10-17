@@ -415,3 +415,27 @@ describe('#576 四轮复审 P2-4：嵌套容器内部块级重分类（编辑点
     expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
   })
 })
+
+describe('#576 五轮复审 P2-3：围栏范围扩张（祖先链名同构但块范围改变）', () => {
+  it('引用内开围栏 3→4 个反引号：闭围栏失配、FencedCode 扩张吞后文——增量结果与新建状态一致（0 片段）', () => {
+    const text = '> ```\n> ```\n> a <span>x</span>'
+    const state = buildState(text, EditorSelection.single(4))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    // offset 3 插入反引号：编辑点新旧祖先链名序列相同（CodeMark>FencedCode
+    // >Blockquote>Document），但 FencedCode 从 [2,11) 扩张到 [2,31)——
+    // 名同构不是窗口外结构不变的充分条件，须对照映射范围
+    const next = state.update({ changes: { from: 3, insert: '`' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    // 新文档全量路径同款结果（增量 = 全量）
+    expect(buildState('> ````\n> ```\n> a <span>x</span>', EditorSelection.single(4))
+      .field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+
+  it('反向删除第 4 个反引号：围栏收缩、span 恢复正文——片段重新出现', () => {
+    const text = '> ````\n> ```\n> a <span>x</span>'
+    const state = buildState(text, EditorSelection.single(4))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 3, to: 4 } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
+  })
+})

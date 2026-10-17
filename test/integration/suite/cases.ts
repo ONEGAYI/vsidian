@@ -19279,13 +19279,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await waitSessionReady(fileA)
       await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
       // Reading：A 与 B（嵌入卡内）的资源全部按各自文档身份装载（谓词直等
-      // B 图应用——嵌入装载与目录解析完成后才进入断言）
+      // B 图应用——嵌入装载与目录解析完成后才进入断言；imgLoaded 一并纳入
+      // 等待：src 应用（imgAppliedSrcs）与加载完成（load 事件置 loaded）是
+      // 两个异步阶段，CI 慢机上仅等应用即断言会在事件到达前失败）
       const reading = await waitViewState(fileA, (v) => {
         const r = v.paint?.html?.resources
         return v.viewMode === 'reading' && r !== undefined &&
           r.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-a-only.png')) &&
           r.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-b-only.png')) &&
-          r.srcsetApplied >= 1 && r.mediaResolved >= 1
+          r.srcsetApplied >= 1 && r.mediaResolved >= 1 && r.imgLoaded >= 2
       }, 0, 45000)
       const res = reading.paint!.html!.resources!
       assert(res.imgLoaded >= 2, `A/B 图装载完成（实际 ${JSON.stringify(res)}）`)
@@ -19311,7 +19313,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const refreshed = await waitViewState(fileA, (v) => {
         const r = v.paint?.html?.resources
         return v.viewMode === 'reading' && r !== undefined && r.firstResolvedCssUrl !== null &&
-          r.firstResolvedCssUrl !== urlBefore
+          r.firstResolvedCssUrl !== urlBefore && r.imgLoaded >= 2
       }, 0, 30000)
       const res2 = refreshed.paint!.html!.resources!
       assert(res2.firstResolvedCssUrl !== urlBefore, '背景图覆写后产物取到新地址（失效重取）')

@@ -112,6 +112,12 @@ function scanAllHtmlSpans(doc: Text, tree: Tree | null): LiveHtmlSpan[] {
  * 看不到旧结构）各取祖先链名序列对照——内部重分类必然改变编辑点所处
  * 的结构路径（如 Blockquote>Blockquote>FencedCode ↔ Blockquote>
  * FencedCode），名序列不同即退全量（每次编辑多付常数次 O(depth) 对照）。
+ * #576 五轮复审 P2-3：链上**名序列**相同仍不充分——围栏开串 3→4 个
+ * 反引号使 FencedCode 扩张吞后文（编辑点新旧链名同为
+ * CodeMark>FencedCode>Blockquote>Document）。签名升级为**名 + 区间**：
+ * 旧链区间经变更映射（from 端 assoc -1 / to 端 +1——「节点覆盖或邻接
+ * 变更且自身结构不变」时映射区间恰等于新区间，普通打字不误报），与
+ * 新链对照；重分类的扩张/收缩必然造成任一层区间失配。
  */
 export function topLevelStructureStable(
   changes: ChangeSet,
@@ -131,15 +137,17 @@ export function topLevelStructureStable(
   if (o !== null || n !== null) {
     return false
   }
-  const chainNamesOf = (tree: Tree, pos: number): string => {
+  const chainSigOf = (tree: Tree, pos: number, changes: ChangeSet | null): string => {
     const clamped = Math.max(0, Math.min(pos, tree.length - 1))
     let node: SyntaxNode | null = tree.resolveInner(clamped, 1)
-    const names: string[] = []
+    const parts: string[] = []
     while (node !== null) {
-      names.push(node.name)
+      const from = changes !== null ? changes.mapPos(node.from, -1) : node.from
+      const to = changes !== null ? changes.mapPos(node.to, 1) : node.to
+      parts.push(`${node.name}:${from},${to}`)
       node = node.parent
     }
-    return names.join('>')
+    return parts.join('>')
   }
   let chainsStable = true
   changes.iterChangedRanges((fromA, toA, fromB, toB) => {
@@ -148,8 +156,8 @@ export function topLevelStructureStable(
     }
     const oldEnd = Math.max(fromA, toA - 1)
     const newEnd = Math.max(fromB, toB - 1)
-    if (chainNamesOf(oldTree, fromA) !== chainNamesOf(newTree, fromB) ||
-      chainNamesOf(oldTree, oldEnd) !== chainNamesOf(newTree, newEnd)) {
+    if (chainSigOf(oldTree, fromA, changes) !== chainSigOf(newTree, fromB, null) ||
+      chainSigOf(oldTree, oldEnd, changes) !== chainSigOf(newTree, newEnd, null)) {
       chainsStable = false
     }
   })

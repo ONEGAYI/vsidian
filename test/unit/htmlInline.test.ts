@@ -286,6 +286,23 @@ const CASES: Array<{ name: string; text: string; want: Array<[number, number]> |
     text: 'a <https://x`y> <span>z</span> ` t',
     want: null,
   },
+  // ---- #576 五轮复审 P2-1：孤岛行（ATX 标题/表格格）同样接入字面区 ----
+  {
+    name: '#576 五轮 P2-1：ATX 标题内链接 title 反引号是字面——其后 span 成片段（孤岛行字面区）',
+    text: '# a [label](url "`") <span>x</span> ` z',
+    want: null,
+  },
+  {
+    name: '#576 五轮 P2-1：表格格内链接 title 反引号是字面——格内 span 成片段（孤岛行字面区）',
+    text: '| a [l](url "`") <span>x</span> ` z | b |\n| --- | --- |',
+    want: null,
+  },
+  // ---- #576 五轮复审 P2-2：HTML 片段内部的 Markdown 伪上下文不否决已成型片段 ----
+  {
+    name: '#576 五轮 P2-2：片段内部的链接伪 title 不否决片段（md-it 位置序先消费 span 到首个闭标签，树把片段内部文本误标 LinkTitle——只认片段起点上下文）',
+    text: 'a <span>[label](url "</span>") <b>x</b> z',
+    want: null,
+  },
 ]
 
 describe('行内 HTML 片段：识别与配对矩阵（两端一致）', () => {
