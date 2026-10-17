@@ -369,6 +369,23 @@ const CASES: Array<{ name: string; text: string; want: Array<[number, number]> |
     text: '| a | b |\n| --- | --- |\n| <span>x `|` y</span> | z |',
     want: [[26, 46]],
   },
+  // ---- #576 八轮复审 P2-1：链接成立性按真实 HTML 消费顺序判定（占位重解析事实源）----
+  {
+    name: '#576 八轮 P2-1a：HTML 吞掉链接闭界与目的地（开界 `[` 在片段外）——链接从未成立，title 不是字面区（b 正常成片段）',
+    text: 'a [x <span>](url "</span> <b>y</b>")',
+    want: [[5, 25], [26, 34]],
+  },
+  {
+    name: '#576 八轮 P2-1b：真实成立的外层链接（HTML 只在 label 内、闭界未吞）——title 是字面区（b 不成片段；Lezer 内层伪 `[` 不得当宿主）',
+    text: 'a [l <span>[x</span>](https://example.test "<b>no</b>")',
+    want: [[5, 20]],
+  },
+  // ---- #576 八轮复审 P2-2：表格字面区来自生产同源解析（mask 护格界 + 格内占位重解析）----
+  {
+    name: '#576 八轮 P2-2：真实链接 title 内反引号+管道——格界受 mask 保护，title 反引号不与格末配对成 code span（b 正常成片段）',
+    text: '| a | b |\n| --- | --- |\n| [x](https://example.test "`|") <b>y</b> ` | z |',
+    want: [[57, 65]],
+  },
 ]
 
 describe('行内 HTML 片段：识别与配对矩阵（两端一致）', () => {
