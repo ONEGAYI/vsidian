@@ -6,7 +6,7 @@
 // 在同 profile 并发 writeMarker 下让先 rename 方消费共享 tmp、后 rename 方
 // ENOENT；每次写入带唯一片段后各自的 rename 只消费各自的 tmp。
 import { promises as fsp } from 'node:fs'
-
+import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import {
   parseLegacyThemeMigrationMarker,
@@ -45,7 +45,9 @@ export function makeDiskMarkerStore(
     },
     writeMarker: async (profileId, marker: LegacyThemeMigrationMarker) => {
       const target = legacyMarkerStatePath(dir, profileId)
-      const tmp = `${target}.tmp`
+      // 六审：tmp 名按写入唯一化（每次写入唯一片段）——各自的 rename 只
+      // 消费各自的 tmp，并发写同一状态文件不再互抢
+      const tmp = `${target}.${randomUUID()}.tmp`
       await writeFs.writeFile(tmp, JSON.stringify(marker))
       await writeFs.rename(tmp, target)
     },

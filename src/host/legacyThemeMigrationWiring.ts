@@ -115,7 +115,10 @@ export function createLegacyThemeMigrationWiring(
   const writeMarkerToDisk = async (profileId: string, marker: LegacyThemeMigrationMarker): Promise<void> => {
     const statePath = stateFilePath(profileId)
     await fsp.mkdir(storageDir, { recursive: true })
-    const tmp = `${statePath}.${process.pid}.tmp`
+    // 六审（CI 39026659483）：tmp 名按写入唯一化——pid 片段只隔进程，同
+    // 进程并发写（激活期迁移与 _test 重跑重叠、锁失效双 owner 的症状面）
+    // 仍共享 tmp，后 rename 方 ENOENT；补 UUID 片段让每次写入独占 tmp
+    const tmp = `${statePath}.${process.pid}.${randomUUID()}.tmp`
     await fsp.writeFile(tmp, JSON.stringify(marker), 'utf8')
     await fsp.rename(tmp, statePath)
   }
