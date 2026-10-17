@@ -266,7 +266,8 @@ await page.setContent(`<html lang="zh-CN"><body class="">${islandHtml}<div id="a
 await page.addStyleTag({ path: settingsOutput.replace(/\.js$/, '.css') })
 await page.addStyleTag({ content: `:root { --vscode-font-family: "Segoe UI", "Microsoft YaHei", sans-serif; --vscode-editor-background:#ffffff; --vscode-editor-foreground:#30343b; --vscode-sideBar-background:#f5f6f8; --vscode-descriptionForeground:#59616d; --vscode-list-activeSelectionBackground:#e0e4eb; --vscode-list-activeSelectionForeground:#26313e; --vscode-input-background:#ffffff; --vscode-input-foreground:#30343b; --vscode-panel-border:#d7dce3; --vscode-focusBorder:#2687d4; }` })
 await page.evaluate((state) => {
-  window.savedSettings = { 'appearance.mermaidTheme': 'codex' }
+  // #535 T08：旧键 codex 已在激活迁移清理，浏览器桩模拟迁移后干净 profile
+  window.savedSettings = {}
   window.sentMessages = []
   window.themesState = state
   window.acquireVsCodeApi = () => ({ postMessage(message) {
@@ -304,12 +305,13 @@ try {
   // 进入外观分页 → 「主题」页签（原预设主题原位更名——H-U01）
   await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
   await page.getByRole('tab', { name: zhCn['appearance.themes'], exact: true }).click()
-  // 单选列表：内置 default/codex + 两个组件主题（同名主题按来源区分——H-U01/H-U08）
-  await page.waitForFunction(() => document.querySelectorAll('.vsidian-appearance-presets input[type=radio]').length >= 4, null, { timeout: 8000 })
+  // 单选列表：内置 default + 两个组件主题（同名主题按来源区分——H-U01/H-U08；
+  // #535 后无内置 codex 项）
+  await page.waitForFunction(() => document.querySelectorAll('.vsidian-appearance-presets input[type=radio]').length >= 3, null, { timeout: 8000 })
   const radios = page.locator('.vsidian-appearance-presets input[type=radio]')
-  assert.equal(await radios.count(), 4, 'default + codex + 两个组件主题')
-  // 升级用户旧键 codex 回显（目录 preferred 权威未达前——宿主推送 themesState.preferred=default 到达后 codex 回显由宿主权威驱动；
-  // 此处宿主 mock preferred=default，断言 default 选中）——H-U04 回显走宿主推送
+  assert.equal(await radios.count(), 3, 'default + 两个组件主题')
+  assert.equal(await page.locator('.vsidian-appearance-presets input[value=codex]').count(), 0, '内置 Codex 单选项应随内核退役消失')
+  // 宿主 mock preferred=default：default 选中——H-U04 回显走宿主推送
   assert.equal(await radios.nth(0).isChecked(), true, 'preferred=default 选中')
 
   // 同名主题来源徽章：两个 aqua 分别标来源（H-U01）——addons.state 的组件
@@ -324,11 +326,12 @@ try {
   assert.equal(await unavailableRow.locator('input').isDisabled(), true, '不可用主题 radio 禁用')
   assert.equal(await unavailableRow.locator('.vsidian-theme-option-unavailable').textContent(), zhCn['appearance.theme.unavailable'])
 
-  // 单选切换：点击组件主题 → settings.set 双键补丁（H-U02/H-U04 持久化）
+  // 单选切换：点击组件主题 → settings.set 单键补丁（H-U02/H-U04 持久化；
+  // #535 后旧 Mermaid 键退役，补丁只写新键）
   await page.locator('.vsidian-appearance-presets input[value="vsidian-test-fixture.addon-theme/aqua"]').check()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'settings.set' && m.values['appearance.theme'] === 'vsidian-test-fixture.addon-theme/aqua'), null, { timeout: 8000 })
   const setMsg = await page.evaluate(() => window.sentMessages.find((m) => m.kind === 'settings.set' && m.values['appearance.theme']))
-  assert.equal(setMsg.values['appearance.mermaidTheme'], 'default', '旧键同步写 preset 投影')
+  assert.equal('appearance.mermaidTheme' in setMsg.values, false, '补丁不含已退役的旧 Mermaid 键')
   await page.getByRole('button', { name: zhCn['keybindingSettings.title'], exact: true }).click()
   await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
   await page.getByRole('tab', { name: zhCn['appearance.themes'], exact: true }).click()
@@ -336,12 +339,12 @@ try {
 
   // 目录推送对账：preferred 变化后选中回显（宿主权威——H-U04 重开回显同机制）
   await page.evaluate((state) => {
-    window.themesState = { ...state, version: 4, preferred: 'codex', preferredAvailable: true }
+    window.themesState = { ...state, version: 4, preferred: 'default', preferredAvailable: true }
     window.dispatchEvent(new MessageEvent('message', { source: window, data: window.themesState }))
   }, themesState)
   await page.waitForFunction(() => {
-    const codex = document.querySelector('.vsidian-appearance-presets input[value=codex]')
-    return codex?.checked === true
+    const def = document.querySelector('.vsidian-appearance-presets input[value=default]')
+    return def?.checked === true
   }, null, { timeout: 8000 })
 
   // 搜索定位：主题设置条目可搜（H-U08）——输入「主题选择」出现结果并点击路由
@@ -350,10 +353,10 @@ try {
   const result = page.locator('.vsidian-settings-result', { hasText: zhCn['setting.theme.title'] })
   await result.first().waitFor({ timeout: 8000 })
   await result.first().click()
-  // 路由落点：外观分页主题页签（radiogroup 可见）
+  // 路由落点：外观分页主题页签（radiogroup 可见；#535 后 default + 两组件 = 3 项）
   await page.waitForFunction(() => {
     const panel = document.querySelector('.vsidian-appearance-presets')
-    return panel !== null && !panel.hasAttribute('hidden') && panel.querySelectorAll('input[type=radio]').length >= 4
+    return panel !== null && !panel.hasAttribute('hidden') && panel.querySelectorAll('input[type=radio]').length >= 3
   }, null, { timeout: 8000 })
 
   // 首选不可用回落提示（保留首选回显——H-U05）：宿主推送 preferred 指向不可用主题
