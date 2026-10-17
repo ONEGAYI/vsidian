@@ -2921,6 +2921,50 @@ export interface PaintProbe {
       /** 首个已解析 CSS URL（失效重取的地址变化断言） */
       firstResolvedCssUrl: string | null
     }
+    /** #573（T08）SVG/MathML 与混合命名空间绘制面：实际绘制证据（真宿主
+     *  /浏览器断言面——rect 有面积即真实排版；jsdom 无布局恒 false 只作
+     *  计数回归）+ foreignObject/渐变引用/ID 作用域前缀观测 */
+    svgMath: {
+      /** 渲染根内 svg 元素数 */
+      svgs: number
+      /** 任一 svg rect 有面积（实际绘制，非 DOM 存在性） */
+      svgPainted: boolean
+      /** 渲染根内 math 元素数 */
+      maths: number
+      /** 任一 math rect 有面积（MathML 结构实际绘制） */
+      mathPainted: boolean
+      /** foreignObject 混合内容计数 */
+      foreignObjects: number
+      /** fill/stroke/filter/clip-path 属性含 url(#id) 的渐变/引用计数 */
+      gradientRefs: number
+      /** 带作用域前缀的 url(#…) 引用计数（B 域引用不指向 A 的证据） */
+      scopedGradientRefs: number
+      /** 带 ID 作用域前缀（vs<scope>--）的产物 id 计数（B/C 前缀化证据） */
+      scopedIds: number
+      /** 带前缀 id 元素中 computed stroke 非 none 的计数（B 的 CSS #id
+       *  选择器协同命中并绘制的证据） */
+      scopedStrokePainted: number
+    }
+    /** #572（T07）iframe 绘制面：当前激活内容域内白名单帧的装配属性
+     *  （sandbox 系统强制面）、src 归属改写与 Live 命中接管层计数。
+     *  **帧内内容可见性不在此断言**（沙箱/跨域帧对父文档不可读——
+     *  「load 事件或 DOM 存在不当作可见证据」的口径），内容可见证据
+     *  在 browser 层经 CDP 帧读取。 */
+    iframes?: {
+      /** 白名单帧数（data-vsidian-iframe 标记） */
+      frames: number
+      /** 各帧 sandbox 属性值序列（装配面钉住：https=allow-scripts、其余空） */
+      sandboxes: string[]
+      /** 各帧 src 属性值序列（本地解析改写断言；srcdoc 帧为 null 形态缺省） */
+      srcs: Array<string | null>
+      /** srcdoc 在场帧数（内容形态矩阵） */
+      srcdocFrames: number
+      /** Live 命中接管层数（Reading 恒 0——不接管原生交互） */
+      shields: number
+      /** 任一帧（或其 wrapper）rect 有面积且 elementFromPoint 命中
+       *  （jsdom 无布局恒 false，真宿主集成断言依据） */
+      visible: boolean
+    }
   }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
   quickActions?: {

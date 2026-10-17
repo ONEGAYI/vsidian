@@ -843,6 +843,9 @@ export class RefContentMount {
       // #570（T05）：HTML 资源（srcset/媒体属性）按装载目标 B/C 身份订阅
       //（docStyle 产物同身份——B 的 url() 以 B 目录解析）
       ...(this.htmlResources ? { htmlResources: this.htmlResources } : {}),
+      // #573（T08）：ID 文档作用域——B 产物内部 id 前缀化（docStyle 产物
+      // 同 scope 键，CSS id/url(#id) 侧协同改写）；装载无目标时缺省 A 口径
+      ...(this.docScope ? { docScope: this.docScope } : {}),
     })
     // #340：text 内容无 Markdown 嵌入块语义（块挂载仅 markdown 路径可达）
     const mdTarget = this.target !== null && !('kind' in this.target) ? this.target : null

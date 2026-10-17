@@ -95,6 +95,13 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 族——img/srcset 真实语法装载、文档样式 url()/字体绘制、媒体属性改写、
   // Live 点击不跳转、Reading 链接意图、失效重取）
   'htmlResources',
+  // #572（T07）文档内 iframe：紧随 htmlResources（同 HTML 族——sandbox 矩阵
+  // /srcdoc 脚本零执行/本地页装载/Live 外层命中选源码/拒绝嵌入真实状态/释放无残留）
+  'htmlIframe572',
+  // #573（T08）SVG/MathML 与混合命名空间：紧随 htmlResources（同 HTML
+  // 族——SVG 几何/文字/渐变/foreignObject 实际绘制、MathML 结构、行内
+  // 混排不吞正文、点击选区精确、净化负向、A/B 相同 ID 不串目标）
+  'svgMathml-573',
   'dropCursorPaint', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',

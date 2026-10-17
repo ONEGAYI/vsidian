@@ -118,6 +118,7 @@ vsidian/
     │   ├── globLiteral.ts             # watcher 文件名 glob 转义
     │   ├── hoverRefresh.ts            # 引用视图同步参数与订阅注册表
     │   ├── htmlBlock.ts               # 块级 HTML 边界共享事实源
+    │   ├── htmlFragment.ts            # ID 文档作用域语法层
     │   ├── htmlInline.ts              # 行内 HTML 区间事实源
     │   ├── htmlResource.ts            # HTML 资源 URL 语法层
     │   ├── i18n.ts                    # t() 取词与语言包装配状态模块

@@ -54,3 +54,22 @@ describe('Reading HTML 块绘制规则（reading-html-block 条目）', () => {
     expect(rule).toMatch(/font-family:\s*var\(--vscode-editor-font-family/)
   })
 })
+
+describe('#572（T07）Live iframe 命中接管（live-html-widget 条目的 frame/shield 子结构）', () => {
+  it('wrapper 定位上下文（position:relative——shield 的 inset 参照）', () => {
+    const rule = cssRule(css, '#app .cm-editor .cm-content .vsidian-live-html-frame')
+    expect(rule).toMatch(/position:\s*relative/)
+  })
+
+  it('行内宿主内 wrapper inline-block（行内流不断行）', () => {
+    const rule = cssRule(css, '#app .cm-editor .cm-content .vsidian-live-inline-html-content .vsidian-live-html-frame')
+    expect(rule).toMatch(/display:\s*inline-block/)
+  })
+
+  it('shield 全覆盖压顶（absolute + inset:0 + z-index——帧事件不冒泡的命中载体）', () => {
+    const rule = cssRule(css, '#app .cm-editor .cm-content .vsidian-live-html-frame-shield')
+    expect(rule).toMatch(/position:\s*absolute/)
+    expect(rule).toMatch(/inset:\s*0/)
+    expect(rule).toMatch(/z-index:\s*1/)
+  })
+})
