@@ -30,6 +30,20 @@ export function legacyMarkerStatePath(dir: string, profileId: string): string {
   return path.join(dir, `legacy-theme-migration.${profileId}.state.json`)
 }
 
+/**
+ * 六审 R5-1（让位判定的磁盘信号）：目录内是否已有任一迁移状态文件
+ * （目录缺失 = 无——与生产 wiring 的 hasAnyMigrationState 同语义）
+ */
+export async function legacyHasAnyMarkerState(dir: string): Promise<boolean> {
+  try {
+    const names = await fsp.readdir(dir)
+    return names.some((name) =>
+      name.startsWith('legacy-theme-migration.') && name.endsWith('.state.json'))
+  } catch {
+    return false
+  }
+}
+
 export function makeDiskMarkerStore(
   dir: string,
   writeFs: MarkerWriteFs = defaultWriteFs,

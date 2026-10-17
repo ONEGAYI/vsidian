@@ -19,6 +19,7 @@ import { promises as fsp } from 'fs'
 import * as path from 'path'
 import {
   LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY,
+  LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY,
   parseLegacyThemeMigrationMarker,
   runLegacyThemeMigration,
   type LegacyThemeMigrationMarker,
@@ -166,6 +167,17 @@ export function createLegacyThemeMigrationWiring(
     writeProfileId: async (id) => {
       await context.globalState.update(LEGACY_THEME_MIGRATION_PROFILE_ID_STATE_KEY, id)
     },
+    // 六审 R5-1：让位判定的磁盘信号——共享磁盘上任一按身份命名的迁移状
+    // 态文件在场（目录缺失 = 无）
+    hasAnyMigrationState: async () => {
+      try {
+        const names = await fsp.readdir(storageDir)
+        return names.some((name) =>
+          name.startsWith(LEGACY_THEME_MIGRATION_STATE_FILE_PREFIX) && name.endsWith('.state.json'))
+      } catch {
+        return false
+      }
+    },
     readMarker: (profileId) => readMarkerFromDisk(profileId),
     writeMarker: (profileId, marker) => writeMarkerToDisk(profileId, marker),
     extensionVersion: () => String(
@@ -258,9 +270,13 @@ export function createLegacyThemeMigrationWiring(
           }
           await context.globalState.update(LEGACY_THEME_MIGRATION_PROFILE_ID_STATE_KEY, undefined)
           const overlay = readOverlayRecord()
-          if (overlay !== null && LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY in overlay) {
+          const mechanismKeys = [
+            LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY,
+            LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY,
+          ]
+          if (overlay !== null && mechanismKeys.some((key) => key in overlay)) {
             const cleaned = { ...overlay }
-            delete cleaned[LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY]
+            for (const key of mechanismKeys) delete cleaned[key]
             await context.globalState.update(SETTINGS_STORAGE_KEY, cleaned)
           }
           await migrationLock.forceCleanup()

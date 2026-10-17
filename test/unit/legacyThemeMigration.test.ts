@@ -274,6 +274,8 @@ function fakePorts(
     writeProfileId: async (id) => {
       state.profileId = id
     },
+    // 六审 R5-1：让位判定的磁盘信号（内存分箱等价——分箱非空即在场）
+    hasAnyMigrationState: async () => state.markers.size > 0,
     readMarker: async (profileId) => state.markers.get(profileId) ?? null,
     writeMarker: async (profileId, markerToWrite) => {
       state.events.push(`write-marker:${markerToWrite.state}`)

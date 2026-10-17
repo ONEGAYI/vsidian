@@ -31,12 +31,20 @@
 // 同批原子写入），磁盘即时判据按身份命名分居——双 profile 各自独立完成
 // 迁移与引导，同 profile 多窗收敛到同一状态文件。
 //
-// **声明的有界边界（如实落档，不虚饰）**：同一 profile 两窗口在**首次
-// 生成 profileId 的历史唯一时刻**，若 storage 广播延迟超出败者（锁内
-// 身份等待窗 + 败者等待超时）的等待窗，败者可能自生成另一 id 并多引导
-// 一次——一次性、有界，后续激活时 memento 从 db 初始化读到已收敛的 id，
-// 永不重复。该边界源于上述平台通道的固有缺口（不存在「profile 隔离 +
-// 跨窗即时」双满足通道），不承诺「任意延迟下恰 1」。
+// **身份等待超时语义（六审 R5-1 改判，失败关闭）**：身份等待窗超时后
+// **不再自生成**——磁盘上已有任一迁移状态时本窗让位（不迁移、不引导、
+// 不写迁移状态），下次激活 memento 从 db 初始化读到已收敛身份后短路或
+// 正常迁移（1.82.3 的窗口重开即 db 读，storage 广播延迟只影响已开窗口
+// 的缓存、不影响重开窗口的初始读）。全新 profile 经 overlay 让位记号
+// （见 LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY）在下
+// 次激活恢复生成资格——跨 profile 活性不因让位回退（五审 P2-C 修复面
+// 保持）。**声明的残余边界（如实落档，不虚饰）**：让位记号的「已让位
+// 过一轮 → 恢复生成资格」判定无法区分「全新 profile（db 无身份）」与
+// 「身份已入 db 但本窗缓存跨激活地过期」——后者在两窗跨激活交错（一窗
+// 的让位记号已入 db、他窗的身份写入尚未到达本窗缓存）且同时在恢复资
+// 格上并发时，仍可能多引导一次；该形态比六审前的「任意缓存延迟即每窗
+// 重复一次」严格收窄，源于平台不存在「profile 隔离 + 跨窗即时」双满足
+// 通道的固有缺口，不承诺「任意延迟下恰 1」。
 //
 // 状态机沿用可恢复形态（PR #581 评审修复，发现 1）：
 //   无文件                 未迁移
@@ -72,6 +80,17 @@ import type { LegacyThemeMigrationLockHandle } from './legacyThemeMigrationLock'
  * sanitize 快照层按未知键忽略、不污染生效值。
  */
 export const LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY = '_legacyThemeMigration.profileId'
+
+/**
+ * 身份等待让位记号（六审 R5-1，overlay 机制键）：身份等待窗超时且磁盘
+ * 上已有任一迁移状态时本窗让位（不迁移不引导不写迁移状态），并把该记号
+ * 落进本 profile 的 overlay（PROFILE 域持久、跨 profile 域隔离、sanitize
+ * 按未知键忽略）。下次激活读到自己的记号 → 恢复生成资格——全新 profile
+ * 在他 profile 已迁移的磁盘上不至于永久让位（跨 profile 活性，五审
+ * P2-C 的修复面不能回退）。生成身份后记号复位为 false。
+ */
+export const LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY =
+  '_legacyThemeMigration.identityWaitDeferred'
 
 /**
  * 主题值形态分类（值无关化，T08 五审）：迁移判定按**结构**不按具体字面量
@@ -195,6 +214,13 @@ export interface LegacyThemeMigrationPorts {
   /** profileId 持久化（globalState 独立键；overlay 载体由迁移补丁同批承载） */
   writeProfileId(id: string): Promise<void>
   /**
+   * 六审 R5-1（让位判定的磁盘信号）：共享磁盘上是否已有任一按身份命名
+   * 的迁移状态文件。身份等待超时且此信号为真时，本窗身份可能只是
+   * memento 缓存过期（同 profile 前窗已生成、广播在途）——让位而非自
+   * 造新 UUID（R5 复审实测三窗三次重复引导的根因）。
+   */
+  hasAnyMigrationState(): Promise<boolean>
+  /**
    * P2-B/P2-C 磁盘权威状态读（按 profileId 命名的状态文件；即时跨窗、
    * 跨 profile 分居）——不依赖本窗口 memento 缓存（无标记/损坏按 null）。
    */
@@ -246,15 +272,28 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * 锁内 profile 身份解析（B' 唯一生成点）：重读两载体（他窗可能在快速
- * 路径与抢锁之间已生成并广播）→ 仍无则在身份等待窗内轮询重读（同
- * profile 他窗的广播在途时收敛为同一 id）→ 超窗自生成新 UUID 并持久
- * 化（声明的有界边界：超窗即可能双 id 多引导一次，后续激活收敛）。
+ * 锁内 profile 身份解析（六审 R5-1 改判：等待窗超时不再无条件自生成）。
+ * 判定链（按序）：
+ * 1. 两载体读序（globalState 独立键 → overlay 内部键）+ 等待窗内轮询重
+ *    读——同 profile 他窗刚生成、广播在途时收敛为同一 id；
+ * 2. 超时后**不生成**：本窗 memento 可能只是缓存过期（同 profile 前窗
+ *    已生成身份、storage 广播延迟超出等待窗），此刻自造新 UUID 会让同
+ *    profile 每个未收到广播的窗口各迁移各引导一次（R5 复审实测三窗
+ *    三次）。让位 = 返回 null：本次激活不迁移、不引导、不写迁移状态，
+ *    下次激活 memento 从 db 初始化读到已收敛身份后短路或正常迁移；
+ * 3. 让位须可逃逸（跨 profile 活性）：全新 profile 在「他 profile 已有
+ *    迁移状态」的磁盘上首次激活也会让位——不可逃逸即永久让位（等于
+ *    跨 profile 永久短路，五审 P2-C 修复面回退）。逃逸通道 = overlay
+ *    让位记号（见 LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY）：
+ *    已让位过一轮的 profile 下次激活读到自己的记号 → 恢复生成资格，
+ *    生成后记号复位；
+ * 4. 磁盘全净（无任何 profile 曾认领）→ 首次认领，正常生成（单窗升级
+ *    主路径零额外激活成本）。
  */
-async function resolveOrGenerateProfileId(
+async function resolveProfileIdOrDefer(
   ports: LegacyThemeMigrationPorts,
   options: LegacyThemeMigrationRunOptions,
-): Promise<string> {
+): Promise<string | null> {
   const waitMs = options.profileIdWaitMs ?? 1_000
   const pollMs = options.profileIdPollMs ?? 50
   let id = await ports.readProfileId()
@@ -266,9 +305,29 @@ async function resolveOrGenerateProfileId(
   if (id !== null) {
     return id
   }
+  const overlay = ports.readRawOverlay()
+  const deferredBefore = isRecord(overlay) &&
+    overlay[LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY] === true
+  if (!deferredBefore && await ports.hasAnyMigrationState()) {
+    // 让位：记号落本 profile overlay（重开窗口从 db 读到；写失败不阻断
+    // 让位本身——下次激活按无记号再走一轮，方向仍 fail-closed）
+    await ports.applyExclusiveOverlayStep(() => ({
+      patch: { [LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY]: true },
+      result: undefined,
+    })).catch(() => undefined)
+    return null
+  }
   const factory = options.profileIdFactory ?? (() => globalThis.crypto.randomUUID())
   id = factory()
   await ports.writeProfileId(id)
+  if (deferredBefore) {
+    // 生成后复位让位记号：此后本 profile 的身份缓存过期窗（若再有）回到
+    // 让位判定，不再持有「已让位过」的生成资格
+    await ports.applyExclusiveOverlayStep(() => ({
+      patch: { [LEGACY_THEME_MIGRATION_IDENTITY_WAIT_DEFERRED_OVERLAY_KEY]: false },
+      result: undefined,
+    })).catch(() => undefined)
+  }
   return id
 }
 
@@ -308,9 +367,14 @@ async function executeOwnerSequence(
       }
     }
     if (!(await stillCurrent())) return NONE_RESULT
-    // B'：身份缺失时在锁内生成（快速路径可能带着 null 进来——那是需要
-    // 迁移但尚无身份的首次激活；等待窗语义见 resolveOrGenerateProfileId）
-    const id = profileId ?? await resolveOrGenerateProfileId(ports, options)
+    // B'：身份缺失时在锁内解析（快速路径可能带着 null 进来——那是需要
+    // 迁移但尚无身份的首次激活；等待/让位语义见 resolveProfileIdOrDefer）
+    const id = profileId ?? await resolveProfileIdOrDefer(ports, options)
+    if (id === null) {
+      // 六审 R5-1：身份未定让位——本次激活不迁移、不引导、不写迁移状态
+      // （finally 照常释放锁；下次激活从 db 收敛身份后短路或正常迁移）
+      return NONE_RESULT
+    }
     // 认领后从磁盘重读权威状态（P2-B：等待期间其他窗口可能已完成收口）
     const marker = await ports.readMarker(id)
     if (marker?.state === 'done') {

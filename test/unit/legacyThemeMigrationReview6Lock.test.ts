@@ -200,6 +200,8 @@ function windowPorts(options: {
     applyExclusiveOverlayStep: mementoExclusiveStep(options.memento),
     readProfileId: async () => PROFILE_ID,
     writeProfileId: async () => {},
+    // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+    hasAnyMigrationState: async () => false,
     readMarker: diskMarker.readMarker,
     writeMarker: async (profileId, marker) => {
       const hang = barrier?.hangIfFirst()

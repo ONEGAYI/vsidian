@@ -125,6 +125,8 @@ function makeReview3Ports(options: {
     // B'：身份已收敛的常态（本场景焦点在 memento 缓存延迟非身份生成）
     readProfileId: async () => 'review3-profile',
     writeProfileId: async () => {},
+    // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+    hasAnyMigrationState: async () => false,
     readMarker: async () => options.markerBox.value ?? null,
     writeMarker: async (_profileId, marker) => {
       options.markerBox.value = marker
@@ -320,6 +322,8 @@ describe('P2-B：双窗口独立 memento 缓存 + 延迟广播 + 共享磁盘状
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
       readProfileId: async () => 'review3-profile',
       writeProfileId: async () => {},
+      // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+      hasAnyMigrationState: async () => false,
       ...diskMarker,
       extensionVersion: () => '1.2.3-test',
       requestGuide: () => {
@@ -367,6 +371,8 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
       applyExclusiveOverlayStep: mementoExclusiveStep(window.memento),
       readProfileId: async () => 'review3-profile',
       writeProfileId: async () => {},
+      // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+      hasAnyMigrationState: async () => false,
       ...diskMarker,
       extensionVersion: () => '1.2.3-test',
       requestGuide: () => {
@@ -387,9 +393,11 @@ describe('锁代次协议接入生产链（四审 P2-D）：三「窗口」独�
     const portsA: LegacyThemeMigrationPorts = {
       readRawOverlay: () => windowA.memento.get(SETTINGS_STORAGE_KEY),
       applyExclusiveOverlayStep: mementoExclusiveStep(windowA.memento),
-      readProfileId: async () => 'review3-profile',
-      writeProfileId: async () => {},
-      readMarker: diskMarker.readMarker,
+    readProfileId: async () => 'review3-profile',
+    writeProfileId: async () => {},
+    // 固定预置身份——六审 R5-1 的等待/让位判定不可达，桩值即可
+    hasAnyMigrationState: async () => false,
+    readMarker: diskMarker.readMarker,
       writeMarker: async (profileId, marker) => {
         await diskMarker.writeMarker(profileId, marker)
         if (marker.state === 'pending') {

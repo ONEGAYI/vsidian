@@ -25,7 +25,7 @@ import {
   runLegacyThemeMigration,
   type LegacyThemeMigrationPorts,
 } from '../../src/shared/legacyThemeMigration'
-import { makeDiskMarkerStore } from './legacyDiskMarkerStore'
+import { makeDiskMarkerStore, legacyHasAnyMarkerState } from './legacyDiskMarkerStore'
 import {
   createLegacyThemeMigrationLock,
   type LegacyThemeMigrationLockHandle,
@@ -175,6 +175,7 @@ function windowPorts(
     applyExclusiveOverlayStep: mementoExclusiveStep(memento),
     ...profileIdPorts(memento),
     ...diskMarker,
+    hasAnyMigrationState: () => legacyHasAnyMarkerState(dir),
     extensionVersion: () => '1.2.3-test',
     requestGuide: onGuide,
     lock: makeLock(dir, token),
