@@ -1,28 +1,42 @@
 // #535 T08 旧内核 Codex 设置迁移——vscode 层装配：globalState 原始
-// overlay 读写端口（直写存储层，绕过 SettingsService.apply 的定义校验
-// ——旧键定义已删除，经 apply 写旧键会被拒；判定依据见 shared/
-// codexMigration 头注释）、一次性安装引导通知、globalStorage 锁文件
-// 跨窗口原子认领（PR #581 评审发现 2：fs.open 'wx' = O_EXCL）与
-// _test 钩子（VSIDIAN_TEST_HOOKS 门控，判据与 editorGuardWiring 一致）。
+// overlay 读端口 + 经 SettingsService 串行链的最小主题键补丁写端口
+// （PR #581 三审 P2-A）、profile 作用域磁盘权威完成状态（P2-B：
+// globalStorageUri 下 state JSON，跨窗口一致、不依赖各窗口 memento
+// 缓存——1.82.3 的 Memento.get 只读本地 _value，写入与跨窗广播分离）、
+// token/rename 安全接管锁（codexMigrationLock 协议）、一次性安装引导
+// 通知与 _test 钩子（VSIDIAN_TEST_HOOKS 门控，判据与 editorGuardWiring
+// 一致）。
 //
 // 集成测试宿主的通知短路：VSIDIAN_TEST_HOOKS=1 时引导通知 no-op（独立
 // 桌面测试宿主无法交互 toast，与 editorGuardWiring 同一口径）；引导计
 // 数在 requestGuide 内先递增——短路只挡 UI，不挡「引导已决定」的观测。
 import * as vscode from 'vscode'
+import { randomUUID } from 'node:crypto'
 import { promises as fsp } from 'fs'
 import * as path from 'path'
 import {
-  CODEX_MIGRATION_MARKER_KEY,
   parseCodexMigrationMarker,
   runCodexThemeMigration,
   type CodexMigrationMarker,
   type CodexMigrationPorts,
 } from '../shared/codexMigration'
+import {
+  createCodexMigrationLock,
+  type CodexLockFilesystem,
+} from '../shared/codexMigrationLock'
 import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../shared/settings'
 import { SETTINGS_STORAGE_KEY, SettingsService } from './settingsService'
 import { t } from '../shared/i18n'
-/** globalStorage 内的迁移锁文件名（多窗口原子认领；mtime 为陈旧判据） */
+
+/** globalStorage 内的迁移锁文件名（多窗口原子认领；协议见 codexMigrationLock） */
 const CODEX_MIGRATION_LOCK_FILE = 'codex-theme-migration.lock'
+
+/**
+ * globalStorage 内的迁移完成状态文件（P2-B：profile 作用域磁盘权威——
+ * globalStorageUri 本身按 profile 隔离，不用跨 profile 共享目录；判据
+ * 不依赖各窗口 globalState memento 缓存）
+ */
+const CODEX_MIGRATION_STATE_FILE = 'codex-theme-migration.state.json'
 
 /** 迁移运行时状态（_test 观测面；原始 overlay 两键为原始层值非快照值） */
 export interface CodexMigrationRuntimeState {
@@ -37,8 +51,8 @@ export interface CodexMigrationRuntimeState {
 }
 
 export interface CodexMigrationWiring {
-  /** _test / 诊断观测面 */
-  stateFor(): CodexMigrationRuntimeState
+  /** _test / 诊断观测面（marker 从磁盘权威状态文件读取） */
+  stateFor(): Promise<CodexMigrationRuntimeState>
   /** 重跑迁移（_test 专用：模拟重启后的再次激活；生产只在 activate 跑一次） */
   run(): Promise<{ action: string; guide: boolean }>
 }
@@ -51,18 +65,64 @@ export function createCodexMigrationWiring(
   const testHooks = process.env.VSIDIAN_TEST_HOOKS === '1'
   let guideCount = 0
 
-  // ---- 多窗口原子认领锁（globalStorage 目录内锁文件；O_EXCL） ----
-  const lockPath = path.join(context.globalStorageUri.fsPath, CODEX_MIGRATION_LOCK_FILE)
-  const releaseMigrationLock = async (): Promise<void> => {
-    await fsp.rm(lockPath, { force: true })
+  const storageDir = context.globalStorageUri.fsPath
+  const lockPath = path.join(storageDir, CODEX_MIGRATION_LOCK_FILE)
+  const statePath = path.join(storageDir, CODEX_MIGRATION_STATE_FILE)
+
+  // ---- P2-B：磁盘权威完成状态（tmp+rename 原子写；损坏按无标记处理，
+  // 恢复语义兜底——rename 原子性保证正常路径不会读到半截内容） ----
+  const readMarkerFromDisk = async (): Promise<CodexMigrationMarker | null> => {
+    try {
+      return parseCodexMigrationMarker(JSON.parse(await fsp.readFile(statePath, 'utf8')))
+    } catch {
+      return null
+    }
   }
+  const writeMarkerToDisk = async (marker: CodexMigrationMarker): Promise<void> => {
+    await fsp.mkdir(storageDir, { recursive: true })
+    const tmp = `${statePath}.${process.pid}.tmp`
+    await fsp.writeFile(tmp, JSON.stringify(marker), 'utf8')
+    await fsp.rename(tmp, statePath)
+  }
+
+  // ---- 跨窗口锁（fs 原语端口 + 协议实现；token 为本窗口本次激活的
+  // 认领代次标识——释放与接管都经它核对，见 codexMigrationLock） ----
+  const lockFs: CodexLockFilesystem = {
+    writeFileExclusive: async (target, data) => {
+      const handle = await fsp.open(target, 'wx')
+      try {
+        await handle.writeFile(data, 'utf8')
+      } finally {
+        await handle.close()
+      }
+    },
+    rename: (from, to) => fsp.rename(from, to),
+    link: (from, to) => fsp.link(from, to),
+    rm: async (target) => {
+      await fsp.rm(target, { force: true })
+    },
+    statMtimeMs: async (target) => {
+      try {
+        return (await fsp.stat(target)).mtimeMs
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      }
+    },
+    readFile: (target) => fsp.readFile(target, 'utf8'),
+  }
+  const migrationLock = createCodexMigrationLock(lockFs, lockPath, {
+    token: randomUUID(),
+    pid: process.pid,
+  })
+
   const ports: CodexMigrationPorts = {
     readRawOverlay: () => context.globalState.get(SETTINGS_STORAGE_KEY),
     // P2-A（PR #581 三审）：读-判-写经 SettingsService 串行链——与设置页
     // 保存（apply）互斥，等待窗口内的用户写入不被旧快照覆盖
     applyExclusiveOverlayStep: (step) => settingsService.runExclusiveOverlayStep(step),
-    readMarker: () => context.globalState.get(CODEX_MIGRATION_MARKER_KEY),
-    writeMarker: (marker) => Promise.resolve(context.globalState.update(CODEX_MIGRATION_MARKER_KEY, marker)),
+    readMarker: readMarkerFromDisk,
+    writeMarker: writeMarkerToDisk,
     extensionVersion: () => String(
       (context.extension.packageJSON as { version?: unknown }).version ?? ''),
     requestGuide: () => {
@@ -75,35 +135,11 @@ export function createCodexMigrationWiring(
       // 与当前回落，安装与选择归用户
       void vscode.window.showInformationMessage(t('host.codexThemeMigrated'))
     },
-    tryAcquireLock: async () => {
-      await fsp.mkdir(context.globalStorageUri.fsPath, { recursive: true })
-      try {
-        const handle = await fsp.open(lockPath, 'wx')
-        try {
-          await handle.writeFile(String(process.pid), 'utf8')
-        } finally {
-          await handle.close()
-        }
-        return true
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
-        throw error
-      }
-    },
-    lockAgeMs: async () => {
-      try {
-        const stat = await fsp.stat(lockPath)
-        return Date.now() - stat.mtimeMs
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-        throw error
-      }
-    },
-    releaseLock: releaseMigrationLock,
+    lock: migrationLock,
   }
 
-  const stateFor = (): CodexMigrationRuntimeState => {
-    const marker = parseCodexMigrationMarker(context.globalState.get(CODEX_MIGRATION_MARKER_KEY))
+  const stateFor = async (): Promise<CodexMigrationRuntimeState> => {
+    const marker = await readMarkerFromDisk()
     const overlay = context.globalState.get<Record<string, unknown>>(SETTINGS_STORAGE_KEY)
     return {
       marker,
@@ -129,7 +165,7 @@ export function createCodexMigrationWiring(
     context.subscriptions.push(
       vscode.commands.registerCommand(
         'onegayi.vsidian._test.getCodexMigrationState',
-        (): CodexMigrationRuntimeState => stateFor(),
+        (): Promise<CodexMigrationRuntimeState> => stateFor(),
       ),
       // 用例造数：直写原始 overlay 双键（绕过定义校验，模拟升级残留；
       // null = 删除该键——「从未设置」形态）
@@ -153,14 +189,15 @@ export function createCodexMigrationWiring(
           return true
         },
       ),
-      // 用例隔离：清一次性标记 + 引导计数归零 + 认领锁（overlay 不动——
-      // 造数走注入钩子；runner 每用例前调用，防止迁移标记与锁残留跨用例
-      // 污染——崩溃注入场景的残留锁在此收口）
+      // 用例隔离：清磁盘权威状态 + 隔离式清锁（rename 夺走即删，无观察/
+      // 动作窗口）+ 引导计数归零（overlay 不动——造数走注入钩子；runner
+      // 每用例前调用，防止迁移状态与锁残留跨用例污染——崩溃注入场景的
+      // 残留锁在此收口）
       vscode.commands.registerCommand(
         'onegayi.vsidian._test.resetCodexMigration',
         async () => {
-          await context.globalState.update(CODEX_MIGRATION_MARKER_KEY, undefined)
-          await releaseMigrationLock()
+          await fsp.rm(statePath, { force: true })
+          await migrationLock.forceCleanup()
           guideCount = 0
           return true
         },

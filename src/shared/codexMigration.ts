@@ -5,15 +5,20 @@
 // overlay**（未经 sanitizeStoredSettings）——旧 Mermaid 键的设置定义随
 // 本票删除后，overlay 中残留的 'codex' 会被 sanitize 当未知键忽略、
 // 快照层无法区分「曾是 codex」与「从未设置」，一次性引导将永不触发。
-// 因此编排直接读写原始 overlay 层（不经 SettingsService.apply——apply
-// 按定义表校验，旧键定义删除后任何写入都会被拒）。
+// 因此编排直接读写原始 overlay 层（读经 readRawOverlay；写经
+// applyExclusiveOverlayStep——与 SettingsService.apply 同一进程内串行链
+// 的最小主题键补丁，PR #581 三审 P2-A：pending 持久化等待窗口内的用户
+// 保存不被旧快照覆盖）。
 //
-// 一次性标记（globalState 独立键，与设置同 profile 持久化——参照
-// editorGuard #322 版本锁先例：写锁不依赖用户对通知的响应）：标记为
-// 可恢复状态机（PR #581 评审修复，发现 1）——
-//   undefined          未迁移
-//   { state: pending } 迁移已认领、引导欠账（恢复时必补发）
-//   { state: done }    迁移收口（幂等短路，不再引导）
+// 完成标记（PR #581 三审 P2-B）：**profile 作用域磁盘权威状态文件**
+// （globalStorageUri 下 state JSON，wiring 层 tmp+rename 原子写）——
+// 判据完全不依赖各窗口 globalState memento 缓存。1.82.3 的 Memento.get
+// 只读本地 _value，存储写入与跨窗广播是分离通道：A 窗口写 done 删锁后，
+// B 窗口缓存过期时会按旧 codex/空标记再次迁移再次引导（评审方受控缓存
+// 模拟实测 guides=2）。状态机沿用可恢复形态（PR #581 评审修复，发现 1）：
+//   无文件                 未迁移
+//   { state: pending }    迁移已认领、引导欠账（恢复时必补发）
+//   { state: done }       迁移收口（幂等短路，不再引导）
 // 持久化顺序：**先写 pending、再改设置、发引导、写 done**——任何一次
 // 写失败或进程中断后，下次激活都能从 pending 恢复（设置已迁移 → 补发
 // 引导；设置未迁移 → 重走完整迁移），引导不会因中途失败而永久丢失。
@@ -21,15 +26,14 @@
 // （同步序）——该窗口内进程被 kill 或 done 持久化失败时，恢复只能按
 // pending 补发，可能双弹一次；这比「引导永久丢失」代价小。
 //
-// 多窗口并发（PR #581 评审修复，发现 2）：迁移与恢复均经 globalStorage
-// 目录内锁文件原子认领（fs.open 'wx' = O_EXCL，跨进程原子原语）。认领
-// 成功者执行完整序列；认领失败者短等待 done 出现后静默退出（绝不通知），
-// 超时也静默退出（本次不引导，待下次激活恢复）。胜者崩溃后锁残留由
-// mtime 陈旧接管兜底（超阈值删除重抢），不会永久锁死。
+// 多窗口并发（PR #581 评审修复发现 2 + 三审同修）：迁移与恢复经
+// globalStorage 目录锁文件原子认领（fs.open 'wx' = O_EXCL）+ 安全接管
+// 协议（token 代次校验 + rename 隔离验证，见 codexMigrationLock 文件头
+// 不变量）。认领成功者执行完整序列；认领失败者短等待磁盘 done 出现后
+// 静默退出（绝不通知），超时也静默退出（本次不引导，待下次激活恢复）。
+// 胜者崩溃后锁残留由 mtime 陈旧接管兜底（超阈值接管），不会永久锁死。
 import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from './settings'
-
-/** 一次性迁移标记的 globalState 键（vsidian.<域> 命名习惯） */
-export const CODEX_MIGRATION_MARKER_KEY = 'vsidian.codexThemeMigration'
+import type { CodexMigrationLockHandle } from './codexMigrationLock'
 
 /**
  * 迁移判定用的旧内核主题身份字面量。addonThemes 的 CODEX_THEME_ID 已降为
@@ -49,9 +53,9 @@ export interface CodexMigrationPlan {
 }
 
 /**
- * 一次性标记（可恢复状态机）：pending = 迁移已认领、引导欠账（恢复时必
- * 补发后收口）；done = 迁移收口（重开/重启/多窗口的幂等短路判据）。
- * version 记录迁移执行时的扩展版本（诊断用）。
+ * 一次性标记（可恢复状态机，磁盘权威形态）：pending = 迁移已认领、引导
+ * 欠账（恢复时必补发后收口）；done = 迁移收口（重开/重启/多窗口的幂等
+ * 短路判据）。version 记录迁移执行时的扩展版本（诊断用）。
  */
 export interface CodexMigrationMarker {
   state: 'pending' | 'done'
@@ -130,20 +134,19 @@ export interface CodexMigrationPorts {
   applyExclusiveOverlayStep<R>(
     step: (overlay: unknown) => { patch: Record<string, unknown> | null; result: R },
   ): Promise<R>
-  /** globalState.get(标记键)——undefined 即未迁移（形态见 parseCodexMigrationMarker） */
-  readMarker(): unknown
-  /** globalState.update(标记键, marker)——pending/done 状态机的唯一写入通道 */
+  /**
+   * P2-B（PR #581 三审）：profile 作用域磁盘权威状态文件读——跨窗口
+   * 一致判据，不依赖本窗口 memento 缓存（无标记/损坏按 null）。
+   */
+  readMarker(): Promise<CodexMigrationMarker | null>
+  /** 磁盘权威状态文件原子写（wiring 层 tmp+rename） */
   writeMarker(marker: CodexMigrationMarker): Promise<void>
   /** context.extension.packageJSON.version（标记值，诊断用） */
   extensionVersion(): string
   /** 一次性安装引导通知（VSIDIAN_TEST_HOOKS=1 时短路，wiring 层实现） */
   requestGuide(): void
-  /** 原子认领锁文件（O_EXCL）：true = 认领成功（本窗口为迁移胜者） */
-  tryAcquireLock(): Promise<boolean>
-  /** 锁文件年龄（ms；不存在 = null）——陈旧接管判据 */
-  lockAgeMs(): Promise<number | null>
-  /** 删除锁文件（陈旧接管 / 胜者正常完成或异常退出时释放） */
-  releaseLock(): Promise<void>
+  /** 跨窗口锁句柄（token/rename 接管协议见 codexMigrationLock） */
+  lock: CodexMigrationLockHandle
 }
 
 /** 编排结果：action 同计划；guide = 本次是否请求了引导 */
@@ -154,7 +157,7 @@ export interface CodexMigrationRunResult {
 
 /** 并发认领参数（默认值见 runCodexThemeMigration；单测注入小间隔/超时） */
 export interface CodexMigrationRunOptions {
-  /** 锁 mtime 陈旧阈值（ms）：超过即视胜者已崩溃，删除重抢 */
+  /** 锁 mtime 陈旧阈值（ms）：超过即视胜者已崩溃，安全接管重抢 */
   lockStaleMs?: number
   /** 认领失败者等待 done 的超时（ms）：超时静默退出（本次不引导） */
   waitTimeoutMs?: number
@@ -168,36 +171,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 尝试认领；失败时检查陈旧并接管（删除重抢）。true = 认领成功 */
-async function tryAcquireOrTakeover(
-  ports: CodexMigrationPorts,
-  staleMs: number,
-): Promise<boolean> {
-  if (await ports.tryAcquireLock()) return true
-  const age = await ports.lockAgeMs()
-  if (age !== null && age > staleMs) {
-    await ports.releaseLock()
-    return ports.tryAcquireLock()
-  }
-  return false
-}
-
 /**
- * 胜者序列（认领成功后执行）：重读状态 → 按恢复规则补完。
- * - plan migrate → 完整序列：写 pending → 改设置 → 发引导（同步序）→ 写 done；
+ * 胜者序列（认领成功后执行）：磁盘重读状态 → 按恢复规则补完。
+ * - plan migrate → 完整序列：写 pending → 串行化重判并落最小补丁 →
+ *   （重判仍 migrate 才）发引导（同步序）→ 写 done；重判落到档 2/档 3
+ *   说明等待期间用户已自行处置——不引导，直接写 done 收口（P2-A）；
  * - plan clean-legacy → 只清旧键（pending 欠账则补发引导并收口）；
  * - plan none 且 pending 在场 → 补发引导后写 done（引导欠账必达）；
  * - plan none 且无 pending → 静默收尾。
- * 异常时立即释放锁（下次激活可立即重试）；真实进程崩溃不走 finally，
- * 锁残留由 mtime 陈旧接管兜底。
+ * 异常时立即释放锁（token 校验式，下次激活可立即重试）；真实进程崩溃
+ * 不走 finally，锁残留由 mtime 陈旧接管兜底。
  */
 async function executeOwnerSequence(ports: CodexMigrationPorts): Promise<CodexMigrationRunResult> {
   try {
-    // 认领后重读状态（等待期间其他窗口可能已完成收口）
-    const marker = parseCodexMigrationMarker(ports.readMarker())
+    // 认领后从磁盘重读权威状态（P2-B：等待期间其他窗口可能已完成收口）
+    const marker = await ports.readMarker()
     if (marker?.state === 'done') {
       return NONE_RESULT
     }
+    const recoveredPending = marker?.state === 'pending'
     const rawOverlay = ports.readRawOverlay()
     const plan = planCodexThemeMigration(rawOverlay, false)
     const version = ports.extensionVersion()
@@ -234,7 +226,7 @@ async function executeOwnerSequence(ports: CodexMigrationPorts): Promise<CodexMi
     }
     if (plan.action === 'clean-legacy') {
       await ports.applyExclusiveOverlayStep(() => ({ patch: plan.overlayPatch, result: undefined }))
-      if (marker?.state === 'pending') {
+      if (recoveredPending) {
         // pending = 引导欠账：清旧键之外补发引导并收口
         ports.requestGuide()
         await ports.writeMarker({ state: 'done', version })
@@ -243,23 +235,24 @@ async function executeOwnerSequence(ports: CodexMigrationPorts): Promise<CodexMi
       return { action: plan.action, guide: false }
     }
     // plan none：设置已迁移（或本就无需迁移）——只有 pending 欠账需要补发
-    if (marker?.state === 'pending') {
+    if (recoveredPending) {
       ports.requestGuide()
       await ports.writeMarker({ state: 'done', version })
       return { action: 'none', guide: true }
     }
     return NONE_RESULT
   } finally {
-    // 释放失败不传播（陈旧接管兜底；done 标记才是收口判据）
-    await ports.releaseLock().catch(() => undefined)
+    // 释放失败不传播（陈旧接管兜底；磁盘 done 状态才是收口判据）
+    await ports.lock.release().catch(() => undefined)
   }
 }
 
 /**
- * 宿主编排：done 短路（快速路径不抢锁）→ 需迁移或恢复时跨进程原子认领
- * （发现 2）→ 胜者执行 owner 序列；败者短等待 done 出现后静默退出
- * （绝不通知），等待期间锁陈旧则接管补完。超时静默退出：本次不引导，
- * 待下次激活按恢复规则补完。
+ * 宿主编排：磁盘 done 短路（快速路径不抢锁，P2-B：判据不依赖 memento
+ * 缓存）→ 需迁移或恢复时跨进程原子认领（O_EXCL + 安全接管协议）→
+ * 胜者执行 owner 序列；败者短等待磁盘 done 出现后静默退出（绝不通知），
+ * 等待期间锁陈旧/消失则接管补完。超时静默退出：本次不引导，待下次激活
+ * 按恢复规则补完。
  */
 export async function runCodexThemeMigration(
   ports: CodexMigrationPorts,
@@ -269,36 +262,40 @@ export async function runCodexThemeMigration(
   const waitTimeoutMs = options.waitTimeoutMs ?? 5_000
   const pollIntervalMs = options.pollIntervalMs ?? 100
 
-  // 快速路径：done 在场（重开/重启/多窗口常规形态）——不抢锁直接退出
-  const marker = parseCodexMigrationMarker(ports.readMarker())
-  if (marker?.state === 'done') {
+  // 快速路径：磁盘权威 done 在场（重开/重启/多窗口常规形态）——不抢锁
+  // 直接退出。跨窗口一致：他窗已收口时本窗即使 memento 缓存过期也短路
+  const initialMarker = await ports.readMarker()
+  if (initialMarker?.state === 'done') {
     return NONE_RESULT
   }
-  const pending = marker?.state === 'pending'
+  const pending = initialMarker?.state === 'pending'
   const plan = planCodexThemeMigration(ports.readRawOverlay(), false)
   if (plan.action === 'none' && !pending) {
     return NONE_RESULT
   }
 
-  if (await tryAcquireOrTakeover(ports, lockStaleMs)) {
+  if (await ports.lock.tryAcquire()) {
     return executeOwnerSequence(ports)
   }
-  // 认领失败：等待 done（期间锁陈旧则接管补完——胜者崩溃不留死锁）
+  if (await ports.lock.takeoverIfStale(lockStaleMs)) {
+    return executeOwnerSequence(ports)
+  }
+  // 认领失败：等待磁盘 done（期间锁陈旧/消失则接管补完——胜者崩溃不留
+  // 死锁；接管协议带 owner/代次校验，不按过期观察删新锁）
   const start = Date.now()
   for (;;) {
-    if (parseCodexMigrationMarker(ports.readMarker())?.state === 'done') {
+    if ((await ports.readMarker())?.state === 'done') {
       return NONE_RESULT
     }
     if (Date.now() - start > waitTimeoutMs) {
       // 超时静默退出：绝不通知（本次不引导，待下次激活恢复）
       return NONE_RESULT
     }
-    const age = await ports.lockAgeMs()
+    const age = await ports.lock.ageMs()
     if (age === null || age > lockStaleMs) {
-      // 锁不存在（胜者异常退出已释放）或已陈旧（胜者崩溃残留）——接力或
-      // 接管：owner 序列重读状态，幂等安全
-      if (age !== null) await ports.releaseLock()
-      if (await ports.tryAcquireLock()) {
+      // 锁不在位（胜者异常退出已释放）或已陈旧（胜者崩溃残留）——接力或
+      // 接管：owner 序列重读磁盘状态，幂等安全
+      if (await ports.lock.takeoverIfStale(lockStaleMs)) {
         return executeOwnerSequence(ports)
       }
     }

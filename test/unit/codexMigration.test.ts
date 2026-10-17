@@ -12,13 +12,13 @@
 // 方复现用例的契约化。
 import { describe, expect, it } from 'vitest'
 import {
-  CODEX_MIGRATION_MARKER_KEY,
   parseCodexMigrationMarker,
   planCodexThemeMigration,
   runCodexThemeMigration,
   type CodexMigrationMarker,
   type CodexMigrationPorts,
 } from '../../src/shared/codexMigration'
+import type { CodexMigrationLockHandle } from '../../src/shared/codexMigrationLock'
 import { APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from '../../src/shared/settings'
 
 // ---- 三档迁移矩阵（规格 addon-themes.md §6.2 / 任务书语义矩阵） ----
@@ -119,10 +119,47 @@ describe('parseCodexMigrationMarker（标记形态守卫）', () => {
 
 // ---- 宿主编排 ----
 
+/** 内存锁（P2-B 后端口为锁句柄；takeover 语义的内存等价——细节协议由
+ * codexMigrationLock.test.ts 以真实 fs 钉住，此处只承载编排场景） */
 interface FakeLock {
   /** 预置一个已占用锁；ageMs 供陈旧判定（默认 0 = 活跃） */
   hold(ageMs?: number): void
   isHeld(): boolean
+}
+
+function makeFakeLock(): FakeLock & { handle: CodexMigrationLockHandle } {
+  const state = { held: false, ageMs: 0 }
+  const handle: CodexMigrationLockHandle = {
+    tryAcquire: async () => {
+      if (state.held) return false
+      state.held = true
+      state.ageMs = 0
+      return true
+    },
+    takeoverIfStale: async (staleMs: number) => {
+      if (!state.held) return handle.tryAcquire()
+      if (state.ageMs <= staleMs) return false
+      state.held = false
+      return handle.tryAcquire()
+    },
+    release: async () => {
+      state.held = false
+      state.ageMs = 0
+    },
+    ageMs: async () => (state.held ? state.ageMs : null),
+    forceCleanup: async () => {
+      state.held = false
+      state.ageMs = 0
+    },
+  }
+  return {
+    handle,
+    hold(ageMs = 0) {
+      state.held = true
+      state.ageMs = ageMs
+    },
+    isHeld: () => state.held,
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -138,14 +175,7 @@ function fakePorts(
   lock: FakeLock
 } {
   const state = { overlay: rawOverlay, marker, guides: 0, events: [] as string[] }
-  const lockState = { held: false, ageMs: 0 }
-  const lock: FakeLock = {
-    hold(ageMs = 0) {
-      lockState.held = true
-      lockState.ageMs = ageMs
-    },
-    isHeld: () => lockState.held,
-  }
+  const lock = makeFakeLock()
   const ports: CodexMigrationPorts = {
     readRawOverlay: () => state.overlay,
     // P2-A（PR #581 三审）：端口为互斥「读-判-写」——fake 以同快照合成；
@@ -158,7 +188,7 @@ function fakePorts(
       }
       return result
     },
-    readMarker: () => state.marker,
+    readMarker: async () => state.marker ?? null,
     writeMarker: async (markerToWrite) => {
       state.events.push(`write-marker:${markerToWrite.state}`)
       state.marker = markerToWrite
@@ -168,17 +198,7 @@ function fakePorts(
       state.events.push('guide')
       state.guides += 1
     },
-    tryAcquireLock: async () => {
-      if (lockState.held) return false
-      lockState.held = true
-      lockState.ageMs = 0
-      return true
-    },
-    lockAgeMs: async () => (lockState.held ? lockState.ageMs : null),
-    releaseLock: async () => {
-      lockState.held = false
-      lockState.ageMs = 0
-    },
+    lock: lock.handle,
   }
   return { ports, state, lock }
 }
@@ -410,8 +430,6 @@ describe('runCodexThemeMigration（多窗口并发——PR #581 评审发现 2�
   })
 })
 
-describe('CODEX_MIGRATION_MARKER_KEY（标记键形态）', () => {
-  it('globalState 独立键（vsidian.<域> 命名习惯，与设置 overlay 同 profile 持久化）', () => {
-    expect(CODEX_MIGRATION_MARKER_KEY).toBe('vsidian.codexThemeMigration')
-  })
-})
+// P2-B（PR #581 三审）：完成标记的 globalState 独立键已随磁盘权威化退役
+// （state JSON 于 globalStorageUri 下，跨窗口一致、不依赖 memento 缓存）——
+// 双窗口独立缓存场景见 codexMigrationReview3.test.ts。
