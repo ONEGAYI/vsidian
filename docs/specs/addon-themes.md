@@ -122,3 +122,24 @@ API 面：themes-register 条目 lifecycle 值域收窄为 `default | <addonId>/
 引导文案 `host.codexThemeMigrated`（双语）：说明去向、当前回落 default、安装与选择归用户（不自动安装、不代选）；VSIDIAN_TEST_HOOKS=1 时通知短路（计数先于短路，集成断言「只引导一次」经 `_test.getCodexMigrationState` 观测）。`_test` 四钩子（get/inject/reset/run）按 VSIDIAN_TEST_HOOKS 门控注册，runner 每用例重置面并入标记清理。
 
 先红后绿证据（日志在 T08 工作树 `out/test/`，均含退出码）：迁移纯函数 15 例（`t08-red-codexMigration.log` EXIT=1 → `t08-green1-codexMigration.log` EXIT=0）；既有单测翻转（`t08-red-flip-unit.log` 8 失败 → `t08-green-flip-unit.log` 132 例）；全量单测 375 文件 8773+ 例（`t08-unit-slice3b.log`，vitest 侧全绿；node --test 侧契约测试在重锚定提交后随 `t08-unit-final.log` 全绿）；API 重锚定红→绿（`t08-addoncompat-pre-reanchor.log` EXIT=1 → `t08-addoncompat-post.log` 10 项零失败）；浏览器 graphicPopup/settingsPage/addonThemes 及相邻 settingsPageRestore+mermaidPaint 全过；集成迁移用例与 T07 主题用例定向通过（默认独立桌面）。安装态组件版 Codex 验证（真实安装 bridge VSIX 后经统一主题页选择）与包体实测/SIZE_LIMITS 重估不在本线，归后续线（线 2）。
+
+### 10.1 线 2 落档：安装态验证、包体实测与阈值重估（2026-10-17）
+
+**组件产物与安装验证记录（#535 验收标准 1 的一览）**：
+
+| 项 | 值 |
+| --- | --- |
+| 组件 | vsidian-codex-bridge（ONEGAYI.vsidian-codex-bridge） |
+| 版本 / 提交 | 0.1.0 / `75a0e5d2eb8bc73eace04881066fe7d1824d7bc4` |
+| VSIX sha256 | `e0b6eda5242786b7c96cb8cd31f190517042fc6503f5b7e500faa8cf8f8c5bc3`（本仓实测复核一致） |
+| 渠道 | GitHub Release（2026-10-16，组件仓自带独立桌面四层安装验证） |
+| 旧版对照物 | 本仓 v1.1.0 VSIX（sha256 `0ab6b8182374c9edc9832cc113c0e73cc103c4e56f94f5f2623e1a5feb944ae9`，升级路径的「旧实物」） |
+| 安装验证 | `test/integration/runInstalledCodexBridge.mjs` 两阶段真安装链全过（报告 `out/test/t08-phase-legacy.log` / `t08-phase-upgraded.log`，宿主默认独立桌面） |
+
+安装态断言面（`test/integration/suite/codexBridgeInstalledCases.ts`，`VSIDIAN_T08_PHASE` 阶段门控）：legacy 阶段装 v1.1.0 旧 VSIX 证实旧枚举 codex 在旧版语义内合法可保存（升级前状态真实成立）；upgraded 阶段以 `--force` 同版本覆盖为本分支 VSIX + bridge 同装（本分支未升版本号，同版本覆盖承载安装链升级面，版本差异化升级链由 T16 E 先例覆盖），验证 bridge 经真实安装链被发现并注册 Codex 主题、选择后渲染选路走组件（`paint.renderers` 容器 provider 为 `ONEGAYI.vsidian-codex-bridge/codex-mermaid` 且真实绘制）、停用回落 default 且保留首选、恢复重新生效；升级迁移语义（旧键残留回落 default、引导恰一次、不覆盖已选组件主题）在安装产物上复验。
+
+**通道取舍（已如实施行）**：1.82.3 测试宿主的 storage 完全 in-memory（T16 D/E 票面三途径实证，写入/预置均不落盘也不读盘），legacy 会话写入的 globalState 无法跨会话带到 upgraded 会话——升级残留以 `_test.injectCodexLegacyOverlay` 直写原始 overlay 承载（模拟磁盘上的旧键残留），真实跨会话落盘归人工验证清单（安装版真实升级路径）。
+
+**六类图对照口径**：bridge v0.1.0 发行说明已载明其独立契约测试对拍内核色板（逐值迁移），本仓不重复对拍色板值；本仓安装态断言收敛为「选路正确 + 渲染成功 + 弹窗快照/导出链路不回归」（default 路径 graphicPopup 浏览器回归线 1 已覆盖）。完整视觉对照（六类图型亮暗、ELK 布局、画布、导出、显式配置）列为人工待验项（[manual-verification.md](manual-verification.md) T08 线 2 节）。
+
+**包体实测与阈值重估（#535 验收标准 6）**：ELK 分块移除后实测 VSIX 413 文件、解压 12,916 KB ≈ 12.62 MiB（2026-10-17，日志 `out/test/t08-release-package.log` EXIT=0；ELK 在场时约 13.80 MiB）。据此提案总量两线各下调 1.0 MiB 至警告 13.5 / 上限 14.0 MiB（余量 0.88/1.38 MiB，沿 #338 与 ELK 两次裁决的余量风格），单文件 3/4 MiB 与图标 100 KB 不受影响不动；mermaid.js 经 ELK 剥离缩为 25,682 B 按需加载壳（渲染主体移入 mermaid-chunks 分块，最大 chunk 约 443 KB），单文件线锚定对象改为最大单项 main.js（2,573,352 B ≈ 2.46 MB）。**阈值下调无先例、属用户裁决口径：上述数值为依据 #535 验收口径按实测提出的提案，待用户确认后即为生效口径**；三处同步已按提案值落齐（`scripts/release.mjs` SIZE_LIMITS 与注释史、release 技能「体积红线」节、`test/release/release.test.mjs` 钉值先红后绿）。
