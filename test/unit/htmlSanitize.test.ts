@@ -309,3 +309,50 @@ describe('#572（T07）iframe srcdoc：内容递归净化（属性值不过标�
   })
 })
 
+describe('#576 评审追加：srcdoc 递归净化重入不污染外层 walk（多帧/多节点共存）', () => {
+  /** 从净化产物解析出全部 iframe（按文档序） */
+  function framesOf(out: string): HTMLIFrameElement[] {
+    return Array.from(new DOMParser().parseFromString(out, 'text/html').querySelectorAll('iframe'))
+  }
+
+  it('非空 srcdoc 帧后跟纯 https 帧：两帧均在（递归净化不得删外层后续帧）', () => {
+    const out = sanitizeHtmlBlockMarkup('<div><iframe srcdoc="<b>1</b>"></iframe><iframe src="https://a.example"></iframe></div>')
+    const frames = framesOf(out)
+    expect(frames.length).toBe(2)
+    expect(frames[0]!.getAttribute('srcdoc')).toContain('<b>1</b>')
+    expect(frames[1]!.getAttribute('src')).toBe('https://a.example')
+    expect(frames[1]!.getAttribute('sandbox')).toBe(IFRAME_REMOTE_SANDBOX)
+  })
+
+  it('src=https + srcdoc 组合帧后跟纯 https 帧：两帧均在（组合形态 sandbox 零 token 维持）', () => {
+    const out = sanitizeHtmlBlockMarkup('<div><iframe src="https://x.example" srcdoc="<b>x</b>"></iframe><iframe src="https://a.example"></iframe></div>')
+    const frames = framesOf(out)
+    expect(frames.length).toBe(2)
+    expect(frames[0]!.getAttribute('sandbox')).toBe('')
+    expect(frames[0]!.getAttribute('srcdoc')).toContain('<b>x</b>')
+    expect(frames[1]!.getAttribute('src')).toBe('https://a.example')
+  })
+
+  it('多 srcdoc 帧序列（非空 + 空串 + 非空）全保留，各自 srcdoc 独立递归净化回写', () => {
+    const out = sanitizeHtmlBlockMarkup('<div><iframe srcdoc="<b>1</b>"></iframe><iframe srcdoc=""></iframe><iframe srcdoc="<i>2</i>"></iframe></div>')
+    const frames = framesOf(out)
+    expect(frames.length).toBe(3)
+    expect(frames[0]!.getAttribute('srcdoc')).toContain('<b>1</b>')
+    expect(frames[1]!.getAttribute('srcdoc')).toBe('')
+    expect(frames[2]!.getAttribute('srcdoc')).toContain('<i>2</i>')
+  })
+
+  it('内外层配置互斥面同调用同时成立：外层 <style> 标签维持 FORBID，srcdoc 内 <style> 维持放行', () => {
+    const out = sanitizeHtmlBlockMarkup(
+      '<div><iframe srcdoc="<style>.b{color:blue}</style><b>x</b>"></iframe><style>.a{color:red}</style><p>t</p></div>')
+    // 外层：style 标签不进正文 DOM（T04 双通道——srcdoc 帧之后的节点按外层配置
+    // 判定，内层 ADD_TAGS 不得污染外层放行面）
+    expect(out).not.toContain('<style>.a')
+    // 内层：srcdoc 里 style 保留（帧文档作用域合法内容）
+    const frame = framesOf(out)[0]!
+    expect(frame.getAttribute('srcdoc')).toContain('<style>')
+    // srcdoc 后续的普通元素不受内层配置影响
+    expect(out).toContain('<p>t</p>')
+  })
+})
+

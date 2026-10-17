@@ -72,6 +72,39 @@ const SVG_NS = 'http://www.w3.org/2000/svg'
 const SVG_ANIMATION_TAGS = new Set(['animate', 'animatemotion', 'animatetransform', 'set'])
 
 /**
+ * data-vsidian-* 剥离防线（源文伪造系统标记拦截）——外层实例与 srcdoc
+ * 递归净化内层实例共用同一处理函数（防线语义单一事实源，不建第二份逻辑）
+ */
+function stripVsidianAttrHook(_node: Node, data: { attrName: string; keepAttr: boolean }): void {
+  if (data.attrName.startsWith('data-vsidian-')) {
+    data.keepAttr = false
+  }
+}
+
+/**
+ * #573（T08）动画目标劫持防线：SMIL 动画把 attributeName 指向
+ * href/xlink:href（含前缀与大小写形态）或 on* 事件属性时，动画可把
+ * 链接 href 改写为 javascript: 或直接挂事件——该动画元素整体移除
+ *（DOMPurify 内置亦有属性级防线，此为双保险，不依赖其内部行为细节）。
+ * 外层实例与 srcdoc 递归净化内层实例共用（帧内 SVG 与正文 SVG 同口径）。
+ */
+function svgAnimationGuardHook(node: Element): void {
+  if (!(node instanceof Element) || node.namespaceURI !== SVG_NS) {
+    return
+  }
+  const local = node.localName?.toLowerCase() ?? ''
+  if (!SVG_ANIMATION_TAGS.has(local)) {
+    return
+  }
+  const raw = node.getAttribute('attributeName') ?? ''
+  const t = raw.trim().toLowerCase()
+  const bare = t.includes(':') ? t.slice(t.indexOf(':') + 1) : t
+  if (bare === 'href' || bare.startsWith('on')) {
+    node.parentNode?.removeChild(node)
+  }
+}
+
+/**
  * #572（T07）srcdoc 原文中转站：DOMPurify 的 SAFE_FOR_XML 防护（默认开）
  * 会把含 `</style>`/`</script>` 等**闭合标签的属性值**整体移除（mXSS 防护
  * ——属性值里的标记是 JSON/XML 上下文的混淆向量）；srcdoc 的合法内容恰好
@@ -97,6 +130,37 @@ function isHttpsFrameSrc(raw: string): boolean {
   return /^https:\/\//i.test(raw.trim())
 }
 
+/** srcdoc 递归净化专用实例（懒创建；null = 不可用） */
+let srcdocPurify: typeof DOMPurify | null = null
+
+/**
+ * srcdoc 递归净化的独立 DOMPurify 实例。
+ *
+ * #576 评审追加修复——重入配置污染缺陷：内层若复用默认实例，after-hook
+ * 中重入 `DOMPurify.sanitize` 会以 per-call config 全量覆盖单例闭包状态
+ *（FORBID_TAGS/ALLOWED_TAGS 等）且调用结束不恢复——外层 walk 的后续
+ * 节点按内层配置判定：首个非空 srcdoc 帧之后的所有 iframe（含纯 https
+ * 帧）被内层 FORBID_TAGS 静默删除、外层 FORBID 的 `<style>` 反被内层
+ * ADD_TAGS 放行（多帧差分契约实证，test/unit/htmlSanitize.test.ts
+ * 「评审追加」组）。内外层配置面天然互斥（内层须 FORBID iframe / 放行
+ * style，外层正相反），任何单实例配置组合都无法同时满足两侧 walk 口径
+ * ——唯一稳路是独立实例隔离闭包状态。hooks 只装与外层同语义的两道共用
+ * 防线（data-vsidian-* 剥离 + SVG 动画防线）；srcdoc 捕获/iframe 许可
+ * 面 hook 不装——内层 FORBID_TAGS 使 iframe 节点不存在，无作用对象。
+ */
+function srcdocPurifyInstance(): typeof DOMPurify | null {
+  if (typeof window === 'undefined' || !DOMPurify.isSupported) {
+    return null
+  }
+  if (srcdocPurify === null) {
+    const instance = DOMPurify(window)
+    instance.addHook('uponSanitizeAttribute', stripVsidianAttrHook)
+    instance.addHook('afterSanitizeAttributes', svgAnimationGuardHook)
+    srcdocPurify = instance
+  }
+  return srcdocPurify
+}
+
 /** srcdoc 内容的递归净化（属性值不过标签层——第二净化通道） */
 function sanitizeSrcdocContent(value: string): string {
   // 嵌套 iframe FORBID：`srcdoc<iframe srcdoc=…>` 递归装载攻击面封死
@@ -107,7 +171,14 @@ function sanitizeSrcdocContent(value: string): string {
   // 顶层 head 类元素（style 等）在全文档解析下会被 HTML 解析器移入 head、
   // 随 body 序列化丢出产物——以容器包裹走片段解析后 DOMParser 解包；
   // 浏览器对 srcdoc 重新按文档解析，片段内容语义等价（自动重建壳）。
-  const wrapped = DOMPurify.sanitize(`<div>${value}</div>`, {
+  // 经独立实例执行（重入隔离——见 srcdocPurifyInstance 头注释）。
+  const purify = srcdocPurifyInstance()
+  if (!purify) {
+    // 防御分支：能进 after-hook 说明外层实例可用（window 在场），同步
+    // 执行下不可达；万一到达按降级安全处理（不回放未净化内容）
+    return ''
+  }
+  const wrapped = purify.sanitize(`<div>${value}</div>`, {
     FORBID_TAGS: ['iframe'],
     ADD_TAGS: ['style', ...SVG_MATHML_ADD_TAGS],
     HTML_INTEGRATION_POINTS: HTML_INTEGRATION_POINTS_CONFIG,
@@ -121,11 +192,7 @@ function purifyInstance(): typeof DOMPurify | null {
     return null
   }
   if (!hooksInstalled) {
-    DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
-      if (data.attrName.startsWith('data-vsidian-')) {
-        data.keepAttr = false
-      }
-    })
+    DOMPurify.addHook('uponSanitizeAttribute', stripVsidianAttrHook)
     // #572（T07）srcdoc 原文捕获（见 pendingSrcdoc 头注释）
     DOMPurify.addHook('beforeSanitizeAttributes', (node) => {
       if (node instanceof HTMLIFrameElement) {
@@ -136,25 +203,8 @@ function purifyInstance(): typeof DOMPurify | null {
         }
       }
     })
-    // #573（T08）动画目标劫持防线：SMIL 动画把 attributeName 指向
-    // href/xlink:href（含前缀与大小写形态）或 on* 事件属性时，动画可把
-    // 链接 href 改写为 javascript: 或直接挂事件——该动画元素整体移除
-    //（DOMPurify 内置亦有属性级防线，此为双保险，不依赖其内部行为细节）
-    DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-      if (!(node instanceof Element) || node.namespaceURI !== SVG_NS) {
-        return
-      }
-      const local = node.localName?.toLowerCase() ?? ''
-      if (!SVG_ANIMATION_TAGS.has(local)) {
-        return
-      }
-      const raw = node.getAttribute('attributeName') ?? ''
-      const t = raw.trim().toLowerCase()
-      const bare = t.includes(':') ? t.slice(t.indexOf(':') + 1) : t
-      if (bare === 'href' || bare.startsWith('on')) {
-        node.parentNode?.removeChild(node)
-      }
-    })
+    // #573（T08）动画目标劫持防线（共用具名函数——语义见其头注释）
+    DOMPurify.addHook('afterSanitizeAttributes', svgAnimationGuardHook)
     // #572（T07）iframe 许可面强制（afterSanitizeAttributes：源文属性已
     // 过滤、此处写系统值——见模块头「iframe 许可面」；与 #573 动画防线
     // 是独立节点集〔HTMLIFrame vs SVG〕，两 hook 互不干扰）
