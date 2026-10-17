@@ -160,6 +160,10 @@ export async function run(): Promise<void> {
           }
           await new Promise((r) => setTimeout(r, 100))
         }
+        // #535 迁移面重置（globalState 与设置同层）：一次性标记与引导计数
+        // 跨用例共享会让迁移用例的「首迁检测」被前序写锁污染（与守护面
+        // 同一防护口径；原始 overlay 双键的造数归用例自身注入/清理）
+        await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
         await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', diagnose)
       }
       if (process.platform === 'win32' && CLIPBOARD_CASE_NAMES.has(name)) {

@@ -1355,6 +1355,7 @@ async function waitViewState(
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
+        settings: s['settings'],
         jiebaEngine: s['jiebaEngine'],
         find: s['find'],
         imageStates: s['imageStates'],
@@ -7471,31 +7472,71 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('math.md', (v) => v.viewMode === 'reading' && (v.readingMathCount ?? -1) === 8)
   }],
   // ---- 工单 #60：Mermaid 围栏块双模式渲染（live/reading/降级/一致性） ----
-  ['Mermaid Codex 预设：设置保存、双模式绘制与重开回显', async () => {
+  // #535 T08：内核 Codex 退役——原「Codex 预设：设置保存、双模式绘制与重开
+  // 回显」用例改写为迁移语义用例（写 codex 被设置层拒绝 + 原始 overlay
+  // 迁移回落 + 一次性引导只发一次 + 不覆盖已选组件主题）。
+  ['Codex 旧设置迁移：写 codex 被拒、原始 overlay 回落 default、引导只一次且不覆盖组件选择', async () => {
     const previous = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
     try {
+      // 枚举收窄后：旧键定义已删除，任何写入（含 codex）按未知键整批拒绝
+      const rejected = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'codex' })) as { ok: boolean; rejected?: string[] }
+      assert(rejected.ok === false, '旧 Mermaid 键写入应被设置层拒绝（定义已删除）')
+      assert(rejected.rejected?.includes('appearance.mermaidTheme'), '拒绝清单应点名旧键')
+      // 档 1（升级用户主路径）：重置后注入原始 overlay 旧键 codex（模拟升级
+      // 残留——绕过定义校验）→ 重跑迁移 → 双键回落 + 引导一次
+      await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', { theme: null, mermaid: 'codex' })
+      const first = (await vscode.commands.executeCommand('onegayi.vsidian._test.runCodexMigration')) as { action: string; guide: boolean }
+      assert(first.action === 'migrate' && first.guide === true, '旧键 codex 应触发迁移与引导')
+      let state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getCodexMigrationState')) as {
+        marker: string | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
+      assert(state.overlayTheme === 'default' && state.overlayMermaid === 'default', '迁移后原始 overlay 双键应回落 default')
+      assert(state.marker !== null, '一次性标记应与迁移同批写入')
+      assert(state.guideCount === 1, '迁移应请求一次引导')
+      // 重开/重启/多窗口语义：标记在场时重跑（模拟再次激活）→ 无操作不重复引导
+      const second = (await vscode.commands.executeCommand('onegayi.vsidian._test.runCodexMigration')) as { action: string; guide: boolean }
+      assert(second.action === 'none' && second.guide === false, '标记在场时重跑应无操作')
+      state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getCodexMigrationState')) as typeof state
+      assert(state.guideCount === 1, '重跑不得再次请求引导')
+      assert(state.overlayTheme === 'default', '重跑不得改写已迁移的设置')
+      // 档 2（不覆盖已选组件主题）：新键组件身份 + 旧键 codex 残留 → 只清旧键
+      await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', { theme: 'vsidian-test-fixture.addon-theme/aqua', mermaid: 'codex' })
+      const third = (await vscode.commands.executeCommand('onegayi.vsidian._test.runCodexMigration')) as { action: string; guide: boolean }
+      assert(third.action === 'clean-legacy' && third.guide === false, '已选组件主题只清旧键残留、不引导')
+      state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getCodexMigrationState')) as typeof state
+      assert(state.overlayTheme === 'vsidian-test-fixture.addon-theme/aqua', '迁移不得覆盖已选组件主题')
+      assert(state.overlayMermaid === 'default', '旧键残留应清为 default')
+      assert(state.marker === null && state.guideCount === 0, 'clean-legacy 不写标记不引导')
+      // 档 2 后恢复 default（正式设置链路——同 runner 重置面语义），再走
+      // 面板链路：面板装载拉取应读到 default 快照
+      const restored = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.theme': 'default' })) as { ok: boolean }
+      assert(restored.ok, '恢复 default 应经正式设置链路保存')
+      // 迁移后真宿主链路：面板快照读迁移后值，双模式绘制走 default 管线
       await openWithEditor('mermaid.md')
       await waitSessionReady('mermaid.md')
       const uri = wsUri('mermaid.md').toString()
       const text = await readDisk('mermaid.md')
-      const saved = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'codex' })) as { ok: boolean }
-      assert(saved.ok, 'Codex 主题应经正式设置链路保存')
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: text.indexOf('结尾段落') })
       const live = await waitViewState('mermaid.md', v =>
-        v.settings?.['appearance.mermaidTheme'] === 'codex' && v.paint?.mermaid?.rendered === 4, 0, 60000)
-      assert(live.paint?.mermaid?.visible === true, 'Codex 预设在 Live 中应真实绘制')
+        v.settings?.['appearance.theme'] === 'default' && v.paint?.mermaid?.rendered === 4, 0, 60000)
+      assert(live.paint?.mermaid?.visible === true, 'default 在 Live 中应真实绘制')
       assert(live.paint?.mermaid?.error === 1, '无效图仍经原管线降级')
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
       const reading = await waitViewState('mermaid.md', v => v.viewMode === 'reading' && v.paint?.mermaid?.rendered === 4, 0, 60000)
-      assert(reading.paint?.mermaid?.visible === true, 'Codex 预设在阅读模式应真实绘制')
+      assert(reading.paint?.mermaid?.visible === true, 'default 在阅读模式应真实绘制')
       await vscode.commands.executeCommand('workbench.action.closeAllEditors')
       await openWithEditor('mermaid.md')
       await waitSessionReady('mermaid.md')
-      const reopened = await waitViewState('mermaid.md', v => v.settings?.['appearance.mermaidTheme'] === 'codex')
-      assert(reopened.settings?.['appearance.mermaidTheme'] === 'codex', '重开面板应回显持久化主题')
-      assert(await readDisk('mermaid.md') === text, '主题切换不得改写图源码')
+      const reopened = await waitViewState('mermaid.md', v => v.settings?.['appearance.theme'] === 'default')
+      assert(reopened.settings?.['appearance.mermaidTheme'] === undefined, '快照不再含已退役的旧 Mermaid 键')
+      assert(await readDisk('mermaid.md') === text, '迁移不得改写图源码')
     } finally {
-      await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': previous['appearance.mermaidTheme'] })
+      // 清理：注入的原始 overlay 双键恢复（删除 = 未设置态）+ 标记清空
+      await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', { theme: null, mermaid: null })
+      const current = previous['appearance.theme']
+      await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.theme': typeof current === 'string' ? current : 'default' })
     }
   }],
 
