@@ -10690,6 +10690,44 @@ export class WebviewSyncController {
       /** 全部媒体就绪态（多元素矩阵断言；readyState ≥ 2 = 有当前帧数据） */
       mediaReadyStates: interactMediaEls.map((m) => m.readyState),
     }
+    // #573（T08）SVG/MathML 绘制探针：全域（reading 容器 / cm-content——
+    // 覆盖块级、行内 widget 与 reading 行内原位三种形态）svg/math 元素计数
+    // 与绘制证据（非 DOM 存在性——真宿主/浏览器下 rect 有面积即实际排版
+    // 绘制；jsdom 无布局恒 0，只作回归计数面）+ foreignObject 计数 +
+    // url(#id) 渐变引用计数 + ID 作用域观测（B 产物 id 前缀化计数、前缀
+    // 引用计数、带前缀 id 元素的描边绘制计数——B 的 CSS #id 协同命中证据）
+    const svgMathScope = htmlScope
+    const svgEls = svgMathScope ? [...svgMathScope.querySelectorAll<SVGElement>('svg')] : []
+    const mathEls = svgMathScope ? [...svgMathScope.querySelectorAll<HTMLElement>('math')] : []
+    const elPainted = (el: Element): boolean => {
+      const rect = el.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    }
+    const gradientAttrOf = (el: Element): string =>
+      el.getAttribute('fill') ?? el.getAttribute('stroke') ?? el.getAttribute('filter') ?? el.getAttribute('clip-path') ?? ''
+    const paintEls = svgMathScope
+      ? [...svgMathScope.querySelectorAll<HTMLElement>('[fill], [stroke], [filter], [clip-path]')]
+      : []
+    const gradientRefs = paintEls.filter((el) => /url\(#/.test(gradientAttrOf(el))).length
+    const scopedGradientRefs = paintEls.filter((el) => /url\(#vs[-A-Za-z0-9_]+--/.test(gradientAttrOf(el))).length
+    const scopedIdEls = svgMathScope
+      ? [...svgMathScope.querySelectorAll<HTMLElement>('[id]')]
+        .filter((el) => /^vs[-A-Za-z0-9_]+--/.test(el.id))
+      : []
+    const svgMathPaint = {
+      svgs: svgEls.length,
+      svgPainted: svgEls.some(elPainted),
+      maths: mathEls.length,
+      mathPainted: mathEls.some(elPainted),
+      foreignObjects: svgMathScope ? svgMathScope.querySelectorAll('foreignObject').length : 0,
+      gradientRefs,
+      /** 带作用域前缀的 url(#…) 引用计数（B 域引用不指向 A 的直接证据） */
+      scopedGradientRefs,
+      scopedIds: scopedIdEls.length,
+      /** 带前缀 id 元素中 computed stroke 非 none 的计数（B 的 CSS #id
+       *  选择器协同命中并绘制的证据） */
+      scopedStrokePainted: scopedIdEls.filter((el) => getComputedStyle(el).stroke !== 'none').length,
+    }
     // #570（T05）HTML/CSS 资源绘制探针：HTML 块/行内内容里的图片装载态
     //（管理器回包后 src 已应用 + loaded 事件确认）、srcset 重组应用计数、
     // 媒体属性改写计数（成功解析后属性以绝对地址存在），文档样式产物的
@@ -10745,6 +10783,33 @@ export class WebviewSyncController {
       firstResolvedCssUrl: docStyleEls
         .map((el) => el.textContent?.match(/url\("(https?:[^"]+)"\)/)?.[1] ?? null)
         .find((u): u is string => u !== null) ?? null,
+    }
+    // #572（T07）iframe 绘制面：激活内容域内白名单帧的装配属性与 Live
+    // 命中接管层。**帧内内容可见性不在此断言**（沙箱/跨域帧对父文档
+    // 不可读——「load 事件或 DOM 存在不当作可见证据」，内容可见证据在
+    // browser 层经 CDP 帧读取）；可见位只证帧盒子本身绘制（rect 有面积
+    // 且 elementFromPoint 命中——live 侧探 wrapper，shield 覆盖下 element
+    // FromPoint 返回 shield 而非帧）。
+    const iframeEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLIFrameElement>('iframe[data-vsidian-iframe]')]
+      : []
+    let iframeVisible = false
+    for (const frame of iframeEls) {
+      const box = frame.closest<HTMLElement>('.vsidian-live-html-frame') ?? frame
+      if (hitPaintedElement(box)) {
+        iframeVisible = true
+        break
+      }
+    }
+    const iframePaint = {
+      frames: iframeEls.length,
+      sandboxes: iframeEls.map((f) => f.getAttribute('sandbox') ?? ''),
+      srcs: iframeEls.map((f) => f.getAttribute('src')),
+      srcdocFrames: iframeEls.filter((f) => f.hasAttribute('srcdoc')).length,
+      shields: htmlScope
+        ? htmlScope.querySelectorAll('.vsidian-live-html-frame-shield').length
+        : 0,
+      visible: iframeVisible,
     }
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
@@ -11034,7 +11099,13 @@ export class WebviewSyncController {
       // reading：.vsidian-reading-html；无渲染根时缺省）
       // #568 起 html 探针含行内面：块或行内任一在场即产出
       // #570（T05）起附资源面 resources（图片装载/srcset/媒体属性/产物 url）
-      ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: { ...htmlPaint, resources: htmlResourcesPaint, interact: htmlInteractPaint } } : {}),
+      // #573（T08）起附 SVG/MathML 面 svgMath（绘制证据/foreignObject/渐变
+      // 引用/作用域前缀——真宿主与浏览器断言面，jsdom 恒计数）
+      // #572（T07）起附 iframe 面（白名单帧在场即产出——块/行内归并采集）
+      // #571（T06）interact 面与上述三面并存于同一 html 探针对象
+      ...(htmlRoots > 0 || inlinePaint.roots > 0 || iframePaint.frames > 0
+        ? { html: { ...htmlPaint, resources: htmlResourcesPaint, interact: htmlInteractPaint, svgMath: svgMathPaint, iframes: iframePaint } }
+        : {}),
       // #569（T04）文档样式隔离观测（无产物缺省）
       ...(docStyleProbe ? { docStyle: docStyleProbe } : {}),
       quickActions,

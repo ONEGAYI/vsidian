@@ -9,11 +9,15 @@
 //   系统装配生成的锚点不在净化输入内，天然不误删）
 // - <style> 元素不随 DOM 净化放行（T04 收集器独立抽取装载——双通道）
 // - 净化后为空的片段（script-only 等）回退为转义源码（可访问原始源码）
+// - #572（T07）iframe：白名单放行 + sandbox/权限面系统强制（作者值恒被
+//   覆盖）+ srcdoc 内容递归净化（属性值不过标签层——第二净化通道）
 import { describe, it, expect } from 'vitest'
 import {
   sanitizeHtmlBlockMarkup,
   htmlBlockRenderHtml,
   HTML_SOURCE_FALLBACK_CLASS,
+  IFRAME_APPROVED_ATTR,
+  IFRAME_REMOTE_SANDBOX,
 } from '../../src/webview/htmlSanitize'
 
 describe('sanitizeHtmlBlockMarkup：白名单净化（第一道闸）', () => {
@@ -170,3 +174,123 @@ describe('htmlBlockRenderHtml：块渲染 HTML 装配（净化 + 降级回退）
     expect(html).not.toContain('<script')
   })
 })
+
+
+describe('#572（T07）iframe：白名单放行与 sandbox/权限面系统强制', () => {
+  /** 从净化产物解析出 iframe 元素（断言读属性不读字符串子串） */
+  function iframeOf(markup: string): HTMLIFrameElement {
+    const doc = new DOMParser().parseFromString(markup, 'text/html')
+    const frame = doc.querySelector('iframe')
+    expect(frame, `产物应有 iframe（实际 ${markup}）`).not.toBeNull()
+    return frame!
+  }
+
+  it('iframe 通过白名单（src/title/width/height 等呈现属性保留）', () => {
+    const out = sanitizeHtmlBlockMarkup('<iframe src="https://example.com/embed" title="嵌入" width="320" height="180"></iframe>')
+    const frame = iframeOf(out)
+    expect(frame.getAttribute('src')).toBe('https://example.com/embed')
+    expect(frame.getAttribute('title')).toBe('嵌入')
+    expect(frame.getAttribute('width')).toBe('320')
+    expect(frame.getAttribute('height')).toBe('180')
+  })
+
+  it('https 远端帧：sandbox 强制为仅 allow-scripts（作者值恒被覆盖），referrerpolicy=no-referrer', () => {
+    const out = sanitizeHtmlBlockMarkup(
+      '<iframe src="https://example.com" sandbox="allow-scripts allow-same-origin allow-top-navigation allow-forms"></iframe>')
+    const frame = iframeOf(out)
+    expect(frame.getAttribute('sandbox')).toBe(IFRAME_REMOTE_SANDBOX)
+    expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin')
+    expect(frame.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+  })
+
+  it('相对路径形态（本地可控页面）：sandbox 零 token（笔记可控内容结构性禁脚本）', () => {
+    const out = sanitizeHtmlBlockMarkup('<iframe src="page.html" sandbox="allow-scripts"></iframe>')
+    expect(iframeOf(out).getAttribute('sandbox')).toBe('')
+  })
+
+  it('srcdoc 形态：sandbox 零 token（srcdoc 是笔记本体——脚本禁执行）', () => {
+    const out = sanitizeHtmlBlockMarkup('<iframe srcdoc="<b>x</b>" sandbox="allow-scripts"></iframe>')
+    expect(iframeOf(out).getAttribute('sandbox')).toBe('')
+  })
+
+  it('明文 http 与无 src 形态：sandbox 零 token（http 帧生产被 CSP 拦截，不放行脚本面）', () => {
+    const out = sanitizeHtmlBlockMarkup('<div><iframe src="http://example.com"></iframe><iframe loading="lazy"></iframe></div>')
+    const frames = new DOMParser().parseFromString(out, 'text/html').querySelectorAll('iframe')
+    expect(frames.length).toBe(2)
+    for (const frame of frames) {
+      expect(frame.getAttribute('sandbox')).toBe('')
+    }
+  })
+
+  it('权限面剥除：allow/allowfullscreen/allowpaymentrequest 不进产物（子文档零本地权限）', () => {
+    const out = sanitizeHtmlBlockMarkup(
+      '<iframe src="https://example.com" allow="camera; geolocation; fullscreen" allowfullscreen allowpaymentrequest></iframe>')
+    expect(out).not.toContain('allow="')
+    expect(out).not.toContain('allowfullscreen')
+    expect(out).not.toContain('allowpaymentrequest')
+    expect(out).not.toContain('camera')
+  })
+
+  it('系统标记在场：净化产物携带 IFRAME_APPROVED_ATTR（第二道闸豁免面）', () => {
+    const out = sanitizeHtmlBlockMarkup('<iframe src="page.html"></iframe>')
+    expect(iframeOf(out).getAttribute(IFRAME_APPROVED_ATTR)).not.toBeNull()
+  })
+
+  it('file: src 剥除（DOMPurify 默认协议面——无效地址矩阵，资源层不越权）', () => {
+    const out = sanitizeHtmlBlockMarkup('<iframe src="file:///d:/notes/x.html"></iframe>')
+    expect(iframeOf(out).getAttribute('src')).toBe(null)
+  })
+
+  it('作者伪造系统标记被剥离（源文 data-vsidian-* 不进场；系统值在属性过滤后写入）', () => {
+    const out = sanitizeHtmlBlockMarkup('<span data-vsidian-iframe="1">fake</span>')
+    expect(out).not.toContain('data-vsidian-iframe')
+  })
+})
+
+describe('#572（T07）iframe srcdoc：内容递归净化（属性值不过标签层）', () => {
+  function srcdocOf(markup: string): string {
+    return iframeOf2(markup).getAttribute('srcdoc') ?? ''
+  }
+  function iframeOf2(markup: string): HTMLIFrameElement {
+    const doc = new DOMParser().parseFromString(markup, 'text/html')
+    const frame = doc.querySelector('iframe')
+    expect(frame, `产物应有 iframe（实际 ${markup}）`).not.toBeNull()
+    return frame!
+  }
+
+  it('合规 srcdoc 内容原样保留（样式/结构照常）', () => {
+    const inner = '<style>.x { color: red; }</style><p>段</p>'
+    const out = sanitizeHtmlBlockMarkup(`<iframe srcdoc="${inner.replace(/"/g, '&quot;')}"></iframe>`)
+    const value = srcdocOf(out)
+    expect(value).toContain('<style>')
+    expect(value).toContain('<p>段</p>')
+  })
+
+  it('srcdoc 内 script 与事件属性剥除（笔记本体脚本禁执行的属性面）', () => {
+    const inner = '<script>evil()</script><img src="x" onerror="evil()"><b>ok</b>'
+    const out = sanitizeHtmlBlockMarkup(`<iframe srcdoc="${inner.replace(/"/g, '&quot;')}"></iframe>`)
+    const value = srcdocOf(out)
+    expect(value).not.toContain('<script')
+    expect(value).not.toContain('onerror')
+    expect(value).toContain('<b>ok</b>')
+  })
+
+  it('srcdoc 内嵌套 iframe 拒绝（递归装载攻击面封死——嵌套帧无既有需求）', () => {
+    const inner = '<iframe srcdoc="<i>inner</i>"></iframe><b>ok</b>'
+    const out = sanitizeHtmlBlockMarkup(`<iframe srcdoc="${inner.replace(/"/g, '&quot;')}"></iframe>`)
+    const value = srcdocOf(out)
+    expect(value.toLowerCase()).not.toContain('<iframe')
+    expect(value).toContain('<b>ok</b>')
+  })
+
+  it('srcdoc 内危险协议链接剥除与系统锚点伪造剥离', () => {
+    const inner = '<a href="javascript:evil()">a</a><span data-vsidian-doc-scope="fake">b</span><a href="https://ok">c</a>'
+    const out = sanitizeHtmlBlockMarkup(`<iframe srcdoc="${inner.replace(/"/g, '&quot;')}"></iframe>`)
+    const value = srcdocOf(out)
+    expect(value).not.toContain('javascript:')
+    expect(value).not.toContain('data-vsidian-doc-scope')
+    expect(value).toContain('href="https://ok"')
+  })
+})
+

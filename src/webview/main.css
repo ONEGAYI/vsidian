@@ -5685,6 +5685,28 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   max-width: 100%;
 }
 
+/* ---- #572（T07）Live widget 内 iframe 命中接管（外层命中机制，样式契约
+   live-html-widget 条目的 frame/shield 子结构）----
+   沙箱/跨域子文档是独立 document，帧内指针事件不冒泡到父文档——以透明
+   shield 盖住帧可视区，指针事件落在父文档元素上、冒泡到 CM6 mousedown
+   拦截器 → 选中完整源码。Reading 侧不接管（U13 原生交互）。wrapper 承担
+   定位上下文（shield 的 inset:0 参照）；行内宿主内 inline-block 不断行。 */
+#app .cm-editor .cm-content .vsidian-live-html-frame {
+  position: relative;
+}
+
+#app .cm-editor .cm-content .vsidian-live-inline-html-content .vsidian-live-html-frame {
+  display: inline-block;
+}
+
+#app .cm-editor .cm-content .vsidian-live-html-frame-shield {
+  position: absolute;
+  inset: 0;
+  /* 盖过帧（后置兄弟 + z-index——iframe 默认参与层叠，显式压顶防主题
+     片段抬帧）；透明零观感，只有命中语义 */
+  z-index: 1;
+}
+
 /* ---- #568（T03）行内原生 HTML（样式契约 content 域 live-inline-html-widget
    / reading-inline-html 条目）----
    Live：宿主是行内片段 inline replace widget 的替换物（span，

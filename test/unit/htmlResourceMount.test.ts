@@ -263,3 +263,55 @@ describe('身份与生命周期', () => {
     expect(video.getAttribute('src')).toBe(null) // 迟到结果丢弃
   })
 })
+
+describe('#572（T07）iframe src：归属改写（本地可控页面经资源解析）', () => {
+  it('iframe[src] 相对路径经订阅端口解析，成功后改写为绝对地址', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<iframe src="page.html" sandbox="" data-vsidian-iframe="1"></iframe>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    expect(sub.requests).toEqual(['page.html'])
+    expect(root.querySelector('iframe')!.getAttribute('src')).toBe('page.html') // 解析前保持原文
+    sub.reply(0, 'https://resolved/page.html')
+    expect(root.querySelector('iframe')!.getAttribute('src')).toBe('https://resolved/page.html')
+    // sandbox 等系统属性不被资源管线触碰
+    expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('')
+  })
+
+  it('https 直连 iframe 不进订阅端口（远端帧直载）', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<iframe src="https://example.com/embed" sandbox="allow-scripts" data-vsidian-iframe="1"></iframe>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    expect(sub.requests).toEqual([])
+    expect(root.querySelector('iframe')!.getAttribute('src')).toBe('https://example.com/embed')
+  })
+
+  it('srcdoc 在场跳过 src 解析（内容非资源引用 + 浏览器忽略 src）', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<iframe src="page.html" srcdoc="<b>x</b>" sandbox="" data-vsidian-iframe="1"></iframe>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    expect(sub.requests).toEqual([])
+    expect(root.querySelector('iframe')!.getAttribute('src')).toBe('page.html')
+  })
+
+  it('解析失败保持原文（无效地址矩阵——不编造地址，浏览器按原生语义失败）', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<iframe src="missing.html" sandbox="" data-vsidian-iframe="1"></iframe>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    sub.fail(0)
+    expect(root.querySelector('iframe')!.getAttribute('src')).toBe('missing.html')
+  })
+
+  it('迟到结果不写回（iframe 订阅随 binding 退订）', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<iframe src="late.html" sandbox="" data-vsidian-iframe="1"></iframe>'
+    const binding = prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    binding.dispose()
+    sub.reply(0, 'https://resolved/late.html')
+    expect(root.querySelector('iframe')!.getAttribute('src')).toBe('late.html')
+  })
+})

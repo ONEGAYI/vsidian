@@ -43,6 +43,35 @@ export const LIVE_HTML_CLASS_NAMES = {
   content: 'vsidian-live-html-content',
 } as const
 
+/** #572（T07）Live widget 内 iframe 的命中区接管结构（外层命中机制）：
+ *  沙箱/跨域子文档是独立 document，帧内指针事件**不冒泡到父文档**——
+ *  CM6 的 mousedown 拦截器无从命中，无法兑现「单击 iframe 可视区域 →
+ *  选中完整源码」。以透明覆盖层（shield）盖住帧可视区，指针事件落在
+ *  父文档元素上、正常冒泡到拦截器（结构载体而非事件自监听——「跨域
+ *  iframe 不能冒充可直接监听的子 DOM」的落档形态）。Reading 侧不接管
+ *  （规格 U13：承载受支持的原生交互）。 */
+export const LIVE_HTML_FRAME_CLASS_NAMES = {
+  /** iframe 定位包裹层（shield 的定位上下文；行内宿主内 inline-block） */
+  frame: 'vsidian-live-html-frame',
+  /** 透明命中接管层（inset:0 覆盖帧——样式契约 live-html-widget 条目） */
+  shield: 'vsidian-live-html-frame-shield',
+} as const
+
+/** Live widget 内 iframe 装配 shield（幂等——已包裹的帧跳过） */
+function shieldLiveIframes(content: HTMLElement): void {
+  for (const iframe of Array.from(content.querySelectorAll('iframe'))) {
+    if (iframe.parentElement?.classList.contains(LIVE_HTML_FRAME_CLASS_NAMES.frame) === true) {
+      continue
+    }
+    const frame = document.createElement('div')
+    frame.className = LIVE_HTML_FRAME_CLASS_NAMES.frame
+    const shield = document.createElement('div')
+    shield.className = LIVE_HTML_FRAME_CLASS_NAMES.shield
+    iframe.replaceWith(frame)
+    frame.append(iframe, shield)
+  }
+}
+
 /** 装饰实例缓存上限（键 = 源文 + 区间 + docScope；与 liveEmbed 同量级） */
 export const liveHtmlDecoCacheLimit = 64
 
@@ -217,6 +246,8 @@ export function buildLiveHtmlDecorationRanges(
  *   拦截器已转完整源码选区），修饰键点击保持选区语义——任何情形都不让
  *   webview 原生导航接管（相对路径在本 origin 必坏 + https 会整页跳走，
  *   均为「意外跳转」）。
+ * - #572（T07）iframe 命中区接管：shield 盖帧（帧事件不冒泡到父文档——
+ *   外层命中机制，见 LIVE_HTML_FRAME_CLASS_NAMES 头注释）。
  */
 export function prepareHtmlWidgetContent(
   content: HTMLElement,
@@ -228,11 +259,18 @@ export function prepareHtmlWidgetContent(
       images: liveImagesOfView(view) ?? null,
       sourceDocUri: sourceDocUri ?? undefined,
       live: true,
+      // #573（T08）ID 文档作用域：docScope facet（主文 'doc' 零改写，
+      // 嵌入内部 Live = B 的 docScope 键——B 产物 id 前缀化）
+      docScope: liveHtmlDocScopeOf(view.state),
     })
   } else {
     // 裸构造（单测直驱无视图）：仅图片管理器绑定面缺席，属性资源照走 hub
     prepareHtmlResources(content, { images: null, live: true })
   }
+  // #572（T07）iframe 命中区接管：shield 盖帧（帧事件不冒泡——见
+  // LIVE_HTML_FRAME_CLASS_NAMES 头注释）；mousedown 冒泡到 CM6 拦截器
+  // → 选中完整源码（与内容点击同一执行体）
+  shieldLiveIframes(content)
   content.addEventListener('click', (event) => {
     const target = event.target
     if (target instanceof Element && target.closest('a[href]') !== null) {

@@ -10,6 +10,7 @@ import { EditorSelection, EditorState, type SelectionRange } from '@codemirror/s
 import { EditorView } from '@codemirror/view'
 import {
   LIVE_HTML_CLASS_NAMES,
+  LIVE_HTML_FRAME_CLASS_NAMES,
   LiveHtmlWidget,
   liveHtml,
   liveHtmlDecorations,
@@ -205,6 +206,31 @@ describe('Live HTML 片段替换装饰：显隐切换', () => {
     expect(pause).toHaveBeenCalledTimes(1)
     expect(load).toHaveBeenCalledTimes(1)
     expect(video.getAttribute('src')).toBe(null)
+  })
+
+  it('#572（T07）iframe 命中区接管：wrapper + 透明 shield 装配（外层命中机制——帧事件不冒泡到父文档）', () => {
+    const src = '<iframe src="https://example.com/embed"></iframe>'
+    const w = new LiveHtmlWidget(src, 0, src.length, 'doc')
+    const dom = w.toDOM()
+    const iframe = dom.querySelector('iframe')
+    expect(iframe, 'iframe 在场（白名单放行）').not.toBeNull()
+    expect(iframe!.getAttribute('sandbox')).toBe('allow-scripts')
+    const shield = dom.querySelector(`.${LIVE_HTML_FRAME_CLASS_NAMES.shield}`)
+    expect(shield, '透明覆盖层在场').not.toBeNull()
+    const wrapper = dom.querySelector(`.${LIVE_HTML_FRAME_CLASS_NAMES.frame}`)
+    expect(wrapper, '定位包裹层在场').not.toBeNull()
+    // 结构契约：iframe 与 shield 同为 wrapper 子级、shield 后置（覆盖帧）
+    expect(iframe!.parentElement).toBe(wrapper)
+    expect(shield!.parentElement).toBe(wrapper)
+    expect(wrapper!.lastElementChild).toBe(shield)
+  })
+
+  it('#572（T07）srcdoc iframe 同样接管（内容形态不影响命中区机制）', () => {
+    const src = '<iframe srcdoc="<b>内嵌文档</b>"></iframe>'
+    const w = new LiveHtmlWidget(src, 0, src.length, 'doc')
+    const dom = w.toDOM()
+    expect(dom.querySelector('iframe')!.getAttribute('sandbox')).toBe('')
+    expect(dom.querySelector(`.${LIVE_HTML_FRAME_CLASS_NAMES.shield}`)).not.toBeNull()
   })
 })
 

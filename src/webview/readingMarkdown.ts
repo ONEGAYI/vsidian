@@ -29,7 +29,7 @@ import { highlightFlankOk } from '../shared/markdownDoc'
 import { tableCellBreakLength } from '../shared/tableCells'
 import { decodeCellView } from '../shared/tableCellEmbed'
 import { matchInlineHtmlFragmentAt } from '../shared/htmlInline'
-import { htmlInlineRenderHtml } from './htmlSanitize'
+import { htmlInlineRenderHtml, IFRAME_APPROVED_ATTR } from './htmlSanitize'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
 export interface ReadingRenderEnv {
@@ -534,9 +534,16 @@ export function buildLineBounds(text: string): ReadingRenderEnv {
   return { lineStarts, lineEnds }
 }
 
-/** DOM 纵深净化：移除 script/iframe/style 等元素、行内事件属性与危险协议链接 */
+/** DOM 纵深净化：移除 script/style/object/embed 元素与**未经白名单的**
+ *  iframe、行内事件属性与危险协议链接（#572/T07 起：携带系统标记且
+ *  sandbox 在场的 iframe 是 htmlSanitize 白名单产物——第一道闸已强制
+ *  sandbox/权限面——豁免移除；其余维持移除，防御纵深语义不变） */
 export function sanitizeReadingDom(root: HTMLElement): void {
   for (const el of Array.from(root.querySelectorAll('script, iframe, style, object, embed'))) {
+    if (el.tagName === 'IFRAME' &&
+      el.hasAttribute(IFRAME_APPROVED_ATTR) && el.hasAttribute('sandbox')) {
+      continue
+    }
     el.remove()
   }
   for (const el of Array.from(root.querySelectorAll('*'))) {
