@@ -157,6 +157,78 @@ export function generateCodeGiantFenceSample(lines = 6000) {
   return out.join('\n')
 }
 
+// #574（T09）HTML 族性能样例：原生 HTML 批次收口的针对性档位。
+// 大量 HTML 片段（块级表格/短 div 与行内混排交替）——Live widget 建拆与
+// Reading 块挂载回收的载体；同构保证不同体量档只差体量本身。
+export function generateHtmlDenseSample(blocks = 300) {
+  const out = ['# HTML 片段密集性能样例', '']
+  for (let i = 1; i <= blocks; i++) {
+    out.push(`第 ${i} 段 普通段落样本行，固定宽度内容，与 HTML 片段交替。`, '')
+    if (i % 3 === 0) {
+      out.push(
+        `<div class="hblk">HTML 块 ${i}，<b>加粗文本</b>与行内<span style="color: rgb(200, 0, 0)">着色文字</span>混排。</div>`, '',
+      )
+    } else {
+      out.push(
+        '<table>', '  <tr>', `    <td>表 ${i} 格 A</td>`, `    <td colspan="2">表 ${i} 跨列内容</td>`,
+        '  </tr>', '</table>', '',
+      )
+    }
+  }
+  out.push('结尾段落。', '')
+  return out.join('\n')
+}
+
+// 单大表格样例（#574）：一个块级 HTML 表格（rows 行 × 4 列，稀疏
+// colspan/rowspan）——单块大体量的解析/净化/widget 构建与块内滚动成本载体。
+export function generateHtmlGiantTableSample(rows = 400) {
+  const out = ['# 单大表格性能样例', '', '<table>']
+  for (let r = 0; r < rows; r++) {
+    if (r % 7 === 3) {
+      out.push(`  <tr><td rowspan="2">行 ${r} 纵跨格</td><td>行 ${r} 格 B</td><td>行 ${r} 格 C</td><td>行 ${r} 格 D</td></tr>`)
+    } else {
+      out.push(`  <tr><td>行 ${r} 格 A</td><td colspan="2">行 ${r} 横跨格</td><td>行 ${r} 格 D</td></tr>`)
+    }
+  }
+  out.push('</table>', '', '结尾段落。', '')
+  return out.join('\n')
+}
+
+// 文档样式密集样例（#574）：顶部大 `<style>` 块（rules 条规则）+ 消费
+// 规则的 HTML/Markdown 混排正文。style 块刻意拉长到数百行——文档打开
+// 即停在顶部时，性能探针（视口中部行行尾键入）必然落在样式源文内，
+// 逐字符输入延迟即「样式源文编辑 → 全文收集/改写/产物更新」的往返成本。
+export function generateHtmlStyleSample(rules = 400) {
+  const out = ['# 文档样式密集性能样例', '', '<style>']
+  for (let i = 1; i <= rules; i++) {
+    out.push(`.h-${i} { padding: ${(i % 4) + 1}px; border-width: ${i % 3}px; }`)
+    if (i % 10 === 0) {
+      out.push(`.h-${i} b { color: rgb(${i % 255}, 30, 30); }`)
+    }
+  }
+  out.push('</style>')
+  for (let i = 1; i <= 120; i++) {
+    out.push('', `<div class="h-${(i % rules) + 1}">样式消费块 ${i}，<b>粗体 ${i}</b> 内容。</div>`)
+    if (i % 4 === 0) {
+      out.push(`第 ${i} 段 Markdown 对照文本。`)
+    }
+  }
+  out.push('', '结尾段落。', '')
+  return out.join('\n')
+}
+
+// HTML 图片密集样例（#574）：img 块引用 runPerf 落盘的 probe-N.svg——
+// 离屏资源回收（Reading 块挂载/卸载与图片状态计数）的观测载体。
+export function generateHtmlImageDenseSample(blocks = 300) {
+  const out = ['# HTML 图片密集性能样例', '']
+  for (let i = 1; i <= blocks; i++) {
+    out.push(`第 ${i} 段 图片密集对照段落文本，固定宽度内容。`, '')
+    out.push(`<div><img src="probe-${i % 24}.svg" alt="图 ${i}"> 图 ${i} 说明文字。</div>`, '')
+  }
+  out.push('结尾段落。', '')
+  return out.join('\n')
+}
+
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href) {
   const lines = Number(process.argv[2])
   const outFile = process.argv[3]

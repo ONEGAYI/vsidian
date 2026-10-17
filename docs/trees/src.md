@@ -109,6 +109,7 @@ vsidian/
     │   ├── cssSnippetEnv.ts           # CSS 片段环境身份与分桶戳（#131）
     │   ├── cssSnippetImports.ts       # CSS 片段依赖导入形态学单一事实源
     │   ├── cssSnippets.ts             # CSS 片段纯逻辑单一事实源
+    │   ├── docStyle.ts                # 文档样式收集/改写核心与身份键（纯逻辑）
     │   ├── editorGuard.ts             # 默认编辑器守护共享纯逻辑
     │   ├── editOrigin.ts              # T03可选编辑来源元数据
     │   ├── findOptions.ts             # 查找选项三开关单一事实源
@@ -116,6 +117,10 @@ vsidian/
     │   ├── frontmatterTable.ts        # frontmatter 表格化纯逻辑
     │   ├── globLiteral.ts             # watcher 文件名 glob 转义
     │   ├── hoverRefresh.ts            # 引用视图同步参数与订阅注册表
+    │   ├── htmlBlock.ts               # 块级 HTML 边界共享事实源
+    │   ├── htmlFragment.ts            # ID 文档作用域语法层
+    │   ├── htmlInline.ts              # 行内 HTML 区间事实源
+    │   ├── htmlResource.ts            # HTML 资源 URL 语法层
     │   ├── i18n.ts                    # t() 取词与语言包装配状态模块
     │   ├── imageRefresh.ts            # 图片刷新共享常量与核验决策
     │   ├── jiebaManifest.ts           # jieba 锁定版本与下载源清单
@@ -204,6 +209,7 @@ vsidian/
         ├── diagramExport.ts              # 图表导出序列化与光栅化
         ├── diagramPopup.ts               # 图表弹窗全屏浮层
         ├── diagramPopupGeometry.ts       # 弹窗几何纯函数
+        ├── docStyleLoader.ts             # 文档样式装载器（产物生命周期）
         ├── embedCard.ts                  # Reading 嵌入卡片管理器
         ├── embedSlots.ts                 # 混排嵌入识别配对与DOM提升纯逻辑
         ├── fenceEscape.ts                # 围栏 Tab 越界适配层（#125）
@@ -220,6 +226,10 @@ vsidian/
         ├── hoverPopup.ts                 # 悬停预览浮层单例
         ├── hoverPopupGeometry.ts         # 悬停浮层几何纯函数
         ├── htmlComment.ts                # 阅读侧 HTML 注释剥离纯函数
+        ├── htmlInteract.ts               # 表单媒体交互防线
+        ├── htmlResourceHub.ts            # HTML 资源解析枢纽
+        ├── htmlResourceMount.ts          # HTML 资源 DOM 装配
+        ├── htmlSanitize.ts               # HTML 块专用净化边界
         ├── htmlToMarkdown.ts             # 富文本HTML到Markdown转换
         ├── imagePaste.ts                 # 图片粘贴拦截适配层（#161）
         ├── imagePopup.ts                 # 图片弹窗全屏浮层单例
@@ -235,6 +245,8 @@ vsidian/
         ├── liveCodeCard.ts               # Live 代码块卡片装饰
         ├── liveDecorations.ts            # 语法树驱动 Live 装饰（#8）
         ├── liveEmbed.ts                  # Live 嵌入装饰与源码显隐
+        ├── liveHtml.ts                   # Live 块级 HTML 片段替换装饰
+        ├── liveInlineHtml.ts             # 行内 HTML Live 装饰
         ├── liveInstance.ts               # Live 编辑器可复用实例
         ├── liveLineNumbers.ts            # 表格段首行号与绘制探针
         ├── liveLinks.ts                  # live 链接装饰与跳转（#10）

@@ -159,6 +159,18 @@ import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
+import { liveDocStyle, liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
+import {
+  hubResourcePort,
+  invalidateAllHtmlResources,
+  notifyHtmlResourceInvalidate,
+  notifyHtmlResourceResult,
+  registerHtmlResourcePort,
+} from './htmlResourceHub'
+import { disposeHtmlResourcesOf, prepareHtmlResources } from './htmlResourceMount'
+import { installHtmlSubmitGuard, pauseHtmlMedia } from './htmlInteract'
+import { documentStyleRegistry } from './docStyleLoader'
+import { revealInlineHtmlSourceAtCursor } from './liveInlineHtml'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
@@ -247,7 +259,7 @@ import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './ima
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
-import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
+import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
 import {
   BACKLINK_CLASS_NAMES,
@@ -1064,6 +1076,12 @@ export class WebviewSyncController {
         id === 'headingFoldAll' || id === 'headingUnfoldAll') {
         this.runHeadingFoldCommand(id)
       }
+      // #567（T02）编辑当前 HTML 源码：本地分支直执行（纯选区事务零写
+      // 回，不出站宿主往返）；命令面板经 ui.command 回发共用
+      // runHtmlEditSourceCommand（目标按焦点实例光标解析，无命中静默）
+      else if (id === 'htmlEditSource') {
+        this.runHtmlEditSourceCommand()
+      }
       // #439 链接场景三项：本地分支直执行（目标 = 焦点实例光标处链接命中，
       // 与「预览当前链接」同一目标推导口径；无命中静默不误动）。菜单入口
       // 经 runContextMenuCommand 快照负载（打开时捕获），键位入口按光标即
@@ -1137,6 +1155,11 @@ export class WebviewSyncController {
     this.readingContainer = createReadingContainer()
     this.readingContainer.tabIndex = 0
     this.readingContainer.style.display = 'none'
+    // #571（T06）表单提交守卫：document 捕获相位单一防线——笔记 HTML 的
+    // form（Reading 块/嵌入卡/浮层/Live widget 内容）submit 一律不导航
+    // （webview 是编辑器本体；无表单后端）。控制器是生产唯一装配入口，
+    // 浏览器 fixture 直驱时同样生效
+    installHtmlSubmitGuard(document)
     this.images = new ImageResourceManager({
       // http/https 图源直连（可加载性由 webview CSP 决定），其余经宿主解析
       isDirectSrc: isDirectImageSrc,
@@ -1155,6 +1178,12 @@ export class WebviewSyncController {
       // #201 周期核验调度：首个非直连条目起表、全回收停表
       onBecomeActive: () => this.imageVerify?.onBecomeActive(),
       onBecomeIdle: () => this.imageVerify?.onBecomeIdle(),
+    })
+    // #570（T05）HTML/CSS 资源解析端口注册（A 面板身份——htmlResource.request
+    // 经主桥出站；嵌入 B/C 的订阅以 sourceDocUri 区分，宿主按来源目录解析）
+    registerHtmlResourcePort({
+      session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
+      send: (message) => this.bridge.postMessage(message),
     })
     // #201 周期核验：活跃图源合并上报（间隔约 30 秒，工程初值；无活跃停表；
     // 面板恢复可见/宿主唤醒立即核验）。visibilitychange 常驻监听随 dispose 摘除
@@ -1258,6 +1287,10 @@ export class WebviewSyncController {
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
     this.readingView = new VirtualReadingView(this.readingContainer, {
+      // #567（T02）主文档身份标记（T01 探针 b2 隔离基座）：html 块渲染根
+      // 挂 data-vsidian-doc-scope="doc"（嵌入实例的目标身份键随 T04 装载
+      // 器接线）
+      docScope: 'doc',
       // #419 阅读态折叠交互：翻转主文 Live 的折叠 StateField（单一事实源
       // ——阅读与 Live 共享同一折叠状态集）；阅读呈现刷新经下方折叠侦测
       // updateListener 闭环（dispatch → 折叠集变化 → syncReadingFolds）
@@ -1270,7 +1303,9 @@ export class WebviewSyncController {
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
       onBlockMounted: (el) => {
         if (this.images) {
-          prepareReadingImages(el, this.images)
+          // #570（T05）：HTML 资源装配（img/srcset/媒体属性——A 面板身份；
+          // 内部覆盖既有 prepareReadingImages 的 img[src] 面并扩展属性矩阵）
+          prepareHtmlResources(el, { images: this.images })
         }
         // #111 渲染分派走注册表（登记即继承）：容器语言有管线即渲染，
         // 无管线停留 pending 降级（live 侧由发射 gate 直接降级源码+卡片）
@@ -1289,6 +1324,7 @@ export class WebviewSyncController {
       },
       onBlockUnmounted: (el) => {
         this.images?.detachWithin(el)
+        disposeHtmlResourcesOf(el) // #570：块级资源订阅退订（迟到结果不回写）
         this.embedCards?.unmountBlock(el)
       },
     })
@@ -1821,6 +1857,13 @@ export class WebviewSyncController {
       // P2-04（#281）挂卡宿主标记：根正文才发射嵌入卡片装饰（嵌入内部
       // Live 编辑器不挂卡——嵌套结构与命令接线归 P2-10）
       liveEmbedCardsHostMark,
+      // #567（T02）主文档身份标记：根正文的 HTML 块渲染根挂
+      // data-vsidian-doc-scope="doc"（T01 探针 b2 隔离基座）；#569（T04）
+      // 起同键装载全文 <style> 产物（Reading 共享同一 CM6 doc——双模式
+      // 单一装载链；dispose 随视图销毁释放）；#570（T05）产物 url()/字体
+      // 经 hub 端口按 A 身份解析（sourceDocUri 缺省 = 面板文档）
+      liveHtmlDocScope('doc'),
+      liveDocStyle('doc', hubResourcePort()),
       // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
       // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
       ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
@@ -3135,6 +3178,11 @@ export class WebviewSyncController {
           case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
           case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
           case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
+          // #567（T02）编辑当前 HTML 源码：命令面板入口（快捷键走 router
+          // 本地分支直达），两入口共用 runHtmlEditSourceCommand——目标按
+          // 焦点实例光标解析（焦点在嵌入内部 Live 时落 B 的 html 块），
+          // 无命中静默
+          case 'htmlEditSource': this.runHtmlEditSourceCommand(); break
           // #439 链接场景三项：命令面板入口（快捷键走 router 本地分支直达），
           // 与菜单入口共用 runLinkSceneCommand 执行体（目标按光标即时推导）
           case 'openLink': this.runLinkSceneKeyCommand('openLink'); break
@@ -3799,6 +3847,15 @@ export class WebviewSyncController {
         this.images?.invalidate(message.srcs)
         notifyHoverImageInvalidate(message.srcs)
         this.embedCards?.notifyImageInvalidate(message.srcs)
+        // #570（T05）：HTML/CSS 资源同口径失效重取（srcset/媒体属性经 hub；
+        // 文档样式 url()/字体经注册表——清映射回退原文后新代次 URI 重渲染）
+        notifyHtmlResourceInvalidate(message.srcs)
+        documentStyleRegistry.notifyResourceInvalidate(message.srcs)
+        break
+      case 'htmlResource.result':
+        // #570（T05）HTML/CSS 资源解析结果路由（独立消息种——reqId 空间
+        // 与 image.result 隔离；未知/迟到 reqId 由 hub 丢弃）
+        notifyHtmlResourceResult(message)
         break
       case 'image.wake':
         // #201 及时核验：窗口焦点回归/远程重连，有活跃图源立即触发一轮
@@ -3820,6 +3877,9 @@ export class WebviewSyncController {
         invalidateHoverPopupImages()
         // #222 嵌入卡片内 B 图片同口径全量重挂
         this.embedCards?.invalidateImages()
+        // #570（T05）：HTML/CSS 资源同口径全量失效重取（新代次戳 URI）
+        invalidateAllHtmlResources()
+        documentStyleRegistry.invalidateAllResources()
         resetMermaidLoadFailure()
         break
       case 'view.state.request': {
@@ -4207,6 +4267,12 @@ export class WebviewSyncController {
         ? Math.min(...sel.ranges.map((r) => r.from))
         : this.modeAnchor ?? 0
       this.modeAnchor = cursor
+      // #571（T06）切离 Live：隐藏编辑器内的 widget 媒体暂停（DOM 常驻
+      // display:none 不自动停——防「切到阅读后音频仍在播」；只停不释放，
+      // 切回不重置）
+      if (this.view?.contentDOM) {
+        pauseHtmlMedia(this.view.contentDOM)
+      }
       this.applyModeDom('reading') // 先更新模式（refreshReading 依赖它）
       if (editorHadFocus) this.readingContainer?.focus()
       this.refreshReading()
@@ -4237,6 +4303,11 @@ export class WebviewSyncController {
       }
     }
     const readingHadFocus = document.activeElement === this.readingContainer
+    // #571（T06）切离 Reading：隐藏阅读容器内的媒体暂停（块 DOM 常驻
+    // display:none 不自动停——与切离 Live 对称；只停不释放，切回不重置）
+    if (this.readingContainer) {
+      pauseHtmlMedia(this.readingContainer)
+    }
     this.applyModeDom('live')
     if (readingHadFocus) this.view?.focus()
     // 恢复光标到锚点并滚动到视口中部；事务不带 changes → 不产生编辑历史
@@ -10031,6 +10102,22 @@ export class WebviewSyncController {
     applyHeadingFoldOperation(resolved.view, op)
   }
 
+  /** #567（T02）「编辑当前 HTML 源码」：光标所在 html 块 → 选中完整源码
+   *  区间（与渲染内容点击、编辑按钮三入口同一执行体；纯选区事务零写
+   *  回——显形由既有装饰管线按选区触及接管）。无命中静默不动作。
+   *  #568（T03）行内片段同源：块级无命中时按行内片段表解析（同一命令
+   *  覆盖两种片段形态） */
+  private runHtmlEditSourceCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved || !this.targetEditable(resolved.view, resolved.embed)) {
+      return
+    }
+    if (revealHtmlSourceAtCursor(resolved.view)) {
+      return
+    }
+    revealInlineHtmlSourceAtCursor(resolved.view)
+  }
+
   /**
    * 应用可读行宽设置（#175；settings.snapshot / settings.changed 到达时）：
    * - 非 0 档：把两模式限宽变量（--vsidian-reading-max-width /
@@ -10237,6 +10324,12 @@ export class WebviewSyncController {
    * 首字符命中测试落在内容区内（DOM 数量与几何坐标探针测不出的"真的
    * 可见"），附带 CM6 baseTheme 存活与行号禁选观测。
    */
+  /** #569（T04）Reading 主容器直接子块的计算色探针（无命中 null） */
+  private readingProbeColor(selector: string, prop: string): string | null {
+    const el = this.readingContainer?.querySelector<HTMLElement>(selector)
+    return el ? getComputedStyle(el).getPropertyValue(prop).trim() : null
+  }
+
   private collectPaint(): PaintProbe {
     const view = this.view
     const contentEl = view?.dom.querySelector<HTMLElement>('.cm-content')
@@ -10656,6 +10749,265 @@ export class WebviewSyncController {
           overlayImgLoaded: imageOverlayImgLoaded,
         }
       : undefined
+    // #567（T02）块级原生 HTML 绘制探针：渲染根计数 + 可见性（任一根
+    // rect 有面积且 elementFromPoint 命中自身子树）+ 合并单元格命中证据
+    // + 净化负向计数（script/on* 残留，期望恒 0）。live 态光标在块外才
+    // 有 widget（触及显形是规格行为，非样式失效）
+    const htmlScope = this.viewMode === 'reading' ? this.readingContainer : view.contentDOM
+    const htmlRootEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLElement>('.vsidian-live-html, .vsidian-reading-html')]
+      : []
+    const htmlRoots = htmlRootEls.length
+    let htmlVisible = false
+    for (const root of htmlRootEls) {
+      if (hitPaintedElement(root)) {
+        htmlVisible = true
+        break
+      }
+    }
+    const mergedCellEl = htmlRootEls
+      .flatMap((root) => [...root.querySelectorAll<HTMLElement>('td[colspan], td[rowspan], th[colspan], th[rowspan]')])
+      [0] ?? null
+    // #568（T03）行内原生 HTML 绘制探针：live 侧行内宿主
+    //（.vsidian-live-inline-html）计数 + 可见性 + 行内颜色绘制证据（首个
+    // 带行内颜色样式的元素 computed color）+ br 换行计数 + 净化负向
+    //（宿主子树 script/on* 残留期望恒 0；live 态光标在片段外才有 widget）
+    // Reading 侧无包装类（原位渲染——Q4=B 最小 DOM 侵入），观测面 = 容器
+    // 内带行内颜色样式的原生元素（净化负向取其所在 reading 块子树）。
+    // jsdom 无布局（rect 恒 0），visible 恒 false——只作真宿主/浏览器依据
+    const inlineHostEls = htmlScope && this.viewMode !== 'reading'
+      ? [...htmlScope.querySelectorAll<HTMLElement>('.vsidian-live-inline-html')]
+      : []
+    const inlineColorEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLElement>('[style*="color"]')]
+        .filter((el) => (this.viewMode === 'reading'
+          ? el.closest('.vsidian-reading-html') === null // 块级 html 块归 paint.html 口径
+          : el.closest('.vsidian-live-inline-html') !== null))
+      : []
+    let inlineVisible = false
+    for (const el of inlineColorEls) {
+      if (hitPaintedElement(el)) {
+        inlineVisible = true
+        break
+      }
+    }
+    const inlineNegScope = this.viewMode === 'reading'
+      ? [...new Set(inlineColorEls.map((el) => el.closest<HTMLElement>('.vsidian-reading-block')))]
+        .filter((el): el is HTMLElement => el !== null)
+      : inlineHostEls
+    const inlinePaint = {
+      roots: this.viewMode === 'reading' ? inlineColorEls.length : inlineHostEls.length,
+      visible: inlineVisible,
+      color: inlineColorEls[0] ? getComputedStyle(inlineColorEls[0]).color : null,
+      // br 换行绘制证据：live 取行内宿主子树；reading 取容器内全部 br
+      //（原子 br 片段无颜色元素——颜色圈定不到；排除代码块，代码区 br
+      // 属既有代码呈现不是行内 HTML 证据）
+      brs: this.viewMode === 'reading'
+        ? (htmlScope
+          ? [...htmlScope.querySelectorAll('br')]
+            .filter((br) => br.closest('.vsidian-reading-code-block') === null).length
+          : 0)
+        : inlineHostEls.reduce((n, el) => n + el.querySelectorAll('br').length, 0),
+      scripts: inlineNegScope.reduce((n, r) => n + r.querySelectorAll('script').length, 0),
+      eventAttrs: inlineNegScope.reduce(
+        (n, r) => n + [...r.querySelectorAll('*')]
+          .reduce((m, el) => m + [...el.attributes].filter((a) => a.name.toLowerCase().startsWith('on')).length, 0),
+        0),
+    }
+    const htmlPaint = {
+      roots: htmlRoots,
+      visible: htmlVisible,
+      mergedCell: mergedCellEl
+        ? { hit: hitPaintedElement(mergedCellEl), borderWidth: getComputedStyle(mergedCellEl).borderTopWidth }
+        : null,
+      scripts: htmlRootEls.reduce((n, r) => n + r.querySelectorAll('script').length, 0),
+      eventAttrs: htmlRootEls.reduce(
+        (n, r) => n + [...r.querySelectorAll('*')]
+          .reduce((m, el) => m + [...el.attributes].filter((a) => a.name.toLowerCase().startsWith('on')).length, 0),
+        0),
+      inline: inlinePaint,
+    }
+    // #571（T06）表单与媒体交互探针：控件计数、details 展开态（真实 open
+    // 属性）、媒体真实装载与播放态（readyState/currentTime/paused/network
+    // ——集成与浏览器断言面；非标签存在断言）。作用域 = 当前模式内容域
+    //（reading 容器 / CM6 contentDOM——行内片段与嵌入卡内容同被覆盖）
+    const interactMediaEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLMediaElement>('video, audio')]
+      : []
+    const firstInteractMedia = interactMediaEls[0] ?? null
+    const htmlInteractPaint = {
+      controls: htmlScope
+        ? htmlScope.querySelectorAll('input, select, textarea, button').length
+        : 0,
+      detailsTotal: htmlScope
+        ? htmlScope.querySelectorAll('details').length
+        : 0,
+      detailsOpen: htmlScope
+        ? [...htmlScope.querySelectorAll<HTMLDetailsElement>('details')].filter((d) => d.open).length
+        : 0,
+      mediaTotal: interactMediaEls.length,
+      mediaPlaying: interactMediaEls.filter((m) => !m.paused && !m.ended).length,
+      mediaPaused: interactMediaEls.filter((m) => m.paused).length,
+      mediaReadyState: firstInteractMedia ? firstInteractMedia.readyState : null,
+      mediaCurrentTime: firstInteractMedia ? firstInteractMedia.currentTime : null,
+      mediaNetworkState: firstInteractMedia ? firstInteractMedia.networkState : null,
+      mediaError: firstInteractMedia?.error ? firstInteractMedia.error.code : null,
+      /** 全部媒体就绪态（多元素矩阵断言；readyState ≥ 2 = 有当前帧数据） */
+      mediaReadyStates: interactMediaEls.map((m) => m.readyState),
+    }
+    // #573（T08）SVG/MathML 绘制探针：全域（reading 容器 / cm-content——
+    // 覆盖块级、行内 widget 与 reading 行内原位三种形态）svg/math 元素计数
+    // 与绘制证据（非 DOM 存在性——真宿主/浏览器下 rect 有面积即实际排版
+    // 绘制；jsdom 无布局恒 0，只作回归计数面）+ foreignObject 计数 +
+    // url(#id) 渐变引用计数 + ID 作用域观测（B 产物 id 前缀化计数、前缀
+    // 引用计数、带前缀 id 元素的描边绘制计数——B 的 CSS #id 协同命中证据）
+    const svgMathScope = htmlScope
+    const svgEls = svgMathScope ? [...svgMathScope.querySelectorAll<SVGElement>('svg')] : []
+    const mathEls = svgMathScope ? [...svgMathScope.querySelectorAll<HTMLElement>('math')] : []
+    /** computed 读取防御：未挂载元素/宿主边界拿不到时返回 null（探针在
+     *  jsdom 无布局环境不抛——只作计数回归） */
+    const computedOf = (el: Element): CSSStyleDeclaration | null => {
+      if (!el.isConnected) {
+        return null
+      }
+      try {
+        return getComputedStyle(el)
+      } catch {
+        return null
+      }
+    }
+    const elPainted = (el: Element): boolean => {
+      const rect = el.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) {
+        return false
+      }
+      // 可见性负向控制（#576 Standards）：visibility:hidden 与 opacity:0
+      // 的元素 rect 仍有面积但不绘制——隐藏元素不产生绘制证据
+      const cs = computedOf(el)
+      if (cs === null) {
+        return true // computed 不可得（宿主边界）：rect 有面积即证据
+      }
+      return cs.visibility !== 'hidden' && cs.opacity !== '0'
+    }
+    const elHidden = (el: Element): boolean => {
+      const cs = computedOf(el)
+      return cs !== null && (cs.display === 'none' || cs.visibility === 'hidden')
+    }
+    const gradientAttrOf = (el: Element): string =>
+      el.getAttribute('fill') ?? el.getAttribute('stroke') ?? el.getAttribute('filter') ?? el.getAttribute('clip-path') ?? ''
+    const paintEls = svgMathScope
+      ? [...svgMathScope.querySelectorAll<HTMLElement>('[fill], [stroke], [filter], [clip-path]')]
+      : []
+    const gradientRefs = paintEls.filter((el) => /url\(#/.test(gradientAttrOf(el))).length
+    const scopedGradientRefs = paintEls.filter((el) => /url\(#vs[-A-Za-z0-9_]+--/.test(gradientAttrOf(el))).length
+    const scopedIdEls = svgMathScope
+      ? [...svgMathScope.querySelectorAll<HTMLElement>('[id]')]
+        .filter((el) => /^vs[-A-Za-z0-9_]+--/.test(el.id))
+      : []
+    const hiddenProbeEls = [...svgEls, ...mathEls]
+    const svgMathPaint = {
+      svgs: svgEls.length,
+      svgPainted: svgEls.some(elPainted),
+      svgPaintedCount: svgEls.filter(elPainted).length,
+      maths: mathEls.length,
+      mathPainted: mathEls.some(elPainted),
+      mathPaintedCount: mathEls.filter(elPainted).length,
+      /** 隐藏负向对照（display:none/visibility:hidden 的 svg/math）——集成
+       *  断言 hiddenPainted === 0 钉住探针「非恒真」 */
+      hiddenControls: hiddenProbeEls.filter(elHidden).length,
+      hiddenPainted: hiddenProbeEls.filter((el) => elHidden(el) && elPainted(el)).length,
+      foreignObjects: svgMathScope ? svgMathScope.querySelectorAll('foreignObject').length : 0,
+      gradientRefs,
+      /** 带作用域前缀的 url(#…) 引用计数（B 域引用不指向 A 的直接证据） */
+      scopedGradientRefs,
+      scopedIds: scopedIdEls.length,
+      /** 带前缀 id 元素中 computed stroke 非 none 的计数（B 的 CSS #id
+       *  选择器协同命中并绘制的证据） */
+      scopedStrokePainted: scopedIdEls.filter((el) => getComputedStyle(el).stroke !== 'none').length,
+    }
+    // #570（T05）HTML/CSS 资源绘制探针：HTML 块/行内内容里的图片装载态
+    //（管理器回包后 src 已应用 + loaded 事件确认）、srcset 重组应用计数、
+    // 媒体属性改写计数（成功解析后属性以绝对地址存在），文档样式产物的
+    // url() 解析应用计数（绝对地址 vs 仍为相对原文——后者为未解析/失败，
+    // 按语义不报错）。docStyleEls 在下方声明后并入（避免 TDZ）。
+    const htmlImgEls = htmlRootEls.flatMap((r) => [...r.querySelectorAll<HTMLImageElement>('img')])
+    const attrResolved = (value: string | null): boolean =>
+      value !== null && /^(https?:|vscode-webview:|vscode-resource:)/i.test(value)
+    // #569（T04）文档样式绘制探针：head 产物键集 + Reading 主容器直接
+    // 子块计算色（文档样式命中证据）+ 工具栏排除面基线。直接子块限定：
+    // 嵌入卡内段落挂引用键不计入主文档读值
+    const docStyleEls = [...document.querySelectorAll<HTMLStyleElement>('style[data-vsidian-doc-style]')]
+    const docStyleProbe = docStyleEls.length > 0
+      ? {
+          scopes: docStyleEls.map((el) => el.getAttribute('data-vsidian-doc-style') ?? ''),
+          mainRules: (document.querySelector<HTMLStyleElement>('style[data-vsidian-doc-style="doc"]')?.sheet?.cssRules.length ?? 0),
+          readingParagraphColor: this.readingContainer
+            ? this.readingProbeColor(':scope > .vsidian-reading-paragraph p', 'color')
+            : null,
+          readingHeadingColor: this.readingContainer
+            ? this.readingProbeColor(':scope > .vsidian-reading-heading-1 h1', 'color')
+            : null,
+          toolbarColor: this.toolbar
+            ? getComputedStyle(this.toolbar).color
+            : null,
+        }
+      : undefined
+    // #570（T05）HTML/CSS 资源绘制探针（并入 htmlPaint.resources；docStyleEls
+    // 已在上文声明）：图片装载态（回包应用 + loaded 确认）、srcset 重组、
+    // 媒体属性改写（成功解析后为绝对地址）、产物 url() 解析应用（绝对地址
+    // 计数与仍为相对原文的计数——后者是未解析/失败，按语义不报错）
+    const htmlResourcesPaint = {
+      imgs: htmlImgEls.length,
+      imgLoaded: htmlImgEls.filter((el) => el.dataset['vsidianImgState'] === 'loaded').length,
+      imgAppliedSrc: htmlImgEls.map((el) => el.getAttribute('src')).find((s) => s !== null) ?? null,
+      /** 全部已应用地址（A/B 归属断言——按路径段区分来源文档） */
+      imgAppliedSrcs: htmlImgEls.map((el) => el.getAttribute('src')).filter((s): s is string => s !== null),
+      srcsetApplied: htmlRootEls.reduce(
+        (n, r) => n + [...r.querySelectorAll('[srcset]')].filter((el) => attrResolved(el.getAttribute('srcset'))).length, 0),
+      srcsetPending: htmlRootEls.reduce(
+        (n, r) => n + r.querySelectorAll('[data-vsidian-srcset]').length, 0),
+      mediaResolved: htmlRootEls.reduce(
+        (n, r) => n + [...r.querySelectorAll('video[src], audio[src], source[src], video[poster]')]
+          .filter((el) => [...el.attributes].some((a) => attrResolved(a.value))).length, 0),
+      /** 各 docScope 产物的 url() 解析计数（A/B 归属断言——按 scope 分别
+       *  断言解析数，串源时计数漂移可检）；firstResolvedCssUrl 供失效
+       *  重取的地址变化断言 */
+      docStyleProducts: docStyleEls.map((el) => ({
+        scope: el.getAttribute('data-vsidian-doc-style') ?? '',
+        resolvedUrls: (el.textContent?.match(/url\("https?:/g)?.length ?? 0),
+        totalUrls: (el.textContent?.match(/url\("/g)?.length ?? 0),
+      })),
+      firstResolvedCssUrl: docStyleEls
+        .map((el) => el.textContent?.match(/url\("(https?:[^"]+)"\)/)?.[1] ?? null)
+        .find((u): u is string => u !== null) ?? null,
+    }
+    // #572（T07）iframe 绘制面：激活内容域内白名单帧的装配属性与 Live
+    // 命中接管层。**帧内内容可见性不在此断言**（沙箱/跨域帧对父文档
+    // 不可读——「load 事件或 DOM 存在不当作可见证据」，内容可见证据在
+    // browser 层经 CDP 帧读取）；可见位只证帧盒子本身绘制（rect 有面积
+    // 且 elementFromPoint 命中——live 侧探 wrapper，shield 覆盖下 element
+    // FromPoint 返回 shield 而非帧）。
+    const iframeEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLIFrameElement>('iframe[data-vsidian-iframe]')]
+      : []
+    let iframeVisible = false
+    for (const frame of iframeEls) {
+      const box = frame.closest<HTMLElement>('.vsidian-live-html-frame') ?? frame
+      if (hitPaintedElement(box)) {
+        iframeVisible = true
+        break
+      }
+    }
+    const iframePaint = {
+      frames: iframeEls.length,
+      sandboxes: iframeEls.map((f) => f.getAttribute('sandbox') ?? ''),
+      srcs: iframeEls.map((f) => f.getAttribute('src')),
+      srcdocFrames: iframeEls.filter((f) => f.hasAttribute('srcdoc')).length,
+      shields: htmlScope
+        ? htmlScope.querySelectorAll('.vsidian-live-html-frame-shield').length
+        : 0,
+      visible: iframeVisible,
+    }
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
     // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。分组线
@@ -10940,6 +11292,19 @@ export class WebviewSyncController {
         dynamicLanguages: [...dynamicRenderedFenceLanguageSnapshot()],
       },
       imageChrome,
+      // #567（T02）块级原生 HTML 绘制观测（live：.vsidian-live-html /
+      // reading：.vsidian-reading-html；无渲染根时缺省）
+      // #568 起 html 探针含行内面：块或行内任一在场即产出
+      // #570（T05）起附资源面 resources（图片装载/srcset/媒体属性/产物 url）
+      // #573（T08）起附 SVG/MathML 面 svgMath（绘制证据/foreignObject/渐变
+      // 引用/作用域前缀——真宿主与浏览器断言面，jsdom 恒计数）
+      // #572（T07）起附 iframe 面（白名单帧在场即产出——块/行内归并采集）
+      // #571（T06）interact 面与上述三面并存于同一 html 探针对象
+      ...(htmlRoots > 0 || inlinePaint.roots > 0 || iframePaint.frames > 0
+        ? { html: { ...htmlPaint, resources: htmlResourcesPaint, interact: htmlInteractPaint, svgMath: svgMathPaint, iframes: iframePaint } }
+        : {}),
+      // #569（T04）文档样式隔离观测（无产物缺省）
+      ...(docStyleProbe ? { docStyle: docStyleProbe } : {}),
       quickActions,
       code,
       fm,

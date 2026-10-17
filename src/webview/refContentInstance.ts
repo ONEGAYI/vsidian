@@ -16,9 +16,12 @@ import { splitReadingBlocks } from './readingBlocks'
 import { createReadingBlockElement } from './readingView'
 import { VirtualReadingView, type ReadingViewStats } from './readingVirtualView'
 import { createSourcedImageManager, mountRefContentBlock, refreshRefCodeHighlight } from './refReadingContent'
+import { hubResourcePort, subscribeHtmlResource, type HtmlResourceSubscribe } from './htmlResourceHub'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { TextRefView } from './textRefView'
 import type { ImageResourceManager } from './imageResource'
+import { DocumentStyleBinding } from './docStyleLoader'
+import { docScopeKeyOf } from '../shared/docStyle'
 import { onLocaleChanged } from '../shared/i18n'
 
 /** 四项、总量 2 MiB、单项 512 KiB；大目标只供当前实例使用。 */
@@ -383,9 +386,17 @@ export class RefContentMount {
   private released = false
   private target: RefLoadedContent | RefLoadedTextContent | null = null
   private images: ImageResourceManager | null = null
+  /** #570（T05）属性资源订阅面（B 身份——srcset/媒体属性经 hub 以目标
+   *  fsPath 订阅；render 随装载目标建立） */
+  private htmlResources: { subscribe: HtmlResourceSubscribe; sourceDocUri: string } | null = null
   private view: VirtualReadingView | null
   /** #340（P3-08）text 内容视图（与 markdown 的 VirtualReadingView 互斥） */
   private textView: TextRefView | null = null
+  /** #569（T04）文档样式装载句柄（B 的 <style> 随 B 的全文装载/更新；
+   *  目标键从装载内容 fsPath 派生——同一 B 多实例共享产物，dispose
+   *  释放，ADR-0019 决定 3/4） */
+  private docStyle: DocumentStyleBinding | null = null
+  private docScope: string | null = null
   private readonly blocks = new Map<HTMLElement, Array<() => void>>()
   private readonly cleanups: Array<() => void> = []
   private frame: number | null = null
@@ -534,16 +545,34 @@ export class RefContentMount {
       send: this.options.send,
       sourceDocUri: () => this.target?.fsPath ?? '',
     })
+    // #570（T05）：属性资源订阅面（B 身份）+ 文档样式资源端口（同身份——
+    // B 的 <style> 产物内 url()/字体按 B 目录解析，与 img 管理器同一身份面）
+    this.htmlResources = {
+      subscribe: subscribeHtmlResource,
+      sourceDocUri: mdLoaded.fsPath,
+    }
+    // #569（T04）文档样式装载：目标键从 B 的 fsPath 派生（canonical
+    // 身份域单向派生）；同一 B 多实例（嵌入卡 + 悬停浮层 + 内部 Live）
+    // 共享同一产物。标记随 setDocument 重建的块铺开（render 流程恒
+    // clear → setDocument）
+    const scopeKey = docScopeKeyOf(mdLoaded.fsPath)
+    if (this.docStyle === null || this.docScope !== scopeKey) {
+      this.docStyle?.dispose()
+      this.docStyle = new DocumentStyleBinding(scopeKey, hubResourcePort(mdLoaded.fsPath))
+      this.docScope = scopeKey
+    }
+    this.docStyle.sync(mdLoaded.text)
     // P2-03（#280，ADR-0011）：内容范围恒为目标全文——块不再按 range 过滤；
     // range 只作初始定位区间（无保存滚动位置的首开滚动到锚点）
     if (this.view) {
+      this.view.setDocScope(scopeKey)
       this.view.setDocument(mdLoaded.text, {
         blocks: parsed.blocks, parsedNow: parsed.parsedNow,
       })
       this.view.updateNow()
     } else {
       for (const block of parsed.blocks) {
-        const el = createReadingBlockElement(block, mdLoaded.text)
+        const el = createReadingBlockElement(block, mdLoaded.text, scopeKey)
         this.options.contentEl.appendChild(el)
         this.mountBlock(el)
       }
@@ -584,6 +613,8 @@ export class RefContentMount {
       this.instance.scrollTop = this.options.scrollEl.scrollTop
     }
     this.clear()
+    // #569：text 装载无 Markdown 正文——文档样式随 markdown 目标一并释放
+    this.releaseDocStyle()
     // text 内容接管 contentEl：释放 Markdown 虚拟视图——VirtualReadingView
     // 复用 contentEl 作为块容器，其 updateNow/clearAll 会重建容器内容并
     // 清掉文本视图（挂载期互斥的结构性表达；同挂载点切回 markdown 走
@@ -738,8 +769,17 @@ export class RefContentMount {
     for (const el of [...this.blocks.keys()]) this.unmountBlock(el)
     this.images?.dispose()
     this.images = null
+    this.htmlResources = null // #570：随装载目标清退（块级订阅已随 unmount 退订）
     this.target = null
     if (!this.view) this.options.contentEl.textContent = ''
+  }
+
+  /** #569：释放文档样式装载（mount 终结/换装 text 内容时） */
+  private releaseDocStyle(): void {
+    this.docStyle?.dispose()
+    this.docStyle = null
+    this.docScope = null
+    this.view?.setDocScope(undefined)
   }
 
   notifyImageResult(msg: { reqId: number; ok: boolean; src?: string; reason?: string }): void { this.images?.handleResult(msg) }
@@ -769,6 +809,8 @@ export class RefContentMount {
     }
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     this.clear()
+    // #569：文档样式随视图释放回收（多实例共享时引用递减，归零移除产物）
+    this.releaseDocStyle()
     this.view?.dispose()
     this.view = null
     this.options.contentEl.textContent = ''
@@ -798,6 +840,12 @@ export class RefContentMount {
         toggle: () => (this.instance.fmExpanded = !this.instance.fmExpanded),
       } : null,
       onDispose: (cleanup) => cleanups.push(cleanup),
+      // #570（T05）：HTML 资源（srcset/媒体属性）按装载目标 B/C 身份订阅
+      //（docStyle 产物同身份——B 的 url() 以 B 目录解析）
+      ...(this.htmlResources ? { htmlResources: this.htmlResources } : {}),
+      // #573（T08）：ID 文档作用域——B 产物内部 id 前缀化（docStyle 产物
+      // 同 scope 键，CSS id/url(#id) 侧协同改写）；装载无目标时缺省 A 口径
+      ...(this.docScope ? { docScope: this.docScope } : {}),
     })
     // #340：text 内容无 Markdown 嵌入块语义（块挂载仅 markdown 路径可达）
     const mdTarget = this.target !== null && !('kind' in this.target) ? this.target : null

@@ -841,6 +841,90 @@ interface ViewState {
       error: number
       count: number
     }
+    /** #567（T02）块级原生 HTML 绘制：渲染根可见性 + 合并单元格命中 +
+     *  净化负向计数（script/on* 残留期望恒 0） */
+    html?: {
+      roots: number
+      visible: boolean
+      mergedCell: { hit: boolean; borderWidth: string | null } | null
+      scripts: number
+      eventAttrs: number
+      /** #568（T03）行内原生 HTML 绘制面：live 宿主 / reading 原位颜色
+       *  元素观测（[style*=color] 圈定——无包装类） */
+      inline: {
+        roots: number
+        visible: boolean
+        color: string | null
+        brs: number
+        scripts: number
+        eventAttrs: number
+      }
+      /** #570（T05）HTML/CSS 资源绘制面：图片装载态、srcset 重组、媒体
+       *  属性改写与文档样式产物 url() 解析计数（A/B 归属按 scope 分别检） */
+      resources?: {
+        imgs: number
+        imgLoaded: number
+        imgAppliedSrc: string | null
+        imgAppliedSrcs: string[]
+        srcsetApplied: number
+        srcsetPending: number
+        mediaResolved: number
+        docStyleProducts: Array<{ scope: string; resolvedUrls: number; totalUrls: number }>
+        firstResolvedCssUrl: string | null
+      }
+      /** #571（T06）表单与媒体交互面：控件计数、details 展开态与媒体
+       *  真实装载/播放态（readyState/currentTime——非标签存在断言） */
+      interact?: {
+        controls: number
+        detailsTotal: number
+        detailsOpen: number
+        mediaTotal: number
+        mediaPlaying: number
+        mediaPaused: number
+        mediaReadyState: number | null
+        mediaCurrentTime: number | null
+        mediaNetworkState: number | null
+        mediaError: number | null
+        mediaReadyStates: number[]
+      }
+      /** #573（T08）SVG/MathML 与混合命名空间绘制面（全域圈定：块级/
+       *  行内/Reading 原位三形态）：实际绘制证据 + foreignObject/渐变引用/
+       *  ID 作用域前缀观测 */
+      svgMath?: {
+        svgs: number
+        svgPainted: boolean
+        svgPaintedCount: number
+        maths: number
+        mathPainted: boolean
+        mathPaintedCount: number
+        hiddenControls: number
+        hiddenPainted: number
+        foreignObjects: number
+        gradientRefs: number
+        scopedGradientRefs: number
+        scopedIds: number
+        scopedStrokePainted: number
+      }
+      /** #572（T07）iframe 绘制面：白名单帧装配属性 + Live 命中接管层
+       *  （帧内内容对父文档不可读——内容可见证据在 browser 层） */
+      iframes?: {
+        frames: number
+        sandboxes: string[]
+        srcs: Array<string | null>
+        srcdocFrames: number
+        shields: number
+        visible: boolean
+      }
+    }
+    /** #569（T04）文档样式绘制：产物键集 + Reading 直接子块计算色 +
+     *  工具栏排除面基线（无产物缺省） */
+    docStyle?: {
+      scopes: string[]
+      mainRules: number
+      readingParagraphColor: string | null
+      readingHeadingColor: string | null
+      toolbarColor: string | null
+    }
     /** #106 分割线绘制：当前激活视图内首个渲染态横线的可见性与计数 */
     hr?: {
       visible: boolean
@@ -18964,5 +19048,641 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSessionReady(file)
     await waitViewState(file, (v) => v.selectionOffset === offset, 0, 30000)
     assert(await readDisk(file) === diskBefore, '快速切页应保持源文零写回')
+  }],
+
+  // ---- #567（T02）块级原生 HTML 双模式渲染 ----
+  // 真宿主 webview 内验证首条用户路径：带 colspan/rowspan 的 HTML 表格在
+  // Live（片段替换 widget）与 Reading（净化块渲染）两模式的绘制层证据
+  // （paint.html：渲染根命中 + 合并单元格 elementFromPoint 命中——「仅
+  // 元素数量不通过」的验收口径）与净化负向（渲染根内 script/on* 残留
+  // 恒 0、磁盘零写回）。
+  ['块级 HTML：双模式合并单元格绘制与净化负向（#567）', async () => {
+    const file = 'block-html-567.md'
+    const htmlTable = [
+      '<table>',
+      '  <tr>',
+      '    <td colspan="2" rowspan="3">合并单元格</td>',
+      '    <td onclick="evil()">普通格</td>',
+      '  </tr>',
+      '</table>',
+    ].join('\n')
+    const doc = [
+      '# 块级 HTML 样例',
+      '',
+      htmlTable,
+      '',
+      '<div onclick="evil()">可点击</div><script>evil()</script>',
+      '',
+      '结尾段落。',
+    ].join('\n')
+    await writeFile(nodePath.join(wsDir!, file), doc, 'utf8')
+    const diskBefore = await readDisk(file)
+    try {
+      await openWithEditor(file)
+      await waitSessionReady(file)
+      // Live 起步：光标在文档首（块外）——表格块以片段替换 widget 渲染
+      const live = await waitViewState(file, (v) =>
+        v.viewMode === 'live' && v.paint?.html !== undefined && v.paint.html.roots >= 2, 0, 30000)
+      const liveHtml = live.paint!.html!
+      assert(liveHtml.visible === true, `Live 渲染根实际可见（elementFromPoint 命中，实际 ${JSON.stringify(liveHtml)}）`)
+      assert(liveHtml.mergedCell !== null && liveHtml.mergedCell.hit === true,
+        `Live 合并单元格绘制层命中（实际 ${JSON.stringify(liveHtml.mergedCell)}）`)
+      // 边框宽为观测字段（原生表格默认无边框，0px 合法）；合并单元格的
+      // 绘制层证据 = 合并格中心 elementFromPoint 命中（上方断言）
+      assert(liveHtml.scripts === 0, `Live 渲染根内 script 残留应为 0（实际 ${liveHtml.scripts}）`)
+      assert(liveHtml.eventAttrs === 0, `Live 渲染根内 on* 事件属性残留应为 0（实际 ${liveHtml.eventAttrs}）`)
+
+      // Reading：html 块净化渲染（合并单元格 + 负向同口径）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
+      const reading = await waitViewState(file, (v) =>
+        v.viewMode === 'reading' && v.paint?.html !== undefined && v.paint.html.roots >= 2, 0, 30000)
+      const readingHtml = reading.paint!.html!
+      assert(readingHtml.visible === true, 'Reading 渲染根实际可见')
+      assert(readingHtml.mergedCell !== null && readingHtml.mergedCell.hit === true,
+        `Reading 合并单元格绘制层命中（实际 ${JSON.stringify(readingHtml.mergedCell)}）`)
+      assert(readingHtml.scripts === 0 && readingHtml.eventAttrs === 0,
+        `Reading 净化负向：script/on* 残留恒 0（实际 ${readingHtml.scripts}/${readingHtml.eventAttrs}）`)
+      assert((reading.readingBlockCount ?? 0) >= 4, 'Reading 块序列含 html 块（标题/表格/恶意/结尾）')
+
+      // 零写回：渲染与模式切换不写磁盘、不改源文
+      assert(await readDisk(file) === diskBefore, '渲染与切换零磁盘写回')
+      assert(reading.text === doc, '源文逐字节不变（不序列化浏览器修复 DOM）')
+    } finally {
+      await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
+    }
+  }],
+
+  // ---- #568（T03）行内 HTML 混排双模式渲染 ----
+  // 真宿主 webview 内验证：行内片段（span 内联颜色 / br 换行）在 Live
+  //（行内 inline replace 装饰）与 Reading（原位渲染）两模式的绘制层证据
+  //（paint.html.inline：宿主/颜色元素命中 + computed color + br 计数——
+  // 「仅元素数量不通过」的验收口径）与净化负向（script/on* 残留恒 0、
+  // 未闭合字面降级、磁盘零写回）。
+  ['行内 HTML：双模式内联颜色与换行绘制（#568）', async () => {
+    const file = 'inline-html-568.md'
+    const doc = [
+      '# 行内 HTML 样例',
+      '',
+      '正文 <span style="color:red">红字</span> 与 <span style="color:blue">蓝字</span> 混排，换行 a<br>b 尾。',
+      '',
+      '恶意 <span style="color:red" onclick="evil()">恶</span> 与未闭合 <span style="color:red">尾巴',
+      '',
+      '结尾段落。',
+    ].join('\n')
+    await writeFile(nodePath.join(wsDir!, file), doc, 'utf8')
+    const diskBefore = await readDisk(file)
+    try {
+      await openWithEditor(file)
+      await waitSessionReady(file)
+      // Live 起步：光标在文档首（片段外）——行内片段以装饰渲染
+      const live = await waitViewState(file, (v) =>
+        v.viewMode === 'live' && v.paint?.html !== undefined && v.paint.html.inline !== undefined &&
+        v.paint.html.inline.roots >= 4, 0, 30000)
+      const liveInline = live.paint!.html!.inline!
+      assert(liveInline.visible === true,
+        `Live 行内颜色元素实际可见（elementFromPoint 命中，实际 ${JSON.stringify(liveInline)}）`)
+      assert(liveInline.color === 'rgb(255, 0, 0)',
+        `Live span 内联颜色绘制（computed color，实际 ${liveInline.color}）`)
+      assert(liveInline.brs >= 1, `Live br 换行绘制（实际 ${liveInline.brs}）`)
+      assert(liveInline.scripts === 0 && liveInline.eventAttrs === 0,
+        `Live 净化负向：script/on* 残留恒 0（实际 ${liveInline.scripts}/${liveInline.eventAttrs}）`)
+
+      // Reading：原位渲染（颜色元素 + br + 负向同口径）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
+      const reading = await waitViewState(file, (v) =>
+        v.viewMode === 'reading' && v.paint?.html !== undefined && v.paint.html.inline !== undefined &&
+        v.paint.html.inline.roots >= 2, 0, 30000)
+      const readingInline = reading.paint!.html!.inline!
+      assert(readingInline.visible === true, 'Reading 行内颜色元素实际可见')
+      assert(readingInline.color === 'rgb(255, 0, 0)',
+        `Reading span 内联颜色绘制（实际 ${readingInline.color}）`)
+      assert(readingInline.brs >= 1, `Reading br 换行绘制（实际 ${readingInline.brs}）`)
+      assert(readingInline.scripts === 0 && readingInline.eventAttrs === 0,
+        `Reading 净化负向恒 0（实际 ${readingInline.scripts}/${readingInline.eventAttrs}）`)
+
+      // 零写回：渲染与模式切换不写磁盘、不改源文（未闭合片段字面降级可访问）
+      assert(await readDisk(file) === diskBefore, '渲染与切换零磁盘写回')
+      assert(reading.text === doc, '源文逐字节不变（不序列化浏览器修复 DOM）')
+    } finally {
+      await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
+    }
+  }],
+
+  // ---- #569（T04）全文文档样式装载与隔离 ----
+  // 真宿主（最低 1.82.3 = Chromium 114）验证 b2 路线：head 产物在场 +
+  // Reading 语义标签直中（h1/p 计算色）+ 工具栏排除面（定向规则不得
+  // 改写）+ 删除 style 块产物回收（无残留）——绘制层断言（paint.docStyle）。
+  ['文档样式：Reading 标签直中、工具栏排除与产物回收（#569）', async () => {
+    const file = 'doc-style-569.md'
+    const doc = [
+      '# 文档样式样例标题',
+      '',
+      '导语段落。',
+      '',
+      '<style>',
+      'p { color: rgb(0, 0, 205); }',
+      'h1 { color: rgb(75, 0, 130); }',
+      '.vsidian-toolbar { color: rgb(250, 100, 0); }',
+      '</style>',
+      '',
+      '结尾段落。',
+    ].join('\n')
+    await writeFile(nodePath.join(wsDir!, file), doc, 'utf8')
+    const diskBefore = await readDisk(file)
+    try {
+      await openWithEditor(file)
+      await waitSessionReady(file)
+      // Reading：产物在场 + 标签直中 + 排除面
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
+      const reading = await waitViewState(file, (v) =>
+        v.viewMode === 'reading' && v.paint?.docStyle !== undefined && v.paint.docStyle.mainRules > 0, 0, 30000)
+      const probe = reading.paint!.docStyle!
+      assert(probe.scopes.includes('doc'), `主文档产物在场（实际键集 ${JSON.stringify(probe.scopes)}）`)
+      assert(probe.readingParagraphColor === 'rgb(0, 0, 205)',
+        `Reading 段落被 p{} 直染（实际 ${probe.readingParagraphColor}）`)
+      assert(probe.readingHeadingColor === 'rgb(75, 0, 130)',
+        `Reading 标题被 h1{} 直染（实际 ${probe.readingHeadingColor}）`)
+      assert(probe.toolbarColor !== 'rgb(250, 100, 0)',
+        `工具栏不被定向规则染指（实际 ${probe.toolbarColor}）`)
+
+      // 删除 style 块（宿主编辑链路——WorkspaceEdit 外部增量广播）：
+      // 源文更新驱动产物回收（无残留规则），撤销链同源
+      const styleBlock = '<style>\np { color: rgb(0, 0, 205); }\nh1 { color: rgb(75, 0, 130); }\n.vsidian-toolbar { color: rgb(250, 100, 0); }\n</style>'
+      const stripped = doc.replace(`${styleBlock}\n\n`, '')
+      assert(await readDisk(file) === diskBefore, '装载与模式切换零磁盘写回')
+      const textDoc = await vscode.workspace.openTextDocument(wsUri(file))
+      const delEdit = new vscode.WorkspaceEdit()
+      const at = doc.indexOf(styleBlock)
+      assert(at >= 0, '定位 style 块')
+      delEdit.replace(wsUri(file), new vscode.Range(textDoc.positionAt(at), textDoc.positionAt(at + styleBlock.length + 2)), '')
+      assert(await vscode.workspace.applyEdit(delEdit), '删除 style 块应成功')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri(file))
+      const after = await waitViewState(file, (v) =>
+        v.viewMode === 'live' && v.text === stripped && v.paint?.docStyle === undefined, 0, 30000)
+      assert(after.text === stripped, '删除后的源文同步（外部增量）')
+      assert(after.paint?.docStyle === undefined, 'style 块删除后产物移除（无残留规则）')
+    } finally {
+      await rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined)
+    }
+  }],
+
+  ['HTML 资源：链接图片与 CSS 的文档归属、失效刷新与释放（#570）', async () => {
+    const fileA = 't5-res-570.md'
+    const fileB = 't5-sub/t5-b-570.md'
+    const docA = [
+      '# 资源归属主文档',
+      '',
+      '<div>',
+      '  <img src="t5-a-only.png" alt="A 图">',
+      '  <img srcset="t5-sa.png 1x, t5-sb.png 2x" alt="多候选">',
+      '  <video src="t5-clip.mp4" poster="t5-a-only.png" controls></video>',
+      '</div>',
+      '',
+      '![[t5-sub/t5-b-570]]',
+      '',
+      '<style>',
+      '.t5-hero { background: url(t5-bg.png); }',
+      '.t5-raw { background: url(t5-sub/t5-b-only.png); }',
+      '</style>',
+      '',
+      '<div class="t5-hero">背景</div>',
+    ].join('\n')
+    // B：img 引用 sub 专属文件（A 目录解析必 404——串源负向）；style 的
+    // 第二条规则引用 root 专属文件（B 目录解析必 404——双向串源检）
+    const docB = [
+      '# 嵌入目标 B',
+      '',
+      '<div><img src="t5-b-only.png" alt="B 图"></div>',
+      '',
+      '<style>',
+      '.t5-b-hero { background: url(t5-b-bg.png); }',
+      '.t5-b-raw { background: url(t5-a-only.png); }',
+      '</style>',
+    ].join('\n')
+    await mkdir(nodePath.join(wsDir!, 't5-sub'), { recursive: true }).catch(() => undefined)
+    const pngA = Buffer.from(TINY_PNG_BASE64, 'base64')
+    const pngB = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+    await Promise.all([
+      writeFile(nodePath.join(wsDir!, fileA), docA, 'utf8'),
+      writeFile(nodePath.join(wsDir!, fileB), docB, 'utf8'),
+      writeFile(nodePath.join(wsDir!, 't5-a-only.png'), pngA),
+      writeFile(nodePath.join(wsDir!, 't5-sa.png'), pngA),
+      writeFile(nodePath.join(wsDir!, 't5-sb.png'), pngB),
+      writeFile(nodePath.join(wsDir!, 't5-bg.png'), pngA),
+      writeFile(nodePath.join(wsDir!, 't5-clip.mp4'), Buffer.from('fake-mp4-bytes')),
+      writeFile(nodePath.join(wsDir!, 't5-sub/t5-b-only.png'), pngB),
+      writeFile(nodePath.join(wsDir!, 't5-sub/t5-b-bg.png'), pngB),
+    ])
+    try {
+      await openWithEditor(fileA)
+      await waitSessionReady(fileA)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      // Reading：A 与 B（嵌入卡内）的资源全部按各自文档身份装载（谓词直等
+      // B 图应用——嵌入装载与目录解析完成后才进入断言；imgLoaded 一并纳入
+      // 等待：src 应用（imgAppliedSrcs）与加载完成（load 事件置 loaded）是
+      // 两个异步阶段，CI 慢机上仅等应用即断言会在事件到达前失败）
+      const reading = await waitViewState(fileA, (v) => {
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && r !== undefined &&
+          r.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-a-only.png')) &&
+          r.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-b-only.png')) &&
+          r.srcsetApplied >= 1 && r.mediaResolved >= 1 && r.imgLoaded >= 2
+      }, 0, 45000)
+      const res = reading.paint!.html!.resources!
+      assert(res.imgLoaded >= 2, `A/B 图装载完成（实际 ${JSON.stringify(res)}）`)
+      // A/B 归属（串源负向）：A 图来自根目录、B 图来自 t5-sub（各自目录
+      // 才有对方没有的文件——src 应用地址按路径段区分）
+      assert(res.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-a-only.png')),
+        `A 图按根目录解析（实际 ${JSON.stringify(res.imgAppliedSrcs)}）`)
+      assert(res.imgAppliedSrcs.some((s) => decodeURIComponent(s).includes('t5-sub') && decodeURIComponent(s).includes('t5-b-only.png')),
+        `B 图按 sub 目录解析（实际 ${JSON.stringify(res.imgAppliedSrcs)}）`)
+      // CSS url() 归属（双向串源检）：A 产物 2 条全部解析；B 产物 2 条只
+      // 解析 1 条（b-bg 命中、a-only 在 B 目录不存在保持原文——串源即 2）
+      const docProd = res.docStyleProducts.find((p) => p.scope === 'doc')
+      const refProd = res.docStyleProducts.find((p) => p.scope.startsWith('ref:'))
+      assert(docProd !== undefined && docProd.totalUrls === 2 && docProd.resolvedUrls === 2,
+        `A 产物 url 双解析（实际 ${JSON.stringify(res.docStyleProducts)}）`)
+      assert(refProd !== undefined && refProd.totalUrls === 2 && refProd.resolvedUrls === 1,
+        `B 产物 url 单解析（b-bg 命中 / a-only 404 保持原文——串源即漂移；实际 ${JSON.stringify(res.docStyleProducts)}）`)
+      const urlBefore = res.firstResolvedCssUrl
+
+      // 失效刷新：覆写 A 的背景图（不同字节）→ watcher 失效广播 → 产物
+      // 重取到新代次 URI（地址文本变化）
+      await writeFile(nodePath.join(wsDir!, 't5-bg.png'), pngB)
+      const refreshed = await waitViewState(fileA, (v) => {
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && r !== undefined && r.firstResolvedCssUrl !== null &&
+          r.firstResolvedCssUrl !== urlBefore && r.imgLoaded >= 2
+      }, 0, 30000)
+      const res2 = refreshed.paint!.html!.resources!
+      assert(res2.firstResolvedCssUrl !== urlBefore, '背景图覆写后产物取到新地址（失效重取）')
+      assert(res2.imgLoaded >= 2, '失效重取不破坏既有装载面')
+
+      // 释放无迟到污染：删除嵌入行（WorkspaceEdit 外部增量）→ B 实例释放
+      // （img 计数回落、ref 产物移除——释放链路正向证据）
+      const embedLine = '![[t5-sub/t5-b-570]]'
+      const at = docA.indexOf(embedLine)
+      assert(at >= 0, '定位嵌入行')
+      const textDoc = await vscode.workspace.openTextDocument(wsUri(fileA))
+      const delEdit = new vscode.WorkspaceEdit()
+      delEdit.replace(wsUri(fileA), new vscode.Range(textDoc.positionAt(at), textDoc.positionAt(at + embedLine.length + 1)), '')
+      assert(await vscode.workspace.applyEdit(delEdit), '删除嵌入行应成功')
+      const released = await waitViewState(fileA, (v) => {
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && r !== undefined && r.imgs === 2 &&
+          !r.docStyleProducts.some((p) => p.scope.startsWith('ref:'))
+      }, 0, 30000)
+      const res3 = released.paint!.html!.resources!
+      assert(res3.imgs === 2, `B 嵌入释放后 img 计数回落（实际 ${res3.imgs}）`)
+      assert(!res3.docStyleProducts.some((p) => p.scope.startsWith('ref:')),
+        `B 文档样式产物随释放回收（实际 ${JSON.stringify(res3.docStyleProducts)}）`)
+    } finally {
+      await Promise.all([
+        rm(nodePath.join(wsDir!, fileA), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-sub'), { force: true, recursive: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-a-only.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-sa.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-sb.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-bg.png'), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't5-clip.mp4'), { force: true }).catch(() => undefined),
+      ])
+    }
+  }],
+  ['表单 details 与音视频的双模式行为（#571）', async () => {
+    const fileA = 't6-controls-571.md'
+    const docA = [
+      '# 表单与媒体',
+      '',
+      '<div id="t6-block">',
+      '  <details id="t6-details" open><summary>已展开</summary><p>折叠正文</p></details>',
+      '  <form action="https://example.com/submit" method="get">',
+      '    <input id="t6-text" type="text" value="初始">',
+      '    <select id="t6-sel"><option value="a">甲</option><option value="b">乙</option></select>',
+      '    <button type="submit" id="t6-go">提交</button>',
+      '  </form>',
+      '  <video id="t6-video" src="t6-tone.wav" controls muted autoplay></video>',
+      '  <audio id="t6-audio" src="t6-tone.wav" controls></audio>',
+      '</div>',
+      '',
+      '尾段。',
+    ].join('\n')
+    // 合成真实可解码 WAV（8kHz 单声道 8-bit 正弦）：宿主 webview 经
+    // asWebviewUri 归属解析装载——readyState/播放态是 CSP media-src 放行的
+    // 真实生效证据（#37 教训：CSP 断言必须落真实 webview 宿主）
+    function makeToneWavBytes(seconds: number, freq: number, rate: number): Buffer {
+      const n = Math.floor(seconds * rate)
+      const buf = Buffer.alloc(44 + n)
+      buf.write('RIFF', 0)
+      buf.writeUInt32LE(36 + n, 4)
+      buf.write('WAVE', 8)
+      buf.write('fmt ', 12)
+      buf.writeUInt32LE(16, 16)
+      buf.writeUInt16LE(1, 20) // PCM
+      buf.writeUInt16LE(1, 22) // mono
+      buf.writeUInt32LE(rate, 24)
+      buf.writeUInt32LE(rate, 28)
+      buf.writeUInt16LE(1, 32)
+      buf.writeUInt16LE(8, 34)
+      buf.write('data', 36)
+      buf.writeUInt32LE(n, 40)
+      for (let i = 0; i < n; i++) {
+        buf[44 + i] = 128 + Math.round(120 * Math.sin((2 * Math.PI * freq * i) / rate))
+      }
+      return buf
+    }
+    await writeFile(nodePath.join(wsDir!, fileA), docA, 'utf8')
+    await writeFile(nodePath.join(wsDir!, 't6-tone.wav'), makeToneWavBytes(3, 440, 8000))
+    try {
+      await openWithEditor(fileA)
+      await waitSessionReady(fileA)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      // Reading：控件族渲染（净化白名单放行）、details 展开态（真实 open
+      // 属性）、媒体真实装载（readyState ≥ 2 = 已取得当前数据——本地
+      // asWebviewUri 资源在 CSP media-src 下可装载的实证）与播放推进
+      const reading = await waitViewState(fileA, (v) => {
+        const it = v.paint?.html?.interact
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && it !== undefined &&
+          it.controls >= 4 && it.detailsTotal >= 1 && it.detailsOpen >= 1 &&
+          it.mediaTotal >= 2 && it.mediaReadyState !== null && it.mediaReadyState >= 2 &&
+          (r?.mediaResolved ?? 0) >= 2
+      }, 0, 45000)
+      const it = reading.paint!.html!.interact!
+      const res = reading.paint!.html!.resources!
+      assert(it.detailsOpen >= 1, `details 展开态经净化保留并呈现（真实 open 属性；实际 ${JSON.stringify(it)}）`)
+      assert(it.controls >= 4, `表单控件族渲染（input/select/button 等；实际 ${it.controls}）`)
+      assert(it.mediaReadyState! >= 2, `媒体取得当前数据（readyState≥2——CSP media-src 放行 cspSource 装载的实证；实际 ${it.mediaReadyState}）`)
+      assert(it.mediaError === null, `媒体无错误（不可用格式不得伪装已支持；实际 ${it.mediaError}）`)
+      assert(res.mediaResolved >= 2, `媒体属性归属解析改写（实际 ${res.mediaResolved}）`)
+      // 播放推进：Electron webview 默认 autoplay 策略允许 muted autoplay——
+      // 如实记录观测值（不达此断言即真实策略差异，落矩阵待查）
+      const playing = await waitViewState(fileA, (v) => {
+        const p = v.paint?.html?.interact
+        return v.viewMode === 'reading' && p !== undefined && p.mediaPlaying >= 1
+      }, 0, 20000).catch(() => null)
+      console.log(`[#571] muted autoplay 播放观测：mediaPlaying=${playing ? playing.paint!.html!.interact!.mediaPlaying : '未播放（策略差异，记录待人工核对）'} currentTime=${playing ? playing.paint!.html!.interact!.mediaCurrentTime : '-'}`)
+
+      // Live：widget 渲染同一控件与媒体面（点击交互的浏览器级验证在
+      // browser 套件 html-controls-571——真宿主不可驱动 webview 内指针）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri(fileA))
+      const live = await waitViewState(fileA, (v) => {
+        const p = v.paint?.html?.interact
+        return v.viewMode === 'live' && p !== undefined && p.controls >= 4 && p.mediaTotal >= 2
+      }, 0, 30000)
+      const liveIt = live.paint!.html!.interact!
+      assert(liveIt.controls >= 4, `Live widget 渲染控件族（实际 ${liveIt.controls}）`)
+      assert(liveIt.mediaTotal >= 2, `Live widget 渲染媒体（实际 ${liveIt.mediaTotal}）`)
+    } finally {
+      await Promise.all([
+        rm(nodePath.join(wsDir!, fileA), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't6-tone.wav'), { force: true }).catch(() => undefined),
+      ])
+    }
+  }],
+  ['SVG/MathML 与混合命名空间：双模式绘制、净化与文档 ID 归属（#573）', async () => {
+    const fileA = 't8-svg-573.md'
+    const fileB = 't8-sub/t8-b-573.md'
+    // A：块级 SVG（渐变/文字/foreignObject，多行成型块级）+ MathML 块 +
+    // 行内 SVG 混排 + 恶意载荷块 + 本篇 style 类块 + 嵌入 B（id="shared"
+    // 与 B 同名——串目标检测：A 橙渐变 / B 绿渐变）
+    const svgMain = [
+      '<svg width="160" height="80" viewBox="0 0 160 80">',
+      '  <defs>',
+      '    <linearGradient id="shared">',
+      '      <stop offset="0" stop-color="#ff8800"/>',
+      '      <stop offset="1" stop-color="#ffcc00"/>',
+      '    </linearGradient>',
+      '  </defs>',
+      '  <rect x="2" y="2" width="120" height="50" fill="url(#shared)"/>',
+      '  <text x="6" y="20" font-size="14">SVG 文字</text>',
+      '  <foreignObject x="124" y="4" width="32" height="18"><div xmlns="http://www.w3.org/1999/xhtml" style="color: rgb(178, 34, 34)">FO</div></foreignObject>',
+      '</svg>',
+    ].join('\n')
+    const evil = '<svg width="10" height="10"><rect onload="window.__t8evil = 1" width="5" height="5"/><script>486</script><a><text>e</text><animate attributeName="href" values="486"></animate></a></svg>'
+    const docA = [
+      '# SVG MathML 主文档',
+      '',
+      svgMain,
+      '',
+      '<math display="block"><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><mfrac><mn>1</mn><mi>y</mi></mfrac></mrow></math>',
+      '',
+      '行内 <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" fill="#0a880a"></circle></svg> 混排。',
+      '',
+      evil,
+      '',
+      // 隐藏负向对照（#576 Standards）：绘制探针的可见性钉子——
+      // visibility:hidden 的 svg 与 display:none 的 math 不得产生绘制证据
+      '<svg style="visibility:hidden" width="20" height="20"><rect width="10" height="10"/></svg>',
+      '',
+      '<math style="display:none"><mi>h</mi></math>',
+      '',
+      '![[t8-sub/t8-b-573]]',
+      '',
+      '<style>',
+      '.t8-cls { fill: #0055aa; }',
+      '</style>',
+      '',
+      '<svg width="30" height="30"><rect class="t8-cls" width="24" height="24"></rect></svg>',
+      '',
+    ].join('\n')
+    // B：id="shared" 同名渐变（绿色）+ CSS #id 选择器目标（协同命中证据）
+    const docB = [
+      '# B 目标',
+      '',
+      '<svg width="90" height="50"><defs><linearGradient id="shared"><stop offset="0" stop-color="#00aa44"/><stop offset="1" stop-color="#00cc66"/></linearGradient></defs><rect fill="url(#shared)" width="70" height="36"/></svg>',
+      '',
+      '<style>',
+      '#t8-b-rect { stroke: #aa00aa; stroke-width: 2; }',
+      '</style>',
+      '',
+      '<svg width="60" height="34"><rect id="t8-b-rect" width="50" height="26" fill="none"/></svg>',
+      '',
+    ].join('\n')
+    await mkdir(nodePath.join(wsDir!, 't8-sub'), { recursive: true }).catch(() => undefined)
+    await Promise.all([
+      writeFile(nodePath.join(wsDir!, fileA), docA, 'utf8'),
+      writeFile(nodePath.join(wsDir!, fileB), docB, 'utf8'),
+    ])
+    try {
+      await openWithEditor(fileA)
+      await waitSessionReady(fileA)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      // Reading：SVG/MathML 实际绘制（Chromium 114——MathML Core 能力
+      // 实测记录点）+ foreignObject + 渐变引用 + B 前缀化与 CSS 协同。
+      // 谓词含 B 就绪条件（scopedIds/gradientRefs）——嵌入卡异步装载在
+      // 高负载时段晚于 A 侧完成，不带 B 条件会在 B 未挂载时提前命中
+      const reading = await waitViewState(fileA, (v) => {
+        const m = v.paint?.html?.svgMath
+        return v.viewMode === 'reading' && m !== undefined && m.svgs >= 5 &&
+          m.svgPainted && m.maths >= 1 && m.mathPainted &&
+          m.scopedIds >= 2 && m.gradientRefs >= 2 && m.scopedStrokePainted >= 1
+      }, 0, 45000)
+      const m1 = reading.paint!.html!.svgMath!
+      assert(m1.svgs >= 5, `SVG 全量渲染（块级 + 行内 + B；实际 ${JSON.stringify(m1)}）`)
+      assert(m1.svgPainted, 'SVG 实际绘制（rect 有面积——非 DOM 存在性）')
+      assert(m1.mathPainted, `MathML 实际绘制（Chromium 114 MathML Core；实际 ${JSON.stringify(m1)}）`)
+      assert(m1.foreignObjects >= 1, 'foreignObject 混合内容在场')
+      assert(m1.gradientRefs >= 2, `A/B 渐变引用在场（实际 ${m1.gradientRefs}）`)
+      // A/B 相同 ID 不串目标：B 的 id 与引用全部前缀化、前缀描边绘制命中
+      assert(m1.scopedIds >= 2, `B 产物 id 前缀化（shared + t8-b-rect；实际 ${m1.scopedIds}）`)
+      assert(m1.scopedGradientRefs >= 1, `B 的 url(#shared) 引用已前缀化——不串 A（实际 ${m1.scopedGradientRefs}）`)
+      assert(m1.scopedStrokePainted >= 1, `B 的 CSS #id 选择器协同命中并绘制（实际 ${m1.scopedStrokePainted}）`)
+      const h1 = reading.paint!.html!
+      assert(h1.scripts === 0 && h1.eventAttrs === 0,
+        `净化负向：svg script/事件零残留（实际 scripts=${h1.scripts} events=${h1.eventAttrs}）`)
+      // #576 Standards 负向控制：隐藏对照在场且不产生绘制证据（探针非恒真）
+      assert(m1.hiddenControls >= 2, `隐藏负向对照在场（visibility:hidden svg + display:none math；实际 ${m1.hiddenControls}）`)
+      assert(m1.hiddenPainted === 0, `隐藏元素不产生绘制证据（实际 ${m1.hiddenPainted}）`)
+
+      // Live：widget 绘制 + MathML 结构 + 模式切换存续（主文 contentDOM 内
+      // 4 个 svg：块级 1 + 行内 3——嵌入卡 B 是独立 Live 实例不计入）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri(fileA))
+      const live = await waitViewState(fileA, (v) => {
+        const m = v.paint?.html?.svgMath
+        return v.viewMode === 'live' && m !== undefined && m.svgs >= 4 &&
+          m.svgPainted && m.maths >= 1 && m.mathPainted
+      }, 0, 45000)
+      const m2 = live.paint!.html!.svgMath!
+      assert(m2.svgPainted && m2.mathPainted,
+        `Live：SVG 与 MathML widget 实际绘制（实际 ${JSON.stringify(m2)}）`)
+      assert(live.paint!.html!.scripts === 0, 'Live 净化负向零残留')
+      assert(m2.hiddenControls >= 2 && m2.hiddenPainted === 0,
+        `Live 隐藏负向对照不产生绘制证据（实际 ${JSON.stringify(m2)}）`)
+
+      // 释放：删除嵌入行（外部增量）→ B 释放，作用域前缀 id 归零
+      const embedLine = '![[t8-sub/t8-b-573]]'
+      const at = docA.indexOf(embedLine)
+      assert(at >= 0, '定位嵌入行')
+      const textDoc = await vscode.workspace.openTextDocument(wsUri(fileA))
+      const delEdit = new vscode.WorkspaceEdit()
+      delEdit.replace(wsUri(fileA), new vscode.Range(textDoc.positionAt(at), textDoc.positionAt(at + embedLine.length + 1)), '')
+      assert(await vscode.workspace.applyEdit(delEdit), '删除嵌入行应成功')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      const released = await waitViewState(fileA, (v) => {
+        const m = v.paint?.html?.svgMath
+        return v.viewMode === 'reading' && m !== undefined && m.scopedIds === 0 && m.svgs >= 4
+      }, 0, 45000)
+      const m3 = released.paint!.html!.svgMath!
+      assert(m3.scopedIds === 0, `B 嵌入释放后前缀 id 归零（实际 ${m3.scopedIds}）`)
+      assert(m3.svgs >= 4, `A 侧 SVG 不受释放影响（实际 ${m3.svgs}）`)
+    } finally {
+      await Promise.all([
+        rm(nodePath.join(wsDir!, fileA), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't8-sub'), { force: true, recursive: true }).catch(() => undefined),
+      ])
+    }
+  }],
+  ['HTML iframe：装载矩阵、宿主桥隔离与释放（#572）', async () => {
+    // 受控 https 服务器：装载即向父窗口注入伪造宿主消息（守卫失效则
+    // view.mode.set 会把视图切走——在场状态即隔离证据）
+    const samplePage = [
+      '<!doctype html><html><head><meta charset="utf-8"><title>iframe 样本页</title></head>',
+      '<body style="margin:0"><div id="marker" style="padding:12px">iframe 样本页标记</div>',
+      '<script>',
+      "  window.parent.postMessage({ kind: 'view.mode.set', mode: 'live' }, '*')",
+      '</script>',
+      '</body></html>',
+    ].join('')
+    const tlsSeen = { connections: 0 }
+    const fixturesDir = nodePath.resolve(__dirname, '..', '..', '..', '..', 'test', 'fixtures')
+    const tlsServer = nodeHttps.createServer({
+      key: readFileSync(nodePath.join(fixturesDir, 'webframe-test-key.pem')),
+      cert: readFileSync(nodePath.join(fixturesDir, 'webframe-test-cert.pem')),
+    }, (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(samplePage)
+    })
+    tlsServer.on('connection', () => {
+      tlsSeen.connections += 1
+    })
+    await new Promise<void>((resolve) => tlsServer.listen(0, '127.0.0.1', resolve))
+    const embedUrl = `https://127.0.0.1:${(tlsServer.address() as { port: number }).port}/embed`
+    // 本地可控页面（工作区文件——src 相对路径经资源归属解析的装载目标）
+    const pageFile = 'iframe-page-572.html'
+    const localPage = [
+      '<!doctype html><html><head><meta charset="utf-8"><title>本地页</title>',
+      '<style>body { font-family: sans-serif; }</style></head>',
+      '<body style="margin:0"><div id="local-marker" style="padding:12px">本地页面标记</div></body></html>',
+    ].join('')
+    const file = 'block-html-572.md'
+    const doc = [
+      '# iframe 样例',
+      '',
+      '<div>',
+      `  <iframe id="f-local" src="${pageFile}" height="140" title="本地页"></iframe>`,
+      `  <iframe id="f-https" src="${embedUrl}" height="140" title="远端页"></iframe>`,
+      '</div>',
+      '',
+      `<iframe id="f-srcdoc" srcdoc="<p id='in'>内嵌标记</p><script>evil()</script>" height="60"></iframe>`,
+      '',
+      '结尾段落。',
+    ].join('\n')
+    const plainFile = 'plain-572.md'
+    try {
+      await Promise.all([
+        writeFile(nodePath.join(wsDir!, pageFile), localPage, 'utf8'),
+        writeFile(nodePath.join(wsDir!, file), doc, 'utf8'),
+      ])
+      await openWithEditor(file)
+      await waitSessionReady(file)
+      // Live：三帧装配（sandbox 矩阵 + 本地 src 归属改写 + shield 全覆盖）。
+      // 等待谓词含本地 src 已改写（相对地址首跳会被资源服务拒绝——同 img
+      // 的坏相对候选问题，改写落地前的帧导航属既有语义，断言只看终态）
+      const live = await waitViewState(file, (v) =>
+        v.viewMode === 'live' && v.paint?.html?.iframes !== undefined &&
+        v.paint.html.iframes.frames === 3 && v.paint.html.iframes.shields === 3 &&
+        (v.paint.html.iframes.srcs[0] ?? '').includes('iframe-page-572.html') &&
+        /vscode-webview|vscode-resource/.test(v.paint.html.iframes.srcs[0] ?? ''), 0, 45000)
+      const liveFrames = live.paint!.html!.iframes!
+      assert(liveFrames.visible === true, `帧盒实际绘制（elementFromPoint 命中；实际 ${JSON.stringify(liveFrames)}`)
+      assert(liveFrames.sandboxes[0] === '' && liveFrames.sandboxes[1] === 'allow-scripts' &&
+        liveFrames.sandboxes[2] === '',
+        `本地/srcdoc 帧零 token、https 帧 allow-scripts（实际 ${JSON.stringify(liveFrames.sandboxes)}）`)
+      assert(liveFrames.srcdocFrames === 1, `srcdoc 帧在场（实际 ${liveFrames.srcdocFrames}）`)
+      const localSrc = liveFrames.srcs[0] ?? ''
+      assert(/vscode-webview|vscode-resource/.test(localSrc) && decodeURIComponent(localSrc).includes(pageFile),
+        `本地页 src 已改写为资源域地址（实际 ${localSrc}）——frame-src 的 cspSource 面（#572）`)
+      assert(liveFrames.srcs[1] === embedUrl, 'https 直连不改写')
+
+      // Reading：原生呈现（无 shield）+ sandbox 面不随模式变化
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
+      const reading = await waitViewState(file, (v) =>
+        v.viewMode === 'reading' && v.paint?.html?.iframes !== undefined &&
+        v.paint.html.iframes.frames === 3 && v.paint.html.iframes.shields === 0, 0, 30000)
+      const readFrames = reading.paint!.html!.iframes!
+      assert(readFrames.visible === true, 'Reading 帧盒实际绘制')
+      assert(readFrames.sandboxes[1] === 'allow-scripts' && readFrames.sandboxes[0] === '' &&
+        readFrames.sandboxes[2] === '',
+        `Reading sandbox 面与 Live 一致（实际 ${JSON.stringify(readFrames.sandboxes)}）`)
+
+      // CSP 网络层差分：webview 内 https 帧对受控服务器发起出网连接
+      //（frame-src https: 放行导航——被 CSP 拦截则零连接；自签证书校验
+      // 失败发生在 socket 到达之后，属测试环境不可注入信任的既知边界）
+      await poll('受控服务器收到 iframe 出网连接', async () =>
+        tlsSeen.connections > 0 ? tlsSeen.connections : undefined, 20000)
+      assert(tlsSeen.connections > 0, `https 帧导航被 CSP 放行（连接到达；实际 ${tlsSeen.connections}）`)
+
+      // 宿主桥隔离：样本页装载即注入伪造 view.mode.set（live）——守卫生效
+      // 则 Reading 视图保持不变（消息桥仅放行宿主来源，子帧消息无条件拒绝）
+      const after = await waitViewState(file, (v) => v.viewMode === 'reading')
+      assert(after.viewMode === 'reading', '恶意子页 postMessage 不被消息桥消费（宿主桥隔离）')
+
+      // 释放：换到无 iframe 文档——paint 探针无帧（DOM 移除即中止在途装载）
+      await writeFile(nodePath.join(wsDir!, plainFile), '# 无帧文档\n\n普通正文。\n', 'utf8')
+      await openWithEditor(plainFile)
+      await waitSessionReady(plainFile)
+      const plain = await waitViewState(plainFile, (v) =>
+        v.paint?.html?.iframes === undefined || v.paint.html.iframes.frames === 0, 0, 30000)
+      assert(plain.paint?.html?.iframes === undefined || plain.paint!.html!.iframes!.frames === 0,
+        '换文档后无残留 iframe（释放无陈旧帧）')
+    } finally {
+      await Promise.all([
+        rm(nodePath.join(wsDir!, file), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, pageFile), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, plainFile), { force: true }).catch(() => undefined),
+      ])
+      tlsServer.close()
+    }
   }],
 ]

@@ -891,6 +891,8 @@ export const zhCn: Record<MessageKey, string> = {
   'contextMenu.graphicExportSvg': '导出 SVG',
   'contextMenu.graphicExportPng': '导出 PNG',
   'contextMenu.graphicCopySource': '复制源码',
+  /** 块级原生 HTML（#567/T02） */
+  'html.blockTooltip': 'HTML 区块——点击编辑源码',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': '复制当前块链接',
   // ---- #438 图形块场景簇四操作（右键菜单项的键位评估记录；默认未绑定） ----
@@ -898,6 +900,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.graphic.exportSvg.title': '导出光标处图形为 SVG',
   'command.graphic.exportPng.title': '导出光标处图形为 PNG',
   'command.graphic.copySource.title': '复制光标处图形源码',
+  // ---- #567（T02）块级 HTML 源码编辑操作（默认未绑定，仅 Live 正文） ----
+  'command.html.editSource.title': '编辑当前 HTML 源码',
 
   // ---- #437 表格专属右键簇（tableOps；复制语义沿区域复制口径）----
   /** 表格簇：结构六操作（复用键位注册表既有 id，提示列自动派生） */

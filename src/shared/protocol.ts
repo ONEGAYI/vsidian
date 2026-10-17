@@ -307,6 +307,19 @@ export type HostToWebview =
    *  会话全部面板（多面板一致）。webview 对命中条目撤下旧图、作废重发
    *  image.request（新版本 URL）；旧 reqId 在途结果被代次守卫丢弃 */
   | { kind: 'image.invalidate'; srcs: string[] }
+  /** #570（T05）HTML/CSS 资源 URL 解析结果：reqId 对应 htmlResource.request。
+   *  独立消息种（不并入 image.result——webview 侧 reqId 路由空间按消息种
+   *  隔离，杜绝与各 ImageResourceManager 自增 reqId 的误配对）。ok 时 url
+   *  为可直接进属性/产物文本的 webview 资源 URI；失败附原因码（语义与
+   *  image.result 对齐），调用侧保持原文不编造地址 */
+  | { kind: 'htmlResource.result'; reqId: number; ok: true; url: string }
+  | {
+      kind: 'htmlResource.result'
+      reqId: number
+      ok: false
+      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error' | 'inaccessible'
+      detail?: string
+    }
   /** 图片核验唤醒（#201）：窗口焦点回归/远程重连后由宿主广播，webview
    *  有活跃图源时立即触发一轮周期核验（及时核验，不等下一周期） */
   | { kind: 'image.wake' }
@@ -1588,6 +1601,22 @@ export type WebviewToHost =
       /** #220 来源文档（悬停浮层内图片） */
       sourceDocUri?: string
     }
+  /** #570（T05）HTML/CSS 资源 URL 解析请求：原生 HTML 的 srcset/媒体属性
+   *  与文档样式 url()/@import/@font-face 的相对目标按**来源文档**解析为
+   *  webview 可装载地址。会话守卫与 image.request 同款（就绪且 docUri 匹
+   *  配）；sourceDocUri 语义同款（嵌入 B/C 身份，宿主与已读取的悬停/嵌入
+   *  目标比对，不匹配即丢弃——不信任前端任意 URI）。reqId 为 webview 侧
+   *  本消息种独立自增空间（路由按消息种隔离）。宿主侧解析复用同一
+   *  classifyImageTarget 白名单与 asWebviewUri 机制（路径规则不建第二份） */
+  | {
+      kind: 'htmlResource.request'
+      sessionId: string
+      docUri: string
+      reqId: number
+      url: string
+      /** 来源文档（嵌入/悬停 B/C 身份；缺省 = 面板自身文档） */
+      sourceDocUri?: string
+    }
   /** 图片周期核验（#201）：webview 活跃挂载图源（非直连）合并上报，宿主
    *  stat 对比版本表后对变化目标回发 image.invalidate（维持目标不响应）。
    *  由 webview 调度器驱动：间隔约 30 秒、无活跃槽位停止、面板恢复可见/
@@ -2830,6 +2859,156 @@ export interface PaintProbe {
     overlayVisible: boolean
     /** 浮层内图片已装载（img 元素在场且 loaded 态） */
     overlayImgLoaded: boolean
+  }
+  /** #569（T04）文档样式绘制观测：head 产物元素键集（装载面在场）与
+   *  Reading 主容器直接子块的计算色（文档样式命中的绘制层证据——
+   *  「仅产物元素在场不通过」的验收口径）。无产物时整个字段缺省。 */
+  docStyle?: {
+    /** head 内全部产物元素的 docScope 键（主文档 'doc' + 嵌入派生键） */
+    scopes: string[]
+    /** 主文档产物规则数 */
+    mainRules: number
+    /** Reading 主容器直接子首个段落的计算色（无 Reading 视图为 null） */
+    readingParagraphColor: string | null
+    /** Reading 主容器直接子首个标题的计算色（无 Reading 视图为 null） */
+    readingHeadingColor: string | null
+    /** 工具栏计算色（排除面基线对照——定向规则不得改写它） */
+    toolbarColor: string | null
+  }
+  /** #567（T02）块级原生 HTML 绘制观测：当前激活视图内 html 块渲染根的
+   *  计数与真实可见性（elementFromPoint 命中——jsdom 无布局恒 false，
+   *  只作真宿主集成断言依据）。mergedCell 是合并单元格的绘制层证据
+   *  （colspan/rowspan 格命中 + computed 边框宽——「仅元素数量不通过」
+   *  的验收口径）；scripts/eventAttrs 为净化负向证据（渲染根内 script
+   *  元素与 on* 属性残留计数，期望恒 0）。无 html 块时整个字段缺省。 */
+  html?: {
+    /** 当前激活视图内渲染根数（live：.vsidian-live-html / reading：
+     *  .vsidian-reading-html） */
+    roots: number
+    /** 任一渲染根 rect 有面积且 elementFromPoint 命中自身子树 */
+    visible: boolean
+    /** 首个带 colspan/rowspan 的表格格命中证据（无合并单元格为 null） */
+    mergedCell: { hit: boolean; borderWidth: string | null } | null
+    /** 净化负向：渲染根内 script 元素数（期望 0） */
+    scripts: number
+    /** 净化负向：渲染根内 on* 事件属性数（期望 0） */
+    eventAttrs: number
+    /** #568（T03）行内原生 HTML 绘制面：live 行内宿主 / reading 原位
+     *  渲染的行内颜色元素观测（无包装类——按 [style*=color] 圈定） */
+    inline: {
+      /** live：.vsidian-live-inline-html 宿主数；reading：容器内带行内
+       *  颜色样式且不在块级 html 块内的原生元素数 */
+      roots: number
+      /** 任一观测元素 rect 有面积且 elementFromPoint 命中自身子树 */
+      visible: boolean
+      /** 首个观测元素 computed color（span 内联颜色绘制证据；无则 null） */
+      color: string | null
+      /** br 换行绘制证据：live = 行内宿主子树 br 数；reading = 容器内
+       *  非代码块 br 数（原子 br 片段无颜色元素，颜色圈定不到） */
+      brs: number
+      /** 净化负向：观测面子树内 script 元素数（期望 0） */
+      scripts: number
+      /** 净化负向：观测面子树内 on* 事件属性数（期望 0） */
+      eventAttrs: number
+    }
+    /** #570（T05）HTML/CSS 资源绘制面：图片装载态（管理器回包应用 +
+     *  loaded 确认）、srcset 重组、媒体属性改写（成功解析后属性为绝对
+     *  地址）与文档样式产物 url() 解析应用计数 */
+    resources: {
+      imgs: number
+      imgLoaded: number
+      imgAppliedSrc: string | null
+      /** 全部已应用地址（A/B 归属断言——按路径段区分来源文档） */
+      imgAppliedSrcs: string[]
+      srcsetApplied: number
+      srcsetPending: number
+      mediaResolved: number
+      /** 各 docScope 产物的 url() 解析计数（归属断言按 scope 分别检） */
+      docStyleProducts: Array<{ scope: string; resolvedUrls: number; totalUrls: number }>
+      /** 首个已解析 CSS URL（失效重取的地址变化断言） */
+      firstResolvedCssUrl: string | null
+    }
+    /** #571（T06）表单与媒体交互面：控件计数、details 展开态（真实 open
+     *  属性）与媒体真实装载/播放态（readyState/currentTime——非标签存在
+     *  断言）。作用域 = 当前模式内容域（含行内片段与嵌入卡内容）。 */
+    interact: {
+      /** input/select/textarea/button 控件计数 */
+      controls: number
+      detailsTotal: number
+      /** 展开（open 属性真实翻转）的 details 数 */
+      detailsOpen: number
+      mediaTotal: number
+      /** 未暂停且未结束的媒体数（真实播放中） */
+      mediaPlaying: number
+      mediaPaused: number
+      /** 首个媒体就绪态（0 无数据 … 4 可播；≥2 = 已有当前帧数据） */
+      mediaReadyState: number | null
+      /** 首个媒体播放进度（秒；>0 即解码器真实推进） */
+      mediaCurrentTime: number | null
+      /** 首个媒体网络状态（0 空 / 1 空闲 / 2 装载中 / 3 无来源） */
+      mediaNetworkState: number | null
+      /** 首个媒体错误码（MediaError.code；无错误 null——不可用格式的真实
+       *  状态证据，不将不支持编码声明为已支持） */
+      mediaError: number | null
+      /** 全部媒体就绪态（多元素矩阵断言） */
+      mediaReadyStates: number[]
+    }
+    /** #573（T08）SVG/MathML 与混合命名空间绘制面：实际绘制证据（真宿主
+     *  /浏览器断言面——可见且 rect 有面积即真实排版；jsdom 无布局恒
+     *  false 只作计数回归）+ foreignObject/渐变引用/ID 作用域前缀观测
+     *  与隐藏负向对照（#576 Standards：探针不恒真的钉子） */
+    svgMath: {
+      /** 渲染根内 svg 元素数 */
+      svgs: number
+      /** 任一 svg 可见且 rect 有面积（实际绘制，非 DOM 存在性；可见 =
+       *  visibility 非 hidden 且 opacity 非 0——隐藏元素 rect 仍可能有
+       *  面积，不当作绘制证据） */
+      svgPainted: boolean
+      /** 可见且绘制的 svg 计数（量化面） */
+      svgPaintedCount: number
+      /** 渲染根内 math 元素数 */
+      maths: number
+      /** 任一 math 可见且 rect 有面积（MathML 结构实际绘制） */
+      mathPainted: boolean
+      /** 可见且绘制的 math 计数 */
+      mathPaintedCount: number
+      /** 隐藏对照元素计数（display:none 或 visibility:hidden 的 svg/math
+       *  ——集成用例负向控制在场面） */
+      hiddenControls: number
+      /** 隐藏对照中被误判绘制的计数（**应恒 0**——探针不恒真的钉子） */
+      hiddenPainted: number
+      /** foreignObject 混合内容计数 */
+      foreignObjects: number
+      /** fill/stroke/filter/clip-path 属性含 url(#id) 的渐变/引用计数 */
+      gradientRefs: number
+      /** 带作用域前缀的 url(#…) 引用计数（B 域引用不指向 A 的证据） */
+      scopedGradientRefs: number
+      /** 带 ID 作用域前缀（vs<scope>--）的产物 id 计数（B/C 前缀化证据） */
+      scopedIds: number
+      /** 带前缀 id 元素中 computed stroke 非 none 的计数（B 的 CSS #id
+       *  选择器协同命中并绘制的证据） */
+      scopedStrokePainted: number
+    }
+    /** #572（T07）iframe 绘制面：当前激活内容域内白名单帧的装配属性
+     *  （sandbox 系统强制面）、src 归属改写与 Live 命中接管层计数。
+     *  **帧内内容可见性不在此断言**（沙箱/跨域帧对父文档不可读——
+     *  「load 事件或 DOM 存在不当作可见证据」的口径），内容可见证据
+     *  在 browser 层经 CDP 帧读取。 */
+    iframes?: {
+      /** 白名单帧数（data-vsidian-iframe 标记） */
+      frames: number
+      /** 各帧 sandbox 属性值序列（装配面钉住：https=allow-scripts、其余空） */
+      sandboxes: string[]
+      /** 各帧 src 属性值序列（本地解析改写断言；srcdoc 帧为 null 形态缺省） */
+      srcs: Array<string | null>
+      /** srcdoc 在场帧数（内容形态矩阵） */
+      srcdocFrames: number
+      /** Live 命中接管层数（Reading 恒 0——不接管原生交互） */
+      shields: number
+      /** 任一帧（或其 wrapper）rect 有面积且 elementFromPoint 命中
+       *  （jsdom 无布局恒 false，真宿主集成断言依据） */
+      visible: boolean
+    }
   }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
   quickActions?: {
@@ -4507,6 +4686,17 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.src) &&
         (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
+    case 'htmlResource.request':
+      // #570（T05）HTML/CSS 资源解析：字段形态与 image.request 同款（url
+      // 非空；sourceDocUri 可选非空字符串）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.url === 'string' &&
+        v.url.length > 0 &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
+      )
     case 'image.verify':
       // #201 周期核验：条目形态（state 枚举 + 可选 reason 码）
       return (
@@ -5149,6 +5339,26 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'image.invalidate':
       // #201 失效通知：src 非空数组（空批无广播意义，防御放行不收紧）
       return Array.isArray(v.srcs) && v.srcs.every(isString)
+    case 'htmlResource.result':
+      // #570（T05）HTML/CSS 资源解析结果：reqId 配对 + ok/失败形态
+      //（reason 枚举与 image.result 对齐）
+      if (!isPositiveInt(v.reqId)) {
+        return false
+      }
+      if (v.ok === true) {
+        return isString(v.url)
+      }
+      if (v.ok === false) {
+        return (
+          (v.reason === 'blocked' ||
+            v.reason === 'outside-workspace' ||
+            v.reason === 'not-found' ||
+            v.reason === 'read-error' ||
+            v.reason === 'inaccessible') &&
+          (v.detail === undefined || isString(v.detail))
+        )
+      }
+      return false
     case 'image.wake':
       return true
     case 'image.paste.result':

@@ -46,6 +46,9 @@ export const READING_CLASS_NAMES = {
   /** #222 嵌入块（独占行；主文档挂载时内含嵌入卡片，嵌入内容/浮层内为
    *  占位引用行） */
   embedBlock: 'vsidian-reading-embed',
+  /** #567（T02）块级原生 HTML 块（内含净化后的原生语义 DOM，不加生产
+   *  Markdown 块类——Q4=B 口径，样式契约 reading-html-block 条目） */
+  html: 'vsidian-reading-html',
   /** #246 混排嵌入宿主修饰类（叠加在 embedBlock 上：块内占位提升产生
    *  的流内卡片宿主——列表/引用容器内跟随缩进与列宽） */
   embedMixed: 'vsidian-reading-embed-mixed',
@@ -116,6 +119,9 @@ function blockClassNames(block: ReadingBlock): string[] {
     case 'embed':
       names.push(READING_CLASS_NAMES.embedBlock)
       break
+    case 'html':
+      names.push(READING_CLASS_NAMES.html)
+      break
   }
   return names
 }
@@ -124,12 +130,20 @@ function blockClassNames(block: ReadingBlock): string[] {
  * 创建单个阅读块元素（结构契约：稳定类名 + data-vsidian-src-start/end 锚点；
  * 内部 HTML 为 markdown-it 产物，进 DOM 前净化并转换任务项）。
  * #7 全量渲染与按需挂载共用此构建器，保证两种路径的块结构逐字节一致。
+ * #567（T02）起 html 块渲染根挂 data-vsidian-doc-scope 标记（T01 探针
+ * b2 隔离路线的基座——值 = 文档身份）；#569（T04）铺开到**全部内容块根**
+ * （Markdown 块同挂——b2「逐块标记」纪律：嵌入卡是内容流中的兄弟块而
+ * 非后代，标记只挂文档自有内容根才能兑现排除语义；系统 chrome——卡壳/
+ * 工具栏/gutter——不挂）。
  */
-export function createReadingBlockElement(block: ReadingBlock, text: string): HTMLElement {
+export function createReadingBlockElement(block: ReadingBlock, text: string, docScope?: string): HTMLElement {
   const el = document.createElement('div')
   el.className = blockClassNames(block).join(' ')
   el.dataset['vsidianSrcStart'] = String(block.start)
   el.dataset['vsidianSrcEnd'] = String(block.end)
+  if (docScope !== undefined) {
+    el.dataset['vsidianDocScope'] = docScope
+  }
   el.innerHTML = block.html
   sanitizeReadingDom(el)
   bindReadingCodeContext(el, text, block.codeContext)

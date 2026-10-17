@@ -1,0 +1,653 @@
+{
+  "env": {
+    "label": "host-1.82.3-webview",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.82.3 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36",
+    "startedAt": "2026-10-16T14:48:43.857Z"
+  },
+  "capabilities": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.82.3 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36",
+    "fontsBaseline": 20,
+    "constructedSheet": true,
+    ":is": true,
+    ":where": true,
+    ":not(complex)": true,
+    ":has": true,
+    "@scope 规则类型": "(无规则)",
+    "CSSScopeRule 全局": false,
+    "@layer 规则类型": "CSSLayerBlockRule",
+    "@container 规则类型": "CSSContainerRule",
+    "嵌套规则": true,
+    "adoptedStyleSheets(document)": true,
+    "adoptedStyleSheets(shadowRoot)": true
+  },
+  "scenarios": [
+    {
+      "route": "baseline",
+      "summary": "基线：无文档样式，生产 CSS + 契约片段 + 片段仿真下的参照读值",
+      "rows": [
+        {
+          "name": "toolbar.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "基线入库",
+          "meets": null
+        },
+        {
+          "name": "cm-strong.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "基线入库",
+          "meets": null
+        },
+        {
+          "name": "a-md-h1.font-size",
+          "value": "21.7px",
+          "expect": "基线入库（生产标题规则值）",
+          "meets": null
+        },
+        {
+          "name": "a-strong.text-decoration-color",
+          "value": "rgb(16, 17, 18)",
+          "expect": "基线入库（契约片段命中值）",
+          "meets": true
+        },
+        {
+          "name": "a-theme.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "基线入库（主题变量解析值）",
+          "meets": null
+        },
+        {
+          "name": "b-md-p.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "基线入库",
+          "meets": null
+        }
+      ],
+      "notes": [],
+      "base": {}
+    },
+    {
+      "route": "a1-shadow-content",
+      "summary": "Shadow DOM：Reading 内容整体进 shadow root，文档样式挂 shadow 内",
+      "rows": [
+        {
+          "name": "a-native-h1.color",
+          "value": "rgb(75, 0, 130)",
+          "expect": "文档样式命中 shadow 内原生 h1",
+          "meets": true
+        },
+        {
+          "name": "a-md-p.color",
+          "value": "rgb(0, 0, 205)",
+          "expect": "文档样式命中 shadow 内 Markdown p",
+          "meets": true
+        },
+        {
+          "name": "a-md-h1.font-size",
+          "value": "28px",
+          "expect": "同基线（21.7px）",
+          "meets": false
+        },
+        {
+          "name": "a-md-h1.font-size.breakage",
+          "value": "28px",
+          "expect": "生产 CSS 断供证据（应≠基线值）",
+          "meets": null
+        },
+        {
+          "name": "a-strong.text-decoration-color",
+          "value": "rgb(0, 0, 205)",
+          "expect": "同基线（rgb(16, 17, 18)）",
+          "meets": false
+        },
+        {
+          "name": "a-strong.text-decoration-color.breakage",
+          "value": "rgb(0, 0, 205)",
+          "expect": "外部片段断供证据（应≠基线值）",
+          "meets": null
+        },
+        {
+          "name": "a-theme.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "b-md-p.color",
+          "value": "rgb(0, 128, 128)",
+          "expect": "B 自有样式命中",
+          "meets": true
+        },
+        {
+          "name": "b-native-h1.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "A 的 h1{} 不达 B shadow（非 purple）",
+          "meets": true
+        },
+        {
+          "name": "c-md-p.color",
+          "value": "rgb(107, 142, 35)",
+          "expect": "C 自有样式命中",
+          "meets": true
+        },
+        {
+          "name": "b-native-p.color",
+          "value": "rgb(222, 0, 111)",
+          "expect": "A 变量是否穿透进 B shadow（继承泄漏探测）",
+          "meets": false
+        },
+        {
+          "name": "toolbar.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "cm-strong.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "document.fonts.families",
+          "value": "KaTeX_AMS,KaTeX_Caligraphic,KaTeX_Caligraphic,KaTeX_Fraktur,KaTeX_Fraktur,KaTeX_Main,KaTeX_Main,KaTeX_Main,KaTeX_Main,KaTeX_Math,KaTeX_Math,KaTeX_SansSerif,KaTeX_SansSerif,KaTeX_SansSerif,KaTeX_Script,KaTeX_Size1,KaTeX_Size2,KaTeX_Size3,KaTeX_Size4,KaTeX_Typewriter",
+          "expect": "shadow 内 @font-face 是否泄漏进文档字体集",
+          "meets": null
+        }
+      ],
+      "notes": [
+        "若 families 含 probe-leak-font：shadow 样式表内 @font-face 在该引擎按文档作用域生效（泄漏）；否则为 shadow 作用域。"
+      ],
+      "base": {}
+    },
+    {
+      "route": "a2-shadow-adopted",
+      "summary": "Shadow DOM 重装变体：生产 CSS/片段以 constructed sheet 采纳进 shadow",
+      "rows": [
+        {
+          "name": "a-md-h1.font-size",
+          "value": "21.7px",
+          "expect": "生产 CSS 采纳进 shadow 后恢复（重装变体）",
+          "meets": null
+        },
+        {
+          "name": "a-md-p.color",
+          "value": "rgb(0, 0, 205)",
+          "expect": "文档样式命中",
+          "meets": true
+        },
+        {
+          "name": "b-md-p.color",
+          "value": "rgb(0, 0, 205)",
+          "expect": "B 段落（同树直染，shadow 单根形态）",
+          "meets": null
+        },
+        {
+          "name": "toolbar.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        }
+      ],
+      "notes": [
+        "重装变体代价：每个 shadow root 都要复制采纳生产 CSS + 片段链（snippetLoader 现管 document.head，需第二套装配），嵌入/浮层每个内容根一份。"
+      ],
+      "base": {}
+    },
+    {
+      "route": "a3-shadow-live-widget",
+      "summary": "Shadow DOM Live 变体：widget 级 shadow 共享 constructed sheet",
+      "rows": [
+        {
+          "name": "w1.h1.color",
+          "value": "rgb(75, 0, 130)",
+          "expect": "共享 constructed sheet 命中 widget1",
+          "meets": true
+        },
+        {
+          "name": "w2.h1.color",
+          "value": "rgb(75, 0, 130)",
+          "expect": "同一共享 sheet 命中 widget2",
+          "meets": true
+        },
+        {
+          "name": "cm-strong.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "cm-line.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "w2.h1.color(卸下w1后)",
+          "value": "rgb(75, 0, 130)",
+          "expect": "规则不随块走",
+          "meets": true
+        },
+        {
+          "name": "w3.h1.color(重挂)",
+          "value": "rgb(75, 0, 130)",
+          "expect": "重挂 widget 恢复绘制",
+          "meets": true
+        }
+      ],
+      "notes": [
+        "Live 限制：sheet 在 shadow 内只命中 widget 内容，CM6 Markdown DOM（div/span）在光 DOM——文档样式无法按标签语义命中 Markdown（h1{} 不命中光 DOM）。"
+      ],
+      "base": {}
+    },
+    {
+      "route": "b1-prefix-naive",
+      "summary": "前缀改写（朴素）：包装器类前缀，嵌入卡在包装内",
+      "rows": [
+        {
+          "name": "a-md-p.color",
+          "value": "rgb(0, 0, 205)",
+          "expect": "命中本篇 Markdown p",
+          "meets": true
+        },
+        {
+          "name": "a-native-h1.color",
+          "value": "rgb(75, 0, 130)",
+          "expect": "命中原生 h1",
+          "meets": true
+        },
+        {
+          "name": "b-native-h1.color",
+          "value": "rgb(75, 0, 130)",
+          "expect": "包装内直染泄漏证人：A 的 h1{} 应染到 B 的 h1（purple）",
+          "meets": true
+        },
+        {
+          "name": "b-md-p.color",
+          "value": "rgb(0, 128, 128)",
+          "expect": "同特异性下 B 样式后置可掩盖直染（teal），泄漏以 h1/变量证人为准",
+          "meets": null
+        },
+        {
+          "name": "b-native-p.color",
+          "value": "rgb(222, 0, 111)",
+          "expect": "A 变量经包装继承泄漏进 B",
+          "meets": true
+        },
+        {
+          "name": "toolbar.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "cm-strong.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "a-p-tag.color",
+          "value": "rgb(0, 0, 205)",
+          "expect": "特异性翻转证据：.scope p(0,1,1) 压过片段类(0,1,0)",
+          "meets": null
+        },
+        {
+          "name": "a-p-order.color",
+          "value": "rgb(205, 92, 92)",
+          "expect": "同特异性时 doc 后置胜出",
+          "meets": null
+        }
+      ],
+      "notes": [
+        "包装器形态（含嵌入卡在内的整片前缀）对「引用隔离」约束失败：直染与继承双泄漏——本场景即失败证据取样。"
+      ],
+      "base": {}
+    },
+    {
+      "route": "b2-prefix-perblock",
+      "summary": "前缀改写（逐块）：data-doc 标记 + :where():is() 零特异性",
+      "rows": [
+        {
+          "name": "a-native-h1.color",
+          "value": "rgb(75, 0, 130)",
+          "expect": "h1{}",
+          "meets": true
+        },
+        {
+          "name": "a-native-h1.background-color",
+          "value": "rgb(0, 128, 0)",
+          "expect": ".probe-a-cls{}",
+          "meets": true
+        },
+        {
+          "name": "a-native-td.background-color",
+          "value": "rgb(255, 255, 0)",
+          "expect": "table td{}",
+          "meets": true
+        },
+        {
+          "name": "a-native-h1.text-decoration-line",
+          "value": "underline",
+          "expect": "[attr]{}",
+          "meets": true
+        },
+        {
+          "name": "a-native-h1.text-decoration-color",
+          "value": "rgb(255, 0, 255)",
+          "expect": "[attr]{} 配对",
+          "meets": true
+        },
+        {
+          "name": "a-pe::before.content",
+          "value": "\"PE\"",
+          "expect": ".probe-pe::before",
+          "meets": true
+        },
+        {
+          "name": "a-pe::before.color",
+          "value": "rgb(1, 2, 3)",
+          "expect": "::before 配色",
+          "meets": true
+        },
+        {
+          "name": "a-sib-target.color",
+          "value": "rgb(9, 8, 7)",
+          "expect": ".probe-sib + .probe-sib-target",
+          "meets": true
+        },
+        {
+          "name": "a-child.border-color",
+          "value": "rgb(4, 5, 6)",
+          "expect": ".probe-parent > .probe-child",
+          "meets": true
+        },
+        {
+          "name": "a-pseudo-cls.letter-spacing",
+          "value": "5px",
+          "expect": ".probe-fam p:nth-child(2)",
+          "meets": true
+        },
+        {
+          "name": "a-media.color",
+          "value": "rgb(60, 60, 61)",
+          "expect": "@media 内规则（改写递归下钻）",
+          "meets": true
+        },
+        {
+          "name": "a-md-p.color",
+          "value": "rgb(0, 0, 205)",
+          "expect": "Markdown p 同规则命中",
+          "meets": true
+        },
+        {
+          "name": "a-md-h1.color",
+          "value": "rgb(75, 0, 130)",
+          "expect": "Markdown h1 同规则命中（元素直染胜过包装继承）",
+          "meets": true
+        },
+        {
+          "name": "toolbar.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "toolbar-btn.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "cm-line.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "cm-strong.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "b-md-p.color",
+          "value": "rgb(0, 128, 128)",
+          "expect": "B 隔离（teal 非 blue）",
+          "meets": true
+        },
+        {
+          "name": "b-native-h1.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "B 隔离：A 的 h1{} 不达 B（非 purple）",
+          "meets": true
+        },
+        {
+          "name": "c-md-p.color",
+          "value": "rgb(107, 142, 35)",
+          "expect": "C 隔离（olive 非 blue）",
+          "meets": true
+        },
+        {
+          "name": "embed-b-header.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "b-native-p.color",
+          "value": "rgb(5, 5, 5)",
+          "expect": "A 变量不泄漏进 B（fallback 生效）",
+          "meets": true
+        },
+        {
+          "name": "a-var.color",
+          "value": "rgb(222, 0, 111)",
+          "expect": "A 变量本篇可用",
+          "meets": true
+        },
+        {
+          "name": "a-var-root.color",
+          "value": "rgb(7, 7, 7)",
+          "expect": ":root 规则改写后失活（fallback）",
+          "meets": true
+        },
+        {
+          "name": "body.--a-body-mark",
+          "value": "",
+          "expect": "body 规则改写后失活（空值）",
+          "meets": true
+        },
+        {
+          "name": "a-theme.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "a-p-order.color",
+          "value": "rgb(205, 92, 92)",
+          "expect": "同特异性(0,1,0)：doc 后置胜片段（indianred）",
+          "meets": true
+        },
+        {
+          "name": "a-p-tag.color",
+          "value": "rgb(46, 139, 87)",
+          "expect": "特异性语义保持：片段类(0,1,0)>doc 标签(0,0,1)（seagreen）",
+          "meets": true
+        },
+        {
+          "name": "a-md-h1.font-size",
+          "value": "21.7px",
+          "expect": "生产标题规则不受影响",
+          "meets": null
+        },
+        {
+          "name": "a-strong.text-decoration-color",
+          "value": "rgb(16, 17, 18)",
+          "expect": "同基线（rgb(16, 17, 18)）",
+          "meets": true
+        },
+        {
+          "name": "a-md-p.color(卸下原生块后)",
+          "value": "rgb(0, 0, 205)",
+          "expect": "规则不随块走",
+          "meets": true
+        },
+        {
+          "name": "b-md-p.color(卸下原生块后)",
+          "value": "rgb(0, 128, 128)",
+          "expect": "其他文档不受卸载影响",
+          "meets": true
+        },
+        {
+          "name": "sheet.rules(卸下前后)",
+          "value": "19→19",
+          "expect": "文档样式规则数稳定",
+          "meets": true
+        },
+        {
+          "name": "a-native-h1.color(重挂)",
+          "value": "rgb(75, 0, 130)",
+          "expect": "重挂恢复绘制",
+          "meets": true
+        }
+      ],
+      "notes": [],
+      "base": {}
+    },
+    {
+      "route": "c-at-scope",
+      "summary": "CSS @scope（donut 上边界），Chromium 114 可用性实测",
+      "rows": [
+        {
+          "name": "sheet.rule-kinds",
+          "value": "(空)",
+          "expect": "规则对象类型（CSSScopeRule=支持；CSSUnknownRule/CSSStyleRule 退化=不支持）",
+          "meets": null
+        },
+        {
+          "name": "a-native-h1.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "@scope 命中即 purple；114 预期不命中（≠基线即支持）",
+          "meets": null
+        },
+        {
+          "name": "a-md-p.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同上",
+          "meets": null
+        },
+        {
+          "name": "b-md-p.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "donut 上边界隔离 B（teal=隔离成立）",
+          "meets": null
+        },
+        {
+          "name": "toolbar.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "a-p-tag.color",
+          "value": "rgb(46, 139, 87)",
+          "expect": "@scope 不改特异性（seagreen=语义保持）",
+          "meets": null
+        }
+      ],
+      "notes": [
+        "Chromium 114（Chrome 118 起 @scope 进 stable）预期：规则不生效且命中值=基线——本场景即淘汰证据取样；现代 Chromium 应全绿。"
+      ],
+      "base": {}
+    },
+    {
+      "route": "d-iframe-srcdoc",
+      "summary": "每文档 iframe（srcdoc，嵌套 B/C）",
+      "rows": [
+        {
+          "name": "frame-a.url",
+          "value": "about:srcdoc",
+          "expect": "about:srcdoc=装载成功；about:blank=被 CSP 拦截或未装载",
+          "meets": null
+        },
+        {
+          "name": "frame-a.access",
+          "value": "readyState=complete",
+          "expect": "srcdoc 同源可访问性（生产 CSP frame-src https: 下的实测）",
+          "meets": null
+        },
+        {
+          "name": "a-md-h1.color(帧内)",
+          "value": "rgb(75, 0, 130)",
+          "expect": "A 文档样式在自有 iframe 内命中 Markdown h1",
+          "meets": null
+        },
+        {
+          "name": "a-native-h1.color(帧内)",
+          "value": "rgb(75, 0, 130)",
+          "expect": "原生 h1 同命中",
+          "meets": true
+        },
+        {
+          "name": "a-md-h1.font-size(帧内)",
+          "value": "32px",
+          "expect": "生产 CSS 不在帧内（应≠基线值）",
+          "meets": null
+        },
+        {
+          "name": "a-theme.color(帧内)",
+          "value": "rgb(64, 64, 64)",
+          "expect": "主题变量不进帧（fallback rgb(64,64,64)）",
+          "meets": true
+        },
+        {
+          "name": "a-strong.text-decoration-color(帧内)",
+          "value": "rgb(0, 0, 205)",
+          "expect": "外部片段不进帧（≠基线值）",
+          "meets": null
+        },
+        {
+          "name": "b-frame.access",
+          "value": "ok",
+          "expect": "嵌套 srcdoc（B）",
+          "meets": null
+        },
+        {
+          "name": "b-md-p.color(帧内)",
+          "value": "rgb(0, 128, 128)",
+          "expect": "B 自有样式帧内命中（teal）",
+          "meets": true
+        },
+        {
+          "name": "c-frame.access",
+          "value": "ok",
+          "expect": "二重嵌套 srcdoc（C）",
+          "meets": null
+        },
+        {
+          "name": "c-md-p.color(帧内)",
+          "value": "rgb(107, 142, 35)",
+          "expect": "C 自有样式帧内命中（olive）",
+          "meets": true
+        },
+        {
+          "name": "toolbar.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        },
+        {
+          "name": "cm-strong.color",
+          "value": "rgb(204, 204, 204)",
+          "expect": "同基线（rgb(204, 204, 204)）",
+          "meets": true
+        }
+      ],
+      "notes": [
+        "iframe 隔离成立但生产 CSS/主题变量/片段全数断供（需每帧重装）；Live 的 Markdown DOM 在帧外，帧内样式无法命中——结构性不满足「同规则命中原生+Markdown」。"
+      ],
+      "base": {}
+    }
+  ]
+}

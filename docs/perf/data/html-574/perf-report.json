@@ -1,0 +1,492 @@
+{
+  "startedAt": "2026-10-17T05:45:12.313Z",
+  "samples": {},
+  "boundaryShapes": {},
+  "htmlShapes": {
+    "htmlMany": {
+      "file": "perf-html-many.md",
+      "byteSize": 118561,
+      "lineCount": 4404,
+      "open": {
+        "openToReadyMs": 571,
+        "openToEditableMs": 671,
+        "openToFirstInputMs": 697,
+        "pollIntervalMs": 25
+      },
+      "live": {
+        "kind": "perf.report",
+        "typingRounds": 10,
+        "scrollRounds": 6,
+        "docLines": 4404,
+        "firstInputSettledEpochMs": 1792215913476,
+        "baseline": {
+          "renderedLines": 45,
+          "contentDomCount": 228,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 23313914
+        },
+        "afterTyping": {
+          "renderedLines": 45,
+          "contentDomCount": 228,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 21628848
+        },
+        "afterScroll": {
+          "renderedLines": 45,
+          "contentDomCount": 228,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 22491676
+        },
+        "inputDelayMs": {
+          "samples": [
+            38.5,
+            33.30000001192093,
+            33.39999997615814,
+            33.200000047683716,
+            33.39999997615814,
+            33.39999997615814,
+            33.30000001192093,
+            33.19999998807907,
+            33.39999997615814,
+            33.200000047683716
+          ],
+          "avgMs": 33.83000000119209,
+          "maxMs": 38.5
+        },
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
+        "headingStats": {
+          "totalUpdates": 14,
+          "lastUpdateScannedLines": 1,
+          "fullBuildLines": 4404
+        }
+      },
+      "reading": {
+        "totalBlocks": 1202,
+        "report": {
+          "kind": "reading.perf.report",
+          "scrollRounds": 6,
+          "totalBlocks": 1202,
+          "baseline": {
+            "mountedBlocks": 47,
+            "contentDomCount": 177,
+            "scrollTopPx": 25,
+            "scrollHeightPx": 76081,
+            "jsHeapBytes": 25344105
+          },
+          "afterScroll": {
+            "mountedBlocks": 46,
+            "contentDomCount": 171,
+            "scrollTopPx": 0,
+            "scrollHeightPx": 71272,
+            "jsHeapBytes": 25353653
+          },
+          "parseCount": 1,
+          "maxMountedBlocks": 76,
+          "ok": true
+        }
+      },
+      "modeSwitch": {
+        "toReadingMs": 233,
+        "toLiveMs": 125,
+        "pollIntervalMs": 25
+      }
+    },
+    "htmlLong": {
+      "file": "perf-html-long.md",
+      "byteSize": 398413,
+      "lineCount": 14674,
+      "open": {
+        "openToReadyMs": 146,
+        "openToEditableMs": 268,
+        "openToFirstInputMs": 317,
+        "pollIntervalMs": 25
+      },
+      "live": {
+        "kind": "perf.report",
+        "typingRounds": 10,
+        "scrollRounds": 6,
+        "docLines": 14674,
+        "firstInputSettledEpochMs": 1792215915336,
+        "baseline": {
+          "renderedLines": 45,
+          "contentDomCount": 228,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 24748027
+        },
+        "afterTyping": {
+          "renderedLines": 45,
+          "contentDomCount": 228,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 47424986
+        },
+        "afterScroll": {
+          "renderedLines": 45,
+          "contentDomCount": 228,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 48763612
+        },
+        "inputDelayMs": {
+          "samples": [
+            39,
+            49.799999952316284,
+            33.40000003576279,
+            33.30000001192093,
+            33.39999997615814,
+            50,
+            49.89999997615814,
+            50,
+            33.60000002384186,
+            49.80000001192093
+          ],
+          "avgMs": 42.21999999880791,
+          "maxMs": 50
+        },
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
+        "headingStats": {
+          "totalUpdates": 14,
+          "lastUpdateScannedLines": 1,
+          "fullBuildLines": 14674
+        }
+      },
+      "reading": {
+        "totalBlocks": 4002,
+        "report": {
+          "kind": "reading.perf.report",
+          "scrollRounds": 6,
+          "totalBlocks": 4002,
+          "baseline": {
+            "mountedBlocks": 47,
+            "contentDomCount": 177,
+            "scrollTopPx": 25,
+            "scrollHeightPx": 256279,
+            "jsHeapBytes": 33725897
+          },
+          "afterScroll": {
+            "mountedBlocks": 46,
+            "contentDomCount": 171,
+            "scrollTopPx": 0,
+            "scrollHeightPx": 251469,
+            "jsHeapBytes": 35441928
+          },
+          "parseCount": 1,
+          "maxMountedBlocks": 76,
+          "ok": true
+        }
+      },
+      "modeSwitch": {
+        "toReadingMs": 467,
+        "toLiveMs": 124,
+        "pollIntervalMs": 25
+      }
+    },
+    "htmlGiantTable": {
+      "file": "perf-html-giant-table.md",
+      "byteSize": 38571,
+      "lineCount": 407,
+      "open": {
+        "openToReadyMs": 146,
+        "openToEditableMs": 238,
+        "openToFirstInputMs": 291,
+        "pollIntervalMs": 25
+      },
+      "live": {
+        "kind": "perf.report",
+        "typingRounds": 10,
+        "scrollRounds": 6,
+        "docLines": 407,
+        "firstInputSettledEpochMs": 1792215917592,
+        "baseline": {
+          "renderedLines": 3,
+          "contentDomCount": 1675,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 41506499
+        },
+        "afterTyping": {
+          "renderedLines": 3,
+          "contentDomCount": 1675,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 21579789
+        },
+        "afterScroll": {
+          "renderedLines": 3,
+          "contentDomCount": 1675,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 21945785
+        },
+        "inputDelayMs": {
+          "samples": [
+            43.09999996423721,
+            66.60000002384186,
+            50.09999996423721,
+            50,
+            50,
+            50,
+            66.70000004768372,
+            66.59999996423721,
+            66.59999996423721,
+            66.70000004768372
+          ],
+          "avgMs": 57.63999999761582,
+          "maxMs": 66.70000004768372
+        },
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
+        "headingStats": {
+          "totalUpdates": 14,
+          "lastUpdateScannedLines": 1,
+          "fullBuildLines": 407
+        }
+      },
+      "reading": {
+        "totalBlocks": 3,
+        "report": {
+          "kind": "reading.perf.report",
+          "scrollRounds": 6,
+          "totalBlocks": 3,
+          "baseline": {
+            "mountedBlocks": 2,
+            "contentDomCount": 1667,
+            "scrollTopPx": 25,
+            "scrollHeightPx": 10376,
+            "jsHeapBytes": 26980047
+          },
+          "afterScroll": {
+            "mountedBlocks": 2,
+            "contentDomCount": 1667,
+            "scrollTopPx": 0,
+            "scrollHeightPx": 10376,
+            "jsHeapBytes": 27054810
+          },
+          "parseCount": 1,
+          "maxMountedBlocks": 2,
+          "ok": true
+        }
+      },
+      "modeSwitch": {
+        "toReadingMs": 124,
+        "toLiveMs": 126,
+        "pollIntervalMs": 25
+      }
+    },
+    "htmlStyle": {
+      "file": "perf-html-style.md",
+      "byteSize": 28933,
+      "lineCount": 717,
+      "open": {
+        "openToReadyMs": 168,
+        "openToEditableMs": 200,
+        "openToFirstInputMs": 217,
+        "pollIntervalMs": 25
+      },
+      "live": {
+        "kind": "perf.report",
+        "typingRounds": 10,
+        "scrollRounds": 6,
+        "docLines": 717,
+        "firstInputSettledEpochMs": 1792215919631,
+        "baseline": {
+          "renderedLines": 53,
+          "contentDomCount": 56,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 28659860
+        },
+        "afterTyping": {
+          "renderedLines": 53,
+          "contentDomCount": 56,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 29834774
+        },
+        "afterScroll": {
+          "renderedLines": 53,
+          "contentDomCount": 56,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 28155210
+        },
+        "inputDelayMs": {
+          "samples": [
+            13.800000011920929,
+            12.099999964237213,
+            15.800000011920929,
+            33.30000001192093,
+            33.39999997615814,
+            33.30000001192093,
+            33.39999997615814,
+            33.30000001192093,
+            33.30000001192093,
+            33.39999997615814
+          ],
+          "avgMs": 27.509999996423723,
+          "maxMs": 33.39999997615814
+        },
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
+        "headingStats": {
+          "totalUpdates": 14,
+          "lastUpdateScannedLines": 1,
+          "fullBuildLines": 717
+        }
+      },
+      "reading": {
+        "totalBlocks": 123,
+        "report": {
+          "kind": "reading.perf.report",
+          "scrollRounds": 6,
+          "totalBlocks": 123,
+          "baseline": {
+            "mountedBlocks": 39,
+            "contentDomCount": 119,
+            "scrollTopPx": 25,
+            "scrollHeightPx": 5396,
+            "jsHeapBytes": 30349199
+          },
+          "afterScroll": {
+            "mountedBlocks": 38,
+            "contentDomCount": 116,
+            "scrollTopPx": 0,
+            "scrollHeightPx": 5369,
+            "jsHeapBytes": 23128314
+          },
+          "parseCount": 1,
+          "maxMountedBlocks": 61,
+          "ok": true
+        }
+      },
+      "modeSwitch": {
+        "toReadingMs": 125,
+        "toLiveMs": 125,
+        "pollIntervalMs": 25
+      }
+    },
+    "htmlImageDense": {
+      "file": "perf-html-images.md",
+      "byteSize": 42496,
+      "lineCount": 1204,
+      "open": {
+        "openToReadyMs": 168,
+        "openToEditableMs": 200,
+        "openToFirstInputMs": 239,
+        "pollIntervalMs": 25
+      },
+      "live": {
+        "kind": "perf.report",
+        "typingRounds": 10,
+        "scrollRounds": 6,
+        "docLines": 1204,
+        "firstInputSettledEpochMs": 1792215921297,
+        "baseline": {
+          "renderedLines": 13,
+          "contentDomCount": 57,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 32389550
+        },
+        "afterTyping": {
+          "renderedLines": 13,
+          "contentDomCount": 57,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 35750875
+        },
+        "afterScroll": {
+          "renderedLines": 13,
+          "contentDomCount": 57,
+          "headingLineCount": 1,
+          "inviewHeadingCount": 1,
+          "jsHeapBytes": 32425829
+        },
+        "inputDelayMs": {
+          "samples": [
+            11.5,
+            12,
+            18.600000023841858,
+            33.299999952316284,
+            33.40000003576279,
+            33.30000001192093,
+            33.59999996423721,
+            33,
+            33.40000003576279,
+            33.39999997615814
+          ],
+          "avgMs": 27.55,
+          "maxMs": 33.59999996423721
+        },
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
+        "headingStats": {
+          "totalUpdates": 14,
+          "lastUpdateScannedLines": 1,
+          "fullBuildLines": 1204
+        }
+      },
+      "reading": {
+        "totalBlocks": 602,
+        "imageStatesBaseline": {
+          "loading": 0,
+          "loaded": 4,
+          "error": 0
+        },
+        "imageStatesAfterScroll": {
+          "loading": 0,
+          "loaded": 4,
+          "error": 0
+        },
+        "report": {
+          "kind": "reading.perf.report",
+          "scrollRounds": 6,
+          "totalBlocks": 602,
+          "baseline": {
+            "mountedBlocks": 10,
+            "contentDomCount": 57,
+            "scrollTopPx": 25,
+            "scrollHeightPx": 22611,
+            "jsHeapBytes": 30678425
+          },
+          "afterScroll": {
+            "mountedBlocks": 11,
+            "contentDomCount": 67,
+            "scrollTopPx": 0,
+            "scrollHeightPx": 39494,
+            "jsHeapBytes": 33791467
+          },
+          "parseCount": 1,
+          "maxMountedBlocks": 79,
+          "ok": true
+        }
+      },
+      "modeSwitch": {
+        "toReadingMs": 124,
+        "toLiveMs": 123,
+        "pollIntervalMs": 25
+      }
+    }
+  }
+}

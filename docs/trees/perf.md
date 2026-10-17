@@ -19,6 +19,7 @@ vsidian/
         ├── 2026-09-title-decoration-viewport.md       # 标题切片视口渲染实测数据
         ├── 2026-09-vault-index-storage.md             # 索引存储选型三档基准解读（#195）
         ├── 2026-10-hit-reveal-budget.md               # 命中显形重建预算实测（#251）
+        ├── 2026-10-html-rendering-perf.md             # HTML 批次性能收口报告
         ├── 2026-10-ref-expansion-244.md               # 递归引用驻留实测
         ├── 2026-10-ref-phase15-249.md                 # 1.5 期收口资源实测汇总（#249）
         ├── 2026-10-ref-phase2-291.md                  # 二期引用性能收口报告
@@ -31,6 +32,8 @@ vsidian/
             ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
             ├── hover-embed-perf.json                  # #225 状态层嵌入装饰实测数据
             ├── hover-refresh.json                     # #224 引用视图同步定向测量数据
+            ├── html-574/                              # HTML 档性能报告数据目录
+            │   └── perf-report.json # HTML 档性能原始报告
             ├── perf-report.json                       # 性能探针原始报告数据
             ├── ref-expansion-244.json                 # 递归引用实测原始数据
             ├── ref-phase15-249.json                   # #249 资源实测原始报告数据

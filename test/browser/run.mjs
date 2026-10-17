@@ -82,6 +82,35 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 2026-10 修复合入列：dropCursorPaint（拖放落点光标——拖动选中文本悬停
   // 期间 .cm-dropCursor 真实画出/定位、落位后撤下、文本真实落位）紧随
   // multicursor 族（同选区/光标绘制层）
+  // #567（T02）块级原生 HTML：紧随 liveEmbed（同片段替换装饰族——真实
+  // 点击/方向键/跨块选区/多选区/纯 style 常显/净化负向/阅读态渲染）
+  'liveHtml',
+  // #568（T03）行内原生 HTML 混排：紧随 liveHtml（同行内替换装饰族——
+  // 真实点击/方向键/双向选区/多选区/IME/编辑粘贴链路/阅读态原位渲染）
+  'liveInlineHtml',
+  // #569（T04）全文文档样式装载：紧随 liveHtml（同 HTML 族——b2 隔离装载/
+  // 层叠/排除面/虚拟化/多实例/A→B→C 隔离/编辑撤销重做同步）
+  'docStyle',
+  // #570（T05）HTML 链接图片与 CSS 资源文档归属：紧随 docStyle（同 HTML
+  // 族——img/srcset 真实语法装载、文档样式 url()/字体绘制、媒体属性改写、
+  // Live 点击不跳转、Reading 链接意图、失效重取）
+  'htmlResources',
+  // #571（T06）表单 details 与音视频双模式行为：紧随 htmlResources（同
+  // HTML 族——Reading 表单真实输入/选择、details 展开、媒体真实播放、
+  // 提交不导航、零写回；Live 控件/媒体命中区点击 = 完整源码选区；释放
+  // 与模式切换无持续播放）
+  'html-controls-571',
+  // #572（T07）文档内 iframe：紧随 htmlResources（同 HTML 族——sandbox 矩阵
+  // /srcdoc 脚本零执行/本地页装载/Live 外层命中选源码/拒绝嵌入真实状态/释放无残留）
+  'htmlIframe572',
+  // #573（T08）SVG/MathML 与混合命名空间：紧随 htmlResources（同 HTML
+  // 族——SVG 几何/文字/渐变/foreignObject 实际绘制、MathML 结构、行内
+  // 混排不吞正文、点击选区精确、净化负向、A/B 相同 ID 不串目标）
+  'svgMathml-573',
+  // #574（T09）交叉场景收口：紧随 HTML 族（查找面板定位命中 HTML 源码
+  // 范围、标题折叠区间含 HTML 块的隐藏与落点展开恢复、悬停浮层内 HTML
+  // 渲染与 B 身份隔离、块级源文内真实 IME 组合定稿）
+  'htmlCross574',
   'dropCursorPaint', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',

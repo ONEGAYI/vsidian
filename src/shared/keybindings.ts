@@ -232,6 +232,13 @@ export const UI_OPERATIONS = [
   { id: 'graphicExportSvg', command: 'onegayi.vsidian.graphic.exportSvg', titleKey: 'command.graphic.exportSvg.title', mode: 'live', writes: false, defaults: [] },
   { id: 'graphicExportPng', command: 'onegayi.vsidian.graphic.exportPng', titleKey: 'command.graphic.exportPng.title', mode: 'live', writes: false, defaults: [] },
   { id: 'graphicCopySource', command: 'onegayi.vsidian.graphic.copySource', titleKey: 'command.graphic.copySource.title', mode: 'live', writes: false, defaults: [] },
+  // #567（T02）块级 HTML「编辑当前 HTML 源码」：渲染区右上角编辑按钮与
+  // 渲染内容普通点击的键位可达入口（三入口同一执行体 runHtmlEditSource
+  // ——命中当前片段即选中完整源码）。只读选区操作（writes: false——不
+  // 改权威文本，显形由装饰管线按选区派生），仅 Live 正文（阅读只读、
+  // 源码模式不经 webview 键路由天然不涉及）；默认不占键位——按钮与点
+  // 击是主入口，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
+  { id: 'htmlEditSource', command: 'onegayi.vsidian.html.editSource', titleKey: 'command.html.editSource.title', mode: 'live', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

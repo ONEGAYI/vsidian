@@ -45,6 +45,9 @@ import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import { LiveEditorInstance, externalSync } from './liveInstance'
 import { liveEmbedChildCards } from './liveEmbed'
+import { liveDocStyle, liveHtmlDocScope, liveHtmlResourceSource } from './liveHtml'
+import { hubResourcePort } from './htmlResourceHub'
+import { docScopeKeyOf } from '../shared/docStyle'
 import { ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { closeFmPopoverForView } from './frontmatterPopover'
 import type { SettingsPayload } from '../shared/settings'
@@ -2083,7 +2086,18 @@ export class EmbedCardManager {
       sourceDocUri: live.fsPath,
       parentDepth: entryRef.content.source.depth ?? 1,
       treeId: entryRef.content.source.treeId ?? entryRef.hostId,
-    })])
+    }),
+    // #569（T04）嵌入内部 Live 的文档身份：目标键从 B 的 fsPath 派生
+    //（canonicalRefTargetKey 单向派生——与 RefContentMount 的 Reading
+    // 装载同键，同一 B 的嵌入卡/浮层/内部 Live 共享产物）；标记注入
+    // liveHtml 的 docScope facet + 全文 <style> 装载（teardown 随实例
+    // destroy 释放）。#570（T05）：资源来源身份 facet（widget 内
+    // srcset/媒体属性以 B 订阅）+ 产物 url()/字体端口（同 B 身份）
+    ...(live.fsPath ? [
+      liveHtmlDocScope(docScopeKeyOf(live.fsPath)),
+      liveHtmlResourceSource(live.fsPath),
+      liveDocStyle(docScopeKeyOf(live.fsPath), hubResourcePort(live.fsPath)),
+    ] : [])])
     const inst = created
     live.instance = inst
     // T06（#355）embed 句柄注册：目标身份与实例均在场。instanceId 用
