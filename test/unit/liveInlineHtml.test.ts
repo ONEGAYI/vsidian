@@ -301,3 +301,31 @@ describe('#576 评审 P2-5：前文语法变化（围栏开闭）使行内片段
     expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
   })
 })
+
+describe('#576 二轮复审：段内上下文变化（InlineCode ↔ HTML 片段）的行级失效', () => {
+  it('插入反引号成行内代码吞掉 span——旧片段不残留（顶层签名不变）', () => {
+    const text = 'prefix text <span>x</span> `tail'
+    const state = buildState(text, EditorSelection.single(7))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    const next = state.update({ changes: { from: 7, insert: '`' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+
+  it('删除起始反引号：行内代码解体后片段恢复（窗口覆盖新片段位置）', () => {
+    const text = 'prefix `text <span>x</span> `tail'
+    const state = buildState(text, EditorSelection.single(7))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 7, to: 8 } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
+  })
+
+  it('嵌套吸收：新外层 span 吸收旧片段——表不产重叠装饰（只留最外层）', () => {
+    const text = 'a mid <b>x</b> tail</span>'
+    const state = buildState(text, EditorSelection.single(2))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    const next = state.update({ changes: { from: 2, insert: '<span>' } }).state
+    const spans = next.field(liveInlineHtmlSpansField)
+    expect(spans).toHaveLength(1)
+    expect(next.doc.sliceString(spans[0].from, spans[0].to)).toBe('<span>mid <b>x</b> tail</span>')
+  })
+})

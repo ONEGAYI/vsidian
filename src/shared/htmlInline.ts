@@ -182,47 +182,117 @@ export function matchInlineHtmlFragmentAt(src: string, pos: number): number | nu
 }
 
 /**
- * Lezer 树的行内 HTML 片段（最外层、单行）：HTMLTag 节点是**候选起点**
- * （解析器语义面——代码与块级区域不产 HTMLTag，天然排除），片段范围在
- * **原始文本**上按 HTML 语法确定（matchInlineHtmlFragmentAt——与
- * markdown-it 侧同一驱动面，两端一致由对拍钉住）。不配对树节点的原因
- * （#576 评审 P2-6）：Lezer 会把片段内的 `\` 组合成 Escape 节点吞掉后续
- * 标签的 `<`（`a <span>\</span>` 的闭标签不再产 HTMLTag），只配对剩余
- * 节点会把两端一致的片段误判为未闭合。HTML 外部的真转义（`\<span>`）
- * 不产 HTMLTag 候选，排除语义保持。
+ * 行内代码 span 的闭串查找（markdown-it backticks 规则语义复刻）：开串
+ * （长度 n）向后找**等长**串（长度不同的串跳过继续）；内容原样穿过
+ * （含 HTML 标签——code span 内容是字面）。找不到返回 -1（该串按字面）。
  */
-export function inlineHtmlFragmentsOfTree(tree: Tree, doc: Text): HtmlInlineFragment[] {
-  const starts: number[] = []
-  const visit = (node: SyntaxNode): void => {
-    if (node.name === 'HTMLTag') {
-      starts.push(node.from)
-      return // 叶子节点（解析器界定的单标签）
-    }
-    for (let child = node.firstChild; child; child = child.nextSibling) {
-      visit(child)
-    }
-  }
-  visit(tree.topNode)
-  if (starts.length === 0) {
-    return []
-  }
-  // 候选升序逐个起扫：从最左候选在原始文本上确定完整片段，已成交片段
-  // 内的后续候选跳过（嵌套只保留最外层；孤立闭标签起点不成型）
-  const out: HtmlInlineFragment[] = []
-  let coveredTo = -1
-  for (const from of starts) {
-    if (from < coveredTo) {
-      continue // 已含在前一片段内
-    }
-    const line = doc.lineAt(from)
-    const lineText = doc.sliceString(line.from, line.to)
-    const end = matchInlineHtmlFragmentAt(lineText, from - line.from)
-    if (end === null) {
+function findClosingBacktickRun(src: string, start: number, limit: number, runLen: number): number {
+  let i = start + runLen
+  while (i < limit) {
+    if (src[i] === '`') {
+      let len = 0
+      while (i + len < limit && src[i + len] === '`') {
+        len++
+      }
+      if (len === runLen) {
+        return i
+      }
+      i += len
       continue
     }
-    const to = line.from + end
-    out.push({ from, to })
-    coveredTo = to
+    i++
+  }
+  return -1
+}
+
+/**
+ * 行内交错扫描（#576 二轮复审 P2）：按文档序从 from 到 limit 扫描，
+ * - 转义对 `\x` 跳过（外部上下文的 `\<` 不是标签起点）
+ * - 反引号串按等长配对复刻 code span（内容原样跳过——含 HTML 字面；
+ *   未配对的串按字面继续）
+ * - `<` 起 matchInlineHtmlFragmentAt（成型片段**整段消费**——片段内部的
+ *   反引号/转义是字面，不参与 Markdown 结构、不污染其后的配对上下文）
+ * 与 markdown-it 侧（backticks 规则先于 html 规则按位置交错）语义一致，
+ * 两端一致性由对拍钉住。产出片段的**文本内偏移**区间。
+ */
+export function scanInlineHtmlFragmentsInText(src: string, from: number, limit: number): HtmlInlineFragment[] {
+  const out: HtmlInlineFragment[] = []
+  let i = from
+  while (i < limit) {
+    const ch = src[i]!
+    if (ch === '\\') {
+      i += 2 // 转义对（外部上下文）
+      continue
+    }
+    if (ch === '`') {
+      let runLen = 0
+      while (i + runLen < limit && src[i + runLen] === '`') {
+        runLen++
+      }
+      const close = findClosingBacktickRun(src, i, limit, runLen)
+      i = close < 0 ? i + runLen : close + runLen
+      continue
+    }
+    if (ch === '<') {
+      const end = matchInlineHtmlFragmentAt(src, i)
+      if (end !== null) {
+        out.push({ from: i, to: end })
+        i = end
+        continue
+      }
+    }
+    i++
+  }
+  return out
+}
+
+/** 行内片段不进入的块级结构（探针实测节点名——整块先行消费，行内容是
+ *  字面：围栏/缩进代码块、HTML 注释块、处理指令块、块级 HTML/DOCTYPE） */
+const INLINE_EXCLUDED_BLOCK_NODES = new Set(['FencedCode', 'CodeBlock', 'CommentBlock', 'ProcessingInstructionBlock', 'HTMLBlock'])
+
+/**
+ * 行的块级上下文判定：行首经 resolveInner 的祖先链含块级结构名即排除
+ * （O(depth)——块级区间整体覆盖行，块级结构不跨「行中开始」；不遍历
+ * 全树，增量重建的窗口路径每次键击只付祖先链成本）。
+ */
+function lineInBlockContext(tree: Tree, lineFrom: number): boolean {
+  let node: SyntaxNode | null = tree.resolveInner(Math.max(0, Math.min(lineFrom, tree.length - 1)), 1)
+  while (node !== null) {
+    if (INLINE_EXCLUDED_BLOCK_NODES.has(node.name)) {
+      return true
+    }
+    node = node.parent
+  }
+  return false
+}
+
+/**
+ * Lezer 树的行内 HTML 片段（最外层、单行）：树只提供**块级排除区**
+ * （块级结构先行消费的行——行内容是字面）；行内结构（code span 配对、
+ * 片段消费、外部转义）由 scanInlineHtmlFragmentsInText 按原始文本交错
+ * 扫描——不复用 Lezer 的 HTMLTag 节点集合（#576 二轮复审 P2：解析器把
+ * HTML 片段内部的反引号配成 InlineCode，会吞掉后续标签的 HTMLTag 候选
+ * 或漏吞应字面的标签，片段集合被污染）。from/to 可限定行窗口（增量
+ * 重建的窗口扫描；缺省全文档）。
+ */
+export function inlineHtmlFragmentsOfTree(
+  tree: Tree,
+  doc: Text,
+  from = 0,
+  to = doc.length,
+): HtmlInlineFragment[] {
+  const out: HtmlInlineFragment[] = []
+  const firstLine = doc.lineAt(Math.max(0, Math.min(from, doc.length))).number
+  const lastLine = doc.lineAt(Math.max(0, Math.min(to, doc.length))).number
+  for (let n = firstLine; n <= lastLine; n++) {
+    const line = doc.line(n)
+    if (lineInBlockContext(tree, line.from)) {
+      continue
+    }
+    const text = doc.sliceString(line.from, line.to)
+    for (const frag of scanInlineHtmlFragmentsInText(text, 0, text.length)) {
+      out.push({ from: line.from + frag.from, to: line.from + frag.to })
+    }
   }
   return out
 }

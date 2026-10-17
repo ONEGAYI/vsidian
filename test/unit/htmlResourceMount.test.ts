@@ -378,3 +378,19 @@ describe('#576 评审 P2-4：style 属性的相对 URL 接入来源资源管线�
     expect(root.querySelector('div')!.getAttribute('style')).toBe('background:url(late.png)')
   })
 })
+
+describe('#576 二轮复审 P2：style 资源失效后丢弃旧代地址（持续订阅三段：成功→失效失败回退→恢复换新代）', () => {
+  it('失效重取失败时删除旧映射回退原文；再失效重取成功换新代地址', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<div style="background:url(bg.png)">x</div>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    sub.reply(0, 'https://resolved/bg.png?v=1')
+    expect(root.querySelector('div')!.getAttribute('style')).toContain('?v=1')
+    // hub 失效链路：清缓存后对仍有订阅者的条目重取，经同一 listener 回调
+    sub.fail(0)
+    expect(root.querySelector('div')!.getAttribute('style')).toBe('background:url(bg.png)')
+    sub.reply(0, 'https://resolved/bg.png?v=2')
+    expect(root.querySelector('div')!.getAttribute('style')).toContain('?v=2')
+  })
+})

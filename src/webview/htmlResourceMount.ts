@@ -204,6 +204,10 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
       track(subscribe(raw, guard((o) => {
         if (o.ok) {
           resolved.set(raw, o.url)
+        } else {
+          // #576 二轮复审 P2：失效后重取失败——丢弃旧代映射回退装配原值
+          //（资源失效语义：不保留旧地址，最终 DOM 与源文一致）
+          resolved.delete(raw)
         }
         pending -= 1
         apply()

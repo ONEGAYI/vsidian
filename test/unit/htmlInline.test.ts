@@ -239,6 +239,20 @@ describe('行内 HTML 片段：识别与配对矩阵（两端一致）', () => {
     expect(mdRuleFragments(text)).toEqual(['<span style="color:red">\\</span>'])
   })
 
+  it('#576 二轮复审 P2：HTML 内的反引号不污染后续候选（span 先消费——内部反引号是字面，其后 b 正常渲染）', () => {
+    const text = 'a <span>`</span> <b>x</b> ` tail'
+    const want = ['<span>`</span>', '<b>x</b>']
+    expect(lezerFragments(text).map((f) => text.slice(f.from, f.to))).toEqual(want)
+    expect(mdRuleFragments(text)).toEqual(want)
+  })
+
+  it('#576 二轮复审 P2：HTML 内反引号与后续反引号配对成行内代码（b 是代码字面非片段）', () => {
+    const text = 'a <span>`</span> `<b>x</b>` tail'
+    const want = ['<span>`</span>']
+    expect(lezerFragments(text).map((f) => text.slice(f.from, f.to))).toEqual(want)
+    expect(mdRuleFragments(text)).toEqual(want)
+  })
+
   it('#576 评审 P2-6 边界：HTML 外部的转义开标签不成片段（真正的外部 escape 排除保持）', () => {
     // \\< 的 < 被 escape 吞——不是行内 HTML 起点，两端一致降级为字面
     expect(lezerFragments('a \\<span>x\\</span> b')).toEqual([])

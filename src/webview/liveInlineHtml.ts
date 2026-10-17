@@ -49,7 +49,7 @@ export interface LiveInlineHtmlSpan extends HtmlInlineFragment {
 
 /** 树窗口内行内片段扫描（表构建/增量重建共用） */
 function scanInlineHtmlSpans(doc: Text, tree: Tree, from: number, to: number): LiveInlineHtmlSpan[] {
-  return inlineHtmlFragmentsOfTree(tree, doc)
+  return inlineHtmlFragmentsOfTree(tree, doc, from, to)
     .filter((f) => f.to > from && f.from < to)
     .map((f) => ({ from: f.from, to: f.to, source: doc.sliceString(f.from, f.to) }))
 }
@@ -93,6 +93,34 @@ export function rebuildInlineHtmlSpans(
     to: changes.mapPos(s.to, -1),
     source: s.source,
   }))
+  // #576 二轮复审 P2：行级失效——段内上下文变化（InlineCode 开闭吞标签、新外层标签吸收内层）不改变顶层结构签名，但使同一行的片段表失效。变更行整行并入窗口（重建后的片段可在行内任意位置）。剪枝：行内配对只依赖本行字符（单行成型边界）——变更行的新行文本不含 '<' 与 '`' 且旧表在该行无片段时，编辑前后片段集均为空，无需扩窗（纯文字键击零额外成本；块级上下文变化由顶层签名守卫覆盖）。
+  const linesWithOldSpan = new Set<number>()
+  for (const m of mapped) {
+    if (m.to > m.from) {
+      linesWithOldSpan.add(doc.lineAt(m.from).number)
+    }
+  }
+  const changedLines = new Set<number>()
+  changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+    const lo = doc.lineAt(Math.max(0, Math.min(fromB, doc.length))).number
+    const hi = doc.lineAt(Math.max(0, Math.min(toB, doc.length))).number
+    for (let n = lo; n <= hi; n++) {
+      changedLines.add(n)
+    }
+  })
+  for (const n of changedLines) {
+    const line = doc.line(n)
+    if (linesWithOldSpan.has(n)) {
+      seedFrom = Math.min(seedFrom, line.from)
+      seedTo = Math.max(seedTo, line.to)
+      continue
+    }
+    const text = doc.sliceString(line.from, line.to)
+    if (text.includes('<') || text.includes('`')) {
+      seedFrom = Math.min(seedFrom, line.from)
+      seedTo = Math.max(seedTo, line.to)
+    }
+  }
   for (const m of mapped) {
     if (m.to + 1 >= seedFrom && m.from <= seedTo + 1) {
       seedFrom = Math.min(seedFrom, m.from)
@@ -117,6 +145,18 @@ export function rebuildInlineHtmlSpans(
   }
   out.push(...scanInlineHtmlSpans(doc, tree, Math.max(0, seedFrom), Math.min(doc.length, seedTo)))
   out.sort((a, b) => a.from - b.from)
+  // 表引用短路：重建结果与旧表逐项相等时返回旧引用——装饰 field 的
+  // spansChanged 判定走引用比较，纯文内键击（片段表无变化）时跳过
+  // RangeSet 重建与 view 装饰 diff（帧预算敏感路径的成本归零）
+  if (out.length === prev.length) {
+    let same = true
+    for (let i = 0; i < out.length && same; i++) {
+      same = out[i]!.from === prev[i]!.from && out[i]!.to === prev[i]!.to && out[i]!.source === prev[i]!.source
+    }
+    if (same) {
+      return prev as LiveInlineHtmlSpan[]
+    }
+  }
   return out
 }
 

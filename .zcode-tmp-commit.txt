@@ -1,0 +1,9 @@
+fix: PR #576 二轮复审三项 P2 修复（行内交错扫描/行级失效/style 失效回退）
+
+按 PR 二轮复审结论（2026-10-17 04:08 评论）逐项修复：
+
+- 行内 HTML 片段改交错扫描事实源（P2：HTML 内反引号污染候选）：scanInlineHtmlFragmentsInText 按文档序扫描——转义对跳过、反引号串等长配对复刻 code span（内容字面穿过，含 HTML 标签）、'<' 起片段整段消费（内部反引号/转义是字面，不参与 Markdown 结构、不污染其后配对上下文）——不再复用 Lezer HTMLTag 节点集合（解析器把片段内反引号配成 InlineCode，会吞掉后续标签候选或漏吞应字面标签）。inlineHtmlFragmentsOfTree 重写为「树块级排除区（FencedCode/CodeBlock/CommentBlock/ProcessingInstructionBlock/HTMLBlock，resolveInner 祖先链 O(depth)）+ 逐行交错扫描」，支持行窗口参数（增量路径零全树成本）
+- 行内增量重建增行级失效（P2：段内上下文变化不触发顶层签名）：InlineCode 开闭吞标签/新外层标签吸收内层使同一行片段表失效——变更行整行并入窗口；剪枝：行内配对只依赖本行字符，变更行不含 '<'/'`' 且旧表无片段时不扩窗（纯文字键击零额外成本）；表引用短路令片段表无变化的键击跳过 RangeSet 重建与 view 装饰 diff
+- style 属性资源失效后失败丢弃旧代映射（P2：保留上一代解析 URL）：失效重取失败时 resolved.delete 回退装配原值——资源失效语义与 style 产物一致（不保留旧地址，最终 DOM 与源文一致）
+
+验证：unit 全量 392 文件/9114 项、browser 113 套件（312.24s）、tsc、集成四分片（1/3 片各 1 例等待超时为已知抖动，单宿主复跑两片全绿）。性能：htmlMany/htmlGiantTable/htmlStyle/htmlImageDense 档零差异；htmlLong 极端档（14674 行）键击 +1 帧（约 39 到 49ms 帧数量化）——jsdom 同步层新代码行内链反而更快（1.4ms 对旧 2.2ms）、隔离实验排除行级失效、旧 htmlInline 加新 liveInlineHtml 组合恢复基线——宿主渲染管线二级效应，已落档为已知边界。
