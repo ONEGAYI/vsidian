@@ -26,6 +26,7 @@ import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
+import { codexBridgeInstalledCases } from './codexBridgeInstalledCases'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -18984,6 +18985,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // 阶段矩阵——R1 全装载/R2 宿主不可见负向；用例体 sshGuard 自跳过非
   // SSH 会话，发行态断言面见 addonT17RemoteSshCases.ts 头注）
   ...addonT17RemoteSshCases,
+  // #535 T08：安装态组件对照与升级路径（runInstalledCodexBridge.mjs 阶段
+  // 矩阵——legacy v1.1.0 旧物基线/upgraded 本分支+bridge 同装；用例体
+  // phaseGuard 自跳过非本阶段与非安装态会话，断言面见
+  // codexBridgeInstalledCases.ts 头注）
+  ...codexBridgeInstalledCases,
   // 追加独立场景，保留原 Mermaid 用例的冷启动条件及既有分片位置。
   ['Live 快速光标切标签页：Mermaid 夹具的 LF 锚点保持（#446）', async () => {
     const file = 'viewport-fast-mermaid.md'
