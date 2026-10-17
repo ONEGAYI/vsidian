@@ -167,6 +167,7 @@ import {
   registerHtmlResourcePort,
 } from './htmlResourceHub'
 import { disposeHtmlResourcesOf, prepareHtmlResources } from './htmlResourceMount'
+import { installHtmlSubmitGuard, pauseHtmlMedia } from './htmlInteract'
 import { documentStyleRegistry } from './docStyleLoader'
 import { revealInlineHtmlSourceAtCursor } from './liveInlineHtml'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
@@ -1150,6 +1151,11 @@ export class WebviewSyncController {
     this.readingContainer = createReadingContainer()
     this.readingContainer.tabIndex = 0
     this.readingContainer.style.display = 'none'
+    // #571（T06）表单提交守卫：document 捕获相位单一防线——笔记 HTML 的
+    // form（Reading 块/嵌入卡/浮层/Live widget 内容）submit 一律不导航
+    // （webview 是编辑器本体；无表单后端）。控制器是生产唯一装配入口，
+    // 浏览器 fixture 直驱时同样生效
+    installHtmlSubmitGuard(document)
     this.images = new ImageResourceManager({
       // http/https 图源直连（可加载性由 webview CSP 决定），其余经宿主解析
       isDirectSrc: isDirectImageSrc,
@@ -4231,6 +4237,12 @@ export class WebviewSyncController {
         ? Math.min(...sel.ranges.map((r) => r.from))
         : this.modeAnchor ?? 0
       this.modeAnchor = cursor
+      // #571（T06）切离 Live：隐藏编辑器内的 widget 媒体暂停（DOM 常驻
+      // display:none 不自动停——防「切到阅读后音频仍在播」；只停不释放，
+      // 切回不重置）
+      if (this.view?.contentDOM) {
+        pauseHtmlMedia(this.view.contentDOM)
+      }
       this.applyModeDom('reading') // 先更新模式（refreshReading 依赖它）
       if (editorHadFocus) this.readingContainer?.focus()
       this.refreshReading()
@@ -4261,6 +4273,11 @@ export class WebviewSyncController {
       }
     }
     const readingHadFocus = document.activeElement === this.readingContainer
+    // #571（T06）切离 Reading：隐藏阅读容器内的媒体暂停（块 DOM 常驻
+    // display:none 不自动停——与切离 Live 对称；只停不释放，切回不重置）
+    if (this.readingContainer) {
+      pauseHtmlMedia(this.readingContainer)
+    }
     this.applyModeDom('live')
     if (readingHadFocus) this.view?.focus()
     // 恢复光标到锚点并滚动到视口中部；事务不带 changes → 不产生编辑历史
@@ -10645,6 +10662,34 @@ export class WebviewSyncController {
         0),
       inline: inlinePaint,
     }
+    // #571（T06）表单与媒体交互探针：控件计数、details 展开态（真实 open
+    // 属性）、媒体真实装载与播放态（readyState/currentTime/paused/network
+    // ——集成与浏览器断言面；非标签存在断言）。作用域 = 当前模式内容域
+    //（reading 容器 / CM6 contentDOM——行内片段与嵌入卡内容同被覆盖）
+    const interactMediaEls = htmlScope
+      ? [...htmlScope.querySelectorAll<HTMLMediaElement>('video, audio')]
+      : []
+    const firstInteractMedia = interactMediaEls[0] ?? null
+    const htmlInteractPaint = {
+      controls: htmlScope
+        ? htmlScope.querySelectorAll('input, select, textarea, button').length
+        : 0,
+      detailsTotal: htmlScope
+        ? htmlScope.querySelectorAll('details').length
+        : 0,
+      detailsOpen: htmlScope
+        ? [...htmlScope.querySelectorAll<HTMLDetailsElement>('details')].filter((d) => d.open).length
+        : 0,
+      mediaTotal: interactMediaEls.length,
+      mediaPlaying: interactMediaEls.filter((m) => !m.paused && !m.ended).length,
+      mediaPaused: interactMediaEls.filter((m) => m.paused).length,
+      mediaReadyState: firstInteractMedia ? firstInteractMedia.readyState : null,
+      mediaCurrentTime: firstInteractMedia ? firstInteractMedia.currentTime : null,
+      mediaNetworkState: firstInteractMedia ? firstInteractMedia.networkState : null,
+      mediaError: firstInteractMedia?.error ? firstInteractMedia.error.code : null,
+      /** 全部媒体就绪态（多元素矩阵断言；readyState ≥ 2 = 有当前帧数据） */
+      mediaReadyStates: interactMediaEls.map((m) => m.readyState),
+    }
     // #570（T05）HTML/CSS 资源绘制探针：HTML 块/行内内容里的图片装载态
     //（管理器回包后 src 已应用 + loaded 事件确认）、srcset 重组应用计数、
     // 媒体属性改写计数（成功解析后属性以绝对地址存在），文档样式产物的
@@ -10989,7 +11034,7 @@ export class WebviewSyncController {
       // reading：.vsidian-reading-html；无渲染根时缺省）
       // #568 起 html 探针含行内面：块或行内任一在场即产出
       // #570（T05）起附资源面 resources（图片装载/srcset/媒体属性/产物 url）
-      ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: { ...htmlPaint, resources: htmlResourcesPaint } } : {}),
+      ...(htmlRoots > 0 || inlinePaint.roots > 0 ? { html: { ...htmlPaint, resources: htmlResourcesPaint, interact: htmlInteractPaint } } : {}),
       // #569（T04）文档样式隔离观测（无产物缺省）
       ...(docStyleProbe ? { docStyle: docStyleProbe } : {}),
       quickActions,

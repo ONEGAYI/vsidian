@@ -2921,6 +2921,31 @@ export interface PaintProbe {
       /** 首个已解析 CSS URL（失效重取的地址变化断言） */
       firstResolvedCssUrl: string | null
     }
+    /** #571（T06）表单与媒体交互面：控件计数、details 展开态（真实 open
+     *  属性）与媒体真实装载/播放态（readyState/currentTime——非标签存在
+     *  断言）。作用域 = 当前模式内容域（含行内片段与嵌入卡内容）。 */
+    interact: {
+      /** input/select/textarea/button 控件计数 */
+      controls: number
+      detailsTotal: number
+      /** 展开（open 属性真实翻转）的 details 数 */
+      detailsOpen: number
+      mediaTotal: number
+      /** 未暂停且未结束的媒体数（真实播放中） */
+      mediaPlaying: number
+      mediaPaused: number
+      /** 首个媒体就绪态（0 无数据 … 4 可播；≥2 = 已有当前帧数据） */
+      mediaReadyState: number | null
+      /** 首个媒体播放进度（秒；>0 即解码器真实推进） */
+      mediaCurrentTime: number | null
+      /** 首个媒体网络状态（0 空 / 1 空闲 / 2 装载中 / 3 无来源） */
+      mediaNetworkState: number | null
+      /** 首个媒体错误码（MediaError.code；无错误 null——不可用格式的真实
+       *  状态证据，不将不支持编码声明为已支持） */
+      mediaError: number | null
+      /** 全部媒体就绪态（多元素矩阵断言） */
+      mediaReadyStates: number[]
+    }
   }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
   quickActions?: {

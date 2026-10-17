@@ -1,11 +1,13 @@
 // #570（T05）HTML 资源 DOM 装配契约（净化产物 → DOM 咽喉的后置管线）：
 // img/src+srcset 剥离重解析、媒体 source/src/poster 归属改写、
 // a[href] 不改写（导航归点击委托）、解析结果的迟到守卫与释放语义。
+// #571（T06）起媒体装载语义收紧：相对 src/poster 解析前剥离（原文记忆
+// dataset）、失败恢复原文、dispose 释放媒体（pause + 断流）。
 // 身份矩阵：装配依赖注入的订阅端口携带 sourceDocUri（A/B/C 串源负向）。
 // 红测纪律：本文件先于实现编写——src/webview/htmlResourceMount.ts 与
 // htmlResourceHub.ts 尚不存在，import 即红。
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { ImageResourceManager } from '../../src/webview/imageResource'
 import {
   prepareHtmlResources,
@@ -124,7 +126,7 @@ describe('img：src 绑定管理器 + srcset 剥离重解析', () => {
   })
 })
 
-describe('媒体 source/src 与 poster：归属改写（语法矩阵，装载语义归 T06）', () => {
+describe('媒体 source/src 与 poster：归属改写 + T06 装载语义（相对目标先剥离）', () => {
   it('picture 内 source[srcset] 同 srcset 管线', () => {
     const sub = recorderSubscribe()
     const root = document.createElement('div')
@@ -136,32 +138,55 @@ describe('媒体 source/src 与 poster：归属改写（语法矩阵，装载语
     expect(source.dataset['vsidianSrcset']).toBe('a.webp 1w, b.webp 2w')
   })
 
-  it('video[src]/audio[src]/video[poster]：保留原属性，成功解析后改写为绝对地址', () => {
+  it('T06 装载语义：相对 src/poster 先剥离（防 webview origin 坏相对请求），原文记忆 dataset，成功后回写绝对地址', () => {
     const sub = recorderSubscribe()
     const root = document.createElement('div')
     root.innerHTML = '<video src="clip.mp4" poster="cover.png"></video><audio src="tone.ogg"></audio>'
     prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
     expect(sub.requests).toEqual(['clip.mp4', 'cover.png', 'tone.ogg'])
-    expect(root.querySelector('video')!.getAttribute('src')).toBe('clip.mp4') // 解析前保持原文
+    // 解析前剥离（img/srcset 同纪律——#571 起 CSP 放行媒体装载，保留原文
+    // 会先向 webview origin 发坏相对请求再被改写覆盖）
+    const video = root.querySelector('video')!
+    expect(video.getAttribute('src')).toBe(null)
+    expect(video.dataset['vsidianMediaSrc']).toBe('clip.mp4')
+    expect(video.getAttribute('poster')).toBe(null)
+    expect(video.dataset['vsidianMediaPoster']).toBe('cover.png')
+    expect(root.querySelector('audio')!.getAttribute('src')).toBe(null)
     sub.reply(0, 'https://resolved/clip.mp4')
     sub.reply(1, 'https://resolved/cover.png')
     sub.reply(2, 'https://resolved/tone.ogg')
-    expect(root.querySelector('video')!.getAttribute('src')).toBe('https://resolved/clip.mp4')
-    expect(root.querySelector('video')!.getAttribute('poster')).toBe('https://resolved/cover.png')
+    expect(video.getAttribute('src')).toBe('https://resolved/clip.mp4')
+    expect(video.getAttribute('poster')).toBe('https://resolved/cover.png')
+    expect(video.dataset['vsidianMediaSrc']).toBe(undefined) // 应用完成即清除记忆
+    expect(video.dataset['vsidianMediaPoster']).toBe(undefined)
     expect(root.querySelector('audio')!.getAttribute('src')).toBe('https://resolved/tone.ogg')
   })
 
-  it('source[src]（video/audio 内）：同归属改写', () => {
+  it('解析失败恢复原文（T05 失败语义保持——最终 DOM 与源文一致，不编造地址）', () => {
+    const sub = recorderSubscribe()
+    const root = document.createElement('div')
+    root.innerHTML = '<video src="gone.mp4"></video>'
+    prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    sub.fail(0)
+    const video = root.querySelector('video')!
+    expect(video.getAttribute('src')).toBe('gone.mp4')
+    expect(video.dataset['vsidianMediaSrc']).toBe(undefined)
+  })
+
+  it('source[src]（video/audio 内）：同剥离与改写；非资源属性不动', () => {
     const sub = recorderSubscribe()
     const root = document.createElement('div')
     root.innerHTML = '<video controls><source src="a.mp4" type="video/mp4"></video>'
     prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
+    const source = root.querySelector('source')!
+    expect(source.getAttribute('src')).toBe(null)
+    expect(source.dataset['vsidianMediaSrc']).toBe('a.mp4')
     sub.reply(0, 'https://resolved/a.mp4')
-    expect(root.querySelector('source')!.getAttribute('src')).toBe('https://resolved/a.mp4')
-    expect(root.querySelector('source')!.getAttribute('type')).toBe('video/mp4') // 非资源属性不动
+    expect(source.getAttribute('src')).toBe('https://resolved/a.mp4')
+    expect(source.getAttribute('type')).toBe('video/mp4')
   })
 
-  it('https 直连媒体属性不改写', () => {
+  it('https 直连媒体属性不改写不剥离', () => {
     const sub = recorderSubscribe()
     const root = document.createElement('div')
     root.innerHTML = '<video src="https://cdn/clip.mp4"></video>'
@@ -223,13 +248,18 @@ describe('身份与生命周期', () => {
     expect(sub.requests).toEqual(['a.png'])
   })
 
-  it('脱离文档后的迟到结果不写回（binding dispose 守卫）', async () => {
+  it('脱离文档后的迟到结果不写回（binding dispose 守卫）；dispose 同时释放媒体（#571：pause + src 剥除 + 记忆清理）', async () => {
     const sub = recorderSubscribe()
     const root = document.createElement('div')
     root.innerHTML = '<video src="late.mp4"></video>'
+    const video = root.querySelector('video')!
+    const pause = vi.spyOn(video, 'pause')
     const binding = prepareHtmlResources(root, { images: null, subscribe: sub.subscribe })
     binding.dispose()
+    expect(pause).toHaveBeenCalledTimes(1) // #571：释放即停（无持续播放）
+    expect(video.getAttribute('src')).toBe(null)
+    expect(video.dataset['vsidianMediaSrc']).toBe(undefined)
     sub.reply(0, 'https://resolved/late.mp4')
-    expect(root.querySelector('video')!.getAttribute('src')).toBe('late.mp4')
+    expect(video.getAttribute('src')).toBe(null) // 迟到结果丢弃
   })
 })

@@ -12,18 +12,22 @@
 //   时管理器绑定**首个候选**（浏览器从 srcset 选用时 src 仅回退）。
 // - picture 内 source[srcset]：同 srcset 管线。
 // - video/audio 的 src、video 的 poster、video/audio 内 source[src]：
-//   保留原属性，成功解析后改写为绝对地址（媒体装载语义归 T06——本票只
-//   校准归属与语法）。
+//   相对目标先剥离（#571/T06 起媒体装载放行——保留原文会先向 webview
+//   origin 发坏相对请求再被改写覆盖；img/srcset 同纪律），原文记忆于
+//   data-vsidian-media-*；解析成功改写为绝对地址，失败恢复原文（T05
+//   失败语义——最终 DOM 与源文一致，不编造地址）。
 // - a[href]：**不改写**——导航归 Reading 点击委托/宿主 linkTarget 分类
 //   （单一权威），Live 侧点击显形优先（mousedown 拦截器 + click 防默认
 //   导航在 widget 装配层）。
 // - 失败语义：失败候选/属性保持原文（浏览器按原生语义回退/失败，不编造
 //   地址）；危险协议在净化层已拒，本层不越权。
 //
-// 生命周期：返回 binding（dispose 退订全部订阅——退订后迟到结果不回写，
+// 生命周期：返回 binding（dispose 退订全部订阅并**释放子树媒体**——
+// #571/T06：pause + 断流，DOM 移除不自动暂停；退订后迟到结果不回写，
 // 「视图释放后无迟到结果污染」）；幂等标记防同根重复装配；模块级登记表
 // 供 sweep（Live widget DOM 离场兜底——挂在 liveLinks 的 sweep 调用点）。
 import { ImageResourceManager } from './imageResource'
+import { releaseHtmlMedia } from './htmlInteract'
 import {
   buildSrcsetValue,
   needsDocumentBaseResolution,
@@ -157,7 +161,7 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
     }
   }
 
-  // ---- 媒体属性管线（video/audio src、poster、source[src]）----
+  // ---- 媒体属性管线（video/audio src、poster、source[src]；#571/T06 装载语义）----
   const mediaTargets: Array<[string, string]> = [
     ['video[src]', 'src'],
     ['video[poster]', 'poster'],
@@ -170,12 +174,19 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
       if (raw === null || !needsDocumentBaseResolution(raw)) {
         continue // 直连/无目标语义：保持原属性
       }
+      // 相对目标先剥离（防 webview origin 坏相对请求——#571 起媒体装载
+      // 放行，img/srcset 同纪律）；原文记忆 dataset，失败恢复原文
+      el.removeAttribute(attr)
+      const memoKey = `vsidianMedia${attr === 'poster' ? 'Poster' : 'Src'}`
+      el.dataset[memoKey] = raw
       owners.push(el)
       track(subscribe(raw, guard((o) => {
+        delete el.dataset[memoKey]
         if (o.ok) {
           el.setAttribute(attr, o.url)
+        } else {
+          el.setAttribute(attr, raw) // 失败恢复原文（真实失败按原生语义呈现）
         }
-        // 失败：保持原文（真实失败按原生语义呈现，不编造）
       }), sourceDocUri))
     }
   }
@@ -190,6 +201,8 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
         unsub()
       }
       unsubscribers.length = 0
+      // #571（T06）释放即停：子树媒体 pause + 断流（DOM 移除不自动暂停）
+      releaseHtmlMedia(root)
       activeBindings.delete(binding)
       bindingsByRoot.delete(root)
     },

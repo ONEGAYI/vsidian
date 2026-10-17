@@ -28,7 +28,7 @@ import { isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree, type HtmlBlockSpan 
 import { htmlBlockRenderHtml } from './htmlSanitize'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
 import { DocumentStyleBinding, type DocStyleResourcePort } from './docStyleLoader'
-import { prepareHtmlResources } from './htmlResourceMount'
+import { disposeHtmlResourcesOf, prepareHtmlResources } from './htmlResourceMount'
 import { liveImagesOfView } from './liveLinks'
 import { t } from '../shared/i18n'
 import type { Tree } from '@lezer/common'
@@ -299,6 +299,19 @@ export class LiveHtmlWidget extends WidgetType {
 
   ignoreEvent(): boolean {
     return false // 点击不吞——普通点击进入源码（规格红线）
+  }
+
+  /**
+   * #571（T06）widget 退场（显形撤下/视口移除/视图销毁——CM6 移除 widget
+   * DOM 时回调）：释放内容根的资源 binding（其 dispose 即媒体释放——
+   * DOM 移除不自动暂停，防「显形后音频仍在播」）+ 订阅即时退订（不等
+   * liveLinks 的 sweep 兜底周期）。
+   */
+  destroy(dom: HTMLElement): void {
+    const content = dom.querySelector(`.${LIVE_HTML_CLASS_NAMES.content}`)
+    if (content instanceof HTMLElement) {
+      disposeHtmlResourcesOf(content)
+    }
   }
 }
 

@@ -1208,6 +1208,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'An inline host span (display:inline) inside a .cm-line in the live-view .cm-content; the inner .vsidian-live-inline-html-content holds the sanitized native HTML. Mounted identically in the main document and inside embedded live editors.',
     obsidian: { counterpart: 'No dedicated class (Obsidian inline HTML toggles between source and rendering; internal structure is closed-source and not promised)' },
   },
+  'html-native-media': {
+    purpose:
+      'Column-width constraint for video elements inside native HTML fragments (#571/T06): an oversized video is clamped inside the body column instead of overflowing (the same family of semantics as the image-slot max-width:100%; author width/height attributes are preserved, only overflow is clamped). Audio control bars have no overflow surface, so no rule is added. Media loading surface: local resources resolve against the owning source document (asWebviewUri products), remote https URLs load directly, and CSP media-src admits them (#571); Reading carries native play/pause interaction while a plain click on the Live hit area still prioritizes source reveal (no exception for controls), and block unmount / widget teardown / mode switch stop playback immediately (DOM removal does not auto-pause).',
+    states:
+      'Clamped presentation by default; revealed source (Live touched) releases the media as the widget withdraws (pause + stream cut); Reading virtualization recycling releases the same way, and remounting rebuilds from the block source text.',
+    dom: 'Native <video> elements inside HTML blocks/inline fragments (sanitizer products; controls/autoplay/loop/muted/preload/poster and other attributes survive the sanitizer whitelist); an inline-fragment video in Reading lives inside its content block (a paragraph, for example).',
+    obsidian: { counterpart: '.markdown-preview-view video (reading) / inline video in live (no public stable Obsidian class)' },
+  },
   'reading-embed-ref': {
     purpose:
       'The openable placeholder form of an embed reference (#222): a line-owning embed inside referenced reading content first parses into a recognizable ![[display]] reference. Since #244/#245 it mounts as a body card or hover-internal card when depth and budgets allow; excessive depth, a cycle, or budget rejection retains an in-place explanation and an open-target entry. The target always resolves relative to its direct source document.',

@@ -225,6 +225,7 @@ vsidian/
         ├── hoverPopup.ts                 # 悬停预览浮层单例
         ├── hoverPopupGeometry.ts         # 悬停浮层几何纯函数
         ├── htmlComment.ts                # 阅读侧 HTML 注释剥离纯函数
+        ├── htmlInteract.ts               # 表单媒体交互防线
         ├── htmlResourceHub.ts            # HTML 资源解析枢纽
         ├── htmlResourceMount.ts          # HTML 资源 DOM 装配
         ├── htmlSanitize.ts               # HTML 块专用净化边界

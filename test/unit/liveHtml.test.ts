@@ -5,7 +5,7 @@
 // （命中当前片段后选中完整源码区间）。真实指针/绘制验证在 browser 与
 // 集成层。
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { EditorSelection, EditorState, type SelectionRange } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
@@ -192,6 +192,19 @@ describe('Live HTML 片段替换装饰：显隐切换', () => {
     expect(dom.querySelector('[data-vsidian-src-start]')).toBeNull()
     expect(dom.querySelector('div')!.textContent).toContain('x')
     expect(dom.querySelector('span')!.textContent).toBe('y')
+  })
+
+  it('#571（T06）widget destroy：媒体立即释放（显形撤下 widget 后无持续播放）+ 资源订阅退订', () => {
+    const src = '<video src="https://cdn/v.mp4" controls></video>'
+    const w = new LiveHtmlWidget(src, 0, src.length, 'doc')
+    const dom = w.toDOM()
+    const video = dom.querySelector('video')!
+    const pause = vi.spyOn(video, 'pause')
+    const load = vi.spyOn(video, 'load')
+    w.destroy(dom)
+    expect(pause).toHaveBeenCalledTimes(1)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(video.getAttribute('src')).toBe(null)
   })
 })
 

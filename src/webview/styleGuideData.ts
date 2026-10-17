@@ -4049,6 +4049,31 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#568（2026-10-16）"
   },
   {
+    "id": "html-native-media",
+    "domain": "content",
+    "category": "reading-structure",
+    "kind": "selector",
+    "target": "HTML 内容内的 video 元素（.vsidian-live-html / .vsidian-live-inline-html / .vsidian-reading-block 三面；无自有类）",
+    "purpose": "原生 HTML 片段内 video 的列宽约束（#571/T06）：超宽视频钳制在正文列内不溢出（与图片槽位 max-width:100% 同族语义；作者 width/height 属性保留，仅钳制溢出）。audio 控件条无溢出面，不加规则。媒体装载面：本地资源经来源文档归属解析（asWebviewUri 产物）、远端 https 直连，CSP media-src 放行（#571）；Reading 承载原生播放/暂停交互，Live 普通点击命中区仍优先源码显形（不因控件例外），块卸载/widget 退场/模式切换即停（DOM 移除不自动暂停）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "常态钳制呈现；源码显形（Live 触及）时随 widget 退场释放（pause + 断流）；Reading 虚拟化回收同释放，重挂载从块源文重建。",
+    "dom": "HTML 块/行内片段内的原生 <video> 元素（净化产物，controls/autoplay/loop/muted/preload/poster 等属性按净化白名单保留）；Reading 行内片段的 video 在内容块（如段落）内。",
+    "example": ".markdown-preview-view video {\n  max-width: 100%;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view video（阅读；Live 内联视频 Obsidian 无公开稳定类）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 liveHtmlCssContract（#571）：video max-width 三面规则形态钉住（Live 块级/行内宿主 + Reading 内容块）",
+      "单元 htmlInteract/htmlResourceMount（#571）：媒体释放（pause + 断流 + 记忆清理）与幂等、装载剥离语义",
+      "浏览器 html-controls-571（#571）：Reading 媒体真实播放观测（readyState/currentTime）、释放后无持续播放、模式切换暂停"
+    ],
+    "introduced": "#571（2026-10-16）"
+  },
+  {
     "id": "reading-embed-ref",
     "domain": "content",
     "category": "link-image-wikilink",
@@ -6864,6 +6889,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "An inline host span (display:inline) inside a .cm-line in the live-view .cm-content; the inner .vsidian-live-inline-html-content holds the sanitized native HTML. Mounted identically in the main document and inside embedded live editors.",
     "obsidian": {
       "counterpart": "No dedicated class (Obsidian inline HTML toggles between source and rendering; internal structure is closed-source and not promised)"
+    }
+  },
+  "html-native-media": {
+    "purpose": "Column-width constraint for video elements inside native HTML fragments (#571/T06): an oversized video is clamped inside the body column instead of overflowing (the same family of semantics as the image-slot max-width:100%; author width/height attributes are preserved, only overflow is clamped). Audio control bars have no overflow surface, so no rule is added. Media loading surface: local resources resolve against the owning source document (asWebviewUri products), remote https URLs load directly, and CSP media-src admits them (#571); Reading carries native play/pause interaction while a plain click on the Live hit area still prioritizes source reveal (no exception for controls), and block unmount / widget teardown / mode switch stop playback immediately (DOM removal does not auto-pause).",
+    "states": "Clamped presentation by default; revealed source (Live touched) releases the media as the widget withdraws (pause + stream cut); Reading virtualization recycling releases the same way, and remounting rebuilds from the block source text.",
+    "dom": "Native <video> elements inside HTML blocks/inline fragments (sanitizer products; controls/autoplay/loop/muted/preload/poster and other attributes survive the sanitizer whitelist); an inline-fragment video in Reading lives inside its content block (a paragraph, for example).",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view video (reading) / inline video in live (no public stable Obsidian class)"
     }
   },
   "reading-embed-ref": {

@@ -5673,6 +5673,18 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   display: none;
 }
 
+/* #571（T06）原生媒体列宽约束（样式契约 content 域 html-native-media
+   条目）：video 超宽不溢出正文列——与图片槽位的 max-width:100% 同族
+   语义（作者 width/height 属性保留，仅钳制溢出；Obsidian 对应
+   .markdown-preview-view video 方向）。audio 控件条无溢出面，不加规则
+   （不发明额外形态干预）。Reading 侧挂内容块级（块级 html 块与段落内
+   行内片段的 video 都在 .vsidian-reading-block 下；嵌入卡内容同构）。 */
+#app .cm-editor .cm-content .vsidian-live-html video,
+#app .cm-editor .cm-content .vsidian-live-inline-html video,
+#app .vsidian-view-reading .vsidian-reading-block video {
+  max-width: 100%;
+}
+
 /* ---- #568（T03）行内原生 HTML（样式契约 content 域 live-inline-html-widget
    / reading-inline-html 条目）----
    Live：宿主是行内片段 inline replace widget 的替换物（span，

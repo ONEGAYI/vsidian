@@ -95,6 +95,11 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 族——img/srcset 真实语法装载、文档样式 url()/字体绘制、媒体属性改写、
   // Live 点击不跳转、Reading 链接意图、失效重取）
   'htmlResources',
+  // #571（T06）表单 details 与音视频双模式行为：紧随 htmlResources（同
+  // HTML 族——Reading 表单真实输入/选择、details 展开、媒体真实播放、
+  // 提交不导航、零写回；Live 控件/媒体命中区点击 = 完整源码选区；释放
+  // 与模式切换无持续播放）
+  'html-controls-571',
   'dropCursorPaint', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',

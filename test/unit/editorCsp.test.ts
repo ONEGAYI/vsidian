@@ -92,9 +92,20 @@ describe('编辑器 CSP 装配（#130 HTTPS 样式导入与联网字体）', () 
     expect(directives.get('frame-src')).toEqual(['https:'])
   })
 
+  it("#571（T06）media-src：精确等值 [cspSource, 'https:']——原生 audio/video/source/track 装载面（移除即红：default-src 'none' 回落拦截全部媒体装载；收紧即红：本地 asWebviewUri 资源（cspSource 域）与远端 https 媒体缺一不可）", () => {
+    // #571（T06）表单与音视频：媒体 src/poster/source 经 T05 归属解析改写
+    // 为绝对地址——本地资源是 asWebviewUri 的 https 资源域形态（cspSource），
+    // 远端直连保持 https 原文。只放行这两类：不放开 http:（混合内容红线）、
+    // data:/blob:（无已知需求，不预防性放行）。track 字幕同受 media-src 管辖
+    expect(directives.get('media-src')).toEqual([
+      'https://vscode-webview.test-origin',
+      'https:',
+    ])
+  })
+
   it('指令集穷举（新增指令须随测试更新语义说明）', () => {
     expect([...directives.keys()].sort()).toEqual(
-      ['connect-src', 'default-src', 'font-src', 'frame-src', 'img-src', 'script-src', 'style-src', 'worker-src'],
+      ['connect-src', 'default-src', 'font-src', 'frame-src', 'img-src', 'media-src', 'script-src', 'style-src', 'worker-src'],
     )
   })
 

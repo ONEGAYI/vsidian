@@ -38,6 +38,71 @@ describe('sanitizeHtmlBlockMarkup：白名单净化（第一道闸）', () => {
     expect(out).toContain('<ol start="3" reversed')
   })
 
+  // #571（T06）表单与媒体矩阵：DOMPurify 默认白名单已放行全族标签与安全
+  // 属性（此处为契约钉住——防止后续收紧配置时静默丢族）；导航/聚焦类
+  // 属性（formaction/autofocus）默认剥离是安全姿态，一并钉住。
+  it('表单控件族通过（form/label/input/select/optgroup/option/textarea/button/fieldset/legend/datalist/output/progress/meter + 控件属性）', () => {
+    const out = sanitizeHtmlBlockMarkup(
+      '<form action="/x" method="post">' +
+      '<label for="i">L</label>' +
+      '<input id="i" type="text" value="v" placeholder="p" required>' +
+      '<select name="s"><option value="1" selected>一</option><optgroup label="g"><option value="2">二</option></optgroup></select>' +
+      '<textarea rows="3" cols="4">t</textarea>' +
+      '<button type="submit">Go</button><button type="reset">R</button>' +
+      '<input type="checkbox" checked><input type="radio" name="r" checked>' +
+      '<input type="file" accept=".png"><input type="number" min="1" max="9" step="2" value="3">' +
+      '<input type="range" value="5"><input type="color" value="#ff0000"><input type="date" value="2026-01-01">' +
+      '<datalist id="d"><option value="x"></datalist>' +
+      '<fieldset><legend>lg</legend><p>in</p></fieldset>' +
+      '<output>o</output><progress value="7" max="10"></progress><meter value="0.5"></meter>' +
+      '</form>',
+    )
+    expect(out).toContain('<form action="/x" method="post">')
+    expect(out).toContain('<input id="i" type="text" value="v" placeholder="p" required')
+    expect(out).toContain('<option value="1" selected')
+    expect(out).toContain('<optgroup label="g">')
+    expect(out).toContain('<textarea rows="3" cols="4">t</textarea>')
+    expect(out).toContain('<button type="submit">Go</button>')
+    expect(out).toContain('<input type="checkbox" checked')
+    expect(out).toContain('<input type="file" accept=".png">')
+    expect(out).toContain('<input type="number" min="1" max="9" step="2" value="3">')
+    expect(out).toContain('<fieldset><legend>lg</legend>')
+    expect(out).toContain('<progress value="7" max="10">')
+    expect(out).toContain('<meter value="0.5">')
+  })
+
+  it('媒体族通过（audio/video/source/track + 装载与控件属性）', () => {
+    const out = sanitizeHtmlBlockMarkup(
+      '<video src="a.mp4" controls autoplay loop muted preload="metadata" poster="p.jpg" width="320" height="240" playsinline>' +
+      '<track kind="subtitles" src="a.vtt" srclang="zh" label="中" default>' +
+      '<source src="b.webm" type="video/webm">fallback</video>' +
+      '<audio src="c.mp3" controls loop preload="auto"><source src="d.ogg" type="audio/ogg"></audio>',
+    )
+    expect(out).toContain('<video src="a.mp4" controls')
+    expect(out).toContain('autoplay')
+    expect(out).toContain('poster="p.jpg"')
+    expect(out).toContain('playsinline')
+    expect(out).toContain('<track kind="subtitles" src="a.vtt" srclang="zh" label="中" default')
+    expect(out).toContain('<source src="b.webm" type="video/webm">')
+    expect(out).toContain('<audio src="c.mp3" controls')
+  })
+
+  it('表单与媒体的负向：导航/聚焦/执行面恒拒（formaction/autofocus/on*/javascript: 媒体地址）', () => {
+    const out = sanitizeHtmlBlockMarkup(
+      '<form onsubmit="evil()" action="javascript:x"><button formaction="https://a/b">Go</button></form>' +
+      '<input onfocus="evil()" autofocus>' +
+      '<video src="javascript:evil()"></video>' +
+      '<source onerror="evil()" src="a.mp4">' +
+      '<input type="image" formaction="javascript:y" src="i.png">',
+    )
+    expect(out).not.toContain('onsubmit')
+    expect(out).not.toContain('onfocus')
+    expect(out).not.toContain('onerror')
+    expect(out).not.toContain('formaction')
+    expect(out).not.toContain('autofocus')
+    expect(out).not.toContain('javascript:')
+  })
+
   it('SVG 与 MathML 命名空间内容通过安全子集', () => {
     const out = sanitizeHtmlBlockMarkup('<svg width="20" height="20"><circle cx="10" cy="10" r="8"></circle></svg><math><mi>x</mi></math>')
     expect(out).toContain('<circle')

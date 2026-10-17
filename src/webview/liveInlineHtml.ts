@@ -26,6 +26,7 @@ import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from '
 import { inlineHtmlFragmentsOfTree, type HtmlInlineFragment } from '../shared/htmlInline'
 import { htmlInlineRenderHtml } from './htmlSanitize'
 import { makeHtmlWidgetMousedown, liveHtmlDocScopeOf, prepareHtmlWidgetContent } from './liveHtml'
+import { disposeHtmlResourcesOf } from './htmlResourceMount'
 import type { Tree } from '@lezer/common'
 
 /** #568 Live 行内 HTML 宿主稳定类名（样式契约 live-inline-html-widget
@@ -205,6 +206,17 @@ export class LiveInlineHtmlWidget extends WidgetType {
 
   ignoreEvent(): boolean {
     return false // 点击不吞——普通点击进入源码（与块级同红线）
+  }
+
+  /**
+   * #571（T06）widget 退场：释放内容根的资源 binding（dispose 即媒体释放
+   * ——显形撤下后无持续播放）+ 订阅即时退订（与块级同一执行体形状）。
+   */
+  destroy(dom: HTMLElement): void {
+    const content = dom.querySelector(`.${LIVE_INLINE_HTML_CLASS_NAMES.content}`)
+    if (content instanceof HTMLElement) {
+      disposeHtmlResourcesOf(content)
+    }
   }
 }
 

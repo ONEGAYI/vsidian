@@ -45,6 +45,23 @@
 //   目标站点响应自带的 CSP 管辖（父文档 CSP 不作用于子文档），故本指令
 //   只约束「iframe 能导航到哪」，不扩大父文档的 script/connect 面。
 //
+// #571 变更（表单 details 与音视频——T06）：
+// - 新增独立指令 `media-src ${cspSource} https:`——笔记 HTML 的原生
+//   audio/video（含 source 子元素与 track 字幕）装载面。此前无该指令，
+//   default-src 'none' 回落拦截全部媒体装载（T05 只改写属性不装载的
+//   原因）。逐项理由：
+//   - `${cspSource}`：本地媒体经 T05 归属解析（htmlResourceMount 媒体
+//     管线）改写为 asWebviewUri 产物——该形态是 cspSource 域下的 https
+//     资源地址，与 img/font 同一装载面（既有授权路径，不新增根）。
+//   - `https:`：远端直连媒体（needsDocumentBaseResolution 判定直连、
+//     属性保持 https 原文）由浏览器原生管线装载——与 img-src/style-src/
+//     font-src 的远端面同口径。
+//   - 不放行 `http:`（明文混合内容红线，与全部既有指令一致）；不放行
+//     `data:`/`blob:`（无已知生产需求，不预防性扩面——与 img-src 的
+//     data:〔图表弹窗光栅化用〕不同，媒体无等价消费方）。
+//   - 不涉脚本/connect 面：媒体解码不执行页面脚本，track 字幕是文本
+//     资源（同受 media-src 管辖）。
+//
 // 不放宽的面（验收红线）：
 // - script-src 维持 nonce 门控——不因字体/样式需求扩大脚本权限，不放行
 //   https:/unsafe-inline/unsafe-eval（'wasm-unsafe-eval' 是 #239 jieba
@@ -74,5 +91,8 @@ export function buildEditorCsp(cspSource: string, nonce: string): string {
     `worker-src blob:`,
     // #343 外链原网页 iframe：只放行 https 源（见文件头 #343 变更说明）
     `frame-src https:`,
+    // #571 原生媒体装载：cspSource（本地经 asWebviewUri 归属解析产物）+
+    // https:（远端直连）；逐项理由见文件头 #571 变更说明（track 同受管辖）
+    `media-src ${cspSource} https:`,
   ].join('; ')
 }

@@ -54,3 +54,12 @@ describe('Reading HTML 块绘制规则（reading-html-block 条目）', () => {
     expect(rule).toMatch(/font-family:\s*var\(--vscode-editor-font-family/)
   })
 })
+
+describe('#571（T06）原生媒体列宽约束（html-native-media 条目）', () => {
+  it('video 超宽不溢出正文列：Live 块级/行内宿主 + Reading 内容块三面 max-width:100%（audio 控件条无溢出面不加规则）', () => {
+    const rule = cssRule(css, '#app .vsidian-view-reading .vsidian-reading-block video')
+    expect(rule).toMatch(/max-width:\s*100%/)
+    expect(css).toContain('.vsidian-live-html video,')
+    expect(css).toContain('.vsidian-live-inline-html video,')
+  })
+})

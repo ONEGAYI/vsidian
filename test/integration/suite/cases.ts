@@ -868,6 +868,21 @@ interface ViewState {
         docStyleProducts: Array<{ scope: string; resolvedUrls: number; totalUrls: number }>
         firstResolvedCssUrl: string | null
       }
+      /** #571（T06）表单与媒体交互面：控件计数、details 展开态与媒体
+       *  真实装载/播放态（readyState/currentTime——非标签存在断言） */
+      interact?: {
+        controls: number
+        detailsTotal: number
+        detailsOpen: number
+        mediaTotal: number
+        mediaPlaying: number
+        mediaPaused: number
+        mediaReadyState: number | null
+        mediaCurrentTime: number | null
+        mediaNetworkState: number | null
+        mediaError: number | null
+        mediaReadyStates: number[]
+      }
     }
     /** #569（T04）文档样式绘制：产物键集 + Reading 直接子块计算色 +
      *  工具栏排除面基线（无产物缺省） */
@@ -19136,6 +19151,97 @@ export const cases: Array<[string, () => Promise<void>]> = [
         rm(nodePath.join(wsDir!, 't5-sb.png'), { force: true }).catch(() => undefined),
         rm(nodePath.join(wsDir!, 't5-bg.png'), { force: true }).catch(() => undefined),
         rm(nodePath.join(wsDir!, 't5-clip.mp4'), { force: true }).catch(() => undefined),
+      ])
+    }
+  }],
+  ['表单 details 与音视频的双模式行为（#571）', async () => {
+    const fileA = 't6-controls-571.md'
+    const docA = [
+      '# 表单与媒体',
+      '',
+      '<div id="t6-block">',
+      '  <details id="t6-details" open><summary>已展开</summary><p>折叠正文</p></details>',
+      '  <form action="https://example.com/submit" method="get">',
+      '    <input id="t6-text" type="text" value="初始">',
+      '    <select id="t6-sel"><option value="a">甲</option><option value="b">乙</option></select>',
+      '    <button type="submit" id="t6-go">提交</button>',
+      '  </form>',
+      '  <video id="t6-video" src="t6-tone.wav" controls muted autoplay></video>',
+      '  <audio id="t6-audio" src="t6-tone.wav" controls></audio>',
+      '</div>',
+      '',
+      '尾段。',
+    ].join('\n')
+    // 合成真实可解码 WAV（8kHz 单声道 8-bit 正弦）：宿主 webview 经
+    // asWebviewUri 归属解析装载——readyState/播放态是 CSP media-src 放行的
+    // 真实生效证据（#37 教训：CSP 断言必须落真实 webview 宿主）
+    function makeToneWavBytes(seconds: number, freq: number, rate: number): Buffer {
+      const n = Math.floor(seconds * rate)
+      const buf = Buffer.alloc(44 + n)
+      buf.write('RIFF', 0)
+      buf.writeUInt32LE(36 + n, 4)
+      buf.write('WAVE', 8)
+      buf.write('fmt ', 12)
+      buf.writeUInt32LE(16, 16)
+      buf.writeUInt16LE(1, 20) // PCM
+      buf.writeUInt16LE(1, 22) // mono
+      buf.writeUInt32LE(rate, 24)
+      buf.writeUInt32LE(rate, 28)
+      buf.writeUInt16LE(1, 32)
+      buf.writeUInt16LE(8, 34)
+      buf.write('data', 36)
+      buf.writeUInt32LE(n, 40)
+      for (let i = 0; i < n; i++) {
+        buf[44 + i] = 128 + Math.round(120 * Math.sin((2 * Math.PI * freq * i) / rate))
+      }
+      return buf
+    }
+    await writeFile(nodePath.join(wsDir!, fileA), docA, 'utf8')
+    await writeFile(nodePath.join(wsDir!, 't6-tone.wav'), makeToneWavBytes(3, 440, 8000))
+    try {
+      await openWithEditor(fileA)
+      await waitSessionReady(fileA)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
+      // Reading：控件族渲染（净化白名单放行）、details 展开态（真实 open
+      // 属性）、媒体真实装载（readyState ≥ 2 = 已取得当前数据——本地
+      // asWebviewUri 资源在 CSP media-src 下可装载的实证）与播放推进
+      const reading = await waitViewState(fileA, (v) => {
+        const it = v.paint?.html?.interact
+        const r = v.paint?.html?.resources
+        return v.viewMode === 'reading' && it !== undefined &&
+          it.controls >= 4 && it.detailsTotal >= 1 && it.detailsOpen >= 1 &&
+          it.mediaTotal >= 2 && it.mediaReadyState !== null && it.mediaReadyState >= 2 &&
+          (r?.mediaResolved ?? 0) >= 2
+      }, 0, 45000)
+      const it = reading.paint!.html!.interact!
+      const res = reading.paint!.html!.resources!
+      assert(it.detailsOpen >= 1, `details 展开态经净化保留并呈现（真实 open 属性；实际 ${JSON.stringify(it)}）`)
+      assert(it.controls >= 4, `表单控件族渲染（input/select/button 等；实际 ${it.controls}）`)
+      assert(it.mediaReadyState! >= 2, `媒体取得当前数据（readyState≥2——CSP media-src 放行 cspSource 装载的实证；实际 ${it.mediaReadyState}）`)
+      assert(it.mediaError === null, `媒体无错误（不可用格式不得伪装已支持；实际 ${it.mediaError}）`)
+      assert(res.mediaResolved >= 2, `媒体属性归属解析改写（实际 ${res.mediaResolved}）`)
+      // 播放推进：Electron webview 默认 autoplay 策略允许 muted autoplay——
+      // 如实记录观测值（不达此断言即真实策略差异，落矩阵待查）
+      const playing = await waitViewState(fileA, (v) => {
+        const p = v.paint?.html?.interact
+        return v.viewMode === 'reading' && p !== undefined && p.mediaPlaying >= 1
+      }, 0, 20000).catch(() => null)
+      console.log(`[#571] muted autoplay 播放观测：mediaPlaying=${playing ? playing.paint!.html!.interact!.mediaPlaying : '未播放（策略差异，记录待人工核对）'} currentTime=${playing ? playing.paint!.html!.interact!.mediaCurrentTime : '-'}`)
+
+      // Live：widget 渲染同一控件与媒体面（点击交互的浏览器级验证在
+      // browser 套件 html-controls-571——真宿主不可驱动 webview 内指针）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri(fileA))
+      const live = await waitViewState(fileA, (v) => {
+        const p = v.paint?.html?.interact
+        return v.viewMode === 'live' && p !== undefined && p.controls >= 4 && p.mediaTotal >= 2
+      }, 0, 30000)
+      const liveIt = live.paint!.html!.interact!
+      assert(liveIt.controls >= 4, `Live widget 渲染控件族（实际 ${liveIt.controls}）`)
+      assert(liveIt.mediaTotal >= 2, `Live widget 渲染媒体（实际 ${liveIt.mediaTotal}）`)
+    } finally {
+      await Promise.all([
+        rm(nodePath.join(wsDir!, fileA), { force: true }).catch(() => undefined),
+        rm(nodePath.join(wsDir!, 't6-tone.wav'), { force: true }).catch(() => undefined),
       ])
     }
   }],

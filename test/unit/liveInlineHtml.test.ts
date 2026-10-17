@@ -5,7 +5,7 @@
 // revealInlineHtmlSourceAtCursor 目标解析。真实指针/绘制验证在 browser
 // 与集成层。
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { EditorSelection, EditorState, type SelectionRange } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
@@ -236,6 +236,19 @@ describe('Live 行内片段替换装饰：显隐切换（selectionTouchesRange �
     expect(dom.querySelector('[onclick]')).toBeNull()
     expect(dom.querySelector('[data-vsidian-src-start]')).toBeNull()
     expect(dom.textContent).toContain('x')
+  })
+
+  it('#571（T06）widget destroy：行内媒体立即释放（显形撤下后无持续播放）', () => {
+    const src = '<audio src="https://cdn/t.mp3" controls></audio>'
+    const w = new LiveInlineHtmlWidget(src, 0, src.length, 'doc')
+    const dom = w.toDOM()
+    const audio = dom.querySelector('audio')!
+    const pause = vi.spyOn(audio, 'pause')
+    const load = vi.spyOn(audio, 'load')
+    w.destroy(dom)
+    expect(pause).toHaveBeenCalledTimes(1)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(audio.getAttribute('src')).toBe(null)
   })
 })
 

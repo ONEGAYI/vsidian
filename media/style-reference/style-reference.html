@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（94 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（95 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -601,7 +601,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 tableCells：转义管道拆分契约</p>
       <p class="life">引入：#42（2026-09-24）</p>
     </article>
-    <h2>正文域 · 阅读块级结构（16）</h2>
+    <h2>正文域 · 阅读块级结构（17）</h2>
     <article class="entry" id="reading-block">
       <h3><code>.vsidian-reading-block（+ data-vsidian-src-start / -end 源锚点属性）</code><span class="eid">reading-block</span></h3>
       <p class="purpose">阅读容器内每个内容块的基类；锚点属性为 LF 全文 UTF-16 offset（与消息协议坐标同构），按需挂载与任务定位依赖。</p>
@@ -823,6 +823,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 readingInlineHtml（#568）：原位渲染（颜色元素/br 不拆段/嵌套/片段内不递归 Markdown/标题引用列表表格上下文）、不成型字面降级、净化负向（事件属性/伪造锚点/危险协议）；浏览器 liveInlineHtml 阅读态（#568）：内联颜色 computed + br 换行绘制、表格/引用上下文不回退；集成（#568）：paint.html.inline（reading 侧颜色元素命中与 computed color）</p>
       <p class="life">引入：#568（2026-10-16）</p>
+    </article>
+    <article class="entry" id="html-native-media">
+      <h3><code>HTML 内容内的 video 元素（.vsidian-live-html / .vsidian-live-inline-html / .vsidian-reading-block 三面；无自有类）</code><span class="eid">html-native-media</span></h3>
+      <p class="purpose">原生 HTML 片段内 video 的列宽约束（#571/T06）：超宽视频钳制在正文列内不溢出（与图片槽位 max-width:100% 同族语义；作者 width/height 属性保留，仅钳制溢出）。audio 控件条无溢出面，不加规则。媒体装载面：本地资源经来源文档归属解析（asWebviewUri 产物）、远端 https 直连，CSP media-src 放行（#571）；Reading 承载原生播放/暂停交互，Live 普通点击命中区仍优先源码显形（不因控件例外），块卸载/widget 退场/模式切换即停（DOM 移除不自动暂停）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+<p class="states">状态：常态钳制呈现；源码显形（Live 触及）时随 widget 退场释放（pause + 断流）；Reading 虚拟化回收同释放，重挂载从块源文重建。</p>
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view video（阅读；Live 内联视频 Obsidian 无公开稳定类）</p>
+
+      <p class="dom">DOM 关系：HTML 块/行内片段内的原生 &lt;video&gt; 元素（净化产物，controls/autoplay/loop/muted/preload/poster 等属性按净化白名单保留）；Reading 行内片段的 video 在内容块（如段落）内。</p>
+      <pre><code>.markdown-preview-view video {
+  max-width: 100%;
+}</code></pre>
+      <p class="verify">验证：单元 liveHtmlCssContract（#571）：video max-width 三面规则形态钉住（Live 块级/行内宿主 + Reading 内容块）；单元 htmlInteract/htmlResourceMount（#571）：媒体释放（pause + 断流 + 记忆清理）与幂等、装载剥离语义；浏览器 html-controls-571（#571）：Reading 媒体真实播放观测（readyState/currentTime）、释放后无持续播放、模式切换暂停</p>
+      <p class="life">引入：#571（2026-10-16）</p>
     </article>
     <h2>正文域 · 链接、图片与双链（17）</h2>
     <article class="entry" id="mod-link-hover">
