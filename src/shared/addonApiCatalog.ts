@@ -1253,4 +1253,14 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
     // 既有五个入口的兼容清单保留在 1.0.0 记录，参考文档按全台账合并呈现。
     experimental: [],
   },
+  {
+    version: '1.2.0',
+    status: 'released',
+    releasedAt: '2026-10-18',
+    summary:
+      '兼容性修订（随 Vsidian 1.2.0 发布）：无新增能力面与实验入口。内核 Codex 主题退役（#535/T08）——旧键 appearance.mermaidTheme 不再参与主题首选解析，首选值域收窄为 default | <addonId>/<themeId>，存量 codex 按未知首选回落 default 显示且首选保留；resolveActiveTheme 对退役 codex 值按目录不命中处理（available=false、effective=default、preferred 保留）；preferredAvailable 收窄为仅 default 恒 true；v1.1.0 公开符号 resolveThemePreferred 双参与 CODEX_THEME_ID 保持编译期兼容并标 @deprecated（弃用与移除受双门槛约束）。',
+    // 本版本不新增实验入口，既有五个入口的兼容清单保留在 1.0.0 记录，
+    // 参考文档按全台账合并呈现。
+    experimental: [],
+  },
 ]

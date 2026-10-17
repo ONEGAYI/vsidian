@@ -1,6 +1,6 @@
 # Vsidian 附加组件开发指南
 
-状态：**公开 API 开发指南（2026-10-08 随 T13 #362 建立；2026-10-16 起 1.1.0 已发行）**。稳定 API 自 1.1.0 起随 Vsidian 本体发行并提供兼容承诺（变更记录见仓库根 [CHANGELOG-API.md](../../CHANGELOG-API.md)）；SDK 包与独立示例仓库尚未提供。接口签名与逐条语义以[公开 API 参考](api-reference.md)为准（该文档从事实源生成，不手改）。
+状态：**公开 API 开发指南（2026-10-08 随 T13 #362 建立；当前发行 1.2.0）**。稳定 API 自 1.1.0（2026-10-16）起随 Vsidian 本体发行并提供兼容承诺（变更记录见仓库根 [CHANGELOG-API.md](../../CHANGELOG-API.md)）；SDK 包与独立示例仓库尚未提供。接口签名与逐条语义以[公开 API 参考](api-reference.md)为准（该文档从事实源生成，不手改）。
 
 本文回答「一个附加组件从零到跑起来要做什么」：接入流程、两端代码形态、六组能力怎么用、去哪抄样例、怎么调试、版本怎么算。规则依据是 [ADR-0012](../adr/0012-vsidian-addons-distribution-api-governance.md) 与[规格](../specs/vsidian-addons.md)；技术路线见[技术方案](../design/vsidian-addon-api.md)。
 
@@ -357,10 +357,10 @@ const result = await sdk.views?.openDocument({
 
 ## 7. 版本、兼容与迁移
 
-- **API 版本独立于 Vsidian 本体版本**：兼容判定只看清单 `api` 范围与宿主稳定 API 版本（当前 1.1.0，2026-10-16 随 v1.1.0 发行），不因本体升级自动改变。
+- **API 版本独立于 Vsidian 本体版本**：兼容判定只看清单 `api` 范围与宿主稳定 API 版本（当前 1.2.0，2026-10-18 随 v1.2.0 发行；兼容承诺自 1.1.0 起），不因本体升级自动改变。
 - **实验入口另行声明**：`experimental.cm6`、`experimental.headingFold` 等入口可能随版本调整，不随稳定 API 弃用期限承诺；使用前必须在清单声明兼容范围。
 - **稳定移除规则**：稳定 API 确需移除时，先发布弃用说明与替代方案；从弃用版本实际发布日起，同时满足两个后续 API 次版本和 30 天才允许移除。
-- **当前状态**：1.1.0（2026-10-16）已随 Vsidian 1.1.0 发行，发行版本受兼容承诺与移除规则约束；发行台账（`src/shared/addonApiCatalog.ts` 的 `ADDON_API_RELEASES`）如实区分候选与已发布，experimental 实验入口维持候选口径。迁移内容在出现破坏性变更时补充。
+- **当前状态**：已随本体发行 1.1.0（2026-10-16）与 1.2.0（2026-10-18），发行版本受兼容承诺与移除规则约束；发行台账（`src/shared/addonApiCatalog.ts` 的 `ADDON_API_RELEASES`）如实区分候选与已发布，experimental 实验入口维持候选口径。迁移内容在出现破坏性变更时补充。
 - **变更记录**：调用者可见的 API 变更（新能力面、语义修订、拒绝原因、预算）记录在仓库根 [CHANGELOG-API.md](../../CHANGELOG-API.md)——候选期增补累计进当前候选面不升版本号，落账时转正为版本段。
 
 ## 8. 文档维护入口（组件作者一般不需要）

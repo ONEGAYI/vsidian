@@ -12,6 +12,7 @@
 | --- | --- | --- | --- |
 | 1.0.0 | 候选（未发行） | —（未发行不携带日期） | 首个候选稳定 API：首版六组能力面（发现与安装/页面 SDK/输入行为/设置/渲染提供者/命令菜单界面）已随 T01–T12 实施与消费样例收敛；候选期内追加粘贴转换组（#541 T01 基础链路起）与 2026-10 扩展批次（文档导航 #543、只读引用浮窗与嵌入 #544/#545、主题登记 #546、设置页上下文 #553）。候选 = 形状已冻结待发行，尚未对外发布——发行前不产生兼容承诺；升级为 released 须在真实发行时人工落账并填实际发布日期。 |
 | 1.1.0 | 已发布 | 2026-10-16 | 首个随本体发行的稳定 API（随 Vsidian 1.1.0 发布）：1.0.0 候选面与候选期增补（粘贴转换组、2026-10 扩展批次）并入本版本；自本发行日起产生兼容承诺，弃用与移除受双移除门槛约束（两个后续 API 次版本且满 30 天）。此前各本体版本携带的候选面不追溯兼容承诺；experimental 实验入口维持候选口径（兼容清单整本台账唯一锚定，见 1.0.0 记录），不随稳定 API 弃用期限承诺。 |
+| 1.2.0 | 已发布 | 2026-10-18 | 兼容性修订（随 Vsidian 1.2.0 发布）：无新增能力面与实验入口。内核 Codex 主题退役（#535/T08）——旧键 appearance.mermaidTheme 不再参与主题首选解析，首选值域收窄为 default \| <addonId>/<themeId>，存量 codex 按未知首选回落 default 显示且首选保留；resolveActiveTheme 对退役 codex 值按目录不命中处理（available=false、effective=default、preferred 保留）；preferredAvailable 收窄为仅 default 恒 true；v1.1.0 公开符号 resolveThemePreferred 双参与 CODEX_THEME_ID 保持编译期兼容并标 @deprecated（弃用与移除受双门槛约束）。 |
 
 **实验入口兼容清单**（使用须在清单 `experimental` 声明对应入口与兼容范围；实验入口可能随版本调整，不随稳定 API 弃用期限承诺）：
 
@@ -138,12 +139,12 @@ export type AddonDeclarationParseResult =
 
 ```ts
 /**
- * 宿主当前稳定 API 版本（`^1.0.0` 语义的基准）。1.1.0（2026-10-16）起随
- * Vsidian 本体发行并产生兼容承诺——附加组件声明的 api 范围须包含该版本
- * 才判兼容；API 版本独立于 Vsidian 本体版本号，随携带 API 变更的本体
- * 发布同笔升版。
+ * 宿主当前稳定 API 版本（`^1.0.0` 语义的基准）。当前 1.2.0；自 1.1.0
+ * （2026-10-16）起随 Vsidian 本体发行并产生兼容承诺——附加组件声明的
+ * api 范围须包含该版本才判兼容；API 版本独立于 Vsidian 本体版本号，随
+ * 携带 API 变更的本体发布同笔升版。
  */
-export const ADDON_API_VERSION = '1.1.0'
+export const ADDON_API_VERSION = '1.2.0'
 
 /** 兼容判定的宿主侧输入 */
 export interface AddonCompatibilityHost {
