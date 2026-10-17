@@ -89,6 +89,9 @@ export function createCodexMigrationWiring(
   // 认领代次标识——释放与接管都经它核对，见 codexMigrationLock） ----
   const lockFs: CodexLockFilesystem = {
     writeFileExclusive: async (target, data) => {
+      // 首次认领前 globalStorage 父目录可能尚不存在（激活早期）——先建
+      // 目录再 O_EXCL 创建（沿旧 tryAcquireLock 的 mkdir 先例）
+      await fsp.mkdir(path.dirname(target), { recursive: true })
       const handle = await fsp.open(target, 'wx')
       try {
         await handle.writeFile(data, 'utf8')
