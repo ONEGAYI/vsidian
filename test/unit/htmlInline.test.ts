@@ -166,6 +166,84 @@ const CASES: Array<{ name: string; text: string; want: Array<[number, number]> |
     text: '段落。\n\n<div>\n  <span style="color:red">块内</span>\n</div>\n\n尾段 <u>x</u>',
     want: null,
   },
+  // ---- #576 三轮复审 P2-1：跨行 code span 状态（行内容器内维持，两端一致）----
+  {
+    name: '跨行 code span：行 2 的 span 是代码字面（容器内状态维持）',
+    text: 'a `start\n<span>x</span> end` z',
+    want: [],
+  },
+  {
+    name: '引用内跨行 code span：同样字面',
+    text: '> a `start\n> <span>x</span> end` z',
+    want: [],
+  },
+  {
+    name: 'Setext 标题容器内的跨行 code span：同样字面',
+    text: 'a `x\n<span>y</span>` z\n===',
+    want: [],
+  },
+  {
+    name: '反引号开串与闭串隔行：中间行的 span 是字面（状态跨两行传播）',
+    text: 'a `open\n<span>x</span>\nmore` end',
+    want: [],
+  },
+  {
+    name: 'code span 跨行闭合后：同容器后续片段正常（状态不泄漏到闭合之后）',
+    text: 'a `x\ny` <span>ok</span>',
+    want: null,
+  },
+  {
+    name: '容器边界重置状态：下一段落的片段不受前段未闭合串影响',
+    text: 'a `open\n\n<span>ok</span>',
+    want: null,
+  },
+  // ---- #576 三轮复审 P2-2：缩进代码（行首点查不到缩进后才开始的块）----
+  {
+    name: '缩进代码内的 span：字面（块起点在缩进之后）',
+    text: '    a <span>x</span>',
+    want: [],
+  },
+  {
+    name: '引用内缩进代码：同样字面',
+    text: '>     a <span>x</span>',
+    want: [],
+  },
+  // ---- #576 三轮复审 P2-3：非正文上下文（链接标题/引用定义/行内注释/PI/声明/CDATA）----
+  {
+    name: '链接标题内的 span：字面（title 是字面串，不内解析）',
+    text: 'a [label](target "t <span>x</span>") z',
+    want: [],
+  },
+  {
+    name: '引用定义行：label 与 title 均字面（定义被块级消费，不产正文内容）',
+    text: '[label]: /url "t <span>x</span>"\n\n[<span>x</span>]: /url2',
+    want: [],
+  },
+  {
+    name: '行内注释内的 span：字面（注释是单个原始 HTML token）',
+    text: 'a <!-- <span>x</span> --> b',
+    want: [],
+  },
+  {
+    name: '跨行行内注释内的 span：字面（注释 token 可跨行）',
+    text: 'a <!-- x\ny <span>x</span> --> b',
+    want: [],
+  },
+  {
+    name: 'PI/声明/CDATA 内的 span：字面（单 token 消费到各自闭串）',
+    text: 'a <? <span>x</span> ?> b <!DOCTYPE f <span>y</span>> c <![CDATA[ <span>z</span> ]]> d',
+    want: [],
+  },
+  {
+    name: '对照组：链接 label 内的 span 正常成片段（label 是内联内容）',
+    text: 'a [<span>x</span>](t) z',
+    want: null,
+  },
+  {
+    name: '对照组：破坏的尖括号目的地（两端都不成链接）——span 正常成片段',
+    text: 'a [label](<t <span>x</span>>) z',
+    want: null,
+  },
 ]
 
 describe('行内 HTML 片段：识别与配对矩阵（两端一致）', () => {

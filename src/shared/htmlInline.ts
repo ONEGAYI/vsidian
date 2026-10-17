@@ -1,24 +1,35 @@
 // 行内 HTML 片段边界共享事实源（#568/T03，规格「HTML 范围与源文」「Live
 // 的状态与选区」）：
-// - **节点名经实测**（探针 out/test/t03-lezer-probe*.mts，#246 先例——
-//   不猜节点名）：Live 侧 Lezer markdownLanguage 对行内 HTML 产
-//   `HTMLTag` 节点（每标签一个，Paragraph/Heading/TableCell/引用与列表
-//   内段落皆产；FencedCode/InlineCode/HTMLBlock 内不产——解析器先行
-//   消费或整块吞噬，天然排除代码与块级区域）。
-// - 配对范围由**原始 HTML 语法扫描**确定（token 级标签识别是两端解析器
-//   自身的规则；不用正则猜测嵌套范围）。两端共用本模块：Lezer 侧
-//   `inlineHtmlFragmentsOfTree`（树 HTMLTag 节点作候选起点 + 原始文本
-//   定范围——#576 评审 P2-6：树配对会被片段内 Escape 吞标签误判未
-//   闭合），markdown-it 侧 `matchInlineHtmlFragmentAt`（行内规则的消费
-//   驱动面）——两端一致性由对拍测试钉住（test/unit/htmlInline.test.ts）。
-// - **单行成型边界**：片段不跨行（开标签与匹配闭标签须同行）。理由：
-//   CM6 行内 replace 装饰不得跨换行（Live 硬约束），跨行配对两端一致
-//   降级为源码字面（含属性内换行的标签同理不成型）。
+// - **节点名与结构经实测**（探针 test/unit 临时探针 + out/test 探针先例，
+//   #246 纪律——不猜节点名）：Paragraph/SetextHeading1/SetextHeading2 是
+//   跨行的行内容器（InlineCode/Comment 节点可跨行）；CodeBlock 从缩进
+//   之后才开始（行首点查祖先不含它——须行末定位）；链接语法产
+//   Link/LinkLabel/LinkMark/URL/LinkTitle，引用定义产 LinkReference
+//   （整行被块级消费，不产正文内容）。
+// - 片段边界由**原始文本交错扫描**确定（#576 二轮复审起弃用 Lezer
+//   HTMLTag 节点集合——解析器把片段内反引号配成 InlineCode 会吞/漏吞
+//   标签候选）：按文档序转义对跳过、反引号串等长配对复刻 code span
+//   （markdown-it backticks 规则语义）、非元素原始 HTML 产物（注释/
+//   PI/声明/CDATA——markdown-it html_inline 各 token 正则的镜像）整
+//   token 消费、`<` 起 matchInlineHtmlFragmentAt 成型片段整段消费。两端
+//   共用本模块：Lezer 侧 `inlineHtmlFragmentsOfTree`（容器整段扫描 +
+//   树上下文排除），markdown-it 侧 `matchInlineHtmlFragmentAt`（行内
+//   规则的消费驱动面）——两端一致性由对拍测试钉住
+//   （test/unit/htmlInline.test.ts）。
+// - **跨行 code span 状态（#576 三轮复审 P2-1）**：code span 可跨行
+//   （开闭串可分处容器两行）——状态在**完整行内容器**内维持（容器
+//   整段扫描），容器边界重置；单行 HTML 片段的成型边界不变（片段
+//   不跨行是 CM6 行内 replace 装饰的硬约束）。
+// - **树上下文排除（#576 三轮复审 P2-2/P2-3）**：块级结构五节点名按
+//   **行末字符**与**片段端点**的祖先链排除（行首点查不到缩进后才开
+//   始的 CodeBlock）；行内结构字面区（LinkTitle/LinkReference——title
+//   是字面串不内解析、定义被块级消费）按片段端点祖先链排除。
+// - **单行成型边界**：片段不跨行（开标签与匹配闭标签须同行）；未闭合
+//   开标签/孤立闭标签不成片段，降级为源码字面（保守方向与 htmlBlock
+//   一致——显源码优先）。
 // - **最外层语义**：嵌套片段只取最外层（内层被包含，不独立成片段）——
 //   Live 单 widget 覆盖、点击选中完整源码、显形粒度均以最外层为确定性
 //   区间；void/自闭合标签单标签即片段。
-// - 未闭合开标签/孤立闭标签不成片段：降级为源码字面（保守方向与
-//   htmlBlock 一致——显源码优先）。
 import type { Text } from '@codemirror/state'
 import type { SyntaxNode, Tree } from '@lezer/common'
 
@@ -51,6 +62,10 @@ const TAG_NAME_RE = /^[A-Za-z][A-Za-z0-9-]*/
 const ATTR_NAME_RE = /^[A-Za-z_:][A-Za-z0-9_.:-]*/
 /** 标签与属性之间的空白（不含换行——单行成型边界） */
 const ATTR_WS_RE = /[ \t]*/
+/** 声明产物的名字（HTML 语法：大写字母序列） */
+const DECL_NAME_RE = /^<![A-Z]+/
+/** 需要扩窗的相关字符（`<` 或反引号——跨行状态与片段成型的唯一入口） */
+const RELEVANT_CHARS_RE = /[<`]/
 
 /**
  * 识别 src[pos] 起的单个 HTML 标签（CommonMark 原始 HTML 标签语法的
@@ -138,7 +153,7 @@ export function matchHtmlTagAt(
  * markdown-it 行内规则的消费驱动面：src[pos] 若为完整行内 HTML 片段的
  * 起点（开标签 + 同行匹配闭标签，或原子标签），返回片段终点；否则
  * null（不成型，留给 html_inline 默认链转义字面）。扫描以首个换行为界
- * （单行成型边界——与 Lezer 侧同行分组一致）。
+ * （单行成型边界——与容器扫描的行内投影一致）。
  */
 export function matchInlineHtmlFragmentAt(src: string, pos: number): number | null {
   if (pos >= src.length || src[pos] !== '<') {
@@ -182,9 +197,60 @@ export function matchInlineHtmlFragmentAt(src: string, pos: number): number | nu
 }
 
 /**
+ * 非元素原始 HTML 产物（#576 三轮复审 P2-3）的 token 终点：注释
+ * `<!--…-->`（含 `<!-->`/`<!--->` 空形态；内容以 `-->` 结束，可跨行）、
+ * PI `<?…?>`、声明 `<!NAME …>`（大写名 + 空白 + 至首个 `>`）、CDATA
+ * `<![CDATA[…]]]>`——markdown-it html_inline 各 token 正则的镜像（单
+ * token 消费，内部标签是字面）。不成形（无闭串）返回 null（字面，
+ * 扫描继续——与 markdown-it 该处规则失败后的继续语义一致）。limit 为
+ * 容器末端（这些 token 与 code span 一样可跨行）。
+ */
+function matchRawHtmlNonElementAt(src: string, pos: number, limit: number): number | null {
+  if (pos + 1 >= limit || src[pos] !== '<') {
+    return null
+  }
+  const next = src[pos + 1]!
+  if (next === '?') {
+    const close = src.indexOf('?>', pos + 2)
+    return close < 0 || close + 3 > limit ? null : close + 3
+  }
+  if (next !== '!') {
+    return null
+  }
+  if (src.startsWith('<!-->', pos)) {
+    return pos + 5
+  }
+  if (src.startsWith('<!--->', pos)) {
+    return pos + 6
+  }
+  if (src.startsWith('<!--', pos)) {
+    // 通用形态：内容以首个 `-->` 结束（懒惰量词语义；内容可跨行）
+    const close = src.indexOf('-->', pos + 4)
+    return close < 0 || close + 3 > limit ? null : close + 3
+  }
+  if (src.startsWith('<![CDATA[', pos)) {
+    const close = src.indexOf(']]>', pos + 9)
+    return close < 0 || close + 3 > limit ? null : close + 3
+  }
+  const decl = DECL_NAME_RE.exec(src.slice(pos, limit))
+  if (decl !== null) {
+    // markdown-it 声明正则：`<![A-Z]+\s[^>]*>`——名字后必须一个空白
+    // （\s 含换行），内容至首个 `>`（内容不含 `>`，可跨行）
+    const afterName = pos + decl[0].length
+    if (afterName < limit && /[ \t\n\r]/.test(src[afterName]!)) {
+      const close = src.indexOf('>', afterName + 1)
+      return close < 0 || close + 1 > limit ? null : close + 1
+    }
+    return null
+  }
+  return null
+}
+
+/**
  * 行内代码 span 的闭串查找（markdown-it backticks 规则语义复刻）：开串
  * （长度 n）向后找**等长**串（长度不同的串跳过继续）；内容原样穿过
- * （含 HTML 标签——code span 内容是字面）。找不到返回 -1（该串按字面）。
+ * （含 HTML 标签——code span 内容是字面；跨行由容器扫描传入跨行
+ * limit 自然成立）。找不到返回 -1（该串按字面）。
  */
 function findClosingBacktickRun(src: string, start: number, limit: number, runLen: number): number {
   let i = start + runLen
@@ -206,14 +272,19 @@ function findClosingBacktickRun(src: string, start: number, limit: number, runLe
 }
 
 /**
- * 行内交错扫描（#576 二轮复审 P2）：按文档序从 from 到 limit 扫描，
+ * 行内交错扫描（#576 二轮复审 P2 起的事实源，三轮复审扩为容器粒度）：
+ * 按文档序从 from 到 limit 扫描（from/limit 通常为**行内容器**区间——
+ * code span 与非元素原始 HTML token 可跨行，状态须容器内维持）：
  * - 转义对 `\x` 跳过（外部上下文的 `\<` 不是标签起点）
  * - 反引号串按等长配对复刻 code span（内容原样跳过——含 HTML 字面；
  *   未配对的串按字面继续）
- * - `<` 起 matchInlineHtmlFragmentAt（成型片段**整段消费**——片段内部的
- *   反引号/转义是字面，不参与 Markdown 结构、不污染其后的配对上下文）
- * 与 markdown-it 侧（backticks 规则先于 html 规则按位置交错）语义一致，
- * 两端一致性由对拍钉住。产出片段的**文本内偏移**区间。
+ * - `<` 起非元素产物（注释/PI/声明/CDATA）**整 token 消费**（内部
+ *   标签字面——markdown-it 单 token 语义）
+ * - `<` 起 matchInlineHtmlFragmentAt（成型片段**整段消费**——片段内部
+ *   的反引号/转义是字面，不参与 Markdown 结构、不污染其后的配对上下文；
+ *   片段不跨行由其行内 limit 保证）
+ * 与 markdown-it 侧（backticks/html 规则按位置交错）语义一致，两端一致
+ * 性由对拍钉住。产出片段的**文本内偏移**区间。
  */
 export function scanInlineHtmlFragmentsInText(src: string, from: number, limit: number): HtmlInlineFragment[] {
   const out: HtmlInlineFragment[] = []
@@ -234,6 +305,11 @@ export function scanInlineHtmlFragmentsInText(src: string, from: number, limit: 
       continue
     }
     if (ch === '<') {
+      const rawEnd = matchRawHtmlNonElementAt(src, i, limit)
+      if (rawEnd !== null) {
+        i = rawEnd
+        continue
+      }
       const end = matchInlineHtmlFragmentAt(src, i)
       if (end !== null) {
         out.push({ from: i, to: end })
@@ -250,30 +326,74 @@ export function scanInlineHtmlFragmentsInText(src: string, from: number, limit: 
  *  字面：围栏/缩进代码块、HTML 注释块、处理指令块、块级 HTML/DOCTYPE） */
 const INLINE_EXCLUDED_BLOCK_NODES = new Set(['FencedCode', 'CodeBlock', 'CommentBlock', 'ProcessingInstructionBlock', 'HTMLBlock'])
 
-/**
- * 行的块级上下文判定：行首经 resolveInner 的祖先链含块级结构名即排除
- * （O(depth)——块级区间整体覆盖行，块级结构不跨「行中开始」；不遍历
- * 全树，增量重建的窗口路径每次键击只付祖先链成本）。
- */
-function lineInBlockContext(tree: Tree, lineFrom: number): boolean {
-  let node: SyntaxNode | null = tree.resolveInner(Math.max(0, Math.min(lineFrom, tree.length - 1)), 1)
-  while (node !== null) {
-    if (INLINE_EXCLUDED_BLOCK_NODES.has(node.name)) {
-      return true
-    }
-    node = node.parent
-  }
-  return false
+/** 跨行的行内容器名（探针实测：Paragraph/SetextHeading1/SetextHeading2；
+ *  ATX 标题与表格单元格单行——孤岛扫描等价，不入白名单） */
+const INLINE_CONTAINER_NODES = new Set(['Paragraph', 'SetextHeading1', 'SetextHeading2'])
+
+/** 片段端点的行内上下文排除名（探针实测）：块级五名（双保险——缩进
+ *  代码的块起点在缩进之后，行首判定查不到，端点判定兜底）+ 行内结构
+ *  字面区——LinkTitle（链接/引用定义的 title 是字面串，markdown-it
+ *  不内解析）与 LinkReference（引用定义整行被块级消费，不产正文内容） */
+const INLINE_EXCLUDED_CONTEXT_NODES = new Set([...INLINE_EXCLUDED_BLOCK_NODES, 'LinkTitle', 'LinkReference'])
+
+/** 一行的行内扫描上下文（inlineContextOfLine 的产物） */
+export interface InlineLineContext {
+  /** 行内容属块级排除结构（整行字面，不扫描） */
+  excluded: boolean
+  /** 行所属行内容器区间（code span 状态的维持边界）；null = 无容器
+   *  （主题分隔线、表格分隔行、引用定义行等——按孤岛扫描本行） */
+  container: { from: number; to: number } | null
 }
 
 /**
- * Lezer 树的行内 HTML 片段（最外层、单行）：树只提供**块级排除区**
- * （块级结构先行消费的行——行内容是字面）；行内结构（code span 配对、
- * 片段消费、外部转义）由 scanInlineHtmlFragmentsInText 按原始文本交错
- * 扫描——不复用 Lezer 的 HTMLTag 节点集合（#576 二轮复审 P2：解析器把
- * HTML 片段内部的反引号配成 InlineCode，会吞掉后续标签的 HTMLTag 候选
- * 或漏吞应字面的标签，片段集合被污染）。from/to 可限定行窗口（增量
- * 重建的窗口扫描；缺省全文档）。
+ * 行的行内扫描上下文（#576 三轮复审 P2-2）：**行末字符**（行首点查
+ * 的祖先链不含缩进后才开始的 CodeBlock——块级结构的行内起点在缩进/
+ * 标记之后）经 resolveInner 的祖先链（O(depth)，增量窗口路径每次键击
+ * 只付祖先链成本）：命中块级排除名 → 整行字面；命中行内容器名 → 容器
+ * 区间（跨行 code span 状态的维持边界，容器边界重置）。
+ */
+export function inlineContextOfLine(tree: Tree, lineFrom: number, lineTo: number): InlineLineContext {
+  const pos = Math.max(0, Math.min(lineTo - 1, tree.length - 1))
+  if (lineTo <= lineFrom || pos < lineFrom) {
+    return { excluded: false, container: null } // 空行：无内容（容器边界语义由相邻行容器差承担）
+  }
+  let node: SyntaxNode | null = tree.resolveInner(pos, 1)
+  let container: { from: number; to: number } | null = null
+  while (node !== null) {
+    if (INLINE_EXCLUDED_BLOCK_NODES.has(node.name)) {
+      return { excluded: true, container: null }
+    }
+    if (container === null && INLINE_CONTAINER_NODES.has(node.name)) {
+      container = { from: node.from, to: node.to }
+    }
+    node = node.parent
+  }
+  return { excluded: false, container }
+}
+
+/** 片段端点的上下文排除（行内结构字面区 + 块级双保险） */
+function fragmentExcludedByContext(tree: Tree, from: number, to: number): boolean {
+  const excludedAt = (pos: number): boolean => {
+    let node: SyntaxNode | null = tree.resolveInner(Math.max(0, Math.min(pos, tree.length - 1)), 1)
+    while (node !== null) {
+      if (INLINE_EXCLUDED_CONTEXT_NODES.has(node.name)) {
+        return true
+      }
+      node = node.parent
+    }
+    return false
+  }
+  return excludedAt(from) || excludedAt(to - 1)
+}
+
+/**
+ * Lezer 树的行内 HTML 片段（最外层、单行）：树提供**结构上下文**（块级
+ * 排除区、行内容器、行内字面区——全部经实测节点名）；行内结构（code
+ * span 配对、非元素 token 消费、片段消费、外部转义）由
+ * scanInlineHtmlFragmentsInText 按容器原始文本交错扫描（#576 三轮复审
+ * P2-1/P2-3：容器整段扫描维持跨行状态；不用 Lezer HTMLTag 节点集合）。
+ * from/to 可限定行窗口（增量重建：窗口内命中的容器**整段**扫描——状态
+ * 从容器起点才正确——片段发射裁剪到窗口交集；同容器多行只扫一次）。
  */
 export function inlineHtmlFragmentsOfTree(
   tree: Tree,
@@ -284,15 +404,47 @@ export function inlineHtmlFragmentsOfTree(
   const out: HtmlInlineFragment[] = []
   const firstLine = doc.lineAt(Math.max(0, Math.min(from, doc.length))).number
   const lastLine = doc.lineAt(Math.max(0, Math.min(to, doc.length))).number
+  const scanned = new Map<string, HtmlInlineFragment[]>()
+  const emitted = new Set<string>()
   for (let n = firstLine; n <= lastLine; n++) {
     const line = doc.line(n)
-    if (lineInBlockContext(tree, line.from)) {
+    const ctx = inlineContextOfLine(tree, line.from, line.to)
+    if (ctx.excluded) {
       continue
     }
+    if (ctx.container !== null) {
+      const base = ctx.container.from
+      const key = `${base}:${ctx.container.to}`
+      if (!scanned.has(key)) {
+        const text = doc.sliceString(base, ctx.container.to)
+        scanned.set(key, scanInlineHtmlFragmentsInText(text, 0, text.length)
+          .filter((f) => !fragmentExcludedByContext(tree, base + f.from, base + f.to)))
+      }
+      if (!emitted.has(key)) {
+        emitted.add(key)
+        for (const f of scanned.get(key)!) {
+          const absFrom = base + f.from
+          const absTo = base + f.to
+          if (absTo > from && absFrom < to) {
+            out.push({ from: absFrom, to: absTo })
+          }
+        }
+      }
+      continue
+    }
+    // 孤岛行（无行内容器）：本行独立扫描（无跨行状态——单行容器语义等价）
     const text = doc.sliceString(line.from, line.to)
-    for (const frag of scanInlineHtmlFragmentsInText(text, 0, text.length)) {
-      out.push({ from: line.from + frag.from, to: line.from + frag.to })
+    for (const f of scanInlineHtmlFragmentsInText(text, 0, text.length)) {
+      const absFrom = line.from + f.from
+      const absTo = line.from + f.to
+      if (absTo > from && absFrom < to && !fragmentExcludedByContext(tree, absFrom, absTo)) {
+        out.push({ from: absFrom, to: absTo })
+      }
     }
   }
   return out
 }
+
+/** 变更行扩窗相关性判定的共享正则（`<` 或反引号——跨行状态与片段成型
+ *  的唯一入口；liveInlineHtml 的窗口构造与剪枝共用同一口径） */
+export const INLINE_RELEVANT_CHARS_RE = RELEVANT_CHARS_RE

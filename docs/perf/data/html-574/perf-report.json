@@ -1,5 +1,5 @@
 {
-  "startedAt": "2026-10-17T01:52:46.606Z",
+  "startedAt": "2026-10-17T05:45:12.313Z",
   "samples": {},
   "boundaryShapes": {},
   "htmlShapes": {
@@ -8,9 +8,9 @@
       "byteSize": 118561,
       "lineCount": 4404,
       "open": {
-        "openToReadyMs": 585,
-        "openToEditableMs": 687,
-        "openToFirstInputMs": 710,
+        "openToReadyMs": 571,
+        "openToEditableMs": 671,
+        "openToFirstInputMs": 697,
         "pollIntervalMs": 25
       },
       "live": {
@@ -18,45 +18,49 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 4404,
-        "firstInputSettledEpochMs": 1792201967796,
+        "firstInputSettledEpochMs": 1792215913476,
         "baseline": {
           "renderedLines": 45,
           "contentDomCount": 228,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 23127469
+          "jsHeapBytes": 23313914
         },
         "afterTyping": {
           "renderedLines": 45,
           "contentDomCount": 228,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 29740109
+          "jsHeapBytes": 21628848
         },
         "afterScroll": {
           "renderedLines": 45,
           "contentDomCount": 228,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 21458138
+          "jsHeapBytes": 22491676
         },
         "inputDelayMs": {
           "samples": [
-            35.89999997615814,
-            33,
-            33.60000002384186,
-            33.09999996423721,
-            33.60000002384186,
-            33.10000002384186,
+            38.5,
+            33.30000001192093,
             33.39999997615814,
-            33.10000002384186,
-            33.5,
-            33.299999952316284
+            33.200000047683716,
+            33.39999997615814,
+            33.39999997615814,
+            33.30000001192093,
+            33.19999998807907,
+            33.39999997615814,
+            33.200000047683716
           ],
-          "avgMs": 33.55999999642372,
-          "maxMs": 35.89999997615814
+          "avgMs": 33.83000000119209,
+          "maxMs": 38.5
         },
-        "longTasks": null,
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
         "headingStats": {
           "totalUpdates": 14,
           "lastUpdateScannedLines": 1,
@@ -74,14 +78,14 @@
             "contentDomCount": 177,
             "scrollTopPx": 25,
             "scrollHeightPx": 76081,
-            "jsHeapBytes": 23765594
+            "jsHeapBytes": 25344105
           },
           "afterScroll": {
             "mountedBlocks": 46,
             "contentDomCount": 171,
             "scrollTopPx": 0,
             "scrollHeightPx": 71272,
-            "jsHeapBytes": 24010134
+            "jsHeapBytes": 25353653
           },
           "parseCount": 1,
           "maxMountedBlocks": 76,
@@ -89,7 +93,7 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 234,
+        "toReadingMs": 233,
         "toLiveMs": 125,
         "pollIntervalMs": 25
       }
@@ -99,9 +103,9 @@
       "byteSize": 398413,
       "lineCount": 14674,
       "open": {
-        "openToReadyMs": 181,
-        "openToEditableMs": 273,
-        "openToFirstInputMs": 308,
+        "openToReadyMs": 146,
+        "openToEditableMs": 268,
+        "openToFirstInputMs": 317,
         "pollIntervalMs": 25
       },
       "live": {
@@ -109,45 +113,49 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 14674,
-        "firstInputSettledEpochMs": 1792201969859,
+        "firstInputSettledEpochMs": 1792215915336,
         "baseline": {
           "renderedLines": 45,
           "contentDomCount": 228,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 39981729
+          "jsHeapBytes": 24748027
         },
         "afterTyping": {
           "renderedLines": 45,
           "contentDomCount": 228,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 42404005
+          "jsHeapBytes": 47424986
         },
         "afterScroll": {
           "renderedLines": 45,
           "contentDomCount": 228,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 30138621
+          "jsHeapBytes": 48763612
         },
         "inputDelayMs": {
           "samples": [
-            42.80000001192093,
-            33.69999998807907,
-            49.60000002384186,
+            39,
+            49.799999952316284,
+            33.40000003576279,
+            33.30000001192093,
             33.39999997615814,
             50,
-            33.30000001192093,
-            33.39999997615814,
-            49.90000003576279,
-            33.30000001192093,
-            33.39999997615814
+            49.89999997615814,
+            50,
+            33.60000002384186,
+            49.80000001192093
           ],
-          "avgMs": 39.28000000119209,
+          "avgMs": 42.21999999880791,
           "maxMs": 50
         },
-        "longTasks": null,
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
         "headingStats": {
           "totalUpdates": 14,
           "lastUpdateScannedLines": 1,
@@ -165,14 +173,14 @@
             "contentDomCount": 177,
             "scrollTopPx": 25,
             "scrollHeightPx": 256279,
-            "jsHeapBytes": 34033926
+            "jsHeapBytes": 33725897
           },
           "afterScroll": {
             "mountedBlocks": 46,
             "contentDomCount": 171,
             "scrollTopPx": 0,
             "scrollHeightPx": 251469,
-            "jsHeapBytes": 29608633
+            "jsHeapBytes": 35441928
           },
           "parseCount": 1,
           "maxMountedBlocks": 76,
@@ -180,8 +188,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 561,
-        "toLiveMs": 125,
+        "toReadingMs": 467,
+        "toLiveMs": 124,
         "pollIntervalMs": 25
       }
     },
@@ -190,9 +198,9 @@
       "byteSize": 38571,
       "lineCount": 407,
       "open": {
-        "openToReadyMs": 128,
-        "openToEditableMs": 191,
-        "openToFirstInputMs": 248,
+        "openToReadyMs": 146,
+        "openToEditableMs": 238,
+        "openToFirstInputMs": 291,
         "pollIntervalMs": 25
       },
       "live": {
@@ -200,45 +208,49 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 407,
-        "firstInputSettledEpochMs": 1792201972151,
+        "firstInputSettledEpochMs": 1792215917592,
         "baseline": {
           "renderedLines": 3,
           "contentDomCount": 1675,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 35369022
+          "jsHeapBytes": 41506499
         },
         "afterTyping": {
           "renderedLines": 3,
           "contentDomCount": 1675,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 23647623
+          "jsHeapBytes": 21579789
         },
         "afterScroll": {
           "renderedLines": 3,
           "contentDomCount": 1675,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 24004382
+          "jsHeapBytes": 21945785
         },
         "inputDelayMs": {
           "samples": [
-            34.80000001192093,
-            49.10000002384186,
-            49.799999952316284,
+            43.09999996423721,
+            66.60000002384186,
+            50.09999996423721,
+            50,
+            50,
+            50,
             66.70000004768372,
-            50.09999996423721,
-            49.90000003576279,
-            50.09999996423721,
-            49.90000003576279,
-            66.69999998807907,
-            70.39999997615814
+            66.59999996423721,
+            66.59999996423721,
+            66.70000004768372
           ],
-          "avgMs": 53.75,
-          "maxMs": 70.39999997615814
+          "avgMs": 57.63999999761582,
+          "maxMs": 66.70000004768372
         },
-        "longTasks": null,
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
         "headingStats": {
           "totalUpdates": 14,
           "lastUpdateScannedLines": 1,
@@ -256,14 +268,14 @@
             "contentDomCount": 1667,
             "scrollTopPx": 25,
             "scrollHeightPx": 10376,
-            "jsHeapBytes": 28979700
+            "jsHeapBytes": 26980047
           },
           "afterScroll": {
             "mountedBlocks": 2,
             "contentDomCount": 1667,
             "scrollTopPx": 0,
             "scrollHeightPx": 10376,
-            "jsHeapBytes": 29046871
+            "jsHeapBytes": 27054810
           },
           "parseCount": 1,
           "maxMountedBlocks": 2,
@@ -272,7 +284,7 @@
       },
       "modeSwitch": {
         "toReadingMs": 124,
-        "toLiveMs": 124,
+        "toLiveMs": 126,
         "pollIntervalMs": 25
       }
     },
@@ -281,9 +293,9 @@
       "byteSize": 28933,
       "lineCount": 717,
       "open": {
-        "openToReadyMs": 138,
-        "openToEditableMs": 167,
-        "openToFirstInputMs": 194,
+        "openToReadyMs": 168,
+        "openToEditableMs": 200,
+        "openToFirstInputMs": 217,
         "pollIntervalMs": 25
       },
       "live": {
@@ -291,45 +303,49 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 717,
-        "firstInputSettledEpochMs": 1792201974163,
+        "firstInputSettledEpochMs": 1792215919631,
         "baseline": {
           "renderedLines": 53,
           "contentDomCount": 56,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 32743400
+          "jsHeapBytes": 28659860
         },
         "afterTyping": {
           "renderedLines": 53,
           "contentDomCount": 56,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 33056325
+          "jsHeapBytes": 29834774
         },
         "afterScroll": {
           "renderedLines": 53,
           "contentDomCount": 56,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 31620183
+          "jsHeapBytes": 28155210
         },
         "inputDelayMs": {
           "samples": [
-            7.900000035762787,
-            12,
+            13.800000011920929,
             12.099999964237213,
-            12.100000023841858,
-            31.600000023841858,
-            33.19999998807907,
+            15.800000011920929,
+            33.30000001192093,
             33.39999997615814,
-            33.40000003576279,
-            33.299999952316284,
-            33.30000001192093
+            33.30000001192093,
+            33.39999997615814,
+            33.30000001192093,
+            33.30000001192093,
+            33.39999997615814
           ],
-          "avgMs": 24.230000001192092,
-          "maxMs": 33.40000003576279
+          "avgMs": 27.509999996423723,
+          "maxMs": 33.39999997615814
         },
-        "longTasks": null,
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
         "headingStats": {
           "totalUpdates": 14,
           "lastUpdateScannedLines": 1,
@@ -347,14 +363,14 @@
             "contentDomCount": 119,
             "scrollTopPx": 25,
             "scrollHeightPx": 5396,
-            "jsHeapBytes": 33971518
+            "jsHeapBytes": 30349199
           },
           "afterScroll": {
             "mountedBlocks": 38,
             "contentDomCount": 116,
             "scrollTopPx": 0,
             "scrollHeightPx": 5369,
-            "jsHeapBytes": 29976860
+            "jsHeapBytes": 23128314
           },
           "parseCount": 1,
           "maxMountedBlocks": 61,
@@ -362,8 +378,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 108,
-        "toLiveMs": 124,
+        "toReadingMs": 125,
+        "toLiveMs": 125,
         "pollIntervalMs": 25
       }
     },
@@ -372,9 +388,9 @@
       "byteSize": 42496,
       "lineCount": 1204,
       "open": {
-        "openToReadyMs": 147,
-        "openToEditableMs": 214,
-        "openToFirstInputMs": 247,
+        "openToReadyMs": 168,
+        "openToEditableMs": 200,
+        "openToFirstInputMs": 239,
         "pollIntervalMs": 25
       },
       "live": {
@@ -382,45 +398,49 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 1204,
-        "firstInputSettledEpochMs": 1792201975829,
+        "firstInputSettledEpochMs": 1792215921297,
         "baseline": {
           "renderedLines": 13,
           "contentDomCount": 57,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 30141486
+          "jsHeapBytes": 32389550
         },
         "afterTyping": {
           "renderedLines": 13,
           "contentDomCount": 57,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 29928653
+          "jsHeapBytes": 35750875
         },
         "afterScroll": {
           "renderedLines": 13,
           "contentDomCount": 57,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 31111349
+          "jsHeapBytes": 32425829
         },
         "inputDelayMs": {
           "samples": [
-            9.100000023841858,
-            15.899999976158142,
+            11.5,
+            12,
+            18.600000023841858,
+            33.299999952316284,
             33.40000003576279,
-            33.19999998807907,
-            33.39999997615814,
             33.30000001192093,
-            33.30000001192093,
-            33.39999997615814,
-            33.30000001192093,
-            33.30000001192093
+            33.59999996423721,
+            33,
+            33.40000003576279,
+            33.39999997615814
           ],
-          "avgMs": 29.160000002384187,
-          "maxMs": 33.40000003576279
+          "avgMs": 27.55,
+          "maxMs": 33.59999996423721
         },
-        "longTasks": null,
+        "longTasks": {
+          "count": 0,
+          "maxMs": 0,
+          "totalMs": 0
+        },
         "headingStats": {
           "totalUpdates": 14,
           "lastUpdateScannedLines": 1,
@@ -447,15 +467,15 @@
             "mountedBlocks": 10,
             "contentDomCount": 57,
             "scrollTopPx": 25,
-            "scrollHeightPx": 23151,
-            "jsHeapBytes": 21972415
+            "scrollHeightPx": 22611,
+            "jsHeapBytes": 30678425
           },
           "afterScroll": {
             "mountedBlocks": 11,
             "contentDomCount": 67,
             "scrollTopPx": 0,
-            "scrollHeightPx": 41138,
-            "jsHeapBytes": 24613922
+            "scrollHeightPx": 39494,
+            "jsHeapBytes": 33791467
           },
           "parseCount": 1,
           "maxMountedBlocks": 79,
@@ -464,7 +484,7 @@
       },
       "modeSwitch": {
         "toReadingMs": 124,
-        "toLiveMs": 109,
+        "toLiveMs": 123,
         "pollIntervalMs": 25
       }
     }

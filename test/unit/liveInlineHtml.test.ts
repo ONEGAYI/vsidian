@@ -329,3 +329,52 @@ describe('#576 二轮复审：段内上下文变化（InlineCode ↔ HTML 片段
     expect(next.doc.sliceString(spans[0].from, spans[0].to)).toBe('<span>mid <b>x</b> tail</span>')
   })
 })
+
+describe('#576 三轮复审：跨行 code span 状态的容器级传播（增量窗口）', () => {
+  it('前行插入开串反引号：后行片段被跨行 code span 吞掉（不残留）', () => {
+    // 行 2 的孤立闭串反引号不配对 → span 是片段；行 1 加开串后跨行配对吞掉它
+    const text = 'a start\n<span>x</span> end` z'
+    const state = buildState(text, EditorSelection.single(2))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    const next = state.update({ changes: { from: 2, insert: '`' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+
+  it('前行删除开串反引号：后行片段恢复（新行文本无相关字符——旧文本判定）', () => {
+    const text = 'a `start\n<span>x</span> end` z'
+    const state = buildState(text, EditorSelection.single(2))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 2, to: 3 } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
+  })
+
+  it('删除近闭串：开串改配更远闭串，隔行片段被吞掉（容器前向传播）', () => {
+    // 行 2 的闭串先闭；删除它后开串改配行 3 末的闭串 → code span 吞掉行 3 的 span
+    const text = 'a `x\ny` tail\n<span>ok</span> end` z'
+    const state = buildState(text, EditorSelection.single(4))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    const next = state.update({ changes: { from: 6, to: 7 } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+})
+
+describe('#576 三轮复审 P2-2：缩进代码行的增量（行末上下文定位）', () => {
+  it('缩进代码行内键入标签：不产片段（块起点在缩进之后，行首点查不到）', () => {
+    const state = buildState('    a ', EditorSelection.single(6))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 6, insert: '<span>x</span>' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+})
+
+describe('#576 三轮复审 P3：装饰层引用短路接到生产链（docChanged 不变集返回旧引用）', () => {
+  it('纯文尾键击（片段表与触及集均无变化）：装饰集引用不变（view 装饰 diff 归零）', () => {
+    const state = buildState('a <span>x</span> b\ntail', EditorSelection.single(17))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    const before = state.field(liveInlineHtmlDecorations)
+    const next = state.update({ changes: { from: 17, insert: 'z' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toBe(state.field(liveInlineHtmlSpansField))
+    const after = next.field(liveInlineHtmlDecorations)
+    expect(after).toBe(before)
+  })
+})

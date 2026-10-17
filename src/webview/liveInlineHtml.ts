@@ -1,8 +1,9 @@
 // Live 行内原生 HTML 装饰（#568/T03，规格「Live 的状态与选区」表）：
-// - 片段表：Lezer HTMLTag 节点派生（shared/htmlInline 单一事实源——同行
-//   分组栈式配对、最外层、单行成型；与 Reading 侧 markdown-it 规则
-//   对拍钉住），增量重建（种子 = 变更区间 ∪ 相交旧片段，rebuildHtmlSpans
-//   同款纪律）。
+// - 片段表：shared/htmlInline 单一事实源（行内容器整段交错扫描——code
+//   span 状态跨行维持、树上下文排除链接标题/引用定义/块级区；最外层、
+//   单行成型；与 Reading 侧 markdown-it 规则对拍钉住），增量重建（种子
+//   = 变更区间 ∪ 相交旧片段 ∪ 变更行容器末端，rebuildHtmlSpans 同款
+//   纪律）。
 // - 片段替换装饰：未触及 = **精确区间 [from, to] inline replace widget**
 //   （行内宿主 span，display:inline——前后正文同行流不断行，不隐藏前后
 //   正文）；触及（selectionTouchesRange 语义：折叠光标含两端、非空选区
@@ -23,7 +24,12 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
-import { inlineHtmlFragmentsOfTree, type HtmlInlineFragment } from '../shared/htmlInline'
+import {
+  INLINE_RELEVANT_CHARS_RE,
+  inlineContextOfLine,
+  inlineHtmlFragmentsOfTree,
+  type HtmlInlineFragment,
+} from '../shared/htmlInline'
 import { htmlInlineRenderHtml } from './htmlSanitize'
 import { makeHtmlWidgetMousedown, liveHtmlDocScopeOf, prepareHtmlWidgetContent, topLevelStructureStable } from './liveHtml'
 import { disposeHtmlResourcesOf } from './htmlResourceMount'
@@ -93,34 +99,41 @@ export function rebuildInlineHtmlSpans(
     to: changes.mapPos(s.to, -1),
     source: s.source,
   }))
-  // #576 二轮复审 P2：行级失效——段内上下文变化（InlineCode 开闭吞标签、新外层标签吸收内层）不改变顶层结构签名，但使同一行的片段表失效。变更行整行并入窗口（重建后的片段可在行内任意位置）。剪枝：行内配对只依赖本行字符（单行成型边界）——变更行的新行文本不含 '<' 与 '`' 且旧表在该行无片段时，编辑前后片段集均为空，无需扩窗（纯文字键击零额外成本；块级上下文变化由顶层签名守卫覆盖）。
+  // #576 三轮复审 P2-1：行级失效升级为**容器级**——code span 状态在行
+  // 内容器内跨行维持（段内上下文变化使后行片段增减，顶层签名与变更行
+  // 都覆盖不到），变更行的扩窗终点延伸到容器末端（状态只向后传播，
+  // 窗口起点维持行首）。剪枝口径 = 变更行的新文本**或变更区间的旧文本**
+  // 含 `<`/反引号，或旧表在该行有片段——旧文本判定补上「删除了唯一的
+  // 相关字符」的场景（新行两无所指但跨行配对已改变）；纯文字键击零
+  // 额外成本。
   const linesWithOldSpan = new Set<number>()
   for (const m of mapped) {
     if (m.to > m.from) {
       linesWithOldSpan.add(doc.lineAt(m.from).number)
     }
   }
-  const changedLines = new Set<number>()
-  changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+  const containerEndOfLine = (n: number): number => {
+    const line = doc.line(n)
+    if (tree === null) {
+      return line.to
+    }
+    const ctx = inlineContextOfLine(tree, line.from, line.to)
+    return ctx.container !== null ? Math.max(ctx.container.to, line.to) : line.to
+  }
+  changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    const oldRelevant = INLINE_RELEVANT_CHARS_RE.test(tr.startState.doc.sliceString(fromA, toA))
     const lo = doc.lineAt(Math.max(0, Math.min(fromB, doc.length))).number
     const hi = doc.lineAt(Math.max(0, Math.min(toB, doc.length))).number
     for (let n = lo; n <= hi; n++) {
-      changedLines.add(n)
+      const line = doc.line(n)
+      const relevant = linesWithOldSpan.has(n) || oldRelevant ||
+        INLINE_RELEVANT_CHARS_RE.test(doc.sliceString(line.from, line.to))
+      if (relevant) {
+        seedFrom = Math.min(seedFrom, line.from)
+        seedTo = Math.max(seedTo, containerEndOfLine(n))
+      }
     }
   })
-  for (const n of changedLines) {
-    const line = doc.line(n)
-    if (linesWithOldSpan.has(n)) {
-      seedFrom = Math.min(seedFrom, line.from)
-      seedTo = Math.max(seedTo, line.to)
-      continue
-    }
-    const text = doc.sliceString(line.from, line.to)
-    if (text.includes('<') || text.includes('`')) {
-      seedFrom = Math.min(seedFrom, line.from)
-      seedTo = Math.max(seedTo, line.to)
-    }
-  }
   for (const m of mapped) {
     if (m.to + 1 >= seedFrom && m.from <= seedTo + 1) {
       seedFrom = Math.min(seedFrom, m.from)
@@ -145,9 +158,10 @@ export function rebuildInlineHtmlSpans(
   }
   out.push(...scanInlineHtmlSpans(doc, tree, Math.max(0, seedFrom), Math.min(doc.length, seedTo)))
   out.sort((a, b) => a.from - b.from)
-  // 表引用短路：重建结果与旧表逐项相等时返回旧引用——装饰 field 的
-  // spansChanged 判定走引用比较，纯文内键击（片段表无变化）时跳过
-  // RangeSet 重建与 view 装饰 diff（帧预算敏感路径的成本归零）
+  // 表引用短路：重建结果与旧表逐项相等时返回旧引用——下游装饰 field 的
+  // spansChanged 判定走引用比较（纯文内键击片段表无变化时不重复传播）。
+  // 表扫描本身的跳过由上方剪枝承担；装饰集的短路见
+  // liveInlineHtmlDecorations（RangeSet.of 重建与 view diff 分层处理）
   if (out.length === prev.length) {
     let same = true
     for (let i = 0; i < out.length && same; i++) {
@@ -329,7 +343,7 @@ export const liveInlineHtmlDecorations = StateField.define<DecorationSet>({
     if (!deco) {
       return RangeSet.empty
     }
-    return RangeSet.of(
+    const next = RangeSet.of(
       buildLiveInlineHtmlDecorationRanges(
         tr.state.selection,
         tr.state.field(liveInlineHtmlSpansField, false) ?? [],
@@ -339,6 +353,12 @@ export const liveInlineHtmlDecorations = StateField.define<DecorationSet>({
       ),
       true,
     )
+    // #576 三轮复审 P3：重建集与旧集逐项相等（装饰实例经 decoCache 键
+    // 复用，值相等性由 Decoration 的 RangeValue.eq 判定）时返回旧引用
+    // ——view 层装饰更新按 field 引用判等，纯文键击（docChanged 但片段
+    // 表与触及集不变）不进装饰 diff；RangeSet.of 重建本身仍执行（选区
+    // 移动的触及判定依赖每事务重算）
+    return RangeSet.eq([value], [next]) ? value : next
   },
   provide: (f) => EditorView.decorations.from(f),
 })
