@@ -368,7 +368,7 @@ describe('#576 三轮复审 P2-2：缩进代码行的增量（行末上下文定
 })
 
 describe('#576 三轮复审 P3：装饰层引用短路接到生产链（docChanged 不变集返回旧引用）', () => {
-  it('纯文尾键击（片段表与触及集均无变化）：装饰集引用不变（view 装饰 diff 归零）', () => {
+  it('纯文尾键击（片段表与触及集均无变化）：装饰集引用不变（等价集保持引用）', () => {
     const state = buildState('a <span>x</span> b\ntail', EditorSelection.single(17))
     expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
     const before = state.field(liveInlineHtmlDecorations)
@@ -376,5 +376,42 @@ describe('#576 三轮复审 P3：装饰层引用短路接到生产链（docChang
     expect(next.field(liveInlineHtmlSpansField)).toBe(state.field(liveInlineHtmlSpansField))
     const after = next.field(liveInlineHtmlDecorations)
     expect(after).toBe(before)
+  })
+})
+
+describe('#576 四轮复审 P2-1：闭串编辑对容器前文的反向影响（窗口双向扩）', () => {
+  it('删除容器末闭串：code span 解体，前文片段恢复（与新建状态一致）', () => {
+    const text = 'a `start\nb <span>x</span>\nend`'
+    const state = buildState(text, EditorSelection.single(4))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 29, to: 30 } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
+  })
+
+  it('末行插入闭反引号（容器末端之内）：前文片段被跨行 code span 吞掉', () => {
+    const text = 'a `start\nb <span>x</span> tail\nend'
+    const state = buildState(text, EditorSelection.single(28))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    // 插在末字母 d 之前（容器末端之内——不触发顶层边界失配的偶然全扫）
+    const next = state.update({ changes: { from: 33, insert: '`' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+})
+
+describe('#576 四轮复审 P2-4：嵌套容器内部块级重分类（编辑点祖先链守卫）', () => {
+  it('删除文首 "> "：内层引用解体、span 行进入围栏——旧片段不残留', () => {
+    const text = '> > ```html\n> a <span>x</span>\n> ```'
+    const state = buildState(text, EditorSelection.single(4))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(1)
+    const next = state.update({ changes: { from: 0, to: 2 } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(0)
+  })
+
+  it('文首插入 "> "：围栏内 span 行成为正文段落——片段重新出现', () => {
+    const text = '> ```html\n> a <span>x</span>\n> ```'
+    const state = buildState(text, EditorSelection.single(4))
+    expect(state.field(liveInlineHtmlSpansField)).toHaveLength(0)
+    const next = state.update({ changes: { from: 0, insert: '> ' } }).state
+    expect(next.field(liveInlineHtmlSpansField)).toHaveLength(1)
   })
 })

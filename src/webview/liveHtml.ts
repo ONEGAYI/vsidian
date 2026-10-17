@@ -31,7 +31,7 @@ import { DocumentStyleBinding, type DocStyleResourcePort } from './docStyleLoade
 import { disposeHtmlResourcesOf, prepareHtmlResources } from './htmlResourceMount'
 import { liveImagesOfView } from './liveLinks'
 import { t } from '../shared/i18n'
-import type { Tree } from '@lezer/common'
+import type { SyntaxNode, Tree } from '@lezer/common'
 
 /** #567 Live HTML 块宿主稳定类名（样式契约 content 域 live-html-widget
  *  条目同源；宿主兼任 hover 边框与编辑按钮的定位包裹层） */
@@ -105,6 +105,13 @@ function scanAllHtmlSpans(doc: Text, tree: Tree | null): LiveHtmlSpan[] {
  * （节点名 + 边界），全一致 = 变更区外无重分类（窗口外旧条目可信，
  * 纯增量保持——普通打字的顶层结构通常不变）；任一不一致（含块数增减）
  * = 退全量重扫（树是权威）。树未推进（同引用）由调用方短路。
+ * #576 四轮复审 P2-4：顶层名与边界一致**不足以**证明容器内部结构不变
+ * ——嵌套引用/列表内的 FencedCode 等重分类不改变顶层 Blockquote 的名
+ * 与映射边界。补第二道：变更区间的**新旧两端**（iterChangedRanges 的
+ * fromA/toA 旧坐标与 fromB/toB 新坐标——映射会落到删除区起点之前而
+ * 看不到旧结构）各取祖先链名序列对照——内部重分类必然改变编辑点所处
+ * 的结构路径（如 Blockquote>Blockquote>FencedCode ↔ Blockquote>
+ * FencedCode），名序列不同即退全量（每次编辑多付常数次 O(depth) 对照）。
  */
 export function topLevelStructureStable(
   changes: ChangeSet,
@@ -121,7 +128,32 @@ export function topLevelStructureStable(
       return false
     }
   }
-  return o === null && n === null
+  if (o !== null || n !== null) {
+    return false
+  }
+  const chainNamesOf = (tree: Tree, pos: number): string => {
+    const clamped = Math.max(0, Math.min(pos, tree.length - 1))
+    let node: SyntaxNode | null = tree.resolveInner(clamped, 1)
+    const names: string[] = []
+    while (node !== null) {
+      names.push(node.name)
+      node = node.parent
+    }
+    return names.join('>')
+  }
+  let chainsStable = true
+  changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (!chainsStable) {
+      return
+    }
+    const oldEnd = Math.max(fromA, toA - 1)
+    const newEnd = Math.max(fromB, toB - 1)
+    if (chainNamesOf(oldTree, fromA) !== chainNamesOf(newTree, fromB) ||
+      chainNamesOf(oldTree, oldEnd) !== chainNamesOf(newTree, newEnd)) {
+      chainsStable = false
+    }
+  })
+  return chainsStable
 }
 
 /**

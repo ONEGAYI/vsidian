@@ -241,7 +241,49 @@ const CASES: Array<{ name: string; text: string; want: Array<[number, number]> |
   },
   {
     name: '对照组：破坏的尖括号目的地（两端都不成链接）——span 正常成片段',
-    text: 'a [label](<t <span>x</span>>) z',
+    text: 'a [label](<t <span>x</span>) z',
+    want: null,
+  },
+  // ---- #576 四轮复审 P2-2：PI 结束位置（真实闭串长度）----
+  {
+    name: 'PI 紧邻标签：PI 后紧跟的 span 正常成片段（闭串 ?> 为两字符）',
+    text: 'a <?ok?><span>x</span> z',
+    want: null,
+  },
+  {
+    name: 'PI 带空格紧邻标签（对照）',
+    text: 'a <?ok?> <span>x</span> z',
+    want: null,
+  },
+  {
+    name: 'PI 闭在容器末：下一行的 span 不被吞（跨行不越界）',
+    text: 'a <?x?>\n<span>y</span>',
+    want: null,
+  },
+  {
+    name: '未闭合 PI：字面继续——其后的 span 正常成片段（两端一致）',
+    text: 'a <?ok <span>x</span> z',
+    want: null,
+  },
+  // ---- #576 四轮复审 P2-3：非正文区反引号不参与正文配对（扫描期跳过，非事后过滤）----
+  {
+    name: '链接 title 内的反引号是字面：title 后的 span 正常成片段',
+    text: 'a [label](url "`") <span>x</span> ` z',
+    want: null,
+  },
+  {
+    name: '尖括号目的地内的反引号是字面：其后的 span 正常成片段',
+    text: 'a [l](<a`b>) <span>y</span> ` z',
+    want: null,
+  },
+  {
+    name: '裸目的地内的反引号是字面：其后的 span 正常成片段',
+    text: 'a [l](a`b) <span>y</span> ` z',
+    want: null,
+  },
+  {
+    name: 'autolink 内的反引号是字面：其后的 span 正常成片段',
+    text: 'a <https://x`y> <span>z</span> ` t',
     want: null,
   },
 ]

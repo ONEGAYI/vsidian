@@ -211,8 +211,10 @@ function matchRawHtmlNonElementAt(src: string, pos: number, limit: number): numb
   }
   const next = src[pos + 1]!
   if (next === '?') {
+    // PI 闭串 `?>` 是两个字符（#576 四轮复审 P2-2：曾按注释闭串误写 +3，
+    // 多推进一位吞掉紧邻标签起点）
     const close = src.indexOf('?>', pos + 2)
-    return close < 0 || close + 3 > limit ? null : close + 3
+    return close < 0 || close + 2 > limit ? null : close + 2
   }
   if (next !== '!') {
     return null
@@ -275,6 +277,11 @@ function findClosingBacktickRun(src: string, start: number, limit: number, runLe
  * 行内交错扫描（#576 二轮复审 P2 起的事实源，三轮复审扩为容器粒度）：
  * 按文档序从 from 到 limit 扫描（from/limit 通常为**行内容器**区间——
  * code span 与非元素原始 HTML token 可跨行，状态须容器内维持）：
+ * - skipRanges（文本内偏移、升序互斥）：**不参与正文内联解析**的字面区
+ *   （链接 title/目的地/autolink——探针实测节点名）——扫描位置进入即
+ *   整区跳过（#576 四轮复审 P2-3：这些区里的反引号是字面，若参与配对
+ *   会污染其后正文的 code span 判定；事后过滤只能删错误产物，恢复不了
+ *   扫描阶段漏掉的正文）
  * - 转义对 `\x` 跳过（外部上下文的 `\<` 不是标签起点）
  * - 反引号串按等长配对复刻 code span（内容原样跳过——含 HTML 字面；
  *   未配对的串按字面继续）
@@ -286,10 +293,24 @@ function findClosingBacktickRun(src: string, start: number, limit: number, runLe
  * 与 markdown-it 侧（backticks/html 规则按位置交错）语义一致，两端一致
  * 性由对拍钉住。产出片段的**文本内偏移**区间。
  */
-export function scanInlineHtmlFragmentsInText(src: string, from: number, limit: number): HtmlInlineFragment[] {
+export function scanInlineHtmlFragmentsInText(
+  src: string,
+  from: number,
+  limit: number,
+  skipRanges: ReadonlyArray<{ from: number; to: number }> = [],
+): HtmlInlineFragment[] {
   const out: HtmlInlineFragment[] = []
+  let skipIdx = 0
   let i = from
   while (i < limit) {
+    while (skipIdx < skipRanges.length && skipRanges[skipIdx]!.to <= i) {
+      skipIdx++
+    }
+    const skip = skipRanges[skipIdx]
+    if (skip !== undefined && i >= skip.from && i < skip.to) {
+      i = skip.to
+      continue
+    }
     const ch = src[i]!
     if (ch === '\\') {
       i += 2 // 转义对（外部上下文）
@@ -340,9 +361,9 @@ const INLINE_EXCLUDED_CONTEXT_NODES = new Set([...INLINE_EXCLUDED_BLOCK_NODES, '
 export interface InlineLineContext {
   /** 行内容属块级排除结构（整行字面，不扫描） */
   excluded: boolean
-  /** 行所属行内容器区间（code span 状态的维持边界）；null = 无容器
-   *  （主题分隔线、表格分隔行、引用定义行等——按孤岛扫描本行） */
-  container: { from: number; to: number } | null
+  /** 行所属行内容器节点（code span 状态的维持边界、字面区收集根）；
+   *  null = 无容器（主题分隔线、表格分隔行、引用定义行等——孤岛扫描） */
+  container: SyntaxNode | null
 }
 
 /**
@@ -358,13 +379,13 @@ export function inlineContextOfLine(tree: Tree, lineFrom: number, lineTo: number
     return { excluded: false, container: null } // 空行：无内容（容器边界语义由相邻行容器差承担）
   }
   let node: SyntaxNode | null = tree.resolveInner(pos, 1)
-  let container: { from: number; to: number } | null = null
+  let container: SyntaxNode | null = null
   while (node !== null) {
     if (INLINE_EXCLUDED_BLOCK_NODES.has(node.name)) {
       return { excluded: true, container: null }
     }
     if (container === null && INLINE_CONTAINER_NODES.has(node.name)) {
-      container = { from: node.from, to: node.to }
+      container = node
     }
     node = node.parent
   }
@@ -386,12 +407,44 @@ function fragmentExcludedByContext(tree: Tree, from: number, to: number): boolea
   return excludedAt(from) || excludedAt(to - 1)
 }
 
+/** 容器子树内**不参与正文内联解析**的字面区节点名（探针实测）：链接
+ *  title（字面串）、目的地 URL（裸/尖括号形态均产——内部反引号字面）、
+ *  autolink（<scheme:…> 整体字面）。这些区在扫描期跳过（#576 四轮复审
+ *  P2-3——事后过滤删不掉已污染的配对状态）；链接 label 是内联内容，
+ *  不入此集合 */
+const INLINE_LITERAL_CONTEXT_NODES = new Set(['LinkTitle', 'URL', 'Autolink'])
+
+/** 容器子树内的字面区收集（绝对区间，文档序升序——树遍历天然有序） */
+function literalContextRangesOf(node: SyntaxNode): Array<{ from: number; to: number }> {
+  const out: Array<{ from: number; to: number }> = []
+  const visit = (n: SyntaxNode): void => {
+    if (INLINE_LITERAL_CONTEXT_NODES.has(n.name)) {
+      out.push({ from: n.from, to: n.to })
+      return // 字面区内部不再有正文内联结构
+    }
+    let c = n.firstChild
+    while (c !== null) {
+      visit(c)
+      c = c.nextSibling
+    }
+  }
+  let c = node.firstChild
+  while (c !== null) {
+    visit(c)
+    c = c.nextSibling
+  }
+  return out
+}
+
 /**
  * Lezer 树的行内 HTML 片段（最外层、单行）：树提供**结构上下文**（块级
  * 排除区、行内容器、行内字面区——全部经实测节点名）；行内结构（code
  * span 配对、非元素 token 消费、片段消费、外部转义）由
  * scanInlineHtmlFragmentsInText 按容器原始文本交错扫描（#576 三轮复审
  * P2-1/P2-3：容器整段扫描维持跨行状态；不用 Lezer HTMLTag 节点集合）。
+ * 字面区（#576 四轮复审 P2-3）在**扫描期**跳过——树只对真正解析成功的
+ * 链接/autolink 产节点，反引号先于链接开串时两端同样先配对（树里无该
+ * 链接节点，扫描器原样配对——与 markdown-it 位置序规则一致）。
  * from/to 可限定行窗口（增量重建：窗口内命中的容器**整段**扫描——状态
  * 从容器起点才正确——片段发射裁剪到窗口交集；同容器多行只扫一次）。
  */
@@ -413,11 +466,14 @@ export function inlineHtmlFragmentsOfTree(
       continue
     }
     if (ctx.container !== null) {
-      const base = ctx.container.from
-      const key = `${base}:${ctx.container.to}`
+      const containerNode = ctx.container
+      const base = containerNode.from
+      const key = `${base}:${containerNode.to}`
       if (!scanned.has(key)) {
-        const text = doc.sliceString(base, ctx.container.to)
-        scanned.set(key, scanInlineHtmlFragmentsInText(text, 0, text.length)
+        const text = doc.sliceString(base, containerNode.to)
+        const skips = literalContextRangesOf(containerNode)
+          .map((r) => ({ from: r.from - base, to: r.to - base }))
+        scanned.set(key, scanInlineHtmlFragmentsInText(text, 0, text.length, skips)
           .filter((f) => !fragmentExcludedByContext(tree, base + f.from, base + f.to)))
       }
       if (!emitted.has(key)) {
