@@ -303,6 +303,49 @@ const CASES: Array<{ name: string; text: string; want: Array<[number, number]> |
     text: 'a <span>[label](url "</span>") <b>x</b> z',
     want: null,
   },
+  // ---- #576 六轮复审 P2-1：伪字面区跨出已消费 HTML 后不吞后续正文 ----
+  {
+    name: '#576 六轮 P2-1：片段消费越过后，与其相交的伪 LinkTitle 失效——后续 b 正常成片段（链接开界已被 HTML 消费覆盖，链接从未成立）',
+    text: 'a <span>[x](url "</span> <b>y</b>")',
+    want: null,
+  },
+  // ---- #576 六轮复审 P2-2：孤岛行按 TableCell 边界配对，不跨格拼片段 ----
+  {
+    name: '#576 六轮 P2-2：开闭标签分处两格——各格字面不成片段（Reading 两格各自字面）',
+    text: '| <span>x | y</span> |\n| --- | --- |',
+    want: [],
+  },
+  {
+    name: '#576 六轮 P2-2 负控：同格成对片段正常（格内配对不受分段影响）',
+    text: '| a <span>x</span> b | <b>c</b> |\n| --- | --- |',
+    want: null,
+  },
+  {
+    name: '#576 六轮 P2-2 负控：转义管道不分割格——格内片段正常',
+    text: '| a \\| b <span>x</span> | c |\n| --- | --- |',
+    want: null,
+  },
+  {
+    name: '#576 六轮 P2-2 负控：两格各自独立片段',
+    text: '| <span>x</span> | <span>y</span> |\n| --- | --- |',
+    want: null,
+  },
+  // ---- #576 六轮复审 P2-3：片段配对按 HTML 词法跳过非元素 token ----
+  {
+    name: '#576 六轮 P2-3：注释内的同名开标签不参与嵌套深度（外层 span 正常闭合，片段含注释原文）',
+    text: 'a <span><!-- <span> -->x</span> z',
+    want: [[2, 31]],
+  },
+  {
+    name: '#576 六轮 P2-3：注释内的同名闭标签不闭合外层（片段到真闭标签，含注释原文）',
+    text: 'a <span><!-- </span> -->x</span> z',
+    want: [[2, 32]],
+  },
+  {
+    name: '#576 六轮 P2-3：PI 内的标签同理是字面（非元素 token 整体跳过）',
+    text: 'a <span><?pi <span> ?>x</span> z',
+    want: [[2, 30]],
+  },
 ]
 
 describe('行内 HTML 片段：识别与配对矩阵（两端一致）', () => {

@@ -29,6 +29,17 @@
 // - **孤岛行字面区（#576 五轮复审 P2-1）**：ATX 标题/表格单元格等
 //   单行上下文同样接入扫描期跳过（title/目的地/autolink 内的反引号
 //   是字面——与容器行同口径）。
+// - **伪字面区失效（#576 六轮复审 P2-1）**：与已消费 HTML 片段相交的
+//   字面区是伪上下文（链接开界被片段消费覆盖、链接从未成立——树把
+//   片段内部及其后的文本标成 LinkTitle）——扫描期不跳、发射后过滤
+//   跳过该节点查外层；只有严格在被检起点之前结束的已消费区间参与
+//   判定（片段自身不能自我豁免真祖先）。
+// - **表格行分格扫描（#576 六轮复审 P2-2）**：TableCell 是表格行的
+//   实际内联解析域——开闭标签分处两格不成片段（不跨格配对吞 Markdown
+//   管道），同格配对/转义管道语义保持。
+// - **片段配对跳过非元素 token（#576 六轮复审 P2-3）**：片段内部配对
+//   按同一 HTML 词法跳过注释/PI/声明/CDATA（内部同名标签是字面，不参
+//   与嵌套深度——与片段外交错扫描器同口径）。
 // - **单行成型边界**：片段不跨行（开标签与匹配闭标签须同行）；未闭合
 //   开标签/孤立闭标签不成片段，降级为源码字面（保守方向与 htmlBlock
 //   一致——显源码优先）。
@@ -180,6 +191,14 @@ export function matchInlineHtmlFragmentAt(src: string, pos: number): number | nu
   let i = open.end
   while (i < limit) {
     if (src[i] === '<') {
+      // 非元素 token（注释/PI/声明/CDATA——#576 六轮复审 P2-3）：按
+      // HTML 词法整 token 跳过——内部的同名开/闭标签是字面，不参与
+      // 嵌套深度（不能只在片段外的交错扫描器处理注释）
+      const rawEnd = matchRawHtmlNonElementAt(src, i, limit)
+      if (rawEnd !== null) {
+        i = rawEnd
+        continue
+      }
       const tag = matchHtmlTagAt(src, i, limit)
       if (tag !== null) {
         if (tag.name === open.name) {
@@ -278,6 +297,15 @@ function findClosingBacktickRun(src: string, start: number, limit: number, runLe
   return -1
 }
 
+/** 一次行内交错扫描的产物：片段与已消费区间（同坐标文本内偏移） */
+export interface InlineScanResult {
+  fragments: HtmlInlineFragment[]
+  /** 已成型的 HTML 片段区间——树上下文过滤用它失效伪字面区（链接开界
+   *  被片段消费覆盖、链接从未成立——树却把片段内部及其后的文本标成
+   *  LinkTitle 等字面区；#576 六轮复审 P2-1） */
+  consumedRanges: Array<{ from: number; to: number }>
+}
+
 /**
  * 行内交错扫描（#576 二轮复审 P2 起的事实源，三轮复审扩为容器粒度）：
  * 按文档序从 from 到 limit 扫描（from/limit 通常为**行内容器**区间——
@@ -286,7 +314,8 @@ function findClosingBacktickRun(src: string, start: number, limit: number, runLe
  *   （链接 title/目的地/autolink——探针实测节点名）——扫描位置进入即
  *   整区跳过（#576 四轮复审 P2-3：这些区里的反引号是字面，若参与配对
  *   会污染其后正文的 code span 判定；事后过滤只能删错误产物，恢复不了
- *   扫描阶段漏掉的正文）
+ *   扫描阶段漏掉的正文）；与**已消费片段相交**的 skip 区是伪字面区
+ *   （#576 六轮复审 P2-1）——按正文继续，不跳
  * - 转义对 `\x` 跳过（外部上下文的 `\<` 不是标签起点）
  * - 反引号串按等长配对复刻 code span（内容原样跳过——含 HTML 字面；
  *   未配对的串按字面继续）
@@ -296,15 +325,16 @@ function findClosingBacktickRun(src: string, start: number, limit: number, runLe
  *   的反引号/转义是字面，不参与 Markdown 结构、不污染其后的配对上下文；
  *   片段不跨行由其行内 limit 保证）
  * 与 markdown-it 侧（backticks/html 规则按位置交错）语义一致，两端一致
- * 性由对拍钉住。产出片段的**文本内偏移**区间。
+ * 性由对拍钉住。产出片段与已消费区间的**文本内偏移**区间。
  */
 export function scanInlineHtmlFragmentsInText(
   src: string,
   from: number,
   limit: number,
   skipRanges: ReadonlyArray<{ from: number; to: number }> = [],
-): HtmlInlineFragment[] {
+): InlineScanResult {
   const out: HtmlInlineFragment[] = []
+  const consumed: Array<{ from: number; to: number }> = []
   let skipIdx = 0
   let i = from
   while (i < limit) {
@@ -313,6 +343,10 @@ export function scanInlineHtmlFragmentsInText(
     }
     const skip = skipRanges[skipIdx]
     if (skip !== undefined && i >= skip.from && i < skip.to) {
+      if (consumed.some((c) => c.from < skip.to && c.to > skip.from)) {
+        skipIdx++ // 伪字面区失效：按正文继续（内部反引号等重新参与解析）
+        continue
+      }
       i = skip.to
       continue
     }
@@ -339,13 +373,14 @@ export function scanInlineHtmlFragmentsInText(
       const end = matchInlineHtmlFragmentAt(src, i)
       if (end !== null) {
         out.push({ from: i, to: end })
+        consumed.push({ from: i, to: end })
         i = end
         continue
       }
     }
     i++
   }
-  return out
+  return { fragments: out, consumedRanges: consumed }
 }
 
 /** 行内片段不进入的块级结构（探针实测节点名——整块先行消费，行内容是
@@ -405,14 +440,30 @@ export function inlineContextOfLine(tree: Tree, lineFrom: number, lineTo: number
  * 片段、链接从未存在——Lezer 树却解析出链接），未经 HTML 语义修正的
  * Markdown 树不得否决扫描器已按两端一致语义成型的片段。块级结构整块
  * 先行消费，片段起点在块级内则整段都在——起点判定即充分。
+ * consumedRanges（绝对区间）失效**伪上下文节点**（#576 六轮复审 P2-1）：
+ * 祖先链上的排除名节点若与任一已消费片段相交，说明该「字面区」的链接
+ * 开界已被 HTML 消费序覆盖、链接从未成立——跳过该节点继续查外层（更
+ * 外层的真块级上下文仍生效）。只有**严格在被检起点之前结束**的区间参
+ * 与判定：被检片段自身就在祖先节点内（区间天然相交），不能自我豁免；
+ * 此前的片段才是否定链接结构的合法证据。
  */
-function fragmentExcludedByContext(tree: Tree, from: number): boolean {
+function fragmentExcludedByContext(
+  tree: Tree,
+  from: number,
+  consumedRanges: ReadonlyArray<{ from: number; to: number }> = [],
+): boolean {
+  const priorConsumed = consumedRanges.filter((c) => c.to <= from)
   let node: SyntaxNode | null = tree.resolveInner(Math.max(0, Math.min(from, tree.length - 1)), 1)
   while (node !== null) {
-    if (INLINE_EXCLUDED_CONTEXT_NODES.has(node.name)) {
-      return true
+    const current: SyntaxNode = node
+    if (INLINE_EXCLUDED_CONTEXT_NODES.has(current.name)) {
+      const pseudo = priorConsumed.some((c) => c.from < current.to && c.to > current.from)
+      if (!pseudo) {
+        return true
+      }
+      // 伪上下文节点：跳过，继续查外层
     }
-    node = node.parent
+    node = current.parent
   }
   return false
 }
@@ -470,6 +521,27 @@ function literalRangesOfIslandLine(tree: Tree, lineFrom: number, lineTo: number)
 }
 
 /**
+ * 孤岛行内的表格单元格区间（升序；格是表格行的实际内联解析域——
+ * #576 六轮复审 P2-2：开闭标签分处两格时整行配对会拼出跨格片段吞掉
+ * Markdown 管道，而 Reading 按格重解析、各格字面。非表格行返回空）。
+ */
+function tableCellRangesOfLine(tree: Tree, lineFrom: number, lineTo: number): Array<{ from: number; to: number }> {
+  const out: Array<{ from: number; to: number }> = []
+  tree.iterate({
+    from: lineFrom,
+    to: lineTo,
+    enter: (node) => {
+      if (node.name === 'TableCell') {
+        out.push({ from: node.from, to: node.to })
+        return false
+      }
+      return true
+    },
+  })
+  return out
+}
+
+/**
  * Lezer 树的行内 HTML 片段（最外层、单行）：树提供**结构上下文**（块级
  * 排除区、行内容器、行内字面区——全部经实测节点名）；行内结构（code
  * span 配对、非元素 token 消费、片段消费、外部转义）由
@@ -506,8 +578,10 @@ export function inlineHtmlFragmentsOfTree(
         const text = doc.sliceString(base, containerNode.to)
         const skips = literalContextRangesOf(containerNode)
           .map((r) => ({ from: r.from - base, to: r.to - base }))
-        scanned.set(key, scanInlineHtmlFragmentsInText(text, 0, text.length, skips)
-          .filter((f) => !fragmentExcludedByContext(tree, base + f.from)))
+        const scan = scanInlineHtmlFragmentsInText(text, 0, text.length, skips)
+        const consumedAbs = scan.consumedRanges.map((c) => ({ from: base + c.from, to: base + c.to }))
+        scanned.set(key, scan.fragments
+          .filter((f) => !fragmentExcludedByContext(tree, base + f.from, consumedAbs)))
       }
       if (!emitted.has(key)) {
         emitted.add(key)
@@ -521,17 +595,27 @@ export function inlineHtmlFragmentsOfTree(
       }
       continue
     }
-    // 孤岛行（无行内容器）：本行独立扫描（无跨行状态——单行容器语义等价）；
-    // 字面区同容器口径在扫描期跳过（#576 五轮复审 P2-1：标题/表格格内
-    // title 等的反引号是字面，不参与本行配对）
-    const text = doc.sliceString(line.from, line.to)
-    const skips = literalRangesOfIslandLine(tree, line.from, line.to)
-      .map((r) => ({ from: r.from - line.from, to: r.to - line.from }))
-    for (const f of scanInlineHtmlFragmentsInText(text, 0, text.length, skips)) {
-      const absFrom = line.from + f.from
-      const absTo = line.from + f.to
-      if (absTo > from && absFrom < to && !fragmentExcludedByContext(tree, absFrom)) {
-        out.push({ from: absFrom, to: absTo })
+    // 孤岛行（无行内容器）：表格行按 TableCell 边界**分格扫描**（格是
+    // 实际内联解析域，配对不跨格——#576 六轮复审 P2-2），其余单行上下文
+    // （ATX 标题等）按整行扫描（无跨行状态——单行容器语义等价）；字面区
+    // 同容器口径在扫描期跳过（#576 五轮复审 P2-1：标题/表格格内 title 等
+    // 的反引号是字面，不参与本段配对）
+    const segments = tableCellRangesOfLine(tree, line.from, line.to)
+    if (segments.length === 0) {
+      segments.push({ from: line.from, to: line.to })
+    }
+    for (const seg of segments) {
+      const text = doc.sliceString(seg.from, seg.to)
+      const skips = literalRangesOfIslandLine(tree, seg.from, seg.to)
+        .map((r) => ({ from: r.from - seg.from, to: r.to - seg.from }))
+      const scan = scanInlineHtmlFragmentsInText(text, 0, text.length, skips)
+      const consumedAbs = scan.consumedRanges.map((c) => ({ from: seg.from + c.from, to: seg.from + c.to }))
+      for (const f of scan.fragments) {
+        const absFrom = seg.from + f.from
+        const absTo = seg.from + f.to
+        if (absTo > from && absFrom < to && !fragmentExcludedByContext(tree, absFrom, consumedAbs)) {
+          out.push({ from: absFrom, to: absTo })
+        }
       }
     }
   }
