@@ -25,7 +25,7 @@ export interface SettingsStorage {
   update(key: string, value: unknown): Thenable<void>
 }
 
-/** 设置 overlay 的 globalState 存储键（#535 起宿主侧多处消费：服务私有层 + T08 迁移直写原始层） */
+/** 设置 overlay 的 globalState 存储键（服务私有层消费） */
 export const SETTINGS_STORAGE_KEY = 'vsidian.settings'
 
 /** 变更监听者：保存成功后以新快照调用 */
@@ -46,11 +46,11 @@ export class SettingsService {
   private readonly defs = new Map<string, SettingDefinition>()
   private readonly listeners = new Set<SettingsListener>()
   /**
-   * overlay 读-改-写段的进程内串行链（#535 T08 PR #581 三审 P2-A）：
-   * apply 与迁移的互斥写步骤共用同一链——迁移在 pending 持久化的等待
-   * 窗口内，用户保存与迁移写回若各自基于旧读全量写会互相覆盖（丢失
-   * 更新，评审方 pending 屏障反例）。链式互斥：每段等待前一段落定后再
-   * 进入；只覆盖「读-合并-写」段，通知（listeners）留在链外。
+   * overlay 读-改-写段的进程内串行链：apply 的读-合并-写段在此链上
+   * 串行执行，并发保存各自基于旧读全量写会互相覆盖（丢失更新，原
+   * PR #581 三审 P2-A 的互斥语义收敛为 apply 单消费方）。链式互斥：
+   * 每段等待前一段落定后再进入；只覆盖「读-合并-写」段，通知
+   * （listeners）留在链外。
    */
   private overlayWriteChain: Promise<unknown> = Promise.resolve()
 
@@ -118,9 +118,8 @@ export class SettingsService {
       return { ok: false, rejected: result.rejected, reason: 'invalid' }
     }
     try {
-      // P2-A（PR #581 三审）：读-合并-写经串行链执行——与迁移的互斥写
-      // 步骤串行，双方都在最新 overlay 上合并，等待窗口内的用户保存不再
-      // 被迁移的旧快照覆盖（也不反向覆盖迁移补丁）
+      // 读-合并-写经串行链执行：并发保存都在最新 overlay 上合并，
+      // 不各自基于旧读全量写互相覆盖
       await this.enqueueOverlayWrite(async () => {
         const overlay = {
           ...this.storage.get<Record<string, unknown>>(this.storageKey),

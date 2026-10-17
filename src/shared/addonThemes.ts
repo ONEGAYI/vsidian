@@ -161,8 +161,9 @@ function resolvePreferredThemeValue(themeValue: string | undefined): string {
 
 /**
  * 首选解析（纯函数；v1.1.0 兼容调用形状）。#546 T07 曾有「新键 default
- * 且旧 Mermaid 键 codex 回显 codex」的过渡分支，#535 T08 迁移落地后
- * 删除：存量旧值在激活时回落 default 并引导（见 shared/codexMigration）。
+ * 且旧 Mermaid 键 codex 回显 codex」的过渡分支，#535 T08 退役后删除：
+ * 不做激活迁移与引导（2026-10-17 用户终局裁决，规格 addon-themes.md
+ * §10.0）——存量旧值按目录不命中的未知首选回落 default 显示。
  *
  * @param legacyMermaidValue 旧键 `appearance.mermaidTheme` 的取值。
  *   @deprecated #535 后旧键设置定义已删除、不再参与首选解析——传任何
