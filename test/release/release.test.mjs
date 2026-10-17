@@ -257,11 +257,12 @@ test('VSIX 检查：完整合法集合通过且零警告（#60 后单文件警�
   assert.deepEqual(result.warnings, [])
 })
 
-test('T08 包体预算：ELK 剥离后实测 12,916 KB 零警告，总量两线 13.5/14.0 MiB、单文件红线 4 MiB（待用户确认后生效口径）', () => {
+test('T08 包体预算：ELK 剥离后实测 12,916 KB 零警告，总量两线 13.5/14.0 MiB、单文件红线 4 MiB（已依 #535 验收口径以提案值生效）', () => {
   const entries = makeEntries()
   // T08（#535）实测基线：解压总量 12,916 KB（413 文件）——依据 #535 验收
-  // 口径按实测重估，警告线 13.5 MiB（余量约 0.88）、失败线 14.0 MiB
-  // （余量约 1.38），单文件 3/4 MiB 与图标线不受影响
+  // 口径（依据实测重估）以提案值生效，警告线 13.5 MiB（余量约 0.88）、
+  // 失败线 14.0 MiB（余量约 1.38），下调属用户裁决面、发版/验收轮用户可
+  // 整体回调；单文件 3/4 MiB 与图标线不受影响
   const targetBytes = 12916 * 1024
   let remaining = targetBytes - entries.reduce((total, entry) => total + entry.size, 0)
   for (let i = 0; remaining > 0; i++) {
