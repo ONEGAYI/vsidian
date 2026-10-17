@@ -17,6 +17,7 @@ import {
 } from '../../src/shared/htmlInline'
 import { topLevelHtmlBlockSpansOfTree } from '../../src/shared/htmlBlock'
 import { createMarkdownRenderer } from '../../src/webview/readingMarkdown'
+import { maskCodeSpanPipes } from '../../src/shared/tableCells'
 
 /** Lezer 侧：树派生的行内片段（绝对 offset；frontmatter 区内的树产物
  *  按发射层同款排除——头区不产正文装饰） */
@@ -32,19 +33,24 @@ function lezerFragments(text: string): HtmlInlineFragment[] {
  *  费面）产出的片段 token 内容序列——块/行内/tokenizer 的层间边界全部
  *  走真实链（html_block 区域不进行内解析、代码 span 先行消费、表格格
  *  内重解析同产）。前置形态镜像 splitReadingBlocks 的 frontmatter 先行
- *  整块提取（头区等长空白——不进行内解析；语料不含 HTML 注释） */
+ *  整块提取（头区等长空白——不进行内解析；语料不含 HTML 注释）与表格
+ *  code span 管道遮蔽（shared/tableCells 的 maskCodeSpanPipes 同一实现
+ *  ——裸 parser 的表格规则先于 inline code 切格，生产管线靠遮蔽保护；
+ *  产物切片还原原字）。 */
+const MD_PIPE_MASK = String.fromCharCode(0xe000)
 function mdRuleFragments(text: string): string[] {
   const fm = frontmatterRange(text)
-  const parseText = fm
+  const fmMasked = fm
     ? text.slice(0, fm.start) + ' '.repeat(fm.end - fm.start) + text.slice(fm.end)
     : text
+  const parseText = fmMasked.split('\n').map((l) => maskCodeSpanPipes(l, MD_PIPE_MASK)).join('\n')
   const md = createMarkdownRenderer()
   const tokens = md.parse(parseText, {} as never)
   const out: string[] = []
   const walk = (list: Array<{ type: string; content: string; children?: unknown }>): void => {
     for (const token of list) {
       if (token.type === 'vsidian_inline_html') {
-        out.push(token.content)
+        out.push(token.content.split(MD_PIPE_MASK).join('|'))
       }
       if (Array.isArray(token.children)) {
         walk(token.children as Array<{ type: string; content: string; children?: unknown }>)
@@ -345,6 +351,23 @@ const CASES: Array<{ name: string; text: string; want: Array<[number, number]> |
     name: '#576 六轮 P2-3：PI 内的标签同理是字面（非元素 token 整体跳过）',
     text: 'a <span><?pi <span> ?>x</span> z',
     want: [[2, 30]],
+  },
+  // ---- #576 七轮复审 P2-1：宿主链接开界被吞则整个链接上下文失效 ----
+  {
+    name: '#576 七轮 P2-1：HTML 吞掉链接 `[` 开界——链接从未成立，其 title 不是字面区（后续 b 正常成片段）',
+    text: 'a <span>[x</span>](url "<b>y</b>")',
+    want: null,
+  },
+  {
+    name: '#576 七轮 P2-1 负控：真链接 label 内的 HTML 不破坏链接——title 仍是字面区（i 不成片段）',
+    text: 'a [l <b>x</b>](url "<i>y</i>") t',
+    want: null,
+  },
+  // ---- #576 七轮复审 P2-2：格边界沿用 protectCodePipes 口径（code span 内管道不切格）----
+  {
+    name: '#576 七轮 P2-2：code span 内管道不切格——同格完整 span 不被截断（裸 Lezer TableCell 会切在 span 管道处）',
+    text: '| a | b |\n| --- | --- |\n| <span>x `|` y</span> | z |',
+    want: [[26, 46]],
   },
 ]
 
