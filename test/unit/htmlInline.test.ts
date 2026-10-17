@@ -386,6 +386,22 @@ const CASES: Array<{ name: string; text: string; want: Array<[number, number]> |
     text: '| a | b |\n| --- | --- |\n| [x](https://example.test "`|") <b>y</b> ` | z |',
     want: [[57, 65]],
   },
+  // ---- #576 九轮复审 P2：初值未经字面区验证的候选不得固化（迭代初值 = 原文同步链接解析）----
+  {
+    name: '#576 九轮 P2（段落）：title 内开标签是字面（链接闭合同步消费先于其后 html）——孤立闭标签不成片段，仅 b 成片段',
+    text: 'a [x](https://example.test "<span>") <b>yes</b> </span>',
+    want: [[37, 47]],
+  },
+  {
+    name: '#576 九轮 P2（ATX 标题）：同根形态——标题行内 title 字面边界保持',
+    text: '# a [x](url "<span>") <b>y</b> </span>',
+    want: [[22, 30]],
+  },
+  {
+    name: '#576 九轮 P2（表格格）：同根形态——格内 title 字面边界保持',
+    text: '| a | b |\n| --- | --- |\n| [x](url "<span>") <b>y</b> </span> | z |',
+    want: [[44, 52]],
+  },
 ]
 
 describe('行内 HTML 片段：识别与配对矩阵（两端一致）', () => {

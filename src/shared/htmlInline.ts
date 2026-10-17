@@ -518,17 +518,18 @@ export interface ResolvedInlineHtml {
 }
 
 /**
- * 行内 HTML 片段的**收敛解析**（#576 八轮复审起的事实源）：扫描（字面
- * 区跳过）→ 片段区间等长替换为中性字符 → `parseInline` 重解析 → 派生
- * 字面区 → 再扫描，迭代至片段与字面区双双稳定（≤4 轮）。原理：md-it
- * 位置序中 HTML 片段被消费为 token、对其后的 Markdown 结构解析等价于
- * 一段中性文本——占位重解析复现该语义，字面区（链接 title/目的地/
- * autolink）天然只含**真实成立**的链接结构（链接闭界或目的地被片段
- * 吞掉时重解析不再产链接节点；片段内部的伪 `[` 开界被占位抹去——
- * 外层树在两个方向上都不可信，故不再作字面区事实源）。
- * 典型收敛两轮：首轮无 skip 扫出全部候选片段（含真 title 内的——占位
- * 后重解析恢复链接结构）、次轮字面区生效后片段集修正、第三轮确认稳定。
- * 纯文本快路径：无 `<` 直接零片段返回（不付 parseInline 成本）。
+ * 行内 HTML 片段的**收敛解析**（#576 八轮复审起的事实源，九轮复审补初
+ * 值）：**初值 = 原文 parseInline 的字面区**（Lezer 同步链接解析——位
+ * 置序中 `]` 闭合同步消费 destination/title、先于其后文本的 html 消费，
+ * title/URL 的字面边界由此先行确立，#576 九轮复审 P2：初值为空时 title
+ * 内开标签会被当正文候选与链接外孤立闭标签配对，占位后真链接结构被破
+ * 坏、错误候选固化）。此后迭代修正「片段先占」的情形：扫描（字面区跳
+ * 过）→ 片段区间等长替换为中性字符 → `parseInline` 重解析 → 派生字面
+ * 区 → 再扫描，迭代至片段与字面区双双稳定（≤4 轮）。片段候选起点在字
+ * 面区外（先于 `]`）时照常消费——占位吞掉链接结构字符后重解析不再产
+ * 链接、伪字面区被迭代清除（八轮两个方向的反例即此路径）。
+ * 典型收敛两轮；纯文本快路径：无 `<` 直接零片段返回（不付 parseInline
+ * 成本）。
  */
 function resolveInlineHtmlInText(text: string, offset: number): ResolvedInlineHtml {
   if (!text.includes('<')) {
@@ -536,7 +537,7 @@ function resolveInlineHtmlInText(text: string, offset: number): ResolvedInlineHt
   }
   const neutral = pickNeutralChar(text)
   let fragments: HtmlInlineFragment[] = []
-  let literals: Array<{ from: number; to: number }> = []
+  let literals: Array<{ from: number; to: number }> = literalRangesOfPlaceholder(text, offset)
   for (let round = 0; round < 4; round++) {
     const scan = scanInlineHtmlFragmentsInText(text, 0, text.length,
       literals.map((l) => ({ from: l.from - offset, to: l.to - offset })))
