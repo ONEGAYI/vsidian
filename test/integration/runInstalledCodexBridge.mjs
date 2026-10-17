@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
 import { buildTestHostArgs, evaluateHostReport, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
-import { applyPhaseEnv, installExtension, installedExtensionDir, listVsixEntries, packageMainVsix } from './t16Package.mjs'
+import { applyPhaseEnv, installExtension, installedExtensionDir, listVsixEntries, packageMainVsix } from './installSupport.mjs'
 import { T08_PHASES, auditBridgeVsixEntries, t08PhaseHostEnv } from './t08CodexBridge.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')

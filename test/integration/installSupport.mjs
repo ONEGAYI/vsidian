@@ -1,4 +1,7 @@
-// #365 T16 附加组件安装态回归——打包与阶段装配库（启动器与单测共用）。
+// 安装态回归支撑库——VSIX 打包与阶段装配（启动器与单测共用）。
+// 原 t16Package.mjs（#365 T16 起源），因现被 t16（runInstalledAddons）、
+// runInstalled、runInstalledCodexBridge、runRemoteSshAddons 多启动器
+// 共享，2026-10-17 评审更名。
 //
 // 双 VSIX 安装态：主 Vsidian VSIX + 三套 T15 独立样例 VSIX（+ 两枚负向
 // 夹具 VSIX）经 VSCode 1.82.3 CLI --install-extension 装入隔离 profile，

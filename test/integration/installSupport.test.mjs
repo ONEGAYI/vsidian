@@ -1,6 +1,7 @@
-// #365 T16 安装态回归——打包与阶段装配纯逻辑单测（node --test）。
-// 副作用层（vsce/CLI 安装/宿主启动）由 runInstalledAddons.mjs 集成承载，
-// 本文件只钉住纯逻辑契约：主/组件 VSIX 条目断言、阶段环境拼装与删除标记。
+// 安装态回归支撑库（installSupport.mjs，原 t16Package.mjs）纯逻辑单测
+// （node --test）。副作用层（vsce/CLI 安装/宿主启动）由 runInstalledAddons.mjs
+// 等启动器集成承载，本文件只钉住纯逻辑契约：主/组件 VSIX 条目断言、
+// 阶段环境拼装与删除标记。
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,7 +15,7 @@ import {
   auditMainVsixEntries,
   installedExtensionDir,
   phaseHostEnv,
-} from './t16Package.mjs'
+} from './installSupport.mjs'
 
 const MAIN_VSIX_OK = [
   '[Content_Types].xml',

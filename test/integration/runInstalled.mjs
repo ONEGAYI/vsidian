@@ -22,7 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
-import { installedExtensionDir } from './t16Package.mjs'
+import { installedExtensionDir } from './installSupport.mjs'
 import { buildTestHostArgs, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')

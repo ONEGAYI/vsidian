@@ -51,7 +51,7 @@ import { generatePerfSample, generateReadingSample, generateMermaidDenseSample }
 import { writeFixtures } from './fixtures.mjs'
 import { buildTestHostArgs, evaluateHostReport, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 import { buildAllExamples } from '../examples/tools/buildLib.mjs'
-import { installExtension, installedExtensionDir, packageExtensionVsix, packageMainVsix, writeDevAnchor } from './t16Package.mjs'
+import { installExtension, installedExtensionDir, packageExtensionVsix, packageMainVsix, writeDevAnchor } from './installSupport.mjs'
 import {
   REMOTE_SSH_COMPAT_VERSION,
   T17_SSH_CASE_FILTER,
