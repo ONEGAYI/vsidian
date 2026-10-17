@@ -26,7 +26,7 @@ import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
-import { codexBridgeInstalledCases } from './codexBridgeInstalledCases'
+import { assertCodexMigrationMatrix, codexBridgeInstalledCases, type CodexMigrationState } from './codexBridgeInstalledCases'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
@@ -7483,32 +7483,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const rejected = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.mermaidTheme': 'codex' })) as { ok: boolean; rejected?: string[] }
       assert(rejected.ok === false, '旧 Mermaid 键写入应被设置层拒绝（定义已删除）')
       assert(rejected.rejected?.includes('appearance.mermaidTheme'), '拒绝清单应点名旧键')
-      // 档 1（升级用户主路径）：重置后注入原始 overlay 旧键 codex（模拟升级
-      // 残留——绕过定义校验）→ 重跑迁移 → 双键回落 + 引导一次
-      await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
-      await vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', { theme: null, mermaid: 'codex' })
-      const first = (await vscode.commands.executeCommand('onegayi.vsidian._test.runCodexMigration')) as { action: string; guide: boolean }
-      assert(first.action === 'migrate' && first.guide === true, '旧键 codex 应触发迁移与引导')
-      let state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getCodexMigrationState')) as {
-        marker: string | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
-      assert(state.overlayTheme === 'default' && state.overlayMermaid === 'default', '迁移后原始 overlay 双键应回落 default')
-      assert(state.marker !== null, '一次性标记应与迁移同批写入')
-      assert(state.guideCount === 1, '迁移应请求一次引导')
-      // 重开/重启/多窗口语义：标记在场时重跑（模拟再次激活）→ 无操作不重复引导
-      const second = (await vscode.commands.executeCommand('onegayi.vsidian._test.runCodexMigration')) as { action: string; guide: boolean }
-      assert(second.action === 'none' && second.guide === false, '标记在场时重跑应无操作')
-      state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getCodexMigrationState')) as typeof state
-      assert(state.guideCount === 1, '重跑不得再次请求引导')
-      assert(state.overlayTheme === 'default', '重跑不得改写已迁移的设置')
-      // 档 2（不覆盖已选组件主题）：新键组件身份 + 旧键 codex 残留 → 只清旧键
-      await vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration')
-      await vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', { theme: 'vsidian-test-fixture.addon-theme/aqua', mermaid: 'codex' })
-      const third = (await vscode.commands.executeCommand('onegayi.vsidian._test.runCodexMigration')) as { action: string; guide: boolean }
-      assert(third.action === 'clean-legacy' && third.guide === false, '已选组件主题只清旧键残留、不引导')
-      state = (await vscode.commands.executeCommand('onegayi.vsidian._test.getCodexMigrationState')) as typeof state
-      assert(state.overlayTheme === 'vsidian-test-fixture.addon-theme/aqua', '迁移不得覆盖已选组件主题')
-      assert(state.overlayMermaid === 'default', '旧键残留应清为 default')
-      assert(state.marker === null && state.guideCount === 0, 'clean-legacy 不写标记不引导')
+      // 三档矩阵（共享断言助手，与安装态用例同语义）：重置注入与迁移经
+      // _test 命令通道；档 2 已选主题用 fixture 主题；标记断非空（dev 会话
+      // 无安装产物版本凭证）
+      await assertCodexMigrationMatrix({
+        reset: () => vscode.commands.executeCommand('onegayi.vsidian._test.resetCodexMigration'),
+        injectLegacyOverlay: (patch) => vscode.commands.executeCommand('onegayi.vsidian._test.injectCodexLegacyOverlay', patch),
+        runMigration: () => vscode.commands.executeCommand<{ action: string; guide: boolean }>('onegayi.vsidian._test.runCodexMigration'),
+        readState: () => vscode.commands.executeCommand<CodexMigrationState>('onegayi.vsidian._test.getCodexMigrationState'),
+      }, {
+        componentThemeRef: 'vsidian-test-fixture.addon-theme/aqua',
+        assertMarker: (marker) => assert(marker !== null, '一次性标记应与迁移同批写入'),
+      })
       // 档 2 后恢复 default（正式设置链路——同 runner 重置面语义），再走
       // 面板链路：面板装载拉取应读到 default 快照
       const restored = (await vscode.commands.executeCommand(CMD.setSettings, { 'appearance.theme': 'default' })) as { ok: boolean }

@@ -65,6 +65,59 @@ async function renderersPaint(uri: vscode.Uri): Promise<RenderersPaint | undefin
   return view?.paint?.renderers
 }
 
+/** 迁移状态观测形态（_test.getCodexMigrationState 的回包；三档矩阵共享
+ * 断言的观测对象，dev 用例一并引用） */
+export interface CodexMigrationState { marker: string | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
+
+/** 三档矩阵共享断言的命令通道：dev 用例（cases.ts，_test 命令全名）与
+ * 安装态用例（本文件，PREFIX 拼接）各按自身常量风格注入——两侧通道值
+ * 相同，参数化是为让矩阵语义不依赖任一侧的引用写法 */
+export interface CodexMigrationChannel {
+  reset(): PromiseLike<unknown>
+  injectLegacyOverlay(patch: { theme: string | null; mermaid: string | null }): PromiseLike<unknown>
+  runMigration(): PromiseLike<{ action: string; guide: boolean }>
+  readState(): PromiseLike<CodexMigrationState>
+}
+
+/** Codex 旧设置迁移三档矩阵断言（#535，单一事实源）：档 1 升级残留迁移
+ * 回落 default + 引导恰一次、标记在场重跑无操作、档 2 已选组件主题不被
+ * 覆盖只清旧键。dev 用例（cases.ts）与安装态用例（本文件第 3 条）共用；
+ * 调用方差异经 options 承载：
+ * - componentThemeRef：档 2 注入的已选主题身份（dev 用 fixture 主题，
+ *   安装态用 bridge 组件身份）；
+ * - assertMarker：档 1 迁移后一次性标记的断言（dev 断非空即可，安装态
+ *   断等于安装产物的扩展版本）。 */
+export async function assertCodexMigrationMatrix(
+  channel: CodexMigrationChannel,
+  options: { componentThemeRef: string; assertMarker: (marker: string | null) => void },
+): Promise<void> {
+  // 档 1（升级用户主路径）：注入原始 overlay 旧键 codex（模拟升级残留——
+  // 绕过定义校验）→ 迁移 → 双键回落 + 引导恰一次
+  await channel.reset()
+  await channel.injectLegacyOverlay({ theme: null, mermaid: 'codex' })
+  const first = await channel.runMigration()
+  assert(first.action === 'migrate' && first.guide === true, `旧键 codex 应触发迁移与引导（实际 ${JSON.stringify(first)}）`)
+  let state = await channel.readState()
+  assert(state.overlayTheme === 'default' && state.overlayMermaid === 'default', '迁移后原始 overlay 双键应回落 default')
+  options.assertMarker(state.marker)
+  assert(state.guideCount === 1, '迁移应请求一次引导')
+  // 重开/重启/多窗口语义：标记在场时重跑（模拟再次激活）→ 无操作不重复引导
+  const second = await channel.runMigration()
+  assert(second.action === 'none' && second.guide === false, '标记在场时重跑应无操作')
+  state = await channel.readState()
+  assert(state.guideCount === 1, '重跑不得再次请求引导')
+  assert(state.overlayTheme === 'default', '重跑不得改写已迁移的设置')
+  // 档 2（不覆盖已选组件主题）：新键组件身份 + 旧键 codex 残留 → 只清旧键
+  await channel.reset()
+  await channel.injectLegacyOverlay({ theme: options.componentThemeRef, mermaid: 'codex' })
+  const third = await channel.runMigration()
+  assert(third.action === 'clean-legacy' && third.guide === false, `已选组件主题只清旧键残留、不引导（实际 ${JSON.stringify(third)}）`)
+  state = await channel.readState()
+  assert(state.overlayTheme === options.componentThemeRef, '迁移不得覆盖已选组件主题')
+  assert(state.overlayMermaid === 'default', '旧键残留应清为 default')
+  assert(state.marker === null && state.guideCount === 0, 'clean-legacy 不写标记不引导')
+}
+
 export const codexBridgeInstalledCases: Array<[string, () => Promise<void>]> = [
   // ---- 阶段 legacy：v1.1.0 真实旧物内旧枚举合法（升级前基线） ----
   ['T08 安装态（旧版）：v1.1.0 旧 VSIX 内 codex 枚举合法可保存（#535）', async () => {
@@ -155,43 +208,28 @@ export const codexBridgeInstalledCases: Array<[string, () => Promise<void>]> = [
     }
   }],
 
-  // ---- 阶段 upgraded：升级迁移语义（B2 验收面；与线 1 dev 用例同构，
-  // 跑在安装产物上；存量注入的取舍见文件头注释） ----
+  // ---- 阶段 upgraded：升级迁移语义（B2 验收面；与线 1 dev 用例共用三档
+  // 矩阵共享断言助手，跑在安装产物上；存量注入的取舍见文件头注释） ----
   ['T08 安装态（升级后）：旧键残留迁移 default、引导恰一次且不覆盖组件选择（#535）', async () => {
     if (!phaseMatch('upgraded')) {
       skipNotice('T08 安装态（升级后）：旧键残留迁移 default、引导恰一次且不覆盖组件选择（#535）')
       return
     }
     const previous = await vscode.commands.executeCommand<Record<string, unknown>>(`${PREFIX}getSettings`)
-    interface MigrationState { marker: string | null; guideCount: number; overlayTheme: unknown; overlayMermaid: unknown }
-    const readState = () => vscode.commands.executeCommand<MigrationState>(`${PREFIX}getCodexMigrationState`)
     try {
-      // 档 1（升级用户主路径）：注入原始 overlay 旧键 codex（模拟 v1.1.0
-      // 升级带来的磁盘残留）→ 迁移 → 双键回落 + 引导恰一次
-      await vscode.commands.executeCommand(`${PREFIX}resetCodexMigration`)
-      await vscode.commands.executeCommand(`${PREFIX}injectCodexLegacyOverlay`, { theme: null, mermaid: 'codex' })
-      const first = await vscode.commands.executeCommand<{ action: string; guide: boolean }>(`${PREFIX}runCodexMigration`)
-      assert(first!.action === 'migrate' && first.guide === true, `旧键 codex 应触发迁移与引导（实际 ${JSON.stringify(first)}）`)
-      let state = await readState()
-      assert(state!.overlayTheme === 'default' && state!.overlayMermaid === 'default', '迁移后原始 overlay 双键应回落 default')
-      assert(state!.marker === (vscode.extensions.getExtension('onegayi.vsidian')!.packageJSON as { version: string }).version, '一次性标记应记录安装产物的扩展版本')
-      assert(state!.guideCount === 1, '迁移应请求一次引导')
-      // 重开/重启语义：标记在场时重跑（模拟再次激活）→ 无操作不重复引导
-      const second = await vscode.commands.executeCommand<{ action: string; guide: boolean }>(`${PREFIX}runCodexMigration`)
-      assert(second!.action === 'none' && second!.guide === false, '标记在场时重跑应无操作')
-      state = await readState()
-      assert(state!.guideCount === 1, '重跑不得再次请求引导')
-      assert(state!.overlayTheme === 'default', '重跑不得改写已迁移的设置')
-      // 档 2（不覆盖已选组件主题）：新键 bridge 组件身份 + 旧键 codex 残留
-      // → 只清旧键，不覆盖用户新选
-      await vscode.commands.executeCommand(`${PREFIX}resetCodexMigration`)
-      await vscode.commands.executeCommand(`${PREFIX}injectCodexLegacyOverlay`, { theme: BRIDGE_THEME_REF, mermaid: 'codex' })
-      const third = await vscode.commands.executeCommand<{ action: string; guide: boolean }>(`${PREFIX}runCodexMigration`)
-      assert(third!.action === 'clean-legacy' && third!.guide === false, `已选组件主题只清旧键残留、不引导（实际 ${JSON.stringify(third)}）`)
-      state = await readState()
-      assert(state!.overlayTheme === BRIDGE_THEME_REF, '迁移不得覆盖已选组件主题')
-      assert(state!.overlayMermaid === 'default', '旧键残留应清为 default')
-      assert(state!.marker === null && state!.guideCount === 0, 'clean-legacy 不写标记不引导')
+      // 三档矩阵（共享断言助手）：注入原始 overlay 旧键模拟 v1.1.0 升级带来
+      // 的磁盘残留；档 2 已选主题为 bridge 组件身份，一次性标记断等于安装
+      // 产物的扩展版本（真实安装链的版本凭证）
+      await assertCodexMigrationMatrix({
+        reset: () => vscode.commands.executeCommand(`${PREFIX}resetCodexMigration`),
+        injectLegacyOverlay: (patch) => vscode.commands.executeCommand(`${PREFIX}injectCodexLegacyOverlay`, patch),
+        runMigration: () => vscode.commands.executeCommand<{ action: string; guide: boolean }>(`${PREFIX}runCodexMigration`),
+        readState: () => vscode.commands.executeCommand<CodexMigrationState>(`${PREFIX}getCodexMigrationState`),
+      }, {
+        componentThemeRef: BRIDGE_THEME_REF,
+        assertMarker: (marker) => assert(marker === (vscode.extensions.getExtension('onegayi.vsidian')!.packageJSON as { version: string }).version,
+          '一次性标记应记录安装产物的扩展版本'),
+      })
     } finally {
       await vscode.commands.executeCommand(`${PREFIX}resetCodexMigration`)
       await vscode.commands.executeCommand(`${PREFIX}injectCodexLegacyOverlay`, { theme: null, mermaid: null })
