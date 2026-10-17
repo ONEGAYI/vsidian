@@ -25,6 +25,9 @@ export interface SettingsStorage {
   update(key: string, value: unknown): Thenable<void>
 }
 
+/** 设置 overlay 的 globalState 存储键（#535 起宿主侧多处消费：服务私有层 + T08 迁移直写原始层） */
+export const SETTINGS_STORAGE_KEY = 'vsidian.settings'
+
 /** 变更监听者：保存成功后以新快照调用 */
 export type SettingsListener = (values: SettingsPayload) => void
 
@@ -46,7 +49,7 @@ export class SettingsService {
   constructor(
     private readonly storage: SettingsStorage,
     defs: readonly SettingDefinition[] = [],
-    private readonly storageKey = 'vsidian.settings',
+    private readonly storageKey: string = SETTINGS_STORAGE_KEY,
   ) {
     // 构造期定义直接信任（编译期类型 + 单一调用点）；运行时注册走
     // addDefinitions 的完整校验
