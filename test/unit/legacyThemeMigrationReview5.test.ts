@@ -9,10 +9,13 @@
 // - 正常双窗恰 1（同 profile 双窗首启，广播即时镜像）；
 // - 延迟在等待窗内恰 1（广播延迟 &lt; 锁内身份等待窗 → 败者收敛到胜者
 //   身份，不重复引导）；
-// - 双 profile 各自独立完成迁移与引导（四审反例场景的修复验证）；
-// - 有界边界的有界性（广播丢失 → 败者自生成多引导一次；后续激活从
-//   db 读到已收敛身份，永不重复——**不写**「任意延迟下恰 1」断言，
-//   平台不可满足，见 legacyThemeMigration 文件头声明）。
+// - 双 profile 各自独立完成迁移与引导（四审反例场景的修复验证；六审
+//   R5-1 后全新 profile 首次激活在他 profile 已迁移的磁盘上让位一次，
+//   下次激活恢复生成资格完成迁移——恰一次）；
+// - 广播丢失（六审 R5-1 改判）：超窗不再自生成——让位不引导不写状态，
+//   重开窗从 db 读到已收敛身份与磁盘 done 短路，迁移与引导恰一次
+//   （**不写**「任意延迟下恰 1」断言——跨激活交错的残余边界见
+//   legacyThemeMigration 文件头六审声明）。
 import { afterAll, describe, expect, it } from 'vitest'
 import { promises as fsp } from 'node:fs'
 import * as os from 'node:os'
@@ -182,7 +185,7 @@ function windowPorts(
 const RETIRED_OVERLAY = { [MERMAID_THEME_KEY]: 'retired-preset' }
 
 describe("B'（五审 P2-C）：双 profile 共享 globalStorage 磁盘目录", () => {
-  it('profile A 完成迁移后 profile B 激活 → B 仍须完成自己的迁移与引导（不被 A 的完成状态短路）', async () => {
+  it('profile A 完成迁移后 profile B 激活 → B 首次让位（六审 R5-1），下次激活生成身份完成自己的迁移与引导', async () => {
     const dir = await newDir()
     // 双 profile：各自独立 globalState（PROFILE 域隔离，storage 广播亦不互通）
     const profileA = makeMemento()
@@ -191,21 +194,28 @@ describe("B'（五审 P2-C）：双 profile 共享 globalStorage 磁盘目录", 
       p.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
     }
     const guides = { A: 0, B: 0 }
-    // 无镜像（profile 域隔离）；身份等待窗注入小值让 B 快速自生成（同
-    // profile 广播永不到达——等待窗只收窄同 profile 双窗竞态）
+    // 无镜像（profile 域隔离）；身份等待窗注入小值让让位/生成判定快速到达
     const a = await runLegacyThemeMigration(windowPorts(profileA.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
     expect(a).toEqual({ action: 'migrate', guide: true })
     expect(guides.A).toBe(1)
+    const idA = profileA.store.get(PROFILE_ID_STATE_KEY) as string
 
-    // 四审反例（固定名状态文件让 B 读到 A 的 done）：B' 后按身份分居
-    const b = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
-    expect(b).toEqual({ action: 'migrate', guide: true })
-    expect(guides.B).toBe(1) // B 的迁移引导不得被 A 的完成状态吞掉
+    // B 首次激活：磁盘已有 A 的迁移状态（身份永不到达 B 的 memento——
+    // PROFILE 域隔离）→ 六审 R5-1 让位：不迁移、不引导、不写迁移状态。
+    // 红态（五审实现）：立即自生成并迁移引导（吞不掉迁移但与 R5-1 的同
+    // profile 重复引导同一根因——超窗自生成）
+    const b1 = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b1', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
+    expect(b1).toEqual({ action: 'none', guide: false })
+    expect(guides.B).toBe(0)
+    // B 下次激活：读到自己的让位记号（overlay，同 profile 域可见）→ 恢复
+    // 生成资格，完成自己的迁移与引导（跨 profile 活性不回退——B' 语义保持）
+    const b2 = await runLegacyThemeMigration(windowPorts(profileB.memento, dir, 'token-b2', () => { guides.B += 1 }), { profileIdWaitMs: 10, profileIdPollMs: 2 })
+    expect(b2).toEqual({ action: 'migrate', guide: true })
+    expect(guides.B).toBe(1) // B 的迁移引导不被 A 的完成状态吞掉，恰一次
 
     // 两身份各自落盘（共享目录、按身份分文件）
     const stateFiles = (await fsp.readdir(dir)).filter((n) => n.includes('.state.json'))
     expect(stateFiles.length).toBe(2)
-    const idA = profileA.store.get(PROFILE_ID_STATE_KEY) as string
     const idB = profileB.store.get(PROFILE_ID_STATE_KEY) as string
     expect(idA).not.toBe(idB) // 双 profile 双身份
     expect((await makeDiskMarkerStore(dir).readMarker(idA))?.state).toBe('done')
@@ -252,7 +262,7 @@ describe("B'（五审 P2-C）：同 profile 双窗首启（身份生成竞态）
     expect(idA).toBe(idB) // 延迟到达但仍在窗内 → 同一身份（磁盘状态不分裂）
   })
 
-  it('有界边界（声明的极端形态）：广播丢失 → 败者自生成多引导一次；后续激活从 db 收敛，永不重复', async () => {
+  it('边界形态（六审 R5-1 改判）：广播丢失 → 让位不重复引导；重开窗从 db 收敛短路；迁移恰一次', async () => {
     const dir = await newDir()
     const { A, B } = makeMirroredMementos(Infinity) // 广播丢失（评审方缓存模拟同款）
     A.store.set(SETTINGS_STORAGE_KEY, RETIRED_OVERLAY)
@@ -261,21 +271,30 @@ describe("B'（五审 P2-C）：同 profile 双窗首启（身份生成竞态）
     // 顺序激活（A 完成后 B 首启）——B 的身份等待窗内广播永不到达
     const a = await runLegacyThemeMigration(windowPorts(A.memento, dir, 'token-a', () => { guides.A += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
     expect(a).toEqual({ action: 'migrate', guide: true })
-    const b = await runLegacyThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
-    // 有界边界如实呈现：B 自生成另一身份、多引导一次（总计 2，相对正常
-    // 双窗恰 1 多出一次——平台通道固有缺口，见 legacyThemeMigration 文件头）
-    expect(b).toEqual({ action: 'migrate', guide: true })
-    expect(guides.A + guides.B).toBe(2)
     const idA = A.store.get(PROFILE_ID_STATE_KEY) as string
-    const idB = B.store.get(PROFILE_ID_STATE_KEY) as string
-    expect(idA).not.toBe(idB)
+    const b = await runLegacyThemeMigration(windowPorts(B.memento, dir, 'token-b', () => { guides.B += 1 }), { profileIdWaitMs: 150, profileIdPollMs: 10 })
+    // 六审 R5-1：超窗不再自生成——磁盘已有 A 的迁移状态 → 让位（不迁移、
+    // 不引导、不写迁移状态）。红态（五审实现）：自生成另一身份并引导，
+    // guides=2（R5 复审的重复引导反例同根因）
+    expect(b).toEqual({ action: 'none', guide: false })
+    expect(guides.A + guides.B).toBe(1)
+    const idB = B.store.get(PROFILE_ID_STATE_KEY)
+    expect(idB).toBeUndefined() // 让位者不生成第二身份
+    // 让位者不写迁移状态：磁盘状态文件仍只有 A 的身份一份
+    const stateFiles = (await fsp.readdir(dir)).filter((n) => n.endsWith('.state.json'))
+    expect(stateFiles.length).toBe(1)
 
-    // 「重启」B：新窗口 memento 从 db 初始化（B 的 store 快照）→ 读到已
-    // 收敛身份与磁盘 done → 短路，引导计数不再增长（有界性的收敛面）
+    // 「重开」B：新窗口 memento 从 db 初始化（同 profile 共享 db——A 的
+    // 身份与迁移后 overlay 已持久化，广播丢失不影响重开窗口的 db 读）→
+    // 读到已收敛身份与磁盘 done → 短路，引导计数不再增长（收敛面）
     const restarted = makeMemento()
-    for (const [key, value] of B.store) restarted.store.set(key, value)
+    restarted.store.set(SETTINGS_STORAGE_KEY, {
+      [MERMAID_THEME_KEY]: 'default',
+      [LEGACY_THEME_MIGRATION_PROFILE_ID_OVERLAY_KEY]: idA,
+    })
+    restarted.store.set(PROFILE_ID_STATE_KEY, idA)
     const again = await runLegacyThemeMigration(windowPorts(restarted.memento, dir, 'token-b2', () => { guides.B += 1 }))
     expect(again).toEqual({ action: 'none', guide: false })
-    expect(guides.A + guides.B).toBe(2) // 永不重复
+    expect(guides.A + guides.B).toBe(1) // 迁移与引导恰一次
   })
 })
