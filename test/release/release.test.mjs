@@ -257,9 +257,12 @@ test('VSIX 检查：完整合法集合通过且零警告（#60 后单文件警�
   assert.deepEqual(result.warnings, [])
 })
 
-test('Codex ELK 包体预算：13.80 MiB 零警告，单文件红线仍为 4 MiB', () => {
+test('T08 包体预算：ELK 剥离后实测 12,916 KB 零警告，总量两线 13.5/14.0 MiB、单文件红线 4 MiB（待用户确认后生效口径）', () => {
   const entries = makeEntries()
-  const targetBytes = Math.ceil(13.80 * 1024 * 1024)
+  // T08（#535）实测基线：解压总量 12,916 KB（413 文件）——依据 #535 验收
+  // 口径按实测重估，警告线 13.5 MiB（余量约 0.88）、失败线 14.0 MiB
+  // （余量约 1.38），单文件 3/4 MiB 与图标线不受影响
+  const targetBytes = 12916 * 1024
   let remaining = targetBytes - entries.reduce((total, entry) => total + entry.size, 0)
   for (let i = 0; remaining > 0; i++) {
     const size = Math.min(remaining, 2 * 1024 * 1024)
@@ -269,8 +272,8 @@ test('Codex ELK 包体预算：13.80 MiB 零警告，单文件红线仍为 4 MiB
   const result = inspectVsixEntries(entries)
   assert.equal(result.ok, true)
   assert.deepEqual(result.warnings, [])
-  assert.equal(SIZE_LIMITS.totalWarnBytes, 14.5 * 1024 * 1024)
-  assert.equal(SIZE_LIMITS.totalMaxBytes, 15.0 * 1024 * 1024)
+  assert.equal(SIZE_LIMITS.totalWarnBytes, 13.5 * 1024 * 1024)
+  assert.equal(SIZE_LIMITS.totalMaxBytes, 14.0 * 1024 * 1024)
   assert.equal(SIZE_LIMITS.fileMaxBytes, 4 * 1024 * 1024)
 })
 
