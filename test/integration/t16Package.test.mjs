@@ -2,6 +2,9 @@
 // 副作用层（vsce/CLI 安装/宿主启动）由 runInstalledAddons.mjs 集成承载，
 // 本文件只钉住纯逻辑契约：主/组件 VSIX 条目断言、阶段环境拼装与删除标记。
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 import {
   T16_PHASES,
@@ -9,6 +12,7 @@ import {
   applyPhaseEnv,
   auditAddonVsixEntries,
   auditMainVsixEntries,
+  installedExtensionDir,
   phaseHostEnv,
 } from './t16Package.mjs'
 
@@ -114,4 +118,24 @@ test('阶段环境应用：删除标记把继承 env 里的 VSIDIAN_TEST_HOOKS �
 
 test('阶段矩阵固定为 A-E 五阶段（启动器编排与用例 phaseGuard 共同依赖）', () => {
   assert.deepEqual(T16_PHASES, ['A', 'B', 'C', 'D', 'E'])
+})
+
+test('扩展目录定位：精确 id 不误取同发布者前缀的其他扩展（T08 bridge 同装坑）', () => {
+  const base = mkdtempSync(path.join(tmpdir(), 't16-extdir-'))
+  try {
+    // 同发布者双扩展同装（T08 组件对照安装态的目录形态）：
+    // onegayi.vsidian-1.2.3（主）与 onegayi.vsidian-codex-bridge-0.1.0（bridge）
+    mkdirSync(path.join(base, 'onegayi.vsidian-codex-bridge-0.1.0'))
+    mkdirSync(path.join(base, 'onegayi.vsidian-1.2.3'))
+    const main = installedExtensionDir(base, 'onegayi.vsidian')
+    assert.ok(main, '主扩展必须命中')
+    assert.equal(path.basename(main.dir), 'onegayi.vsidian-1.2.3', `主扩展取精确 id 目录而非字典序取尾（实际 ${main.dir}）`)
+    assert.equal(main.count, 1, '同前缀 bridge 不计入主扩展命中数')
+    const bridge = installedExtensionDir(base, 'onegayi.vsidian-codex-bridge')
+    assert.ok(bridge, 'bridge 按自身精确 id 命中')
+    assert.equal(path.basename(bridge.dir), 'onegayi.vsidian-codex-bridge-0.1.0')
+    assert.equal(installedExtensionDir(base, 'onegayi.missing'), null, '未安装 id 返回 null')
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
 })

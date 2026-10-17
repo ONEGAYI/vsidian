@@ -22,6 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
+import { installedExtensionDir } from './t16Package.mjs'
 import { buildTestHostArgs, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -94,13 +95,13 @@ try {
   // 故把 dev path 指向上一步安装解压出的扩展目录——加载的代码仍是 VSIX
   // 解压产物（受 .vscodeignore 过滤后的真实文件集合），而非仓库源码树；
   // 安装注册链路（清单解析/目录注册）已由第一步 CLI 安装单独验证。
-  const installedDirs = readdirSync(extensionsDir).filter(
-    (d) => d.startsWith('onegayi.'),
-  )
-  if (installedDirs.length === 0) {
-    throw new Error(`安装目录中未找到扩展：${extensionsDir}`)
+  // 精确 id 定位（T08 #535）：同发布者前缀过滤 + 字典序取尾会在与
+  // bridge（onegayi.vsidian-codex-bridge）同装时误取后者。
+  const installed = installedExtensionDir(extensionsDir, 'onegayi.vsidian')
+  if (!installed) {
+    throw new Error(`安装目录中未找到主扩展 onegayi.vsidian：${extensionsDir}`)
   }
-  const installedExt = path.join(extensionsDir, installedDirs[installedDirs.length - 1])
+  const installedExt = installed.dir
   // 以单 folder 的 .code-workspace 启动（multi-root 形态起步）：1.86.2 上目录
   // （single-folder）启动时 updateWorkspaceFolders 增根触发 window reload
   // （ext host 退出、suite 中断，#198 用例确定性复现；1.82.3 下界矩阵沿用
