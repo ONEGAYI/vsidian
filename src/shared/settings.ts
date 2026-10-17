@@ -358,6 +358,18 @@ export const HOVER_LIVE_DIRECT_KEY = 'hover.liveDirect'
 export const HOVER_LIVE_DIRECT_DEFAULT = false
 
 /**
+ * #577「大纲面板 Ctrl 悬停预览」开关：大纲条目上按住 Ctrl/Cmd 悬停弹出
+ * 该标题的引用浮窗（当前文档全文渲染 + 锚点初始定位，与正文 `[[#标题]]`
+ * 悬停同款语义）。**默认开启**；关闭后大纲 Ctrl 悬停不再弹浮窗（不按
+ * Ctrl 的悬停恒不弹——无提示浮标语义）。受 `hover.enabled` 总开关管辖
+ * （dependsOn 灰化联动；总开关关闭时全域悬停入口已被前置拦截）。键与
+ * 消费方（syncController 的 outlineHoverPreviewEnabled 投影）成对导出。
+ */
+export const HOVER_OUTLINE_PREVIEW_KEY = 'hover.outlinePreview'
+/** 默认 true：升级后大纲 Ctrl 悬停直接可用（#577 升级零迁移） */
+export const HOVER_OUTLINE_PREVIEW_DEFAULT = true
+
+/**
  * #299「悬停显示跳转目标」开关：悬停在引用上且本次悬停不会打开引用
  * 视图浮层时，稳定悬停后显示目标位置小浮标（统一自绘悬停提示体系承载，
  * 内容为目标相对其所属根的完整路径 + 源码形态锚点）。**独立于
@@ -693,6 +705,18 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     // #332 灰化联动补漏：本项只在总开关开启时生效（描述既有口径），登记
     // 依赖后设置页随总开关灰化/解灰（值不清除）。targetTip 明确独立不登记
     // （#299：总开关关闭时提示反而是悬停的唯一反馈）
+    dependsOn: HOVER_ENABLED_KEY,
+  },
+  {
+    // #577 大纲面板 Ctrl 悬停预览（hover.* 域 → 「引用视图」组：直接悬停
+    // 显示之后、跳转目标提示之前——同为触发方式调节项）：按住 Ctrl/Cmd
+    // 悬停大纲条目弹出该标题的引用浮窗；受总开关管辖（dependsOn 灰化联动
+    // 对齐 liveDirect 先例）
+    key: HOVER_OUTLINE_PREVIEW_KEY,
+    type: 'boolean',
+    default: HOVER_OUTLINE_PREVIEW_DEFAULT,
+    titleKey: 'setting.hoverOutlinePreview.title',
+    descriptionKey: 'setting.hoverOutlinePreview.description',
     dependsOn: HOVER_ENABLED_KEY,
   },
   {

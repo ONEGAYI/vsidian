@@ -32,6 +32,7 @@ import * as nodeHttps from 'node:https'
 import * as nodePath from 'node:path'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import type { HoverPreviewPdfProbe, ReadingEmbedPdfProbe } from '../../../src/shared/protocol'
+import { ADDON_API_VERSION } from '../../../src/shared/addonIdentity'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
 import { CHROME_CONTRACT_PROBES } from '../../../src/shared/chromeContract'
@@ -794,6 +795,9 @@ interface ViewState {
     caretColor: string | null
     /** 本地轻提示绘制观测（#305；#379 T04 重名风险提示断言用） */
     toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
+    /** T05（#544）悬停引用浮窗绘制观测（无浮窗时缺省）：elementFromPoint
+     *  命中 + computed 背景/边框——#577 大纲悬停的绘制层断言面 */
+    hoverPopup?: { hit: boolean; background: string | null; borderWidth: string | null; errorState: boolean }
     /** #237 绘制光标 .cm-cursor 的 borderLeftColor（多光标开时在场；不在场为 null） */
     drawnCursorColor?: string | null
     readingFindSource?: { visible: boolean; text: string; current: string; background: string | null }
@@ -14018,6 +14022,166 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[验收反馈] 先悬停再按 Ctrl 补触发链路通过')
   }],
 
+  // #577 大纲条目 Ctrl 悬停：面板容器委托（hover.test.pointer 的 outline
+  // 档经与用户悬停同一 mouseover 处理器）→ directTarget（fsPath=当前文档、
+  // anchor=条目标题字面文本——与 copyLink 拼锚点同源口径）→ 宿主直读 →
+  // 全文渲染 + 锚点初始定位（P2-03 全文可达：块数恒为全文 10 块）。
+  // 标题条「打开」按钮执行大纲现有跳转（openAction 闭包；Live 落光标高亮
+  // / Reading 滚动定位双模式各验一条）；绘制层断言落在 view.state.paint.
+  // hoverPopup（elementFromPoint 命中 + computed 背景——视觉层断言约定）
+  ['悬停大纲：Ctrl 悬停条目弹出标题引用浮窗（全文+锚点+打开跳转+绘制层）（#577）', async () => {
+    await openWithEditor('悬停 大纲.md')
+    await waitSessionReady('悬停 大纲.md')
+    const uri = wsUri('悬停 大纲.md').toString()
+    // 确保侧栏与大纲面板可见（两开关独立 toggle——ensure 而非盲点）；
+    // 新面板侧栏默认收起、大纲面板默认 active（#54 状态机）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    const ready = await waitViewState('悬停 大纲.md', (v) =>
+      v.outline?.active === true && v.outline?.panelPainted === true && (v.outline?.items.length ?? 0) >= 5)
+    assert(ready.outline!.items[2]!.text === '甲子节', '条目 2 应为「甲子节」')
+    // 加粗标题条目原文含行内标记（锚点字面口径与 copyLink 同源）
+    assert(ready.outline!.items[4]!.text === '**加粗**乙二',
+      `条目 4 应为含行内标记的标题原文（实际 ${ready.outline!.items[4]!.text}）`)
+
+    // Ctrl 悬停条目 2（### 甲子节）：锚点命中 → scope=heading + 全文 10 块
+    //（锚点只作初始定位，不裁剪内容——与正文 [[#标题]] 悬停同款语义）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 2, link: 'outline', ctrlKey: true })
+    const shown = await waitViewState('悬停 大纲.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    assert(shown.hoverPreview?.note === '悬停 大纲.md',
+      `目标标识应为当前文档根内相对路径（实际 ${shown.hoverPreview?.note}）`)
+    assert(shown.hoverPreview?.blocks === 10,
+      `标题锚点悬停应渲染全文 10 块（实际 ${shown.hoverPreview?.blocks}）`)
+
+    // 绘制层断言（视觉层断言约定）：elementFromPoint 命中浮窗容器 +
+    // computed 背景在场——样式注入失效时任一失守
+    await waitViewState('悬停 大纲.md', (v) => v.paint?.hoverPopup?.hit === true)
+    const painted = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+    const hoverPaint = painted.paint?.hoverPopup
+    assert(hoverPaint?.background !== null && hoverPaint?.background !== '',
+      `浮窗 computed 背景应在场（CSS 绘制证据，实际 ${hoverPaint?.background}）`)
+
+    // 标题条「打开」= 大纲现有跳转（Live：落光标 + located 高亮落位；浮窗关）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'hover.test.live', action: 'open' })
+    const jumped = await waitViewState('悬停 大纲.md',
+      (v) => v.hoverPreview?.open === false && v.outline?.locatedItemIndex === 2)
+    assert(jumped.outline!.locatedItemIndex === 2, 'openAction 应执行大纲跳转（located 落到条目 2）')
+
+    // 复位：离开条目
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 2, link: 'outline' })
+    await waitViewState('悬停 大纲.md', (v) => v.hoverPreview?.open === false)
+
+    // Reading 模式同链路（面板不随正文模式改变触发规则）：悬停条目 3 →
+    // 浮窗 → 打开 → located 落位（阅读视图滚动定位）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停 大纲.md', (v) => v.viewMode === 'reading')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 3, link: 'outline', ctrlKey: true })
+    await waitViewState('悬停 大纲.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'hover.test.live', action: 'open' })
+    const jumpedReading = await waitViewState('悬停 大纲.md',
+      (v) => v.hoverPreview?.open === false && v.outline?.locatedItemIndex === 3)
+    assert(jumpedReading.outline!.locatedItemIndex === 3,
+      `阅读模式 openAction 同样执行大纲跳转（实际 located=${jumpedReading.outline?.locatedItemIndex}）`)
+
+    // 复位：离开 + 切回 live（后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 3, link: 'outline' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停 大纲.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
+    console.log('[#577] 大纲 Ctrl 悬停浮窗：锚点定位 + 全文 10 块 + 绘制层 + 双模式打开跳转通过')
+  }],
+
+  // #577 大纲悬停第二组：无修饰位不弹（零请求）、先悬停后按 Ctrl 补触发
+  //（modkey 真实 keydown 链路）、设置生命周期（outlinePreview 开关 + 总
+  // 开关；waitSettings 读回防护对冲 globalState 迟到回翻）与编辑触发条目
+  // 重建的浮窗释放（replaceChildren 不派发 mouseout，靠域释放兜底）
+  ['悬停大纲：补触发、设置开关生命周期与条目重建释放（#577）', async () => {
+    await openWithEditor('悬停 大纲.md')
+    await waitSessionReady('悬停 大纲.md')
+    const uri = wsUri('悬停 大纲.md').toString()
+    // 面板 ensure（前序用例可能已开侧栏/面板——两开关独立 toggle，盲点
+    // 会把已开状态关掉；大纲悬停需要面板可见）
+    const probe = await waitViewState('悬停 大纲.md', (v) => v.outline !== undefined)
+    if (probe.sidebar?.open !== true) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    }
+    if (probe.outline?.active !== true) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outline.test.click' })
+    }
+    await waitViewState('悬停 大纲.md', (v) =>
+      v.outline?.active === true && (v.outline?.items.length ?? 0) >= 5)
+
+    // 无修饰位悬停：不弹（Ctrl 语义必须）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'outline' })
+    await new Promise((r) => setTimeout(r, 600))
+    const idle = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(idle?.hoverPreview?.open !== true,
+      `无修饰位悬停大纲条目不应弹浮窗（实际 ${JSON.stringify(idle?.hoverPreview)}）`)
+
+    // 先悬停后按 Ctrl：modkey 真实 keydown → 补触发打开
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'modkey', index: 1 })
+    await waitViewState('悬停 大纲.md', (v) => v.hoverPreview?.open === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1, link: 'outline' })
+    await waitViewState('悬停 大纲.md', (v) => v.hoverPreview?.open === false)
+
+    // hover.outlinePreview 关闭：Ctrl 悬停不弹；重开恢复（waitSettings 读回
+    // 防护——保存广播与 globalState 迟到回翻的已知竞态）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.outlinePreview': false })
+    await waitSettings({ 'hover.outlinePreview': false })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'outline', ctrlKey: true })
+    await new Promise((r) => setTimeout(r, 600))
+    const off = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(off?.hoverPreview?.open !== true, 'outlinePreview 关闭后 Ctrl 悬停不应弹浮窗')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1, link: 'outline' })
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.outlinePreview': true })
+    await waitSettings({ 'hover.outlinePreview': true })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'outline', ctrlKey: true })
+    await waitViewState('悬停 大纲.md', (v) => v.hoverPreview?.open === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1, link: 'outline' })
+    await waitViewState('悬停 大纲.md', (v) => v.hoverPreview?.open === false)
+
+    // hover.enabled 总开关关闭：大纲入口被前置拦截；恢复后回归
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.enabled': false })
+    await waitSettings({ 'hover.enabled': false })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'outline', ctrlKey: true })
+    await new Promise((r) => setTimeout(r, 600))
+    const gated = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(gated?.hoverPreview?.open !== true, '总开关关闭后大纲 Ctrl 悬停不应弹浮窗')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1, link: 'outline' })
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.enabled': true })
+    await waitSettings({ 'hover.enabled': true })
+
+    // 编辑触发条目重建：在场浮窗经域释放（sync.test.edit 真实输入事务 →
+    // 大纲序列变化 → renderOutlineItems 全量重建，不派发 mouseout）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'outline', ctrlKey: true })
+    await waitViewState('悬停 大纲.md', (v) => v.hoverPreview?.open === true)
+    const editedDoc = await vscode.workspace.openTextDocument(wsUri('悬停 大纲.md'))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.edit',
+      offset: editedDoc.getText().length,
+      text: '\n## 重建后新标题\n',
+    })
+    const rebuilt = await waitViewState('悬停 大纲.md', (v) =>
+      v.hoverPreview?.open === false && (v.outline?.items.some((i) => i.text === '重建后新标题') ?? false))
+    assert(rebuilt.outline!.items.some((i) => i.text === '重建后新标题'),
+      '条目重建确实发生（新标题在场）——浮窗随之释放（无悬挂）')
+    console.log('[#577] 大纲悬停：无修饰不弹 + 补触发 + 设置生命周期 + 重建释放通过')
+  }],
+
   // ---- #224 引用视图同步 ----
 
   // 未保存修改推送（applyEdit 不保存——TextDocument.version 推进即推送，
@@ -18686,8 +18850,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const exports = (await host.activate()) as
       | { apiVersion: string; registerAddon: (owner: unknown, definition?: unknown) => unknown }
       | undefined
-    assert(exports && exports.apiVersion === '1.0.0',
-      `导出 API 应含 apiVersion 1.0.0，实际 ${JSON.stringify(exports && exports.apiVersion)}`)
+    assert(exports && exports.apiVersion === ADDON_API_VERSION,
+      `导出 API 应含 apiVersion ${ADDON_API_VERSION}（宿主稳定 API 版本常量），实际 ${JSON.stringify(exports && exports.apiVersion)}`)
     assert(typeof exports!.registerAddon === 'function', '导出 API 应含 registerAddon 函数')
 
     // 路径一（VSCode 原生激活）：contributes.commands 自动派生激活事件，
@@ -18701,7 +18865,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(stats.registerCount === 1, `夹具应恰注册一次（两路径共用幂等 activate），实际 ${stats.registerCount}`)
     assert(stats.setupCount === 1, `setup 应恰执行一次，实际 ${stats.setupCount}`)
     assert(stats.lastRegisterResult?.ok === true, `首次注册应成功，实际 ${JSON.stringify(stats.lastRegisterResult)}`)
-    assert(stats.apiVersionAtRegister === '1.0.0', `注册时 API 应可访问（版本随行），实际 ${String(stats.apiVersionAtRegister)}`)
+    assert(stats.apiVersionAtRegister === ADDON_API_VERSION,
+      `注册时 API 应可访问（版本随行），实际 ${String(stats.apiVersionAtRegister)}`)
 
     // 路径二（Vsidian 主动唤醒）与状态判定：轮询协调器状态收敛
     const state = async () =>
@@ -18725,8 +18890,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(ok?.status === 'registered', `兼容夹具应为 registered，实际 ${JSON.stringify(ok)}`)
     const incompatible = settled.addons.find((entry) => entry.id === 'vsidian-test-fixture.addon-incompatible')
     assert(incompatible?.apiRange === '^2.0.0', `不兼容状态应携带声明范围，实际 ${JSON.stringify(incompatible)}`)
-    assert(settled.apiVersion === '1.0.0' && settled.draft === true,
-      `载荷应含候选版本与草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
+    assert(settled.apiVersion === ADDON_API_VERSION && settled.draft === false,
+      `载荷应含宿主稳定 API 版本与非草案标记，实际 ${JSON.stringify({ apiVersion: settled.apiVersion, draft: settled.draft })}`)
 
     // 普通扩展不入列表：内置扩展（vscode.* / ms-*）无身份声明，一律不在场
     for (const entry of settled.addons) {

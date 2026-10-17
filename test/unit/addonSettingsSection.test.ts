@@ -79,7 +79,7 @@ function addonsState(
   const message = {
     kind: 'addons.state',
     apiVersion: '1.0.0',
-    draft: true,
+    draft: false,
     addons,
     ...(openAddonSettingsPage !== undefined ? { openAddonSettingsPage } : {}),
   }
@@ -188,13 +188,14 @@ describe('附加组件分页呈现（用户可见文本）', () => {
     expect(visibleText(harness.parent)).toContain('未发现 Vsidian 附加组件')
   })
 
-  it('API 版本行带草案标注（不冒充已发布稳定 API）', () => {
+  it('API 版本行按已发行口径标注（1.1.0 起随版本发行，不再声称草案）', () => {
     const harness = makeView()
     openAddonsPage(harness)
     harness.dispatch(addonsState([]))
     const text = visibleText(harness.parent)
     expect(text).toContain('附加组件 API 版本 1.0.0')
-    expect(text).toContain('草案')
+    expect(text).not.toContain('草案')
+    expect(text).not.toContain('draft')
   })
 })
 
@@ -270,7 +271,7 @@ describe('附加组件分页：通道堵死与设置入口导航（#465）', () 
     const message = {
       kind: 'addons.settingsState',
       apiVersion: '1.0.0',
-      draft: true,
+      draft: false,
       open,
       hasWorkspace: false,
       addon: open === null ? null : {

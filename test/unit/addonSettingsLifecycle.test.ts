@@ -214,7 +214,7 @@ function panelHarness(ids: string[], options: { definitions?: Record<string, Add
     const message = {
       kind: 'addons.settingsState',
       apiVersion: ADDON_API_VERSION,
-      draft: true,
+      draft: false,
       open,
       hasWorkspace: true,
       addon: open === null ? null : {
@@ -235,7 +235,7 @@ function panelHarness(ids: string[], options: { definitions?: Record<string, Add
     const message = {
       kind: 'addons.state',
       apiVersion: ADDON_API_VERSION,
-      draft: true,
+      draft: false,
       addons: ids.map((id) => {
         const status = runtime.runtimeStatus(id)
         return {
@@ -366,7 +366,7 @@ function panelHarness(ids: string[], options: { definitions?: Record<string, Add
 async function openPanel(h: PanelHarness): Promise<void> {
   h.area.handleHostMessage((() => {
     const message = {
-      kind: 'addons.state', apiVersion: ADDON_API_VERSION, draft: true,
+      kind: 'addons.state', apiVersion: ADDON_API_VERSION, draft: false,
       addons: [], openAddonSettingsPage: null, openAddonSettings: null,
     }
     if (!isHostToWebview(message)) throw new Error('初始 addons.state 未通过守卫')

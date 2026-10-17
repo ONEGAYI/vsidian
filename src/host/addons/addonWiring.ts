@@ -118,7 +118,7 @@ export interface AddonEditorBridge {
 /** 设置页面板接线（settingsPage 消费） */
 export interface AddonPageWiring {
   /** addons.state 消息载荷（宿主权威状态现算；合并运行生命周期状态） */
-  getState(): { kind: 'addons.state' } & { apiVersion: string; draft: true; addons: readonly AddonStatusEntry[]; openAddonSettingsPage: string | null; openAddonSettings: string | null }
+  getState(): { kind: 'addons.state' } & { apiVersion: string; draft: false; addons: readonly AddonStatusEntry[]; openAddonSettingsPage: string | null; openAddonSettings: string | null }
   /** #353 T04 addons.settingsState 消息载荷（基础设置区权威状态现算） */
   getSettingsState(): { kind: 'addons.settingsState' } & AddonSettingsStatePayload
   /** T08（#357）addons.behaviors 消息载荷（行为冲突管理权威状态现算：
@@ -135,7 +135,7 @@ export interface AddonPageWiring {
   /** #546 T07 addons.themesState 消息载荷（主题目录 + 唯一首选与可用性；
    *  设置页拉取应答与变化推送共用） */
   getThemesState(): { kind: 'addons.themesState' } & AddonThemesStatePayload
-  /** 市场搜索（关键词仅搜索辅助：vsidian-addon） */
+  /** 市场搜索（@tag 查询 vsidian-addon——keywords 上架 Marketplace 后被索引为 tag） */
   openSearch(): void
   /** VSCode 扩展管理视图 */
   openExtensionsView(): void
@@ -503,7 +503,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
   const getState = () => ({
     kind: 'addons.state' as const,
     apiVersion: ADDON_API_VERSION,
-    draft: true as const,
+    draft: false as const,
     addons: [...coordinator.stateEntries()].map(mergeRuntimeStatus),
     // #351 T02 当前打开的组件设置页（权威在 runtime；设置页分页挂载区依据）
     openAddonSettingsPage: runtime.openSettingsAddonId() ?? null,
@@ -561,7 +561,7 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     return {
       kind: 'addons.settingsState',
       apiVersion: ADDON_API_VERSION,
-      draft: true,
+      draft: false,
       open,
       hasWorkspace: hostHasWorkspace(),
       addon: open === null ? null : buildSettingsArea(open),
@@ -1320,8 +1320,10 @@ export function createAddonWiring(context: vscode.ExtensionContext, hostSettings
     // #546 T07 主题目录状态现算（目录 + 首选 + 可用性）
     getThemesState: () => buildThemesState(),
     openSearch: () => {
-      // 关键词仅帮助市场寻找（vsidian-addon）；不代表接入协议或官方身份
-      void vscode.commands.executeCommand('workbench.extensions.search', '@keyword:"vsidian-addon"')
+      // @tag 修饰符：package.json keywords 上架 Marketplace 后被索引为 tag
+      //（@keyword 非法语法，整串按字面搜索恒为空，#579）；仅搜索辅助，
+      // 不代表接入协议或官方身份
+      void vscode.commands.executeCommand('workbench.extensions.search', '@tag:"vsidian-addon"')
     },
     openExtensionsView: () => {
       void vscode.commands.executeCommand('workbench.view.extensions')

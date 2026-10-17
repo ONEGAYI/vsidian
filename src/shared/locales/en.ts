@@ -221,6 +221,8 @@ export const en = {
   'setting.hoverExternalShapePage': 'Live page (rendered in the popup)',
   'setting.hoverLiveDirect.title': 'Show previews directly on hover in the live view',
   'setting.hoverLiveDirect.description': 'Point at a link in the live preview to open the reference popup directly, without a modifier key. When off, hold Ctrl (Cmd on macOS) while hovering, or press Ctrl mid-hover. Has no effect while "Preview references on hover" is off.',
+  'setting.hoverOutlinePreview.title': 'Preview headings on hover in the outline panel',
+  'setting.hoverOutlinePreview.description': 'Hold Ctrl (Cmd on macOS) while hovering an entry in the outline panel to open a reference popup of that heading: the current document fully rendered, initially scrolled to the heading, with an open button that jumps like clicking the entry. Pressing Ctrl mid-hover also works. When off, hovering outline entries never opens the popup. Has no effect while "Preview references on hover" is off.',
   'setting.codeblockCard.title': 'Code block card',
   'setting.codeblockCard.description': 'Collapse a fenced code block into a card when the cursor leaves it: hide the fence markers and show a language header bar. Turn off to restore the plain source fence look.',
   'setting.codeblockLineNumbers.title': 'Line numbers inside cards',
@@ -1066,7 +1068,7 @@ export const en = {
   /** #350 T01 附加组件：设置页「附加组件」分页（状态列表与 VSCode 管理入口）。
    *  #465 IA 分页起本页收敛为组件级管理，行为管理独立成页 */
   'settings.addonsSection': 'Add-ons',
-  'settings.addonsSectionDescription': 'Vsidian add-ons are separate VSCode extensions. Install, uninstall and disable them in VSCode; their capabilities register through the add-on API. The add-on API is still a draft.',
+  'settings.addonsSectionDescription': 'Vsidian add-ons are separate VSCode extensions. Install, uninstall and disable them in VSCode; their capabilities register through the add-on API. The add-on API ships with Vsidian releases.',
   /** #465/#466 输入行为管理独立分页（原「Behavior conflicts」更名迁出） */
   'settings.addonsBehaviorsSection': 'Input behaviors',
   'settings.addonsBehaviorsSectionDescription': 'Manage input behaviors registered by add-ons: applicable behaviors trigger in order by default; reorder them or turn off individual ones. Turning off one item does not disable the whole add-on.',
@@ -1083,7 +1085,7 @@ export const en = {
   'addons.statusActivationFailed': 'Activation failed: {detail}',
   'addons.statusHostUnavailable': 'Not visible in the current extension host — check its installation or running location via VSCode extension management',
   'addons.statusInvalidDeclaration': 'Invalid identity declaration: {detail}',
-  'addons.apiVersionLabel': 'Add-on API version {version} (draft — not a published stable API)',
+  'addons.apiVersionLabel': 'Add-on API version {version}',
   'addons.searchMarketplace': 'Search Marketplace for add-ons',
   'addons.openExtensionsView': 'Manage extensions in VSCode',
   'addons.openDetail': 'Extension details',

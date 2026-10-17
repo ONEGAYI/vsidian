@@ -229,6 +229,25 @@ describe('ready 握手与 init', () => {
     expect(out[0]).toMatchObject({ kind: 'init', docUri: 'file:///b.md' })
   })
 
+  it('#577 注入 docFsPath 时 init 携带宿主权威 fsPath；缺省不下发（旧形态不变）', async () => {
+    const withFs = new DocumentSession(new FakeDoc('x'), {
+      docUri: 'file:///d%3A/notes/a.md', docFsPath: 'd:\\notes\\a.md',
+    })
+    const outA: HostToWebview[] = []
+    const idA = withFs.attachPanel({ send: (m) => outA.push(m) })
+    await withFs.handleWebviewMessage({ kind: 'ready' }, idA)
+    expect(outA[0]).toMatchObject({ kind: 'init', fsPath: 'd:\\notes\\a.md' })
+
+    const withoutFs = new DocumentSession(new FakeDoc('x'), { docUri: 'file:///d%3A/notes/b.md' })
+    const outB: HostToWebview[] = []
+    const idB = withoutFs.attachPanel({ send: (m) => outB.push(m) })
+    await withoutFs.handleWebviewMessage({ kind: 'ready' }, idB)
+    expect(outB[0]).toMatchObject({ kind: 'init' })
+    if (outB[0].kind === 'init') {
+      expect('fsPath' in outB[0]).toBe(false)
+    }
+  })
+
   it('ready 重复到达（webview 重载）时重发最新 init', async () => {
     const s = setup()
     const id = s.attach()

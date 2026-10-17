@@ -86,7 +86,7 @@ try {
     window.__reply = (kind, notice) => {
       if (kind === 'addons-state') {
         return {
-          kind: 'addons.state', apiVersion: '1.0.0', draft: true,
+          kind: 'addons.state', apiVersion: '1.0.0', draft: false,
           openAddonSettingsPage: null, openAddonSettings: null,
           addons: [
             { id: 'fixture.demo', label: '组件甲', official: false, status: 'registered', enabled: true },

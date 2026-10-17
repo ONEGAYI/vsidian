@@ -122,7 +122,7 @@ try {
     window.__hostState = state
     window.__defs = defs
     window.__addonsState = () => ({
-      kind: 'addons.state', apiVersion: '1.0.0', draft: true, openAddonSettingsPage: null, openAddonSettings: window.__hostState.open,
+      kind: 'addons.state', apiVersion: '1.0.0', draft: false, openAddonSettingsPage: null, openAddonSettings: window.__hostState.open,
       addons: [{ id: 'fixture.demo', label: 'Demo', official: false, status: 'registered', enabled: window.__hostState.enabled.effective, hasSettingsPage: false, hasSettingsDefinitions: true,
         // #472 搜索摘要随 addons.state 既有链路（mock 与生产 wiring 同形）
         settingsSearchIndex: {
@@ -137,7 +137,7 @@ try {
         values[def.key] = { effective: fallback, source: 'default', ...(window.__hostState.values[def.key] ?? {}) }
       }
       return {
-        kind: 'addons.settingsState', apiVersion: '1.0.0', draft: true,
+        kind: 'addons.settingsState', apiVersion: '1.0.0', draft: false,
         open: window.__hostState.open, hasWorkspace: window.__hostState.hasWorkspace,
         addon: window.__hostState.open === null ? null : {
           addonId: 'fixture.demo', label: 'Demo', faulted: false, hasCustomPage: false,

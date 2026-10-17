@@ -31,11 +31,12 @@ export const ADDON_MANIFEST_FIELD = 'vsidianAddon'
 export const ADDON_IDENTITY_MANIFEST_VERSION = 1
 
 /**
- * 首个候选稳定 API 版本（`^1.0.0` 语义的基准）。当前不存在已发布的公开
- * API——附加组件声明的 api 范围须包含该版本才判兼容；API 版本独立于
- * Vsidian 本体版本号。
+ * 宿主当前稳定 API 版本（`^1.0.0` 语义的基准）。1.1.0（2026-10-16）起随
+ * Vsidian 本体发行并产生兼容承诺——附加组件声明的 api 范围须包含该版本
+ * 才判兼容；API 版本独立于 Vsidian 本体版本号，随携带 API 变更的本体
+ * 发布同笔升版。
  */
-export const ADDON_API_VERSION = '1.0.0'
+export const ADDON_API_VERSION = '1.1.0'
 
 /** 官方归属判定（唯一入口，来源限于官方登记表；registry 参数仅供测试
  *  注入登记表形态——生产调用缺省用真实清单） */

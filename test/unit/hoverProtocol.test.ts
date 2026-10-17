@@ -457,6 +457,34 @@ describe('#221 全入口悬停：directTarget 与 hover.test.pointer 扩展校�
     // 非法枚举拒绝
     expect(isHostToWebview({ ...base, link: 'unknown' })).toBe(false)
   })
+
+  it('hover.test.pointer：#577 扩 outline 档（大纲面板条目 + ctrlKey 修饰位透传）', () => {
+    const base = { kind: 'hover.test.pointer', action: 'enter' as const, index: 0 }
+    expect(isHostToWebview({ ...base, link: 'outline' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'outline', ctrlKey: true })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'outline', ctrlKey: false })).toBe(true)
+    // 大纲档 leave 同样合法（移出关闭时序）
+    expect(isHostToWebview({ ...base, link: 'outline', action: 'leave' as const })).toBe(true)
+  })
+
+  it('hover.test.live：#577 扩 open 动作（浮窗标题条打开按钮）', () => {
+    const base = { kind: 'hover.test.live' as const, action: 'open' as const }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, action: 'close' as const, intent: 'escape' })).toBe(true)
+    expect(isHostToWebview({ ...base, action: 'unknown' as unknown as 'open' })).toBe(false)
+  })
+
+  it('init：#577 可选 fsPath 字段（宿主权威的当前文档身份——webview 不自行转换）；缺省向后兼容、非字符串拒绝', () => {
+    const base = {
+      kind: 'init', sessionId: 's1', docUri: 'file:///d%3A/notes/a.md', version: 1, text: 'x',
+    } as Record<string, unknown>
+    // 旧形态（无 fsPath）向后兼容
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, fsPath: 'd:\\notes\\a.md' })).toBe(true)
+    // 空串容忍（webview 侧降级不弹）
+    expect(isHostToWebview({ ...base, fsPath: '' })).toBe(true)
+    expect(isHostToWebview({ ...base, fsPath: 3 })).toBe(false)
+  })
 })
 
 // #224 引用视图同步：订阅（webview → 宿主）与失效推送（宿主 → webview）

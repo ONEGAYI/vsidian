@@ -63,12 +63,12 @@ try {
       post(window.__settingsState())
     }
     window.__addonsState = () => ({
-      kind: 'addons.state', apiVersion: '1.0.0', draft: true,
+      kind: 'addons.state', apiVersion: '1.0.0', draft: false,
       openAddonSettingsPage: null, openAddonSettings: window.__hostState.open,
       addons: window.__hostState.addons,
     })
     window.__settingsState = () => ({
-      kind: 'addons.settingsState', apiVersion: '1.0.0', draft: true,
+      kind: 'addons.settingsState', apiVersion: '1.0.0', draft: false,
       open: window.__hostState.open, hasWorkspace: false,
       addon: window.__hostState.open === null ? null : {
         addonId: window.__hostState.open,

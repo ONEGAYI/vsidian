@@ -256,11 +256,11 @@ try {
     assert.notEqual(groupPaint.bg, groupPaint.bodyBg, '容器与正文应有可辨色差')
     assert.equal(groupPaint.radius, '10px')
     assert.equal(groupPaint.borderWidth, '1px')
-    // #332 设置重组：引用视图组迁至「文件与链接」分页——组内五行用户可见
-    // 文案与顺序不变（总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入层级 →
-    // 嵌入高度），总开关与跳转目标提示各自走真实保存链路；两枚组标题生图
-    // 资产（pointerLink/dbLink）在真实组标题上做主题与绘制核验
-    //（typewriter/wordSegment 同款口径）
+    // #332 设置重组：引用视图组迁至「文件与链接」分页——组内用户可见
+    // 文案与顺序（总开关 → 直接悬停显示 → 大纲悬停（#577）→ 跳转目标
+    // 提示 → 外链两件 → 嵌入层级 → 嵌入高度），总开关与跳转目标提示各自
+    // 走真实保存链路；两枚组标题生图资产（pointerLink/dbLink）在真实组
+    // 标题上做主题与绘制核验（typewriter/wordSegment 同款口径）
     await page.getByRole('button', { name: zhCn['settings.filesLinksSection'], exact: true }).click()
     const refviewGroup = page.locator('.vsidian-settings-group').filter({
       has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['settings.groupRefview'] }) })
@@ -269,13 +269,15 @@ try {
     assert.deepEqual(refviewTitles.map((t) => t.trim()), [
       zhCn['setting.hoverEnabled.title'],
       zhCn['setting.hoverLiveDirect.title'],
+      // #577 大纲面板 Ctrl 悬停预览（触发方式调节项与 liveDirect 相邻）
+      zhCn['setting.hoverOutlinePreview.title'],
       zhCn['setting.hoverTargetTip.title'],
       // #342（P3-10）外链预览两件：跳转目标提示之后、嵌入两项之前
       zhCn['setting.hoverExternalEnabled.title'],
       zhCn['setting.hoverExternalShape.title'],
       zhCn['setting.embedMaxDepth.title'],
       zhCn['setting.embedMaxHeight.title'],
-    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 外链开关与形态 → 嵌入展开层级 → 嵌入最大高度')
+    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 大纲悬停 → 跳转目标提示 → 外链开关与形态 → 嵌入展开层级 → 嵌入最大高度')
     assert.equal(await refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverLiveDirect.title'], exact: true })
       .isVisible(), true, '改名后的「实时预览中直接悬停显示」条目在组内呈现')
     const hoverEnabledBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverEnabled.title'], exact: true })

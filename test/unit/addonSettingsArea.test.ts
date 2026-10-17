@@ -79,7 +79,7 @@ function addonsState(entries: Array<Record<string, unknown>>, openAddonSettingsP
   const message = {
     kind: 'addons.state',
     apiVersion: '1.0.0',
-    draft: true,
+    draft: false,
     addons: entries,
     openAddonSettingsPage: null,
     ...(openAddonSettingsPage !== undefined ? { openAddonSettingsPage } : {}),
@@ -148,7 +148,7 @@ function settingsState(options: {
   const message = {
     kind: 'addons.settingsState',
     apiVersion: '1.0.0',
-    draft: true,
+    draft: false,
     open: options.open ?? options.addonId ?? ADDON_ID,
     hasWorkspace: options.hasWorkspace ?? true,
     addon: options.open === null ? null : {

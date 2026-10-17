@@ -46,7 +46,8 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | --- | --- |
 | Wikilinks & anchors | Five `[[wikilink]]` forms; `#heading` and `#^block-id` jumps land on the target, with a highlight flash on arrival |
 | Line-number links | Clicking `[jump](note.md:103)` lands on line 103 in the Vsidian panel for Markdown targets, or reveals that line in the native editor for code/config files (`file.ts:103` works the same). Out-of-range line numbers open the target and report honestly instead of silently clamping; mixing a line number with an anchor (`note.md:20#heading`) is reported as an invalid location |
-| Wikilink completion | Typing `[[]]` pops up file candidates (every common file type — images, PDFs, and more); `#` / `^` then list the target's headings and blocks; works in table cells and embedded editors too |
+| Short-name & absolute-path wikilinks | When a short name misses in the same folder, it resolves to the only same-name note in the source's workspace root (ambiguity stays unresolved with a hint); explicit absolute-path wikilinks (Windows drive or server paths) cross workspace roots and reach targets outside the workspace — jumps, hover, embeds, backlinks, and rename updates all covered |
+| Wikilink completion | Typing `[[]]` pops up file candidates (every common file type — images, PDFs, and more); `#` / `^` then list the target's headings and blocks; the inserted path picks shortest / relative (default) / absolute per the "Internal link type" setting; works in table cells and embedded editors too |
 | Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
 | Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable |
 | Image wikilink embeds | `![[image.png]]` embeds images that behave identically to plain Markdown image links — loading, failure hints, auto refresh, and the popup viewer are the same; hovering a wikilink that points to an image shows the image itself in the popup |
@@ -64,7 +65,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Document embeds | `![[note]]` mounts a card where the target note can be edited and saved in place, leaving the parent untouched; `![[file.ts]]` and `![[file.pdf]]` embed text and PDF read-only, with `#line=N` / `#range=B-E` anchors; the cursor reveals the reference source for editing; inline, list, quote, and table-cell positions all render, with recursive expansion (three levels by default) |
 | Backlink panel | The sidebar shows which documents reference the current note: context cards grouped by source with the matched link highlighted, sortable and searchable, click to jump to the reference |
 | Outgoing links panel | The sidebar lists every link in the current note (wikilinks, links, images, reference definitions); click lands on the link's actual anchor, broken links dim |
-| Reference updates on rename | Renaming or moving files and folders inside VS Code rewrites wikilinks, links, and image references to the new locations; one undo reverts the whole rewrite |
+| Reference updates on rename | Renaming or moving files and folders inside VS Code rewrites wikilinks, links, and image references to the new locations (a short name is kept when it still resolves uniquely; a target leaving its workspace root keeps its identity via an explicit absolute path); one undo reverts the whole rewrite |
 
 ### Code blocks & diagrams
 
@@ -94,10 +95,10 @@ See the [fenced-language list](docs/specs/code-block-card.md#语法高亮) for s
 
 | Feature | Description |
 | --- | --- |
-| Add-on system | VS Code extensions that declare an add-on identity are discovered and registered by Vsidian automatically; they can contribute settings pages, input behaviors, code-block renderers, commands and keybindings, context-menu items, toolbar buttons, and panels |
+| Add-on system | VS Code extensions that declare an add-on identity are discovered and registered by Vsidian automatically; they can contribute settings pages, input behaviors, code-block renderers, paste-conversion rules, read-only reference views (popups and embed mounts), themes, commands and keybindings, context-menu items, toolbar buttons, and panels |
 | Management & diagnostics | Vsidian settings offer per-add-on toggles, settings editing, input-behavior ordering and per-item disabling, failure reasons, and manual retry; a failing add-on has its contributions withdrawn without affecting others or built-in features |
 | Code-block renderer takeover | Add-ons may replace the rendering of languages they declare (Mermaid included); users can switch per language or back to built-in, and disabling or failure falls back to built-in rendering |
-| Developer API | The API reference, semantic catalog, and developer guide live in `docs/addons/` in the repository; the API is at a 1.0.0 candidate stage and not yet released |
+| Developer API | The API reference, semantic catalog, and developer guide live in `docs/addons/` in the repository, with changes tracked in `CHANGELOG-API.md`; the stable API ships as of 1.1.0 with compatibility commitments |
 
 The complete behavior, boundaries, and settings of each feature are documented in [docs/features.md](https://github.com/ONEGAYI/vsidian/blob/main/docs/features.md) (in Chinese).
 

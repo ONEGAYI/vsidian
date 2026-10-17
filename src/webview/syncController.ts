@@ -117,6 +117,7 @@ import {
   HOVER_ENABLED_KEY,
   HOVER_TARGET_TIP_KEY,
   HOVER_LIVE_DIRECT_KEY,
+  HOVER_OUTLINE_PREVIEW_KEY,
   HOVER_EXTERNAL_ENABLED_KEY,
   READING_BREAKS_DEFAULT,
   READING_BREAKS_KEY,
@@ -223,6 +224,7 @@ import {
   zoomHoverPdf,
   resetHoverPdfZoom,
   hoverPopupLiveTestAction,
+  hoverPopupTestOpenAction,
   notifyHoverTokens,
   notifyHoverWatchRejected,
   notifyAppearanceChanged,
@@ -568,6 +570,8 @@ export class WebviewSyncController {
   private driveAddonBehaviors: import('./liveInstance').LiveEditorInstanceDeps['driveAddonBehaviors']
   private sessionId = ''
   private docUri = ''
+  /** #577 当前文档宿主权威 fsPath（init.fsPath；空串 = 未知——大纲悬停降级） */
+  private docFsPath = ''
   /** 实例存在前的持久化初值兜底（persistState 在 mount 前被调用时使用） */
   private readonly initialSeq: number
   private readonly initialConflictRevision: number
@@ -1486,6 +1490,9 @@ export class WebviewSyncController {
         this.updateLinkModState(e)
         if (!e.repeat) {
           this.onLiveHoverModifierDown()
+          // #577 大纲条目上的「先悬停、后按 Ctrl」补触发（面板现场与 Live
+          // 独立记录，互不串扰）
+          this.onOutlineHoverModifierDown()
         }
       }
       if (e.key === 'Escape' && this.quickHeadingMenu && !this.quickHeadingMenu.hidden) {
@@ -1564,6 +1571,9 @@ export class WebviewSyncController {
     this.docKeyup = (e: KeyboardEvent) => {
       if (e.key === 'Control' || e.key === 'Meta') {
         this.updateLinkModState(e)
+        // #577 大纲浮窗按「松开」时序关闭（票面决策；Live 正文浮窗松开
+        // 不关的既有语义不受影响）
+        this.onOutlineHoverModifierUp()
       }
     }
     document.addEventListener('keyup', this.docKeyup, true)
@@ -2402,6 +2412,9 @@ export class WebviewSyncController {
       case 'init':
         this.sessionId = message.sessionId
         this.docUri = message.docUri
+        // #577 当前文档宿主权威 fsPath（可选字段）：大纲条目 directTarget
+        //（悬停预览直接目标）的身份取材；缺省（旧宿主）安全降级不弹
+        this.docFsPath = message.fsPath ?? ''
         // 目标会话身份同步注入实例（出站消息的实例目标戳记；根 chrome
         // 的会话消费面继续读根持有的同值字段）
         this.live?.setSession(message.sessionId, message.docUri)
@@ -2851,6 +2864,12 @@ export class WebviewSyncController {
       case 'hover.test.live': {
         // P2-06（#283）测试钩子：浮窗根内部 Live 操作族（与头部按钮/编辑器
         // 事务管线同一处理器链路——宿主测试无法派发真实点击/键入）
+        if (message.action === 'open') {
+          // #577 浮窗标题条「打开」按钮（真实 click 同一监听；面板形态经
+          // openAction 闭包分派，纯 Reading 浮窗无内部 Live 同样可用）
+          hoverPopupTestOpenAction()
+          break
+        }
         hoverPopupLiveTestAction(message.action, {
           ...(message.intent !== undefined ? { intent: message.intent } : {}),
           ...(message.pos !== undefined ? { pos: message.pos } : {}),
@@ -2921,6 +2940,17 @@ export class WebviewSyncController {
             break
           }
           dispatchHoverEvent(item, message.action === 'enter')
+          break
+        }
+        if (message.link === 'outline') {
+          // #577 大纲面板第 index 个条目（Ctrl+悬停语义——ctrlKey 修饰位
+          // 透传，缺省不带 = 无修饰位不触发）
+          const item = this.outlinePanelEl
+            ?.querySelectorAll<HTMLElement>(`.${OUTLINE_CLASS_NAMES.item}`)[message.index]
+          if (!item) {
+            break
+          }
+          dispatchHoverEvent(item, message.action === 'enter', message.ctrlKey === true)
           break
         }
         const container = this.readingContainer
@@ -5625,6 +5655,12 @@ export class WebviewSyncController {
         this.outlineJumpToItem(index)
       }
     })
+    // #577 大纲条目 Ctrl 悬停：容器 mouseover/mouseout 委托（与
+    // click/contextmenu 同模式——renderOutlineItems 重建条目 DOM 不丢
+    // 监听）。修饰位与开关判定在 handleOutlineHover（面板不随正文模式
+    // 改变触发规则；无 targetTip 路由）
+    panel.addEventListener('mouseover', (event) => this.handleOutlineHover(event, 'enter'))
+    panel.addEventListener('mouseout', (event) => this.handleOutlineHover(event, 'leave'))
     // #69 右键菜单：面板容器 contextmenu 委托（与 click 委托同模式——条目
     // DOM 重建不丢监听）。preventDefault 阻断浏览器原生菜单；目标取最近
     // 条目（箭头/文字/标记 span 上右键都算该条目）
@@ -6138,6 +6174,13 @@ export class WebviewSyncController {
     return this.settings?.[HOVER_LIVE_DIRECT_KEY] === true
   }
 
+  /** #577 大纲面板 Ctrl 悬停预览开关（hover.outlinePreview；缺省/快照未达
+   *  = true 开）：关闭后大纲条目 Ctrl 悬停不再弹浮窗。总开关（hover.
+   * enabled）由 hoverPreviewAnchorEnter 入口统一前置拦截，此处不重复 */
+  private outlineHoverPreviewEnabled(): boolean {
+    return this.settings?.[HOVER_OUTLINE_PREVIEW_KEY] !== false
+  }
+
   /** #298 悬停总开关（hover.enabled；缺省/快照未达 = true 开）：关闭时
    *  所有悬停路径不开浮层——经 hoverPreview 上下文投影，门控统一收敛在
    *  hoverPopup 的 hoverPreviewAnchorEnter 入口（阅读/面板/Live 两路/
@@ -6395,6 +6438,117 @@ export class WebviewSyncController {
     // 由宿主轻量解析回失败，不出提示——与浮层的 not-found 分态分工不同；
     // spec 已就地构造，thunk 统一形态）
     this.enterHoverOrTip(item, () => spec)
+  }
+
+  // ---- #577 大纲条目 Ctrl 悬停（面板不随正文模式改变触发规则） ----
+  // 与反链/出链的容器委托同模式（条目 DOM 全量重建不丢监听）；差异：大纲
+  // 是 Ctrl/Cmd 修饰触发（票面决策 4——不走 enterHoverOrTip 双路由，修饰
+  // 位不足直接 return，不出 targetTip：跳转目标提示语义归正文引用，大纲
+  // 条目本身就是导航目标）；目标 = 当前文档全文 + 标题锚点（directTarget，
+  // anchor 取条目原文——与大纲菜单 copyLink 拼锚点、宿主 heading 匹配
+  // 口径同源，零新语义）。
+
+  /** 指针当前悬停的大纲条目：mouseover 总在记录（修饰位不足也记——「先
+   * 悬停、后按 Ctrl」补触发的现场），mouseout/重建脱树时清空 */
+  private lastOutlineHover: { anchor: HTMLElement } | null = null
+
+  /** 大纲悬停目标规格：directTarget 形态——fsPath = 当前面板文档（init
+   * 携带的宿主权威身份）、anchor = 条目标题字面文本（OutlineItem.text，
+   * 含行内标记——与 copyLink 同源口径）；openAction = 大纲现有跳转闭包
+   * （浮窗标题条「打开」与条目点击同一落位） */
+  private outlineHoverSpecOf(index: number): HoverPopupTargetSpec | null {
+    const item = this.outlineItems[index]
+    if (!item || this.docFsPath === '') {
+      return null // 条目数据不在场或文档身份未知（旧宿主 init 无 fsPath）：安全降级
+    }
+    return {
+      target: item.text,
+      sourceStart: 0, // 面板形态中性值（条目非当前文档内引用区间）
+      sourceEnd: 0,
+      directFsPath: this.docFsPath,
+      directAnchor: item.text,
+      openAction: () => this.outlineJumpToItem(index),
+    }
+  }
+
+  /** #577 大纲面板悬停：容器 mouseover/mouseout 委托（enter/leave 两相）。
+   * enter 修饰位足（Ctrl/Cmd）且开关开 → 直接走浮层入口（无 targetTip
+   * 路由）；leave 按 relatedTarget 联合域过滤（条目内部移动不视为离开） */
+  private handleOutlineHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+    const panel = this.outlinePanelEl
+    const item = (event.target as HTMLElement | null)?.closest?.(`.${OUTLINE_CLASS_NAMES.item}`)
+    if (!(item instanceof HTMLElement) || !panel?.contains(item)) {
+      return
+    }
+    if (phase === 'leave') {
+      const related = event.relatedTarget
+      if (related instanceof Node && item.contains(related)) {
+        return
+      }
+      if (this.lastOutlineHover?.anchor === item) {
+        this.lastOutlineHover = null
+      }
+      hoverPreviewAnchorLeave(item)
+      return
+    }
+    // 现场先记（补触发依赖），再按修饰位与开关决定本次是否开浮层
+    this.lastOutlineHover = { anchor: item }
+    const withMod = event.ctrlKey || event.metaKey
+    if (!withMod || !this.outlineHoverPreviewEnabled()) {
+      return
+    }
+    this.tryOpenOutlineHover(item)
+  }
+
+  /** 条目 DOM → 数据索引（DOM 与 outlineItems 同序渲染；与 click/右键/
+   * 拖拽委托同一口径） */
+  private outlineIndexOfItem(item: HTMLElement): number | null {
+    const panel = this.outlinePanelEl
+    if (!panel?.contains(item)) {
+      return null
+    }
+    const index = Array.from(
+      panel.querySelectorAll<HTMLElement>(`.${OUTLINE_CLASS_NAMES.item}`),
+    ).indexOf(item)
+    return index >= 0 ? index : null
+  }
+
+  /** #577 开浮层公共序列（handleOutlineHover 与 onOutlineHoverModifierDown
+   *  共用）：条目 → 数据索引 → 目标规格 → 浮层入口（spec 缺席安全静默；
+   *  hover 总开关由 hoverPreviewAnchorEnter 入口统一拦截） */
+  private tryOpenOutlineHover(anchor: HTMLElement): void {
+    const index = this.outlineIndexOfItem(anchor)
+    const spec = index === null ? null : this.outlineHoverSpecOf(index)
+    if (spec) {
+      hoverPreviewAnchorEnter(anchor, spec)
+    }
+  }
+
+  /** #577 Ctrl/Cmd 按下补触发（仿 onLiveHoverModifierDown，大纲自挂——
+   * Live 版 viewMode 判定直接 return 不复用）：指针已在大纲条目上再按
+   * 修饰键同样开浮层；总开关（hover.enabled）经 hoverPreviewAnchorEnter
+   * 入口统一拦截 */
+  private onOutlineHoverModifierDown(): void {
+    const pending = this.lastOutlineHover
+    if (!pending || !pending.anchor.isConnected) {
+      this.lastOutlineHover = null
+      return
+    }
+    if (!this.outlineHoverPreviewEnabled()) {
+      return
+    }
+    this.tryOpenOutlineHover(pending.anchor)
+  }
+
+  /** #577 Ctrl/Cmd 松开：大纲浮窗按既有 350ms 关延迟时序关闭（票面「移
+   * 出/松开」语义——再按下由 enter 幂等取消待关）。仅作用于大纲悬停现场，
+   * 不影响正文 Live 浮窗（其松开语义既有为不关，保持不变） */
+  private onOutlineHoverModifierUp(): void {
+    const pending = this.lastOutlineHover
+    if (!pending) {
+      return
+    }
+    hoverPreviewAnchorLeave(pending.anchor)
   }
 
   /** #221 键盘命令「预览当前链接」：手动打开浮层且焦点进入（无目标静默
@@ -6899,6 +7053,13 @@ export class WebviewSyncController {
       }
     }
     if (changed && this.outlinePanelEl) {
+      // #577 在场悬停浮层的锚点随旧条目 DOM 脱树（replaceChildren 不派发
+      // mouseout）：先释放再重建（反链面板 rerenderBacklinks 同先例）；域内
+      // 待开计时一并取消（去抖重建可早于 300ms 待开——防孤儿请求与泄漏
+      // 监听，hoverPopup 域释放语义）；补触发现场一并清空（新 DOM 是新
+      // 元素，旧现场不可复用）
+      closeHoverPopupIfAnchorWithin(this.outlinePanelEl)
+      this.lastOutlineHover = null
       // #69：条目 DOM 重建使菜单锚点与重命名编辑态过期——先关闭再重建
       // （重命名提交路径已在 finishOutlineRename 先清状态，此处无重入）
       this.closeOutlineMenu()
@@ -7310,6 +7471,10 @@ export class WebviewSyncController {
     if (!panel) {
       return
     }
+    // #577 重建前释放域内悬停浮层（锚点脱树防悬挂；与 outlineEnsureFresh
+    // 重建分支同款；域内待开计时一并取消——域释放语义）并清补触发现场
+    closeHoverPopupIfAnchorWithin(panel)
+    this.lastOutlineHover = null
     this.cancelOutlineDrag()
     renderOutlineItems(panel, this.outlineItems, this.outlineFacts.hasChildren,
       this.outlineSearchState?.ranges)
