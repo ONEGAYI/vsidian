@@ -87,6 +87,7 @@ function makeMemLock(): LegacyThemeMigrationLockHandle {
       state.held = false
     },
     ageMs: async () => (state.held ? 0 : null),
+    isCurrentGeneration: async () => state.held,
     forceCleanup: async () => {
       state.held = false
     },

@@ -1,54 +1,74 @@
-// #535 T08 旧主题迁移锁——代次锁（fencing）协议（PR #581 四审 P2-D 修
-// 复；不依赖 vscode/DOM，fs 原语经端口注入——宿主接线用 node fs，单测
-// 注入真实 fs 或受控门控复现评审方调度）。
+// #535 T08 旧主题迁移锁——代次锁（fencing）协议（PR #581 四审 P2-D 建立，
+// 六审 P2-E 修订提交点语义；不依赖 vscode/DOM，fs 原语经端口注入——宿主
+// 接线用 node fs，单测注入真实 fs 或受控门控复现评审方调度）。
 //
 // 文件族（都在 globalStorage 扩展私有目录，lockPath 为基名）：
-//   <lockPath>.gen      当前代次指针：内容为十进制代次数字，tmp+rename
-//                        原子替换；首次认领时创建，此后只被原子前进、
-//                        永不删除或夺走——公开锁路径（指针）任意时刻存
-//                        在，不存在「检查/接管/释放期间锁路径暂时消失」
-//                        的窗口，第三窗口无法趁虚获锁。
 //   <lockPath>.<n>      第 n 代锁文件：JSON { token, pid, createdAt, gen }
-//                        ——O_EXCL 创建，同名互斥；文件名即代次身份。
+//                        ——O_EXCL 创建，同名互斥；文件名即代次身份；释放
+//                        与前代清理按名删除（U3/U4）。
+//   <lockPath>.g<n>     第 n 代的提交标记（六审）：O_EXCL 创建、内容为十
+//                        进制代次数字，生产路径永不删除。**有效代次指针 =
+//                        标记族的 max**——标记只增不减，任何滞后方的任何
+//                        写都无法让有效指针回退（旧单文件指针的 rename
+//                        覆盖回退路径在协议中不再存在）。
+//   <lockPath>.gen      指针兼容视图（六审降级为诊断面）：内容为最后一次
+//                        提交的代次数字，tmp+rename 尽力更新；其值恒 ≤ 标
+//                        记族 max（每次写都发生在自己标记提交之后），不参
+//                        与仲裁。保留原因：诊断习惯与四/五审测试播种形态。
 //
-// 不变量（协议核心，评审方四审两项调度反例的闭合面）：
+// 为什么提交点是「真正的原子仲裁」（六审 P2-E 核心论证）：单机文件系统
+// 没有通用 compare-and-swap——评审方已论证「多读一次指针 + rename 原子
+// 替换」不构成 CAS（读与写之间的窗口让滞后读数写出回退指针，R4 实测
+// 2→1、双 owner、guides=['B','A']）。文件系统保证原子性的创建语义只有
+// **O_EXCL**：名字由创建方选定，同名恰有一个赢家、败者得 EEXIST。因此
+// 把「指针推进」从「可覆盖 rename 的单文件」改为 **O_EXCL 单调标记族**：
+// - 第 n 代的提交 = 创建 g<n>。同名并发/重复提交只有一个赢家；EEXIST
+//   即仲裁败诉——该代次已被历史认领者提交（自己的指针读数过时，典型形
+//   态：接管者已提交并释放、名字看似空闲），删自己的候选文件撤退；
+// - 滞后者「把指针写回旧值」变形为「创建一个更低的标记」——max 不受影
+//   响，回退在结构上不存在；滞后者在提交后核验（重读 max）发现自己落
+//   后时删自己的代次文件退场（标记保留：该代次确实被提交过，是历史的
+//   一部分，删除既无必要又有竞态代价）。
 //
-// U1 指针在场：认领提交只经 tmp+rename 原子替换；任何路径都不把指针或
-//    当前代次文件「先移走再核验」——评审方实测的「接管先 rename 候选
-//    （可能是 A 重建的新鲜活锁）→ 公开路径暂时空缺 → 第三窗口
-//    open('wx') 成功 → link 因 EEXIST 放弃恢复 → rm 清掉 A 的隔离副本
-//    → 双 owner」与「释放先 rename 后核验 token 的同型空隙」两类根因
-//    （活锁路径暂时消失 + 按过期观察删继任锁）在此结构上不存在。
-// U2 至多一个 owner：每代文件只有一个 O_EXCL 创建者；指针只被「自己
-//    候选代次文件已创建、且重读指针仍低于候选」的一方推进（提交点）。
-//    创建后的指针单调性校验让持滞后指针读数的迟到者删自己的文件退场
-//    ——陈旧读数永远写不出回退指针，也就不会与真实 owner 并存。
+// 不变量（协议核心；U1-U4 四审建立，六审保持不回退）：
+//
+// U1 指针在场：首次提交后标记族（与兼容视图）在生产路径永不消失——不
+//    存在「检查/接管/释放期间锁路径暂时空缺」的窗口，第三窗口无法趁虚
+//    获锁。六审加强：标记族永不删除，指针语义上永久单调。
+// U2 至多一个 owner：每代文件只有一个 O_EXCL 创建者；代次提交与所有权
+//    成立是同一原子动作（创建 g<n> 成功），提交后不存在「用先前读数改
+//    写指针」的步骤；已提交却被更高代次超越的滞后者由提交后核验拦截撤
+//    退，进入 owner 序列后由调用方的 fencing（legacyThemeMigration 六审
+//    方向 B：每个关键副作用前 isCurrentGeneration 复核）继续拦截。
 // U3 删除对象永远是自己代次的确切文件名：释放 = 单条 rm 自己的
-//    <lockPath>.<ownGen>（文件名即身份，无观察/校验窗口）；旧 owner
-//    永远够不到继任者（继任者代次严格更高）。
-// U4 前代残留清理只删代次数字严格小于自己代次的 <lockPath>.<n>：自己
-//    能走到更高代次，意味着所有更低代次已被声明陈旧（超阈值）、孤儿
-//    （提交窗崩溃）或放弃（单调性校验撤退）——新 owner 按文件名携带的
-//    代次核对后清理，绝不删当前或更高代次的锁（不存在「按过期观察删
-//    新锁」）。
+//    <lockPath>.<ownGen>（标记不删；曾被接管时文件已被清理，rm 为无害
+//    no-op）；旧 owner 永远够不到继任者（继任者代次严格更高）。
+// U4 前代残留清理只删代次数字严格小于自己代次的 <lockPath>.<n>：标记
+//    g<n> 的后缀不是纯数字，天然不在清理面；新 owner 按文件名携带的代
+//    次核对后清理，绝不删当前或更高代次的锁。
 //
 // 认领（tryAcquire / takeoverIfStale 共用核心）：
-//   读指针 p → 入口检查当前代次（tryAcquire 要求在位即败——无论新鲜
-//   陈旧；接管只对 mtime 陈旧的当前代次放行）→ 步进候选 = p+1：跳过
-//   「存在且已陈旧」的候选代次（提交窗崩溃的孤儿），遇新鲜候选即整体
-//   失败（那是正在提交的并行认领者——fail-closed）→ O_EXCL 创建
-//   lock.<候选>（并发同代认领只有一个赢家）→ 重读指针做单调性校验
-//   （≥ 候选则删自己的文件、按败者退场）→ tmp+rename 把指针原子推到
-//   候选（提交点，所有权成立）→ 尽力清理更低代次残留。
+//   读指针 p（标记族 max 与兼容视图取大）→ 入口检查当前代次（tryAcquire
+//   要求在位即败——无论新鲜陈旧；接管只对 mtime 陈旧的当前代次放行）→
+//   步进候选 = p+1：跳过「存在且已陈旧」的候选（提交窗崩溃的孤儿），遇
+//   新鲜候选即整体失败（fail-closed）。**六审：普通认领的候选新鲜度阈值
+//   为 Infinity——任何存在的候选文件（无论年龄）都按在途/残留让位，永
+//   不以时间判定越过；时间语义（陈旧阈值）只属于接管路径**，两条路径的
+//   过期语义不混用。普通认领被孤儿挡住不锁死：调用方等待环经
+//   takeoverIfStale 的阈值兜底（生产 runLegacyThemeMigration 已有衔接）→
+//   O_EXCL 创建 lock.<候选>（并发同代认领只有一个赢家）→ **提交点：
+//   O_EXCL 创建 g<候选>（EEXIST = 名字已被历史提交 → 撤退）** → 提交后
+//   核验：重读 max，> 候选 → 已被更高代次超越 → 删自己的代次文件撤退 →
+//   兼容视图尽力更新 → 清理更低代次残留。
 //
-// 陈旧接管：当前代次 mtime 超阈值即以同一核心按更高代次抢占；指针只在
-// 提交点前进、从不回退。崩溃在「创建后、提交前」的孤儿代次文件由下一
-// 个认领者按陈旧步进越过、由新 owner 清理（U4），不会永久锁死。
+// 陈旧接管：当前代次 mtime 超阈值即以同一核心按更高代次抢占；有效指针
+// 只在提交点前进、从不回退。崩溃在「创建后、提交前」的孤儿代次文件由
+// 接管路径按陈旧步进越过、由新 owner 清理（U4），不会永久锁死。
 //
-// 指针读取失败语义：指针缺失 = 从未认领（按代次 0 引导，首个认领者顺
-// 带创建指针）；指针内容损坏（非纯十进制数字）= 存储层异常，fail-closed
-// 抛错（本次激活放弃迁移，下次激活重试）——绝不按 0 重写，那会在真实
-// owner 在场时造成指针回退与双 owner。
+// 指针读取失败语义：兼容视图缺失 = 从未提交（按代次 0 引导）；内容损坏
+// （非纯十进制数字）= 存储层异常，fail-closed 抛错（本次激活放弃迁移，
+// 下次激活重试）——绝不按 0 重写。标记扫描对目录缺失（首次提交前父目录
+// 尚未建立）按空族处理。
 
 /** errno 形态错误（code 判定用；不引 node 类型保持 webview 边界纯净） */
 export interface LegacyLockFsError {
@@ -59,15 +79,15 @@ export interface LegacyLockFsError {
 export interface LegacyLockFilesystem {
   /** O_EXCL 创建并整体写入（目标已存在抛 code=EEXIST） */
   writeFileExclusive(path: string, data: string): Promise<void>
-  /** 原子改名替换（指针推进：tmp → 指针；同卷 rename 原子替换） */
+  /** 原子改名替换（指针兼容视图：tmp → 视图；同卷 rename 原子替换） */
   rename(from: string, to: string): Promise<void>
   /** 删除文件（不存在视为成功——语义等价 rm -f） */
   rm(path: string): Promise<void>
   /** 目标 mtime（ms；不存在 = null） */
   statMtimeMs(path: string): Promise<number | null>
-  /** 读文本内容（指针读取；不存在/不可读抛错） */
+  /** 读文本内容（指针视图读取；不存在/不可读抛错） */
   readFile(path: string): Promise<string>
-  /** 列目录条目名（前代残留清理与 _test 隔离；不存在抛错） */
+  /** 列目录条目名（标记族扫描、前代残留清理与 _test 隔离；不存在抛错） */
   listDirFiles(dir: string): Promise<string[]>
 }
 
@@ -88,9 +108,17 @@ export interface LegacyThemeMigrationLockHandle {
   /** 当前代次锁年龄（ms；指针代次文件不存在 = null） */
   ageMs(): Promise<number | null>
   /**
-   * 全族清理（_test 隔离钩子专用）：删除指针与所有 <lockPath> 家族
-   * 文件（含旧协议形态残留）；生产路径不调用（生产释放走 release 的
-   * 按名删除协议）。
+   * fencing 判据（六审方向 B）：自己是否仍持有最高已提交代次（标记族
+   * max === ownGen）。未认领或已被更高代次接管（自身滞缓/崩溃被陈旧接
+   * 管）→ false——owner 序列在关键副作用前复核，滞后 owner 静默撤退。
+   * 判据依赖「有效指针不可回退」（标记族），不存在「指针被拉回自己代
+   * 次后误判有效」的形态。
+   */
+  isCurrentGeneration(): Promise<boolean>
+  /**
+   * 全族清理（_test 隔离钩子专用）：删除指针视图与所有 <lockPath> 家族
+   * 文件（含提交标记与旧协议形态残留）；生产路径不调用（生产释放走
+   * release 的按名删除协议）。
    */
   forceCleanup(): Promise<void>
 }
@@ -149,13 +177,14 @@ export function createLegacyThemeMigrationLock(
   now: () => number = Date.now,
 ): LegacyThemeMigrationLockHandle {
   const pointerPath = `${lockPath}.gen`
+  const markerPath = (gen: number) => `${lockPath}.g${gen}`
   const genPath = (gen: number) => `${lockPath}.${gen}`
   const lockDir = dirOfFile(lockPath)
   const lockBase = baseOfFile(lockPath)
   let ownGen: number | null = null
 
-  /** 读当前代次指针：缺失 = 0（引导态）；损坏 = 抛错（fail-closed，见文件头） */
-  const readPointer = async (): Promise<number> => {
+  /** 兼容视图读取（缺失 = 0；损坏抛错 fail-closed，见文件头） */
+  const readPointerHint = async (): Promise<number> => {
     let content: string
     try {
       content = await fs.readFile(pointerPath)
@@ -170,8 +199,32 @@ export function createLegacyThemeMigrationLock(
     return Number.parseInt(text, 10)
   }
 
-  /** 指针原子推进（提交点）：token 唯一的 tmp 写入 + rename 原子替换 */
-  const pushPointer = async (gen: number): Promise<void> => {
+  /** 提交标记族扫描取 max（目录缺失 = 空族——首次提交前父目录尚不存在） */
+  const scanMarkerMax = async (): Promise<number> => {
+    let names: string[]
+    try {
+      names = await fs.listDirFiles(lockDir)
+    } catch (error) {
+      if (isErrnoLike(error, 'ENOENT')) return 0
+      throw error
+    }
+    const prefix = `${lockBase}.g`
+    let max = 0
+    for (const name of names) {
+      if (!name.startsWith(prefix)) continue
+      const suffix = name.slice(prefix.length)
+      if (!/^\d+$/.test(suffix)) continue
+      max = Math.max(max, Number.parseInt(suffix, 10))
+    }
+    return max
+  }
+
+  /** 有效代次指针：max(兼容视图, 提交标记族)——标记族单调，整体不回退 */
+  const readPointer = async (): Promise<number> =>
+    Math.max(await readPointerHint(), await scanMarkerMax())
+
+  /** 兼容视图尽力更新（tmp+rename；失败不回滚所有权——标记才是权威） */
+  const pushPointerHint = async (gen: number): Promise<void> => {
     const tmp = `${pointerPath}.${identity.token}.tmp`
     await fs.writeFileExclusive(tmp, String(gen))
     try {
@@ -182,7 +235,7 @@ export function createLegacyThemeMigrationLock(
     }
   }
 
-  /** U4：清理严格更低代次的残留锁文件（尽力而为，失败不传播） */
+  /** U4：清理严格更低代次的残留锁文件（尽力而为，失败不传播；标记不在清理面） */
   const cleanupOlderGens = async (own: number): Promise<void> => {
     let names: string[]
     try {
@@ -193,7 +246,7 @@ export function createLegacyThemeMigrationLock(
     for (const name of names) {
       if (!name.startsWith(`${lockBase}.`)) continue
       const suffix = name.slice(lockBase.length + 1)
-      if (!/^\d+$/.test(suffix)) continue // 指针（.gen）/指针 tmp/旧协议残留——不动
+      if (!/^\d+$/.test(suffix)) continue // 标记（g<n>）/指针视图/旧协议残留——不动
       if (Number.parseInt(suffix, 10) < own) {
         await fs.rm(`${lockPath}.${suffix}`).catch(() => undefined)
       }
@@ -204,7 +257,8 @@ export function createLegacyThemeMigrationLock(
    * 认领核心（tryAcquire / takeoverIfStale 共用）：
    * requireCurrentAbsent = true：当前代次在位即败（「无锁才认领」的严格
    * 形态，陈旧交给 takeoverIfStale 处理）；false：当前代次缺失或陈旧均
-   * 可继续（接管形态）。
+   * 可继续（接管形态）。staleMs 只作用于「接管形态的当前代次新鲜度」与
+   * 「孤儿候选步进的陈旧阈值」；普通认领传 Infinity——候选存在即让位。
    */
   const acquireCore = async (options: {
     requireCurrentAbsent: boolean
@@ -217,7 +271,8 @@ export function createLegacyThemeMigrationLock(
       if (now() - currentMtime <= options.staleMs) return false // 新鲜——不动
     }
     // 步进候选：跳过「存在且已陈旧」的孤儿代次；遇新鲜候选即失败
-    // （尚未提交完成的并行认领者——fail-closed，败者路径接管兜底）
+    // （尚未提交完成的并行认领者或任何在途候选——fail-closed；普通认领
+    // 的 staleMs=Infinity 使该分支对任何存在的候选恒真，永不以时间越过）
     let candidate = p + 1
     for (;;) {
       const mtime = await fs.statMtimeMs(genPath(candidate))
@@ -238,27 +293,32 @@ export function createLegacyThemeMigrationLock(
       if (isErrnoLike(error, 'EEXIST')) return false
       throw error
     }
-    // U2 单调性校验：指针已被更晚的认领者推进到 ≥ 候选（自己的指针读数
-    // 已过时）——删自己刚创建的文件、按败者退场，绝不写回退指针
-    const p2 = await readPointer()
-    if (p2 >= candidate) {
-      await fs.rm(genPath(candidate)).catch(() => undefined)
-      return false
-    }
+    // 提交点（六审）：O_EXCL 创建提交标记——原子仲裁。EEXIST = 该代次已
+    // 被历史认领者提交（自己的指针读数过时：典型为接管者已提交并释放、
+    // 名字看似空闲）——删自己的候选文件撤退，绝不重试同名、绝不改写指针
     try {
-      await pushPointer(candidate)
-    } catch {
-      // 提交失败：撤回自己的候选文件（残留即孤儿，由后续陈旧步进越过）
+      await fs.writeFileExclusive(markerPath(candidate), String(candidate))
+    } catch (error) {
+      await fs.rm(genPath(candidate)).catch(() => undefined)
+      if (isErrnoLike(error, 'EEXIST')) return false
+      throw error
+    }
+    // 提交后核验：已有更高代次提交 → 自己是滞后者（如慢 owner 在提交点
+    // 前后被人接管）——删自己的代次文件撤退；自己的标记保留（该代次确实
+    // 被提交过，max 不受影响），不构成回退
+    const committed = await readPointer()
+    if (committed > candidate) {
       await fs.rm(genPath(candidate)).catch(() => undefined)
       return false
     }
     ownGen = candidate
+    await pushPointerHint(candidate).catch(() => undefined)
     await cleanupOlderGens(candidate).catch(() => undefined)
     return true
   }
 
   return {
-    tryAcquire: () => acquireCore({ requireCurrentAbsent: true, staleMs: 0 }),
+    tryAcquire: () => acquireCore({ requireCurrentAbsent: true, staleMs: Number.POSITIVE_INFINITY }),
 
     takeoverIfStale: (staleMs) => acquireCore({ requireCurrentAbsent: false, staleMs }),
 
@@ -266,8 +326,8 @@ export function createLegacyThemeMigrationLock(
       if (ownGen === null) return
       const gen = ownGen
       ownGen = null
-      // U3：只删自己代次的确切文件名——单条 rm。曾被接管（文件已被新
-      // owner 按 U4 清理）时为无害 no-op；任何情况下都够不到继任者
+      // U3：只删自己代次的确切文件名——单条 rm；标记不删。曾被接管（文件
+      // 已被新 owner 按 U4 清理）时为无害 no-op；任何情况下都够不到继任者
       await fs.rm(genPath(gen))
     },
 
@@ -275,6 +335,12 @@ export function createLegacyThemeMigrationLock(
       const p = await readPointer()
       const mtime = await fs.statMtimeMs(genPath(p))
       return mtime === null ? null : now() - mtime
+    },
+
+    isCurrentGeneration: async () => {
+      if (ownGen === null) return false
+      const p = await readPointer()
+      return p === ownGen
     },
 
     forceCleanup: async () => {
@@ -286,13 +352,15 @@ export function createLegacyThemeMigrationLock(
         return
       }
       for (const name of names) {
-        // 只删锁族文件：基名本身、代次（纯数字后缀）、指针（.gen）与指针
-        // tmp（.tmp 结尾）——**不含**同前缀的状态文件（<base>.<profileId>.
-        // state.json：五审改名后锁基名与状态文件前缀同族，须按后缀分族）
+        // 只删锁族文件：基名本身、代次（纯数字后缀）、指针视图（.gen）、
+        // 提交标记（g<数字>）与指针 tmp（.tmp 结尾）——**不含**同前缀的状
+        // 态文件（<base>.<profileId>.state.json：五审改名后锁基名与状态
+        // 文件前缀同族，须按后缀分族）
         const suffix = name === lockBase ? ''
           : name.startsWith(`${lockBase}.`) ? name.slice(lockBase.length + 1) : null
         if (suffix === null) continue
-        if (suffix !== '' && suffix !== 'gen' && !suffix.endsWith('.tmp') && !/^\d+$/.test(suffix)) {
+        if (suffix !== '' && suffix !== 'gen' && !suffix.endsWith('.tmp') &&
+            !/^\d+$/.test(suffix) && !/^g\d+$/.test(suffix)) {
           continue
         }
         await fs.rm(`${lockDir}/${name}`).catch(() => undefined)

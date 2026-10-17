@@ -203,6 +203,7 @@ function makeFakeLock(): FakeLock & { handle: LegacyThemeMigrationLockHandle } {
       state.ageMs = 0
     },
     ageMs: async () => (state.held ? state.ageMs : null),
+    isCurrentGeneration: async () => state.held,
     forceCleanup: async () => {
       state.held = false
       state.ageMs = 0

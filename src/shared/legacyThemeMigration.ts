@@ -49,13 +49,19 @@
 // （同步序）——该窗口内进程被 kill 或 done 持久化失败时，恢复只能按
 // pending 补发，可能双弹一次；这比「引导永久丢失」代价小。
 //
-// 多窗口并发（PR #581 评审修复发现 2 + 三审同修 + 四审 P2-D）：迁移与
-// 恢复经 globalStorage 目录的代次锁（fencing）原子认领（当前代次指针
-// tmp+rename 原子推进 + 对 lock.<gen+1> 的 fs.open 'wx' = O_EXCL，见
-// legacyThemeMigrationLock 文件头不变量）。认领成功者执行完整序列；认领失败
-// 者短等待磁盘 done 出现后静默退出（绝不通知），超时也静默退出（本次
-// 不引导，待下次激活恢复）。胜者崩溃后锁残留由 mtime 陈旧接管兜底
-// （超阈值接管），不会永久锁死。
+// 多窗口并发（PR #581 评审修复发现 2 + 三审同修 + 四审 P2-D + 六审
+// P2-E）：迁移与恢复经 globalStorage 目录的代次锁（fencing）原子认领。
+// 六审 P2-E 修订：锁提交点改为 O_EXCL 单调标记族（代次提交与所有权成立
+// 是同一原子动作，指针不可回退，见 legacyThemeMigrationLock 六审节）；
+// 普通认领对在途候选 fail-closed；owner 序列每个关键副作用（写 pending/
+// 发引导）前经 isCurrentGeneration 复核，滞后 owner 静默撤退不再引导。
+// **声明的有界边界（六审）**：fence 核验与副作用之间、引导 fire 与 done
+// 写之间均为同步序窗口——要求 owner 在其间被更高代次接管需「滞缓超陈旧
+// 阈值（默认 10s）+ 微秒级交错」同时成立，比六审前的「24ms 交错即双
+// owner」严格多个数量级，与既有「进程 kill 的同步序残余窗口」同类取舍。
+// 认领成功者执行完整序列；认领失败者短等待磁盘 done 出现后静默退出（绝
+// 不通知），超时也静默退出（本次不引导，待下次激活恢复）。胜者崩溃后锁
+// 残留由 mtime 陈旧接管兜底（超阈值接管），不会永久锁死。
 import { APPEARANCE_THEME_DEFAULT, APPEARANCE_THEME_KEY, MERMAID_THEME_KEY } from './settings'
 import type { LegacyThemeMigrationLockHandle } from './legacyThemeMigrationLock'
 
@@ -285,6 +291,23 @@ async function executeOwnerSequence(
   options: LegacyThemeMigrationRunOptions,
 ): Promise<LegacyThemeMigrationRunResult> {
   try {
+    // 六审 P2-E 方向 B（fencing）：owner 序列的每个关键副作用（写 pending、
+    // 发引导）前复核自己仍是最高已提交代次——被更高代次接管（自身滞缓/
+    // 崩溃后的陈旧接管）时静默撤退：不写状态、不引导，本次激活放弃（pending
+    // 若已写则由下次激活按恢复规则补完）。判据依赖锁的「有效指针不可回
+    // 退」（O_EXCL 提交标记族，见 legacyThemeMigrationLock 六审节），单纯
+    // fencing 不存在「指针被拉回自己代次后误判有效」的形态；判据读取失败
+    // 亦按失效处理（fail-closed）。残余边界：核验与副作用之间为同步序
+    // （与「引导 fire 与 done 写之间无 await」同类），不承诺任意调度下
+    // 恰 1，详见文件头六审声明
+    const stillCurrent = async (): Promise<boolean> => {
+      try {
+        return await ports.lock.isCurrentGeneration()
+      } catch {
+        return false
+      }
+    }
+    if (!(await stillCurrent())) return NONE_RESULT
     // B'：身份缺失时在锁内生成（快速路径可能带着 null 进来——那是需要
     // 迁移但尚无身份的首次激活；等待窗语义见 resolveOrGenerateProfileId）
     const id = profileId ?? await resolveOrGenerateProfileId(ports, options)
@@ -300,7 +323,9 @@ async function executeOwnerSequence(
 
     if (plan.action === 'migrate') {
       // 持久化顺序（发现 1）：pending 先于设置改写落盘——中途任何失败都
-      // 能从 pending 恢复，引导不会永久丢失
+      // 能从 pending 恢复，引导不会永久丢失。fence：滞后 owner 不得把
+      // 状态机从 done 拉回 pending（写前复核代次）
+      if (!(await stillCurrent())) return NONE_RESULT
       await ports.writeMarker(id, { state: 'pending', version })
       // P2-A（PR #581 三审）：pending 落盘后在串行化路径内重读最新
       // overlay 并按三档矩阵重新判定，只写主题相关键的最小补丁（不做
@@ -318,6 +343,8 @@ async function executeOwnerSequence(
         }
       })
       if (revisedAction === 'migrate') {
+        // fence：引导是面向用户的不可撤回副作用，滞后 owner 不得发出
+        if (!(await stillCurrent())) return NONE_RESULT
         // 引导 fire 与 done 写之间无 await（同步序）：残余崩溃窗口见文件头
         ports.requestGuide()
         await ports.writeMarker(id, { state: 'done', version })
@@ -338,7 +365,9 @@ async function executeOwnerSequence(
         result: undefined,
       }))
       if (recoveredPending) {
-        // pending = 引导欠账：清旧键之外补发引导并收口
+        // pending = 引导欠账：清旧键之外补发引导并收口（fence：滞后 owner
+        // 不得补发——接管者会按同一欠账规则补发，不会丢）
+        if (!(await stillCurrent())) return NONE_RESULT
         ports.requestGuide()
         await ports.writeMarker(id, { state: 'done', version })
         return { action: plan.action, guide: true }
@@ -347,6 +376,7 @@ async function executeOwnerSequence(
     }
     // plan none：设置已迁移（或本就无需迁移）——只有 pending 欠账需要补发
     if (recoveredPending) {
+      if (!(await stillCurrent())) return NONE_RESULT
       ports.requestGuide()
       await ports.writeMarker(id, { state: 'done', version })
       return { action: 'none', guide: true }
