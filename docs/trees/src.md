@@ -30,6 +30,7 @@ vsidian/
     │   │   ├── addonStorageService.ts         # 组件数据目录服务
     │   │   ├── addonThemeService.ts           # 组件主题目录与代次回收
     │   │   └── addonWiring.ts                 # 宿主装配与面板桥
+    │   ├── codexMigrationWiring.ts       # Codex 迁移 vscode 层装配
     │   ├── cssSnippetService.ts          # CSS 片段宿主权威服务
     │   ├── cssSnippetWiring.ts           # CSS 片段 vscode 层装配
     │   ├── diagramExportHost.ts          # 宿主图表导出执行壳
@@ -105,6 +106,7 @@ vsidian/
     │   ├── changeMapping.ts           # 变更重定位纯函数
     │   ├── chromeContract.ts          # 界面域样式契约探针表
     │   ├── codeLangs.ts               # 代码块语言注册表与别名路由
+    │   ├── codexMigration.ts          # Codex 设置迁移纯函数与编排
     │   ├── contextMenu.ts             # 统一右键菜单内核纯函数单一事实源
     │   ├── cssSnippetEnv.ts           # CSS 片段环境身份与分桶戳（#131）
     │   ├── cssSnippetImports.ts       # CSS 片段依赖导入形态学单一事实源
