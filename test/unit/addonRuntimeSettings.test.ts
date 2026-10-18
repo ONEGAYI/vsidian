@@ -139,6 +139,39 @@ describe('T04 runtime：setup context 设置 API（公开消费面）', () => {
     expect(api!.getSource('mystery')).toBeUndefined()
   })
 
+  it('#590 按层读取：get() 暴露两层显式值（含定义外遗留键）；无工作区时 workspaceValues 为 null', async () => {
+    const persistence = memorySettingsPersistence()
+    // 预置用户层显式值 + 定义外遗留键（遗留键存储原样、不因定义集删除）
+    persistence.raw.set('user', { version: 1, values: { 'fixture.demo': { flag: false, legacyKey: 'kept' } } })
+    const h = harness({ settingsPersistence: persistence })
+    let api: import('../../src/host/addons/addonRegistry').AddonSetupContext['settings'] | undefined
+    h.register({
+      setup(context) {
+        api = context.settings
+        context.settings.registerDefinitions(DEFS)
+      },
+    })
+    expect(await api!.update('workspace', { threshold: 55 })).toEqual({ ok: true })
+    const snapshot = api!.get()
+    expect(snapshot.values).toEqual({ flag: false, threshold: 55, replacements: ['旧→新'], limits: { name: 'demo', count: 3 } })
+    expect(snapshot.sources['flag']).toBe('user')
+    expect(snapshot.sources['threshold']).toBe('workspace')
+    expect(snapshot.userValues).toEqual({ flag: false, legacyKey: 'kept' })
+    expect(snapshot.workspaceValues).toEqual({ threshold: 55 })
+
+    const noWs = harness({ settingsPersistence: memorySettingsPersistence(false) })
+    let noWsApi: import('../../src/host/addons/addonRegistry').AddonSetupContext['settings'] | undefined
+    noWs.register({
+      setup(context) {
+        noWsApi = context.settings
+        context.settings.registerDefinitions(DEFS)
+      },
+    })
+    const noWsSnapshot = noWsApi!.get()
+    expect(noWsSnapshot.workspaceValues).toBeNull()
+    expect(noWsSnapshot.userValues).toEqual({})
+  })
+
   it('update/clearWorkspaceOverride 经公开 API 生效；onChanged 在持久化成功后投递', async () => {
     const h = harness()
     const changes: Array<{ scope: string; keys: readonly string[] }> = []
