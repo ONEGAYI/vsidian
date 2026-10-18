@@ -102,6 +102,32 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **工厂允许 async 形态**（官方样例即「await 通道握手后再注册」）：装载结局按工厂同步段判定（返回 pending 的 promise 即报装载成功），但工厂 promise 的 rejection 会与同步异常**同路径归因 `factory-error`**——整代次立即回滚（`onDispose` 回调、扩展、命令等全部回收）并上报宿主触发全组件故障暂停；rejection 迟到（代次已被卸载或替换）则静默丢弃。工厂内部的长等待或驻留循环不会挂起装载指令流。
 - 详见参考的 [`page-sdk`](api-reference.md#page-sdk)、[`page-bridge`](api-reference.md#page-bridge)、[`page-load-protocol`](api-reference.md#page-load-protocol)、[`heading-fold-experimental`](api-reference.md#heading-fold-experimental)、[`syntax-experimental`](api-reference.md#syntax-experimental)、[`host-settings-experimental`](api-reference.md#host-settings-experimental) 与 [`behavior-enabled-state`](api-reference.md#behavior-enabled-state) 条目。
 
+### 2.4 页面语言（sdk.locale，#582，开发中）
+
+编辑器页与设置页都提供 `sdk.locale`，组件用它选择**自己的**语言包。它与平台 UI 共用 `resolveLocale(general.language, vscode.env.language)` 的结果：显式偏好优先，`auto` 跟随 VSCode 显示语言。不要用 `navigator.language`、系统区域或裸宿主显示语言推测平台的生效语言。
+
+```ts
+import type { VsidianAddonPageSdk } from '<主仓库>/src/shared/addonPage'
+
+function observePageLocale(
+  sdk: VsidianAddonPageSdk,
+  renderLabels: (language: string) => void,
+): (() => void) | undefined {
+  const locale = sdk.locale
+  if (!locale) return undefined // 旧宿主缺此能力，由调用方选择明确的兼容策略
+  renderLabels(locale.get()) // 首值；onChange 不立即回放
+  const off = locale.onChange(renderLabels)
+  sdk.onDispose(off)
+  return off
+}
+```
+
+- 当前正常快照为 `en` / `zh-cn`，类型为 `string`，为未来语言留口；组件遇到未支持代码时自行选用自己的默认词包。仅平台语言启动数据缺失/损坏时可为空串，与平台快照一致。
+- 回调只在**生效语言代码变化**时触发，重复通知或同语言换包不触发；回调中 `get()` 已是新值。语言切换不重建组件工厂，更新现有文字节点即可保留输入、页签与其他组件状态。
+- 返回的退订函数可重复调用；同一回调的多次订阅相互独立。平台在装载释放时自动清理订阅，释放后的迟到订阅无效；同步回调异常按组件故障上报，不阻断平台与其他组件的语言更新。
+- `locale` 在声明上为可选，以兼容旧宿主及现有 SDK 结构。缺失时可保留组件明确配置的默认界面或提示升级，不能把浏览器语言当作平台语言；需要严格同语种时须要求支持本能力的宿主。
+- 本能力尚未发行，不能据此宣称 API 1.2.0 已提供；下次本体发布需随新增能力升 API 次版本并正式落账。逐条契约见 [`page-locale`](api-reference.md#page-locale)，已发布记录不回填。
+
 ## 3. 能力分组速览
 
 逐条签名、语义与验证定位见[公开 API 参考](api-reference.md)；此处只给「用哪组做什么」的路标（首版六组随 #362 批次落地，粘贴转换组自 #541 起追加）。
@@ -112,6 +138,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 | 页面 SDK | 装载协议、视图/快照/文本提交、通道 | `sdk.views`、`sdk.channel`、`defineAddonPage` | 两端 |
 | 输入行为 | 可组合输入处理 | `sdk.behaviors.register` | 编辑器页 |
 | 输入行为 | 行为禁用态只读可见（灰态同步） | `sdk.behaviorState.enabledState` / `onEnabledChange` | 两端页面 |
+| 页面 SDK（生效语言，开发中） | 组件文案与平台同步，原地更新且保留状态 | `sdk.locale.get/onChange` | 编辑器页与设置页 |
 | 页面 SDK（设置上下文） | 详情自绘页的作用域对齐与搜索定位承接 | `sdk.settingsContext.*` | 设置页 |
 | 设置 | 定义、读写、作用范围、设置页 | `ctx.settings.*` | 宿主 |
 | 渲染提供者 | 代码块渲染候选与自动接管 | `sdk.renderers.register` | 编辑器页 |
@@ -376,7 +403,7 @@ const result = await sdk.views?.openDocument({
 | 行为消费样例 | `test/fixtures/addon-v02/` 各夹具 |
 | 用户故事覆盖映射 | `docs/specs/vsidian-addons-coverage.md`（接口或验证变更时同步更新） |
 
-签名或语义调整必须同步：语义清单条目 → 重生成参考 → 消费样例与钉住断言 → 台账（如涉版本状态）。
+签名或语义调整必须同步：语义清单条目 → 重生成参考 → 消费样例与钉住断言 → 台账（如涉版本状态）。新增开发中能力单列条目与 `CHANGELOG-API.md` Unreleased，不改写已发行记录；声明文本变化仍按 [API 门禁](../specs/addons-api-gate.md) 显式重锚，不能弱化检查。
 
 ## 9. 统一主题与主题环境（T07 / #546）
 

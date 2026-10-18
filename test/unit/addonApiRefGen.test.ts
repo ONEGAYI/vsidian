@@ -76,6 +76,23 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
     }
   })
 
+  it('#582 页面语言独立登记双页面稳定候选面，不冒充已经发行', () => {
+    const entry = ADDON_API_ENTRIES.find((item) => item.id === 'page-locale')
+    expect(entry).toMatchObject({
+      group: 'page-sdk', layer: 'stable-candidate',
+      endpoints: ['editor-page', 'settings-page'],
+      signatures: [{ module: 'src/shared/addonPage.ts', symbols: ['AddonLocaleFacet'] }],
+      introduced: '#582',
+    })
+    expect(entry?.semantics.localization).toContain('general.language')
+    expect(entry?.semantics.lifecycle).toContain('不立即回放')
+    expect(entry?.verification).toEqual(expect.arrayContaining([
+      'test/unit/addonPageLocale.test.ts', 'test/addonApi/publicApiConsumer.ts',
+      'test/browser/addonSettingsContext.mjs', 'test/integration/suite/addonT02Cases.ts',
+    ]))
+    expect(ADDON_API_RELEASES.some((release) => release.summary.includes('#582'))).toBe(false)
+  })
+
   it('实验入口 cm6 在案且与实验条目互相咬合', () => {
     const expEntries = ADDON_API_RELEASES.flatMap((r) => r.experimental.map((e) => e.entry))
     expect(expEntries).toContain('cm6')
@@ -206,6 +223,22 @@ describe('addonApiRefGen 生成器纯函数', () => {
     expect(md).toContain('移除规则正文')
     expect(md).toContain('实验入口兼容清单')
     expect(md).toContain('`test/unit/addonIdentity.test.ts`')
+  })
+
+  it('#582 已有发行记录时不把新条目误标为 1.0.0 来源或全部未发行', () => {
+    const md = buildApiReferenceMarkdown({
+      groups: sampleGroups, entries: sampleEntries, removalRule: '规则',
+      releases: [...sampleReleases, {
+        version: '1.2.0', status: 'released', releasedAt: '2026-10-18',
+        summary: '已发行的能力。', experimental: [],
+      }],
+    }, signatures)
+    expect(md).toContain('稳定 API 已有实际发行')
+    expect(md).toContain('开发中的新增能力仍未发行')
+    expect(md).toContain('稳定 API 面（发行状态见台账与条目说明）')
+    expect(md).not.toContain('随 1.0.0 候选冻结')
+    expect(md).not.toContain('尚未发行任何稳定 API')
+    expect(md).not.toContain('当前所有条目与版本均为')
   })
 
   it('实验条目渲染清单声明名与兼容边界提示', () => {

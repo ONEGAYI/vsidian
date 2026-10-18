@@ -154,3 +154,19 @@ T03 自动化运行证据随票面实施回填，人工验收仍开放。内部�
 | H-U08 | 中英文、来源、搜索定位 | `themeSettings`；`addonThemes` 浏览器热换语言包、搜索与主题页签路由 |
 
 本地接手验证报告为 T07 工作树 `out/test/t07-resume-*`；联合全量回归由汇总分支记录。图表弹窗继续既有 `graphicPopup` 快照验证，T08 的安装、迁移和包体收口尚未交付。
+
+## 页面语言同源覆盖（#582，开发中）
+
+公开接口单列 `page-locale`（`sdk.locale`），对应故事 7/23 的原页热更新与资源释放，以及设置自绘页与平台同语种的验收。既有故事历史结论保持不变；本能力尚未计入已发行 API 1.2.0，下一发行按新增能力升次版本。
+
+| 场景 | 公开接入与验证 |
+| --- | --- |
+| 首帧同源与两层语言模型 | 单 `addonPageLocale`：editor/settings 两页、显式 en/zh-cn、auto 中文/未适配宿主、与 navigator 相反，首帧经生产 localeBoot 数据岛装配；损坏数据不伪造语言 |
+| 热切换、顺序与去重 | 单 `addonPageLocale`：en ↔ zh-cn，get 在回调前已更新，不回放、同码换包不重复；平台语言监听仍收消息 |
+| 释放、退订与故障 | 单 `addonPageLocale`：独立重复订阅、手动幂等退订、卸载/换代/工厂失败/故障/整页释放、旧代次迟到 no-op；异常上报且其他组件及平台不受阻 |
+| 设置外壳重建不丢组件状态 | 单 `addonSettingsArea`（#582 组）：生产 SettingsPageView/AddonSettingsAreaSection + 真实 loader，数据岛与浏览器语言相反；换语种重建外壳而保留同一组件根/输入节点、已编辑值、输入监听状态与 locale 订阅 |
+| 真实公开组件消费与可见文字 | 浏 `addonSettingsContext` + `settingsContextSettings`：生产 settingsMain、构建桥登记的组件、真实样式；首帧平台/浏览器语言相反，双向切换平台与组件文案，同时保留根节点与输入状态 |
+| 真宿主偏好变化 | 集 `addonT02Cases` + `t02Settings`：实际 `general.language` 设置更新 → 设置页 locale.changed → 公开 sdk.locale 回显；平台/组件文本与计算色、组件实例和状态保持 |
+| 公开签名与兼容性 | `publicApiConsumer`：get/callback 均 string、退订函数、locale 可选、旧 SDK 形状仍可赋值；`addonApiSurface` / `addonApiRefGen`：公开导入与独立目录条目；生成参考与历史门禁 |
+
+执行边界：浏览器与真宿主新增回归已编写，构建/类型检查单独记录；当前实施环境的 OS socket 权限阻止浏览器/GUI/VSCode 宿主启动，未执行这些图形用例，也未绕过限制。它们需在可运行图形宿主的 CI/授权环境实际运行后，才能更新为绘制层验收通过；单元通过不能替代该结论。
