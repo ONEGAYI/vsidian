@@ -317,7 +317,7 @@ import {
   outlineStructuralExpand,
 } from './outlineMenu'
 import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES, focusMenuDom } from './contextMenuDom'
-import { WIKILINK_SUGGEST_CLASS_NAMES } from './wikilinkSuggest'
+import { WIKILINK_SUGGEST_CLASS_NAMES, wikilinkFileResultFresh } from './wikilinkSuggest'
 import {
   PLAIN_MENU_LINE,
   buildContextMenuModel,
@@ -11062,6 +11062,7 @@ export class WebviewSyncController {
       `.${WIKILINK_SUGGEST_CLASS_NAMES.status}`) ?? null
     const wikilinkSuggest = suggestEl
       ? {
+        fileResultFresh: wikilinkFileResultFresh(suggestEl),
         visible: hitPaintedElement(suggestEl),
         display: getComputedStyle(suggestEl).display,
         itemCount: suggestEl.querySelectorAll(`.${WIKILINK_SUGGEST_CLASS_NAMES.item}`).length,

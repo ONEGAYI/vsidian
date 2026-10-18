@@ -1023,6 +1023,7 @@ interface ViewState {
      *  行计数与键盘高亮行/状态行文本（会话关闭时缺省）；#377 T02 起补
      *  候选文件名序列（按名核对候选集合） */
     wikilinkSuggest?: {
+      fileResultFresh?: boolean
       visible: boolean
       display: string | null
       itemCount: number
@@ -1451,6 +1452,7 @@ async function waitViewState(
         readingMermaidCount: s['readingMermaidCount'],
         mermaid: paint?.['mermaid'],
         graphic: paint?.['graphic'],
+        html: paint?.['html'],
         // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
         readingBlockCount: s['readingBlockCount'],
         readingMountedBlocks: s['readingMountedBlocks'],
@@ -3130,7 +3132,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const uri = wsUri('task.md').toString()
 
     // live：任务行在首屏且非活动（光标在标题行）→ checkbox 已渲染
-    const live = await waitViewState('task.md', (v) => v.cssProbe?.liveTaskCheckboxDecorationColor !== undefined && v.viewMode === 'live')
+    const live = await waitViewState('task.md', (v) =>
+      v.viewMode === 'live' && typeof v.cssProbe?.liveTaskCheckboxDecorationColor === 'string')
     assert(
       live.cssProbe!.liveTaskCheckboxDecorationColor === 'rgb(19, 20, 21)',
       `live 任务 checkbox 应被测试片段命中 rgb(19, 20, 21)，实际 ${live.cssProbe!.liveTaskCheckboxDecorationColor}`,
@@ -3139,7 +3142,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const reading = await poll('阅读模式任务样式探针', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
-      return v?.viewMode === 'reading' && v.cssProbe?.readingTaskCheckboxDecorationColor !== undefined ? v : undefined
+      return v?.viewMode === 'reading' && typeof v.cssProbe?.readingTaskCheckboxDecorationColor === 'string' ? v : undefined
     })
     assert(
       reading.cssProbe!.readingTaskCheckboxDecorationColor === 'rgb(22, 23, 24)',
@@ -18238,7 +18241,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await typeText('目')
       await poll('同目录查询自动高亮首项', async () => {
         const s = await suggestPaint()
-        return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
+        return s?.fileResultFresh === true && s.activeIndex === 0 &&
+          s.names?.[0] === '同目录目标.md' ? s : undefined
       })
       await pressKey('enter')
       const afterSame = '来源正文\n[[同目录目标.md|同目录目标]]'
@@ -18258,13 +18262,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await typeText('目')
       await poll('子目录查询自动高亮首项', async () => {
         const s = await suggestPaint()
-        return s && s.itemCount >= 1 && s.activeIndex === 0 ? s : undefined
+        return s?.fileResultFresh === true && s.activeIndex === 0 &&
+          s.names?.[0] === '子目录目标.md' ? s : undefined
       })
       await pressKey('enter')
       const afterNested = '来源正文\n[[../子目录目标.md|子目录目标]]'
       await poll('子目录目标按 .. 上行相对路径插入', () => doc.getText() === afterNested ? true : undefined)
       assert(doc.isDirty, '第二次确认后文档仍应 dirty')
       await doc.save()
+    } catch (error) {
+      const view = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState | undefined
+      console.error('[#376 T01] 插入链路最后观测', JSON.stringify({
+        hostText: fixtureDoc?.getText(), webviewText: view?.text,
+        selectionOffset: view?.selectionOffset, suggest: view?.paint?.wikilinkSuggest,
+      }))
+      throw error
     } finally {
       try {
         // 仅收尾本例的临时文档；失败路径也不留下 dirty 标签或根登记污染后续用例。
@@ -19553,12 +19565,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(m1.hiddenPainted === 0, `隐藏元素不产生绘制证据（实际 ${m1.hiddenPainted}）`)
 
       // Live：widget 绘制 + MathML 结构 + 模式切换存续（主文 contentDOM 内
-      // 4 个 svg：块级 1 + 行内 3——嵌入卡 B 是独立 Live 实例不计入）
+      // 4 个 svg：块级 1 + 行内 3——嵌入卡 B 是独立 Live 实例不计入）。
+      // B 端口绑定完成后再删引用，固定「外部同步覆盖活跃引用」的竞争窗口。
       await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri(fileA))
       const live = await waitViewState(fileA, (v) => {
         const m = v.paint?.html?.svgMath
         return v.viewMode === 'live' && m !== undefined && m.svgs >= 4 &&
-          m.svgPainted && m.maths >= 1 && m.mathPainted
+          m.svgPainted && m.maths >= 1 && m.mathPainted &&
+          v.readingEmbed?.some((card) => card.host === 'live' &&
+            card.inner === 't8-sub/t8-b-573' && card.liveBound === true) === true
       }, 0, 45000)
       const m2 = live.paint!.html!.svgMath!
       assert(m2.svgPainted && m2.mathPainted,
@@ -19575,6 +19590,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const delEdit = new vscode.WorkspaceEdit()
       delEdit.replace(wsUri(fileA), new vscode.Range(textDoc.positionAt(at), textDoc.positionAt(at + embedLine.length + 1)), '')
       assert(await vscode.workspace.applyEdit(delEdit), '删除嵌入行应成功')
+      assert(textDoc.getText() === docA.replace(embedLine + '\n', ''), '删除后权威正文与预期一致')
       await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(fileA))
       const released = await waitViewState(fileA, (v) => {
         const m = v.paint?.html?.svgMath
@@ -19583,6 +19599,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const m3 = released.paint!.html!.svgMath!
       assert(m3.scopedIds === 0, `B 嵌入释放后前缀 id 归零（实际 ${m3.scopedIds}）`)
       assert(m3.svgs >= 4, `A 侧 SVG 不受释放影响（实际 ${m3.svgs}）`)
+      const session = (await vscode.commands.executeCommand(CMD.sessionState, wsUri(fileA).toString())) as SessionState
+      assert(session.appliedEdits === 0, '宿主外部删除不得产生回声写回')
     } finally {
       await Promise.all([
         rm(nodePath.join(wsDir!, fileA), { force: true }).catch(() => undefined),

@@ -3097,6 +3097,8 @@ export interface PaintProbe {
    *  候选行计数与键盘高亮行/状态行文本（会话关闭时缺省）。jsdom 无布局
    *  恒 false，只作真宿主集成断言依据 */
   wikilinkSuggest?: {
+    /** 文件枚举已回包且未被 invalidate 作废；有高亮不等于可确认。 */
+    fileResultFresh?: boolean
     visible: boolean
     display: string | null
     itemCount: number
@@ -3941,6 +3943,7 @@ function isPaintProbe(v: unknown): v is PaintProbe {
     )) &&
     (v.wikilinkSuggest === undefined || (
       isObject(v.wikilinkSuggest) &&
+      (v.wikilinkSuggest.fileResultFresh === undefined || typeof v.wikilinkSuggest.fileResultFresh === 'boolean') &&
       typeof v.wikilinkSuggest.visible === 'boolean' &&
       isNullOrString(v.wikilinkSuggest.display) &&
       isNonNegativeInt(v.wikilinkSuggest.itemCount) &&

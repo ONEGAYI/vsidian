@@ -27,6 +27,7 @@ import { createReadingBlockElement } from '../../src/webview/readingView'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 import { EditorView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
+import { externalSync } from '../../src/webview/liveInstance'
 
 installLocale('zh-cn', zhCn)
 
@@ -520,6 +521,26 @@ describe('P2-05 显式关闭确认模态', () => {
 })
 
 describe('P2-05 删除活跃引用拦截', () => {
+  it.each([false, true])('宿主外部删除直接同步，不发起本地关闭确认（目标 dirty=%s）', (dirty) => {
+    const ctx = harness()
+    setupLive(ctx)
+    if (dirty) typeAndDirty(ctx)
+    ctx.sent.length = 0
+    try {
+      const line = ctx.mainView.state.doc.line(3)
+      ctx.mainView.dispatch({
+        changes: { from: line.from, to: line.to + 1 },
+        annotations: externalSync.of(true),
+      })
+      expect(ctx.mainView.state.doc.toString()).toBe('# 父文档\n\n\n尾部段落。\n')
+      expect(ctx.sent).toEqual([])
+      expect(dialogBox()).toBeNull()
+    } finally {
+      ctx.manager.dispose()
+      ctx.mainView.destroy()
+    }
+  })
+
   /** 装载 + Live + dirty（活跃编辑中） */
   function setupDirty(): { manager: EmbedCardManager; sent: WebviewToHost[]; mainView: EditorView; els: HTMLElement[] } {
     const h = harness()

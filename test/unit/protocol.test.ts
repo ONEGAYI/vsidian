@@ -66,6 +66,19 @@ describe('isWebviewToHost', () => {
     })).toBe(false)
   })
 
+  it('文件候选新鲜度探针接受布尔值与旧载荷，拒绝错误类型', () => {
+    const suggest = { visible: true, display: 'flex', itemCount: 1,
+      activeIndex: 0, activeText: 'target.md', statusText: null, names: ['target.md'] }
+    const state = { kind: 'view.state', text: '[[]]', docLength: 4, lineCount: 1, renderedLines: 1,
+      paint: { textVisible: true, scrollerDisplay: 'block', gutterUserSelect: null,
+        darkTheme: false, caretColor: null, wikilinkSuggest: suggest } }
+    expect(isWebviewToHost(state)).toBe(true)
+    for (const [fresh, accepted] of [[true, true], [false, true], ['true', false]] as const) {
+      expect(isWebviewToHost({ ...state, paint: { ...state.paint,
+        wikilinkSuggest: { ...suggest, fileResultFresh: fresh } } })).toBe(accepted)
+    }
+  })
+
   it('view.switch.request 消息校验（#141）：target 仅 live/reading（双态裁剪，源码路径不可达）', () => {
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'live' })).toBe(true)
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'reading' })).toBe(true)
