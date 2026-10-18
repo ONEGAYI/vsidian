@@ -72,3 +72,12 @@ deliverLocateToPage（有自绘页且未故障时）：
 ## 6. 验收对照
 
 见票面 #553 验收标准；单测（`addonSettingsArea.test.ts` #553 组、`addonPageLoader.test.ts` #553 组、`addonSettingsLifecycle.test.ts` #555 评审二轮组——切换卸载/定向定位/重试恢复的生产模块链）、浏览器（`addonSettingsContext.mjs`）、门禁（page-settings-context 条目 + 基线重锚）构成证据链。人工验收项登记于 `manual-verification.md`。
+
+## 7. 按层显式值（#590）
+
+组件自绘设置页按作用域层呈现（如「用户默认」层显示用户层真值，而非工作区覆盖后的合并值）需要读到两层各自的显式值——原有 `get()` 只返回合并生效值与来源，被工作区覆盖的用户层原值组件侧无法反推（消费方证据：vsidian-easy-typing#59 审查 Spec-1）。
+
+- **能力**：`AddonSettingsGetSnapshot` 新增可选成员 `userValues`（用户默认层显式值）与 `workspaceValues`（工作区层显式值；`null` = 无工作区）。两字段只含该层**显式保存过**的键，含定义外遗留键（存储原样，不因定义集删除）；键未显式保存时不在映射中，生效值回退语义仍以 `values`/`sources` 为准，不从层值推导。
+- **既有语义零变化**：`values`/`sources` 合并口径、存储结构（version 1 冻结）、`update`/`clearWorkspaceOverride`/`onChanged` 全部不动（§4「界面迁移不是设置数据迁移」同款边界：本票是读取面扩展，不是数据迁移）。数据源即服务层 `effectiveSnapshot()` 既有的 `userValues`/`workspaceValues`（原生表单按层取值的同一通路），组件面装配点在 runtime setup 面 `get()`。
+- **可选成员的兼容语义**：字段可选（旧调用形状不受影响）；进程内直调、无通道序列化面。台账 `settings-context` 条目 `introduced` 追加 #590，发行随下次本体发版升次版本。
+- **验证**：`test/unit/addonRuntimeSettings.test.ts`（异值三向断言 + 遗留键原样 + 无工作区 null）；公开消费样例 `test/addonApi/publicApiConsumer.ts` 补两形态编译期钉住。消费方完整接入（按层显示与联动）归 vsidian-easy-typing#60，不在此规格展开。
