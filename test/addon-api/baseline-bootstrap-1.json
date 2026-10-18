@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "8b948c2e01257ba6d4e58542d8b682664fbf9b27",
-      "ref": "8b948c2e01257ba6d4e58542d8b682664fbf9b27",
+      "sha": "42e66f9a094c8989aca152303d39d7fffabbac8e",
+      "ref": "42e66f9a",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -899,10 +899,11 @@
       "endpoints": [
         "host"
       ],
-      "purpose": "setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。",
+      "purpose": "setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源（#590 起 get 快照另附两层显式值 userValues / workspaceValues，供组件按作用域层呈现）、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。",
       "semantics": {
         "lifecycle": "普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。新 setup 代次重跑时定义集与组声明一并清换。",
-        "errors": "按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。#472 组批校验：组键重复或定义引用未声明组键整批拒绝（归因 invalid-definitions）。"
+        "errors": "按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。#472 组批校验：组键重复或定义引用未声明组键整批拒绝（归因 invalid-definitions）。",
+        "coordinates": "#590 get 快照可选成员 userValues / workspaceValues（数据形状）：各层只含显式保存过的键（含定义外遗留键——存储原样不删）；workspaceValues 为 null 表无工作区。values/sources 合并口径不变，生效值不从层值推导。"
       },
       "signatures": [
         {
@@ -919,7 +920,7 @@
         "test/integration/suite/addonT04Cases.ts",
         "test/browser/addonSettings.mjs"
       ],
-      "introduced": "#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）"
+      "introduced": "#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）、#590（两层显式值）"
     },
     {
       "id": "settings-definitions",
@@ -1305,8 +1306,8 @@
       "AddonRegistrationHandle": "/** 注册面返回的释放句柄（重复 dispose 无害；迟到登记被拒时为 no-op） */\nexport interface AddonRegistrationHandle {\n  dispose(): void\n}",
       "AddonChannelRegistry": "/** 通道注册面（setup/enable 上下文同形状；同名 topic 重复注册拒绝） */\nexport interface AddonChannelRegistry {\n  handle(topic: string, handler: AddonChannelHandler): AddonRegistrationHandle\n}",
       "AddonChannelHandler": "/** 通道处理器（宿主组件代码注册；载荷与结果都是 JSON 数据） */\nexport type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknown>",
-      "AddonSettingsContextApi": "/**\n * 设置能力面（setup 生命周期常驻——普通停用后保留；技术方案 5.5 形状）。\n * T02 先立 registerPage/registerDefinitions；T04 起接入读写与事件。\n */\nexport interface AddonSettingsContextApi {\n  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */\n  registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle\n  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings）。\n   *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段\n   *  引用其组键——引用未声明组键或组键重复整批拒绝 */\n  registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle\n  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */\n  get(): AddonSettingsGetSnapshot\n  /** 单键来源（未定义键为 undefined） */\n  getSource(key: string): AddonSettingSource | undefined\n  /** 按批校验并保存到指定层（失败不虚报；变化事件只在持久化成功后发出） */\n  update(scope: 'user' | 'workspace', patch: Record<string, unknown>): Promise<AddonSettingsUpdateResult>\n  /** 清除工作区对某键的覆盖（恢复继承用户默认，不是恢复出厂值） */\n  clearWorkspaceOverride(key: string): Promise<AddonSettingsUpdateResult>\n  /** 订阅成功保存后的变化（所属组件设置生命周期内有效） */\n  onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle\n}",
-      "AddonSettingsGetSnapshot": "/** 设置读取快照（settings.get() 的结果：生效值与来源） */\nexport interface AddonSettingsGetSnapshot {\n  readonly values: Readonly<Record<string, AddonSettingValue>>\n  readonly sources: Readonly<Record<string, AddonSettingSource>>\n}",
+      "AddonSettingsContextApi": "/**\n * 设置能力面（setup 生命周期常驻——普通停用后保留；技术方案 5.5 形状）。\n * T02 先立 registerPage/registerDefinitions；T04 起接入读写与事件。\n */\nexport interface AddonSettingsContextApi {\n  /** 设置页入口登记（自身安装目录内的相对路径；越界拒绝） */\n  registerPage(entry: AddonPageEntryInput): AddonRegistrationHandle\n  /** 设置定义收集（可序列化定义；形状校验矩阵见 shared/addonSettings）。\n   *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段\n   *  引用其组键——引用未声明组键或组键重复整批拒绝 */\n  registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle\n  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认）；#590 起附\n   *  两层显式值（userValues / workspaceValues，供组件按作用域层呈现） */\n  get(): AddonSettingsGetSnapshot\n  /** 单键来源（未定义键为 undefined） */\n  getSource(key: string): AddonSettingSource | undefined\n  /** 按批校验并保存到指定层（失败不虚报；变化事件只在持久化成功后发出） */\n  update(scope: 'user' | 'workspace', patch: Record<string, unknown>): Promise<AddonSettingsUpdateResult>\n  /** 清除工作区对某键的覆盖（恢复继承用户默认，不是恢复出厂值） */\n  clearWorkspaceOverride(key: string): Promise<AddonSettingsUpdateResult>\n  /** 订阅成功保存后的变化（所属组件设置生命周期内有效） */\n  onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle\n}",
+      "AddonSettingsGetSnapshot": "/** 设置读取快照（settings.get() 的结果：生效值与来源，#590 起含两层显式值） */\nexport interface AddonSettingsGetSnapshot {\n  readonly values: Readonly<Record<string, AddonSettingValue>>\n  readonly sources: Readonly<Record<string, AddonSettingSource>>\n  /** 用户默认层显式值（#590）——只含该层显式保存过的键，含定义外遗留键\n   *  （存储原样，不因定义集删除）；键未显式保存时不在此映射中（生效值\n   *  回退语义见 sources，不从本字段推导） */\n  readonly userValues?: Readonly<Record<string, AddonSettingValue>>\n  /** 工作区层显式值（#590）；null = 无工作区。遗留键口径同 userValues */\n  readonly workspaceValues?: Readonly<Record<string, AddonSettingValue>> | null\n}",
       "AddonSettingsChangeEventData": "/** 设置变化事件（settings.onChanged 的载荷） */\nexport interface AddonSettingsChangeEventData {\n  readonly scope: 'user' | 'workspace'\n  readonly keys: readonly string[]\n}",
       "AddonPasteRulesContextApi": "/**\n * 粘贴规则注册面（#541 T01，enable 生命周期；声明式粘贴转换规格 §4.1）。\n * 声明为可序列化数据（形状见 shared/addonPasteRules）；来源组件身份由\n * 平台注入，作者不能冒充其他组件。整批校验：批内 ID 重复、未知操作或\n * 超预算声明整批拒绝（普通 API 拒绝不算组件故障），不部分安装。停用/\n * 故障/代次结束撤回本生命周期全部规则。\n */\nexport interface AddonPasteRulesContextApi {\n  /**\n   * 登记一批粘贴转换规则；返回普通注册结果与释放句柄（dispose 只移除\n   * 本批，重复调用无害）。已终结代次的迟到注册拒绝 released。\n   */\n  registerRules(declarations: readonly unknown[]): AddonPasteRulesRegisterResult\n}"
     },
