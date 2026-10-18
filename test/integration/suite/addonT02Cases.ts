@@ -20,10 +20,28 @@
 // - 「重启后停用保持」的重启语义由单元测试「同 store 新实例」钉住
 //   （addonRuntime.test.ts），此处钉住「偏好写入持久层」。
 import * as vscode from 'vscode'
+import { LOCALE_MESSAGES } from '../../../src/shared/locales'
 
 const VIEW_TYPE = 'onegayi.vsidian.editor'
 const ADDON_ID = 'vsidian-test-fixture.addon-t02'
 const wsDir = process.env['WORKSPACE_DIR'] ?? ''
+
+interface FixtureReport {
+  topic?: string
+  ok?: boolean
+  echoed?: unknown
+  docLength?: number
+  markColor?: string
+  logoLoaded?: boolean
+  locale?: string
+  phase?: 'initial' | 'change'
+  changeCount?: number
+  instanceId?: string
+  generation?: number
+  titleText?: string
+  titleColor?: string
+  visible?: boolean
+}
 
 interface FixtureStats {
   activateCount: number
@@ -34,8 +52,8 @@ interface FixtureStats {
   settingsEchoCalls: number
   reportCalls: number
   docStateCalls: number
-  lastReport: { topic?: string; ok?: boolean; echoed?: unknown; docLength?: number; markColor?: string; logoLoaded?: boolean } | null
-  reportsLog: Array<{ topic?: string; ok?: boolean; echoed?: unknown; logoLoaded?: boolean }>
+  lastReport: FixtureReport | null
+  reportsLog: FixtureReport[]
   lastDocState: { docLength?: number; markColor?: string } | null
   lastRegisterResult: { ok: boolean; reason?: string } | null
 }
@@ -422,6 +440,86 @@ export const addonT02Cases: Array<[string, () => Promise<void>]> = [
 
     await vscode.commands.executeCommand('onegayi.vsidian._test.closeSettingsPage')
     console.log('[#351] 组件设置页装载、JSON 通信与关闭释放通过')
+  }],
+
+  ['附加组件 T02：页面生效语言热更与组件标题真实绘制（#582）', async () => {
+    await ensureEnabled()
+    const settings = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSettings')) as Record<string, unknown>
+    const originalLanguage = settings['general.language']
+    // 独立新面板，避免其他用例的页面与旧回报满足首帧断言。
+    await vscode.commands.executeCommand('onegayi.vsidian._test.closeSettingsPage')
+    const before = await fixtureStats()
+    const previousInstances = new Set(before.reportsLog.map((report) => report.instanceId))
+    const setLanguage = async (lang: string): Promise<void> => {
+      const saved = (await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', {
+        'general.language': lang,
+      })) as { ok: boolean }
+      assert(saved.ok === true, `语言 ${lang} 应经真实设置服务保存成功`)
+    }
+    const assertPaint = (report: FixtureReport, lang: 'en' | 'zh-cn'): void => {
+      const expected = lang === 'en' ? 'T02 test addon settings' : 'T02 测试组件设置'
+      assert(report.titleText === expected, `组件标题应随 ${lang} 更新，实际 ${JSON.stringify(report)}`)
+      assert(report.titleColor === 'rgb(0, 120, 200)' && report.visible === true,
+        `组件标题应可见且授权 CSS 真正生效，实际 ${JSON.stringify(report)}`)
+    }
+    try {
+      await setLanguage('en')
+      await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+      await poll('设置页打开并就绪', async () => {
+        const info = (await vscode.commands.executeCommand('onegayi.vsidian._test.settingsPageInfo')) as
+          | { open: boolean; ready: boolean } | undefined
+        return info?.open && info.ready ? true : undefined
+      })
+      // 现有会话恢复入口选择真实组件设置分页；随后经正式消息打开详情，
+      // 页面自行发 openAddonPage，确保组件是在可见详情里绘制而非离屏挂载。
+      await vscode.commands.executeCommand('onegayi.vsidian._test.injectSettingsPageMessage', {
+        kind: 'settings.uiState', section: 'addon-settings', scrollTop: 0,
+      })
+      await vscode.commands.executeCommand('onegayi.vsidian._test.injectSettingsPageMessage', { kind: 'settings.get' })
+      await vscode.commands.executeCommand('onegayi.vsidian._test.injectSettingsPageMessage', {
+        kind: 'addons.settingsOpen', addonId: ADDON_ID,
+      })
+      const initial = await pollDiag('英文首帧组件标题绘制', async () => {
+        const stats = await fixtureStats()
+        return stats.reportsLog.find((report) => report.topic === 'settingsLocale' &&
+          report.phase === 'initial' && report.locale === 'en' && !previousInstances.has(report.instanceId))
+      })
+      assertPaint(initial, 'en')
+      assert(initial.changeCount === 0, '订阅不回放，首帧文案由 locale.get() 渲染')
+      await pollDiag('组件首帧挂载回执', async () => {
+        const stats = await fixtureStats()
+        return stats.settingsEchoCalls === before.settingsEchoCalls + 1 ? true : undefined
+      })
+      await clearBridgeEvents()
+      for (const [lang, changeCount] of [['zh-cn', 1], ['en', 2]] as const) {
+        await setLanguage(lang)
+        const changed = await pollDiag(`组件标题切换为 ${lang}`, async () => {
+          const stats = await fixtureStats()
+          return stats.reportsLog.find((report) => report.topic === 'settingsLocale' &&
+            report.instanceId === initial.instanceId && report.phase === 'change' &&
+            report.locale === lang && report.changeCount === changeCount)
+        })
+        assertPaint(changed, lang)
+        assert(changed.generation === initial.generation, '语言热更不得替换装载代次')
+        await poll('平台设置标题同步切换', async () => {
+          const info = (await vscode.commands.executeCommand('onegayi.vsidian._test.settingsPageInfo')) as
+            | { title: string } | undefined
+          return info?.title === LOCALE_MESSAGES[lang]['settings.pageTitle'] ? true : undefined
+        })
+        const stats = await fixtureStats()
+        assert(stats.settingsEchoCalls === before.settingsEchoCalls + 1, '语言热更不得再次调用组件工厂')
+        const events = await bridgeEvents()
+        assert(!events.some((event) => event.panel === 'settings' && event.addonId === ADDON_ID &&
+          (event.kind === 'directive.load' || event.kind === 'directive.unload')),
+        '语言切换不得卸载/重新装载组件设置页')
+      }
+    } finally {
+      await vscode.commands.executeCommand('onegayi.vsidian._test.addonSettingsCloseArea')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.addonCloseSettingsPage')
+      await vscode.commands.executeCommand('onegayi.vsidian._test.closeSettingsPage')
+      await setLanguage(typeof originalLanguage === 'string' ? originalLanguage : 'auto')
+    }
+    console.log('[#582] 组件设置页 en→zh→en 真宿主语言消费通过（标题/计算色/可见性/同实例热更）')
   }],
 
   ['附加组件 T02：停用偏好持久层写入（重启语义由单测钉住）（#351）', async () => {

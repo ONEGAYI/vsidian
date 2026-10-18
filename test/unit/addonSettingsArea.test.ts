@@ -23,6 +23,10 @@ import { AddonSection } from '../../src/webview/addonSettingsSection'
 import { AddonBehaviorManageSection } from '../../src/webview/addonBehaviorManageSection'
 import { AddonSettingsAreaSection, ADDON_SETTINGS_SECTION_ID } from '../../src/webview/addonSettingsAreaSection'
 import { AddonSettingsContextRuntime } from '../../src/webview/addonSettingsContext'
+import { ADDON_PAGE_REGISTRY_GLOBAL, installAddonPageLoader } from '../../src/webview/addonPageLoader'
+import type { AddonPageRegistration } from '../../src/shared/addonPage'
+import { bootLocaleFromDocument, handleLocaleChangedMessage } from '../../src/webview/localeBoot'
+import { buildLocaleIslandHtml } from '../../src/shared/locales/island'
 
 installLocale('zh-cn', zhCn)
 
@@ -1192,6 +1196,85 @@ describe('#553 详情自绘页优先：首屏形态与打开语义', () => {
       { id: ADDON_ID, label: 'Demo', official: false, status: 'registered', hasSettingsDefinitions: true, hasSettingsPage: true },
     ], openAddonSettingsPage ?? null)
   }
+
+  it('#582 生产设置外壳换语言重建时保留真实 SDK 组件根、输入状态与订阅', async () => {
+    const language = vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-US')
+    const island = document.createElement('div')
+    island.innerHTML = buildLocaleIslandHtml('zh-cn', zhCn)
+    document.body.append(island)
+    expect(bootLocaleFromDocument()).toBe(true)
+    const host = document.createElement('div')
+    const h = makeView(host, new AddonSettingsContextRuntime())
+    document.body.append(h.parent)
+    const globals = globalThis as unknown as Record<string, unknown>
+    const previousRegistry = globals[ADDON_PAGE_REGISTRY_GLOBAL]
+    const registrations: AddonPageRegistration[] = []
+    globals[ADDON_PAGE_REGISTRY_GLOBAL] = registrations
+    const changes: string[] = []
+    let factories = 0
+    const loader = installAddonPageLoader({
+      page: 'settings', mountContainer: host, send: () => {}, now: () => 1000,
+      loadScript: async () => {
+        registrations.push({ addonId: ADDON_ID, registeredAt: 1000, factory(sdk) {
+          factories += 1
+          const root = sdk.mountRoot()!
+          root.className = 'locale-consumer'
+          const title = document.createElement('p')
+          const input = document.createElement('input')
+          let edits = 0
+          input.addEventListener('input', () => { edits += 1 })
+          const render = (lang: string): void => {
+            title.textContent = lang === 'zh-cn' ? '组件设置' : 'Addon settings'
+            title.dataset.edits = String(edits)
+          }
+          render(sdk.locale!.get())
+          sdk.locale!.onChange((lang) => { changes.push(lang); render(lang) })
+          root.append(title, input)
+        } })
+        return { ok: true }
+      },
+    })
+    try {
+      openSettingsAreaPage(h)
+      h.dispatch(customAddonsState(ADDON_ID))
+      h.dispatch(settingsState({ hasCustomPage: true, openAddonSettingsPage: ADDON_ID }))
+      expect(await loader.load({ addonId: ADDON_ID, generation: 1, page: 'settings',
+        scriptUri: 'https://fixture.test/settings.js', cssUris: [] })).toMatchObject({ ok: true })
+      const root = h.parent.querySelector<HTMLElement>('.locale-consumer')!
+      const input = root.querySelector('input')!
+      expect(navigator.language).toBe('en-US')
+      expect(root.querySelector('p')?.textContent).toBe('组件设置')
+      expect(changes).toEqual([])
+      input.value = 'unsaved component draft'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      let shell = h.parent.querySelector('.vsidian-addons-settings')
+      for (const [lang, messages, title] of [['en', en, 'Addon settings'], ['zh-cn', zhCn, '组件设置']] as const) {
+        handleLocaleChangedMessage({ kind: 'locale.changed', lang, messages })
+        // 平台 shell 确实重建，同时组件节点、监听器闭包与未保存值都保留。
+        expect(h.parent.querySelector('.vsidian-addons-settings')).not.toBe(shell)
+        shell = h.parent.querySelector('.vsidian-addons-settings')
+        expect(h.parent.querySelector('.locale-consumer')).toBe(root)
+        expect(root.isConnected).toBe(true)
+        expect(root.querySelector('input')).toBe(input)
+        expect(input.value).toBe('unsaved component draft')
+        expect(root.querySelector('p')?.textContent).toBe(title)
+        expect(root.querySelector('p')?.dataset.edits).toBe('1')
+        expect(h.parent.querySelector('.vsidian-settings-title')?.textContent).toBe(messages['settings.pageTitle'])
+        expect(h.parent.querySelector('.vsidian-addons-detail-tab')?.textContent).toBe(messages['addons.detailCustomViewTab'])
+      }
+      expect(changes).toEqual(['en', 'zh-cn'])
+      expect(factories).toBe(1)
+      expect(loader.stats().active).toEqual([{ addonId: ADDON_ID, generation: 1 }])
+    } finally {
+      await loader.disposeAll()
+      h.view.dispose()
+      h.parent.remove()
+      island.remove()
+      globals[ADDON_PAGE_REGISTRY_GLOBAL] = previousRegistry
+      language.mockRestore()
+      installLocale('zh-cn', zhCn)
+    }
+  })
 
   it('hasCustomPage 详情渲染即自动上送 openAddonPage（无需用户点击）；应答未达期间重复推送不重发', () => {
     const { host } = customHost()
