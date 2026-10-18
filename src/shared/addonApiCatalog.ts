@@ -46,7 +46,7 @@ export interface AddonApiGroup {
   readonly order: number
 }
 
-/** 分层：stable-candidate = 随 1.0.0 候选冻结的稳定面；experimental = 实验入口 */
+/** 分层：stable-candidate = 稳定 API 面，发行状态见台账与条目说明；experimental = 实验入口 */
 export type AddonApiLayer = 'stable-candidate' | 'experimental'
 
 /** 执行端：host = 组件宿主代码（扩展进程）；editor-page / settings-page = 页面代码 */

@@ -169,4 +169,6 @@ T03 自动化运行证据随票面实施回填，人工验收仍开放。内部�
 | 真宿主偏好变化 | 集 `addonT02Cases` + `t02Settings`：实际 `general.language` 设置更新 → 设置页 locale.changed → 公开 sdk.locale 回显；平台/组件文本与计算色、组件实例和状态保持 |
 | 公开签名与兼容性 | `publicApiConsumer`：get/callback 均 string、退订函数、locale 可选、旧 SDK 形状仍可赋值；`addonApiSurface` / `addonApiRefGen`：公开导入与独立目录条目；生成参考与历史门禁 |
 
-执行边界：浏览器与真宿主新增回归已编写，构建/类型检查单独记录；当前实施环境的 OS socket 权限阻止浏览器/GUI/VSCode 宿主启动，未执行这些图形用例，也未绕过限制。它们需在可运行图形宿主的 CI/授权环境实际运行后，才能更新为绘制层验收通过；单元通过不能替代该结论。
+执行边界：浏览器与真宿主新增回归已编写，构建/类型检查单独记录；实施环境因 OS socket 权限限制未本地执行图形用例，也未绕过限制。绘制层验收由合并后 CI 补齐：[run 39093360036](https://github.com/ONEGAYI/vsidian/actions/runs/39093360036)（合并提交 `0fb73eb1`，12 job 全绿）——browser 的 `addonSettingsContext` 确认 #582 首帧语言、zh↔en 绘制与组件实例/未保存输入保留；真宿主分片确认 en→zh→en 的平台/组件文本、计算色、可见性与同实例热更。单元通过不替代绘制层证据的口径不变，后续图形变更仍须重走该层验证。
+
+编辑器页端点：locale facet 双页同一代码路径（装载器无条件装配，无 page 分支），`addonPageLocale` 单测 `describe.each(['editor', 'settings'])` 两页对拍钉住同形；图形/真宿主级消费验证目前落在设置页，编辑器页的图形级消费断言待后续票补齐（编辑器页 `locale.changed` 既有链路已有既有语言切换用例覆盖，残余风险仅在真实编辑器 webview 内组件热渲染的最后集成缝）。
