@@ -176,6 +176,25 @@ describe('附加组件公开声明消费面（T13）', () => {
     expect(source.includes('settingsScopeSample'), '消费面应含作用域快照消费样例').toBe(true)
   })
 
+  it('#582 页面语言通过公开声明消费，兼容旧 SDK 的可选性有编译期保护', () => {
+    const source = readFileSync(consumerPath, 'utf8')
+    const sf = ts.createSourceFile(consumerPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const pageImports = sf.statements.filter(ts.isImportDeclaration).filter((node) =>
+      ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text.endsWith('/addonPage'),
+    )
+    const symbols = pageImports.flatMap((node) => {
+      const bindings = node.importClause?.namedBindings
+      return bindings && ts.isNamedImports(bindings) ? bindings.elements.map((entry) => entry.name.text) : []
+    })
+    expect(symbols).toContain('AddonLocaleFacet')
+    expect(source).toContain("| 'locale'")
+    for (const pinned of [
+      'LocaleSurface', 'localeSnapshotPinned', 'localeCallbackPinned', 'localeUnsubscribePinned',
+      'localeOptionalPinned', 'sdkWithoutLocaleCompatible', 'consumePageLocale',
+    ]) expect(source, `消费面应钉住 ${pinned}`).toContain(pinned)
+    expect(source).not.toMatch(/navigator\.(?:language|languages)/)
+  })
+
   it('v1.1.0 主题公开符号兼容形状已进消费面（PR #581 评审发现 3：双参调用与 deprecated 常量防回潮）', () => {
     // 从消费面移除任一兼容消费（CODEX_THEME_ID 值导入、双参调用样例、
     // 兼容钉住字段）或再收窄公开签名即红——弃用路径而非删除由本断言与

@@ -2,7 +2,7 @@
 
 > 本文档由 `scripts/genAddonApiRef.mjs` 从语义清单与发行台账单一事实源（`src/shared/addonApiCatalog.ts`）及各事实源模块的 TypeScript 声明自动生成，**禁止手改**；新鲜度由 `npm run check:addonapi` 校验。接入流程、构建桥、调试与迁移的叙述性内容见[开发指南](developer-guide.md)；示例仓库的准备说明见[示例仓库准备](example-repo-plan.md)。
 
-**诚实声明**：当前所有条目与版本均为**候选状态，尚未对外发布**——Vsidian 尚未发行任何稳定 API、SDK 包或独立示例仓库。候选形状已随 T01–T12 的消费样例冻结，发行前不产生兼容承诺。
+**诚实声明**：稳定 API 已有实际发行，版本与日期以发行台账为准，已发行能力受兼容承诺约束。开发中的新增能力仍未发行，以条目说明与 CHANGELOG-API 的 Unreleased 为准；条目分层不等同于发行版本。
 
 ## 状态、版本与发行台账
 
@@ -45,6 +45,7 @@
     - [`addon-status` 组件状态模型与设置页呈现](#addon-status)
   - [2. 页面 SDK](#2-页面-sdk)
     - [`page-sdk` 注入组件工厂的页面 SDK](#page-sdk)
+    - [`page-locale` 页面生效语言快照与订阅（locale）](#page-locale)
     - [`page-settings-context` 设置页上下文面（settingsContext）](#page-settings-context)
     - [`page-load-protocol` 页面装载协议（指令与出站消息）](#page-load-protocol)
     - [`page-bridge` SDK 构建桥（vsidian-addon-sdk 虚拟模块）](#page-bridge)
@@ -85,7 +86,7 @@
 
 ### `manifest-declaration` 私有身份声明（vsidianAddon 清单字段）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#350（T01）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#350（T01）
 
 **目标**：组件在自己的 package.json 顶层用私有字段声明身份与兼容范围。没有声明的普通扩展不进入组件列表；声明非法者保留状态与原因，不静默忽略。
 
@@ -127,7 +128,7 @@ export type AddonDeclarationParseResult =
 
 ### `compatibility` 兼容判定（稳定 API 范围与实验入口）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#350（T01）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#350（T01）
 
 **目标**：声明的 api 范围须包含宿主当前稳定 API 版本（首个候选 1.0.0）；声明的实验入口逐项核对宿主已提供且版本匹配。API 版本独立于 Vsidian 本体版本号。
 
@@ -190,7 +191,7 @@ export function checkAddonCompatibility(
 
 ### `register-addon` 宿主注册入口（registerAddon）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#350（T01）、#351（T02）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#350（T01）、#351（T02）
 
 **目标**：Vsidian activate() 返回的公开导出 API：组件经 extensions.getExtension('onegayi.vsidian').exports 调用 registerAddon 接入。owner 为调用者的原生 Extension 身份，组件激活中即可调用（不要求 isActive）。
 
@@ -229,7 +230,7 @@ export const VSIDIAN_EXTENSION_ID = 'onegayi.vsidian'
 
 ### `addon-definition` 注册定义与两段生命周期（setup/enable）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#351（T02）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#351（T02）
 
 **目标**：设置接入与运行功能分别管理：setup 注册设置定义、自己的设置页与设置通信（普通停用后保留）；enable 注册编辑器页面入口与运行功能（按用户功能开关启停）。
 
@@ -291,7 +292,7 @@ export interface AddonRegistrationHandle {
 
 ### `official-registry` 官方（核心）组件登记表
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#354（T05）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#354（T05）
 
 **目标**：官方归属只由主仓库维护的扩展 ID 清单判定（唯一入口 isOfficialAddon）；组件不能自行声明「核心」。表内已登记首个官方组件 vsidian-easy-typing，后续官方组件发布时增行登记。
 
@@ -327,7 +328,7 @@ export const OFFICIAL_ADDON_EXTENSION_IDS: readonly string[] = OFFICIAL_ADDON_RE
 
 ### `addon-status` 组件状态模型与设置页呈现
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#350（T01）、#355（T06 运行状态）、#472（搜索摘要）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#350（T01）、#355（T06 运行状态）、#472（搜索摘要）
 
 **目标**：设置页「附加组件」分页的状态载荷：七种状态覆盖注册、唤醒在途、待注册、不兼容、激活失败、宿主不可查与声明非法；故障暂停标注但不改变「已启用」归类。#472 起已注册有定义组件附带 settingsSearchIndex 摘要（定义 title/description 与组声明——组件设置分页全局搜索索引的数据源，随 addons.state 既有链路推送）。
 
@@ -390,7 +391,7 @@ export type AddonStatusKind =
 
 ### `page-sdk` 注入组件工厂的页面 SDK
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页、设置页 · **引入**：#351（T02），facet 随 T06–T11 与 #553 增补
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页、设置页 · **引入**：#351（T02），facet 随 T06–T11 与 #553 增补
 
 **目标**：装载器核对入口身份后调用工厂注入 SDK：装载身份（组件 ID + 代次 + 页面种类）、七个能力 facet（views/behaviors/behaviorState/settingsContext/commands/menus/renderers 等）、CM6 扩展登记、设置页挂载根、资源地址与释放回调。
 
@@ -409,6 +410,9 @@ export type AddonStatusKind =
 export interface VsidianAddonPageSdk {
   /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */
   readonly addon: { id: string; generation: number; page: AddonPageKind }
+  /** #582 编辑器页与设置页均提供；可选声明兼容旧宿主与既有 SDK 消费方。
+   *  随平台语言即时通知，不重载组件工厂或丢失页面状态。 */
+  readonly locale?: AddonLocaleFacet
   /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
    *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =
    *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）；
@@ -488,9 +492,39 @@ export type AddonPageKind = 'editor' | 'settings'
 
 **验证**：`test/unit/addonPageLoader.test.ts`、`test/browser/addonPageSdk.mjs`、`test/integration/suite/addonT02Cases.ts`
 
+### `page-locale` 页面生效语言快照与订阅（locale）
+
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页、设置页 · **引入**：#582
+
+**目标**：#582 新增只读 sdk.locale：组件按平台生效语言选择自己的文案，语言切换时就地更新已挂载界面，不重载工厂或清空组件状态。本能力开发中，尚未计入已发行 API 版本；旧宿主须特性检测。
+
+语义要点：
+- **适用模式**：编辑器页与设置页均提供，与 live/reading 模式无关。SDK 声明为可选成员以兼容旧宿主与既有结构化消费者；本面没有语言设置写入成员。
+- **生命周期**：get 同步读取当前快照，查询不受代次释放影响。onChange 不立即回放，首值由 get 读取；只在生效语言代码变化时通知，同语言换包不重发，回调前 get 已是新值。同一回调的多次订阅独立；返回幂等退订函数，所属装载释放时自动全部回收，已释放代次的迟到订阅为 no-op。
+- **错误与拒绝**：订阅回调同步抛错按既有主题环境口径归因上报组件运行期故障，由宿主裁决暂停；不阻断平台语言刷新与其他组件的通知。
+- **多语言与本地化**：与平台 UI 共用 resolveLocale(general.language, vscode.env.language) 的生效结果：显式偏好优先，auto 跟随宿主显示语言。页面只读首帧数据岛与 locale.changed 已装配的 i18n 快照，不读取 navigator.language、操作系统语言或裸宿主语言作为旁路。当前代码为 en / zh-cn，公开返回类型为 string；仅缺失或损坏语言启动数据时沿用内核空串，不伪造回退语言。
+
+签名事实源：`src/shared/addonPage.ts`
+
+```ts
+/** #582 页面生效语言：与平台 UI 共用 general.language 偏好 + 宿主显示
+ *  语言解析后的快照，不读取浏览器/操作系统语言。 */
+export interface AddonLocaleFacet {
+  /** 当前语言代码（现有 en / zh-cn；string 为后续语言留口）。仅平台尚未
+   *  成功装配语言包时为空串，与内核快照一致；只读查询不受代次释放影响。 */
+  get(): string
+  /** 只通知语言代码变化，不立即回放（首值经 get 读取）；回调前快照已
+   *  更新。同一回调可独立多次订阅；返回幂等退订，代次释放自动回收，
+   *  已释放代次的迟到订阅为 no-op。回调异常按组件运行期故障上报。 */
+  onChange(listener: (locale: string) => void): () => void
+}
+```
+
+**验证**：`test/unit/addonPageLocale.test.ts`、`test/unit/addonSettingsArea.test.ts`、`test/unit/addonApiSurface.test.ts`、`test/addonApi/publicApiConsumer.ts`、`test/browser/addonSettingsContext.mjs`、`test/integration/suite/addonT02Cases.ts`
+
 ### `page-settings-context` 设置页上下文面（settingsContext）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：设置页 · **引入**：#553
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：设置页 · **引入**：#553
 
 **目标**：#553 详情自绘页优先起设置页提供的平台上下文：作用域标签状态（用户默认/当前工作区 + 工作区在场）与全局设置搜索的定位目标（定义/分组键）的快照读取与变化订阅——组件自绘设置页据此对齐「当前写到哪一层」并承接搜索跳转的页内定位（切自己的页内 Tab 并定位控件），不读取平台私有 DOM。
 
@@ -534,7 +568,7 @@ export interface AddonSettingsLocateTarget {
 
 ### `page-load-protocol` 页面装载协议（指令与出站消息）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页、设置页 · **引入**：#351（T02）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页、设置页 · **引入**：#351（T02）
 
 **目标**：宿主与页面之间的装载/卸载/通道/故障消息形状。装载实现细节（作者一般经构建桥间接使用，不直接记忆桥接名）；每 webview 资源独立授权，不复用另一页 URI。
 
@@ -638,7 +672,7 @@ export type AddonPageOutbound =
 
 ### `page-bridge` SDK 构建桥（vsidian-addon-sdk 虚拟模块）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页、设置页 · **引入**：#349（V02 验证）、#351（T02 生产化）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页、设置页 · **引入**：#349（V02 验证）、#351（T02 生产化）
 
 **目标**：构建辅助工具提供的作者入口：defineAddonPage 在 IIFE 执行时把工厂推入全局登记表（作者不手写全局变量），currentSdk 读装载器注入槽（仅工厂执行期可靠）。
 
@@ -663,7 +697,7 @@ export function currentSdk(): VsidianAddonPageSdk | undefined
 
 ### `document-navigation` 文档打开与定位（views.openDocument）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#543（扩展批次 T03）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#543（扩展批次 T03）
 
 **目标**：组件提交来源实例、目标路径与互斥定位，由宿主打开 Markdown 或原生文本并报告实际打开与定位结果；不提供任意文件读取面。
 
@@ -729,7 +763,7 @@ export type AddonDocNavResult =
 
 ### `views-editor` 统一视图与编辑面（views / editor）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#355（T06）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#355（T06）
 
 **目标**：主正文、嵌入内部 Live 与悬停引用共用统一句柄：枚举/订阅实例、读取快照、提交文本修饰（默认原子或显式 joinPrevious）、选区与定位。操作始终归当前目标文档——在引用 B 中编辑不误改父文档 A。
 
@@ -1135,7 +1169,7 @@ export function addonHostSettingGet(
 
 ### `ref-views-popup` 只读引用浮窗请求（refViews）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#544（T05）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#544（T05）
 
 **目标**：组件请求内核只读引用浮窗（T05 #544，规格 addon-reference-views.md）：在触发文字或自有控件旁打开目标引用浮窗，获取本次请求的关闭句柄。宿主复用 hoverDocAccess/refContent 的来源、准入、读取、租约与刷新链——组件不重新实现内容渲染，也不因请求呈现取得写目标文档的能力。
 
@@ -1275,7 +1309,7 @@ export function buildAddonRefHoverTarget(target: AddonRefTargetSpec): string | n
 
 ### `ref-views-embed` 只读引用组件容器嵌入（refViews.mountEmbed）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#545（T06）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#545（T06）
 
 **目标**：组件在自有容器挂载内核只读引用子根（T06 #545，规格 addon-reference-views.md §6）：sdk.refViews.mountEmbed 把内核引用卡片（与正文 ![[…]] 嵌入同款装配）挂进本组件已取得的面板内容根或渲染内容根（可为其后代），复用成熟的内容展示与既有目标访问链（来源解析/只读能力/预算/订阅/释放），不重新实现渲染，也不因请求呈现取得写目标文档的能力。本请求零正文写入、零撤销项——插入 ![[…]] 仍由既有编辑 API 显式执行。
 
@@ -1348,7 +1382,7 @@ export function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {
 
 ### `theme-environment` 主题环境快照与订阅（themeEnvironment）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#546（T07）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#546（T07）
 
 **目标**：编辑器页 SDK 的只读主题环境面（sdk.themeEnvironment，#546/H-U06–U07）：读取 VSCode 实际生效主题的明暗快照并订阅变化——主题组件据此更新已挂载图形。不扩充为任意 VSCode configuration 读取（白名单语义与 hostSettings 同边界）。
 
@@ -1415,7 +1449,7 @@ export function isAddonThemeEnvironmentPayload(value: unknown): value is AddonTh
 
 ### `channel` 页面与宿主通道
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码、编辑器页、设置页 · **引入**：#351（T02）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码、编辑器页、设置页 · **引入**：#351（T02）
 
 **目标**：组件宿主代码与自身页面之间的 JSON 请求/结果传递：页面侧 sdk.channel.request，宿主侧 channel.handle 注册 topic 处理器。载荷与结果必须是可序列化数据——不能把 DOM、函数或编辑器实例传过桥。
 
@@ -1454,7 +1488,7 @@ export type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknow
 
 ### `behaviors-register` 输入行为注册与观察
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#356（T07）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#356（T07）
 
 **目标**：注册可组合输入行为：稳定局部 ID + 必填名称（单语言字符串或多语言映射，映射按页面语言渲染）+ 可选说明/例子/独占组 + 业务回调。onChanged 为只读观察（通知与修饰分别注册——不是原输入链的第二写入口）。
 
@@ -1608,7 +1642,7 @@ export type AddonBehaviorRegisterResult =
 
 ### `behavior-order-state` 行为顺序与逐项开关持久
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#357（T08）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#357（T08）
 
 **目标**：行为的持久身份 = 组件 ID + 局部 ID（不以显示名为存储键——改名/本地化不丢配置）；用户排序保留相对次序，新项按默认序（完整键字典序）追加，逐项关闭保留存储。
 
@@ -1703,7 +1737,7 @@ export function mergeBehaviorOrderPreservingUnknown(
 
 ### `behavior-enabled-state` 行为禁用态只读可见面
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页、设置页 · **引入**：#476
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页、设置页 · **引入**：#476
 
 **目标**：SDK behaviorState 面（独立于 behaviors 面，编辑器页与设置页均提供）：enabledState() 立即返回本组件行为启用快照（组件运行态 + 本组件被禁行为局部 id 集），onEnabledChange(cb) 订阅变化（返回退订）。只读——无任何写入宿主状态的成员（两层开关语义的平台侧答案：宿主层只报事实，写入归宿主行为管理）。
 
@@ -1766,7 +1800,7 @@ export function behaviorDisabledLocalIds(disabledKeys: readonly string[], addonI
 
 ### `addon-storage` 组件数据目录与文件监听
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#404
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#404
 
 **目标**：每组件一个安装目录外的隔离可写数据目录（globalStorage 语义）与目录内文件监听：富结构数据（规则对象等，超出设置存储一层嵌套边界）自由读写，外部同步工具改写文件后自动重载。宿主侧 setup/enable 上下文同形状；页面侧组件经自己的 channel topic 桥接宿主读写。
 
@@ -1944,7 +1978,7 @@ export interface AddonStorageFsPort {
 
 ### `settings-context` 宿主设置能力面（setup 上下文）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）
 
 **目标**：setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。
 
@@ -1995,7 +2029,7 @@ export interface AddonSettingsChangeEventData {
 
 ### `settings-definitions` 可序列化设置定义与值校验
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#353（T04）、#473/#475（呈现形态）、#472（分组）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#353（T04）、#473/#475（呈现形态）、#472（分组）
 
 **目标**：设置定义可序列化：标量（boolean/number/string）、数组（重复项）与对象（字段表）一层结构；有限数、长度、枚举约束由定义描述——不存在函数校验器形态。string 定义可声明呈现层形态：enumLabels 枚举档位标签（直值或多语言映射）与 multiline 多行文本（#473/#475）。#472 分组（引用式）：定义可选 group 字段引用组键，组元数据（title/description 为 AddonLocalizedText）经注册载荷声明一次、声明序即呈现序；组键组件内唯一、引用未声明组键整批拒绝。
 
@@ -2211,7 +2245,7 @@ export function addonSettingValueMatches(def: AddonSettingDefinition, value: unk
 
 ### `settings-scope` 作用范围解析与存储
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#353（T04）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#353（T04）
 
 **目标**：生效值解析：工作区显式 > 用户默认显式 > 出厂默认；两层存储同构（globalState / workspaceState），结构 version 1 冻结。
 
@@ -2285,7 +2319,7 @@ export function parseAddonSettingsStore(raw: unknown): Record<string, Record<str
 
 ### `renderers-register` 渲染提供者注册
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#358（T09）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#358（T09）
 
 **目标**：为一个或多个代码块语言提供渲染候选（可替代内置，含 Mermaid）：可序列化声明上报宿主参与确定性选择，mount/refresh/release 回调留本页执行；可选登记图形导出（exportSvg——弹窗与导出链路共用）。
 
@@ -2354,7 +2388,7 @@ export interface AddonRendererCandidate extends AddonRendererProviderInfo {
 
 ### `renderer-selection` 确定性选择、自动接管与首选恢复
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#358（T09）、#546（T07 主题例外）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#358（T09）、#546（T07 主题例外）
 
 **目标**：选择单位是提供者、挂载单位是某视图中的某个代码块。默认序按（发现批次升序, providerId 升序）取末位生效（内置视作批次 0）；用户显式首选优先且不可用时按默认序回退（首选记录不清除）。#546 起主题关联提供者例外：不参与默认序与按语言首选，仅主题单选选中且可用时对其声明语言生效（RendererThemeSelectionContext 注入）。
 
@@ -2530,7 +2564,7 @@ export interface AddonRendererStoreV1 {
 
 ### `themes-register` 主题目录登记与唯一选择
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#546（T07）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#546（T07）
 
 **目标**：组件在 enable 生命周期经 context.themes.register 登记主题元数据（稳定身份 + 多语言名 + 本组件提供者关联）——宿主目录不依赖打开编辑器页面；主题目录与唯一首选驱动设置页「主题」页签单选与渲染生效。#546（T07）首版候选；#535（T08）内核 Codex 退役：无老用户存量、不做激活迁移与引导（2026-10-17 用户裁决），Codex 改由附加组件提供。
 
@@ -2703,7 +2737,7 @@ export interface AddonEnableContext extends AddonRegistrationContext {
 
 ### `commands-register` 命令注册与统一快捷键
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#359（T10）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#359（T10）
 
 **目标**：新增自己的可绑定命令（title 自由文本，不进 Vsidian 内置字典）：进入统一快捷键管理（冲突检查/绑定/显式清空/恢复默认）与宿主命令面板；执行链三入口（快捷键路由、宿主命令面板、菜单项点击）共用组件回调。#427 起回调携带目标视图句柄（AddonViewHandle | null）——平台在执行时刻解析当前活动视图（焦点嵌入内部 Live → 该实例，否则主正文；无活动视图 null），组件无需自建焦点探针防御链。
 
@@ -2777,7 +2811,7 @@ export interface AddonSdkCommandsFacet {
 
 ### `menus-register` 菜单项注册
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#359（T10）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#359（T10）
 
 **目标**：向统一右键菜单新增自己的菜单项：组件簇（addon.<组件 ID>）追加在内置三簇之后；label 自由文本，iconKey 须已在平台图标 key 表登记（组件不能注入新图标资产）。
 
@@ -2852,7 +2886,7 @@ export interface AddonSdkMenusFacet {
 
 ### `ui-buttons-panels` 工具栏按钮与面板
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：编辑器页 · **引入**：#360（T11）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#360（T11）
 
 **目标**：往平台预定义挂载点新增自己的界面元素：按钮唯一合法槽是工具栏左组尾部容器，面板唯一宿主是主编辑区尾部 dock（面板 chrome 与 dock 样式归平台，内容根内部样式归组件）。按钮动作二选一：挂接已注册命令（点击经命令体系执行、键位徽章取生效绑定）或自带回调。
 
@@ -2954,7 +2988,7 @@ export interface AddonSdkUiFacet {
 
 ### `paste-rules-register` 声明式粘贴规则注册（enable 生命周期）
 
-**分层**：稳定候选（随 1.0.0 候选冻结，未发行） · **执行端**：组件宿主代码 · **引入**：#541（T01）；#542（T02 正则/条件/嵌套）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#541（T01）；#542（T02 正则/条件/嵌套）
 
 **目标**：组件在宿主运行生命周期（enable 上下文的 paste 面）登记可序列化粘贴转换规则：全部已打开与新打开的编辑器页面共用同一组有效规则，在富文本粘贴的 HTML→Markdown 遍历中消费——来源特化元素（如带私有属性的 span）可恢复为 Markdown 链接等结构，来源识别不进入内核。
 

@@ -23,7 +23,7 @@ import ts from 'typescript'
 
 /** 分层徽标（参考文档的诚实边界：候选不是已发布） */
 const LAYER_LABELS = {
-  'stable-candidate': '稳定候选（随 1.0.0 候选冻结，未发行）',
+  'stable-candidate': '稳定 API 面（发行状态见台账与条目说明）',
   experimental: '实验入口（不随稳定 API 弃用期限承诺）',
 }
 
@@ -136,6 +136,10 @@ export function buildApiReferenceMarkdown(data, signatures) {
     })
     .join('\n')
 
+  const hasPublishedApi = releases.some((record) => ['released', 'deprecated', 'removed'].includes(record.status))
+  const publicationNotice = hasPublishedApi
+    ? '稳定 API 已有实际发行，版本与日期以发行台账为准，已发行能力受兼容承诺约束。开发中的新增能力仍未发行，以条目说明与 CHANGELOG-API 的 Unreleased 为准；条目分层不等同于发行版本。'
+    : '当前所有条目与版本均为**候选状态，尚未对外发布**——Vsidian 尚未发行任何稳定 API、SDK 包或独立示例仓库。候选形状已随 T01–T12 的消费样例冻结，发行前不产生兼容承诺。'
   const statusSection = renderReleases(releases)
 
   const body = groupsOrdered
@@ -156,7 +160,7 @@ ${items}`
 
 > 本文档由 \`scripts/genAddonApiRef.mjs\` 从语义清单与发行台账单一事实源（\`src/shared/addonApiCatalog.ts\`）及各事实源模块的 TypeScript 声明自动生成，**禁止手改**；新鲜度由 \`npm run check:addonapi\` 校验。接入流程、构建桥、调试与迁移的叙述性内容见[开发指南](developer-guide.md)；示例仓库的准备说明见[示例仓库准备](example-repo-plan.md)。
 
-**诚实声明**：当前所有条目与版本均为**候选状态，尚未对外发布**——Vsidian 尚未发行任何稳定 API、SDK 包或独立示例仓库。候选形状已随 T01–T12 的消费样例冻结，发行前不产生兼容承诺。
+**诚实声明**：${publicationNotice}
 
 ## 状态、版本与发行台账
 

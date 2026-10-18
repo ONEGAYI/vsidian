@@ -27,6 +27,7 @@ import type {
   AddonChannelOutcome,
   AddonCm6Runtime,
   AddonLoadFailureReason,
+  AddonLocaleFacet,
   AddonPageFactory,
   AddonPageKind,
   AddonSdkCommandsFacet,
@@ -333,6 +334,7 @@ export const loadFailureReasonsPinned: Equals<AddonLoadFailureReason, PinnedLoad
 export type SdkSurface = Pick<
   VsidianAddonPageSdk,
   | 'addon'
+  | 'locale'
   | 'experimental'
   | 'views'
   | 'behaviors'
@@ -349,6 +351,27 @@ export type SdkSurface = Pick<
   | 'channel'
   | 'onDispose'
 >
+
+/** #582 页面语言：两方法只读面，string 为后续语言留口。 */
+export type LocaleSurface = Pick<AddonLocaleFacet, 'get' | 'onChange'>
+export const localeSnapshotPinned: Equals<ReturnType<AddonLocaleFacet['get']>, string> = true
+export const localeCallbackPinned: Equals<Parameters<Parameters<AddonLocaleFacet['onChange']>[0]>, [string]> = true
+export const localeUnsubscribePinned: Equals<ReturnType<AddonLocaleFacet['onChange']>, () => void> = true
+export const localeOptionalPinned: Equals<VsidianAddonPageSdk['locale'], AddonLocaleFacet | undefined> = true
+/** 旧 SDK 结构不提供 locale 仍可赋给新声明；误改必填成员会使本消费编译失败。 */
+export const sdkWithoutLocaleCompatible = (sdk: Omit<VsidianAddonPageSdk, 'locale'>): VsidianAddonPageSdk => sdk
+/** 特性检测后先取首值，再观察变化；旧宿主不猜测浏览器/系统语言。 */
+export const consumePageLocale = (
+  sdk: VsidianAddonPageSdk,
+  renderLabels: (locale: string) => void,
+): (() => void) | undefined => {
+  const locale = sdk.locale
+  if (!locale) return undefined
+  renderLabels(locale.get())
+  const off = locale.onChange(renderLabels)
+  sdk.onDispose(off)
+  return off
+}
 
 /** views 面（枚举/获取/创建/销毁订阅） */
 export type ViewsSurface = Pick<AddonViewsFacet, 'list' | 'get' | 'onCreated' | 'onDisposed' | 'openDocument'>

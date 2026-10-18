@@ -449,6 +449,31 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#351（T02），facet 随 T06–T11 与 #553 增补',
   },
   {
+    id: 'page-locale',
+    group: 'page-sdk',
+    title: '页面生效语言快照与订阅（locale）',
+    layer: 'stable-candidate',
+    endpoints: ['editor-page', 'settings-page'],
+    signatures: [{ module: 'src/shared/addonPage.ts', symbols: ['AddonLocaleFacet'] }],
+    purpose:
+      '#582 新增只读 sdk.locale：组件按平台生效语言选择自己的文案，语言切换时就地更新已挂载界面，不重载工厂或清空组件状态。本能力开发中，尚未计入已发行 API 版本；旧宿主须特性检测。',
+    semantics: {
+      modes: '编辑器页与设置页均提供，与 live/reading 模式无关。SDK 声明为可选成员以兼容旧宿主与既有结构化消费者；本面没有语言设置写入成员。',
+      localization: '与平台 UI 共用 resolveLocale(general.language, vscode.env.language) 的生效结果：显式偏好优先，auto 跟随宿主显示语言。页面只读首帧数据岛与 locale.changed 已装配的 i18n 快照，不读取 navigator.language、操作系统语言或裸宿主语言作为旁路。当前代码为 en / zh-cn，公开返回类型为 string；仅缺失或损坏语言启动数据时沿用内核空串，不伪造回退语言。',
+      lifecycle: 'get 同步读取当前快照，查询不受代次释放影响。onChange 不立即回放，首值由 get 读取；只在生效语言代码变化时通知，同语言换包不重发，回调前 get 已是新值。同一回调的多次订阅独立；返回幂等退订函数，所属装载释放时自动全部回收，已释放代次的迟到订阅为 no-op。',
+      errors: '订阅回调同步抛错按既有主题环境口径归因上报组件运行期故障，由宿主裁决暂停；不阻断平台语言刷新与其他组件的通知。',
+    },
+    verification: [
+      'test/unit/addonPageLocale.test.ts',
+      'test/unit/addonSettingsArea.test.ts',
+      'test/unit/addonApiSurface.test.ts',
+      'test/addonApi/publicApiConsumer.ts',
+      'test/browser/addonSettingsContext.mjs',
+      'test/integration/suite/addonT02Cases.ts',
+    ],
+    introduced: '#582',
+  },
+  {
     id: 'page-settings-context',
     group: 'page-sdk',
     title: '设置页上下文面（settingsContext）',
