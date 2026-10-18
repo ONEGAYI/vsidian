@@ -18836,24 +18836,39 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 5 })
     await typeText('[')
     await typeText('[')
-    await typeText('T02素材-配图.png')
-    await pressKey('#')
-    await poll('非 Markdown 查询状态行到达', async () => {
-      const s = await suggestPaint()
-      return s && s.statusText && /不是 Markdown|not a Markdown/.test(s.statusText) ? s : undefined
-    })
+    const expectTargetStatus = async (target: string, label: string, status: RegExp) => {
+      await typeText(target)
+      let last: ViewState | undefined
+      try {
+        // 文件枚举失效时 # 会被 F7 守卫消费并重查，不能把随后出现的文件
+        // 空态误当成标题状态超时。等当前输入的新鲜枚举，再只按一次 #。
+        await poll(`${target} 文件枚举新鲜`, async () => {
+          last = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
+          return last.text === `来源正文\n[[${target}]]` &&
+            last.paint?.wikilinkSuggest?.fileResultFresh === true ? true : undefined
+        })
+        await pressKey('#')
+        await poll(label, async () => {
+          last = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
+          const s = last.paint?.wikilinkSuggest
+          return s?.statusText && status.test(s.statusText) ? s : undefined
+        })
+      } catch (error) {
+        console.error('[#379 T04] 目标状态最后观测', JSON.stringify({
+          target, hostText: doc.getText(), webviewText: last?.text,
+          selectionOffset: last?.selectionOffset, suggest: last?.paint?.wikilinkSuggest,
+        }))
+        throw error
+      }
+    }
+    await expectTargetStatus('T02素材-配图.png', '非 Markdown 查询状态行到达', /不是 Markdown|not a Markdown/)
     // 清空整个目标区（逐字符退格回空双链），改写不存在目标
     await pressKey('escape')
     for (let i = 0; i < 'T02素材-配图.png#'.length; i++) {
       await pressKey('backspace')
     }
     await poll('清回空双链', () => doc.getText() === '来源正文\n[[]]' ? true : undefined)
-    await typeText('不存在目标.md')
-    await pressKey('#')
-    await poll('不可定位查询状态行到达', async () => {
-      const s = await suggestPaint()
-      return s && s.statusText && /未找到目标文档|not found/.test(s.statusText) ? s : undefined
-    })
+    await expectTargetStatus('不存在目标.md', '不可定位查询状态行到达', /未找到目标文档|not found/)
     await pressKey('escape')
 
     // 收尾：外部链路清回基线并保存两份文档（目标文档恢复磁盘内容）
