@@ -15,7 +15,7 @@
 // 缓冲）随本模块自 syncController 迁入，正文见各方法内注释；协议约定
 // webview 全程 LF 坐标。本票为准备性 expand 改造：不接入引用目标 B 的
 // 生产写端口，不引入独立 history（撤销权威仍在宿主 TextDocument）。
-import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, Transaction, type Extension } from '@codemirror/state'
+import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, Transaction, type Extension, type Text } from '@codemirror/state'
 import { EditorView, ViewPlugin, dropCursor, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
 import { addonInstanceIdField, setAddonInstanceId } from './addonViewIdentity'
@@ -605,6 +605,20 @@ export class LiveEditorInstance {
    *  的实际作用面）；单选区与非塌缩选区（replaceSelection 路径，选区
    *  归 #107 重建等既有链路）不建立——保守收窄干预面。 */
   private multiCursorCompose: { startSelection: EditorSelection; netChanges: ChangeSet } | null = null
+  /** #593 组合期通用净变更材料（组合外为 null）：组合起点文档 + 组合期
+   *  全部文档事务的净变更累积。compositionend 补驱动据此推导 replaced——
+   *  iterChanges 给出起点坐标系下被组合覆盖的区间与文本（典型：组合开始
+   *  时的选区内容），中间态 preedit 的相互替换在 ChangeSet 合成数学中自动
+   *  消解（净变更只表达「起点文档 → 终态文档」差异）。在捕获阶段建立
+   *  （captureCompositionStart，先于 CM6 内建 observer 的冒泡阶段跨行
+   *  选区删除——deferredLocal 同款时序，R1 审查实证）：起点文档先于首笔
+   *  删除抓取，跨行选区的替换侧才不丢失；冒泡 handler 不重复初始化
+   *  （会把已含首笔删除的净变更重置为空）。迟入组合（compositionupdate
+   *  兜底）组合前事务可能已入账，起点差异无法补记，材料缺席退 null 不
+   *  引入新错位（#495 补偿同口径）。与 multiCursorCompose（#495 选区补偿，
+   *  互不依赖；空白格/表格组合（blankComposition 归表格管线）同样建立但
+   *  补驱动门控先行拦截，不消费。 */
+  private composeNetChanges: { startDoc: Text; net: ChangeSet } | null = null
   /** 组合期间到达、待 flush 的外部增量（按到达序） */
   private pendingExternal: BufferedIncremental[] = []
   /** 组合期间到达、待 flush 的全文消息（覆盖增量形态）。source 记录来源
@@ -1232,15 +1246,22 @@ export class LiveEditorInstance {
    * 先于 compositionend 到达且被组合期门控拦截（见 compositionend 处的
    * 实证注释），这里以净定稿文本（event.data）补一次驱动，userEvent 标
    * 'input.type.compose'（行为可据此区分普通键入与 IME 定稿）。
+   * replaced 经组合期净变更推导（#593）：净变更 ChangeSet 定义域为组合
+   * 起点文档，iterChanges 直接给出起点坐标系下被组合覆盖的区间与文本
+   * （与键入路径的事务取法同构）；纯塌缩光标组合为纯插入、迟入组合
+   * （compositionupdate 兜底）材料缺席，均为 null。
    * 门控对齐键入路径的既有情境：空白格/网格组合（blankComposition 在场
    * ——净输入归表格管线规范化）、表格格区（组合开始点标记——定稿事务
    * 已清空 region，开始时刻留存，#124「格区不接管」口径）、代码上下文
    * （定稿落点判 inCodeContext；多选区时只查主选区 head 与 head-1，
    * 是键入路径「全部选区双端」的近似——IME 定稿在多选区下极罕见，
    * 取主落点已覆盖现实输入形态）、取消组合（data 为空）。外部同步与
-   * SDK 修饰不经此路径。
+   * SDK 修饰不经此路径。净变更材料取用即清（所有门控路径统一回收，
+   * 不残留到下一组合）。
    */
   private maybeDriveAddonBehaviorsForComposeCommit(committedText: string): void {
+    const composeNet = this.composeNetChanges
+    this.composeNetChanges = null
     if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined) {
       return
     }
@@ -1255,9 +1276,24 @@ export class LiveEditorInstance {
     if (inCodeContext(state, head - 1) || inCodeContext(state, head)) {
       return
     }
+    // replaced 推导与键入路径（maybeDriveAddonBehaviors）的事务取法同构：
+    // 多删除区间最小包围 + 起点文档按序切片拼接（事务前 LF 坐标）
+    let replacedFrom = -1
+    let replacedTo = -1
+    let replacedText = ''
+    if (composeNet) {
+      composeNet.net.iterChanges((fromA, toA) => {
+        if (toA > fromA) {
+          replacedFrom = replacedFrom < 0 ? fromA : Math.min(replacedFrom, fromA)
+          replacedTo = Math.max(replacedTo, toA)
+          replacedText += composeNet.startDoc.sliceString(fromA, toA)
+        }
+      })
+    }
+    const replaced = replacedFrom < 0 ? null : { from: replacedFrom, to: replacedTo, text: replacedText }
     const instanceId = this.addonBehaviorInstanceId
     queueMicrotask(() => {
-      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: 'input.type.compose', inputText: committedText, replaced: null })
+      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: 'input.type.compose', inputText: committedText, replaced })
     })
   }
 
@@ -2587,7 +2623,16 @@ export class LiveEditorInstance {
       this.markPauseBoundary()
       // CM6 的内建 observer 在冒泡阶段会先删除跨行选区；必须在捕获
       // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
+      // #593 净变更材料同款时序：起点文档必须在删除发生前抓取，跨行
+      // 选区的首笔删除才能进累积（replaced 保留组合开始时刻的原始文本，
+      // R1 审查实证）
       this.composing = true
+      if (this.view) {
+        this.composeNetChanges = {
+          startDoc: this.view.state.doc,
+          net: ChangeSet.empty(this.view.state.doc.length),
+        }
+      }
       this.beginBlankComposition()
       // P2-05：组合开始 = 输入挂起态——置位 settle 检测
       this.notifyInputSettle()
@@ -2807,6 +2852,13 @@ export class LiveEditorInstance {
           if (this.multiCursorCompose && tr.docChanged) {
             this.multiCursorCompose.netChanges = this.multiCursorCompose.netChanges.compose(tr.changes)
           }
+          // #593 组合期通用净变更累积：与 #495 补偿材料共享累积点（组合期
+          // 外部增量经 pendingExternal 缓冲、不在此产生事务——与 #495 同
+          // 前提；取消组合的回退事务同样进累积，净变更回到原点，但补驱动
+          // 门控对空 data 不消费）
+          if (this.composeNetChanges && tr.docChanged) {
+            this.composeNetChanges.net = this.composeNetChanges.net.compose(tr.changes)
+          }
           // T07（#356）输入行为链驱动检测（内核情境门控在检测内先行）
           this.maybeDriveAddonBehaviors(tr, update.state)
           if (!tr.docChanged || tr.annotation(externalSync)) {
@@ -2883,6 +2935,10 @@ export class LiveEditorInstance {
               netChanges: ChangeSet.empty(this.view.state.doc.length),
             }
           }
+          // #593 组合期通用净变更材料在 captureCompositionStart（捕获
+          // 阶段）建立——CM6 内建 observer 在冒泡阶段会先删除跨行选区，
+          // 此处再初始化会把已含首笔删除的净变更重置为空；此处不重复
+          //（迟入 compositionupdate 兜底同样不建，材料缺席退 null）
           this.beginBlankComposition()
         },
         compositionupdate: () => {

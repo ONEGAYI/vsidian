@@ -7,7 +7,9 @@
 //   updateListener 同步段内嵌套 dispatch——修饰先于输入反序出站的实证
 //   修复）；
 // - IME（#399 修订）：组合中间态（composing 在场）不驱动；compositionend
-//   之后的定稿 compose 事务驱动（inputText 含定稿文本）；
+//   之后的定稿 compose 事务驱动（inputText 含定稿文本）；补驱动 replaced
+//   经组合期净变更推导（#593）：起点坐标系被组合覆盖的文本（替换选区的
+//   组合携带选区内容），纯插入与迟入组合（compositionupdate 兜底）为 null；
 // - 网格编辑态（tableRegionField 在场——setTableRegion 激活）、代码上下文
 //   （inCodeContext）、外部同步（externalSync）、SDK 修饰
 //   （addonEditOriginTag）不驱动；
@@ -103,6 +105,59 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([]) // 同步段零驱动（微任务模式）
     await flushMicrotasks()
     expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你好', replaced: null }])
+  })
+
+  it('#593 IME 定稿替换选区：补驱动 replaced 携带组合起点被覆盖文本（净变更推导）', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 1, head: 4 } }) // 选中 'ord'
+    const content = view.contentDOM
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    // 组合第一笔：preedit 替换选区（起点坐标系 [1,4)）
+    view.dispatch({ changes: { from: 1, to: 4, insert: 'n' }, userEvent: 'input.type.compose.start' })
+    // 候选更新（中间态替换前轮 preedit）
+    view.dispatch({ changes: { from: 1, to: 2, insert: 'ni' }, userEvent: 'input.type.compose.update' })
+    // 定稿（实证先于 compositionend、被组合期门控拦截）
+    view.dispatch({ changes: { from: 1, to: 3, insert: '你' }, userEvent: 'input.type.compose' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '你' }))
+    await flushMicrotasks()
+    // 净变更只表达「组合起点文档 → 终态」差异：中间态 preedit 相互替换
+    // 在 ChangeSet 合成中消解，replaced 语义 = 组合开始时被覆盖的选区文本
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你', replaced: { from: 1, to: 4, text: 'ord' } }])
+  })
+
+  it('#593 迟入组合（compositionupdate 兜底、无 compositionstart）：净变更材料缺席，replaced 退 null', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    const content = view.contentDOM
+    // 迟入组合：未经 compositionstart（快照无法在组合起点建立，材料缺席）
+    content.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'n' }))
+    view.dispatch({ changes: { from: 4, insert: '你' }, userEvent: 'input.type.compose' })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '你' }))
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你', replaced: null }])
+  })
+
+  it('#594R1 跨行选区：起点快照早于 CM6 的组合期跨行删除，replaced 保留原始文本', async () => {
+    const { instance, drives } = setup('ab\ncd\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 1, head: 4 } }) // 选中 'b\nc'（跨行）
+    const content = view.contentDOM
+    // 真实 compositionstart：CM6 内建 observer 在冒泡阶段先删除跨行选区
+    //（文档立即变 'ad\n'）——起点材料必须在捕获阶段（删除之前）建立，
+    // 首笔删除才能进净变更累积（deferredLocal 同款时序，liveInstance
+    // captureCompositionStart 注释）
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    // 后续组合事务按删除后坐标模拟（CM6 从 DOM 差异推导的真实形态）
+    view.dispatch({ changes: { from: 1, insert: 'n' }, userEvent: 'input.type.compose.start' })
+    view.dispatch({ changes: { from: 1, to: 2, insert: '你' }, userEvent: 'input.type.compose' })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '你' }))
+    await flushMicrotasks()
+    // 净变更含首笔跨行删除：replaced = 组合开始时刻的原始选区文本（LF 坐标 [1,4)）
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你', replaced: { from: 1, to: 4, text: 'b\nc' } }])
   })
 
   it('#400 delete 事务驱动：inputText 空、replaced 携带被删文本（事务前坐标）', async () => {
