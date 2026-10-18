@@ -2008,8 +2008,7 @@ export class EmbedCardManager {
       // 增量/全文同步，dispatchExternal/replaceDoc 派发）同样豁免：外部变
       // 更静默同步是既有契约——拦截会把宿主同步当本地删除（dirty 弹张冠
       // 李戴的确认），clean 路径重放还会以旧基线把同步变更当本地编辑回声
-      // 出站。A 层主 view 无 doc 型外部派发（仅选区 externalSync），故
-      // mainDocChangeFilter 无此分支
+      // 出站。A 层主 view 的宿主同步由 mainDocChangeFilter 同样放行。
       if (!tr.docChanged || tr.annotation(refCloseReplay) === true || tr.annotation(externalSync) === true) {
         return true
       }
@@ -3085,10 +3084,10 @@ export class EmbedCardManager {
 
   /** 删除活跃引用拦截（changeFilter）：变更完整覆盖任一「端口在场的嵌入
    *  引用源区间」时拦截（返回 false 取消变更，事务其余部分照常）并记录
-   *  pendingDelete——先确认后写入 A。重放事务带豁免注解放行。 */
+   *  pendingDelete——先确认后写入 A。重放事务与宿主外部同步均放行。 */
   mainDocChangeFilter(): Extension {
     return EditorState.changeFilter.of((tr: Transaction): boolean => {
-      if (!tr.docChanged || tr.annotation(refCloseReplay) === true) {
+      if (!tr.docChanged || tr.annotation(refCloseReplay) === true || tr.annotation(externalSync) === true) {
         return true
       }
       // 活跃端口区间（端口在场 = 引用正在编辑；区间即挂载时的源区间）。

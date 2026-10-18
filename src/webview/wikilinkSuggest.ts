@@ -173,6 +173,13 @@ function sameOrigin(a: SuggestOrigin, b: SuggestOrigin): boolean {
     a.pipeWidth === b.pipeWidth
 }
 
+const fileResultFreshByPopup = new WeakMap<HTMLElement, () => boolean>()
+
+/** 诊断快照读取浮层所属实例的文件枚举新鲜度，嵌入实例与主文档同口径。 */
+export function wikilinkFileResultFresh(popup: HTMLElement): boolean {
+  return fileResultFreshByPopup.get(popup)?.() ?? false
+}
+
 export class WikilinkSuggestController {
   private view: EditorView | null = null
   private session: { origin: SuggestOrigin; query: string; generation: number; target: string } | null = null
@@ -1267,6 +1274,7 @@ export class WikilinkSuggestController {
         }
       })
       document.body.appendChild(el)
+      fileResultFreshByPopup.set(el, () => this.result?.stage === 'file' && !this.resultStale)
       this.popup = el
     }
     return this.popup

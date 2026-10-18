@@ -199,6 +199,8 @@ try {
   await scenario('Tab 确认：替换整个文件字段、保留已有显示文字', { doc: '', cursor: 0 }, async (page) => {
     // 先手写完整链接 [[方案.md|手写]]，再回到文件段中部编辑目标并 Tab 确认
     await page.keyboard.type('[[')
+    // 模拟慢宿主回包，固定 >40ms 后启用自适应去抖的分支。
+    await page.waitForTimeout(80)
     await page.evaluate(() => window.respondQuery([]))
     await page.keyboard.type('方案.md|手写')
     assert.equal((await read(page)).text, '[[方案.md|手写]]')
@@ -206,6 +208,7 @@ try {
     // 光标落到文件段中部（「.」「m」之间）：纯移动不重开，键入才再触发
     await page.evaluate((offset) => window.locate(offset), 5)
     await page.keyboard.type('x')
+    await page.waitForFunction(() => window.lastQuery()?.query === '方案.x')
     const q = await page.evaluate(() => window.lastQuery())
     assert.equal(q.query, '方案.x', '再触发自动取光标左侧目标输入')
     await page.evaluate((items) => window.respondQuery(items), [fangan()])
@@ -329,6 +332,7 @@ try {
     assert.equal(await page.evaluate(() => window.lastQuery()?.offset), 50)
     // 清单代次已变（7 → 8）：追加页必须被拒拼，并按新代次重取首页
     await page.evaluate((items) => window.respondQuery(items, { total: 51, catalogGen: 8 }), full)
+    await page.waitForFunction(() => window.lastQuery()?.offset === undefined)
     const refetch = await page.evaluate(() => window.lastQuery())
     assert.equal(refetch.offset, undefined, '重取首页（无 offset）')
     assert.equal((await popup(page)).itemCount, 50, '旧追加结果未进候选')
