@@ -609,10 +609,13 @@ export class LiveEditorInstance {
    *  全部文档事务的净变更累积。compositionend 补驱动据此推导 replaced——
    *  iterChanges 给出起点坐标系下被组合覆盖的区间与文本（典型：组合开始
    *  时的选区内容），中间态 preedit 的相互替换在 ChangeSet 合成数学中自动
-   *  消解（净变更只表达「起点文档 → 终态文档」差异）。仅 compositionstart
-   *  建立：迟入组合（compositionupdate 兜底）组合前事务可能已入账，起点
-   *  差异无法补记，材料缺席退 null 不引入新错位（#495 补偿同口径）。与
-   *  multiCursorCompose（#495 选区补偿，仅全塌缩多光标）共享累积点、
+   *  消解（净变更只表达「起点文档 → 终态文档」差异）。在捕获阶段建立
+   *  （captureCompositionStart，先于 CM6 内建 observer 的冒泡阶段跨行
+   *  选区删除——deferredLocal 同款时序，R1 审查实证）：起点文档先于首笔
+   *  删除抓取，跨行选区的替换侧才不丢失；冒泡 handler 不重复初始化
+   *  （会把已含首笔删除的净变更重置为空）。迟入组合（compositionupdate
+   *  兜底）组合前事务可能已入账，起点差异无法补记，材料缺席退 null 不
+   *  引入新错位（#495 补偿同口径）。与 multiCursorCompose（#495 选区补偿，
    *  互不依赖；空白格/表格组合（blankComposition 归表格管线）同样建立但
    *  补驱动门控先行拦截，不消费。 */
   private composeNetChanges: { startDoc: Text; net: ChangeSet } | null = null
@@ -2620,7 +2623,16 @@ export class LiveEditorInstance {
       this.markPauseBoundary()
       // CM6 的内建 observer 在冒泡阶段会先删除跨行选区；必须在捕获
       // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
+      // #593 净变更材料同款时序：起点文档必须在删除发生前抓取，跨行
+      // 选区的首笔删除才能进累积（replaced 保留组合开始时刻的原始文本，
+      // R1 审查实证）
       this.composing = true
+      if (this.view) {
+        this.composeNetChanges = {
+          startDoc: this.view.state.doc,
+          net: ChangeSet.empty(this.view.state.doc.length),
+        }
+      }
       this.beginBlankComposition()
       // P2-05：组合开始 = 输入挂起态——置位 settle 检测
       this.notifyInputSettle()
@@ -2923,14 +2935,10 @@ export class LiveEditorInstance {
               netChanges: ChangeSet.empty(this.view.state.doc.length),
             }
           }
-          // #593 组合期通用净变更材料：起点文档 + 空变更集（累积点在
-          // updateListener；消费与取用即清在 maybeDriveAddonBehaviorsForComposeCommit）
-          if (this.view) {
-            this.composeNetChanges = {
-              startDoc: this.view.state.doc,
-              net: ChangeSet.empty(this.view.state.doc.length),
-            }
-          }
+          // #593 组合期通用净变更材料在 captureCompositionStart（捕获
+          // 阶段）建立——CM6 内建 observer 在冒泡阶段会先删除跨行选区，
+          // 此处再初始化会把已含首笔删除的净变更重置为空；此处不重复
+          //（迟入 compositionupdate 兜底同样不建，材料缺席退 null）
           this.beginBlankComposition()
         },
         compositionupdate: () => {
