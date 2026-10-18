@@ -7,10 +7,10 @@
 // mock 桥回灌（含 addonPage.directive 装载指令——与生产宿主推送同形）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdir, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { artifactPath, chromium } from './runtime.mjs'
+import { build, artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 import { buildSettingsMain } from './settingsBundle.mjs'
 import { buildTestAddons } from '../fixtures/addon-v02/sdk/buildAddon.mjs'
@@ -20,6 +20,10 @@ const output = await buildSettingsMain(root)
 const artifacts = artifactPath(root, 'screenshots/addonSettingsContext')
 await mkdir(artifacts, { recursive: true })
 const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
+// 与 languageSwitch.mjs 同一产物/构建配置，避免 broker 同 outfile 配置冲突。
+const dictOut = artifactPath(root, 'languageSwitchLocales.mjs')
+await build({ entryPoints: [path.join(root, 'src/shared/locales/index.ts')], bundle: true, outfile: dictOut, format: 'esm' })
+const { LOCALE_MESSAGES } = await import(pathToFileURL(dictOut).href)
 
 // ---- 夹具组件产物（真实 defineAddonPage 工厂 + 组件样式）与 http 服务 ----
 const layout = await buildTestAddons({ log: () => {} })
@@ -62,7 +66,8 @@ const hostState = {
 
 const browser = await chromium.launch({ headless: true, channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 try {
-  const page = await browser.newPage({ viewport: { width: 1100, height: 760 } })
+  // 浏览器英文、平台数据岛中文：组件首帧不得误读 navigator.language。
+  const page = await browser.newPage({ viewport: { width: 1100, height: 760 }, locale: 'en-US' })
   const errors = []
   page.on('pageerror', (err) => errors.push(err.message))
   await page.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
@@ -172,7 +177,7 @@ try {
   const fixtureRoot = area.locator('.vsidian-addons-addonpage .scx-settings-root')
   await fixtureRoot.waitFor()
   // 首屏绘制层：夹具回显行可见（几何非零）且计算色来自组件样式（<link> 授权装载同证）
-  const scopePaint = await fixtureRoot.locator('.scx-scope').evaluate((el) => {
+  const scopePaint = await fixtureRoot.locator('.scx-scope:not(.scx-locale)').evaluate((el) => {
     const cs = getComputedStyle(el)
     const rect = el.getBoundingClientRect()
     return { color: cs.color, display: cs.display, height: rect.height, text: el.textContent }
@@ -190,9 +195,50 @@ try {
   assert.equal(await area.locator('input[data-addon-setting="__enabled__"]').count(), 1, '总开关恒在场（平台外壳）')
   await page.screenshot({ path: path.join(artifacts, 'detail-custom-first.png') })
 
+  // ---- #582 真实 SDK 语言消费：首帧与热切换，同一组件实例保留草稿 ----
+  assert.equal(await page.evaluate(() => navigator.language), 'en-US', '对照浏览器语言固定为英文')
+  const draft = fixtureRoot.locator('.scx-draft')
+  await draft.fill('Keep this unsaved draft / 保留草稿')
+  // 保存实际节点身份，而非只数工厂或装载次数（平台外壳会在换包时重建）。
+  await fixtureRoot.evaluate((el) => {
+    window.__localeFixtureRoot = el
+    window.__localeFixtureDraft = el.querySelector('.scx-draft')
+    window.__localeLoadGeneration = window.__loadGeneration
+  })
+  const expectLocalePaint = async (lang, text) => {
+    await fixtureRoot.locator('.scx-locale').filter({ hasText: text }).waitFor()
+    const paint = await fixtureRoot.locator('.scx-locale').evaluate((el) => {
+      const cs = getComputedStyle(el)
+      const rect = el.getBoundingClientRect()
+      return { text: el.textContent, lang: el.dataset.locale, color: cs.color,
+        visible: cs.display !== 'none' && cs.visibility === 'visible' && rect.width > 0 && rect.height > 0 }
+    })
+    assert.deepEqual(paint, { text, lang, color: 'rgb(178, 74, 214)', visible: true }, '组件文案及授权样式真实绘制')
+    const title = page.locator('.vsidian-settings-title')
+    await title.filter({ hasText: LOCALE_MESSAGES[lang]['settings.pageTitle'] }).waitFor()
+    assert.equal(await title.isVisible(), true, '平台标题随同一语言源更新且可见')
+    const customTab = area.getByRole('tab', { name: LOCALE_MESSAGES[lang]['addons.detailCustomViewTab'], exact: true })
+    assert.equal(await customTab.isVisible(), true, '重建的详情外壳也使用新语言')
+    assert.equal(await draft.inputValue(), 'Keep this unsaved draft / 保留草稿', '组件未保存输入跨语言切换保留')
+    assert.equal(await fixtureRoot.evaluate((el) => el === window.__localeFixtureRoot &&
+      el.querySelector('.scx-draft') === window.__localeFixtureDraft &&
+      window.__loadGeneration === window.__localeLoadGeneration), true, '组件根与控件保持同一实例，未重新装载')
+  }
+  await expectLocalePaint('zh-cn', '组件语言：简体中文')
+  for (const [lang, text] of [['en', 'Component language: English'], ['zh-cn', '组件语言：简体中文']]) {
+    // 模拟真实宿主 general.language 保存后的两条广播；只走生产消息入口。
+    await page.evaluate(({ lang, messages }) => {
+      const post = (message) => window.dispatchEvent(new MessageEvent('message', { source: window, data: message }))
+      post({ kind: 'settings.changed', values: { 'general.language': lang } })
+      post({ kind: 'locale.changed', lang, messages })
+    }, { lang, messages: LOCALE_MESSAGES[lang] })
+    await expectLocalePaint(lang, text)
+    await page.screenshot({ path: path.join(artifacts, `detail-locale-${lang}.png`) })
+  }
+
   // ---- 2. 作用域切换真实传至组件：工作区标签 → 夹具回显 workspace ----
   await page.getByRole('tab', { name: zhCn['addons.scopeWorkspace'], exact: true }).click()
-  await fixtureRoot.locator('.scx-scope').filter({ hasText: 'scope=workspace' }).waitFor()
+  await fixtureRoot.locator('.scx-scope:not(.scx-locale)').filter({ hasText: 'scope=workspace' }).waitFor()
   // 次级「基础设置」页签：表单呈现且写入带 workspace scope（显示值与写入目标一致）
   await page.getByRole('tab', { name: zhCn['addons.detailBasicsViewTab'], exact: true }).click()
   const flagToggle = area.locator('input[data-addon-setting="flag"]')
@@ -264,7 +310,7 @@ try {
   assert.equal(closedPage, true, '切换到无自绘页组件时撤下残留挂载（单一组件身份）')
 
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
-  console.log('[#553] 组件设置详情自绘页优先浏览器回归通过（首屏装载/次级页签/作用域与定位交付/故障恢复/切换组件）')
+  console.log('[#553/#582] 组件设置详情浏览器回归通过（首帧语言/zh↔en 绘制/实例与草稿保留/次级页签/作用域与定位交付/故障恢复/切换组件）')
 } finally {
   assetServer.close()
   await browser.close()
