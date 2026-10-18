@@ -240,6 +240,12 @@ export const settingsGetSnapshotLayerless: AddonSettingsGetSnapshot = {
   userValues: {},
   workspaceValues: null,
 }
+/** 旧形状样例（#590 前仅 values/sources 两字段）：两新字段全体缺席仍可
+ *  赋值——把「可选」钉在实例上，误改必填（去掉 `?`）即本样例编译失败 */
+export const settingsGetSnapshotLegacyShape: AddonSettingsGetSnapshot = {
+  values: { theme: 'light' },
+  sources: { theme: 'default' },
+}
 
 /** 通道结束态（timeout/released 本地终结；rejected 宿主侧拒绝） */
 export type PinnedChannelReasons = 'timeout' | 'released' | 'rejected'
