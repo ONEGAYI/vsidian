@@ -43,10 +43,16 @@ export interface AddonRegistrationHandle {
   dispose(): void
 }
 
-/** 设置读取快照（settings.get() 的结果：生效值与来源） */
+/** 设置读取快照（settings.get() 的结果：生效值与来源，#590 起含两层显式值） */
 export interface AddonSettingsGetSnapshot {
   readonly values: Readonly<Record<string, AddonSettingValue>>
   readonly sources: Readonly<Record<string, AddonSettingSource>>
+  /** 用户默认层显式值（#590）——只含该层显式保存过的键，含定义外遗留键
+   *  （存储原样，不因定义集删除）；键未显式保存时不在此映射中（生效值
+   *  回退语义见 sources，不从本字段推导） */
+  readonly userValues?: Readonly<Record<string, AddonSettingValue>>
+  /** 工作区层显式值（#590）；null = 无工作区。遗留键口径同 userValues */
+  readonly workspaceValues?: Readonly<Record<string, AddonSettingValue>> | null
 }
 
 /** 设置变化事件（settings.onChanged 的载荷） */
@@ -66,7 +72,8 @@ export interface AddonSettingsContextApi {
    *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段
    *  引用其组键——引用未声明组键或组键重复整批拒绝 */
   registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle
-  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */
+  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认）；#590 起附
+   *  两层显式值（userValues / workspaceValues，供组件按作用域层呈现） */
   get(): AddonSettingsGetSnapshot
   /** 单键来源（未定义键为 undefined） */
   getSource(key: string): AddonSettingSource | undefined

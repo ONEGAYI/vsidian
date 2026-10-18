@@ -166,6 +166,7 @@ import type {
   AddonDefinition,
   AddonEnableContext,
   AddonSettingsContextApi,
+  AddonSettingsGetSnapshot,
   AddonSetupContext,
 } from '../../src/host/addons/addonRegistry'
 import type { VsidianAddonExports } from '../../src/host/addons/addonWiring'
@@ -223,6 +224,28 @@ export const statusKindsPinned: Equals<AddonStatusKind, PinnedStatusKinds> = tru
 export const viewTypesPinned: Equals<AddonViewType, 'main' | 'embed' | 'hover'> = true
 export const editHistoryPinned: Equals<AddonEditHistory, 'atomic' | 'joinPrevious'> = true
 export const settingSourcesPinned: Equals<AddonSettingSource, 'default' | 'user' | 'workspace'> = true
+
+/** #590 设置读取快照的两层显式值成员（可选：字段缺席编译合法 = 旧形态
+ *  消费不受影响；workspaceValues 的 null 表无工作区）。样例即编译期钉住：
+ *  字段名或类型收窄会让 compile 失败；扩态是契约变更，须同步台账/文档 */
+export const settingsGetSnapshotSample: AddonSettingsGetSnapshot = {
+  values: { theme: 'compact' },
+  sources: { theme: 'user' },
+  userValues: { theme: 'default' },
+  workspaceValues: { theme: 'compact' },
+}
+export const settingsGetSnapshotLayerless: AddonSettingsGetSnapshot = {
+  values: { theme: 'default' },
+  sources: { theme: 'default' },
+  userValues: {},
+  workspaceValues: null,
+}
+/** 旧形状样例（#590 前仅 values/sources 两字段）：两新字段全体缺席仍可
+ *  赋值——把「可选」钉在实例上，误改必填（去掉 `?`）即本样例编译失败 */
+export const settingsGetSnapshotLegacyShape: AddonSettingsGetSnapshot = {
+  values: { theme: 'light' },
+  sources: { theme: 'default' },
+}
 
 /** 通道结束态（timeout/released 本地终结；rejected 宿主侧拒绝） */
 export type PinnedChannelReasons = 'timeout' | 'released' | 'rejected'

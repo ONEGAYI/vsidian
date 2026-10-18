@@ -1978,11 +1978,12 @@ export interface AddonStorageFsPort {
 
 ### `settings-context` 宿主设置能力面（setup 上下文）
 
-**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：组件宿主代码 · **引入**：#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）、#590（两层显式值）
 
-**目标**：setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。
+**目标**：setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源（#590 起 get 快照另附两层显式值 userValues / workspaceValues，供组件按作用域层呈现）、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。
 
 语义要点：
+- **坐标与数据形状**：#590 get 快照可选成员 userValues / workspaceValues（数据形状）：各层只含显式保存过的键（含定义外遗留键——存储原样不删）；workspaceValues 为 null 表无工作区。values/sources 合并口径不变，生效值不从层值推导。
 - **生命周期**：普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。新 setup 代次重跑时定义集与组声明一并清换。
 - **错误与拒绝**：按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。#472 组批校验：组键重复或定义引用未声明组键整批拒绝（归因 invalid-definitions）。
 
@@ -2000,7 +2001,8 @@ export interface AddonSettingsContextApi {
    *  #472 分组：第二参为可选组声明批（声明序即呈现序），定义的 group 字段
    *  引用其组键——引用未声明组键或组键重复整批拒绝 */
   registerDefinitions(defs: readonly unknown[], groups?: readonly unknown[]): AddonRegistrationHandle
-  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认） */
+  /** 生效值与来源快照（工作区显式 > 用户默认 > 出厂默认）；#590 起附
+   *  两层显式值（userValues / workspaceValues，供组件按作用域层呈现） */
   get(): AddonSettingsGetSnapshot
   /** 单键来源（未定义键为 undefined） */
   getSource(key: string): AddonSettingSource | undefined
@@ -2012,10 +2014,16 @@ export interface AddonSettingsContextApi {
   onChanged(listener: (change: AddonSettingsChangeEventData) => void): AddonRegistrationHandle
 }
 
-/** 设置读取快照（settings.get() 的结果：生效值与来源） */
+/** 设置读取快照（settings.get() 的结果：生效值与来源，#590 起含两层显式值） */
 export interface AddonSettingsGetSnapshot {
   readonly values: Readonly<Record<string, AddonSettingValue>>
   readonly sources: Readonly<Record<string, AddonSettingSource>>
+  /** 用户默认层显式值（#590）——只含该层显式保存过的键，含定义外遗留键
+   *  （存储原样，不因定义集删除）；键未显式保存时不在此映射中（生效值
+   *  回退语义见 sources，不从本字段推导） */
+  readonly userValues?: Readonly<Record<string, AddonSettingValue>>
+  /** 工作区层显式值（#590）；null = 无工作区。遗留键口径同 userValues */
+  readonly workspaceValues?: Readonly<Record<string, AddonSettingValue>> | null
 }
 
 /** 设置变化事件（settings.onChanged 的载荷） */

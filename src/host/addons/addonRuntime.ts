@@ -560,7 +560,7 @@ export class AddonRuntime {
         // ---- #353 T04 读写与事件（技术方案 5.5；平台权威在服务） ----
         get: () => {
           const snapshot = settings.effectiveSnapshot(addonId)
-          return { values: snapshot.values, sources: snapshot.sources }
+          return { values: snapshot.values, sources: snapshot.sources, userValues: snapshot.userValues, workspaceValues: snapshot.workspaceValues }
         },
         getSource: (key) => settings.sourceOf(addonId, key),
         update: (scope, patch) => {

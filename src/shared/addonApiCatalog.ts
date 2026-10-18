@@ -954,13 +954,14 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
       },
     ],
     purpose:
-      'setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。',
+      'setup 生命周期常驻的设置能力：registerPage 登记自己的设置页入口、registerDefinitions 收集可序列化定义（#472 起第二参可选组声明批——声明序即呈现序，定义 group 字段引用组键）、get / getSource 读生效值与来源（#590 起 get 快照另附两层显式值 userValues / workspaceValues，供组件按作用域层呈现）、update 按批写入指定层、clearWorkspaceOverride 清除工作区覆盖、onChanged 订阅成功保存后的变化。',
     semantics: {
       lifecycle: '普通停用后保留（已停用组件仍可配置）；故障暂停时回收组件代码——平台保留已取得的定义与值，用基础控件供修正参数后手动重试。新 setup 代次重跑时定义集与组声明一并清换。',
       errors: '按批校验并保存，失败不虚报成功；变化事件只在持久化成功后发出。clearWorkspaceOverride 恢复继承用户默认，不是恢复出厂默认。#472 组批校验：组键重复或定义引用未声明组键整批拒绝（归因 invalid-definitions）。',
+      coordinates: '#590 get 快照可选成员 userValues / workspaceValues（数据形状）：各层只含显式保存过的键（含定义外遗留键——存储原样不删）；workspaceValues 为 null 表无工作区。values/sources 合并口径不变，生效值不从层值推导。',
     },
     verification: ['test/unit/addonRuntimeSettings.test.ts', 'test/integration/suite/addonT04Cases.ts', 'test/browser/addonSettings.mjs'],
-    introduced: '#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）',
+    introduced: '#351（T02 页面入口）、#353（T04 读写）、#472（分组声明）、#590（两层显式值）',
   },
   {
     id: 'settings-definitions',
