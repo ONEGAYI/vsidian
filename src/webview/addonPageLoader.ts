@@ -51,6 +51,7 @@ import type { AddonSettingsContextRuntime } from './addonSettingsContext'
 import type { AddonCommandsRuntime } from './addonCommands'
 import type { AddonUiRuntime } from './addonUi'
 import { addonHostSettingGet } from '../shared/addonHostSettingsApi'
+import { currentLocaleLang, onLocaleChanged } from '../shared/i18n'
 import type { SettingsPayload } from '../shared/settings'
 
 /** 构建桥 defineAddonPage 写入的全局登记表（数组形态：同一脚本重复执行
@@ -94,6 +95,8 @@ interface ActiveLoad {
   generation: number
   startedAt: number
   disposeCallbacks: Array<() => void>
+  /** #582 每次订阅独立持有退订句柄；手动退订即移出，避免长驻页面积累。 */
+  localeSubscriptions: Set<() => void>
   mountRoots: HTMLElement[]
   extensionsAttached: boolean
   /** 本装载经 registerExtension 收集的 CM6 扩展（聚合下发——见
@@ -560,6 +563,39 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
         : undefined
     const sdk: VsidianAddonPageSdk = {
       addon: { id: loadRecord.addonId, generation: loadRecord.generation, page },
+      // 两类页面共用数据岛/locale.changed 已装配的 i18n，不另建语言源或 hub。
+      locale: {
+        get: currentLocaleLang,
+        onChange: (listener) => {
+          if (!isLoadActive(loadRecord)) return () => {}
+          let previous = currentLocaleLang()
+          const offSource = onLocaleChanged(() => {
+            const language = currentLocaleLang()
+            if (!isLoadActive(loadRecord) || language === previous) return
+            previous = language
+            try {
+              listener(language)
+            } catch (error) {
+              // 与主题环境同口径：隔离回调异常，只上报、由宿主裁决释放。
+              if (!loadRecord.faultReported) {
+                loadRecord.faultReported = true
+                let detail = 'unprintable callback error'
+                try {
+                  detail = String(error)
+                } catch {
+                  // thrown 值可无原型或有抛错的转换钩子；格式化也不得阻断换包。
+                }
+                env.send({ type: 'addon.faulted', addonId: loadRecord.addonId, generation: loadRecord.generation, page, reason: `locale: ${detail}` })
+              }
+            }
+          })
+          const unsubscribe = () => {
+            if (loadRecord.localeSubscriptions.delete(unsubscribe)) offSource()
+          }
+          loadRecord.localeSubscriptions.add(unsubscribe)
+          return unsubscribe
+        },
+      },
       experimental: { cm6: env.cm6, headingFold: headingFoldFacet, viewIdentity: viewIdentityFacet, syntax: syntaxFacet, hostSettings: hostSettingsFacet },
       ...(viewsFacet ? { views: viewsFacet } : {}),
       ...(behaviorsFacet ? { behaviors: behaviorsFacet } : {}),
@@ -759,6 +795,8 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
    */
   const releaseLoad = (loadRecord: ActiveLoad, ended: 'released' | 'faulted', reason?: string): { disposals: number; releasedRequests: number } => {
     active.delete(loadRecord.addonId)
+    // 先撤语言订阅：组件释放回调即使触发换包，也不能再调用已释放观察者。
+    for (const unsubscribe of loadRecord.localeSubscriptions) unsubscribe()
     // T07（#356）行为注册整组注销（opId 分配器随卸载解绑——释放后该组件
     // 的行为不再有可注入来源，提交路径结构上不可用）
     env.addonBehaviors?.unregisterAddon(loadRecord.addonId)
@@ -902,6 +940,7 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
       generation: manifest.generation,
       startedAt: loadStartedAt,
       disposeCallbacks: [],
+      localeSubscriptions: new Set(),
       mountRoots: [],
       extensionsAttached: false,
       extensionParts: [],

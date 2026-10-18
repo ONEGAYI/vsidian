@@ -123,6 +123,18 @@ export type AddonChannelOutcome =
   | { ok: true; result: unknown }
   | { ok: false; reason: 'timeout' | 'released' | 'rejected' }
 
+/** #582 页面生效语言：与平台 UI 共用 general.language 偏好 + 宿主显示
+ *  语言解析后的快照，不读取浏览器/操作系统语言。 */
+export interface AddonLocaleFacet {
+  /** 当前语言代码（现有 en / zh-cn；string 为后续语言留口）。仅平台尚未
+   *  成功装配语言包时为空串，与内核快照一致；只读查询不受代次释放影响。 */
+  get(): string
+  /** 只通知语言代码变化，不立即回放（首值经 get 读取）；回调前快照已
+   *  更新。同一回调可独立多次订阅；返回幂等退订，代次释放自动回收，
+   *  已释放代次的迟到订阅为 no-op。回调异常按组件运行期故障上报。 */
+  onChange(listener: (locale: string) => void): () => void
+}
+
 /** 注入组件工厂的页面 SDK（T02 子集：页面装配、共享运行时、资源与通信
  * 生命周期；T06（#355）起编辑器页提供 views 面——统一视图句柄、快照与
  * 文本提交；T07（#356）起编辑器页提供 behaviors 面——可组合输入行为的
@@ -131,6 +143,9 @@ export type AddonChannelOutcome =
 export interface VsidianAddonPageSdk {
   /** 本次装载身份：组件 ID + 装载代次 + 页面种类 */
   readonly addon: { id: string; generation: number; page: AddonPageKind }
+  /** #582 编辑器页与设置页均提供；可选声明兼容旧宿主与既有 SDK 消费方。
+   *  随平台语言即时通知，不重载组件工厂或丢失页面状态。 */
+  readonly locale?: AddonLocaleFacet
   /** 实验入口（仅编辑器页提供；设置页为 undefined）：cm6 = CM6 共享
    *  运行时；headingFold = 标题折叠查询与命令（#410）；viewIdentity =
    *  视图身份反查（#426）；syntax = 行类型与行内标记查询（#433）；
