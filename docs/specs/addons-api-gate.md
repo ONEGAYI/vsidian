@@ -32,6 +32,8 @@ node scripts/demoAddonApiGate.mjs # 负向演示（退出码 0 = 全部场景符
 
 **先验证基线可信，再运行兼容检查**（CI 步骤序的核心）。验证语义：从锚点 git 对象重新派生条目集合、台账快照与全部签名声明文本，与基线文件**精确比对**（多一条、少一条、一字段漂移都失败）；锚点对象不可达（无 `.git` / 浅克隆 / 伪造 SHA / 标签消失）一律失败，不静默接受。
 
+**当前状态澄清（2026-10-18，#582）**：发行台账已记录实际发行的 API 1.1.0 / 1.2.0，1.0.0 仍保留原候选记录；下表及首发流程中「尚未发行」和首个 1.0.0 的未来式表述保留为 2026-10-08 的历史设计记录，不代表当前发行状态。现用基线仍采用 bootstrap 提交锚点，保留已发行记录并继续复验兼容承诺。生成器沿用的 bootstrap `meta.note` 中「首个真实发行前」属于旧模板措辞，不改变实际台账；本票不修改检查器、模板或基线模式，也不伪造 release 标签。
+
 | 路径 | 锚点 | 额外核实 | 当前状态 |
 | --- | --- | --- | --- |
 | **bootstrap**（显式初始基线） | `baseline-bootstrap-1.json` 的 `meta.anchor` 指向实际实施提交（非发行锚点） | 从 git 对象重派生并逐项复验 | **当前生效**；条目、签名与候选台账数量以该快照为准 |
@@ -83,6 +85,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 **独立审查后主题回落修复重锚（2026-10-15）**：两轴审查发现选中主题失效后，同语言普通提供者仍可接管。`b252bb79` 为 `RendererThemeSelectionContext` 增加可选的不可用主题语言范围，修正 `selectEffectiveRenderers` 的内置回落；`f28a3e3d` 进一步保留当前唯一首选的派生语言 profile 快照，覆盖组件冷启动未登记时的既有选择。SDK 调用面、旧条目和发行台账不变。旧锚点可信复验通过，候选检查只在上述接口和选择函数文本报两项 `signature-declaration-changed`，证据为 `out/test/addon-batch-takeover/review-fixes-compat-red.json`。按字节冻结规则从已提交对象 `f28a3e3d` 显式重锚；33 条目、21 模块及候选 1.0.0 保持，生成参考、基线可信复验和十项兼容检查通过（`review-fixes-baseline.log`）。不改检查器、不加豁免，不把审查修复表述为实际 API 发行。
 
 **两票并行重锚合并后的组合重锚（2026-10-16）**：T02（#542）与 T06（#545）从同一主线切出并各自重锚候选基线（锚 `abc22572` / `5eb3f39d`），两侧基线互不含对方新增符号，合并时手工融合无意义。第二批次集成分支真实 merge 合入 T06（组合提交 `7cfbb8b3`）后，旧 T06 侧基线可信复验通过，候选比较如实记录 8 项预期失败——全部为 T02 侧符号（coordinates/lifecycle/errors 三处语义文本改写＋`AddonPasteRuleMatch`、`ADDON_PASTE_RULES_MAX_PER_ADDON`、`ADDON_PASTE_RULES_MAX_DEPTH`、`validateAddonPasteRuleDeclarations`、`orderAddonPasteRules` 五个签名声明文本变化，`out/test/t06-merge-compat-pre-reanchor.log`，与 T02 单票重锚时的失败清单一致，无第三方漂移）。按字节冻结规则从已提交合并对象执行 `--emit-baseline --anchor 7cfbb8b3`，发射 35 条目 / 22 签名模块及候选台账快照，随后独立提交并复验。重锚保留两侧旧锚点 git 对象与失败证据，不修改检查器、不加豁免，API 1.0.0 仍为未发行候选。T04 合入后须对最终组合再次整体复验，必要时重锚。
+
+**#582 页面语言能力重锚理由（2026-10-18）**：运行时、公开消费、文档及异常隔离回归已进入实际远端组合实施对象 `8b948c2e01257ba6d4e58542d8b682664fbf9b27`，其完整树与本轮独立规范、规格两轴审查通过的组合实现一致。公开增量为两种页面共用的 `AddonLocaleFacet` 与 `VsidianAddonPageSdk` 的可选只读 `locale` 成员。旧 `dc7cd3b6ea9b8d9192be1f89bf353d6593ed0547` 基线在该对象的工作树中可信复验通过，实际候选仅因 SDK 声明新增可选成员触发一项 `signature-declaration-changed`，其余九项检查通过（`out/test/582-final-pre-reanchor-trust.log`、`out/test/582-final-pre-reanchor-compat.json`）。按字节冻结规则，执行 `--emit-baseline --anchor 8b948c2e01257ba6d4e58542d8b682664fbf9b27` 从该已提交对象显式生成基线，再将基线和本说明另笔提交在其后，保证实际锚点为最终分支可达祖先。新快照增加 `page-locale` 条目与 facet 声明，更新 SDK 声明；原有 35 条目、其余声明、完整性清单及三条发行台账不改写，仍为 22 个签名模块。保留旧锚点、功能提交和重锚前失败证据，不修改检查器、不加豁免、不调整版本或发布日期。API 1.2.0 的已发行历史不包含本新增能力；能力记入 Unreleased，下一次实际发行须按新增能力提升 API 次版本。重锚前 node 恢复态夹具按旧基线复制验证文件，因此同时报告新 locale 测试缺失；生成新基线收录该条目后自然补齐，不修改夹具或检查规则。
 
 ## CI 接线（代码侧，已交付）
 
