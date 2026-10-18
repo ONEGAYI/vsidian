@@ -17,6 +17,8 @@
 //    默认链回归；
 // 4. IME 情境（#399 修订）：候选期不驱动（组合中间态非行为输入）、
 //    组合定稿驱动行为链（inputText 含定稿文本，观察与修饰面一致）；
+//    4a（#593）定稿替换选区时 replaced 携带被组合覆盖文本（净变更推导）、
+//    纯塌缩光标定稿 replaced 为 null；
 // 5. 表格情境口径：源码行内键入照常驱动与受修饰（#124 同口径——排除
 //    面是网格编辑态 tableRegionField 而非表格行文本；网格 region 在场
 //    不驱动由单测 liveInstanceBehaviorDrive 钉住）；
@@ -261,12 +263,46 @@ try {
   const imeBehaviors = events.filter((e) => e.kind === 'behavior')
   assert.ok(imeBehaviors.length > 0, `IME 定稿应触发行为回调：${JSON.stringify(events)}`)
   assert.ok(imeBehaviors.every((e) => e.inputText === '，'), `行为上下文 inputText 应为定稿文本：${JSON.stringify(imeBehaviors)}`)
+  assert.ok(imeBehaviors.every((e) => e.replaced === null), `纯塌缩光标组合为纯插入，replaced 应为 null：${JSON.stringify(imeBehaviors)}`)
   assert.ok(events.some((e) => e.kind === 'changed' && e.inputText === '，'), `onChanged 观察应含定稿文本：${JSON.stringify(events)}`)
   stats = await command('stats')
   assert.equal(stats.counters.drives, drivesBeforeIme + 1, `IME 定稿应驱动恰好一次：${JSON.stringify(stats.counters)}`)
   await undo()
   await waitText(T0)
   console.log('[PASS] IME 候选期不驱动、组合定稿驱动行为链（inputText 含定稿文本，#399）')
+
+  // ---- 4a. #593 IME 定稿替换选区：补驱动 replaced 携带被组合覆盖文本 ----
+  await command('reset')
+  const drivesBeforeWrap = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  // 选中 'ord'（光标在行尾，3×Shift+ArrowLeft）
+  for (let i = 0; i < 3; i++) {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 0 })
+  }
+  await call('Input.imeSetComposition', { text: '你', selectionStart: 1, selectionEnd: 1 })
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  await call('Input.insertText', { text: '你' })
+  // 定稿字符取非符号对字符（'你'）：符号对 open 字符（如 '【'）会触发
+  // symbolAutocomplete 的 IME 提交补全主动路径（selectionWrap 配对包裹，
+  // userEvent 'input.type' 的事务再驱动一次行为链）——该交互属内置符号
+  // 对与行为链的竞争面，不在本断言面内（#593 只验补驱动替换侧）
+  await waitText('w你')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  // 组合期净变更推导：起点坐标系被组合覆盖文本 = 选区 'ord'（[1,4)）
+  events = await collectEvents()
+  const wrapBehaviors = events.filter((e) => e.kind === 'behavior')
+  assert.ok(wrapBehaviors.length > 0, `IME 定稿替换选区应触发行为回调：${JSON.stringify(events)}`)
+  assert.ok(wrapBehaviors.every((e) => e.replaced?.text === 'ord' && e.replaced.from === 1 && e.replaced.to === 4),
+    `行为上下文 replaced 应携带选区文本 'ord'（事务前坐标 [1,4)）：${JSON.stringify(wrapBehaviors)}`)
+  assert.ok(events.some((e) => e.kind === 'changed' && e.replaced?.text === 'ord'), `onChanged 观察应携带被替换文本：${JSON.stringify(events)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeWrap + 1, `IME 定稿替换选区应驱动恰好一次：${JSON.stringify(stats.counters)}`)
+  await undo()
+  await waitText(T0)
+  console.log('[PASS] IME 定稿替换选区：replaced 携带被组合覆盖的选区文本（净变更推导，#593）')
 
   // ---- 4.5 #400：真实退格驱动行为链，replaced 携带被删文本 ----
   await command('reset')

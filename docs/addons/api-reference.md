@@ -1494,7 +1494,7 @@ export type AddonChannelHandler = (payload: unknown) => unknown | Promise<unknow
 
 语义要点：
 - **适用模式**：合法可编辑 Live 实例（内核先执行只读、IME 组合中间态、表格网格与既有情境门控；IME 组合定稿（composition commit）驱动一次——userEvent input.type.compose、inputText 为净定稿文本，#399；删除事务白名单 backward/forward/selection/cut/line 驱动（dedent 属缩进命令族不纳入），#400）。
-- **坐标与数据形状**：修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。上下文与观察事件携带 docUri（目标文档 URI，与 views 句柄 targetDocUri 同源：main = 面板文档，embed = 引用目标——在引用 B 内触发时是 B 的 URI，#407）与 replaced（事务替换/删除侧：键入替换选区 = 被替换内容（#401），delete = 被删文本（#400），事务前 LF 坐标，IME 定稿恒 null）。
+- **坐标与数据形状**：修饰计划相对 context.snapshot（LF 坐标）；后续行为读取前序行为的修饰结果。上下文与观察事件携带 docUri（目标文档 URI，与 views 句柄 targetDocUri 同源：main = 面板文档，embed = 引用目标——在引用 B 内触发时是 B 的 URI，#407）与 replaced（事务替换/删除侧：键入替换选区 = 被替换内容（#401），delete = 被删文本（#400），事务前 LF 坐标；IME 定稿经组合期净变更推导（#593）——起点坐标系被组合覆盖的文本，纯插入与迟入组合为 null）。
 - **生命周期**：行为能力与适用条件只由代码表达（不复制进清单）；每次修饰按自己的原子声明提交，提交与身份注入由平台完成（行为不能直接写文档）。
 - **错误与拒绝**：注册拒绝：invalid-registration / duplicate-id / not-editor-page / released（名称缺失或形态非法拒绝、说明/例子缺失允许）。
 - **历史与撤回**：文本变化不终止链（默认可组合）；确需择一的用显式独占组（同组件命名空间内互斥，跨组件不互斥）——不恢复统一「先接管者生效」。
@@ -1584,9 +1584,10 @@ export interface AddonInputContext {
    *  为被替换的选区内容（#401——SelectKey 包裹/替换类规则的判定依据：
    *  按键插入发生在选区销毁之后，行为从本字段读回包裹目标）；delete.*
    *  事务时为被删文本（#400——联动删除配对端需要知道删了什么）。多区间
-   *  时为全部删除区间的最小包围与按序拼接文本。IME 定稿补驱动恒 null
-   *  （组合事务先于 compositionend，替换侧无法归因——#399 边界）；
-   *  纯插入无删除侧为 null */
+   *  时为全部删除区间的最小包围与按序拼接文本。IME 定稿补驱动经组合期
+   *  净变更推导（#593）：起点坐标系下被组合覆盖的文本（典型：组合开始
+   *  时的选区内容），纯塌缩光标组合与迟入组合（compositionupdate 兜底）
+   *  为 null；纯插入无删除侧为 null */
   readonly replaced: AddonReplacedRange | null
   /** 行为读取时点的当前快照——已含本次输入与**前序行为的修饰结果**
    *  （后续行为读取前序结果）；输入点从快照选区读取 */

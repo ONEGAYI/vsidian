@@ -10,6 +10,14 @@
 
 ### 新增
 
+**IME 定稿行为上下文携带替换侧（#593）**
+
+- 行为链 IME 组合定稿补驱动（`userEvent='input.type.compose'`）的上下文 `replaced` 不再恒为 `null`：经组合期净变更推导，携带组合起点坐标系下被组合覆盖的文本（典型：组合开始时的选区内容——选中文字后经输入法定稿符号，SelectKey 包裹/替换类规则据此读回包裹目标；事务前 LF 坐标）。
+- 纯塌缩光标组合为纯插入、迟入组合（未经 `compositionstart` 的 `compositionupdate` 兜底形态）材料缺席，两种形态维持 `null`；候选中间态不驱动、定稿驱动恰一次的 #399 语义不变。
+- 类型形状（`AddonReplacedRange | null`）不变，原以 `null` 为不处理判定的旧组件不受影响（取值范围放宽，无破坏性）；本项属开发中新增能力，下次本体发行时 API 升次版本。
+
+### 新增
+
 **设置读取快照的两层显式值（#590）**
 
 - `settings.get()` 快照（`AddonSettingsGetSnapshot`）新增可选成员 `userValues` 与 `workspaceValues`：各层**只含显式保存过的键**（含定义外遗留键——存储原样，不因定义集删除）；`workspaceValues` 为 `null` 表无工作区。供组件自绘设置页按作用域层呈现用户层真值（此前只有合并生效值，被工作区覆盖的用户层原值组件侧无法反推）。
