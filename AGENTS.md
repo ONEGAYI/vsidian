@@ -117,7 +117,8 @@ vsidian/
 │   │   ├── 0016-two-layer-behavior-disable-semantics.md       # 行为禁用两层独立开关决策
 │   │   ├── 0017-unified-addon-theme-selection.md              # 组件主题统一入口与互斥选择决策
 │   │   ├── 0018-markdown-shortname-resolution.md              # 短名与绝对引用架构决策
-│   │   └── 0019-document-html-and-style-scope.md              # 文档HTML与样式作用域决策
+│   │   ├── 0019-document-html-and-style-scope.md              # 文档HTML与样式作用域决策
+│   │   └── 0020-ime-symbol-competition-arbitration.md         # IME定稿符号对竞争裁决
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
