@@ -3,10 +3,15 @@
 //
 // 形态（架构约定：注册表存静态元数据、计划用纯函数，本层负责事件/
 // 选区/事务派发）：
-// - 拦截点 EditorState.transactionFilter（#123 同款先例）：有非空选区时
-//   键入注册包裹符号的「选区替换」事务被改写为「各段两侧插入 + 原文
-//   保持选中」的一笔事务（userEvent 保留 input.*）——一次包裹（含跨段
-//   多块）即一笔 edit.request，宿主撤销一次整体恢复。
+// - 拦截点 EditorState.transactionFilter（#123 同款先例）。#597 方案 3
+//   起键入路径与 IME 路径同构（原始输入 → 行为链 → 内置兜底）：有非空
+//   选区时键入注册包裹符号的「选区替换」事务**放行原始替换**（不再
+//   原子改写为「各段两侧插入 + 原文保持选中」）——链驱动以原始形态
+//   （inputText 单字符 + replaced 原文区间）恰一次驱动，内置兜底在微
+//   任务时点按段重建并恢复原文选中；原始事务带 symbolRawInput 注解
+//   强制暂缓出站，兜底触碰暂缓并入同段，flush 单笔 edit.request = 宿主
+//   撤销一次整体恢复。多 range 时 SelectKey 管线让位（selections>1
+//   既有门）、兜底承担重建。
 // - 两种输入形态都认（真实键盘在 CM6 中的产物）：
 //   1) 单 range 非空选区：事务为「选区替换为单字符、光标落插入后」
 //      （浏览器 DOM 替换 → applyDOMChange 的选区替换识别）。
@@ -42,7 +47,7 @@
 // 的格区替换在更后仍能收到放行的格区事务。composition tracker 的微任务
 // 与 #123 提交补全 attempt 的互斥经 symbolCompositionState 快照让位
 // （#123 handler 在扩展序先执行，attempt 先入队，读到快照即让位）。
-import { EditorSelection, EditorState, Transaction } from '@codemirror/state'
+import { EditorSelection, EditorState, StateEffect, Transaction } from '@codemirror/state'
 import { EditorView, ViewPlugin } from '@codemirror/view'
 import {
   findSelectionWrapEntry,
@@ -51,13 +56,32 @@ import {
 } from '../shared/symbols'
 import { planSelectionWrap } from '../shared/symbolWrap'
 import { inCodeContext } from './symbolAutocomplete'
-import { builtinEditOrigin } from './syncController'
+import { builtinEditOrigin, symbolRawInput } from './syncController'
 import {
   getCompositionSelectionSnapshot,
   setCompositionSelectionSnapshot,
   type CompositionSelectionSnapshot,
 } from './symbolCompositionState'
 import { tableRegionField } from './tableRegionSelection'
+
+/** #597 键入路径包裹兜底的选区快照（filter 时点判定）：原文段（键入前
+ *  LF 坐标与文本）、键入字符与代码上下文门控结果（原始事务会清空
+ *  tableRegionField，attempt 侧无法复查——门控随快照携带，镜像
+ *  compositionInTableRegion 模式）。经 effect 随放行事务流动（filter 无
+ *  view 句柄，per-view WeakMap 暂存不可达），微任务同一事件循环内消费
+ *  即逝，无跨事务残留 */
+interface TypedWrapPending {
+  /** 键入的包裹字符（注册表 open） */
+  readonly ch: string
+  readonly open: string
+  readonly close: string
+  /** 选区任一端处于代码上下文（filter 时点判定） */
+  readonly inCode: boolean
+  /** 键入前各 range 的原文段（LF 坐标，升序与选区一致） */
+  readonly segments: readonly { from: number; to: number; text: string }[]
+}
+
+const pendingTypedWrap = StateEffect.define<TypedWrapPending>()
 
 /** 提取事务的全部纯替换条目；任一条不是「单字符替换」返回 null */
 function singleCharReplacements(tr: Transaction): { from: number; to: number; ch: string }[] | null {
@@ -113,8 +137,10 @@ function selectionTouchesCode(state: EditorState, ranges: readonly { from: numbe
 }
 
 /**
- * 选区包裹的输入改写 filter（#124）。门控链见文件头注释；返回改写事务
- * 或原事务（不接管时保留普通「键入替换选区」编辑语义）。
+ * 选区包裹的输入改写 filter（#124）。门控链见文件头注释；#597 方案 3
+ * 起不再原子改写——命中即放行原始替换事务（重指定同形 + symbolRawInput
+ * 出站强制暂缓）并经 effect 携带兜底快照，微任务 attempt 按段重建
+ * （M1 链先、M3 内置后）；纯空白选区（plan null）保持普通替换语义。
  */
 const selectionWrapFilter = EditorState.transactionFilter.of((tr) => {
   if (!tr.isUserEvent('input') || tr.isUserEvent('input.paste') || tr.isUserEvent('input.drop')) {
@@ -140,21 +166,35 @@ const selectionWrapFilter = EditorState.transactionFilter.of((tr) => {
   if (!entry) {
     return tr
   }
-  if (!shouldSelectionWrap(entry, { inCode: selectionTouchesCode(state, ranges) })) {
+  const inCode = selectionTouchesCode(state, ranges)
+  if (!shouldSelectionWrap(entry, { inCode })) {
     return tr
   }
   const plan = planSelectionWrap(state.doc.toString(), ranges, entry)
   if (!plan) {
-    return tr
+    return tr // 纯空白选区：不接管，保留普通替换语义
   }
+  // #597 方案 3：放行原始替换（不再改写）——链驱动以原始形态（inputText
+  // 单字符 + replaced 原文区间）恰一次驱动，内置兜底在微任务时点按段
+  // 重建（多 range 时链让位、兜底承担，数学原型见 #597 探针第 5 例）。
+  // 重指定同形事务（变更/选区/滚动原样重建，userEvent 保留）+
+  // symbolRawInput 注解：出站强制暂缓，兜底触碰暂缓并入同段，flush
+  // 单笔出站 = 一条宿主撤销记录。快照经 effect 流动（filter 无 view
+  // 句柄，无法写 per-view WeakMap 暂存）；格区等门控在 filter 时点判定
+  // 并随快照携带——原始事务会清空 tableRegionField，attempt 侧无法复查
+  // （镜像 compositionInTableRegion 模式）
   const event = tr.annotation(Transaction.userEvent)
   return {
-    changes: plan.changes,
-    selection: EditorSelection.create(
-      plan.selection.map((range) => EditorSelection.range(range.anchor, range.head)),
-      0,
-    ),
-    annotations: event ? Transaction.userEvent.of(event) : undefined,
+    changes: tr.changes,
+    selection: tr.selection,
+    effects: pendingTypedWrap.of({
+      ch,
+      open: entry.open,
+      close: entry.close,
+      inCode,
+      segments: ranges.map((range) => ({ from: range.from, to: range.to, text: state.doc.sliceString(range.from, range.to) })),
+    }),
+    annotations: [...(event ? [Transaction.userEvent.of(event)] : []), symbolRawInput.of(true)],
     scrollIntoView: tr.scrollIntoView,
   }
 })
@@ -319,6 +359,111 @@ const wrapCompositionTracker = EditorView.domEventHandlers({
       }
     })
   },
+})
+
+/** #597 键入路径包裹兜底（filter 放行原始替换后的微任务时点）：镜像
+ *  attemptCompositionWrap 的结构与防御。形态校验：各段区间在原始替换后
+ *  文档中仍恰为键入字符占据、选区仍为各段的追加式光标——链（M1 微
+ *  任务先执行）已改写区间或移动选区即让位（组件产出为终态，零重复
+ *  内容）；通过则按段重建：每段独立套用同一拆段计划，变更组批量同时
+ *  坐标（全部相对原始替换后文档，offset 不加 delta）、delta 只平移批后
+ *  选区（CM6 变更/选区坐标系分界——数学原型 #597 探针第 5 例，终态与
+ *  选区覆盖文本和现行 filter 改写逐字一致）。纯空白段恢复原文不包裹
+ *  （原文已被键入字符替换，换回即与现行改写的「不产生变更」对齐）。 */
+function attemptTypedWrap(view: EditorView, pending: TypedWrapPending): void {
+  if (view.compositionStarted || view.state.readOnly) {
+    return
+  }
+  const state = view.state
+  if (state.field(tableRegionField, false)) {
+    return // 防御（键入事务已清空 region，正常不可达）
+  }
+  const entry = findSelectionWrapEntry(pending.ch)
+  if (!entry || entry.open !== pending.open || entry.close !== pending.close) {
+    return // 注册表与快照不一致（防御）
+  }
+  if (!shouldSelectionWrap(entry, { inCode: pending.inCode })) {
+    return
+  }
+  // 段在原始替换后文档中的位置（前方段落净长差 = ch 长度 - 原文长度）
+  let postShift = 0
+  const segments = pending.segments.map((seg) => {
+    const pos = seg.from + postShift
+    postShift += pending.ch.length - (seg.to - seg.from)
+    return { ...seg, pos }
+  })
+  // 形态校验：选区 range 数与段一致、全部为追加式光标（head === 段起点
+  // + ch 长度）、各段区间恰被键入字符占据
+  const selection = state.selection
+  if (selection.ranges.length !== segments.length) {
+    return
+  }
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!
+    const range = selection.ranges[i]!
+    if (!range.empty || range.head !== seg.pos + pending.ch.length ||
+        state.sliceDoc(seg.pos, seg.pos + pending.ch.length) !== pending.ch) {
+      return // 区间/选区已被链改写：让位
+    }
+  }
+  const changes: { from: number; to: number; insert: string }[] = []
+  const ranges: ReturnType<typeof EditorSelection.range>[] = []
+  let delta = 0
+  for (const seg of segments) {
+    const start = seg.pos + delta
+    const plan = planSelectionWrap(seg.text, [{ from: 0, to: seg.text.length }], entry)
+    if (!plan) {
+      // 纯空白段：恢复原文（现行 filter 改写对该段不产生变更——原文
+      // 未动；放行使其被替换为键入字符，此处换回并保持原文选中）
+      changes.push({ from: seg.pos, to: seg.pos + pending.ch.length, insert: seg.text })
+      ranges.push(EditorSelection.range(start, start + seg.text.length))
+      delta += seg.text.length - pending.ch.length
+      continue
+    }
+    // 段内重建合成（attemptCompositionWrap 同款循环）
+    let rebuilt = ''
+    let at = 0
+    for (const change of plan.changes) {
+      rebuilt += seg.text.slice(at, change.from) + change.insert
+      at = change.from
+    }
+    rebuilt += seg.text.slice(at)
+    changes.push({ from: seg.pos, to: seg.pos + pending.ch.length, insert: rebuilt })
+    ranges.push(...plan.selection.map((range) =>
+      EditorSelection.range(start + range.anchor, start + range.head)))
+    delta += rebuilt.length - pending.ch.length
+  }
+  // 编程式派发不经 DOM 回流；多字符替换形态不命中 filter 的单字符门控。
+  // builtinEditOrigin（#595/#597）：行为链不消费本事务（键入路径已由
+  // 放行的原始事务以干净形态驱动过一次）；userEvent 保留 input.* 维持
+  // 撤销惯例与「一次包裹=一笔 edit.request」出站合并不变（symbolRawInput
+  // 强制暂缓下与原始替换并入同段）
+  view.dispatch({
+    changes,
+    selection: EditorSelection.create(ranges, 0),
+    userEvent: 'input.type',
+    annotations: builtinEditOrigin.of(true),
+    scrollIntoView: true,
+  })
+}
+
+/** #597 兜底入队点：键入路径包裹兜底的 updateListener（不得从 filter
+ *  入队——filter 先于 updateListener 执行，attempt 会抢在链驱动前落地
+ *  打破坐标不变量，反证见 #597 验证报告第二节）。装配序与
+ *  symbolAutocomplete 的 typedAutocloseScheduler 同款：updateListener 按
+ *  扩展数组正序执行（#597 实施实证，原「靠后者先执行」假设不成立），
+ *  故由 liveInstance 装配在主簿记 listener（链驱动入队点）之后——M1
+ *  链驱动微任务先入队、M3 兜底后入队（ADR-0020 裁决一）。常驻装配：
+ *  filter 关闭时无 pending effect 在途，零成本。两组 filter 互斥（选区
+ *  有无），同一时刻至多一组有快照在途（symbolTypedPath 测试钉住） */
+export const typedWrapScheduler = EditorView.updateListener.of((update) => {
+  for (const tr of update.transactions) {
+    const effect = tr.effects.find((e) => e.is(pendingTypedWrap))
+    if (effect) {
+      const pending = effect.value
+      queueMicrotask(() => attemptTypedWrap(update.view, pending))
+    }
+  }
 })
 
 /**

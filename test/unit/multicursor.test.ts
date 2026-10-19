@@ -109,7 +109,7 @@ describe('allowMultipleSelections 与符号包裹解耦（#237）', () => {
     expect(ranges(view), '包裹关闭后多 range 仍存续').toHaveLength(2)
   })
 
-  it('多光标关闭时跨段包裹仍改写文本，选区折回主 range（降级边界）', () => {
+  it('多光标关闭时跨段包裹仍改写文本，选区折回主 range（降级边界）', async () => {
     const { controller, sent, view } = setup('aa\n\nbb')
     controller.handleHostMessage({ kind: 'settings.changed', values: { 'editor.multicursor': false } })
     view.dispatch({ selection: EditorSelection.range(0, 6), userEvent: 'select.pointer' })
@@ -118,10 +118,13 @@ describe('allowMultipleSelections 与符号包裹解耦（#237）', () => {
       selection: { anchor: 1 },
       userEvent: 'input.type',
     })
+    // #597：包裹改写移到微任务兜底——推平微任务后断言
+    await Promise.resolve()
+    await Promise.resolve()
     // 包裹计划仍两侧插入（文本生效），选区被 asSingle 折回单 range
     expect(view.state.doc.toString()).toBe('*aa*\n\n*bb*')
     expect(ranges(view)).toHaveLength(1)
-    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
+    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
   })
 })
 

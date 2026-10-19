@@ -98,7 +98,12 @@ describe('#597 方案3 探针：出站与撤销粒度', () => {
     const view = c.getView()!
     useSegmentClock()
     view.dispatch({ selection: { anchor: 1, head: 1 } })
-    view.dispatch({ changes: { from: 1, insert: '(' }, userEvent: 'input.type' })
+    // #597 实施后此用例走真实键入路径：filter 放行原始 ( + 微任务兜底 )
+    // 强制暂缓合并。真实键入事务总带显式选区（CM6 domObserver 从 DOM
+    // 读回光标——插入后落在插入文本之后），模拟形态与其对齐。断言形态
+    // 不变：终态 ()、单笔 edit.request 含 ()、一次撤销整体恢复——方案 3
+    // 的出站/撤销粒度契约与现状基线一致
+    view.dispatch({ changes: { from: 1, insert: '(' }, selection: { anchor: 2 }, userEvent: 'input.type' })
     await vi.advanceTimersByTimeAsync(20)
     expect(view.state.doc.toString()).toBe('中()')
     const reqs = editRequests(sent)
