@@ -5,7 +5,7 @@
 // #93 起：框架标题经 t() 取词——本文件装配生产 zh-cn 语言包（装配三径之
 // 单测注入），断言与字典同源（不再复制字面量）。#95 起设置项定义经
 // titleKey/descriptionKey 取词，fixture 定义复用生产词条键。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import {
   SettingsPageView,
   SETTINGS_PAGE_CLASS_NAMES,
@@ -1446,5 +1446,220 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     imageResult!.click()
     expect(parent.querySelector('[data-setting-key="image.paste"]')!.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
       .contains('vsidian-settings-item-located')).toBe(true)
+  })
+})
+
+describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时的代报与三条件失效）', () => {
+  /** 生产注册口径 + 外发消息捕获（与「会话内恢复」组同装配） */
+  function makeTrackedFullView(): { view: SettingsPageView; sent: unknown[]; parent: HTMLElement } {
+    const sent: unknown[] = []
+    const snippets = new CssSnippetSettingsSection({ postMessage() {} })
+    const appearance = new AppearanceSection(
+      snippets, new StyleReferenceSection({ postMessage() {} }),
+      new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [new KeybindingSettingsSection({ postMessage() {} }), appearance, new IndexMaintenanceSection({ postMessage() {} })],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, sent, parent }
+  }
+  function mainEl(parent: HTMLElement): HTMLElement {
+    const main = parent.querySelector<HTMLElement>('.vsidian-settings-main')
+    expect(main, '主区滚动容器应已渲染').toBeTruthy()
+    return main!
+  }
+  function uiStateMessages(sent: unknown[]): Array<{ kind: string; section: string; scrollTop: number; state?: unknown }> {
+    return sent.filter((m) => (m as { kind?: string }).kind === 'settings.uiState') as never
+  }
+  /** 可滚动主区替身（jsdom 无布局）：scrollTop 赋值按 scrollHeight−clientHeight
+   *  钳位。geometry 保持引用，测试中途改 scrollHeight 即模拟异步内容起高 */
+  function stubScrollableMain(main: HTMLElement, geometry: { scrollHeight: number; clientHeight: number }): void {
+    let top = 0
+    Object.defineProperty(main, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = Math.max(0, Math.min(value, geometry.scrollHeight - geometry.clientHeight))
+      },
+    })
+    Object.defineProperty(main, 'scrollHeight', { configurable: true, get: () => geometry.scrollHeight })
+    Object.defineProperty(main, 'clientHeight', { configurable: true, get: () => geometry.clientHeight })
+  }
+  /** ResizeObserver 替身（jsdom 无实现，addonRefViewsEmbedCard 先例）：记录
+   *  observe 目标与 disconnect 状态，fire 手动触发回调（模拟内容起高的通知） */
+  function installResizeObserverStub(): {
+    observers: Array<{ observed: Element[]; disconnected: boolean; fire: () => void }>
+  } {
+    const observers: Array<{ observed: Element[]; disconnected: boolean; fire: () => void }> = []
+    vi.stubGlobal('ResizeObserver', class {
+      private readonly record: { observed: Element[]; disconnected: boolean; fire: () => void }
+      constructor(callback: ResizeObserverCallback) {
+        const record = {
+          observed: [] as Element[],
+          disconnected: false,
+          fire: () => callback([], this as unknown as ResizeObserver),
+        }
+        this.record = record
+        observers.push(record)
+      }
+      observe(target: Element): void { this.record.observed.push(target) }
+      disconnect(): void { this.record.disconnected = true }
+    })
+    return { observers }
+  }
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('恢复应用被钳（异步内容未起高）：uiState 代报恢复值而非复位/钳位实测值，state 载荷照常携带', () => {
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    stubScrollableMain(main, { scrollHeight: 300, clientHeight: 250 }) // 最大可滚 50 < 120
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(50) // 应用被钳：内容未起高
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({
+      kind: 'settings.uiState', section: 'appearance', scrollTop: 120, state: { tab: 'cssSnippets' },
+    })
+    // 钳位之后没有任何 0/50 实测值上报（render 尾上报先于补放完成，是记忆污染点）
+    expect(uiStateMessages(sent).every((m) => m.scrollTop === 120)).toBe(true)
+  })
+
+  it('条件①：内容起高至足以容纳即补放——观察挂内容容器 listEl，补放后卸载并上报真实值自愈', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(50)
+    const observer = observers.at(-1)!
+    expect(observer.observed).toEqual([parent.querySelector('.vsidian-settings-list')])
+    // 渐进起高：首拍仍不足（最大可滚 70 < 120）→ 继续观察
+    geometry.scrollHeight = 320
+    observer.fire()
+    expect(main.scrollTop).toBe(50)
+    expect(observer.disconnected).toBe(false)
+    // 足够高：补放到位、卸载观察
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+    expect(observer.disconnected).toBe(true)
+    // 补放引发的 scroll 事件上报真实值（宿主记忆接管自愈，同值无副作用）
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+  })
+
+  it('条件②：pending 期间用户真实滚动立即作废 pending——上报用户位置，其后起高不覆盖', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    main.scrollTop = 30 // 用户滚到 30（钳位上限 50 内，≠ 钳位锚点 50）
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 })
+    expect(observer.disconnected).toBe(true)
+    // 其后内容起高也不补放：不覆盖用户滚动位置
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(30)
+  })
+
+  it('标记窗口：应用被钳引发的 scroll 事件（值=钳位实测）不算用户滚动，pending 存续照常补放', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    // 真实浏览器中应用赋值被钳引发的 scroll 事件：scrollTop=50=赋值读回值
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // 未被误判为用户滚动
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 仍代报
+    // 窗口消费后 pending 继续生效：起高补放照常
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+  })
+
+  it('条件③：切换分页清除 pending 并复位顶部——代报不跨上下文污染新分页，旧观察回调不再补放', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    sent.length = 0
+    clickNav(parent, zhCn['settings.generalSection'])
+    expect(observer.disconnected).toBe(true)
+    expect(main.scrollTop).toBe(0) // 「切分页主区滚动重置顶部」语义（#155）不破坏
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'general', scrollTop: 0 })
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(0)
+  })
+
+  it('应用成功（同步内容已够高）不挂补放：无观察实例（平台自有分页幂等，无行为差异）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    stubScrollableMain(main, { scrollHeight: 2000, clientHeight: 250 }) // 最大可滚 1750 ≥ 120
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(120)
+    expect(observers, '内容足够高时不得挂 ResizeObserver').toEqual([])
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+  })
+
+  it('无 ResizeObserver 环境（特性检测回退）：挂 pending 不崩溃，代报持续防洗，用户滚动仍可作废', () => {
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    stubScrollableMain(main, { scrollHeight: 300, clientHeight: 250 })
+    expect(typeof ResizeObserver === 'function', '前提：jsdom 无 ResizeObserver').toBe(false)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(50)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+    // 条件②路径不依赖 RO：用户滚动仍立即作废并上报真实位置
+    main.scrollTop = 30
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 })
+  })
+
+  it('二次重开不污染：pending 期间宿主按代报值记忆，回放恢复值不退化（代报净效果闭环）', () => {
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    const first = makeTrackedFullView()
+    stubScrollableMain(mainEl(first.parent), geometry)
+    first.view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const memorized = uiStateMessages(first.sent).at(-1)!.scrollTop
+    expect(memorized).toBe(120)
+    // 重开（新视图实例 = webview 重建）：宿主按记忆回放——恢复值不得是 0/50
+    const second = makeTrackedFullView()
+    stubScrollableMain(mainEl(second.parent), { ...geometry }) // 同样的异步未起高形态
+    second.view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: memorized })
+    expect(uiStateMessages(second.sent).at(-1)!.scrollTop).toBe(120)
+    expect(mainEl(second.parent).scrollTop).toBe(50) // 仍被钳，补放待命
+  })
+
+  it('同上下文重渲染（同分页重复点开）保留 pending：render 头卸载旧观察后重挂续放', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const firstObserver = observers.at(-1)!
+    expect(firstObserver.disconnected).toBe(false)
+    clickNav(parent, zhCn['appearance.title']) // 同分页再次点开：上下文未变
+    expect(firstObserver.disconnected).toBe(true) // 旧观察显式卸载（render 头统一清理）
+    const rearmed = observers.at(-1)!
+    expect(rearmed).not.toBe(firstObserver)
+    expect(rearmed.disconnected).toBe(false)
+    geometry.scrollHeight = 2000
+    rearmed.fire()
+    expect(main.scrollTop).toBe(120)
   })
 })

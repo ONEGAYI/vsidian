@@ -159,6 +159,75 @@ try {
   await page.waitForFunction((expected) =>
     document.querySelector('.vsidian-settings-main').scrollTop === expected, kbScrolled)
   assert.equal(await mainEl().evaluate((el) => el.scrollTop), kbScrolled, '重载后快捷键页滚动应恢复到记忆位置')
+
+  // ---- #596 异步装载内容页的滚动恢复补放（ResizeObserver 实拍）----
+  // 附加组件详情页的装载时序模拟：恢复应用时内容未起高（样式收起 list，
+  // 主区 max scrollTop 塌缩 → 应用被钳），随后「装载完成」解除收起——
+  // listEl 起高经 RO 补放落位；壳期 uiState 以恢复值代报（宿主记忆不被
+  // 复位/钳位值洗掉）。cap 样式即受控延迟装载的测试页注入
+  {
+    // ① 壳期恢复：应用被钳（max scrollTop=0 → 停 0），代报 300
+    await loadSettingsPage()
+    await page.locator('.vsidian-settings-nav-item').first().waitFor()
+    const cap = await page.addStyleTag({ content: '.vsidian-settings-list { display: none !important; }' })
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: window, data: { kind: 'settings.focusSection', section: 'editor', scroll: 300 },
+      }))
+    })
+    await page.waitForFunction(() => {
+      const last = window.sentMessages.filter((m) => m.kind === 'settings.uiState').at(-1)
+      return last && last.section === 'editor' && last.scrollTop === 300
+    })
+    assert.equal(await mainEl().evaluate((el) => el.scrollTop), 0, '内容未起高时应用应被钳（壳期不可滚）')
+    // ② 「装载完成」：解除收起 → listEl 起高 → RO 补放到恢复位置
+    await cap.evaluate((el) => el.remove())
+    await page.waitForFunction(() => document.querySelector('.vsidian-settings-main').scrollTop === 300)
+    assert.equal(await mainEl().evaluate((el) => el.scrollTop), 300, '内容起高后 RO 应补放到恢复位置')
+
+    // ③ 用户滚动作废 pending（条件②实拍）：重造壳期挂 pending → 用户滚动
+    // → 解除后不得覆盖用户位置。半高 cap（max scrollTop≈80）：用户可真实
+    // 滚动（30），恢复值 300 仍被钳挂 pending
+    const cap2 = await page.addStyleTag({ content: '.vsidian-settings-list { max-height: 500px !important; overflow: hidden !important; }' })
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: window, data: { kind: 'settings.focusSection', section: 'editor', scroll: 300 },
+      }))
+    })
+    await mainEl().evaluate((el) => { el.scrollTop = 30 })
+    await page.waitForFunction(() => {
+      const last = window.sentMessages.filter((m) => m.kind === 'settings.uiState').at(-1)
+      return last && last.section === 'editor' && last.scrollTop === 30
+    })
+    await cap2.evaluate((el) => el.remove())
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    assert.equal(await mainEl().evaluate((el) => el.scrollTop), 30, 'pending 已被用户滚动作废：起高后不得覆盖用户位置')
+
+    // ④ 切换分页清除 pending（条件③实拍）：壳期挂 pending → 切常规页
+    // → 复位顶部 + 观察卸载 → 解除后不补放
+    const cap3 = await page.addStyleTag({ content: '.vsidian-settings-list { max-height: 500px !important; overflow: hidden !important; }' })
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: window, data: { kind: 'settings.focusSection', section: 'editor', scroll: 300 },
+      }))
+    })
+    await page.getByRole('button', { name: zhCn['settings.generalSection'], exact: true }).click()
+    assert.equal(await mainEl().evaluate((el) => el.scrollTop), 0, '切分页主区滚动应复位顶部（#155 语义）')
+    await page.waitForFunction(() => {
+      const last = window.sentMessages.filter((m) => m.kind === 'settings.uiState').at(-1)
+      return last && last.section === 'general' && last.scrollTop === 0
+    })
+    await cap3.evaluate((el) => el.remove())
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    assert.equal(await mainEl().evaluate((el) => el.scrollTop), 0, '切页后 pending 已清除：解除收起不得再补放')
+
+    // ⑤ 壳期代报的记忆值重放（二次重开不污染闭环）：按 ① 断言的记忆值
+    // 300 重载回放，满高内容直接恢复——恢复值未被壳期洗掉
+    await loadSettingsPage([{ kind: 'settings.focusSection', section: 'editor', scroll: 300 }])
+    await page.locator('.vsidian-settings-nav-item').first().waitFor()
+    await page.waitForFunction(() => document.querySelector('.vsidian-settings-main').scrollTop === 300)
+    assert.equal(await mainEl().evaluate((el) => el.scrollTop), 300, '按壳期代报记忆值重放：二次重开仍恢复原位置')
+  }
   assert.deepEqual(errors, [], '页面不得有未捕获错误')
 } finally {
   await browser.close()
