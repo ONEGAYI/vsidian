@@ -164,10 +164,14 @@ async function closeAllEditors(): Promise<void> {
   await new Promise((r) => setTimeout(r, 300))
 }
 
-/** 行为状态恢复默认（防跨用例污染；幂等） */
+/** 行为状态恢复默认（防跨用例污染；幂等）——恢复面覆盖夹具全部五行为
+ *  （含 T07 套件可能禁用的 locale-name/bracket-conv，跨套件同宿主兜底） */
 async function resetBehaviorState(): Promise<void> {
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', { order: [] })
-  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE], disabled: false })
+  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', {
+    keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, `${ADDON_ID}#locale-name`, `${ADDON_ID}#bracket-conv`],
+    disabled: false,
+  })
 }
 
 /** 打开真实设置页并等待 ready（消息注入须在面板在场时进行）。

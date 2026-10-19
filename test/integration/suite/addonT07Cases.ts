@@ -207,7 +207,7 @@ async function closeAllEditors(): Promise<void> {
 /** 行为状态恢复默认（防跨用例污染；幂等） */
 async function resetBehaviorState(): Promise<void> {
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', { order: [] })
-  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE], disabled: false })
+  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE, KEY_BRACKET], disabled: false })
 }
 
 export const addonT07Cases: Array<[string, () => Promise<void>]> = [
