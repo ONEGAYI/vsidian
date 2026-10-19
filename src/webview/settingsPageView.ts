@@ -296,6 +296,22 @@ export class SettingsPageView {
   private active: string | undefined
   private pending = 0
   private saveFailed = false
+  /** #596 恢复滚动补放：恢复应用被钳（异步内容未起高）时的待恢复值；
+   *  null = 无补放。三条件失效（详见 clearPendingScroll）：补放成功 /
+   *  用户真实滚动 / 切换分页；无超时上限（装载失败随用户操作自然废弃） */
+  private pendingScroll: number | null = null
+  /** #596 补放观察：观察内容容器 listEl（mainEl 盒高不随内容变，观察无效），
+   *  起高至足以容纳 pending 时补放并卸载 */
+  private pendingObserver: ResizeObserver | null = null
+  /** #596 selectSection 的恢复目标（render 前置位）：render 尾部 uiState
+   *  上报的代报源——上报发生在滚动应用之前，实测是刚复位的 0，直接上报会
+   *  把宿主记忆洗掉（异步装载页应用被钳后无 scroll 事件自愈，损害延续到
+   *  下一次重开）。render 完成后按实测转正为 pendingScroll 或清除 */
+  private restoreScrollTarget: number | null = null
+  /** #596 程序性滚动赋值窗口锚点：复位/恢复应用可能引发 scroll 事件（值变
+   *  化或被钳），值吻合锚点的事件不算用户滚动（pending 不因之失效）；
+   *  null = 窗口关闭。锚点取赋值后的读回值（被钳时为钳位实际值） */
+  private programmaticScrollAnchor: number | null = null
   /** 当前分页内容卸载器集合（标准分页 mount 与编辑器页委托组 mount 的
    *  清理函数逐个收集）：编辑器页多委托组并存，重渲染/切页时全部执行 */
   private sectionDisposers: Array<() => void> = []
@@ -356,7 +372,7 @@ export class SettingsPageView {
     this.mainEl = main
     // 会话内恢复：主区滚动实时上报（浏览器 scroll 事件本身已按帧节流，
     // 无需再节流）；分页上下文变化的上报在 render 尾部
-    main.addEventListener('scroll', () => this.reportUiState())
+    main.addEventListener('scroll', () => this.onMainScroll())
     parent.append(root)
     // 语言切换重渲染（#93/#101）：常驻骨架（标题/搜索框/侧栏标签）由
     // localeDom 注册表单点重刷；列表与分页是 render() 的重建产物，随换包
@@ -376,6 +392,7 @@ export class SettingsPageView {
    * （单测）用它防监听器累积。
    */
   dispose(): void {
+    this.clearPendingScroll()
     this.offLocale?.()
     this.offLocale = undefined
   }
@@ -386,6 +403,8 @@ export class SettingsPageView {
    *  'wordSegment'）发起定位时打开编辑器页，entry 透传给对应委托组。
    *  scroll（可选，会话内恢复）：渲染复位后应用的主区滚动位置——缺省 =
    *  保持 render 的复位语义（顶部）；未知分页整条忽略（不设滚动）。
+   *  #596：应用被钳（异步内容未起高，实测 scrollTop < scroll）时挂 pending
+   *  补放（armPendingScroll），恢复值同时充当 render 尾上报的代报源。
    *  state（可选，PR #346）：恢复的分页内输入态载荷——在 mount 之前应用
    *  （mount 按已恢复字段渲染）；entry 在场时不应用（显式定位语义优先，
    *  防御性跳过——协议约定二者不同时携带） */
@@ -398,8 +417,20 @@ export class SettingsPageView {
     if (state !== undefined && entry === undefined) {
       this.sections.find((s) => s.id === id)?.restoreState?.(state)
     }
+    // #596：恢复值先置为代报源再渲染——render 尾部 uiState 上报发生在
+    // 滚动应用之前，此刻实测是刚复位的 0（记忆污染点）；平台自有分页靠
+    // 随后「应用成功 → scroll 事件 → 上报正确值」自愈，异步页应用被钳
+    // 无自愈，代报防止宿主记忆被洗
+    this.restoreScrollTarget = scroll ?? null
     this.render(entry)
-    if (scroll !== undefined && this.mainEl) this.mainEl.scrollTop = scroll
+    const target = this.restoreScrollTarget
+    this.restoreScrollTarget = null
+    if (target !== null && this.mainEl) {
+      this.setMainScrollProgrammatically(target)
+      // 应用被钳（异步内容未起高）→ 挂 pending 与补放观察；平台自有分页
+      // 同步渲染高度当场就位，此处不挂（幂等无行为差异）
+      if (this.mainEl.scrollTop < target) this.armPendingScroll(target)
+    }
   }
 
   handleHostMessage(message: unknown): void {
@@ -565,6 +596,12 @@ export class SettingsPageView {
   }
   private render(focusEntry?: string): void {
     if (!this.listEl) return
+    // #596 render 头统一卸载补放观察：内容即将重建，旧观察不再有意义；
+    // 分页/搜索上下文变化（条件③）同时清 pending——补放只属于恢复流所在
+    // 上下文，切页后「主区滚动重置顶部」语义（#155）不变。同上下文重渲染
+    // （开关回显、换包）保留 pending，render 尾部重挂观察续放
+    this.pendingObserver?.disconnect()
+    this.pendingObserver = null
     // #155 主区独立滚动：分页或搜索上下文变化时滚动复位；同分页内的重渲染
     // （开关回显、换包）保持滚动位置。复位先于内容重建，focusEntry 的
     // scrollIntoView 在其之后执行，定位不受影响
@@ -572,7 +609,8 @@ export class SettingsPageView {
     const renderKey = `${this.active ?? ''}|${query}`
     const contextChanged = renderKey !== this.lastRenderKey
     this.lastRenderKey = renderKey
-    if (contextChanged && this.mainEl) this.mainEl.scrollTop = 0
+    if (contextChanged) this.clearPendingScroll()
+    if (contextChanged && this.mainEl) this.setMainScrollProgrammatically(0)
     for (const dispose of this.sectionDisposers) dispose()
     this.sectionDisposers = []
     // #96 默认分组 = 首个分类（有常规定义时即「常规」）；active 指向已
@@ -580,6 +618,9 @@ export class SettingsPageView {
     const active = this.categories().find((c) => c.id === this.active) ?? this.categories()[0]
     this.renderNav(active, query)
     this.renderContent(focusEntry, query, active)
+    // #596：同上下文重渲染后 pending 仍存活（上下文变化的清除在头部）——
+    // 重挂观察续放（内容重建后高度回落，再起高时补放）
+    if (this.pendingScroll !== null) this.armPendingScroll(this.pendingScroll)
     // 会话内恢复（面板关闭/隐藏重载后还原分页与滚动）：分页或搜索上下文
     // 变化即上报 UI 态——同分页回显重渲染（开关回显、换包）不重复上报；
     // 宿主在下次 settings.get 握手按记忆补发 focusSection{scroll, state}。
@@ -678,11 +719,76 @@ export class SettingsPageView {
     }
   }
 
+  /** #596 程序性滚动赋值（render 头复位与 selectSection 恢复应用共用）：
+   *  赋值后读回实际值置标记窗口锚点——赋值引发的 scroll 事件（含被钳，
+   *  值=钳位实际值）据此与用户真实滚动区分（见 onMainScroll） */
+  private setMainScrollProgrammatically(value: number): void {
+    if (!this.mainEl) return
+    this.mainEl.scrollTop = value
+    this.programmaticScrollAnchor = Math.round(this.mainEl.scrollTop)
+  }
+
+  /** #596 主区 scroll 事件：标记窗口内的程序性事件（值吻合锚点）消费窗口
+   *  不算用户滚动；其余任何滚动都是用户真实滚动——pending 立即作废（条件
+   *  ②，不覆盖用户位置），随后上报（pending 期间 reportUiState 以代报值
+   *  防宿主记忆被复位/钳位值洗掉） */
+  private onMainScroll(): void {
+    if (this.programmaticScrollAnchor !== null && this.mainEl &&
+        Math.round(this.mainEl.scrollTop) === this.programmaticScrollAnchor) {
+      this.programmaticScrollAnchor = null
+      this.reportUiState()
+      return
+    }
+    this.programmaticScrollAnchor = null
+    this.clearPendingScroll()
+    this.reportUiState()
+  }
+
+  /** #596 清 pending 并卸载补放观察——三条件失效（①补放成功 ②用户真实
+   *  滚动 ③切换分页）与 render 头部清理、dispose 共用出口 */
+  private clearPendingScroll(): void {
+    this.pendingScroll = null
+    this.pendingObserver?.disconnect()
+    this.pendingObserver = null
+  }
+
+  /** #596 挂 pending 与补放观察：ResizeObserver 观察 listEl（内容容器——
+   *  mainEl 盒高不随内容变，观察无效；渐进起高天然多次回调直至够高）；
+   *  无 ResizeObserver 环境（jsdom 等）按 hoverPopup 先例特性检测回退——
+   *  只挂 pending（代报仍防记忆洗掉），补放交由真实浏览器路径 */
+  private armPendingScroll(scroll: number): void {
+    this.pendingScroll = scroll
+    this.pendingObserver?.disconnect()
+    this.pendingObserver = null
+    if (typeof ResizeObserver === 'function' && this.listEl) {
+      const observer = new ResizeObserver(() => this.tryApplyPendingScroll())
+      observer.observe(this.listEl)
+      this.pendingObserver = observer
+    }
+  }
+
+  /** #596 条件①补放：内容高度足以容纳 pending（最大可滚 ≥ 恢复值）即
+   *  应用——先清 pending 再赋值（赋值引发的 scroll 事件到来时 pending 已
+   *  空，不会被误判为用户滚动，且上报真实值自愈宿主记忆）；高度仍不足
+   *  则继续观察。无超时上限：装载失败（永不够高）时 pending 随用户滚动
+   *  或切分页自然废弃 */
+  private tryApplyPendingScroll(): void {
+    const main = this.mainEl
+    if (this.pendingScroll === null || !main) return
+    if (main.scrollHeight - main.clientHeight < this.pendingScroll) return
+    const target = this.pendingScroll
+    this.clearPendingScroll()
+    main.scrollTop = target
+  }
+
   /** 会话内恢复上报：当前生效分页（active 未选时回落首个分类，与 render
    *  的回落渲染一致）与主区滚动位置。无激活分类（空 defs fixture）不发，
    *  宿主侧空 section 同样忽略。scrollTop 取整：DOM scrollTop 是 double，
    *  zoom/分数缩放下产生小数，协议守卫只收非负整数（不取整整条被静默
    *  丢弃，恢复失效）；恢复误差 ≤0.5px 不可感知。
+   *  #596 代报：pending/恢复目标在场时以恢复值代替实测值——render 尾上报
+   *  先于补放完成，实测是复位/钳位值，直接上报会把宿主记忆洗掉；补放成
+   *  功后真实 scroll 事件上报接管自愈。
    *  withState（PR #346）：输入态变化与分页切换的上报携带当前分页的
    *  captureState 载荷（宿主不解释内容，原样记忆回放）；滚动上报不重报
    *  state——输入态未变省载荷，宿主对同分页的无 state 上报保留既有记忆 */
@@ -693,7 +799,7 @@ export class SettingsPageView {
     this.bridge.postMessage({
       kind: 'settings.uiState',
       section: id,
-      scrollTop: Math.round(this.mainEl?.scrollTop ?? 0),
+      scrollTop: Math.round(this.pendingScroll ?? this.restoreScrollTarget ?? this.mainEl?.scrollTop ?? 0),
       ...(state !== undefined ? { state } : {}),
     })
   }
