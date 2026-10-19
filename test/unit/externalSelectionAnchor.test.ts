@@ -5,6 +5,7 @@
 // 坍缩到区间边界（wo|rd 坍到 w|【ord】）。旧文本是新文本子串（符号
 // 产出保序保留原文）时按子串锚定补偿——原文内字符位置逐字保留。
 import { describe, it, expect } from 'vitest'
+import { EditorSelection } from '@codemirror/state'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { WebviewToHost } from '../../src/shared/protocol'
 
@@ -95,5 +96,40 @@ describe('外部整段替换的区间内部光标保序锚定（评审 004）', 
       changes: [{ offset: 1, length: 3, text: '【ord】' }],
     })
     expect(view.state.selection.main.head).toBe(6) // w【ord】| 末尾
+  })
+
+  it('同一替换段内多光标：不归并、逐光标锚定、主选区身份保留（评审 004 v2）', () => {
+    const { controller, view } = setup('word\n')
+    // 双光标都在被替换段内部（r 前=2、d 前=3），主选区是第二个
+    view.dispatch({ selection: EditorSelection.create(
+      [EditorSelection.cursor(2), EditorSelection.cursor(3)], 1) })
+    controller.handleHostMessage({
+      kind: 'doc.changed', version: 2, origin: 'external',
+      changes: [{ offset: 1, length: 3, text: '【ord】' }],
+    })
+    expect(view.state.doc.toString()).toBe('w【ord】\n')
+    const sel = view.state.selection
+    // selection.map 会把同区间多光标归并（且丢主选区身份）——锚定须基于
+    // 原始 ranges 逐光标：r 前→3、d 前→4，主选区仍指向第二个
+    expect(sel.ranges).toHaveLength(2)
+    expect(sel.ranges[0]!.head).toBe(3)
+    expect(sel.ranges[1]!.head).toBe(4)
+    expect(sel.mainIndex).toBe(1)
+    expect(sel.main.head).toBe(4)
+  })
+
+  it('降序 changes 数组：锚定位移按位置序累计（评审 004 v2）', () => {
+    const { controller, view } = setup('ordzwei\n')
+    view.dispatch({ selection: { anchor: 4 } }) // zwei 的 w 前
+    controller.handleHostMessage({
+      kind: 'doc.changed', version: 2, origin: 'external',
+      // 降序到达（宿主/来源未保证升序）：后段在前
+      changes: [
+        { offset: 3, length: 4, text: '【zwei】' },
+        { offset: 0, length: 3, text: '【ord】' },
+      ],
+    })
+    expect(view.state.doc.toString()).toBe('【ord】【zwei】\n')
+    expect(view.state.selection.main.head).toBe(7)
   })
 })

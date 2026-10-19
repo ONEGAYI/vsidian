@@ -1875,18 +1875,22 @@ export class LiveEditorInstance {
     // 「净插入 + 区间右端点光标」时漏钳
     const hitMask = view.state.selection.ranges.map((range) =>
       range.empty && specs.some((c) => range.head >= c.from && range.head <= c.to))
-    const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
+    const cs = ChangeSet.of(specs, view.state.doc.length)
+    const mapped = view.state.selection.map(cs)
     // 评审 004（PR #599）：整段替换把区间**内部**的原文字标/选区端点
     // 坍缩到区间边界（CM6 映射语义）。旧文本是新文本的子串（#597 键入
     // 路径符号包裹/补全的净变更保序保留原文：ord→【ord】）时按子串锚定
     // 补偿——原文内字符位置逐字保留（另一实例 wo|rd 平移到【o|rd】而非
     // 坍到段首）；非子串（真替换，无字符身份可锚）维持 CM6 映射行为。
-    // R3 续修：锚定值是批内坐标，须手算前序段累计净位移（cs.mapPos 对
-    // 区间内部位置同样坍边界，不可用）；非空选区两端各自锚定、无锚端
-    // 保留 CM6 映射端，方向随 anchor/head 语义保留
+    // R4 续修（v2）：selection.map 会把同区间多光标**归并去重**且丢主
+    // 选区身份——锚定改基于原始 ranges 逐个处理（无锚端用单 range 的
+    // old.map(cs)，不经归并集）；位移累计按位置序（specs 到达序不保证
+    // 升序，降序数组直接累计会漏左侧位移）；端点在替换段边界上归
+    // CM6 端点映射（段首身份在插入前缀下两义，不锚）
+    const sortedSpecs = [...specs].sort((a, b) => a.from - b.from)
     const anchorPos = (pos: number): number | null => {
       let shift = 0
-      for (const c of specs) {
+      for (const c of sortedSpecs) {
         if (c.from !== c.to && pos > c.from && pos < c.to) {
           const oldText = view.state.doc.sliceString(c.from, c.to)
           const subAt = c.insert.indexOf(oldText)
@@ -1898,19 +1902,25 @@ export class LiveEditorInstance {
       }
       return null
     }
-    const anchoredRanges = mapped.ranges.map((range, i) => {
-      const old = view.state.selection.ranges[i]!
-      const anchor = anchorPos(old.anchor) ?? range.anchor
-      const head = anchorPos(old.head) ?? range.head
-      return anchor === range.anchor && head === range.head
-        ? range
-        : EditorSelection.range(anchor, head)
+    const originRanges = view.state.selection.ranges
+    const anchoredRanges = originRanges.map((old) => {
+      const anchor = anchorPos(old.anchor)
+      const head = anchorPos(old.head)
+      if (anchor === null && head === null) {
+        return null
+      }
+      const solo = old.map(cs)
+      return EditorSelection.range(anchor ?? solo.anchor, head ?? solo.head)
     })
-    const anchored = anchoredRanges.some((range, i) => range !== mapped.ranges[i])
-    const selection = anchored || mapped.ranges.some((range) => range.from > range.to)
-      ? EditorSelection.create(anchoredRanges.map((range) =>
-        range.from > range.to ? EditorSelection.range(range.to, range.from) : range),
-      mapped.mainIndex)
+    const anchored = anchoredRanges.some((range) => range !== null)
+    const mergedAway = mapped.ranges.length !== originRanges.length
+    const selection = anchored || mergedAway || mapped.ranges.some((range) => range.from > range.to)
+      ? EditorSelection.create(anchoredRanges.map((range, i) => {
+        const resolved = range ?? originRanges[i]!.map(cs)
+        return resolved.from > resolved.to
+          ? EditorSelection.range(resolved.to, resolved.from)
+          : resolved
+      }), view.state.selection.mainIndex)
       : undefined
     view.dispatch({
       changes: specs,
