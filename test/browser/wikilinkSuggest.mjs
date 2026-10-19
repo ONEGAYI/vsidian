@@ -97,11 +97,22 @@ const popup = (page) => page.evaluate(() => window.readPopup())
 
 /** #597：`[[` 起始的键入序列命中符号补全的 symbolRawInput 强制暂缓——
  *  首笔 edit.request 要等 flush 宏任务才出站。确认类用例在 Enter 前先等
- *  键入段出站（deferredLocal 发出即清），避免撞 F3 未出站门（确认路径
- *  消费按键不出 accept——时序赛跑非确定）；F3 门自身交互由「快速输入
- *  未确认窗口」专测覆盖，不经本助手 */
-const awaitTypedOutbound = (page) => page.waitForFunction(() =>
-  window.hostMessages().some((m) => m.kind === 'edit.request'))
+ *  键入段出站收敛（deferredLocal 发出即清），避免撞 F3 未出站门（确认
+ *  路径消费按键不出 accept——时序赛跑非确定）；F3 门自身交互由「快速
+ *  输入未确认窗口」专测覆盖，不经本助手。
+ *  R3 轮 CI 实证「等首笔出站」不够：首笔出站被 ack 后，键入批尾的后续
+ *  字符仍可触碰进新暂缓段（autoAck 收敛链与键入时序竞争），Enter 时
+ *  新段未 flush——改为出站静默等待（计数连续两采样不变，60ms 采样
+ *  间隔覆盖 flush 宏任务与链式收敛） */
+const awaitTypedOutbound = async (page) => {
+  await page.waitForFunction(() => window.hostMessages().some((m) => m.kind === 'edit.request'))
+  await page.waitForFunction(() => {
+    const count = window.hostMessages().filter((m) => m.kind === 'edit.request').length
+    const stable = window.__typedOutboundCount === count
+    window.__typedOutboundCount = count
+    return stable
+  }, undefined, { timeout: 5000, polling: 60 })
+}
 
 try {
   // ---- 触发与初始高亮 ----
