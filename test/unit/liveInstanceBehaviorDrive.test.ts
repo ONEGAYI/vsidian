@@ -12,14 +12,15 @@
 //   组合携带选区内容），纯插入与迟入组合（compositionupdate 兜底）为 null；
 // - 网格编辑态（tableRegionField 在场——setTableRegion 激活）、代码上下文
 //   （inCodeContext）、外部同步（externalSync）、SDK 修饰
-//   （addonEditOriginTag）不驱动；
+//   （addonEditOriginTag）、内置符号补全/包裹（builtinEditOrigin，#595——
+//   IME 定稿符号对的内置加工不重复驱动，终态兜底与补全照常）不驱动；
 // - 表格源码行内（region 未激活）键入照常驱动（#124 同口径：排除面是
 //   网格编辑态而非表格行文本）；
 // - 未装配驱动（deps 缺省）或未设身份（setAddonBehaviorIdentity 未调）
 //   时零驱动。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorSelection, Transaction } from '@codemirror/state'
-import { LiveEditorInstance, externalSync, addonEditOriginTag, type LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
+import { LiveEditorInstance, externalSync, addonEditOriginTag, builtinEditOrigin, type LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
 import { setTableRegion } from '../../src/webview/tableRegionSelection'
 import { ImageResourceManager } from '../../src/webview/imageResource'
 import type { WebviewToHost } from '../../src/shared/protocol'
@@ -158,6 +159,59 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     await flushMicrotasks()
     // 净变更含首笔跨行删除：replaced = 组合开始时刻的原始选区文本（LF 坐标 [1,4)）
     expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '你', replaced: { from: 1, to: 4, text: 'b\nc' } }])
+  })
+
+  it('#595 内置符号补全/包裹事务（builtinEditOrigin 注解）不驱动行为链', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    // #123 补全 attempt 的同款事务形态：userEvent input.type + 内置来源
+    // 注解——IME 定稿的驱动已由 #593 补驱动以干净形态完成，内置加工
+    // 事务不重复驱动（防双驱动）
+    view.dispatch({
+      changes: { from: 5, insert: '】' },
+      userEvent: 'input.type',
+      annotations: builtinEditOrigin.of(true),
+    })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('#595 IME 定稿符号对（选区）：#124 包裹兜底落地、行为链驱动恰一次', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 1, head: 4 } }) // 选中 'ord'
+    const content = view.contentDOM
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    // 定稿事务（实证先于 compositionend；此处直接给定终态形态）
+    view.dispatch({ changes: { from: 1, to: 4, insert: '【' }, userEvent: 'input.type.compose', selection: { anchor: 2 } })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '【' }))
+    await flushMicrotasks()
+    // M1 补驱动（干净形态：选区 inputText='【'、replaced='ord'）恰一次；
+    // M3 内置包裹（w【ord】）带 builtinEditOrigin 不再驱动（原先双驱动）
+    expect(drives).toEqual([{
+      instanceId: 'main', userEvent: 'input.type.compose', inputText: '【',
+      replaced: { from: 1, to: 4, text: 'ord' },
+    }])
+    expect(view.state.doc.toString()).toBe('w【ord】\n')
+  })
+
+  it('#595 IME 定稿符号对（无选区）：#123 补全照常、行为链驱动恰一次', async () => {
+    const { instance, drives } = setup('word\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 4 } })
+    const content = view.contentDOM
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    view.dispatch({ changes: { from: 4, insert: '【' }, userEvent: 'input.type.compose', selection: { anchor: 5 } })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '【' }))
+    await flushMicrotasks()
+    // M1 补驱动（无选区 inputText='【'、replaced=null）恰一次；M2 补全
+    // （word【】）带 builtinEditOrigin 不再驱动
+    expect(drives).toEqual([{
+      instanceId: 'main', userEvent: 'input.type.compose', inputText: '【', replaced: null,
+    }])
+    expect(view.state.doc.toString()).toBe('word【】\n')
+    expect(view.state.selection.main.head).toBe(5)
   })
 
   it('#400 delete 事务驱动：inputText 空、replaced 携带被删文本（事务前坐标）', async () => {

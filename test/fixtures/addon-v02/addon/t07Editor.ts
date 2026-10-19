@@ -10,10 +10,16 @@
 // - locale-name：多语言 name 形态（#464）——恒不修饰（返回 null 且不经
 //   wrapReporter 上报），仅钉住多语言行为名在目录/设置页的端到端呈现；
 //   不干扰既有链断言（默认序/独占组/全关零回调）
+// - bracket-conv（#595）：IME 定稿 '【' 替换选区时半角化改写（'w[ord]'）
+//   ——SelectKey 类同步行为示意：单字符 inputText + replaced 作改写目标
+//   （#401 语义）。让位验证载体：行为链驱动（M1）先改写区间，内置 #124
+//   包裹 attempt（M3）形态校验发现区间被改写即中止——判定只认
+//   inputText '【' 且 replaced 非空，不干扰 '^' 族与无选区场景
 //
 // 判定只依赖本次输入文本（健壮：不受前序修饰与光标映射语义影响）；
-// 默认序（完整键字典序）dash → locale-name → space → tilde（locale-name
-// 恒不修饰，等效于 dash → space → tilde 的链结果）：键入 ^ 的默认结果
+// 默认序（完整键字典序）bracket-conv → dash → locale-name → space →
+// tilde（locale-name 恒不修饰，等效于 bracket-conv → dash → space →
+// tilde 的链结果）：键入 ^ 的默认结果
 // word^- (dash 先插 -，space 组内先于 tilde 适用再插空格)；调序
 // （tilde 前置）后 word^~-（tilde 先占组、space 跳过）——「调整顺序
 // 导致可预期结果」；组外 dash 两种顺序都运行（不恢复先接管者生效）。
@@ -56,6 +62,25 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     }
   }
 
+  /** #595 半角化计划：IME 定稿 '【' 替换选区时，把已落地的定稿字符改写为
+   *  半角括号包裹被替换文本（SelectKey 类同步行为示意）。replaced 坐标系
+   *  是事务前文档，选区替换式定稿的字符恰落在 replaced.from——以快照
+   *  核对定稿字符在场后才计划，位置语义自证 */
+  const planBracketConv = (ctx: AddonInputContext): AddonBehaviorInputPlan | null => {
+    if (ctx.inputText !== '【' || ctx.replaced === null) {
+      return null
+    }
+    const at = ctx.replaced.from
+    if (ctx.snapshot.text.slice(at, at + ctx.inputText.length) !== ctx.inputText) {
+      return null
+    }
+    const text = `[${ctx.replaced.text}]`
+    return {
+      changes: [{ offset: at, length: ctx.inputText.length, text }],
+      selection: { anchor: at + text.length, head: at + text.length },
+    }
+  }
+
   const wrapReporter = (id: string, plan: (ctx: AddonInputContext) => AddonBehaviorInputPlan | null) =>
     (ctx: AddonInputContext): AddonBehaviorInputPlan | null => {
       const result = plan(ctx)
@@ -74,6 +99,10 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     }
 
   const registrations: Array<{ id: string; name: AddonBehaviorName; description?: string; examples?: string[]; exclusiveGroup?: string; history?: 'atomic' | 'joinPrevious'; plan: (ctx: AddonInputContext) => AddonBehaviorInputPlan | null; report?: boolean }> = [
+    {
+      id: 'bracket-conv', name: '全角括号半角化', description: 'IME 定稿【时半角化包裹',
+      examples: ['ord→[ord]'], plan: planBracketConv,
+    },
     { id: 'dash-fill', name: '短划填充', description: '键入 ^ 后插入短划', examples: ['^-^'], plan: planFill('-') },
     {
       id: 'space-fill', name: '空格整理', exclusiveGroup: 'fill', history: 'joinPrevious',

@@ -4,8 +4,10 @@
 // 形态（架构约定：注册表存静态元数据，本层负责事件/选区/事务派发）：
 // - 拦截点 EditorState.transactionFilter（先例 tableEditing 的
 //   normalizeBlankRowInput）：键入起始符号的单条插入事务被改写为
-//   open+close 一笔插入（光标居中、userEvent 保留 input.*）——一次补全
-//   即一笔 edit.request，宿主撤销一次整体恢复，不另设编辑器 history。
+//   open+close 一笔插入（光标居中、userEvent 保留 input.*——CM6 输入
+//   分类语义；撤销分段不消费 userEvent，实际由 markUndoSegmentBoundary/
+//   停顿阈值/origins 驱动）——一次补全即一笔 edit.request，宿主撤销
+//   一次整体恢复，不另设编辑器 history。
 // - 闭合越过：紧贴「自动补出的」闭合符号再键入同一符号（括号引号为
 //   close 字符，Markdown 自反符为同字符）→ 改写为零插入纯选区事务
 //   （零写回、零编辑历史），光标跳过闭合符号。越过只认自动来源
@@ -20,7 +22,9 @@
 //   的监听先于扩展 handler，定稿 flush 微任务先行完成，attempt 执行时
 //   光标左侧已是提交文本；attempt 的 dispatch 与组合净输入在
 //   deferredLocal 合并，flush 单笔出站 = 宿主撤销一次整体恢复，幂等检查
-//   防双补）。组合开始时有非空选区则 attempt 让位（读
+//   防双补；dispatch 携带 builtinEditOrigin 注解（#595）——行为链不
+//   消费该内置加工事务，IME 定稿已由 #593 补驱动以干净形态驱动过一次）。
+//   组合开始时有非空选区则 attempt 让位（读
 //   symbolCompositionState 快照——提交归 #124 的包裹重建路径，同一提交
 //   只允许一条路径生效）。提交完整符号对（一次两个字符）不命中单字符
 //   形态，天然不补。
@@ -45,7 +49,7 @@ import { EditorSelection, EditorState, StateEffect, StateField, Transaction } fr
 import { EditorView, keymap, type Command } from '@codemirror/view'
 import { findAutocloseEntry, shouldAutoclose } from '../shared/symbols'
 import { getCompositionSelectionSnapshot } from './symbolCompositionState'
-import { externalSync } from './syncController'
+import { externalSync, builtinEditOrigin } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
 import { chainAt } from '../shared/markdownDoc'
@@ -320,6 +324,10 @@ function attemptCompositionCommitClose(view: EditorView, data: string): void {
       close: entry.close,
     }),
     userEvent: 'input.type',
+    // #595 内置来源标记：行为链不消费本事务（IME 定稿已由 #593 补驱动
+    // 以干净形态驱动过一次）；userEvent 保留 input.* 维持撤销惯例与
+    // 「一次补全=一笔 edit.request」出站合并不变
+    annotations: builtinEditOrigin.of(true),
     scrollIntoView: true,
   })
 }

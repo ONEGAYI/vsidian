@@ -19,6 +19,10 @@
 //    组合定稿驱动行为链（inputText 含定稿文本，观察与修饰面一致）；
 //    4a（#593）定稿替换选区时 replaced 携带被组合覆盖文本（净变更推导）、
 //    纯塌缩光标定稿 replaced 为 null；
+//    4b（#595）定稿符号对字符（【）的竞争裁决：行为链先（M1 半角化改写
+//    生效、内置包裹让位）/ 无行为时内置全角兜底（w【ord】）/ 无选区补全
+//    照常（word【】），驱动均恰一次（builtinEditOrigin 消除双驱动），
+//    M1 先于 M3 的微任务序经行为/观察事件的快照文本钉进断言；
 // 5. 表格情境口径：源码行内键入照常驱动与受修饰（#124 同口径——排除
 //    面是网格编辑态 tableRegionField 而非表格行文本；网格 region 在场
 //    不驱动由单测 liveInstanceBehaviorDrive 钉住）；
@@ -168,9 +172,10 @@ try {
   // ---- 1. 真实键盘键入 ^ 触发默认序链：dash 插 -、space 组内先适用插空格、tilde 跳过 ----
   await command('reset')
   let stats = await command('stats')
-  // #464 增加恒不修饰的多语言目录样例，原三条输入行为仍各自验证。
+  // #464 增加恒不修饰的多语言目录样例，原三条输入行为仍各自验证；
+  // #595 bracket-conv 只认 IME 定稿 '【'（替换选区），不干扰 ^ 族。
   assert.deepEqual(stats.registrations.map((entry) => entry.id).sort(),
-    ['dash-fill', 'locale-name', 'space-fill', 'tilde-fill'], `行为目录应含三个输入行为与多语言样例：${JSON.stringify(stats.registrations)}`)
+    ['bracket-conv', 'dash-fill', 'locale-name', 'space-fill', 'tilde-fill'], `行为目录应含四条输入行为与多语言样例：${JSON.stringify(stats.registrations)}`)
   assert.equal(stats.hostState, null, '初始无用户覆盖（默认序全开启）')
   await typeChar('^')
   await waitText('word^- ')
@@ -285,10 +290,9 @@ try {
   await call('Input.imeSetComposition', { text: '你', selectionStart: 1, selectionEnd: 1 })
   await new Promise((resolve) => setTimeout(resolve, 250))
   await call('Input.insertText', { text: '你' })
-  // 定稿字符取非符号对字符（'你'）：符号对 open 字符（如 '【'）会触发
-  // symbolAutocomplete 的 IME 提交补全主动路径（selectionWrap 配对包裹，
-  // userEvent 'input.type' 的事务再驱动一次行为链）——该交互属内置符号
-  // 对与行为链的竞争面，不在本断言面内（#593 只验补驱动替换侧）
+  // 定稿字符取非符号对字符（'你'）：符号对 open 字符（如 '【'）会进入
+  // 内置包裹/补全与行为链的竞争面（#595 裁决后由下方 4b 专项覆盖），
+  // 本用例只验 #593 补驱动的 replaced 推导侧，保持非符号对字符规避
   await waitText('w你')
   await new Promise((resolve) => setTimeout(resolve, 500))
   // 组合期净变更推导：起点坐标系被组合覆盖文本 = 选区 'ord'（[1,4)）
@@ -303,6 +307,109 @@ try {
   await undo()
   await waitText(T0)
   console.log('[PASS] IME 定稿替换选区：replaced 携带被组合覆盖的选区文本（净变更推导，#593）')
+
+  // ---- 4b. #595 IME 定稿符号对：行为链先、内置兜底、双驱动消除 ----
+  // 裁决契约：#593 补驱动（M1）先启动，组件修饰先改写区间即生效；内置
+  // #124 包裹 attempt（M3）后执行，形态校验遇区间被组件改写即中止让位；
+  // attempt dispatch 携带 builtinEditOrigin 注解——内置加工事务不驱动
+  // 行为链（原先第二次驱动把 '【ord】' 展开形态外泄给组件）。
+  // ---- 4b-i. 挂测试行为（bracket-conv 半角化）：终态为行为产出（让位生效）
+  await command('reset')
+  const drivesBeforeSym = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  // 选中 'ord'（光标在行尾，3×Shift+ArrowLeft）
+  for (let i = 0; i < 3; i++) {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 0 })
+  }
+  await call('Input.imeSetComposition', { text: '【', selectionStart: 1, selectionEnd: 1 })
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  await call('Input.insertText', { text: '【' })
+  await waitText('w[ord]')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  events = await collectEvents()
+  const symBehaviors = events.filter((e) => e.kind === 'behavior' && e.id === 'bracket-conv')
+  assert.ok(symBehaviors.length > 0, `IME 定稿 '【' 应触发 bracket-conv：${JSON.stringify(events)}`)
+  assert.ok(symBehaviors.every((e) => e.inputText === '【' && e.replaced?.text === 'ord' && e.replaced.from === 1 && e.replaced.to === 4),
+    `行为上下文应为干净形态（inputText '【'、replaced 选区 'ord' [1,4)）：${JSON.stringify(symBehaviors)}`)
+  // M1 先于 M3（时序契约实测收口）：行为执行时快照仍是定稿未加工形态
+  // 'w【'——若内置包裹（M3）先行改写，快照应为 'w【ord】'
+  assert.ok(symBehaviors.every((e) => e.snapshotText === 'w【'), `M1 应先于 M3（行为快照为包裹前形态 'w【'）：${JSON.stringify(symBehaviors)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeSym + 1, `IME 定稿符号对应驱动恰好一次（双驱动消除）：${JSON.stringify(stats.counters)}`)
+  // 回基态：行为修饰与组合输入的撤回单位拆分随 ack 收敛时序在「一或两
+  // 笔」间落定（origin 段归组口径，requestHistory 对未落定编辑先排队），
+  // 轮询撤回至 T0——行为路径的撤回粒度不在 #595 断言面（验收钉的是
+  // 内置路径的单笔合并，见 4b-ii/4b-iii）
+  for (let i = 0; i < 4 && await command('text') !== T0; i++) {
+    await undo()
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  await waitText(T0)
+  console.log('[PASS] IME 定稿符号对（挂行为）：bracket-conv 产出生效、内置包裹让位、驱动恰一次（M1 先于 M3，#595）')
+
+  // ---- 4b-ii. 停用行为：内置全角包裹兜底落地、驱动仍恰一次 ----
+  await command('setDisabled', { keys: ['vsidian-test-fixture.addon-t07#bracket-conv'], disabled: true })
+  for (let i = 0; i < 50; i++) {
+    stats = await command('stats')
+    if (stats.hostState?.disabled?.some((k) => k.endsWith('#bracket-conv'))) break
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  assert.ok(stats.hostState?.disabled?.some((k) => k.endsWith('#bracket-conv')), `停用推送应到达：${JSON.stringify(stats.hostState)}`)
+  await command('reset')
+  const drivesBeforeFallback = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  // 选中 'ord'（3×Shift+ArrowLeft）
+  for (let i = 0; i < 3; i++) {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 0 })
+  }
+  await call('Input.imeSetComposition', { text: '【', selectionStart: 1, selectionEnd: 1 })
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  await call('Input.insertText', { text: '【' })
+  await waitText('w【ord】')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  events = await collectEvents()
+  const fallbackChanged = events.filter((e) => e.kind === 'changed' && e.inputText === '【')
+  assert.ok(fallbackChanged.length > 0, `观察事件应含定稿 '【'：${JSON.stringify(events)}`)
+  // M1 先于 M3（兜底路径同样钉住）：观察事件快照为包裹前形态 'w【'——
+  // 若内置包裹（M3）先于行为链驱动（M1），快照应为 'w【ord】'
+  assert.ok(fallbackChanged.every((e) => e.snapshotText === 'w【'), `M1 应先于 M3（观察快照为包裹前形态 'w【'）：${JSON.stringify(fallbackChanged)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeFallback + 1, `内置兜底路径同样只驱动一次（包裹事务不驱动）：${JSON.stringify(stats.counters)}`)
+  // 一次包裹 = 一笔 edit.request：宿主撤销一次整体恢复
+  await undo()
+  await waitText(T0)
+  console.log('[PASS] IME 定稿符号对（无行为）：内置全角包裹兜底 w【ord】、驱动恰一次、单笔撤销（#595）')
+
+  // ---- 4b-iii. 无选区定稿 '【'：#123 补全照常、驱动恰一次 ----
+  await command('reset')
+  const drivesBeforeClose = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  await call('Input.imeSetComposition', { text: '【', selectionStart: 1, selectionEnd: 1 })
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  await call('Input.insertText', { text: '【' })
+  await waitText('word【】')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  stats = await command('stats')
+  // 无选区路径同样双驱动消除：原先补全 '】' 的 attempt 事务（input.type）
+  // 会再驱动一次（inputText='】'）
+  assert.equal(stats.counters.drives, drivesBeforeClose + 1, `无选区定稿符号对应驱动恰好一次（补全事务不驱动）：${JSON.stringify(stats.counters)}`)
+  await undo()
+  await waitText(T0)
+  // 恢复默认（bracket-conv 复启，管理面幂等写回）
+  await command('setDisabled', { keys: ['vsidian-test-fixture.addon-t07#bracket-conv'], disabled: false })
+  for (let i = 0; i < 50; i++) {
+    stats = await command('stats')
+    if (stats.hostState === null) break
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  assert.equal(stats.hostState, null, '恢复默认后无用户覆盖')
+  console.log('[PASS] 无选区 IME 定稿符号对：补全 word【】 照常、驱动恰一次、单笔撤销（#595）')
 
   // ---- 4.5 #400：真实退格驱动行为链，replaced 携带被删文本 ----
   await command('reset')
