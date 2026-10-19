@@ -3,15 +3,21 @@
 //
 // 形态（架构约定：注册表存静态元数据，本层负责事件/选区/事务派发）：
 // - 拦截点 EditorState.transactionFilter（先例 tableEditing 的
-//   normalizeBlankRowInput）：键入起始符号的单条插入事务被改写为
-//   open+close 一笔插入（光标居中、userEvent 保留 input.*——CM6 输入
-//   分类语义；撤销分段不消费 userEvent，实际由 markUndoSegmentBoundary/
-//   停顿阈值/origins 驱动）——一次补全即一笔 edit.request，宿主撤销
-//   一次整体恢复，不另设编辑器 history。
+//   normalizeBlankRowInput）。#597 方案 3 起键入路径与 IME 路径同构
+//   （原始输入 → 行为链 → 内置兜底）：键入起始符号的单条插入事务
+//   **放行原始单字符**（不再原子改写为 open+close 一笔）——行为链经
+//   maybeDriveAddonBehaviors 以原始形态（inputText='('）驱动恰一次，
+//   内置兜底在微任务时点补闭合 + addAutoclosePair（自动状态登记移到
+//   attempt——与下一按键之间只隔微任务，事件循环保证不可达竞态）；
+//   原始事务带 symbolRawInput 注解强制暂缓出站，兜底触碰暂缓并入同段，
+//   flush 单笔 edit.request = 宿主撤销一次整体恢复（两笔均在同一事件
+//   循环任务内完成，微任务先于渲染，用户不可见中间态）。
 // - 闭合越过：紧贴「自动补出的」闭合符号再键入同一符号（括号引号为
 //   close 字符，Markdown 自反符为同字符）→ 改写为零插入纯选区事务
 //   （零写回、零编辑历史），光标跳过闭合符号。越过只认自动来源
 //   （autoclosePairsField 记录），手打的相邻闭合符号照常插入。
+//   越过维持 filter 内改写（#597：零 doc 变更、不进驱动面与出站，
+//   无坐标问题）。
 // - 空对退格：自动补出且仍为空的符号对内部退格同删两侧（keymap，
 //   先于表格/默认删除链）；非自动来源与对内已有内容不接管。
 // - IME：组合期间（compositionstart..compositionend）不干预（filter 读
@@ -49,9 +55,10 @@ import { EditorSelection, EditorState, StateEffect, StateField, Transaction } fr
 import { EditorView, keymap, type Command } from '@codemirror/view'
 import { findAutocloseEntry, shouldAutoclose } from '../shared/symbols'
 import { getCompositionSelectionSnapshot } from './symbolCompositionState'
-import { externalSync, builtinEditOrigin } from './syncController'
+import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
+import { blankRowInputPlan } from './tableEditing'
 import { chainAt } from '../shared/markdownDoc'
 
 /** 代码上下文节点（含边界标记）：CodeMark/CodeInfo 归入围栏内部口径 */
@@ -70,6 +77,29 @@ interface AutoclosePairSpan {
 
 const setSymbolComposing = StateEffect.define<boolean>()
 const addAutoclosePair = StateEffect.define<AutoclosePairSpan>()
+
+/** #597 键入路径兜底材料：filter 时点判定（注册表命中 + shouldAutoclose
+ *  通过 + 格区/选区/组合等全部门控已过），随放行事务经 effect 流动到
+ *  本组 updateListener——filter 无 view 句柄（CM6 transactionFilter 只
+ *  见事务），per-view WeakMap 暂存不可达，事务内载体是唯一通道；微任务
+ *  同一事件循环内消费即逝，无跨事务残留 */
+interface TypedAutoclosePending {
+  /** 原始插入点：open 字符在放行事务后占据 [pos, pos + open.length) */
+  readonly pos: number
+  readonly open: string
+  readonly close: string
+  /** 长度基准（放行事务后的文档长度）：行为链任何净改写必破坏它——
+   *  同步组件产出保留开符号与光标位置时（评审 001），追加式校验的
+   *  「光标紧邻 + 左邻字符」两项都仍满足、无法分辨；正常嵌套（在
+   *  既有闭合符内键入）以当次事务后长度为基准，不受既有文本影响 */
+  readonly docLength: number
+  /** 组件修饰纪元（评审 001 续）：等长改写（净长度为零）不破坏长度
+   *  基准——「净长度为零」不等于「未修改」，纪元是组件触碰的唯一
+   *  可辨证据 */
+  readonly editEpoch: number
+}
+
+const pendingTypedAutoclose = StateEffect.define<TypedAutoclosePending>()
 
 /** 组合进行中标志（compositionstart..compositionend；end 同步复位——
  * 见头注释 IME 节：定稿事务晚于 compositionend，若延迟复位会把提交
@@ -234,16 +264,37 @@ const autocloseInputFilter = EditorState.transactionFilter.of((tr) => {
   if (!shouldAutoclose(entry, ctx)) {
     return tr
   }
+  // 表格空白行首笔（评审 002）：tableEditing 的 normalizeBlankRowInput
+  // 在本 filter 之后的链上重建事务并丢弃 effect 载体——兜底 attempt 拿
+  // 不到 pending、闭合符丢失（终态 | | | (|）。此分支维持 #597 前的原子
+  // 改写：规范化以 open+close 成对内容进行，与既有行为逐字一致（同
+  // 「闭合越过分支保持 filter 内改写」的例外模式；blankRowInputPlan 纯
+  // 函数预判，不依赖 tableEditing filter 的执行序）
+  if (blankRowInputPlan(state, insertion.from, insertion.from, ch)) {
+    return {
+      changes: { from: insertion.from, insert: entry.open + entry.close },
+      selection: EditorSelection.cursor(insertion.from + entry.open.length),
+      effects: addAutoclosePair.of({
+        from: insertion.from,
+        to: insertion.from + entry.open.length + entry.close.length,
+        open: entry.open,
+        close: entry.close,
+      }),
+      annotations: keepEvent,
+      scrollIntoView: tr.scrollIntoView,
+    }
+  }
+  // #597 方案 3：放行原始单字符插入（不再原子改写）——链驱动以原始形态
+  // （inputText 单字符）恰一次驱动，内置兜底在微任务时点补闭合（M1 链
+  // 先、M3 内置后，ADR-0020 裁决一）。重指定同形事务（变更/选区/滚动
+  // 原样重建，userEvent 经 keepEvent 保留）+ symbolRawInput 注解：出站
+  // 强制暂缓，兜底触碰暂缓并入同段，flush 单笔出站 = 一条宿主撤销记录。
+  // 兜底材料经 effect 流动（filter 无 view 句柄，无法写 per-view 暂存）
   return {
-    changes: { from: pos, insert: entry.open + entry.close },
-    selection: EditorSelection.cursor(pos + entry.open.length),
-    effects: addAutoclosePair.of({
-      from: pos,
-      to: pos + entry.open.length + entry.close.length,
-      open: entry.open,
-      close: entry.close,
-    }),
-    annotations: keepEvent,
+    changes: tr.changes,
+    selection: tr.selection,
+    effects: pendingTypedAutoclose.of({ pos, open: entry.open, close: entry.close, docLength: tr.newDoc.length, editEpoch: state.field(addonEditEpoch, false) ?? 0 }),
+    annotations: [...(keepEvent ? [keepEvent] : []), symbolRawInput.of(true)],
     scrollIntoView: tr.scrollIntoView,
   }
 })
@@ -332,6 +383,70 @@ function attemptCompositionCommitClose(view: EditorView, data: string): void {
   })
 }
 
+/** #597 键入路径兜底补全（filter 放行原始 open 键入后的微任务时点）：
+ *  镜像 attemptCompositionCommitClose 的结构与防御。形态校验（追加式）：
+ *  光标仍紧邻原始 open 之后且左侧字符未被改写——链（M1 微任务先执行）
+ *  已改写区间或移动光标时让位（组件产出为终态，零重复内容）。通过则
+ *  在光标处补 close + addAutoclosePair（自动状态登记移到 attempt，
+ *  filter 不再写 effect——与下一按键之间只隔微任务，事件循环保证
+ *  不可达竞态）。 */
+function attemptTypedAutoclose(view: EditorView, pending: TypedAutoclosePending): void {
+  if (view.compositionStarted || view.state.readOnly) {
+    return
+  }
+  const state = view.state
+  const selection = state.selection
+  if (selection.ranges.length !== 1 || !selection.main.empty) {
+    return
+  }
+  const pos = selection.main.head
+  if (pos !== pending.pos + pending.open.length ||
+      state.sliceDoc(pos - pending.open.length, pos) !== pending.open ||
+      state.doc.length !== pending.docLength ||
+      (state.field(addonEditEpoch, false) ?? 0) !== pending.editEpoch) {
+    return // 原始插入已被链改写 / 光标已移动 / 文档被净改写 / 组件已修饰（含等长，评审 001 续）：让位
+  }
+  view.dispatch({
+    changes: { from: pos, insert: pending.close },
+    selection: EditorSelection.cursor(pos),
+    effects: addAutoclosePair.of({
+      from: pending.pos,
+      to: pos + pending.close.length,
+      open: pending.open,
+      close: pending.close,
+    }),
+    userEvent: 'input.type',
+    // #595/#597 内置来源标记：行为链不消费本事务（键入路径已由放行的
+    // 原始事务以干净形态驱动过一次）；userEvent 保留 input.* 维持撤销
+    // 惯例与「一次补全=一笔 edit.request」出站合并不变
+    annotations: builtinEditOrigin.of(true),
+    scrollIntoView: true,
+  })
+}
+
+/** #597 兜底入队点：键入路径兜底 attempt 的 updateListener。不得从
+ *  filter 入队——filter 先于 updateListener 执行，attempt 会抢在链驱动
+ *  前落地，打破 SelectKey「键入文本在快照中占据 [replaced.from,
+ *  +inputText.length)」坐标不变量（#597 验证报告第二节反证：内置先改写
+ *  后补发原始载荷必产出重复内容）。
+ *  **装配序实证修正（#597 实施发现）**：updateListener 按扩展数组**正序**
+ *  执行（靠前者先，裸 CM6 与 liveInstance 装配双重实验钉住——原方案
+ *  「数组靠后者先执行」的假设不成立），因此本 listener **不在符号组内
+ *  装配**，而由 liveInstance 装配在主簿记 listener（链驱动入队点）之后
+ *  （数组更后段 = 更晚执行）——主簿记先入队链驱动微任务（M1），本
+ *  listener 后入队兜底微任务（M3），微任务 FIFO 保证执行序（ADR-0020
+ *  裁决一；symbolTypedPath 测试钉住）。常驻装配（不随设置 Compartment
+ *  退出）：filter 关闭时无 pending effect 在途，本 listener 零成本。 */
+export const typedAutocloseScheduler = EditorView.updateListener.of((update) => {
+  for (const tr of update.transactions) {
+    const effect = tr.effects.find((e) => e.is(pendingTypedAutoclose))
+    if (effect) {
+      const pending = effect.value
+      queueMicrotask(() => attemptTypedAutoclose(update.view, pending))
+    }
+  }
+})
+
 /** 组合标志复位的延迟句柄（compositionend 后一个宏任务复位——CM6 的
  * 组合定稿 flush 与 DOM 写回发生在这窗口内，同步 dispatch 会打断定稿
  * （tableComposition 先例同款延迟；tableCaret 的 IME 回归实证） */
@@ -371,7 +486,9 @@ const symbolCompositionTracker = EditorView.domEventHandlers({
 })
 
 /** 装配入口（syncController 经 Compartment 按设置热重配；顺序约束见
- * 头注释——置于 tableEditing 之后） */
+ * 头注释——置于 tableEditing 之后）。#597 兜底入队点
+ * typedAutocloseScheduler 不在此装配——见其注释（liveInstance 装配在
+ * 主簿记 listener 之后）。 */
 export const symbolAutocomplete = [
   symbolComposing,
   autoclosePairs,

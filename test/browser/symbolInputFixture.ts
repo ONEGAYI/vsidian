@@ -20,6 +20,20 @@ const controller = new WebviewSyncController({
   setState() {},
 })
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+// #597 渲染帧采样探针（paint 中间态钉子）：每个渲染帧（rAF 回调时点）
+// 采样用户可见文本（.cm-content 的 textContent——视觉层断言对象，非
+// state.doc 存在性）。契约：原始字符与兜底闭合在同一事件循环任务内
+// 完成（微任务先于渲染），任何帧的可见文本只能是初始或终态形态——
+// 出现中间态（如 '中(' 无闭合、包裹半成品）即两笔跨帧、契约被破坏。
+const frameSamples: string[] = []
+const sampleFrame = () => {
+  const content = document.querySelector('.cm-content')
+  if (content) {
+    frameSamples.push(content.textContent ?? '')
+  }
+  requestAnimationFrame(sampleFrame)
+}
+requestAnimationFrame(sampleFrame)
 Object.assign(window, {
   initDoc(text: string) {
     controller.handleHostMessage({ kind: 'init', sessionId: 'symbol-input',
@@ -50,6 +64,20 @@ Object.assign(window, {
   },
   readHostMessages() {
     return hostMessages
+  },
+  /** 单独确认最后一笔 edit.request（不撤销）——多笔连续出站场景的 ack
+   *  收敛点：在途请求未确认时后续暂缓段留守，确认后才依次出站 */
+  ackLastEdit(version: number) {
+    const request = [...hostMessages].reverse().find((message) =>
+      (message as { kind?: string }).kind === 'edit.request') as { seq: number } | undefined
+    if (!request) throw new Error('缺少待确认的 edit.request')
+    controller.handleHostMessage({ kind: 'edit.ack', seq: request.seq, ok: true, version })
+  },
+  resetFrameSamples() {
+    frameSamples.length = 0
+  },
+  readFrameSamples() {
+    return [...frameSamples]
   },
   ackAndExternalUndo(changes: { offset: number; length: number; text: string }[], version: number) {
     const request = [...hostMessages].reverse().find((message) =>

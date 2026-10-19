@@ -15,7 +15,7 @@
 // 缓冲）随本模块自 syncController 迁入，正文见各方法内注释；协议约定
 // webview 全程 LF 坐标。本票为准备性 expand 改造：不接入引用目标 B 的
 // 生产写端口，不引入独立 history（撤销权威仍在宿主 TextDocument）。
-import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, Transaction, type Extension, type Text } from '@codemirror/state'
+import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateField, Transaction, type Extension, type Text } from '@codemirror/state'
 import { EditorView, ViewPlugin, dropCursor, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
 import { addonInstanceIdField, setAddonInstanceId } from './addonViewIdentity'
@@ -74,8 +74,8 @@ import { anchorFlash } from './anchorFlash'
 import { codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
 import { frontmatterEditing } from './frontmatterEditing'
 import { liveLineNumbers } from './liveLineNumbers'
-import { inCodeContext, symbolAutocomplete } from './symbolAutocomplete'
-import { symbolSelectionWrap } from './symbolWrap'
+import { inCodeContext, symbolAutocomplete, typedAutocloseScheduler } from './symbolAutocomplete'
+import { symbolSelectionWrap, typedWrapScheduler } from './symbolWrap'
 import { multicursorExtensions } from './multicursor'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
@@ -104,18 +104,45 @@ export const externalSync = Annotation.define<boolean>()
 export const addonEditOriginTag = Annotation.define<{ origins: EditOriginMeta[] }>()
 
 /** #595 内置程序化符号事务标记：#123 提交补全 / #124 包裹重建在
- *  compositionend 后微任务 attempt 派发的事务携带。这些事务是 IME 定稿
- *  输入的内置加工——行为链已由 #593 补驱动以干净形态（原始
- *  inputText/replaced）驱动过，内置加工事务不重复驱动（防双驱动：包裹
- *  展开形态 inputText='【ord】' / 补全闭合 inputText='】' 不作为二次
- *  驱动外泄给组件）。与键入路径的分界：真实键入符号字符的补全/包裹经
- *  transactionFilter 改写并保留 input.type userEvent，照常驱动一次
- *  （inputText 为展开形态如 '()'——#411 起既有行为，不在本标记覆盖面，
- *  是否同样排除属后续裁决）。语义与另两个注解互不复用：externalSync
+ *  compositionend 后微任务 attempt 派发的事务携带（#597 起键入路径的
+ *  兜底 attempt 同款——见 symbolRawInput 注释）。这些事务是输入的内置
+ *  加工——行为链已由原始形态事务（IME 路径 #593 补驱动 / 键入路径
+ *  #597 放行原始键入）以干净载荷（原始 inputText/replaced）驱动过，
+ *  内置加工事务不重复驱动（防双驱动：包裹展开形态 inputText='【ord】' /
+ *  补全闭合 inputText='】' / '()' 不作为二次驱动外泄给组件）。语义与
+ *  另两个注解互不复用：externalSync
  *  会抑制出站回发（打破「一次补全/包裹与组合净输入合并单笔出站」），
  *  addonEditOriginTag 向外发请求注入 origin 元数据并强制开新撤销段——
  *  本注解只退出行为链驱动面，出站合并与撤销分段语义均不变 */
 export const builtinEditOrigin = Annotation.define<boolean>()
+
+/** #597 键入路径符号原始事务标记：#123 补全 / #124 包裹的
+ *  transactionFilter 放行原始单字符键入时以重指定（同形事务，变更/选区
+ *  从 tr 重建）携带。出站管线（recordLocalChangeSet）见此注解即**强制
+ *  暂缓**（等同触碰暂缓路径，不立即出站）——同一事件循环微任务内的
+ *  内置兜底 attempt 触碰暂缓集自然并入同段，flush 定时（宏任务，晚于
+ *  全部微任务）单笔出站，维持「一次补全/包裹 = 一笔 edit.request = 一条
+ *  宿主撤销记录」（朴素两笔在孤立按键下退化为两条撤销记录，#597 探针
+ *  第二节实证）。不得复用另两个注解：externalSync 抑制出站回发（符号
+ *  输入必须出站，只是延后合并）、addonEditOriginTag 注入组件 origin
+ *  元数据并强制开新撤销段（用户键入不带组件来源）；与
+ *  builtinEditOrigin 的分界：那是内置程序化加工事务（退出链驱动面），
+ *  本注解的事务恰是链驱动面本身——#597 起键入路径以原始单字符形态
+ *  驱动（inputText='('，不再是展开形态 '()'）。本注解只改出站时点，
+ *  驱动、撤销分段与未确认追踪语义均不变 */
+export const symbolRawInput = Annotation.define<boolean>()
+
+/** #597 键入路径兜底让位的组件修饰纪元（评审 001 续修）：组件事务
+ *  （addonEditOriginTag）使纪元 +1；符号 pending 载体携带创建时纪元，
+ *  attempt 校验纪元未变——组件任何改写（含净长度为零的等长替换，
+ *  docLength 基准拦不住的形态）都失效让位。StateField 而非注解：
+ *  attempt 在微任务时点要回看「自 filter 放行以来」的窗口，注解只
+ *  在当笔事务上。与 docLength 双基准并存：纪元管「组件是否动过」，
+ *  长度管「文档是否被动过」（非组件路径） */
+export const addonEditEpoch = StateField.define<number>({
+  create: () => 0,
+  update: (value, tr) => (tr.annotation(addonEditOriginTag) !== undefined ? value + 1 : value),
+})
 
 /** #400 行为链驱动的 delete userEvent 白名单：字符/选区/行删除（用户
  *  删除意图）；delete.dedent（Shift+Tab 降缩进）属缩进命令族、Tab 家族
@@ -1161,11 +1188,10 @@ export class LiveEditorInstance {
    * - 程序化事务排除：外部同步（externalSync）与 SDK 修饰
    *   （addonEditOriginTag）不触发（防第二写入口/递归）；内置程序化符号
    *   事务（builtinEditOrigin，#595——#123 补全/#124 包裹在 compositionend
-   *   后微任务派发的 attempt）同样不触发：IME 定稿的驱动已由 #593 补驱动
-   *   以干净形态（原始 inputText/replaced）完成，内置加工事务不重复驱动
-   *   （展开/闭合形态不作为二次驱动外泄）。键入路径的符号补全/包裹经
-   *   transactionFilter 改写保留 input.type，照常驱动一次（inputText 为
-   *   展开形态如 '()'——#411 起既有行为，不在本排除面）。
+   *   或键入放行后微任务派发的兜底 attempt）同样不触发：IME 定稿的驱动
+   *   已由 #593 补驱动、键入路径已由 #597 放行的原始键入事务以干净形态
+   *   （原始 inputText/replaced）完成，内置加工事务不重复驱动（展开/
+   *   闭合形态不作为二次驱动外泄）。
    * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/undo 不
    * 驱动）+ delete 白名单（backward/forward/selection/cut/line——#400；
    * paste/drop/undo 与 dedent 等命令族删除仍不驱动）。
@@ -1849,11 +1875,52 @@ export class LiveEditorInstance {
     // 「净插入 + 区间右端点光标」时漏钳
     const hitMask = view.state.selection.ranges.map((range) =>
       range.empty && specs.some((c) => range.head >= c.from && range.head <= c.to))
-    const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
-    const selection = mapped.ranges.some((range) => range.from > range.to)
-      ? EditorSelection.create(mapped.ranges.map((range) =>
-        range.from > range.to ? EditorSelection.range(range.to, range.from) : range),
-      mapped.mainIndex)
+    const cs = ChangeSet.of(specs, view.state.doc.length)
+    const mapped = view.state.selection.map(cs)
+    // 评审 004（PR #599）：整段替换把区间**内部**的原文字标/选区端点
+    // 坍缩到区间边界（CM6 映射语义）。旧文本是新文本的子串（#597 键入
+    // 路径符号包裹/补全的净变更保序保留原文：ord→【ord】）时按子串锚定
+    // 补偿——原文内字符位置逐字保留（另一实例 wo|rd 平移到【o|rd】而非
+    // 坍到段首）；非子串（真替换，无字符身份可锚）维持 CM6 映射行为。
+    // R4 续修（v2）：selection.map 会把同区间多光标**归并去重**且丢主
+    // 选区身份——锚定改基于原始 ranges 逐个处理（无锚端用单 range 的
+    // old.map(cs)，不经归并集）；位移累计按位置序（specs 到达序不保证
+    // 升序，降序数组直接累计会漏左侧位移）；端点在替换段边界上归
+    // CM6 端点映射（段首身份在插入前缀下两义，不锚）
+    const sortedSpecs = [...specs].sort((a, b) => a.from - b.from)
+    const anchorPos = (pos: number): number | null => {
+      let shift = 0
+      for (const c of sortedSpecs) {
+        if (c.from !== c.to && pos > c.from && pos < c.to) {
+          const oldText = view.state.doc.sliceString(c.from, c.to)
+          const subAt = c.insert.indexOf(oldText)
+          return subAt < 0 ? null : c.from + subAt + (pos - c.from) + shift
+        }
+        if (c.to <= pos) {
+          shift += c.insert.length - (c.to - c.from)
+        }
+      }
+      return null
+    }
+    const originRanges = view.state.selection.ranges
+    const anchoredRanges = originRanges.map((old) => {
+      const anchor = anchorPos(old.anchor)
+      const head = anchorPos(old.head)
+      if (anchor === null && head === null) {
+        return null
+      }
+      const solo = old.map(cs)
+      return EditorSelection.range(anchor ?? solo.anchor, head ?? solo.head)
+    })
+    const anchored = anchoredRanges.some((range) => range !== null)
+    const mergedAway = mapped.ranges.length !== originRanges.length
+    const selection = anchored || mergedAway || mapped.ranges.some((range) => range.from > range.to)
+      ? EditorSelection.create(anchoredRanges.map((range, i) => {
+        const resolved = range ?? originRanges[i]!.map(cs)
+        return resolved.from > resolved.to
+          ? EditorSelection.range(resolved.to, resolved.from)
+          : resolved
+      }), view.state.selection.mainIndex)
       : undefined
     view.dispatch({
       changes: specs,
@@ -2012,8 +2079,11 @@ export class LiveEditorInstance {
   /** 普通事务与空白格组合净变更共用同一出站/未确认坐标链。
    *  T06（#355）origins：SDK applyEdits 事务（addonEditOriginTag）的来源
    *  列表随事务传入；暂缓窗口内 joinPrevious 并入同组队尾段（合并笔），
-   *  正常路径逐笔出站（各自成条目、同组连续撤回）。 */
-  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[], origins?: EditOriginMeta[]): void {
+   *  正常路径逐笔出站（各自成条目、同组连续撤回）。
+   *  #597 forceDefer：符号原始键入事务（symbolRawInput 注解）强制暂缓——
+   *  同一事件循环微任务内的内置兜底 attempt 触碰暂缓集并入同段，flush
+   *  单笔出站（撤销粒度语义见注解注释）。 */
+  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[], origins?: EditOriginMeta[], forceDefer = false): void {
     if (changes.length === 0 || !this.sessionId) {
       if (origins !== undefined) {
         // 无净文本变更的 SDK 请求不进文本管线（纯选区语义，不造文本
@@ -2039,7 +2109,7 @@ export class LiveEditorInstance {
         Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS)
     this.undoCursorBoundary = false
     this.lastLocalInputAt = Date.now()
-    if (this.composing || this.deferredLocal || (
+    if (forceDefer || this.composing || this.deferredLocal || (
       this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
     )) {
       // T06（#355）同组未提交合并（技术方案 §6 表格第一行）：joinPrevious
@@ -2105,6 +2175,12 @@ export class LiveEditorInstance {
       }
       // P2-05：暂缓集增长 = 输入挂起态（组合/触碰暂缓）——置位 settle 检测
       this.notifyInputSettle()
+      if (forceDefer) {
+        // #597：强制暂缓自带 flush 定时兜底——孤立按键（无在途请求、无
+        // 既有暂缓集）没有 ack 收敛点触发 sendDeferredLocal；setTimeout(0)
+        // 宏任务晚于链驱动/内置兜底全部微任务，段在出站前已完整
+        this.scheduleFlush()
+      }
       return
     }
     const baseChanges = this.toBaseChanges(changes)
@@ -2908,9 +2984,23 @@ export class LiveEditorInstance {
           })
           // T06（#355）SDK 修饰事务：来源列表随事务透传出站
           const addonTag = tr.annotation(addonEditOriginTag)
-          this.recordLocalChangeSet(tr.changes, changes, addonTag?.origins)
+          // #597：符号原始键入事务（filter 放行重指定）强制暂缓出站
+          this.recordLocalChangeSet(tr.changes, changes, addonTag?.origins, tr.annotation(symbolRawInput) === true)
         }
       }),
+      // #597 键入路径兜底入队点（typedAutocloseScheduler/typedWrapScheduler）：
+      // updateListener 按扩展数组**正序**执行（靠前者先——裸 CM6 与本装配
+      // 双重实验钉住，原「靠后者先执行」假设不成立），故置于上方主簿记
+      // listener 之后（数组更后 = 更晚执行）——主簿记先入队链驱动微任务
+      // （M1），此二者后入队兜底微任务（M3），微任务 FIFO 保证 M1→M3
+      // （ADR-0020 裁决一；symbolTypedPath 测试钉住）。常驻装配（不随
+      // 设置 Compartment 退出）：filter 关闭时无 pending effect 在途，零
+      // 成本；两组 filter 互斥，同一时刻至多一个 attempt 在途。
+      // filter/keymap/domHandler 的装配序不受影响（仍在符号组内，符号组
+      // 与 tableEditing 的相对顺序未动）。
+      addonEditEpoch,
+      typedAutocloseScheduler,
+      typedWrapScheduler,
       // 撤销/重做转发 keymap（#402 起提升为 Prec.highest 保留键闸）：
       // 撤销/重做归宿主文本管线，是附加组件按键拦截的**保留键面**——
       // addon keymap 即使用 Prec.highest 抢占也不得越过（同为 highest 时

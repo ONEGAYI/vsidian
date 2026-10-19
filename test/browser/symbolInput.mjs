@@ -5,7 +5,9 @@
 // 不补、选区经 IME 提交单个起始符号的包裹重建（叠加/弯引号/完整对不补）、
 // 代码块内括号照补与强调抑制、转义与撇号防误触、右邻抑制生态口径
 // （#151：词字符/标点前不越界补全，空白/闭合类照补、双链骨架两键成型、
-// IME 提交同口径）、设置开关即时生效。
+// IME 提交同口径）、设置开关即时生效、#597 键入路径验收矩阵（未装组件
+// 终态与旧 filter 改写逐字一致、补全/包裹单笔出站与单记录撤销、渲染帧
+// 间无中间态、多 range 键入包裹）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -97,6 +99,12 @@ const check = async (page, text, head, name) => {
     assert.equal(after.head, head, `${name} head: ${JSON.stringify(after)}`)
   }
 }
+
+/** 等待一个渲染帧过去。#597 帧采样场景全程可能快于一个帧周期（~16ms），
+ *  rAF 探针零采样会让「length > 0」失据、「every」对空数组恒真——reset
+ *  后与读样本前各推一帧，保证初始/终态帧必在样本中（加强而非弱化钉子） */
+const nextPaint = (page) => page.evaluate(() =>
+  new Promise((resolve) => requestAnimationFrame(() => resolve())))
 
 try {
   // ---- 补全与光标居中（真实键盘；全角符号经 insertText 走真实 input 事件）----
@@ -426,6 +434,111 @@ try {
     const after = await read(page)
     assert.equal(after.text, '| a\\| | b |\n| --- | --- |\n| 1\\| | 2 |\npara', `多光标键入: ${JSON.stringify(after)}`)
     assert.deepEqual(after.ranges, [{ from: 3, to: 3 }, { from: 29, to: 29 }], `键入后光标: ${JSON.stringify(after)}`)
+  })
+
+  // ---- #597 键入路径验收矩阵：filter 放行原始事务 → 内置兜底微任务 ----
+  // 终态/出站/撤销/中间态/多 range 五面（行为链组件交互面在 T07 套件钉）。
+  const editRequestCount = (page) => page.evaluate(() =>
+    window.readHostMessages().filter((message) => message.kind === 'edit.request').length)
+  const editRequestsOf = (page) => page.evaluate(() =>
+    window.readHostMessages().filter((message) => message.kind === 'edit.request'))
+  // 出站是异步 flush（symbolRawInput 强制暂缓 → setTimeout(0)）：先等一笔
+  // 到位，再留缓冲窗排除迟到的第二笔，然后严格断言恰一笔增量（双写回
+  // 仍会被抓住——比「先到位再断言」更强的防竞态形态）
+  const awaitSingleOutbound = async (page, before) => {
+    await page.waitForFunction((n) =>
+      window.readHostMessages().filter((message) => message.kind === 'edit.request').length >= n + 1, before)
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    return (await editRequestsOf(page)).length
+  }
+  await scenario('#597 中文后键入 ( ：终态 中() 光标在括号内（与旧改写逐字一致）', { doc: '中', cursor: 1 }, async (page) => {
+    await page.keyboard.insertText('(')
+    await check(page, '中()', 2, '补全')
+  })
+  await scenario('#597 选中文本后键入 【 ：【text】 且选区覆盖原文（真实键盘替换路径）', { doc: 'hello text', cursor: 6 }, async (page) => {
+    await selectRight(page, 4)
+    await page.keyboard.insertText('【')
+    await checkRanges(page, 'hello 【text】', [{ from: 7, to: 11 }], '键入包裹')
+  })
+  await scenario('#597 补全单笔出站：原始 ( 与兜底 ) 合并一笔 edit.request（一条宿主撤销记录）', { doc: '中', cursor: 1 }, async (page) => {
+    const before = await editRequestCount(page)
+    await page.keyboard.insertText('(')
+    await check(page, '中()', 2, '终态')
+    const after = await awaitSingleOutbound(page, before)
+    assert.equal(after, before + 1, `补全应恰一笔 edit.request（出站拆笔即撤销粒度破坏）：${JSON.stringify(await editRequestsOf(page))}`)
+    const last = (await editRequestsOf(page)).at(-1)
+    assert.deepEqual(last.changes, [{ offset: 1, length: 0, text: '()' }],
+      `单笔净变更应为插入 '()'（原始与兜底同段合并）：${JSON.stringify(last)}`)
+  })
+  await scenario('#597 包裹单笔出站：原始替换与兜底重建合并一笔 edit.request', { doc: 'hello text', cursor: 6 }, async (page) => {
+    const before = await editRequestCount(page)
+    await selectRight(page, 4)
+    await page.keyboard.insertText('【')
+    await checkRanges(page, 'hello 【text】', [{ from: 7, to: 11 }], '终态')
+    const after = await awaitSingleOutbound(page, before)
+    assert.equal(after, before + 1, `包裹应恰一笔 edit.request：${JSON.stringify(await editRequestsOf(page))}`)
+    const last = (await editRequestsOf(page)).at(-1)
+    // 原始替换（[6,10)→'【'）与兜底重建（重建段）复合为一条替换语义
+    assert.deepEqual(last.changes, [{ offset: 6, length: 4, text: '【text】' }],
+      `单笔净变更应等价「原文→open+原文+close」：${JSON.stringify(last)}`)
+  })
+  await scenario('#597 键入补全撤销：ack 单记录后一次外部撤销整体恢复', { doc: '中', cursor: 1 }, async (page) => {
+    await page.keyboard.insertText('(')
+    await check(page, '中()', 2, '终态')
+    await page.waitForFunction(() =>
+      window.readHostMessages().filter((message) => message.kind === 'edit.request').length >= 1)
+    // 宿主撤销单条记录 = 撤整笔 '()'（残留悬空 '(' 即单笔契约破坏）
+    await page.evaluate(() => window.ackAndExternalUndo([{ offset: 1, length: 2, text: '' }], 2))
+    await check(page, '中', 1, '一次撤销整体恢复')
+  })
+  await scenario('#597 补全无中间态：渲染帧采样只见初始与终态', { doc: '中', cursor: 1 }, async (page) => {
+    await page.evaluate(() => window.resetFrameSamples())
+    await nextPaint(page)
+    await page.keyboard.insertText('(')
+    await check(page, '中()', 2, '终态')
+    await nextPaint(page)
+    const samples = await page.evaluate(() => window.readFrameSamples())
+    assert.ok(samples.length > 0, '帧采样探针应运行')
+    assert.ok(samples.every((text) => text === '中' || text === '中()'),
+      `渲染帧间不得见中间态（如 '中(' 无闭合）：${JSON.stringify(samples)}`)
+  })
+  await scenario('#597 包裹无中间态：渲染帧采样只见初始与终态', { doc: 'hello text', cursor: 6 }, async (page) => {
+    await selectRight(page, 4)
+    await page.evaluate(() => window.resetFrameSamples())
+    await nextPaint(page)
+    await page.keyboard.insertText('【')
+    await checkRanges(page, 'hello 【text】', [{ from: 7, to: 11 }], '终态')
+    await nextPaint(page)
+    const samples = await page.evaluate(() => window.readFrameSamples())
+    assert.ok(samples.length > 0, '帧采样探针应运行（空样本不得静默通过）')
+    assert.ok(samples.every((text) => text === 'hello text' || text === 'hello 【text】'),
+      `渲染帧间不得见包裹中间态（如 'hello 【' 半成品）：${JSON.stringify(samples)}`)
+  })
+  await scenario('#597 多 range 键入 【：各段同步包裹、选区回设覆盖各段原文、逐键单笔出站', { doc: '甲段\n\n乙段', cursor: 0 }, async (page) => {
+    // 第一键：跨段单 range 选区 → 兜底按段重建，产物为多 range（各段原文）
+    let before = await editRequestCount(page)
+    await selectRight(page, 6)
+    await page.keyboard.insertText('【')
+    await checkRanges(page, '【甲段】\n\n【乙段】', [
+      { from: 1, to: 3 },
+      { from: 7, to: 9 },
+    ], '跨段第一键（多 range 产物）')
+    let after = await awaitSingleOutbound(page, before)
+    assert.equal(after, before + 1, `第一键应恰一笔 edit.request：${JSON.stringify(await editRequestsOf(page))}`)
+    // 第二键前确认第一笔：出站串行化（在途未确认时后续段留守暂缓集，
+    // ack 收敛点触发依次出站）——与生产行为一致，先给收敛点
+    before = after
+    await page.evaluate(() => window.ackLastEdit(2))
+    // 第二键：真实键盘多 range 键入（CM6 replaceSelection 逐 range 替换）
+    // ——SelectKey 管线让位（selections>1 既有门），各段同步包裹由内置
+    // 兜底承担，选区回设覆盖各段原文（里层）
+    await page.keyboard.insertText('【')
+    await checkRanges(page, '【【甲段】】\n\n【【乙段】】', [
+      { from: 2, to: 4 },
+      { from: 10, to: 12 },
+    ], '跨段第二键（多 range 键入包裹）')
+    after = await awaitSingleOutbound(page, before)
+    assert.equal(after, before + 1, `第二键应恰一笔 edit.request：${JSON.stringify(await editRequestsOf(page))}`)
   })
 
   // ---- #125 围栏内两步 Tab 越界：真实 Tab 键驱动生产 keymap 链 ----

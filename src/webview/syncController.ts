@@ -75,11 +75,12 @@ import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
 // 最小可复用入口；主面板经此创建唯一正文编辑器。externalSync 注解随同步
 // 机制本体迁入 liveInstance，此处 re-export 维持 symbolAutocomplete /
 // frontmatterEditing / perfProbe 既有导入路径；builtinEditOrigin（#595
-// 内置程序化符号事务标记）同面 re-export——symbolAutocomplete/symbolWrap
-// 的既有导入路径同款
-import { externalSync, builtinEditOrigin, LiveEditorInstance, type LiveEditorInstanceDeps } from './liveInstance'
+// 内置程序化符号事务标记）与 symbolRawInput（#597 键入路径符号原始
+// 事务标记）同面 re-export——symbolAutocomplete/symbolWrap 的既有导入
+// 路径同款
+import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch, LiveEditorInstance, type LiveEditorInstanceDeps } from './liveInstance'
 
-export { externalSync, builtinEditOrigin }
+export { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch }
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,

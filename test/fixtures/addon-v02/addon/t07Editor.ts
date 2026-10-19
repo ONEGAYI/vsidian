@@ -15,6 +15,12 @@
 //   （#401 语义）。让位验证载体：行为链驱动（M1）先改写区间，内置 #124
 //   包裹 attempt（M3）形态校验发现区间被改写即中止——判定只认
 //   inputText '【' 且 replaced 非空，不干扰 '^' 族与无选区场景
+// - async-conv（#597）：真实键盘 '（' 替换选区时异步修饰——onInput 返回
+//   null（不占用链修饰面），下一宏任务经 views 面 applyEdits 把内置兜底
+//   已落地的 '（原文）' 覆盖为 '〈原文〉'。异步类行为矩阵载体（ADR-0020
+//   已知边界同型）：内置兜底（M3）先落地、修饰后至以内置产出为改写基线
+//   覆盖——判定只认真实键入（userEvent input.type）的 inputText '（' 且
+//   replaced 非空，不干扰 '^' 族/IME 定稿（含 '（' 与 '【'）与无选区场景
 //
 // 判定只依赖本次输入文本（健壮：不受前序修饰与光标映射语义影响）；
 // 默认序（完整键字典序）bracket-conv → dash → locale-name → space →
@@ -81,6 +87,47 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     }
   }
 
+  /** #597 异步修饰计划：真实键盘 '（' 替换选区时，onInput 返回 null（链
+   *  修饰面零动作），下一宏任务经 views 面把内置兜底已落地的全角包裹
+   *  '（原文）' 覆盖为 '〈原文〉'——改写基线取异步时点快照（内置产物），
+   *  找不到兜底形态（如被前序改写/兜底让位）即放弃。fire-and-forget：
+   *  结果上报不做（终态由宿主侧文本断言承载） */
+  const planAsyncConv = (ctx: AddonInputContext): null => {
+    // 只修饰真实键入路径：IME 定稿事务同样以 '（' 替换选区（userEvent
+    // input.type.compose，#124 集成链路）——一并匹配会把 IME 包裹产物
+    // 异步覆盖为〈〉，权威文本与「（原文）」期望永不相等（CI 集成实证）
+    if (ctx.userEvent === 'input.type.compose' || ctx.inputText !== '（' || ctx.replaced === null) {
+      return null
+    }
+    const target = `（${ctx.replaced.text}）`
+    const replacement = `〈${ctx.replaced.text}〉`
+    setTimeout(() => {
+      const views = sdk.views
+      if (!views) {
+        return
+      }
+      const handle = views.list().find((info) =>
+        info.targetDocUri === ctx.docUri && info.viewType === 'main')
+      const editor = handle ? views.get(handle.instanceId)?.editor : undefined
+      if (!editor) {
+        return
+      }
+      const snap = editor.getSnapshot()
+      if (!snap.ok) {
+        return
+      }
+      const at = snap.snapshot.text.indexOf(target)
+      if (at < 0) {
+        return
+      }
+      void editor.applyEdits({
+        revision: snap.snapshot.revision,
+        changes: [{ offset: at, length: target.length, text: replacement }],
+      })
+    }, 0)
+    return null
+  }
+
   const wrapReporter = (id: string, plan: (ctx: AddonInputContext) => AddonBehaviorInputPlan | null) =>
     (ctx: AddonInputContext): AddonBehaviorInputPlan | null => {
       const result = plan(ctx)
@@ -102,6 +149,10 @@ defineAddonPage(ADDON_ID, (sdk: VsidianAddonPageSdk) => {
     {
       id: 'bracket-conv', name: '全角括号半角化', description: 'IME 定稿【时半角化包裹',
       examples: ['ord→[ord]'], plan: planBracketConv,
+    },
+    {
+      id: 'async-conv', name: '全角包裹异步改写', description: '键入（时异步改写包裹符',
+      examples: ['（ord）→〈ord〉'], plan: planAsyncConv,
     },
     { id: 'dash-fill', name: '短划填充', description: '键入 ^ 后插入短划', examples: ['^-^'], plan: planFill('-') },
     {

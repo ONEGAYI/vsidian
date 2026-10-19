@@ -265,7 +265,7 @@ describe('设置开关（editor.symbolTabEscape）', () => {
     expect(view.state.selection.main.head).toBe(ROW + 4)
   })
 
-  it('关闭越界不影响 #123 补全与 #124 包裹开关的独立性', () => {
+  it('关闭越界不影响 #123 补全与 #124 包裹开关的独立性', async () => {
     const { controller, view } = setup('')
     controller.handleHostMessage({ kind: 'settings.changed', values: { 'editor.symbolTabEscape': false } })
     view.dispatch({
@@ -273,6 +273,9 @@ describe('设置开关（editor.symbolTabEscape）', () => {
       selection: { anchor: 1 },
       userEvent: 'input.type',
     })
+    // #597：补全移到微任务兜底——推平微任务后断言
+    await Promise.resolve()
+    await Promise.resolve()
     expect(view.state.doc.toString()).toBe('()')
   })
 })

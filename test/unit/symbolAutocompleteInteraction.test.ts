@@ -32,8 +32,10 @@ function setup(text: string) {
 
 /** 模拟浏览器 input 事件回流产生的事务（CM6 对普通键入的 userEvent 与
  *  光标形态：插入后光标落在插入文本之后——CM6 domObserver 从 DOM 选区
- *  读出的正是这一形态）。带 to 时模拟选区替换事务 */
-function typeText(
+ *  读出的正是这一形态）。带 to 时模拟选区替换事务。
+ *  #597：补全闭合移到微任务兜底（原始事务放行 → 微任务 attempt），await
+ *  本 helper 即推平微任务后返回——用例断言与真实键入时序一致 */
+async function typeText(
   view: ReturnType<typeof setup>['view'],
   from: number,
   text: string,
@@ -45,6 +47,8 @@ function typeText(
     selection: { anchor: from + text.length },
     userEvent,
   })
+  await Promise.resolve()
+  await Promise.resolve()
 }
 
 /** 回 ack 确认既有未确认编辑（连续两笔重叠编辑的第二笔会被同步协议暂缓
@@ -65,13 +69,16 @@ function pressBackspace(view: ReturnType<typeof setup>['view']) {
 const editRequests = (sent: WebviewToHost[]) => sent.filter((m) => m.kind === 'edit.request')
 
 describe('无选区自动补全：单笔事务、光标居中', () => {
-  it('键入起始括号补入闭合符号：单笔 edit.request 携带两侧文本', () => {
+  it('键入起始括号补入闭合符号：单笔 edit.request 携带两侧文本', async () => {
     const { sent, view } = setup('')
-    typeText(view, 0, '(')
+    await typeText(view, 0, '(')
     expect(view.state.doc.toString()).toBe('()')
     expect(view.state.selection.main.head).toBe(1)
-    expect(editRequests(sent)).toHaveLength(1)
-    expect(editRequests(sent)[0]).toMatchObject({
+    // #597：原始 ( 强制暂缓 + 微任务兜底 ) 并入同段——flush 定时后单笔
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const reqs = editRequests(sent)
+    expect(reqs).toHaveLength(1)
+    expect(reqs[0]).toMatchObject({
       kind: 'edit.request',
       changes: [{ offset: 0, length: 0, text: '()' }],
     })
@@ -82,98 +89,101 @@ describe('无选区自动补全：单笔事务、光标居中', () => {
     ['（', '（）'], ['【', '【】'], ['《', '《》'], ['「', '「」'], ['『', '『』'],
     ['“', '“”'], ['‘', '‘’'], ['"', '""'], ["'", "''"],
     ['*', '**'], ['_', '__'], ['~', '~~'], ['`', '``'], ['=', '=='], ['$', '$$'],
-  ])('键入 %s 得 %s 且光标居中', (open, wrapped) => {
+  ])('键入 %s 得 %s 且光标居中', async (open, wrapped) => {
     const { view } = setup('')
-    typeText(view, 0, open)
+    await typeText(view, 0, open)
     expect(view.state.doc.toString()).toBe(wrapped)
     expect(view.state.selection.main.head).toBe(1)
   })
 
-  it('英文尖括号不补全：原样插入', () => {
+  it('英文尖括号不补全：原样插入', async () => {
     const { view } = setup('')
-    typeText(view, 0, '<')
+    await typeText(view, 0, '<')
     expect(view.state.doc.toString()).toBe('<')
     expect(view.state.selection.main.head).toBe(1)
   })
 
-  it('非注册字符与多字符插入不触发补全', () => {
+  it('非注册字符与多字符插入不触发补全', async () => {
     const { view } = setup('')
-    typeText(view, 0, 'x')
+    await typeText(view, 0, 'x')
     expect(view.state.doc.toString()).toBe('x')
-    typeText(view, 1, 'ab')
+    await typeText(view, 1, 'ab')
     expect(view.state.doc.toString()).toBe('xab')
   })
 })
 
 describe('闭合越过：紧贴自动补出的闭合符号再键入同一符号', () => {
-  it('括号越过零写回：文本不变、光标跳过闭合符号、无新增 edit.request', () => {
+  it('括号越过零写回：文本不变、光标跳过闭合符号、无新增 edit.request', async () => {
     const { sent, view } = setup('')
-    typeText(view, 0, '(')
+    await typeText(view, 0, '(')
     expect(view.state.doc.toString()).toBe('()')
     const before = editRequests(sent).length
-    typeText(view, 1, ')')
+    await typeText(view, 1, ')')
     expect(view.state.doc.toString()).toBe('()')
     expect(view.state.selection.main.head).toBe(2)
     expect(editRequests(sent)).toHaveLength(before)
   })
 
-  it('越过同样适用于弯引号与 Markdown 自反符号', () => {
+  it('越过同样适用于弯引号与 Markdown 自反符号', async () => {
     const { view } = setup('')
-    typeText(view, 0, '“')
+    await typeText(view, 0, '“')
     expect(view.state.doc.toString()).toBe('“”')
-    typeText(view, 1, '”')
+    await typeText(view, 1, '”')
     expect(view.state.doc.toString()).toBe('“”')
     expect(view.state.selection.main.head).toBe(2)
   })
 
-  it('越过只认自动补出的闭合符号：手打的相邻闭合符号照常插入', () => {
+  it('越过只认自动补出的闭合符号：手打的相邻闭合符号照常插入', async () => {
     const { view } = setup('()')
     view.dispatch({ selection: { anchor: 1 } })
-    typeText(view, 1, ')')
+    await typeText(view, 1, ')')
     expect(view.state.doc.toString()).toBe('())')
   })
 
-  it('越过消耗后自动状态消失：再键入闭合符号为普通插入', () => {
+  it('越过消耗后自动状态消失：再键入闭合符号为普通插入', async () => {
     const { view } = setup('')
-    typeText(view, 0, '(')
-    typeText(view, 1, ')')
-    typeText(view, 2, ')')
+    await typeText(view, 0, '(')
+    await typeText(view, 1, ')')
+    await typeText(view, 2, ')')
     expect(view.state.doc.toString()).toBe('())')
   })
 })
 
 describe('星号连续输入硬契约：| → *|* → **| → ***|', () => {
-  it('三连击严格得到空对、越过、单边第三星', () => {
+  it('三连击严格得到空对、越过、单边第三星', async () => {
     const { view } = setup('')
-    typeText(view, 0, '*')
+    await typeText(view, 0, '*')
     expect(view.state.doc.toString()).toBe('**')
     expect(view.state.selection.main.head).toBe(1)
-    typeText(view, 1, '*')
+    await typeText(view, 1, '*')
     expect(view.state.doc.toString()).toBe('**')
     expect(view.state.selection.main.head).toBe(2)
-    typeText(view, 2, '*')
+    await typeText(view, 2, '*')
     expect(view.state.doc.toString()).toBe('***')
     expect(view.state.selection.main.head).toBe(3)
   })
 
   it('已有星号前缀（词尾闭合场景）仍按串首契约补全：**bold| 键 * 得 **bold*|*',
-    () => {
+    async () => {
       // runBefore 只看紧邻左侧同字符：`d` 前无星号 → 补全（闭合粗体的
       // 第二键经越过消费，与星号契约一致，不特判词形）
       const { view } = setup('**bold')
       view.dispatch({ selection: { anchor: 6 } })
-      typeText(view, 6, '*')
+      await typeText(view, 6, '*')
       expect(view.state.doc.toString()).toBe('**bold**')
       expect(view.state.selection.main.head).toBe(7)
     })
 })
 
 describe('自动空对退格删除', () => {
-  it('自动补出的空符号对内部退格同删两侧（单笔 edit.request）', () => {
+  it('自动补出的空符号对内部退格同删两侧（单笔 edit.request）', async () => {
     const { controller, sent, view } = setup('')
-    typeText(view, 0, '（')
+    await typeText(view, 0, '（')
     expect(view.state.doc.toString()).toBe('（）')
+    // #597：强制暂缓下（与兜底同段）单笔出站需 flush 定时
+    await new Promise((resolve) => setTimeout(resolve, 0))
     const before = editRequests(sent).length
+    expect(before).toBe(1)
     // 回 ack：连续重叠编辑的第二笔默认暂缓出站（既有同步协议），确认后
     // 删除那笔才能立即出站
     ackPending(controller, sent)
@@ -187,7 +197,7 @@ describe('自动空对退格删除', () => {
     })
   })
 
-  it('非自动来源的空对退格只删起始符号（交默认行为）', () => {
+  it('非自动来源的空对退格只删起始符号（交默认行为）', async () => {
     const { view } = setup('()')
     view.dispatch({ selection: { anchor: 1 } })
     const before = view.state.doc.toString()
@@ -196,19 +206,23 @@ describe('自动空对退格删除', () => {
     expect(view.state.doc.toString()).toBe(')')
   })
 
-  it('对内出现内容后退格不再同删两侧', () => {
+  it('对内出现内容后退格不再同删两侧', async () => {
     const { view } = setup('')
-    typeText(view, 0, '(')
-    typeText(view, 1, '好')
+    await typeText(view, 0, '(')
+    await typeText(view, 1, '好')
     expect(view.state.doc.toString()).toBe('(好)')
     pressBackspace(view)
     expect(view.state.doc.toString()).toBe('()')
   })
 
-  it('外部重载（doc.resync）清空自动状态：退格不误删', () => {
+  it('外部重载（doc.resync）清空自动状态：退格不误删', async () => {
     const { controller, view } = setup('')
-    typeText(view, 0, '(')
+    await typeText(view, 0, '(')
     expect(view.state.doc.toString()).toBe('()')
+    // #597：强制暂缓窗口（一个宏任务）内 resync 与未出站输入并存会走
+    // 暂停保守口径（#4 既有语义，flushBufferedExternal 同款）——真实
+    // resync 与键入的间隔远大于该窗口；此处等 flush 出站后再重载
+    await new Promise((resolve) => setTimeout(resolve, 0))
     controller.handleHostMessage({ kind: 'doc.resync', version: 5, text: '()' })
     view.dispatch({ selection: { anchor: 1 } })
     pressBackspace(view)
@@ -245,103 +259,103 @@ describe('输入法与粘贴', () => {
     expect(view.state.doc.toString()).toBe('（）')
   })
 
-  it('组合结束窗口内的 compose 定稿事务不被 filter 改写（补全由钩子宏任务统一完成）', () => {
+  it('组合结束窗口内的 compose 定稿事务不被 filter 改写（补全由钩子宏任务统一完成）', async () => {
     const { controller, view } = setup('')
     controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'start', text: '' })
     controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'end', text: 'x' })
     // compositionend 后 field 延迟一个宏任务复位：窗口内的 compose 事务
     // （真实链路即 CM6 的定稿 flush）原样放行；补全统一由 compositionend
     // 钩子的 attempt 触发（上一用例端到端覆盖）
-    typeText(view, 0, '（', 'input.type.compose')
+    await typeText(view, 0, '（', 'input.type.compose')
     expect(view.state.doc.toString()).toBe('（')
   })
 
-  it('粘贴事务（input.paste）不触发补全', () => {
+  it('粘贴事务（input.paste）不触发补全', async () => {
     const { view } = setup('')
-    typeText(view, 0, '(', 'input.paste')
+    await typeText(view, 0, '(', 'input.paste')
     expect(view.state.doc.toString()).toBe('(')
   })
 
-  it('拖放事务（input.drop）不触发补全', () => {
+  it('拖放事务（input.drop）不触发补全', async () => {
     const { view } = setup('')
-    typeText(view, 0, '*', 'input.drop')
+    await typeText(view, 0, '*', 'input.drop')
     expect(view.state.doc.toString()).toBe('*')
   })
 })
 
 describe('上下文抑制与共存', () => {
-  it('围栏代码块内：括号照补、Markdown 强调抑制', () => {
+  it('围栏代码块内：括号照补、Markdown 强调抑制', async () => {
     const { view } = setup('```js\n\n```')
     // 光标在围栏中间的空行（CodeText 区间）内
     view.dispatch({ selection: { anchor: 6 } })
-    typeText(view, 6, '(')
+    await typeText(view, 6, '(')
     expect(view.state.doc.toString()).toBe('```js\n()\n```')
-    typeText(view, 7, '*')
+    await typeText(view, 7, '*')
     expect(view.state.doc.toString()).toBe('```js\n(*)\n```')
   })
 
-  it('行内代码内：括号照补、强调抑制', () => {
+  it('行内代码内：括号照补、强调抑制', async () => {
     const { view } = setup('a `b` c')
     // 内容首（b 之前）键 [：#151 右邻词字符不补——口径不豁免代码上下文
     view.dispatch({ selection: { anchor: 3 } })
-    typeText(view, 3, '[')
+    await typeText(view, 3, '[')
     expect(view.state.doc.toString()).toBe('a `[b` c')
     expect(view.state.selection.main.head).toBe(4)
     // 内容尾（闭反引号前，右邻 ` 属注册表闭合类）键 [：allowInCode 照补
     view.dispatch({ selection: { anchor: 5 } })
-    typeText(view, 5, '[')
+    await typeText(view, 5, '[')
     expect(view.state.doc.toString()).toBe('a `[b[]` c')
     expect(view.state.selection.main.head).toBe(6)
     // 同位置再键强调符：行内代码按代码口径抑制（不补对）
-    typeText(view, 6, '~')
+    await typeText(view, 6, '~')
     expect(view.state.doc.toString()).toBe('a `[b[~]` c')
   })
 
-  it('降级头区（不可成型）按代码口径：括号照补、强调抑制', () => {
+  it('降级头区（不可成型）按代码口径：括号照补、强调抑制', async () => {
     // #140 Popover 改版：成型头区光标不可达（编辑收敛到 Popover），代码
     // 口径的可编辑面收敛到降级源码形态（复杂类型）——嵌套键使头区降级
     const { view } = setup('---\nouter:\n  inner: x\n---\n')
     // 光标在 x 之后
     view.dispatch({ selection: { anchor: 21 } })
-    typeText(view, 21, '(')
+    await typeText(view, 21, '(')
     expect(view.state.doc.toString()).toBe('---\nouter:\n  inner: x()\n---\n')
-    typeText(view, 22, '=')
+    await typeText(view, 22, '=')
     expect(view.state.doc.toString()).toBe('---\nouter:\n  inner: x(=)\n---\n')
   })
 
-  it('反斜杠转义后的符号按普通文字处理', () => {
+  it('反斜杠转义后的符号按普通文字处理', async () => {
     const { view } = setup('a \\')
     view.dispatch({ selection: { anchor: 3 } })
-    typeText(view, 3, '*')
+    await typeText(view, 3, '*')
     expect(view.state.doc.toString()).toBe('a \\*')
     // 另一 Markdown 触发符同样只在紧邻 \ 后被抑制
     const second = setup('b \\')
     second.view.dispatch({ selection: { anchor: 3 } })
-    typeText(second.view, 3, '~')
+    await typeText(second.view, 3, '~')
     expect(second.view.state.doc.toString()).toBe('b \\~')
   })
 
-  it('英文撇号词中不配对', () => {
+  it('英文撇号词中不配对', async () => {
     const { view } = setup("don")
     view.dispatch({ selection: { anchor: 3 } })
-    typeText(view, 3, "'")
+    await typeText(view, 3, "'")
     expect(view.state.doc.toString()).toBe("don'")
   })
 
-  it('表格格区选区替换语义不被改写', () => {
+  it('表格格区选区替换语义不被改写', async () => {
     const table = '| A | B |\n| --- | --- |\n| x | y |'
     const { view } = setup(table)
     selectTableRegion(view, { tableFrom: 0, rowFrom: 0, rowTo: 1, columnFrom: 0, columnTo: 0 })
-    typeText(view, view.state.selection.main.from, '（')
+    await typeText(view, view.state.selection.main.from, '（')
     // 既有格区替换语义（#72「普通输入覆盖矩形内容，文本只落左上格」）：
     // 左上格替换为（、其余选中格清空；符号补全不得在此追加闭合符号
     expect(view.state.doc.toString()).toBe('| （ | B |\n| --- | --- |\n|  | y |')
   })
 
-  it('有普通文本选区时不补全：选区走 #124 包裹路径（两侧包裹，非空对插入）', () => {
+  it('有普通文本选区时不补全：选区走 #124 包裹路径（两侧包裹，非空对插入）', async () => {
     const { view } = setup('word')
     view.dispatch({ selection: { anchor: 0, head: 4 } })
-    typeText(view, 0, '(', 'input.type', 4)
+    await typeText(view, 0, '(', 'input.type', 4)
     // #124 落地后：非空选区的键入经 symbolWrap 包裹（(word)），补全的
     // 光标居中形态不复现（详见 symbolWrapInteraction 契约）
     expect(view.state.doc.toString()).toBe('(word)')
@@ -373,25 +387,26 @@ describe('编程式多变更事务（形态门控）', () => {
 })
 
 describe('设置开关（editor.symbolAutocomplete）', () => {
-  it('默认开启；关闭后补全、越过、空对删除全部停用', () => {
+  it('默认开启；关闭后补全、越过、空对删除全部停用', async () => {
     const { controller, sent, view } = setup('')
     controller.handleHostMessage({
       kind: 'settings.changed',
       values: { 'editor.symbolAutocomplete': false },
     })
-    typeText(view, 0, '(')
+    await typeText(view, 0, '(')
     expect(view.state.doc.toString()).toBe('(')
     expect(view.state.selection.main.head).toBe(1)
+    // 关闭时 filter 不在装配：原始事务无 symbolRawInput 暂缓，立即出站
     expect(editRequests(sent)).toHaveLength(1)
     // 键入 ) 为普通插入（无自动状态可越过）
-    typeText(view, 1, ')')
+    await typeText(view, 1, ')')
     expect(view.state.doc.toString()).toBe('()')
     // 退格只删光标前一个字符（不识别空对，无同删两侧）
     pressBackspace(view)
     expect(view.state.doc.toString()).toBe('(')
   })
 
-  it('关闭再开启即时恢复补全', () => {
+  it('关闭再开启即时恢复补全', async () => {
     const { controller, view } = setup('')
     controller.handleHostMessage({
       kind: 'settings.changed',
@@ -401,7 +416,7 @@ describe('设置开关（editor.symbolAutocomplete）', () => {
       kind: 'settings.changed',
       values: { 'editor.symbolAutocomplete': true },
     })
-    typeText(view, 0, '(')
+    await typeText(view, 0, '(')
     expect(view.state.doc.toString()).toBe('()')
   })
 
