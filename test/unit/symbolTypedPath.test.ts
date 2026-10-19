@@ -164,6 +164,28 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     expect(view.state.doc.toString()).toBe('中（\n')
   })
 
+  it('同步行为产出保留同开符号与光标时补全兜底让位：不重复补闭合（评审 001）', async () => {
+    const { view } = setup('中\n', (input, v) => {
+      // 同步行为产出保留开符号与光标位置（如智能括号组件补上闭合）：
+      // 追加式校验的「光标紧邻 open 后 + 左邻字符」两项都仍满足，仅凭
+      // 它们无法分辨组件改写——长度基准（原始事务后文档长度）被组件
+      // 净改写破坏才让位
+      if (input.inputText === '(') {
+        v.dispatch({
+          changes: { from: 2, insert: ')' },
+          annotations: addonEditOriginTag.of({
+            origins: [{ addonId: 'pub.demo', opId: 'op-3', undo: 'atomic' }],
+          }),
+        })
+      }
+    })
+    view.dispatch({ selection: { anchor: 1 } })
+    view.dispatch({ changes: { from: 1, insert: '(' }, selection: { anchor: 2 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    // 组件产出 () 为终态：内置不得再补 )（红：当前实得中())）
+    expect(view.state.doc.toString()).toBe('中()\n')
+  })
+
   it('同步 SelectKey 行为包裹选区时内置兜底让位：终态为组件产出（原文选中）', async () => {
     const { view } = setup('word\n', (input, v) => {
       if (input.inputText === '【' && input.replaced?.text === 'ord') {
@@ -187,6 +209,27 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     const sel = view.state.selection
     expect(sel.ranges).toHaveLength(1)
     expect(view.state.doc.sliceString(sel.main.anchor, sel.main.head)).toBe('ord')
+  })
+
+  it('同步行为产出同前缀重建时包裹兜底让位：不回退组件已取代的原文（评审 001）', async () => {
+    const { view } = setup('word\n', (input, v) => {
+      // 同步行为以「同前缀改写」重建（区间首字符仍是 【、光标仍在 2）：
+      // 占据校验与选区校验都仍满足——长度基准被净改写破坏才让位
+      if (input.inputText === '【' && input.replaced?.text === 'ord') {
+        v.dispatch({
+          changes: { from: 1, to: 2, insert: '【word】' },
+          selection: EditorSelection.cursor(2),
+          annotations: addonEditOriginTag.of({
+            origins: [{ addonId: 'pub.demo', opId: 'op-4', undo: 'atomic' }],
+          }),
+        })
+      }
+    })
+    view.dispatch({ selection: { anchor: 1, head: 4 } })
+    view.dispatch({ changes: { from: 1, to: 4, insert: '【' }, selection: { anchor: 2 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    // 组件产出 【word】 为终态：内置不得以快照旧原文 ord 回退重建
+    expect(view.state.doc.toString()).toBe('w【word】\n')
   })
 })
 

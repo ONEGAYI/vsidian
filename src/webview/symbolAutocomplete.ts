@@ -87,6 +87,12 @@ interface TypedAutoclosePending {
   readonly pos: number
   readonly open: string
   readonly close: string
+  /** 长度基准（放行事务后的文档长度）：行为链任何净改写必破坏它——
+   *  同步组件产出保留开符号与光标位置时（评审 001），追加式校验的
+   *  「光标紧邻 + 左邻字符」两项都仍满足、无法分辨，长度基准是
+   *  「原始事务后无人触碰」的唯一可验证证据；正常嵌套（在既有闭合
+   *  符内键入）以当次事务后长度为基准，不受既有文本影响 */
+  readonly docLength: number
 }
 
 const pendingTypedAutoclose = StateEffect.define<TypedAutoclosePending>()
@@ -263,7 +269,7 @@ const autocloseInputFilter = EditorState.transactionFilter.of((tr) => {
   return {
     changes: tr.changes,
     selection: tr.selection,
-    effects: pendingTypedAutoclose.of({ pos, open: entry.open, close: entry.close }),
+    effects: pendingTypedAutoclose.of({ pos, open: entry.open, close: entry.close, docLength: tr.newDoc.length }),
     annotations: [...(keepEvent ? [keepEvent] : []), symbolRawInput.of(true)],
     scrollIntoView: tr.scrollIntoView,
   }
@@ -371,8 +377,9 @@ function attemptTypedAutoclose(view: EditorView, pending: TypedAutoclosePending)
   }
   const pos = selection.main.head
   if (pos !== pending.pos + pending.open.length ||
-      state.sliceDoc(pos - pending.open.length, pos) !== pending.open) {
-    return // 原始插入已被链改写 / 光标已移动：让位
+      state.sliceDoc(pos - pending.open.length, pos) !== pending.open ||
+      state.doc.length !== pending.docLength) {
+    return // 原始插入已被链改写 / 光标已移动 / 文档被净改写（评审 001）：让位
   }
   view.dispatch({
     changes: { from: pos, insert: pending.close },
