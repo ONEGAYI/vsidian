@@ -411,6 +411,28 @@ try {
   assert.equal(stats.hostState, null, '恢复默认后无用户覆盖')
   console.log('[PASS] 无选区 IME 定稿符号对：补全 word【】 照常、驱动恰一次、单笔撤销（#595）')
 
+  // ---- 4c. #595 评审补钉：真实键入符号对（非组合）照常驱动、inputText 为
+  // 展开形态 ---- 契约收窄后的事实钉住：键入路径的补全/包裹经
+  // transactionFilter 改写并保留 input.type userEvent，照常驱动一次
+  // （inputText='()'——#411 起既有行为，不在 builtinEditOrigin 排除面；
+  // 与 IME 定稿路径的干净形态相区分。初稿误记「键入天然不驱动」，评审
+  // 推翻——t15 用例的注入通道无 userEvent，不代表真实键入）
+  await command('reset')
+  const drivesBeforeTyped = (await command('stats')).counters.drives
+  await typeChar('(')
+  await waitText('word()')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  events = await collectEvents()
+  const typedBehaviors = events.filter((e) => e.kind === 'behavior')
+  assert.ok(typedBehaviors.length > 0, `真实键入 '(' 应驱动行为链（键入路径既有行为）：${JSON.stringify(events)}`)
+  assert.ok(typedBehaviors.every((e) => e.inputText === '()' && e.replaced == null),
+    `键入路径行为上下文为展开形态（inputText '()'、replaced null）：${JSON.stringify(typedBehaviors)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeTyped + 1, `真实键入符号对应驱动恰好一次：${JSON.stringify(stats.counters)}`)
+  await undo()
+  await waitText(T0)
+  console.log("[PASS] 真实键入符号对（非组合）：filter 改写照常驱动、inputText 为展开形态 '()'（#595 契约收窄实证）")
+
   // ---- 4.5 #400：真实退格驱动行为链，replaced 携带被删文本 ----
   await command('reset')
   const drivesBeforeDel = (await command('stats')).counters.drives
