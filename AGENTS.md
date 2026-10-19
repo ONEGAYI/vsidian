@@ -132,6 +132,7 @@ vsidian/
 │   ├── features.md # README 功能与设置详解下沉页
 │   ├── perf/…      # 性能实测数据与测量工具说明
 │   ├── research/   # 技术调研报告
+│   │   ├── 597-plan3-probe.md                     # #597 键入路径形态归一验证报告
 │   │   ├── addon-csp-dynamic-eval-probe.md        # 动态代码 CSP 探针报告
 │   │   ├── addon-fold-capability-probe.md         # 折叠能力载体盘点探针
 │   │   ├── data/                                  # 探针证据数据目录
