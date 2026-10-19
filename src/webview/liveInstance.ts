@@ -103,6 +103,20 @@ export const externalSync = Annotation.define<boolean>()
  *  （addonId/opId），作者请求不可携带——不能冒充其他组件 */
 export const addonEditOriginTag = Annotation.define<{ origins: EditOriginMeta[] }>()
 
+/** #595 内置程序化符号事务标记：#123 提交补全 / #124 包裹重建在
+ *  compositionend 后微任务 attempt 派发的事务携带。这些事务是 IME 定稿
+ *  输入的内置加工——行为链已由 #593 补驱动以干净形态（原始
+ *  inputText/replaced）驱动过，内置加工事务不重复驱动（防双驱动：包裹
+ *  展开形态 inputText='【ord】' / 补全闭合 inputText='】' 不作为二次
+ *  驱动外泄给组件）。与键入路径的分界：真实键入符号字符的补全/包裹经
+ *  transactionFilter 改写并保留 input.type userEvent，照常驱动一次
+ *  （inputText 为展开形态如 '()'——#411 起既有行为，不在本标记覆盖面，
+ *  是否同样排除属后续裁决）。语义与另两个注解互不复用：externalSync
+ *  会抑制出站回发（打破「一次补全/包裹与组合净输入合并单笔出站」），
+ *  addonEditOriginTag 向外发请求注入 origin 元数据并强制开新撤销段——
+ *  本注解只退出行为链驱动面，出站合并与撤销分段语义均不变 */
+export const builtinEditOrigin = Annotation.define<boolean>()
+
 /** #400 行为链驱动的 delete userEvent 白名单：字符/选区/行删除（用户
  *  删除意图）；delete.dedent（Shift+Tab 降缩进）属缩进命令族、Tab 家族
  *  情境链语义（不新增可绑定命令绕过），不纳入 */
@@ -1145,7 +1159,13 @@ export class LiveEditorInstance {
    * - 代码上下文：frontmatter/块级代码（inCodeContext，#123/#124 同
    *   口径）排除——行为只作用于正文；
    * - 程序化事务排除：外部同步（externalSync）与 SDK 修饰
-   *   （addonEditOriginTag）不触发（防第二写入口/递归）。
+   *   （addonEditOriginTag）不触发（防第二写入口/递归）；内置程序化符号
+   *   事务（builtinEditOrigin，#595——#123 补全/#124 包裹在 compositionend
+   *   后微任务派发的 attempt）同样不触发：IME 定稿的驱动已由 #593 补驱动
+   *   以干净形态（原始 inputText/replaced）完成，内置加工事务不重复驱动
+   *   （展开/闭合形态不作为二次驱动外泄）。键入路径的符号补全/包裹经
+   *   transactionFilter 改写保留 input.type，照常驱动一次（inputText 为
+   *   展开形态如 '()'——#411 起既有行为，不在本排除面）。
    * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/undo 不
    * 驱动）+ delete 白名单（backward/forward/selection/cut/line——#400；
    * paste/drop/undo 与 dedent 等命令族删除仍不驱动）。
@@ -1154,7 +1174,7 @@ export class LiveEditorInstance {
     if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined || !tr.docChanged) {
       return
     }
-    if (tr.annotation(externalSync) || tr.annotation(addonEditOriginTag)) {
+    if (tr.annotation(externalSync) || tr.annotation(addonEditOriginTag) || tr.annotation(builtinEditOrigin)) {
       return
     }
     const userEvent = tr.annotation(Transaction.userEvent)

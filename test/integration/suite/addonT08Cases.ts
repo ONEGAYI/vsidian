@@ -164,10 +164,14 @@ async function closeAllEditors(): Promise<void> {
   await new Promise((r) => setTimeout(r, 300))
 }
 
-/** 行为状态恢复默认（防跨用例污染；幂等） */
+/** 行为状态恢复默认（防跨用例污染；幂等）——恢复面覆盖夹具全部五行为
+ *  （含 T07 套件可能禁用的 locale-name/bracket-conv，跨套件同宿主兜底） */
 async function resetBehaviorState(): Promise<void> {
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', { order: [] })
-  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE], disabled: false })
+  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', {
+    keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, `${ADDON_ID}#locale-name`, `${ADDON_ID}#bracket-conv`],
+    disabled: false,
+  })
 }
 
 /** 打开真实设置页并等待 ready（消息注入须在面板在场时进行）。
@@ -217,11 +221,11 @@ export const addonT08Cases: Array<[string, () => Promise<void>]> = [
     await resetDocAndOpen(file, 'word\n')
     await probeRegistrations(file)
 
-    // 注册上报对账：宿主目录含四个行为（名称为注册面元数据；#464 起
-    // 含一个多语言映射名行为）
+    // 注册上报对账：宿主目录含五个行为（名称为注册面元数据；#464 起
+    // 含一个多语言映射名行为，#595 起含 bracket-conv）
     const catalog = await poll('目录上报到达', async () => {
       const list = await behaviorCatalog()
-      return list.filter((entry) => entry.addonId === ADDON_ID).length === 4 ? list : undefined
+      return list.filter((entry) => entry.addonId === ADDON_ID).length === 5 ? list : undefined
     })
     const names = catalog.filter((entry) => entry.addonId === ADDON_ID).map((entry) => entry.name)
     assert(names.every((name) => isNonEmptyBehaviorName(name)), `目录应含必填名称：${JSON.stringify(catalog)}`)
@@ -332,7 +336,7 @@ export const addonT08Cases: Array<[string, () => Promise<void>]> = [
     await poll('重开后目录与关闭配置恢复', async () => {
       const list = await behaviorCatalog()
       const stats = await behaviorStats(file)
-      return list.filter((entry) => entry.addonId === ADDON_ID).length === 4 &&
+      return list.filter((entry) => entry.addonId === ADDON_ID).length === 5 &&
         stats?.hostState?.disabled?.includes(KEY_SPACE) ? list : undefined
     })
     await typeAt(file, 4, '^')

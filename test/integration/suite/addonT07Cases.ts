@@ -38,6 +38,8 @@ const KEY_SPACE = `${ADDON_ID}#space-fill`
 const KEY_TILDE = `${ADDON_ID}#tilde-fill`
 /** #464 多语言名载体行为（恒不修饰）：全关/重置面与三行为同列 */
 const KEY_LOCALE = `${ADDON_ID}#locale-name`
+/** #595 夹具行为（IME 定稿 '【' 替换选区时半角化；非符号输入恒不修饰）：全关/重置面与四行为同列 */
+const KEY_BRACKET = `${ADDON_ID}#bracket-conv`
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -205,7 +207,7 @@ async function closeAllEditors(): Promise<void> {
 /** 行为状态恢复默认（防跨用例污染；幂等） */
 async function resetBehaviorState(): Promise<void> {
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', { order: [] })
-  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE], disabled: false })
+  await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', { keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE, KEY_BRACKET], disabled: false })
 }
 
 export const addonT07Cases: Array<[string, () => Promise<void>]> = [
@@ -347,14 +349,15 @@ export const addonT07Cases: Array<[string, () => Promise<void>]> = [
     await probeRegistrations(file)
 
     // 全部关闭：输入仍达观察者（changed 事件），但零修饰零提交。
-    // locale-name 也纳入全关面（其回调恒不修饰，关闭仅影响目录/管理面
-    // 呈现——全关语义覆盖夹具全部四行为，非仅三修饰行为）
+    // locale-name 与 bracket-conv 也纳入全关面（两者对非符号输入恒不修饰，
+    // 关闭仅影响目录/管理面呈现——全关语义覆盖夹具全部五行为，非仅修饰
+    // 行为）
     await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', {
-      keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE], disabled: true,
+      keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, KEY_LOCALE, KEY_BRACKET], disabled: true,
     })
     await poll('全关推送到达', async () => {
       const stats = await behaviorStats(file)
-      return stats?.hostState?.disabled?.length === 4 ? stats : undefined
+      return stats?.hostState?.disabled?.length === 5 ? stats : undefined
     })
     const drivesBefore = (await behaviorStats(file))?.counters.drives ?? 0
     await vscode.commands.executeCommand(`${ADDON_ID}.reset`)

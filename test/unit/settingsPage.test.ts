@@ -5,7 +5,7 @@
 // #93 起：框架标题经 t() 取词——本文件装配生产 zh-cn 语言包（装配三径之
 // 单测注入），断言与字典同源（不再复制字面量）。#95 起设置项定义经
 // titleKey/descriptionKey 取词，fixture 定义复用生产词条键。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import {
   SettingsPageView,
   SETTINGS_PAGE_CLASS_NAMES,
@@ -1446,5 +1446,448 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     imageResult!.click()
     expect(parent.querySelector('[data-setting-key="image.paste"]')!.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
       .contains('vsidian-settings-item-located')).toBe(true)
+  })
+})
+
+describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时的代报与三条件失效）', () => {
+  /** 生产注册口径 + 外发消息捕获（与「会话内恢复」组同装配） */
+  function makeTrackedFullView(): { view: SettingsPageView; sent: unknown[]; parent: HTMLElement } {
+    const sent: unknown[] = []
+    const snippets = new CssSnippetSettingsSection({ postMessage() {} })
+    const appearance = new AppearanceSection(
+      snippets, new StyleReferenceSection({ postMessage() {} }),
+      new ThemeSelectionSection(new AddonThemesStore(), { postMessage: () => {} }))
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [new KeybindingSettingsSection({ postMessage() {} }), appearance, new IndexMaintenanceSection({ postMessage() {} })],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, sent, parent }
+  }
+  function mainEl(parent: HTMLElement): HTMLElement {
+    const main = parent.querySelector<HTMLElement>('.vsidian-settings-main')
+    expect(main, '主区滚动容器应已渲染').toBeTruthy()
+    return main!
+  }
+  function uiStateMessages(sent: unknown[]): Array<{ kind: string; section: string; scrollTop: number; state?: unknown }> {
+    return sent.filter((m) => (m as { kind?: string }).kind === 'settings.uiState') as never
+  }
+  /** 可滚动主区替身（jsdom 无布局）：scrollTop 赋值按 scrollHeight−clientHeight
+   *  钳位。geometry 保持引用，测试中途改 scrollHeight 即模拟异步内容起高 */
+  function stubScrollableMain(main: HTMLElement, geometry: { scrollHeight: number; clientHeight: number }): void {
+    let top = 0
+    Object.defineProperty(main, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = Math.max(0, Math.min(value, geometry.scrollHeight - geometry.clientHeight))
+      },
+    })
+    Object.defineProperty(main, 'scrollHeight', { configurable: true, get: () => geometry.scrollHeight })
+    Object.defineProperty(main, 'clientHeight', { configurable: true, get: () => geometry.clientHeight })
+  }
+  /** ResizeObserver 替身（jsdom 无实现，addonRefViewsEmbedCard 先例）：记录
+   *  observe 目标与 disconnect 状态，fire 手动触发回调（模拟内容起高的通知） */
+  function installResizeObserverStub(): {
+    observers: Array<{ observed: Element[]; disconnected: boolean; fire: () => void }>
+  } {
+    const observers: Array<{ observed: Element[]; disconnected: boolean; fire: () => void }> = []
+    vi.stubGlobal('ResizeObserver', class {
+      private readonly record: { observed: Element[]; disconnected: boolean; fire: () => void }
+      constructor(callback: ResizeObserverCallback) {
+        const record = {
+          observed: [] as Element[],
+          disconnected: false,
+          fire: () => callback([], this as unknown as ResizeObserver),
+        }
+        this.record = record
+        observers.push(record)
+      }
+      observe(target: Element): void { this.record.observed.push(target) }
+      disconnect(): void { this.record.disconnected = true }
+    })
+    return { observers }
+  }
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('恢复应用被钳（异步内容未起高）：uiState 代报恢复值而非复位/钳位实测值，state 载荷照常携带', () => {
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    stubScrollableMain(main, { scrollHeight: 300, clientHeight: 250 }) // 最大可滚 50 < 120
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(50) // 应用被钳：内容未起高
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({
+      kind: 'settings.uiState', section: 'appearance', scrollTop: 120, state: { tab: 'cssSnippets' },
+    })
+    // 钳位之后没有任何 0/50 实测值上报（render 尾上报先于补放完成，是记忆污染点）
+    expect(uiStateMessages(sent).every((m) => m.scrollTop === 120)).toBe(true)
+  })
+
+  it('条件①：内容起高至足以容纳即补放——观察挂内容容器 listEl，补放后卸载并上报真实值自愈', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(50)
+    const observer = observers.at(-1)!
+    // 观察面含内容容器 listEl（起高/收缩）与 mainEl（窗口缩放钳位）——
+    // 布局变化信号两端都在（scroll 归因的布局静默判定，见 onMainScroll）
+    expect(observer.observed).toEqual([
+      parent.querySelector('.vsidian-settings-list'), parent.querySelector('.vsidian-settings-main'),
+    ])
+    // 渐进起高：首拍仍不足（最大可滚 70 < 120）→ 继续观察
+    geometry.scrollHeight = 320
+    observer.fire()
+    expect(main.scrollTop).toBe(50)
+    expect(observer.disconnected).toBe(false)
+    // 足够高：补放到位、卸载观察
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+    expect(observer.disconnected).toBe(true)
+    // 补放引发的 scroll 事件上报真实值（宿主记忆接管自愈，同值无副作用）
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+  })
+
+  it('条件②：用户滚动接管 = 输入信号（武装）+ 非锚点滚动事实——wheel 后主区滚动即作废，上报用户位置', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    // 用户滚轮：wheel 信号只武装接管判定，信号本身不作废（评审 VsidianPR598-001
+    // R3 收窄：无滚动事实的输入不接管）
+    main.dispatchEvent(new Event('wheel'))
+    expect(observer.disconnected).toBe(false)
+    main.scrollTop = 30 // 用户滚到 30（钳位上限 50 内）——滚动事实到达
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 })
+    // 其后内容起高也不补放：不覆盖用户滚动位置
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(30)
+  })
+
+  it('输入信号无滚动事实不作废（R3：已取消输入/触摸点击不产生主区滚动）：pending 存续，代报持续，起高照常补放', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    // 三类「有输入信号、无滚动事实」：已取消（preventDefault）的滚轮与空格、
+    // 触摸点击（tap）——主区未滚动，不得丢恢复目标或洗掉宿主记忆
+    main.addEventListener('wheel', (e) => e.preventDefault(), { once: true, capture: true })
+    main.dispatchEvent(new WheelEvent('wheel', { cancelable: true }))
+    main.dispatchEvent(new Event('touchstart'))
+    main.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+    expect(observer.disconnected).toBe(false)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+    // 再起高：照常补放恢复值
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+  })
+
+  it('armed 输入 + 布局静默窗内的收缩钳位不作废（R5：取消输入/tap 后的布局滚动不丢恢复目标）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知（布局快照，不算布局变化）
+    // 取消的滚轮与触摸点击（tap）武装了接管，但随后内容收缩钳位（RO 先行
+    // 通知布局变化）——scroll 处于布局静默窗内，归因布局不作废
+    main.addEventListener('wheel', (e) => e.preventDefault(), { once: true, capture: true })
+    main.dispatchEvent(new WheelEvent('wheel', { cancelable: true }))
+    main.dispatchEvent(new Event('touchstart'))
+    geometry.scrollHeight = 270 // 收缩（max 塌到 20）：布局变化通知 → 钳位 scroll
+    observer.fire()
+    main.scrollTop = 20
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // 钳位不接管：pending 保留
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 代报持续
+    // 再起高：照常补放恢复值
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+  })
+
+  it('武装不因时间流逝失效（R5：长按滚动条/触摸 600ms 后才移动仍接管）：armed 持续到滚动事实到达', () => {
+    vi.useFakeTimers({ toFake: ['performance'] }) // setup 起统一 mock 时钟（R7 建议）
+    try {
+      const { observers } = installResizeObserverStub()
+      const { view, sent, parent } = makeTrackedFullView()
+      const main = mainEl(parent)
+      const geometry = { scrollHeight: 300, clientHeight: 250 }
+      stubScrollableMain(main, geometry)
+      view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+      const observer = observers.at(-1)!
+      observer.fire() // 初次观察通知
+      // 按住滚动条（mousedown target=main）后停顿 600ms 再拖动：期间无布局
+      // 变化，滚动到达时布局安静——armed 不设过期窗口，照常接管
+      main.dispatchEvent(new MouseEvent('mousedown'))
+      vi.advanceTimersByTime(600)
+      main.scrollTop = 40 // 用户拖动到 40
+      main.dispatchEvent(new Event('scroll'))
+      expect(observer.disconnected).toBe(true)
+      expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 40 })
+      // 其后内容起高也不补放：不覆盖用户滚动位置
+      geometry.scrollHeight = 2000
+      observer.fire()
+      expect(main.scrollTop).toBe(40)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('部分起高（max 变大）后静默窗内的真实滚动照常接管（R6：起高不产生布局性 scroll，不设防）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知
+    // 部分起高（max 50→80，仍不足恢复 120，pending 继续）：只有收缩
+    // （max 变小）才可能引发 clamp scroll——起高方向不进入布局静默防区
+    geometry.scrollHeight = 330
+    observer.fire()
+    // 其后用户真实滚轮滚到 30：必须接管
+    main.dispatchEvent(new Event('wheel'))
+    main.scrollTop = 30
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true) // 接管：pending 作废
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 }) // 上报用户位置
+    // 其后内容继续起高也不补放：不覆盖用户位置
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(30)
+  })
+
+  it('收缩钳位完成后的用户真实滚动照常接管（R7）：clamp 防区只拦压降本身，不拦其后的滚动', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知
+    // 取消的滚轮武装 + 内容收缩钳位（50→20，压降到新下边界）：归因布局
+    main.addEventListener('wheel', (e) => e.preventDefault(), { once: true, capture: true })
+    main.dispatchEvent(new WheelEvent('wheel', { cancelable: true }))
+    geometry.scrollHeight = 270
+    observer.fire()
+    main.scrollTop = 20
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // clamp 不接管：pending 保留
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 代报持续
+    // clamp 完成后（模拟 100ms，同步表达）用户真实向上滚到 10：值已离开
+    // 边界（≠ max），是新的滚动事实——照常接管
+    main.dispatchEvent(new Event('wheel'))
+    main.scrollTop = 10
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true) // 接管：pending 作废
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 10 }) // 上报用户位置
+    // 其后内容起高也不补放：不覆盖用户位置
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(10)
+  })
+
+  it('用户滚到底部（上升到边界）不算 clamp：方向区分，armed 下照常接管', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知
+    // 部分起高（max 80）后用户向下滚到底：值到达边界但是上升（lastKnown 50
+    // < 80），与收缩压降（上次值 > 当前边界值）方向相反——接管
+    geometry.scrollHeight = 330
+    observer.fire()
+    main.dispatchEvent(new Event('wheel'))
+    main.scrollTop = 80 // 滚到底 = max
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 80 })
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(80) // 不被补放覆盖
+  })
+
+  it('布局钳位（无用户输入的内容收缩）不作废 pending：代报持续防洗，再起高后照常补放（评审 VsidianPR598-001）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    expect(main.scrollTop).toBe(50) // 应用被钳（最大可滚 50）
+    // 消费程序锚点（应用被钳引发的 scroll 事件，值=赋值读回值 50）
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false)
+    // 加载过程收缩内容（max 塌缩到 20）：浏览器钳位下调并派发 scroll——
+    // 全程无用户输入事件，不得当作用户接管
+    geometry.scrollHeight = 270
+    main.scrollTop = 20
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // 钳位不作废 pending
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 代报持续
+    // 再起高：照常补放恢复值
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+  })
+
+  it('滚动接管信号面精度（R3）：控件键盘/子元素 mousedown/非滚动键不武装，滚动键武装后随滚动事实作废', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    // 控件键盘（R3 点名：搜索框空格/Home、下拉框方向键）：冒泡到主区但
+    // target 是表单控件，不武装——即便随后布局钳位滚动也不作废
+    const input = document.createElement('input')
+    main.append(input)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+    const select = document.createElement('select')
+    main.append(select)
+    select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    main.scrollTop = 20 // 收缩钳位下调（全程无接管武装）
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 代报持续
+    // 子元素 mousedown（点击设置项/侧栏条目）：target 非 main 自身，不武装
+    parent.querySelector('.vsidian-settings-nav-item')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    main.scrollTop = 30
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false)
+    // 非滚动键 keydown（如字母键）：不武装
+    main.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    main.scrollTop = 40
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false)
+    // 滚动键 keydown（PageDown）：武装 + 滚动事实 → 作废
+    main.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true }))
+    main.scrollTop = 50
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 50 })
+  })
+
+  it('标记窗口：应用被钳引发的 scroll 事件（值=钳位实测）不算用户滚动，pending 存续照常补放', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    // 真实浏览器中应用赋值被钳引发的 scroll 事件：scrollTop=50=赋值读回值
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // 未被误判为用户滚动
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 仍代报
+    // 窗口消费后 pending 继续生效：起高补放照常
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+  })
+
+  it('条件③：切换分页清除 pending 并复位顶部——代报不跨上下文污染新分页，旧观察回调不再补放', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    sent.length = 0
+    clickNav(parent, zhCn['settings.generalSection'])
+    expect(observer.disconnected).toBe(true)
+    expect(main.scrollTop).toBe(0) // 「切分页主区滚动重置顶部」语义（#155）不破坏
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'general', scrollTop: 0 })
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(0)
+  })
+
+  it('应用成功（同步内容已够高）不挂补放：无观察实例（平台自有分页幂等，无行为差异）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    stubScrollableMain(main, { scrollHeight: 2000, clientHeight: 250 }) // 最大可滚 1750 ≥ 120
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(120)
+    expect(observers, '内容足够高时不得挂 ResizeObserver').toEqual([])
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+  })
+
+  it('无 ResizeObserver 环境（特性检测回退）：挂 pending 不崩溃，代报持续防洗，用户滚动（wheel + 滚动事实）仍可作废', () => {
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    stubScrollableMain(main, { scrollHeight: 300, clientHeight: 250 })
+    expect(typeof ResizeObserver === 'function', '前提：jsdom 无 ResizeObserver').toBe(false)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(main.scrollTop).toBe(50)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+    // 条件②路径不依赖 RO：wheel 武装 + 滚动事实作废并上报真实位置
+    main.dispatchEvent(new Event('wheel'))
+    main.scrollTop = 30
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 })
+  })
+
+  it('二次重开不污染：pending 期间宿主按代报值记忆，回放恢复值不退化（代报净效果闭环）', () => {
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    const first = makeTrackedFullView()
+    stubScrollableMain(mainEl(first.parent), geometry)
+    first.view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const memorized = uiStateMessages(first.sent).at(-1)!.scrollTop
+    expect(memorized).toBe(120)
+    // 重开（新视图实例 = webview 重建）：宿主按记忆回放——恢复值不得是 0/50
+    const second = makeTrackedFullView()
+    stubScrollableMain(mainEl(second.parent), { ...geometry }) // 同样的异步未起高形态
+    second.view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: memorized })
+    expect(uiStateMessages(second.sent).at(-1)!.scrollTop).toBe(120)
+    expect(mainEl(second.parent).scrollTop).toBe(50) // 仍被钳，补放待命
+  })
+
+  it('同上下文重渲染（同分页重复点开）保留 pending：render 头卸载旧观察后重挂续放', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const firstObserver = observers.at(-1)!
+    expect(firstObserver.disconnected).toBe(false)
+    clickNav(parent, zhCn['appearance.title']) // 同分页再次点开：上下文未变
+    expect(firstObserver.disconnected).toBe(true) // 旧观察显式卸载（render 头统一清理）
+    const rearmed = observers.at(-1)!
+    expect(rearmed).not.toBe(firstObserver)
+    expect(rearmed.disconnected).toBe(false)
+    geometry.scrollHeight = 2000
+    rearmed.fire()
+    expect(main.scrollTop).toBe(120)
   })
 })

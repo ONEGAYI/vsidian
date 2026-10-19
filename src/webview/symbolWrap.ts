@@ -51,6 +51,7 @@ import {
 } from '../shared/symbols'
 import { planSelectionWrap } from '../shared/symbolWrap'
 import { inCodeContext } from './symbolAutocomplete'
+import { builtinEditOrigin } from './syncController'
 import {
   getCompositionSelectionSnapshot,
   setCompositionSelectionSnapshot,
@@ -244,10 +245,15 @@ function attemptCompositionWrap(
     delta += rebuilt.length - (segment.to - segment.from)
   }
   // 编程式派发不经 DOM 回流；多字符替换形态不命中 filter 的单字符门控。
+  // builtinEditOrigin（#595）：行为链不消费本事务（IME 定稿已由 #593 补
+  // 驱动以干净形态驱动过一次——行为修饰先改写区间时，下方形态校验自然
+  // 让位）；userEvent 保留 input.* 维持撤销惯例与「一次包裹=一笔
+  // edit.request」出站合并不变
   view.dispatch({
     changes,
     selection: EditorSelection.create(ranges, 0),
     userEvent: 'input.type',
+    annotations: builtinEditOrigin.of(true),
     scrollIntoView: true,
   })
 }
