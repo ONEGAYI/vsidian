@@ -4,8 +4,9 @@
 // Input.imeSetComposition 真实驱动 compositionstart..compositionend。
 // 行为链由 addon-t07 夹具组件经公开 SDK behaviors.register 注册
 // （dash-fill / space-fill / tilde-fill——后两者同独占组 fill；行为族
-// 判定只依赖 inputText 键入 ^，重设计缘由见 t07Editor.ts 头注），
-// 调序与单项停用经宿主行为状态钩子（管理面等价入口）。
+// 判定只依赖 inputText 键入 ^，重设计缘由见 t07Editor.ts 头注；
+// bracket-conv / async-conv 为 #595/#597 符号对竞争载体系），调序与单项
+// 停用经宿主行为状态钩子（管理面等价入口）。
 // 宿主伴随套件：test/integration/addonT07BehaviorsSuite.ts。
 // 场景：
 // 1. 真实键盘键入 ^ 触发默认序链（dash 插 -、space 组内先适用插空格
@@ -23,6 +24,15 @@
 //    生效、内置包裹让位）/ 无行为时内置全角兜底（w【ord】）/ 无选区补全
 //    照常（word【】），驱动均恰一次（builtinEditOrigin 消除双驱动），
 //    M1 先于 M3 的微任务序经行为/观察事件的快照文本钉进断言；
+//    4c（#597）真实键盘路径（非组合）同构：filter 放行原始单字符事务，
+//    驱动恰一次且 inputText 为原始字符（'('）、replaced null——观察
+//    快照 'word('（无闭合）钉 M1 先于 M3，终态 word() 与旧改写逐字一致，
+//    一次 Ctrl+Z 整体恢复（单笔 edit.request）；
+//    4d（#597）真实键盘路径同步行为组件：键入 '【' 替换选区 →
+//    bracket-conv 产出 w[ord] 为终态、内置兜底让位（M1 快照 'w【'）；
+//    4e（#597）真实键盘路径异步行为组件：键入 '（' 替换选区 → 内置
+//    兜底先落地 w（ord）、async-conv 修饰后至覆盖为 w〈ord〉（ADR-0020
+//    已知边界同型，断言终态）；
 // 5. 表格情境口径：源码行内键入照常驱动与受修饰（#124 同口径——排除
 //    面是网格编辑态 tableRegionField 而非表格行文本；网格 region 在场
 //    不驱动由单测 liveInstanceBehaviorDrive 钉住）；
@@ -173,9 +183,10 @@ try {
   await command('reset')
   let stats = await command('stats')
   // #464 增加恒不修饰的多语言目录样例，原三条输入行为仍各自验证；
-  // #595 bracket-conv 只认 IME 定稿 '【'（替换选区），不干扰 ^ 族。
+  // #595 bracket-conv 只认 IME 定稿 '【'（替换选区），不干扰 ^ 族；
+  // #597 async-conv 只认真实键盘 '（'（替换选区）的异步修饰。
   assert.deepEqual(stats.registrations.map((entry) => entry.id).sort(),
-    ['bracket-conv', 'dash-fill', 'locale-name', 'space-fill', 'tilde-fill'], `行为目录应含四条输入行为与多语言样例：${JSON.stringify(stats.registrations)}`)
+    ['async-conv', 'bracket-conv', 'dash-fill', 'locale-name', 'space-fill', 'tilde-fill'], `行为目录应含五条输入行为与多语言样例：${JSON.stringify(stats.registrations)}`)
   assert.equal(stats.hostState, null, '初始无用户覆盖（默认序全开启）')
   await typeChar('^')
   await waitText('word^- ')
@@ -411,12 +422,14 @@ try {
   assert.equal(stats.hostState, null, '恢复默认后无用户覆盖')
   console.log('[PASS] 无选区 IME 定稿符号对：补全 word【】 照常、驱动恰一次、单笔撤销（#595）')
 
-  // ---- 4c. #595 评审补钉：真实键入符号对（非组合）照常驱动、inputText 为
-  // 展开形态 ---- 契约收窄后的事实钉住：键入路径的补全/包裹经
-  // transactionFilter 改写并保留 input.type userEvent，照常驱动一次
-  // （inputText='()'——#411 起既有行为，不在 builtinEditOrigin 排除面；
-  // 与 IME 定稿路径的干净形态相区分。初稿误记「键入天然不驱动」，评审
-  // 推翻——t15 用例的注入通道无 userEvent，不代表真实键入）
+  // ---- 4c. #597 键入路径重排：真实键入符号字符（非组合）以原始形态驱动 ----
+  // 契约收口：filter 放行原始单字符事务（不再改写为 '()'），链驱动恰一次
+  // 且 inputText 为原始键入字符（'('、replaced null——与 IME 定稿路径同构，
+  // builtinEditOrigin 消除兜底事务的双驱动）；内置兜底（M3）微任务补闭合，
+  // 终态 word() 与旧 filter 改写逐字一致。M1 先于 M3 经观察事件快照钉住
+  // （快照 'word(' 无闭合——若兜底先行改写，快照应为 'word()'）。
+  // 一次补全 = 一笔 edit.request：Ctrl+Z 一次整体恢复（若出站拆两笔，
+  // 首撤只撤 ')' 残留悬空 '('，waitText 超时即失败）。
   await command('reset')
   const drivesBeforeTyped = (await command('stats')).counters.drives
   await typeChar('(')
@@ -425,13 +438,91 @@ try {
   events = await collectEvents()
   const typedBehaviors = events.filter((e) => e.kind === 'behavior')
   assert.ok(typedBehaviors.length > 0, `真实键入 '(' 应驱动行为链（键入路径既有行为）：${JSON.stringify(events)}`)
-  assert.ok(typedBehaviors.every((e) => e.inputText === '()' && e.replaced == null),
-    `键入路径行为上下文为展开形态（inputText '()'、replaced null）：${JSON.stringify(typedBehaviors)}`)
+  assert.ok(typedBehaviors.every((e) => e.inputText === '(' && e.replaced == null),
+    `键入路径行为上下文为原始单字符形态（inputText '('、replaced null）：${JSON.stringify(typedBehaviors)}`)
+  const typedChanged = events.filter((e) => e.kind === 'changed' && e.inputText === '(')
+  assert.ok(typedChanged.length > 0, `观察事件应含原始键入 '('：${JSON.stringify(events)}`)
+  // M1 先于 M3（键入路径时序契约）：观察快照为补全前形态 'word('——若
+  // 内置兜底（M3）先于链驱动（M1）落地，快照应为 'word()'
+  assert.ok(typedChanged.every((e) => e.snapshotText === 'word('),
+    `M1 应先于 M3（观察快照为补全前形态 'word('）：${JSON.stringify(typedChanged)}`)
   stats = await command('stats')
-  assert.equal(stats.counters.drives, drivesBeforeTyped + 1, `真实键入符号对应驱动恰好一次：${JSON.stringify(stats.counters)}`)
+  assert.equal(stats.counters.drives, drivesBeforeTyped + 1, `真实键入符号对应驱动恰好一次（兜底补全事务不驱动）：${JSON.stringify(stats.counters)}`)
   await undo()
   await waitText(T0)
-  console.log("[PASS] 真实键入符号对（非组合）：filter 改写照常驱动、inputText 为展开形态 '()'（#595 契约收窄实证）")
+  console.log("[PASS] 真实键入符号对（非组合）：原始形态驱动 inputText='('、M1 先于 M3、终态 word()、单笔撤销（#597）")
+
+  // ---- 4d. #597 真实键盘路径同步行为组件：组件产出为终态、内置兜底让位 ----
+  // bracket-conv（同步 SelectKey 类）在真实键盘（非 IME）路径同样命中：
+  // 键入 '【'（insertText 走 input.type 替换选区）→ filter 放行原始替换
+  // → M1 链驱动（inputText='【'、replaced='ord'）→ bracket-conv 半角化
+  // 改写区间 → M3 兜底形态校验遇区间被改写即让位——终态为组件产出
+  // w[ord]，零重复内容。
+  await command('reset')
+  const drivesBeforeTypedWrap = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  // 选中 'ord'（光标在行尾，3×Shift+ArrowLeft）
+  for (let i = 0; i < 3; i++) {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 0 })
+  }
+  await call('Input.insertText', { text: '【' })
+  await waitText('w[ord]')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  events = await collectEvents()
+  const typedWrapBehaviors = events.filter((e) => e.kind === 'behavior' && e.id === 'bracket-conv')
+  assert.ok(typedWrapBehaviors.length > 0, `真实键入 '【' 应触发 bracket-conv：${JSON.stringify(events)}`)
+  assert.ok(typedWrapBehaviors.every((e) => e.inputText === '【' && e.replaced?.text === 'ord' && e.replaced.from === 1 && e.replaced.to === 4),
+    `键入路径行为上下文应为干净形态（inputText '【'、replaced 选区 'ord' [1,4)）：${JSON.stringify(typedWrapBehaviors)}`)
+  // M1 先于 M3（真实键盘路径钉住）：行为快照为兜底重建前形态 'w【'——
+  // 若内置包裹（M3）先行改写，快照应为 'w【ord】'
+  assert.ok(typedWrapBehaviors.every((e) => e.snapshotText === 'w【'),
+    `M1 应先于 M3（行为快照为包裹前形态 'w【'）：${JSON.stringify(typedWrapBehaviors)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeTypedWrap + 1, `真实键入包裹应驱动恰好一次（兜底让位不产出、无双驱动）：${JSON.stringify(stats.counters)}`)
+  // 回基态：行为修饰与键入的撤回单位随 ack 收敛时序落定（同 4b-i 口径，
+  // 轮询撤回至 T0——行为路径的撤回粒度不在 #597 断言面）
+  for (let i = 0; i < 4 && await command('text') !== T0; i++) {
+    await undo()
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  await waitText(T0)
+  console.log('[PASS] 真实键入包裹（同步组件）：bracket-conv 产出 w[ord] 生效、内置兜底让位、驱动恰一次（M1 先于 M3，#597）')
+
+  // ---- 4e. #597 真实键盘路径异步行为组件：内置先落地、修饰后至覆盖 ----
+  // async-conv（fixture 组件）判定键入 '（' 替换选区：onInput 返回 null
+  // 不占链修饰面，下一宏任务经 views 面 applyEdits 异步改写——内置兜底
+  // （M3）先落地 w（ord），异步修饰后至以内置产出为改写基线覆盖为
+  // w〈ord〉（ADR-0020 已知边界同型继承，断言终态即可）。
+  await command('reset')
+  const drivesBeforeAsync = (await command('stats')).counters.drives
+  await focus(); await docEnd()
+  // 选中 'ord'（3×Shift+ArrowLeft）
+  for (let i = 0; i < 3; i++) {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 0 })
+  }
+  await call('Input.insertText', { text: '（' })
+  await waitText('w〈ord〉')
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  events = await collectEvents()
+  const asyncBehaviors = events.filter((e) => e.kind === 'behavior' && e.id === 'async-conv')
+  assert.ok(asyncBehaviors.length > 0, `真实键入 '（' 应触发 async-conv 回调：${JSON.stringify(events)}`)
+  assert.ok(asyncBehaviors.every((e) => e.inputText === '（' && e.replaced?.text === 'ord' && e.replaced.from === 1 && e.replaced.to === 4),
+    `异步行为上下文应为干净形态（inputText '（'、replaced 选区 'ord' [1,4)）：${JSON.stringify(asyncBehaviors)}`)
+  stats = await command('stats')
+  assert.equal(stats.counters.drives, drivesBeforeAsync + 1, `异步修饰路径同样只驱动一次：${JSON.stringify(stats.counters)}`)
+  // 回基态（同 4b-i 口径轮询）
+  for (let i = 0; i < 4 && await command('text') !== T0; i++) {
+    await undo()
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  await waitText(T0)
+  console.log('[PASS] 真实键入包裹（异步组件）：内置兜底先落地 w（ord）、修饰后至覆盖 w〈ord〉、驱动恰一次（#597）')
 
   // ---- 4.5 #400：真实退格驱动行为链，replaced 携带被删文本 ----
   await command('reset')

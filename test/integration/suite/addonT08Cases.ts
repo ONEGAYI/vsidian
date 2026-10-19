@@ -1,7 +1,8 @@
 // T08（#357）行为冲突管理——真宿主生产路径用例。
 //
 // 生产消费链路：夹具组件 vsidian-test-fixture.addon-t07 的编辑器页注册
-// 三个输入行为（dash-fill / space-fill / tilde-fill）；页面 runtime 在注册
+// 输入行为族（dash-fill / space-fill / tilde-fill 加 locale-name /
+// bracket-conv / async-conv 载体系）；页面 runtime 在注册
 // 后经 addon.behaviors.report 全量对账上报宿主，宿主目录服务（runState
 // 门控）构建行为冲突管理目录；设置页经 addons.behaviorsGet 拉取载荷，
 // 写入经 addons.behaviorsSetDisabled/SetOrder（本用例经生产设置页面板
@@ -164,12 +165,13 @@ async function closeAllEditors(): Promise<void> {
   await new Promise((r) => setTimeout(r, 300))
 }
 
-/** 行为状态恢复默认（防跨用例污染；幂等）——恢复面覆盖夹具全部五行为
- *  （含 T07 套件可能禁用的 locale-name/bracket-conv，跨套件同宿主兜底） */
+/** 行为状态恢复默认（防跨用例污染；幂等）——恢复面覆盖夹具全部六行为
+ *  （含 T07 套件可能禁用的 locale-name/bracket-conv/async-conv，跨套件
+ *  同宿主兜底） */
 async function resetBehaviorState(): Promise<void> {
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetOrder', { order: [] })
   await vscode.commands.executeCommand('onegayi.vsidian._test.addonBehaviorSetDisabled', {
-    keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, `${ADDON_ID}#locale-name`, `${ADDON_ID}#bracket-conv`],
+    keys: [KEY_DASH, KEY_SPACE, KEY_TILDE, `${ADDON_ID}#locale-name`, `${ADDON_ID}#bracket-conv`, `${ADDON_ID}#async-conv`],
     disabled: false,
   })
 }
@@ -221,11 +223,12 @@ export const addonT08Cases: Array<[string, () => Promise<void>]> = [
     await resetDocAndOpen(file, 'word\n')
     await probeRegistrations(file)
 
-    // 注册上报对账：宿主目录含五个行为（名称为注册面元数据；#464 起
-    // 含一个多语言映射名行为，#595 起含 bracket-conv）
+    // 注册上报对账：宿主目录含六个行为（名称为注册面元数据；#464 起
+    // 含一个多语言映射名行为，#595 起含 bracket-conv，#597 起含
+    // async-conv）
     const catalog = await poll('目录上报到达', async () => {
       const list = await behaviorCatalog()
-      return list.filter((entry) => entry.addonId === ADDON_ID).length === 5 ? list : undefined
+      return list.filter((entry) => entry.addonId === ADDON_ID).length === 6 ? list : undefined
     })
     const names = catalog.filter((entry) => entry.addonId === ADDON_ID).map((entry) => entry.name)
     assert(names.every((name) => isNonEmptyBehaviorName(name)), `目录应含必填名称：${JSON.stringify(catalog)}`)
@@ -336,7 +339,7 @@ export const addonT08Cases: Array<[string, () => Promise<void>]> = [
     await poll('重开后目录与关闭配置恢复', async () => {
       const list = await behaviorCatalog()
       const stats = await behaviorStats(file)
-      return list.filter((entry) => entry.addonId === ADDON_ID).length === 5 &&
+      return list.filter((entry) => entry.addonId === ADDON_ID).length === 6 &&
         stats?.hostState?.disabled?.includes(KEY_SPACE) ? list : undefined
     })
     await typeAt(file, 4, '^')
