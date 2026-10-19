@@ -303,6 +303,11 @@ export class SettingsPageView {
   /** #596 补放观察：观察内容容器 listEl（mainEl 盒高不随内容变，观察无效），
    *  起高至足以容纳 pending 时补放并卸载 */
   private pendingObserver: ResizeObserver | null = null
+  /** #596 用户滚动输入信号监听卸载器（评审 VsidianPR598-001）：wheel /
+   *  滚动条 mousedown / 滚动键 keydown / touchstart 任一到达即用户接管，
+   *  pending 立即作废。监听挂 mainEl（跨 render 稳定），与补放观察同生
+   *  命周期——armPendingScroll 幂等挂载、clearPendingScroll 卸载 */
+  private userScrollSignalDisposer: (() => void) | null = null
   /** #596 selectSection 的恢复目标（render 前置位）：render 尾部 uiState
    *  上报的代报源——上报发生在滚动应用之前，实测是刚复位的 0，直接上报会
    *  把宿主记忆洗掉（异步装载页应用被钳后无 scroll 事件自愈，损害延续到
@@ -728,10 +733,11 @@ export class SettingsPageView {
     this.programmaticScrollAnchor = Math.round(this.mainEl.scrollTop)
   }
 
-  /** #596 主区 scroll 事件：标记窗口内的程序性事件（值吻合锚点）消费窗口
-   *  不算用户滚动；其余任何滚动都是用户真实滚动——pending 立即作废（条件
-   *  ②，不覆盖用户位置），随后上报（pending 期间 reportUiState 以代报值
-   *  防宿主记忆被复位/钳位值洗掉） */
+  /** #596 主区 scroll 事件：标记窗口内的程序性事件（值吻合锚点）消费窗口；
+   *  窗口外的 scroll 不直接判用户滚动——无用户输入事件的滚动是布局钳位
+   *  （内容收缩下调 scrollTop）等程序现象，pending 保留、代报持续（评审
+   *  VsidianPR598-001：用户接管只由输入信号判定，见 armUserScrollSignal）；
+   *  pending 期间的 reportUiState 以代报值防宿主记忆被钳位值洗掉 */
   private onMainScroll(): void {
     if (this.programmaticScrollAnchor !== null && this.mainEl &&
         Math.round(this.mainEl.scrollTop) === this.programmaticScrollAnchor) {
@@ -740,16 +746,49 @@ export class SettingsPageView {
       return
     }
     this.programmaticScrollAnchor = null
-    this.clearPendingScroll()
     this.reportUiState()
   }
 
-  /** #596 清 pending 并卸载补放观察——三条件失效（①补放成功 ②用户真实
-   *  滚动 ③切换分页）与 render 头部清理、dispose 共用出口 */
+  /** #596 清 pending 并卸载补放观察与用户滚动信号——三条件失效（①补放成功
+   *  ②用户真实滚动（输入信号，见 armUserScrollSignal）③切换分页）与 render
+   *  头部清理、dispose 共用出口 */
   private clearPendingScroll(): void {
     this.pendingScroll = null
     this.pendingObserver?.disconnect()
     this.pendingObserver = null
+    this.userScrollSignalDisposer?.()
+    this.userScrollSignalDisposer = null
+  }
+
+  /** #596 用户滚动接管信号（评审 VsidianPR598-001）：四路输入任一到达即
+   *  用户接管——pending 立即作废（条件②的即时面，不等 scroll 事件）。布局
+   *  钳位不产生任何输入事件，据此与用户真实滚动可靠区分：
+   *  - wheel：滚轮/触控板（冒泡自主区内容）；
+   *  - mousedown（target 为 mainEl 自身）：滚动条交互——内容点击的 target
+   *    是子元素，不算接管；
+   *  - keydown（滚动键族）：方向键/翻页/Home/End/空格；
+   *  - touchstart：触摸滚动。幂等：已挂载时跳过（render 尾重挂不重复） */
+  private armUserScrollSignal(): void {
+    if (this.userScrollSignalDisposer !== null || !this.mainEl) return
+    const main = this.mainEl
+    const onSignal = (): void => this.clearPendingScroll()
+    const onMouseDown = (event: MouseEvent): void => {
+      if (event.target === main) this.clearPendingScroll()
+    }
+    const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (SCROLL_KEYS.has(event.key)) this.clearPendingScroll()
+    }
+    main.addEventListener('wheel', onSignal, { passive: true })
+    main.addEventListener('mousedown', onMouseDown)
+    main.addEventListener('keydown', onKeyDown)
+    main.addEventListener('touchstart', onSignal, { passive: true })
+    this.userScrollSignalDisposer = () => {
+      main.removeEventListener('wheel', onSignal)
+      main.removeEventListener('mousedown', onMouseDown)
+      main.removeEventListener('keydown', onKeyDown)
+      main.removeEventListener('touchstart', onSignal)
+    }
   }
 
   /** #596 挂 pending 与补放观察：ResizeObserver 观察 listEl（内容容器——
@@ -760,6 +799,7 @@ export class SettingsPageView {
     this.pendingScroll = scroll
     this.pendingObserver?.disconnect()
     this.pendingObserver = null
+    this.armUserScrollSignal()
     if (typeof ResizeObserver === 'function' && this.listEl) {
       const observer = new ResizeObserver(() => this.tryApplyPendingScroll())
       observer.observe(this.listEl)

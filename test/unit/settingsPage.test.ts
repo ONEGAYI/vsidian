@@ -1550,7 +1550,7 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
   })
 
-  it('条件②：pending 期间用户真实滚动立即作废 pending——上报用户位置，其后起高不覆盖', () => {
+  it('条件②：pending 期间用户真实滚动（wheel 输入信号）立即作废 pending——上报用户位置，其后起高不覆盖', () => {
     const { observers } = installResizeObserverStub()
     const { view, sent, parent } = makeTrackedFullView()
     const main = mainEl(parent)
@@ -1558,14 +1558,60 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     stubScrollableMain(main, geometry)
     view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
     const observer = observers.at(-1)!
-    main.scrollTop = 30 // 用户滚到 30（钳位上限 50 内，≠ 钳位锚点 50）
+    // 用户滚轮：wheel 输入信号到达即作废（不等 scroll 事件）
+    main.dispatchEvent(new Event('wheel'))
+    expect(observer.disconnected).toBe(true)
+    main.scrollTop = 30 // 用户滚到 30（钳位上限 50 内）
     main.dispatchEvent(new Event('scroll'))
     expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 })
-    expect(observer.disconnected).toBe(true)
     // 其后内容起高也不补放：不覆盖用户滚动位置
     geometry.scrollHeight = 2000
     observer.fire()
     expect(main.scrollTop).toBe(30)
+  })
+
+  it('布局钳位（无用户输入的内容收缩）不作废 pending：代报持续防洗，再起高后照常补放（评审 VsidianPR598-001）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    expect(main.scrollTop).toBe(50) // 应用被钳（最大可滚 50）
+    // 消费程序锚点（应用被钳引发的 scroll 事件，值=赋值读回值 50）
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false)
+    // 加载过程收缩内容（max 塌缩到 20）：浏览器钳位下调并派发 scroll——
+    // 全程无用户输入事件，不得当作用户接管
+    geometry.scrollHeight = 270
+    main.scrollTop = 20
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // 钳位不作废 pending
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 代报持续
+    // 再起高：照常补放恢复值
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+  })
+
+  it('滚动接管信号面精度：子元素 mousedown 与非滚动键 keydown 不作废 pending（只有滚动条与滚动键算接管）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    stubScrollableMain(main, { scrollHeight: 300, clientHeight: 250 })
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    // 子元素 mousedown（点击设置项/侧栏条目）：target 非 main 自身，不是滚动条交互
+    parent.querySelector('.vsidian-settings-nav-item')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    expect(observer.disconnected).toBe(false)
+    // 非滚动键 keydown（如字母键）：不作废
+    main.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    expect(observer.disconnected).toBe(false)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
+    // 滚动键 keydown（PageDown）：作废
+    main.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true }))
+    expect(observer.disconnected).toBe(true)
   })
 
   it('标记窗口：应用被钳引发的 scroll 事件（值=钳位实测）不算用户滚动，pending 存续照常补放', () => {
@@ -1615,7 +1661,7 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
   })
 
-  it('无 ResizeObserver 环境（特性检测回退）：挂 pending 不崩溃，代报持续防洗，用户滚动仍可作废', () => {
+  it('无 ResizeObserver 环境（特性检测回退）：挂 pending 不崩溃，代报持续防洗，用户滚动（wheel 信号）仍可作废', () => {
     const { view, sent, parent } = makeTrackedFullView()
     const main = mainEl(parent)
     stubScrollableMain(main, { scrollHeight: 300, clientHeight: 250 })
@@ -1623,7 +1669,8 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
     expect(main.scrollTop).toBe(50)
     expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 })
-    // 条件②路径不依赖 RO：用户滚动仍立即作废并上报真实位置
+    // 条件②路径不依赖 RO：wheel 输入信号仍立即作废并上报真实位置
+    main.dispatchEvent(new Event('wheel'))
     main.scrollTop = 30
     main.dispatchEvent(new Event('scroll'))
     expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 })

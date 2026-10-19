@@ -185,23 +185,34 @@ try {
     await page.waitForFunction(() => document.querySelector('.vsidian-settings-main').scrollTop === 300)
     assert.equal(await mainEl().evaluate((el) => el.scrollTop), 300, '内容起高后 RO 应补放到恢复位置')
 
-    // ③ 用户滚动作废 pending（条件②实拍）：重造壳期挂 pending → 用户滚动
-    // → 解除后不得覆盖用户位置。半高 cap（max scrollTop≈80）：用户可真实
-    // 滚动（30），恢复值 300 仍被钳挂 pending
+    // ③ 用户滚动作废 pending（条件②实拍）：重造壳期挂 pending → 用户真实
+    // 滚轮（wheel 输入信号）→ 解除后不得覆盖用户位置。半高 cap（max
+    // scrollTop≈80）：用户可真实滚动，恢复值 300 仍被钳挂 pending。
+    // 程序赋值 scrollTop 不再能模拟用户滚动（VsidianPR598-001：无输入事件
+    // 的滚动是布局钳位，不作废 pending）——必须走真实滚轮输入
     const cap2 = await page.addStyleTag({ content: '.vsidian-settings-list { max-height: 500px !important; overflow: hidden !important; }' })
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', {
         source: window, data: { kind: 'settings.focusSection', section: 'editor', scroll: 300 },
       }))
     })
-    await mainEl().evaluate((el) => { el.scrollTop = 30 })
-    await page.waitForFunction(() => {
+    const box = await mainEl().boundingBox()
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    // 恢复值 300 被钳在壳期底界（max = scrollHeight - clientHeight），向下
+    // 无处可滚——向上滚离底界；断言按实际 max 动态判定（滚轮像素增量小
+    // 于壳期可滚量，滚后位置严格在 (0, max) 内）
+    await page.mouse.wheel(0, -40)
+    const userState = await page.waitForFunction(() => {
+      const el = document.querySelector('.vsidian-settings-main')
       const last = window.sentMessages.filter((m) => m.kind === 'settings.uiState').at(-1)
-      return last && last.section === 'editor' && last.scrollTop === 30
+      const max = el.scrollHeight - el.clientHeight
+      return el.scrollTop > 0 && el.scrollTop < max && last && last.section === 'editor' &&
+        last.scrollTop === Math.round(el.scrollTop) ? { pos: el.scrollTop } : null
     })
+    const userPos = await userState.evaluate((s) => s.pos)
     await cap2.evaluate((el) => el.remove())
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-    assert.equal(await mainEl().evaluate((el) => el.scrollTop), 30, 'pending 已被用户滚动作废：起高后不得覆盖用户位置')
+    assert.equal(await mainEl().evaluate((el) => el.scrollTop), userPos, 'pending 已被用户滚轮作废：起高后不得覆盖用户位置')
 
     // ④ 切换分页清除 pending（条件③实拍）：壳期挂 pending → 切常规页
     // → 复位顶部 + 观察卸载 → 解除后不补放
