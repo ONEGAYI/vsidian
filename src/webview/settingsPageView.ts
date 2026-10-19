@@ -20,11 +20,13 @@ import {
 
 export interface SettingsPageBridge { postMessage(message: unknown): void }
 
-/** #596 布局静默窗（毫秒）：scroll 事件前该时长内无布局变化（RO 通知）
- *  才可能归因用户——窗口内的 scroll 视为布局引发（收缩钳位/scroll
- *  anchoring），即便此前有输入信号也不算用户接管（评审 VsidianPR598-001
- *  R5：取消输入/已结束 tap 后的布局钳位会落入任何「输入时间窗」） */
-const USER_SCROLL_LAYOUT_QUIET_MS = 250
+/** #596 收缩钳位静默窗（毫秒）：scroll 事件前该时长内无收缩（RO 通知的
+ *  max 变小方向）才归因用户——窗内的 scroll 视为收缩 clamp（内容塌缩/
+ *  窗口放大），即便此前有输入信号也不算用户接管（评审 VsidianPR598-001
+ *  R5：取消输入/已结束 tap 后的收缩钳位会落入任何「输入时间窗」；R6：
+ *  起高方向不产生布局性 scroll，不设防——渐进起高期间的用户真实滚动
+ *  必须照常接管） */
+const LAYOUT_CLAMP_QUIET_MS = 250
 
 /**
  * 侧栏大组（#354 T05）：附加分页向设置页侧栏贡献「选项」之外的大组
@@ -310,15 +312,15 @@ export class SettingsPageView {
    *  起高至足以容纳 pending 时补放并卸载 */
   private pendingObserver: ResizeObserver | null = null
   /** #596 用户接管武装（布尔，无过期）：输入信号到达置位——非锚点 scroll
-   *  且处于布局静默期（见 onMainScroll）才真正接管并清 pending。信号本身
+   *  且处于收缩静默期（见 onMainScroll）才真正接管并清 pending。信号本身
    *  不作废、也不设时间窗过期（评审 VsidianPR598-001 R5：时间窗两头漏——
    *  窗内的布局钳位误清、长按超窗后开始滚动的真实接管漏清）；归因由布局
    *  静默判定承担。随 clearPendingScroll 一并清除 */
   private userScrollArmed = false
-  /** #596 最近布局变化时间（pendingObserver 的 RO 通知置位，初次观察通知
-   *  除外——那是快照不是变化；0 = 从未）：scroll 归因的布局静默期起点。
-   *  观察面含 mainEl（窗口缩放改盒高引发的钳位）与 listEl（内容起高/收缩） */
-  private lastLayoutChangeAt = 0
+  /** #596 最近一次收缩时间（0 = 从未）：pendingObserver 的 RO 通知
+   *  按 max 可滚量方向分诊，仅收缩（可能引发 clamp scroll 的唯一布局形态）
+   *  记入；起高不产生布局性 scroll，不记（R6）。scroll 归因的静默期起点 */
+  private lastLayoutShrinkAt = 0
   /** #596 用户滚动输入信号监听卸载器（评审 VsidianPR598-001）：wheel /
    *  滚动条 mousedown / 滚动键 keydown / touchstart 任一到达即用户接管，
    *  pending 立即作废。监听挂 mainEl（跨 render 稳定），与补放观察同生
@@ -750,11 +752,11 @@ export class SettingsPageView {
   }
 
   /** #596 主区 scroll 事件：标记窗口内的程序性事件（值吻合锚点）消费窗口；
-   *  已武装（有输入信号）且处于布局静默期（USER_SCROLL_LAYOUT_QUIET_MS 内
-   *  无 RO 布局通知）的非锚点 scroll = 用户接管——清 pending、上报实测
-   *  （用户位置）；其余非锚点 scroll 归因布局（收缩钳位、scroll anchoring
-   *  等程序现象），pending 保留、代报持续（评审 VsidianPR598-001 R3/R5：
-   *  「有输入且有滚动事实且布局安静」三者齐备才算用户接管）；pending 期间
+   *  已武装（有输入信号）且处于收缩静默期（LAYOUT_CLAMP_QUIET_MS 内无收缩
+   *  通知）的非锚点 scroll = 用户接管——清 pending、上报实测（用户位置）；
+   *  其余非锚点 scroll 归因布局（收缩 clamp；起高不产生 scroll 无需设防），
+   *  pending 保留、代报持续（评审 VsidianPR598-001 R3/R5/R6：「有输入、
+   *  有滚动事实、非收缩静默窗」三者齐备才算用户接管）；pending 期间
    *  的 reportUiState 以代报值防宿主记忆被钳位值洗掉 */
   private onMainScroll(): void {
     if (this.programmaticScrollAnchor !== null && this.mainEl &&
@@ -764,10 +766,10 @@ export class SettingsPageView {
       return
     }
     this.programmaticScrollAnchor = null
-    // 静默期判定：从未观察到布局变化（0）视为远古——测试进程早期
-    // performance.now() 很小，不能把「从未变化」误判成「刚变化」
-    if (this.userScrollArmed && (this.lastLayoutChangeAt === 0 ||
-        performance.now() - this.lastLayoutChangeAt > USER_SCROLL_LAYOUT_QUIET_MS)) {
+    // 静默期判定：从未观察到收缩（0）视为远古——测试进程早期
+    // performance.now() 很小，不能把「从未收缩」误判成「刚收缩」
+    if (this.userScrollArmed && (this.lastLayoutShrinkAt === 0 ||
+        performance.now() - this.lastLayoutShrinkAt > LAYOUT_CLAMP_QUIET_MS)) {
       this.clearPendingScroll() // 幂等：pending 已空时仅清武装与监听
       this.reportUiState()
       return
@@ -776,7 +778,7 @@ export class SettingsPageView {
   }
 
   /** #596 清 pending 并卸载补放观察、用户滚动信号与武装——三条件失效
-   *  （①补放成功 ②用户接管：布局静默期的非锚点 scroll，见 onMainScroll
+   *  （①补放成功 ②用户接管：收缩静默期的非锚点 scroll，见 onMainScroll
    *  ③切换分页）与 render 头部清理、dispose 共用出口 */
   private clearPendingScroll(): void {
     this.pendingScroll = null
@@ -785,17 +787,17 @@ export class SettingsPageView {
     this.userScrollSignalDisposer?.()
     this.userScrollSignalDisposer = null
     this.userScrollArmed = false
-    this.lastLayoutChangeAt = 0
+    this.lastLayoutShrinkAt = 0
   }
 
   /** #596 用户滚动接管信号（评审 VsidianPR598-001，R3/R5 收窄）：输入信号
    *  只「武装」接管判定（布尔，无过期），不作废 pending——作废的实际触发
-   *  是「已武装 + 布局静默期的非锚点 scroll」（onMainScroll），scroll 的
-   *  归因由布局静默判定承担，不由输入与滚动的时间接近性承担：
+   *  是「已武装 + 收缩静默期的非锚点 scroll」（onMainScroll），scroll 的
+   *  归因由收缩方向判定承担，不由输入与滚动的时间接近性承担：
    *  - 控件键盘（搜索框空格/Home、下拉框方向键）、已取消（preventDefault）
    *    的 keydown/wheel、触摸点击（tap）：无滚动事实，不作废；
    *  - 取消输入/已结束 tap 之后短窗内的布局钳位 scroll：RO 先行通知布局
-   *    变化（静默期不满足），不作废；
+   *    变化（收缩静默期不满足），不作废；
    *  - 长按滚动条/触摸后才开始移动：armed 无过期，移动的 scroll 照常接管。
    *  幂等：已挂载时跳过（render 尾重挂不重复） */
   private armUserScrollSignal(): void {
@@ -826,27 +828,31 @@ export class SettingsPageView {
   }
 
   /** #596 挂 pending 与补放观察：ResizeObserver 观察 listEl（内容起高/收缩）
-   *  与 mainEl（窗口缩放改盒高引发的钳位）——mainEl 盒高不随内容变但随
-   *  视口变，两端都在观察面上才能给 scroll 归因提供完整的布局变化信号
-   *  （见 lastLayoutChangeAt）。初次观察通知是布局快照不算变化（真浏览器
-   *  observe 后立即回调一次，若计入会污染挂载后首拍的静默期）。渐进起高
-   *  天然多次回调直至够高；无 ResizeObserver 环境（jsdom 等）按 hoverPopup
-   *  先例特性检测回退——只挂 pending（代报仍防记忆洗掉），补放交由真实
-   *  浏览器路径 */
+   *  与 mainEl（窗口缩放改盒高引发的钳位）——渐进起高天然多次回调直至
+   *  够高；无 ResizeObserver 环境（jsdom 等）按 hoverPopup 先例特性检测
+   *  回退——只挂 pending（代报仍防记忆洗掉），补放交由真实浏览器路径。
+   *  #596 R6：布局变化通知按几何方向分诊——只有收缩（max 可滚量变小，
+   *  scrollHeight 缩或 clientHeight 涨）才可能引发浏览器 clamp scrollTop
+   *  的布局性 scroll；起高（max 变大）不产生 scroll，不得进入静默防区
+   *  （渐进起高会持续通知，若无差别记 dirty 会把其间用户的真实滚动全部
+   *  拒绝接管，随后补放覆盖用户位置） */
   private armPendingScroll(scroll: number): void {
     this.pendingScroll = scroll
     this.pendingObserver?.disconnect()
     this.pendingObserver = null
     this.armUserScrollSignal()
     if (typeof ResizeObserver === 'function' && this.listEl && this.mainEl) {
-      let firstFire = true
+      const main = this.mainEl
+      let prevMax = main.scrollHeight - main.clientHeight // 挂载时几何快照
       const observer = new ResizeObserver(() => {
-        if (firstFire) firstFire = false
-        else this.lastLayoutChangeAt = performance.now()
+        const max = main.scrollHeight - main.clientHeight
+        const shrank = max < prevMax
+        prevMax = max
+        if (shrank) this.lastLayoutShrinkAt = performance.now()
         this.tryApplyPendingScroll()
       })
       observer.observe(this.listEl)
-      observer.observe(this.mainEl)
+      observer.observe(main)
       this.pendingObserver = observer
     }
   }

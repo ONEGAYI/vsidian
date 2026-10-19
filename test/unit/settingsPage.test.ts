@@ -1636,14 +1636,45 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     // 按住滚动条（mousedown target=main）后停顿任意久（模拟 600ms）再拖动：
     // 期间无布局变化，滚动到达时处于布局静默期——armed 不设过期窗口，照常接管
     main.dispatchEvent(new MouseEvent('mousedown'))
-    main.scrollTop = 40 // 用户拖动到 40
-    main.dispatchEvent(new Event('scroll'))
-    expect(observer.disconnected).toBe(true)
-    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 40 })
+    vi.useFakeTimers({ toFake: ['performance'] })
+    try {
+      vi.advanceTimersByTime(600) // 真实推进时钟（R6：测试须真模拟停顿时长）
+      main.scrollTop = 40 // 用户拖动到 40
+      main.dispatchEvent(new Event('scroll'))
+      expect(observer.disconnected).toBe(true)
+      expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 40 })
+    } finally {
+      vi.useRealTimers()
+    }
     // 其后内容起高也不补放：不覆盖用户滚动位置
     geometry.scrollHeight = 2000
     observer.fire()
     expect(main.scrollTop).toBe(40)
+  })
+
+  it('部分起高（max 变大）后静默窗内的真实滚动照常接管（R6：起高不产生布局性 scroll，不设防）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知
+    // 部分起高（max 50→80，仍不足恢复 120，pending 继续）：只有收缩
+    // （max 变小）才可能引发 clamp scroll——起高方向不进入布局静默防区
+    geometry.scrollHeight = 330
+    observer.fire()
+    // 100ms 后用户真实滚轮滚到 30：即便处于任何时间窗内也必须接管
+    main.dispatchEvent(new Event('wheel'))
+    main.scrollTop = 30
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true) // 接管：pending 作废
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 30 }) // 上报用户位置
+    // 其后内容继续起高也不补放：不覆盖用户位置
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(30)
   })
 
   it('布局钳位（无用户输入的内容收缩）不作废 pending：代报持续防洗，再起高后照常补放（评审 VsidianPR598-001）', () => {
