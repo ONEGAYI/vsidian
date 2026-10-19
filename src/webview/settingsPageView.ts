@@ -20,10 +20,11 @@ import {
 
 export interface SettingsPageBridge { postMessage(message: unknown): void }
 
-/** #596 用户接管武装窗口（毫秒）：输入信号到「非锚点 scroll 事件」的最长
- *  间隔——窗口内二者同时发生才算用户接管（真实滚轮/滚动条/滚动键的 scroll
- *  紧随信号之后，亚秒级；超出视为无因果，scroll 按布局钳位处理） */
-const USER_SCROLL_ARM_WINDOW_MS = 500
+/** #596 布局静默窗（毫秒）：scroll 事件前该时长内无布局变化（RO 通知）
+ *  才可能归因用户——窗口内的 scroll 视为布局引发（收缩钳位/scroll
+ *  anchoring），即便此前有输入信号也不算用户接管（评审 VsidianPR598-001
+ *  R5：取消输入/已结束 tap 后的布局钳位会落入任何「输入时间窗」） */
+const USER_SCROLL_LAYOUT_QUIET_MS = 250
 
 /**
  * 侧栏大组（#354 T05）：附加分页向设置页侧栏贡献「选项」之外的大组
@@ -308,12 +309,16 @@ export class SettingsPageView {
   /** #596 补放观察：观察内容容器 listEl（mainEl 盒高不随内容变，观察无效），
    *  起高至足以容纳 pending 时补放并卸载 */
   private pendingObserver: ResizeObserver | null = null
-  /** #596 用户接管武装时间戳：输入信号到达置位（performance.now()），
-   *  非 null = 已武装——窗口（USER_SCROLL_ARM_WINDOW_MS）内出现非锚点
-   *  scroll 才真正接管（onMainScroll 清 pending）；信号本身不作废（评审
-   *  VsidianPR598-001 R3 收窄：控件键盘/已取消输入/触摸点击无滚动事实，
-   *  直接作废会误丢恢复目标）。随 clearPendingScroll 一并清除 */
-  private userScrollArmedAt: number | null = null
+  /** #596 用户接管武装（布尔，无过期）：输入信号到达置位——非锚点 scroll
+   *  且处于布局静默期（见 onMainScroll）才真正接管并清 pending。信号本身
+   *  不作废、也不设时间窗过期（评审 VsidianPR598-001 R5：时间窗两头漏——
+   *  窗内的布局钳位误清、长按超窗后开始滚动的真实接管漏清）；归因由布局
+   *  静默判定承担。随 clearPendingScroll 一并清除 */
+  private userScrollArmed = false
+  /** #596 最近布局变化时间（pendingObserver 的 RO 通知置位，初次观察通知
+   *  除外——那是快照不是变化；0 = 从未）：scroll 归因的布局静默期起点。
+   *  观察面含 mainEl（窗口缩放改盒高引发的钳位）与 listEl（内容起高/收缩） */
+  private lastLayoutChangeAt = 0
   /** #596 用户滚动输入信号监听卸载器（评审 VsidianPR598-001）：wheel /
    *  滚动条 mousedown / 滚动键 keydown / touchstart 任一到达即用户接管，
    *  pending 立即作废。监听挂 mainEl（跨 render 稳定），与补放观察同生
@@ -745,12 +750,12 @@ export class SettingsPageView {
   }
 
   /** #596 主区 scroll 事件：标记窗口内的程序性事件（值吻合锚点）消费窗口；
-   *  武装窗口内的非锚点 scroll = 用户接管（输入信号 + 滚动事实，见
-   *  armUserScrollSignal）——清 pending、上报实测（用户位置）；其余非锚点
-   *  scroll 是布局钳位（内容收缩下调 scrollTop 等程序现象，无输入信号或
-   *  超出窗口），pending 保留、代报持续（评审 VsidianPR598-001：用户接管
-   *  必须同时有输入与滚动事实）；pending 期间的 reportUiState 以代报值
-   *  防宿主记忆被钳位值洗掉 */
+   *  已武装（有输入信号）且处于布局静默期（USER_SCROLL_LAYOUT_QUIET_MS 内
+   *  无 RO 布局通知）的非锚点 scroll = 用户接管——清 pending、上报实测
+   *  （用户位置）；其余非锚点 scroll 归因布局（收缩钳位、scroll anchoring
+   *  等程序现象），pending 保留、代报持续（评审 VsidianPR598-001 R3/R5：
+   *  「有输入且有滚动事实且布局安静」三者齐备才算用户接管）；pending 期间
+   *  的 reportUiState 以代报值防宿主记忆被钳位值洗掉 */
   private onMainScroll(): void {
     if (this.programmaticScrollAnchor !== null && this.mainEl &&
         Math.round(this.mainEl.scrollTop) === this.programmaticScrollAnchor) {
@@ -759,8 +764,10 @@ export class SettingsPageView {
       return
     }
     this.programmaticScrollAnchor = null
-    if (this.userScrollArmedAt !== null &&
-        performance.now() - this.userScrollArmedAt <= USER_SCROLL_ARM_WINDOW_MS) {
+    // 静默期判定：从未观察到布局变化（0）视为远古——测试进程早期
+    // performance.now() 很小，不能把「从未变化」误判成「刚变化」
+    if (this.userScrollArmed && (this.lastLayoutChangeAt === 0 ||
+        performance.now() - this.lastLayoutChangeAt > USER_SCROLL_LAYOUT_QUIET_MS)) {
       this.clearPendingScroll() // 幂等：pending 已空时仅清武装与监听
       this.reportUiState()
       return
@@ -769,7 +776,7 @@ export class SettingsPageView {
   }
 
   /** #596 清 pending 并卸载补放观察、用户滚动信号与武装——三条件失效
-   *  （①补放成功 ②用户接管：武装窗口内的非锚点 scroll，见 onMainScroll
+   *  （①补放成功 ②用户接管：布局静默期的非锚点 scroll，见 onMainScroll
    *  ③切换分页）与 render 头部清理、dispose 共用出口 */
   private clearPendingScroll(): void {
     this.pendingScroll = null
@@ -777,24 +784,24 @@ export class SettingsPageView {
     this.pendingObserver = null
     this.userScrollSignalDisposer?.()
     this.userScrollSignalDisposer = null
-    this.userScrollArmedAt = null
+    this.userScrollArmed = false
+    this.lastLayoutChangeAt = 0
   }
 
-  /** #596 用户滚动接管信号（评审 VsidianPR598-001，R3 收窄）：输入信号只
-   *  「武装」接管判定（记时间戳），不作废 pending——作废的实际触发是武装
-   *  窗口内的非锚点 scroll 事件（onMainScroll）。「有输入且有滚动事实」才
-   *  算用户接管：控件键盘（搜索框空格/Home、下拉框方向键）、已取消
-   *  （preventDefault）的 keydown/wheel、触摸点击都不产生主区滚动，不得
-   *  丢恢复目标：
-   *  - wheel / touchstart：武装（是否接管看随后有无滚动事实）；
-   *  - mousedown（target 为 mainEl 自身，滚动条交互）：武装——内容点击的
-   *    target 是子元素，不算；
-   *  - keydown（滚动键族且 target 非表单控件/contenteditable）：武装。
+  /** #596 用户滚动接管信号（评审 VsidianPR598-001，R3/R5 收窄）：输入信号
+   *  只「武装」接管判定（布尔，无过期），不作废 pending——作废的实际触发
+   *  是「已武装 + 布局静默期的非锚点 scroll」（onMainScroll），scroll 的
+   *  归因由布局静默判定承担，不由输入与滚动的时间接近性承担：
+   *  - 控件键盘（搜索框空格/Home、下拉框方向键）、已取消（preventDefault）
+   *    的 keydown/wheel、触摸点击（tap）：无滚动事实，不作废；
+   *  - 取消输入/已结束 tap 之后短窗内的布局钳位 scroll：RO 先行通知布局
+   *    变化（静默期不满足），不作废；
+   *  - 长按滚动条/触摸后才开始移动：armed 无过期，移动的 scroll 照常接管。
    *  幂等：已挂载时跳过（render 尾重挂不重复） */
   private armUserScrollSignal(): void {
     if (this.userScrollSignalDisposer !== null || !this.mainEl) return
     const main = this.mainEl
-    const arm = (): void => { this.userScrollArmedAt = performance.now() }
+    const arm = (): void => { this.userScrollArmed = true }
     const onMouseDown = (event: MouseEvent): void => {
       if (event.target === main) arm()
     }
@@ -818,18 +825,28 @@ export class SettingsPageView {
     }
   }
 
-  /** #596 挂 pending 与补放观察：ResizeObserver 观察 listEl（内容容器——
-   *  mainEl 盒高不随内容变，观察无效；渐进起高天然多次回调直至够高）；
-   *  无 ResizeObserver 环境（jsdom 等）按 hoverPopup 先例特性检测回退——
-   *  只挂 pending（代报仍防记忆洗掉），补放交由真实浏览器路径 */
+  /** #596 挂 pending 与补放观察：ResizeObserver 观察 listEl（内容起高/收缩）
+   *  与 mainEl（窗口缩放改盒高引发的钳位）——mainEl 盒高不随内容变但随
+   *  视口变，两端都在观察面上才能给 scroll 归因提供完整的布局变化信号
+   *  （见 lastLayoutChangeAt）。初次观察通知是布局快照不算变化（真浏览器
+   *  observe 后立即回调一次，若计入会污染挂载后首拍的静默期）。渐进起高
+   *  天然多次回调直至够高；无 ResizeObserver 环境（jsdom 等）按 hoverPopup
+   *  先例特性检测回退——只挂 pending（代报仍防记忆洗掉），补放交由真实
+   *  浏览器路径 */
   private armPendingScroll(scroll: number): void {
     this.pendingScroll = scroll
     this.pendingObserver?.disconnect()
     this.pendingObserver = null
     this.armUserScrollSignal()
-    if (typeof ResizeObserver === 'function' && this.listEl) {
-      const observer = new ResizeObserver(() => this.tryApplyPendingScroll())
+    if (typeof ResizeObserver === 'function' && this.listEl && this.mainEl) {
+      let firstFire = true
+      const observer = new ResizeObserver(() => {
+        if (firstFire) firstFire = false
+        else this.lastLayoutChangeAt = performance.now()
+        this.tryApplyPendingScroll()
+      })
       observer.observe(this.listEl)
+      observer.observe(this.mainEl)
       this.pendingObserver = observer
     }
   }

@@ -1534,7 +1534,11 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
     expect(main.scrollTop).toBe(50)
     const observer = observers.at(-1)!
-    expect(observer.observed).toEqual([parent.querySelector('.vsidian-settings-list')])
+    // 观察面含内容容器 listEl（起高/收缩）与 mainEl（窗口缩放钳位）——
+    // 布局变化信号两端都在（scroll 归因的布局静默判定，见 onMainScroll）
+    expect(observer.observed).toEqual([
+      parent.querySelector('.vsidian-settings-list'), parent.querySelector('.vsidian-settings-main'),
+    ])
     // 渐进起高：首拍仍不足（最大可滚 70 < 120）→ 继续观察
     geometry.scrollHeight = 320
     observer.fire()
@@ -1582,7 +1586,8 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     const observer = observers.at(-1)!
     // 三类「有输入信号、无滚动事实」：已取消（preventDefault）的滚轮与空格、
     // 触摸点击（tap）——主区未滚动，不得丢恢复目标或洗掉宿主记忆
-    main.dispatchEvent(new Event('wheel'))
+    main.addEventListener('wheel', (e) => e.preventDefault(), { once: true, capture: true })
+    main.dispatchEvent(new WheelEvent('wheel', { cancelable: true }))
     main.dispatchEvent(new Event('touchstart'))
     main.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
     expect(observer.disconnected).toBe(false)
@@ -1591,6 +1596,54 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     geometry.scrollHeight = 2000
     observer.fire()
     expect(main.scrollTop).toBe(120)
+  })
+
+  it('armed 输入 + 布局静默窗内的收缩钳位不作废（R5：取消输入/tap 后的布局滚动不丢恢复目标）', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知（布局快照，不算布局变化）
+    // 取消的滚轮与触摸点击（tap）武装了接管，但随后内容收缩钳位（RO 先行
+    // 通知布局变化）——scroll 处于布局静默窗内，归因布局不作废
+    main.addEventListener('wheel', (e) => e.preventDefault(), { once: true, capture: true })
+    main.dispatchEvent(new WheelEvent('wheel', { cancelable: true }))
+    main.dispatchEvent(new Event('touchstart'))
+    geometry.scrollHeight = 270 // 收缩（max 塌到 20）：布局变化通知 → 钳位 scroll
+    observer.fire()
+    main.scrollTop = 20
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // 钳位不接管：pending 保留
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 代报持续
+    // 再起高：照常补放恢复值
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(120)
+  })
+
+  it('武装不因时间流逝失效（R5：长按滚动条/触摸 600ms 后才移动仍接管）：armed 持续到滚动事实到达', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知
+    // 按住滚动条（mousedown target=main）后停顿任意久（模拟 600ms）再拖动：
+    // 期间无布局变化，滚动到达时处于布局静默期——armed 不设过期窗口，照常接管
+    main.dispatchEvent(new MouseEvent('mousedown'))
+    main.scrollTop = 40 // 用户拖动到 40
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 40 })
+    // 其后内容起高也不补放：不覆盖用户滚动位置
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(40)
   })
 
   it('布局钳位（无用户输入的内容收缩）不作废 pending：代报持续防洗，再起高后照常补放（评审 VsidianPR598-001）', () => {
