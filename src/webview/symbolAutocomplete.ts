@@ -58,6 +58,7 @@ import { getCompositionSelectionSnapshot } from './symbolCompositionState'
 import { externalSync, builtinEditOrigin, symbolRawInput } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
+import { blankRowInputPlan } from './tableEditing'
 import { chainAt } from '../shared/markdownDoc'
 
 /** 代码上下文节点（含边界标记）：CodeMark/CodeInfo 归入围栏内部口径 */
@@ -259,6 +260,26 @@ const autocloseInputFilter = EditorState.transactionFilter.of((tr) => {
   }
   if (!shouldAutoclose(entry, ctx)) {
     return tr
+  }
+  // 表格空白行首笔（评审 002）：tableEditing 的 normalizeBlankRowInput
+  // 在本 filter 之后的链上重建事务并丢弃 effect 载体——兜底 attempt 拿
+  // 不到 pending、闭合符丢失（终态 | | | (|）。此分支维持 #597 前的原子
+  // 改写：规范化以 open+close 成对内容进行，与既有行为逐字一致（同
+  // 「闭合越过分支保持 filter 内改写」的例外模式；blankRowInputPlan 纯
+  // 函数预判，不依赖 tableEditing filter 的执行序）
+  if (blankRowInputPlan(state, insertion.from, insertion.from, ch)) {
+    return {
+      changes: { from: insertion.from, insert: entry.open + entry.close },
+      selection: EditorSelection.cursor(insertion.from + entry.open.length),
+      effects: addAutoclosePair.of({
+        from: insertion.from,
+        to: insertion.from + entry.open.length + entry.close.length,
+        open: entry.open,
+        close: entry.close,
+      }),
+      annotations: keepEvent,
+      scrollIntoView: tr.scrollIntoView,
+    }
   }
   // #597 方案 3：放行原始单字符插入（不再原子改写）——链驱动以原始形态
   // （inputText 单字符）恰一次驱动，内置兜底在微任务时点补闭合（M1 链

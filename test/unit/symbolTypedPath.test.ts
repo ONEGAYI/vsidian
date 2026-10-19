@@ -164,6 +164,17 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     expect(view.state.doc.toString()).toBe('中（\n')
   })
 
+  it('表格空白行首笔补全照常：blankRow 规范化链上兜底载体不丢（评审 002）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { view } = setup(text)
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    // 期望与 #597 前（原子改写经 blankRow 规范化）逐字一致：
+    // 红形态 | | | (|（normalizeBlankRowInput 重建事务丢 effect 载体，兜底不发生）
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | ()|\n')
+  })
+
   it('同步行为产出保留同开符号与光标时补全兜底让位：不重复补闭合（评审 001）', async () => {
     const { view } = setup('中\n', (input, v) => {
       // 同步行为产出保留开符号与光标位置（如智能括号组件补上闭合）：
