@@ -1864,8 +1864,30 @@ export class LiveEditorInstance {
     const hitMask = view.state.selection.ranges.map((range) =>
       range.empty && specs.some((c) => range.head >= c.from && range.head <= c.to))
     const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
-    const selection = mapped.ranges.some((range) => range.from > range.to)
-      ? EditorSelection.create(mapped.ranges.map((range) =>
+    // 评审 004（PR #599）：整段替换把区间**内部**的原文字标坍缩到区间
+    // 边界（CM6 映射语义）。旧文本是新文本的子串（#597 键入路径符号
+    // 包裹/补全的净变更保序保留原文：ord→【ord】）时按子串锚定补偿——
+    // 原文内字符位置逐字保留（另一实例 wo|rd 平移到【o|rd】而非坍到
+    // 段首）；非子串（真替换，无字符身份可锚）维持 CM6 映射行为
+    const anchoredRanges = mapped.ranges.map((range, i) => {
+      const old = view.state.selection.ranges[i]!
+      if (!old.empty) {
+        return range
+      }
+      const spec = specs.find((c) => c.from !== c.to && old.head > c.from && old.head < c.to)
+      if (!spec) {
+        return range
+      }
+      const oldText = view.state.doc.sliceString(spec.from, spec.to)
+      const subAt = spec.insert.indexOf(oldText)
+      if (subAt < 0) {
+        return range
+      }
+      return EditorSelection.cursor(spec.from + subAt + (old.head - spec.from))
+    })
+    const anchored = anchoredRanges.some((range, i) => range !== mapped.ranges[i])
+    const selection = anchored || mapped.ranges.some((range) => range.from > range.to)
+      ? EditorSelection.create(anchoredRanges.map((range) =>
         range.from > range.to ? EditorSelection.range(range.to, range.from) : range),
       mapped.mainIndex)
       : undefined
