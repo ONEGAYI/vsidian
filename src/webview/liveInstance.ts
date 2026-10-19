@@ -103,6 +103,18 @@ export const externalSync = Annotation.define<boolean>()
  *  （addonId/opId），作者请求不可携带——不能冒充其他组件 */
 export const addonEditOriginTag = Annotation.define<{ origins: EditOriginMeta[] }>()
 
+/** #595 内置程序化符号事务标记：#123 提交补全 / #124 包裹重建在
+ *  compositionend 后微任务 attempt 派发的事务携带。这些事务是用户输入
+ *  （含 IME 定稿）的内置加工——行为链已由原始输入（键入路径的
+ *  beforeinput 拦截事务无 input.type userEvent，天然不驱动；IME 定稿的
+ *  #593 补驱动）以干净形态驱动过一次，内置加工事务不重复驱动（防双
+ *  驱动：包裹展开形态 inputText='【ord】' / 补全闭合 inputText='】' 不
+ *  外泄给组件）。语义与另两个注解互不复用：externalSync 会抑制出站回发
+ *  （打破「一次补全/包裹与组合净输入合并单笔出站」），addonEditOriginTag
+ *  向外发请求注入 origin 元数据并强制开新撤销段——本注解只退出行为链
+ *  驱动面，出站合并与撤销分段语义均不变 */
+export const builtinEditOrigin = Annotation.define<boolean>()
+
 /** #400 行为链驱动的 delete userEvent 白名单：字符/选区/行删除（用户
  *  删除意图）；delete.dedent（Shift+Tab 降缩进）属缩进命令族、Tab 家族
  *  情境链语义（不新增可绑定命令绕过），不纳入 */
@@ -1145,7 +1157,12 @@ export class LiveEditorInstance {
    * - 代码上下文：frontmatter/块级代码（inCodeContext，#123/#124 同
    *   口径）排除——行为只作用于正文；
    * - 程序化事务排除：外部同步（externalSync）与 SDK 修饰
-   *   （addonEditOriginTag）不触发（防第二写入口/递归）。
+   *   （addonEditOriginTag）不触发（防第二写入口/递归）；内置程序化符号
+   *   事务（builtinEditOrigin，#595——#123 补全/#124 包裹的 attempt
+   *   dispatch）同样不触发：IME 定稿的驱动已由 #593 补驱动以干净形态
+   *   （原始 inputText/replaced）完成，内置加工事务不重复驱动（展开/
+   *   闭合形态不外泄给组件；键入路径同字符经 beforeinput 拦截无
+   *   input.type userEvent 天然不驱动——两路径归一为只驱动一次）。
    * 触发面：userEvent 以 input.type 开头（普通键入；paste/drop/undo 不
    * 驱动）+ delete 白名单（backward/forward/selection/cut/line——#400；
    * paste/drop/undo 与 dedent 等命令族删除仍不驱动）。
@@ -1154,7 +1171,7 @@ export class LiveEditorInstance {
     if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined || !tr.docChanged) {
       return
     }
-    if (tr.annotation(externalSync) || tr.annotation(addonEditOriginTag)) {
+    if (tr.annotation(externalSync) || tr.annotation(addonEditOriginTag) || tr.annotation(builtinEditOrigin)) {
       return
     }
     const userEvent = tr.annotation(Transaction.userEvent)
