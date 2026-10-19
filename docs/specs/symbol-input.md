@@ -96,6 +96,7 @@ CM6 keymap 与 transactionFilter 的顺序语义相反——keymap 按扩展数�
 - **出站强制暂缓**：filter 放行时以重指定附注解（`symbolRawInput`，与 `builtinEditOrigin` 并列），`recordLocalChangeSet` 见注解走暂缓分支（不立即出站）；兜底触碰未确认区并入同段——维持「一次补全/包裹 = 一笔 edit.request = 一条宿主撤销记录」。分段语义沿用：无停顿、无光标移动 → 同段单笔。
 - **微任务序契约**：链驱动（M1）先启动、内置兜底（M3）后执行（ADR-0020 裁决一沿用到键入路径）；同步类行为以组件产出为终态，异步类行为内置先落地、修饰后至覆盖（既有已知边界同型继承）。SelectKey 管线对 `selections>1` 让位（既有门），多 range 包裹完全由内置兜底承担。
 - **驱动面契约**：键入符号字符恰驱动一次，`inputText` 为原始键入字符（`'('`）、`replaced` 为被替换选区——契约语义字段变更（兼容性事件），catalog/developer-guide/CHANGELOG-API 同步、基线显式重锚；不新增开关或兼容模式（用户裁决）。`autoclosePairs` 登记（越过/空对退格依据）移到 attempt：与下一按键之间只隔微任务，事件循环保证不可达竞态；两笔事务在同一事件循环任务内完成（微任务先于渲染），中间态不可见。
+- **例外：表格空白行规范化接管域（用户裁决，评审 002）**：键入命中表格空白行首笔规范化（`blankRowInputPlan`——补全 filter 放行前预判）时**维持 #597 前的原子改写**（open+close 成对插入、经 `normalizeBlankRowInput` 整行重建）——规范化重建事务会丢弃 effect 载体（兜底不发生），此场景补全以成对内容进规范化、终态与 #597 前逐字一致（`| | | ()|`）。该场景 `inputText` 为规范化整行载荷而非原始单字符（base 同为改写形态，无回归）；「原始输入 → 行为链 → 内置兜底」对该接管域的完整统一转 [#600](https://github.com/ONEGAYI/vsidian/issues/600)，不泛化为所有表格例外、不新增开关。
 
 ### 设置开关
 
