@@ -95,6 +95,14 @@ async function scenario(name, { doc, cursor }, run) {
 const read = (page) => page.evaluate(() => window.readEditor())
 const popup = (page) => page.evaluate(() => window.readPopup())
 
+/** #597：`[[` 起始的键入序列命中符号补全的 symbolRawInput 强制暂缓——
+ *  首笔 edit.request 要等 flush 宏任务才出站。确认类用例在 Enter 前先等
+ *  键入段出站（deferredLocal 发出即清），避免撞 F3 未出站门（确认路径
+ *  消费按键不出 accept——时序赛跑非确定）；F3 门自身交互由「快速输入
+ *  未确认窗口」专测覆盖，不经本助手 */
+const awaitTypedOutbound = (page) => page.waitForFunction(() =>
+  window.hostMessages().some((m) => m.kind === 'edit.request'))
+
 try {
   // ---- 触发与初始高亮 ----
   await scenario('连续两个 [ 出现候选；空查询无高亮', { doc: '', cursor: 0 }, async (page) => {
@@ -773,6 +781,7 @@ try {
   await scenario('无 ID 块 Enter：出站 accept → 宿主补写回包 → 写入并回 linked', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await awaitTypedOutbound(page)
     await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -798,6 +807,7 @@ try {
   await scenario('无 ID 块接受失败：toast 提示并保留输入', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await awaitTypedOutbound(page)
     await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -815,6 +825,7 @@ try {
   await scenario('同文档无 ID 块：标记插入并入同一笔确认事务（一笔受控操作）', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await awaitTypedOutbound(page)
     await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -842,6 +853,7 @@ try {
   await scenario('sameDoc 确认合笔单笔撤销：Ctrl+Z 一步同退链接与标记，redo 同复（#503）', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await awaitTypedOutbound(page)
     await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -882,6 +894,7 @@ try {
   await scenario('F4：target-changed 失败不 toast——重发查询刷新版本基准，重试即成功', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await awaitTypedOutbound(page)
     await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
     const queriesBefore = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length)
     await page.keyboard.press('ArrowDown')
@@ -910,6 +923,7 @@ try {
   await scenario('F8：sameDoc 合笔标记在字段上方——光标平移到锚点末（不落链接内部）', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await awaitTypedOutbound(page)
     await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -948,10 +962,14 @@ try {
   })
 
   await scenario('F3：快速输入未确认窗口 Enter 消费不出站 accept——推进出站并重发查询，落定后重按即接受', { doc: '', cursor: 0 }, async (page) => {
-    // 关闭 ack 扮演：模拟「前一笔 ack 往返慢」——连续键入的后续笔进入
-    // 暂缓集（宿主收不到、whenEditsSettled 也不等），构成 F3 未出站窗口
+    // 关闭 ack 扮演：模拟「前一笔 ack 往返慢」——构成 F3 未出站窗口。
+    // #597 构造适配：符号键入自带 flush 宏任务兜底，纯符号序列的暂缓段
+    // 会在键入批后被发走（窗口与 Enter 赛跑非确定）。前置普通字符 `x`
+    // 占住在途位（立即出站、慢 ack 不确认），`[` 起的强制暂缓段被出站
+    // 串行化守卫（在途未确认时留守暂缓集）稳定拦截——deferredLocal
+    // 恒非空直至 ack 收敛，窗口确定性成立
     await page.evaluate(() => window.setAutoAck(false))
-    await page.keyboard.type('[[../资料/方案.md#^')
+    await page.keyboard.type('x[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
     await page.evaluate((items) => window.respondBlockQuery(items, 7), [blockNoId()])
     const queriesBefore = await page.evaluate(() => window.hostMessages().filter((m) => m.kind === 'wikilink.block.query').length)
@@ -980,13 +998,14 @@ try {
     assert.equal(acc.targetVersion, 9, '以刷新后的版本基准出站')
     await page.evaluate(() => window.respondBlockAccept({ ok: true, blockId: 'f3win1', alias: '方案' }))
     const after = await read(page)
-    assert.equal(after.text, '[[../资料/方案.md#^f3win1|方案]]', '落定后接受成功')
+    assert.equal(after.text, 'x[[../资料/方案.md#^f3win1|方案]]', '落定后接受成功')
     assert.equal((await popup(page)).open, false)
   })
 
   await scenario('接受在途 Esc：关闭候选并出站 cancel（宿主守卫撤回）', { doc: '', cursor: 0 }, async (page) => {
     await page.keyboard.type('[[../资料/方案.md#^')
     await page.waitForFunction(() => window.lastBlockQuery() !== undefined)
+    await awaitTypedOutbound(page)
     await page.evaluate((items) => window.respondBlockQuery(items), [blockNoId()])
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
