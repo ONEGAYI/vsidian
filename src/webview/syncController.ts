@@ -78,9 +78,9 @@ import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
 // 内置程序化符号事务标记）与 symbolRawInput（#597 键入路径符号原始
 // 事务标记）同面 re-export——symbolAutocomplete/symbolWrap 的既有导入
 // 路径同款
-import { externalSync, builtinEditOrigin, symbolRawInput, LiveEditorInstance, type LiveEditorInstanceDeps } from './liveInstance'
+import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch, LiveEditorInstance, type LiveEditorInstanceDeps } from './liveInstance'
 
-export { externalSync, builtinEditOrigin, symbolRawInput }
+export { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch }
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,

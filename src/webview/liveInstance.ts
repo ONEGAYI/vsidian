@@ -15,7 +15,7 @@
 // 缓冲）随本模块自 syncController 迁入，正文见各方法内注释；协议约定
 // webview 全程 LF 坐标。本票为准备性 expand 改造：不接入引用目标 B 的
 // 生产写端口，不引入独立 history（撤销权威仍在宿主 TextDocument）。
-import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, Transaction, type Extension, type Text } from '@codemirror/state'
+import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateField, Transaction, type Extension, type Text } from '@codemirror/state'
 import { EditorView, ViewPlugin, dropCursor, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
 import { addonInstanceIdField, setAddonInstanceId } from './addonViewIdentity'
@@ -131,6 +131,18 @@ export const builtinEditOrigin = Annotation.define<boolean>()
  *  驱动（inputText='('，不再是展开形态 '()'）。本注解只改出站时点，
  *  驱动、撤销分段与未确认追踪语义均不变 */
 export const symbolRawInput = Annotation.define<boolean>()
+
+/** #597 键入路径兜底让位的组件修饰纪元（评审 001 续修）：组件事务
+ *  （addonEditOriginTag）使纪元 +1；符号 pending 载体携带创建时纪元，
+ *  attempt 校验纪元未变——组件任何改写（含净长度为零的等长替换，
+ *  docLength 基准拦不住的形态）都失效让位。StateField 而非注解：
+ *  attempt 在微任务时点要回看「自 filter 放行以来」的窗口，注解只
+ *  在当笔事务上。与 docLength 双基准并存：纪元管「组件是否动过」，
+ *  长度管「文档是否被动过」（非组件路径） */
+export const addonEditEpoch = StateField.define<number>({
+  create: () => 0,
+  update: (value, tr) => (tr.annotation(addonEditOriginTag) !== undefined ? value + 1 : value),
+})
 
 /** #400 行为链驱动的 delete userEvent 白名单：字符/选区/行删除（用户
  *  删除意图）；delete.dedent（Shift+Tab 降缩进）属缩进命令族、Tab 家族
@@ -1864,26 +1876,35 @@ export class LiveEditorInstance {
     const hitMask = view.state.selection.ranges.map((range) =>
       range.empty && specs.some((c) => range.head >= c.from && range.head <= c.to))
     const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
-    // 评审 004（PR #599）：整段替换把区间**内部**的原文字标坍缩到区间
-    // 边界（CM6 映射语义）。旧文本是新文本的子串（#597 键入路径符号
-    // 包裹/补全的净变更保序保留原文：ord→【ord】）时按子串锚定补偿——
-    // 原文内字符位置逐字保留（另一实例 wo|rd 平移到【o|rd】而非坍到
-    // 段首）；非子串（真替换，无字符身份可锚）维持 CM6 映射行为
+    // 评审 004（PR #599）：整段替换把区间**内部**的原文字标/选区端点
+    // 坍缩到区间边界（CM6 映射语义）。旧文本是新文本的子串（#597 键入
+    // 路径符号包裹/补全的净变更保序保留原文：ord→【ord】）时按子串锚定
+    // 补偿——原文内字符位置逐字保留（另一实例 wo|rd 平移到【o|rd】而非
+    // 坍到段首）；非子串（真替换，无字符身份可锚）维持 CM6 映射行为。
+    // R3 续修：锚定值是批内坐标，须手算前序段累计净位移（cs.mapPos 对
+    // 区间内部位置同样坍边界，不可用）；非空选区两端各自锚定、无锚端
+    // 保留 CM6 映射端，方向随 anchor/head 语义保留
+    const anchorPos = (pos: number): number | null => {
+      let shift = 0
+      for (const c of specs) {
+        if (c.from !== c.to && pos > c.from && pos < c.to) {
+          const oldText = view.state.doc.sliceString(c.from, c.to)
+          const subAt = c.insert.indexOf(oldText)
+          return subAt < 0 ? null : c.from + subAt + (pos - c.from) + shift
+        }
+        if (c.to <= pos) {
+          shift += c.insert.length - (c.to - c.from)
+        }
+      }
+      return null
+    }
     const anchoredRanges = mapped.ranges.map((range, i) => {
       const old = view.state.selection.ranges[i]!
-      if (!old.empty) {
-        return range
-      }
-      const spec = specs.find((c) => c.from !== c.to && old.head > c.from && old.head < c.to)
-      if (!spec) {
-        return range
-      }
-      const oldText = view.state.doc.sliceString(spec.from, spec.to)
-      const subAt = spec.insert.indexOf(oldText)
-      if (subAt < 0) {
-        return range
-      }
-      return EditorSelection.cursor(spec.from + subAt + (old.head - spec.from))
+      const anchor = anchorPos(old.anchor) ?? range.anchor
+      const head = anchorPos(old.head) ?? range.head
+      return anchor === range.anchor && head === range.head
+        ? range
+        : EditorSelection.range(anchor, head)
     })
     const anchored = anchoredRanges.some((range, i) => range !== mapped.ranges[i])
     const selection = anchored || mapped.ranges.some((range) => range.from > range.to)
@@ -2967,6 +2988,7 @@ export class LiveEditorInstance {
       // 成本；两组 filter 互斥，同一时刻至多一个 attempt 在途。
       // filter/keymap/domHandler 的装配序不受影响（仍在符号组内，符号组
       // 与 tableEditing 的相对顺序未动）。
+      addonEditEpoch,
       typedAutocloseScheduler,
       typedWrapScheduler,
       // 撤销/重做转发 keymap（#402 起提升为 Prec.highest 保留键闸）：

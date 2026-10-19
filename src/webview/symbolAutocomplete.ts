@@ -55,7 +55,7 @@ import { EditorSelection, EditorState, StateEffect, StateField, Transaction } fr
 import { EditorView, keymap, type Command } from '@codemirror/view'
 import { findAutocloseEntry, shouldAutoclose } from '../shared/symbols'
 import { getCompositionSelectionSnapshot } from './symbolCompositionState'
-import { externalSync, builtinEditOrigin, symbolRawInput } from './syncController'
+import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
 import { blankRowInputPlan } from './tableEditing'
@@ -90,10 +90,13 @@ interface TypedAutoclosePending {
   readonly close: string
   /** 长度基准（放行事务后的文档长度）：行为链任何净改写必破坏它——
    *  同步组件产出保留开符号与光标位置时（评审 001），追加式校验的
-   *  「光标紧邻 + 左邻字符」两项都仍满足、无法分辨，长度基准是
-   *  「原始事务后无人触碰」的唯一可验证证据；正常嵌套（在既有闭合
-   *  符内键入）以当次事务后长度为基准，不受既有文本影响 */
+   *  「光标紧邻 + 左邻字符」两项都仍满足、无法分辨；正常嵌套（在
+   *  既有闭合符内键入）以当次事务后长度为基准，不受既有文本影响 */
   readonly docLength: number
+  /** 组件修饰纪元（评审 001 续）：等长改写（净长度为零）不破坏长度
+   *  基准——「净长度为零」不等于「未修改」，纪元是组件触碰的唯一
+   *  可辨证据 */
+  readonly editEpoch: number
 }
 
 const pendingTypedAutoclose = StateEffect.define<TypedAutoclosePending>()
@@ -290,7 +293,7 @@ const autocloseInputFilter = EditorState.transactionFilter.of((tr) => {
   return {
     changes: tr.changes,
     selection: tr.selection,
-    effects: pendingTypedAutoclose.of({ pos, open: entry.open, close: entry.close, docLength: tr.newDoc.length }),
+    effects: pendingTypedAutoclose.of({ pos, open: entry.open, close: entry.close, docLength: tr.newDoc.length, editEpoch: state.field(addonEditEpoch, false) ?? 0 }),
     annotations: [...(keepEvent ? [keepEvent] : []), symbolRawInput.of(true)],
     scrollIntoView: tr.scrollIntoView,
   }
@@ -399,8 +402,9 @@ function attemptTypedAutoclose(view: EditorView, pending: TypedAutoclosePending)
   const pos = selection.main.head
   if (pos !== pending.pos + pending.open.length ||
       state.sliceDoc(pos - pending.open.length, pos) !== pending.open ||
-      state.doc.length !== pending.docLength) {
-    return // 原始插入已被链改写 / 光标已移动 / 文档被净改写（评审 001）：让位
+      state.doc.length !== pending.docLength ||
+      (state.field(addonEditEpoch, false) ?? 0) !== pending.editEpoch) {
+    return // 原始插入已被链改写 / 光标已移动 / 文档被净改写 / 组件已修饰（含等长，评审 001 续）：让位
   }
   view.dispatch({
     changes: { from: pos, insert: pending.close },

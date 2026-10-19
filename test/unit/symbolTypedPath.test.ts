@@ -222,6 +222,27 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     expect(view.state.doc.sliceString(sel.main.anchor, sel.main.head)).toBe('ord')
   })
 
+  it('同步行为等长改写时补全兜底让位：净长度为零不等于未修改（评审 001 续）', async () => {
+    const { view } = setup('中 \n', (input, v) => {
+      // 组件把 ( 后的空格等长替换为闭符）：docLength 基准不破坏——
+      // 「净长度为零」不等于「未修改」，组件修饰纪元（addonEditEpoch）
+      // 是唯一可辨证据
+      if (input.inputText === '(') {
+        v.dispatch({
+          changes: { from: 2, to: 3, insert: ')' },
+          annotations: addonEditOriginTag.of({
+            origins: [{ addonId: 'pub.demo', opId: 'op-5', undo: 'atomic' }],
+          }),
+        })
+      }
+    })
+    view.dispatch({ selection: { anchor: 1 } })
+    view.dispatch({ changes: { from: 1, insert: '(' }, selection: { anchor: 2 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    // 组件产出中() 为终态：内置不得再补 )（红：当前实得中())）
+    expect(view.state.doc.toString()).toBe('中()\n')
+  })
+
   it('同步行为产出同前缀重建时包裹兜底让位：不回退组件已取代的原文（评审 001）', async () => {
     const { view } = setup('word\n', (input, v) => {
       // 同步行为以「同前缀改写」重建（区间首字符仍是 【、光标仍在 2）：

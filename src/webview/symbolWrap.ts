@@ -56,7 +56,7 @@ import {
 } from '../shared/symbols'
 import { planSelectionWrap } from '../shared/symbolWrap'
 import { inCodeContext } from './symbolAutocomplete'
-import { builtinEditOrigin, symbolRawInput } from './syncController'
+import { builtinEditOrigin, symbolRawInput, addonEditEpoch } from './syncController'
 import {
   getCompositionSelectionSnapshot,
   setCompositionSelectionSnapshot,
@@ -79,8 +79,11 @@ interface TypedWrapPending {
   readonly inCode: boolean
   /** 长度基准（放行事务后的文档长度）：同步组件以同前缀形态改写（区间
    *  首字符仍是键入符、光标位置不变——评审 001）时占据/选区校验都仍
-   *  满足、无法分辨，长度基准是「无人净改写」的唯一可验证证据 */
+   *  满足、无法分辨，长度基准是「无人净改写」的可验证证据 */
   readonly docLength: number
+  /** 组件修饰纪元（评审 001 续）：等长改写不破坏长度基准，纪元是组件
+   *  触碰的唯一可辨证据（与补全 pending 同款双基准） */
+  readonly editEpoch: number
   /** 键入前各 range 的原文段（LF 坐标，升序与选区一致） */
   readonly segments: readonly { from: number; to: number; text: string }[]
 }
@@ -197,6 +200,7 @@ const selectionWrapFilter = EditorState.transactionFilter.of((tr) => {
       close: entry.close,
       inCode,
       docLength: tr.newDoc.length,
+      editEpoch: state.field(addonEditEpoch, false) ?? 0,
       segments: ranges.map((range) => ({ from: range.from, to: range.to, text: state.doc.sliceString(range.from, range.to) })),
     }),
     annotations: [...(event ? [Transaction.userEvent.of(event)] : []), symbolRawInput.of(true)],
@@ -401,8 +405,9 @@ function attemptTypedWrap(view: EditorView, pending: TypedWrapPending): void {
   // 形态校验：选区 range 数与段一致、全部为追加式光标（head === 段起点
   // + ch 长度）、各段区间恰被键入字符占据
   const selection = state.selection
-  if (selection.ranges.length !== segments.length || state.doc.length !== pending.docLength) {
-    return // 选区结构已变 / 文档被净改写（评审 001 同前缀改写）：让位
+  if (selection.ranges.length !== segments.length || state.doc.length !== pending.docLength ||
+      (state.field(addonEditEpoch, false) ?? 0) !== pending.editEpoch) {
+    return // 选区结构已变 / 文档被净改写 / 组件已修饰（含等长，评审 001 续）：让位
   }
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]!
