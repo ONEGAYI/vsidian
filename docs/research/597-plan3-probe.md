@@ -1,6 +1,6 @@
 # #597 方案 3 验证报告与实施方案（原始输入 → 行为链 → 内置兜底）
 
-> 状态：已批准实施（2026-10-19），实施随 #597。
+> 状态：已批准实施（2026-10-19），实施随 #597。实施方案第 1/4 条两处草案细节经实施实证修正——暂存载体改 `pendingTypedAutoclose`/`pendingTypedWrap` StateEffect 随事务流动（filter 无 view 句柄，per-view WeakMap 不可达）；`updateListener` 按扩展数组**正序**执行（「靠后者先执行」是 filter 序律，草案混同了两者），scheduler 改装配于主簿记 listener 之后。以下改动清单已按实证勘误，语义以 symbol-input.md「键入路径重排（#597 落档）」节为准。
 > 裁决轮：2026-10-19，用户裁定「当前保留方案 1、归一化目标方案 3、不用方案 2 过渡」；
 > EasyTyping #64 先行 IME 接入联调，不等 #597。
 > 探针代码：vsidian `verify/597-plan3` 分支 `test/unit/plan3Probe.test.ts`（5 例）、
@@ -62,10 +62,10 @@ filter 改写 () 一笔事务        filter 放行原始 ( 一笔事务
 
 ### 改动清单
 
-1. **`symbolAutocomplete.ts` `autocloseInputFilter` 补全分支**：不再改写，放行原始事务；检出「注册表命中的 open 键入」时暂存兜底材料（per-view，形如 `symbolCompositionState`；含 `shouldAutoclose` 判定用的 ctx——attempt 侧不重算）。**闭合越过分支保持 filter 内改写**（零 doc 变更、不进驱动面与出站，无坐标问题）。
+1. **`symbolAutocomplete.ts` `autocloseInputFilter` 补全分支**：不再改写，放行原始事务；检出「注册表命中的 open 键入」时暂存兜底材料（**实施实证修正**：`pendingTypedAutoclose` StateEffect 随事务流动——filter 无 view 句柄、per-view WeakMap 不可达；含 `shouldAutoclose` 判定用的 ctx——attempt 侧不重算）。**闭合越过分支保持 filter 内改写**（零 doc 变更、不进驱动面与出站，无坐标问题）。
 2. **`symbolWrap.ts` `selectionWrapFilter` 包裹分支**：同上放行 + 暂存选区快照（ranges/原文/inCode，`captureCompositionSelection` 同款；表格格区等门控在 filter 时判定并随快照携带——定稿事务会清空 `tableRegionField`，attempt 侧无法复查，镜像 `compositionInTableRegion` 模式）。
 3. **新增键入路径兜底 attempt（两处或合一）**：镜像 `attemptCompositionCommitClose`/`attemptCompositionWrap`——形态校验（区间仍为原始键入字符/追加式）不符即让位；符合则补闭合/按段重建（多选区数学见探针原型），携带 `builtinEditOrigin`，`userEvent: 'input.type'` 保留。
-4. **attempt 入队点 = 符号扩展组内的 `updateListener`**（新增）：CM6 facet 优先级下数组靠后者先执行，主簿记 listener（链驱动入队点，扩展数组后段）先于符号组 listener 执行 → attempt 微任务天然排在链驱动之后。**不得从 filter 入队**（filter 先于 updateListener 执行，attempt 会抢在链前落地，打破坐标不变量——反证探针即该形态）。装配序由测试钉住。
+4. **attempt 入队点 = 符号模块自带 scheduler `updateListener`（`typedAutocloseScheduler`/`typedWrapScheduler`）**（**实施实证修正**：CM6 `updateListener` 按扩展数组**正序**执行、靠前者先——「靠后者先执行」是 filter 的序律，草案混同了两者，裸 CM6 与 liveInstance 装配双重实验钉住），由 liveInstance 装配在主簿记 listener 之后：正序下主簿记先入队链驱动微任务（M1）、scheduler 后入队兜底微任务（M3），微任务 FIFO 保 M1→M3。**不得从 filter 入队**（filter 先于 updateListener 执行，attempt 会抢在链前落地，打破坐标不变量——反证探针即该形态）。装配序由 `symbolTypedPath` 测试钉住。
 5. **出站强制暂缓**：filter 放行原始符号事务时以重指定（同 `keepEvent` 机制）附注解（如 `symbolRawInput`，`liveInstance.ts` 定义、与 `builtinEditOrigin` 并列），`recordLocalChangeSet` 见此注解即走暂缓分支（不立即出站）；兜底 attempt 触碰未确认区并入同段（既有机制，无需改）。分段语义沿用：无停顿、无光标移动 → 同段单笔。
 6. **契约面（API 语义变更，兼容性事件）**：键入路径 `inputText` 从展开形态（`'()'`）改为原始单字符（`'('`）。同步动作：`CHANGELOG-API` 语义条目、`addonApiCatalog` behaviors 条目语义澄清、developer-guide 行为链触发面、ADR-0020 修订记录、`symbol-input.md` 落档、`check:addoncompat` 基线重锚（`--emit-baseline` 显式动作，随实施 PR 同交并独立说明）。
 7. **不新增开关或兼容模式**（用户裁决）；EasyTyping 侧零改动即获得键入路径 SelectKey 命中面，联调归 easy-typing#64。
