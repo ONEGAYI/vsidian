@@ -100,6 +100,12 @@ const check = async (page, text, head, name) => {
   }
 }
 
+/** 等待一个渲染帧过去。#597 帧采样场景全程可能快于一个帧周期（~16ms），
+ *  rAF 探针零采样会让「length > 0」失据、「every」对空数组恒真——reset
+ *  后与读样本前各推一帧，保证初始/终态帧必在样本中（加强而非弱化钉子） */
+const nextPaint = (page) => page.evaluate(() =>
+  new Promise((resolve) => requestAnimationFrame(() => resolve())))
+
 try {
   // ---- 补全与光标居中（真实键盘；全角符号经 insertText 走真实 input 事件）----
   for (const [ch, pair] of [['(', '()'], ['[', '[]'], ['{', '{}']]) {
@@ -487,8 +493,10 @@ try {
   })
   await scenario('#597 补全无中间态：渲染帧采样只见初始与终态', { doc: '中', cursor: 1 }, async (page) => {
     await page.evaluate(() => window.resetFrameSamples())
+    await nextPaint(page)
     await page.keyboard.insertText('(')
     await check(page, '中()', 2, '终态')
+    await nextPaint(page)
     const samples = await page.evaluate(() => window.readFrameSamples())
     assert.ok(samples.length > 0, '帧采样探针应运行')
     assert.ok(samples.every((text) => text === '中' || text === '中()'),
@@ -497,9 +505,12 @@ try {
   await scenario('#597 包裹无中间态：渲染帧采样只见初始与终态', { doc: 'hello text', cursor: 6 }, async (page) => {
     await selectRight(page, 4)
     await page.evaluate(() => window.resetFrameSamples())
+    await nextPaint(page)
     await page.keyboard.insertText('【')
     await checkRanges(page, 'hello 【text】', [{ from: 7, to: 11 }], '终态')
+    await nextPaint(page)
     const samples = await page.evaluate(() => window.readFrameSamples())
+    assert.ok(samples.length > 0, '帧采样探针应运行（空样本不得静默通过）')
     assert.ok(samples.every((text) => text === 'hello text' || text === 'hello 【text】'),
       `渲染帧间不得见包裹中间态（如 'hello 【' 半成品）：${JSON.stringify(samples)}`)
   })

@@ -369,7 +369,8 @@ const wrapCompositionTracker = EditorView.domEventHandlers({
  *  坐标（全部相对原始替换后文档，offset 不加 delta）、delta 只平移批后
  *  选区（CM6 变更/选区坐标系分界——数学原型 #597 探针第 5 例，终态与
  *  选区覆盖文本和现行 filter 改写逐字一致）。纯空白段恢复原文不包裹
- *  （原文已被键入字符替换，换回即与现行改写的「不产生变更」对齐）。 */
+ *  （原文已被键入字符替换，换回即与现行改写的「不产生变更」对齐），
+ *  且不设选区 range（现行改写的 selection 只含非空段，逐字对齐）。 */
 function attemptTypedWrap(view: EditorView, pending: TypedWrapPending): void {
   if (view.compositionStarted || view.state.readOnly) {
     return
@@ -414,9 +415,10 @@ function attemptTypedWrap(view: EditorView, pending: TypedWrapPending): void {
     const plan = planSelectionWrap(seg.text, [{ from: 0, to: seg.text.length }], entry)
     if (!plan) {
       // 纯空白段：恢复原文（现行 filter 改写对该段不产生变更——原文
-      // 未动；放行使其被替换为键入字符，此处换回并保持原文选中）
+      // 未动；放行使其被替换为键入字符，此处换回）。选区不设 range——
+      // 现行改写的 plan.selection 只含非空段（该段选区消失是旧形态既有
+      // 行为，「终态与选区覆盖文本逐字一致」硬边界，是否保留另立票据）
       changes.push({ from: seg.pos, to: seg.pos + pending.ch.length, insert: seg.text })
-      ranges.push(EditorSelection.range(start, start + seg.text.length))
       delta += seg.text.length - pending.ch.length
       continue
     }

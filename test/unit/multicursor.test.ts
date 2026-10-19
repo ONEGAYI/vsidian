@@ -118,13 +118,15 @@ describe('allowMultipleSelections 与符号包裹解耦（#237）', () => {
       selection: { anchor: 1 },
       userEvent: 'input.type',
     })
-    // #597：包裹改写移到微任务兜底——推平微任务后断言
+    // #597：包裹改写移到微任务兜底、原始事务强制暂缓出站——推平微任务
+    // 与 flush 宏任务后断言；单笔出站语义（一条宿主撤销记录）保持不变
     await Promise.resolve()
     await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 30))
     // 包裹计划仍两侧插入（文本生效），选区被 asSingle 折回单 range
     expect(view.state.doc.toString()).toBe('*aa*\n\n*bb*')
     expect(ranges(view)).toHaveLength(1)
-    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
+    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
   })
 })
 

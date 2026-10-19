@@ -256,6 +256,49 @@ describe('#597 键入路径：选区包裹（单/多 range）', () => {
     expect(sel.ranges.map((r) => view.state.doc.sliceString(r.anchor, r.head))).toEqual(covered)
   })
 
+  it('多 range 混合纯空白段：空白段换回原文、选区只含非空段（与现行改写逐字一致）', async () => {
+    const text = 'x ord y  z'
+    const ranges = [
+      { from: 2, to: 5 },
+      { from: 7, to: 9 },
+    ]
+    const entry = findSelectionWrapEntry('【')!
+    // 对照基准：现行 filter 改写跳过纯空白块——changes 与 selection 均
+    // 不含空白段（该段选区消失是旧形态既有行为，不得顺手改）
+    const plan = planSelectionWrap(text, ranges, entry)!
+    expect(plan.selection).toHaveLength(1)
+    const terminal = applySer(
+      text,
+      plan.changes.map((c) => ({ offset: c.from, length: c.to - c.from, text: c.insert })),
+    )
+    const covered = plan.selection.map((s) => terminal.slice(s.anchor, s.head))
+    expect(covered).toEqual(['ord'])
+
+    const { view } = setup(text)
+    view.dispatch({
+      selection: EditorSelection.create(
+        ranges.map((r) => EditorSelection.range(r.from, r.to)),
+        0,
+      ),
+    })
+    // 多 range 键入形态：每 range 一条单字符替换，第二段平移 = 首段净长差 -2
+    view.dispatch({
+      changes: [
+        { from: 2, to: 5, insert: '【' },
+        { from: 7, to: 9, insert: '【' },
+      ],
+      selection: EditorSelection.create(
+        [EditorSelection.cursor(3), EditorSelection.cursor(6)],
+        0,
+      ),
+      userEvent: 'input.type',
+    })
+    await settleMicrotasks()
+    expect(view.state.doc.toString()).toBe(terminal)
+    const sel = view.state.selection
+    expect(sel.ranges.map((r) => view.state.doc.sliceString(r.anchor, r.head))).toEqual(covered)
+  })
+
   it('多 range 键入包裹出站单笔合并：open/原文/close 同段一笔 edit.request', async () => {
     const { sent, view } = setup('x ord y zwei z')
     useSegmentClock()
