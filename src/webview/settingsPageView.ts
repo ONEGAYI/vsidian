@@ -20,14 +20,6 @@ import {
 
 export interface SettingsPageBridge { postMessage(message: unknown): void }
 
-/** #596 收缩钳位静默窗（毫秒）：scroll 事件前该时长内无收缩（RO 通知的
- *  max 变小方向）才归因用户——窗内的 scroll 视为收缩 clamp（内容塌缩/
- *  窗口放大），即便此前有输入信号也不算用户接管（评审 VsidianPR598-001
- *  R5：取消输入/已结束 tap 后的收缩钳位会落入任何「输入时间窗」；R6：
- *  起高方向不产生布局性 scroll，不设防——渐进起高期间的用户真实滚动
- *  必须照常接管） */
-const LAYOUT_CLAMP_QUIET_MS = 250
-
 /**
  * 侧栏大组（#354 T05）：附加分页向设置页侧栏贡献「选项」之外的大组
  * （附加组件的核心/第三方两组，各含已启用/已停用子组）。大组间由视图
@@ -317,10 +309,12 @@ export class SettingsPageView {
    *  窗内的布局钳位误清、长按超窗后开始滚动的真实接管漏清）；归因由布局
    *  静默判定承担。随 clearPendingScroll 一并清除 */
   private userScrollArmed = false
-  /** #596 最近一次收缩时间（0 = 从未）：pendingObserver 的 RO 通知
-   *  按 max 可滚量方向分诊，仅收缩（可能引发 clamp scroll 的唯一布局形态）
-   *  记入；起高不产生布局性 scroll，不记（R6）。scroll 归因的静默期起点 */
-  private lastLayoutShrinkAt = 0
+  /** #596 上次已知 scrollTop（程序赋值读回值或上次 scroll 事件值，
+   *  Math.round 对齐）：clamp 与用户滚到底在边界值上不可分、方向可分——
+   *  收缩 clamp 是从上次值压降到新下边界（上次值 > 当前值），用户滚到底
+   *  是上升到边界（上次值 < 当前值）。方向特征替代时间窗（R7：任何时间
+   *  窗都会把窗内的真实滚动误拒） */
+  private lastKnownScrollTop = 0
   /** #596 用户滚动输入信号监听卸载器（评审 VsidianPR598-001）：wheel /
    *  滚动条 mousedown / 滚动键 keydown / touchstart 任一到达即用户接管，
    *  pending 立即作废。监听挂 mainEl（跨 render 稳定），与补放观察同生
@@ -749,31 +743,38 @@ export class SettingsPageView {
     if (!this.mainEl) return
     this.mainEl.scrollTop = value
     this.programmaticScrollAnchor = Math.round(this.mainEl.scrollTop)
+    this.lastKnownScrollTop = this.programmaticScrollAnchor
   }
 
   /** #596 主区 scroll 事件：标记窗口内的程序性事件（值吻合锚点）消费窗口；
-   *  已武装（有输入信号）且处于收缩静默期（LAYOUT_CLAMP_QUIET_MS 内无收缩
-   *  通知）的非锚点 scroll = 用户接管——清 pending、上报实测（用户位置）；
-   *  其余非锚点 scroll 归因布局（收缩 clamp；起高不产生 scroll 无需设防），
-   *  pending 保留、代报持续（评审 VsidianPR598-001 R3/R5/R6：「有输入、
-   *  有滚动事实、非收缩静默窗」三者齐备才算用户接管）；pending 期间
-   *  的 reportUiState 以代报值防宿主记忆被钳位值洗掉 */
+   *  已武装（有输入信号）且非「收缩压降」的非锚点 scroll = 用户接管——清
+   *  pending、上报实测（用户位置）。收缩压降特征：scrollTop 被压到当前
+   *  下边界（= max 可滚量）且较上次已知值下降——收缩（max 变小）后浏览器
+   *  clamp scrollTop 的唯一形态；用户滚到底是上升到边界（上次值 < 当前
+   *  值），方向相反，照常接管；起高不产生布局性 scroll，天然不设防。
+   *  方向特征替代时间窗（评审 VsidianPR598-001 R3/R5/R6/R7：任何时间窗
+   *  都存在「窗内真实滚动被拒」与「窗外布局钳位误清」的同拍重叠）；
+   *  pending 期间的 reportUiState 以代报值防宿主记忆被钳位值洗掉 */
   private onMainScroll(): void {
+    const current = this.mainEl ? Math.round(this.mainEl.scrollTop) : 0
+    const clampedDown = !!this.mainEl &&
+      current === Math.round(this.mainEl.scrollHeight - this.mainEl.clientHeight) &&
+      this.lastKnownScrollTop > current
     if (this.programmaticScrollAnchor !== null && this.mainEl &&
-        Math.round(this.mainEl.scrollTop) === this.programmaticScrollAnchor) {
+        current === this.programmaticScrollAnchor) {
       this.programmaticScrollAnchor = null
+      this.lastKnownScrollTop = current
       this.reportUiState()
       return
     }
     this.programmaticScrollAnchor = null
-    // 静默期判定：从未观察到收缩（0）视为远古——测试进程早期
-    // performance.now() 很小，不能把「从未收缩」误判成「刚收缩」
-    if (this.userScrollArmed && (this.lastLayoutShrinkAt === 0 ||
-        performance.now() - this.lastLayoutShrinkAt > LAYOUT_CLAMP_QUIET_MS)) {
+    if (this.userScrollArmed && !clampedDown) {
+      this.lastKnownScrollTop = current
       this.clearPendingScroll() // 幂等：pending 已空时仅清武装与监听
       this.reportUiState()
       return
     }
+    this.lastKnownScrollTop = current
     this.reportUiState()
   }
 
@@ -787,18 +788,17 @@ export class SettingsPageView {
     this.userScrollSignalDisposer?.()
     this.userScrollSignalDisposer = null
     this.userScrollArmed = false
-    this.lastLayoutShrinkAt = 0
   }
 
-  /** #596 用户滚动接管信号（评审 VsidianPR598-001，R3/R5 收窄）：输入信号
-   *  只「武装」接管判定（布尔，无过期），不作废 pending——作废的实际触发
-   *  是「已武装 + 收缩静默期的非锚点 scroll」（onMainScroll），scroll 的
-   *  归因由收缩方向判定承担，不由输入与滚动的时间接近性承担：
+  /** #596 用户滚动接管信号（评审 VsidianPR598-001，R3/R5/R7 收窄）：输入
+   *  信号只「武装」接管判定（布尔，无过期），不作废 pending——作废的实际
+   *  触发是「已武装 + 非收缩压降的非锚点 scroll」（onMainScroll），scroll
+   *  的归因由压降方向特征承担，不由输入与滚动的时间接近性承担：
    *  - 控件键盘（搜索框空格/Home、下拉框方向键）、已取消（preventDefault）
    *    的 keydown/wheel、触摸点击（tap）：无滚动事实，不作废；
-   *  - 取消输入/已结束 tap 之后短窗内的布局钳位 scroll：RO 先行通知布局
-   *    变化（收缩静默期不满足），不作废；
-   *  - 长按滚动条/触摸后才开始移动：armed 无过期，移动的 scroll 照常接管。
+   *  - 取消输入后的收缩钳位 scroll：压降到新下边界（方向特征），不作废；
+   *  - 收缩完成后的用户滚动、用户滚到底（升到边界）、长按后移动、起高
+   *    期间的滚动：均非压降形态，照常接管。
    *  幂等：已挂载时跳过（render 尾重挂不重复） */
   private armUserScrollSignal(): void {
     if (this.userScrollSignalDisposer !== null || !this.mainEl) return
@@ -828,31 +828,20 @@ export class SettingsPageView {
   }
 
   /** #596 挂 pending 与补放观察：ResizeObserver 观察 listEl（内容起高/收缩）
-   *  与 mainEl（窗口缩放改盒高引发的钳位）——渐进起高天然多次回调直至
-   *  够高；无 ResizeObserver 环境（jsdom 等）按 hoverPopup 先例特性检测
-   *  回退——只挂 pending（代报仍防记忆洗掉），补放交由真实浏览器路径。
-   *  #596 R6：布局变化通知按几何方向分诊——只有收缩（max 可滚量变小，
-   *  scrollHeight 缩或 clientHeight 涨）才可能引发浏览器 clamp scrollTop
-   *  的布局性 scroll；起高（max 变大）不产生 scroll，不得进入静默防区
-   *  （渐进起高会持续通知，若无差别记 dirty 会把其间用户的真实滚动全部
-   *  拒绝接管，随后补放覆盖用户位置） */
+   *  与 mainEl（窗口缩放改盒高也改变 max 可滚量与补放条件）——渐进起高
+   *  天然多次回调直至够高；无 ResizeObserver 环境（jsdom 等）按 hoverPopup
+   *  先例特性检测回退——只挂 pending（代报仍防记忆洗掉），补放交由真实
+   *  浏览器路径。R7 起 RO 只承担补放触发，scroll 归因由 onMainScroll 的
+   *  压降方向特征承担（不再依赖 RO 通知与 scroll 的调度先后） */
   private armPendingScroll(scroll: number): void {
     this.pendingScroll = scroll
     this.pendingObserver?.disconnect()
     this.pendingObserver = null
     this.armUserScrollSignal()
     if (typeof ResizeObserver === 'function' && this.listEl && this.mainEl) {
-      const main = this.mainEl
-      let prevMax = main.scrollHeight - main.clientHeight // 挂载时几何快照
-      const observer = new ResizeObserver(() => {
-        const max = main.scrollHeight - main.clientHeight
-        const shrank = max < prevMax
-        prevMax = max
-        if (shrank) this.lastLayoutShrinkAt = performance.now()
-        this.tryApplyPendingScroll()
-      })
+      const observer = new ResizeObserver(() => this.tryApplyPendingScroll())
       observer.observe(this.listEl)
-      observer.observe(main)
+      observer.observe(this.mainEl)
       this.pendingObserver = observer
     }
   }
@@ -869,6 +858,7 @@ export class SettingsPageView {
     const target = this.pendingScroll
     this.clearPendingScroll()
     main.scrollTop = target
+    this.lastKnownScrollTop = Math.round(main.scrollTop)
   }
 
   /** 会话内恢复上报：当前生效分页（active 未选时回落首个分类，与 render

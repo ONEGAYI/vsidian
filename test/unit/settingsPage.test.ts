@@ -1625,31 +1625,31 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
   })
 
   it('武装不因时间流逝失效（R5：长按滚动条/触摸 600ms 后才移动仍接管）：armed 持续到滚动事实到达', () => {
-    const { observers } = installResizeObserverStub()
-    const { view, sent, parent } = makeTrackedFullView()
-    const main = mainEl(parent)
-    const geometry = { scrollHeight: 300, clientHeight: 250 }
-    stubScrollableMain(main, geometry)
-    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
-    const observer = observers.at(-1)!
-    observer.fire() // 初次观察通知
-    // 按住滚动条（mousedown target=main）后停顿任意久（模拟 600ms）再拖动：
-    // 期间无布局变化，滚动到达时处于布局静默期——armed 不设过期窗口，照常接管
-    main.dispatchEvent(new MouseEvent('mousedown'))
-    vi.useFakeTimers({ toFake: ['performance'] })
+    vi.useFakeTimers({ toFake: ['performance'] }) // setup 起统一 mock 时钟（R7 建议）
     try {
-      vi.advanceTimersByTime(600) // 真实推进时钟（R6：测试须真模拟停顿时长）
+      const { observers } = installResizeObserverStub()
+      const { view, sent, parent } = makeTrackedFullView()
+      const main = mainEl(parent)
+      const geometry = { scrollHeight: 300, clientHeight: 250 }
+      stubScrollableMain(main, geometry)
+      view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+      const observer = observers.at(-1)!
+      observer.fire() // 初次观察通知
+      // 按住滚动条（mousedown target=main）后停顿 600ms 再拖动：期间无布局
+      // 变化，滚动到达时布局安静——armed 不设过期窗口，照常接管
+      main.dispatchEvent(new MouseEvent('mousedown'))
+      vi.advanceTimersByTime(600)
       main.scrollTop = 40 // 用户拖动到 40
       main.dispatchEvent(new Event('scroll'))
       expect(observer.disconnected).toBe(true)
       expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 40 })
+      // 其后内容起高也不补放：不覆盖用户滚动位置
+      geometry.scrollHeight = 2000
+      observer.fire()
+      expect(main.scrollTop).toBe(40)
     } finally {
       vi.useRealTimers()
     }
-    // 其后内容起高也不补放：不覆盖用户滚动位置
-    geometry.scrollHeight = 2000
-    observer.fire()
-    expect(main.scrollTop).toBe(40)
   })
 
   it('部分起高（max 变大）后静默窗内的真实滚动照常接管（R6：起高不产生布局性 scroll，不设防）', () => {
@@ -1665,7 +1665,7 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     // （max 变小）才可能引发 clamp scroll——起高方向不进入布局静默防区
     geometry.scrollHeight = 330
     observer.fire()
-    // 100ms 后用户真实滚轮滚到 30：即便处于任何时间窗内也必须接管
+    // 其后用户真实滚轮滚到 30：必须接管
     main.dispatchEvent(new Event('wheel'))
     main.scrollTop = 30
     main.dispatchEvent(new Event('scroll'))
@@ -1675,6 +1675,60 @@ describe('#596 恢复滚动补放：pending 状态机（异步内容未起高时
     geometry.scrollHeight = 2000
     observer.fire()
     expect(main.scrollTop).toBe(30)
+  })
+
+  it('收缩钳位完成后的用户真实滚动照常接管（R7）：clamp 防区只拦压降本身，不拦其后的滚动', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知
+    // 取消的滚轮武装 + 内容收缩钳位（50→20，压降到新下边界）：归因布局
+    main.addEventListener('wheel', (e) => e.preventDefault(), { once: true, capture: true })
+    main.dispatchEvent(new WheelEvent('wheel', { cancelable: true }))
+    geometry.scrollHeight = 270
+    observer.fire()
+    main.scrollTop = 20
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(false) // clamp 不接管：pending 保留
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 120 }) // 代报持续
+    // clamp 完成后（模拟 100ms，同步表达）用户真实向上滚到 10：值已离开
+    // 边界（≠ max），是新的滚动事实——照常接管
+    main.dispatchEvent(new Event('wheel'))
+    main.scrollTop = 10
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true) // 接管：pending 作废
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 10 }) // 上报用户位置
+    // 其后内容起高也不补放：不覆盖用户位置
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(10)
+  })
+
+  it('用户滚到底部（上升到边界）不算 clamp：方向区分，armed 下照常接管', () => {
+    const { observers } = installResizeObserverStub()
+    const { view, sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    const geometry = { scrollHeight: 300, clientHeight: 250 }
+    stubScrollableMain(main, geometry)
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    const observer = observers.at(-1)!
+    observer.fire() // 初次观察通知
+    // 部分起高（max 80）后用户向下滚到底：值到达边界但是上升（lastKnown 50
+    // < 80），与收缩压降（上次值 > 当前边界值）方向相反——接管
+    geometry.scrollHeight = 330
+    observer.fire()
+    main.dispatchEvent(new Event('wheel'))
+    main.scrollTop = 80 // 滚到底 = max
+    main.dispatchEvent(new Event('scroll'))
+    expect(observer.disconnected).toBe(true)
+    expect(uiStateMessages(sent).at(-1)).toMatchObject({ section: 'appearance', scrollTop: 80 })
+    geometry.scrollHeight = 2000
+    observer.fire()
+    expect(main.scrollTop).toBe(80) // 不被补放覆盖
   })
 
   it('布局钳位（无用户输入的内容收缩）不作废 pending：代报持续防洗，再起高后照常补放（评审 VsidianPR598-001）', () => {
