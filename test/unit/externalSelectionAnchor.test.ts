@@ -54,6 +54,39 @@ describe('外部整段替换的区间内部光标保序锚定（评审 004）', 
     expect([1, 4]).toContain(view.state.selection.main.head)
   })
 
+  it('多段替换：后段内部光标锚定计入前序段位移（评审 004 续）', () => {
+    const { controller, view } = setup('ordzwei\n')
+    view.dispatch({ selection: { anchor: 4 } }) // zwei 的 w 前（段 2 内部）
+    controller.handleHostMessage({
+      kind: 'doc.changed', version: 2, origin: 'external',
+      changes: [
+        { offset: 0, length: 3, text: '【ord】' },
+        { offset: 3, length: 4, text: '【zwei】' },
+      ],
+    })
+    expect(view.state.doc.toString()).toBe('【ord】【zwei】\n')
+    // 段 2 批内锚定 5 + 段 1 净位移 +2 = 7（【z|wei】——旧 w 前逐字保留；
+    // 漏前序位移时错到 5（【|zwei】）
+    expect(view.state.selection.main.head).toBe(7)
+  })
+
+  it('非空正向选区：两端各自锚定，覆盖原文身份保留（评审 004 续）', () => {
+    const { controller, view } = setup('word\n')
+    view.dispatch({ selection: { anchor: 2, head: 3 } }) // r 正向（两端都在区间严格内部）
+    controller.handleHostMessage({
+      kind: 'doc.changed', version: 2, origin: 'external',
+      changes: [{ offset: 1, length: 3, text: '【ord】' }],
+    })
+    expect(view.state.doc.toString()).toBe('w【ord】\n')
+    const sel = view.state.selection.main
+    // 旧 anchor=2（r 前）锚定到【ord】的 r 前=3；旧 head=3（d 前）锚定到
+    // d 前=4 → 新选区覆盖 r（【o|r|d】），原文身份逐字保留（端点在替换
+    // 段边界上时归 CM6 端点映射，不在锚定面）
+    expect(sel.anchor).toBe(3)
+    expect(sel.head).toBe(4)
+    expect(view.state.doc.sliceString(sel.anchor, sel.head)).toBe('r')
+  })
+
   it('区间外光标不受锚定影响（前缀平移照常）', () => {
     const { controller, view } = setup('word\n')
     view.dispatch({ selection: { anchor: 4 } }) // 区间右端点
