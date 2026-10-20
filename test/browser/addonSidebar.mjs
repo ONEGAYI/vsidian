@@ -88,12 +88,13 @@ try {
   // 初始空清单 → 空态（两大组结构在场）
   await page.evaluate(() => {
     window.__hostState.addons = [
-      // 官方：一启用（含故障暂停）一停用
+      // 官方：一启用（含故障暂停）一停用（均有设置能力，侧栏可见）
       { id: 'onegayi.core', label: 'Core A', official: true, status: 'registered', enabled: true, fault: { reason: 'enable 异常：demo crash' }, hasSettingsDefinitions: true },
-      { id: 'onegayi.core-off', label: 'Core B', official: true, status: 'registered', enabled: false },
-      // 第三方：一启用一停用；未注册（不兼容）不进侧栏分组
+      { id: 'onegayi.core-off', label: 'Core B', official: true, status: 'registered', enabled: false, hasSettingsDefinitions: true },
+      // 第三方：一启用一停用；未注册（不兼容）与无设置能力的纯运行组件不进侧栏分组
       { id: 'a.third-on', label: 'Third On', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
-      { id: 'a.third-off', label: 'Third Off', official: false, status: 'registered', enabled: false },
+      { id: 'a.third-off', label: 'Third Off', official: false, status: 'registered', enabled: false, hasSettingsPage: true },
+      { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
       { id: 'a.future', label: 'Future', official: false, status: 'incompatible', apiRange: '^2.0.0' },
     ]
   })
@@ -115,6 +116,7 @@ try {
   assert.ok((await coreSubgroups.nth(1).innerText()).includes('Core B'), '开关停用者归已停用子组')
   const navText = await nav.innerText()
   assert.ok(!navText.includes('Future'), '未注册组件不进侧栏分组')
+  assert.ok(!navText.includes('Plain'), '无设置能力的纯运行组件不进侧栏（只在附加组件页列表呈现）')
 
   // ---- 2. 大组分隔绘制层：divider 有可见描边（非 display:none） ----
   const dividerPaint = await nav.locator('.vsidian-settings-nav-divider').first().evaluate((el) => {
@@ -129,7 +131,7 @@ try {
   assert.equal(badgePaint, 'rgb(184, 17, 27)', '故障徽章应为错误底色（绘制层）')
 
   // ---- 3. 侧栏组件条目点击：可配置组件直达「组件设置」分页（#465）；
-  //      纯运行组件回附加组件页定位列表行 ----
+  //      无设置能力的纯运行组件不占侧栏条目 ----
   await nav.getByRole('button', { name: /Third On/ }).click()
   await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.settingsOpen' && m.addonId === 'a.third-on'))
   // #465 通道堵死：可配置组件条目导航到「组件设置」分页，附加组件页不
@@ -187,44 +189,15 @@ try {
   await page.locator('.vsidian-addons-settings-hub').waitFor()
   // #554 关闭设置区（open=null 推送）：高亮摘除，无旧组件残留
   assert.equal(await pageItems.count(), 0, '关闭设置区后侧栏不得残留组件条目高亮')
-  // 纯运行组件条目（Third Off——无定义无设置页）：回附加组件页只定位列表行
-  await nav.getByRole('button', { name: /Third Off/ }).click()
-  const located = page.locator('.vsidian-addons-list .vsidian-settings-item-located')
-  await located.waitFor()
-  assert.match(await located.first().innerText(), /Third Off/, '点击条目定位组件状态行')
-  // #462 绘制层：条目行定位描边真实绘制（focusBorder 1px + offset 8px），
-  // 列表容器不再套区块级描边（容器级与条目级互斥，消三层叠加）
-  const locatedPaint = await page.evaluate(() => {
-    const list = document.querySelector('.vsidian-addons-list')
-    const row = list?.querySelector('.vsidian-settings-item-located')
-    if (!list || !row) return null
-    const rowCs = getComputedStyle(row)
-    const listCs = getComputedStyle(list)
-    return {
-      rowOutline: `${rowCs.outlineWidth} ${rowCs.outlineStyle} ${rowCs.outlineColor}`,
-      rowOffset: rowCs.outlineOffset,
-      rowRadius: rowCs.borderRadius,
-      listOutlineStyle: listCs.outlineStyle,
-      listLocated: list.classList.contains('vsidian-settings-item-located'),
-    }
-  })
-  assert.ok(locatedPaint, '定位条目行应在场')
-  assert.equal(locatedPaint.rowOutline, '1px solid rgb(38, 135, 212)', '条目行定位描边应绘制（focusBorder 1px）')
-  assert.equal(locatedPaint.rowOffset, '8px', '条目行定位描边外扩 8px（跳转落点档位）')
-  assert.equal(locatedPaint.rowRadius, '3px', '定位高亮圆角 3px（跳转落点档位）')
-  assert.equal(locatedPaint.listOutlineStyle, 'none', '列表容器不得再套区块级描边（层级互斥）')
-  assert.equal(locatedPaint.listLocated, false, '列表容器不带定位高亮类')
-  // #462 一次性退场：约 1.5s 后高亮摘除（跳转落点是一次性导航反馈）
-  await page.waitForTimeout(1700)
-  assert.equal(
-    await page.locator('.vsidian-addons-list .vsidian-settings-item-located').count()
-      + (await page.locator('.vsidian-addons-list.vsidian-settings-item-located').count()),
-    0,
-    '定位高亮应在约 1.5s 后一次性退场',
-  )
-  // #554 纯运行组件条目点击：不开设置区、组件条目不整组点亮——「附加组件」
-  // 选项按钮按当前页高亮（绘制层：选中底色），全部组件条目保持透明底
-  assert.equal(await pageItems.count(), 1, '纯运行组件点击后唯一选中是「附加组件」选项按钮')
+  // 无设置能力的纯运行组件不占侧栏条目；状态列表仍呈现（2026-10-20 口径修订）
+  assert.equal(await nav.getByRole('button', { name: /Plain/ }).count(), 0, '无设置能力的纯运行组件不进侧栏')
+  await nav.getByRole('button', { name: zhCn['settings.addonsSection'], exact: true }).click()
+  const addonsList = page.locator('.vsidian-addons-list')
+  await addonsList.waitFor()
+  assert.match(await addonsList.innerText(), /Plain/, '纯运行组件仍在「附加组件」页列表呈现')
+  // #554 附加组件页：组件条目不整组点亮——「附加组件」选项按钮按当前页
+  // 高亮（绘制层：选中底色），全部组件条目保持透明底
+  assert.equal(await pageItems.count(), 1, '附加组件页唯一选中是「附加组件」选项按钮')
   paints = await navItemPaints()
   {
     const addonsOption = paints.find((p) => p.text === zhCn['settings.addonsSection'])
@@ -262,7 +235,7 @@ try {
 
   assert.deepEqual(errors, [], '页面不得有未捕获异常')
   console.log('[#354] 附加组件侧栏三组与故障排障浏览器回归通过（三组结构/子组归属/分隔绘制/条目路由/排障块/空态）')
-  console.log('[#465] 通道堵死与组件设置分页浏览器契约通过（可配置条目直达设置分页/返回 hub/纯运行组件定位行）')
+  console.log('[#465] 通道堵死与组件设置分页浏览器契约通过（可配置条目直达设置分页/返回 hub/纯运行组件不进侧栏）')
 } finally {
   await browser.close()
 }

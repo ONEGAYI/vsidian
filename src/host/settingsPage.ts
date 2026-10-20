@@ -352,6 +352,10 @@ export function createSettingsPage(
       case 'addons.openLogs':
       case 'addons.retry':
       case 'addons.commandCatalogGet':
+      // #546 T07 主题目录装载回填：设置页装载即拉取 addons.themesGet，
+      // 由附加组件接线应答 addons.themesState（目录/首选/可用性）。此消息
+      // 曾漏转发，组件主题候选在「外观 → 主题」永不出现（2026-10-20 修复）
+      case 'addons.themesGet':
       case 'addons.behaviorsSetDisabled':
       case 'addons.behaviorsSetOrder':
       case 'addons.behaviorsViewSet':

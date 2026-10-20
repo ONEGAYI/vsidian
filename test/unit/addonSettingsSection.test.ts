@@ -469,8 +469,8 @@ describe('设置页侧栏三组结构（T05）', () => {
   it('核心/第三方两大组恒在场（空清单也不消失），官方与第三方组件归位准确', () => {
     const harness = makeView()
     harness.dispatch(addonsState([
-      { id: 'onegayi.core', label: 'Core', official: true, status: 'registered', enabled: true },
-      { id: 'a.third', label: 'Third', official: false, status: 'registered', enabled: true },
+      { id: 'onegayi.core', label: 'Core', official: true, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      { id: 'a.third', label: 'Third', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
     ]))
     const labels = [...harness.parent.querySelectorAll('.vsidian-settings-nav-group-label')].map((el) => el.textContent)
     expect(labels).toEqual(['选项', '核心组件', '第三方组件'])
@@ -492,10 +492,10 @@ describe('设置页侧栏三组结构（T05）', () => {
   it('已启用/已停用子组按用户功能开关归类；未注册组件不进侧栏分组', () => {
     const harness = makeView()
     harness.dispatch(addonsState([
-      { id: 'onegayi.core', label: 'CoreOn', official: true, status: 'registered', enabled: true },
-      { id: 'onegayi.off', label: 'CoreOff', official: true, status: 'registered', enabled: false },
-      { id: 'a.on', label: 'ThirdOn', official: false, status: 'registered', enabled: true },
-      { id: 'a.off', label: 'ThirdOff', official: false, status: 'registered', enabled: false },
+      { id: 'onegayi.core', label: 'CoreOn', official: true, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      { id: 'onegayi.off', label: 'CoreOff', official: true, status: 'registered', enabled: false, hasSettingsPage: true },
+      { id: 'a.on', label: 'ThirdOn', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
+      { id: 'a.off', label: 'ThirdOff', official: false, status: 'registered', enabled: false, hasSettingsPage: true },
       // 未注册（无开关值）不参与已启用/已停用归类
       { id: 'a.incompatible', label: 'Future', official: false, status: 'incompatible', apiRange: '^2.0.0' },
     ]))
@@ -517,7 +517,7 @@ describe('设置页侧栏三组结构（T05）', () => {
   it('开关开启但故障暂停者留在已启用组并标注故障（不移入已停用）', () => {
     const harness = makeView()
     harness.dispatch(addonsState([
-      { id: 'a.faulted', label: 'Broken', official: false, status: 'registered', enabled: true, fault: { reason: 'enable 异常：boom' } },
+      { id: 'a.faulted', label: 'Broken', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true, fault: { reason: 'enable 异常：boom' } },
     ]))
     const sections = [...harness.parent.querySelectorAll('.vsidian-settings-nav-section')]
     const third = sections[2]
@@ -553,23 +553,17 @@ describe('设置页侧栏三组结构（T05）', () => {
     expect(harness.parent.querySelector('.vsidian-settings-heading')?.textContent).toBe('组件设置')
   })
 
-  it('无定义且无设置页的组件条目点击只定位列表行（不导航、不强开设置区）', async () => {
+  it('无设置能力的纯运行组件不进侧栏；状态列表仍呈现并可管理', () => {
     const harness = makeView()
     harness.dispatch(addonsState([
       { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
     ]))
     const nav = harness.parent.querySelector('nav')
-    const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Plain'))
-    item!.click()
+    expect(nav?.textContent ?? '').not.toContain('Plain')
+    // 纯运行组件只在「附加组件」页列表呈现；侧栏不提供无落点的条目
+    openAddonsPage(harness)
+    expect(harness.parent.querySelector('.vsidian-addons-list')?.textContent ?? '').toContain('Plain')
     expect(harness.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toEqual([])
-    await harness.settle()
-    expect(harness.parent.querySelector('.vsidian-settings-heading')?.textContent).toBe('附加组件')
-    // 定位落在条目行上（.vsidian-settings-item），容器本身不带 located
-    const list = harness.parent.querySelector('.vsidian-addons-list')
-    const locatedRow = harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')
-    expect(locatedRow).toBeTruthy()
-    expect(locatedRow?.classList.contains('vsidian-settings-item')).toBe(true)
-    expect(list?.classList.contains('vsidian-settings-item-located')).toBe(false)
   })
 
   it('addons.state 推送后侧栏随之重建（分组数据实时）', () => {
@@ -578,7 +572,7 @@ describe('设置页侧栏三组结构（T05）', () => {
     let navText = harness.parent.querySelector('nav')?.textContent ?? ''
     expect(navText).not.toContain('Later')
     harness.dispatch(addonsState([
-      { id: 'a.later', label: 'Later', official: false, status: 'registered', enabled: true },
+      { id: 'a.later', label: 'Later', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
     ]))
     navText = harness.parent.querySelector('nav')?.textContent ?? ''
     expect(navText).toContain('Later')
@@ -588,11 +582,10 @@ describe('设置页侧栏三组结构（T05）', () => {
 // ---- #462：定位高亮层级互斥与一次性退场（纯运行组件 = 条目级唯一载体） ----
 
 describe('定位高亮层级互斥与一次性退场（#462）', () => {
-  function locatePlainBySidebar(harness: ReturnType<typeof makeView>): void {
-    const nav = harness.parent.querySelector('nav')
-    const item = [...(nav?.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item') ?? [])].find((b) => b.textContent?.includes('Plain'))
-    expect(item).toBeTruthy()
-    item!.click()
+  function locatePlainByFocusEntry(harness: ReturnType<typeof makeView>): void {
+    // 侧栏不再贡献纯运行组件条目；条目级定位路径仍由显式 focusEntry 承载
+    // （宿主/搜索定位），此处直接走分页 mount 的定位入口
+    harness.view.selectSection('addons', 'addon:a.plain')
   }
 
   it('list 级定位：高亮落列表容器本身，不落到条目行（互斥另一半）', () => {
@@ -620,7 +613,7 @@ describe('定位高亮层级互斥与一次性退场（#462）', () => {
       harness.dispatch(addonsState([
         { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
       ]))
-      locatePlainBySidebar(harness)
+      locatePlainByFocusEntry(harness)
       expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
       vi.advanceTimersByTime(1500)
       // 退场：已渲染的高亮类被摘除（定位态清空）
@@ -643,7 +636,7 @@ describe('定位高亮层级互斥与一次性退场（#462）', () => {
       harness.dispatch(addonsState([
         { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
       ]))
-      locatePlainBySidebar(harness)
+      locatePlainByFocusEntry(harness)
       // 时限内的推送（定位后应答回灌）重渲染：条目行高亮保持，容器仍不带
       harness.dispatch(addonsState([
         { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
@@ -654,7 +647,7 @@ describe('定位高亮层级互斥与一次性退场（#462）', () => {
       vi.advanceTimersByTime(1500)
       expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeNull()
       // 再次显式定位：高亮重新呈现（一次性退场不清灭后续导航）
-      locatePlainBySidebar(harness)
+      locatePlainByFocusEntry(harness)
       expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')).toBeTruthy()
     } finally {
       vi.useRealTimers()
