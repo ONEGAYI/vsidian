@@ -289,6 +289,12 @@ HTML 内部的普通点击仍优先进入源码，包含其链接、控件与媒
 - 不额外提供服务器、表单后端、媒体转码或远端站点策略绕过。
 - 本次开票不授权实施代码、推送、合并或市场发布。全量目标下的元素分类不是范围豁免；遇到平台限制需提供证据并单独讨论。
 
+## 后续票落档
+
+### 原生 HTML 表格默认样式（#613，2026-10-20）
+
+块级原生 HTML 容器（`.vsidian-live-html` / `.vsidian-reading-html`——嵌入卡与悬停浮层复用同管线时随容器类生效）内的 `table/th/td` 自 #613 起带默认呈现：`border-collapse` + `1px` 边框（`--vscode-panel-border`）+ 表头底色（`--vsidian-table-background`）+ `4px 12px` 内边距，复用 Markdown 管道表格默认档位（td 不加等宽字体——那是管道表格特例）。**可覆盖性为硬约束**：选择器经 `:where()` 归零容器特异性（裸标签承担 `(0,0,1)`，#133 先例），CSS 片段链与文档 `<style>`（层叠序后置于内置产物）以裸标签源序即可覆盖；形态由 `test/unit/htmlTableCssContract.test.ts` 钉住防高特异性回潮，计算边框断言落 browser `liveHtml` 场景 A/K 与集成 #567（真宿主 paint 探针 `mergedCell.borderWidth`——缩放显示下计算值可为亚像素，断言钉「有宽度」）。Live 侧 table 无 margin（宿主 padding 承担间距，margin 折叠出行盒会造成 CM6 高度记账错位——#217 口径）；Reading 侧 `0.4em 0`。边界：行内 HTML 片段内的表格不接（Reading 行内原位渲染无容器类可锚定，记录为边界，不顺手扩）；覆盖按 CSS 元素对应语义——内置默认声明在 th/td（collapse 模式分隔线由 cell 边框绘制），`table {}` 单选择器只覆盖 table 自身边框，关全部框线需 `table, th, td { border: none }`。
+
 ## 实施票与依赖
 
 | 编号 | 可独立验收的交付 | Blocked by |

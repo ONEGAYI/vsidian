@@ -16,9 +16,16 @@ await build({ entryPoints: [path.join(root, 'test/browser/liveHtmlFixture.ts')],
   bundle: true, outfile: bundle, format: 'iife',
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]' })
 
-/** 父文档：表格块（首条用户路径）+ 纯 style 块 + 恶意载荷块 + 未闭合块 */
+/** 父文档：表格块（首条用户路径，含表头行——#613 边框/表头底色断言载体）
+ * + 纯 style 块 + 恶意载荷块 + 未闭合块（#613 可覆盖性验证独立装载第二
+ * 文档——文档 <style> 按 docScope 全篇生效，掺进主文档会同时改写默认
+ * 表格块，两组断言互扰） */
 const TABLE_BLOCK = [
   '<table>',
+  '  <tr>',
+  '    <th>表头甲</th>',
+  '    <th>表头乙</th>',
+  '  </tr>',
   '  <tr>',
   '    <td colspan="2" rowspan="3">合并单元格</td>',
   '    <td>普通格</td>',
@@ -26,6 +33,18 @@ const TABLE_BLOCK = [
   '</table>',
 ].join('\n')
 const EVIL_BLOCK = '<div onclick="evil()">可点击</div><script>window.__htmlEvilRan = true</script>'
+const OVERRIDE_TABLE = '<table>\n  <tr>\n    <td>覆盖态单元格</td>\n  </tr>\n</table>'
+const OVERRIDE_DOC = [
+  '覆盖篇首段。',
+  '',
+  // 覆盖按 CSS 元素对应语义声明在 table/th/td 三个元素上：内置默认的
+  // 边框声明在 th/td（collapse 模式分隔线由 cell 边框绘制，table 自身
+  // 只画外圈），`table {}` 单选择器本就不与 td 声明竞争
+  '<style>table, th, td { border: none }</style>',
+  OVERRIDE_TABLE,
+  '',
+  '收尾段落。',
+].join('\n')
 const DOC = [
   '开篇段落。',
   '',
@@ -51,7 +70,7 @@ const HTML_FROM = DOC.indexOf(TABLE_BLOCK)
 const HTML_TO = HTML_FROM + TABLE_BLOCK.length
 const EVIL_FROM = DOC.indexOf(EVIL_BLOCK)
 const EVIL_TO = EVIL_FROM + EVIL_BLOCK.length
-const STYLE_LINE = '<style>'
+const STYLE_X_BLOCK = '<style>\n.x { color: red; }'
 const UNCLOSED_FROM = DOC.indexOf('<div>\n  未闭合内容')
 
 const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
@@ -92,10 +111,15 @@ try {
   assert.equal(tableHost.popupButton, false, '无弹窗按钮（HTML 块仅 edit）')
   assert.equal(tableHost.tooltip, zhCn['html.blockTooltip'], '宿主悬停词走 i18n 词条')
   assert.equal(tableHost.position, 'relative', '宿主承担按钮定位上下文')
+  // #613 默认表格样式（绘制层计算值——样式注入失效即红，非 DOM 存在性）
+  assert.equal(tableHost.cellBorderStyle, 'solid', `默认边框绘制（实际 ${tableHost.cellBorderStyle}）`)
+  assert.ok(Number.parseFloat(tableHost.cellBorderWidth) >= 1,
+    `边框有宽度（实际 ${tableHost.cellBorderWidth}）`)
+  assert.notEqual(tableHost.headerBg, 'rgba(0, 0, 0, 0)', `表头底色绘制（实际 ${tableHost.headerBg}）`)
   assert.equal(await linePainted('<table>'), false, '隐形态源文不绘制（区间替换）')
   const spanList = await spans()
   assert.equal(spanList.length, 4, '块表四条（表格/样式/恶意/未闭合）')
-  assert.equal(spanList.filter((s) => DOC.slice(s.from, s.to).startsWith(STYLE_LINE)).length, 1, '纯 style 块在表（常显不占位）')
+  assert.equal(spanList.filter((s) => DOC.slice(s.from, s.to).startsWith(STYLE_X_BLOCK)).length, 1, '纯 style 块在表（常显不占位）')
   // 恶意块：净化负向（无 script/事件/伪造锚点；脚本未执行）
   const evilHost = hosts.find((h) => h.from === EVIL_FROM)
   assert.ok(evilHost, '恶意块宿主在场（可安全部分渲染）')
@@ -258,7 +282,7 @@ try {
   await page.waitForTimeout(120)
   const hostsAfterLeave = await reads()
   // style 块从未出现在宿主列表（无论光标在哪）
-  assert.equal(hostsAfterLeave.every((h) => DOC.slice(h.from, h.to).startsWith(STYLE_LINE) === false), true,
+  assert.equal(hostsAfterLeave.every((h) => DOC.slice(h.from, h.to).startsWith(STYLE_X_BLOCK) === false), true,
     '纯 style 块恒不发射 widget')
   passed++
   console.log('[LiveHTML][PASS] 纯 <style> 块：源码常显不占位')
@@ -302,10 +326,41 @@ try {
   assert.equal(readingTable.hitInside, true, '阅读态合并格中心命中（绘制层）')
   assert.equal(readingTable.docScope, 'doc', '主文档 docScope 标记在场（T04 基座）')
   assert.equal(readingTable.scriptCount, 0, '阅读态 script 不进场')
+  // #613 阅读态默认样式（绘制层计算值——样式注入失效即红）
+  assert.equal(readingTable.cellBorderStyle, 'solid', `阅读态默认边框绘制（实际 ${readingTable.cellBorderStyle}）`)
+  assert.notEqual(readingTable.headerBg, 'rgba(0, 0, 0, 0)', `阅读态表头底色绘制（实际 ${readingTable.headerBg}）`)
   assert.equal(await page.evaluate(() => window.liveHtmlSent().filter((m) => m.kind === 'edit.request').length), 0,
     '模式切换零写回')
   passed++
   console.log('[LiveHTML][PASS] 阅读态渲染：合并单元格绘制 + docScope + 净化负向')
+
+  // ---- 场景 K（#613）：文档 <style> 裸标签覆盖默认边框（可覆盖性，绘制层）----
+  // 文档样式按 docScope 全篇生效，覆盖验证独立装载第二文档（真实 init
+  // 换文档链路，docStyle 随新文档重装载）：docStyle 产物（:where 标记
+  // 前缀 + 裸标签）与内置默认同为 (0,0,1) 特异性，层叠序后置即胜——
+  // 作者无需提高特异性即可改写默认表格观感
+  await page.evaluate((mode) => window.setLiveHtmlMode(mode), 'live')
+  await page.evaluate((text) => window.initLiveHtmlDoc(text), OVERRIDE_DOC)
+  await page.locator('.vsidian-live-html').first().waitFor({ timeout: 5000 })
+  await page.waitForTimeout(150)
+  const overrideHosts = await reads()
+  const overrideHost = overrideHosts.find((h) => (h.text ?? '').includes('覆盖态单元格'))
+  assert.ok(overrideHost, '覆盖文档表格宿主在场（渲染态）')
+  assert.equal(overrideHost.tablePresent, true, '覆盖文档表格渲染（净化剥 style、docStyle 走源文装载）')
+  assert.equal(overrideHost.cellBorderStyle, 'none',
+    `Live 文档 <style> 裸标签覆盖默认边框（实际 ${overrideHost.cellBorderStyle}）`)
+  await page.evaluate((mode) => window.setLiveHtmlMode(mode), 'reading')
+  // 等表格块本身：覆盖文档首个 reading-html 块是净化为空的纯 style 块
+  //（display:none 恒不可见，等它可见会超时）
+  await page.locator('.vsidian-reading-html table').first().waitFor({ timeout: 5000 })
+  await page.waitForTimeout(150)
+  const overrideReading = (await page.evaluate(() => window.readReadingHtmls()))
+    .find((b) => (b.text ?? '').includes('覆盖态单元格'))
+  assert.ok(overrideReading, '阅读态覆盖文档表格渲染')
+  assert.equal(overrideReading.cellBorderStyle, 'none',
+    `阅读态文档样式覆盖同样生效（实际 ${overrideReading.cellBorderStyle}）`)
+  passed++
+  console.log('[LiveHTML][PASS] 文档 <style> 裸标签覆盖默认边框（Live/Reading 双态，可覆盖性）')
 
   // ---- 收尾：页面错误收集 ----
   assert.deepEqual(errors, [], '无页面错误（脚本不执行、装饰切换无异常）')
