@@ -54,7 +54,8 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
 
   it('台账诚实性：已发行版本必有日期，未发行与实验入口恒为候选无日期（再次发行时显式更新本断言并人工落账）', () => {
     // 1.1.0（2026-10-16）为首个随本体发行的版本；1.2.0（2026-10-18）
-    // 为首个兼容性修订发行；1.0.0 候选记录与全部
+    // 为首个兼容性修订发行；1.3.0（2026-10-20）为首个新增能力发行；
+    // 1.0.0 候选记录与全部
     // 实验入口保留候选口径——candidate 携带日期 = 伪造发行史。
     const byVersion = new Map(ADDON_API_RELEASES.map((r) => [r.version, r]))
     expect(byVersion.get('1.0.0')?.status).toBe('candidate')
@@ -63,6 +64,8 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
     expect(byVersion.get('1.1.0')?.releasedAt).toBe('2026-10-16')
     expect(byVersion.get('1.2.0')?.status).toBe('released')
     expect(byVersion.get('1.2.0')?.releasedAt).toBe('2026-10-18')
+    expect(byVersion.get('1.3.0')?.status).toBe('released')
+    expect(byVersion.get('1.3.0')?.releasedAt).toBe('2026-10-20')
     for (const record of ADDON_API_RELEASES) {
       if (record.status === 'released') {
         expect(record.releasedAt, `已发行版本 ${record.version} 须携带日期`).toMatch(/^\d{4}-\d{2}-\d{2}$/)
@@ -76,7 +79,7 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
     }
   })
 
-  it('#582 页面语言独立登记双页面稳定候选面，不冒充已经发行', () => {
+  it('#582 页面语言已随 1.3.0 发行落账（双页面稳定面）', () => {
     const entry = ADDON_API_ENTRIES.find((item) => item.id === 'page-locale')
     expect(entry).toMatchObject({
       group: 'page-sdk', layer: 'stable-candidate',
@@ -90,7 +93,7 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
       'test/unit/addonPageLocale.test.ts', 'test/addonApi/publicApiConsumer.ts',
       'test/browser/addonSettingsContext.mjs', 'test/integration/suite/addonT02Cases.ts',
     ]))
-    expect(ADDON_API_RELEASES.some((release) => release.summary.includes('#582'))).toBe(false)
+    expect(ADDON_API_RELEASES.some((release) => release.version === '1.3.0' && release.summary.includes('#582'))).toBe(true)
   })
 
   it('实验入口 cm6 在案且与实验条目互相咬合', () => {

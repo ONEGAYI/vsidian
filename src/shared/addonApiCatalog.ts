@@ -1289,4 +1289,14 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
     // 参考文档按全台账合并呈现。
     experimental: [],
   },
+  {
+    version: '1.3.0',
+    status: 'released',
+    releasedAt: '2026-10-20',
+    summary:
+      '新增能力与语义澄清（随 Vsidian 1.3.0 发布）：页面 SDK 新增可选只读 locale 面（编辑器页与设置页，#582）；settings.get() 快照新增可选成员 userValues 与 workspaceValues（各作用域层显式保存值，#590）；行为链 IME 组合定稿补驱动上下文 replaced 携带组合覆盖文本（取值范围放宽，类型形状不变，#593）。输入行为驱动语义归一——键入路径与表格空白行首笔规范化的 inputText 一律为原始键入字符（#597、#600），IME 定稿路径内置补全/包裹重建事务退出行为链驱动面（#595）；归一属兼容性修订而非破坏性变更（涉及形态从未载入已发行契约文档）。无新增实验入口。',
+    // 本版本不新增实验入口，既有五个入口的兼容清单保留在 1.0.0 记录，
+    // 参考文档按全台账合并呈现。
+    experimental: [],
+  },
 ]
