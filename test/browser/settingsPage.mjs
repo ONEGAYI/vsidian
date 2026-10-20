@@ -31,6 +31,13 @@ try {
         window.sentMessages.push(message)
         setTimeout(() => {
           if (message.kind === 'settings.set') Object.assign(window.savedSettings, message.values)
+          // #602 分层口径：浏览器层没有真宿主，stub 模拟宿主应答本身必要；
+          // 但 themesState 应答只允许发生在「请求已先经 postMessage 记入
+          // sentMessages」之后（上方 push 先于本 setTimeout），并由装载后
+          // 的 sentMessages 断言显性钉住 webview 确实发起过请求——不是
+          // 静默自答。宿主转发→应答链路不由本套件覆盖：由单元测试
+          // settingsPageHost（转发断言）与真宿主集成 addonThemeSettingsHost
+          // （设置页「外观→主题」候选 DOM 断言）钉住。
           if (message.kind === 'addons.themesGet' || (message.kind === 'settings.set' && 'appearance.theme' in message.values)) {
             window.dispatchEvent(new MessageEvent('message', { source: window, data: {
               kind: 'addons.themesState', version: 0, themes: [],
@@ -51,6 +58,10 @@ try {
     // 导航按钮；「编辑器」按钮仍存在（下一行 exact 匹配保证）
     const nav = page.locator('.vsidian-settings-nav-item').first()
     await nav.waitFor()
+    // #602 显性契约：设置页装载即发 addons.themesGet（settingsMain 装载
+    // 即拉取）——stub 的 themesState 应答必须对应真实发出的请求，而非
+    // 静默自答（宿主转发缺陷曾在浏览器层被 stub 应答掩盖，#602）
+    await page.waitForFunction(() => window.sentMessages.some((m) => m.kind === 'addons.themesGet'), null, { timeout: 8000 })
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).waitFor()
     const paint = await nav.evaluate(el => {
       const cs = getComputedStyle(el)

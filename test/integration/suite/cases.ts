@@ -1307,7 +1307,7 @@ interface LinkLogData {
     /** #159 块引用目标（与 heading 互斥） */
     blockId?: string
     candidates?: string[]
-    locate?: 'custom-panel' | 'native' | 'none'
+    locate?: 'custom-panel' | 'native' | 'native-line' | 'none'
   }>
 }
 
@@ -3543,6 +3543,53 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.line === 9999 && e.locate === 'none')
     // 已开面板重显照常（可打开但定位失败则提示——面板仍在场）
     await waitSessionReady('nav-target.md')
+  }],
+
+  ['双链可读文本行定位：text 原生 reveal 与无效锚点矩阵（越界/形态非法）（#611）', async () => {
+    await openWithEditor('line-links.md')
+    await waitSessionReady('line-links.md')
+    const uri = wsUri('line-links.md').toString()
+
+    // 有效锚点：[[nav-target.ts#line=2]] —— 原生文本编辑器打开（双链限定
+    // 的 #line 锚点经 parseTextAnchorSpec/resolveTextNav 解析），日志记录
+    // native-line（#611：原生文本行定位独立枚举，与 custom-panel 的本扩
+    // 展面板挂载定位区分）。落行不断言 selection：双链分支只 revealRange
+    //（滚动视口）不设 selection（普链 #534 分支才设置），3 行目标的
+    // visibleRanges 也无落点区分度——定位成功的观测面即本日志
+    await injectWikilink(uri, 'nav-target.ts#line=2')
+    const editor = await poll('双链原生编辑器打开', async () => {
+      const e = vscode.window.activeTextEditor
+      return e && e.document.uri.fsPath === wsUri('nav-target.ts').fsPath ? e : undefined
+    })
+    assert(editor.document.getText().startsWith('export const a'), 'text 目标应原生打开')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'line=2' && e.locate === 'native-line')
+
+    // 首行锚点矩阵（#616 复审 001）：line=1 与 range 首行形态（1-3 定界 /
+    // -3 开放端）解析成功并执行 revealRange(0,0)——定位落在第 1 行也须
+    // 如实记 native-line，「是否定位」不以其行号 > 1 代替（无锚点/非法
+    // 锚点维持 none，见下方失败侧）
+    await injectWikilink(uri, 'nav-target.ts#line=1')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'line=1' && e.locate === 'native-line')
+    await injectWikilink(uri, 'nav-target.ts#range=1-3')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'range=1-3' && e.locate === 'native-line')
+    await injectWikilink(uri, 'nav-target.ts#range=-3')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'range=-3' && e.locate === 'native-line')
+
+    // 越界：目标可打开但定位失败——打开照常（顶部）+ locate none（无效
+    // 锚点 toast 为宿主通知，集成以执行日志断言——同 #534 口径）
+    await injectWikilink(uri, 'nav-target.ts#line=9999')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'line=9999' && e.locate === 'none')
+
+    // 锚点形态非法（非 line=/range= 键值形态）：parseTextAnchorSpec 判
+    // format 失败——打开照常 + locate none（与越界同一失败侧语义）
+    await injectWikilink(uri, 'nav-target.ts#二行')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === '二行' && e.locate === 'none')
   }],
 
   ['图片显示：本地工作区图片经宿主通道装载，缺失图进入可重试错误态，零写回（#10）', async () => {

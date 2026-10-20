@@ -254,8 +254,10 @@ export interface WikilinkLogEntry {
   /** 请求的块引用目标（#159；与 heading 互斥） */
   blockId?: string
   /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；native=原生
-   *  默认编辑器打开（#608 图片/PDF/音视频附件）；none=无定位 */
-  locate?: 'custom-panel' | 'native' | 'none'
+   *  默认编辑器打开（#608 图片/PDF/音视频附件，无定位语义）；native-line=
+   *  原生文本编辑器行定位（#611 可读文本目标的 #line/#range 锚点，
+   *  showTextDocument + revealRange）；none=无定位 */
+  locate?: 'custom-panel' | 'native' | 'native-line' | 'none'
 }
 
 interface SessionEntry {
@@ -2820,6 +2822,10 @@ export function createTextEditorProvider(
     }
     if (openChannel === 'native-text') {
       let jumpLine = 1
+      // 合法锚点已解析并将执行行定位（#616 复审 001）：不以 jumpLine > 1
+      // 代替「是否定位」——line=1 与 range 首行形态（1-3 / -3 开放端）
+      // jumpLine 为 1，revealRange(0,0) 照常执行，locate 须记 native-line
+      let anchorResolved = false
       let anchorInvalid: string | null = null
       if (parsed.heading !== null || parsed.blockId !== null) {
         const anchorRaw = parsed.heading !== null ? parsed.heading : `^${parsed.blockId}`
@@ -2831,6 +2837,7 @@ export function createTextEditorProvider(
           const resolved = resolveTextNav(anchorSpec, textDoc.lineCount)
           if (resolved.ok) {
             jumpLine = resolved.nav.jumpLine
+            anchorResolved = true
           } else {
             anchorInvalid = anchorRaw
           }
@@ -2842,7 +2849,7 @@ export function createTextEditorProvider(
         path: targetPath,
         heading: parsed.heading ?? undefined,
         blockId: parsed.blockId ?? undefined,
-        locate: jumpLine > 1 ? 'custom-panel' : 'none',
+        locate: anchorResolved ? 'native-line' : 'none',
       })
       const textEditor = await vscode.window.showTextDocument(targetUri, { preview: false })
       const lineIdx = Math.min(jumpLine - 1, Math.max(0, textEditor.document.lineCount - 1))
