@@ -58,7 +58,7 @@ import { getCompositionSelectionSnapshot } from './symbolCompositionState'
 import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
-import { blankRowInputPlan } from './tableEditing'
+import { blankRowRawInput } from './tableEditing'
 import { chainAt } from '../shared/markdownDoc'
 
 /** 代码上下文节点（含边界标记）：CodeMark/CodeInfo 归入围栏内部口径 */
@@ -97,6 +97,9 @@ interface TypedAutoclosePending {
    *  基准——「净长度为零」不等于「未修改」，纪元是组件触碰的唯一
    *  可辨证据 */
   readonly editEpoch: number
+  /** #600 blankRow 规范化重映射在场时给出闭合落地后的光标（整行重建的
+   *  光标语义随 base——在闭合符后；普通键入路径缺省居中） */
+  readonly cursorAfterClose?: number
 }
 
 const pendingTypedAutoclose = StateEffect.define<TypedAutoclosePending>()
@@ -264,26 +267,11 @@ const autocloseInputFilter = EditorState.transactionFilter.of((tr) => {
   if (!shouldAutoclose(entry, ctx)) {
     return tr
   }
-  // 表格空白行首笔（评审 002）：tableEditing 的 normalizeBlankRowInput
-  // 在本 filter 之后的链上重建事务并丢弃 effect 载体——兜底 attempt 拿
-  // 不到 pending、闭合符丢失（终态 | | | (|）。此分支维持 #597 前的原子
-  // 改写：规范化以 open+close 成对内容进行，与既有行为逐字一致（同
-  // 「闭合越过分支保持 filter 内改写」的例外模式；blankRowInputPlan 纯
-  // 函数预判，不依赖 tableEditing filter 的执行序）
-  if (blankRowInputPlan(state, insertion.from, insertion.from, ch)) {
-    return {
-      changes: { from: insertion.from, insert: entry.open + entry.close },
-      selection: EditorSelection.cursor(insertion.from + entry.open.length),
-      effects: addAutoclosePair.of({
-        from: insertion.from,
-        to: insertion.from + entry.open.length + entry.close.length,
-        open: entry.open,
-        close: entry.close,
-      }),
-      annotations: keepEvent,
-      scrollIntoView: tr.scrollIntoView,
-    }
-  }
+  // 表格空白行首笔（#600 统一）：与普通键入同路径放行原始单字符——
+  // normalizeBlankRowInput 的整行重建经 blankRowRawInput 载体保全注解与
+  // effect（typedAutocloseScheduler 按 insertAt 落点重映射补闭合），终
+  // 态/光标与 #597 前原子改写逐字一致，行为链以原始单字符驱动
+  //
   // #597 方案 3：放行原始单字符插入（不再原子改写）——链驱动以原始形态
   // （inputText 单字符）恰一次驱动，内置兜底在微任务时点补闭合（M1 链
   // 先、M3 内置后，ADR-0020 裁决一）。重指定同形事务（变更/选区/滚动
@@ -408,7 +396,7 @@ function attemptTypedAutoclose(view: EditorView, pending: TypedAutoclosePending)
   }
   view.dispatch({
     changes: { from: pos, insert: pending.close },
-    selection: EditorSelection.cursor(pos),
+    selection: EditorSelection.cursor(pending.cursorAfterClose ?? pos),
     effects: addAutoclosePair.of({
       from: pending.pos,
       to: pos + pending.close.length,
@@ -422,6 +410,14 @@ function attemptTypedAutoclose(view: EditorView, pending: TypedAutoclosePending)
     annotations: builtinEditOrigin.of(true),
     scrollIntoView: true,
   })
+}
+
+/** 键入补全 pending 是否在本事务上（#600）：blankRow 规范化整行重建会
+ *  丢注解（含 symbolRawInput），出站强制暂缓改由 liveInstance 以本判定
+ *  等价触发——pending 与 symbolRawInput 在 filter 放行的原始事务上恒同
+ *  现，重建路径以 pending 为暂缓证据不弱于原条件 */
+export function hasTypedAutoclosePending(tr: Transaction): boolean {
+  return tr.effects.some((e) => e.is(pendingTypedAutoclose))
 }
 
 /** #597 兜底入队点：键入路径兜底 attempt 的 updateListener。不得从
@@ -441,7 +437,21 @@ export const typedAutocloseScheduler = EditorView.updateListener.of((update) => 
   for (const tr of update.transactions) {
     const effect = tr.effects.find((e) => e.is(pendingTypedAutoclose))
     if (effect) {
-      const pending = effect.value
+      // #600 blankRow 规范化重映射：pending 的 pos/docLength 是 filter 时
+      // 点（规范化前）坐标——normalizeBlankRowInput 整行重建后原样转发
+      // 了 effect，这里按重建事务携带的原始载荷注解换算到规范化后文档
+      // （open 落点 = insertAt、长度基准 = 本事务后文档长度、光标随 base
+      // 语义在闭合符后）。注册表 open 不含 | 与换行，escapeCellText 恒
+      // 等长——若未来出现会变宽的转义，attempt 的追加式校验自然让位
+      const raw = tr.annotation(blankRowRawInput)
+      const pending = raw
+        ? {
+            ...effect.value,
+            pos: raw.insertAt,
+            docLength: tr.newDoc.length,
+            cursorAfterClose: raw.insertAt + effect.value.open.length + effect.value.close.length,
+          }
+        : effect.value
       queueMicrotask(() => attemptTypedAutoclose(update.view, pending))
     }
   }

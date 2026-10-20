@@ -12,7 +12,7 @@
 // 自研拆分，供 live 装饰与编辑链路使用——阅读视图渲染侧的对应偏差见
 // docs/perf/2026-09-table-cell-editing.md「已知限制」。
 import { describe, it, expect } from 'vitest'
-import {
+import { containerPrefixLen,
   splitTableRowCells,
   tableRowCellsForColumns,
   planBlankRowCellInput,
@@ -99,6 +99,9 @@ describe('splitTableRowCells：GFM 单元格切分', () => {
     const edit = planBlankRowCellInput(' | | ', 20, 3, 23, 23, 'x|y')!
     expect(edit.insert).toBe('| | x\\|y| |')
     expect(edit.selection).toBe(28)
+    // #600：用户文本（含转义形态）在规范化后文档的落点
+    expect(edit.insertAt).toBe(20 + edit.insert.indexOf('x'))
+    expect(edit.selection).toBe(edit.insertAt + 'x\\|y'.length)
   })
 
   it.each([2, 3])('无边界纯空白行的第 %i 列数首次输入补全源管道和目标格', (columns) => {
@@ -107,8 +110,19 @@ describe('splitTableRowCells：GFM 单元格切分', () => {
       const pos = tableRowCellsForColumns(original, 20, columns)![col]!.contentFrom
       const edit = planBlankRowCellInput(original, 20, columns, pos, pos, 'X')
       const expected = '|' + Array.from({ length: columns }, (_, index) => ` ${index === col ? 'X' : ''}|`).join('')
-      expect(edit).toEqual({ from: 20, to: 25, insert: expected, selection: 20 + expected.indexOf('X') + 1 })
+      expect(edit).toEqual({ from: 20, to: 25, insert: expected, selection: 20 + expected.indexOf('X') + 1, insertAt: 20 + expected.indexOf('X') })
     }
+  })
+
+  it('#600 insertAt：用户文本在规范化后文档的落点（前缀行同一基准），selection 紧随其后', () => {
+    const lineText = '>  | | '
+    const prefixLen = containerPrefixLen(lineText)
+    const cells = tableRowCellsForColumns(lineText, 30, 3, prefixLen)!
+    const from = cells[2]!.contentFrom
+    const edit = planBlankRowCellInput(lineText, 30, 3, from, from, '(', prefixLen)!
+    expect(edit.insert.startsWith('> ')).toBe(true)
+    expect(edit.insertAt).toBe(30 + edit.insert.indexOf('('))
+    expect(edit.selection).toBe(edit.insertAt + 1)
   })
 
   it('空单元格：| a || b | 的中间空段是空格零内容单元格', () => {

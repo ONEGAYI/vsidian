@@ -514,6 +514,34 @@ try {
     assert.ok(samples.every((text) => text === 'hello text' || text === 'hello 【text】'),
       `渲染帧间不得见包裹中间态（如 'hello 【' 半成品）：${JSON.stringify(samples)}`)
   })
+  // ---- #600 表格空白行首笔：规范化接管域的原始输入契约（真实键盘验收；
+  // 行为链载荷/组件让位面在 symbolTypedPath 单测与 T07 套件钉）----
+  const BLANK_ROW_DOC = 'a|b|c\n---|---|---\n | | '
+  await scenario('#600 空白网格行键入 ( ：整行规范化 + 兜底闭合，终态与 base 逐字一致、光标在闭合符后', { doc: BLANK_ROW_DOC, cursor: 23 }, async (page) => {
+    await page.keyboard.insertText('(')
+    await check(page, 'a|b|c\n---|---|---\n| | | ()|', 26, 'blankRow 补全')
+  })
+  await scenario('#600 空白网格行补全单笔出站：整行规范化与兜底闭合合并一笔 edit.request', { doc: BLANK_ROW_DOC, cursor: 23 }, async (page) => {
+    const before = await editRequestCount(page)
+    await page.keyboard.insertText('(')
+    await check(page, 'a|b|c\n---|---|---\n| | | ()|', 26, '终态')
+    const after = await awaitSingleOutbound(page, before)
+    assert.equal(after, before + 1, `blankRow 补全应恰一笔 edit.request：${JSON.stringify(await editRequestsOf(page))}`)
+    const last = (await editRequestsOf(page)).at(-1)
+    assert.deepEqual(last.changes, [{ offset: 18, length: 5, text: '| | | ()|' }],
+      `单笔净变更应为整行规范化合并闭合：${JSON.stringify(last)}`)
+  })
+  await scenario('#600 空白网格行补全撤销：ack 单记录后一次外部撤销整体恢复原文行', { doc: BLANK_ROW_DOC, cursor: 23 }, async (page) => {
+    await page.keyboard.insertText('(')
+    await check(page, 'a|b|c\n---|---|---\n| | | ()|', 26, '终态')
+    await page.waitForFunction(() =>
+      window.readHostMessages().filter((message) => message.kind === 'edit.request').length >= 1)
+    // 宿主撤销单条记录 = 撤整笔整行替换（残留 () 或 ( 即单笔契约破坏）；
+    // 光标随外部变更钳入空白网格行首格内容位（19）——既有外部钳制语义
+    await page.evaluate(() => window.ackAndExternalUndo([{ offset: 18, length: 9, text: ' | | ' }], 2))
+    await check(page, BLANK_ROW_DOC, 19, '一次撤销整体恢复')
+  })
+
   await scenario('#597 多 range 键入 【：各段同步包裹、选区回设覆盖各段原文、逐键单笔出站', { doc: '甲段\n\n乙段', cursor: 0 }, async (page) => {
     // 第一键：跨段单 range 选区 → 兜底按段重建，产物为多 range（各段原文）
     let before = await editRequestCount(page)

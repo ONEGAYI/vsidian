@@ -78,7 +78,16 @@ export const tablePipeKeyHandler: Command = (view: EditorView): boolean => {
     const range = state.selection.main
     const plan = blankRowInputPlan(state, range.from, range.to, '\\|')
     if (plan) {
-      view.dispatch({ changes: plan, selection: { anchor: plan.selection } })
+      // #600 评审 001：专用入口同样纳入「原始输入 → 行为链」——携带原始
+      // | 载体（blankRowRawInput 兼作 protectGridCellContent 的终态放行标
+      // 记，见其首行门）+ userEvent 补齐驱动门；转义、规范化后坐标与一
+      // 次出站保持（无 pending，不进暂缓）
+      view.dispatch({
+        changes: plan,
+        selection: { anchor: plan.selection },
+        userEvent: 'input.type',
+        annotations: blankRowRawInput.of({ inputText: '|', insertAt: plan.insertAt }),
+      })
       return true
     }
   }
@@ -507,12 +516,22 @@ const protectGridPointerSelection = EditorState.transactionFilter.of((tr) => {
   }
 })
 
+/** #600 评审 002：格内转义改写的插入原文。protectGridCellContent 在
+ *  normalizeBlankRowInput 之前执行（扩展数组靠后者先过滤），含管道的
+ *  插入先被 escapeCellText 改写、blankRowRawInput 再捕获就成了转义后
+ *  形态——本注解携带转义前原文供其回溯；位置/结构改写（截断、格界
+ *  钳制）不附（原文与事务形状不再对应），此时载荷与 base 同形态 */
+const cellInputEscaped = Annotation.define<string>()
+
 /** 原生删除命令可跨过隐藏源码。格内开始的编辑只修改这一格的可见内容；
  * 过滤器同时覆盖键盘删除与浏览器 DOM observer 回报的输入事务。
  * #57：跨格 / 整表选区的删除与替换经 planGridSelectionEdit 与可见选区
  * 解耦——整表覆盖删整块，部分覆盖只删各格内容交集，隐藏结构始终保留。 */
 const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
   if (tr.annotation(tableRegionReplacement)) return tr
+  // #600 评审 001：已带 blankRowRawInput 的事务是规范化终态（管道键入口
+  //  整行计划直发）——格内防护按区间截断会把它塞回单格，放行
+  if (tr.annotation(blankRowRawInput)) return tr
   if (!tr.docChanged || (!tr.isUserEvent('delete') && !tr.isUserEvent('input'))) return tr
   const ranges = tr.startState.selection.ranges
   if (ranges.length !== 1) return tr
@@ -555,11 +574,15 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
   const cellInsert = escapeCellText
   const changes: Array<{ from: number; to: number; insert: string }> = []
   let clipped = false
+  let escapedRaw: string | null = null // #600 评审 002：转义前插入原文（跨 iterChanges 累积）
   tr.changes.iterChanges((from, to, _fromB, _toB, insert) => {
     // 空白行首笔规范化属于结构补全，不应被本过滤器截断。
     const normalize = (text: string): string => {
       const out = cellInsert(text)
-      if (out !== text) clipped = true // insert 被改写也必须重写事务
+      if (out !== text) {
+        clipped = true // insert 被改写也必须重写事务
+        escapedRaw = (escapedRaw ?? '') + text // 保留转义前原文（见声明处）
+      }
       return out
     }
     if (from === to) {
@@ -631,7 +654,10 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
   return {
     changes,
     selection: { anchor: changes[0]!.from + (clearedCell ? 0 : changes[0]!.insert.length) },
-    annotations: event ? Transaction.userEvent.of(event) : undefined,
+    annotations: [
+      ...(event ? [Transaction.userEvent.of(event)] : []),
+      ...(escapedRaw !== null ? [cellInputEscaped.of(escapedRaw)] : []),
+    ],
     scrollIntoView: tr.scrollIntoView,
   }
 })
@@ -986,6 +1012,14 @@ function prepareGridInputPadding(view: EditorView): void {
     effects: region ? setTableRegion.of(region) : undefined })
 }
 
+/** #600 空白行规范化的原始输入载体：normalizeBlankRowInput 整行重建事
+ *  务时附上——inputText 为规范化前的原始键入文本（该路径恒 from===to
+ *  纯插入，replaced 语义即 null），insertAt 为用户文本在规范化后文档
+ *  中的落点（plan.insertAt 同源）。链驱动（maybeDriveAddonBehaviors）
+ *  据此以原始载荷驱动；符号兜底（typedAutocloseScheduler）据此把 pending
+ *  坐标重映射到规范化后文档——规范化对行为链与符号兜底透明 */
+export const blankRowRawInput = Annotation.define<{ inputText: string; insertAt: number }>()
+
 /** 普通键入、粘贴在空白行首笔规范化；IME 候选过程可能多次替换同一区间，
  * 此处不能逐笔改整行，否则宿主收到的变更坐标与候选终态不一致。 */
 const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
@@ -1000,11 +1034,22 @@ const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
   const { from, to, text } = change
   const plan = blankRowInputPlan(tr.startState, from, to, text)
   if (!plan) return tr
+  // #600 载体保全：userEvent 显式重挂（Transaction 注解无公开枚举面，
+  // 逐字转发做不到公开 API 内）；symbolRawInput 不在此转发——出站暂缓
+  // 由 liveInstance 按 pending effect 在场等价判定（pending 与该注解在
+  // 原始事务上恒同现）。effect 经公开 tr.effects 原样携带（坐标类 effect
+  // 的重映射由消费方按 blankRowRawInput.insertAt 补偿——本 filter 无从
+  // 知晓各 effect 的语义，不建第二份映射表）；原始键入载荷随重建事务
+  // 外发，规范化对行为链透明
   const event = tr.annotation(Transaction.userEvent)
   return {
     changes: plan,
     selection: { anchor: plan.selection },
-    annotations: event ? Transaction.userEvent.of(event) : undefined,
+    annotations: [
+      ...(event ? [Transaction.userEvent.of(event)] : []),
+      blankRowRawInput.of({ inputText: tr.annotation(cellInputEscaped) ?? text, insertAt: plan.insertAt }),
+    ],
+    effects: tr.effects,
   }
 })
 

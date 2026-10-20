@@ -18,6 +18,8 @@ import { EditorSelection } from '@codemirror/state'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { addonEditOriginTag } from '../../src/webview/liveInstance'
 import { planSelectionWrap } from '../../src/shared/symbolWrap'
+import { containerPrefixLen, splitTableRowCells } from '../../src/shared/tableCells'
+import { tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { findSelectionWrapEntry } from '../../src/shared/symbols'
 import type { SerChange, WebviewToHost } from '../../src/shared/protocol'
 
@@ -164,15 +166,181 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     expect(view.state.doc.toString()).toBe('中（\n')
   })
 
-  it('表格空白行首笔补全照常：blankRow 规范化链上兜底载体不丢（评审 002）', async () => {
+  // ---- #600 表格空白行首笔：原始输入语义进入规范化接管域 ----
+
+  it('表格空白行首笔 ( ：原始输入驱动恰一次（replaced 恒 null），快照为规范化后文档，兜底重映射补闭合、终态与 base 逐字一致', async () => {
     const text = 'a|b|c\n---|---|---\n | | \n'
-    const { view } = setup(text)
+    const { drives, docAtDrive, view } = setup(text)
     view.dispatch({ selection: { anchor: 23 } })
     view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
     await settleMicrotasks()
-    // 期望与 #597 前（原子改写经 blankRow 规范化）逐字一致：
-    // 红形态 | | | (|（normalizeBlankRowInput 重建事务丢 effect 载体，兜底不发生）
+    // 原始输入契约（#600）：inputText 为原始单字符、纯插入 replaced 为
+    // null——不再是规范化整行载荷（红形态：inputText='| | | ()|'、
+    // replaced={from:18,to:23,text:' | | '}）
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: '(', replaced: null },
+    ])
+    // M1 时点快照：规范化整行已落、内置闭合未落（M1→M3 微任务序不变）
+    expect(docAtDrive).toEqual(['a|b|c\n---|---|---\n| | | (|\n'])
+    // 终态/光标与 base（#597 前原子改写经规范化）逐字一致：光标在闭合符后
     expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | ()|\n')
+    expect(view.state.selection.main.head).toBe(26)
+  })
+
+  it('表格空白行首笔：规范化整行与兜底闭合合并单笔 edit.request，一次 Ctrl+Z 整体恢复', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { sent, view } = setup(text)
+    useSegmentClock()
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await vi.advanceTimersByTimeAsync(20)
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | ()|\n')
+    const reqs = editRequests(sent)
+    // 恰一笔出站（symbolRawInput 强制暂缓 + 兜底触碰并入同段）
+    expect(reqs).toHaveLength(1)
+    expect(applySer(text, reqs[0]!.changes)).toBe('a|b|c\n---|---|---\n| | | ()|\n')
+    expect(undoOnceOver(reqs, text)).toBe(text)
+  })
+
+  it('表格空白行首笔非符号字符：同样以原始输入驱动，载荷为原字符而非规范化整行', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { drives, docAtDrive, view } = setup(text)
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: 'x' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: 'x', replaced: null },
+    ])
+    expect(docAtDrive).toEqual(['a|b|c\n---|---|---\n| | | x|\n'])
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | x|\n')
+  })
+
+  it('表格空白行首笔：同步组件在规范化后快照上改写开符号，内置兜底让位不重复闭合', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { view } = setup(text, (input, v) => {
+      if (input.inputText === '(') {
+        // 组件按快照（规范化后文档）坐标改写：(| → （；纪元守卫令兜底让位
+        const open = v.state.doc.toString().indexOf('(')
+        v.dispatch({
+          changes: { from: open, to: open + 1, insert: '（' },
+          annotations: addonEditOriginTag.of({
+            origins: [{ addonId: 'pub.demo', opId: 'op-t1', undo: 'atomic' }],
+          }),
+        })
+      }
+    })
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    // 组件产出为终态：兜底不得再补 )（红形态：| | | （)|）
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | （|\n')
+  })
+
+  it('表格空白行键入 | 经管道键入口：恰一次原始驱动（inputText 为原字符），转义与规范化终态不变（评审 001）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { drives, sent, view } = setup(text)
+    view.dispatch({ selection: { anchor: 23 } })
+    expect(tablePipeKeyHandler(view)).toBe(true)
+    await settleMicrotasks()
+    // 红形态：生产 handler 事务无 userEvent/载体，行为回调 0 次
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: '|', replaced: null },
+    ])
+    // 终态与 base 逐字一致：原字符 | 转义入末格、单笔出站
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | \\||\n')
+    expect(editRequests(sent)).toHaveLength(1)
+  })
+
+  it('表格空白行多字符含管道输入：载荷为转义前原文（x|y 与 x\|y 可区分），结构转义保持（评审 002）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const a = setup(text)
+    a.view.dispatch({ selection: { anchor: 23 } })
+    a.view.dispatch({ changes: { from: 23, insert: 'x|y' }, selection: { anchor: 26 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    // 红形态：protectGridCellContent 先转义，载荷成四字符 x\|y
+    expect(a.drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: 'x|y', replaced: null },
+    ])
+    expect(a.view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | x\\|y|\n')
+    // 原文 x\|y（用户已手动转义）：载荷四字符，两者可区分
+    const b = setup(text)
+    b.view.dispatch({ selection: { anchor: 23 } })
+    b.view.dispatch({ changes: { from: 23, insert: 'x\\|y' }, selection: { anchor: 27 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    expect(b.drives[0]!.inputText).toBe('x\\|y')
+    expect(b.view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | x\\|y|\n')
+  })
+
+  it('表格空白行单字符 | 经事务入口：载荷为原字符，格内转义与规范化终态不变（评审 002 覆盖面）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { drives, view } = setup(text)
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: '|' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: '|', replaced: null },
+    ])
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | \\||\n')
+  })
+
+  it('表格空白行首笔：异步组件后至覆盖内置兜底产物（内置先落地、修饰后至覆盖）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { view } = setup(text, async (input, v) => {
+      if (input.inputText === '(') {
+        // 异步行为（await 后至）：内置兜底已先落地 ()，组件按快照坐标
+        // 后至改写 open——（组件产出为终态（既有微任务序契约同型继承）
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        const open = v.state.doc.toString().indexOf('(')
+        v.dispatch({
+          changes: { from: open, to: open + 1, insert: '（' },
+          annotations: addonEditOriginTag.of({
+            origins: [{ addonId: 'pub.demo', opId: 'op-t2', undo: 'atomic' }],
+          }),
+        })
+      }
+    })
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    // 兜底先落地 | | | ()|；异步改写 open 后终态为组件产出，无二次闭合
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | （)|\n')
+  })
+
+  it('多光标含空白网格行：不进 blankRow 规范化（既有边界），驱动载荷为逐 range 拼接原字符', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { drives, view } = setup(text)
+    view.dispatch({ selection: EditorSelection.create([EditorSelection.cursor(1), EditorSelection.cursor(23)], 1) })
+    view.dispatch({
+      changes: [{ from: 1, insert: '(' }, { from: 23, insert: '(' }],
+      selection: EditorSelection.create([EditorSelection.cursor(2), EditorSelection.cursor(24)], 1),
+      userEvent: 'input.type',
+    })
+    await settleMicrotasks()
+    // 既有边界（#600 支持面）：normalizeBlankRowInput 只接管单变更事务，
+    // 多 range 键入直通不规范化；载荷与现行多 range 拼接语义一致
+    expect(view.state.doc.toString()).toBe('a(|b|c\n---|---|---\n | | (\n')
+    expect(drives).toHaveLength(1)
+    expect(drives[0]!.inputText).toBe('((')
+    expect(drives[0]!.replaced).toBeNull()
+  })
+
+  it('引用容器表格空白行首笔：前缀随行规范化，原始输入驱动与兜底重映射同构', async () => {
+    const text = '> a|b|c\n> ---|---|---\n>  | | \n'
+    const { drives, view } = setup(text)
+    const blank = view.state.doc.line(3)
+    // 前缀感知切分取目标格内容起点（#296 口径，前缀长度与生产同源）
+    const prefixLen = containerPrefixLen(blank.text)
+    const pos = splitTableRowCells(blank.text, blank.from, prefixLen)[2]!.contentFrom
+    view.dispatch({ selection: { anchor: pos } })
+    view.dispatch({ changes: { from: pos, insert: '(' }, selection: { anchor: pos + 1 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: '(', replaced: null },
+    ])
+    expect(view.state.doc.toString()).toBe('> a|b|c\n> ---|---|---\n>  | | | ()|\n')
+    // 光标在闭合符后（与 base 同构）：head 左邻字符是 ) 而非 (
+    expect(view.state.sliceDoc(view.state.selection.main.head - 1, view.state.selection.main.head)).toBe(')')
   })
 
   it('同步行为产出保留同开符号与光标时补全兜底让位：不重复补闭合（评审 001）', async () => {
