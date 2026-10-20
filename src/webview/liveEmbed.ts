@@ -43,7 +43,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
 import { mermaidFencesField } from './liveMermaid'
-import { chainAt } from '../shared/markdownDoc'
+import { chainAt, lineHasTableRow } from '../shared/markdownDoc'
 import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
 import { refEmbedTargetIsImage } from '../shared/refContent'
 import type { Tree } from '@lezer/common'
@@ -95,16 +95,17 @@ const EMIT_EXCLUDED = new Set([
   'HTMLBlock', 'Comment', 'CommentBlock',
 ])
 
-/** 表格内容行节点名（#248：spans 表的格内解码扫描行分类） */
-const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
+/** 表格内容行判定（#610 审查：行区间与 TableRow/Header 节点相交——
+ *  行首节点链查不到缩进/引用/列表内表格的行节点；事实源在 markdownDoc） */
+function lineIsTableRow(line: { text: string; from: number }, tree: Tree | null): boolean {
+  return tree !== null && lineHasTableRow(tree, line.from, line.from + line.text.length)
+}
 
 /** 单行的嵌入 occurrence（表格内容行走格内解码扫描——inner 解码语义、
  *  区间源文；其余行走原始行扫描）。sole 随行判定。 */
 function embedSpansOfLine(line: { text: string; from: number; to: number }, tree: Tree | null): LiveEmbedSpan[] {
   const sole = soleEmbedOfLine(line.text) !== null
-  const isTableRow = tree !== null &&
-    chainAt(tree, line.from).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
-  const hits = isTableRow ? scanEmbedsInTableRow(line.text, line.from) : scanEmbedsInLine(line.text, line.from)
+  const hits = lineIsTableRow(line, tree) ? scanEmbedsInTableRow(line.text, line.from) : scanEmbedsInLine(line.text, line.from)
   return hits.map((hit) => ({
     lineFrom: line.from,
     lineTo: line.to,

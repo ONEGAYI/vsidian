@@ -201,3 +201,37 @@ export function chainAt(tree: Tree, pos: number): SyntaxNode[] {
   }
   return chain
 }
+
+/** 表格内容行节点名（lezer GFM：TableHeader/TableRow）——行级表格判定的
+ *  单一事实源（vaultLinkExtract / liveEmbed / embedSlots 的行扫描准入
+ *  共用；#610 审查起三处私有副本归并于此） */
+export const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
+
+/** TableRow/Header 的合法祖先节点名（相交判定下潜剪枝：表格行只出现在
+ *  这些容器下，集外节点不含表格行。若解析器新增容器名导致误漏，判定
+ *  退化为原文字面行扫描——本判定引入前的既有行为，不会误判为表格行） */
+const TABLE_ROW_ANCESTOR_NAMES = new Set([
+  'Document', 'Table', 'Blockquote', 'BulletList', 'OrderedList', 'ListItem',
+])
+
+/** 物理行区间 [from, to) 内是否出现表格内容行节点（TableHeader/TableRow）：
+ *  按「节点区间与行区间相交」而非行首节点链判定——缩进/引用/列表内表格
+ *  的 TableRow 从容器前缀之后才开始，chainAt(行首) 查不到行节点（#610
+ *  审查：vaultLinkExtract 与 liveEmbed/embedSlots 的行首假设同源缺陷）。 */
+export function lineHasTableRow(tree: Tree, from: number, to: number): boolean {
+  const visit = (node: SyntaxNode): boolean => {
+    if (TABLE_ROW_NODE_NAMES.has(node.name)) {
+      return true
+    }
+    if (!TABLE_ROW_ANCESTOR_NAMES.has(node.name)) {
+      return false
+    }
+    for (const child of intersectingChildren(node, from, to)) {
+      if (visit(child)) {
+        return true
+      }
+    }
+    return false
+  }
+  return visit(tree.topNode)
+}
