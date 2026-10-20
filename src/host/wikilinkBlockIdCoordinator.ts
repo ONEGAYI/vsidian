@@ -29,6 +29,7 @@
 //   协调（V01 场景 5 及变体）。
 import { blockIdOfLine, collectBlockIds, standaloneBlockIdOf } from '../shared/blockId'
 import { parseWikilinkInner, scanWikilinksInLine } from '../shared/wikilink'
+import { scanWikilinksInTableRow } from '../shared/tableCellEmbed'
 import { planTargetBlockId, withdrawalGuard, type BlockIdWithdrawRecord } from '../shared/wikilinkBlock'
 
 /** 目标文档访问端口（vscode 层注入：openTextDocument 装载 + WorkspaceEdit）。
@@ -87,14 +88,22 @@ function markerForDoc(lfMarker: string, crlf: boolean): string {
 
 /** 来源 LF 全文中是否存在**结构上**指向 blockId 的块引用（F7）：逐行扫描
  *  合法双链并经 parseWikilinkInner 全等比对——`#^id` 以纯文本/代码块形态
- *  出现不算引用（不撤回真实链接的标记，也不被文本巧合误留） */
+ *  出现不算引用（不撤回真实链接的标记，也不被文本巧合误留）。
+ *  #607 评审轮：行扫描叠加表格解码视图（scanWikilinksInTableRow 并集）——
+ *  表格格内 `[[a#^id\|别名]]` 的原文字面 blockId 含 `\` 不符字符集（原文
+ *  扫描不识别），解码语义合法且索引侧已产边，协调器同口径识别。双扫描
+ *  不区分表格行（无 tree）：普通行同形态也被识别——多识别的方向是
+ *  「不撤回」（保守侧），与撤回判定的安全方向一致。 */
 function originTextReferencesBlockId(lfText: string, blockId: string): boolean {
   if (blockId === '') {
     return false
   }
   for (const rawLine of lfText.split('\n')) {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
-    for (const occurrence of scanWikilinksInLine(line)) {
+    const occurrences = line.includes('\\|')
+      ? [...scanWikilinksInLine(line), ...scanWikilinksInTableRow(line)]
+      : scanWikilinksInLine(line)
+    for (const occurrence of occurrences) {
       const parsed = parseWikilinkInner(occurrence.inner)
       if (parsed !== null && parsed.blockId === blockId) {
         return true

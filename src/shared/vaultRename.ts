@@ -61,6 +61,7 @@
 // 注入（与 vaultLink 同约定，与运行进程平台无关）。
 import * as path from 'node:path'
 import { planVaultLinkPath, shortnameLookupKeyOf, splitLineSuffix, type VaultLinkPathContext } from './vaultLink'
+import { isEscapedAt } from './tableCells'
 import type { VaultEdge } from './vaultIndexModel'
 
 /** 单条移动映射（单文件 rename/move 传 1 条；批量/目录移动传多条） */
@@ -999,7 +1000,18 @@ function buildBracketPathEdit(
   const hashAt = targetPart.indexOf('#')
   const pathRaw = hashAt >= 0 ? targetPart.slice(0, hashAt) : targetPart
   if (pathRaw.trim() === edge.target) {
+    // #607 评审轮防御：首分割命中的 pathRaw 以未配对反斜杠结尾、其后
+    // 紧邻转义管道（`\|`，isEscapedAt 语义——`\\|` 偶数配对不构成转义）
+    // 时，替换区间收窄一位排除该反斜杠——target 含尾随 `\` 的边（旧快照
+    // 升级窗口的原文字面形态、普通行 `\|` 双链）改写保真转义管道与别名。
     // 双链形态学不做 URL 编码（字面直写）；扩展名省略语义已在决策侧处理
+    if (pipeAt > 0 && isEscapedAt(inner, pipeAt) && pathRaw.endsWith('\\')) {
+      return {
+        start: baseOffset + openLen,
+        end: baseOffset + openLen + pathRaw.length - 1,
+        replacement: newTargetText,
+      }
+    }
     return {
       start: baseOffset + openLen,
       end: baseOffset + openLen + pathRaw.length,
