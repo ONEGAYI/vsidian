@@ -193,6 +193,23 @@ try {
   })
 
   // ---- 代码上下文 ----
+  for (const symbols of [true, false]) {
+    await scenario(`行内代码后 IME 句号：组合期保留反引号、结束恢复隐藏（符号辅助 ${symbols}）`,
+      { doc: '`test`', cursor: 6 }, async (page) => {
+        await page.evaluate((on) => {
+          window.setSymbolAutocomplete(on)
+          window.setSymbolSelectionWrap(on)
+        }, symbols)
+        const cdp = await page.context().newCDPSession(page)
+        await cdp.send('Input.imeSetComposition', { text: '。', selectionStart: 0, selectionEnd: 1 })
+        assert.equal(await page.locator('.cm-content').innerText(), '`test`。', '组合期间反引号保持可见')
+        await cdp.send('Input.insertText', { text: '。' })
+        await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent === 'test。')
+        await check(page, '`test`。', 7, '定稿后光标仍在句号后')
+        await page.keyboard.type('X')
+        await check(page, '`test`。X', 8, '后续输入在代码外')
+      })
+  }
   await scenario('代码块内括号照补、Markdown 强调抑制', { doc: CODE_DOC, cursor: 6 }, async (page) => {
     await page.keyboard.type('(')
     await check(page, '```js\n()\n```', 7, '括号补全')

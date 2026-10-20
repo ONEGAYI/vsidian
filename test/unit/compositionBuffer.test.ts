@@ -69,6 +69,35 @@ const waitFlush = () => new Promise<void>((r) => setTimeout(r, 20))
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+describe('行内代码边界的 IME 显形', () => {
+  it('定稿 flush 前保留反引号，结束后恢复隐藏且后续文字落在代码外', async () => {
+    const { bridge } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c, '`test`')
+      const view = c.getView()!
+      view.dispatch({ selection: { anchor: 6 } })
+      startComposition(c)
+      view.dispatch({ changes: { from: 6, insert: '。' },
+        selection: { anchor: 6, head: 7 }, userEvent: 'input.type.compose.start' })
+      expect(view.contentDOM.textContent).toBe('`test`。')
+      endComposition(c)
+      // 某些输入法在 compositionend 后才交付最终事务；这段窗口也须保持 DOM。
+      await Promise.resolve()
+      view.dispatch({ changes: { from: 6, to: 7, insert: '。' },
+        selection: { anchor: 7 }, userEvent: 'input.type.compose' })
+      expect(view.contentDOM.textContent).toBe('`test`。')
+      await waitFlush()
+      expect(view.contentDOM.textContent).toBe('test。')
+      expect(view.state.selection.main.head).toBe(7)
+      view.dispatch({ changes: { from: 7, insert: 'X' }, selection: { anchor: 8 }, userEvent: 'input.type' })
+      expect(view.state.doc.toString()).toBe('`test`。X')
+    } finally {
+      c.dispose()
+    }
+  })
+})
+
 describe('矩形格区 IME 写回', () => {
   it('零宽首格开始组合后取消，不清区域内容且不写回', async () => {
     const { bridge, sent } = makeBridge()

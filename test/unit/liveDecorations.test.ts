@@ -282,6 +282,30 @@ describe('buildLivePreviewDecorations：全量构建（树驱动语义）', () =
 describe('标记作用域：行首及行内语法', () => {
   const doc = '# 标题\n\n**粗** 与 `码`\n\n> 引用\n'
 
+  it.each(['input.type.compose.start', 'input.type.compose'])(
+    '行内代码后组合输入（%s）：候选选区离开代码时仍保留原来显形的反引号', (userEvent) => {
+      let state = stateWithDoc('`test`', { anchor: 6 })
+      state = state.update({
+        changes: { from: 6, insert: '。' },
+        selection: { anchor: 6, head: 7 },
+        userEvent,
+      }).state
+      expect(state.doc.toString()).toBe('`test`。')
+      expect(hiddenRanges(state.field(liveDecorationsField).decos)).not.toContainEqual([0, 1])
+      expect(hiddenRanges(state.field(liveDecorationsField).decos)).not.toContainEqual([5, 6])
+
+      // 后续候选替换与选区收缩也不能在组合中移除反引号 DOM。
+      state = state.update({
+        changes: { from: 6, to: 7, insert: '。' },
+        selection: { anchor: 7 },
+        userEvent: 'input.type.compose',
+      }).state
+      expect(hiddenRanges(state.field(liveDecorationsField).decos)).not.toContainEqual([5, 6])
+      // 普通非空选区仍按严格相交判定，不能把全局边界放宽来规避 IME 问题。
+      expect(hiddenRanges(stateWithDoc('`test`。', { anchor: 6, head: 7 })
+        .field(liveDecorationsField).decos)).toEqual([[0, 1], [5, 6]])
+    })
+
   it('光标在 # 附近：标记不隐藏；移出后隐藏', () => {
     const active = build(doc, { anchor: 0 })
     expect(hiddenRanges(active)).not.toContainEqual([0, 2])

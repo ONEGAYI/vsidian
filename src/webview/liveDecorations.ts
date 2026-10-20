@@ -29,6 +29,7 @@ import {
   Facet,
   Prec,
   RangeSet,
+  StateEffect,
   StateField,
   Text,
   type ChangeSet,
@@ -859,6 +860,7 @@ function emitForRange(
   containerRender = true,
   metrics: TableReadabilityInput | null = null,
   overrides: ReadonlyMap<number, TableGridOverride> | null = null,
+  compositionSelection: EditorSelection | null = null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -1189,7 +1191,8 @@ function emitForRange(
         // 仅行内代码的反引号隐藏；围栏 ``` 保留可见
         if (path[path.length - 1]?.name === 'InlineCode') {
           const scope = path[path.length - 1]!
-          if (!touches(scope.from, scope.to)) {
+          if (!touches(scope.from, scope.to) &&
+              !(compositionSelection && selectionTouchesRange(compositionSelection, scope.from, scope.to))) {
             out.push(hideDeco.range(node.from, node.to))
           }
         }
@@ -1484,6 +1487,9 @@ function selectionSpans(tr: Transaction): LineSpan[] {
   }
   for (const r of tr.state.selection.ranges) {
     push(r.from, r.to)
+  }
+  for (const r of tr.startState.field(inlineCodeComposition)?.ranges ?? []) {
+    push(tr.changes.mapPos(r.from, -1), tr.changes.mapPos(r.to, 1))
   }
   return spans
 }
@@ -1782,6 +1788,21 @@ function changedCovers(changed: readonly ChangedRange4[], from: number, to: numb
 
 // ---- StateField ----
 
+const clearInlineCodeComposition = StateEffect.define<null>()
+
+// IME 会把闭合反引号后的光标扩成代码范围外的候选选区。保留组合起点
+// 的显形范围，避免组合中隐藏反引号、改写 DOM 后让 IME 回读出错误光标。
+const inlineCodeComposition = StateField.define<EditorSelection | null>({
+  create: () => null,
+  update(value, tr) {
+    if (tr.effects.some((effect) => effect.is(clearInlineCodeComposition))) return null
+    const selection = tr.isUserEvent('input.type.compose.start')
+      ? tr.startState.selection
+      : value ?? (tr.isUserEvent('input.type.compose') ? tr.startState.selection : null)
+    return selection?.map(tr.changes, -1) ?? null
+  },
+})
+
 /**
  * #372 高度计划发布（纯效果事务）：逐载荷复核表格身份（Table 节点 from）、
  * 文档引用（区间迁移即过期）、列数与度量签名，验证通过才把优化模板套进
@@ -1853,7 +1874,7 @@ function applyHeightPlans(
       filter: () => false,
       add: emitForRange(next.tree, doc, state.selection, next.fm, first, last, gridPlans, next.fmModel,
         state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
-        state.facet(tableContainerRenderFacet), metrics, gridOverrides),
+        state.facet(tableContainerRenderFacet), metrics, gridOverrides, state.field(inlineCodeComposition)),
       sort: true,
     })
     next = {
@@ -1886,7 +1907,8 @@ function buildLiveDecoState(
   const decos = RangeSet.of(
     emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
       state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
-      state.facet(tableContainerRenderFacet), state.facet(tableMetricsFacet), prevOverrides), true)
+      state.facet(tableContainerRenderFacet), state.facet(tableMetricsFacet), prevOverrides,
+      state.field(inlineCodeComposition)), true)
   return {
     decos,
     tree,
@@ -1930,7 +1952,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     // 折叠切换检测（零写回 effect 事务）：头区装饰随折叠态重建
     const fmFoldChanged =
       (tr.startState.field(fmFoldField, false) ?? false) !== (tr.state.field(fmFoldField, false) ?? false)
-    if (!tr.docChanged && tr.selection === undefined && !hitRevealChanged && !fmFoldChanged &&
+    const compositionChanged = tr.startState.field(inlineCodeComposition) !== tr.state.field(inlineCodeComposition)
+    if (!tr.docChanged && tr.selection === undefined && !hitRevealChanged && !fmFoldChanged && !compositionChanged &&
         sameTableRegion(tr.startState.field(tableRegionField, false), tr.state.field(tableRegionField, false))) {
       return value
     }
@@ -1950,7 +1973,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, 1, fmLast, value.gridPlans,
             value.fmModel, tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), fmFolded,
-            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
+            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
+            tr.state.field(inlineCodeComposition)),
           sort: true,
         })
         return {
@@ -2016,7 +2040,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 filter: () => false,
                 add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, updatedPlans, value.fmModel,
                   tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
-                  tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
+                  tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
+                  tr.state.field(inlineCodeComposition)),
                 sort: true,
               })
               return {
@@ -2043,7 +2068,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             filter: () => false,
             add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
               tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
-              tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
+              tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
+              tr.state.field(inlineCodeComposition)),
             sort: true,
           })
           return {
@@ -2072,7 +2098,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
             tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
-            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides),
+            tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
+            tr.state.field(inlineCodeComposition)),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -2139,7 +2166,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         filter: () => false,
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
           tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
-          tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), gridOverrides),
+          tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), gridOverrides,
+          tr.state.field(inlineCodeComposition)),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1
@@ -2163,6 +2191,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     }
   },
   provide: (f) => [
+    inlineCodeComposition,
     // #150 格位共存：mark 装饰源经 Prec.low 排到全部 widget 装饰源之后
     // （decorations facet 的输入序即 RangeSet.spans 的 rank 序）。CM6 构建
     // 行 DOM 时，replace widget 只会被 rank 不低于自己的活跃 mark 嵌套
@@ -2404,6 +2433,7 @@ function clampGridCellPointer(event: MouseEvent, view: EditorView): boolean {
 const viewportLivePlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet
+    compositionTimer: ReturnType<typeof setTimeout> | undefined
     constructor(view: EditorView) {
       this.decorations = buildViewportLiveDecorations(
         view.state.doc,
@@ -2422,10 +2452,23 @@ const viewportLivePlugin = ViewPlugin.fromClass(
         )
       }
     }
+    destroy() {
+      clearTimeout(this.compositionTimer)
+    }
   },
   {
     decorations: (plugin) => plugin.decorations,
     eventHandlers: {
+      compositionstart() {
+        clearTimeout(this.compositionTimer)
+      },
+      compositionend(_event: CompositionEvent, view: EditorView) {
+        // 与符号输入同口径：等 CM6 的组合定稿 flush 完成，再恢复反引号
+        // 显隐。同步 dispatch 会打断组合定稿；销毁时撤销待执行的刷新。
+        this.compositionTimer = setTimeout(() => {
+          view.dispatch({ effects: clearInlineCodeComposition.of(null) })
+        }, 0)
+      },
       mouseup(event: MouseEvent, view: EditorView) {
         return clampGridCellPointer(event, view)
       },
