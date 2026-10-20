@@ -3565,6 +3565,20 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
       e.heading === 'line=2' && e.locate === 'native-line')
 
+    // 首行锚点矩阵（#616 复审 001）：line=1 与 range 首行形态（1-3 定界 /
+    // -3 开放端）解析成功并执行 revealRange(0,0)——定位落在第 1 行也须
+    // 如实记 native-line，「是否定位」不以其行号 > 1 代替（无锚点/非法
+    // 锚点维持 none，见下方失败侧）
+    await injectWikilink(uri, 'nav-target.ts#line=1')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'line=1' && e.locate === 'native-line')
+    await injectWikilink(uri, 'nav-target.ts#range=1-3')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'range=1-3' && e.locate === 'native-line')
+    await injectWikilink(uri, 'nav-target.ts#range=-3')
+    await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === 'nav-target.ts' &&
+      e.heading === 'range=-3' && e.locate === 'native-line')
+
     // 越界：目标可打开但定位失败——打开照常（顶部）+ locate none（无效
     // 锚点 toast 为宿主通知，集成以执行日志断言——同 #534 口径）
     await injectWikilink(uri, 'nav-target.ts#line=9999')

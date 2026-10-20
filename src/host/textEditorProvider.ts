@@ -2822,6 +2822,10 @@ export function createTextEditorProvider(
     }
     if (openChannel === 'native-text') {
       let jumpLine = 1
+      // 合法锚点已解析并将执行行定位（#616 复审 001）：不以 jumpLine > 1
+      // 代替「是否定位」——line=1 与 range 首行形态（1-3 / -3 开放端）
+      // jumpLine 为 1，revealRange(0,0) 照常执行，locate 须记 native-line
+      let anchorResolved = false
       let anchorInvalid: string | null = null
       if (parsed.heading !== null || parsed.blockId !== null) {
         const anchorRaw = parsed.heading !== null ? parsed.heading : `^${parsed.blockId}`
@@ -2833,6 +2837,7 @@ export function createTextEditorProvider(
           const resolved = resolveTextNav(anchorSpec, textDoc.lineCount)
           if (resolved.ok) {
             jumpLine = resolved.nav.jumpLine
+            anchorResolved = true
           } else {
             anchorInvalid = anchorRaw
           }
@@ -2844,7 +2849,7 @@ export function createTextEditorProvider(
         path: targetPath,
         heading: parsed.heading ?? undefined,
         blockId: parsed.blockId ?? undefined,
-        locate: jumpLine > 1 ? 'native-line' : 'none',
+        locate: anchorResolved ? 'native-line' : 'none',
       })
       const textEditor = await vscode.window.showTextDocument(targetUri, { preview: false })
       const lineIdx = Math.min(jumpLine - 1, Math.max(0, textEditor.document.lineCount - 1))
