@@ -496,3 +496,23 @@ provider 的 `onDidChangeTextDocument` 索引接线内：**空 contentChanges �
 - 本地索引相关单元 5 文件 160 项通过；真实 VSCode 1.82.3 单宿主保留 CI 紧邻反链/侧栏三项，再跑 #198 三项，共 6 项全绿，排除维护用例 8630ms；类型、文件树严格检查与 diff 检查通过。
 - 原始红绿 JSON、逐项日志与宿主报告保留于 `out/test/rich-paste/publication/ci-final/run-37090505718/fix-198/`（`red-service`、`red-ownership-boundaries`、`green-index-final`、`host-context-native.log`）。
 - CI run `37090505718` 只直接记录了最终删除清理超时，没有扫描阶段快照；上述受控反馈证明生产竞态可达，不据此断言 CI 恰好经历相同顺序。
+
+## #607 实施落档（2026-10-20）
+
+工单 [#607](https://github.com/ONEGAYI/vsidian/issues/607)：表格格内双链 `\|` 转义竖线未走 #248 表格解码——rename 改写丢 `\` 导致表格呈现退化为纯文本（真实宿主 1.86.2 人工验证定性；源文双链语法仍合法，跳转/悬停未死，坏的是表格呈现层）。本票将 #248 的格内解码语义从嵌入泛化到双链，索引边 target 变干净后 rename 侧零改动（`buildBracketPathEdit` 的 #248 转义管道保真分支双链/嵌入共用，自动接住）。
+
+### 分层与语义
+
+- **`src/shared/tableCellEmbed.ts`**：新增 `scanWikilinksInTableRow`——`scanEmbedsInTableRow` 的同构镜像（splitTableRowCells 逐格切分 + decodeCellView 解码视图 + scanWikilinksInLine 扫描 + 源码区间映射回写；`to` 端点修正同款——`]]` 紧贴 `\|` 不吞转义反斜杠）。两扫描器互斥语义保持：双链扫描器的 `!` 前置守卫照常生效（`![[x]]` 不被双链版命中）。
+- **`src/host/vaultLinkExtract.ts`**：新增 `wikilinkHitsOfLine`（与 `embedHitsOfLine` 同一表格判定入口 `TABLE_ROW_NODE_NAMES`），双链行扫描接入——表格内容行的双链边 target/inner 为解码语义（`\` 不进路径）、区间为原始源文；**非表格行 `\|` 双链仍按原文字面**（#248 既有语义不扩散，票面第三条平台不一致缺陷不随本票收敛——普通行 `\|` 的 Windows 巧合命中 / POSIX 断链维持现状，规格层另裁决）。
+
+### 验证（TDD：接线前红例实测）
+
+- `vaultLinkExtract.test.ts` 新增 #607 describe 五例：格内别名/锚点+别名拆列、表头格同产边、代码格与跨格伪形态排除、普通行原文字面（既有语义钉住）、`]]` 紧贴转义管道端点——接线前 3 红（target 仍含 `\`）实测反例成立，接线后全绿。
+- `tableCellEmbed.test.ts` 新增五例（解码语义/互斥/锚点与块引用/代码格/端点修正）；`vaultRename.test.ts` 新增两例防回归（格内双链改写 `\|` 与列结构保真、锚点保留——钉住保真分支对干净 target 的接住能力）。
+- compile（tsc + esbuild）通过；全量 unit 结果见提交记录。
+
+### 边界
+
+- **呈现层（Reading/Live 的双链渲染）与悬停/跳转解析不动**：`[[a\|b]]` 在表格格内的呈现按 markdown-it 的 `\|` 表格转义处理（切列不切 `\|`，格内 inner 原文走 parseWikilinkInner 的尾随 `\` 巧合命中——Windows 语义下与解码边命中同一目标，行为一致）；本票只统一**索引/改写侧**的边形态。呈现层若后续与索引分叉（POSIX 宿主上格内双链呈现断链而索引边干净），属 #607 票面第三条的既有平台边界，不在本票顺手放宽。
+- 反链/出链面板对表格内双链的**显示原文**从 `目标文档\` 变为 `目标文档`（解码语义）——呈现更干净，属预期变化。

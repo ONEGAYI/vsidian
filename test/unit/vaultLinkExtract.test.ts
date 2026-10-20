@@ -543,3 +543,52 @@ describe('#556 T2：shortnameDepKeyOf（文件集合变化重判的反查键）'
     expect(shortnameDepKeyOf({ target: '', kind: 'wikilink' }, CTX)).toBeNull()
   })
 })
+
+describe('#607 表格格内双链边（转义映射保真）', () => {
+  it('格内 \\| 别名双链产 wikilink 边：target 为解码路径、区间为源文、别名不进目标', () => {
+    const text = '| a | [[设计\\|别名]] |\n| --- | --- |\n| b | c |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const wl = edges.find((e) => e.kind === 'wikilink')
+    expect(wl).toBeDefined()
+    expect(wl!.target).toBe('设计')
+    expect(wl!.resolvedTarget).toBe(ABS('notes/设计.md'))
+    expect(wl!.anchor).toBe('')
+    expect(text.slice(wl!.start, wl!.end)).toBe('[[设计\\|别名]]')
+  })
+
+  it('格内锚点 + 别名组合：anchor 与解码路径拆列正确', () => {
+    const text = '| [[设计#章节甲\\|显]] | b |\n| --- | --- |\n| c | d |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => [e.target, e.anchor])).toEqual([
+      ['设计', '章节甲'],
+    ])
+  })
+
+  it('表头格与数据格同产边；格内行内代码与跨格伪形态不产边', () => {
+    const text = '| [[设计]] [[目标笔记\\|n]] | b |\n| --- | --- |\n| c | d |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => e.target)).toEqual(['设计', '目标笔记'])
+    const codeCell = '| `[[设计]]` | b |\n| --- | --- |\n| c | d |'
+    expect(extractVaultEdges('notes/源.md', codeCell, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
+    const pseudo = '| a [[x | y]] b |\n| --- | --- |\n| c | d |'
+    expect(extractVaultEdges('notes/源.md', pseudo, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
+  })
+
+  it('普通段落行的 \\| 双链仍按原文字面产边（既有语义不扩散）', () => {
+    const text = '段 [[设计\\|x]] 段\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const wl = edges.find((e) => e.kind === 'wikilink')
+    expect(wl).toBeDefined()
+    expect(wl!.target).toBe('设计\\')
+  })
+
+  it(']] 紧贴转义管道的双链端点：区间不含尾随反斜杠（rename 改写不触达）', () => {
+    const text = '| [[设计]]\\|尾 | y |\n| --- | --- |\n| a | b |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const wl = edges.find((e) => e.kind === 'wikilink')
+    expect(wl).toBeDefined()
+    expect(wl!.target).toBe('设计')
+    expect(text.slice(wl!.start, wl!.end)).toBe('[[设计]]')
+    expect(text[wl!.end]).toBe('\\')
+  })
+})

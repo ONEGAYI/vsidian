@@ -41,7 +41,7 @@ import * as path from 'node:path'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { classifyImageTarget, classifyLinkTarget, linkPathTextOf, type LinkContext } from './linkTarget'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
-import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
+import { scanEmbedsInTableRow, scanWikilinksInTableRow } from '../shared/tableCellEmbed'
 import { scanLooseLinksInLine } from '../shared/looseLink'
 import {
   planVaultLinkPath,
@@ -190,6 +190,18 @@ function embedHitsOfLine(line: string, base: number, tree: Tree): ReturnType<typ
   }
   const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
   return isTableRow ? scanEmbedsInTableRow(line, base) : scanEmbedsInLine(line, base)
+}
+
+/** 单行的双链命中（#607：embedHitsOfLine 的同构镜像）——表格内容行
+ *  （TableRow/TableHeader）走格内解码扫描（`\|` 按表格转义解码、`\` 不进
+ *  目标路径，inner/target 为解码语义，区间为原始源文）；其余行走原始行
+ *  扫描（非表格行 `\|` 形态仍按原文字面——既有语义不扩散）。 */
+function wikilinkHitsOfLine(line: string, base: number, tree: Tree): ReturnType<typeof scanWikilinksInLine> {
+  if (!line.includes('[[')) {
+    return []
+  }
+  const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+  return isTableRow ? scanWikilinksInTableRow(line, base) : scanWikilinksInLine(line, base)
 }
 
 /**
@@ -377,9 +389,12 @@ export function extractVaultEdges(
   }
   visit(tree.topNode)
 
-  // ---- 行扫描：双链与宽松链接（与 liveLinks 同一形态学 + 同一降级边界） ----
+  // ---- 行扫描：双链与宽松链接（非表格行与 liveLinks 同一形态学 + 同一
+  // 降级边界；表格内容行的双链 #607 起走格内解码——见 wikilinkHitsOfLine） ----
   const scanLine = (line: string, base: number): void => {
-    for (const hit of scanWikilinksInLine(line, base)) {
+    // #607：表格内容行的双链走格内解码扫描（`\|` 解码语义）——与嵌入
+    // （embedHitsOfLine）同一表格判定入口；其余行原文字面（既有语义）
+    for (const hit of wikilinkHitsOfLine(line, base, tree)) {
       if (scanSuppressed(tree, hit.from, fmEnd)) {
         continue
       }

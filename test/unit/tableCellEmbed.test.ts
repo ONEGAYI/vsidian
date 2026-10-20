@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decodeCellView,
   scanEmbedsInTableRow,
+  scanWikilinksInTableRow,
 } from '../../src/shared/tableCellEmbed'
 import { parseWikilinkInner } from '../../src/shared/wikilink'
 import { splitTableRowCells } from '../../src/shared/tableCells'
@@ -199,5 +200,51 @@ describe('scanEmbedsInTableRow：表格内容行的格内嵌入 occurrence', () 
         expect(raw.slice(3, -2).replaceAll('\\|', '|')).toBe(hit.inner)
       }
     }
+  })
+})
+
+describe('scanWikilinksInTableRow：#607 表格内容行的格内双链 occurrence', () => {
+  it('别名管道形态：inner 为解码语义，from/to 为原始源码区间', () => {
+    const line = '| 前文 [[B\\|别名]] 后文 |'
+    const hits = scanWikilinksInTableRow(line, 0)
+    expect(hits).toHaveLength(1)
+    const hit = hits[0]!
+    expect(hit.inner).toBe('B|别名')
+    const parsed = parseWikilinkInner(hit.inner)
+    expect(parsed!.path).toBe('B')
+    expect(parsed!.alias).toBe('别名')
+    expect(line.slice(hit.from, hit.to)).toBe('[[B\\|别名]]')
+  })
+
+  it('嵌入形态不被双链扫描命中（两扫描器互斥语义保持）', () => {
+    const line = '| ![[B\\|别名]] | [[C]] |'
+    const hits = scanWikilinksInTableRow(line, 0)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]!.inner).toBe('C')
+  })
+
+  it('锚点 + 别名与块引用形态保真', () => {
+    const line = '| [[B#标题\\|显]] | [[B#^blk-1\\|别名]] |'
+    const hits = scanWikilinksInTableRow(line, 0)
+    expect(hits.map((h) => h.inner)).toEqual(['B#标题|显', 'B#^blk-1|别名'])
+    const first = parseWikilinkInner(hits[0]!.inner)!
+    expect(first.path).toBe('B')
+    expect(first.heading).toBe('标题')
+    expect(first.alias).toBe('显')
+    expect(parseWikilinkInner(hits[1]!.inner)!.blockId).toBe('blk-1')
+  })
+
+  it('格内行内代码中的双链字面量不命中；无管道形态照常命中', () => {
+    expect(scanWikilinksInTableRow('| `[[B\\|x]]` | y |', 0)).toHaveLength(0)
+    const hits = scanWikilinksInTableRow('| [[A]] | [[C#h]] |', 0)
+    expect(hits.map((h) => h.inner)).toEqual(['A', 'C#h'])
+  })
+
+  it(']] 紧贴转义管道的端点修正：区间不含尾随反斜杠', () => {
+    const line = '| [[B]]\\|尾 | y |'
+    const hits = scanWikilinksInTableRow(line, 0)
+    expect(hits).toHaveLength(1)
+    expect(line.slice(hits[0]!.from, hits[0]!.to)).toBe('[[B]]')
+    expect(line[hits[0]!.to]).toBe('\\')
   })
 })
