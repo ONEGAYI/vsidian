@@ -1126,16 +1126,17 @@ describe('侧栏组件条目唯一选中（#554）', () => {
     expect(currentOf(h, 'Core A')).toBe('false')
   })
 
-  it('纯运行组件条目点击：不开设置区、组件条目不整组点亮，「附加组件」选项按钮按当前页高亮', async () => {
+  it('纯运行组件不进侧栏：无组件条目可点亮，「附加组件」选项按钮按当前页高亮', async () => {
     const h = makeView()
     h.dispatch(addonsState([
       { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
       { id: CORE_A, label: 'Core A', official: true, status: 'registered', enabled: true, hasSettingsDefinitions: true },
     ]))
-    navItem(h, 'Plain').click()
+    expect([...h.parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .some((b) => b.textContent === 'Plain')).toBe(false)
+    h.view.selectSection('addons')
     expect(h.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toEqual([])
     await h.settle()
-    expect(currentOf(h, 'Plain')).toBe('false')
     expect(currentOf(h, 'Core A')).toBe('false')
     expect(currentOf(h, zhCn['settings.addonsSection'])).toBe('page')
   })

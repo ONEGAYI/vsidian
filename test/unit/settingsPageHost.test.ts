@@ -270,6 +270,32 @@ describe('设置页默认编辑器守护接线（#323）', () => {
   })
 })
 
+describe('设置页附加组件主题目录拉取（#546 T07）', () => {
+  it('addons.themesGet 转发给附加组件接线（主题目录装载回填不被静默丢弃）', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const handleSettingsMessage = vi.fn((_webview: unknown, _message: unknown) => true)
+    const addons = {
+      handleSettingsMessage,
+      settingsResourceRoots: () => [],
+      attachSettingsPanel: () => {},
+      settingsPanelDisposed: () => {},
+    }
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      {
+        getSnapshot: () => ({}),
+        apply: () => Promise.resolve({ ok: true as const, values: {} }),
+      } as never,
+      { getSnapshot: () => ({}) } as never,
+      undefined, undefined, undefined, undefined, undefined, addons as never)
+    page.open()
+    page.injectMessage({ kind: 'addons.themesGet' })
+    expect(handleSettingsMessage).toHaveBeenCalledTimes(1)
+    expect(handleSettingsMessage.mock.calls[0]?.[0]).toBe(fresh.panel.webview)
+    expect(handleSettingsMessage.mock.calls[0]?.[1]).toEqual({ kind: 'addons.themesGet' })
+  })
+})
+
 describe('设置页会话内 UI 态恢复（webview 上报 uiState，重开/重载握手补发）', () => {
   const makeService = () => ({
     getSnapshot: () => ({}),

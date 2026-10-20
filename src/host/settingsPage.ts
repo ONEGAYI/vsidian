@@ -352,6 +352,7 @@ export function createSettingsPage(
       case 'addons.openLogs':
       case 'addons.retry':
       case 'addons.commandCatalogGet':
+      case 'addons.themesGet': // #546 T07 装载回填：接线应答 themesState；曾漏转发致主题候选永不出现（2026-10-20 修复）
       case 'addons.behaviorsSetDisabled':
       case 'addons.behaviorsSetOrder':
       case 'addons.behaviorsViewSet':
