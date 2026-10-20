@@ -409,6 +409,21 @@ export const IMAGE_PASTE_SUBPATH_DEFAULT = 'assets'
 export const IMAGE_PASTE_SUBPATH_MAX_LENGTH = 200
 
 /**
+ * 「粘贴图片生成链接格式」：粘贴落盘后在光标处插入的图片引用语法两档。
+ * markdown = 标准 Markdown 直链（默认，现状）；wikilink = 双链嵌入
+ * `![[相对路径]]`——路径原样写入（空格不转义、不 percent-encode），落盘
+ * 文件名 stem 追加清洗双链不可表达字符（`[]#^|`，全清洗为空回退时间戳
+ * 名）；相对路径仍含不可表达字符（用户子路径目录段引入）时该次回退直
+ * 链。路径形态固定为从当前文档目录出发的相对路径，不联动
+ * `link.insertPathType`（那是双链联想的插入档位，语义不同）。值域消费方
+ * 在 host/imagePastePlan（buildImagePasteInsertText）。
+ */
+export const IMAGE_PASTE_LINK_FORMAT_KEY = 'image.pasteLinkFormat'
+export const IMAGE_PASTE_LINK_FORMAT_MODES = ['markdown', 'wikilink'] as const
+export type ImagePasteLinkFormatMode = (typeof IMAGE_PASTE_LINK_FORMAT_MODES)[number]
+export const IMAGE_PASTE_LINK_FORMAT_DEFAULT: ImagePasteLinkFormatMode = 'markdown'
+
+/**
  * #239「分词引擎」：Ctrl+Left/Right 词级移动对连续中文段的切分引擎。
  * builtin = Intl.Segmenter（granularity 'word'，浏览器内置零体积，默认）；
  * jieba = jieba-wasm（资源经公共 CDN 按需下载到 globalStorage，锁定版本
@@ -654,6 +669,21 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     dependsOnEnum: {
       key: IMAGE_PASTE_LOCATION_KEY,
       values: ['workspace-root', 'relative-to-file'],
+    },
+  },
+  {
+    // 粘贴图片生成链接格式（markdown 直链 / wikilink 双链嵌入）：随总
+    // 开关灰化（关闭时无粘贴接管，格式无生效面）
+    key: IMAGE_PASTE_LINK_FORMAT_KEY,
+    type: 'string',
+    default: IMAGE_PASTE_LINK_FORMAT_DEFAULT,
+    enum: IMAGE_PASTE_LINK_FORMAT_MODES,
+    titleKey: 'setting.imagePasteLinkFormat.title',
+    descriptionKey: 'setting.imagePasteLinkFormat.description',
+    dependsOn: IMAGE_PASTE_KEY,
+    optionLabelKeys: {
+      markdown: 'setting.imagePasteLinkFormatMarkdown',
+      wikilink: 'setting.imagePasteLinkFormatWikilink',
     },
   },
   {

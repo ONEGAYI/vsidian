@@ -5,7 +5,7 @@
 // （imagePasteHost.ts）负责 vscode.Uri ↔ fsPath 转换与 I/O。
 // 单测在 test/unit/imagePastePlan.test.ts。
 import { posix } from 'node:path'
-import type { ImagePasteLocationMode } from '../shared/settings'
+import type { ImagePasteLinkFormatMode, ImagePasteLocationMode } from '../shared/settings'
 
 /** 子路径规范化：统一分隔符、去尾斜杠与冗余段；返回 null = 非法。
  *  非法判定：绝对路径（首部 `/`（POSIX 绝对特征）、Windows 盘符、UNC）
@@ -203,4 +203,50 @@ export function buildImageInsertMarkdown(fileName: string, relativePath: string)
   const stem = fileName.replace(/\.[^.]+$/, '')
   const encoded = relativePath.split('/').map(encodeImagePathComponent).join('/')
   return `![${escapeAltText(stem)}](${encoded})`
+}
+
+// ---- 双链嵌入档（粘贴图片链接格式，image.pasteLinkFormat）----
+//
+// 双链 `![[…]]` 与直链的语法差异（嵌入形态学单一事实源 shared/wikilink）：
+// 路径**原样**写入 inner——不 percent-encode、空格不转义（inner 规范化只
+// trim 首尾）；但 inner 禁 `[`/`]`（扫描层守卫直接降级字面文本）、`#` 开
+// 标题锚点分割、`^` 路径裸含降级、`|` 恒为别名分割——这些字符无法在双链
+// 中无损表达（Obsidian 文件名限制同源），靠「落盘前 stem 追加清洗 + 相对
+// 路径不安全整次回退直链」两道闸保证产物恒可渲染。
+
+/** 双链不可表达字符集：`[`/`]`（inner 守卫拒绝）、`#`（锚点分割）、
+ *  `^`（路径降级）、`|`（别名分割；基础文件名清洗已移除，防御性纳入） */
+const WIKILINK_UNSAFE_IMAGE_PATH_RE = /[\[\]#|^]/
+
+/** 相对路径可被双链嵌入无损表达（不含不可表达字符）；不安全时调用方
+ *  该次回退 Markdown 直链（不擅自改写用户子路径目录名） */
+export function isWikilinkSafeImagePath(relativePath: string): boolean {
+  return !WIKILINK_UNSAFE_IMAGE_PATH_RE.test(relativePath)
+}
+
+/** 双链模式的 stem 追加清洗：删除 `[]#^`（`|` 防御性同删）并 trim 清洗
+ *  残留的边缘空白。返回空串时调用方回退时间戳名（与基础清洗同语义）。
+ *  仅双链档调用——直链档的 percent-encode 与 alt 转义已消化这些字符，
+ *  不改变落盘名（现状行为不变）。 */
+export function sanitizeWikilinkImageStem(stem: string): string {
+  return stem.replace(/[\[\]#|^]/g, '').trim()
+}
+
+/** 双链嵌入插入文本：`![[相对路径]]`——路径原样，不做任何转义 */
+export function buildImageInsertWikilink(relativePath: string): string {
+  return `![[${relativePath}]]`
+}
+
+/** 按格式档位组装插入文本：wikilink 档要求相对路径可无损表达——不满足
+ *  （用户子路径目录段引入破坏字符等）回退 Markdown 直链，该次粘贴仍成
+ *  功（落盘名已按双链口径清洗，直链编码路径照常可用） */
+export function buildImagePasteInsertText(
+  fileName: string,
+  relativePath: string,
+  format: ImagePasteLinkFormatMode,
+): string {
+  if (format === 'wikilink' && isWikilinkSafeImagePath(relativePath)) {
+    return buildImageInsertWikilink(relativePath)
+  }
+  return buildImageInsertMarkdown(fileName, relativePath)
 }

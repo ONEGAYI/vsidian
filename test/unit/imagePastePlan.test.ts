@@ -5,16 +5,20 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildImageInsertMarkdown,
+  buildImageInsertWikilink,
+  buildImagePasteInsertText,
   candidateImageFileNames,
   encodeImagePathComponent,
   imageExtensionForMime,
   isSyntheticClipboardImageName,
+  isWikilinkSafeImagePath,
   normalizeImageSubpath,
   pastedImageStem,
   relativePosixImagePath,
   resolveImagePasteDir,
   decodeFileNameHint,
   sanitizeImageFileName,
+  sanitizeWikilinkImageStem,
 } from '../../src/host/imagePastePlan'
 
 describe('normalizeImageSubpath（子路径规范化，#161）', () => {
@@ -209,5 +213,50 @@ describe('文件名提示解码（#163 验收反馈：percent-encode 形态剪�
     expect(decodeFileNameHint('photo 100%.png')).toBe('photo 100%.png')
     expect(decodeFileNameHint('示例 图片 A.png')).toBe('示例 图片 A.png')
     expect(decodeFileNameHint('bad %zz name.png')).toBe('bad %zz name.png')
+  })
+})
+
+describe('粘贴图片链接格式（双链嵌入档）', () => {
+  it('buildImageInsertWikilink：路径原样嵌入——空格与中文不转义、不 percent-encode', () => {
+    expect(buildImageInsertWikilink('Pasted image 20260928090503.png')).toBe(
+      '![[' + 'Pasted image 20260928090503.png]]',
+    )
+    expect(buildImageInsertWikilink('assets/图片 一.png')).toBe('![[assets/图片 一.png]]')
+    expect(buildImageInsertWikilink('../assets/a.png')).toBe('![[../assets/a.png]]')
+  })
+
+  it('sanitizeWikilinkImageStem：清洗双链不可表达字符（[]#^|），保留空格中文与圆括号', () => {
+    expect(sanitizeWikilinkImageStem('a#b')).toBe('ab')
+    expect(sanitizeWikilinkImageStem('注[释]^v2')).toBe('注释v2')
+    expect(sanitizeWikilinkImageStem('Pasted image (1)')).toBe('Pasted image (1)')
+    // 竖线已被基础文件名清洗移除（Windows 非法字符），此处防御性兜底
+    expect(sanitizeWikilinkImageStem('a|b')).toBe('ab')
+    // 清洗删除破坏字符后 trim 边缘空白（# 在词尾时不得留下尾随空格）
+    expect(sanitizeWikilinkImageStem('尾随 # ')).toBe('尾随')
+    // 全是破坏字符 → 空串（调用方回退时间戳名）
+    expect(sanitizeWikilinkImageStem('[#]^')).toBe('')
+  })
+
+  it('isWikilinkSafeImagePath：普通相对路径安全；目录段或文件名含破坏字符不安全', () => {
+    expect(isWikilinkSafeImagePath('assets/Pasted image 1.png')).toBe(true)
+    expect(isWikilinkSafeImagePath('../assets/图片.png')).toBe(true)
+    expect(isWikilinkSafeImagePath('a#b/x.png')).toBe(false)
+    expect(isWikilinkSafeImagePath('x[1].png')).toBe(false)
+    expect(isWikilinkSafeImagePath('a|b.png')).toBe(false)
+    expect(isWikilinkSafeImagePath('a^b.png')).toBe(false)
+  })
+
+  it('buildImagePasteInsertText：markdown 档维持直链；wikilink 档产双链；路径不可表达时回退直链', () => {
+    expect(buildImagePasteInsertText('photo', 'assets/photo 1.png', 'markdown')).toBe(
+      '![photo](assets/photo%201.png)',
+    )
+    expect(buildImagePasteInsertText('Pasted image 1', 'assets/Pasted image 1.png', 'wikilink')).toBe(
+      '![[' + 'assets/Pasted image 1.png]]',
+    )
+    // 目录段含 #（用户子路径引入）：双链无法无损表达，该次回退直链——
+    // 落盘名已按双链口径清洗，直链编码路径照常可用
+    expect(buildImagePasteInsertText('photo', 'a#b/photo.png', 'wikilink')).toBe(
+      '![photo](a%23b/photo.png)',
+    )
   })
 })

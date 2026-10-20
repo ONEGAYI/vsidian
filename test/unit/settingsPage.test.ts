@@ -1313,6 +1313,7 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
       zhCn['setting.imagePaste.title'],
       zhCn['setting.imagePasteLocation.title'],
       zhCn['setting.imagePasteSubpath.title'],
+      zhCn['setting.imagePasteLinkFormat.title'],
     ])
     // 索引维护降为页内二级组：h3 组标题在分页自有内容容器内（原分页内容不回归）
     const content = parent.querySelector('.vsidian-settings-section-content')

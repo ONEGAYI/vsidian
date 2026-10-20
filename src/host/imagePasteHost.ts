@@ -9,16 +9,20 @@ import { posix } from 'node:path'
 import { t } from '../shared/i18n'
 import type { ImagePasteFailReason, ImagePastePayload } from '../shared/protocol'
 import {
+  IMAGE_PASTE_LINK_FORMAT_DEFAULT,
+  IMAGE_PASTE_LINK_FORMAT_KEY,
+  IMAGE_PASTE_LINK_FORMAT_MODES,
   IMAGE_PASTE_LOCATION_DEFAULT,
   IMAGE_PASTE_LOCATION_KEY,
   IMAGE_PASTE_LOCATION_MODES,
   IMAGE_PASTE_SUBPATH_DEFAULT,
   IMAGE_PASTE_SUBPATH_KEY,
+  type ImagePasteLinkFormatMode,
   type ImagePasteLocationMode,
 } from '../shared/settings'
 import type { SettingsPayload } from '../shared/settings'
 import {
-  buildImageInsertMarkdown,
+  buildImagePasteInsertText,
   candidateImageFileNames,
   decodeFileNameHint,
   imageExtensionForMime,
@@ -27,6 +31,7 @@ import {
   relativePosixImagePath,
   resolveImagePasteDir,
   sanitizeImageFileName,
+  sanitizeWikilinkImageStem,
 } from './imagePastePlan'
 
 /** 重名探测上限：原图名到 -99 仍全部存在即按写盘失败处理（正常用户
@@ -70,6 +75,11 @@ export async function runImagePaste(
       : IMAGE_PASTE_LOCATION_DEFAULT
   const rawSubpath = opts.settings[IMAGE_PASTE_SUBPATH_KEY]
   const subpath = typeof rawSubpath === 'string' ? rawSubpath : IMAGE_PASTE_SUBPATH_DEFAULT
+  const rawFormat = opts.settings[IMAGE_PASTE_LINK_FORMAT_KEY]
+  const format: ImagePasteLinkFormatMode =
+    typeof rawFormat === 'string' && (IMAGE_PASTE_LINK_FORMAT_MODES as readonly string[]).includes(rawFormat)
+      ? (rawFormat as ImagePasteLinkFormatMode)
+      : IMAGE_PASTE_LINK_FORMAT_DEFAULT
 
   const dir = resolveImagePasteDir({
     mode,
@@ -104,6 +114,15 @@ export async function runImagePaste(
   if (stem === '') {
     stem = pastedImageStem(new Date())
   }
+  // 双链档：stem 追加清洗双链不可表达字符（`[]#^`——`![[…]]` 无法无损
+  // 表达，Obsidian 文件名限制同源）；清洗为空同样回退时间戳。直链档不做
+  // 此清洗（percent-encode 与 alt 转义已消化，落盘名保持现状行为）。
+  if (format === 'wikilink') {
+    stem = sanitizeWikilinkImageStem(stem)
+    if (stem === '') {
+      stem = pastedImageStem(new Date())
+    }
+  }
 
   const dirUri = opts.docUri.with({ path: dir.dirPath })
   try {
@@ -128,7 +147,8 @@ export async function runImagePaste(
     const target = vscode.Uri.joinPath(dirUri, fileName)
     await vscode.workspace.fs.writeFile(target, Buffer.from(payload.dataBase64, 'base64'))
     const rel = relativePosixImagePath(posix.dirname(opts.docUri.path), dir.dirPath, fileName)
-    report({ ok: true, markdown: buildImageInsertMarkdown(fileName, rel) })
+    // 按格式档位组装（wikilink 档路径不可无损表达时回退直链，纯逻辑内判定）
+    report({ ok: true, markdown: buildImagePasteInsertText(fileName, rel, format) })
   } catch {
     void vscode.window.showErrorMessage(t('host.imagePasteWriteFailed'))
     report({ ok: false, reason: 'write-failed' })
