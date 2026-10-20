@@ -201,6 +201,14 @@ describe('scanEmbedsInTableRow：表格内容行的格内嵌入 occurrence', () 
       }
     }
   })
+
+  it('单列无边界管道行（GFM 可省略首尾管道）：整行按一格扫描不丢嵌入', () => {
+    const line = '前缀 ![[图片 一]] 后缀'
+    const hits = scanEmbedsInTableRow(line, 0)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]!.inner).toBe('图片 一')
+    expect(line.slice(hits[0]!.from, hits[0]!.to)).toBe('![[图片 一]]')
+  })
 })
 
 describe('scanWikilinksInTableRow：#607 表格内容行的格内双链 occurrence', () => {
@@ -271,5 +279,19 @@ describe('scanWikilinksInTableRow：#607 表格内容行的格内双链 occurren
     const line = '| 一 [[A\\|a]] 二 [[B]] 三 |'
     const hits = scanWikilinksInTableRow(line, 0)
     expect(hits.map((h) => line.slice(h.from, h.to))).toEqual(['[[A\\|a]]', '[[B]]'])
+  })
+
+  it('单列无边界管道行（GFM 可省略首尾管道）：整行按一格扫描不丢链接', () => {
+    const line = '一段 [[设计]] 与 [[目标笔记#^blk-1]] 的行'
+    const hits = scanWikilinksInTableRow(line, 0)
+    expect(hits.map((h) => h.inner)).toEqual(['设计', '目标笔记#^blk-1'])
+    expect(hits.map((h) => line.slice(h.from, h.to))).toEqual(['[[设计]]', '[[目标笔记#^blk-1]]'])
+  })
+
+  it('单列无边界行：行内代码字面量仍排除；base 偏移叠加正确', () => {
+    expect(scanWikilinksInTableRow('`[[设计]]` 字面', 0)).toHaveLength(0)
+    const hits = scanWikilinksInTableRow('[[设计]]', 42)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]!.from).toBe(42)
   })
 })

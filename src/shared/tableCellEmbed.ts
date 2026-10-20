@@ -11,6 +11,9 @@
 // - **源码区间保真**：occurrence 的 from/to 恒为**原始源码区间**（含
 //   `\|` 转义字符本身），写回/索引/rename 都落回源文坐标——绝不用解码
 //   字符串 offset 直接写回（解码文本短于源文，offset 必错位）。
+// - **单列无边界行**：不含任何管道字符的表格内容行（GFM 允许省略首尾
+//   边界管道）整行按一格扫描——splitTableRowCells 对无管道行返回 []，
+//   不回退则已确认表格行内容整体丢失（#610 审查）。
 // - **单一事实源**：切列判定复用 tableCells（scanCodeSpans/isEscapedAt/
 //   splitTableRowCells），嵌入/双链形态学复用 shared/wikilink
 //   （scanEmbedsInLine / scanWikilinksInLine 与 parseWikilinkInner），
@@ -78,6 +81,23 @@ export function decodeCellView(cellText: string): CellDecodedView {
 }
 
 /**
+ * 表格内容行的单元格区间迭代：无任何管道字符的单列行（GFM 允许省略首尾
+ * 边界管道——`| h |\n| --- |\n[[x]]` 的数据行）整行按一格处理。
+ * splitTableRowCells 对无管道行返回 []（其契约：无裸管道即非表格行切分），
+ * 若不回退，已确认的表格内容行内容会整体丢失（索引边/rename 改写随之
+ * 丢失，#610 审查）。仅含转义管道 `\|` 的行不受影响（含 `|` 字符，正常
+ * 切分为单格）。
+ */
+function* tableRowCellRanges(lineText: string): Iterable<{ from: number; to: number }> {
+  const cells = splitTableRowCells(lineText, 0)
+  if (cells.length === 0) {
+    yield { from: 0, to: lineText.length }
+    return
+  }
+  yield* cells
+}
+
+/**
  * 表格内容行（表头/数据行）的格内嵌入 occurrence：逐单元格（GFM 语义切分
  * ——`\|` 不切列）构建解码视图后扫描嵌入，命中映射回**原始源码区间**，
  * inner 为解码语义。调用方负责判定该行确为表格内容行（lezer TableRow/
@@ -94,7 +114,7 @@ export function scanEmbedsInTableRow(lineText: string, base = 0): EmbedOccurrenc
     return []
   }
   const out: EmbedOccurrence[] = []
-  for (const cell of splitTableRowCells(lineText, 0)) {
+  for (const cell of tableRowCellRanges(lineText)) {
     const raw = lineText.slice(cell.from, cell.to)
     if (!raw.includes('![[')) {
       continue
@@ -142,7 +162,7 @@ export function scanWikilinksInTableRow(lineText: string, base = 0): WikilinkOcc
     return []
   }
   const out: WikilinkOccurrence[] = []
-  for (const cell of splitTableRowCells(lineText, 0)) {
+  for (const cell of tableRowCellRanges(lineText)) {
     const raw = lineText.slice(cell.from, cell.to)
     if (!raw.includes('[[')) {
       continue
