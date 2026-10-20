@@ -112,12 +112,16 @@ try {
     if (result?.exceptionDetails) throw new Error(`页面求值异常：${JSON.stringify(result.exceptionDetails)}`)
     return result?.result?.value
   }
-  const waitFor = async (label, expression, timeout = 30000) => {
+  // ready 谓词判定采样是否就绪（默认按 truthiness——布尔探针沿用）；
+  // 对象采样必须显式传谓词：未就绪对象（{ok:false}）是 truthy，无谓词
+  // 会在首采即返回、把「尚未回填」误判成回归（#616 复审 002）。未就绪
+  // 采样保留在 last 里，超时报文携带最后采样辅助定位
+  const waitFor = async (label, expression, timeout = 30000, ready = (v) => Boolean(v)) => {
     const until = Date.now() + timeout
     let last
     do {
       last = await evalWorld(expression)
-      if (last) return last
+      if (ready(last)) return last
       await new Promise((resolve) => setTimeout(resolve, 200))
     } while (Date.now() < until)
     throw new Error(`等待超时：${label}（最后采样 ${JSON.stringify(last)}）`)
@@ -127,8 +131,10 @@ try {
   await waitFor('外观分页页签挂载', 'Boolean(document.querySelector(\'.vsidian-style-ref-tab[data-tab="presets"]\'))')
   // 切到「主题」页签（真实 click 事件路径——与用户点击同一监听器）
   await evalWorld('document.querySelector(\'.vsidian-style-ref-tab[data-tab="presets"]\').click()')
-  // 链路终点断言：aqua 候选出现在单选列表（转发断链时 webview 等不到
-  // themesState，此处只剩 default——必然超时翻红）
+  // 链路终点断言：aqua 候选出现在单选列表。两态都等满 30 秒：转发断链
+  // 时 webview 等不到 themesState、只剩 default——超时翻红；回填稍晚于
+  // 页签挂载（settingsPageInfo.ready 只保证设置页 ready）时未就绪对象
+  // 经 ok 谓词继续等待，不误判回归（#616 复审 002）
   const sample = await waitFor('主题候选（aqua 单选）渲染', `(() => {
     const panel = document.querySelector('.vsidian-appearance-presets')
     if (!panel || panel.hasAttribute('hidden')) return null
@@ -140,7 +146,7 @@ try {
     return { ok: true, aquaDisabled: aqua.disabled, aquaVisible: aqua.getBoundingClientRect().height > 0,
       aquaSource: aqua.closest('label')?.querySelector('.vsidian-theme-option-source')?.textContent ?? '',
       defaultChecked: def.checked, count: panel.querySelectorAll('input[type=radio]').length }
-  })()`)
+  })()`, 30000, (v) => v?.ok === true)
   assert.equal(sample.ok, true, `主题候选应出现在「外观 → 主题」单选列表：${JSON.stringify(sample)}`)
   assert.equal(sample.aquaDisabled, false, `aqua 候选应可用（夹具启用中，available=true）：${JSON.stringify(sample)}`)
   assert.equal(sample.aquaVisible, true, `aqua 候选应有非零布局（用户可见层，非 DOM 存在性）：${JSON.stringify(sample)}`)
