@@ -41,7 +41,7 @@ import * as path from 'node:path'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { classifyImageTarget, classifyLinkTarget, linkPathTextOf, type LinkContext } from './linkTarget'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
-import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
+import { scanEmbedsInTableRow, scanWikilinksInTableRow } from '../shared/tableCellEmbed'
 import { scanLooseLinksInLine } from '../shared/looseLink'
 import {
   planVaultLinkPath,
@@ -51,7 +51,7 @@ import {
   type VaultLinkShortnameLookupResult,
 } from '../shared/vaultLink'
 import { sortEdges, type VaultEdge, type VaultEdgeKind } from '../shared/vaultIndexModel'
-import { chainAt, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
+import { chainAt, frontmatterRange, lineHasTableRow, markdownTreeParser } from '../shared/markdownDoc'
 
 /**
  * 出链面板的边准入判别（出链面板批次）：外部 scheme（https:// 等）与危险
@@ -115,9 +115,6 @@ export interface VaultEdgeExtractOptions {
    *  外部目标恒 miss——单测直驱的简化形态） */
   resolveAbsolute?: VaultEdgeResolvePort
 }
-
-/** 表格内容行节点名（#248：嵌入行扫描的格内解码分类） */
-const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
 
 /** 名为 name 的直接子节点 */
 function childNamed(node: SyntaxNode, name: string): SyntaxNode | null {
@@ -183,13 +180,29 @@ function scanSuppressed(tree: Tree, from: number, fmEnd: number | null): boolean
 }
 
 /** 单行的嵌入命中（#248：表格内容行走格内解码扫描——inner 解码语义、
- *  区间源文；其余行走原始行扫描）。 */
+ *  区间源文；其余行走原始行扫描）。表格行判定按「节点区间与行区间相交」
+ *  （lineHasTableRow，#610 审查）——行首节点链查不到缩进/引用/列表内
+ *  表格的行节点。 */
 function embedHitsOfLine(line: string, base: number, tree: Tree): ReturnType<typeof scanEmbedsInLine> {
   if (!line.includes('![[')) {
     return []
   }
-  const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
-  return isTableRow ? scanEmbedsInTableRow(line, base) : scanEmbedsInLine(line, base)
+  return lineHasTableRow(tree, base, base + line.length)
+    ? scanEmbedsInTableRow(line, base)
+    : scanEmbedsInLine(line, base)
+}
+
+/** 单行的双链命中（#607：embedHitsOfLine 的同构镜像）——表格内容行
+ *  （TableRow/TableHeader）走格内解码扫描（`\|` 按表格转义解码、`\` 不进
+ *  目标路径，inner/target 为解码语义，区间为原始源文）；其余行走原始行
+ *  扫描（非表格行 `\|` 形态仍按原文字面——既有语义不扩散）。 */
+function wikilinkHitsOfLine(line: string, base: number, tree: Tree): ReturnType<typeof scanWikilinksInLine> {
+  if (!line.includes('[[')) {
+    return []
+  }
+  return lineHasTableRow(tree, base, base + line.length)
+    ? scanWikilinksInTableRow(line, base)
+    : scanWikilinksInLine(line, base)
 }
 
 /**
@@ -377,9 +390,12 @@ export function extractVaultEdges(
   }
   visit(tree.topNode)
 
-  // ---- 行扫描：双链与宽松链接（与 liveLinks 同一形态学 + 同一降级边界） ----
+  // ---- 行扫描：双链与宽松链接（非表格行与 liveLinks 同一形态学 + 同一
+  // 降级边界；表格内容行的双链 #607 起走格内解码——见 wikilinkHitsOfLine） ----
   const scanLine = (line: string, base: number): void => {
-    for (const hit of scanWikilinksInLine(line, base)) {
+    // #607：表格内容行的双链走格内解码扫描（`\|` 解码语义）——与嵌入
+    // （embedHitsOfLine）同一表格判定入口；其余行原文字面（既有语义）
+    for (const hit of wikilinkHitsOfLine(line, base, tree)) {
       if (scanSuppressed(tree, hit.from, fmEnd)) {
         continue
       }

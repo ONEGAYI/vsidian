@@ -496,3 +496,52 @@ provider 的 `onDidChangeTextDocument` 索引接线内：**空 contentChanges �
 - 本地索引相关单元 5 文件 160 项通过；真实 VSCode 1.82.3 单宿主保留 CI 紧邻反链/侧栏三项，再跑 #198 三项，共 6 项全绿，排除维护用例 8630ms；类型、文件树严格检查与 diff 检查通过。
 - 原始红绿 JSON、逐项日志与宿主报告保留于 `out/test/rich-paste/publication/ci-final/run-37090505718/fix-198/`（`red-service`、`red-ownership-boundaries`、`green-index-final`、`host-context-native.log`）。
 - CI run `37090505718` 只直接记录了最终删除清理超时，没有扫描阶段快照；上述受控反馈证明生产竞态可达，不据此断言 CI 恰好经历相同顺序。
+
+## #607 实施落档（2026-10-20）
+
+工单 [#607](https://github.com/ONEGAYI/vsidian/issues/607)：表格格内双链 `\|` 转义竖线未走 #248 表格解码——rename 改写丢 `\` 导致表格呈现退化为纯文本（真实宿主 1.86.2 人工验证定性；源文双链语法仍合法，跳转/悬停未死，坏的是表格呈现层）。本票将 #248 的格内解码语义从嵌入泛化到双链，索引边 target 变干净后 rename 侧零改动（`buildBracketPathEdit` 的 #248 转义管道保真分支双链/嵌入共用，自动接住）。
+
+### 分层与语义
+
+- **`src/shared/tableCellEmbed.ts`**：新增 `scanWikilinksInTableRow`——`scanEmbedsInTableRow` 的同构镜像（splitTableRowCells 逐格切分 + decodeCellView 解码视图 + scanWikilinksInLine 扫描 + 源码区间映射回写；`to` 端点修正同款——`]]` 紧贴 `\|` 不吞转义反斜杠）。两扫描器互斥语义保持：双链扫描器的 `!` 前置守卫照常生效（`![[x]]` 不被双链版命中）。
+- **`src/host/vaultLinkExtract.ts`**：新增 `wikilinkHitsOfLine`（与 `embedHitsOfLine` 同一表格判定入口 `TABLE_ROW_NODE_NAMES`），双链行扫描接入——表格内容行的双链边 target/inner 为解码语义（`\` 不进路径）、区间为原始源文；**非表格行 `\|` 双链仍按原文字面**（#248 既有语义不扩散，票面第三条平台不一致缺陷不随本票收敛——普通行 `\|` 的 Windows 巧合命中 / POSIX 断链维持现状，规格层另裁决）。
+
+### 验证（TDD：接线前红例实测）
+
+- `vaultLinkExtract.test.ts` 新增 #607 describe 五例：格内别名/锚点+别名拆列、表头格同产边、代码格与跨格伪形态排除、普通行原文字面（既有语义钉住）、`]]` 紧贴转义管道端点——接线前 3 红（target 仍含 `\`）实测反例成立，接线后全绿。
+- `tableCellEmbed.test.ts` 新增五例（解码语义/互斥/锚点与块引用/代码格/端点修正）；`vaultRename.test.ts` 新增两例防回归（格内双链改写 `\|` 与列结构保真、锚点保留——钉住保真分支对干净 target 的接住能力）。
+- compile（tsc + esbuild）通过；全量 unit 结果见提交记录。
+
+### 边界
+
+- **呈现层（Reading/Live 的双链渲染）与悬停/跳转解析不动**：`[[a\|b]]` 在表格格内的呈现按 markdown-it 的 `\|` 表格转义处理（切列不切 `\|`，格内 inner 原文走 parseWikilinkInner——**分形态**：纯别名 `[[a\|b]]` 的 path 尾随 `\` 在 Windows 上被路径归一吞掉、与解码边命中同一目标（POSIX 断链）；锚点+别名 `[[a#h\|b]]` 的 heading 解析为 `h\`——**文件目标 Windows 巧合命中但锚点文本带 `\` 定位失配**；块引用+别名 `[[a#^blk\|b]]` 的 blockId 含 `\` 不符块 ID 字符集——**呈现层整条降级为纯文本非链接，而索引边命中**）。本票只统一**索引/改写侧**的边形态；呈现层的这些分叉（Windows 锚点失配、POSIX 断链）属 #607 票面第三条的既有边界，不在本票顺手放宽，是否收敛待规格层裁决。
+- **块 ID 撤回协调器（wikilinkBlockIdCoordinator）已接表格解码（第三轮，用户授权 2026-10-20）**：`originTextReferencesBlockId` 的行扫描叠加 `scanWikilinksInTableRow` 并集（仅含 `\|` 的行触发第二扫描）——表格格内 `[[a#^blk\|b]]` 按 #248/#607 解码语义识别为「曾引用」。双扫描不区分表格行（协调器无 tree）：普通行同形态也被识别，多识别的方向是「不撤回」（保守侧，与撤回判定的安全方向一致），语义由协调器测试两例钉住。
+- **旧快照窗口（升级路径，第三轮 rename 侧防御收口）**：升级前持久化的索引快照中，表格内 `\|` 双链边按旧原文字面抽取（target 含尾随 `\`）；对该目标 rename 时 `buildBracketPathEdit` 首分割命中（pathRaw 与旧边 target 同形）后，**防御分支**（首分割命中且 pathRaw 以未配对 `\` 结尾、紧邻 `|`——isEscapedAt 语义，`\\|` 偶数配对不构成转义不收窄）收窄替换区间排除尾随 `\`——**旧快照边改写同样保真，窗口内无损坏**（改写落盘触发重抽后边形态自愈为解码语义）。该防御同时覆盖**普通行 `\|` 双链**的既有改写行为（同形态无法区分来源）：普通行改写从「丢 `\`」改为保真——与表格内语义统一，属 #607 票面第三条（平台不一致收敛）的部分裁决落地：改写保真化已实施，普通行**解析语义**（Windows 巧合命中 / POSIX 断链）仍维持原文字面不变。POSIX 旧边为断链（resolvedTarget=null）、rename 跳过，无损坏。
+- 反链/出链面板对表格内双链的**显示原文**从 `目标文档\` 变为 `目标文档`（解码语义）——呈现更干净，属预期变化。
+
+## #610 审查轮收口（2026-10-20，PR #610 评审遗留）
+
+PR #610 首审（review 5584371899）两项 P2 的修复落档。两项同根于「表格内容行」的两个既有假设：切列器对无管道行返回空、行级判定用行首节点链。
+
+### 单列无边界行（新引入回归，审查 vsidianPR610-001）
+
+- **根因**：`splitTableRowCells` 的契约是「无裸管道即非表格行切分，返回 []」——GFM 允许省略首尾边界管道（`| h |\n| --- |\n[[x]]` 的数据行整行即 TableCell，lezer 实证为 TableRow），双链行扫描统一交给表格解码路径后，无管道行**整行内容丢失**（索引边与 rename 改写随之丢失；#607 前该行靠普通行扫描产边，故为新增回归）。
+- **修复**：`tableCellEmbed.ts` 新增 `tableRowCellRanges` 迭代器——切列结果为空时（行内无任何 `|` 字符）整行按一格扫描；嵌入与双链两扫描器共用。调用方准入不变（仍要求已确认是表格内容行；协调器的无 tree 并集扫描在无管道行上与原行扫描恒等，零语义变化）。含 `\|` 的行不受影响（含 `|` 字符，正常切分为单格）。
+- **连带修复（嵌入侧同型缺口，#248 既有）**：单列表格无边界行的嵌入在 #248 起同样被丢弃（EMIT/liveEmbed/embedSlots/refExpansion 全链），本修复一并恢复。
+
+### 容器内表格的行级判定（修复覆盖遗漏，审查 vsidianPR610-002）
+
+- **根因**：表格行判定用 `chainAt(tree, 行首)`——缩进（0–3 空格）、引用/多层引用、列表内表格的 TableRow 从容器前缀之后才开始，行首链查不到行节点（lezer 实证：缩进 Table[2,…)、引用 Blockquote>QuoteMark>Table[2,…)、列表 BulletList>ListItem>Table[2,…)），误走原文字面扫描。#248 起嵌入侧即有此缺口，#607 双链镜像复制了同一假设。
+- **修复**：`markdownDoc.ts` 新增 **`lineHasTableRow(tree, from, to)`**——按「节点区间与物理行区间相交」判定，下潜剪枝按 TableRow 的封闭祖先集合（Document/Table/Blockquote/BulletList/OrderedList/ListItem；剪枝误漏时退化为原字面行扫描即修复前行为，不会误判为表格行）。`TABLE_ROW_NODE_NAMES` 随之归并为该模块导出的单一事实源，行首假设的三处副本（vaultLinkExtract 嵌入/双链、liveEmbed、embedSlots）全部接线。`refExpansion.validChildSource` 的判定以 occurrence 起点为锚（位于行内容内，非行首），无此缺陷，维持原判定。
+- **语义口径（lezer 为事实源）**：分隔行节点是 TableDelimiter（非内容行，不命中判定、不进解码扫描）；无管道尾行在 lezer 中归属 TableRow（单格，空行才断表）——该类行无 `\|` 可解码，走解码路径与原行扫描恒等，无行为分叉。
+
+### 验证
+
+- 红例先行 13 例（tableCellEmbed 3 + vaultLinkExtract 7 + markdownDoc 3），接线前实测失败（产边为空/判定为 false）；修复后全绿。
+- `vaultLinkExtract.test.ts` 新增 #610 describe 含**真实抽取 → `planVaultRenameRewrites` 串联**：单列无边界数据行、列表内表格、引用内表格（块 ID + 别名）三条 rename 往返断言（`\|` 与列结构保真）；0–3 空格缩进、双层引用矩阵与四空格代码块反例在内。
+- `markdownDoc.test.ts` 新增 `lineHasTableRow` describe：顶层/缩进/引用/双层引用/列表/单列无边界/段落/代码块矩阵与空行断表口径。
+
+### 边界
+
+- 呈现层（Reading/Live 的双链渲染）与悬停/跳转解析不动（#607 落档既有边界维持）；本节只统一**索引/改写侧**与嵌入呈现的行级准入。
+- liveEmbed/embedSlots 接线后，容器内表格的**嵌入**呈现从原文字面改为格内解码——与 #248 顶层语义补齐，属预期变化。

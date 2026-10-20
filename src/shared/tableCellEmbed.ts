@@ -1,29 +1,36 @@
-// 表格格内嵌入的三套区间映射（工单 #248）：表格单元格内的 `![[…]]` 嵌入
-// 在「原始源码（LF 全文 offset）— 表格转义（`\|` 等）— 渲染文字（解码后）」
-// 三套坐标之间建立显式映射。核心约束：
+// 表格格内嵌入/双链的三套区间映射（工单 #248；#607 起双链同构接入）：
+// 表格单元格内的 `![[…]]` 嵌入与 `[[…]]` 双链在「原始源码（LF 全文
+// offset）— 表格转义（`\|` 等）— 渲染文字（解码后）」三套坐标之间建立
+// 显式映射。核心约束：
 //
 // - **解码语义**：GFM 表格格内 `\|` 是转义管道（escapeCellText 的逆），
-//   `![[B\|别名]]` 的格内语义即 `![[B|别名]]`——别名管道不误切列
-//   （splitTableRowCells 的 isEscapedAt 已保证 `\|` 不作列分隔），嵌入
-//   inner/目标解析一律用**解码语义**（`B|别名`——`\` 不进目标路径）。
+//   `![[B\|别名]]` / `[[B\|别名]]` 的格内语义即 `![[B|别名]]`——别名管道
+//   不误切列（splitTableRowCells 的 isEscapedAt 已保证 `\|` 不作列分隔），
+//   嵌入/双链的 inner/目标解析一律用**解码语义**（`B|别名`——`\` 不进
+//   目标路径）。
 // - **源码区间保真**：occurrence 的 from/to 恒为**原始源码区间**（含
 //   `\|` 转义字符本身），写回/索引/rename 都落回源文坐标——绝不用解码
 //   字符串 offset 直接写回（解码文本短于源文，offset 必错位）。
+// - **单列无边界行**：不含任何管道字符的表格内容行（GFM 允许省略首尾
+//   边界管道）整行按一格扫描——splitTableRowCells 对无管道行返回 []，
+//   不回退则已确认表格行内容整体丢失（#610 审查）。
 // - **单一事实源**：切列判定复用 tableCells（scanCodeSpans/isEscapedAt/
-//   splitTableRowCells），嵌入形态学复用 shared/wikilink（scanEmbedsInLine
-//   与 parseWikilinkInner），本模块不另起一套扫描器。
+//   splitTableRowCells），嵌入/双链形态学复用 shared/wikilink
+//   （scanEmbedsInLine / scanWikilinksInLine 与 parseWikilinkInner），
+//   本模块不另起一套扫描器。
 //
 // 消费端（三处准入 + 索引/rename，全链同源）：
 // - Reading 呈现：readingMarkdown 的格内重解析（占位 inner 为解码语义）与
 //   embedSlots 的 occurrence 扫描（配对区间为源文）
 // - Live 呈现：liveEmbed 的嵌入表（表格行解码扫描，EMIT 层 #248 起开放）
 // - 宿主准入与索引：refExpansion.validChildSource（对齐口径）、
-//   vaultLinkExtract（嵌入边 target 解码、区间源文）、vaultRename（改写
-//   只替换路径段，`\|` 别名与锚点原文保真）
+//   vaultLinkExtract（嵌入边 #248 / 双链边 #607 起 target 解码、区间源文）、
+//   vaultRename（改写只替换路径段，`\|` 别名与锚点原文保真——保真分支
+//   双链/嵌入共用）
 //
 // 本模块不依赖 vscode/CM6/DOM（node 单测直驱；宿主与 webview 双产物共用）。
-import type { EmbedOccurrence } from './wikilink'
-import { scanEmbedsInLine } from './wikilink'
+import type { EmbedOccurrence, WikilinkOccurrence } from './wikilink'
+import { scanEmbedsInLine, scanWikilinksInLine } from './wikilink'
 import { isEscapedAt, scanCodeSpans, splitTableRowCells } from './tableCells'
 
 /** 格内解码视图：文本 + 逐解码位置到源码位置的映射。
@@ -74,6 +81,23 @@ export function decodeCellView(cellText: string): CellDecodedView {
 }
 
 /**
+ * 表格内容行的单元格区间迭代：无任何管道字符的单列行（GFM 允许省略首尾
+ * 边界管道——`| h |\n| --- |\n[[x]]` 的数据行）整行按一格处理。
+ * splitTableRowCells 对无管道行返回 []（其契约：无裸管道即非表格行切分），
+ * 若不回退，已确认的表格内容行内容会整体丢失（索引边/rename 改写随之
+ * 丢失，#610 审查）。仅含转义管道 `\|` 的行不受影响（含 `|` 字符，正常
+ * 切分为单格）。
+ */
+function* tableRowCellRanges(lineText: string): Iterable<{ from: number; to: number }> {
+  const cells = splitTableRowCells(lineText, 0)
+  if (cells.length === 0) {
+    yield { from: 0, to: lineText.length }
+    return
+  }
+  yield* cells
+}
+
+/**
  * 表格内容行（表头/数据行）的格内嵌入 occurrence：逐单元格（GFM 语义切分
  * ——`\|` 不切列）构建解码视图后扫描嵌入，命中映射回**原始源码区间**，
  * inner 为解码语义。调用方负责判定该行确为表格内容行（lezer TableRow/
@@ -90,7 +114,7 @@ export function scanEmbedsInTableRow(lineText: string, base = 0): EmbedOccurrenc
     return []
   }
   const out: EmbedOccurrence[] = []
-  for (const cell of splitTableRowCells(lineText, 0)) {
+  for (const cell of tableRowCellRanges(lineText)) {
     const raw = lineText.slice(cell.from, cell.to)
     if (!raw.includes('![[')) {
       continue
@@ -111,6 +135,47 @@ export function scanEmbedsInTableRow(lineText: string, base = 0): EmbedOccurrenc
       // `\|` 时（`![[B]]\|尾`），hit.to 落在解码缩短点上、其映射指向源码
       // 管道字符位置，区间会多含一枚 `\`。正确端点 = 末字符（hit.to - 1，
       // 恒为 `]`）的源码位 + 1；无缩短点时与直接映射恒等（相邻位差 1）
+      out.push({
+        from: base + cell.from + srcHit,
+        to: base + cell.from + view.toSourceAt[hit.to - 1]! + 1,
+        inner: hit.inner,
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * 表格内容行（表头/数据行）的格内双链 occurrence（#607：#248 解码语义
+ * 泛化到双链——与 scanEmbedsInTableRow 同构镜像）：逐单元格（GFM 语义
+ * 切分——`\|` 不切列）构建解码视图后扫描双链，命中映射回**原始源码区间**
+ * （含 `\|` 转义字符本身），inner 为解码语义（`B|别名`——`\` 不进目标
+ * 路径）。调用方负责判定该行确为表格内容行（lezer TableRow/TableHeader
+ * 或等价形态）。
+ *
+ * 与 scanEmbedsInTableRow 互斥语义保持：双链扫描器的 `!` 前置守卫照常
+ * 生效（`![[x]]` 不被本函数命中，嵌入归 scanEmbedsInTableRow）；code
+ * span 内字面量与跨格伪形态同款排除。
+ */
+export function scanWikilinksInTableRow(lineText: string, base = 0): WikilinkOccurrence[] {
+  if (!lineText.includes('[[')) {
+    return []
+  }
+  const out: WikilinkOccurrence[] = []
+  for (const cell of tableRowCellRanges(lineText)) {
+    const raw = lineText.slice(cell.from, cell.to)
+    if (!raw.includes('[[')) {
+      continue
+    }
+    const view = decodeCellView(raw)
+    const inSpan = scanCodeSpans(raw)
+    for (const hit of scanWikilinksInLine(view.text)) {
+      const srcHit = view.toSourceAt[hit.from]!
+      if (inSpan[srcHit]) {
+        continue
+      }
+      // to 端点修正与 scanEmbedsInTableRow 同款：`]` 恒为末字符（hit.to-1）
+      // 的源码位 + 1——`]]` 紧贴 `\|` 时不吞转义反斜杠
       out.push({
         from: base + cell.from + srcHit,
         to: base + cell.from + view.toSourceAt[hit.to - 1]! + 1,

@@ -249,6 +249,30 @@ describe('WikilinkBlockIdCoordinator code-review 修复（F1/F2/F7/F13）', () =
     expect(h.deleteCalls).toEqual([{ fsPath: TARGET, offset: 5, length: MARKER_ABC.length }])
   })
 
+  it('#607 评审轮：表格格内块引用+转义别名形态算「曾引用」——不误撤回', async () => {
+    const h = makeHarness()
+    h.targets.set(TARGET, { text: `para1${MARKER_ABC}`, version: 5 })
+    // 表格格内 [[b.md#^abc123\|别名]]：原文字面 blockId 含 \ 不符字符集
+    //（原文扫描不识别），表格解码语义（#248/#607）blockId=abc123 合法——
+    // 索引侧已产边，协调器同口径识别（曾引用保留，撤回判定的保守方向）
+    h.setOriginText('| 见 [[b.md#^abc123\\|别名]] | x |\n| --- | --- |\n| a | b |')
+    await register(h, { reqId: 1, id: 'abc123', offset: 5, versionAfterInsert: 5 })
+    await h.coordinator.disposeOrigin(ORIGIN)
+    expect(h.deleteCalls).toEqual([])
+    expect(h.targets.get(TARGET)).toEqual({ text: `para1${MARKER_ABC}`, version: 5 })
+  })
+
+  it('#607 评审轮：普通行同形态（无表格上下文）同样保守算「曾引用」——双扫描并集语义钉住', async () => {
+    const h = makeHarness()
+    h.targets.set(TARGET, { text: `para1${MARKER_ABC}`, version: 5 })
+    // 双扫描不区分表格行：普通行 \| 形态经解码视图识别——多识别的方向
+    // 是「不撤回」（保守侧），形态极边缘；语义在此钉住
+    h.setOriginText('see [[b.md#^abc123\\|别名]] here')
+    await register(h, { reqId: 1, id: 'abc123', offset: 5, versionAfterInsert: 5 })
+    await h.coordinator.disposeOrigin(ORIGIN)
+    expect(h.deleteCalls).toEqual([])
+  })
+
   it('F13：disposeAll 跨来源全量收尾——各来源未落地且无引用的记录均撤回', async () => {
     const h = makeHarness()
     h.targets.set(TARGET, { text: `para1${MARKER_ABC}`, version: 5 })

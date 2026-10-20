@@ -26,7 +26,7 @@
 //   以 data-vsidian-embed-promoted 查询配对（promotedHostsOf）。
 import { imageAltRangesInLine, normalizeReferenceLabel, scanEmbedsInLine } from '../shared/wikilink'
 import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
-import { chainAt, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
+import { chainAt, frontmatterRange, lineHasTableRow, markdownTreeParser } from '../shared/markdownDoc'
 import { refEmbedTargetIsImage } from '../shared/refContent'
 import { READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES, createMarkdownRenderer } from './readingMarkdown'
@@ -50,9 +50,6 @@ const OCCURRENCE_EXCLUDED = new Set([
   'FencedCode', 'CodeBlock', 'CodeText', 'CodeMark', 'CodeInfo', 'InlineCode',
   'HTMLBlock', 'Comment', 'CommentBlock',
 ])
-
-/** 表格内容行节点名（#248：格内解码扫描的行分类） */
-const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
 
 /** 提升时需要拆壳的行内格式标签（占位提出到块级父直下；code 内不会有
  *  占位，列入仅防御） */
@@ -140,7 +137,8 @@ export function blockEmbedOccurrences(
   let base = blockStart
   for (const line of text.slice(blockStart, blockEnd).split('\n')) {
     if (line.includes('![[')) {
-      const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+      // 表格行判定按行区间相交（#610 审查；行首链查不到容器内表格）
+      const isTableRow = lineHasTableRow(tree, base, base + line.length)
       const altRanges = imageAltRangesInLine(line, 0, (label) =>
         (references ?? referenceLabelsOf(text)).has(normalizeReferenceLabel(label)))
       const hits = isTableRow ? scanEmbedsInTableRow(line, 0) : scanEmbedsInLine(line, 0)

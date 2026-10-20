@@ -13,6 +13,7 @@ import {
   docInput,
   frontmatterRange,
   headingLevelOf,
+  lineHasTableRow,
   markdownTreeParser,
   visitRange,
 } from '../../src/shared/markdownDoc'
@@ -134,6 +135,40 @@ describe('chainAt：位置处的命名节点链（包含判定）', () => {
     expect(names).not.toContain('Blockquote')
     expect(names).not.toContain('FencedCode')
     expect(names).not.toContain('ListItem')
+  })
+})
+
+describe('lineHasTableRow：物理行区间与表格行节点相交判定（#610 审查）', () => {
+  /** 逐物理行判定（与抽取器的逐行扫描同输入形态） */
+  const rowLinesOf = (text: string): boolean[] =>
+    text.split('\n').map((line, i, all) => {
+      const from = all.slice(0, i).reduce((acc, l) => acc + l.length + 1, 0)
+      return lineHasTableRow(markdownTreeParser.parse(text), from, from + line.length)
+    })
+
+  it('顶层表格：表头/数据行命中；分隔行（TableDelimiter 节点）不含行节点不命中', () => {
+    expect(rowLinesOf('| a | b |\n| --- | --- |\n| c | d |\n前段')).toEqual([true, false, true, true])
+  })
+
+  it('缩进/引用/双层引用/列表内表格：容器前缀不遮挡行命中', () => {
+    expect(rowLinesOf('  | a | b |\n  | --- | --- |\n  | c | d |')).toEqual([true, false, true])
+    expect(rowLinesOf('> | a | b |\n> | --- | --- |\n> | c | d |')).toEqual([true, false, true])
+    expect(rowLinesOf('> > | a | b |\n> > | --- | --- |\n> > | c | d |')).toEqual([true, false, true])
+    expect(rowLinesOf('- | a | b |\n  | --- | --- |\n  | c | d |')).toEqual([true, false, true])
+  })
+
+  it('普通段落与四空格缩进代码块：不命中（不误判为表格行）', () => {
+    expect(rowLinesOf('see [[x]] a | b')).toEqual([false])
+    expect(rowLinesOf('段\n\n    | [[x]] |\n')).toEqual([false, false, false, false])
+  })
+
+  it('单列无边界管道数据行（GFM 可省略首尾管道）：命中为表格行', () => {
+    // 尾行无管道：lezer 归属为 TableRow（单格）——空行才断表
+    expect(rowLinesOf('| h |\n| --- |\n[[target]]')).toEqual([true, false, true])
+  })
+
+  it('空行后的段落不再属于表格（lezer 空行断表）', () => {
+    expect(rowLinesOf('| a | b |\n| --- | --- |\n| c | d |\n\n前段 [[x]]')).toEqual([true, false, true, false, false])
   })
 })
 

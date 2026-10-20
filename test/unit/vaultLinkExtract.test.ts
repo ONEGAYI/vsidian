@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as path from 'node:path'
 import { extractVaultEdges, shortnameDepKeyOf } from '../../src/host/vaultLinkExtract'
+import { planVaultRenameRewrites } from '../../src/shared/vaultRename'
 import type { VaultLinkPathContext } from '../../src/shared/vaultLink'
 
 /** 根内文件集合（相对路径 / 分隔，真实大小写形态）→ resolver：绝对 fsPath
@@ -541,5 +542,143 @@ describe('#556 T2：shortnameDepKeyOf（文件集合变化重判的反查键）'
     expect(shortnameDepKeyOf({ target: '目标.pdf', kind: 'wikilink' }, CTX)).toBeNull()
     expect(shortnameDepKeyOf({ target: '图.png', kind: 'image' }, CTX)).toBeNull()
     expect(shortnameDepKeyOf({ target: '', kind: 'wikilink' }, CTX)).toBeNull()
+  })
+})
+
+describe('#607 表格格内双链边（转义映射保真）', () => {
+  it('格内 \\| 别名双链产 wikilink 边：target 为解码路径、区间为源文、别名不进目标', () => {
+    const text = '| a | [[设计\\|别名]] |\n| --- | --- |\n| b | c |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const wl = edges.find((e) => e.kind === 'wikilink')
+    expect(wl).toBeDefined()
+    expect(wl!.target).toBe('设计')
+    expect(wl!.resolvedTarget).toBe(ABS('notes/设计.md'))
+    expect(wl!.anchor).toBe('')
+    expect(text.slice(wl!.start, wl!.end)).toBe('[[设计\\|别名]]')
+  })
+
+  it('格内锚点 + 别名组合：anchor 与解码路径拆列正确', () => {
+    const text = '| [[设计#章节甲\\|显]] | b |\n| --- | --- |\n| c | d |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => [e.target, e.anchor])).toEqual([
+      ['设计', '章节甲'],
+    ])
+  })
+
+  it('表头格与数据格同产边；格内行内代码与跨格伪形态不产边', () => {
+    const text = '| [[设计]] [[目标笔记\\|n]] | b |\n| --- | --- |\n| c | [[设计\\|d行]] |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => e.target)).toEqual(['设计', '目标笔记', '设计'])
+    const codeCell = '| `[[设计]]` | b |\n| --- | --- |\n| c | d |'
+    expect(extractVaultEdges('notes/源.md', codeCell, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
+    const pseudo = '| a [[x | y]] b |\n| --- | --- |\n| c | d |'
+    expect(extractVaultEdges('notes/源.md', pseudo, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
+  })
+
+  it('普通段落行的 \\| 双链仍按原文字面产边（既有语义不扩散）', () => {
+    const text = '段 [[设计\\|x]] 段\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const wl = edges.find((e) => e.kind === 'wikilink')
+    expect(wl).toBeDefined()
+    expect(wl!.target).toBe('设计\\')
+  })
+
+  it(']] 紧贴转义管道的双链端点：区间不含尾随反斜杠（rename 改写不触达）', () => {
+    const text = '| [[设计]]\\|尾 | y |\n| --- | --- |\n| a | b |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const wl = edges.find((e) => e.kind === 'wikilink')
+    expect(wl).toBeDefined()
+    expect(wl!.target).toBe('设计')
+    expect(text.slice(wl!.start, wl!.end)).toBe('[[设计]]')
+    expect(text[wl!.end]).toBe('\\')
+  })
+})
+
+/** 应用改写计划到文本（串联断言辅助——与 vaultRename 测试同一偏移语义） */
+function applyEdits(text: string, edits: readonly { start: number; end: number; replacement: string }[]): string {
+  let out = text
+  for (const e of [...edits].sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, e.start) + e.replacement + out.slice(e.end)
+  }
+  return out
+}
+
+/** 真实抽取 → rename 改写串联：抽取边直接喂 planVaultRenameRewrites（与
+ *  索引服务到 rename 通道的接线同型），断言应用改写后的全文 */
+function renameRoundTrip(text: string, oldRel: string, newRel: string): string {
+  const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+  const result = planVaultRenameRewrites(
+    {
+      rootFsPaths: ['C:/vault'],
+      isWindowsHost: true,
+      moves: [{ oldFsPath: `C:/vault/${oldRel}`, newFsPath: `C:/vault/${newRel}` }],
+    },
+    [{ fsPath: 'C:/vault/notes/源.md', text, edges, edgeRootFsPath: 'C:/vault' }],
+  )
+  expect(result.skipped).toEqual([])
+  return applyEdits(text, result.docs[0]?.edits ?? [])
+}
+
+describe('#610 审查轮：单列无边界行与缩进/引用/列表内表格', () => {
+  it('单列表格无边界数据行的双链产边，rename 串联改写成立（新增回归）', () => {
+    const text = '| h |\n| --- |\n[[设计]]\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => [e.target, e.resolvedTarget])).toEqual([
+      ['设计', ABS('notes/设计.md')],
+    ])
+    expect(renameRoundTrip(text, 'notes/设计.md', 'notes/重命名.md')).toBe('| h |\n| --- |\n[[重命名]]\n')
+  })
+
+  it('单列无边界数据行的同格多链接与标题/块锚点均产边', () => {
+    const text = '| h |\n| --- |\n[[设计]] 与 [[目标笔记#深处标题]] 及 [[目标笔记#^blk-1]]\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => [e.target, e.anchor])).toEqual([
+      ['设计', ''],
+      ['目标笔记', '深处标题'],
+      ['目标笔记', '^blk-1'],
+    ])
+  })
+
+  it('0–3 空格缩进表格：转义别名走解码（target 不带尾随反斜杠）', () => {
+    for (const indent of ['', ' ', '  ', '   ']) {
+      const text = `${indent}| [[设计\\|别名]] | b |\n${indent}| --- | --- |\n${indent}| c | d |`
+      const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+      const wl = edges.find((e) => e.kind === 'wikilink')
+      expect(wl, `indent=${indent.length}`).toBeDefined()
+      expect(wl!.target).toBe('设计')
+      expect(text.slice(wl!.start, wl!.end)).toBe('[[设计\\|别名]]')
+    }
+  })
+
+  it('引用与双层引用内表格：表头/数据行均产解码边', () => {
+    const quoted = '> | [[设计\\|显]] | b |\n> | --- | --- |\n> | c | d |'
+    const edges = extractVaultEdges('notes/源.md', quoted, CTX, resolverOf(FILES, CTX))
+    const wl = edges.find((e) => e.kind === 'wikilink')
+    expect(wl).toBeDefined()
+    expect(wl!.target).toBe('设计')
+    const nested = '> > | [[设计]] | b |\n> > | --- | --- |\n> > | c | d |'
+    const edges2 = extractVaultEdges('notes/源.md', nested, CTX, resolverOf(FILES, CTX))
+    expect(edges2.filter((e) => e.kind === 'wikilink').map((e) => e.target)).toEqual(['设计'])
+  })
+
+  it('列表内表格：块 ID + 别名边解码产边，rename 串联改写保真（\\| 不丢）', () => {
+    const text = '- | [[设计#^blk-1\\|别名]] | b |\n  | --- | --- |\n  | c | d |\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => [e.target, e.anchor])).toEqual([
+      ['设计', '^blk-1'],
+    ])
+    expect(renameRoundTrip(text, 'notes/设计.md', 'notes/重命名.md'))
+      .toBe('- | [[重命名#^blk-1\\|别名]] | b |\n  | --- | --- |\n  | c | d |\n')
+  })
+
+  it('引用内表格的块 ID + 别名边 rename 串联改写保真', () => {
+    const text = '> | [[设计#^blk-1\\|别名]] | b |\n> | --- | --- |\n> | c | d |'
+    expect(renameRoundTrip(text, 'notes/设计.md', 'notes/重命名.md'))
+      .toBe('> | [[重命名#^blk-1\\|别名]] | b |\n> | --- | --- |\n> | c | d |')
+  })
+
+  it('四空格缩进行是缩进代码块：不按表格行产边（判定不误伤）', () => {
+    const text = '段落\n\n    | [[设计]] | b |\n'
+    expect(extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
   })
 })

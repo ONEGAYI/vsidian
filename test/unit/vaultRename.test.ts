@@ -1468,3 +1468,71 @@ describe('vaultRename：#564 普链行号后缀保留（`:N` 是定位语义，r
     expect(result.docs).toEqual([])
   })
 })
+
+describe('#607 表格格内双链的改写（转义管道保真）', () => {
+  it('格内 \\| 别名双链：只替换路径段，\\| 别名与列结构保留', () => {
+    const text = '| a | [[target\\|别名]] |\n| --- | --- |\n| b | c |'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('[[target\\|别名]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      // 索引边 target 为解码路径（vaultLinkExtract #607 解码语义）
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: at, end: at + '[[target\\|别名]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.skipped).toEqual([])
+    expect(result.docs[0]!.edits).toHaveLength(1)
+    const edited = applyEdits(text, result.docs[0]!.edits)
+    expect(edited).toBe('| a | [[renamed\\|别名]] |\n| --- | --- |\n| b | c |')
+    expect(edited.split('\n')[0]).toContain('\\|')
+  })
+
+  it('格内锚点 + 别名组合：锚点保留在路径段之后', () => {
+    const text = '| [[target#标题\\|显]] | b |\n| --- | --- |\n| c | d |'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('[[target#标题\\|显]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'wikilink', start: at, end: at + '[[target#标题\\|显]]'.length, anchor: '标题' }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('| [[renamed#标题\\|显]] | b |\n| --- | --- |\n| c | d |')
+  })
+
+  it('#607 评审轮：target 含尾随反斜杠的边（旧快照/普通行原文字面形态）改写保真转义管道', () => {
+    // 旧快照边与普通行 \\| 边同形（target=`target\\`，首分割命中），防御收窄
+    // 替换区间排除尾随反斜杠——\\| 与别名保留
+    const text = '段 [[target\\|别名]] 段\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('[[target\\|别名]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target\\', resolved: 'target.md', kind: 'wikilink', start: at, end: at + '[[target\\|别名]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('段 [[renamed\\|别名]] 段\n')
+  })
+
+  it('#607 评审轮：表格内旧快照形态（多行表格）同样保真、列结构不变', () => {
+    const text = '| a | [[target\\|别名]] |\n| --- | --- |\n| b | c |'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('[[target\\|别名]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target\\', resolved: 'target.md', kind: 'wikilink', start: at, end: at + '[[target\\|别名]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('| a | [[renamed\\|别名]] |\n| --- | --- |\n| b | c |')
+    expect(applyEdits(text, result.docs[0]!.edits).split('\n')[0]).toContain('\\|')
+  })
+
+  it('#607 评审轮：配对反斜杠（\\\\|，偶数枚）不构成转义管道、不收窄', () => {
+    // `[[target\\\\|别名]]`（源文两枚反斜杠）：| 前偶数反斜杠非转义——按
+    // 原文整段替换（既有行为），不因防御误保真
+    const text = '段 [[target\\\\|别名]] 段\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('[[target\\\\|别名]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target\\\\', resolved: 'target.md', kind: 'wikilink', start: at, end: at + '[[target\\\\|别名]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('段 [[renamed|别名]] 段\n')
+  })
+})
