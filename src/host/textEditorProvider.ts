@@ -225,7 +225,8 @@ export interface LinkLogEntry {
   /** #534 doc 目标的尾部行号（分类层剥出的 1-based 行号） */
   line?: number
   /** #160 doc/anchor 的定位方式：custom-panel=本扩展面板挂载定位；
-   *  native=原生编辑器行定位（#534 text 目标）；
+   *  native=原生编辑器打开——#534 text 目标的行定位，以及 #608 起图片/
+   *  PDF/音视频附件经 vscode.open 默认编辑器打开（附件无定位语义）；
    *  none=无定位（无锚点无行号、
    *  `#^` 块引用定位器缺席降级或目标标题缺失） */
   locate?: 'custom-panel' | 'native' | 'none'
@@ -2810,6 +2811,8 @@ export function createTextEditorProvider(
         kind: 'wikilink-doc',
         target: parsed.path,
         path: targetPath,
+        heading: parsed.heading ?? undefined,
+        blockId: parsed.blockId ?? undefined,
         locate: 'native',
       })
       await vscode.commands.executeCommand('vscode.open', targetUri)
@@ -5782,7 +5785,6 @@ async function executeLinkIntent(
     // 普链 fragment 原样交宿主打开的既有口径不解析、附件无定位语义，不弹
     // 锚点/行号警告
     if (classifyLinkOpenChannel(fsPath) === 'native-default') {
-      await vscode.commands.executeCommand('vscode.open', uri)
       pushLog({
         kind: 'doc',
         href: intent.href,
@@ -5790,6 +5792,7 @@ async function executeLinkIntent(
         fragment: targetFragment ?? undefined,
         locate: 'native',
       })
+      await vscode.commands.executeCommand('vscode.open', uri)
       return
     }
     if (classifyLinkOpenChannel(fsPath) === 'native-text') {

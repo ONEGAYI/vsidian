@@ -137,6 +137,9 @@ describe('#608 链接跳转打开通道 classifyLinkOpenChannel', () => {
       expect(classifyLinkOpenChannel(`D:\\notes\\媒体.${ext}`), `.${ext} 应交原生解析`).toBe('native-default')
     }
     expect(classifyLinkOpenChannel('D:\\notes\\播客.MP3')).toBe('native-default')
+    // CHANGELOG 明示覆盖的 Opus 系格式：显式钉住防白名单回缩
+    expect(classifyLinkOpenChannel('D:\\notes\\录音.opus')).toBe('native-default')
+    expect(classifyLinkOpenChannel('D:\\notes\\录音.OGA')).toBe('native-default')
   })
 })
 

@@ -73,7 +73,7 @@ export function classifyLocalRefContentKind(fsPath: string): LocalRefContentKind
  *  文本装载。内容类型分类不受影响——媒体仍归 text 桶（悬停/引用读取路径
  *  不变），只在打开通道层分出。 */
 export const MEDIA_FILE_EXTENSIONS: readonly string[] = [
-  'mp3', 'wav', 'ogg', 'ogv', 'flac', 'm4a', 'mp4', 'webm', 'mov', 'mkv', 'avi',
+  'mp3', 'wav', 'ogg', 'oga', 'opus', 'ogv', 'flac', 'm4a', 'mp4', 'webm', 'mov', 'mkv', 'avi',
 ]
 
 /** 路径是否音视频媒体文件（按扩展名；大小写不敏感） */
