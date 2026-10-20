@@ -63,10 +63,11 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'editor.pastePreserveFormatting': true,
       'editor.pasteAskBefore': true,
       'editor.pasteSplitUndo': true,
-      // #161 图片粘贴三件：总开关 / 存放模式枚举 / 子路径自由文本
+      // #161 图片粘贴四件：总开关 / 存放模式枚举 / 子路径自由文本 / 链接格式
       'image.paste': true,
       'image.pasteLocation': 'same-dir',
       'image.pasteSubpath': 'assets',
+      'image.pasteLinkFormat': 'markdown',
       // #556 内部链接类型（默认 relative = 既有插入风格零变化）
       'link.insertPathType': 'relative',
       'editor.readableLineWidth': 0,

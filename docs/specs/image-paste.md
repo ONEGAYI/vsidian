@@ -1,15 +1,14 @@
 # 规格：图片粘贴插入与资产文件夹
 
-状态：已共识待实施（[#161](https://github.com/ONEGAYI/vsidian/issues/161)）。本文是图片粘贴能力的单一事实源。母题 #16 的图片粘贴切片；拖拽文件插入**不在本批**。
+状态：已实施（[#161](https://github.com/ONEGAYI/vsidian/issues/161)）；链接格式双链档为后续增量（本文件持续作为图片粘贴能力的单一事实源）。母题 #16 的图片粘贴切片；拖拽文件插入**不在本批**。
 
 ## 范围
 
-- **覆盖**：Live 正文内 `Ctrl+V` 粘贴剪贴板图片 → 落盘到可配置的资产文件夹 → 在光标处插入 Markdown 图片引用；资产文件夹设置（独立设置页新条目）。
+- **覆盖**：Live 正文内 `Ctrl+V` 粘贴剪贴板图片 → 落盘到可配置的资产文件夹 → 在光标处插入图片引用（语法随「链接格式」设置，见下）；资产文件夹设置（独立设置页新条目）。
 - **排除**：
   - 拖拽图片文件进编辑器（另票）；
   - SVG 粘贴落盘（剪贴板 SVG 以文本形态存在，本批不承诺）；
   - 阅读模式粘贴（阅读正文只读，不接管）；
-  - 嵌入语法 `![[图片]]`（双链嵌入未实现，插入一律标准语法）；
   - 跨工作区（无工作区的单文件场景按「与当前文件同目录」回退，见下）。
 
 ## 已确认决策（2026-09-28 设计访谈）
@@ -29,6 +28,11 @@
   - 图片存放位置模式（枚举：同目录 / 相对工作区根 / 相对当前文件，默认同目录；`dependsOn` 总开关——关闭时一并灰化）；
   - 图片存放子路径（string，默认 `assets`；**#163 验收反馈防呆改版**：`dependsOnEnum` 挂位置模式——模式=同目录时控件灰化禁改（值不清除，切回有效模式按原值生效），经模式项的 dependsOn 链随总开关级联灰化）。
 - 持久化走既有 `settingsService`（globalState overlay），变更广播与回显复用现有 `settings.changed` 链路；设置页验证保存、重开回显、变更后立即生效。
+- **链接格式**（`image.pasteLinkFormat`，枚举两档，默认 `markdown`；`dependsOn` 总开关）：
+  - `markdown`：标准 Markdown 直链（现状）；
+  - `wikilink`：双链嵌入 `![[相对路径]]`——**路径原样写入**（空格不转义、不 percent-encode，与直链档的编码规则互斥）；落盘文件名 stem 追加清洗双链不可表达字符（`[]#^`，`|` 已被基础清洗移除、防御性同删），清洗为空回退时间戳名；相对路径仍含不可表达字符（用户子路径目录段引入）时该次回退直链——不擅自改写用户目录名，产物恒可渲染。
+  - 表格单元格内使用双链嵌入**无需转义竖线**（路径不含 `|`，格内 `\|` 转义语义见表格嵌入规格 #248）；直链档表格内竖线由 percent-encode 与文件名清洗双保险消化。
+  - 路径形态固定为从当前文档目录出发的相对路径（与直链档同一条计算结果），**不联动** `link.insertPathType`（那是双链联想的插入档位，语义不同）。
 
 ## 目录解析与落盘规则
 
@@ -48,7 +52,9 @@
 - **webview 侧**：`EditorView.domEventHandlers({ paste })`（模板：tableEditing 的 copy handler）检测 `event.clipboardData.items` 中 `type` 以 `image/` 开头的项（`clipboardData` 仅事件同步窗口内可用，读出后即转 base64）；守卫：总开关开、live 模式、可编辑、非 suspended、非 IME 组合态；命中即 `preventDefault` 并出站。
 - **宿主侧**：解析设置 → 目标目录 → 文件名策略 → 写入 → 计算插入文本回发。
 - **插入**：webview 收结果后**单事务 dispatch** 在光标处插入 markdown（模板：`applyOutlineEdits` 的变更应用；守卫同格式操作），自动走标准 `edit.request` 出站——一笔撤销、CRLF 由宿主 `NewlineCoordinator` 归一。
-- **插入语法**：`![文件名stem](相对路径)`——路径为从当前文档目录到落盘文件的相对路径（POSIX 分隔符），空格、非 ASCII 与 `#()<>` 等特殊字符 percent-encode（与渲染端 `normalizeImgSrc` 的 percent-decode 容错对偶）；stem 取文件名去扩展名。
+- **插入语法**：随 `image.pasteLinkFormat` 两档——
+  - `markdown`（默认）：`![文件名stem](相对路径)`——路径为从当前文档目录到落盘文件的相对路径（POSIX 分隔符），空格、非 ASCII 与 `#()<>` 等特殊字符 percent-encode（与渲染端 `normalizeImgSrc` 的 percent-decode 容错对偶）；stem 取文件名去扩展名；
+  - `wikilink`：`![[相对路径]]`——同一条相对路径计算，路径**原样**写入（空格与中文不转义、不编码）；嵌入渲染与目标解析复用 `shared/wikilink` 嵌入形态学与 `vaultLink` 规划器（`![[assets/x.png]]` 相对路径经 `planVaultLinkPath` inside 候选命中）。
 - 落盘文件天然位于工作区内，无需扩 `localResourceRoots`（现有图片资源根已覆盖工作区文件夹）。
 
 ## 交互契约

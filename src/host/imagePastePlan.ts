@@ -5,7 +5,8 @@
 // （imagePasteHost.ts）负责 vscode.Uri ↔ fsPath 转换与 I/O。
 // 单测在 test/unit/imagePastePlan.test.ts。
 import { posix } from 'node:path'
-import type { ImagePasteLocationMode } from '../shared/settings'
+import { isImageFileExtension } from '../shared/imageRefresh'
+import type { ImagePasteLinkFormatMode, ImagePasteLocationMode } from '../shared/settings'
 
 /** 子路径规范化：统一分隔符、去尾斜杠与冗余段；返回 null = 非法。
  *  非法判定：绝对路径（首部 `/`（POSIX 绝对特征）、Windows 盘符、UNC）
@@ -203,4 +204,65 @@ export function buildImageInsertMarkdown(fileName: string, relativePath: string)
   const stem = fileName.replace(/\.[^.]+$/, '')
   const encoded = relativePath.split('/').map(encodeImagePathComponent).join('/')
   return `![${escapeAltText(stem)}](${encoded})`
+}
+
+// ---- 双链嵌入档（粘贴图片链接格式，image.pasteLinkFormat）----
+//
+// 双链 `![[…]]` 与直链的语法差异（嵌入形态学单一事实源 shared/wikilink）：
+// 路径**原样**写入 inner——不 percent-encode、空格不转义（inner 规范化只
+// trim 首尾）；但 inner 禁 `[`/`]`（扫描层守卫直接降级字面文本）、`#` 开
+// 标题锚点分割、`^` 路径裸含降级、`|` 恒为别名分割——这些字符无法在双链
+// 中无损表达（Obsidian 文件名限制同源），靠「落盘前 stem 追加清洗 + 相对
+// 路径不安全整次回退直链」两道闸保证产物恒可渲染。
+
+/** 双链不可表达字符集：`[`/`]`（inner 守卫拒绝）、`#`（锚点分割）、
+ *  `^`（路径降级）、`|`（别名分割；基础文件名清洗已移除，防御性纳入） */
+const WIKILINK_UNSAFE_IMAGE_PATH_RE = /[\[\]#|^]/
+
+/** 会被渲染端 percent-decode 改变的序列（与 normalizeImgSrc 的
+ *  decodeURIComponent 同口径——`%` 后两位十六进制必然解码改变）：双链
+ *  路径原样写入后经图源规范化二次解释，请求路径 ≠ 落盘路径（PR605-001）。
+ *  非法序列（如 `%zz`）解码失败回原字面，无歧义，不拦。 */
+const WIKILINK_PERCENT_ENCODED_RE = /%[0-9A-Fa-f]{2}/
+
+/** 嵌入 inner 禁换行（scanEmbedsInLine 守卫）：文件名清洗已去控制字符，
+ *  但用户子路径目录段可引入——跨行嵌入不成型，渲染为文本（PR605-001） */
+const WIKILINK_LINE_BREAK_RE = /[\n\r]/
+
+/** 相对路径可被双链嵌入无损表达（不含不可表达字符、无会被二次解码的
+ *  percent 序列、无换行）；不安全时调用方该次回退 Markdown 直链（不擅自
+ *  改写用户子路径目录名） */
+export function isWikilinkSafeImagePath(relativePath: string): boolean {
+  return !WIKILINK_UNSAFE_IMAGE_PATH_RE.test(relativePath) &&
+    !WIKILINK_PERCENT_ENCODED_RE.test(relativePath) &&
+    !WIKILINK_LINE_BREAK_RE.test(relativePath)
+}
+
+/** 双链模式的 stem 追加清洗：删除 `[]#^`（`|` 防御性同删）并 trim 清洗
+ *  残留的边缘空白。返回空串时调用方回退时间戳名（与基础清洗同语义）。
+ *  仅双链档调用——直链档的 percent-encode 与 alt 转义已消化这些字符，
+ *  不改变落盘名（现状行为不变）。 */
+export function sanitizeWikilinkImageStem(stem: string): string {
+  return stem.replace(/[\[\]#|^]/g, '').trim()
+}
+
+/** 双链嵌入插入文本：`![[相对路径]]`——路径原样，不做任何转义 */
+export function buildImageInsertWikilink(relativePath: string): string {
+  return `![[${relativePath}]]`
+}
+
+/** 按格式档位组装插入文本：wikilink 档要求相对路径可无损表达且落盘扩
+ *  展名被共享图片分类识别（isImageFileExtension——MIME 兜底扩展名如
+ *  `.x-icon` 不在清单时 refEmbedTargetIsImage 返回 false，嵌入按文本引
+ *  用呈现；PR605-002）——不满足任一条件回退 Markdown 直链，该次粘贴仍
+ *  成功（直链 img 与编码路径不依赖上述分派） */
+export function buildImagePasteInsertText(
+  fileName: string,
+  relativePath: string,
+  format: ImagePasteLinkFormatMode,
+): string {
+  if (format === 'wikilink' && isImageFileExtension(fileName) && isWikilinkSafeImagePath(relativePath)) {
+    return buildImageInsertWikilink(relativePath)
+  }
+  return buildImageInsertMarkdown(fileName, relativePath)
 }
