@@ -1198,6 +1198,20 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'batch-moved.md'), BATCH_MOVED_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'assets', 'batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
+  // #608 链接跳转附件：图片/PDF 目标的打开通道用例载体（png 复用 TINY_PNG
+  // 样本；pdf 复用根内资料.pdf——附件不新增独立 pdf，避免样本膨胀）
+  writeFileSync(path.join(wsDir, '附件图片.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, '跳转附件.md'), [
+    '# 跳转附件样例',
+    '',
+    '图片双链 [[附件图片.png]] 与普通链接 [图片](附件图片.png)。',
+    '',
+    'PDF 双链 [[资料.pdf]] 与普通链接 [手册](资料.pdf)。',
+    '',
+  ].join('\n'), 'utf8')
+  // #608 出链面板 .markdown 目标（自定义编辑器 selector 声明了该扩展名，
+  // 出链条目跳转应进 Vsidian 面板而非原生文本编辑器）
+  writeFileSync(path.join(wsDir, '出链附件.markdown'), '# 出链 markdown 目标\n\n正文段落。\n', 'utf8')
   // #218 悬停预览：独立父文档（存在目标 + 缺失目标双链；不与共享样本的
   // 双链计数断言互相干扰——wikilinks.md 有 liveWikilinkCount===4 钉住（3 双链
   // + 1 混排嵌入 mark，#217 验收反馈起嵌入挂双链类））。

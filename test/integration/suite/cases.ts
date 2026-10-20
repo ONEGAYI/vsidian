@@ -563,6 +563,32 @@ async function waitActiveCustomTab(file: string): Promise<void> {
   })
 }
 
+/** #608 等待指定文件以非本扩展编辑器打开（vscode.open 默认编辑器解析）：
+ *  内置图片预览器为非本扩展 viewType 的 TabInputCustom，无扩展接管的 pdf
+ *  落 TabInputText 二进制提示页——两者都满足「不是 Vsidian 面板」 */
+async function waitNativeDefaultTab(file: string): Promise<void> {
+  const caseInsensitive = process.platform === 'win32' || process.platform === 'darwin'
+  const norm = (u: string): string => (caseInsensitive ? u.toLowerCase() : u)
+  const uri = norm(wsUri(file).toString())
+  await poll(`原生默认编辑器打开 ${file}`, () => {
+    const hit = vscode.window.tabGroups.all
+      .flatMap((g) => g.tabs)
+      .find((t) => {
+        const input = t.input
+        const inputUri = input instanceof vscode.TabInputText
+          ? input.uri
+          : input instanceof vscode.TabInputCustom
+            ? input.uri
+            : undefined
+        return inputUri !== undefined && norm(inputUri.toString()) === uri
+      })
+    return hit !== undefined &&
+      !(hit.input instanceof vscode.TabInputCustom && hit.input.viewType === VIEW_TYPE)
+      ? true
+      : undefined
+  })
+}
+
 /** 打开两个 .md 的原生文本 diff 并等待活动 tab 就位（#38 D10） */
 async function openTextDiff(left: string, right: string, title: string): Promise<void> {
   // override 只认布尔 true（1.86 扩展主机 converter 限制，见 diff 陷阱笔记）：
@@ -1351,6 +1377,17 @@ async function waitWikilinkLog(
   match: (e: LinkLogData['log'][number]) => boolean,
 ): Promise<LinkLogData['log'][number]> {
   return poll('双链执行日志', async () => {
+    const data = (await vscode.commands.executeCommand(CMD.linkLog, uri)) as LinkLogData | undefined
+    return data?.found ? data.log.find(match) : undefined
+  })
+}
+
+/** 等待普链执行日志中出现匹配条目（#10；与 waitWikilinkLog 同一 linkLog 通道） */
+async function waitLinkLog(
+  uri: string,
+  match: (e: LinkLogData['log'][number]) => boolean,
+): Promise<LinkLogData['log'][number]> {
+  return poll('普链执行日志', async () => {
     const data = (await vscode.commands.executeCommand(CMD.linkLog, uri)) as LinkLogData | undefined
     return data?.found ? data.log.find(match) : undefined
   })
@@ -5054,6 +5091,65 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
 
     assert(await readDisk('wikilinks.md') === diskBefore, '歧义/缺失链路不得改写源文档')
+  }],
+
+  ['链接跳转附件：图片与 PDF 目标交原生默认编辑器打开，不再按文本装载进面板（#608）', async () => {
+    await openWithEditor('跳转附件.md')
+    await waitSessionReady('跳转附件.md')
+    const uri = wsUri('跳转附件.md').toString()
+    const diskBefore = await readDisk('跳转附件.md')
+    const versionBefore = (await vscode.workspace.openTextDocument(wsUri('跳转附件.md'))).version
+
+    // 双链跳图片：日志钉住 native 分派，标签层钉住不进 Vsidian 面板
+    //（修复前 openWith VIEW_TYPE 会把 PNG 装载为 TextDocument 按文本渲染）
+    await injectWikilink(uri, '附件图片.png')
+    const imgLog = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === '附件图片.png')
+    assert(imgLog!.path === wsUri('附件图片.png').fsPath, `图片目标路径不符：${imgLog!.path}`)
+    assert(imgLog!.locate === 'native', `图片目标应交原生打开，实际 ${imgLog!.locate}`)
+    await waitNativeDefaultTab('附件图片.png')
+    assert(tabsOf('附件图片.png', 'vsidian') === 0, '图片目标不得进 Vsidian 面板')
+
+    // 普链跳图片：普链执行体同一 native-default 通道
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: '附件图片.png', srcStart: 0, srcEnd: 10,
+    })
+    const linkImgLog = await waitLinkLog(uri, (e) => e.kind === 'doc' && e.href === '附件图片.png')
+    assert(linkImgLog!.locate === 'native', `普链图片目标应交原生打开，实际 ${linkImgLog!.locate}`)
+
+    // 普链跳 PDF：image 与 pdf 两桶各验一枚（修复前同样强制进面板）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'link.activate', sessionId: '', docUri: uri,
+      href: '资料.pdf', srcStart: 0, srcEnd: 8,
+    })
+    const pdfLog = await waitLinkLog(uri, (e) => e.kind === 'doc' && e.href === '资料.pdf')
+    assert(pdfLog!.path === wsUri('资料.pdf').fsPath, `PDF 目标路径不符：${pdfLog!.path}`)
+    assert(pdfLog!.locate === 'native', `PDF 目标应交原生打开，实际 ${pdfLog!.locate}`)
+    await waitNativeDefaultTab('资料.pdf')
+    assert(tabsOf('资料.pdf', 'vsidian') === 0, 'PDF 目标不得进 Vsidian 面板')
+
+    // 附件跳转全程只读
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `附件跳转不得产生 applyEdit，实际 ${state.appliedEdits}`)
+    assert(state.version === versionBefore, `版本不得变化（${versionBefore} → ${state.version}）`)
+    assert(await readDisk('跳转附件.md') === diskBefore, '附件跳转不得改写源文档')
+  }],
+
+  ['出链面板跳转：.markdown 目标进 Vsidian 面板（#608 打开通道统一）', async () => {
+    // 原 /\.md$/i 判定漏掉 *.markdown（自定义编辑器 selector 已声明该扩展名）
+    // ——跳转被误送原生文本编辑器；统一走 shared 通道分类后应进面板。
+    // outlink.activate 由 provider 层 panelMessageHandler 拦截，须走
+    // injectWebviewReceived（与真实 webview 消息同一处理入口）触达
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    const uri = wsUri('wikilinks.md').toString()
+    const accepted = await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'outlink.activate', sessionId: '', docUri: uri,
+      targetUri: wsUri('出链附件.markdown').fsPath, anchor: '',
+    })
+    assert(accepted === true, 'outlink.activate 注入应被面板处理器接受')
+    await waitActiveCustomTab('出链附件.markdown')
+    await waitSessionReady('出链附件.markdown')
   }],
 
   ['表格数据行背景透明到编辑器背景，表头保留底色（#213）', async () => {
