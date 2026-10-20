@@ -5,7 +5,7 @@
 // 与浏览器套件（multicursor）互补：本层驱动 CM6 事务与消息；浏览器层用
 // 真实键盘/鼠标验证 alt+click 三场景落点、绘制光标可见性与 goal column。
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { EditorSelection } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
@@ -16,6 +16,19 @@ import type { WebviewToHost } from '../../src/shared/protocol'
 if (Range.prototype.getClientRects === undefined) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
 }
+
+const fixtures: Array<{ controller: WebviewSyncController; host: HTMLDivElement }> = []
+
+afterEach(() => {
+  for (const { controller, host } of fixtures.splice(0)) {
+    controller.dispose()
+    host.remove()
+  }
+})
+
+afterAll(() => {
+  expect(document.querySelectorAll('.cm-editor'), 'jsdom 销毁前须回收全部编辑器夹具').toHaveLength(0)
+})
 
 function setup(text: string) {
   const sent: WebviewToHost[] = []
@@ -30,6 +43,7 @@ function setup(text: string) {
   const host = document.createElement('div')
   document.body.append(host)
   controller.mount(host, [keymap.of(defaultKeymap)])
+  fixtures.push({ controller, host })
   controller.handleHostMessage({ kind: 'init', sessionId: 'multicursor',
     docUri: 'file:///multicursor.md', version: 1, text })
   const view = controller.getView()!
@@ -70,7 +84,6 @@ describe('drawSelection 与多选区装配（#237）', () => {
     expect(selectedText()).toEqual([])
     expect(view.state.doc.toString()).toBe('> abc\n> def')
     expect(sent.filter(message => message.kind === 'edit.request')).toHaveLength(0)
-    controller.dispose()
   })
   it('默认开启：多 range 选区存续、光标/选区绘制层在场', () => {
     const { view } = setup('aaa\nbbb\nccc')
@@ -136,7 +149,6 @@ describe('上下添加光标（#237）', () => {
     view.dispatch({ selection: EditorSelection.cursor(5) }) // 第二行行尾
     controller.handleHostMessage({ kind: 'ui.command', op: 'addCursorAbove' })
     expect(view.state.selection.ranges.length).toBe(2)
-    controller.dispose()
   })
 
   it('文档首行上方不添加（CM6 边界返回 false 不派发）', () => {
