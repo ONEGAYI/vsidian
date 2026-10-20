@@ -246,17 +246,46 @@ describe('粘贴图片链接格式（双链嵌入档）', () => {
     expect(isWikilinkSafeImagePath('a^b.png')).toBe(false)
   })
 
+  it('isWikilinkSafeImagePath：可解码 %XX 序列与换行不安全（PR605-001）', () => {
+    // 字面 %20 目录名合法落盘，但渲染端 normalizeImgSrc 会解码一次——
+    // 请求路径 ≠ 落盘路径，图片丢失；含可解码序列即回退直链
+    expect(isWikilinkSafeImagePath('assets%20copy/a.png')).toBe(false)
+    expect(isWikilinkSafeImagePath('%E5%9B%BE.png')).toBe(false)
+    // 非法序列 decodeURIComponent 失败回原字面，无二次解释歧义，仍安全
+    expect(isWikilinkSafeImagePath('assets%zz/a.png')).toBe(true)
+    expect(isWikilinkSafeImagePath('100%.png')).toBe(true)
+    // 嵌入 inner 禁换行：子路径目录段含换行时 ![[…]] 跨行不成型，渲染为文本
+    expect(isWikilinkSafeImagePath('assets\ncopy/a.png')).toBe(false)
+    expect(isWikilinkSafeImagePath('assets\rcopy/a.png')).toBe(false)
+  })
+
   it('buildImagePasteInsertText：markdown 档维持直链；wikilink 档产双链；路径不可表达时回退直链', () => {
-    expect(buildImagePasteInsertText('photo', 'assets/photo 1.png', 'markdown')).toBe(
+    expect(buildImagePasteInsertText('photo.png', 'assets/photo 1.png', 'markdown')).toBe(
       '![photo](assets/photo%201.png)',
     )
-    expect(buildImagePasteInsertText('Pasted image 1', 'assets/Pasted image 1.png', 'wikilink')).toBe(
+    expect(buildImagePasteInsertText('Pasted image 1.png', 'assets/Pasted image 1.png', 'wikilink')).toBe(
       '![[' + 'assets/Pasted image 1.png]]',
     )
     // 目录段含 #（用户子路径引入）：双链无法无损表达，该次回退直链——
     // 落盘名已按双链口径清洗，直链编码路径照常可用
-    expect(buildImagePasteInsertText('photo', 'a#b/photo.png', 'wikilink')).toBe(
+    expect(buildImagePasteInsertText('photo.png', 'a#b/photo.png', 'wikilink')).toBe(
       '![photo](a%23b/photo.png)',
+    )
+  })
+
+  it('buildImagePasteInsertText：双链档要求扩展名被共享图片分类识别（PR605-002）', () => {
+    // MIME 兜底扩展名 .x-icon 不在共享图片清单——refEmbedTargetIsImage
+    // 返回 false，嵌入按文本引用呈现；该次回退直链（直链 img 不依赖分派）
+    expect(buildImagePasteInsertText('photo.x-icon', 'assets/photo.x-icon', 'wikilink')).toBe(
+      '![photo](assets/photo.x-icon)',
+    )
+    // .ico 在共享图片清单内，双链照常
+    expect(buildImagePasteInsertText('photo.ico', 'assets/photo.ico', 'wikilink')).toBe(
+      '![[' + 'assets/photo.ico]]',
+    )
+    // 常见位图不受影响
+    expect(buildImagePasteInsertText('photo.png', 'assets/photo.png', 'wikilink')).toBe(
+      '![[' + 'assets/photo.png]]',
     )
   })
 })
