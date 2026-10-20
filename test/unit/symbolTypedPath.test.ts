@@ -235,6 +235,30 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | （|\n')
   })
 
+  it('表格空白行首笔：异步组件后至覆盖内置兜底产物（内置先落地、修饰后至覆盖）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { view } = setup(text, async (input, v) => {
+      if (input.inputText === '(') {
+        // 异步行为（await 后至）：内置兜底已先落地 ()，组件按快照坐标
+        // 后至改写 open——（组件产出为终态（既有微任务序契约同型继承）
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        const open = v.state.doc.toString().indexOf('(')
+        v.dispatch({
+          changes: { from: open, to: open + 1, insert: '（' },
+          annotations: addonEditOriginTag.of({
+            origins: [{ addonId: 'pub.demo', opId: 'op-t2', undo: 'atomic' }],
+          }),
+        })
+      }
+    })
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    // 兜底先落地 | | | ()|；异步改写 open 后终态为组件产出，无二次闭合
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | （)|\n')
+  })
+
   it('多光标含空白网格行：不进 blankRow 规范化（既有边界），驱动载荷为逐 range 拼接原字符', async () => {
     const text = 'a|b|c\n---|---|---\n | | \n'
     const { drives, view } = setup(text)
