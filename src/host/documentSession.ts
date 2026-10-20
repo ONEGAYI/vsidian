@@ -408,7 +408,9 @@ function hoverShapeKeyOf(
 /** 变更组相等（顺序无关）：段内区间互不重叠，排序后逐段比较。
  *  VSCode 对多段 WorkspaceEdit 的回流 contentChanges 按偏移降序到达，
  *  而 webview 出站（CM6 iterChanges）为升序——按序比较会把自家确认
- *  误判为外部变更（#13 表格结构操作的多段变更暴露）。 */
+ *  误判为外部变更（#13 表格结构操作的多段变更暴露）。插入文本按 LF
+ *  比较：VSCode 会按文档 EOL 规范化换行，空/单行文档尚无行尾可供推断；
+ *  区间仍须在同一宿主坐标系精确匹配。 */
 function changesEqual(a: readonly SerChange[], b: readonly SerChange[]): boolean {
   if (a.length !== b.length) {
     return false
@@ -417,7 +419,8 @@ function changesEqual(a: readonly SerChange[], b: readonly SerChange[]): boolean
   const sortedB = [...b].sort((x, y) => x.offset - y.offset)
   return sortedA.every(
     (c, i) =>
-      c.offset === sortedB[i]!.offset && c.length === sortedB[i]!.length && c.text === sortedB[i]!.text,
+      c.offset === sortedB[i]!.offset && c.length === sortedB[i]!.length &&
+      c.text.replace(/\r\n/g, '\n') === sortedB[i]!.text.replace(/\r\n/g, '\n'),
   )
 }
 

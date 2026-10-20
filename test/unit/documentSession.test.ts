@@ -942,6 +942,35 @@ describe('外部变更广播与不写回保证', () => {
 })
 
 describe('CRLF 文档的换行协调（CM6 端统一 LF）', () => {
+  it.each([
+    { text: '', late: false }, { text: '单行', late: false },
+    { text: '', late: true }, { text: '单行', late: true },
+  ])('尚无换行的 CRLF 文档 $text（迟到回流：$late）首次多行粘贴不向来源面板回放', async ({ text, late }) => {
+    const s = setup(text)
+    s.doc.eol = 2
+    s.doc.fireChangeOnApply = !late
+    // VSCode WorkspaceEdit 按 TextDocument.eol 规范化插入文本，再发回流事件。
+    const apply = s.doc.applyChanges.bind(s.doc)
+    s.doc.applyChanges = (changes) => apply(changes.map(c => ({ ...c, text: c.text.replace(/\r?\n/g, '\r\n') })))
+    const source = s.attach(), observer = s.attach()
+    await readyPanel(s, source)
+    await readyPanel(s, observer)
+    s.sent.get(source)!.length = 0
+    s.sent.get(observer)!.length = 0
+
+    await s.send(source, {
+      kind: 'edit.request', sessionId: source, docUri: DOC_URI, seq: 1, baseVersion: 1,
+      changes: [{ offset: text.length, length: 0, text: '甲\n乙' }],
+    })
+    if (late) s.session.handleDocChanged([{ offset: text.length, length: 0, text: '甲\r\n乙' }], 2)
+
+    expect(s.doc.content).toBe(text + '甲\r\n乙')
+    expect(s.sent.get(source)).toEqual([{ kind: 'edit.ack', seq: 1, ok: true, version: 2 }])
+    expect(s.sent.get(observer)).toEqual([{
+      kind: 'doc.changed', version: 2, origin: 'external',
+      changes: [{ offset: text.length, length: 0, text: '甲\n乙' }],
+    }])
+  })
   function setupCrlf() {
     const s = setup('# 标题\r\n正文内容\r\n第三行')
     return s
