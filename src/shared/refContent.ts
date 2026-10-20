@@ -68,6 +68,54 @@ export function classifyLocalRefContentKind(fsPath: string): LocalRefContentKind
   return 'text'
 }
 
+/** 音视频媒体扩展（#608 打开通道）：与 Obsidian 附件支持的常见音视频格式
+ *  对齐；媒体目标交原生默认编辑器（内置媒体预览器或用户扩展），不按可读
+ *  文本装载。内容类型分类不受影响——媒体仍归 text 桶（悬停/引用读取路径
+ *  不变），只在打开通道层分出。 */
+export const MEDIA_FILE_EXTENSIONS: readonly string[] = [
+  'mp3', 'wav', 'ogg', 'oga', 'opus', 'ogv', 'flac', 'm4a', 'mp4', 'webm', 'mov', 'mkv', 'avi',
+]
+
+/** 路径是否音视频媒体文件（按扩展名；大小写不敏感） */
+export function isMediaFileExtension(fsPath: string): boolean {
+  const dot = fsPath.lastIndexOf('.')
+  if (dot < 0) {
+    return false
+  }
+  return MEDIA_FILE_EXTENSIONS.includes(fsPath.slice(dot + 1).toLowerCase())
+}
+
+/**
+ * 链接跳转打开通道（#608）：宿主两个跳转执行体与出链面板按同一分派打开
+ * 目标——
+ * - `vsidian-panel`：Markdown 进本扩展面板（锚点定位通道）——markdown 桶
+ *   对齐自定义编辑器 selector 声明的扩展名（`*.md` 与 `*.markdown`，比
+ *   classifyLocalRefContentKind 的 `.md` 桶宽：后者服务内容读取，`.markdown`
+ *   的内容分类归 text 是另一层既有口径，本通道不跟随）；
+ * - `native-text`：可读文本走原生文本编辑器（#340 口径，`#line`/行号锚点
+ *   在该通道解析）；
+ * - `native-default`：图片/PDF/音视频交 `vscode.open` 默认编辑器解析——
+ *   内置图片/媒体预览器或用户扩展接管，尊重 `workbench.editorAssociations`；
+ *   附件目标无锚点/行号定位语义（PDF `#page` 等三期阅读视图落地时接回）。
+ */
+export type LinkOpenChannel = 'vsidian-panel' | 'native-text' | 'native-default'
+
+/** 打开通道的 markdown 扩展名（= package.json customEditors selector 声明） */
+const MARKDOWN_OPEN_EXTENSIONS: readonly string[] = ['md', 'markdown']
+
+export function classifyLinkOpenChannel(fsPath: string): LinkOpenChannel {
+  const dot = fsPath.lastIndexOf('.')
+  const ext = dot < 0 ? '' : fsPath.slice(dot + 1).toLowerCase()
+  if (MARKDOWN_OPEN_EXTENSIONS.includes(ext)) {
+    return 'vsidian-panel'
+  }
+  const kind = classifyLocalRefContentKind(fsPath)
+  if (kind === 'text' && !isMediaFileExtension(fsPath)) {
+    return 'native-text'
+  }
+  return 'native-default'
+}
+
 /**
  * #336（P3-04）嵌入/双链目标的图片预判（webview 渲染路径分流判据）：
  * inner 为 `![[`/`[[` 与 `]]`/`]]` 之间的原文（可含 `|别名`）。判据 =
