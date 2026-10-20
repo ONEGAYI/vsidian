@@ -254,8 +254,10 @@ export interface WikilinkLogEntry {
   /** 请求的块引用目标（#159；与 heading 互斥） */
   blockId?: string
   /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；native=原生
-   *  默认编辑器打开（#608 图片/PDF/音视频附件）；none=无定位 */
-  locate?: 'custom-panel' | 'native' | 'none'
+   *  默认编辑器打开（#608 图片/PDF/音视频附件，无定位语义）；native-line=
+   *  原生文本编辑器行定位（#611 可读文本目标的 #line/#range 锚点，
+   *  showTextDocument + revealRange）；none=无定位 */
+  locate?: 'custom-panel' | 'native' | 'native-line' | 'none'
 }
 
 interface SessionEntry {
@@ -2842,7 +2844,7 @@ export function createTextEditorProvider(
         path: targetPath,
         heading: parsed.heading ?? undefined,
         blockId: parsed.blockId ?? undefined,
-        locate: jumpLine > 1 ? 'custom-panel' : 'none',
+        locate: jumpLine > 1 ? 'native-line' : 'none',
       })
       const textEditor = await vscode.window.showTextDocument(targetUri, { preview: false })
       const lineIdx = Math.min(jumpLine - 1, Math.max(0, textEditor.document.lineCount - 1))
