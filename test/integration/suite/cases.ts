@@ -10721,6 +10721,38 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(stillThere !== undefined, '撤销后落盘文件应保留')
   }],
 
+  ['图片粘贴：双链嵌入链接格式（image.pasteLinkFormat=wikilink，路径原样无编码）', async () => {
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const uri = wsUri('paste-image.md').toString()
+    const diskBefore = await readDisk('paste-image.md')
+    await waitSettings({
+      'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets',
+      'image.pasteLinkFormat': 'wikilink',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 1 })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 1,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64,
+    })
+    // 插入文本为双链嵌入：时间戳名含空格但路径原样——无百分号编码、无
+    // 尖括号包裹（与直链档的 percent-encode 对偶差异）；时间戳名不含双链
+    // 不可表达字符，stem 无需追加清洗。同秒重名时宿主 -1 递增，容忍序号
+    const view = await waitViewState('paste-image.md', (v) =>
+      /!\[\[Pasted image \d{14}(-\d+)?\.png\]\]/.test(v.text))
+    const match = /!\[\[Pasted image (\d{14})(-\d+)?\.png\]\]/.exec(view.text)
+    assert(match !== null, '插入文本应为双链嵌入形态')
+    const fileName = `Pasted image ${match![1]}${match![2] ?? ''}.png`
+    const bytes = await vscode.workspace.fs.readFile(wsUri(fileName))
+    assert(Buffer.compare(Buffer.from(bytes), Buffer.from(PASTE_PNG_BASE64, 'base64')) === 0,
+      '落盘文件字节应与 base64 载荷解码一致')
+    // 撤销一步还原；落盘文件保留
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await waitViewState('paste-image.md', (v) => v.text === diskBefore)
+    // 恢复直链档（防格式偏好泄漏到后续用例）
+    await waitSettings({ 'image.pasteLinkFormat': 'markdown' })
+  }],
+
   ['图片粘贴：原名清洗沿用与重名 -1 递增（#161）', async () => {
     await openWithEditor('paste-image.md')
     await waitSessionReady('paste-image.md')

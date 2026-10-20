@@ -324,8 +324,10 @@ export type HostToWebview =
    *  有活跃图源时立即触发一轮周期核验（及时核验，不等下一周期） */
   | { kind: 'image.wake' }
   /** 图片粘贴落盘结果（#161）：ok 时 markdown 为宿主计算好的完整插入文本
-   *  （![stem](percent-encode 相对路径)，与渲染端 normalizeImgSrc 的 decode
-   *  对偶），webview 在光标处单事务插入（一笔撤销）；失败附原因码
+   *  （格式随 image.pasteLinkFormat：markdown 档为 ![stem](percent-encode
+   *  相对路径)，与渲染端 normalizeImgSrc 的 decode 对偶；wikilink 档为
+   *  ![[相对路径]]，路径原样、空格不转义，路径含双链不可表达字符时该次
+   *  回退直链），webview 在光标处单事务插入（一笔撤销）；失败附原因码
    *  （invalid-location=子路径越界/绝对路径；write-failed=建目录或写盘
    *  失败；invalid=载荷校验失败），webview 不插入文本 */
   | { kind: 'image.paste.result'; reqId: number; ok: true; markdown: string }
