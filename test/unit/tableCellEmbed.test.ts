@@ -247,4 +247,29 @@ describe('scanWikilinksInTableRow：#607 表格内容行的格内双链 occurren
     expect(line.slice(hits[0]!.from, hits[0]!.to)).toBe('[[B]]')
     expect(line[hits[0]!.to]).toBe('\\')
   })
+
+  it('base 偏移叠加正确（from/to 恒为全文坐标）', () => {
+    const line = '| [[B\\|别名]] |'
+    const hits = scanWikilinksInTableRow(line, 100)
+    expect(hits).toHaveLength(1)
+    expect(line.slice(hits[0]!.from - 100, hits[0]!.to - 100)).toBe('[[B\\|别名]]')
+  })
+
+  it('格首转义管道后跟双链：from 精确不含前置反斜杠', () => {
+    const line = '| \\|[[B]] | y |'
+    const hits = scanWikilinksInTableRow(line, 0)
+    expect(hits).toHaveLength(1)
+    expect(line.slice(hits[0]!.from, hits[0]!.to)).toBe('[[B]]')
+  })
+
+  it('残缺形态不命中（未闭合 / 内部含中括号）', () => {
+    expect(scanWikilinksInTableRow('| [[B\\|x | y |', 0)).toHaveLength(0)
+    expect(scanWikilinksInTableRow('| [[B[x]] | y |', 0)).toHaveLength(0)
+  })
+
+  it('命中区间 slice 严格等于双链原文的通用不变量（同格多命中）', () => {
+    const line = '| 一 [[A\\|a]] 二 [[B]] 三 |'
+    const hits = scanWikilinksInTableRow(line, 0)
+    expect(hits.map((h) => line.slice(h.from, h.to))).toEqual(['[[A\\|a]]', '[[B]]'])
+  })
 })

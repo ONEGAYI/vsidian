@@ -565,9 +565,9 @@ describe('#607 表格格内双链边（转义映射保真）', () => {
   })
 
   it('表头格与数据格同产边；格内行内代码与跨格伪形态不产边', () => {
-    const text = '| [[设计]] [[目标笔记\\|n]] | b |\n| --- | --- |\n| c | d |'
+    const text = '| [[设计]] [[目标笔记\\|n]] | b |\n| --- | --- |\n| c | [[设计\\|d行]] |'
     const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
-    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => e.target)).toEqual(['设计', '目标笔记'])
+    expect(edges.filter((e) => e.kind === 'wikilink').map((e) => e.target)).toEqual(['设计', '目标笔记', '设计'])
     const codeCell = '| `[[设计]]` | b |\n| --- | --- |\n| c | d |'
     expect(extractVaultEdges('notes/源.md', codeCell, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
     const pseudo = '| a [[x | y]] b |\n| --- | --- |\n| c | d |'
