@@ -215,6 +215,48 @@ try {
       assert.equal(p.bg, 'rgba(0, 0, 0, 0)', `组件条目「${p.text}」不得整组点亮`)
     }
   }
+  // ---- 3b. 故障条目（FaultPage：仅自绘页已被撤下）点击——fault 例外下
+  //      定位路径仍真实可达（vsidianPR603-001）：不开设置区、仍在本管理
+  //      页，落点为状态行定位（描边绘制/层级互斥/约 1.5s 一次性退场） ----
+  await page.evaluate(() => { window.sentMessages = [] })
+  await nav.getByRole('button', { name: /FaultPage/ }).click()
+  const locatedRow = page.locator('.vsidian-addons-list .vsidian-settings-item-located')
+  await locatedRow.waitFor()
+  assert.match(await locatedRow.first().innerText(), /FaultPage/, '故障条目点击定位组件状态行')
+  assert.equal(
+    await page.evaluate(() => window.sentMessages.filter((m) => m.kind === 'addons.settingsOpen').length),
+    0,
+    '故障条目点击不开设置区（自绘页已撤下，无落点）',
+  )
+  const locatedPaint = await page.evaluate(() => {
+    const list = document.querySelector('.vsidian-addons-list')
+    const row = list?.querySelector('.vsidian-settings-item-located')
+    if (!list || !row) return null
+    const rowCs = getComputedStyle(row)
+    const listCs = getComputedStyle(list)
+    return {
+      rowOutline: `${rowCs.outlineWidth} ${rowCs.outlineStyle} ${rowCs.outlineColor}`,
+      rowOffset: rowCs.outlineOffset,
+      rowRadius: rowCs.borderRadius,
+      listOutlineStyle: listCs.outlineStyle,
+      listLocated: list.classList.contains('vsidian-settings-item-located'),
+    }
+  })
+  assert.ok(locatedPaint, '定位条目行应在场')
+  assert.equal(locatedPaint.rowOutline, '1px solid rgb(38, 135, 212)', '条目行定位描边应绘制（focusBorder 1px）')
+  assert.equal(locatedPaint.rowOffset, '8px', '条目行定位描边外扩 8px（跳转落点档位）')
+  assert.equal(locatedPaint.rowRadius, '3px', '定位高亮圆角 3px（跳转落点档位）')
+  assert.equal(locatedPaint.listOutlineStyle, 'none', '列表容器不得再套区块级描边（层级互斥）')
+  assert.equal(locatedPaint.listLocated, false, '列表容器不带定位高亮类')
+  assert.equal(await pageItems.count(), 1, '故障条目点击后唯一选中仍是「附加组件」选项按钮')
+  // #462 一次性退场：约 1.5s 后高亮摘除（跳转落点是一次性导航反馈）
+  await page.waitForTimeout(1700)
+  assert.equal(
+    await page.locator('.vsidian-addons-list .vsidian-settings-item-located').count()
+      + (await page.locator('.vsidian-addons-list.vsidian-settings-item-located').count()),
+    0,
+    '定位高亮应在约 1.5s 后一次性退场',
+  )
   // 本段新增的 Core A 切换点击会遗留 settingsOpen 记录——清空后续段落
   // 的消息等待基准（第 4 段按「点击后新到达」等待 onegayi.core）
   await page.evaluate(() => { window.sentMessages = [] })

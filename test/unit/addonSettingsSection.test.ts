@@ -667,6 +667,18 @@ describe('定位高亮层级互斥与一次性退场（#462）', () => {
       vi.useRealTimers()
     }
   })
+
+  it('故障条目（仅自绘页已撤下）点击定位状态行：fault 例外下的真实可达路径（vsidianPR603-001）', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      { id: 'a.pageonly', label: 'PageOnly', official: false, status: 'registered', enabled: true, hasSettingsPage: false, fault: { reason: 'enable 异常：boom' } },
+    ]))
+    // 侧栏故障条目点击的等价形态：定位状态行、不强开设置区（自绘页已
+    // 撤下，无可打开的设置界面）——fault 放行后此路径真实可达，非防御分支
+    harness.view.selectSection('addons', 'addon:a.pageonly')
+    expect(harness.sent.filter((m) => (m as { kind?: string }).kind === 'addons.settingsOpen')).toEqual([])
+    expect(harness.parent.querySelector('.vsidian-addons-list .vsidian-settings-item-located')?.textContent).toContain('PageOnly')
+  })
 })
 
 // ---- #354 T05：故障排障入口（列表行重试 + 工具组日志） ----
