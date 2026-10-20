@@ -529,6 +529,20 @@ describe('设置页侧栏三组结构（T05）', () => {
     expect(disabledGroup?.textContent ?? '').not.toContain('Broken')
   })
 
+  it('故障暂停的仅自绘页组件保留侧栏条目（ADR-0012：故障不改变分组）', () => {
+    const harness = makeView()
+    harness.dispatch(addonsState([
+      // 宿主故障时撤下自绘设置页（addonRuntime：runState !== 'faulted' 才有
+      // hasSettingsPage），该组件又无设置定义——若按静态「有设置能力」过滤
+      // 会被挤出侧栏，违反「故障留已启用组并标注」口径
+      { id: 'a.pageonly', label: 'PageOnly', official: false, status: 'registered', enabled: true, hasSettingsPage: false, fault: { reason: 'enable 异常：boom' } },
+    ]))
+    const sections = [...harness.parent.querySelectorAll('.vsidian-settings-nav-section')]
+    const third = sections[2]
+    expect(third?.textContent ?? '').toContain('PageOnly')
+    expect(third?.querySelector('.vsidian-settings-nav-item-badge')?.textContent ?? '').toContain('故障暂停')
+  })
+
   it('空清单时两大组呈现空态提示（分组结构不消失）', () => {
     const harness = makeView()
     harness.dispatch(addonsState([]))

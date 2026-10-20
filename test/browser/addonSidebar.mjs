@@ -95,6 +95,9 @@ try {
       { id: 'a.third-on', label: 'Third On', official: false, status: 'registered', enabled: true, hasSettingsDefinitions: true },
       { id: 'a.third-off', label: 'Third Off', official: false, status: 'registered', enabled: false, hasSettingsPage: true },
       { id: 'a.plain', label: 'Plain', official: false, status: 'registered', enabled: true },
+      // 故障暂停的仅自绘页组件：宿主撤下设置页（hasSettingsPage: false），
+      // 仍保留侧栏条目并标注故障（ADR-0012：故障不改变分组）
+      { id: 'a.fault-page', label: 'FaultPage', official: false, status: 'registered', enabled: true, hasSettingsPage: false, fault: { reason: 'enable 异常：page crash' } },
       { id: 'a.future', label: 'Future', official: false, status: 'incompatible', apiRange: '^2.0.0' },
     ]
   })
@@ -117,6 +120,9 @@ try {
   const navText = await nav.innerText()
   assert.ok(!navText.includes('Future'), '未注册组件不进侧栏分组')
   assert.ok(!navText.includes('Plain'), '无设置能力的纯运行组件不进侧栏（只在附加组件页列表呈现）')
+  const thirdGroup = nav.locator('.vsidian-settings-nav-section').nth(2)
+  assert.ok((await thirdGroup.innerText()).includes('FaultPage'), '故障暂停的仅自绘页组件保留侧栏条目（故障不改变分组）')
+  assert.ok((await thirdGroup.innerText()).includes(zhCn['addons.sidebarFaultBadge']), '该条目带故障标注')
 
   // ---- 2. 大组分隔绘制层：divider 有可见描边（非 display:none） ----
   const dividerPaint = await nav.locator('.vsidian-settings-nav-divider').first().evaluate((el) => {

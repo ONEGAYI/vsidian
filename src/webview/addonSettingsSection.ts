@@ -47,6 +47,9 @@ export const ADDONS_SECTION_MANAGE_ENTRY = 'manage'
  * - 只登记**有设置能力**的组件（设置定义或自己的设置页）：侧栏条目的
  *   落点必须是可打开的设置界面；纯运行组件（两者皆无）不提供无落点
  *   条目，只在「附加组件」页列表呈现与管理（2026-10-20 用户验收口径）；
+ *   例外：故障暂停者即使自绘设置页被宿主暂时撤下（无定义者此时两个字段
+ *   皆 false），仍保留侧栏条目并标注故障——ADR-0012「故障暂停不改变
+ *   分组」，不以移出分组代替故障提示；
  * - 按用户功能开关归类已启用/已停用——开关值只在已注册组件上存在，
  *   未注册（不兼容/唤醒失败等）不参与分组（状态列表仍呈现）；
  * - 开关开启但故障暂停者留在已启用组并标注故障（不移入已停用）。
@@ -56,7 +59,7 @@ export function addonSidebarGroups(addons: readonly AddonStatusEntry[]): readonl
     const scoped = addons.filter((entry) =>
       entry.official === official &&
       typeof entry.enabled === 'boolean' &&
-      (entry.hasSettingsDefinitions === true || entry.hasSettingsPage === true))
+      (entry.hasSettingsDefinitions === true || entry.hasSettingsPage === true || entry.fault !== undefined))
     const of = (enabled: boolean) => scoped
       .filter((entry) => entry.enabled === enabled)
       .map((entry) => ({
@@ -160,8 +163,9 @@ export class AddonSection implements SettingsPageSection {
     // #354 T05 侧栏组件条目定位（addon:<组件 ID>）：可配置（有定义或有
     // 自己的设置页）时打开该组件基础设置区并导航到「组件设置」分页——
     // 停用组件仍可配置（ADR Q23）。侧栏分组自 2026-10-20 起只贡献有设置
-    // 能力的组件；显式 focusEntry 仍可能指向纯运行组件（存量定位/程序化
-    // 导航），此时只定位状态列表行、不强开设置区（本页恒为管理视图）
+    // 能力的组件（故障者例外，见 addonSidebarGroups 头注）；显式
+    // focusEntry 指向纯运行组件的分支为防御性保留（当前无真实产生方，
+    // 行为由 #462 定位测试钉住），此时只定位状态列表行、不强开设置区
     const focusAddonId = focusAddonOf(focusEntry)
     if (focusAddonId !== undefined) {
       const entry = this.state?.addons.find((item) => item.id === focusAddonId)
