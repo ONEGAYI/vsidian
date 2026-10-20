@@ -14,6 +14,8 @@ import { buildTestHostArgs, runTestHost } from '../integration/testHost.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 mkdirSync(path.join(root, 'out/test/warning-ack'), { recursive: true })
 const dir = mkdtempSync(path.join(tmpdir(), 'vsidian-keyboard-host-'))
+mkdirSync(path.join(dir, '.vscode'))
+writeFileSync(path.join(dir, '.vscode/settings.json'), JSON.stringify({ 'files.eol': '\r\n' }))
 writeFileSync(path.join(dir, 'keyboard.md'), 'word')
 await build({ entryPoints: [path.join(root, 'test/integration/richPasteHostSuite.ts')],
   outfile: path.join(root, 'out/test/integration/richPasteHost.js'), bundle: true,
@@ -156,7 +158,42 @@ try {
     })()`)
   }
 
-  await command('preferences', { values: { 'editor.pasteSplitUndo': false } })
+  const markdownTable = [
+    '| 能力 | 可以怎样用于你们的工具 |',
+    '|---|---|',
+    '| **工具执行记录与详情** | 展示调用过程，保留参数和结果供追查；用户按需展开 |',
+    '| **Task 子代理与子会话** | 分别调查日志、波形、RTL，主会话汇总结果，用户可以进入子会话查看调查过程 |',
+    '| **自定义 `/命令`** | 提供 `/triage`、`/analyze`、`/evidence` 等固定入口，减少用户记忆提示词的负担 |',
+    '| **`@` 文件引用** | 用户直接指定日志、RTL 或信号清单，明确本轮分析对象 |',
+    '| **原生 diff** | 涉及 RTL、配置、断言修改时，展示实际文件变化 |',
+    '| **Permission 执行授权** | 在需要授权的工具执行前请求允许；业务路线选择仍交给 Question |',
+    '| **`/export`** | 导出会话，方便复盘和交付 |',
+  ].join('\n')
+  await command('preferences', { values: { 'editor.pastePreserveFormatting': false } })
+  for (const { text, html } of [
+    { text: 'Question 问答面板\nTodo 任务清单\n工具执行记录与详情\n原生 diff' },
+    { text: markdownTable, html: `<pre dir="ltr"><code data-language="markdown">${markdownTable}</code></pre>` },
+  ]) {
+    const hostText = text.replace(/\n/g, '\r\n')
+    await command('replaceText', { text: '' })
+    await evaluate('document.querySelector(".cm-content").focus()')
+    if (html) {
+      await evaluate(`navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([${JSON.stringify(text)}], { type: 'text/plain' }),
+        'text/html': new Blob([${JSON.stringify(html)}], { type: 'text/html' }),
+      })])`)
+    } else await evaluate(`navigator.clipboard.writeText(${JSON.stringify(text)})`)
+    await press('v'); await waitText(hostText)
+    await new Promise(r => setTimeout(r, 250))
+    assert.equal((await command('paint')).text, text, '编辑区与宿主一致，不回放自身粘贴')
+    await press('z'); await waitText('')
+    assert.equal((await command('paint')).text, '', '撤销同时清空编辑区')
+    await press('y'); await waitText(hostText)
+    assert.equal((await command('paint')).text, text, '重做只恢复一份内容')
+  }
+  console.log('[PASS] 真宿主普通多行文本与完整表格 Ctrl+V 不重复，编辑区/宿主/撤销/重做一致')
+  await command('replaceText', { text: 'word' })
+  await command('preferences', { values: { 'editor.pastePreserveFormatting': true, 'editor.pasteSplitUndo': false } })
   await evaluate('document.querySelector(".cm-content").focus()')
   await evaluate('(async()=>{await navigator.clipboard.write([new ClipboardItem({"text/plain":new Blob(["new"],{type:"text/plain"}),"text/html":new Blob(["<b style=font-weight:normal><span style=font-weight:700>new</span></b>"],{type:"text/html"})})]);})()')
   await press('a');await press('v')
