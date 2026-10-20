@@ -5685,6 +5685,44 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   max-width: 100%;
 }
 
+/* ---- #613 原生 HTML 表格默认边框（可覆盖）----
+   作者源文未写边框时浏览器默认零框线，与 Markdown 管道表格观感割裂
+   （Obsidian 默认主题对渲染区所有表格统一给边框）。复用 reading-table
+   默认档位（--vscode-panel-border 边框 / --vsidian-table-background
+   表头底色 / 4px 12px 内边距）。可覆盖是硬约束：容器经 :where() 归零
+   特异性（#133 先例），裸标签承担 (0,0,1)——用户片段链与文档 <style>
+   （层叠序后置于内置产物）按裸标签源序即可覆盖，无需提高特异性；
+   同容器表格规则不得以非 :where 形态出现（契约测试防回潮）。
+   td 不加等宽字体（那是管道表格特例；原生 HTML 表格保持通用字体）。
+   Live 侧无 margin：宿主 padding 已承担间距，且 margin 折叠出行盒会
+   造成 CM6 高度记账错位（live-embed #217 口径）；Reading 侧文档流
+   保留 0.4em 0（reading-table 同款）。行内 HTML 片段内表格不接——
+   Reading 行内原位渲染无容器类可锚定，且表格写进行内属畸形用法（#613
+   记录的边界，不顺手扩）。嵌入卡与悬停浮层复用同管线时随容器类生效。 */
+:where(#app .vsidian-live-html) table,
+:where(#app .vsidian-reading-html) table {
+  border-collapse: collapse;
+  max-width: 100%;
+}
+
+:where(#app .vsidian-reading-html) table {
+  margin: 0.4em 0;
+}
+
+:where(#app .vsidian-live-html) th,
+:where(#app .vsidian-live-html) td,
+:where(#app .vsidian-reading-html) th,
+:where(#app .vsidian-reading-html) td {
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.4));
+  padding: 4px 12px;
+}
+
+:where(#app .vsidian-live-html) th,
+:where(#app .vsidian-reading-html) th {
+  background-color: var(--vsidian-table-background, rgba(128, 128, 128, 0.1));
+  font-weight: 600;
+}
+
 /* ---- #572（T07）Live widget 内 iframe 命中接管（外层命中机制，样式契约
    live-html-widget 条目的 frame/shield 子结构）----
    沙箱/跨域子文档是独立 document，帧内指针事件不冒泡到父文档——以透明

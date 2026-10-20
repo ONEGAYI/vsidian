@@ -19259,8 +19259,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(liveHtml.visible === true, `Live 渲染根实际可见（elementFromPoint 命中，实际 ${JSON.stringify(liveHtml)}）`)
       assert(liveHtml.mergedCell !== null && liveHtml.mergedCell.hit === true,
         `Live 合并单元格绘制层命中（实际 ${JSON.stringify(liveHtml.mergedCell)}）`)
-      // 边框宽为观测字段（原生表格默认无边框，0px 合法）；合并单元格的
-      // 绘制层证据 = 合并格中心 elementFromPoint 命中（上方断言）
+      // #613 起原生表格默认样式生效：合并格计算边框 > 0（内置默认 1px
+      // 逻辑像素；缩放显示下计算值可为亚像素如 150% DPI 的 0.666667px，
+      // 断言只钉「有宽度」；作者样式可覆盖）。绘制层证据 = 合并格中心
+      // elementFromPoint 命中 + 计算边框宽（样式注入失效即红）
+      assert(liveHtml.mergedCell.borderWidth !== null
+        && Number.parseFloat(liveHtml.mergedCell.borderWidth) > 0,
+        `Live 合并单元格默认边框绘制（实际 ${liveHtml.mergedCell.borderWidth}）`)
       assert(liveHtml.scripts === 0, `Live 渲染根内 script 残留应为 0（实际 ${liveHtml.scripts}）`)
       assert(liveHtml.eventAttrs === 0, `Live 渲染根内 on* 事件属性残留应为 0（实际 ${liveHtml.eventAttrs}）`)
 
@@ -19272,6 +19277,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(readingHtml.visible === true, 'Reading 渲染根实际可见')
       assert(readingHtml.mergedCell !== null && readingHtml.mergedCell.hit === true,
         `Reading 合并单元格绘制层命中（实际 ${JSON.stringify(readingHtml.mergedCell)}）`)
+      assert(readingHtml.mergedCell.borderWidth !== null
+        && Number.parseFloat(readingHtml.mergedCell.borderWidth) > 0,
+        `Reading 合并单元格默认边框绘制（实际 ${readingHtml.mergedCell.borderWidth}）`)
       assert(readingHtml.scripts === 0 && readingHtml.eventAttrs === 0,
         `Reading 净化负向：script/on* 残留恒 0（实际 ${readingHtml.scripts}/${readingHtml.eventAttrs}）`)
       assert((reading.readingBlockCount ?? 0) >= 4, 'Reading 块序列含 html 块（标题/表格/恶意/结尾）')

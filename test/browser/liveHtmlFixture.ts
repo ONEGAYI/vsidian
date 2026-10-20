@@ -99,11 +99,15 @@ Object.assign(window, {
     return els.map((host) => {
       const rect = host.getBoundingClientRect()
       const style = getComputedStyle(host)
-      const cell = host.querySelector<HTMLElement>('td, th')
+      // 优先合并格：命中语义钉「合并格中心」（表头行加入后 first cell 不再是合并格）
+      const cell = host.querySelector<HTMLElement>('td[colspan], td[rowspan]')
+        ?? host.querySelector<HTMLElement>('td, th')
       const cellRect = cell?.getBoundingClientRect()
       const hit = cellRect && cellRect.width > 0 && cellRect.height > 0
         ? document.elementFromPoint(cellRect.left + cellRect.width / 2, cellRect.top + cellRect.height / 2)
         : null
+      const tdEl = host.querySelector<HTMLElement>('td')
+      const thEl = host.querySelector<HTMLElement>('th')
       return {
         from: Number(host.dataset['vsidianHtmlFrom']),
         to: Number(host.dataset['vsidianHtmlTo']),
@@ -120,6 +124,10 @@ Object.assign(window, {
         tooltip: host.getAttribute('data-tooltip') ?? '',
         /** 绘制层证据：合并格中心命中落在宿主内（真实接收指针） */
         hitInside: hit !== null && host.contains(hit),
+        /** #613 默认表格边框与表头底色（计算值——样式注入失效即红） */
+        cellBorderStyle: tdEl ? getComputedStyle(tdEl).borderTopStyle : '',
+        cellBorderWidth: tdEl ? getComputedStyle(tdEl).borderTopWidth : '',
+        headerBg: thEl ? getComputedStyle(thEl).backgroundColor : '',
         text: (host.textContent ?? '').trim(),
       }
     })
@@ -129,11 +137,14 @@ Object.assign(window, {
     const els = Array.from(document.querySelectorAll<HTMLElement>('.vsidian-reading-html'))
     return els.map((el) => {
       const rect = el.getBoundingClientRect()
-      const cell = el.querySelector<HTMLElement>('td, th')
+      const cell = el.querySelector<HTMLElement>('td[colspan], td[rowspan]')
+        ?? el.querySelector<HTMLElement>('td, th')
       const cellRect = cell?.getBoundingClientRect()
       const hit = cellRect && cellRect.width > 0 && cellRect.height > 0
         ? document.elementFromPoint(cellRect.left + cellRect.width / 2, cellRect.top + cellRect.height / 2)
         : null
+      const tdEl = el.querySelector<HTMLElement>('td')
+      const thEl = el.querySelector<HTMLElement>('th')
       return {
         height: rect.height,
         tablePresent: el.querySelector('table') !== null,
@@ -142,6 +153,10 @@ Object.assign(window, {
         display: getComputedStyle(el).display,
         docScope: el.dataset['vsidianDocScope'] ?? null,
         hitInside: hit !== null && el.contains(hit),
+        /** #613 默认表格边框与表头底色（计算值） */
+        cellBorderStyle: tdEl ? getComputedStyle(tdEl).borderTopStyle : '',
+        cellBorderWidth: tdEl ? getComputedStyle(tdEl).borderTopWidth : '',
+        headerBg: thEl ? getComputedStyle(thEl).backgroundColor : '',
         text: (el.textContent ?? '').trim(),
       }
     })
