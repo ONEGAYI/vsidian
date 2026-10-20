@@ -279,6 +279,11 @@ await page.evaluate((state) => {
         window.dispatchEvent(new MessageEvent('message', { source: window, data: window.themesState }))
       }
       if (message.kind === 'settings.uiState') return
+      // #602 分层口径：stub 应答只发生在请求先经上方 push 记入
+      // sentMessages 之后；「webview 确实发起过请求」由下方 sentMessages
+      // 断言显性钉住——不是静默自答。宿主转发→themesState 应答链路不由
+      // 本套件覆盖：由单元测试 settingsPageHost（转发断言）与真宿主集成
+      // addonThemeSettingsHost（设置页「外观→主题」候选 DOM 断言）钉住。
       if (message.kind === 'addons.themesGet') {
         window.dispatchEvent(new MessageEvent('message', { source: window, data: window.themesState }))
         return
@@ -310,6 +315,10 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.vsidian-appearance-presets input[type=radio]').length >= 3, null, { timeout: 8000 })
   const radios = page.locator('.vsidian-appearance-presets input[type=radio]')
   assert.equal(await radios.count(), 3, 'default + 两个组件主题')
+  // #602 显性契约：候选渲染的前提是页面真实发起过 addons.themesGet——
+  // stub 应答不是静默自答（宿主转发缺陷曾在浏览器层被 stub 掩盖，#602）
+  assert.equal(await page.evaluate(() => window.sentMessages.some((m) => m.kind === 'addons.themesGet')), true,
+    '设置页装载应真实发出 addons.themesGet 请求（stub 应答对应的请求已记入 sentMessages）')
   assert.equal(await page.locator('.vsidian-appearance-presets input[value=retired-preset]').count(), 0, '退役预设不应出现内置单选项')
   // 宿主 mock preferred=default：default 选中——H-U04 回显走宿主推送
   assert.equal(await radios.nth(0).isChecked(), true, 'preferred=default 选中')
