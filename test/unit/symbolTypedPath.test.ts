@@ -19,6 +19,7 @@ import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/sync
 import { addonEditOriginTag } from '../../src/webview/liveInstance'
 import { planSelectionWrap } from '../../src/shared/symbolWrap'
 import { containerPrefixLen, splitTableRowCells } from '../../src/shared/tableCells'
+import { tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { findSelectionWrapEntry } from '../../src/shared/symbols'
 import type { SerChange, WebviewToHost } from '../../src/shared/protocol'
 
@@ -233,6 +234,53 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     await settleMicrotasks()
     // 组件产出为终态：兜底不得再补 )（红形态：| | | （)|）
     expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | （|\n')
+  })
+
+  it('表格空白行键入 | 经管道键入口：恰一次原始驱动（inputText 为原字符），转义与规范化终态不变（评审 001）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { drives, sent, view } = setup(text)
+    view.dispatch({ selection: { anchor: 23 } })
+    expect(tablePipeKeyHandler(view)).toBe(true)
+    await settleMicrotasks()
+    // 红形态：生产 handler 事务无 userEvent/载体，行为回调 0 次
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: '|', replaced: null },
+    ])
+    // 终态与 base 逐字一致：原字符 | 转义入末格、单笔出站
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | \\||\n')
+    expect(editRequests(sent)).toHaveLength(1)
+  })
+
+  it('表格空白行多字符含管道输入：载荷为转义前原文（x|y 与 x\|y 可区分），结构转义保持（评审 002）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const a = setup(text)
+    a.view.dispatch({ selection: { anchor: 23 } })
+    a.view.dispatch({ changes: { from: 23, insert: 'x|y' }, selection: { anchor: 26 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    // 红形态：protectGridCellContent 先转义，载荷成四字符 x\|y
+    expect(a.drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: 'x|y', replaced: null },
+    ])
+    expect(a.view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | x\\|y|\n')
+    // 原文 x\|y（用户已手动转义）：载荷四字符，两者可区分
+    const b = setup(text)
+    b.view.dispatch({ selection: { anchor: 23 } })
+    b.view.dispatch({ changes: { from: 23, insert: 'x\\|y' }, selection: { anchor: 27 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    expect(b.drives[0]!.inputText).toBe('x\\|y')
+    expect(b.view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | x\\|y|\n')
+  })
+
+  it('表格空白行单字符 | 经事务入口：载荷为原字符，格内转义与规范化终态不变（评审 002 覆盖面）', async () => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { drives, view } = setup(text)
+    view.dispatch({ selection: { anchor: 23 } })
+    view.dispatch({ changes: { from: 23, insert: '|' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    await settleMicrotasks()
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: '|', replaced: null },
+    ])
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | \\||\n')
   })
 
   it('表格空白行首笔：异步组件后至覆盖内置兜底产物（内置先落地、修饰后至覆盖）', async () => {
