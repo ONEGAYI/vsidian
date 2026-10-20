@@ -357,6 +357,10 @@ it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选�
   // （detail 面板常驻 display:flex，无此基线两面板会同屏叠加）
   expect(css).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important/)
   expect(css).toContain('.vsidian-settings-nav-item[aria-current="page"]')
+  // #462 条目行定位描边：侧栏纯运行组件条目移除后，focusEntry 定位路径的
+  // 绘制规则由本契约钉住（浏览器端到端断言随触发路径一并退役）
+  expect(css).toMatch(/\.vsidian-settings-item-located\s*\{[^}]*outline:\s*1px solid var\(--vscode-focusBorder/)
+  expect(css).toMatch(/\.vsidian-settings-item-located\s*\{[^}]*outline-offset:\s*8px/)
   expect(css).toContain('--vscode-list-activeSelectionBackground')
   expect(css).toContain(':focus-visible')
   expect(css).toContain('@media (max-width: 600px)')
