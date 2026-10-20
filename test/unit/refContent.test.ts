@@ -4,7 +4,9 @@
 // ——本票不实现非 Markdown 锚点解析，仅结构与字段位，P3-05/P3-08 接入）。
 import { describe, expect, it } from 'vitest'
 import {
+  MEDIA_FILE_EXTENSIONS,
   REF_CONTENT_KINDS,
+  classifyLinkOpenChannel,
   classifyLocalRefContentKind,
   isRefContentKind,
   refEmbedTargetIsImage,
@@ -97,6 +99,47 @@ describe('Markdown 载荷与导航选择器结构（类型留位）', () => {
     expect(content.kind).toBe('image')
     expect(content.src).toBe('assets/图.png')
     expect(content.version).toBe(5)
+  })
+})
+
+// #608（链接跳转打开通道）：宿主两个跳转执行体与出链面板按同一分派打开
+// 目标——markdown 进 Vsidian 面板；可读文本走原生文本编辑器（#340 口径，
+// 行号锚点在该通道解析）；图片/PDF/音视频交 vscode.open 默认编辑器解析
+// （内置图片/媒体预览器或用户扩展接管，尊重 workbench.editorAssociations）。
+// 分类不改变内容类型（classifyLocalRefContentKind 不动）——媒体扩展只在
+// 打开通道层从「可读文本」分出，悬停/引用读取路径不受影响。
+describe('#608 链接跳转打开通道 classifyLinkOpenChannel', () => {
+  it('markdown 目标进 Vsidian 面板（.md 与 .markdown 同口径，大小写不敏感）', () => {
+    expect(classifyLinkOpenChannel('D:\\notes\\笔记.md')).toBe('vsidian-panel')
+    expect(classifyLinkOpenChannel('D:\\notes\\NOTE.MD')).toBe('vsidian-panel')
+    expect(classifyLinkOpenChannel('D:\\notes\\笔记.markdown')).toBe('vsidian-panel')
+    expect(classifyLinkOpenChannel('D:\\notes\\NOTE.MARKDOWN')).toBe('vsidian-panel')
+  })
+
+  it('可读文本走原生文本编辑器（代码/配置/无扩展名；#340 行号锚点通道）', () => {
+    expect(classifyLinkOpenChannel('D:\\notes\\src\\main.ts')).toBe('native-text')
+    expect(classifyLinkOpenChannel('D:\\notes\\.vscode\\settings.json')).toBe('native-text')
+    expect(classifyLinkOpenChannel('D:\\notes\\笔记.txt')).toBe('native-text')
+    expect(classifyLinkOpenChannel('D:\\notes\\LICENSE')).toBe('native-text')
+  })
+
+  it('图片与 PDF 交原生默认编辑器解析（不再按文本装载二进制）', () => {
+    for (const ext of ['png', 'apng', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']) {
+      expect(classifyLinkOpenChannel(`D:\\notes\\图.${ext}`), `.${ext} 应交原生解析`).toBe('native-default')
+      expect(classifyLinkOpenChannel(`D:\\notes\\图.${ext.toUpperCase()}`), `大写 .${ext} 同口径`).toBe('native-default')
+    }
+    expect(classifyLinkOpenChannel('D:\\notes\\资料.pdf')).toBe('native-default')
+    expect(classifyLinkOpenChannel('D:\\notes\\资料.PDF')).toBe('native-default')
+  })
+
+  it('音视频媒体交原生默认编辑器解析（内置媒体预览器，不当文本装载）', () => {
+    for (const ext of MEDIA_FILE_EXTENSIONS) {
+      expect(classifyLinkOpenChannel(`D:\\notes\\媒体.${ext}`), `.${ext} 应交原生解析`).toBe('native-default')
+    }
+    expect(classifyLinkOpenChannel('D:\\notes\\播客.MP3')).toBe('native-default')
+    // CHANGELOG 明示覆盖的 Opus 系格式：显式钉住防白名单回缩
+    expect(classifyLinkOpenChannel('D:\\notes\\录音.opus')).toBe('native-default')
+    expect(classifyLinkOpenChannel('D:\\notes\\录音.OGA')).toBe('native-default')
   })
 })
 

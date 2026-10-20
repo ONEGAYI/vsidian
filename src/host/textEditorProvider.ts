@@ -49,7 +49,7 @@ import {
   type VaultLinkShortnamePort,
 } from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
-import { classifyLocalRefContentKind } from '../shared/refContent'
+import { classifyLinkOpenChannel, classifyLocalRefContentKind } from '../shared/refContent'
 import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
 import type { AddonDocNavResult } from '../shared/addonNavApi'
@@ -225,7 +225,8 @@ export interface LinkLogEntry {
   /** #534 doc 目标的尾部行号（分类层剥出的 1-based 行号） */
   line?: number
   /** #160 doc/anchor 的定位方式：custom-panel=本扩展面板挂载定位；
-   *  native=原生编辑器行定位（#534 text 目标）；
+   *  native=原生编辑器打开——#534 text 目标的行定位，以及 #608 起图片/
+   *  PDF/音视频附件经 vscode.open 默认编辑器打开（附件无定位语义）；
    *  none=无定位（无锚点无行号、
    *  `#^` 块引用定位器缺席降级或目标标题缺失） */
   locate?: 'custom-panel' | 'native' | 'none'
@@ -252,8 +253,9 @@ export interface WikilinkLogEntry {
   heading?: string
   /** 请求的块引用目标（#159；与 heading 互斥） */
   blockId?: string
-  /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；none=无标题定位 */
-  locate?: 'custom-panel' | 'none'
+  /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；native=原生
+   *  默认编辑器打开（#608 图片/PDF/音视频附件）；none=无定位 */
+  locate?: 'custom-panel' | 'native' | 'none'
 }
 
 interface SessionEntry {
@@ -2562,13 +2564,17 @@ export function createTextEditorProvider(
    *   一定位器）发 view.locate（LF 坐标换算同双链）；无锚点或未命中回落
    *   文档顶（打开即顶部，不发 locate）。
    * - 非 Markdown 目标（图片等附件）：vscode.open 原生打开（内置预览器），
-   *   Vsidian 自定义编辑器不接非 md 文档。
+   *   Vsidian 自定义编辑器不接非 md 文档；分派经 shared classifyLinkOpenChannel
+   *   （#608——原 /\.md$/i 正则漏 *.markdown，已随通道统一修正）。
    * targetUri 是平台分隔符 fsPath 形态（快照载荷原样回传），经 Uri.file
    * 解析（与 openBacklinkSource 同口径）。
    */
   const openOutlinkTarget = async (targetUri: string, anchor: string): Promise<void> => {
     const uri = vscode.Uri.file(targetUri)
-    if (!/\.md$/i.test(uri.path)) {
+    // #608 打开通道统一：markdown 进面板，其余目标（图片/PDF/可读文本附件）
+    // 交 vscode.open 默认编辑器解析——原 /\.md$/i 正则漏掉 *.markdown
+    //（自定义编辑器 selector 已声明该扩展名），统一走 shared 通道分类
+    if (classifyLinkOpenChannel(uri.fsPath) !== 'vsidian-panel') {
       await vscode.commands.executeCommand('vscode.open', uri)
       return
     }
@@ -2796,7 +2802,23 @@ export function createTextEditorProvider(
     // 双链限定的 #line/#range 锚点在此解析（分词与校验单一事实源在
     // shared/refText）。锚点非法仍打开（顶部）+ 警告提示（同锚点缺失的
     // 「打开后提示」语义）；Markdown 锚点定位保持既有 Vsidian 面板路径
-    if (classifyLocalRefContentKind(targetPath) === 'text') {
+    // #608 目标打开通道：图片/PDF/音视频交 vscode.open 默认编辑器解析
+    //（内置图片/媒体预览器或用户扩展接管），不再强制进面板把二进制按文本
+    // 装载；附件目标无锚点定位语义，fragment 随打开动作一并忽略
+    const openChannel = classifyLinkOpenChannel(targetPath)
+    if (openChannel === 'native-default') {
+      pushLog({
+        kind: 'wikilink-doc',
+        target: parsed.path,
+        path: targetPath,
+        heading: parsed.heading ?? undefined,
+        blockId: parsed.blockId ?? undefined,
+        locate: 'native',
+      })
+      await vscode.commands.executeCommand('vscode.open', targetUri)
+      return
+    }
+    if (openChannel === 'native-text') {
       let jumpLine = 1
       let anchorInvalid: string | null = null
       if (parsed.heading !== null || parsed.blockId !== null) {
@@ -5758,7 +5780,22 @@ async function executeLinkIntent(
     //（锚点控制仅双链可用，普链 fragment 原样交宿主打开，2026-10-04 规范
     // 修订口径），不带行定位、不弹锚点警告；#534 行号例外：转同源
     // TextAnchorSpec 经 resolveTextNav 判定后 reveal（越界提示不打开失败）
-    if (classifyLocalRefContentKind(fsPath) === 'text') {
+    // #608 图片/PDF/音视频目标：vscode.open 默认编辑器解析（内置图片/媒体
+    // 预览器或用户扩展接管），不装载 TextDocument（避免二进制按文本解码）；
+    // 普链 fragment 原样交宿主打开的既有口径不解析、附件无定位语义，不弹
+    // 锚点/行号警告
+    if (classifyLinkOpenChannel(fsPath) === 'native-default') {
+      pushLog({
+        kind: 'doc',
+        href: intent.href,
+        path: fsPath,
+        fragment: targetFragment ?? undefined,
+        locate: 'native',
+      })
+      await vscode.commands.executeCommand('vscode.open', uri)
+      return
+    }
+    if (classifyLinkOpenChannel(fsPath) === 'native-text') {
       let locate: 'native' | 'none' = 'none'
       const editor = await vscode.window.showTextDocument(uri, { preview: false })
       if (targetLine !== null) {
