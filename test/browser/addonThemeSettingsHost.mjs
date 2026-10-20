@@ -134,7 +134,11 @@ try {
   // 链路终点断言：aqua 候选出现在单选列表。两态都等满 30 秒：转发断链
   // 时 webview 等不到 themesState、只剩 default——超时翻红；回填稍晚于
   // 页签挂载（settingsPageInfo.ready 只保证设置页 ready）时未就绪对象
-  // 经 ok 谓词继续等待，不误判回归（#616 复审 002）
+  // 经 ok 谓词继续等待，不误判回归（#616 复审 002）。
+  // 可见性双证据（#616 复审 003）：非零布局（几何）+ 绘制层——候选
+  // label 至文档根逐级计算样式 visibility/display/opacity（含 #app 等
+  // 面板上方持久祖先），visibility:hidden / display:none / opacity:0
+  // 布局仍在但不可见，仅查高度拦不住
   const sample = await waitFor('主题候选（aqua 单选）渲染', `(() => {
     const panel = document.querySelector('.vsidian-appearance-presets')
     if (!panel || panel.hasAttribute('hidden')) return null
@@ -143,13 +147,23 @@ try {
     if (!aqua || !def) {
       return { ok: false, aqua: Boolean(aqua), default: Boolean(def), count: panel.querySelectorAll('input[type=radio]').length }
     }
+    let painted = true
+    for (let el = aqua.closest('label') ?? aqua; el; el = el.parentElement) {
+      const cs = getComputedStyle(el)
+      if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) {
+        painted = false
+        break
+      }
+    }
     return { ok: true, aquaDisabled: aqua.disabled, aquaVisible: aqua.getBoundingClientRect().height > 0,
+      aquaPainted: painted,
       aquaSource: aqua.closest('label')?.querySelector('.vsidian-theme-option-source')?.textContent ?? '',
       defaultChecked: def.checked, count: panel.querySelectorAll('input[type=radio]').length }
   })()`, 30000, (v) => v?.ok === true)
   assert.equal(sample.ok, true, `主题候选应出现在「外观 → 主题」单选列表：${JSON.stringify(sample)}`)
   assert.equal(sample.aquaDisabled, false, `aqua 候选应可用（夹具启用中，available=true）：${JSON.stringify(sample)}`)
   assert.equal(sample.aquaVisible, true, `aqua 候选应有非零布局（用户可见层，非 DOM 存在性）：${JSON.stringify(sample)}`)
+  assert.equal(sample.aquaPainted, true, `aqua 候选应绘制可见（候选至文档根无 visibility:hidden/display:none/opacity:0）：${JSON.stringify(sample)}`)
   assert.equal(sample.defaultChecked, true, `干净 profile 下 default 应为选中态（preferred 未设置）：${JSON.stringify(sample)}`)
   console.log(`[PASS] #602 设置页主题目录经真宿主转发回填：aqua 候选可见可用（来源徽章 ${JSON.stringify(sample.aquaSource)}，单选共 ${sample.count} 项）`)
   writeFileSync(path.join(dir, 'done'), '')
