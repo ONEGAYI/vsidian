@@ -265,7 +265,7 @@ export function planBlankRowCellInput(
   to: number,
   insert: string,
   prefixLen = 0,
-): { from: number; to: number; insert: string; selection: number } | null {
+): { from: number; to: number; insert: string; selection: number; insertAt: number } | null {
   const blanked = blankContainerPrefix(lineText, prefixLen)
   if (from !== to || !insert || insert.includes('\n') || !/^[\s|]+$/.test(blanked) ||
       blanked[0] === '|' || blanked[blanked.length - 1] === '|') return null
@@ -283,6 +283,9 @@ export function planBlankRowCellInput(
     to: lineStart + lineText.length,
     insert: canonical.slice(0, relative) + escaped + canonical.slice(relative),
     selection: target + escaped.length,
+    // #600：用户文本（转义后形态）在规范化后文档中的落点——行为链兜底/
+    // 组件定位的坐标换算基准（事务重建后原始坐标不可直接复用）
+    insertAt: target,
   }
 }
 

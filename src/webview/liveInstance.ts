@@ -74,14 +74,14 @@ import { anchorFlash } from './anchorFlash'
 import { codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
 import { frontmatterEditing } from './frontmatterEditing'
 import { liveLineNumbers } from './liveLineNumbers'
-import { inCodeContext, symbolAutocomplete, typedAutocloseScheduler } from './symbolAutocomplete'
+import { hasTypedAutoclosePending, inCodeContext, symbolAutocomplete, typedAutocloseScheduler } from './symbolAutocomplete'
 import { symbolSelectionWrap, typedWrapScheduler } from './symbolWrap'
 import { multicursorExtensions } from './multicursor'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { fenceEscape } from './fenceEscape'
 import { findDecorations } from './findSession'
-import { blankRowInputPlan, clampExternalCursor, tableEditing, tableRowsAt } from './tableEditing'
+import { blankRowInputPlan, blankRowRawInput, clampExternalCursor, tableEditing, tableRowsAt } from './tableEditing'
 import { prefixLenOf } from './tableStructure'
 import { tableRegionField } from './tableRegionSelection'
 import { planTableRegionReplace, type TableRegion } from './tableRegion'
@@ -1220,19 +1220,25 @@ export class LiveEditorInstance {
     if (state.selection.ranges.some((range) => inCodeContext(state, range.from) || inCodeContext(state, range.to))) {
       return
     }
-    let inputText = ''
+    // #600 blankRow 规范化接管域：整行重建事务携带原始键入载荷（该路径
+    // 恒纯插入，replaced 为 null）——行为链以原始输入驱动，规范化对组
+    // 件透明；快照仍为当前（规范化后）文档，组件编辑计划即当前坐标
+    const rawInput = tr.annotation(blankRowRawInput)
+    let inputText = rawInput?.inputText ?? ''
     let replacedFrom = -1
     let replacedTo = -1
     let replacedText = ''
-    tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-      inputText += inserted.sliceString(0)
-      if (toA > fromA) {
-        replacedFrom = replacedFrom < 0 ? fromA : Math.min(replacedFrom, fromA)
-        replacedTo = Math.max(replacedTo, toA)
-        replacedText += tr.startState.doc.sliceString(fromA, toA)
-      }
-    })
-    const replaced = replacedFrom < 0 ? null : { from: replacedFrom, to: replacedTo, text: replacedText }
+    if (!rawInput) {
+      tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+        inputText += inserted.sliceString(0)
+        if (toA > fromA) {
+          replacedFrom = replacedFrom < 0 ? fromA : Math.min(replacedFrom, fromA)
+          replacedTo = Math.max(replacedTo, toA)
+          replacedText += tr.startState.doc.sliceString(fromA, toA)
+        }
+      })
+    }
+    const replaced = rawInput || replacedFrom < 0 ? null : { from: replacedFrom, to: replacedTo, text: replacedText }
     // 微任务延迟：链执行的首次 applyEdits 会在其 await 求值时**同步**
     // dispatch 修饰事务（Promise executor 同步语义）——若在此处（键入
     // 事务的 updateListener 同步段内）直接驱动，修饰事务会嵌套 dispatch
@@ -2984,8 +2990,15 @@ export class LiveEditorInstance {
           })
           // T06（#355）SDK 修饰事务：来源列表随事务透传出站
           const addonTag = tr.annotation(addonEditOriginTag)
-          // #597：符号原始键入事务（filter 放行重指定）强制暂缓出站
-          this.recordLocalChangeSet(tr.changes, changes, addonTag?.origins, tr.annotation(symbolRawInput) === true)
+          // #597：符号原始键入事务（filter 放行重指定）强制暂缓出站；
+          // #600：blankRow 规范化重建丢 symbolRawInput 注解——pending
+          // effect 在场即同一键入路径（两载体恒同现），等价触发暂缓
+          this.recordLocalChangeSet(
+            tr.changes,
+            changes,
+            addonTag?.origins,
+            tr.annotation(symbolRawInput) === true || hasTypedAutoclosePending(tr),
+          )
         }
       }),
       // #597 键入路径兜底入队点（typedAutocloseScheduler/typedWrapScheduler）：

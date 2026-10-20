@@ -986,6 +986,14 @@ function prepareGridInputPadding(view: EditorView): void {
     effects: region ? setTableRegion.of(region) : undefined })
 }
 
+/** #600 空白行规范化的原始输入载体：normalizeBlankRowInput 整行重建事
+ *  务时附上——inputText 为规范化前的原始键入文本（该路径恒 from===to
+ *  纯插入，replaced 语义即 null），insertAt 为用户文本在规范化后文档
+ *  中的落点（plan.insertAt 同源）。链驱动（maybeDriveAddonBehaviors）
+ *  据此以原始载荷驱动；符号兜底（typedAutocloseScheduler）据此把 pending
+ *  坐标重映射到规范化后文档——规范化对行为链与符号兜底透明 */
+export const blankRowRawInput = Annotation.define<{ inputText: string; insertAt: number }>()
+
 /** 普通键入、粘贴在空白行首笔规范化；IME 候选过程可能多次替换同一区间，
  * 此处不能逐笔改整行，否则宿主收到的变更坐标与候选终态不一致。 */
 const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
@@ -1000,11 +1008,22 @@ const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
   const { from, to, text } = change
   const plan = blankRowInputPlan(tr.startState, from, to, text)
   if (!plan) return tr
+  // #600 载体保全：userEvent 显式重挂（Transaction 注解无公开枚举面，
+  // 逐字转发做不到公开 API 内）；symbolRawInput 不在此转发——出站暂缓
+  // 由 liveInstance 按 pending effect 在场等价判定（pending 与该注解在
+  // 原始事务上恒同现）。effect 经公开 tr.effects 原样携带（坐标类 effect
+  // 的重映射由消费方按 blankRowRawInput.insertAt 补偿——本 filter 无从
+  // 知晓各 effect 的语义，不建第二份映射表）；原始键入载荷随重建事务
+  // 外发，规范化对行为链透明
   const event = tr.annotation(Transaction.userEvent)
   return {
     changes: plan,
     selection: { anchor: plan.selection },
-    annotations: event ? Transaction.userEvent.of(event) : undefined,
+    annotations: [
+      ...(event ? [Transaction.userEvent.of(event)] : []),
+      blankRowRawInput.of({ inputText: text, insertAt: plan.insertAt }),
+    ],
+    effects: tr.effects,
   }
 })
 
