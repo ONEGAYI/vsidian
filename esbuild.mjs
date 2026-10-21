@@ -238,6 +238,44 @@ if (!production) {
     banner: pdfProbeBanner,
     logLevel: 'info',
   })
+  // #619（V01）PDF 导出浏览器后端探针三产物（研究票，不进 VSIX）：
+  // - suite：宿主侧套件（node18/cjs；宿主 Node 18 spawn Chrome/Edge + 零依赖
+  //   CDP 直连 + pdf-lib 书签后处理）；
+  // - verify：跑在被测浏览器页面内的 pdf.js 验证引擎（browser/iife；跑在
+  //   本机 Chrome/Edge 155，chrome114 target 沿用 pdfProbe 的保守口径）；
+  // - verifyWorker：pdf.js legacy worker 单文件 iife（宿主读文本经 Blob URL
+  //   装配，与 P3-02 验证过的形态一致）
+  targets.push({
+    entryPoints: ['test/integration/pdfExportProbe/suite.ts'],
+    outfile: 'out/test/integration/pdfExportProbe/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfExportProbe/verifyEntry.ts'],
+    outfile: 'out/test/integration/pdfExportProbe/verify.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfExportProbe/verifyWorker.ts'],
+    outfile: 'out/test/integration/pdfExportProbe/verifyWorker.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    logLevel: 'info',
+  })
   targets.push({
     // 性能测量套件（#5）：由 test/perf/runPerf.mjs 以 extensionTestsPath 启动
     entryPoints: ['test/perf/suite.ts'],
