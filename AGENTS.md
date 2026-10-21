@@ -118,7 +118,8 @@ vsidian/
 │   │   ├── 0017-unified-addon-theme-selection.md              # 组件主题统一入口与互斥选择决策
 │   │   ├── 0018-markdown-shortname-resolution.md              # 短名与绝对引用架构决策
 │   │   ├── 0019-document-html-and-style-scope.md              # 文档HTML与样式作用域决策
-│   │   └── 0020-ime-symbol-competition-arbitration.md         # IME定稿符号对竞争裁决
+│   │   ├── 0020-ime-symbol-competition-arbitration.md         # IME定稿符号对竞争裁决
+│   │   └── 0021-pdf-export-installed-browser.md               # PDF导出浏览器依赖决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -212,6 +213,7 @@ vsidian/
 │   │   ├── markdown-shortname-links.md           # 短名引用与链接类型规格
 │   │   ├── mvp-issues.md                         # MVP GitHub Issue 索引
 │   │   ├── mvp.md                                # MVP 规格主文档
+│   │   ├── pdf-export.md                         # PDF导出规格与工单索引
 │   │   ├── reference-view-group.md               # 引用视图设置组与跳转目标提示规格
 │   │   ├── rich-text-paste.md                    # 富文本粘贴与分步撤销规格
 │   │   ├── search-reveal.md                      # 外部搜索导航定位恢复规格
