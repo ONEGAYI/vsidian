@@ -18,15 +18,20 @@ import {
   navigateAndWaitLoad,
   printToPdf,
   readExportFailures,
+  readHeadingMarks,
   waitForExportReady,
   withTimeout,
   type LaunchedBrowser,
 } from './browserLauncher'
 import { startExportResourceServer, type ExportResourceResolvePort, type ExportResourceServer } from './exportResourceServer'
 import { buildPdfExportPageHtml } from './pdfExportPage'
-import { PdfExportBrowserError, type BrowserExportSession } from './pdfExportJob'
+import { PdfExportBrowserError, type BrowserExportSession, type PdfBookmarkReport } from './pdfExportJob'
+import { extractPdfPageTexts } from './pdfOutlineFlow'
+import { writePdfOutline } from './pdfOutlineWrite'
+import { locateHeadingsInPages, outlineEntriesOf, type PdfHeadingMark } from '../../shared/pdfOutline'
+import { t } from '../../shared/i18n'
 import type { PdfExportFailureItem, PdfExportPagePayload, PdfExportReadyState } from '../../shared/pdfExportPayload'
-import type { PdfExportOptions } from '../../shared/pdfExportOptions'
+import type { PdfExportOptions, PdfHeaderFooterContext } from '../../shared/pdfExportOptions'
 
 export interface CreateBrowserExportSessionDeps {
   /** 产物根（extensionUri/out/webview——静态产物与资产的服务目录） */
@@ -48,6 +53,9 @@ export function createBrowserExportSession(
   let pageSession: Awaited<ReturnType<typeof createPageSession>>['session'] | undefined
   let released = false
   let pageRendered = false
+  /** T05：renderPage 捕获的页眉页脚上下文 + 标题埋点（finalizePrint 消费） */
+  let hfContext: PdfHeaderFooterContext | undefined
+  let headingMarks: PdfHeadingMark[] = []
 
   const releaseKill = (): void => {
     if (released) return
@@ -73,6 +81,7 @@ export function createBrowserExportSession(
       ready: boolean
       readyState: PdfExportReadyState
       failures: PdfExportFailureItem[]
+      headings: PdfHeadingMark[]
     }> {
       if (released) throw new PdfExportBrowserError('launch', '会话已释放（重复 renderPage）')
       try {
@@ -117,6 +126,22 @@ export function createBrowserExportSession(
             `导出页未在限定时间内就绪（asyncReady=${ready.state.asyncReady} fonts=${ready.state.fontsStatus} 等待 ${ready.waitedMs}ms）`)
         }
         const failures = await readExportFailures(session.session)
+        // T05（#625）：标题埋点拉取（书签数据面——DOM 文档序）+ 页眉页脚
+        // 上下文捕获（docTitle/dark/页码词条；dateText 取打印时刻——见
+        // finalizePrint）
+        try {
+          headingMarks = await readHeadingMarks(session.session)
+        } catch { headingMarks = [] } // 埋点拉取失败：书签链路如实降级（finalizePrint 报告）
+        hfContext = {
+          docTitle: (input.payload.docs[0]?.docName ?? 'document').replace(/\.md$/i, ''),
+          dateText: '',
+          dark: input.payload.style.dark,
+          pageLabel: {
+            pre: t('pdfExport.pageNumber.pre'),
+            mid: t('pdfExport.pageNumber.mid'),
+            post: t('pdfExport.pageNumber.post'),
+          },
+        }
         pageRendered = true
         if (deps.onPageSnapshot !== undefined) {
           // 视觉证据：就绪后的整页截图（probe 后、打印前——正文/图片/图形
@@ -140,6 +165,7 @@ export function createBrowserExportSession(
             failures,
           },
           failures,
+          headings: headingMarks,
         }
       } catch (error) {
         // 失败路径强杀收尾（幂等）；成功路径页面保留待 finalizePrint
@@ -148,7 +174,7 @@ export function createBrowserExportSession(
       }
     },
 
-    async finalizePrint(options: PdfExportOptions): Promise<Buffer> {
+    async finalizePrint(options: PdfExportOptions): Promise<{ bytes: Buffer; bookmarks: PdfBookmarkReport }> {
       if (!pageRendered || released || !launched || !pageSession) {
         throw new PdfExportBrowserError('print', '页面未就绪（finalizePrint 前置 renderPage 未成功）')
       }
@@ -157,9 +183,49 @@ export function createBrowserExportSession(
         // printToPDF 前前台化：被打印 target 须在前台（V01 §10.2 光栅化挂起
         // 坑的防御——headless 下为幂等防御位）
         await session.send('Page.bringToFront').catch(() => undefined)
-        const bytes = await printToPdf(session, options)
+        // T05：页眉页脚上下文（dateText 取打印时刻；renderPage 未捕获时
+        // undefined——与开关全关等价，参数面仍由 options 主导）
+        const now = new Date()
+        const dateText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+        const hf = hfContext !== undefined ? { ...hfContext, dateText } : undefined
+        const printed = await printToPdf(session, options, hf)
+        // T05（#625）：标题书签后处理——打印产物 → 浏览器侧 pdfjs 逐页文本
+        //（locate target，只 getTextContent 不受光栅化挂起影响）→ 宿主游标
+        // 匹配 → pdf-lib 写 /Outlines。任何失败整份不加书签并如实报告
+        //（不伪造）；部分标题定位失败跳过该条。浏览器与服务在书签链路
+        // 完成后才释放（定位 target 需要 server 供给 pdfMain/worker）。
+        let bookmarks: PdfBookmarkReport = { written: false, total: headingMarks.length, skipped: 0, reason: 'disabled' }
+        let bytes = printed
+        if (options.bookmarksEnabled) {
+          if (headingMarks.length === 0) {
+            bookmarks = { written: false, total: 0, skipped: 0, reason: 'no-headings' }
+          } else {
+            try {
+              const pageTexts = await extractPdfPageTexts(launched.connection, server!.baseUrl, printed)
+              const located = locateHeadingsInPages(headingMarks, pageTexts)
+              const entries = outlineEntriesOf(located)
+              bookmarks = {
+                written: entries.length > 0,
+                total: headingMarks.length,
+                skipped: headingMarks.length - entries.length,
+                ...(entries.length === 0 ? { reason: 'none-located' as const } : {}),
+              }
+              if (entries.length > 0) {
+                bytes = Buffer.from(await writePdfOutline(printed, entries))
+              }
+            } catch (error) {
+              bookmarks = {
+                written: false,
+                total: headingMarks.length,
+                skipped: headingMarks.length,
+                reason: 'locate-failed',
+                detail: error instanceof Error ? error.message : String(error),
+              }
+            }
+          }
+        }
         await releaseGraceful()
-        return bytes
+        return { bytes, bookmarks }
       } catch (error) {
         releaseKill()
         if (error instanceof PdfExportBrowserError) throw error

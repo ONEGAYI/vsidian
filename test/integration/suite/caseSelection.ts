@@ -25,6 +25,30 @@ export const SENSITIVE_CASES = [
   },
 
   {
+    name: 'PDF 导出（#625 T05）：横纵向/自定义纸张几何、页眉页脚与页码产物断言',
+    issue: '#625',
+    reason: 'T01/T02 同族真实浏览器链路（spawn/打印时长 + 书签后处理多一轮 target 定位），CI 波动基线未建立；本地全量持续跑，回流条件同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#625 T05）：标题书签结构、重复标题页码与中文标题',
+    issue: '#625',
+    reason: '书签链路含浏览器侧 pdfjs 定位 target 与 pdf-lib 后处理，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#625 T05）：书签失败不给伪造（无标题文档零 outline）',
+    issue: '#625',
+    reason: '同族真实浏览器链路；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#625 T05）：持久默认参数回显（自有设置页键 → 模态预选）',
+    issue: '#625',
+    reason: '同族真实浏览器链路（含固定输入捕获与浏览器发现前置）；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     issue: '#293 / #129',
     reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',

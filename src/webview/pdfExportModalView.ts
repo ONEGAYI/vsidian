@@ -14,9 +14,11 @@ import {
   normalizePdfExportOptions,
   PDF_EXPORT_OPTIONS_DEFAULTS,
   PDF_ORIENTATIONS,
-  PDF_PAPER_SIZES,
+  PDF_PAGE_NUMBER_POSITION_LABEL_KEYS,
+  PDF_PAGE_NUMBER_POSITIONS,
   PDF_PAPER_SIZE_KINDS,
   type PdfExportOptions,
+  type PdfPageNumberPosition,
 } from '../shared/pdfExportOptions'
 
 interface PdfExportModalStateMessage {
@@ -32,6 +34,8 @@ interface PdfExportModalStateMessage {
   cancelKind?: 'user' | 'save-dialog'
   /** T02（#622）awaiting-resources 阶段的失败清单 */
   resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+  /** T05（#625）标题书签结果（done 阶段提示数据源） */
+  bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
 }
 
 export interface PdfExportModalViewOptions {
@@ -67,6 +71,10 @@ const CLASS = {
   issuesList: 'vsidian-pdfexport-issues-list',
   issueItem: 'vsidian-pdfexport-issue-item',
   resumeButton: 'vsidian-pdfexport-resume',
+  /** T05（#625）开关行（checkbox + 文案）、子选项与书签提示 */
+  checkRow: 'vsidian-pdfexport-check',
+  checkSub: 'vsidian-pdfexport-check-sub',
+  bookmarkNotice: 'vsidian-pdfexport-bookmark-notice',
 } as const
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -120,8 +128,16 @@ export class PdfExportModalView {
   private paperSelect: HTMLSelectElement | null = null
   private orientationSelect: HTMLSelectElement | null = null
   private marginInput: HTMLInputElement | null = null
+  private customWidthInput: HTMLInputElement | null = null
+  private customHeightInput: HTMLInputElement | null = null
   private scaleRange: HTMLInputElement | null = null
   private scaleValue: HTMLElement | null = null
+  private headerCheck: HTMLInputElement | null = null
+  private headerTitleCheck: HTMLInputElement | null = null
+  private headerDateCheck: HTMLInputElement | null = null
+  private pageNumberCheck: HTMLInputElement | null = null
+  private pageNumberPositionSelect: HTMLSelectElement | null = null
+  private bookmarksCheck: HTMLInputElement | null = null
   private runButton: HTMLButtonElement | null = null
   private cancelButton: HTMLButtonElement | null = null
   private statusEl: HTMLElement | null = null
@@ -164,10 +180,26 @@ export class PdfExportModalView {
       const parsed = Number(this.marginInput.value)
       if (Number.isFinite(parsed)) this.currentParams.marginMm = parsed
     }
+    if (this.customWidthInput) {
+      const parsed = Number(this.customWidthInput.value)
+      if (Number.isFinite(parsed)) this.currentParams.customWidthMm = parsed
+    }
+    if (this.customHeightInput) {
+      const parsed = Number(this.customHeightInput.value)
+      if (Number.isFinite(parsed)) this.currentParams.customHeightMm = parsed
+    }
     if (this.scaleRange) {
       const parsed = Number(this.scaleRange.value)
       if (Number.isFinite(parsed)) this.currentParams.scale = parsed
     }
+    if (this.headerCheck) this.currentParams.headerEnabled = this.headerCheck.checked
+    if (this.headerTitleCheck) this.currentParams.headerTitle = this.headerTitleCheck.checked
+    if (this.headerDateCheck) this.currentParams.headerDate = this.headerDateCheck.checked
+    if (this.pageNumberCheck) this.currentParams.pageNumberEnabled = this.pageNumberCheck.checked
+    if (this.pageNumberPositionSelect) {
+      this.currentParams.pageNumberPosition = this.pageNumberPositionSelect.value as PdfPageNumberPosition
+    }
+    if (this.bookmarksCheck) this.currentParams.bookmarksEnabled = this.bookmarksCheck.checked
   }
 
   private render(): void {
@@ -196,7 +228,10 @@ export class PdfExportModalView {
 
     this.paperSelect = el('select', CLASS.select) as HTMLSelectElement
     for (const kind of PDF_PAPER_SIZE_KINDS) {
-      const option = el('option', '', t(PDF_PAPER_SIZES[kind].labelKey))
+      const label = kind === 'custom'
+        ? t('pdfExport.paper.custom')
+        : this.paperLabelOf(kind)
+      const option = el('option', '', label)
       option.value = kind
       this.paperSelect.appendChild(option)
     }
@@ -204,8 +239,36 @@ export class PdfExportModalView {
     this.paperSelect.addEventListener('change', () => {
       this.paramsTouched = true
       this.readControlsIntoParams()
+      // 自定义宽高输入显隐联动（custom 时呈现）；重建保持其余控件状态一致
+      this.render()
     })
     side.appendChild(this.field(t('pdfExport.paper.label'), this.paperSelect))
+
+    // 自定义宽高（paper === 'custom' 时呈现；默认隐藏不占视觉位）
+    if (params.paper === 'custom') {
+      this.customWidthInput = el('input', CLASS.numberInput) as HTMLInputElement
+      this.customWidthInput.type = 'number'
+      this.customWidthInput.min = '20'
+      this.customWidthInput.max = '558'
+      this.customWidthInput.step = '1'
+      this.customWidthInput.value = String(params.customWidthMm)
+      this.customWidthInput.addEventListener('change', () => {
+        this.paramsTouched = true
+        this.readControlsIntoParams()
+      })
+      side.appendChild(this.field(t('pdfExport.customWidth.label'), this.customWidthInput))
+      this.customHeightInput = el('input', CLASS.numberInput) as HTMLInputElement
+      this.customHeightInput.type = 'number'
+      this.customHeightInput.min = '20'
+      this.customHeightInput.max = '558'
+      this.customHeightInput.step = '1'
+      this.customHeightInput.value = String(params.customHeightMm)
+      this.customHeightInput.addEventListener('change', () => {
+        this.paramsTouched = true
+        this.readControlsIntoParams()
+      })
+      side.appendChild(this.field(t('pdfExport.customHeight.label'), this.customHeightInput))
+    }
 
     this.orientationSelect = el('select', CLASS.select) as HTMLSelectElement
     for (const orientation of PDF_ORIENTATIONS) {
@@ -248,6 +311,48 @@ export class PdfExportModalView {
     rangeWrap.appendChild(this.scaleRange)
     rangeWrap.appendChild(this.scaleValue)
     side.appendChild(this.field(t('pdfExport.scale.label'), rangeWrap))
+
+    // ---- T05（#625）页眉 / 页码 / 标题书签 ----
+    // 页眉：开关 + 内容子项（标题/日期——开关开时呈现）
+    const header = this.checkRow(t('pdfExport.header.label'), params.headerEnabled, () => {
+      this.render() // 子项显隐联动
+    })
+    this.headerCheck = header.box
+    side.appendChild(header.row)
+    if (params.headerEnabled) {
+      const titleItem = this.checkRow(t('pdfExport.header.title'), params.headerTitle, undefined, CLASS.checkSub)
+      this.headerTitleCheck = titleItem.box
+      side.appendChild(titleItem.row)
+      const dateItem = this.checkRow(t('pdfExport.header.date'), params.headerDate, undefined, CLASS.checkSub)
+      this.headerDateCheck = dateItem.box
+      side.appendChild(dateItem.row)
+    }
+
+    // 页码：开关 + 页脚内位置（开时呈现）
+    const pageNumber = this.checkRow(t('pdfExport.pageNumber.label'), params.pageNumberEnabled, () => {
+      this.render() // 位置 select 显隐联动
+    })
+    this.pageNumberCheck = pageNumber.box
+    side.appendChild(pageNumber.row)
+    if (params.pageNumberEnabled) {
+      this.pageNumberPositionSelect = el('select', CLASS.select) as HTMLSelectElement
+      for (const position of PDF_PAGE_NUMBER_POSITIONS) {
+        const option = el('option', '', t(PDF_PAGE_NUMBER_POSITION_LABEL_KEYS[position]))
+        option.value = position
+        this.pageNumberPositionSelect.appendChild(option)
+      }
+      this.pageNumberPositionSelect.value = params.pageNumberPosition
+      this.pageNumberPositionSelect.addEventListener('change', () => {
+        this.paramsTouched = true
+        this.readControlsIntoParams()
+      })
+      side.appendChild(this.field(t('pdfExport.pageNumber.position'), this.pageNumberPositionSelect))
+    }
+
+    // 标题书签开关
+    const bookmarks = this.checkRow(t('pdfExport.bookmarks.label'), params.bookmarksEnabled)
+    this.bookmarksCheck = bookmarks.box
+    side.appendChild(bookmarks.row)
 
     const actions = el('div', CLASS.actions)
     this.runButton = el('button', CLASS.runButton, t('pdfExport.run')) as HTMLButtonElement
@@ -309,6 +414,25 @@ export class PdfExportModalView {
       }
     } else if (phase === 'done') {
       this.statusDetailEl.textContent = t('pdfExport.savedTo', { path: this.state?.savedPath ?? '' })
+      // T05：书签结果提示（disabled 不提示——用户未开启时静默；失败/跳过
+      // 如实呈现，不冒充成功）
+      const bookmarks = this.state?.bookmarks
+      if (bookmarks !== undefined) {
+        let notice: string | undefined
+        if (bookmarks.written) {
+          const count = bookmarks.total - bookmarks.skipped
+          notice = bookmarks.skipped > 0
+            ? t('pdfExport.bookmarks.partial', { count, skipped: bookmarks.skipped })
+            : t('pdfExport.bookmarks.added', { count })
+        } else if (bookmarks.reason === 'no-headings') {
+          notice = t('pdfExport.bookmarks.noHeadings')
+        } else if (bookmarks.reason === 'none-located' || bookmarks.reason === 'locate-failed' || bookmarks.reason === 'write-failed') {
+          notice = t('pdfExport.bookmarks.locateFailed')
+        }
+        if (notice !== undefined) {
+          side.appendChild(el('div', CLASS.bookmarkNotice, notice))
+        }
+      }
     } else if (phase === 'cancelled') {
       const kindKey = this.state?.cancelKind === 'save-dialog' ? 'pdfExport.cancelKind.saveDialog' : 'pdfExport.cancelKind.user'
       this.statusDetailEl.textContent = `${t('pdfExport.phase.cancelled')} ${t(kindKey)}`
@@ -326,6 +450,37 @@ export class PdfExportModalView {
     field.appendChild(el('label', CLASS.fieldLabel, label))
     field.appendChild(control)
     return field
+  }
+
+  /** 纸张选项词条（custom 无物理预设表条目——单独词条） */
+  private paperLabelOf(kind: Exclude<PdfExportOptions['paper'], 'custom'>): string {
+    const table: Record<string, string> = {
+      a3: t('pdfExport.paper.a3'),
+      a4: t('pdfExport.paper.a4'),
+      a5: t('pdfExport.paper.a5'),
+      b5: t('pdfExport.paper.b5'),
+      letter: t('pdfExport.paper.letter'),
+      legal: t('pdfExport.paper.legal'),
+    }
+    return table[kind] ?? kind
+  }
+
+  /** 开关行（label 包裹 checkbox + 文案，点击整行可切换）；onChange 额外
+   *  联动（如子项显隐重建）。cls 缺省常规行，子选项传缩进类。返回行节点
+   *  与 checkbox（paramsTouched/readControls 由调用方持有的 box 驱动）。 */
+  private checkRow(label: string, checked: boolean, onChange?: () => void, cls: string = CLASS.checkRow): { row: HTMLLabelElement; box: HTMLInputElement } {
+    const row = el('label', cls) as HTMLLabelElement
+    const box = el('input', '') as HTMLInputElement
+    box.type = 'checkbox'
+    box.checked = checked
+    box.addEventListener('change', () => {
+      this.paramsTouched = true
+      this.readControlsIntoParams()
+      onChange?.()
+    })
+    row.appendChild(box)
+    row.appendChild(el('span', '', label))
+    return { row, box }
   }
 
   /** 绘制层探针（测试钩子门控）：控件可见性与计算样式摘要——可见性断言
@@ -349,7 +504,21 @@ export class PdfExportModalView {
         paperSelect: probe(this.paperSelect),
         orientationSelect: probe(this.orientationSelect),
         marginInput: probe(this.marginInput),
+        customWidthInput: probe(this.customWidthInput),
+        customHeightInput: probe(this.customHeightInput),
         scaleRange: probe(this.scaleRange),
+        headerCheck: probe(this.headerCheck),
+        headerTitleCheck: probe(this.headerTitleCheck),
+        headerDateCheck: probe(this.headerDateCheck),
+        pageNumberCheck: probe(this.pageNumberCheck),
+        pageNumberPositionSelect: probe(this.pageNumberPositionSelect),
+        bookmarksCheck: probe(this.bookmarksCheck),
+        headerChecked: this.headerCheck?.checked ?? null,
+        pageNumberChecked: this.pageNumberCheck?.checked ?? null,
+        bookmarksChecked: this.bookmarksCheck?.checked ?? null,
+        paperValue: this.paperSelect?.value ?? '',
+        pageNumberPositionValue: this.pageNumberPositionSelect?.value ?? null,
+        bookmarkNoticeText: document.querySelector(`.${CLASS.bookmarkNotice}`)?.textContent ?? '',
         runButton: probe(this.runButton),
         runButtonDisabled: this.runButton?.disabled ?? null,
         cancelButtonHidden: this.cancelButton?.hidden ?? null,

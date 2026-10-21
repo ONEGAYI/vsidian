@@ -76,6 +76,15 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
     'pdfExport.orientation': 'portrait',
     'pdfExport.paper': 'a4',
     'pdfExport.scale': 1,
+    // T05（#625）默认参数补全：自定义宽高回落 A4 + 页眉/页码/书签默认关
+    'pdfExport.customWidthMm': 210,
+    'pdfExport.customHeightMm': 297,
+    'pdfExport.headerEnabled': false,
+    'pdfExport.headerTitle': true,
+    'pdfExport.headerDate': false,
+    'pdfExport.pageNumberEnabled': false,
+    'pdfExport.pageNumberPosition': 'footer-center',
+    'pdfExport.bookmarksEnabled': false,
       'editor.readableLineWidth': 0,
       // #222 嵌入限高（Reading 嵌入卡片内容滚动区上限）
       'embed.maxHeight': 480,

@@ -119,6 +119,37 @@
   color: var(--vscode-descriptionForeground);
 }
 
+/* T05（#625）开关行：checkbox + 文案横排（label 包裹整行可点）；子选项
+ * 缩进一档（与字段行同族的次级呈现，零新增档位值） */
+.vsidian-pdfexport-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.vsidian-pdfexport-check input[type='checkbox'] {
+  accent-color: var(--vscode-checkbox-background, var(--vscode-focusBorder));
+  margin: 0;
+}
+
+.vsidian-pdfexport-check-sub {
+  padding-left: 24px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+/* 书签结果提示（done 阶段；描述色次级呈现，不用警示色——非错误态） */
+.vsidian-pdfexport-bookmark-notice {
+  padding-top: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
 .vsidian-pdfexport-actions {
   display: flex;
   gap: 10px;

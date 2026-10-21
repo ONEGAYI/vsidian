@@ -538,6 +538,40 @@ const PDF_EXPORT_T02_EMBED_DOC = [
   '',
 ].join('\n')
 
+// T05（#625）页眉页脚/页码/标题书签样本：多页 + 中文标题 + 重复标题
+//（不同页两次出现——游标推进断言面）+ 深层嵌套。标题正文刻意含
+//「页」等部首敏感字（ToUnicode 归一路径的真实覆盖）。
+const PDF_EXPORT_T05_DOC = (() => {
+  const lines = [
+    '# T05 根标题：页面与书签',
+    '',
+    '首段说明：页眉页脚、页码与标题书签集成样本（PDF-T05-HEAD-MARKER）。',
+    '',
+  ]
+  for (let i = 1; i <= 22; i++) {
+    lines.push(`上填充段 ${i}：T05 长文档正文行，用于产生多页分页。`, '')
+  }
+  lines.push('## 重复小节标题', '')
+  lines.push('第一次重复小节正文（PDF-T05-DUP-FIRST）。', '')
+  for (let i = 23; i <= 44; i++) {
+    lines.push(`下填充段 ${i}：T05 长文档正文行，用于产生多页分页。`, '')
+  }
+  lines.push('## 重复小节标题', '')
+  lines.push('第二次重复小节正文（PDF-T05-DUP-SECOND）。', '')
+  lines.push('### 深层三级小节', '')
+  lines.push('三级小节正文。', '')
+  lines.push('末段标记：PDF-T05-TAIL-MARKER。')
+  return lines.join('\n')
+})()
+
+// T05 书签失败面样本：无标题文档（书签开启时如实「无标题不加书签」）
+const PDF_EXPORT_T05_NOHEADINGS_DOC = [
+  '无标题文档首段：书签开启时不应产生伪造书签（PDF-T05-NOHEAD-BODY）。',
+  '',
+  '无标题文档次段正文。',
+  '',
+].join('\n')
+
 // #133 界面域样式契约样例：公式（行内/块级/错误）、mermaid（有效/无效）、
 // 代码卡片（js keyword token）、大纲（嵌套标题 + 行内标记）、frontmatter
 // 成型卡片（#140 探针：card-line/row/cell/add-entry 与阅读侧同款表格）
@@ -1109,6 +1143,9 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   // 文件存在与扩展名；嵌入目标正文由用例注入未保存修改）
   writeFileSync(path.join(wsDir, 'pdf-export-t02.md'), PDF_EXPORT_T02_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'pdf-export-t02-embed.md'), PDF_EXPORT_T02_EMBED_DOC, 'utf8')
+  // T05（#625）页眉页脚/页码/书签样本（书签结构 + 重复标题 + 失败面）
+  writeFileSync(path.join(wsDir, 'pdf-export-t05.md'), PDF_EXPORT_T05_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-export-t05-noheadings.md'), PDF_EXPORT_T05_NOHEADINGS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'pdf-export-t02-clip.mp4'), Buffer.from('00 00 00 18 mp4-placeholder'), 'utf8')
   mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
   writeFileSync(path.join(wsDir, 'assets', 'pdf-t02-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))

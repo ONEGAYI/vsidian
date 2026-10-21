@@ -122,6 +122,39 @@ describe('mountExportDocument：全量装配与嵌入展开', () => {
     expect(root.textContent).toContain('尾段文本 PDF-ASSEMBLY-TAIL。')
   })
 
+  it('T05 标题书签埋点：heading 块挂 level 标记且 DOM 序即文档序', () => {
+    const { root } = setup({
+      docs: [{
+        fsPath: 'D:/vault/笔记甲.md',
+        docName: '笔记甲.md',
+        text: [
+          '# 顶层标题',
+          '',
+          '### 三级小节',
+          '',
+          '## 二级小节',
+          '',
+          '正文段。',
+        ].join('\n'),
+        version: 4,
+      }],
+    })
+    const marks = Array.from(root.querySelectorAll<HTMLElement>('[data-vsidian-heading-level]'))
+    expect(marks.map((el) => el.getAttribute('data-vsidian-heading-level'))).toEqual(['1', '3', '2'])
+    // 文档序 = querySelectorAll 序（宿主 readHeadingMarks 的书签顺序依据）；
+    // 标题文本取 textContent（行内标记天然剥离；宿主拉取时 trim——断言同口径）
+    expect(marks.map((el) => (el.textContent ?? '').trim())).toEqual(['顶层标题', '三级小节', '二级小节'])
+    // 非标题块不挂标记
+    expect(root.querySelector('p[data-vsidian-heading-level]')).toBeNull()
+  })
+
+  it('T05 埋点覆盖嵌入展开目标：B 的标题块同样携带 level 标记', () => {
+    const { root } = setup()
+    const embedBox = root.querySelector('.vsidian-pdf-embed-expanded')
+    expect(embedBox).not.toBeNull()
+    expect(embedBox!.querySelectorAll('[data-vsidian-heading-level]').length).toBeGreaterThan(0)
+  })
+
   it('嵌入目标展开：B 全文进场、来源标识行在场、B 的 docScope 标记', () => {
     const { root } = setup()
     const expanded = root.querySelector(`.${PDF_EXPORT_CLASS_NAMES.embedExpanded}`)

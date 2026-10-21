@@ -40,9 +40,17 @@ import type {
   PdfExportStyleSnapshot,
 } from '../../shared/pdfExportPayload'
 import {
+  PDF_EXPORT_BOOKMARKS_KEY,
   PDF_EXPORT_BROWSER_PATH_KEY,
+  PDF_EXPORT_CUSTOM_HEIGHT_MM_KEY,
+  PDF_EXPORT_CUSTOM_WIDTH_MM_KEY,
+  PDF_EXPORT_HEADER_DATE_KEY,
+  PDF_EXPORT_HEADER_KEY,
+  PDF_EXPORT_HEADER_TITLE_KEY,
   PDF_EXPORT_MARGIN_KEY,
   PDF_EXPORT_ORIENTATION_KEY,
+  PDF_EXPORT_PAGE_NUMBER_KEY,
+  PDF_EXPORT_PAGE_NUMBER_POSITION_KEY,
   PDF_EXPORT_PAPER_KEY,
   PDF_EXPORT_SCALE_KEY,
   type SettingsPayload,
@@ -108,6 +116,8 @@ export interface PdfExportModalInfo {
   hookedSaveTarget: string | undefined
   /** awaiting-resources 阶段的失败清单（继续/取消两分支断言面） */
   resourceIssues: PdfExportJobState['resourceIssues']
+  /** 标题书签结果（T05：done 观测面——written/reason/skipped 断言面） */
+  bookmarks: PdfExportJobState['bookmarks']
   /** 固定输入的嵌入预取统计（观测面） */
   embedStats: { embeds: number; mediaEmbeds: number; failures: number } | undefined
   /** 就绪后导出页整页截图（测试钩子装配时的视觉证据；base64 PNG） */
@@ -126,12 +136,28 @@ export interface PdfExportModalHandle {
 
 /** 从设置快照读取本次默认参数与浏览器路径（实时快照——设置页修改即时生效） */
 function defaultsFromSettings(snapshot: SettingsPayload): { defaults: PdfExportOptions; browserPath: string } {
+  const numberOr = (key: string): number | undefined => {
+    const value = snapshot[key]
+    return typeof value === 'number' ? value : undefined
+  }
+  const boolOr = (key: string): boolean | undefined => {
+    const value = snapshot[key]
+    return typeof value === 'boolean' ? value : undefined
+  }
   return {
     defaults: normalizePdfExportOptions({
       paper: snapshot[PDF_EXPORT_PAPER_KEY],
       orientation: snapshot[PDF_EXPORT_ORIENTATION_KEY],
-      marginMm: typeof snapshot[PDF_EXPORT_MARGIN_KEY] === 'number' ? snapshot[PDF_EXPORT_MARGIN_KEY] as number : undefined,
-      scale: typeof snapshot[PDF_EXPORT_SCALE_KEY] === 'number' ? snapshot[PDF_EXPORT_SCALE_KEY] as number : undefined,
+      marginMm: numberOr(PDF_EXPORT_MARGIN_KEY),
+      scale: numberOr(PDF_EXPORT_SCALE_KEY),
+      customWidthMm: numberOr(PDF_EXPORT_CUSTOM_WIDTH_MM_KEY),
+      customHeightMm: numberOr(PDF_EXPORT_CUSTOM_HEIGHT_MM_KEY),
+      headerEnabled: boolOr(PDF_EXPORT_HEADER_KEY),
+      headerTitle: boolOr(PDF_EXPORT_HEADER_TITLE_KEY),
+      headerDate: boolOr(PDF_EXPORT_HEADER_DATE_KEY),
+      pageNumberEnabled: boolOr(PDF_EXPORT_PAGE_NUMBER_KEY),
+      pageNumberPosition: snapshot[PDF_EXPORT_PAGE_NUMBER_POSITION_KEY],
+      bookmarksEnabled: boolOr(PDF_EXPORT_BOOKMARKS_KEY),
     }, PDF_EXPORT_OPTIONS_DEFAULTS),
     browserPath: typeof snapshot[PDF_EXPORT_BROWSER_PATH_KEY] === 'string'
       ? snapshot[PDF_EXPORT_BROWSER_PATH_KEY] as string
@@ -214,6 +240,7 @@ export function createPdfExportModal(
     lastPaint,
     hookedSaveTarget,
     resourceIssues: job.state.resourceIssues,
+    bookmarks: job.state.bookmarks,
     embedStats,
     lastSnapshot,
   })
@@ -233,6 +260,7 @@ export function createPdfExportModal(
       ...(job.state.failReason !== undefined ? { failReason: job.state.failReason } : {}),
       ...(job.state.failDetail !== undefined ? { failDetail: job.state.failDetail } : {}),
       ...(job.state.cancelKind !== undefined ? { cancelKind: job.state.cancelKind } : {}),
+      ...(job.state.bookmarks !== undefined ? { bookmarks: job.state.bookmarks } : {}),
       ...(job.state.resourceIssues !== undefined
         ? { resourceIssues: job.state.resourceIssues.map((issue) => ({ kind: issue.kind, item: issue.item, reason: issue.reason })) }
         : {}),

@@ -142,6 +142,17 @@ export async function startExportResourceServer(
       return
     }
 
+    // T05（#625）书签定位页：装载同源 pdfMain.js（#337 随包产物，挂全局
+    // __vsidianPdfjs）的最小页面。无 CSP——与 V01 探针验证引擎宿主页同形态
+    //（worker 经 fetch→Blob→objectURL 装配需要；页面必须 http origin，V01
+    // §10.1 opaque origin 坑）。仅书签开启时由宿主定向创建 target 访问。
+    if (route === 'locate.html' && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><title>locate</title>'
+        + '<script src="pdfMain.js"></script></head><body></body></html>')
+      return
+    }
+
     if (route === 'res' && req.method === 'GET') {
       const outcome = await resolveResourceUrl(rawUrl)
       if (!outcome.ok) {
