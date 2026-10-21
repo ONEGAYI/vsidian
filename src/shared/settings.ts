@@ -438,9 +438,9 @@ export const WORD_SEGMENT_ENGINE_DEFAULT: WordSegmentEngineMode = 'builtin'
 
 /**
  * #239「jieba 下载源」：jsdelivr（默认）/ npmmirror / custom（自托管
- * 目录基址，见 JIEBA_CUSTOM_URL_KEY）。URL 构造纯逻辑在
- * shared/jiebaManifest；下载在宿主侧执行存 globalStorage（Remote SSH
- * 在远程机下载）。
+ * 目录基址，见 JIEBA_CUSTOM_URL_KEY）/ local（#630 本地离线安装路径，
+ * 见 JIEBA_LOCAL_PATH_KEY）。URL/路径构造纯逻辑在 shared/jiebaManifest；
+ * 下载与本地读取均在宿主侧执行存 globalStorage（Remote SSH 在远程机）。
  */
 export const WORD_SEGMENT_SOURCE_KEY = 'editor.wordSegmentSource'
 export type WordSegmentSourceSetting = JiebaSourceMode
@@ -454,6 +454,16 @@ export const WORD_SEGMENT_SOURCE_DEFAULT: WordSegmentSourceSetting = 'jsdelivr'
 export const JIEBA_CUSTOM_URL_KEY = 'editor.wordSegmentJiebaUrl'
 export const JIEBA_CUSTOM_URL_DEFAULT = ''
 export const JIEBA_CUSTOM_URL_MAX_LENGTH = 500
+
+/**
+ * #630「本地离线安装路径」：local 模式下生效的本地路径——指向目录
+ * （内含两个同名锁定文件）或 npm tarball（.tgz）文件；存在性与形态由
+ * 宿主侧 stat 判定，逐文件 sha256 校验与网络下载同构。路径按宿主侧
+ * 文件系统解析（Remote SSH 场景为远程机路径）；非 local 模式不生效。
+ */
+export const JIEBA_LOCAL_PATH_KEY = 'editor.wordSegmentJiebaLocalPath'
+export const JIEBA_LOCAL_PATH_DEFAULT = ''
+export const JIEBA_LOCAL_PATH_MAX_LENGTH = 1000
 
 /**
  * #322「默认编辑器守护」开关：Markdown 默认编辑器被其他扩展抢占时的
@@ -843,6 +853,7 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
       jsdelivr: 'setting.wordSegmentSourceJsdelivr',
       npmmirror: 'setting.wordSegmentSourceNpmmirror',
       custom: 'setting.wordSegmentSourceCustom',
+      local: 'setting.wordSegmentSourceLocal',
     },
     // 引擎选 builtin 时下载源无意义（链式灰化，值不清除）
     dependsOnEnum: { key: WORD_SEGMENT_ENGINE_KEY, values: ['jieba'] },
@@ -856,6 +867,16 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.wordSegmentCustomUrl.description',
     // 仅 custom 源下生效（链式灰化：builtin → 非 custom 两级传导）
     dependsOnEnum: { key: WORD_SEGMENT_SOURCE_KEY, values: ['custom'] },
+  },
+  {
+    key: JIEBA_LOCAL_PATH_KEY,
+    type: 'string',
+    default: JIEBA_LOCAL_PATH_DEFAULT,
+    maxLength: JIEBA_LOCAL_PATH_MAX_LENGTH,
+    titleKey: 'setting.wordSegmentLocalPath.title',
+    descriptionKey: 'setting.wordSegmentLocalPath.description',
+    // 仅 local 源下生效（链式灰化：builtin → 非 local 两级传导）
+    dependsOnEnum: { key: WORD_SEGMENT_SOURCE_KEY, values: ['local'] },
   },
   // #322 默认编辑器守护开关（general.* 域 → 常规页归属：#323 起以常规页
   // 「默认编辑器」委托组呈现（wordSegment 先例同款「键进注册表 + 标准行

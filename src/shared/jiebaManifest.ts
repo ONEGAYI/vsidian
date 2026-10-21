@@ -6,9 +6,11 @@
 // 文件）。哈希对锁定版本 2.4.0 的真实 CDN 资产计算（jsdelivr 裸文件与
 // npmmirror tarball 解包产物已实测逐字节一致，2026-09-30）。
 //
-// 下载源三档：jsdelivr（默认，逐文件直下）、npmmirror（tarball 单 URL +
+// 下载源四档：jsdelivr（默认，逐文件直下）、npmmirror（tarball 单 URL +
 // 解包提取，registry 的 /files/ 镜像对非白名单包 403 故走 tarball）、
-// custom（用户自托管目录基址 + 文件名拼接）。custom 基址必须 https。
+// custom（用户自托管目录基址 + 文件名拼接，基址必须 https）、local
+//（#630 本地离线安装——目录或 .tgz 文件路径，零网络请求；路径在宿主侧
+// 解析，Remote SSH 场景为远程机路径）。
 export const JIEBA_WASM_PACKAGE = 'jieba-wasm'
 export const JIEBA_WASM_VERSION = '2.4.0'
 
@@ -37,7 +39,7 @@ export const JIEBA_MANIFEST_FILES: readonly JiebaManifestFile[] = [
   },
 ]
 
-export const JIEBA_SOURCE_MODES = ['jsdelivr', 'npmmirror', 'custom'] as const
+export const JIEBA_SOURCE_MODES = ['jsdelivr', 'npmmirror', 'custom', 'local'] as const
 export type JiebaSourceMode = (typeof JIEBA_SOURCE_MODES)[number]
 
 /** npmmirror 的 registry tarball 单 URL（解包提取 pkg/web/* 两文件） */
@@ -92,4 +94,21 @@ export function planJiebaDownload(
     kind: 'files',
     files: manifest.map((file) => ({ file, url: resolveFile(file) })),
   }
+}
+
+export type JiebaLocalPlan =
+  | { ok: true; kind: 'local'; path: string }
+  | { ok: false; reason: 'invalid-local-path' }
+
+/**
+ * local 源离线安装计划（#630）：trim 后非空即接受——存在性与形态
+ * （目录 / tarball 文件）由宿主侧 stat 判定，纯逻辑层不探测文件系统，
+ * 与 planJiebaDownload 对称（URL 规划与本地路径规划同族）。
+ */
+export function planJiebaLocalInstall(localPath: string): JiebaLocalPlan {
+  const trimmed = localPath.trim()
+  if (trimmed === '') {
+    return { ok: false, reason: 'invalid-local-path' }
+  }
+  return { ok: true, kind: 'local', path: trimmed }
 }

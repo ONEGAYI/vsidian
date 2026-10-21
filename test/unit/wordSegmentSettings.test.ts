@@ -126,18 +126,22 @@ describe('侧栏与编辑器页组结构（#264）', () => {
     ])
   })
 
-  it('分词组内容与改版前分词分页一致：引擎/下载源 radio、自定义 URL、下载/删除管理', () => {
+  it('分词组形态：引擎/下载源 radio、源参数输入与资源管理按钮', () => {
     const { parent } = makeProductionView()
     clickNav(parent, zhCn['settings.editorCategory'])
     const group = wordSegmentGroup(parent)
     expect(radiosOf(group, 'editor.wordSegmentEngine')).toHaveLength(2)
-    expect(radiosOf(group, 'editor.wordSegmentSource')).toHaveLength(3)
+    // #630 起源档位四选一（jsdelivr/npmmirror/custom/local）
+    expect(radiosOf(group, 'editor.wordSegmentSource')).toHaveLength(4)
     expect(group.querySelector<HTMLInputElement>('.vsidian-wordseg-custom-url')).toBeTruthy()
+    expect(group.querySelector<HTMLInputElement>('.vsidian-wordseg-local-path')).toBeTruthy()
     const buttons = [...group.querySelectorAll<HTMLButtonElement>('button')]
       .map((b) => b.textContent)
     expect(buttons).toContain(zhCn['wordSegment.download'])
     expect(buttons).toContain(zhCn['wordSegment.deleteResource'])
-    // 三键不以标准设置行重复呈现（呈现归分词组，排除保留）
+    // #631 打开资源目录按钮
+    expect(buttons).toContain(zhCn['wordSegment.openDirectory'])
+    // 四键不以标准设置行重复呈现（呈现归分词组，排除保留）
     expect(group.querySelectorAll('[data-setting-key]')).toHaveLength(0)
   })
 
@@ -304,5 +308,103 @@ describe('全局搜索与兼容路由（#264）', () => {
     expect(wordSegment.entries.map((e) => e.id))
       .toEqual([WORD_SEGMENT_SECTION_ENGINE_ENTRY, WORD_SEGMENT_SECTION_RESOURCE_ENTRY])
     expect(wordSegment.entries.every((e) => e.title.length > 0)).toBe(true)
+  })
+})
+
+describe('local 源离线安装与打开资源目录（#630/#631）', () => {
+  it('源档位含 local；local 路径框随档位/引擎灰化与回显（不清值）', () => {
+    const { dispatch, parent } = makeProductionView()
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const group = () => wordSegmentGroup(parent)
+    expect(radiosOf(group(), 'editor.wordSegmentSource').some((r) => r.value === 'local')).toBe(true)
+    dispatch(hostValues({
+      'editor.wordSegmentEngine': 'jieba',
+      'editor.wordSegmentSource': 'local',
+      'editor.wordSegmentJiebaLocalPath': 'D:/offline/jieba-2.4.0',
+    }))
+    const input = group().querySelector<HTMLInputElement>('.vsidian-wordseg-local-path')!
+    expect(input.value).toBe('D:/offline/jieba-2.4.0')
+    expect(input.disabled).toBe(false)
+    // 切回 custom：路径框禁用但值保留（宿主快照为全量，切换源档不清值）
+    dispatch(hostValues({
+      'editor.wordSegmentEngine': 'jieba',
+      'editor.wordSegmentSource': 'custom',
+      'editor.wordSegmentJiebaLocalPath': 'D:/offline/jieba-2.4.0',
+    }))
+    expect(group().querySelector<HTMLInputElement>('.vsidian-wordseg-local-path')!.disabled).toBe(true)
+    expect(group().querySelector<HTMLInputElement>('.vsidian-wordseg-local-path')!.value)
+      .toBe('D:/offline/jieba-2.4.0')
+    // 引擎 builtin：与 custom URL 同款链式灰化
+    dispatch(hostValues({
+      'editor.wordSegmentEngine': 'builtin',
+      'editor.wordSegmentSource': 'local',
+      'editor.wordSegmentJiebaLocalPath': 'D:/offline/jieba-2.4.0',
+    }))
+    expect(group().querySelector<HTMLInputElement>('.vsidian-wordseg-local-path')!.disabled).toBe(true)
+  })
+
+  it('local 路径框 change 上送 settings.set（trim 后提交）', () => {
+    const { dispatch, sent, parent } = makeProductionView()
+    clickNav(parent, zhCn['settings.editorCategory'])
+    dispatch(hostValues({ 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'local' }))
+    const input = wordSegmentGroup(parent).querySelector<HTMLInputElement>('.vsidian-wordseg-local-path')!
+    input.value = '  D:/offline/jieba-2.4.0  '
+    input.dispatchEvent(new Event('change'))
+    expect(sent).toContainEqual({
+      kind: 'settings.set',
+      values: { 'editor.wordSegmentJiebaLocalPath': 'D:/offline/jieba-2.4.0' },
+    })
+  })
+
+  it('源切 local 后下载按钮文案就地切换「从本地安装」，切回网络档恢复（资源块不重建）', () => {
+    const { dispatch, parent } = makeProductionView()
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const buttonOf = (label: string) =>
+      [...wordSegmentGroup(parent).querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent === label)!
+    expect(buttonOf(zhCn['wordSegment.download'])).toBeTruthy()
+    dispatch(hostValues({ 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'local' }))
+    expect(buttonOf(zhCn['wordSegment.installLocal'])).toBeTruthy()
+    dispatch(hostValues({ 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'jsdelivr' }))
+    expect(buttonOf(zhCn['wordSegment.download'])).toBeTruthy()
+  })
+
+  it('local 源进行中文案为「读取并校验中…」（wordSegment.state 整渲染路径）', () => {
+    const { dispatch, wordSegment, parent } = makeProductionView()
+    clickNav(parent, zhCn['settings.editorCategory'])
+    dispatch(hostValues({ 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'local' }))
+    pushState(wordSegment, { status: 'downloading' })
+    expect(wordSegmentGroup(parent).querySelector('.vsidian-wordseg-status')?.textContent)
+      .toBe(zhCn['wordSegment.installing'])
+  })
+
+  it('打开资源目录按钮：未安装禁用不点送；已安装可点并上送 wordSegment.openDirectory；下载中禁用', () => {
+    const { sent, wordSegment, parent } = makeProductionView()
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const openDir = () =>
+      [...wordSegmentGroup(parent).querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent === zhCn['wordSegment.openDirectory'])!
+    expect(openDir().disabled).toBe(true)
+    openDir().click()
+    expect(sent).not.toContainEqual({ kind: 'wordSegment.openDirectory' })
+    pushState(wordSegment, { installed: true, version: '0.1.0' })
+    expect(openDir().disabled).toBe(false)
+    openDir().click()
+    expect(sent).toContainEqual({ kind: 'wordSegment.openDirectory' })
+    pushState(wordSegment, { installed: true, version: '0.1.0', status: 'downloading' })
+    expect(openDir().disabled).toBe(true)
+  })
+
+  it('notice 取词：installed 基调 ok、install-failed 基调 warn 且携带 detail', () => {
+    const { wordSegment, parent } = makeProductionView()
+    clickNav(parent, zhCn['settings.editorCategory'])
+    pushState(wordSegment, { notice: { kind: 'installed' } })
+    let notice = wordSegmentGroup(parent).querySelector('.vsidian-index-notice')!
+    expect(notice.textContent).toBe(zhCn['wordSegment.noticeInstalled'])
+    expect(notice.className).toContain('vsidian-index-notice-ok')
+    pushState(wordSegment, { notice: { kind: 'install-failed', detail: 'no entry' } })
+    notice = wordSegmentGroup(parent).querySelector('.vsidian-index-notice')!
+    expect(notice.textContent).toBe(zhCn['wordSegment.noticeInstallFailed'].replace('{detail}', 'no entry'))
+    expect(notice.className).toContain('vsidian-index-notice-warn')
   })
 })

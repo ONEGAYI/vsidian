@@ -959,7 +959,7 @@ export type HostToWebview =
       version: string
       status: 'idle' | 'downloading'
       notice: {
-        kind: 'downloaded' | 'download-failed' | 'deleted' | 'delete-failed' | 'load-failed'
+        kind: 'downloaded' | 'download-failed' | 'installed' | 'install-failed' | 'deleted' | 'delete-failed' | 'load-failed'
         detail?: string
       } | null
       resources: { js: string; wasm: string } | null
@@ -2028,11 +2028,16 @@ export type WebviewToHost =
   | { kind: 'wordSegment.get' }
   /** 请求下载 jieba 资源（#239，设置页）：宿主按当前下载源设置执行——
    *  下载 → sha256 校验 → 落 globalStorage，失败清理不留半成品文件；
-   *  全程经 wordSegment.state 推送（downloading → idle/notice） */
+   *  全程经 wordSegment.state 推送（downloading → idle/notice）。
+   *  #630 起 local 源档下同消息语义为「从本地路径安装」（零网络请求），
+   *  notice 用 installed/install-failed 区分于网络档 */
   | { kind: 'wordSegment.download' }
   /** 删除已下载 jieba 资源（#239，设置页）：删除后引擎回退 builtin，
    *  结果经 wordSegment.state 推送 */
   | { kind: 'wordSegment.delete' }
+  /** 打开资源目录（#631，设置页）：宿主在系统文件管理器中 reveal
+   *  globalStorage/jieba-wasm/<version>（installed 时按钮才可用）；无应答 */
+  | { kind: 'wordSegment.openDirectory' }
   /** 编辑器侧 jieba 加载结果回报（#239）：宿主已确认资源就绪但 webview
    *  动态 import/init 失败时上报（CSP/运行时不兼容等宿主不可见场景），
    *  宿主通知用户并记录 notice.load-failed；成功不回报 */
@@ -4920,6 +4925,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'wordSegment.get':
     case 'wordSegment.download':
     case 'wordSegment.delete':
+    case 'wordSegment.openDirectory':
     case 'defaultEditor.get':
     case 'defaultEditor.fix':
     case 'addons.get':
@@ -5988,9 +5994,12 @@ function isIndexNoticeKind(v: unknown): v is (typeof INDEX_NOTICE_KINDS)[number]
   return typeof v === 'string' && (INDEX_NOTICE_KINDS as readonly string[]).includes(v)
 }
 
-/** #239 分词资源操作结果反馈种类（wordSegment.state.notice.kind） */
+/** #239 分词资源操作结果反馈种类（wordSegment.state.notice.kind）；
+ *  installed/install-failed 为 #630 local 源离线安装专用（与网络档
+ *  downloaded/download-failed 区分，取词与基调不同） */
 const WORD_SEGMENT_NOTICE_KINDS = [
-  'downloaded', 'download-failed', 'deleted', 'delete-failed', 'load-failed',
+  'downloaded', 'download-failed', 'installed', 'install-failed',
+  'deleted', 'delete-failed', 'load-failed',
 ] as const
 
 function isWordSegmentNoticeKind(v: unknown): v is (typeof WORD_SEGMENT_NOTICE_KINDS)[number] {

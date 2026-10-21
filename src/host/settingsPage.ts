@@ -284,10 +284,15 @@ export function createSettingsPage(
         return
       case 'wordSegment.download':
         // 结果经服务 onStateChanged → notifyWordSegmentChanged 推送
+        //（#630 local 源档下同消息为「从本地安装」，行为由源档位决定）
         void jieba?.service.download()
         return
       case 'wordSegment.delete':
         void jieba?.service.delete()
+        return
+      case 'wordSegment.openDirectory':
+        // #631 打开资源目录（revealFileInOS，无应答）
+        jieba?.openInstallDirectory()
         return
       case 'wordSegment.loadResult':
         return // 编辑器面板链路（provider 消费），设置页不会发出
