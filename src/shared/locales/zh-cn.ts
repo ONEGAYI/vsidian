@@ -165,10 +165,17 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.run': '导出',
   /** 取消进行中的导出 */
   'pdfExport.cancel': '取消',
-  /** 主区预览占位（真实 PDF 预览归 T07/#627） */
+  /** 主区预览占位（T07/#627：真实 PDF 预览——手动刷新语义说明） */
   'pdfExport.previewPlaceholderTitle': 'PDF 预览',
   'pdfExport.previewPlaceholderDescription':
-    '生成结果的 PDF 预览将在后续版本接入。本次导出始终使用此处参数与所示固定文档。',
+    '预览显示按当前参数与固定输入实际生成的 PDF 页面。参数或清单变化后需手动刷新；预览不会自动生成。',
+  /** T07（#627）预览工具栏：手动刷新/过期徽章/阶段与书签提示 */
+  'pdfExport.preview.refresh': '刷新预览',
+  'pdfExport.preview.generating': '正在生成 PDF 预览…',
+  'pdfExport.preview.failed': '预览生成失败',
+  'pdfExport.preview.stale': '预览已过期',
+  'pdfExport.preview.bookmarks': '标题书签 {count} 条',
+  'pdfExport.preview.itemLabel': '预览文件',
   /** 任务阶段 */
   'pdfExport.phase.idle': '就绪',
   'pdfExport.phase.generating': '正在生成 PDF…',

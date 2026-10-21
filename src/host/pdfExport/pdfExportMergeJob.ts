@@ -28,6 +28,7 @@ import {
   type PdfBookmarkReport,
   type PdfExportFailReason,
   type PdfExportInputPayload,
+  type PdfExportPrecomputed,
 } from './pdfExportJob'
 import type { PdfBatchCapturedDoc } from './pdfExportBatchJob'
 import type { ResolveBrowserResult } from './browserFind'
@@ -58,6 +59,10 @@ export interface PdfMergeRunPlan {
   pageBreak: boolean
   window: PdfMergeWindowInput
   browserPath: string | undefined
+  /** T07（#627）预览产物复用：指纹核对相等（参数 + 清单序 + 各篇版本 +
+   *  每篇另起一页）的合并预览字节——跳过逐篇捕获与浏览器生成，直接保存。
+   *  在场时 window/items 不参与执行（观测面保留）。 */
+  precomputed?: PdfExportPrecomputed
 }
 
 /** 合并 payload 纯装配（清单序 captured + 窗口级件 → 单产物载荷）：
@@ -231,65 +236,71 @@ export class PdfMergeJob {
         this.setState({ phase: 'failed', failReason: 'internal', failDetail: 'empty merge list' })
         return finish()
       }
-      const resolved = await this.ports.resolveBrowser(plan.browserPath)
-      if (!resolved.ok) {
-        this.setState({ phase: 'failed', failReason: resolved.reason })
-        return finish()
-      }
-      // ---- 准备阶段固定输入：逐篇捕获（清单序；任一篇失败即整次失败）----
-      const captured: PdfBatchCapturedDoc[] = []
-      for (let index = 0; index < plan.items.length; index++) {
-        const item = plan.items[index]!
-        const docName = docNameOf(item.fsPath)
-        this.setState({ currentIndex: index, currentName: docName })
-        let outcome: PdfBatchCapturedDoc | { ok: false; reason: string }
-        try {
-          outcome = await this.ports.captureDoc(item.fsPath)
-        } catch {
-          outcome = { ok: false, reason: 'read-failed' }
-        }
-        if (this.cancelRequested) return cancelledResult('user')
-        if (!('payload' in outcome) || !outcome.payload) {
-          this.setState({ phase: 'failed', failReason: 'capture-failed', failDetail: docName })
-          return finish()
-        }
-        captured.push(outcome)
-      }
-      const payload = buildPdfMergePayload([captured[0]!, ...captured.slice(1)], plan.window, plan.pageBreak)
-      // ---- 两段式（T02 单文档同款，单会话承载合并产物）----
-      const session = this.ports.createSession(resolved.browser.executablePath)
-      this.activeSession = session
       let bytes: Buffer
       let bookmarks: PdfBookmarkReport
-      try {
-        const rendered = await session.renderPage({
-          payload: { ...payload, mermaidUri: '', resBase: '', locale: this.ports.locale() },
-          options: plan.options,
-        })
-        if (this.cancelRequested) throw new MergeCancelled()
-        this.setState({ phase: 'running' })
-        if (rendered.failures.length > 0 && !this.resumeAll) {
-          this.setState({ phase: 'awaiting-resources', resourceIssues: rendered.failures })
-          const choice = await new Promise<'resume' | 'resume-all' | false>((resolve) => {
-            this.choiceResolver = resolve
-          })
-          if (choice === 'resume-all') this.resumeAll = true
-          if (!choice || this.cancelRequested) throw new MergeCancelled()
-          this.setState({ phase: 'running', resourceIssues: undefined })
+      if (plan.precomputed !== undefined) {
+        // T07 预览产物复用：同源同代次字节直接进入保存阶段——不捕获不启浏览器
+        bytes = Buffer.from(plan.precomputed.bytes)
+        bookmarks = plan.precomputed.bookmarks
+      } else {
+        const resolved = await this.ports.resolveBrowser(plan.browserPath)
+        if (!resolved.ok) {
+          this.setState({ phase: 'failed', failReason: resolved.reason })
+          return finish()
         }
-        const printed = await session.finalizePrint(plan.options)
-        bytes = printed.bytes
-        bookmarks = printed.bookmarks
-      } catch (error) {
+        // ---- 准备阶段固定输入：逐篇捕获（清单序；任一篇失败即整次失败）----
+        const captured: PdfBatchCapturedDoc[] = []
+        for (let index = 0; index < plan.items.length; index++) {
+          const item = plan.items[index]!
+          const docName = docNameOf(item.fsPath)
+          this.setState({ currentIndex: index, currentName: docName })
+          let outcome: PdfBatchCapturedDoc | { ok: false; reason: string }
+          try {
+            outcome = await this.ports.captureDoc(item.fsPath)
+          } catch {
+            outcome = { ok: false, reason: 'read-failed' }
+          }
+          if (this.cancelRequested) return cancelledResult('user')
+          if (!('payload' in outcome) || !outcome.payload) {
+            this.setState({ phase: 'failed', failReason: 'capture-failed', failDetail: docName })
+            return finish()
+          }
+          captured.push(outcome)
+        }
+        const payload = buildPdfMergePayload([captured[0]!, ...captured.slice(1)], plan.window, plan.pageBreak)
+        // ---- 两段式（T02 单文档同款，单会话承载合并产物）----
+        const session = this.ports.createSession(resolved.browser.executablePath)
+        this.activeSession = session
+        try {
+          const rendered = await session.renderPage({
+            payload: { ...payload, mermaidUri: '', resBase: '', locale: this.ports.locale() },
+            options: plan.options,
+          })
+          if (this.cancelRequested) throw new MergeCancelled()
+          this.setState({ phase: 'running' })
+          if (rendered.failures.length > 0 && !this.resumeAll) {
+            this.setState({ phase: 'awaiting-resources', resourceIssues: rendered.failures })
+            const choice = await new Promise<'resume' | 'resume-all' | false>((resolve) => {
+              this.choiceResolver = resolve
+            })
+            if (choice === 'resume-all') this.resumeAll = true
+            if (!choice || this.cancelRequested) throw new MergeCancelled()
+            this.setState({ phase: 'running', resourceIssues: undefined })
+          }
+          const printed = await session.finalizePrint(plan.options)
+          bytes = printed.bytes
+          bookmarks = printed.bookmarks
+        } catch (error) {
+          session.dispose()
+          if (this.cancelRequested || error instanceof MergeCancelled) return cancelledResult('user')
+          this.setState({ phase: 'failed', failReason: mapBrowserErrorToFailReason(error), failDetail: error instanceof Error ? error.message : String(error), currentName: undefined })
+          return finish()
+        }
         session.dispose()
-        if (this.cancelRequested || error instanceof MergeCancelled) return cancelledResult('user')
-        this.setState({ phase: 'failed', failReason: mapBrowserErrorToFailReason(error), failDetail: error instanceof Error ? error.message : String(error), currentName: undefined })
-        return finish()
-      }
-      session.dispose()
-      if (this.cancelRequested) {
-        // finalizePrint 正常返回与取消的边缘竞态：按取消收口，产物不落盘
-        return cancelledResult('user')
+        if (this.cancelRequested) {
+          // finalizePrint 正常返回与取消的边缘竞态：按取消收口，产物不落盘
+          return cancelledResult('user')
+        }
       }
       // ---- 保存对话框 + 原子写盘（取消/失败不留伪成功产物）----
       this.setState({ phase: 'saving', bookmarks })

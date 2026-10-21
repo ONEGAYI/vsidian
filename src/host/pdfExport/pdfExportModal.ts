@@ -21,7 +21,7 @@
 // 绘制层探针经 _test.getPdfExportModalState 命令暴露（extension.ts 注册）。
 
 import * as vscode from 'vscode'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -35,7 +35,9 @@ import {
   PDF_EXPORT_OPTIONS_DEFAULTS,
   type PdfExportOptions,
 } from '../../shared/pdfExportOptions'
+import { pdfPreviewFingerprint, type PdfPreviewTarget } from '../../shared/pdfExportPreview'
 import type {
+  PdfExportFailureItem,
   PdfExportSnippetEntry,
   PdfExportStyleSnapshot,
 } from '../../shared/pdfExportPayload'
@@ -68,9 +70,10 @@ import {
   PDF_EXPORT_SCALE_KEY,
   type SettingsPayload,
 } from '../../shared/settings'
-import { PdfExportJob, type PdfExportInput, type PdfExportInputPayload, type PdfExportJobState } from './pdfExportJob'
-import { PdfBatchJob, type PdfBatchRunPlan } from './pdfExportBatchJob'
-import { PdfMergeJob, type PdfMergeRunPlan } from './pdfExportMergeJob'
+import { PdfExportJob, type PdfExportInput, type PdfExportInputPayload, type PdfExportJobState, type PdfExportPrecomputed } from './pdfExportJob'
+import { PdfBatchJob, type PdfBatchRunPlan, type PdfBatchCapturedDoc } from './pdfExportBatchJob'
+import { PdfMergeJob, buildPdfMergePayload, type PdfMergeRunPlan } from './pdfExportMergeJob'
+import { PdfPreviewJob } from './pdfExportPreviewJob'
 import { createBrowserExportSession } from './pdfExportSession'
 import { resolveExportBrowser } from './browserFind'
 import { prefetchEmbedTargets, type PdfExportEmbedReadPort } from './pdfExportEmbeds'
@@ -171,6 +174,32 @@ export interface PdfExportModalInfo {
   fragmentCount: number
   /** 就绪后导出页整页截图（测试钩子装配时的视觉证据；base64 PNG） */
   lastSnapshot: string | undefined
+  /** T07（#627）模态 HTML 的预览装配观测：CSP 全文与 pdfjs 资产注入标志
+   *  （core 集成断言在无浏览器环境钉住装载面——worker-src blob: 等） */
+  modalCsp: string
+  modalPreviewAssetsReady: boolean
+  /** T07（#627）预览观测面（无预览会话时 phase='idle'；bytesSha 为就绪
+   *  产物的指纹摘要——与最终导出文件哈希对读，钉住「同源同代次」） */
+  preview: {
+    phase: 'idle' | 'generating' | 'ready' | 'failed'
+    generation: number
+    fingerprint: string | undefined
+    byteLength: number
+    bytesSha256: string
+    bookmarks: PdfExportJobState['bookmarks']
+    failures: PdfExportJobState['resourceIssues']
+    failReason: string | undefined
+    target: PdfPreviewTarget | undefined
+    /** 批量模式当前选中预览条目 id（非批量模式 undefined） */
+    batchItemId: string | undefined
+    /** 捕获/生成在途（刷新按钮禁用判据） */
+    busy: boolean
+    /** 最近一次单文档/合并导出是否复用了预览字节（观测面） */
+    lastExportReused: boolean
+    /** 预览任务累计发起/取消计数（释放配对观测） */
+    runs: number
+    cancels: number
+  }
   /** T04（#624）批量模式观测面（非批量/合并模式 undefined；合并模式为
    *  merge 形态——单产物观测：savedPath/bookmarks/篇进度，无映射面） */
   batch:
@@ -230,6 +259,9 @@ export interface PdfExportModalHandle {
   getInfo(): PdfExportModalInfo
   /** 经正式处理入口注入模态 webview → 宿主消息（测试钩子通道） */
   injectMessage(message: unknown): void
+  /** T07（#627）宿主 → 模态 webview 消息转发（测试钩子通道——webview 侧
+   *  仅 __vsidianTestHooks 标志下消费 _test 形态） */
+  postToWebview(message: unknown): void
 }
 
 /** 从设置快照读取本次默认参数与浏览器路径（实时快照——设置页修改即时生效） */
@@ -276,6 +308,8 @@ export function createPdfExportModal(
   let lastHtml: string | undefined
   let lastPaint: unknown
   let lastSnapshot: string | undefined
+  let modalCsp = ''
+  let modalPreviewAssetsReady = false
   let hookedSaveTarget: string | undefined
   let embedStats: PdfExportModalInfo['embedStats']
   /** 最近一次捕获的选区片段数（观测面；0=全文导出） */
@@ -354,6 +388,277 @@ export function createPdfExportModal(
     batchOpChain = batchOpChain.then(op, op)
   }
   const nextBatchId = (): string => `b${++batchIdSeq}`
+
+  // ---- T07（#627）同模态 PDF 预览：会话级代次模型与产物存储 ----
+  // 统一代次模型（合并/批量 job 不补 generation 字段——既有状态面不动）：
+  // - previewGen 每次发布（刷新完成或导出产物回填）单调 +1；previewResetToken
+  //   在模态关闭/切换模式时 +1。迟到回包 = 旧代次或旧令牌，一律丢弃——
+  //   不覆盖新结果、不复活旧预览（连续刷新、关闭后迟到、导出让位同守卫）；
+  // - 过期判定单一事实源：pdfPreviewFingerprint（shared）——webview 以
+  //   state 下发的目标身份 + 本地参数就地比较（参数/清单/选中条目/输入
+  //   版本任一变化即失配）；宿主在导出发起时以同一函数核对相等才允许
+  //   字节复用（「新一轮 run 重置」语义由会话层 reset 承担）。
+  let previewGen = 0
+  let previewResetToken = 0
+  let previewPhase: 'idle' | 'generating' | 'ready' | 'failed' = 'idle'
+  let previewFailReason: string | undefined
+  /** 捕获或生成在途（同一时刻至多一轮——连续刷新不叠加启动生成任务） */
+  let previewBusy = false
+  let previewStore: {
+    generation: number
+    fingerprint: string
+    bytes: Buffer
+    bookmarks: NonNullable<PdfExportJobState['bookmarks']>
+    failures: PdfExportFailureItem[]
+  } | undefined
+  /** 批量模式选中预览条目（缺省首条；被移除时回退首条——见 previewTargetOf） */
+  let previewBatchItemId: string | undefined
+  /** 条目 fsPath → 最近一次捕获的权威版本（批量/合并目标身份数据面） */
+  const previewItemVersions = new Map<string, number>()
+  let previewRuns = 0
+  let previewCancels = 0
+  let previewLastExportReused = false
+  /** open 时刻的源与选区（刷新预览 = 新一轮固定输入，按原选区重新捕获） */
+  let activeSource: PdfExportDocumentSource | undefined
+  let activeSelection: readonly PdfSelectionRange[] | undefined
+
+  const hostToday = (): string => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }
+
+  const previewJob = new PdfPreviewJob({
+    resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
+    createSession: (executablePath) => createBrowserExportSession(executablePath, {
+      outWebviewDir: sessionDeps.outWebviewDir,
+      resourceResolve: {
+        resolve: sessionDeps.resolveResource,
+        knownDocFsPaths: () => knownDocFsPaths,
+      },
+    }),
+    locale: () => hostLocale(getSettingsSnapshot()),
+  })
+
+  /** 当前预览目标身份（随 state 下发——webview 与本地参数合成指纹比较） */
+  const previewTargetOf = (): PdfPreviewTarget | undefined => {
+    if (mode === 'document') {
+      const input = fixedInput
+      if (input === undefined) return undefined
+      return {
+        kind: 'document',
+        doc: {
+          docName: input.docName,
+          capturedVersion: input.capturedVersion,
+          ...(input.payload.fragments !== undefined
+            ? { fragments: input.payload.fragments.map((f) => [f.start, f.end] as const) }
+            : {}),
+        },
+      }
+    }
+    if (mode === 'batch') {
+      const selected = batchItems.find((i) => i.id === previewBatchItemId) ?? batchItems[0]
+      if (selected === undefined) return undefined
+      return {
+        kind: 'batchItem',
+        fsPath: selected.fsPath,
+        doc: {
+          docName: selected.fsPath.split('/').pop() ?? selected.fsPath,
+          capturedVersion: previewItemVersions.get(selected.fsPath) ?? 0,
+        },
+      }
+    }
+    if (batchItems.length === 0) return undefined
+    return {
+      kind: 'merge',
+      fsPaths: batchItems.map((i) => i.fsPath),
+      versions: batchItems.map((i) => previewItemVersions.get(i.fsPath) ?? 0),
+    }
+  }
+
+  /** 批量模式生效中的预览条目 id（选中条目被移除时回退首条） */
+  const effectivePreviewItemId = (): string | undefined =>
+    mode === 'batch'
+      ? (batchItems.find((i) => i.id === previewBatchItemId) ?? batchItems[0])?.id
+      : undefined
+
+  /** 就绪产物复用核对：参数与固定输入身份（含每篇另起一页与页眉日期）与
+   *  产物代次指纹严格相等才复用——过期 PDF 不得当作当前设置结果 */
+  const previewReusable = (options: PdfExportOptions, pageBreak: boolean): PdfExportPrecomputed | undefined => {
+    if (previewStore === undefined || previewPhase !== 'ready' || previewBusy) return undefined
+    const target = previewTargetOf()
+    if (target === undefined) return undefined
+    if (pdfPreviewFingerprint({ options, target, pageBreak, today: hostToday() }) !== previewStore.fingerprint) {
+      return undefined
+    }
+    return { bytes: previewStore.bytes, bookmarks: previewStore.bookmarks }
+  }
+
+  /** 导出发起/重新执行命令时让位：作废在途预览（代次推进——迟到回包丢弃） */
+  const cancelInFlightPreview = (): void => {
+    if (!previewBusy) return
+    previewGen++
+    if (previewJob.isRunning) {
+      previewJob.cancel()
+      previewCancels++
+    }
+    previewBusy = false
+    previewPhase = previewStore !== undefined ? 'ready' : 'idle'
+    previewFailReason = undefined
+  }
+
+  /** 预览会话整体重置（关闭模态/切换模式）：重开不显示上一会话预览 */
+  const resetPreviewSession = (): void => {
+    cancelInFlightPreview()
+    previewResetToken++
+    previewGen++
+    previewStore = undefined
+    previewPhase = 'idle'
+    previewFailReason = undefined
+    previewBatchItemId = undefined
+    previewItemVersions.clear()
+    previewLastExportReused = false
+  }
+
+  const pushPreviewArtifact = (): void => {
+    if (panel === undefined || previewStore === undefined) return
+    void panel.webview.postMessage({
+      kind: 'pdfExportModal.previewArtifact',
+      generation: previewStore.generation,
+      base64: previewStore.bytes.toString('base64'),
+    })
+  }
+
+  /** 发布就绪产物：状态置 ready 并推送字节（generation 由调用方给定——
+   *  刷新轮 = 该轮请求代次（不推进 previewGen，保 continuation 的 finally
+   *  守卫成立以复位 busy）；导出回填 = ++previewGen 的新代次） */
+  const adoptPreviewBytes = (
+    generation: number,
+    fingerprint: string,
+    bytes: Buffer,
+    bookmarks: NonNullable<PdfExportJobState['bookmarks']>,
+    failures: PdfExportFailureItem[],
+  ): void => {
+    previewStore = { generation, fingerprint, bytes, bookmarks, failures }
+    previewPhase = 'ready'
+    previewFailReason = undefined
+    notifyState()
+    pushPreviewArtifact()
+  }
+
+  /** 手动刷新预览：新一轮固定输入重新捕获（规格 §2.1——不复用上一轮输入）
+   *  → 与导出同一 createBrowserExportSession 管线产出字节。连续刷新/导出
+   *  运行中不叠加发起（不因重复输入反复启动生成任务）。 */
+  const refreshPreview = (rawParams: unknown, pageBreak: boolean): void => {
+    if (previewBusy || job.isRunning || batchJob.isRunning || mergeJob.isRunning) return
+    const { defaults, browserPath } = defaultsFromSettings(getSettingsSnapshot())
+    const params = normalizePdfExportOptions(rawParams, defaults)
+    const gen = ++previewGen
+    const token = previewResetToken
+    previewBusy = true
+    previewRuns++
+    previewPhase = 'generating'
+    previewFailReason = undefined
+    notifyState()
+    void (async () => {
+      let fingerprintTarget: PdfPreviewTarget | undefined
+      let payload: PdfExportInputPayload | undefined
+      try {
+        if (mode === 'document') {
+          const source = activeSource
+          if (source === undefined) {
+            // 无源（防御：单文档模式恒有 open 源）——回 idle 不冒充失败
+            previewPhase = 'idle'
+            return
+          }
+          if (fixedInput === undefined) {
+            // 固定输入捕获尚未完成（open 后捕获在途——UI 刷新按钮此时禁用；
+            // 本路径仅在捕获竞态下可达）：回 idle，用户稍后再刷新
+            previewPhase = 'idle'
+            return
+          }
+          // 新一轮固定内容：按 open 时刻的选区重新捕获全文并切片（钳制兜底）
+          const input = await captureInput(source, activeSelection)
+          if (gen !== previewGen || token !== previewResetToken) return
+          fixedInput = input
+          payload = input.payload
+        } else if (mode === 'batch') {
+          const item = batchItems.find((i) => i.id === previewBatchItemId) ?? batchItems[0]
+          if (item === undefined) {
+            // 空清单无可预览目标：静默回 idle（不构成失败）
+            previewPhase = 'idle'
+            return
+          }
+          batchWindowCapture = await sessionDeps.captureBatchWindowInput()
+          if (gen !== previewGen || token !== previewResetToken) return
+          const captured = await makeCaptureDocPort()(item.fsPath)
+          if (gen !== previewGen || token !== previewResetToken) return
+          if (!('payload' in captured) || !captured.payload) throw new Error('capture-failed')
+          previewItemVersions.set(item.fsPath, captured.capturedVersion)
+          payload = captured.payload
+        } else {
+          if (batchItems.length === 0) {
+            previewPhase = 'idle'
+            return
+          }
+          batchWindowCapture = await sessionDeps.captureBatchWindowInput()
+          if (gen !== previewGen || token !== previewResetToken) return
+          const captureDoc = makeCaptureDocPort()
+          const captured: PdfBatchCapturedDoc[] = []
+          for (const item of batchItems) {
+            const outcome = await captureDoc(item.fsPath)
+            if (gen !== previewGen || token !== previewResetToken) return
+            if (!('payload' in outcome) || !outcome.payload) throw new Error('capture-failed')
+            previewItemVersions.set(item.fsPath, outcome.capturedVersion)
+            captured.push(outcome)
+          }
+          const raw = batchWindowCapture
+          payload = buildPdfMergePayload([captured[0]!, ...captured.slice(1)], {
+            style: raw.style ?? {
+              dark: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+                || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast,
+              vars: {},
+              reading: {},
+            },
+            snippets: raw.snippets,
+            breaks: raw.breaks,
+          }, pageBreak)
+        }
+        fingerprintTarget = previewTargetOf()
+        if (fingerprintTarget === undefined || payload === undefined) throw new Error('no-preview-target')
+        const fingerprint = pdfPreviewFingerprint({ options: params, target: fingerprintTarget, pageBreak, today: hostToday() })
+        // 资源服务守卫登记（预览任务的固定输入数据面）
+        knownDocFsPaths.clear()
+        for (const doc of payload.docs) knownDocFsPaths.add(doc.fsPath)
+        if (payload.merge !== undefined) {
+          for (const entry of payload.merge.docs) knownDocFsPaths.add(entry.doc.fsPath)
+        }
+        const result = await previewJob.run({
+          payload,
+          options: params,
+          browserPath: browserPath.trim() || undefined,
+        })
+        if (gen !== previewGen || token !== previewResetToken) return
+        if (result.ok) {
+          adoptPreviewBytes(gen, fingerprint, result.bytes, result.bookmarks, result.failures)
+        } else if (result.reason === 'cancelled') {
+          previewPhase = previewStore !== undefined ? 'ready' : 'idle'
+        } else {
+          previewPhase = 'failed'
+          previewFailReason = result.reason
+        }
+      } catch (error) {
+        if (gen !== previewGen || token !== previewResetToken) return
+        previewPhase = 'failed'
+        previewFailReason = error instanceof Error && error.message === 'capture-failed' ? 'capture-failed' : 'internal'
+      } finally {
+        if (gen === previewGen && token === previewResetToken) {
+          previewBusy = false
+          knownDocFsPaths.clear()
+          notifyState()
+        }
+      }
+    })()
+  }
 
   const batchInfo = () => mode === 'batch'
     ? {
@@ -510,29 +815,50 @@ export function createPdfExportModal(
   }
 
   /** T06（#626）合并执行：窗口级固定输入一次捕获（style 兜底）+ 全部主条目
-   *  身份预登记（嵌入目标随逐篇捕获补登记——见 makeCaptureDocPort） */
+   *  身份预登记（嵌入目标随逐篇捕获补登记——见 makeCaptureDocPort）。
+   *  T07（#627）：指纹核对相等的合并预览字节直接复用（跳过捕获与浏览器
+   *  生成，仅保存对话框与写盘）；预览在途时先让位取消。 */
   const startMergeRun = async (params: PdfExportOptions, pageBreak: boolean): Promise<void> => {
     if (mergeJob.isRunning || batchJob.isRunning || job.isRunning) return
-    lastHtml = undefined
-    lastSnapshot = undefined
-    hookedSaveTarget = undefined
-    const raw = await sessionDeps.captureBatchWindowInput()
-    batchWindowCapture = raw
-    const plan: PdfMergeRunPlan = {
-      items: batchItems,
-      options: params,
-      pageBreak,
-      window: {
-        style: raw.style ?? {
-          dark: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
-            || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast,
-          vars: {},
-          reading: {},
+    cancelInFlightPreview()
+    const reuse = previewReusable(params, pageBreak)
+    previewLastExportReused = reuse !== undefined
+    let plan: PdfMergeRunPlan
+    if (reuse !== undefined) {
+      plan = {
+        items: batchItems,
+        options: params,
+        pageBreak,
+        window: {
+          style: { dark: false, vars: {}, reading: {} },
+          snippets: [],
+          breaks: false,
         },
-        snippets: raw.snippets,
-        breaks: raw.breaks,
-      },
-      browserPath: defaultsFromSettings(getSettingsSnapshot()).browserPath.trim() || undefined,
+        browserPath: undefined,
+        precomputed: reuse,
+      }
+    } else {
+      lastHtml = undefined
+      lastSnapshot = undefined
+      hookedSaveTarget = undefined
+      const raw = await sessionDeps.captureBatchWindowInput()
+      batchWindowCapture = raw
+      plan = {
+        items: batchItems,
+        options: params,
+        pageBreak,
+        window: {
+          style: raw.style ?? {
+            dark: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+              || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast,
+            vars: {},
+            reading: {},
+          },
+          snippets: raw.snippets,
+          breaks: raw.breaks,
+        },
+        browserPath: defaultsFromSettings(getSettingsSnapshot()).browserPath.trim() || undefined,
+      }
     }
     batchPhase = 'running'
     notifyState()
@@ -568,9 +894,12 @@ export function createPdfExportModal(
   }
 
   /** 批量执行：窗口级固定输入一次捕获 + knownDocFsPaths 登记（全批条目与
-   *  其嵌入目标——资源服务守卫数据面） */
+   *  其嵌入目标——资源服务守卫数据面）。T07：批量永不复用预览字节（预览
+   *  只覆盖单条目——部分覆盖不得进导出）；预览在途时先让位取消。 */
   const startBatchRun = async (params: PdfExportOptions): Promise<void> => {
     if (batchJob.isRunning || job.isRunning) return
+    cancelInFlightPreview()
+    previewLastExportReused = false
     batchWindowCapture = await sessionDeps.captureBatchWindowInput()
     const plan: PdfBatchRunPlan = {
       items: batchItems,
@@ -612,7 +941,27 @@ export function createPdfExportModal(
     embedStats,
     fragmentCount,
     lastSnapshot,
+    modalCsp,
+    modalPreviewAssetsReady,
     batch: batchInfo(),
+    preview: {
+      phase: previewPhase,
+      generation: previewStore?.generation ?? previewGen,
+      fingerprint: previewStore?.fingerprint,
+      byteLength: previewStore?.bytes.length ?? 0,
+      bytesSha256: previewStore !== undefined
+        ? createHash('sha256').update(previewStore.bytes).digest('hex')
+        : '',
+      bookmarks: previewStore?.bookmarks,
+      failures: previewStore?.failures,
+      failReason: previewFailReason,
+      target: previewTargetOf(),
+      batchItemId: effectivePreviewItemId(),
+      busy: previewBusy,
+      lastExportReused: previewLastExportReused,
+      runs: previewRuns,
+      cancels: previewCancels,
+    },
   })
 
   const notifyState = (): void => {
@@ -637,6 +986,21 @@ export function createPdfExportModal(
       // T04（#624）批量 / T06（#626）合并模式状态（单文档模式不携带——
       // 既有字段零改动；合并形态经 batchInfo 的 merge 分支）
       ...(mode !== 'document' ? { batch: batchInfo() } : {}),
+      // T07（#627）预览状态（含当前目标身份与宿主侧日期——webview 就地
+      //  合成指纹做过期比较，与宿主导出复用核对同一函数）
+      preview: {
+        phase: previewPhase,
+        generation: previewStore?.generation ?? previewGen,
+        ...(previewStore !== undefined ? { fingerprint: previewStore.fingerprint } : {}),
+        ...(previewStore?.bookmarks !== undefined ? { bookmarks: previewStore.bookmarks } : {}),
+        ...(previewStore !== undefined && previewStore.failures.length > 0
+          ? { failures: previewStore.failures.map((issue) => ({ kind: issue.kind, item: issue.item, reason: issue.reason })) }
+          : {}),
+        ...(previewFailReason !== undefined ? { failReason: previewFailReason } : {}),
+        ...(effectivePreviewItemId() !== undefined ? { batchItemId: effectivePreviewItemId() } : {}),
+      },
+      ...(previewTargetOf() !== undefined ? { previewTarget: previewTargetOf()! } : {}),
+      hostToday: hostToday(),
     })
   }
   job.onStateChange = () => {
@@ -863,6 +1227,27 @@ export function createPdfExportModal(
     }
   }
 
+  /** T07（#627）预览消息族：手动刷新与批量条目选择（清单/输入权威在宿主，
+   *  过期判定在 webview 经目标身份 + 本地参数指纹比较） */
+  const handlePreviewMessage = (message: { kind: string; params?: unknown; pageBreak?: unknown; itemId?: unknown }): void => {
+    switch (message.kind) {
+      case 'pdfExportModal.preview.refresh': {
+        refreshPreview(message.params, message.pageBreak === true)
+        return
+      }
+      case 'pdfExportModal.preview.select': {
+        if (mode === 'batch' && !batchJob.isRunning && typeof message.itemId === 'string'
+          && batchItems.some((i) => i.id === message.itemId)) {
+          previewBatchItemId = message.itemId
+          notifyState()
+        }
+        return
+      }
+      default:
+        return
+    }
+  }
+
   const handleMessage = (message: unknown): void => {
     if (!isWebviewToHost(message)) return
     if (typeof message.kind === 'string'
@@ -870,12 +1255,19 @@ export function createPdfExportModal(
       handleBatchMessage(message)
       return
     }
+    if (typeof message.kind === 'string' && message.kind.startsWith('pdfExportModal.preview.')) {
+      handlePreviewMessage(message)
+      return
+    }
     switch (message.kind) {
       case 'pdfExportModal.get':
         notifyState()
+        // webview 会话内重挂载（面板 retained 后重载）：重推当前预览产物
+        pushPreviewArtifact()
         return
       case 'pdfExportModal.run': {
         if (!fixedInput) return
+        cancelInFlightPreview()
         lastHtml = undefined
         lastSnapshot = undefined
         hookedSaveTarget = undefined
@@ -886,9 +1278,27 @@ export function createPdfExportModal(
         }
         const { defaults, browserPath } = defaultsFromSettings(getSettingsSnapshot())
         const params = normalizePdfExportOptions(message.params, defaults)
-        void job.run(fixedInput, params, browserPath.trim() || undefined).then((result) => {
+        // T07（#627）预览产物复用：指纹核对相等（参数 + 固定输入身份）时
+        // 导出直接消费预览管线字节——与预览同源同代次，过期预览不进导出
+        const reuse = previewReusable(params, false)
+        previewLastExportReused = reuse !== undefined
+        void job.run(fixedInput, params, browserPath.trim() || undefined, reuse).then((result) => {
           if (result.kind === 'done') {
             void vscode.window.showInformationMessage(t('pdfExport.savedTo', { path: result.state.savedPath ?? '' }))
+            // 导出产物回填预览（单文档 run 返回字节；指纹不同才更新推送）
+            const target = previewTargetOf()
+            if (result.bytes !== undefined && target !== undefined && !previewBusy) {
+              const fingerprint = pdfPreviewFingerprint({ options: params, target, today: hostToday() })
+              if (previewStore?.fingerprint !== fingerprint) {
+                adoptPreviewBytes(
+                  ++previewGen,
+                  fingerprint,
+                  result.bytes,
+                  result.state.bookmarks ?? { written: false, total: 0, skipped: 0, reason: 'disabled' },
+                  [],
+                )
+              }
+            }
           }
         })
         return
@@ -926,11 +1336,14 @@ export function createPdfExportModal(
       },
     )
     panel = created
-    created.webview.html = buildPdfExportModalHtml(
+    const built = buildPdfExportModalHtml(
       created.webview,
       context.extensionUri,
       hostLocale(getSettingsSnapshot()),
     )
+    created.webview.html = built.html
+    modalCsp = built.csp
+    modalPreviewAssetsReady = built.assetsReady
     const messageSub = created.webview.onDidReceiveMessage(handleMessage)
     created.onDidDispose(() => {
       messageSub.dispose()
@@ -939,6 +1352,9 @@ export function createPdfExportModal(
       job.dispose()
       batchJob.dispose()
       mergeJob.dispose()
+      previewJob.dispose()
+      // 预览会话终结：重置代次与产物（重开 = 全新会话，不显示上一会话预览）
+      resetPreviewSession()
       knownDocFsPaths.clear()
       lastPaint = undefined
       // 会话终结：模式、批量清单与策略选择一并重置（重开 = 全新会话）
@@ -961,6 +1377,8 @@ export function createPdfExportModal(
     job.cancel()
     batchJob.cancel()
     mergeJob.cancel()
+    // 切换模式 = 新清单会话：预览代次与产物整体重置（目标身份形态已变）
+    resetPreviewSession()
     mode = next
     batchPhase = 'editing'
     batchItems = []
@@ -977,10 +1395,15 @@ export function createPdfExportModal(
     sourceDirForDialog = source.uri.scheme === 'file'
       ? vscode.Uri.file(path.dirname(source.uri.fsPath))
       : vscode.workspace.workspaceFolders?.[0]?.uri
+    // 重新执行命令 = 新一轮输入：在途预览让位（迟到回包按代次丢弃）
+    cancelInFlightPreview()
+    activeSource = source
+    activeSelection = selection
     if (mode !== 'document') {
       // 清单模式 → 单文档：取消在途清单任务，清单丢弃（重开清单 = 空清单）
       batchJob.cancel()
       mergeJob.cancel()
+      resetPreviewSession()
       mode = 'document'
     }
     // 固定输入捕获（异步）：面板装载握手（get）早于捕获完成时以空输入态
@@ -1024,17 +1447,33 @@ export function createPdfExportModal(
     isOpen: () => panel !== undefined,
     getInfo: info,
     injectMessage: handleMessage,
+    postToWebview: (message: unknown) => {
+      if (panel !== undefined) {
+        void panel.webview.postMessage(message)
+      }
+    },
   }
 }
 
 /** 模态 HTML：CSP 与产物地址装配（settingsPage 同模式）；测试钩子标志经
  *  nonce 内联注入（webview 侧仅在该标志下发送 _test.* 绘制层探针——宿主
- *  侧门控的被动接收形态，与编辑器面板 _test 钩子同约定） */
+ *  侧门控的被动接收形态，与编辑器面板 _test 钩子同约定）。
+ *  T07（#627）预览装载面（#337/#334 编辑器 webview 同口径，不另建阅读器）：
+ *  - `window.__vsidianPdfAssets`：pdfMain/pdfWorker 产物与 pdfjs 资产目录
+ *    的 webview 资源 URI（pdfRender.ts 的 PdfHoverView 消费——分页 canvas、
+ *    有界挂载与 Blob worker 装配全部复用）；
+ *  - CSP 增量三条：`worker-src blob:`（worker 经 fetch→Blob→objectURL 装配
+ *    ——#334 探针实证 webview 内可行）、`connect-src ${cspSource} blob:`
+ *    （worker 文本/资产 fetch 走 cspSource；预览 PDF 字节源是本页自建
+ *    Blob URL）、script-src 追加 `'wasm-unsafe-eval'`（pdfjs wasm/ICC 资产
+ *    编译——与 editorCsp 同款最小放行）。V01 探针的「opaque origin 下
+ *    Blob 不能承载 Worker」结论针对导出浏览器内的 about:blank/data:
+ *    页面，不适用于 VSCode webview（#334 已在生产 webview 实证通过）。 */
 function buildPdfExportModalHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
   locale: LocaleCode,
-): string {
+): { html: string; csp: string; assetsReady: boolean } {
   const nonce = randomUUID()
   const scriptUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfExport.js'),
@@ -1042,14 +1481,25 @@ function buildPdfExportModalHtml(
   const styleUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfExport.css'),
   )
+  const pdfAssets = {
+    mainJs: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfMain.js')).toString(),
+    workerJs: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfWorker.js')).toString(),
+    cMapUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'cmaps')).toString(),
+    fontUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'standard_fonts')).toString(),
+    wasmUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'wasm')).toString(),
+    iccUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'iccs')).toString(),
+  }
   const csp = [
     `default-src 'none'`,
     `img-src ${webview.cspSource}`,
-    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
+    `script-src ${webview.cspSource} 'nonce-${nonce}' 'wasm-unsafe-eval'`,
     `style-src ${webview.cspSource}`,
+    `connect-src ${webview.cspSource} blob:`,
+    `worker-src blob:`,
   ].join('; ')
   const testHooksFlag = process.env.VSIDIAN_TEST_HOOKS === '1' ? 'window.__vsidianTestHooks = true;' : ''
-  return `<!DOCTYPE html>
+  return {
+    html: `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
 <meta charset="UTF-8">
@@ -1061,8 +1511,11 @@ function buildPdfExportModalHtml(
 <body>
 <div id="app"></div>
 ${buildLocaleIslandHtml(locale, LOCALE_MESSAGES[locale])}
-<script nonce="${nonce}">${testHooksFlag}</script>
+<script nonce="${nonce}">${testHooksFlag}window.__vsidianPdfAssets = ${JSON.stringify(pdfAssets)};</script>
 <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
-</html>`
+</html>`,
+    csp,
+    assetsReady: Object.values(pdfAssets).every((value) => value !== ''),
+  }
 }

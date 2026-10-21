@@ -141,6 +141,15 @@ export interface PdfExportRunResult {
   bytes?: Buffer
 }
 
+/** T07（#627）预览产物复用形态：参数与固定输入身份经指纹严格核对相等时，
+ *  导出直接消费预览管线产出的字节（同一 createBrowserExportSession 产物）
+ *  ——跳过浏览器生成，仅走保存对话框与写盘；过期预览由调用方指纹核对
+ *  排除（本 job 不重复判定）。 */
+export interface PdfExportPrecomputed {
+  bytes: Uint8Array
+  bookmarks: PdfBookmarkReport
+}
+
 export class PdfExportJob {
   private generation = 0
   private activeSession: BrowserExportSession | undefined
@@ -185,11 +194,14 @@ export class PdfExportJob {
 
   /** 执行一次导出。任务串行：进行中再发起返回 busy（模态防重入）。
    *  返回 awaiting-resources 时任务仍占用会话等待 resolveResourceChoice
-   *  或 cancel；其余 kind 均为终态。 */
+   *  或 cancel；其余 kind 均为终态。
+   *  precomputed（T07/#627）：指纹核对相等的预览产物——跳过浏览器链路
+   *  直接进入保存阶段（产物与预览同源同代次）。 */
   async run(
     input: PdfExportInput,
     options: PdfExportOptions,
     configuredBrowserPath: string | undefined,
+    precomputed?: PdfExportPrecomputed,
   ): Promise<PdfExportRunResult> {
     if (this.running) {
       return { ok: false, kind: 'busy', state: { ...this._state, failReason: 'busy' } }
@@ -209,55 +221,62 @@ export class PdfExportJob {
       return finish({ ok: false, kind: 'cancelled', state: this._state })
     }
     try {
-      const resolved = await this.ports.resolveBrowser(configuredBrowserPath)
-      if (!resolved.ok) {
-        this.setState({ phase: 'failed', failReason: resolved.reason })
-        return finish({ ok: false, kind: 'failed', state: this._state })
-      }
-      const session = this.ports.createSession(resolved.browser.executablePath)
-      this.activeSession = session
-      let rendered
-      try {
-        rendered = await session.renderPage({
-          payload: { ...input.payload, mermaidUri: '', resBase: '', locale: this.ports.locale() },
-          options,
-        })
-      } catch (error) {
-        session.dispose()
-        throw error
-      }
-      if (this.cancelRequested) {
-        session.dispose()
-        return cancelledResult('user')
-      }
-      if (rendered.failures.length > 0) {
-        // 缺资源选择（规格 §2.3）：失败清单非空 → 等待用户继续/取消；
-        // 会话与页面保留（继续时直接打印，取消即释放）
-        this.setState({ phase: 'awaiting-resources', resourceIssues: rendered.failures })
-        const accept = await new Promise<boolean>((resolve) => {
-          this.choiceResolver = resolve
-        })
-        if (!accept || this.cancelRequested) {
+      let bytes: Buffer
+      let bookmarks: PdfBookmarkReport | undefined
+      if (precomputed !== undefined) {
+        // T07 预览产物复用：同源同代次字节直接进入保存阶段——不启动浏览器
+        bytes = Buffer.from(precomputed.bytes)
+      } else {
+        const resolved = await this.ports.resolveBrowser(configuredBrowserPath)
+        if (!resolved.ok) {
+          this.setState({ phase: 'failed', failReason: resolved.reason })
+          return finish({ ok: false, kind: 'failed', state: this._state })
+        }
+        const session = this.ports.createSession(resolved.browser.executablePath)
+        this.activeSession = session
+        let rendered
+        try {
+          rendered = await session.renderPage({
+            payload: { ...input.payload, mermaidUri: '', resBase: '', locale: this.ports.locale() },
+            options,
+          })
+        } catch (error) {
+          session.dispose()
+          throw error
+        }
+        if (this.cancelRequested) {
           session.dispose()
           return cancelledResult('user')
         }
-        this.setState({ phase: 'generating', resourceIssues: undefined })
-      }
-      let bytes: Buffer
-      let bookmarks: PdfBookmarkReport
-      try {
-        const printed = await session.finalizePrint(options)
+        if (rendered.failures.length > 0) {
+          // 缺资源选择（规格 §2.3）：失败清单非空 → 等待用户继续/取消；
+          // 会话与页面保留（继续时直接打印，取消即释放）
+          this.setState({ phase: 'awaiting-resources', resourceIssues: rendered.failures })
+          const accept = await new Promise<boolean>((resolve) => {
+            this.choiceResolver = resolve
+          })
+          if (!accept || this.cancelRequested) {
+            session.dispose()
+            return cancelledResult('user')
+          }
+          this.setState({ phase: 'generating', resourceIssues: undefined })
+        }
+        let printed: { bytes: Buffer; bookmarks: PdfBookmarkReport }
+        try {
+          printed = await session.finalizePrint(options)
+        } finally {
+          session.dispose()
+        }
         bytes = printed.bytes
         bookmarks = printed.bookmarks
-      } finally {
-        session.dispose()
+        if (this.cancelRequested) {
+          // 导出途中用户取消（cancel 已触发 killSync；finalizePrint 正常返回的
+          // 边缘竞态也按取消收口，产物不落盘）
+          return cancelledResult('user')
+        }
       }
-      if (this.cancelRequested) {
-        // 导出途中用户取消（cancel 已触发 killSync；finalizePrint 正常返回的
-        // 边缘竞态也按取消收口，产物不落盘）
-        return cancelledResult('user')
-      }
-      this.setState({ phase: 'saving', bookmarks })
+      const finalBookmarks = bookmarks ?? precomputed?.bookmarks
+      this.setState({ phase: 'saving', ...(finalBookmarks !== undefined ? { bookmarks: finalBookmarks } : {}) })
       const target = await this.ports.showSaveDialog(input.docName.replace(/\.md$/i, '') + '.pdf')
       if (target === undefined) {
         this.setState({ phase: 'cancelled', cancelKind: 'save-dialog' })

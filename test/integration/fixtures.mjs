@@ -1269,6 +1269,19 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'assets', 'pdf-merge-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // T07（#627）预览样本：长文档（40 节 × 12 段——A4 下 10+ 页，有界挂载
+  // 断言载体：预览仅挂载可见窗口 ± 有限相邻页，费用不随总页数线性增长）
+  writeFileSync(path.join(wsDir, 'pdf-export-t07-long.md'), [
+    '# PDF T07 长文档预览样本',
+    '',
+    ...Array.from({ length: 40 }, (_, i) => [
+      `## 第 ${i + 1} 节 PDF-T07-LONG-${i + 1}`,
+      '',
+      ...Array.from({ length: 12 }, (_, j) =>
+        `长文档第 ${i + 1} 节第 ${j + 1} 段：预览按窗口装载页面，挂载页数不随总页数增长。`),
+      '',
+    ]).flat(),
+  ].join('\n'), 'utf8')
   // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
   // 对照——严格态 br=1（仅显式）、宽松态 br=3
   writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')

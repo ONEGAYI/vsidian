@@ -669,7 +669,45 @@ export type HostToWebview =
             savedPath?: string
             bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
           }
+      /** T07（#627）预览状态：phase/generation 与就绪产物指纹（webview 以
+       *  previewTarget + 本地参数合成指纹比较——过期判定；宿主导出复用
+       *  核对同一函数）。batchItemId = 批量模式生效中的预览条目 */
+      preview?: {
+        phase: 'idle' | 'generating' | 'ready' | 'failed'
+        generation: number
+        fingerprint?: string
+        failReason?: string
+        bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
+        failures?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+        batchItemId?: string
+      }
+      /** T07（#627）当前预览目标身份（宿主权威——document/batchItem/merge；
+       *  webview 与本地参数合成指纹做过期比较，批量选中条目被移除时宿主
+       *  回退首条） */
+      previewTarget?: {
+        kind: 'document'
+        doc: { docName: string; capturedVersion: number; fragments?: ReadonlyArray<readonly [number, number]> }
+      } | {
+        kind: 'batchItem'
+        fsPath: string
+        doc: { docName: string; capturedVersion: number; fragments?: ReadonlyArray<readonly [number, number]> }
+      } | {
+        kind: 'merge'
+        fsPaths: ReadonlyArray<string>
+        versions: ReadonlyArray<number>
+      }
+      /** T07（#627）宿主侧当日日期（页眉日期开启时指纹成分——两侧同源，
+       *  远端时区不使过期判定漂移） */
+      hostToday: string
     }
+  /** T07（#627）预览产物字节推送（base64）：就绪时一次 + 模态 webview 会话
+   *  内重挂载（get）时重推；webview 按当前 state.preview.generation 配对
+   *  消费——迟到/旧会话产物丢弃 */
+  | { kind: 'pdfExportModal.previewArtifact'; generation: number; base64: string }
+  /** T07（#627）测试钩子：参数控件置值（宿主 _test.postPdfExportModalWebviewMessage
+   *  转发，VSIDIAN_TEST_HOOKS 门控链路——webview 仅 __vsidianTestHooks 标志
+   *  下消费；驱动 paramsTouched 真实路径供过期徽章断言） */
+  | { kind: 'pdfExportModal._test.setParam'; field: string; value?: unknown }
   /** T02（#622）阅读样式快照请求（面板级只读交互）：编辑器 webview 枚举
    *  主题变量计算值回包 pdfExport.styleSnapshot.report（PDF 导出准备阶段
    *  的主题跟随数据源；模态经 provider 发起，超时降级空快照） */
@@ -1940,6 +1978,14 @@ export type WebviewToHost =
    *  生成后弹出——同单文档时序）；params 为模态当前参数原样载荷（宿主
    *  normalize 后使用），pageBreak = 每篇另起一页（视图本地态） */
   | { kind: 'pdfExportModal.merge.run'; params: unknown; pageBreak?: boolean }
+  /** T07（#627）手动刷新预览：宿主新一轮固定输入捕获 + 同管线生成；params
+   *  为模态当前参数原样载荷（宿主 normalize 后使用），pageBreak = 合并
+   *  模式的每篇另起一页（非合并模式忽略）。生成在途/导出运行中时宿主
+   *  忽略（不因重复输入反复启动生成任务） */
+  | { kind: 'pdfExportModal.preview.refresh'; params: unknown; pageBreak?: boolean }
+  /** T07（#627）批量模式切换预览条目（清单内 id 锚点；目标身份变化经
+   *  state.previewTarget 推回——webview 过期判定就地失配） */
+  | { kind: 'pdfExportModal.preview.select'; itemId: string }
   /** T02（#622）阅读样式快照上报（宿主 pdfExport.styleSnapshot.request 的
    *  回包——面板级只读交互：编辑器 webview 枚举主题变量计算值，供导出页
    *  主题跟随；不进文档会话消息管线，provider 层拦截分发） */
@@ -4529,6 +4575,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       // T06（#626）合并发起：params 为模态当前参数原样载荷（同 confirm
       // 口径）；pageBreak = 每篇另起一页（视图本地态）
       return v.pageBreak === undefined || typeof v.pageBreak === 'boolean'
+    case 'pdfExportModal.preview.refresh':
+      // T07（#627）手动刷新预览：params 同 run 口径原样载荷；pageBreak 同
+      // merge.run（非合并模式忽略）
+      return v.pageBreak === undefined || typeof v.pageBreak === 'boolean'
+    case 'pdfExportModal.preview.select':
+      // T07（#627）批量预览条目选择（清单内 id 锚点）
+      return isString(v.itemId)
     case 'pdfExportModal.batch.cancel':
       return true
     case 'pdfExportModal.batch.resume':
@@ -5799,7 +5852,25 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
                 isString((issue as { item?: unknown }).item) &&
                 isString((issue as { reason?: unknown }).reason)))) &&
             (v.batch.bookmarks === undefined || isObject(v.batch.bookmarks)))
-        )))
+        ))) &&
+        // T07（#627）预览状态与目标身份为可选追加字段（形态层守卫：phase
+        // 枚举 + 代次非负；previewTarget 三形态 kind 判别——内部结构宿主自产）
+        (v.preview === undefined || (isObject(v.preview) &&
+          (v.preview.phase === 'idle' || v.preview.phase === 'generating' ||
+            v.preview.phase === 'ready' || v.preview.phase === 'failed') &&
+          isNonNegativeInt(v.preview.generation) &&
+          (v.preview.fingerprint === undefined || isString(v.preview.fingerprint)) &&
+          (v.preview.failReason === undefined || isString(v.preview.failReason)) &&
+          (v.preview.batchItemId === undefined || isString(v.preview.batchItemId)))) &&
+        (v.previewTarget === undefined || (isObject(v.previewTarget) &&
+          (v.previewTarget.kind === 'document' || v.previewTarget.kind === 'batchItem' || v.previewTarget.kind === 'merge'))) &&
+        isString(v.hostToday)
+    case 'pdfExportModal.previewArtifact':
+      // T07（#627）预览产物字节（base64；代次配对在 webview 视图内完成）
+      return isNonNegativeInt(v.generation) && isString(v.base64)
+    case 'pdfExportModal._test.setParam':
+      // T07（#627）测试钩子转发（宿主 VSIDIAN_TEST_HOOKS 门控链路）
+      return isString(v.field)
     case 'pdfExport.styleSnapshot.request':
       return true
     case 'settings.focusSection':

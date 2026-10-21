@@ -175,10 +175,17 @@ export const en = {
   'pdfExport.run': 'Export',
   /** Cancel the running export */
   'pdfExport.cancel': 'Cancel',
-  /** Preview main-area placeholder (real PDF preview lands in T07/#627) */
+  /** Preview main-area placeholder (T07/#627: real PDF pages, manual refresh) */
   'pdfExport.previewPlaceholderTitle': 'PDF preview',
   'pdfExport.previewPlaceholderDescription':
-    'Preview of the generated PDF arrives in a later version. This export always uses the parameters and the fixed document shown here.',
+    'The preview shows the actual PDF pages generated from the current parameters and fixed inputs. Refresh manually after changing parameters or the list; the preview never regenerates on its own.',
+  /** T07 (#627) preview toolbar: manual refresh, stale badge, phase and bookmark notices */
+  'pdfExport.preview.refresh': 'Refresh preview',
+  'pdfExport.preview.generating': 'Generating PDF preview…',
+  'pdfExport.preview.failed': 'Preview generation failed',
+  'pdfExport.preview.stale': 'Preview outdated',
+  'pdfExport.preview.bookmarks': '{count} heading bookmarks',
+  'pdfExport.preview.itemLabel': 'Preview file',
   /** Task phase labels */
   'pdfExport.phase.idle': 'Ready',
   'pdfExport.phase.generating': 'Generating PDF…',

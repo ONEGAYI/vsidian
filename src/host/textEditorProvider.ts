@@ -5795,6 +5795,20 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.injectPdfExportModalMessage',
       (message: unknown) => pdfExportModal.injectMessage(message),
     ),
+    // T07（#627）模态 webview 消息转发（VSIDIAN_TEST_HOOKS 门控注册——
+    // webview 侧仅在 __vsidianTestHooks 标志下消费 _test 形态，如参数控件
+    // 置值驱动 paramsTouched → 过期徽章断言；生产不注册）
+    ...(process.env.VSIDIAN_TEST_HOOKS === '1'
+      ? [
+        vscode.commands.registerCommand(
+          'onegayi.vsidian._test.postPdfExportModalWebviewMessage',
+          (message: unknown) => {
+            pdfExportModal.postToWebview(message)
+            return true
+          },
+        ),
+      ]
+      : []),
     vscode.commands.registerCommand(
       // #38 全局模式记忆重置（模拟无历史）：globalState 在同一集成进程内
       // 共享，用例须自带前置重置避免跨用例状态泄漏。写入 'live' 而非

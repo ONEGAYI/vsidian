@@ -320,3 +320,51 @@ describe('PdfExportJob：取消与防重入', () => {
     expect(calls.cancel).toBe(1)
   })
 })
+
+describe('PdfExportJob：预览产物复用（T07 precomputed）', () => {
+  it('指纹核对相等的预览字节：跳过浏览器链路，直接保存对话框与写盘', async () => {
+    const { ports, calls } = makePorts()
+    const job = new PdfExportJob(ports)
+    const precomputed = {
+      bytes: Uint8Array.from(Buffer.from('%PDF-preview-bytes')),
+      bookmarks: { written: true, total: 2, skipped: 0 } as never,
+    }
+    const result = await job.run(INPUT as never, PDF_EXPORT_OPTIONS_DEFAULTS, undefined, precomputed)
+    expect(result.kind).toBe('done')
+    expect(result.bytes?.toString()).toBe('%PDF-preview-bytes')
+    // 未启动浏览器（resolveBrowser/createSession/renderPage 零调用）
+    expect(calls.resolveBrowser).toHaveLength(0)
+    expect(calls.createSession).toHaveLength(0)
+    expect(calls.renderPage).toHaveLength(0)
+    expect(calls.finalizePrint).toBe(0)
+    // 保存对话框与写盘真实走通；书签报告透传
+    expect(calls.showSaveDialog).toHaveLength(1)
+    expect(calls.writeFile).toEqual([{ target: 'D:' + '\\' + 'out' + '\\' + '笔记甲.pdf', bytes: '%PDF-preview-bytes'.length }])
+    expect(result.state.bookmarks?.written).toBe(true)
+  })
+
+  it('复用路径保存对话框取消：cancelled/save-dialog、不写盘', async () => {
+    const { ports, calls } = makePorts()
+    ports.showSaveDialog = async () => undefined
+    const job = new PdfExportJob(ports)
+    const result = await job.run(INPUT as never, PDF_EXPORT_OPTIONS_DEFAULTS, undefined, {
+      bytes: Uint8Array.from(Buffer.from('%PDF-x')),
+      bookmarks: { written: false, total: 0, skipped: 0 } as never,
+    })
+    expect(result.state.phase).toBe('cancelled')
+    expect(result.state.cancelKind).toBe('save-dialog')
+    expect(calls.writeFile).toHaveLength(0)
+  })
+
+  it('复用路径写盘失败：failed/write-failed（不静默成功）', async () => {
+    const { ports } = makePorts()
+    ports.writeFile = async () => { throw new Error('disk full') }
+    const job = new PdfExportJob(ports)
+    const result = await job.run(INPUT as never, PDF_EXPORT_OPTIONS_DEFAULTS, undefined, {
+      bytes: Uint8Array.from(Buffer.from('%PDF-x')),
+      bookmarks: { written: false, total: 0, skipped: 0 } as never,
+    })
+    expect(result.kind).toBe('failed')
+    expect(result.state.failReason).toBe('write-failed')
+  })
+})

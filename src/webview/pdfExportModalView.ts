@@ -20,7 +20,11 @@ import {
   type PdfExportOptions,
   type PdfPageNumberPosition,
 } from '../shared/pdfExportOptions'
+import { pdfPreviewFingerprint, type PdfPreviewTarget } from '../shared/pdfExportPreview'
 import type { PdfBatchConflictStrategy, PdfBatchItem, PdfBatchMappingEntry, PdfBatchResultEntry } from '../shared/pdfExportBatch'
+// T07（#627）预览：复用 #337 PDF 阅读视图（PdfHoverView——分页 canvas、
+// 有界挂载窗口、Blob worker 装配与共享文档存储），不另建阅读器
+import { PdfHoverView, type PdfRenderProbe } from './pdfRender'
 
 interface PdfExportModalStateMessage {
   kind: 'pdfExportModal.state'
@@ -37,6 +41,23 @@ interface PdfExportModalStateMessage {
   resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
   /** T05（#625）标题书签结果（done 阶段提示数据源） */
   bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
+  /** T07（#627）预览状态：phase/generation 与就绪产物指纹（过期判定数据源
+   *  ——webview 以 previewTarget + 本地参数就地合成指纹比较，宿主导出复用
+   *  核对同一函数；迟到 artifact 按代次配对丢弃） */
+  preview?: {
+    phase: 'idle' | 'generating' | 'ready' | 'failed'
+    generation: number
+    fingerprint?: string
+    failReason?: string
+    bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
+    failures?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+    /** 批量模式生效中的预览条目（选中条目被移除时宿主回退首条） */
+    batchItemId?: string
+  }
+  /** 当前预览目标身份（宿主权威；批量 = 生效选中条目） */
+  previewTarget?: PdfPreviewTarget
+  /** 宿主侧当日日期（页眉日期开启时的指纹成分——两侧同源） */
+  hostToday: string
   /** T04（#624）批量 / T06（#626）合并模式状态（在场即清单模式 UI；
    *  缺省 = 单文档 UI。按 mode 判别的联合形态：批量携带映射面与逐文件
    *  结果表；合并为单产物观测（phase 含 capturing/saving，savedPath/
@@ -135,6 +156,13 @@ const CLASS = {
   mergeRunButton: 'vsidian-pdfexport-merge-run',
   mergePageBreakCheck: 'vsidian-pdfexport-merge-pagebreak',
   mergeOutcome: 'vsidian-pdfexport-merge-outcome',
+  /** T07（#627）预览主区：工具栏/过期徽章/滚动区（承载 PdfHoverView） */
+  previewBlock: 'vsidian-pdfexport-previewblock',
+  previewBar: 'vsidian-pdfexport-previewbar',
+  previewRefresh: 'vsidian-pdfexport-preview-refresh',
+  previewStaleBadge: 'vsidian-pdfexport-preview-stale',
+  previewNotice: 'vsidian-pdfexport-preview-notice',
+  previewScroll: 'vsidian-pdfexport-preview-scroll',
 } as const
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -212,6 +240,15 @@ export class PdfExportModalView {
   private mergePageBreakCheckEl: HTMLInputElement | null = null
   private mergeRunButtonEl: HTMLButtonElement | null = null
   private mergeOutcomeEl: HTMLElement | null = null
+  /** T07（#627）预览控制器：持久滚动区 + PdfHoverView 跨 render 存活
+   *  （render 全量重建时重挂载并恢复 scrollTop——canvas 位图随节点保留） */
+  private previewScrollEl: HTMLDivElement | null = null
+  private previewView: PdfHoverView | null = null
+  /** 当前显示产物的 Blob URL（新一轮 show 落定后回收旧 URL） */
+  private previewArtifactUrl = ''
+  private previewArtifactGen = 0
+  /** 存活 Blob URL 计数（释放配对观测——连续刷新后应收敛为 1） */
+  private previewBlobUrlsAlive = 0
 
   constructor(options: PdfExportModalViewOptions) {
     this.options = options
@@ -234,6 +271,209 @@ export class PdfExportModalView {
   handleLocaleChanged(message: unknown): void {
     if (isHostToWebview(message) && message.kind === 'locale.changed') {
       this.render()
+    }
+  }
+
+  // ---- T07（#627）预览主区：实际 PDF 页面（PdfHoverView 复用） ----
+
+  /** 持久滚动区（跨 render 存活——render 全量重建时重挂载并恢复 scrollTop） */
+  private ensurePreviewScroll(): HTMLDivElement {
+    if (this.previewScrollEl === null) {
+      this.previewScrollEl = el('div', CLASS.previewScroll)
+    }
+    return this.previewScrollEl
+  }
+
+  private ensurePreviewView(): PdfHoverView {
+    if (this.previewView === null) {
+      this.previewView = new PdfHoverView(this.ensurePreviewScroll())
+    }
+    return this.previewView
+  }
+
+  /** 过期判定（无状态计算——每次 render 重估）：当前参数 + 当前目标身份
+   *  合成指纹与就绪产物指纹比较。参数、清单、选中条目、输入版本任一变化
+   *  即失配；生成在途时旧产物仍按其指纹比较（过期徽章持续可见直至新产物
+   *  落地配对成功）。 */
+  private computePreviewStale(): boolean {
+    const s = this.state
+    if (s?.preview?.fingerprint === undefined || s.previewTarget === undefined) return false
+    if (this.previewArtifactUrl === '') return false
+    const fingerprint = pdfPreviewFingerprint({
+      options: this.currentParams,
+      target: s.previewTarget,
+      ...(s.batch?.mode === 'merge' ? { pageBreak: this.mergePageBreak } : {}),
+      today: s.hostToday,
+    })
+    return fingerprint !== s.preview.fingerprint
+  }
+
+  /** 预览产物落地（宿主 previewArtifact 消息）：代次配对丢弃迟到/旧会话
+   *  产物；Blob URL 生命周期配对（新一轮 show 落定后回收旧 URL）。 */
+  applyPreviewArtifact(generation: number, base64: string): void {
+    const s = this.state
+    if (s?.preview === undefined || generation !== s.preview.generation) return
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+    this.previewBlobUrlsAlive++
+    const prevUrl = this.previewArtifactUrl
+    this.previewArtifactUrl = url
+    this.previewArtifactGen = generation
+    const scroll = this.ensurePreviewScroll()
+    const view = this.ensurePreviewView()
+    const width = Math.max(240, scroll.clientWidth - 16 || 600)
+    void view.show(url, 1, width).finally(() => {
+      if (prevUrl !== '') {
+        URL.revokeObjectURL(prevUrl)
+        this.previewBlobUrlsAlive--
+      }
+      this.render()
+    })
+  }
+
+  /** 测试钩子：参数控件置值并走真实 change 路径（仅 __vsidianTestHooks 下
+   *  由宿主 _test 转发到达——驱动 paramsTouched → 过期徽章断言） */
+  applyTestSetParam(patch: { field?: unknown; value?: unknown }): void {
+    if (!(globalThis as { __vsidianTestHooks?: boolean }).__vsidianTestHooks) return
+    const field = typeof patch.field === 'string' ? patch.field : ''
+    const value = patch.value
+    const setSelect = (select: HTMLSelectElement | null, v: string): void => {
+      if (select === null || select.value === v) return
+      select.value = v
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    const setCheck = (box: HTMLInputElement | null, v: boolean): void => {
+      if (box === null || box.checked === v) return
+      box.checked = v
+      box.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    switch (field) {
+      case 'paper': setSelect(this.paperSelect, String(value)); return
+      case 'orientation': setSelect(this.orientationSelect, String(value)); return
+      case 'pageNumberPosition': setSelect(this.pageNumberPositionSelect, String(value)); return
+      case 'marginMm':
+      case 'customWidthMm':
+      case 'customHeightMm': {
+        const input = field === 'marginMm' ? this.marginInput : field === 'customWidthMm' ? this.customWidthInput : this.customHeightInput
+        if (input === null || typeof value !== 'number' || input.value === String(value)) return
+        input.value = String(value)
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+        return
+      }
+      case 'scale': {
+        if (this.scaleRange === null || typeof value !== 'number') return
+        this.scaleRange.value = String(value)
+        this.scaleRange.dispatchEvent(new Event('input', { bubbles: true }))
+        return
+      }
+      case 'headerEnabled': setCheck(this.headerCheck, value === true); return
+      case 'headerTitle': setCheck(this.headerTitleCheck, value === true); return
+      case 'headerDate': setCheck(this.headerDateCheck, value === true); return
+      case 'pageNumberEnabled': setCheck(this.pageNumberCheck, value === true); return
+      case 'bookmarksEnabled': setCheck(this.bookmarksCheck, value === true); return
+      case 'mergePageBreak': setCheck(this.mergePageBreakCheckEl, value === true); return
+      default: return
+    }
+  }
+
+  /** 预览目标可用（空清单/固定输入未就位时刷新不可用） */
+  private previewTargetAvailable(): boolean {
+    const s = this.state
+    if (s?.batch !== undefined) return s.batch.items.length > 0
+    return s?.docName !== undefined && s.docName !== ''
+  }
+
+  /** 预览主区（工具栏 + 滚动区/空态占位）；split = 清单编辑态上下分栏 */
+  private buildPreviewArea(): HTMLElement {
+    const block = el('div', CLASS.previewBlock)
+    const bar = el('div', CLASS.previewBar)
+    const s = this.state
+    const preview = s?.preview
+    const previewBusy = preview?.phase === 'generating'
+    const exportBusy = s?.batch !== undefined
+      ? s.batch.phase === 'running' || s.batch.phase === 'awaiting-resources'
+        || (s.batch.mode === 'merge' && (s.batch.phase === 'capturing' || s.batch.phase === 'saving'))
+      : s?.phase === 'generating' || s?.phase === 'saving' || s?.phase === 'awaiting-resources'
+
+    const refresh = el('button', CLASS.previewRefresh, t('pdfExport.preview.refresh')) as HTMLButtonElement
+    // 生成在途/导出运行中禁用（不因重复输入反复启动生成任务）
+    refresh.disabled = previewBusy || exportBusy || !this.previewTargetAvailable()
+    refresh.addEventListener('click', () => {
+      this.paramsTouched = true
+      this.readControlsIntoParams()
+      this.currentParams = normalizePdfExportOptions(this.currentParams)
+      this.options.postMessage({
+        kind: 'pdfExportModal.preview.refresh',
+        params: this.currentParams,
+        ...(s?.batch?.mode === 'merge' ? { pageBreak: this.mergePageBreak } : {}),
+      })
+    })
+    bar.appendChild(refresh)
+
+    // 过期徽章（刷新完成前持续可见——指纹失配即显示）
+    if (this.computePreviewStale()) {
+      bar.appendChild(el('span', CLASS.previewStaleBadge, t('pdfExport.preview.stale')))
+    }
+
+    // 阶段/结果提示（失败分态经 T01 词条映射；书签计数为就绪产物观测面）
+    let notice = ''
+    if (preview?.phase === 'failed' && preview.failReason !== undefined) {
+      const key = preview.failReason === 'capture-failed'
+        ? 'pdfExport.batch.captureFailed'
+        : FAIL_REASON_KEYS[preview.failReason] ?? 'pdfExport.fail.internal'
+      notice = `${t('pdfExport.preview.failed')} ${t(key)}`
+    } else if (previewBusy) {
+      notice = t('pdfExport.preview.generating')
+    } else if (preview?.bookmarks?.written === true) {
+      notice = t('pdfExport.preview.bookmarks', {
+        count: String(Math.max(0, preview.bookmarks.total - preview.bookmarks.skipped)),
+      })
+    }
+    if (notice !== '') {
+      bar.appendChild(el('span', CLASS.previewNotice, notice))
+    }
+
+    // 批量条目选择器（按清单选择预览项——不一次常驻所有 PDF 的页面）
+    const batch = s?.batch
+    if (batch?.mode === 'batch' && batch.phase === 'editing' && batch.items.length > 0) {
+      const select = el('select', CLASS.select) as HTMLSelectElement
+      const selectedId = preview?.batchItemId ?? batch.items[0]!.id
+      for (const item of batch.items) {
+        const option = el('option', '', item.relPath)
+        option.value = item.id
+        select.appendChild(option)
+      }
+      select.value = selectedId
+      select.addEventListener('change', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.preview.select', itemId: select.value })
+      })
+      const field = el('div', CLASS.field)
+      field.appendChild(el('label', CLASS.fieldLabel, t('pdfExport.preview.itemLabel')))
+      field.appendChild(select)
+      bar.appendChild(field)
+    }
+
+    block.appendChild(bar)
+
+    if (this.previewArtifactUrl === '') {
+      const placeholder = el('div', CLASS.previewPlaceholder)
+      placeholder.appendChild(el('h2', CLASS.previewTitle, t('pdfExport.previewPlaceholderTitle')))
+      placeholder.appendChild(el('p', CLASS.previewDescription, t('pdfExport.previewPlaceholderDescription')))
+      block.appendChild(placeholder)
+    } else {
+      block.appendChild(this.ensurePreviewScroll())
+    }
+    return block
+  }
+
+  /** 预览滚动区重挂载后恢复滚动位置（render 全量重建不丢浏览位置） */
+  private restorePreviewScroll(top: number): void {
+    if (this.previewScrollEl !== null && top > 0) {
+      this.previewScrollEl.scrollTop = top
     }
   }
 
@@ -273,6 +513,8 @@ export class PdfExportModalView {
   private render(): void {
     const parent = this.host
     if (!parent) return
+    // 预览滚动区跨 render 存活：重建前捕获滚动位置，重挂载后恢复
+    const keptPreviewScrollTop = this.previewScrollEl?.scrollTop ?? 0
     parent.textContent = ''
     // T04（#624）批量 / T06（#626）合并：清单模式内容承载于主区（T07 预览
     // 落位前的清单内容区），侧区为添加入口与参数——与单文档渲染完全分治
@@ -282,19 +524,18 @@ export class PdfExportModalView {
       } else {
         this.renderBatch(parent)
       }
+      this.restorePreviewScroll(keptPreviewScrollTop)
       return
     }
     const busy = this.state?.phase === 'generating' || this.state?.phase === 'saving' || this.state?.phase === 'awaiting-resources'
     const params = this.currentParams
 
     const root = el('div', CLASS.root)
-    // ---- 主区：预览占位（T07/#627 接线骨架：state.generation 承载代次） ----
+    // ---- 主区：实际 PDF 页面预览（T07/#627——PdfHoverView 分页 canvas） ----
     const preview = el('main', CLASS.preview)
-    const placeholder = el('div', CLASS.previewPlaceholder)
-    placeholder.appendChild(el('h2', CLASS.previewTitle, t('pdfExport.previewPlaceholderTitle')))
-    placeholder.appendChild(el('p', CLASS.previewDescription, t('pdfExport.previewPlaceholderDescription')))
-    preview.appendChild(placeholder)
+    preview.appendChild(this.buildPreviewArea())
     root.appendChild(preview)
+    this.restorePreviewScroll(keptPreviewScrollTop)
 
     // ---- 侧区：固定输入 + 参数 + 操作 + 状态 ----
     const side = el('aside', CLASS.side)
@@ -414,6 +655,9 @@ export class PdfExportModalView {
       this.paramsTouched = true
       this.readControlsIntoParams()
       onChange?.()
+      // T07（#627）：参数变化即时重渲染——过期徽章随指纹失配立即可见
+      //（子项显隐联动的 onChange 自带 render 时为无害重复）
+      this.render()
     })
     row.appendChild(box)
     row.appendChild(el('span', '', label))
@@ -452,6 +696,7 @@ export class PdfExportModalView {
       this.customWidthInput.addEventListener('change', () => {
         this.paramsTouched = true
         this.readControlsIntoParams()
+        this.render() // T07：过期徽章随参数变化即时可见
       })
       side.appendChild(this.field(t('pdfExport.customWidth.label'), this.customWidthInput))
       this.customHeightInput = el('input', CLASS.numberInput) as HTMLInputElement
@@ -463,6 +708,7 @@ export class PdfExportModalView {
       this.customHeightInput.addEventListener('change', () => {
         this.paramsTouched = true
         this.readControlsIntoParams()
+        this.render() // T07：过期徽章随参数变化即时可见
       })
       side.appendChild(this.field(t('pdfExport.customHeight.label'), this.customHeightInput))
     }
@@ -477,6 +723,7 @@ export class PdfExportModalView {
     this.orientationSelect.addEventListener('change', () => {
       this.paramsTouched = true
       this.readControlsIntoParams()
+      this.render() // T07：过期徽章随参数变化即时可见
     })
     side.appendChild(this.field(t('pdfExport.orientation.label'), this.orientationSelect))
 
@@ -489,6 +736,7 @@ export class PdfExportModalView {
     this.marginInput.addEventListener('change', () => {
       this.paramsTouched = true
       this.readControlsIntoParams()
+      this.render() // T07：过期徽章随参数变化即时可见
     })
     side.appendChild(this.field(t('pdfExport.margin.label'), this.marginInput))
 
@@ -503,6 +751,11 @@ export class PdfExportModalView {
       this.paramsTouched = true
       this.readControlsIntoParams()
       if (this.scaleValue) this.scaleValue.textContent = `${Math.round(this.currentParams.scale * 100)}%`
+    })
+    // T07（#627）：拖动提交（change）时重渲染——过期徽章即时可见；不在
+    // input 逐 tick 重渲染（拖动中的整树重建会打断滑杆交互）
+    this.scaleRange.addEventListener('change', () => {
+      this.render()
     })
     this.scaleValue = el('span', CLASS.rangeValue, `${Math.round(params.scale * 100)}%`)
     rangeWrap.appendChild(this.scaleRange)
@@ -545,6 +798,7 @@ export class PdfExportModalView {
       this.pageNumberPositionSelect.addEventListener('change', () => {
         this.paramsTouched = true
         this.readControlsIntoParams()
+        this.render() // T07：过期徽章随参数变化即时可见
       })
       side.appendChild(this.field(t('pdfExport.pageNumber.position'), this.pageNumberPositionSelect))
     }
@@ -584,10 +838,13 @@ export class PdfExportModalView {
     const params = this.currentParams
     const root = el('div', CLASS.root)
 
-    // ---- 主区：按阶段承载清单 / 映射预览 / 结果表 ----
+    // ---- 主区：编辑态 = 清单 + 预览上下分栏（按清单选择预览项）；其余
+    // 阶段维持既有清单/映射/结果承载（T07 预览不在执行态呈现） ----
     const main = el('main', CLASS.preview)
     if (batch.phase === 'editing') {
+      main.classList.add('vsidian-pdfexport-preview-split')
       main.appendChild(this.buildBatchList(batch, running, 'pdfExport.batch.listTitle', 'pdfExport.batch.empty'))
+      main.appendChild(this.buildPreviewArea())
     } else if (batch.phase === 'confirm') {
       main.appendChild(this.buildBatchConfirm(batch))
     } else {
@@ -685,10 +942,13 @@ export class PdfExportModalView {
     const params = this.currentParams
     const root = el('div', CLASS.root)
 
-    // ---- 主区：清单（editing）/ 进度与缺资源（在途）/ 单产物结果（终态） ----
+    // ---- 主区：编辑态 = 清单 + 预览上下分栏（合并单产物预览）；在途与
+    // 终态维持既有进度/结果承载 ----
     const main = el('main', CLASS.preview)
     if (batch.phase === 'editing') {
+      main.classList.add('vsidian-pdfexport-preview-split')
       main.appendChild(this.buildBatchList(batch, running, 'pdfExport.merge.listTitle', 'pdfExport.merge.empty'))
+      main.appendChild(this.buildPreviewArea())
     } else if (running) {
       main.appendChild(this.buildMergeProgress(batch))
       if (batch.phase === 'awaiting-resources') {
@@ -1079,7 +1339,68 @@ export class PdfExportModalView {
         mergePageBreakCheck: probe(this.mergePageBreakCheckEl),
         mergePageBreakChecked: this.mergePageBreakCheckEl?.checked ?? null,
         mergeOutcomeText: this.mergeOutcomeEl?.textContent ?? '',
+        // T07（#627）预览面观测：刷新按钮/过期徽章绘制层状态 + PdfHoverView
+        // 探针（页数/有界挂载/画布字节/非白像素比——实际 PDF 页面证据，
+        // 非 DOM 存在性）+ Blob URL 存活计数（释放配对）
+        previewRefreshButton: probe(document.querySelector<HTMLElement>(`.${CLASS.previewRefresh}`)),
+        previewRefreshDisabled: (document.querySelector(`.${CLASS.previewRefresh}`) as HTMLButtonElement | null)?.disabled ?? null,
+        previewStale: this.computePreviewStale(),
+        previewStaleBadge: probe(document.querySelector<HTMLElement>(`.${CLASS.previewStaleBadge}`)),
+        previewStaleBadgeText: document.querySelector(`.${CLASS.previewStaleBadge}`)?.textContent ?? '',
+        previewNoticeText: document.querySelector(`.${CLASS.previewNotice}`)?.textContent ?? '',
+        previewEmptyDescription: document.querySelector(`.${CLASS.previewDescription}`)?.textContent ?? '',
+        previewBatchSelect: probe(document.querySelector<HTMLElement>(`.${CLASS.previewBar} .${CLASS.select}`)),
+        previewBatchSelectValue: (document.querySelector(`.${CLASS.previewBar} .${CLASS.select}`) as HTMLSelectElement | null)?.value ?? '',
+        previewArtifactGeneration: this.previewArtifactGen,
+        previewBlobUrlsAlive: this.previewBlobUrlsAlive,
+        // 诊断观测：滚动区几何与 DOM 画布在场数（canvas 计数对绘制层探针
+        // 的补充——集成失败排查用，非用户可见面）
+        previewScrollBox: this.previewScrollEl !== null
+          ? `${this.previewScrollEl.clientWidth}x${this.previewScrollEl.clientHeight}`
+          : '',
+        previewPageSlots: Array.from(
+          document.querySelectorAll(`.${CLASS.previewScroll} .vsidian-hover-pdf-page`),
+        ).map((node) => `${(node as HTMLElement).dataset['page'] ?? '?'}:${node.querySelector('canvas') !== null ? 'c' : '-'}`),
+        previewCanvasCount: document.querySelectorAll(`.${CLASS.previewScroll} canvas`).length,
+        previewFirstCanvasSize: (() => {
+          const canvas = document.querySelector(`.${CLASS.previewScroll} canvas`) as HTMLCanvasElement | null
+          return canvas !== null ? `${canvas.width}x${canvas.height}` : ''
+        })(),
+        previewPdf: this.previewView !== null && this.previewArtifactUrl !== ''
+          ? this.previewPdfProbeOf(this.previewView.probe())
+          : null,
       },
     })
+  }
+
+  /** PdfHoverView 探针的观测子集（集成断言面：页数/挂载有界/画布费用/非白比） */
+  private previewPdfProbeOf(p: PdfRenderProbe): {
+    phase: PdfRenderProbe['phase']
+    page: number
+    totalPages: number
+    mountedPages: number
+    canvasBytes: number
+    nonWhiteRatio: number
+    canvasWidth: number
+    canvasHeight: number
+    zoom: number
+    scrollHeight: number
+    scrollTop: number
+    textLayerPages: number
+  } {
+    return {
+      phase: p.phase,
+      page: p.page,
+      totalPages: p.totalPages,
+      mountedPages: p.mountedPages,
+      canvasBytes: p.canvasBytes,
+      nonWhiteRatio: p.nonWhiteRatio,
+      canvasWidth: p.canvasWidth,
+      canvasHeight: p.canvasHeight,
+      zoom: p.zoom,
+      scrollHeight: p.scrollHeight,
+      scrollTop: p.scrollTop,
+      textLayerPages: p.textLayerPages,
+    }
   }
 }

@@ -346,3 +346,45 @@ describe('PdfMergeJob（合并执行器）', () => {
     expect((await running).phase).toBe('done')
   })
 })
+
+describe('PdfMergeJob：预览产物复用（T07 precomputed）', () => {
+  it('指纹核对相等的合并预览字节：零捕获零会话，直接保存对话框与写盘', async () => {
+    const h = makeHarness([{ name: '甲.md' }, { name: '乙.md' }])
+    const result = await h.job.run({
+      items: itemsOf(['甲.md', '乙.md']),
+      options: { ...PDF_EXPORT_OPTIONS_DEFAULTS },
+      pageBreak: true,
+      window,
+      browserPath: undefined,
+      precomputed: {
+        bytes: Uint8Array.from(Buffer.from('%PDF-merged-preview')),
+        bookmarks: { written: true, total: 3, skipped: 0 } as never,
+      },
+    })
+    expect(result.phase).toBe('done')
+    // 未捕获（零 captureDoc）、未启动浏览器（零会话/渲染/打印）
+    expect(h.calls.capture).toEqual([])
+    expect(h.calls.sessions).toBe(0)
+    expect(h.calls.finalize).toBe(0)
+    // 保存与写盘真实走通；书签报告透传（默认名取首篇文档名）
+    expect(h.calls.saveDialogNames).toEqual(['甲.pdf'])
+    expect(h.calls.writeFile).toEqual([{ target: '/tmp/merged-test.pdf', bytes: 19 }])
+    expect(result.bookmarks?.written).toBe(true)
+  })
+
+  it('复用路径保存对话框取消：cancelled/save-dialog、不写盘', async () => {
+    const h = makeHarness([{ name: '甲.md' }])
+    h.nextSaveTarget = undefined
+    const result = await h.job.run({
+      items: itemsOf(['甲.md']),
+      options: { ...PDF_EXPORT_OPTIONS_DEFAULTS },
+      pageBreak: false,
+      window,
+      browserPath: undefined,
+      precomputed: { bytes: Uint8Array.from(Buffer.from('%PDF-x')), bookmarks: { written: false, total: 0, skipped: 0 } as never },
+    })
+    expect(result.phase).toBe('cancelled')
+    expect(result.cancelKind).toBe('save-dialog')
+    expect(h.calls.writeFile).toEqual([])
+  })
+})

@@ -98,6 +98,24 @@ export const SENSITIVE_CASES = [
     evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T06 沿先例）',
   },
   {
+    name: 'PDF 导出（#627 T07）：单文档预览、过期刷新与导出同源（真浏览器）',
+    issue: '#627',
+    reason: 'T01–T06 同族真实浏览器链路（预览各轮 spawn/打印 + 指纹核对复用路径），CI 波动基线未建立；本地全量持续跑，回流条件同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#627 T07）：批量按清单选择预览与长文档有界挂载（真浏览器）',
+    issue: '#627',
+    reason: '同族真实浏览器链路（长文档多页装配 + 有界挂载窗口断言），CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#627 T07）：合并预览书签观测与关闭后迟到丢弃（真浏览器）',
+    issue: '#627',
+    reason: '同族真实浏览器链路（合并预览装配 + 在途关闭/重开的迟到回包窗口），CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
+  },
+  {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     issue: '#293 / #129',
     reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',
