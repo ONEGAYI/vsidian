@@ -1,0 +1,186 @@
+/* PDF 导出模态样式（T01/#621）——ui-patterns 档位：
+ * - 色彩全主题变量（--vscode-*），明暗自适应，零硬编码色值；
+ * - 圆角档位：select/number 输入 2px（VSCode 原生控件观感）、按钮 6px、
+ *   侧区卡片 10px（设置页组卡片同档）；
+ * - 间距：字段行 14px 上下、操作区上 18px（设置行 18px 档的紧凑变体）；
+ * - 焦点环走全局 :focus-visible 默认（2px focusBorder + offset 3px），
+ *   不自带焦点样式。 */
+
+.vsidian-pdfexport {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 20px;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-size: 13px;
+}
+
+/* ---- 主区：预览占位（T07/#627 接入真实 PDF 预览） ---- */
+.vsidian-pdfexport-preview {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.vsidian-pdfexport-preview-placeholder {
+  max-width: 420px;
+  padding: 24px;
+  text-align: center;
+}
+
+.vsidian-pdfexport-preview-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.vsidian-pdfexport-preview-description {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.65;
+}
+
+/* ---- 侧区：固定输入 + 参数 + 操作 + 状态 ---- */
+.vsidian-pdfexport-side {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+.vsidian-pdfexport-docrow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+}
+
+.vsidian-pdfexport-doc-label {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.vsidian-pdfexport-doc-name {
+  font-weight: 500;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.vsidian-pdfexport-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 0;
+}
+
+.vsidian-pdfexport-field + .vsidian-pdfexport-field {
+  border-top: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+}
+
+.vsidian-pdfexport-field-label {
+  color: var(--vscode-descriptionForeground);
+}
+
+.vsidian-pdfexport-select,
+.vsidian-pdfexport-number {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 2px;
+  border: 1px solid var(--vscode-dropdown-border);
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.vsidian-pdfexport-range-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vsidian-pdfexport-range {
+  flex: 1;
+  accent-color: var(--vscode-focusBorder);
+}
+
+.vsidian-pdfexport-range-value {
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-descriptionForeground);
+}
+
+.vsidian-pdfexport-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 18px;
+}
+
+.vsidian-pdfexport-run {
+  flex: 1;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 14px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-run:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.vsidian-pdfexport-run:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.vsidian-pdfexport-cancel {
+  border: 1px solid var(--vscode-button-border);
+  border-radius: 6px;
+  padding: 7px 14px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-status {
+  padding-top: 14px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.vsidian-pdfexport-open-settings {
+  margin-top: 10px;
+  border: 1px solid var(--vscode-button-border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .vsidian-pdfexport {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(200px, 1fr) auto;
+    height: auto;
+    min-height: 100vh;
+  }
+}

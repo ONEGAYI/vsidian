@@ -55,6 +55,10 @@ const extra: readonly KeybindingOperation[] = [
   // 零占用，宿主编辑器正文无默认占用——评估记录见 docs/specs/keybindings.md）
   { id: 'blockCopyLink', command: 'onegayi.vsidian.block.copyLink', titleKey: 'command.block.copyLink.title', mode: 'live', writes: true, defaults: ['ctrl+shift+c'] },
   { id: 'openSettings', command: 'onegayi.vsidian.openSettings', titleKey: 'command.openSettings.title', mode: 'both', writes: false, defaults: [] },
+  // T01（#621）PDF 导出：当前文档导出模态入口。只读操作（不写文档、不吞
+  // 源码/设置页输入），双模式可用（Live/Reading 均以固定输入导出）；默认
+  // 不占键位——命令面板与后续模态内按钮是主入口，键位留给用户自绑
+  { id: 'pdfExportCurrentDocument', command: 'onegayi.vsidian.pdfExport.currentDocument', titleKey: 'command.pdfExport.currentDocument.title', mode: 'both', writes: false, defaults: [] },
   // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
   // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）
   { id: 'openStyleReference', command: 'onegayi.vsidian.openStyleReference', titleKey: 'command.openStyleReference.title', mode: 'both', writes: false, defaults: [] },

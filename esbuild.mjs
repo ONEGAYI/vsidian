@@ -149,6 +149,13 @@ const targets = [
     ...webviewBase,
   },
   {
+    // PDF 导出模态 webview 产物（#621 T01）：独立入口（主区预览占位 +
+    // 侧区参数），样式经 import 产出 pdfExport.css
+    entryPoints: ['src/webview/pdfExportMain.ts'],
+    outfile: 'out/webview/pdfExport.js',
+    ...webviewBase,
+  },
+  {
     // Mermaid 独立产物（#60）：经 ESM 源打包（官方 UMD 的模块作用域下
     // 全局自赋值会落空抛错，见 mermaidEntry.ts 头注释），入口显式挂
     // globalThis.mermaid；图类型经 ESM 分块按需加载

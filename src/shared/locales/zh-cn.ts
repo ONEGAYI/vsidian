@@ -115,6 +115,61 @@ export const zhCn: Record<MessageKey, string> = {
   /** 「文件与链接」分页内小节（#298 建组、#332 随分页迁移）：hover.* 悬停
    *  预览族与 embed.* 正文嵌入族 */
   'settings.groupRefview': '引用视图',
+  /** 「文件与链接」分页内小节（T01/#621）：pdfExport.* 导出设置 */
+  'settings.groupPdfExport': 'PDF 导出',
+  // ---- T01（#621）PDF 导出：模态、参数与失败分态 ----
+  /** 导出模态面板标题 */
+  'pdfExport.modalTitle': '导出 PDF',
+  /** 模态输入块标签：本次导出的固定文档 */
+  'pdfExport.docLabel': '文档',
+  /** 模态参数标签 */
+  'pdfExport.paper.label': '纸张尺寸',
+  'pdfExport.orientation.label': '方向',
+  'pdfExport.margin.label': '页边距（毫米）',
+  'pdfExport.scale.label': '缩放',
+  /** 纸张尺寸选项 */
+  'pdfExport.paper.a3': 'A3',
+  'pdfExport.paper.a4': 'A4',
+  'pdfExport.paper.a5': 'A5',
+  'pdfExport.paper.letter': 'Letter',
+  'pdfExport.paper.legal': 'Legal',
+  /** 方向选项 */
+  'pdfExport.orientation.portrait': '纵向',
+  'pdfExport.orientation.landscape': '横向',
+  /** 主操作：按当前参数执行导出 */
+  'pdfExport.run': '导出',
+  /** 取消进行中的导出 */
+  'pdfExport.cancel': '取消',
+  /** 主区预览占位（真实 PDF 预览归 T07/#627） */
+  'pdfExport.previewPlaceholderTitle': 'PDF 预览',
+  'pdfExport.previewPlaceholderDescription':
+    '生成结果的 PDF 预览将在后续版本接入。本次导出始终使用此处参数与所示固定文档。',
+  /** 任务阶段 */
+  'pdfExport.phase.idle': '就绪',
+  'pdfExport.phase.generating': '正在生成 PDF…',
+  'pdfExport.phase.saving': '正在选择保存位置…',
+  'pdfExport.phase.done': '导出完成',
+  'pdfExport.phase.failed': '导出失败',
+  'pdfExport.phase.cancelled': '已取消导出',
+  /** 失败原因（规格 §2.5 可见状态） */
+  'pdfExport.fail.no-browser':
+    '未找到可用的 Chrome 或 Edge。请安装 Chrome/Edge，或在 Vsidian 设置页配置浏览器路径。',
+  'pdfExport.fail.configured-path-missing':
+    '设置的浏览器路径不存在。请在 Vsidian 设置页检查该路径。',
+  'pdfExport.fail.launch-failed': '打印浏览器启动失败。',
+  'pdfExport.fail.navigate-failed': '导出页面无法在浏览器中打开。',
+  'pdfExport.fail.not-ready': '导出页面未在限定时间内就绪。',
+  'pdfExport.fail.print-failed': '浏览器生成 PDF 失败。',
+  'pdfExport.fail.write-failed': 'PDF 无法写入所选位置。',
+  'pdfExport.fail.busy': '已有导出任务在进行。',
+  'pdfExport.fail.internal': '导出过程中出现意外错误。',
+  /** 取消细分 */
+  'pdfExport.cancelKind.user': '已按用户请求取消。',
+  'pdfExport.cancelKind.saveDialog': '未选择保存位置，PDF 未保存。',
+  /** 成功详情：保存目标路径 */
+  'pdfExport.savedTo': '已保存到 {path}',
+  /** 从模态打开 Vsidian 设置（缺浏览器恢复路径） */
+  'pdfExport.openSettings': '打开设置',
   /** 设置页「文件与链接」附加分页（#332：原「索引维护」改名承接图片/
    *  引用视图/索引维护三组，对齐 Obsidian 文件与链接分页心智） */
   'settings.filesLinksSection': '文件与链接',
@@ -783,6 +838,11 @@ export const zhCn: Record<MessageKey, string> = {
   'command.table.insertColumnRight.title': '表格：右侧插入列',
   'command.table.deleteColumn.title': '表格：删除列',
   'command.openSettings.title': '打开设置',
+  /** T01（#621）PDF 导出：打开当前文档导出模态（只读操作，默认不绑定） */
+  'command.pdfExport.currentDocument.title': 'Vsidian：将当前文档导出为 PDF',
+  /** T01（#621）无活动 Vsidian 文档时的命令提示 */
+  'host.pdfExportNoActiveDocument':
+    '请先在 Vsidian 中打开 Markdown 文档，再执行 PDF 导出。',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS 片段：重新加载',
   /** #131 暂停/恢复全部片段命令 */
@@ -850,6 +910,18 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.imagePasteLinkFormat.description': '粘贴图片后在光标处插入的引用语法。双链嵌入写成 ![[相对路径]]：路径原样保留（空格不转义、不做百分号编码），文件名中的 #^[] 等双链无法表达的字符会在保存时移除；表格单元格内使用双链无需转义竖线（路径不含竖线）。',
   'setting.imagePasteLinkFormatMarkdown': 'Markdown 直链',
   'setting.imagePasteLinkFormatWikilink': '双链嵌入',
+  // ---- T01（#621）PDF 导出设置（文件与链接分页「PDF 导出」组）----
+  'setting.pdfExportBrowserPath.title': 'PDF 导出浏览器',
+  'setting.pdfExportBrowserPath.description':
+    '生成 PDF 使用的 Chrome 或 Edge 可执行文件路径。留空时自动检测已安装的浏览器。',
+  'setting.pdfExportPaper.title': '默认纸张尺寸',
+  'setting.pdfExportPaper.description': '打开导出窗口时预选的纸张尺寸。',
+  'setting.pdfExportOrientation.title': '默认方向',
+  'setting.pdfExportOrientation.description': '打开导出窗口时预选的页面方向。',
+  'setting.pdfExportMargin.title': '默认页边距（毫米）',
+  'setting.pdfExportMargin.description': '打开导出窗口时预选的页边距（0–50 毫米）。',
+  'setting.pdfExportScale.title': '默认缩放',
+  'setting.pdfExportScale.description': '打开导出窗口时预选的打印缩放（0.1–2，1 为 100%）。',
   'host.imagePasteInvalidLocation': '粘贴图片未保存：子路径 {subpath} 非法（不允许绝对路径或 ..）。',
   'host.imagePasteNoWorkspaceFallback': '未打开工作区文件夹，粘贴图片已保存到当前文件同目录。',
   'host.imagePasteWriteFailed': '粘贴图片保存失败。',

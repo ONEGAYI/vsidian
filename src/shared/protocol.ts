@@ -23,6 +23,7 @@ import { isAddonThemeEnvironmentPayload, isAddonThemesStatePayload } from './add
 import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 import { isAddonDocNavLocate, isAddonDocNavResult, type AddonDocNavLocate, type AddonDocNavResult } from './addonNavApi'
+import type { PdfExportOptions } from './pdfExportOptions'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -586,6 +587,22 @@ export type HostToWebview =
       reason?: 'cancelled' | 'invalid' | 'not-found' | 'read-failed' | 'writeFailed'
     }
   | { kind: 'settings.snapshot'; values: SettingsPayload }
+  /** T01（#621）PDF 导出模态状态推送：任务阶段/代次/失败分态与当前默认
+   *  参数（设置页持久值经宿主 normalize 后的权威形态）。模态 webview 装
+   *  载（pdfExportModal.get）与每次任务状态变化时推送 */
+  | {
+      kind: 'pdfExportModal.state'
+      phase: 'idle' | 'generating' | 'saving' | 'done' | 'failed' | 'cancelled'
+      generation: number
+      docName: string
+      capturedVersion: number
+      defaults: PdfExportOptions
+      browserPath: string
+      savedPath?: string
+      failReason?: string
+      failDetail?: string
+      cancelKind?: 'user' | 'save-dialog'
+    }
   /**
    * #132 样式参考：打开设置页后定位到指定附加分页（section id）。
    * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略。
@@ -1805,6 +1822,17 @@ export type WebviewToHost =
    *  createWebviewPanel。无 sessionId/docUri——打开设置页不依赖任何文档
    *  会话（无文档打开时同样可用） */
   | { kind: 'settings.open' }
+  /** T01（#621）PDF 导出模态状态拉取（装载/重载 ready 回填）：宿主以
+   *  pdfExportModal.state 应答（阶段、默认参数与浏览器路径设置回显） */
+  | { kind: 'pdfExportModal.get' }
+  /** T01（#621）发起导出：params 为模态当前参数（宿主 normalize 后使用） */
+  | { kind: 'pdfExportModal.run'; params: unknown }
+  /** T01（#621）取消进行中的导出任务 */
+  | { kind: 'pdfExportModal.cancel' }
+  /** T01（#621）绘制层探针上报（测试钩子通道：控件可见性与计算样式摘要，
+   *  webview 侧仅在宿主 init 载荷携带 testHooks 时发送；宿主在
+   *  VSIDIAN_TEST_HOOKS=1 时经 _test.* 命令暴露给集成断言） */
+  | { kind: '_test.pdfExportModal.report'; paint: unknown }
   /** 请求设置快照（#33）：设置页 ready 后与编辑器面板 init 后拉取当前值，
    *  宿主以 settings.snapshot 响应（webview 不持久化设置，权威在宿主） */
   | { kind: 'settings.get' }
@@ -4339,6 +4367,17 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isString(v.sessionId) && isString(v.docUri)
     case 'settings.open':
       return true
+    case 'pdfExportModal.get':
+      return true
+    case 'pdfExportModal.cancel':
+      return true
+    case 'pdfExportModal.run':
+      // params 为模态当前参数原样载荷：宿主侧 normalizePdfExportOptions
+      // 收敛（非法值回落默认），协议层只要求字段存在为对象
+      return v.params === undefined || isObject(v.params) || v.params === null
+    case '_test.pdfExportModal.report':
+      // 测试钩子通道：仅校验字段存在
+      return 'paint' in v
     case 'settings.get':
       return true
     case 'settings.set':
@@ -5545,6 +5584,20 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
     case 'settings.snapshot':
       return isSettingsPayload(v.values)
+    case 'pdfExportModal.state':
+      // T01（#621）模态状态：phase 枚举 + 数值/字符串守卫；defaults 是宿主
+      // normalize 后的权威参数（webview 只消费不校验内部结构——宿主自产）
+      return (v.phase === 'idle' || v.phase === 'generating' || v.phase === 'saving' ||
+          v.phase === 'done' || v.phase === 'failed' || v.phase === 'cancelled') &&
+        isNonNegativeInt(v.generation) &&
+        isString(v.docName) &&
+        isNonNegativeInt(v.capturedVersion) &&
+        isString(v.browserPath) &&
+        isObject(v.defaults) &&
+        (v.savedPath === undefined || isString(v.savedPath)) &&
+        (v.failReason === undefined || isString(v.failReason)) &&
+        (v.failDetail === undefined || isString(v.failDetail)) &&
+        (v.cancelKind === undefined || v.cancelKind === 'user' || v.cancelKind === 'save-dialog')
     case 'settings.focusSection':
       // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）；
       // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用；

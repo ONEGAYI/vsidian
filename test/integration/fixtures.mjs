@@ -31,6 +31,34 @@ const SYMBOL_TAB_CRLF_DOC = '**CRLF 越界**段\r\n正文行\r\n'
 const CONFLICT_DOC = '第一段原文甲\n第二段原文乙\n'
 const SPLIT_CONFLICT_DOC = '分裂测试行一\n分裂测试行二\n'
 const HEADING_DOC = '# 顶部一级标题\n普通段落第一行内容\n普通段落第二行内容\n## 中部二级标题\n另一段普通内容结尾\n'
+// T01（#621）PDF 导出样本：中文标题/列表/表格与多页正文（首中末段与
+// 固定输入断言载体；尾部 ASCII 标记规避 ToUnicode 部首码位归一问题）
+const PDF_EXPORT_DOC = (() => {
+  const lines = [
+    '# 中文导出样例标题',
+    '',
+    '首段：PDF 导出链路验证文档，包含标题、列表、表格与多页正文。',
+    '',
+    '## 特性清单',
+    '',
+    '- 列表项甲：中文标题渲染',
+    '- 列表项乙：表格与列表混排',
+    '- 列表项丙：多页分页正确性',
+    '',
+    '## 对照表格',
+    '',
+    '| 项目 | 值 |',
+    '| --- | --- |',
+    '| 纸张 | A4 |',
+    '| 引擎 | 已安装浏览器 |',
+    '',
+  ]
+  for (let i = 1; i <= 60; i++) {
+    lines.push(`第 ${i} 段：正文填充行，用于产生多页分页——导出验收要求首、中、末段均有真实正文。`, '')
+  }
+  lines.push('末段标记：PDF-EXPORT-TAIL-MARKER，分页后应完整保留。')
+  return lines.join('\n')
+})()
 // #423 阅读宽松换行样例：首段三行两处单换行（严格态拼回同段、宽松态逐行）；
 // 次段行尾双空格显式硬换行（两种形态恒 1 br，显式标记不随设置变化的对照）
 const READING_BREAKS_DOC =
@@ -1033,6 +1061,8 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'conflict.md'), CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'splitconflict.md'), SPLIT_CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'heading.md'), HEADING_DOC, 'utf8')
+  // T01（#621）PDF 导出样本
+  writeFileSync(path.join(wsDir, 'pdf-export.md'), PDF_EXPORT_DOC, 'utf8')
   // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
   // 对照——严格态 br=1（仅显式）、宽松态 br=3
   writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')

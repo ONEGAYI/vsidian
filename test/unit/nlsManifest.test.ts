@@ -62,8 +62,9 @@ describe('manifest NLS：package.json 引用契约', () => {
     // + #437 表格簇七命令（删除表格/选择行/列/整表/复制 Markdown/移除引用块/增一层引用）
     // + #438 图形块场景簇四命令（弹窗预览/导出 SVG/导出 PNG/复制源码）
     // + #439 链接场景三命令（打开链接/复制链接地址/复制显示文字）
+    // + T01/#621 PDF 导出一命令（当前文档导出模态）
     // ——新增/删减命令须同步本断言）
-    expect(commands.length).toBe(106)
+    expect(commands.length).toBe(107)
     const literal = commands.filter((c) => !/^%.+%$/.test(c.title))
     expect(
       literal.map((c) => `${c.command}: ${c.title}`),

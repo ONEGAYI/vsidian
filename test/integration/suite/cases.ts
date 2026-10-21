@@ -7,6 +7,7 @@ import { probe278Cases } from './probe278'
 import { probe375Cases } from './probe375'
 import { wikilinkBlockCases } from './wikilinkBlock'
 import { wikilinkEmbedCases } from './wikilinkEmbed'
+import { pdfExportT01Cases } from './pdfExportT01Cases'
 import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
@@ -1613,6 +1614,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   ...wikilinkBlockCases,
   // #381（T06）真宿主端到端：内部 Live 双链联想（B 归属/补 ID/端口释放）
   ...wikilinkEmbedCases,
+  // T01（#621）PDF 导出：命令/模态绘制层断言（core）+ 真实浏览器生成与
+  // 固定输入断言（真浏览器用例入敏感组——见 caseSelection 的登记）
+  ...pdfExportT01Cases,
   ['激活与默认编辑器声明（#38 后接管 .md 默认打开）', async () => {
     const ext = vscode.extensions.getExtension(EXT_ID)
     assert(ext, `扩展 ${EXT_ID} 未找到`)

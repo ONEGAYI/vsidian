@@ -112,6 +112,7 @@ import {
 } from '../shared/imageRefresh'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
+import { createPdfExportModal, type PdfExportDocumentSource } from './pdfExport/pdfExportModal'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
@@ -417,7 +418,11 @@ export function createTextEditorProvider(
   /** #351 T02 附加组件面板桥（页面装载指令路由 + 资源根 + 状态刷新）；
    *  生产由 extension.ts 注入 createAddonWiring 产物的 editorBridge */
   addons?: AddonEditorBridge,
-): vscode.CustomTextEditorProvider & { dispose(): Promise<void> } {
+): vscode.CustomTextEditorProvider & {
+  dispose(): Promise<void>
+  /** T01（#621）PDF 导出固定输入源（命令入口消费） */
+  getActivePdfExportSource(): PdfExportDocumentSource | undefined
+} {
   const sessions = new Map<string, SessionEntry>()
   // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
   // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
@@ -2938,6 +2943,7 @@ export function createTextEditorProvider(
   //（VSCode 停用窗口约 5s；面板尚开时 confirmed 记录本就不在收尾范围）
   const provider: vscode.CustomTextEditorProvider & {
     dispose(): Promise<void>
+    getActivePdfExportSource(): PdfExportDocumentSource | undefined
   } = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
@@ -4223,6 +4229,21 @@ export function createTextEditorProvider(
     dispose(): Promise<void> {
       return blockIdCoordinator.disposeAll()
     },
+
+    /** T01（#621）PDF 导出固定输入源：当前活动 tab 为本扩展 custom editor
+     *  时返回其权威文档与会话（导出模态打开时刻读取未保存正文——
+     *  whenEditsSettled 后 getText 即「webview 已出站编辑全部落地」的当前
+     *  有效版本）；源码模式或非 Markdown 活动时 undefined（命令层提示） */
+    getActivePdfExportSource(): PdfExportDocumentSource | undefined {
+      const active = deriveActiveTabMode()
+      if (!active || active.mode === 'source') return undefined
+      for (const entry of sessions.values()) {
+        if (isSameDocUri(entry.doc.uri, active.uri)) {
+          return { uri: entry.doc.uri, document: entry.doc, session: entry.session }
+        }
+      }
+      return undefined
+    },
   }
 
   // #270 dirty 丢弃/还原的覆盖层通用退役信号：「空 contentChanges 且文档
@@ -4789,6 +4810,27 @@ export function createTextEditorProvider(
     vscode.window.onDidChangeActiveTextEditor(() => refreshActiveModeContext()),
   )
   refreshActiveModeContext()
+
+  // ---- T01（#621）PDF 导出模态：设置快照与设置页入口经 settings wiring
+  //  注入（持久默认参数只在自有设置页）；固定输入源读 provider 活动面板
+  //  的权威文档会话。命令双模式可用（Live/Reading 均导出固定输入；源码
+  //  模式活动时提示先在 Vsidian 打开——源码 tab 无本扩展会话） ----
+  const pdfExportModal = createPdfExportModal(
+    context,
+    () => settings?.service.getSnapshot() ?? {},
+    () => settings?.page.open(),
+  )
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.currentDocument', () => {
+      const source = provider.getActivePdfExportSource()
+      if (!source) {
+        void vscode.window.showWarningMessage(t('host.pdfExportNoActiveDocument'))
+        return false
+      }
+      pdfExportModal.open(source)
+      return true
+    }),
+  )
 
   // ---- 查找命令（#14）：活动 tab 为本扩展 custom editor 时向其面板发送
   // view.find.open（webview 内浮动查找面板）。查找是纯只读视图操作 ----
@@ -5443,6 +5485,16 @@ export function createTextEditorProvider(
       // 切换后记忆写入 / 弹回不写记忆等契约
       'onegayi.vsidian._test.getLastMode',
       () => readRemembered(),
+    ),
+    // T01（#621）PDF 导出模态观测钩子：面板态/代次/固定输入版本/装配
+    // HTML/绘制层探针/钩子保存目标——集成断言命令-模态-生成-保存链路
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.getPdfExportModalState',
+      () => pdfExportModal.getInfo(),
+    ),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.injectPdfExportModalMessage',
+      (message: unknown) => pdfExportModal.injectMessage(message),
     ),
     vscode.commands.registerCommand(
       // #38 全局模式记忆重置（模拟无历史）：globalState 在同一集成进程内

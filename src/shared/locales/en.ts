@@ -123,6 +123,61 @@ export const en = {
   /** Files-and-links page section (#298 created, moved with the page in #332):
    *  hover.* preview family and embed.* family */
   'settings.groupRefview': 'Reference views',
+  /** Files-and-links page section (T01/#621): pdfExport.* export settings */
+  'settings.groupPdfExport': 'PDF export',
+  // ---- T01（#621）PDF 导出：模态、参数与失败分态 ----
+  /** Export modal panel title */
+  'pdfExport.modalTitle': 'Export PDF',
+  /** Modal input block label: the fixed document of this export */
+  'pdfExport.docLabel': 'Document',
+  /** Modal parameter labels */
+  'pdfExport.paper.label': 'Paper size',
+  'pdfExport.orientation.label': 'Orientation',
+  'pdfExport.margin.label': 'Margins (mm)',
+  'pdfExport.scale.label': 'Scale',
+  /** Paper size option labels */
+  'pdfExport.paper.a3': 'A3',
+  'pdfExport.paper.a4': 'A4',
+  'pdfExport.paper.a5': 'A5',
+  'pdfExport.paper.letter': 'Letter',
+  'pdfExport.paper.legal': 'Legal',
+  /** Orientation option labels */
+  'pdfExport.orientation.portrait': 'Portrait',
+  'pdfExport.orientation.landscape': 'Landscape',
+  /** Primary action: run the export with current parameters */
+  'pdfExport.run': 'Export',
+  /** Cancel the running export */
+  'pdfExport.cancel': 'Cancel',
+  /** Preview main-area placeholder (real PDF preview lands in T07/#627) */
+  'pdfExport.previewPlaceholderTitle': 'PDF preview',
+  'pdfExport.previewPlaceholderDescription':
+    'Preview of the generated PDF arrives in a later version. This export always uses the parameters and the fixed document shown here.',
+  /** Task phase labels */
+  'pdfExport.phase.idle': 'Ready',
+  'pdfExport.phase.generating': 'Generating PDF…',
+  'pdfExport.phase.saving': 'Choosing where to save…',
+  'pdfExport.phase.done': 'Exported',
+  'pdfExport.phase.failed': 'Export failed',
+  'pdfExport.phase.cancelled': 'Export cancelled',
+  /** Failure reasons (visible states per spec §2.5) */
+  'pdfExport.fail.no-browser':
+    'No usable Chrome or Edge found. Install Chrome or Edge, or set the browser path on the Vsidian settings page.',
+  'pdfExport.fail.configured-path-missing':
+    'The browser path configured in settings does not exist. Check it on the Vsidian settings page.',
+  'pdfExport.fail.launch-failed': 'The browser could not be started for printing.',
+  'pdfExport.fail.navigate-failed': 'The export page could not be opened in the browser.',
+  'pdfExport.fail.not-ready': 'The export page did not finish loading in time.',
+  'pdfExport.fail.print-failed': 'The browser failed to produce the PDF.',
+  'pdfExport.fail.write-failed': 'The PDF could not be written to the chosen location.',
+  'pdfExport.fail.busy': 'An export is already running.',
+  'pdfExport.fail.internal': 'Unexpected error during export.',
+  /** Cancel kinds */
+  'pdfExport.cancelKind.user': 'Cancelled by user.',
+  'pdfExport.cancelKind.saveDialog': 'No location chosen, the PDF was not saved.',
+  /** Success detail: saved target path */
+  'pdfExport.savedTo': 'Saved to {path}',
+  /** Open Vsidian settings from the modal (browser missing recovery path) */
+  'pdfExport.openSettings': 'Open settings',
   /** Settings "Files and links" section page (#332: renamed from "Index
    *  maintenance" to host the Images / Reference views / Index maintenance
    *  groups, mirroring Obsidian's Files & links page) */
@@ -837,6 +892,11 @@ export const en = {
   'command.table.insertColumnRight.title': 'Table: insert column right',
   'command.table.deleteColumn.title': 'Table: delete column',
   'command.openSettings.title': 'Open settings',
+  /** T01（#621）PDF 导出：打开当前文档导出模态（只读操作，默认不绑定） */
+  'command.pdfExport.currentDocument.title': 'Vsidian: Export current document to PDF',
+  /** T01（#621）无活动 Vsidian 文档时的命令提示 */
+  'host.pdfExportNoActiveDocument':
+    'Open a Markdown document in Vsidian first, then export it to PDF.',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS snippets: reload',
   /** #131 暂停/恢复全部片段命令 */
@@ -904,6 +964,18 @@ export const en = {
   'setting.imagePasteLinkFormat.description': 'Syntax inserted at the cursor after a pasted image is saved. Wikilink embeds are written as ![[relative path]]: the path is kept verbatim (spaces are not escaped or percent-encoded), and characters wikilinks cannot express (#^[] and the like) are removed from the saved file name. No pipe escaping is needed inside table cells (the path never contains one).',
   'setting.imagePasteLinkFormatMarkdown': 'Markdown link',
   'setting.imagePasteLinkFormatWikilink': 'Wikilink embed',
+  // ---- T01（#621）PDF 导出设置（文件与链接分页「PDF 导出」组）----
+  'setting.pdfExportBrowserPath.title': 'Browser for PDF export',
+  'setting.pdfExportBrowserPath.description':
+    'Path of the Chrome or Edge executable used to generate PDFs. Leave empty to detect an installed browser automatically.',
+  'setting.pdfExportPaper.title': 'Default paper size',
+  'setting.pdfExportPaper.description': 'Paper size preselected when the export dialog opens.',
+  'setting.pdfExportOrientation.title': 'Default orientation',
+  'setting.pdfExportOrientation.description': 'Page orientation preselected when the export dialog opens.',
+  'setting.pdfExportMargin.title': 'Default margins (mm)',
+  'setting.pdfExportMargin.description': 'Page margins preselected when the export dialog opens (0–50 mm).',
+  'setting.pdfExportScale.title': 'Default scale',
+  'setting.pdfExportScale.description': 'Print scale preselected when the export dialog opens (0.1–2, where 1 is 100%).',
   'host.imagePasteInvalidLocation': 'Pasted image was not saved: the configured subpath "{subpath}" is invalid (absolute paths and ".." are not allowed).',
   'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
   'host.imagePasteWriteFailed': 'Failed to save the pasted image.',

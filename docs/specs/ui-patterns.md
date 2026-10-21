@@ -140,6 +140,26 @@ div.vsidian-behavior-query                        ← 查询区（组卡片内�
 - **翻页控件**（行为列表底部）：`<< < 第 x / y 页 > >>` 五件套——四枚行内微钮（22px 档、次级按钮变量族，到头/到底禁用发灰）+ 指示文本 12px 说明色；总页数 ≤ 1 不渲染。
 - **上限提示**：积木总数 > 16 时加号禁用（微钮禁用态）+ data-tooltip 说明（D9）。
 
+### 2.6 PDF 导出模态面板（页面级 webview，T01/#621）
+
+独立 webview 面板（createWebviewPanel，非设置页非编辑器内浮层——同类先例是设置页面板，形态归本节而不入 §3 浮层族）。布局参考 Better Export PDF 的「主区预览 + 侧区配置」（规格 [pdf-export.md](pdf-export.md) §2.4）：
+
+```text
+div.vsidian-pdfexport               ← 两列 grid（1fr + 320px；≤720px 退化为上下两行）
+├─ main.vsidian-pdfexport-preview    ← 主区：10px 卡片边框容器；T01 为占位说明
+│    └─ …placeholder（标题 15px/600 + 说明 13px 说明色，居中 max-width 420px）
+└─ aside.vsidian-pdfexport-side      ← 侧区：10px 卡片（1px 描边 + 16px 20px 内边距，独立滚动）
+     ├─ 文档行（12px 说明色标签 + 14px/500 文档名，下边线 tint 8%）
+     ├─ 参数字段行（label 上控件下，14px 0 上下 + tint 8% 分隔线——设置行 18px 档的紧凑变体）
+     │    select/number → 2px 档（dropdown/input 变量族）；scale → range + tabular-nums 值文本（accent-color focusBorder）
+     ├─ 操作行（18px 上距）：主按钮 6px 档（--vscode-button-*，busy 态禁用降透明）+ 次级按钮 6px 档（button-secondary 变量族，仅生成中显示）
+     └─ 状态行（role="status"，说明色，word-break）+ 「打开设置」次级按钮（仅缺浏览器分态显示）
+```
+
+- 控件全部复用 §2.3 既有档位（select/number 2px、range accent-color），无新控件形态；明暗主题全 `--vscode-*` 变量自适应，零硬编码色值。
+- T07（#627）真实 PDF 预览落位主区（代次概念 state.generation 先行）；页眉页脚参数（T05）沿参数字段行追加。
+- 绘制层断言：集成用例「PDF 导出模态（#621 T01）」经 `_test.pdfExportModal.report` 探针断言控件可见性（offsetParent + 计算样式）——非 DOM 存在性。
+
 ## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）
 
 | 模式 | 形态要点 | 事实源与契约指针 |

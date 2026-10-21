@@ -334,6 +334,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.pdfExport.currentDocument",
+        "title": "%command.pdfExport.currentDocument.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.openSettings",
         "title": "%command.openSettings.title%",
         "category": "Vsidian"
