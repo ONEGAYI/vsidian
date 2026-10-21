@@ -39,6 +39,10 @@ export type PdfExportFailReason =
   | 'write-failed'
   | 'busy'
   | 'internal'
+  /** T08/#628 Remote SSH：本机执行端扩展未安装/未激活（远端会话专用分态） */
+  | 'executor-missing'
+  /** T08/#628 Remote SSH：跨宿主通道不可达（断连/命令超时——如实报失败不伪成功） */
+  | 'executor-unreachable'
 
 /** 固定输入（规格 §2.1：准备阶段确定本次使用的版本）——payload 数据面。
  *  docs[0] 恒为主文档；mermaidUri/resBase 由会话装配层填、locale 由模态
@@ -63,28 +67,37 @@ export class PdfExportBrowserError extends Error {
   }
 }
 
-/** 标题书签报告（T05/#625）：written=false 时产物不加 /Outlines——不给
- *  伪造书签；机器原因码不进用户文案（模态按 reason 映射词条） */
-export interface PdfBookmarkReport {
-  written: boolean
-  /** 埋点标题总数 */
-  total: number
-  /** 定位失败被跳过的标题数（written=true 时可为部分跳过） */
-  skipped: number
-  reason?: 'disabled' | 'no-headings' | 'none-located' | 'locate-failed' | 'write-failed'
-  /** 失败的原始诊断信息（观测面；不进用户文案） */
-  detail?: string
+/** T08/#628 跨宿主通道错误（remote 适配器抛出）：kind=missing = 执行端
+ *  未安装/未激活；unreachable = 超时/断连/通道故障（V02 §5 断连后远端
+ *  在途 await 无终态——超时如实收口不伪成功） */
+export class PdfExportRemoteChannelError extends Error {
+  readonly kind: 'missing' | 'unreachable'
+  constructor(message: string, kind: 'missing' | 'unreachable' = 'unreachable') {
+    super(message)
+    this.name = 'PdfExportRemoteChannelError'
+    this.kind = kind
+  }
 }
 
+/** 标题书签报告（T05/#625 建立；T08/#628 定义下沉 shared/pdfExportPayload
+ *  ——跨宿主协议两端口径同源，此处 re-export 保持既有导入面） */
+import type { PdfBookmarkReport } from '../../shared/pdfExportPayload'
+export type { PdfBookmarkReport }
+
 /** 异常 → 失败分态映射（T04 起单文档 job 与批量执行器共用——不建第二份
- *  分态口径；非浏览器链路异常收敛 internal） */
+ *  分态口径；非浏览器链路异常收敛 internal；T08 跨宿主通道错误按
+ *  executor-unreachable/missing 分态如实呈现） */
 export function mapBrowserErrorToFailReason(error: unknown): PdfExportFailReason {
-  return error instanceof PdfExportBrowserError
-    ? (error.code === 'launch' ? 'launch-failed'
+  if (error instanceof PdfExportBrowserError) {
+    return error.code === 'launch' ? 'launch-failed'
       : error.code === 'navigate' ? 'navigate-failed'
       : error.code === 'not-ready' ? 'not-ready'
-      : 'print-failed')
-    : 'internal'
+      : 'print-failed'
+  }
+  if (error instanceof PdfExportRemoteChannelError) {
+    return error.kind === 'missing' ? 'executor-missing' : 'executor-unreachable'
+  }
+  return 'internal'
 }
 
 /** 单次导出的浏览器会话端口（生产 createBrowserExportSession 实现） */

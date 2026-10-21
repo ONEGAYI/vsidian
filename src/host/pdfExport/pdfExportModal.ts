@@ -76,6 +76,8 @@ import { PdfMergeJob, buildPdfMergePayload, type PdfMergeRunPlan } from './pdfEx
 import { PdfPreviewJob } from './pdfExportPreviewJob'
 import { createBrowserExportSession } from './pdfExportSession'
 import { resolveExportBrowser } from './browserFind'
+import { createPdfRemoteAdapter, type PdfRemoteAdapter } from './pdfRemoteAdapter'
+import { readPdfRemoteTestHooks } from './pdfRemoteTestHooks'
 import { prefetchEmbedTargets, type PdfExportEmbedReadPort } from './pdfExportEmbeds'
 import { sliceSelectionFragments, type PdfSelectionRange } from './pdfExportSelection'
 import type { DocumentSession } from '../documentSession'
@@ -178,6 +180,14 @@ export interface PdfExportModalInfo {
    *  （core 集成断言在无浏览器环境钉住装载面——worker-src blob: 等） */
   modalCsp: string
   modalPreviewAssetsReady: boolean
+  /** T08（#628）remote 会话观测面：是否走本机执行端链路 + 最近一次执行端
+   *  浏览器解析结果（e2e 断言「remote 路径确实被取用」） */
+  remote: {
+    active: boolean
+    /** undefined = 本会话尚未发起过任务（无 ping 数据） */
+    browserResolved: boolean | undefined
+    browserKind?: string | undefined
+  }
   /** T07（#627）预览观测面（无预览会话时 phase='idle'；bytesSha 为就绪
    *  产物的指纹摘要——与最终导出文件哈希对读，钉住「同源同代次」） */
   preview: {
@@ -318,9 +328,49 @@ export function createPdfExportModal(
    *  前登记、终态后清空） */
   const knownDocFsPaths = new Set<string>()
 
+  // ---- T08（#628）Remote SSH 运行侧判定与会话适配 ----
+  // 判据：`vscode.env.remoteName` 在场 = remote 窗口。主扩展 extensionKind
+  // 为 workspace——remote 窗口中本扩展恒跑在 vscode-server（远端），本地
+  // 窗口恒跑本机；对 workspace-kind 扩展，remoteName 与「本进程在远端」
+  // 等价（V02 §2 的教训是 remoteName 不能判别任意扩展在哪端——本扩展
+  // 单端运行，无此歧义）。remote 下四个 job 与预览的端口面换成本机执行
+  // 端适配器（跨 ext host 命令通道）；本地窗口保持既有链路零改动。
+  const workspaceRootOf = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  const remoteAdapter: PdfRemoteAdapter | undefined = vscode.env.remoteName !== undefined
+    ? createPdfRemoteAdapter({
+      exec: (command, arg) => vscode.commands.executeCommand(command, arg),
+      resolveResource: sessionDeps.resolveResource,
+      readResourceBytes: async (fsPath) => vscode.workspace.fs.readFile(vscode.Uri.file(fsPath)),
+      knownDocFsPaths: () => knownDocFsPaths,
+      pageLabel: () => ({
+        pre: t('pdfExport.pageNumber.pre'),
+        mid: t('pdfExport.pageNumber.mid'),
+        post: t('pdfExport.pageNumber.post'),
+      }),
+      testHooks: () => readPdfRemoteTestHooks(undefined, workspaceRootOf()),
+    })
+    : undefined
+  /** remote 观测面：最近一次执行端 ping 的浏览器解析结果 */
+  let remoteResolveObserved: { ok: boolean; kind?: string } | undefined
+
+  /** 测试钩子门控（本地 = env；remote e2e = 工作区标记文件——远端 ext host
+   *  读不到宿主 env，V02 §3.4；沿 T17 标记文件先例） */
+  const testHooksActive = (): boolean =>
+    process.env.VSIDIAN_TEST_HOOKS === '1' || readPdfRemoteTestHooks(undefined, workspaceRootOf()) !== undefined
+
   /** 保存对话框端口（单文档与 T06 合并共用：钩子短路临时目录自动路径
-   *  经 hookedSaveTarget 暴露；生产走系统对话框，取消 = undefined） */
+   *  经 hookedSaveTarget 暴露；生产走系统对话框，取消 = undefined。
+   *  T08 remote：对话框与写盘都在本机——经执行端命令（远端 Uri.file 会
+   *  把本机路径误落到远端 fs，V02 §3.3 语义；钩子注入路径同样走执行端
+   *  真实落盘，目标路径经 hookedSaveTarget 暴露） */
   const saveDialogPort = async (defaultFileName: string): Promise<string | undefined> => {
+    if (remoteAdapter !== undefined) {
+      const target = await remoteAdapter.showSaveDialog(defaultFileName)
+      if (target !== undefined && testHooksActive()) {
+        hookedSaveTarget = target
+      }
+      return target
+    }
     if (process.env.VSIDIAN_TEST_HOOKS === '1') {
       // 测试钩子短路：自动目标路径（临时目录 + 默认名），真实落盘可断言；
       // 目标路径经 getInfo()（单文档直读 / 合并 batch.hookedSaveTarget）暴露
@@ -335,9 +385,19 @@ export function createPdfExportModal(
     return target?.fsPath
   }
 
-  const job = new PdfExportJob({
-    resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
-    createSession: (executablePath) => createBrowserExportSession(executablePath, {
+  /** T08 remote：浏览器解析与端口面（本地窗口保持既有链路） */
+  const resolveBrowserPort = remoteAdapter !== undefined
+    ? async (configuredPath: string | undefined) => {
+      const result = await remoteAdapter!.resolveBrowser(configuredPath)
+      remoteResolveObserved = result.ok
+        ? { ok: true, kind: result.browser.kind }
+        : { ok: false }
+      return result
+    }
+    : resolveExportBrowser
+  const createSessionPort = remoteAdapter !== undefined
+    ? (executablePath: string) => remoteAdapter!.createSession(executablePath)
+    : (executablePath: string) => createBrowserExportSession(executablePath, {
       outWebviewDir: sessionDeps.outWebviewDir,
       resourceResolve: {
         resolve: sessionDeps.resolveResource,
@@ -353,7 +413,11 @@ export function createPdfExportModal(
           },
         }
         : {}),
-    }),
+    })
+
+  const job = new PdfExportJob({
+    resolveBrowser: resolveBrowserPort,
+    createSession: createSessionPort,
     showSaveDialog: saveDialogPort,
     writeFile: async (targetPath, bytes) => {
       await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), Buffer.from(bytes))
@@ -428,14 +492,8 @@ export function createPdfExportModal(
   }
 
   const previewJob = new PdfPreviewJob({
-    resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
-    createSession: (executablePath) => createBrowserExportSession(executablePath, {
-      outWebviewDir: sessionDeps.outWebviewDir,
-      resourceResolve: {
-        resolve: sessionDeps.resolveResource,
-        knownDocFsPaths: () => knownDocFsPaths,
-      },
-    }),
+    resolveBrowser: resolveBrowserPort,
+    createSession: createSessionPort,
     locale: () => hostLocale(getSettingsSnapshot()),
   })
 
@@ -724,8 +782,14 @@ export function createPdfExportModal(
   }
 
   /** 批量产物写盘：目标目录按需创建 + 临时文件 + 原子替换（覆盖策略下
-   *  旧文件在新文件完整写入前不损毁；失败清理临时文件） */
+   *  旧文件在新文件完整写入前不损毁；失败清理临时文件）。
+   *  T08 remote：产物落本机——经执行端分块写盘命令（远端 workspace.fs
+   *  是远端盘；原子语义由执行端承担，路径为本机真实路径） */
   const writeBatchFile = async (targetPath: string, bytes: Uint8Array): Promise<void> => {
+    if (remoteAdapter !== undefined) {
+      await remoteAdapter.writeFile(targetPath, bytes)
+      return
+    }
     const target = vscode.Uri.file(targetPath)
     await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, '..'))
     const tmp = `${targetPath}.vsidian-tmp-${randomUUID()}`
@@ -766,14 +830,8 @@ export function createPdfExportModal(
   }
 
   const batchJob = new PdfBatchJob({
-    resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
-    createSession: (executablePath) => createBrowserExportSession(executablePath, {
-      outWebviewDir: sessionDeps.outWebviewDir,
-      resourceResolve: {
-        resolve: sessionDeps.resolveResource,
-        knownDocFsPaths: () => knownDocFsPaths,
-      },
-    }),
+    resolveBrowser: resolveBrowserPort,
+    createSession: createSessionPort,
     captureDoc: makeCaptureDocPort(),
     writeFile: writeBatchFile,
     locale: () => hostLocale(getSettingsSnapshot()),
@@ -793,14 +851,8 @@ export function createPdfExportModal(
   // ---- T06（#626）合并模式执行器：同一清单数据面按合并语义消费（单产物
   //  两段式；保存对话框/写盘/释放与单文档同口径——取消/失败不留伪成功） ----
   const mergeJob = new PdfMergeJob({
-    resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
-    createSession: (executablePath) => createBrowserExportSession(executablePath, {
-      outWebviewDir: sessionDeps.outWebviewDir,
-      resourceResolve: {
-        resolve: sessionDeps.resolveResource,
-        knownDocFsPaths: () => knownDocFsPaths,
-      },
-    }),
+    resolveBrowser: resolveBrowserPort,
+    createSession: createSessionPort,
     captureDoc: makeCaptureDocPort(),
     showSaveDialog: saveDialogPort,
     writeFile: writeBatchFile,
@@ -872,7 +924,8 @@ export function createPdfExportModal(
     })
   }
 
-  /** confirm 进入：探测名义目标磁盘已有 + 首版映射 */
+  /** confirm 进入：探测名义目标磁盘已有 + 首版映射（T08 remote：目标目录
+   *  在本机——冲突映射在本机目标目录上解析，经执行端 stat 命令批量探测） */
   const enterBatchConfirm = async (targetDir: string): Promise<void> => {
     batchTargetDir = targetDir
     batchExisting = new Set<string>()
@@ -880,14 +933,21 @@ export function createPdfExportModal(
       const rel = item.relPath.replace(/\.(md|markdown)$/i, '.pdf')
       return `${targetDir}/${rel}`.toLowerCase()
     }))
-    await Promise.all([...nominalDirs].map(async (target) => {
-      try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(target))
-        batchExisting.add(target)
-      } catch {
-        /* 不存在即不占用 */
+    if (remoteAdapter !== undefined) {
+      const entries = await remoteAdapter.statFiles([...nominalDirs])
+      for (const entry of entries) {
+        if (entry.exists) batchExisting.add(entry.path)
       }
-    }))
+    } else {
+      await Promise.all([...nominalDirs].map(async (target) => {
+        try {
+          await vscode.workspace.fs.stat(vscode.Uri.file(target))
+          batchExisting.add(target)
+        } catch {
+          /* 不存在即不占用 */
+        }
+      }))
+    }
     batchMapping = planBatchMapping(batchItems, targetDir, batchStrategy, batchExisting)
     batchPhase = 'confirm'
     notifyState()
@@ -943,6 +1003,11 @@ export function createPdfExportModal(
     lastSnapshot,
     modalCsp,
     modalPreviewAssetsReady,
+    remote: {
+      active: remoteAdapter !== undefined,
+      browserResolved: remoteResolveObserved?.ok,
+      ...(remoteResolveObserved?.ok ? { browserKind: remoteResolveObserved.kind } : {}),
+    },
     batch: batchInfo(),
     preview: {
       phase: previewPhase,
@@ -1081,7 +1146,7 @@ export function createPdfExportModal(
           const injected = message.paths
           // 路径统一经 Uri.file 归一形态（Windows 盘符大小写/分隔符——与
           // 对话框结果同款，避免同文件因来源不同形成异形身份）
-          if (Array.isArray(injected) && injected.every((p) => typeof p === 'string') && process.env.VSIDIAN_TEST_HOOKS === '1') {
+          if (Array.isArray(injected) && injected.every((p) => typeof p === 'string') && testHooksActive()) {
             files = (injected as string[]).map((p) => vscode.Uri.file(p).fsPath.replaceAll('\\', '/'))
           } else {
             const picked = await vscode.window.showOpenDialog({
@@ -1103,7 +1168,7 @@ export function createPdfExportModal(
         enqueueBatchOp(async () => {
           let dirs: vscode.Uri[] | undefined
           const injected = message.path
-          if (typeof injected === 'string' && injected !== '' && process.env.VSIDIAN_TEST_HOOKS === '1') {
+          if (typeof injected === 'string' && injected !== '' && testHooksActive()) {
             dirs = [vscode.Uri.file(injected)]
           } else {
             dirs = await vscode.window.showOpenDialog({
@@ -1144,18 +1209,25 @@ export function createPdfExportModal(
         if (mode !== 'batch' || batchJob.isRunning || batchItems.length === 0) return
         enqueueBatchOp(async () => {
           let targetDir: string | undefined
-          if (process.env.VSIDIAN_TEST_HOOKS === '1') {
-            // 测试钩子短路：注入目录优先（用例预置已有文件后探测），
-            // 缺省自动临时目录；真实落盘可断言，经观测面暴露
-            const injected = typeof message.targetDir === 'string' && message.targetDir !== '' ? message.targetDir : undefined
+          if (testHooksActive()) {
+            // 测试钩子短路：注入目录优先（用例预置已有文件后探测；remote
+            // e2e 经 marker.targetDir 注入本机目录——产物真实落盘可断言），
+            // 缺省自动临时目录；经观测面暴露
+            const marker = readPdfRemoteTestHooks(undefined, workspaceRootOf())
+            const injected = typeof message.targetDir === 'string' && message.targetDir !== '' ? message.targetDir : marker?.targetDir
             if (injected) {
-              targetDir = vscode.Uri.file(injected).fsPath.replaceAll('\\', '/')
+              targetDir = injected.replaceAll('\\', '/')
               hookedBatchTargetDir = targetDir
             } else {
               const dir = mkdtempSync(path.join(tmpdir(), 'vsidian-pdfbatch-test-'))
               hookedBatchTargetDir = dir.replaceAll('\\', '/')
               targetDir = hookedBatchTargetDir
             }
+          } else if (remoteAdapter !== undefined) {
+            // T08 remote：产物落本机——目标目录在本机选（远端 showOpenDialog
+            // 浏览的是远端 fs，两者不是同一台机器的盘）
+            const picked = await remoteAdapter.showOpenDialogDir()
+            targetDir = picked?.replaceAll('\\', '/')
           } else {
             const picked = await vscode.window.showOpenDialog({
               canSelectMany: false,
@@ -1357,6 +1429,10 @@ export function createPdfExportModal(
       resetPreviewSession()
       knownDocFsPaths.clear()
       lastPaint = undefined
+      // 固定输入一并作废（T08 e2e 实证：闭包变量跨会话残留会让重开后的
+      // 极早期 run 消费上一会话输入——新一轮 open 的捕获在途时旧输入仍可答）
+      fixedInput = undefined
+      sourceDirForDialog = undefined
       // 会话终结：模式、批量清单与策略选择一并重置（重开 = 全新会话）
       mode = 'document'
       batchPhase = 'editing'

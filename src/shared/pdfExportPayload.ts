@@ -125,6 +125,20 @@ export interface PdfExportPagePayload {
   locale: 'zh-cn' | 'en'
 }
 
+/** 标题书签报告（T05/#625 定义于 pdfExportJob，T08/#628 下沉 shared——
+ *  跨宿主协议两端口径同源）：written=false 时产物不加 /Outlines——不给
+ *  伪造书签；机器原因码不进用户文案（模态按 reason 映射词条） */
+export interface PdfBookmarkReport {
+  written: boolean
+  /** 埋点标题总数 */
+  total: number
+  /** 定位失败被跳过的标题数（written=true 时可为部分跳过） */
+  skipped: number
+  reason?: 'disabled' | 'no-headings' | 'none-located' | 'locate-failed' | 'write-failed'
+  /** 失败的原始诊断信息（观测面；不进用户文案） */
+  detail?: string
+}
+
 /** 页面侧失败项（probe 阶段宿主拉取；模态 i18n 列表数据源） */
 export type PdfExportFailureKind = 'embed' | 'image' | 'graphic' | 'media'
 

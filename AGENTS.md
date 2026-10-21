@@ -142,14 +142,19 @@ vsidian/
 │   │   │   ├── appearance-probe-light-default.json           # 外观探针亮色轮证据
 │   │   │   ├── html-css-scope-probe-b2-evidence.png          # 探针b2获选路线视觉取证截图
 │   │   │   ├── html-css-scope-probe-browser-chromium151.json # 探针浏览器Chromium151证据数据
-│   │   │   └── html-css-scope-probe-host-1.82.3.json         # 探针宿主1.82.3证据数据
+│   │   │   ├── html-css-scope-probe-host-1.82.3.json         # 探针宿主1.82.3证据数据
+│   │   │   └── pdf-export-browser-probe/                     # V01 探针证据数据
+│   │   │       ├── completion-composite-p1.png # V01 探针截图
+│   │   │       ├── full-sample-p1.png          # V01 样张截图 p1
+│   │   │       ├── full-sample-p2.png          # V01 样张截图 p2
+│   │   │       └── full-sample-p3.png          # V01 样张截图 p3
 │   │   ├── html-css-scope-probe.md                # 文档内CSS作用域隔离探针报告
 │   │   ├── obsidian-live-preview-editor.md        # Obsidian 技术栈与选型调研
 │   │   ├── obsidian-properties-nested-yaml.md     # Obsidian 嵌套 YAML 调查
 │   │   ├── obsidian-viewport-rendering.md         # 视口渲染性能补充调研
 │   │   ├── pdf-engine-compatibility-probe.md      # P3-02 PDF 引擎兼容性探针报告
-│   │   ├── pdf-export-browser-probe.md            # V01 已安装浏览器PDF后端探针报告
-│   │   ├── pdf-export-remote-ssh-probe.md         # V02 Remote SSH到本机PDF闭环探针报告
+│   │   ├── pdf-export-browser-probe.md            # V01 浏览器后端探针报告
+│   │   ├── pdf-export-remote-ssh-probe.md         # V02 Remote SSH 探针报告
 │   │   ├── t02-regex-budget-probe.md              # T02 正则实现预算与选型探针报告
 │   │   ├── vscode-1823-host-route-probes.md       # P2-01 宿主路线探针结论
 │   │   ├── vscode-addon-discovery.md              # 附加组件发现与调用边界调研
@@ -264,6 +269,7 @@ vsidian/
 │   ├── genNls.mjs                # manifest NLS 文件生成脚本
 │   ├── genStyleGuide.mjs         # 样式指南生成脚本
 │   ├── linkDeps.mjs              # worktree 依赖预置脚本
+│   ├── packageExecutor.mjs       # 执行端 VSIX 打包脚本
 │   ├── pdfBuildConfig.mjs        # PDF.js 双产物构建配置事实源
 │   ├── quick-action-icons.py     # 快速操作图标生成与校验
 │   ├── release.mjs               # 发布脚本：打包、包体检查与上传
@@ -271,6 +277,10 @@ vsidian/
 ├── src/                   # 扩展源码
 │   ├── extension.ts # 扩展激活入口
 │   ├── host/…       # 宿主端实现
+│   ├── pdfExecutor/ # PDF 本机执行端扩展
+│   │   ├── extension.ts     # PDF 执行端扩展入口
+│   │   ├── package.json     # PDF 执行端清单模板
+│   │   └── resourceQueue.ts # 执行端挂起资源队列
 │   ├── shared/…     # 两端共享纯逻辑
 │   └── webview/…    # webview 端实现
 ├── test/…                 # 测试根

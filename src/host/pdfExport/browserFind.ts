@@ -115,6 +115,11 @@ export type ResolveBrowserResult =
   | { ok: false; reason: 'configured-path-missing'; configuredPath: string }
   /** 无可用浏览器（未安装 / 平台未支持） */
   | { ok: false; reason: 'no-browser' }
+  /** T08/#628 远端会话专用：本机执行端扩展未安装/未激活（pdfRemoteAdapter
+   *  产出；本模块自身不返回该分态——执行端缺失语义属于跨宿主通道层） */
+  | { ok: false; reason: 'executor-missing' }
+  /** T08/#628 远端会话专用：跨宿主命令超时/不可达（同上，通道层产出） */
+  | { ok: false; reason: 'executor-unreachable' }
 
 /** 解析本次导出使用的浏览器：显式配置路径优先（存在即用，不回退——
  *  用户点名路径失效时如实报错，不静默换浏览器），否则自动发现

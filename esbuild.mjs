@@ -179,6 +179,23 @@ const targets = [
     splitting: true,
     chunkNames: 'mermaid-chunks/[name]-[hash]',
   },
+  {
+    // T08（#628）PDF 导出本机执行端扩展（双 VSIX 分发的第二个包）：
+    // ui kind——remote 窗口跑在本机 ext host；浏览器发现/CDP 生成/书签
+    // 后处理（pdf-lib）整体复用 src/host/pdfExport 既有模块，打进本包
+    // bundle（两包各自自包含）。产物 out/pdfExecutor/extension.js 由
+    // scripts/packageExecutor.mjs 组装执行端 VSIX（不进主包 .vscodeignore 面）
+    entryPoints: ['src/pdfExecutor/extension.ts'],
+    outfile: 'out/pdfExecutor/extension.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: !production,
+    minify: production,
+    logLevel: 'info',
+  },
   // PDF.js 双产物（#337）：配置单一事实源在 scripts/pdfBuildConfig.mjs
   //（#346 修复轮 2 提取——浏览器测试侧 ensurePdfArtifacts 消费同一工厂，
   // 相同 outfile 逐字段一致；banner/iife/chrome114 语义注释在彼处）
@@ -289,6 +306,20 @@ if (!production) {
     platform: 'browser',
     format: 'iife',
     target: 'chrome114',
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  // T08（#628）Remote SSH PDF 导出 e2e 套件（本地 ext host runner——被测
+  // 命令经 executeCommand 跨 ext host 路由到远端主扩展；由
+  // test/integration/runPdfRemoteE2E.mjs 驱动）
+  targets.push({
+    entryPoints: ['test/integration/pdfRemoteE2E/suite.ts'],
+    outfile: 'out/test/integration/pdfRemoteE2E/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
     sourcemap: true,
     logLevel: 'info',
   })

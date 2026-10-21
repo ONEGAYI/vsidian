@@ -205,6 +205,10 @@ export const en = {
   'pdfExport.fail.writeFailed': 'The PDF could not be written to the chosen location.',
   'pdfExport.fail.busy': 'An export is already running.',
   'pdfExport.fail.internal': 'Unexpected error during export.',
+  'pdfExport.fail.executorMissing':
+    'Remote sessions need the companion "Vsidian PDF Export Executor" extension installed and enabled on your local machine (alongside the main extension). It is currently unavailable; install it and retry.',
+  'pdfExport.fail.executorUnreachable':
+    'The local executor could not be reached (the connection may have dropped or a command timed out). The export did not finish; check the connection and retry.',
   /** Cancel kinds */
   'pdfExport.cancelKind.user': 'Cancelled by user.',
   'pdfExport.cancelKind.saveDialog': 'No location chosen, the PDF was not saved.',
@@ -966,6 +970,12 @@ export const en = {
   /** 扩展市场 displayName / description（含 customEditors displayName 同源） */
   'manifest.displayName': 'Vsidian',
   'manifest.description': 'Obsidian-like Markdown editing: live preview + reading views',
+  /** T08 (#628): companion executor extension (second VSIX of the dual-package
+   *  distribution) — marketplace display and bundled README generated from the
+   *  dictionaries by scripts/packageExecutor.mjs; no hand-written JSON */
+  'executor.manifest.displayName': 'Vsidian PDF Export Executor',
+  'executor.manifest.description': 'Companion extension for PDF generation in Vsidian remote sessions (Remote SSH): renders PDFs with your locally installed browser and saves them locally. Install alongside the main Vsidian extension.',
+  'executor.readme.body': 'This extension handles local PDF generation during Remote SSH sessions: documents and resources are read from the remote workspace, PDFs are produced by your locally installed Chrome/Edge, and files are saved to your local machine. It is invoked only by the main Vsidian extension in remote sessions; no separate setup is needed.',
 
   'command.toggleViewMode.title': 'Switch to the next view mode',
   /** #232 归属句式：editor/title 三态切换命令的 manifest title（genNls 生成源），

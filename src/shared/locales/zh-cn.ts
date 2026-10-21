@@ -195,6 +195,10 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.fail.writeFailed': 'PDF 无法写入所选位置。',
   'pdfExport.fail.busy': '已有导出任务在进行。',
   'pdfExport.fail.internal': '导出过程中出现意外错误。',
+  'pdfExport.fail.executorMissing':
+    '远程会话需要本机安装并启用「Vsidian PDF 导出执行端」配套扩展（与 Vsidian 主扩展同在本机），当前不可用。请安装后重试。',
+  'pdfExport.fail.executorUnreachable':
+    '无法连接本机执行端（连接可能已断开或命令超时）。导出未完成，请检查连接后重试。',
   /** 取消细分 */
   'pdfExport.cancelKind.user': '已按用户请求取消。',
   'pdfExport.cancelKind.saveDialog': '未选择保存位置，PDF 未保存。',
@@ -909,6 +913,11 @@ export const zhCn: Record<MessageKey, string> = {
   // （#232）：manifest title 改归属句式，操作名拆到 operation.* 独立键。
   'manifest.displayName': 'Vsidian',
   'manifest.description': '类 Obsidian 的 Markdown 编辑体验：实时预览 + 阅读双视图',
+  /** T08（#628）执行端扩展（双 VSIX 分发的第二个包）的市场展示面与包内
+   *  README——由 scripts/packageExecutor.mjs 从字典生成，不手写 JSON */
+  'executor.manifest.displayName': 'Vsidian PDF 导出执行端',
+  'executor.manifest.description': 'Vsidian 远程会话（Remote SSH）的 PDF 生成配套扩展：在本机浏览器生成 PDF 并保存到本机。须与 Vsidian 主扩展一同安装。',
+  'executor.readme.body': '本扩展在 Remote SSH 会话中承担 PDF 的本机生成：远端工作区读取文档与资源，本扩展调用本机已安装的 Chrome/Edge 生成 PDF，并把文件保存到本机。仅在远程会话中被 Vsidian 主扩展调用，无需单独操作。',
 
   'command.toggleViewMode.title': '切换到下一视图模式',
   /** #232 归属句式：editor/title 三态切换命令的 manifest title（genNls 生成源），

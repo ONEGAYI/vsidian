@@ -114,6 +114,7 @@ import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { createPdfExportModal, type PdfBatchDocCaptureOutcome, type PdfExportDocumentSource, type PdfExportEmbedReadOutcome, type PdfExportSnippetEntry, type PdfExportStyleSnapshot } from './pdfExport/pdfExportModal'
 import { prefetchEmbedTargets } from './pdfExport/pdfExportEmbeds'
+import { readPdfRemoteTestHooks } from './pdfExport/pdfRemoteTestHooks'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
@@ -5341,8 +5342,12 @@ export function createTextEditorProvider(
   ))
 
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时
-  // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露 ----
-  if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+  // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露。T08（#628）remote e2e 例外：
+  // 远端 ext host 读不到宿主 env（V02 §3.4 实测 server 不继承 VSIDIAN_*），
+  // 沿 T17 标记文件先例——工作区根在场 .vsidian-pdf-remote-test.json（hooks=true）
+  // 时同样启用（远端会话的模态观测/消息注入断言面；写盘与生成仍走真实链路） ----
+  if (process.env.VSIDIAN_TEST_HOOKS === '1'
+    || readPdfRemoteTestHooks(undefined, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath) !== undefined) {
     // V01（#348）历史分组探针：文档事件路由启动 + 随 context 释放
     addonHistoryHub?.start()
     context.subscriptions.push({ dispose: () => addonHistoryHub?.dispose() })
@@ -5375,7 +5380,7 @@ export function createTextEditorProvider(
     vscode.commands.registerCommand('onegayi.vsidian._test.getSessionState', (uriStr: string) => {
       const entry = getEntry(vscode.Uri.parse(uriStr))
       if (!entry) {
-        return { found: false, panels: [], version: 0, appliedEdits: 0 }
+        return { found: false, panels: [], version: 0, appliedEdits: 0, sessionUris: [...sessions.keys()] }
       }
       return {
         found: true,
@@ -5385,6 +5390,9 @@ export function createTextEditorProvider(
         panels: realPanelsOf(entry),
         version: entry.doc.version,
         appliedEdits: entry.appliedEdits,
+        // T08（#628）remote e2e 诊断面：会话键全集（runner 侧 URI 与远端
+        // 条目键的编码形态对读——vscode-remote URI 跨端 stringify 差异排查）
+        sessionUris: [...sessions.keys()],
         // #208 资源代次（0 = 未刷新；每次手动刷新 +1，图片 URI ?v= 戳同源）
         imageGeneration: entry.session.getImageGeneration(),
       }

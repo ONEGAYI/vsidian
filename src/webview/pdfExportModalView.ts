@@ -184,6 +184,10 @@ const FAIL_REASON_KEYS: Record<string, string> = {
   internal: 'pdfExport.fail.internal',
   // T06（#626）合并专用分态：清单篇固定输入失败（篇名经 captureFailedNotice 呈现）
   'capture-failed': 'pdfExport.batch.captureFailed',
+  // T08（#628）远程会话专用分态：执行端缺失 / 跨宿主通道不可达（呈现走
+  // 既有失败行元素——无新 UI 形态）
+  'executor-missing': 'pdfExport.fail.executorMissing',
+  'executor-unreachable': 'pdfExport.fail.executorUnreachable',
 }
 
 /** 缺资源项的 i18n 键映射（kind × reason → 词条；未知值回退通配词条） */

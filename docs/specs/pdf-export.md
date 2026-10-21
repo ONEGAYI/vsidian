@@ -87,6 +87,16 @@
 - 不允许以远端生成、远端保存或要求远端安装浏览器替换用户已确认的行为，也不能仅凭两个端点分别可用就宣称跨宿主闭环已经通过。
 - 不为导出将整个 Vsidian 从 workspace 改成 ui 运行侧。若可行路线需要新增分发单元或其他重要约束，拿证据返回方案讨论。
 
+#### 3.2.1 T08（#628）实施落档
+
+- **分发形态**：双 VSIX——主包（workspace kind，不变）+ 配套执行端扩展 `onegayi.vsidian-pdf-executor`（ui kind，远程窗口跑在本机 ext host）。执行端静态资产（pdfExportPage/pdfjs/mermaid 等）不随执行端包重复分发，运行时从本机安装的主扩展目录读取（双包安装是前提；缺失经能力探测如实报告）。执行端打包入口 `node scripts/packageExecutor.mjs`（清单模板 `src/pdfExecutor/package.json`，版本号与主包同步注入，NLS 从字典生成）。
+- **协议**：`src/shared/pdfRemote.ts` 单一事实源（两端共用）。命令族 `vsidian.pdfExecutor.*`（ping/renderPage/finalizePrint/cancelTask/queryTask/provideResources/writeFileAtomic/statFiles/showSaveDialog/showOpenDialogDir）；错误码进 message 前缀（Error.code 跨端丢失，V02 实测）；进度与挂起资源经轮询查询命令；取消经第二条命令（协作式取消 → 执行端 killSync）。
+- **资源传输**：执行端资源服务（127.0.0.1，在本机起）对 `/res` 增配延迟读取端口——页面请求入队挂起，远端轮询发现后用既有 resolveResource 端口解析 + workspace.fs 读字节，经 provideResources 回填（解析面不建第二份）；单命令写盘按 6MB base64 分块（V02 8MB 实测内保守值），执行端集齐原子落位。
+- **运行侧判定**：`vscode.env.remoteName` 在场 = remote 窗口；主扩展单端运行（workspace kind），remote 窗口中恒在远端——判定无 V02 §2 的端歧义。remote 下四个 job 与预览的端口面（resolveBrowser/createSession/对话框/写盘/stat）整体换成本机执行端适配器（`src/host/pdfExport/pdfRemoteAdapter.ts`），job/模态/指纹复用逻辑零改动；本地窗口链路不变。
+- **保存与路径语义**：保存对话框、批量目标目录选择、冲突 stat 探测与写盘全部在本机执行端执行（远端 `vscode.Uri.file` 会把本机路径落到远端盘——不可用）；结果表显示本机真实路径。批量映射在本机目标目录上解析。
+- **异常面**：执行端未装/未激活 → `executor-missing`；命令超时/断连 → `executor-unreachable`（断连后远端在途 await 无终态——所有跨端调用自带超时，如实报失败不伪成功）；断连后本机执行端的在途任务自然终结并释放（迟到回包无处可去，不污染通道）。取消经命令通道同步终止本机端。**与 V02 最小协议的差异**：保存由远端 orchestrator 驱动（job 端口替换而非把落盘并入 renderPdf 命令）——T07 指纹/复用/代次逻辑零改动的结构代价；断连时在途产物不落盘（已完成文件保留），符合验收标准「不伪成功、已完成文件保留」。
+- **测试面**：e2e 入口 `node test/integration/runPdfRemoteE2E.mjs [--round=main|noexec|disconnect]`（runner 本地 ext host + 命令路由；远端会话钩子经工作区标记文件 `.vsidian-pdf-remote-test.json`——远端读不到宿主 env，V02 §3.4）。物理同机（ssh localhost）如实标注；CentOS 7 真实异机未验证。
+
 ### 3.3 可复用入口
 
 | 责任 | 当前入口 |

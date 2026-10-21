@@ -42,6 +42,12 @@ export interface CreateBrowserExportSessionDeps {
   onPageAssembled?: (html: string) => void
   /** 就绪后整页截图观测点（视觉证据 PNG——测试钩子装配；可空） */
   onPageSnapshot?: (pngBase64: string) => void
+  /**
+   * T08/#628 页码词条覆盖（远端会话）：PDF 页脚文案须跟远端 UI 语言，
+   * 而本会话在 remote 下跑在本机执行端（其 locale 可能不同）——远端
+   * 适配器按自身 locale 取 t() 后传入。缺省（本地会话）直接用本进程 t()。
+   */
+  pageLabel?: { pre: string; mid: string; post: string }
 }
 
 export function createBrowserExportSession(
@@ -148,7 +154,7 @@ export function createBrowserExportSession(
           docTitle: (input.payload.docs[0]?.docName ?? 'document').replace(/\.md$/i, ''),
           dateText: '',
           dark: input.payload.style.dark,
-          pageLabel: {
+          pageLabel: deps.pageLabel ?? {
             pre: t('pdfExport.pageNumber.pre'),
             mid: t('pdfExport.pageNumber.mid'),
             post: t('pdfExport.pageNumber.post'),

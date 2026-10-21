@@ -34,6 +34,18 @@ export interface ExportResourceResolvePort {
   >
   /** 本次固定输入登记过的文档身份集合（/res 与 /resource 的 doc 守卫） */
   knownDocFsPaths(): ReadonlySet<string>
+  /**
+   * T08/#628 远程执行端形态（可选）：资源字节不在本机——/res 不再走
+   * resolve+readFile，改为入队挂起 HTTP 应答，待远端读取字节后回填
+   * （queryTask/provideResources 命令通道配对；见 shared/pdfRemote.ts）。
+   * 在场时 /resource 的 POST 应答直接给 /res URL（解析失败面移至 /res 拉
+   * 取时刻呈现——reqId 路由语义不变）。resolve 字段仍要求实现（类型面
+   * 兼容），远程装配下不会被 /res 调用。
+   */
+  requestBytes?(src: string, doc: string | undefined): Promise<
+    | { ok: true; contentType: string; bytes: Uint8Array }
+    | { ok: false; reason: 'not-found' | 'inaccessible' | 'blocked' }
+  >
 }
 
 export interface ExportResourceServer {
@@ -154,6 +166,37 @@ export async function startExportResourceServer(
     }
 
     if (route === 'res' && req.method === 'GET') {
+      // T08/#628 远程执行端形态：字节经 requestBytes 挂起等待远端回填
+      //（HTTP 应答保持打开——页面 <img> 正常等待装载；远端断连时由队列
+      // 超时收口为 inaccessible，不悬挂页面就绪谓词之外的通道）。doc 守卫
+      // 与本地形态同口径（未登记身份 blocked），解析面整体在远端执行。
+      if (ports.requestBytes !== undefined) {
+        const url = new URL(rawUrl, 'http://127.0.0.1')
+        const src = url.searchParams.get('src') ?? ''
+        const docParam = url.searchParams.get('doc')
+        const doc = docParam !== null && docParam !== '' ? docParam : undefined
+        if (src === '') {
+          sendJson(res, 404, { ok: false, reason: 'blocked' })
+          return
+        }
+        if (doc !== undefined && !ports.knownDocFsPaths().has(doc)) {
+          sendJson(res, 404, { ok: false, reason: 'blocked' })
+          return
+        }
+        const bytesOutcome = await ports.requestBytes(src, doc)
+        if (!bytesOutcome.ok) {
+          sendJson(res, 404, { ok: false, reason: bytesOutcome.reason })
+          return
+        }
+        const body = Buffer.from(bytesOutcome.bytes)
+        res.writeHead(200, {
+          'content-type': bytesOutcome.contentType,
+          'content-length': body.length,
+          'cache-control': 'no-store',
+        })
+        res.end(body)
+        return
+      }
       const outcome = await resolveResourceUrl(rawUrl)
       if (!outcome.ok) {
         sendJson(res, 404, { ok: false, reason: outcome.reason })
@@ -192,6 +235,15 @@ export async function startExportResourceServer(
         return
       }
       const src = typeof body.url === 'string' ? body.url : ''
+      // T08/#628 远程执行端形态：解析面整体移至 /res 拉取时刻（requestBytes
+      // 挂起回填）——POST 直接应答装载地址，失败面在 /res 呈现（页面侧
+      // htmlResource 的失败分态不受影响）
+      if (ports.requestBytes !== undefined) {
+        const q = new URLSearchParams({ src })
+        if (sourceDocUri !== undefined && sourceDocUri !== '') q.set('doc', sourceDocUri)
+        sendJson(res, 200, { reqId, ok: true, url: `${prefix}res?${q.toString()}` })
+        return
+      }
       const outcome = await ports.resolve(src, sourceDocUri)
       if (!outcome.ok) {
         sendJson(res, 200, { reqId, ok: false, reason: outcome.reason })
