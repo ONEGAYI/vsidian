@@ -8,12 +8,14 @@ import { gzipSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import {
   JIEBA_INSTALL_DIR,
+  JIEBA_LOCAL_READ_LIMIT_BYTES,
   JiebaResourceService,
   sha256Hex,
   type JiebaManifestEntry,
   type JiebaResourcePort,
 } from '../../src/host/jiebaResourceService'
-import { planJiebaLocalInstall } from '../../src/shared/jiebaManifest'
+import { extractTarEntries } from '../../src/host/jiebaTar'
+import { planJiebaDownload, planJiebaLocalInstall } from '../../src/shared/jiebaManifest'
 
 const STAGING_DIR = 'jieba-wasm/.staging'
 const PAYLOAD_A = new TextEncoder().encode('jieba test payload a')
@@ -31,6 +33,9 @@ class FakeVscodeFs implements JiebaResourcePort {
   /** local 源外部路径面（绝对路径键，与 globalStorage 相对路径命名空间隔离） */
   readonly externalFiles = new Map<string, Uint8Array>()
   readonly externalDirs = new Set<string>()
+  /** 评审 C1 测试钩子：按路径覆盖 statExternal 报告的 size（构造超限
+   *  场景不必真的分配 64 MB 字节） */
+  readonly externalSizeOverrides = new Map<string, number>()
 
   constructor(private readonly payload: Uint8Array) {}
 
@@ -90,14 +95,24 @@ class FakeVscodeFs implements JiebaResourcePort {
     }
   }
 
-  async statExternal(path: string): Promise<'file' | 'directory' | null> {
-    if (this.externalDirs.has(path)) return 'directory'
-    if (this.externalFiles.has(path)) return 'file'
+  /** 宿主装配层 Uri.file 语义近似：分隔符统一为 /（服务侧 `\` 拼接的
+   *  Windows 路径经归一后命中同一键） */
+  private static norm(path: string): string {
+    return path.replace(/\\/g, '/')
+  }
+
+  async statExternal(path: string): Promise<{ kind: 'file' | 'directory'; size: number } | null> {
+    const key = FakeVscodeFs.norm(path)
+    if (this.externalDirs.has(key)) return { kind: 'directory', size: 0 }
+    const bytes = this.externalFiles.get(key)
+    if (bytes) {
+      return { kind: 'file', size: this.externalSizeOverrides.get(key) ?? bytes.length }
+    }
     return null
   }
 
   async readExternal(path: string): Promise<Uint8Array> {
-    const bytes = this.externalFiles.get(path)
+    const bytes = this.externalFiles.get(FakeVscodeFs.norm(path))
     if (!bytes) throw new Error(`无法读取不存在的文件 '${path}'`)
     return bytes
   }
@@ -203,6 +218,10 @@ describe('planJiebaLocalInstall（local 源规划纯函数）', () => {
     expect(planJiebaLocalInstall('   ')).toEqual({ ok: false, reason: 'invalid-local-path' })
     expect(planJiebaLocalInstall('  D:/pkg  ')).toEqual({ ok: true, kind: 'local', path: 'D:/pkg' })
   })
+
+  it('planJiebaDownload 显式拒绝 local 档（评审 A3：不落入 custom 分支产出误导 reason）', () => {
+    expect(planJiebaDownload('local', '')).toEqual({ ok: false, reason: 'local-mode' })
+  })
 })
 
 describe('JiebaResourceService.download（local 源离线安装，#630）', () => {
@@ -216,6 +235,27 @@ describe('JiebaResourceService.download（local 源离线安装，#630）', () =
     expect(service.getState().installed).toBe(true)
     expect(fs.files.get(`${JIEBA_INSTALL_DIR}/a.js`)).toEqual(PAYLOAD_A)
     expect(fs.dirs.has(STAGING_DIR)).toBe(false)
+  })
+
+  it('Windows 风格路径（尾反斜杠、混合分隔符）：归一后命中同一目录（评审 A5）', async () => {
+    const fs = new FakeVscodeFs(PAYLOAD_A)
+    fs.externalDirs.add('D:/offline/pkg')
+    fs.externalFiles.set('D:/offline/pkg/a.js', PAYLOAD_A)
+    const service = createLocalService(fs, 'D:\\offline\\pkg\\')
+    await service.download()
+    expect(service.getState().notice?.kind).toBe('installed')
+    expect(fs.files.get(`${JIEBA_INSTALL_DIR}/a.js`)).toEqual(PAYLOAD_A)
+  })
+
+  it('退化路径形态（`/` 与裸盘符 `C:\\`）：按无效路径拒绝而非读盘根（评审 C4）', async () => {
+    for (const degenerate of ['/', 'C:\\']) {
+      const fs = new FakeVscodeFs(PAYLOAD_A)
+      const service = createLocalService(fs, degenerate)
+      await service.download()
+      const notice = service.getState().notice
+      expect(notice?.kind).toBe('install-failed')
+      expect((notice as { detail?: string }).detail).toContain('invalid local path')
+    }
   })
 
   it('tgz 形态：npm tarball 解包提取 package/ 前缀条目并校验落盘', async () => {
@@ -257,14 +297,80 @@ describe('JiebaResourceService.download（local 源离线安装，#630）', () =
     expect(fs.files.has(`${JIEBA_INSTALL_DIR}/a.js`)).toBe(false)
   })
 
-  it('哈希不符：install-failed 且无半成品（不覆盖既有安装的判定）', async () => {
+  it('哈希不符（等长篡改，真正触发 sha256 分支）：install-failed 且无半成品', async () => {
     const fs = new FakeVscodeFs(PAYLOAD_A)
     fs.externalDirs.add('D:/offline/tampered')
-    fs.externalFiles.set('D:/offline/tampered/a.js', new TextEncoder().encode('tampered bytes'))
+    // 与 PAYLOAD_A 等长（20 字节）不同内容——size 先行的校验不再拦截，
+    // 断言落到 sha256 分支（评审 A1：原 14 字节用例实际走的是 size 分支）
+    fs.externalFiles.set('D:/offline/tampered/a.js', new TextEncoder().encode('tampered payload !!!'))
     const service = createLocalService(fs, 'D:/offline/tampered')
     await service.download()
-    expect(service.getState().notice?.kind).toBe('install-failed')
+    const notice = service.getState().notice
+    expect(notice?.kind).toBe('install-failed')
+    expect((notice as { detail?: string }).detail).toContain('sha256 mismatch')
     expect(fs.files.has(`${JIEBA_INSTALL_DIR}/a.js`)).toBe(false)
+  })
+
+  it('已有安装时离线重装失败：notice install-failed 但 installed 保持 true、既有文件字节不变（评审 A1）', async () => {
+    const fs = new FakeVscodeFs(PAYLOAD_A)
+    fs.externalDirs.add('D:/offline/pkg')
+    fs.externalFiles.set('D:/offline/pkg/a.js', PAYLOAD_A)
+    const service = createLocalService(fs, 'D:/offline/pkg')
+    await service.download()
+    expect(service.getState().installed).toBe(true)
+    // 改指向等长篡改目录重装：收集阶段即失败，未触碰既有安装
+    fs.externalDirs.add('D:/offline/tampered')
+    fs.externalFiles.set('D:/offline/tampered/a.js', new TextEncoder().encode('tampered payload !!!'))
+    const service2 = new JiebaResourceService(
+      fs, () => ({ mode: 'local', customUrl: '', localPath: 'D:/offline/tampered' }), MINIFEST_ONE_FILE)
+    await service2.download()
+    expect(service2.getState().notice?.kind).toBe('install-failed')
+    expect(service2.getState().installed).toBe(true)
+    expect(fs.files.get(`${JIEBA_INSTALL_DIR}/a.js`)).toEqual(PAYLOAD_A)
+  })
+
+  it('超上限的 tarball 文件：stat size 先行拒绝，不读入内存（评审 C1）', async () => {
+    const fs = new FakeVscodeFs(PAYLOAD_A)
+    fs.externalFiles.set('D:/offline/huge.tgz', buildTarball([['package/pkg/web/a.js', PAYLOAD_A]]))
+    fs.externalSizeOverrides.set('D:/offline/huge.tgz', JIEBA_LOCAL_READ_LIMIT_BYTES + 1)
+    const service = createLocalService(fs, 'D:/offline/huge.tgz')
+    await service.download()
+    const notice = service.getState().notice
+    expect(notice?.kind).toBe('install-failed')
+    expect((notice as { detail?: string }).detail).toContain('exceeds local read limit')
+  })
+
+  it('目录内单文件超上限：逐文件 stat 先行拒绝（评审 C1）', async () => {
+    const fs = new FakeVscodeFs(PAYLOAD_A)
+    fs.externalDirs.add('D:/offline/bigdir')
+    fs.externalFiles.set('D:/offline/bigdir/a.js', PAYLOAD_A)
+    fs.externalSizeOverrides.set('D:/offline/bigdir/a.js', JIEBA_LOCAL_READ_LIMIT_BYTES + 1)
+    const service = createLocalService(fs, 'D:/offline/bigdir')
+    await service.download()
+    expect(service.getState().notice?.kind).toBe('install-failed')
+    expect((service.getState().notice as { detail?: string }).detail).toContain('exceeds local read limit')
+  })
+
+  it('tarball 解压输出上限：超限 gzip 在 gunzip 阶段抛错（评审 C1 zip bomb 防御）', () => {
+    const tgz = buildTarball([['package/pkg/web/a.js', PAYLOAD_A]])
+    // 输出 2048 字节（512 头 + 512 数据 + 1024 收尾），注入 512 上限
+    expect(() => extractTarEntries(tgz, 512)).toThrow()
+  })
+
+  it('采集中途切档：入口源快照决定采集路径与 notice 归类（评审 C2）', async () => {
+    const fs = new FakeVscodeFs(PAYLOAD_A)
+    let reads = 0
+    const service = new JiebaResourceService(
+      fs,
+      () => {
+        reads += 1
+        // 第二次起模拟用户已把源切到 local——若采集器重新读设置即会走错路径
+        return { mode: reads > 1 ? 'local' : 'jsdelivr', customUrl: '', localPath: '' }
+      },
+      MINIFEST_ONE_FILE)
+    await service.download()
+    expect(service.getState().notice?.kind).toBe('downloaded')
+    expect(fs.files.get(`${JIEBA_INSTALL_DIR}/a.js`)).toEqual(PAYLOAD_A)
   })
 
   it('非 tar 普通文件：install-failed（gunzip 失败归入安装失败）', async () => {

@@ -76,9 +76,15 @@ export function createJiebaWiring(
     async statExternal(path) {
       try {
         const info = await vscode.workspace.fs.stat(vscode.Uri.file(path))
-        return (info.type & vscode.FileType.Directory) !== 0 ? 'directory' : 'file'
-      } catch {
-        return null
+        return {
+          kind: (info.type & vscode.FileType.Directory) !== 0 ? 'directory' as const : 'file' as const,
+          size: info.size,
+        }
+      } catch (error) {
+        // 不存在归 null（服务按 not accessible 报告）；权限拒绝/卷离线等
+        // 其余错误透传——install-failed 的 detail 携带底层原因（评审 C3）
+        if ((error as { code?: string }).code === 'FileNotFound') return null
+        throw error
       }
     },
     readExternal: (path) => fsBytes(vscode.Uri.file(path)),

@@ -1035,7 +1035,7 @@ export const en = {
   'wordSegment.customUrlPlaceholder': 'https://example.com/jieba/',
   'wordSegment.localPathPlaceholder': 'D:/resources/jieba-wasm-2.4.0 (directory or .tgz)',
   'wordSegment.resourceLabel': 'jieba resources',
-  'wordSegment.resourceDescription': 'Downloaded on demand into the extension storage (about 4 MB); never bundled with the extension. Deleting falls back to the built-in engine.',
+  'wordSegment.resourceDescription': 'Downloaded on demand into the extension storage (about 4 MB); never bundled with the extension. The local path mode installs from a directory or offline archive instead. Deleting falls back to the built-in engine.',
   'wordSegment.installed': 'jieba-wasm {version} installed and verified.',
   'wordSegment.notInstalled': 'Not installed. The built-in engine is active.',
   'wordSegment.downloading': 'Downloading and verifying…',

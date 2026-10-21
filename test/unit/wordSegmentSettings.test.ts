@@ -9,7 +9,7 @@ import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS, type SettingsPayload } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
-import { isHostToWebview, type HostToWebview } from '../../src/shared/protocol'
+import { isHostToWebview, isWebviewToHost, type HostToWebview } from '../../src/shared/protocol'
 import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
@@ -356,17 +356,19 @@ describe('local 源离线安装与打开资源目录（#630/#631）', () => {
     })
   })
 
-  it('源切 local 后下载按钮文案就地切换「从本地安装」，切回网络档恢复（资源块不重建）', () => {
+  it('源切 local 后下载按钮文案就地切换「从本地安装」，切回网络档恢复（节点 identity 不变——资源块不重建）', () => {
     const { dispatch, parent } = makeProductionView()
     clickNav(parent, zhCn['settings.editorCategory'])
     const buttonOf = (label: string) =>
       [...wordSegmentGroup(parent).querySelectorAll<HTMLButtonElement>('button')]
         .find((b) => b.textContent === label)!
-    expect(buttonOf(zhCn['wordSegment.download'])).toBeTruthy()
+    const before = buttonOf(zhCn['wordSegment.download'])
     dispatch(hostValues({ 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'local' }))
-    expect(buttonOf(zhCn['wordSegment.installLocal'])).toBeTruthy()
+    const afterLocal = buttonOf(zhCn['wordSegment.installLocal'])
+    // 同一节点就地更新而非重建（评审 A6：identity 断言）
+    expect(afterLocal).toBe(before)
     dispatch(hostValues({ 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'jsdelivr' }))
-    expect(buttonOf(zhCn['wordSegment.download'])).toBeTruthy()
+    expect(buttonOf(zhCn['wordSegment.download'])).toBe(before)
   })
 
   it('local 源进行中文案为「读取并校验中…」（wordSegment.state 整渲染路径）', () => {
@@ -379,6 +381,8 @@ describe('local 源离线安装与打开资源目录（#630/#631）', () => {
   })
 
   it('打开资源目录按钮：未安装禁用不点送；已安装可点并上送 wordSegment.openDirectory；下载中禁用', () => {
+    // 协议 guard 对新消息种类的放行钉住（无载荷开关类，与 snippets 族同款）
+    expect(isWebviewToHost({ kind: 'wordSegment.openDirectory' })).toBe(true)
     const { sent, wordSegment, parent } = makeProductionView()
     clickNav(parent, zhCn['settings.editorCategory'])
     const openDir = () =>

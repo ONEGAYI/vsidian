@@ -12,10 +12,19 @@ import { gunzipSync } from 'node:zlib'
 
 const tarTextDecoder = new TextDecoder('utf-8')
 
+/** 解压输出上限（#630 评审 C1）：合法 jieba-wasm tarball 解压后远小于
+ *  此值；离线包属不可信输入（构造 gzip 可几 KB 膨胀数 GB），
+ *  gunzipSync 的 maxOutputLength 在膨胀超限时抛错，防宿主进程内存耗尽 */
+export const JIEBA_TAR_MAX_OUTPUT_BYTES = 256 * 1024 * 1024
+
 /** 解 gzip + 提取全部普通文件条目：Map<条目路径, 字节>（package/ 前缀
- *  保留在键中）。输入不是合法 tar/gzip 时抛错（调用方按下载失败处理） */
-export function extractTarEntries(gzipped: Uint8Array): Map<string, Uint8Array> {
-  const tar = gunzipSync(gzipped)
+ *  保留在键中）。输入不是合法 tar/gzip 时抛错（调用方按下载失败处理）；
+ *  解压输出超过 maxOutputBytes 时抛错（zip bomb 防御） */
+export function extractTarEntries(
+  gzipped: Uint8Array,
+  maxOutputBytes: number = JIEBA_TAR_MAX_OUTPUT_BYTES,
+): Map<string, Uint8Array> {
+  const tar = gunzipSync(gzipped, { maxOutputLength: maxOutputBytes })
   const out = new Map<string, Uint8Array>()
   const headerSize = 512
   for (let offset = 0; offset + headerSize <= tar.length; offset += headerSize) {

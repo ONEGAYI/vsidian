@@ -62,11 +62,14 @@ export type JiebaDownloadPlan =
       files: readonly { file: JiebaManifestFile; url: string }[]
     }
   | { ok: true; kind: 'tarball'; tarballUrl: string }
-  | { ok: false; reason: 'invalid-custom-url' }
+  | { ok: false; reason: 'invalid-custom-url' | 'local-mode' }
 
 /**
- * 解析下载源 → 下载计划。custom 源 URL 形态 = 基址（去尾斜杠）+ '/' +
- * 文件名（用户自托管目录内含两个同名文件；文案写明该约定）。
+ * 解析下载源 → 下载计划（仅网络三档：jsdelivr/npmmirror/custom）。custom
+ * 源 URL 形态 = 基址（去尾斜杠）+ '/' + 文件名（用户自托管目录内含两个
+ * 同名文件；文案写明该约定）。local 档不走 URL 下载（归
+ * planJiebaLocalInstall + 宿主侧本地读取），显式拒绝而非落入 custom
+ * 分支产生误导性 invalid-custom-url（#630 评审 A3）。
  * manifest 缺省用锁定清单；服务层透传自身清单注入（单测以小清单通过
  * files 分支校验——锁定 sha256 无法反向构造测试字节）。
  */
@@ -77,6 +80,9 @@ export function planJiebaDownload(
 ): JiebaDownloadPlan {
   if (mode === 'npmmirror') {
     return { ok: true, kind: 'tarball', tarballUrl: jiebaTarballUrl('npmmirror')! }
+  }
+  if (mode === 'local') {
+    return { ok: false, reason: 'local-mode' }
   }
   let resolveFile: (file: JiebaManifestFile) => string
   if (mode === 'jsdelivr') {

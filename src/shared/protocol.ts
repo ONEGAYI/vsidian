@@ -962,6 +962,8 @@ export type HostToWebview =
         kind: 'downloaded' | 'download-failed' | 'installed' | 'install-failed' | 'deleted' | 'delete-failed' | 'load-failed'
         detail?: string
       } | null
+      // 注：downloaded/installed 变体的运行时载荷另携带 version 字段
+      //（宿主通知取词用；guard 放行额外属性，webview 不消费——自 #239 延续）
       resources: { js: string; wasm: string } | null
     }
   /** #323 默认编辑器守护状态（设置页常规页「默认编辑器」委托组消费）：

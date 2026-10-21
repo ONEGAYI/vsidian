@@ -982,7 +982,7 @@ export const zhCn: Record<MessageKey, string> = {
   'wordSegment.customUrlPlaceholder': 'https://example.com/jieba/',
   'wordSegment.localPathPlaceholder': 'D:/resources/jieba-wasm-2.4.0（目录或 .tgz 文件）',
   'wordSegment.resourceLabel': 'jieba 资源',
-  'wordSegment.resourceDescription': '按需下载到扩展存储（约 4 MB），不随扩展打包。删除后回退内置引擎。',
+  'wordSegment.resourceDescription': '按需下载到扩展存储（约 4 MB），不随扩展打包；本地路径档改为从指定目录或离线包读取。删除后回退内置引擎。',
   'wordSegment.installed': '已安装并校验通过（jieba-wasm {version}）。',
   'wordSegment.notInstalled': '未安装，当前使用内置引擎。',
   'wordSegment.downloading': '下载并校验中…',
