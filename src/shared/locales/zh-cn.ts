@@ -229,6 +229,8 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.mediaNotice.iframe': '网页嵌入不进 PDF，原始地址：',
   'pdfExport.mediaNotice.pdf': 'PDF 文件不嵌入导出内容，原文件：',
   'pdfExport.mediaNotice.web': '网页嵌入不进 PDF，原始地址：',
+  /** 远端身份目标的降级标注（Remote SSH——远端路径纯文本呈现，不可点） */
+  'pdfExport.remoteMediaBadge': '远端文件',
   'pdfExport.embedFailedNotice': '嵌入目标未能装载：{target}',
   /** T04（#624）批量导出清单与结果表（模态批量模式 UI） */
   'pdfExport.batch.chooseTargetDir': '选择导出目标目录',
@@ -265,6 +267,8 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.batch.awaitingResources': '当前文件部分资源缺失，请选择处理方式',
   'pdfExport.batch.doneNotice': '批量导出完成：{success} / {total} 项成功',
   'pdfExport.batch.captureFailed': '读取失败',
+  /** 失败项结果行的单项重试入口（规格 §2.5「失败项可据清单重新发起」） */
+  'pdfExport.batch.retryItem': '重试此项',
   /** T06（#626）合并导出：清单模态合并模式 UI（清单编辑复用 batch 词条） */
   'pdfExport.merge.run': '合并导出…',
   'pdfExport.merge.listTitle': '合并清单',

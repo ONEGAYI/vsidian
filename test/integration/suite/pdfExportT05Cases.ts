@@ -10,6 +10,7 @@ import * as vscode from 'vscode'
 import * as assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { normalizePdfText } from '../../../src/shared/pdfTextNormalize'
+import { exportFailFastError } from './pdfExportEvidence'
 
 const VIEW_TYPE = 'onegayi.vsidian.editor'
 const EXPORT_COMMAND = 'onegayi.vsidian.pdfExport.currentDocument'
@@ -95,9 +96,8 @@ async function runExport(params: Record<string, unknown>): Promise<ModalInfo> {
   })
   return poll('导出终态', async () => {
     const info = await modalState()
-    if (info.phase === 'failed') {
-      throw new Error(`导出失败分态：${info.failReason ?? 'unknown'}：${info.failDetail ?? ''}`)
-    }
+    const fail = exportFailFastError(info)
+    if (fail !== undefined) throw fail
     if (info.phase === 'cancelled') {
       throw new Error('导出意外取消')
     }

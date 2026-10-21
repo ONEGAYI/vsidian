@@ -152,6 +152,8 @@ const CLASS = {
   batchBackButton: 'vsidian-pdfexport-batch-back',
   batchSummary: 'vsidian-pdfexport-batch-summary',
   batchResumeAllButton: 'vsidian-pdfexport-batch-resumeall',
+  /** 双轴评审 P3：结果表失败行的单项重试按钮（终态可重发——规格 §2.5） */
+  batchRetryButton: 'vsidian-pdfexport-batch-retry',
   /** T06（#626）合并模式：合并导出按钮/每篇另起一页开关/单产物状态区 */
   mergeRunButton: 'vsidian-pdfexport-merge-run',
   mergePageBreakCheck: 'vsidian-pdfexport-merge-pagebreak',
@@ -1197,7 +1199,9 @@ export class PdfExportModalView {
     return wrap
   }
 
-  /** 结果表（成功/失败/跳过/取消 + 真实输出路径；失败分态经 T01 词条映射） */
+  /** 结果表（成功/失败/跳过/取消 + 真实输出路径；失败分态经 T01 词条映射）。
+   *  终态阶段（done/cancelled/failed）的失败行附单项重试入口（双轴评审 P3
+   *  ——规格 §2.5「失败项可据清单重新发起」；参数取当前控件值随消息上行） */
   private buildBatchResults(batch: Extract<NonNullable<PdfExportModalStateMessage['batch']>, { mode: 'batch' }>): HTMLElement {
     const wrap = el('div', CLASS.previewPlaceholder)
     wrap.classList.add(CLASS.batchList)
@@ -1211,6 +1215,7 @@ export class PdfExportModalView {
       cancelled: String(counts.cancelled),
       total: String(counts.total),
     })))
+    const retryable = batch.phase === 'done' || batch.phase === 'cancelled' || batch.phase === 'failed'
     const table = el('table', CLASS.batchTable)
     const body = el('tbody', '')
     for (const entry of batch.results) {
@@ -1223,6 +1228,18 @@ export class PdfExportModalView {
       row.appendChild(statusCell)
       const pathCell = el('td', CLASS.batchItemRoot, entry.targetPath ?? (entry.failReason ? t(FAIL_REASON_KEYS[entry.failReason] ?? 'pdfExport.fail.internal') : ''))
       row.appendChild(pathCell)
+      if (retryable && entry.status === 'failed') {
+        const actionCell = el('td', '')
+        const retry = el('button', CLASS.batchRetryButton, t('pdfExport.batch.retryItem')) as HTMLButtonElement
+        retry.addEventListener('click', () => {
+          this.paramsTouched = true
+          this.readControlsIntoParams()
+          this.currentParams = normalizePdfExportOptions(this.currentParams)
+          this.options.postMessage({ kind: 'pdfExportModal.batch.retryItem', id: entry.id, params: this.currentParams })
+        })
+        actionCell.appendChild(retry)
+        row.appendChild(actionCell)
+      }
       body.appendChild(row)
     }
     table.appendChild(body)
@@ -1337,6 +1354,11 @@ export class PdfExportModalView {
         batchBackButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchBackButton}`)),
         batchResumeAllButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchResumeAllButton}`)),
         batchSummaryText: document.querySelector(`.${CLASS.batchSummary}`)?.textContent ?? '',
+        // 双轴评审 P3：失败行重试按钮绘制层状态（可见性 + 文本——终态才在场）
+        batchRetryButtons: Array.from(document.querySelectorAll(`.${CLASS.batchRetryButton}`)).map((n) => ({
+          visible: (n as HTMLElement).offsetParent !== null,
+          text: (n.textContent ?? ''),
+        })),
         // T06（#626）合并面观测：合并按钮/每篇另起一页开关/终态文本
         mergeRunButton: probe(this.mergeRunButtonEl),
         mergeRunButtonDisabled: this.mergeRunButtonEl?.disabled ?? null,

@@ -96,7 +96,7 @@ async function channelCall<T>(exec: PdfRemoteExec, budgets: PdfRemoteBudgets, bu
     return await withTimeout(Promise.resolve(exec(command, arg)) as Promise<T>, timeoutMs, `${label} cross-host timeout (${timeoutMs}ms)`)
   } catch (error) {
     if (isCommandNotFound(error)) {
-      throw new PdfExportRemoteChannelError(`本机执行端扩展未安装或未激活：${command}`, 'missing')
+      throw new PdfExportRemoteChannelError(`local executor extension not installed or inactive: ${command}`, 'missing')
     }
     throw new PdfExportRemoteChannelError(error instanceof Error ? error.message : String(error), 'unreachable')
   }
@@ -242,14 +242,16 @@ export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAda
 
     return {
       async renderPage(input: { payload: PdfExportPagePayload; options: PdfExportOptions }): Promise<PdfRemoteRenderPageResult> {
-        if (disposed) throw new PdfExportBrowserError('launch', '会话已释放（重复 renderPage）')
+        if (disposed) throw new PdfExportBrowserError('launch', 'session already released (duplicate renderPage)')
         taskId = `r${++sessionSeq}-${randomUUID()}`
         // mermaidUri/resBase 由执行端资源服务装配（远端传空串——jobs 已置
         // 空串，多余字段跨端无害；类型经收窄声明）。exec 的同步异常也归一
-        // 为 rejection（防御：通道实现不应同步抛，但抛了也不能绕过解码）
+        // 为 rejection（防御：通道实现不应同步抛，但抛了也不能绕过解码）。
+        // remoteFs 标注（双轴评审 P1）：payload 离开远端文件系统语义、进入
+        // 本机浏览器页面的唯一咽喉——页面据此不给远端 fsPath 产 file:/// 链接。
         const request: PdfRemoteRenderPageRequest = {
           taskId,
-          payload: input.payload as PdfRemoteRenderPageRequest['payload'],
+          payload: { ...input.payload, remoteFs: true } as PdfRemoteRenderPageRequest['payload'],
           options: input.options,
           knownDocFsPaths: [...deps.knownDocFsPaths()],
           pageLabel: deps.pageLabel(),
@@ -272,7 +274,7 @@ export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAda
 
       async finalizePrint(options: PdfExportOptions): Promise<{ bytes: Buffer; bookmarks: PdfBookmarkReport }> {
         if (disposed || taskId === '') {
-          throw new PdfExportBrowserError('print', '页面未就绪（finalizePrint 前置 renderPage 未成功）')
+          throw new PdfExportBrowserError('print', 'page not ready (finalizePrint requires a successful renderPage)')
         }
         try {
           const result = await channelCall<{ pdfBase64: string; bookmarks: PdfBookmarkReport }>(

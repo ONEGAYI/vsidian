@@ -46,6 +46,7 @@ import {
   addToBatchFromDir,
   isMarkdownFilePath,
   isPdfBatchConflictStrategy,
+  mergeBatchResults,
   moveBatchItem,
   planBatchMapping,
   removeBatchItem,
@@ -445,6 +446,10 @@ export function createPdfExportModal(
   let batchIdSeq = 0
   let batchWindowCapture: PdfBatchWindowCapture | undefined
   let hookedBatchTargetDir: string | undefined
+  /** 结果表聚合（双轴评审 P3）：整批轮与单项重试轮共用——job 单轮 state
+   *  只含本轮条目，此处按 id 原位归并（mergeBatchResults 单一事实源），
+   *  重试后既有成功/跳过记录不丢 */
+  let batchResults: PdfBatchResultEntry[] = []
   /** 批量异步操作串行链（收集/对话框/探测不得交错——消息到达序即用户
    *  操作序，晚到的增删看到一致的清单中间态） */
   let batchOpChain: Promise<void> = Promise.resolve()
@@ -729,7 +734,7 @@ export function createPdfExportModal(
         currentIndex: batchJob.state.currentIndex,
         total: batchJob.state.total,
         currentName: batchJob.state.currentName,
-        results: batchJob.state.results,
+        results: batchResults,
         resourceIssues: batchJob.state.resourceIssues,
         failReason: batchJob.state.failReason,
         hookedTargetDir: hookedBatchTargetDir,
@@ -841,6 +846,10 @@ export function createPdfExportModal(
     const phase = batchJob.state.phase
     if (phase === 'running' || phase === 'awaiting-resources' || phase === 'done' || phase === 'cancelled' || phase === 'failed') {
       batchPhase = phase
+    }
+    // 结果聚合：job 单轮结果按 id 原位归并（重试轮替换失败条目、保留其余）
+    if (batchJob.state.results.length > 0) {
+      batchResults = mergeBatchResults(batchResults, batchJob.state.results)
     }
     if (phase === 'idle' || phase === 'done' || phase === 'cancelled' || phase === 'failed') {
       knownDocFsPaths.clear()
@@ -960,6 +969,7 @@ export function createPdfExportModal(
     if (batchJob.isRunning || job.isRunning) return
     cancelInFlightPreview()
     previewLastExportReused = false
+    batchResults = []
     batchWindowCapture = await sessionDeps.captureBatchWindowInput()
     const plan: PdfBatchRunPlan = {
       items: batchItems,
@@ -981,6 +991,34 @@ export function createPdfExportModal(
         )
       }
     })
+  }
+
+  /** 失败项单项重试（双轴评审 P3，规格 §2.5「失败项可据清单重新发起」）：
+   *  终态结果表上按 id 重发单项——复用既有 batchJob 与该条目的映射计划
+   *  （目标路径与策略沿用本轮 confirm 固定值），新一轮固定输入重新捕获
+   *  （窗口级件 + 该文档）；结果经 batchResults 原位归并（成功/跳过不丢）。
+   *  结构性取舍：不把「单条重入」做进 job 状态机——单项计划即同一状态机
+   *  的单元素输入，job 逻辑零改动。phase 在同步段先置 running——终态
+   *  观察面不残留旧 done（重试发起即离开上一轮终态）。 */
+  const retryBatchItem = (id: string, params: PdfExportOptions): void => {
+    if (mode !== 'batch' || batchJob.isRunning || job.isRunning || mergeJob.isRunning) return
+    const item = batchItems.find((i) => i.id === id)
+    const mapping = batchMapping?.find((m) => m.id === id)
+    if (item === undefined || mapping === undefined || mapping.action === 'skip') return
+    cancelInFlightPreview()
+    batchPhase = 'running'
+    notifyState()
+    void (async () => {
+      batchWindowCapture = await sessionDeps.captureBatchWindowInput()
+      knownDocFsPaths.add(item.fsPath)
+      notifyState()
+      await batchJob.run({
+        items: [item],
+        mapping: new Map([[id, mapping]]),
+        options: params,
+        browserPath: defaultsFromSettings(getSettingsSnapshot()).browserPath.trim() || undefined,
+      })
+    })()
   }
 
   const info = (): PdfExportModalInfo => ({
@@ -1282,6 +1320,7 @@ export function createPdfExportModal(
           batchMapping = undefined
           batchTargetDir = undefined
           batchExisting = new Set()
+          batchResults = []
           notifyState()
         }
         return
@@ -1292,6 +1331,14 @@ export function createPdfExportModal(
           return
         }
         batchJob.resolveResourceChoice(message.all === true ? 'resume-all' : 'resume')
+        return
+      }
+      case 'pdfExportModal.batch.retryItem': {
+        // 失败项单项重试（终态结果表入口；params 为 webview 当前控件值）
+        if (mode !== 'batch' || typeof message.id !== 'string') return
+        const { defaults } = defaultsFromSettings(getSettingsSnapshot())
+        const params = normalizePdfExportOptions(message.params as Record<string, unknown> | undefined, defaults)
+        void retryBatchItem(message.id, params)
         return
       }
       default:
@@ -1443,6 +1490,7 @@ export function createPdfExportModal(
       batchStrategy = 'rename'
       hookedBatchTargetDir = undefined
       batchWindowCapture = undefined
+      batchResults = []
     })
   }
 
@@ -1464,6 +1512,7 @@ export function createPdfExportModal(
     batchStrategy = 'rename'
     hookedBatchTargetDir = undefined
     batchWindowCapture = undefined
+    batchResults = []
     notifyState()
   }
 

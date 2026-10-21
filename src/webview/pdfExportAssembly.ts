@@ -16,8 +16,11 @@
 // - payload.embeds 按 inner 精确匹配（块级 embed 块 + 混排提升宿主统一经
 //   data-vsidian-embed-inner 通道）；展开一层——B 的块群挂 B 的 docScope，
 //   B 内嵌块保留占位引用行（与阅读嵌入卡一层展开同边界，循环天然断）。
-// - 非 Markdown 嵌入（payload.mediaEmbeds）降级为静态说明 + 真实链接
-//   （本地 file:/// 真实路径、远端原 URL——不伪装本机路径）。
+// - 非 Markdown 嵌入（payload.mediaEmbeds）与正文 video/audio/iframe 降级
+//   为静态说明 + 不可误导的链接呈现：本地 file:/// 真实路径、http(s) 原
+//   URL；远端身份（payload.remoteFs——Remote SSH 咨询单一判据）不产
+//   file:/// 链接（远端路径以远端标注纯文本呈现，不伪装本机地址——规格
+//   §2.3；决策单一事实源 mediaNoticeTargetOf）。
 // - 预取失败（embedFailures）按块命中才呈现失败说明并计入 failures；
 //   枚举超集不命中即静默（与阅读形态学差异不冒充失败）。
 //
@@ -60,6 +63,8 @@ export const PDF_EXPORT_CLASS_NAMES = {
   notice: 'vsidian-pdf-notice',
   /** 降级说明内链接 */
   noticeLink: 'vsidian-pdf-notice-link',
+  /** 降级说明内远端路径标注（远端身份目标的纯文本呈现——不可点） */
+  noticeRemotePath: 'vsidian-pdf-notice-remote-path',
   /** T06（#626）合并分篇容器（每篇一块——docScope 与资源身份的篇边界） */
   mergeDoc: 'vsidian-pdf-merge-doc',
   /** T06（#626）每篇另起一页（非首篇分篇容器的分页修饰类） */
@@ -157,10 +162,105 @@ function buildMediaNotice(kindLabel: string, linkHref: string, linkText: string)
   return notice
 }
 
+/** 远端目标的降级说明：静态文字 + 远端标注 + 路径纯文本（不可点——本机
+ *  浏览器无该盘，file:/// 形态即伪装；规格 §2.3「说明与链接必须指向真实
+ *  目标」的远端侧形态） */
+function buildRemotePathNotice(kindLabel: string, remotePath: string): HTMLElement {
+  const notice = document.createElement('div')
+  notice.className = PDF_EXPORT_CLASS_NAMES.notice
+  const mark = document.createElement('span')
+  mark.className = PDF_EXPORT_CLASS_NAMES.noticeRemotePath
+  mark.textContent = t('pdfExport.remoteMediaBadge')
+  notice.append(kindLabel, mark, document.createTextNode(remotePath))
+  return notice
+}
+
+/** 仅说明降级（无可表达真实目标：空 src / data: 等非路径非 http 形态） */
+function buildLabelOnlyNotice(kindLabel: string): HTMLElement {
+  const notice = document.createElement('div')
+  notice.className = PDF_EXPORT_CLASS_NAMES.notice
+  notice.textContent = kindLabel
+  return notice
+}
+
 /** 本地 fsPath → file:/// 真实路径链接（Windows 盘符与 POSIX 均归一） */
 export function fileLinkOf(fsPath: string): string {
   const normalized = fsPath.replaceAll('\\', '/')
   return `file://${normalized.startsWith('/') ? '' : '/'}${normalized}`
+}
+
+// ---- 降级链接目标决策（双轴评审 P1/P2 的单一事实源） ----
+//
+// 消费方：块级 ![[媒体/PDF]] 嵌入（consumeEmbedHosts——目标恒为宿主解析的
+// 绝对身份）与行内 video/audio/iframe（degradeMediaElements——src 可能是
+// 文档相对路径，以所属文档身份词法解析）。规则不建第二份：
+// - http(s)：原样真实链接（本地/远端一致）；
+// - 绝对路径（POSIX `/`、Windows 盘符、`\\`）：本地 = file:/// 真实路径；
+//   远端（remoteFs）= 远端标注纯文本，不产链接；
+// - 文档相对路径：以所属文档目录词法解析为绝对目标后按上述分派（`..`
+//   段归并；无文档身份则无可表达地址）；
+// - 其余 scheme（data:/blob: 等）：无可表达真实地址，仅说明。
+
+/** Windows 盘符绝对形态（`X:/`、`X:\`——裸 `X:` 是盘内相对怪语义，不算） */
+const WINDOWS_DRIVE_ABSOLUTE_RE = /^[a-zA-Z]:[\\/]/
+/** 一般 scheme 形态（http(s) 已先行分流；命中即非路径语义） */
+const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/
+
+export type PdfMediaNoticeTarget =
+  | { kind: 'link'; href: string }
+  | { kind: 'remote-path'; path: string }
+  | { kind: 'none' }
+
+/** 相对 src 以所属文档身份词法解析为绝对目标（`/` 分隔；`.`/`..` 段归并） */
+export function resolveDocRelativePath(rel: string, docFsPath: string): string {
+  const cut = docFsPath.lastIndexOf('/')
+  const dir = cut > 0 ? docFsPath.slice(0, cut) : ''
+  const absolute = dir.startsWith('/') || WINDOWS_DRIVE_ABSOLUTE_RE.test(dir)
+  const out: string[] = []
+  for (const part of `${dir === '' ? '' : `${dir}/`}${rel.replaceAll('\\', '/')}`.split('/')) {
+    if (part === '') {
+      if (out.length === 0 && dir.startsWith('/')) out.push('')
+      continue
+    }
+    if (part === '.') continue
+    if (part === '..') {
+      // 绝对身份不向上逃出根（POSIX 前导空段 / 盘符段是根锚）；相对身份
+      // 保留 .. 段（词法保真——无可定位基准时不编造）
+      if (out.length > 0 && out[out.length - 1] !== '' && out[out.length - 1] !== '..' && !/^[a-zA-Z]:$/.test(out[out.length - 1]!)) {
+        out.pop()
+      } else if (!absolute) {
+        out.push('..')
+      }
+      continue
+    }
+    out.push(part)
+  }
+  return out.join('/')
+}
+
+/** 降级链接目标决策（单一事实源——见上方矩阵） */
+export function mediaNoticeTargetOf(
+  target: string,
+  docFsPath: string | undefined,
+  remoteFs: boolean,
+): PdfMediaNoticeTarget {
+  if (target === '') return { kind: 'none' }
+  if (/^https?:\/\//i.test(target)) return { kind: 'link', href: target }
+  const absolute = target.startsWith('/') || target.startsWith('\\') || WINDOWS_DRIVE_ABSOLUTE_RE.test(target)
+  if (!absolute && URL_SCHEME_RE.test(target)) return { kind: 'none' }
+  const resolved = absolute
+    ? target
+    : docFsPath !== undefined && docFsPath !== ''
+      ? resolveDocRelativePath(target, docFsPath)
+      : ''
+  // 解析结果须为绝对身份（文档身份异常时词法结果可能仍相对——无可表达
+  // 真实地址，不产伪 file 链接）
+  if (resolved === '' || !(resolved.startsWith('/') || resolved.startsWith('\\') || WINDOWS_DRIVE_ABSOLUTE_RE.test(resolved))) {
+    return { kind: 'none' }
+  }
+  return remoteFs
+    ? { kind: 'remote-path', path: resolved }
+    : { kind: 'link', href: fileLinkOf(resolved) }
 }
 
 /** 图形容器预降级：导出页无附加组件渲染面，无内置渲染器的图形语言围栏
@@ -181,31 +281,27 @@ function degradeUnsupportedGraphicContainers(root: ParentNode): void {
 }
 
 /** 媒体元素降级（video/audio/iframe → 静态说明 + 真实链接）：
- *  PDF 页面/视频帧/网页截图不进正文（规格 §2.3 硬边界）；src 保留真实
- *  目标（http(s) 原样、本地路径解析为 file:///） */
-function degradeMediaElements(root: ParentNode): void {
+ *  PDF 页面/视频帧/网页截图不进正文（规格 §2.3 硬边界）；目标经
+ *  mediaNoticeTargetOf 单一事实源决策（http(s) 原样、本地路径 file:///、
+ *  远端身份纯文本标注）。相对 src 先被 prepareHtmlResources 剥离——原文
+ *  在 dataset.vsidianMediaSrc（memo），此处优先读 memo 再读属性/source 子
+ *  元素（双轴评审 P2：不读 memo 会丢链接，读属性拼相对路径会产伪地址） */
+function degradeMediaElements(root: ParentNode, docFsPath: string, remoteFs: boolean): void {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('video, audio, iframe'))) {
+    const sourceEl = el.querySelector('source')
     const raw = el.getAttribute('src')
-      ?? el.querySelector('source')?.getAttribute('src')
+      ?? el.dataset['vsidianMediaSrc']
+      ?? sourceEl?.getAttribute('src')
+      ?? sourceEl?.dataset['vsidianMediaSrc']
       ?? ''
     const tag = el.tagName.toLowerCase()
     const label = t(`pdfExport.mediaNotice.${tag === 'iframe' ? 'iframe' : 'media'}`)
-    let href = ''
-    let linkText = raw
-    if (/^https?:\/\//i.test(raw)) {
-      href = raw
-    } else if (raw !== '') {
-      href = fileLinkOf(raw)
-      linkText = raw
-    }
-    const notice = href === ''
-      ? (() => {
-        const n = document.createElement('div')
-        n.className = PDF_EXPORT_CLASS_NAMES.notice
-        n.textContent = label
-        return n
-      })()
-      : buildMediaNotice(label, href, linkText)
+    const target = mediaNoticeTargetOf(raw, docFsPath, remoteFs)
+    const notice = target.kind === 'link'
+      ? buildMediaNotice(label, target.href, raw)
+      : target.kind === 'remote-path'
+        ? buildRemotePathNotice(label, target.path)
+        : buildLabelOnlyNotice(label)
     el.replaceWith(notice)
   }
 }
@@ -295,7 +391,9 @@ export function mountExportDocument(
 
   /** 嵌入消费（块级 embed 块 + 混排提升宿主统一按 data-vsidian-embed-inner；
    *  T06 合并分篇按篇传入各自的嵌入面——嵌入解析以来源文档为基准，不跨
-   *  篇混配；docIndex 在场时展开容器内的标题埋点补挂宿主篇序） */
+   *  篇混配；docIndex 在场时展开容器内的标题埋点补挂宿主篇序。远端身份
+   *  （remoteFs）只作用于非 Markdown 嵌入的降级链接形态——见
+   *  mediaNoticeTargetOf） */
   const consumeEmbedHosts = (
     root: HTMLElement,
     embedByInner: Map<string, PdfExportEmbedEntry>,
@@ -303,6 +401,7 @@ export function mountExportDocument(
     failedInners: ReadonlySet<string>,
     embedFailures: ReadonlyArray<{ inner: string; reason: string }>,
     docIndex: number | undefined,
+    remoteFs: boolean,
   ): void => {
     for (const host of Array.from(root.querySelectorAll<HTMLElement>('[data-vsidian-embed-inner]'))) {
       const inner = host.dataset['vsidianEmbedInner'] ?? ''
@@ -320,18 +419,17 @@ export function mountExportDocument(
       const media = mediaByInner.get(inner)
       if (media !== undefined) {
         const label = t(`pdfExport.mediaNotice.${media.kind === 'pdf' ? 'pdf' : media.kind === 'web' ? 'web' : 'media'}`)
+        // 嵌入身份目标的链接决策与行内媒体同一事实源（mediaNoticeTargetOf）：
+        // web = 远端 URL 真实链接；pdf/media = 宿主解析的绝对 fsPath——本地
+        // 产 file:/// 真实路径，远端纯文本标注（不伪装本机地址）
         const target = media.kind === 'web'
-          ? media.url ?? ''
-          : media.fsPath !== undefined ? fileLinkOf(media.fsPath) : ''
-        const linkText = media.kind === 'web' ? media.url ?? inner : media.fsPath ?? inner
-        const notice = target === ''
-          ? (() => {
-            const n = document.createElement('div')
-            n.className = PDF_EXPORT_CLASS_NAMES.notice
-            n.textContent = label
-            return n
-          })()
-          : buildMediaNotice(label, target, linkText)
+          ? (media.url !== undefined && media.url !== '' ? { kind: 'link' as const, href: media.url } : { kind: 'none' as const })
+          : media.fsPath !== undefined ? mediaNoticeTargetOf(media.fsPath, undefined, remoteFs) : { kind: 'none' as const }
+        const notice = target.kind === 'link'
+          ? buildMediaNotice(label, target.href, media.kind === 'web' ? media.url ?? inner : media.fsPath ?? inner)
+          : target.kind === 'remote-path'
+            ? buildRemotePathNotice(label, target.path)
+            : buildLabelOnlyNotice(label)
         host.replaceWith(notice)
         continue
       }
@@ -349,6 +447,7 @@ export function mountExportDocument(
   }
 
   const mainScope = docScopeKeyOf(main.fsPath)
+  const remoteFs = payload.remoteFs === true
   if (payload.merge !== undefined) {
     // T06（#626）合并分篇挂载：每篇一个分篇容器（docScope/资源身份按篇
     //  隔离——样式与相对资源不跨篇污染）；pageBreak 时非首篇另起一页
@@ -371,6 +470,7 @@ export function mountExportDocument(
         new Set(entry.embedFailures.map((e) => e.inner)),
         entry.embedFailures,
         index,
+        remoteFs,
       )
     })
   } else if (payload.fragments !== undefined) {
@@ -397,6 +497,7 @@ export function mountExportDocument(
       failedInners,
       payload.embedFailures,
       undefined,
+      remoteFs,
     )
   }
 
@@ -426,7 +527,7 @@ export function mountExportDocument(
     degradeUnsupportedGraphicContainers(root)
     renderMermaidIn(root)
     renderGraphicBlockInto(root)
-    degradeMediaElements(root)
+    degradeMediaElements(root, fsPath, remoteFs)
   }
 
   // 文档样式：A 与各 B 的 docScope 独立装载（合并不跨篇污染的隔离基础）

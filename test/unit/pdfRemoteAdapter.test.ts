@@ -137,6 +137,8 @@ describe('会话（renderPage/finalizePrint/cancel）', () => {
     expect(request.knownDocFsPaths).toEqual(['/d/a.md'])
     expect(request.pageLabel).toEqual({ pre: '第 ', mid: ' 页 / 共 ', post: ' 页' })
     expect(request.payload.docs[0]!.text).toBe('# t')
+    // 双轴评审 P1：远端身份在 renderPage 咽喉统一标注（页面据此不给远端 fsPath 产 file:/// 链接）
+    expect(request.payload.remoteFs).toBe(true)
     expect(typeof request.taskId).toBe('string')
   })
 

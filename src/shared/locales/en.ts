@@ -239,6 +239,8 @@ export const en = {
   'pdfExport.mediaNotice.iframe': 'Web frames are not embedded into the PDF, original address: ',
   'pdfExport.mediaNotice.pdf': 'PDF files are not embedded into the export, original file: ',
   'pdfExport.mediaNotice.web': 'Web frames are not embedded into the PDF, original address: ',
+  /** Remote-target fallback badge (Remote SSH — remote path shown as plain text, not clickable) */
+  'pdfExport.remoteMediaBadge': 'remote file',
   'pdfExport.embedFailedNotice': 'Embed target could not be loaded: {target}',
   /** T04 (#624) Batch export list and results table (modal batch-mode UI) */
   'pdfExport.batch.chooseTargetDir': 'Choose target folder',
@@ -275,6 +277,8 @@ export const en = {
   'pdfExport.batch.awaitingResources': 'Some resources failed for the current file — choose how to continue',
   'pdfExport.batch.doneNotice': 'Batch export finished: {success} of {total} succeeded',
   'pdfExport.batch.captureFailed': 'read failed',
+  /** Per-item retry entry on failed result rows (spec §2.5 "failed items can be re-run from the list") */
+  'pdfExport.batch.retryItem': 'Retry this item',
   /** T06 (#626) merge export: list-modal merge mode UI (list editing reuses
    *  the batch entries) */
   'pdfExport.merge.run': 'Merge export…',

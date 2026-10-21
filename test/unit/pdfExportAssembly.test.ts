@@ -9,9 +9,11 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 import {
   evaluateExportReadiness,
   fileLinkOf,
+  mediaNoticeTargetOf,
   mountExportDocument,
   PDF_EXPORT_CLASS_NAMES,
   PDF_EXPORT_HEADING_DOC_ATTR,
+  resolveDocRelativePath,
   type PdfExportAssemblyHandle,
 } from '../../src/webview/pdfExportAssembly'
 import { MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, GRAPHIC_LANG_ATTR } from '../../src/shared/mermaid'
@@ -412,6 +414,162 @@ describe('fileLinkOf：本机真实路径链接', () => {
     expect(fileLinkOf('D:/vault/a b/图.png')).toBe('file:///D:/vault/a b/图.png')
     expect(fileLinkOf('D:\\vault\\图.png')).toBe('file:///D:/vault/图.png')
     expect(fileLinkOf('/home/u/note.pdf')).toBe('file:///home/u/note.pdf')
+  })
+})
+
+// ---- 双轴评审 P1/P2：远端身份与相对路径的降级链接形态 ----
+
+describe('mountExportDocument：远端身份降级（remoteFs，P1）', () => {
+  function mountRemote(overrides: Partial<PdfExportPagePayload>): HTMLElement {
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    mountExportDocument(root, payloadOf({ remoteFs: true, ...overrides }), {
+      images: { resolve: async () => ({ ok: false, reason: 'blocked' }) },
+      channel: { send: async (m) => ({ reqId: m.reqId, ok: false, reason: 'blocked' }) },
+    })
+    return root
+  }
+
+  it('远端 fsPath 的媒体/PDF 嵌入：无 file:/// 链接，远端标注 + 路径纯文本', () => {
+    const root = mountRemote({
+      mediaEmbeds: [
+        { inner: '视频丙.mp4', kind: 'media', fsPath: '/home/u/vault/视频丙.mp4' },
+        { inner: '文档丁.pdf', kind: 'pdf', fsPath: '/home/u/vault/文档丁.pdf' },
+      ],
+    })
+    // 不伪装本机地址：任何 file 链接都不得出现（规格 §2.3）
+    expect(root.querySelector(`a.${PDF_EXPORT_CLASS_NAMES.noticeLink}[href^="file:"]`)).toBeNull()
+    const marks = Array.from(root.querySelectorAll(`.${PDF_EXPORT_CLASS_NAMES.noticeRemotePath}`))
+    expect(marks).toHaveLength(2)
+    expect(marks.every((m) => m.textContent === '远端文件')).toBe(true)
+    const notices = Array.from(root.querySelectorAll(`.${PDF_EXPORT_CLASS_NAMES.notice}`))
+    expect(notices.some((n) => (n.textContent ?? '').includes('/home/u/vault/视频丙.mp4'))).toBe(true)
+    expect(notices.some((n) => (n.textContent ?? '').includes('/home/u/vault/文档丁.pdf'))).toBe(true)
+  })
+
+  it('远端 web 嵌入：http(s) 原真实链接保持（远端身份只作用于文件路径目标）', () => {
+    const payload = payloadOf({
+      remoteFs: true,
+      embeds: [],
+      embedFailures: [],
+    })
+    payload.docs[0] = {
+      fsPath: '/home/u/vault/笔记甲.md',
+      docName: '笔记甲.md',
+      text: '![[https://example.com/clip]]',
+      version: 3,
+    }
+    payload.mediaEmbeds = [{ inner: 'https://example.com/clip', kind: 'web', url: 'https://example.com/clip' }]
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    mountExportDocument(root, payload, {
+      images: { resolve: async () => ({ ok: false, reason: 'blocked' }) },
+      channel: { send: async (m) => ({ reqId: m.reqId, ok: false, reason: 'blocked' }) },
+    })
+    const link = root.querySelector<HTMLAnchorElement>(`a.${PDF_EXPORT_CLASS_NAMES.noticeLink}`)
+    expect(link?.getAttribute('href')).toBe('https://example.com/clip')
+  })
+
+  it('远端正文相对路径媒体/iframe：以所属文档身份解析为绝对远端路径纯文本', () => {
+    const payload = payloadOf({
+      remoteFs: true,
+      embeds: [],
+      mediaEmbeds: [],
+      embedFailures: [],
+    })
+    payload.docs[0] = {
+      fsPath: '/home/u/vault/笔记甲.md',
+      docName: '笔记甲.md',
+      text: '<video src="sub/远端视频.mp4"></video>\n\n<iframe src="sub/page.html"></iframe>',
+      version: 3,
+    }
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    mountExportDocument(root, payload, {
+      images: { resolve: async () => ({ ok: false, reason: 'blocked' }) },
+      channel: { send: async (m) => ({ reqId: m.reqId, ok: false, reason: 'blocked' }) },
+    })
+    expect(root.querySelector('video')).toBeNull()
+    expect(root.querySelector('iframe')).toBeNull()
+    expect(root.querySelector(`a.${PDF_EXPORT_CLASS_NAMES.noticeLink}`)).toBeNull()
+    expect(root.querySelectorAll(`.${PDF_EXPORT_CLASS_NAMES.noticeRemotePath}`)).toHaveLength(2)
+    const text = root.textContent ?? ''
+    expect(text).toContain('/home/u/vault/sub/远端视频.mp4')
+    expect(text).toContain('/home/u/vault/sub/page.html')
+  })
+})
+
+describe('mountExportDocument：本地相对路径降级（P2）', () => {
+  it('相对 src 的 video（剥离 memo）与 iframe 按所属文档解析为真实 file 链接', () => {
+    const payload = payloadOf({ embeds: [], mediaEmbeds: [], embedFailures: [] })
+    payload.docs[0]!.text = '<video src="sub/影片乙.mp4"></video>\n\n<iframe src="sub/页面丙.html"></iframe>'
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    mountExportDocument(root, payload, {
+      images: { resolve: async () => ({ ok: false, reason: 'blocked' }) },
+      channel: { send: async (m) => ({ reqId: m.reqId, ok: false, reason: 'blocked' }) },
+    })
+    expect(root.querySelector('video')).toBeNull()
+    expect(root.querySelector('iframe')).toBeNull()
+    const hrefs = Array.from(root.querySelectorAll<HTMLAnchorElement>(`a.${PDF_EXPORT_CLASS_NAMES.noticeLink}`))
+      .map((a) => a.getAttribute('href') ?? '')
+    // 相对路径以文档目录解析（不再拼成 file:///sub/... 伪根地址）
+    expect(hrefs).toContain('file:///D:/vault/sub/影片乙.mp4')
+    expect(hrefs).toContain('file:///D:/vault/sub/页面丙.html')
+    expect(hrefs.some((href) => href === 'file:///sub/影片乙.mp4' || href === 'file:///sub/页面丙.html')).toBe(false)
+  })
+
+  it('data: URI 媒体无可表达真实地址：仅说明，无链接无远端标注', () => {
+    const payload = payloadOf({ embeds: [], mediaEmbeds: [], embedFailures: [] })
+    payload.docs[0]!.text = '<video src="data:video/mp4;base64,AAAA"></video>'
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    mountExportDocument(root, payload, {
+      images: { resolve: async () => ({ ok: false, reason: 'blocked' }) },
+      channel: { send: async (m) => ({ reqId: m.reqId, ok: false, reason: 'blocked' }) },
+    })
+    expect(root.querySelector('video')).toBeNull()
+    expect(root.querySelector(`a.${PDF_EXPORT_CLASS_NAMES.noticeLink}`)).toBeNull()
+    expect(root.querySelector(`.${PDF_EXPORT_CLASS_NAMES.noticeRemotePath}`)).toBeNull()
+    expect(root.querySelector(`.${PDF_EXPORT_CLASS_NAMES.notice}`)).not.toBeNull()
+  })
+})
+
+describe('mediaNoticeTargetOf：降级链接决策矩阵（单一事实源）', () => {
+  const DOC = 'D:/vault/笔记甲.md'
+
+  it('http(s) 原样链接；data:/blob: 等 scheme 无可表达地址', () => {
+    expect(mediaNoticeTargetOf('https://e.com/v.mp4', DOC, false)).toEqual({ kind: 'link', href: 'https://e.com/v.mp4' })
+    expect(mediaNoticeTargetOf('http://e.com/v.mp4', DOC, true)).toEqual({ kind: 'link', href: 'http://e.com/v.mp4' })
+    expect(mediaNoticeTargetOf('data:video/mp4;base64,AA', DOC, false)).toEqual({ kind: 'none' })
+    expect(mediaNoticeTargetOf('blob:https://e.com/x', DOC, true)).toEqual({ kind: 'none' })
+    expect(mediaNoticeTargetOf('', DOC, false)).toEqual({ kind: 'none' })
+  })
+
+  it('绝对路径：本地 file:/// 真实链接；远端纯文本（不伪装）', () => {
+    expect(mediaNoticeTargetOf('/home/u/v.mp4', DOC, false)).toEqual({ kind: 'link', href: 'file:///home/u/v.mp4' })
+    expect(mediaNoticeTargetOf('E:\\media\\x.mp4', DOC, false)).toEqual({ kind: 'link', href: 'file:///E:/media/x.mp4' })
+    expect(mediaNoticeTargetOf('/home/u/v.mp4', DOC, true)).toEqual({ kind: 'remote-path', path: '/home/u/v.mp4' })
+  })
+
+  it('相对路径以所属文档身份解析；无文档身份则无可表达地址', () => {
+    expect(mediaNoticeTargetOf('sub/v.mp4', DOC, false)).toEqual({ kind: 'link', href: 'file:///D:/vault/sub/v.mp4' })
+    expect(mediaNoticeTargetOf('sub/v.mp4', DOC, true)).toEqual({ kind: 'remote-path', path: 'D:/vault/sub/v.mp4' })
+    expect(mediaNoticeTargetOf('sub/v.mp4', undefined, false)).toEqual({ kind: 'none' })
+  })
+
+  it('盘符形态不被误判为 scheme（c:/x 是路径）', () => {
+    expect(mediaNoticeTargetOf('C:/media/x.mp4', DOC, false)).toEqual({ kind: 'link', href: 'file:///C:/media/x.mp4' })
+  })
+})
+
+describe('resolveDocRelativePath：文档身份词法解析', () => {
+  it('Windows 与 POSIX 文档身份拼接相对段；. 与 .. 归并', () => {
+    expect(resolveDocRelativePath('sub/v.mp4', 'D:/vault/n.md')).toBe('D:/vault/sub/v.mp4')
+    expect(resolveDocRelativePath('./sub/../v.mp4', 'D:/vault/n.md')).toBe('D:/vault/v.mp4')
+    expect(resolveDocRelativePath('sub\\v.mp4', 'D:/vault/n.md')).toBe('D:/vault/sub/v.mp4')
+    expect(resolveDocRelativePath('sub/v.mp4', '/home/u/n.md')).toBe('/home/u/sub/v.mp4')
+    expect(resolveDocRelativePath('../v.mp4', '/home/u/n.md')).toBe('/home/v.mp4')
   })
 })
 

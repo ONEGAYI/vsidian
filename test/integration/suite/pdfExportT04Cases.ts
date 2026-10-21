@@ -357,6 +357,34 @@ export const pdfExportT04Cases: Array<[string, () => Promise<void>]> = [
     const bText = normalizePdfText((await extractPdfText(bBytes)).pages.join('\n'))
     assert.ok(bText.includes('PDF-T04-DIR1-SUB-B'), '成功项产物应含标记正文')
 
+    // ---- 双轴评审 P3：失败项单项重试（规格 §2.5「失败项可据清单重新发起」）----
+    // 补建缺失文件后按 id 重发单项：新一轮固定输入重新捕获（未打开走工作区
+    // 读取通道），失败项翻成功；既有 skip/success 结果原位保留（batchResults
+    // 按 id 归并——job 单轮 state 只含本轮条目）。先等 phase 离开旧终态
+    // （宿主同步段已置 running），再等重试轮 done——不吃到上一轮的 done 快照
+    await writeFile(norm(path.join(wsDir, 'pdf-batch/does-not-exist.md')), '# PDF-T04-RETRY-CONTENT\n', 'utf8')
+    const failedEntry = done.results.find((r) => r.status === 'failed')!
+    await inject({ kind: 'pdfExportModal.batch.retryItem', id: failedEntry.id, params: { paper: 'a4', orientation: 'portrait', marginMm: 18, scale: 1 } })
+    await poll('单项重试进入运行', async () => {
+      const info = await modalState()
+      return info.batch?.phase === 'running' ? true : undefined
+    }, 30000)
+    const retried = await poll('单项重试完成', async () => {
+      const info = await modalState()
+      if (info.batch?.phase === 'failed') {
+        throw new Error(`批量失败分态：${info.batch.failReason ?? 'unknown'}`)
+      }
+      return info.batch?.phase === 'done' ? info.batch : undefined
+    }, 180000)
+    assert.deepEqual(
+      retried.results.map((r) => `${r.docName}:${r.status}`),
+      ['a.md:skipped', 'b.md:success', 'does-not-exist.md:success'],
+      '重试后失败项翻成功，既有 skip/success 原位保留',
+    )
+    const retryBytes = Buffer.from(await readFile(retried.results[2]!.targetPath!))
+    const retryText = normalizePdfText((await extractPdfText(retryBytes)).pages.join('\n'))
+    assert.ok(retryText.includes('PDF-T04-RETRY-CONTENT'), '重试产物应含补建文件正文')
+
     await vscode.commands.executeCommand('workbench.action.closeAllEditors').then(() => undefined, () => undefined)
   }],
 

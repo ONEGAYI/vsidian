@@ -72,7 +72,7 @@ export async function launchHeadlessBrowser(options: LaunchOptions): Promise<Lau
 
   const devtoolsPromise = new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`等待 DevTools 监听超时（${timeoutMs}ms）——目标不是可调试浏览器或启动失败；stderr 头部：${stderrText.slice(0, 400)}`))
+      reject(new Error(`timed out waiting for DevTools listener (${timeoutMs}ms) — target is not a debuggable browser or launch failed; stderr head: ${stderrText.slice(0, 400)}`))
     }, timeoutMs)
     proc.stderr!.on('data', (chunk: Buffer) => {
       stderrText += chunk.toString('utf8')
@@ -85,11 +85,11 @@ export async function launchHeadlessBrowser(options: LaunchOptions): Promise<Lau
     })
     proc.on('error', (error) => {
       clearTimeout(timer)
-      reject(new Error(`spawn 失败：${(error as NodeJS.ErrnoException).code ?? ''} ${error.message}`))
+      reject(new Error(`spawn failed: ${(error as NodeJS.ErrnoException).code ?? ''} ${error.message}`))
     })
     proc.on('exit', (code, signal) => {
       clearTimeout(timer)
-      if (!wsUrl) reject(new Error(`浏览器进程提前退出（code=${code} signal=${signal}）；stderr 头部：${stderrText.slice(0, 400)}`))
+      if (!wsUrl) reject(new Error(`browser process exited early (code=${code} signal=${signal}); stderr head: ${stderrText.slice(0, 400)}`))
     })
   })
 
@@ -156,7 +156,7 @@ export async function createPageSession(connection: CdpConnection): Promise<{ se
 /** 导航并等待 Page.loadEventFired（订阅先于 navigate，事件不丢）。 */
 export async function navigateAndWaitLoad(session: CdpSession, url: string, timeoutMs = 20_000): Promise<void> {
   const loadFired = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`loadEventFired 超时（${timeoutMs}ms）：${url}`)), timeoutMs)
+    const timer = setTimeout(() => reject(new Error(`loadEventFired timeout (${timeoutMs}ms): ${url}`)), timeoutMs)
     session.on('Page.loadEventFired', () => { clearTimeout(timer); resolve() })
   })
   await session.send('Page.navigate', { url })
@@ -167,7 +167,7 @@ export async function navigateAndWaitLoad(session: CdpSession, url: string, time
  * 永不返回——超时显式报错比拖死宿主可诊断（V01 §10.2 实测）。 */
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} 超时（${ms}ms）`)), ms)
+    const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
     promise.then(
       (value) => { clearTimeout(timer); resolve(value) },
       (error) => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))) },
@@ -191,11 +191,11 @@ export async function evaluate<T>(session: CdpSession, expression: string, optio
   if (result.exceptionDetails) {
     const detail = result.exceptionDetails.exception?.description
       ?? (result.exceptionDetails.exception?.value !== undefined ? JSON.stringify(result.exceptionDetails.exception.value) : '')
-    throw new Error(`页面 evaluate 异常：${result.exceptionDetails.text ?? ''} ${String(detail).slice(0, 500)}`)
+    throw new Error(`page evaluate exception: ${result.exceptionDetails.text ?? ''} ${String(detail).slice(0, 500)}`)
   }
   const inner = result.result
-  if (!inner) throw new Error('Runtime.evaluate 无返回结果')
-  if (inner.subtype === 'error') throw new Error(`页面 evaluate 抛错：${inner.description ?? 'unknown'}`)
+  if (!inner) throw new Error('Runtime.evaluate returned no result')
+  if (inner.subtype === 'error') throw new Error(`page evaluate threw: ${inner.description ?? 'unknown'}`)
   return inner.value as T
 }
 

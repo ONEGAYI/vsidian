@@ -116,6 +116,13 @@ export interface PdfExportPagePayload {
   /** T03（#623）选区片段（在场 = 选区导出：替代 docs[0] 全文挂载；
    *  空数组 = 零正文——不回落全文，不误触发全文导出） */
   fragments?: PdfExportSelectionFragment[]
+  /** 远端文件系统身份（双轴评审 P1，规格 §2.3「不能将远端路径伪装成可在
+   *  本机打开的文件地址」）：true = payload 内 fsPath 属 Remote SSH 工作区
+   *  （文档在远端、浏览器与产物在本机）——媒体/PDF 嵌入与行内媒体降级
+   *  **不产出 file:/// 链接**（远端路径以远端标注纯文本呈现）；http(s)
+   *  目标不受影响。由远端适配器在 renderPage 咽喉统一标注（链接规则的
+   *  身份判据单一事实源——payload 其余构建点零感知）；本地窗口缺省。 */
+  remoteFs?: boolean
   /** 阅读宽松换行（#423：渲染器 breaks 与阅读视图同值） */
   breaks: boolean
   /** mermaid 产物地址（http 服务同源供） */

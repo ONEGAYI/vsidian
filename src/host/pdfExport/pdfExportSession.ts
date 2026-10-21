@@ -92,23 +92,23 @@ export function createBrowserExportSession(
       failures: PdfExportFailureItem[]
       headings: PdfHeadingMark[]
     }> {
-      if (released) throw new PdfExportBrowserError('launch', '会话已释放（重复 renderPage）')
+      if (released) throw new PdfExportBrowserError('launch', 'session already released (duplicate renderPage)')
       try {
         try {
           launched = await launchHeadlessBrowser({ executablePath })
         } catch (error) {
-          throw new PdfExportBrowserError('launch', `浏览器启动失败：${error instanceof Error ? error.message : String(error)}`)
+          throw new PdfExportBrowserError('launch', `browser launch failed: ${error instanceof Error ? error.message : String(error)}`)
         }
         try {
           server = await startExportResourceServer(deps.outWebviewDir, deps.resourceResolve)
         } catch (error) {
-          throw new PdfExportBrowserError('launch', `导出资源服务启动失败：${error instanceof Error ? error.message : String(error)}`)
+          throw new PdfExportBrowserError('launch', `export resource server failed to start: ${error instanceof Error ? error.message : String(error)}`)
         }
         let session
         try {
           session = await createPageSession(launched.connection)
         } catch (error) {
-          throw new PdfExportBrowserError('launch', `页面会话建立失败：${error instanceof Error ? error.message : String(error)}`)
+          throw new PdfExportBrowserError('launch', `page session setup failed: ${error instanceof Error ? error.message : String(error)}`)
         }
         pageSession = session.session
         const pageUrl = `${server.baseUrl}/export.html`
@@ -127,7 +127,7 @@ export function createBrowserExportSession(
         try {
           await navigateAndWaitLoad(session.session, pageUrl)
         } catch (error) {
-          throw new PdfExportBrowserError('navigate', `导出页导航失败：${error instanceof Error ? error.message : String(error)}`)
+          throw new PdfExportBrowserError('navigate', `export page navigation failed: ${error instanceof Error ? error.message : String(error)}`)
         }
         const ready = await waitForExportReady(session.session)
         if (!ready.ok) {
@@ -194,7 +194,7 @@ export function createBrowserExportSession(
 
     async finalizePrint(options: PdfExportOptions): Promise<{ bytes: Buffer; bookmarks: PdfBookmarkReport }> {
       if (!pageRendered || released || !launched || !pageSession) {
-        throw new PdfExportBrowserError('print', '页面未就绪（finalizePrint 前置 renderPage 未成功）')
+        throw new PdfExportBrowserError('print', 'page not ready (finalizePrint requires a successful renderPage)')
       }
       const session = pageSession
       try {
@@ -273,7 +273,7 @@ export function createBrowserExportSession(
       } catch (error) {
         releaseKill()
         if (error instanceof PdfExportBrowserError) throw error
-        throw new PdfExportBrowserError('print', `printToPDF 失败：${error instanceof Error ? error.message : String(error)}`)
+        throw new PdfExportBrowserError('print', `printToPDF failed: ${error instanceof Error ? error.message : String(error)}`)
       }
     },
 

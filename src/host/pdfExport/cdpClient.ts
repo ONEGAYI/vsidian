@@ -48,7 +48,7 @@ function parseFrameHeader(buf: Buffer): FrameHeader | null {
   } else if (length === 127) {
     if (buf.length < 10) return null
     const big = buf.readBigUInt64BE(2)
-    if (big > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('WebSocket 帧长度超过安全整数')
+    if (big > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('WebSocket frame length exceeds safe integer')
     length = Number(big)
     headerSize = 10
   }
@@ -72,7 +72,7 @@ export class MiniWebSocket {
 
   constructor(private options: MiniWebSocketOptions) {
     const url = new URL(options.url)
-    if (url.protocol !== 'ws:') throw new Error(`仅支持 ws://（导出场景为 127.0.0.1 本地调试端口），收到 ${url.protocol}`)
+    if (url.protocol !== 'ws:') throw new Error(`only ws:// is supported (export uses a 127.0.0.1 local debug port), got ${url.protocol}`)
     const port = Number(url.port) || 80
     const key = randomBytes(16).toString('base64')
     this.ready = new Promise((resolve, reject) => {
@@ -91,8 +91,8 @@ export class MiniWebSocket {
     })
     this.socket.on('data', (chunk: Buffer) => this.onData(chunk))
     this.socket.on('error', (error) => {
-      if (!this.established) this.rejectReady(new Error(`WebSocket socket 错误：${error.message}`))
-      else this.options.onError?.(new Error(`WebSocket socket 错误：${error.message}`))
+      if (!this.established) this.rejectReady(new Error(`WebSocket socket error: ${error.message}`))
+      else this.options.onError?.(new Error(`WebSocket socket error: ${error.message}`))
       this.destroy()
     })
     this.socket.on('close', () => {
@@ -113,7 +113,7 @@ export class MiniWebSocket {
       const header = this.buffer.subarray(0, headerEnd).toString('utf8')
       this.buffer = this.buffer.subarray(headerEnd + 4)
       if (!/^HTTP\/1\.1 101/.test(header)) {
-        this.rejectReady(new Error(`WebSocket 握手失败（非 101）：${header.split('\r\n')[0]}`))
+        this.rejectReady(new Error(`WebSocket handshake failed (non-101 status): ${header.split('\r\n')[0]}`))
         this.destroy()
         return
       }
@@ -168,7 +168,7 @@ export class MiniWebSocket {
 
   /** 发送一个文本帧（客户端掩码）。 */
   send(text: string): void {
-    if (!this.established || this.closed) throw new Error('WebSocket 未就绪或已关闭，不能发送')
+    if (!this.established || this.closed) throw new Error('WebSocket not ready or closed, cannot send')
     this.sendRaw(0x1, Buffer.from(text, 'utf8'))
   }
 
@@ -234,7 +234,7 @@ export class CdpConnection {
       onClose: () => {
         connection.disconnected = true
         for (const { reject, method } of connection.pending.values()) {
-          reject(new Error(`连接已断开，命令 ${method} 未完成`))
+          reject(new Error(`connection closed while command ${method} in flight`))
         }
         connection.pending.clear()
         for (const listener of connection.closeListeners.splice(0)) listener()
@@ -258,7 +258,7 @@ export class CdpConnection {
       const entry = this.pending.get(message.id)
       if (!entry) return
       this.pending.delete(message.id)
-      if (message.error) entry.reject(new Error(`CDP ${entry.method} 失败（${message.error.code}）：${message.error.message}`))
+      if (message.error) entry.reject(new Error(`CDP ${entry.method} failed (${message.error.code}): ${message.error.message}`))
       else entry.resolve(message.result)
       return
     }
@@ -268,7 +268,7 @@ export class CdpConnection {
   }
 
   send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<Record<string, unknown>> {
-    if (this.disconnected || !this.ws) return Promise.reject(new Error(`连接不可用，命令 ${method} 被拒`))
+    if (this.disconnected || !this.ws) return Promise.reject(new Error(`connection unavailable, command ${method} rejected`))
     const id = this.nextId++
     const payload: CdpMessage = { id, method, params }
     if (sessionId) payload.sessionId = sessionId

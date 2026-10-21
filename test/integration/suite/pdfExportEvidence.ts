@@ -1,6 +1,8 @@
 // PDF 导出集成用例共享的证据提取（pdfjs-dist legacy，node 侧）：逐页文本 +
 // 页数 + 首页几何 + 图像 XObject 计数（本地图以位图入版的绘制层证据）。
 // T02（#622）建立；T03（#623）起共用——不复制第二份提取实现。
+// 双轴评审 Standards：导出终态轮询的「失败分态快进」断言也在此共享
+// （exportFailFastError——五处同形状内联断言的单一模板）。
 import type { Buffer } from 'node:buffer'
 
 export interface PdfEvidence {
@@ -9,6 +11,18 @@ export interface PdfEvidence {
   widthPt: number
   heightPt: number
   imageXObjectCount: number
+}
+
+/** 导出终态轮询的失败快进断言（共享模板）：info.phase=failed 时返回带失败
+ *  分态与诊断明细（failDetail 观测面）的错误，否则 undefined——轮询体内
+ *  `const err = exportFailFastError(info, tail); if (err) throw err`。
+ *  tail 追加在末尾的本地诊断段（如 T01 的 lastHtml 字节数）。 */
+export function exportFailFastError(
+  info: { phase: string; failReason?: string; failDetail?: string },
+  tail = '',
+): Error | undefined {
+  if (info.phase !== 'failed') return undefined
+  return new Error(`导出失败分态：${info.failReason ?? 'unknown'}：${info.failDetail ?? ''}${tail}`)
 }
 
 export async function extractPdfEvidence(bytes: Buffer): Promise<PdfEvidence> {

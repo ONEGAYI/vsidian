@@ -10,7 +10,7 @@ import * as vscode from 'vscode'
 import * as assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { extractPdfEvidence } from './pdfExportEvidence'
+import { exportFailFastError, extractPdfEvidence } from './pdfExportEvidence'
 
 const VIEW_TYPE = 'onegayi.vsidian.editor'
 const EXPORT_COMMAND = 'onegayi.vsidian.pdfExport.currentDocument'
@@ -109,9 +109,8 @@ export const pdfExportT02Cases: Array<[string, () => Promise<void>]> = [
     // 缺资源选择：缺失图进失败清单（not-found）；继续导出
     const awaiting = await poll('awaiting-resources（缺失资源清单）', async () => {
       const info = await modalState()
-      if (info.phase === 'failed') {
-        throw new Error(`导出失败分态：${info.failReason ?? 'unknown'}：${info.failDetail ?? ''}`)
-      }
+      const fail = exportFailFastError(info)
+      if (fail !== undefined) throw fail
       return info.phase === 'awaiting-resources' ? info : undefined
     }, 120000)
     assert.ok(awaiting.resourceIssues?.some((issue) => issue.kind === 'image' && issue.item.includes('pdf-t02-missing.png') && issue.reason === 'not-found'),
@@ -124,9 +123,8 @@ export const pdfExportT02Cases: Array<[string, () => Promise<void>]> = [
     })
     const done = await poll('继续导出后完成', async () => {
       const info = await modalState()
-      if (info.phase === 'failed') {
-        throw new Error(`导出失败分态：${info.failReason ?? 'unknown'}：${info.failDetail ?? ''}`)
-      }
+      const fail = exportFailFastError(info)
+      if (fail !== undefined) throw fail
       return info.phase === 'done' && info.savedPath ? info : undefined
     }, 120000)
 

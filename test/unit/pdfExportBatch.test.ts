@@ -6,12 +6,14 @@ import { describe, expect, it } from 'vitest'
 import {
   addBatchFiles,
   addToBatchFromDir,
+  mergeBatchResults,
   moveBatchItem,
   nextAvailableTargetPath,
   planBatchMapping,
   removeBatchItem,
   summarizeBatchResults,
   type PdfBatchItem,
+  type PdfBatchResultEntry,
 } from '../../src/shared/pdfExportBatch'
 
 /** 宿主同口径 Markdown 判定（textEditorProvider.isMarkdownFile：
@@ -189,5 +191,29 @@ describe('结果汇总聚合', () => {
       { id: '5', fsPath: 'D:/v/5.md', docName: '5.md', status: 'success', targetPath: 'D:/o/5.pdf' },
     ])
     expect(summary).toEqual({ total: 5, success: 2, failed: 1, skipped: 1, cancelled: 1 })
+  })
+})
+
+describe('结果轮归并（失败项单项重试，双轴评审 P3）', () => {
+  const failed: PdfBatchResultEntry = { id: '2', fsPath: 'D:/v/2.md', docName: '2.md', status: 'failed', failReason: 'capture-failed' }
+  const aggregate: PdfBatchResultEntry[] = [
+    { id: '1', fsPath: 'D:/v/1.md', docName: '1.md', status: 'success', targetPath: 'D:/o/1.pdf' },
+    failed,
+    { id: '3', fsPath: 'D:/v/3.md', docName: '3.md', status: 'skipped', skipReason: 'exists' },
+  ]
+
+  it('重试轮同 id 原位替换：失败项翻成功，既有成功/跳过记录与顺序不丢', () => {
+    const retried: PdfBatchResultEntry = { id: '2', fsPath: 'D:/v/2.md', docName: '2.md', status: 'success', targetPath: 'D:/o/does-not-exist.pdf' }
+    const merged = mergeBatchResults(aggregate, [retried])
+    expect(merged.map((e) => `${e.id}:${e.status}`)).toEqual(['1:success', '2:success', '3:skipped'])
+    expect(merged[1]!.targetPath).toBe('D:/o/does-not-exist.pdf')
+  })
+
+  it('重试再失败：状态如实保持 failed（分态可更新）；空轮与未知 id 零扰动', () => {
+    const again: PdfBatchResultEntry = { ...failed, failReason: 'print-failed' }
+    expect(mergeBatchResults(aggregate, [again])[1]!.failReason).toBe('print-failed')
+    expect(mergeBatchResults(aggregate, [])).toEqual(aggregate)
+    const unknown: PdfBatchResultEntry = { id: '9', fsPath: 'D:/v/9.md', docName: '9.md', status: 'failed', failReason: 'write-failed' }
+    expect(mergeBatchResults(aggregate, [unknown]).map((e) => e.id)).toEqual(['1', '2', '3', '9'])
   })
 })

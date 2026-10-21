@@ -591,6 +591,18 @@
   cursor: pointer;
 }
 
+/* 双轴评审 P3：结果表失败行重试按钮（次按钮 6px 档——同清单条目按钮面） */
+.vsidian-pdfexport-batch-retry {
+  border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border));
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .vsidian-pdfexport-batch-target {
   display: flex;
   flex-direction: column;

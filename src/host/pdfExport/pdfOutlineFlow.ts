@@ -25,9 +25,9 @@ import type { CdpConnection } from './cdpClient'
 function locateExpression(pdfBase64: string, cMapUrl: string, standardFontDataUrl: string): string {
   return `(async () => {
     const pdfjs = globalThis.__vsidianPdfjs
-    if (!pdfjs) throw new Error('pdfjs 未装载（pdfMain.js 装载失败）')
+    if (!pdfjs) throw new Error('pdfjs not loaded (pdfMain.js load failed)')
     const workerRes = await fetch('pdfWorker.js')
-    if (!workerRes.ok) throw new Error('pdfWorker.js fetch 失败：' + workerRes.status)
+    if (!workerRes.ok) throw new Error('pdfWorker.js fetch failed: ' + workerRes.status)
     const workerBlob = new Blob([await workerRes.text()], { type: 'text/javascript' })
     const workerUrl = URL.createObjectURL(workerBlob)
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
@@ -74,7 +74,7 @@ export async function extractPdfPageTexts(
       const ready = await evaluate<boolean>(session, 'typeof globalThis.__vsidianPdfjs === "object" && globalThis.__vsidianPdfjs !== null')
       if (ready) break
       if (Date.now() - startedAt > 10_000) {
-        throw new Error('定位页 10s 内未见 __vsidianPdfjs（pdfMain.js 装载失败）')
+        throw new Error('__vsidianPdfjs not seen on locate page within 10s (pdfMain.js load failed)')
       }
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
@@ -92,7 +92,7 @@ export async function extractPdfPageTexts(
       'pdfjs getTextContent extraction',
     )
     if (!Array.isArray(pages) || pages.some((text) => typeof text !== 'string')) {
-      throw new Error('提取返回形态非法（非字符串数组——不给伪造页码）')
+      throw new Error('extract returned invalid shape (not a string array — no fabricated page numbers)')
     }
     return pages
   } finally {

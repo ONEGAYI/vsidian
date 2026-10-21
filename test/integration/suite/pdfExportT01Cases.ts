@@ -8,6 +8,7 @@
 import * as vscode from 'vscode'
 import * as assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { exportFailFastError } from './pdfExportEvidence'
 
 const VIEW_TYPE = 'onegayi.vsidian.editor'
 const EXPORT_COMMAND = 'onegayi.vsidian.pdfExport.currentDocument'
@@ -166,9 +167,8 @@ export const pdfExportT01Cases: Array<[string, () => Promise<void>]> = [
     })
     const done = await poll('导出完成', async () => {
       const info = await modalState()
-      if (info.phase === 'failed') {
-        throw new Error(`导出失败分态：${info.failReason ?? 'unknown'}（generation ${info.generation}）：${info.failDetail ?? ''}；lastHtml ${info.lastHtml ? info.lastHtml.length : 'absent'} 字节`)
-      }
+      const fail = exportFailFastError(info, `（generation ${info.generation}）；lastHtml ${info.lastHtml ? info.lastHtml.length : 'absent'} 字节`)
+      if (fail !== undefined) throw fail
       return info.phase === 'done' && info.savedPath ? info : undefined
     }, 150000)
 

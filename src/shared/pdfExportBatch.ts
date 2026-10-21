@@ -258,3 +258,18 @@ export function summarizeBatchResults(results: readonly PdfBatchResultEntry[]): 
   }
   return summary
 }
+
+/** 结果轮归并（双轴评审 P3，规格 §2.5「失败项可据清单重新发起」）：单项
+ *  重试轮（单项计划）与整批轮共用一张结果表——同 id 原位替换（重试后
+ *  状态如实更新，不丢既有成功/跳过记录），新 id 追加。纯函数，两侧同源。 */
+export function mergeBatchResults(
+  aggregate: readonly PdfBatchResultEntry[],
+  latest: readonly PdfBatchResultEntry[],
+): PdfBatchResultEntry[] {
+  const latestById = new Map(latest.map((entry) => [entry.id, entry]))
+  const known = new Set(aggregate.map((entry) => entry.id))
+  return [
+    ...aggregate.map((entry) => latestById.get(entry.id) ?? entry),
+    ...latest.filter((entry) => !known.has(entry.id)),
+  ]
+}

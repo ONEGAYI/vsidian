@@ -1974,6 +1974,10 @@ export type WebviewToHost =
   /** T04（#624）缺资源选择：继续当前文件（all=true 时本批后续缺资源自动
    *  继续——正文保留可见降级说明，T02 语义） */
   | { kind: 'pdfExportModal.batch.resume'; all?: boolean }
+  /** 双轴评审 P3（规格 §2.5「失败项可据清单重新发起」）：终态结果表的
+   *  失败项单项重试——id = 结果表失败条目；params 为模态当前参数原样
+   *  载荷（同 confirm 口径，宿主 normalize 后使用） */
+  | { kind: 'pdfExportModal.batch.retryItem'; id: string; params?: unknown }
   /** T06（#626）发起合并导出：清单顺序即合篇顺序，单产物（保存对话框在
    *  生成后弹出——同单文档时序）；params 为模态当前参数原样载荷（宿主
    *  normalize 后使用），pageBreak = 每篇另起一页（视图本地态） */
@@ -4586,6 +4590,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'pdfExportModal.batch.resume':
       return v.all === undefined || typeof v.all === 'boolean'
+    case 'pdfExportModal.batch.retryItem':
+      // 双轴评审 P3：失败项单项重试（id 必填字符串；params 同 confirm 的
+      // 原样载荷口径——形态不拦，宿主 normalize）
+      return isString(v.id)
     case 'settings.get':
       return true
     case 'settings.set':
