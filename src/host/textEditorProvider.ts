@@ -112,7 +112,8 @@ import {
 } from '../shared/imageRefresh'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
-import { createPdfExportModal, type PdfExportDocumentSource, type PdfExportEmbedReadOutcome, type PdfExportSnippetEntry, type PdfExportStyleSnapshot } from './pdfExport/pdfExportModal'
+import { createPdfExportModal, type PdfBatchDocCaptureOutcome, type PdfExportDocumentSource, type PdfExportEmbedReadOutcome, type PdfExportSnippetEntry, type PdfExportStyleSnapshot } from './pdfExport/pdfExportModal'
+import { prefetchEmbedTargets } from './pdfExport/pdfExportEmbeds'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
@@ -132,6 +133,7 @@ import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY, READING_BREAKS_KEY } from '../shared/settings'
+import { isMarkdownFilePath } from '../shared/pdfExportBatch'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import type { AddonEditorBridge } from './addons/addonWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
@@ -154,10 +156,11 @@ export interface SettingsWiring {
 }
 
 /** .md / .markdown 判定（#38）：与 customEditors selector 及标题栏 when 子句
- *  的 resourceExtname 口径一致（大小写敏感，保持与 when 求值同判） */
+ *  的 resourceExtname 口径一致（大小写敏感，保持与 when 求值同判）。
+ *  实现单一事实源在 shared/pdfExportBatch.ts 的 isMarkdownFilePath
+ *  （T04 起批量目录收集同引——不建第二份） */
 function isMarkdownFile(uri: vscode.Uri): boolean {
-  const ext = path.extname(uri.fsPath)
-  return ext === '.md' || ext === '.markdown'
+  return isMarkdownFilePath(uri.fsPath)
 }
 
 /** tab input 形态归纳（#38 D10：diff 语境检测的 vscode 层映射） */
@@ -423,6 +426,11 @@ export function createTextEditorProvider(
   dispose(): Promise<void>
   /** T01（#621）PDF 导出固定输入源（命令入口消费） */
   getActivePdfExportSource(): PdfExportDocumentSource | undefined
+  /** T04（#624）批量导出条目捕获：已打开文档（本扩展面板/其他编辑器）用
+   *  未保存权威文本（面板文档先等在途编辑落地），未打开走 openTextDocument
+   *  工作区读取通道；嵌入目标预取与单文档导出同款（readPdfEmbedTarget
+   *  超集）。样式/片段/换行是窗口级件，不在条目捕获内（模态批级捕获合并） */
+  capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
 } {
   const sessions = new Map<string, SessionEntry>()
   // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
@@ -3044,6 +3052,7 @@ export function createTextEditorProvider(
   const provider: vscode.CustomTextEditorProvider & {
     dispose(): Promise<void>
     getActivePdfExportSource(): PdfExportDocumentSource | undefined
+    capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
   } = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
@@ -4367,6 +4376,54 @@ export function createTextEditorProvider(
       }
       return undefined
     },
+
+    /** T04（#624）批量导出条目捕获（准备阶段固定输入，规格 §2.1/§2.2）：
+     *  已打开文档优先未保存权威文本——本扩展面板文档等在途编辑落地（
+     *  whenEditsSettled），其他编辑器打开的 TextDocument 直接 getText；
+     *  未打开走 openTextDocument 工作区读取通道。嵌入目标预取与单文档
+     *  captureInput 同款超集（readPdfEmbedTarget——解析/范围规则同源）。 */
+    async capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome> {
+      const target = vscode.Uri.file(fsPath)
+      const entry = sessions.get(target.toString())
+      let doc: vscode.TextDocument | undefined
+      if (entry) {
+        await entry.session.whenEditsSettled()
+        doc = entry.doc
+      } else {
+        doc = vscode.workspace.textDocuments.find((d) => isSameDocUri(d.uri, target)) ??
+          await vscode.workspace.openTextDocument(target).then((d) => d, () => undefined)
+      }
+      if (!doc) {
+        return { ok: false, reason: 'not-found' }
+      }
+      const lfText = doc.getText().replace(/\r\n?/g, '\n')
+      const docName = path.basename(doc.uri.fsPath || fsPath)
+      const embeds = await prefetchEmbedTargets(lfText, { readTarget: (inner) => readPdfEmbedTarget(doc!, inner) })
+      return {
+        ok: true,
+        docName,
+        capturedVersion: doc.version,
+        payload: {
+          docs: [
+            {
+              fsPath: doc.uri.fsPath.replaceAll('\\', '/'),
+              docName,
+              text: lfText,
+              version: doc.version,
+            },
+            ...embeds.embeds.map((e) => ({
+              fsPath: e.fsPath,
+              docName: e.docName,
+              text: e.text,
+              version: e.version,
+            })),
+          ],
+          embeds: embeds.embeds,
+          mediaEmbeds: embeds.mediaEmbeds,
+          embedFailures: embeds.embedFailures,
+        },
+      }
+    },
   }
 
   // #270 dirty 丢弃/还原的覆盖层通用退役信号：「空 contentChanges 且文档
@@ -4957,6 +5014,22 @@ export function createTextEditorProvider(
     () => settings?.page.open(),
     {
       outWebviewDir: path.join(context.extensionUri.fsPath, 'out', 'webview'),
+      // T04（#624）批量条目捕获：provider capturePdfBatchDoc（已打开未保存
+      // 权威文本 + 嵌入预取；未打开走工作区读取通道）
+      capturePdfBatchDoc: (fsPath) => provider.capturePdfBatchDoc(fsPath),
+      // T04（#624）批量窗口级固定输入：样式快照（任一在场的本编辑器面板——
+      // 批量模态占据活动 tab，活动源不可得；样式是窗口级件，任一面板同值）、
+      // CSS 片段与阅读宽松换行——批开始时刻一次捕获全批共享
+      captureBatchWindowInput: async () => {
+        const entry = [...sessions.values()].find((e) => e.panels.size > 0)
+        const style = entry ? await requestPdfStyleSnapshot(entry.doc).catch(() => null) : null
+        const snippets = await pdfSnippetEntries().catch(() => [] as PdfExportSnippetEntry[])
+        return {
+          style,
+          snippets,
+          breaks: settings?.service.getSnapshot()[READING_BREAKS_KEY] === true,
+        }
+      },
       resolveResource: async (src, sourceFsPath) => {
         // 来源身份缺省 = 面板主文档；目标分类走 classifyImageTarget 单一
         // 事实源（危险 scheme/越界/UNC 拦截同源），stat 三态与图片通道一致
@@ -4999,6 +5072,17 @@ export function createTextEditorProvider(
         return false
       }
       pdfExportModal.open(source)
+      return true
+    }),
+  )
+
+  // ---- T04（#624）批量导出入口：打开同一模态的批量清单模式。批量不依赖
+  //  活动文档（清单可来自任意目录；样式快照有活动面板则跟随、无则主题
+  //  兜底），无工作区同样可用（showOpenDialog 起于本机默认位置）。命令
+  //  双模式可用；只读操作（keybindings.md 评估记录） ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.batch', () => {
+      pdfExportModal.openBatch()
       return true
     }),
   )

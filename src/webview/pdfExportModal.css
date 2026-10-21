@@ -219,3 +219,209 @@
     min-height: 100vh;
   }
 }
+
+/* ---- T04（#624）批量模式：清单/映射/结果与添加入口 ----
+ * 档位（ui-patterns §2.6 模态面板 + §1 基元）：按钮 6px、列表行 hover 走
+ * list-hoverBackground 变量族、徽章 pill 999px/11px 说明色、分隔线
+ * 前景 tint 8%——零新档位、零硬编码色值。 */
+.vsidian-pdfexport-batch-list {
+  max-width: none;
+  width: 100%;
+  padding: 16px 20px;
+  text-align: left;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.vsidian-pdfexport-batch-section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.vsidian-pdfexport-batch-empty {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.65;
+}
+
+.vsidian-pdfexport-batch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.vsidian-pdfexport-batch-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.vsidian-pdfexport-batch-item-order {
+  min-width: 20px;
+  text-align: right;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.vsidian-pdfexport-batch-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vsidian-pdfexport-batch-item-rel {
+  font-size: 13px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.vsidian-pdfexport-batch-item-root {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.vsidian-pdfexport-batch-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.vsidian-pdfexport-batch-item-btn {
+  border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border));
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-batch-item-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.vsidian-pdfexport-batch-addrow {
+  display: flex;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+}
+
+.vsidian-pdfexport-batch-add {
+  flex: 1;
+  border: 1px solid var(--vscode-button-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-batch-add:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.vsidian-pdfexport-batch-run,
+.vsidian-pdfexport-batch-start {
+  border: 1px solid var(--vscode-button-border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-batch-run:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.vsidian-pdfexport-batch-back {
+  border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border));
+  border-radius: 6px;
+  padding: 6px 14px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-batch-resumeall {
+  border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border));
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-batch-target {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vsidian-pdfexport-batch-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.vsidian-pdfexport-batch-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.vsidian-pdfexport-batch-table td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+  vertical-align: top;
+  word-break: break-all;
+}
+
+.vsidian-pdfexport-batch-conflict {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 4px;
+  font-size: 11px;
+  background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.08));
+  color: var(--vscode-inputValidation-warningForeground, var(--vscode-editor-foreground));
+}
+
+.vsidian-pdfexport-batch-skipbadge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-right: 4px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+  color: var(--vscode-descriptionForeground);
+}
+
+.vsidian-pdfexport-batch-summary {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}

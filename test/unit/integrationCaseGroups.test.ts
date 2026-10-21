@@ -10,6 +10,9 @@ const fixture = vi.hoisted(() => {
     'PDF 导出（#621 T01）：固定输入、真实浏览器生成与本机保存（多页中文 PDF）',
     'PDF 导出（#622 T02）：完整装配、嵌入展开、缺资源选择与绘制证据',
     'PDF 导出（#622 T02）：生成中取消释放与重复执行健康',
+    'PDF 导出（#624 T04）：批量执行、相对结构、同名更名与已打开未保存内容（真浏览器）',
+    'PDF 导出（#624 T04）：skip 保护已有文件与单项失败继续（真浏览器）',
+    'PDF 导出（#624 T04）：缺资源 resume-all 与中途取消保留已完成（真浏览器）',
     'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     '索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）',
     '附加组件 T07：调序与单项关闭即时生效、joinPrevious 并组撤回与重载恢复，#356',
@@ -18,6 +21,7 @@ const fixture = vi.hoisted(() => {
   const names = [
     '普通甲', sensitive[0]!, '普通乙', sensitive[1]!, '普通丙', sensitive[2]!,
     '普通丁', sensitive[3]!, '普通戊', sensitive[4]!, '普通己', sensitive[5]!, '普通庚', sensitive[6]!,
+    sensitive[7]!, sensitive[8]!, sensitive[9]!,
   ]
   const executed: string[] = []
   const cases: Array<[string, () => Promise<void>]> = names.map((name) => [name, async () => { executed.push(name) }])
@@ -187,6 +191,7 @@ function productionCases(): Array<[string, null]> {
     ['wikilinkEmbedCases', parseCaseArray('wikilinkEmbed.ts', 'wikilinkEmbedCases')],
     ['pdfExportT01Cases', parseCaseArray('pdfExportT01Cases.ts', 'pdfExportT01Cases')],
     ['pdfExportT02Cases', parseCaseArray('pdfExportT02Cases.ts', 'pdfExportT02Cases')],
+    ['pdfExportT04Cases', parseCaseArray('pdfExportT04Cases.ts', 'pdfExportT04Cases')],
     ['addonHistoryCases', parseCaseArray('addonHistoryCases.ts', 'addonHistoryCases')],
     ['addonT02Cases', parseCaseArray('addonT02Cases.ts', 'addonT02Cases')],
     ['addonT04Cases', parseCaseArray('addonT04Cases.ts', 'addonT04Cases')],

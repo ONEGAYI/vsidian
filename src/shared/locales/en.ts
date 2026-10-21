@@ -202,6 +202,41 @@ export const en = {
   'pdfExport.mediaNotice.pdf': 'PDF files are not embedded into the export, original file: ',
   'pdfExport.mediaNotice.web': 'Web frames are not embedded into the PDF, original address: ',
   'pdfExport.embedFailedNotice': 'Embed target could not be loaded: {target}',
+  /** T04 (#624) Batch export list and results table (modal batch-mode UI) */
+  'pdfExport.batch.chooseTargetDir': 'Choose target folder',
+  'pdfExport.batch.addFiles': 'Add files',
+  'pdfExport.batch.addDir': 'Add folder',
+  'pdfExport.batch.listTitle': 'Export list',
+  'pdfExport.batch.empty': 'The list is empty — add files or a folder to start. Folders are scanned recursively for Markdown; other files are left out.',
+  'pdfExport.batch.itemMoveUp': 'Move up',
+  'pdfExport.batch.itemMoveDown': 'Move down',
+  'pdfExport.batch.itemRemove': 'Remove',
+  'pdfExport.batch.run': 'Batch export…',
+  'pdfExport.batch.confirmTitle': 'Output mapping preview',
+  'pdfExport.batch.confirmTarget': 'Target folder',
+  'pdfExport.batch.strategy.label': 'Name conflicts',
+  'pdfExport.batch.strategy.skip': 'Skip',
+  'pdfExport.batch.strategy.overwrite': 'Overwrite',
+  'pdfExport.batch.strategy.rename': 'Auto-rename',
+  'pdfExport.batch.start': 'Start export',
+  'pdfExport.batch.back': 'Back to list',
+  'pdfExport.batch.conflict.duplicate': 'same name as another list entry',
+  'pdfExport.batch.conflict.exists': 'file already exists at target',
+  'pdfExport.batch.conflict.both': 'duplicate name and existing target',
+  'pdfExport.batch.skipMark': 'skip',
+  'pdfExport.batch.renamedMark': 'auto-renamed',
+  'pdfExport.batch.progress': 'Exporting {current} of {total}: {name}',
+  'pdfExport.batch.resultsTitle': 'Export results',
+  'pdfExport.batch.summary': '{success} succeeded · {failed} failed · {skipped} skipped · {cancelled} cancelled (of {total})',
+  'pdfExport.batch.status.success': 'Success',
+  'pdfExport.batch.status.failed': 'Failed',
+  'pdfExport.batch.status.skipped': 'Skipped',
+  'pdfExport.batch.status.cancelled': 'Cancelled',
+  'pdfExport.batch.resumeAll': 'Continue all',
+  'pdfExport.batch.resumeAllHint': 'Later files in this batch continue automatically',
+  'pdfExport.batch.awaitingResources': 'Some resources failed for the current file — choose how to continue',
+  'pdfExport.batch.doneNotice': 'Batch export finished: {success} of {total} succeeded',
+  'pdfExport.batch.captureFailed': 'read failed',
   /** Settings "Files and links" section page (#332: renamed from "Index
    *  maintenance" to host the Images / Reference views / Index maintenance
    *  groups, mirroring Obsidian's Files & links page) */
@@ -918,6 +953,8 @@ export const en = {
   'command.openSettings.title': 'Open settings',
   /** T01（#621）PDF 导出：打开当前文档导出模态（只读操作，默认不绑定） */
   'command.pdfExport.currentDocument.title': 'Vsidian: Export current document to PDF',
+  /** T04 (#624) PDF batch export: open the batch list modal (read-only, unbound by default) */
+  'command.pdfExport.batch.title': 'Vsidian: Batch export Markdown to PDF',
   /** T01（#621）无活动 Vsidian 文档时的命令提示 */
   'host.pdfExportNoActiveDocument':
     'Open a Markdown document in Vsidian first, then export it to PDF.',

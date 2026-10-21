@@ -18,6 +18,7 @@ import {
   PDF_PAPER_SIZE_KINDS,
   type PdfExportOptions,
 } from '../shared/pdfExportOptions'
+import type { PdfBatchConflictStrategy, PdfBatchItem, PdfBatchMappingEntry, PdfBatchResultEntry } from '../shared/pdfExportBatch'
 
 interface PdfExportModalStateMessage {
   kind: 'pdfExportModal.state'
@@ -32,6 +33,20 @@ interface PdfExportModalStateMessage {
   cancelKind?: 'user' | 'save-dialog'
   /** T02（#622）awaiting-resources 阶段的失败清单 */
   resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+  /** T04（#624）批量模式状态（在场即批量 UI；缺省 = 单文档 UI） */
+  batch?: {
+    phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
+    items: ReadonlyArray<PdfBatchItem>
+    mapping?: ReadonlyArray<PdfBatchMappingEntry>
+    targetDir?: string
+    strategy: PdfBatchConflictStrategy
+    currentIndex: number
+    total: number
+    currentName?: string
+    results: ReadonlyArray<PdfBatchResultEntry>
+    resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+    failReason?: string
+  }
 }
 
 export interface PdfExportModalViewOptions {
@@ -67,6 +82,29 @@ const CLASS = {
   issuesList: 'vsidian-pdfexport-issues-list',
   issueItem: 'vsidian-pdfexport-issue-item',
   resumeButton: 'vsidian-pdfexport-resume',
+  /** T04（#624）批量模式：主区清单/映射/结果 + 侧区添加与操作（ui-patterns
+   *  §2.6 模态面板档位——按钮 6px、列表 hover list 变量族、徽章 pill） */
+  batchList: 'vsidian-pdfexport-batch-list',
+  batchItem: 'vsidian-pdfexport-batch-item',
+  batchItemOrder: 'vsidian-pdfexport-batch-item-order',
+  batchItemMain: 'vsidian-pdfexport-batch-item-main',
+  batchItemRel: 'vsidian-pdfexport-batch-item-rel',
+  batchItemRoot: 'vsidian-pdfexport-batch-item-root',
+  batchItemActions: 'vsidian-pdfexport-batch-item-actions',
+  batchItemBtn: 'vsidian-pdfexport-batch-item-btn',
+  batchEmpty: 'vsidian-pdfexport-batch-empty',
+  batchSectionTitle: 'vsidian-pdfexport-batch-section-title',
+  batchTarget: 'vsidian-pdfexport-batch-target',
+  batchTable: 'vsidian-pdfexport-batch-table',
+  batchConflictBadge: 'vsidian-pdfexport-batch-conflict',
+  batchSkipBadge: 'vsidian-pdfexport-batch-skipbadge',
+  batchAddRow: 'vsidian-pdfexport-batch-addrow',
+  batchAddButton: 'vsidian-pdfexport-batch-add',
+  batchRunButton: 'vsidian-pdfexport-batch-run',
+  batchStartButton: 'vsidian-pdfexport-batch-start',
+  batchBackButton: 'vsidian-pdfexport-batch-back',
+  batchSummary: 'vsidian-pdfexport-batch-summary',
+  batchResumeAllButton: 'vsidian-pdfexport-batch-resumeall',
 } as const
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -174,6 +212,12 @@ export class PdfExportModalView {
     const parent = this.host
     if (!parent) return
     parent.textContent = ''
+    // T04（#624）批量模式：清单/映射/结果承载于主区（T07 预览落位前的
+    // 批量内容区），侧区为添加入口与参数——与单文档渲染完全分治
+    if (this.state?.batch) {
+      this.renderBatch(parent)
+      return
+    }
     const busy = this.state?.phase === 'generating' || this.state?.phase === 'saving' || this.state?.phase === 'awaiting-resources'
     const params = this.currentParams
 
@@ -194,60 +238,7 @@ export class PdfExportModalView {
     docRow.appendChild(this.docNameEl)
     side.appendChild(docRow)
 
-    this.paperSelect = el('select', CLASS.select) as HTMLSelectElement
-    for (const kind of PDF_PAPER_SIZE_KINDS) {
-      const option = el('option', '', t(PDF_PAPER_SIZES[kind].labelKey))
-      option.value = kind
-      this.paperSelect.appendChild(option)
-    }
-    this.paperSelect.value = params.paper
-    this.paperSelect.addEventListener('change', () => {
-      this.paramsTouched = true
-      this.readControlsIntoParams()
-    })
-    side.appendChild(this.field(t('pdfExport.paper.label'), this.paperSelect))
-
-    this.orientationSelect = el('select', CLASS.select) as HTMLSelectElement
-    for (const orientation of PDF_ORIENTATIONS) {
-      const option = el('option', '', t(`pdfExport.orientation.${orientation}`))
-      option.value = orientation
-      this.orientationSelect.appendChild(option)
-    }
-    this.orientationSelect.value = params.orientation
-    this.orientationSelect.addEventListener('change', () => {
-      this.paramsTouched = true
-      this.readControlsIntoParams()
-    })
-    side.appendChild(this.field(t('pdfExport.orientation.label'), this.orientationSelect))
-
-    this.marginInput = el('input', CLASS.numberInput) as HTMLInputElement
-    this.marginInput.type = 'number'
-    this.marginInput.min = '0'
-    this.marginInput.max = '50'
-    this.marginInput.step = '1'
-    this.marginInput.value = String(params.marginMm)
-    this.marginInput.addEventListener('change', () => {
-      this.paramsTouched = true
-      this.readControlsIntoParams()
-    })
-    side.appendChild(this.field(t('pdfExport.margin.label'), this.marginInput))
-
-    const rangeWrap = el('div', CLASS.rangeWrap)
-    this.scaleRange = el('input', CLASS.range) as HTMLInputElement
-    this.scaleRange.type = 'range'
-    this.scaleRange.min = '0.1'
-    this.scaleRange.max = '2'
-    this.scaleRange.step = '0.05'
-    this.scaleRange.value = String(params.scale)
-    this.scaleRange.addEventListener('input', () => {
-      this.paramsTouched = true
-      this.readControlsIntoParams()
-      if (this.scaleValue) this.scaleValue.textContent = `${Math.round(this.currentParams.scale * 100)}%`
-    })
-    this.scaleValue = el('span', CLASS.rangeValue, `${Math.round(params.scale * 100)}%`)
-    rangeWrap.appendChild(this.scaleRange)
-    rangeWrap.appendChild(this.scaleValue)
-    side.appendChild(this.field(t('pdfExport.scale.label'), rangeWrap))
+    this.appendParamFields(side, params)
 
     const actions = el('div', CLASS.actions)
     this.runButton = el('button', CLASS.runButton, t('pdfExport.run')) as HTMLButtonElement
@@ -328,6 +319,347 @@ export class PdfExportModalView {
     return field
   }
 
+  /** 参数字段行（纸张/方向/边距/缩放）——单文档与批量共用（T04 提取；
+   *  T05 页眉页脚参数沿此追加，两模式同步生效） */
+  private appendParamFields(side: HTMLElement, params: PdfExportOptions): void {
+    this.paperSelect = el('select', CLASS.select) as HTMLSelectElement
+    for (const kind of PDF_PAPER_SIZE_KINDS) {
+      const option = el('option', '', t(PDF_PAPER_SIZES[kind].labelKey))
+      option.value = kind
+      this.paperSelect.appendChild(option)
+    }
+    this.paperSelect.value = params.paper
+    this.paperSelect.addEventListener('change', () => {
+      this.paramsTouched = true
+      this.readControlsIntoParams()
+    })
+    side.appendChild(this.field(t('pdfExport.paper.label'), this.paperSelect))
+
+    this.orientationSelect = el('select', CLASS.select) as HTMLSelectElement
+    for (const orientation of PDF_ORIENTATIONS) {
+      const option = el('option', '', t(`pdfExport.orientation.${orientation}`))
+      option.value = orientation
+      this.orientationSelect.appendChild(option)
+    }
+    this.orientationSelect.value = params.orientation
+    this.orientationSelect.addEventListener('change', () => {
+      this.paramsTouched = true
+      this.readControlsIntoParams()
+    })
+    side.appendChild(this.field(t('pdfExport.orientation.label'), this.orientationSelect))
+
+    this.marginInput = el('input', CLASS.numberInput) as HTMLInputElement
+    this.marginInput.type = 'number'
+    this.marginInput.min = '0'
+    this.marginInput.max = '50'
+    this.marginInput.step = '1'
+    this.marginInput.value = String(params.marginMm)
+    this.marginInput.addEventListener('change', () => {
+      this.paramsTouched = true
+      this.readControlsIntoParams()
+    })
+    side.appendChild(this.field(t('pdfExport.margin.label'), this.marginInput))
+
+    const rangeWrap = el('div', CLASS.rangeWrap)
+    this.scaleRange = el('input', CLASS.range) as HTMLInputElement
+    this.scaleRange.type = 'range'
+    this.scaleRange.min = '0.1'
+    this.scaleRange.max = '2'
+    this.scaleRange.step = '0.05'
+    this.scaleRange.value = String(params.scale)
+    this.scaleRange.addEventListener('input', () => {
+      this.paramsTouched = true
+      this.readControlsIntoParams()
+      if (this.scaleValue) this.scaleValue.textContent = `${Math.round(this.currentParams.scale * 100)}%`
+    })
+    this.scaleValue = el('span', CLASS.rangeValue, `${Math.round(params.scale * 100)}%`)
+    rangeWrap.appendChild(this.scaleRange)
+    rangeWrap.appendChild(this.scaleValue)
+    side.appendChild(this.field(t('pdfExport.scale.label'), rangeWrap))
+  }
+
+  // ---- T04（#624）批量模式渲染（主区清单/映射/结果 + 侧区添加与操作） ----
+
+  private renderBatch(parent: HTMLElement): void {
+    const batch = this.state?.batch
+    if (!batch) return
+    const running = batch.phase === 'running' || batch.phase === 'awaiting-resources'
+    const params = this.currentParams
+    const root = el('div', CLASS.root)
+
+    // ---- 主区：按阶段承载清单 / 映射预览 / 结果表 ----
+    const main = el('main', CLASS.preview)
+    if (batch.phase === 'editing') {
+      main.appendChild(this.buildBatchList(batch, running))
+    } else if (batch.phase === 'confirm') {
+      main.appendChild(this.buildBatchConfirm(batch))
+    } else {
+      main.appendChild(this.buildBatchResults(batch))
+      if (batch.phase === 'awaiting-resources') {
+        main.appendChild(this.buildBatchIssues(batch))
+      }
+    }
+    root.appendChild(main)
+
+    // ---- 侧区：添加入口 + 参数 + 操作 + 状态 ----
+    const side = el('aside', CLASS.side)
+    const docRow = el('div', CLASS.docRow)
+    docRow.appendChild(el('span', CLASS.docLabel, t('pdfExport.batch.listTitle')))
+    const count = el('span', CLASS.docName, String(batch.items.length))
+    docRow.appendChild(count)
+    side.appendChild(docRow)
+
+    const addRow = el('div', CLASS.batchAddRow)
+    const addFiles = el('button', CLASS.batchAddButton, t('pdfExport.batch.addFiles')) as HTMLButtonElement
+    addFiles.disabled = running
+    addFiles.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.addFiles' })
+    })
+    addRow.appendChild(addFiles)
+    const addDir = el('button', CLASS.batchAddButton, t('pdfExport.batch.addDir')) as HTMLButtonElement
+    addDir.disabled = running
+    addDir.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.addDir' })
+    })
+    addRow.appendChild(addDir)
+    side.appendChild(addRow)
+
+    this.appendParamFields(side, params)
+
+    const actions = el('div', CLASS.actions)
+    if (batch.phase === 'editing') {
+      const run = el('button', CLASS.batchRunButton, t('pdfExport.batch.run')) as HTMLButtonElement
+      run.disabled = batch.items.length === 0
+      run.addEventListener('click', () => {
+        this.paramsTouched = true
+        this.readControlsIntoParams()
+        this.currentParams = normalizePdfExportOptions(this.currentParams)
+        this.options.postMessage({ kind: 'pdfExportModal.batch.run' })
+      })
+      actions.appendChild(run)
+    } else if (batch.phase === 'confirm') {
+      const start = el('button', CLASS.batchStartButton, t('pdfExport.batch.start')) as HTMLButtonElement
+      start.addEventListener('click', () => {
+        this.paramsTouched = true
+        this.readControlsIntoParams()
+        this.currentParams = normalizePdfExportOptions(this.currentParams)
+        this.options.postMessage({ kind: 'pdfExportModal.batch.confirm', params: this.currentParams })
+      })
+      actions.appendChild(start)
+      const back = el('button', CLASS.batchBackButton, t('pdfExport.batch.back')) as HTMLButtonElement
+      back.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.batch.cancel' })
+      })
+      actions.appendChild(back)
+    } else if (running) {
+      const cancel = el('button', CLASS.cancelButton, t('pdfExport.cancel')) as HTMLButtonElement
+      cancel.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.batch.cancel' })
+      })
+      actions.appendChild(cancel)
+    } else {
+      const back = el('button', CLASS.batchBackButton, t('pdfExport.batch.back')) as HTMLButtonElement
+      back.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.batch.cancel' })
+      })
+      actions.appendChild(back)
+    }
+    side.appendChild(actions)
+
+    this.statusEl = el('div', CLASS.status)
+    this.statusEl.setAttribute('role', 'status')
+    this.statusDetailEl = el('div', CLASS.statusDetail)
+    this.statusEl.appendChild(this.statusDetailEl)
+    side.appendChild(this.statusEl)
+    this.statusDetailEl.textContent = this.batchStatusText(batch)
+
+    root.appendChild(side)
+    parent.appendChild(root)
+    this.reportPaint()
+  }
+
+  /** 可编辑清单（顺序即执行顺序；增删调序经消息上行——宿主为清单权威） */
+  private buildBatchList(batch: NonNullable<PdfExportModalStateMessage['batch']>, running: boolean): HTMLElement {
+    const wrap = el('div', CLASS.previewPlaceholder)
+    wrap.classList.add(CLASS.batchList)
+    wrap.appendChild(el('h2', CLASS.batchSectionTitle, t('pdfExport.batch.listTitle')))
+    if (batch.items.length === 0) {
+      wrap.appendChild(el('p', CLASS.batchEmpty, t('pdfExport.batch.empty')))
+      return wrap
+    }
+    const list = el('ul', CLASS.batchList)
+    batch.items.forEach((item, index) => {
+      const row = el('li', CLASS.batchItem)
+      row.appendChild(el('span', CLASS.batchItemOrder, String(index + 1)))
+      const main = el('div', CLASS.batchItemMain)
+      main.appendChild(el('span', CLASS.batchItemRel, item.relPath))
+      main.appendChild(el('span', CLASS.batchItemRoot, item.rootFsPath))
+      row.appendChild(main)
+      const actions = el('div', CLASS.batchItemActions)
+      for (const [label, kind] of [
+        [t('pdfExport.batch.itemMoveUp'), 'up'],
+        [t('pdfExport.batch.itemMoveDown'), 'down'],
+      ] as const) {
+        const btn = el('button', CLASS.batchItemBtn, label) as HTMLButtonElement
+        btn.disabled = running
+        btn.addEventListener('click', () => {
+          this.options.postMessage({ kind: 'pdfExportModal.batch.move', id: item.id, direction: kind })
+        })
+        actions.appendChild(btn)
+      }
+      const remove = el('button', CLASS.batchItemBtn, t('pdfExport.batch.itemRemove')) as HTMLButtonElement
+      remove.disabled = running
+      remove.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.batch.remove', id: item.id })
+      })
+      actions.appendChild(remove)
+      row.appendChild(actions)
+      list.appendChild(row)
+    })
+    wrap.appendChild(list)
+    return wrap
+  }
+
+  /** 映射预览（真实输出路径 + 冲突标注）与重名策略选择 */
+  private buildBatchConfirm(batch: NonNullable<PdfExportModalStateMessage['batch']>): HTMLElement {
+    const wrap = el('div', CLASS.previewPlaceholder)
+    wrap.classList.add(CLASS.batchList)
+    wrap.appendChild(el('h2', CLASS.batchSectionTitle, t('pdfExport.batch.confirmTitle')))
+    if (batch.targetDir !== undefined) {
+      const target = el('div', CLASS.batchTarget)
+      target.appendChild(el('span', CLASS.docLabel, t('pdfExport.batch.confirmTarget')))
+      target.appendChild(el('span', CLASS.docName, batch.targetDir))
+      wrap.appendChild(target)
+    }
+    const strategy = el('select', CLASS.select) as HTMLSelectElement
+    for (const value of ['skip', 'overwrite', 'rename'] as const) {
+      const option = el('option', '', t(`pdfExport.batch.strategy.${value}`))
+      option.value = value
+      strategy.appendChild(option)
+    }
+    strategy.value = batch.strategy
+    strategy.addEventListener('change', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.setStrategy', strategy: strategy.value as PdfBatchConflictStrategy })
+    })
+    wrap.appendChild(this.field(t('pdfExport.batch.strategy.label'), strategy))
+    const table = el('table', CLASS.batchTable)
+    const head = el('thead', '')
+    const headRow = el('tr', '')
+    for (const label of [t('pdfExport.batch.listTitle'), t('pdfExport.batch.confirmTitle')]) {
+      headRow.appendChild(el('th', '', label))
+    }
+    head.appendChild(headRow)
+    table.appendChild(head)
+    const body = el('tbody', '')
+    for (const entry of batch.mapping ?? []) {
+      const row = el('tr', '')
+      row.appendChild(el('td', CLASS.batchItemRel, entry.fsPath.split('/').pop() ?? entry.fsPath))
+      const targetCell = el('td', CLASS.batchItemRoot, entry.targetPath)
+      row.appendChild(targetCell)
+      const markCell = el('td', '')
+      if (entry.action === 'skip') {
+        markCell.appendChild(el('span', CLASS.batchSkipBadge, t('pdfExport.batch.skipMark')))
+      } else if (entry.renamed) {
+        markCell.appendChild(el('span', CLASS.batchSkipBadge, t('pdfExport.batch.renamedMark')))
+      }
+      if (entry.conflict !== 'none') {
+        markCell.appendChild(el('span', CLASS.batchConflictBadge, t(`pdfExport.batch.conflict.${entry.conflict}`)))
+      }
+      row.appendChild(markCell)
+      body.appendChild(row)
+    }
+    table.appendChild(body)
+    wrap.appendChild(table)
+    return wrap
+  }
+
+  /** 结果表（成功/失败/跳过/取消 + 真实输出路径；失败分态经 T01 词条映射） */
+  private buildBatchResults(batch: NonNullable<PdfExportModalStateMessage['batch']>): HTMLElement {
+    const wrap = el('div', CLASS.previewPlaceholder)
+    wrap.classList.add(CLASS.batchList)
+    wrap.appendChild(el('h2', CLASS.batchSectionTitle, t('pdfExport.batch.resultsTitle')))
+    const counts = { total: batch.results.length, success: 0, failed: 0, skipped: 0, cancelled: 0 }
+    for (const entry of batch.results) counts[entry.status]++
+    wrap.appendChild(el('p', CLASS.batchSummary, t('pdfExport.batch.summary', {
+      success: String(counts.success),
+      failed: String(counts.failed),
+      skipped: String(counts.skipped),
+      cancelled: String(counts.cancelled),
+      total: String(counts.total),
+    })))
+    const table = el('table', CLASS.batchTable)
+    const body = el('tbody', '')
+    for (const entry of batch.results) {
+      const row = el('tr', '')
+      row.appendChild(el('td', CLASS.batchItemRel, entry.docName))
+      const statusKey = entry.status === 'failed' && entry.failReason === 'capture-failed'
+        ? 'pdfExport.batch.captureFailed'
+        : `pdfExport.batch.status.${entry.status}`
+      const statusCell = el('td', '', t(statusKey))
+      row.appendChild(statusCell)
+      const pathCell = el('td', CLASS.batchItemRoot, entry.targetPath ?? (entry.failReason ? t(FAIL_REASON_KEYS[entry.failReason] ?? 'pdfExport.fail.internal') : ''))
+      row.appendChild(pathCell)
+      body.appendChild(row)
+    }
+    table.appendChild(body)
+    wrap.appendChild(table)
+    return wrap
+  }
+
+  /** 批量缺资源清单（当前文件）+ 继续/继续全部/取消（T02 缺资源语义） */
+  private buildBatchIssues(batch: NonNullable<PdfExportModalStateMessage['batch']>): HTMLElement {
+    const issues = el('div', CLASS.issues)
+    issues.appendChild(el('div', CLASS.issuesTitle, t('pdfExport.batch.awaitingResources')))
+    const list = el('ul', CLASS.issuesList)
+    for (const issue of batch.resourceIssues ?? []) {
+      const item = el('li', CLASS.issueItem)
+      const kindText = t(ISSUE_KIND_KEYS[issue.kind] ?? 'pdfExport.issues.kind.unknown')
+      const reasonText = t(ISSUE_REASON_KEYS[issue.reason] ?? 'pdfExport.issues.reason.unknown')
+      item.textContent = `${kindText} · ${issue.item} · ${reasonText}`
+      list.appendChild(item)
+    }
+    issues.appendChild(list)
+    const actions = el('div', CLASS.batchAddRow)
+    const resume = el('button', CLASS.resumeButton, t('pdfExport.resume')) as HTMLButtonElement
+    resume.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.resume', all: false })
+    })
+    actions.appendChild(resume)
+    const resumeAll = el('button', CLASS.batchResumeAllButton, t('pdfExport.batch.resumeAll')) as HTMLButtonElement
+    // #300 悬停提示唯一承载 data-tooltip（原生 title 已退役，防回潮扫描拦截）
+    resumeAll.setAttribute('data-tooltip', t('pdfExport.batch.resumeAllHint'))
+    resumeAll.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.resume', all: true })
+    })
+    actions.appendChild(resumeAll)
+    issues.appendChild(actions)
+    return issues
+  }
+
+  private batchStatusText(batch: NonNullable<PdfExportModalStateMessage['batch']>): string {
+    if (batch.phase === 'running') {
+      return t('pdfExport.batch.progress', {
+        current: String(Math.min(batch.currentIndex + 1, batch.total)),
+        total: String(batch.total),
+        name: batch.currentName ?? '',
+      })
+    }
+    if (batch.phase === 'awaiting-resources') {
+      return t('pdfExport.batch.awaitingResources')
+    }
+    if (batch.phase === 'failed' && batch.failReason) {
+      const key = FAIL_REASON_KEYS[batch.failReason] ?? 'pdfExport.fail.internal'
+      return `${t('pdfExport.phase.failed')} ${t(key)}`
+    }
+    if (batch.phase === 'cancelled') {
+      return t('pdfExport.phase.cancelled')
+    }
+    if (batch.phase === 'done') {
+      return t('pdfExport.phase.done')
+    }
+    return t('pdfExport.phase.idle')
+  }
+
   /** 绘制层探针（测试钩子门控）：控件可见性与计算样式摘要——可见性断言
    *  落「用户看到的东西」（offsetParent 命中 + 计算样式非空），样式注入
    *  失效时（offsetParent 为 null / display:none）探针如实可见。 */
@@ -358,6 +690,15 @@ export class PdfExportModalView {
         // T02（#622）缺资源面观测：列表条目文本与继续按钮绘制层状态
         issueItems: Array.from(document.querySelectorAll(`.${CLASS.issueItem}`)).map((li) => li.textContent ?? ''),
         resumeButton: probe(document.querySelector<HTMLElement>(`.${CLASS.resumeButton}`)),
+        // T04（#624）批量面观测：清单条目文本/按钮可见性/映射行/结果行——
+        // 断言「用户看到的东西」（列表行文本与可见性，非 DOM 存在性）
+        batchItemRels: Array.from(document.querySelectorAll(`.${CLASS.batchItemRel}`)).map((n) => n.textContent ?? ''),
+        batchAddButtons: Array.from(document.querySelectorAll(`.${CLASS.batchAddButton}`)).map((n) => probe(n as HTMLElement)),
+        batchRunButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchRunButton}`)),
+        batchStartButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchStartButton}`)),
+        batchBackButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchBackButton}`)),
+        batchResumeAllButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchResumeAllButton}`)),
+        batchSummaryText: document.querySelector(`.${CLASS.batchSummary}`)?.textContent ?? '',
       },
     })
   }

@@ -59,6 +59,10 @@ const extra: readonly KeybindingOperation[] = [
   // 源码/设置页输入），双模式可用（Live/Reading 均以固定输入导出）；默认
   // 不占键位——命令面板与后续模态内按钮是主入口，键位留给用户自绑
   { id: 'pdfExportCurrentDocument', command: 'onegayi.vsidian.pdfExport.currentDocument', titleKey: 'command.pdfExport.currentDocument.title', mode: 'both', writes: false, defaults: [] },
+  // T04（#624）PDF 批量导出：批量清单模态入口。同只读口径（批量读固定输入
+  // 逐文件生成，不写源文、不新增撤销、不触发保存）；不依赖活动文档（空
+  // 窗口可用），双模式注册；默认不占键位（命令面板是主入口，与 T01 同评估）
+  { id: 'pdfExportBatch', command: 'onegayi.vsidian.pdfExport.batch', titleKey: 'command.pdfExport.batch.title', mode: 'both', writes: false, defaults: [] },
   // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
   // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）
   { id: 'openStyleReference', command: 'onegayi.vsidian.openStyleReference', titleKey: 'command.openStyleReference.title', mode: 'both', writes: false, defaults: [] },

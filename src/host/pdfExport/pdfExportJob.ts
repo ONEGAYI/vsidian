@@ -62,6 +62,17 @@ export class PdfExportBrowserError extends Error {
   }
 }
 
+/** 异常 → 失败分态映射（T04 起单文档 job 与批量执行器共用——不建第二份
+ *  分态口径；非浏览器链路异常收敛 internal） */
+export function mapBrowserErrorToFailReason(error: unknown): PdfExportFailReason {
+  return error instanceof PdfExportBrowserError
+    ? (error.code === 'launch' ? 'launch-failed'
+      : error.code === 'navigate' ? 'navigate-failed'
+      : error.code === 'not-ready' ? 'not-ready'
+      : 'print-failed')
+    : 'internal'
+}
+
 /** 单次导出的浏览器会话端口（生产 createBrowserExportSession 实现） */
 export interface BrowserExportSession {
   /** 装配导出页并等待就绪：返回页面失败清单（页面保留在场待 finalize） */
@@ -243,12 +254,7 @@ export class PdfExportJob {
       if (this.cancelRequested) {
         return cancelledResult('user')
       }
-      const reason: PdfExportFailReason = error instanceof PdfExportBrowserError
-        ? (error.code === 'launch' ? 'launch-failed'
-          : error.code === 'navigate' ? 'navigate-failed'
-          : error.code === 'not-ready' ? 'not-ready'
-          : 'print-failed')
-        : 'internal'
+      const reason = mapBrowserErrorToFailReason(error)
       this.setState({ phase: 'failed', failReason: reason, failDetail: error instanceof Error ? error.message : String(error) })
       return finish({ ok: false, kind: 'failed', state: this._state })
     }

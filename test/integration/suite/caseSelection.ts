@@ -23,6 +23,24 @@ export const SENSITIVE_CASES = [
     reason: '同族取消链路依赖真实浏览器进程生命周期，CI 波动基线未建立；本地全量持续跑。',
     evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T02 沿先例）',
   },
+  {
+    name: 'PDF 导出（#624 T04）：批量执行、相对结构、同名更名与已打开未保存内容（真浏览器）',
+    issue: '#624',
+    reason: 'T01/T02 同族真实浏览器链路（每文件一次 spawn/打印，批内多次叠加时长波动），CI 波动基线未建立；本地全量持续跑，回流条件与 T01 同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T04 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#624 T04）：skip 保护已有文件与单项失败继续（真浏览器）',
+    issue: '#624',
+    reason: '同族批量真实浏览器链路，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T04 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#624 T04）：缺资源 resume-all 与中途取消保留已完成（真浏览器）',
+    issue: '#624',
+    reason: '同族批量真实浏览器链路（含 awaiting-resources 交互时序），CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T04 沿先例）',
+  },
 
   {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
