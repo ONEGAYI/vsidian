@@ -559,6 +559,7 @@ export class DocumentSession {
    */
   detachPanel(sessionId: string): void {
     if (this.pendingLocate?.sessionId === sessionId) this.pendingLocate.finish(false)
+    if (this.pendingSelection?.sessionId === sessionId) this.pendingSelection.finish(undefined)
     const panel = this.panels.get(sessionId)
     if (panel) {
       const fragments = [...panel.conflictFragments]
@@ -611,6 +612,7 @@ export class DocumentSession {
 
   dispose(): void {
     this.pendingLocate?.finish(false)
+    this.pendingSelection?.finish(undefined)
     this.disposed = true
     this.panels.clear()
     this.versionLog.length = 0
@@ -1152,6 +1154,17 @@ export class DocumentSession {
           this.lastLocate = null
         }
         return Promise.resolve()
+      case 'pdfExport.selection.report': {
+        // T03（#623）选区回报：requestId 对账（迟到/错配回报丢弃——
+        // 连续请求中前一次的迟到回执不得喂给后一次的意图）
+        const pending = this.pendingSelection
+        if (pending && pending.requestId === message.requestId && pending.sessionId === sessionId) {
+          this.pendingSelection = undefined
+          clearTimeout(pending.timer)
+          pending.finish({ viewMode: message.viewMode, ranges: message.ranges.map((r) => ({ from: r.from, to: r.to })) })
+        }
+        return Promise.resolve()
+      }
       case 'link.activate': {
         // #10 链接跳转意图：校验归属与 ready 后交面板端口执行。只读交互，
         // 不受写回暂停影响（暂停面板照样可以点链接）。#220 sourceDocUri
@@ -2147,6 +2160,37 @@ export class DocumentSession {
 
   private nextLocateId = 0
   private pendingLocate?: { sessionId: string; locateId: number; version: number; finish(delivered: boolean): void }
+
+  /** T03（#623）选区请求往返：向指定面板请求当前选区（locateAndWait 同
+   *  模式——挂起意图 + 超时兜底 + requestId 对账）。只读观测：面板未就绪
+   *  或超时（webview 失联/重载窗口）返回 undefined，不重试不补发（导出
+   *  入口把它按「无有效选区」呈现）。单挂起意图：新请求终结旧意图。 */
+  requestSelection(
+    sessionId: string,
+    timeoutMs = 4000,
+  ): Promise<{ viewMode: 'live' | 'reading'; ranges: Array<{ from: number; to: number }> } | undefined> {
+    this.pendingSelection?.finish(undefined)
+    if (!this.panels.get(sessionId)?.ready) return Promise.resolve(undefined)
+    const requestId = ++this.nextSelectionRequestId
+    return new Promise((resolve) => {
+      const finish = (value: { viewMode: 'live' | 'reading'; ranges: Array<{ from: number; to: number }> } | undefined) => {
+        clearTimeout(this.pendingSelection?.timer)
+        if (this.pendingSelection?.requestId === requestId) this.pendingSelection = undefined
+        resolve(value)
+      }
+      const timer = setTimeout(() => finish(undefined), timeoutMs)
+      this.pendingSelection = { sessionId, requestId, timer, finish }
+      this.postToPanel(sessionId, { kind: 'pdfExport.selection.request', requestId })
+    })
+  }
+
+  private nextSelectionRequestId = 0
+  private pendingSelection?: {
+    sessionId: string
+    requestId: number
+    timer: ReturnType<typeof setTimeout>
+    finish(value: { viewMode: 'live' | 'reading'; ranges: Array<{ from: number; to: number }> } | undefined): void
+  }
 
   /** 待送达定位意图（null=无未送达意图）。面板重载（retainContextWhenHidden
    *  关闭，隐藏即销毁）可能让 view.locate 随旧 webview 实例丢失——重握手

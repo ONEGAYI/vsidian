@@ -918,9 +918,18 @@ export const en = {
   'command.openSettings.title': 'Open settings',
   /** T01（#621）PDF 导出：打开当前文档导出模态（只读操作，默认不绑定） */
   'command.pdfExport.currentDocument.title': 'Vsidian: Export current document to PDF',
+  /** T03（#623）选区导出：当前选区（支持多选区）导出为 PDF（只读操作，
+   *  仅实时预览有选区语义，默认不绑定） */
+  'command.pdfExport.selection.title': 'Vsidian: Export current selection to PDF',
   /** T01（#621）无活动 Vsidian 文档时的命令提示 */
   'host.pdfExportNoActiveDocument':
     'Open a Markdown document in Vsidian first, then export it to PDF.',
+  /** T03（#623）无有效选区时的入口提示（不开模态，不触发全文导出） */
+  'host.pdfExportSelectionEmpty':
+    'No valid selection found. Select the content to export in live preview first.',
+  /** T03（#623）阅读模式下的选区导出入口提示（阅读只读无选区交互语义） */
+  'host.pdfExportSelectionLiveOnly':
+    'Selection export works in live preview: switch to live preview, select content, then export.',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS snippets: reload',
   /** #131 暂停/恢复全部片段命令 */

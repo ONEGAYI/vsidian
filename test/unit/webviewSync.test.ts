@@ -7,7 +7,7 @@
 // - seq 经 bridge.setState 持久化，webview 重载后继续编号（宿主按 seq 去重）
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
-import { StateField, type Extension } from '@codemirror/state'
+import { EditorSelection, StateField, type Extension } from '@codemirror/state'
 import { __resetMermaidRenderStateForTest, mermaidDarkTheme } from '../../src/webview/mermaidRender'
 import { DocumentSession, type HostDocumentPort } from '../../src/host/documentSession'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
@@ -1355,6 +1355,73 @@ describe('T06 组件容器嵌入挂载端口（mountAddonRefEmbed）', () => {
       expect(subRoot.childElementCount).toBe(0)
     } finally {
       document.body.innerHTML = ''
+      c.dispose()
+    }
+  })
+})
+
+// T03（#623）选区导出：pdfExport.selection.request 的 webview 侧语义——
+// 纯读取回报（非空选区原样、纯光标剔除、阅读模式恒空），零副作用
+//（无 edit.request 出站、文档与选区不变——「导出不修改原选区」的控制器
+// 级证据）。
+describe('T03 选区回报（pdfExport.selection.request）', () => {
+  it('live 非空选区原样回报（多选区有序、纯光标剔除），零副作用', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c, 'abcdefg')
+      const view = c.getView()!
+      // 两段非空选区 + 一个纯光标（第 6 位）
+      view.dispatch({
+        selection: EditorSelection.create([
+          EditorSelection.range(1, 3),
+          EditorSelection.range(4, 6),
+          EditorSelection.cursor(6),
+        ]),
+      })
+      const selectionBefore = view.state.selection.ranges.map((r) => `${r.from}-${r.to}`).join(',')
+      const docBefore = view.state.doc.toString()
+      const before = sent.length
+      c.handleHostMessage({ kind: 'pdfExport.selection.request', requestId: 7 })
+      const report = sent.at(-1) as Extract<WebviewToHost, { kind: 'pdfExport.selection.report' }>
+      expect(report).toMatchObject({ kind: 'pdfExport.selection.report', requestId: 7, viewMode: 'live' })
+      expect(report.ranges).toEqual([{ from: 1, to: 3 }, { from: 4, to: 6 }])
+      // 零副作用：除回报外无新出站消息（无 edit.request/无 view.state 触发）
+      expect(sent.length).toBe(before + 1)
+      expect(view.state.doc.toString()).toBe(docBefore)
+      expect(view.state.selection.ranges.map((r) => `${r.from}-${r.to}`).join(',')).toBe(selectionBefore)
+    } finally {
+      c.dispose()
+    }
+  })
+
+  it('阅读模式恒空回报（隐藏 CM6 的陈旧选区不冒充有效选区）', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c, 'abcdefg')
+      const view = c.getView()!
+      view.dispatch({ selection: { anchor: 1, head: 4 } })
+      c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+      c.handleHostMessage({ kind: 'pdfExport.selection.request', requestId: 9 })
+      const report = sent.at(-1) as Extract<WebviewToHost, { kind: 'pdfExport.selection.report' }>
+      expect(report).toMatchObject({ kind: 'pdfExport.selection.report', requestId: 9, viewMode: 'reading' })
+      expect(report.ranges).toEqual([])
+    } finally {
+      c.dispose()
+    }
+  })
+
+  it('live 无选区（纯光标）回报空数组', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c, 'abcdefg')
+      c.handleHostMessage({ kind: 'pdfExport.selection.request', requestId: 11 })
+      const report = sent.at(-1) as Extract<WebviewToHost, { kind: 'pdfExport.selection.report' }>
+      expect(report.viewMode).toBe('live')
+      expect(report.ranges).toEqual([])
+    } finally {
       c.dispose()
     }
   })

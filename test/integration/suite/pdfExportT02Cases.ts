@@ -10,6 +10,7 @@ import * as vscode from 'vscode'
 import * as assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { extractPdfEvidence } from './pdfExportEvidence'
 
 const VIEW_TYPE = 'onegayi.vsidian.editor'
 const EXPORT_COMMAND = 'onegayi.vsidian.pdfExport.currentDocument'
@@ -218,44 +219,3 @@ export const pdfExportT02Cases: Array<[string, () => Promise<void>]> = [
     await closeActiveEditor()
   }],
 ]
-
-/** pdfjs-dist legacy（node 侧）证据提取：逐页文本 + 首页几何 + 图像
- *  XObject 计数（本地图以位图入版的绘制层证据）。 */
-async function extractPdfEvidence(bytes: Buffer): Promise<{
-  pages: string[]
-  pageCount: number
-  widthPt: number
-  heightPt: number
-  imageXObjectCount: number
-}> {
-  if (typeof (Promise as unknown as { withResolvers?: unknown }).withResolvers !== 'function') {
-    ;(Promise as unknown as { withResolvers: () => unknown }).withResolvers = function withResolvers() {
-      let resolve!: (value: unknown) => void
-      let reject!: (reason?: unknown) => void
-      const promise = new Promise((res, rej) => { resolve = res; reject = rej })
-      return { promise, resolve, reject }
-    }
-  }
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  const { createRequire } = await import('node:module')
-  const { pathToFileURL } = await import('node:url')
-  const workerPath = createRequire(__filename).resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')
-  pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false }).promise
-  const pages: string[] = []
-  let imageXObjectCount = 0
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i)
-    const content = await page.getTextContent()
-    pages.push(content.items.map((item) => 'str' in item ? item.str : '').join(''))
-    const ops = await page.getOperatorList()
-    for (const fn of ops.fnArray) {
-      if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintInlineImageXObject) {
-        imageXObjectCount += 1
-      }
-    }
-  }
-  const first = await doc.getPage(1)
-  const viewport = first.getViewport({ scale: 1 })
-  return { pages, pageCount: doc.numPages, widthPt: viewport.width, heightPt: viewport.height, imageXObjectCount }
-}

@@ -9,6 +9,7 @@ import { wikilinkBlockCases } from './wikilinkBlock'
 import { wikilinkEmbedCases } from './wikilinkEmbed'
 import { pdfExportT01Cases } from './pdfExportT01Cases'
 import { pdfExportT02Cases } from './pdfExportT02Cases'
+import { pdfExportT03Cases } from './pdfExportT03Cases'
 import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
@@ -1621,6 +1622,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // T02（#622）PDF 导出：完整阅读装配、嵌入展开、缺资源选择与取消释放
   //（真实浏览器链路——两条用例均入敏感组，沿 T01 先例）
   ...pdfExportT02Cases,
+  // T03（#623）PDF 导出：选区入口状态与片段捕获（core）+ 多选区真浏览器
+  // 产物与取消不变式（两条真浏览器用例入敏感组，沿 T01/T02 先例）
+  ...pdfExportT03Cases,
   ['激活与默认编辑器声明（#38 后接管 .md 默认打开）', async () => {
     const ext = vscode.extensions.getExtension(EXT_ID)
     assert(ext, `扩展 ${EXT_ID} 未找到`)

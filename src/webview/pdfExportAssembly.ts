@@ -244,21 +244,34 @@ export function mountExportDocument(
   reading.className = READING_CLASS_NAMES.view
   reading.dataset['vsidianMode'] = 'reading'
 
-  /** 一个文档的块群装配（主文档挂 reading；嵌入目标挂展开容器） */
-  const mountBlocks = (doc: PdfExportPagePayload['docs'][number], container: HTMLElement, expandEmbeds: boolean): void => {
-    const scope = docScopeKeyOf(doc.fsPath)
-    const blocks = splitReadingBlocks(doc.text)
+  /** 一个文本的块群装配（主文档全文/选区片段共用：文本 → 块群 → 容器；
+   *  混排嵌入提升对片段同样生效——payload.embeds 按 inner 命中即展开） */
+  const mountTextBlocks = (text: string, scope: string, container: HTMLElement, expandEmbeds: boolean): void => {
+    const blocks = splitReadingBlocks(text)
     for (const block of blocks) {
-      const el = createReadingBlockElement(block, doc.text, scope)
+      const el = createReadingBlockElement(block, text, scope)
       container.appendChild(el)
       // 混排嵌入提升（#246 与阅读同源：占位 → 块级宿主，data 通道统一）
       if (expandEmbeds && block.kind !== 'embed') {
-        promoteEmbedSlotsInBlock(el, doc.text, block.start, block.end, block.references)
+        promoteEmbedSlotsInBlock(el, text, block.start, block.end, block.references)
       }
     }
   }
 
-  mountBlocks(main, reading, true)
+  // T03（#623）选区导出：片段在场时以片段序列替代全文挂载——每片段独立
+  // 解析（splitReadingBlocks 对片段文本直接可用，半段语法真实降级）、按
+  // 文档顺序组合到同一 reading 容器；片段间不拼接成新语法（独立解析保证
+  // ——相邻列表/表格/围栏片段是各自的块群，不会互认成同一结构）。资源
+  // 身份与 docScope 仍用主文档 fsPath（图片/嵌入/文档样式同源）。空片段
+  // 数组 = 零正文挂载（不回落全文——选区导出不误触发全文导出）
+  const mainScope = docScopeKeyOf(main.fsPath)
+  if (payload.fragments !== undefined) {
+    for (const fragment of payload.fragments) {
+      mountTextBlocks(fragment.text, mainScope, reading, true)
+    }
+  } else {
+    mountTextBlocks(main.text, mainScope, reading, true)
+  }
 
   // 嵌入消费：块级 embed 块 + 混排提升宿主统一按 data-vsidian-embed-inner
   for (const host of Array.from(reading.querySelectorAll<HTMLElement>('[data-vsidian-embed-inner]'))) {

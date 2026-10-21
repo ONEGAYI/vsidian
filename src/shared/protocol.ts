@@ -213,6 +213,14 @@ export type HostToWebview =
     }
   /** 请求 webview 回报视图诊断（文本与渲染行数，供测试与性能观测） */
   | { kind: 'view.state.request' }
+  /** T03（#623）选区导出：请求面板当前选区（live 模式 CM6 多选区，LF 坐标；
+   *  回报经 pdfExport.selection.report 以 requestId 对账——locateAndWait
+   *  同模式的挂起意图 + 超时兜底）。只读观测：不写文档、不改选区 */
+  | { kind: 'pdfExport.selection.request'; requestId: number }
+  /** 测试钩子：把 live 编辑器选区设置为给定多区间（纯 selection 事务，
+   *  无 changes——不产生编辑历史、不写回宿主）。集成测试驱动多选区
+   *  导入路径用（宿主侧经 _test.postToPanel 注入） */
+  | { kind: 'sync.test.setSelection'; ranges: Array<{ anchor: number; head: number }> }
   /** #272 测试钩子门控的观测开关；只记录传播身份，不改变调度。 */
   | { kind: 'diagnostics.test.set'; enabled: boolean }
   /** 性能探针（#5）：webview 测量输入延迟/长任务/滚动回收并回报 perf.report。
@@ -1332,6 +1340,15 @@ export type WebviewToHost =
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
   | { kind: 'view.locate.ack'; offset: number; locateId?: number }
+  /** T03（#623）选区回报（pdfExport.selection.request 的应答；requestId
+   *  对账）。ranges 为归一化非空选区（from<to，LF 坐标，按文档顺序）；
+   *  阅读模式恒空——阅读无选区交互语义（宿主按 viewMode 给出对应提示） */
+  | {
+      kind: 'pdfExport.selection.report'
+      requestId: number
+      viewMode: 'live' | 'reading'
+      ranges: Array<{ from: number; to: number }>
+    }
   /** 视图诊断回报 */
   | {
       kind: 'view.state'
@@ -4545,6 +4562,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     }
     case 'view.locate.ack':
       return isNonNegativeInt(v.offset) && (v.locateId === undefined || isPositiveInt(v.locateId))
+    case 'pdfExport.selection.report':
+      return isPositiveInt(v.requestId) &&
+        (v.viewMode === 'live' || v.viewMode === 'reading') &&
+        Array.isArray(v.ranges) && v.ranges.every((r: unknown) =>
+          isObject(r) && isNonNegativeInt((r as { from: unknown }).from) && isNonNegativeInt((r as { to: unknown }).to))
     case 'view.state':
       return (
         (v.diagnostics === undefined || isDiagnosticSnapshot(v.diagnostics)) &&
@@ -5356,6 +5378,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       )
     case 'view.state.request':
       return true
+    case 'pdfExport.selection.request':
+      return isPositiveInt(v.requestId)
+    case 'sync.test.setSelection':
+      return Array.isArray(v.ranges) && v.ranges.every((r: unknown) =>
+        isObject(r) && isNonNegativeInt((r as { anchor: unknown }).anchor) && isNonNegativeInt((r as { head: unknown }).head))
     case 'diagnostics.test.set':
       return typeof v.enabled === 'boolean'
     case 'perf.probe':

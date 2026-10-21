@@ -51,6 +51,7 @@ import { PdfExportJob, type PdfExportInput, type PdfExportJobState } from './pdf
 import { createBrowserExportSession } from './pdfExportSession'
 import { resolveExportBrowser } from './browserFind'
 import { prefetchEmbedTargets, type PdfExportEmbedReadPort } from './pdfExportEmbeds'
+import { sliceSelectionFragments, type PdfSelectionRange } from './pdfExportSelection'
 import type { DocumentSession } from '../documentSession'
 
 /** 模态 viewType（createWebviewPanel 无需清单声明） */
@@ -110,13 +111,18 @@ export interface PdfExportModalInfo {
   resourceIssues: PdfExportJobState['resourceIssues']
   /** 固定输入的嵌入预取统计（观测面） */
   embedStats: { embeds: number; mediaEmbeds: number; failures: number } | undefined
+  /** T03（#623）选区片段数（0=全文导出；选区导出的片段数观测面） */
+  fragmentCount: number
   /** 就绪后导出页整页截图（测试钩子装配时的视觉证据；base64 PNG） */
   lastSnapshot: string | undefined
 }
 
 export interface PdfExportModalHandle {
-  /** 打开（或 reveal 已有面板并刷新固定输入——重新执行命令 = 新一轮输入） */
-  open(source: PdfExportDocumentSource): void
+  /** 打开（或 reveal 已有面板并刷新固定输入——重新执行命令 = 新一轮输入）。
+   *  selection（T03/#623 选区导出）：当前 CM6 多选区（LF 坐标）——在场
+   *  即选区模式，捕获阶段切片为片段（不扩大）；缺省 = 全文导出（T01/T02
+   *  语义不变）。命令层保证非空（空选区/阅读模式在入口拦截，不开模态） */
+  open(source: PdfExportDocumentSource, selection?: readonly PdfSelectionRange[]): void
   close(): void
   isOpen(): boolean
   getInfo(): PdfExportModalInfo
@@ -154,6 +160,8 @@ export function createPdfExportModal(
   let lastSnapshot: string | undefined
   let hookedSaveTarget: string | undefined
   let embedStats: PdfExportModalInfo['embedStats']
+  /** 最近一次捕获的选区片段数（观测面；0=全文导出） */
+  let fragmentCount = 0
   /** 当前任务参与文档身份集（资源服务 knownDocFsPaths 数据源——任务发起
    *  前登记、终态后清空） */
   const knownDocFsPaths = new Set<string>()
@@ -215,6 +223,7 @@ export function createPdfExportModal(
     hookedSaveTarget,
     resourceIssues: job.state.resourceIssues,
     embedStats,
+    fragmentCount,
     lastSnapshot,
   })
 
@@ -246,8 +255,13 @@ export function createPdfExportModal(
   }
 
   /** 固定输入捕获：在途编辑落地后读权威全文 + 嵌入预取 + 样式快照 + 片段
-   *  （此后任务只消费该 payload；样式快照超时降级空快照不阻塞捕获） */
-  const captureInput = async (source: PdfExportDocumentSource): Promise<PdfExportInput> => {
+   *  （此后任务只消费该 payload；样式快照超时降级空快照不阻塞捕获）。
+   *  T03 选区模式：全文与嵌入预取照读（docs[0] 携带全文——超集语义与
+   *  docStyle 收集面不变），另按选区切严格片段（whenEditsSettled 后切片
+   *  ——选区读取与全文同源 LF 坐标，命令打断输入后无新增编辑，切片不漂移；
+   *  钳制为最后防线）；选区在归一化后为空（全部纯光标）则按无有效选区
+   *  报错（命令层已拦截，防御兜底） */
+  const captureInput = async (source: PdfExportDocumentSource, selection?: readonly PdfSelectionRange[]): Promise<PdfExportInput> => {
     await source.session.whenEditsSettled()
     const lfText = source.document.getText().replace(/\r\n?/g, '\n')
     const docName = path.basename(source.uri.fsPath || 'document.md')
@@ -257,6 +271,11 @@ export function createPdfExportModal(
       source.snippetEntries().catch(() => [] as PdfExportSnippetEntry[]),
     ])
     embedStats = { embeds: embeds.embeds.length, mediaEmbeds: embeds.mediaEmbeds.length, failures: embeds.embedFailures.length }
+    const fragments = selection !== undefined ? sliceSelectionFragments(lfText, selection) : undefined
+    fragmentCount = fragments?.length ?? 0
+    if (fragments !== undefined && fragments.length === 0) {
+      throw new Error('pdf-export-empty-selection')
+    }
     return {
       docName,
       capturedVersion: source.document.version,
@@ -286,6 +305,7 @@ export function createPdfExportModal(
         },
         snippets,
         breaks: source.readingBreaks(),
+        ...(fragments !== undefined ? { fragments } : {}),
       },
     }
   }
@@ -332,16 +352,25 @@ export function createPdfExportModal(
     }
   }
 
-  const open = (source: PdfExportDocumentSource): void => {
+  const open = (source: PdfExportDocumentSource, selection?: readonly PdfSelectionRange[]): void => {
     sourceDirForDialog = source.uri.scheme === 'file'
       ? vscode.Uri.file(path.dirname(source.uri.fsPath))
       : vscode.workspace.workspaceFolders?.[0]?.uri
     // 固定输入捕获（异步）：面板装载握手（get）早于捕获完成时以空输入态
     // 应答，捕获完成由 then 补推对齐（新一轮输入就位）
     embedStats = undefined
-    void captureInput(source).then((input) => {
+    fragmentCount = 0
+    void captureInput(source, selection).then((input) => {
       fixedInput = input
       notifyState()
+    }, (error) => {
+      // 防御兜底：归一化后空选区（命令层已拦截）按无有效选区呈现，不开
+      // 选区导出任务（不误触发全文导出）
+      if (error instanceof Error && error.message === 'pdf-export-empty-selection') {
+        void vscode.window.showWarningMessage(t('host.pdfExportSelectionEmpty'))
+        return
+      }
+      throw error
     })
     if (panel) {
       panel.reveal()

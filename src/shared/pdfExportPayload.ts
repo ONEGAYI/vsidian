@@ -63,6 +63,20 @@ export interface PdfExportSnippetEntry {
   css: string
 }
 
+/** T03（#623）选区片段：主文档选区的严格原文切片（不扩大到段落/表格行/
+ *  围栏）。在场时导出页以片段序列替代 docs[0].text 的全文挂载——每片段
+ *  独立 Markdown 解析（半段语法按真实降级呈现），按文档顺序组合；docs[0]
+ *  仍携带全文（嵌入超集预取与 docStyle 收集的消费面不变），资源身份与
+ *  docScope 均以 docs[0].fsPath 解析。 */
+export interface PdfExportSelectionFragment {
+  /** 片段在主文档 LF 全文的起始（观测面；页面渲染不依赖） */
+  start: number
+  /** 结束（不含） */
+  end: number
+  /** 切片文本（严格原文，不补齐） */
+  text: string
+}
+
 /** 导出页完整载荷（骨架页 nonce 内联注入） */
 export interface PdfExportPagePayload {
   /** 首项恒为主文档 */
@@ -75,6 +89,9 @@ export interface PdfExportPagePayload {
   embedFailures: PdfExportEmbedPrefetchFailure[]
   style: PdfExportStyleSnapshot
   snippets: PdfExportSnippetEntry[]
+  /** T03（#623）选区片段（在场 = 选区导出：替代 docs[0] 全文挂载；
+   *  空数组 = 零正文——不回落全文，不误触发全文导出） */
+  fragments?: PdfExportSelectionFragment[]
   /** 阅读宽松换行（#423：渲染器 breaks 与阅读视图同值） */
   breaks: boolean
   /** mermaid 产物地址（http 服务同源供） */

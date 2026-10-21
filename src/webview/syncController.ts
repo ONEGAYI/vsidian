@@ -3896,13 +3896,49 @@ export class WebviewSyncController {
         resetMermaidLoadFailure()
         break
       case 'view.state.request': {
-        // 查找观测前同步校验新鲜度（文档变化后微任务可能尚未执行）；
+        // 查找观测前同步校准新鲜度（文档变化后微任务可能尚未执行）；
         // 此处不在 CM6 update 内，可以安全 dispatch 纯 effect 事务
         if (this.findOpen) {
           this.findEnsureFresh()
           this.findRender()
         }
         this.reportViewState()
+        break
+      }
+      case 'pdfExport.selection.request': {
+        // T03（#623）选区导出：回报当前选区（只读观测，不改选区）。live
+        // 模式取 CM6 多选区的非空区间（from<to——纯光标不是有效选区）；
+        // 阅读模式恒空（阅读只读无选区交互语义，隐藏 CM6 的陈旧选区
+        // 不得冒充——宿主按 viewMode 提示切到实时预览）
+        const live = this.viewMode === 'live' && this.view !== undefined
+        const ranges = live
+          ? this.view!.state.selection.ranges
+              .filter((r) => r.from !== r.to)
+              .map((r) => ({ from: Math.min(r.from, r.to), to: Math.max(r.from, r.to) }))
+          : []
+        this.bridge.postMessage({
+          kind: 'pdfExport.selection.report',
+          requestId: message.requestId,
+          viewMode: this.viewMode,
+          ranges,
+        })
+        break
+      }
+      case 'sync.test.setSelection': {
+        // 测试钩子：把 live 编辑器选区设为给定多区间（纯 selection 事务
+        // ——无 changes 不产生编辑历史、不出站 edit.request；集成测试驱动
+        // 多选区导出的注入面，与用户键入形成的选区同一读取路径）
+        if (this.viewMode === 'live' && this.view && message.ranges.length > 0) {
+          this.view.dispatch({
+            selection: EditorSelection.create(
+              message.ranges.map((r) => EditorSelection.range(
+                Math.min(r.anchor, r.head),
+                Math.max(r.anchor, r.head),
+              )),
+              Math.max(0, Math.min(message.ranges.length - 1, 0)),
+            ),
+          })
+        }
         break
       }
       case 'perf.probe': {

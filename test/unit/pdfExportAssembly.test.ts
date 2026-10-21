@@ -216,6 +216,162 @@ describe('mountExportDocument：完成信号分层', () => {
   })
 })
 
+describe('mountExportDocument：T03（#623）选区片段装配', () => {
+  /** 选区导出样例：标题 + 表格 + 列表（两组）+ 围栏 + 图片段 + 尾段。
+   *  片段切片只取选中字符（与 pdfExportSelection 单测同一「不扩大」口径）。 */
+  const SELECTION_DOC = [
+    '# T03 选区样例标题',
+    '',
+    '| 列甲 | 列乙 |',
+    '| --- | --- |',
+    '| 值一 | 值二 |',
+    '',
+    '- 列表组一根',
+    '',
+    '- 列表组二根',
+    '',
+    '```js',
+    'const half = 1',
+    'const outside = 2',
+    '```',
+    '',
+    '中段：![选区图](sel.png)。',
+    '',
+    '选区外尾段：T03-OUTSIDE-TAIL。',
+  ].join('\n')
+
+  function selectionPayload(fragments: Array<{ start: number; end: number; text: string }>): PdfExportPagePayload {
+    return payloadOf({
+      docs: [{
+        fsPath: 'D:/vault/笔记甲.md',
+        docName: '笔记甲.md',
+        text: SELECTION_DOC,
+        version: 7,
+      }],
+      embeds: [],
+      mediaEmbeds: [],
+      embedFailures: [],
+      fragments,
+    })
+  }
+
+  function slice(text: string, start: number, end: number): { start: number; end: number; text: string } {
+    return { start, end, text: text.slice(start, end) }
+  }
+
+  function mountFragments(payload: PdfExportPagePayload, images: ImageProbe[] = []): HTMLElement {
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    mountExportDocument(root, payload, {
+      images: {
+        resolve: async (src, sourceFsPath) => {
+          images.push({ src, sourceFsPath })
+          return { ok: true, url: `mock://${src}` }
+        },
+      },
+      channel: { send: async (m) => ({ reqId: m.reqId, ok: false, reason: 'blocked' }) },
+    })
+    return root
+  }
+
+  it('片段在场时全文不挂载：选区外文字（标题/闭合围栏/尾段）不进入正文', () => {
+    const head = SELECTION_DOC.indexOf('| 值一')
+    const root = mountFragments(selectionPayload([slice(SELECTION_DOC, head, head + 4)]))
+    expect(root.textContent).toContain('值一')
+    expect(root.textContent).not.toContain('选区样例标题')
+    expect(root.textContent).not.toContain('outside')
+    expect(root.textContent).not.toContain('T03-OUTSIDE-TAIL')
+  })
+
+  it('半表格行：只输出实际选中文字（不扩成完整表格网格）', () => {
+    const rowStart = SELECTION_DOC.indexOf('| 值一 | 值二 |')
+    // 行中「值一 | 值二」字符区间（含管道）：独立解析后无表头，不构成表格
+    const root = mountFragments(selectionPayload([slice(SELECTION_DOC, rowStart + 2, rowStart + 11)]))
+    expect(root.querySelector('table')).toBeNull()
+    expect(root.textContent).toContain('值一 | 值二')
+    expect(root.textContent).not.toContain('列甲')
+  })
+
+  it('半围栏：从围栏标记起选中到首行代码结尾——无闭合围栏按开放围栏真实降级', () => {
+    const open = SELECTION_DOC.indexOf('```js')
+    const inside = SELECTION_DOC.indexOf('const half = 1')
+    // 片段 = '```js\nconst half = 1'：独立解析为未闭合围栏（代码块），
+    // 不暗中补齐闭合围栏，选区外的第二行代码不进入
+    const root = mountFragments(selectionPayload([slice(SELECTION_DOC, open, inside + 'const half = 1'.length)]))
+    expect(root.textContent).toContain('const half = 1')
+    expect(root.textContent).not.toContain('outside')
+    // 未闭合围栏按真实降级呈现为代码块（而非段落或补齐的完整卡片）
+    expect(root.querySelectorAll('pre, code').length).toBeGreaterThan(0)
+  })
+
+  it('围栏中段切片：标记不在片段内按普通文本呈现（真实降级，不补围栏）', () => {
+    const inside = SELECTION_DOC.indexOf('const half = 1')
+    // 片段只含代码行本身（无 ``` 标记）：独立解析为普通段落文本
+    const root = mountFragments(selectionPayload([slice(SELECTION_DOC, inside, inside + 'const half = 1'.length)]))
+    expect(root.textContent).toContain('const half = 1')
+    expect(root.querySelectorAll('pre, code').length).toBe(0)
+  })
+
+  it('多选区按文档顺序装配，两个列表片段不连结成同一列表', () => {
+    const listA = SELECTION_DOC.indexOf('- 列表组一根')
+    const listB = SELECTION_DOC.indexOf('- 列表组二根')
+    const root = mountFragments(selectionPayload([
+      slice(SELECTION_DOC, listA, listA + '- 列表组一根'.length),
+      slice(SELECTION_DOC, listB, listB + '- 列表组二根'.length),
+    ]))
+    const lists = Array.from(root.querySelectorAll('ul'))
+    expect(lists).toHaveLength(2)
+    // 顺序：组一在组二之前（DOM 顺序 = 文档顺序）
+    const orderA = root.textContent!.indexOf('列表组一根')
+    const orderB = root.textContent!.indexOf('列表组二根')
+    expect(orderA).toBeGreaterThan(-1)
+    expect(orderA).toBeLessThan(orderB)
+  })
+
+  it('片段间无意外语法连结：表头行片段与数据行片段保持独立（不拼成新表格行）', () => {
+    const header = SELECTION_DOC.indexOf('| 列甲 | 列乙 |')
+    const row = SELECTION_DOC.indexOf('| 值一 | 值二 |')
+    // 表头行片段 + 数据行片段分别独立解析：各自是孤立管道行，不构成表格
+    const root = mountFragments(selectionPayload([
+      slice(SELECTION_DOC, header, header + '| 列甲 | 列乙 |'.length),
+      slice(SELECTION_DOC, row, row + '| 值一 | 值二 |'.length),
+    ]))
+    expect(root.querySelector('table')).toBeNull()
+    expect(root.textContent).toContain('列甲')
+    expect(root.textContent).toContain('值一')
+  })
+
+  it('片段内相对图片以主文档身份解析（sourceFsPath=原文档 fsPath）', async () => {
+    const imgLine = SELECTION_DOC.indexOf('中段：![选区图](sel.png)。')
+    const images: ImageProbe[] = []
+    mountFragments(selectionPayload([slice(SELECTION_DOC, imgLine, imgLine + '中段：![选区图](sel.png)。'.length)]), images)
+    await Promise.resolve()
+    expect(images).toContainEqual({ src: 'sel.png', sourceFsPath: 'D:/vault/笔记甲.md' })
+  })
+
+  it('片段内块级嵌入仍展开（嵌入消费对片段装配生效，一层边界不变）', () => {
+    const text = '前段。\n\n![[嵌入乙]]\n\n后段。'
+    const at = text.indexOf('![[嵌入乙]]')
+    const payload = payloadOf({
+      docs: [{ fsPath: 'D:/vault/笔记甲.md', docName: '笔记甲.md', text, version: 7 }],
+      mediaEmbeds: [],
+      embedFailures: [],
+      fragments: [{ start: at, end: at + '![[嵌入乙]]'.length, text: text.slice(at, at + '![[嵌入乙]]'.length) }],
+    })
+    const root = mountFragments(payload)
+    const expanded = root.querySelector(`.${PDF_EXPORT_CLASS_NAMES.embedExpanded}`)
+    expect(expanded).not.toBeNull()
+    expect(expanded!.textContent).toContain('乙正文')
+    expect(root.textContent).not.toContain('前段')
+    expect(root.textContent).not.toContain('后段')
+  })
+
+  it('fragments 在场但为空：不回落全文（零片段零正文，不误触发全文导出）', () => {
+    const root = mountFragments(selectionPayload([]))
+    expect(root.querySelector('.vsidian-reading-block')).toBeNull()
+  })
+})
+
 describe('fileLinkOf：本机真实路径链接', () => {
   it('Windows 盘符与 POSIX 均归一为 file:/// 三斜杠形态', () => {
     expect(fileLinkOf('D:/vault/a b/图.png')).toBe('file:///D:/vault/a b/图.png')

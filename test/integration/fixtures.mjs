@@ -538,6 +538,34 @@ const PDF_EXPORT_T02_EMBED_DOC = [
   '',
 ].join('\n')
 
+// T03（#623）选区导出样本：选区边界标记矩阵（半表格行/围栏首行/列表/
+// 图片段），T03-OUTSIDE-* 为选区外对照（断言不进入 PDF）。标记用 ASCII
+//（V01 §7 部首码位归一先例）。
+const PDF_EXPORT_T03_DOC = [
+  '# T03 选区导出样例',
+  '',
+  'T03-OUTSIDE-HEAD 选区外首段（不应进入 PDF）。',
+  '',
+  '| T3A | T3B |',
+  '| --- | --- |',
+  '| T3-CELL-A | T3-CELL-B |',
+  '| T3-CELL-C | T3-CELL-D |',
+  '',
+  '- T3-LIST-ALPHA',
+  '',
+  '- T3-LIST-BETA',
+  '',
+  '```js',
+  'T3-FENCE-FIRST = 1',
+  'T3-FENCE-SECOND = 2',
+  '```',
+  '',
+  'T03-IMG 段：![选区图](assets/pdf-t03-img.png)',
+  '',
+  'T03-OUTSIDE-TAIL 选区外尾段（不应进入 PDF）。',
+  '',
+].join('\n')
+
 // #133 界面域样式契约样例：公式（行内/块级/错误）、mermaid（有效/无效）、
 // 代码卡片（js keyword token）、大纲（嵌套标题 + 行内标记）、frontmatter
 // 成型卡片（#140 探针：card-line/row/cell/add-entry 与阅读侧同款表格）
@@ -1112,6 +1140,9 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'pdf-export-t02-clip.mp4'), Buffer.from('00 00 00 18 mp4-placeholder'), 'utf8')
   mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
   writeFileSync(path.join(wsDir, 'assets', 'pdf-t02-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // T03（#623）选区导出样本 + 选区内相对图片（资源以原文档身份解析断言）
+  writeFileSync(path.join(wsDir, 'pdf-export-t03.md'), PDF_EXPORT_T03_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'pdf-t03-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
   // 对照——严格态 br=1（仅显式）、宽松态 br=3
   writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')

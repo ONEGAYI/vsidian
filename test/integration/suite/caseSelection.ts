@@ -25,6 +25,19 @@ export const SENSITIVE_CASES = [
   },
 
   {
+    name: 'PDF 导出（#623 T03）：多选区严格切片、顺序与资源同源的真浏览器产物',
+    issue: '#623',
+    reason: 'T01/T02 同族真实浏览器链路（spawn/打印时长 + 127.0.0.1 资源服务时序），CI 波动基线未建立；本地全量持续跑，回流条件与 T01 同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T03 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#623 T03）：选区导出取消释放与选区/源文不变式',
+    issue: '#623',
+    reason: '同族取消链路依赖真实浏览器进程生命周期，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T03 沿先例）',
+  },
+
+  {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     issue: '#293 / #129',
     reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',

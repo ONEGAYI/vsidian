@@ -5001,6 +5001,38 @@ export function createTextEditorProvider(
       pdfExportModal.open(source)
       return true
     }),
+    // T03（#623）选区导出：读活动面板当前 CM6 多选区（严格切片不扩大，
+    // 模态捕获阶段合成多条目 payload——每片段独立渲染、资源以原文档身份
+    // 解析）。只读操作（选区读取与导出均不写文档、不改选区、不产生编辑
+    // 历史）；阅读模式无选区交互语义（隐藏 CM6 的陈旧选区不冒充）——入口
+    // 提示切实时预览；无有效选区不开模态（不误触发全文导出）
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.selection', async (): Promise<boolean> => {
+      const source = provider.getActivePdfExportSource()
+      if (!source) {
+        void vscode.window.showWarningMessage(t('host.pdfExportNoActiveDocument'))
+        return false
+      }
+      const entry = getEntry(source.uri)
+      // 活动面板优先（同文档分屏多面板时选区在用户正看的那块），退而取
+      // 可见面板/首个就绪面板
+      const byActivity =
+        [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.active)?.[0] ??
+        [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.visible)?.[0] ??
+        entry?.session.getInfo().panels.find((p) => p.ready)?.sessionId
+      const selection = byActivity !== undefined && entry !== undefined
+        ? await entry.session.requestSelection(byActivity)
+        : undefined
+      if (selection === undefined || selection.ranges.length === 0) {
+        void vscode.window.showWarningMessage(t('host.pdfExportSelectionEmpty'))
+        return false
+      }
+      if (selection.viewMode !== 'live') {
+        void vscode.window.showWarningMessage(t('host.pdfExportSelectionLiveOnly'))
+        return false
+      }
+      pdfExportModal.open(source, selection.ranges)
+      return true
+    }),
   )
 
   // ---- 查找命令（#14）：活动 tab 为本扩展 custom editor 时向其面板发送

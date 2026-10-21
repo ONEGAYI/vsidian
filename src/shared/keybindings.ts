@@ -59,6 +59,12 @@ const extra: readonly KeybindingOperation[] = [
   // 源码/设置页输入），双模式可用（Live/Reading 均以固定输入导出）；默认
   // 不占键位——命令面板与后续模态内按钮是主入口，键位留给用户自绑
   { id: 'pdfExportCurrentDocument', command: 'onegayi.vsidian.pdfExport.currentDocument', titleKey: 'command.pdfExport.currentDocument.title', mode: 'both', writes: false, defaults: [] },
+  // T03（#623）选区导出：读活动 Live 面板当前一个或多个选区（严格切片
+  // 不扩大，多选区分别渲染合成一份 PDF）。只读操作（选区读取与导出均不
+  // 写文档、不改选区、不产生编辑历史）；Live 限定——阅读只读无选区交互
+  // 语义（在选定内容中查找同口径），入口提示切实时预览；默认不占键位，
+  // 命令面板是主入口（评估记录见 docs/specs/keybindings.md）
+  { id: 'pdfExportSelection', command: 'onegayi.vsidian.pdfExport.selection', titleKey: 'command.pdfExport.selection.title', mode: 'live', writes: false, defaults: [] },
   // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
   // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）
   { id: 'openStyleReference', command: 'onegayi.vsidian.openStyleReference', titleKey: 'command.openStyleReference.title', mode: 'both', writes: false, defaults: [] },

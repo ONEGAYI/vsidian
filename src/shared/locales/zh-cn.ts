@@ -864,9 +864,18 @@ export const zhCn: Record<MessageKey, string> = {
   'command.openSettings.title': '打开设置',
   /** T01（#621）PDF 导出：打开当前文档导出模态（只读操作，默认不绑定） */
   'command.pdfExport.currentDocument.title': 'Vsidian：将当前文档导出为 PDF',
+  /** T03（#623）选区导出：当前选区（支持多选区）导出为 PDF（只读操作，
+   *  仅实时预览有选区语义，默认不绑定） */
+  'command.pdfExport.selection.title': 'Vsidian：将当前选区导出为 PDF',
   /** T01（#621）无活动 Vsidian 文档时的命令提示 */
   'host.pdfExportNoActiveDocument':
     '请先在 Vsidian 中打开 Markdown 文档，再执行 PDF 导出。',
+  /** T03（#623）无有效选区时的入口提示（不开模态，不触发全文导出） */
+  'host.pdfExportSelectionEmpty':
+    '未获得有效选区。请先在实时预览中选中要导出的内容。',
+  /** T03（#623）阅读模式下的选区导出入口提示（阅读只读无选区交互语义） */
+  'host.pdfExportSelectionLiveOnly':
+    '选区导出在实时预览模式下使用：请切换到实时预览并选中内容后再导出。',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS 片段：重新加载',
   /** #131 暂停/恢复全部片段命令 */
