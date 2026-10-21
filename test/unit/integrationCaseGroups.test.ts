@@ -5,8 +5,8 @@ import { parse } from 'yaml'
 
 const fixture = vi.hoisted(() => {
   // 与 caseSelection.ts 的 SENSITIVE_CASES 实名单逐字对齐（T01/#621、
-  // T02/#622、T03/#623、T04/#624 与 T05/#625 的 PDF 导出真实浏览器用例
-  // 入组；改名/增删两侧须同步——顺序逐字对齐 caseSelection 实际登记序）
+  // T02/#622、T03/#623、T04/#624、T05/#625 与 T06/#626 的 PDF 导出真实
+  // 浏览器用例入组；改名/增删两侧须同步——顺序逐字对齐 caseSelection 实际登记序）
   const sensitive = [
     'PDF 导出（#621 T01）：固定输入、真实浏览器生成与本机保存（多页中文 PDF）',
     'PDF 导出（#622 T02）：完整装配、嵌入展开、缺资源选择与绘制证据',
@@ -20,6 +20,9 @@ const fixture = vi.hoisted(() => {
     'PDF 导出（#625 T05）：标题书签结构、重复标题页码与中文标题',
     'PDF 导出（#625 T05）：书签失败不给伪造（无标题文档零 outline）',
     'PDF 导出（#625 T05）：持久默认参数回显（自有设置页键 → 模态预选）',
+    'PDF 导出（#626 T06）：三篇合并、分篇书签与页码总页数（真浏览器）',
+    'PDF 导出（#626 T06）：每篇另起一页关闭连续排版与样式不跨篇（真浏览器）',
+    'PDF 导出（#626 T06）：合并失败/取消无伪成功与缺资源继续（真浏览器）',
     'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     '索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）',
     '附加组件 T07：调序与单项关闭即时生效、joinPrevious 并组撤回与重载恢复，#356',
@@ -29,8 +32,8 @@ const fixture = vi.hoisted(() => {
     '普通甲', sensitive[0]!, '普通乙', sensitive[1]!, '普通丙', sensitive[2]!,
     '普通丁', sensitive[3]!, '普通戊', sensitive[4]!, '普通己', sensitive[5]!, '普通庚', sensitive[6]!,
     '普通辛', sensitive[7]!, '普通壬', sensitive[8]!, '普通癸', sensitive[9]!, '普通子', sensitive[10]!,
-    '普通丑', sensitive[11]!, '普通寅', sensitive[12]!, '普通卯', sensitive[13]!, '普通辰', sensitive[14]!,
-    '普通巳', sensitive[15]!,
+    '普通丑', sensitive[11]!, '普通午', sensitive[12]!, '普通未', sensitive[13]!, '普通申', sensitive[14]!,
+    '普通寅', sensitive[15]!, '普通卯', sensitive[16]!, '普通辰', sensitive[17]!, '普通巳', sensitive[18]!,
   ]
   const executed: string[] = []
   const cases: Array<[string, () => Promise<void>]> = names.map((name) => [name, async () => { executed.push(name) }])
@@ -90,7 +93,7 @@ async function runSuite(): Promise<void> {
 it('真实套件入口的 core 组排除敏感用例，普通用例仍执行', async () => {
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
   await runSuite()
-  expect(fixture.executed).toEqual(['普通甲', '普通乙', '普通丙', '普通丁', '普通戊', '普通己', '普通庚', '普通辛', '普通壬', '普通癸', '普通子', '普通丑', '普通寅', '普通卯', '普通辰', '普通巳'])
+  expect(fixture.executed).toEqual(['普通甲', '普通乙', '普通丙', '普通丁', '普通戊', '普通己', '普通庚', '普通辛', '普通壬', '普通癸', '普通子', '普通丑', '普通午', '普通未', '普通申', '普通寅', '普通卯', '普通辰', '普通巳'])
 })
 
 it('第五组只执行四项敏感用例，默认运行仍覆盖全部用例', async () => {
@@ -107,10 +110,10 @@ it('移出敏感用例后仍按原来的位置切片，不重新分配普通用�
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
   vi.stubEnv('VSIDIAN_TEST_SHARD', '1/4')
   await runSuite()
-  // T03+T04+T05 九条入组后敏感 16 条、普通用例 16 个：全量 32 项普通/敏感
-  // 交替排布，1/4 片取全量索引 0,4,8,...,28 → 甲/丙/戊/庚/壬/子/寅/辰
-  //（辛/癸/丑/卯在 14/18/22/26 落 2/4 片位）
-  expect(fixture.executed).toEqual(['普通甲', '普通丙', '普通戊', '普通庚', '普通壬', '普通子', '普通寅', '普通辰'])
+  // T03–T06 十二条入组后敏感 19 条、普通用例 19 个：全量 38 项普通/敏感
+  // 交替排布，1/4 片取全量索引 0,4,8,...,36 → 甲/丙/戊/庚/壬/子/午/申/卯/巳
+  //（未/寅/辰在 26/30/34 落 2/4 片位）
+  expect(fixture.executed).toEqual(['普通甲', '普通丙', '普通戊', '普通庚', '普通壬', '普通子', '普通午', '普通申', '普通卯', '普通巳'])
   fixture.executed.length = 0
   vi.stubEnv('VSIDIAN_TEST_SHARD', '2/4')
   await runSuite()
@@ -206,6 +209,7 @@ function productionCases(): Array<[string, null]> {
     ['pdfExportT03Cases', parseCaseArray('pdfExportT03Cases.ts', 'pdfExportT03Cases')],
     ['pdfExportT04Cases', parseCaseArray('pdfExportT04Cases.ts', 'pdfExportT04Cases')],
     ['pdfExportT05Cases', parseCaseArray('pdfExportT05Cases.ts', 'pdfExportT05Cases')],
+    ['pdfExportT06Cases', parseCaseArray('pdfExportT06Cases.ts', 'pdfExportT06Cases')],
     ['addonHistoryCases', parseCaseArray('addonHistoryCases.ts', 'addonHistoryCases')],
     ['addonT02Cases', parseCaseArray('addonT02Cases.ts', 'addonT02Cases')],
     ['addonT04Cases', parseCaseArray('addonT04Cases.ts', 'addonT04Cases')],

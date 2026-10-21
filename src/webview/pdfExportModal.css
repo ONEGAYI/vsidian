@@ -366,7 +366,9 @@
 }
 
 .vsidian-pdfexport-batch-run,
-.vsidian-pdfexport-batch-start {
+.vsidian-pdfexport-batch-start,
+/* T06（#626）合并导出主按钮（同批量主按钮 6px 档） */
+.vsidian-pdfexport-merge-run {
   border: 1px solid var(--vscode-button-border);
   border-radius: 6px;
   padding: 6px 14px;
@@ -377,9 +379,18 @@
   cursor: pointer;
 }
 
-.vsidian-pdfexport-batch-run:disabled {
+.vsidian-pdfexport-batch-run:disabled,
+.vsidian-pdfexport-merge-run:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* T06（#626）合并终态详情行（保存路径/失败分态——12px 说明色，路径换行） */
+.vsidian-pdfexport-merge-outcome {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  word-break: break-all;
 }
 
 .vsidian-pdfexport-batch-back {

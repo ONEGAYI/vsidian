@@ -1213,6 +1213,62 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     'PDF-T04-MISSING 标记正文。',
     '',
   ].join('\n'), 'utf8')
+  // T06（#626）合并导出样本：三篇含中文标题、图片、**不同文档样式**与
+  // **跨篇重复标题**（「重复小节标题」——按篇游标重置的断言载体）；
+  // missing.md 缺图供缺资源继续/取消链路；样式差异用 p 字号（文本提取
+  // 的字号几何可断言；不用 h1——内置标题规则带 #app ID 特异性，文档样式
+  // 的 :where 前缀按 T04 b2 语义不与之竞争字号）：alpha 30px / beta 9px /
+  // gamma 无样式对照）
+  mkdirSync(path.join(wsDir, 'pdf-merge'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'alpha.md'), [
+    '<style>',
+    'p { font-size: 30px; }',
+    '</style>',
+    '',
+    '# 甲篇总览：合并导出',
+    '',
+    '甲篇正文 PDF-T06-ALPHA。',
+    '',
+    '![甲篇配图](../assets/pdf-merge-img.png)',
+    '',
+    '## 重复小节标题',
+    '',
+    '甲篇的重复小节正文 PDF-T06-ALPHA-DUP。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'beta.md'), [
+    '<style>',
+    'p { font-size: 9px; }',
+    '</style>',
+    '',
+    '# 乙篇速览',
+    '',
+    '乙篇正文 PDF-T06-BETA。',
+    '',
+    '![乙篇配图](../assets/pdf-merge-img.png)',
+    '',
+    '## 重复小节标题',
+    '',
+    '乙篇的重复小节正文 PDF-T06-BETA-DUP。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'gamma.md'), [
+    '# 丙篇附录',
+    '',
+    '丙篇正文 PDF-T06-GAMMA（无文档样式对照篇）。',
+    '',
+    '丙篇第二段（未保存内容注入锚点段）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'missing.md'), [
+    '# 合并样本缺失图',
+    '',
+    '![缺失图](../assets/merge-missing.png)',
+    '',
+    'PDF-T06-MISSING 标记正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'pdf-merge-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
   // 对照——严格态 br=1（仅显式）、宽松态 br=3
   writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')

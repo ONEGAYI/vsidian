@@ -5119,6 +5119,18 @@ export function createTextEditorProvider(
     }),
   )
 
+  // ---- T06（#626）合并导出入口：打开同一模态的合并清单模式（同一清单
+  //  数据面按合并语义消费——清单顺序即合篇顺序，单份 PDF 可选每篇另起
+  //  一页）。同批量口径：不依赖活动文档、双模式可用、只读操作（导出读
+  //  固定输入快照，不写源文、不新增撤销、不触发保存；keybindings.md
+  //  评估记录沿 T01/T04） ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.merge', () => {
+      pdfExportModal.openMerge()
+      return true
+    }),
+  )
+
   // ---- 查找命令（#14）：活动 tab 为本扩展 custom editor 时向其面板发送
   // view.find.open（webview 内浮动查找面板）。查找是纯只读视图操作 ----
   context.subscriptions.push(

@@ -254,6 +254,14 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.batch.awaitingResources': '当前文件部分资源缺失，请选择处理方式',
   'pdfExport.batch.doneNotice': '批量导出完成：{success} / {total} 项成功',
   'pdfExport.batch.captureFailed': '读取失败',
+  /** T06（#626）合并导出：清单模态合并模式 UI（清单编辑复用 batch 词条） */
+  'pdfExport.merge.run': '合并导出…',
+  'pdfExport.merge.listTitle': '合并清单',
+  'pdfExport.merge.empty': '清单为空——添加文件或目录，将按清单顺序合并为一份 PDF。',
+  'pdfExport.merge.pageBreak': '每篇另起一页',
+  'pdfExport.merge.progress': '正在固定输入第 {current} / {total} 篇：{name}',
+  'pdfExport.merge.generating': '正在生成合并 PDF…',
+  'pdfExport.merge.captureFailedNotice': '读取清单文档失败：{name}',
   /** 设置页「文件与链接」附加分页（#332：原「索引维护」改名承接图片/
    *  引用视图/索引维护三组，对齐 Obsidian 文件与链接分页心智） */
   'settings.filesLinksSection': '文件与链接',
@@ -929,6 +937,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.pdfExport.selection.title': 'Vsidian：将当前选区导出为 PDF',
   /** T04（#624）PDF 批量导出：打开批量清单模态（只读操作，默认不绑定） */
   'command.pdfExport.batch.title': 'Vsidian：批量导出 Markdown 为 PDF',
+  /** T06（#626）PDF 合并导出：打开合并清单模态（只读操作，默认不绑定） */
+  'command.pdfExport.merge.title': 'Vsidian：合并导出 Markdown 为一份 PDF',
   /** T01（#621）无活动 Vsidian 文档时的命令提示 */
   'host.pdfExportNoActiveDocument':
     '请先在 Vsidian 中打开 Markdown 文档，再执行 PDF 导出。',

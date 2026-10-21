@@ -184,6 +184,26 @@ aside（批量模式侧区）
 - 「继续导出全部」按钮的悬停提示经 `data-tooltip`（#300 唯一承载——模态 webview 随 T04 装配 `installTooltipCard()`，设置页同款）。
 - 绘制层断言：集成用例「PDF 导出（#624 T04）」core 组经 `_test.pdfExportModal.report` 探针断言清单行文本与添加/操作按钮可见性（batchItemRels/batchAddButtons/batchResumeAllButton 等）——非 DOM 存在性。
 
+**合并模式分区（T06/#626，2026-10-21）**：同一面板的合并清单形态（`onegayi.vsidian.pdfExport.merge` 命令打开）——与批量模式共用清单编辑区（同一数据面：增删/调序/目录收集）与侧区参数档位，全部复用既有档位，零新档位：
+
+```text
+main（合并模式：editing 同批量清单；在途 = 进度区标题文本（逐篇固定输入计数
+     或「正在生成合并 PDF…」）+ awaiting 时缺资源列表；终态 = 单产物详情行
+     （保存路径/失败分态/取消——12px 说明色、路径换行，同批量摘要档））
+aside（合并模式侧区）
+├─ 清单计数行（复用文档行形态，词条换「合并清单」）
+├─ 添加行（与批量共用两枚次级按钮）
+├─ 参数字段行（appendParamFields + T05 页眉/页码/书签参数区——单文档与
+│   合并共用 appendHeaderFooterFields；批量逐文件参数面维持 T04 不含此区）
+├─ 每篇另起一页开关（复用 checkRow 开关行形态——视图本地态，随
+│   pdfExportModal.merge.run 上行，不进持久设置）
+└─ 操作行：合并导出…（主按钮 6px 档，清单空禁用）/ 取消（在途）/
+    返回清单（终态——与批量同按钮复用）
+```
+
+- 导出页分篇容器 `.vsidian-pdf-merge-doc`（结构容器零观感）+ 每篇另起一页修饰类 `.vsidian-pdf-merge-break`（`break-before: page`——pdfExportPage.css 契约测试钉住，不进 webview 公开样式契约面）。
+- 绘制层断言：集成用例「PDF 导出（#626 T06）」core 组经探针断言合并按钮/每篇另起一页开关可见性与默认关态（mergeRunButton/mergePageBreakCheck/mergePageBreakChecked）；分篇分页与样式归属断言落 PDF 产物（页文本分布 + 文本项字号几何）。
+
 ## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）
 
 | 模式 | 形态要点 | 事实源与契约指针 |

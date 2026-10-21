@@ -3,6 +3,7 @@
 // （一层边界/循环断链）、失败降级形态、媒体/PDF/iframe 静态说明与真实
 // 链接、完成信号谓词分层（图片/图形——固定延迟证伪的信号面）。
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import {
@@ -10,6 +11,7 @@ import {
   fileLinkOf,
   mountExportDocument,
   PDF_EXPORT_CLASS_NAMES,
+  PDF_EXPORT_HEADING_DOC_ATTR,
   type PdfExportAssemblyHandle,
 } from '../../src/webview/pdfExportAssembly'
 import { MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, GRAPHIC_LANG_ATTR } from '../../src/shared/mermaid'
@@ -410,5 +412,119 @@ describe('fileLinkOf：本机真实路径链接', () => {
     expect(fileLinkOf('D:/vault/a b/图.png')).toBe('file:///D:/vault/a b/图.png')
     expect(fileLinkOf('D:\\vault\\图.png')).toBe('file:///D:/vault/图.png')
     expect(fileLinkOf('/home/u/note.pdf')).toBe('file:///home/u/note.pdf')
+  })
+})
+
+describe('mountExportDocument：T06（#626）合并分篇装配', () => {
+  const mergeEntry = (
+    name: string,
+    text: string,
+    embeds: PdfExportPagePayload['embeds'] = [],
+    embedFailures: PdfExportPagePayload['embedFailures'] = [],
+  ) => ({
+    doc: { fsPath: `D:/vault/${name}`, docName: name, text, version: 5 },
+    embeds,
+    mediaEmbeds: [],
+    embedFailures,
+  })
+
+  function setupMerge(entries: Array<ReturnType<typeof mergeEntry>>, pageBreak: boolean) {
+    const payload = payloadOf({
+      docs: [
+        ...entries.map((entry) => entry.doc),
+        ...entries.flatMap((entry) => entry.embeds.map((e) => ({
+          fsPath: e.fsPath, docName: e.docName, text: e.text, version: e.version,
+        }))),
+      ] as PdfExportPagePayload['docs'],
+      embeds: entries.flatMap((entry) => entry.embeds),
+      merge: { docs: [entries[0]!, ...entries.slice(1)], pageBreak },
+    })
+    return setup(payload)
+  }
+
+  it('分篇容器按清单序挂载，docScope 按篇隔离（不跨篇污染的装配基础）', () => {
+    const { root } = setupMerge([
+      mergeEntry('甲篇.md', '# 甲篇标题\n\n甲篇正文。'),
+      mergeEntry('乙篇.md', '# 乙篇标题\n\n乙篇正文。'),
+    ], false)
+    const sections = Array.from(root.querySelectorAll<HTMLElement>(`.${PDF_EXPORT_CLASS_NAMES.mergeDoc}`))
+    expect(sections).toHaveLength(2)
+    expect(sections[0]!.textContent).toContain('甲篇标题')
+    expect(sections[1]!.textContent).toContain('乙篇标题')
+    // 每篇容器携带来源身份与篇序（资源按篇解析的回查标记 + 书签分段锚）
+    expect(sections.map((s) => s.getAttribute('data-vsidian-pdf-merge-fs')))
+      .toEqual(['D:/vault/甲篇.md', 'D:/vault/乙篇.md'])
+    expect(sections.map((s) => s.getAttribute('data-vsidian-pdf-merge-index'))).toEqual(['0', '1'])
+    expect(new Set(sections.map((s) => s.dataset['vsidianDocScope'])).size).toBe(2)
+  })
+
+  it('每篇另起一页：非首篇带 mergeBreak 修饰类，首篇不带；关闭时全体无', () => {
+    const { root: onRoot } = setupMerge([
+      mergeEntry('甲篇.md', '# 甲'),
+      mergeEntry('乙篇.md', '# 乙'),
+      mergeEntry('丙篇.md', '# 丙'),
+    ], true)
+    const onSections = Array.from(onRoot.querySelectorAll<HTMLElement>(`.${PDF_EXPORT_CLASS_NAMES.mergeDoc}`))
+    expect(onSections.map((s) => s.classList.contains(PDF_EXPORT_CLASS_NAMES.mergeBreak)))
+      .toEqual([false, true, true])
+
+    const { root: offRoot } = setupMerge([
+      mergeEntry('甲篇.md', '# 甲'),
+      mergeEntry('乙篇.md', '# 乙'),
+    ], false)
+    expect(Array.from(offRoot.querySelectorAll(`.${PDF_EXPORT_CLASS_NAMES.mergeBreak}`))).toEqual([])
+    // 分页规则由 pdfExportPage.css 契约钉住（break-before: page——样式注入
+    // 失效时类名断言照样通过的防线）
+    const css = readFileSync('src/webview/pdfExportPage.css', 'utf8')
+    expect(css).toMatch(/\.vsidian-pdf-merge-break\s*\{[^}]*break-before:\s*page/)
+  })
+
+  it('标题埋点挂篇序（data-vsidian-heading-doc）；嵌入展开内的标题随宿主篇', () => {
+    const { root } = setup()
+    expect(root.querySelector(`[${PDF_EXPORT_HEADING_DOC_ATTR}]`)).toBeNull()
+
+    const withEmbed = setupMerge([
+      mergeEntry('甲篇.md', '# 甲篇标题\n\n![[共享笔记]]', [
+        { inner: '共享笔记', fsPath: 'D:/vault/共享笔记.md', docName: '共享笔记.md', text: '## 共享内标题\n\n共享正文。', version: 9 },
+      ]),
+      mergeEntry('乙篇.md', '# 乙篇标题'),
+    ], true)
+    const withDoc = Array.from(withEmbed.root.querySelectorAll<HTMLElement>(`[${PDF_EXPORT_HEADING_DOC_ATTR}]`))
+    // 文本对照宿主 readHeadingMarks 的 trim 口径（jsdom 下标题块尾带换行）
+    expect(withDoc.map((m) => (m.textContent ?? '').trim())).toEqual(['甲篇标题', '共享内标题', '乙篇标题'])
+    expect(withDoc.map((m) => m.getAttribute(PDF_EXPORT_HEADING_DOC_ATTR))).toEqual(['0', '0', '1'])
+  })
+
+  it('按篇嵌入消费：两篇同 inner 各自命中自己的嵌入目标（不跨篇混配）', () => {
+    const { root } = setupMerge([
+      mergeEntry('甲篇.md', '![[笔记]]', [
+        { inner: '笔记', fsPath: 'D:/vault/a/笔记.md', docName: '笔记.md', text: 'A 篇的笔记正文。', version: 1 },
+      ]),
+      mergeEntry('乙篇.md', '![[笔记]]', [
+        { inner: '笔记', fsPath: 'D:/vault/b/笔记.md', docName: '笔记.md', text: 'B 篇的笔记正文。', version: 1 },
+      ]),
+    ], false)
+    const sections = Array.from(root.querySelectorAll<HTMLElement>(`.${PDF_EXPORT_CLASS_NAMES.mergeDoc}`))
+    expect(sections[0]!.textContent).toContain('A 篇的笔记正文。')
+    expect(sections[1]!.textContent).toContain('B 篇的笔记正文。')
+  })
+
+  it('按篇图片身份：各篇相对图片以本篇 fsPath 解析', async () => {
+    const { root, images } = setupMerge([
+      mergeEntry('甲篇.md', '![甲图](a.png)'),
+      mergeEntry('乙篇.md', '![乙图](b.png)'),
+    ], false)
+    await settleImages(root)
+    expect(images).toContainEqual({ src: 'a.png', sourceFsPath: 'D:/vault/甲篇.md' })
+    expect(images).toContainEqual({ src: 'b.png', sourceFsPath: 'D:/vault/乙篇.md' })
+  })
+
+  it('按篇预取失败：命中篇呈现失败说明并入失败清单', () => {
+    const { root, handle } = setupMerge([
+      mergeEntry('甲篇.md', '![[缺失甲]]', [], [{ inner: '缺失甲', reason: 'not-found' }]),
+      mergeEntry('乙篇.md', '乙篇正文。'),
+    ], false)
+    expect(handle.failures).toEqual([{ kind: 'embed', item: '缺失甲', reason: 'not-found' }])
+    expect(root.textContent).toContain('缺失甲')
   })
 })

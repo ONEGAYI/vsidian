@@ -28,7 +28,7 @@ import { buildPdfExportPageHtml } from './pdfExportPage'
 import { PdfExportBrowserError, type BrowserExportSession, type PdfBookmarkReport } from './pdfExportJob'
 import { extractPdfPageTexts } from './pdfOutlineFlow'
 import { writePdfOutline } from './pdfOutlineWrite'
-import { locateHeadingsInPages, outlineEntriesOf, type PdfHeadingMark } from '../../shared/pdfOutline'
+import { locateHeadingsInPages, locateMergeHeadingsInPages, mergeOutlineEntries, outlineEntriesOf, type PdfHeadingMark, type PdfOutlineEntry } from '../../shared/pdfOutline'
 import { t } from '../../shared/i18n'
 import type { PdfExportFailureItem, PdfExportPagePayload, PdfExportReadyState } from '../../shared/pdfExportPayload'
 import type { PdfExportOptions, PdfHeaderFooterContext } from '../../shared/pdfExportOptions'
@@ -56,6 +56,9 @@ export function createBrowserExportSession(
   /** T05：renderPage 捕获的页眉页脚上下文 + 标题埋点（finalizePrint 消费） */
   let hfContext: PdfHeaderFooterContext | undefined
   let headingMarks: PdfHeadingMark[] = []
+  /** T06（#626）：合并导出的书签元数据（篇名序列 + 每篇另起一页——
+   *  finalizePrint 按篇分段定位与子树拼接消费；单文档导出 undefined） */
+  let mergeMeta: { docNames: readonly string[]; pageBreak: boolean } | undefined
 
   const releaseKill = (): void => {
     if (released) return
@@ -132,6 +135,15 @@ export function createBrowserExportSession(
         try {
           headingMarks = await readHeadingMarks(session.session)
         } catch { headingMarks = [] } // 埋点拉取失败：书签链路如实降级（finalizePrint 报告）
+        // T06（#626）：合并书签元数据（篇名序列去扩展名——与页眉标题同源）
+        if (input.payload.merge !== undefined) {
+          mergeMeta = {
+            docNames: input.payload.merge.docs.map((entry) => entry.doc.docName.replace(/\.(md|markdown)$/i, '')),
+            pageBreak: input.payload.merge.pageBreak,
+          }
+        } else {
+          mergeMeta = undefined
+        }
         hfContext = {
           docTitle: (input.payload.docs[0]?.docName ?? 'document').replace(/\.md$/i, ''),
           dateText: '',
@@ -194,6 +206,8 @@ export function createBrowserExportSession(
         // 匹配 → pdf-lib 写 /Outlines。任何失败整份不加书签并如实报告
         //（不伪造）；部分标题定位失败跳过该条。浏览器与服务在书签链路
         // 完成后才释放（定位 target 需要 server 供给 pdfMain/worker）。
+        // T06（#626）：合并产物按篇分段定位（游标重置 + 篇首下界）并以
+        // 文档名顶级拼接条目流——写入层与单文档共用 writePdfOutline。
         let bookmarks: PdfBookmarkReport = { written: false, total: headingMarks.length, skipped: 0, reason: 'disabled' }
         let bytes = printed
         if (options.bookmarksEnabled) {
@@ -202,12 +216,36 @@ export function createBrowserExportSession(
           } else {
             try {
               const pageTexts = await extractPdfPageTexts(launched.connection, server!.baseUrl, printed)
-              const located = locateHeadingsInPages(headingMarks, pageTexts)
-              const entries = outlineEntriesOf(located)
+              let entries: PdfOutlineEntry[]
+              /** 与埋点同口径的条目数（skipped 计算基数——合并流的文档名
+               *  顶级条目不是埋点标题，不计入） */
+              let headingEntryCount: number
+              if (mergeMeta !== undefined) {
+                // 合并：埋点按篇分段（无篇标记的防御归 0），逐篇定位后拼接
+                const groups: PdfHeadingMark[][] = mergeMeta.docNames.map(() => [])
+                for (const mark of headingMarks) {
+                  const index = Math.max(0, Math.min(mark.docIndex ?? 0, groups.length - 1))
+                  groups[index]!.push(mark)
+                }
+                const located = locateMergeHeadingsInPages(
+                  groups.map((marks) => ({ marks })),
+                  pageTexts,
+                  mergeMeta.pageBreak,
+                )
+                entries = mergeOutlineEntries(located.map((docLocated, index) => ({
+                  docName: mergeMeta!.docNames[index]!,
+                  entries: outlineEntriesOf(docLocated),
+                })))
+                headingEntryCount = entries.filter((entry) => entry.level > 1).length
+              } else {
+                const located = locateHeadingsInPages(headingMarks, pageTexts)
+                entries = outlineEntriesOf(located)
+                headingEntryCount = entries.length
+              }
               bookmarks = {
                 written: entries.length > 0,
                 total: headingMarks.length,
-                skipped: headingMarks.length - entries.length,
+                skipped: headingMarks.length - headingEntryCount,
                 ...(entries.length === 0 ? { reason: 'none-located' as const } : {}),
               }
               if (entries.length > 0) {

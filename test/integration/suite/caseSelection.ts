@@ -80,6 +80,24 @@ export const SENSITIVE_CASES = [
     evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
   },
   {
+    name: 'PDF 导出（#626 T06）：三篇合并、分篇书签与页码总页数（真浏览器）',
+    issue: '#626',
+    reason: 'T01–T05 同族真实浏览器链路（单会话多篇装配 + 书签按篇定位后处理），CI 波动基线未建立；本地全量持续跑，回流条件同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T06 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#626 T06）：每篇另起一页关闭连续排版与样式不跨篇（真浏览器）',
+    issue: '#626',
+    reason: '同族真实浏览器链路（连续排版形态 + 文档样式按篇归属的字号几何断言）；CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T06 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#626 T06）：合并失败/取消无伪成功与缺资源继续（真浏览器）',
+    issue: '#626',
+    reason: '同族取消/失败链路依赖真实浏览器进程生命周期与 awaiting-resources 交互时序；CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T06 沿先例）',
+  },
+  {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     issue: '#293 / #129',
     reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',

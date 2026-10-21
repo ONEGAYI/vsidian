@@ -264,6 +264,15 @@ export const en = {
   'pdfExport.batch.awaitingResources': 'Some resources failed for the current file — choose how to continue',
   'pdfExport.batch.doneNotice': 'Batch export finished: {success} of {total} succeeded',
   'pdfExport.batch.captureFailed': 'read failed',
+  /** T06 (#626) merge export: list-modal merge mode UI (list editing reuses
+   *  the batch entries) */
+  'pdfExport.merge.run': 'Merge export…',
+  'pdfExport.merge.listTitle': 'Merge list',
+  'pdfExport.merge.empty': 'The list is empty — add files or directories to merge them into one PDF in list order.',
+  'pdfExport.merge.pageBreak': 'Start each document on a new page',
+  'pdfExport.merge.progress': 'Fixing input {current} / {total}: {name}',
+  'pdfExport.merge.generating': 'Generating merged PDF…',
+  'pdfExport.merge.captureFailedNotice': 'Failed to read list document: {name}',
   /** Settings "Files and links" section page (#332: renamed from "Index
    *  maintenance" to host the Images / Reference views / Index maintenance
    *  groups, mirroring Obsidian's Files & links page) */
@@ -985,6 +994,8 @@ export const en = {
   'command.pdfExport.selection.title': 'Vsidian: Export current selection to PDF',
   /** T04 (#624) PDF batch export: open the batch list modal (read-only, unbound by default) */
   'command.pdfExport.batch.title': 'Vsidian: Batch export Markdown to PDF',
+  /** T06 (#626) PDF merge export: open the merge list modal (read-only, unbound by default) */
+  'command.pdfExport.merge.title': 'Vsidian: Merge Markdown into one PDF',
   /** T01（#621）无活动 Vsidian 文档时的命令提示 */
   'host.pdfExportNoActiveDocument':
     'Open a Markdown document in Vsidian first, then export it to PDF.',

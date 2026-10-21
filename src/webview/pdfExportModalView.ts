@@ -37,20 +37,38 @@ interface PdfExportModalStateMessage {
   resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
   /** T05（#625）标题书签结果（done 阶段提示数据源） */
   bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
-  /** T04（#624）批量模式状态（在场即批量 UI；缺省 = 单文档 UI） */
-  batch?: {
-    phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
-    items: ReadonlyArray<PdfBatchItem>
-    mapping?: ReadonlyArray<PdfBatchMappingEntry>
-    targetDir?: string
-    strategy: PdfBatchConflictStrategy
-    currentIndex: number
-    total: number
-    currentName?: string
-    results: ReadonlyArray<PdfBatchResultEntry>
-    resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
-    failReason?: string
-  }
+  /** T04（#624）批量 / T06（#626）合并模式状态（在场即清单模式 UI；
+   *  缺省 = 单文档 UI。按 mode 判别的联合形态：批量携带映射面与逐文件
+   *  结果表；合并为单产物观测（phase 含 capturing/saving，savedPath/
+   *  bookmarks 为产物面，failDetail 携带失败篇名）） */
+  batch?:
+    | {
+        mode: 'batch'
+        phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
+        items: ReadonlyArray<PdfBatchItem>
+        mapping?: ReadonlyArray<PdfBatchMappingEntry>
+        targetDir?: string
+        strategy: PdfBatchConflictStrategy
+        currentIndex: number
+        total: number
+        currentName?: string
+        results: ReadonlyArray<PdfBatchResultEntry>
+        resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+        failReason?: string
+      }
+    | {
+        mode: 'merge'
+        phase: 'editing' | 'capturing' | 'running' | 'awaiting-resources' | 'saving' | 'done' | 'cancelled' | 'failed'
+        items: ReadonlyArray<PdfBatchItem>
+        currentIndex: number
+        total: number
+        currentName?: string
+        resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+        failReason?: string
+        failDetail?: string
+        savedPath?: string
+        bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
+      }
 }
 
 export interface PdfExportModalViewOptions {
@@ -113,6 +131,10 @@ const CLASS = {
   batchBackButton: 'vsidian-pdfexport-batch-back',
   batchSummary: 'vsidian-pdfexport-batch-summary',
   batchResumeAllButton: 'vsidian-pdfexport-batch-resumeall',
+  /** T06（#626）合并模式：合并导出按钮/每篇另起一页开关/单产物状态区 */
+  mergeRunButton: 'vsidian-pdfexport-merge-run',
+  mergePageBreakCheck: 'vsidian-pdfexport-merge-pagebreak',
+  mergeOutcome: 'vsidian-pdfexport-merge-outcome',
 } as const
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -132,6 +154,8 @@ const FAIL_REASON_KEYS: Record<string, string> = {
   'write-failed': 'pdfExport.fail.writeFailed',
   busy: 'pdfExport.fail.busy',
   internal: 'pdfExport.fail.internal',
+  // T06（#626）合并专用分态：清单篇固定输入失败（篇名经 captureFailedNotice 呈现）
+  'capture-failed': 'pdfExport.batch.captureFailed',
 }
 
 /** 缺资源项的 i18n 键映射（kind × reason → 词条；未知值回退通配词条） */
@@ -182,6 +206,12 @@ export class PdfExportModalView {
   private statusDetailEl: HTMLElement | null = null
   private openSettingsButton: HTMLButtonElement | null = null
   private docNameEl: HTMLElement | null = null
+  /** T06（#626）每篇另起一页（合并模式专属参数——视图本地态，随合并
+   *  run 消息上行；不进持久设置页，导出是单次行为参数） */
+  private mergePageBreak = false
+  private mergePageBreakCheckEl: HTMLInputElement | null = null
+  private mergeRunButtonEl: HTMLButtonElement | null = null
+  private mergeOutcomeEl: HTMLElement | null = null
 
   constructor(options: PdfExportModalViewOptions) {
     this.options = options
@@ -244,10 +274,14 @@ export class PdfExportModalView {
     const parent = this.host
     if (!parent) return
     parent.textContent = ''
-    // T04（#624）批量模式：清单/映射/结果承载于主区（T07 预览落位前的
-    // 批量内容区），侧区为添加入口与参数——与单文档渲染完全分治
+    // T04（#624）批量 / T06（#626）合并：清单模式内容承载于主区（T07 预览
+    // 落位前的清单内容区），侧区为添加入口与参数——与单文档渲染完全分治
     if (this.state?.batch) {
-      this.renderBatch(parent)
+      if (this.state.batch.mode === 'merge') {
+        this.renderMerge(parent)
+      } else {
+        this.renderBatch(parent)
+      }
       return
     }
     const busy = this.state?.phase === 'generating' || this.state?.phase === 'saving' || this.state?.phase === 'awaiting-resources'
@@ -272,47 +306,8 @@ export class PdfExportModalView {
 
     this.appendParamFields(side, params)
 
-    // ---- T05（#625）页眉 / 页码 / 标题书签 ----
-    // 页眉：开关 + 内容子项（标题/日期——开关开时呈现）
-    const header = this.checkRow(t('pdfExport.header.label'), params.headerEnabled, () => {
-      this.render() // 子项显隐联动
-    })
-    this.headerCheck = header.box
-    side.appendChild(header.row)
-    if (params.headerEnabled) {
-      const titleItem = this.checkRow(t('pdfExport.header.title'), params.headerTitle, undefined, CLASS.checkSub)
-      this.headerTitleCheck = titleItem.box
-      side.appendChild(titleItem.row)
-      const dateItem = this.checkRow(t('pdfExport.header.date'), params.headerDate, undefined, CLASS.checkSub)
-      this.headerDateCheck = dateItem.box
-      side.appendChild(dateItem.row)
-    }
-
-    // 页码：开关 + 页脚内位置（开时呈现）
-    const pageNumber = this.checkRow(t('pdfExport.pageNumber.label'), params.pageNumberEnabled, () => {
-      this.render() // 位置 select 显隐联动
-    })
-    this.pageNumberCheck = pageNumber.box
-    side.appendChild(pageNumber.row)
-    if (params.pageNumberEnabled) {
-      this.pageNumberPositionSelect = el('select', CLASS.select) as HTMLSelectElement
-      for (const position of PDF_PAGE_NUMBER_POSITIONS) {
-        const option = el('option', '', t(PDF_PAGE_NUMBER_POSITION_LABEL_KEYS[position]))
-        option.value = position
-        this.pageNumberPositionSelect.appendChild(option)
-      }
-      this.pageNumberPositionSelect.value = params.pageNumberPosition
-      this.pageNumberPositionSelect.addEventListener('change', () => {
-        this.paramsTouched = true
-        this.readControlsIntoParams()
-      })
-      side.appendChild(this.field(t('pdfExport.pageNumber.position'), this.pageNumberPositionSelect))
-    }
-
-    // 标题书签开关
-    const bookmarks = this.checkRow(t('pdfExport.bookmarks.label'), params.bookmarksEnabled)
-    this.bookmarksCheck = bookmarks.box
-    side.appendChild(bookmarks.row)
+    // ---- T05（#625）页眉 / 页码 / 标题书签（单文档与 T06 合并共用） ----
+    this.appendHeaderFooterFields(side, params)
 
     const actions = el('div', CLASS.actions)
     this.runButton = el('button', CLASS.runButton, t('pdfExport.run')) as HTMLButtonElement
@@ -374,25 +369,7 @@ export class PdfExportModalView {
       }
     } else if (phase === 'done') {
       this.statusDetailEl.textContent = t('pdfExport.savedTo', { path: this.state?.savedPath ?? '' })
-      // T05：书签结果提示（disabled 不提示——用户未开启时静默；失败/跳过
-      // 如实呈现，不冒充成功）
-      const bookmarks = this.state?.bookmarks
-      if (bookmarks !== undefined) {
-        let notice: string | undefined
-        if (bookmarks.written) {
-          const count = bookmarks.total - bookmarks.skipped
-          notice = bookmarks.skipped > 0
-            ? t('pdfExport.bookmarks.partial', { count, skipped: bookmarks.skipped })
-            : t('pdfExport.bookmarks.added', { count })
-        } else if (bookmarks.reason === 'no-headings') {
-          notice = t('pdfExport.bookmarks.noHeadings')
-        } else if (bookmarks.reason === 'none-located' || bookmarks.reason === 'locate-failed' || bookmarks.reason === 'write-failed') {
-          notice = t('pdfExport.bookmarks.locateFailed')
-        }
-        if (notice !== undefined) {
-          side.appendChild(el('div', CLASS.bookmarkNotice, notice))
-        }
-      }
+      this.appendBookmarkNotice(side, this.state?.bookmarks)
     } else if (phase === 'cancelled') {
       const kindKey = this.state?.cancelKind === 'save-dialog' ? 'pdfExport.cancelKind.saveDialog' : 'pdfExport.cancelKind.user'
       this.statusDetailEl.textContent = `${t('pdfExport.phase.cancelled')} ${t(kindKey)}`
@@ -533,11 +510,76 @@ export class PdfExportModalView {
     side.appendChild(this.field(t('pdfExport.scale.label'), rangeWrap))
   }
 
+  /** T05（#625）页眉/页码/书签参数区（单文档与 T06 合并共用——合并产物
+   *  同样承载页眉页脚与合并书签；T04 批量逐文件参数面不变，不含此区） */
+  private appendHeaderFooterFields(side: HTMLElement, params: PdfExportOptions): void {
+    // 页眉：开关 + 内容子项（标题/日期——开关开时呈现）
+    const header = this.checkRow(t('pdfExport.header.label'), params.headerEnabled, () => {
+      this.render() // 子项显隐联动
+    })
+    this.headerCheck = header.box
+    side.appendChild(header.row)
+    if (params.headerEnabled) {
+      const titleItem = this.checkRow(t('pdfExport.header.title'), params.headerTitle, undefined, CLASS.checkSub)
+      this.headerTitleCheck = titleItem.box
+      side.appendChild(titleItem.row)
+      const dateItem = this.checkRow(t('pdfExport.header.date'), params.headerDate, undefined, CLASS.checkSub)
+      this.headerDateCheck = dateItem.box
+      side.appendChild(dateItem.row)
+    }
+
+    // 页码：开关 + 页脚内位置（开时呈现）
+    const pageNumber = this.checkRow(t('pdfExport.pageNumber.label'), params.pageNumberEnabled, () => {
+      this.render() // 位置 select 显隐联动
+    })
+    this.pageNumberCheck = pageNumber.box
+    side.appendChild(pageNumber.row)
+    if (params.pageNumberEnabled) {
+      this.pageNumberPositionSelect = el('select', CLASS.select) as HTMLSelectElement
+      for (const position of PDF_PAGE_NUMBER_POSITIONS) {
+        const option = el('option', '', t(PDF_PAGE_NUMBER_POSITION_LABEL_KEYS[position]))
+        option.value = position
+        this.pageNumberPositionSelect.appendChild(option)
+      }
+      this.pageNumberPositionSelect.value = params.pageNumberPosition
+      this.pageNumberPositionSelect.addEventListener('change', () => {
+        this.paramsTouched = true
+        this.readControlsIntoParams()
+      })
+      side.appendChild(this.field(t('pdfExport.pageNumber.position'), this.pageNumberPositionSelect))
+    }
+
+    // 标题书签开关
+    const bookmarks = this.checkRow(t('pdfExport.bookmarks.label'), params.bookmarksEnabled)
+    this.bookmarksCheck = bookmarks.box
+    side.appendChild(bookmarks.row)
+  }
+
+  /** 书签结果提示（T05 语义：disabled 不提示——用户未开启时静默；失败/
+   *  跳过如实呈现，不冒充成功；单文档 done 与 T06 合并 done 共用） */
+  private appendBookmarkNotice(side: HTMLElement, bookmarks: { written: boolean; total: number; skipped: number; reason?: string } | undefined): void {
+    if (bookmarks === undefined) return
+    let notice: string | undefined
+    if (bookmarks.written) {
+      const count = bookmarks.total - bookmarks.skipped
+      notice = bookmarks.skipped > 0
+        ? t('pdfExport.bookmarks.partial', { count, skipped: bookmarks.skipped })
+        : t('pdfExport.bookmarks.added', { count })
+    } else if (bookmarks.reason === 'no-headings') {
+      notice = t('pdfExport.bookmarks.noHeadings')
+    } else if (bookmarks.reason === 'none-located' || bookmarks.reason === 'locate-failed' || bookmarks.reason === 'write-failed') {
+      notice = t('pdfExport.bookmarks.locateFailed')
+    }
+    if (notice !== undefined) {
+      side.appendChild(el('div', CLASS.bookmarkNotice, notice))
+    }
+  }
+
   // ---- T04（#624）批量模式渲染（主区清单/映射/结果 + 侧区添加与操作） ----
 
   private renderBatch(parent: HTMLElement): void {
     const batch = this.state?.batch
-    if (!batch) return
+    if (!batch || batch.mode !== 'batch') return
     const running = batch.phase === 'running' || batch.phase === 'awaiting-resources'
     const params = this.currentParams
     const root = el('div', CLASS.root)
@@ -545,7 +587,7 @@ export class PdfExportModalView {
     // ---- 主区：按阶段承载清单 / 映射预览 / 结果表 ----
     const main = el('main', CLASS.preview)
     if (batch.phase === 'editing') {
-      main.appendChild(this.buildBatchList(batch, running))
+      main.appendChild(this.buildBatchList(batch, running, 'pdfExport.batch.listTitle', 'pdfExport.batch.empty'))
     } else if (batch.phase === 'confirm') {
       main.appendChild(this.buildBatchConfirm(batch))
     } else {
@@ -633,13 +675,176 @@ export class PdfExportModalView {
     this.reportPaint()
   }
 
-  /** 可编辑清单（顺序即执行顺序；增删调序经消息上行——宿主为清单权威） */
-  private buildBatchList(batch: NonNullable<PdfExportModalStateMessage['batch']>, running: boolean): HTMLElement {
+  // ---- T06（#626）合并模式渲染（主区清单/进度/结果 + 侧区添加、参数与
+  //  每篇另起一页——全部复用批量清单与单文档参数档位，零新档位） ----
+
+  private renderMerge(parent: HTMLElement): void {
+    const batch = this.state?.batch
+    if (!batch || batch.mode !== 'merge') return
+    const running = batch.phase === 'capturing' || batch.phase === 'running' || batch.phase === 'saving' || batch.phase === 'awaiting-resources'
+    const params = this.currentParams
+    const root = el('div', CLASS.root)
+
+    // ---- 主区：清单（editing）/ 进度与缺资源（在途）/ 单产物结果（终态） ----
+    const main = el('main', CLASS.preview)
+    if (batch.phase === 'editing') {
+      main.appendChild(this.buildBatchList(batch, running, 'pdfExport.merge.listTitle', 'pdfExport.merge.empty'))
+    } else if (running) {
+      main.appendChild(this.buildMergeProgress(batch))
+      if (batch.phase === 'awaiting-resources') {
+        main.appendChild(this.buildBatchIssues(batch))
+      }
+    } else {
+      main.appendChild(this.buildMergeOutcome(batch))
+    }
+    root.appendChild(main)
+
+    // ---- 侧区：添加入口 + 参数（单文档全参数面 + 每篇另起一页） ----
+    const side = el('aside', CLASS.side)
+    const docRow = el('div', CLASS.docRow)
+    docRow.appendChild(el('span', CLASS.docLabel, t('pdfExport.merge.listTitle')))
+    const count = el('span', CLASS.docName, String(batch.items.length))
+    docRow.appendChild(count)
+    side.appendChild(docRow)
+
+    const addRow = el('div', CLASS.batchAddRow)
+    const addFiles = el('button', CLASS.batchAddButton, t('pdfExport.batch.addFiles')) as HTMLButtonElement
+    addFiles.disabled = running
+    addFiles.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.addFiles' })
+    })
+    addRow.appendChild(addFiles)
+    const addDir = el('button', CLASS.batchAddButton, t('pdfExport.batch.addDir')) as HTMLButtonElement
+    addDir.disabled = running
+    addDir.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.addDir' })
+    })
+    addRow.appendChild(addDir)
+    side.appendChild(addRow)
+
+    this.appendParamFields(side, params)
+    this.appendHeaderFooterFields(side, params)
+
+    // 每篇另起一页（合并专属参数——视图本地态随 merge.run 上行）
+    const pageBreak = this.checkRow(t('pdfExport.merge.pageBreak'), this.mergePageBreak, () => {
+      this.mergePageBreak = pageBreak.box.checked
+    })
+    pageBreak.row.classList.add(CLASS.mergePageBreakCheck)
+    this.mergePageBreakCheckEl = pageBreak.box
+    side.appendChild(pageBreak.row)
+
+    const actions = el('div', CLASS.actions)
+    if (batch.phase === 'editing') {
+      const run = el('button', CLASS.mergeRunButton, t('pdfExport.merge.run')) as HTMLButtonElement
+      run.disabled = batch.items.length === 0
+      run.addEventListener('click', () => {
+        this.paramsTouched = true
+        this.readControlsIntoParams()
+        this.currentParams = normalizePdfExportOptions(this.currentParams)
+        this.options.postMessage({ kind: 'pdfExportModal.merge.run', params: this.currentParams, pageBreak: this.mergePageBreak })
+      })
+      this.mergeRunButtonEl = run
+      actions.appendChild(run)
+    } else if (running) {
+      const cancel = el('button', CLASS.cancelButton, t('pdfExport.cancel')) as HTMLButtonElement
+      cancel.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.batch.cancel' })
+      })
+      actions.appendChild(cancel)
+    } else {
+      const back = el('button', CLASS.batchBackButton, t('pdfExport.batch.back')) as HTMLButtonElement
+      back.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.batch.cancel' })
+      })
+      actions.appendChild(back)
+    }
+    side.appendChild(actions)
+
+    this.statusEl = el('div', CLASS.status)
+    this.statusEl.setAttribute('role', 'status')
+    this.statusDetailEl = el('div', CLASS.statusDetail)
+    this.statusEl.appendChild(this.statusDetailEl)
+    side.appendChild(this.statusEl)
+    this.statusDetailEl.textContent = this.mergeStatusText(batch)
+
+    root.appendChild(side)
+    parent.appendChild(root)
+    this.reportPaint()
+  }
+
+  /** 合并在途进度区（capturing 逐篇固定输入 / running 单会话生成 / saving
+   *  保存对话框与写盘——按实际阶段与篇计数呈现，不编造整体百分比） */
+  private buildMergeProgress(batch: Extract<NonNullable<PdfExportModalStateMessage['batch']>, { mode: 'merge' }>): HTMLElement {
     const wrap = el('div', CLASS.previewPlaceholder)
     wrap.classList.add(CLASS.batchList)
-    wrap.appendChild(el('h2', CLASS.batchSectionTitle, t('pdfExport.batch.listTitle')))
+    const label = batch.phase === 'capturing'
+      ? t('pdfExport.merge.progress', {
+        current: String(Math.min(batch.currentIndex + 1, batch.total)),
+        total: String(batch.total),
+        name: batch.currentName ?? '',
+      })
+      : batch.phase === 'saving'
+        ? t('pdfExport.phase.saving')
+        : t('pdfExport.merge.generating')
+    wrap.appendChild(el('h2', CLASS.batchSectionTitle, label))
+    return wrap
+  }
+
+  /** 合并终态区（done 保存路径与书签提示 / failed 失败分态与篇名 /
+   *  cancelled 取消——不伪装成功） */
+  private buildMergeOutcome(batch: Extract<NonNullable<PdfExportModalStateMessage['batch']>, { mode: 'merge' }>): HTMLElement {
+    const wrap = el('div', CLASS.previewPlaceholder)
+    wrap.classList.add(CLASS.batchList)
+    wrap.appendChild(el('h2', CLASS.batchSectionTitle, this.mergeStatusText(batch)))
+    const detail = el('p', CLASS.mergeOutcome)
+    if (batch.phase === 'done' && batch.savedPath !== undefined) {
+      detail.textContent = t('pdfExport.savedTo', { path: batch.savedPath })
+    } else if (batch.phase === 'failed') {
+      detail.textContent = batch.failReason === 'capture-failed' && batch.currentName
+        ? t('pdfExport.merge.captureFailedNotice', { name: batch.currentName })
+        : t(FAIL_REASON_KEYS[batch.failReason ?? 'internal'] ?? 'pdfExport.fail.internal')
+    } else {
+      detail.textContent = t('pdfExport.phase.cancelled')
+    }
+    this.mergeOutcomeEl = detail
+    wrap.appendChild(detail)
+    return wrap
+  }
+
+  private mergeStatusText(batch: Extract<NonNullable<PdfExportModalStateMessage['batch']>, { mode: 'merge' }>): string {
+    if (batch.phase === 'editing') return t('pdfExport.phase.idle')
+    if (batch.phase === 'capturing') {
+      return t('pdfExport.merge.progress', {
+        current: String(Math.min(batch.currentIndex + 1, batch.total)),
+        total: String(batch.total),
+        name: batch.currentName ?? '',
+      })
+    }
+    if (batch.phase === 'running') return t('pdfExport.merge.generating')
+    if (batch.phase === 'saving') return t('pdfExport.phase.saving')
+    if (batch.phase === 'awaiting-resources') return t('pdfExport.batch.awaitingResources')
+    if (batch.phase === 'done') return t('pdfExport.phase.done')
+    if (batch.phase === 'cancelled') return t('pdfExport.phase.cancelled')
+    if (batch.phase === 'failed' && batch.failReason) {
+      const key = FAIL_REASON_KEYS[batch.failReason] ?? 'pdfExport.fail.internal'
+      return `${t('pdfExport.phase.failed')} ${t(key)}`
+    }
+    return t('pdfExport.phase.failed')
+  }
+
+  /** 可编辑清单（顺序即执行/合篇顺序；增删调序经消息上行——宿主为清单
+   *  权威；标题与空态词条由模式传入——批量/合并各自文案） */
+  private buildBatchList(
+    batch: NonNullable<PdfExportModalStateMessage['batch']>,
+    running: boolean,
+    titleKey: 'pdfExport.batch.listTitle' | 'pdfExport.merge.listTitle',
+    emptyKey: 'pdfExport.batch.empty' | 'pdfExport.merge.empty',
+  ): HTMLElement {
+    const wrap = el('div', CLASS.previewPlaceholder)
+    wrap.classList.add(CLASS.batchList)
+    wrap.appendChild(el('h2', CLASS.batchSectionTitle, t(titleKey)))
     if (batch.items.length === 0) {
-      wrap.appendChild(el('p', CLASS.batchEmpty, t('pdfExport.batch.empty')))
+      wrap.appendChild(el('p', CLASS.batchEmpty, t(emptyKey)))
       return wrap
     }
     const list = el('ul', CLASS.batchList)
@@ -676,7 +881,7 @@ export class PdfExportModalView {
   }
 
   /** 映射预览（真实输出路径 + 冲突标注）与重名策略选择 */
-  private buildBatchConfirm(batch: NonNullable<PdfExportModalStateMessage['batch']>): HTMLElement {
+  private buildBatchConfirm(batch: Extract<NonNullable<PdfExportModalStateMessage['batch']>, { mode: 'batch' }>): HTMLElement {
     const wrap = el('div', CLASS.previewPlaceholder)
     wrap.classList.add(CLASS.batchList)
     wrap.appendChild(el('h2', CLASS.batchSectionTitle, t('pdfExport.batch.confirmTitle')))
@@ -729,7 +934,7 @@ export class PdfExportModalView {
   }
 
   /** 结果表（成功/失败/跳过/取消 + 真实输出路径；失败分态经 T01 词条映射） */
-  private buildBatchResults(batch: NonNullable<PdfExportModalStateMessage['batch']>): HTMLElement {
+  private buildBatchResults(batch: Extract<NonNullable<PdfExportModalStateMessage['batch']>, { mode: 'batch' }>): HTMLElement {
     const wrap = el('div', CLASS.previewPlaceholder)
     wrap.classList.add(CLASS.batchList)
     wrap.appendChild(el('h2', CLASS.batchSectionTitle, t('pdfExport.batch.resultsTitle')))
@@ -868,6 +1073,12 @@ export class PdfExportModalView {
         batchBackButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchBackButton}`)),
         batchResumeAllButton: probe(document.querySelector<HTMLElement>(`.${CLASS.batchResumeAllButton}`)),
         batchSummaryText: document.querySelector(`.${CLASS.batchSummary}`)?.textContent ?? '',
+        // T06（#626）合并面观测：合并按钮/每篇另起一页开关/终态文本
+        mergeRunButton: probe(this.mergeRunButtonEl),
+        mergeRunButtonDisabled: this.mergeRunButtonEl?.disabled ?? null,
+        mergePageBreakCheck: probe(this.mergePageBreakCheckEl),
+        mergePageBreakChecked: this.mergePageBreakCheckEl?.checked ?? null,
+        mergeOutcomeText: this.mergeOutcomeEl?.textContent ?? '',
       },
     })
   }

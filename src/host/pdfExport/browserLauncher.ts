@@ -263,24 +263,29 @@ export async function readExportFailures(session: CdpSession): Promise<PdfExport
 
 /** 拉取标题书签埋点（T05/#625：probe 阶段就绪后调用——装配层 heading
  *  块的 [data-vsidian-heading-level] 清单，querySelectorAll 文档序即书签
- *  序；形态防御性收窄：level 1–6 + 非空文本，非法条目丢弃不冒充） */
+ *  序；形态防御性收窄：level 1–6 + 非空文本，非法条目丢弃不冒充。
+ *  T06（#626）：合并导出的分篇容器另挂 [data-vsidian-heading-doc]（篇
+ *  序——嵌入展开容器内的标题随宿主篇），缺省 0 = 单文档语义不变） */
 export async function readHeadingMarks(session: CdpSession): Promise<PdfHeadingMark[]> {
   const raw = await evaluate<unknown>(session,
     `(() => Array.from(document.querySelectorAll('[data-vsidian-heading-level]')).map((el) => ({
       level: Number(el.getAttribute('data-vsidian-heading-level')),
       text: el.textContent ?? '',
+      docIndex: Number(el.getAttribute('data-vsidian-heading-doc') ?? 0) || 0,
     })))()`)
   if (!Array.isArray(raw)) {
     return []
   }
   return raw
-    .filter((item): item is { level: number; text: string } =>
+    .filter((item): item is { level: number; text: string; docIndex: number } =>
       item !== null && typeof item === 'object'
       && Number.isInteger((item as { level?: unknown }).level)
       && (item as { level: number }).level >= 1
       && (item as { level: number }).level <= 6
-      && typeof (item as { text?: unknown }).text === 'string')
-    .map((item) => ({ level: item.level, text: item.text.trim() }))
+      && typeof (item as { text?: unknown }).text === 'string'
+      && Number.isInteger((item as { docIndex?: unknown }).docIndex)
+      && (item as { docIndex: number }).docIndex >= 0)
+    .map((item) => ({ level: item.level, text: item.text.trim(), docIndex: item.docIndex }))
 }
 
 /** Page.printToPDF：返回 PDF 字节（base64 解码）。参数由

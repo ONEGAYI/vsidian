@@ -70,6 +70,7 @@ import {
 } from '../../shared/settings'
 import { PdfExportJob, type PdfExportInput, type PdfExportInputPayload, type PdfExportJobState } from './pdfExportJob'
 import { PdfBatchJob, type PdfBatchRunPlan } from './pdfExportBatchJob'
+import { PdfMergeJob, type PdfMergeRunPlan } from './pdfExportMergeJob'
 import { createBrowserExportSession } from './pdfExportSession'
 import { resolveExportBrowser } from './browserFind'
 import { prefetchEmbedTargets, type PdfExportEmbedReadPort } from './pdfExportEmbeds'
@@ -170,23 +171,44 @@ export interface PdfExportModalInfo {
   fragmentCount: number
   /** 就绪后导出页整页截图（测试钩子装配时的视觉证据；base64 PNG） */
   lastSnapshot: string | undefined
-  /** T04（#624）批量模式观测面（非批量模式 undefined） */
-  batch: {
-    mode: 'document' | 'batch'
-    phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
-    items: PdfBatchItem[]
-    mapping: PdfBatchMappingEntry[] | undefined
-    targetDir: string | undefined
-    strategy: PdfBatchConflictStrategy
-    currentIndex: number
-    total: number
-    currentName: string | undefined
-    results: PdfBatchResultEntry[]
-    resourceIssues: PdfExportJobState['resourceIssues']
-    failReason: string | undefined
-    /** 钩子模式下批量目标目录短路的自动路径 */
-    hookedTargetDir: string | undefined
-  } | undefined
+  /** T04（#624）批量模式观测面（非批量/合并模式 undefined；合并模式为
+   *  merge 形态——单产物观测：savedPath/bookmarks/篇进度，无映射面） */
+  batch:
+    | {
+        mode: 'batch'
+        phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
+        items: PdfBatchItem[]
+        mapping: PdfBatchMappingEntry[] | undefined
+        targetDir: string | undefined
+        strategy: PdfBatchConflictStrategy
+        currentIndex: number
+        total: number
+        currentName: string | undefined
+        results: PdfBatchResultEntry[]
+        resourceIssues: PdfExportJobState['resourceIssues']
+        failReason: string | undefined
+        /** 钩子模式下批量目标目录短路的自动路径 */
+        hookedTargetDir: string | undefined
+      }
+    | {
+        mode: 'merge'
+        /** T06（#626）合并单产物阶段（capturing = 逐篇固定输入；saving =
+         *  保存对话框/写盘——批量模式不产生这两个阶段） */
+        phase: 'editing' | 'capturing' | 'running' | 'awaiting-resources' | 'saving' | 'done' | 'cancelled' | 'failed'
+        items: PdfBatchItem[]
+        currentIndex: number
+        total: number
+        currentName: string | undefined
+        resourceIssues: PdfExportJobState['resourceIssues']
+        failReason: string | undefined
+        /** 失败的原始诊断（观测面；不进用户文案） */
+        failDetail: string | undefined
+        savedPath: string | undefined
+        bookmarks: PdfExportJobState['bookmarks']
+        /** 钩子模式下保存对话框短路的自动目标路径 */
+        hookedSaveTarget: string | undefined
+      }
+    | undefined
 }
 
 export interface PdfExportModalHandle {
@@ -200,6 +222,9 @@ export interface PdfExportModalHandle {
   /** T04（#624）打开批量模式（或 reveal 已有面板切换到批量清单——不依赖
    *  活动文档；清单与映射权威在宿主，重开重置为空清单） */
   openBatch(): void
+  /** T06（#626）打开合并模式（或 reveal 已有面板切换到合并清单——同一
+   *  清单数据面按合并语义消费：清单顺序即合篇顺序，单产物无映射面） */
+  openMerge(): void
   close(): void
   isOpen(): boolean
   getInfo(): PdfExportModalInfo
@@ -259,6 +284,23 @@ export function createPdfExportModal(
    *  前登记、终态后清空） */
   const knownDocFsPaths = new Set<string>()
 
+  /** 保存对话框端口（单文档与 T06 合并共用：钩子短路临时目录自动路径
+   *  经 hookedSaveTarget 暴露；生产走系统对话框，取消 = undefined） */
+  const saveDialogPort = async (defaultFileName: string): Promise<string | undefined> => {
+    if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+      // 测试钩子短路：自动目标路径（临时目录 + 默认名），真实落盘可断言；
+      // 目标路径经 getInfo()（单文档直读 / 合并 batch.hookedSaveTarget）暴露
+      const dir = mkdtempSync(path.join(tmpdir(), 'vsidian-pdfexport-test-'))
+      hookedSaveTarget = path.join(dir, defaultFileName)
+      return hookedSaveTarget
+    }
+    const target = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.joinPath(sourceDirForDialog ?? vscode.Uri.file(tmpdir()), defaultFileName),
+      filters: { 'PDF': ['pdf'] },
+    })
+    return target?.fsPath
+  }
+
   const job = new PdfExportJob({
     resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
     createSession: (executablePath) => createBrowserExportSession(executablePath, {
@@ -278,20 +320,7 @@ export function createPdfExportModal(
         }
         : {}),
     }),
-    showSaveDialog: async (defaultFileName) => {
-      if (process.env.VSIDIAN_TEST_HOOKS === '1') {
-        // 测试钩子短路：自动目标路径（临时目录 + 文档名），真实落盘可断言；
-        // 目标路径经 getInfo().hookedSaveTarget 暴露
-        const dir = mkdtempSync(path.join(tmpdir(), 'vsidian-pdfexport-test-'))
-        hookedSaveTarget = path.join(dir, defaultFileName)
-        return hookedSaveTarget
-      }
-      const target = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.joinPath(sourceDirForDialog ?? vscode.Uri.file(tmpdir()), defaultFileName),
-        filters: { 'PDF': ['pdf'] },
-      })
-      return target?.fsPath
-    },
+    showSaveDialog: saveDialogPort,
     writeFile: async (targetPath, bytes) => {
       await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), Buffer.from(bytes))
     },
@@ -303,8 +332,10 @@ export function createPdfExportModal(
 
   // ---- T04（#624）批量模式：清单权威在宿主（编辑经消息上行，state 推送
   //  下行）；清单顺序即执行顺序；映射预览在 confirm 阶段呈现并随策略切换
-  //  重算（磁盘已有探测缓存于 confirm 进入时——准备阶段固定映射快照） ----
-  let mode: 'document' | 'batch' = 'document'
+  //  重算（磁盘已有探测缓存于 confirm 进入时——准备阶段固定映射快照）。
+  //  T06（#626）合并模式共用同一清单数据面（batchItems/batchOpChain/
+  //  nextBatchId）——消费面换 mergeJob（单产物两段式）。 ----
+  let mode: 'document' | 'batch' | 'merge' = 'document'
   let batchPhase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed' = 'editing'
   let batchItems: PdfBatchItem[] = []
   let batchMapping: PdfBatchMappingEntry[] | undefined
@@ -340,7 +371,27 @@ export function createPdfExportModal(
         failReason: batchJob.state.failReason,
         hookedTargetDir: hookedBatchTargetDir,
       }
-    : undefined
+    : mode === 'merge'
+      ? {
+          mode: 'merge' as const,
+          // 合并阶段直读 mergeJob（editing 由模态会话管理；终态后保持——
+          // 与批量 batchPhase 的终态滞留语义一致；idle 是 run 前瞬态，
+          // 映射 running 与 batchPhase 观测一致）
+          phase: batchPhase === 'editing'
+            ? 'editing' as const
+            : mergeJob.state.phase === 'idle' ? 'running' as const : mergeJob.state.phase,
+          items: batchItems,
+          currentIndex: mergeJob.state.currentIndex,
+          total: mergeJob.state.total,
+          currentName: mergeJob.state.currentName,
+          resourceIssues: mergeJob.state.resourceIssues,
+          failReason: mergeJob.state.failReason,
+          failDetail: mergeJob.state.failDetail,
+          savedPath: mergeJob.state.savedPath,
+          bookmarks: mergeJob.state.bookmarks,
+          hookedSaveTarget,
+        }
+      : undefined
 
   /** 目录递归收集（readDirectory 递归；条目名稳定排序——枚举顺序只是初始
    *  清单顺序，最终执行顺序由用户可调的清单决定） */
@@ -382,6 +433,33 @@ export function createPdfExportModal(
     }
   }
 
+  /** 条目级捕获端口（T04 批量与 T06 合并共用）：provider 固定输入 + 窗口
+   *  级件并入 + 资源服务守卫登记（主条目 + 嵌入目标身份——捕获成功即登记，
+   *  renderPage 资源请求在捕获之后，时序上先于页面装载） */
+  const makeCaptureDocPort = () => async (fsPath: string) => {
+    const outcome = await sessionDeps.capturePdfBatchDoc(fsPath)
+    if (!outcome.ok) return outcome
+    const window = batchWindowCapture
+    for (const doc of outcome.payload.docs) {
+      knownDocFsPaths.add(doc.fsPath)
+    }
+    return {
+      docName: outcome.docName,
+      capturedVersion: outcome.capturedVersion,
+      payload: {
+        ...outcome.payload,
+        style: window?.style ?? {
+          dark: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+            || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast,
+          vars: {},
+          reading: {},
+        },
+        snippets: window?.snippets ?? [],
+        breaks: window?.breaks ?? false,
+      },
+    }
+  }
+
   const batchJob = new PdfBatchJob({
     resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
     createSession: (executablePath) => createBrowserExportSession(executablePath, {
@@ -391,31 +469,7 @@ export function createPdfExportModal(
         knownDocFsPaths: () => knownDocFsPaths,
       },
     }),
-    captureDoc: async (fsPath) => {
-      const outcome = await sessionDeps.capturePdfBatchDoc(fsPath)
-      if (!outcome.ok) return outcome
-      const window = batchWindowCapture
-      // 资源服务守卫数据面：主条目 + 嵌入目标身份（捕获成功即登记——
-      // renderPage 资源请求在捕获之后，时序上先于页面装载）
-      for (const doc of outcome.payload.docs) {
-        knownDocFsPaths.add(doc.fsPath)
-      }
-      return {
-        docName: outcome.docName,
-        capturedVersion: outcome.capturedVersion,
-        payload: {
-          ...outcome.payload,
-          style: window?.style ?? {
-            dark: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
-              || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast,
-            vars: {},
-            reading: {},
-          },
-          snippets: window?.snippets ?? [],
-          breaks: window?.breaks ?? false,
-        },
-      }
-    },
+    captureDoc: makeCaptureDocPort(),
     writeFile: writeBatchFile,
     locale: () => hostLocale(getSettingsSnapshot()),
   })
@@ -429,6 +483,67 @@ export function createPdfExportModal(
       knownDocFsPaths.clear()
     }
     notifyState()
+  }
+
+  // ---- T06（#626）合并模式执行器：同一清单数据面按合并语义消费（单产物
+  //  两段式；保存对话框/写盘/释放与单文档同口径——取消/失败不留伪成功） ----
+  const mergeJob = new PdfMergeJob({
+    resolveBrowser: (configuredPath) => resolveExportBrowser(configuredPath),
+    createSession: (executablePath) => createBrowserExportSession(executablePath, {
+      outWebviewDir: sessionDeps.outWebviewDir,
+      resourceResolve: {
+        resolve: sessionDeps.resolveResource,
+        knownDocFsPaths: () => knownDocFsPaths,
+      },
+    }),
+    captureDoc: makeCaptureDocPort(),
+    showSaveDialog: saveDialogPort,
+    writeFile: writeBatchFile,
+    locale: () => hostLocale(getSettingsSnapshot()),
+  })
+  mergeJob.onStateChange = () => {
+    const phase = mergeJob.state.phase
+    if (phase === 'idle' || phase === 'done' || phase === 'cancelled' || phase === 'failed') {
+      knownDocFsPaths.clear()
+    }
+    notifyState()
+  }
+
+  /** T06（#626）合并执行：窗口级固定输入一次捕获（style 兜底）+ 全部主条目
+   *  身份预登记（嵌入目标随逐篇捕获补登记——见 makeCaptureDocPort） */
+  const startMergeRun = async (params: PdfExportOptions, pageBreak: boolean): Promise<void> => {
+    if (mergeJob.isRunning || batchJob.isRunning || job.isRunning) return
+    lastHtml = undefined
+    lastSnapshot = undefined
+    hookedSaveTarget = undefined
+    const raw = await sessionDeps.captureBatchWindowInput()
+    batchWindowCapture = raw
+    const plan: PdfMergeRunPlan = {
+      items: batchItems,
+      options: params,
+      pageBreak,
+      window: {
+        style: raw.style ?? {
+          dark: vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+            || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast,
+          vars: {},
+          reading: {},
+        },
+        snippets: raw.snippets,
+        breaks: raw.breaks,
+      },
+      browserPath: defaultsFromSettings(getSettingsSnapshot()).browserPath.trim() || undefined,
+    }
+    batchPhase = 'running'
+    notifyState()
+    for (const item of batchItems) {
+      knownDocFsPaths.add(item.fsPath)
+    }
+    void mergeJob.run(plan).then((state) => {
+      if (state.phase === 'done' && state.savedPath !== undefined) {
+        void vscode.window.showInformationMessage(t('pdfExport.savedTo', { path: state.savedPath }))
+      }
+    })
   }
 
   /** confirm 进入：探测名义目标磁盘已有 + 首版映射 */
@@ -519,26 +634,9 @@ export function createPdfExportModal(
       ...(job.state.resourceIssues !== undefined
         ? { resourceIssues: job.state.resourceIssues.map((issue) => ({ kind: issue.kind, item: issue.item, reason: issue.reason })) }
         : {}),
-      // T04（#624）批量模式状态（单文档模式不携带——既有字段零改动）
-      ...(mode === 'batch'
-        ? {
-            batch: {
-              phase: batchPhase,
-              items: batchItems,
-              ...(batchMapping !== undefined ? { mapping: batchMapping } : {}),
-              ...(batchTargetDir !== undefined ? { targetDir: batchTargetDir } : {}),
-              strategy: batchStrategy,
-              currentIndex: batchJob.state.currentIndex,
-              total: batchJob.state.total,
-              ...(batchJob.state.currentName !== undefined ? { currentName: batchJob.state.currentName } : {}),
-              results: batchJob.state.results,
-              ...(batchJob.state.resourceIssues !== undefined
-                ? { resourceIssues: batchJob.state.resourceIssues.map((issue) => ({ kind: issue.kind, item: issue.item, reason: issue.reason })) }
-                : {}),
-              ...(batchJob.state.failReason !== undefined ? { failReason: batchJob.state.failReason } : {}),
-            },
-          }
-        : {}),
+      // T04（#624）批量 / T06（#626）合并模式状态（单文档模式不携带——
+      // 既有字段零改动；合并形态经 batchInfo 的 merge 分支）
+      ...(mode !== 'document' ? { batch: batchInfo() } : {}),
     })
   }
   job.onStateChange = () => {
@@ -604,12 +702,13 @@ export function createPdfExportModal(
     }
   }
 
-  /** T04（#624）批量消息族处理（清单编辑经消息上行——宿主为清单权威；
+  /** T04（#624）/T06（#626）清单模式消息族处理（清单编辑经消息上行——
+   *  宿主为清单权威；增删调序两模式共用，run/confirm/策略按模式分治；
    *  对话框为生产唯一入口，paths/path/targetDir 仅 VSIDIAN_TEST_HOOKS 门控
    *  下消费；收集/探测类操作经 batchOpChain 串行——消息到达序即用户操作序） */
-  const handleBatchMessage = (message: { kind: string; paths?: unknown; path?: unknown; targetDir?: unknown; id?: unknown; direction?: unknown; strategy?: unknown; params?: unknown; all?: unknown }): void => {
-    if (mode !== 'batch') return
-    const editingLocked = batchJob.isRunning
+  const handleBatchMessage = (message: { kind: string; paths?: unknown; path?: unknown; targetDir?: unknown; id?: unknown; direction?: unknown; strategy?: unknown; params?: unknown; all?: unknown; pageBreak?: unknown }): void => {
+    if (mode !== 'batch' && mode !== 'merge') return
+    const editingLocked = batchJob.isRunning || mergeJob.isRunning
     switch (message.kind) {
       case 'pdfExportModal.batch.addFiles': {
         if (editingLocked) return
@@ -678,7 +777,7 @@ export function createPdfExportModal(
         return
       }
       case 'pdfExportModal.batch.run': {
-        if (batchJob.isRunning || batchItems.length === 0) return
+        if (mode !== 'batch' || batchJob.isRunning || batchItems.length === 0) return
         enqueueBatchOp(async () => {
           let targetDir: string | undefined
           if (process.env.VSIDIAN_TEST_HOOKS === '1') {
@@ -707,27 +806,41 @@ export function createPdfExportModal(
         })
         return
       }
+      case 'pdfExportModal.merge.run': {
+        // T06（#626）合并入口：清单即合篇顺序（无目标目录/映射/策略——单
+        // 产物保存对话框在生成后弹出，与单文档导出同时序）
+        if (mode !== 'merge' || mergeJob.isRunning || batchJob.isRunning || batchItems.length === 0) return
+        const { defaults } = defaultsFromSettings(getSettingsSnapshot())
+        const params = normalizePdfExportOptions(message.params as Record<string, unknown> | undefined, defaults)
+        void startMergeRun(params, message.pageBreak === true)
+        return
+      }
       case 'pdfExportModal.batch.setStrategy': {
-        if (batchPhase !== 'confirm' || !isPdfBatchConflictStrategy(message.strategy)) return
+        if (mode !== 'batch' || batchPhase !== 'confirm' || !isPdfBatchConflictStrategy(message.strategy)) return
         batchStrategy = message.strategy
         batchMapping = planBatchMapping(batchItems, batchTargetDir!, batchStrategy, batchExisting)
         notifyState()
         return
       }
       case 'pdfExportModal.batch.confirm': {
-        if (batchPhase !== 'confirm' || batchJob.isRunning) return
+        if (mode !== 'batch' || batchPhase !== 'confirm' || batchJob.isRunning) return
         const { defaults } = defaultsFromSettings(getSettingsSnapshot())
         const params = normalizePdfExportOptions(message.params as Record<string, unknown> | undefined, defaults)
         void startBatchRun(params)
         return
       }
       case 'pdfExportModal.batch.cancel': {
-        if (batchJob.isRunning) {
+        if (mode === 'merge' && mergeJob.isRunning) {
+          mergeJob.cancel()
+          return
+        }
+        if (mode === 'batch' && batchJob.isRunning) {
           batchJob.cancel()
           return
         }
         // confirm/done/cancelled/failed → 回到清单编辑（映射丢弃，新一轮
-        // 重新选择目标目录与探测——上一轮未完成结果不复用）
+        // 重新选择目标目录与探测——上一轮未完成结果不复用；合并同口径：
+        // done 后返回 = 新一轮重新固定输入）
         if (batchPhase !== 'editing') {
           batchPhase = 'editing'
           batchMapping = undefined
@@ -738,6 +851,10 @@ export function createPdfExportModal(
         return
       }
       case 'pdfExportModal.batch.resume': {
+        if (mode === 'merge') {
+          mergeJob.resolveResourceChoice(message.all === true ? 'resume-all' : 'resume')
+          return
+        }
         batchJob.resolveResourceChoice(message.all === true ? 'resume-all' : 'resume')
         return
       }
@@ -748,7 +865,8 @@ export function createPdfExportModal(
 
   const handleMessage = (message: unknown): void => {
     if (!isWebviewToHost(message)) return
-    if (typeof message.kind === 'string' && message.kind.startsWith('pdfExportModal.batch.')) {
+    if (typeof message.kind === 'string'
+      && (message.kind.startsWith('pdfExportModal.batch.') || message.kind.startsWith('pdfExportModal.merge.'))) {
       handleBatchMessage(message)
       return
     }
@@ -820,6 +938,7 @@ export function createPdfExportModal(
       // 关闭模态：取消在途任务并释放（规格 §2.5 配对释放；未完成产物不落盘）
       job.dispose()
       batchJob.dispose()
+      mergeJob.dispose()
       knownDocFsPaths.clear()
       lastPaint = undefined
       // 会话终结：模式、批量清单与策略选择一并重置（重开 = 全新会话）
@@ -835,13 +954,14 @@ export function createPdfExportModal(
     })
   }
 
-  /** 批量模式收口：切换/重开均进入新批量会话——取消在途任务并重置清单
+  /** 清单模式收口：切换/重开均进入新清单会话——取消在途任务并重置清单
    *  与策略选择（上一会话的策略选择不跨会话残留；open(source) 同款
    *  「重新执行命令 = 新一轮输入」语义；单文档任务在途时取消让位） */
-  const enterBatchMode = (): void => {
+  const enterListMode = (next: 'batch' | 'merge'): void => {
     job.cancel()
     batchJob.cancel()
-    mode = 'batch'
+    mergeJob.cancel()
+    mode = next
     batchPhase = 'editing'
     batchItems = []
     batchMapping = undefined
@@ -857,9 +977,10 @@ export function createPdfExportModal(
     sourceDirForDialog = source.uri.scheme === 'file'
       ? vscode.Uri.file(path.dirname(source.uri.fsPath))
       : vscode.workspace.workspaceFolders?.[0]?.uri
-    if (mode === 'batch') {
-      // 批量 → 单文档：取消在途批量任务，清单丢弃（重开批量 = 空清单）
+    if (mode !== 'document') {
+      // 清单模式 → 单文档：取消在途清单任务，清单丢弃（重开清单 = 空清单）
       batchJob.cancel()
+      mergeJob.cancel()
       mode = 'document'
     }
     // 固定输入捕获（异步）：面板装载握手（get）早于捕获完成时以空输入态
@@ -882,7 +1003,13 @@ export function createPdfExportModal(
   }
 
   const openBatch = (): void => {
-    enterBatchMode()
+    enterListMode('batch')
+    ensurePanel()
+    notifyState()
+  }
+
+  const openMerge = (): void => {
+    enterListMode('merge')
     ensurePanel()
     notifyState()
   }
@@ -890,6 +1017,7 @@ export function createPdfExportModal(
   return {
     open,
     openBatch,
+    openMerge,
     close: () => {
       panel?.dispose()
     },

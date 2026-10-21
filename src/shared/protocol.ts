@@ -613,41 +613,62 @@ export type HostToWebview =
       /** T02（#622）awaiting-resources 阶段的失败清单（kind/item/reason——
        *  item/reason 为机器值，词条映射在 webview 侧） */
       resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
-      /** T04（#624）批量模式状态（批量模态打开时在场；单文档模式缺省——
-       *  既有字段零改动，批量状态整体为可选追加字段） */
-      batch?: {
-        phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
-        /** 可编辑清单（顺序即执行顺序） */
-        items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
-        /** confirm 阶段的映射预览（真实输出映射 + 冲突标注） */
-        mapping?: ReadonlyArray<{
-          id: string
-          fsPath: string
-          targetPath: string
-          action: 'export' | 'skip'
-          conflict: 'none' | 'duplicate' | 'exists' | 'both'
-          renamed: boolean
-          skipReason?: 'duplicate' | 'exists'
-        }>
-        targetDir?: string
-        strategy: 'skip' | 'overwrite' | 'rename'
-        currentIndex: number
-        total: number
-        currentName?: string
-        results: ReadonlyArray<{
-          id: string
-          fsPath: string
-          docName: string
-          status: 'success' | 'failed' | 'skipped' | 'cancelled'
-          targetPath?: string
-          failReason?: string
-          skipReason?: 'duplicate' | 'exists'
-        }>
-        /** awaiting-resources 阶段当前文件的失败清单 */
-        resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
-        /** 整批环境性失败分态（resolveBrowser 失败） */
-        failReason?: string
-      }
+      /** T04（#624）批量 / T06（#626）合并模式状态（清单模态打开时在场；
+       *  单文档模式缺省——既有字段零改动，清单状态整体为可选追加字段，
+       *  按 mode 判别：批量携带映射面与逐文件结果；合并为单产物观测） */
+      batch?:
+        | {
+            mode: 'batch'
+            phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
+            /** 可编辑清单（顺序即执行顺序） */
+            items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+            /** confirm 阶段的映射预览（真实输出映射 + 冲突标注） */
+            mapping?: ReadonlyArray<{
+              id: string
+              fsPath: string
+              targetPath: string
+              action: 'export' | 'skip'
+              conflict: 'none' | 'duplicate' | 'exists' | 'both'
+              renamed: boolean
+              skipReason?: 'duplicate' | 'exists'
+            }>
+            targetDir?: string
+            strategy: 'skip' | 'overwrite' | 'rename'
+            currentIndex: number
+            total: number
+            currentName?: string
+            results: ReadonlyArray<{
+              id: string
+              fsPath: string
+              docName: string
+              status: 'success' | 'failed' | 'skipped' | 'cancelled'
+              targetPath?: string
+              failReason?: string
+              skipReason?: 'duplicate' | 'exists'
+            }>
+            /** awaiting-resources 阶段当前文件的失败清单 */
+            resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+            /** 整批环境性失败分态（resolveBrowser 失败） */
+            failReason?: string
+          }
+        | {
+            mode: 'merge'
+            /** T06（#626）合并单产物阶段（capturing = 逐篇固定输入；
+             *  saving = 保存对话框与写盘——批量模式不产生这两个阶段） */
+            phase: 'editing' | 'capturing' | 'running' | 'awaiting-resources' | 'saving' | 'done' | 'cancelled' | 'failed'
+            /** 可编辑清单（顺序即合篇顺序——与批量同一数据面） */
+            items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+            currentIndex: number
+            total: number
+            currentName?: string
+            /** awaiting-resources 阶段的失败清单（合并产物整体面） */
+            resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+            failReason?: string
+            /** 失败的原始诊断（观测面，不进用户文案；capture-failed 携带篇名） */
+            failDetail?: string
+            savedPath?: string
+            bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
+          }
     }
   /** T02（#622）阅读样式快照请求（面板级只读交互）：编辑器 webview 枚举
    *  主题变量计算值回包 pdfExport.styleSnapshot.report（PDF 导出准备阶段
@@ -1915,6 +1936,10 @@ export type WebviewToHost =
   /** T04（#624）缺资源选择：继续当前文件（all=true 时本批后续缺资源自动
    *  继续——正文保留可见降级说明，T02 语义） */
   | { kind: 'pdfExportModal.batch.resume'; all?: boolean }
+  /** T06（#626）发起合并导出：清单顺序即合篇顺序，单产物（保存对话框在
+   *  生成后弹出——同单文档时序）；params 为模态当前参数原样载荷（宿主
+   *  normalize 后使用），pageBreak = 每篇另起一页（视图本地态） */
+  | { kind: 'pdfExportModal.merge.run'; params: unknown; pageBreak?: boolean }
   /** T02（#622）阅读样式快照上报（宿主 pdfExport.styleSnapshot.request 的
    *  回包——面板级只读交互：编辑器 webview 枚举主题变量计算值，供导出页
    *  主题跟随；不进文档会话消息管线，provider 层拦截分发） */
@@ -4500,6 +4525,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'pdfExportModal.batch.confirm':
       // params 为模态当前参数原样载荷（同 run 口径）
       return true
+    case 'pdfExportModal.merge.run':
+      // T06（#626）合并发起：params 为模态当前参数原样载荷（同 confirm
+      // 口径）；pageBreak = 每篇另起一页（视图本地态）
+      return v.pageBreak === undefined || typeof v.pageBreak === 'boolean'
     case 'pdfExportModal.batch.cancel':
       return true
     case 'pdfExportModal.batch.resume':
@@ -5737,20 +5766,40 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.resourceIssues === undefined || (Array.isArray(v.resourceIssues) &&
           v.resourceIssues.every((issue) => isObject(issue) && isString((issue as { kind?: unknown }).kind) &&
             isString((issue as { item?: unknown }).item) && isString((issue as { reason?: unknown }).reason)))) &&
-        // T04（#624）批量状态为可选追加字段：在场时校验枚举与数组形态
-        //（items/mapping/results 为宿主自产数据面，形态层拦类型即可）
-        (v.batch === undefined || (isObject(v.batch) &&
-          (v.batch.phase === 'editing' || v.batch.phase === 'confirm' || v.batch.phase === 'running' ||
-            v.batch.phase === 'awaiting-resources' || v.batch.phase === 'done' || v.batch.phase === 'cancelled' ||
-            v.batch.phase === 'failed') &&
-          (v.batch.strategy === 'skip' || v.batch.strategy === 'overwrite' || v.batch.strategy === 'rename') &&
-          isNonNegativeInt(v.batch.currentIndex) && isNonNegativeInt(v.batch.total) &&
-          Array.isArray(v.batch.items) &&
-          (v.batch.mapping === undefined || Array.isArray(v.batch.mapping)) &&
-          Array.isArray(v.batch.results) &&
-          (v.batch.targetDir === undefined || isString(v.batch.targetDir)) &&
-          (v.batch.currentName === undefined || isString(v.batch.currentName)) &&
-          (v.batch.failReason === undefined || isString(v.batch.failReason))))
+        // T04（#624）批量 / T06（#626）合并状态为可选追加字段：按 mode 判别
+        // 校验（批量 mode 缺省兼容旧载荷；合并为单产物观测——无映射/策略/
+        // 结果表面，phase 含 capturing/saving）。items/mapping/results 为宿主
+        // 自产数据面，形态层拦类型即可
+        (v.batch === undefined || (isObject(v.batch) && (
+          ((v.batch.mode === undefined || v.batch.mode === 'batch') &&
+            (v.batch.phase === 'editing' || v.batch.phase === 'confirm' || v.batch.phase === 'running' ||
+              v.batch.phase === 'awaiting-resources' || v.batch.phase === 'done' || v.batch.phase === 'cancelled' ||
+              v.batch.phase === 'failed') &&
+            (v.batch.strategy === 'skip' || v.batch.strategy === 'overwrite' || v.batch.strategy === 'rename') &&
+            isNonNegativeInt(v.batch.currentIndex) && isNonNegativeInt(v.batch.total) &&
+            Array.isArray(v.batch.items) &&
+            (v.batch.mapping === undefined || Array.isArray(v.batch.mapping)) &&
+            Array.isArray(v.batch.results) &&
+            (v.batch.targetDir === undefined || isString(v.batch.targetDir)) &&
+            (v.batch.currentName === undefined || isString(v.batch.currentName)) &&
+            (v.batch.failReason === undefined || isString(v.batch.failReason)))
+          || (v.batch.mode === 'merge' &&
+            (v.batch.phase === 'editing' || v.batch.phase === 'capturing' || v.batch.phase === 'running' ||
+              v.batch.phase === 'awaiting-resources' || v.batch.phase === 'saving' || v.batch.phase === 'done' ||
+              v.batch.phase === 'cancelled' || v.batch.phase === 'failed') &&
+            isNonNegativeInt(v.batch.currentIndex) && isNonNegativeInt(v.batch.total) &&
+            Array.isArray(v.batch.items) &&
+            (v.batch.currentName === undefined || isString(v.batch.currentName)) &&
+            (v.batch.failReason === undefined || isString(v.batch.failReason)) &&
+            (v.batch.failDetail === undefined || isString(v.batch.failDetail)) &&
+            (v.batch.savedPath === undefined || isString(v.batch.savedPath)) &&
+            (v.batch.resourceIssues === undefined || (Array.isArray(v.batch.resourceIssues) &&
+              v.batch.resourceIssues.every((issue) => isObject(issue) &&
+                isString((issue as { kind?: unknown }).kind) &&
+                isString((issue as { item?: unknown }).item) &&
+                isString((issue as { reason?: unknown }).reason)))) &&
+            (v.batch.bookmarks === undefined || isObject(v.batch.bookmarks)))
+        )))
     case 'pdfExport.styleSnapshot.request':
       return true
     case 'settings.focusSection':

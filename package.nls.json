@@ -61,6 +61,7 @@
   "command.pdfExport.currentDocument.title": "Vsidian: Export current document to PDF",
   "command.pdfExport.selection.title": "Vsidian: Export current selection to PDF",
   "command.pdfExport.batch.title": "Vsidian: Batch export Markdown to PDF",
+  "command.pdfExport.merge.title": "Vsidian: Merge Markdown into one PDF",
   "command.openSettings.title": "Open settings",
   "command.cssSnippets.refresh.title": "CSS snippets: reload",
   "command.cssSnippets.pause.title": "CSS snippets: pause all",

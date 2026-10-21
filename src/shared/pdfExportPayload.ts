@@ -77,11 +77,27 @@ export interface PdfExportSelectionFragment {
   text: string
 }
 
+/** T06（#626）合并导出的分篇条目：每篇一份完整固定输入（主文档 + **该篇**
+ *  的嵌入预取超集）。按篇携带的原因：嵌入 inner 的解析以**来源文档**为基准
+ *  （readEmbedTarget 在源文档上下文解析相对路径），两篇同 inner 可解析到
+ *  不同目标——顶层 union 无法按篇归属，装配与失败面都按篇消费。 */
+export interface PdfMergeDocEntry {
+  doc: PdfExportDocEntry
+  /** 本篇的嵌入预取（成功） */
+  embeds: PdfExportEmbedEntry[]
+  /** 本篇的非 Markdown 嵌入目标身份 */
+  mediaEmbeds: PdfExportMediaEmbedEntry[]
+  /** 本篇的预取失败登记 */
+  embedFailures: PdfExportEmbedPrefetchFailure[]
+}
+
 /** 导出页完整载荷（骨架页 nonce 内联注入） */
 export interface PdfExportPagePayload {
-  /** 首项恒为主文档 */
+  /** 首项恒为主文档（merge 在场时 = 全部主文档依清单序 + 嵌入目标并集
+   *  ——docStyle 收集与资源身份数据面不变，挂载面以 merge.docs 为准） */
   docs: [PdfExportDocEntry, ...PdfExportDocEntry[]]
-  /** 嵌入目标预取（成功；按 inner 去重） */
+  /** 嵌入目标预取（成功；按 inner 去重——merge 在场时为跨篇并集，消费
+   *  面按篇走 merge.docs[k].embeds） */
   embeds: PdfExportEmbedEntry[]
   /** 非 Markdown 嵌入目标身份（降级说明用） */
   mediaEmbeds: PdfExportMediaEmbedEntry[]
@@ -89,6 +105,14 @@ export interface PdfExportPagePayload {
   embedFailures: PdfExportEmbedPrefetchFailure[]
   style: PdfExportStyleSnapshot
   snippets: PdfExportSnippetEntry[]
+  /** T06（#626）合并导出：多主文档分篇装配。在场时装配侧按 merge.docs
+   *  逐篇挂载（替代 docs[0] 单主文档全文），每篇独立 docScope/资源身份
+   *  （样式与相对资源不跨篇污染）；pageBreak = 每篇另起一页（首篇除外
+   *  ——break-before: page），关闭 = 连续排版。 */
+  merge?: {
+    docs: [PdfMergeDocEntry, ...PdfMergeDocEntry[]]
+    pageBreak: boolean
+  }
   /** T03（#623）选区片段（在场 = 选区导出：替代 docs[0] 全文挂载；
    *  空数组 = 零正文——不回落全文，不误触发全文导出） */
   fragments?: PdfExportSelectionFragment[]

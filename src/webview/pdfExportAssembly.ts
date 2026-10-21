@@ -42,7 +42,9 @@ import { GRAPHIC_LANG_ATTR, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../sha
 import { graphicRendererFor } from './graphicRenderers'
 import { t } from '../shared/i18n'
 import type {
+  PdfExportEmbedEntry,
   PdfExportFailureItem,
+  PdfExportMediaEmbedEntry,
   PdfExportPagePayload,
 } from '../shared/pdfExportPayload'
 
@@ -58,6 +60,10 @@ export const PDF_EXPORT_CLASS_NAMES = {
   notice: 'vsidian-pdf-notice',
   /** 降级说明内链接 */
   noticeLink: 'vsidian-pdf-notice-link',
+  /** T06（#626）合并分篇容器（每篇一块——docScope 与资源身份的篇边界） */
+  mergeDoc: 'vsidian-pdf-merge-doc',
+  /** T06（#626）每篇另起一页（非首篇分篇容器的分页修饰类） */
+  mergeBreak: 'vsidian-pdf-merge-break',
 } as const
 
 /** 标题书签埋点属性（T05/#625）：装配层 heading 块挂 level 标记，宿主
@@ -66,9 +72,17 @@ export const PDF_EXPORT_CLASS_NAMES = {
  *  （markdown-it 标题 token，与用户看到的标题层级一致）。 */
 export const PDF_EXPORT_HEADING_LEVEL_ATTR = 'data-vsidian-heading-level'
 
-function annotateHeadingMark(el: HTMLElement, kind: string, level: number | undefined): void {
+/** T06（#626）标题书签埋点的篇序属性：合并分篇容器内的 heading 挂所属
+ *  篇序（merge.docs 下标——嵌入展开容器内的标题随宿主篇）；单文档导出
+ *  不挂，宿主侧缺省归 0（readHeadingMarks 同口径） */
+export const PDF_EXPORT_HEADING_DOC_ATTR = 'data-vsidian-heading-doc'
+
+function annotateHeadingMark(el: HTMLElement, kind: string, level: number | undefined, docIndex?: number): void {
   if (kind === 'heading') {
     el.setAttribute(PDF_EXPORT_HEADING_LEVEL_ATTR, String(level ?? 1))
+    if (docIndex !== undefined) {
+      el.setAttribute(PDF_EXPORT_HEADING_DOC_ATTR, String(docIndex))
+    }
   }
 }
 
@@ -105,6 +119,11 @@ export interface PdfExportAssemblyHandle {
 
 /** 装配期身份标记：展开容器的来源 fsPath（装配内部回查用，非公开契约） */
 const EMBED_FS_PATH_ATTR = 'data-vsidian-pdf-embed-fs'
+
+/** 装配期身份标记：合并分篇容器的来源 fsPath 与篇序（资源身份回查与
+ *  docRoots 数据面，非公开契约） */
+const MERGE_SECTION_FS_ATTR = 'data-vsidian-pdf-merge-fs'
+const MERGE_SECTION_INDEX_ATTR = 'data-vsidian-pdf-merge-index'
 
 /** 嵌入展开：B 全文的块群 + 来源标识行（B 的 docScope；一层边界——B 内
  *  embed 块保留占位引用行，不再展开） */
@@ -258,13 +277,14 @@ export function mountExportDocument(
   reading.className = READING_CLASS_NAMES.view
   reading.dataset['vsidianMode'] = 'reading'
 
-  /** 一个文本的块群装配（主文档全文/选区片段共用：文本 → 块群 → 容器；
-   *  混排嵌入提升对片段同样生效——payload.embeds 按 inner 命中即展开） */
-  const mountTextBlocks = (text: string, scope: string, container: HTMLElement, expandEmbeds: boolean): void => {
+  /** 一个文本的块群装配（主文档全文/选区片段/合并分篇共用：文本 → 块群
+   *  → 容器；混排嵌入提升对各形态同样生效——embeds 按 inner 命中即展开。
+   *  docIndex（T06）：合并分篇的标题埋点挂篇序；单文档缺省不挂） */
+  const mountTextBlocks = (text: string, scope: string, container: HTMLElement, expandEmbeds: boolean, docIndex?: number): void => {
     const blocks = splitReadingBlocks(text)
     for (const block of blocks) {
       const el = createReadingBlockElement(block, text, scope)
-      annotateHeadingMark(el, block.kind, block.kind === 'heading' ? block.level : undefined)
+      annotateHeadingMark(el, block.kind, block.kind === 'heading' ? block.level : undefined, docIndex)
       container.appendChild(el)
       // 混排嵌入提升（#246 与阅读同源：占位 → 块级宿主，data 通道统一）
       if (expandEmbeds && block.kind !== 'embed') {
@@ -273,14 +293,93 @@ export function mountExportDocument(
     }
   }
 
-  // T03（#623）选区导出：片段在场时以片段序列替代全文挂载——每片段独立
-  // 解析（splitReadingBlocks 对片段文本直接可用，半段语法真实降级）、按
-  // 文档顺序组合到同一 reading 容器；片段间不拼接成新语法（独立解析保证
-  // ——相邻列表/表格/围栏片段是各自的块群，不会互认成同一结构）。资源
-  // 身份与 docScope 仍用主文档 fsPath（图片/嵌入/文档样式同源）。空片段
-  // 数组 = 零正文挂载（不回落全文——选区导出不误触发全文导出）
+  /** 嵌入消费（块级 embed 块 + 混排提升宿主统一按 data-vsidian-embed-inner；
+   *  T06 合并分篇按篇传入各自的嵌入面——嵌入解析以来源文档为基准，不跨
+   *  篇混配；docIndex 在场时展开容器内的标题埋点补挂宿主篇序） */
+  const consumeEmbedHosts = (
+    root: HTMLElement,
+    embedByInner: Map<string, PdfExportEmbedEntry>,
+    mediaByInner: Map<string, PdfExportMediaEmbedEntry>,
+    failedInners: ReadonlySet<string>,
+    embedFailures: ReadonlyArray<{ inner: string; reason: string }>,
+    docIndex: number | undefined,
+  ): void => {
+    for (const host of Array.from(root.querySelectorAll<HTMLElement>('[data-vsidian-embed-inner]'))) {
+      const inner = host.dataset['vsidianEmbedInner'] ?? ''
+      const embed = embedByInner.get(inner)
+      if (embed !== undefined) {
+        const expanded = buildExpandedEmbed(embed)
+        host.replaceWith(expanded)
+        if (docIndex !== undefined) {
+          for (const heading of Array.from(expanded.querySelectorAll<HTMLElement>(`[${PDF_EXPORT_HEADING_LEVEL_ATTR}]`))) {
+            heading.setAttribute(PDF_EXPORT_HEADING_DOC_ATTR, String(docIndex))
+          }
+        }
+        continue
+      }
+      const media = mediaByInner.get(inner)
+      if (media !== undefined) {
+        const label = t(`pdfExport.mediaNotice.${media.kind === 'pdf' ? 'pdf' : media.kind === 'web' ? 'web' : 'media'}`)
+        const target = media.kind === 'web'
+          ? media.url ?? ''
+          : media.fsPath !== undefined ? fileLinkOf(media.fsPath) : ''
+        const linkText = media.kind === 'web' ? media.url ?? inner : media.fsPath ?? inner
+        const notice = target === ''
+          ? (() => {
+            const n = document.createElement('div')
+            n.className = PDF_EXPORT_CLASS_NAMES.notice
+            n.textContent = label
+            return n
+          })()
+          : buildMediaNotice(label, target, linkText)
+        host.replaceWith(notice)
+        continue
+      }
+      if (failedInners.has(inner)) {
+        const reason = embedFailures.find((f) => f.inner === inner)?.reason ?? 'not-found'
+        const notice = document.createElement('div')
+        notice.className = PDF_EXPORT_CLASS_NAMES.notice
+        notice.textContent = t('pdfExport.embedFailedNotice', { target: inner })
+        host.replaceWith(notice)
+        failures.push({ kind: 'embed', item: inner, reason })
+        continue
+      }
+      // 超集未命中（枚举形态差异）：保留占位引用行（阅读混排边界同形，不冒充失败）
+    }
+  }
+
   const mainScope = docScopeKeyOf(main.fsPath)
-  if (payload.fragments !== undefined) {
+  if (payload.merge !== undefined) {
+    // T06（#626）合并分篇挂载：每篇一个分篇容器（docScope/资源身份按篇
+    //  隔离——样式与相对资源不跨篇污染）；pageBreak 时非首篇另起一页
+    //  （break-before: page 由 mergeBreak 类承载，pdfExportPage.css 钉住）
+    const { docs: mergeDocs, pageBreak } = payload.merge
+    mergeDocs.forEach((entry, index) => {
+      const scope = docScopeKeyOf(entry.doc.fsPath)
+      const section = document.createElement('div')
+      section.className = PDF_EXPORT_CLASS_NAMES.mergeDoc
+        + (pageBreak && index > 0 ? ` ${PDF_EXPORT_CLASS_NAMES.mergeBreak}` : '')
+      section.dataset['vsidianDocScope'] = scope
+      section.setAttribute(MERGE_SECTION_FS_ATTR, entry.doc.fsPath)
+      section.setAttribute(MERGE_SECTION_INDEX_ATTR, String(index))
+      reading.appendChild(section)
+      mountTextBlocks(entry.doc.text, scope, section, true, index)
+      consumeEmbedHosts(
+        section,
+        new Map(entry.embeds.map((e) => [e.inner, e])),
+        new Map(entry.mediaEmbeds.map((e) => [e.inner, e])),
+        new Set(entry.embedFailures.map((e) => e.inner)),
+        entry.embedFailures,
+        index,
+      )
+    })
+  } else if (payload.fragments !== undefined) {
+    // T03（#623）选区导出：片段在场时以片段序列替代 docs[0] 全文挂载——每片段独立
+    // 解析（splitReadingBlocks 对片段文本直接可用，半段语法真实降级）、按文档
+    // 顺序组合到同一 reading 容器；片段间不拼接成新语法（独立解析保证
+    // ——相邻列表/表格/围栏片段是各自的块群，不会互认成同一结构）。资源
+    // 身份与 docScope 仍用主文档 fsPath（图片/嵌入/文档样式同源）。空片段
+    // 数组 = 零正文挂载（不回落全文——选区导出不误触发全文导出）
     for (const fragment of payload.fragments) {
       mountTextBlocks(fragment.text, mainScope, reading, true)
     }
@@ -288,49 +387,30 @@ export function mountExportDocument(
     mountTextBlocks(main.text, mainScope, reading, true)
   }
 
-  // 嵌入消费：块级 embed 块 + 混排提升宿主统一按 data-vsidian-embed-inner
-  for (const host of Array.from(reading.querySelectorAll<HTMLElement>('[data-vsidian-embed-inner]'))) {
-    const inner = host.dataset['vsidianEmbedInner'] ?? ''
-    const embed = embedByInner.get(inner)
-    if (embed !== undefined) {
-      host.replaceWith(buildExpandedEmbed(embed))
-      continue
-    }
-    const media = mediaByInner.get(inner)
-    if (media !== undefined) {
-      const label = t(`pdfExport.mediaNotice.${media.kind === 'pdf' ? 'pdf' : media.kind === 'web' ? 'web' : 'media'}`)
-      const target = media.kind === 'web'
-        ? media.url ?? ''
-        : media.fsPath !== undefined ? fileLinkOf(media.fsPath) : ''
-      const linkText = media.kind === 'web' ? media.url ?? inner : media.fsPath ?? inner
-      const notice = target === ''
-        ? (() => {
-          const n = document.createElement('div')
-          n.className = PDF_EXPORT_CLASS_NAMES.notice
-          n.textContent = label
-          return n
-        })()
-        : buildMediaNotice(label, target, linkText)
-      host.replaceWith(notice)
-      continue
-    }
-    if (failedInners.has(inner)) {
-      const reason = payload.embedFailures.find((f) => f.inner === inner)?.reason ?? 'not-found'
-      const notice = document.createElement('div')
-      notice.className = PDF_EXPORT_CLASS_NAMES.notice
-      notice.textContent = t('pdfExport.embedFailedNotice', { target: inner })
-      host.replaceWith(notice)
-      failures.push({ kind: 'embed', item: inner, reason })
-      continue
-    }
-    // 超集未命中（枚举形态差异）：保留占位引用行（阅读混排边界同形，不冒充失败）
+  // 嵌入消费：单文档/选区路径在整个 reading 上消费（合并路径已在分篇
+  // 容器内按篇消费完毕——此处不再全局扫描，避免跨篇 inner 混配）
+  if (payload.merge === undefined) {
+    consumeEmbedHosts(
+      reading,
+      embedByInner,
+      mediaByInner,
+      failedInners,
+      payload.embedFailures,
+      undefined,
+    )
   }
 
   // 每个文档的图片 + HTML 资源 + 图形渲染（A 与各 B 同管线；B 的资源以
   // B 身份解析——prepareHtmlResources 的 sourceDocUri 与 manager 身份一致；
-  // 展开容器的 fsPath 经装配期身份标记回查）
+  // 展开容器的 fsPath 经装配期身份标记回查；T06 合并：分篇容器是第一层
+  // 文档根——篇内图片/资源以该篇身份解析，嵌套展开容器回查自身身份）
+  const sectionRoots = payload.merge !== undefined
+    ? Array.from(reading.querySelectorAll<HTMLElement>(`[${MERGE_SECTION_FS_ATTR}]`))
+      .map((el) => ({ fsPath: el.getAttribute(MERGE_SECTION_FS_ATTR) ?? '', root: el }))
+      .filter((entry) => entry.fsPath !== '')
+    : [{ fsPath: main.fsPath, root: reading }]
   const docRoots: Array<{ fsPath: string; root: HTMLElement }> = [
-    { fsPath: main.fsPath, root: reading },
+    ...sectionRoots,
     ...Array.from(reading.querySelectorAll<HTMLElement>(`[${EMBED_FS_PATH_ATTR}]`))
       .map((el) => ({ fsPath: el.getAttribute(EMBED_FS_PATH_ATTR) ?? '', root: el }))
       .filter((entry) => entry.fsPath !== ''),

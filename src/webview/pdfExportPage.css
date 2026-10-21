@@ -38,6 +38,18 @@ body {
   font-weight: 600;
 }
 
+/* T06（#626）合并分篇：每篇一个分篇容器（结构容器零观感——篇间留白由
+ * 篇内首尾块自身 margin 承担）；每篇另起一页 = 非首篇 break-before:
+ * page（打印分页由 break 属性驱动，@page 尺寸/边距仍由骨架装配统一
+ * 负责）。关闭时该类不在场 = 连续排版，两形态共享同一容器结构 */
+.vsidian-pdf-merge-doc {
+  break-inside: auto;
+}
+
+.vsidian-pdf-merge-break {
+  break-before: page;
+}
+
 .vsidian-pdf-notice {
   margin: 0.6em 0;
   padding: 0.5em 0.9em;
