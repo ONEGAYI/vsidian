@@ -40,7 +40,6 @@ import type {
   PdfExportStyleSnapshot,
 } from '../../shared/pdfExportPayload'
 import {
-  PDF_EXPORT_BOOKMARKS_KEY,
   addBatchFiles,
   addToBatchFromDir,
   isMarkdownFilePath,
@@ -54,6 +53,7 @@ import {
   type PdfBatchResultEntry,
 } from '../../shared/pdfExportBatch'
 import {
+  PDF_EXPORT_BOOKMARKS_KEY,
   PDF_EXPORT_BROWSER_PATH_KEY,
   PDF_EXPORT_CUSTOM_HEIGHT_MM_KEY,
   PDF_EXPORT_CUSTOM_WIDTH_MM_KEY,

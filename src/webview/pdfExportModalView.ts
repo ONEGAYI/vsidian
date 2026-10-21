@@ -441,6 +441,8 @@ export class PdfExportModalView {
     row.appendChild(box)
     row.appendChild(el('span', '', label))
     return { row, box }
+  }
+
   /** 参数字段行（纸张/方向/边距/缩放）——单文档与批量共用（T04 提取；
    *  T05 页眉页脚参数沿此追加，两模式同步生效） */
   private appendParamFields(side: HTMLElement, params: PdfExportOptions): void {

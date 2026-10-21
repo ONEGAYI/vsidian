@@ -190,7 +190,9 @@ export class PdfBatchJob {
             if (!choice || this.cancelRequested) throw new BatchCancelled()
             this.setState({ phase: 'running', resourceIssues: undefined })
           }
-          bytes = await session.finalizePrint(plan.options)
+          // T05 起 finalizePrint 返回 { bytes, bookmarks }：批量逐文件产物
+          // 不写书签（书签定位按单份产物正文——合并书签归 T06）
+          bytes = (await session.finalizePrint(plan.options)).bytes
         } catch (error) {
           session.dispose()
           if (this.cancelRequested || error instanceof BatchCancelled) {

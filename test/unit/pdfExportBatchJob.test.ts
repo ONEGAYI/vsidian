@@ -67,9 +67,9 @@ function makeHarness(files: FileScript[]): Harness {
           if (script.renderError) {
             throw new PdfExportBrowserError(script.renderError.code as 'launch', script.renderError.message)
           }
-          return { ready: true, readyState: {} as never, failures: (script.failures ?? []) as never }
+          return { ready: true, readyState: {} as never, failures: (script.failures ?? []) as never, headings: [] }
         }),
-        finalizePrint: vi.fn(async () => Buffer.from('%PDF-1.4 mock-bytes')),
+        finalizePrint: vi.fn(async () => ({ bytes: Buffer.from('%PDF-1.4 mock-bytes'), bookmarks: { written: false, total: 0, skipped: 0, reason: 'disabled' } as never })),
         cancel: vi.fn(() => {
           calls.sessionCancel++
           const error = new Error('CDP connection closed')

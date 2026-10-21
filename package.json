@@ -341,6 +341,9 @@
       {
         "command": "onegayi.vsidian.pdfExport.selection",
         "title": "%command.pdfExport.selection.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.pdfExport.batch",
         "title": "%command.pdfExport.batch.title%",
         "category": "Vsidian"
