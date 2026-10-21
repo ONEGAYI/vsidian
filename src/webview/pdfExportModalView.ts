@@ -21,7 +21,7 @@ import {
 
 interface PdfExportModalStateMessage {
   kind: 'pdfExportModal.state'
-  phase: 'idle' | 'generating' | 'saving' | 'done' | 'failed' | 'cancelled'
+  phase: 'idle' | 'generating' | 'awaiting-resources' | 'saving' | 'done' | 'failed' | 'cancelled'
   generation: number
   docName: string
   capturedVersion: number
@@ -30,6 +30,8 @@ interface PdfExportModalStateMessage {
   savedPath?: string
   failReason?: string
   cancelKind?: 'user' | 'save-dialog'
+  /** T02（#622）awaiting-resources 阶段的失败清单 */
+  resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
 }
 
 export interface PdfExportModalViewOptions {
@@ -59,6 +61,12 @@ const CLASS = {
   status: 'vsidian-pdfexport-status',
   statusDetail: 'vsidian-pdfexport-status-detail',
   openSettings: 'vsidian-pdfexport-open-settings',
+  /** T02（#622）缺资源列表与继续导出按钮 */
+  issues: 'vsidian-pdfexport-issues',
+  issuesTitle: 'vsidian-pdfexport-issues-title',
+  issuesList: 'vsidian-pdfexport-issues-list',
+  issueItem: 'vsidian-pdfexport-issue-item',
+  resumeButton: 'vsidian-pdfexport-resume',
 } as const
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -69,15 +77,36 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: s
 }
 
 const FAIL_REASON_KEYS: Record<string, string> = {
-  'no-browser': 'pdfExport.fail.no-browser',
-  'configured-path-missing': 'pdfExport.fail.configured-path-missing',
-  'launch-failed': 'pdfExport.fail.launch-failed',
-  'navigate-failed': 'pdfExport.fail.navigate-failed',
-  'not-ready': 'pdfExport.fail.not-ready',
-  'print-failed': 'pdfExport.fail.print-failed',
-  'write-failed': 'pdfExport.fail.write-failed',
+  'no-browser': 'pdfExport.fail.noBrowser',
+  'configured-path-missing': 'pdfExport.fail.configuredPathMissing',
+  'launch-failed': 'pdfExport.fail.launchFailed',
+  'navigate-failed': 'pdfExport.fail.navigateFailed',
+  'not-ready': 'pdfExport.fail.notReady',
+  'print-failed': 'pdfExport.fail.printFailed',
+  'write-failed': 'pdfExport.fail.writeFailed',
   busy: 'pdfExport.fail.busy',
   internal: 'pdfExport.fail.internal',
+}
+
+/** 缺资源项的 i18n 键映射（kind × reason → 词条；未知值回退通配词条） */
+const ISSUE_KIND_KEYS: Record<string, string> = {
+  embed: 'pdfExport.issues.kind.embed',
+  image: 'pdfExport.issues.kind.image',
+  graphic: 'pdfExport.issues.kind.graphic',
+  media: 'pdfExport.issues.kind.media',
+}
+
+const ISSUE_REASON_KEYS: Record<string, string> = {
+  'not-found': 'pdfExport.issues.reason.notFound',
+  inaccessible: 'pdfExport.issues.reason.inaccessible',
+  blocked: 'pdfExport.issues.reason.blocked',
+  'load-failed': 'pdfExport.issues.reason.loadFailed',
+  'anchor-missing': 'pdfExport.issues.reason.anchorMissing',
+  ambiguous: 'pdfExport.issues.reason.ambiguous',
+  escape: 'pdfExport.issues.reason.blocked',
+  'outside-workspace': 'pdfExport.issues.reason.blocked',
+  'non-markdown': 'pdfExport.issues.reason.nonMarkdown',
+  'read-failed': 'pdfExport.issues.reason.readFailed',
 }
 
 export class PdfExportModalView {
@@ -145,7 +174,7 @@ export class PdfExportModalView {
     const parent = this.host
     if (!parent) return
     parent.textContent = ''
-    const busy = this.state?.phase === 'generating' || this.state?.phase === 'saving'
+    const busy = this.state?.phase === 'generating' || this.state?.phase === 'saving' || this.state?.phase === 'awaiting-resources'
     const params = this.currentParams
 
     const root = el('div', CLASS.root)
@@ -247,7 +276,28 @@ export class PdfExportModalView {
     side.appendChild(this.statusEl)
 
     const phase = this.state?.phase ?? 'idle'
-    if (phase === 'failed' && this.state?.failReason) {
+    if (phase === 'awaiting-resources') {
+      // T02（#622）缺资源选择：失败清单（i18n）+ 继续导出/取消——继续时
+      // 正文保留可见降级说明（页面侧已渲染说明块），取消走既有释放链路
+      const issues = el('div', CLASS.issues)
+      issues.appendChild(el('div', CLASS.issuesTitle, t('pdfExport.issues.title')))
+      const list = el('ul', CLASS.issuesList)
+      for (const issue of this.state?.resourceIssues ?? []) {
+        const item = el('li', CLASS.issueItem)
+        const kindText = t(ISSUE_KIND_KEYS[issue.kind] ?? 'pdfExport.issues.kind.unknown')
+        const reasonText = t(ISSUE_REASON_KEYS[issue.reason] ?? 'pdfExport.issues.reason.unknown')
+        item.textContent = `${kindText} · ${issue.item} · ${reasonText}`
+        list.appendChild(item)
+      }
+      issues.appendChild(list)
+      const resumeButton = el('button', CLASS.resumeButton, t('pdfExport.resume')) as HTMLButtonElement
+      resumeButton.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.resume' })
+      })
+      issues.appendChild(resumeButton)
+      side.appendChild(issues)
+      this.statusDetailEl.textContent = t('pdfExport.phase.awaitingResources')
+    } else if (phase === 'failed' && this.state?.failReason) {
       const key = FAIL_REASON_KEYS[this.state.failReason] ?? 'pdfExport.fail.internal'
       this.statusDetailEl.textContent = `${t('pdfExport.phase.failed')} ${t(key)}`
       if (this.state.failReason === 'no-browser' || this.state.failReason === 'configured-path-missing') {
@@ -305,6 +355,9 @@ export class PdfExportModalView {
         cancelButtonHidden: this.cancelButton?.hidden ?? null,
         statusText: this.statusDetailEl?.textContent ?? '',
         status: probe(this.statusEl),
+        // T02（#622）缺资源面观测：列表条目文本与继续按钮绘制层状态
+        issueItems: Array.from(document.querySelectorAll(`.${CLASS.issueItem}`)).map((li) => li.textContent ?? ''),
+        resumeButton: probe(document.querySelector<HTMLElement>(`.${CLASS.resumeButton}`)),
       },
     })
   }

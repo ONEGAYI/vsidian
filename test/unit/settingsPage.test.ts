@@ -1302,7 +1302,7 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     [...sectionByTitle(parent, title).querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .map((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ?? '')
 
-  it('页内四组：内部链接/图片/引用视图标准行组在前，索引维护二级组（分页自有内容）收尾', () => {
+  it('页内五组：内部链接/图片/引用视图/PDF 导出标准行组在前，索引维护二级组（分页自有内容）收尾', () => {
     const { parent } = makeFilesView()
     clickNav(parent, zhCn['settings.filesLinksSection'])
     expect(parent.querySelector('.vsidian-settings-heading')?.textContent)
@@ -1311,6 +1311,7 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
       zhCn['settings.groupLink'],
       zhCn['settings.groupImage'],
       zhCn['settings.groupRefview'],
+      zhCn['settings.groupPdfExport'],
       zhCn['indexMaintenance.title'],
     ])
     expect(itemTitlesOf(parent, zhCn['settings.groupImage'])).toEqual([

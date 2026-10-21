@@ -74,6 +74,13 @@ const REQUIRED_EXTENSION = [
   'out/webview/main.css',
   'out/webview/settings.js',
   'out/webview/settings.css',
+  // #621 T01 PDF 导出模态产物（缺失时导出命令打开的模态不可用）
+  'out/webview/pdfexport.js',
+  'out/webview/pdfexport.css',
+  // #622 T02 PDF 导出页产物（跑在被测浏览器里的完整 Reading 装配——
+  // 缺失时导出页装载失败，任务如实分态 not-ready）
+  'out/webview/pdfexportpage.js',
+  'out/webview/pdfexportpage.css',
   // #60 Mermaid 独立产物（按需懒加载的渲染器；缺失时图表降级为错误态）
   'out/webview/mermaid.js',
   // #337 PDF 双产物（pdfjs-dist@6.4.299 legacy 主库 + worker；缺失时 PDF

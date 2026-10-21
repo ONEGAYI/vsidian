@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { CdpConnection, CdpSession } from './cdpClient'
 import { printToPdfParamsOf, type PdfExportOptions } from '../../shared/pdfExportOptions'
+import { isPdfExportFailureItem, type PdfExportFailureItem } from '../../shared/pdfExportPayload'
 
 export interface LaunchOptions {
   executablePath: string
@@ -198,16 +199,35 @@ export async function evaluate<T>(session: CdpSession, expression: string, optio
 export interface ExportReadyState {
   asyncReady: boolean
   fontsStatus: string
+  /** T02 全量就绪态（页面侧 __vsidianPdfExportReadiness 的整体投影） */
+  assembled?: boolean
+  images?: boolean
+  graphics?: boolean
 }
 
-/** 导出页就绪谓词（页面侧单次求值）：装配就绪位 + 字体装载。
- *  T01 无图片/异步图形（归 T02 扩全量谓词：全图 complete && naturalWidth>0）。 */
+/** 导出页就绪谓词（页面侧单次求值）：装配就绪位（T02 起为组合位——
+ *  assembled∧images∧graphics，页面侧 evaluateExportReadiness 产出）+
+ *  字体装载。禁止固定延迟（V01 §5 对照证伪：loadEventFired 与固定 500ms
+ *  均缺延迟注入内容，只有组合信号收敛）。 */
 export async function readExportReady(session: CdpSession): Promise<ExportReadyState> {
   return evaluate<ExportReadyState>(session,
-    `(() => ({
-      asyncReady: !!(window.__vsidianPdfExport && window.__vsidianPdfExport.asyncReady === true),
-      fontsStatus: document.fonts ? document.fonts.status : 'loaded',
-    }))()`)
+    `(() => {
+      const read = window.__vsidianPdfExportReadiness
+      if (typeof read === 'function') {
+        const state = read()
+        return {
+          asyncReady: state.asyncReady === true,
+          fontsStatus: typeof state.fonts === 'string' ? state.fonts : 'loaded',
+          assembled: state.assembled === true,
+          images: state.images === true,
+          graphics: state.graphics === true,
+        }
+      }
+      return {
+        asyncReady: !!(window.__vsidianPdfExport && window.__vsidianPdfExport.asyncReady === true),
+        fontsStatus: document.fonts ? document.fonts.status : 'loaded',
+      }
+    })()`)
 }
 
 /** 轮询就绪谓词直到全部为真或超时。禁止固定延迟（V01 §5 对照证伪：
@@ -225,6 +245,17 @@ export async function waitForExportReady(
     if (Date.now() - startedAt > timeoutMs) return { ok: false, state, waitedMs: Date.now() - startedAt }
     await new Promise((resolve) => setTimeout(resolve, 80))
   }
+}
+
+/** 拉取页面侧失败清单（T02：probe 阶段就绪后调用——缺资源继续/取消的
+ *  数据源；形态防御性收窄，非法条目丢弃不冒充） */
+export async function readExportFailures(session: CdpSession): Promise<PdfExportFailureItem[]> {
+  const raw = await evaluate<unknown>(session,
+    `(() => { const read = window.__vsidianPdfExportReadiness; return typeof read === 'function' ? read().failures : []; })()`)
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  return raw.filter(isPdfExportFailureItem)
 }
 
 /** Page.printToPDF：返回 PDF 字节（base64 解码）。参数由

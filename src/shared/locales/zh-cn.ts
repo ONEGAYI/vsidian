@@ -152,15 +152,15 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.phase.failed': '导出失败',
   'pdfExport.phase.cancelled': '已取消导出',
   /** 失败原因（规格 §2.5 可见状态） */
-  'pdfExport.fail.no-browser':
+  'pdfExport.fail.noBrowser':
     '未找到可用的 Chrome 或 Edge。请安装 Chrome/Edge，或在 Vsidian 设置页配置浏览器路径。',
-  'pdfExport.fail.configured-path-missing':
+  'pdfExport.fail.configuredPathMissing':
     '设置的浏览器路径不存在。请在 Vsidian 设置页检查该路径。',
-  'pdfExport.fail.launch-failed': '打印浏览器启动失败。',
-  'pdfExport.fail.navigate-failed': '导出页面无法在浏览器中打开。',
-  'pdfExport.fail.not-ready': '导出页面未在限定时间内就绪。',
-  'pdfExport.fail.print-failed': '浏览器生成 PDF 失败。',
-  'pdfExport.fail.write-failed': 'PDF 无法写入所选位置。',
+  'pdfExport.fail.launchFailed': '打印浏览器启动失败。',
+  'pdfExport.fail.navigateFailed': '导出页面无法在浏览器中打开。',
+  'pdfExport.fail.notReady': '导出页面未在限定时间内就绪。',
+  'pdfExport.fail.printFailed': '浏览器生成 PDF 失败。',
+  'pdfExport.fail.writeFailed': 'PDF 无法写入所选位置。',
   'pdfExport.fail.busy': '已有导出任务在进行。',
   'pdfExport.fail.internal': '导出过程中出现意外错误。',
   /** 取消细分 */
@@ -170,6 +170,30 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.savedTo': '已保存到 {path}',
   /** 从模态打开 Vsidian 设置（缺浏览器恢复路径） */
   'pdfExport.openSettings': '打开设置',
+  /** T02（#622）缺资源选择与导出页降级说明 */
+  'pdfExport.phase.awaitingResources': '部分资源缺失，请选择处理方式',
+  'pdfExport.resume': '继续导出',
+  'pdfExport.issues.title': '以下资源未能装载：',
+  'pdfExport.issues.kind.embed': '嵌入目标',
+  'pdfExport.issues.kind.image': '图片',
+  'pdfExport.issues.kind.graphic': '图形',
+  'pdfExport.issues.kind.media': '媒体嵌入',
+  'pdfExport.issues.kind.unknown': '资源',
+  'pdfExport.issues.reason.notFound': '未找到',
+  'pdfExport.issues.reason.inaccessible': '无法访问',
+  'pdfExport.issues.reason.blocked': '路径被拦截',
+  'pdfExport.issues.reason.loadFailed': '装载失败',
+  'pdfExport.issues.reason.anchorMissing': '锚点不存在',
+  'pdfExport.issues.reason.ambiguous': '同名目标不唯一',
+  'pdfExport.issues.reason.nonMarkdown': '不是可嵌入的 Markdown 内容',
+  'pdfExport.issues.reason.readFailed': '读取失败',
+  'pdfExport.issues.reason.unknown': '原因未知',
+  /** 导出页降级说明（页面正文内的可见文字——继续导出时保留） */
+  'pdfExport.mediaNotice.media': '音视频不嵌入 PDF，原文件：',
+  'pdfExport.mediaNotice.iframe': '网页嵌入不进 PDF，原始地址：',
+  'pdfExport.mediaNotice.pdf': 'PDF 文件不嵌入导出内容，原文件：',
+  'pdfExport.mediaNotice.web': '网页嵌入不进 PDF，原始地址：',
+  'pdfExport.embedFailedNotice': '嵌入目标未能装载：{target}',
   /** 设置页「文件与链接」附加分页（#332：原「索引维护」改名承接图片/
    *  引用视图/索引维护三组，对齐 Obsidian 文件与链接分页心智） */
   'settings.filesLinksSection': '文件与链接',

@@ -496,6 +496,48 @@ const REFRESH_BLUE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC'
 export const LARGE_DOC_LINES = 100_000
 
+// T02（#622）PDF 导出完整阅读装配样本：长文档（首中末段 + 嵌入目标 +
+// 媒体嵌入 + 本地/缺失图片 + 公式 + mermaid + 原生 HTML 媒体降级）。
+// 标记用 ASCII（规避 ToUnicode 部首码位归一问题——V01 §7）。
+const PDF_EXPORT_T02_DOC = (() => {
+  const lines = [
+    '# T02 完整装配样例',
+    '',
+    '首段标记：PDF-T02-HEAD-MARKER。',
+    '',
+    '![[pdf-export-t02-embed.md]]',
+    '',
+    '![[pdf-export-t02-clip.mp4]]',
+    '',
+    '![本地图](assets/pdf-t02-img.png)',
+    '',
+    '![缺失图](assets/pdf-t02-missing.png)',
+    '',
+    '块级公式：',
+    '',
+    '$$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$',
+    '',
+    '```mermaid',
+    'graph TD; Start-->Check; Check-->Done;',
+    '```',
+    '',
+    '<video src="https://example.com/t02-clip.mp4"></video>',
+    '',
+  ]
+  for (let i = 1; i <= 40; i++) {
+    lines.push(`填充段 ${i}：T02 长文档正文行，产生多页分页。`, '')
+  }
+  lines.push('末段标记：PDF-T02-TAIL-MARKER。')
+  return lines.join('\n')
+})()
+// T02 嵌入目标：标题 + 正文（用例注入未保存修改后断言进入 PDF）
+const PDF_EXPORT_T02_EMBED_DOC = [
+  '## 嵌入目标标题',
+  '',
+  '嵌入目标预置正文（EMBED-BASE-TEXT）。',
+  '',
+].join('\n')
+
 // #133 界面域样式契约样例：公式（行内/块级/错误）、mermaid（有效/无效）、
 // 代码卡片（js keyword token）、大纲（嵌套标题 + 行内标记）、frontmatter
 // 成型卡片（#140 探针：card-line/row/cell/add-entry 与阅读侧同款表格）
@@ -1063,6 +1105,13 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'heading.md'), HEADING_DOC, 'utf8')
   // T01（#621）PDF 导出样本
   writeFileSync(path.join(wsDir, 'pdf-export.md'), PDF_EXPORT_DOC, 'utf8')
+  // T02（#622）：完整阅读装配样本 + 嵌入目标 + 媒体占位（媒体身份只需
+  // 文件存在与扩展名；嵌入目标正文由用例注入未保存修改）
+  writeFileSync(path.join(wsDir, 'pdf-export-t02.md'), PDF_EXPORT_T02_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-export-t02-embed.md'), PDF_EXPORT_T02_EMBED_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-export-t02-clip.mp4'), Buffer.from('00 00 00 18 mp4-placeholder'), 'utf8')
+  mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'assets', 'pdf-t02-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
   // 对照——严格态 br=1（仅显式）、宽松态 br=3
   writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')

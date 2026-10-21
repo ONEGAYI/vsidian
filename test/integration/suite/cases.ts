@@ -8,6 +8,7 @@ import { probe375Cases } from './probe375'
 import { wikilinkBlockCases } from './wikilinkBlock'
 import { wikilinkEmbedCases } from './wikilinkEmbed'
 import { pdfExportT01Cases } from './pdfExportT01Cases'
+import { pdfExportT02Cases } from './pdfExportT02Cases'
 import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
@@ -1617,6 +1618,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // T01（#621）PDF 导出：命令/模态绘制层断言（core）+ 真实浏览器生成与
   // 固定输入断言（真浏览器用例入敏感组——见 caseSelection 的登记）
   ...pdfExportT01Cases,
+  // T02（#622）PDF 导出：完整阅读装配、嵌入展开、缺资源选择与取消释放
+  //（真实浏览器链路——两条用例均入敏感组，沿 T01 先例）
+  ...pdfExportT02Cases,
   ['激活与默认编辑器声明（#38 后接管 .md 默认打开）', async () => {
     const ext = vscode.extensions.getExtension(EXT_ID)
     assert(ext, `扩展 ${EXT_ID} 未找到`)

@@ -1,23 +1,32 @@
-// PDF 导出任务编排（T01/#621）：一次导出的状态机、代次与资源配对释放。
+// PDF 导出任务编排（T01/#621 建立，T02/#622 升级两段式与缺资源选择）。
 //
 // 纯逻辑可单测：浏览器链路经 BrowserExportSession 端口注入（生产实现
-// createBrowserExportSession：launch → 临时 HTML → file:// 导航 → 组合就绪
-// 信号 → printToPDF → close → 清理临时目录；探针 V01 已实测的链路），
-// 文件系统与保存对话框经 ports 注入（vscode 层装配）。
+// createBrowserExportSession：launch → 资源服务 → http 页面 → 组合就绪 →
+// 失败清单 →（用户选择）→ printToPDF → 释放），文件系统与保存对话框经
+// ports 注入（vscode 层装配）。
 //
-// 语义（规格 §2.5 任务结果与释放）：
+// 语义（规格 §2.5 任务结果与释放 + §2.3 缺资源选择）：
 // - 代次（generation）单调递增，新旧任务以真实代次区分（§2.4）；
+// - 两段式：renderPage（装配 + 就绪 + 失败清单）→ 失败非空进入
+//   awaiting-resources（模态呈现 i18n 列表，用户选择继续/取消）→
+//   finalizePrint（printToPDF）→ saving → done；
 // - 取消：killSync 等价路径打断在途命令（悬挂命令立即 reject，V01 §8），
 //   已取消任务不落盘（未完成产物不得伪装成成功 PDF）；
 // - 保存对话框在生成完成后弹出，用户取消即本次任务取消（产物丢弃）；
-// - 每次任务的浏览器会话在 finally 释放（成功路径 exportPdf 内部已
-//   Browser.close；dispose 幂等兜底失败路径）。
+// - 每次任务的浏览器会话与服务在 finally 释放（dispose 幂等兜底）。
 
-import { buildPdfExportHtml } from './pdfExportHtml'
 import type { ResolveBrowserResult } from './browserFind'
+import type { PdfExportFailureItem, PdfExportPagePayload, PdfExportReadyState } from '../../shared/pdfExportPayload'
 import type { PdfExportOptions } from '../../shared/pdfExportOptions'
 
-export type PdfExportPhase = 'idle' | 'generating' | 'saving' | 'done' | 'failed' | 'cancelled'
+export type PdfExportPhase =
+  | 'idle'
+  | 'generating'
+  | 'awaiting-resources'
+  | 'saving'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
 
 export type PdfExportFailReason =
   | 'no-browser'
@@ -30,16 +39,19 @@ export type PdfExportFailReason =
   | 'busy'
   | 'internal'
 
-/** 固定输入（规格 §2.1：准备阶段确定本次使用的版本） */
+/** 固定输入（规格 §2.1：准备阶段确定本次使用的版本）——payload 数据面。
+ *  docs[0] 恒为主文档；mermaidUri/resBase 由会话装配层填、locale 由模态
+ *  侧填（此处不携带）。T03 选区与 T04 批量在此结构上扩展 docs 或片段。 */
+export type PdfExportInputPayload = Omit<PdfExportPagePayload, 'mermaidUri' | 'resBase' | 'locale'>
+
 export interface PdfExportInput {
   /** 文档显示名（文件名，含扩展名） */
   docName: string
-  /** 固定输入的 Markdown 正文（LF 坐标；打开模态时刻的权威文本快照） */
-  markdown: string
   /** 固定时刻权威版本（观测面：供断言「生成期间后续编辑不混入」） */
   capturedVersion: number
-  /** 阅读样式快照（T01 骨架：T02 接完整阅读样式） */
-  readingStyleSnapshot: Record<string, unknown>
+  /** 固定输入数据面（正文/嵌入/样式快照/片段；T02 起 readingStyleSnapshot
+   *  的骨架形态并入 payload.style） */
+  payload: PdfExportInputPayload
 }
 
 /** 浏览器链路错误码（生产 session 抛出，job 映射失败分态） */
@@ -52,11 +64,17 @@ export class PdfExportBrowserError extends Error {
 
 /** 单次导出的浏览器会话端口（生产 createBrowserExportSession 实现） */
 export interface BrowserExportSession {
-  /** 生成 PDF 字节（完成后浏览器已释放；失败时内部尽力释放） */
-  exportPdf(input: { html: string; options: PdfExportOptions }): Promise<Buffer>
-  /** 用户取消：强杀进程树并清理（在途 exportPdf 随连接断开 reject） */
+  /** 装配导出页并等待就绪：返回页面失败清单（页面保留在场待 finalize） */
+  renderPage(input: { payload: PdfExportPagePayload; options: PdfExportOptions }): Promise<{
+    ready: boolean
+    readyState: PdfExportReadyState
+    failures: PdfExportFailureItem[]
+  }>
+  /** 打印并释放（renderPage 成功后可达一次） */
+  finalizePrint(options: PdfExportOptions): Promise<Buffer>
+  /** 用户取消：强杀进程树并清理（在途命令随连接断开 reject） */
   cancel(): void
-  /** 幂等兜底释放（exportPdf 成功/失败后调用均安全） */
+  /** 幂等兜底释放（renderPage/finalizePrint 成功/失败后调用均安全） */
   dispose(): void
 }
 
@@ -68,6 +86,8 @@ export interface PdfExportJobPorts {
   writeFile(targetPath: string, bytes: Uint8Array): Promise<void>
   /** 装配 HTML 观测点（VSIDIAN_TEST_HOOKS 集成断言用；生产可空实现） */
   onHtmlAssembled?: (html: string) => void
+  /** UI 语言（payload.locale 装配） */
+  locale(): 'zh-cn' | 'en'
 }
 
 export interface PdfExportJobState {
@@ -80,11 +100,14 @@ export interface PdfExportJobState {
   /** cancelled 终态的细分（用户主动取消 / 保存对话框取消） */
   cancelKind?: 'user' | 'save-dialog'
   savedPath?: string
+  /** awaiting-resources 阶段的失败清单（模态 i18n 列表数据源） */
+  resourceIssues?: PdfExportFailureItem[]
 }
 
 export interface PdfExportRunResult {
   ok: boolean
-  kind: 'done' | 'failed' | 'cancelled' | 'busy'
+  /** done=成功落盘；failed/cancelled 终态；awaiting-resources=等待用户选择 */
+  kind: 'done' | 'failed' | 'cancelled' | 'busy' | 'awaiting-resources'
   state: PdfExportJobState
   bytes?: Buffer
 }
@@ -94,6 +117,8 @@ export class PdfExportJob {
   private activeSession: BrowserExportSession | undefined
   private running = false
   private cancelRequested = false
+  /** awaiting-resources 的用户选择 resolver（resolveResourceChoice 消费） */
+  private choiceResolver: ((accept: boolean) => void) | undefined
   private _state: PdfExportJobState = { phase: 'idle', generation: 0 }
   onStateChange?: (state: PdfExportJobState) => void
 
@@ -112,14 +137,26 @@ export class PdfExportJob {
     return this.running
   }
 
-  /** 取消进行中的任务（幂等；对未运行任务无副作用） */
+  /** 取消进行中的任务（幂等；对未运行任务无副作用）——含等待选择阶段 */
   cancel(): void {
     if (!this.running) return
     this.cancelRequested = true
+    this.choiceResolver?.(false)
+    this.choiceResolver = undefined
     this.activeSession?.cancel()
   }
 
-  /** 执行一次导出。任务串行：进行中再发起返回 busy（模态防重入）。 */
+  /** awaiting-resources 阶段的用户选择：accept=true 继续导出（正文保留可见
+   *  降级说明），false = 取消。非该阶段调用无副作用（防御返回）。 */
+  resolveResourceChoice(accept: boolean): void {
+    const resolver = this.choiceResolver
+    this.choiceResolver = undefined
+    resolver?.(accept)
+  }
+
+  /** 执行一次导出。任务串行：进行中再发起返回 busy（模态防重入）。
+   *  返回 awaiting-resources 时任务仍占用会话等待 resolveResourceChoice
+   *  或 cancel；其余 kind 均为终态。 */
   async run(
     input: PdfExportInput,
     options: PdfExportOptions,
@@ -131,11 +168,16 @@ export class PdfExportJob {
     this.running = true
     this.cancelRequested = false
     const generation = ++this.generation
-    this.setState({ phase: 'generating', generation, docName: input.docName, failReason: undefined, failDetail: undefined, cancelKind: undefined, savedPath: undefined })
+    this.setState({ phase: 'generating', generation, docName: input.docName, failReason: undefined, failDetail: undefined, cancelKind: undefined, savedPath: undefined, resourceIssues: undefined })
     const finish = (result: PdfExportRunResult): PdfExportRunResult => {
       this.running = false
       this.activeSession = undefined
+      this.choiceResolver = undefined
       return result
+    }
+    const cancelledResult = (kind: 'user'): PdfExportRunResult => {
+      this.setState({ phase: 'cancelled', cancelKind: kind })
+      return finish({ ok: false, kind: 'cancelled', state: this._state })
     }
     try {
       const resolved = await this.ports.resolveBrowser(configuredBrowserPath)
@@ -143,27 +185,45 @@ export class PdfExportJob {
         this.setState({ phase: 'failed', failReason: resolved.reason })
         return finish({ ok: false, kind: 'failed', state: this._state })
       }
-      const html = buildPdfExportHtml({
-        title: input.docName,
-        markdown: input.markdown,
-        options,
-        // T02 接线骨架：阅读样式快照的样式面就位前进 extraCss
-        ...(Object.keys(input.readingStyleSnapshot).length > 0 ? {} : {}),
-      })
-      this.ports.onHtmlAssembled?.(html)
       const session = this.ports.createSession(resolved.browser.executablePath)
       this.activeSession = session
+      let rendered
+      try {
+        rendered = await session.renderPage({
+          payload: { ...input.payload, mermaidUri: '', resBase: '', locale: this.ports.locale() },
+          options,
+        })
+      } catch (error) {
+        session.dispose()
+        throw error
+      }
+      if (this.cancelRequested) {
+        session.dispose()
+        return cancelledResult('user')
+      }
+      if (rendered.failures.length > 0) {
+        // 缺资源选择（规格 §2.3）：失败清单非空 → 等待用户继续/取消；
+        // 会话与页面保留（继续时直接打印，取消即释放）
+        this.setState({ phase: 'awaiting-resources', resourceIssues: rendered.failures })
+        const accept = await new Promise<boolean>((resolve) => {
+          this.choiceResolver = resolve
+        })
+        if (!accept || this.cancelRequested) {
+          session.dispose()
+          return cancelledResult('user')
+        }
+        this.setState({ phase: 'generating', resourceIssues: undefined })
+      }
       let bytes: Buffer
       try {
-        bytes = await session.exportPdf({ html, options })
+        bytes = await session.finalizePrint(options)
       } finally {
         session.dispose()
       }
       if (this.cancelRequested) {
-        // 导出途中用户取消（cancel 已触发 killSync；exportPdf 正常返回的
+        // 导出途中用户取消（cancel 已触发 killSync；finalizePrint 正常返回的
         // 边缘竞态也按取消收口，产物不落盘）
-        this.setState({ phase: 'cancelled', cancelKind: 'user' })
-        return finish({ ok: false, kind: 'cancelled', state: this._state })
+        return cancelledResult('user')
       }
       this.setState({ phase: 'saving' })
       const target = await this.ports.showSaveDialog(input.docName.replace(/\.md$/i, '') + '.pdf')
@@ -181,8 +241,7 @@ export class PdfExportJob {
       return finish({ ok: true, kind: 'done', state: this._state, bytes })
     } catch (error) {
       if (this.cancelRequested) {
-        this.setState({ phase: 'cancelled', cancelKind: 'user' })
-        return finish({ ok: false, kind: 'cancelled', state: this._state })
+        return cancelledResult('user')
       }
       const reason: PdfExportFailReason = error instanceof PdfExportBrowserError
         ? (error.code === 'launch' ? 'launch-failed'

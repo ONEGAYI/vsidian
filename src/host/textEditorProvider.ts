@@ -49,7 +49,7 @@ import {
   type VaultLinkShortnamePort,
 } from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
-import { classifyLinkOpenChannel, classifyLocalRefContentKind } from '../shared/refContent'
+import { classifyLinkOpenChannel, classifyLocalRefContentKind, isMediaFileExtension } from '../shared/refContent'
 import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
 import type { AddonDocNavResult } from '../shared/addonNavApi'
@@ -112,7 +112,7 @@ import {
 } from '../shared/imageRefresh'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
-import { createPdfExportModal, type PdfExportDocumentSource } from './pdfExport/pdfExportModal'
+import { createPdfExportModal, type PdfExportDocumentSource, type PdfExportEmbedReadOutcome, type PdfExportSnippetEntry, type PdfExportStyleSnapshot } from './pdfExport/pdfExportModal'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
@@ -121,6 +121,7 @@ import {
   readRefContentTarget,
   resolveHoverTargetTip,
   type HoverDocAccessContext,
+  type HoverDocAccessPorts,
   type RefReadOutcome,
 } from './hoverDocAccess'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
@@ -130,7 +131,7 @@ import type { FindOptionsStore } from './findOptionsStore'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
-import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY } from '../shared/settings'
+import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY, READING_BREAKS_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import type { AddonEditorBridge } from './addons/addonWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
@@ -2937,6 +2938,105 @@ export function createTextEditorProvider(
     }
   }
 
+  // ---- T02（#622）PDF 导出固定输入能力（模态 source 扩展）----
+  /** PDF 导出面板级样式快照等待者（docUri 键；request 发起登记、回包或
+   *  超时清空——面板消息处理器顶部拦截 pdfExport.styleSnapshot.report） */
+  const pendingPdfStyleProbes = new Map<string, (snapshot: PdfExportStyleSnapshot) => void>()
+
+  /** 嵌入目标读取端口（readRefContentTarget 窄化投影——解析/范围规则与
+   *  悬停预览同源；web 目标不注入元信息抓取（unsupported 分态，正文保留
+   *  占位引用行）；媒体扩展经目标解析补充分派为身份条目） */
+  const readPdfEmbedTarget = async (document: vscode.TextDocument, inner: string): Promise<PdfExportEmbedReadOutcome> => {
+    const access = hoverAccessContextOf(document)
+    const ports: HoverDocAccessPorts = {
+      resolveVaultFile: (rawPath) =>
+        resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath, undefined, shortnameLookupOf(document.uri.fsPath)),
+      openTextDocument: async (fsPath) => {
+        try {
+          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+          return { version: doc.version, text: doc.getText(), languageId: doc.languageId }
+        } catch {
+          return null
+        }
+      },
+      statFile: async (fsPath) => {
+        try {
+          const info = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+          return { mtimeMs: info.mtime, isFile: (info.type & vscode.FileType.File) !== 0 }
+        } catch {
+          return null
+        }
+      },
+    }
+    const outcome = await readRefContentTarget({ target: inner }, access, ports)
+    if (outcome.ok) {
+      const content = outcome.content
+      if (content.kind === 'markdown') {
+        return {
+          ok: true,
+          kind: 'markdown',
+          fsPath: outcome.fsPath.replaceAll('\\', '/'),
+          docName: path.basename(outcome.fsPath),
+          text: content.lfText,
+          version: content.version,
+        }
+      }
+      if (content.kind === 'pdf') {
+        return { ok: true, kind: 'pdf', fsPath: outcome.fsPath.replaceAll('\\', '/') }
+      }
+      if (content.kind === 'web') {
+        return { ok: true, kind: 'web', url: content.url }
+      }
+      // text 桶（代码/配置/音视频）：媒体扩展名在此分派（classifyLocalRefContentKind
+      // 的 text 桶不区分媒体——媒体身份只属打开通道，见 refContent 模块注释）；
+      // 图片（image 桶）走正文图片管线不升级
+      if (isMediaFileExtension(outcome.fsPath)) {
+        return { ok: true, kind: 'media', fsPath: outcome.fsPath.replaceAll('\\', '/') }
+      }
+      return { ok: false, reason: 'non-markdown' }
+    }
+    return { ok: false, reason: outcome.reason }
+  }
+
+  /** 面板样式快照请求（3s 超时 null——面板未就绪/消息丢失降级空快照） */
+  const requestPdfStyleSnapshot = async (document: vscode.TextDocument): Promise<PdfExportStyleSnapshot | null> => {
+    const entry = sessions.get(document.uri.toString())
+    const panel = entry && entry.panels.size > 0 ? [...entry.panels.values()][0]! : undefined
+    if (!panel) {
+      return null
+    }
+    const key = document.uri.toString()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingPdfStyleProbes.delete(key)
+        resolve(null)
+      }, 3000)
+      pendingPdfStyleProbes.set(key, (snapshot) => {
+        clearTimeout(timer)
+        pendingPdfStyleProbes.delete(key)
+        resolve(snapshot)
+      })
+      void panel.webview.postMessage({ kind: 'pdfExport.styleSnapshot.request' })
+    })
+  }
+
+  /** CSS 片段固定文本（启用清单；单文件读取失败跳过不阻塞捕获） */
+  const pdfSnippetEntries = async (): Promise<PdfExportSnippetEntry[]> => {
+    const state = snippets?.getState()
+    if (!snippets || !state?.directory || state.paused) {
+      return []
+    }
+    const out: PdfExportSnippetEntry[] = []
+    for (const { name } of snippets.getLinkItems()) {
+      try {
+        out.push({ name, css: await fsp.readFile(path.join(state.directory, name), 'utf8') })
+      } catch {
+        // 读取失败跳过：单片段缺失不阻塞导出捕获
+      }
+    }
+    return out
+  }
+
   // F13：provider 公开停用收尾——blockIdCoordinator.disposeAll 对未落地
   // 的补 ID pending 尽力撤回（来源会话还在场时 linked 未到的记录按权威
   // 文本核对后收尾），由 extension.deactivate 返回其 Promise 驱动
@@ -3495,6 +3595,20 @@ export function createTextEditorProvider(
       const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
         if (isWebviewToHost(message) && message.kind === 'ready') cancelDocNavRequests()
+        // T02（#622）PDF 导出样式快照回包：面板级只读交互——provider 层拦截
+        //（不进文档会话消息管线），分发给固定输入捕获的等待者
+        if (isWebviewToHost(message) && message.kind === 'pdfExport.styleSnapshot.report') {
+          pendingPdfStyleProbes.get(document.uri.toString())?.({
+            dark: message.dark,
+            vars: message.vars,
+            reading: {
+              fontFamily: message.fontFamily,
+              fontSize: message.fontSize,
+              lineHeight: message.lineHeight,
+            },
+          })
+          return
+        }
         // 粘贴模态记忆只允许更新两个既定偏好，复用现有持久化与广播。
         if (isWebviewToHost(message) && message.kind === 'paste.preferences.set') {
           void (settings?.service.apply({ [PASTE_PRESERVE_FORMATTING_KEY]: message.preserveFormatting,
@@ -4239,7 +4353,16 @@ export function createTextEditorProvider(
       if (!active || active.mode === 'source') return undefined
       for (const entry of sessions.values()) {
         if (isSameDocUri(entry.doc.uri, active.uri)) {
-          return { uri: entry.doc.uri, document: entry.doc, session: entry.session }
+          return {
+            uri: entry.doc.uri,
+            document: entry.doc,
+            session: entry.session,
+            // T02（#622）固定输入能力（见上方实现块注释）
+            readEmbedTarget: (inner) => readPdfEmbedTarget(entry.doc, inner),
+            requestStyleSnapshot: () => requestPdfStyleSnapshot(entry.doc),
+            snippetEntries: () => pdfSnippetEntries(),
+            readingBreaks: () => settings?.service.getSnapshot()[READING_BREAKS_KEY] === true,
+          }
         }
       }
       return undefined
@@ -4814,11 +4937,59 @@ export function createTextEditorProvider(
   // ---- T01（#621）PDF 导出模态：设置快照与设置页入口经 settings wiring
   //  注入（持久默认参数只在自有设置页）；固定输入源读 provider 活动面板
   //  的权威文档会话。命令双模式可用（Live/Reading 均导出固定输入；源码
-  //  模式活动时提示先在 Vsidian 打开——源码 tab 无本扩展会话） ----
+  //  模式活动时提示先在 Vsidian 打开——源码 tab 无本扩展会话）。
+  //  T02（#622）：会话依赖注入产物目录与资源解析端口（classifyImageTarget
+  //  + workspace stat——解析与白名单同源，只换装载地址构造层） ----
+  const IMAGE_CONTENT_TYPES: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.avif': 'image/avif',
+    '.ico': 'image/x-icon',
+  }
   const pdfExportModal = createPdfExportModal(
     context,
     () => settings?.service.getSnapshot() ?? {},
     () => settings?.page.open(),
+    {
+      outWebviewDir: path.join(context.extensionUri.fsPath, 'out', 'webview'),
+      resolveResource: async (src, sourceFsPath) => {
+        // 来源身份缺省 = 面板主文档；目标分类走 classifyImageTarget 单一
+        // 事实源（危险 scheme/越界/UNC 拦截同源），stat 三态与图片通道一致
+        let ctxDoc: vscode.TextDocument | undefined
+        if (sourceFsPath !== undefined && sourceFsPath !== '') {
+          ctxDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFsPath)).then((d) => d, () => undefined)
+        }
+        ctxDoc ??= provider.getActivePdfExportSource()?.document ?? vscode.workspace.textDocuments[0]
+        if (!ctxDoc) {
+          return { ok: false as const, reason: 'blocked' as const }
+        }
+        const target = classifyImageTarget(src, linkContextOfPath(sourceFsPath ?? ctxDoc.uri.fsPath))
+        if (target.kind === 'blocked') {
+          return { ok: false as const, reason: 'blocked' as const }
+        }
+        try {
+          const info = await vscode.workspace.fs.stat(vscode.Uri.file(target.fsPath))
+          if ((info.type & vscode.FileType.File) === 0) {
+            return { ok: false as const, reason: 'not-found' as const }
+          }
+          return {
+            ok: true as const,
+            fsPath: target.fsPath,
+            contentType: IMAGE_CONTENT_TYPES[path.extname(target.fsPath).toLowerCase()] ?? 'application/octet-stream',
+          }
+        } catch (err) {
+          if (isFileNotFound(err)) {
+            return { ok: false as const, reason: 'not-found' as const }
+          }
+          return { ok: false as const, reason: 'inaccessible' as const }
+        }
+      },
+    },
   )
   context.subscriptions.push(
     vscode.commands.registerCommand('onegayi.vsidian.pdfExport.currentDocument', () => {

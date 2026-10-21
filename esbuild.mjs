@@ -156,6 +156,15 @@ const targets = [
     ...webviewBase,
   },
   {
+    // PDF 导出页产物（#622 T02）：跑在被测浏览器里的完整 Reading 管线
+    //（解析/DOM 构建/图片/文档样式/图形渲染复用 webview 模块），样式
+    // 复用 main.css + katex + 导出限定观感，产出 pdfExportPage.js|css
+    //（宿主微型资源服务静态供给——http origin 是 V01 §10.1 的结构性要求）
+    entryPoints: ['src/webview/pdfExportPageMain.ts'],
+    outfile: 'out/webview/pdfExportPage.js',
+    ...webviewBase,
+  },
+  {
     // Mermaid 独立产物（#60）：经 ESM 源打包（官方 UMD 的模块作用域下
     // 全局自赋值会落空抛错，见 mermaidEntry.ts 头注释），入口显式挂
     // globalThis.mermaid；图类型经 ESM 分块按需加载

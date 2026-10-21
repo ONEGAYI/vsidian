@@ -592,7 +592,7 @@ export type HostToWebview =
    *  载（pdfExportModal.get）与每次任务状态变化时推送 */
   | {
       kind: 'pdfExportModal.state'
-      phase: 'idle' | 'generating' | 'saving' | 'done' | 'failed' | 'cancelled'
+      phase: 'idle' | 'generating' | 'awaiting-resources' | 'saving' | 'done' | 'failed' | 'cancelled'
       generation: number
       docName: string
       capturedVersion: number
@@ -602,7 +602,14 @@ export type HostToWebview =
       failReason?: string
       failDetail?: string
       cancelKind?: 'user' | 'save-dialog'
+      /** T02（#622）awaiting-resources 阶段的失败清单（kind/item/reason——
+       *  item/reason 为机器值，词条映射在 webview 侧） */
+      resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
     }
+  /** T02（#622）阅读样式快照请求（面板级只读交互）：编辑器 webview 枚举
+   *  主题变量计算值回包 pdfExport.styleSnapshot.report（PDF 导出准备阶段
+   *  的主题跟随数据源；模态经 provider 发起，超时降级空快照） */
+  | { kind: 'pdfExport.styleSnapshot.request' }
   /**
    * #132 样式参考：打开设置页后定位到指定附加分页（section id）。
    * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略。
@@ -1829,6 +1836,19 @@ export type WebviewToHost =
   | { kind: 'pdfExportModal.run'; params: unknown }
   /** T01（#621）取消进行中的导出任务 */
   | { kind: 'pdfExportModal.cancel' }
+  /** T02（#622）缺资源选择——继续导出（正文保留可见降级说明） */
+  | { kind: 'pdfExportModal.resume' }
+  /** T02（#622）阅读样式快照上报（宿主 pdfExport.styleSnapshot.request 的
+   *  回包——面板级只读交互：编辑器 webview 枚举主题变量计算值，供导出页
+   *  主题跟随；不进文档会话消息管线，provider 层拦截分发） */
+  | {
+      kind: 'pdfExport.styleSnapshot.report'
+      dark: boolean
+      vars: Record<string, string>
+      fontFamily?: string
+      fontSize?: string
+      lineHeight?: string
+    }
   /** T01（#621）绘制层探针上报（测试钩子通道：控件可见性与计算样式摘要，
    *  webview 侧仅在宿主 init 载荷携带 testHooks 时发送；宿主在
    *  VSIDIAN_TEST_HOOKS=1 时经 _test.* 命令暴露给集成断言） */
@@ -4371,6 +4391,14 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'pdfExportModal.cancel':
       return true
+    case 'pdfExportModal.resume':
+      return true
+    case 'pdfExport.styleSnapshot.report':
+      return typeof v.dark === 'boolean' && isObject(v.vars) &&
+        Object.entries(v.vars).every(([key, value]) => key.startsWith('--') && isString(value)) &&
+        (v.fontFamily === undefined || isString(v.fontFamily)) &&
+        (v.fontSize === undefined || isString(v.fontSize)) &&
+        (v.lineHeight === undefined || isString(v.lineHeight))
     case 'pdfExportModal.run':
       // params 为模态当前参数原样载荷：宿主侧 normalizePdfExportOptions
       // 收敛（非法值回落默认），协议层只要求字段存在为对象
@@ -5587,8 +5615,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'pdfExportModal.state':
       // T01（#621）模态状态：phase 枚举 + 数值/字符串守卫；defaults 是宿主
       // normalize 后的权威参数（webview 只消费不校验内部结构——宿主自产）
-      return (v.phase === 'idle' || v.phase === 'generating' || v.phase === 'saving' ||
-          v.phase === 'done' || v.phase === 'failed' || v.phase === 'cancelled') &&
+      return (v.phase === 'idle' || v.phase === 'generating' || v.phase === 'awaiting-resources' ||
+          v.phase === 'saving' || v.phase === 'done' || v.phase === 'failed' || v.phase === 'cancelled') &&
         isNonNegativeInt(v.generation) &&
         isString(v.docName) &&
         isNonNegativeInt(v.capturedVersion) &&
@@ -5597,7 +5625,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.savedPath === undefined || isString(v.savedPath)) &&
         (v.failReason === undefined || isString(v.failReason)) &&
         (v.failDetail === undefined || isString(v.failDetail)) &&
-        (v.cancelKind === undefined || v.cancelKind === 'user' || v.cancelKind === 'save-dialog')
+        (v.cancelKind === undefined || v.cancelKind === 'user' || v.cancelKind === 'save-dialog') &&
+        (v.resourceIssues === undefined || (Array.isArray(v.resourceIssues) &&
+          v.resourceIssues.every((issue) => isObject(issue) && isString((issue as { kind?: unknown }).kind) &&
+            isString((issue as { item?: unknown }).item) && isString((issue as { reason?: unknown }).reason))))
+    case 'pdfExport.styleSnapshot.request':
+      return true
     case 'settings.focusSection':
       // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）；
       // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用；

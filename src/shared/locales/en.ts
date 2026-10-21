@@ -160,15 +160,15 @@ export const en = {
   'pdfExport.phase.failed': 'Export failed',
   'pdfExport.phase.cancelled': 'Export cancelled',
   /** Failure reasons (visible states per spec §2.5) */
-  'pdfExport.fail.no-browser':
+  'pdfExport.fail.noBrowser':
     'No usable Chrome or Edge found. Install Chrome or Edge, or set the browser path on the Vsidian settings page.',
-  'pdfExport.fail.configured-path-missing':
+  'pdfExport.fail.configuredPathMissing':
     'The browser path configured in settings does not exist. Check it on the Vsidian settings page.',
-  'pdfExport.fail.launch-failed': 'The browser could not be started for printing.',
-  'pdfExport.fail.navigate-failed': 'The export page could not be opened in the browser.',
-  'pdfExport.fail.not-ready': 'The export page did not finish loading in time.',
-  'pdfExport.fail.print-failed': 'The browser failed to produce the PDF.',
-  'pdfExport.fail.write-failed': 'The PDF could not be written to the chosen location.',
+  'pdfExport.fail.launchFailed': 'The browser could not be started for printing.',
+  'pdfExport.fail.navigateFailed': 'The export page could not be opened in the browser.',
+  'pdfExport.fail.notReady': 'The export page did not finish loading in time.',
+  'pdfExport.fail.printFailed': 'The browser failed to produce the PDF.',
+  'pdfExport.fail.writeFailed': 'The PDF could not be written to the chosen location.',
   'pdfExport.fail.busy': 'An export is already running.',
   'pdfExport.fail.internal': 'Unexpected error during export.',
   /** Cancel kinds */
@@ -178,6 +178,30 @@ export const en = {
   'pdfExport.savedTo': 'Saved to {path}',
   /** Open Vsidian settings from the modal (browser missing recovery path) */
   'pdfExport.openSettings': 'Open settings',
+  /** T02 (#622): missing-resource choice and export-page fallback notices */
+  'pdfExport.phase.awaitingResources': 'Some resources failed to load — choose how to continue',
+  'pdfExport.resume': 'Continue export',
+  'pdfExport.issues.title': 'The following resources could not be loaded:',
+  'pdfExport.issues.kind.embed': 'Embed target',
+  'pdfExport.issues.kind.image': 'Image',
+  'pdfExport.issues.kind.graphic': 'Diagram',
+  'pdfExport.issues.kind.media': 'Media embed',
+  'pdfExport.issues.kind.unknown': 'Resource',
+  'pdfExport.issues.reason.notFound': 'not found',
+  'pdfExport.issues.reason.inaccessible': 'inaccessible',
+  'pdfExport.issues.reason.blocked': 'path blocked',
+  'pdfExport.issues.reason.loadFailed': 'failed to load',
+  'pdfExport.issues.reason.anchorMissing': 'anchor missing',
+  'pdfExport.issues.reason.ambiguous': 'ambiguous target',
+  'pdfExport.issues.reason.nonMarkdown': 'not embeddable Markdown content',
+  'pdfExport.issues.reason.readFailed': 'read failed',
+  'pdfExport.issues.reason.unknown': 'unknown reason',
+  /** Export-page fallback notices (visible text inside the page body, kept when export continues) */
+  'pdfExport.mediaNotice.media': 'Audio/video is not embedded into the PDF, original file: ',
+  'pdfExport.mediaNotice.iframe': 'Web frames are not embedded into the PDF, original address: ',
+  'pdfExport.mediaNotice.pdf': 'PDF files are not embedded into the export, original file: ',
+  'pdfExport.mediaNotice.web': 'Web frames are not embedded into the PDF, original address: ',
+  'pdfExport.embedFailedNotice': 'Embed target could not be loaded: {target}',
   /** Settings "Files and links" section page (#332: renamed from "Index
    *  maintenance" to host the Images / Reference views / Index maintenance
    *  groups, mirroring Obsidian's Files & links page) */

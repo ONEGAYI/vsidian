@@ -178,6 +178,7 @@ import { revealInlineHtmlSourceAtCursor } from './liveInlineHtml'
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
 import { resetMermaidLoadFailure, setMermaidDarkTheme } from './mermaidRender'
+import { collectReadingStyleSnapshot } from './readingStyleSnapshot'
 import {
   closeDiagramPopup,
   DIAGRAM_POPUP_CLASS_NAMES,
@@ -2454,6 +2455,22 @@ export class WebviewSyncController {
         this.skeletonHoldReleased = true
         this.dismissSkeleton()
         break
+      case 'pdfExport.styleSnapshot.request': {
+        // T02（#622）面板级只读交互：主题变量计算值枚举回包（PDF 导出准备
+        // 阶段的主题跟随数据源；无副作用）
+        const snapshot = collectReadingStyleSnapshot()
+        if (snapshot !== null) {
+          this.bridge.postMessage({
+            kind: 'pdfExport.styleSnapshot.report',
+            dark: snapshot.dark,
+            vars: snapshot.vars,
+            ...(snapshot.reading.fontFamily !== undefined ? { fontFamily: snapshot.reading.fontFamily } : {}),
+            ...(snapshot.reading.fontSize !== undefined ? { fontSize: snapshot.reading.fontSize } : {}),
+            ...(snapshot.reading.lineHeight !== undefined ? { lineHeight: snapshot.reading.lineHeight } : {}),
+          })
+        }
+        break
+      }
       case 'keybindings.snapshot':
       case 'keybindings.changed': {
         const overrides = message.overrides

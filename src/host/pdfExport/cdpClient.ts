@@ -96,10 +96,10 @@ export class MiniWebSocket {
       this.destroy()
     })
     this.socket.on('close', () => {
-      if (!this.established) this.rejectReady(new Error('WebSocket 握手前 socket 关闭'))
+      if (!this.established) this.rejectReady(new Error('WebSocket socket closed before handshake'))
       if (!this.closed) {
         this.closed = true
-        this.options.onClose?.(null, 'socket 关闭')
+        this.options.onClose?.(null, 'socket closed')
       }
     })
   }

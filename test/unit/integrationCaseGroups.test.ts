@@ -4,13 +4,21 @@ import ts from 'typescript'
 import { parse } from 'yaml'
 
 const fixture = vi.hoisted(() => {
+  // 与 caseSelection.ts 的 SENSITIVE_CASES 实名单逐字对齐（T01/#621 与
+  // T02/#622 的 PDF 导出真实浏览器用例入组；改名/增删两侧须同步）
   const sensitive = [
+    'PDF 导出（#621 T01）：固定输入、真实浏览器生成与本机保存（多页中文 PDF）',
+    'PDF 导出（#622 T02）：完整装配、嵌入展开、缺资源选择与绘制证据',
+    'PDF 导出（#622 T02）：生成中取消释放与重复执行健康',
     'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     '索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）',
     '附加组件 T07：调序与单项关闭即时生效、joinPrevious 并组撤回与重载恢复，#356',
     '附加组件 T15：渲染样例停用降级、故障恢复与自处理缺陷对照（#364）',
   ]
-  const names = ['普通甲', sensitive[0]!, '普通乙', sensitive[1]!, '普通丙', sensitive[2]!, '普通丁', sensitive[3]!]
+  const names = [
+    '普通甲', sensitive[0]!, '普通乙', sensitive[1]!, '普通丙', sensitive[2]!,
+    '普通丁', sensitive[3]!, '普通戊', sensitive[4]!, '普通己', sensitive[5]!, '普通庚', sensitive[6]!,
+  ]
   const executed: string[] = []
   const cases: Array<[string, () => Promise<void>]> = names.map((name) => [name, async () => { executed.push(name) }])
   return { sensitive, names, cases, executed }
@@ -66,10 +74,10 @@ async function runSuite(): Promise<void> {
   if (error) throw error
 }
 
-it('真实套件入口的 core 组排除四项敏感用例，普通用例仍执行', async () => {
+it('真实套件入口的 core 组排除敏感用例，普通用例仍执行', async () => {
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
   await runSuite()
-  expect(fixture.executed).toEqual(['普通甲', '普通乙', '普通丙', '普通丁'])
+  expect(fixture.executed).toEqual(['普通甲', '普通乙', '普通丙', '普通丁', '普通戊', '普通己', '普通庚'])
 })
 
 it('第五组只执行四项敏感用例，默认运行仍覆盖全部用例', async () => {
@@ -86,7 +94,7 @@ it('移出敏感用例后仍按原来的位置切片，不重新分配普通用�
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
   vi.stubEnv('VSIDIAN_TEST_SHARD', '1/4')
   await runSuite()
-  expect(fixture.executed).toEqual(['普通甲', '普通丙'])
+  expect(fixture.executed).toEqual(['普通甲', '普通丙', '普通戊', '普通庚'])
   fixture.executed.length = 0
   vi.stubEnv('VSIDIAN_TEST_SHARD', '2/4')
   await runSuite()
@@ -126,7 +134,7 @@ it('敏感名单成员改名、消失或重复时立即失败，不静默缩减�
   for (const entry of SENSITIVE_CASES) {
     expect(entry.issue).not.toBe('')
     expect(entry.reason).not.toBe('')
-    expect(entry.evidence).toMatch(/^https:\/\/github\.com\/ONEGAYI\/vsidian\//)
+    expect(entry.evidence).toMatch(/^(https:\/\/github\.com\/ONEGAYI\/vsidian\/|docs\/specs\/)/)
   }
 })
 
@@ -177,6 +185,8 @@ function productionCases(): Array<[string, null]> {
     ['probe375Cases', parseCaseArray('probe375.ts', 'probe375Cases')],
     ['wikilinkBlockCases', parseCaseArray('wikilinkBlock.ts', 'wikilinkBlockCases')],
     ['wikilinkEmbedCases', parseCaseArray('wikilinkEmbed.ts', 'wikilinkEmbedCases')],
+    ['pdfExportT01Cases', parseCaseArray('pdfExportT01Cases.ts', 'pdfExportT01Cases')],
+    ['pdfExportT02Cases', parseCaseArray('pdfExportT02Cases.ts', 'pdfExportT02Cases')],
     ['addonHistoryCases', parseCaseArray('addonHistoryCases.ts', 'addonHistoryCases')],
     ['addonT02Cases', parseCaseArray('addonT02Cases.ts', 'addonT02Cases')],
     ['addonT04Cases', parseCaseArray('addonT04Cases.ts', 'addonT04Cases')],

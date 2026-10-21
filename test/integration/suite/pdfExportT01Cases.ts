@@ -88,10 +88,12 @@ export const pdfExportT01Cases: Array<[string, () => Promise<void>]> = [
     assert.equal(ok, true, '当前文档命令应成功打开模态')
 
     // 绘制层断言：控件真实可见（offsetParent 命中 + 计算样式非 none），
-    // 非 DOM 存在性——样式注入失效时（CSP 拦截等）此断言如实失败
+    // 非 DOM 存在性——样式注入失效时（CSP 拦截等）此断言如实失败。
+    // T02 起固定输入捕获含嵌入预取/样式快照（异步），轮询同时等捕获完成
+    //（docName 就位）与绘制层探针
     const state = await poll('模态绘制层探针就位', async () => {
       const info = await modalState()
-      if (info.open && info.lastPaint !== undefined) {
+      if (info.open && info.docName === 'pdf-export.md' && info.lastPaint !== undefined) {
         const paint = info.lastPaint as PaintReport
         if (paint.paperSelect && paint.runButton) return info
       }

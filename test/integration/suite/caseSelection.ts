@@ -6,6 +6,25 @@ import * as vscode from 'vscode'
 
 export const SENSITIVE_CASES = [
   {
+    name: 'PDF 导出（#621 T01）：固定输入、真实浏览器生成与本机保存（多页中文 PDF）',
+    issue: '#621',
+    reason: 'CI runner 上 spawn Edge/Chrome 冷启动与打印时长波动未建立稳定基线；本地全量持续跑，观察足够 run 后按既有退出条件回流 core。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」',
+  },
+  {
+    name: 'PDF 导出（#622 T02）：完整装配、嵌入展开、缺资源选择与绘制证据',
+    issue: '#622',
+    reason: 'T01 同族真实浏览器链路（spawn/打印时长 + 127.0.0.1 资源服务时序），CI 波动基线未建立；本地全量持续跑，回流条件与 T01 同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T02 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#622 T02）：生成中取消释放与重复执行健康',
+    issue: '#622',
+    reason: '同族取消链路依赖真实浏览器进程生命周期，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T02 沿先例）',
+  },
+
+  {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     issue: '#293 / #129',
     reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',
@@ -28,12 +47,6 @@ export const SENSITIVE_CASES = [
     issue: '#364',
     reason: '近 30 个 CI run 中 6 次失败（约 20%），mermaid 容器绘制等待超时、本地单跑稳定通过——CI 环境时序敏感，根因未定。',
     evidence: 'https://github.com/ONEGAYI/vsidian/actions/runs/37724661505',
-  },
-  {
-    name: 'PDF 导出（#621 T01）：固定输入、真实浏览器生成与本机保存（多页中文 PDF）',
-    issue: '#621',
-    reason: 'CI runner 上 spawn Edge/Chrome 冷启动与打印时长波动未建立稳定基线；本地全量持续跑，观察足够 run 后按既有退出条件回流 core。',
-    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」',
   },
 ] as const
 

@@ -70,6 +70,12 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'image.pasteLinkFormat': 'markdown',
       // #556 内部链接类型（默认 relative = 既有插入风格零变化）
       'link.insertPathType': 'relative',
+    // T01（#621）PDF 导出默认参数（设置页持久值——浏览器路径与四项默认）
+    'pdfExport.browserPath': '',
+    'pdfExport.marginMm': 20,
+    'pdfExport.orientation': 'portrait',
+    'pdfExport.paper': 'a4',
+    'pdfExport.scale': 1,
       'editor.readableLineWidth': 0,
       // #222 嵌入限高（Reading 嵌入卡片内容滚动区上限）
       'embed.maxHeight': 480,
