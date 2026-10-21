@@ -17,6 +17,7 @@
 
 import type { ResolveBrowserResult } from './browserFind'
 import type { PdfExportFailureItem, PdfExportPagePayload, PdfExportReadyState } from '../../shared/pdfExportPayload'
+import type { PdfHeadingMark } from '../../shared/pdfOutline'
 import type { PdfExportOptions } from '../../shared/pdfExportOptions'
 
 export type PdfExportPhase =
@@ -62,16 +63,31 @@ export class PdfExportBrowserError extends Error {
   }
 }
 
+/** 标题书签报告（T05/#625）：written=false 时产物不加 /Outlines——不给
+ *  伪造书签；机器原因码不进用户文案（模态按 reason 映射词条） */
+export interface PdfBookmarkReport {
+  written: boolean
+  /** 埋点标题总数 */
+  total: number
+  /** 定位失败被跳过的标题数（written=true 时可为部分跳过） */
+  skipped: number
+  reason?: 'disabled' | 'no-headings' | 'none-located' | 'locate-failed' | 'write-failed'
+  /** 失败的原始诊断信息（观测面；不进用户文案） */
+  detail?: string
+}
+
 /** 单次导出的浏览器会话端口（生产 createBrowserExportSession 实现） */
 export interface BrowserExportSession {
-  /** 装配导出页并等待就绪：返回页面失败清单（页面保留在场待 finalize） */
+  /** 装配导出页并等待就绪：返回页面失败清单与标题埋点（页面保留在场待 finalize） */
   renderPage(input: { payload: PdfExportPagePayload; options: PdfExportOptions }): Promise<{
     ready: boolean
     readyState: PdfExportReadyState
     failures: PdfExportFailureItem[]
+    /** T05：标题书签埋点（DOM 文档序；finalizePrint 的书签数据面） */
+    headings: PdfHeadingMark[]
   }>
-  /** 打印并释放（renderPage 成功后可达一次） */
-  finalizePrint(options: PdfExportOptions): Promise<Buffer>
+  /** 打印并释放（renderPage 成功后可达一次）：T05 起返回书签报告 */
+  finalizePrint(options: PdfExportOptions): Promise<{ bytes: Buffer; bookmarks: PdfBookmarkReport }>
   /** 用户取消：强杀进程树并清理（在途命令随连接断开 reject） */
   cancel(): void
   /** 幂等兜底释放（renderPage/finalizePrint 成功/失败后调用均安全） */
@@ -102,6 +118,8 @@ export interface PdfExportJobState {
   savedPath?: string
   /** awaiting-resources 阶段的失败清单（模态 i18n 列表数据源） */
   resourceIssues?: PdfExportFailureItem[]
+  /** 标题书签结果（T05：done 阶段观测面——模态按 reason/skipped 映射提示） */
+  bookmarks?: PdfBookmarkReport
 }
 
 export interface PdfExportRunResult {
@@ -168,7 +186,7 @@ export class PdfExportJob {
     this.running = true
     this.cancelRequested = false
     const generation = ++this.generation
-    this.setState({ phase: 'generating', generation, docName: input.docName, failReason: undefined, failDetail: undefined, cancelKind: undefined, savedPath: undefined, resourceIssues: undefined })
+    this.setState({ phase: 'generating', generation, docName: input.docName, failReason: undefined, failDetail: undefined, cancelKind: undefined, savedPath: undefined, resourceIssues: undefined, bookmarks: undefined })
     const finish = (result: PdfExportRunResult): PdfExportRunResult => {
       this.running = false
       this.activeSession = undefined
@@ -215,8 +233,11 @@ export class PdfExportJob {
         this.setState({ phase: 'generating', resourceIssues: undefined })
       }
       let bytes: Buffer
+      let bookmarks: PdfBookmarkReport
       try {
-        bytes = await session.finalizePrint(options)
+        const printed = await session.finalizePrint(options)
+        bytes = printed.bytes
+        bookmarks = printed.bookmarks
       } finally {
         session.dispose()
       }
@@ -225,7 +246,7 @@ export class PdfExportJob {
         // 边缘竞态也按取消收口，产物不落盘）
         return cancelledResult('user')
       }
-      this.setState({ phase: 'saving' })
+      this.setState({ phase: 'saving', bookmarks })
       const target = await this.ports.showSaveDialog(input.docName.replace(/\.md$/i, '') + '.pdf')
       if (target === undefined) {
         this.setState({ phase: 'cancelled', cancelKind: 'save-dialog' })

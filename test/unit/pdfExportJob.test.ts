@@ -42,6 +42,8 @@ interface SessionScript {
   hangingRender?: boolean
   /** finalizePrint 挂起直至 cancel() */
   hangingPrint?: boolean
+  /** T05：finalizePrint 的书签报告（缺省 disabled 形态） */
+  bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
 }
 
 function makePorts(script: SessionScript = {}) {
@@ -73,19 +75,20 @@ function makePorts(script: SessionScript = {}) {
           ready: true,
           readyState: { assembled: true, images: true, graphics: true, fonts: 'loaded', asyncReady: true, failures: script.failures ?? [] },
           failures: script.failures ?? [],
+          headings: [],
         }
       },
     finalizePrint: script.hangingPrint
       ? () => {
         calls.finalizePrint += 1
-        return new Promise<Buffer>((_resolve, reject) => { hangingReject = reject })
+        return new Promise<{ bytes: Buffer; bookmarks: { written: boolean; total: number; skipped: number } }>((_resolve, reject) => { hangingReject = reject })
       }
       : async () => {
         calls.finalizePrint += 1
         if (script.printError) {
           throw new PdfExportBrowserError(script.printError.code, script.printError.message)
         }
-        return Buffer.from('%PDF-mock')
+        return { bytes: Buffer.from('%PDF-mock'), bookmarks: script.bookmarks ?? { written: false, total: 0, skipped: 0, reason: 'disabled' } }
       },
     cancel: () => {
       calls.cancel += 1
@@ -127,6 +130,20 @@ describe('PdfExportJob：成功链路（T02 两段式）', () => {
     expect(calls.dispose).toBe(1)
     expect(calls.finalizePrint).toBe(1)
     expect(calls.renderPage[0]).toMatchObject({ docName: '笔记甲.md', locale: 'zh-cn' })
+  })
+
+  it('T05 书签报告透传：session 的 bookmarks 进入终态 state（done 观测面）', async () => {
+    const { ports } = makePorts({
+      bookmarks: { written: true, total: 5, skipped: 1 },
+    })
+    const job = new PdfExportJob(ports)
+    const result = await job.run(INPUT as never, PDF_EXPORT_OPTIONS_DEFAULTS, undefined)
+    expect(result.ok).toBe(true)
+    expect(result.state.bookmarks).toEqual({ written: true, total: 5, skipped: 1 })
+    // 缺省（书签关）形态：disabled 报告如实透传
+    const plain = new PdfExportJob(makePorts().ports)
+    const plainResult = await plain.run(INPUT as never, PDF_EXPORT_OPTIONS_DEFAULTS, undefined)
+    expect(plainResult.state.bookmarks).toEqual({ written: false, total: 0, skipped: 0, reason: 'disabled' })
   })
 
   it('代次单调递增，状态推送每阶段到达', async () => {

@@ -60,6 +60,18 @@ export const PDF_EXPORT_CLASS_NAMES = {
   noticeLink: 'vsidian-pdf-notice-link',
 } as const
 
+/** 标题书签埋点属性（T05/#625）：装配层 heading 块挂 level 标记，宿主
+ *  probe 阶段拉取（DOM 文档顺序 = 书签顺序；标题文本读 textContent——
+ *  行内标记天然剥离）。层级口径 = Reading 管线 heading 块的 level
+ *  （markdown-it 标题 token，与用户看到的标题层级一致）。 */
+export const PDF_EXPORT_HEADING_LEVEL_ATTR = 'data-vsidian-heading-level'
+
+function annotateHeadingMark(el: HTMLElement, kind: string, level: number | undefined): void {
+  if (kind === 'heading') {
+    el.setAttribute(PDF_EXPORT_HEADING_LEVEL_ATTR, String(level ?? 1))
+  }
+}
+
 /** 图片槽位终态属性值（ImageSlotState） */
 const IMG_STATE_ATTR = 'data-vsidian-img-state'
 
@@ -107,7 +119,9 @@ function buildExpandedEmbed(doc: PdfExportPagePayload['docs'][number]): HTMLElem
   label.textContent = doc.docName
   box.appendChild(label)
   for (const block of splitReadingBlocks(doc.text)) {
-    box.appendChild(createReadingBlockElement(block, doc.text, scope))
+    const el = createReadingBlockElement(block, doc.text, scope)
+    annotateHeadingMark(el, block.kind, block.kind === 'heading' ? block.level : undefined)
+    box.appendChild(el)
   }
   return box
 }
@@ -250,6 +264,7 @@ export function mountExportDocument(
     const blocks = splitReadingBlocks(text)
     for (const block of blocks) {
       const el = createReadingBlockElement(block, text, scope)
+      annotateHeadingMark(el, block.kind, block.kind === 'heading' ? block.level : undefined)
       container.appendChild(el)
       // 混排嵌入提升（#246 与阅读同源：占位 → 块级宿主，data 通道统一）
       if (expandEmbeds && block.kind !== 'embed') {

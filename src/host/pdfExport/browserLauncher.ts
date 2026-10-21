@@ -19,8 +19,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { CdpConnection, CdpSession } from './cdpClient'
-import { printToPdfParamsOf, type PdfExportOptions } from '../../shared/pdfExportOptions'
+import { printToPdfParamsOf, type PdfExportOptions, type PdfHeaderFooterContext } from '../../shared/pdfExportOptions'
 import { isPdfExportFailureItem, type PdfExportFailureItem } from '../../shared/pdfExportPayload'
+import type { PdfHeadingMark } from '../../shared/pdfOutline'
 
 export interface LaunchOptions {
   executablePath: string
@@ -175,12 +176,14 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 }
 
 /** Runtime.evaluate（returnByValue）。页面异常透传——exceptionDetails
- *  不在 result 里，必须显式检查（V01 §10.7 探针第一轮实证坑）。 */
-export async function evaluate<T>(session: CdpSession, expression: string, options: { timeoutMs?: number } = {}): Promise<T> {
+ *  不在 result 里，必须显式检查（V01 §10.7 探针第一轮实证坑）。
+ *  awaitPromise（T05）：定位引擎等页内异步函数返回值时置 true（探针
+ *  pdfVerify 的 evaluate 同口径）；缺省 false 保持既有语义。 */
+export async function evaluate<T>(session: CdpSession, expression: string, options: { timeoutMs?: number; awaitPromise?: boolean } = {}): Promise<T> {
   const result = await withTimeout(session.send('Runtime.evaluate', {
     expression,
     returnByValue: true,
-    awaitPromise: false,
+    awaitPromise: options.awaitPromise ?? false,
   }), options.timeoutMs ?? 60_000, 'Runtime.evaluate') as unknown as {
     result?: { type?: string; subtype?: string; value?: T; description?: string }
     exceptionDetails?: { text?: string; exception?: { description?: string; value?: unknown } }
@@ -258,11 +261,38 @@ export async function readExportFailures(session: CdpSession): Promise<PdfExport
   return raw.filter(isPdfExportFailureItem)
 }
 
+/** 拉取标题书签埋点（T05/#625：probe 阶段就绪后调用——装配层 heading
+ *  块的 [data-vsidian-heading-level] 清单，querySelectorAll 文档序即书签
+ *  序；形态防御性收窄：level 1–6 + 非空文本，非法条目丢弃不冒充） */
+export async function readHeadingMarks(session: CdpSession): Promise<PdfHeadingMark[]> {
+  const raw = await evaluate<unknown>(session,
+    `(() => Array.from(document.querySelectorAll('[data-vsidian-heading-level]')).map((el) => ({
+      level: Number(el.getAttribute('data-vsidian-heading-level')),
+      text: el.textContent ?? '',
+    })))()`)
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  return raw
+    .filter((item): item is { level: number; text: string } =>
+      item !== null && typeof item === 'object'
+      && Number.isInteger((item as { level?: unknown }).level)
+      && (item as { level: number }).level >= 1
+      && (item as { level: number }).level <= 6
+      && typeof (item as { text?: unknown }).text === 'string')
+    .map((item) => ({ level: item.level, text: item.text.trim() }))
+}
+
 /** Page.printToPDF：返回 PDF 字节（base64 解码）。参数由
- *  printToPdfParamsOf 统一换算（纸张/方向/边距/缩放真实传入）。 */
-export async function printToPdf(session: CdpSession, options: PdfExportOptions): Promise<Buffer> {
+ *  printToPdfParamsOf 统一换算（纸张/方向/边距/缩放/页眉页脚模板真实
+ *  传入——T05：hf 上下文提供时接入 displayHeaderFooter）。 */
+export async function printToPdf(
+  session: CdpSession,
+  options: PdfExportOptions,
+  hf?: PdfHeaderFooterContext,
+): Promise<Buffer> {
   const result = await withTimeout(session.send('Page.printToPDF', {
-    ...printToPdfParamsOf(options),
+    ...printToPdfParamsOf(options, hf),
   }), 90_000, 'Page.printToPDF') as unknown as { data: string }
   return Buffer.from(result.data, 'base64')
 }
