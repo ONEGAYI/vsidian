@@ -11,6 +11,7 @@ import { pdfExportT01Cases } from './pdfExportT01Cases'
 import { pdfExportT02Cases } from './pdfExportT02Cases'
 import { pdfExportT03Cases } from './pdfExportT03Cases'
 import { pdfExportT05Cases } from './pdfExportT05Cases'
+import { pdfExportT04Cases } from './pdfExportT04Cases'
 import { addonHistoryCases } from './addonHistoryCases'
 import { addonT02Cases } from './addonT02Cases'
 import { addonT04Cases } from './addonT04Cases'
@@ -1629,6 +1630,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // T05（#625）PDF 导出：页眉页脚/页码/标题书签与排版矩阵（真实浏览器
   // 链路——四条用例均入敏感组，沿 T01/T02 先例）
   ...pdfExportT05Cases,
+  // T04（#624）PDF 批量导出：清单编辑与映射预览（core 绘制层）+ 批量
+  // 执行/重名三策略/未保存/失败继续/取消（真浏览器——三条用例入敏感组）
+  ...pdfExportT04Cases,
   ['激活与默认编辑器声明（#38 后接管 .md 默认打开）', async () => {
     const ext = vscode.extensions.getExtension(EXT_ID)
     assert(ext, `扩展 ${EXT_ID} 未找到`)

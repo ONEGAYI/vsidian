@@ -4,6 +4,7 @@
 // 换包后视图重渲染常驻文本。
 import { PdfExportModalView } from './pdfExportModalView'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
+import { installTooltipCard } from './tooltipCard'
 import { isHostToWebview } from '../shared/protocol'
 import './pdfExportModal.css'
 
@@ -12,6 +13,10 @@ declare function acquireVsCodeApi(): {
 }
 
 bootLocaleFromDocument()
+
+// #300 统一自绘悬停提示（T04 起模态携带 data-tooltip 承载的提示——设置页
+// 同款装配，document 级委托监听）
+installTooltipCard()
 
 const vscode = acquireVsCodeApi()
 const view = new PdfExportModalView({

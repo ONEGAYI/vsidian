@@ -160,6 +160,30 @@ div.vsidian-pdfexport               ← 两列 grid（1fr + 320px；≤720px 退
 - T07（#627）真实 PDF 预览落位主区（代次概念 state.generation 先行）；页眉页脚参数（T05）沿参数字段行追加。
 - 绘制层断言：集成用例「PDF 导出模态（#621 T01）」经 `_test.pdfExportModal.report` 探针断言控件可见性（offsetParent + 计算样式）——非 DOM 存在性。
 
+**批量模式分区（T04/#624，2026-10-21）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载添加入口与参数——全部复用既有档位，零新档位：
+
+```text
+main（批量模式：左对齐内容区替代居中占位，独立滚动）
+├─ editing：ul 批量清单（li 行 = 序号 12px tabular-nums 说明色 + 相对路径 13px/500
+│    + 根目录 11px 说明色 + 上移/下移/移除按钮 6px 档 11px secondary 变量族；
+│    行 hover → list-hoverBackground）
+├─ confirm：目标目录行 + 策略 select（2px 档）+ table 映射预览
+│    （表头说明色 600 + 行分隔线 tint 8%；冲突徽章 pill 999px/11px warning 变量族、
+│    跳过/已更名徽章同 pill 前景 tint 8% 底）
+└─ running/awaiting/done：table 结果表（同上映射表形态）+ awaiting 时缺资源
+     列表（T02 issues 形态复用）+ 继续导出（主按钮）/继续导出全部（次级按钮）
+
+aside（批量模式侧区）
+├─ 清单计数行（复用文档行形态：标签 + 14px/500 数值）
+├─ 添加行（两枚等宽次级按钮 6px 档，运行中禁用降透明）
+├─ 参数字段行（与单文档共用 appendParamFields——T05 参数追加两模式同步生效）
+├─ 操作行：批量导出…（主按钮）/ 开始导出 + 返回清单（次级）/ 取消（运行中）
+└─ 状态行（进度文案「正在导出第 N / M 个：文件名」role="status"）
+```
+
+- 「继续导出全部」按钮的悬停提示经 `data-tooltip`（#300 唯一承载——模态 webview 随 T04 装配 `installTooltipCard()`，设置页同款）。
+- 绘制层断言：集成用例「PDF 导出（#624 T04）」core 组经 `_test.pdfExportModal.report` 探针断言清单行文本与添加/操作按钮可见性（batchItemRels/batchAddButtons/batchResumeAllButton 等）——非 DOM 存在性。
+
 ## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）
 
 | 模式 | 形态要点 | 事实源与契约指针 |

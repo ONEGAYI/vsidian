@@ -613,6 +613,41 @@ export type HostToWebview =
       /** T02（#622）awaiting-resources 阶段的失败清单（kind/item/reason——
        *  item/reason 为机器值，词条映射在 webview 侧） */
       resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+      /** T04（#624）批量模式状态（批量模态打开时在场；单文档模式缺省——
+       *  既有字段零改动，批量状态整体为可选追加字段） */
+      batch?: {
+        phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
+        /** 可编辑清单（顺序即执行顺序） */
+        items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+        /** confirm 阶段的映射预览（真实输出映射 + 冲突标注） */
+        mapping?: ReadonlyArray<{
+          id: string
+          fsPath: string
+          targetPath: string
+          action: 'export' | 'skip'
+          conflict: 'none' | 'duplicate' | 'exists' | 'both'
+          renamed: boolean
+          skipReason?: 'duplicate' | 'exists'
+        }>
+        targetDir?: string
+        strategy: 'skip' | 'overwrite' | 'rename'
+        currentIndex: number
+        total: number
+        currentName?: string
+        results: ReadonlyArray<{
+          id: string
+          fsPath: string
+          docName: string
+          status: 'success' | 'failed' | 'skipped' | 'cancelled'
+          targetPath?: string
+          failReason?: string
+          skipReason?: 'duplicate' | 'exists'
+        }>
+        /** awaiting-resources 阶段当前文件的失败清单 */
+        resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+        /** 整批环境性失败分态（resolveBrowser 失败） */
+        failReason?: string
+      }
     }
   /** T02（#622）阅读样式快照请求（面板级只读交互）：编辑器 webview 枚举
    *  主题变量计算值回包 pdfExport.styleSnapshot.report（PDF 导出准备阶段
@@ -1855,6 +1890,31 @@ export type WebviewToHost =
   | { kind: 'pdfExportModal.cancel' }
   /** T02（#622）缺资源选择——继续导出（正文保留可见降级说明） */
   | { kind: 'pdfExportModal.resume' }
+  /** T04（#624）批量清单：请求添加文件（宿主 showOpenDialog 多选后收集，
+   *  清单经 state.batch 推回；paths 仅 VSIDIAN_TEST_HOOKS 宿主门控下消费
+   *  ——生产实现忽略该字段，对话框是唯一入口） */
+  | { kind: 'pdfExportModal.batch.addFiles'; paths?: string[] }
+  /** T04（#624）批量清单：请求添加目录（宿主目录选择后递归收集 Markdown，
+   *  非 Markdown 不入清单；path 同为测试钩子注入字段） */
+  | { kind: 'pdfExportModal.batch.addDir'; path?: string }
+  /** T04（#624）批量清单：删除条目（id 锚点） */
+  | { kind: 'pdfExportModal.batch.remove'; id: string }
+  /** T04（#624）批量清单：上移/下移调序（清单顺序即执行顺序） */
+  | { kind: 'pdfExportModal.batch.move'; id: string; direction: 'up' | 'down' }
+  /** T04（#624）发起批量导出：宿主选目标目录 → 探测磁盘已有 → 推送映射
+   *  预览进入 confirm 阶段（测试钩子短路目标目录；targetDir 仅钩子门控
+   *  下消费——用例预置已有文件后注入同目录探测，生产对话框是唯一入口） */
+  | { kind: 'pdfExportModal.batch.run'; targetDir?: string }
+  /** T04（#624）confirm 阶段选择重名策略（宿主重算映射推回预览） */
+  | { kind: 'pdfExportModal.batch.setStrategy'; strategy: 'skip' | 'overwrite' | 'rename' }
+  /** T04（#624）确认映射与策略，开始执行（params 为模态当前参数原样载荷，
+   *  宿主 normalize 后使用——同 pdfExportModal.run 口径） */
+  | { kind: 'pdfExportModal.batch.confirm'; params: unknown }
+  /** T04（#624）取消批量任务或退出确认（已完成文件保留，未完成不落盘） */
+  | { kind: 'pdfExportModal.batch.cancel' }
+  /** T04（#624）缺资源选择：继续当前文件（all=true 时本批后续缺资源自动
+   *  继续——正文保留可见降级说明，T02 语义） */
+  | { kind: 'pdfExportModal.batch.resume'; all?: boolean }
   /** T02（#622）阅读样式快照上报（宿主 pdfExport.styleSnapshot.request 的
    *  回包——面板级只读交互：编辑器 webview 枚举主题变量计算值，供导出页
    *  主题跟随；不进文档会话消息管线，provider 层拦截分发） */
@@ -4423,6 +4483,27 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case '_test.pdfExportModal.report':
       // 测试钩子通道：仅校验字段存在
       return 'paint' in v
+    // T04（#624）批量清单消息族：形态层守卫（策略枚举、方向枚举、路径/条目
+    // 字符串）；paths/path 的测试钩子门控在宿主实现侧（协议层只拦形态）
+    case 'pdfExportModal.batch.addFiles':
+      return v.paths === undefined || (Array.isArray(v.paths) && v.paths.every(isString))
+    case 'pdfExportModal.batch.addDir':
+      return v.path === undefined || isString(v.path)
+    case 'pdfExportModal.batch.remove':
+      return isString(v.id)
+    case 'pdfExportModal.batch.move':
+      return isString(v.id) && (v.direction === 'up' || v.direction === 'down')
+    case 'pdfExportModal.batch.run':
+      return v.targetDir === undefined || isString(v.targetDir)
+    case 'pdfExportModal.batch.setStrategy':
+      return v.strategy === 'skip' || v.strategy === 'overwrite' || v.strategy === 'rename'
+    case 'pdfExportModal.batch.confirm':
+      // params 为模态当前参数原样载荷（同 run 口径）
+      return true
+    case 'pdfExportModal.batch.cancel':
+      return true
+    case 'pdfExportModal.batch.resume':
+      return v.all === undefined || typeof v.all === 'boolean'
     case 'settings.get':
       return true
     case 'settings.set':
@@ -5655,7 +5736,21 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.cancelKind === undefined || v.cancelKind === 'user' || v.cancelKind === 'save-dialog') &&
         (v.resourceIssues === undefined || (Array.isArray(v.resourceIssues) &&
           v.resourceIssues.every((issue) => isObject(issue) && isString((issue as { kind?: unknown }).kind) &&
-            isString((issue as { item?: unknown }).item) && isString((issue as { reason?: unknown }).reason))))
+            isString((issue as { item?: unknown }).item) && isString((issue as { reason?: unknown }).reason)))) &&
+        // T04（#624）批量状态为可选追加字段：在场时校验枚举与数组形态
+        //（items/mapping/results 为宿主自产数据面，形态层拦类型即可）
+        (v.batch === undefined || (isObject(v.batch) &&
+          (v.batch.phase === 'editing' || v.batch.phase === 'confirm' || v.batch.phase === 'running' ||
+            v.batch.phase === 'awaiting-resources' || v.batch.phase === 'done' || v.batch.phase === 'cancelled' ||
+            v.batch.phase === 'failed') &&
+          (v.batch.strategy === 'skip' || v.batch.strategy === 'overwrite' || v.batch.strategy === 'rename') &&
+          isNonNegativeInt(v.batch.currentIndex) && isNonNegativeInt(v.batch.total) &&
+          Array.isArray(v.batch.items) &&
+          (v.batch.mapping === undefined || Array.isArray(v.batch.mapping)) &&
+          Array.isArray(v.batch.results) &&
+          (v.batch.targetDir === undefined || isString(v.batch.targetDir)) &&
+          (v.batch.currentName === undefined || isString(v.batch.currentName)) &&
+          (v.batch.failReason === undefined || isString(v.batch.failReason))))
     case 'pdfExport.styleSnapshot.request':
       return true
     case 'settings.focusSection':

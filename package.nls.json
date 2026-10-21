@@ -60,6 +60,7 @@
   "command.exportStyleReference.title": "Vsidian: Export style reference JSON",
   "command.pdfExport.currentDocument.title": "Vsidian: Export current document to PDF",
   "command.pdfExport.selection.title": "Vsidian: Export current selection to PDF",
+  "command.pdfExport.batch.title": "Vsidian: Batch export Markdown to PDF",
   "command.openSettings.title": "Open settings",
   "command.cssSnippets.refresh.title": "CSS snippets: reload",
   "command.cssSnippets.pause.title": "CSS snippets: pause all",

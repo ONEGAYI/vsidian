@@ -1180,6 +1180,39 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   // T03（#623）选区导出样本 + 选区内相对图片（资源以原文档身份解析断言）
   writeFileSync(path.join(wsDir, 'pdf-export-t03.md'), PDF_EXPORT_T03_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'assets', 'pdf-t03-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // T04（#624）批量导出样本：两个目录根（各含 a.md 制造批内同名冲突）、
+  // 嵌套子目录（相对结构断言）、非 Markdown 混入（收集排除断言）。
+  // 缺失图（missing.md 引用）供缺资源选择/取消链路。
+  mkdirSync(path.join(wsDir, 'pdf-batch', 'dir1', 'sub'), { recursive: true })
+  mkdirSync(path.join(wsDir, 'pdf-batch', 'dir2'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'a.md'), [
+    '# 批量样本 dir1 a',
+    '',
+    'PDF-T04-DIR1-A 标记正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'sub', 'b.md'), [
+    '# 批量样本 dir1 sub b',
+    '',
+    'PDF-T04-DIR1-SUB-B 标记正文（嵌套子目录相对结构）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir2', 'a.md'), [
+    '# 批量样本 dir2 a',
+    '',
+    'PDF-T04-DIR2-A 标记正文（与 dir1 同名）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'note.txt'), 'plain text payload', 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir2', 'missing.md'), [
+    '# 批量样本缺失图',
+    '',
+    '![缺失图](../assets/batch-missing.png)',
+    '',
+    'PDF-T04-MISSING 标记正文。',
+    '',
+  ].join('\n'), 'utf8')
   // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
   // 对照——严格态 br=1（仅显式）、宽松态 br=3
   writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')

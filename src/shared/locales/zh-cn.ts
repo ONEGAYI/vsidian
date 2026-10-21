@@ -219,6 +219,41 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.mediaNotice.pdf': 'PDF 文件不嵌入导出内容，原文件：',
   'pdfExport.mediaNotice.web': '网页嵌入不进 PDF，原始地址：',
   'pdfExport.embedFailedNotice': '嵌入目标未能装载：{target}',
+  /** T04（#624）批量导出清单与结果表（模态批量模式 UI） */
+  'pdfExport.batch.chooseTargetDir': '选择导出目标目录',
+  'pdfExport.batch.addFiles': '添加文件',
+  'pdfExport.batch.addDir': '添加目录',
+  'pdfExport.batch.listTitle': '导出清单',
+  'pdfExport.batch.empty': '清单为空——添加文件或目录开始批量导出。目录会递归收集 Markdown，其他文件不会进入清单。',
+  'pdfExport.batch.itemMoveUp': '上移',
+  'pdfExport.batch.itemMoveDown': '下移',
+  'pdfExport.batch.itemRemove': '移除',
+  'pdfExport.batch.run': '批量导出…',
+  'pdfExport.batch.confirmTitle': '输出映射预览',
+  'pdfExport.batch.confirmTarget': '目标目录',
+  'pdfExport.batch.strategy.label': '重名处理',
+  'pdfExport.batch.strategy.skip': '跳过',
+  'pdfExport.batch.strategy.overwrite': '覆盖',
+  'pdfExport.batch.strategy.rename': '自动更名',
+  'pdfExport.batch.start': '开始导出',
+  'pdfExport.batch.back': '返回清单',
+  'pdfExport.batch.conflict.duplicate': '与清单其他条目同名',
+  'pdfExport.batch.conflict.exists': '目标位置已有文件',
+  'pdfExport.batch.conflict.both': '同名且目标已有文件',
+  'pdfExport.batch.skipMark': '跳过',
+  'pdfExport.batch.renamedMark': '已自动更名',
+  'pdfExport.batch.progress': '正在导出第 {current} / {total} 个：{name}',
+  'pdfExport.batch.resultsTitle': '导出结果',
+  'pdfExport.batch.summary': '成功 {success}，失败 {failed}，跳过 {skipped}，取消 {cancelled}（共 {total} 项）',
+  'pdfExport.batch.status.success': '成功',
+  'pdfExport.batch.status.failed': '失败',
+  'pdfExport.batch.status.skipped': '跳过',
+  'pdfExport.batch.status.cancelled': '已取消',
+  'pdfExport.batch.resumeAll': '继续导出全部',
+  'pdfExport.batch.resumeAllHint': '本批后续文件的同类提示将自动继续',
+  'pdfExport.batch.awaitingResources': '当前文件部分资源缺失，请选择处理方式',
+  'pdfExport.batch.doneNotice': '批量导出完成：{success} / {total} 项成功',
+  'pdfExport.batch.captureFailed': '读取失败',
   /** 设置页「文件与链接」附加分页（#332：原「索引维护」改名承接图片/
    *  引用视图/索引维护三组，对齐 Obsidian 文件与链接分页心智） */
   'settings.filesLinksSection': '文件与链接',
@@ -892,6 +927,8 @@ export const zhCn: Record<MessageKey, string> = {
   /** T03（#623）选区导出：当前选区（支持多选区）导出为 PDF（只读操作，
    *  仅实时预览有选区语义，默认不绑定） */
   'command.pdfExport.selection.title': 'Vsidian：将当前选区导出为 PDF',
+  /** T04（#624）PDF 批量导出：打开批量清单模态（只读操作，默认不绑定） */
+  'command.pdfExport.batch.title': 'Vsidian：批量导出 Markdown 为 PDF',
   /** T01（#621）无活动 Vsidian 文档时的命令提示 */
   'host.pdfExportNoActiveDocument':
     '请先在 Vsidian 中打开 Markdown 文档，再执行 PDF 导出。',
