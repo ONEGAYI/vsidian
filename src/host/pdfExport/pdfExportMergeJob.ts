@@ -309,11 +309,18 @@ export class PdfMergeJob {
         this.setState({ phase: 'cancelled', cancelKind: 'save-dialog' })
         return finish()
       }
+      // 双轴评审 P2-004：对话框 await 期间已取消/关闭 → 迟到路径不提交产物
+      if (this.cancelRequested) {
+        return cancelledResult('user')
+      }
       try {
         await this.ports.writeFile(target, bytes)
       } catch (error) {
         this.setState({ phase: 'failed', failReason: 'write-failed', failDetail: error instanceof Error ? error.message : String(error) })
         return finish()
+      }
+      if (this.cancelRequested) {
+        return cancelledResult('user')
       }
       this.setState({ phase: 'done', savedPath: target, currentName: undefined })
       return finish()

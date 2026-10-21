@@ -295,11 +295,22 @@ export class PdfExportJob {
         this.setState({ phase: 'cancelled', cancelKind: 'save-dialog' })
         return finish({ ok: false, kind: 'cancelled', state: this._state })
       }
+      // 双轴评审 P2-004：对话框 await 期间用户可能已取消/关闭模态（cancel()
+      // 已置 cancelRequested）——迟到的路径不能再提交产物（未完成产物不
+      // 伪成功、不覆盖既有文件）
+      if (this.cancelRequested) {
+        return cancelledResult('user')
+      }
       try {
         await this.ports.writeFile(target, bytes)
       } catch (error) {
         this.setState({ phase: 'failed', failReason: 'write-failed' })
         return finish({ ok: false, kind: 'failed', state: this._state })
+      }
+      // 写盘 await 期间同样可能被取消：产物已落盘但会话已取消——按取消
+      // 收口（不宣称 done；已写入的文件由用户可见路径保留）
+      if (this.cancelRequested) {
+        return cancelledResult('user')
       }
       this.setState({ phase: 'done', savedPath: target })
       return finish({ ok: true, kind: 'done', state: this._state, bytes })

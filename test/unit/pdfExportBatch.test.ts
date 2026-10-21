@@ -9,6 +9,7 @@ import {
   mergeBatchResults,
   moveBatchItem,
   nextAvailableTargetPath,
+  renameProbeCandidates,
   planBatchMapping,
   removeBatchItem,
   summarizeBatchResults,
@@ -178,6 +179,18 @@ describe('自动更名规则', () => {
 
   it('更名候选大小写不敏感参与占用判定（保留原 basename 大小写）', () => {
     expect(nextAvailableTargetPath('D:/out/Name.pdf', new Set(['d:/out/name (2).PDF']))).toBe('D:/out/Name (3).pdf')
+  })
+
+  it('探测候选与命名序列同源：名义路径 + 连续编号，覆盖到命名可能选中的全部候选', () => {
+    const candidates = renameProbeCandidates('D:/out/name.pdf')
+    expect(candidates[0]).toBe('D:/out/name.pdf')
+    expect(candidates[1]).toBe('D:/out/name (2).pdf')
+    expect(candidates[2]).toBe('D:/out/name (3).pdf')
+    // 双轴评审 P2-003：磁盘已有 name (2).pdf 时，命名会选中 (3)——(3) 必须在
+    // 探测面内，否则「只 stat 名义路径」会让自动更名覆盖既有编号文件
+    const existing = new Set(['d:/out/name (2).pdf'])
+    const selected = nextAvailableTargetPath('D:/out/name.pdf', existing)
+    expect(candidates.map((c) => c.toLowerCase())).toContain(selected.toLowerCase())
   })
 })
 

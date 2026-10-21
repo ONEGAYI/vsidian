@@ -298,6 +298,25 @@ describe('PdfExportJob：取消与防重入', () => {
     expect(calls.writeFile).toHaveLength(0)
   })
 
+  it('保存对话框挂起期间取消：迟到路径不写盘、终态 cancelled（双轴评审 P2-004）', async () => {
+    const { ports, calls } = makePorts()
+    let resolveDialog: ((path: string | undefined) => void) | undefined
+    ports.showSaveDialog = () => new Promise((resolve) => { resolveDialog = resolve })
+    const job = new PdfExportJob(ports)
+    const running = job.run(INPUT as never, PDF_EXPORT_OPTIONS_DEFAULTS, undefined)
+    // 等任务进入 saving（对话框已挂起）
+    for (let i = 0; i < 200 && resolveDialog === undefined; i++) {
+      await new Promise((r) => setTimeout(r, 1))
+    }
+    expect(resolveDialog).toBeDefined()
+    job.cancel()
+    resolveDialog!('D:/out/late.pdf')
+    const result = await running
+    expect(result.state.phase).toBe('cancelled')
+    expect(result.state.cancelKind).toBe('user')
+    expect(calls.writeFile).toHaveLength(0)
+  })
+
   it('任务进行中再发起：busy 拒绝且不改当前代次', async () => {
     const { ports } = makePorts()
     const job = new PdfExportJob(ports)

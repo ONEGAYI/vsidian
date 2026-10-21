@@ -50,6 +50,7 @@ import {
   moveBatchItem,
   planBatchMapping,
   removeBatchItem,
+  renameProbeCandidates,
   type PdfBatchConflictStrategy,
   type PdfBatchItem,
   type PdfBatchMappingEntry,
@@ -416,13 +417,20 @@ export function createPdfExportModal(
         : {}),
     })
 
+  /** 单文档/选区落盘端口（双轴评审 P2-001）：remote 下保存对话框返回的是
+   *  **本机**路径，必须经执行端写本机 fs——用远端 workspace.fs 会把本机路径
+   *  误落到远端（或直接失败）。批量/合并的 writeBatchFile 已是此口径。 */
+  const writeFilePort = remoteAdapter !== undefined
+    ? (targetPath: string, bytes: Uint8Array) => remoteAdapter!.writeFile(targetPath, bytes)
+    : async (targetPath: string, bytes: Uint8Array) => {
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), Buffer.from(bytes))
+    }
+
   const job = new PdfExportJob({
     resolveBrowser: resolveBrowserPort,
     createSession: createSessionPort,
     showSaveDialog: saveDialogPort,
-    writeFile: async (targetPath, bytes) => {
-      await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), Buffer.from(bytes))
-    },
+    writeFile: writeFilePort,
     onHtmlAssembled: (html) => {
       lastHtml = html
     },
@@ -553,6 +561,11 @@ export function createPdfExportModal(
     if (pdfPreviewFingerprint({ options, target, pageBreak, today: hostToday() }) !== previewStore.fingerprint) {
       return undefined
     }
+    // 双轴评审 P2-002：预览在缺资源时**自动继续**（只读核对面——正文保留可见
+    // 说明）。但最终导出必须让用户就「继续/取消」做出选择（规格 §2.3）；把
+    // 带失败项的预览字节直接复用会静默跳过该确认。带 failures 时不复用，
+    // 走正常生成链重新呈现确认。
+    if (previewStore.failures.length > 0) return undefined
     return { bytes: previewStore.bytes, bookmarks: previewStore.bookmarks }
   }
 
@@ -938,17 +951,20 @@ export function createPdfExportModal(
   const enterBatchConfirm = async (targetDir: string): Promise<void> => {
     batchTargetDir = targetDir
     batchExisting = new Set<string>()
-    const nominalDirs = new Set(batchItems.map((item) => {
+    // 双轴评审 P2-003：rename 依赖「磁盘实际占用」判定——只 stat 名义路径会
+    // 漏掉 name (2).pdf 等既有编号文件，导致自动更名选中已占用编号并覆盖。
+    // 探测面 = 每个名义目标的编号候选（与 nextAvailableTargetPath 同源序列）。
+    const candidates = new Set(batchItems.flatMap((item) => {
       const rel = item.relPath.replace(/\.(md|markdown)$/i, '.pdf')
-      return `${targetDir}/${rel}`.toLowerCase()
+      return renameProbeCandidates(`${targetDir}/${rel}`)
     }))
     if (remoteAdapter !== undefined) {
-      const entries = await remoteAdapter.statFiles([...nominalDirs])
+      const entries = await remoteAdapter.statFiles([...candidates])
       for (const entry of entries) {
         if (entry.exists) batchExisting.add(entry.path)
       }
     } else {
-      await Promise.all([...nominalDirs].map(async (target) => {
+      await Promise.all([...candidates].map(async (target) => {
         try {
           await vscode.workspace.fs.stat(vscode.Uri.file(target))
           batchExisting.add(target)

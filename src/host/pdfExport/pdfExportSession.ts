@@ -132,7 +132,7 @@ export function createBrowserExportSession(
         const ready = await waitForExportReady(session.session)
         if (!ready.ok) {
           throw new PdfExportBrowserError('not-ready',
-            `导出页未在限定时间内就绪（asyncReady=${ready.state.asyncReady} fonts=${ready.state.fontsStatus} 等待 ${ready.waitedMs}ms）`)
+            `导出页未在限定时间内就绪（asyncReady=${ready.state.asyncReady} assembled=${ready.state.assembled} images=${ready.state.images} graphics=${ready.state.graphics} fonts=${ready.state.fontsStatus} 等待 ${ready.waitedMs}ms）`)
         }
         const failures = await readExportFailures(session.session)
         // T05（#625）：标题埋点拉取（书签数据面——DOM 文档序）+ 页眉页脚

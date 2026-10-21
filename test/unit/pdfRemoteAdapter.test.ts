@@ -130,10 +130,13 @@ describe('会话（renderPage/finalizePrint/cancel）', () => {
     h.setHandler(PDF_EXECUTOR_COMMANDS.renderPage, () => ({ ready: true, readyState, failures: [], headings: [] }))
     h.setHandler(PDF_EXECUTOR_COMMANDS.queryTask, (): PdfRemoteQueryTaskResult => ({ known: true, phase: 'rendering', pending: [] }))
     const adapter = createPdfRemoteAdapter({ ...h.deps, budgets: fastBudgets })
-    const session = adapter.createSession('ignored')
+    const session = adapter.createSession('C:/portable/chrome.exe')
     const result = await session.renderPage({ payload: samplePayload(), options: { paper: 'a4' } as never })
     expect(result.ready).toBe(true)
     const request = h.calls.find((c) => c.command === PDF_EXECUTOR_COMMANDS.renderPage)!.arg as PdfRemoteRenderPageRequest
+    // 双轴评审 P2-005：ping 阶段解析的本机可执行路径必须带到 renderPage，
+    // 执行端不得重新自动发现（自定义/便携路径可用时不能被换掉）
+    expect(request.browserPath).toBe('C:/portable/chrome.exe')
     expect(request.knownDocFsPaths).toEqual(['/d/a.md'])
     expect(request.pageLabel).toEqual({ pre: '第 ', mid: ' 页 / 共 ', post: ' 页' })
     expect(request.payload.docs[0]!.text).toBe('# t')

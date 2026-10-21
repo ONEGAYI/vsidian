@@ -229,7 +229,10 @@ export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAda
     })()
   }
 
-  const createSession = (_executablePath: string): BrowserExportSession => {
+  /** 双轴评审 P2-005：解析阶段（ping）用的可执行路径必须原样带进 renderPage
+   *  ——执行端若重新自动发现，会在「仅自定义/便携路径可用」时换错浏览器或
+   *  直接失败（browserFind 的显式配置优先契约要求发现与启动同一路径）。 */
+  const createSession = (executablePath: string): BrowserExportSession => {
     let taskId = ''
     let disposed = false
 
@@ -255,6 +258,7 @@ export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAda
           options: input.options,
           knownDocFsPaths: [...deps.knownDocFsPaths()],
           pageLabel: deps.pageLabel(),
+          browserPath: executablePath,
         }
         const renderPromise = (async () => deps.exec(PDF_EXECUTOR_COMMANDS.renderPage, request))() as Promise<PdfRemoteRenderPageResult>
         servePendingResources(taskId, renderPromise)

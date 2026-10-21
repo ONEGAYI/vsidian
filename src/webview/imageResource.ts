@@ -22,6 +22,11 @@ import { t } from '../shared/i18n'
 /** 槽位状态（stable class/data 入口，样式见 main.css 与选择器映射表） */
 export type ImageSlotState = 'loading' | 'loaded' | 'error'
 
+/** 直连（http/https）图加载超时：超过即按 load-timeout 终态失败收口。
+ *  服务端返回 HTML/被拦截内容时 img 既不 load 也不 error，不设上限会让
+ *  以「槽位终态」为完成信号的消费方（PDF 导出就绪谓词）永不收敛。 */
+const DIRECT_IMAGE_TIMEOUT_MS = 10_000
+
 export const IMAGE_CLASS_NAMES = {
   /** 图片槽位基类（阅读 img 与 live widget 容器共用） */
   image: 'vsidian-image',
@@ -120,6 +125,10 @@ interface SlotRecord {
   /** 失效提示文字已写入 img.alt（原值记忆于 errorOriginalAlt；恢复回写） */
   errorAltApplied?: boolean
   errorOriginalAlt?: string
+  /** 直连（http/https）图的加载超时句柄：服务端返回非位图内容时
+   *  load/error 事件都不触发，槽位会永久停在 loading——超时按终态失败
+   *  收口（PDF 导出等以「槽位终态」为完成信号，不能无限等待） */
+  directTimer?: ReturnType<typeof setTimeout>
 }
 
 export class ImageResourceManager {
@@ -186,11 +195,13 @@ export class ImageResourceManager {
       // 槽位同生命周期，invalidate 撤下旧图后 slot 上迟到的旧事件须忽略）
       onLoad: (event) => {
         if (event.currentTarget === record.img) {
+          this.clearDirectTimer(record)
           this.setSlotState(slot, 'loaded')
         }
       },
       onError: (event) => {
         if (event.currentTarget === record.img) {
+          this.clearDirectTimer(record)
           this.setSlotState(slot, 'error', 'load-failed')
         }
       },
@@ -224,6 +235,7 @@ export class ImageResourceManager {
       this.restoreAlt(slot)
     }
     this.slots.delete(slot)
+    this.clearDirectTimer(record)
     record.entry.waiters.delete(slot)
     slot.removeEventListener('load', record.onLoad)
     slot.removeEventListener('error', record.onError)
@@ -454,6 +466,26 @@ export class ImageResourceManager {
       slot.setAttribute('src', src)
     }
     this.setSlotState(slot, 'loading') // src 已应用，等 img load/error 确认
+    // 直连图兜底：非位图响应（HTML 错误页、被拦截的 mime）可能既不 load
+    // 也不 error，槽位会永久 loading。超时后按终态失败收口，使以槽位终态
+    // 为完成信号的消费方（PDF 导出）收敛并进入缺资源继续/取消链路。
+    this.clearDirectTimer(record)
+    if (record.entry.direct === true) {
+      record.directTimer = setTimeout(() => {
+        record.directTimer = undefined
+        if (this.slots.get(slot) !== record) return
+        if (!slot.dataset['vsidianImgState'] || slot.dataset['vsidianImgState'] === 'loading') {
+          this.setSlotState(slot, 'error', 'inaccessible')
+        }
+      }, DIRECT_IMAGE_TIMEOUT_MS)
+    }
+  }
+
+  private clearDirectTimer(record: SlotRecord): void {
+    if (record.directTimer !== undefined) {
+      clearTimeout(record.directTimer)
+      record.directTimer = undefined
+    }
   }
 
   private releaseImages(record: SlotRecord): void {

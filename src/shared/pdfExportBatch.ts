@@ -70,6 +70,23 @@ export function nextAvailableTargetPath(targetPath: string, taken: ReadonlySet<s
   }
 }
 
+/** 自动更名的候选探测上限：从 name.pdf 起探测 name (2..N).pdf。
+ *  探测与命名同源（nextAvailableTargetPath 用同一编号序列），避免「只 stat
+ *  名义路径 → 选中已被 name (2).pdf 占用的编号 → 覆盖既有文件」
+ *  （双轴评审 P2-003）。上限只为防御病态目录，不参与命名规则。 */
+const RENAME_PROBE_LIMIT = 200
+
+/** 生成某名义目标的编号候选路径列表（含名义路径本身）——宿主探测磁盘占用
+ *  的唯一入口，与 nextAvailableTargetPath 的命名序列严格同源。 */
+export function renameProbeCandidates(targetPath: string): string[] {
+  const out: string[] = [targetPath]
+  const dot = targetPath.lastIndexOf('.')
+  const base = dot < 0 ? targetPath : targetPath.slice(0, dot)
+  const ext = dot < 0 ? '' : targetPath.slice(dot)
+  for (let n = 2; n <= RENAME_PROBE_LIMIT; n++) out.push(`${base} (${n})${ext}`)
+  return out
+}
+
 /**
  * 目录收集入列：files 为宿主递归枚举出的目录内全部文件（规范 '/' 形态），
  * 只保留 Markdown（注入宿主同口径判定）、按 fsPath 去重（大小写不敏感——
