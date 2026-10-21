@@ -1,14 +1,18 @@
 // 设置页「中文分词」二级组（#239 分词分页；#264 起退役为编辑器页尾组）：
 // 分词引擎选择（builtin Intl/jieba）、jieba 下载源选择（jsdelivr/npmmirror/
-// 自定义 URL）与资源下载/删除管理。经 SettingsPageDelegateGroup 委托装配进
-// 编辑器分页（不占侧栏分页槽位）；设置值权威在宿主（settings.snapshot/
-// changed 回显），资源状态权威在宿主（wordSegment.state 推送），组不自行
-// 推断。文案一律 t() 取词（wordSegment.* / setting.* 词条）。
+// 自定义 URL/本地路径）与资源下载/删除/打开目录管理。经
+// SettingsPageDelegateGroup 委托装配进编辑器分页（不占侧栏分页槽位）；
+// 设置值权威在宿主（settings.snapshot/changed 回显），资源状态权威在宿主
+//（wordSegment.state 推送），组不自行推断。#630 local 源档下「下载」按钮
+// 文案就地切换为「从本地安装」；#631 新增「打开资源目录」按钮。文案一律
+// t() 取词（wordSegment.* / setting.* 词条）。
 import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import {
   JIEBA_CUSTOM_URL_KEY,
   JIEBA_CUSTOM_URL_MAX_LENGTH,
+  JIEBA_LOCAL_PATH_KEY,
+  JIEBA_LOCAL_PATH_MAX_LENGTH,
   WORD_SEGMENT_ENGINE_DEFAULT,
   WORD_SEGMENT_ENGINE_KEY,
   WORD_SEGMENT_SOURCE_DEFAULT,
@@ -71,10 +75,11 @@ export class WordSegmentSection implements SettingsPageDelegateGroup {
   }
 
   /** 设置值权威回显的就地同步：引擎/下载源 radio 选中态与灰化、自定义
-   *  URL 输入值与禁用态。资源状态块不受 settings.* 影响（随
-   *  wordSegment.state 重建），定位类与焦点原样保留。灰化口径与 render
-   *  一致：下载源三行只随 engine 非 jieba 禁用，custom 输入框另在下载源
-   *  非 custom 时禁用 */
+   *  URL 与本地路径输入值与禁用态、下载/安装按钮文案与进行中状态文本。
+   *  资源状态块不受 settings.* 影响时仅同步这些源档位相关文本（资源块
+   *  整重建由 wordSegment.state 触发），定位类与焦点原样保留。灰化口径
+   *  与 render 一致：下载源四行只随 engine 非 jieba 禁用，custom/local
+   *  输入框另在下载源非对应档时禁用 */
   private syncSettingValues(): void {
     const parent = this.parent
     if (!parent) return
@@ -93,6 +98,31 @@ export class WordSegmentSection implements SettingsPageDelegateGroup {
       customInput.value = this.valueOf(JIEBA_CUSTOM_URL_KEY, '')
       customInput.disabled = sourceDisabled || source !== 'custom'
     }
+    const localInput = parent.querySelector<HTMLInputElement>('input.vsidian-wordseg-local-path')
+    if (localInput) {
+      localInput.value = this.valueOf(JIEBA_LOCAL_PATH_KEY, '')
+      localInput.disabled = sourceDisabled || source !== 'local'
+    }
+    // 源档位相关文案就地同步（资源块只在 wordSegment.state 时重建，档位
+    // 切换不触发重建——按钮与进行中文案须随 settings.changed 更新）
+    const downloadButton = parent.querySelector<HTMLButtonElement>('button.vsidian-wordseg-download')
+    if (downloadButton) {
+      downloadButton.textContent = this.actionLabel(source)
+    }
+    const statusEl = parent.querySelector<HTMLElement>('.vsidian-wordseg-status')
+    if (statusEl && this.resourceState?.status === 'downloading') {
+      statusEl.textContent = this.busyText(source)
+    }
+  }
+
+  /** 资源获取动作文案：local 档是本地安装，网络档是下载 */
+  private actionLabel(source: string): string {
+    return source === 'local' ? t('wordSegment.installLocal') : t('wordSegment.download')
+  }
+
+  /** 资源获取进行中文案：local 档读本地路径，网络档走网络下载 */
+  private busyText(source: string): string {
+    return source === 'local' ? t('wordSegment.installing') : t('wordSegment.downloading')
   }
 
   private send(message: object): void {
@@ -173,6 +203,7 @@ export class WordSegmentSection implements SettingsPageDelegateGroup {
       this.optionRow(WORD_SEGMENT_SOURCE_KEY, 'jsdelivr', source, t('setting.wordSegmentSourceJsdelivr'), undefined, sourceDisabled),
       this.optionRow(WORD_SEGMENT_SOURCE_KEY, 'npmmirror', source, t('setting.wordSegmentSourceNpmmirror'), undefined, sourceDisabled),
       this.optionRow(WORD_SEGMENT_SOURCE_KEY, 'custom', source, t('setting.wordSegmentSourceCustom'), undefined, sourceDisabled),
+      this.optionRow(WORD_SEGMENT_SOURCE_KEY, 'local', source, t('setting.wordSegmentSourceLocal'), undefined, sourceDisabled),
     )
     const customRow = document.createElement('div')
     customRow.className = 'vsidian-wordseg-custom-row'
@@ -193,6 +224,26 @@ export class WordSegmentSection implements SettingsPageDelegateGroup {
     })
     customRow.append(customInput)
     engineBlock.append(customRow)
+    // #630 local 源路径输入（目录或 .tgz 文件；宿主侧解析，Remote SSH 为
+    // 远程机路径——placeholder 与设置描述写明）
+    const localPath = this.valueOf(JIEBA_LOCAL_PATH_KEY, '')
+    const localRow = document.createElement('div')
+    localRow.className = 'vsidian-wordseg-custom-row'
+    const localInput = document.createElement('input')
+    localInput.type = 'text'
+    localInput.className = 'vsidian-settings-text vsidian-wordseg-local-path'
+    localInput.value = localPath
+    localInput.placeholder = t('wordSegment.localPathPlaceholder')
+    localInput.setAttribute('aria-label', t('setting.wordSegmentLocalPath.title'))
+    localInput.maxLength = JIEBA_LOCAL_PATH_MAX_LENGTH
+    localInput.disabled = sourceDisabled || source !== 'local'
+    localInput.addEventListener('change', () => {
+      if (localInput.value.trim() !== localPath) {
+        this.setSetting(JIEBA_LOCAL_PATH_KEY, localInput.value.trim())
+      }
+    })
+    localRow.append(localInput)
+    engineBlock.append(localRow)
     parent.append(engineBlock)
     this.locateBlock(engineBlock, focusEntry, WORD_SEGMENT_SECTION_ENGINE_ENTRY)
 
@@ -214,7 +265,7 @@ export class WordSegmentSection implements SettingsPageDelegateGroup {
     statusEl.className = 'vsidian-wordseg-status'
     statusEl.setAttribute('role', 'status')
     if (busy) {
-      statusEl.textContent = t('wordSegment.downloading')
+      statusEl.textContent = this.busyText(source)
     } else if (state?.installed) {
       statusEl.textContent = t('wordSegment.installed', { version: state.version })
     } else {
@@ -224,13 +275,18 @@ export class WordSegmentSection implements SettingsPageDelegateGroup {
 
     const actions = document.createElement('div')
     actions.className = 'vsidian-wordseg-actions'
-    const download = this.button(t('wordSegment.download'), () =>
-      this.send({ kind: 'wordSegment.download' }), 'vsidian-index-primary')
+    const download = this.button(this.actionLabel(source), () =>
+      this.send({ kind: 'wordSegment.download' }), 'vsidian-index-primary vsidian-wordseg-download')
     download.disabled = busy
     const remove = this.button(t('wordSegment.deleteResource'), () =>
       this.send({ kind: 'wordSegment.delete' }))
     remove.disabled = busy || state?.installed !== true
-    actions.append(download, remove)
+    // #631 打开资源目录（分享/备份入口）：installed 时才可点——未安装时
+    // 版本目录不存在，revealFileInOS 无处可开
+    const openDir = this.button(t('wordSegment.openDirectory'), () =>
+      this.send({ kind: 'wordSegment.openDirectory' }))
+    openDir.disabled = busy || state?.installed !== true
+    actions.append(download, remove, openDir)
     resourceBlock.append(actions)
 
     if (state?.notice) {
@@ -280,15 +336,17 @@ export class WordSegmentSection implements SettingsPageDelegateGroup {
   }
 }
 
-/** notice 展示基调：失败为警示，成功为常规，加载失败警示 */
+/** notice 展示基调：成功（下载/安装/删除）为常规，失败与加载失败警示 */
 function noticeTone(kind: string): 'ok' | 'warn' {
-  return kind === 'downloaded' || kind === 'deleted' ? 'ok' : 'warn'
+  return kind === 'downloaded' || kind === 'installed' || kind === 'deleted' ? 'ok' : 'warn'
 }
 
 function noticeText(notice: NonNullable<WordSegmentStateMessage['notice']>): string {
   const keyByKind: Record<typeof notice.kind, Parameters<typeof t>[0]> = {
     downloaded: 'wordSegment.noticeDownloaded',
     'download-failed': 'wordSegment.noticeDownloadFailed',
+    installed: 'wordSegment.noticeInstalled',
+    'install-failed': 'wordSegment.noticeInstallFailed',
     deleted: 'wordSegment.noticeDeleted',
     'delete-failed': 'wordSegment.noticeDeleteFailed',
     'load-failed': 'wordSegment.noticeLoadFailed',

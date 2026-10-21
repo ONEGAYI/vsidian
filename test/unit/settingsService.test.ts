@@ -86,10 +86,11 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'hover.externalEnabled': false,
       'hover.externalShape': 'card',
       // #239 中文分词三件：引擎默认内置（Intl.Segmenter）、下载源默认
-      // jsdelivr、自定义源基址默认空
+      // jsdelivr、自定义源基址默认空；#630 local 源路径默认空
       'editor.wordSegmentEngine': 'builtin',
       'editor.wordSegmentSource': 'jsdelivr',
       'editor.wordSegmentJiebaUrl': '',
+      'editor.wordSegmentJiebaLocalPath': '',
       // #296 三轮 块内表格渲染（实验性，默认开 = 容器内表格网格化）
       'experimental.table.blockRender': true,
       // #322 默认编辑器守护（默认开 = 抢占提示可用；呈现归 #323 委托组）

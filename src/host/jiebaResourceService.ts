@@ -6,7 +6,8 @@
 // 下载执行在宿主侧（Remote SSH 场景在远程机执行，用户决策钉住）；失败
 // 或校验不符清理 staging 不留半成品文件。提交原子性：写满 staging 目录
 // 后一次性 rename 到版本目录（旧版本先删）——中断最坏残留整个 staging
-// 目录，下次下载前先清。
+// 目录，下次下载前先清。#630 起 local 源离线安装走同一 staging/提交
+// 链路（notice 用 installed/install-failed 区分于网络档）。
 //
 // 已安装判定：版本目录两文件在场且 sha256 逐一与清单相符（启动时校验
 // 一次；磁盘损坏/篡改视为未安装）。资源 URI 由 vscode 层逐 webview 构造
@@ -16,6 +17,7 @@ import {
   JIEBA_MANIFEST_FILES,
   JIEBA_WASM_VERSION,
   planJiebaDownload,
+  planJiebaLocalInstall,
   type JiebaSourceMode,
 } from '../shared/jiebaManifest'
 import { extractTarEntries } from './jiebaTar'
@@ -23,6 +25,11 @@ import { extractTarEntries } from './jiebaTar'
 /** globalStorage 相对路径（端口实现负责拼到存储根） */
 export const JIEBA_INSTALL_DIR = `jieba-wasm/${JIEBA_WASM_VERSION}`
 const JIEBA_STAGING_DIR = 'jieba-wasm/.staging'
+
+/** #630 评审 C1：local 源单文件读取上限。锁定清单两文件合计约 4 MB，
+ *  上限留两个数量级余量；超限（误指大文件/恶意构造）在读取前拒绝，
+ *  防宿主进程内存被离线包输入耗尽 */
+export const JIEBA_LOCAL_READ_LIMIT_BYTES = 64 * 1024 * 1024
 
 /** 文件系统/下载端口（vscode 层用 vscode.workspace.fs + 全局 fetch 实现；
  *  relative path 相对 globalStorage 根；vscode.workspace.fs 返回
@@ -36,11 +43,26 @@ export interface JiebaResourcePort {
   /** 目录删除（不存在视为成功——幂等清理） */
   rmdir(relativePath: string): PromiseLike<void>
   rename(fromPath: string, toPath: string): PromiseLike<void>
+  /** #630 local 源外部路径形态探测：file=普通文件（tarball）、
+   *  directory=目录（内含清单同名文件）、null=不存在；size 供读取前
+   *  上限检查（评审 C1）。非 FileNotFound 的错误（权限/卷离线等）由
+   *  实现透传，detail 携带原因（评审 C3） */
+  statExternal(path: string): Promise<JiebaExternalStat | null>
+  /** #630 local 源外部路径文件读取（绝对路径，与 globalStorage 相对
+   *  路径命名空间隔离） */
+  readExternal(path: string): Promise<Uint8Array>
+}
+
+export interface JiebaExternalStat {
+  kind: 'file' | 'directory'
+  size: number
 }
 
 export type JiebaNotice =
   | { kind: 'downloaded'; version: string }
   | { kind: 'download-failed'; detail: string }
+  | { kind: 'installed'; version: string }
+  | { kind: 'install-failed'; detail: string }
   | { kind: 'deleted' }
   | { kind: 'delete-failed'; detail: string }
   | { kind: 'load-failed'; detail?: string }
@@ -52,7 +74,7 @@ export interface JiebaResourceState {
   notice: JiebaNotice | null
 }
 
-export type JiebaSourceReader = () => { mode: JiebaSourceMode; customUrl: string }
+export type JiebaSourceReader = () => { mode: JiebaSourceMode; customUrl: string; localPath: string }
 
 export interface JiebaManifestEntry {
   name: string
@@ -131,39 +153,23 @@ export class JiebaResourceService {
   }
 
   /**
-   * 下载（设置页按钮驱动）：按当前下载源设置取 URL 集 → 下载 → 文件级
-   * sha256 校验 → staging 落盘 → rename 提交。任一步失败清理 staging，
-   * 状态 notice 记 detail（宿主层据此通知）。并发调用（downloading 中）
-   * 直接忽略。
+   * 下载/离线安装（设置页按钮驱动）：入口读一次源设置快照（评审 C2——
+   * 采集中途用户切档不改变本次操作的采集源与 notice 归类）→ 收集文件
+   * （网络档取 URL 集下载、local 档读本地路径）→ 文件级 sha256 校验 →
+   * staging 落盘 → rename 提交。任一步失败清理 staging，状态 notice 记
+   * detail（宿主层据此通知；网络档 downloaded/download-failed、local 档
+   * installed/install-failed）。并发调用（downloading 中）直接忽略。
    */
   async download(): Promise<void> {
     if (this.state.status === 'downloading') return
     this.state = { ...this.state, status: 'downloading', notice: null }
     this.changed()
+    const source = this.sourceOf()
+    const local = source.mode === 'local'
     try {
-      const { mode, customUrl } = this.sourceOf()
-      const plan = planJiebaDownload(mode, customUrl, this.manifest)
-      if (!plan.ok) {
-        throw new Error(`invalid download source: ${plan.reason}`)
-      }
-      const files = new Map<string, Uint8Array>()
-      if (plan.kind === 'files') {
-        for (const { file, url } of plan.files) {
-          const bytes = await this.port.fetchBytes(url)
-          assertManifestFile(file, bytes)
-          files.set(file.name, bytes)
-        }
-      } else {
-        const entries = extractTarEntries(await this.port.fetchBytes(plan.tarballUrl))
-        for (const file of this.manifest) {
-          const bytes = entries.get(`package/${file.npmPath}`)
-          if (!bytes) {
-            throw new Error(`tarball missing entry: package/${file.npmPath}`)
-          }
-          assertManifestFile(file, bytes)
-          files.set(file.name, bytes)
-        }
-      }
+      const files = local
+        ? await this.collectLocalFiles(source.localPath)
+        : await this.collectRemoteFiles(source)
       await this.rmdirIfExists(JIEBA_STAGING_DIR)
       await this.port.mkdirp(JIEBA_STAGING_DIR)
       for (const [name, bytes] of files) {
@@ -171,22 +177,103 @@ export class JiebaResourceService {
       }
       await this.rmdirIfExists(JIEBA_INSTALL_DIR)
       await this.port.rename(JIEBA_STAGING_DIR, JIEBA_INSTALL_DIR)
-      this.state = { ...this.state, installed: true, notice: { kind: 'downloaded', version: JIEBA_WASM_VERSION } }
+      this.state = {
+        ...this.state,
+        installed: true,
+        notice: local
+          ? { kind: 'installed', version: JIEBA_WASM_VERSION }
+          : { kind: 'downloaded', version: JIEBA_WASM_VERSION },
+      }
     } catch (error) {
       try {
         await this.port.rmdir(JIEBA_STAGING_DIR)
       } catch {
-        // 清理失败不掩盖下载失败本身（残留目录下次下载前再清）
+        // 清理失败不掩盖下载/安装失败本身（残留目录下次下载/安装前再清）
       }
       this.state = {
         ...this.state,
         installed: await this.verifyFiles().catch(() => false),
-        notice: { kind: 'download-failed', detail: errorMessage(error) },
+        notice: local
+          ? { kind: 'install-failed', detail: errorMessage(error) }
+          : { kind: 'download-failed', detail: errorMessage(error) },
       }
     } finally {
       this.state = { ...this.state, status: 'idle' }
       this.changed()
     }
+  }
+
+  /** local 源文件收集（#630）：目录形态按 `目录/清单名` 逐文件读取（每
+   *  文件 stat 先行——缺文件报路径、超上限先拒，评审 C1）、普通文件按
+   *  npm tarball 解包提取 package/ 前缀条目；逐文件 sha256 校验与网络
+   *  下载同构（assertManifestFile）。路径按宿主侧文件系统解析。 */
+  private async collectLocalFiles(localPath: string): Promise<Map<string, Uint8Array>> {
+    const plan = planJiebaLocalInstall(localPath)
+    if (!plan.ok) {
+      throw new Error(`invalid local path: ${plan.reason}`)
+    }
+    // 尾斜杠/反斜杠先归一（目录路径常见带尾分隔符），stat 与读取共用同一路径；
+    // 归一后为空或裸盘符（`/`、`C:\`）无法指向确定目录，按无效路径拒绝（评审 C4）
+    const base = plan.path.replace(/[\\/]+$/, '')
+    if (base === '' || /^[A-Za-z]:$/.test(base)) {
+      throw new Error(`invalid local path: ${plan.path}`)
+    }
+    const rootStat = await this.port.statExternal(base)
+    if (rootStat === null) {
+      throw new Error(`local path not accessible: ${plan.path}`)
+    }
+    if (rootStat.kind === 'directory') {
+      const files = new Map<string, Uint8Array>()
+      for (const file of this.manifest) {
+        const filePath = `${base}/${file.name}`
+        const fileStat = await this.port.statExternal(filePath)
+        if (fileStat === null || fileStat.kind !== 'file') {
+          throw new Error(`local directory missing file: ${filePath}`)
+        }
+        assertWithinLocalLimit(file.name, fileStat.size)
+        const bytes = await this.port.readExternal(filePath)
+        assertManifestFile(file, bytes)
+        files.set(file.name, bytes)
+      }
+      return files
+    }
+    assertWithinLocalLimit(base, rootStat.size)
+    return this.collectFromTarball(await this.port.readExternal(base))
+  }
+
+  private async collectRemoteFiles(
+    source: { mode: JiebaSourceMode; customUrl: string },
+  ): Promise<Map<string, Uint8Array>> {
+    const plan = planJiebaDownload(source.mode, source.customUrl, this.manifest)
+    if (!plan.ok) {
+      throw new Error(`invalid download source: ${plan.reason}`)
+    }
+    if (plan.kind === 'files') {
+      const files = new Map<string, Uint8Array>()
+      for (const { file, url } of plan.files) {
+        const bytes = await this.port.fetchBytes(url)
+        assertManifestFile(file, bytes)
+        files.set(file.name, bytes)
+      }
+      return files
+    }
+    return this.collectFromTarball(await this.port.fetchBytes(plan.tarballUrl))
+  }
+
+  /** tarball 提取 + 清单校验（npmmirror 网络档与 local tgz 档共用，
+   *  两处语义要求严格同构——评审 A2；解压输出上限见 jiebaTar C1 防御） */
+  private collectFromTarball(gzipped: Uint8Array): Map<string, Uint8Array> {
+    const entries = extractTarEntries(gzipped)
+    const files = new Map<string, Uint8Array>()
+    for (const file of this.manifest) {
+      const bytes = entries.get(`package/${file.npmPath}`)
+      if (!bytes) {
+        throw new Error(`tarball missing entry: package/${file.npmPath}`)
+      }
+      assertManifestFile(file, bytes)
+      files.set(file.name, bytes)
+    }
+    return files
   }
 
   /** 删除已下载资源（引擎回退 builtin 由编辑器侧按 installed=false 处理） */
@@ -215,6 +302,12 @@ function assertManifestFile(file: { name: string; sha256: string; size: number }
   }
   if (sha256Hex(bytes) !== file.sha256) {
     throw new Error(`${file.name}: sha256 mismatch`)
+  }
+}
+
+function assertWithinLocalLimit(label: string, size: number): void {
+  if (size > JIEBA_LOCAL_READ_LIMIT_BYTES) {
+    throw new Error(`${label}: ${size} bytes exceeds local read limit ${JIEBA_LOCAL_READ_LIMIT_BYTES}`)
   }
 }
 

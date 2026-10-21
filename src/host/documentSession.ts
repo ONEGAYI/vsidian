@@ -935,8 +935,10 @@ export class DocumentSession {
         return Promise.resolve()
       case 'wordSegment.download':
       case 'wordSegment.delete':
-        // #239 下载/删除只在设置页 webview 链路（settingsPage 模块）处理，
-        // 编辑器面板不会发出；到达此处无副作用（保持协议穷尽）
+      case 'wordSegment.openDirectory':
+        // #239 下载/删除与 #631 打开资源目录只在设置页 webview 链路
+        //（settingsPage 模块）处理，编辑器面板不会发出；到达此处无副作用
+        //（保持协议穷尽）
         return Promise.resolve()
       case 'keybindings.get':
       case 'keybindings.set':

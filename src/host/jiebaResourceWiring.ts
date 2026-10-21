@@ -2,14 +2,16 @@
 // （vscode.workspace.fs）+ 宿主侧 fetch（Node 18 全局 fetch——Remote SSH
 // 场景在远程机执行下载）+ 逐面板资源 URI 构造（asWebviewUri 前缀面板
 // 私有）+ 状态广播与用户通知（i18n）。服务纯逻辑在
-// host/jiebaResourceService（端口注入，单测覆盖）。
+// host/jiebaResourceService（端口注入，单测覆盖）。#630 起端口另含
+// 本地离线包读取面（statExternal/readExternal，Uri.file 绝对路径）；
+// #631 打开资源目录走 revealFileInOS（cssSnippetWiring 同款）。
 import * as vscode from 'vscode'
 import {
   JIEBA_MANIFEST_FILES,
   JIEBA_WASM_VERSION,
 } from '../shared/jiebaManifest'
 import { JiebaResourceService, type JiebaResourcePort, type JiebaResourceState } from './jiebaResourceService'
-import { WORD_SEGMENT_SOURCE_KEY, JIEBA_CUSTOM_URL_KEY } from '../shared/settings'
+import { WORD_SEGMENT_SOURCE_KEY, JIEBA_CUSTOM_URL_KEY, JIEBA_LOCAL_PATH_KEY } from '../shared/settings'
 import type { SettingsService } from './settingsService'
 import { t } from '../shared/i18n'
 import type { JiebaSourceMode } from '../shared/jiebaManifest'
@@ -21,6 +23,9 @@ export interface JiebaWiring {
   stateFor(webview: Pick<vscode.Webview, 'asWebviewUri'>): JiebaResourceState & {
     resources: { js: string; wasm: string } | null
   }
+  /** #631 在系统文件管理器中打开版本目录（installed 时设置页按钮触发；
+   *  未安装时目录不存在，静默忽略——按钮侧已禁用，此为兜底） */
+  openInstallDirectory(): void
 }
 
 function toRelative(root: vscode.Uri, relativePath: string): vscode.Uri {
@@ -68,14 +73,31 @@ export function createJiebaWiring(
     },
     rename: (fromPath, toPath) => vscode.workspace.fs.rename(
       toRelative(root, fromPath), toRelative(root, toPath), { overwrite: true }),
+    async statExternal(path) {
+      try {
+        const info = await vscode.workspace.fs.stat(vscode.Uri.file(path))
+        return {
+          kind: (info.type & vscode.FileType.Directory) !== 0 ? 'directory' as const : 'file' as const,
+          size: info.size,
+        }
+      } catch (error) {
+        // 不存在归 null（服务按 not accessible 报告）；权限拒绝/卷离线等
+        // 其余错误透传——install-failed 的 detail 携带底层原因（评审 C3）
+        if ((error as { code?: string }).code === 'FileNotFound') return null
+        throw error
+      }
+    },
+    readExternal: (path) => fsBytes(vscode.Uri.file(path)),
   }
   const service = new JiebaResourceService(port, () => {
     const values = settingsService.getSnapshot()
     const mode = values[WORD_SEGMENT_SOURCE_KEY]
     const customUrl = values[JIEBA_CUSTOM_URL_KEY]
+    const localPath = values[JIEBA_LOCAL_PATH_KEY]
     return {
       mode: (typeof mode === 'string' ? mode : 'jsdelivr') as JiebaSourceMode,
       customUrl: typeof customUrl === 'string' ? customUrl : '',
+      localPath: typeof localPath === 'string' ? localPath : '',
     }
   })
   // 状态变化 → 用户通知（成功 info / 失败 warning；面板与设置页的状态
@@ -89,6 +111,12 @@ export function createJiebaWiring(
     } else if (notice.kind === 'download-failed') {
       void vscode.window.showWarningMessage(
         t('host.jiebaDownloadFailed', { detail: notice.detail }))
+    } else if (notice.kind === 'installed') {
+      void vscode.window.showInformationMessage(
+        t('host.jiebaInstalled', { version: notice.version }))
+    } else if (notice.kind === 'install-failed') {
+      void vscode.window.showWarningMessage(
+        t('host.jiebaInstallFailed', { detail: notice.detail }))
     } else if (notice.kind === 'deleted') {
       void vscode.window.showInformationMessage(t('host.jiebaDeleted'))
     } else if (notice.kind === 'delete-failed') {
@@ -103,6 +131,11 @@ export function createJiebaWiring(
   void service.verifyInstalled()
   return {
     service,
+    openInstallDirectory() {
+      if (!service.getState().installed) return
+      void vscode.commands.executeCommand(
+        'revealFileInOS', vscode.Uri.joinPath(root, 'jieba-wasm', JIEBA_WASM_VERSION))
+    },
     stateFor(webview) {
       const state = service.getState()
       let resources: { js: string; wasm: string } | null = null
