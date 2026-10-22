@@ -14,8 +14,10 @@ import {
   IMAGE_RESIZE_CLASS_NAMES,
   IMAGE_RESIZE_HANDLE_SIZE,
   IMAGE_RESIZE_HIT_SIZE,
+  IMAGE_RESIZE_HANDLE_BORDER,
   IMAGE_RESIZE_MIN_WIDTH,
   attachResizeHandle,
+  attachResizeHandleToLiveImage,
   computeResizeTarget,
   glowExtension,
   innerSpanOfImageSource,
@@ -73,6 +75,21 @@ describe('computeResizeTarget：等比模式', () => {
       naturalHeight: natural.height,
       containerWidth: 800,
     })).toEqual({ width: 75, height: null, unit: 'percent' })
+  })
+
+  it('百分比域内放大（150%）维持百分比（101%–1000% 合法域，规格 §3.4）', () => {
+    // 固有宽 200，100% 起始渲染 200px；拖到 300px = 150%
+    expect(computeResizeTarget({
+      startWidth: 200,
+      startHeight: 100,
+      dx: 100,
+      dy: 0,
+      mode: 'proportional',
+      declared: { width: 100, height: null, unit: 'percent' },
+      naturalWidth: natural.width,
+      naturalHeight: natural.height,
+      containerWidth: 800,
+    })).toEqual({ width: 150, height: null, unit: 'percent' })
   })
 
   it('原写作为 |WxH → 两轴等比缩放，不丢高度（|100x80 拖到 200 写 200x160）', () => {
@@ -189,6 +206,78 @@ describe('computeResizeTarget：尺寸界', () => {
   })
 })
 
+describe('computeResizeTarget：百分比写回域（1–1000，越域改写像素形态）', () => {
+  it('超上限：固有宽 20 拖到 210px → 写像素 210（不写 1050%——解析侧会判非法降级为别名，垃圾段累积）', () => {
+    expect(computeResizeTarget({
+      startWidth: 20,
+      startHeight: 10,
+      dx: 190,
+      dy: 0,
+      mode: 'proportional',
+      declared: { width: 100, height: null, unit: 'percent' },
+      naturalWidth: 20,
+      naturalHeight: 10,
+      containerWidth: 800,
+    })).toEqual({ width: 210, height: null, unit: 'px' })
+  })
+
+  it('下溢：固有宽 4000 拖到 24px → 写像素 24（不钳 1% 导致松手渲染跳回 40px）', () => {
+    expect(computeResizeTarget({
+      startWidth: 4000,
+      startHeight: 2000,
+      dx: -3976,
+      dy: 0,
+      mode: 'proportional',
+      declared: { width: 100, height: null, unit: 'percent' },
+      naturalWidth: 4000,
+      naturalHeight: 2000,
+      containerWidth: 800,
+    })).toEqual({ width: 24, height: null, unit: 'px' })
+  })
+
+  it('域内不变：固有宽 200 拖到 300px → 150%（维持百分比写回）', () => {
+    expect(computeResizeTarget({
+      startWidth: 200,
+      startHeight: 100,
+      dx: 100,
+      dy: 0,
+      mode: 'proportional',
+      declared: { width: 100, height: null, unit: 'percent' },
+      naturalWidth: 200,
+      naturalHeight: 100,
+      containerWidth: 800,
+    })).toEqual({ width: 150, height: null, unit: 'percent' })
+  })
+
+  it('恰 1000%：固有宽 100 拖到 1000px → 1000%（边界含于域，走百分比不改像素）', () => {
+    expect(computeResizeTarget({
+      startWidth: 100,
+      startHeight: 100,
+      dx: 900,
+      dy: 0,
+      mode: 'proportional',
+      declared: { width: 100, height: null, unit: 'percent' },
+      naturalWidth: 100,
+      naturalHeight: 100,
+      containerWidth: 2000,
+    })).toEqual({ width: 1000, height: null, unit: 'percent' })
+  })
+
+  it('恰 1%：固有宽 2400 拖到下界 24px → 1%（边界含于域，走百分比不改像素）', () => {
+    expect(computeResizeTarget({
+      startWidth: 2400,
+      startHeight: 1200,
+      dx: -2376,
+      dy: 0,
+      mode: 'proportional',
+      declared: { width: 100, height: null, unit: 'percent' },
+      naturalWidth: 2400,
+      naturalHeight: 1200,
+      containerWidth: 800,
+    })).toEqual({ width: 1, height: null, unit: 'percent' })
+  })
+})
+
 describe('glowExtension：光晕延伸距离', () => {
   it('小图走 24px 保底', () => {
     expect(glowExtension(100, 100)).toBe(24)
@@ -225,9 +314,14 @@ describe('resizeHandleLayout：贴右下角内侧、与圆角同心', () => {
     expect(resizeHandleLayout({ width: 300, height: 200, radius: 4 })).toEqual({ right: 0, bottom: 0 })
   })
 
-  it('几何常量：视觉 12×12、热区 20×20', () => {
+  it('几何常量：视觉 12×12、热区 20×20、透明边框 4（TS 字面量锚点）', () => {
     expect(IMAGE_RESIZE_HANDLE_SIZE).toBe(12)
     expect(IMAGE_RESIZE_HIT_SIZE).toBe(20)
+    expect(IMAGE_RESIZE_HANDLE_BORDER).toBe(4)
+  })
+
+  it('几何派生：热区 − 2×边框 = 视觉（三常量联动，改任一侧即漂移暴露）', () => {
+    expect(IMAGE_RESIZE_HIT_SIZE - 2 * IMAGE_RESIZE_HANDLE_BORDER).toBe(IMAGE_RESIZE_HANDLE_SIZE)
   })
 })
 
@@ -270,6 +364,22 @@ describe('planSizeSuffixRewrite / replaceSizeSuffix：尾缀改写', () => {
     expect(replaceSizeSuffix('图.png', { width: 75, height: null, unit: 'percent' })).toBe('图.png|75%')
     expect(replaceSizeSuffix('图.png|100', { width: 120, height: 90, unit: 'px' })).toBe('图.png|120x90')
   })
+
+  it('bareAlt（直链单段）：无管道且整段即尺寸 → 整段替换，不留旧数字进别名位', () => {
+    const plan = planSizeSuffixRewrite('100', { width: 160, height: null, unit: 'px' }, { bareAlt: true })
+    expect(plan).toEqual({ inner: '160', from: 0, to: 3, text: '160' })
+    expect(replaceSizeSuffix('100', { width: 160, height: null, unit: 'px' }, { bareAlt: true })).toBe('160')
+  })
+
+  it('bareAlt：无管道且非尺寸（普通图注）→ 追加竖线段（既有行为不变）', () => {
+    expect(replaceSizeSuffix('图注', { width: 160, height: null, unit: 'px' }, { bareAlt: true }))
+      .toBe('图注|160')
+  })
+
+  it('双链路径（默认 bareAlt=false）：无管道的纯数字段是目标路径，不整段替换', () => {
+    // `![[100]]` 的 100 是文件名不是尺寸段——整段替换会吞掉目标路径
+    expect(replaceSizeSuffix('100', { width: 160, height: null, unit: 'px' })).toBe('100|160')
+  })
 })
 
 describe('innerSpanOfImageSource：定位内层（最小编辑的前提）', () => {
@@ -301,6 +411,16 @@ describe('rewriteImageSourceSuffix：整段源文改写只动内层', () => {
       .toBe('![图注|200](img.png)')
     expect(rewriteImageSourceSuffix('![a|100](x(1).png)', { width: 50, height: null, unit: 'percent' }))
       .toBe('![a|50%](x(1).png)')
+  })
+
+  it('直链单段尺寸：![100](图.png) 拖到 160 → ![160](图.png)（alt 不残留旧数字）', () => {
+    expect(rewriteImageSourceSuffix('![100](图.png)', { width: 160, height: null, unit: 'px' }))
+      .toBe('![160](图.png)')
+  })
+
+  it('双链 ![[100]]（目标名恰为纯数字）仍追加，不吞目标路径', () => {
+    expect(rewriteImageSourceSuffix('![[100]]', { width: 160, height: null, unit: 'px' }))
+      .toBe('![[100|160]]')
   })
 
   it('形态不可识别返回 null（不猜、不改）', () => {
@@ -359,14 +479,134 @@ describe('attachResizeHandle：DOM 装配', () => {
   })
 })
 
+describe('attachResizeHandle：拖动时序（jsdom + rect stub）', () => {
+  /** jsdom 无指针事件几何与布局：rect 以实例覆写、事件以带 pointerId 的
+   *  MouseEvent 模拟（listener 只读 button/clientX/clientY/shiftKey/pointerId） */
+  class FakePointerEvent extends MouseEvent {
+    readonly pointerId: number
+    constructor(type: string, init: { pointerId: number; button?: number; clientX?: number; clientY?: number; shiftKey?: boolean; bubbles?: boolean }) {
+      super(type, { button: init.button ?? 0, clientX: init.clientX ?? 0, clientY: init.clientY ?? 0, shiftKey: init.shiftKey ?? false, bubbles: init.bubbles ?? true })
+      this.pointerId = init.pointerId
+    }
+  }
+
+  const fire = (target: Window | Element, type: string, init: ConstructorParameters<typeof FakePointerEvent>[1]): void => {
+    target.dispatchEvent(new FakePointerEvent(type, init))
+  }
+
+  /** 布局就绪的图相框（beginDrag 要求 rect 尺寸 > 0） */
+  function laidOutFrame(): { frame: HTMLElement; img: HTMLImageElement } {
+    const frame = document.createElement('span')
+    frame.className = 'vsidian-image vsidian-graphic-frame'
+    frame.dataset['vsidianImgState'] = 'loaded'
+    const img = document.createElement('img')
+    const rect = { width: 100, height: 50, x: 0, y: 0, top: 0, left: 0, right: 100, bottom: 50, toJSON: () => ({}) } as DOMRect
+    Object.defineProperty(img, 'getBoundingClientRect', { value: () => rect })
+    Object.defineProperty(frame, 'getBoundingClientRect', { value: () => rect })
+    frame.append(img)
+    document.body.append(frame)
+    return { frame, img }
+  }
+
+  afterEach(() => {
+    document.body.replaceChildren()
+  })
+
+  it('F5：containerWidth 仅 beginDrag 解析一次，pointermove 复用缓存值', () => {
+    const { frame } = laidOutFrame()
+    let resolves = 0
+    attachResizeHandle(frame, {
+      resolveStart: () => ({ declared: null }),
+      onCommit: () => undefined,
+      containerWidth: () => {
+        resolves += 1
+        return 800
+      },
+    })
+    const handle = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    fire(handle, 'pointerdown', { pointerId: 7, clientX: 100, clientY: 50 })
+    expect(resolves).toBe(1) // beginDrag 解析一次
+    fire(window, 'pointermove', { pointerId: 7, clientX: 140, clientY: 70 })
+    fire(window, 'pointermove', { pointerId: 7, clientX: 180, clientY: 90 })
+    expect(resolves).toBe(1) // move 路径不再解析（容器宽拖动期间不变）
+    fire(window, 'pointerup', { pointerId: 7, clientX: 180, clientY: 90 })
+    // 下一轮拖动重新解析（用户可能改了窗口/行宽）
+    fire(handle, 'pointerdown', { pointerId: 8, clientX: 100, clientY: 50 })
+    expect(resolves).toBe(2)
+    fire(window, 'pointerup', { pointerId: 8, clientX: 100, clientY: 50 })
+  })
+
+  it('B6：拖动中源文滑移（commit 时读出与快照不一致）→ 安全放弃提交', () => {
+    const { frame } = laidOutFrame()
+    let source = '![[img.png|100]]'
+    const committed: string[] = []
+    frame.dataset['vsidianSrcFrom'] = '0'
+    frame.dataset['vsidianSrcTo'] = String(source.length)
+    attachResizeHandleToLiveImage(frame, {
+      readInner: () => source,
+      commitInner: (_frame, _range, inner) => {
+        committed.push(inner)
+      },
+    })
+    const handle = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    fire(handle, 'pointerdown', { pointerId: 7, clientX: 100, clientY: 50 })
+    fire(window, 'pointermove', { pointerId: 7, clientX: 160, clientY: 80 })
+    // 模拟拖动中并发编辑滑移该区间：等长的另一条图片引用滑进来（形态
+    // 仍合法——只靠 ![ 形态校验挡不住，会把无关引用的尾缀写坏）
+    source = '![[tiny.png|75]]'
+    fire(window, 'pointerup', { pointerId: 7, clientX: 160, clientY: 80 })
+    expect(committed).toEqual([])
+  })
+
+  it('B6 对照：源文未变 → 正常提交（快照比对不误伤正常路径）', () => {
+    const { frame } = laidOutFrame()
+    const source = '![[img.png|100]]'
+    const committed: string[] = []
+    frame.dataset['vsidianSrcFrom'] = '0'
+    frame.dataset['vsidianSrcTo'] = String(source.length)
+    attachResizeHandleToLiveImage(frame, {
+      readInner: () => source,
+      commitInner: (_frame, _range, inner) => {
+        committed.push(inner)
+      },
+    })
+    const handle = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    fire(handle, 'pointerdown', { pointerId: 7, clientX: 100, clientY: 50 })
+    fire(window, 'pointermove', { pointerId: 7, clientX: 160, clientY: 80 })
+    fire(window, 'pointerup', { pointerId: 7, clientX: 160, clientY: 80 })
+    expect(committed).toEqual(['img.png|160'])
+  })
+
+  it('B6 直链单段尺寸提交走整段替换（内层 alt 100 → 160，不残留旧数字）', () => {
+    const { frame } = laidOutFrame()
+    const source = '![100](图.png)'
+    const committed: string[] = []
+    frame.dataset['vsidianSrcFrom'] = '0'
+    frame.dataset['vsidianSrcTo'] = String(source.length)
+    attachResizeHandleToLiveImage(frame, {
+      readInner: () => source,
+      commitInner: (_frame, _range, inner) => {
+        committed.push(inner)
+      },
+    })
+    const handle = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    fire(handle, 'pointerdown', { pointerId: 7, clientX: 100, clientY: 50 })
+    fire(window, 'pointermove', { pointerId: 7, clientX: 160, clientY: 80 })
+    fire(window, 'pointerup', { pointerId: 7, clientX: 160, clientY: 80 })
+    expect(committed).toEqual(['160'])
+  })
+})
+
 describe('main.css 手柄与光晕规则（#636 契约）', () => {
   const css = readFileSync(path.resolve(process.cwd(), 'src/webview/main.css'), 'utf8')
 
-  it('手柄 20×20 热区、4px 透明边框收出 12×12 视觉、光标 nwse-resize', () => {
+  it('手柄热区/边框/视觉与 TS 常量联动（改常量即暴露 CSS 漂移）', () => {
     const rule = cssRule(css, '#app .vsidian-image-resize-handle')
-    expect(rule).toMatch(/width:\s*20px/)
-    expect(rule).toMatch(/height:\s*20px/)
-    expect(rule).toMatch(/border:\s*4px solid transparent/)
+    // 断言值由 TS 常量派生：调任一常量而 CSS 未跟，本断言随常量联动失败，
+    // 防止 TS 与 CSS 各改各的（border 值同源于 IMAGE_RESIZE_HANDLE_BORDER）
+    expect(rule).toMatch(new RegExp(`width:\\s*${IMAGE_RESIZE_HIT_SIZE}px`))
+    expect(rule).toMatch(new RegExp(`height:\\s*${IMAGE_RESIZE_HIT_SIZE}px`))
+    expect(rule).toMatch(new RegExp(`border:\\s*${IMAGE_RESIZE_HANDLE_BORDER}px solid transparent`))
     expect(rule).toMatch(/background-clip:\s*padding-box/)
     expect(rule).toMatch(/cursor:\s*nwse-resize/)
     // 默认不常驻
@@ -374,12 +614,13 @@ describe('main.css 手柄与光晕规则（#636 契约）', () => {
     expect(rule).toMatch(/visibility:\s*hidden/)
   })
 
-  it('光晕沿圆角轮廓、不占布局（absolute + pointer-events:none + 半径变量）', () => {
+  it('光晕为边线光带、不占布局（absolute + pointer-events:none + 深度变量）', () => {
     const rule = cssRule(css, '#app .vsidian-image-resize-glow')
     expect(rule).toMatch(/position:\s*absolute/)
     expect(rule).toMatch(/pointer-events:\s*none/)
-    expect(rule).toMatch(/box-shadow:[^;]*var\(--vsidian-image-resize-glow/)
-    expect(rule).toMatch(/clip-path:\s*circle\(/)
+    // 底边与右边两条向内递减的渐变光带：色标含深度变量（无该变量的漂移即暴露）
+    expect(rule).toMatch(/linear-gradient\(to top,[^;]*calc\(var\(--vsidian-image-resize-glow/)
+    expect(rule).toMatch(/linear-gradient\(to left,[^;]*calc\(var\(--vsidian-image-resize-glow/)
   })
 
   it('悬停显现且拖动中排除光晕（互斥不靠层叠顺序）', () => {

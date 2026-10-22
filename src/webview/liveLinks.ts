@@ -26,7 +26,7 @@ import type { SyntaxNode, Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
-import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
+import { applyPercentWidthOnImageLoad, IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
 import { imageSizeAttrs, sameImageSize, splitAliasAndSize, type ImageSize } from '../shared/imageSize'
 import { attachResizeHandleToLiveImage } from './imageResize'
 import { sweepHtmlResourceBindings } from './htmlResourceMount'
@@ -306,7 +306,9 @@ export class LiveImageWidget extends WidgetType {
       image.draggable = false
       // #635 尺寸属性必须写在 render 回调内：invalidateAll 会重走本回调，
       // 写在外层会随重取丢失。像素走属性（加载前即可预留空间），百分比
-      // 走内联 style（HTML width 属性不接受百分比）
+      // 走内联 style 占位（HTML width 属性不接受百分比）+ loaded 后按固有
+      // 宽折算 px（CSS % 基准是包含块，非规格 §3.1 的固有宽——放大域会被
+      // max-width:100% 钳制；折算接线随回调重挂，与尺寸属性同位）
       if (this.size !== null) {
         const sizeAttrs = imageSizeAttrs(this.size)
         if (sizeAttrs.width !== null) {
@@ -317,6 +319,7 @@ export class LiveImageWidget extends WidgetType {
         }
         if (sizeAttrs.styleWidth !== null) {
           image.style.width = sizeAttrs.styleWidth
+          applyPercentWidthOnImageLoad(image, sizeAttrs.percentWidth!)
         }
       }
       slot.appendChild(image)

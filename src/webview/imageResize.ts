@@ -18,8 +18,10 @@
 
 import { EditorView } from '@codemirror/view'
 import {
+  IMAGE_SIZE_PERCENT_MAX,
   formatImageSizeSuffix,
   parseImageSizeSuffix,
+  percentToPxWidth,
   sameImageSize,
   type ImageSize,
 } from '../shared/imageSize'
@@ -29,7 +31,7 @@ import { t } from '../shared/i18n'
 export const IMAGE_RESIZE_CLASS_NAMES = {
   /** 手柄本体（pointerdown 的命中面） */
   handle: 'vsidian-image-resize-handle',
-  /** 右下角描边光晕（纯装饰，不接事件） */
+  /** 右下角边线光带光晕（纯装饰，不接事件） */
   glow: 'vsidian-image-resize-glow',
   /** 拖动中的尺寸读数（如 `320 × 180`） */
   readout: 'vsidian-image-resize-readout',
@@ -42,6 +44,9 @@ export const IMAGE_RESIZE_RESIZING_CLASS = 'vsidian-image-resizing'
 export const IMAGE_RESIZE_HANDLE_SIZE = 12
 /** 手柄热区边长（热区大于视觉，便于抓取） */
 export const IMAGE_RESIZE_HIT_SIZE = 20
+/** 手柄热区收出视觉方块的透明边框宽（CSS .vsidian-image-resize-handle 的 border 同源值：
+ *  热区 20 − 2×4 = 视觉 12；CSS 侧注释与本常量互为锚点，改任一侧须同步另一侧） */
+export const IMAGE_RESIZE_HANDLE_BORDER = 4
 /** 最小宽度（规格 §5.4：再小抓不住，与光晕保底同档） */
 export const IMAGE_RESIZE_MIN_WIDTH = 24
 /** 最小高度（只防 0/负值；等比缩放的小图不应被抬高） */
@@ -103,7 +108,14 @@ export function computeResizeTarget(args: ComputeResizeTargetArgs): ImageSize {
   if (args.declared?.unit === 'percent') {
     const natural = finitePositive(args.naturalWidth) ? args.naturalWidth : startWidth
     const percent = round2((desired / natural) * 100)
-    return { width: Math.max(1, percent), height: null, unit: 'percent' }
+    // 写回域守卫（规格 §3.4：1%–1000）：越域改写像素形态——超上限写
+    // `|1050%` 会被解析侧判非法降级为别名（垃圾段 `图.png|1050%|210`
+    // 累积）；下溢钳 1% 会让松手渲染跳离拖动所见（natural 4000 拖 24 →
+    // 1% = 40px）。像素无上限且所见即所得，与拖动视觉一致
+    if (percent < 1 || percent > IMAGE_SIZE_PERCENT_MAX) {
+      return { width: Math.round(desired), height: null, unit: 'px' }
+    }
+    return { width: percent, height: null, unit: 'percent' }
   }
 
   // `|WxH`：按起点宽高的实际比例推进高度。用户手写的 W:H 可能不等于固有
@@ -122,10 +134,11 @@ export function computeResizeTarget(args: ComputeResizeTargetArgs): ImageSize {
 }
 
 /**
- * 光晕延伸距离（规格 §6.1）：`max(24px, min(宽, 高) × 10%)`。
+ * 光晕光带深度（规格 §6.1）：`max(24px, min(宽, 高) × 10%)`。
  *
- * 取 max 不取和——相加会让大图的光晕边界难以预期；基数用短边——宽图若
- * 按宽边算会沿底边铺出一条边光，看起来像「半条边在发光」而非角落光斑。
+ * 取 max 不取和——相加会让大图的光带深度难以预期；基数用短边——宽图若
+ * 按宽边算，982×169 的图沿底边的光带深度会到 98px、与行高失衡，短边让
+ * 光带与图的视觉体量成比例。
  */
 export function glowExtension(frameWidth: number, frameHeight: number): number {
   if (!Number.isFinite(frameWidth) || !Number.isFinite(frameHeight)) {
@@ -170,7 +183,7 @@ export interface SizeSuffixRewrite {
   from: number
   /** inner 内替换区间终点 */
   to: number
-  /** 替换文本（恒以 `|` 开头，与手写形态一致） */
+  /** 替换文本（通常以 `|` 开头；直链单段尺寸整段替换时为纯尺寸文本） */
   text: string
 }
 
@@ -181,9 +194,18 @@ export interface SizeSuffixRewrite {
  * 追加新段。只替换末段而不是整串重建，是为了让别名（可能含 `|`）逐字节
  * 保留；「能不能解析」直接调用 parseImageSizeSuffix，不另写正则——否则
  * `|0`、`|2000%` 在解析侧是别名、在写回侧会被当尺寸替换掉。
+ *
+ * `opts.bareAlt`（Markdown 直链的 alt 段专用）：无 `|` 且**整段**可解析为
+ * 尺寸（`![100](图.png)`）时整段替换、不带竖线——追加会产出
+ * `![100|160]`，旧数字漏进别名位、alt 从空变 100。双链 inner 无管道时
+ * 整段是**目标路径**（`![[100]]` 是文件名），不得整段替换，默认 false。
  */
-export function planSizeSuffixRewrite(inner: string, size: ImageSize): SizeSuffixRewrite {
-  const text = `|${formatImageSizeSuffix(size)}`
+export function planSizeSuffixRewrite(
+  inner: string,
+  size: ImageSize,
+  opts?: { bareAlt?: boolean },
+): SizeSuffixRewrite {
+  const bare = `|${formatImageSizeSuffix(size)}`
   // 尾随空段（`|` 或空白）不承载信息：先退到最后一个有内容的字符，否则
   // 会在 `图.png|` 后追加出 `图.png||160`
   let end = inner.length
@@ -196,28 +218,37 @@ export function planSizeSuffixRewrite(inner: string, size: ImageSize): SizeSuffi
     }
   }
   if (end === 0) {
-    return { inner: text, from: 0, to: inner.length, text }
+    return { inner: bare, from: 0, to: inner.length, text: bare }
   }
   const pipe = inner.lastIndexOf('|', end - 1)
   if (pipe < 0) {
+    // 直链单段尺寸（bareAlt）：整段即尺寸段，整段替换（text 无竖线）
+    if (opts?.bareAlt === true && parseImageSizeSuffix(inner.slice(0, end)) !== null) {
+      const text = bare.slice(1)
+      return { inner: text + inner.slice(end), from: 0, to: end, text }
+    }
     // 无别名无尺寸：插入点取 end（尾随空白之前），不把分隔符塞到空白后
-    return { inner: inner.slice(0, end) + text, from: end, to: end, text }
+    return { inner: inner.slice(0, end) + bare, from: end, to: end, text: bare }
   }
   // 末段是尺寸则连竖线一起替换；否则视为别名，追加新段（别名原样保留）
   if (parseImageSizeSuffix(inner.slice(pipe + 1, end)) === null) {
-    return { inner: inner.slice(0, end) + text, from: end, to: end, text }
+    return { inner: inner.slice(0, end) + bare, from: end, to: end, text: bare }
   }
   return {
-    inner: inner.slice(0, pipe) + text + inner.slice(end),
+    inner: inner.slice(0, pipe) + bare + inner.slice(end),
     from: pipe,
     to: end,
-    text,
+    text: bare,
   }
 }
 
 /** planSizeSuffixRewrite 的便捷壳（返回新 inner） */
-export function replaceSizeSuffix(inner: string, size: ImageSize): string {
-  return planSizeSuffixRewrite(inner, size).inner
+export function replaceSizeSuffix(
+  inner: string,
+  size: ImageSize,
+  opts?: { bareAlt?: boolean },
+): string {
+  return planSizeSuffixRewrite(inner, size, opts).inner
 }
 
 /** 源文中的图片引用区间（[from, to) 为全文坐标，含两端包裹标记） */
@@ -247,7 +278,8 @@ export function rewriteImageSourceSuffix(sourceText: string, size: ImageSize): s
     return null
   }
   const alt = sourceText.slice(2, closeLabel)
-  return `![${replaceSizeSuffix(alt, size)}]${sourceText.slice(closeLabel + 1)}`
+  // 直链 inner 是裸 alt 段：单段尺寸整段替换（bareAlt，见 plan 注释）
+  return `![${replaceSizeSuffix(alt, size, { bareAlt: true })}]${sourceText.slice(closeLabel + 1)}`
 }
 
 /** 拖动起点的尺寸声明来源 */
@@ -256,6 +288,12 @@ export interface ResizeStart {
   declared: ImageSize | null
   /** 源文区间（可选；缺省时提交阶段由调用方自行定位） */
   source?: ImageSourceRange
+  /**
+   * beginDrag 时刻的源文整段快照（B6 滑移守卫）：提交时重读比对，不一致
+   * 即安全放弃——并发编辑滑移后固定区间可能覆盖无关文本。调用方自定义
+   * resolveStart 时缺省（undefined），守卫退位给形态校验兜底。
+   */
+  sourceText?: string | null
 }
 
 /** toast 的最小接口（不引 toast.ts，避免把 toast.css 拖进本模块的依赖图） */
@@ -365,6 +403,9 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
     // 不 stopPropagation：拖动只是视觉操作，不应截断上层（如浮层关闭）
     // 的正常事件流；真正需要吞掉的是 mousedown 的落位（上面已 preventDefault）
     const start = opts.resolveStart()
+    // F5：容器宽在拖动期间不变，beginDrag 解析一次缓存——move 路径的
+    // 端口解析（findFromDOM + getComputedStyle + clientWidth）是纯浪费
+    const containerWidthCache = opts.containerWidth?.() ?? Number.POSITIVE_INFINITY
     drag = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -375,6 +416,7 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
       start,
       startInlineWidth: img.style.width,
       startInlineHeight: img.style.height,
+      containerWidth: containerWidthCache,
       moved: false,
       last: null,
     }
@@ -400,9 +442,12 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
       return
     }
     // 视觉一律折算为像素：百分比声明写 style.width='N%' 会让拖动跟随容器
-    // 而非指针，指针位移与视觉反馈脱节
+    // 而非指针，指针位移与视觉反馈脱节；折算口径与装载链路同源
+    // （percentToPxWidth：naturalWidth × N%，不取整）
     const naturalWidth = img.naturalWidth > 0 ? img.naturalWidth : current.startWidth
-    const visualWidth = size.unit === 'percent' ? (naturalWidth * size.width) / 100 : size.width
+    const visualWidth = size.unit === 'percent'
+      ? (percentToPxWidth(naturalWidth, size.width) ?? size.width)
+      : size.width
     let visualHeight: number
     if (size.height !== null) {
       visualHeight = size.height
@@ -444,7 +489,8 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
         declared: current.startDeclared,
         naturalWidth: img.naturalWidth,
         naturalHeight: img.naturalHeight,
-        containerWidth: opts.containerWidth?.() ?? Number.POSITIVE_INFINITY,
+        // F5：move 只用 beginDrag 的缓存值（容器宽拖动期间不变）
+        containerWidth: current.containerWidth,
       }),
       event,
     )
@@ -532,6 +578,8 @@ interface ActiveDrag {
   start: ResizeStart
   startInlineWidth: string
   startInlineHeight: string
+  /** F5：beginDrag 解析一次的容器宽缓存（move 路径复用） */
+  containerWidth: number
   /** 指针是否真的位移过（纯按下松手不产生空写回） */
   moved: boolean
   /** 最近一次算出的目标尺寸（pointerup 提交它） */
@@ -578,6 +626,12 @@ export interface LiveImageResizeContext {
  * 的一步（规格 §5.3）。调用方提供 `commitInner` 时改走它（嵌入内部 Live
  * 等自有出站通道）。
  */
+/** 直链（`![alt](dest)`，非双链 `![[…]]`）的 inner 是裸 alt 段：单段尺寸
+ *  走整段替换（bareAlt）；双链 inner 无管道时整段是目标路径，不得整段替换 */
+function bareAltOfSource(sourceText: string): { bareAlt?: boolean } {
+  return sourceText.startsWith('![') && !sourceText.startsWith('![[') ? { bareAlt: true } : {}
+}
+
 export function attachResizeHandleToLiveImage(
   frame: HTMLElement,
   ctx: LiveImageResizeContext = {},
@@ -589,15 +643,28 @@ export function attachResizeHandleToLiveImage(
   const read = (target: HTMLElement, span: ImageSourceRange): string | null =>
     ctx.readInner ? ctx.readInner(target, span) : readLiveSource(target, span)
   return attachResizeHandle(frame, {
-    resolveStart: () => ({
-      declared: ctx.resolveDeclared
-        ? ctx.resolveDeclared(frame, range)
-        : declaredSizeOfSource(read(frame, range)),
-      source: range,
-    }),
-    onCommit: (size) => {
+    resolveStart: () => {
+      const sourceText = read(frame, range)
+      return {
+        declared: ctx.resolveDeclared
+          ? ctx.resolveDeclared(frame, range)
+          : declaredSizeOfSource(sourceText),
+        source: range,
+        // B6 滑移快照：commit 时重读比对，不一致即安全放弃（并发编辑会
+        // 让固定区间覆盖到无关文本，写回会破坏正文）
+        sourceText,
+      }
+    },
+    onCommit: (size, start) => {
       const sourceText = read(frame, range)
       if (sourceText === null) {
+        return
+      }
+      // B6：拖动期间源文滑移（区间读出与快照不一致）→ 放弃本次提交。
+      // start.sourceText undefined 表示调用方自定义 resolveStart 未提供
+      // 快照（旧用法不破坏），null 表示 beginDrag 时已读不到——两种都
+      // 交给下方既有形态校验兜底
+      if (start.sourceText !== undefined && sourceText !== start.sourceText) {
         return
       }
       if (ctx.commitInner) {
@@ -606,7 +673,7 @@ export function attachResizeHandleToLiveImage(
         if (inner === null) {
           return
         }
-        ctx.commitInner(frame, range, replaceSizeSuffix(inner, size))
+        ctx.commitInner(frame, range, replaceSizeSuffix(inner, size, bareAltOfSource(sourceText)))
         return
       }
       commitLiveFrameSize(frame, range, size, sourceText)
@@ -708,7 +775,7 @@ function commitLiveFrameSize(
   if (span === null) {
     return // 形态不可识别：不写文档
   }
-  const plan = planSizeSuffixRewrite(span.text, size)
+  const plan = planSizeSuffixRewrite(span.text, size, bareAltOfSource(sourceText))
   if (plan.inner === span.text) {
     return // 改写无变化：不产生空撤销步
   }

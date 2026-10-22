@@ -6,7 +6,7 @@
 // 本层不写文档：任何路径都不得产生 edit.request（由使用方保证，本层只管
 // 资源状态）。
 import { describe, it, expect, vi } from 'vitest'
-import { ImageResourceManager } from '../../src/webview/imageResource'
+import { ImageResourceManager, applyPercentWidthOnImageLoad } from '../../src/webview/imageResource'
 import { t } from '../../src/shared/i18n'
 
 function makeManager() {
@@ -257,6 +257,63 @@ describe('live 视图的自定义渲染回调', () => {
     // detach 释放：内部 img 的 src 同样被清空
     manager.detach(slot)
     expect(inner!.getAttribute('src')).toBeNull()
+  })
+})
+
+// ==== #635 百分比装载后折算 px（CSS % 基准是包含块，规格 §3.1 基准是固有宽）====
+
+describe('applyPercentWidthOnImageLoad：装载后按 naturalWidth × N% 折算', () => {
+  /** jsdom 的 img 无真实装载：naturalWidth/complete 以实例属性覆写模拟 */
+  function loadedImg(naturalWidth: number, complete = true): HTMLImageElement {
+    const el = img()
+    Object.defineProperty(el, 'naturalWidth', { value: naturalWidth, configurable: true })
+    Object.defineProperty(el, 'complete', { value: complete, configurable: true })
+    return el
+  }
+
+  it('未装载（naturalWidth 0）保持 N% 占位；load 后折算覆盖 style.width', () => {
+    const el = img()
+    el.style.width = '50%'
+    applyPercentWidthOnImageLoad(el, 50)
+    expect(el.style.width).toBe('50%') // 未装载：不折算
+    Object.defineProperty(el, 'naturalWidth', { value: 200, configurable: true })
+    el.dispatchEvent(new Event('load'))
+    expect(el.style.width).toBe('100px')
+  })
+
+  it('已装载（complete + naturalWidth>0）注册时立即折算', () => {
+    const el = loadedImg(200)
+    el.style.width = '12.5%'
+    applyPercentWidthOnImageLoad(el, 12.5)
+    expect(el.style.width).toBe('25px')
+  })
+
+  it('重复 load 幂等重算：invalidate 重取后新 load 按新 naturalWidth 再折算', () => {
+    const el = loadedImg(200)
+    applyPercentWidthOnImageLoad(el, 50)
+    el.dispatchEvent(new Event('load'))
+    expect(el.style.width).toBe('100px')
+    // 模拟重取：占位恢复 + 图片换成不同固有尺寸（规格 §10 已知边界）
+    el.style.width = '50%'
+    Object.defineProperty(el, 'naturalWidth', { value: 400, configurable: true })
+    el.dispatchEvent(new Event('load'))
+    expect(el.style.width).toBe('200px')
+  })
+
+  it('error 事件不折算（保持占位，浏览器原生失败呈现）', () => {
+    const el = img() // 未装载注册：不立即折算
+    el.style.width = '50%'
+    applyPercentWidthOnImageLoad(el, 50)
+    Object.defineProperty(el, 'naturalWidth', { value: 200, configurable: true })
+    el.dispatchEvent(new Event('error'))
+    expect(el.style.width).toBe('50%')
+  })
+
+  it('装载后 naturalWidth 仍为 0（伪值）时不写伪像素', () => {
+    const el = loadedImg(0)
+    applyPercentWidthOnImageLoad(el, 50)
+    el.dispatchEvent(new Event('load'))
+    expect(el.style.width).toBe('')
   })
 })
 

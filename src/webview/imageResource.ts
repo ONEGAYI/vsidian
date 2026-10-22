@@ -18,6 +18,7 @@
 // 本层不触碰编辑器状态与文档文本（图片是纯显示资源，零写回契约的使用方
 // 由 syncController 保证；重试点击会阻断冒泡以免触发外层链接导航）。
 import { t } from '../shared/i18n'
+import { IMAGE_SIZE_PERCENT_MAX, percentToPxWidth } from '../shared/imageSize'
 
 /** 槽位状态（stable class/data 入口，样式见 main.css 与选择器映射表） */
 export type ImageSlotState = 'loading' | 'loaded' | 'error'
@@ -53,6 +54,48 @@ export const IMAGE_CLASS_NAMES = {
  *  该形态经宿主分类拦截，见 linkTarget） */
 export function isDirectImageSrc(src: string): boolean {
   return /^https?:\/\//i.test(src)
+}
+
+/**
+ * #635 百分比尺寸声明的 DOM 识别标记（`data-vsidian-img-size-pct`，值为
+ * 百分比数值原文）：markdown 渲染产物在写 `style.width:'N%'` 占位时同时
+ * 挂本标记，装配咽喉（htmlResourceMount）据此识别「需要装载后折算」的
+ * img——用户手写 HTML 的原生百分比 CSS（基准是包含块）不带标记，不进
+ * 折算链路、语义不动。
+ */
+export const IMAGE_SIZE_PCT_DATASET_KEY = 'vsidianImgSizePct'
+
+/** 同一标记的 HTML 属性名形态（Reading 侧拼 HTML 字符串时使用） */
+export const IMAGE_SIZE_PCT_ATTR = 'data-vsidian-img-size-pct'
+
+/**
+ * 百分比尺寸的装载后折算接线（两条渲染血缘共用，折算纯逻辑单一事实源
+ * 是 shared/imageSize 的 percentToPxWidth）：图片 loaded（`complete &&
+ * naturalWidth > 0`）后把 `style.width` 从 `N%` 占位覆盖为固有宽折算的
+ * px（规格 §3.1 基准——CSS `%` 的基准是包含块，裸 `N%` 在放大域被
+ * `max-width:100%` 钳制、独行 block 形态撑满整行）。
+ *
+ * - 注册时已装载（缓存图）立即折算；否则挂 load 监听，loaded 后折算。
+ * - load 监听常驻不 once：invalidateAll／invalidate 重取后新 load 按当时
+ *   naturalWidth 重新折算（幂等）；监听随 img 生命周期回收。
+ * - error／未装载（naturalWidth 为 0 伪值）不动 style——保持占位，失败
+ *   呈现归浏览器原生语义。
+ * - 超出合法域（1–1000）的标记值按污染防御忽略，不折算。
+ */
+export function applyPercentWidthOnImageLoad(img: HTMLImageElement, percent: number): void {
+  if (!Number.isFinite(percent) || percent < 1 || percent > IMAGE_SIZE_PERCENT_MAX) {
+    return
+  }
+  const apply = (): void => {
+    const px = percentToPxWidth(img.naturalWidth, percent)
+    if (px !== null) {
+      img.style.width = `${px}px`
+    }
+  }
+  if (img.complete && img.naturalWidth > 0) {
+    apply()
+  }
+  img.addEventListener('load', apply)
 }
 
 export interface ImageManagerDeps {

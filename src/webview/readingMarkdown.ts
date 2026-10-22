@@ -21,6 +21,7 @@ import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
 import { WIKILINK_CLASS_NAMES, embedAtPosition, parseWikilinkInner } from '../shared/wikilink'
 import { imageSizeAttrs, splitAliasAndSize, type ImageSize } from '../shared/imageSize'
+import { IMAGE_SIZE_PCT_ATTR } from './imageResource'
 import { refEmbedTargetIsImage } from '../shared/refContent'
 import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
@@ -373,7 +374,9 @@ function embedImageHtml(inner: string): string {
 
 /** #635 尺寸 → HTML 属性串（前导空格；空串表示无尺寸）。
  *  像素走 width/height 属性（浏览器加载前即可预留空间，减少布局跳动），
- *  百分比必须走内联 style——HTML width 属性不接受百分比。 */
+ *  百分比必须走内联 style——HTML width 属性不接受百分比；装载前保留
+ *  `N%` 占位，同时挂 data-vsidian-img-size-pct 标记供装配咽喉在 loaded
+ *  后按固有宽折算 px（CSS % 基准是包含块，非规格 §3.1 的固有宽）。 */
 function sizeAttributeHtml(size: ImageSize): string {
   const attrs = imageSizeAttrs(size)
   let out = ''
@@ -384,7 +387,7 @@ function sizeAttributeHtml(size: ImageSize): string {
     out += ` height="${escapeHtml(attrs.height)}"`
   }
   if (attrs.styleWidth !== null) {
-    out += ` style="width:${escapeHtml(attrs.styleWidth)}"`
+    out += ` style="width:${escapeHtml(attrs.styleWidth)}" ${IMAGE_SIZE_PCT_ATTR}="${escapeHtml(String(attrs.percentWidth))}"`
   }
   return out
 }
@@ -464,9 +467,11 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
   const defaultImageRender = md.renderer.rules['image']
   md.renderer.rules['image'] = (tokens, idx, options, env, self) => {
     const token = tokens[idx]!
-    const parts = token.content.split('|')
-    const split = parts.length > 1 ? splitAliasAndSize(parts) : null
-    if (split === null || split.size === null) {
+    // 无条件分段剥离（含单段 `![250](url)` 官方形态——parts.length 守卫会
+    // 挡掉它，Live 侧同口径已支持）；size 为 null 时仍走默认实现分支，
+    // 保持无尺寸行为逐字节一致（下方注释声明的兼容承诺）
+    const split = splitAliasAndSize(token.content.split('|'))
+    if (split.size === null) {
       // 无尺寸：与既有行为逐字节一致（alt 仍由 children 派生，含原后缀）
       if (defaultImageRender) {
         return defaultImageRender(tokens, idx, options, env, self)
@@ -489,7 +494,9 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
       token.attrSet('height', attrs.height)
     }
     if (attrs.styleWidth !== null) {
+      // 占位 % + 折算标记（装载后按固有宽折算 px，见 sizeAttributeHtml 注释）
       token.attrSet('style', `width:${attrs.styleWidth}`)
+      token.attrSet(IMAGE_SIZE_PCT_ATTR, String(attrs.percentWidth))
     }
     return self.renderToken(tokens, idx, options)
   }

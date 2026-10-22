@@ -4471,13 +4471,14 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 
    handle：盒 20×20 为热区，4px 透明边框 + background-clip:padding-box 把
    实际着色收进内层 12×12（视觉 12、热区 20，视觉与热区同元素实现，避免
-   伪元素在 button 上的旧引擎兼容问题）。right/bottom 由 JS 按圆角同心
+   伪元素在 button 上的旧引擎兼容问题）。边框宽 4 的 TS 侧锚点是
+   IMAGE_RESIZE_HANDLE_BORDER（热区 − 2×边框 = 视觉；改任一侧须同步另一侧）。right/bottom 由 JS 按圆角同心
    写入内联值，这里的 0 是布局就绪前的兜底。
-   glow：覆盖整个相框的描边层（border + box-shadow，不占布局），再用
-   circle(var(--vsidian-image-resize-glow) at 100% 100%) 裁成以右下角为
-   圆心的圆形区——光只从角落向外渐淡，不沿整条边铺开。延伸距离由 JS
-   依「max(24px, 短边 10%)」写入自定义属性（几何决策在纯函数里，CSS 只
-   消费）。 */
+   glow：覆盖整个相框的描边层（border + 背景，不占布局），背景为底边与
+   右边两条向内递减的渐变光带（各自从边线起发光、向内渐淡至无，右带叠于
+   底带之上，角落交汇处视觉同亮度），不向外溢出相框、其余两边无光。光带
+   深度由 JS 依「max(24px, 短边 10%)」写入自定义属性（几何决策在纯函数
+   里，CSS 只消费）。 */
 #app .vsidian-image-resize-handle {
   position: absolute;
   right: 0;
@@ -4508,10 +4509,15 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 55%, transparent);
   border-radius: 4px;
-  /* 只沿右下角圆角轮廓发光：blur 取延伸距离，clip 把光收成角落光斑 */
-  box-shadow: 0 0 var(--vsidian-image-resize-glow, 24px)
-    color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 60%, transparent);
-  clip-path: circle(var(--vsidian-image-resize-glow, 24px) at 100% 100%);
+  /* 底边与右边两条向内递减的渐变光带：右带叠于底带之上，角落交汇处视觉
+     同亮度；深度 = 延伸距离变量，不向外溢出相框 */
+  background:
+    linear-gradient(to top,
+      color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 60%, transparent),
+      transparent calc(var(--vsidian-image-resize-glow, 24px))),
+    linear-gradient(to left,
+      color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 60%, transparent),
+      transparent calc(var(--vsidian-image-resize-glow, 24px)));
   pointer-events: none;
   opacity: 0;
   visibility: hidden;

@@ -637,6 +637,34 @@ describe('#635 图片尺寸尾缀：嵌入形态产出尺寸属性', () => {
     expect(pct.getAttribute('width')).toBeNull()
   })
 
+  it('Markdown 直链单段数字：![250](a.png) 得宽 250、alt 空（规格 §2 官方形态，与 Live 一致）', () => {
+    const img = renderToDom(md, '![250](a.png)\n').querySelector('img')!
+    expect(img.getAttribute('width')).toBe('250')
+    expect(img.getAttribute('alt')).toBe('')
+    expect(img.getAttribute('style')).toBeNull()
+  })
+
+  it('Markdown 直链单段非法数字（0）走默认分支：无尺寸属性（降级口径与多段一致）', () => {
+    const img = renderToDom(md, '![0](a.png)\n').querySelector('img')!
+    expect(img.getAttribute('width')).toBeNull()
+    expect(img.getAttribute('alt')).toBe('0')
+  })
+
+  it('百分比产物携带 data-vsidian-img-size-pct 标记（装载后按固有宽折算 px 的识别面）', () => {
+    const embed = renderToDom(md, '![[图.png|50%]]\n').querySelector('img')!
+    expect(embed.getAttribute('style')).toBe('width:50%') // 装载前保留 N% 占位
+    expect(embed.getAttribute('data-vsidian-img-size-pct')).toBe('50')
+    const direct = renderToDom(md, '![图注|25%](a.png)\n').querySelector('img')!
+    expect(direct.getAttribute('data-vsidian-img-size-pct')).toBe('25')
+  })
+
+  it('像素与无尺寸产物不带 pct 标记（不进折算链路）', () => {
+    const px = renderToDom(md, '![[图.png|100]]\n').querySelector('img')!
+    expect(px.getAttribute('data-vsidian-img-size-pct')).toBeNull()
+    const none = renderToDom(md, '![[图.png]]\n').querySelector('img')!
+    expect(none.getAttribute('data-vsidian-img-size-pct')).toBeNull()
+  })
+
   it('无尺寸的直链行为不变（回归：alt 与属性形态照旧）', () => {
     const img = renderToDom(md, '![图注](a.png)\n').querySelector('img')!
     expect(img.getAttribute('alt')).toBe('图注')

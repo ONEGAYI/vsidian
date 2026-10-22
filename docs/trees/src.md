@@ -265,7 +265,7 @@ vsidian/
         ├── htmlToMarkdown.ts             # 富文本HTML到Markdown转换
         ├── imagePaste.ts                 # 图片粘贴拦截适配层（#161）
         ├── imagePopup.ts                 # 图片弹窗全屏浮层单例
-        ├── imageResize.ts                # 图片相框拖动手柄与光晕
+        ├── imageResize.ts                # 图片相框拖动手柄与光带
         ├── imageResource.ts              # 图片资源状态机（#10）
         ├── imageVerifyScheduler.ts       # webview 周期核验定时器调度
         ├── indentEditing.ts              # Tab 通用行缩进处理器（#120）

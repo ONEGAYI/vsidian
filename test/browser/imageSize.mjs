@@ -6,8 +6,12 @@
 //   S2 |WxH 拉伸：渲染宽高恰为 W×H（不保持比例，官方语义）
 //   S3 |N%  百分比：渲染宽 = 固有宽 × N%
 //   S4 非法值降级：渲染宽 = 固有宽，alt 保留原后缀
-//   S5 七个渲染面：Live 独行 / Live 行内混排 / Reading / 表格格内 / 链接内
+//   S5 渲染面：Reading / 表格格内
 //   S6 双链嵌入与 Markdown 直链两种语法同尺寸（同源一致性）
+//   S7 渲染面补口：Live 直链独行 / Live 行内混排像素档 / 链接内（Live 与 Reading）
+//   覆盖边界：嵌入卡与悬停浮层面的尺寸断言在 imageEmbedParity（B 内容链
+//   可驱动）；行内混排的百分比档见 S3d；PDF 导出面为规格前瞻声明
+//   （#618–#628 未实施），当前无可测对象
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, artifactPath, chromium } from './runtime.mjs'
@@ -114,6 +118,24 @@ ${line}` : line
   m = (await measure())[0]
   check('S3 |N% 宽度 = 固有宽 × 50%', near(m.width, 100), `w=${m.width.toFixed(1)} expected=100`)
 
+  // ---- S3b：放大域百分比（101%–1000%）按固有宽折算 ----
+  // CSS 百分比基准是包含块——裸 % 会被 max-width 钳制成整行/容器口径；
+  // 装载后折算 px（固有宽 × N%）才能兑现规格 §3.1 的固有宽基准
+  await load('live', '![[img.png|200%]]')
+  m = (await measure())[0]
+  check('S3b Live 放大 200% = 固有宽 × 2', near(m.width, 400),
+    `w=${m.width.toFixed(1)} expected=400（不是固有 200，也不是容器整行宽）`)
+
+  // ---- S3c：Reading 侧百分比同基准（Reading 血缘经装配咽喉折算） ----
+  await load('reading', '![[img.png|50%]]')
+  m = (await measure())[0]
+  check('S3c Reading 50% = 固有宽 × 0.5', near(m.width, 100), `w=${m.width.toFixed(1)} expected=100`)
+
+  // ---- S3d：行内混排放大（容器口径钳制的主失效形态） ----
+  await load('live', '文字 ![[img.png|200%]] 文字', { prefix: false })
+  m = (await measure())[0]
+  check('S3d Live 行内放大 200% = 固有宽 × 2', near(m.width, 400), `w=${m.width.toFixed(1)} expected=400`)
+
   // ---- S4：非法值降级 ----
   await load('live', '![[img.png|0]]')
   m = (await measure())[0]
@@ -145,6 +167,25 @@ ${line}` : line
   const [direct, embed] = await measure()
   check('S6 直链与嵌入同宽', near(direct.width, 160) && near(embed.width, 160),
     `direct=${direct.width.toFixed(1)} embed=${embed.width.toFixed(1)} expected=160`)
+
+  // ---- S7a：Live 直链独行（此前直链仅 Reading 面 S5b，Live 侧走 alt 串剥离） ----
+  await load('live', '![图注|140](img.png)')
+  m = (await measure())[0]
+  check('S7 Live 直链 |W 生效', near(m.width, 140), `w=${m.width.toFixed(1)} expected=140`)
+  check('S7 Live 直链 alt 剥离尺寸', m.alt === '图注', `alt=${JSON.stringify(m.alt)}`)
+
+  // ---- S7b：Live 行内混排像素档（S3d 已盖行内混排的百分比档，此处补直链像素） ----
+  await load('live', '文字 ![图注|110](img.png) 文字', { prefix: false })
+  m = (await measure())[0]
+  check('S7 Live 行内混排直链 |W 生效', near(m.width, 110), `w=${m.width.toFixed(1)} expected=110`)
+
+  // ---- S7c：链接内图片（仅显示，无手柄——无手柄断言归 imageResize D10） ----
+  await load('live', '[![图注|120](img.png)](目标.md)')
+  m = (await measure())[0]
+  check('S7 链接内图片 |W 生效（Live）', near(m.width, 120), `w=${m.width.toFixed(1)} expected=120`)
+  await load('reading', '[![图注|120](img.png)](目标.md)')
+  m = (await measure())[0]
+  check('S7 链接内图片 |W 生效（Reading）', near(m.width, 120), `w=${m.width.toFixed(1)} expected=120`)
 
   check('无页面错误', errors.length === 0, errors.join('; ') || 'none')
 } finally {

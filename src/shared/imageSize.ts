@@ -116,6 +116,13 @@ export function splitAliasAndSize(parts: readonly string[]): {
  * 像素走 `width`／`height` 属性（浏览器加载前即可预留空间，减少布局
  * 跳动）；百分比必须走内联 `style.width`——HTML `width` 属性不接受百分比。
  *
+ * `percentWidth` 是百分比的**数值**形态，供装载链路在图片 loaded 后按
+ * 固有宽折算像素（CSS `%` 的基准是包含块而非规格 §3.1 的固有宽——裸
+ * `N%` 会让放大域（>100%）被 `max-width:100%` 钳制、独行 block 形态撑满
+ * 整行；折算函数见 `percentToPxWidth`，两条渲染血缘的接线共用它）。
+ * `styleWidth`（`N%` 串）作为装载前的占位保留，loaded 后立即被折算 px
+ * 覆盖（加载前无宽，占位不产生布局跳动）。
+ *
  * 返回形态供两条渲染血缘共用：Reading 侧拼 HTML 字符串，Live 侧写 DOM
  * 属性（`height` 缺省表示等比，不写）。
  */
@@ -123,15 +130,32 @@ export function imageSizeAttrs(size: ImageSize): {
   width: string | null
   height: string | null
   styleWidth: string | null
+  percentWidth: number | null
 } {
   if (size.unit === 'percent') {
-    return { width: null, height: null, styleWidth: `${size.width}%` }
+    return { width: null, height: null, styleWidth: `${size.width}%`, percentWidth: size.width }
   }
   return {
     width: String(size.width),
     height: size.height === null ? null : String(size.height),
     styleWidth: null,
+    percentWidth: null,
   }
+}
+
+/**
+ * 百分比 → 像素宽（规格 §3.1 基准：`naturalWidth × N%`，等比、不取整——
+ * 与拖动 applyVisual 的视觉折算同口径）。两条渲染血缘的装载接线共用
+ * 本函数，不建第二份折算。
+ *
+ * `naturalWidth` 未知（未装载 0 / 非有限值）返回 null：不产出伪像素，
+ * 调用方保持装载前占位（`N%`）或无宽。
+ */
+export function percentToPxWidth(naturalWidth: number, percent: number): number | null {
+  if (!Number.isFinite(naturalWidth) || naturalWidth <= 0 || !Number.isFinite(percent)) {
+    return null
+  }
+  return (naturalWidth * percent) / 100
 }
 
 /** 写回源文用的尾缀文本（拖动结果与既有写法保持同形态，规格 §5.2）。

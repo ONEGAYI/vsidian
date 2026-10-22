@@ -5,6 +5,7 @@ import {
   formatImageSizeSuffix,
   imageSizeAttrs,
   parseImageSizeSuffix,
+  percentToPxWidth,
   sameImageSize,
   splitAliasAndSize,
 } from '../../src/shared/imageSize'
@@ -140,6 +141,7 @@ describe('imageSizeAttrs：像素走属性，百分比走内联样式', () => {
       width: '300',
       height: null,
       styleWidth: null,
+      percentWidth: null,
     })
   })
 
@@ -148,6 +150,7 @@ describe('imageSizeAttrs：像素走属性，百分比走内联样式', () => {
       width: '640',
       height: '480',
       styleWidth: null,
+      percentWidth: null,
     })
   })
 
@@ -156,12 +159,39 @@ describe('imageSizeAttrs：像素走属性，百分比走内联样式', () => {
       width: null,
       height: null,
       styleWidth: '50%',
+      percentWidth: 50,
     })
     expect(imageSizeAttrs({ width: 12.5, height: null, unit: 'percent' })).toEqual({
       width: null,
       height: null,
       styleWidth: '12.5%',
+      percentWidth: 12.5,
     })
+  })
+})
+
+describe('percentToPxWidth：百分比按固有宽折算像素（规格 §3.1 基准）', () => {
+  it('值域矩阵：1% / 12.5% / 100% / 1000% 按固有宽折算', () => {
+    expect(percentToPxWidth(200, 1)).toBe(2)
+    expect(percentToPxWidth(200, 12.5)).toBe(25)
+    expect(percentToPxWidth(200, 100)).toBe(200)
+    expect(percentToPxWidth(200, 1000)).toBe(2000)
+  })
+
+  it('小数结果不取整（与拖动 applyVisual 的视觉折算同口径）', () => {
+    expect(percentToPxWidth(300, 33.333)).toBeCloseTo(99.999, 3)
+  })
+
+  it('naturalWidth 未知（0 / 负 / NaN / Infinity）返回 null，不产出伪像素', () => {
+    expect(percentToPxWidth(0, 50)).toBeNull()
+    expect(percentToPxWidth(-10, 50)).toBeNull()
+    expect(percentToPxWidth(Number.NaN, 50)).toBeNull()
+    expect(percentToPxWidth(Number.POSITIVE_INFINITY, 50)).toBeNull()
+  })
+
+  it('percent 非有限值返回 null（防御：装载链路的标记值可能被外部污染）', () => {
+    expect(percentToPxWidth(200, Number.NaN)).toBeNull()
+    expect(percentToPxWidth(200, Number.POSITIVE_INFINITY)).toBeNull()
   })
 })
 

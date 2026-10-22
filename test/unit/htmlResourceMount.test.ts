@@ -67,6 +67,31 @@ describe('img：src 绑定管理器 + srcset 剥离重解析', () => {
     expect(img.dataset['vsidianImgSrc']).toBe('pic.png')
   })
 
+  // ==== #635 百分比尺寸折算（Reading 血缘：装配咽喉按固有宽折算 px）====
+
+  it('带 data-vsidian-img-size-pct 的 img：装载后折算 px 覆盖占位百分比（基准 = naturalWidth）', () => {
+    const { images } = managerRecorder()
+    const root = document.createElement('div')
+    root.innerHTML = '<img src="pic.png" style="width:50%" data-vsidian-img-size-pct="50">'
+    prepareHtmlResources(root, { images, subscribe: recorderSubscribe().subscribe })
+    const img = root.querySelector('img')!
+    expect(img.style.width).toBe('50%') // 装载前保持占位
+    Object.defineProperty(img, 'naturalWidth', { value: 200, configurable: true })
+    img.dispatchEvent(new Event('load'))
+    expect(img.style.width).toBe('100px')
+  })
+
+  it('无 pct 标记的 img 不折算：用户手写 HTML 的百分比 CSS 语义（包含块基准）不动', () => {
+    const { images } = managerRecorder()
+    const root = document.createElement('div')
+    root.innerHTML = '<img src="pic.png" style="width:50%">'
+    prepareHtmlResources(root, { images, subscribe: recorderSubscribe().subscribe })
+    const img = root.querySelector('img')!
+    Object.defineProperty(img, 'naturalWidth', { value: 200, configurable: true })
+    img.dispatchEvent(new Event('load'))
+    expect(img.style.width).toBe('50%')
+  })
+
   it('img 同时带 src 与 srcset：管理器绑定首个候选（srcset 命中时 src 仅为回退），srcset 先剥离防坏相对候选', () => {
     const { images, srcs } = managerRecorder()
     const sub = recorderSubscribe()

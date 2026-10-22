@@ -9,10 +9,10 @@
 //   D5 一次拖动 = 一笔 edit.request（宿主撤销一步）
 //   D6 Esc 中止不写文档
 //   D7 最小宽 24 保底
-//   D8 光晕延伸距离 = max(24, 短边 × 10%)（计算样式断言）
-//   D9 按住态：相框异色描边 + 光晕消失（互斥）
-//   D10 链接内与表格格内无手柄（沿既有排除矩阵）
-//   D11 拖动开始弹 Shift 提示 toast（已按住 Shift 时跳过）
+//   D8 光晕延伸距离 = max(24, 短边 × 10%)（计算样式断言：保底档 + 短边 10% 档）
+//   D9 按住态：相框异色描边 + 光晕消失（互斥；描边与光晕两侧均有计算样式断言）
+//   D10 表格格内与链接内图片均无手柄（沿既有排除矩阵；链接内先证图片仍渲染）
+//   D11 拖动开始弹 Shift 提示 toast（正反两断言：首拖未按 Shift 弹、已按住不弹）
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, artifactPath, chromium } from './runtime.mjs'
@@ -99,16 +99,37 @@ try {
     `visible=${afterHover?.visible} size=${afterHover?.width}×${afterHover?.height}`)
   check('D1 手柄光标 nwse-resize', afterHover?.cursor === 'nwse-resize', `cursor=${afterHover?.cursor}`)
 
-  // ---- D8：光晕延伸距离 ----
-  const glow = await page.evaluate(() => {
-    const el = document.querySelector('.vsidian-image-resize-glow')
-    if (!el) return null
-    const style = getComputedStyle(el)
-    return { boxShadow: style.boxShadow, opacity: style.opacity, display: style.display }
+  // ---- D8：光晕光带深度（计算样式断言：保底档 + 短边 10% 档） ----
+  const glowState = () => page.evaluate(() => {
+    const frame = document.querySelector('.cm-content .vsidian-image')
+    const glow = document.querySelector('.vsidian-image-resize-glow')
+    if (!frame || !glow) return null
+    const rect = frame.getBoundingClientRect()
+    return {
+      value: Number.parseFloat(getComputedStyle(frame).getPropertyValue('--vsidian-image-resize-glow')),
+      frameW: rect.width,
+      frameH: rect.height,
+      backgroundImage: getComputedStyle(glow).backgroundImage,
+    }
   })
-  check('D8 光晕元素在场且有发光（非透明）',
-    glow !== null && (glow.boxShadow !== 'none' || glow.opacity !== '0'),
-    `boxShadow=${glow?.boxShadow} opacity=${glow?.opacity}`)
+  // 保底档：固有 200×100（短边 100 → 10% = 10 < 24 → 保底 24px）
+  const glowFloor = await glowState()
+  check('D8 小图光晕在场且深度走 24px 保底',
+    glowFloor !== null && Number.isFinite(glowFloor.value) && near(glowFloor.value, 24, 2),
+    `glow=${glowFloor?.value}px bg=${glowFloor?.backgroundImage?.slice(0, 100)}`)
+  // 形态：边线光带为双 linear-gradient（底边 to top + 右边 to left）
+  const bgTop = (glowFloor?.backgroundImage.match(/to top/g) ?? []).length
+  const bgLeft = (glowFloor?.backgroundImage.match(/to left/g) ?? []).length
+  check('D8 光晕形态为双 linear-gradient（底边 to top + 右边 to left）',
+    bgTop >= 1 && bgLeft >= 1, `toTop=${bgTop} toLeft=${bgLeft}`)
+  // 短边 10% 档：|600 → 600×300（短边 300 → 30 > 24），期望按实测相框短边推导
+  await load('![[img.png|600]]')
+  const glowRatio = await glowState()
+  const shortEdge = glowRatio ? Math.min(glowRatio.frameW, glowRatio.frameH) : 0
+  const expectedGlow = Math.max(24, shortEdge * 0.1)
+  check('D8 大图光带深度 = max(24, 短边 × 10%)',
+    glowRatio !== null && shortEdge > 240 && near(glowRatio.value, expectedGlow, 2),
+    `glow=${glowRatio?.value}px 短边=${shortEdge.toFixed(1)} 期望≈${expectedGlow.toFixed(1)}`)
 
   // ---- D2：等比拖动 ----
   await load('![[img.png|100]]')
@@ -127,6 +148,10 @@ try {
       height: img?.getBoundingClientRect().height ?? 0,
       frameOutline: f ? getComputedStyle(f).outlineWidth : '',
       resizing: f?.classList.contains('vsidian-image-resizing') ?? false,
+      glowOpacity: (() => {
+        const g = document.querySelector('.vsidian-image-resize-glow')
+        return g ? getComputedStyle(g).opacity : ''
+      })(),
       readout: document.querySelector('.vsidian-image-resize-readout')?.textContent ?? null,
     }
   })
@@ -135,6 +160,8 @@ try {
     `h=${duringDrag.height.toFixed(1)} expected≈${(duringDrag.width / 2).toFixed(1)}`)
   check('D9 按住时相框异色描边', duringDrag.resizing && duringDrag.frameOutline !== '0px',
     `resizing=${duringDrag.resizing} outline=${duringDrag.frameOutline}`)
+  check('D9 拖动中光晕消失（互斥）', Number.parseFloat(duringDrag.glowOpacity) === 0,
+    `glowOpacity=${duringDrag.glowOpacity}`)
   check('D2 拖动中有尺寸读数', duringDrag.readout !== null && /\d+\s*×\s*\d+/.test(duringDrag.readout),
     `readout=${JSON.stringify(duringDrag.readout)}`)
   await page.mouse.up()
@@ -145,8 +172,6 @@ try {
   check('D2 等比写回 |W（无 x 高）', /^\|\d+$/.test(String(written).replace(/^.*\|/, '|')),
     `written=${JSON.stringify(written)}`)
 
-  // ---- D3：Shift 自由拖动 ----
-  await load('![[img.png|100]]')
   // ---- D3：Shift 自由拖动 ----
   // 每轮先清出站记录：edit.request 是累积数组，不清会把上一轮的写回当本轮
   await page.evaluate(() => window.clearSentImage())
@@ -165,6 +190,25 @@ try {
   const shiftWritten = String(shiftEdits[0]?.changes?.[0]?.text ?? '')
   check('D3 Shift 拖动写回 |WxH', /^\|\d+x\d+$/.test(shiftWritten.replace(/^.*\|/, '|')),
     `written=${JSON.stringify(shiftWritten)}`)
+
+  // ---- D4：原 |WxH 等比拖动保留两轴 ----
+  await page.evaluate(() => window.clearSentImage())
+  await load('![[img.png|100x80]]')
+  await (await page.$('.cm-content .vsidian-image'))?.hover()
+  await page.waitForTimeout(100)
+  const boxD4 = await (await page.$('.vsidian-image-resize-handle'))?.boundingBox()
+  if (!boxD4) throw new Error('D4 手柄不可定位')
+  await page.mouse.move(boxD4.x + boxD4.width / 2, boxD4.y + boxD4.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(boxD4.x + boxD4.width / 2 + 60, boxD4.y + boxD4.height / 2 + 30, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForTimeout(200)
+  const d4Edits = await editRequests()
+  const d4Written = String(d4Edits[0]?.changes?.[0]?.text ?? '')
+  const d4Match = /^\|(\d+)x(\d+)$/.exec(d4Written.replace(/^.*\|/, '|'))
+  check('D4 原 |WxH 等比写回仍 |WxH（两轴按比例）',
+    d4Match !== null && Number(d4Match[1]) === 160 && Math.abs(Number(d4Match[2]) - 128) <= 1,
+    `written=${JSON.stringify(d4Written)}（起点 100x80 等比 ×1.6 → 期望 |160x128）`)
 
   // ---- D6：Esc 中止 ----
   await page.evaluate(() => window.clearSentImage?.())
@@ -192,6 +236,15 @@ try {
   await load('| 图 | 说明 |\n| --- | --- |\n| ![[img.png]] | 格内 |')
   const tableHandle = await handleInfo()
   check('D10 表格格内无拖动手柄', tableHandle === null, `handle=${JSON.stringify(tableHandle)}`)
+  // 链接内图片：先证图片仍渲染（防「未渲染故无手柄」的误胜），再断言无手柄
+  await load('[![图注|100](img.png)](目标.md)')
+  const linkRendered = await page.evaluate(() => {
+    const img = document.querySelector('.cm-content .vsidian-image img')
+    return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0
+  })
+  check('D10 链接内图片仍渲染（非空判定）', linkRendered, `rendered=${linkRendered}`)
+  const linkHandle = await handleInfo()
+  check('D10 链接内图片无拖动手柄', linkHandle === null, `handle=${JSON.stringify(linkHandle)}`)
 
   // ---- D11：Shift 提示 toast ----
   await load('![[img.png|100]]')
@@ -210,6 +263,27 @@ try {
   check('D11 提示为 neutral 档（能力说明非警示）', toastText?.severity === 'neutral',
     `severity=${toastText?.severity}`)
   await page.mouse.up()
+
+  // 反向：首拖前已按住 Shift 的人不需要被告知（规格 §7.2）
+  await page.evaluate(() => {
+    document.querySelectorAll('.vsidian-toast').forEach((el) => el.remove())
+  })
+  await load('![[img.png|100]]')
+  await page.evaluate(() => {
+    document.querySelectorAll('.vsidian-toast').forEach((el) => el.remove())
+  })
+  await (await page.$('.cm-content .vsidian-image'))?.hover()
+  await page.waitForTimeout(100)
+  const boxD11 = await (await page.$('.vsidian-image-resize-handle'))?.boundingBox()
+  if (!boxD11) throw new Error('D11 反向场景手柄不可定位')
+  await page.keyboard.down('Shift')
+  await page.mouse.move(boxD11.x + boxD11.width / 2, boxD11.y + boxD11.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(boxD11.x + boxD11.width / 2 + 10, boxD11.y + boxD11.height / 2 + 5, { steps: 3 })
+  const shiftToastShown = await page.evaluate(() => document.querySelector('.vsidian-toast') !== null)
+  check('D11 首拖已按 Shift 不弹提示', !shiftToastShown, `toast在场=${shiftToastShown}`)
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
 
   check('无页面错误', errors.length === 0, errors.join('; ') || 'none')
 } finally {
