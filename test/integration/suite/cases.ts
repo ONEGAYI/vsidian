@@ -1497,6 +1497,7 @@ async function waitViewState(
         mermaid: paint?.['mermaid'],
         graphic: paint?.['graphic'],
         html: paint?.['html'],
+        docStyle: paint?.['docStyle'],
         // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
         readingBlockCount: s['readingBlockCount'],
         readingMountedBlocks: s['readingMountedBlocks'],
@@ -5390,6 +5391,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const uri = wsUri('table13.md').toString()
     const doc = await vscode.workspace.openTextDocument(wsUri('table13.md'))
     const original = TABLE13_DOC_TEXT
+    const beforePromote = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
 
     // 删表头：首个数据行升为新表头，分隔行随移到升格行之后、对齐保留
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
@@ -5401,7 +5403,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '| 名字 | 数量 |\n| --- | :---: |\n| 苹果 | 3 |\n',
       '| 苹果 | 3 |\n| --- | :---: |\n',
     )
-    await poll('删表头升格', () => (doc.getText() === promoted ? true : undefined))
+    await poll('删表头升格', async () => {
+      if (doc.getText() !== promoted) return undefined
+      // 文档事件可先于 applyEdit 完成；先结算上一操作，再采下一操作的基线。
+      const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return state.appliedEdits > beforePromote.appliedEdits ? true : undefined
+    })
 
     // 分隔行单独删除：拒绝（结构行保护，零写回）
     const beforeReject = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
@@ -15261,7 +15268,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'embed.test.save', inner: 'p204-编辑目标',
     })
-    await poll('目标保存落盘', async () => (await readDisk('p204-编辑目标.md')).includes('【嵌入编辑】') ? true : undefined)
+    // 文件已写入时，宿主的 dirty 清零通知仍可能在途；两者同到才完成保存。
+    await poll('目标保存落盘', async () =>
+      (await readDisk('p204-编辑目标.md')).includes('【嵌入编辑】') && !bDoc.isDirty ? true : undefined)
     assert(!bDoc.isDirty, '保存后目标干净')
     await waitViewState('p204-编辑嵌入.md', (v) =>
       (v.readingEmbed ?? []).every((c) => c.inner !== 'p204-编辑目标' || c.liveDirty !== true)
@@ -19452,7 +19461,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // Reading：产物在场 + 标签直中 + 排除面
       await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri(file))
       const reading = await waitViewState(file, (v) =>
-        v.viewMode === 'reading' && v.paint?.docStyle !== undefined && v.paint.docStyle.mainRules > 0, 0, 30000)
+        v.viewMode === 'reading' && v.paint?.docStyle !== undefined && v.paint.docStyle.mainRules > 0 &&
+        typeof v.paint.docStyle.readingParagraphColor === 'string' &&
+        typeof v.paint.docStyle.readingHeadingColor === 'string' &&
+        typeof v.paint.docStyle.toolbarColor === 'string', 0, 30000)
       const probe = reading.paint!.docStyle!
       assert(probe.scopes.includes('doc'), `主文档产物在场（实际键集 ${JSON.stringify(probe.scopes)}）`)
       assert(probe.readingParagraphColor === 'rgb(0, 0, 205)',

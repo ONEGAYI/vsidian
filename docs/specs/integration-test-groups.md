@@ -571,3 +571,25 @@ CI38684976209候选802d582a的原Mermaid切标签例62144ms超时，光标已为
 永久viewMode契约固定隐藏前JSON、覆盖Live/reading恢复及同帧三次滚动只读取一次最新中心。viewToggle夹具以销毁前缓存重建，销毁中补发不进入新实例；明暗主题继续验证两模式位置，新增第二次滚动不重放旧中心的场景。真实API/真实Mermaid修正后0/300ms对照均恢复4个围栏到既有终态、光标2029和中心行116。
 
 历史CI缺少父端缓存与逐帧滚动记录，不证明本机制是该轮唯一原因；也不承诺同一JS任务发送后立刻销毁的异步消息必然送达。本项按已复现保存缺口初步修复，条目12的弹窗SVG等待另查，人工验收独立。证据为out/test/mermaid24-viewport-contract-red.log、frame-contract-red.log、viewtoggle-browser-red.log、iframe-viewport-real-baseline.log、iframe-viewport-real-keep-observer.log、iframe-real-frame-green.log及frame前缀回归日志；中间只保存像素值的失败另存，不充当最终验证。
+
+## #552：等待缺口与符号套件开销加固（2026-10-22）
+
+本轮以 `f7763956` 为基线，在 Windows / Node 24.20.0 / 锁定 Chromium / VSCode 1.82.3 开发态验证。生产代码、原断言、等待预算及 core/sensitive 名单保持原有语义；修订集中在测试驱动与采样条件。
+
+| 对应记录 | 已验证的缺口与修订 |
+| --- | --- |
+| 条目35，symbolInput | 每场景重新装载编辑器脚本的累计开销可超过 120 秒。改为复用页面、脚本和 CDP 会话，每场景销毁重建生产控制器并清空消息与帧样本；新增设置和未确认编辑的隔离回归 |
+| 条目26，IME 热切换 | 异步出站可能晚于唯一一次 ack，后续无人确认新请求。改为在原等待周期内持续履行宿主回执职责，落定后仍验证扩展摘除和文本完整 |
+| 条目33，#13 零写回 | 新表头可早于 applyEdit 完成及计数结算到达。等上一操作计数推进后再取得拒绝操作基线，保留原零写回断言 |
+| PR #603 后的 #281 保存失败 | 落盘不代表 dirty 已清零。保存等待同时覆盖新内容落盘和目标干净，再验证圆点消失与父文档不变 |
+| PR #614 后的 #569 探针 null | 样式产物在场不代表 Reading 标签已挂载。等三个计算色取得字符串，错误颜色仍交原断言；超时摘要补 docStyle 末帧 |
+
+**红绿证据**：执行真实集成采样回调，旧条件误放行 dirty 文档、未挂载标签及未结算计数，修订后拒绝这些快照。IME 探针暂缓组合结束的零延迟任务，首次 ack 为 null；释放任务后旧等待失败，持续回执后原三场景通过。探针使用 500ms 快速失败窗口，正式用例仍为原 30 秒预算。
+
+symbolInput 原 76 场景本机基线为 37.024s；复用夹具并新增隔离场景后，最终三套件并发中的 77 场景为 6.33s。CDP 六倍 CPU 减速对照中，旧入口 120.701s 超时，复用入口 24.600s 通过。减速对照证明开销改进，不等同于复刻 GitHub runner，也不证明所有历史超时均由同一原因造成。
+
+**本地验证**：28 项等待、诊断及分组契约通过；另 88 项 CSS 导入与同步控制器测试通过。最终 browser 的 symbolInput / addonHotSwitch / wikilinkSuggest 三套件通过。真宿主先跑 #13/#246/#281/#569/#570 五项，再补 #381 三项；计数修订后单独复验 #13 通过，类型检查通过。首次启动因工作树缺 .vscode-test 目录而未进入用例；中间一次 #13 因新增变量误放相邻用例失败。两者均已修正，失败日志分别保留。
+
+**未定因部分**：条目25 的 88 项单测及 #246/#381 原等待本机通过，只作为负样本；条目12仍按既定安排等待新证据。PR #606 的跨功能八项超时未取得新的 runner/文件事件证据，不作同因判断。GitHub 台账未勾销，Linux CI 与人工验收未由本机检查替代。
+
+日志在工作树 `out/test/552/`：readiness-red-report.json、readiness-green.log、table-counter-red-confirmed.log、final-unit.log、addon-red.log / addon-green.log、symbol-slow-red/ / symbol-slow-reuse/、browser-final.log、integration-targets-host.log、integration-381-host.log、integration-table-fixed.log、typecheck-final.log。最终 browser 完整报告为 `out/test/browser-runs/run-KouZ4g/`。失败与通过记录分别保留，不因阶段切换重跑全量。

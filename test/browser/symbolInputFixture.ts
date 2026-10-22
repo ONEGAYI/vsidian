@@ -9,17 +9,7 @@ import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
 
 const hostMessages: unknown[] = []
-const controller = new WebviewSyncController({
-  postMessage(message) {
-    hostMessages.push(message)
-    ;(window as unknown as Record<string, unknown>)['__lastHostMessage'] = message
-  },
-  getState() {
-    return undefined
-  },
-  setState() {},
-})
-controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+let controller: WebviewSyncController
 // #597 渲染帧采样探针（paint 中间态钉子）：每个渲染帧（rAF 回调时点）
 // 采样用户可见文本（.cm-content 的 textContent——视觉层断言对象，非
 // state.doc 存在性）。契约：原始字符与兜底闭合在同一事件循环任务内
@@ -36,6 +26,20 @@ const sampleFrame = () => {
 requestAnimationFrame(sampleFrame)
 Object.assign(window, {
   initDoc(text: string) {
+    // 每个场景重建生产控制器：设置、CM 状态和在途编辑都不跨场景保留。
+    // 页面与已装载脚本可复用，避免逐场景重新解析整个编辑器产物。
+    controller?.dispose()
+    hostMessages.length = 0
+    frameSamples.length = 0
+    controller = new WebviewSyncController({
+      postMessage(message) {
+        hostMessages.push(message)
+        ;(window as unknown as Record<string, unknown>)['__lastHostMessage'] = message
+      },
+      getState() { return undefined },
+      setState() {},
+    })
+    controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
     controller.handleHostMessage({ kind: 'init', sessionId: 'symbol-input',
       docUri: 'file:///symbol.md', version: 1, text })
   },
