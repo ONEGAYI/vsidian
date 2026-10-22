@@ -6,6 +6,116 @@ import * as vscode from 'vscode'
 
 export const SENSITIVE_CASES = [
   {
+    name: 'PDF 导出（#621 T01）：固定输入、真实浏览器生成与本机保存（多页中文 PDF）',
+    issue: '#621',
+    reason: 'CI runner 上 spawn Edge/Chrome 冷启动与打印时长波动未建立稳定基线；本地全量持续跑，观察足够 run 后按既有退出条件回流 core。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」',
+  },
+  {
+    name: 'PDF 导出（#622 T02）：完整装配、嵌入展开、缺资源选择与绘制证据',
+    issue: '#622',
+    reason: 'T01 同族真实浏览器链路（spawn/打印时长 + 127.0.0.1 资源服务时序），CI 波动基线未建立；本地全量持续跑，回流条件与 T01 同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T02 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#622 T02）：生成中取消释放与重复执行健康',
+    issue: '#622',
+    reason: '同族取消链路依赖真实浏览器进程生命周期，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T02 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#624 T04）：批量执行、相对结构、同名更名与已打开未保存内容（真浏览器）',
+    issue: '#624',
+    reason: 'T01/T02 同族真实浏览器链路（每文件一次 spawn/打印，批内多次叠加时长波动），CI 波动基线未建立；本地全量持续跑，回流条件与 T01 同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T04 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#624 T04）：skip 保护已有文件与单项失败继续（真浏览器）',
+    issue: '#624',
+    reason: '同族批量真实浏览器链路，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T04 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#624 T04）：缺资源 resume-all 与中途取消保留已完成（真浏览器）',
+    issue: '#624',
+    reason: '同族批量真实浏览器链路（含 awaiting-resources 交互时序），CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T04 沿先例）',
+  },
+
+  {
+    name: 'PDF 导出（#623 T03）：多选区严格切片、顺序与资源同源的真浏览器产物',
+    issue: '#623',
+    reason: 'T01/T02 同族真实浏览器链路（spawn/打印时长 + 127.0.0.1 资源服务时序），CI 波动基线未建立；本地全量持续跑，回流条件与 T01 同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T03 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#623 T03）：选区导出取消释放与选区/源文不变式',
+    issue: '#623',
+    reason: '同族取消链路依赖真实浏览器进程生命周期，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T03 沿先例）',
+  },
+
+  {
+    name: 'PDF 导出（#625 T05）：横纵向/自定义纸张几何、页眉页脚与页码产物断言',
+    issue: '#625',
+    reason: 'T01/T02 同族真实浏览器链路（spawn/打印时长 + 书签后处理多一轮 target 定位），CI 波动基线未建立；本地全量持续跑，回流条件同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#625 T05）：标题书签结构、重复标题页码与中文标题',
+    issue: '#625',
+    reason: '书签链路含浏览器侧 pdfjs 定位 target 与 pdf-lib 后处理，CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#625 T05）：书签失败不给伪造（无标题文档零 outline）',
+    issue: '#625',
+    reason: '同族真实浏览器链路；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#625 T05）：持久默认参数回显（自有设置页键 → 模态预选）',
+    issue: '#625',
+    reason: '同族真实浏览器链路（含固定输入捕获与浏览器发现前置）；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T05 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#626 T06）：三篇合并、分篇书签与页码总页数（真浏览器）',
+    issue: '#626',
+    reason: 'T01–T05 同族真实浏览器链路（单会话多篇装配 + 书签按篇定位后处理），CI 波动基线未建立；本地全量持续跑，回流条件同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T06 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#626 T06）：每篇另起一页关闭连续排版与样式不跨篇（真浏览器）',
+    issue: '#626',
+    reason: '同族真实浏览器链路（连续排版形态 + 文档样式按篇归属的字号几何断言）；CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T06 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#626 T06）：合并失败/取消无伪成功与缺资源继续（真浏览器）',
+    issue: '#626',
+    reason: '同族取消/失败链路依赖真实浏览器进程生命周期与 awaiting-resources 交互时序；CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T06 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#627 T07）：单文档预览、过期刷新与导出同源（真浏览器）',
+    issue: '#627',
+    reason: 'T01–T06 同族真实浏览器链路（预览各轮 spawn/打印 + 指纹核对复用路径），CI 波动基线未建立；本地全量持续跑，回流条件同节。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#627 T07）：批量清单点击选中与自动加载预览（真浏览器）',
+    issue: '#627',
+    reason: '同族真实浏览器链路（长文档多页装配 + 有界挂载窗口 + 点击即生成），CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
+  },
+  {
+    name: 'PDF 导出（#627 T07）：合并预览书签观测与关闭后迟到丢弃（真浏览器）',
+    issue: '#627',
+    reason: '同族真实浏览器链路（合并预览装配 + 在途关闭/重开的迟到回包窗口），CI 波动基线未建立；本地全量持续跑。',
+    evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
+  },
+  {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     issue: '#293 / #129',
     reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',

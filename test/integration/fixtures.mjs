@@ -31,6 +31,34 @@ const SYMBOL_TAB_CRLF_DOC = '**CRLF 越界**段\r\n正文行\r\n'
 const CONFLICT_DOC = '第一段原文甲\n第二段原文乙\n'
 const SPLIT_CONFLICT_DOC = '分裂测试行一\n分裂测试行二\n'
 const HEADING_DOC = '# 顶部一级标题\n普通段落第一行内容\n普通段落第二行内容\n## 中部二级标题\n另一段普通内容结尾\n'
+// T01（#621）PDF 导出样本：中文标题/列表/表格与多页正文（首中末段与
+// 固定输入断言载体；尾部 ASCII 标记规避 ToUnicode 部首码位归一问题）
+const PDF_EXPORT_DOC = (() => {
+  const lines = [
+    '# 中文导出样例标题',
+    '',
+    '首段：PDF 导出链路验证文档，包含标题、列表、表格与多页正文。',
+    '',
+    '## 特性清单',
+    '',
+    '- 列表项甲：中文标题渲染',
+    '- 列表项乙：表格与列表混排',
+    '- 列表项丙：多页分页正确性',
+    '',
+    '## 对照表格',
+    '',
+    '| 项目 | 值 |',
+    '| --- | --- |',
+    '| 纸张 | A4 |',
+    '| 引擎 | 已安装浏览器 |',
+    '',
+  ]
+  for (let i = 1; i <= 60; i++) {
+    lines.push(`第 ${i} 段：正文填充行，用于产生多页分页——导出验收要求首、中、末段均有真实正文。`, '')
+  }
+  lines.push('末段标记：PDF-EXPORT-TAIL-MARKER，分页后应完整保留。')
+  return lines.join('\n')
+})()
 // #423 阅读宽松换行样例：首段三行两处单换行（严格态拼回同段、宽松态逐行）；
 // 次段行尾双空格显式硬换行（两种形态恒 1 br，显式标记不随设置变化的对照）
 const READING_BREAKS_DOC =
@@ -467,6 +495,129 @@ const REFRESH_GREEN_PNG_BASE64 =
 const REFRESH_BLUE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC'
 export const LARGE_DOC_LINES = 100_000
+
+// T02（#622）PDF 导出完整阅读装配样本：长文档（首中末段 + 嵌入目标 +
+// 媒体嵌入 + 本地/缺失图片 + 公式 + mermaid + 原生 HTML 媒体降级）。
+// 标记用 ASCII（规避 ToUnicode 部首码位归一问题——V01 §7）。
+const PDF_EXPORT_T02_DOC = (() => {
+  const lines = [
+    '# T02 完整装配样例',
+    '',
+    '首段标记：PDF-T02-HEAD-MARKER。',
+    '',
+    '![[pdf-export-t02-embed.md]]',
+    '',
+    // #010 回归钉子：带标题锚点、块锚点与别名的嵌入必须仍解析到同一
+    // Markdown 目标（完整 inner 不能被当文件路径——那会让合法语法退化成
+    // not-found）；自引用嵌入也须命中（path 为空 = 来源文档自身）
+    '![[pdf-export-t02-embed.md#嵌入目标标题]]',
+    '',
+    '![[pdf-export-t02-embed.md|别名显示]]',
+    '',
+    '![[#T02 完整装配样例]]',
+    '',
+    '![[pdf-export-t02-clip.mp4]]',
+    '',
+    // PDF 嵌入目标：导出页按身份降级为说明 + 链接，不得误报读取失败
+    // （PDF 目标不进文本解码通道——该分派修复的集成钉子）
+    '![[pdf-export-t02-target.pdf]]',
+    '',
+    // R11 回归钉子：两端带空白的合法 inner 也必须先归一再判身份——旧实现
+    // 只在含 #/| 时解析，尾随空格会混进扩展名，媒体/PDF 退回文本链并误报
+    '![[ pdf-export-t02-clip.mp4 ]]',
+    '',
+    '![[ pdf-export-t02-target.pdf ]]',
+    '',
+    '![本地图](assets/pdf-t02-img.png)',
+    '',
+    '![缺失图](assets/pdf-t02-missing.png)',
+    '',
+    '块级公式：',
+    '',
+    '$$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$',
+    '',
+    '```mermaid',
+    'graph TD; Start-->Check; Check-->Done;',
+    '```',
+    '',
+    '<video src="https://example.com/t02-clip.mp4"></video>',
+    '',
+  ]
+  for (let i = 1; i <= 40; i++) {
+    lines.push(`填充段 ${i}：T02 长文档正文行，产生多页分页。`, '')
+  }
+  lines.push('末段标记：PDF-T02-TAIL-MARKER。')
+  return lines.join('\n')
+})()
+// T02 嵌入目标：标题 + 正文（用例注入未保存修改后断言进入 PDF）
+const PDF_EXPORT_T02_EMBED_DOC = [
+  '## 嵌入目标标题',
+  '',
+  '嵌入目标预置正文（EMBED-BASE-TEXT）。',
+  '',
+].join('\n')
+
+// T03（#623）选区导出样本：选区边界标记矩阵（半表格行/围栏首行/列表/
+// 图片段），T03-OUTSIDE-* 为选区外对照（断言不进入 PDF）。标记用 ASCII
+//（V01 §7 部首码位归一先例）。
+const PDF_EXPORT_T03_DOC = [
+  '# T03 选区导出样例',
+  '',
+  'T03-OUTSIDE-HEAD 选区外首段（不应进入 PDF）。',
+  '',
+  '| T3A | T3B |',
+  '| --- | --- |',
+  '| T3-CELL-A | T3-CELL-B |',
+  '| T3-CELL-C | T3-CELL-D |',
+  '',
+  '- T3-LIST-ALPHA',
+  '',
+  '- T3-LIST-BETA',
+  '',
+  '```js',
+  'T3-FENCE-FIRST = 1',
+  'T3-FENCE-SECOND = 2',
+  '```',
+  '',
+  'T03-IMG 段：![选区图](assets/pdf-t03-img.png)',
+  '',
+  'T03-OUTSIDE-TAIL 选区外尾段（不应进入 PDF）。',
+  '',
+].join('\n')
+
+// T05（#625）页眉页脚/页码/标题书签样本：多页 + 中文标题 + 重复标题
+//（不同页两次出现——游标推进断言面）+ 深层嵌套。标题正文刻意含
+//「页」等部首敏感字（ToUnicode 归一路径的真实覆盖）。
+const PDF_EXPORT_T05_DOC = (() => {
+  const lines = [
+    '# T05 根标题：页面与书签',
+    '',
+    '首段说明：页眉页脚、页码与标题书签集成样本（PDF-T05-HEAD-MARKER）。',
+    '',
+  ]
+  for (let i = 1; i <= 22; i++) {
+    lines.push(`上填充段 ${i}：T05 长文档正文行，用于产生多页分页。`, '')
+  }
+  lines.push('## 重复小节标题', '')
+  lines.push('第一次重复小节正文（PDF-T05-DUP-FIRST）。', '')
+  for (let i = 23; i <= 44; i++) {
+    lines.push(`下填充段 ${i}：T05 长文档正文行，用于产生多页分页。`, '')
+  }
+  lines.push('## 重复小节标题', '')
+  lines.push('第二次重复小节正文（PDF-T05-DUP-SECOND）。', '')
+  lines.push('### 深层三级小节', '')
+  lines.push('三级小节正文。', '')
+  lines.push('末段标记：PDF-T05-TAIL-MARKER。')
+  return lines.join('\n')
+})()
+
+// T05 书签失败面样本：无标题文档（书签开启时如实「无标题不加书签」）
+const PDF_EXPORT_T05_NOHEADINGS_DOC = [
+  '无标题文档首段：书签开启时不应产生伪造书签（PDF-T05-NOHEAD-BODY）。',
+  '',
+  '无标题文档次段正文。',
+  '',
+].join('\n')
 
 // #133 界面域样式契约样例：公式（行内/块级/错误）、mermaid（有效/无效）、
 // 代码卡片（js keyword token）、大纲（嵌套标题 + 行内标记）、frontmatter
@@ -1033,6 +1184,125 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'conflict.md'), CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'splitconflict.md'), SPLIT_CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'heading.md'), HEADING_DOC, 'utf8')
+  // T01（#621）PDF 导出样本
+  writeFileSync(path.join(wsDir, 'pdf-export.md'), PDF_EXPORT_DOC, 'utf8')
+  // T02（#622）：完整阅读装配样本 + 嵌入目标 + 媒体占位（媒体身份只需
+  // 文件存在与扩展名；嵌入目标正文由用例注入未保存修改）
+  writeFileSync(path.join(wsDir, 'pdf-export-t02.md'), PDF_EXPORT_T02_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-export-t02-embed.md'), PDF_EXPORT_T02_EMBED_DOC, 'utf8')
+  // T05（#625）页眉页脚/页码/书签样本（书签结构 + 重复标题 + 失败面）
+  writeFileSync(path.join(wsDir, 'pdf-export-t05.md'), PDF_EXPORT_T05_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-export-t05-noheadings.md'), PDF_EXPORT_T05_NOHEADINGS_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-export-t02-clip.mp4'), Buffer.from('00 00 00 18 mp4-placeholder'), 'utf8')
+  // PDF 嵌入目标：只需存在性（导出页不 fetch 源 PDF），最小合法 PDF 头即可
+  writeFileSync(path.join(wsDir, 'pdf-export-t02-target.pdf'), Buffer.from('%PDF-1.4\n%%EOF\n'), 'utf8')
+  mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'assets', 'pdf-t02-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // T03（#623）选区导出样本 + 选区内相对图片（资源以原文档身份解析断言）
+  writeFileSync(path.join(wsDir, 'pdf-export-t03.md'), PDF_EXPORT_T03_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'pdf-t03-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // T04（#624）批量导出样本：两个目录根（各含 a.md 制造批内同名冲突）、
+  // 嵌套子目录（相对结构断言）、非 Markdown 混入（收集排除断言）。
+  // 缺失图（missing.md 引用）供缺资源选择/取消链路。
+  mkdirSync(path.join(wsDir, 'pdf-batch', 'dir1', 'sub'), { recursive: true })
+  mkdirSync(path.join(wsDir, 'pdf-batch', 'dir2'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'a.md'), [
+    '# 批量样本 dir1 a',
+    '',
+    'PDF-T04-DIR1-A 标记正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'sub', 'b.md'), [
+    '# 批量样本 dir1 sub b',
+    '',
+    'PDF-T04-DIR1-SUB-B 标记正文（嵌套子目录相对结构）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir2', 'a.md'), [
+    '# 批量样本 dir2 a',
+    '',
+    'PDF-T04-DIR2-A 标记正文（与 dir1 同名）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'note.txt'), 'plain text payload', 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir1', 'pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'pdf-batch', 'dir2', 'missing.md'), [
+    '# 批量样本缺失图',
+    '',
+    '![缺失图](../assets/batch-missing.png)',
+    '',
+    'PDF-T04-MISSING 标记正文。',
+    '',
+  ].join('\n'), 'utf8')
+  // T06（#626）合并导出样本：三篇含中文标题、图片、**不同文档样式**与
+  // **跨篇重复标题**（「重复小节标题」——按篇游标重置的断言载体）；
+  // missing.md 缺图供缺资源继续/取消链路；样式差异用 p 字号（文本提取
+  // 的字号几何可断言；不用 h1——内置标题规则带 #app ID 特异性，文档样式
+  // 的 :where 前缀按 T04 b2 语义不与之竞争字号）：alpha 30px / beta 9px /
+  // gamma 无样式对照）
+  mkdirSync(path.join(wsDir, 'pdf-merge'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'alpha.md'), [
+    '<style>',
+    'p { font-size: 30px; }',
+    '</style>',
+    '',
+    '# 甲篇总览：合并导出',
+    '',
+    '甲篇正文 PDF-T06-ALPHA。',
+    '',
+    '![甲篇配图](../assets/pdf-merge-img.png)',
+    '',
+    '## 重复小节标题',
+    '',
+    '甲篇的重复小节正文 PDF-T06-ALPHA-DUP。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'beta.md'), [
+    '<style>',
+    'p { font-size: 9px; }',
+    '</style>',
+    '',
+    '# 乙篇速览',
+    '',
+    '乙篇正文 PDF-T06-BETA。',
+    '',
+    '![乙篇配图](../assets/pdf-merge-img.png)',
+    '',
+    '## 重复小节标题',
+    '',
+    '乙篇的重复小节正文 PDF-T06-BETA-DUP。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'gamma.md'), [
+    '# 丙篇附录',
+    '',
+    '丙篇正文 PDF-T06-GAMMA（无文档样式对照篇）。',
+    '',
+    '丙篇第二段（未保存内容注入锚点段）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'pdf-merge', 'missing.md'), [
+    '# 合并样本缺失图',
+    '',
+    '![缺失图](../assets/merge-missing.png)',
+    '',
+    'PDF-T06-MISSING 标记正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'pdf-merge-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // T07（#627）预览样本：长文档（40 节 × 12 段——A4 下 10+ 页，有界挂载
+  // 断言载体：预览仅挂载可见窗口 ± 有限相邻页，费用不随总页数线性增长）
+  writeFileSync(path.join(wsDir, 'pdf-export-t07-long.md'), [
+    '# PDF T07 长文档预览样本',
+    '',
+    ...Array.from({ length: 40 }, (_, i) => [
+      `## 第 ${i + 1} 节 PDF-T07-LONG-${i + 1}`,
+      '',
+      ...Array.from({ length: 12 }, (_, j) =>
+        `长文档第 ${i + 1} 节第 ${j + 1} 段：预览按窗口装载页面，挂载页数不随总页数增长。`),
+      '',
+    ]).flat(),
+  ].join('\n'), 'utf8')
   // #423 阅读宽松换行：段内单换行段落（2 处）+ 双空格显式硬换行（1 处）
   // 对照——严格态 br=1（仅显式）、宽松态 br=3
   writeFileSync(path.join(wsDir, 'reading-breaks.md'), READING_BREAKS_DOC, 'utf8')

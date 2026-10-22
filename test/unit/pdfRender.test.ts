@@ -13,6 +13,7 @@ import {
   __resetPdfjsSingletonsForTest,
   __setPdfAssetsForTest,
   classifyPdfLink,
+  PDF_ACTUAL_SCALE,
   PDF_SCROLL_LIMITS,
   pdfErrorText,
   PdfHoverView,
@@ -56,13 +57,16 @@ function makeFakePage(width = 612, height = 792, renderImpl?: () => Promise<void
       scale,
       transform: [scale, 0, 0, -scale, 0, height * scale],
     }),
-    render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => {
+    render: ({ canvas, viewport, transform }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number }; transform?: number[] }) => {
       let rejectOuter: ((err: Error) => void) | undefined
       const task = {
         promise: new Promise<void>((resolve, reject) => {
           rejectOuter = reject
-          canvas.width = Math.floor(viewport.width)
-          canvas.height = Math.floor(viewport.height)
+          // HiDPI：真实 pdfjs 按 transform 把内容绘到后备画布（生产侧后备
+          // 尺寸 = 视口尺寸 × outputScale），替身同构
+          const outputScale = transform?.[0] ?? 1
+          canvas.width = Math.floor(viewport.width * outputScale)
+          canvas.height = Math.floor(viewport.height * outputScale)
           if (renderImpl) {
             void renderImpl().then(resolve, reject)
           } else {
@@ -961,6 +965,104 @@ describe('PDF 适合宽度与用户缩放（#339）', () => {
     expect(probe.zoom).toBe(1)
     // 浮点口径：448/612 × 612 = 447.999… → floor 447（真实 pdfjs 同算式同结果）
     expect(probe.canvasWidth).toBe(Math.floor(612 * (448 / 612)))
+  })
+
+  it('HiDPI：画布后备尺寸按 devicePixelRatio 放大、CSS 尺寸保持视口尺寸', async () => {
+    mockViewport()
+    installFakePdfjs(makeFakeDoc(2))
+    Object.defineProperty(window, 'devicePixelRatio', { value: 2, configurable: true })
+    try {
+      const view = new PdfHoverView(scrollEl)
+      cleanupFns.push(() => view.dispose())
+      const cssWidth = 612 * (448 / 612)
+      await view.show('https://files.test/a.pdf?v=1', 1, 448)
+      const canvas = scrollEl.querySelector('canvas') as HTMLCanvasElement
+      // 后备 = CSS × 2（transform 驱动 pdfjs 按 2× 绘制），CSS 显示宽不变
+      expect(canvas.width).toBe(Math.floor(cssWidth * 2))
+      expect(Math.abs(Number.parseFloat(canvas.style.width) - cssWidth)).toBeLessThan(0.01)
+      expect(view.probe().canvasWidth).toBe(canvas.width)
+    } finally {
+      Object.defineProperty(window, 'devicePixelRatio', { value: 1, configurable: true })
+    }
+  })
+
+  it('预览纸面宽封顶：宽容器不拉伸页面；百分比以 100% = 纸面大小为基准', async () => {
+    mockViewport()
+    installFakePdfjs(makeFakeDoc(3))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const paperWidth = Math.round(612 * PDF_ACTUAL_SCALE)
+    view.setMaxRenderWidth(paperWidth)
+    await view.show('https://files.test/a.pdf?v=1', 1, 1000)
+    expect(view.probe().canvasWidth).toBe(paperWidth)
+    expect(view.zoomPercent()).toBe(100)
+    expect(view.zoomBy(1.25)).toBe(true)
+    expect(view.zoomPercent()).toBe(125)
+    await pumpUntil(() => view.probe().canvasWidth === Math.floor(612 * ((paperWidth / 612) * 1.25)))
+    expect(view.probe().canvasWidth).toBe(Math.floor(612 * ((paperWidth / 612) * 1.25)))
+    // 收窄封顶（纸张/面板变化）：zoom 乘子保留，按新适配宽重绘
+    view.setMaxRenderWidth(400)
+    await pumpUntil(() => view.probe().canvasWidth === Math.floor(612 * (400 / 612) * 1.25))
+    expect(view.probe().canvasWidth).toBe(Math.floor(612 * (400 / 612) * 1.25))
+  })
+
+  it('纸面 100% 复位（窄面板）：反算乘子回到纸面尺寸，而非适合宽度', async () => {
+    mockViewport()
+    installFakePdfjs(makeFakeDoc(3))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    view.setMaxRenderWidth(Math.round(612 * PDF_ACTUAL_SCALE))
+    // 容器 400 < 纸面 816：适合宽度显示约 49%
+    await view.show('https://files.test/a.pdf?v=1', 1, 400)
+    expect(view.zoomPercent()).toBe(49)
+    // 预览页码行与缩放条同基准（相对纸面），不谎称适合宽度是 100%
+    const info = () =>
+      (scrollEl.querySelector('.vsidian-hover-pdf-page-info') as HTMLElement | null)?.textContent ?? ''
+    expect(info()).toBe('hover.pdfPageInfoZoom')
+    expect(view.zoomBy(1.25)).toBe(true)
+    expect(view.zoomPercent()).toBe(61)
+    // 复位 100%：乘子 = (96/72) / (400/612) ≈ 2.04，画布回到纸面宽 816
+    expect(view.resetToPaperScale()).toBe(true)
+    expect(view.zoomPercent()).toBe(100)
+    expect(info()).toBe('hover.pdfPageInfo')
+    const paperWidth = Math.floor(612 * PDF_ACTUAL_SCALE)
+    await pumpUntil(() => view.probe().canvasWidth === paperWidth)
+    expect(view.probe().canvasWidth).toBe(paperWidth)
+    // 已在纸面尺寸：再复位无动作
+    expect(view.resetToPaperScale()).toBe(false)
+  })
+
+  it('纸面 100% 复位（宽面板）：放大后回到纸面尺寸；已是纸面尺寸时无动作', async () => {
+    mockViewport()
+    installFakePdfjs(makeFakeDoc(3))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const paperWidth = Math.round(612 * PDF_ACTUAL_SCALE)
+    view.setMaxRenderWidth(paperWidth)
+    await view.show('https://files.test/a.pdf?v=1', 1, 1000)
+    expect(view.zoomPercent()).toBe(100)
+    expect(view.resetToPaperScale(), '已是纸面尺寸：无动作').toBe(false)
+    expect(view.zoomBy(1.25)).toBe(true)
+    expect(view.zoomPercent()).toBe(125)
+    expect(view.resetToPaperScale()).toBe(true)
+    expect(view.zoomPercent()).toBe(100)
+    await pumpUntil(() => view.probe().canvasWidth === paperWidth)
+    expect(view.probe().canvasWidth).toBe(paperWidth)
+  })
+
+  it('纸面 100% 复位（极窄面板）：乘子触顶时停在上限，百分比回显达成值', async () => {
+    mockViewport()
+    installFakePdfjs(makeFakeDoc(3))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    view.setMaxRenderWidth(Math.round(612 * PDF_ACTUAL_SCALE))
+    // 150px 容器需要 ×5.44 才能到纸面，超过 PDF_ZOOM_MAX 4
+    await view.show('https://files.test/a.pdf?v=1', 1, 150)
+    expect(view.zoomPercent()).toBe(18)
+    expect(view.resetToPaperScale()).toBe(true)
+    // 乘子 4 对应的达成百分比 ≈74%——不谎称已到 100%
+    expect(view.zoomPercent()).toBe(74)
+    expect(view.zoomPercent()).toBeLessThan(100)
   })
 
   it('放大：zoom 乘子推进且绘制尺寸按新 scale 重绘（挂载页不残留旧画布）', async () => {

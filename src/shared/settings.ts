@@ -17,6 +17,18 @@
 import type { MessageKey } from './locales/en'
 import { JIEBA_SOURCE_MODES, type JiebaSourceMode } from './jiebaManifest'
 import { WIKILINK_INSERT_PATH_MODES, type WikilinkInsertPathMode } from './wikilinkInsertMode'
+import {
+  PDF_EXPORT_CUSTOM_MM_MAX,
+  PDF_EXPORT_CUSTOM_MM_MIN,
+  PDF_EXPORT_MARGIN_MM_MAX,
+  PDF_EXPORT_MARGIN_MM_MIN,
+  PDF_EXPORT_OPTIONS_DEFAULTS,
+  PDF_EXPORT_SCALE_MAX,
+  PDF_EXPORT_SCALE_MIN,
+  PDF_ORIENTATIONS,
+  PDF_PAGE_NUMBER_POSITIONS,
+  PDF_PAPER_SIZE_KINDS,
+} from './pdfExportOptions'
 
 /** 协议载荷中的设置值：标量容器（协议层只约束形态，合法性由本模块按定义判定；
  *  放宽数值类型不需要改协议——「整体下发而非逐项布尔」的扩展预留） */
@@ -324,6 +336,30 @@ export const LINK_INSERT_PATH_TYPE_KEY = 'link.insertPathType'
 export const LINK_INSERT_PATH_TYPE_MODES = WIKILINK_INSERT_PATH_MODES
 export type LinkInsertPathTypeMode = WikilinkInsertPathMode
 export const LINK_INSERT_PATH_TYPE_DEFAULT: LinkInsertPathTypeMode = 'relative'
+
+/**
+ * T01（#621）PDF 导出持久设置：浏览器路径 + 四项默认参数（规格 §2.4——
+ * 模态是本次导出参数的界面，持久默认值只进自有设置页）。参数值域与校验
+ * 单一事实源在 shared/pdfExportOptions（normalizePdfExportOptions 收敛，
+ * 设置页 range/enum 控件仅限值域）；浏览器路径空串 = 自动发现（V01 三
+ * 通道），路径无效的失败分态在导出任务层（configured-path-missing）。
+ */
+export const PDF_EXPORT_BROWSER_PATH_KEY = 'pdfExport.browserPath'
+export const PDF_EXPORT_BROWSER_PATH_MAX_LENGTH = 1024
+export const PDF_EXPORT_PAPER_KEY = 'pdfExport.paper'
+export const PDF_EXPORT_ORIENTATION_KEY = 'pdfExport.orientation'
+export const PDF_EXPORT_MARGIN_KEY = 'pdfExport.marginMm'
+export const PDF_EXPORT_SCALE_KEY = 'pdfExport.scale'
+// T05（#625）默认参数补全：自定义宽高 + 页眉/页码/书签（值域事实源
+// shared/pdfExportOptions；模态每次 open/run 实时读快照）
+export const PDF_EXPORT_CUSTOM_WIDTH_MM_KEY = 'pdfExport.customWidthMm'
+export const PDF_EXPORT_CUSTOM_HEIGHT_MM_KEY = 'pdfExport.customHeightMm'
+export const PDF_EXPORT_HEADER_KEY = 'pdfExport.headerEnabled'
+export const PDF_EXPORT_HEADER_TITLE_KEY = 'pdfExport.headerTitle'
+export const PDF_EXPORT_HEADER_DATE_KEY = 'pdfExport.headerDate'
+export const PDF_EXPORT_PAGE_NUMBER_KEY = 'pdfExport.pageNumberEnabled'
+export const PDF_EXPORT_PAGE_NUMBER_POSITION_KEY = 'pdfExport.pageNumberPosition'
+export const PDF_EXPORT_BOOKMARKS_KEY = 'pdfExport.bookmarksEnabled'
 
 /**
  * #298「悬停预览引用文档」总开关：悬停触发引用视图浮层的全域启停。关闭后
@@ -825,6 +861,138 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
       relative: 'setting.linkInsertPathTypeRelative',
       absolute: 'setting.linkInsertPathTypeAbsolute',
     },
+  },
+  // T01（#621）PDF 导出五件（文件与链接分页「PDF 导出」组，前缀
+  // pdfExport. 由 indexMaintenanceSettings 的 defsGroups 收纳）：浏览器
+  // 路径 + 打开模态时预选的四项默认参数；值域事实源 shared/pdfExportOptions
+  {
+    key: PDF_EXPORT_BROWSER_PATH_KEY,
+    type: 'string',
+    default: '',
+    maxLength: PDF_EXPORT_BROWSER_PATH_MAX_LENGTH,
+    titleKey: 'setting.pdfExportBrowserPath.title',
+    descriptionKey: 'setting.pdfExportBrowserPath.description',
+  },
+  {
+    key: PDF_EXPORT_PAPER_KEY,
+    type: 'string',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.paper,
+    enum: PDF_PAPER_SIZE_KINDS,
+    titleKey: 'setting.pdfExportPaper.title',
+    descriptionKey: 'setting.pdfExportPaper.description',
+    optionLabelKeys: {
+      a3: 'pdfExport.paper.a3',
+      a4: 'pdfExport.paper.a4',
+      a5: 'pdfExport.paper.a5',
+      b5: 'pdfExport.paper.b5',
+      letter: 'pdfExport.paper.letter',
+      legal: 'pdfExport.paper.legal',
+      custom: 'pdfExport.paper.custom',
+    },
+  },
+  {
+    key: PDF_EXPORT_ORIENTATION_KEY,
+    type: 'string',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.orientation,
+    enum: PDF_ORIENTATIONS,
+    titleKey: 'setting.pdfExportOrientation.title',
+    descriptionKey: 'setting.pdfExportOrientation.description',
+    optionLabelKeys: {
+      portrait: 'pdfExport.orientation.portrait',
+      landscape: 'pdfExport.orientation.landscape',
+    },
+  },
+  {
+    key: PDF_EXPORT_MARGIN_KEY,
+    type: 'number',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.marginMm,
+    min: PDF_EXPORT_MARGIN_MM_MIN,
+    max: PDF_EXPORT_MARGIN_MM_MAX,
+    step: 1,
+    titleKey: 'setting.pdfExportMargin.title',
+    descriptionKey: 'setting.pdfExportMargin.description',
+    unit: 'mm',
+  },
+  {
+    key: PDF_EXPORT_SCALE_KEY,
+    type: 'number',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.scale,
+    min: PDF_EXPORT_SCALE_MIN,
+    max: PDF_EXPORT_SCALE_MAX,
+    step: 0.05,
+    titleKey: 'setting.pdfExportScale.title',
+    descriptionKey: 'setting.pdfExportScale.description',
+  },
+  // T05（#625）默认参数补全八件（同「PDF 导出」组收纳）
+  {
+    key: PDF_EXPORT_CUSTOM_WIDTH_MM_KEY,
+    type: 'number',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.customWidthMm,
+    min: PDF_EXPORT_CUSTOM_MM_MIN,
+    max: PDF_EXPORT_CUSTOM_MM_MAX,
+    step: 1,
+    titleKey: 'setting.pdfExportCustomWidth.title',
+    descriptionKey: 'setting.pdfExportCustomWidth.description',
+    unit: 'mm',
+  },
+  {
+    key: PDF_EXPORT_CUSTOM_HEIGHT_MM_KEY,
+    type: 'number',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.customHeightMm,
+    min: PDF_EXPORT_CUSTOM_MM_MIN,
+    max: PDF_EXPORT_CUSTOM_MM_MAX,
+    step: 1,
+    titleKey: 'setting.pdfExportCustomHeight.title',
+    descriptionKey: 'setting.pdfExportCustomHeight.description',
+    unit: 'mm',
+  },
+  {
+    key: PDF_EXPORT_HEADER_KEY,
+    type: 'boolean',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.headerEnabled,
+    titleKey: 'setting.pdfExportHeader.title',
+    descriptionKey: 'setting.pdfExportHeader.description',
+  },
+  {
+    key: PDF_EXPORT_HEADER_TITLE_KEY,
+    type: 'boolean',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.headerTitle,
+    titleKey: 'setting.pdfExportHeaderTitle.title',
+    descriptionKey: 'setting.pdfExportHeaderTitle.description',
+  },
+  {
+    key: PDF_EXPORT_HEADER_DATE_KEY,
+    type: 'boolean',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.headerDate,
+    titleKey: 'setting.pdfExportHeaderDate.title',
+    descriptionKey: 'setting.pdfExportHeaderDate.description',
+  },
+  {
+    key: PDF_EXPORT_PAGE_NUMBER_KEY,
+    type: 'boolean',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.pageNumberEnabled,
+    titleKey: 'setting.pdfExportPageNumber.title',
+    descriptionKey: 'setting.pdfExportPageNumber.description',
+  },
+  {
+    key: PDF_EXPORT_PAGE_NUMBER_POSITION_KEY,
+    type: 'string',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.pageNumberPosition,
+    enum: PDF_PAGE_NUMBER_POSITIONS,
+    titleKey: 'setting.pdfExportPageNumberPosition.title',
+    descriptionKey: 'setting.pdfExportPageNumberPosition.description',
+    optionLabelKeys: {
+      'footer-left': 'setting.pdfExportPageNumberPositionLeft',
+      'footer-center': 'setting.pdfExportPageNumberPositionCenter',
+      'footer-right': 'setting.pdfExportPageNumberPositionRight',
+    },
+  },
+  {
+    key: PDF_EXPORT_BOOKMARKS_KEY,
+    type: 'boolean',
+    default: PDF_EXPORT_OPTIONS_DEFAULTS.bookmarksEnabled,
+    titleKey: 'setting.pdfExportBookmarks.title',
+    descriptionKey: 'setting.pdfExportBookmarks.description',
   },
   // #239 中文分词三件（引擎/下载源/自定义基址）：设置页呈现归编辑器页
   // 「中文分词」委托组（#264 起为编辑器页尾二级组，wordSegmentSettings

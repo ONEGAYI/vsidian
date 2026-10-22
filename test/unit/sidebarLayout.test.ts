@@ -169,13 +169,19 @@ describe('左侧设置入口齿轮图标化（#53）', () => {
 })
 
 describe('侧栏切换按钮（#53）', () => {
-  it('切换按钮位于主编辑区顶栏右端（toolbar 最后子元素）且含两态图标 SVG', () => {
+  it('切换按钮位于主编辑区顶栏右端（最后一个按钮）且含两态图标 SVG', () => {
     const h = makeBridge()
     const { parent } = mountSidebar(h)
     const toolbar = parent.querySelector<HTMLElement>('.vsidian-main .vsidian-toolbar')!
     const btn = toolbar.querySelector<HTMLButtonElement>('button.vsidian-sidebar-toggle')
     expect(btn, '顶栏应含 vsidian-sidebar-toggle 按钮').toBeTruthy()
-    expect(toolbar.lastElementChild === btn, '切换按钮应为顶栏最后一个子元素（右端）').toBe(true)
+    // 右端判据取「工具栏直接子按钮的最后一个」而非「最后一个子元素」：PDF
+    // 导出下拉菜单是工具栏的隐藏浮层（菜单自身及其菜单项都不参与右端组
+    // 排布，菜单项虽是 button 但嵌套在浮层内）
+    const buttons = [...toolbar.children].filter(
+      (el): el is HTMLButtonElement => el instanceof HTMLButtonElement,
+    )
+    expect(buttons.at(-1) === btn, '切换按钮应为顶栏最后一个按钮（右端）').toBe(true)
     const bar = btn!.querySelector<SVGElement>('.vsidian-sidebar-icon-bar')
     const frame = btn!.querySelector<SVGElement>('.vsidian-sidebar-icon-frame')
     expect(bar, '图标应含竖线 vsidian-sidebar-icon-bar').toBeTruthy()

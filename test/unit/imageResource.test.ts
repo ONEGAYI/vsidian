@@ -26,6 +26,40 @@ function state(el: HTMLElement): string {
   return el.dataset['vsidianImgState'] ?? ''
 }
 
+describe('直连图加载超时（双轴审查：坏图链接不得让就绪谓词永久挂起）', () => {
+  it('http(s) 直连图既不 load 也不 error 时，超时按终态失败收口', () => {
+    vi.useFakeTimers()
+    try {
+      const { manager } = makeManager()
+      const el = img()
+      manager.attach(el, 'https://example.com/')
+      expect(state(el)).toBe('loading')
+      // 服务端返回 HTML（非位图）时 img 既不 load 也不 error——PDF 导出以
+      // 「槽位终态」为完成信号，不设上限会永不收敛
+      vi.advanceTimersByTime(10_000)
+      expect(state(el)).toBe('error')
+      expect(el.dataset['vsidianImgReason']).toBe('inaccessible')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('超时前 load 命中：定时器清理，槽位为 loaded 且不被迟到超时改写', () => {
+    vi.useFakeTimers()
+    try {
+      const { manager } = makeManager()
+      const el = img()
+      manager.attach(el, 'https://example.com/a.png')
+      el.dispatchEvent(new Event('load'))
+      expect(state(el)).toBe('loaded')
+      vi.advanceTimersByTime(20_000)
+      expect(state(el)).toBe('loaded')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('装载与占位状态', () => {
   it('attach 非直连图源：进入 loading 并经宿主通道请求（携带自增 reqId）', () => {
     const { manager, posted } = makeManager()

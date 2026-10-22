@@ -54,6 +54,25 @@ vsidian/
     │   ├── keybindingService.ts          # 快捷键全局存储服务
     │   ├── linkTarget.ts                 # 宿主侧链接目标分类纯逻辑（#10）
     │   ├── pasteHistoryTracker.ts        # 宿主粘贴阶段历史解释
+    │   ├── pdfExport/                    # PDF 导出宿主端链路
+    │   │   ├── browserFind.ts          # 导出浏览器发现三通道
+    │   │   ├── browserLauncher.ts      # CDP 浏览器会话管理
+    │   │   ├── cdpClient.ts            # 零依赖 CDP 客户端
+    │   │   ├── exportResourceServer.ts # 导出页资源服务
+    │   │   ├── pdfExportBatchJob.ts    # 批量导出执行器
+    │   │   ├── pdfExportEmbeds.ts      # 嵌入目标预取
+    │   │   ├── pdfExportHtml.ts        # CSS @page 剥离
+    │   │   ├── pdfExportJob.ts         # 单文档导出任务
+    │   │   ├── pdfExportMergeJob.ts    # 合并导出执行器
+    │   │   ├── pdfExportModal.ts       # 导出模态宿主
+    │   │   ├── pdfExportPage.ts        # 导出页 HTML 装配
+    │   │   ├── pdfExportPreviewJob.ts  # 预览任务执行器
+    │   │   ├── pdfExportSelection.ts   # 选区严格切片
+    │   │   ├── pdfExportSession.ts     # 浏览器会话生产实现
+    │   │   ├── pdfOutlineFlow.ts       # 书签页码定位
+    │   │   ├── pdfOutlineWrite.ts      # 书签写入 pdf-lib
+    │   │   ├── pdfRemoteAdapter.ts     # PDF 远端会话适配器
+    │   │   └── pdfRemoteTestHooks.ts   # remote e2e 钩子标记
     │   ├── proxyAgent.ts                 # 外链抓取代理接入（CONNECT 隧道）
     │   ├── refEditPorts.ts               # 引用编辑端口绑定注册表
     │   ├── searchReveal.ts               # 搜索定位恢复纯逻辑（#318）
@@ -81,6 +100,10 @@ vsidian/
     │   ├── wikilinkBlockSource.ts        # 块联想宿主查询编排
     │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
     │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
+    ├── pdfExecutor/ # PDF 本机执行端扩展
+    │   ├── extension.ts     # PDF 执行端扩展入口
+    │   ├── package.json     # PDF 执行端清单模板
+    │   └── resourceQueue.ts # 执行端挂起资源队列
     ├── shared/      # 两端共享纯逻辑
     │   ├── addonApiCatalog.ts         # 附加组件 API 语义清单与台账
     │   ├── addonBehaviors.ts          # 输入行为共享契约事实源
@@ -140,7 +163,14 @@ vsidian/
     │   ├── newline.ts                 # CRLF/LF 换行协调器
     │   ├── obsidianAlias.ts           # Obsidian 别名桥实现同源表
     │   ├── officialAddons.ts          # 官方组件登记表事实源
+    │   ├── pdfExportBatch.ts          # 批量清单纯逻辑
+    │   ├── pdfExportOptions.ts        # 导出参数事实源
+    │   ├── pdfExportPayload.ts        # 导出固定输入载荷
+    │   ├── pdfExportPreview.ts        # 预览指纹纯逻辑
     │   ├── pdfNav.ts                  # PDF 导航锚点解析纯逻辑
+    │   ├── pdfOutline.ts              # 书签树与定位纯逻辑
+    │   ├── pdfRemote.ts               # PDF 跨宿主协议事实源
+    │   ├── pdfTextNormalize.ts        # PDF 文本归一纯逻辑
     │   ├── protocol.ts                # 消息协议单一事实源
     │   ├── refContent.ts              # 引用内容类型分派共享内核（#333）
     │   ├── refExpansion.ts            # 引用递归路径与容量预算
@@ -273,6 +303,12 @@ vsidian/
         ├── outlineSection.ts             # 大纲控制域纯函数
         ├── outlinkPanel.ts               # 出链面板 DOM 与四态渲染
         ├── overlayAnchor.ts              # 浮层右缘锚点计划纯函数
+        ├── pdfExportAssembly.ts          # 导出页正文装配
+        ├── pdfExportMain.ts              # 导出模态 webview 入口
+        ├── pdfExportModal.css            # 导出模态样式
+        ├── pdfExportModalView.ts         # 导出模态视图
+        ├── pdfExportPage.css             # 导出页观感样式
+        ├── pdfExportPageMain.ts          # 导出页 webview 入口
         ├── pdfMainEntry.ts               # PDF.js 主库独立产物入口
         ├── pdfRender.ts                  # PDF 渲染器（全文按页滚动）
         ├── pdfWorkerEntry.ts             # PDF.js worker 独立产物入口
@@ -285,6 +321,7 @@ vsidian/
         ├── readingFindSource.ts          # 阅读查找只读源码浮层
         ├── readingMarkdown.ts            # markdown-it 安全渲染层
         ├── readingProbe.ts               # 阅读视图性能探针
+        ├── readingStyleSnapshot.ts       # 阅读样式快照纯逻辑
         ├── readingView.ts                # 阅读视图 DOM 构建与锚点定位
         ├── readingViewport.ts            # 阅读视口挂载窗口纯函数
         ├── readingVirtualView.ts         # 阅读视图虚拟化装配层

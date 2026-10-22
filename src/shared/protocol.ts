@@ -23,6 +23,16 @@ import { isAddonThemeEnvironmentPayload, isAddonThemesStatePayload } from './add
 import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettingSearchEntry, isAddonSettingStoredValue } from './addonSettings'
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 import { isAddonDocNavLocate, isAddonDocNavResult, type AddonDocNavLocate, type AddonDocNavResult } from './addonNavApi'
+import type { PdfExportOptions } from './pdfExportOptions'
+
+/** 工具栏导出菜单的四个入口：与命令面板四个 PDF 命令一一对应（同一实现，
+ *  不新增导出语义）。currentDocument/selection 需活动文档与有效选区，
+ *  batch/merge 不依赖活动文档 */
+export const PDF_EXPORT_ENTRY_MODES = ['currentDocument', 'selection', 'batch', 'merge'] as const
+export type PdfExportEntryMode = (typeof PDF_EXPORT_ENTRY_MODES)[number]
+export function isPdfExportEntryMode(value: unknown): value is PdfExportEntryMode {
+  return typeof value === 'string' && (PDF_EXPORT_ENTRY_MODES as readonly string[]).includes(value)
+}
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -212,6 +222,14 @@ export type HostToWebview =
     }
   /** 请求 webview 回报视图诊断（文本与渲染行数，供测试与性能观测） */
   | { kind: 'view.state.request' }
+  /** T03（#623）选区导出：请求面板当前选区（live 模式 CM6 多选区，LF 坐标；
+   *  回报经 pdfExport.selection.report 以 requestId 对账——locateAndWait
+   *  同模式的挂起意图 + 超时兜底）。只读观测：不写文档、不改选区 */
+  | { kind: 'pdfExport.selection.request'; requestId: number }
+  /** 测试钩子：把 live 编辑器选区设置为给定多区间（纯 selection 事务，
+   *  无 changes——不产生编辑历史、不写回宿主）。集成测试驱动多选区
+   *  导入路径用（宿主侧经 _test.postToPanel 注入） */
+  | { kind: 'sync.test.setSelection'; ranges: Array<{ anchor: number; head: number }> }
   /** #272 测试钩子门控的观测开关；只记录传播身份，不改变调度。 */
   | { kind: 'diagnostics.test.set'; enabled: boolean }
   /** 性能探针（#5）：webview 测量输入延迟/长任务/滚动回收并回报 perf.report。
@@ -586,6 +604,135 @@ export type HostToWebview =
       reason?: 'cancelled' | 'invalid' | 'not-found' | 'read-failed' | 'writeFailed'
     }
   | { kind: 'settings.snapshot'; values: SettingsPayload }
+  /** T01（#621）PDF 导出模态状态推送：任务阶段/代次/失败分态与当前默认
+   *  参数（设置页持久值经宿主 normalize 后的权威形态）。模态 webview 装
+   *  载（pdfExportModal.get）与每次任务状态变化时推送 */
+  | {
+      kind: 'pdfExportModal.state'
+      phase: 'idle' | 'generating' | 'awaiting-resources' | 'saving' | 'done' | 'failed' | 'cancelled'
+      generation: number
+      docName: string
+      capturedVersion: number
+      defaults: PdfExportOptions
+      browserPath: string
+      savedPath?: string
+      failReason?: string
+      failDetail?: string
+      cancelKind?: 'user' | 'save-dialog'
+      /** T02（#622）awaiting-resources 阶段的失败清单（kind/item/reason——
+       *  item/reason 为机器值，词条映射在 webview 侧） */
+      resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+      /** T04（#624）批量 / T06（#626）合并模式状态（清单模态打开时在场；
+       *  单文档模式缺省——既有字段零改动，清单状态整体为可选追加字段，
+       *  按 mode 判别：批量携带映射面与逐文件结果；合并为单产物观测） */
+      batch?:
+        | {
+            mode: 'batch'
+            phase: 'editing' | 'confirm' | 'running' | 'awaiting-resources' | 'done' | 'cancelled' | 'failed'
+            /** 可编辑清单（顺序即执行顺序） */
+            items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+            /** confirm 阶段的映射预览（真实输出映射 + 冲突标注） */
+            mapping?: ReadonlyArray<{
+              id: string
+              fsPath: string
+              targetPath: string
+              /** 名义路径（无覆盖碰撞重试的命名锚） */
+              nominalPath: string
+              action: 'export' | 'skip'
+              conflict: 'none' | 'duplicate' | 'exists' | 'both'
+              renamed: boolean
+              /** 白名单策略的无覆盖落位标记 */
+              exclusive: boolean
+              skipReason?: 'duplicate' | 'exists'
+            }>
+            targetDir?: string
+            strategy: 'skip' | 'overwrite' | 'rename'
+            currentIndex: number
+            total: number
+            currentName?: string
+            results: ReadonlyArray<{
+              id: string
+              fsPath: string
+              docName: string
+              status: 'success' | 'failed' | 'skipped' | 'cancelled'
+              targetPath?: string
+              failReason?: string
+              skipReason?: 'duplicate' | 'exists'
+            }>
+            /** awaiting-resources 阶段当前文件的失败清单 */
+            resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+            /** 整批环境性失败分态（resolveBrowser 失败） */
+            failReason?: string
+          }
+        | {
+            mode: 'merge'
+            /** T06（#626）合并单产物阶段（capturing = 逐篇固定输入；
+             *  saving = 保存对话框与写盘——批量模式不产生这两个阶段） */
+            phase: 'editing' | 'capturing' | 'running' | 'awaiting-resources' | 'saving' | 'done' | 'cancelled' | 'failed'
+            /** 可编辑清单（顺序即合篇顺序——与批量同一数据面） */
+            items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+            currentIndex: number
+            total: number
+            currentName?: string
+            /** awaiting-resources 阶段的失败清单（合并产物整体面） */
+            resourceIssues?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+            failReason?: string
+            /** 失败的原始诊断（观测面，不进用户文案；capture-failed 携带篇名） */
+            failDetail?: string
+            savedPath?: string
+            bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
+          }
+      /** T07（#627）预览状态：phase/generation 与就绪产物指纹（webview 以
+       *  previewTarget + 本地参数合成指纹比较——过期判定；宿主导出复用
+       *  核对同一函数）。batchItemId = 批量模式生效中的预览条目 */
+      preview?: {
+        phase: 'idle' | 'generating' | 'ready' | 'failed'
+        generation: number
+        fingerprint?: string
+        failReason?: string
+        bookmarks?: { written: boolean; total: number; skipped: number; reason?: string }
+        failures?: ReadonlyArray<{ kind: string; item: string; reason: string }>
+        batchItemId?: string
+      }
+      /** T07（#627）当前预览目标身份（宿主权威——document/batchItem/merge；
+       *  webview 与本地参数合成指纹做过期比较，批量选中条目被移除时宿主
+       *  回退首条） */
+      previewTarget?: {
+        kind: 'document'
+        doc: { docName: string; capturedVersion: number; fragments?: ReadonlyArray<readonly [number, number]> }
+      } | {
+        kind: 'batchItem'
+        fsPath: string
+        doc: { docName: string; capturedVersion: number; fragments?: ReadonlyArray<readonly [number, number]> }
+      } | {
+        kind: 'merge'
+        fsPaths: ReadonlyArray<string>
+        versions: ReadonlyArray<number>
+      }
+      /** T07（#627）宿主侧当日日期（页眉日期开启时指纹成分——两侧同源，
+       *  远端时区不使过期判定漂移） */
+      hostToday: string
+      /** 验收统一页：当前模式的导出清单——单文档模式只有「当前文档」一行
+       *  （与批量/合并共用同一清单 UI；批量/合并的清单仍走 batch.items）。
+       *  selectedId = 正在预览的条目（单文档恒为当前文档）。 */
+      list?: {
+        mode: 'document'
+        items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+        selectedId?: string
+      }
+    }
+  /** T07（#627）预览产物字节推送（base64）：就绪时一次 + 模态 webview 会话
+   *  内重挂载（get）时重推；webview 按当前 state.preview.generation 配对
+   *  消费——迟到/旧会话产物丢弃 */
+  | { kind: 'pdfExportModal.previewArtifact'; generation: number; base64: string }
+  /** T07（#627）测试钩子：参数控件置值（宿主 _test.postPdfExportModalWebviewMessage
+   *  转发，VSIDIAN_TEST_HOOKS 门控链路——webview 仅 __vsidianTestHooks 标志
+   *  下消费；驱动 paramsTouched 真实路径供过期徽章断言） */
+  | { kind: 'pdfExportModal._test.setParam'; field: string; value?: unknown }
+  /** T02（#622）阅读样式快照请求（面板级只读交互）：编辑器 webview 枚举
+   *  主题变量计算值回包 pdfExport.styleSnapshot.report（PDF 导出准备阶段
+   *  的主题跟随数据源；模态经 provider 发起，超时降级空快照） */
+  | { kind: 'pdfExport.styleSnapshot.request' }
   /**
    * #132 样式参考：打开设置页后定位到指定附加分页（section id）。
    * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略。
@@ -1308,6 +1455,15 @@ export type WebviewToHost =
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
   | { kind: 'view.locate.ack'; offset: number; locateId?: number }
+  /** T03（#623）选区回报（pdfExport.selection.request 的应答；requestId
+   *  对账）。ranges 为归一化非空选区（from<to，LF 坐标，按文档顺序）；
+   *  阅读模式恒空——阅读无选区交互语义（宿主按 viewMode 给出对应提示） */
+  | {
+      kind: 'pdfExport.selection.report'
+      requestId: number
+      viewMode: 'live' | 'reading'
+      ranges: Array<{ from: number; to: number }>
+    }
   /** 视图诊断回报 */
   | {
       kind: 'view.state'
@@ -1805,6 +1961,80 @@ export type WebviewToHost =
    *  createWebviewPanel。无 sessionId/docUri——打开设置页不依赖任何文档
    *  会话（无文档打开时同样可用） */
   | { kind: 'settings.open' }
+  /** T01（#621）PDF 导出模态状态拉取（装载/重载 ready 回填）：宿主以
+   *  pdfExportModal.state 应答（阶段、默认参数与浏览器路径设置回显） */
+  | { kind: 'pdfExportModal.get' }
+  /** 编辑器工具栏「导出为 PDF」按钮的下拉菜单入口：按 mode 打开同一导出
+   *  模态的对应模式（currentDocument/selection 复用命令入口的文档与选区
+   *  校验——无活动文档、无有效选区、阅读模式等分态在宿主侧给可见提示并
+   *  不打开模态；batch/merge 不依赖活动文档）。与命令面板四个命令同一实现，
+   *  菜单只是多入口之一（不新增第二套导出语义） */
+  | { kind: 'pdfExport.open'; mode: PdfExportEntryMode }
+  /** T01（#621）发起导出：params 为模态当前参数（宿主 normalize 后使用） */
+  | { kind: 'pdfExportModal.run'; params: unknown }
+  /** T01（#621）取消进行中的导出任务 */
+  | { kind: 'pdfExportModal.cancel' }
+  /** T02（#622）缺资源选择——继续导出（正文保留可见降级说明） */
+  | { kind: 'pdfExportModal.resume' }
+  /** T04（#624）批量清单：请求添加文件（宿主 showOpenDialog 多选后收集，
+   *  清单经 state.batch 推回；paths 仅 VSIDIAN_TEST_HOOKS 宿主门控下消费
+   *  ——生产实现忽略该字段，对话框是唯一入口） */
+  | { kind: 'pdfExportModal.batch.addFiles'; paths?: string[] }
+  /** T04（#624）批量清单：请求添加目录（宿主目录选择后递归收集 Markdown，
+   *  非 Markdown 不入清单；path 同为测试钩子注入字段） */
+  | { kind: 'pdfExportModal.batch.addDir'; path?: string }
+  /** T04（#624）批量清单：删除条目（id 锚点） */
+  | { kind: 'pdfExportModal.batch.remove'; id: string }
+  /** T04（#624）批量清单：上移/下移调序（清单顺序即执行顺序） */
+  | { kind: 'pdfExportModal.batch.move'; id: string; direction: 'up' | 'down' }
+  /** T04（#624）发起批量导出：宿主选目标目录 → 探测磁盘已有 → 推送映射
+   *  预览进入 confirm 阶段（测试钩子短路目标目录；targetDir 仅钩子门控
+   *  下消费——用例预置已有文件后注入同目录探测，生产对话框是唯一入口） */
+  | { kind: 'pdfExportModal.batch.run'; targetDir?: string }
+  /** T04（#624）confirm 阶段选择重名策略（宿主重算映射推回预览） */
+  | { kind: 'pdfExportModal.batch.setStrategy'; strategy: 'skip' | 'overwrite' | 'rename' }
+  /** T04（#624）确认映射与策略，开始执行（params 为模态当前参数原样载荷，
+   *  宿主 normalize 后使用——同 pdfExportModal.run 口径） */
+  | { kind: 'pdfExportModal.batch.confirm'; params: unknown }
+  /** T04（#624）取消批量任务或退出确认（已完成文件保留，未完成不落盘） */
+  | { kind: 'pdfExportModal.batch.cancel' }
+  /** T04（#624）缺资源选择：继续当前文件（all=true 时本批后续缺资源自动
+   *  继续——正文保留可见降级说明，T02 语义） */
+  | { kind: 'pdfExportModal.batch.resume'; all?: boolean }
+  /** 双轴评审 P3（规格 §2.5「失败项可据清单重新发起」）：终态结果表的
+   *  失败项单项重试——id = 结果表失败条目；params 为模态当前参数原样
+   *  载荷（同 confirm 口径，宿主 normalize 后使用） */
+  | { kind: 'pdfExportModal.batch.retryItem'; id: string; params?: unknown }
+  /** T06（#626）发起合并导出：清单顺序即合篇顺序，单产物（保存对话框在
+   *  生成后弹出——同单文档时序）；params 为模态当前参数原样载荷（宿主
+   *  normalize 后使用），pageBreak = 每篇另起一页（视图本地态） */
+  | { kind: 'pdfExportModal.merge.run'; params: unknown; pageBreak?: boolean }
+  /** T07（#627）手动刷新预览：宿主新一轮固定输入捕获 + 同管线生成；params
+   *  为模态当前参数原样载荷（宿主 normalize 后使用），pageBreak = 合并
+   *  模式的每篇另起一页（非合并模式忽略）。生成在途/导出运行中时宿主
+   *  忽略（不因重复输入反复启动生成任务） */
+  | { kind: 'pdfExportModal.preview.refresh'; params: unknown; pageBreak?: boolean }
+  /** T07（#627）切换预览条目（清单内 id 锚点；目标身份变化经
+   *  state.previewTarget 推回——webview 过期判定就地失配）。
+   *  验收统一页：点击清单条目即选中该条并**自动加载预览**（幂等——同一
+   *  条目重复点击不重复生成，已就绪且未过期时零动作）；params/pageBreak
+   *  为该次点击时的模态参数原样载荷（同 refresh 口径）。 */
+  | { kind: 'pdfExportModal.preview.select'; itemId: string; params?: unknown; pageBreak?: boolean }
+  /** T02（#622）阅读样式快照上报（宿主 pdfExport.styleSnapshot.request 的
+   *  回包——面板级只读交互：编辑器 webview 枚举主题变量计算值，供导出页
+   *  主题跟随；不进文档会话消息管线，provider 层拦截分发） */
+  | {
+      kind: 'pdfExport.styleSnapshot.report'
+      dark: boolean
+      vars: Record<string, string>
+      fontFamily?: string
+      fontSize?: string
+      lineHeight?: string
+    }
+  /** T01（#621）绘制层探针上报（测试钩子通道：控件可见性与计算样式摘要，
+   *  webview 侧仅在宿主 init 载荷携带 testHooks 时发送；宿主在
+   *  VSIDIAN_TEST_HOOKS=1 时经 _test.* 命令暴露给集成断言） */
+  | { kind: '_test.pdfExportModal.report'; paint: unknown }
   /** 请求设置快照（#33）：设置页 ready 后与编辑器面板 init 后拉取当前值，
    *  宿主以 settings.snapshot 响应（webview 不持久化设置，权威在宿主） */
   | { kind: 'settings.get' }
@@ -4339,6 +4569,64 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isString(v.sessionId) && isString(v.docUri)
     case 'settings.open':
       return true
+    case 'pdfExportModal.get':
+      return true
+    case 'pdfExport.open':
+      return isPdfExportEntryMode(v.mode)
+    case 'pdfExportModal.cancel':
+      return true
+    case 'pdfExportModal.resume':
+      return true
+    case 'pdfExport.styleSnapshot.report':
+      return typeof v.dark === 'boolean' && isObject(v.vars) &&
+        Object.entries(v.vars).every(([key, value]) => key.startsWith('--') && isString(value)) &&
+        (v.fontFamily === undefined || isString(v.fontFamily)) &&
+        (v.fontSize === undefined || isString(v.fontSize)) &&
+        (v.lineHeight === undefined || isString(v.lineHeight))
+    case 'pdfExportModal.run':
+      // params 为模态当前参数原样载荷：宿主侧 normalizePdfExportOptions
+      // 收敛（非法值回落默认），协议层只要求字段存在为对象
+      return v.params === undefined || isObject(v.params) || v.params === null
+    case '_test.pdfExportModal.report':
+      // 测试钩子通道：仅校验字段存在
+      return 'paint' in v
+    // T04（#624）批量清单消息族：形态层守卫（策略枚举、方向枚举、路径/条目
+    // 字符串）；paths/path 的测试钩子门控在宿主实现侧（协议层只拦形态）
+    case 'pdfExportModal.batch.addFiles':
+      return v.paths === undefined || (Array.isArray(v.paths) && v.paths.every(isString))
+    case 'pdfExportModal.batch.addDir':
+      return v.path === undefined || isString(v.path)
+    case 'pdfExportModal.batch.remove':
+      return isString(v.id)
+    case 'pdfExportModal.batch.move':
+      return isString(v.id) && (v.direction === 'up' || v.direction === 'down')
+    case 'pdfExportModal.batch.run':
+      return v.targetDir === undefined || isString(v.targetDir)
+    case 'pdfExportModal.batch.setStrategy':
+      return v.strategy === 'skip' || v.strategy === 'overwrite' || v.strategy === 'rename'
+    case 'pdfExportModal.batch.confirm':
+      // params 为模态当前参数原样载荷（同 run 口径）
+      return true
+    case 'pdfExportModal.merge.run':
+      // T06（#626）合并发起：params 为模态当前参数原样载荷（同 confirm
+      // 口径）；pageBreak = 每篇另起一页（视图本地态）
+      return v.pageBreak === undefined || typeof v.pageBreak === 'boolean'
+    case 'pdfExportModal.preview.refresh':
+      // T07（#627）手动刷新预览：params 同 run 口径原样载荷；pageBreak 同
+      // merge.run（非合并模式忽略）
+      return v.pageBreak === undefined || typeof v.pageBreak === 'boolean'
+    case 'pdfExportModal.preview.select':
+      // T07（#627）预览条目选择（清单内 id 锚点）；params/pageBreak 同 refresh
+      // 口径（点击即自动加载预览）
+      return isString(v.itemId) && (v.pageBreak === undefined || typeof v.pageBreak === 'boolean')
+    case 'pdfExportModal.batch.cancel':
+      return true
+    case 'pdfExportModal.batch.resume':
+      return v.all === undefined || typeof v.all === 'boolean'
+    case 'pdfExportModal.batch.retryItem':
+      // 双轴评审 P3：失败项单项重试（id 必填字符串；params 同 confirm 的
+      // 原样载荷口径——形态不拦，宿主 normalize）
+      return isString(v.id)
     case 'settings.get':
       return true
     case 'settings.set':
@@ -4478,6 +4766,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     }
     case 'view.locate.ack':
       return isNonNegativeInt(v.offset) && (v.locateId === undefined || isPositiveInt(v.locateId))
+    case 'pdfExport.selection.report':
+      return isPositiveInt(v.requestId) &&
+        (v.viewMode === 'live' || v.viewMode === 'reading') &&
+        Array.isArray(v.ranges) && v.ranges.every((r: unknown) =>
+          isObject(r) && isNonNegativeInt((r as { from: unknown }).from) && isNonNegativeInt((r as { to: unknown }).to))
     case 'view.state':
       return (
         (v.diagnostics === undefined || isDiagnosticSnapshot(v.diagnostics)) &&
@@ -5289,6 +5582,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       )
     case 'view.state.request':
       return true
+    case 'pdfExport.selection.request':
+      return isPositiveInt(v.requestId)
+    case 'sync.test.setSelection':
+      return Array.isArray(v.ranges) && v.ranges.every((r: unknown) =>
+        isObject(r) && isNonNegativeInt((r as { anchor: unknown }).anchor) && isNonNegativeInt((r as { head: unknown }).head))
     case 'diagnostics.test.set':
       return typeof v.enabled === 'boolean'
     case 'perf.probe':
@@ -5545,6 +5843,81 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
     case 'settings.snapshot':
       return isSettingsPayload(v.values)
+    case 'pdfExportModal.state':
+      // T01（#621）模态状态：phase 枚举 + 数值/字符串守卫；defaults 是宿主
+      // normalize 后的权威参数（webview 只消费不校验内部结构——宿主自产）
+      return (v.phase === 'idle' || v.phase === 'generating' || v.phase === 'awaiting-resources' ||
+          v.phase === 'saving' || v.phase === 'done' || v.phase === 'failed' || v.phase === 'cancelled') &&
+        isNonNegativeInt(v.generation) &&
+        isString(v.docName) &&
+        isNonNegativeInt(v.capturedVersion) &&
+        isString(v.browserPath) &&
+        isObject(v.defaults) &&
+        (v.savedPath === undefined || isString(v.savedPath)) &&
+        (v.failReason === undefined || isString(v.failReason)) &&
+        (v.failDetail === undefined || isString(v.failDetail)) &&
+        (v.cancelKind === undefined || v.cancelKind === 'user' || v.cancelKind === 'save-dialog') &&
+        (v.resourceIssues === undefined || (Array.isArray(v.resourceIssues) &&
+          v.resourceIssues.every((issue) => isObject(issue) && isString((issue as { kind?: unknown }).kind) &&
+            isString((issue as { item?: unknown }).item) && isString((issue as { reason?: unknown }).reason)))) &&
+        // T04（#624）批量 / T06（#626）合并状态为可选追加字段：按 mode 判别
+        // 校验（批量 mode 缺省兼容旧载荷；合并为单产物观测——无映射/策略/
+        // 结果表面，phase 含 capturing/saving）。items/mapping/results 为宿主
+        // 自产数据面，形态层拦类型即可
+        (v.batch === undefined || (isObject(v.batch) && (
+          ((v.batch.mode === undefined || v.batch.mode === 'batch') &&
+            (v.batch.phase === 'editing' || v.batch.phase === 'confirm' || v.batch.phase === 'running' ||
+              v.batch.phase === 'awaiting-resources' || v.batch.phase === 'done' || v.batch.phase === 'cancelled' ||
+              v.batch.phase === 'failed') &&
+            (v.batch.strategy === 'skip' || v.batch.strategy === 'overwrite' || v.batch.strategy === 'rename') &&
+            isNonNegativeInt(v.batch.currentIndex) && isNonNegativeInt(v.batch.total) &&
+            Array.isArray(v.batch.items) &&
+            (v.batch.mapping === undefined || Array.isArray(v.batch.mapping)) &&
+            Array.isArray(v.batch.results) &&
+            (v.batch.targetDir === undefined || isString(v.batch.targetDir)) &&
+            (v.batch.currentName === undefined || isString(v.batch.currentName)) &&
+            (v.batch.failReason === undefined || isString(v.batch.failReason)))
+          || (v.batch.mode === 'merge' &&
+            (v.batch.phase === 'editing' || v.batch.phase === 'capturing' || v.batch.phase === 'running' ||
+              v.batch.phase === 'awaiting-resources' || v.batch.phase === 'saving' || v.batch.phase === 'done' ||
+              v.batch.phase === 'cancelled' || v.batch.phase === 'failed') &&
+            isNonNegativeInt(v.batch.currentIndex) && isNonNegativeInt(v.batch.total) &&
+            Array.isArray(v.batch.items) &&
+            (v.batch.currentName === undefined || isString(v.batch.currentName)) &&
+            (v.batch.failReason === undefined || isString(v.batch.failReason)) &&
+            (v.batch.failDetail === undefined || isString(v.batch.failDetail)) &&
+            (v.batch.savedPath === undefined || isString(v.batch.savedPath)) &&
+            (v.batch.resourceIssues === undefined || (Array.isArray(v.batch.resourceIssues) &&
+              v.batch.resourceIssues.every((issue) => isObject(issue) &&
+                isString((issue as { kind?: unknown }).kind) &&
+                isString((issue as { item?: unknown }).item) &&
+                isString((issue as { reason?: unknown }).reason)))) &&
+            (v.batch.bookmarks === undefined || isObject(v.batch.bookmarks)))
+        ))) &&
+        // T07（#627）预览状态与目标身份为可选追加字段（形态层守卫：phase
+        // 枚举 + 代次非负；previewTarget 三形态 kind 判别——内部结构宿主自产）
+        (v.preview === undefined || (isObject(v.preview) &&
+          (v.preview.phase === 'idle' || v.preview.phase === 'generating' ||
+            v.preview.phase === 'ready' || v.preview.phase === 'failed') &&
+          isNonNegativeInt(v.preview.generation) &&
+          (v.preview.fingerprint === undefined || isString(v.preview.fingerprint)) &&
+          (v.preview.failReason === undefined || isString(v.preview.failReason)) &&
+          (v.preview.batchItemId === undefined || isString(v.preview.batchItemId)))) &&
+        (v.previewTarget === undefined || (isObject(v.previewTarget) &&
+          (v.previewTarget.kind === 'document' || v.previewTarget.kind === 'batchItem' || v.previewTarget.kind === 'merge'))) &&
+        // 验收统一页：单文档清单数据面（mode=document；items 宿主自产）
+        (v.list === undefined || (isObject(v.list) && v.list.mode === 'document' &&
+          Array.isArray(v.list.items) &&
+          (v.list.selectedId === undefined || isString(v.list.selectedId)))) &&
+        isString(v.hostToday)
+    case 'pdfExportModal.previewArtifact':
+      // T07（#627）预览产物字节（base64；代次配对在 webview 视图内完成）
+      return isNonNegativeInt(v.generation) && isString(v.base64)
+    case 'pdfExportModal._test.setParam':
+      // T07（#627）测试钩子转发（宿主 VSIDIAN_TEST_HOOKS 门控链路）
+      return isString(v.field)
+    case 'pdfExport.styleSnapshot.request':
+      return true
     case 'settings.focusSection':
       // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）；
       // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用；

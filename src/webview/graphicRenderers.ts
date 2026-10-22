@@ -287,7 +287,7 @@ export function graphicContainerOwnerChanged(container: HTMLElement, mode: Addon
  * （容器停留 pending 降级，不回落内置误渲非内置语言）。「登记即继承」
  * 在阅读挂载钩子的落点。
  */
-export function renderGraphicBlockInto(root: ParentNode): void {
+export function renderGraphicBlockInto(root: ParentNode, owns?: (el: Element) => boolean): void {
   const targets: HTMLElement[] = []
   if (
     root instanceof HTMLElement &&
@@ -297,6 +297,9 @@ export function renderGraphicBlockInto(root: ParentNode): void {
     targets.push(root)
   }
   for (const el of Array.from(root.querySelectorAll<HTMLElement>(`[${GRAPHIC_LANG_ATTR}]`))) {
+    if (owns !== undefined && !owns(el)) {
+      continue
+    }
     if (el.getAttribute(MERMAID_STATE_ATTR) === 'pending') {
       targets.push(el)
     }

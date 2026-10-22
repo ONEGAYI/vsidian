@@ -103,6 +103,10 @@ Object.assign(window, {
       ?.getBoundingClientRect() ?? null
     const refreshRect = document.querySelector('.vsidian-refresh-toggle')
       ?.getBoundingClientRect() ?? null
+    // 右端组自 2026-10-22 起为「刷新 → 导出 → 双态 → 侧栏」：刷新与双态之间
+    // 插入导出按钮，故 gap 计算对相邻件取导出按钮（缺失时回落双态自身）
+    const exportRect = document.querySelector('.vsidian-pdf-export-toggle')
+      ?.getBoundingClientRect() ?? null
     const displayOf = (cls: string) => {
       const icon = btn.querySelector(`.${cls}`)
       return icon ? getComputedStyle(icon).display : 'missing'
@@ -118,7 +122,8 @@ Object.assign(window, {
       toolbarCenterX: barRect ? barRect.x + barRect.width / 2 : null,
       gapToSidebar: sideRect ? sideRect.left - rect.right : null,
       refreshCenterX: refreshRect ? refreshRect.x + refreshRect.width / 2 : null,
-      refreshGapToView: refreshRect ? rect.left - refreshRect.right : null,
+      refreshGapToView: refreshRect && exportRect ? exportRect.left - refreshRect.right
+        : refreshRect ? rect.left - refreshRect.right : null,
     }
   },
   /** 工具栏按钮序（DOM 序契约） */

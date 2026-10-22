@@ -61,7 +61,7 @@ import type { AddonPasteRule } from '../shared/addonPasteRules'
 import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
 import { isHttpLinkHref } from '../shared/webLink'
-import type { HostToWebview, PasteStage } from '../shared/protocol'
+import type { HostToWebview, PasteStage, PdfExportEntryMode } from '../shared/protocol'
 import type { TableEditOp } from '../shared/protocol'
 import type { AddonRefEmbedCardInput } from './addonRefViews'
 import { chainAt } from '../shared/markdownDoc'
@@ -129,6 +129,7 @@ import {
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
+import type { MessageKey } from '../shared/locales/en'
 import { bindLocale, bindLocaleAttrs, bindLocaleFn, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
 import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
@@ -178,6 +179,7 @@ import { revealInlineHtmlSourceAtCursor } from './liveInlineHtml'
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
 import { resetMermaidLoadFailure, setMermaidDarkTheme } from './mermaidRender'
+import { collectReadingStyleSnapshot } from './readingStyleSnapshot'
 import {
   closeDiagramPopup,
   DIAGRAM_POPUP_CLASS_NAMES,
@@ -693,6 +695,10 @@ export class WebviewSyncController {
   private viewToggleBtn: HTMLButtonElement | undefined
   /** #208 工具栏刷新嵌入资源按钮（测试钩子 refresh.test.click 的真实点击目标） */
   private refreshBtn: HTMLButtonElement | undefined
+  /** PDF 导出按钮与其下拉菜单（四个导出入口共用同一模态；菜单开合状态
+   *  由 hidden 属性承载，与快速操作标题菜单同一套键盘/Esc/点外关闭语义） */
+  private pdfExportBtn: HTMLButtonElement | undefined
+  private pdfExportMenu: HTMLElement | undefined
   private quickHeadingBtn: HTMLButtonElement | undefined
   private quickHeadingMenu: HTMLElement | undefined
   private quickActionResizeObserver: ResizeObserver | undefined
@@ -2095,6 +2101,10 @@ export class WebviewSyncController {
     this.quickToggleBtn = undefined
     this.viewToggleBtn = undefined
     this.refreshBtn = undefined
+    document.removeEventListener('pointerdown', this.pdfExportDismissPointer, true)
+    document.removeEventListener('keydown', this.pdfExportEscapeKey, true)
+    this.pdfExportBtn = undefined
+    this.pdfExportMenu = undefined
     this.quickHeadingBtn = undefined
     this.quickHeadingMenu = undefined
     this.findPanel?.remove()
@@ -2454,6 +2464,22 @@ export class WebviewSyncController {
         this.skeletonHoldReleased = true
         this.dismissSkeleton()
         break
+      case 'pdfExport.styleSnapshot.request': {
+        // T02（#622）面板级只读交互：主题变量计算值枚举回包（PDF 导出准备
+        // 阶段的主题跟随数据源；无副作用）
+        const snapshot = collectReadingStyleSnapshot()
+        if (snapshot !== null) {
+          this.bridge.postMessage({
+            kind: 'pdfExport.styleSnapshot.report',
+            dark: snapshot.dark,
+            vars: snapshot.vars,
+            ...(snapshot.reading.fontFamily !== undefined ? { fontFamily: snapshot.reading.fontFamily } : {}),
+            ...(snapshot.reading.fontSize !== undefined ? { fontSize: snapshot.reading.fontSize } : {}),
+            ...(snapshot.reading.lineHeight !== undefined ? { lineHeight: snapshot.reading.lineHeight } : {}),
+          })
+        }
+        break
+      }
       case 'keybindings.snapshot':
       case 'keybindings.changed': {
         const overrides = message.overrides
@@ -3879,13 +3905,49 @@ export class WebviewSyncController {
         resetMermaidLoadFailure()
         break
       case 'view.state.request': {
-        // 查找观测前同步校验新鲜度（文档变化后微任务可能尚未执行）；
+        // 查找观测前同步校准新鲜度（文档变化后微任务可能尚未执行）；
         // 此处不在 CM6 update 内，可以安全 dispatch 纯 effect 事务
         if (this.findOpen) {
           this.findEnsureFresh()
           this.findRender()
         }
         this.reportViewState()
+        break
+      }
+      case 'pdfExport.selection.request': {
+        // T03（#623）选区导出：回报当前选区（只读观测，不改选区）。live
+        // 模式取 CM6 多选区的非空区间（from<to——纯光标不是有效选区）；
+        // 阅读模式恒空（阅读只读无选区交互语义，隐藏 CM6 的陈旧选区
+        // 不得冒充——宿主按 viewMode 提示切到实时预览）
+        const live = this.viewMode === 'live' && this.view !== undefined
+        const ranges = live
+          ? this.view!.state.selection.ranges
+              .filter((r) => r.from !== r.to)
+              .map((r) => ({ from: Math.min(r.from, r.to), to: Math.max(r.from, r.to) }))
+          : []
+        this.bridge.postMessage({
+          kind: 'pdfExport.selection.report',
+          requestId: message.requestId,
+          viewMode: this.viewMode,
+          ranges,
+        })
+        break
+      }
+      case 'sync.test.setSelection': {
+        // 测试钩子：把 live 编辑器选区设为给定多区间（纯 selection 事务
+        // ——无 changes 不产生编辑历史、不出站 edit.request；集成测试驱动
+        // 多选区导出的注入面，与用户键入形成的选区同一读取路径）
+        if (this.viewMode === 'live' && this.view && message.ranges.length > 0) {
+          this.view.dispatch({
+            selection: EditorSelection.create(
+              message.ranges.map((r) => EditorSelection.range(
+                Math.min(r.anchor, r.head),
+                Math.max(r.anchor, r.head),
+              )),
+              Math.max(0, Math.min(message.ranges.length - 1, 0)),
+            ),
+          })
+        }
         break
       }
       case 'perf.probe': {
@@ -5546,6 +5608,21 @@ export class WebviewSyncController {
       })
     })
     this.viewToggleBtn = viewBtn
+    // PDF 导出按钮（右下端组、双态切换左侧）：点击展开四个导出入口菜单。
+    // 四个 mode 与命令面板四个命令一一对应——本按钮只发 pdfExport.open，
+    // 文档/选区校验与模态打开全在宿主命令实现内（不建第二套导出语义）。
+    // 鼠标按下不抢正文焦点（与刷新/双态按钮同口径）
+    const pdfExportBtn = document.createElement('button')
+    pdfExportBtn.type = 'button'
+    pdfExportBtn.className = 'vsidian-pdf-export-toggle'
+    bindLocaleAttrs(pdfExportBtn, 'toolbar.exportPdf')
+    pdfExportBtn.setAttribute('aria-haspopup', 'menu')
+    pdfExportBtn.setAttribute('aria-expanded', 'false')
+    pdfExportBtn.setAttribute('aria-controls', 'vsidian-pdf-export-menu')
+    pdfExportBtn.appendChild(createPdfExportIcon())
+    pdfExportBtn.addEventListener('mousedown', (event) => event.preventDefault())
+    pdfExportBtn.addEventListener('click', (event) => this.togglePdfExportMenu(event.detail === 0))
+    this.pdfExportBtn = pdfExportBtn
     const sidebarBtn = document.createElement('button')
     sidebarBtn.type = 'button'
     sidebarBtn.className = 'vsidian-sidebar-toggle'
@@ -5568,9 +5645,117 @@ export class WebviewSyncController {
     this.addonToolbarSlotEl = addonSlot
     bar.appendChild(addonSlot)
     bar.appendChild(refreshBtn)
+    bar.appendChild(pdfExportBtn)
     bar.appendChild(viewBtn)
     bar.appendChild(sidebarBtn)
+    const exportMenu = this.buildPdfExportMenu()
+    bar.appendChild(exportMenu)
+    this.pdfExportMenu = exportMenu
+    // 点外关闭：capture 阶段判定，菜单与按钮之外的按下即收起（与大纲菜单/
+    // 右键菜单同一「点外消失」语义）。常驻注册（不随开合增删），关闭路径
+    // 幂等；dispose 时统一摘除
+    document.addEventListener('pointerdown', this.pdfExportDismissPointer, true)
     return bar
+  }
+
+  /** 工具栏导出菜单的点外关闭判定（capture 阶段；命中按钮或菜单内则放行） */
+  private readonly pdfExportDismissPointer = (event: Event): void => {
+    if (this.pdfExportMenu === undefined || this.pdfExportMenu.hidden) return
+    const target = event.target instanceof Node ? event.target : null
+    if (target !== null && (this.pdfExportMenu.contains(target) || this.pdfExportBtn?.contains(target) === true)) return
+    this.closePdfExportMenu(false)
+  }
+
+  /** 菜单打开期间的 Esc 拦截（document capture 层）：菜单的 keydown 监听器
+   *  只有在焦点落进菜单时才收得到事件，而**鼠标点击**按钮会保留正文焦点
+   *  （按钮 mousedown preventDefault 是保住选区/焦点的手段），此时 Esc 发往
+   *  .cm-content，冒泡到不了兄弟节点 menu（#011）。开合期间在 document 上
+   *  挂 capture 监听，关闭时摘除——不常驻、不与其他 Esc 语义争用。 */
+  private readonly pdfExportEscapeKey = (event: Event): void => {
+    if (this.pdfExportMenu === undefined || this.pdfExportMenu.hidden) return
+    if ((event as KeyboardEvent).key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    this.closePdfExportMenu(true)
+  }
+
+  /** 工具栏「导出为 PDF」下拉菜单：四个入口逐项真实 button（role=menuitem），
+   *  点击即发 pdfExport.open 并收起菜单。键盘语义沿快速操作标题菜单的既有
+   *  形态——ArrowUp/Down 循环、Home/End 跳端、Esc 收起并回焦按钮。 */
+  private buildPdfExportMenu(): HTMLElement {
+    const menu = document.createElement('div')
+    menu.className = 'vsidian-pdf-export-menu'
+    menu.id = 'vsidian-pdf-export-menu'
+    menu.setAttribute('role', 'menu')
+    bindLocale(menu, 'aria-label', 'toolbar.exportPdfMenu')
+    menu.hidden = true
+    const items: Array<[PdfExportEntryMode, MessageKey]> = [
+      ['currentDocument', 'pdfExport.menu.currentDocument'],
+      ['selection', 'pdfExport.menu.selection'],
+      ['batch', 'pdfExport.menu.batch'],
+      ['merge', 'pdfExport.menu.merge'],
+    ]
+    for (const [mode, key] of items) {
+      const el = document.createElement('button')
+      el.type = 'button'
+      el.className = 'vsidian-pdf-export-menu-item'
+      el.setAttribute('role', 'menuitem')
+      el.dataset['exportMode'] = mode
+      bindLocale(el, 'text', key)
+      el.addEventListener('mousedown', (event) => event.preventDefault())
+      el.addEventListener('click', () => {
+        this.closePdfExportMenu(false)
+        this.bridge.postMessage({ kind: 'pdfExport.open', mode })
+      })
+      menu.appendChild(el)
+    }
+    menu.addEventListener('keydown', (event) => {
+      const options = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+      if (options.length === 0) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        this.closePdfExportMenu(true)
+      } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault()
+        const index = options.indexOf(document.activeElement as HTMLButtonElement)
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+          : event.key === 'ArrowDown' ? (index + 1) % options.length
+            : (index + options.length - 1) % options.length
+        options[next]?.focus()
+      }
+    })
+    return menu
+  }
+
+  private togglePdfExportMenu(focusFirst: boolean): void {
+    const menu = this.pdfExportMenu
+    const btn = this.pdfExportBtn
+    if (!menu || !btn) return
+    if (!menu.hidden) {
+      this.closePdfExportMenu(true)
+      return
+    }
+    menu.hidden = false
+    // 贴着按钮右缘、按钮下方展开：工具栏右端组靠右，左对齐会溢出主编辑区。
+    // 用工具栏的定位框换算出相对坐标（菜单是工具栏的绝对定位子元素）
+    const bar = this.toolbar
+    if (bar) {
+      const barRect = bar.getBoundingClientRect()
+      const btnRect = btn.getBoundingClientRect()
+      menu.style.right = `${Math.max(0, barRect.right - btnRect.right)}px`
+      menu.style.top = `${btnRect.bottom - barRect.top}px`
+    }
+    btn.setAttribute('aria-expanded', 'true')
+    // 打开期间接管 document 级 Esc（焦点可能仍在正文——见 pdfExportEscapeKey）
+    document.addEventListener('keydown', this.pdfExportEscapeKey, true)
+    if (focusFirst) menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+  }
+
+  private closePdfExportMenu(returnFocus: boolean): void {
+    if (this.pdfExportMenu) this.pdfExportMenu.hidden = true
+    this.pdfExportBtn?.setAttribute('aria-expanded', 'false')
+    document.removeEventListener('keydown', this.pdfExportEscapeKey, true)
+    if (returnFocus) this.pdfExportBtn?.focus()
   }
 
   /** #208 手动刷新请求发送（工具栏按钮与快捷键入口共用——两条入口汇合
@@ -12266,6 +12451,32 @@ function createViewToggleIcon(): SVGSVGElement {
   edit.setAttribute('d', 'M21.174 6.812a1 1 0 0 0-3.986-3.987L3.642 16.374a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z')
   svg.appendChild(book)
   svg.appendChild(edit)
+  return svg
+}
+
+/** 工具栏 PDF 导出图标（lucide file-down 意象，内联 SVG，不引入图标库）：
+ *  纸张轮廓 + 向下箭头，与刷新/齿轮/双态图标同为 stroke-width=2 恒定线宽 */
+function createPdfExportIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  const sheet = document.createElementNS(SVG_NS, 'path')
+  sheet.setAttribute('d', 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z')
+  const fold = document.createElementNS(SVG_NS, 'path')
+  fold.setAttribute('d', 'M14 2v6h6')
+  const arrow = document.createElementNS(SVG_NS, 'path')
+  arrow.setAttribute('d', 'M12 12v6')
+  const arrowHead = document.createElementNS(SVG_NS, 'path')
+  arrowHead.setAttribute('d', 'M9 15l3 3 3-3')
+  svg.appendChild(sheet)
+  svg.appendChild(fold)
+  svg.appendChild(arrow)
+  svg.appendChild(arrowHead)
   return svg
 }
 

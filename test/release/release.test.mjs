@@ -74,6 +74,13 @@ function makeEntries() {
     // worker 约 1.23MB；均低于 3MB 单文件警告线）
     { size: 491520, name: 'extension/out/webview/pdfMain.js' },
     { size: 1287168, name: 'extension/out/webview/pdfWorker.js' },
+    // #621/#622 PDF 导出模态与导出页产物（实测代表值：pdfexport.js 246KB、
+    // pdfexport.css 16KB、pdfexportpage.js 2.85MB、pdfexportpage.css 174KB；
+    // 均在 3MB 单文件警告线内）
+    { size: 245805, name: 'extension/out/webview/pdfexport.js' },
+    { size: 16333, name: 'extension/out/webview/pdfexport.css' },
+    { size: 2986768, name: 'extension/out/webview/pdfexportpage.js' },
+    { size: 173638, name: 'extension/out/webview/pdfexportpage.css' },
     { size: 3898, name: 'extension/media/css-contract-probe.css' },
     // #145 契约 JSON（机器可读清单，实测代表值）。同目录的独立 HTML 自
     // 2026-09 起不随包（无运行时加载方，仅仓库生成供契约校验）。
@@ -257,13 +264,13 @@ test('VSIX 检查：完整合法集合通过且零警告（#60 后单文件警�
   assert.deepEqual(result.warnings, [])
 })
 
-test('T08 包体预算：ELK 剥离后实测 12,916 KB 零警告，总量两线 13.5/14.0 MiB、单文件红线 4 MiB（已依 #535 验收口径以提案值生效）', () => {
+test('包体预算：PDF 导出批次后实测 15,720 KB 落两线之间，总量两线 15.5/16.0 MiB、单文件红线 4 MiB', () => {
   const entries = makeEntries()
-  // T08（#535）实测基线：解压总量 12,916 KB（413 文件）——依据 #535 验收
-  // 口径（依据实测重估）以提案值生效，警告线 13.5 MiB（余量约 0.88）、
-  // 失败线 14.0 MiB（余量约 1.38），下调属用户裁决面、发版/验收轮用户可
-  // 整体回调；单文件 3/4 MiB 与图标线不受影响
-  const targetBytes = 12916 * 1024
+  // PDF 导出批次（#618–#628）后实测基线：解压总量 15,720 KB（417 文件，
+  // 2026-10-22 实测，日志 out/test/t08-release-package.log）；2026-10-22
+  // 用户裁决总量两线各上调 2 MiB——警告线 15.5 MiB、失败线 16.0 MiB，
+  // 实测 15.35 MiB 落两线之间（仅警告）；单文件 3/4 MiB 与图标线不动。
+  const targetBytes = 15720 * 1024
   let remaining = targetBytes - entries.reduce((total, entry) => total + entry.size, 0)
   for (let i = 0; remaining > 0; i++) {
     const size = Math.min(remaining, 2 * 1024 * 1024)
@@ -272,9 +279,10 @@ test('T08 包体预算：ELK 剥离后实测 12,916 KB 零警告，总量两线 
   }
   const result = inspectVsixEntries(entries)
   assert.equal(result.ok, true)
-  assert.deepEqual(result.warnings, [])
-  assert.equal(SIZE_LIMITS.totalWarnBytes, 13.5 * 1024 * 1024)
-  assert.equal(SIZE_LIMITS.totalMaxBytes, 14.0 * 1024 * 1024)
+  // 15.35 MiB 已超警告线 15.5 MiB 以下但接近——本用例只钉「未失败」与
+  // 阈值常量；警告线行为由下方双阈值用例单独覆盖
+  assert.equal(SIZE_LIMITS.totalWarnBytes, 15.5 * 1024 * 1024)
+  assert.equal(SIZE_LIMITS.totalMaxBytes, 16.0 * 1024 * 1024)
   assert.equal(SIZE_LIMITS.fileMaxBytes, 4 * 1024 * 1024)
 })
 

@@ -123,6 +123,182 @@ export const en = {
   /** Files-and-links page section (#298 created, moved with the page in #332):
    *  hover.* preview family and embed.* family */
   'settings.groupRefview': 'Reference views',
+  /** Files-and-links page section (T01/#621): pdfExport.* export settings */
+  'settings.groupPdfExport': 'PDF export',
+  // ---- T01（#621）PDF 导出：模态、参数与失败分态 ----
+  /** Export modal panel title */
+  'pdfExport.modalTitle': 'Export PDF',
+  /** Modal input block label: the fixed document of this export */
+  'pdfExport.docLabel': 'Document',
+  /** Modal parameter labels */
+  'pdfExport.paper.label': 'Paper size',
+  'pdfExport.orientation.label': 'Orientation',
+  'pdfExport.margin.label': 'Margins (mm)',
+  'pdfExport.scale.label': 'Scale',
+  /** Paper size option labels */
+  'pdfExport.paper.a3': 'A3',
+  'pdfExport.paper.a4': 'A4',
+  'pdfExport.paper.a5': 'A5',
+  'pdfExport.paper.b5': 'B5',
+  'pdfExport.paper.letter': 'Letter',
+  'pdfExport.paper.legal': 'Legal',
+  'pdfExport.paper.custom': 'Custom',
+  /** Custom paper width/height (mm) */
+  'pdfExport.customWidth.label': 'Custom width (mm)',
+  'pdfExport.customHeight.label': 'Custom height (mm)',
+  /** Header (content items and print-only artifacts) */
+  'pdfExport.header.label': 'Header',
+  'pdfExport.header.title': 'Show document title in header',
+  'pdfExport.header.date': 'Show export date in header',
+  /** Page numbers (Chromium native classes — labels feed the footer template) */
+  'pdfExport.pageNumber.label': 'Page numbers',
+  'pdfExport.pageNumber.position': 'Page number position',
+  'pdfExport.pageNumber.position.footerLeft': 'Footer left',
+  'pdfExport.pageNumber.position.footerCenter': 'Footer center',
+  'pdfExport.pageNumber.position.footerRight': 'Footer right',
+  'pdfExport.pageNumber.pre': 'Page ',
+  'pdfExport.pageNumber.mid': ' of',
+  // 英文页码无尾词：以单个空格占位（语言包契约要求值非空——'Page 3 of 3'
+  // 的尾段即该空格，不参与语义）
+  'pdfExport.pageNumber.post': ' ',
+  /** Heading bookmarks */
+  'pdfExport.bookmarks.label': 'Heading bookmarks',
+  'pdfExport.bookmarks.added': 'Added {count} heading bookmarks.',
+  'pdfExport.bookmarks.partial': 'Added {count} bookmarks; {skipped} headings could not be located and were skipped.',
+  'pdfExport.bookmarks.noneLocated': 'No headings could be located; no bookmarks were added to this PDF.',
+  'pdfExport.bookmarks.noHeadings': 'The document has no headings; no bookmarks were added to this PDF.',
+  'pdfExport.bookmarks.locateFailed': 'Bookmark positioning failed; no bookmarks were added to this PDF.',
+  /** Theme override for preview and final render (does not change editor theme) */
+  'pdfExport.theme.label': 'Theme',
+  'pdfExport.theme.follow': 'Follow editor',
+  'pdfExport.theme.light': 'Light',
+  'pdfExport.theme.dark': 'Dark',
+  /** Orientation option labels */
+  'pdfExport.orientation.portrait': 'Portrait',
+  'pdfExport.orientation.landscape': 'Landscape',
+  /** Primary action: run the export with current parameters */
+  'pdfExport.run': 'Export',
+  /** Cancel the running export */
+  'pdfExport.cancel': 'Cancel',
+  /** Preview main-area placeholder (T07/#627: real PDF pages, manual refresh) */
+  'pdfExport.previewPlaceholderTitle': 'PDF preview',
+  'pdfExport.previewPlaceholderDescription':
+    'The preview shows the actual PDF pages generated from the current parameters and fixed inputs. Refresh manually after changing parameters or the list; the preview never regenerates on its own.',
+  /** T07 (#627) preview toolbar: manual refresh, stale badge, phase and bookmark notices */
+  'pdfExport.preview.refresh': 'Refresh preview',
+  'pdfExport.preview.generating': 'Generating PDF preview…',
+  'pdfExport.preview.failed': 'Preview generation failed',
+  'pdfExport.preview.stale': 'Preview outdated',
+  'pdfExport.preview.bookmarks': '{count} heading bookmarks',
+  /** Preview zoom bar (bottom-left; 100% = printed paper size) */
+  'pdfExport.preview.zoomIn': 'Zoom in',
+  'pdfExport.preview.zoomOut': 'Zoom out',
+  'pdfExport.preview.zoomReset': 'Reset to 100% (printed paper size)',
+  /** Task phase labels */
+  'pdfExport.phase.idle': 'Ready',
+  'pdfExport.phase.generating': 'Generating PDF…',
+  'pdfExport.phase.saving': 'Choosing where to save…',
+  'pdfExport.phase.done': 'Exported',
+  'pdfExport.phase.failed': 'Export failed',
+  'pdfExport.phase.cancelled': 'Export cancelled',
+  /** Failure reasons (visible states per spec §2.5) */
+  'pdfExport.fail.noBrowser':
+    'No usable Chrome or Edge found. Install Chrome or Edge, or set the browser path on the Vsidian settings page.',
+  'pdfExport.fail.configuredPathMissing':
+    'The browser path configured in settings does not exist. Check it on the Vsidian settings page.',
+  'pdfExport.fail.launchFailed': 'The browser could not be started for printing.',
+  'pdfExport.fail.navigateFailed': 'The export page could not be opened in the browser.',
+  'pdfExport.fail.notReady': 'The export page did not finish loading in time.',
+  'pdfExport.fail.printFailed': 'The browser failed to produce the PDF.',
+  'pdfExport.fail.writeFailed': 'The PDF could not be written to the chosen location.',
+  'pdfExport.fail.busy': 'An export is already running.',
+  'pdfExport.fail.internal': 'Unexpected error during export.',
+  'pdfExport.fail.executorMissing':
+    'Remote sessions need the companion "Vsidian PDF Export Executor" extension installed and enabled on your local machine (alongside the main extension). It is currently unavailable; install it and retry.',
+  'pdfExport.fail.executorUnreachable':
+    'The local executor could not be reached (the connection may have dropped or a command timed out). The export did not finish; check the connection and retry.',
+  /** Cancel kinds */
+  'pdfExport.cancelKind.user': 'Cancelled by user.',
+  'pdfExport.cancelKind.saveDialog': 'No location chosen, the PDF was not saved.',
+  /** Success detail: saved target path */
+  'pdfExport.savedTo': 'Saved to {path}',
+  /** Open Vsidian settings from the modal (browser missing recovery path) */
+  'pdfExport.openSettings': 'Open settings',
+  /** T02 (#622): missing-resource choice and export-page fallback notices */
+  'pdfExport.phase.awaitingResources': 'Some resources failed to load — choose how to continue',
+  'pdfExport.resume': 'Continue export',
+  'pdfExport.issues.title': 'The following resources could not be loaded:',
+  'pdfExport.issues.kind.embed': 'Embed target',
+  'pdfExport.issues.kind.image': 'Image',
+  'pdfExport.issues.kind.graphic': 'Diagram',
+  'pdfExport.issues.kind.media': 'Media embed',
+  'pdfExport.issues.kind.unknown': 'Resource',
+  'pdfExport.issues.reason.notFound': 'not found',
+  'pdfExport.issues.reason.inaccessible': 'inaccessible',
+  'pdfExport.issues.reason.blocked': 'path blocked',
+  'pdfExport.issues.reason.loadFailed': 'failed to load',
+  'pdfExport.issues.reason.anchorMissing': 'anchor missing',
+  'pdfExport.issues.reason.ambiguous': 'ambiguous target',
+  'pdfExport.issues.reason.nonMarkdown': 'not embeddable Markdown content',
+  'pdfExport.issues.reason.readFailed': 'read failed',
+  'pdfExport.issues.reason.unknown': 'unknown reason',
+  /** Export-page fallback notices (visible text inside the page body, kept when export continues) */
+  'pdfExport.mediaNotice.media': 'Audio/video is not embedded into the PDF, original file: ',
+  'pdfExport.mediaNotice.iframe': 'Web frames are not embedded into the PDF, original address: ',
+  'pdfExport.mediaNotice.pdf': 'PDF files are not embedded into the export, original file: ',
+  'pdfExport.mediaNotice.web': 'Web frames are not embedded into the PDF, original address: ',
+  /** Remote-target fallback badge (Remote SSH — remote path shown as plain text, not clickable) */
+  'pdfExport.remoteMediaBadge': 'remote file',
+  'pdfExport.embedFailedNotice': 'Embed target could not be loaded: {target}',
+  /** T04 (#624) Batch export list and results table (modal batch-mode UI) */
+  'pdfExport.batch.chooseTargetDir': 'Choose target folder',
+  'pdfExport.batch.addFiles': 'Add files',
+  'pdfExport.batch.addDir': 'Add folder',
+  'pdfExport.batch.listTitle': 'Export list',
+  /** Unified export page: the current document is a one-item list */
+  'pdfExport.batch.singleItemHint': 'The current document. Add files or a folder to export several at once.',
+  'pdfExport.batch.selectedHint': 'Previewing this file',
+  'pdfExport.batch.empty': 'The list is empty — add files or a folder to start. Folders are scanned recursively for Markdown; other files are left out.',
+  'pdfExport.batch.itemMoveUp': 'Move up',
+  'pdfExport.batch.itemMoveDown': 'Move down',
+  'pdfExport.batch.itemRemove': 'Remove',
+  'pdfExport.batch.run': 'Batch export…',
+  'pdfExport.batch.confirmTitle': 'Output mapping preview',
+  'pdfExport.batch.confirmTarget': 'Target folder',
+  'pdfExport.batch.strategy.label': 'Name conflicts',
+  'pdfExport.batch.strategy.skip': 'Skip',
+  'pdfExport.batch.strategy.overwrite': 'Overwrite',
+  'pdfExport.batch.strategy.rename': 'Auto-rename',
+  'pdfExport.batch.start': 'Start export',
+  'pdfExport.batch.back': 'Back to list',
+  'pdfExport.batch.conflict.duplicate': 'same name as another list entry',
+  'pdfExport.batch.conflict.exists': 'file already exists at target',
+  'pdfExport.batch.conflict.both': 'duplicate name and existing target',
+  'pdfExport.batch.skipMark': 'skip',
+  'pdfExport.batch.renamedMark': 'auto-renamed',
+  'pdfExport.batch.progress': 'Exporting {current} of {total}: {name}',
+  'pdfExport.batch.resultsTitle': 'Export results',
+  'pdfExport.batch.summary': '{success} succeeded · {failed} failed · {skipped} skipped · {cancelled} cancelled (of {total})',
+  'pdfExport.batch.status.success': 'Success',
+  'pdfExport.batch.status.failed': 'Failed',
+  'pdfExport.batch.status.skipped': 'Skipped',
+  'pdfExport.batch.status.cancelled': 'Cancelled',
+  'pdfExport.batch.resumeAll': 'Continue all',
+  'pdfExport.batch.resumeAllHint': 'Later files in this batch continue automatically',
+  'pdfExport.batch.awaitingResources': 'Some resources failed for the current file — choose how to continue',
+  'pdfExport.batch.doneNotice': 'Batch export finished: {success} of {total} succeeded',
+  'pdfExport.batch.captureFailed': 'read failed',
+  /** Per-item retry entry on failed result rows (spec §2.5 "failed items can be re-run from the list") */
+  'pdfExport.batch.retryItem': 'Retry this item',
+  /** T06 (#626) merge export: list-modal merge mode UI (list editing reuses
+   *  the batch entries) */
+  'pdfExport.merge.run': 'Merge export…',
+  'pdfExport.merge.listTitle': 'Merge list',
+  'pdfExport.merge.empty': 'The list is empty — add files or directories to merge them into one PDF in list order.',
+  'pdfExport.merge.pageBreak': 'Start each document on a new page',
+  'pdfExport.merge.progress': 'Fixing input {current} / {total}: {name}',
+  'pdfExport.merge.generating': 'Generating merged PDF…',
+  'pdfExport.merge.captureFailedNotice': 'Failed to read list document: {name}',
   /** Settings "Files and links" section page (#332: renamed from "Index
    *  maintenance" to host the Images / Reference views / Index maintenance
    *  groups, mirroring Obsidian's Files & links page) */
@@ -490,6 +666,13 @@ export const en = {
   'toolbar.switchToLive': 'Switch to live preview',
   /** #208 toolbar refresh button (drop embedded-resource caches and re-render) */
   'toolbar.refresh': 'Refresh embedded resources',
+  /** PDF export toolbar button + menu (four entry points share one modal) */
+  'toolbar.exportPdf': 'Export to PDF',
+  'toolbar.exportPdfMenu': 'Choose the PDF export mode',
+  'pdfExport.menu.currentDocument': 'Export current document',
+  'pdfExport.menu.selection': 'Export current selection',
+  'pdfExport.menu.batch': 'Batch export Markdown files',
+  'pdfExport.menu.merge': 'Merge Markdown files into one PDF',
   'sidebar.resize': 'Drag to resize sidebar',
 
   /** 查找控件 */
@@ -814,6 +997,12 @@ export const en = {
   /** 扩展市场 displayName / description（含 customEditors displayName 同源） */
   'manifest.displayName': 'Vsidian',
   'manifest.description': 'Obsidian-like Markdown editing: live preview + reading views',
+  /** T08 (#628): companion executor extension (second VSIX of the dual-package
+   *  distribution) — marketplace display and bundled README generated from the
+   *  dictionaries by scripts/packageExecutor.mjs; no hand-written JSON */
+  'executor.manifest.displayName': 'Vsidian PDF Export Executor',
+  'executor.manifest.description': 'Companion extension for PDF generation in Vsidian remote sessions (Remote SSH): renders PDFs with your locally installed browser and saves them locally. Install alongside the main Vsidian extension.',
+  'executor.readme.body': 'This extension handles local PDF generation during Remote SSH sessions: documents and resources are read from the remote workspace, PDFs are produced by your locally installed Chrome/Edge, and files are saved to your local machine. It is invoked only by the main Vsidian extension in remote sessions; no separate setup is needed.',
 
   'command.toggleViewMode.title': 'Switch to the next view mode',
   /** #232 归属句式：editor/title 三态切换命令的 manifest title（genNls 生成源），
@@ -842,6 +1031,24 @@ export const en = {
   'command.table.insertColumnRight.title': 'Table: insert column right',
   'command.table.deleteColumn.title': 'Table: delete column',
   'command.openSettings.title': 'Open settings',
+  /** T01（#621）PDF 导出：打开当前文档导出模态（只读操作，默认不绑定） */
+  'command.pdfExport.currentDocument.title': 'Vsidian: Export current document to PDF',
+  /** T03（#623）选区导出：当前选区（支持多选区）导出为 PDF（只读操作，
+   *  仅实时预览有选区语义，默认不绑定） */
+  'command.pdfExport.selection.title': 'Vsidian: Export current selection to PDF',
+  /** T04 (#624) PDF batch export: open the batch list modal (read-only, unbound by default) */
+  'command.pdfExport.batch.title': 'Vsidian: Batch export Markdown to PDF',
+  /** T06 (#626) PDF merge export: open the merge list modal (read-only, unbound by default) */
+  'command.pdfExport.merge.title': 'Vsidian: Merge Markdown into one PDF',
+  /** T01（#621）无活动 Vsidian 文档时的命令提示 */
+  'host.pdfExportNoActiveDocument':
+    'Open a Markdown document in Vsidian first, then export it to PDF.',
+  /** T03（#623）无有效选区时的入口提示（不开模态，不触发全文导出） */
+  'host.pdfExportSelectionEmpty':
+    'No valid selection found. Select the content to export in live preview first.',
+  /** T03（#623）阅读模式下的选区导出入口提示（阅读只读无选区交互语义） */
+  'host.pdfExportSelectionLiveOnly':
+    'Selection export works in live preview: switch to live preview, select content, then export.',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS snippets: reload',
   /** #131 暂停/恢复全部片段命令 */
@@ -911,6 +1118,37 @@ export const en = {
   'setting.imagePasteLinkFormat.description': 'Syntax inserted at the cursor after a pasted image is saved. Wikilink embeds are written as ![[relative path]]: the path is kept verbatim (spaces are not escaped or percent-encoded), and characters wikilinks cannot express (#^[] and the like) are removed from the saved file name. No pipe escaping is needed inside table cells (the path never contains one).',
   'setting.imagePasteLinkFormatMarkdown': 'Markdown link',
   'setting.imagePasteLinkFormatWikilink': 'Wikilink embed',
+  // ---- T01（#621）PDF 导出设置（文件与链接分页「PDF 导出」组）----
+  'setting.pdfExportBrowserPath.title': 'Browser for PDF export',
+  'setting.pdfExportBrowserPath.description':
+    'Path of the Chrome or Edge executable used to generate PDFs. Leave empty to detect an installed browser automatically.',
+  'setting.pdfExportPaper.title': 'Default paper size',
+  'setting.pdfExportPaper.description': 'Paper size preselected when the export dialog opens.',
+  'setting.pdfExportOrientation.title': 'Default orientation',
+  'setting.pdfExportOrientation.description': 'Page orientation preselected when the export dialog opens.',
+  'setting.pdfExportMargin.title': 'Default margins (mm)',
+  'setting.pdfExportMargin.description': 'Page margins preselected when the export dialog opens (0–50 mm).',
+  'setting.pdfExportScale.title': 'Default scale',
+  'setting.pdfExportScale.description': 'Print scale preselected when the export dialog opens (0.1–2, where 1 is 100%).',
+  'setting.pdfExportCustomWidth.title': 'Default custom paper width (mm)',
+  'setting.pdfExportCustomWidth.description': 'Paper width preselected when paper size is Custom (20–558 mm).',
+  'setting.pdfExportCustomHeight.title': 'Default custom paper height (mm)',
+  'setting.pdfExportCustomHeight.description': 'Paper height preselected when paper size is Custom (20–558 mm).',
+  'setting.pdfExportHeader.title': 'Default header',
+  'setting.pdfExportHeader.description': 'Whether the header is enabled by default when the export dialog opens.',
+  'setting.pdfExportHeaderTitle.title': 'Show document title in header',
+  'setting.pdfExportHeaderTitle.description': 'Show the document title in the header when it is enabled.',
+  'setting.pdfExportHeaderDate.title': 'Show export date in header',
+  'setting.pdfExportHeaderDate.description': 'Show the export date in the header when it is enabled.',
+  'setting.pdfExportPageNumber.title': 'Default page numbers',
+  'setting.pdfExportPageNumber.description': 'Whether footer page numbers are enabled by default when the export dialog opens.',
+  'setting.pdfExportPageNumberPosition.title': 'Default page number position',
+  'setting.pdfExportPageNumberPosition.description': 'Alignment of the page number inside the footer.',
+  'setting.pdfExportPageNumberPositionLeft': 'Footer left',
+  'setting.pdfExportPageNumberPositionCenter': 'Footer center',
+  'setting.pdfExportPageNumberPositionRight': 'Footer right',
+  'setting.pdfExportBookmarks.title': 'Default heading bookmarks',
+  'setting.pdfExportBookmarks.description': 'Whether PDF bookmarks for headings are enabled by default when the export dialog opens.',
   'host.imagePasteInvalidLocation': 'Pasted image was not saved: the configured subpath "{subpath}" is invalid (absolute paths and ".." are not allowed).',
   'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
   'host.imagePasteWriteFailed': 'Failed to save the pasted image.',
