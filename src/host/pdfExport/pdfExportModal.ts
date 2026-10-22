@@ -755,8 +755,13 @@ export function createPdfExportModal(
     pendingPreview = undefined
   }
 
+  /** 重挂载重推缓存（webview 回 get）：**只在缓存仍属当前选择时**重发。
+   *  异目标（用户已切到另一条、新一轮仍在生成）时旧缓存不得重发——否则
+   *  面板重载后会把上一目标的画面重新显示出来，而 state 已指向新目标且
+   *  代次被沿用（#009）。同目标下的参数变化仍重发（旧画面 + 过期徽章）。 */
   const pushPreviewArtifact = (): void => {
     if (panel === undefined || previewStore === undefined) return
+    if (!samePreviewSelection(previewStore.target)) return
     void panel.webview.postMessage({
       kind: 'pdfExportModal.previewArtifact',
       generation: previewStore.generation,

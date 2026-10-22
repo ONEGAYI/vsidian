@@ -314,6 +314,77 @@ function replayDisplayedArtifacts(posts: Array<Record<string, unknown>>): { text
   return { text: displayed, mismatched }
 }
 
+describe('PDF 导出模态预览竞态（#009 重挂载重推缓存）', () => {
+  it('A 就绪 → 切 B 生成在途 → webview 重挂载：不得重发 A 的画面', async () => {
+    const { panel, posts } = makePanel()
+    const vscode = await import('vscode')
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never)
+    const handle = createPdfExportModal(
+      { extensionUri: { fsPath: '/ext', path: '/ext' } } as never,
+      () => SETTINGS as never,
+      () => undefined,
+      {
+        outWebviewDir: '/ext/out',
+        resolveResource: async () => ({ ok: false, reason: 'not-found' }),
+        capturePdfBatchDoc: async (fsPath: string) => ({
+          ok: true as const,
+          docName: fsPath.split('/').pop() ?? fsPath,
+          capturedVersion: 1,
+          payload: {
+            docs: [{
+              fsPath,
+              docName: fsPath.split('/').pop() ?? fsPath,
+              text: fsPath.endsWith('a.md') ? 'FIRST-DOC' : 'SECOND-DOC',
+              version: 1,
+            }],
+            embeds: [],
+            mediaEmbeds: [],
+            embedFailures: [],
+          },
+        }),
+        captureBatchWindowInput: async () => ({ style: null, snippets: [], breaks: false }),
+      },
+    )
+    handle.openBatch()
+    handle.injectMessage({ kind: 'pdfExportModal.batch.addFiles', paths: ['/ws/a.md', '/ws/b.md'] })
+    await flush()
+    const items = lastState(posts).batch!.items
+
+    // 先把 a 预览做到 ready
+    handle.injectMessage({ kind: 'pdfExportModal.preview.select', itemId: items[0]!.id, params: {} })
+    await flush(400)
+    expect(lastState(posts).preview.phase).toBe('ready')
+
+    // 切到 b 并卡在渲染（生成在途）
+    sessionState.autoRelease = false
+    handle.injectMessage({ kind: 'pdfExportModal.preview.select', itemId: items[1]!.id, params: {} })
+    await flush()
+    expect(lastState(posts).preview.phase).toBe('generating')
+
+    // 模拟 webview 重挂载：启动时发 pdfExportModal.get
+    posts.length = 0
+    handle.injectMessage({ kind: 'pdfExportModal.get' })
+    await flush()
+
+    const state = lastState(posts)
+    expect((state.previewTarget as { fsPath?: string } | undefined)?.fsPath).toBe('/ws/b.md')
+    // 关键：不得把 a 的历史缓存当作 b 的画面重发
+    const artifactsAfterGet = posts.filter((m) => m['kind'] === 'pdfExportModal.previewArtifact')
+    for (const artifact of artifactsAfterGet) {
+      const bytes = Buffer.from(artifact['base64'] as string, 'base64').toString('utf8')
+      expect(bytes, '重挂载不得重发异目标的历史缓存').not.toContain('FIRST')
+    }
+
+    // 放行 b：最终画面才是 b
+    sessionState.autoRelease = true
+    for (const release of sessionState.gates.splice(0)) release()
+    await flush(600)
+    const settled = lastState(posts)
+    expect(settled.preview.phase).toBe('ready')
+    expect(sessionState.printed[sessionState.printed.length - 1]).toContain('SECOND')
+  }, 30000)
+})
+
 describe('PDF 导出模态预览竞态（#008 选区往返）', () => {
   it('选区 → 升格批量 → 缩回选区：不得复用全文产物', async () => {
     const { panel, posts } = makePanel()
