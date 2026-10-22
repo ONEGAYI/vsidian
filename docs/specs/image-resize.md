@@ -1,6 +1,6 @@
 # 规格：图片尺寸后缀与拖动手柄
 
-> 状态：设计访谈完成（2026-10-22），未实施。本文是图片尺寸语法与拖动手柄的**单一事实源**；实施拆两票，验收以此为准。
+> 状态：设计访谈完成（2026-10-22），未实施。本文是图片尺寸语法与拖动手柄的**单一事实源**；实施拆两票——尺寸语法与七渲染面 [#635](https://github.com/ONEGAYI/vsidian/issues/635)、拖动手柄与视觉 [#636](https://github.com/ONEGAYI/vsidian/issues/636)，验收以此为准。
 
 ## 1. 目标与范围
 
@@ -163,6 +163,8 @@ markdown-it 把整个 `图注|100x80` 放进 `token.content` 与 `children`，`a
 百分比必须走 `style.width = 'N%'`，因为 HTML `width` 属性不接受百分比。像素走属性更利于浏览器在加载前预留空间、减少布局跳动。
 
 ## 5. 拖动手柄
+
+> 本节与 §6、§7 归 [#636](https://github.com/ONEGAYI/vsidian/issues/636)；§2–§4 归 [#635](https://github.com/ONEGAYI/vsidian/issues/635)。
 
 ### 5.1 出现范围
 
