@@ -392,6 +392,11 @@ export const zhCn: Record<MessageKey, string> = {
   /** #318 打开提示（宿主通知气泡 + 定位按钮；弹出本身零副作用） */
   'host.searchRevealHint': '从搜索结果打开？点此定位到选中的匹配处。',
   'host.searchRevealHintLocate': '定位',
+  /** #638 跳转到行：输入框提示/占位/校验与失败反馈 */
+  'host.gotoLinePrompt': '要跳转到的行号（1–{total}）',
+  'host.gotoLinePlaceholder': '输入源码行号，例如 42',
+  'host.gotoLineInvalid': '请输入 1 到 {total} 之间的整数行号。',
+  'host.gotoLineNoPanel': '当前活动标签页不是 Vsidian 面板——请先在 Vsidian 中打开目标笔记再跳转到行。',
   // ---- #199 更名/移动引用自动更新（宿主通知；批量操作合并提示）----
   // #556 T4：越出所属根改为明确绝对路径改写（不再是跳过原因），跳过仅余
   // 内容变化（edge-stale）一类
@@ -794,6 +799,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.index.cleanup.title': '索引：清理当前工作区缓存',
   /** #318 搜索导航定位恢复（默认未绑定，评估记录见 docs/specs/keybindings.md） */
   'command.searchReveal.locate.title': '定位到搜索选中结果',
+  /** #638 跳转到行（默认 Ctrl+G，评估记录见 docs/specs/keybindings.md） */
+  'command.gotoLine.title': '跳转到行',
   'command.ui.sidebarToggle.title': '展开或收起右侧栏',
   'command.ui.outlineToggle.title': '显示或隐藏大纲',
   'command.ui.outlineSearch.title': '搜索大纲标题',

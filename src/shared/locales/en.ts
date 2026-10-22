@@ -415,6 +415,11 @@ export const en = {
   /** #318 open hint (host notification with a locate button; showing it is side-effect free) */
   'host.searchRevealHint': 'Opened from search results? Jump to the selected match here.',
   'host.searchRevealHintLocate': 'Locate',
+  /** #638 go to line: input box prompt/placeholder/validation and failures */
+  'host.gotoLinePrompt': 'Line number to jump to (1–{total})',
+  'host.gotoLinePlaceholder': 'Enter a source line number, e.g. 42',
+  'host.gotoLineInvalid': 'Enter a whole line number between 1 and {total}.',
+  'host.gotoLineNoPanel': 'No active Vsidian panel — open the note in Vsidian before jumping to a line.',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
   // #556 T4: targets outside the source root are now rewritten to explicit
   // absolute paths (no longer a skip reason); the only skip reason left is
@@ -848,6 +853,8 @@ export const en = {
   'command.index.cleanup.title': 'Index: clean workspace cache',
   /** #318: search reveal (unbound by default; see docs/specs/keybindings.md) */
   'command.searchReveal.locate.title': 'Reveal selected search result',
+  /** #638 go to line (default Ctrl+G; see docs/specs/keybindings.md) */
+  'command.gotoLine.title': 'Go to line',
   'command.ui.sidebarToggle.title': 'Expand or collapse the sidebar',
   'command.ui.outlineToggle.title': 'Show or hide the outline',
   'command.ui.outlineSearch.title': 'Search headings',

@@ -47,6 +47,20 @@ export async function run(): Promise<void> {
         edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), message.text ?? '')
         result = await vscode.workspace.applyEdit(edit)
       }
+      // #638 真宿主输入框链路：经命令入口执行 gotoLine（原生输入框由 CDP 侧
+      // 驱动键入并确认）。命令内部等待输入框关闭，故此处不 await——先回执已
+      // 启动，完成/异常写入 gotoline-result.json 供探针轮询。
+      if (message.action === 'gotoLineCommand') {
+        void vscode.commands.executeCommand('onegayi.vsidian.gotoLine').then(
+          (value) => writeFileSync(path.join(directory, 'gotoline-result.json'),
+            JSON.stringify({ done: true, value })),
+          (error: unknown) => writeFileSync(path.join(directory, 'gotoline-result.json'),
+            JSON.stringify({ done: true, error: String(error) })),
+        )
+        result = { started: true }
+      }
+      // #638 光标位置观测经 CDP 在 webview 内直读（见 keybindingsHost.mjs），
+      // 本套件不另设读取动作
       writeFileSync(path.join(directory, `response-${message.id}.json`), JSON.stringify(result))
     }
     await new Promise((resolve) => setTimeout(resolve, 100))

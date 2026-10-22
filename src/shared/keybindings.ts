@@ -83,6 +83,12 @@ const extra: readonly KeybindingOperation[] = [
   // 原型验证结论评论），默认未绑定，用户可经键位设置自配（裁定依据与
   // 评估记录见 docs/specs/keybindings.md 与 docs/specs/search-reveal.md）
   { id: 'searchRevealLocate', command: 'onegayi.vsidian.searchReveal.locate', titleKey: 'command.searchReveal.locate.title', mode: 'both', writes: false, defaults: [] },
+  // #638 跳转到行：自定义编辑器接管 .md 后宿主 workbench.action.gotoLine 失去
+  // 可寻址文本编辑器目标（activeTextEditor=undefined），Ctrl+G 落到原生入口
+  // 只提示先打开文本编辑器。本操作在 webview 捕获层接管该键，宿主弹输入框
+  // 收 1-based 源码行号，经 view.locate 落位（复用既有换行换算与折叠展开
+  // 链路）。纯视图定位零写回；双模式可用；默认 ctrl+g，用户可改绑/清空
+  { id: 'gotoLine', command: 'onegayi.vsidian.gotoLine', titleKey: 'command.gotoLine.title', mode: 'both', writes: false, defaults: ['ctrl+g'] },
 ]
 
 /** 视图中已有明确目标的按钮动作：命令面板、快捷键均可调用。 */

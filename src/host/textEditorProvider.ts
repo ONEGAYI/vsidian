@@ -116,6 +116,7 @@ import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { matchHostOffset, parseCopyMatch, SEARCH_REVEAL_SENTINEL, shouldShowSearchRevealHint } from './searchReveal'
+import { parseGotoLineInput, gotoLineLfOffset } from './gotoLine'
 import {
   readRefContentTarget,
   resolveHoverTargetTip,
@@ -4997,6 +4998,79 @@ export function createTextEditorProvider(
   context.subscriptions.push(vscode.commands.registerCommand(
     'onegayi.vsidian.searchReveal.locate',
     searchRevealLocateWithFeedback,
+  ))
+
+  // ---- #638 跳转到行（当前文档行号定位）----
+  // 自定义编辑器接管 .md 后，宿主 workbench.action.gotoLine 没有可寻址的
+  // 文本编辑器目标，Ctrl+G 只提示先打开文本编辑器。本命令在 webview 捕获层
+  // 接管该键（注册表 gotoLine，默认 ctrl+g、双模式、零写回），宿主弹原生
+  // 输入框收 1-based 源码行号，经 view.locate 落位——复用既有换行换算与折叠
+  // 展开链路（locateOffset 的 unfoldAround 分支），不新造定位器。
+  //
+  // 目标面板在弹框前固定：触发时活动的 Vsidian tab 与其中 active 且 ready 的
+  // 真实面板。异步输入期间用户可能切换文档或关闭面板，故投递前重验同一会话
+  // 记录仍在场；不改为「输入后重新找活动面板」，也不广播到同文件的其他分屏。
+  const gotoLineCommand = async (): Promise<void> => {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+    if (!(tab?.input instanceof vscode.TabInputCustom) || tab.input.viewType !== VIEW_TYPE) {
+      void vscode.window.showWarningMessage(t('host.gotoLineNoPanel'))
+      return
+    }
+    const targetUri = tab.input.uri
+    const ready = await waitForReadyPanel(targetUri, 5000)
+    if (!ready) {
+      void vscode.window.showWarningMessage(t('host.gotoLineNoPanel'))
+      return
+    }
+    // 分屏同 URI 多面板：优先触发时 active 的那个（与搜索定位同口径）
+    const activeSessionId = [...ready.entry.panels.entries()]
+      .find(([sessionId, panel]) => panel.active &&
+        ready.entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready))?.[0]
+    const sessionId = activeSessionId ?? ready.sessionId
+    const entry = ready.entry
+    const total = entry.doc.lineCount
+    const input = await vscode.window.showInputBox({
+      prompt: t('host.gotoLinePrompt', { total: String(total) }),
+      placeHolder: t('host.gotoLinePlaceholder'),
+      validateInput: (value) => {
+        // 空值 = 取消式空提交，不报错也不定位（用户直接回车放弃）
+        if (value.trim() === '') {
+          return undefined
+        }
+        const line = parseGotoLineInput(value)
+        if (line === null || line > entry.doc.lineCount) {
+          return t('host.gotoLineInvalid', { total: String(entry.doc.lineCount) })
+        }
+        return undefined
+      },
+    })
+    if (input === undefined) {
+      return
+    }
+    const line = parseGotoLineInput(input)
+    if (line === null) {
+      return
+    }
+    // 输入期间文档可能变短或面板被关闭：按执行时权威状态重验，不发送失效定位
+    if (!entry.panels.has(sessionId) ||
+      !entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready)) {
+      return
+    }
+    // 行首偏移按执行时权威文本重算（等待期间的外部变更不发送旧偏移），
+    // CRLF 折算与行扫描复用 gotoLineLfOffset（hostLineStart 同一事实源）
+    const lfOffset = gotoLineLfOffset(entry.doc.getText(), line)
+    if (lfOffset === null) {
+      void vscode.window.showWarningMessage(t('host.gotoLineInvalid', {
+        total: String(entry.doc.lineCount),
+      }))
+      return
+    }
+    entry.session.postToPanel(sessionId, { kind: 'view.locate', offset: lfOffset })
+  }
+
+  context.subscriptions.push(vscode.commands.registerCommand(
+    'onegayi.vsidian.gotoLine',
+    gotoLineCommand,
   ))
 
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时

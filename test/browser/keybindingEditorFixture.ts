@@ -5,6 +5,9 @@ import '../../src/webview/main.css'
 
 const messages: unknown[] = []
 let forwarded = 0
+/** #638 宿主输入框模拟：设定用户「提交」的行号（1-based，null = 取消） */
+let gotoLineTarget: number | null = 2
+const gotoLineExecutions: number[] = []
 const controller = new WebviewSyncController({
   postMessage(message: WebviewToHost) {
     messages.push(message)
@@ -13,6 +16,22 @@ const controller = new WebviewSyncController({
       else if (message.id === 'findNext' || message.id === 'findPrevious')
         controller.handleHostMessage({ kind: 'view.find.step',
           direction: message.id === 'findNext' ? 'next' : 'prev' })
+      else if (message.id === 'gotoLine') {
+        // 宿主链路模拟：输入框提交行号后按权威文本换算出 LF 行首偏移投递
+        // view.locate；取消（null）不投递——与生产 gotoLineCommand 同口径
+        gotoLineExecutions.push(gotoLineTarget ?? 0)
+        if (gotoLineTarget !== null) {
+          const text = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+            .state.doc.toString()
+          let offset = 0
+          for (let n = 1; n < gotoLineTarget; n++) {
+            const next = text.indexOf('\n', offset)
+            if (next < 0) break
+            offset = next + 1
+          }
+          controller.handleHostMessage({ kind: 'view.locate', offset })
+        }
+      }
       else controller.handleHostMessage({ kind: 'format.command', op: message.id as 'bold' })
     }
   },
@@ -36,6 +55,9 @@ Object.assign(window, {
   keyState() {
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
     return { text: view.state.doc.toString(), messages, forwarded,
-      findOpen: document.querySelector('.vsidian-find')?.classList.contains('vsidian-find-open') }
+      findOpen: document.querySelector('.vsidian-find')?.classList.contains('vsidian-find-open'),
+      cursor: view.state.selection.main.head, gotoLineExecutions }
   },
+  /** #638：设定下一次 Ctrl+G 提交的行号（null = 用户取消输入框） */
+  setGotoLineTarget(line: number | null) { gotoLineTarget = line },
 })
