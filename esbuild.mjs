@@ -149,6 +149,22 @@ const targets = [
     ...webviewBase,
   },
   {
+    // PDF 导出模态 webview 产物（#621 T01）：独立入口（主区预览占位 +
+    // 侧区参数），样式经 import 产出 pdfExport.css
+    entryPoints: ['src/webview/pdfExportMain.ts'],
+    outfile: 'out/webview/pdfExport.js',
+    ...webviewBase,
+  },
+  {
+    // PDF 导出页产物（#622 T02）：跑在被测浏览器里的完整 Reading 管线
+    //（解析/DOM 构建/图片/文档样式/图形渲染复用 webview 模块），样式
+    // 复用 main.css + katex + 导出限定观感，产出 pdfExportPage.js|css
+    //（宿主微型资源服务静态供给——http origin 是 V01 §10.1 的结构性要求）
+    entryPoints: ['src/webview/pdfExportPageMain.ts'],
+    outfile: 'out/webview/pdfExportPage.js',
+    ...webviewBase,
+  },
+  {
     // Mermaid 独立产物（#60）：经 ESM 源打包（官方 UMD 的模块作用域下
     // 全局自赋值会落空抛错，见 mermaidEntry.ts 头注释），入口显式挂
     // globalThis.mermaid；图类型经 ESM 分块按需加载
@@ -162,6 +178,23 @@ const targets = [
     format: 'esm',
     splitting: true,
     chunkNames: 'mermaid-chunks/[name]-[hash]',
+  },
+  {
+    // T08（#628）PDF 导出本机执行端扩展（双 VSIX 分发的第二个包）：
+    // ui kind——remote 窗口跑在本机 ext host；浏览器发现/CDP 生成/书签
+    // 后处理（pdf-lib）整体复用 src/host/pdfExport 既有模块，打进本包
+    // bundle（两包各自自包含）。产物 out/pdfExecutor/extension.js 由
+    // scripts/packageExecutor.mjs 组装执行端 VSIX（不进主包 .vscodeignore 面）
+    entryPoints: ['src/pdfExecutor/extension.ts'],
+    outfile: 'out/pdfExecutor/extension.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: !production,
+    minify: production,
+    logLevel: 'info',
   },
   // PDF.js 双产物（#337）：配置单一事实源在 scripts/pdfBuildConfig.mjs
   //（#346 修复轮 2 提取——浏览器测试侧 ensurePdfArtifacts 消费同一工厂，
@@ -236,6 +269,58 @@ if (!production) {
     target: 'chrome114',
     sourcemap: true,
     banner: pdfProbeBanner,
+    logLevel: 'info',
+  })
+  // #619（V01）PDF 导出浏览器后端探针三产物（研究票，不进 VSIX）：
+  // - suite：宿主侧套件（node18/cjs；宿主 Node 18 spawn Chrome/Edge + 零依赖
+  //   CDP 直连 + pdf-lib 书签后处理）；
+  // - verify：跑在被测浏览器页面内的 pdf.js 验证引擎（browser/iife；跑在
+  //   本机 Chrome/Edge 155，chrome114 target 沿用 pdfProbe 的保守口径）；
+  // - verifyWorker：pdf.js legacy worker 单文件 iife（宿主读文本经 Blob URL
+  //   装配，与 P3-02 验证过的形态一致）
+  targets.push({
+    entryPoints: ['test/integration/pdfExportProbe/suite.ts'],
+    outfile: 'out/test/integration/pdfExportProbe/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfExportProbe/verifyEntry.ts'],
+    outfile: 'out/test/integration/pdfExportProbe/verify.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfExportProbe/verifyWorker.ts'],
+    outfile: 'out/test/integration/pdfExportProbe/verifyWorker.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  // T08（#628）Remote SSH PDF 导出 e2e 套件（本地 ext host runner——被测
+  // 命令经 executeCommand 跨 ext host 路由到远端主扩展；由
+  // test/integration/runPdfRemoteE2E.mjs 驱动）
+  targets.push({
+    entryPoints: ['test/integration/pdfRemoteE2E/suite.ts'],
+    outfile: 'out/test/integration/pdfRemoteE2E/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
     logLevel: 'info',
   })
   targets.push({

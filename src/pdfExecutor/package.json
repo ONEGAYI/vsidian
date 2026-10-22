@@ -1,0 +1,25 @@
+{
+  "//": "执行端扩展清单模板（T08/#628）：scripts/packageExecutor.mjs 读取本文件组装打包目录（版本号取主包 package.json 同步注入，NLS 两份由脚本从字典生成）。命令族全部为内部协议命令（remote 主扩展经 executeCommand 跨 ext host 调用），不进命令面板——contributes.commands 留空。激活事件用 onStartupFinished：1.82.3 实测 remote 窗口下远端发起的 executeCommand 不触发 ui 扩展的 onCommand 激活（V02 探针即以 activationEvents '*' 规避）——随窗口启动注册命令族，除注册外零启动成本。",
+  "name": "vsidian-pdf-executor",
+  "displayName": "%manifest.displayName%",
+  "description": "%manifest.description%",
+  "publisher": "onegayi",
+  "license": "MIT",
+  "icon": "media/vsidian-icon-256.png",
+  "engines": {
+    "vscode": "^1.82.3"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": []
+  }
+}

@@ -1,0 +1,80 @@
+/* PDF 导出页限定观感（T02/#622）：只承载导出新形态（嵌入展开容器、降级
+ * 说明），阅读样式与 #app 变量族复用 main.css（零复制）。不进 webview
+ * 样式契约面（导出页是独立产物线，非编辑器 webview）。 */
+
+/* 打印布局覆盖：main.css 的编辑器视口布局（html/body 100% + overflow
+ * hidden + reading 容器内部滚动）在打印语义下会裁掉视口外正文——导出页
+ * 是文档流铺开形态（全量正文进纸张分页，不依赖视口） */
+html,
+body {
+  height: auto;
+  overflow: visible;
+}
+
+#app {
+  height: auto;
+}
+
+#app .vsidian-view-reading {
+  flex: none;
+  min-height: 0;
+  overflow: visible;
+  /* 40vh 滚动缓冲是虚拟化视口语义；打印改为紧凑页尾 */
+  padding-bottom: 24px;
+}
+
+.vsidian-pdf-embed-expanded {
+  margin: 0.8em 0;
+  padding: 0.6em 1em;
+  border-left: 3px solid var(--vsidian-heading-color-3, var(--vscode-editor-foreground, #d0d7de));
+  background: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 4%, transparent);
+  break-inside: auto;
+}
+
+.vsidian-pdf-embed-source {
+  font-size: 0.85em;
+  opacity: 0.75;
+  margin-bottom: 0.4em;
+  font-weight: 600;
+}
+
+/* T06（#626）合并分篇：每篇一个分篇容器（结构容器零观感——篇间留白由
+ * 篇内首尾块自身 margin 承担）；每篇另起一页 = 非首篇 break-before:
+ * page（打印分页由 break 属性驱动，@page 尺寸/边距仍由骨架装配统一
+ * 负责）。关闭时该类不在场 = 连续排版，两形态共享同一容器结构 */
+.vsidian-pdf-merge-doc {
+  break-inside: auto;
+}
+
+.vsidian-pdf-merge-break {
+  break-before: page;
+}
+
+.vsidian-pdf-notice {
+  margin: 0.6em 0;
+  padding: 0.5em 0.9em;
+  border: 1px dashed var(--vscode-editor-foreground, #808080);
+  border-radius: 4px;
+  opacity: 0.9;
+  font-size: 0.92em;
+  break-inside: avoid-page;
+}
+
+.vsidian-pdf-notice a,
+a.vsidian-pdf-notice-link {
+  color: var(--vscode-textLink-foreground, #0969da);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+/* 远端身份目标的降级标注（不可点纯文本——本机浏览器无该盘，不伪装本机
+ * 地址；路径原文跟随其后，可整段换行选中复制） */
+.vsidian-pdf-notice-remote-path {
+  display: inline-block;
+  margin: 0 0.35em 0 0;
+  padding: 0 0.4em;
+  border: 1px solid var(--vscode-editor-foreground, #808080);
+  border-radius: 3px;
+  font-size: 0.85em;
+  opacity: 0.85;
+}

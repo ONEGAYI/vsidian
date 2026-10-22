@@ -49,7 +49,7 @@ import {
   type VaultLinkShortnamePort,
 } from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
-import { classifyLinkOpenChannel, classifyLocalRefContentKind } from '../shared/refContent'
+import { classifyLinkOpenChannel, classifyLocalRefContentKind, isMediaFileExtension } from '../shared/refContent'
 import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
 import type { AddonDocNavResult } from '../shared/addonNavApi'
@@ -72,6 +72,7 @@ import {
   type HoverPreviewRequestPayload,
   type ImageExportPayload,
   type ImagePastePayload,
+  type PdfExportEntryMode,
   type SerChange,
   type TableEditOp,
   type WebviewToHost,
@@ -112,6 +113,9 @@ import {
 } from '../shared/imageRefresh'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
+import { createPdfExportModal, type PdfBatchDocCaptureOutcome, type PdfExportDocumentSource, type PdfExportEmbedReadOutcome, type PdfExportSnippetEntry, type PdfExportStyleSnapshot } from './pdfExport/pdfExportModal'
+import { prefetchEmbedTargets } from './pdfExport/pdfExportEmbeds'
+import { readPdfRemoteTestHooks } from './pdfExport/pdfRemoteTestHooks'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
@@ -120,6 +124,7 @@ import {
   readRefContentTarget,
   resolveHoverTargetTip,
   type HoverDocAccessContext,
+  type HoverDocAccessPorts,
   type RefReadOutcome,
 } from './hoverDocAccess'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
@@ -129,7 +134,8 @@ import type { FindOptionsStore } from './findOptionsStore'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
-import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY } from '../shared/settings'
+import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY, READING_BREAKS_KEY } from '../shared/settings'
+import { isMarkdownFilePath } from '../shared/pdfExportBatch'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import type { AddonEditorBridge } from './addons/addonWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
@@ -152,10 +158,11 @@ export interface SettingsWiring {
 }
 
 /** .md / .markdown 判定（#38）：与 customEditors selector 及标题栏 when 子句
- *  的 resourceExtname 口径一致（大小写敏感，保持与 when 求值同判） */
+ *  的 resourceExtname 口径一致（大小写敏感，保持与 when 求值同判）。
+ *  实现单一事实源在 shared/pdfExportBatch.ts 的 isMarkdownFilePath
+ *  （T04 起批量目录收集同引——不建第二份） */
 function isMarkdownFile(uri: vscode.Uri): boolean {
-  const ext = path.extname(uri.fsPath)
-  return ext === '.md' || ext === '.markdown'
+  return isMarkdownFilePath(uri.fsPath)
 }
 
 /** tab input 形态归纳（#38 D10：diff 语境检测的 vscode 层映射） */
@@ -417,7 +424,16 @@ export function createTextEditorProvider(
   /** #351 T02 附加组件面板桥（页面装载指令路由 + 资源根 + 状态刷新）；
    *  生产由 extension.ts 注入 createAddonWiring 产物的 editorBridge */
   addons?: AddonEditorBridge,
-): vscode.CustomTextEditorProvider & { dispose(): Promise<void> } {
+): vscode.CustomTextEditorProvider & {
+  dispose(): Promise<void>
+  /** T01（#621）PDF 导出固定输入源（命令入口消费） */
+  getActivePdfExportSource(): PdfExportDocumentSource | undefined
+  /** T04（#624）批量导出条目捕获：已打开文档（本扩展面板/其他编辑器）用
+   *  未保存权威文本（面板文档先等在途编辑落地），未打开走 openTextDocument
+   *  工作区读取通道；嵌入目标预取与单文档导出同款（readPdfEmbedTarget
+   *  超集）。样式/片段/换行是窗口级件，不在条目捕获内（模态批级捕获合并） */
+  capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
+} {
   const sessions = new Map<string, SessionEntry>()
   // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
   // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
@@ -519,6 +535,11 @@ export function createTextEditorProvider(
   let lastClosedInput:
     | { docUri: string; webviewText?: string; fragments: string[]; fromRefPort?: boolean }
     | undefined
+
+  /** PDF 导出入口执行体（四个能入口共用）：定义在文件后段（依赖
+   *  pdfExportModal 与 provider 自身），面板端口注入早于它的初始化——注入
+   *  时只捕获该 let 的读取，用户点击发生在装配完成后，取值已就绪 */
+  let openPdfExportEntry: ((mode: PdfExportEntryMode) => Promise<boolean>) | undefined
 
   // ---- P2-04（#281）目标编辑端口：嵌入内部 Live 与 B 会话的绑定簿记 ----
   // provider 持注册表；B 会话接入复用 openEntry（B 打开为 custom editor 时
@@ -2932,12 +2953,170 @@ export function createTextEditorProvider(
     }
   }
 
+  // ---- T02（#622）PDF 导出固定输入能力（模态 source 扩展）----
+  /** PDF 导出面板级样式快照等待者（docUri 键；request 发起登记、回包或
+   *  超时清空——面板消息处理器顶部拦截 pdfExport.styleSnapshot.report） */
+  const pendingPdfStyleProbes = new Map<string, (snapshot: PdfExportStyleSnapshot) => void>()
+
+  /** 嵌入目标读取端口（readRefContentTarget 窄化投影——解析规则与悬停
+   *  预览同源）。与悬停路径的端口面差异（本通道只产出**导出身份**，不装载
+   *  正文字节）：
+   *  - 不注入 readPdfFileResource：导出页只需 PDF 目标的存在性与路径（降级
+   *    说明 + 真实链接），不需要 asWebviewUri/字节数。注入 statFile 已足够
+   *    让 pdf 通道通过存在性校验——见下方 pdf 分派；
+   *  - web 目标不注入元信息抓取（unsupported 分态，正文保留占位引用行）。
+   *  媒体（音视频）与 PDF 一样是**身份条目**，绝不进 text 通道解码——二进制
+   *  文件经 openTextDocument 会失败并误报 read-failed。 */
+  const readPdfEmbedTarget = async (document: vscode.TextDocument, inner: string): Promise<PdfExportEmbedReadOutcome> => {
+    const access = hoverAccessContextOf(document)
+    const statOf = async (fsPath: string): Promise<{ size: number; isFile: boolean } | null> => {
+      try {
+        const info = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+        return { size: info.size, isFile: (info.type & vscode.FileType.File) !== 0 }
+      } catch {
+        return null
+      }
+    }
+    const ports: HoverDocAccessPorts = {
+      resolveVaultFile: (rawPath) =>
+        resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath, undefined, shortnameLookupOf(document.uri.fsPath)),
+      openTextDocument: async (fsPath) => {
+        try {
+          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+          return { version: doc.version, text: doc.getText(), languageId: doc.languageId }
+        } catch {
+          return null
+        }
+      },
+      statFile: async (fsPath) => {
+        try {
+          const info = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+          return { mtimeMs: info.mtime, isFile: (info.type & vscode.FileType.File) !== 0 }
+        } catch {
+          return null
+        }
+      },
+      // PDF 通道只需存在性与字节数门（不带 asWebviewUri——导出页不 fetch
+      // 源 PDF，只按身份降级为说明 + 链接）。uri 留空占位（本消费者不读）
+      readPdfFileResource: async (fsPath) => {
+        const info = await statOf(fsPath)
+        if (info === null) {
+          return { kind: 'inaccessible' }
+        }
+        if (!info.isFile) {
+          return { kind: 'not-found' }
+        }
+        return { kind: 'ok', uri: '', version: 0, bytes: info.size }
+      },
+    }
+    // 目标解析**先走完整链路**（readRefContentTarget）：双链 inner 里可能带
+    // `#标题` / `#^块` / `|别名` / 空路径自引用，这些形态由 parseWikilinkInner
+    // 在共用解析层剥出真实 path；直接把 inner 当路径喂给 resolveVaultFile 会
+    // 让合法 Markdown 嵌入退化成 not-found（#010 回归）。
+    //
+    // 但媒体/PDF 不能进文本解码（openTextDocument 对二进制必然失败 → 误报
+    // read-failed）。所以先用**同一个** parseWikilinkInner 取出规范 path 做
+    // 类型预判：命中 PDF/媒体则走身份分派（只需存在性），其余（Markdown、
+    // 自引用、带锚点/别名）一律交回原解析链，锚点语义由它继续处理。
+    //
+    // 解析**无条件执行**，不看 inner 里是否出现 `#`/`|`：`![[ clip.mp4 ]]`
+    // 这类两端带空白的合法写法也必须先归一成 `clip.mp4` 才判得准扩展名
+    //（R11：按「含分隔符才解析」会把尾随空格带进扩展名，媒体/PDF 退回文本
+    // 链并误报）。解析失败（非法形态）不阻断——原解析链给出一致的降级理由。
+    const parsedInner = parseWikilinkInner(inner)
+    const identityPath = parsedInner !== null ? parsedInner.path : inner.trim()
+    const identityKind = identityPath === ''
+      ? undefined
+      : classifyLocalRefContentKind(identityPath) === 'pdf'
+        ? 'pdf'
+        : isMediaFileExtension(identityPath) ? 'media' : undefined
+    if (identityKind !== undefined) {
+      const resolved = await ports.resolveVaultFile(identityPath)
+      if (resolved.kind !== 'target') {
+        // 解析失败按既有分态透传（not-found/escape/ambiguous 都有对应用户
+        // 可见理由；pending 收敛 read-failed 与既有文本通道口径一致）
+        return {
+          ok: false,
+          reason: resolved.kind === 'pending' ? 'read-failed' : resolved.kind,
+        }
+      }
+      const info = await statOf(resolved.fsPath)
+      if (info === null) {
+        return { ok: false, reason: 'read-failed' }
+      }
+      if (!info.isFile) {
+        return { ok: false, reason: 'not-found' }
+      }
+      return {
+        ok: true,
+        kind: identityKind,
+        fsPath: resolved.fsPath.replaceAll('\\', '/'),
+      }
+    }
+    const outcome = await readRefContentTarget({ target: inner }, access, ports)
+    if (outcome.ok) {
+      if (outcome.content.kind === 'markdown') {
+        return {
+          ok: true,
+          kind: 'markdown',
+          fsPath: outcome.fsPath.replaceAll('\\', '/'),
+          docName: path.basename(outcome.fsPath),
+          text: outcome.content.lfText,
+          version: outcome.content.version,
+        }
+      }
+      return { ok: false, reason: 'non-markdown' }
+    }
+    return { ok: false, reason: outcome.reason }
+  }
+
+  /** 面板样式快照请求（3s 超时 null——面板未就绪/消息丢失降级空快照） */
+  const requestPdfStyleSnapshot = async (document: vscode.TextDocument): Promise<PdfExportStyleSnapshot | null> => {
+    const entry = sessions.get(document.uri.toString())
+    const panel = entry && entry.panels.size > 0 ? [...entry.panels.values()][0]! : undefined
+    if (!panel) {
+      return null
+    }
+    const key = document.uri.toString()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingPdfStyleProbes.delete(key)
+        resolve(null)
+      }, 3000)
+      pendingPdfStyleProbes.set(key, (snapshot) => {
+        clearTimeout(timer)
+        pendingPdfStyleProbes.delete(key)
+        resolve(snapshot)
+      })
+      void panel.webview.postMessage({ kind: 'pdfExport.styleSnapshot.request' })
+    })
+  }
+
+  /** CSS 片段固定文本（启用清单；单文件读取失败跳过不阻塞捕获） */
+  const pdfSnippetEntries = async (): Promise<PdfExportSnippetEntry[]> => {
+    const state = snippets?.getState()
+    if (!snippets || !state?.directory || state.paused) {
+      return []
+    }
+    const out: PdfExportSnippetEntry[] = []
+    for (const { name } of snippets.getLinkItems()) {
+      try {
+        out.push({ name, css: await fsp.readFile(path.join(state.directory, name), 'utf8') })
+      } catch {
+        // 读取失败跳过：单片段缺失不阻塞导出捕获
+      }
+    }
+    return out
+  }
+
   // F13：provider 公开停用收尾——blockIdCoordinator.disposeAll 对未落地
   // 的补 ID pending 尽力撤回（来源会话还在场时 linked 未到的记录按权威
   // 文本核对后收尾），由 extension.deactivate 返回其 Promise 驱动
   //（VSCode 停用窗口约 5s；面板尚开时 confirmed 记录本就不在收尾范围）
   const provider: vscode.CustomTextEditorProvider & {
     dispose(): Promise<void>
+    getActivePdfExportSource(): PdfExportDocumentSource | undefined
+    capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
   } = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
@@ -3371,6 +3550,10 @@ export function createTextEditorProvider(
         // 面板级处理（与 link.activate 同模式；settings.set 只存在于
         // 设置页 webview 链路，不经文档会话）
         openSettings: () => settings?.page.open(),
+        // 工具栏导出按钮的菜单入口：四个 mode 与命令面板四个命令同一执行
+        // 体（openPdfExportEntry 在本文件后段定义并赋值到该 let——注入时
+        // 尚未初始化，调用发生在用户点击时，闭包取值已就绪）
+        openPdfExport: (mode) => { openPdfExportEntry?.(mode) },
         requestSettings: () => settings?.service.getSnapshot() ?? {},
         // #128 CSS 片段端口：init 后 snippets.get 的面板级应答（清单 URI
         // 逐面板构造）与片段链装载结果回报（失败提示；只读交互）
@@ -3489,6 +3672,20 @@ export function createTextEditorProvider(
       const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
         if (isWebviewToHost(message) && message.kind === 'ready') cancelDocNavRequests()
+        // T02（#622）PDF 导出样式快照回包：面板级只读交互——provider 层拦截
+        //（不进文档会话消息管线），分发给固定输入捕获的等待者
+        if (isWebviewToHost(message) && message.kind === 'pdfExport.styleSnapshot.report') {
+          pendingPdfStyleProbes.get(document.uri.toString())?.({
+            dark: message.dark,
+            vars: message.vars,
+            reading: {
+              fontFamily: message.fontFamily,
+              fontSize: message.fontSize,
+              lineHeight: message.lineHeight,
+            },
+          })
+          return
+        }
         // 粘贴模态记忆只允许更新两个既定偏好，复用现有持久化与广播。
         if (isWebviewToHost(message) && message.kind === 'paste.preferences.set') {
           void (settings?.service.apply({ [PASTE_PRESERVE_FORMATTING_KEY]: message.preserveFormatting,
@@ -4223,6 +4420,78 @@ export function createTextEditorProvider(
     dispose(): Promise<void> {
       return blockIdCoordinator.disposeAll()
     },
+
+    /** T01（#621）PDF 导出固定输入源：当前活动 tab 为本扩展 custom editor
+     *  时返回其权威文档与会话（导出模态打开时刻读取未保存正文——
+     *  whenEditsSettled 后 getText 即「webview 已出站编辑全部落地」的当前
+     *  有效版本）；源码模式或非 Markdown 活动时 undefined（命令层提示） */
+    getActivePdfExportSource(): PdfExportDocumentSource | undefined {
+      const active = deriveActiveTabMode()
+      if (!active || active.mode === 'source') return undefined
+      for (const entry of sessions.values()) {
+        if (isSameDocUri(entry.doc.uri, active.uri)) {
+          return {
+            uri: entry.doc.uri,
+            document: entry.doc,
+            session: entry.session,
+            // T02（#622）固定输入能力（见上方实现块注释）
+            readEmbedTarget: (inner) => readPdfEmbedTarget(entry.doc, inner),
+            requestStyleSnapshot: () => requestPdfStyleSnapshot(entry.doc),
+            snippetEntries: () => pdfSnippetEntries(),
+            readingBreaks: () => settings?.service.getSnapshot()[READING_BREAKS_KEY] === true,
+          }
+        }
+      }
+      return undefined
+    },
+
+    /** T04（#624）批量导出条目捕获（准备阶段固定输入，规格 §2.1/§2.2）：
+     *  已打开文档优先未保存权威文本——本扩展面板文档等在途编辑落地（
+     *  whenEditsSettled），其他编辑器打开的 TextDocument 直接 getText；
+     *  未打开走 openTextDocument 工作区读取通道。嵌入目标预取与单文档
+     *  captureInput 同款超集（readPdfEmbedTarget——解析/范围规则同源）。 */
+    async capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome> {
+      const target = vscode.Uri.file(fsPath)
+      const entry = sessions.get(target.toString())
+      let doc: vscode.TextDocument | undefined
+      if (entry) {
+        await entry.session.whenEditsSettled()
+        doc = entry.doc
+      } else {
+        doc = vscode.workspace.textDocuments.find((d) => isSameDocUri(d.uri, target)) ??
+          await vscode.workspace.openTextDocument(target).then((d) => d, () => undefined)
+      }
+      if (!doc) {
+        return { ok: false, reason: 'not-found' }
+      }
+      const lfText = doc.getText().replace(/\r\n?/g, '\n')
+      const docName = path.basename(doc.uri.fsPath || fsPath)
+      const embeds = await prefetchEmbedTargets(lfText, { readTarget: (inner) => readPdfEmbedTarget(doc!, inner) })
+      return {
+        ok: true,
+        docName,
+        capturedVersion: doc.version,
+        payload: {
+          docs: [
+            {
+              fsPath: doc.uri.fsPath.replaceAll('\\', '/'),
+              docName,
+              text: lfText,
+              version: doc.version,
+            },
+            ...embeds.embeds.map((e) => ({
+              fsPath: e.fsPath,
+              docName: e.docName,
+              text: e.text,
+              version: e.version,
+            })),
+          ],
+          embeds: embeds.embeds,
+          mediaEmbeds: embeds.mediaEmbeds,
+          embedFailures: embeds.embedFailures,
+        },
+      }
+    },
   }
 
   // #270 dirty 丢弃/还原的覆盖层通用退役信号：「空 contentChanges 且文档
@@ -4790,6 +5059,153 @@ export function createTextEditorProvider(
   )
   refreshActiveModeContext()
 
+  // ---- T01（#621）PDF 导出模态：设置快照与设置页入口经 settings wiring
+  //  注入（持久默认参数只在自有设置页）；固定输入源读 provider 活动面板
+  //  的权威文档会话。命令双模式可用（Live/Reading 均导出固定输入；源码
+  //  模式活动时提示先在 Vsidian 打开——源码 tab 无本扩展会话）。
+  //  T02（#622）：会话依赖注入产物目录与资源解析端口（classifyImageTarget
+  //  + workspace stat——解析与白名单同源，只换装载地址构造层） ----
+  const IMAGE_CONTENT_TYPES: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.avif': 'image/avif',
+    '.ico': 'image/x-icon',
+  }
+  const pdfExportModal = createPdfExportModal(
+    context,
+    () => settings?.service.getSnapshot() ?? {},
+    () => settings?.page.open(),
+    {
+      outWebviewDir: path.join(context.extensionUri.fsPath, 'out', 'webview'),
+      // T04（#624）批量条目捕获：provider capturePdfBatchDoc（已打开未保存
+      // 权威文本 + 嵌入预取；未打开走工作区读取通道）
+      capturePdfBatchDoc: (fsPath) => provider.capturePdfBatchDoc(fsPath),
+      // T04（#624）批量窗口级固定输入：样式快照（任一在场的本编辑器面板——
+      // 批量模态占据活动 tab，活动源不可得；样式是窗口级件，任一面板同值）、
+      // CSS 片段与阅读宽松换行——批开始时刻一次捕获全批共享
+      captureBatchWindowInput: async () => {
+        const entry = [...sessions.values()].find((e) => e.panels.size > 0)
+        const style = entry ? await requestPdfStyleSnapshot(entry.doc).catch(() => null) : null
+        const snippets = await pdfSnippetEntries().catch(() => [] as PdfExportSnippetEntry[])
+        return {
+          style,
+          snippets,
+          breaks: settings?.service.getSnapshot()[READING_BREAKS_KEY] === true,
+        }
+      },
+      resolveResource: async (src, sourceFsPath) => {
+        // 来源身份缺省 = 面板主文档；目标分类走 classifyImageTarget 单一
+        // 事实源（危险 scheme/越界/UNC 拦截同源），stat 三态与图片通道一致
+        let ctxDoc: vscode.TextDocument | undefined
+        if (sourceFsPath !== undefined && sourceFsPath !== '') {
+          ctxDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFsPath)).then((d) => d, () => undefined)
+        }
+        ctxDoc ??= provider.getActivePdfExportSource()?.document ?? vscode.workspace.textDocuments[0]
+        if (!ctxDoc) {
+          return { ok: false as const, reason: 'blocked' as const }
+        }
+        const target = classifyImageTarget(src, linkContextOfPath(sourceFsPath ?? ctxDoc.uri.fsPath))
+        if (target.kind === 'blocked') {
+          return { ok: false as const, reason: 'blocked' as const }
+        }
+        try {
+          const info = await vscode.workspace.fs.stat(vscode.Uri.file(target.fsPath))
+          if ((info.type & vscode.FileType.File) === 0) {
+            return { ok: false as const, reason: 'not-found' as const }
+          }
+          return {
+            ok: true as const,
+            fsPath: target.fsPath,
+            contentType: IMAGE_CONTENT_TYPES[path.extname(target.fsPath).toLowerCase()] ?? 'application/octet-stream',
+          }
+        } catch (err) {
+          if (isFileNotFound(err)) {
+            return { ok: false as const, reason: 'not-found' as const }
+          }
+          return { ok: false as const, reason: 'inaccessible' as const }
+        }
+      },
+    },
+  )
+  // ---- PDF 导出入口单一执行体（命令面板四个命令与工具栏下拉菜单共用）：
+  //  文档/选区校验与模态打开只在这里做一次，两条入口不各自实现校验语义。
+  //  返回值 = 是否真的打开了模态（校验失败给可见提示并返回 false）。
+  openPdfExportEntry = async (mode: PdfExportEntryMode): Promise<boolean> => {
+    if (mode === 'batch') {
+      pdfExportModal.openBatch()
+      return true
+    }
+    if (mode === 'merge') {
+      pdfExportModal.openMerge()
+      return true
+    }
+    const source = provider.getActivePdfExportSource()
+    if (!source) {
+      void vscode.window.showWarningMessage(t('host.pdfExportNoActiveDocument'))
+      return false
+    }
+    if (mode === 'currentDocument') {
+      pdfExportModal.open(source)
+      return true
+    }
+    // 选区：读活动面板当前 CM6 多选区（严格切片不扩大，模态捕获阶段合成
+    // 多条目 payload——每片段独立渲染、资源以原文档身份解析）。只读操作
+    // （选区读取与导出均不写文档、不改选区、不产生编辑历史）；阅读模式无
+    // 选区交互语义（隐藏 CM6 的陈旧选区不冒充）——提示切实时预览；无有效
+    // 选区不开模态（不误触发全文导出）
+    const entry = getEntry(source.uri)
+    // 活动面板优先（同文档分屏多面板时选区在用户正看的那块），退而取
+    // 可见面板/首个就绪面板
+    const byActivity =
+      [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.active)?.[0] ??
+      [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.visible)?.[0] ??
+      entry?.session.getInfo().panels.find((p) => p.ready)?.sessionId
+    const selection = byActivity !== undefined && entry !== undefined
+      ? await entry.session.requestSelection(byActivity)
+      : undefined
+    if (selection === undefined || selection.ranges.length === 0) {
+      void vscode.window.showWarningMessage(t('host.pdfExportSelectionEmpty'))
+      return false
+    }
+    if (selection.viewMode !== 'live') {
+      void vscode.window.showWarningMessage(t('host.pdfExportSelectionLiveOnly'))
+      return false
+    }
+    pdfExportModal.open(source, selection.ranges)
+    return true
+  }
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.currentDocument',
+      () => openPdfExportEntry?.('currentDocument') ?? false),
+    // T03（#623）选区导出命令（校验与模态打开在共享执行体内）
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.selection',
+      () => openPdfExportEntry?.('selection') ?? false),
+  )
+
+  // ---- T04（#624）批量导出入口：打开同一模态的批量清单模式。批量不依赖
+  //  活动文档（清单可来自任意目录；样式快照有活动面板则跟随、无则主题
+  //  兜底），无工作区同样可用（showOpenDialog 起于本机默认位置）。命令
+  //  双模式可用；只读操作（keybindings.md 评估记录） ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.batch',
+      () => openPdfExportEntry?.('batch') ?? false),
+  )
+
+  // ---- T06（#626）合并导出入口：打开同一模态的合并清单模式（同一清单
+  //  数据面按合并语义消费——清单顺序即合篇顺序，单份 PDF 可选每篇另起
+  //  一页）。同批量口径：不依赖活动文档、双模式可用、只读操作（导出读
+  //  固定输入快照，不写源文、不新增撤销、不触发保存；keybindings.md
+  //  评估记录沿 T01/T04） ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.merge',
+      () => openPdfExportEntry?.('merge') ?? false),
+  )
+
   // ---- 查找命令（#14）：活动 tab 为本扩展 custom editor 时向其面板发送
   // view.find.open（webview 内浮动查找面板）。查找是纯只读视图操作 ----
   context.subscriptions.push(
@@ -5000,8 +5416,12 @@ export function createTextEditorProvider(
   ))
 
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时
-  // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露 ----
-  if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+  // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露。T08（#628）remote e2e 例外：
+  // 远端 ext host 读不到宿主 env（V02 §3.4 实测 server 不继承 VSIDIAN_*），
+  // 沿 T17 标记文件先例——工作区根在场 .vsidian-pdf-remote-test.json（hooks=true）
+  // 时同样启用（远端会话的模态观测/消息注入断言面；写盘与生成仍走真实链路） ----
+  if (process.env.VSIDIAN_TEST_HOOKS === '1'
+    || readPdfRemoteTestHooks(undefined, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath) !== undefined) {
     // V01（#348）历史分组探针：文档事件路由启动 + 随 context 释放
     addonHistoryHub?.start()
     context.subscriptions.push({ dispose: () => addonHistoryHub?.dispose() })
@@ -5034,7 +5454,7 @@ export function createTextEditorProvider(
     vscode.commands.registerCommand('onegayi.vsidian._test.getSessionState', (uriStr: string) => {
       const entry = getEntry(vscode.Uri.parse(uriStr))
       if (!entry) {
-        return { found: false, panels: [], version: 0, appliedEdits: 0 }
+        return { found: false, panels: [], version: 0, appliedEdits: 0, sessionUris: [...sessions.keys()] }
       }
       return {
         found: true,
@@ -5044,6 +5464,9 @@ export function createTextEditorProvider(
         panels: realPanelsOf(entry),
         version: entry.doc.version,
         appliedEdits: entry.appliedEdits,
+        // T08（#628）remote e2e 诊断面：会话键全集（runner 侧 URI 与远端
+        // 条目键的编码形态对读——vscode-remote URI 跨端 stringify 差异排查）
+        sessionUris: [...sessions.keys()],
         // #208 资源代次（0 = 未刷新；每次手动刷新 +1，图片 URI ?v= 戳同源）
         imageGeneration: entry.session.getImageGeneration(),
       }
@@ -5444,6 +5867,30 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.getLastMode',
       () => readRemembered(),
     ),
+    // T01（#621）PDF 导出模态观测钩子：面板态/代次/固定输入版本/装配
+    // HTML/绘制层探针/钩子保存目标——集成断言命令-模态-生成-保存链路
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.getPdfExportModalState',
+      () => pdfExportModal.getInfo(),
+    ),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.injectPdfExportModalMessage',
+      (message: unknown) => pdfExportModal.injectMessage(message),
+    ),
+    // T07（#627）模态 webview 消息转发（VSIDIAN_TEST_HOOKS 门控注册——
+    // webview 侧仅在 __vsidianTestHooks 标志下消费 _test 形态，如参数控件
+    // 置值驱动 paramsTouched → 过期徽章断言；生产不注册）
+    ...(process.env.VSIDIAN_TEST_HOOKS === '1'
+      ? [
+        vscode.commands.registerCommand(
+          'onegayi.vsidian._test.postPdfExportModalWebviewMessage',
+          (message: unknown) => {
+            pdfExportModal.postToWebview(message)
+            return true
+          },
+        ),
+      ]
+      : []),
     vscode.commands.registerCommand(
       // #38 全局模式记忆重置（模拟无历史）：globalState 在同一集成进程内
       // 共享，用例须自带前置重置避免跨用例状态泄漏。写入 'live' 而非

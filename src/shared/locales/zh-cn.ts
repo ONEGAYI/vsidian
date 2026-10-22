@@ -115,6 +115,179 @@ export const zhCn: Record<MessageKey, string> = {
   /** 「文件与链接」分页内小节（#298 建组、#332 随分页迁移）：hover.* 悬停
    *  预览族与 embed.* 正文嵌入族 */
   'settings.groupRefview': '引用视图',
+  /** 「文件与链接」分页内小节（T01/#621）：pdfExport.* 导出设置 */
+  'settings.groupPdfExport': 'PDF 导出',
+  // ---- T01（#621）PDF 导出：模态、参数与失败分态 ----
+  /** 导出模态面板标题 */
+  'pdfExport.modalTitle': '导出 PDF',
+  /** 模态输入块标签：本次导出的固定文档 */
+  'pdfExport.docLabel': '文档',
+  /** 模态参数标签 */
+  'pdfExport.paper.label': '纸张尺寸',
+  'pdfExport.orientation.label': '方向',
+  'pdfExport.margin.label': '页边距（毫米）',
+  'pdfExport.scale.label': '缩放',
+  /** 纸张尺寸选项 */
+  'pdfExport.paper.a3': 'A3',
+  'pdfExport.paper.a4': 'A4',
+  'pdfExport.paper.a5': 'A5',
+  'pdfExport.paper.b5': 'B5',
+  'pdfExport.paper.letter': 'Letter',
+  'pdfExport.paper.legal': 'Legal',
+  'pdfExport.paper.custom': '自定义',
+  /** 自定义纸张宽高（毫米） */
+  'pdfExport.customWidth.label': '自定义宽（毫米）',
+  'pdfExport.customHeight.label': '自定义高（毫米）',
+  /** 页眉（内容项与导出页印刷相关） */
+  'pdfExport.header.label': '页眉',
+  'pdfExport.header.title': '页眉显示文档标题',
+  'pdfExport.header.date': '页眉显示导出日期',
+  /** 页码（Chromium 原生页码 class——词条供页脚模板拼装） */
+  'pdfExport.pageNumber.label': '页码',
+  'pdfExport.pageNumber.position': '页码位置',
+  'pdfExport.pageNumber.position.footerLeft': '页脚居左',
+  'pdfExport.pageNumber.position.footerCenter': '页脚居中',
+  'pdfExport.pageNumber.position.footerRight': '页脚居右',
+  'pdfExport.pageNumber.pre': '第 ',
+  'pdfExport.pageNumber.mid': ' 页 / 共 ',
+  'pdfExport.pageNumber.post': ' 页',
+  /** 标题书签 */
+  'pdfExport.bookmarks.label': '标题书签',
+  'pdfExport.bookmarks.added': '已添加 {count} 条标题书签。',
+  'pdfExport.bookmarks.partial': '已添加 {count} 条书签；{skipped} 条标题未能定位，已跳过。',
+  'pdfExport.bookmarks.noneLocated': '未能定位任何标题，本份 PDF 未添加书签。',
+  'pdfExport.bookmarks.noHeadings': '文档没有标题，本份 PDF 未添加书签。',
+  'pdfExport.bookmarks.locateFailed': '书签定位失败，本份 PDF 未添加书签。',
+  /** 预览与最终渲染的亮暗覆盖（不改变编辑器主题） */
+  'pdfExport.theme.label': '主题',
+  'pdfExport.theme.follow': '跟随编辑器',
+  'pdfExport.theme.light': '亮色',
+  'pdfExport.theme.dark': '暗色',
+  /** 方向选项 */
+  'pdfExport.orientation.portrait': '纵向',
+  'pdfExport.orientation.landscape': '横向',
+  /** 主操作：按当前参数执行导出 */
+  'pdfExport.run': '导出',
+  /** 取消进行中的导出 */
+  'pdfExport.cancel': '取消',
+  /** 主区预览占位（T07/#627：真实 PDF 预览——手动刷新语义说明） */
+  'pdfExport.previewPlaceholderTitle': 'PDF 预览',
+  'pdfExport.previewPlaceholderDescription':
+    '预览显示按当前参数与固定输入实际生成的 PDF 页面。参数或清单变化后需手动刷新；预览不会自动生成。',
+  /** T07（#627）预览工具栏：手动刷新/过期徽章/阶段与书签提示 */
+  'pdfExport.preview.refresh': '刷新预览',
+  'pdfExport.preview.generating': '正在生成 PDF 预览…',
+  'pdfExport.preview.failed': '预览生成失败',
+  'pdfExport.preview.stale': '预览已过期',
+  'pdfExport.preview.bookmarks': '标题书签 {count} 条',
+  /** 预览缩放条（左下角；100% = 打印纸面大小） */
+  'pdfExport.preview.zoomIn': '放大预览',
+  'pdfExport.preview.zoomOut': '缩小预览',
+  'pdfExport.preview.zoomReset': '复位为 100%（打印纸面大小）',
+  /** 任务阶段 */
+  'pdfExport.phase.idle': '就绪',
+  'pdfExport.phase.generating': '正在生成 PDF…',
+  'pdfExport.phase.saving': '正在选择保存位置…',
+  'pdfExport.phase.done': '导出完成',
+  'pdfExport.phase.failed': '导出失败',
+  'pdfExport.phase.cancelled': '已取消导出',
+  /** 失败原因（规格 §2.5 可见状态） */
+  'pdfExport.fail.noBrowser':
+    '未找到可用的 Chrome 或 Edge。请安装 Chrome/Edge，或在 Vsidian 设置页配置浏览器路径。',
+  'pdfExport.fail.configuredPathMissing':
+    '设置的浏览器路径不存在。请在 Vsidian 设置页检查该路径。',
+  'pdfExport.fail.launchFailed': '打印浏览器启动失败。',
+  'pdfExport.fail.navigateFailed': '导出页面无法在浏览器中打开。',
+  'pdfExport.fail.notReady': '导出页面未在限定时间内就绪。',
+  'pdfExport.fail.printFailed': '浏览器生成 PDF 失败。',
+  'pdfExport.fail.writeFailed': 'PDF 无法写入所选位置。',
+  'pdfExport.fail.busy': '已有导出任务在进行。',
+  'pdfExport.fail.internal': '导出过程中出现意外错误。',
+  'pdfExport.fail.executorMissing':
+    '远程会话需要本机安装并启用「Vsidian PDF 导出执行端」配套扩展（与 Vsidian 主扩展同在本机），当前不可用。请安装后重试。',
+  'pdfExport.fail.executorUnreachable':
+    '无法连接本机执行端（连接可能已断开或命令超时）。导出未完成，请检查连接后重试。',
+  /** 取消细分 */
+  'pdfExport.cancelKind.user': '已按用户请求取消。',
+  'pdfExport.cancelKind.saveDialog': '未选择保存位置，PDF 未保存。',
+  /** 成功详情：保存目标路径 */
+  'pdfExport.savedTo': '已保存到 {path}',
+  /** 从模态打开 Vsidian 设置（缺浏览器恢复路径） */
+  'pdfExport.openSettings': '打开设置',
+  /** T02（#622）缺资源选择与导出页降级说明 */
+  'pdfExport.phase.awaitingResources': '部分资源缺失，请选择处理方式',
+  'pdfExport.resume': '继续导出',
+  'pdfExport.issues.title': '以下资源未能装载：',
+  'pdfExport.issues.kind.embed': '嵌入目标',
+  'pdfExport.issues.kind.image': '图片',
+  'pdfExport.issues.kind.graphic': '图形',
+  'pdfExport.issues.kind.media': '媒体嵌入',
+  'pdfExport.issues.kind.unknown': '资源',
+  'pdfExport.issues.reason.notFound': '未找到',
+  'pdfExport.issues.reason.inaccessible': '无法访问',
+  'pdfExport.issues.reason.blocked': '路径被拦截',
+  'pdfExport.issues.reason.loadFailed': '装载失败',
+  'pdfExport.issues.reason.anchorMissing': '锚点不存在',
+  'pdfExport.issues.reason.ambiguous': '同名目标不唯一',
+  'pdfExport.issues.reason.nonMarkdown': '不是可嵌入的 Markdown 内容',
+  'pdfExport.issues.reason.readFailed': '读取失败',
+  'pdfExport.issues.reason.unknown': '原因未知',
+  /** 导出页降级说明（页面正文内的可见文字——继续导出时保留） */
+  'pdfExport.mediaNotice.media': '音视频不嵌入 PDF，原文件：',
+  'pdfExport.mediaNotice.iframe': '网页嵌入不进 PDF，原始地址：',
+  'pdfExport.mediaNotice.pdf': 'PDF 文件不嵌入导出内容，原文件：',
+  'pdfExport.mediaNotice.web': '网页嵌入不进 PDF，原始地址：',
+  /** 远端身份目标的降级标注（Remote SSH——远端路径纯文本呈现，不可点） */
+  'pdfExport.remoteMediaBadge': '远端文件',
+  'pdfExport.embedFailedNotice': '嵌入目标未能装载：{target}',
+  /** T04（#624）批量导出清单与结果表（模态批量模式 UI） */
+  'pdfExport.batch.chooseTargetDir': '选择导出目标目录',
+  'pdfExport.batch.addFiles': '添加文件',
+  'pdfExport.batch.addDir': '添加目录',
+  'pdfExport.batch.listTitle': '导出清单',
+  /** 验收统一页：单文档与批量共用同一清单（单文档 = 一行当前文档） */
+  'pdfExport.batch.singleItemHint': '当前文档。可继续添加文件或目录，清单多于一篇时按批量导出。',
+  'pdfExport.batch.selectedHint': '正在预览此文件',
+  'pdfExport.batch.empty': '清单为空——添加文件或目录开始批量导出。目录会递归收集 Markdown，其他文件不会进入清单。',
+  'pdfExport.batch.itemMoveUp': '上移',
+  'pdfExport.batch.itemMoveDown': '下移',
+  'pdfExport.batch.itemRemove': '移除',
+  'pdfExport.batch.run': '批量导出…',
+  'pdfExport.batch.confirmTitle': '输出映射预览',
+  'pdfExport.batch.confirmTarget': '目标目录',
+  'pdfExport.batch.strategy.label': '重名处理',
+  'pdfExport.batch.strategy.skip': '跳过',
+  'pdfExport.batch.strategy.overwrite': '覆盖',
+  'pdfExport.batch.strategy.rename': '自动更名',
+  'pdfExport.batch.start': '开始导出',
+  'pdfExport.batch.back': '返回清单',
+  'pdfExport.batch.conflict.duplicate': '与清单其他条目同名',
+  'pdfExport.batch.conflict.exists': '目标位置已有文件',
+  'pdfExport.batch.conflict.both': '同名且目标已有文件',
+  'pdfExport.batch.skipMark': '跳过',
+  'pdfExport.batch.renamedMark': '已自动更名',
+  'pdfExport.batch.progress': '正在导出第 {current} / {total} 个：{name}',
+  'pdfExport.batch.resultsTitle': '导出结果',
+  'pdfExport.batch.summary': '成功 {success}，失败 {failed}，跳过 {skipped}，取消 {cancelled}（共 {total} 项）',
+  'pdfExport.batch.status.success': '成功',
+  'pdfExport.batch.status.failed': '失败',
+  'pdfExport.batch.status.skipped': '跳过',
+  'pdfExport.batch.status.cancelled': '已取消',
+  'pdfExport.batch.resumeAll': '继续导出全部',
+  'pdfExport.batch.resumeAllHint': '本批后续文件的同类提示将自动继续',
+  'pdfExport.batch.awaitingResources': '当前文件部分资源缺失，请选择处理方式',
+  'pdfExport.batch.doneNotice': '批量导出完成：{success} / {total} 项成功',
+  'pdfExport.batch.captureFailed': '读取失败',
+  /** 失败项结果行的单项重试入口（规格 §2.5「失败项可据清单重新发起」） */
+  'pdfExport.batch.retryItem': '重试此项',
+  /** T06（#626）合并导出：清单模态合并模式 UI（清单编辑复用 batch 词条） */
+  'pdfExport.merge.run': '合并导出…',
+  'pdfExport.merge.listTitle': '合并清单',
+  'pdfExport.merge.empty': '清单为空——添加文件或目录，将按清单顺序合并为一份 PDF。',
+  'pdfExport.merge.pageBreak': '每篇另起一页',
+  'pdfExport.merge.progress': '正在固定输入第 {current} / {total} 篇：{name}',
+  'pdfExport.merge.generating': '正在生成合并 PDF…',
+  'pdfExport.merge.captureFailedNotice': '读取清单文档失败：{name}',
   /** 设置页「文件与链接」附加分页（#332：原「索引维护」改名承接图片/
    *  引用视图/索引维护三组，对齐 Obsidian 文件与链接分页心智） */
   'settings.filesLinksSection': '文件与链接',
@@ -455,6 +628,13 @@ export const zhCn: Record<MessageKey, string> = {
   'toolbar.switchToLive': '切换到实时预览',
   /** #208 工具栏刷新按钮（清嵌入资源缓存重渲染：图片/图表取新解析） */
   'toolbar.refresh': '刷新嵌入资源',
+  /** PDF 导出工具栏按钮与菜单（四个入口共用同一模态） */
+  'toolbar.exportPdf': '导出为 PDF',
+  'toolbar.exportPdfMenu': '选择 PDF 导出方式',
+  'pdfExport.menu.currentDocument': '导出当前文档',
+  'pdfExport.menu.selection': '导出当前选区',
+  'pdfExport.menu.batch': '批量导出 Markdown',
+  'pdfExport.menu.merge': '合并多篇为一份 PDF',
   'sidebar.resize': '拖拽调整侧栏宽度',
 
   'find.placeholder': '查找',
@@ -755,6 +935,11 @@ export const zhCn: Record<MessageKey, string> = {
   // （#232）：manifest title 改归属句式，操作名拆到 operation.* 独立键。
   'manifest.displayName': 'Vsidian',
   'manifest.description': '类 Obsidian 的 Markdown 编辑体验：实时预览 + 阅读双视图',
+  /** T08（#628）执行端扩展（双 VSIX 分发的第二个包）的市场展示面与包内
+   *  README——由 scripts/packageExecutor.mjs 从字典生成，不手写 JSON */
+  'executor.manifest.displayName': 'Vsidian PDF 导出执行端',
+  'executor.manifest.description': 'Vsidian 远程会话（Remote SSH）的 PDF 生成配套扩展：在本机浏览器生成 PDF 并保存到本机。须与 Vsidian 主扩展一同安装。',
+  'executor.readme.body': '本扩展在 Remote SSH 会话中承担 PDF 的本机生成：远端工作区读取文档与资源，本扩展调用本机已安装的 Chrome/Edge 生成 PDF，并把文件保存到本机。仅在远程会话中被 Vsidian 主扩展调用，无需单独操作。',
 
   'command.toggleViewMode.title': '切换到下一视图模式',
   /** #232 归属句式：editor/title 三态切换命令的 manifest title（genNls 生成源），
@@ -783,6 +968,24 @@ export const zhCn: Record<MessageKey, string> = {
   'command.table.insertColumnRight.title': '表格：右侧插入列',
   'command.table.deleteColumn.title': '表格：删除列',
   'command.openSettings.title': '打开设置',
+  /** T01（#621）PDF 导出：打开当前文档导出模态（只读操作，默认不绑定） */
+  'command.pdfExport.currentDocument.title': 'Vsidian：将当前文档导出为 PDF',
+  /** T03（#623）选区导出：当前选区（支持多选区）导出为 PDF（只读操作，
+   *  仅实时预览有选区语义，默认不绑定） */
+  'command.pdfExport.selection.title': 'Vsidian：将当前选区导出为 PDF',
+  /** T04（#624）PDF 批量导出：打开批量清单模态（只读操作，默认不绑定） */
+  'command.pdfExport.batch.title': 'Vsidian：批量导出 Markdown 为 PDF',
+  /** T06（#626）PDF 合并导出：打开合并清单模态（只读操作，默认不绑定） */
+  'command.pdfExport.merge.title': 'Vsidian：合并导出 Markdown 为一份 PDF',
+  /** T01（#621）无活动 Vsidian 文档时的命令提示 */
+  'host.pdfExportNoActiveDocument':
+    '请先在 Vsidian 中打开 Markdown 文档，再执行 PDF 导出。',
+  /** T03（#623）无有效选区时的入口提示（不开模态，不触发全文导出） */
+  'host.pdfExportSelectionEmpty':
+    '未获得有效选区。请先在实时预览中选中要导出的内容。',
+  /** T03（#623）阅读模式下的选区导出入口提示（阅读只读无选区交互语义） */
+  'host.pdfExportSelectionLiveOnly':
+    '选区导出在实时预览模式下使用：请切换到实时预览并选中内容后再导出。',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS 片段：重新加载',
   /** #131 暂停/恢复全部片段命令 */
@@ -850,6 +1053,37 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.imagePasteLinkFormat.description': '粘贴图片后在光标处插入的引用语法。双链嵌入写成 ![[相对路径]]：路径原样保留（空格不转义、不做百分号编码），文件名中的 #^[] 等双链无法表达的字符会在保存时移除；表格单元格内使用双链无需转义竖线（路径不含竖线）。',
   'setting.imagePasteLinkFormatMarkdown': 'Markdown 直链',
   'setting.imagePasteLinkFormatWikilink': '双链嵌入',
+  // ---- T01（#621）PDF 导出设置（文件与链接分页「PDF 导出」组）----
+  'setting.pdfExportBrowserPath.title': 'PDF 导出浏览器',
+  'setting.pdfExportBrowserPath.description':
+    '生成 PDF 使用的 Chrome 或 Edge 可执行文件路径。留空时自动检测已安装的浏览器。',
+  'setting.pdfExportPaper.title': '默认纸张尺寸',
+  'setting.pdfExportPaper.description': '打开导出窗口时预选的纸张尺寸。',
+  'setting.pdfExportOrientation.title': '默认方向',
+  'setting.pdfExportOrientation.description': '打开导出窗口时预选的页面方向。',
+  'setting.pdfExportMargin.title': '默认页边距（毫米）',
+  'setting.pdfExportMargin.description': '打开导出窗口时预选的页边距（0–50 毫米）。',
+  'setting.pdfExportScale.title': '默认缩放',
+  'setting.pdfExportScale.description': '打开导出窗口时预选的打印缩放（0.1–2，1 为 100%）。',
+  'setting.pdfExportCustomWidth.title': '默认自定义纸宽（毫米）',
+  'setting.pdfExportCustomWidth.description': '纸张尺寸选「自定义」时预选的纸张宽度（20–558 毫米）。',
+  'setting.pdfExportCustomHeight.title': '默认自定义纸高（毫米）',
+  'setting.pdfExportCustomHeight.description': '纸张尺寸选「自定义」时预选的纸张高度（20–558 毫米）。',
+  'setting.pdfExportHeader.title': '默认页眉',
+  'setting.pdfExportHeader.description': '打开导出窗口时预选是否显示页眉。',
+  'setting.pdfExportHeaderTitle.title': '页眉显示文档标题',
+  'setting.pdfExportHeaderTitle.description': '页眉开启时在其中显示文档标题。',
+  'setting.pdfExportHeaderDate.title': '页眉显示导出日期',
+  'setting.pdfExportHeaderDate.description': '页眉开启时在其中显示导出日期。',
+  'setting.pdfExportPageNumber.title': '默认页码',
+  'setting.pdfExportPageNumber.description': '打开导出窗口时预选是否在页脚显示页码。',
+  'setting.pdfExportPageNumberPosition.title': '默认页码位置',
+  'setting.pdfExportPageNumberPosition.description': '页码在页脚内的对齐位置。',
+  'setting.pdfExportPageNumberPositionLeft': '页脚居左',
+  'setting.pdfExportPageNumberPositionCenter': '页脚居中',
+  'setting.pdfExportPageNumberPositionRight': '页脚居右',
+  'setting.pdfExportBookmarks.title': '默认标题书签',
+  'setting.pdfExportBookmarks.description': '打开导出窗口时预选是否为标题生成 PDF 书签。',
   'host.imagePasteInvalidLocation': '粘贴图片未保存：子路径 {subpath} 非法（不允许绝对路径或 ..）。',
   'host.imagePasteNoWorkspaceFallback': '未打开工作区文件夹，粘贴图片已保存到当前文件同目录。',
   'host.imagePasteWriteFailed': '粘贴图片保存失败。',

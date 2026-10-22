@@ -36,6 +36,9 @@ export class IndexMaintenanceSection implements SettingsPageSection {
     { titleKey: 'settings.groupLink', icon: 'link' as const, prefixes: ['link.'] },
     { titleKey: 'settings.groupImage', icon: 'image' as const, prefixes: ['image.'] },
     { titleKey: 'settings.groupRefview', icon: 'pointerLink' as const, prefixes: ['hover.', 'embed.'] },
+    // T01（#621）PDF 导出组（browserPath + 四项默认参数）；不配图标——
+    // 无既有语义字形，不发明（#472 组件设置组同款空缺槽位）
+    { titleKey: 'settings.groupPdfExport', prefixes: ['pdfExport.'] },
   ] as const
   // #332 改名：分页标题/描述走文件与链接词条；「索引维护」降为页内二级
   // 组标题（render 内 h3，indexMaintenance.title 词条沿用）

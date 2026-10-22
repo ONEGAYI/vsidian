@@ -1,0 +1,20 @@
+{
+  "name": "pdf-remote-probe-installee",
+  "displayName": "PDF Remote Probe Installee",
+  "description": "V02 probe: target of workbench.extensions.installExtension experiment",
+  "version": "0.0.1",
+  "publisher": "vsidian",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "categories": [
+    "Other"
+  ]
+}

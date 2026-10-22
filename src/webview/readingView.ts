@@ -180,9 +180,19 @@ export function renderReadingBlocks(
  * 在 webview origin 下不可解析，必须经宿主通道），原始地址转入
  * data-vsidian-img-src 并绑定资源管理器（块挂载即装载；卸载由 detachWithin
  * 释放）。alt 保留（加载前占位与无障碍语义）。
+ *
+ * owns（可选）：同一容器内嵌套了其他文档根（PDF 导出的嵌入展开）时限定
+ * 归属——不属于本根的槽位不剥离不绑定，交给拥有它的根处理；缺省全部。
  */
-export function prepareReadingImages(root: HTMLElement, images: ImageResourceManager): void {
+export function prepareReadingImages(
+  root: HTMLElement,
+  images: ImageResourceManager,
+  owns?: (el: Element) => boolean,
+): void {
   for (const img of Array.from(root.querySelectorAll('img'))) {
+    if (owns !== undefined && !owns(img)) {
+      continue
+    }
     const raw = img.getAttribute('src') ?? ''
     img.removeAttribute('src')
     images.attach(img, raw)

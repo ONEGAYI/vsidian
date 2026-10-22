@@ -62,6 +62,28 @@ const SRCSET_MEMO_ATTR = 'data-vsidian-srcset'
 /** 装配幂等标记（同根二次 prepare 不重复剥离/订阅） */
 const PREPARED_ATTR = 'data-vsidian-html-res'
 
+/** 嵌套文档根标记属性（PDF 导出的嵌入展开容器；mountExportDocument 写入，
+ *  与 EMBED_FS_PATH_ATTR 同源）。同一容器内嵌套其他文档根时，外层根不再
+ *  处理内层根子树——资源身份各归其根（否则外层先剥 src、内层再拿到空串）。 */
+export const NESTED_DOC_ROOT_ATTR = 'data-vsidian-nested-doc-root'
+
+/** 归属谓词：元素不属于 root 内嵌套的其他文档根（含 root 自身判定） */
+function ownedByRoot(root: HTMLElement): (el: Element) => boolean {
+  return (el: Element): boolean => {
+    if (!root.querySelector(`[${NESTED_DOC_ROOT_ATTR}]`)) {
+      return true // 无嵌套根：全量处理（常规路径零开销语义）
+    }
+    let node: Element | null = el
+    while (node !== null && node !== root) {
+      if (node.hasAttribute(NESTED_DOC_ROOT_ATTR)) {
+        return false
+      }
+      node = node.parentElement
+    }
+    return true
+  }
+}
+
 export interface HtmlResourceMountDeps {
   /** 所属视图的图片管理器（A 面板 / B 实例——身份随视图成立）；null = 无绑定 */
   images: ImageResourceManager | null
@@ -101,18 +123,28 @@ const XLINK_NS = 'http://www.w3.org/1999/xlink'
  * 时零动作。同步纯 DOM 变换（无订阅、无生命周期——幂等由 PREPARED_ATTR
  * 咽喉挡重复）。
  */
-function applyHtmlIdScope(root: HTMLElement, docScope: string | null | undefined): void {
+function applyHtmlIdScope(
+  root: HTMLElement,
+  docScope: string | null | undefined,
+  owns: (el: Element) => boolean = () => true,
+): void {
   const prefix = htmlIdScopePrefix(docScope)
   if (prefix === null) {
     return
   }
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('[id]'))) {
+    if (!owns(el)) {
+      continue
+    }
     const id = el.getAttribute('id')
     if (id !== null && id !== '') {
       el.setAttribute('id', prefix + id)
     }
   }
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
+    if (!owns(el)) {
+      continue
+    }
     for (const attr of [...el.attributes]) {
       const value = attr.value
       if (!value.includes('#')) {
@@ -149,6 +181,7 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
   const sourceDocUri = deps.sourceDocUri
   const unsubscribers: Array<() => void> = []
   const owners: HTMLElement[] = [root]
+  const owns = ownedByRoot(root)
   let disposed = false
 
   const track = (unsub: () => void): void => {
@@ -164,7 +197,7 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
 
   // ---- #573（T08）ID 文档作用域（B/C 单侧前缀化，先于资源订阅——
   // href="#id" 已前缀化后不再命中下方相对路径订阅）----
-  applyHtmlIdScope(root, deps.docScope)
+  applyHtmlIdScope(root, deps.docScope, owns)
 
   // ---- #576 评审 P2-4：style 属性的相对 URL（CSS URL 语法面）----
   // style 属性值是 CSS 声明列表：url() 产按 CSS 词法扫描（引号形态同
@@ -174,6 +207,9 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
   // 改写后值，重装不冲掉前缀）；直连 URL 与无产属性零动作。hub 订阅持
   // 续活跃：资源失效经同一 listener 重取再回调（重装幂等）。
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('[style]'))) {
+    if (!owns(el)) {
+      continue
+    }
     const base = el.getAttribute('style') ?? ''
     const raws = new Set(
       scanCssUrls(base)
@@ -217,6 +253,9 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
 
   // ---- srcset 管线（img 与 picture source）----
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('img[srcset], source[srcset]'))) {
+    if (!owns(el)) {
+      continue
+    }
     const raw = el.getAttribute('srcset') ?? ''
     el.removeAttribute('srcset')
     const candidates = parseSrcsetCandidates(raw)
@@ -260,6 +299,9 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
   // ---- img 管理器绑定（src 剥离 + 状态机；srcset 在场时绑定首个候选）----
   if (deps.images) {
     for (const img of Array.from(root.querySelectorAll('img'))) {
+      if (!owns(img)) {
+        continue
+      }
       const srcsetRaw = img.getAttribute(SRCSET_MEMO_ATTR) ?? img.getAttribute('srcset')
       const candidates = srcsetRaw !== null ? parseSrcsetCandidates(srcsetRaw) : []
       const logicalSrc = candidates.length > 0
@@ -273,6 +315,9 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
     }
   } else {
     for (const img of Array.from(root.querySelectorAll('img'))) {
+      if (!owns(img)) {
+        continue
+      }
       // 无管理器（测试直驱/裸视图）：仍剥 src 防坏相对候选请求噪声，
       // 原文记忆于既有 dataset 口径（回挂管理器时 attach 自行读取）
       const raw = img.getAttribute('src')
@@ -300,6 +345,9 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
   ]
   for (const [selector, attr] of mediaTargets) {
     for (const el of Array.from(root.querySelectorAll<HTMLElement>(selector))) {
+      if (!owns(el)) {
+        continue
+      }
       const raw = el.getAttribute(attr)
       if (raw === null || !needsDocumentBaseResolution(raw)) {
         continue // 直连/无目标语义：保持原属性
@@ -338,6 +386,9 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
   // frame-src 的 cspSource 源表达式放行）。srcdoc 在场跳过：内容不是资源
   // 引用，且浏览器按规范忽略 src（解析它纯属浪费请求）。
   for (const frame of Array.from(root.querySelectorAll<HTMLElement>('iframe[src]'))) {
+    if (!owns(frame)) {
+      continue
+    }
     if (frame.hasAttribute('srcdoc')) {
       continue
     }

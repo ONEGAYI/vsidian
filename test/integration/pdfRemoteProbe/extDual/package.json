@@ -1,0 +1,21 @@
+{
+  "name": "pdf-remote-probe-dual",
+  "displayName": "PDF Remote Probe Dual",
+  "description": "V02 probe: extensionKind array semantics fixture (ui + workspace)",
+  "version": "0.0.1",
+  "publisher": "vsidian",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "categories": [
+    "Other"
+  ]
+}

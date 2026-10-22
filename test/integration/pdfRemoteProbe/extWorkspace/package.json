@@ -1,0 +1,20 @@
+{
+  "name": "pdf-remote-probe-workspace",
+  "displayName": "PDF Remote Probe Workspace",
+  "description": "V02 Remote SSH probe: workspace-side (vscode-server) fixture extension",
+  "version": "0.0.1",
+  "publisher": "vsidian",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "categories": [
+    "Other"
+  ]
+}

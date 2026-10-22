@@ -140,6 +140,134 @@ div.vsidian-behavior-query                        ← 查询区（组卡片内�
 - **翻页控件**（行为列表底部）：`<< < 第 x / y 页 > >>` 五件套——四枚行内微钮（22px 档、次级按钮变量族，到头/到底禁用发灰）+ 指示文本 12px 说明色；总页数 ≤ 1 不渲染。
 - **上限提示**：积木总数 > 16 时加号禁用（微钮禁用态）+ data-tooltip 说明（D9）。
 
+### 2.6 PDF 导出模态面板（页面级 webview，T01/#621）
+
+独立 webview 面板（createWebviewPanel，非设置页非编辑器内浮层——同类先例是设置页面板，形态归本节而不入 §3 浮层族）。布局参考 Better Export PDF 的「主区预览 + 侧区配置」（规格 [pdf-export.md](pdf-export.md) §2.4）：
+
+```text
+div.vsidian-pdfexport               ← 两列 grid（1fr + 320px；≤720px 退化为上下两行）
+├─ main.vsidian-pdfexport-preview    ← 主区：10px 卡片边框容器；T01 为占位说明
+│    └─ …placeholder（标题 15px/600 + 说明 13px 说明色，居中 max-width 420px）
+└─ aside.vsidian-pdfexport-side      ← 侧区：10px 卡片（1px 描边 + 16px 20px 内边距，独立滚动）
+     ├─ 文档行（12px 说明色标签 + 14px/500 文档名，下边线 tint 8%）
+     ├─ 参数字段行（label 上控件下，14px 0 上下 + tint 8% 分隔线——设置行 18px 档的紧凑变体）
+     │    select/number → 2px 档（dropdown/input 变量族）；scale → range + tabular-nums 值文本（accent-color focusBorder）
+     ├─ 操作行（18px 上距）：主按钮 6px 档（--vscode-button-*，busy 态禁用降透明）+ 次级按钮 6px 档（button-secondary 变量族，仅生成中显示）
+     └─ 状态行（role="status"，说明色，word-break）+ 「打开设置」次级按钮（仅缺浏览器分态显示）
+```
+
+- 控件全部复用 §2.3 既有档位（select/number 2px、range accent-color），无新控件形态；明暗主题全 `--vscode-*` 变量自适应，零硬编码色值。
+- **导出主题字段（验收反馈，2026-10-22）**：侧区参数末尾追加「主题」select（2px 档，与纸张/方向同档），三档「跟随编辑器／亮色／暗色」。它是产物观感参数而非编辑器设置——只改变预览与最终 PDF，不改编辑器主题。单文档与合并接在标题书签之后，批量在通用参数之后（`appendThemeField` 单一入口，三种模式共用）；切换即标预览过期。
+- T07（#627）真实 PDF 预览落位主区（代次概念 state.generation 先行）；页眉页脚参数（T05）沿参数字段行追加。
+- 绘制层断言：集成用例「PDF 导出模态（#621 T01）」经 `_test.pdfExportModal.report` 探针断言控件可见性（offsetParent + 计算样式）——非 DOM 存在性。
+
+**预览舞台（验收修复轮，2026-10-22）**：T07 主区内部统一为「预览舞台」——滚动区、左下角缩放条与加载骨架共用同一持久定位容器（`--vsidian-pdfexport-print-width` 由视图按当前纸张/方向写入）：
+
+```text
+main.vsidian-pdfexport-preview（弹性列；max-width = 纸面宽 + 64px，右侧栏吸收剩余宽度）
+└─ 工具栏（刷新/过期徽章/提示/批量条目选择）
+└─ .vsidian-pdfexport-preview-stage（position:relative；空白/生成态加 --empty 修饰）
+     ├─ .vsidian-pdfexport-preview-scroll（持久滚动区，承载 PdfHoverView 页塔）
+     ├─ .vsidian-pdfexport-zoombar（absolute left/bottom 14px；浮层 8px 圆角 + widget-shadow）
+     │    − / 百分比 12px tabular-nums（点击复位 100%）/ +
+     └─ .vsidian-pdfexport-preview-skeleton（生成/首帧期覆盖层，pointer-events:none）
+          └─ .vsidian-pdfexport-skeleton-page（按纸面宽与纵横比成形，内含 9 个
+             .vsidian-skeleton-block——与开屏骨架同族灰块与扫光配方）
+```
+
+- 布局尺寸变化（纸张/方向切换）走 `max-width` / `flex-basis` 220ms 过渡；`prefers-reduced-motion` 下关闭。说明块 `margin-inline:auto` 真正居中（列向 flex + max-width 不贴左）。
+- 缩放条与 Ctrl+滚轮共用 `PdfHoverView` 缩放入口；百分比 = 相对打印纸面的达成值（100% = 纸面大小），受渲染上限钳制时如实停在上限。工具条按钮 6px 档、百分比 12px tabular-nums、无新增色彩档位。
+- 百分比点击走预览专用的纸面 100% 入口（`resetToPaperScale`——按有效适配比例反算乘子；窄面板下同样回到纸面尺寸并横向滚动，乘子触顶时回显达成值），不改变阅读器浮层/嵌入卡 `resetZoom` 的适合宽度语义。面板宽度变化经滚动区 `ResizeObserver` 刷新百分比回显（下一帧，避免与 PdfHoverView 自己的重绘竞序）。
+- 骨架复用 #292 开屏骨架的视觉配方与 `shared/skeletonTiming` 节拍常量（经 CSS 变量注入），不复制数值；仍是页面级模态内部形态，不改变编辑器骨架的公开契约条目。
+- 绘制层断言：浏览器套件 `pdfExportPreview`（生产模态入口 + 真实 pdfjs + deviceScaleFactor 2）断言说明块居中、页面宽不超过纸面宽且居中、画布后备 = CSS × DPR、缩放条位置与 Ctrl+滚轮/按钮/百分比复位、骨架 9 块与 1.5s 扫光，并在视口收窄到 900px 后断言窄面板复位回到纸面 816px 且横向可滚动；集成 T07 探针追加 `previewPrintWidth` / `previewZoomBar` / `previewFirstCanvasCssWidth` 断言。
+
+**统一导出页（验收反馈，2026-10-22）**：单个/批量/合并三种入口共用同一页面形态——**清单恒在侧栏、主区恒为预览**，不存在「单文档一套、批量另一套」的分叉。单文档进入时清单只有「当前文档」一行（升级/新增词条 `pdfExport.batch.singleItemHint`、选中行说明 `pdfExport.batch.selectedHint`）：
+
+```text
+div.vsidian-pdfexport
+├─ main.vsidian-pdfexport-preview    ← 主区：预览舞台（单篇/多篇同一布局，无上下分栏）
+└─ aside.vsidian-pdfexport-side
+     ├─ .vsidian-pdfexport-export-list（清单区，下边线 tint 8%）
+     │    ├─ 标题行（12px 说明色）+ 计数徽章（pill 999px/11px，前景 tint 8% 底）
+     │    ├─ ul.vsidian-pdfexport-export-list-items（固定三条目高 206px = 3×66 + 2×4，
+     │    │    内部滚动 scrollbar-gutter:stable；行固定高 66px、路径单行省略）
+     │    │    └─ li.vsidian-pdfexport-batch-item（沿用 T04 行档位：序号/路径/根 + 三枚 6px 微钮）
+     │    │         · 可点选行加 --batch-item-clickable（cursor:pointer，role=button + aria-pressed）
+     │    │         · 选中行加 --batch-item-selected（activeSelection 前景/底色 + 1px focusBorder 描边）
+     │    └─ 添加行（「添加文件 / 添加目录」两枚等宽次级按钮——单文档点击即升格为多篇清单）
+     ├─ 参数字段行（appendParamFields；合并再追加页眉/页码/书签与每篇另起一页）
+     └─ 操作行 + 状态行（按模式：导出 / 批量导出… / 合并导出…；在途取消；终态返回）
+```
+
+- 清单容器**固定三条目高**（验收反馈：条目增多时列表不许把侧栏撑长或外溢到参数区），第 4 条起在容器内滚动；行高固定 + 路径单行省略，数量变化不引起侧栏布局跳动。
+- 预览工具栏不再提供「预览文件」下拉：条目点击是唯一的预览目标入口，`preview.select` 携带当前控件参数，宿主按目标身份 + 参数指纹做幂等判定（同条已就绪且未过期即零动作），在途轮只记最后一次点击并在收尾后补发（`pendingPreview`）。
+- **连点以最后点击为准**：每轮在发起时锁定目标身份（`pdfPreviewTargetKey`：只认哪一篇/哪份清单，不含版本），生成期间改选后该轮字节按锁定身份核对，目标已变即丢弃并撤下旧产物——不会出现「选中行是 B、画面仍是 A」。换目标时视图同步撤下旧画布与 Blob，由骨架屏接管至新产物首帧；参数变化不撤画面（保留 + 过期徽章）。
+- 单文档一行清单的条目 id 为 `document`（`PDF_DOCUMENT_LIST_ITEM_ID`），与宿主 `preview.select` 的识别口径同源；批量/合并条目 id 仍由宿主自增。
+- 升格/缩回：单文档「添加文件/目录」在用户真正选中文件后才转为批量清单（当前文档成首条并保持选中），删到只剩该条时缩回单文档模式；仅由单文档升格来的清单可缩回（批量命令打开的清单保持清单语义）。
+- 绘制层断言：浏览器套件 `pdfExportPreview` 断言清单在侧栏且只有一行当前文档、选中态描边为实线、主区不含清单且工具栏无 `select`、点击条目上行带参数的 `preview.select`，以及 6 条目时清单容器高 206px / 行高 66px / 内部可滚 / 长路径不横向溢出；集成 T07 core 用例断言 `exportListVisible` / `exportListInSide` / `selectedItemRel` / `selectedItemOutlines` 与升格、缩回两条路径，T07 敏感真浏览器用例断言快速连点（先 A 后 B）最终呈现最后点击那一条。
+
+**编辑器工具栏导出入口（验收反馈，2026-10-22）**：编辑器顶栏右端组、刷新按钮与双态切换之间，新增「导出为 PDF」图标按钮（26×24 顶栏图标档，与刷新/双态/侧栏同档），点击展开四个入口的下拉菜单：
+
+```text
+div.vsidian-toolbar（position:relative 作菜单定位基准）
+├─ …左组（设置、快速操作、附加组件槽）
+└─ 右端组（刷新 → 导出 → 双态切换 → 侧栏）
+     └─ div.vsidian-pdf-export-menu[role=menu]（按钮右缘对齐、按钮下方展开）
+          └─ button.vsidian-pdf-export-menu-item[role=menuitem] × 4
+             （导出当前文档 / 导出当前选区 / 批量导出 / 合并为一份）
+```
+
+- 菜单形态沿既有**菜单族**档位：`--vscode-menu-*` 变量族（回落 editorWidget）、圆角 5px、padding 3px、阴影 `0 3px 10px var(--vscode-widget-shadow)`、z-index 5——与快速操作标题菜单同档，不新增档位。
+- 菜单项是真实 `button` + `role=menuitem`，键盘 ArrowUp/Down 循环、Home/End 跳端、Esc 收起并回焦按钮、点外关闭；按钮 `aria-haspopup=menu` + `aria-expanded` 随开合翻转。
+- 四个入口与命令面板四个命令**共用同一宿主执行体**：webview 只发 `pdfExport.open`（mode 分派），文档/选区校验与模态打开全在宿主，不复制第二套校验。
+- 断言分层：单测钉住菜单 DOM 序、四个 mode 的出站消息、开合/Esc/点外/语言刷新；样式契约由本档位与既有菜单族条目共同覆盖。
+
+**批量模式分区（T04/#624，2026-10-21；2026-10-22 统一页复核后清单移入侧栏）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载清单与参数——全部复用既有档位，零新档位：
+
+```text
+main（批量模式）
+├─ editing：预览舞台（与单文档同一布局——清单在侧栏，主区不再有上下分栏）
+├─ confirm：目标目录行 + 策略 select（2px 档）+ table 映射预览
+│    （表头说明色 600 + 行分隔线 tint 8%；冲突徽章 pill 999px/11px warning 变量族、
+│    跳过/已更名徽章同 pill 前景 tint 8% 底）
+└─ running/awaiting/done：table 结果表（同上映射表形态）+ awaiting 时缺资源
+     列表（T02 issues 形态复用）+ 继续导出（主按钮）/继续导出全部（次级按钮）
+
+aside（批量模式侧区）
+├─ 导出清单（统一清单形态：标题 + 计数徽章 + 可点选行 [序号 12px tabular-nums
+│   说明色 + 相对路径 13px/500 + 根目录 11px 说明色 + 上移/下移/移除按钮 6px 档
+│   11px secondary 变量族；行 hover → list-hoverBackground；选中行 → 强调描边 +
+│   activeSelection 底色] + 添加行「添加文件/添加目录」）
+├─ 参数字段行（与单文档共用 appendParamFields——T05 参数追加两模式同步生效）
+├─ 操作行：批量导出…（主按钮）/ 开始导出 + 返回清单（次级）/ 取消（运行中）
+└─ 状态行（进度文案「正在导出第 N / M 个：文件名」role="status"）
+```
+
+- 「继续导出全部」按钮的悬停提示经 `data-tooltip`（#300 唯一承载——模态 webview 随 T04 装配 `installTooltipCard()`，设置页同款）。
+- 绘制层断言：集成用例「PDF 导出（#624 T04）」core 组经 `_test.pdfExportModal.report` 探针断言清单行文本与添加/操作按钮可见性（batchItemRels/batchAddButtons/batchResumeAllButton 等）——非 DOM 存在性。
+
+**合并模式分区（T06/#626，2026-10-21；2026-10-22 统一页复核后清单移入侧栏）**：同一面板的合并清单形态（`onegayi.vsidian.pdfExport.merge` 命令打开）——与批量模式共用同一清单组件（同一数据面：增删/调序/目录收集）与侧区参数档位，全部复用既有档位，零新档位：
+
+```text
+main（合并模式：editing = 预览舞台（合并单产物预览）；在途 = 进度区标题文本
+     （逐篇固定输入计数或「正在生成合并 PDF…」）+ awaiting 时缺资源列表；
+     终态 = 单产物详情行（保存路径/失败分态/取消——12px 说明色、路径换行，
+     同批量摘要档））
+aside（合并模式侧区）
+├─ 导出清单（统一清单形态，标题词条换「合并清单」；条目行不可点选——
+│   合并预览是单产物，不按条目分支）
+├─ 添加行（与批量共用两枚次级按钮）
+├─ 参数字段行（appendParamFields + T05 页眉/页码/书签参数区——单文档与
+│   合并共用 appendHeaderFooterFields；批量逐文件参数面维持 T04 不含此区）
+├─ 每篇另起一页开关（复用 checkRow 开关行形态——视图本地态，随
+│   pdfExportModal.merge.run 上行，不进持久设置）
+└─ 操作行：合并导出…（主按钮 6px 档，清单空禁用）/ 取消（在途）/
+    返回清单（终态——与批量同按钮复用）
+```
+
+- 导出页分篇容器 `.vsidian-pdf-merge-doc`（结构容器零观感）+ 每篇另起一页修饰类 `.vsidian-pdf-merge-break`（`break-before: page`——pdfExportPage.css 契约测试钉住，不进 webview 公开样式契约面）。
+- 绘制层断言：集成用例「PDF 导出（#626 T06）」core 组经探针断言合并按钮/每篇另起一页开关可见性与默认关态（mergeRunButton/mergePageBreakCheck/mergePageBreakChecked）；分篇分页与样式归属断言落 PDF 产物（页文本分布 + 文本项字号几何）。
+
 ## 3. 浮层元素模式（编辑器 webview 为主，多数已入公开契约）
 
 | 模式 | 形态要点 | 事实源与契约指针 |

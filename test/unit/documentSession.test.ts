@@ -3089,3 +3089,66 @@ describe('P2-13 panel-closed-with-input 通知的 fromRefPort 标记', () => {
     expect(notice && notice.type === 'panel-closed-with-input' && notice.fromRefPort).toBeUndefined()
   })
 })
+
+// T03（#623）选区导出：宿主 → webview 的选区请求往返（requestId 对账，
+// locateAndWait 同模式——挂起意图 + 超时兜底 + 面板失联即 undefined）。
+describe('T03 选区请求往返（pdfExport.selection.request / report）', () => {
+  it('就绪面板：请求出站带 requestId，回报对账后解析选区', async () => {
+    const s = setup('abcd')
+    const id = s.attach()
+    await readyPanel(s, id)
+    const pending = s.session.requestSelection(id, 2000)
+    const req = s.sent.get(id)!.at(-1)!
+    expect(req.kind).toBe('pdfExport.selection.request')
+    expect(typeof (req as { requestId: number }).requestId).toBe('number')
+    await s.send(id, {
+      kind: 'pdfExport.selection.report',
+      requestId: (req as { requestId: number }).requestId,
+      viewMode: 'live',
+      ranges: [{ from: 1, to: 3 }],
+    })
+    expect(await pending).toEqual({ viewMode: 'live', ranges: [{ from: 1, to: 3 }] })
+  })
+
+  it('超时无回报解析 undefined（不悬挂）；新请求可再发起', async () => {
+    const s = setup('abcd')
+    const id = s.attach()
+    await readyPanel(s, id)
+    const first = s.session.requestSelection(id, 30)
+    expect(await first).toBeUndefined()
+    // 第二次请求正常往返（挂起意图被超时终结，不吞后续请求）
+    const second = s.session.requestSelection(id, 2000)
+    const req = s.sent.get(id)!.at(-1) as { requestId: number }
+    await s.send(id, { kind: 'pdfExport.selection.report', requestId: req.requestId, viewMode: 'live', ranges: [] })
+    expect(await second).toEqual({ viewMode: 'live', ranges: [] })
+  })
+
+  it('未就绪面板立即返回 undefined（不出站请求）', async () => {
+    const s = setup('abcd')
+    const id = s.attach()
+    const before = s.sent.get(id)!.length
+    expect(await s.session.requestSelection(id, 100)).toBeUndefined()
+    expect(s.sent.get(id)!.length).toBe(before)
+  })
+
+  it('迟到/错配 requestId 的回报不解析挂起意图（陈旧回报丢弃）', async () => {
+    const s = setup('abcd')
+    const id = s.attach()
+    await readyPanel(s, id)
+    const pending = s.session.requestSelection(id, 5000)
+    const req = s.sent.get(id)!.at(-1) as { requestId: number }
+    await s.send(id, { kind: 'pdfExport.selection.report', requestId: req.requestId + 999, viewMode: 'live', ranges: [{ from: 0, to: 2 }] })
+    // 正确 requestId 到达才解析
+    await s.send(id, { kind: 'pdfExport.selection.report', requestId: req.requestId, viewMode: 'reading', ranges: [] })
+    expect(await pending).toEqual({ viewMode: 'reading', ranges: [] })
+  })
+
+  it('面板失联（detach）终结挂起意图为 undefined', async () => {
+    const s = setup('abcd')
+    const id = s.attach()
+    await readyPanel(s, id)
+    const pending = s.session.requestSelection(id, 5000)
+    s.session.detachPanel(id)
+    expect(await pending).toBeUndefined()
+  })
+})

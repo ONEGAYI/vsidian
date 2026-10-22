@@ -559,11 +559,12 @@ export class SettingsPageView {
     // editorDefs 为基，一并排除）；#332 起图片（image.*）与引用视图
     // （hover.*/embed.*）两族迁至「文件与链接」分页（分页 defsGroups 按
     // 同一前缀收纳，搜索随该分页分组命中）；#556 起 link.*（内部链接类型）
-    // 随同分页收纳，同样排除防重复呈现
+    // 随同分页收纳，同样排除防重复呈现；T01（#621）起 pdfExport.*（导出
+    // 浏览器路径与四项默认参数）随同分页「PDF 导出」组收纳，同样排除
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment') &&
       !d.key.startsWith('experimental.') && !d.key.startsWith('image.') &&
       !d.key.startsWith('hover.') && !d.key.startsWith('embed.') && !d.key.startsWith('appearance.') &&
-      !d.key.startsWith('link.'))
+      !d.key.startsWith('link.') && !d.key.startsWith('pdfExport.'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
    *  icon 为二级组标题图标，注册表驱动（#263 内联字形 + #265 生图资产）。

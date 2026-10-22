@@ -39,15 +39,49 @@ try {
     await page.addScriptTag({ path: output })
     await page.evaluate(() => window.initDoc('# 标题\n\n正文段。'))
 
-    // ---- DOM 序：齿轮、✎、附加组件槽（#360 T11，常驻空槽）、刷新嵌入资源、双态切换、侧栏 ----
+    // ---- DOM 序：齿轮、✎、附加组件槽（#360 T11，常驻空槽）、刷新嵌入资源、
+    //      PDF 导出、双态切换、侧栏、导出菜单浮层（隐藏态，恒为最后子元素）----
     assert.deepEqual(await page.evaluate(() => window.toolbarOrder()), [
       'vsidian-settings-toggle',
       'vsidian-quick-toggle',
       'vsidian-addon-toolbar-slot',
       'vsidian-refresh-toggle',
+      'vsidian-pdf-export-toggle',
       'vsidian-view-toggle',
       'vsidian-sidebar-toggle',
-    ], '按钮序应为 齿轮、快速操作、附加组件槽、刷新嵌入资源、双态切换、侧栏')
+      'vsidian-pdf-export-menu',
+    ], '按钮序应为 齿轮、快速操作、附加组件槽、刷新嵌入资源、PDF 导出、双态切换、侧栏（+导出菜单浮层）')
+
+    // ---- PDF 导出菜单绘制层：默认不占位，点击后真实展开于工具栏内、右缘
+    //      不越出工具栏，四个菜单项均可命中（样式注入失效时此断言失败）----
+    const menuClosed = await page.evaluate(() => {
+      const menu = document.querySelector('.vsidian-pdf-export-menu')
+      return { hidden: menu.hasAttribute('hidden'), box: menu.getBoundingClientRect().width }
+    })
+    assert.equal(menuClosed.hidden, true, '导出菜单默认应收起')
+    assert.equal(menuClosed.box, 0, '收起态菜单不应占据布局宽度')
+    const menuOpen = await page.evaluate(() => {
+      document.querySelector('.vsidian-pdf-export-toggle').click()
+      const menu = document.querySelector('.vsidian-pdf-export-menu')
+      const bar = document.querySelector('.vsidian-toolbar')
+      const mr = menu.getBoundingClientRect()
+      const br = bar.getBoundingClientRect()
+      const items = [...menu.querySelectorAll('.vsidian-pdf-export-menu-item')]
+      return {
+        width: mr.width, height: mr.height,
+        withinBar: mr.right <= br.right + 1 && mr.left >= br.left - 1 && mr.top >= br.top - 1,
+        itemCount: items.length,
+        hitAll: items.every((el) => {
+          const r = el.getBoundingClientRect()
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+          return hit === el || el.contains(hit)
+        }),
+      }
+    })
+    assert.ok(menuOpen.width > 100 && menuOpen.height > 80, `菜单展开后应有实际尺寸（${menuOpen.width}×${menuOpen.height}）`)
+    assert.equal(menuOpen.withinBar, true, '菜单应完整落在工具栏水平范围内（右缘对齐按钮、不越界）')
+    assert.equal(menuOpen.itemCount, 4, '菜单应含四个导出入口')
+    assert.equal(menuOpen.hitAll, true, '四个菜单项均应在绘制层可命中（未被遮挡）')
 
     // ---- 绘制层可见性与图标随态（live：edit 可见、book 隐藏）----
     await page.waitForSelector('.vsidian-view-toggle')
@@ -60,17 +94,25 @@ try {
     assert.equal(paint.title, zhCn['toolbar.switchToReading'], 'title 与 aria 同词')
 
     // ---- #158/#208 右端组几何（绘制层）：刷新嵌入资源按钮（#208 起持有
-    //      margin-left:auto）与双态切换均位于工具栏水平中点右侧，刷新与
-    //      双态切换、双态切换与侧栏开关分别以工具栏 gap（4px）紧邻组成
-    //      右端组 ----
+    //      margin-left:auto）与双态切换均位于工具栏水平中点右侧。PDF 导出
+    //      按钮插在两者之间，右端组现为「刷新 → 导出 → 双态 → 侧栏」四件，
+    //      相邻两件之间均以工具栏 gap（4px）紧邻 ----
     assert.ok(paint.refreshCenterX !== null && paint.refreshCenterX > paint.toolbarCenterX,
       `刷新按钮中心应位于工具栏水平中点右侧（#208 右端组首按钮）：refreshCenterX=${paint.refreshCenterX}, toolbarCenterX=${paint.toolbarCenterX}`)
     assert.ok(paint.refreshGapToView !== null && Math.abs(paint.refreshGapToView - 4) < 1,
-      `刷新按钮与双态切换应以工具栏 gap 紧邻（实测间距 ${paint.refreshGapToView}px）`)
+      `刷新按钮与导出按钮应以工具栏 gap 紧邻（实测间距 ${paint.refreshGapToView}px）`)
     assert.ok(paint.centerX > paint.toolbarCenterX,
       `双态按钮中心应位于工具栏水平中点右侧（#158 右端组）：centerX=${paint.centerX}, toolbarCenterX=${paint.toolbarCenterX}`)
     assert.ok(paint.gapToSidebar !== null && Math.abs(paint.gapToSidebar - 4) < 1,
       `双态切换与侧栏开关应以工具栏 gap 紧邻组成右端组（实测间距 ${paint.gapToSidebar}px）`)
+    // 导出按钮与双态切换同样属于右端组且以 gap 紧邻（50px = 26px 按钮 + ...；
+    // 用相邻几何直接核对，不依赖夹具新增字段：导出按钮右缘到双态左缘）
+    const exportGap = await page.evaluate(() => {
+      const exp = document.querySelector('.vsidian-pdf-export-toggle').getBoundingClientRect()
+      const view = document.querySelector('.vsidian-view-toggle').getBoundingClientRect()
+      return view.left - exp.right
+    })
+    assert.ok(Math.abs(exportGap - 4) < 1, `导出按钮与双态切换应以工具栏 gap 紧邻（实测间距 ${exportGap}px）`)
 
     // ---- 点击出站 + 宿主回环后图标随态翻转（reading：book 可见）----
     const beforeClick = await page.evaluate(() => window.readHostMessages().length)

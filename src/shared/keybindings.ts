@@ -55,6 +55,25 @@ const extra: readonly KeybindingOperation[] = [
   // 零占用，宿主编辑器正文无默认占用——评估记录见 docs/specs/keybindings.md）
   { id: 'blockCopyLink', command: 'onegayi.vsidian.block.copyLink', titleKey: 'command.block.copyLink.title', mode: 'live', writes: true, defaults: ['ctrl+shift+c'] },
   { id: 'openSettings', command: 'onegayi.vsidian.openSettings', titleKey: 'command.openSettings.title', mode: 'both', writes: false, defaults: [] },
+  // T01（#621）PDF 导出：当前文档导出模态入口。只读操作（不写文档、不吞
+  // 源码/设置页输入），双模式可用（Live/Reading 均以固定输入导出）；默认
+  // 不占键位——命令面板与后续模态内按钮是主入口，键位留给用户自绑
+  { id: 'pdfExportCurrentDocument', command: 'onegayi.vsidian.pdfExport.currentDocument', titleKey: 'command.pdfExport.currentDocument.title', mode: 'both', writes: false, defaults: [] },
+  // T03（#623）选区导出：读活动 Live 面板当前一个或多个选区（严格切片
+  // 不扩大，多选区分别渲染合成一份 PDF）。只读操作（选区读取与导出均不
+  // 写文档、不改选区、不产生编辑历史）；Live 限定——阅读只读无选区交互
+  // 语义（在选定内容中查找同口径），入口提示切实时预览；默认不占键位，
+  // 命令面板是主入口（评估记录见 docs/specs/keybindings.md）
+  { id: 'pdfExportSelection', command: 'onegayi.vsidian.pdfExport.selection', titleKey: 'command.pdfExport.selection.title', mode: 'live', writes: false, defaults: [] },
+  // T04（#624）PDF 批量导出：批量清单模态入口。同只读口径（批量读固定输入
+  // 逐文件生成，不写源文、不新增撤销、不触发保存）；不依赖活动文档（空
+  // 窗口可用），双模式注册；默认不占键位（命令面板是主入口，与 T01 同评估）
+  { id: 'pdfExportBatch', command: 'onegayi.vsidian.pdfExport.batch', titleKey: 'command.pdfExport.batch.title', mode: 'both', writes: false, defaults: [] },
+  // T06（#626）PDF 合并导出：合并清单模态入口（同一模态的合并模式——清单
+  // 顺序组合为一份 PDF，可选每篇另起一页）。同批量只读口径（逐篇读固定
+  // 输入合成单产物，不写源文、不新增撤销、不触发保存）；不依赖活动文档，
+  // 双模式注册；默认不占键位（命令面板是主入口，与 T01/T04 同评估）
+  { id: 'pdfExportMerge', command: 'onegayi.vsidian.pdfExport.merge', titleKey: 'command.pdfExport.merge.title', mode: 'both', writes: false, defaults: [] },
   // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
   // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）
   { id: 'openStyleReference', command: 'onegayi.vsidian.openStyleReference', titleKey: 'command.openStyleReference.title', mode: 'both', writes: false, defaults: [] },

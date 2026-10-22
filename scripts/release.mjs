@@ -40,8 +40,14 @@ export const SIZE_LIMITS = {
   // 1.38 MiB，沿 #338 与 ELK 两次裁决的余量风格）——下调无先例、属
   // 用户裁决面，已以提案值生效，发版/验收轮用户可整体回调；单文件与
   // 图标线不受影响。
-  totalWarnBytes: 13.5 * 1024 * 1024,
-  totalMaxBytes: 14.0 * 1024 * 1024,
+  // PDF 导出批次（#618–#628，T01–T08）新增模态产物 pdfexport.js/css 与
+  // 导出页产物 pdfexportpage.js/css（实测合计约 3.26 MiB，最大单项
+  // pdfexportpage.js 2.85 MiB 仍在单文件 3/4 MiB 线内），2026-10-22
+  // 用户裁决总量两线各上调 2 MiB：警告线 13.5→15.5 MiB、失败线
+  // 14.0→16.0 MiB（实测 15.35 MiB 落警告线与失败线之间，距失败线
+  // 约 0.65 MiB）；单文件与图标线不动。
+  totalWarnBytes: 15.5 * 1024 * 1024,
+  totalMaxBytes: 16.0 * 1024 * 1024,
   // 一般单文件：最大单项为 main.js（T08 后实测 2,573,352 B ≈ 2.46 MB，
   // 含 CM6 + KaTeX、Lezer 语言表、查找引擎、悬停/嵌入与分词），警告线
   // 3 MB 在其上留余量、失败线 4 MB 拦截意外超大文件（如误升 mermaid
@@ -74,6 +80,13 @@ const REQUIRED_EXTENSION = [
   'out/webview/main.css',
   'out/webview/settings.js',
   'out/webview/settings.css',
+  // #621 T01 PDF 导出模态产物（缺失时导出命令打开的模态不可用）
+  'out/webview/pdfexport.js',
+  'out/webview/pdfexport.css',
+  // #622 T02 PDF 导出页产物（跑在被测浏览器里的完整 Reading 装配——
+  // 缺失时导出页装载失败，任务如实分态 not-ready）
+  'out/webview/pdfexportpage.js',
+  'out/webview/pdfexportpage.css',
   // #60 Mermaid 独立产物（按需懒加载的渲染器；缺失时图表降级为错误态）
   'out/webview/mermaid.js',
   // #337 PDF 双产物（pdfjs-dist@6.4.299 legacy 主库 + worker；缺失时 PDF
