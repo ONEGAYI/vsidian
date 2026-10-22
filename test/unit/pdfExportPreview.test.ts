@@ -1,7 +1,7 @@
 // PDF 导出预览指纹纯逻辑单元测试（T07/#627）：归一参数口径、四种输入
 // 形态的身份区分、代次语义（页眉日期）与两侧一致性。
 import { describe, expect, it } from 'vitest'
-import { pdfPreviewFingerprint, type PdfPreviewTarget } from '../../src/shared/pdfExportPreview'
+import { pdfPreviewFingerprint, pdfPreviewTargetKey, type PdfPreviewTarget } from '../../src/shared/pdfExportPreview'
 
 const DOC_TARGET: PdfPreviewTarget = {
   kind: 'document',
@@ -83,5 +83,35 @@ describe('pdfPreviewFingerprint：固定输入身份', () => {
     const doc = { docName: 'a.md', capturedVersion: 1 }
     expect(pdfPreviewFingerprint({ options: PARAMS, target: { kind: 'document', doc } }))
       .not.toBe(pdfPreviewFingerprint({ options: PARAMS, target: { kind: 'batchItem', fsPath: 'D:/vault/a.md', doc } }))
+  })
+})
+
+describe('pdfPreviewTargetKey：目标选择身份键（不含参数、日期与版本）', () => {
+  it('参数/版本推进不改变目标键；换条目/换文档才改变', () => {
+    const doc = { docName: 'a.md', capturedVersion: 2 }
+    const target: PdfPreviewTarget = { kind: 'document', doc }
+    const base = pdfPreviewTargetKey(target)
+    expect(pdfPreviewTargetKey({ kind: 'document', doc: { ...doc } })).toBe(base)
+    // 捕获推进版本（同一篇的输入更新）不算换目标
+    expect(pdfPreviewTargetKey({ kind: 'document', doc: { docName: 'a.md', capturedVersion: 3 } })).toBe(base)
+    expect(pdfPreviewTargetKey({
+      kind: 'batchItem', fsPath: 'D:/vault/a.md', doc,
+    })).not.toBe(base)
+    // 同一目标的完整指纹随参数变化，但目标键不变——参数变化不撤旧画面
+    expect(pdfPreviewFingerprint({ options: PARAMS, target })).not.toBe(
+      pdfPreviewFingerprint({ options: { ...PARAMS, orientation: 'landscape' }, target }),
+    )
+    expect(pdfPreviewTargetKey(target)).toBe(base)
+  })
+
+  it('批量条目换文件、合并清单增删/换序都算换目标', () => {
+    const item = (fsPath: string): PdfPreviewTarget =>
+      ({ kind: 'batchItem', fsPath, doc: { docName: 'a.md', capturedVersion: 1 } })
+    expect(pdfPreviewTargetKey(item('D:/v/a.md'))).not.toBe(pdfPreviewTargetKey(item('D:/v/b.md')))
+    const merge = (fsPaths: string[]): PdfPreviewTarget => ({ kind: 'merge', fsPaths, versions: fsPaths.map(() => 1) })
+    expect(pdfPreviewTargetKey(merge(['a.md', 'b.md'])))
+      .not.toBe(pdfPreviewTargetKey(merge(['b.md', 'a.md'])))
+    expect(pdfPreviewTargetKey(merge(['a.md', 'b.md'])))
+      .not.toBe(pdfPreviewTargetKey(merge(['a.md'])))
   })
 })

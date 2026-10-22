@@ -35,7 +35,7 @@ import {
   PDF_EXPORT_OPTIONS_DEFAULTS,
   type PdfExportOptions,
 } from '../../shared/pdfExportOptions'
-import { pdfPreviewFingerprint, type PdfPreviewTarget } from '../../shared/pdfExportPreview'
+import { pdfPreviewFingerprint, pdfPreviewTargetKey, type PdfPreviewTarget } from '../../shared/pdfExportPreview'
 import type {
   PdfExportFailureItem,
   PdfExportSnippetEntry,
@@ -765,13 +765,25 @@ export function createPdfExportModal(
    *  运行中不叠加发起（不因重复输入反复启动生成任务）。
    *  preset（验收统一页的进入自动预览）：payload 为 open 时刻刚捕获的固定
    *  输入——跳过二次捕获（同一轮输入不重复读文档/嵌入/样式），目标身份
-   *  仍按当前模式由 previewTargetOf() 计算。 */
+   *  仍按当前模式由 previewTargetOf() 计算。
+   *
+   *  目标身份在**轮次开始时锁定**（不在捕获/生成完成后重取）：生成在途期间
+   *  用户改选条目时，本轮的输入与产物仍属发起时的那一份——完成后按锁定
+   *  身份核对，目标已变则丢弃本轮字节（不把 A 的画面贴成 B 的指纹，也不
+   *  让幂等判定因此误判 B 已就绪）。最新选择由 pendingPreview 在轮末补发。 */
   const refreshPreview = (rawParams: unknown, pageBreak: boolean, preset?: { payload: PdfExportInputPayload }): void => {
     if (previewBusy || job.isRunning || batchJob.isRunning || mergeJob.isRunning) return
     const { defaults, browserPath } = defaultsFromSettings(getSettingsSnapshot())
     const params = normalizePdfExportOptions(rawParams, defaults)
     const gen = ++previewGen
     const token = previewResetToken
+    // 锁定目标身份：document 用当前固定输入身份；批量/合并用发起时刻的
+    // 清单与选中条目（捕获只补版本号，不换目标）
+    const lockedTarget = previewTargetOf()
+    const lockedBatchItem = mode === 'batch'
+      ? (batchItems.find((i) => i.id === previewBatchItemId) ?? batchItems[0])
+      : undefined
+    const lockedMergeItems = mode === 'merge' ? batchItems.map((i) => i.fsPath) : undefined
     previewBusy = true
     previewRuns++
     previewPhase = 'generating'
@@ -802,7 +814,7 @@ export function createPdfExportModal(
           fixedInput = input
           payload = input.payload
         } else if (mode === 'batch') {
-          const item = batchItems.find((i) => i.id === previewBatchItemId) ?? batchItems[0]
+          const item = lockedBatchItem
           if (item === undefined) {
             // 空清单无可预览目标：静默回 idle（不构成失败）
             previewPhase = 'idle'
@@ -816,7 +828,7 @@ export function createPdfExportModal(
           previewItemVersions.set(item.fsPath, captured.capturedVersion)
           payload = captured.payload
         } else {
-          if (batchItems.length === 0) {
+          if (lockedMergeItems === undefined || lockedMergeItems.length === 0) {
             previewPhase = 'idle'
             return
           }
@@ -824,11 +836,13 @@ export function createPdfExportModal(
           if (gen !== previewGen || token !== previewResetToken) return
           const captureDoc = makeCaptureDocPort()
           const captured: PdfBatchCapturedDoc[] = []
-          for (const item of batchItems) {
-            const outcome = await captureDoc(item.fsPath)
+          // 按发起时刻锁定的清单捕获（顺序不变：期间增删条目归下一轮，
+          // 本轮产物不得以新清单的指纹发布）
+          for (const fsPath of lockedMergeItems) {
+            const outcome = await captureDoc(fsPath)
             if (gen !== previewGen || token !== previewResetToken) return
             if (!('payload' in outcome) || !outcome.payload) throw new Error('capture-failed')
-            previewItemVersions.set(item.fsPath, outcome.capturedVersion)
+            previewItemVersions.set(fsPath, outcome.capturedVersion)
             captured.push(outcome)
           }
           const raw = batchWindowCapture
@@ -845,6 +859,18 @@ export function createPdfExportModal(
         }
         fingerprintTarget = previewTargetOf()
         if (fingerprintTarget === undefined || payload === undefined) throw new Error('no-preview-target')
+        // 目标身份轮中变动守卫：锁定目标与当前目标不是同一份内容（换条目/
+        // 换清单/换文档）→ 本轮产物作废，最新选择交由 pendingPreview 补发。
+        // 同一目标内的版本号推进不在此列（那是同一内容的更新，照常发布）。
+        if (lockedTarget !== undefined && pdfPreviewTargetKey(lockedTarget) !== pdfPreviewTargetKey(fingerprintTarget)) {
+          // 本轮作废：旧产物也不再属于当前目标（合并清单增删等没有待补
+          // 点击的场合），一并撤下——不能停在 generating 让视图永远骨架，
+          // 也不能让下一次导出误复用别的目标的字节。
+          previewStore = undefined
+          previewPhase = 'idle'
+          previewFailReason = undefined
+          return
+        }
         const fingerprint = pdfPreviewFingerprint({ options: params, target: fingerprintTarget, pageBreak, today: hostToday() })
         // 资源服务守卫登记（预览任务的固定输入数据面）
         knownDocFsPaths.clear()

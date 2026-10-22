@@ -70,3 +70,18 @@ export function pdfPreviewFingerprint(input: PdfPreviewFingerprintInput): string
   }
   return JSON.stringify(['merge', head, target.fsPaths, target.versions, input.pageBreak === true])
 }
+
+/** 目标选择身份键（不含参数、日期与权威版本）——只回答「看的是不是同一篇
+ *  /同一份清单」。用途：换目标时立刻作废上一目标的就绪字节（骨架屏接管，
+ *  不保留旧预览），以及预览轮次中途改选时丢弃本轮产物。版本号推进不参与
+ *  ——那是同一目标的输入更新，由完整指纹判过期（旧画面保留 + 过期徽章，
+ *  规格 §2.4），捕获过程本身也会推进版本。 */
+export function pdfPreviewTargetKey(target: PdfPreviewTarget): string {
+  if (target.kind === 'document') {
+    return JSON.stringify(['document', target.doc.docName, target.doc.fragments ?? null])
+  }
+  if (target.kind === 'batchItem') {
+    return JSON.stringify(['batchItem', target.fsPath])
+  }
+  return JSON.stringify(['merge', target.fsPaths])
+}

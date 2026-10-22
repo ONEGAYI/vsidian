@@ -188,7 +188,8 @@ div.vsidian-pdfexport
 └─ aside.vsidian-pdfexport-side
      ├─ .vsidian-pdfexport-export-list（清单区，下边线 tint 8%）
      │    ├─ 标题行（12px 说明色）+ 计数徽章（pill 999px/11px，前景 tint 8% 底）
-     │    ├─ ul.vsidian-pdfexport-export-list-items（gap 4px，max-height 34vh 独立滚动）
+     │    ├─ ul.vsidian-pdfexport-export-list-items（固定三条目高 206px = 3×66 + 2×4，
+     │    │    内部滚动 scrollbar-gutter:stable；行固定高 66px、路径单行省略）
      │    │    └─ li.vsidian-pdfexport-batch-item（沿用 T04 行档位：序号/路径/根 + 三枚 6px 微钮）
      │    │         · 可点选行加 --batch-item-clickable（cursor:pointer，role=button + aria-pressed）
      │    │         · 选中行加 --batch-item-selected（activeSelection 前景/底色 + 1px focusBorder 描边）
@@ -197,10 +198,12 @@ div.vsidian-pdfexport
      └─ 操作行 + 状态行（按模式：导出 / 批量导出… / 合并导出…；在途取消；终态返回）
 ```
 
+- 清单容器**固定三条目高**（验收反馈：条目增多时列表不许把侧栏撑长或外溢到参数区），第 4 条起在容器内滚动；行高固定 + 路径单行省略，数量变化不引起侧栏布局跳动。
 - 预览工具栏不再提供「预览文件」下拉：条目点击是唯一的预览目标入口，`preview.select` 携带当前控件参数，宿主按目标身份 + 参数指纹做幂等判定（同条已就绪且未过期即零动作），在途轮只记最后一次点击并在收尾后补发（`pendingPreview`）。
+- **连点以最后点击为准**：每轮在发起时锁定目标身份（`pdfPreviewTargetKey`：只认哪一篇/哪份清单，不含版本），生成期间改选后该轮字节按锁定身份核对，目标已变即丢弃并撤下旧产物——不会出现「选中行是 B、画面仍是 A」。换目标时视图同步撤下旧画布与 Blob，由骨架屏接管至新产物首帧；参数变化不撤画面（保留 + 过期徽章）。
 - 单文档一行清单的条目 id 为 `document`（`PDF_DOCUMENT_LIST_ITEM_ID`），与宿主 `preview.select` 的识别口径同源；批量/合并条目 id 仍由宿主自增。
 - 升格/缩回：单文档「添加文件/目录」在用户真正选中文件后才转为批量清单（当前文档成首条并保持选中），删到只剩该条时缩回单文档模式；仅由单文档升格来的清单可缩回（批量命令打开的清单保持清单语义）。
-- 绘制层断言：浏览器套件 `pdfExportPreview` 断言清单在侧栏且只有一行当前文档、选中态描边为实线、主区不含清单且工具栏无 `select`、点击条目上行带参数的 `preview.select`；集成 T07 core 用例断言 `exportListVisible` / `exportListInSide` / `selectedItemRel` / `selectedItemOutlines` 与升格、缩回两条路径。
+- 绘制层断言：浏览器套件 `pdfExportPreview` 断言清单在侧栏且只有一行当前文档、选中态描边为实线、主区不含清单且工具栏无 `select`、点击条目上行带参数的 `preview.select`，以及 6 条目时清单容器高 206px / 行高 66px / 内部可滚 / 长路径不横向溢出；集成 T07 core 用例断言 `exportListVisible` / `exportListInSide` / `selectedItemRel` / `selectedItemOutlines` 与升格、缩回两条路径，T07 敏感真浏览器用例断言快速连点（先 A 后 B）最终呈现最后点击那一条。
 
 **批量模式分区（T04/#624，2026-10-21；2026-10-22 统一页复核后清单移入侧栏）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载清单与参数——全部复用既有档位，零新档位：
 

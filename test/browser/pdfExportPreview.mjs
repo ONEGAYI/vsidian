@@ -154,6 +154,56 @@ try {
   assert.equal(listLayout.mainHasSelect, false, '预览工具栏不应再有文件下拉')
   passed++
 
+  // ---- 清单容器固定三条目高、内部滚动（多条目不外溢侧栏） ----
+  const manyItems = Array.from({ length: 6 }, (_, i) => ({
+    id: `b${i + 1}`,
+    fsPath: `D:/ws/条目更长一些的文件名-${i + 1}.md`,
+    rootFsPath: 'D:/ws/一个很长的根目录路径/子目录',
+    relPath: `条目更长一些的文件名-${i + 1}.md`,
+  }))
+  await page.evaluate((s) => window.postMessage(s, '*'), {
+    ...state({ phase: 'idle', generation: 0 }),
+    batch: {
+      mode: 'batch', phase: 'editing', items: manyItems,
+      strategy: 'rename', currentIndex: 0, total: 0, results: [],
+    },
+    preview: { phase: 'idle', generation: 0, batchItemId: 'b1' },
+    previewTarget: { kind: 'batchItem', fsPath: manyItems[0].fsPath, doc: { docName: manyItems[0].relPath, capturedVersion: 1 } },
+    list: undefined,
+  })
+  await page.locator('.vsidian-pdfexport-export-list-items').waitFor()
+  const listBox = await page.evaluate(() => {
+    const list = document.querySelector('.vsidian-pdfexport-export-list-items')
+    const row = list.querySelector('.vsidian-pdfexport-batch-item')
+    const side = document.querySelector('.vsidian-pdfexport-side')
+    const style = getComputedStyle(list)
+    const box = list.getBoundingClientRect()
+    return {
+      height: Math.round(box.height),
+      rowHeight: Math.round(row.getBoundingClientRect().height),
+      overflowY: style.overflowY,
+      scrollHeight: list.scrollHeight,
+      clientWidth: list.clientWidth,
+      scrollWidth: list.scrollWidth,
+      insideSide: box.bottom <= side.getBoundingClientRect().bottom + 0.5,
+      rows: list.querySelectorAll('.vsidian-pdfexport-batch-item').length,
+    }
+  })
+  assert.equal(listBox.rows, 6, `批量清单应有 6 行（实测 ${listBox.rows}）`)
+  // 3 × 66 + 2 × 4 = 206px（固定三条目高，行高 66）
+  assert.ok(Math.abs(listBox.height - 206) <= 1, `清单容器应固定三条目高 206px（实测 ${listBox.height}px）`)
+  assert.equal(listBox.rowHeight, 66, `条目行高应固定 66px（实测 ${listBox.rowHeight}px）`)
+  assert.equal(listBox.overflowY, 'auto', '条目超出时内部滚动')
+  assert.ok(listBox.scrollHeight > listBox.height + 100, `内部内容应高于容器（scrollHeight ${listBox.scrollHeight}）`)
+  assert.equal(listBox.scrollWidth <= listBox.clientWidth + 1, true, '长文本不应横向溢出（单行省略）')
+  assert.equal(listBox.insideSide, true, '清单底部不越出侧栏卡片')
+  passed++
+
+  // 恢复单文档态，供后续场景（点击条目/骨架/产物）沿用同一份 fixture
+  await page.evaluate((s) => window.postMessage(s, '*'), state({ phase: 'idle', generation: 0 }))
+  await page.waitForFunction(() =>
+    document.querySelectorAll('.vsidian-pdfexport-export-list .vsidian-pdfexport-batch-item').length === 1)
+
   // ---- 点击清单条目：上行 preview.select（带当前参数，自动加载预览） ----
   await page.locator('.vsidian-pdfexport-export-list .vsidian-pdfexport-batch-item').click()
   const selected = await page.evaluate(() => {
@@ -285,7 +335,7 @@ try {
   passed++
 
   assert.deepEqual(errors, [], `页面不应有未捕获异常：${errors.join(' | ')}`)
-  console.log(`pdfExportPreview: ${passed}/6 场景通过`)
+  console.log(`pdfExportPreview: ${passed}/7 场景通过`)
 } finally {
   await browser.close()
 }

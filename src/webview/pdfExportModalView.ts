@@ -21,7 +21,7 @@ import {
   type PdfExportOptions,
   type PdfPageNumberPosition,
 } from '../shared/pdfExportOptions'
-import { pdfPreviewFingerprint, type PdfPreviewTarget } from '../shared/pdfExportPreview'
+import { pdfPreviewFingerprint, pdfPreviewTargetKey, type PdfPreviewTarget } from '../shared/pdfExportPreview'
 import {
   type PdfBatchConflictStrategy,
   type PdfBatchItem,
@@ -296,6 +296,10 @@ export class PdfExportModalView {
   private previewStageEl: HTMLDivElement | null = null
   /** 产物字节已到达、PdfHoverView 首帧尚未落定（骨架覆盖期） */
   private previewLoading = false
+  /** 换目标后等新产物：期间一律骨架（不闪回空态说明——用户已看过预览） */
+  private previewAwaitSkeleton = false
+  /** 当前预览目标的选择身份键（换文档/换条目即撤旧画面） */
+  private previewTargetKey = ''
   private zoomOutEl: HTMLButtonElement | null = null
   private zoomInEl: HTMLButtonElement | null = null
   private zoomValueEl: HTMLButtonElement | null = null
@@ -314,7 +318,48 @@ export class PdfExportModalView {
     if (!this.paramsTouched) {
       this.currentParams = { ...state.defaults }
     }
+    this.syncPreviewTarget()
+    // 等新产物的骨架只在「确实还有一轮在跑」时延续：宿主放弃了一轮（目标
+    // 中途变化且无待补选）会回到 idle/failed——此时不能永远停在骨架
+    if (this.previewArtifactUrl === '' && state.preview !== undefined
+      && state.preview.phase !== 'generating') {
+      this.previewAwaitSkeleton = false
+    }
     this.render()
+  }
+
+  /** 换文档/换清单条目 → 立刻撤下上一目标的画布与字节，由骨架屏接管
+   *  （用户验收口径：不保留旧预览冒充新目标）。参数变化不在此列——旧画面
+   *  保留并亮过期徽章（规格 §2.4「参数或清单改变后标记预览过期」的对用户
+   *  可见面是徽章，不是空白）。身份键只认「哪一篇/哪份清单」。 */
+  private syncPreviewTarget(): void {
+    const target = this.state?.previewTarget
+    const key = target !== undefined ? pdfPreviewTargetKey(target) : ''
+    if (this.previewTargetKey === key) return
+    const hadPreview = this.previewTargetKey !== ''
+    this.previewTargetKey = key
+    if (!hadPreview) return
+    // 换目标：旧 Blob 立即释放，画布塔整体撤下（PdfHoverView.dispose 后按需
+    // 重建——目标身份已变，旧滚动位置/缩放不跨目标携带）
+    this.dropPreviewArtifact()
+  }
+
+  /** 撤下当前预览产物（换目标/会话重置）：释放 Blob URL、清画布与 loading
+   *  态，骨架或说明按最新 state 呈现。 */
+  private dropPreviewArtifact(): void {
+    if (this.previewArtifactUrl !== '') {
+      URL.revokeObjectURL(this.previewArtifactUrl)
+      this.previewArtifactUrl = ''
+      this.previewBlobUrlsAlive = Math.max(0, this.previewBlobUrlsAlive - 1)
+    }
+    this.previewArtifactGen = 0
+    this.previewLoading = false
+    // 换目标后到新产物落定之间由骨架屏接管（不回到空态说明的闪跳）
+    this.previewAwaitSkeleton = true
+    if (this.previewScrollEl !== null) this.previewScrollEl.scrollTop = 0
+    const view = this.previewView
+    this.previewView = null
+    view?.dispose()
   }
 
   /** 语言切换（locale.changed）：常驻文本重渲染 */
@@ -503,6 +548,7 @@ export class PdfExportModalView {
     this.previewArtifactUrl = url
     this.previewArtifactGen = generation
     this.previewLoading = true
+    this.previewAwaitSkeleton = false
     this.previewView?.setMaxRenderWidth(this.printPageSize().widthPx)
     // 先挂载舞台（骨架覆盖空滚动区），再以真实容器宽发起装载——避免
     // 离屏 clientWidth=0 时用回退宽渲染一轮
@@ -778,9 +824,10 @@ export class PdfExportModalView {
       .forEach((node) => node.remove())
     if (this.previewArtifactUrl === '') {
       stage.classList.add('vsidian-pdfexport-preview-stage--empty')
-      if (previewBusy) {
-        // 生成在途且尚无产物：扫光骨架（复用开屏骨架的配方与节拍常量），
-        // 不再停留在一行静态说明上
+      if (previewBusy || this.previewAwaitSkeleton) {
+        // 生成在途且尚无产物，或刚换了目标正在等新产物：扫光骨架（复用
+        // 开屏骨架的配方与节拍常量）。换目标后不闪回空态说明——用户刚看
+        // 过的预览被撤下时，骨架才是「正在换」的如实呈现。
         stage.appendChild(this.buildPreviewSkeleton())
       } else {
         const placeholder = el('div', CLASS.previewPlaceholder)

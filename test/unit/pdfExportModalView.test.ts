@@ -75,6 +75,7 @@ vi.mock('../../src/webview/pdfRender', () => ({
 }))
 
 import { PDF_EXPORT_OPTIONS_DEFAULTS } from '../../src/shared/pdfExportOptions'
+import { pdfPreviewFingerprint } from '../../src/shared/pdfExportPreview'
 import { PdfExportModalView } from '../../src/webview/pdfExportModalView'
 
 const STATE = {
@@ -290,5 +291,88 @@ describe('PDF 导出模态视图：统一导出页清单（验收）', () => {
       | { itemId: string }
       | undefined
     expect(select?.itemId).toBe('b1')
+  })
+
+  it('换清单条目：旧画布立即撤下、骨架接管，不把上一目标的预览留在新选中项下', async () => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:preview'),
+      revokeObjectURL: vi.fn(),
+    })
+    const item = (id: string, rel: string, fsPath: string) => ({ id, fsPath, rootFsPath: 'D:/ws', relPath: rel })
+    const batchState = (batchItemId: string, phase: 'ready' | 'generating') => stateWithPreview({
+      batch: {
+        mode: 'batch',
+        phase: 'editing',
+        items: [item('b1', 'a.md', 'D:/ws/a.md'), item('b2', 'b.md', 'D:/ws/b.md')],
+        strategy: 'rename',
+        currentIndex: 0,
+        total: 0,
+        results: [],
+      },
+      preview: { phase, generation: 1, batchItemId },
+      previewTarget: {
+        kind: 'batchItem',
+        fsPath: batchItemId === 'b1' ? 'D:/ws/a.md' : 'D:/ws/b.md',
+        doc: { docName: batchItemId === 'b1' ? 'a.md' : 'b.md', capturedVersion: 1 },
+      },
+    })
+    const { view, host } = mount()
+    const first = batchState('b1', 'ready')
+    view.applyState(first)
+    view.applyPreviewArtifact(1, btoa('preview'))
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vsidian-pdfexport-preview-skeleton')).toBeNull()
+      expect(FakePdfHoverView.instances[0]!.shows.length).toBe(1)
+    })
+    const firstInstance = FakePdfHoverView.instances[0]!
+    // 切到另一条：旧画布撤下（实例 dispose、Blob 回收），骨架接管
+    view.applyState(batchState('b2', 'generating'))
+    expect(host.querySelector('.vsidian-pdfexport-preview-skeleton')).not.toBeNull()
+    expect(vi.mocked(URL.revokeObjectURL)).toHaveBeenCalledWith('blob:preview')
+    // 旧实例不再出现在任何后续渲染中（新产物落地时新建实例）
+    view.applyPreviewArtifact(1, btoa('preview-b'))
+    await vi.waitFor(() => {
+      expect(FakePdfHoverView.instances.length).toBe(2)
+      expect(FakePdfHoverView.instances[1]!.shows.length).toBe(1)
+    })
+    expect(firstInstance.shows.length).toBe(1)
+    expect(FakePdfHoverView.instances[1]).not.toBe(firstInstance)
+  })
+
+  it('参数变化不撤预览：旧画面保留并由过期徽章标记', async () => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:preview'),
+      revokeObjectURL: vi.fn(),
+    })
+    const list = { mode: 'document' as const, items: [{ id: 'document', fsPath: 'D:/ws/a.md', rootFsPath: 'D:/ws', relPath: 'a.md' }], selectedId: 'document' }
+    const target = { kind: 'document' as const, doc: { docName: 'a.md', capturedVersion: 1 } }
+    const { view, host } = mount()
+    // 指纹与当前参数一致 → 无过期徽章
+    const currentFingerprint = pdfPreviewFingerprint({
+      options: PDF_EXPORT_OPTIONS_DEFAULTS,
+      target,
+      today: '2026-10-22',
+    })
+    view.applyState(stateWithPreview({
+      list, previewTarget: target,
+      preview: { phase: 'ready', generation: 1, fingerprint: currentFingerprint },
+    }))
+    view.applyPreviewArtifact(1, btoa('preview'))
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vsidian-pdfexport-preview-skeleton')).toBeNull()
+    })
+    expect(host.querySelector('.vsidian-pdfexport-preview-stale')).toBeNull()
+    const instancesBefore = FakePdfHoverView.instances.length
+    // 同一目标下参数失配（宿主下发新指纹前本地即失配）：旧画面保留 + 徽章
+    view.applyState(stateWithPreview({
+      list, previewTarget: target,
+      preview: { phase: 'ready', generation: 1, fingerprint: 'other-fp' },
+    }))
+    expect(host.querySelector('.vsidian-pdfexport-preview-stale')).not.toBeNull()
+    expect(host.querySelector('.vsidian-pdfexport-preview-skeleton')).toBeNull()
+    // 没有换目标：Painter 实例不被重建（旧画面仍在场）
+    expect(FakePdfHoverView.instances.length).toBe(instancesBefore)
   })
 })

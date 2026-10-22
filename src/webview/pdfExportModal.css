@@ -480,19 +480,46 @@ body {
   line-height: 1.55;
 }
 
+/* 清单容器固定三条目高（验收反馈：条目多时不外溢侧栏卡片，内部滚动）。
+ * 行高与两处 4px 间隙共同构成容器高，行固定高 + 文本单行省略——数量
+ * 变化不改变侧栏布局（单个/多个同一页面，位置不跳）。 */
 .vsidian-pdfexport-export-list-items {
+  --vsidian-pdfexport-export-item-height: 66px;
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 34vh;
+  height: calc(var(--vsidian-pdfexport-export-item-height) * 3 + 8px);
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .vsidian-pdfexport-export-list-items > .vsidian-pdfexport-batch-item {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  height: var(--vsidian-pdfexport-export-item-height);
   padding: 6px 8px;
+  overflow: hidden;
+}
+
+/* 路径在固定行高内单行省略（完整路径经 title 悬停可见） */
+.vsidian-pdfexport-export-list-items .vsidian-pdfexport-batch-item-rel,
+.vsidian-pdfexport-export-list-items .vsidian-pdfexport-batch-item-root {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+
+.vsidian-pdfexport-export-list-items .vsidian-pdfexport-batch-item-rel {
+  line-height: 18px;
+}
+
+.vsidian-pdfexport-export-list-items .vsidian-pdfexport-batch-item-root,
+.vsidian-pdfexport-export-list-items .vsidian-pdfexport-batch-item-badge {
+  line-height: 16px;
 }
 
 .vsidian-pdfexport-batch-item-clickable {

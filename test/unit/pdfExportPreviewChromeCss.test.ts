@@ -43,4 +43,17 @@ describe('PDF 导出模态预览样式契约', () => {
     expect(css).toContain(`var(--vsidian-pdfexport-skeleton-delay, ${SKELETON_SHIMMER_DELAY_MS}ms)`)
     expect(css).toContain('.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block::after')
   })
+
+  it('导出清单固定三条目高、内部滚动（条目增多不撑开侧栏）', () => {
+    const items = ruleOf('.vsidian-pdfexport-export-list-items')
+    expect(items).toContain('--vsidian-pdfexport-export-item-height: 66px')
+    expect(items).toContain('height: calc(var(--vsidian-pdfexport-export-item-height) * 3 + 8px)')
+    expect(items).toContain('overflow-y: auto')
+    expect(items).not.toContain('max-height: 34vh')
+    // 行本身固定高并裁切，路径单行省略（否则 66px 行内两行文本换行溢出）
+    const row = ruleOf('.vsidian-pdfexport-export-list-items > .vsidian-pdfexport-batch-item')
+    expect(row).toContain('height: var(--vsidian-pdfexport-export-item-height)')
+    expect(row).toContain('overflow: hidden')
+    expect(css).toMatch(/\.vsidian-pdfexport-export-list-items \.vsidian-pdfexport-batch-item-rel[\s\S]*?text-overflow: ellipsis/)
+  })
 })

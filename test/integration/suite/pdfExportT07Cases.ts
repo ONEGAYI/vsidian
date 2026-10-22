@@ -424,6 +424,32 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
       norm(items[0]!.fsPath), '切换条目后预览目标应为新选中条目')
     assert.equal(switched.info.preview.runs, runsStart + 2, '切换条目应自动加载新条目预览（一轮）')
 
+    // 快速连点（先 A、随即 B）：最终呈现必须是 B，而不是先落地的那一轮。
+    // 在途轮的目标身份在其发起时锁定，目标已变的迟到字节一律丢弃，最新
+    // 选择在轮末补发一轮——用户最后点的那一项才是画面。
+    const runsBeforeRace = (await modalState()).preview.runs
+    await inject({ kind: 'pdfExportModal.preview.select', itemId: longId, params: PARAMS_BASE })
+    await inject({ kind: 'pdfExportModal.preview.select', itemId: firstId, params: PARAMS_BASE })
+    const raced = await poll('快速连点后落在最后点击的条目', async () => {
+      const info = await modalState()
+      const p = paintOf(info)
+      if (info.preview.phase !== 'ready') return undefined
+      if (p['previewArtifactGeneration'] !== info.preview.generation) return undefined
+      const target = info.preview.target as { kind?: string; fsPath?: string } | undefined
+      if (target?.fsPath !== norm(items[0]!.fsPath)) return undefined
+      const pdf = p['previewPdf'] as T07PreviewPdfProbe | null
+      if (pdf === null || pdf.phase !== 'content') return undefined
+      return { info, pdf }
+    }, 240000)
+    assert.equal((raced.info.preview.target as { fsPath?: string } | undefined)?.fsPath,
+      norm(items[0]!.fsPath), '快速连点后预览目标应为最后点击的条目')
+    // 最后点击的条目至少补发了一轮（在途轮被作废时也要有新轮）
+    assert.ok(raced.info.preview.runs >= runsBeforeRace + 1,
+      `快速连点后应至少再生成一轮（实测 ${raced.info.preview.runs - runsBeforeRace} 轮）`)
+    // 选中态与画面同源：不能出现「高亮 A、画面 B」
+    const racedPaint = paintOf(raced.info)
+    assert.equal(racedPaint['selectedItemRel'], items[0]!.relPath, '选中行应与最终预览目标一致')
+
     await closeAll()
   }],
 
