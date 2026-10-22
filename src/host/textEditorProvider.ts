@@ -3009,37 +3009,45 @@ export function createTextEditorProvider(
         return { kind: 'ok', uri: '', version: 0, bytes: info.size }
       },
     }
-    // 媒体/PDF 身份先于文本通道分派：这两类都不是 Markdown 正文，不应进入
-    // openTextDocument 解码（二进制必然失败 → 误报 read-failed）。目标解析
-    // 仍走同一 resolveVaultFile 端口（路径/短名/根边界规则不另写一份）
-    const resolution = await ports.resolveVaultFile(inner)
-    if (resolution.kind === 'target') {
-      if (classifyLocalRefContentKind(resolution.fsPath) === 'pdf') {
-        const info = await statOf(resolution.fsPath)
-        if (info === null) {
-          return { ok: false, reason: 'read-failed' }
+    // 目标解析**先走完整链路**（readRefContentTarget）：双链 inner 里可能带
+    // `#标题` / `#^块` / `|别名` / 空路径自引用，这些形态由 parseWikilinkInner
+    // 在共用解析层剥出真实 path；直接把 inner 当路径喂给 resolveVaultFile 会
+    // 让合法 Markdown 嵌入退化成 not-found（#010 回归）。
+    //
+    // 但媒体/PDF 不能进文本解码（openTextDocument 对二进制必然失败 → 误报
+    // read-failed）。所以先用**同一个** parseWikilinkInner 取出真实 path 做
+    // 类型预判：命中 PDF/媒体则走身份分派（只需存在性），其余（Markdown、
+    // 自引用、带锚点/别名）一律交回原解析链，锚点语义由它继续处理。
+    const parsedInner = inner.includes('|') || inner.includes('#')
+      ? parseWikilinkInner(inner.trim())
+      : null
+    const identityPath = parsedInner !== null ? parsedInner.path : inner
+    const identityKind = identityPath === ''
+      ? undefined
+      : classifyLocalRefContentKind(identityPath) === 'pdf'
+        ? 'pdf'
+        : isMediaFileExtension(identityPath) ? 'media' : undefined
+    if (identityKind !== undefined) {
+      const resolved = await ports.resolveVaultFile(identityPath)
+      if (resolved.kind !== 'target') {
+        // 解析失败按既有分态透传（not-found/escape/ambiguous 都有对应用户
+        // 可见理由；pending 收敛 read-failed 与既有文本通道口径一致）
+        return {
+          ok: false,
+          reason: resolved.kind === 'pending' ? 'read-failed' : resolved.kind,
         }
-        if (!info.isFile) {
-          return { ok: false, reason: 'not-found' }
-        }
-        return { ok: true, kind: 'pdf', fsPath: resolution.fsPath.replaceAll('\\', '/') }
       }
-      if (isMediaFileExtension(resolution.fsPath)) {
-        const info = await statOf(resolution.fsPath)
-        if (info === null) {
-          return { ok: false, reason: 'read-failed' }
-        }
-        if (!info.isFile) {
-          return { ok: false, reason: 'not-found' }
-        }
-        return { ok: true, kind: 'media', fsPath: resolution.fsPath.replaceAll('\\', '/') }
+      const info = await statOf(resolved.fsPath)
+      if (info === null) {
+        return { ok: false, reason: 'read-failed' }
       }
-    } else if (resolution.kind !== 'no-workspace') {
-      // 解析失败按既有分态透传（not-found/escape/ambiguous/pending 都有
-      // 对应用户可见理由，不收敛成统一的 read-failed）
+      if (!info.isFile) {
+        return { ok: false, reason: 'not-found' }
+      }
       return {
-        ok: false,
-        reason: resolution.kind === 'pending' ? 'read-failed' : resolution.kind,
+        ok: true,
+        kind: identityKind,
+        fsPath: resolved.fsPath.replaceAll('\\', '/'),
       }
     }
     const outcome = await readRefContentTarget({ target: inner }, access, ports)

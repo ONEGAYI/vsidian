@@ -2102,6 +2102,7 @@ export class WebviewSyncController {
     this.viewToggleBtn = undefined
     this.refreshBtn = undefined
     document.removeEventListener('pointerdown', this.pdfExportDismissPointer, true)
+    document.removeEventListener('keydown', this.pdfExportEscapeKey, true)
     this.pdfExportBtn = undefined
     this.pdfExportMenu = undefined
     this.quickHeadingBtn = undefined
@@ -5665,6 +5666,19 @@ export class WebviewSyncController {
     this.closePdfExportMenu(false)
   }
 
+  /** 菜单打开期间的 Esc 拦截（document capture 层）：菜单的 keydown 监听器
+   *  只有在焦点落进菜单时才收得到事件，而**鼠标点击**按钮会保留正文焦点
+   *  （按钮 mousedown preventDefault 是保住选区/焦点的手段），此时 Esc 发往
+   *  .cm-content，冒泡到不了兄弟节点 menu（#011）。开合期间在 document 上
+   *  挂 capture 监听，关闭时摘除——不常驻、不与其他 Esc 语义争用。 */
+  private readonly pdfExportEscapeKey = (event: Event): void => {
+    if (this.pdfExportMenu === undefined || this.pdfExportMenu.hidden) return
+    if ((event as KeyboardEvent).key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    this.closePdfExportMenu(true)
+  }
+
   /** 工具栏「导出为 PDF」下拉菜单：四个入口逐项真实 button（role=menuitem），
    *  点击即发 pdfExport.open 并收起菜单。键盘语义沿快速操作标题菜单的既有
    *  形态——ArrowUp/Down 循环、Home/End 跳端、Esc 收起并回焦按钮。 */
@@ -5732,12 +5746,15 @@ export class WebviewSyncController {
       menu.style.top = `${btnRect.bottom - barRect.top}px`
     }
     btn.setAttribute('aria-expanded', 'true')
+    // 打开期间接管 document 级 Esc（焦点可能仍在正文——见 pdfExportEscapeKey）
+    document.addEventListener('keydown', this.pdfExportEscapeKey, true)
     if (focusFirst) menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
   }
 
   private closePdfExportMenu(returnFocus: boolean): void {
     if (this.pdfExportMenu) this.pdfExportMenu.hidden = true
     this.pdfExportBtn?.setAttribute('aria-expanded', 'false')
+    document.removeEventListener('keydown', this.pdfExportEscapeKey, true)
     if (returnFocus) this.pdfExportBtn?.focus()
   }
 

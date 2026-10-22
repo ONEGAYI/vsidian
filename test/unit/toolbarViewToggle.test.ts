@@ -225,6 +225,41 @@ describe('工具栏 PDF 导出下拉菜单', () => {
     parent.remove()
   })
 
+  it('鼠标打开（detail=1、焦点仍在正文）时 Esc 仍能收起菜单并回焦按钮（#011）', () => {
+    const { c, parent } = setup()
+    const btn = parent.querySelector<HTMLButtonElement>('.vsidian-pdf-export-toggle')!
+    const menu = parent.querySelector<HTMLElement>('.vsidian-pdf-export-menu')!
+    // 真实鼠标语义：mousedown 被 preventDefault 保住正文焦点，click.detail=1
+    // 走 toggle(false) 不主动移焦——焦点仍在 .cm-content
+    const content = parent.querySelector<HTMLElement>('.cm-content')!
+    content.focus()
+    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }))
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))
+    expect(menu.hidden).toBe(false)
+    expect(document.activeElement, '前置：焦点应仍在正文（未被菜单夺走）').toBe(content)
+    // 从**实际焦点**派发 Esc（不是直接发给菜单）——旧实现下事件到不了菜单
+    content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(menu.hidden, 'Esc 应收起菜单').toBe(true)
+    expect(btn.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement, 'Esc 后应回焦导出按钮').toBe(btn)
+    c.dispose()
+    parent.remove()
+  })
+
+  it('用完即摘：菜单关闭后 Esc 不再被拦截（不干扰正文既有 Esc 语义）', () => {
+    const { c, parent } = setup()
+    const btn = parent.querySelector<HTMLButtonElement>('.vsidian-pdf-export-toggle')!
+    const menu = parent.querySelector<HTMLElement>('.vsidian-pdf-export-menu')!
+    btn.click()
+    btn.click()
+    expect(menu.hidden).toBe(true)
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    document.body.dispatchEvent(event)
+    expect(event.defaultPrevented, '菜单已关，Esc 不应被本功能吞掉').toBe(false)
+    c.dispose()
+    parent.remove()
+  })
+
   it('再次点击按钮收起菜单（不重复发消息）', () => {
     const { c, parent, sent } = setup()
     const btn = parent.querySelector<HTMLButtonElement>('.vsidian-pdf-export-toggle')!

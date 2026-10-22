@@ -507,6 +507,15 @@ const PDF_EXPORT_T02_DOC = (() => {
     '',
     '![[pdf-export-t02-embed.md]]',
     '',
+    // #010 回归钉子：带标题锚点、块锚点与别名的嵌入必须仍解析到同一
+    // Markdown 目标（完整 inner 不能被当文件路径——那会让合法语法退化成
+    // not-found）；自引用嵌入也须命中（path 为空 = 来源文档自身）
+    '![[pdf-export-t02-embed.md#嵌入目标标题]]',
+    '',
+    '![[pdf-export-t02-embed.md|别名显示]]',
+    '',
+    '![[#T02 完整装配样例]]',
+    '',
     '![[pdf-export-t02-clip.mp4]]',
     '',
     // PDF 嵌入目标：导出页按身份降级为说明 + 链接，不得误报读取失败
