@@ -168,6 +168,11 @@ export const en = {
   'pdfExport.bookmarks.noneLocated': 'No headings could be located; no bookmarks were added to this PDF.',
   'pdfExport.bookmarks.noHeadings': 'The document has no headings; no bookmarks were added to this PDF.',
   'pdfExport.bookmarks.locateFailed': 'Bookmark positioning failed; no bookmarks were added to this PDF.',
+  /** Theme override for preview and final render (does not change editor theme) */
+  'pdfExport.theme.label': 'Theme',
+  'pdfExport.theme.follow': 'Follow editor',
+  'pdfExport.theme.light': 'Light',
+  'pdfExport.theme.dark': 'Dark',
   /** Orientation option labels */
   'pdfExport.orientation.portrait': 'Portrait',
   'pdfExport.orientation.landscape': 'Landscape',

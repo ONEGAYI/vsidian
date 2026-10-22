@@ -22,6 +22,11 @@ export type PdfPaperSizeKind = 'a3' | 'a4' | 'a5' | 'b5' | 'letter' | 'legal' | 
 export type PdfOrientation = 'portrait' | 'landscape'
 /** 页码在页脚内的对齐位置（Chromium 模板容器为 flex，经 margin 推移） */
 export type PdfPageNumberPosition = 'footer-left' | 'footer-center' | 'footer-right'
+/** 导出主题：follow = 跟随当前编辑器主题；light / dark = 强制亮/暗。
+ *  **只影响预览与最终产物**，不改变编辑器自身主题（用户可在模态里对照
+ *  两种观感，不必先切编辑器主题）。 */
+export type PdfThemeMode = 'follow' | 'light' | 'dark'
+export const PDF_THEME_MODES: readonly PdfThemeMode[] = ['follow', 'light', 'dark']
 
 export interface PdfExportOptions {
   paper: PdfPaperSizeKind
@@ -46,6 +51,8 @@ export interface PdfExportOptions {
   pageNumberPosition: PdfPageNumberPosition
   /** 标题书签开关（默认关——书签经 pdf-lib 后处理写入） */
   bookmarksEnabled: boolean
+  /** 导出主题（默认跟随编辑器；强制亮/暗只作用于预览与产物） */
+  theme: PdfThemeMode
 }
 
 /** 纸张物理尺寸（英寸；V01 探针实测矩阵的输入面）与设置页/模态选项词条。
@@ -82,6 +89,13 @@ export const PDF_PAGE_NUMBER_POSITION_LABEL_KEYS: Record<
   'footer-right': 'pdfExport.pageNumber.position.footerRight',
 }
 
+/** 导出主题三档词条（跟随编辑器 / 强制亮 / 强制暗） */
+export const PDF_THEME_MODE_LABEL_KEYS: Record<PdfThemeMode, MessageKey> = {
+  follow: 'pdfExport.theme.follow',
+  light: 'pdfExport.theme.light',
+  dark: 'pdfExport.theme.dark',
+}
+
 export const PDF_EXPORT_MARGIN_MM_MIN = 0
 export const PDF_EXPORT_MARGIN_MM_MAX = 50
 export const PDF_EXPORT_SCALE_MIN = 0.1
@@ -108,6 +122,7 @@ export const PDF_EXPORT_OPTIONS_DEFAULTS: Readonly<PdfExportOptions> = {
   pageNumberEnabled: false,
   pageNumberPosition: 'footer-center',
   bookmarksEnabled: false,
+  theme: 'follow',
 }
 
 const MM_PER_IN = 25.4
@@ -169,6 +184,9 @@ export function normalizePdfExportOptions(
       ? raw.pageNumberPosition
       : defaults.pageNumberPosition,
     bookmarksEnabled: boolOr(raw.bookmarksEnabled, defaults.bookmarksEnabled),
+    theme: typeof raw.theme === 'string' && (PDF_THEME_MODES as readonly string[]).includes(raw.theme)
+      ? raw.theme as PdfThemeMode
+      : defaults.theme,
   }
 }
 

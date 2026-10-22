@@ -93,6 +93,56 @@ describe('buildPdfExportPageHtml：骨架装配', () => {
     expect(html).toContain('--vscode-editor-background: #ffffff;')
   })
 
+  it('强制亮/暗只改预览与产物：body 类与基础变量按目标切换', () => {
+    // 快照是暗色编辑器，强制亮色 → 亮色 body 类与亮色兜底变量
+    const forcedLight = buildPdfExportPageHtml({
+      payload: payloadOf({ style: { dark: true, vars: {}, reading: {} } }),
+      options: { ...PDF_EXPORT_OPTIONS_DEFAULTS, theme: 'light' },
+      ...ADDRESSES,
+    })
+    expect(forcedLight).toContain('<body class="vscode-light">')
+    expect(forcedLight).toContain('--vscode-editor-background: #ffffff;')
+    expect(forcedLight).not.toContain('--vscode-editor-background: #1e1e1e;')
+    // 反向：亮色编辑器强制暗色
+    const forcedDark = buildPdfExportPageHtml({
+      payload: payloadOf({ style: { dark: false, vars: {}, reading: {} } }),
+      options: { ...PDF_EXPORT_OPTIONS_DEFAULTS, theme: 'dark' },
+      ...ADDRESSES,
+    })
+    expect(forcedDark).toContain('<body class="vscode-dark">')
+    expect(forcedDark).toContain('--vscode-editor-background: #1e1e1e;')
+    expect(forcedDark).not.toContain('--vscode-editor-background: #ffffff;')
+  })
+
+  it('强制主题剥离快照里的编辑器主题变量，保留非 vscode 主题值', () => {
+    const html = buildPdfExportPageHtml({
+      payload: payloadOf({
+        style: {
+          dark: true,
+          vars: { '--vscode-editor-background': '#1e1e1e', '--vscode-sideBar-background': '#181818', '--h1-color': '#e6e6e6' },
+          reading: {},
+        },
+      }),
+      options: { ...PDF_EXPORT_OPTIONS_DEFAULTS, theme: 'light' },
+      ...ADDRESSES,
+    })
+    // 快照的 --vscode-* 被丢弃（否则强制亮色仍带暗背景）
+    expect(html).not.toContain('--vscode-editor-background: #1e1e1e;')
+    expect(html).not.toContain('--vscode-sideBar-background: #181818;')
+    // 非 vscode 的用户样式值不受主题开关影响
+    expect(html).toContain('--h1-color: #e6e6e6;')
+  })
+
+  it('theme=follow 沿用快照主题（强制分支不介入）', () => {
+    const html = buildPdfExportPageHtml({
+      payload: payloadOf({ style: { dark: true, vars: { '--vscode-editor-background': '#101010' }, reading: {} } }),
+      options: PDF_EXPORT_OPTIONS_DEFAULTS,
+      ...ADDRESSES,
+    })
+    expect(html).toContain('<body class="vscode-dark">')
+    expect(html).toContain('--vscode-editor-background: #101010;')
+  })
+
   it('片段文本经 @page 剥离后进样式链（T01 防线对片段统一执行）', () => {
     const html = buildPdfExportPageHtml({
       payload: payloadOf({

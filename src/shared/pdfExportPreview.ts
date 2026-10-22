@@ -54,7 +54,7 @@ export function pdfPreviewFingerprint(input: PdfPreviewFingerprintInput): string
     options.orientation, options.marginMm, options.scale,
     options.headerEnabled, options.headerTitle, options.headerDate,
     options.pageNumberEnabled, options.pageNumberPosition,
-    options.bookmarksEnabled,
+    options.bookmarksEnabled, options.theme,
   ]
   // 页眉日期开启时产物印刷当日日期——跨日即为不同代次（复用不得携带旧日期）
   if (options.headerDate && input.today !== undefined) {

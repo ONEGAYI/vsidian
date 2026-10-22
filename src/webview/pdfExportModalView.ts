@@ -18,8 +18,11 @@ import {
   PDF_PAGE_NUMBER_POSITION_LABEL_KEYS,
   PDF_PAGE_NUMBER_POSITIONS,
   PDF_PAPER_SIZE_KINDS,
+  PDF_THEME_MODES,
+  PDF_THEME_MODE_LABEL_KEYS,
   type PdfExportOptions,
   type PdfPageNumberPosition,
+  type PdfThemeMode,
 } from '../shared/pdfExportOptions'
 import { pdfPreviewFingerprint, pdfPreviewTargetKey, type PdfPreviewTarget } from '../shared/pdfExportPreview'
 import {
@@ -271,6 +274,7 @@ export class PdfExportModalView {
   private pageNumberCheck: HTMLInputElement | null = null
   private pageNumberPositionSelect: HTMLSelectElement | null = null
   private bookmarksCheck: HTMLInputElement | null = null
+  private themeSelect: HTMLSelectElement | null = null
   private runButton: HTMLButtonElement | null = null
   private cancelButton: HTMLButtonElement | null = null
   private statusEl: HTMLElement | null = null
@@ -607,6 +611,7 @@ export class PdfExportModalView {
       case 'headerDate': setCheck(this.headerDateCheck, value === true); return
       case 'pageNumberEnabled': setCheck(this.pageNumberCheck, value === true); return
       case 'bookmarksEnabled': setCheck(this.bookmarksCheck, value === true); return
+      case 'theme': setSelect(this.themeSelect, String(value)); return
       case 'mergePageBreak': setCheck(this.mergePageBreakCheckEl, value === true); return
       default: return
     }
@@ -883,6 +888,7 @@ export class PdfExportModalView {
       this.currentParams.pageNumberPosition = this.pageNumberPositionSelect.value as PdfPageNumberPosition
     }
     if (this.bookmarksCheck) this.currentParams.bookmarksEnabled = this.bookmarksCheck.checked
+    if (this.themeSelect) this.currentParams.theme = this.themeSelect.value as PdfThemeMode
   }
 
   private render(): void {
@@ -1196,6 +1202,27 @@ export class PdfExportModalView {
     const bookmarks = this.checkRow(t('pdfExport.bookmarks.label'), params.bookmarksEnabled)
     this.bookmarksCheck = bookmarks.box
     side.appendChild(bookmarks.row)
+
+    this.appendThemeField(side, params)
+  }
+
+  /** 导出主题（跟随/亮/暗）：只作用于预览与产物，不切编辑器主题。
+   *  三种模式共用（批量逐文件同样有观感需求），单文档/合并紧随书签之后，
+   *  批量在通用参数之后。 */
+  private appendThemeField(side: HTMLElement, params: PdfExportOptions): void {
+    this.themeSelect = el('select', CLASS.select) as HTMLSelectElement
+    for (const mode of PDF_THEME_MODES) {
+      const option = el('option', '', t(PDF_THEME_MODE_LABEL_KEYS[mode]))
+      option.value = mode
+      this.themeSelect.appendChild(option)
+    }
+    this.themeSelect.value = params.theme
+    this.themeSelect.addEventListener('change', () => {
+      this.paramsTouched = true
+      this.readControlsIntoParams()
+      this.render() // 主题变化即读过期标记（与其余参数一致）
+    })
+    side.appendChild(this.field(t('pdfExport.theme.label'), this.themeSelect))
   }
 
   /** 书签结果提示（T05 语义：disabled 不提示——用户未开启时静默；失败/
@@ -1254,6 +1281,9 @@ export class PdfExportModalView {
     if (listEl !== null) side.appendChild(listEl)
 
     this.appendParamFields(side, params)
+    // 批量：逐文件产物同样承载主题观感（T04 的逐文件参数面不含页眉页脚，
+    //  主题是产物外观而非页眉结构，按同一入口登记）
+    this.appendThemeField(side, params)
 
     const actions = el('div', CLASS.actions)
     if (batch.phase === 'editing') {
@@ -1638,9 +1668,11 @@ export class PdfExportModalView {
         pageNumberCheck: probe(this.pageNumberCheck),
         pageNumberPositionSelect: probe(this.pageNumberPositionSelect),
         bookmarksCheck: probe(this.bookmarksCheck),
+        themeSelect: probe(this.themeSelect),
         headerChecked: this.headerCheck?.checked ?? null,
         pageNumberChecked: this.pageNumberCheck?.checked ?? null,
         bookmarksChecked: this.bookmarksCheck?.checked ?? null,
+        themeValue: this.themeSelect?.value ?? null,
         paperValue: this.paperSelect?.value ?? '',
         pageNumberPositionValue: this.pageNumberPositionSelect?.value ?? null,
         bookmarkNoticeText: document.querySelector(`.${CLASS.bookmarkNotice}`)?.textContent ?? '',

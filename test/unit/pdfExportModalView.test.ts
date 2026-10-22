@@ -376,3 +376,54 @@ describe('PDF 导出模态视图：统一导出页清单（验收）', () => {
     expect(FakePdfHoverView.instances.length).toBe(instancesBefore)
   })
 })
+
+describe('PDF 导出模态视图：主题开关', () => {
+  const withTarget = (overrides: Record<string, unknown>) => stateWithPreview({
+    list: { mode: 'document', items: [{ id: 'document', fsPath: 'D:/ws/a.md', rootFsPath: 'D:/ws', relPath: 'a.md' }], selectedId: 'document' },
+    previewTarget: { kind: 'document', doc: { docName: 'a.md', capturedVersion: 1 } },
+    ...overrides,
+  })
+
+  const themeSelectOf = (host: HTMLElement): HTMLSelectElement => {
+    const selects = Array.from(host.querySelectorAll<HTMLSelectElement>('.vsidian-pdfexport-side select'))
+    const found = selects.find((select) => Array.from(select.options).some((option) => option.value === 'follow'))
+    expect(found).toBeDefined()
+    return found!
+  }
+
+  it('单文档侧栏呈现三档主题，默认跟随编辑器', () => {
+    const { view, host } = mount()
+    view.applyState(withTarget({}))
+    const select = themeSelectOf(host)
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['follow', 'light', 'dark'])
+    expect(select.value).toBe('follow')
+  })
+
+  it('切到暗色：上行刷新参数携带 theme，并立即亮过期徽章', () => {
+    ;(globalThis as { __vsidianTestHooks?: boolean }).__vsidianTestHooks = true
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:preview'),
+      revokeObjectURL: vi.fn(),
+    })
+    const { view, host, posted } = mount()
+    const target = { kind: 'document' as const, doc: { docName: 'a.md', capturedVersion: 1 } }
+    view.applyState(withTarget({
+      preview: {
+        phase: 'ready', generation: 1,
+        fingerprint: pdfPreviewFingerprint({ options: PDF_EXPORT_OPTIONS_DEFAULTS, target, today: '2026-10-22' }),
+      },
+    }))
+    view.applyPreviewArtifact(1, btoa('preview'))
+    expect(host.querySelector('.vsidian-pdfexport-preview-stale')).toBeNull()
+
+    view.applyTestSetParam({ field: 'theme', value: 'dark' })
+    // theme 进入预览指纹（否则切主题后旧产物被当成当前配置）
+    expect(host.querySelector('.vsidian-pdfexport-preview-stale')).not.toBeNull()
+    host.querySelector<HTMLButtonElement>('.vsidian-pdfexport-preview-refresh')!.click()
+    const refresh = posted.find((m) => (m as { kind?: string }).kind === 'pdfExportModal.preview.refresh') as
+      | { params: Record<string, unknown> }
+      | undefined
+    expect(refresh?.params['theme']).toBe('dark')
+  })
+})

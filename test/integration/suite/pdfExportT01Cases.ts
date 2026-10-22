@@ -38,6 +38,8 @@ interface PaintReport {
   orientationSelect: { visible: boolean; display: string; color: string } | null
   marginInput: { visible: boolean; display: string; color: string } | null
   scaleRange: { visible: boolean; display: string; color: string } | null
+  themeSelect?: { visible: boolean; display: string; color: string } | null
+  themeValue?: string | null
   runButton: { visible: boolean; display: string; color: string } | null
   runButtonDisabled: boolean | null
   statusText: string
@@ -110,6 +112,8 @@ export const pdfExportT01Cases: Array<[string, () => Promise<void>]> = [
     assert.equal(paint.orientationSelect?.visible, true, '方向控件应可见')
     assert.equal(paint.marginInput?.visible, true, '边距控件应可见')
     assert.equal(paint.scaleRange?.visible, true, '缩放控件应可见')
+    assert.equal(paint.themeSelect?.visible, true, '导出主题控件应可见（绘制层）')
+    assert.equal(paint.themeValue, 'follow', '导出主题默认跟随编辑器')
     assert.equal(paint.runButton?.visible, true, '导出按钮应可见')
     assert.notEqual(paint.runButtonDisabled, true, '导出按钮初始可用')
     assert.ok(paint.statusText.length > 0, '状态区应有阶段文案')

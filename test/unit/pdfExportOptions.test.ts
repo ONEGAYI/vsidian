@@ -32,10 +32,20 @@ describe('PDF 导出参数模型', () => {
       pageNumberEnabled: false,
       pageNumberPosition: 'footer-center',
       bookmarksEnabled: false,
+      // 导出主题默认跟随编辑器（只作用于预览与产物）
+      theme: 'follow',
       // 自定义宽高回落 A4（paper !== 'custom' 时不参与换算）
       customWidthMm: 210,
       customHeightMm: 297,
     })
+  })
+
+  it('normalize：主题只认 follow/light/dark，其余回落默认', () => {
+    expect(normalizePdfExportOptions({ theme: 'dark' }).theme).toBe('dark')
+    expect(normalizePdfExportOptions({ theme: 'light' }).theme).toBe('light')
+    expect(normalizePdfExportOptions({ theme: 'follow' }).theme).toBe('follow')
+    expect(normalizePdfExportOptions({ theme: 'sepia' }).theme).toBe('follow')
+    expect(normalizePdfExportOptions({ theme: 1 }).theme).toBe('follow')
   })
 
   it('normalize：非法字段回落默认、合法字段保留', () => {

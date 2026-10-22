@@ -158,6 +158,11 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.bookmarks.noneLocated': '未能定位任何标题，本份 PDF 未添加书签。',
   'pdfExport.bookmarks.noHeadings': '文档没有标题，本份 PDF 未添加书签。',
   'pdfExport.bookmarks.locateFailed': '书签定位失败，本份 PDF 未添加书签。',
+  /** 预览与最终渲染的亮暗覆盖（不改变编辑器主题） */
+  'pdfExport.theme.label': '主题',
+  'pdfExport.theme.follow': '跟随编辑器',
+  'pdfExport.theme.light': '亮色',
+  'pdfExport.theme.dark': '暗色',
   /** 方向选项 */
   'pdfExport.orientation.portrait': '纵向',
   'pdfExport.orientation.landscape': '横向',

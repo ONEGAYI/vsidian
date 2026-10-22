@@ -157,6 +157,7 @@ div.vsidian-pdfexport               ← 两列 grid（1fr + 320px；≤720px 退
 ```
 
 - 控件全部复用 §2.3 既有档位（select/number 2px、range accent-color），无新控件形态；明暗主题全 `--vscode-*` 变量自适应，零硬编码色值。
+- **导出主题字段（验收反馈，2026-10-22）**：侧区参数末尾追加「主题」select（2px 档，与纸张/方向同档），三档「跟随编辑器／亮色／暗色」。它是产物观感参数而非编辑器设置——只改变预览与最终 PDF，不改编辑器主题。单文档与合并接在标题书签之后，批量在通用参数之后（`appendThemeField` 单一入口，三种模式共用）；切换即标预览过期。
 - T07（#627）真实 PDF 预览落位主区（代次概念 state.generation 先行）；页眉页脚参数（T05）沿参数字段行追加。
 - 绘制层断言：集成用例「PDF 导出模态（#621 T01）」经 `_test.pdfExportModal.report` 探针断言控件可见性（offsetParent + 计算样式）——非 DOM 存在性。
 

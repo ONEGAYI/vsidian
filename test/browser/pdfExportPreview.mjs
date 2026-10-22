@@ -36,6 +36,7 @@ const DEFAULTS = {
   orientation: 'portrait', marginMm: 20, scale: 1,
   headerEnabled: false, headerTitle: true, headerDate: false,
   pageNumberEnabled: false, pageNumberPosition: 'footer-center', bookmarksEnabled: false,
+  theme: 'follow',
 }
 
 const state = (preview) => ({
@@ -152,6 +153,31 @@ try {
   assert.match(listLayout.outline, /^solid /, `选中行应有可见描边（实测 ${listLayout.outline}）`)
   assert.equal(listLayout.mainHasList, false, '主区不应再承载清单（统一页：清单入侧栏）')
   assert.equal(listLayout.mainHasSelect, false, '预览工具栏不应再有文件下拉')
+  passed++
+
+  // ---- 导出主题下拉：三档可见、绘制有尺寸、不越出侧栏（验收反馈 2026-10-22） ----
+  const themeField = await page.evaluate(() => {
+    const selects = Array.from(document.querySelectorAll('.vsidian-pdfexport-side select'))
+    const select = selects.find((el) => Array.from(el.options).some((option) => option.value === 'follow'))
+    if (select === undefined) return null
+    const box = select.getBoundingClientRect()
+    const side = document.querySelector('.vsidian-pdfexport-side').getBoundingClientRect()
+    const style = getComputedStyle(select)
+    return {
+      values: Array.from(select.options).map((option) => option.value),
+      value: select.value,
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+      visible: style.display !== 'none' && style.visibility !== 'hidden' && box.width > 0 && box.height > 0,
+      insideSide: box.left >= side.left - 0.5 && box.right <= side.right + 0.5,
+    }
+  })
+  assert.ok(themeField !== null, '侧栏应呈现导出主题下拉')
+  assert.deepEqual(themeField.values, ['follow', 'light', 'dark'], `主题应有三档（实测 ${themeField.values.join('/')}）`)
+  assert.equal(themeField.value, 'follow', '主题默认跟随编辑器')
+  assert.equal(themeField.visible, true, '主题下拉应真实绘制（宽高非零且未隐藏）')
+  assert.ok(themeField.width > 100, `主题下拉应有可见宽度（实测 ${themeField.width}px）`)
+  assert.equal(themeField.insideSide, true, '主题下拉不应越出侧栏')
   passed++
 
   // ---- 清单容器固定三条目高、内部滚动（多条目不外溢侧栏） ----
@@ -335,7 +361,7 @@ try {
   passed++
 
   assert.deepEqual(errors, [], `页面不应有未捕获异常：${errors.join(' | ')}`)
-  console.log(`pdfExportPreview: ${passed}/7 场景通过`)
+  console.log(`pdfExportPreview: ${passed}/8 场景通过`)
 } finally {
   await browser.close()
 }

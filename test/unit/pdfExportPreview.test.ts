@@ -27,6 +27,7 @@ describe('pdfPreviewFingerprint：参数归一口径', () => {
       { ...PARAMS, scale: 1.5 },
       { ...PARAMS, headerEnabled: true },
       { ...PARAMS, bookmarksEnabled: true },
+      { ...PARAMS, theme: 'dark' },
     ]) {
       expect(pdfPreviewFingerprint({ options: changed, target: DOC_TARGET })).not.toBe(base)
     }

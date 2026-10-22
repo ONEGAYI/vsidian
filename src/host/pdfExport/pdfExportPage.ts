@@ -78,9 +78,20 @@ img { max-width: 100%; }
 export function buildPdfExportPageHtml(input: PdfExportPageAssemblyInput): string {
   const { payload, options } = input
   const nonce = randomUUID()
+  // 主题开关（theme=light/dark）在此生效：这是把样式快照变成页面变量的
+  // **唯一入口**，预览页与最终导出都经它——强制亮/暗时 body 主题类与
+  // 基础变量都按目标切换，同时丢弃快照里来自当前编辑器主题的 --vscode-*
+  // 值（否则强制亮色仍会带着暗色背景变量）。follow 保持既有跟随语义。
+  const forcedTheme = options.theme === 'follow' ? undefined : options.theme
+  const dark = forcedTheme === undefined ? payload.style.dark : forcedTheme === 'dark'
+  const styleVars = forcedTheme === undefined
+    ? payload.style.vars
+    : Object.fromEntries(
+      Object.entries(payload.style.vars).filter(([name]) => !name.startsWith('--vscode-')),
+    )
   const varsBlock = [
-    cssVarBlockOf(payload.style.dark ? BASE_VARS_DARK : BASE_VARS_LIGHT),
-    cssVarBlockOf(payload.style.vars),
+    cssVarBlockOf(dark ? BASE_VARS_DARK : BASE_VARS_LIGHT),
+    cssVarBlockOf(styleVars),
     payload.style.reading.fontFamily !== undefined
       ? `--vsidian-pdf-reading-font: ${payload.style.reading.fontFamily.replaceAll(';', '\\3b ')};`
       : '',
@@ -103,7 +114,7 @@ export function buildPdfExportPageHtml(input: PdfExportPageAssemblyInput): strin
     "font-src 'self' data: https:",
     "connect-src 'self'",
   ].join('; ')
-  const bodyClass = payload.style.dark ? 'vscode-dark' : 'vscode-light'
+  const bodyClass = dark ? 'vscode-dark' : 'vscode-light'
   return `<!DOCTYPE html>
 <html lang="${payload.locale}">
 <head>
