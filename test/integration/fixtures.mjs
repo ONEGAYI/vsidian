@@ -522,6 +522,12 @@ const PDF_EXPORT_T02_DOC = (() => {
     // （PDF 目标不进文本解码通道——该分派修复的集成钉子）
     '![[pdf-export-t02-target.pdf]]',
     '',
+    // R11 回归钉子：两端带空白的合法 inner 也必须先归一再判身份——旧实现
+    // 只在含 #/| 时解析，尾随空格会混进扩展名，媒体/PDF 退回文本链并误报
+    '![[ pdf-export-t02-clip.mp4 ]]',
+    '',
+    '![[ pdf-export-t02-target.pdf ]]',
+    '',
     '![本地图](assets/pdf-t02-img.png)',
     '',
     '![缺失图](assets/pdf-t02-missing.png)',

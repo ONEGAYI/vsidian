@@ -3015,13 +3015,16 @@ export function createTextEditorProvider(
     // 让合法 Markdown 嵌入退化成 not-found（#010 回归）。
     //
     // 但媒体/PDF 不能进文本解码（openTextDocument 对二进制必然失败 → 误报
-    // read-failed）。所以先用**同一个** parseWikilinkInner 取出真实 path 做
+    // read-failed）。所以先用**同一个** parseWikilinkInner 取出规范 path 做
     // 类型预判：命中 PDF/媒体则走身份分派（只需存在性），其余（Markdown、
     // 自引用、带锚点/别名）一律交回原解析链，锚点语义由它继续处理。
-    const parsedInner = inner.includes('|') || inner.includes('#')
-      ? parseWikilinkInner(inner.trim())
-      : null
-    const identityPath = parsedInner !== null ? parsedInner.path : inner
+    //
+    // 解析**无条件执行**，不看 inner 里是否出现 `#`/`|`：`![[ clip.mp4 ]]`
+    // 这类两端带空白的合法写法也必须先归一成 `clip.mp4` 才判得准扩展名
+    //（R11：按「含分隔符才解析」会把尾随空格带进扩展名，媒体/PDF 退回文本
+    // 链并误报）。解析失败（非法形态）不阻断——原解析链给出一致的降级理由。
+    const parsedInner = parseWikilinkInner(inner)
+    const identityPath = parsedInner !== null ? parsedInner.path : inner.trim()
     const identityKind = identityPath === ''
       ? undefined
       : classifyLocalRefContentKind(identityPath) === 'pdf'

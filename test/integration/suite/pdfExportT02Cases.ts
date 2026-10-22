@@ -98,13 +98,14 @@ export const pdfExportT02Cases: Array<[string, () => Promise<void>]> = [
       const info = await modalState()
       return info.docName === 'pdf-export-t02.md' && info.capturedVersion >= 1 && info.embedStats !== undefined ? info : undefined
     })
-    // 超集预取观测：4 个 markdown 嵌入 + 2 个身份条目（音视频 + PDF）。
-    // 四个 markdown 分别是裸名、带标题锚点、带别名与自引用（#010：这些形态
-    // 必须仍解析到同一目标，不能被当成文件路径而退化为 not-found）。
-    // PDF 与媒体同为身份条目——两者都不得进入文本解码通道（二进制经
-    // openTextDocument 会失败并误报 read-failed），故同时钉住失败数为 0
+    // 超集预取观测：4 个 markdown 嵌入 + 4 个身份条目（音视频/PDF 各两种
+    // 写法：裸名与两端带空白）。四个 markdown 分别是裸名、带标题锚点、带
+    // 别名与自引用（#010：这些形态必须仍解析到同一目标，不能被当成文件
+    // 路径而退化为 not-found）。PDF 与媒体同为身份条目——两者都不得进入
+    // 文本解码通道（二进制经 openTextDocument 会失败并误报 read-failed）。
+    // 两端空白写法钉住 R11：无条件先归一 inner 再判身份。
     assert.equal(captured.embedStats?.embeds, 4, '应预取 4 个 markdown 嵌入目标（裸名/标题锚点/别名/自引用）')
-    assert.equal(captured.embedStats?.mediaEmbeds, 2, '应登记 2 个身份条目（音视频 + PDF）')
+    assert.equal(captured.embedStats?.mediaEmbeds, 4, '应登记 4 个身份条目（音视频/PDF 各含裸名与两端空白写法）')
     assert.equal(captured.embedStats?.failures, 0, '媒体与 PDF 嵌入不得计为读取失败')
 
     await vscode.commands.executeCommand('onegayi.vsidian._test.injectPdfExportModalMessage', {
