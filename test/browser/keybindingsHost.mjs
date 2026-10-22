@@ -34,7 +34,9 @@ const host = runTestHost({ executable, args, env: { ...process.env, WORKSPACE_DI
   reportPath: path.join(root, '.vscode-test/keybindings-host.log') })
 let socket
 try {
-  const deadline = Date.now() + 60000
+  // 首次运行需下载并解压宿主，冷启动可达数分钟（#638 实测 60s 窗口不足）；
+  // 宿主本体超时由 runTestHost 的 timeoutMs 兜底，此处只等就绪信号
+  const deadline = Date.now() + 180000
   while ((!existsSync(path.join(dir, 'ready')) || !(await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.ok).catch(() => false))) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
@@ -173,13 +175,144 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 300))
   await press('b')
   await waitText('**word**')
+
+  // #638 跳转到行：命令入口开原生输入框（webview 的 Ctrl+G 已在
+  // keybindingEditor 浏览器套件覆盖面板消费），此处验证真宿主「输入框 →
+  // view.locate → 落位/绘制层」全链。宿主会把写入文本按平台规范化行尾
+  //（Windows 为 CRLF），断言按实际文本比较——CRLF 行号换算正是本票验收项。
+  const gotoDocLines = ['第一行', '第二行', '第三行', '第四行']
+  assert.equal(await command('replaceText', { text: gotoDocLines.join('\n') + '\n' }), true)
+  let gotoDoc = ''
+  for (let i = 0; i < 50; i++) {
+    gotoDoc = await command('text')
+    if (gotoDoc.includes('第三行')) break
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  assert(gotoDoc.includes('第三行'), '替换后的文本应可读回')
+  assert(/\r\n/.test(gotoDoc), `宿主应为 CRLF 行尾（实测 ${JSON.stringify(gotoDoc)}）`)
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  // 工作台页面（非 webview）驱动原生输入框：先在 webview 内把光标移到文首，
+  // 再经命令入口触发，随后在任一 CDP 目标里找 .quick-input-widget 输入。
+  await call('Runtime.evaluate', { contextId,
+    expression: "document.querySelector('.cm-content').focus()" })
+  await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Home', code: 'Home',
+    windowsVirtualKeyCode: 36, modifiers: 2 })
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Home', code: 'Home',
+    windowsVirtualKeyCode: 36, modifiers: 2 })
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  // 命令入口（与键位同执行体；键位路径已在浏览器套件覆盖）
+  assert.deepEqual(await command('gotoLineCommand'), { started: true })
+  // 输入框出现在工作台页面：逐目标尝试找到可输入的输入框
+  let inputTarget
+  for (const target of targets.filter((item) => item.webSocketDebuggerUrl)) {
+    if (target.webSocketDebuggerUrl === undefined) continue
+    await connect(target)
+    const probe = await call('Runtime.evaluate', {
+      expression: `Boolean(document.querySelector('.quick-input-box input, .quick-input-widget input'))`,
+      returnByValue: true,
+    }).catch(() => null)
+    if (probe?.result?.value === true) { inputTarget = target; break }
+  }
+  assert(inputTarget, '未找到原生输入框（.quick-input-widget input）')
+  // 原生输入框由 VSCode quickInput 自持按键处理，合成 DOM 事件不生效（实测
+  // keydown 合成不触发确认）——经 CDP Input 域真实键入：先输入越界值 99 回车，
+  // validateInput 应拦下并保持输入框在场；再全选替换为 3 回车完成定位。
+  const inputSelector = '.quick-input-box input, .quick-input-widget input'
+  const widgetOpen = async () => (await call('Runtime.evaluate', {
+    expression: `Boolean(document.querySelector(${JSON.stringify(inputSelector)}))`,
+    returnByValue: true,
+  })).result?.value === true
+  await call('Runtime.evaluate', {
+    expression: `document.querySelector(${JSON.stringify(inputSelector)}).focus()`,
+    returnByValue: true,
+  })
+  const typeText = async (text) => call('Input.insertText', { text })
+  const pressEnter = async () => {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter',
+      windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter',
+      windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+  }
+  const selectAll = async () => {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'a', code: 'KeyA',
+      windowsVirtualKeyCode: 65, modifiers: 2 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA',
+      windowsVirtualKeyCode: 65, modifiers: 2 })
+  }
+  const backspace = async () => {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Backspace', code: 'Backspace',
+      windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace',
+      windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 })
+  }
+  await typeText('99')
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  await pressEnter()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert(await widgetOpen(), '越界输入应被 validateInput 拦下并保持输入框在场')
+  // 空值同样要得到本地化校验反馈，不能被当成"取消式空提交"静默放行
+  //（#638 验收：空值、越界等一律反馈且不定位；取消由 Esc 单独处理）。
+  await selectAll()
+  await backspace()
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  await pressEnter()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert(await widgetOpen(), '空值提交应被 validateInput 拦下并保持输入框在场')
+  const invalidMessage = await call('Runtime.evaluate', {
+    expression: `(() => { const el = document.querySelector('.quick-input-message');
+      return el ? el.textContent : null })()`,
+    returnByValue: true,
+  })
+  // 文案随宿主语言切换，断言只钉"有反馈且带行数上限"（两语言包都含 {total}）
+  const invalidText = invalidMessage?.result?.value ?? ''
+  assert(invalidText !== '' && invalidText.includes('5'),
+    `空值提交应显示本地化行号文案（实测 ${JSON.stringify(invalidText)}）`)
+  await typeText('3')
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  await pressEnter()
+  const gotolineDone = path.join(dir, 'gotoline-result.json')
+  const until = Date.now() + 8000
+  while (!existsSync(gotolineDone) && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  assert(existsSync(gotolineDone), 'gotoLine 命令未在输入确认后返回')
+  assert.equal(JSON.parse(readFileSync(gotolineDone, 'utf8')).done, true)
+  // 光标应落在第三行行首：读 webview 内 CM6 活动行（DOM 选区所在 .cm-line）
+  let cursorHit = false
+  for (const target of targets.filter((item) => item.webSocketDebuggerUrl)) {
+    await connect(target)
+    const probe = await call('Runtime.evaluate', { contextId,
+      expression: `(() => { const el = document.querySelector('.cm-content');
+        return el ? document.querySelectorAll('.cm-line').length : -1 })()`,
+      returnByValue: true }).catch(() => null)
+    if (probe?.result?.value >= 0) {
+      const line = await call('Runtime.evaluate', { contextId,
+        expression: `(() => { const sel = window.getSelection();
+          const node = sel?.anchorNode; const el = node?.nodeType === 3 ? node.parentElement : node;
+          const lineEl = el?.closest?.('.cm-line');
+          if (!lineEl) return -1;
+          const lines = [...document.querySelectorAll('.cm-line')];
+          return lines.indexOf(lineEl) + 1 })()`,
+        returnByValue: true })
+      if (line?.result?.value === 3) { cursorHit = true; break }
+    }
+  }
+  assert(cursorHit, 'Ctrl+G 提交行号后光标应落在第 3 行')
+  assert.equal(await command('text'), gotoDoc, '跳转到行不得修改正文')
+  console.log('[键盘宿主] Ctrl+G 真宿主输入框 → view.locate → 落位通过')
+  // 还原为 Ctrl+B 段落的期望文本，让既有最终断言（写回结果）继续成立
+  assert.equal(await command('replaceText', { text: 'word' }), true)
+  await waitText('word')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  await press('b')
+  await waitText('**word**')
   // 真宿主 TextDocument 经 edit.request 写回；最终由伴随套件在 done 后回报。
   writeFileSync(path.join(dir, 'done'), '')
   const code = await host
   assert.equal(code, 0)
   assert.equal(readFileSync(path.join(dir, 'result'), 'utf8'), '**word**',
     'Ctrl+B 应由 Vsidian 加粗而非切换工作台侧栏')
-  console.log('[键盘宿主][PASS] 独立桌面 CDP Ctrl+B、Ctrl+0–6、改绑旧键释放、两段键、清空及重置（宿主版本见启动日志）')
+  console.log('[键盘宿主][PASS] 独立桌面 CDP Ctrl+B、Ctrl+0–6、改绑旧键释放、两段键、清空及重置、Ctrl+G 跳转到行（宿主版本见启动日志）')
 } finally {
   if (socket) socket.close()
   writeFileSync(path.join(dir, 'done'), '')

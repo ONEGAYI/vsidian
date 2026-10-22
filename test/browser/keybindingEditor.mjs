@@ -100,6 +100,32 @@ try {
     await page.keyboard.press('Control+i')
     assert.equal((await page.evaluate(() => window.keyState())).text, '> - ## 正文')
   }
+  // #638 跳转到行：真实 Ctrl+G 被面板消费（不透传宿主），提交行号后落位行首；
+  // 取消不移动；显式清空后旧键释放回 window 层
+  const gotoDoc = '第一行\n第二行\n第三行\n'
+  await page.evaluate((text) => {
+    window.initKeys(text)
+    window.updateKeys({})
+    window.setGotoLineTarget(3)
+  }, gotoDoc)
+  await page.locator('.cm-content').focus()
+  await page.keyboard.press('Control+Home')
+  const forwardedBeforeGoto = (await page.evaluate(() => window.keyState())).forwarded
+  await page.keyboard.press('Control+g')
+  let gotoState = await page.evaluate(() => window.keyState())
+  assert.equal(gotoState.forwarded, forwardedBeforeGoto, 'Ctrl+G 被面板消费，不应到达 window 冒泡转发层')
+  assert.deepEqual(gotoState.gotoLineExecutions, [3], 'Ctrl+G 应触发一次宿主输入框链路')
+  assert.equal(gotoState.cursor, gotoDoc.indexOf('第三行'), '提交行号后光标应落在该行行首')
+  assert.equal(gotoState.text, gotoDoc, '跳转到行不修改正文')
+  await page.evaluate(() => window.setGotoLineTarget(null))
+  await page.keyboard.press('Control+g')
+  gotoState = await page.evaluate(() => window.keyState())
+  assert.equal(gotoState.cursor, gotoDoc.indexOf('第三行'), '取消输入框不应移动位置')
+  assert.deepEqual(gotoState.gotoLineExecutions, [3, 0], '取消仍触发宿主链路一次（由宿主判定放弃）')
+  await page.evaluate(() => window.updateKeys({ gotoLine: [] }))
+  await page.keyboard.press('Control+g')
+  gotoState = await page.evaluate(() => window.keyState())
+  assert.equal(gotoState.forwarded, forwardedBeforeGoto + 1, '显式清空后 Ctrl+G 应释放回 window 层')
   await page.close()
-  console.log('[编辑器快捷键][PASS] 原生键盘默认/清空释放/改绑/两段键与 window 转发隔离；含行内代码的整段粗体/斜体/删除线/高亮往返与绘制')
+  console.log('[编辑器快捷键][PASS] 原生键盘默认/清空释放/改绑/两段键与 window 转发隔离；含行内代码的整段粗体/斜体/删除线/高亮往返与绘制；Ctrl+G 跳转到行的消费/落位/取消/清空释放')
 } finally { await browser.close() }

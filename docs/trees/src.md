@@ -39,6 +39,7 @@ vsidian/
     │   ├── editorGuardService.ts         # 默认编辑器守护宿主服务
     │   ├── editorGuardWiring.ts          # 默认编辑器守护 vscode 层装配
     │   ├── findOptionsStore.ts           # 查找选项持久化存取
+    │   ├── gotoLine.ts                   # 跳转到行纯逻辑（#638）
     │   ├── hostLocale.ts                 # 生效语言宿主装配解析帮手
     │   ├── hoverDocAccess.ts             # 悬停预览文档访问纯逻辑
     │   ├── hoverRefreshCoordinator.ts    # 引用视图刷新协调器（宿主）

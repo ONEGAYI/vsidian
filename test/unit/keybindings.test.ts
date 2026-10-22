@@ -11,6 +11,20 @@ import { en } from '../../src/shared/locales/en'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 
 describe('快捷键契约', () => {
+  it('跳转到行默认 Ctrl+G，双模式可用并允许改绑或清空', () => {
+    expect(getEffectiveBindings({}, 'gotoLine')).toEqual(['ctrl+g'])
+    for (const mode of ['live', 'reading'] as const) {
+      expect(resolveKeybinding({}, mode, 'ctrl+g', false))
+        .toEqual({ kind: 'command', id: 'gotoLine' })
+      expect(resolveKeybinding({ gotoLine: [] }, mode, 'ctrl+g'))
+        .toEqual({ kind: 'none' })
+      expect(resolveKeybinding({ gotoLine: ['ctrl+alt+g'] }, mode, 'ctrl+g'))
+        .toEqual({ kind: 'none' })
+      expect(resolveKeybinding({ gotoLine: ['ctrl+alt+g'] }, mode, 'ctrl+alt+g'))
+        .toEqual({ kind: 'command', id: 'gotoLine' })
+    }
+  })
+
   it('登记全部用户命令并保留固定默认值', () => {
     const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
     expect(KEYBINDING_OPERATIONS.map((op) => op.command).sort()).toEqual(

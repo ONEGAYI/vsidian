@@ -50,6 +50,7 @@
 | 折叠全部标题节（#413，全部可折叠标题；同级相邻空节排除） | Live | Ctrl+K Ctrl+0 / Cmd+K Cmd+0 |
 | 展开全部标题节（#413，清空折叠集） | Live | Ctrl+K Ctrl+J / Cmd+K Cmd+J |
 | 图形块场景簇四操作（#438：弹窗预览 / 导出 SVG / 导出 PNG / 复制源码，目标为光标处图形块） | Live | 无 |
+| 跳转到行（#638：输入 1-based 源码行号，落位当前 Vsidian 文档） | Live、阅读 | Ctrl+G |
 
 **作用域**：写操作只在可编辑的 Live 正文获得焦点时拦截按键。阅读容器可执行只读视图操作；查找输入框仅允许只读操作；源码编辑器和设置页输入不装配正文按键路由。模式切换、失焦、超时（1.2 秒）或 Escape 会取消待输入的两段键。内部冲突包含完全相同的键位，以及重叠模式中的单段键与两段键首段；模式互斥时可复用键位。
 
@@ -102,6 +103,8 @@
 **索引维护命令注册为宿主命令、默认未绑定（#198 评估结论）**：「完整重建」（`onegayi.vsidian.index.rebuild`）与「清理当前工作区缓存」（`onegayi.vsidian.index.cleanup`）登记于 extra 操作表（双模式生效 `mode: both`、非写操作 `writes: false`——语义为命令在两模式下均可用；操作本体不写正文，只维护索引缓存）。索引维护属**设置页/宿主域操作**：入口常驻设置页「索引维护」分页（按钮与命令共用同一 wiring），不接管正文输入、不进 webview 键路由；宿主侧注册保证设置页或面板异常时命令面板仍可达（cssSnippets.pause 同模式）。低频操作默认不占键位，用户可按需绑定。
 
 **「定位到搜索选中结果」注册为宿主命令、默认未绑定（#318 评估结论，2026-10-03 落定）**：外部搜索导航定位恢复的显式触发入口（`onegayi.vsidian.searchReveal.locate`，双模式生效 `mode: both`、非写操作 `writes: false`——纯视图定位，view.locate 通道与双链锚点跳转同链）。**显式方案定案、自动捕获停止**：恢复路径依赖内部命令 `search.action.copyMatch` 的剪贴板回读（有非文本剪贴板被覆盖的副作用），且「面板激活自动捕获」存在残留选中与切换标签不可区分的歧义——原型验证实证了三项证据（残留选中歧义误定位、已激活面板无事件盲区、非文本剪贴板覆盖，见 [#318 原型验证结论评论](https://github.com/ONEGAYI/vsidian/issues/318)），按票面停止条件移除自动方案；**显式触发把意图判定交给用户按键，零歧义**，故注册为可绑定命令但默认未绑定（语义、边界与官方 API 落地后的演进路径见 [search-reveal.md](search-reveal.md)）。
+
+**「跳转到行」注册为可绑定操作、默认 Ctrl+G（#638 评估结论，2026-10-22）**：自定义编辑器接管 `.md` 后，宿主 `workbench.action.gotoLine` 失去可寻址的文本编辑器目标（`activeTextEditor=undefined`，与 [search-reveal.md](search-reveal.md) 同一宿主能力缺口），Ctrl+G 落到原生入口只提示先打开文本编辑器。**本操作在 webview 捕获层接管该键**（`onegayi.vsidian.gotoLine`，双模式生效 `mode: both`、非写操作 `writes: false`——纯视图定位，`view.locate` 通道与双链锚点跳转同链），宿主弹原生输入框收 **1-based 源码行号**，复用既有换行换算（`NewlineCoordinator`）与折叠展开链路（`locateOffset` 的 `unfoldAround` 分支），不新造定位器。目标为触发时活动的 Vsidian 面板：分屏同 URI 多面板时优先 active 的那个（与搜索定位同口径），**不向同文件其他分屏广播**。输入期间文档变化或面板关闭时按执行时权威状态重验，不发送失效定位；空值/0/负数/小数/非数字与越界值经 `validateInput` 本地化反馈且不定位，取消不移动位置。**不接管 Ctrl+E/Ctrl+P**（外部文件打开流程保持原生）、不修补原生 Quick Open 的外部位置透传、不依赖试验 API、不复活搜索剪贴板自动捕获路径；**不扩展列号、百分比或字符偏移**。冲突核对（#638）：注册表与 `keybindingRouter` 此前对 `ctrl+g` 零占用，CM6 `defaultKeymap` 无该绑定（`Mod-g` 属未装配的 `searchKeymap`），无需吞键接管；源码编辑器与设置页不经 webview 键路由天然不接管。
 
 **单文件更名/移动的引用自动更新无快捷键（#199 评估结论）**：引用改写由 `onWillRenameFiles`/`onDidRenameFiles` 事件自动驱动（用户在资源管理器/命令面板发起 rename 或 move 即触发，任何 VSCode 原生改名入口都覆盖），不是可枚举目标的用户命令、不注册操作、不占键位（通道语义与实测边界见 [vault-index-backlinks.md](vault-index-backlinks.md) 的「#199 实施落档」节）。外部工具改名不触发 VSCode rename 事件，只刷新索引不改写（「不猜测旧新身份」）。
 
