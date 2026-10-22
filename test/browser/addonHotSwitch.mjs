@@ -130,8 +130,12 @@ await scenario('IME 组合中停用：组合不丢、落定后扩展摘除（不
     // 组合提交（文本落定）→ 宿主 ack 在途请求 → 挂起意图冲刷
     await cdp.send('Input.insertText', { text: '候选词' })
     await page.waitForFunction(() => window.readEditor().text.includes('候选词'))
-    await page.evaluate(() => window.ackPendingEdits())
-    await page.waitForFunction(() => window.pendingInput() === false)
+    // 组合结束的 flush 可能晚于首次采样；夹具持续扮演宿主确认新请求，
+    // 不能确认一次空快照后只等 pendingInput，否则后续请求永远无人回执。
+    await page.waitForFunction(() => {
+      window.ackPendingEdits()
+      return window.pendingInput() === false
+    })
     // 落定冲刷：扩展摘除（不留旧功能），文本完整保留
     await page.waitForFunction(() => window.markInfo().count === 0)
     const finalText = await page.evaluate(() => window.readEditor().text)

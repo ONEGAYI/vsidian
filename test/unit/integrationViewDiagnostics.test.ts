@@ -14,6 +14,7 @@ it('视图等待超时保留最后一帧图表与弹窗探针（#446 条目12）
       paint: { mermaid: { rendered: 0, error: 0, count: 2 }, graphic: { frames: 2, overlay: false } } },
     { viewMode: 'live', selectionOffset: 256, liveMermaidCount: 5, readingMermaidCount: 0,
       paint: { mermaid: { rendered: 4, error: 1, count: 5 },
+        docStyle: { mainRules: 3, readingParagraphColor: null, readingHeadingColor: null },
         graphic: { frames: 5, editButtons: 5, popupButtons: 5, overlay: true, overlaySvg: false } } },
   ]
   let index = 0
@@ -33,5 +34,6 @@ it('视图等待超时保留最后一帧图表与弹窗探针（#446 条目12）
   expect(observed).toMatchObject({ viewMode: 'live', selectionOffset: 256,
     liveMermaidCount: 5, readingMermaidCount: 0,
     mermaid: { rendered: 4, error: 1, count: 5 },
+    docStyle: { mainRules: 3, readingParagraphColor: null, readingHeadingColor: null },
     graphic: { frames: 5, editButtons: 5, popupButtons: 5, overlay: true, overlaySvg: false } })
 })
