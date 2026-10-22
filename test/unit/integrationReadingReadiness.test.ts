@@ -130,6 +130,69 @@ it('P2-14 保存采样同时等待目标文档干净和新内容落盘（#446 �
   await expect(sample(async () => '【三层孙】', { isDirty: false })).resolves.toBe(true)
 })
 
+it('P2-04 保存采样不能把磁盘更新当成 dirty 已清零（#552 / #281）', async () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'poll' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === '目标保存落盘' &&
+      node.arguments[1]?.getText(source).includes('p204-编辑目标.md')) callbacks.push(node.arguments[1])
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})();`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('readDisk', 'bDoc', code)
+  await expect(sample(async () => '【嵌入编辑】', { isDirty: true })).resolves.toBeUndefined()
+  await expect(sample(async () => '旧内容', { isDirty: false })).resolves.toBeUndefined()
+  await expect(sample(async () => '【嵌入编辑】', { isDirty: false })).resolves.toBe(true)
+})
+
+it('文档样式采样等待 Reading 标签挂载，错误颜色仍交给原断言报告（#552 / #569）', () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'waitViewState' &&
+      node.arguments[1]?.getText(source).includes('docStyle.mainRules > 0')) callbacks.push(node.arguments[1])
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})(state);`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('state', code)
+  const ready = { mainRules: 3, readingParagraphColor: 'rgb(0, 0, 205)',
+    readingHeadingColor: 'rgb(75, 0, 130)', toolbarColor: 'rgb(1, 2, 3)' }
+  const state = (docStyle: unknown) => ({ viewMode: 'reading', paint: { docStyle } })
+  for (const field of ['readingParagraphColor', 'readingHeadingColor', 'toolbarColor']) {
+    expect(sample(state({ ...ready, [field]: null }))).toBe(false)
+  }
+  expect(sample(state({ ...ready, mainRules: 0 }))).toBe(false)
+  expect(sample(state(ready))).toBe(true)
+  expect(sample(state({ ...ready, readingParagraphColor: 'rgb(255, 0, 0)' }))).toBe(true)
+})
+
+it('删表头采样等到写回计数结算，再建立拒绝操作的零写回基线（#552 条目33）', async () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'poll' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text === '删表头升格') callbacks.push(node.arguments[1]!)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})();`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('doc', 'promoted', 'vscode', 'CMD', 'uri', 'beforePromote', code)
+  let state = { appliedEdits: 4 }
+  const document = { getText: () => '新表头' }
+  const commands = { commands: { executeCommand: async () => state } }
+  const check = async () => sample(document, '新表头', commands, { sessionState: 'probe' }, 'table13.md', { appliedEdits: 4 })
+  // VSCode 的 onDidChangeTextDocument 可早于 applyEdit 的 Promise 完成：
+  // 新文本已在场，宿主计数仍属于前一帧。
+  await expect(check()).resolves.toBeUndefined()
+  state = { appliedEdits: 5 }
+  await expect(check()).resolves.toBe(true)
+  document.getText = () => '旧表头'
+  await expect(check()).resolves.toBeUndefined()
+})
+
 it('图片尺寸采样等待目标锚点完成视觉补偿，高度增长不能单独放行（#446 条目22）', async () => {
   const callbacks: ts.Expression[] = []
   const visit = (node: ts.Node): void => {
