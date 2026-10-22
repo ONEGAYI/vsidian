@@ -2313,12 +2313,9 @@ export class EmbedCardManager {
     }
   }
 
-  /** init 后定位：会话选区恢复优先（occurrence 记忆），否则标题/块引用
-   *  定位到锚点区间起点（P2-03 语义在 Live 侧的落位）。选区恢复只设光标
-   *  不强制滚动——重开浮层保持从顶部显示（2026-10-02 验收反馈：恢复记忆
-   *  把浮层拉回上次光标行，预览进度错乱）；继续编辑时 CM6 按输入/导航
-   *  自行跟随光标。章节/块引用定位保持滚动（打开即到引用区间是 P2-03
-   *  的显式语义） */
+  /** init 后定位：非零引用定位点优先于会话选区记忆，重开仍到引用处。
+   *  无定位点时只恢复光标、不强制滚动（2026-10-02 验收反馈：恢复记忆
+   *  把浮层拉回上次光标行，预览进度错乱）。 */
   private locateLiveInstance(entry: EmbedEntry): void {
     const live = entry.live
     const view = live?.instance?.getView()
@@ -2326,13 +2323,6 @@ export class EmbedCardManager {
       return
     }
     live.initialLocated = true
-    if (entry.liveSelection) {
-      const { anchor, head } = entry.liveSelection
-      if (anchor <= view.state.doc.length && head <= view.state.doc.length) {
-        view.dispatch({ selection: { anchor, head } })
-      }
-      return
-    }
     const loaded = entry.loaded
     // #338/#341：EmbedLoaded 联合收宽后此处只对 markdown 形态定位（text
     // 装载无 Markdown 选择器/端口、PDF 无文本坐标——live 视图本就不为
@@ -2344,6 +2334,13 @@ export class EmbedCardManager {
       loaded.range.start > 0 && loaded.range.start <= view.state.doc.length) {
       const at = loaded.range.start
       view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at) })
+      return
+    }
+    if (entry.liveSelection) {
+      const { anchor, head } = entry.liveSelection
+      if (anchor <= view.state.doc.length && head <= view.state.doc.length) {
+        view.dispatch({ selection: { anchor, head } })
+      }
     }
   }
 
