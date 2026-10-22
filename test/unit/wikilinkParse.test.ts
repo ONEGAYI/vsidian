@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseWikilinkInner,
+  scanEmbedsInLine,
   scanWikilinksInLine,
   wikilinkAtCol,
 } from '../../src/shared/wikilink'
@@ -24,6 +25,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: null,
       blockId: null,
       alias: null,
+      size: null,
       display: '笔记',
     })
     expect(parseWikilinkInner('目录/笔记')).toEqual({
@@ -31,6 +33,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: null,
       blockId: null,
       alias: null,
+      size: null,
       display: '目录/笔记',
     })
     expect(parseWikilinkInner('笔记|显示文字')).toEqual({
@@ -38,6 +41,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: null,
       blockId: null,
       alias: '显示文字',
+      size: null,
       display: '显示文字',
     })
     expect(parseWikilinkInner('笔记#标题')).toEqual({
@@ -45,6 +49,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: '标题',
       blockId: null,
       alias: null,
+      size: null,
       display: '笔记#标题',
     })
   })
@@ -55,6 +60,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: '标题',
       blockId: null,
       alias: '显示',
+      size: null,
       display: '显示',
     })
   })
@@ -68,6 +74,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: '标题',
       blockId: null,
       alias: '显  示',
+      size: null,
       display: '显  示',
     })
   })
@@ -97,6 +104,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: '标题含',
       blockId: null,
       alias: '竖线',
+      size: null,
       display: '竖线',
     })
     expect(parseWikilinkInner('笔记#A|B|C')).toEqual({
@@ -104,6 +112,7 @@ describe('parseWikilinkInner：目标结构解析', () => {
       heading: 'A',
       blockId: null,
       alias: 'B|C',
+      size: null,
       display: 'B|C',
     })
   })
@@ -116,6 +125,7 @@ describe('块引用形态：[[笔记#^块ID]]（Obsidian `#^` 标准形态）', 
       heading: null,
       blockId: '37066d',
       alias: null,
+      size: null,
       display: '笔记#^37066d',
     })
     // 人读块 ID（Obsidian 允许拉丁字母/数字/连字符）
@@ -133,6 +143,7 @@ describe('块引用形态：[[笔记#^块ID]]（Obsidian `#^` 标准形态）', 
       heading: null,
       blockId: '37066d',
       alias: '显示',
+      size: null,
       display: '显示',
     })
   })
@@ -162,6 +173,7 @@ describe('本文件锚点（#159）：[[#标题]] 与 [[#^块id]] 空路径放�
       heading: '标题',
       blockId: null,
       alias: null,
+      size: null,
       display: '#标题',
     })
   })
@@ -172,6 +184,7 @@ describe('本文件锚点（#159）：[[#标题]] 与 [[#^块id]] 空路径放�
       heading: null,
       blockId: '37066d',
       alias: null,
+      size: null,
       display: '#^37066d',
     })
     expect(parseWikilinkInner('#^quote-of-the-day')).toMatchObject({
@@ -187,6 +200,7 @@ describe('本文件锚点（#159）：[[#标题]] 与 [[#^块id]] 空路径放�
       heading: '标题',
       blockId: null,
       alias: '显示',
+      size: null,
       display: '显示',
     })
     expect(parseWikilinkInner('#^37066d|显示')).toEqual({
@@ -194,6 +208,7 @@ describe('本文件锚点（#159）：[[#标题]] 与 [[#^块id]] 空路径放�
       heading: null,
       blockId: '37066d',
       alias: '显示',
+      size: null,
       display: '显示',
     })
   })
@@ -296,5 +311,69 @@ describe('wikilinkAtCol：按列定位出现（Ctrl/Cmd+单击命中判定）', 
     expect(wikilinkAtCol(line, from - 1)).toBeNull()
     expect(wikilinkAtCol(line, to)).toBeNull()
     expect(wikilinkAtCol(line, 0)).toBeNull()
+  })
+})
+
+// #635 图片尺寸尾缀：嵌入形态剥离尺寸、普通链接维持别名语义（规格 §3.2）。
+// 同一段源文 `图.png|100` 在两种语法里语义不同——判定权归扫描器角色。
+describe('parseWikilinkInner：嵌入形态的尺寸尾缀（#635）', () => {
+  const embed = (inner: string) => parseWikilinkInner(inner, { embed: true })
+
+  it('只写宽度像素：alias 为 null、size 就位', () => {
+    const parsed = embed('图.png|100')!
+    expect(parsed.alias).toBeNull()
+    expect(parsed.size).toEqual({ width: 100, height: null, unit: 'px' })
+  })
+
+  it('别名 + 尺寸：末段剥离，别名保留', () => {
+    const parsed = embed('图.png|说明文字|100')!
+    expect(parsed.alias).toBe('说明文字')
+    expect(parsed.size).toEqual({ width: 100, height: null, unit: 'px' })
+    expect(parsed.display).toBe('说明文字')
+  })
+
+  it('双轴与百分比形态', () => {
+    expect(embed('图.png|640x480')!.size).toEqual({ width: 640, height: 480, unit: 'px' })
+    expect(embed('图.png|50%')!.size).toEqual({ width: 50, height: null, unit: 'percent' })
+    expect(embed('图.png|说明|12.5%')!.size).toEqual({ width: 12.5, height: null, unit: 'percent' })
+  })
+
+  it('非法尾缀原样降级：size 为 null，整段留在别名里', () => {
+    for (const [inner, alias] of [
+      ['图.png|说明|0', '说明|0'],
+      ['图.png|说明|x200', '说明|x200'],
+      ['图.png|说明|50%x30%', '说明|50%x30%'],
+      ['图.png|说明|2000%', '说明|2000%'],
+    ] as const) {
+      const parsed = embed(inner)!
+      expect(parsed.size, inner).toBeNull()
+      expect(parsed.alias, inner).toBe(alias)
+    }
+  })
+
+  it('无尺寸时行为与普通链接逐字节一致', () => {
+    expect(embed('图.png|说明文字')).toEqual(parseWikilinkInner('图.png|说明文字'))
+    expect(embed('图.png')).toEqual(parseWikilinkInner('图.png'))
+  })
+
+  it('空别名仍然降级（![[图.png|]] 非合法嵌入）', () => {
+    expect(embed('图.png|')).toBeNull()
+  })
+
+  it('普通链接（不传 embed）的尾缀数字仍是别名，size 恒 null', () => {
+    const parsed = parseWikilinkInner('图.png|100')!
+    expect(parsed.alias).toBe('100')
+    expect(parsed.size).toBeNull()
+    const two = parseWikilinkInner('图.png|100|200')!
+    expect(two.alias).toBe('100|200')
+    expect(two.size).toBeNull()
+  })
+
+  it('嵌入扫描器按嵌入语义解析（scanEmbedsInLine 同源）', () => {
+    const hits = scanEmbedsInLine('前 ![[图.png|说明|100]] 后')
+    expect(hits).toHaveLength(1)
+    const parsed = parseWikilinkInner(hits[0]!.inner, { embed: true })!
+    expect(parsed.alias).toBe('说明')
+    expect(parsed.size).toEqual({ width: 100, height: null, unit: 'px' })
   })
 })

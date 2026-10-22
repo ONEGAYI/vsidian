@@ -88,9 +88,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     expect(applyStyleContractEntryOverride(entry, 'en', {})).toBe(entry)
   })
 
-  it("content 域全部 95 条 id 均有英文覆盖（#179 全量交付 + 独行图片布局 + 失败态细分 + #213 行背景变量 + #222 嵌入 + #223 Live 嵌入宿主 + #217 验收反馈转义符与修饰键悬停 + #296 live-table-prefix + P2-05 #282 关闭确认模态 + P2-12 #289 冲突三项选择条）", () => {
+  it("content 域全部 96 条 id 均有英文覆盖（#179 全量交付 + 独行图片布局 + 失败态细分 + #213 行背景变量 + #222 嵌入 + #223 Live 嵌入宿主 + #217 验收反馈转义符与修饰键悬停 + #296 live-table-prefix + P2-05 #282 关闭确认模态 + P2-12 #289 冲突三项选择条 + #636 图片拖动手柄）", () => {
     const contentIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'content').map((e) => e.id)
-    expect(contentIds.length).toBe(95)
+    expect(contentIds.length).toBe(96)
     for (const id of contentIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `content 条目缺英文覆盖：${id}`).toBeDefined()
     }
@@ -104,9 +104,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('两域合计全量覆盖，无覆盖表缺口（历史批次 + P2-12 #289 冲突三项选择条 + #305 toast + #306 粘贴询问）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(231)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(231)
+  it('两域合计全量覆盖，无覆盖表缺口（历史批次 + P2-12 #289 冲突三项选择条 + #305 toast + #306 粘贴询问 + #636 图片拖动手柄）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(232)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(232)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }

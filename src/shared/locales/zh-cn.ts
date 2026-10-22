@@ -897,6 +897,11 @@ export const zhCn: Record<MessageKey, string> = {
   'graphic.popupExportImageDisabled': '外链图片不支持导出，可先保存到工作区。',
   'graphic.imageExportFailed': '图片导出失败',
 
+  /** 图片拖动手柄（#636）：手柄无障碍标签、拖动读数与 Shift 能力提示 */
+  'imageResize.handleAria': '调整图片大小',
+  'imageResize.readout': '{width} × {height}',
+  'imageResize.toast.shiftHint': '按住 Shift 可自由调整宽高',
+
   'decor.taskCheck': '勾选任务',
   'decor.taskUncheck': '取消任务勾选',
   'decor.emptyCell': '空单元格',

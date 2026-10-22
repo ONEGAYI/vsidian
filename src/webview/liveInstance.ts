@@ -2788,6 +2788,10 @@ export class LiveEditorInstance {
           }
         },
         images: this.deps.images,
+        // #636 图片拖动手柄的 Shift 提示（复用根 toast 面；缺省静默）
+        ...(this.deps.notifyToast
+          ? { toast: (text, severity) => this.deps.notifyToast!(text, severity) }
+          : {}),
       }),
       // #59 公式：跨行块表（StateField 增量）+ 视口装饰（光标进入显源码、
       // 离开恢复 KaTeX 排版；渲染与装饰实例均按源文缓存）

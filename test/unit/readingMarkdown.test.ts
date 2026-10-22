@@ -582,3 +582,72 @@ describe('#336 图片嵌入：inline 规则产出 img（与普通 Markdown 图�
     }
   })
 })
+
+// #635 图片尺寸尾缀：两条渲染血缘（双链嵌入 vsidian_embed_image 与标准
+// image token）都必须产出尺寸属性。像素走 width/height 属性（加载前即可
+// 预留空间），百分比只能走内联 style（HTML width 属性不接受百分比）。
+describe('#635 图片尺寸尾缀：嵌入形态产出尺寸属性', () => {
+  const md = createMarkdownRenderer()
+
+  it('|W 只写宽度、等比（不写 height）', () => {
+    const img = renderToDom(md, '![[图.png|100]]\n').querySelector('img')!
+    expect(img.getAttribute('width')).toBe('100')
+    expect(img.getAttribute('height')).toBeNull()
+    expect(img.getAttribute('style')).toBeNull()
+    expect(img.getAttribute('alt')).toBe('')
+  })
+
+  it('|WxH 双轴属性（拉伸语义原样保留）', () => {
+    const img = renderToDom(md, '![[图.png|640x480]]\n').querySelector('img')!
+    expect(img.getAttribute('width')).toBe('640')
+    expect(img.getAttribute('height')).toBe('480')
+  })
+
+  it('|N% 走内联 style.width', () => {
+    const img = renderToDom(md, '![[图.png|50%]]\n').querySelector('img')!
+    expect(img.getAttribute('style')).toBe('width:50%')
+    expect(img.getAttribute('width')).toBeNull()
+  })
+
+  it('别名与尺寸共存：alt 取剥离后的别名', () => {
+    const img = renderToDom(md, '![[图.png|说明文字|120]]\n').querySelector('img')!
+    expect(img.getAttribute('alt')).toBe('说明文字')
+    expect(img.getAttribute('width')).toBe('120')
+  })
+
+  it('非法值降级：无尺寸属性，后缀留在 alt 里', () => {
+    const img = renderToDom(md, '![[图.png|说明|0]]\n').querySelector('img')!
+    expect(img.getAttribute('width')).toBeNull()
+    expect(img.getAttribute('style')).toBeNull()
+    expect(img.getAttribute('alt')).toBe('说明|0')
+  })
+
+  it('Markdown 直链同源：![图注|100](a.png) 剥尺寸且 alt 为图注', () => {
+    const img = renderToDom(md, '![图注|100](a.png)\n').querySelector('img')!
+    expect(img.getAttribute('width')).toBe('100')
+    expect(img.getAttribute('alt')).toBe('图注')
+  })
+
+  it('Markdown 直链双轴与百分比', () => {
+    const box = renderToDom(md, '![图注|300x200](a.png)\n').querySelector('img')!
+    expect(box.getAttribute('width')).toBe('300')
+    expect(box.getAttribute('height')).toBe('200')
+    const pct = renderToDom(md, '![图注|25%](a.png)\n').querySelector('img')!
+    expect(pct.getAttribute('style')).toBe('width:25%')
+    expect(pct.getAttribute('width')).toBeNull()
+  })
+
+  it('无尺寸的直链行为不变（回归：alt 与属性形态照旧）', () => {
+    const img = renderToDom(md, '![图注](a.png)\n').querySelector('img')!
+    expect(img.getAttribute('alt')).toBe('图注')
+    expect(img.getAttribute('width')).toBeNull()
+    expect(img.getAttribute('height')).toBeNull()
+    expect(img.getAttribute('style')).toBeNull()
+  })
+
+  it('尺寸值与 src/alt 一样经 HTML 转义（不因数字形态跳过转义）', () => {
+    const img = renderToDom(md, '![[a"b.png|说明|77]]\n').querySelector('img')!
+    expect(img.getAttribute('src')).toBe('a"b.png')
+    expect(img.getAttribute('width')).toBe('77')
+  })
+})

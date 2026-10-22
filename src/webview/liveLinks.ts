@@ -27,6 +27,8 @@ import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
+import { imageSizeAttrs, sameImageSize, splitAliasAndSize, type ImageSize } from '../shared/imageSize'
+import { attachResizeHandleToLiveImage } from './imageResize'
 import { sweepHtmlResourceBindings } from './htmlResourceMount'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } from './graphicBlockChrome'
 import { imagePopupOptsOfView, openImagePopup } from './imagePopup'
@@ -172,6 +174,8 @@ export function imageWidgetDeco(
   images: ImageResourceManager | undefined,
   block = false,
   chrome = false,
+  size: ImageSize | null = null,
+  range?: { from: number; to: number },
 ) {
   const holder: object = images ?? NO_MANAGER
   let cache = imageWidgetDecos.get(holder)
@@ -179,12 +183,19 @@ export function imageWidgetDeco(
     cache = new Map()
     imageWidgetDecos.set(holder, cache)
   }
-  const key = `${src}\u0000${alt}\u0000${block ? '1' : '0'}\u0000${chrome ? '1' : '0'}`
+  // 尺寸必须入键（#635）：后缀改动后 alt 可能不变（如 `|100`→`|200`），
+  // 不入键会复用旧 widget 导致尺寸不更新。区间同理——同 src 同 alt 但
+  // 位置不同不能复用（#636 拖动写回按 widget 上的区间定位）。
+  const sizeKey = size === null ? '' : `${size.unit}:${size.width}x${size.height ?? ''}`
+  const rangeKey = range === undefined ? '' : `${range.from}-${range.to}`
+  const key = `${src}\u0000${alt}\u0000${sizeKey}\u0000${rangeKey}\u0000${block ? '1' : '0'}\u0000${chrome ? '1' : '0'}`
   const hit = lruGet(cache, key)
   if (hit) {
     return hit
   }
-  const deco = Decoration.replace({ widget: new LiveImageWidget(src, alt, images, block, chrome) })
+  const deco = Decoration.replace({
+    widget: new LiveImageWidget(src, alt, images, block, chrome, size, range),
+  })
   cache.set(key, deco)
   lruEvict(cache, WIDGET_DECO_CACHE_LIMIT)
   return deco
@@ -200,6 +211,27 @@ const liveImagesByView = new WeakMap<EditorView, ImageResourceManager>()
 /** 视图所属的图片资源管理器（未装配 createLinkInteractions 的裸视图无） */
 export function liveImagesOfView(view: EditorView): ImageResourceManager | undefined {
   return liveImagesByView.get(view)
+}
+
+/** #636 拖动手柄的接线端口（按视图登记，装配点与 liveImagesByView 同源）：
+ *  widget 的 toDOM 拿不到 syncController 私有字段，经此惰性取所属视图的
+ *  轻提示通道与容器宽度。缺省时手柄仍可装但无 toast、最大宽不钳制。 */
+export interface LiveImageResizePort {
+  toast?(text: string, severity: 'neutral' | 'warning' | 'error', key?: string): void
+  /** 正文列内容宽（拖动最大宽钳制基准） */
+  containerWidth?(): number
+}
+
+const liveResizePortsByView = new WeakMap<EditorView, LiveImageResizePort>()
+
+/** 登记视图的拖动端口（createLinkInteractions 装配时调用） */
+export function setLiveImageResizePort(view: EditorView, port: LiveImageResizePort): void {
+  liveResizePortsByView.set(view, port)
+}
+
+/** 视图所属的拖动端口（未装配时无） */
+export function liveResizePortOfView(view: EditorView): LiveImageResizePort | undefined {
+  return liveResizePortsByView.get(view)
 }
 
 /** live 图片 widget：占位（alt 文本）→ 经资源管理器装载 → 失败可重试。
@@ -220,13 +252,23 @@ export class LiveImageWidget extends WidgetType {
     readonly images?: ImageResourceManager,
     readonly block = false,
     readonly chrome = false,
+    /** #635 显示尺寸（源文尾缀语义）；null = 按固有尺寸 */
+    readonly size: ImageSize | null = null,
+    /** #636 源文区间（拖动写回定位依据）；缺省表示不提供（不挂手柄） */
+    readonly range?: { from: number; to: number },
   ) {
     super()
   }
 
   eq(other: LiveImageWidget): boolean {
     return (
-      other.src === this.src && other.alt === this.alt && other.block === this.block && other.chrome === this.chrome
+      other.src === this.src &&
+      other.alt === this.alt &&
+      other.block === this.block &&
+      other.chrome === this.chrome &&
+      sameImageSize(other.size, this.size) &&
+      other.range?.from === this.range?.from &&
+      other.range?.to === this.range?.to
     )
   }
 
@@ -245,6 +287,12 @@ export class LiveImageWidget extends WidgetType {
     span.dataset['vsidianImgState'] = 'loading'
     span.classList.add(IMAGE_CLASS_NAMES.state('loading'))
     span.setAttribute('data-tooltip', this.alt)
+    // #636 源文区间（拖动手柄据此定位并写回尺寸尾缀；缺省不写——无区间的
+    // 槽位不挂手柄，属安全降级而非缺陷）
+    if (this.range !== undefined) {
+      span.dataset['vsidianSrcFrom'] = String(this.range.from)
+      span.dataset['vsidianSrcTo'] = String(this.range.to)
+    }
 
     span.textContent = this.alt
     const images = this.images ?? (view !== undefined ? liveImagesOfView(view) : undefined)
@@ -256,6 +304,21 @@ export class LiveImageWidget extends WidgetType {
       // 禁原生拖拽（与阅读侧 attach 通道同源决策）：ghost 缩略图 + 复制
       // 徽标语义错乱，且吞交互输入流
       image.draggable = false
+      // #635 尺寸属性必须写在 render 回调内：invalidateAll 会重走本回调，
+      // 写在外层会随重取丢失。像素走属性（加载前即可预留空间），百分比
+      // 走内联 style（HTML width 属性不接受百分比）
+      if (this.size !== null) {
+        const sizeAttrs = imageSizeAttrs(this.size)
+        if (sizeAttrs.width !== null) {
+          image.setAttribute('width', sizeAttrs.width)
+        }
+        if (sizeAttrs.height !== null) {
+          image.setAttribute('height', sizeAttrs.height)
+        }
+        if (sizeAttrs.styleWidth !== null) {
+          image.style.width = sizeAttrs.styleWidth
+        }
+      }
       slot.appendChild(image)
       if (this.chrome) {
         slot.appendChild(
@@ -284,6 +347,32 @@ export class LiveImageWidget extends WidgetType {
       if (this.block && this.chrome) {
         markImageFrameSized(slot, image)
       }
+      // #636 拖动手柄：沿 chrome 的排除矩阵（链接内嵌与表格网格内已由
+      // chrome=false 表达，规格 §5.1）——那里点击语义归链接跳转与单元格
+      // 编辑，拖动会与之冲突。手柄挂在 span 上而非 img：invalidate 重取会
+      // 换掉 img，挂 span 则随 widget 生命周期只装一次。源文读写与写回
+      // 由 imageResize 的默认路径承担（经所属视图的 updateListener 汇总为
+      // 单笔 edit.request，宿主撤销一步）。
+      // toast 端口在**拖动开始时**才解析：toDOM 期 span 尚未插入文档，
+      // findFromDOM 取不到视图（toodom 的 view 参数在 render 回调的闭包里
+      // 也不代表已挂载）。此时延迟到真实交互，span 必在树内。
+      if (this.chrome) {
+        attachResizeHandleToLiveImage(span, {
+          toast: {
+            show: (text, severity, key) => {
+              const owner = EditorView.findFromDOM(span)
+              if (owner) {
+                liveResizePortOfView(owner)?.toast?.(text, severity ?? 'neutral', key)
+              }
+            },
+          },
+          containerWidth: () => {
+            const owner = EditorView.findFromDOM(span)
+            return owner ? (liveResizePortOfView(owner)?.containerWidth?.() ?? Number.POSITIVE_INFINITY)
+              : Number.POSITIVE_INFINITY
+          },
+        })
+      }
       return image
     })
     return span
@@ -297,6 +386,10 @@ export class LiveImageWidget extends WidgetType {
     return this.chrome
   }
 }
+
+/** #636 按原形态把新 inner 重新包裹回源文——由 imageResize 模块的
+ *  commitLiveFrameSize 统一承担（形态识别与包裹还原是同一件事，不在此
+ *  复制第二份）。 */
 
 /** 名为 name 的直接子节点 */
 function childNamed(node: SyntaxNode, name: string): SyntaxNode | null {
@@ -510,13 +603,18 @@ export function buildLinkImageDecorationRanges(
           // 跳转语义）与表格网格内图片（点击落单元格源码）不挂 chrome、
           // 不吞点击（规格明确排除，行为现状钉住）
           const chrome = !hasAncestorNamed(node, 'Link') && !hasAncestorNamed(node, 'Table')
+          // #635：直链形态的尺寸尾缀藏在标签原文里（markdown-it 无独立
+          // 尺寸字段，Live 侧同口径从 alt 串剥离）
+          const split = splitAliasAndSize(alt.split('|'))
           out.push(
             imageWidgetDeco(
               src,
-              alt,
+              split.alias ?? '',
               images,
               soloImageLine(doc, node.from, node.to),
               chrome,
+              split.size,
+              { from: node.from, to: node.to },
             ).range(node.from, node.to),
           )
           return
@@ -670,13 +768,16 @@ export function buildLooseLinkDecorationRanges(
             const alt = doc.sliceString(hit.labelFrom, hit.labelTo)
             // #212 宽松图片同机制：表格网格内不挂 chrome 不吞点击（宽松
             // 形态学守卫标签不含 []，不会出现在链接内）
+            const looseSplit = splitAliasAndSize(alt.split('|'))
             out.push(
               imageWidgetDeco(
                 hit.dest,
-                alt,
+                looseSplit.alias ?? '',
                 images,
                 soloImageLine(doc, hit.from, hit.to),
                 !insideTableRange(tree, hit.from, hit.to),
+                looseSplit.size,
+                { from: hit.from, to: hit.to },
               ).range(hit.from, hit.to),
             )
             continue
@@ -926,6 +1027,8 @@ export function createLinkInteractions(opts: {
   images: ImageResourceManager
   /** #11 双链激活回调（缺省不启用双链点击判定） */
   postActivateWikilink?: (target: string, srcStart: number, srcEnd: number) => void
+  /** #636 拖动手柄的轻提示通道（缺省无 Shift 提示，手柄其余功能不受影响） */
+  toast?: (text: string, severity: 'neutral' | 'warning' | 'error', key?: string) => void
 }): Extension {
   const onMouseDown = makeLinkMouseDownHandler(opts.postActivate, opts.postActivateWikilink)
   let pendingClick: { target: 'wikilink' | 'link'; pos: number; x: number; y: number } | null = null
@@ -935,6 +1038,17 @@ export function createLinkInteractions(opts: {
       constructor(view: EditorView) {
         // #336：视图 → 图片管理器登记（图片嵌入 widget 的惰性解析来源）
         liveImagesByView.set(view, opts.images)
+        // #636：拖动端口登记（Shift 提示 + 拖动最大宽的正文列宽基准）
+        setLiveImageResizePort(view, {
+          ...(opts.toast ? { toast: opts.toast } : {}),
+          containerWidth: () => {
+            const content = view.contentDOM
+            const style = getComputedStyle(content)
+            return content.clientWidth
+              - Number.parseFloat(style.paddingLeft || '0')
+              - Number.parseFloat(style.paddingRight || '0')
+          },
+        })
         this.decorations = this.build(view)
       }
       destroy(): void {

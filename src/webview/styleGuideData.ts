@@ -1643,6 +1643,29 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "live SVG 塌缩修复（2026-09-29）"
   },
   {
+    "id": "image-resize-handle",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-image-resize-handle / .vsidian-image-resize-glow / .vsidian-image-resize-readout（相框右下角拖动手柄族，#636）",
+    "purpose": "图片相框右下角拖动手柄（#636）：拖动即改图片显示尺寸并把结果写回源文尺寸后缀。手柄是硬性次要编辑入口——只在 Live 视图的非排除图片上出现；链接内与表格格内沿既有排除矩阵不出现（那里的点击语义归链接跳转与单元格编辑），阅读视图不出现（只读契约）。视觉 12×12、热区 20×20（沿用侧栏拖宽句柄的热区大于视觉做法），光标 nwse-resize，贴住相框右下角内侧并与圆角同心。glow 为沿圆角轮廓的描边发光（outline/box-shadow 组合，不占布局），中心在右下角、沿 45° 向左上渐淡，延伸距离 = max(24px, min(相框宽, 相框高) × 10%)——取 max 不取和（避免大图边界难预期）、基数用短边（宽图不会沿底边铺出一条边光）。readout 为拖动中的实时尺寸读数（形如 `320 × 180`），松手即消失。",
+    "views": [
+      "live"
+    ],
+    "states": "悬停相框时显现（与既有 .vsidian-graphic-chrome 同一套 frame:hover 模型，不常驻——常驻会让每张图右下角都挂装饰）。拖动中：相框挂 .vsidian-image-resizing（整个外框 1px 实线异色描边，取 --vscode-focusBorder），同时 glow 完全消失——两者互斥，避免一处出现两团亮区。拖动结束或 Esc 中止后两者一并撤下。手柄在图片 error / loading 态不呈现（无尺寸语义可调）；尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。",
+    "dom": "手柄元素是相框（live 侧 span.vsidian-image 兼任 vsidian-graphic-frame）的子节点，与既有 .vsidian-graphic-chrome 按钮组同级；glow 与 readout 同为其子节点（glow 承担沿圆角轮廓的发光、readout 承担拖动读数）。",
+    "example": "/* 拖动中：相框异色描边，光晕消失（互斥） */\n.vsidian-image.vsidian-image-resizing {\n  outline: 1px solid var(--vscode-focusBorder);\n  outline-offset: 2px;\n}\n.vsidian-image.vsidian-image-resizing .vsidian-image-resize-glow {\n  opacity: 0;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（Obsidian 不给图片拖动改尺寸的手柄；其尺寸靠源码尾缀手写）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 imageResize：悬停显现与不常驻、等比与 Shift 双轴写回形态、一次拖动一笔 edit.request、Esc 不写文档、最小宽保底、光晕延伸距离与「描边 + 光晕消失」互斥态（计算样式断言）、链接内与表格格内无手柄、拖动开始 Shift 提示 toast",
+      "单元 imageResize：computeResizeTarget（等比/百分比/双轴保留/最小宽/最大宽钳制）、glowExtension（24 保底与短边 10%）、resizeHandleLayout 与 replaceSizeSuffix 纯逻辑"
+    ],
+    "introduced": "#636（2026-10-22）"
+  },
+  {
     "id": "live-wikilink",
     "domain": "content",
     "category": "link-image-wikilink",
@@ -6072,6 +6095,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Live inline widget span.vsidian-image.vsidian-image-block > img; reading span.vsidian-graphic-frame.vsidian-image.vsidian-image-block > img (both display: block). With sized stacked, the same node also carries .vsidian-image-sized (width: fit-content).",
     "obsidian": {
       "counterpart": "No direct counterpart (Obsidian has no public standalone-image layout class)"
+    }
+  },
+  "image-resize-handle": {
+    "purpose": "Drag handle at the bottom-right corner of the image frame (#636): dragging changes the displayed image size and writes the result back into the source size suffix. The handle is a deliberate secondary editing affordance — it appears only on non-excluded images in Live view; images inside links and table cells follow the existing exclusion matrix (click semantics there belong to link navigation and cell editing), and Reading view has no handle (read-only contract). Visual 12×12 with a 20×20 hit area (the same hit-area-larger-than-visual approach as the sidebar width handle), cursor nwse-resize, inset at the bottom-right corner and concentric with the frame corner radius. glow is a stroke glow along the rounded outline (outline/box-shadow combination, no layout cost), centered on the bottom-right corner and fading up-and-left at 45°; extension distance = max(24px, min(frame width, frame height) × 10%) — max, not sum (so large-image boundaries stay predictable), based on the short edge (a wide image never gets a full edge-length streak of light). readout is the live size readout during dragging (e.g. `320 × 180`), disappearing on release.",
+    "states": "Revealed while hovering the frame (the same frame:hover model as the existing .vsidian-graphic-chrome; never persistent — persistence would hang a decoration off every image corner). While dragging: the frame carries .vsidian-image-resizing (the whole outline takes a 1px solid contrast stroke, --vscode-focusBorder) and glow disappears entirely — the two are mutually exclusive so one corner never shows two bright regions. Both are removed when the drag ends or is aborted with Esc. The handle is absent in the error/loading image states (no size semantics to adjust); oversized hand-written values are still clamped by max-width:100%, and the drag-time visual clamp never rewrites the user value.",
+    "dom": "The handle element is a child of the frame (in live view the span.vsidian-image doubles as vsidian-graphic-frame), a sibling of the existing .vsidian-graphic-chrome group; glow and readout are its children (glow carries the corner-outline light, readout the drag-time numbers).",
+    "obsidian": {
+      "counterpart": "No direct counterpart (Obsidian gives no drag-to-resize handle for images; sizes are hand-written as source suffixes)"
     }
   },
   "live-wikilink": {
