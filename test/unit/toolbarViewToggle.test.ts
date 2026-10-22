@@ -49,13 +49,14 @@ function toolbarButtons(parent: HTMLElement): HTMLElement[] {
 }
 
 describe('工具栏双态视图切换按钮（#141）', () => {
-  it('DOM 序：齿轮、快速操作、刷新、双态切换、侧栏（刷新紧邻双态左侧）', () => {
+  it('DOM 序：齿轮、快速操作、刷新、PDF 导出、双态切换、侧栏（刷新紧邻导出左侧）', () => {
     const { c, parent } = setup()
     const buttons = toolbarButtons(parent).map((b) => b.className)
     expect(buttons).toEqual([
       'vsidian-settings-toggle',
       'vsidian-quick-toggle',
       'vsidian-refresh-toggle',
+      'vsidian-pdf-export-toggle',
       'vsidian-view-toggle',
       'vsidian-sidebar-toggle',
     ])
@@ -167,6 +168,85 @@ describe('工具栏双态视图切换按钮（#141）', () => {
     const before = sent.length
     parent.querySelector<HTMLButtonElement>('.vsidian-view-toggle')!.click()
     expect(sent.slice(before)).toEqual([{ kind: 'view.switch.request', target: 'reading' }])
+    c.dispose()
+    parent.remove()
+  })
+})
+
+// PDF 导出下拉菜单：四个入口逐项发 pdfExport.open（与命令面板四个命令同一
+// 宿主执行体——菜单只做入口分派，校验语义不在 webview 侧复制）
+describe('工具栏 PDF 导出下拉菜单', () => {
+  it('默认收起；点击按钮展开、四个菜单项按固定顺序可见', () => {
+    const { c, parent } = setup()
+    const menu = parent.querySelector<HTMLElement>('.vsidian-pdf-export-menu')!
+    expect(menu.hidden, '默认应收起').toBe(true)
+    parent.querySelector<HTMLButtonElement>('.vsidian-pdf-export-toggle')!.click()
+    expect(menu.hidden, '点击后应展开').toBe(false)
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('.vsidian-pdf-export-menu-item')]
+    expect(items.map((el) => el.dataset['exportMode'])).toEqual([
+      'currentDocument', 'selection', 'batch', 'merge',
+    ])
+    // 真实 button + role=menuitem（键盘可达，不是 div 伪装）
+    for (const item of items) {
+      expect(item.tagName).toBe('BUTTON')
+      expect(item.getAttribute('role')).toBe('menuitem')
+    }
+    c.dispose()
+    parent.remove()
+  })
+
+  it('点击菜单项发 pdfExport.open 对应 mode 并收起菜单', () => {
+    const { c, parent, sent } = setup()
+    const btn = parent.querySelector<HTMLButtonElement>('.vsidian-pdf-export-toggle')!
+    const menu = parent.querySelector<HTMLElement>('.vsidian-pdf-export-menu')!
+    for (const mode of ['currentDocument', 'selection', 'batch', 'merge'] as const) {
+      btn.click()
+      expect(menu.hidden).toBe(false)
+      const before = sent.length
+      menu.querySelector<HTMLButtonElement>(`[data-export-mode="${mode}"]`)!.click()
+      expect(sent.slice(before)).toEqual([{ kind: 'pdfExport.open', mode }])
+      expect(menu.hidden, `${mode} 点击后应收起`).toBe(true)
+    }
+    c.dispose()
+    parent.remove()
+  })
+
+  it('按钮 aria-expanded 随开合翻转；Esc 收起并回焦按钮', () => {
+    const { c, parent } = setup()
+    const btn = parent.querySelector<HTMLButtonElement>('.vsidian-pdf-export-toggle')!
+    const menu = parent.querySelector<HTMLElement>('.vsidian-pdf-export-menu')!
+    expect(btn.getAttribute('aria-expanded')).toBe('false')
+    btn.click()
+    expect(btn.getAttribute('aria-expanded')).toBe('true')
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(menu.hidden).toBe(true)
+    expect(btn.getAttribute('aria-expanded')).toBe('false')
+    c.dispose()
+    parent.remove()
+  })
+
+  it('再次点击按钮收起菜单（不重复发消息）', () => {
+    const { c, parent, sent } = setup()
+    const btn = parent.querySelector<HTMLButtonElement>('.vsidian-pdf-export-toggle')!
+    const menu = parent.querySelector<HTMLElement>('.vsidian-pdf-export-menu')!
+    btn.click()
+    const before = sent.length
+    btn.click()
+    expect(menu.hidden).toBe(true)
+    expect(sent.slice(before)).toEqual([])
+    c.dispose()
+    parent.remove()
+  })
+
+  it('语言切换后菜单项文案随语言包刷新', () => {
+    const { c, parent } = setup()
+    const first = parent.querySelector<HTMLButtonElement>('[data-export-mode="currentDocument"]')!.textContent
+    installLocale('en', en)
+    // localeDom 按 isConnected 刷存活项——菜单项仍在树内，换包即重算
+    const after = parent.querySelector<HTMLButtonElement>('[data-export-mode="currentDocument"]')!.textContent
+    expect(after).not.toBe(first)
+    expect(after).toBe('Export current document')
+    installLocale('zh-cn', zhCn)
     c.dispose()
     parent.remove()
   })

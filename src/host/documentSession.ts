@@ -32,6 +32,7 @@ import {
   type ImageExportFailReason,
   type ImageExportPayload,
   type ImagePastePayload,
+  type PdfExportEntryMode,
   type SerChange,
   type SettingsPayload,
   type WebviewToHost,
@@ -181,6 +182,10 @@ export interface PanelPort {
   /** #33 打开 Vsidian 设置页（vscode 层注入：createWebviewPanel；设置页
    *  不依赖文档会话，与 link.activate 同为面板级 UI 意图端口） */
   openSettings?(): void
+  /** 工具栏导出按钮的菜单入口（vscode 层注入：与四个导出命令同一执行体
+   *  ——按 mode 校验活动文档/选区后打开对应模态模式）。面板级 UI 意图，
+   *  不依赖会话状态 */
+  openPdfExport?(mode: PdfExportEntryMode): void
   /** #33 设置快照拉取（vscode 层注入：SettingsService.getSnapshot；面板
    *  init 后的 settings.get 以 settings.snapshot 响应） */
   requestSettings?(): SettingsPayload
@@ -831,6 +836,13 @@ export class DocumentSession {
         // #33 打开设置页：不依赖文档状态（无文档语义在宿主层闭合），
         // 暂停态同样放行（与 link.activate 同口径的只读交互）
         panel.port.openSettings?.()
+        return Promise.resolve()
+      case 'pdfExport.open':
+        // 工具栏导出按钮的下拉菜单：四个 mode 汇入 provider 注入的同一
+        // 执行体（与命令面板四个命令共用实现——文档/选区校验与模态打开
+        // 不在会话层重复）。只读交互（导出读固定输入快照，不写源文），
+        // 暂停态同样放行，与其他面板级 UI 意图同口径
+        panel.port.openPdfExport?.(message.mode)
         return Promise.resolve()
       case 'settings.get':
         // #33 设置快照拉取：响应权威快照（webview 不持久化设置）

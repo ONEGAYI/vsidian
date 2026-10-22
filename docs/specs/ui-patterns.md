@@ -205,6 +205,22 @@ div.vsidian-pdfexport
 - 升格/缩回：单文档「添加文件/目录」在用户真正选中文件后才转为批量清单（当前文档成首条并保持选中），删到只剩该条时缩回单文档模式；仅由单文档升格来的清单可缩回（批量命令打开的清单保持清单语义）。
 - 绘制层断言：浏览器套件 `pdfExportPreview` 断言清单在侧栏且只有一行当前文档、选中态描边为实线、主区不含清单且工具栏无 `select`、点击条目上行带参数的 `preview.select`，以及 6 条目时清单容器高 206px / 行高 66px / 内部可滚 / 长路径不横向溢出；集成 T07 core 用例断言 `exportListVisible` / `exportListInSide` / `selectedItemRel` / `selectedItemOutlines` 与升格、缩回两条路径，T07 敏感真浏览器用例断言快速连点（先 A 后 B）最终呈现最后点击那一条。
 
+**编辑器工具栏导出入口（验收反馈，2026-10-22）**：编辑器顶栏右端组、刷新按钮与双态切换之间，新增「导出为 PDF」图标按钮（26×24 顶栏图标档，与刷新/双态/侧栏同档），点击展开四个入口的下拉菜单：
+
+```text
+div.vsidian-toolbar（position:relative 作菜单定位基准）
+├─ …左组（设置、快速操作、附加组件槽）
+└─ 右端组（刷新 → 导出 → 双态切换 → 侧栏）
+     └─ div.vsidian-pdf-export-menu[role=menu]（按钮右缘对齐、按钮下方展开）
+          └─ button.vsidian-pdf-export-menu-item[role=menuitem] × 4
+             （导出当前文档 / 导出当前选区 / 批量导出 / 合并为一份）
+```
+
+- 菜单形态沿既有**菜单族**档位：`--vscode-menu-*` 变量族（回落 editorWidget）、圆角 5px、padding 3px、阴影 `0 3px 10px var(--vscode-widget-shadow)`、z-index 5——与快速操作标题菜单同档，不新增档位。
+- 菜单项是真实 `button` + `role=menuitem`，键盘 ArrowUp/Down 循环、Home/End 跳端、Esc 收起并回焦按钮、点外关闭；按钮 `aria-haspopup=menu` + `aria-expanded` 随开合翻转。
+- 四个入口与命令面板四个命令**共用同一宿主执行体**：webview 只发 `pdfExport.open`（mode 分派），文档/选区校验与模态打开全在宿主，不复制第二套校验。
+- 断言分层：单测钉住菜单 DOM 序、四个 mode 的出站消息、开合/Esc/点外/语言刷新；样式契约由本档位与既有菜单族条目共同覆盖。
+
 **批量模式分区（T04/#624，2026-10-21；2026-10-22 统一页复核后清单移入侧栏）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载清单与参数——全部复用既有档位，零新档位：
 
 ```text

@@ -98,9 +98,12 @@ export const pdfExportT02Cases: Array<[string, () => Promise<void>]> = [
       const info = await modalState()
       return info.docName === 'pdf-export-t02.md' && info.capturedVersion >= 1 && info.embedStats !== undefined ? info : undefined
     })
-    // 超集预取观测：1 个 markdown 嵌入 + 1 个媒体嵌入身份
+    // 超集预取观测：1 个 markdown 嵌入 + 2 个身份条目（音视频 + PDF）。
+    // PDF 与媒体同为身份条目——两者都不得进入文本解码通道（二进制经
+    // openTextDocument 会失败并误报 read-failed），故同时钉住失败数为 0
     assert.equal(captured.embedStats?.embeds, 1, '应预取 1 个 markdown 嵌入目标')
-    assert.equal(captured.embedStats?.mediaEmbeds, 1, '应登记 1 个媒体嵌入身份')
+    assert.equal(captured.embedStats?.mediaEmbeds, 2, '应登记 2 个身份条目（音视频 + PDF）')
+    assert.equal(captured.embedStats?.failures, 0, '媒体与 PDF 嵌入不得计为读取失败')
 
     await vscode.commands.executeCommand('onegayi.vsidian._test.injectPdfExportModalMessage', {
       kind: 'pdfExportModal.run',

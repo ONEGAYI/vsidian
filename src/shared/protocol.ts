@@ -25,6 +25,15 @@ import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 import { isAddonDocNavLocate, isAddonDocNavResult, type AddonDocNavLocate, type AddonDocNavResult } from './addonNavApi'
 import type { PdfExportOptions } from './pdfExportOptions'
 
+/** 工具栏导出菜单的四个入口：与命令面板四个 PDF 命令一一对应（同一实现，
+ *  不新增导出语义）。currentDocument/selection 需活动文档与有效选区，
+ *  batch/merge 不依赖活动文档 */
+export const PDF_EXPORT_ENTRY_MODES = ['currentDocument', 'selection', 'batch', 'merge'] as const
+export type PdfExportEntryMode = (typeof PDF_EXPORT_ENTRY_MODES)[number]
+export function isPdfExportEntryMode(value: unknown): value is PdfExportEntryMode {
+  return typeof value === 'string' && (PDF_EXPORT_ENTRY_MODES as readonly string[]).includes(value)
+}
+
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
 export type { FindOptions }
@@ -1955,6 +1964,12 @@ export type WebviewToHost =
   /** T01（#621）PDF 导出模态状态拉取（装载/重载 ready 回填）：宿主以
    *  pdfExportModal.state 应答（阶段、默认参数与浏览器路径设置回显） */
   | { kind: 'pdfExportModal.get' }
+  /** 编辑器工具栏「导出为 PDF」按钮的下拉菜单入口：按 mode 打开同一导出
+   *  模态的对应模式（currentDocument/selection 复用命令入口的文档与选区
+   *  校验——无活动文档、无有效选区、阅读模式等分态在宿主侧给可见提示并
+   *  不打开模态；batch/merge 不依赖活动文档）。与命令面板四个命令同一实现，
+   *  菜单只是多入口之一（不新增第二套导出语义） */
+  | { kind: 'pdfExport.open'; mode: PdfExportEntryMode }
   /** T01（#621）发起导出：params 为模态当前参数（宿主 normalize 后使用） */
   | { kind: 'pdfExportModal.run'; params: unknown }
   /** T01（#621）取消进行中的导出任务 */
@@ -4556,6 +4571,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'pdfExportModal.get':
       return true
+    case 'pdfExport.open':
+      return isPdfExportEntryMode(v.mode)
     case 'pdfExportModal.cancel':
       return true
     case 'pdfExportModal.resume':

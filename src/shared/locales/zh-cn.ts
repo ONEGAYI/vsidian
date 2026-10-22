@@ -623,6 +623,13 @@ export const zhCn: Record<MessageKey, string> = {
   'toolbar.switchToLive': '切换到实时预览',
   /** #208 工具栏刷新按钮（清嵌入资源缓存重渲染：图片/图表取新解析） */
   'toolbar.refresh': '刷新嵌入资源',
+  /** PDF 导出工具栏按钮与菜单（四个入口共用同一模态） */
+  'toolbar.exportPdf': '导出为 PDF',
+  'toolbar.exportPdfMenu': '选择 PDF 导出方式',
+  'pdfExport.menu.currentDocument': '导出当前文档',
+  'pdfExport.menu.selection': '导出当前选区',
+  'pdfExport.menu.batch': '批量导出 Markdown',
+  'pdfExport.menu.merge': '合并多篇为一份 PDF',
   'sidebar.resize': '拖拽调整侧栏宽度',
 
   'find.placeholder': '查找',

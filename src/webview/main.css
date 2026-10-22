@@ -549,8 +549,10 @@ body.vscode-light #app {
 }
 
 /* 主编辑区顶栏（#53 图标化）：左端齿轮设置入口 + 右端侧栏切换按钮，
-   高度与侧栏顶栏共用同一变量（对齐） */
+   高度与侧栏顶栏共用同一变量（对齐）。position:relative 作 PDF 导出下拉
+   菜单的定位基准（菜单是工具栏的绝对定位子元素） */
 #app .vsidian-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -768,6 +770,36 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
    再拉出空隙。收起/展开态随主编辑区右边界移动由 flex 布局自然承接 */
 .vsidian-toolbar .vsidian-refresh-toggle {
   margin-left: auto;
+}
+
+/* PDF 导出按钮与下拉菜单：按钮沿用顶栏 26×24 图标档，菜单形态沿快速操作
+   标题菜单（menu 变量族、圆角 5px、padding 3px、阴影 §1.3、z-index 5）。
+   菜单贴着按钮右缘展开（工具栏右端组靠右，左对齐会溢出主编辑区）。 */
+.vsidian-toolbar .vsidian-pdf-export-menu {
+  position: absolute;
+  z-index: 5;
+  min-width: 176px;
+  padding: 3px;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border));
+  border-radius: 5px;
+  background: var(--vscode-menu-background, var(--vscode-editor-background));
+  color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
+  box-shadow: 0 3px 10px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
+  display: flex;
+  flex-direction: column;
+}
+
+.vsidian-toolbar .vsidian-pdf-export-menu[hidden] {
+  display: none;
+}
+
+.vsidian-toolbar .vsidian-pdf-export-menu-item {
+  width: 100%;
+  height: auto;
+  justify-content: flex-start;
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
 }
 
 /* #360 T11 附加组件挂载点（平台容器与面板 chrome 样式归平台；组件按钮

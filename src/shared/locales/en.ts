@@ -656,6 +656,13 @@ export const en = {
   'toolbar.switchToLive': 'Switch to live preview',
   /** #208 toolbar refresh button (drop embedded-resource caches and re-render) */
   'toolbar.refresh': 'Refresh embedded resources',
+  /** PDF export toolbar button + menu (four entry points share one modal) */
+  'toolbar.exportPdf': 'Export to PDF',
+  'toolbar.exportPdfMenu': 'Choose the PDF export mode',
+  'pdfExport.menu.currentDocument': 'Export current document',
+  'pdfExport.menu.selection': 'Export current selection',
+  'pdfExport.menu.batch': 'Batch export Markdown files',
+  'pdfExport.menu.merge': 'Merge Markdown files into one PDF',
   'sidebar.resize': 'Drag to resize sidebar',
 
   /** 查找控件 */

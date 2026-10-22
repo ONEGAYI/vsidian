@@ -509,6 +509,10 @@ const PDF_EXPORT_T02_DOC = (() => {
     '',
     '![[pdf-export-t02-clip.mp4]]',
     '',
+    // PDF 嵌入目标：导出页按身份降级为说明 + 链接，不得误报读取失败
+    // （PDF 目标不进文本解码通道——该分派修复的集成钉子）
+    '![[pdf-export-t02-target.pdf]]',
+    '',
     '![本地图](assets/pdf-t02-img.png)',
     '',
     '![缺失图](assets/pdf-t02-missing.png)',
@@ -1175,6 +1179,8 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
   writeFileSync(path.join(wsDir, 'pdf-export-t05.md'), PDF_EXPORT_T05_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'pdf-export-t05-noheadings.md'), PDF_EXPORT_T05_NOHEADINGS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'pdf-export-t02-clip.mp4'), Buffer.from('00 00 00 18 mp4-placeholder'), 'utf8')
+  // PDF 嵌入目标：只需存在性（导出页不 fetch 源 PDF），最小合法 PDF 头即可
+  writeFileSync(path.join(wsDir, 'pdf-export-t02-target.pdf'), Buffer.from('%PDF-1.4\n%%EOF\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
   writeFileSync(path.join(wsDir, 'assets', 'pdf-t02-img.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // T03（#623）选区导出样本 + 选区内相对图片（资源以原文档身份解析断言）

@@ -72,6 +72,7 @@ import {
   type HoverPreviewRequestPayload,
   type ImageExportPayload,
   type ImagePastePayload,
+  type PdfExportEntryMode,
   type SerChange,
   type TableEditOp,
   type WebviewToHost,
@@ -534,6 +535,11 @@ export function createTextEditorProvider(
   let lastClosedInput:
     | { docUri: string; webviewText?: string; fragments: string[]; fromRefPort?: boolean }
     | undefined
+
+  /** PDF 导出入口执行体（四个能入口共用）：定义在文件后段（依赖
+   *  pdfExportModal 与 provider 自身），面板端口注入早于它的初始化——注入
+   *  时只捕获该 let 的读取，用户点击发生在装配完成后，取值已就绪 */
+  let openPdfExportEntry: ((mode: PdfExportEntryMode) => Promise<boolean>) | undefined
 
   // ---- P2-04（#281）目标编辑端口：嵌入内部 Live 与 B 会话的绑定簿记 ----
   // provider 持注册表；B 会话接入复用 openEntry（B 打开为 custom editor 时
@@ -2952,11 +2958,25 @@ export function createTextEditorProvider(
    *  超时清空——面板消息处理器顶部拦截 pdfExport.styleSnapshot.report） */
   const pendingPdfStyleProbes = new Map<string, (snapshot: PdfExportStyleSnapshot) => void>()
 
-  /** 嵌入目标读取端口（readRefContentTarget 窄化投影——解析/范围规则与
-   *  悬停预览同源；web 目标不注入元信息抓取（unsupported 分态，正文保留
-   *  占位引用行）；媒体扩展经目标解析补充分派为身份条目） */
+  /** 嵌入目标读取端口（readRefContentTarget 窄化投影——解析规则与悬停
+   *  预览同源）。与悬停路径的端口面差异（本通道只产出**导出身份**，不装载
+   *  正文字节）：
+   *  - 不注入 readPdfFileResource：导出页只需 PDF 目标的存在性与路径（降级
+   *    说明 + 真实链接），不需要 asWebviewUri/字节数。注入 statFile 已足够
+   *    让 pdf 通道通过存在性校验——见下方 pdf 分派；
+   *  - web 目标不注入元信息抓取（unsupported 分态，正文保留占位引用行）。
+   *  媒体（音视频）与 PDF 一样是**身份条目**，绝不进 text 通道解码——二进制
+   *  文件经 openTextDocument 会失败并误报 read-failed。 */
   const readPdfEmbedTarget = async (document: vscode.TextDocument, inner: string): Promise<PdfExportEmbedReadOutcome> => {
     const access = hoverAccessContextOf(document)
+    const statOf = async (fsPath: string): Promise<{ size: number; isFile: boolean } | null> => {
+      try {
+        const info = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+        return { size: info.size, isFile: (info.type & vscode.FileType.File) !== 0 }
+      } catch {
+        return null
+      }
+    }
     const ports: HoverDocAccessPorts = {
       resolveVaultFile: (rawPath) =>
         resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath, undefined, shortnameLookupOf(document.uri.fsPath)),
@@ -2976,31 +2996,63 @@ export function createTextEditorProvider(
           return null
         }
       },
+      // PDF 通道只需存在性与字节数门（不带 asWebviewUri——导出页不 fetch
+      // 源 PDF，只按身份降级为说明 + 链接）。uri 留空占位（本消费者不读）
+      readPdfFileResource: async (fsPath) => {
+        const info = await statOf(fsPath)
+        if (info === null) {
+          return { kind: 'inaccessible' }
+        }
+        if (!info.isFile) {
+          return { kind: 'not-found' }
+        }
+        return { kind: 'ok', uri: '', version: 0, bytes: info.size }
+      },
+    }
+    // 媒体/PDF 身份先于文本通道分派：这两类都不是 Markdown 正文，不应进入
+    // openTextDocument 解码（二进制必然失败 → 误报 read-failed）。目标解析
+    // 仍走同一 resolveVaultFile 端口（路径/短名/根边界规则不另写一份）
+    const resolution = await ports.resolveVaultFile(inner)
+    if (resolution.kind === 'target') {
+      if (classifyLocalRefContentKind(resolution.fsPath) === 'pdf') {
+        const info = await statOf(resolution.fsPath)
+        if (info === null) {
+          return { ok: false, reason: 'read-failed' }
+        }
+        if (!info.isFile) {
+          return { ok: false, reason: 'not-found' }
+        }
+        return { ok: true, kind: 'pdf', fsPath: resolution.fsPath.replaceAll('\\', '/') }
+      }
+      if (isMediaFileExtension(resolution.fsPath)) {
+        const info = await statOf(resolution.fsPath)
+        if (info === null) {
+          return { ok: false, reason: 'read-failed' }
+        }
+        if (!info.isFile) {
+          return { ok: false, reason: 'not-found' }
+        }
+        return { ok: true, kind: 'media', fsPath: resolution.fsPath.replaceAll('\\', '/') }
+      }
+    } else if (resolution.kind !== 'no-workspace') {
+      // 解析失败按既有分态透传（not-found/escape/ambiguous/pending 都有
+      // 对应用户可见理由，不收敛成统一的 read-failed）
+      return {
+        ok: false,
+        reason: resolution.kind === 'pending' ? 'read-failed' : resolution.kind,
+      }
     }
     const outcome = await readRefContentTarget({ target: inner }, access, ports)
     if (outcome.ok) {
-      const content = outcome.content
-      if (content.kind === 'markdown') {
+      if (outcome.content.kind === 'markdown') {
         return {
           ok: true,
           kind: 'markdown',
           fsPath: outcome.fsPath.replaceAll('\\', '/'),
           docName: path.basename(outcome.fsPath),
-          text: content.lfText,
-          version: content.version,
+          text: outcome.content.lfText,
+          version: outcome.content.version,
         }
-      }
-      if (content.kind === 'pdf') {
-        return { ok: true, kind: 'pdf', fsPath: outcome.fsPath.replaceAll('\\', '/') }
-      }
-      if (content.kind === 'web') {
-        return { ok: true, kind: 'web', url: content.url }
-      }
-      // text 桶（代码/配置/音视频）：媒体扩展名在此分派（classifyLocalRefContentKind
-      // 的 text 桶不区分媒体——媒体身份只属打开通道，见 refContent 模块注释）；
-      // 图片（image 桶）走正文图片管线不升级
-      if (isMediaFileExtension(outcome.fsPath)) {
-        return { ok: true, kind: 'media', fsPath: outcome.fsPath.replaceAll('\\', '/') }
       }
       return { ok: false, reason: 'non-markdown' }
     }
@@ -3487,6 +3539,10 @@ export function createTextEditorProvider(
         // 面板级处理（与 link.activate 同模式；settings.set 只存在于
         // 设置页 webview 链路，不经文档会话）
         openSettings: () => settings?.page.open(),
+        // 工具栏导出按钮的菜单入口：四个 mode 与命令面板四个命令同一执行
+        // 体（openPdfExportEntry 在本文件后段定义并赋值到该 let——注入时
+        // 尚未初始化，调用发生在用户点击时，闭包取值已就绪）
+        openPdfExport: (mode) => { openPdfExportEntry?.(mode) },
         requestSettings: () => settings?.service.getSnapshot() ?? {},
         // #128 CSS 片段端口：init 后 snippets.get 的面板级应答（清单 URI
         // 逐面板构造）与片段链装载结果回报（失败提示；只读交互）
@@ -5065,48 +5121,59 @@ export function createTextEditorProvider(
       },
     },
   )
-  context.subscriptions.push(
-    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.currentDocument', () => {
-      const source = provider.getActivePdfExportSource()
-      if (!source) {
-        void vscode.window.showWarningMessage(t('host.pdfExportNoActiveDocument'))
-        return false
-      }
+  // ---- PDF 导出入口单一执行体（命令面板四个命令与工具栏下拉菜单共用）：
+  //  文档/选区校验与模态打开只在这里做一次，两条入口不各自实现校验语义。
+  //  返回值 = 是否真的打开了模态（校验失败给可见提示并返回 false）。
+  openPdfExportEntry = async (mode: PdfExportEntryMode): Promise<boolean> => {
+    if (mode === 'batch') {
+      pdfExportModal.openBatch()
+      return true
+    }
+    if (mode === 'merge') {
+      pdfExportModal.openMerge()
+      return true
+    }
+    const source = provider.getActivePdfExportSource()
+    if (!source) {
+      void vscode.window.showWarningMessage(t('host.pdfExportNoActiveDocument'))
+      return false
+    }
+    if (mode === 'currentDocument') {
       pdfExportModal.open(source)
       return true
-    }),
-    // T03（#623）选区导出：读活动面板当前 CM6 多选区（严格切片不扩大，
-    // 模态捕获阶段合成多条目 payload——每片段独立渲染、资源以原文档身份
-    // 解析）。只读操作（选区读取与导出均不写文档、不改选区、不产生编辑
-    // 历史）；阅读模式无选区交互语义（隐藏 CM6 的陈旧选区不冒充）——入口
-    // 提示切实时预览；无有效选区不开模态（不误触发全文导出）
-    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.selection', async (): Promise<boolean> => {
-      const source = provider.getActivePdfExportSource()
-      if (!source) {
-        void vscode.window.showWarningMessage(t('host.pdfExportNoActiveDocument'))
-        return false
-      }
-      const entry = getEntry(source.uri)
-      // 活动面板优先（同文档分屏多面板时选区在用户正看的那块），退而取
-      // 可见面板/首个就绪面板
-      const byActivity =
-        [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.active)?.[0] ??
-        [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.visible)?.[0] ??
-        entry?.session.getInfo().panels.find((p) => p.ready)?.sessionId
-      const selection = byActivity !== undefined && entry !== undefined
-        ? await entry.session.requestSelection(byActivity)
-        : undefined
-      if (selection === undefined || selection.ranges.length === 0) {
-        void vscode.window.showWarningMessage(t('host.pdfExportSelectionEmpty'))
-        return false
-      }
-      if (selection.viewMode !== 'live') {
-        void vscode.window.showWarningMessage(t('host.pdfExportSelectionLiveOnly'))
-        return false
-      }
-      pdfExportModal.open(source, selection.ranges)
-      return true
-    }),
+    }
+    // 选区：读活动面板当前 CM6 多选区（严格切片不扩大，模态捕获阶段合成
+    // 多条目 payload——每片段独立渲染、资源以原文档身份解析）。只读操作
+    // （选区读取与导出均不写文档、不改选区、不产生编辑历史）；阅读模式无
+    // 选区交互语义（隐藏 CM6 的陈旧选区不冒充）——提示切实时预览；无有效
+    // 选区不开模态（不误触发全文导出）
+    const entry = getEntry(source.uri)
+    // 活动面板优先（同文档分屏多面板时选区在用户正看的那块），退而取
+    // 可见面板/首个就绪面板
+    const byActivity =
+      [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.active)?.[0] ??
+      [...(entry?.panels.entries() ?? [])].find(([, panel]) => panel.visible)?.[0] ??
+      entry?.session.getInfo().panels.find((p) => p.ready)?.sessionId
+    const selection = byActivity !== undefined && entry !== undefined
+      ? await entry.session.requestSelection(byActivity)
+      : undefined
+    if (selection === undefined || selection.ranges.length === 0) {
+      void vscode.window.showWarningMessage(t('host.pdfExportSelectionEmpty'))
+      return false
+    }
+    if (selection.viewMode !== 'live') {
+      void vscode.window.showWarningMessage(t('host.pdfExportSelectionLiveOnly'))
+      return false
+    }
+    pdfExportModal.open(source, selection.ranges)
+    return true
+  }
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.currentDocument',
+      () => openPdfExportEntry?.('currentDocument') ?? false),
+    // T03（#623）选区导出命令（校验与模态打开在共享执行体内）
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.selection',
+      () => openPdfExportEntry?.('selection') ?? false),
   )
 
   // ---- T04（#624）批量导出入口：打开同一模态的批量清单模式。批量不依赖
@@ -5114,10 +5181,8 @@ export function createTextEditorProvider(
   //  兜底），无工作区同样可用（showOpenDialog 起于本机默认位置）。命令
   //  双模式可用；只读操作（keybindings.md 评估记录） ----
   context.subscriptions.push(
-    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.batch', () => {
-      pdfExportModal.openBatch()
-      return true
-    }),
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.batch',
+      () => openPdfExportEntry?.('batch') ?? false),
   )
 
   // ---- T06（#626）合并导出入口：打开同一模态的合并清单模式（同一清单
@@ -5126,10 +5191,8 @@ export function createTextEditorProvider(
   //  固定输入快照，不写源文、不新增撤销、不触发保存；keybindings.md
   //  评估记录沿 T01/T04） ----
   context.subscriptions.push(
-    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.merge', () => {
-      pdfExportModal.openMerge()
-      return true
-    }),
+    vscode.commands.registerCommand('onegayi.vsidian.pdfExport.merge',
+      () => openPdfExportEntry?.('merge') ?? false),
   )
 
   // ---- 查找命令（#14）：活动 tab 为本扩展 custom editor 时向其面板发送
