@@ -57,22 +57,19 @@ const clipboardServer = createServer((_req, res) => {
 })
 await new Promise((resolve) => clipboardServer.listen(0, '127.0.0.1', resolve))
 const clipboardOrigin = `http://127.0.0.1:${clipboardServer.address().port}`
+// 复用页面与脚本；initDoc 每场景销毁并重建控制器，仍隔离设置、输入和选区。
+const page = await browser.newPage()
+const cdpSession = await page.context().newCDPSession(page)
+const errors = []
+page.on('pageerror', (error) => errors.push(error.message))
 
-/** 单场景执行器：打开页面、初始化文档、定位光标、执行步骤、断言终态 */
+/** 单场景执行器：重建控制器、初始化文档、定位光标、执行步骤、断言终态 */
 async function scenario(name, { doc, cursor, grantClipboard }, run) {
   total++
-  const page = await browser.newPage()
   if (grantClipboard) {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: clipboardOrigin })
-    await page.goto(clipboardOrigin)
-  } else {
-    await page.setContent('<div id="app"></div>')
   }
-  const errors = []
-  page.on('pageerror', (error) => errors.push(error.message))
   try {
-    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
-    await page.addScriptTag({ path: bundle })
     await page.evaluate((text) => window.initDoc(text), doc)
     // 先点击聚焦（光标会落到点击处），再经生产 view.locate 链路精确定位
     await page.click('.cm-content')
@@ -86,8 +83,6 @@ async function scenario(name, { doc, cursor, grantClipboard }, run) {
   } catch (error) {
     console.log(`[符号输入][FAIL] ${name}: ${error.message}`)
     throw error
-  } finally {
-    await page.close()
   }
 }
 
@@ -107,6 +102,20 @@ const nextPaint = (page) => page.evaluate(() =>
   new Promise((resolve) => requestAnimationFrame(() => resolve())))
 
 try {
+  await page.goto(clipboardOrigin)
+  await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await page.addScriptTag({ path: bundle })
+  await scenario('场景重建隔离设置与未确认输入（#552）', { doc: '', cursor: 0 }, async (page) => {
+    await page.evaluate(() => window.setSymbolAutocomplete(false))
+    await page.keyboard.type('x')
+    await page.waitForFunction(() => window.readHostMessages().some((message) => message.kind === 'edit.request'))
+    await page.evaluate(() => window.initDoc(''))
+    assert.equal(await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'edit.request').length),
+      0, '新场景不保留上一场景的未确认编辑')
+    await page.click('.cm-content')
+    await page.keyboard.type('(')
+    await check(page, '()', 1, '新场景恢复默认补全设置')
+  })
   // ---- 补全与光标居中（真实键盘；全角符号经 insertText 走真实 input 事件）----
   for (const [ch, pair] of [['(', '()'], ['[', '[]'], ['{', '{}']]) {
     await scenario(`英文括号补全 ${ch}`, { doc: '', cursor: 0 }, async (page) => {
@@ -179,14 +188,14 @@ try {
 
   // ---- 中文 composition：候选不干预、提交补全、完整对不补 ----
   await scenario('IME 候选期间不干预、提交单个起始符号补全', { doc: '', cursor: 0 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
     await check(page, '（', 1, '候选期无补全')
     await cdp.send('Input.insertText', { text: '（' })
     await check(page, '（）', 1, '提交补全')
   })
   await scenario('IME 提交完整符号对不重复补全', { doc: '', cursor: 0 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await cdp.send('Input.imeSetComposition', { text: '（）', selectionStart: 2, selectionEnd: 2 })
     await cdp.send('Input.insertText', { text: '（）' })
     await check(page, '（）', 2, '完整对不补')
@@ -200,7 +209,7 @@ try {
           window.setSymbolAutocomplete(on)
           window.setSymbolSelectionWrap(on)
         }, symbols)
-        const cdp = await page.context().newCDPSession(page)
+        const cdp = cdpSession
         await cdp.send('Input.imeSetComposition', { text: '。', selectionStart: 0, selectionEnd: 1 })
         assert.equal(await page.locator('.cm-content').innerText(), '`test`。', '组合期间反引号保持可见')
         await cdp.send('Input.insertText', { text: '。' })
@@ -251,7 +260,7 @@ try {
     await check(page, '[[]]', 2, '第二键照补（[[|]] 骨架）')
   })
   await scenario('IME 提交路径同口径：右邻词字符提交全角括号不补', { doc: 'word', cursor: 0 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
     await cdp.send('Input.insertText', { text: '（' })
     await check(page, '（word', 1, 'IME 提交不补')
@@ -288,7 +297,7 @@ try {
   })
   for (const route of ['keyboard', 'ime']) {
     await scenario(`包裹撤销后再次包裹：${route}`, { doc: 'hello text', cursor: 6 }, async (page) => {
-      const cdp = route === 'ime' ? await page.context().newCDPSession(page) : null
+      const cdp = route === 'ime' ? cdpSession : null
       const open = route === 'ime' ? '（' : '*'
       const close = route === 'ime' ? '）' : '*'
       await selectRight(page, 4)
@@ -365,7 +374,7 @@ try {
     await check(page, 'hello **', 8, '粘贴按普通替换语义')
   })
   await scenario('选中文字经 IME 提交单个起始符号：包裹重建并保持原文选中', { doc: 'hello text', cursor: 6 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await selectRight(page, 4)
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
     await cdp.send('Input.insertText', { text: '（' })
@@ -373,7 +382,7 @@ try {
     await checkRanges(page, 'hello （text）', [{ from: 7, to: 11 }], 'IME 提交包裹')
   })
   await scenario('IME 包裹后再次 IME 提交继续叠加（（text））', { doc: 'hello text', cursor: 6 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await selectRight(page, 4)
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
     await cdp.send('Input.insertText', { text: '（' })
@@ -382,7 +391,7 @@ try {
     await checkRanges(page, 'hello （（text））', [{ from: 8, to: 12 }], 'IME 连续叠加')
   })
   await scenario('跨段选区经 IME 提交：各段包裹且空行保留', { doc: '甲段\n\n乙段', cursor: 0 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await selectRight(page, 6)
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
     await cdp.send('Input.insertText', { text: '（' })
@@ -402,14 +411,14 @@ try {
     ], '跨段 IME 连续叠加')
   })
   await scenario('IME 提交弯引号“：得“text”', { doc: 'hello text', cursor: 6 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await selectRight(page, 4)
     await cdp.send('Input.imeSetComposition', { text: '“', selectionStart: 1, selectionEnd: 1 })
     await cdp.send('Input.insertText', { text: '“' })
     await checkRanges(page, 'hello “text”', [{ from: 7, to: 11 }], 'IME 弯引号对')
   })
   await scenario('IME 提交完整符号对（）不包裹不补全', { doc: 'hello text', cursor: 6 }, async (page) => {
-    const cdp = await page.context().newCDPSession(page)
+    const cdp = cdpSession
     await selectRight(page, 4)
     await cdp.send('Input.imeSetComposition', { text: '（）', selectionStart: 2, selectionEnd: 2 })
     await cdp.send('Input.insertText', { text: '（）' })
