@@ -26,8 +26,11 @@ export type PdfRemoteExec = (command: string, arg?: unknown) => PromiseLike<unkn
 export const PDF_EXECUTOR_EXTENSION_ID = 'onegayi.vsidian-pdf-executor'
 
 /** 协议版本（ping 返回；不匹配时远端按 executor-unreachable 收口——执行端
- *  旧版与主扩展新版间的形态漂移不冒充可用） */
-export const PDF_EXECUTOR_PROTOCOL_VERSION = 1
+ *  旧版与主扩展新版间的形态漂移不冒充可用）。
+ *  v2（#624 P2-003 复核）：writeFileAtomic 增 overwrite 标志 + 新增
+ *  listDirectory——批量自动更名要在本机侧枚举目标目录真实占用并做无覆盖
+ *  提交，不能靠固定编号候选猜。两包同版分发，旧执行端按缺失收口。 */
+export const PDF_EXECUTOR_PROTOCOL_VERSION = 2
 
 /** 命令族（全部在执行端注册；远端经 executeCommand 跨 ext host 调用） */
 export const PDF_EXECUTOR_COMMANDS = {
@@ -43,10 +46,13 @@ export const PDF_EXECUTOR_COMMANDS = {
   queryTask: 'vsidian.pdfExecutor.queryTask',
   /** 挂起资源供给（远端读取字节后回传；与 queryTask 配对） */
   provideResources: 'vsidian.pdfExecutor.provideResources',
-  /** 本机原子写盘（目录按需创建 + 临时文件 + rename 替换） */
+  /** 本机原子写盘（目录按需创建 + 临时文件 + rename；overwrite=false 时
+   *  排他落位，目标已存在抛 target-exists） */
   writeFileAtomic: 'vsidian.pdfExecutor.writeFileAtomic',
   /** 本机文件 stat 探测（批量目标目录冲突映射在本机侧解析） */
   statFiles: 'vsidian.pdfExecutor.statFiles',
+  /** 本机目录枚举（批量自动更名的真实占用面；目录不存在返回空） */
+  listDirectory: 'vsidian.pdfExecutor.listDirectory',
   /** 本机保存对话框（返回本机路径字符串；取消 = null） */
   showSaveDialog: 'vsidian.pdfExecutor.showSaveDialog',
   /** 本机目录选择对话框（批量目标目录；取消 = null） */
@@ -134,7 +140,10 @@ export interface PdfRemoteResourceItem {
 
 /** 分块写盘请求（V02 §3.1 单命令 8MB 实测安全——6MB base64 分块保守上限；
  *  执行端按 writeId 集齐 total 块后组装并原子落位，中途失败/超时自清理
- *  不残留半成品目标文件） */
+ *  不残留半成品目标文件）。
+ *  overwrite（v2）：缺省/true = 原子替换（用户显式选择覆盖，或保存对话框
+ *  已确认）；false = 无覆盖提交，目标已存在时执行端抛 target-exists，
+ *  调用方换下一编号候选重试。 */
 export interface PdfRemoteWriteFileRequest {
   /** 本次写的幂等键（远端 randomUUID） */
   writeId: string
@@ -142,6 +151,7 @@ export interface PdfRemoteWriteFileRequest {
   seq: number
   total: number
   base64: string
+  overwrite?: boolean
 }
 
 export interface PdfRemoteStatFilesRequest {
@@ -150,6 +160,16 @@ export interface PdfRemoteStatFilesRequest {
 
 export interface PdfRemoteStatFilesResult {
   entries: Array<{ path: string; exists: boolean; isFile: boolean }>
+}
+
+/** 目录枚举（批量自动更名的占用面——目录不存在返回空清单） */
+export interface PdfRemoteListDirectoryRequest {
+  dir: string
+}
+
+export interface PdfRemoteListDirectoryResult {
+  /** 条目名（不含路径分隔符；枚举失败/目录不存在为空数组） */
+  names: string[]
 }
 
 export interface PdfRemoteSaveDialogRequest {

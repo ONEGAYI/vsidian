@@ -160,6 +160,25 @@ div.vsidian-pdfexport               ← 两列 grid（1fr + 320px；≤720px 退
 - T07（#627）真实 PDF 预览落位主区（代次概念 state.generation 先行）；页眉页脚参数（T05）沿参数字段行追加。
 - 绘制层断言：集成用例「PDF 导出模态（#621 T01）」经 `_test.pdfExportModal.report` 探针断言控件可见性（offsetParent + 计算样式）——非 DOM 存在性。
 
+**预览舞台（验收修复轮，2026-10-22）**：T07 主区内部统一为「预览舞台」——滚动区、左下角缩放条与加载骨架共用同一持久定位容器（`--vsidian-pdfexport-print-width` 由视图按当前纸张/方向写入）：
+
+```text
+main.vsidian-pdfexport-preview（弹性列；max-width = 纸面宽 + 64px，右侧栏吸收剩余宽度）
+└─ 工具栏（刷新/过期徽章/提示/批量条目选择）
+└─ .vsidian-pdfexport-preview-stage（position:relative；空白/生成态加 --empty 修饰）
+     ├─ .vsidian-pdfexport-preview-scroll（持久滚动区，承载 PdfHoverView 页塔）
+     ├─ .vsidian-pdfexport-zoombar（absolute left/bottom 14px；浮层 8px 圆角 + widget-shadow）
+     │    − / 百分比 12px tabular-nums（点击复位 100%）/ +
+     └─ .vsidian-pdfexport-preview-skeleton（生成/首帧期覆盖层，pointer-events:none）
+          └─ .vsidian-pdfexport-skeleton-page（按纸面宽与纵横比成形，内含 9 个
+             .vsidian-skeleton-block——与开屏骨架同族灰块与扫光配方）
+```
+
+- 布局尺寸变化（纸张/方向切换）走 `max-width` / `flex-basis` 220ms 过渡；`prefers-reduced-motion` 下关闭。说明块 `margin-inline:auto` 真正居中（列向 flex + max-width 不贴左）。
+- 缩放条与 Ctrl+滚轮共用 `PdfHoverView` 缩放入口；百分比 = 相对打印纸面的达成值（100% = 纸面大小），受渲染上限钳制时如实停在上限。工具条按钮 6px 档、百分比 12px tabular-nums、无新增色彩档位。
+- 骨架复用 #292 开屏骨架的视觉配方与 `shared/skeletonTiming` 节拍常量（经 CSS 变量注入），不复制数值；仍是页面级模态内部形态，不改变编辑器骨架的公开契约条目。
+- 绘制层断言：浏览器套件 `pdfExportPreview`（生产模态入口 + 真实 pdfjs + deviceScaleFactor 2）断言说明块居中、页面宽不超过纸面宽且居中、画布后备 = CSS × DPR、缩放条位置与 Ctrl+滚轮/按钮/百分比复位、骨架 9 块与 1.5s 扫光；集成 T07 探针追加 `previewPrintWidth` / `previewZoomBar` / `previewFirstCanvasCssWidth` 断言。
+
 **批量模式分区（T04/#624，2026-10-21）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载添加入口与参数——全部复用既有档位，零新档位：
 
 ```text

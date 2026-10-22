@@ -68,9 +68,14 @@ const COMMON_PATHS: Record<DiscoveredBrowser['kind'], string[]> = {
 
 function findInPathEnv(deps: BrowserFindDeps, kind: DiscoveredBrowser['kind']): string | null {
   const exe = kind === 'chrome' ? 'chrome.exe' : 'msedge.exe'
-  for (const dir of (deps.pathEnv ?? '').split(path.delimiter)) {
+  // PATH 的分隔与拼接必须跟随**被扫描平台**（deps.platform），不能用宿主
+  // 进程的 path.delimiter/path.join：Windows 语义的 PATH 在 POSIX 测试机
+  // 上会被 ':' 切坏、被 '/' 拼错（CI Linux runner 实测）。本函数只在
+  // win32 分支被调用（discoverBrowsers 已在非 win32 提前返回），因此固定
+  // 用 Windows 语义。
+  for (const dir of (deps.pathEnv ?? '').split(';')) {
     if (!dir) continue
-    const candidate = path.join(dir, exe)
+    const candidate = path.win32.join(dir, exe)
     if (deps.existsSync(candidate)) return candidate
   }
   return null

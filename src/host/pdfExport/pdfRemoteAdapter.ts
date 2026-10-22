@@ -17,6 +17,7 @@ import { withTimeout } from './browserLauncher'
 import {
   PdfExportBrowserError,
   PdfExportRemoteChannelError,
+  PdfExportTargetExistsError,
   type BrowserExportSession,
 } from './pdfExportJob'
 import type { ResolveBrowserResult } from './browserFind'
@@ -125,10 +126,14 @@ export interface PdfRemoteAdapter {
   showSaveDialog(defaultFileName: string): Promise<string | undefined>
   /** 本机目录选择（undefined = 用户取消） */
   showOpenDialogDir(): Promise<string | undefined>
-  /** 本机原子写盘（分块传输 + 执行端组装备落位——目录按需创建 + 原子替换） */
-  writeFile(targetPath: string, bytes: Uint8Array): Promise<void>
+  /** 本机原子写盘（分块传输 + 执行端组装备落位——目录按需创建 + 原子替换）。
+   *  overwrite=false 为无覆盖提交：目标已存在时抛 PdfExportTargetExistsError
+   *  （批量白名单策略据此换下一编号候选）。 */
+  writeFile(targetPath: string, bytes: Uint8Array, overwrite?: boolean): Promise<void>
   /** 本机 stat 探测（批量目标目录冲突映射） */
   statFiles(paths: readonly string[]): Promise<Array<{ path: string; exists: boolean; isFile: boolean }>>
+  /** 本机目录条目名（批量自动更名的真实占用面；目录不存在返回空） */
+  listDirectory(dir: string): Promise<string[]>
 }
 
 export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAdapter {
@@ -319,7 +324,7 @@ export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAda
       const picked = await channelCall<string | null>(deps.exec, budgets, 'dialogTimeoutMs', PDF_EXECUTOR_COMMANDS.showOpenDialogDir, undefined, 'showOpenDialogDir')
       return typeof picked === 'string' && picked !== '' ? picked : undefined
     },
-    writeFile: async (targetPath: string, bytes: Uint8Array): Promise<void> => {
+    writeFile: async (targetPath: string, bytes: Uint8Array, overwrite = true): Promise<void> => {
       // 分块传输（V02 §3.1：单命令 8MB 实测安全——6MB base64 取保守上限）：
       // { writeId, seq, total, base64 } 逐块上行，执行端集齐后组装并原子
       // 落位（见执行端 writeFileAtomic 的分块面）。取消/断连时执行端按
@@ -328,14 +333,23 @@ export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAda
       const base64 = Buffer.from(bytes).toString('base64')
       const total = Math.max(1, Math.ceil(base64.length / WRITE_CHUNK_CHARS))
       for (let seq = 0; seq < total; seq++) {
-        await channelCall(
-          deps.exec,
-          budgets,
-          'writeTimeoutMs',
-          PDF_EXECUTOR_COMMANDS.writeFileAtomic,
-          { writeId, targetPath, seq, total, base64: base64.slice(seq * WRITE_CHUNK_CHARS, (seq + 1) * WRITE_CHUNK_CHARS) },
-          'writeFileAtomic',
-        )
+        try {
+          await channelCall(
+            deps.exec,
+            budgets,
+            'writeTimeoutMs',
+            PDF_EXECUTOR_COMMANDS.writeFileAtomic,
+            { writeId, targetPath, seq, total, base64: base64.slice(seq * WRITE_CHUNK_CHARS, (seq + 1) * WRITE_CHUNK_CHARS), overwrite },
+            'writeFileAtomic',
+          )
+        } catch (error) {
+          // 无覆盖提交撞上已存在目标：转成可重试的领域错误（执行端码
+          // target-exists 经 message 前缀传递；channelCall 包装后仍可解码）
+          if (!overwrite && decodePdfRemoteError(error)?.code === 'target-exists') {
+            throw new PdfExportTargetExistsError(targetPath)
+          }
+          throw error
+        }
       }
     },
     statFiles: async (paths: readonly string[]): Promise<Array<{ path: string; exists: boolean; isFile: boolean }>> => {
@@ -343,6 +357,12 @@ export function createPdfRemoteAdapter(deps: PdfRemoteAdapterDeps): PdfRemoteAda
         deps.exec, budgets, 'writeTimeoutMs', PDF_EXECUTOR_COMMANDS.statFiles, { paths: [...paths] }, 'statFiles',
       )
       return result.entries
+    },
+    listDirectory: async (dir: string): Promise<string[]> => {
+      const result = await channelCall<{ names: string[] }>(
+        deps.exec, budgets, 'writeTimeoutMs', PDF_EXECUTOR_COMMANDS.listDirectory, { dir }, 'listDirectory',
+      )
+      return Array.isArray(result?.names) ? result.names.filter((name): name is string => typeof name === 'string') : []
     },
   }
 }

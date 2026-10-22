@@ -171,6 +171,9 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
     assert.ok(String(paint['previewEmptyDescription'] ?? '').length > 0, '空态说明应可见（手动刷新语义）')
     assert.equal(paint['previewStale'], false, '初始无过期徽章')
     assert.equal(paint['previewStaleBadgeText'], '', '过期徽章不应渲染')
+    // 验收修复：预览列宽按 A4 纵向纸面宽派生；空态不显示缩放条
+    assert.equal(String(paint['previewPrintWidth'] ?? ''), '794px', '预览列宽应等于 A4 纵向纸面宽（794px）')
+    assert.equal(visible(paint['previewZoomBar']), false, '空态不应显示缩放条')
 
     await closeAll()
   }],
@@ -207,6 +210,14 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
     assert.ok(String(paintOf(first.info)['previewNoticeText'] ?? '').length > 0, '书签计数提示应在工具栏在场')
     assert.equal(paintOf(first.info)['previewStale'], false, '就绪预览与当前参数一致——无过期徽章')
     assert.equal(paintOf(first.info)['previewBlobUrlsAlive'], 1, '预览 Blob URL 存活计数应为 1（无泄漏）')
+    // 验收修复：页面宽不超过 A4 纵向纸面宽（794 CSS px，宽面板不再拉伸；
+    // 面板比纸面窄时随面板缩小），缩放条左下角可见且回显百分比
+    const firstPaint = paintOf(first.info)
+    const portraitWidth = Number(firstPaint['previewFirstCanvasCssWidth'] ?? 0)
+    assert.ok(portraitWidth > 0 && portraitWidth <= 794.5, `预览页面宽应不超过 A4 纸面宽（实际 ${portraitWidth}px）`)
+    assert.ok(visible(firstPaint['previewZoomBar']), '预览就绪后缩放条应可见')
+    assert.match(String(firstPaint['previewZoomValueText'] ?? ''), /^\d+%$/, '缩放条应回显百分比')
+    assert.ok((firstPaint['previewZoomButtons'] as unknown[]).every(visible), '缩放按钮应可见可用')
 
     // ---- 参数修改 → 过期可见；不自动生成（runs 不变、phase 仍 ready） ----
     await postToWebview({ kind: 'pdfExportModal._test.setParam', field: 'orientation', value: 'landscape' })
@@ -223,6 +234,9 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
     const second = await waitPreviewPainted()
     assert.ok(second.pdf.canvasWidth > second.pdf.canvasHeight,
       `横向预览画布应宽大于高（实际 ${second.pdf.canvasWidth}×${second.pdf.canvasHeight}）`)
+    // 横向纸面宽 11.69in × 96 ≈ 1122 CSS px——页面宽同样不超过纸面宽
+    const landscapeWidth = Number(paintOf(second.info)['previewFirstCanvasCssWidth'] ?? 0)
+    assert.ok(landscapeWidth > 0 && landscapeWidth <= 1122.5, `横向预览页面宽应不超过纸面宽（实际 ${landscapeWidth}px）`)
     assert.equal(paintOf(second.info)['previewStale'], false, '刷新完成后过期徽章消失（新配置生效）')
     assert.equal(paintOf(second.info)['previewBlobUrlsAlive'], 1, '连续刷新后旧 Blob URL 应回收（存活恒 1）')
     assert.equal(second.info.preview.runs, runsBefore + 2, '两轮刷新各只发起一次生成')

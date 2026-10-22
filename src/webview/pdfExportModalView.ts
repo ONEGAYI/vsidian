@@ -12,6 +12,7 @@ import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import {
   normalizePdfExportOptions,
+  orientedPageSize,
   PDF_EXPORT_OPTIONS_DEFAULTS,
   PDF_ORIENTATIONS,
   PDF_PAGE_NUMBER_POSITION_LABEL_KEYS,
@@ -22,9 +23,10 @@ import {
 } from '../shared/pdfExportOptions'
 import { pdfPreviewFingerprint, type PdfPreviewTarget } from '../shared/pdfExportPreview'
 import type { PdfBatchConflictStrategy, PdfBatchItem, PdfBatchMappingEntry, PdfBatchResultEntry } from '../shared/pdfExportBatch'
+import { SKELETON_SHIMMER_CYCLE_MS, SKELETON_SHIMMER_DELAY_MS } from '../shared/skeletonTiming'
 // T07（#627）预览：复用 #337 PDF 阅读视图（PdfHoverView——分页 canvas、
 // 有界挂载窗口、Blob worker 装配与共享文档存储），不另建阅读器
-import { PdfHoverView, type PdfRenderProbe } from './pdfRender'
+import { PDF_ZOOM_STEP, PdfHoverView, type PdfRenderProbe } from './pdfRender'
 
 interface PdfExportModalStateMessage {
   kind: 'pdfExportModal.state'
@@ -165,6 +167,17 @@ const CLASS = {
   previewStaleBadge: 'vsidian-pdfexport-preview-stale',
   previewNotice: 'vsidian-pdfexport-preview-notice',
   previewScroll: 'vsidian-pdfexport-preview-scroll',
+  /** 预览舞台（持久滚动区 + 左下角缩放条 + 加载骨架的共同定位基准） */
+  previewStage: 'vsidian-pdfexport-preview-stage',
+  /** 预览加载骨架（复用开屏骨架块的扫光配方，按纸面尺寸成形） */
+  previewSkeleton: 'vsidian-pdfexport-preview-skeleton',
+  skeletonPage: 'vsidian-pdfexport-skeleton-page',
+  /** 骨架块类名与开屏骨架同族（视觉配方与共享常量同源） */
+  skeletonBlock: 'vsidian-skeleton-block',
+  /** 左下角缩放控件（− / 百分比 / +） */
+  zoomBar: 'vsidian-pdfexport-zoombar',
+  zoomButton: 'vsidian-pdfexport-zoom-btn',
+  zoomValue: 'vsidian-pdfexport-zoom-value',
 } as const
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -255,6 +268,13 @@ export class PdfExportModalView {
   private previewArtifactGen = 0
   /** 存活 Blob URL 计数（释放配对观测——连续刷新后应收敛为 1） */
   private previewBlobUrlsAlive = 0
+  /** 预览舞台（跨 render 存活：滚动区 + 缩放条 + 骨架的共同容器） */
+  private previewStageEl: HTMLDivElement | null = null
+  /** 产物字节已到达、PdfHoverView 首帧尚未落定（骨架覆盖期） */
+  private previewLoading = false
+  private zoomOutEl: HTMLButtonElement | null = null
+  private zoomInEl: HTMLButtonElement | null = null
+  private zoomValueEl: HTMLButtonElement | null = null
 
   constructor(options: PdfExportModalViewOptions) {
     this.options = options
@@ -286,8 +306,118 @@ export class PdfExportModalView {
   private ensurePreviewScroll(): HTMLDivElement {
     if (this.previewScrollEl === null) {
       this.previewScrollEl = el('div', CLASS.previewScroll)
+      // Ctrl+滚轮缩放（用户验收要求）：只接管带 Ctrl 的滚轮——普通滚轮
+      // 仍走滚动；内容未就绪时零动作。non-passive 才能 preventDefault，
+      // 阻止 webview 级页面缩放。
+      this.previewScrollEl.addEventListener('wheel', (event) => {
+        if (!event.ctrlKey) return
+        const view = this.previewView
+        if (view === null || !view.contentReady) return
+        event.preventDefault()
+        const factor = event.deltaY < 0 ? PDF_ZOOM_STEP : 1 / PDF_ZOOM_STEP
+        if (view.zoomBy(factor)) this.updateZoomUi()
+      }, { passive: false })
     }
     return this.previewScrollEl
+  }
+
+  /** 预览舞台（持久）：滚动区 + 左下角缩放条 + 加载骨架的共同容器 */
+  private ensurePreviewStage(): HTMLDivElement {
+    if (this.previewStageEl === null) {
+      this.previewStageEl = el('div', CLASS.previewStage)
+      this.previewStageEl.appendChild(this.ensurePreviewScroll())
+      this.previewStageEl.appendChild(this.buildZoomBar())
+    }
+    return this.previewStageEl
+  }
+
+  /** 左下角缩放控件：− / 百分比（点击复位 100%） / + */
+  private buildZoomBar(): HTMLElement {
+    const bar = el('div', CLASS.zoomBar)
+    const out = el('button', CLASS.zoomButton, '−') as HTMLButtonElement
+    out.type = 'button'
+    out.setAttribute('aria-label', t('pdfExport.preview.zoomOut'))
+    out.setAttribute('data-tooltip', t('pdfExport.preview.zoomOut'))
+    out.addEventListener('click', () => this.applyPreviewZoom('out'))
+    const value = el('button', CLASS.zoomValue, '100%') as HTMLButtonElement
+    value.type = 'button'
+    value.setAttribute('aria-label', t('pdfExport.preview.zoomReset'))
+    value.setAttribute('data-tooltip', t('pdfExport.preview.zoomReset'))
+    value.addEventListener('click', () => this.applyPreviewZoom('reset'))
+    const inBtn = el('button', CLASS.zoomButton, '+') as HTMLButtonElement
+    inBtn.type = 'button'
+    inBtn.setAttribute('aria-label', t('pdfExport.preview.zoomIn'))
+    inBtn.setAttribute('data-tooltip', t('pdfExport.preview.zoomIn'))
+    inBtn.addEventListener('click', () => this.applyPreviewZoom('in'))
+    this.zoomOutEl = out
+    this.zoomInEl = inBtn
+    this.zoomValueEl = value
+    bar.appendChild(out)
+    bar.appendChild(value)
+    bar.appendChild(inBtn)
+    this.updateZoomUi()
+    return bar
+  }
+
+  /** 缩放动作（按钮/百分比复位）——成功后同步百分比与禁用态 */
+  private applyPreviewZoom(action: 'in' | 'out' | 'reset'): void {
+    const view = this.previewView
+    if (view === null) return
+    const changed = action === 'in'
+      ? view.zoomBy(PDF_ZOOM_STEP)
+      : action === 'out'
+        ? view.zoomBy(1 / PDF_ZOOM_STEP)
+        : view.resetZoom()
+    if (changed) this.updateZoomUi()
+  }
+
+  /** 缩放条回显：百分比 = 相对打印纸面的达成值（100% = 纸面大小） */
+  private updateZoomUi(): void {
+    const view = this.previewView
+    const ready = view !== null && view.contentReady
+    if (this.zoomValueEl !== null) {
+      this.zoomValueEl.textContent = `${view?.zoomPercent() ?? 100}%`
+    }
+    if (this.zoomOutEl !== null) this.zoomOutEl.disabled = !ready
+    if (this.zoomInEl !== null) this.zoomInEl.disabled = !ready
+    if (this.zoomValueEl !== null) this.zoomValueEl.disabled = !ready
+  }
+
+  /** 预览纸面的 CSS 像素尺寸（96 dpi 打印实际尺寸）——页面显示上限与
+   *  骨架成形尺寸的共同来源。 */
+  private printPageSize(): { widthPx: number; heightPx: number } {
+    const size = orientedPageSize(this.currentParams)
+    return {
+      widthPx: Math.max(1, Math.round(size.widthIn * 96)),
+      heightPx: Math.max(1, Math.round(size.heightIn * 96)),
+    }
+  }
+
+  /** 布局度量写到根元素：预览列宽按纸面宽封顶（右侧栏吸收剩余宽度），
+   *  骨架页按同一尺寸成形；CSS 侧 transition 负责尺寸变化的滑动动画。 */
+  private applyRootMetrics(root: HTMLElement): void {
+    const { widthPx } = this.printPageSize()
+    root.style.setProperty('--vsidian-pdfexport-print-width', `${widthPx}px`)
+    root.classList.toggle('vsidian-pdfexport--list', this.state?.batch !== undefined)
+    this.previewView?.setMaxRenderWidth(widthPx)
+  }
+
+  /** 预览加载骨架（复用开屏骨架屏的灰块 + 扫光配方；尺寸贴合当前纸面）。 */
+  private buildPreviewSkeleton(): HTMLElement {
+    const wrap = el('div', CLASS.previewSkeleton)
+    wrap.setAttribute('aria-hidden', 'true')
+    // 扫光节拍与开屏骨架同源（shared/skeletonTiming 常量），CSS 只消费变量
+    wrap.style.setProperty('--vsidian-pdfexport-skeleton-cycle', `${SKELETON_SHIMMER_CYCLE_MS}ms`)
+    wrap.style.setProperty('--vsidian-pdfexport-skeleton-delay', `${SKELETON_SHIMMER_DELAY_MS}ms`)
+    const page = el('div', CLASS.skeletonPage)
+    const { widthPx, heightPx } = this.printPageSize()
+    page.style.setProperty('--vsidian-pdfexport-skeleton-width', `${widthPx}px`)
+    page.style.setProperty('--vsidian-pdfexport-skeleton-ratio', String(widthPx / heightPx))
+    for (let i = 0; i < 9; i++) {
+      page.appendChild(el('div', CLASS.skeletonBlock))
+    }
+    wrap.appendChild(page)
+    return wrap
   }
 
   private ensurePreviewView(): PdfHoverView {
@@ -315,7 +445,8 @@ export class PdfExportModalView {
   }
 
   /** 预览产物落地（宿主 previewArtifact 消息）：代次配对丢弃迟到/旧会话
-   *  产物；Blob URL 生命周期配对（新一轮 show 落定后回收旧 URL）。 */
+   *  产物；Blob URL 生命周期配对（新一轮 show 落定后回收旧 URL）。
+   *  首帧落定前保持骨架覆盖（不出现空白画布），落定后撤除并回显缩放条。 */
   applyPreviewArtifact(generation: number, base64: string): void {
     const s = this.state
     if (s?.preview === undefined || generation !== s.preview.generation) return
@@ -329,14 +460,21 @@ export class PdfExportModalView {
     const prevUrl = this.previewArtifactUrl
     this.previewArtifactUrl = url
     this.previewArtifactGen = generation
+    this.previewLoading = true
+    this.previewView?.setMaxRenderWidth(this.printPageSize().widthPx)
+    // 先挂载舞台（骨架覆盖空滚动区），再以真实容器宽发起装载——避免
+    // 离屏 clientWidth=0 时用回退宽渲染一轮
+    this.render()
     const scroll = this.ensurePreviewScroll()
     const view = this.ensurePreviewView()
-    const width = Math.max(240, scroll.clientWidth - 16 || 600)
+    const width = Math.max(240, scroll.clientWidth - 16 || this.printPageSize().widthPx)
     void view.show(url, 1, width).finally(() => {
+      this.previewLoading = false
       if (prevUrl !== '') {
         URL.revokeObjectURL(prevUrl)
         this.previewBlobUrlsAlive--
       }
+      this.updateZoomUi()
       this.render()
     })
   }
@@ -465,14 +603,30 @@ export class PdfExportModalView {
 
     block.appendChild(bar)
 
+    // 内容区舞台（持久）：滚动区 + 左下角缩放条；空态/生成态以覆盖层
+    // 呈现（骨架或说明），避免整块建了又拆。
+    const stage = this.ensurePreviewStage()
+    stage.querySelectorAll(`:scope > .${CLASS.previewSkeleton}, :scope > .${CLASS.previewPlaceholder}`)
+      .forEach((node) => node.remove())
     if (this.previewArtifactUrl === '') {
-      const placeholder = el('div', CLASS.previewPlaceholder)
-      placeholder.appendChild(el('h2', CLASS.previewTitle, t('pdfExport.previewPlaceholderTitle')))
-      placeholder.appendChild(el('p', CLASS.previewDescription, t('pdfExport.previewPlaceholderDescription')))
-      block.appendChild(placeholder)
+      stage.classList.add('vsidian-pdfexport-preview-stage--empty')
+      if (previewBusy) {
+        // 生成在途且尚无产物：扫光骨架（复用开屏骨架的配方与节拍常量），
+        // 不再停留在一行静态说明上
+        stage.appendChild(this.buildPreviewSkeleton())
+      } else {
+        const placeholder = el('div', CLASS.previewPlaceholder)
+        placeholder.appendChild(el('h2', CLASS.previewTitle, t('pdfExport.previewPlaceholderTitle')))
+        placeholder.appendChild(el('p', CLASS.previewDescription, t('pdfExport.previewPlaceholderDescription')))
+        stage.appendChild(placeholder)
+      }
     } else {
-      block.appendChild(this.ensurePreviewScroll())
+      stage.classList.remove('vsidian-pdfexport-preview-stage--empty')
+      // 产物已到达但首帧未落定：骨架覆盖空滚动区（不出现白屏）
+      if (this.previewLoading) stage.appendChild(this.buildPreviewSkeleton())
     }
+    block.appendChild(stage)
+    this.updateZoomUi()
     return block
   }
 
@@ -537,6 +691,7 @@ export class PdfExportModalView {
     const params = this.currentParams
 
     const root = el('div', CLASS.root)
+    this.applyRootMetrics(root)
     // ---- 主区：实际 PDF 页面预览（T07/#627——PdfHoverView 分页 canvas） ----
     const preview = el('main', CLASS.preview)
     preview.appendChild(this.buildPreviewArea())
@@ -843,6 +998,7 @@ export class PdfExportModalView {
     const running = batch.phase === 'running' || batch.phase === 'awaiting-resources'
     const params = this.currentParams
     const root = el('div', CLASS.root)
+    this.applyRootMetrics(root)
 
     // ---- 主区：编辑态 = 清单 + 预览上下分栏（按清单选择预览项）；其余
     // 阶段维持既有清单/映射/结果承载（T07 预览不在执行态呈现） ----
@@ -947,6 +1103,7 @@ export class PdfExportModalView {
     const running = batch.phase === 'capturing' || batch.phase === 'running' || batch.phase === 'saving' || batch.phase === 'awaiting-resources'
     const params = this.currentParams
     const root = el('div', CLASS.root)
+    this.applyRootMetrics(root)
 
     // ---- 主区：编辑态 = 清单 + 预览上下分栏（合并单产物预览）；在途与
     // 终态维持既有进度/结果承载 ----
@@ -1377,6 +1534,15 @@ export class PdfExportModalView {
         previewEmptyDescription: document.querySelector(`.${CLASS.previewDescription}`)?.textContent ?? '',
         previewBatchSelect: probe(document.querySelector<HTMLElement>(`.${CLASS.previewBar} .${CLASS.select}`)),
         previewBatchSelectValue: (document.querySelector(`.${CLASS.previewBar} .${CLASS.select}`) as HTMLSelectElement | null)?.value ?? '',
+        // 验收修复轮：缩放条/加载骨架/纸面宽变量的绘制层观测
+        previewZoomBar: probe(document.querySelector<HTMLElement>(`.${CLASS.zoomBar}`)),
+        previewZoomValueText: this.zoomValueEl?.textContent ?? '',
+        previewZoomButtons: [this.zoomOutEl, this.zoomInEl].map((node) => probe(node)),
+        previewSkeleton: probe(document.querySelector<HTMLElement>(`.${CLASS.previewSkeleton}`)),
+        previewPrintWidth: (() => {
+          const root = document.querySelector<HTMLElement>(`.${CLASS.root}`)
+          return root?.style.getPropertyValue('--vsidian-pdfexport-print-width') ?? ''
+        })(),
         previewArtifactGeneration: this.previewArtifactGen,
         previewBlobUrlsAlive: this.previewBlobUrlsAlive,
         // 诊断观测：滚动区几何与 DOM 画布在场数（canvas 计数对绘制层探针
@@ -1391,6 +1557,11 @@ export class PdfExportModalView {
         previewFirstCanvasSize: (() => {
           const canvas = document.querySelector(`.${CLASS.previewScroll} canvas`) as HTMLCanvasElement | null
           return canvas !== null ? `${canvas.width}x${canvas.height}` : ''
+        })(),
+        previewFirstCanvasCssWidth: (() => {
+          const canvas = document.querySelector(`.${CLASS.previewScroll} canvas`) as HTMLCanvasElement | null
+          const width = canvas !== null ? Number.parseFloat(canvas.style.width) : Number.NaN
+          return Number.isFinite(width) ? width : 0
         })(),
         previewPdf: this.previewView !== null && this.previewArtifactUrl !== ''
           ? this.previewPdfProbeOf(this.previewView.probe())

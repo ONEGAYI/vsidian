@@ -32,6 +32,7 @@
 - 支持选择文件和目录；目录递归收集 Markdown，清单显示文件身份及顺序。
 - 导出前可增删清单条目并调整顺序。批量逐文件输出，合并严格按清单顺序输出，不依赖文件枚举顺序决定最终结果。
 - 文件身份、Markdown 类型与路径处理复用现有事实源。输出路径冲突先呈现实际映射，再统一选择跳过、覆盖或自动更名；不静默覆盖。
+- 自动更名以目标目录**实际存在的文件**为占用面（目录枚举），命名序列不设固定编号上限；确认映射与真正落位之间目录新增同名文件时，落位侧以无覆盖方式提交并换下一编号候选——已存在文件永远不被静默替换。跳过策略遇到确认后新增的同名文件按跳过收口；覆盖只由用户显式选择产生。
 - 批量保留所选目录的相对结构；多个选择根的同名映射也进入冲突处理，不无说明地丢文件或覆盖其他根的产物。
 
 ### 2.3 正文、样式与嵌入
@@ -53,6 +54,10 @@
 预览行为：
 
 - 显示实际生成 PDF 的页面预览，不以普通 HTML 预览冒充 PDF 分页结果。
+- 预览页面按**打印纸面大小**呈现（100% = 纸面尺寸，宽面板不把页面拉伸放大）；预览列宽随当前纸张/方向按纸面宽派生，右侧配置栏吸收剩余宽度，尺寸变化以短程过渡呈现。
+- 预览画布按设备像素比绘制（后备分辨率 = CSS 尺寸 × devicePixelRatio，上限 2），HiDPI 下正文与矢量图形不发虚。
+- 预览区左下角提供缩放控件（缩小/百分比/放大，百分比点击复位 100%）与 Ctrl+滚轮缩放；缩放百分比按纸面实际尺寸如实回显，受渲染上限钳制时不谎称生效。
+- 生成或产物首帧未落定时显示扫光骨架（复用开屏骨架屏的灰块与扫光配方，尺寸贴合当前纸面），不以空白或静态说明冒充加载过程。
 - 参数或清单改变后标记预览过期，由用户手动刷新；不因每次控件输入反复启动生成任务。
 - 过期预览不能被当作当前配置的最终产物。最终导出使用与当次参数、清单和固定输入对应的结果；新旧任务以真实代次区分。
 - 复用已有 PDF 阅读渲染引擎评估预览，不因此升级 PDF.js 或重新设计一套 PDF 阅读 UI。
@@ -90,10 +95,10 @@
 #### 3.2.1 T08（#628）实施落档
 
 - **分发形态**：双 VSIX——主包（workspace kind，不变）+ 配套执行端扩展 `onegayi.vsidian-pdf-executor`（ui kind，远程窗口跑在本机 ext host）。执行端静态资产（pdfExportPage/pdfjs/mermaid 等）不随执行端包重复分发，运行时从本机安装的主扩展目录读取（双包安装是前提；缺失经能力探测如实报告）。执行端打包入口 `node scripts/packageExecutor.mjs`（清单模板 `src/pdfExecutor/package.json`，版本号与主包同步注入，NLS 从字典生成）。
-- **协议**：`src/shared/pdfRemote.ts` 单一事实源（两端共用）。命令族 `vsidian.pdfExecutor.*`（ping/renderPage/finalizePrint/cancelTask/queryTask/provideResources/writeFileAtomic/statFiles/showSaveDialog/showOpenDialogDir）；错误码进 message 前缀（Error.code 跨端丢失，V02 实测）；进度与挂起资源经轮询查询命令；取消经第二条命令（协作式取消 → 执行端 killSync）。
+- **协议**：`src/shared/pdfRemote.ts` 单一事实源（两端共用）。命令族 `vsidian.pdfExecutor.*`（ping/renderPage/finalizePrint/cancelTask/queryTask/provideResources/writeFileAtomic/statFiles/listDirectory/showSaveDialog/showOpenDialogDir）；协议版本 v2（writeFileAtomic 增 overwrite 无覆盖标志、新增 listDirectory 目录枚举，旧执行端按缺失收口）；错误码进 message 前缀（Error.code 跨端丢失，V02 实测），`target-exists` 为无覆盖落位的显式分态；进度与挂起资源经轮询查询命令；取消经第二条命令（协作式取消 → 执行端 killSync）。
 - **资源传输**：执行端资源服务（127.0.0.1，在本机起）对 `/res` 增配延迟读取端口——页面请求入队挂起，远端轮询发现后用既有 resolveResource 端口解析 + workspace.fs 读字节，经 provideResources 回填（解析面不建第二份）；单命令写盘按 6MB base64 分块（V02 8MB 实测内保守值），执行端集齐原子落位。
 - **运行侧判定**：`vscode.env.remoteName` 在场 = remote 窗口；主扩展单端运行（workspace kind），remote 窗口中恒在远端——判定无 V02 §2 的端歧义。remote 下四个 job 与预览的端口面（resolveBrowser/createSession/对话框/写盘/stat）整体换成本机执行端适配器（`src/host/pdfExport/pdfRemoteAdapter.ts`），job/模态/指纹复用逻辑零改动；本地窗口链路不变。
-- **保存与路径语义**：保存对话框、批量目标目录选择、冲突 stat 探测与写盘全部在本机执行端执行（远端 `vscode.Uri.file` 会把本机路径落到远端盘——不可用）；结果表显示本机真实路径。批量映射在本机目标目录上解析。
+- **保存与路径语义**：保存对话框、批量目标目录选择、冲突占用枚举（listDirectory）与写盘全部在本机执行端执行（远端 `vscode.Uri.file` 会把本机路径落到远端盘——不可用）；结果表显示本机真实路径。批量映射在本机目标目录上解析；自动更名的落位为无覆盖提交，撞上确认后新增文件时换下一编号候选（P2-003 复核闭合）。
 - **异常面**：执行端未装/未激活 → `executor-missing`；命令超时/断连 → `executor-unreachable`（断连后远端在途 await 无终态——所有跨端调用自带超时，如实报失败不伪成功）；断连后本机执行端的在途任务自然终结并释放（迟到回包无处可去，不污染通道）。取消经命令通道同步终止本机端。**与 V02 最小协议的差异**：保存由远端 orchestrator 驱动（job 端口替换而非把落盘并入 renderPdf 命令）——T07 指纹/复用/代次逻辑零改动的结构代价；断连时在途产物不落盘（已完成文件保留），符合验收标准「不伪成功、已完成文件保留」。
 - **测试面**：e2e 入口 `node test/integration/runPdfRemoteE2E.mjs [--round=main|noexec|disconnect]`（runner 本地 ext host + 命令路由；远端会话钩子经工作区标记文件 `.vsidian-pdf-remote-test.json`——远端读不到宿主 env，V02 §3.4）。物理同机（ssh localhost）如实标注；CentOS 7 真实异机未验证。
 

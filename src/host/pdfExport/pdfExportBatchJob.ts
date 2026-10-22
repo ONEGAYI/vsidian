@@ -21,6 +21,7 @@
 
 import {
   mapBrowserErrorToFailReason,
+  PdfExportTargetExistsError,
   type BrowserExportSession,
   type PdfExportFailReason,
   type PdfExportInputPayload,
@@ -28,7 +29,7 @@ import {
 import type { ResolveBrowserResult } from './browserFind'
 import type { PdfExportFailureItem } from '../../shared/pdfExportPayload'
 import type { PdfExportOptions } from '../../shared/pdfExportOptions'
-import type { PdfBatchItem, PdfBatchMappingEntry, PdfBatchResultEntry } from '../../shared/pdfExportBatch'
+import { nextTargetAfterCollision, type PdfBatchConflictStrategy, type PdfBatchItem, type PdfBatchMappingEntry, type PdfBatchResultEntry } from '../../shared/pdfExportBatch'
 
 /** 批量扩展失败分态：条目文档在准备阶段不可得（未保存文本读取失败/文件不存在） */
 export type PdfBatchFailReason = PdfExportFailReason | 'capture-failed'
@@ -47,8 +48,11 @@ export interface PdfBatchJobPorts {
   /** 准备阶段固定输入：已打开文档用未保存权威文本，未打开走工作区读取
    *  通道；嵌入目标预取与主文档同款（T02 语义） */
   captureDoc(fsPath: string): Promise<PdfBatchCapturedDoc | { ok: false; reason: string }>
-  /** 生成产物写盘（生产实现：临时文件 + 原子替换） */
-  writeFile(targetPath: string, bytes: Uint8Array): Promise<void>
+  /** 生成产物写盘（生产实现：临时文件 + 原子替换）。
+   *  overwrite=false 是**无覆盖提交**（白名单策略 rename/skip：落位瞬间目标
+   *  已存在必须抛 PdfExportTargetExistsError，调用方换下一候选重试）；
+   *  overwrite=true 只由用户显式选择「覆盖」策略产生。 */
+  writeFile(targetPath: string, bytes: Uint8Array, overwrite: boolean): Promise<void>
   /** UI 语言（payload.locale 装配） */
   locale(): 'zh-cn' | 'en'
 }
@@ -72,6 +76,9 @@ export interface PdfBatchRunPlan {
   /** id → 映射计划条目（planBatchMapping 产物；skip 项由执行器登记跳过） */
   mapping: ReadonlyMap<string, PdfBatchMappingEntry>
   options: PdfExportOptions
+  /** 重名策略：决定落位碰撞的处理（rename 换编号 / skip 跳过 / overwrite
+   *  显式覆盖）。映射条目已带 exclusive，仍保留策略以区分碰撞语义。 */
+  strategy: PdfBatchConflictStrategy
   browserPath: string | undefined
 }
 
@@ -212,14 +219,25 @@ export class PdfBatchJob {
           return finish()
         }
         // ---- 写盘（生产实现临时文件 + 原子替换；失败继续其余项）----
+        // 白名单策略（rename/skip）的落位必须无覆盖：确认映射到真正写盘
+        // 之间目录可能新增同名文件（P2-003 复核复现）——撞上已存在目标时
+        // 从名义路径重新走命名序列换下一候选，不覆盖、不误报写盘失败。有界
+        // 重试（32 次）只防御病态目录；到界如实失败，不猜空闲。
+        let landed: { targetPath?: string; skipped?: boolean }
         try {
-          await this.ports.writeFile(mapping.targetPath, bytes)
+          landed = await this.writeDefaultOff(mapping, bytes, plan.strategy)
         } catch {
           results.push({ ...base, status: 'failed', failReason: 'write-failed' })
           this.setState({ results: [...results] })
           continue
         }
-        results.push({ ...base, status: 'success', targetPath: mapping.targetPath })
+        if (landed.skipped === true) {
+          // skip 策略：确认后新增的同名文件 → 按策略跳过，不换名生成新文件
+          results.push({ ...base, status: 'skipped', skipReason: 'exists' })
+          this.setState({ results: [...results] })
+          continue
+        }
+        results.push({ ...base, status: 'success', targetPath: landed.targetPath })
         this.setState({ results: [...results] })
       }
       this.setState({ phase: 'done', currentIndex: plan.items.length, currentName: undefined, resourceIssues: undefined })
@@ -229,6 +247,35 @@ export class PdfBatchJob {
       this.activeSession = undefined
       this.choiceResolver = undefined
     }
+  }
+
+  /** 白名单策略的无覆盖落位：先写计划路径，撞上已存在目标（确认后新增
+   *  的同名文件）时按策略处理——rename 从名义路径重走命名序列取下一候选；
+   *  skip 按跳过收口（不换名生成新文件）。返回实际落位路径或 skipped
+   *  （结果表如实呈现）。非碰撞错误原样上抛（写盘失败语义不变）。 */
+  private async writeDefaultOff(
+    mapping: PdfBatchMappingEntry,
+    bytes: Uint8Array,
+    strategy: PdfBatchConflictStrategy,
+  ): Promise<{ targetPath?: string; skipped?: boolean }> {
+    if (!mapping.exclusive) {
+      await this.ports.writeFile(mapping.targetPath, bytes, true)
+      return { targetPath: mapping.targetPath }
+    }
+    const taken = new Set<string>()
+    let target = mapping.targetPath
+    for (let attempt = 0; attempt < 32; attempt++) {
+      try {
+        await this.ports.writeFile(target, bytes, false)
+        return { targetPath: target }
+      } catch (error) {
+        if (!(error instanceof PdfExportTargetExistsError)) throw error
+        if (strategy === 'skip') return { skipped: true }
+        taken.add(target)
+        target = nextTargetAfterCollision(mapping.nominalPath, target, taken)
+      }
+    }
+    throw new Error(`rename collision retry exhausted: ${mapping.nominalPath}`)
   }
 
   /** 释放兜底（模态关闭时调用）：取消在途批次 */

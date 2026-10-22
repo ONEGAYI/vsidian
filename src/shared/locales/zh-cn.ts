@@ -176,6 +176,10 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.preview.stale': '预览已过期',
   'pdfExport.preview.bookmarks': '标题书签 {count} 条',
   'pdfExport.preview.itemLabel': '预览文件',
+  /** 预览缩放条（左下角；100% = 打印纸面大小） */
+  'pdfExport.preview.zoomIn': '放大预览',
+  'pdfExport.preview.zoomOut': '缩小预览',
+  'pdfExport.preview.zoomReset': '复位为 100%（打印纸面大小）',
   /** 任务阶段 */
   'pdfExport.phase.idle': '就绪',
   'pdfExport.phase.generating': '正在生成 PDF…',

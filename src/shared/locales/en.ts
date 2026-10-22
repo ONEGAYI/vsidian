@@ -186,6 +186,10 @@ export const en = {
   'pdfExport.preview.stale': 'Preview outdated',
   'pdfExport.preview.bookmarks': '{count} heading bookmarks',
   'pdfExport.preview.itemLabel': 'Preview file',
+  /** Preview zoom bar (bottom-left; 100% = printed paper size) */
+  'pdfExport.preview.zoomIn': 'Zoom in',
+  'pdfExport.preview.zoomOut': 'Zoom out',
+  'pdfExport.preview.zoomReset': 'Reset to 100% (printed paper size)',
   /** Task phase labels */
   'pdfExport.phase.idle': 'Ready',
   'pdfExport.phase.generating': 'Generating PDF…',

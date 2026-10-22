@@ -271,11 +271,40 @@ describe('写盘分块与对话框', () => {
     await adapter.writeFile('D:/out/a.pdf', new Uint8Array([1, 2]))
     const writes = h.calls.filter((c) => c.command === PDF_EXECUTOR_COMMANDS.writeFileAtomic)
     expect(writes.length).toBe(1)
-    const arg = writes[0]!.arg as { writeId: string; seq: number; total: number; base64: string; targetPath: string }
+    const arg = writes[0]!.arg as { writeId: string; seq: number; total: number; base64: string; targetPath: string; overwrite: boolean }
     expect(arg.total).toBe(1)
     expect(arg.seq).toBe(0)
     expect(arg.targetPath).toBe('D:/out/a.pdf')
+    expect(arg.overwrite).toBe(true)
     expect(Buffer.from(arg.base64, 'base64')).toEqual(Buffer.from([1, 2]))
+  })
+
+  it('无覆盖提交：overwrite=false 随请求下传；执行端 target-exists 转领域错误', async () => {
+    const h = makeHarness()
+    h.setHandler(PDF_EXECUTOR_COMMANDS.writeFileAtomic, () => ({ written: true }))
+    const adapter = createPdfRemoteAdapter({ ...h.deps, budgets: fastBudgets })
+    await adapter.writeFile('D:/out/a.pdf', new Uint8Array([1]), false)
+    const arg = h.calls.find((c) => c.command === PDF_EXECUTOR_COMMANDS.writeFileAtomic)!.arg as { overwrite: boolean }
+    expect(arg.overwrite).toBe(false)
+
+    const clash = makeHarness()
+    clash.setHandler(PDF_EXECUTOR_COMMANDS.writeFileAtomic, () => {
+      throw encodePdfRemoteError('target-exists', 'D:/out/a.pdf')
+    })
+    const clashAdapter = createPdfRemoteAdapter({ ...clash.deps, budgets: fastBudgets })
+    await expect(clashAdapter.writeFile('D:/out/a.pdf', new Uint8Array([1]), false))
+      .rejects.toMatchObject({ name: 'PdfExportTargetExistsError', targetPath: 'D:/out/a.pdf' })
+  })
+
+  it('本机目录枚举：条目名回传，异常/缺失按空清单收口', async () => {
+    const h = makeHarness()
+    h.setHandler(PDF_EXECUTOR_COMMANDS.listDirectory, (arg: { dir: string }) =>
+      arg.dir === 'D:/out' ? { names: ['a.pdf', 'a (2).pdf'] } : { names: [] })
+    const adapter = createPdfRemoteAdapter({ ...h.deps, budgets: fastBudgets })
+    expect(await adapter.listDirectory('D:/out')).toEqual(['a.pdf', 'a (2).pdf'])
+    expect(await adapter.listDirectory('D:/missing')).toEqual([])
+    h.setHandler(PDF_EXECUTOR_COMMANDS.listDirectory, () => ({ names: [1, 'ok.pdf'] }))
+    expect(await adapter.listDirectory('D:/out')).toEqual(['ok.pdf'])
   })
 
   it('大产物分块：块序完整、writeId 一致、拼接还原原文', async () => {

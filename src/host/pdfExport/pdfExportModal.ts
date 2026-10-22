@@ -48,9 +48,9 @@ import {
   isPdfBatchConflictStrategy,
   mergeBatchResults,
   moveBatchItem,
+  occupiedTargetsFromListings,
   planBatchMapping,
   removeBatchItem,
-  renameProbeCandidates,
   type PdfBatchConflictStrategy,
   type PdfBatchItem,
   type PdfBatchMappingEntry,
@@ -72,7 +72,7 @@ import {
   PDF_EXPORT_SCALE_KEY,
   type SettingsPayload,
 } from '../../shared/settings'
-import { PdfExportJob, type PdfExportInput, type PdfExportInputPayload, type PdfExportJobState, type PdfExportPrecomputed } from './pdfExportJob'
+import { PdfExportJob, PdfExportTargetExistsError, type PdfExportInput, type PdfExportInputPayload, type PdfExportJobState, type PdfExportPrecomputed } from './pdfExportJob'
 import { PdfBatchJob, type PdfBatchRunPlan, type PdfBatchCapturedDoc } from './pdfExportBatchJob'
 import { PdfMergeJob, buildPdfMergePayload, type PdfMergeRunPlan } from './pdfExportMergeJob'
 import { PdfPreviewJob } from './pdfExportPreviewJob'
@@ -799,13 +799,17 @@ export function createPdfExportModal(
     return found
   }
 
-  /** 批量产物写盘：目标目录按需创建 + 临时文件 + 原子替换（覆盖策略下
-   *  旧文件在新文件完整写入前不损毁；失败清理临时文件）。
+  /** 批量产物写盘：目标目录按需创建 + 临时文件 + 原子落位（失败清理临时
+   *  文件）。
+   *  overwrite=true：显式覆盖策略/保存对话框已确认——原子替换旧文件。
+   *  overwrite=false：白名单策略（自动更名/跳过）的无覆盖提交——rename
+   *  不带 replace，目标在写入瞬间已存在即抛 PdfExportTargetExistsError；
+   *  调用方（batch job）换下一编号候选重试，绝不静默覆盖。
    *  T08 remote：产物落本机——经执行端分块写盘命令（远端 workspace.fs
-   *  是远端盘；原子语义由执行端承担，路径为本机真实路径） */
-  const writeBatchFile = async (targetPath: string, bytes: Uint8Array): Promise<void> => {
+   *  是远端盘；原子与排他语义由执行端承担，路径为本机真实路径） */
+  const writeBatchFile = async (targetPath: string, bytes: Uint8Array, overwrite = true): Promise<void> => {
     if (remoteAdapter !== undefined) {
-      await remoteAdapter.writeFile(targetPath, bytes)
+      await remoteAdapter.writeFile(targetPath, bytes, overwrite)
       return
     }
     const target = vscode.Uri.file(targetPath)
@@ -813,11 +817,21 @@ export function createPdfExportModal(
     const tmp = `${targetPath}.vsidian-tmp-${randomUUID()}`
     try {
       await vscode.workspace.fs.writeFile(vscode.Uri.file(tmp), Buffer.from(bytes))
-      await vscode.workspace.fs.rename(vscode.Uri.file(tmp), target, { overwrite: true })
+      await vscode.workspace.fs.rename(vscode.Uri.file(tmp), target, { overwrite })
     } catch (error) {
       await vscode.workspace.fs.delete(vscode.Uri.file(tmp)).then(() => undefined, () => undefined)
+      if (!overwrite && isFileExistsError(error)) {
+        throw new PdfExportTargetExistsError(targetPath)
+      }
       throw error
     }
+  }
+
+  /** 排他落位撞上已存在目标的判定（FileSystemError 与底层 EEXIST 两形态） */
+  const isFileExistsError = (error: unknown): boolean => {
+    if (error instanceof vscode.FileSystemError) return error.code === 'FileExists'
+    const message = error instanceof Error ? error.message : String(error)
+    return /EEXIST|file exists|already exists/i.test(message)
   }
 
   /** 条目级捕获端口（T04 批量与 T06 合并共用）：provider 固定输入 + 窗口
@@ -946,33 +960,39 @@ export function createPdfExportModal(
     })
   }
 
-  /** confirm 进入：探测名义目标磁盘已有 + 首版映射（T08 remote：目标目录
-   *  在本机——冲突映射在本机目标目录上解析，经执行端 stat 命令批量探测） */
+  /** confirm 进入：枚举目标目录真实占用 + 首版映射（T08 remote：目标目录
+   *  在本机——占用枚举经执行端目录命令）。
+   *
+   *  双轴评审 P2-003 复核：rename 的占用判定必须枚举**目录里实际存在的
+   *  文件**，不能按固定编号上限猜候选（既有 `name (201).pdf` 会漏出探测面，
+   *  随后被当作空闲覆盖）。占用集交给 planBatchMapping/nextAvailableTargetPath
+   *  统一裁决；命名序列本身没有上限假设。 */
   const enterBatchConfirm = async (targetDir: string): Promise<void> => {
     batchTargetDir = targetDir
-    batchExisting = new Set<string>()
-    // 双轴评审 P2-003：rename 依赖「磁盘实际占用」判定——只 stat 名义路径会
-    // 漏掉 name (2).pdf 等既有编号文件，导致自动更名选中已占用编号并覆盖。
-    // 探测面 = 每个名义目标的编号候选（与 nextAvailableTargetPath 同源序列）。
-    const candidates = new Set(batchItems.flatMap((item) => {
-      const rel = item.relPath.replace(/\.(md|markdown)$/i, '.pdf')
-      return renameProbeCandidates(`${targetDir}/${rel}`)
-    }))
+    const dir = targetDir.replace(/\/+$/, '')
+    const nominalTargets = batchItems.map((item) =>
+      `${dir}/${item.relPath.replace(/\.(md|markdown)$/i, '.pdf')}`)
+    const listings = new Map<string, string[]>()
+    const dirs = new Set<string>()
+    for (const target of nominalTargets) {
+      const slash = target.lastIndexOf('/')
+      if (slash > 0) dirs.add(target.slice(0, slash))
+    }
     if (remoteAdapter !== undefined) {
-      const entries = await remoteAdapter.statFiles([...candidates])
-      for (const entry of entries) {
-        if (entry.exists) batchExisting.add(entry.path)
+      for (const entry of dirs) {
+        listings.set(entry, await remoteAdapter.listDirectory(entry))
       }
     } else {
-      await Promise.all([...candidates].map(async (target) => {
+      await Promise.all([...dirs].map(async (entry) => {
         try {
-          await vscode.workspace.fs.stat(vscode.Uri.file(target))
-          batchExisting.add(target)
+          const children = await vscode.workspace.fs.readDirectory(vscode.Uri.file(entry))
+          listings.set(entry, children.map(([name]) => name))
         } catch {
-          /* 不存在即不占用 */
+          listings.set(entry, []) // 目录不存在/不可读 = 无既有占用
         }
       }))
     }
+    batchExisting = new Set(occupiedTargetsFromListings(nominalTargets, (entry) => listings.get(entry) ?? []))
     batchMapping = planBatchMapping(batchItems, targetDir, batchStrategy, batchExisting)
     batchPhase = 'confirm'
     notifyState()
@@ -991,6 +1011,7 @@ export function createPdfExportModal(
       items: batchItems,
       mapping: new Map((batchMapping ?? []).map((entry) => [entry.id, entry])),
       options: params,
+      strategy: batchStrategy,
       browserPath: defaultsFromSettings(getSettingsSnapshot()).browserPath.trim() || undefined,
     }
     batchPhase = 'running'
@@ -1032,6 +1053,7 @@ export function createPdfExportModal(
         items: [item],
         mapping: new Map([[id, mapping]]),
         options: params,
+        strategy: batchStrategy,
         browserPath: defaultsFromSettings(getSettingsSnapshot()).browserPath.trim() || undefined,
       })
     })()

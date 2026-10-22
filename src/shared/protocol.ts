@@ -627,9 +627,13 @@ export type HostToWebview =
               id: string
               fsPath: string
               targetPath: string
+              /** 名义路径（无覆盖碰撞重试的命名锚） */
+              nominalPath: string
               action: 'export' | 'skip'
               conflict: 'none' | 'duplicate' | 'exists' | 'both'
               renamed: boolean
+              /** 白名单策略的无覆盖落位标记 */
+              exclusive: boolean
               skipReason?: 'duplicate' | 'exists'
             }>
             targetDir?: string

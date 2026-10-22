@@ -3,7 +3,7 @@
 // 取消保留已完成、resume/resume-all 缺资源选择与配对释放。
 // 浏览器链路经 BrowserExportSession 端口替身注入（T01/T02 单测同模式）。
 import { describe, expect, it, vi } from 'vitest'
-import { PdfExportBrowserError, type BrowserExportSession } from '../../src/host/pdfExport/pdfExportJob'
+import { PdfExportBrowserError, PdfExportTargetExistsError, type BrowserExportSession } from '../../src/host/pdfExport/pdfExportJob'
 import { PdfBatchJob, type PdfBatchJobPorts } from '../../src/host/pdfExport/pdfExportBatchJob'
 import { planBatchMapping, type PdfBatchConflictStrategy, type PdfBatchItem } from '../../src/shared/pdfExportBatch'
 import { PDF_EXPORT_OPTIONS_DEFAULTS } from '../../src/shared/pdfExportOptions'
@@ -29,6 +29,8 @@ interface FileScript {
   renderError?: { code: 'launch' | 'navigate' | 'not-ready' | 'print'; message: string }
   /** writeFile 抛错 */
   writeFail?: boolean
+  /** 首次落位撞上已存在目标（无覆盖提交的碰撞重试路径） */
+  collisionOnce?: boolean
   /** renderPage 挂起直至 cancel */
   hangingRender?: boolean
 }
@@ -38,7 +40,7 @@ interface Harness {
   job: PdfBatchJob
   calls: {
     capture: string[]
-    writeFile: Array<{ target: string; bytes: number }>
+    writeFile: Array<{ target: string; bytes: number; overwrite: boolean }>
     sessionDispose: number
     sessionCancel: number
   }
@@ -47,8 +49,9 @@ interface Harness {
 }
 
 function makeHarness(files: FileScript[]): Harness {
-  const calls = { capture: [] as string[], writeFile: [] as Array<{ target: string; bytes: number }>, sessionDispose: 0, sessionCancel: 0 }
+  const calls = { capture: [] as string[], writeFile: [] as Array<{ target: string; bytes: number; overwrite: boolean }>, sessionDispose: 0, sessionCancel: 0 }
   const scripts = new Map(files.map((f) => [f.name, f]))
+  const collided = new Set<string>()
   /** 挂起中的 renderPage reject 队列：cancel()（killSync 语义）触发连接断开
    *  reject——在途命令立即失败，忠实于生产 browserLauncher 行为 */
   const hangingRejects = new Set<(error: Error) => void>()
@@ -87,7 +90,7 @@ function makeHarness(files: FileScript[]): Harness {
       }
       return { docName: name, capturedVersion: 1, payload: payloadOf(name) }
     },
-    writeFile: async (target: string, bytes: Uint8Array) => {
+    writeFile: async (target: string, bytes: Uint8Array, overwrite: boolean) => {
       // basename（去目录、去 "(n)" 编号）映射回源名查 writeFail 脚本
       const base = target.split('/').pop()!
       const name = base.replace(/ \(\d+\)\.pdf$/i, '.pdf').replace(/\.pdf$/i, '.md')
@@ -95,7 +98,11 @@ function makeHarness(files: FileScript[]): Harness {
       if (script?.writeFail) {
         throw new Error('EACCES')
       }
-      calls.writeFile.push({ target, bytes: bytes.length })
+      if (script?.collisionOnce === true && !collided.has(name) && !overwrite) {
+        collided.add(name)
+        throw new PdfExportTargetExistsError(target)
+      }
+      calls.writeFile.push({ target, bytes: bytes.length, overwrite })
     },
     locale: () => 'zh-cn',
   }
@@ -113,7 +120,7 @@ const itemsOf = (names: string[]): PdfBatchItem[] =>
 const planOf = (names: string[], existing: ReadonlySet<string> = new Set(), strategy: PdfBatchConflictStrategy = 'rename') => {
   const items = itemsOf(names)
   const mapping = new Map(planBatchMapping(items, 'D:/out', strategy, existing).map((e) => [e.id, e]))
-  return { items, mapping, options: { ...PDF_EXPORT_OPTIONS_DEFAULTS }, browserPath: undefined }
+  return { items, mapping, options: { ...PDF_EXPORT_OPTIONS_DEFAULTS }, strategy, browserPath: undefined }
 }
 
 describe('批量执行：逐文件两段式循环', () => {
@@ -163,6 +170,37 @@ describe('批量执行：逐文件两段式循环', () => {
     const state = await h.job.run(planOf(['a.md', 'locked.md', 'c.md']))
     expect(state.results[1]).toMatchObject({ status: 'failed', failReason: 'write-failed' })
     expect(state.results[2].status).toBe('success')
+  })
+
+  it('落位保护：rename/skip 无覆盖提交，overwrite 才允许覆盖', async () => {
+    const rename = makeHarness([{ name: 'a.md' }])
+    await rename.job.run(planOf(['a.md']))
+    expect(rename.calls.writeFile).toEqual([{ target: 'D:/out/a.pdf', bytes: 19, overwrite: false }])
+
+    const skip = makeHarness([{ name: 'a.md' }])
+    await skip.job.run(planOf(['a.md'], new Set(), 'skip'))
+    expect(skip.calls.writeFile[0]?.overwrite).toBe(false)
+
+    const overwrite = makeHarness([{ name: 'a.md' }])
+    await overwrite.job.run(planOf(['a.md'], new Set(), 'overwrite'))
+    expect(overwrite.calls.writeFile[0]?.overwrite).toBe(true)
+  })
+
+  it('确认后新增同名文件：无覆盖碰撞改落下一编号，已存在文件保留', async () => {
+    const h = makeHarness([{ name: 'a.md', collisionOnce: true }])
+    const state = await h.job.run(planOf(['a.md']))
+    expect(state.phase).toBe('done')
+    // 首次计划 a.pdf 撞上确认后新增的文件 → 从名义路径重新编号取 a (2).pdf
+    expect(h.calls.writeFile).toEqual([{ target: 'D:/out/a (2).pdf', bytes: 19, overwrite: false }])
+    expect(state.results[0]).toMatchObject({ status: 'success', targetPath: 'D:/out/a (2).pdf' })
+  })
+
+  it('skip 策略确认后新增同名文件：按跳过收口，不换名生成新文件', async () => {
+    const h = makeHarness([{ name: 'a.md', collisionOnce: true }])
+    const state = await h.job.run(planOf(['a.md'], new Set(), 'skip'))
+    expect(state.phase).toBe('done')
+    expect(h.calls.writeFile).toEqual([])
+    expect(state.results[0]).toMatchObject({ status: 'skipped', skipReason: 'exists' })
   })
 
   it('缺资源暂停等待选择：resume 继续当前文件', async () => {

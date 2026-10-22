@@ -9,7 +9,8 @@ import {
   mergeBatchResults,
   moveBatchItem,
   nextAvailableTargetPath,
-  renameProbeCandidates,
+  nextTargetAfterCollision,
+  occupiedTargetsFromListings,
   planBatchMapping,
   removeBatchItem,
   summarizeBatchResults,
@@ -181,16 +182,31 @@ describe('自动更名规则', () => {
     expect(nextAvailableTargetPath('D:/out/Name.pdf', new Set(['d:/out/name (2).PDF']))).toBe('D:/out/Name (3).pdf')
   })
 
-  it('探测候选与命名序列同源：名义路径 + 连续编号，覆盖到命名可能选中的全部候选', () => {
-    const candidates = renameProbeCandidates('D:/out/name.pdf')
-    expect(candidates[0]).toBe('D:/out/name.pdf')
-    expect(candidates[1]).toBe('D:/out/name (2).pdf')
-    expect(candidates[2]).toBe('D:/out/name (3).pdf')
-    // 双轴评审 P2-003：磁盘已有 name (2).pdf 时，命名会选中 (3)——(3) 必须在
-    // 探测面内，否则「只 stat 名义路径」会让自动更名覆盖既有编号文件
-    const existing = new Set(['d:/out/name (2).pdf'])
-    const selected = nextAvailableTargetPath('D:/out/name.pdf', existing)
-    expect(candidates.map((c) => c.toLowerCase())).toContain(selected.toLowerCase())
+  it('目录占用枚举：真实存在的编号文件全部进入占用集（不设编号上限）', () => {
+    const names = ['name.pdf', 'name (2).pdf', ...Array.from({ length: 198 }, (_, i) => `name (${i + 3}).pdf`), 'name (201).pdf']
+    const targets = occupiedTargetsFromListings(['D:/out/name.pdf'], () => names)
+    expect(targets).toContain('D:/out/name.pdf')
+    expect(targets).toContain('D:/out/name (201).pdf')
+    // 命名序列对完整占用集求解：201 个连续占用之后取 (202)，不会选中未
+    // 探测的编号（P2-003 复核复现路径）
+    expect(nextAvailableTargetPath('D:/out/name.pdf', new Set(targets))).toBe('D:/out/name (202).pdf')
+  })
+
+  it('目录占用枚举：按名义目标的父目录分组，异常条目名跳过', () => {
+    const listings: Record<string, string[]> = {
+      'D:/out': ['a.pdf'],
+      'D:/out/sub': ['b (2).pdf', 'bad/name.pdf'],
+    }
+    const targets = occupiedTargetsFromListings(
+      ['D:/out/a.pdf', 'D:/out/sub/b.pdf', 'D:/out/sub/b.pdf'],
+      (dir) => listings[dir] ?? [],
+    )
+    expect(targets.sort()).toEqual(['D:/out/a.pdf', 'D:/out/sub/b (2).pdf'])
+  })
+
+  it('无覆盖碰撞重试：从名义路径重新编号，不产生 name (3) (2).pdf', () => {
+    const taken = new Set(['D:/out/name.pdf', 'D:/out/name (2).pdf', 'D:/out/name (3).pdf'])
+    expect(nextTargetAfterCollision('D:/out/name.pdf', 'D:/out/name (3).pdf', taken)).toBe('D:/out/name (4).pdf')
   })
 })
 

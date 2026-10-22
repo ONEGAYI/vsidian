@@ -32,6 +32,8 @@ import {
   encodePdfRemoteError,
   type PdfRemoteFinalizePrintRequest,
   type PdfRemoteFinalizePrintResult,
+  type PdfRemoteListDirectoryRequest,
+  type PdfRemoteListDirectoryResult,
   type PdfRemotePingResult,
   type PdfRemoteQueryTaskResult,
   type PdfRemoteRenderPageRequest,
@@ -43,6 +45,16 @@ import {
   type PdfRemoteWriteFileRequest,
 } from '../shared/pdfRemote'
 import type { PdfExportOptions } from '../shared/pdfExportOptions'
+
+/** 无覆盖落位撞上已存在目标的判定（workspace.fs 的 FileSystemError
+ *  与底层 EEXIST 两种形态都覆盖） */
+function isFileExistsError(error: unknown): boolean {
+  if (error instanceof vscode.FileSystemError) {
+    return error.code === 'FileExists'
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return /EEXIST|file exists|already exists/i.test(message)
+}
 
 /** 主扩展本机资产目录（out/webview）须在场的运行时产物（缺失 = 执行端不可用） */
 const MAIN_ASSET_FILES = [
@@ -110,11 +122,15 @@ export function activate(context: vscode.ExtensionContext): void {
     timer: ReturnType<typeof setTimeout>
   }>()
 
-  /** 命令包装：Error → 协议编码（code 进 message 前缀） */
+  /** 命令包装：Error → 协议编码（code 进 message 前缀）。已编码错误原样
+   *  上抛——内层显式分态（如 target-exists）不被外层兜底码覆盖。 */
   const encoded = async <T>(code: string, run: () => Promise<T>): Promise<T> => {
     try {
       return await run()
     } catch (error) {
+      if (error instanceof Error && error.name === 'PdfRemoteExecutorError') {
+        throw error
+      }
       if (error instanceof PdfExportBrowserError) {
         throw encodePdfRemoteError(error.code, error.message)
       }
@@ -297,13 +313,31 @@ export function activate(context: vscode.ExtensionContext): void {
         const tmp = `${pending.targetPath}.vsidian-tmp-${randomUUID()}`
         try {
           await vscode.workspace.fs.writeFile(vscode.Uri.file(tmp), assembled)
-          await vscode.workspace.fs.rename(vscode.Uri.file(tmp), target, { overwrite: true })
+          await vscode.workspace.fs.rename(vscode.Uri.file(tmp), target, { overwrite: request.overwrite !== false })
         } catch (error) {
           await vscode.workspace.fs.delete(vscode.Uri.file(tmp)).then(() => undefined, () => undefined)
+          // 无覆盖提交撞上已存在目标：显式分态（远端据此换下一编号候选，
+          // 不把碰撞误报成写盘失败）
+          if (request.overwrite === false && isFileExistsError(error)) {
+            throw encodePdfRemoteError('target-exists', pending.targetPath)
+          }
           throw error
         }
         return { written: pending.targetPath, bytes: assembled.length }
       })
+    }),
+
+    // ---- 本机目录枚举（批量自动更名的真实占用面；目录不存在返回空） ----
+    vscode.commands.registerCommand(PDF_EXECUTOR_COMMANDS.listDirectory, async (request: PdfRemoteListDirectoryRequest): Promise<PdfRemoteListDirectoryResult> => {
+      if (request === null || typeof request !== 'object' || typeof request.dir !== 'string') {
+        throw encodePdfRemoteError('bad-request', 'listDirectory 参数形态非法')
+      }
+      try {
+        const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(request.dir))
+        return { names: entries.filter(([, type]) => (type & vscode.FileType.File) !== 0).map(([name]) => name) }
+      } catch {
+        return { names: [] } // 目录不存在/不可读 = 无占用面（落位侧仍有排他保护）
+      }
     }),
 
     // ---- 本机 stat 探测（批量目标目录冲突映射在本机侧解析） ----

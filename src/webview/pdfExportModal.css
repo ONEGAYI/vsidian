@@ -6,26 +6,69 @@
  * - 焦点环走全局 :focus-visible 默认（2px focusBorder + offset 3px），
  *   不自带焦点样式。 */
 
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--vscode-editor-background);
+}
+
+#app {
+  height: 100%;
+}
+
+/* 主布局：预览列按打印纸面宽封顶（--vsidian-pdfexport-print-width 由视图
+ * 按当前纸张/方向写入），右侧栏吸收剩余宽度；整块内容居中。变更时对
+ * max-width / flex-basis 做短程过渡（用户验收要求的滑动动画）；
+ * prefers-reduced-motion 下关闭。批量/合并清单模式撤销封顶（表格需要宽）。 */
 .vsidian-pdfexport {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
   gap: 20px;
-  height: 100vh;
+  height: 100%;
+  max-width: calc(var(--vsidian-pdfexport-print-width, 794px) + 64px + 460px + 60px);
+  margin-inline: auto;
   box-sizing: border-box;
   padding: 20px;
   background: var(--vscode-editor-background);
   color: var(--vscode-editor-foreground);
   font-size: 13px;
+  transition: max-width 220ms ease;
 }
 
-/* ---- 主区：预览占位（T07/#627 接入真实 PDF 预览） ---- */
+.vsidian-pdfexport--list {
+  justify-content: stretch;
+  max-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vsidian-pdfexport,
+  .vsidian-pdfexport-preview,
+  .vsidian-pdfexport-side {
+    transition: none;
+  }
+}
+
+/* ---- 主区：预览（T07/#627 接入真实 PDF 预览） ---- */
 .vsidian-pdfexport-preview {
+  flex: 1 1 0;
+  max-width: calc(var(--vsidian-pdfexport-print-width, 794px) + 64px);
+  min-width: 0;
+  min-height: 0;
   border: 1px solid var(--vscode-panel-border);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 0;
+  transition: max-width 220ms ease;
+}
+
+.vsidian-pdfexport--list .vsidian-pdfexport-preview {
+  max-width: none;
 }
 
 /* T07（#627）：单文档模式预览块占满主区 */
@@ -52,6 +95,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 /* 预览工具栏（档位：按钮 6px 次级、徽章 pill 999px/11px 警示族、说明色 12px） */
@@ -115,13 +159,177 @@
   justify-content: center;
 }
 
+.vsidian-pdfexport-preview-stage > .vsidian-pdfexport-preview-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
 /* 预览滚动区（承载 PdfHoverView——页塔与页码信息行） */
 .vsidian-pdfexport-preview-scroll {
   flex: 1;
   min-height: 0;
-  margin-top: 8px;
   border-radius: 6px;
   overflow: auto;
+}
+
+/* 预览舞台：滚动区 + 左下角缩放条 + 加载骨架的共同定位基准（跨 render
+ * 存活——滚动位置与画布位图随节点保留） */
+.vsidian-pdfexport-preview-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+
+/* 空态/生成态：滚动区为空，缩放条无意义——隐藏（内容区由说明或骨架覆盖；
+ * 滚动区一并撤下，避免与说明块各占一半高度把说明挤到下半区） */
+.vsidian-pdfexport-preview-stage--empty > .vsidian-pdfexport-preview-scroll,
+.vsidian-pdfexport-preview-stage--empty > .vsidian-pdfexport-zoombar {
+  display: none;
+}
+
+/* ---- 左下角缩放控件（− / 百分比 / +；百分比点击复位 100%）----
+ * 档位：面板 8px 圆角、按钮 6px、tabular-nums 百分比、浮层阴影走
+ * --vscode-widget-shadow（ui-patterns 浮层谱系），零硬编码色值。 */
+.vsidian-pdfexport-zoombar {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, transparent);
+}
+
+.vsidian-pdfexport-zoom-btn,
+.vsidian-pdfexport-zoom-value {
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vscode-editor-foreground);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-zoom-btn {
+  width: 28px;
+  height: 26px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.vsidian-pdfexport-zoom-value {
+  min-width: 54px;
+  height: 26px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-descriptionForeground);
+}
+
+.vsidian-pdfexport-zoom-btn:hover:not(:disabled),
+.vsidian-pdfexport-zoom-value:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.vsidian-pdfexport-zoom-btn:disabled,
+.vsidian-pdfexport-zoom-value:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- 预览加载骨架（复用 #292 开屏骨架的灰块 + 扫光配方）----
+ * 灰块底色/扫光高亮沿用编辑器前景色低占比 color-mix；节拍来自
+ * shared/skeletonTiming（视图以 CSS 变量注入，CSS 不复制常量）；
+ * 页面按当前纸面宽与纵横比成形。 */
+.vsidian-pdfexport-preview-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--vscode-editor-background);
+}
+
+.vsidian-pdfexport-skeleton-page {
+  --vsidian-pdfexport-skeleton-width: 794px;
+  --vsidian-pdfexport-skeleton-ratio: 0.707;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  align-self: center;
+  /* 宽度贴合纸面宽（面板更窄时随面板）；高度由纵横比反算，超高部分
+   * 裁剪——骨架是瞬时形态，不为此做二次排版 */
+  width: min(100%, var(--vsidian-pdfexport-skeleton-width));
+  height: auto;
+  aspect-ratio: var(--vsidian-pdfexport-skeleton-ratio);
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 32px 36px;
+  border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground, #808080) 8%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 3%, transparent);
+}
+
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block {
+  position: relative;
+  overflow: hidden;
+  width: 88%;
+  height: 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 9%, transparent);
+}
+
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(1) {
+  width: 42%;
+  height: 22px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 16%, transparent);
+  margin-bottom: 6px;
+}
+
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(2) { width: 96%; }
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(3) { width: 91%; }
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(4) { width: 94%; }
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(5) { width: 62%; }
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(6) { width: 100%; height: 72px; border-radius: 10px; }
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(7) { width: 90%; }
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(8) { width: 74%; }
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block:nth-child(9) { width: 38%; }
+
+.vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--vscode-editor-foreground, #808080) 8%, transparent), transparent);
+  animation: vsidian-pdfexport-skeleton-sweep var(--vsidian-pdfexport-skeleton-cycle, 1500ms) linear infinite;
+  animation-delay: var(--vsidian-pdfexport-skeleton-delay, 300ms);
+}
+
+@keyframes vsidian-pdfexport-skeleton-sweep {
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vsidian-pdfexport-skeleton-page > .vsidian-skeleton-block::after {
+    animation: none;
+  }
 }
 
 /* ---- T07（#627）预览：PDF 阅读视图样式（PdfHoverView #337 同结构——
@@ -199,6 +407,9 @@
 
 .vsidian-pdfexport-preview-placeholder {
   max-width: 420px;
+  /* 列向 flex 子项默认 stretch，max-width 会把 420px 盒贴到左边缘——
+   * margin-inline:auto 让说明块真正居中（验收反馈：预览提示不居中）。 */
+  margin-inline: auto;
   padding: 24px;
   text-align: center;
 }
@@ -217,10 +428,18 @@
 
 /* ---- 侧区：固定输入 + 参数 + 操作 + 状态 ---- */
 .vsidian-pdfexport-side {
+  flex: 1 1 360px;
+  min-width: 300px;
+  max-width: 460px;
   border: 1px solid var(--vscode-panel-border);
   border-radius: 10px;
   padding: 16px 20px;
   overflow-y: auto;
+  transition: flex-basis 220ms ease;
+}
+
+.vsidian-pdfexport--list .vsidian-pdfexport-side {
+  max-width: 420px;
 }
 
 .vsidian-pdfexport-docrow {
@@ -413,16 +632,26 @@
 
 @media (max-width: 720px) {
   .vsidian-pdfexport {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(200px, 1fr) auto;
+    flex-direction: column;
+    max-width: none;
     height: auto;
-    min-height: 100vh;
+    min-height: 100%;
+  }
+
+  .vsidian-pdfexport-preview {
+    max-width: none;
+    min-height: 320px;
+  }
+
+  .vsidian-pdfexport-side {
+    flex: 0 0 auto;
+    max-width: none;
   }
 
   /* T07（#627）：窄屏单列模式主行高随内容增长（height: auto）——预览
-   * 页塔会把滚动区撑至全文高（挂载窗口失真）。预览滚动区设上限：窗口
+   * 页塔会把滚动区撑至全文高（挂载窗口失真）。预览舞台设上限：窗口
    * 计算回到有界视口，挂载/回收语义与宽屏一致 */
-  .vsidian-pdfexport-preview-scroll {
+  .vsidian-pdfexport-preview-stage {
     max-height: 70vh;
   }
 }

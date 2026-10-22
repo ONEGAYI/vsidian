@@ -70,21 +70,50 @@ export function nextAvailableTargetPath(targetPath: string, taken: ReadonlySet<s
   }
 }
 
-/** 自动更名的候选探测上限：从 name.pdf 起探测 name (2..N).pdf。
- *  探测与命名同源（nextAvailableTargetPath 用同一编号序列），避免「只 stat
- *  名义路径 → 选中已被 name (2).pdf 占用的编号 → 覆盖既有文件」
- *  （双轴评审 P2-003）。上限只为防御病态目录，不参与命名规则。 */
-const RENAME_PROBE_LIMIT = 200
-
-/** 生成某名义目标的编号候选路径列表（含名义路径本身）——宿主探测磁盘占用
- *  的唯一入口，与 nextAvailableTargetPath 的命名序列严格同源。 */
-export function renameProbeCandidates(targetPath: string): string[] {
-  const out: string[] = [targetPath]
-  const dot = targetPath.lastIndexOf('.')
-  const base = dot < 0 ? targetPath : targetPath.slice(0, dot)
-  const ext = dot < 0 ? '' : targetPath.slice(dot)
-  for (let n = 2; n <= RENAME_PROBE_LIMIT; n++) out.push(`${base} (${n})${ext}`)
+/**
+ * rename 策略的磁盘占用展开（双轴评审 P2-003 复核修复）：占用判定必须覆盖
+ * 目录里**实际存在**的同名编号文件，不能按固定编号上限猜候选——固定上限
+ * 既可能漏掉 `name (201).pdf`（随后把已占用编号当空闲而覆盖），又会对不
+ * 存在的编号发一堆无用 stat。
+ *
+ * 调用方枚举名义目标的父目录（本机 readDirectory / 执行端同一命令，目录
+ * 不存在返回空），本函数把条目名展开成绝对路径占用集。命名序列本身仍由
+ * `nextAvailableTargetPath` 负责——「目录里有什么」与「下一个空号」两个
+ * 事实源各司其职，不互相猜。
+ *
+ * 参数 listing 返回目录内条目名（不含分隔符）；带分隔符的异常条目跳过。
+ */
+export function occupiedTargetsFromListings(
+  nominalTargets: readonly string[],
+  listing: (dir: string) => readonly string[],
+): string[] {
+  const dirs = new Set<string>()
+  for (const target of nominalTargets) {
+    const slash = target.lastIndexOf('/')
+    if (slash > 0) dirs.add(target.slice(0, slash))
+  }
+  const out: string[] = []
+  for (const dir of dirs) {
+    for (const name of listing(dir)) {
+      if (name === '' || name.includes('/') || name.includes('\\')) continue
+      out.push(`${dir}/${name}`)
+    }
+  }
   return out
+}
+
+/**
+ * 无覆盖提交的碰撞重试（P2-003）：确认映射与真正落位之间目录可能新增同名
+ * 文件，自动更名/跳过的最终落位必须再核对一次。调用方把实际撞上的路径并入
+ * 占用集后，本函数从**名义路径**重新走同一命名序列取下一候选——不能从已
+ * 编号路径继续编号（否则得到 `name (3) (2).pdf`）。
+ */
+export function nextTargetAfterCollision(
+  nominalPath: string,
+  attempted: string,
+  taken: ReadonlySet<string>,
+): string {
+  return nextAvailableTargetPath(nominalPath, new Set([...taken, attempted]))
 }
 
 /**
@@ -170,10 +199,17 @@ export interface PdfBatchMappingEntry {
   fsPath: string
   /** 计划输出路径（'/' 分隔绝对路径；skip 项也给出拟映射路径便于展示） */
   targetPath: string
+  /** rename/skip 策略下的**名义**路径（无编号原始映射）：最终落位发生
+   *  碰撞重试时回到它重新走命名序列，不从已编号路径续编。overwrite 策略
+   *  下与 targetPath 相同。 */
+  nominalPath: string
   action: 'export' | 'skip'
   conflict: PdfBatchConflict
   /** 自动更名过（rename 策略避开冲突） */
   renamed: boolean
+  /** 最终落位必须无覆盖（白名单策略：rename/skip）——执行端以排他创建
+   *  写入并允许碰撞重试；overwrite 策略是显式覆盖授权，为 false */
+  exclusive: boolean
   skipReason?: 'duplicate' | 'exists'
 }
 
@@ -224,20 +260,41 @@ export function planBatchMapping(
         id: item.id,
         fsPath: item.fsPath,
         targetPath: nominal,
+        nominalPath: nominal,
         action: 'skip',
         conflict,
         renamed: false,
+        exclusive: false,
         skipReason: seen.has(nominalKey) ? 'duplicate' : 'exists',
       }
     } else if (strategy === 'overwrite') {
-      entry = { id: item.id, fsPath: item.fsPath, targetPath: nominal, action: 'export', conflict, renamed: false }
+      entry = {
+        id: item.id,
+        fsPath: item.fsPath,
+        targetPath: nominal,
+        nominalPath: nominal,
+        action: 'export',
+        conflict,
+        renamed: false,
+        exclusive: false,
+      }
     } else {
       // rename：动名看**实际占用**（此前条目最终目标或磁盘已有命中名义
       // 路径），不看标注面——首个同名条目无磁盘冲突时不动名，后到者取
-      // 编号路径；conflict 标注仍如实呈现
+      // 编号路径；conflict 标注仍如实呈现。落位一律无覆盖（exclusive），
+      // 确认到写盘之间新增的同名文件由执行层碰撞重试避开。
       const occupied = taken.has(nominalKey)
       const finalPath = occupied ? nextAvailableTargetPath(nominal, taken) : nominal
-      entry = { id: item.id, fsPath: item.fsPath, targetPath: finalPath, action: 'export', conflict, renamed: finalPath !== nominal }
+      entry = {
+        id: item.id,
+        fsPath: item.fsPath,
+        targetPath: finalPath,
+        nominalPath: nominal,
+        action: 'export',
+        conflict,
+        renamed: finalPath !== nominal,
+        exclusive: true,
+      }
     }
     taken.add(conflictKey(entry.targetPath))
     seen.add(nominalKey)

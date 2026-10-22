@@ -79,6 +79,15 @@ export class PdfExportRemoteChannelError extends Error {
   }
 }
 
+/** 无覆盖写入撞上已存在目标（批量白名单策略的落位端口抛出；执行层据此
+ *  换下一编号候选重试——不是写盘失败，也不能静默覆盖） */
+export class PdfExportTargetExistsError extends Error {
+  constructor(readonly targetPath: string) {
+    super(`target already exists: ${targetPath}`)
+    this.name = 'PdfExportTargetExistsError'
+  }
+}
+
 /** 标题书签报告（T05/#625 建立；T08/#628 定义下沉 shared/pdfExportPayload
  *  ——跨宿主协议两端口径同源，此处 re-export 保持既有导入面） */
 import type { PdfBookmarkReport } from '../../shared/pdfExportPayload'
