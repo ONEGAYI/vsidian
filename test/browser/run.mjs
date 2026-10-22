@@ -123,9 +123,6 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #339（P3-07）PDF 适合宽度/缩放/文本选择/链接：紧随 hoverPdf/embedPdf（同 PDF 族
   // ——真实 TextLayer 对齐/选区/缩放重绘/链接矩阵与零写回）
   'pdfZoomCopyLinks',
-  // 验收修复轮：PDF 导出模态预览（生产入口 + 真实 pdfjs——说明块居中、
-  // 页面按纸面宽封顶并居中、HiDPI 后备尺寸、缩放条/Ctrl+滚轮、扫光骨架）
-  'pdfExportPreview',
   // #376（T01）双链文件联想候选：紧随 symbolInput（同输入族——真实键盘/IME
   // 驱动、宿主应答由夹具回灌、候选浮层与键位行为）
   'wikilinkSuggest',
@@ -197,7 +194,12 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // 控制器 + 装载器，hostSettingsSnapshot 接线与生产 main.ts 同款；设置
   // 消息经生产路径进缓存、夹具组件经公开 SDK 读值回报——默认值/同源/
   // 热更跟随/白名单拒绝）紧随附加组件族
-  'addonHostSettings']
+  'addonHostSettings',
+  // 验收修复轮：PDF 导出模态预览（生产入口 + 真实 pdfjs——说明块居中、
+  // 页面按纸面宽封顶并居中、HiDPI 后备尺寸、缩放条/Ctrl+滚轮、扫光骨架）。
+  // 排在最末：短套件且不扰动既有长套件的启动顺序（symbolInput 等长套件
+  // 在受限 CI runner 上接近单脚本预算，插入中段会改变并发重叠）。
+  'pdfExportPreview']
 // 分组（仿集成 VSIDIAN_TEST_GROUP）：缺省 all 全量（本地习惯不变）；CI 的
 // browser job 跑 core，独立非必需的 browser-sensitive job 跑敏感名单。
 // 名单与维护口径见 test/browser/groups.mjs 与 docs/specs/integration-test-groups.md。
