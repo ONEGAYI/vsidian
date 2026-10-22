@@ -149,7 +149,12 @@ function lastEditRequest(h: Harness) {
   throw new Error('edit.request 未发出')
 }
 
-function respondHoverOk(h: Harness, text = TARGET_TEXT, version = 5): void {
+function respondHoverOk(
+  h: Harness,
+  text = TARGET_TEXT,
+  version = 5,
+  range?: { start: number; end: number },
+): void {
   const req = lastHoverRequest(h)
   const msg: Extract<HoverPreviewResult, { ok: true }> = {
     kind: 'hover.result',
@@ -159,7 +164,7 @@ function respondHoverOk(h: Harness, text = TARGET_TEXT, version = 5): void {
     target: { fsPath: B_FS, relPath: '目标笔记.md' },
     version,
     text,
-    range: { start: 0, end: text.length },
+    range: range ?? { start: 0, end: text.length },
     scope: { kind: 'full' },
     depth: 1,
     expansionPath: [],
@@ -170,7 +175,7 @@ function respondHoverOk(h: Harness, text = TARGET_TEXT, version = 5): void {
 
 let portSeq = 0
 /** 应答 bind（成功）并推送 init（编辑器装载全文） */
-function respondBound(h: Harness, opts?: { dirty?: boolean; version?: number }): string {
+function respondBound(h: Harness, opts?: { dirty?: boolean; version?: number; text?: string }): string {
   const bind = lastBindRequest(h)
   const portId = `refport-test-${++portSeq}`
   h.manager.notifyBound({
@@ -180,7 +185,10 @@ function respondBound(h: Harness, opts?: { dirty?: boolean; version?: number }):
   })
   h.manager.notifyPush({
     kind: 'refEdit.push', portId, fsPath: B_FS,
-    message: { kind: 'init', sessionId: portId, docUri: B_DOC_URI, version: opts?.version ?? 5, text: TARGET_TEXT },
+    message: {
+      kind: 'init', sessionId: portId, docUri: B_DOC_URI,
+      version: opts?.version ?? 5, text: opts?.text ?? TARGET_TEXT,
+    },
   })
   return portId
 }
@@ -343,6 +351,37 @@ describe('P2-06 悬停浮窗根引用内部 Live：端口接入与模式状态�
     respondHoverOk(h)
     respondBound(h)
     expect(popupEditor()).not.toBeNull()
+  })
+
+  it('重开浮层：选区记忆在场时仍定位锚点（修复只恢复选区、停在首行）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness('live')
+    const text = [
+      '# 目标笔记',
+      '',
+      ...Array.from({ length: 30 }, (_, i) => `前置第 ${i + 1} 段正文。`),
+      '',
+      '## 章节甲',
+      '',
+      '章节甲正文段。',
+      '',
+    ].join('\n')
+    const anchorStart = text.indexOf('## 章节甲')
+    openPopup(h)
+    respondHoverOk(h, text, 5, { start: anchorStart, end: text.length })
+    respondBound(h, { text })
+    expect(popupEditor()!.state.selection.main.head, '首开光标落在引用起点').toBe(anchorStart)
+    // 用户在浮窗内移动过光标（选区记忆建立）
+    popupEditor()!.dispatch({ selection: { anchor: 7 } })
+    mouseLeavePopup()
+    vi.advanceTimersByTime(HOVER_POPUP_CLOSE_DELAY_MS)
+    expect(isHoverPopupOpen()).toBe(false)
+
+    // 重开同位置：引用锚点优先于旧光标；真实可见性由 browser 用例验证
+    openPopup(h)
+    respondHoverOk(h, text, 6, { start: anchorStart, end: text.length })
+    respondBound(h, { text, version: 6 })
+    expect(popupEditor()!.state.selection.main.head, '重开仍定位到引用起点').toBe(anchorStart)
   })
 
   it('父面板模式切换联动：未手动覆盖的浮窗根跟随（Reading→Live 绑定端口）', () => {

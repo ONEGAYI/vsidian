@@ -273,6 +273,40 @@ try {
   passed++
   console.log('[L8] 关延迟排程后输入开始不销毁现场通过')
 
+  // ---- L9 同一引用首开、关闭、重开：目标标题须在浮窗内可见 ----
+  // 使用此前未打开的引用位置，保证首开确实没有会话选区记忆。
+  const anchorAt = await page.evaluate(() => window.setHoverAnchorTarget())
+  await page.evaluate(() => window.initHoverLiveDoc('# 锚点回归\n\n[[目标笔记|锚点定位]]\n', 'live'))
+  await page.locator('.cm-content .vsidian-wikilink').first().waitFor()
+  await hoverPtr('live-wikilink', 'enter', 0)
+  await waitFor('长文浮窗装载并绑定', probe, (v) => v.open === true && v.liveBound === true)
+  const firstOpen = await waitFor('首开滚动到锚点', () => page.evaluate(() => window.hoverLiveScroll()),
+    (v) => v.headingVisible === true && v.scrollTop > 0, 4000)
+  await page.locator('.vsidian-hover-popup').screenshot({ path: artifactPath(root, 'hoverLive/anchor-first-open.png') })
+  // 光标同步落在锚点（继续输入从引用处接着写）
+  const cursorAt = await page.evaluate(() => {
+    const view = window.hoverEditorView()
+    return view ? view.state.selection.main.head : -1
+  })
+  assert.equal(cursorAt, anchorAt, `首开光标应落在锚点区间起点（实际 ${cursorAt}，期望 ${anchorAt}）`)
+  passed++
+  console.log(`[L9] 首开目标标题可见 ${JSON.stringify(firstOpen)}`)
+
+  // 重开（会话选区记忆已在 Editing 期间建立）：仍须定位锚点，不回到首行
+  await page.click('.vsidian-hover-popup-live .cm-content')
+  await page.evaluate(() => window.hoverEditorView().dispatch({ selection: { anchor: 0 } }))
+  await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  await waitFor('外点关闭浮窗', probe, (v) => v.open !== true, 1500)
+  await hoverPtr('live-wikilink', 'enter', 0)
+  await waitFor('重开浮窗装载并绑定', probe, (v) => v.open === true && v.liveBound === true)
+  const reopenedScroll = await waitFor('重开滚动到锚点', () => page.evaluate(() => window.hoverLiveScroll()),
+    (v) => v.headingVisible === true && v.scrollTop > 0, 4000)
+  await page.locator('.vsidian-hover-popup').screenshot({ path: artifactPath(root, 'hoverLive/anchor-reopened.png') })
+  await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  await waitFor('复位关闭', probe, (v) => v.open !== true, 1500)
+  passed++
+  console.log(`[L9] 重开带选区记忆仍定位锚点 ${JSON.stringify(reopenedScroll)}`)
+
   // ---- 收尾断言：无页面错误、无编辑器泄漏 ----
   assert.deepEqual(errors, [], '页面无未捕获错误')
   const editorCount = await page.evaluate(() => window.hoverLiveEditorCount())
