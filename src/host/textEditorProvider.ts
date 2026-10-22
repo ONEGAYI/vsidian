@@ -116,7 +116,7 @@ import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { matchHostOffset, parseCopyMatch, SEARCH_REVEAL_SENTINEL, shouldShowSearchRevealHint } from './searchReveal'
-import { parseGotoLineInput, gotoLineLfOffset } from './gotoLine'
+import { isValidGotoLineInput, parseGotoLineInput, gotoLineLfOffset } from './gotoLine'
 import {
   readRefContentTarget,
   resolveHoverTargetTip,
@@ -5032,18 +5032,12 @@ export function createTextEditorProvider(
     const input = await vscode.window.showInputBox({
       prompt: t('host.gotoLinePrompt', { total: String(total) }),
       placeHolder: t('host.gotoLinePlaceholder'),
-      validateInput: (value) => {
-        // 空值 = 取消式空提交，不报错也不定位（用户直接回车放弃）
-        if (value.trim() === '') {
-          return undefined
-        }
-        const line = parseGotoLineInput(value)
-        if (line === null || line > entry.doc.lineCount) {
-          return t('host.gotoLineInvalid', { total: String(entry.doc.lineCount) })
-        }
-        return undefined
-      },
+      validateInput: (value) => isValidGotoLineInput(value, entry.doc.lineCount)
+        ? undefined
+        : t('host.gotoLineInvalid', { total: String(entry.doc.lineCount) }),
     })
+    // 取消（Esc）与空提交是两条路：前者 input 为 undefined，后者被
+    // validateInput 拦下、输入框保持在场并显示本地化文案（#638）。
     if (input === undefined) {
       return
     }

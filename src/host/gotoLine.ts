@@ -2,9 +2,9 @@
 //
 // 只接受 1-based 正整数源码行号——宿主 workbench.action.gotoLine 在自定义
 // 编辑器下没有可寻址的文本编辑器目标，本操作以 Vsidian 自有输入框替代。
-// 本模块只判「形状」：空值、0、负数、小数、非数字、夹杂文本与超安全整数
-// 一律 null（调用方不定位）；文档范围（lineCount）由调用方判定，两者分开
-// 才能在输入期间文档变化时按最新行数给出越界反馈。
+// 本模块分两层判定：parseGotoLineInput 只判「形状」——空值、0、负数、小数、
+// 非数字、夹杂文本与超安全整数一律 null；isValidGotoLineInput 在其上叠加
+// 文档范围（lineCount）。分开才能在输入期间文档变化时按最新行数给越界反馈。
 //
 // 不提供列号、百分比、字符偏移或 `:line:col` 语法——#638 票面明确不扩展。
 import { NewlineCoordinator } from '../shared/newline'
@@ -22,6 +22,17 @@ export function parseGotoLineInput(raw: string): number | null {
     return null
   }
   return value
+}
+
+/**
+ * 输入框校验（showInputBox 的 validateInput 唯一判定）：空值、形状非法与
+ * 越界一律未通过——空值同样是「需要本地化反馈」的非法输入，不得提前放行
+ * 后静默退出（#638：取消由 showInputBox 返回 undefined 单独处理，与空提交
+ * 不是同一条路）。
+ */
+export function isValidGotoLineInput(raw: string, lineCount: number): boolean {
+  const line = parseGotoLineInput(raw)
+  return line !== null && line <= lineCount
 }
 
 /**

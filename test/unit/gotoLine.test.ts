@@ -4,7 +4,7 @@
 // 行首换算复用 addonDocNav.hostLineStart（#534 同一事实源），CRLF 经
 // NewlineCoordinator 折算为 webview LF 坐标。
 import { describe, expect, it } from 'vitest'
-import { parseGotoLineInput, gotoLineLfOffset } from '../../src/host/gotoLine'
+import { parseGotoLineInput, gotoLineLfOffset, isValidGotoLineInput } from '../../src/host/gotoLine'
 
 describe('跳转到行输入解析（parseGotoLineInput）', () => {
   it('收正整数行号，两侧空白不敏感', () => {
@@ -13,7 +13,7 @@ describe('跳转到行输入解析（parseGotoLineInput）', () => {
     expect(parseGotoLineInput('  7  ')).toBe(7)
     expect(parseGotoLineInput('100000')).toBe(100000)
   })
-  it('拒绝空值与纯空白（取消与空提交同口径，不定位）', () => {
+  it('拒绝空值与纯空白（形状非法，由输入框统一给本地化反馈）', () => {
     expect(parseGotoLineInput('')).toBeNull()
     expect(parseGotoLineInput('   ')).toBeNull()
   })
@@ -35,6 +35,27 @@ describe('跳转到行输入解析（parseGotoLineInput）', () => {
   it('拒绝超出安全整数范围的值', () => {
     expect(parseGotoLineInput('9007199254740993')).toBeNull()
     expect(parseGotoLineInput('1'.repeat(30))).toBeNull()
+  })
+})
+
+describe('输入框校验（isValidGotoLineInput）', () => {
+  // #638 验收：空值也必须给出本地化校验反馈，不能被当成"取消式空提交"
+  // 放行后静默退出（取消由 showInputBox 返回 undefined 单独处理）。
+  it('空值与纯空白判为未通过（同一非法文案反馈，输入框保持在场）', () => {
+    expect(isValidGotoLineInput('', 10)).toBe(false)
+    expect(isValidGotoLineInput('   ', 10)).toBe(false)
+    expect(isValidGotoLineInput('\t\n', 10)).toBe(false)
+  })
+  it('形状非法与越界均判为未通过', () => {
+    for (const raw of ['0', '-1', '1.5', 'abc', '12a', '1e3', '+5']) {
+      expect(isValidGotoLineInput(raw, 10)).toBe(false)
+    }
+    expect(isValidGotoLineInput('11', 10)).toBe(false)
+  })
+  it('范围内正整数判为通过，边界首末行可用', () => {
+    expect(isValidGotoLineInput('1', 10)).toBe(true)
+    expect(isValidGotoLineInput('10', 10)).toBe(true)
+    expect(isValidGotoLineInput('  3  ', 10)).toBe(true)
   })
 })
 

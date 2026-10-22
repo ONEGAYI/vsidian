@@ -239,12 +239,34 @@ try {
     await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA',
       windowsVirtualKeyCode: 65, modifiers: 2 })
   }
+  const backspace = async () => {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Backspace', code: 'Backspace',
+      windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace',
+      windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 })
+  }
   await typeText('99')
   await new Promise((resolve) => setTimeout(resolve, 150))
   await pressEnter()
   await new Promise((resolve) => setTimeout(resolve, 300))
   assert(await widgetOpen(), '越界输入应被 validateInput 拦下并保持输入框在场')
+  // 空值同样要得到本地化校验反馈，不能被当成"取消式空提交"静默放行
+  //（#638 验收：空值、越界等一律反馈且不定位；取消由 Esc 单独处理）。
   await selectAll()
+  await backspace()
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  await pressEnter()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert(await widgetOpen(), '空值提交应被 validateInput 拦下并保持输入框在场')
+  const invalidMessage = await call('Runtime.evaluate', {
+    expression: `(() => { const el = document.querySelector('.quick-input-message');
+      return el ? el.textContent : null })()`,
+    returnByValue: true,
+  })
+  // 文案随宿主语言切换，断言只钉"有反馈且带行数上限"（两语言包都含 {total}）
+  const invalidText = invalidMessage?.result?.value ?? ''
+  assert(invalidText !== '' && invalidText.includes('5'),
+    `空值提交应显示本地化行号文案（实测 ${JSON.stringify(invalidText)}）`)
   await typeText('3')
   await new Promise((resolve) => setTimeout(resolve, 150))
   await pressEnter()
