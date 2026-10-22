@@ -176,8 +176,9 @@ main.vsidian-pdfexport-preview（弹性列；max-width = 纸面宽 + 64px，右�
 
 - 布局尺寸变化（纸张/方向切换）走 `max-width` / `flex-basis` 220ms 过渡；`prefers-reduced-motion` 下关闭。说明块 `margin-inline:auto` 真正居中（列向 flex + max-width 不贴左）。
 - 缩放条与 Ctrl+滚轮共用 `PdfHoverView` 缩放入口；百分比 = 相对打印纸面的达成值（100% = 纸面大小），受渲染上限钳制时如实停在上限。工具条按钮 6px 档、百分比 12px tabular-nums、无新增色彩档位。
+- 百分比点击走预览专用的纸面 100% 入口（`resetToPaperScale`——按有效适配比例反算乘子；窄面板下同样回到纸面尺寸并横向滚动，乘子触顶时回显达成值），不改变阅读器浮层/嵌入卡 `resetZoom` 的适合宽度语义。面板宽度变化经滚动区 `ResizeObserver` 刷新百分比回显（下一帧，避免与 PdfHoverView 自己的重绘竞序）。
 - 骨架复用 #292 开屏骨架的视觉配方与 `shared/skeletonTiming` 节拍常量（经 CSS 变量注入），不复制数值；仍是页面级模态内部形态，不改变编辑器骨架的公开契约条目。
-- 绘制层断言：浏览器套件 `pdfExportPreview`（生产模态入口 + 真实 pdfjs + deviceScaleFactor 2）断言说明块居中、页面宽不超过纸面宽且居中、画布后备 = CSS × DPR、缩放条位置与 Ctrl+滚轮/按钮/百分比复位、骨架 9 块与 1.5s 扫光；集成 T07 探针追加 `previewPrintWidth` / `previewZoomBar` / `previewFirstCanvasCssWidth` 断言。
+- 绘制层断言：浏览器套件 `pdfExportPreview`（生产模态入口 + 真实 pdfjs + deviceScaleFactor 2）断言说明块居中、页面宽不超过纸面宽且居中、画布后备 = CSS × DPR、缩放条位置与 Ctrl+滚轮/按钮/百分比复位、骨架 9 块与 1.5s 扫光，并在视口收窄到 900px 后断言窄面板复位回到纸面 816px 且横向可滚动；集成 T07 探针追加 `previewPrintWidth` / `previewZoomBar` / `previewFirstCanvasCssWidth` 断言。
 
 **批量模式分区（T04/#624，2026-10-21）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载添加入口与参数——全部复用既有档位，零新档位：
 

@@ -669,8 +669,7 @@ export class PdfHoverView {
    *  被 PDF_RENDER_MAX_SCALE 钳制后如实回报达成值，不谎称缩放生效。 */
   zoomPercent(): number {
     if (this.doc === null || this.totalPages === 0) return 100
-    const dim = this.pageDims[this.page - 1] ?? this.pageDims.find((d) => d !== null) ?? null
-    const baseW = dim?.w ?? PDF_ESTIMATED_PAGE_WIDTH
+    const baseW = this.baseWidthOfVisiblePage()
     return Math.round((this.scaleFor(baseW) / PDF_ACTUAL_SCALE) * 100)
   }
 
@@ -900,14 +899,24 @@ export class PdfHoverView {
     return Math.round(baseH * scale)
   }
 
-  /** 页渲染 scale（#339：宽度适配 × 用户缩放乘子，总 scale 统一受上下限
-   *  钳制——费用单一上限 PDF_RENDER_MAX_SCALE 对缺省与缩放态同等生效）。
-   *  预览模式（maxRenderWidth > 0）的「适合宽度」再以打印实际尺寸为上限：
-   *  宽面板不把页面拉伸放大（100% = 纸面大小），窄面板则随容器缩小。 */
-  private scaleFor(baseWidth: number): number {
+  /** 乘子 1 对应的基础 scale（不含用户缩放）。预览模式（maxRenderWidth > 0）
+   *  的「适合宽度」以打印实际尺寸为上限：宽面板不把页面拉伸放大
+   *  （100% = 纸面大小），窄面板则随容器缩小。 */
+  private fitScaleFor(baseWidth: number): number {
     const rawFit = this.renderWidth / baseWidth
-    const fit = this.maxRenderWidth > 0 ? Math.min(rawFit, PDF_ACTUAL_SCALE) : rawFit
-    return Math.min(PDF_RENDER_MAX_SCALE, Math.max(PDF_RENDER_MIN_SCALE, fit * this.zoom))
+    return this.maxRenderWidth > 0 ? Math.min(rawFit, PDF_ACTUAL_SCALE) : rawFit
+  }
+
+  /** 页渲染 scale（#339：宽度适配 × 用户缩放乘子，总 scale 统一受上下限
+   *  钳制——费用单一上限 PDF_RENDER_MAX_SCALE 对缺省与缩放态同等生效）。 */
+  private scaleFor(baseWidth: number): number {
+    return Math.min(PDF_RENDER_MAX_SCALE, Math.max(PDF_RENDER_MIN_SCALE, this.fitScaleFor(baseWidth) * this.zoom))
+  }
+
+  /** 当前页基础宽（PDF 用户单位；未实测按估计宽） */
+  private baseWidthOfVisiblePage(): number {
+    const dim = this.pageDims[this.page - 1] ?? this.pageDims.find((d) => d !== null) ?? null
+    return dim?.w ?? PDF_ESTIMATED_PAGE_WIDTH
   }
 
   private totalHeight(): number {
@@ -1439,6 +1448,16 @@ export class PdfHoverView {
   private updatePageInfo(): void {
     if (this.page > 0 && this.totalPages > 0) {
       const args = { page: String(this.page), total: String(this.totalPages) }
+      const baseW = this.baseWidthOfVisiblePage()
+      if (this.maxRenderWidth > 0) {
+        // 导出预览：百分比与左下角缩放条同一基准（100% = 纸面实际尺寸），
+        // 不出现「缩放条 49%、页码行却按适合宽度说 100%」的相互矛盾
+        const paperPercent = Math.round((this.scaleFor(baseW) / PDF_ACTUAL_SCALE) * 100)
+        this.pageInfo.textContent = paperPercent === 100
+          ? t('hover.pdfPageInfo', args)
+          : t('hover.pdfPageInfoZoom', { ...args, percent: String(paperPercent) })
+        return
+      }
       if (this.zoom === 1) {
         // #339 缺省态：恒纯页码——fit 被 MAX/MIN_SCALE 钳制是「适合宽度」
         // 的实现细节，不在页码行表达（与 resetZoom 的 zoom===1 缺省判据
@@ -1448,8 +1467,6 @@ export class PdfHoverView {
       }
       // 缩放态：附实际达成缩放百分比（相对适合宽度；上限钳制后的达成值
       //——不显示未生效的乘子）
-      const dim = this.pageDims[this.page - 1] ?? null
-      const baseW = dim?.w ?? PDF_ESTIMATED_PAGE_WIDTH
       const fit = this.renderWidth / baseW
       const achieved = fit > 0 ? this.scaleFor(baseW) / fit : 1
       this.pageInfo.textContent = t('hover.pdfPageInfoZoom', {
@@ -1569,11 +1586,10 @@ export class PdfHoverView {
       return false
     }
     // 视觉有效性：当前页有效 scale 不变的推进不受理（上限语义的诚实面）
-    const dim = this.pageDims[this.page - 1] ?? null
-    const baseW = dim?.w ?? PDF_ESTIMATED_PAGE_WIDTH
+    const baseW = this.baseWidthOfVisiblePage()
     const current = this.scaleFor(baseW)
     const after = Math.min(PDF_RENDER_MAX_SCALE,
-      Math.max(PDF_RENDER_MIN_SCALE, (this.renderWidth / baseW) * next))
+      Math.max(PDF_RENDER_MIN_SCALE, this.fitScaleFor(baseW) * next))
     if (after === current) {
       return false
     }
@@ -1590,6 +1606,37 @@ export class PdfHoverView {
       return false
     }
     this.zoom = 1
+    this.stickyPage = 0
+    this.relayoutToScaleChange()
+    this.updatePageInfo()
+    return true
+  }
+
+  /**
+   * 打印纸面 100% 复位（导出预览专用入口）：把缩放乘子反算到「100% =
+   * 纸面实际尺寸」——容器比纸面窄时乘子放大补偿适合宽度的缩小，宽面板
+   * （乘子本为 1）同样从其他倍率回到纸面尺寸。受 PDF_ZOOM_MAX 与渲染
+   * scale 上限钳制：容器窄到乘子上限仍不足纸面宽时停在上限，百分比回显
+   * 达成值而非 100%（不谎称生效）。已在纸面尺寸返回 false。
+   * 阅读器浮层/嵌入卡不进本入口（resetZoom 的适合宽度语义不变）。
+   */
+  resetToPaperScale(): boolean {
+    if (this.disposed || this.doc === null || this.phase !== 'content') {
+      return false
+    }
+    const baseW = this.baseWidthOfVisiblePage()
+    const fit = this.fitScaleFor(baseW)
+    if (fit <= 0) {
+      return false
+    }
+    const target = Math.min(PDF_ZOOM_MAX, Math.max(PDF_ZOOM_MIN, PDF_ACTUAL_SCALE / fit))
+    // 视觉有效性：目标 scale 与当前一致时不受理（贴浮点判定）
+    const current = this.scaleFor(baseW)
+    const after = Math.min(PDF_RENDER_MAX_SCALE, Math.max(PDF_RENDER_MIN_SCALE, fit * target))
+    if (Math.abs(after - current) < 1e-6) {
+      return false
+    }
+    this.zoom = target
     this.stickyPage = 0
     this.relayoutToScaleChange()
     this.updatePageInfo()

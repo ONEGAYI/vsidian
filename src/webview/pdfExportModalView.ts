@@ -317,6 +317,19 @@ export class PdfExportModalView {
         const factor = event.deltaY < 0 ? PDF_ZOOM_STEP : 1 / PDF_ZOOM_STEP
         if (view.zoomBy(factor)) this.updateZoomUi()
       }, { passive: false })
+      // 面板宽度变化会改「适合宽度」的基础 scale（窄面板的百分比随之变），
+      // 缩放条约在 PdfHoverView 自己的 ResizeObserver 里重绘——下一帧再回显，
+      // 否则百分比停在旧值（窄面板仍显示 100%）。
+      if (typeof ResizeObserver === 'function') {
+        const observer = new ResizeObserver(() => {
+          if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => this.updateZoomUi())
+          } else {
+            this.updateZoomUi()
+          }
+        })
+        observer.observe(this.previewScrollEl)
+      }
     }
     return this.previewScrollEl
   }
@@ -359,7 +372,9 @@ export class PdfExportModalView {
     return bar
   }
 
-  /** 缩放动作（按钮/百分比复位）——成功后同步百分比与禁用态 */
+  /** 缩放动作（按钮/百分比复位）——成功后同步百分比与禁用态。
+   *  百分比复位走预览专用的纸面 100% 入口（按有效 fit 反算乘子）：容器比
+   *  纸面窄时也真正回到纸面尺寸，而不是阅读器 resetZoom 的适合宽度语义。 */
   private applyPreviewZoom(action: 'in' | 'out' | 'reset'): void {
     const view = this.previewView
     if (view === null) return
@@ -367,7 +382,7 @@ export class PdfExportModalView {
       ? view.zoomBy(PDF_ZOOM_STEP)
       : action === 'out'
         ? view.zoomBy(1 / PDF_ZOOM_STEP)
-        : view.resetZoom()
+        : view.resetToPaperScale()
     if (changed) this.updateZoomUi()
   }
 

@@ -198,8 +198,52 @@ try {
   assert.equal(await page.locator('.vsidian-pdfexport-zoom-value').textContent(), '100%', '− 按钮缩小')
   passed++
 
+  // ---- 窄面板：百分比复位必须回到纸面 100%，而不是适合宽度 ----
+  // 视口收窄后预览列窄于 Letter 纸面（816px），适合宽度约 5x%；点百分比
+  // 复位应把乘子反算到纸面尺寸，画布宽回到 ≈816 并横向可滚动。
+  await page.setViewportSize({ width: 900, height: 900 })
+  await page.waitForFunction(() => {
+    const scroll = document.querySelector('.vsidian-pdfexport-preview-scroll')
+    const canvas = scroll?.querySelector('canvas')
+    if (!scroll || !canvas) return false
+    return Number.parseFloat(canvas.style.width) < Number.parseFloat(getComputedStyle(document.querySelector('.vsidian-pdfexport')).getPropertyValue('--vsidian-pdfexport-print-width'))
+  }, undefined, { timeout: 15000 })
+  const narrow = await page.evaluate(() => {
+    const scroll = document.querySelector('.vsidian-pdfexport-preview-scroll')
+    const canvas = scroll.querySelector('canvas')
+    return {
+      label: document.querySelector('.vsidian-pdfexport-zoom-value')?.textContent ?? '',
+      canvasCssWidth: Number.parseFloat(canvas.style.width),
+      scrollClientWidth: scroll.clientWidth,
+    }
+  })
+  assert.ok(narrow.label !== '100%', `窄面板下适合宽度不应回显 100%（实测 ${narrow.label}）`)
+  assert.ok(narrow.canvasCssWidth < 816, `窄面板下页面应随面板缩小（实测 ${narrow.canvasCssWidth.toFixed(1)}px）`)
+  assert.ok(narrow.canvasCssWidth <= narrow.scrollClientWidth, '窄面板下页面不溢出（适合宽度）')
+  await page.locator('.vsidian-pdfexport-zoom-value').click()
+  await page.waitForFunction((paper) => {
+    const canvas = document.querySelector('.vsidian-pdfexport-preview-scroll canvas')
+    return canvas !== null && Math.abs(Number.parseFloat(canvas.style.width) - paper) <= 1
+  }, Math.round(612 * 96 / 72), { timeout: 15000 })
+  const narrowReset = await page.evaluate(() => {
+    const scroll = document.querySelector('.vsidian-pdfexport-preview-scroll')
+    const canvas = scroll.querySelector('canvas')
+    return {
+      label: document.querySelector('.vsidian-pdfexport-zoom-value')?.textContent ?? '',
+      canvasCssWidth: Number.parseFloat(canvas.style.width),
+      scrollWidth: scroll.scrollWidth,
+      scrollClientWidth: scroll.clientWidth,
+    }
+  })
+  assert.equal(narrowReset.label, '100%', '窄面板点百分比应复位纸面 100%')
+  assert.ok(Math.abs(narrowReset.canvasCssWidth - 816) <= 1,
+    `复位后画布宽应等于 Letter 纸面（实测 ${narrowReset.canvasCssWidth.toFixed(1)}px）`)
+  assert.ok(narrowReset.scrollWidth > narrowReset.scrollClientWidth + 20,
+    '纸面尺寸超出窄面板时应横向可滚动，而不是被裁掉')
+  passed++
+
   assert.deepEqual(errors, [], `页面不应有未捕获异常：${errors.join(' | ')}`)
-  console.log(`pdfExportPreview: ${passed}/4 场景通过`)
+  console.log(`pdfExportPreview: ${passed}/5 场景通过`)
 } finally {
   await browser.close()
 }

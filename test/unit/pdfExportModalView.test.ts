@@ -9,6 +9,11 @@ const { FakePdfHoverView } = vi.hoisted(() => {
     static instances: FakePdfHoverView[] = []
     readonly container: HTMLElement
     maxRenderWidth = 0
+    /** 乘子 1 对应「纸面 100%」的反比（窄面板 >1；宽面板 =1）——模拟
+     *  适配宽度与纸面尺寸的差距，复位 100% 需把乘子推到该值 */
+    paperZoom = 1
+    resetZoomCalls = 0
+    paperResetCalls = 0
     private zoom = 1
     private ready = false
     shows: string[] = []
@@ -38,13 +43,21 @@ const { FakePdfHoverView } = vi.hoisted(() => {
     }
 
     resetZoom(): boolean {
+      this.resetZoomCalls++
       if (this.zoom === 1) return false
       this.zoom = 1
       return true
     }
 
+    resetToPaperScale(): boolean {
+      this.paperResetCalls++
+      if (this.zoom === this.paperZoom) return false
+      this.zoom = this.paperZoom
+      return true
+    }
+
     zoomPercent(): number {
-      return Math.round(this.zoom * 100)
+      return Math.round((this.zoom / this.paperZoom) * 100)
     }
 
     probe(): { phase: string } {
@@ -164,5 +177,38 @@ describe('PDF 导出模态视图：预览宽度与缩放条', () => {
     const plain = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true })
     scroll.dispatchEvent(plain)
     expect(plain.defaultPrevented).toBe(false)
+
+    // 百分比复位走预览专用的纸面 100% 入口，而非阅读器的适合宽度复位
+    expect(instance.paperResetCalls).toBeGreaterThan(0)
+    expect(instance.resetZoomCalls).toBe(0)
+    expect(instance.zoomPercent()).toBe(100)
+  })
+
+  it('窄面板：百分比复位到纸面 100%（不是适合宽度），回显随达成值', async () => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:preview'),
+      revokeObjectURL: vi.fn(),
+    })
+    const { view, host } = mount()
+    view.applyState(stateWithPreview({ preview: { phase: 'ready', generation: 1, fingerprint: 'fp' } }))
+    view.applyPreviewArtifact(1, btoa('preview'))
+    await vi.waitFor(() => {
+      expect(host.querySelector('.vsidian-pdfexport-preview-skeleton')).toBeNull()
+    })
+    const instance = FakePdfHoverView.instances[0]!
+    // 窄面板：乘子 1 只到纸面的约 51%，复位需要乘子 ≈1.96
+    instance.paperZoom = 794 / 408
+    // 走 + 按钮（视图入口）放大一档：百分比按纸面前基准回显 ≈64%
+    host.querySelectorAll<HTMLButtonElement>('.vsidian-pdfexport-zoom-btn')[1]!.click()
+    const value = host.querySelector<HTMLButtonElement>('.vsidian-pdfexport-zoom-value')!
+    expect(value.textContent).toBe('64%')
+    value.click()
+    expect(value.textContent).toBe('100%')
+    expect(instance.paperResetCalls).toBe(1)
+    expect(instance.resetZoomCalls).toBe(0)
+    // 已在纸面尺寸再点：无效但不报错，回显不变
+    value.click()
+    expect(value.textContent).toBe('100%')
   })
 })
