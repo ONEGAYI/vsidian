@@ -46,7 +46,29 @@ const TARGET_TEXT = [
   '',
 ].join('\n')
 
-/** 伪造 B 权威文本模型（LF 坐标；宿主 TextDocument 的行为近似） */
+/** 锚点定位回归用长文（L9）：目标章节位于首屏之外 */
+const LONG_TARGET_TEXT = [
+  '# 目标笔记标题',
+  '',
+  ...Array.from({ length: 30 }, (_, i) => `前置第 ${i + 1} 段正文，把目标章节推出浮窗视口。`),
+  '',
+  '## 定位章节',
+  '',
+  '定位章节正文段。',
+  '',
+  ...Array.from({ length: 30 }, (_, i) => `后置第 ${i + 1} 段正文，给锚点定位留出滚动余量。`),
+  '',
+  '## 定位章节之后',
+  '',
+  '后段正文。',
+  '',
+].join('\n')
+
+/** L9 指定章节区间；其余场景按当前全文长度应答 */
+let hoverRange: { start: number; end: number } | null = null
+
+/** 伪造 B 权威文本模型（LF 坐标；宿主 TextDocument 的行为近似）。
+ *  L9 经 setHoverAnchorTarget 整体替换为长文 */
 const bModel = {
   content: TARGET_TEXT,
   savedContent: TARGET_TEXT,
@@ -89,7 +111,7 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
         target: { fsPath: B_FS, relPath: '目标笔记.md' },
         version: bModel.ver,
         text: bModel.content,
-        range: { start: 0, end: bModel.content.length },
+        range: hoverRange ?? { start: 0, end: bModel.content.length },
         scope: { kind: 'full' },
         depth: 1,
         expansionPath: [],
@@ -204,6 +226,43 @@ function mainView(): EditorView | null {
 }
 
 Object.assign(window, {
+  /** L9 锚点定位回归：把 B 目标切成带章节区间的长文 */
+  setHoverAnchorTarget(): number {
+    hoverRange = {
+      start: LONG_TARGET_TEXT.indexOf('## 定位章节'),
+      end: LONG_TARGET_TEXT.indexOf('## 定位章节之后'),
+    }
+    bModel.content = LONG_TARGET_TEXT
+    bModel.savedContent = LONG_TARGET_TEXT
+    return hoverRange.start
+  },
+  /** 浮窗内目标标题的可见性：实际布局、计算样式与绘制命中共同验证 */
+  hoverLiveScroll(): Record<string, unknown> {
+    const editor = document.querySelector<HTMLElement>('.vsidian-hover-popup-live .cm-editor')
+    const view = editor ? EditorView.findFromDOM(editor) : null
+    const scroller = editor?.querySelector<HTMLElement>('.cm-scroller') ?? null
+    if (!view || !scroller) {
+      return { present: false }
+    }
+    const headingLine = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')]
+      .find((el) => (el.textContent ?? '').includes('## 定位章节')) ?? null
+    const clip = scroller.getBoundingClientRect()
+    const box = headingLine?.getBoundingClientRect() ?? null
+    const style = headingLine ? getComputedStyle(headingLine) : null
+    const headingVisible = headingLine !== null && box !== null && style !== null &&
+      box.height > 0 && box.top >= clip.top && box.bottom <= clip.bottom &&
+      style.visibility === 'visible' && style.opacity !== '0' &&
+      headingLine.contains(document.elementFromPoint(box.left + 100, (box.top + box.bottom) / 2))
+    return {
+      present: true,
+      scrollTop: Math.round(scroller.scrollTop),
+      scrollHeight: Math.round(scroller.scrollHeight),
+      clientHeight: Math.round(scroller.clientHeight),
+      headingFound: headingLine !== null,
+      headingVisible,
+      headingOffsetFromTop: box === null ? null : Math.round(box.top - clip.top),
+    }
+  },
   /** 装配父文档并切模式（Live 起步——内部模式继承验证的默认父态） */
   initHoverLiveDoc(text: string, mode: 'live' | 'reading') {
     controller.handleHostMessage({
