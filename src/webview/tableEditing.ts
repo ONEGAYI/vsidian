@@ -1286,6 +1286,25 @@ export const tableEditing = [
       event.preventDefault()
       return true
     },
+    // 格区剪切：复制语义（serializeTableRegion）与删除语义（planTableRegionDelete，
+    // 与 Delete/Backspace 的 deleteSelectedRegion 同源）一次完成。序列化必须抢在
+    // 删除事务之前取文；dispatch 不带 userEvent 注解（protectGridCellContent 对
+    // delete/input 事务会钳制回单格），region field 随 docChanged 自行清除。
+    // 无可删内容（选中格全空，plan 为 null）时退化为纯复制。不拦截则落回
+    // CM6 内建空选区兜底：按行复制原文 + 删除被钳成清空左上格。
+    cut: (event, view) => {
+      if (view.compositionStarted) return false
+      const selected = selectedRegionRows(view)
+      if (!selected || !event.clipboardData) return false
+      const doc = view.state.doc.toString()
+      const text = serializeTableRegion(doc, selected.rows, selected.region)
+      if (text === null) return false
+      const plan = planTableRegionDelete(doc, selected.rows, selected.region)
+      event.clipboardData.setData('text/plain', text)
+      event.preventDefault()
+      if (plan) view.dispatch({ changes: plan.changes, selection: { anchor: plan.selection }, scrollIntoView: true })
+      return true
+    },
     // 格对格粘贴（2026-09-28 决策）：格区选区 + 合法表格剪贴板在事件层
     // 截获直发单事务——事务层的格内粘贴转义（protectGridPointerSelection
     // 的 escapeCellText）会把管道/换行预转义，表格判定必须抢在它之前。
