@@ -185,7 +185,6 @@ export const en = {
   'pdfExport.preview.failed': 'Preview generation failed',
   'pdfExport.preview.stale': 'Preview outdated',
   'pdfExport.preview.bookmarks': '{count} heading bookmarks',
-  'pdfExport.preview.itemLabel': 'Preview file',
   /** Preview zoom bar (bottom-left; 100% = printed paper size) */
   'pdfExport.preview.zoomIn': 'Zoom in',
   'pdfExport.preview.zoomOut': 'Zoom out',
@@ -251,6 +250,9 @@ export const en = {
   'pdfExport.batch.addFiles': 'Add files',
   'pdfExport.batch.addDir': 'Add folder',
   'pdfExport.batch.listTitle': 'Export list',
+  /** Unified export page: the current document is a one-item list */
+  'pdfExport.batch.singleItemHint': 'The current document. Add files or a folder to export several at once.',
+  'pdfExport.batch.selectedHint': 'Previewing this file',
   'pdfExport.batch.empty': 'The list is empty — add files or a folder to start. Folders are scanned recursively for Markdown; other files are left out.',
   'pdfExport.batch.itemMoveUp': 'Move up',
   'pdfExport.batch.itemMoveDown': 'Move down',

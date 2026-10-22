@@ -703,6 +703,14 @@ export type HostToWebview =
       /** T07（#627）宿主侧当日日期（页眉日期开启时指纹成分——两侧同源，
        *  远端时区不使过期判定漂移） */
       hostToday: string
+      /** 验收统一页：当前模式的导出清单——单文档模式只有「当前文档」一行
+       *  （与批量/合并共用同一清单 UI；批量/合并的清单仍走 batch.items）。
+       *  selectedId = 正在预览的条目（单文档恒为当前文档）。 */
+      list?: {
+        mode: 'document'
+        items: ReadonlyArray<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+        selectedId?: string
+      }
     }
   /** T07（#627）预览产物字节推送（base64）：就绪时一次 + 模态 webview 会话
    *  内重挂载（get）时重推；webview 按当前 state.preview.generation 配对
@@ -1991,9 +1999,12 @@ export type WebviewToHost =
    *  模式的每篇另起一页（非合并模式忽略）。生成在途/导出运行中时宿主
    *  忽略（不因重复输入反复启动生成任务） */
   | { kind: 'pdfExportModal.preview.refresh'; params: unknown; pageBreak?: boolean }
-  /** T07（#627）批量模式切换预览条目（清单内 id 锚点；目标身份变化经
-   *  state.previewTarget 推回——webview 过期判定就地失配） */
-  | { kind: 'pdfExportModal.preview.select'; itemId: string }
+  /** T07（#627）切换预览条目（清单内 id 锚点；目标身份变化经
+   *  state.previewTarget 推回——webview 过期判定就地失配）。
+   *  验收统一页：点击清单条目即选中该条并**自动加载预览**（幂等——同一
+   *  条目重复点击不重复生成，已就绪且未过期时零动作）；params/pageBreak
+   *  为该次点击时的模态参数原样载荷（同 refresh 口径）。 */
+  | { kind: 'pdfExportModal.preview.select'; itemId: string; params?: unknown; pageBreak?: boolean }
   /** T02（#622）阅读样式快照上报（宿主 pdfExport.styleSnapshot.request 的
    *  回包——面板级只读交互：编辑器 webview 枚举主题变量计算值，供导出页
    *  主题跟随；不进文档会话消息管线，provider 层拦截分发） */
@@ -4588,8 +4599,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       // merge.run（非合并模式忽略）
       return v.pageBreak === undefined || typeof v.pageBreak === 'boolean'
     case 'pdfExportModal.preview.select':
-      // T07（#627）批量预览条目选择（清单内 id 锚点）
-      return isString(v.itemId)
+      // T07（#627）预览条目选择（清单内 id 锚点）；params/pageBreak 同 refresh
+      // 口径（点击即自动加载预览）
+      return isString(v.itemId) && (v.pageBreak === undefined || typeof v.pageBreak === 'boolean')
     case 'pdfExportModal.batch.cancel':
       return true
     case 'pdfExportModal.batch.resume':
@@ -5876,6 +5888,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           (v.preview.batchItemId === undefined || isString(v.preview.batchItemId)))) &&
         (v.previewTarget === undefined || (isObject(v.previewTarget) &&
           (v.previewTarget.kind === 'document' || v.previewTarget.kind === 'batchItem' || v.previewTarget.kind === 'merge'))) &&
+        // 验收统一页：单文档清单数据面（mode=document；items 宿主自产）
+        (v.list === undefined || (isObject(v.list) && v.list.mode === 'document' &&
+          Array.isArray(v.list.items) &&
+          (v.list.selectedId === undefined || isString(v.list.selectedId)))) &&
         isString(v.hostToday)
     case 'pdfExportModal.previewArtifact':
       // T07（#627）预览产物字节（base64；代次配对在 webview 视图内完成）

@@ -16,6 +16,10 @@
 //
 // 零依赖（webview 与宿主两端共用；路径一律 '/' 分隔的规范形态）。
 
+/** 单文档模式在统一清单中的条目 id（清单只有一行——当前文档；宿主的
+ *  preview.select 以此 id 识别「选中当前文档」并加载预览） */
+export const PDF_DOCUMENT_LIST_ITEM_ID = 'document'
+
 /** 清单条目：文件身份 + 来源根（相对结构计算的锚） */
 export interface PdfBatchItem {
   /** 稳定条目 id（增删调序的锚点；宿主侧自增生成） */

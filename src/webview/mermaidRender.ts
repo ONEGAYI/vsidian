@@ -329,8 +329,9 @@ export function renderMermaidInto(container: HTMLElement, code: string): void {
   })
 }
 
-/** 阅读块挂载钩子：扫描 root（含自身）内 pending 态容器逐个发起渲染 */
-export function renderMermaidIn(root: ParentNode): void {
+/** 阅读块挂载钩子：扫描 root（含自身）内 pending 态容器逐个发起渲染。
+ *  owns 可选：限定只处理属于该根的容器（PDF 导出嵌套文档根的子树归内层根）。 */
+export function renderMermaidIn(root: ParentNode, owns?: (el: Element) => boolean): void {
   if (
     root instanceof HTMLElement &&
     root.getAttribute(MERMAID_STATE_ATTR) === 'pending' &&
@@ -339,6 +340,9 @@ export function renderMermaidIn(root: ParentNode): void {
     renderMermaidInto(root, root.getAttribute(MERMAID_CODE_ATTR)!)
   }
   for (const el of Array.from(root.querySelectorAll<HTMLElement>(`[${MERMAID_CODE_ATTR}]`))) {
+    if (owns !== undefined && !owns(el)) {
+      continue
+    }
     if (el.getAttribute(MERMAID_STATE_ATTR) === 'pending') {
       renderMermaidInto(el, el.getAttribute(MERMAID_CODE_ATTR)!)
     }

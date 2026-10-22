@@ -51,6 +51,12 @@ interface T07ModalInfo {
     | { mode: 'batch'; phase: string; items: Array<{ id: string; fsPath: string; relPath: string }> }
     | { mode: 'merge'; phase: string; items: Array<{ id: string; fsPath: string; relPath: string }> }
     | undefined
+  /** 验收统一页：单文档模式清单观测面（一行当前文档） */
+  list?: {
+    mode: 'document'
+    items: Array<{ id: string; fsPath: string; rootFsPath: string; relPath: string }>
+    selectedId?: string
+  }
   savedPath?: string
   hookedSaveTarget?: string
 }
@@ -144,8 +150,17 @@ async function waitFixedInputReady(): Promise<void> {
   })
 }
 
+/** 等待预览在途轮收尾（验收统一页：open 即自动发起预览——后续注入的
+ *  刷新/选择不得落在在途轮上，否则按协议被忽略或排队） */
+async function waitPreviewSettled(timeoutMs = 180000): Promise<void> {
+  await poll('预览在途轮收尾', async () => {
+    const info = await modalState()
+    return info.preview.busy === false ? true : undefined
+  }, timeoutMs)
+}
+
 export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
-  ['PDF 导出（#627 T07）：预览装载面与工具栏绘制层（core 绘制层）', async () => {
+  ['PDF 导出（#627 T07）：统一导出页清单与进入自动预览（core 绘制层）', async () => {
     await closeAll()
     await openDocAndWait('pdf-export.md')
     await vscode.commands.executeCommand(CURRENT_COMMAND)
@@ -162,18 +177,58 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
     assert.ok(info.modalCsp.includes('connect-src ') && info.modalCsp.includes(' blob:'), 'CSP 应放行 Blob 源 fetch（预览字节装载）')
     assert.ok(info.modalCsp.includes("'wasm-unsafe-eval'"), 'CSP 应放行 wasm 编译（pdfjs 资产）')
 
-    // 绘制层：刷新按钮可见可用（等固定输入就位——open 后捕获在途时按钮
-    // 短暂禁用）；空态说明在场；初始无过期徽章
-    const paint = await poll('刷新按钮可用（固定输入就位）', async () => {
+    // 验收统一页：清单在侧栏、只有当前文档一行且处于选中态；工具栏不再有
+    // 「预览文件」下拉。绘制层断言（offsetParent + 几何 + 计算样式）
+    const paint = await poll('统一清单就位（单文档一行）', async () => {
       const p = paintOf(await modalState())
-      return visible(p['previewRefreshButton']) && p['previewRefreshDisabled'] === false ? p : undefined
+      return p['exportListVisible'] === true && p['selectedItemRel'] === 'pdf-export.md' ? p : undefined
     })
-    assert.ok(String(paint['previewEmptyDescription'] ?? '').length > 0, '空态说明应可见（手动刷新语义）')
-    assert.equal(paint['previewStale'], false, '初始无过期徽章')
-    assert.equal(paint['previewStaleBadgeText'], '', '过期徽章不应渲染')
-    // 验收修复：预览列宽按 A4 纵向纸面宽派生；空态不显示缩放条
+    assert.equal(paint['exportListInSide'], true, '导出清单应位于右侧栏')
+    assert.equal(paint['previewBatchSelect'], null, '预览工具栏不应再有文件下拉选择器')
+    assert.match(String(paint['selectedItemOutlines'] ?? ''), /^solid /, '选中条目应有可见描边（强调色）')
+
+    // 进入即自动发起预览（无需点击刷新）：发起计数在请求时同步 +1——
+    // core 组只钉「已请求」与清单绘制层，不等待真实出图（sensitive 组覆盖）
+    const auto = await poll('进入自动发起预览', async () => {
+      const current = await modalState()
+      return current.preview.runs >= 1 ? current : undefined
+    }, 60000)
+    assert.ok(auto.preview.runs >= 1, '进入单文档导出应自动发起预览')
+    // 预览列宽按 A4 纵向纸面宽派生
     assert.equal(String(paint['previewPrintWidth'] ?? ''), '794px', '预览列宽应等于 A4 纵向纸面宽（794px）')
-    assert.equal(visible(paint['previewZoomBar']), false, '空态不应显示缩放条')
+
+    // ---- 统一页：单个 ↔ 多个同一页面（添加升格、删回缩回） ----
+    // 单文档清单只有当前文档一行，宿主观测面同源
+    const singleList = await poll('单文档清单观测面', async () => {
+      const current = await modalState()
+      return current.list?.items.length === 1 ? current.list : undefined
+    })
+    assert.equal(singleList.mode, 'document', '单文档模式清单形态为 document')
+    assert.equal(singleList.selectedId, 'document', '当前文档条目应处于选中态')
+    assert.equal(singleList.items[0]!.relPath, 'pdf-export.md', '清单一行为当前文档')
+
+    // 添加文件 → 升格为批量清单（当前文档成为首条，仍被选中/已加载）
+    await inject({ kind: 'pdfExportModal.batch.addFiles', paths: [norm(path.join(wsDir, 'pdf-export-t05.md'))] })
+    const promoted = await poll('添加后升格为清单', async () => {
+      const current = await modalState()
+      return current.batch?.mode === 'batch' && current.batch.items.length === 2 ? current : undefined
+    })
+    const promotedPaint = await poll('升格后绘制层清单两行', async () => {
+      const p = paintOf(await modalState())
+      const rels = p['batchItemRels'] as string[] | undefined
+      return rels !== undefined && rels.length === 2 ? p : undefined
+    })
+    assert.equal(promotedPaint['exportListInSide'], true, '升格后清单仍在右侧栏（同一页面形态）')
+    assert.equal(promotedPaint['selectedItemRel'], 'pdf-export.md', '升格后当前文档仍为选中条目')
+
+    // 删除新增条目 → 缩回单文档模式（单个与多个无本质区别）
+    const added = promoted.batch!.items.find((item) => item.relPath === 'pdf-export-t05.md')!
+    await inject({ kind: 'pdfExportModal.batch.remove', id: added.id })
+    const demoted = await poll('删回后缩为单文档', async () => {
+      const current = await modalState()
+      return current.batch === undefined && current.list?.items.length === 1 ? current : undefined
+    })
+    assert.equal(demoted.list!.items[0]!.relPath, 'pdf-export.md', '缩回后清单仍为当前文档一行')
 
     await closeAll()
   }],
@@ -193,6 +248,8 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
       return (await modalState()).open ? true : undefined
     })
     await waitFixedInputReady()
+    // 统一页：open 已完成一轮自动预览——等它收尾再看「手动刷新」增量
+    await waitPreviewSettled()
 
     // ---- 刷新 → 真实 PDF 页面（canvas 非白像素 + 书签观测）----
     // 书签经真实控件路径开启（注入参数须与控件实际值同口径——指纹不失配）
@@ -298,7 +355,7 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
     await closeAll()
   }],
 
-  ['PDF 导出（#627 T07）：批量按清单选择预览与长文档有界挂载（真浏览器）', async () => {
+  ['PDF 导出（#627 T07）：批量清单点击选中与自动加载预览（真浏览器）', async () => {
     await closeAll()
     const { resolveExportBrowser } = await import('../../../src/host/pdfExport/browserFind')
     const browser = await resolveExportBrowser(undefined)
@@ -317,36 +374,55 @@ export const pdfExportT07Cases: Array<[string, () => Promise<void>]> = [
       return batch?.mode === 'batch' && batch.items.length === 2 ? batch.items : undefined
     })
 
-    // 按清单选择预览项（选择第二条长文档）
+    // 点击清单条目 = 选中并自动加载预览（幂等）：首条两次点击只产生一轮
+    // 生成；长文档条目点一次即成为预览目标（无需刷新按钮）
+    const firstId = items[0]!.id
     const longId = items[1]!.id
-    await inject({ kind: 'pdfExportModal.preview.select', itemId: longId })
-    await poll('选择器同步', async () => {
+    const runsStart = (await modalState()).preview.runs
+    await inject({ kind: 'pdfExportModal.preview.select', itemId: longId, params: PARAMS_BASE })
+    await poll('点击条目后目标切换', async () => {
       const info = await modalState()
-      if (info.preview.batchItemId !== longId) return undefined
-      return paintOf(info)['previewBatchSelectValue'] === longId ? info : undefined
-    })
-
-    const batchRunsBefore = (await modalState()).preview.runs
-    await inject({ kind: 'pdfExportModal.preview.refresh', params: PARAMS_BASE })
-    const painted = await waitPreviewPainted()
-    assert.ok(painted.pdf.totalPages >= 10, `长文档预览应 ≥10 页（实际 ${painted.pdf.totalPages}）`)
-    // 有界挂载：仅可见窗口 ± 有限相邻页（挂载页数与画布费用不随总页数增长）
-    assert.ok(painted.pdf.mountedPages <= 8 && painted.pdf.mountedPages < painted.pdf.totalPages,
-      `挂载页数应有界（实际 ${painted.pdf.mountedPages} / 总 ${painted.pdf.totalPages}）`)
-    assert.ok(painted.pdf.canvasBytes <= 40 * 1024 * 1024, `画布费用应在预算内（实际 ${painted.pdf.canvasBytes}）`)
-    assert.equal(paintOf(painted.info)['previewStale'], false, '就绪预览无过期徽章')
-    assert.equal((painted.info.preview.target as { fsPath?: string } | undefined)?.fsPath,
-      norm(items[1]!.fsPath), '预览目标应为选中条目')
-
-    // 切换预览项 → 目标身份变化 → 过期（不自动生成）
-    await inject({ kind: 'pdfExportModal.preview.select', itemId: items[0]!.id })
-    await poll('切换条目后过期徽章可见', async () => {
+      return info.preview.batchItemId === longId && info.preview.phase !== 'idle' ? info : undefined
+    }, 60000)
+    // 点击即加载：选中态绘制层高亮与目标身份一致
+    await poll('选中条目高亮绘制层', async () => {
       const p = paintOf(await modalState())
-      return p['previewStale'] === true ? true : undefined
+      return p['selectedItemRel'] === 'pdf-export-t07-long.md' ? p : undefined
     })
-    const after = await modalState()
-    assert.equal(after.preview.phase, 'ready', '切换条目不自动生成')
-    assert.equal(after.preview.runs, batchRunsBefore + 1, '仅一轮生成（切换条目不追加）')
+    const long = await waitPreviewPainted()
+    assert.ok(long.pdf.totalPages >= 10, `长文档预览应 ≥10 页（实际 ${long.pdf.totalPages}）`)
+    // 有界挂载：仅可见窗口 ± 有限相邻页（挂载页数与画布费用不随总页数增长）
+    assert.ok(long.pdf.mountedPages <= 8 && long.pdf.mountedPages < long.pdf.totalPages,
+      `挂载页数应有界（实际 ${long.pdf.mountedPages} / 总 ${long.pdf.totalPages}）`)
+    assert.ok(long.pdf.canvasBytes <= 40 * 1024 * 1024, `画布费用应在预算内（实际 ${long.pdf.canvasBytes}）`)
+    assert.equal(paintOf(long.info)['previewStale'], false, '就绪预览无过期徽章')
+    assert.equal((long.info.preview.target as { fsPath?: string } | undefined)?.fsPath,
+      norm(items[1]!.fsPath), '预览目标应为选中条目')
+    assert.equal(long.info.preview.runs, runsStart + 1, '点击条目只发起一轮生成')
+
+    // 幂等：再点同一条目（同参数、已就绪且未过期）→ 零动作
+    await inject({ kind: 'pdfExportModal.preview.select', itemId: longId, params: PARAMS_BASE })
+    await new Promise((r) => setTimeout(r, 1200))
+    const repeat = await modalState()
+    assert.equal(repeat.preview.runs, runsStart + 1, '同一条目重复点击不得重复生成')
+    assert.equal(repeat.preview.phase, 'ready', '同一条目重复点击保持就绪态')
+
+    // 点击另一条 → 选中并自动加载新一轮（目标身份变化）。等 webview 已应用
+    // 新代次产物（previewArtifactGeneration 与宿主 generation 对齐）再断言——
+    // 宿主 ready 先于字节到达 webview，只等 phase 会读到上一张画布
+    await inject({ kind: 'pdfExportModal.preview.select', itemId: firstId, params: PARAMS_BASE })
+    const switched = await poll('切换条目自动加载预览并绘制', async () => {
+      const info = await modalState()
+      const p = paintOf(info)
+      if (info.preview.phase !== 'ready') return undefined
+      if (p['previewArtifactGeneration'] !== info.preview.generation) return undefined
+      const pdf = p['previewPdf'] as T07PreviewPdfProbe | null
+      if (pdf === null || pdf.phase !== 'content') return undefined
+      return { info, pdf }
+    }, 180000)
+    assert.equal((switched.info.preview.target as { fsPath?: string } | undefined)?.fsPath,
+      norm(items[0]!.fsPath), '切换条目后预览目标应为新选中条目')
+    assert.equal(switched.info.preview.runs, runsStart + 2, '切换条目应自动加载新条目预览（一轮）')
 
     await closeAll()
   }],

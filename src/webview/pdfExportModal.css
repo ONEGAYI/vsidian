@@ -77,19 +77,8 @@ body {
   height: 100%;
 }
 
-/* T07（#627）：批量/合并编辑态上下分栏（清单 + 预览） */
-.vsidian-pdfexport-preview-split {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 12px;
-}
-
-.vsidian-pdfexport-preview-split > .vsidian-pdfexport-batch-list {
-  flex: 0 1 auto;
-  max-height: 42%;
-}
-
+/* 验收统一页：清单移入侧栏后主区恒为预览（单篇与多篇同一布局），
+ * 不再有「主区上下分栏」形态——侧栏清单高度随内容，侧栏自身滚动。 */
 .vsidian-pdfexport-previewblock {
   flex: 1 1 auto;
   min-height: 0;
@@ -138,18 +127,8 @@ body {
   font-size: 12px;
 }
 
-.vsidian-pdfexport-previewbar .vsidian-pdfexport-field {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  border-top: none;
-}
-
-.vsidian-pdfexport-previewbar .vsidian-pdfexport-select {
-  width: auto;
-  min-width: 160px;
-}
+/* 验收统一页：预览文件选择改为点击侧栏清单条目——工具栏不再有下拉
+ * （原 .previewbar .field / .select 规则随之退役） */
 
 .vsidian-pdfexport-previewblock > .vsidian-pdfexport-preview-placeholder {
   flex: 1;
@@ -461,6 +440,84 @@ body {
   word-break: break-all;
 }
 
+/* ---- 验收统一页：侧栏导出清单（单文档一行 / 批量 / 合并共用）----
+ * 档位复用 T04 批量清单（行 6px 圆角、hover list-hoverBackground、序号
+ * 12px tabular-nums 说明色、路径 13px/500）；新增只有选中态：
+ * 底色走 list-activeSelectionBackground 同族 + 强调色描边（focusBorder），
+ * 与设置页导航条目选中语义一致——零新档位。 */
+.vsidian-pdfexport-export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+}
+
+.vsidian-pdfexport-export-list-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.vsidian-pdfexport-export-list-badge {
+  min-width: 20px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.vsidian-pdfexport-export-list-hint {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.vsidian-pdfexport-export-list-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.vsidian-pdfexport-export-list-items > .vsidian-pdfexport-batch-item {
+  padding: 6px 8px;
+}
+
+.vsidian-pdfexport-batch-item-clickable {
+  cursor: pointer;
+}
+
+.vsidian-pdfexport-batch-item-selected {
+  background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-editor-foreground));
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* 选中行的次级文字跟随选中前景（说明色在强调底上可读性不足） */
+.vsidian-pdfexport-batch-item-selected .vsidian-pdfexport-batch-item-order,
+.vsidian-pdfexport-batch-item-selected .vsidian-pdfexport-batch-item-root,
+.vsidian-pdfexport-batch-item-selected .vsidian-pdfexport-batch-item-badge {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.vsidian-pdfexport-batch-item-badge {
+  font-size: 11px;
+}
+
 .vsidian-pdfexport-field {
   display: flex;
   flex-direction: column;
@@ -656,7 +713,8 @@ body {
   }
 }
 
-/* ---- T04（#624）批量模式：清单/映射/结果与添加入口 ----
+/* ---- T04（#624）批量/合并主区承载：映射确认与结果表（清单已移入侧栏，
+ * 这里只剩主区内容容器与表形态）----
  * 档位（ui-patterns §2.6 模态面板 + §1 基元）：按钮 6px、列表行 hover 走
  * list-hoverBackground 变量族、徽章 pill 999px/11px 说明色、分隔线
  * 前景 tint 8%——零新档位、零硬编码色值。 */

@@ -95,12 +95,13 @@ const stateWithPreview = (overrides: Record<string, unknown>) => ({
   preview: { ...STATE.preview, ...(overrides['preview'] as Record<string, unknown> | undefined) },
 })
 
-const mount = (): { view: PdfExportModalView; host: HTMLElement } => {
+const mount = (): { view: PdfExportModalView; host: HTMLElement; posted: unknown[] } => {
   const host = document.createElement('div')
   document.body.appendChild(host)
-  const view = new PdfExportModalView({ postMessage: () => undefined })
+  const posted: unknown[] = []
+  const view = new PdfExportModalView({ postMessage: (message) => { posted.push(message) } })
   view.mount(host)
-  return { view, host }
+  return { view, host, posted }
 }
 
 const printWidthVar = (host: HTMLElement): string =>
@@ -210,5 +211,84 @@ describe('PDF 导出模态视图：预览宽度与缩放条', () => {
     // 已在纸面尺寸再点：无效但不报错，回显不变
     value.click()
     expect(value.textContent).toBe('100%')
+  })
+})
+
+describe('PDF 导出模态视图：统一导出页清单（验收）', () => {
+  const LIST_STATE = stateWithPreview({
+    list: {
+      mode: 'document',
+      items: [{ id: 'document', fsPath: 'D:/ws/a.md', rootFsPath: 'D:/ws', relPath: 'a.md' }],
+      selectedId: 'document',
+    },
+    previewTarget: { kind: 'document', doc: { docName: 'a.md', capturedVersion: 1 } },
+  })
+
+  it('单文档：清单在右侧栏、一行且选中，主区只有预览（无下拉选择器）', () => {
+    const { view, host } = mount()
+    view.applyState(LIST_STATE)
+    const side = host.querySelector('.vsidian-pdfexport-side')!
+    const list = side.querySelector(':scope > .vsidian-pdfexport-export-list')
+    expect(list).not.toBeNull()
+    const rows = list!.querySelectorAll('.vsidian-pdfexport-batch-item')
+    expect(rows.length).toBe(1)
+    expect(rows[0]!.classList.contains('vsidian-pdfexport-batch-item-selected')).toBe(true)
+    expect(rows[0]!.querySelector('.vsidian-pdfexport-batch-item-rel')?.textContent).toBe('a.md')
+    // 主区只剩预览块；工具栏无预览文件下拉
+    const main = host.querySelector('.vsidian-pdfexport-preview')!
+    expect(main.querySelector('.vsidian-pdfexport-export-list')).toBeNull()
+    expect(main.querySelector('.vsidian-pdfexport-previewbar .vsidian-pdfexport-select')).toBeNull()
+    // 侧栏清单在参数之前（清单/参数/操作/状态的信息序）
+    const sideChildren = Array.from(side.children).map((n) => n.className)
+    expect(sideChildren[0]).toContain('vsidian-pdfexport-export-list')
+  })
+
+  it('点击清单条目：上行 preview.select（带当前参数），移动/移除按钮不误触选择', () => {
+    const { view, host, posted } = mount()
+    view.applyState(LIST_STATE)
+    const row = host.querySelector<HTMLElement>('.vsidian-pdfexport-batch-item')!
+    row.click()
+    const select = posted.find((m) => (m as { kind?: string }).kind === 'pdfExportModal.preview.select') as
+      | { itemId: string; params: Record<string, unknown> }
+      | undefined
+    expect(select).toBeDefined()
+    expect(select!.itemId).toBe('document')
+    expect(select!.params.paper).toBe(PDF_EXPORT_OPTIONS_DEFAULTS.paper)
+    // 行内按钮点击不触发条目选择（移除按钮自身路径）
+    posted.length = 0
+    row.querySelector<HTMLButtonElement>('.vsidian-pdfexport-batch-item-btn:last-of-type')!.click()
+    expect(posted.some((m) => (m as { kind?: string }).kind === 'pdfExportModal.batch.remove')).toBe(true)
+    expect(posted.some((m) => (m as { kind?: string }).kind === 'pdfExportModal.preview.select')).toBe(false)
+  })
+
+  it('批量：选中态跟随 preview.batchItemId，点击另一条上行该条 id', () => {
+    const batchState = stateWithPreview({
+      batch: {
+        mode: 'batch',
+        phase: 'editing',
+        items: [
+          { id: 'b1', fsPath: 'D:/ws/a.md', rootFsPath: 'D:/ws', relPath: 'a.md' },
+          { id: 'b2', fsPath: 'D:/ws/b.md', rootFsPath: 'D:/ws', relPath: 'b.md' },
+        ],
+        strategy: 'rename',
+        currentIndex: 0,
+        total: 0,
+        results: [],
+        preview: undefined,
+      },
+      preview: { phase: 'ready', generation: 1, batchItemId: 'b2', fingerprint: 'fp' },
+      previewTarget: { kind: 'batchItem', fsPath: 'D:/ws/b.md', doc: { docName: 'b.md', capturedVersion: 1 } },
+    })
+    const { view, host, posted } = mount()
+    view.applyState(batchState)
+    const rows = host.querySelectorAll<HTMLElement>('.vsidian-pdfexport-batch-item')
+    expect(rows.length).toBe(2)
+    expect(rows[0]!.classList.contains('vsidian-pdfexport-batch-item-selected')).toBe(false)
+    expect(rows[1]!.classList.contains('vsidian-pdfexport-batch-item-selected')).toBe(true)
+    rows[0]!.click()
+    const select = posted.find((m) => (m as { kind?: string }).kind === 'pdfExportModal.preview.select') as
+      | { itemId: string }
+      | undefined
+    expect(select?.itemId).toBe('b1')
   })
 })

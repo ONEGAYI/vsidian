@@ -180,13 +180,33 @@ main.vsidian-pdfexport-preview（弹性列；max-width = 纸面宽 + 64px，右�
 - 骨架复用 #292 开屏骨架的视觉配方与 `shared/skeletonTiming` 节拍常量（经 CSS 变量注入），不复制数值；仍是页面级模态内部形态，不改变编辑器骨架的公开契约条目。
 - 绘制层断言：浏览器套件 `pdfExportPreview`（生产模态入口 + 真实 pdfjs + deviceScaleFactor 2）断言说明块居中、页面宽不超过纸面宽且居中、画布后备 = CSS × DPR、缩放条位置与 Ctrl+滚轮/按钮/百分比复位、骨架 9 块与 1.5s 扫光，并在视口收窄到 900px 后断言窄面板复位回到纸面 816px 且横向可滚动；集成 T07 探针追加 `previewPrintWidth` / `previewZoomBar` / `previewFirstCanvasCssWidth` 断言。
 
-**批量模式分区（T04/#624，2026-10-21）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载添加入口与参数——全部复用既有档位，零新档位：
+**统一导出页（验收反馈，2026-10-22）**：单个/批量/合并三种入口共用同一页面形态——**清单恒在侧栏、主区恒为预览**，不存在「单文档一套、批量另一套」的分叉。单文档进入时清单只有「当前文档」一行（升级/新增词条 `pdfExport.batch.singleItemHint`、选中行说明 `pdfExport.batch.selectedHint`）：
 
 ```text
-main（批量模式：左对齐内容区替代居中占位，独立滚动）
-├─ editing：ul 批量清单（li 行 = 序号 12px tabular-nums 说明色 + 相对路径 13px/500
-│    + 根目录 11px 说明色 + 上移/下移/移除按钮 6px 档 11px secondary 变量族；
-│    行 hover → list-hoverBackground）
+div.vsidian-pdfexport
+├─ main.vsidian-pdfexport-preview    ← 主区：预览舞台（单篇/多篇同一布局，无上下分栏）
+└─ aside.vsidian-pdfexport-side
+     ├─ .vsidian-pdfexport-export-list（清单区，下边线 tint 8%）
+     │    ├─ 标题行（12px 说明色）+ 计数徽章（pill 999px/11px，前景 tint 8% 底）
+     │    ├─ ul.vsidian-pdfexport-export-list-items（gap 4px，max-height 34vh 独立滚动）
+     │    │    └─ li.vsidian-pdfexport-batch-item（沿用 T04 行档位：序号/路径/根 + 三枚 6px 微钮）
+     │    │         · 可点选行加 --batch-item-clickable（cursor:pointer，role=button + aria-pressed）
+     │    │         · 选中行加 --batch-item-selected（activeSelection 前景/底色 + 1px focusBorder 描边）
+     │    └─ 添加行（「添加文件 / 添加目录」两枚等宽次级按钮——单文档点击即升格为多篇清单）
+     ├─ 参数字段行（appendParamFields；合并再追加页眉/页码/书签与每篇另起一页）
+     └─ 操作行 + 状态行（按模式：导出 / 批量导出… / 合并导出…；在途取消；终态返回）
+```
+
+- 预览工具栏不再提供「预览文件」下拉：条目点击是唯一的预览目标入口，`preview.select` 携带当前控件参数，宿主按目标身份 + 参数指纹做幂等判定（同条已就绪且未过期即零动作），在途轮只记最后一次点击并在收尾后补发（`pendingPreview`）。
+- 单文档一行清单的条目 id 为 `document`（`PDF_DOCUMENT_LIST_ITEM_ID`），与宿主 `preview.select` 的识别口径同源；批量/合并条目 id 仍由宿主自增。
+- 升格/缩回：单文档「添加文件/目录」在用户真正选中文件后才转为批量清单（当前文档成首条并保持选中），删到只剩该条时缩回单文档模式；仅由单文档升格来的清单可缩回（批量命令打开的清单保持清单语义）。
+- 绘制层断言：浏览器套件 `pdfExportPreview` 断言清单在侧栏且只有一行当前文档、选中态描边为实线、主区不含清单且工具栏无 `select`、点击条目上行带参数的 `preview.select`；集成 T07 core 用例断言 `exportListVisible` / `exportListInSide` / `selectedItemRel` / `selectedItemOutlines` 与升格、缩回两条路径。
+
+**批量模式分区（T04/#624，2026-10-21；2026-10-22 统一页复核后清单移入侧栏）**：同一面板的批量清单形态（`onegayi.vsidian.pdfExport.batch` 命令打开），主区按阶段承载内容、侧区承载清单与参数——全部复用既有档位，零新档位：
+
+```text
+main（批量模式）
+├─ editing：预览舞台（与单文档同一布局——清单在侧栏，主区不再有上下分栏）
 ├─ confirm：目标目录行 + 策略 select（2px 档）+ table 映射预览
 │    （表头说明色 600 + 行分隔线 tint 8%；冲突徽章 pill 999px/11px warning 变量族、
 │    跳过/已更名徽章同 pill 前景 tint 8% 底）
@@ -194,8 +214,10 @@ main（批量模式：左对齐内容区替代居中占位，独立滚动）
      列表（T02 issues 形态复用）+ 继续导出（主按钮）/继续导出全部（次级按钮）
 
 aside（批量模式侧区）
-├─ 清单计数行（复用文档行形态：标签 + 14px/500 数值）
-├─ 添加行（两枚等宽次级按钮 6px 档，运行中禁用降透明）
+├─ 导出清单（统一清单形态：标题 + 计数徽章 + 可点选行 [序号 12px tabular-nums
+│   说明色 + 相对路径 13px/500 + 根目录 11px 说明色 + 上移/下移/移除按钮 6px 档
+│   11px secondary 变量族；行 hover → list-hoverBackground；选中行 → 强调描边 +
+│   activeSelection 底色] + 添加行「添加文件/添加目录」）
 ├─ 参数字段行（与单文档共用 appendParamFields——T05 参数追加两模式同步生效）
 ├─ 操作行：批量导出…（主按钮）/ 开始导出 + 返回清单（次级）/ 取消（运行中）
 └─ 状态行（进度文案「正在导出第 N / M 个：文件名」role="status"）
@@ -204,14 +226,16 @@ aside（批量模式侧区）
 - 「继续导出全部」按钮的悬停提示经 `data-tooltip`（#300 唯一承载——模态 webview 随 T04 装配 `installTooltipCard()`，设置页同款）。
 - 绘制层断言：集成用例「PDF 导出（#624 T04）」core 组经 `_test.pdfExportModal.report` 探针断言清单行文本与添加/操作按钮可见性（batchItemRels/batchAddButtons/batchResumeAllButton 等）——非 DOM 存在性。
 
-**合并模式分区（T06/#626，2026-10-21）**：同一面板的合并清单形态（`onegayi.vsidian.pdfExport.merge` 命令打开）——与批量模式共用清单编辑区（同一数据面：增删/调序/目录收集）与侧区参数档位，全部复用既有档位，零新档位：
+**合并模式分区（T06/#626，2026-10-21；2026-10-22 统一页复核后清单移入侧栏）**：同一面板的合并清单形态（`onegayi.vsidian.pdfExport.merge` 命令打开）——与批量模式共用同一清单组件（同一数据面：增删/调序/目录收集）与侧区参数档位，全部复用既有档位，零新档位：
 
 ```text
-main（合并模式：editing 同批量清单；在途 = 进度区标题文本（逐篇固定输入计数
-     或「正在生成合并 PDF…」）+ awaiting 时缺资源列表；终态 = 单产物详情行
-     （保存路径/失败分态/取消——12px 说明色、路径换行，同批量摘要档））
+main（合并模式：editing = 预览舞台（合并单产物预览）；在途 = 进度区标题文本
+     （逐篇固定输入计数或「正在生成合并 PDF…」）+ awaiting 时缺资源列表；
+     终态 = 单产物详情行（保存路径/失败分态/取消——12px 说明色、路径换行，
+     同批量摘要档））
 aside（合并模式侧区）
-├─ 清单计数行（复用文档行形态，词条换「合并清单」）
+├─ 导出清单（统一清单形态，标题词条换「合并清单」；条目行不可点选——
+│   合并预览是单产物，不按条目分支）
 ├─ 添加行（与批量共用两枚次级按钮）
 ├─ 参数字段行（appendParamFields + T05 页眉/页码/书签参数区——单文档与
 │   合并共用 appendHeaderFooterFields；批量逐文件参数面维持 T04 不含此区）

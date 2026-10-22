@@ -175,7 +175,6 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.preview.failed': '预览生成失败',
   'pdfExport.preview.stale': '预览已过期',
   'pdfExport.preview.bookmarks': '标题书签 {count} 条',
-  'pdfExport.preview.itemLabel': '预览文件',
   /** 预览缩放条（左下角；100% = 打印纸面大小） */
   'pdfExport.preview.zoomIn': '放大预览',
   'pdfExport.preview.zoomOut': '缩小预览',
@@ -241,6 +240,9 @@ export const zhCn: Record<MessageKey, string> = {
   'pdfExport.batch.addFiles': '添加文件',
   'pdfExport.batch.addDir': '添加目录',
   'pdfExport.batch.listTitle': '导出清单',
+  /** 验收统一页：单文档与批量共用同一清单（单文档 = 一行当前文档） */
+  'pdfExport.batch.singleItemHint': '当前文档。可继续添加文件或目录，清单多于一篇时按批量导出。',
+  'pdfExport.batch.selectedHint': '正在预览此文件',
   'pdfExport.batch.empty': '清单为空——添加文件或目录开始批量导出。目录会递归收集 Markdown，其他文件不会进入清单。',
   'pdfExport.batch.itemMoveUp': '上移',
   'pdfExport.batch.itemMoveDown': '下移',

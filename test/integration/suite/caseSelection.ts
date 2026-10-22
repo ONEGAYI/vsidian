@@ -104,9 +104,9 @@ export const SENSITIVE_CASES = [
     evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
   },
   {
-    name: 'PDF 导出（#627 T07）：批量按清单选择预览与长文档有界挂载（真浏览器）',
+    name: 'PDF 导出（#627 T07）：批量清单点击选中与自动加载预览（真浏览器）',
     issue: '#627',
-    reason: '同族真实浏览器链路（长文档多页装配 + 有界挂载窗口断言），CI 波动基线未建立；本地全量持续跑。',
+    reason: '同族真实浏览器链路（长文档多页装配 + 有界挂载窗口 + 点击即生成），CI 波动基线未建立；本地全量持续跑。',
     evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
   },
   {

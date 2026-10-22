@@ -35,7 +35,7 @@ import { applyReadingRendererBreaks, splitReadingBlocks } from './readingBlocks'
 import { createReadingBlockElement, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
 import { ImageResourceManager } from './imageResource'
 import { registerHtmlResourcePort, notifyHtmlResourceResult, hubResourcePort } from './htmlResourceHub'
-import { prepareHtmlResources, type HtmlResourceBinding } from './htmlResourceMount'
+import { prepareHtmlResources, NESTED_DOC_ROOT_ATTR, type HtmlResourceBinding } from './htmlResourceMount'
 import { DocumentStyleBinding } from './docStyleLoader'
 import { docScopeKeyOf } from '../shared/docStyle'
 import { promoteEmbedSlotsInBlock } from './embedSlots'
@@ -138,6 +138,10 @@ function buildExpandedEmbed(doc: PdfExportPagePayload['docs'][number]): HTMLElem
   box.className = `${READING_CLASS_NAMES.embedBlock} ${PDF_EXPORT_CLASS_NAMES.embedExpanded}`
   box.dataset['vsidianDocScope'] = scope
   box.setAttribute(EMBED_FS_PATH_ATTR, doc.fsPath)
+  // 嵌套文档根标记：外层文档根的图片/资源/ID 公证述以下内层根的子树归本根
+  // 所有——同一 <img> 不被两层根各绑一次（外层先剥 src，内层拿空串会向宿主
+  // 请求空图源并被分类成 blocked）
+  box.setAttribute(NESTED_DOC_ROOT_ATTR, '1')
   const label = document.createElement('div')
   label.className = PDF_EXPORT_CLASS_NAMES.embedSourceLabel
   label.textContent = doc.docName
@@ -263,10 +267,31 @@ export function mediaNoticeTargetOf(
     : { kind: 'link', href: fileLinkOf(resolved) }
 }
 
+/** 文档根归属谓词（嵌套根的子树归内层根——见 NESTED_DOC_ROOT_ATTR） */
+function ownedBy(root: HTMLElement): (el: Element) => boolean {
+  const nested = root.querySelector(`[${NESTED_DOC_ROOT_ATTR}]`) !== null
+  if (!nested) {
+    return () => true
+  }
+  return (el: Element): boolean => {
+    let node: Element | null = el.parentElement
+    while (node !== null && node !== root) {
+      if (node.hasAttribute(NESTED_DOC_ROOT_ATTR)) {
+        return false
+      }
+      node = node.parentElement
+    }
+    return true
+  }
+}
+
 /** 图形容器预降级：导出页无附加组件渲染面，无内置渲染器的图形语言围栏
  *  在发起渲染前降级为源码呈现（否则容器停留 pending 使完成信号不收敛） */
-function degradeUnsupportedGraphicContainers(root: ParentNode): void {
+function degradeUnsupportedGraphicContainers(root: ParentNode, owns?: (el: Element) => boolean): void {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>(`[${GRAPHIC_LANG_ATTR}]`))) {
+    if (owns !== undefined && !owns(el)) {
+      continue
+    }
     const lang = (el.getAttribute(GRAPHIC_LANG_ATTR) ?? '').trim()
     if (graphicRendererFor(lang) !== undefined) {
       continue
@@ -286,8 +311,11 @@ function degradeUnsupportedGraphicContainers(root: ParentNode): void {
  *  远端身份纯文本标注）。相对 src 先被 prepareHtmlResources 剥离——原文
  *  在 dataset.vsidianMediaSrc（memo），此处优先读 memo 再读属性/source 子
  *  元素（双轴评审 P2：不读 memo 会丢链接，读属性拼相对路径会产伪地址） */
-function degradeMediaElements(root: ParentNode, docFsPath: string, remoteFs: boolean): void {
+function degradeMediaElements(root: ParentNode, docFsPath: string, remoteFs: boolean, owns?: (el: Element) => boolean): void {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('video, audio, iframe'))) {
+    if (owns !== undefined && !owns(el)) {
+      continue
+    }
     const sourceEl = el.querySelector('source')
     const raw = el.getAttribute('src')
       ?? el.dataset['vsidianMediaSrc']
@@ -518,16 +546,17 @@ export function mountExportDocument(
   ]
 
   for (const { fsPath, root } of docRoots) {
-    prepareReadingImages(root, managerFor(fsPath))
+    const owns = ownedBy(root)
+    prepareReadingImages(root, managerFor(fsPath), owns)
     bindings.push(prepareHtmlResources(root, {
       images: managerFor(fsPath),
       sourceDocUri: fsPath,
       docScope: docScopeKeyOf(fsPath),
     }))
-    degradeUnsupportedGraphicContainers(root)
-    renderMermaidIn(root)
-    renderGraphicBlockInto(root)
-    degradeMediaElements(root, fsPath, remoteFs)
+    degradeUnsupportedGraphicContainers(root, owns)
+    renderMermaidIn(root, owns)
+    renderGraphicBlockInto(root, owns)
+    degradeMediaElements(root, fsPath, remoteFs, owns)
   }
 
   // 文档样式：A 与各 B 的 docScope 独立装载（合并不跨篇污染的隔离基础）

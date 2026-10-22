@@ -47,6 +47,12 @@ const state = (preview) => ({
   defaults: DEFAULTS,
   browserPath: '',
   hostToday: '2026-10-22',
+  // 统一导出页：单文档清单一行（当前文档，选中）
+  list: {
+    mode: 'document',
+    items: [{ id: 'document', fsPath: 'D:/ws/验收.md', rootFsPath: 'D:/ws', relPath: '验收.md' }],
+    selectedId: 'document',
+  },
   preview,
 })
 
@@ -89,7 +95,8 @@ try {
   })
   await page.addStyleTag({ path: cssPath })
   await page.addScriptTag({
-    content: `window.acquireVsCodeApi = () => ({ postMessage() {} });
+    content: `window.__posted = [];
+      window.acquireVsCodeApi = () => ({ postMessage(message) { window.__posted.push(message); } });
       window.__vsidianPdfAssets = {
         mainJs: 'https://assets.local/pdfMain.js',
         workerJs: 'https://assets.local/pdfWorker.js',
@@ -122,6 +129,41 @@ try {
   const idleCenter = (idle.placeholder.left + idle.placeholder.right) / 2
   const previewCenter = (idle.preview.left + idle.preview.right) / 2
   assert.ok(Math.abs(idleCenter - previewCenter) <= 2, `说明块应水平居中（偏差 ${(idleCenter - previewCenter).toFixed(1)}px）`)
+  // 统一导出页：清单在右侧栏、只有当前文档一行且选中；主区不再有分栏清单
+  const listLayout = await page.evaluate(() => {
+    const side = document.querySelector('.vsidian-pdfexport-side')
+    const list = side?.querySelector(':scope > .vsidian-pdfexport-export-list')
+    const row = list?.querySelector('.vsidian-pdfexport-batch-item')
+    const style = row === undefined || row === null ? null : getComputedStyle(row)
+    return {
+      inSide: list !== null && list !== undefined,
+      rows: list?.querySelectorAll('.vsidian-pdfexport-batch-item').length ?? 0,
+      selected: row?.classList.contains('vsidian-pdfexport-batch-item-selected') ?? false,
+      rowText: row?.querySelector('.vsidian-pdfexport-batch-item-rel')?.textContent ?? '',
+      outline: style === null ? '' : `${style.outlineStyle} ${style.outlineWidth}`,
+      mainHasList: document.querySelector('.vsidian-pdfexport-preview .vsidian-pdfexport-export-list') !== null,
+      mainHasSelect: document.querySelector('.vsidian-pdfexport-previewbar select') !== null,
+    }
+  })
+  assert.equal(listLayout.inSide, true, '导出清单应位于右侧栏')
+  assert.equal(listLayout.rows, 1, `单文档清单应只有一行（实测 ${listLayout.rows}）`)
+  assert.equal(listLayout.selected, true, '当前文档条目应为选中态')
+  assert.equal(listLayout.rowText, '验收.md', `选中行应为当前文档（实测 ${listLayout.rowText}）`)
+  assert.match(listLayout.outline, /^solid /, `选中行应有可见描边（实测 ${listLayout.outline}）`)
+  assert.equal(listLayout.mainHasList, false, '主区不应再承载清单（统一页：清单入侧栏）')
+  assert.equal(listLayout.mainHasSelect, false, '预览工具栏不应再有文件下拉')
+  passed++
+
+  // ---- 点击清单条目：上行 preview.select（带当前参数，自动加载预览） ----
+  await page.locator('.vsidian-pdfexport-export-list .vsidian-pdfexport-batch-item').click()
+  const selected = await page.evaluate(() => {
+    const posted = window.__posted ?? []
+    const message = [...posted].reverse().find((m) => m?.kind === 'pdfExportModal.preview.select')
+    return message === undefined ? null : { itemId: message.itemId, hasParams: message.params !== undefined }
+  })
+  assert.ok(selected !== null, '点击条目应上行 preview.select')
+  assert.equal(selected.itemId, 'document', '单文档条目 id 应为 document')
+  assert.equal(selected.hasParams, true, '点击条目应携带当前参数（宿主据以判定过期与幂等）')
   passed++
 
   // ---- 生成在途：扫光骨架 9 块 ----
@@ -243,7 +285,7 @@ try {
   passed++
 
   assert.deepEqual(errors, [], `页面不应有未捕获异常：${errors.join(' | ')}`)
-  console.log(`pdfExportPreview: ${passed}/5 场景通过`)
+  console.log(`pdfExportPreview: ${passed}/6 场景通过`)
 } finally {
   await browser.close()
 }

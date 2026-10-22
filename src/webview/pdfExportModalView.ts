@@ -22,7 +22,12 @@ import {
   type PdfPageNumberPosition,
 } from '../shared/pdfExportOptions'
 import { pdfPreviewFingerprint, type PdfPreviewTarget } from '../shared/pdfExportPreview'
-import type { PdfBatchConflictStrategy, PdfBatchItem, PdfBatchMappingEntry, PdfBatchResultEntry } from '../shared/pdfExportBatch'
+import {
+  type PdfBatchConflictStrategy,
+  type PdfBatchItem,
+  type PdfBatchMappingEntry,
+  type PdfBatchResultEntry,
+} from '../shared/pdfExportBatch'
 import { SKELETON_SHIMMER_CYCLE_MS, SKELETON_SHIMMER_DELAY_MS } from '../shared/skeletonTiming'
 // T07（#627）预览：复用 #337 PDF 阅读视图（PdfHoverView——分页 canvas、
 // 有界挂载窗口、Blob worker 装配与共享文档存储），不另建阅读器
@@ -58,6 +63,13 @@ interface PdfExportModalStateMessage {
   }
   /** 当前预览目标身份（宿主权威；批量 = 生效选中条目） */
   previewTarget?: PdfPreviewTarget
+  /** 验收统一页：当前模式的导出清单（单文档 = 仅当前文档一行；批量/合并
+   *  仍走 batch.items）。selectedId = 正在预览的条目（单文档恒为当前文档） */
+  list?: {
+    mode: 'document'
+    items: ReadonlyArray<PdfBatchItem>
+    selectedId?: string
+  }
   /** 宿主侧当日日期（页眉日期开启时的指纹成分——两侧同源） */
   hostToday: string
   /** T04（#624）批量 / T06（#626）合并模式状态（在场即清单模式 UI；
@@ -160,7 +172,19 @@ const CLASS = {
   mergeRunButton: 'vsidian-pdfexport-merge-run',
   mergePageBreakCheck: 'vsidian-pdfexport-merge-pagebreak',
   mergeOutcome: 'vsidian-pdfexport-merge-outcome',
-  /** T07（#627）预览主区：工具栏/过期徽章/滚动区（承载 PdfHoverView） */
+  /** 清单条目选中修饰（预览目标——同一清单只有一项处于选中态） */
+  batchItemSelected: 'vsidian-pdfexport-batch-item-selected',
+  /** 清单条目可点选（点击 = 选中并加载该条预览） */
+  batchItemClickable: 'vsidian-pdfexport-batch-item-clickable',
+  /** 选中态说明行（「正在预览此文件」——选中行内的说明色小字） */
+  batchItemBadge: 'vsidian-pdfexport-batch-item-badge',
+  /** 统一导出清单（单文档一行 / 批量 / 合并共用；置于右侧栏） */
+  exportList: 'vsidian-pdfexport-export-list',
+  exportListTitle: 'vsidian-pdfexport-export-list-title',
+  exportListBadge: 'vsidian-pdfexport-export-list-badge',
+  exportListHint: 'vsidian-pdfexport-export-list-hint',
+  exportListItems: 'vsidian-pdfexport-export-list-items',
+  /** 预览工具栏/过期徽章/滚动区（承载 PdfHoverView） */
   previewBlock: 'vsidian-pdfexport-previewblock',
   previewBar: 'vsidian-pdfexport-previewbar',
   previewRefresh: 'vsidian-pdfexport-preview-refresh',
@@ -409,11 +433,14 @@ export class PdfExportModalView {
   }
 
   /** 布局度量写到根元素：预览列宽按纸面宽封顶（右侧栏吸收剩余宽度），
-   *  骨架页按同一尺寸成形；CSS 侧 transition 负责尺寸变化的滑动动画。 */
+   *  骨架页按同一尺寸成形；CSS 侧 transition 负责尺寸变化的滑动动画。
+   *  宽内容态（批量映射/结果表）才撤销封顶——编辑态的预览与单文档同一
+   *  布局（统一页：清单在侧栏，主区恒为纸面宽预览）。 */
   private applyRootMetrics(root: HTMLElement): void {
     const { widthPx } = this.printPageSize()
     root.style.setProperty('--vsidian-pdfexport-print-width', `${widthPx}px`)
-    root.classList.toggle('vsidian-pdfexport--list', this.state?.batch !== undefined)
+    const wide = this.state?.batch !== undefined && this.state.batch.phase !== 'editing'
+    root.classList.toggle('vsidian-pdfexport--list', wide)
     this.previewView?.setMaxRenderWidth(widthPx)
   }
 
@@ -543,7 +570,150 @@ export class PdfExportModalView {
   private previewTargetAvailable(): boolean {
     const s = this.state
     if (s?.batch !== undefined) return s.batch.items.length > 0
+    if (s?.list !== undefined) return s.list.items.length > 0
     return s?.docName !== undefined && s.docName !== ''
+  }
+
+  /** 当前清单与选中项（统一页数据面）：单文档 = list（一行当前文档），
+   *  批量 = batch.items + preview.batchItemId（缺省首条），合并 = batch.items
+   *  （单产物——没有「选中条目」概念，行不可点选）。 */
+  private listViewOf(): {
+    items: ReadonlyArray<PdfBatchItem>
+    selectedId: string | undefined
+    /** 行可点选（单文档/批量的分条目预览）；合并为 false */
+    selectable: boolean
+  } | undefined {
+    const s = this.state
+    if (s?.batch?.mode === 'batch') {
+      const batch = s.batch
+      const selected = batch.items.some((item) => item.id === s.preview?.batchItemId)
+        ? s.preview!.batchItemId
+        : batch.items[0]?.id
+      // 只有编辑态主区是预览；映射确认/执行/终态下主区是表，点条目不该
+      // 悄悄启动一轮看不见的生成
+      return { items: batch.items, selectedId: selected, selectable: batch.phase === 'editing' }
+    }
+    if (s?.batch?.mode === 'merge') {
+      return { items: s.batch.items, selectedId: undefined, selectable: false }
+    }
+    if (s?.list !== undefined) {
+      return { items: s.list.items, selectedId: s.list.selectedId, selectable: true }
+    }
+    return undefined
+  }
+
+  /** 点击清单条目即加载该条目预览（幂等由宿主保证：同一条目同参数零动作）。
+   *  带当前控件参数上行——宿主按 normalize 后计算指纹，避免与控件现状失配。 */
+  private selectListItem(itemId: string): void {
+    this.paramsTouched = true
+    this.readControlsIntoParams()
+    this.currentParams = normalizePdfExportOptions(this.currentParams)
+    const s = this.state
+    this.options.postMessage({
+      kind: 'pdfExportModal.preview.select',
+      itemId,
+      params: this.currentParams,
+      ...(s?.batch?.mode === 'merge' ? { pageBreak: this.mergePageBreak } : {}),
+    })
+  }
+
+  /** 统一导出清单（侧栏）：单文档一行 = 当前文档；批量/合并为可编辑清单。
+   *  条目点击 = 选中并加载预览（选中态以强调色描边 + 底色高亮）。 */
+  private buildExportList(options: {
+    titleKey: string
+    emptyKey?: string
+    addRow: HTMLElement | null
+    hintKey?: string
+    running: boolean
+  }): HTMLElement | null {
+    const view = this.listViewOf()
+    if (view === undefined) return null
+    const wrap = el('div', CLASS.exportList)
+    const head = el('div', CLASS.exportListTitle)
+    head.appendChild(el('span', '', t(options.titleKey)))
+    head.appendChild(el('span', CLASS.exportListBadge, String(view.items.length)))
+    wrap.appendChild(head)
+    if (view.items.length === 0) {
+      // 单文档无文件身份（untitled 等）：不渲染空清单，交回文档行兜底
+      if (options.emptyKey === undefined) return null
+      wrap.appendChild(el('p', CLASS.batchEmpty, t(options.emptyKey)))
+      if (options.addRow !== null) wrap.appendChild(options.addRow)
+      return wrap
+    }
+    if (options.hintKey !== undefined) {
+      wrap.appendChild(el('p', CLASS.exportListHint, t(options.hintKey)))
+    }
+    const list = el('ul', CLASS.exportListItems)
+    view.items.forEach((item, index) => {
+      const row = el('li', CLASS.batchItem)
+      const selected = view.selectedId !== undefined && item.id === view.selectedId
+      if (selected) row.classList.add(CLASS.batchItemSelected)
+      if (view.selectable) {
+        row.classList.add(CLASS.batchItemClickable)
+        row.setAttribute('role', 'button')
+        row.setAttribute('tabindex', '0')
+        row.setAttribute('aria-pressed', selected ? 'true' : 'false')
+        const activate = (): void => this.selectListItem(item.id)
+        row.addEventListener('click', (event) => {
+          // 行内操作按钮自行处理，不触发条目选择
+          if ((event.target as HTMLElement).closest('button') !== null) return
+          activate()
+        })
+        row.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            activate()
+          }
+        })
+      }
+      row.appendChild(el('span', CLASS.batchItemOrder, String(index + 1)))
+      const main = el('div', CLASS.batchItemMain)
+      main.appendChild(el('span', CLASS.batchItemRel, item.relPath))
+      main.appendChild(el('span', CLASS.batchItemRoot, item.rootFsPath))
+      if (selected) main.appendChild(el('span', CLASS.batchItemBadge, t('pdfExport.batch.selectedHint')))
+      row.appendChild(main)
+      const actions = el('div', CLASS.batchItemActions)
+      for (const [label, kind] of [
+        [t('pdfExport.batch.itemMoveUp'), 'up'],
+        [t('pdfExport.batch.itemMoveDown'), 'down'],
+      ] as const) {
+        const btn = el('button', CLASS.batchItemBtn, label) as HTMLButtonElement
+        btn.disabled = options.running
+        btn.addEventListener('click', () => {
+          this.options.postMessage({ kind: 'pdfExportModal.batch.move', id: item.id, direction: kind })
+        })
+        actions.appendChild(btn)
+      }
+      const remove = el('button', CLASS.batchItemBtn, t('pdfExport.batch.itemRemove')) as HTMLButtonElement
+      remove.disabled = options.running
+      remove.addEventListener('click', () => {
+        this.options.postMessage({ kind: 'pdfExportModal.batch.remove', id: item.id })
+      })
+      actions.appendChild(remove)
+      row.appendChild(actions)
+      list.appendChild(row)
+    })
+    wrap.appendChild(list)
+    if (options.addRow !== null) wrap.appendChild(options.addRow)
+    return wrap
+  }
+
+  /** 侧栏添加行（添加文件/添加目录；单文档模式点击即转多篇清单） */
+  private buildAddRow(running: boolean): HTMLElement {
+    const addRow = el('div', CLASS.batchAddRow)
+    const addFiles = el('button', CLASS.batchAddButton, t('pdfExport.batch.addFiles')) as HTMLButtonElement
+    addFiles.disabled = running
+    addFiles.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.addFiles' })
+    })
+    addRow.appendChild(addFiles)
+    const addDir = el('button', CLASS.batchAddButton, t('pdfExport.batch.addDir')) as HTMLButtonElement
+    addDir.disabled = running
+    addDir.addEventListener('click', () => {
+      this.options.postMessage({ kind: 'pdfExportModal.batch.addDir' })
+    })
+    addRow.appendChild(addDir)
+    return addRow
   }
 
   /** 预览主区（工具栏 + 滚动区/空态占位）；split = 清单编辑态上下分栏 */
@@ -596,25 +766,8 @@ export class PdfExportModalView {
       bar.appendChild(el('span', CLASS.previewNotice, notice))
     }
 
-    // 批量条目选择器（按清单选择预览项——不一次常驻所有 PDF 的页面）
-    const batch = s?.batch
-    if (batch?.mode === 'batch' && batch.phase === 'editing' && batch.items.length > 0) {
-      const select = el('select', CLASS.select) as HTMLSelectElement
-      const selectedId = preview?.batchItemId ?? batch.items[0]!.id
-      for (const item of batch.items) {
-        const option = el('option', '', item.relPath)
-        option.value = item.id
-        select.appendChild(option)
-      }
-      select.value = selectedId
-      select.addEventListener('change', () => {
-        this.options.postMessage({ kind: 'pdfExportModal.preview.select', itemId: select.value })
-      })
-      const field = el('div', CLASS.field)
-      field.appendChild(el('label', CLASS.fieldLabel, t('pdfExport.preview.itemLabel')))
-      field.appendChild(select)
-      bar.appendChild(field)
-    }
+    // 验收统一页：预览文件选择改由右侧清单条目直接点击（选中态高亮 +
+    // 自动加载），工具栏不再提供下拉选择器
 
     block.appendChild(bar)
 
@@ -713,13 +866,26 @@ export class PdfExportModalView {
     root.appendChild(preview)
     this.restorePreviewScroll(keptPreviewScrollTop)
 
-    // ---- 侧区：固定输入 + 参数 + 操作 + 状态 ----
+    // ---- 侧区：导出一行清单（统一页：单篇与多篇同一形态）+ 参数 + 操作 + 状态 ----
     const side = el('aside', CLASS.side)
-    const docRow = el('div', CLASS.docRow)
-    docRow.appendChild(el('span', CLASS.docLabel, t('pdfExport.docLabel')))
-    this.docNameEl = el('span', CLASS.docName, this.state?.docName || '…')
-    docRow.appendChild(this.docNameEl)
-    side.appendChild(docRow)
+    const listEl = this.buildExportList({
+      titleKey: 'pdfExport.batch.listTitle',
+      addRow: this.buildAddRow(busy),
+      hintKey: 'pdfExport.batch.singleItemHint',
+      running: busy,
+    })
+    if (listEl !== null) {
+      side.appendChild(listEl)
+      // 文档名观测面（T01 绘制层断言）：选中行的相对路径
+      this.docNameEl = side.querySelector<HTMLElement>(`.${CLASS.batchItemSelected} .${CLASS.batchItemRel}`)
+    } else {
+      // 状态尚未到达（首帧）：保留文档行占位，不显示空清单
+      const docRow = el('div', CLASS.docRow)
+      docRow.appendChild(el('span', CLASS.docLabel, t('pdfExport.docLabel')))
+      this.docNameEl = el('span', CLASS.docName, this.state?.docName || '…')
+      docRow.appendChild(this.docNameEl)
+      side.appendChild(docRow)
+    }
 
     this.appendParamFields(side, params)
 
@@ -1015,12 +1181,10 @@ export class PdfExportModalView {
     const root = el('div', CLASS.root)
     this.applyRootMetrics(root)
 
-    // ---- 主区：编辑态 = 清单 + 预览上下分栏（按清单选择预览项）；其余
-    // 阶段维持既有清单/映射/结果承载（T07 预览不在执行态呈现） ----
+    // ---- 主区：编辑态 = 预览（统一页——清单在侧栏）；confirm/在途/终态维
+    // 持既有映射/结果承载（执行期不呈现预览） ----
     const main = el('main', CLASS.preview)
     if (batch.phase === 'editing') {
-      main.classList.add('vsidian-pdfexport-preview-split')
-      main.appendChild(this.buildBatchList(batch, running, 'pdfExport.batch.listTitle', 'pdfExport.batch.empty'))
       main.appendChild(this.buildPreviewArea())
     } else if (batch.phase === 'confirm') {
       main.appendChild(this.buildBatchConfirm(batch))
@@ -1032,28 +1196,15 @@ export class PdfExportModalView {
     }
     root.appendChild(main)
 
-    // ---- 侧区：添加入口 + 参数 + 操作 + 状态 ----
+    // ---- 侧区：统一清单（添加/选中/调序）+ 参数 + 操作 + 状态 ----
     const side = el('aside', CLASS.side)
-    const docRow = el('div', CLASS.docRow)
-    docRow.appendChild(el('span', CLASS.docLabel, t('pdfExport.batch.listTitle')))
-    const count = el('span', CLASS.docName, String(batch.items.length))
-    docRow.appendChild(count)
-    side.appendChild(docRow)
-
-    const addRow = el('div', CLASS.batchAddRow)
-    const addFiles = el('button', CLASS.batchAddButton, t('pdfExport.batch.addFiles')) as HTMLButtonElement
-    addFiles.disabled = running
-    addFiles.addEventListener('click', () => {
-      this.options.postMessage({ kind: 'pdfExportModal.batch.addFiles' })
+    const listEl = this.buildExportList({
+      titleKey: 'pdfExport.batch.listTitle',
+      emptyKey: 'pdfExport.batch.empty',
+      addRow: this.buildAddRow(running),
+      running,
     })
-    addRow.appendChild(addFiles)
-    const addDir = el('button', CLASS.batchAddButton, t('pdfExport.batch.addDir')) as HTMLButtonElement
-    addDir.disabled = running
-    addDir.addEventListener('click', () => {
-      this.options.postMessage({ kind: 'pdfExportModal.batch.addDir' })
-    })
-    addRow.appendChild(addDir)
-    side.appendChild(addRow)
+    if (listEl !== null) side.appendChild(listEl)
 
     this.appendParamFields(side, params)
 
@@ -1120,12 +1271,10 @@ export class PdfExportModalView {
     const root = el('div', CLASS.root)
     this.applyRootMetrics(root)
 
-    // ---- 主区：编辑态 = 清单 + 预览上下分栏（合并单产物预览）；在途与
-    // 终态维持既有进度/结果承载 ----
+    // ---- 主区：编辑态 = 预览（统一页——清单在侧栏）；在途与终态维持既有
+    // 进度/结果承载 ----
     const main = el('main', CLASS.preview)
     if (batch.phase === 'editing') {
-      main.classList.add('vsidian-pdfexport-preview-split')
-      main.appendChild(this.buildBatchList(batch, running, 'pdfExport.merge.listTitle', 'pdfExport.merge.empty'))
       main.appendChild(this.buildPreviewArea())
     } else if (running) {
       main.appendChild(this.buildMergeProgress(batch))
@@ -1137,28 +1286,15 @@ export class PdfExportModalView {
     }
     root.appendChild(main)
 
-    // ---- 侧区：添加入口 + 参数（单文档全参数面 + 每篇另起一页） ----
+    // ---- 侧区：统一清单（合篇顺序）+ 参数（单文档全参数面 + 每篇另起一页） ----
     const side = el('aside', CLASS.side)
-    const docRow = el('div', CLASS.docRow)
-    docRow.appendChild(el('span', CLASS.docLabel, t('pdfExport.merge.listTitle')))
-    const count = el('span', CLASS.docName, String(batch.items.length))
-    docRow.appendChild(count)
-    side.appendChild(docRow)
-
-    const addRow = el('div', CLASS.batchAddRow)
-    const addFiles = el('button', CLASS.batchAddButton, t('pdfExport.batch.addFiles')) as HTMLButtonElement
-    addFiles.disabled = running
-    addFiles.addEventListener('click', () => {
-      this.options.postMessage({ kind: 'pdfExportModal.batch.addFiles' })
+    const listEl = this.buildExportList({
+      titleKey: 'pdfExport.merge.listTitle',
+      emptyKey: 'pdfExport.merge.empty',
+      addRow: this.buildAddRow(running),
+      running,
     })
-    addRow.appendChild(addFiles)
-    const addDir = el('button', CLASS.batchAddButton, t('pdfExport.batch.addDir')) as HTMLButtonElement
-    addDir.disabled = running
-    addDir.addEventListener('click', () => {
-      this.options.postMessage({ kind: 'pdfExportModal.batch.addDir' })
-    })
-    addRow.appendChild(addDir)
-    side.appendChild(addRow)
+    if (listEl !== null) side.appendChild(listEl)
 
     this.appendParamFields(side, params)
     this.appendHeaderFooterFields(side, params)
@@ -1268,54 +1404,6 @@ export class PdfExportModalView {
       return `${t('pdfExport.phase.failed')} ${t(key)}`
     }
     return t('pdfExport.phase.failed')
-  }
-
-  /** 可编辑清单（顺序即执行/合篇顺序；增删调序经消息上行——宿主为清单
-   *  权威；标题与空态词条由模式传入——批量/合并各自文案） */
-  private buildBatchList(
-    batch: NonNullable<PdfExportModalStateMessage['batch']>,
-    running: boolean,
-    titleKey: 'pdfExport.batch.listTitle' | 'pdfExport.merge.listTitle',
-    emptyKey: 'pdfExport.batch.empty' | 'pdfExport.merge.empty',
-  ): HTMLElement {
-    const wrap = el('div', CLASS.previewPlaceholder)
-    wrap.classList.add(CLASS.batchList)
-    wrap.appendChild(el('h2', CLASS.batchSectionTitle, t(titleKey)))
-    if (batch.items.length === 0) {
-      wrap.appendChild(el('p', CLASS.batchEmpty, t(emptyKey)))
-      return wrap
-    }
-    const list = el('ul', CLASS.batchList)
-    batch.items.forEach((item, index) => {
-      const row = el('li', CLASS.batchItem)
-      row.appendChild(el('span', CLASS.batchItemOrder, String(index + 1)))
-      const main = el('div', CLASS.batchItemMain)
-      main.appendChild(el('span', CLASS.batchItemRel, item.relPath))
-      main.appendChild(el('span', CLASS.batchItemRoot, item.rootFsPath))
-      row.appendChild(main)
-      const actions = el('div', CLASS.batchItemActions)
-      for (const [label, kind] of [
-        [t('pdfExport.batch.itemMoveUp'), 'up'],
-        [t('pdfExport.batch.itemMoveDown'), 'down'],
-      ] as const) {
-        const btn = el('button', CLASS.batchItemBtn, label) as HTMLButtonElement
-        btn.disabled = running
-        btn.addEventListener('click', () => {
-          this.options.postMessage({ kind: 'pdfExportModal.batch.move', id: item.id, direction: kind })
-        })
-        actions.appendChild(btn)
-      }
-      const remove = el('button', CLASS.batchItemBtn, t('pdfExport.batch.itemRemove')) as HTMLButtonElement
-      remove.disabled = running
-      remove.addEventListener('click', () => {
-        this.options.postMessage({ kind: 'pdfExportModal.batch.remove', id: item.id })
-      })
-      actions.appendChild(remove)
-      row.appendChild(actions)
-      list.appendChild(row)
-    })
-    wrap.appendChild(list)
-    return wrap
   }
 
   /** 映射预览（真实输出路径 + 冲突标注）与重名策略选择 */
@@ -1547,8 +1635,23 @@ export class PdfExportModalView {
         previewStaleBadgeText: document.querySelector(`.${CLASS.previewStaleBadge}`)?.textContent ?? '',
         previewNoticeText: document.querySelector(`.${CLASS.previewNotice}`)?.textContent ?? '',
         previewEmptyDescription: document.querySelector(`.${CLASS.previewDescription}`)?.textContent ?? '',
+        // 验收统一页：清单在侧栏、条目选中态可观测（选中态 = 强调色描边 +
+        // 底色，绘制层断言用 visible/color 组合）；工具栏下拉已移除
+        exportListVisible: (() => {
+          const node = document.querySelector<HTMLElement>(`.${CLASS.exportList}`)
+          if (node === null) return false
+          const rect = node.getBoundingClientRect()
+          return node.offsetParent !== null && rect.width > 0 && rect.height > 0
+        })(),
+        exportListInSide: document.querySelector(`.${CLASS.side} > .${CLASS.exportList}`) !== null,
+        selectedItemRel: document.querySelector(`.${CLASS.batchItemSelected} .${CLASS.batchItemRel}`)?.textContent ?? '',
+        selectedItemOutlines: (() => {
+          const node = document.querySelector<HTMLElement>(`.${CLASS.batchItemSelected}`)
+          if (node === null) return ''
+          const style = window.getComputedStyle(node)
+          return `${style.outlineStyle} ${style.backgroundColor}`
+        })(),
         previewBatchSelect: probe(document.querySelector<HTMLElement>(`.${CLASS.previewBar} .${CLASS.select}`)),
-        previewBatchSelectValue: (document.querySelector(`.${CLASS.previewBar} .${CLASS.select}`) as HTMLSelectElement | null)?.value ?? '',
         // 验收修复轮：缩放条/加载骨架/纸面宽变量的绘制层观测
         previewZoomBar: probe(document.querySelector<HTMLElement>(`.${CLASS.zoomBar}`)),
         previewZoomValueText: this.zoomValueEl?.textContent ?? '',

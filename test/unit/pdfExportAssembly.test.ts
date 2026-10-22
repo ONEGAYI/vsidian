@@ -215,6 +215,24 @@ describe('mountExportDocument：完成信号分层', () => {
     expect(images.some((probe) => probe.src.includes('local.png') && probe.sourceFsPath === 'D:/vault/笔记甲.md')).toBe(true)
   })
 
+  it('嵌入目标内的图片按嵌入文档身份解析一次（不被主文档根剥成空 src）', async () => {
+    const payload = payloadOf()
+    payload.docs[0]!.text = '![[嵌入乙]]\n\n主图：![主图](local.png)。'
+    payload.embeds[0]!.text = '## 乙标题\n\n![乙图](目标图.png)\n\n乙尾。'
+    const { root, images } = setup(payload)
+    await settleImages(root)
+    // 嵌入文档身份的图片请求：src 完整、来源 = 嵌入文档
+    expect(images).toContainEqual({ src: '目标图.png', sourceFsPath: 'D:/vault/嵌入乙.md' })
+    // 不得向宿主发空图源（那会被分类成 blocked 并覆盖成错误态）
+    expect(images.filter((probe) => probe.src === '')).toEqual([])
+    // 嵌入内的图片槽位不是错误态
+    const embedBox = root.querySelector(`.${PDF_EXPORT_CLASS_NAMES.embedExpanded}`)!
+    const embedImg = embedBox.querySelector<HTMLImageElement>('img')
+    expect(embedImg).not.toBeNull()
+    expect(embedImg!.dataset['vsidianImgState']).toBe('loaded')
+    expect(embedImg!.dataset['vsidianImgSrc']).toBe('目标图.png')
+  })
+
   it('失败图片终态登记 failure（image/not-found）且不阻塞就绪', async () => {
     const { handle, root } = setup()
     await settleImages(root)

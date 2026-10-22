@@ -49,6 +49,7 @@ import {
   mergeBatchResults,
   moveBatchItem,
   occupiedTargetsFromListings,
+  PDF_DOCUMENT_LIST_ITEM_ID,
   planBatchMapping,
   removeBatchItem,
   type PdfBatchConflictStrategy,
@@ -250,6 +251,8 @@ export interface PdfExportModalInfo {
         hookedSaveTarget: string | undefined
       }
     | undefined
+  /** 验收统一页：单文档模式的清单观测面（一行当前文档；批量/合并走 batch） */
+  list: { mode: 'document'; items: PdfBatchItem[]; selectedId: string | undefined } | undefined
 }
 
 export interface PdfExportModalHandle {
@@ -454,6 +457,9 @@ export function createPdfExportModal(
   let batchIdSeq = 0
   let batchWindowCapture: PdfBatchWindowCapture | undefined
   let hookedBatchTargetDir: string | undefined
+  /** 清单由单文档「添加文件」升格而来（验收统一页）：删到只剩当前文档时
+   *  缩回单文档模式；批量命令打开的清单一律保持清单语义 */
+  let batchPromotedFromDocument = false
   /** 结果表聚合（双轴评审 P3）：整批轮与单项重试轮共用——job 单轮 state
    *  只含本轮条目，此处按 id 原位归并（mergeBatchResults 单一事实源），
    *  重试后既有成功/跳过记录不丢 */
@@ -481,12 +487,25 @@ export function createPdfExportModal(
   let previewFailReason: string | undefined
   /** 捕获或生成在途（同一时刻至多一轮——连续刷新不叠加启动生成任务） */
   let previewBusy = false
+  /** 在途轮期间收到的最后一次「条目点击」意图：本轮收尾后按最新选择补一轮
+   *  ——不并发叠跑，也不静默丢弃用户点击（统一页进入即自动预览，用户在
+   *  其生成中改选条目是常态）。手动刷新在途时仍按协议忽略（不因重复输入
+   *  反复启动生成任务）。 */
+  let pendingPreview: { params: unknown; pageBreak: boolean } | undefined
   let previewStore: {
     generation: number
     fingerprint: string
     bytes: Buffer
     bookmarks: NonNullable<PdfExportJobState['bookmarks']>
     failures: PdfExportFailureItem[]
+    /** 生成该产物的归一参数与每篇另起一页（promote 后目标身份变化时
+     *  重算指纹用——内容未变不让过期徽章误报） */
+    options: PdfExportOptions
+    pageBreak: boolean
+    /** 生成该产物时的目标身份（promote 重定指纹的守卫：只有同一篇文档
+     *  的 document→batchItem 换形才允许沿用字节，选区片段/其他条目不得
+     *  被误标成当前结果） */
+    target: PdfPreviewTarget
   } | undefined
   /** 批量模式选中预览条目（缺省首条；被移除时回退首条——见 previewTargetOf） */
   let previewBatchItemId: string | undefined
@@ -546,11 +565,125 @@ export function createPdfExportModal(
     }
   }
 
+  /** 预览列表数据面（统一页，验收）：单文档模式只有「当前文档」一行——
+   *  与批量/合并共用同一清单 UI 形态（可在此继续添加文件转为批量）。
+   *  items 为空 + document 在场 = 单文档一行；批量/合并走既有 batch.items。 */
+  const listInfoOf = ():
+    | { mode: 'document'; items: PdfBatchItem[]; selectedId: string | undefined }
+    | undefined => {
+    if (mode !== 'document') return undefined
+    const docItem = documentListItemOf()
+    return {
+      mode: 'document',
+      items: docItem !== undefined ? [docItem] : [],
+      selectedId: docItem !== undefined ? PDF_DOCUMENT_LIST_ITEM_ID : undefined,
+    }
+  }
+
   /** 批量模式生效中的预览条目 id（选中条目被移除时回退首条） */
   const effectivePreviewItemId = (): string | undefined =>
     mode === 'batch'
       ? (batchItems.find((i) => i.id === previewBatchItemId) ?? batchItems[0])?.id
       : undefined
+
+  /** 统一导出页（验收）：单文档模式下发的一行清单身份——批量/合并的清单
+   *  走 batch.items，单文档只有「当前文档」这一行。仅 file scheme 可给出
+   *  身份（untitled 无法成为批量条目；webview 以 docName 回退展示）。 */
+  const documentListItemOf = (): PdfBatchItem | undefined => {
+    if (mode !== 'document') return undefined
+    const source = activeSource
+    if (source === undefined || source.uri.scheme !== 'file') return undefined
+    const fsPath = source.uri.fsPath.replaceAll('\\', '/')
+    const slash = fsPath.lastIndexOf('/')
+    return {
+      id: PDF_DOCUMENT_LIST_ITEM_ID,
+      fsPath,
+      rootFsPath: slash < 0 ? '' : fsPath.slice(0, slash),
+      relPath: fixedInput?.docName ?? path.basename(source.uri.fsPath),
+    }
+  }
+
+  /** 统一导出页（验收）：单文档清单要加文件 = 转为批量清单，当前文档成为
+   *  首条（选中它并沿用其预览面）。选区导出转为清单后按整篇文件导出——
+   *  清单条目没有片段身份，不把片段语义偷带进批量。 */
+  const promoteDocumentToBatch = (): boolean => {
+    if (mode !== 'document') return true
+    if (job.isRunning) return false
+    const docItem = documentListItemOf()
+    if (docItem === undefined) return false
+    if (fixedInput !== undefined) previewItemVersions.set(docItem.fsPath, fixedInput.capturedVersion)
+    mode = 'batch'
+    batchPhase = 'editing'
+    batchPromotedFromDocument = true
+    batchItems = [{ ...docItem, id: nextBatchId() }]
+    batchMapping = undefined
+    batchTargetDir = undefined
+    batchExisting = new Set()
+    batchStrategy = 'rename'
+    batchResults = []
+    batchWindowCapture = undefined
+    hookedBatchTargetDir = undefined
+    previewBatchItemId = batchItems[0]!.id
+    // 当前文档已是首条：目标身份从 document 换成 batchItem（同一篇同一版
+    // 本），内容未变——按新身份重算就绪产物的指纹，不让清单形态切换误报
+    // 过期、也不重复生成。仅当旧产物确为这一篇的全文（无选区片段）时成立；
+    // 选区导出转清单后是整篇产物，旧片段字节不得冒充。
+    retargetPreviewForDocumentIdentity('promote')
+    return true
+  }
+
+  /** 清单缩回单篇且正是当前文档时回到单文档模式（验收统一页：单个与多个
+   *  不是两套页面——清单一行的导出走单文档保存语义） */
+  const demoteBatchToDocumentIfSingle = (): boolean => {
+    if (mode !== 'batch' || !batchPromotedFromDocument) return false
+    if (batchItems.length !== 1 || activeSource === undefined) return false
+    if (activeSource.uri.scheme !== 'file') return false
+    const sourceFs = activeSource.uri.fsPath.replaceAll('\\', '/')
+    if (batchItems[0]!.fsPath !== sourceFs) return false
+    mode = 'document'
+    batchPhase = 'editing'
+    batchPromotedFromDocument = false
+    batchItems = []
+    batchMapping = undefined
+    batchTargetDir = undefined
+    batchExisting = new Set()
+    batchResults = []
+    batchWindowCapture = undefined
+    hookedBatchTargetDir = undefined
+    previewBatchItemId = undefined
+    retargetPreviewForDocumentIdentity('demote')
+    return true
+  }
+
+  /** 同一篇全文文档在 document ↔ batchItem 身份形态间切换时沿用就绪产物
+   *  （内容与参数未变，不误报过期、不重复生成）。形态不符（选区片段、
+   *  另一篇文件）时不改指纹——过期判定按实际身份如实失配。 */
+  const retargetPreviewForDocumentIdentity = (direction: 'promote' | 'demote'): void => {
+    const store = previewStore
+    const source = activeSource
+    if (store === undefined || source === undefined) return
+    const sourceFs = source.uri.scheme === 'file' ? source.uri.fsPath.replaceAll('\\', '/') : undefined
+    if (direction === 'promote') {
+      if (store.target.kind !== 'document') return
+      if (store.target.doc.docName !== fixedInput?.docName || store.target.doc.fragments !== undefined) return
+    } else {
+      if (store.target.kind !== 'batchItem') return
+      if (sourceFs === undefined || store.target.fsPath !== sourceFs) return
+      if (store.target.doc.fragments !== undefined) return
+    }
+    const target = previewTargetOf()
+    if (target === undefined) return
+    previewStore = {
+      ...store,
+      target,
+      fingerprint: pdfPreviewFingerprint({
+        options: store.options,
+        target,
+        pageBreak: store.pageBreak,
+        today: hostToday(),
+      }),
+    }
+  }
 
   /** 就绪产物复用核对：参数与固定输入身份（含每篇另起一页与页眉日期）与
    *  产物代次指纹严格相等才复用——过期 PDF 不得当作当前设置结果 */
@@ -571,6 +704,8 @@ export function createPdfExportModal(
 
   /** 导出发起/重新执行命令时让位：作废在途预览（代次推进——迟到回包丢弃） */
   const cancelInFlightPreview = (): void => {
+    // 导出让位/会话终结：在途轮与待补轮一并作废（不把旧意图带到新轮次）
+    pendingPreview = undefined
     if (!previewBusy) return
     previewGen++
     if (previewJob.isRunning) {
@@ -593,6 +728,7 @@ export function createPdfExportModal(
     previewBatchItemId = undefined
     previewItemVersions.clear()
     previewLastExportReused = false
+    pendingPreview = undefined
   }
 
   const pushPreviewArtifact = (): void => {
@@ -613,8 +749,11 @@ export function createPdfExportModal(
     bytes: Buffer,
     bookmarks: NonNullable<PdfExportJobState['bookmarks']>,
     failures: PdfExportFailureItem[],
+    options: PdfExportOptions,
+    pageBreak: boolean,
+    target: PdfPreviewTarget,
   ): void => {
-    previewStore = { generation, fingerprint, bytes, bookmarks, failures }
+    previewStore = { generation, fingerprint, bytes, bookmarks, failures, options, pageBreak, target }
     previewPhase = 'ready'
     previewFailReason = undefined
     notifyState()
@@ -623,8 +762,11 @@ export function createPdfExportModal(
 
   /** 手动刷新预览：新一轮固定输入重新捕获（规格 §2.1——不复用上一轮输入）
    *  → 与导出同一 createBrowserExportSession 管线产出字节。连续刷新/导出
-   *  运行中不叠加发起（不因重复输入反复启动生成任务）。 */
-  const refreshPreview = (rawParams: unknown, pageBreak: boolean): void => {
+   *  运行中不叠加发起（不因重复输入反复启动生成任务）。
+   *  preset（验收统一页的进入自动预览）：payload 为 open 时刻刚捕获的固定
+   *  输入——跳过二次捕获（同一轮输入不重复读文档/嵌入/样式），目标身份
+   *  仍按当前模式由 previewTargetOf() 计算。 */
+  const refreshPreview = (rawParams: unknown, pageBreak: boolean, preset?: { payload: PdfExportInputPayload }): void => {
     if (previewBusy || job.isRunning || batchJob.isRunning || mergeJob.isRunning) return
     const { defaults, browserPath } = defaultsFromSettings(getSettingsSnapshot())
     const params = normalizePdfExportOptions(rawParams, defaults)
@@ -639,7 +781,9 @@ export function createPdfExportModal(
       let fingerprintTarget: PdfPreviewTarget | undefined
       let payload: PdfExportInputPayload | undefined
       try {
-        if (mode === 'document') {
+        if (preset !== undefined) {
+          payload = preset.payload
+        } else if (mode === 'document') {
           const source = activeSource
           if (source === undefined) {
             // 无源（防御：单文档模式恒有 open 源）——回 idle 不冒充失败
@@ -715,7 +859,7 @@ export function createPdfExportModal(
         })
         if (gen !== previewGen || token !== previewResetToken) return
         if (result.ok) {
-          adoptPreviewBytes(gen, fingerprint, result.bytes, result.bookmarks, result.failures)
+          adoptPreviewBytes(gen, fingerprint, result.bytes, result.bookmarks, result.failures, params, pageBreak, fingerprintTarget)
         } else if (result.reason === 'cancelled') {
           previewPhase = previewStore !== undefined ? 'ready' : 'idle'
         } else {
@@ -731,6 +875,7 @@ export function createPdfExportModal(
           previewBusy = false
           knownDocFsPaths.clear()
           notifyState()
+          drainPendingPreview()
         }
       }
     })()
@@ -1085,6 +1230,7 @@ export function createPdfExportModal(
       ...(remoteResolveObserved?.ok ? { browserKind: remoteResolveObserved.kind } : {}),
     },
     batch: batchInfo(),
+    list: listInfoOf(),
     preview: {
       phase: previewPhase,
       generation: previewStore?.generation ?? previewGen,
@@ -1124,9 +1270,11 @@ export function createPdfExportModal(
       ...(job.state.resourceIssues !== undefined
         ? { resourceIssues: job.state.resourceIssues.map((issue) => ({ kind: issue.kind, item: issue.item, reason: issue.reason })) }
         : {}),
-      // T04（#624）批量 / T06（#626）合并模式状态（单文档模式不携带——
-      // 既有字段零改动；合并形态经 batchInfo 的 merge 分支）
+      // T04（#624）批量 / T06（#626）合并模式状态（合并形态经 batchInfo 的
+      //  merge 分支）。验收统一页：单文档模式也携带清单数据面（list）——
+      // 只有「当前文档」一行，与批量/合并共用同一清单 UI；batch 仍缺省
       ...(mode !== 'document' ? { batch: batchInfo() } : {}),
+      ...(listInfoOf() !== undefined ? { list: listInfoOf()! } : {}),
       // T07（#627）预览状态（含当前目标身份与宿主侧日期——webview 就地
       //  合成指纹做过期比较，与宿主导出复用核对同一函数）
       preview: {
@@ -1212,7 +1360,11 @@ export function createPdfExportModal(
    *  对话框为生产唯一入口，paths/path/targetDir 仅 VSIDIAN_TEST_HOOKS 门控
    *  下消费；收集/探测类操作经 batchOpChain 串行——消息到达序即用户操作序） */
   const handleBatchMessage = (message: { kind: string; paths?: unknown; path?: unknown; targetDir?: unknown; id?: unknown; direction?: unknown; strategy?: unknown; params?: unknown; all?: unknown; pageBreak?: unknown }): void => {
-    if (mode !== 'batch' && mode !== 'merge') return
+    // 验收统一页：单文档清单的「添加文件/添加目录」= 选到文件后转为多篇
+    // 清单（当前文档成为首条）。取消对话框不改页面形态（避免空转升格）。
+    const documentAdd = mode === 'document'
+      && (message.kind === 'pdfExportModal.batch.addFiles' || message.kind === 'pdfExportModal.batch.addDir')
+    if (mode !== 'batch' && mode !== 'merge' && !documentAdd) return
     const editingLocked = batchJob.isRunning || mergeJob.isRunning
     switch (message.kind) {
       case 'pdfExportModal.batch.addFiles': {
@@ -1234,7 +1386,10 @@ export function createPdfExportModal(
             files = picked?.map((uri) => uri.fsPath.replaceAll('\\', '/'))
           }
           if (!files || files.length === 0) return
+          if (mode === 'document' && !promoteDocumentToBatch()) return
           batchItems = addBatchFiles(batchItems, files, isMarkdownFilePath, nextBatchId).items
+          // 转为清单后没真正添到第二篇（重复文件）= 退回单文档
+          demoteBatchToDocumentIfSingle()
           notifyState()
         })
         return
@@ -1255,6 +1410,7 @@ export function createPdfExportModal(
             })
           }
           if (!dirs || dirs.length === 0) return
+          if (mode === 'document' && !promoteDocumentToBatch()) return
           for (const dir of dirs) {
             const files = await collectDirMarkdown(dir)
             batchItems = addToBatchFromDir(
@@ -1265,6 +1421,7 @@ export function createPdfExportModal(
               nextBatchId,
             ).items
           }
+          demoteBatchToDocumentIfSingle()
           notifyState()
         })
         return
@@ -1272,6 +1429,9 @@ export function createPdfExportModal(
       case 'pdfExportModal.batch.remove': {
         if (editingLocked || typeof message.id !== 'string') return
         batchItems = removeBatchItem(batchItems, message.id)
+        // 验收统一页：删到只剩当前文档时缩回单文档模式（单个与多个同一
+        // 页面——清单只有一行就按单篇导出语义走）
+        demoteBatchToDocumentIfSingle()
         notifyState()
         return
       }
@@ -1384,8 +1544,10 @@ export function createPdfExportModal(
     }
   }
 
-  /** T07（#627）预览消息族：手动刷新与批量条目选择（清单/输入权威在宿主，
-   *  过期判定在 webview 经目标身份 + 本地参数指纹比较） */
+  /** T07（#627）预览消息族：手动刷新与清单条目选择（清单/输入权威在宿主，
+   *  过期判定在 webview 经目标身份 + 本地参数指纹比较）。
+   *  验收统一页：点击清单条目 = 选中该条并自动加载预览（幂等——同一条目
+   *  已就绪且指纹一致时零动作，不重复启动生成）。 */
   const handlePreviewMessage = (message: { kind: string; params?: unknown; pageBreak?: unknown; itemId?: unknown }): void => {
     switch (message.kind) {
       case 'pdfExportModal.preview.refresh': {
@@ -1393,16 +1555,49 @@ export function createPdfExportModal(
         return
       }
       case 'pdfExportModal.preview.select': {
-        if (mode === 'batch' && !batchJob.isRunning && typeof message.itemId === 'string'
+        if (typeof message.itemId !== 'string') return
+        if (mode === 'document') {
+          // 单文档清单只有一行（当前文档）：重复点击幂等
+          if (message.itemId !== PDF_DOCUMENT_LIST_ITEM_ID) return
+          selectAndPreview(message.params, message.pageBreak === true)
+          return
+        }
+        if ((mode === 'batch' || mode === 'merge') && !batchJob.isRunning && !mergeJob.isRunning
           && batchItems.some((i) => i.id === message.itemId)) {
-          previewBatchItemId = message.itemId
+          if (mode === 'batch') previewBatchItemId = message.itemId
           notifyState()
+          selectAndPreview(message.params, message.pageBreak === true)
         }
         return
       }
       default:
         return
     }
+  }
+
+  /** 点击条目即加载预览（幂等）：目标/参数指纹与就绪产物一致时零动作。
+   *  在途轮期间只记最新选择（收尾后补一轮），不并发叠跑也不丢弃点击。 */
+  const selectAndPreview = (rawParams: unknown, pageBreak: boolean): void => {
+    if (previewBusy) {
+      pendingPreview = { params: rawParams, pageBreak }
+      return
+    }
+    const { defaults } = defaultsFromSettings(getSettingsSnapshot())
+    const params = normalizePdfExportOptions(rawParams, defaults)
+    const target = previewTargetOf()
+    if (previewStore !== undefined && previewPhase === 'ready' && target !== undefined) {
+      const same = pdfPreviewFingerprint({ options: params, target, pageBreak, today: hostToday() }) === previewStore.fingerprint
+      if (same) return
+    }
+    refreshPreview(params, pageBreak)
+  }
+
+  /** 本轮预览收尾后补发最新条目选择（无则为空操作） */
+  const drainPendingPreview = (): void => {
+    const pending = pendingPreview
+    if (pending === undefined) return
+    pendingPreview = undefined
+    selectAndPreview(pending.params, pending.pageBreak)
   }
 
   const handleMessage = (message: unknown): void => {
@@ -1453,6 +1648,9 @@ export function createPdfExportModal(
                   result.bytes,
                   result.state.bookmarks ?? { written: false, total: 0, skipped: 0, reason: 'disabled' },
                   [],
+                  params,
+                  false,
+                  target,
                 )
               }
             }
@@ -1521,6 +1719,7 @@ export function createPdfExportModal(
       // 会话终结：模式、批量清单与策略选择一并重置（重开 = 全新会话）
       mode = 'document'
       batchPhase = 'editing'
+      batchPromotedFromDocument = false
       batchItems = []
       batchMapping = undefined
       batchTargetDir = undefined
@@ -1543,6 +1742,7 @@ export function createPdfExportModal(
     resetPreviewSession()
     mode = next
     batchPhase = 'editing'
+    batchPromotedFromDocument = false
     batchItems = []
     batchMapping = undefined
     batchTargetDir = undefined
@@ -1568,6 +1768,7 @@ export function createPdfExportModal(
       mergeJob.cancel()
       resetPreviewSession()
       mode = 'document'
+      batchPromotedFromDocument = false
     }
     // 固定输入捕获（异步）：面板装载握手（get）早于捕获完成时以空输入态
     // 应答，捕获完成由 then 补推对齐（新一轮输入就位）
@@ -1576,6 +1777,12 @@ export function createPdfExportModal(
     void captureInput(source, selection).then((input) => {
       fixedInput = input
       notifyState()
+      // 验收统一页：单文档导出进入即加载预览（用刚捕获的固定输入，不重复
+      // 读取；参数取设置页默认值——与 webview 首次渲染一致）
+      if (mode === 'document' && panel !== undefined) {
+        const { defaults } = defaultsFromSettings(getSettingsSnapshot())
+        refreshPreview(defaults, false, { payload: input.payload })
+      }
     }, (error) => {
       // 防御兜底：归一化后空选区（命令层已拦截）按无有效选区呈现，不开
       // 选区导出任务（不误触发全文导出）
