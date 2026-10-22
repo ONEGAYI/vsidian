@@ -565,6 +565,14 @@ export function createPdfExportModal(
     }
   }
 
+  /** 当前选择是否仍是给定目标（轮次守卫共用）：比较「选择身份」而非完整
+   *  指纹——参数改选不算换目标（旧画面保留 + 过期徽章），版本推进也不算
+   *  （同一篇的输入更新）。 */
+  const samePreviewSelection = (locked: PdfPreviewTarget): boolean => {
+    const current = previewTargetOf()
+    return current !== undefined && pdfPreviewTargetKey(current) === pdfPreviewTargetKey(locked)
+  }
+
   /** 预览列表数据面（统一页，验收）：单文档模式只有「当前文档」一行——
    *  与批量/合并共用同一清单 UI 形态（可在此继续添加文件转为批量）。
    *  items 为空 + document 在场 = 单文档一行；批量/合并走既有 batch.items。 */
@@ -651,28 +659,43 @@ export function createPdfExportModal(
     batchWindowCapture = undefined
     hookedBatchTargetDir = undefined
     previewBatchItemId = undefined
-    retargetPreviewForDocumentIdentity('demote')
+    // 缩回选区语义时旧产物是整篇全文：不重标（#008），丢弃后按新目标重出。
+    // selectAndPreview 自带在途语义（生成中只记最新意图、轮末补发），既不
+    // 并发叠跑，也不会因为此刻恰有一轮在跑就静默丢掉这次必要重出。
+    if (!retargetPreviewForDocumentIdentity('demote')) {
+      const stale = previewStore
+      previewStore = undefined
+      previewPhase = 'idle'
+      previewFailReason = undefined
+      if (stale !== undefined) selectAndPreview(stale.options, stale.pageBreak)
+    }
     return true
   }
 
   /** 同一篇全文文档在 document ↔ batchItem 身份形态间切换时沿用就绪产物
-   *  （内容与参数未变，不误报过期、不重复生成）。形态不符（选区片段、
-   *  另一篇文件）时不改指纹——过期判定按实际身份如实失配。 */
-  const retargetPreviewForDocumentIdentity = (direction: 'promote' | 'demote'): void => {
+   *  （内容与参数未变，不误报过期、不重复生成）。**两个方向都要求新旧
+   *  形态都是该篇的全文**：demote 时若新的 document 目标带选区片段，旧
+   *  batchItem 产物是升格后的整篇全文——把它重标成选区指纹会让导出越过
+   *  选择边界（#008），此时返回 false，由调用方丢弃旧产物按新目标重出。 */
+  const retargetPreviewForDocumentIdentity = (direction: 'promote' | 'demote'): boolean => {
     const store = previewStore
     const source = activeSource
-    if (store === undefined || source === undefined) return
+    if (store === undefined || source === undefined) return false
     const sourceFs = source.uri.scheme === 'file' ? source.uri.fsPath.replaceAll('\\', '/') : undefined
     if (direction === 'promote') {
-      if (store.target.kind !== 'document') return
-      if (store.target.doc.docName !== fixedInput?.docName || store.target.doc.fragments !== undefined) return
+      if (store.target.kind !== 'document') return false
+      if (store.target.doc.docName !== fixedInput?.docName || store.target.doc.fragments !== undefined) return false
     } else {
-      if (store.target.kind !== 'batchItem') return
-      if (sourceFs === undefined || store.target.fsPath !== sourceFs) return
-      if (store.target.doc.fragments !== undefined) return
+      if (store.target.kind !== 'batchItem') return false
+      if (sourceFs === undefined || store.target.fsPath !== sourceFs) return false
+      if (store.target.doc.fragments !== undefined) return false
     }
     const target = previewTargetOf()
-    if (target === undefined) return
+    if (target === undefined) return false
+    // 新形态同样必须是全文（demote 回选区时 target.doc.fragments 在场）：
+    // 片段边界与全文产物不是同内容，不得换形复用。
+    if (target.kind === 'document' && target.doc.fragments !== undefined) return false
+    if (target.kind === 'batchItem' && target.doc.fragments !== undefined) return false
     previewStore = {
       ...store,
       target,
@@ -683,6 +706,7 @@ export function createPdfExportModal(
         today: hostToday(),
       }),
     }
+    return true
   }
 
   /** 就绪产物复用核对：参数与固定输入身份（含每篇另起一页与页眉日期）与
@@ -862,12 +886,16 @@ export function createPdfExportModal(
         // 目标身份轮中变动守卫：锁定目标与当前目标不是同一份内容（换条目/
         // 换清单/换文档）→ 本轮产物作废，最新选择交由 pendingPreview 补发。
         // 同一目标内的版本号推进不在此列（那是同一内容的更新，照常发布）。
-        if (lockedTarget !== undefined && pdfPreviewTargetKey(lockedTarget) !== pdfPreviewTargetKey(fingerprintTarget)) {
-          // 本轮作废：旧产物也不再属于当前目标（合并清单增删等没有待补
-          // 点击的场合），一并撤下——不能停在 generating 让视图永远骨架，
-          // 也不能让下一次导出误复用别的目标的字节。
-          previewStore = undefined
-          previewPhase = 'idle'
+        if (lockedTarget !== undefined && !samePreviewSelection(lockedTarget)) {
+          // 本轮作废：旧产物若仍属当前选择则保留（视图已有画面，不闪），
+          // 否则一并撤下——不能停在 generating 让视图永远骨架，也不能让
+          // 下一次导出误复用别的目标的字节。
+          if (previewStore !== undefined && !samePreviewSelection(previewStore.target)) {
+            previewStore = undefined
+            previewPhase = 'idle'
+          } else {
+            previewPhase = previewStore !== undefined ? 'ready' : 'idle'
+          }
           previewFailReason = undefined
           return
         }
@@ -884,6 +912,14 @@ export function createPdfExportModal(
           browserPath: browserPath.trim() || undefined,
         })
         if (gen !== previewGen || token !== previewResetToken) return
+        // 渲染期间改选守卫（R7 007）：生成 await 期间用户可能已点到另一条。
+        // 本轮字节属锁定目标，目标已变就不能以当前选择的身份发布（否则
+        // 旧画面挂到新选中项下、且幂等判定随后把补发轮当成就绪而跳过）。
+        if (lockedTarget !== undefined && !samePreviewSelection(lockedTarget)) {
+          previewPhase = previewStore !== undefined && previewStore.target !== undefined
+            && samePreviewSelection(previewStore.target) ? 'ready' : 'idle'
+          return
+        }
         if (result.ok) {
           adoptPreviewBytes(gen, fingerprint, result.bytes, result.bookmarks, result.failures, params, pageBreak, fingerprintTarget)
         } else if (result.reason === 'cancelled') {
