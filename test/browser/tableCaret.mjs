@@ -712,9 +712,12 @@ try {
         if (scenario === 'enter-cell') {
           const secondLine = await target.evaluate(() => window.tableCaretRect().top)
           await page.keyboard.press('ArrowUp')
+          // 独立光标由 requestMeasure 绘制；保留几何断言，等待实际绘制到达目标行。
+          await page.waitForFunction(y => window.tableCaretRect()?.top < y, secondLine)
           const up = await target.evaluate(e => ({ inside:window.tableCaretInside(e), y:window.tableCaretRect().top }))
           assert(up.inside && up.y < secondLine, '格内换行后上移应返回同格上一行')
           await page.keyboard.press('ArrowDown')
+          await page.waitForFunction(y => window.tableCaretRect()?.top > y, up.y)
           const down = await target.evaluate(e => ({ inside:window.tableCaretInside(e), y:window.tableCaretRect().top }))
           assert(down.inside && down.y > up.y, '下移应返回同格第二行')
           await page.screenshot({ path: artifactPath(root, 'table-enter-live.png') })
