@@ -2919,9 +2919,9 @@ export interface PaintProbe {
    *  时缺省） */
   readingFold?: ReadingFoldPaintProbe
   /** #358 T09 渲染提供者接管绘制观测：文档内图形容器的生效提供者与
-   *  绘制层证据（组件容器计算色/几何；内置 SVG 在场数）——「实际选中
-   *  内容」的断言面（非 DOM 存在性）。无图形容器为空数组（graphic 名
-   *  已被 #111 图形交互探针占用，此处命名 renderers） */
+   *  绘制层证据（组件容器计算色/几何；SVG 在场数按容器所有权分桶）——
+   *  「实际选中内容」的断言面（非 DOM 存在性）。无图形容器为空数组
+   *  （graphic 名已被 #111 图形交互探针占用，此处命名 renderers） */
   renderers?: {
     containers: Array<{
       language: string
@@ -2930,12 +2930,19 @@ export interface PaintProbe {
       /** 挂载目标模式（live widget / 阅读块） */
       mode: string
       state: string | null
-      /** 组件渲染内容的计算背景色（内置容器为 null——SVG 在场由 builtinSvg 计） */
+      /** 组件渲染内容的计算背景色（内置容器为 null——SVG 在场由 builtinSvg/addonSvg 按所有权计） */
       color: string | null
-      /** 组件渲染内容宽度（px；非零 = 真实布局） */
+      /** 组件渲染内容宽度（px；非零 = 真实布局。代表元素选择序见
+       *  graphicRendererContentEl：断言锚 → svg → 可见文本叶子——#629 起
+       *  绕开 display:none 内嵌 <style>；区分渲染成败靠 addonSvg 计数） */
       width: number
     }>
+    /** 内置容器内的 SVG 在场数（无所有权标记的历史容器一并计入；组件
+     *  接管容器渲染出的 SVG 不计入——#629 前按类名全量计数会误计） */
     builtinSvg: number
+    /** 组件接管容器内的 SVG 在场数（#629）：真渲染 SVG 的组件 ≥1，
+     *  error 占位/纯文本组件为 0——组件渲染成败的可区分信号 */
+    addonSvg: number
     /** #361 T12 诊断观测：webview 桥生效表版本（null = 桥侧无表） */
     tableVersion?: number | null
     /** #361 T12 诊断观测：动态渲染型围栏语言集快照（发射判定的输入面） */
@@ -4023,7 +4030,8 @@ function isPaintProbe(v: unknown): v is PaintProbe {
         (c.state === null || isString(c.state)) &&
         (c.color === null || isString(c.color)) &&
         typeof c.width === 'number') &&
-      typeof v.renderers.builtinSvg === 'number')) &&
+      typeof v.renderers.builtinSvg === 'number' &&
+      typeof v.renderers.addonSvg === 'number')) &&
     isNullOrString(v.scrollerDisplay) &&
     isNullOrString(v.gutterUserSelect) &&
     (v.visibleLineNumbers === undefined || (Array.isArray(v.visibleLineNumbers) &&

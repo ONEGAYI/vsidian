@@ -196,6 +196,8 @@ import {
 import {
   effectiveGraphicRendererFor,
   effectiveGraphicSvgExport,
+  graphicRendererContentEl,
+  graphicSvgCountByOwner,
   hasEffectiveGraphicRenderer,
   refreshAddonGraphicBlocks,
   remountChangedGraphicBlocks,
@@ -11401,14 +11403,15 @@ export class WebviewSyncController {
     const findSourceCurrent = findSource?.querySelector<HTMLElement>('.vsidian-find-match-current')
     // #358 T09 渲染提供者接管绘制观测：文档内图形容器逐个回报生效提供者
     //（provider data 属性）、状态、组件渲染内容的计算色与几何（内置容器
-    // color null——SVG 在场由 builtinSvg 计）。绘制层断言面，非 DOM 存在性
+    // color null——SVG 在场由 builtinSvg/addonSvg 按所有权计）。绘制层断言
+    // 面，非 DOM 存在性。#629：代表元素与 svg 分桶经 graphicRenderers 纯
+    // 函数收集（组件真渲染 SVG 场景 builtinSvg 不误计、width 不落
+    // display:none 内嵌 <style>）
     const rendererScope = view.dom.closest('#app') ?? document
     const rendererContainers = [...rendererScope.querySelectorAll<HTMLElement>(`[${GRAPHIC_LANG_ATTR}]`)]
       .filter((el) => el.isConnected)
       .map((el) => {
-        const box = el.querySelector<HTMLElement>('[data-t09-renderer]') ?? el.querySelector<HTMLElement>('.t09-box')
-        // 通用化：组件渲染内容的代表元素取首个带 provider 标记的子节点后代
-        const content = box ?? [...el.querySelectorAll<HTMLElement>('*')].find((child) => child.childElementCount === 0 && (child.textContent ?? '').trim() !== '') ?? null
+        const content = graphicRendererContentEl(el)
         const rect = content?.getBoundingClientRect()
         return {
           language: (el.getAttribute(GRAPHIC_LANG_ATTR) ?? '').trim(),
@@ -11419,6 +11422,7 @@ export class WebviewSyncController {
           width: rect ? rect.width : 0,
         }
       })
+    const rendererSvgCounts = graphicSvgCountByOwner(rendererScope)
     return {
       textVisible,
       scrollerDisplay: view.scrollDOM ? getComputedStyle(view.scrollDOM).display : null,
@@ -11468,7 +11472,8 @@ export class WebviewSyncController {
       graphic,
       renderers: {
         containers: rendererContainers,
-        builtinSvg: rendererScope.querySelectorAll('.vsidian-mermaid svg').length,
+        builtinSvg: rendererSvgCounts.builtin,
+        addonSvg: rendererSvgCounts.addon,
         // #361 T12 诊断观测（非断言面）：webview 桥生效表与动态语言集快照
         tableVersion: addonRenderersBridge()?.currentTable()?.version ?? null,
         dynamicLanguages: [...dynamicRenderedFenceLanguageSnapshot()],

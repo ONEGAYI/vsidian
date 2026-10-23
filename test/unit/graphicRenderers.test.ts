@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { EditorSelection, EditorState } from '@codemirror/state'
 import {
   GRAPHIC_LANG_ATTR,
+  GRAPHIC_PROVIDER_ATTR,
   MERMAID_CODE_ATTR,
   MERMAID_STATE_ATTR,
   RENDERED_FENCE_LABELS,
@@ -12,8 +13,10 @@ import {
 } from '../../src/shared/mermaid'
 import {
   __registerGraphicRendererForTest,
+  graphicRendererContentEl,
   graphicRendererFor,
   graphicRendererLanguages,
+  graphicSvgCountByOwner,
   renderGraphicBlockInto,
 } from '../../src/webview/graphicRenderers'
 import { buildMermaidDecorationRanges, mermaidFencesField } from '../../src/webview/liveMermaid'
@@ -86,5 +89,76 @@ describe('登记即继承（假想第二渲染器）', () => {
     renderGraphicBlockInto(block)
     expect(calls.some((entry) => entry.lang === 'nostack')).toBe(false)
     restore()
+  })
+})
+
+// #629 renderers 探针纯函数：builtinSvg 按容器所有权分桶（组件渲染出的
+// SVG 不得误计入内置计数）、代表元素选择序绕开 display:none 的内嵌
+// <style>（真 SVG 组件场景 width 恒 0 的根因）
+describe('renderers 探针纯函数（#629）', () => {
+  /** 按真实挂载形态构造图形容器（类名/语言/提供者/状态齐全） */
+  function makeContainer(provider: string | null, innerHtml = ''): HTMLElement {
+    const el = document.createElement('div')
+    el.className = 'vsidian-mermaid'
+    el.setAttribute(GRAPHIC_LANG_ATTR, 'mermaid')
+    el.setAttribute(MERMAID_CODE_ATTR, 'graph TD')
+    if (provider !== null) {
+      el.setAttribute(GRAPHIC_PROVIDER_ATTR, provider)
+    }
+    el.setAttribute(MERMAID_STATE_ATTR, 'rendered')
+    el.innerHTML = innerHtml
+    return el
+  }
+
+  describe('graphicSvgCountByOwner：svg 按所有权分桶', () => {
+    it('组件接管容器渲染出的 SVG 不计入 builtin、计入 addon（#629 主缺陷）', () => {
+      const scope = document.createElement('div')
+      scope.appendChild(makeContainer('test.addon/mermaid-alt', '<svg><g><text>A</text></g></svg>'))
+      expect(graphicSvgCountByOwner(scope)).toEqual({ builtin: 0, addon: 1 })
+    })
+
+    it('内置容器与无所有权标记的历史容器计入 builtin', () => {
+      const scope = document.createElement('div')
+      scope.appendChild(makeContainer('builtin', '<svg></svg>'))
+      scope.appendChild(makeContainer(null, '<svg><g><text>B</text></g></svg>'))
+      expect(graphicSvgCountByOwner(scope)).toEqual({ builtin: 2, addon: 0 })
+    })
+
+    it('非图形容器内的 svg 不参与计数；两类容器并存时分桶各自正确', () => {
+      const scope = document.createElement('div')
+      const plain = document.createElement('div')
+      plain.innerHTML = '<svg></svg>'
+      scope.appendChild(plain)
+      scope.appendChild(makeContainer('test.addon/r1', '<svg></svg><svg></svg>'))
+      scope.appendChild(makeContainer('builtin', '<svg></svg>'))
+      expect(graphicSvgCountByOwner(scope)).toEqual({ builtin: 1, addon: 2 })
+    })
+  })
+
+  describe('graphicRendererContentEl：代表元素选择序', () => {
+    it('显式断言锚（t09-box / data-t09-renderer）最优先——fixture 断言锚兼容', () => {
+      const el = makeContainer('test.addon/mermaid-alt', '<div class="t09-box" data-t09-renderer="mermaid-alt">alt</div>')
+      const content = graphicRendererContentEl(el)
+      expect(content?.classList.contains('t09-box')).toBe(true)
+    })
+
+    it('真 SVG 组件场景代表元素是 svg 本体而非内嵌 <style>（width 恒 0 的根因）', () => {
+      // Codex 预设把 themeCSS 烘焙进内嵌 <style>——UA 样式 display:none，
+      // 旧「首个非空文本叶子」fallback 恰命中它
+      const el = makeContainer('test.addon/mermaid', '<svg viewBox="0 0 40 20"><style>.node{fill:#333}</style><g><text>节点</text></g></svg>')
+      const content = graphicRendererContentEl(el)
+      expect(content?.tagName.toLowerCase()).toBe('svg')
+    })
+
+    it('error 占位场景命中可见文本叶子：跳过 UA 隐藏标签与 display:none 元素', () => {
+      const el = makeContainer('test.addon/mermaid', '<style>.x{}</style><span style="display: none">隐藏占位</span><span>渲染失败：语法错误</span>')
+      const content = graphicRendererContentEl(el)
+      expect(content?.tagName.toLowerCase()).toBe('span')
+      expect((content?.textContent ?? '').includes('渲染失败')).toBe(true)
+    })
+
+    it('空容器无代表元素（null，width 探针回 0）', () => {
+      expect(graphicRendererContentEl(makeContainer('test.addon/r', ''))).toBeNull()
+    })
   })
 })
