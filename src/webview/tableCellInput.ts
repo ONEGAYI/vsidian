@@ -5,10 +5,16 @@ import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view'
 import { tableBoundaryField, insertOutside } from './tableBoundary'
 import { tableRegionField } from './tableRegionField'
 import { planTableCellInput, tableCellInputView } from '../shared/tableCellInput'
+import { tableCellBreaks } from '../shared/tableCells'
 import { bindLocale } from './localeDom'
 
 export const independentTableInput = Annotation.define<boolean>()
 export const independentTableKey = new WeakSet<EditorState>()
+function inputSelection(raw: string, plan: ReturnType<typeof planTableCellInput>, offset: number) {
+  const next = raw.slice(0, plan.from) + plan.insert + raw.slice(plan.to)
+  const assoc = tableCellBreaks(next).some(item => item.to === plan.selection) ? 1 : -1
+  return EditorSelection.create([EditorSelection.cursor(offset + plan.selection, assoc)])
+}
 export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }: {
   editableGridCellAt: typeof import('./tableEditing').editableGridCellAt
   deleteGridCellBreak: typeof import('./tableEditing').deleteGridCellBreak
@@ -148,7 +154,7 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
       this.view.dispatch({ changes: region
         ? { from: cell.contentFrom, to: cell.contentTo, insert: planTableCellInput('', this.input.value, this.input.selectionStart).insert }
         : { from: cell.contentFrom + plan.from, to: cell.contentFrom + plan.to, insert: plan.insert },
-        selection: EditorSelection.single(cell.contentFrom + plan.selection),
+        selection: inputSelection(raw, plan, cell.contentFrom),
         annotations: independentTableInput.of(true), userEvent: this.composing ? 'input.type.compose' : 'input.type' })
       this.forwarding = false
       if (!this.composing) this.refresh()
@@ -263,7 +269,7 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
         const to = projectedPosition(projection.positions, range.to - cell.contentFrom)
         const plan = planTableCellInput(raw, projection.text.slice(0, from) + event.data + projection.text.slice(to), from + event.data.length)
         view.dispatch({ changes: { from: cell.contentFrom + plan.from, to: cell.contentFrom + plan.to, insert: plan.insert },
-          selection: EditorSelection.single(cell.contentFrom + plan.selection),
+          selection: inputSelection(raw, plan, cell.contentFrom),
           annotations: independentTableInput.of(true), userEvent: 'input.type' })
         return true
       },
