@@ -703,6 +703,8 @@ const replaceTableRegionInput = EditorState.transactionFilter.of((tr) => {
  * caret 锚在网格行边界，视觉上落到下一列；向当前格关联以保持可继续退格。
  * br 后例外：下一视觉行必须向右关联，才不会显示在 br 之前。 */
 const keepGridInputCaretInsideCell = EditorState.transactionFilter.of((tr) => {
+  // 独立输入自绘光标，无需重建原生选区；重建会让事务扩展器重复迁移嵌入坐标。
+  if (tr.annotation(independentTableInput)) return tr
   if (!tr.docChanged || !tr.isUserEvent('input') || tr.newSelection.ranges.length !== 1 ||
       !tr.newSelection.main.empty) return tr
   const cell = editableGridCellAt(tr.startState, tr.startState.selection.main.anchor)
