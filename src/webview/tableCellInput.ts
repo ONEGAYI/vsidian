@@ -49,6 +49,7 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
       this.caret.setAttribute('aria-hidden', 'true')
       view.dom.append(this.input, this.caret)
       this.input.addEventListener('input', () => this.commit())
+      this.input.addEventListener('beforeinput', () => this.syncSelection(true))
       this.input.addEventListener('select', () => {
         this.syncSelection()
       })
@@ -96,6 +97,7 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
         this.refresh()
       })
       this.input.addEventListener('compositionstart', () => {
+        this.syncSelection(true)
         this.composing = true
         view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
       })
@@ -125,12 +127,18 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
       this.pointerSelecting = false
       this.refresh()
     }
-    syncSelection() {
+    syncSelection(forInput = false) {
       if (this.forwarding || this.composing || this.view.dom.ownerDocument.activeElement !== this.input ||
           this.view.state.field(tableRegionField, false)) return
       const cell = this.cell()
       if (!cell) return
       const projection = tableCellInputView(this.view.state.sliceDoc(cell.contentFrom, cell.contentTo))
+      const range = this.view.state.selection.main
+      const inputAnchor = this.input.selectionDirection === 'backward' ? this.input.selectionEnd : this.input.selectionStart
+      const inputHead = this.input.selectionDirection === 'backward' ? this.input.selectionStart : this.input.selectionEnd
+      // 程序设置 textarea 选区也会异步触发 select；同一投影落点不改写源坐标。
+      if (!forInput && projectedPosition(projection.positions, range.anchor - cell.contentFrom) === inputAnchor &&
+          projectedPosition(projection.positions, range.head - cell.contentFrom) === inputHead) return
       const anchor = cell.contentFrom + projection.positions[this.input.selectionStart]!
       const head = cell.contentFrom + projection.positions[this.input.selectionEnd]!
       const backward = this.input.selectionDirection === 'backward'
@@ -193,8 +201,6 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
         if (this.input.selectionStart !== from || this.input.selectionEnd !== to || this.input.selectionDirection !== direction) this.input.setSelectionRange(from, to, direction)
         this.input.focus({ preventScroll: true })
         this.forwarding = false
-        // 透明格式空白可投影为同一输入落点；源选区也须对齐，符号补全才认作原位键入。
-        this.syncSelection()
         this.measure()
       })
     }

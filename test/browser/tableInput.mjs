@@ -32,6 +32,22 @@ async function init(text = source) {
   await page.locator('.vsidian-table-grid-cell').first().click()
 }
 try {
+  await init('a|b|c\n---|---|---\n | | ')
+  await page.evaluate(() => window.moveCaret(23))
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  assert.equal((await read()).head, 23, '只定位与聚焦不得改写透明格式空白内的源坐标')
+  await page.keyboard.insertText('(')
+  assert.equal((await read()).text, 'a|b|c\n---|---|---\n| | | ()|')
+  console.log('PASS 定位保留源坐标，实际键入时对齐独立输入落点')
+
+  await init()
+  await page.evaluate(() => window.moveCaret(window.readEditor().text.indexOf('y')))
+  await page.evaluate(() => window.controller.handleHostMessage({ kind: 'table.command', op: 'insertRowBelow' }))
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const inserted = await read()
+  assert.equal(inserted.head, inserted.text.indexOf('| | |') + 2, '插行后的内容落点须在异步 select 后保持')
+  console.log('PASS 结构命令的空格落点不被独立输入的异步选区事件改写')
+
   await init()
   await page.keyboard.press('Home')
   await page.keyboard.press('ArrowLeft')

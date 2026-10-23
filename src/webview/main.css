@@ -180,8 +180,7 @@ body.vscode-light #app {
   background-color: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
 }
 
-#app .cm-editor.cm-focused:has(.cm-selectionLayer) .cm-content .vsidian-code-selection,
-#app .cm-editor.vsidian-table-cell-input-active:has(.cm-selectionLayer) .cm-content .vsidian-code-selection {
+#app .cm-editor.cm-focused:has(.cm-selectionLayer) .cm-content .vsidian-code-selection {
   background-color: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
 }
 
