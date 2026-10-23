@@ -86,6 +86,22 @@ export const MODE_READING_ICON =
   '<path d="M8 4C7 3 5.6 2.5 3.2 2.5v9.6c2.4 0 3.8.5 4.8 1.4 1-.9 2.4-1.4 4.8-1.4V2.5C10.4 2.5 9 3 8 4z"></path>' +
   '<path d="M8 4v9.5"></path></svg>'
 
+/** 模式按钮态反查（localeOnDemand 换包重刷用）：按钮图标是态的唯一 DOM
+ *  痕迹（嵌入卡 refreshModeChrome 与浮窗 mkChromeBtn 初值同源写这两枚
+ *  常量），按 innerHTML 匹配得悬停词键；未匹配（态未初始化等）返回
+ *  null——调用方保持原词不强改 */
+export function embedModeTooltipKey(
+  btn: HTMLElement,
+): 'embed.modeToLive' | 'embed.modeToReading' | null {
+  if (btn.innerHTML === MODE_LIVE_ICON) {
+    return 'embed.modeToLive'
+  }
+  if (btn.innerHTML === MODE_READING_ICON) {
+    return 'embed.modeToReading'
+  }
+  return null
+}
+
 /** P2-04 保存目标入口：软盘图标 */
 export const SAVE_ICON =
   '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +

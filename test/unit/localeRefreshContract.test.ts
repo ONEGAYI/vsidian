@@ -21,7 +21,8 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 import { en } from '../../src/shared/locales/en'
 import { CodeCardHeaderWidget } from '../../src/webview/liveCodeCard'
 import { FmCardHeaderWidget, FmDegradedHintWidget } from '../../src/webview/frontmatterDecorations'
-import { EMBED_CARD_CLASS_NAMES } from '../../src/webview/embedCard'
+import { EMBED_CARD_CLASS_NAMES, MODE_LIVE_ICON, MODE_READING_ICON }
+  from '../../src/webview/embedCard'
 import { buildGraphicChrome } from '../../src/webview/graphicBlockChrome'
 import { LiveMathWidget } from '../../src/webview/liveMath'
 import { EmptyTableCellWidget, LIVE_CLASS_NAMES } from '../../src/webview/liveDecorations'
@@ -289,6 +290,38 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
       const embedHeaderPassive = document.createElement('div')
       embedHeaderPassive.className = EMBED_CARD_CLASS_NAMES.header
       host.append(embedHeaderLive, embedHeaderPassive)
+      // 换包残留收口（review-loops B-1 族内补齐）：嵌入卡头部按钮族
+      // （mountCardInto 固化，mode 两态词按图标态反查）、浮窗头部按钮族
+      // （mkChromeBtn 固化）与块级 HTML 宿主词（LiveHtmlWidget.toDOM 固化）
+      const mkCtrl = (className: string, label: string, innerHTML = ''): HTMLElement => {
+        const el = document.createElement(className === 'vsidian-embed-card-dirty' ? 'span' : 'button')
+        el.className = className
+        el.setAttribute('aria-label', label)
+        el.setAttribute('data-tooltip', label)
+        el.innerHTML = innerHTML
+        return el
+      }
+      const embedCtrls = [
+        mkCtrl('vsidian-embed-card-open', zhCn['embed.openTarget']),
+        mkCtrl('vsidian-embed-card-save', zhCn['embed.saveTarget']),
+        mkCtrl('vsidian-embed-card-close', zhCn['embed.closeEditor']),
+        mkCtrl('vsidian-embed-card-dirty', zhCn['embed.dirtyDot']),
+        mkCtrl('vsidian-embed-card-mode', zhCn['embed.modeToLive'], MODE_LIVE_ICON),
+        mkCtrl('vsidian-embed-card-mode', zhCn['embed.modeToReading'], MODE_READING_ICON),
+        mkCtrl('vsidian-hover-popup-save', zhCn['embed.saveTarget']),
+        mkCtrl('vsidian-hover-popup-web-fallback', zhCn['hover.webFallbackToCard']),
+        mkCtrl('vsidian-hover-popup-mode', zhCn['embed.modeToLive'], MODE_LIVE_ICON),
+        mkCtrl('vsidian-hover-popup-close', zhCn['embed.closeEditor']),
+        mkCtrl('vsidian-hover-popup-open', zhCn['embed.openTarget']),
+        mkCtrl('vsidian-hover-popup-dirty', zhCn['embed.dirtyDot']),
+      ]
+      const htmlHost = document.createElement('div')
+      htmlHost.className = 'vsidian-live-html'
+      htmlHost.setAttribute('data-tooltip', zhCn['html.blockTooltip'])
+      // 负向：mode 按钮图标态未知（空 innerHTML）时重刷保持原词不强改
+      // 负向控件初始词用 en——换包后保持原词（未知态不强改）且不触发 zh 残留兜底
+      const modeUnknown = mkCtrl('vsidian-embed-card-mode', en['embed.modeToLive'])
+      host.append(...embedCtrls, htmlHost, modeUnknown)
       const images = new ImageResourceManager({
         isDirectSrc: () => false,
         requestHost: () => {},
@@ -319,6 +352,7 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
         .toBe(zhCn['graphic.popup'])
       expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.getAttribute('data-tooltip'))
         .toBe(zhCn['decor.mathError'])
+      expect(embedCtrls.every((el) => el.getAttribute('data-tooltip') === el.getAttribute('aria-label'))).toBe(true)
       expect(embedHeaderLive.getAttribute('data-tooltip')).toBe(zhCn['embed.selectSource'])
       expect(img.getAttribute('data-tooltip')).toBe(zhCn['decor.imageError'].replace('{reason}', 'not found'))
       switchToEnglish()
@@ -343,6 +377,22 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
         .toBe(en['decor.mathError'])
       expect(embedHeaderLive.getAttribute('data-tooltip')).toBe(en['embed.selectSource'])
       expect(embedHeaderPassive.getAttribute('data-tooltip')).toBeNull()
+      const modeKeyByIcon = (innerHTML: string): string =>
+        innerHTML === MODE_LIVE_ICON ? en['embed.modeToLive'] : en['embed.modeToReading']
+      for (const el of embedCtrls) {
+        const expected = el.classList.contains('vsidian-embed-card-mode') ||
+          el.classList.contains('vsidian-hover-popup-mode')
+          ? modeKeyByIcon(el.innerHTML)
+          : el.getAttribute('data-tooltip')!.replace(zhCn['embed.openTarget'], en['embed.openTarget'])
+            .replace(zhCn['embed.saveTarget'], en['embed.saveTarget'])
+            .replace(zhCn['embed.closeEditor'], en['embed.closeEditor'])
+            .replace(zhCn['embed.dirtyDot'], en['embed.dirtyDot'])
+            .replace(zhCn['hover.webFallbackToCard'], en['hover.webFallbackToCard'])
+        expect(el.getAttribute('data-tooltip'), el.className).toBe(expected)
+        expect(el.getAttribute('aria-label'), el.className).toBe(expected)
+      }
+      expect(htmlHost.getAttribute('data-tooltip')).toBe(en['html.blockTooltip'])
+      expect(modeUnknown.getAttribute('data-tooltip')).toBe(en['embed.modeToLive'])
       expect(img.getAttribute('data-tooltip')).toBe(en['decor.imageError'].replace('{reason}', 'not found'))
       expectNoStaleZh(host, '按需控件（直构树）')
     } finally {
