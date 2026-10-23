@@ -396,6 +396,23 @@ describe('innerSpanOfImageSource：定位内层（最小编辑的前提）', () 
     expect(innerSpanOfImageSource('![a](x.png')).toBeNull()
     expect(innerSpanOfImageSource('![a]x.png)')).toBeNull()
   })
+
+  it('嵌套方括号图注：配对到外层 ]，内层括号留在 alt（vsidianPR641-002）', () => {
+    expect(innerSpanOfImageSource('![a [b] c](a.png)')).toEqual({ text: 'a [b] c', start: 2 })
+    expect(innerSpanOfImageSource('![a [b [c] d] e](a.png)')).toEqual({ text: 'a [b [c] d] e', start: 2 })
+  })
+
+  it('转义方括号图注：\\[ \\] 不计入配对（vsidianPR641-002）', () => {
+    expect(innerSpanOfImageSource('![a \\[b\\] c](a.png)')).toEqual({ text: 'a \\[b\\] c', start: 2 })
+  })
+
+  it('图注括号配不平（嵌套 [ 未闭合）返回 null（与 CommonMark 一致，不猜）', () => {
+    expect(innerSpanOfImageSource('![a [b](a.png)')).toBeNull()
+  })
+
+  it('转义开括号不增深度：label 在其后首个 ] 正常闭合（CommonMark：\\[ 是字面 [）', () => {
+    expect(innerSpanOfImageSource('![a \\[b](a.png)')).toEqual({ text: 'a \\[b', start: 2 })
+  })
 })
 
 describe('rewriteImageSourceSuffix：整段源文改写只动内层', () => {
@@ -427,6 +444,27 @@ describe('rewriteImageSourceSuffix：整段源文改写只动内层', () => {
     expect(rewriteImageSourceSuffix('`![[图.png]]`', { width: 1, height: null, unit: 'px' })).toBeNull()
     expect(rewriteImageSourceSuffix('[[图.png]]', { width: 1, height: null, unit: 'px' })).toBeNull()
     expect(rewriteImageSourceSuffix('![a](x.png', { width: 1, height: null, unit: 'px' })).toBeNull()
+  })
+
+  it('嵌套方括号图注写回：尺寸追加到外层 label，内层括号与目标原样（vsidianPR641-002）', () => {
+    expect(rewriteImageSourceSuffix('![a [b] c](a.png)', { width: 160, height: null, unit: 'px' }))
+      .toBe('![a [b] c|160](a.png)')
+    expect(rewriteImageSourceSuffix('![a [b [c] d] e](a.png)', { width: 160, height: null, unit: 'px' }))
+      .toBe('![a [b [c] d] e|160](a.png)')
+  })
+
+  it('转义方括号图注写回：\\[ \\] 原样保留（vsidianPR641-002）', () => {
+    expect(rewriteImageSourceSuffix('![a \\[b\\] c](a.png)', { width: 160, height: null, unit: 'px' }))
+      .toBe('![a \\[b\\] c|160](a.png)')
+  })
+
+  it('目标 URL 含 ]：label 配对先于目标，既有行为不回归', () => {
+    expect(rewriteImageSourceSuffix('![a](b]c.png)', { width: 160, height: null, unit: 'px' }))
+      .toBe('![a|160](b]c.png)')
+  })
+
+  it('图注括号配不平时返回 null（不猜、不改）', () => {
+    expect(rewriteImageSourceSuffix('![a [b](a.png)', { width: 160, height: null, unit: 'px' })).toBeNull()
   })
 })
 
@@ -594,6 +632,77 @@ describe('attachResizeHandle：拖动时序（jsdom + rect stub）', () => {
     fire(window, 'pointermove', { pointerId: 7, clientX: 160, clientY: 80 })
     fire(window, 'pointerup', { pointerId: 7, clientX: 160, clientY: 80 })
     expect(committed).toEqual(['160'])
+  })
+
+  it('vsidianPR641-002：嵌套方括号图注的拖动写回不再静默失败', () => {
+    const { frame } = laidOutFrame()
+    const source = '![a [b] c](a.png)'
+    const committed: string[] = []
+    frame.dataset['vsidianSrcFrom'] = '0'
+    frame.dataset['vsidianSrcTo'] = String(source.length)
+    attachResizeHandleToLiveImage(frame, {
+      readInner: () => source,
+      commitInner: (_frame, _range, inner) => {
+        committed.push(inner)
+      },
+    })
+    const handle = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    fire(handle, 'pointerdown', { pointerId: 7, clientX: 100, clientY: 50 })
+    fire(window, 'pointermove', { pointerId: 7, clientX: 160, clientY: 80 })
+    fire(window, 'pointerup', { pointerId: 7, clientX: 160, clientY: 80 })
+    // 嵌套层首个 ] 不再被误判为 label 结束：内层括号原样、尺寸段完整
+    expect(committed).toEqual(['a [b] c|160'])
+  })
+
+  it('vsidianPR641-001：资源刷新（slot 清空重建 img）后手柄重装且仅一份、操作新 img', () => {
+    const source = '![[img.png|100]]'
+    const committed: string[] = []
+    const { frame } = laidOutFrame()
+    frame.dataset['vsidianSrcFrom'] = '0'
+    frame.dataset['vsidianSrcTo'] = String(source.length)
+    const attach = (): void => {
+      attachResizeHandleToLiveImage(frame, {
+        readInner: () => source,
+        commitInner: (_frame, _range, inner) => {
+          committed.push(inner)
+        },
+      })
+    }
+    attach()
+    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)).toHaveLength(1)
+    const handle1 = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+
+    // 模拟 LiveImageWidget 的资源 render 回调（invalidateAll/invalidate 后重
+    // 走）：slot.textContent='' 删旧 img 与三件套，frame 不换、换新 img
+    const refresh = (): HTMLImageElement => {
+      frame.textContent = ''
+      const img = document.createElement('img')
+      const rect = { width: 100, height: 50, x: 0, y: 0, top: 0, left: 0, right: 100, bottom: 50, toJSON: () => ({}) } as DOMRect
+      Object.defineProperty(img, 'getBoundingClientRect', { value: () => rect })
+      frame.append(img)
+      attach()
+      return img
+    }
+    const img2 = refresh()
+    const handlesAfterRefresh = frame.querySelectorAll<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)
+    expect(handlesAfterRefresh).toHaveLength(1)
+    const handle2 = handlesAfterRefresh[0]!
+    expect(handle2).not.toBe(handle1) // 重建而非复用
+    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.glow}`)).toHaveLength(1)
+    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)).toHaveLength(1)
+
+    // 再刷一次仍恰好一份（连续多次刷新不堆积）
+    refresh()
+    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)).toHaveLength(1)
+    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.glow}`)).toHaveLength(1)
+    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)).toHaveLength(1)
+
+    // 新手柄操作的是新 img：拖动视觉落在 img2 上、写回走新闭包
+    fire(handle2, 'pointerdown', { pointerId: 9, clientX: 100, clientY: 50 })
+    fire(window, 'pointermove', { pointerId: 9, clientX: 140, clientY: 70 })
+    expect(img2.style.width).toBe('140px')
+    fire(window, 'pointerup', { pointerId: 9, clientX: 140, clientY: 70 })
+    expect(committed).toEqual(['img.png|140'])
   })
 })
 

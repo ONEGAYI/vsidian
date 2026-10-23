@@ -258,6 +258,38 @@ export interface ImageSourceRange {
 }
 
 /**
+ * `![label](dest)` 的 label 结束 `]` 索引——**栈式配对**（vsidianPR641-002）。
+ *
+ * 首个 `]` 不一定是 label 结束：`![a [b] c](a.png)` 的首个 `]` 属于嵌套
+ * 层，CommonMark 也只认括号配平的 label（生产 Lezer 装饰按此产出 widget，
+ * 写回侧配对口径与它对齐）。扫描从 `![` 之后开始（深度 1）：未转义 `[`
+ * 深度+1；未转义 `]` 深度-1，归零即 label 结束，其后必须是 `(`；`\[`/`\]`
+ * 转义跳过。配不平或 `]` 归零处后面不是 `(` 返回 -1（调用方按形态不可
+ * 识别降级，不猜）。innerSpanOfImageSource 与 rewriteImageSourceSuffix
+ * 共用本函数，不建第二份配对。
+ */
+function directLinkLabelCloseOf(sourceText: string): number {
+  for (let i = 2, depth = 1; i < sourceText.length; i++) {
+    const ch = sourceText[i]
+    if (ch === '\\') {
+      if (sourceText[i + 1] === '[' || sourceText[i + 1] === ']') {
+        i += 1 // 跳过被转义的括号
+      }
+      continue
+    }
+    if (ch === '[') {
+      depth += 1
+    } else if (ch === ']') {
+      depth -= 1
+      if (depth === 0) {
+        return sourceText[i + 1] === '(' ? i : -1
+      }
+    }
+  }
+  return -1
+}
+
+/**
  * 整段图片源文的尾缀改写：识别 `![[…]]` 与 `![alt](dest)` 两种包裹形态，
  * 只改「内层」文本，包裹标记与目标路径逐字节保留。
  *
@@ -271,10 +303,11 @@ export function rewriteImageSourceSuffix(sourceText: string, size: ImageSize): s
   if (!sourceText.startsWith('![')) {
     return null
   }
-  // `![alt](dest)`：alt 到首个 `]`，其后必须是 `(`（与 markdown 图片形态
-  // 一致）。目标内可能含 `)`，不参与改写，从尾部找最后一个 `)` 即可
-  const closeLabel = sourceText.indexOf(']')
-  if (closeLabel < 0 || sourceText[closeLabel + 1] !== '(' || !sourceText.endsWith(')')) {
+  // `![alt](dest)`：alt 的结束 `]` 由栈式配对定位（嵌套/转义括号不算，
+  // vsidianPR641-002）。目标内可能含 `)` 与 `]`，不参与改写——只要求整段
+  // 以 `)` 结尾
+  const closeLabel = directLinkLabelCloseOf(sourceText)
+  if (closeLabel < 0 || !sourceText.endsWith(')')) {
     return null
   }
   const alt = sourceText.slice(2, closeLabel)
@@ -314,25 +347,65 @@ export interface AttachResizeHandleOptions {
   cornerRadius?: number
 }
 
+/**
+ * 装配标记（vsidianPR641-001）：挂在 **img 元素**上，不挂 frame。
+ *
+ * LiveImageWidget 的资源 render 回调每次 `slot.textContent = ''` 换新 img
+ * （invalidateAll/invalidate 后重走回调），frame 不换——标记挂 frame 会被
+ * 第二次装配永久短路，图片刷新后手柄消失；挂 img 则随旧 img 一并消亡，
+ * 重装自然发生，且重装的手柄闭包操作的就是新 img。
+ */
 const ATTACHED_FLAG = 'vsidianResizeAttached'
+/** frame 上的上一次装配拆除函数（重装前先拆旧：见 disposeResizeAttachment） */
+const DISPOSE_KEY = 'vsidianResizeDispose'
 /** Shift 提示的 toast 去重键（连续拖动不排队堆积，规格 §7.2） */
 const SHIFT_HINT_TOAST_KEY = 'imageResize.shiftHint'
 
 /**
- * 在图片相框内装配拖动手柄、光晕与读数（幂等）。
+ * 拆除 frame 上既有的一次手柄装配（vsidianPR641-001 重装路径）。
+ *
+ * 旧装配的 ResizeObserver 观察 frame，而 frame 在资源刷新中始终在树内，
+ * `!frame.isConnected` 自撤条件永不命中——不主动断开则每次刷新漏一份
+ * observer 闭包（钉住旧三件套与 img）；恰逢拖动中刷新时旧 window 监听
+ * 也一并卸下。三件套节点通常已随 `textContent = ''` 移除，按类名清出
+ * 只是防御性兜底（保证重装后仅一份）。
+ */
+function disposeResizeAttachment(frame: HTMLElement): void {
+  const holder = frame as HTMLElement & Record<string, unknown>
+  const dispose = holder[DISPOSE_KEY]
+  if (typeof dispose === 'function') {
+    dispose()
+    delete holder[DISPOSE_KEY]
+  }
+  for (const className of [
+    IMAGE_RESIZE_CLASS_NAMES.glow,
+    IMAGE_RESIZE_CLASS_NAMES.readout,
+    IMAGE_RESIZE_CLASS_NAMES.handle,
+  ]) {
+    frame.querySelectorAll(`.${className}`).forEach((el) => {
+      el.remove()
+    })
+  }
+}
+
+/**
+ * 在图片相框内装配拖动手柄、光晕与读数（按当前 img 幂等）。
  *
  * 只做 DOM 装配；「这个 frame 该不该有手柄」由调用方判定（Live 的非排除
- * 图片）。返回 true 表示装配完成或此前已装配。
+ * 图片）。返回 true 表示装配完成或当前 img 此前已装配。
  */
 export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleOptions): boolean {
-  if ((frame as HTMLElement & Record<string, unknown>)[ATTACHED_FLAG] === true) {
-    return true
-  }
   const img = frame.querySelector<HTMLImageElement>('img')
   if (!img) {
     return false
   }
-  ;(frame as HTMLElement & Record<string, unknown>)[ATTACHED_FLAG] = true
+  const imgHolder = img as HTMLImageElement & Record<string, unknown>
+  if (imgHolder[ATTACHED_FLAG] === true) {
+    return true
+  }
+  // 本 frame 此前可能为旧 img 装配过（资源刷新换 img 重装）：先拆旧再装新
+  disposeResizeAttachment(frame)
+  imgHolder[ATTACHED_FLAG] = true
 
   const glow = document.createElement('span')
   glow.className = IMAGE_RESIZE_CLASS_NAMES.glow
@@ -376,11 +449,13 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
     readout.style.bottom = `${bottom + IMAGE_RESIZE_HIT_SIZE + 2}px`
   }
   applyGeometry()
+  let observer: ResizeObserver | undefined
   if (typeof ResizeObserver !== 'undefined') {
-    const observer = new ResizeObserver(() => {
-      // widget 退场后 observer 必须自撤（否则闭包钉住整棵 DOM）
-      if (!frame.isConnected) {
-        observer.disconnect()
+    observer = new ResizeObserver(() => {
+      // widget 退场或三件套被资源刷新清掉后 observer 必须自撤（否则闭包
+      // 钉住整棵 DOM）；常规重装路径另有 disposeResizeAttachment 主动断开
+      if (!frame.isConnected || !handle.isConnected) {
+        observer?.disconnect()
         return
       }
       applyGeometry()
@@ -565,6 +640,16 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
 
   handle.addEventListener('pointerdown', beginDrag)
 
+  // 供下次重装（disposeResizeAttachment）拆除本装配：断开 observer、卸下
+  // 拖动中可能仍挂着的 window 监听（刷新恰好落在拖动进行中的极端时序）
+  ;(frame as HTMLElement & Record<string, unknown>)[DISPOSE_KEY] = (): void => {
+    observer?.disconnect()
+    window.removeEventListener('pointermove', onPointerMove, true)
+    window.removeEventListener('pointerup', onPointerUp, true)
+    window.removeEventListener('pointercancel', onPointerCancel, true)
+    window.removeEventListener('keydown', onKeyDown, true)
+  }
+
   return true
 }
 
@@ -748,8 +833,10 @@ export function innerSpanOfImageSource(sourceText: string): { text: string; star
   if (!sourceText.startsWith('![')) {
     return null
   }
-  const closeLabel = sourceText.indexOf(']')
-  if (closeLabel < 0 || sourceText[closeLabel + 1] !== '(' || !sourceText.endsWith(')')) {
+  // 直链 label 的结束 `]` 与 rewriteImageSourceSuffix 同一配对函数
+  // （vsidianPR641-002：嵌套/转义括号不算 label 结束）
+  const closeLabel = directLinkLabelCloseOf(sourceText)
+  if (closeLabel < 0 || !sourceText.endsWith(')')) {
     return null
   }
   return { text: sourceText.slice(2, closeLabel), start: 2 }

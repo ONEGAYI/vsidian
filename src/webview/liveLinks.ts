@@ -352,10 +352,11 @@ export class LiveImageWidget extends WidgetType {
       }
       // #636 拖动手柄：沿 chrome 的排除矩阵（链接内嵌与表格网格内已由
       // chrome=false 表达，规格 §5.1）——那里点击语义归链接跳转与单元格
-      // 编辑，拖动会与之冲突。手柄挂在 span 上而非 img：invalidate 重取会
-      // 换掉 img，挂 span 则随 widget 生命周期只装一次。源文读写与写回
-      // 由 imageResize 的默认路径承担（经所属视图的 updateListener 汇总为
-      // 单笔 edit.request，宿主撤销一步）。
+      // 编辑，拖动会与之冲突。手柄挂在 span 上、装配标记挂在 img 上：本
+      // render 回调每次 `slot.textContent = ''` 换新 img 后重调装配，旧
+      // 标记随旧 img 消亡（vsidianPR641-001），重装恰好一份且新手柄操作
+      // 新 img。源文读写与写回由 imageResize 的默认路径承担（经所属视图
+      // 的 updateListener 汇总为单笔 edit.request，宿主撤销一步）。
       // toast 端口在**拖动开始时**才解析：toDOM 期 span 尚未插入文档，
       // findFromDOM 取不到视图（toodom 的 view 参数在 render 回调的闭包里
       // 也不代表已挂载）。此时延迟到真实交互，span 必在树内。
