@@ -20,6 +20,7 @@ import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
 import { GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
 import { LIVE_CLASS_NAMES } from './liveDecorations'
 import { DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
+import { EMBED_CARD_CLASS_NAMES } from './embedCard'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { refreshMermaidErrorLocale } from './mermaidRender'
 
@@ -81,6 +82,15 @@ export function refreshOnDemandControlLocale(root: ParentNode): void {
   // 图形化块按钮组（buildGraphicChrome）：edit（仅实时预览装配）与 popup
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.edit}`, () => t('graphic.editSource'))
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.popup}`, () => t('graphic.popup'))
+  // 嵌入卡片头部悬停词（mountCardInto 仅 Live 装饰挂载时写入——按
+  // [data-tooltip] 在场性判定，阅读侧/浮窗根头部无该属性不误挂）。嵌入卡
+  // 头部动作按钮的换包残留是族内既有缺口（open/mode/save/close 同不在
+  // 清单），不随本段顺手扩——补齐另立评估
+  for (const el of root.querySelectorAll<HTMLElement>(
+    `.${EMBED_CARD_CLASS_NAMES.header}[data-tooltip]`,
+  )) {
+    el.setAttribute('data-tooltip', t('embed.selectSource'))
+  }
   // 公式降级 span 的悬停词（LiveMathWidget.toDOM 失败分支；成功态是
   // KaTeX 排版，无本地化文案）
   for (const el of root.querySelectorAll<HTMLElement>(`.${MATH_CLASS_NAMES.mathError}`)) {

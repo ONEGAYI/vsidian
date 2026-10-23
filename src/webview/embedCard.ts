@@ -846,9 +846,10 @@ export class EmbedCardManager {
       // 悬停提示（tooltip 规格接管机制：data-tooltip 唯一承载——块级 HTML
       // host 同款惯例，无 cursor 改动不动样式契约）
       header.setAttribute('data-tooltip', t('embed.selectSource'))
-      // 头部点击选中源码：无修饰左键且非按钮命中才触发（修饰键放行扩展
-      // 选择链；动作按钮各有既有处理）。内容区（scroll）不挂——点击内容
-      // 不得影响父文档是引用视图红线
+      // 头部点击选中源码：无修饰左键且非按钮命中才触发。修饰键点击
+      // 不劫持（widget ignoreEvent 使卡片内事件本就不入父编辑器，修饰键
+      // 点击无额外行为、与改动前一致）；动作按钮各有既有处理。内容区
+      // （scroll）不挂——点击内容不得影响父文档是引用视图红线
       header.addEventListener('click', (event) => {
         if (event.button !== 0 || event.shiftKey || event.ctrlKey ||
           event.altKey || event.metaKey) {

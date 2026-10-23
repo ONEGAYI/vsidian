@@ -105,7 +105,8 @@ export class LiveMermaidWidget extends WidgetType {
         // 起始 offset。派发非空选区覆盖整个围栏区间（与块级 HTML 的
         // onEdit 同一执行体形状——一步可复制/替换）：区间不进 widget
         // 构造（装饰 LRU 缓存键不含坐标），点击时反查围栏表；查不到
-        // 回退围栏起点单点（仍触发源码显形管线）
+        // 回退挂点单点（DOM 未变时挂点即围栏起点、仍走显形管线；极端
+        // 脱挂时序下落点可在任何围栏外——无害单点，不显形也不误写）
         onEdit: () => {
           const view = EditorView.findFromDOM(frame)
           if (!view) {

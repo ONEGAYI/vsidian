@@ -21,6 +21,7 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 import { en } from '../../src/shared/locales/en'
 import { CodeCardHeaderWidget } from '../../src/webview/liveCodeCard'
 import { FmCardHeaderWidget, FmDegradedHintWidget } from '../../src/webview/frontmatterDecorations'
+import { EMBED_CARD_CLASS_NAMES } from '../../src/webview/embedCard'
 import { buildGraphicChrome } from '../../src/webview/graphicBlockChrome'
 import { LiveMathWidget } from '../../src/webview/liveMath'
 import { EmptyTableCellWidget, LIVE_CLASS_NAMES } from '../../src/webview/liveDecorations'
@@ -279,6 +280,15 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
         buildGraphicChrome({ onEdit: () => {}, onPopup: () => {} }),
         new LiveMathWidget('\\bad', false).toDOM(),
       )
+      // 嵌入卡片头部悬停词（mountCardInto 挂载侧动作 = 类名 + setAttribute
+      // 一行，此处直构等价形态；带词的模拟 Live 挂载卡，无词的模拟阅读侧/
+      // 浮窗根卡——重刷按 [data-tooltip] 在场性判定不得误挂）
+      const embedHeaderLive = document.createElement('div')
+      embedHeaderLive.className = EMBED_CARD_CLASS_NAMES.header
+      embedHeaderLive.setAttribute('data-tooltip', zhCn['embed.selectSource'])
+      const embedHeaderPassive = document.createElement('div')
+      embedHeaderPassive.className = EMBED_CARD_CLASS_NAMES.header
+      host.append(embedHeaderLive, embedHeaderPassive)
       const images = new ImageResourceManager({
         isDirectSrc: () => false,
         requestHost: () => {},
@@ -309,6 +319,7 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
         .toBe(zhCn['graphic.popup'])
       expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.getAttribute('data-tooltip'))
         .toBe(zhCn['decor.mathError'])
+      expect(embedHeaderLive.getAttribute('data-tooltip')).toBe(zhCn['embed.selectSource'])
       expect(img.getAttribute('data-tooltip')).toBe(zhCn['decor.imageError'].replace('{reason}', 'not found'))
       switchToEnglish()
       // 换包后：就地重刷为 en（data-tooltip 与 aria-label 同源换词）
@@ -330,6 +341,8 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
         .toBe(en['graphic.popup'])
       expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.getAttribute('data-tooltip'))
         .toBe(en['decor.mathError'])
+      expect(embedHeaderLive.getAttribute('data-tooltip')).toBe(en['embed.selectSource'])
+      expect(embedHeaderPassive.getAttribute('data-tooltip')).toBeNull()
       expect(img.getAttribute('data-tooltip')).toBe(en['decor.imageError'].replace('{reason}', 'not found'))
       expectNoStaleZh(host, '按需控件（直构树）')
     } finally {

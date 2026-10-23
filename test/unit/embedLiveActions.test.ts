@@ -520,7 +520,7 @@ describe('点击卡片头部选中源码区间（Live widget 物化直驱）', (
   })
 
   it('修饰键点击 header（shift/ctrl）：不派发选区（放行扩展选择链）', () => {
-    for (const modifier of [{ shiftKey: true }, { ctrlKey: true }]) {
+    for (const modifier of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
       const { controller } = setupController()
       const view = controller.getView()!
       const host = materialize(controller)
