@@ -148,10 +148,6 @@ try {
       height: img?.getBoundingClientRect().height ?? 0,
       frameOutline: f ? getComputedStyle(f).outlineWidth : '',
       resizing: f?.classList.contains('vsidian-image-resizing') ?? false,
-      glowOpacity: (() => {
-        const g = document.querySelector('.vsidian-image-resize-glow')
-        return g ? getComputedStyle(g).opacity : ''
-      })(),
       readout: document.querySelector('.vsidian-image-resize-readout')?.textContent ?? null,
     }
   })
@@ -160,8 +156,16 @@ try {
     `h=${duringDrag.height.toFixed(1)} expected≈${(duringDrag.width / 2).toFixed(1)}`)
   check('D9 按住时相框异色描边', duringDrag.resizing && duringDrag.frameOutline !== '0px',
     `resizing=${duringDrag.resizing} outline=${duringDrag.frameOutline}`)
-  check('D9 拖动中光晕消失（互斥）', Number.parseFloat(duringDrag.glowOpacity) === 0,
-    `glowOpacity=${duringDrag.glowOpacity}`)
+  // 光带 opacity 带 0.12s 过渡，拖动开始后等待其归零再断言（即时采样在 CI 慢机上
+  // 会落在过渡尾部拿到 0.0004 残值误报）
+  let glowGone = true
+  try {
+    await page.waitForFunction(() => {
+      const g = document.querySelector('.vsidian-image-resize-glow')
+      return g != null && getComputedStyle(g).opacity === '0'
+    }, { timeout: 2000 })
+  } catch { glowGone = false }
+  check('D9 拖动中光晕消失（互斥）', glowGone, '拖动中光带 opacity 未在 2s 内过渡到 0')
   check('D2 拖动中有尺寸读数', duringDrag.readout !== null && /\d+\s*×\s*\d+/.test(duringDrag.readout),
     `readout=${JSON.stringify(duringDrag.readout)}`)
   await page.mouse.up()
