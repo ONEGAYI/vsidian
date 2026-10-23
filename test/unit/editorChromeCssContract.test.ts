@@ -117,10 +117,12 @@ describe('光标与选区颜色按主题适配（main.css 源文本；#237 起 d
     expect(bodies.filter(body => /--vscode-editor-inactiveSelectionBackground/.test(body))).toHaveLength(1)
     expect(css).toMatch(/\.vsidian-code-selection \.vsidian-selection-text\s*\{\s*background-color:\s*transparent;/)
   })
-  it('原生 caret 只允许零宽格与格区让位两处隐藏；绘制光标颜色归 baseTheme，选区背景归 VSCode 主题变量', () => {
-    // 两处合法透明：#237 零宽活动格隐藏原生 caret；#252 格区在场让位
-    //（折叠单光标在多光标关闭时的原生 caret 呈现路径）——此外不得新增
-    expect(css.match(/caret-color\s*:/g)).toHaveLength(2)
+  it('原生 caret 仅在零宽格、格区与表外落点让位；绘制光标与选区颜色沿主题', () => {
+    // 原有零宽格、格区让位保留；表外落点使用独立绘制的边沿中央光标。
+    expect(css.match(/caret-color\s*:/g)).toHaveLength(3)
+    expect(css).toMatch(/\.vsidian-table-boundary-active \.cm-content\s*\{\s*caret-color:\s*transparent;/)
+    expect(css).toMatch(/\.vsidian-table-boundary\s*\{[^}]*background:\s*var\(--vscode-focusBorder\)/)
+    expect(css).toMatch(/\.vsidian-table-cell-input-caret\s*\{[^}]*background:\s*var\(--vscode-editorCursor-foreground, currentColor\)/)
     expect(css).toMatch(/#app \.cm-editor \.cm-content:has\(\.vsidian-table-grid-empty-active\)\s*\{\s*caret-color:\s*transparent;/)
     expect(css).toMatch(/#app \.cm-editor \.cm-content:has\(\.vsidian-table-region-cell\)\s*\{\s*caret-color:\s*transparent;/)
     expect(css).toMatch(/\.vsidian-table-grid-empty-active::after[\s\S]*?border-left:\s*1px solid currentColor;/)

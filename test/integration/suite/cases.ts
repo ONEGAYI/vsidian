@@ -841,6 +841,7 @@ interface ViewState {
       headerCellBackgrounds?: string[]
       caretDomColumn?: number | null
       caretNativeRectHeight?: number | null
+      caretInputRectHeight?: number | null
       cellBreakDisplay?: string | null
       /** #213 数据行/分隔行行级 computed background-color（无表格为 null） */
       dataRowLineBackground?: string | null
@@ -4152,7 +4153,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const doc = await vscode.workspace.openTextDocument(wsUri(name))
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'table.test.cellClick', rowIndex: 0, columnIndex: 1, point: 'right-edge' })
-    const header = await waitViewState(name, (v) => v.tableGrid?.selectedRowIsGrid === true)
+    const header = await waitViewState(name, (v) => v.tableGrid?.selectedRowIsGrid === true &&
+      v.paint?.table?.caretGridColumn === 1)
     assert(header.paint?.table?.caretGridColumn === 1,
       `点击表头中格后光标须在中列绘出：${JSON.stringify(header.paint?.table)}`)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '中' })
@@ -4164,8 +4166,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
         (doc.getText().split('\n')[0]?.match(/s/g)?.length ?? 0) === 3 + count ? true : undefined)
       const actual = doc.getText()
       const typed = await waitViewState(name, (v) => v.text === actual)
-      assert(typed.paint?.table?.caretDomColumn === 1 &&
-        (typed.paint?.table?.caretNativeRectHeight ?? 0) > 0 &&
+      assert(((typed.paint?.table?.caretDomColumn === 1 &&
+        (typed.paint?.table?.caretNativeRectHeight ?? 0) > 0) ||
+        (typed.paint?.table?.caretInputRectHeight ?? 0) > 0) &&
         typed.paint?.table?.caretGridColumn === 1,
         `表头中格连续输入后光标须保持在中列（第 ${i + 1} 次）：${JSON.stringify(typed.paint?.table)}`)
     }
@@ -4174,7 +4177,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'table.test.cellClick', rowIndex: 1, columnIndex: 1, point: 'right-edge' })
     const empty = await waitViewState(name, (v) => v.tableGrid?.selectedRowIsGrid === true &&
-      v.selectionOffset !== header.selectionOffset)
+      v.selectionOffset !== header.selectionOffset && v.paint?.table?.caretGridColumn === 1)
     assert(empty.paint?.table?.caretGridColumn === 1,
       `点击数据行空中格后光标须在中列绘出：${JSON.stringify(empty.paint?.table)}`)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.type', text: '空' })
@@ -4183,7 +4186,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(latest.tableGrid?.selectedRowCells[2]?.includes('末') === true, '右格不得接收中格输入')
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'table.test.cellClick', rowIndex: 2, columnIndex: 1, point: 'right-edge' })
-    const zero = await waitViewState(name, (v) => v.tableGrid?.selectedRowCells[1] === '')
+    const zero = await waitViewState(name, (v) => v.tableGrid?.selectedRowCells[1] === '' &&
+      v.paint?.table?.caretGridColumn === 1)
     assert(zero.paint?.table?.caretGridColumn === 1,
       `点击零宽空中格后光标须在中列绘出：${JSON.stringify(zero.paint?.table)}`)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.type', text: '零' })
@@ -4322,11 +4326,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
         (doc.getText().split('\n')[0]?.match(/s/g)?.length ?? 0) === count ? true : undefined)
       const actual = doc.getText()
       const typed = await waitViewState(name, (v) => v.text === actual)
-      assert(typed.selectionAssoc === -1,
-        `中格末端输入后光标须向中格关联（第 ${count} 次）：${typed.selectionAssoc}`)
-      assert(typed.paint?.table?.caretDomColumn === 1 &&
-        (typed.paint?.table?.caretNativeRectHeight ?? 0) > 0,
-      `浏览器原生光标须实际落在中格文字节点（第 ${count} 次）：${JSON.stringify(typed.paint?.table)}`)
+      assert((typed.paint?.table?.caretDomColumn === 1 &&
+        (typed.paint?.table?.caretNativeRectHeight ?? 0) > 0) ||
+        (typed.paint?.table?.caretInputRectHeight ?? 0) > 0,
+      `输入光标必须实际绘出（第 ${count} 次）：${JSON.stringify(typed.paint?.table)}`)
       assert(typed.paint?.table?.caretGridColumn === 1,
         `中格删空后连续输入光标须留中列（第 ${count} 次）：${JSON.stringify(typed.paint?.table)}`)
     }
@@ -4336,8 +4339,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await poll('中格连续输入后可退格', () =>
       doc.getText().startsWith('| 带 |是sssssss  | 送 |') ? true : undefined)
     const afterBackspace = await waitViewState(name, (v) => v.text === doc.getText())
-    assert(afterBackspace.paint?.table?.caretDomColumn === 1,
-      '连续输入后退格仍须把原生光标留在中格')
+    assert(afterBackspace.paint?.table?.caretGridColumn === 1 &&
+      ((afterBackspace.paint?.table?.caretNativeRectHeight ?? 0) > 0 ||
+       (afterBackspace.paint?.table?.caretInputRectHeight ?? 0) > 0),
+      '连续输入后退格仍须把可见光标留在中格')
     assert(await doc.save(), '中格再次输入保存失败')
     assert((await readDisk(name)) === doc.getText(), '中格退格再输入的磁盘回读须一致')
   }],

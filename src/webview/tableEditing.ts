@@ -2,8 +2,8 @@
 // 表格编辑面的 CM6 扩展。
 //
 // 形态（架构约定：单元格编辑完全跑在既有出站同步链路上）：
-// - 表格编辑面即 CM6 源文本行：安全表格保持网格（#42），进入格子后
-//   仍在对应源区间编辑，不建独立输入状态。IME 组合、出站暂缓、
+// - 安全表格保持源码 mark 网格（#42），活动格由独立 textarea 接收输入，
+//   通过源码投影提交 CM6 事务。IME 组合、出站暂缓、
 //   冲突暂停全部复用既有链路
 //   （syncController），无旁路直改文档
 // - #12 输入语义：在表格行内（非行内代码、非已转义后）键入 | 时自动写为
@@ -19,7 +19,8 @@
 import { Annotation, ChangeSet, EditorSelection, EditorState, StateEffect, StateField, Transaction, type TransactionSpec } from '@codemirror/state'
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
 import type { Command } from '@codemirror/view'
-import { deleteCharBackward } from '@codemirror/commands'
+import { createTableBoundary } from './tableBoundary'
+import { independentTableInput, independentTableKey, createTableCellInput } from './tableCellInput'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import type { TableEditOp } from '../shared/protocol'
 import { liveDecorationsField, LIVE_CLASS_NAMES, snapGridSelectionHead, tableCompositionPreview } from './liveDecorations'
@@ -29,7 +30,7 @@ import { planTableColumnMove, planTableEdit, planTableRowMove, prefixLenOf, tabl
 import { createTableControls } from './tableControls'
 import { planCreateTable } from './tableCreate'
 import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion } from './tableRegion'
-import { createTableRegionPointer, setTableRegion, tableRegionField } from './tableRegionSelection'
+import { createTableRegionPointer, tableRegionField } from './tableRegionSelection'
 import { requestTableReworkOptimize } from './tableHeightScheduler'
 
 /** 表格行身份的解析树节点名（分隔行整体是一个 TableDelimiter 节点） */
@@ -249,7 +250,7 @@ export function clampExternalCursor(state: EditorState, pos: number): number | n
 }
 
 /** 仅渲染为网格的行才限制编辑范围；源码降级行保留原生编辑能力。 */
-function editableGridCellAt(state: EditorState, pos: number) {
+export function editableGridCellAt(state: EditorState, pos: number) {
   const field = state.field(liveDecorationsField, false)
   if (!field) return null
   const line = state.doc.lineAt(pos)
@@ -551,7 +552,7 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
   if (!cell) return tr
   // 空内容格不接受纯空白输入（2026-09-28 语义：空白是结构承载，对用户
   // 透明）：空格里键入/粘贴空格不产生可见效果，也不留下可被退格发现的
-  // 痕迹。prepareGridInputPadding 的承载补齐不经 input 事件，不受影响；
+  // 痕迹。独立输入面同样遵循此空白输入规则；
   // 含非空白字符的输入（如 "a b"）照常进入。
   if (cell.contentFrom === cell.contentTo && tr.isUserEvent('input') &&
       !tr.isUserEvent('input.type.compose')) {
@@ -578,7 +579,8 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
   tr.changes.iterChanges((from, to, _fromB, _toB, insert) => {
     // 空白行首笔规范化属于结构补全，不应被本过滤器截断。
     const normalize = (text: string): string => {
-      const out = cellInsert(text)
+      // 独立输入已按完整格上下文编码；差分不可再次独立转义，否则会改写代码内管道。
+      const out = tr.annotation(independentTableInput) ? text : cellInsert(text)
       if (out !== text) {
         clipped = true // insert 被改写也必须重写事务
         escapedRaw = (escapedRaw ?? '') + text // 保留转义前原文（见声明处）
@@ -608,8 +610,11 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
         remaining.slice(change.to - lower)
     }
     if (remaining.length === 0) {
-      changes.splice(0, changes.length, { from: lower, to: upper, insert: ' ' })
-      clipped = clearedCell = true
+      clearedCell = true
+      if (!tr.annotation(independentTableInput) && !independentTableKey.has(tr.startState)) {
+        changes.splice(0, changes.length, { from: lower, to: upper, insert: ' ' })
+        clipped = true
+      }
     }
   }
   // 省略首尾管道的行在边缘格清空后可能丢列（a|b → |b）。只有此时
@@ -832,7 +837,7 @@ const insertGridCellBreak: Command = (view) => {
 /** 代码片段被格内换行分开后，从后一段开头退格合回原片段。
  * 不能只删除 `<br>`：两侧临时补的反引号也要成对去掉，否则原代码
  * 被拆成两个相邻 span，退格后的源码与回车前不一致。 */
-const deleteGridCellBreak: Command = (view) => {
+export const deleteGridCellBreak: Command = (view) => {
   const range = view.state.selection.main
   if (view.compositionStarted || view.state.selection.ranges.length !== 1 || !range.empty) return false
   const cell = editableGridCellAt(view.state, range.head)
@@ -885,16 +890,7 @@ function moveAcrossGridCell(view: EditorView, forward: boolean): boolean {
   if (!emptyContent && (forward ? head < end : head > cell.contentFrom)) return false
   const target = navTargetsOf(view, forward, true)?.[0]
   if (target === undefined) {
-    // 表格边界的出格一步（#296 二轮真机反馈）：首格最左/末格最右不再吞键
-    // 卡死，直达表格块外紧邻行（上一行行尾/下一行行首）；表格贴文档边界时
-    // 交原生落行首/行尾（前缀触及显形，层级编辑入口保留）
-    const outsideNumber = line.number + (forward ? 1 : -1)
-    if (outsideNumber < 1 || outsideNumber > view.state.doc.lines) return false
-    const outside = view.state.doc.line(outsideNumber)
-    const at = forward ? outside.from : outside.to
-    view.dispatch({ selection: EditorSelection.create([EditorSelection.cursor(at, 1)]),
-      scrollIntoView: true, userEvent: 'select' })
-    return true
+    return boundaryEditing.stopAtTableBoundary(view, forward)
   }
   const next = editableGridCellAt(view.state, target)
   if (!next) return false
@@ -950,11 +946,7 @@ function moveVerticallyAcrossGrid(view: EditorView, forward: boolean): boolean {
     const index = visible.findIndex((row) => row.lineFrom === line.from)
     const nextRow = visible[index + direction]
     if (!nextRow) {
-      const boundary = forward ? rows[rows.length - 1]!.lineFrom : rows[0]!.lineFrom
-      const outsideNumber = state.doc.lineAt(boundary).number + direction
-      if (outsideNumber < 1 || outsideNumber > state.doc.lines) return true
-      const outside = state.doc.line(outsideNumber)
-      return select(outside.from + Math.min(Math.max(0, range.head - cell.contentFrom), outside.length), 1)
+      return boundaryEditing.stopAtTableBoundary(view, forward, true)
     }
     const cells = tableRowCellsForColumns(state.sliceDoc(nextRow.lineFrom, nextRow.lineTo),
       nextRow.lineFrom, cell.cells.length, prefixLenOf(nextRow))
@@ -984,34 +976,9 @@ function moveVerticallyAcrossGrid(view: EditorView, forward: boolean): boolean {
   const rect = domCells?.[column]?.getBoundingClientRect()
   const hit = rect ? view.posAtCoords({ x, y: forward ? rect.top + 5 : rect.bottom - 5 }) : null
   const at = empty ? next.from : Math.max(next.contentFrom, Math.min(next.contentTo, hit ?? next.contentFrom))
-  return select(at, empty || at === next.contentFrom ? 1 : -1)
+  const rows = tableRowsAt(state, nextLine.from, field.tree)
+  return rows ? boundaryEditing.enterBoundary(view, rows, forward ? 'before' : 'after', at) : false
 }
-/** 退格直接删除可见内容，不先消耗透明填充。
- * 填充空格虽然写在源文里，却不是用户打出的末尾空格。
- * 空内容格无从"跳过填充删内容"：bail 交后续链路（空白守恒拒绝删除）。 */
-const deleteBeforeGridPadding: Command = (view) => {
-  if (view.compositionStarted || view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty) return false
-  const head = view.state.selection.main.head
-  const cell = editableGridCellAt(view.state, head)
-  if (!cell || head !== cell.to || head <= cell.from || view.state.sliceDoc(head - 1, head) !== ' ' ||
-      cell.contentFrom === cell.contentTo) return false
-  view.dispatch({ selection: EditorSelection.create([EditorSelection.cursor(head - 1, 1)]) })
-  return deleteCharBackward(view)
-}
-
-/** 无尾填充的既有格在原生输入开始前补齐承载。这样用户新键入的空格
- * 位于透明填充之前，仍按普通字符显示与删除。点击本身不改写文档。 */
-function prepareGridInputPadding(view: EditorView): void {
-  const caret = view.state.selection.main
-  if (!caret.empty) return
-  const cell = editableGridCellAt(view.state, caret.head)
-  if (!cell || caret.head !== cell.to || (cell.to > cell.from && view.state.sliceDoc(cell.to - 1, cell.to) === ' ')) return
-  const region = view.state.field(tableRegionField, false)
-  view.dispatch({ changes: { from: cell.to, insert: ' ' },
-    selection: EditorSelection.create([EditorSelection.cursor(caret.head, cell.from === cell.to ? 1 : -1)]),
-    effects: region ? setTableRegion.of(region) : undefined })
-}
-
 /** #600 空白行规范化的原始输入载体：normalizeBlankRowInput 整行重建事
  *  务时附上——inputText 为规范化前的原始键入文本（该路径恒 from===to
  *  纯插入，replaced 语义即 null），insertAt 为用户文本在规范化后文档
@@ -1023,6 +990,7 @@ export const blankRowRawInput = Annotation.define<{ inputText: string; insertAt:
 /** 普通键入、粘贴在空白行首笔规范化；IME 候选过程可能多次替换同一区间，
  * 此处不能逐笔改整行，否则宿主收到的变更坐标与候选终态不一致。 */
 const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
+  if (tr.annotation(independentTableInput)) return tr
   if (!tr.isUserEvent('input') || tr.changes.empty || tr.startState.field(tableComposition)) return tr
   let change: { from: number; to: number; text: string } | null = null
   let multiple = false
@@ -1232,6 +1200,8 @@ export function runTableColumnMove(view: EditorView, tableFrom: number, source: 
 }
 
 const tableControls = createTableControls({ tableRowsAt, runTableEditAt, runTableRowMove, runTableColumnMove })
+const boundaryEditing = createTableBoundary({ editableGridCellAt, tableRowsAt })
+const tableCellInput = createTableCellInput({ editableGridCellAt, deleteGridCellBreak })
 
 const tableRegionPointer = createTableRegionPointer((view, pos, tree) => tableRowsAt(view.state, pos, tree))
 
@@ -1272,6 +1242,8 @@ const deleteSelectedRegion: Command = (view) => {
 
 /** 装配扩展：键盘编辑、导航及可见表格控件共用 CM6 文本事务 */
 export const tableEditing = [
+  boundaryEditing.extension,
+  tableCellInput,
   tableComposition,
   tableCompositionCleanup,
   tableRegionField,
@@ -1324,14 +1296,9 @@ export const tableEditing = [
       event.preventDefault()
       return true
     },
-    beforeinput: (event, view) => {
-      if (event.inputType === 'insertText' && !event.isComposing && !view.compositionStarted &&
-          !view.state.field(tableRegionField)) prepareGridInputPadding(view)
-    },
     compositionstart: (_event, view) => {
       // 既有文件可能含 || 零宽格。候选开始前提供文字节点，避免浏览器
       // 把组合区间附着在不可编辑 widget 外；普通点击仍不修改源文。
-      prepareGridInputPadding(view)
       const timer = tableCompositionTimers.get(view)
       if (timer !== undefined) clearTimeout(timer)
       tableCompositionTimers.delete(view)
@@ -1373,7 +1340,6 @@ export const tableEditing = [
     { key: 'ArrowUp', run: (view) => moveVerticallyAcrossGrid(view, false) },
     { key: 'ArrowDown', run: (view) => moveVerticallyAcrossGrid(view, true) },
     { key: 'Backspace', run: deleteGridCellBreak },
-    { key: 'Backspace', run: deleteBeforeGridPadding },
   ]),
   keymap.of([{ key: 'Mod-a', run: selectGridCell }]),
   keymap.of([{ key: '|', run: tablePipeKeyHandler }]),

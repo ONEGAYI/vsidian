@@ -3,6 +3,7 @@
 // 打包，字体产物化到 assets/）——公式场景在真实 KaTeX 样式下回归。
 import 'katex/dist/katex.min.css'
 import { WebviewSyncController } from '../../src/webview/syncController'
+import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { getTableOptimizeStats } from '../../src/webview/tableHeightPlan'
@@ -25,10 +26,15 @@ const controller = new WebviewSyncController({
   },
   setState() {},
 })
-controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+const editability = new Compartment()
+controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap), editability.of([])])
 Object.assign(window, { initTable(text: string) {
   controller.handleHostMessage({ kind: 'init', sessionId: 'native-input',
     docUri: 'file:///table.md', version: 1, text })
+}, setTableInputMode(readOnly: boolean, editable: boolean) {
+  controller.getView()!.dispatch({ effects: editability.reconfigure([
+    EditorState.readOnly.of(readOnly), EditorView.editable.of(editable),
+  ]) })
 }, readEditor() {
   const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
   const head = view.state.selection.main.head
@@ -63,4 +69,18 @@ moveCaret(pos: number) {
   if (!view) return false
   view.dispatch({ selection: { anchor: pos } })
   return true
+}, tableCaretRect() {
+  const input = document.activeElement?.classList.contains('vsidian-table-cell-input')
+  const drawn = input ? document.querySelector<HTMLElement>('.vsidian-table-cell-input-caret:not([hidden])') : null
+  const selection = document.getSelection()
+  const rect = drawn?.getBoundingClientRect() ?? (selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null)
+  return rect ? { x: rect.x, y: rect.y, top: rect.top, bottom: rect.bottom, height: rect.height } : null
+}, tableCaretInside(element: HTMLElement) {
+  if (document.activeElement?.classList.contains('vsidian-table-cell-input')) {
+    const drawn = document.querySelector<HTMLElement>('.vsidian-table-cell-input-caret:not([hidden])')
+    if (!drawn) return false
+    const rect = drawn.getBoundingClientRect(), box = element.getBoundingClientRect()
+    return rect.x >= box.left && rect.x < box.right && rect.top >= box.top && rect.top < box.bottom
+  }
+  return element.contains(document.getSelection()?.focusNode ?? null)
 }, controller })

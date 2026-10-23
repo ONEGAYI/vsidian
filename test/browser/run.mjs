@@ -71,7 +71,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 三期 #343 合入列：webPageView（外链原网页形态——受控可嵌入站点真实
 // iframe 内容可见与滚轮滚动、退回矩阵、恶意子页消息注入丢弃、设置联动
 // 销毁）紧随 webLinkCard（同外链悬停族）。
-const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
+const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 

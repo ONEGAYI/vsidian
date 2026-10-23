@@ -10627,6 +10627,7 @@ export class WebviewSyncController {
     let caretGridColumn: number | null = null
     let caretDomColumn: number | null = null
     let caretNativeRectHeight: number | null = null
+    let caretInputRectHeight: number | null = null
     try {
       const selection = window.getSelection()
       if (selection?.isCollapsed && selection.rangeCount > 0 &&
@@ -10653,6 +10654,19 @@ export class WebviewSyncController {
           if (cell && row) {
             caretGridColumn = [...row.querySelectorAll(':scope > .vsidian-table-grid-cell')].indexOf(cell)
           }
+        }
+      }
+      const input = view.dom.querySelector('.vsidian-table-cell-input')
+      const drawn = view.dom.querySelector<HTMLElement>('.vsidian-table-cell-input-caret:not([hidden])')
+      if (input === document.activeElement && drawn) {
+        const rect = drawn.getBoundingClientRect(), style = getComputedStyle(drawn)
+        const hit = document.elementFromPoint(rect.left + 1, (rect.top + rect.bottom) / 2)
+        const cell = hit?.closest<HTMLElement>('.vsidian-table-grid-row > .vsidian-table-grid-cell')
+        if (rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility === 'visible' &&
+            style.backgroundColor !== 'transparent' && style.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+            cell?.parentElement && view.contentDOM.contains(cell)) {
+          caretInputRectHeight = rect.height
+          caretGridColumn = [...cell.parentElement.querySelectorAll(':scope > .vsidian-table-grid-cell')].indexOf(cell)
         }
       }
     } catch {
@@ -11446,6 +11460,7 @@ export class WebviewSyncController {
         headerCellBackgrounds,
         caretDomColumn,
         caretNativeRectHeight,
+        caretInputRectHeight,
         cellBreakDisplay: view.contentDOM.querySelector('.vsidian-table-cell-break')
           ? getComputedStyle(view.contentDOM.querySelector('.vsidian-table-cell-break')!).display : null,
         dataRowLineBackground,

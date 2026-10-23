@@ -22,7 +22,7 @@
 //   头块内不产生 Markdown 装饰（伪标题/伪列表按源码呈现）
 // - 未支持语法（脚注、定义列表等）：无装饰即局部源码降级，不整篇改写
 // - #42 表格：安全表格始终以原文区间 mark + CSS grid 呈现，活动单元格
-//   继续在 CM6 源区间输入。没有独立单元格输入模型，DOM 由视口回收
+//   通过独立输入面映射回 CM6 源区间；网格 DOM 仍由视口回收
 import {
   Annotation,
   EditorSelection,
@@ -733,7 +733,10 @@ function emitTableRowMarks(
         ? tableGridCellDeco(aligns?.[col] ?? null, regionCls).range(cell.from, cell.to)
         : emptyTableCellDecoFor(aligns?.[col] ?? null,
           selection.ranges.some((range) => range.empty && range.head === cell.from), regionCls).range(cell.from))
-      if (cell.to > cell.from && doc.sliceString(cell.to - 1, cell.to) === ' ') {
+      // 独立输入面可以把用户刚输入的空格置于格尾；此时真实落点就是
+      // cell.to，空格须参与排版。源码原有格式填充仍保持透明。
+      if (cell.to > cell.from && doc.sliceString(cell.to - 1, cell.to) === ' ' &&
+          !selection.ranges.some(range => range.empty && range.head === cell.to)) {
         out.push(tableGridPaddingDeco.range(cell.to - 1, cell.to))
       }
       // 只替换裸 br；代码片段或转义后的 br 要保持可见字面文本。
