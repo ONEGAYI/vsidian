@@ -262,19 +262,22 @@ export interface ImageSourceRange {
  *
  * 首个 `]` 不一定是 label 结束：`![a [b] c](a.png)` 的首个 `]` 属于嵌套
  * 层，CommonMark 也只认括号配平的 label（生产 Lezer 装饰按此产出 widget，
- * 写回侧配对口径与它对齐）。扫描从 `![` 之后开始（深度 1）：未转义 `[`
- * 深度+1；未转义 `]` 深度-1，归零即 label 结束，其后必须是 `(`；`\[`/`\]`
- * 转义跳过。配不平或 `]` 归零处后面不是 `(` 返回 -1（调用方按形态不可
- * 识别降级，不猜）。innerSpanOfImageSource 与 rewriteImageSourceSuffix
- * 共用本函数，不建第二份配对。
+ * 写回侧配对口径与它对齐）。扫描从 `![` 之后开始（深度 1）：裸 `[` 深度+1；
+ * 裸 `]` 深度-1，归零即 label 结束，其后必须是 `(`；配不平或 `]` 归零处
+ * 后面不是 `(` 返回 -1（调用方按形态不可识别降级，不猜）。
+ *
+ * 反斜杠**成对消费**（R2 残余修复）：`\` 一律连后一字符整对跳过——`\\` 是
+ * 字面反斜杠（自身的 `\` 被 `\` 转义，**不转义后续字符**，其后的 `]` 是真
+ * 括号参与配对，`![a \\](x.png)` 的 label 在此闭合）；`\x` 是转义序列。
+ * 只跳一字符会把 `\\]` 的真 `]` 误判为被转义（R1 首个 `]` 截断的实现反而
+ * 通过该案例，属 R2 新引入回归）。innerSpanOfImageSource 与
+ * rewriteImageSourceSuffix 共用本函数，不建第二份配对。
  */
 function directLinkLabelCloseOf(sourceText: string): number {
   for (let i = 2, depth = 1; i < sourceText.length; i++) {
     const ch = sourceText[i]
     if (ch === '\\') {
-      if (sourceText[i + 1] === '[' || sourceText[i + 1] === ']') {
-        i += 1 // 跳过被转义的括号
-      }
+      i += 1 // 成对消费：`\\`（字面反斜杠）与 `\x`（转义序列）都不让后一字符参与配对
       continue
     }
     if (ch === '[') {
@@ -369,6 +372,10 @@ const SHIFT_HINT_TOAST_KEY = 'imageResize.shiftHint'
  * observer 闭包（钉住旧三件套与 img）；恰逢拖动中刷新时旧 window 监听
  * 也一并卸下。三件套节点通常已随 `textContent = ''` 移除，按类名清出
  * 只是防御性兜底（保证重装后仅一份）。
+ *
+ * 拖动中刷新的收尾：监听卸下后无人再处理 pointerup、不走 cleanupDrag——
+ * frame 上挂着的拖动态修饰类（异色描边/手柄常显/光晕隐去）与读数显隐必须
+ * 在此同步复位，否则相框停在拖动态（R2 残余）。
  */
 function disposeResizeAttachment(frame: HTMLElement): void {
   const holder = frame as HTMLElement & Record<string, unknown>
@@ -376,6 +383,11 @@ function disposeResizeAttachment(frame: HTMLElement): void {
   if (typeof dispose === 'function') {
     dispose()
     delete holder[DISPOSE_KEY]
+  }
+  frame.classList.remove(IMAGE_RESIZE_RESIZING_CLASS)
+  const readout = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)
+  if (readout && readout.dataset['visible'] !== undefined) {
+    delete readout.dataset['visible']
   }
   for (const className of [
     IMAGE_RESIZE_CLASS_NAMES.glow,

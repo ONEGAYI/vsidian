@@ -16,6 +16,7 @@ import {
   IMAGE_RESIZE_HIT_SIZE,
   IMAGE_RESIZE_HANDLE_BORDER,
   IMAGE_RESIZE_MIN_WIDTH,
+  IMAGE_RESIZE_RESIZING_CLASS,
   attachResizeHandle,
   attachResizeHandleToLiveImage,
   computeResizeTarget,
@@ -413,6 +414,16 @@ describe('innerSpanOfImageSource：定位内层（最小编辑的前提）', () 
   it('转义开括号不增深度：label 在其后首个 ] 正常闭合（CommonMark：\\[ 是字面 [）', () => {
     expect(innerSpanOfImageSource('![a \\[b](a.png)')).toEqual({ text: 'a \\[b', start: 2 })
   })
+
+  it('成对反斜杠（\\\\ 是字面反斜杠）不转义后续字符：其后的 ] 是真括号参与配对（vsidianPR641-002 残余）', () => {
+    // `![a \\](x.png)`：\\ 消费为一对（字面 \），] 未被转义 → label 在此闭合
+    expect(innerSpanOfImageSource('![a \\\\](x.png)')).toEqual({ text: 'a \\\\', start: 2 })
+  })
+
+  it('成对反斜杠后的 ] 归零处不跟 (（CommonMark 判非图片）：降级 null，不把 b] 卷进 label', () => {
+    // `![a \\] b](x.png)`：label [a \\] 闭合处后是空格 → 整体不是 inline image
+    expect(innerSpanOfImageSource('![a \\\\] b](x.png)')).toBeNull()
+  })
 })
 
 describe('rewriteImageSourceSuffix：整段源文改写只动内层', () => {
@@ -465,6 +476,15 @@ describe('rewriteImageSourceSuffix：整段源文改写只动内层', () => {
 
   it('图注括号配不平时返回 null（不猜、不改）', () => {
     expect(rewriteImageSourceSuffix('![a [b](a.png)', { width: 160, height: null, unit: 'px' })).toBeNull()
+  })
+
+  it('成对反斜杠图注写回：label 在真 ] 闭合、\\\\ 原样保留（vsidianPR641-002 残余回归，R1 旧实现可通过）', () => {
+    expect(rewriteImageSourceSuffix('![a \\\\](x.png)', { width: 160, height: null, unit: 'px' }))
+      .toBe('![a \\\\|160](x.png)')
+  })
+
+  it('成对反斜杠后 ] 归零处不跟 (：非图片形态返回 null（旧栈式实现误把 b] 卷进 label）', () => {
+    expect(rewriteImageSourceSuffix('![a \\\\] b](x.png)', { width: 160, height: null, unit: 'px' })).toBeNull()
   })
 })
 
@@ -692,17 +712,80 @@ describe('attachResizeHandle：拖动时序（jsdom + rect stub）', () => {
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)).toHaveLength(1)
 
     // 再刷一次仍恰好一份（连续多次刷新不堆积）
-    refresh()
+    const img3 = refresh()
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)).toHaveLength(1)
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.glow}`)).toHaveLength(1)
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)).toHaveLength(1)
 
-    // 新手柄操作的是新 img：拖动视觉落在 img2 上、写回走新闭包
-    fire(handle2, 'pointerdown', { pointerId: 9, clientX: 100, clientY: 50 })
+    // 事件发往刷新后实际在场的当前手柄（按类名从 frame 重新查询）——向已
+    // 离树的旧 handle2 发事件证明不了「最后在场的手柄可用」；写回须作用于
+    // 本次刷新的新 img3，且不被旧手柄闭包改到 img2
+    const handle3 = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    expect(handle3).not.toBe(handle2) // 又是一次重建，handle2 已离树
+    fire(handle3, 'pointerdown', { pointerId: 9, clientX: 100, clientY: 50 })
     fire(window, 'pointermove', { pointerId: 9, clientX: 140, clientY: 70 })
-    expect(img2.style.width).toBe('140px')
+    expect(img3.style.width).toBe('140px') // 拖动视觉落在当前在场 img 上
+    expect(img2.style.width).toBe('') // 旧 img 不被已离树旧手柄的闭包改动
     fire(window, 'pointerup', { pointerId: 9, clientX: 140, clientY: 70 })
     expect(committed).toEqual(['img.png|140'])
+  })
+
+  it('vsidianPR641-001 残余：拖动进行中资源刷新，拆除链同步清 frame 拖动态类与读数显隐', () => {
+    const source = '![[img.png|100]]'
+    const { frame } = laidOutFrame()
+    frame.dataset['vsidianSrcFrom'] = '0'
+    frame.dataset['vsidianSrcTo'] = String(source.length)
+    const attach = (): void => {
+      attachResizeHandleToLiveImage(frame, {
+        readInner: () => source,
+        commitInner: () => undefined,
+      })
+    }
+    attach()
+    const handle = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    fire(handle, 'pointerdown', { pointerId: 7, clientX: 100, clientY: 50 })
+    fire(window, 'pointermove', { pointerId: 7, clientX: 130, clientY: 60 })
+    expect(frame.classList.contains(IMAGE_RESIZE_RESIZING_CLASS)).toBe(true) // beginDrag 挂类
+    expect(
+      frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)?.dataset['visible'],
+    ).toBe('true') // 读数显示中
+
+    // 拖动进行中恰逢资源刷新：slot 清空重建 img 后重装。拆除链已卸下 window
+    // 监听，此后无人处理 pointerup、不走 cleanupDrag——拖动态修饰类与读数
+    // 显隐必须由拆除链同步复位，否则相框停在异色描边/手柄常显的拖动态
+    frame.textContent = ''
+    const img = document.createElement('img')
+    const rect = { width: 100, height: 50, x: 0, y: 0, top: 0, left: 0, right: 100, bottom: 50, toJSON: () => ({}) } as DOMRect
+    Object.defineProperty(img, 'getBoundingClientRect', { value: () => rect })
+    frame.append(img)
+    attach()
+    expect(frame.classList.contains(IMAGE_RESIZE_RESIZING_CLASS)).toBe(false) // 类已清
+    expect(
+      frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)?.dataset['visible'],
+    ).toBeUndefined() // 新装配的读数不残留显示态
+
+    // 迟到的 pointerup 已无监听消费，不影响已恢复的正常悬停态
+    fire(window, 'pointerup', { pointerId: 7, clientX: 130, clientY: 60 })
+    expect(frame.classList.contains(IMAGE_RESIZE_RESIZING_CLASS)).toBe(false)
+  })
+
+  it('正常拖动路径：松手与 Esc 均清拖动态类（cleanupDrag 行为不因拆除链改动）', () => {
+    const { frame } = laidOutFrame()
+    attachResizeHandle(frame, {
+      resolveStart: () => ({ declared: null }),
+      onCommit: () => undefined,
+    })
+    const handle = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
+    // 松手清类
+    fire(handle, 'pointerdown', { pointerId: 7, clientX: 100, clientY: 50 })
+    expect(frame.classList.contains(IMAGE_RESIZE_RESIZING_CLASS)).toBe(true)
+    fire(window, 'pointerup', { pointerId: 7, clientX: 120, clientY: 60 })
+    expect(frame.classList.contains(IMAGE_RESIZE_RESIZING_CLASS)).toBe(false)
+    // Esc 取消同样清类
+    fire(handle, 'pointerdown', { pointerId: 8, clientX: 100, clientY: 50 })
+    expect(frame.classList.contains(IMAGE_RESIZE_RESIZING_CLASS)).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(frame.classList.contains(IMAGE_RESIZE_RESIZING_CLASS)).toBe(false)
   })
 })
 
