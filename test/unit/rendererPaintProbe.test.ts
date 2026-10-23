@@ -102,6 +102,22 @@ describe('renderers 绘制探针（#629）', () => {
     expect(renderers.containers.find((row) => row.language === 'mermaid')?.provider).toBe('builtin')
   })
 
+  it('error 占位（组件自渲染错误文本、无 svg）：addonSvg 归零——渲染成败可区分', () => {
+    const h = makeBridge()
+    const c = mountProbe(h)
+    // 组件捕获自己的异常、输出错误占位（Q30 自处理失败——平台 state 仍
+    // rendered，mount 同步返回即写）：探针的成败信号只有 addonSvg 计数
+    mountGraphicContainer(
+      'test.addon/mermaid-alt',
+      '<style>.err{color:red}</style><span>渲染失败：语法错误</span>',
+    )
+    const msg = viewStateRenderers(c, h)
+    const renderers = msg.paint!.renderers!
+    expect(renderers.addonSvg).toBe(0)
+    expect(renderers.builtinSvg).toBe(0)
+    expect(renderers.containers.find((row) => row.language === 'mermaid')?.provider).toBe('test.addon/mermaid-alt')
+  })
+
   it('含 renderers.addonSvg 的 view.state 消息经 isWebviewToHost 接受（校验白名单同步）', () => {
     const h = makeBridge()
     const c = mountProbe(h)
