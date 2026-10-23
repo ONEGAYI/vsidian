@@ -771,6 +771,7 @@ export const zhCn: Record<MessageKey, string> = {
    *  （aria-label 与 title 同词；打开沿用 Vsidian 既有打开行为，不改写嵌入原文） */
   'embed.loading': '正在加载嵌入内容…',
   'embed.openTarget': '打开目标笔记',
+  'embed.selectSource': '嵌入卡片——点击选中源码',
   /** P2-04（#281）嵌入内部 Live：模式切换 / 保存目标 / 未保存圆点与
    *  绑定失败、暂停态的就地文案（悬停词走 data-tooltip 同一词条） */
   'embed.modeToLive': '在引用内编辑（切换到实时预览）',

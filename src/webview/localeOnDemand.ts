@@ -20,6 +20,9 @@ import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
 import { GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
 import { LIVE_CLASS_NAMES } from './liveDecorations'
 import { DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
+import { EMBED_CARD_CLASS_NAMES, embedModeTooltipKey } from './embedCard'
+import { HOVER_POPUP_CLASS_NAMES } from './hoverPopup'
+import { LIVE_HTML_CLASS_NAMES } from './liveHtml'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { refreshMermaidErrorLocale } from './mermaidRender'
 
@@ -81,6 +84,39 @@ export function refreshOnDemandControlLocale(root: ParentNode): void {
   // 图形化块按钮组（buildGraphicChrome）：edit（仅实时预览装配）与 popup
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.edit}`, () => t('graphic.editSource'))
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.popup}`, () => t('graphic.popup'))
+  // 嵌入卡片头部悬停词（mountCardInto 仅 Live 装饰挂载时写入——按
+  // [data-tooltip] 在场性判定，阅读侧/浮窗根头部无该属性不误挂）。头部
+  // 按钮族与 HTML 宿主词的原换包残留缺口已随下方收口段一并登记
+  for (const el of root.querySelectorAll<HTMLElement>(
+    `.${EMBED_CARD_CLASS_NAMES.header}[data-tooltip]`,
+  )) {
+    el.setAttribute('data-tooltip', t('embed.selectSource'))
+  }
+  // 嵌入卡与悬停浮窗头部按钮族 + 块级 HTML 宿主词（换包残留收口，
+  // review-loops B-1 族内补齐）：创建侧固化 t() 于挂载时——open/save/
+  // close/dirty 固定词直写；mode 两态词按图标态反查（embedModeTooltipKey
+  // 未知态保持原词）；HTML 宿主词按 [data-tooltip] 在场性刷新（与嵌入卡
+  // 头部悬停词段同判据，空壳控件不误挂）
+  rewriteButtonLocale(root, `.${EMBED_CARD_CLASS_NAMES.open}`, () => t('embed.openTarget'))
+  rewriteButtonLocale(root, `.${EMBED_CARD_CLASS_NAMES.save}`, () => t('embed.saveTarget'))
+  rewriteButtonLocale(root, `.${EMBED_CARD_CLASS_NAMES.close}`, () => t('embed.closeEditor'))
+  rewriteButtonLocale(root, `.${EMBED_CARD_CLASS_NAMES.dirty}`, () => t('embed.dirtyDot'))
+  rewriteButtonLocale(root, `.${EMBED_CARD_CLASS_NAMES.mode}`, (btn) => {
+    const key = embedModeTooltipKey(btn)
+    return key !== null ? t(key) : (btn.getAttribute('data-tooltip') ?? '')
+  })
+  rewriteButtonLocale(root, `.${HOVER_POPUP_CLASS_NAMES.save}`, () => t('embed.saveTarget'))
+  rewriteButtonLocale(root, `.${HOVER_POPUP_CLASS_NAMES.webFallback}`, () => t('hover.webFallbackToCard'))
+  rewriteButtonLocale(root, `.${HOVER_POPUP_CLASS_NAMES.close}`, () => t('embed.closeEditor'))
+  rewriteButtonLocale(root, `.${HOVER_POPUP_CLASS_NAMES.open}`, () => t('embed.openTarget'))
+  rewriteButtonLocale(root, `.${HOVER_POPUP_CLASS_NAMES.dirty}`, () => t('embed.dirtyDot'))
+  rewriteButtonLocale(root, `.${HOVER_POPUP_CLASS_NAMES.mode}`, (btn) => {
+    const key = embedModeTooltipKey(btn)
+    return key !== null ? t(key) : (btn.getAttribute('data-tooltip') ?? '')
+  })
+  for (const el of root.querySelectorAll<HTMLElement>(`.${LIVE_HTML_CLASS_NAMES.host}[data-tooltip]`)) {
+    el.setAttribute('data-tooltip', t('html.blockTooltip'))
+  }
   // 公式降级 span 的悬停词（LiveMathWidget.toDOM 失败分支；成功态是
   // KaTeX 排版，无本地化文案）
   for (const el of root.querySelectorAll<HTMLElement>(`.${MATH_CLASS_NAMES.mathError}`)) {

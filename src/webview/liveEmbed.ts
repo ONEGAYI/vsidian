@@ -372,13 +372,27 @@ export class LiveEmbedWidget extends WidgetType {
     return 1
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view_?: EditorView): HTMLElement {
     // 两形态宿主均为块级 div：显形态是 .cm-content 直接子块；隐形态是块级
     // 替换物（嵌入精确区间——#247 前后文保留在行内，块级宿主断行呈现）
     const host = document.createElement('div')
     host.className = this.below
       ? `${LIVE_EMBED_CLASS_NAMES.host} ${LIVE_EMBED_CLASS_NAMES.below}`
       : LIVE_EMBED_CLASS_NAMES.host
+    // 点击卡片头部选中整个嵌入源码区间（非空选区触发 selectionTouchesRange
+    // 显形管线——与图形块 edit / 块级 HTML onEdit 同族语义；孙卡嵌闭包里
+    // findFromDOM 命中的是直接父编辑器，坐标即该编辑器全文空间）。keyFrom/
+    // keyTo 是本 widget 构造坐标：装饰缓存键含坐标，文本编辑后新键新实例，
+    // 点击时坐标必然新鲜；越界防御对齐 makeHtmlWidgetMousedown 口径
+    const selectSource = (): void => {
+      // toDOM 的 view 参数即所属编辑器（孙卡场景 = 直接父内部 Live）——
+      // 闭包直持有优先；缺参（防御）回退 DOM 反查
+      const view = view_ ?? EditorView.findFromDOM(host)
+      if (view && this.keyTo > this.keyFrom && this.keyTo <= view.state.doc.length) {
+        view.dispatch({ selection: { anchor: this.keyFrom, head: this.keyTo } })
+        view.focus()
+      }
+    }
     if (this.child) {
       // P2-09 孙卡：经直接父来源身份挂载（occurrence 键与 mountChildFrom
       // 同源——B 的 Reading 侧与 Live 编辑器侧命中同一 entry 实例）
@@ -390,9 +404,10 @@ export class LiveEmbedWidget extends WidgetType {
         parentInstanceId: this.child.parentHostId,
         depth: this.child.parentDepth + 1,
         treeId: this.child.treeId,
-      })
+      }, undefined, selectSource)
     } else {
-      cards?.mountCardInto(host, this.inner, this.keyFrom, this.keyTo, 'live')
+      cards?.mountCardInto(host, this.inner, this.keyFrom, this.keyTo, 'live',
+        undefined, undefined, selectSource)
     }
     return host
   }

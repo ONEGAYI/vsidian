@@ -817,6 +817,7 @@ export const en = {
    *  existing Vsidian open behavior, never edits the embed source) */
   'embed.loading': 'Loading embedded note…',
   'embed.openTarget': 'Open target note',
+  'embed.selectSource': 'Embed card — click to select source',
   /** P2-04 (#281) embed internal Live: mode toggle / save target / dirty dot
    *  and bind-failed / paused notes (tooltips share the same keys) */
   'embed.modeToLive': 'Edit inside reference (switch to Live)',

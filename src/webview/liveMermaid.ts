@@ -102,12 +102,27 @@ export class LiveMermaidWidget extends WidgetType {
       buildGraphicChrome({
         // 编辑源码：findFromDOM 只认携带 cmTile 的节点（本版本 CM6 的
         // Tile.get 语义），从 frame 根查找；posAtDOM 即挂点位置 = 围栏
-        // 起始 offset，光标落在 from 即触及围栏区间 → 源码显形（卡片接管）
+        // 起始 offset。派发非空选区覆盖整个围栏区间（与块级 HTML 的
+        // onEdit 同一执行体形状——一步可复制/替换）：区间不进 widget
+        // 构造（装饰 LRU 缓存键不含坐标），点击时反查围栏表；查不到
+        // 回退挂点单点（DOM 未变时挂点即围栏起点、仍走显形管线；极端
+        // 脱挂时序下落点可在任何围栏外——无害单点，不显形也不误写）
         onEdit: () => {
           const view = EditorView.findFromDOM(frame)
-          if (view) {
-            view.dispatch({ selection: { anchor: view.posAtDOM(frame) } })
+          if (!view) {
+            return
           }
+          const pos = view.posAtDOM(frame)
+          const table = view.state.field(mermaidFencesField, false)
+          const fence = table?.spans.find(
+            (f) => f.code === this.code && f.from <= pos && pos <= f.to,
+          )
+          if (fence) {
+            view.dispatch({ selection: { anchor: fence.from, head: fence.to } })
+          } else {
+            view.dispatch({ selection: { anchor: pos } })
+          }
+          view.focus()
         },
         onPopup: () => {
           // P2-10：弹窗按本 widget 所属编辑器的全文刷新（嵌入内部 Live 的

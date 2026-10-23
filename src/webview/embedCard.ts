@@ -86,6 +86,22 @@ export const MODE_READING_ICON =
   '<path d="M8 4C7 3 5.6 2.5 3.2 2.5v9.6c2.4 0 3.8.5 4.8 1.4 1-.9 2.4-1.4 4.8-1.4V2.5C10.4 2.5 9 3 8 4z"></path>' +
   '<path d="M8 4v9.5"></path></svg>'
 
+/** 模式按钮态反查（localeOnDemand 换包重刷用）：按钮图标是态的唯一 DOM
+ *  痕迹（嵌入卡 refreshModeChrome 与浮窗 mkChromeBtn 初值同源写这两枚
+ *  常量），按 innerHTML 匹配得悬停词键；未匹配（态未初始化等）返回
+ *  null——调用方保持原词不强改 */
+export function embedModeTooltipKey(
+  btn: HTMLElement,
+): 'embed.modeToLive' | 'embed.modeToReading' | null {
+  if (btn.innerHTML === MODE_LIVE_ICON) {
+    return 'embed.modeToLive'
+  }
+  if (btn.innerHTML === MODE_READING_ICON) {
+    return 'embed.modeToReading'
+  }
+  return null
+}
+
 /** P2-04 保存目标入口：软盘图标 */
 export const SAVE_ICON =
   '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
@@ -716,6 +732,10 @@ export class EmbedCardManager {
     host: 'reading' | 'live',
     source?: RefSourceContext,
     addonOpts?: EmbedAddonMountOptions,
+    /** Live 装饰挂载专属（liveEmbed widget 注入）：无修饰左键点击卡片
+     *  头部非按钮区 → 选中整个嵌入源码区间（宿主编辑器派发由注入方
+     *  闭包承担）。阅读侧与浮窗根不传——头部点击维持无行为 */
+    onSelectSource?: () => void,
   ): void {
     if (this.active.has(el)) {
       return
@@ -838,6 +858,25 @@ export class EmbedCardManager {
     cardEl.appendChild(scrollEl)
     cardEl.appendChild(stateEl)
     el.appendChild(cardEl)
+    if (onSelectSource) {
+      // 悬停提示（tooltip 规格接管机制：data-tooltip 唯一承载——块级 HTML
+      // host 同款惯例，无 cursor 改动不动样式契约）
+      header.setAttribute('data-tooltip', t('embed.selectSource'))
+      // 头部点击选中源码：无修饰左键且非按钮命中才触发。修饰键点击
+      // 不劫持（widget ignoreEvent 使卡片内事件本就不入父编辑器，修饰键
+      // 点击无额外行为、与改动前一致）；动作按钮各有既有处理。内容区
+      // （scroll）不挂——点击内容不得影响父文档是引用视图红线
+      header.addEventListener('click', (event) => {
+        if (event.button !== 0 || event.shiftKey || event.ctrlKey ||
+          event.altKey || event.metaKey) {
+          return
+        }
+        if (event.target instanceof Element && event.target.closest('button') !== null) {
+          return
+        }
+        onSelectSource()
+      })
+    }
 
     const handle: EmbedCardHandle = {
       entry,

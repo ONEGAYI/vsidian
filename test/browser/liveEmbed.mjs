@@ -198,7 +198,8 @@ try {
   passed++
   console.log('[Live嵌入][PASS] ArrowDown 从上方进入：停进源码行（不越过卡片）')
 
-  // ---- 场景 D：鼠标点击卡片不落光标（ignoreEvent 选区隔离） ----
+  // ---- 场景 D：鼠标点击卡片内容不落光标（ignoreEvent 选区隔离；头部
+  // 点击是选中源码入口，归场景 D2） ----
   await page.evaluate(() => window.setLiveCursor(0))
   await page.waitForTimeout(60)
   hosts = await reads()
@@ -210,16 +211,41 @@ try {
       return null
     }
     const r = card.getBoundingClientRect()
-    return { x: r.left + 40, y: r.top + 12 }
+    // 内容滚动区中部（避开头部与动作按钮——内容点击不落父光标是红线）
+    return { x: r.left + Math.min(40, r.width / 4), y: r.top + r.height / 2 }
   })
   assert.ok(cardRect, '卡片在场（点击目标）')
   await page.mouse.click(cardRect.x, cardRect.y)
   await page.waitForTimeout(60)
   const selAfter = await selection()
-  assert.deepEqual(selAfter, selBefore, '点击卡片不改父编辑器光标')
-  assert.equal(await linePainted(EMBED_LINE), false, '点击卡片不显形源文（光标未触及）')
+  assert.deepEqual(selAfter, selBefore, '点击卡片内容不改父编辑器光标')
+  assert.equal(await linePainted(EMBED_LINE), false, '点击卡片内容不显形源文（光标未触及）')
   passed++
-  console.log('[Live嵌入][PASS] 鼠标点击卡片：父编辑器光标不动、源文保持隐藏')
+  console.log('[Live嵌入][PASS] 鼠标点击卡片内容：父编辑器光标不动、源文保持隐藏')
+
+  // ---- 场景 D2：点击卡片头部选中整个嵌入源码区间（本变更新增契约） ----
+  await page.evaluate(() => window.setLiveCursor(0))
+  await page.waitForTimeout(60)
+  const headerRect = await page.evaluate(() => {
+    const header = document.querySelector('.vsidian-live-embed .vsidian-embed-card-header')
+    if (!header) {
+      return null
+    }
+    const r = header.getBoundingClientRect()
+    // 头部横带左侧空白（标题文字区——避开右侧动作按钮）
+    return { x: r.left + 20, y: r.top + r.height / 2 }
+  })
+  assert.ok(headerRect, '卡片头部在场（点击目标）')
+  await page.mouse.click(headerRect.x, headerRect.y)
+  await page.waitForTimeout(60)
+  const selD2 = await selection()
+  assert.ok(selD2.length === 1 && selD2[0].anchor === EMBED_FROM && selD2[0].head === EMBED_TO,
+    `点头部选中整个嵌入源码区间（实际 ${JSON.stringify(selD2)}，期望 [${EMBED_FROM},${EMBED_TO}]）`)
+  assert.equal(await linePainted(EMBED_LINE), true, '点头部非空选区触及区间 → 源文显形')
+  hosts = await reads()
+  assert.equal(hosts[0].below, true, '选区显形态：卡片转行下方呈现')
+  passed++
+  console.log('[Live嵌入][PASS] 点击卡片头部：非空选区覆盖嵌入区间、源文显形')
 
   // ---- 场景 E：shift+click 跨区选区（非空选区严格重叠显形） ----
   // 点击上段落建立锚点 → shift+click 下段落（选区跨嵌入行）

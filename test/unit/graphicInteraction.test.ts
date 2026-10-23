@@ -10,6 +10,7 @@ import {
   type MermaidApi,
 } from '../../src/webview/mermaidRender'
 import { closeDiagramPopup, isDiagramPopupOpen } from '../../src/webview/diagramPopup'
+import { mermaidFencesField } from '../../src/webview/liveMermaid'
 import type { WebviewToHost } from '../../src/shared/protocol'
 
 const DOC_URI = 'file:///d%3A/notes/g.md'
@@ -52,7 +53,7 @@ async function settle(times = 14): Promise<void> {
   }
 }
 
-function mountDoc(bridge: VsCodeBridge): WebviewSyncController {
+function mountDoc(bridge: VsCodeBridge, text = DOC): WebviewSyncController {
   const controller = new WebviewSyncController(bridge)
   const parent = document.createElement('div')
   document.body.appendChild(parent)
@@ -62,7 +63,7 @@ function mountDoc(bridge: VsCodeBridge): WebviewSyncController {
     sessionId: 's1',
     docUri: DOC_URI,
     version: 1,
-    text: DOC,
+    text,
   })
   // 光标初始在文档头 = 围栏区间内（源码显形）；移到文末让呈现态 widget 发射
   const view = controller.getView()!
@@ -108,7 +109,7 @@ describe('Live 视图：按钮组与禁点击（契约 1–3）', () => {
     expect(view.dom.querySelector('.vsidian-graphic-frame')).not.toBeNull()
   })
 
-  it('点击 edit 按钮：光标落围栏起点、源码显形（编辑入口迁移）', async () => {
+  it('点击 edit 按钮：选中整个围栏区间、源码显形（编辑入口迁移）', async () => {
     mockMermaid()
     const { bridge } = makeBridge()
     const c = mountDoc(bridge)
@@ -118,10 +119,40 @@ describe('Live 视图：按钮组与禁点击（契约 1–3）', () => {
     edit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     edit.click()
     await settle()
-    // DOC 以围栏开头：fence.from = 0，光标触及区间即源码显形
-    expect(view.state.selection.main.anchor).toBe(0)
+    // 非空选区覆盖整个围栏区间（与块级 HTML 的 onEdit 同一执行体形状）：
+    // 区间不写死魔数，与围栏表事实源对齐
+    const fence = view.state.field(mermaidFencesField).spans[0]!
+    const sel = view.state.selection.main
+    expect(sel.empty).toBe(false)
+    expect(sel.anchor).toBe(fence.from)
+    expect(sel.head).toBe(fence.to)
     expect(view.dom.querySelector('.vsidian-graphic-frame')).toBeNull()
     expect(view.state.doc.toString()).toBe(DOC)
+  })
+
+  it('同文档两处相同源码围栏：点第二块 edit 选中第二块区间（code+位置消歧，第一块不受影响）', async () => {
+    mockMermaid()
+    const { bridge } = makeBridge()
+    // 尾段保证光标初始位（文末）在两块围栏之外——两块均发射呈现态 widget
+    const text = DOC + '\n中间段。\n\n' + DOC + '\n尾段。\n'
+    const c = mountDoc(bridge, text)
+    await settle()
+    const view = c.getView()!
+    const edits = view.dom.querySelectorAll('.vsidian-graphic-chrome-edit')
+    expect(edits.length).toBe(2)
+    const second = edits[1] as HTMLButtonElement
+    second.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    second.click()
+    await settle()
+    const fence = view.state.field(mermaidFencesField).spans[1]!
+    expect(fence.from).toBeGreaterThan(text.indexOf('\n中间段'))
+    const sel = view.state.selection.main
+    expect(sel.empty).toBe(false)
+    expect(sel.anchor).toBe(fence.from)
+    expect(sel.head).toBe(fence.to)
+    // 第二块显形退场、第一块呈现态保持
+    expect(view.dom.querySelectorAll('.vsidian-graphic-frame').length).toBe(1)
+    expect(view.state.doc.toString()).toBe(text)
   })
 })
 
