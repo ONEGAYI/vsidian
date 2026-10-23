@@ -26,6 +26,7 @@ import { UI_OPERATIONS, KEYBINDING_OPERATIONS } from '../../src/shared/keybindin
 import { openGraphicPopup } from '../../src/webview/diagramPopup'
 import { EditorView } from '@codemirror/view'
 import { EditorSelection } from '@codemirror/state'
+import { LiveEmbedWidget } from '../../src/webview/liveEmbed'
 
 installLocale('zh-cn', zhCn)
 
@@ -467,3 +468,69 @@ describe('P2-10 embedCard 直驱：焦点目标解析 API', () => {
     h.manager.dispose()
   })
 })
+
+describe('点击卡片头部选中源码区间（Live widget 物化直驱）', () => {
+  /** 物化 Live 嵌入 widget 并挂进主视图内容区（jsdom 无视口物化，toDOM
+   *  直驱——卡片壳由 mountCardInto 重建，装载结果沿用 setupController
+   *  已送达的 hover.result） */
+  function materialize(controller: WebviewSyncController): HTMLElement {
+    const view = controller.getView()!
+    const lineTo = A_TEXT.indexOf('\n')
+    const widget = new LiveEmbedWidget('目标笔记', 0, lineTo, 0, lineTo, false)
+    const host = widget.toDOM(view) as HTMLElement
+    view.dom.querySelector('.cm-content')!.appendChild(host)
+    return host
+  }
+
+  it('点击 header 非按钮区：非空选区覆盖整个嵌入源码区间，文档不变', () => {
+    const { controller } = setupController()
+    const view = controller.getView()!
+    const host = materialize(controller)
+    const embedTo = A_TEXT.indexOf('\n')
+    host.querySelector('.vsidian-embed-card-header')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const sel = view.state.selection.main
+    expect(sel.empty).toBe(false)
+    expect(sel.anchor).toBe(0)
+    expect(sel.head).toBe(embedTo)
+    expect(view.state.doc.toString()).toBe(A_TEXT)
+  })
+
+  it('点击 header 动作按钮（open）：不派发选区（既有按钮行为不受影响）', () => {
+    const { controller } = setupController()
+    const view = controller.getView()!
+    const host = materialize(controller)
+    const before = view.state.selection.main
+    ;(host.querySelector('.vsidian-embed-card-open') as HTMLButtonElement).click()
+    const after = view.state.selection.main
+    expect(after.anchor).toBe(before.anchor)
+    expect(after.head).toBe(before.head)
+  })
+
+  it('点击内容滚动区：不派发选区（点击内容不得影响父文档）', () => {
+    const { controller } = setupController()
+    const view = controller.getView()!
+    const host = materialize(controller)
+    const before = view.state.selection.main
+    host.querySelector('.vsidian-embed-card-scroll')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const after = view.state.selection.main
+    expect(after.anchor).toBe(before.anchor)
+    expect(after.head).toBe(before.head)
+  })
+
+  it('修饰键点击 header（shift/ctrl）：不派发选区（放行扩展选择链）', () => {
+    for (const modifier of [{ shiftKey: true }, { ctrlKey: true }]) {
+      const { controller } = setupController()
+      const view = controller.getView()!
+      const host = materialize(controller)
+      const before = view.state.selection.main
+      host.querySelector('.vsidian-embed-card-header')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...modifier }))
+      const after = view.state.selection.main
+      expect(after.anchor).toBe(before.anchor)
+      expect(after.head).toBe(before.head)
+    }
+  })
+})
+

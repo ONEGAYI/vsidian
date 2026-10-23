@@ -716,6 +716,10 @@ export class EmbedCardManager {
     host: 'reading' | 'live',
     source?: RefSourceContext,
     addonOpts?: EmbedAddonMountOptions,
+    /** Live 装饰挂载专属（liveEmbed widget 注入）：无修饰左键点击卡片
+     *  头部非按钮区 → 选中整个嵌入源码区间（宿主编辑器派发由注入方
+     *  闭包承担）。阅读侧与浮窗根不传——头部点击维持无行为 */
+    onSelectSource?: () => void,
   ): void {
     if (this.active.has(el)) {
       return
@@ -838,6 +842,24 @@ export class EmbedCardManager {
     cardEl.appendChild(scrollEl)
     cardEl.appendChild(stateEl)
     el.appendChild(cardEl)
+    if (onSelectSource) {
+      // 悬停提示（tooltip 规格接管机制：data-tooltip 唯一承载——块级 HTML
+      // host 同款惯例，无 cursor 改动不动样式契约）
+      header.setAttribute('data-tooltip', t('embed.selectSource'))
+      // 头部点击选中源码：无修饰左键且非按钮命中才触发（修饰键放行扩展
+      // 选择链；动作按钮各有既有处理）。内容区（scroll）不挂——点击内容
+      // 不得影响父文档是引用视图红线
+      header.addEventListener('click', (event) => {
+        if (event.button !== 0 || event.shiftKey || event.ctrlKey ||
+          event.altKey || event.metaKey) {
+          return
+        }
+        if (event.target instanceof Element && event.target.closest('button') !== null) {
+          return
+        }
+        onSelectSource()
+      })
+    }
 
     const handle: EmbedCardHandle = {
       entry,

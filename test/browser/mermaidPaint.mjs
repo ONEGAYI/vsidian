@@ -72,6 +72,17 @@ try {
     assert.ok(Math.abs(extraHeight) < 1, `${theme.name}/${theme.size}/${theme.lineHeight} 不应多出光标缓冲空行：${extraHeight}px`)
   }
   await page.locator('.vsidian-graphic-chrome-edit').evaluate(button => button.click())
+  // edit 点击选中整个围栏区间（本变更新增契约）：fixture 文档以围栏开头，
+  // 围栏区间 = 0 .. 文档首个空行前（双换行到结尾段的首个换行处）
+  const selAfterEdit = await page.evaluate(() => {
+    const view = window.controller.getView()
+    const sel = view.state.selection.main
+    const fenceTo = view.state.doc.toString().indexOf('\n\n结尾')
+    return { anchor: sel.anchor, head: sel.head, empty: sel.empty, fenceTo }
+  })
+  assert.ok(selAfterEdit.fenceTo > 0, '围栏区间推导成功')
+  assert.ok(!selAfterEdit.empty && selAfterEdit.anchor === 0 && selAfterEdit.head === selAfterEdit.fenceTo,
+    `edit 点击应选中整个围栏区间（实际 ${JSON.stringify(selAfterEdit)}，期望 [0,${selAfterEdit.fenceTo}]）`)
   assert.equal(await page.locator('.vsidian-code-line').first().evaluate(el => getComputedStyle(el).backgroundColor),
     'rgb(70, 71, 72)', '进入源码后仍使用既有代码卡片背景变量')
   await page.evaluate(() => window.controller.handleHostMessage({ kind: 'settings.changed', values: { 'codeblock.card': false } }))

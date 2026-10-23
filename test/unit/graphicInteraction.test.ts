@@ -10,6 +10,7 @@ import {
   type MermaidApi,
 } from '../../src/webview/mermaidRender'
 import { closeDiagramPopup, isDiagramPopupOpen } from '../../src/webview/diagramPopup'
+import { mermaidFencesField } from '../../src/webview/liveMermaid'
 import type { WebviewToHost } from '../../src/shared/protocol'
 
 const DOC_URI = 'file:///d%3A/notes/g.md'
@@ -108,7 +109,7 @@ describe('Live 视图：按钮组与禁点击（契约 1–3）', () => {
     expect(view.dom.querySelector('.vsidian-graphic-frame')).not.toBeNull()
   })
 
-  it('点击 edit 按钮：光标落围栏起点、源码显形（编辑入口迁移）', async () => {
+  it('点击 edit 按钮：选中整个围栏区间、源码显形（编辑入口迁移）', async () => {
     mockMermaid()
     const { bridge } = makeBridge()
     const c = mountDoc(bridge)
@@ -118,8 +119,13 @@ describe('Live 视图：按钮组与禁点击（契约 1–3）', () => {
     edit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     edit.click()
     await settle()
-    // DOC 以围栏开头：fence.from = 0，光标触及区间即源码显形
-    expect(view.state.selection.main.anchor).toBe(0)
+    // 非空选区覆盖整个围栏区间（与块级 HTML 的 onEdit 同一执行体形状）：
+    // 区间不写死魔数，与围栏表事实源对齐
+    const fence = view.state.field(mermaidFencesField).spans[0]!
+    const sel = view.state.selection.main
+    expect(sel.empty).toBe(false)
+    expect(sel.anchor).toBe(fence.from)
+    expect(sel.head).toBe(fence.to)
     expect(view.dom.querySelector('.vsidian-graphic-frame')).toBeNull()
     expect(view.state.doc.toString()).toBe(DOC)
   })
