@@ -42,7 +42,7 @@
 // #571/T06：pause + 断流，DOM 移除不自动暂停；退订后迟到结果不回写，
 // 「视图释放后无迟到结果污染」）；幂等标记防同根重复装配；模块级登记表
 // 供 sweep（Live widget DOM 离场兜底——挂在 liveLinks 的 sweep 调用点）。
-import { ImageResourceManager } from './imageResource'
+import { ImageResourceManager, applyPercentWidthOnImageLoad, IMAGE_SIZE_PCT_ATTR, IMAGE_SIZE_PCT_DATASET_KEY } from './imageResource'
 import { releaseHtmlMedia } from './htmlInteract'
 import {
   buildSrcsetValue,
@@ -326,6 +326,19 @@ export function prepareHtmlResources(root: HTMLElement, deps: HtmlResourceMountD
         img.removeAttribute('src')
       }
     }
+  }
+
+  // ---- #635 百分比尺寸折算（Reading 血缘的装载接线，两条分支共用）----
+  // markdown 渲染产物（Reading 正文/引用浮层/嵌入卡 Reading 态）带
+  // data-vsidian-img-size-pct 标记：loaded 后按固有宽折算 px（规格 §3.1
+  // 基准——CSS % 的基准是包含块）。标记是识别面：用户手写 HTML 的原生
+  // 百分比 CSS（净化层已剥 data-vsidian-*，天然不带标记）不进折算链路。
+  // 监听常驻：管理器 invalidate 重取后新 load 重新折算（幂等）；无管理器
+  // 分支同样接线（src 剥离前 complete 的缓存图立即折算，其余等回挂）。
+  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>(`img[${IMAGE_SIZE_PCT_ATTR}]`))) {
+    const raw = img.dataset[IMAGE_SIZE_PCT_DATASET_KEY]
+    const percent = raw === undefined ? Number.NaN : Number(raw)
+    applyPercentWidthOnImageLoad(img, percent)
   }
 
   // ---- 媒体属性管线（video/audio src、poster、source[src]；#571/T06 装载语义）----

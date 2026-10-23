@@ -20,6 +20,8 @@ import katexPlugin from '@vscode/markdown-it-katex'
 import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
 import { WIKILINK_CLASS_NAMES, embedAtPosition, parseWikilinkInner } from '../shared/wikilink'
+import { imageSizeAttrs, splitAliasAndSize, type ImageSize } from '../shared/imageSize'
+import { IMAGE_SIZE_PCT_ATTR } from './imageResource'
 import { refEmbedTargetIsImage } from '../shared/refContent'
 import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
@@ -359,13 +361,35 @@ function vsidianEmbedInlineRule(state: StateInline, silent: boolean): boolean {
 /** #336 图片嵌入的 <img> HTML（inner 随 content 携带——图源与别名的单一
  *  来源）。src 为目标原文（未编码——wikilink 路径天然可含空格；资源管理
  *  器 attach 时 normalizeImgSrc 与 markdown-it 编码形态归一），alt 取别名
- *  （无别名为空串——与 `![]()` 同形态）；属性经 HTML 转义 */
+ *  （无别名为空串——与 `![]()` 同形态）；属性经 HTML 转义。
+ *  #635：尺寸尾缀转 width/height 属性（像素）或内联 style.width（百分比） */
 function embedImageHtml(inner: string): string {
-  const parsed = parseWikilinkInner(inner)
+  const parsed = parseWikilinkInner(inner, { embed: true })
   if (!parsed) {
     return escapeHtml(`![[${inner}]]`) // 防御：规则判定已过滤非法形态
   }
-  return `<img src="${escapeHtml(parsed.path)}" alt="${escapeHtml(parsed.alias ?? '')}">`
+  const sizeAttrs = parsed.size === null ? '' : sizeAttributeHtml(parsed.size)
+  return `<img src="${escapeHtml(parsed.path)}" alt="${escapeHtml(parsed.alias ?? '')}"${sizeAttrs}>`
+}
+
+/** #635 尺寸 → HTML 属性串（前导空格；空串表示无尺寸）。
+ *  像素走 width/height 属性（浏览器加载前即可预留空间，减少布局跳动），
+ *  百分比必须走内联 style——HTML width 属性不接受百分比；装载前保留
+ *  `N%` 占位，同时挂 data-vsidian-img-size-pct 标记供装配咽喉在 loaded
+ *  后按固有宽折算 px（CSS % 基准是包含块，非规格 §3.1 的固有宽）。 */
+function sizeAttributeHtml(size: ImageSize): string {
+  const attrs = imageSizeAttrs(size)
+  let out = ''
+  if (attrs.width !== null) {
+    out += ` width="${escapeHtml(attrs.width)}"`
+  }
+  if (attrs.height !== null) {
+    out += ` height="${escapeHtml(attrs.height)}"`
+  }
+  if (attrs.styleWidth !== null) {
+    out += ` style="width:${escapeHtml(attrs.styleWidth)}" ${IMAGE_SIZE_PCT_ATTR}="${escapeHtml(String(attrs.percentWidth))}"`
+  }
+  return out
 }
 
 /** 占位 span 的 HTML（inner 随 data 属性携带——挂载配对的单一来源）。
@@ -435,6 +459,47 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
   // #336（P3-04）图片嵌入渲染：目标为图片的嵌入直接产出 <img>——与普通
   // Markdown 图片同元素同管线（资源管理器装载与 chrome 装饰按 img 命中）
   md.renderer.rules['vsidian_embed_image'] = (tokens, idx) => embedImageHtml(tokens[idx]!.content)
+  // #635 标准图片 token 的尺寸尾缀：markdown-it 把整段标签原文放进
+  // token.content（`图注|100`），attrs 只有 src 与空 alt、无独立尺寸字段，
+  // 所以剥离必须在 content 层面做。默认规则用 renderInlineAsText(children)
+  // 重算 alt——children 里同样含尾缀文本，所以无尺寸形态必须原样走默认
+  // 实现（保兼容），有尺寸时才自行设置 alt 与尺寸属性。
+  const defaultImageRender = md.renderer.rules['image']
+  md.renderer.rules['image'] = (tokens, idx, options, env, self) => {
+    const token = tokens[idx]!
+    // 无条件分段剥离（含单段 `![250](url)` 官方形态——parts.length 守卫会
+    // 挡掉它，Live 侧同口径已支持）；size 为 null 时仍走默认实现分支，
+    // 保持无尺寸行为逐字节一致（下方注释声明的兼容承诺）
+    const split = splitAliasAndSize(token.content.split('|'))
+    if (split.size === null) {
+      // 无尺寸：与既有行为逐字节一致（alt 仍由 children 派生，含原后缀）
+      if (defaultImageRender) {
+        return defaultImageRender(tokens, idx, options, env, self)
+      }
+      token.attrs![token.attrIndex('alt')]![1] = self.renderInlineAsText(token.children!, options, env)
+      return self.renderToken(tokens, idx, options)
+    }
+    const stripped = split.alias ?? ''
+    const altIndex = token.attrIndex('alt')
+    if (altIndex >= 0) {
+      token.attrs![altIndex]![1] = stripped
+    } else {
+      token.attrPush(['alt', stripped])
+    }
+    const attrs = imageSizeAttrs(split.size)
+    if (attrs.width !== null) {
+      token.attrSet('width', attrs.width)
+    }
+    if (attrs.height !== null) {
+      token.attrSet('height', attrs.height)
+    }
+    if (attrs.styleWidth !== null) {
+      // 占位 % + 折算标记（装载后按固有宽折算 px，见 sizeAttributeHtml 注释）
+      token.attrSet('style', `width:${attrs.styleWidth}`)
+      token.attrSet(IMAGE_SIZE_PCT_ATTR, String(attrs.percentWidth))
+    }
+    return self.renderToken(tokens, idx, options)
+  }
   // #60 Mermaid：fence 规则覆盖为容器输出（挂载后经 DOM API 渲染 SVG）
   installMermaidFenceRenderer(md)
   // 编辑态把格内回车存成 br。阅读态只在表格 inline token 里重新解析

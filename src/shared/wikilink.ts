@@ -28,6 +28,8 @@
 //
 // 本模块不依赖 vscode/DOM/CM6（node 单测直驱；宿主与 webview 双产物共用）。
 
+import { splitAliasAndSize, type ImageSize } from './imageSize'
+
 /** #11 双链稳定类名（live widget/mark 与阅读 a 共用；Obsidian 对应
  *  `.cm-hmd-internal-link` / `.internal-link`，见选择器映射表） */
 export const WIKILINK_CLASS_NAMES = {
@@ -45,10 +47,20 @@ export interface ParsedWikilink {
   /** 块引用 ID（`#^块ID` 形态；无 ^ 为 null）。#159 起宿主按块 id 定位
    *  目标块首行；引用更新（重命名同步）仍不属本期 */
   blockId: string | null
-  /** 显示别名（无 | 为 null） */
+  /** 显示别名（无 | 为 null；嵌入形态下已剥离尺寸尾缀） */
   alias: string | null
   /** 非活动行显示文字 */
   display: string
+  /** 嵌入形态的图片尺寸尾缀（#635）。**普通链接恒为 null**——`[[图.png|100]]`
+   *  的 `100` 是显示文字（规格 §3.2）。非法尾缀同样为 null 并留在 alias 里。 */
+  size: ImageSize | null
+}
+
+/** 嵌入形态判定依据（#635）：尺寸语义只作用于嵌入，普通链接的尾缀数字
+ *  仍是别名。调用方按扫描器角色显式传入，不靠内容猜测。 */
+export interface WikilinkParseOptions {
+  /** true = 按嵌入语义解析：尾缀尺寸从别名中剥离（scanEmbedsInLine 家族） */
+  embed?: boolean
 }
 
 /** 块 ID 字符集：拉丁字母/数字/连字符（Obsidian 官方约束——块标识符
@@ -60,18 +72,38 @@ const BLOCK_ID_RE = /^[A-Za-z0-9-]+$/
  * 空别名、多级标题、空或越集块 ID 等）返回 null——调用方按原文降级，不产
  * 生装饰/渲染/跳转。本文件锚点（#159）：`#标题`、`#^块ID`（可带 `|别名`）
  * 合法，path 为空串。
+ *
+ * opts.embed（#635）：嵌入形态下按 `|` 全部分段、末段匹配尺寸形态即剥离为
+ * `size`，其余段拼回别名。普通链接不传，`100` 这类尾缀仍是别名——同一段
+ * 源文在两种语法里语义不同，判定权归扫描器角色而非内容猜测。
  */
-export function parseWikilinkInner(inner: string): ParsedWikilink | null {
+export function parseWikilinkInner(inner: string, opts?: WikilinkParseOptions): ParsedWikilink | null {
   if (inner.length === 0) {
     return null
   }
-  // 首个 | 恒为别名分割（其后内容全归别名，含 |）
+  // 首个 | 恒为别名分割（其后内容全归别名，含 |）；嵌入形态再按 | 细分
+  // 以剥离尾缀尺寸（#635）
   const pipeAt = inner.indexOf('|')
   const targetPart = pipeAt >= 0 ? inner.slice(0, pipeAt) : inner
   const aliasPart = pipeAt >= 0 ? inner.slice(pipeAt + 1) : null
-  const alias = aliasPart === null ? null : aliasPart.trim()
-  if (aliasPart !== null && alias === '') {
-    return null // [[笔记|]]：空别名按不支持形态降级
+  let alias: string | null
+  let size: ImageSize | null = null
+  if (aliasPart === null) {
+    alias = null
+  } else if (opts?.embed === true) {
+    const split = splitAliasAndSize(aliasPart.split('|'))
+    alias = split.alias
+    size = split.size
+    // 空别名且无尺寸（![[图.png|]]）：沿用「空别名按不支持降级」；有尺寸
+    // 时别名本就允许为空（![[图.png|100]]），由 size 承担语义
+    if (alias === null && size === null) {
+      return null
+    }
+  } else {
+    alias = aliasPart.trim()
+    if (alias === '') {
+      return null // [[笔记|]]：空别名按不支持形态降级
+    }
   }
   // 首个 # 恒为标题分割；标题内不得再含 #（多级标题属二期）
   const hashAt = targetPart.indexOf('#')
@@ -114,6 +146,7 @@ export function parseWikilinkInner(inner: string): ParsedWikilink | null {
     blockId,
     alias,
     display: alias !== null ? alias : path !== '' ? `${path}${anchorDisplay}` : anchorDisplay || path,
+    size,
   }
 }
 
@@ -205,7 +238,7 @@ export function scanEmbedsInLine(line: string, base = 0): EmbedOccurrence[] {
     }
     const close = line.indexOf(']]', open + 3)
     const inner = close >= 0 ? line.slice(open + 3, close) : null
-    if (inner !== null && !/[\[\]\n]/.test(inner) && parseWikilinkInner(inner) !== null) {
+    if (inner !== null && !/[\[\]\n]/.test(inner) && parseWikilinkInner(inner, { embed: true }) !== null) {
       out.push({ from: base + open, to: base + close + 2, inner })
       at = close + 2 // 命中：后续扫描不与自身重叠
       continue
@@ -275,7 +308,7 @@ export function embedAtPosition(text: string, start: number, limit: number, base
     return null
   }
   const inner = text.slice(start + 3, close)
-  if (/[\[\]\n]/.test(inner) || parseWikilinkInner(inner) === null) {
+  if (/[\[\]\n]/.test(inner) || parseWikilinkInner(inner, { embed: true }) === null) {
     return null
   }
   return { from: base + start, to: base + close + 2, inner }

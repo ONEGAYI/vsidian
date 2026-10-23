@@ -186,11 +186,12 @@ describe('decodeUnicodeEscapes 转义还原（辅检前置能力）', () => {
           return ch
         })
         .join('')
-    // 现状钉住：当前最长标记集不含拉丁-1 区字符（字典唯一拉丁-1 字符 ·
-    // 属 keybindingSettings.modeLiveReading，非其命名空间最长词条）。此
-    // 断言失败 = 未来出现拉丁-1 最长标记——此时辅检命中与否由下面的
-    // 能力断言保证，并应同步更新本注释中的字典现状描述
-    expect(LONGEST_MARKERS.filter((v) => /[\u0080-\u00FF]/.test(v))).toEqual([])
+    // 现状钉住：字典中的拉丁-1 字符为 `·`（keybindingSettings.modeLiveReading）
+    // 与 `×`（imageResize.readout，#636 尺寸读数「{width} × {height}」——
+    // 乘号是规格 §5.7 的既定形态，不是可替换的排版选择）。此断言失败 =
+    // 又出现了新的拉丁-1 最长标记——辅检命中与否由下面的能力断言保证，
+    // 此时须同步更新本注释中的字典现状描述
+    expect(LONGEST_MARKERS.filter((v) => /[\u0080-\u00FF]/.test(v))).toEqual(['{width} × {height}'])
     // 能力钉住：全部最长标记、字典中真实含拉丁-1 的词条与混排样本，经
     // esbuild 形态编码后必须被完整还原——含拉丁-1 的词条未来成为最长
     // 标记时，辅检的 includes 才不会静默空转

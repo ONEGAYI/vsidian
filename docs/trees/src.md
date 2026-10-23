@@ -147,6 +147,7 @@ vsidian/
     │   ├── htmlResource.ts            # HTML 资源 URL 语法层
     │   ├── i18n.ts                    # t() 取词与语言包装配状态模块
     │   ├── imageRefresh.ts            # 图片刷新共享常量与核验决策
+    │   ├── imageSize.ts               # 图片尺寸后缀解析单一事实源
     │   ├── jiebaManifest.ts           # jieba 锁定版本与下载源清单
     │   ├── keybindings.ts             # 快捷键操作与冲突模型
     │   ├── listPrefix.ts              # 列表引用前缀形态学（#119）
@@ -264,6 +265,7 @@ vsidian/
         ├── htmlToMarkdown.ts             # 富文本HTML到Markdown转换
         ├── imagePaste.ts                 # 图片粘贴拦截适配层（#161）
         ├── imagePopup.ts                 # 图片弹窗全屏浮层单例
+        ├── imageResize.ts                # 图片相框拖动手柄与光带
         ├── imageResource.ts              # 图片资源状态机（#10）
         ├── imageVerifyScheduler.ts       # webview 周期核验定时器调度
         ├── indentEditing.ts              # Tab 通用行缩进处理器（#120）

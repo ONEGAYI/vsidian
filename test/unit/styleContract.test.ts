@@ -361,7 +361,8 @@ describe('styleContract 迁移完整性（旧映射表全集不丢）', () => {
 const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   // content 域（87；#222 增嵌入卡片与占位行两条，#223 增 Live 嵌入宿主，
   // #217 验收反馈增 mod-link-hover，#246 增混排宿主与行内占位两条，
-  // #296 渲染断裂修复增 live-table-prefix，P2-12 #289 增冲突三项选择条）
+  // #296 渲染断裂修复增 live-table-prefix，P2-12 #289 增冲突三项选择条，
+  // #636 增 image-resize-handle（拖动手柄族））
   'view-container': 2,
   heading: 4,
   'inline-format': 9,
@@ -369,7 +370,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'line-syntax': 5,
   table: 12,
   'reading-structure': 17,
-  'link-image-wikilink': 17,
+  'link-image-wikilink': 18,
   'content-variables': 12,
   'content-limits': 12,
   // chrome 域（87；#340 增文本视图一条）

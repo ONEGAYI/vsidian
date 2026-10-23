@@ -296,7 +296,7 @@ export function buildLiveEmbedDecorationRanges(
     // 视图自动成立），不挂卡片壳、不发行下方显形态。触及与独行命中显形
     // （#251 同口径）回纯源码（图片嵌入是图片不是链接，无 mark 着色）
     if (refEmbedTargetIsImage(span.inner)) {
-      const parsed = parseWikilinkInner(span.inner)
+      const parsed = parseWikilinkInner(span.inner, { embed: true })
       if (parsed !== null && !touched &&
           !(span.sole && hitIntersectsRange(hits, span.from, span.to))) {
         const chrome = tree === null ||
@@ -307,6 +307,8 @@ export function buildLiveEmbedDecorationRanges(
           undefined,
           span.sole,
           chrome,
+          parsed.size,
+          { from: span.from, to: span.to },
         ).range(span.from, span.to))
       }
       continue

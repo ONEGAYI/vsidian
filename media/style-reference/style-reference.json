@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "1.3.1",
     "generatedAt": "2026-10-21",
-    "entryCount": 231,
+    "entryCount": 232,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -140,7 +140,7 @@
       "title": "链接、图片与双链",
       "titleKey": "styleRef.category.linkImageWikilink",
       "order": 8,
-      "count": 17
+      "count": 18
     },
     {
       "id": "content-variables",
@@ -1730,6 +1730,29 @@
         "单元 linkInteraction：独立成行判定（整行/尾随空白/列表前缀/混排/同行两图/宽松路径）与 widget 形态 eq"
       ],
       "introduced": "live SVG 塌缩修复（2026-09-29）"
+    },
+    {
+      "id": "image-resize-handle",
+      "domain": "content",
+      "category": "link-image-wikilink",
+      "kind": "selector",
+      "target": ".vsidian-image-resize-handle / .vsidian-image-resize-glow / .vsidian-image-resize-readout（相框右下角拖动手柄族，#636）",
+      "purpose": "图片相框右下角拖动手柄（#636）：拖动即改图片显示尺寸并把结果写回源文尺寸后缀。手柄是硬性次要编辑入口——只在 Live 视图的非排除图片上出现；链接内与表格格内沿既有排除矩阵不出现（那里的点击语义归链接跳转与单元格编辑），阅读视图不出现（只读契约）。视觉 12×12、热区 20×20（沿用侧栏拖宽句柄的热区大于视觉做法），光标 nwse-resize，贴住相框右下角内侧并与圆角同心。glow 为沿右下角两条边线的内侧光带（背景两条 linear-gradient，不占布局）——底边与右边各自从边线起发光、向内递减至无，右带叠于底带之上（角落交汇处视觉同亮度），不向外溢出相框、其余两边无光；光带深度 = max(24px, min(相框宽, 相框高) × 10%)——取 max 不取和（避免大图边界难预期）、基数用短边（宽图沿底边的光带深度会与行高失衡，短边让光带与图的视觉体量成比例）。readout 为拖动中的实时尺寸读数（形如 `320 × 180`），松手即消失。",
+      "views": [
+        "live"
+      ],
+      "states": "悬停相框时显现（与既有 .vsidian-graphic-chrome 同一套 frame:hover 模型，不常驻——常驻会让每张图右下角都挂装饰）。拖动中：相框挂 .vsidian-image-resizing（整个外框 1px 实线异色描边，取 --vscode-focusBorder），同时 glow 完全消失——两者互斥，避免一处出现两团亮区。拖动结束或 Esc 中止后两者一并撤下。手柄在图片 error / loading 态不呈现（无尺寸语义可调）；尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。",
+      "dom": "手柄元素是相框（live 侧 span.vsidian-image 兼任 vsidian-graphic-frame）的子节点，与既有 .vsidian-graphic-chrome 按钮组同级；glow 与 readout 同为其子节点（glow 承担边线光带、readout 承担拖动读数）。glow 的光带深度经内部协调属性 --vsidian-image-resize-glow 传递：JS（glowExtension：max(24px, 短边×10%)）以内联 setProperty 写在相框元素上，CSS 于 .vsidian-image-resize-glow 的背景两条 linear-gradient 消费（光带深度，均带 24px 兜底）。该属性不设公开 variable 条目——值是运行时几何派生而非主题可定制面，glow 消费的是从相框继承的内联值——CSS 片段把同名变量声明在 .vsidian-image-resize-glow 自身即可覆盖光带深度（元素自身声明优先于从父继承的内联值）；显隐互斥态由 opacity/visibility 类规则承担，不受该属性影响。",
+      "example": "/* 拖动中：相框异色描边，光晕消失（互斥） */\n.vsidian-image.vsidian-image-resizing {\n  outline: 1px solid var(--vscode-focusBorder);\n  outline-offset: 2px;\n}\n.vsidian-image.vsidian-image-resizing .vsidian-image-resize-glow {\n  opacity: 0;\n}",
+      "obsidian": {
+        "counterpart": "无直接对应（Obsidian 不给图片拖动改尺寸的手柄；其尺寸靠源码尾缀手写）",
+        "support": "none"
+      },
+      "verification": [
+        "浏览器 imageResize：悬停显现与不常驻、等比与 Shift 双轴写回形态、一次拖动一笔 edit.request、Esc 不写文档、最小宽保底、光晕延伸距离与「描边 + 光晕消失」互斥态（计算样式断言）、链接内与表格格内无手柄、拖动开始 Shift 提示 toast",
+        "单元 imageResize：computeResizeTarget（等比/百分比/双轴保留/最小宽/最大宽钳制）、glowExtension（24 保底与短边 10%）、resizeHandleLayout 与 replaceSizeSuffix 纯逻辑"
+      ],
+      "introduced": "#636（2026-10-22）"
     },
     {
       "id": "live-wikilink",

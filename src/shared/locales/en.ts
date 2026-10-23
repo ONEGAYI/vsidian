@@ -949,6 +949,11 @@ export const en = {
   'graphic.popupExportImageDisabled': 'Remote images cannot be exported; save a workspace copy first.',
   'graphic.imageExportFailed': 'Image export failed',
 
+  /** Image resize handle (#636): accessible label, drag readout, Shift hint */
+  'imageResize.handleAria': 'Resize image',
+  'imageResize.readout': '{width} × {height}',
+  'imageResize.toast.shiftHint': 'Hold Shift to resize width and height independently',
+
   /** 图片/公式/任务/Mermaid 装饰与错误占位 */
   'decor.taskCheck': 'Check task',
   'decor.taskUncheck': 'Uncheck task',

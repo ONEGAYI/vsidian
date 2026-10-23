@@ -172,7 +172,7 @@ try {
   await page.waitForFunction(() => window.sent336().some((m) => m.kind === 'hover.request'), null, { timeout: 4000, polling: 50 })
   const bReq = (await hoverRequests()).at(-1)
   assert.equal(bReq.target, 'B笔记')
-  const B_TEXT = '# B 笔记\n\n内嵌图片 ![[b-assets/b图.png|B 内图片]]。\n'
+  const B_TEXT = '# B 笔记\n\n内嵌图片 ![[b-assets/b图.png|B 内图片|110]]。\n'
   await page.evaluate(({ reqId, instanceId, text }) => window.respondHost({
     kind: 'hover.result', reqId, instanceId, ok: true, contentKind: 'markdown',
     target: { fsPath: 'D:\\notes\\sub\\B笔记.md', relPath: 'sub/B笔记.md' },
@@ -188,6 +188,47 @@ try {
   const bPixel = await page.evaluate(() => window.sampleCenter(document.querySelector('.vsidian-embed-card .vsidian-image')))
   assert.ok(bPixel && bPixel.r > 150 && bPixel.g < 100,
     `B 内图片按 B 解析装载并在绘制层呈现红色（实际 ${JSON.stringify(bPixel)}）`)
+  // #635 嵌入卡渲染面：尺寸后缀在 B 内容渲染中同样生效（别名 + 尺寸段共存）
+  const bWidth = await page.evaluate(() => {
+    const img = document.querySelector('.vsidian-embed-card img')
+    return img ? img.getBoundingClientRect().width : 0
+  })
+  assert.ok(Math.abs(bWidth - 110) <= 2,
+    `嵌入卡内图片尺寸后缀生效（|110，实际 ${bWidth.toFixed(1)}）`)
+
+  // ---- 场景 4b：悬停浮层 markdown 内图片尺寸后缀生效（#635 悬停渲染面） ----
+  const hoverBluePng = await page.evaluate(() => window.makeDataPng(60, 60, 220, 200, 100))
+  await page.evaluate((url) => window.serveImg336('b-assets/b图2.png', url), hoverBluePng)
+  await page.evaluate(() => window.initDoc336('# 悬停浮层\n\n[[C笔记]]\n\n结尾。\n'))
+  await page.evaluate(() => window.setMode336('reading'))
+  const cAnchor = page.locator('a.vsidian-wikilink', { hasText: 'C笔记' }).first()
+  await cAnchor.hover()
+  // 出站消息是累积数组：等本场景的目标请求（旧 B笔记 请求会立即满足无过滤的等待）
+  await page.waitForFunction(() => window.sent336().some((m) => m.kind === 'hover.request' && m.target === 'C笔记'), null, { timeout: 4000, polling: 50 })
+  const cReq = (await hoverRequests()).filter((m) => m.target === 'C笔记').at(-1)
+  assert.ok(cReq, '悬停普通双链发出携带目标原文的读取请求')
+  const C_TEXT = '# C 笔记\n\n尺寸图 ![[b-assets/b图2.png|100]]。\n'
+  await page.evaluate(({ reqId, instanceId, text }) => window.respondHost({
+    kind: 'hover.result', reqId, instanceId, ok: true, contentKind: 'markdown',
+    target: { fsPath: 'D:\\notes\\sub\\C笔记.md', relPath: 'sub/C笔记.md' },
+    version: 3, text,
+    range: { start: 0, end: text.length }, scope: { kind: 'full' },
+  }), { reqId: cReq.reqId, instanceId: cReq.instanceId, text: C_TEXT })
+  await page.waitForFunction(() => {
+    const img = document.querySelector('.vsidian-hover-popup img')
+    return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0
+  }, null, { timeout: 8000, polling: 100 })
+  const popupImgGeom = await page.evaluate(() => {
+    const img = document.querySelector('.vsidian-hover-popup img')
+    const pixel = img ? window.sampleCenter(img) : null
+    return { width: img ? img.getBoundingClientRect().width : 0, pixel }
+  })
+  assert.ok(Math.abs(popupImgGeom.width - 100) <= 2,
+    `悬停浮层内图片尺寸后缀生效（固有 200 → |100，实际 ${popupImgGeom.width.toFixed(1)}）`)
+  assert.ok(popupImgGeom.pixel && popupImgGeom.pixel.b > 150 && popupImgGeom.pixel.r < 100,
+    `悬停浮层内图片绘制层呈现蓝色（实际 ${JSON.stringify(popupImgGeom.pixel)}）`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(600)
 
   // ---- 场景 5：SVG 安全（非交互 img 资源加载，脚本不执行） ----
   const evilSvg = await page.evaluate(() => window.makeEvilSvg())
