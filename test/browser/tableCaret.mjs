@@ -553,10 +553,12 @@ try {
         const caretState = () => page.evaluate(() => {
           const drawn = document.querySelector('.cm-cursorLayer .cm-cursor')
           const fake = document.querySelector('.vsidian-table-grid-empty-active')
+          const input = document.querySelector('.vsidian-table-cell-input-caret')
           return {
             region: document.querySelectorAll('.vsidian-table-region-cell').length,
             drawn: drawn ? getComputedStyle(drawn).display : 'absent',
             fake: fake ? getComputedStyle(fake, '::after').display : 'absent',
+            inputVisible: !!input && !input.hidden && getComputedStyle(input).display !== 'none',
           }
         })
         const a = await cell(1, 0).boundingBox()
@@ -577,6 +579,8 @@ try {
         assert.equal(settled.region, 4, `落定后 2×2 格区应就位: ${JSON.stringify(settled)}`)
         assert.ok(settled.drawn === 'none' || settled.drawn === 'absent',
           `落定后左上格绘制光标应让位（压制或不在场）: ${JSON.stringify(settled)}`)
+        assert.equal(during.inputVisible, false, '拖动中独立输入光标也须让位')
+        assert.equal(settled.inputVisible, false, '落定后独立输入光标也须让位')
         if (scenario === 'region-drag-caret-yield-empty') {
           assert.notEqual(settled.fake, 'absent', '零宽锚点格的假光标装饰应在场（active 仍发射）')
           assert.equal(settled.fake, 'none', `零宽锚点格的假光标应让位: ${JSON.stringify(settled)}`)
@@ -588,8 +592,11 @@ try {
         await cell(2, 1).click()
         await page.waitForFunction(() => {
           if (document.querySelectorAll('.vsidian-table-region-cell').length !== 0) return false
-          const drawn = document.querySelector('.cm-cursorLayer .cm-cursor')
-          return drawn ? getComputedStyle(drawn).display !== 'none' : false
+          const drawn = document.querySelector('.vsidian-table-cell-input-caret:not([hidden])')
+          if (!drawn) return false
+          const style = getComputedStyle(drawn), rect = drawn.getBoundingClientRect()
+          return style.display !== 'none' && style.visibility === 'visible' && rect.height > 0 &&
+            style.backgroundColor !== 'transparent' && style.backgroundColor !== 'rgba(0, 0, 0, 0)'
         }, undefined, { timeout: 5000, polling: 100 })
         if (scenario === 'region-drag-caret-yield') {
           // 多光标关闭形态：drawSelection 退出装配、折叠单光标回退原生

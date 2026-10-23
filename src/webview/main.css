@@ -150,7 +150,8 @@ body.vscode-light #app {
   background: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
 }
 
-#app .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+#app .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground,
+#app .cm-editor.vsidian-table-cell-input-active > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
   background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
 }
 
@@ -169,7 +170,8 @@ body.vscode-light #app {
   background: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
 }
 
-#app .cm-editor.cm-focused > .cm-scroller > .vsidian-selection-layer .vsidian-selection-background {
+#app .cm-editor.cm-focused > .cm-scroller > .vsidian-selection-layer .vsidian-selection-background,
+#app .cm-editor.vsidian-table-cell-input-active > .cm-scroller > .vsidian-selection-layer .vsidian-selection-background {
   background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
 }
 
@@ -178,7 +180,8 @@ body.vscode-light #app {
   background-color: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
 }
 
-#app .cm-editor.cm-focused:has(.cm-selectionLayer) .cm-content .vsidian-code-selection {
+#app .cm-editor.cm-focused:has(.cm-selectionLayer) .cm-content .vsidian-code-selection,
+#app .cm-editor.vsidian-table-cell-input-active:has(.cm-selectionLayer) .cm-content .vsidian-code-selection {
   background-color: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
 }
 
@@ -191,6 +194,9 @@ body.vscode-light #app {
 }
 
 #app .cm-editor.cm-focused .cm-content :where(.vsidian-quote-line, .vsidian-heading-active, .vsidian-code-line,
+  .vsidian-table-line, .vsidian-inline-code, .vsidian-highlight, .vsidian-math-source,
+  .vsidian-math-error, .vsidian-find-match, .vsidian-find-match-current) .vsidian-selection-text,
+#app .cm-editor.vsidian-table-cell-input-active .cm-content :where(.vsidian-quote-line, .vsidian-heading-active, .vsidian-code-line,
   .vsidian-table-line, .vsidian-inline-code, .vsidian-highlight, .vsidian-math-source,
   .vsidian-math-error, .vsidian-find-match, .vsidian-find-match-current) .vsidian-selection-text {
   background-color: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));

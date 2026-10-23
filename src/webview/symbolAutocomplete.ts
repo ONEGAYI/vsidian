@@ -59,6 +59,7 @@ import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch } from 
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
 import { blankRowRawInput } from './tableEditing'
+import { independentTableInput } from './tableCellInput'
 import { chainAt } from '../shared/markdownDoc'
 
 /** 代码上下文节点（含边界标记）：CodeMark/CodeInfo 归入围栏内部口径 */
@@ -282,7 +283,8 @@ const autocloseInputFilter = EditorState.transactionFilter.of((tr) => {
     changes: tr.changes,
     selection: tr.selection,
     effects: pendingTypedAutoclose.of({ pos, open: entry.open, close: entry.close, docLength: tr.newDoc.length, editEpoch: state.field(addonEditEpoch, false) ?? 0 }),
-    annotations: [...(keepEvent ? [keepEvent] : []), symbolRawInput.of(true)],
+    annotations: [...(keepEvent ? [keepEvent] : []), symbolRawInput.of(true),
+      ...(tr.annotation(independentTableInput) ? [independentTableInput.of(true)] : [])],
     scrollIntoView: tr.scrollIntoView,
   }
 })

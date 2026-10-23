@@ -286,21 +286,17 @@ try {
     'B 表格空白格聚焦')
   const cdp = await page5.context().newCDPSession(page5)
   const s5before = await page5.evaluate(() => window.closeoutSent().length)
-  // CDP imeSetComposition 的文本以已提交形态落 DOM（无真实 preedit）——
-  // 再 insertText 会双份；组合流 = imeSetComposition（compositionstart/
-  // update + 文本进 DOM）+ 合成 compositionend（真实 IME 提交必有，CDP
-  // 不产生；按 imagePasteFixture 先例补合成事件驱动同一监听链）
+  // 独立 textarea 接收原生组合与定稿；Input.insertText 替换 preedit，
+  // 不把 compositionend 发到嵌套编辑器外层祖先的 .cm-content。
   await cdp.send('Input.imeSetComposition', { text: '笔|记', selectionStart: 3, selectionEnd: 3 })
   await page5.waitForTimeout(120)
-  await page5.evaluate(() => {
-    const el = document.activeElement?.closest('.cm-content') ?? document.activeElement
-    el?.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '笔|记' }))
-  })
+  await cdp.send('Input.insertText', { text: '笔|记' })
   await page5.waitForTimeout(300)
   void s5before
   const s5model = await page5.evaluate(() => window.closeoutModel('父级B'))
-  assert.ok(s5model.text.includes('| B格1 | 笔\\|记 |'),
-    `组合净输入经表格规划转义落格（实际 ${s5model.text.split('\n')[4] ?? ''}）`)
+  // 原有两枚格式空格保留在输入后方；独立输入不重排它们作为组合承载。
+  assert.equal(s5model.text, B5.replace('| B格1 |  |', '| B格1 |笔\\|记  |'),
+    `组合净输入经表格规划转义落格且其余源文不变（实际 ${s5model.text.split('\n')[4] ?? ''}）`)
   assert.equal(s5model.text.split('\n').length, B5.split('\n').length, '组合规划不增行（格内单行语义）')
   await cdp.detach()
   await page5.close()

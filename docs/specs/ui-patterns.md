@@ -293,6 +293,8 @@ T05（#544）组件引用请求复用悬停弹窗模式：位置由有效触发�
 
 **表格边沿与活动格光标（2026-10-23）**：当前 EditorView 内绝对定位，边沿宽 2px、色取 `--vscode-focusBorder`，中央光标高 1em、宽 2px、色取 `--vscode-editorCursor-foreground`（回落正文前景），以正文背景色隔开边沿。格内独立输入面绘制同宽光标，原生光标让位；格区在场时光标全部隐藏。均无圆角、无全局 z-index，不新增主题档位。`tableInput` 浏览器测试检查实绘色与中央位置，`tableCaret` 检查格内真实绘制位置，CSS 契约钉住主题变量与让位范围。
 
+格内 textarea 获得焦点时，文字选区沿用 `--vscode-editor-selectionBackground` 活动色；焦点离开该编辑器后沿用 `--vscode-editor-inactiveSelectionBackground`。`quoteBarPaint` 以实际像素分别验证活动与失焦两态，不以 `.cm-focused` 是否在场代替焦点语义。
+
 ## 4. 新增 UI 三步接入清单
 
 1. **定形态**：对照 §1 基元与 §2/§3 模式选定档位与结构；没有合型的新元素，先在本文档登记（模式表加行/小节补写）再实现——评审拦「未登记的新形态」。

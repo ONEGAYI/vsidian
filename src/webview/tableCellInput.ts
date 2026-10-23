@@ -192,6 +192,8 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
         if (this.input.selectionStart !== from || this.input.selectionEnd !== to || this.input.selectionDirection !== direction) this.input.setSelectionRange(from, to, direction)
         this.input.focus({ preventScroll: true })
         this.forwarding = false
+        // 透明格式空白可投影为同一输入落点；源选区也须对齐，符号补全才认作原位键入。
+        this.syncSelection()
         this.measure()
       })
     }

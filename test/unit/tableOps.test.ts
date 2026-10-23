@@ -1033,6 +1033,15 @@ describe('引用块内表格的格内编辑防护（#296 审查轮）', () => {
 })
 
 describe('表外落点', () => {
+  it('独立空格输入仍规范化省略边界的空白表格行', () => {
+    const source = 'a|b|c\n---|---|---\n | | '
+    const view = makeEditView(source, source.length)
+    view.contentDOM.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertText', data: '字', bubbles: true, cancelable: true,
+    }))
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | 字|')
+    view.destroy()
+  })
   it('独立格输入的代码内管道经过生产过滤器后不重复转义', () => {
     const source = '| A | B |\n| --- | --- |\n|`ab`| y |'
     const view = makeEditView(source, source.indexOf('ab') + 1)

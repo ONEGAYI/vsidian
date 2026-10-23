@@ -20,6 +20,7 @@ import { addonEditOriginTag } from '../../src/webview/liveInstance'
 import { planSelectionWrap } from '../../src/shared/symbolWrap'
 import { containerPrefixLen, splitTableRowCells } from '../../src/shared/tableCells'
 import { tablePipeKeyHandler } from '../../src/webview/tableEditing'
+import { independentTableInput } from '../../src/webview/tableCellInput'
 import { findSelectionWrapEntry } from '../../src/shared/symbols'
 import type { SerChange, WebviewToHost } from '../../src/shared/protocol'
 
@@ -168,11 +169,13 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
 
   // ---- #600 表格空白行首笔：原始输入语义进入规范化接管域 ----
 
-  it('表格空白行首笔 ( ：原始输入驱动恰一次（replaced 恒 null），快照为规范化后文档，兜底重映射补闭合、终态与 base 逐字一致', async () => {
+  it.each([false, true])('表格空白行首笔 ( ：原始输入驱动恰一次、规范化与兜底落点不变（独立输入 %s）', async (independent) => {
     const text = 'a|b|c\n---|---|---\n | | \n'
     const { drives, docAtDrive, view } = setup(text)
-    view.dispatch({ selection: { anchor: 23 } })
-    view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    const at = independent ? 22 : 23
+    view.dispatch({ selection: { anchor: at } })
+    view.dispatch({ changes: { from: at, insert: '(' }, selection: { anchor: at + 1 },
+      annotations: independent ? independentTableInput.of(true) : [], userEvent: 'input.type' })
     await settleMicrotasks()
     // 原始输入契约（#600）：inputText 为原始单字符、纯插入 replaced 为
     // null——不再是规范化整行载荷（红形态：inputText='| | | ()|'、
@@ -187,12 +190,14 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     expect(view.state.selection.main.head).toBe(26)
   })
 
-  it('表格空白行首笔：规范化整行与兜底闭合合并单笔 edit.request，一次 Ctrl+Z 整体恢复', async () => {
+  it.each([false, true])('表格空白行首笔：规范化与闭合单笔出站、一次撤销恢复（独立输入 %s）', async (independent) => {
     const text = 'a|b|c\n---|---|---\n | | \n'
     const { sent, view } = setup(text)
     useSegmentClock()
-    view.dispatch({ selection: { anchor: 23 } })
-    view.dispatch({ changes: { from: 23, insert: '(' }, selection: { anchor: 24 }, userEvent: 'input.type' })
+    const at = independent ? 22 : 23
+    view.dispatch({ selection: { anchor: at } })
+    view.dispatch({ changes: { from: at, insert: '(' }, selection: { anchor: at + 1 },
+      annotations: independent ? independentTableInput.of(true) : [], userEvent: 'input.type' })
     await vi.advanceTimersByTimeAsync(20)
     expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | ()|\n')
     const reqs = editRequests(sent)

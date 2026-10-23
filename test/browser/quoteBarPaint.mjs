@@ -173,6 +173,11 @@ try {
         [24, 96, 180], '引用块主选区应与副选区同色')
     }
     await selectionPage.evaluate(() => document.activeElement.blur())
+    await selectionPage.waitForFunction(() => {
+      const view = window.controller.getView()
+      return !view.hasFocus && !view.dom.classList.contains('cm-focused') &&
+        !view.dom.classList.contains('vsidian-table-cell-input-active')
+    })
     assert.deepEqual(await pixelAt(selectionPage, await pointAt(selectionPage, sampleOffset)),
       [96, 96, 128], `${name}/${theme} 失焦时应使用非活动选区色`)
     if (name === 'quote') {

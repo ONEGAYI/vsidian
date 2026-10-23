@@ -992,7 +992,6 @@ export const blankRowRawInput = Annotation.define<{ inputText: string; insertAt:
 /** 普通键入、粘贴在空白行首笔规范化；IME 候选过程可能多次替换同一区间，
  * 此处不能逐笔改整行，否则宿主收到的变更坐标与候选终态不一致。 */
 const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
-  if (tr.annotation(independentTableInput)) return tr
   if (!tr.isUserEvent('input') || tr.changes.empty || tr.startState.field(tableComposition)) return tr
   let change: { from: number; to: number; text: string } | null = null
   let multiple = false
@@ -1002,7 +1001,10 @@ const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
   })
   if (multiple || !change) return tr
   const { from, to, text } = change
-  const plan = blankRowInputPlan(tr.startState, from, to, text)
+  // 空 textarea 锚在格首；旧规范化规划器使用去除格式空白后的内容落点。
+  const cell = tr.annotation(independentTableInput) ? editableGridCellAt(tr.startState, from) : null
+  const at = from === to && cell && cell.contentFrom === cell.contentTo ? cell.contentFrom : from
+  const plan = blankRowInputPlan(tr.startState, at, from === to ? at : to, text)
   if (!plan) return tr
   // #600 载体保全：userEvent 显式重挂（Transaction 注解无公开枚举面，
   // 逐字转发做不到公开 API 内）；symbolRawInput 不在此转发——出站暂缓
@@ -1017,6 +1019,7 @@ const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
     selection: { anchor: plan.selection },
     annotations: [
       ...(event ? [Transaction.userEvent.of(event)] : []),
+      ...(tr.annotation(independentTableInput) ? [independentTableInput.of(true)] : []),
       blankRowRawInput.of({ inputText: tr.annotation(cellInputEscaped) ?? text, insertAt: plan.insertAt }),
     ],
     effects: tr.effects,
