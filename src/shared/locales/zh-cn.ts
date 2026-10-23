@@ -906,6 +906,7 @@ export const zhCn: Record<MessageKey, string> = {
   'decor.taskCheck': '勾选任务',
   'decor.taskUncheck': '取消任务勾选',
   'decor.emptyCell': '空单元格',
+  'decor.tableCellInput': '表格单元格输入',
   'decor.mathError': '公式解析失败：显示原文，移动光标进入可编辑',
   'decor.imageError': '图片加载失败（{reason}），点击重试',
   'decor.imageNotFound': '图片找不到（文件不存在或已被删除），点击重试',

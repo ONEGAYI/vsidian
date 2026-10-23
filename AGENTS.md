@@ -121,7 +121,8 @@ vsidian/
 │   │   ├── 0018-markdown-shortname-resolution.md              # 短名与绝对引用架构决策
 │   │   ├── 0019-document-html-and-style-scope.md              # 文档HTML与样式作用域决策
 │   │   ├── 0020-ime-symbol-competition-arbitration.md         # IME定稿符号对竞争裁决
-│   │   └── 0021-pdf-export-installed-browser.md               # PDF导出浏览器依赖决策
+│   │   ├── 0021-pdf-export-installed-browser.md               # PDF导出浏览器依赖决策
+│   │   └── 0022-table-independent-input.md                    # 表格独立输入架构决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定

@@ -103,10 +103,15 @@ try {
           for (let i = 0; i < 10; i++) await page.keyboard.press(deletion === 'backspace' ? 'Backspace' : 'Delete')
         }
         async function snapshot() {
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
           return page.evaluate((row) => {
             const cells = document.querySelectorAll('.vsidian-table-grid-row')[row].querySelectorAll('.vsidian-table-grid-cell')
             const selection = getSelection()
-            const rect = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null
+            const inputCaret = document.activeElement?.classList.contains('vsidian-table-cell-input')
+              ? document.querySelector('.vsidian-table-cell-input-caret:not([hidden])') : null
+            const rect = inputCaret?.getBoundingClientRect() ??
+              (selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null)
+            const caretStyle = inputCaret ? getComputedStyle(inputCaret) : null
             const box = cells[1].getBoundingClientRect()
             const walker = document.createTreeWalker(cells[1], NodeFilter.SHOW_TEXT)
             let lastText = null
@@ -121,8 +126,10 @@ try {
             return { middle: cells[1].textContent, caretX: rect?.x,
               paddingWidth,
               left: cells[0].textContent.trim(), right: cells[2].textContent.trim(),
-              caretInside: cells[1].contains(selection?.focusNode),
-              caretPainted: !!rect && rect.height > 0 && rect.x >= box.left && rect.x < box.right }
+              caretInside: inputCaret ? !!rect && rect.x >= box.left && rect.x < box.right
+                : cells[1].contains(selection?.focusNode),
+              caretPainted: !!rect && rect.height > 0 && rect.x >= box.left && rect.x < box.right &&
+                (!caretStyle || (caretStyle.visibility === 'visible' && caretStyle.backgroundColor !== 'rgba(0, 0, 0, 0)')) }
           }, row)
         }
         async function check(value, step) {
@@ -145,9 +152,11 @@ try {
           }
         }
         await page.keyboard.press('ArrowLeft')
+        await page.waitForFunction(row => window.tableCaretInside(
+          document.querySelectorAll('.vsidian-table-grid-row')[row].querySelectorAll('.vsidian-table-grid-cell')[0]), row)
         const leftFocused = await page.evaluate((row) => {
           const left = document.querySelectorAll('.vsidian-table-grid-row')[row].querySelectorAll('.vsidian-table-grid-cell')[0]
-          return left.contains(getSelection()?.focusNode)
+          return window.tableCaretInside(left)
         }, row)
         assert(leftFocused, '中格格首左移应把真实光标移到左格')
         await page.keyboard.type('x')
@@ -182,9 +191,13 @@ try {
         await page.keyboard.press('ArrowRight')
         const rightFocused = await page.evaluate((row) => {
           const right = document.querySelectorAll('.vsidian-table-grid-row')[row].querySelectorAll('.vsidian-table-grid-cell')[2]
-          return right.contains(getSelection()?.focusNode)
+          return window.tableCaretInside(right)
         }, row)
-        assert(rightFocused, '中格格尾右移应把真实光标移到右格')
+        if (!rightFocused) await page.waitForFunction(row => window.tableCaretInside(
+          document.querySelectorAll('.vsidian-table-grid-row')[row].querySelectorAll('.vsidian-table-grid-cell')[2]), row)
+        assert(await page.evaluate(row => window.tableCaretInside(
+          document.querySelectorAll('.vsidian-table-grid-row')[row].querySelectorAll('.vsidian-table-grid-cell')[2]), row),
+        '中格格尾右移应把真实光标移到右格')
         await page.keyboard.type('x')
         assert.equal((await snapshot()).right, row === 0 ? 'x送' : 'x右', '右移后文字须输入右格')
         await page.keyboard.press('Backspace')
@@ -273,12 +286,14 @@ try {
         } })
       }
       async function checkCell(r, c) {
+        await page.waitForFunction(({ r, c }) => window.tableCaretInside(
+          document.querySelectorAll('.vsidian-table-grid-row')[r].querySelectorAll('.vsidian-table-grid-cell')[c]), { r, c })
         const state = await page.evaluate(({ r, c }) => {
           const target = document.querySelectorAll('.vsidian-table-grid-row')[r].querySelectorAll('.vsidian-table-grid-cell')[c]
           const sel = getSelection()
-          const rect = sel?.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null
+          const rect = window.tableCaretRect()
           const box = target.getBoundingClientRect()
-          return { ...window.readEditor(), inside: target.contains(sel?.focusNode), painted: !!rect && rect.height > 0 &&
+          return { ...window.readEditor(), inside: window.tableCaretInside(target), painted: !!rect && rect.height > 0 &&
             rect.x >= box.left && rect.x < box.right && rect.y >= box.top && rect.y < box.bottom }
         }, { r, c })
         assert(state.inside && state.painted, `${scenario} 光标应在 ${r}/${c}: ${JSON.stringify(state)}`)
@@ -538,10 +553,12 @@ try {
         const caretState = () => page.evaluate(() => {
           const drawn = document.querySelector('.cm-cursorLayer .cm-cursor')
           const fake = document.querySelector('.vsidian-table-grid-empty-active')
+          const input = document.querySelector('.vsidian-table-cell-input-caret')
           return {
             region: document.querySelectorAll('.vsidian-table-region-cell').length,
             drawn: drawn ? getComputedStyle(drawn).display : 'absent',
             fake: fake ? getComputedStyle(fake, '::after').display : 'absent',
+            inputVisible: !!input && !input.hidden && getComputedStyle(input).display !== 'none',
           }
         })
         const a = await cell(1, 0).boundingBox()
@@ -562,6 +579,8 @@ try {
         assert.equal(settled.region, 4, `落定后 2×2 格区应就位: ${JSON.stringify(settled)}`)
         assert.ok(settled.drawn === 'none' || settled.drawn === 'absent',
           `落定后左上格绘制光标应让位（压制或不在场）: ${JSON.stringify(settled)}`)
+        assert.equal(during.inputVisible, false, '拖动中独立输入光标也须让位')
+        assert.equal(settled.inputVisible, false, '落定后独立输入光标也须让位')
         if (scenario === 'region-drag-caret-yield-empty') {
           assert.notEqual(settled.fake, 'absent', '零宽锚点格的假光标装饰应在场（active 仍发射）')
           assert.equal(settled.fake, 'none', `零宽锚点格的假光标应让位: ${JSON.stringify(settled)}`)
@@ -573,8 +592,11 @@ try {
         await cell(2, 1).click()
         await page.waitForFunction(() => {
           if (document.querySelectorAll('.vsidian-table-region-cell').length !== 0) return false
-          const drawn = document.querySelector('.cm-cursorLayer .cm-cursor')
-          return drawn ? getComputedStyle(drawn).display !== 'none' : false
+          const drawn = document.querySelector('.vsidian-table-cell-input-caret:not([hidden])')
+          if (!drawn) return false
+          const style = getComputedStyle(drawn), rect = drawn.getBoundingClientRect()
+          return style.display !== 'none' && style.visibility === 'visible' && rect.height > 0 &&
+            style.backgroundColor !== 'transparent' && style.backgroundColor !== 'rgba(0, 0, 0, 0)'
         }, undefined, { timeout: 5000, polling: 100 })
         if (scenario === 'region-drag-caret-yield') {
           // 多光标关闭形态：drawSelection 退出装配、折叠单光标回退原生
@@ -678,13 +700,13 @@ try {
           await page.keyboard.press('ArrowLeft')
           await page.keyboard.press('ArrowRight')
         }
-        const before = await target.evaluate(() => getSelection().getRangeAt(0).getBoundingClientRect().top)
+        const before = await target.evaluate(() => window.tableCaretRect().top)
         const breaks = scenario === 'enter-repeat' ? 2 : 1
         for (let i = 0; i < breaks; i++) await page.keyboard.press(scenario === 'enter-body' ? 'Shift+Enter' : 'Enter')
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
         assert.equal(await page.locator('.vsidian-table-grid-row').count(), 3, '回车不能拆散表格')
         assert.equal((await page.evaluate(() => window.readEditor())).text.split('\n').length, source.split('\n').length, '格内换行不能拆开 Markdown 表格源行')
-        const after = await target.evaluate(e => ({text:e.innerText, state:window.readEditor(), y:getSelection().getRangeAt(0).getBoundingClientRect().top, inside:e.contains(getSelection().focusNode), html:e.innerHTML, focus:getSelection().focusNode?.nodeName, offset:getSelection().focusOffset}))
+        const after = await target.evaluate(e => ({text:e.innerText, state:window.readEditor(), y:window.tableCaretRect().top, inside:window.tableCaretInside(e), html:e.innerHTML, focus:getSelection().focusNode?.nodeName, offset:getSelection().focusOffset}))
         assert(after.inside && after.y > before, `回车后原生光标必须在同格下一视觉行: ${JSON.stringify({before,after})}`)
         assert(!after.text.includes('<br>'), '换行标记不得显示成源码')
         const input = scenario === 'enter-ime' ? '你好' : 'next'
@@ -695,12 +717,15 @@ try {
         } else await page.keyboard.type(input)
         assert((await target.innerText()).includes(input), '换行后输入仍在原格')
         if (scenario === 'enter-cell') {
-          const secondLine = await target.evaluate(() => getSelection().getRangeAt(0).getBoundingClientRect().top)
+          const secondLine = await target.evaluate(() => window.tableCaretRect().top)
           await page.keyboard.press('ArrowUp')
-          const up = await target.evaluate(e => ({ inside:e.contains(getSelection().focusNode), y:getSelection().getRangeAt(0).getBoundingClientRect().top }))
+          // 独立光标由 requestMeasure 绘制；保留几何断言，等待实际绘制到达目标行。
+          await page.waitForFunction(y => window.tableCaretRect()?.top < y, secondLine)
+          const up = await target.evaluate(e => ({ inside:window.tableCaretInside(e), y:window.tableCaretRect().top }))
           assert(up.inside && up.y < secondLine, '格内换行后上移应返回同格上一行')
           await page.keyboard.press('ArrowDown')
-          const down = await target.evaluate(e => ({ inside:e.contains(getSelection().focusNode), y:getSelection().getRangeAt(0).getBoundingClientRect().top }))
+          await page.waitForFunction(y => window.tableCaretRect()?.top > y, up.y)
+          const down = await target.evaluate(e => ({ inside:window.tableCaretInside(e), y:window.tableCaretRect().top }))
           assert(down.inside && down.y > up.y, '下移应返回同格第二行')
           await page.screenshot({ path: artifactPath(root, 'table-enter-live.png') })
           const saved = (await page.evaluate(() => window.readEditor())).text
@@ -740,8 +765,10 @@ try {
         await page.keyboard.press('ArrowUp')
         await checkCell(0, 1)
         await page.keyboard.press('ArrowUp')
+        await page.keyboard.press('ArrowUp')
         assert.equal((await page.evaluate(() => window.readEditor())).line, 2, '表头上移退出到表格前一行')
         await cell(2, 0).click()
+        await page.keyboard.press('ArrowDown')
         await page.keyboard.press('ArrowDown')
         assert.equal((await page.evaluate(() => window.readEditor())).line, 7, '末行下移退出到表格后一行')
       } else if (scenario === 'vertical-wrapped') {
@@ -1041,9 +1068,9 @@ try {
         // 控件命中正确：点击第三列格后绘制光标落在该格内，真实键入位置一致
         const paintedIn = await cell(1, 2).evaluate((el) => {
           const sel = getSelection()
-          const rect = sel?.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null
+          const rect = window.tableCaretRect()
           const box = el.getBoundingClientRect()
-          return { inside: el.contains(sel?.focusNode),
+          return { inside: window.tableCaretInside(el),
             painted: !!rect && rect.height > 0 && rect.x >= box.left && rect.x < box.right }
         })
         assert(paintedIn.inside && paintedIn.painted, `第三列格控件命中须绘制光标: ${JSON.stringify(paintedIn)}`)
@@ -1209,8 +1236,10 @@ try {
         await page.locator('.cm-line').filter({ hasText: /^BEFORE$/ }).click({ position: { x: 5, y: 10 } })
         await page.keyboard.press('ArrowDown')
         await page.keyboard.press('ArrowDown')
+        await page.keyboard.press('ArrowDown')
         await checkCell(0, 0)
         await page.locator('.cm-line').filter({ hasText: /^AFTER$/ }).click({ position: { x: 5, y: 10 } })
+        await page.keyboard.press('ArrowUp')
         await page.keyboard.press('ArrowUp')
         await page.keyboard.press('ArrowUp')
         await checkCell(2, 0)

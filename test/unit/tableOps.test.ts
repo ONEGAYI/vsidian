@@ -21,6 +21,7 @@ import type { DecorationSet } from '@codemirror/view'
 import { buildLivePreviewDecorations, liveDecorationsField, LIVE_CLASS_NAMES } from '../../src/webview/liveDecorations'
 import { createTableControls } from '../../src/webview/tableControls'
 import { selectTableRegion, tableRegionField } from '../../src/webview/tableRegionSelection'
+import { tableBoundaryField } from '../../src/webview/tableBoundary'
 import {
   tableEditing,
   tableTabForward,
@@ -1031,10 +1032,87 @@ describe('引用块内表格的格内编辑防护（#296 审查轮）', () => {
   })
 })
 
+describe('表外落点', () => {
+  it('独立空格输入仍规范化省略边界的空白表格行', () => {
+    const source = 'a|b|c\n---|---|---\n | | '
+    const view = makeEditView(source, source.length)
+    view.contentDOM.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertText', data: '字', bubbles: true, cancelable: true,
+    }))
+    expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | 字|')
+    view.destroy()
+  })
+  it('独立格输入的代码内管道经过生产过滤器后不重复转义', () => {
+    const source = '| A | B |\n| --- | --- |\n|`ab`| y |'
+    const view = makeEditView(source, source.indexOf('ab') + 1)
+    view.contentDOM.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertText', data: '|', bubbles: true, cancelable: true,
+    }))
+    expect(view.state.doc.toString()).toBe(source.replace('`ab`', '`a|b`'))
+    view.destroy()
+  })
+  it('独立格内输入经宿主写回，撤销一次恢复零宽格', async () => {
+    const original = '| A | B |\n| --- | --- |\n|| y |'
+    const linked = await setupLinked(original)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: EditorSelection.single(original.indexOf('||') + 1) })
+    view.contentDOM.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertText', data: '字', bubbles: true, cancelable: true,
+    }))
+    await settle()
+    expect(linked.doc.getText()).toBe('| A | B |\n| --- | --- |\n|字| y |')
+    expect(linked.doc.applyCalls).toHaveLength(1)
+    await linked.session.handleWebviewMessage({ kind: 'history.request', op: 'undo' }, linked.sessionId)
+    await settle()
+    expect(linked.doc.getText()).toBe(original)
+    expect(view.state.doc.toString()).toBe(original)
+  })
+  it('边沿插行只写回一笔，删除和撤销不误伤表格', async () => {
+    const original = '| A | B |\n| --- | --- |\n| x | y |'
+    const linked = await setupLinked(original)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: EditorSelection.single(original.indexOf('A')) })
+    const press = (key: string) => view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    press('ArrowLeft')
+    expect(linked.doc.applyCalls).toHaveLength(0)
+    press('Enter')
+    await settle()
+    expect(linked.doc.getText()).toBe('\n' + original)
+    expect(linked.doc.applyCalls).toHaveLength(1)
+    press('Delete')
+    await settle()
+    expect(linked.doc.getText()).toBe(original)
+    await linked.session.handleWebviewMessage({ kind: 'history.request', op: 'undo' }, linked.sessionId)
+    await settle()
+    expect(linked.doc.getText()).toBe('\n' + original)
+  })
+  it('零宽格直接输入不物化保护性空格', () => {
+    const source = '| A | B |\n| --- | --- |\n|| y |'
+    const view = makeEditView(source, source.indexOf('||') + 1)
+    view.focus()
+    view.contentDOM.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertText', data: '字', bubbles: true, cancelable: true,
+    }))
+    expect(view.state.doc.toString()).toBe('| A | B |\n| --- | --- |\n|字| y |')
+    view.destroy()
+  })
+  it('首行表格 Left 停在边沿，再 Enter 插入真实前空行', () => {
+    const source = '| A | B |\n| --- | --- |\n| x | y |'
+    const view = makeEditView(source, source.indexOf('A'))
+    const press = (key: string) => view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    press('ArrowLeft')
+    expect(view.state.doc.toString()).toBe(source)
+    press('Enter')
+    expect(view.state.doc.toString()).toBe('\n' + source)
+    expect(view.state.selection.main.head).toBe(0)
+    view.destroy()
+  })
+})
+
 describe('表格边界水平进出导航（#296 二轮真机反馈）', () => {
-  // 表格首/末格最左/最右按方向键直达表格块外紧邻行；紧邻外部行尾/行首
-  // 反向直达首/末格内容（跳过隐藏前缀与管道）。此前首格最左 Left 被吞键
-  // 卡死（navTargetsOf 无左邻目标仍 return true），表格内外无法互达。
+  // 表格与紧邻普通行之间必经边沿；边沿状态与同源码位置的格内光标不同。
   const DOC = '前文段落\n\n> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |\n\n后文段落'
   const TOP_DOC = '前文段落\n\n| 名字 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n后文段落'
 
@@ -1045,6 +1123,7 @@ describe('表格边界水平进出导航（#296 二轮真机反馈）', () => {
   it('引用表首格最左 Left：跳出表格到上一行行尾（不再吞键卡死）', () => {
     const view = makeEditView(DOC, DOC.indexOf('名字'))
     keydown(view, { key: 'ArrowLeft' })
+    keydown(view, { key: 'ArrowLeft' })
     expect(view.state.selection.main.head)
       .toBe(DOC.indexOf('\n\n> | 名字') + 1) // 表格上一行（空行）行尾
     view.destroy()
@@ -1053,24 +1132,31 @@ describe('表格边界水平进出导航（#296 二轮真机反馈）', () => {
   it('引用表末格最右 Right：跳出表格到下一行（空行）行首', () => {
     const view = makeEditView(DOC, DOC.indexOf('3') + 1)
     keydown(view, { key: 'ArrowRight' })
+    keydown(view, { key: 'ArrowRight' })
     expect(view.state.selection.main.head)
       .toBe(DOC.indexOf('后文段落') - 1) // 表格下一行（空行）行首
     view.destroy()
   })
 
-  it('表格上方紧邻行行尾 Right：直达引用表首格内容', () => {
+  it('表格上方紧邻行行尾 Right：先停左沿，再进入引用表首格', () => {
     const blankTo = DOC.indexOf('\n\n> | 名字') + 1
     const view = makeEditView(DOC, blankTo)
     keydown(view, { key: 'ArrowRight' })
+    expect(view.state.field(tableBoundaryField)?.side).toBe('before')
+    keydown(view, { key: 'ArrowRight' })
+    expect(view.state.field(tableBoundaryField)).toBeNull()
     expect(view.state.selection.main.head).toBe(DOC.indexOf('名字'))
     view.destroy()
   })
 
-  it('表格下方紧邻行行首 Left：直达引用表末格内容尾', () => {
+  it('表格下方紧邻行行首 Left：先停右沿，再进入引用表末格', () => {
     // 紧邻表格末行的是空行（from = to）：光标落在空行行首
     const blankFrom = DOC.indexOf('后文段落') - 1
     const view = makeEditView(DOC, blankFrom)
     keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.field(tableBoundaryField)?.side).toBe('after')
+    keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.field(tableBoundaryField)).toBeNull()
     expect(view.state.selection.main.head).toBe(DOC.indexOf('3') + 1)
     view.destroy()
   })
@@ -1078,21 +1164,23 @@ describe('表格边界水平进出导航（#296 二轮真机反馈）', () => {
   it('顶层表边界同样进出（新契约对两形态一致）', () => {
     const view = makeEditView(TOP_DOC, TOP_DOC.indexOf('名字'))
     keydown(view, { key: 'ArrowLeft' })
+    keydown(view, { key: 'ArrowLeft' })
     expect(view.state.selection.main.head)
       .toBe(TOP_DOC.indexOf('\n\n| 名字') + 1)
     const view2 = makeEditView(TOP_DOC, TOP_DOC.indexOf('\n\n| 名字') + 1)
     keydown(view2, { key: 'ArrowRight' })
+    expect(view2.state.field(tableBoundaryField)?.side).toBe('before')
     expect(view2.state.selection.main.head).toBe(TOP_DOC.indexOf('名字'))
     view.destroy()
     view2.destroy()
   })
 
-  it('文档首表格首格最左 Left：交原生（jsdom 无默认链不动，浏览器侧由原生左移）', () => {
+  it('文档首表格首格最左 Left：停靠左沿，源文与源坐标不变', () => {
     const head = '> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |'
     const view = makeEditView(head, head.indexOf('名字'))
     keydown(view, { key: 'ArrowLeft' })
-    // 不接管：贴文档边界时 keymap 返回 false 交原生（此处装配无
-    // defaultKeymap，原生位移为零即证明未接管）
+    expect(view.state.field(tableBoundaryField)?.side).toBe('before')
+    expect(view.state.doc.toString()).toBe(head)
     expect(view.state.selection.main.head).toBe(head.indexOf('名字'))
     view.destroy()
   })

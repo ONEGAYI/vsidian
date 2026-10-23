@@ -88,10 +88,13 @@ const failures = []
     await cell0.click()
     await page.keyboard.press('Home')
     await page.keyboard.press('ArrowLeft')
+    assert.ok(await page.locator('.cm-editor').evaluate(el => el.classList.contains('vsidian-table-boundary-active')))
+    await page.keyboard.press('ArrowLeft')
     const afterLeft = await read()
     assert(afterLeft.head <= source.indexOf('\n\n> | 甲') + 1,
       `首格最左 Left 应跳出表格到上一行（空行行尾）: ${JSON.stringify(afterLeft)}`)
     // 3) 边界入格：空行行尾 Right 直达首格内容（跳过隐藏前缀与管道）
+    await page.keyboard.press('ArrowRight')
     await page.keyboard.press('ArrowRight')
     const afterRight = await read()
     assert.equal(afterRight.head, source.indexOf('甲'),
@@ -102,9 +105,11 @@ const failures = []
     await cellLast.click()
     await page.keyboard.press('End')
     await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
     const afterExit = await read()
     assert.equal(afterExit.head, source.indexOf('后文') - 1,
       `末格最右 Right 应跳出表格到下一行行首: ${JSON.stringify(afterExit)}`)
+    await page.keyboard.press('ArrowLeft')
     await page.keyboard.press('ArrowLeft')
     const backIn = await read()
     assert.equal(backIn.head, source.indexOf('丁') + 1,

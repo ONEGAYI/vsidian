@@ -959,6 +959,7 @@ export const en = {
   'decor.taskCheck': 'Check task',
   'decor.taskUncheck': 'Uncheck task',
   'decor.emptyCell': 'Empty cell',
+  'decor.tableCellInput': 'Table cell input',
   'decor.mathError': 'Math failed to parse: source text is shown; move the cursor in to edit',
   'decor.imageError': 'Image failed to load ({reason}). Click to retry',
   'decor.imageNotFound': 'Image not found (file missing or deleted). Click to retry',

@@ -150,7 +150,8 @@ body.vscode-light #app {
   background: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
 }
 
-#app .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+#app .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground,
+#app .cm-editor.vsidian-table-cell-input-active > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
   background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
 }
 
@@ -169,7 +170,8 @@ body.vscode-light #app {
   background: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
 }
 
-#app .cm-editor.cm-focused > .cm-scroller > .vsidian-selection-layer .vsidian-selection-background {
+#app .cm-editor.cm-focused > .cm-scroller > .vsidian-selection-layer .vsidian-selection-background,
+#app .cm-editor.vsidian-table-cell-input-active > .cm-scroller > .vsidian-selection-layer .vsidian-selection-background {
   background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
 }
 
@@ -191,6 +193,9 @@ body.vscode-light #app {
 }
 
 #app .cm-editor.cm-focused .cm-content :where(.vsidian-quote-line, .vsidian-heading-active, .vsidian-code-line,
+  .vsidian-table-line, .vsidian-inline-code, .vsidian-highlight, .vsidian-math-source,
+  .vsidian-math-error, .vsidian-find-match, .vsidian-find-match-current) .vsidian-selection-text,
+#app .cm-editor.vsidian-table-cell-input-active .cm-content :where(.vsidian-quote-line, .vsidian-heading-active, .vsidian-code-line,
   .vsidian-table-line, .vsidian-inline-code, .vsidian-highlight, .vsidian-math-source,
   .vsidian-math-error, .vsidian-find-match, .vsidian-find-match-current) .vsidian-selection-text {
   background-color: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
@@ -3242,6 +3247,46 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   font-family: monospace;
   word-spacing: -1ch;
 }
+
+/* 表外落点与格内独立输入：都属于当前 EditorView 的局部呈现。 */
+.vsidian-table-boundary {
+  position: absolute;
+  width: 2px;
+  background: var(--vscode-focusBorder);
+  pointer-events: none;
+}
+.vsidian-table-boundary::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 1em;
+  background: var(--vscode-editorCursor-foreground, var(--vscode-editor-foreground));
+  box-shadow: 0 0 0 2px var(--vscode-editor-background);
+}
+.vsidian-table-boundary-active .cm-content { caret-color: transparent; }
+.vsidian-table-boundary-active .cm-cursor { visibility: hidden; }
+.vsidian-table-cell-input {
+  position: absolute;
+  width: 2px;
+  height: 1em;
+  opacity: 0.01;
+  padding: 0;
+  border: 0;
+  resize: none;
+  pointer-events: none;
+}
+.vsidian-table-cell-input-caret {
+  position: absolute;
+  width: 2px;
+  background: var(--vscode-editorCursor-foreground, currentColor);
+  pointer-events: none;
+}
+#app .cm-editor.vsidian-table-cell-input-active .cm-scroller .vsidian-table-grid-empty-active::after {
+  display: none;
+}
+.vsidian-table-cell-input-active .cm-cursor { visibility: hidden; }
 
 /* 零宽格没有可挂载原生 caret 的文字节点：仅在该格活动时将原生 caret
    隐去，并在目标格内绘制同色光标。输入仍由 CM6 源文本管线处理。 */
