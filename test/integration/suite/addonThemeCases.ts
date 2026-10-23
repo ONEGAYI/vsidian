@@ -13,7 +13,7 @@ interface ThemeState {
   preferredAvailable: boolean
   table: { languages: Array<{ language: string; effective: string }> }
 }
-interface Paint { containers: Array<{ provider: string; color: string | null; width: number }>; builtinSvg: number }
+interface Paint { containers: Array<{ provider: string; color: string | null; width: number }>; builtinSvg: number; addonSvg: number }
 const state = () => vscode.commands.executeCommand<ThemeState>(`${PREFIX}addonThemes`)
 
 async function wait<T>(label: string, read: () => Promise<T | undefined>): Promise<T> {

@@ -364,3 +364,60 @@ export function refreshAddonGraphicBlocks(root: ParentNode): void {
     remountGraphicContainer(el, mode)
   }
 }
+
+// ---- T09 绘制观测纯函数（#629 探针语义修正） ----
+
+/** 文档范围内渲染容器里的 svg 按所有权分桶：builtin 只计内置容器（含无
+ *  所有权标记的历史容器），addon 计组件接管容器——热切换重挂载的新容器
+ *  无论内置/组件一律挂 .vsidian-mermaid 类，按类名全量计数会把组件渲染
+ *  出的 SVG 误计入「内置 SVG 在场数」（#629 主缺陷），所有权判定一律经
+ *  GRAPHIC_PROVIDER_ATTR 最近祖先 */
+export function graphicSvgCountByOwner(scope: ParentNode): { builtin: number; addon: number } {
+  let builtin = 0
+  let addon = 0
+  for (const svg of Array.from(scope.querySelectorAll(`.${MERMAID_CLASS_NAMES.diagram} svg`))) {
+    const host = svg.closest(`[${GRAPHIC_PROVIDER_ATTR}]`)
+    if (host !== null && host.getAttribute(GRAPHIC_PROVIDER_ATTR) !== 'builtin') {
+      addon += 1
+    } else {
+      builtin += 1
+    }
+  }
+  return { builtin, addon }
+}
+
+/** UA 默认不参与绘制的元素（无布局语义；mermaid 内嵌 <style>——Codex
+ *  预设把 themeCSS 烘焙进 svg——是 #629 旧 fallback 误命中 display:none
+ *  节点的典型，width 探针因此恒 0） */
+const NON_PAINTED_TAGS = new Set(['STYLE', 'SCRIPT', 'LINK', 'META', 'TITLE', 'NOSCRIPT', 'TEMPLATE'])
+
+/**
+ * 图形容器内组件渲染内容的代表元素（paint.renderers 容器条目 width/color
+ * 的观测对象）。选择序：
+ * 1. 显式断言锚（fixture 组件的 t09-box / data-t09-renderer）——组件
+ *    作者声明的观测标记语义最强；
+ * 2. 容器内首个 svg——真 SVG 绘制产物的最强证据；
+ * 3. 首个非 UA 隐藏、非 display:none 且带非空文本的叶子元素——error
+ *    占位文本等仍可观测（区分渲染成败靠 builtinSvg/addonSvg 计数与
+ *    svg 代表元素，不靠 width 归零）。
+ */
+export function graphicRendererContentEl(container: HTMLElement): Element | null {
+  const box = container.querySelector<HTMLElement>('[data-t09-renderer]') ?? container.querySelector<HTMLElement>('.t09-box')
+  if (box !== null) {
+    return box
+  }
+  const svg = container.querySelector('svg')
+  if (svg !== null) {
+    return svg
+  }
+  for (const child of Array.from(container.querySelectorAll<HTMLElement>('*'))) {
+    if (child.childElementCount !== 0 || (child.textContent ?? '').trim() === '') {
+      continue
+    }
+    if (NON_PAINTED_TAGS.has(child.tagName) || getComputedStyle(child).display === 'none') {
+      continue
+    }
+    return child
+  }
+  return null
+}

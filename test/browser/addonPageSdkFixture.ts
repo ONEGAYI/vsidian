@@ -16,6 +16,7 @@ import * as cmLanguage from '@codemirror/language'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from '../../src/webview/syncController'
+import { graphicSvgCountByOwner } from '../../src/webview/graphicRenderers'
 import { addonCm6LanguageSubset, installAddonPageLoader, type AddonPageLoaderHandle } from '../../src/webview/addonPageLoader'
 import { setAddonRenderersBridge, type AddonRenderersOutboundMessage } from '../../src/webview/addonRenderers'
 import { setThemeEnvironmentHub } from '../../src/webview/addonThemeEnvironment'
@@ -239,9 +240,11 @@ Object.assign(window, {
     return { version: table.version, languages: [...table.languages], store: rendererHost.snapshot(() => true).store }
   },
   /** #358 T09 渲染容器观测（绘制层断言锚）：文档内 t09-box 的提供者/语言/
-   *  模式/文本与计算背景色 + 内置 mermaid svg 在场数 */
+   *  模式/文本与计算背景色 + svg 按容器所有权分桶计数（#629：组件接管
+   *  容器渲染出的 SVG 不误计入内置——与 view.state 探针同源单一事实源） */
   rendererPaintInfo() {
     const boxes = [...document.querySelectorAll<HTMLElement>('.t09-box')]
+    const svgCounts = graphicSvgCountByOwner(document)
     return {
       boxes: boxes.filter((el) => el.isConnected).map((el) => ({
         renderer: el.getAttribute('data-t09-renderer'),
@@ -253,7 +256,8 @@ Object.assign(window, {
       })),
       lateMarks: document.querySelectorAll('[data-t09-late]').length,
       releasedMarks: document.querySelectorAll('[data-t09-released]').length,
-      builtinSvg: document.querySelectorAll('.vsidian-mermaid svg').length,
+      builtinSvg: svgCounts.builtin,
+      addonSvg: svgCounts.addon,
       mermaidStates: [...document.querySelectorAll<HTMLElement>('.vsidian-mermaid')].map((el) => el.getAttribute('data-vsidian-mermaid-state')),
     }
   },

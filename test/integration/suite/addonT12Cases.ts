@@ -91,6 +91,7 @@ async function rendererTable(): Promise<RendererTable> {
 interface PaintRenderers {
   containers: Array<{ provider: string; language: string; width: number; state: string }>
   builtinSvg: number
+  addonSvg: number
   tableVersion?: number | null
   dynamicLanguages?: string[]
 }
