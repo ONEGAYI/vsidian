@@ -18,6 +18,7 @@ import {
 } from '../../src/webview/pdfExportAssembly'
 import { MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, GRAPHIC_LANG_ATTR } from '../../src/shared/mermaid'
 import type { PdfExportPagePayload } from '../../src/shared/pdfExportPayload'
+import { IMAGE_SIZE_PCT_ATTR } from '../../src/webview/imageResource'
 
 beforeAll(() => {
   installLocale('zh-cn', zhCn)
@@ -702,5 +703,112 @@ describe('mountExportDocument：T06（#626）合并分篇装配', () => {
     ], false)
     expect(handle.failures).toEqual([{ kind: 'embed', item: '缺失甲', reason: 'not-found' }])
     expect(root.textContent).toContain('缺失甲')
+  })
+})
+
+
+describe('PDF 面图片尺寸后缀（尺寸语义随 Reading 管线自动生效——#642 核实钉住）', () => {
+  const sizePayload = (overrides: Partial<PdfExportPagePayload> = {}): PdfExportPagePayload => ({
+    docs: [{
+      fsPath: 'D:/vault/笔记甲.md',
+      docName: '笔记甲.md',
+      text: [
+        '宽：![图|300](local.png)',
+        '',
+        '双轴：![图|300x200](dual.png)',
+        '',
+        '百分比：![图|50%](pct.png)',
+        '',
+        '双链嵌入：![[embed-img.png|300]]',
+        '',
+        '非法宽：![图|0](zero.png)',
+        '',
+        '非法百分比：![图|2000%](over.png)',
+      ].join('\n'),
+      version: 3,
+    }],
+    embeds: [],
+    mediaEmbeds: [],
+    embedFailures: [],
+    style: { dark: false, vars: {}, reading: {} },
+    snippets: [],
+    breaks: false,
+    mermaidUri: '',
+    resBase: '',
+    locale: 'zh-cn',
+    ...overrides,
+  })
+
+  const imgByRawSrc = (root: HTMLElement, raw: string): HTMLImageElement | undefined =>
+    Array.from(root.querySelectorAll<HTMLImageElement>('img'))
+      .find((i) => i.dataset['vsidianImgSrc'] === raw)
+
+  it('像素单轴：width 属性随装配生效，等比无 height', () => {
+    const { root } = setup(sizePayload())
+    const img = imgByRawSrc(root, 'local.png')
+    expect(img).toBeDefined()
+    expect(img!.getAttribute('width')).toBe('300')
+    expect(img!.hasAttribute('height')).toBe(false)
+    expect(img!.hasAttribute(IMAGE_SIZE_PCT_ATTR)).toBe(false)
+  })
+
+  it('像素双轴：width 与 height 同时生效（拉伸语义）', () => {
+    const { root } = setup(sizePayload())
+    const img = imgByRawSrc(root, 'dual.png')
+    expect(img).toBeDefined()
+    expect(img!.getAttribute('width')).toBe('300')
+    expect(img!.getAttribute('height')).toBe('200')
+  })
+
+  it('百分比：装载前 N% 占位 + 标记，装载后按固有宽折算 px', async () => {
+    const { root } = setup(sizePayload())
+    const img = imgByRawSrc(root, 'pct.png')
+    expect(img).toBeDefined()
+    expect(img!.getAttribute(IMAGE_SIZE_PCT_ATTR)).toBe('50')
+    expect(img!.getAttribute('style')).toContain('width:50%')
+    await settleImages(root)
+    expect(img!.getAttribute('style')).toContain('320px')
+  })
+
+  it('双链嵌入图片：与普通 Markdown 图片同管线携带尺寸', () => {
+    const { root } = setup(sizePayload())
+    const img = imgByRawSrc(root, 'embed-img.png')
+    expect(img).toBeDefined()
+    expect(img!.getAttribute('width')).toBe('300')
+  })
+
+  it('非法值降级：无尺寸属性、无折算标记、后缀留在原文', () => {
+    const { root } = setup(sizePayload())
+    const zero = imgByRawSrc(root, 'zero.png')
+    expect(zero).toBeDefined()
+    expect(zero!.hasAttribute('width')).toBe(false)
+    expect(zero!.hasAttribute(IMAGE_SIZE_PCT_ATTR)).toBe(false)
+    const over = imgByRawSrc(root, 'over.png')
+    expect(over).toBeDefined()
+    expect(over!.hasAttribute('width')).toBe(false)
+    expect(over!.hasAttribute(IMAGE_SIZE_PCT_ATTR)).toBe(false)
+  })
+
+  it('嵌入展开的 B 文内图片：尺寸同样生效（一层展开同管线）', async () => {
+    const { root } = setup(sizePayload({
+      docs: [{
+        fsPath: 'D:/vault/笔记甲.md',
+        docName: '笔记甲.md',
+        text: '![[嵌入乙]]',
+        version: 3,
+      }],
+      embeds: [{
+        inner: '嵌入乙',
+        fsPath: 'D:/vault/嵌入乙.md',
+        docName: '嵌入乙.md',
+        text: '![乙内图|50%](inside.png)',
+        version: 9,
+      }],
+    }))
+    const img = imgByRawSrc(root, 'inside.png')
+    expect(img).toBeDefined()
+    expect(img!.getAttribute(IMAGE_SIZE_PCT_ATTR)).toBe('50')
+    await settleImages(root)
+    expect(img!.getAttribute('style')).toContain('320px')
   })
 })
