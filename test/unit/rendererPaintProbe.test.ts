@@ -127,4 +127,16 @@ describe('renderers 绘制探针（#629）', () => {
     // 集成表现为 viewState 轮询超时
     expect(isWebviewToHost(msg)).toBe(true)
   })
+
+  it('缺 renderers.addonSvg 的 view.state 消息被 isWebviewToHost 拒绝（必填契约负向钉子）', () => {
+    const h = makeBridge()
+    const c = mountProbe(h)
+    mountGraphicContainer('test.addon/mermaid-alt', '<svg></svg>')
+    const msg = viewStateRenderers(c, h)
+    // addonSvg 与同对象 builtinSvg 同为必填（webview 与宿主同 VSIX 原子发布，
+    // 无混版组合面）：缺失即校验失败，钉住白名单不得回软
+    const stripped = JSON.parse(JSON.stringify(msg)) as typeof msg
+    delete (stripped.paint!.renderers as { addonSvg?: number }).addonSvg
+    expect(isWebviewToHost(stripped)).toBe(false)
+  })
 })

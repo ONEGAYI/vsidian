@@ -2930,7 +2930,9 @@ export interface PaintProbe {
       /** 挂载目标模式（live widget / 阅读块） */
       mode: string
       state: string | null
-      /** 组件渲染内容的计算背景色（内置容器为 null——SVG 在场由 builtinSvg/addonSvg 按所有权计） */
+      /** 组件渲染内容代表元素的 computed backgroundColor（选择序见
+       *  graphicRendererContentEl；无代表内容时 null。内置容器命中 svg 本体，
+       *  色值通常透明，无组件样式语义） */
       color: string | null
       /** 组件渲染内容宽度（px；非零 = 真实布局。代表元素选择序见
        *  graphicRendererContentEl：断言锚 → svg → 可见文本叶子——#629 起

@@ -11402,8 +11402,8 @@ export class WebviewSyncController {
       : null
     const findSourceCurrent = findSource?.querySelector<HTMLElement>('.vsidian-find-match-current')
     // #358 T09 渲染提供者接管绘制观测：文档内图形容器逐个回报生效提供者
-    //（provider data 属性）、状态、组件渲染内容的计算色与几何（内置容器
-    // color null——SVG 在场由 builtinSvg/addonSvg 按所有权计）。绘制层断言
+    //（provider data 属性）、状态、组件渲染内容的计算色与几何（color 取
+    // 代表元素计算背景色，内置容器命中 svg 本体、色值通常透明）。绘制层断言
     // 面，非 DOM 存在性。#629：代表元素与 svg 分桶经 graphicRenderers 纯
     // 函数收集（组件真渲染 SVG 场景 builtinSvg 不误计、width 不落
     // display:none 内嵌 <style>）

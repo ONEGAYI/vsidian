@@ -57,6 +57,7 @@ interface RendererTable {
 interface PaintRenderers {
   containers: Array<{ language: string; provider: string; mode: string; state: string | null; color: string | null; width: number }>
   builtinSvg: number
+  addonSvg: number
 }
 
 async function rendererTable(): Promise<RendererTable> {
