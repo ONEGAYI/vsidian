@@ -46,8 +46,14 @@ export const SIZE_LIMITS = {
   // 用户裁决总量两线各上调 2 MiB：警告线 13.5→15.5 MiB、失败线
   // 14.0→16.0 MiB（实测 15.35 MiB 落警告线与失败线之间，距失败线
   // 约 0.65 MiB）；单文件与图标线不动。
-  totalWarnBytes: 15.5 * 1024 * 1024,
-  totalMaxBytes: 16.0 * 1024 * 1024,
+  // v1.4.0 发布轮实测 15,799 KB（417 文件，日志 out/test/
+  // release-check-1.4.0.log），距警告线仅约 73 KB——2026-10-23 用户
+  // 裁决总量两线各上调 1 MiB：警告线 15.5→16.5 MiB、失败线
+  // 16.0→17.0 MiB；单文件与图标线不动。包体构成探查（PDF 能力族
+  // 约 6.0 MiB 占 38.8%，为本轮增量全部来源）见 out/test/
+  // vsix-size-probe/report-final.txt。
+  totalWarnBytes: 16.5 * 1024 * 1024,
+  totalMaxBytes: 17.0 * 1024 * 1024,
   // 一般单文件：最大单项为 main.js（T08 后实测 2,573,352 B ≈ 2.46 MB，
   // 含 CM6 + KaTeX、Lezer 语言表、查找引擎、悬停/嵌入与分词），警告线
   // 3 MB 在其上留余量、失败线 4 MB 拦截意外超大文件（如误升 mermaid

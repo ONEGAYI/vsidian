@@ -264,13 +264,14 @@ test('VSIX 检查：完整合法集合通过且零警告（#60 后单文件警�
   assert.deepEqual(result.warnings, [])
 })
 
-test('包体预算：PDF 导出批次后实测 15,720 KB 落两线之间，总量两线 15.5/16.0 MiB、单文件红线 4 MiB', () => {
+test('包体预算：v1.4.0 实测 15,799 KB 落两线之间，总量两线 16.5/17.0 MiB、单文件红线 4 MiB', () => {
   const entries = makeEntries()
-  // PDF 导出批次（#618–#628）后实测基线：解压总量 15,720 KB（417 文件，
-  // 2026-10-22 实测，日志 out/test/t08-release-package.log）；2026-10-22
-  // 用户裁决总量两线各上调 2 MiB——警告线 15.5 MiB、失败线 16.0 MiB，
-  // 实测 15.35 MiB 落两线之间（仅警告）；单文件 3/4 MiB 与图标线不动。
-  const targetBytes = 15720 * 1024
+  // v1.4.0 发布轮实测基线：解压总量 15,799 KB（417 文件，2026-10-23
+  // 实测，日志 out/test/release-check-1.4.0.log）；2026-10-23 用户裁决
+  // 总量两线各上调 1 MiB——警告线 16.5 MiB、失败线 17.0 MiB（前值
+  // 15.5/16.0 为 2026-10-22 PDF 导出批次裁决所设），实测 15.43 MiB
+  // 落两线之间；单文件 3/4 MiB 与图标线不动。
+  const targetBytes = 15799 * 1024
   let remaining = targetBytes - entries.reduce((total, entry) => total + entry.size, 0)
   for (let i = 0; remaining > 0; i++) {
     const size = Math.min(remaining, 2 * 1024 * 1024)
@@ -279,10 +280,10 @@ test('包体预算：PDF 导出批次后实测 15,720 KB 落两线之间，总�
   }
   const result = inspectVsixEntries(entries)
   assert.equal(result.ok, true)
-  // 15.35 MiB 已超警告线 15.5 MiB 以下但接近——本用例只钉「未失败」与
-  // 阈值常量；警告线行为由下方双阈值用例单独覆盖
-  assert.equal(SIZE_LIMITS.totalWarnBytes, 15.5 * 1024 * 1024)
-  assert.equal(SIZE_LIMITS.totalMaxBytes, 16.0 * 1024 * 1024)
+  // 15.43 MiB 在警告线 16.5 MiB 以下——本用例只钉「未失败」与阈值
+  // 常量；警告线行为由下方双阈值用例单独覆盖
+  assert.equal(SIZE_LIMITS.totalWarnBytes, 16.5 * 1024 * 1024)
+  assert.equal(SIZE_LIMITS.totalMaxBytes, 17.0 * 1024 * 1024)
   assert.equal(SIZE_LIMITS.fileMaxBytes, 4 * 1024 * 1024)
 })
 
