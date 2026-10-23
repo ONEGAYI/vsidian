@@ -163,7 +163,7 @@ try {
     await page.waitForFunction(() => {
       const g = document.querySelector('.vsidian-image-resize-glow')
       return g != null && getComputedStyle(g).opacity === '0'
-    }, { timeout: 2000 })
+    }, undefined, { timeout: 2000 })
   } catch { glowGone = false }
   check('D9 拖动中光晕消失（互斥）', glowGone, '拖动中光带 opacity 未在 2s 内过渡到 0')
   check('D2 拖动中有尺寸读数', duringDrag.readout !== null && /\d+\s*×\s*\d+/.test(duringDrag.readout),
