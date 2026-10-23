@@ -8,7 +8,8 @@ import { planTableCellInput, tableCellInputView } from '../shared/tableCellInput
 import { tableCellBreaks } from '../shared/tableCells'
 import { bindLocale } from './localeDom'
 
-export const independentTableInput = Annotation.define<boolean>()
+/** 编码前的整格文本；空白行首笔规范化据此保留原始输入载荷。 */
+export const independentTableInput = Annotation.define<{ text: string }>()
 export const independentTableKey = new WeakSet<EditorState>()
 function inputSelection(raw: string, plan: ReturnType<typeof planTableCellInput>, offset: number) {
   const next = raw.slice(0, plan.from) + plan.insert + raw.slice(plan.to)
@@ -155,7 +156,7 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
         ? { from: cell.contentFrom, to: cell.contentTo, insert: planTableCellInput('', this.input.value, this.input.selectionStart).insert }
         : { from: cell.contentFrom + plan.from, to: cell.contentFrom + plan.to, insert: plan.insert },
         selection: inputSelection(raw, plan, cell.contentFrom),
-        annotations: independentTableInput.of(true), userEvent: this.composing ? 'input.type.compose' : 'input.type' })
+        annotations: independentTableInput.of({ text: this.input.value }), userEvent: this.composing ? 'input.type.compose' : 'input.type' })
       this.forwarding = false
       if (!this.composing) this.refresh()
       this.measure()
@@ -269,10 +270,11 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
         const raw = view.state.sliceDoc(cell.contentFrom, cell.contentTo), projection = tableCellInputView(raw)
         const from = projectedPosition(projection.positions, range.from - cell.contentFrom)
         const to = projectedPosition(projection.positions, range.to - cell.contentFrom)
-        const plan = planTableCellInput(raw, projection.text.slice(0, from) + event.data + projection.text.slice(to), from + event.data.length)
+        const text = projection.text.slice(0, from) + event.data + projection.text.slice(to)
+        const plan = planTableCellInput(raw, text, from + event.data.length)
         view.dispatch({ changes: { from: cell.contentFrom + plan.from, to: cell.contentFrom + plan.to, insert: plan.insert },
           selection: inputSelection(raw, plan, cell.contentFrom),
-          annotations: independentTableInput.of(true), userEvent: 'input.type' })
+          annotations: independentTableInput.of({ text }), userEvent: 'input.type' })
         return true
       },
     }),

@@ -1001,8 +1001,9 @@ const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
   })
   if (multiple || !change) return tr
   const { from, to, text } = change
+  const independent = tr.annotation(independentTableInput)
   // 空 textarea 锚在格首；旧规范化规划器使用去除格式空白后的内容落点。
-  const cell = tr.annotation(independentTableInput) ? editableGridCellAt(tr.startState, from) : null
+  const cell = independent ? editableGridCellAt(tr.startState, from) : null
   const at = from === to && cell && cell.contentFrom === cell.contentTo ? cell.contentFrom : from
   const plan = blankRowInputPlan(tr.startState, at, from === to ? at : to, text)
   if (!plan) return tr
@@ -1019,8 +1020,8 @@ const normalizeBlankRowInput = EditorState.transactionFilter.of((tr) => {
     selection: { anchor: plan.selection },
     annotations: [
       ...(event ? [Transaction.userEvent.of(event)] : []),
-      ...(tr.annotation(independentTableInput) ? [independentTableInput.of(true)] : []),
-      blankRowRawInput.of({ inputText: tr.annotation(cellInputEscaped) ?? text, insertAt: plan.insertAt }),
+      ...(independent ? [independentTableInput.of(independent)] : []),
+      blankRowRawInput.of({ inputText: independent?.text ?? tr.annotation(cellInputEscaped) ?? text, insertAt: plan.insertAt }),
     ],
     effects: tr.effects,
   }

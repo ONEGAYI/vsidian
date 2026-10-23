@@ -175,7 +175,7 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     const at = independent ? 22 : 23
     view.dispatch({ selection: { anchor: at } })
     view.dispatch({ changes: { from: at, insert: '(' }, selection: { anchor: at + 1 },
-      annotations: independent ? independentTableInput.of(true) : [], userEvent: 'input.type' })
+      annotations: independent ? independentTableInput.of({ text: '(' }) : [], userEvent: 'input.type' })
     await settleMicrotasks()
     // 原始输入契约（#600）：inputText 为原始单字符、纯插入 replaced 为
     // null——不再是规范化整行载荷（红形态：inputText='| | | ()|'、
@@ -197,7 +197,7 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
     const at = independent ? 22 : 23
     view.dispatch({ selection: { anchor: at } })
     view.dispatch({ changes: { from: at, insert: '(' }, selection: { anchor: at + 1 },
-      annotations: independent ? independentTableInput.of(true) : [], userEvent: 'input.type' })
+      annotations: independent ? independentTableInput.of({ text: '(' }) : [], userEvent: 'input.type' })
     await vi.advanceTimersByTimeAsync(20)
     expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | ()|\n')
     const reqs = editRequests(sent)
@@ -286,6 +286,26 @@ describe('#597 键入路径：原始输入 → 链驱动 → 内置兜底', () =
       { instanceId: 'main', userEvent: 'input.type', inputText: '|', replaced: null },
     ])
     expect(view.state.doc.toString()).toBe('a|b|c\n---|---|---\n| | | \\||\n')
+  })
+
+  it.each([
+    ['|', String.raw`\|`],
+    ['x|y', String.raw`x\|y`],
+    [String.raw`x\|y`, String.raw`x\\\|y`],
+    ['<br>', '<br>'],
+    ['\n', '<br>'],
+  ])('独立输入规范化后仍以原文 %s 驱动，源码为 %s', async (input, encoded) => {
+    const text = 'a|b|c\n---|---|---\n | | \n'
+    const { drives, view } = setup(text)
+    view.dispatch({ selection: { anchor: 23 } })
+    view.contentDOM.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertText', data: input, bubbles: true, cancelable: true,
+    }))
+    await settleMicrotasks()
+    expect(drives).toEqual([
+      { instanceId: 'main', userEvent: 'input.type', inputText: input, replaced: null },
+    ])
+    expect(view.state.doc.toString()).toBe(`a|b|c\n---|---|---\n| | | ${encoded}|\n`)
   })
 
   it('表格空白行首笔：异步组件后至覆盖内置兜底产物（内置先落地、修饰后至覆盖）', async () => {

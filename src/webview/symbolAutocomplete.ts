@@ -279,12 +279,13 @@ const autocloseInputFilter = EditorState.transactionFilter.of((tr) => {
   // 原样重建，userEvent 经 keepEvent 保留）+ symbolRawInput 注解：出站
   // 强制暂缓，兜底触碰暂缓并入同段，flush 单笔出站 = 一条宿主撤销记录。
   // 兜底材料经 effect 流动（filter 无 view 句柄，无法写 per-view 暂存）
+  const independent = tr.annotation(independentTableInput)
   return {
     changes: tr.changes,
     selection: tr.selection,
     effects: pendingTypedAutoclose.of({ pos, open: entry.open, close: entry.close, docLength: tr.newDoc.length, editEpoch: state.field(addonEditEpoch, false) ?? 0 }),
     annotations: [...(keepEvent ? [keepEvent] : []), symbolRawInput.of(true),
-      ...(tr.annotation(independentTableInput) ? [independentTableInput.of(true)] : [])],
+      ...(independent ? [independentTableInput.of(independent)] : [])],
     scrollIntoView: tr.scrollIntoView,
   }
 })
