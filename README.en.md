@@ -28,8 +28,9 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Rich / plain text paste | Ctrl+V converts supported HTML formatting to Markdown, asking first and undoing text and formatting separately by default; Ctrl+Shift+V keeps original text and Markdown markers; see [paste details](docs/features.md#富文本粘贴与撤销) (Chinese) |
 | Multi-cursor editing | Alt+click and Ctrl+Alt+Up/Down add cursors; type and format across selections in parallel, Esc collapses back to one cursor (toggle in settings) |
 | Select next occurrence | Ctrl+D adds each next match as a selection; Ctrl+Shift+L selects all occurrences |
-| Chinese word-wise motion | Ctrl+arrows step through Chinese text word by word; optional jieba engine (downloaded on demand) falls back to the built-in segmenter |
+| Chinese word-wise motion | Ctrl+arrows step through Chinese text word by word; optional jieba engine (downloaded on demand, offline install from a local path supported) falls back to the built-in segmenter |
 | Find & replace | Case, whole-word, and regex toggles; find in selection; Ctrl+H expands the replace bar; reading mode highlights matches per character |
+| Go to line | Ctrl+G jumps to a source line number in the current note (live preview and reading mode; folded sections expand first) |
 | Keybindings | Every action rebinds in one place (chords supported) with conflict detection, clear, and reset to defaults |
 
 ### Structured content
@@ -51,6 +52,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
 | Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable, and the link format can be a Markdown link (default) or a `![[…]]` wikilink embed (path keeps spaces verbatim) |
 | Image wikilink embeds | `![[image.png]]` embeds images that behave identically to plain Markdown image links — loading, failure hints, auto refresh, and the popup viewer are the same; hovering a wikilink that points to an image shows the image itself in the popup |
+| Image size suffixes | `![[img.png|width]]`, `|widthxheight`, `|N%`, and `![alt|width](url)` set the display size across every rendering surface and PDF export; drag the corner handle in live preview to resize |
 | Image popup | Hover an image for its button group; the full-screen popup zooms, pans, refreshes, and exports the original; clicking the image no longer jumps to source |
 | Embedded refresh | Images replaced or deleted on disk reload automatically or show a not-found state; the toolbar button refreshes images and diagrams on demand; shortcut bindable (unbound by default) |
 | External link previews | Hover an http(s) link to show a card with its title, summary, and domain (off by default; restricted fetch that never sends note content or credentials); the "Live page" shape renders the page itself in a sandboxed view, with a one-click fallback to the card |
@@ -75,6 +77,12 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Diagrams & math | Mermaid diagrams and KaTeX math render in both views; diagrams zoom in a full-screen popup and export as SVG/PNG. Diagram themes are chosen on the Appearance → Themes page—install an add-on that provides themes (such as Vsidian Codex Bridge) to pick Codex and more |
 
 See the [fenced-language list](docs/specs/code-block-card.md#语法高亮) for supported languages and aliases, including Tcl, VHDL, project configuration languages, C#, Kotlin, Swift, Dart, SPICE, Makefile, PHP, GraphQL, and distinct PostgreSQL/MySQL/SQLite and JSONC/JSON5 dialects. Main content and Markdown hover/embed views share the highlighting engine.
+
+### Export
+
+| Feature | Description |
+| --- | --- |
+| PDF export | Four entry points — current document, selection, batch, and merged — from the command palette and toolbar; the export window shows a real PDF preview at print size (zoomable, manual refresh) with paper, margins, scale, header/footer, page numbers, and heading bookmarks; body text renders identically to reading view, with tables, math, diagrams, and embeds included; works in Remote SSH sessions too (PDFs generate and save on your local machine). See [the PDF export guide](docs/features.md#pdf-导出) (Chinese) |
 
 ### Outline
 
