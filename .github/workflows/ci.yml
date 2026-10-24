@@ -87,7 +87,10 @@ jobs:
             RANGE=""
           fi
           if [ -n "$RANGE" ]; then
-            FILES=$(git -c core.quotepath=off diff --name-only "$RANGE")
+            # --no-renames：rename 检测下 --name-only 只显目标路径，
+            # 源码改名成 .md 会被误判纯文档而跳过全量（R2 vsidianPR647-002）；
+            # 关闭重命名后改名 = 旧路径删除 + 新路径新增，两侧路径都进判定
+            FILES=$(git -c core.quotepath=off diff --no-renames --name-only "$RANGE")
             if [ -n "$FILES" ]; then
               # 逐行判定用纯内建 case 通配，不走 grep：shell: bash 在
               # -e -o pipefail 下「grep -v 无匹配」退出码 1 会经赋值语句
