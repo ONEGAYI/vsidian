@@ -225,6 +225,10 @@ worktree `wt-wikilink-same-doc`，分支 `fix/wikilink-same-doc-anchor`（基于
 
 验证（TDD 先红后绿，日志均落 `out/test/`）：定向单测 15 例先红（`unit-wikilink-fix.log`）、修后定向全绿并全量 vitest 349 文件 7995 例 + 启动器契约（`unit-wikilink-fix-final.log`）；compile 全链零错误（`compile-wikilink-fix-2.log`）；浏览器 wikilinkSuggest 定向（`browser-wikilink-suggest.log`）与全量 96 套件 274.77s（`browser-full-wikilink-fix.log`）；契约基线复验 + 八项检查零失败（`style-baseline-wikilink-fix.log`／`style-contract-wikilink-fix.log`）；真宿主四分片 413 过／5 败（`integration-wikilink-fix.log`）。5 败全部定性、未解释失败为零：①T15 输入/界面/渲染样例三例（#364，等待页面装载超时）——单宿主定向复跑全过（`integration-retry-5cases.log`），且基线 c71caaab 自身 CI（run 38534528985，不含本轮任何变更）同用例同模式失败在案；②T07 调序（#356）——敏感名单在案（近 30 个 CI run 6 败约 20%、本地单跑稳定通过），本轮单宿主复跑通过；③#69 大纲剪贴板——单宿主独立桌面复跑同败，失败模式与 T18 批次在案定性（独立桌面无前台剪贴板服务的环境性失效）一字不差，且本变更不触及剪贴板/大纲任何代码路径。双链联想全部 16 例联想用例及跳转/显示相关用例全过。**全部自动化通过不等于用户验收**；真机 IME/物理键盘与观感项见 A75。
 
+## CI 纯文本文档豁免机制（2026-10-24）
+
+PR #647（合并提交 570db7a1）：变更集仅含纯文本文档（`.md`/`.txt`）时 CI 自动跳过全部检查 job——`changes` 探测 job 判定（纯内建 while/case 逐行判定、`--no-renames` 防源码改名绕过、fail-open 异常一律照常全量），豁免时检查结论为 skipped、满足远端必需检查；扩展名集合在 ci.yml 的 `changes` job 内维护。机制经三轮审查收口（R1 修探测脚本 `-e -o pipefail` 下 grep 无匹配中止、R2 修重命名绕过面并同步 `integrationCaseGroups` 契约断言、R3 确认无新增缺陷）与 8 场景探测脚本驱动验证（含源码改名 `.md` 反例）；PR CI 全绿为 attempt 3（#43 表格用例前两轮 runner 环境超时，本地同代码 PASS 1761ms 与 main CI 1561ms 旁证归因为环境抖动）。**豁免路径的端到端验证即本节所在提交**：该提交仅改本 `.md` 文件，直推 main 后 CI run 应只含 `changes` 一个 job、其余检查 skipped；若 run 照常全量即豁免未生效的失败信号。
+
 ## 通用准备
 
 - 安装 VSIX（`vsidian-0.1.0.vsix`）到 VSCode 1.86+：命令面板 →「Extensions: Install from VSIX…」。
