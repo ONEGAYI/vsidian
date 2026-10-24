@@ -332,7 +332,7 @@ it('CI 分开运行四个强制分片和第五组，敏感失败不被汇总或�
   expect(jobs.integration_shard.strategy.matrix.shard).toEqual([1, 2, 3, 4])
   const coreRun = jobs.integration_shard.steps.find((step: { run?: string }) => step.run === 'xvfb-run -a npm run test:integration')
   expect(coreRun.env.VSIDIAN_TEST_GROUP).toBe('core')
-  expect(jobs.integration.needs).toBe('integration_shard')
+  expect(jobs.integration.needs).toEqual(['changes', 'integration_shard'])
   const sensitive = jobs['integration-sensitive']
   expect(sensitive).toBeDefined()
   const sensitiveRun = sensitive.steps.find((step: { run?: string }) => step.run === 'xvfb-run -a npm run test:integration')
