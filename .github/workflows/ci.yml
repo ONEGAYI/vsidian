@@ -89,8 +89,19 @@ jobs:
           if [ -n "$RANGE" ]; then
             FILES=$(git -c core.quotepath=off diff --name-only "$RANGE")
             if [ -n "$FILES" ]; then
-              NONDOCS=$(printf '%s\n' "$FILES" | grep -vE '\.(md|txt)$' | head -n 1)
-              if [ -z "$NONDOCS" ]; then
+              # 逐行判定用纯内建 case 通配，不走 grep：shell: bash 在
+              # -e -o pipefail 下「grep -v 无匹配」退出码 1 会经赋值语句
+              # 中止探测，docs-only=true 永远写不出（R1 vsidianPR647-001）
+              non_docs_found=false
+              while IFS= read -r line; do
+                case "$line" in
+                  *.md|*.txt) ;;
+                  *) non_docs_found=true; break ;;
+                esac
+              done <<EOF
+          $FILES
+          EOF
+              if [ "$non_docs_found" = false ]; then
                 verdict=true
               fi
             fi
