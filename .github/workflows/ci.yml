@@ -40,6 +40,10 @@
 #      约定）在 PR Summary 可见；
 #   3. 全量契约检查（基线比较 + 指南一致性 + 期限与发布记录三源交叉）。
 # 报告无论成败均上传（if: always()，沿用 browser job 报告上传先例）。
+# 纯文本文档豁免（2026-10-24 用户授权）：changes 探测 job 判定变更集是否
+# 仅含纯文本文档（**/*.md、**/*.txt，扩展名集合在该 job 内维护）——是则
+# 全部检查 job 跳过（skipped 满足必需检查，不挂起保护规则）；探测自身
+# fail-open，任何异常一律照常跑全量，不产生「探测失败→检查全跳」的绕过面。
 name: CI
 
 on:
@@ -53,9 +57,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 纯文本文档豁免探测：仅当「变更集非空且全部文件落在豁免扩展名内」才
+  # 输出 docs-only=true。豁免扩展名：**/*.md、**/*.txt。fail-open：手动
+  # 触发、基点不可得（before 全零的新建分支首推）、git diff 异常、空 diff
+  # 一律 false（照常全量）——豁免必须确证，不得推断。下游各 job 的 if 用
+  # always() && (探测非 success || 未豁免)：探测 job 自身失败时检查照常
+  # 执行，宁可多跑一轮也不静默放行。
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs-only: ${{ steps.probe.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # 需要基点对象：PR 的 origin/<base> 与 push 的 event.before
+          fetch-depth: 0
+      - name: 探测变更集是否仅含纯文本文档
+        id: probe
+        shell: bash
+        run: |
+          verdict=false
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="origin/${{ github.event.pull_request.base.ref }}...HEAD"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="${{ github.event.before }}..HEAD"
+          else
+            RANGE=""
+          fi
+          if [ -n "$RANGE" ]; then
+            FILES=$(git -c core.quotepath=off diff --name-only "$RANGE")
+            if [ -n "$FILES" ]; then
+              NONDOCS=$(printf '%s\n' "$FILES" | grep -vE '\.(md|txt)$' | head -n 1)
+              if [ -z "$NONDOCS" ]; then
+                verdict=true
+              fi
+            fi
+          fi
+          echo "docs-only=$verdict" >> "$GITHUB_OUTPUT"
+
   unit:
     name: unit
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -78,6 +124,8 @@ jobs:
   style-contract:
     name: style-contract
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -131,6 +179,8 @@ jobs:
   addon-api-contract:
     name: addon-api-contract
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -185,6 +235,8 @@ jobs:
   integration_shard:
     name: integration shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -220,6 +272,8 @@ jobs:
   integration-sensitive:
     name: integration-sensitive
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -249,8 +303,10 @@ jobs:
   integration:
     name: integration
     runs-on: ubuntu-latest
-    needs: integration_shard
-    if: ${{ always() }}
+    needs: [changes, integration_shard]
+    # 豁免时本 job 与分片一并跳过（skipped 满足必需检查）；其余情况维持
+    # 既有语义：无论分片成败都执行并显式核验，保留必需检查的失败可见性
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     steps:
       - name: 核验全部集成测试分片通过
         env:
@@ -260,6 +316,8 @@ jobs:
   browser:
     name: browser
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -316,6 +374,8 @@ jobs:
   browser-sensitive:
     name: browser-sensitive
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -363,6 +423,8 @@ jobs:
   text-appearance:
     name: text-appearance
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs-only != 'true') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
