@@ -488,6 +488,14 @@ export class WikilinkSuggestController {
       return
     }
     const { view, field, head } = guard
+    // PR648-001：`|` 的接受意图绑定发起时的锚点末位置——回包前纯光标
+    // 移动到锚点中部（会话保留、文档未变）说明用户已转入手动编辑，位
+    // 置语义下不应引用新 ID：放弃本地插入、宿主守卫撤回已补写标记、不
+    // 发 linked。Enter/Tab 的确认语义不受位置限制，回包仍按原路径消费
+    if (pending.key !== 'confirm' && head < field.anchorTo) {
+      this.cancelPendingBlockAccept('mid-field')
+      return
+    }
     const blockItem: WikilinkBlockPlanItem = { blockId, alias: message.alias ?? '' }
     const plan = planWikilinkFieldEdit(field, pending.key, head, null, null, blockItem)
     if (!plan) {
@@ -923,7 +931,7 @@ export class WikilinkSuggestController {
   }
 
   /** 在途接受放弃（#380 T05）：宿主按撤回守卫尽力移除本次新增标记 */
-  private cancelPendingBlockAccept(reason: 'session-rebuilt' | 'closed' | 'stale-result'): void {
+  private cancelPendingBlockAccept(reason: 'session-rebuilt' | 'closed' | 'stale-result' | 'mid-field'): void {
     const pending = this.pendingBlockAccept
     if (pending === null) {
       return
@@ -1171,10 +1179,12 @@ export class WikilinkSuggestController {
     if (key === '^' && field.stage === 'block') {
       return false
     }
-    // 评审 F7（阶段转换入口）：file 阶段失效窗内不锁定旧候选进锚点/
-    // 显示文字（同 confirm 口径——吞键并立即重查；标题/块阶段不拦，
-    // 过期接受由宿主侧目标版本守卫淘汰）
-    if (this.resultStale && field.stage === 'file') {
+    // 评审 F7（阶段转换入口）+ PR648-002：失效窗吞键仅限会消费候选的
+    // 路径——文件字段末的 #／^／|（消费高亮候选）。中部三键是手动编辑
+    // （不消费候选、不依赖枚举新鲜度），放行原位插入，不为过期候选的
+    // 提交风险买单；Enter/Tab 的过期保护由宿主 targetVersion 守卫承担，
+    // 不经此分支。标题/块阶段不拦（过期接受由宿主侧目标版本守卫淘汰）
+    if (this.resultStale && field.stage === 'file' && head >= field.fileTo) {
       this.requeryNow()
       return true
     }

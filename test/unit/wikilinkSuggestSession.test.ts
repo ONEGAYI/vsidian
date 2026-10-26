@@ -503,6 +503,55 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
   })
 })
 
+describe('invalidate 失效窗 × 位置语义（PR648-002）', () => {
+  /** 失效窗内中部按键的手动编辑放行夹具：开高亮会话→失效→移中部 */
+  const setupStaleMid = (
+    doc: string,
+  ): ReturnType<typeof setup> & { pressMid: (key: string) => void } => {
+    const ctx = setup(doc)
+    const { controller, sent, view } = ctx
+    locate(controller, 4)
+    typeAt(view, 4, 'x') // [[Aax]]：查询 'Aax'，高亮回灌
+    respond(controller, sent, [FANGAN])
+    controller.handleHostMessage({ kind: 'wikilink.invalidate' }) // 失效窗开（去抖重查未回包）
+    press(view, 'ArrowLeft') // 中部（a 与 x 之间）
+    return { ...ctx, pressMid: (key: string) => press(view, key) }
+  }
+
+  it('失效窗内中部按 |：手动编辑放行原位插入，不再吞键', () => {
+    const { controller, view, pressMid } = setupStaleMid('[[Aa]]')
+    try {
+      pressMid('|')
+      expect(view.state.doc.toString()).toBe('[[Aa|x]]')
+      expect(view.state.selection.main.head).toBe(5)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('失效窗内中部按 #：放行原位插入并转标题阶段', () => {
+    const { controller, view, sent, pressMid } = setupStaleMid('[[Aa]]')
+    try {
+      pressMid('#')
+      expect(view.state.doc.toString()).toBe('[[Aa#x]]')
+      expect(lastHeadingQuery(sent)?.target).toBe('Aa')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('失效窗内中部按 ^：放行原位插入并转块阶段', () => {
+    const { controller, view, sent, pressMid } = setupStaleMid('[[Aa]]')
+    try {
+      pressMid('^')
+      expect(view.state.doc.toString()).toBe('[[Aa#^x]]')
+      expect(lastBlockQuery(sent)?.target).toBe('Aa')
+    } finally {
+      controller.dispose()
+    }
+  })
+})
+
 describe('占位状态守卫：占位不可确认、光标移动与 Esc', () => {
   it('标题占位下 Tab 落穿围栏越界零写回；Enter 落穿默认换行破坏围栏后关闭', () => {
     const { controller, view } = setup('[[方案.md#]]')
@@ -1367,6 +1416,60 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
       // 中部是手动编辑：不消费高亮——无 ID 补写不出站（宿主补写回包后
       // 本地不消费会在目标文档残留无引用 ^id）
       expect(accepts(sent)).toHaveLength(0)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('| 接受在途回包前光标移到锚点中部：放弃引用新 ID、cancel 撤回、不发 linked（PR648-001）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17) // 锚点末
+      typeAt(view, 17, 'x') // 查询 'abx'
+      respondBlock(controller, sent, [BLOCK_NO_ID]) // 无 ID 块高亮在场
+      press(view, '|') // 锚点末发起接受：出站宿主补写
+      expect(accepts(sent)).toHaveLength(1)
+      press(view, 'ArrowLeft') // 回包前纯移动到锚点中部（b 与 x 之间）
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      // 位置语义下回包时光标在中部＝用户转入手动编辑：不引用新 ID、
+      // 本地零编辑、宿主守卫撤回已补写标记、不发 linked
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abx]]')
+      expect(cancels(sent)).toHaveLength(1)
+      expect(linkeds(sent)).toHaveLength(0)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('Enter 接受在途回包前光标移到锚点中部：确认语义不受位置限制，仍引用新 ID（PR648-001 边界）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17)
+      typeAt(view, 17, 'x')
+      respondBlock(controller, sent, [BLOCK_NO_ID])
+      press(view, 'Enter') // Enter 确认发起：出站宿主补写
+      press(view, 'ArrowLeft') // 回包前移到锚点中部
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      // Enter/Tab 确认不受位置限制（规格位置语义）：回包忠实发起意图
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abc123|方案]]')
+      expect(linkeds(sent)).toHaveLength(1)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('| 接受在途回包时光标仍在锚点末：正常引用新 ID（PR648-001 主路径钉住）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17)
+      typeAt(view, 17, 'x')
+      respondBlock(controller, sent, [BLOCK_NO_ID])
+      press(view, '|')
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abc123|]]')
+      expect(linkeds(sent)).toHaveLength(1)
+      expect(cancels(sent)).toHaveLength(0)
     } finally {
       controller.dispose()
     }
