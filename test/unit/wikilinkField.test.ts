@@ -429,6 +429,22 @@ describe('planWikilinkFieldEdit：| 进显示文字', () => {
     const plan = planWikilinkFieldEdit(fieldOf(line, 6), '|', 6, null)
     expect(applyPlan(line, plan!)).toBe('[[A#^i|¦d]]')
   })
+
+  it('块阶段锚点中部且有高亮：不消费 blockId，| 原位插入', () => {
+    const line = '[[A#^id]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 6), '|', 6, null, null, {
+      blockId: 'keep01', alias: '方案',
+    })
+    expect(applyPlan(line, plan!)).toBe('[[A#^i|¦d]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('pipeEscape 格内中部按 |：转义竖线写于光标处，右侧文字保留', () => {
+    // [[A¦a]]：col=3 在 A 与 a 之间（格内 pipeWidth=2，写入 \| 不破网格）
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(escFieldOf(line, 3), '|', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[A\\|¦a]]')
+  })
 })
 
 // ---- #379 T04：标题阶段确认与竖线（标题候选产物 {heading, alias}）----

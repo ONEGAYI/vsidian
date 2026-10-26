@@ -1353,6 +1353,25 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
     }
   })
 
+  it('块阶段锚点中部按 |：不消费高亮、不出站补写、原位插入（2026-10-26 位置语义）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17) // 锚点末（ab 后）
+      typeAt(view, 17, 'x') // 查询 'abx'
+      respondBlock(controller, sent, [BLOCK_NO_ID]) // 无 ID 块高亮在场
+      press(view, 'ArrowLeft') // 纯移动回锚点中部（b 与 x 之间）
+      press(view, '|')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^ab|x]]')
+      expect(view.state.selection.main.head).toBe(18)
+      expect(popupState().open).toBe(false)
+      // 中部是手动编辑：不消费高亮——无 ID 补写不出站（宿主补写回包后
+      // 本地不消费会在目标文档残留无引用 ^id）
+      expect(accepts(sent)).toHaveLength(0)
+    } finally {
+      controller.dispose()
+    }
+  })
+
   it('块查询失败真实状态：目标不可定位显示状态行（不伪装空结果）', () => {
     const { controller, sent, view } = setup('[[../资料/方案.md#^]]')
     try {

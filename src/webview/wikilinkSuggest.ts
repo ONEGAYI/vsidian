@@ -1188,9 +1188,12 @@ export class WikilinkSuggestController {
       : null
     // #380 T05：| 在块阶段有真实高亮走确认路径（confirmBlock 内分已有 ID
     // 本地确认/无 ID 宿主补写两路）；无高亮保持 T03 语义——保留锚点、
-    // 插 | 进显示文字（关闭候选）
+    // 插 | 进显示文字（关闭候选）。2026-10-26 位置语义：光标在锚点
+    // 中部时是手动编辑——高亮不消费，直接走 fallback 原位插 |（无 ID
+    // 补写经宿主落盘，回包后本地 plan 不消费 blockId，会在目标文档
+    // 残留无引用 ^id）；Enter/Tab 确认不受位置限制，仍进 confirmBlock
     if (key === '|' && field.stage === 'block') {
-      if (this.blockActiveItem() !== null) {
+      if (this.blockActiveItem() !== null && head >= field.anchorTo) {
         return this.confirmBlock(view, session, field, head, '|')
       }
       const fallback = planWikilinkFieldEdit(field, '|', head, null, null, null)
