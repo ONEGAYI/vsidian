@@ -456,13 +456,47 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
   it('块占位阶段按 |：保留锚点、| 落在锚点末并关闭', () => {
     const { controller, view } = setup('[[方案.md#^id]]')
     try {
-      locate(controller, 10)
-      typeAt(view, 10, 'x')
-      deleteAt(view, 10, 11)
+      locate(controller, 11) // 锚点末（d 后）——中部行为另有中部用例覆盖
+      typeAt(view, 11, 'x')
+      deleteAt(view, 11, 12)
       press(view, '|')
       expect(view.state.doc.toString()).toBe('[[方案.md#^id|]]')
       expect(view.state.selection.main.head).toBe('[[方案.md#^id|'.length)
       expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('光标在字段中部按 |：原位插入、不消费高亮、关闭候选（2026-10-26 位置语义）', () => {
+    const { controller, sent, view } = setup('[[Aa]]')
+    try {
+      locate(controller, 4)
+      typeAt(view, 4, 'x') // [[Aax]]：字段末输入开会话
+      respond(controller, sent, [FANGAN]) // 高亮在场
+      press(view, 'ArrowLeft') // 纯移动回中部（a 与 x 之间），会话与高亮保留
+      press(view, '|')
+      expect(view.state.doc.toString()).toBe('[[Aa|x]]')
+      expect(view.state.selection.main.head).toBe(5)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('光标在字段中部按 #：原位插入并转标题阶段（右侧文字保留）', () => {
+    const { controller, sent, view } = setup('[[Aa]]')
+    try {
+      locate(controller, 3) // A 与 a 之间
+      typeAt(view, 3, 'x')
+      respond(controller, sent, [])
+      deleteAt(view, 3, 4) // 退回 [[Aa]] col=3：会话在场、空查询
+      press(view, '#')
+      expect(view.state.doc.toString()).toBe('[[A#a]]')
+      expect(view.state.selection.main.head).toBe(4)
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      expect(lastHeadingQuery(sent)?.target).toBe('A')
+      expect(lastHeadingQuery(sent)?.query).toBe('')
     } finally {
       controller.dispose()
     }
@@ -858,6 +892,7 @@ describe('标题阶段会话：候选、键盘与确认（#379 T04）', () => {
       locate(controller, 14) // 锚点起点（x 前）
       typeAt(view, 14, '预')
       respondHeading(controller, sent, [YUSUAN])
+      press(view, 'ArrowRight') // 光标移到锚点末（x 后）——末尾=确认语义
       press(view, '|')
       expect(view.state.doc.toString()).toBe('[[../资料/方案.md#预算|]]')
       expect(view.state.selection.main.head).toBe('[[../资料/方案.md#预算|'.length)

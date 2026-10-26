@@ -700,11 +700,37 @@ try {
     await page.evaluate((items) => window.respondHeadingQuery(items), [
       { id: 'C:\\vault\\资料\\方案.md#3', heading: '预算', level: 2, line: 3, duplicate: false, alias: '方案' },
     ])
+    await page.keyboard.press('ArrowRight') // 光标移到锚点末（x 后）——末尾=确认语义
     await page.keyboard.press('|')
     const after = await read(page)
     assert.equal(after.text, '[[../资料/方案.md#预算|]]', '接受标题后 | 进显示文字（留空）')
     assert.equal(after.head, '[[../资料/方案.md#预算|'.length, '光标在 | 后')
     assert.equal((await popup(page)).open, false, '关闭候选')
+  })
+
+  await scenario('光标在字段中部按 |：原位插入、不消费高亮、关闭候选（2026-10-26 位置语义）', { doc: '[[Aa]]', cursor: 4 }, async (page) => {
+    await page.keyboard.type('x') // [[Aax]]：字段末输入开会话
+    await page.evaluate((items) => window.respondQuery(items), [fangan()])
+    // 高亮在场；纯移动回中部（a 与 x 之间），会话与高亮保留
+    await page.keyboard.press('ArrowLeft')
+    await page.keyboard.press('|')
+    const after = await read(page)
+    assert.equal(after.text, '[[Aa|x]]', '原位插入、文件字段不被候选替换')
+    assert.equal(after.head, 5, '光标跟在 | 后')
+    assert.equal((await popup(page)).open, false, '进显示文字关闭候选')
+  })
+
+  await scenario('光标在字段中部按 #：原位插入并转标题阶段（右侧文字保留）', { doc: '[[Aa]]', cursor: 3 }, async (page) => {
+    await page.keyboard.type('x') // [[Axa]]：中部输入开会话
+    await page.evaluate(() => window.respondQuery([]))
+    await page.keyboard.press('Backspace') // 退回 [[Aa]] col=3：会话在场
+    await page.keyboard.press('#')
+    const after = await read(page)
+    assert.equal(after.text, '[[A#a]]', '# 原位插入、右侧 a 保留')
+    assert.equal(after.head, 4, '光标在 # 后')
+    const hq = await page.evaluate(() => window.lastHeadingQuery())
+    assert.ok(hq, '转阶段出站标题查询')
+    assert.equal(hq.target, 'A', '目标为 # 左侧文件字段')
   })
 
   await scenario('非 Markdown 目标状态行；无匹配标题空态', { doc: '[[配图.png#]]', cursor: 9 }, async (page) => {

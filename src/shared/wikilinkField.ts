@@ -273,11 +273,17 @@ export function planWikilinkFieldEdit(
   /** 文件字段替换的坐标平移（插入点/光标在 fileTo 之后时叠加） */
   const replaceDelta = (replace: boolean, insertPath: string): number =>
     replace ? insertPath.length - (fileTo - innerFrom) : 0
-  const replaceItem = item !== null && item.insertPath !== '' ? item : null
+  /** 光标是否在该阶段目标字段末尾。末尾=确认/转阶段语义（消费高亮、
+   *  分隔符落字段末）；中部=手动编辑（2026-10-26 用户拍板：#/^/| 原位
+   *  插入、不消费高亮、光标右侧文字保留）。confirm（Enter/Tab）不受
+   *  此限——中部确认仍替换整个字段（规格「文件段中间确认候选时」） */
+  const atFieldEnd = stage === 'file' ? col >= fileTo : col >= anchorTo
+  const replaceAllowed = key === 'confirm' || atFieldEnd
+  const replaceItem = replaceAllowed && item !== null && item.insertPath !== '' ? item : null
   /** 标题阶段真实候选（T04；heading 空串防御——宿主已保证非空） */
-  const replaceHeading = headingItem !== null && headingItem.heading !== '' ? headingItem : null
+  const replaceHeading = replaceAllowed && headingItem !== null && headingItem.heading !== '' ? headingItem : null
   /** 块阶段真实候选（T05；blockId 空串防御——宿主已保证非空） */
-  const replaceBlock = blockItem !== null && blockItem.blockId !== '' ? blockItem : null
+  const replaceBlock = replaceAllowed && blockItem !== null && blockItem.blockId !== '' ? blockItem : null
   /** 锚点字段替换的坐标平移（插入点/光标在 anchorTo 之后时叠加） */
   const headingDelta = replaceHeading !== null
     ? replaceHeading.heading.length - (anchorTo - anchorFrom)
@@ -359,8 +365,10 @@ export function planWikilinkFieldEdit(
       // 已有锚点标记：复用，光标跳到锚点起点
       return { changes, cursorTo: hashAt + 1 + delta, nextStage: 'heading' }
     }
-    changes.push({ from: fileTo, to: fileTo, insert: '#' })
-    return { changes, cursorTo: fileTo + 1 + delta, nextStage: 'heading' }
+    // 无锚点标记：末尾落字段末；中部落光标处（原位，2026-10-26）
+    const hashInsertAt = atFieldEnd ? fileTo : col
+    changes.push({ from: hashInsertAt, to: hashInsertAt, insert: '#' })
+    return { changes, cursorTo: hashInsertAt + 1 + delta, nextStage: 'heading' }
   }
 
   if (key === '^') {
@@ -388,13 +396,16 @@ export function planWikilinkFieldEdit(
       changes.push({ from: hashAt + 1, to: hashAt + 1, insert: '^' })
       return { changes, cursorTo: hashAt + 2 + delta, nextStage: 'block' }
     }
-    changes.push({ from: fileTo, to: fileTo, insert: '#^' })
-    return { changes, cursorTo: fileTo + 2 + delta, nextStage: 'block' }
+    // 无锚点标记：末尾一次形成 #^ 落字段末；中部落光标处（原位）
+    const caretInsertAt = atFieldEnd ? fileTo : col
+    changes.push({ from: caretInsertAt, to: caretInsertAt, insert: '#^' })
+    return { changes, cursorTo: caretInsertAt + 2 + delta, nextStage: 'block' }
   }
 
   // key === '|'：竖线在文件／标题／块阶段都只接受**该阶段**的真实高亮——
   // 文件阶段=文件候选（T01）、标题阶段=标题候选（#379 T04）、块阶段=块
-  // 候选（#380 T05）
+  // 候选（#380 T05）；高亮消费仅限光标在字段末（atFieldEnd）——中部键入
+  // 原位插入手动编辑、不吃候选（2026-10-26 位置语义）
   if (stage === 'block') {
     const blockChanges: WikilinkFieldEditPlan['changes'] = replaceBlock !== null
       ? [{ from: anchorFrom, to: anchorTo, insert: replaceBlock.blockId }]
@@ -408,8 +419,8 @@ export function planWikilinkFieldEdit(
       // 过完整 `\|` 序列——pipeWidth=2）
       return { changes: blockChanges, cursorTo: pipeAt + pipeWidth + blockDelta, nextStage: null }
     }
-    blockChanges.push({ from: closeFrom, to: closeFrom, insert: pipeIns })
-    return { changes: blockChanges, cursorTo: closeFrom + pipeWidth + blockDelta, nextStage: null }
+    blockChanges.push({ from: atFieldEnd ? closeFrom : col, to: atFieldEnd ? closeFrom : col, insert: pipeIns })
+    return { changes: blockChanges, cursorTo: (atFieldEnd ? closeFrom : col) + pipeWidth + blockDelta, nextStage: null }
   }
   if (stage === 'heading') {
     const changes: WikilinkFieldEditPlan['changes'] = replaceHeading !== null
@@ -419,8 +430,8 @@ export function planWikilinkFieldEdit(
       // 已有分隔符：复用，光标跳到已有 | 后（已有别名保留）
       return { changes, cursorTo: pipeAt + pipeWidth + headingDelta, nextStage: null }
     }
-    changes.push({ from: closeFrom, to: closeFrom, insert: pipeIns })
-    return { changes, cursorTo: closeFrom + pipeWidth + headingDelta, nextStage: null }
+    changes.push({ from: atFieldEnd ? closeFrom : col, to: atFieldEnd ? closeFrom : col, insert: pipeIns })
+    return { changes, cursorTo: (atFieldEnd ? closeFrom : col) + pipeWidth + headingDelta, nextStage: null }
   }
   const pipeItem = stage === 'file' ? replaceItem : null
   const delta = replaceDelta(pipeItem !== null, pipeItem?.insertPath ?? '')
@@ -431,8 +442,11 @@ export function planWikilinkFieldEdit(
     // 已有分隔符：复用，零编辑，光标跳到已有 | 后（已有别名保留）
     return { changes, cursorTo: pipeAt + pipeWidth + delta, nextStage: null }
   }
-  changes.push({ from: targetEnd, to: targetEnd, insert: pipeIns })
-  return { changes, cursorTo: targetEnd + pipeWidth + delta, nextStage: null }
+  // 无分隔符：末尾落目标区末；中部落光标处（原位，2026-10-26——右侧
+  // 文字保留并自然成为显示文字/后续字段内容）
+  const pipeInsertAt = atFieldEnd ? targetEnd : col
+  changes.push({ from: pipeInsertAt, to: pipeInsertAt, insert: pipeIns })
+  return { changes, cursorTo: pipeInsertAt + pipeWidth + delta, nextStage: null }
 }
 
 //#endregion
