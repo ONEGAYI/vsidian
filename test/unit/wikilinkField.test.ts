@@ -246,11 +246,31 @@ describe('planWikilinkFieldEdit：# 转标题阶段', () => {
     expect(plan!.nextStage).toBe('heading')
   })
 
-  it('光标在目标中部且无高亮：保留完整目标，# 落在字段末（右侧文字不残留）', () => {
-    // [[A¦a]]：col=3 在 A 与 a 之间
+  it('光标在目标中部且无高亮：# 原位插入，光标右侧文字保留', () => {
+    // [[A¦a]]：col=3 在 A 与 a 之间（2026-10-26 位置语义：中部=手动编辑）
     const line = '[[Aa]]'
     const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, null)
-    expect(applyPlan(line, plan!)).toBe('[[Aa#¦]]')
+    expect(applyPlan(line, plan!)).toBe('[[A#¦a]]')
+    expect(plan!.nextStage).toBe('heading')
+  })
+
+  it('光标在目标中部且有高亮：不消费高亮，# 原位插入', () => {
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[A#¦a]]')
+    expect(plan!.nextStage).toBe('heading')
+  })
+
+  it('光标在中部且已有锚点标记：维持复用，光标跳到锚点起点', () => {
+    const line = '[[Aa#H]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[Aa#¦H]]')
+  })
+
+  it('光标在中部且已有 |：# 原位插入，显示文字保留', () => {
+    const line = '[[Aa|B]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '#', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#¦a|B]]')
   })
 
   it('已有锚点标记：不重复插 #，光标跳到锚点起点', () => {
@@ -300,6 +320,21 @@ describe('planWikilinkFieldEdit：^ 转块阶段', () => {
     expect(plan!.nextStage).toBe('block')
   })
 
+  it('文件阶段光标中部：#^ 原位插入，光标右侧文字保留', () => {
+    // [[A¦a]]：col=3 在 A 与 a 之间（2026-10-26 位置语义：中部=手动编辑）
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '^', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#^¦a]]')
+    expect(plan!.nextStage).toBe('block')
+  })
+
+  it('文件阶段光标中部且有高亮：不消费高亮，#^ 原位插入', () => {
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '^', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[A#^¦a]]')
+    expect(plan!.nextStage).toBe('block')
+  })
+
   it('标题阶段锚点中部：^ 插在光标处（用户显式输入，保留两侧锚点文字）', () => {
     const line = '[[A#H]]'
     const plan = planWikilinkFieldEdit(fieldOf(line, 4), '^', 4, null)
@@ -339,11 +374,19 @@ describe('planWikilinkFieldEdit：| 进显示文字', () => {
     expect(plan!.nextStage).toBeNull()
   })
 
-  it('无高亮：保留原输入（含光标右侧文字），| 落在目标区末', () => {
-    // [[A¦a]]：col=3 在 A 与 a 之间
+  it('无高亮：| 原位插入，光标右侧文字保留', () => {
+    // [[A¦a]]：col=3 在 A 与 a 之间（2026-10-26 位置语义：中部=手动编辑，
+    // 光标右侧文字自然成为显示文字）
     const line = '[[Aa]]'
     const plan = planWikilinkFieldEdit(fieldOf(line, 3), '|', 3, null)
-    expect(applyPlan(line, plan!)).toBe('[[Aa|¦]]')
+    expect(applyPlan(line, plan!)).toBe('[[A|¦a]]')
+  })
+
+  it('有高亮且光标在中部：不消费高亮，| 原位插入', () => {
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 3), '|', 3, FANGAN)
+    expect(applyPlan(line, plan!)).toBe('[[A|¦a]]')
+    expect(plan!.nextStage).toBeNull()
   })
 
   it('已有 |：不重复插入，光标跳到已有分隔符后（已有别名保留）', () => {
@@ -351,8 +394,12 @@ describe('planWikilinkFieldEdit：| 进显示文字', () => {
     const plan = planWikilinkFieldEdit(fieldOf(line, 4), '|', 4, null)
     expect(applyPlan(line, plan!)).toBe('[[Aa|¦B]]')
     expect(plan!.changes).toHaveLength(0)
-    const withItem = planWikilinkFieldEdit(fieldOf(line, 3), '|', 3, FANGAN)
-    expect(applyPlan(line, withItem!)).toBe('[[../资料/方案.md|¦B]]')
+    // 光标在字段末 + 高亮：确认候选并复用已有 |（末尾=确认语义）
+    const endWithItem = planWikilinkFieldEdit(fieldOf(line, 4), '|', 4, FANGAN)
+    expect(applyPlan(line, endWithItem!)).toBe('[[../资料/方案.md|¦B]]')
+    // 光标在中部 + 高亮：不吃高亮（2026-10-26 位置语义），零编辑复用跳转
+    const midWithItem = planWikilinkFieldEdit(fieldOf(line, 3), '|', 3, FANGAN)
+    expect(applyPlan(line, midWithItem!)).toBe('[[Aa|¦B]]')
   })
 
   it('标题阶段按 |：无高亮保留锚点，| 在锚点区末（或复用已有 |）', () => {
@@ -363,10 +410,40 @@ describe('planWikilinkFieldEdit：| 进显示文字', () => {
     expect(applyPlan('[[Aa#H|B]]', piped!)).toBe('[[Aa#H|¦B]]')
   })
 
+  it('标题阶段锚点中部按 |：原位插入，光标右侧锚点文字保留', () => {
+    // [[Aa#H¦I]]：col=6 在 H 与 I 之间
+    const line = '[[Aa#HI]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 6), '|', 6, null)
+    expect(applyPlan(line, plan!)).toBe('[[Aa#H|¦I]]')
+  })
+
   it('块阶段按 |：同标题口径', () => {
     const line = '[[A#^id]]'
     const plan = planWikilinkFieldEdit(fieldOf(line, 7), '|', 7, null)
     expect(applyPlan(line, plan!)).toBe('[[A#^id|¦]]')
+  })
+
+  it('块阶段锚点中部按 |：原位插入，光标右侧块文字保留', () => {
+    // [[A#^i¦d]]：col=6 在 i 与 d 之间
+    const line = '[[A#^id]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 6), '|', 6, null)
+    expect(applyPlan(line, plan!)).toBe('[[A#^i|¦d]]')
+  })
+
+  it('块阶段锚点中部且有高亮：不消费 blockId，| 原位插入', () => {
+    const line = '[[A#^id]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 6), '|', 6, null, null, {
+      blockId: 'keep01', alias: '方案',
+    })
+    expect(applyPlan(line, plan!)).toBe('[[A#^i|¦d]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('pipeEscape 格内中部按 |：转义竖线写于光标处，右侧文字保留', () => {
+    // [[A¦a]]：col=3 在 A 与 a 之间（格内 pipeWidth=2，写入 \| 不破网格）
+    const line = '[[Aa]]'
+    const plan = planWikilinkFieldEdit(escFieldOf(line, 3), '|', 3, null)
+    expect(applyPlan(line, plan!)).toBe('[[A\\|¦a]]')
   })
 })
 
@@ -407,10 +484,19 @@ describe('planWikilinkFieldEdit：标题阶段 Enter/Tab 确认（#379 T04）', 
 })
 
 describe('planWikilinkFieldEdit：标题阶段 | 进显示文字（#379 T04）', () => {
-  it('有真实高亮：接受标题并替换锚点字段（不留残留），| 落在锚点末、显示文字留空', () => {
+  it('有真实高亮且光标在锚点末：接受标题并替换锚点字段（不留残留），| 落在锚点末、显示文字留空', () => {
+    // col=10：锚点字段（预x）末、闭围栏前
+    const line = '[[方案.md#预x]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 10), '|', 10, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算|¦]]')
+    expect(plan!.nextStage).toBeNull()
+  })
+
+  it('有真实高亮但光标在锚点中部：不消费高亮，| 原位插入（2026-10-26 位置语义）', () => {
+    // col=9：'预' 与 'x' 之间
     const line = '[[方案.md#预x]]'
     const plan = planWikilinkFieldEdit(fieldOf(line, 9), '|', 9, null, YUSUAN)
-    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算|¦]]')
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#预|¦x]]')
     expect(plan!.nextStage).toBeNull()
   })
 
@@ -421,10 +507,19 @@ describe('planWikilinkFieldEdit：标题阶段 | 进显示文字（#379 T04）',
     expect(applyPlan(line, plan!)).toBe('[[A#HI|¦]]')
   })
 
-  it('已有 |：接受标题后复用分隔符，已有别名保留、光标跳 | 后', () => {
+  it('已有 |：光标在锚点末接受标题后复用分隔符，已有别名保留、光标跳 | 后', () => {
+    // col=9：锚点字段（H）末、已有 | 前
+    const line = '[[方案.md#H|手写]]'
+    const plan = planWikilinkFieldEdit(fieldOf(line, 9), '|', 9, null, YUSUAN)
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算|¦手写]]')
+  })
+
+  it('已有 | 且光标在锚点中部：不吃高亮，零编辑光标跳已有 | 后', () => {
+    // col=8：# 与 H 之间（锚点首）
     const line = '[[方案.md#H|手写]]'
     const plan = planWikilinkFieldEdit(fieldOf(line, 8), '|', 8, null, YUSUAN)
-    expect(applyPlan(line, plan!)).toBe('[[方案.md#预算|¦手写]]')
+    expect(applyPlan(line, plan!)).toBe('[[方案.md#H|¦手写]]')
+    expect(plan!.changes).toHaveLength(0)
   })
 })
 
@@ -454,9 +549,10 @@ describe('planWikilinkFieldEdit：同文档锚点确认（空 alias 不补默认
     expect(applyPlan(line, plan!)).toBe('[[#预算¦|手写]]')
   })
 
-  it('| 主动进显示文字不受空 alias 影响：接受标题后仍插 |（手动别名入口）', () => {
+  it('| 主动进显示文字不受空 alias 影响：锚点末接受标题后仍插 |（手动别名入口）', () => {
+    // col=5：锚点字段（预x）末、闭围栏前
     const line = '[[#预x]]'
-    const plan = planWikilinkFieldEdit(fieldOf(line, 4), '|', 4, null, SELF_YUSUAN)
+    const plan = planWikilinkFieldEdit(fieldOf(line, 5), '|', 5, null, SELF_YUSUAN)
     expect(applyPlan(line, plan!)).toBe('[[#预算|¦]]')
   })
 })

@@ -488,6 +488,14 @@ export class WikilinkSuggestController {
       return
     }
     const { view, field, head } = guard
+    // PR648-001：`|` 的接受意图绑定发起时的锚点末位置——回包前纯光标
+    // 移动到锚点中部（会话保留、文档未变）说明用户已转入手动编辑，位
+    // 置语义下不应引用新 ID：放弃本地插入、宿主守卫撤回已补写标记、不
+    // 发 linked。Enter/Tab 的确认语义不受位置限制，回包仍按原路径消费
+    if (pending.key !== 'confirm' && head < field.anchorTo) {
+      this.cancelPendingBlockAccept('mid-field')
+      return
+    }
     const blockItem: WikilinkBlockPlanItem = { blockId, alias: message.alias ?? '' }
     const plan = planWikilinkFieldEdit(field, pending.key, head, null, null, blockItem)
     if (!plan) {
@@ -923,7 +931,7 @@ export class WikilinkSuggestController {
   }
 
   /** 在途接受放弃（#380 T05）：宿主按撤回守卫尽力移除本次新增标记 */
-  private cancelPendingBlockAccept(reason: 'session-rebuilt' | 'closed' | 'stale-result'): void {
+  private cancelPendingBlockAccept(reason: 'session-rebuilt' | 'closed' | 'stale-result' | 'mid-field'): void {
     const pending = this.pendingBlockAccept
     if (pending === null) {
       return
@@ -1171,10 +1179,13 @@ export class WikilinkSuggestController {
     if (key === '^' && field.stage === 'block') {
       return false
     }
-    // 评审 F7（阶段转换入口）：file 阶段失效窗内不锁定旧候选进锚点/
-    // 显示文字（同 confirm 口径——吞键并立即重查；标题/块阶段不拦，
-    // 过期接受由宿主侧目标版本守卫淘汰）
-    if (this.resultStale && field.stage === 'file') {
+    // 评审 F7（阶段转换入口）+ PR648-002：失效窗吞键仅限会消费候选的
+    // 路径——文件字段末的 #／^／|（消费高亮候选）。中部三键是手动编辑
+    // （不消费候选、不依赖枚举新鲜度），放行原位插入，不为过期候选的
+    // 提交风险买单；Enter/Tab 不进本分支——文件阶段的过期保护在
+    // confirm() 内的同源 resultStale 守卫（吞键并立即重查），块阶段为
+    // 宿主侧目标版本守卫（#380 T05 既有语义）。标题/块阶段此处不拦
+    if (this.resultStale && field.stage === 'file' && head >= field.fileTo) {
       this.requeryNow()
       return true
     }
@@ -1188,9 +1199,12 @@ export class WikilinkSuggestController {
       : null
     // #380 T05：| 在块阶段有真实高亮走确认路径（confirmBlock 内分已有 ID
     // 本地确认/无 ID 宿主补写两路）；无高亮保持 T03 语义——保留锚点、
-    // 插 | 进显示文字（关闭候选）
+    // 插 | 进显示文字（关闭候选）。2026-10-26 位置语义：光标在锚点
+    // 中部时是手动编辑——高亮不消费，直接走 fallback 原位插 |（无 ID
+    // 补写经宿主落盘，回包后本地 plan 不消费 blockId，会在目标文档
+    // 残留无引用 ^id）；Enter/Tab 确认不受位置限制，仍进 confirmBlock
     if (key === '|' && field.stage === 'block') {
-      if (this.blockActiveItem() !== null) {
+      if (this.blockActiveItem() !== null && head >= field.anchorTo) {
         return this.confirmBlock(view, session, field, head, '|')
       }
       const fallback = planWikilinkFieldEdit(field, '|', head, null, null, null)

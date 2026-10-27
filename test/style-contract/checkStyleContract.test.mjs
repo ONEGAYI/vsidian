@@ -626,6 +626,9 @@ const SIM_OPTS = () => ({
   baselinePath: BASELINE_PATH,
   // 模拟树无 .git：注入与真实 tag 一致的固化数据（复刻 CI 缓存场景）
   gitTagData: Object.fromEntries(Object.entries(BASELINE.releases).map(([v, r]) => [r.tag, r.sha])),
+  // 期限校验时点固定为 0.2.0 发布次日——「至今 1 天期限不满」类断言
+  // 不随日历漂移（2026-10-26 起真实今天距 09-26 恰满 30 天曾翻红）
+  now: '2026-09-27',
 })
 
 /** 删除清单条目对象整块（合法 TS：吞掉对象字面量与尾逗号行） */

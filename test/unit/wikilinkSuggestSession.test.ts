@@ -456,13 +456,96 @@ describe('转阶段：# / ^ / |（真实 keydown，无需先 Enter）', () => {
   it('块占位阶段按 |：保留锚点、| 落在锚点末并关闭', () => {
     const { controller, view } = setup('[[方案.md#^id]]')
     try {
-      locate(controller, 10)
-      typeAt(view, 10, 'x')
-      deleteAt(view, 10, 11)
+      locate(controller, 11) // 锚点末（d 后）——中部行为另有中部用例覆盖
+      typeAt(view, 11, 'x')
+      deleteAt(view, 11, 12)
       press(view, '|')
       expect(view.state.doc.toString()).toBe('[[方案.md#^id|]]')
       expect(view.state.selection.main.head).toBe('[[方案.md#^id|'.length)
       expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('光标在字段中部按 |：原位插入、不消费高亮、关闭候选（2026-10-26 位置语义）', () => {
+    const { controller, sent, view } = setup('[[Aa]]')
+    try {
+      locate(controller, 4)
+      typeAt(view, 4, 'x') // [[Aax]]：字段末输入开会话
+      respond(controller, sent, [FANGAN]) // 高亮在场
+      press(view, 'ArrowLeft') // 纯移动回中部（a 与 x 之间），会话与高亮保留
+      press(view, '|')
+      expect(view.state.doc.toString()).toBe('[[Aa|x]]')
+      expect(view.state.selection.main.head).toBe(5)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('光标在字段中部按 #：原位插入并转标题阶段（右侧文字保留）', () => {
+    const { controller, sent, view } = setup('[[Aa]]')
+    try {
+      locate(controller, 3) // A 与 a 之间
+      typeAt(view, 3, 'x')
+      respond(controller, sent, [])
+      deleteAt(view, 3, 4) // 退回 [[Aa]] col=3：会话在场、空查询
+      press(view, '#')
+      expect(view.state.doc.toString()).toBe('[[A#a]]')
+      expect(view.state.selection.main.head).toBe(4)
+      expect(popupState().statusText).toBe(zhCn['wikilinkSuggest.status.headingLoading'])
+      expect(lastHeadingQuery(sent)?.target).toBe('A')
+      expect(lastHeadingQuery(sent)?.query).toBe('')
+    } finally {
+      controller.dispose()
+    }
+  })
+})
+
+describe('invalidate 失效窗 × 位置语义（PR648-002）', () => {
+  /** 失效窗内中部按键的手动编辑放行夹具：开高亮会话→失效→移中部 */
+  const setupStaleMid = (
+    doc: string,
+  ): ReturnType<typeof setup> & { pressMid: (key: string) => void } => {
+    const ctx = setup(doc)
+    const { controller, sent, view } = ctx
+    locate(controller, 4)
+    typeAt(view, 4, 'x') // [[Aax]]：查询 'Aax'，高亮回灌
+    respond(controller, sent, [FANGAN])
+    controller.handleHostMessage({ kind: 'wikilink.invalidate' }) // 失效窗开（去抖重查未回包）
+    press(view, 'ArrowLeft') // 中部（a 与 x 之间）
+    return { ...ctx, pressMid: (key: string) => press(view, key) }
+  }
+
+  it('失效窗内中部按 |：手动编辑放行原位插入，不再吞键', () => {
+    const { controller, view, pressMid } = setupStaleMid('[[Aa]]')
+    try {
+      pressMid('|')
+      expect(view.state.doc.toString()).toBe('[[Aa|x]]')
+      expect(view.state.selection.main.head).toBe(5)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('失效窗内中部按 #：放行原位插入并转标题阶段', () => {
+    const { controller, view, sent, pressMid } = setupStaleMid('[[Aa]]')
+    try {
+      pressMid('#')
+      expect(view.state.doc.toString()).toBe('[[Aa#x]]')
+      expect(lastHeadingQuery(sent)?.target).toBe('Aa')
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('失效窗内中部按 ^：放行原位插入并转块阶段', () => {
+    const { controller, view, sent, pressMid } = setupStaleMid('[[Aa]]')
+    try {
+      pressMid('^')
+      expect(view.state.doc.toString()).toBe('[[Aa#^x]]')
+      expect(lastBlockQuery(sent)?.target).toBe('Aa')
     } finally {
       controller.dispose()
     }
@@ -858,6 +941,7 @@ describe('标题阶段会话：候选、键盘与确认（#379 T04）', () => {
       locate(controller, 14) // 锚点起点（x 前）
       typeAt(view, 14, '预')
       respondHeading(controller, sent, [YUSUAN])
+      press(view, 'ArrowRight') // 光标移到锚点末（x 后）——末尾=确认语义
       press(view, '|')
       expect(view.state.doc.toString()).toBe('[[../资料/方案.md#预算|]]')
       expect(view.state.selection.main.head).toBe('[[../资料/方案.md#预算|'.length)
@@ -1313,6 +1397,79 @@ describe('块阶段会话：候选、确认与无 ID 补写（#380 T05）', () =
       expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^keep01|]]')
       expect(view.state.selection.main.head).toBe('[[../资料/方案.md#^keep01|'.length)
       expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('块阶段锚点中部按 |：不消费高亮、不出站补写、原位插入（2026-10-26 位置语义）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17) // 锚点末（ab 后）
+      typeAt(view, 17, 'x') // 查询 'abx'
+      respondBlock(controller, sent, [BLOCK_NO_ID]) // 无 ID 块高亮在场
+      press(view, 'ArrowLeft') // 纯移动回锚点中部（b 与 x 之间）
+      press(view, '|')
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^ab|x]]')
+      expect(view.state.selection.main.head).toBe(18)
+      expect(popupState().open).toBe(false)
+      // 中部是手动编辑：不消费高亮——无 ID 补写不出站（宿主补写回包后
+      // 本地不消费会在目标文档残留无引用 ^id）
+      expect(accepts(sent)).toHaveLength(0)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('| 接受在途回包前光标移到锚点中部：放弃引用新 ID、cancel 撤回、不发 linked（PR648-001）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17) // 锚点末
+      typeAt(view, 17, 'x') // 查询 'abx'
+      respondBlock(controller, sent, [BLOCK_NO_ID]) // 无 ID 块高亮在场
+      press(view, '|') // 锚点末发起接受：出站宿主补写
+      expect(accepts(sent)).toHaveLength(1)
+      press(view, 'ArrowLeft') // 回包前纯移动到锚点中部（b 与 x 之间）
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      // 位置语义下回包时光标在中部＝用户转入手动编辑：不引用新 ID、
+      // 本地零编辑、宿主守卫撤回已补写标记、不发 linked
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abx]]')
+      expect(cancels(sent)).toHaveLength(1)
+      expect(linkeds(sent)).toHaveLength(0)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('Enter 接受在途回包前光标移到锚点中部：确认语义不受位置限制，仍引用新 ID（PR648-001 边界）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17)
+      typeAt(view, 17, 'x')
+      respondBlock(controller, sent, [BLOCK_NO_ID])
+      press(view, 'Enter') // Enter 确认发起：出站宿主补写
+      press(view, 'ArrowLeft') // 回包前移到锚点中部
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      // Enter/Tab 确认不受位置限制（规格位置语义）：回包忠实发起意图
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abc123|方案]]')
+      expect(linkeds(sent)).toHaveLength(1)
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('| 接受在途回包时光标仍在锚点末：正常引用新 ID（PR648-001 主路径钉住）', () => {
+    const { controller, sent, view } = setup('[[../资料/方案.md#^ab]]')
+    try {
+      locate(controller, 17)
+      typeAt(view, 17, 'x')
+      respondBlock(controller, sent, [BLOCK_NO_ID])
+      press(view, '|')
+      respondAccept(controller, sent, { ok: true, blockId: 'abc123', alias: '方案' })
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md#^abc123|]]')
+      expect(linkeds(sent)).toHaveLength(1)
+      expect(cancels(sent)).toHaveLength(0)
     } finally {
       controller.dispose()
     }
