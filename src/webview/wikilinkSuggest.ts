@@ -1182,8 +1182,9 @@ export class WikilinkSuggestController {
     // 评审 F7（阶段转换入口）+ PR648-002：失效窗吞键仅限会消费候选的
     // 路径——文件字段末的 #／^／|（消费高亮候选）。中部三键是手动编辑
     // （不消费候选、不依赖枚举新鲜度），放行原位插入，不为过期候选的
-    // 提交风险买单；Enter/Tab 的过期保护由宿主 targetVersion 守卫承担，
-    // 不经此分支。标题/块阶段不拦（过期接受由宿主侧目标版本守卫淘汰）
+    // 提交风险买单；Enter/Tab 不进本分支——文件阶段的过期保护在
+    // confirm() 内的同源 resultStale 守卫（吞键并立即重查），块阶段为
+    // 宿主侧目标版本守卫（#380 T05 既有语义）。标题/块阶段此处不拦
     if (this.resultStale && field.stage === 'file' && head >= field.fileTo) {
       this.requeryNow()
       return true
