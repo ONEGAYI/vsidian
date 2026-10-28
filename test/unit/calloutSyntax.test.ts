@@ -88,12 +88,86 @@ describe('calloutDefaultTitle：默认标题派生（Obsidian 1.14.4 app.js 实�
   })
 })
 
-describe('类型注册表（T02 只登记 note；结构为 T03 全类型预留）', () => {
-  it('note 条目在场，携带 CSS 变量与图标名（T03/T06 消费字段）', () => {
-    expect(CALLOUT_TYPES.map((entry) => entry.id)).toEqual(['note'])
-    const note = CALLOUT_TYPES[0]!
-    expect(note.colorVariable).toBe('--callout-default')
-    expect(note.icon).toBe('lucide-pencil')
+describe('类型注册表（T03 全类型登记；数据源 obsidian-1144-callout-defaults.json）', () => {
+  it('帮助页口径 13 规范类型逐项在场（顺序固定，T05 菜单消费）', () => {
+    expect(CALLOUT_TYPES.map((entry) => entry.id)).toEqual([
+      'note', 'abstract', 'info', 'todo', 'tip', 'success', 'question',
+      'warning', 'failure', 'danger', 'bug', 'example', 'quote',
+    ])
+  })
+
+  it('14 别名按帮助页归类（important 归 tip；摘要三态/成败三态/红三义等）', () => {
+    const byId = new Map(CALLOUT_TYPES.map((e) => [e.id, e]))
+    expect(byId.get('abstract')!.aliases).toEqual(['summary', 'tldr'])
+    expect(byId.get('tip')!.aliases).toEqual(['hint', 'important'])
+    expect(byId.get('success')!.aliases).toEqual(['check', 'done'])
+    expect(byId.get('question')!.aliases).toEqual(['help', 'faq'])
+    expect(byId.get('warning')!.aliases).toEqual(['caution', 'attention'])
+    expect(byId.get('failure')!.aliases).toEqual(['fail', 'missing'])
+    expect(byId.get('danger')!.aliases).toEqual(['error'])
+    expect(byId.get('quote')!.aliases).toEqual(['cite'])
+    expect(byId.get('note')!.aliases).toEqual([])
+    // 全表别名总数 = 14（票面口径）
+    expect(CALLOUT_TYPES.flatMap((e) => e.aliases)).toHaveLength(14)
+  })
+
+  it('CSS 变量名按 app.css 取证：abstract→summary / failure→fail / danger→error 形态', () => {
+    const byId = new Map(CALLOUT_TYPES.map((e) => [e.id, e]))
+    expect(byId.get('note')!.colorVariable).toBe('--callout-default')
+    expect(byId.get('abstract')!.colorVariable).toBe('--callout-summary')
+    expect(byId.get('info')!.colorVariable).toBe('--callout-info')
+    expect(byId.get('todo')!.colorVariable).toBe('--callout-todo')
+    expect(byId.get('tip')!.colorVariable).toBe('--callout-tip')
+    expect(byId.get('success')!.colorVariable).toBe('--callout-success')
+    expect(byId.get('question')!.colorVariable).toBe('--callout-question')
+    expect(byId.get('warning')!.colorVariable).toBe('--callout-warning')
+    expect(byId.get('failure')!.colorVariable).toBe('--callout-fail')
+    expect(byId.get('danger')!.colorVariable).toBe('--callout-error')
+    expect(byId.get('bug')!.colorVariable).toBe('--callout-bug')
+    expect(byId.get('example')!.colorVariable).toBe('--callout-example')
+    expect(byId.get('quote')!.colorVariable).toBe('--callout-quote')
+  })
+
+  it('图标名按取证照录（help-circle 无前缀、quote-glyph 内部名照登记）', () => {
+    const byId = new Map(CALLOUT_TYPES.map((e) => [e.id, e]))
+    expect(byId.get('note')!.icon).toBe('lucide-pencil')
+    expect(byId.get('abstract')!.icon).toBe('lucide-clipboard-list')
+    expect(byId.get('info')!.icon).toBe('lucide-info')
+    expect(byId.get('todo')!.icon).toBe('lucide-check-circle-2')
+    expect(byId.get('tip')!.icon).toBe('lucide-flame')
+    expect(byId.get('success')!.icon).toBe('lucide-check')
+    expect(byId.get('question')!.icon).toBe('help-circle')
+    expect(byId.get('warning')!.icon).toBe('lucide-alert-triangle')
+    expect(byId.get('failure')!.icon).toBe('lucide-x')
+    expect(byId.get('danger')!.icon).toBe('lucide-zap')
+    expect(byId.get('bug')!.icon).toBe('lucide-bug')
+    expect(byId.get('example')!.icon).toBe('lucide-list')
+    expect(byId.get('quote')!.icon).toBe('quote-glyph')
+  })
+
+  it('calloutTypeOf：全部别名命中所属规范条目，大小写不敏感', () => {
+    for (const [alias, id] of [
+      ['summary', 'abstract'], ['tldr', 'abstract'], ['hint', 'tip'],
+      ['check', 'success'], ['done', 'success'], ['help', 'question'],
+      ['faq', 'question'], ['caution', 'warning'], ['attention', 'warning'],
+      ['fail', 'failure'], ['missing', 'failure'], ['error', 'danger'],
+      ['cite', 'quote'],
+    ] as const) {
+      expect(calloutTypeOf(alias).id, alias).toBe(id)
+      expect(calloutTypeOf(alias).knownType, alias).toBe(true)
+    }
+    expect(calloutTypeOf('SuMmArY').id).toBe('abstract')
+  })
+
+  it('important 双面归属：语法归类 tip（帮助页），CSS 变量独立 --callout-important', () => {
+    const important = calloutTypeOf('important')
+    expect(important.id).toBe('tip')
+    expect(important.colorVariable).toBe('--callout-important')
+    expect(important.icon).toBe('lucide-flame') // 图标与 tip 同（取证）
+    expect(calloutTypeOf('IMPORTANT').colorVariable).toBe('--callout-important')
+    // 归类条目本体不受覆盖影响
+    expect(calloutTypeOf('tip').colorVariable).toBe('--callout-tip')
+    expect(calloutTypeOf('hint').colorVariable).toBe('--callout-tip')
   })
 
   it('calloutTypeOf：note 命中注册条目；未知类型回落 note 外观但保留原标识语义', () => {
@@ -103,5 +177,17 @@ describe('类型注册表（T02 只登记 note；结构为 T03 全类型预留�
     expect(unknown.id).toBe(CALLOUT_FALLBACK_TYPE)
     expect(unknown.knownType).toBe(false)
     expect(calloutTypeOf('note').knownType).toBe(true)
+  })
+
+  it('默认标题矩阵：全类型与别名按原标识派生（含连字号、Faq/Custom-question 口径）', () => {
+    expect(calloutDefaultTitle('tldr')).toBe('Tldr')
+    expect(calloutDefaultTitle('faq')).toBe('Faq')
+    expect(calloutDefaultTitle('important')).toBe('Important')
+    expect(calloutDefaultTitle('custom-question')).toBe('Custom question')
+    expect(calloutDefaultTitle('quote')).toBe('Quote')
+    // 全部内置类型可派生非空标题
+    for (const entry of CALLOUT_TYPES) {
+      expect(calloutDefaultTitle(entry.id), entry.id).toMatch(/^[A-Z]/)
+    }
   })
 })

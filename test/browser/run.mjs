@@ -76,6 +76,10 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   // 输入外框保留、拖选、明暗双通道底色、普通引用不回归）紧随 quoteBarPaint
   // （同引用族渲染与样式侧套件）。
   'calloutPaint',
+  // #654（T03）合入列：calloutTypes（全类型/别名明暗绘制与图标 mask、
+  // 三层嵌套与列表容器组合、列表内 callout 真实输入/拖选——T01 报告 §10
+  // 声明的编辑态缺口）紧随 calloutPaint（同 callout 族）。
+  'calloutTypes',
   'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',

@@ -214,6 +214,105 @@ describe('Live callout：全量构建', () => {
   })
 })
 
+describe('Live callout：T03 全类型/别名/富标题/嵌套组合', () => {
+  it('全类型与别名照常发射行级形态，data-callout 保留原标识（别名不改写）', () => {
+    const cases = [
+      '> [!tip] 提示标题\n> 正文',
+      '> [!important] 重要标题\n> 正文',
+      '> [!summary] 摘要标题\n> 正文',
+      '> [!cite] 引证标题\n> 正文',
+      '> [!error] 错误标题\n> 正文',
+      '> [!IMPORTANT] 大写别名\n> 正文',
+    ] as const
+    for (const doc of cases) {
+      const lines = lineDecorations(build(doc), doc)
+      expect(lines.get(1)!.cls.split(' '), doc).toContain('callout')
+      expect(lines.get(2)!.cls.split(' '), doc).toContain('callout-content')
+    }
+    // 原标识逐值锚定（小写规范化，别名原样）
+    for (const [src, id] of [
+      ['> [!tip] t\n> b', 'tip'],
+      ['> [!important] t\n> b', 'important'],
+      ['> [!IMPORTANT] t\n> b', 'important'],
+      ['> [!summary] t\n> b', 'summary'],
+    ] as const) {
+      expect(lineDecorations(build(src), src).get(1)!.attrs?.['data-callout']).toBe(id)
+    }
+  })
+
+  it('13 规范类型逐类型发射 data-callout（全量矩阵）', () => {
+    for (const type of [
+      'note', 'abstract', 'info', 'todo', 'tip', 'success', 'question',
+      'warning', 'failure', 'danger', 'bug', 'example', 'quote',
+    ]) {
+      const doc = `> [!${type}] 标题\n> 正文`
+      const lines = lineDecorations(build(doc), doc)
+      expect(lines.get(1)!.attrs?.['data-callout'], type).toBe(type)
+      expect(collect(build(doc)).find((i) => i.widget === `CalloutMarkerWidget:${type}`), type).toBeDefined()
+    }
+  })
+
+  it('富标题：标题 mark 与既有行内格式装饰共存（粗体 mark 不被吞）', () => {
+    const doc = '> [!tip] **加粗标题**'
+    const items = collect(build(doc))
+    const inner = items.find((i) => i.cls?.split(' ').includes('callout-title-inner'))
+    expect(inner).toBeDefined()
+    expect(doc.slice(inner!.from, inner!.to)).toBe('**加粗标题**')
+    // 粗体 mark 装饰与标题 inner mark 同时在场（真实文本叠加两 mark）
+    const bold = items.find((i) => i.cls === 'vsidian-strong' || i.cls?.includes('strong'))
+    expect(bold).toBeDefined()
+  })
+
+  it('三层嵌套：深度逐层叠加，data-callout 最内层胜出，各层标题行类正确', () => {
+    const doc = ['> [!note] 外层', '> > [!tip] 中层', '> > > [!warning] 内层', '> > > 内层正文', '> 外层正文'].join('\n')
+    const lines = lineDecorations(build(doc), doc)
+    expect(lines.get(1)!.attrs?.['data-callout']).toBe('note')
+    expect(lines.get(1)!.cls.split(' ')).toContain('callout-title')
+    // 行 2：外层 content + 中层 title；data-callout 取最内层（tip）
+    expect(lines.get(2)!.cls.split(' ')).toEqual(expect.arrayContaining(['callout-title', 'callout-content']))
+    expect(lines.get(2)!.attrs?.['data-callout']).toBe('tip')
+    // 行 3：三层叠加，最内层 warning 胜出
+    expect(lines.get(3)!.attrs?.['data-callout']).toBe('warning')
+    expect(lines.get(3)!.cls.split(' ')).toContain('callout-title')
+    // 行 4 内层正文，行 5 外层正文（内层容器 toLine=5，lazy 归属）
+    expect(lines.get(4)!.cls.split(' ')).toContain('callout-content')
+    expect(lines.get(5)!.cls.split(' ')).toContain('callout-content')
+    // 三个标记 widget 各自在场
+    for (const w of ['CalloutMarkerWidget:note', 'CalloutMarkerWidget:tip', 'CalloutMarkerWidget:warning']) {
+      expect(collect(build(doc)).find((i) => i.widget === w), w).toBeDefined()
+    }
+  })
+
+  it('列表内 callout：callout 行叠加列表行类（F40 组合）', () => {
+    const doc = ['- 前置条目', '- > [!info] 列表内标题', '  > 列表内正文', '- 后置条目'].join('\n')
+    const lines = lineDecorations(build(doc), doc)
+    const title = lines.get(2)!
+    expect(title.cls.split(' ')).toContain('callout-title')
+    expect(title.cls.split(' ')).toContain('callout')
+    expect(title.attrs?.['data-callout']).toBe('info')
+    expect(lines.get(3)!.cls.split(' ')).toContain('callout-content')
+    expect(lines.get(1)!.cls ?? '', '列表条目行不挂 callout').not.toContain('callout')
+  })
+
+  it('callout 内表格与代码块：行级类叠加不丢（网格行 + 代码行）', () => {
+    const doc = [
+      '> [!success] 混合',
+      '> | a | b |',
+      '> | - | - |',
+      '> | 1 | 2 |',
+      '>',
+      '> ```js',
+      '> const x = 1',
+      '> ```',
+    ].join('\n')
+    const lines = lineDecorations(build(doc), doc)
+    for (let n = 1; n <= 8; n++) {
+      expect(lines.get(n)!.attrs?.['data-callout'], `行${n}`).toBe('success')
+    }
+    expect(lines.get(4)!.cls.split(' ')).toContain('callout-content')
+  })
+})
+
 describe('Live callout：增量维护（身份翻转扩展到容器边界）', () => {
   it('在声明行键入使容器成为 callout：全部容器行更新（与全量一致）', () => {
     const before = ['> 普通引用标题', '> 正文行'].join('\n')

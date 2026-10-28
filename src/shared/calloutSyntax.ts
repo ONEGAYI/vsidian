@@ -1,7 +1,8 @@
-// Callout 语法单一事实源（#653/T02，规格 docs/specs/callout.md §3；T01 探针
-// 报告 §4/§9）：识别器 + 类型注册表 + 默认标题派生，Live 装饰
-// （liveDecorations 的 Blockquote 分支）与阅读渲染（readingMarkdown 的
-// token 变换）共用——适配器不得复制类型表或另写识别规则。
+// Callout 语法单一事实源（#653/T02 建，#654/T03 全类型登记；规格
+// docs/specs/callout.md §3；T01 探针报告 §4/§9）：识别器 + 类型注册表 +
+// 默认标题派生，Live 装饰（liveDecorations 的 Blockquote 分支）与阅读渲染
+// （readingMarkdown 的 token 变换）共用——适配器不得复制类型表或另写识别
+// 规则。
 //
 // 识别输入（T01 两端语法对拍固定，35 夹具零分歧）：引用容器**直属首段
 // 首行**的「段起点→行尾」子串——两端解析器（@codemirror/lang-markdown 与
@@ -9,8 +10,9 @@
 // 形态 `/^\[!([^\]]*)\]([+-])?/` 上接三道拒绝：空类型、类型非单标识符
 // `[A-Za-z0-9_-]+`、声明后紧贴非空白。未成型按普通引用降级，不补写修复。
 //
-// 本票（T02）注册表只登记 note 与未知类型回落；全类型/别名/折叠状态机/
-// 图标定制归 T03/T04/T06 在此结构上增量扩展，不另建第二份类型表。
+// 注册表（T03）：13 规范类型 + 14 别名（帮助页口径）+ important 双面归属
+// （别名归类 tip、CSS 变量独立）；数据源 obsidian-1144-callout-defaults.json。
+// 折叠状态机归 T04、--callout-icon 自定义归 T06，在此结构上增量扩展。
 
 /** 一次成型的 callout 声明（均为输入子串内的相对偏移语义） */
 export interface CalloutDecl {
@@ -75,11 +77,11 @@ export interface CalloutTypeEntry {
   /** 呈现类别 id（即 CSS 类型变量映射的目标类型） */
   readonly id: string
   /** 语法别名（帮助页口径；important 的「别名归类 tip + 独立变量」分歧
-   *  由 T03/T06 按取证 JSON 分别登记，本票 note 无别名） */
+   *  由 CALLOUT_ALIAS_VARIABLE_OVERRIDES 分别登记——见其注释） */
   readonly aliases: readonly string[]
-  /** 该类型的 CSS 颜色变量（T03 全类型变量表消费；本票仅 note 落 CSS） */
+  /** 该类型的 CSS 颜色变量（CSS :where 类型表消费，契约测试钉住同步） */
   readonly colorVariable: string
-  /** 图标名（Obsidian 默认主题取证；T06 做 Lucide/SVG 装配） */
+  /** 图标名（Obsidian 默认主题取证；T06 做 Lucide/SVG 自定义接线） */
   readonly icon: string
   /** 是否注册表内置类型（false = 未知类型回落的合成条目） */
   readonly knownType: boolean
@@ -97,9 +99,14 @@ const FALLBACK_ENTRY: CalloutTypeEntry = {
 }
 
 /**
- * 类型注册表（T02 只登记 note；数据源为 T01 取证
- * obsidian-1144-callout-defaults.json，全类型在 T03 登记）。
- * 消费方：呈现层（CSS 变量/图标选择）、T05 转换规划（菜单写入规范类型）。
+ * 类型注册表（T03 全类型登记；数据源为 T01 取证
+ * obsidian-1144-callout-defaults.json——帮助页口径 13 规范类型 + 14 别名，
+ * CSS 变量名按 app.css 取证形态：abstract→--callout-summary、
+ * failure→--callout-fail、danger→--callout-error；note 的色即
+ * --callout-default；important 在帮助页列为 tip 别名、app.css 给独立
+ * --callout-important——语法归类的别名归 tip，变量面独立见覆盖表）。
+ * 消费方：呈现层（CSS 变量/图标选择，经契约测试映射钉住同步）、
+ * T05 转换规划（菜单写入规范类型）。
  */
 export const CALLOUT_TYPES: readonly CalloutTypeEntry[] = [
   {
@@ -109,14 +116,113 @@ export const CALLOUT_TYPES: readonly CalloutTypeEntry[] = [
     icon: 'lucide-pencil',
     knownType: true,
   },
+  {
+    id: 'abstract',
+    aliases: ['summary', 'tldr'],
+    colorVariable: '--callout-summary',
+    icon: 'lucide-clipboard-list',
+    knownType: true,
+  },
+  {
+    id: 'info',
+    aliases: [],
+    colorVariable: '--callout-info',
+    icon: 'lucide-info',
+    knownType: true,
+  },
+  {
+    id: 'todo',
+    aliases: [],
+    colorVariable: '--callout-todo',
+    icon: 'lucide-check-circle-2',
+    knownType: true,
+  },
+  {
+    id: 'tip',
+    aliases: ['hint', 'important'],
+    colorVariable: '--callout-tip',
+    icon: 'lucide-flame',
+    knownType: true,
+  },
+  {
+    id: 'success',
+    aliases: ['check', 'done'],
+    colorVariable: '--callout-success',
+    icon: 'lucide-check',
+    knownType: true,
+  },
+  {
+    id: 'question',
+    aliases: ['help', 'faq'],
+    colorVariable: '--callout-question',
+    icon: 'help-circle',
+    knownType: true,
+  },
+  {
+    id: 'warning',
+    aliases: ['caution', 'attention'],
+    colorVariable: '--callout-warning',
+    icon: 'lucide-alert-triangle',
+    knownType: true,
+  },
+  {
+    id: 'failure',
+    aliases: ['fail', 'missing'],
+    colorVariable: '--callout-fail',
+    icon: 'lucide-x',
+    knownType: true,
+  },
+  {
+    id: 'danger',
+    aliases: ['error'],
+    colorVariable: '--callout-error',
+    icon: 'lucide-zap',
+    knownType: true,
+  },
+  {
+    id: 'bug',
+    aliases: [],
+    colorVariable: '--callout-bug',
+    icon: 'lucide-bug',
+    knownType: true,
+  },
+  {
+    id: 'example',
+    aliases: [],
+    colorVariable: '--callout-example',
+    icon: 'lucide-list',
+    knownType: true,
+  },
+  {
+    id: 'quote',
+    aliases: ['cite'],
+    colorVariable: '--callout-quote',
+    icon: 'quote-glyph',
+    knownType: true,
+  },
 ]
+
+/**
+ * 个别别名的 CSS 变量覆盖（T01 取证 aliasDiscrepancy）：`important`
+ * 帮助页列为 tip 的别名（语法归类归 tip），但 app.css 给它独立变量
+ * --callout-important（值同 cyan、图标同 lucide-flame）——两者并存不矛盾，
+ * 分别登记：别名归 tip 条目，变量经本覆盖表独立呈现（自定义 CSS 可分别
+ * 覆盖 --callout-tip 与 --callout-important）。CSS 侧有独立 :where 规则
+ * （契约测试钉住）。
+ */
+export const CALLOUT_ALIAS_VARIABLE_OVERRIDES: Readonly<Record<string, string>> = {
+  important: '--callout-important',
+}
 
 /** 类型标识（已小写规范化）→ 呈现类别条目；未知类型回落 note 外观 */
 export function calloutTypeOf(type: string): CalloutTypeEntry {
   const normalized = type.toLowerCase()
   for (const entry of CALLOUT_TYPES) {
     if (entry.id === normalized || entry.aliases.includes(normalized)) {
-      return entry
+      const override = CALLOUT_ALIAS_VARIABLE_OVERRIDES[normalized]
+      return override && override !== entry.colorVariable
+        ? { ...entry, colorVariable: override }
+        : entry
     }
   }
   return FALLBACK_ENTRY

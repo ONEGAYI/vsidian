@@ -1,9 +1,15 @@
-// Callout CSS 契约（#653/T02）：钉住 main.css 的 callout 变量族、类型
-// 变量表、双通道背景与「callout 替代该层引用紫条」边界（T01 报告 §5.4
-// 四项实施边界的 CSS 落点）。用户看到的东西（AGENTS 视觉层断言）：外框
-// 底色/圆角/标题字重/图标可见性由浏览器 calloutPaint 的 computed 断言
-// 兜底，本契约在源头钉住规则形态——样式被误删时先在此失败。
+// Callout CSS 契约（#653/T02，#654/T03 扩展全类型）：钉住 main.css 的
+// callout 变量族、类型变量表、双通道背景与「callout 替代该层引用紫条」边界
+// （T01 报告 §5.4 四项实施边界的 CSS 落点）。类型变量表与图标表**从注册表
+// 驱动断言**（CALLOUT_TYPES 为单一事实源——CSS 手写表被测试强制同步，
+// 不复制类型数据第二份）。用户看到的东西（AGENTS 视觉层断言）：外框
+// 底色/圆角/标题字重/图标可见性由浏览器 calloutPaint / calloutTypes 的
+// computed 断言兜底，本契约在源头钉住规则形态——样式被误删时先在此失败。
 import { describe, expect, it } from 'vitest'
+import {
+  CALLOUT_TYPES,
+  CALLOUT_ALIAS_VARIABLE_OVERRIDES,
+} from '../../src/shared/calloutSyntax'
 import { cssRule, cssRuleExact, readMainCss } from './cssContract'
 
 const css = readMainCss()
@@ -18,17 +24,76 @@ describe('callout 变量族（Obsidian 原名即公开入口）', () => {
     expect(app).toMatch(/--callout-content-background:\s*transparent/)
   })
 
-  it('亮色主题覆盖 note 色（#086ddd）', () => {
+  it('暗色档全类型变量默认值按取证（cyan #53dfdd / green #44cf6e / orange #e9973f / red #fb464c / purple #a882ff / quote #9e9e9e）', () => {
+    const app = cssRuleExact(css, '#app')
+    expect(app).toMatch(/--callout-summary:\s*#53dfdd/)
+    expect(app).toMatch(/--callout-info:\s*#027aff/)
+    expect(app).toMatch(/--callout-todo:\s*#027aff/)
+    expect(app).toMatch(/--callout-tip:\s*#53dfdd/)
+    expect(app).toMatch(/--callout-important:\s*#53dfdd/)
+    expect(app).toMatch(/--callout-success:\s*#44cf6e/)
+    expect(app).toMatch(/--callout-question:\s*#e9973f/)
+    expect(app).toMatch(/--callout-warning:\s*#e9973f/)
+    expect(app).toMatch(/--callout-fail:\s*#fb464c/)
+    expect(app).toMatch(/--callout-error:\s*#fb464c/)
+    expect(app).toMatch(/--callout-bug:\s*#fb464c/)
+    expect(app).toMatch(/--callout-example:\s*#a882ff/)
+    expect(app).toMatch(/--callout-quote:\s*#9e9e9e/)
+  })
+
+  it('亮色主题覆盖全部类型色（取证亮值：blue #086ddd / cyan #00bfbc / green #08b94e / orange #ec7500 / red #e93147 / purple #7852ee）', () => {
     const light = cssRule(css, 'body.vscode-light #app')
-    expect(light).toMatch(/--callout-default:\s*#086ddd/)
+    for (const [name, value] of [
+      ['--callout-default', '#086ddd'], ['--callout-summary', '#00bfbc'],
+      ['--callout-info', '#086ddd'], ['--callout-todo', '#086ddd'],
+      ['--callout-tip', '#00bfbc'], ['--callout-important', '#00bfbc'],
+      ['--callout-success', '#08b94e'], ['--callout-question', '#ec7500'],
+      ['--callout-warning', '#ec7500'], ['--callout-fail', '#e93147'],
+      ['--callout-error', '#e93147'], ['--callout-bug', '#e93147'],
+      ['--callout-example', '#7852ee'],
+    ] as const) {
+      expect(light, name).toMatch(new RegExp(`${name}:\\s*${value}`))
+    }
+    // quote 固定 #9e9e9e 不做亮色覆盖（非调色板引用色，取证照录）
+    expect(light).not.toMatch(/--callout-quote/)
   })
 
   it('类型变量表以 :where() 零特异性承载（T01 边界 1：行元素无内联变量）', () => {
-    const note = cssRule(css, ":where([data-callout='note'])")
-    expect(note).toMatch(/--callout-color:\s*var\(--callout-default\)/)
-    // 零特异性承诺：规则以 :where 起头（无 #app 等特异性来源前缀——
-    // 契约解析器会把前置块注释并入 selector，故按行首锚定断言）
-    expect(css).toMatch(/\n:where\(\[data-callout='note'\]\)\s*\{/)
+    // 零特异性承诺：色表与图标表都以 :where 起头（无 #app 等特异性来源
+    // 前缀——契约解析器会把前置块注释并入 selector，故按行首锚定断言）
+    expect(css).toMatch(/\n:where\(\[data-callout='note'\]\)\s*\{\s*\r?\n\s*--callout-color:\s*var\(--callout-default\)/)
+    expect(css).toMatch(/\n:where\(\[data-callout='note'\]\)\s*\{\s*\r?\n\s*--_vsidian-callout-icon:\s*url\("data:image\/svg\+xml/)
+  })
+
+  it('类型变量表与注册表完全同步（每条目 id+无覆盖别名都有规则且变量名一致）', () => {
+    for (const entry of CALLOUT_TYPES) {
+      // 覆盖表别名（important）的 CSS 变量独立成规则——条目组规则只含
+      // 条目本体与无覆盖别名
+      const selectors = [entry.id, ...entry.aliases.filter((a) => !(a in CALLOUT_ALIAS_VARIABLE_OVERRIDES))]
+        .map((t) => `[data-callout='${t}']`).join(', ')
+      const pattern = new RegExp(
+        `\\n:where\\(${selectors.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\s*\\{[^}]*--callout-color:\\s*var\\(${entry.colorVariable}\\)`)
+      expect(css, entry.id).toMatch(pattern)
+    }
+    // important：别名变量覆盖规则独立在场（变量面登记，取证 aliasDiscrepancy）
+    expect(css).toMatch(/\n:where\(\[data-callout='important'\]\)\s*\{[^}]*--callout-color:\s*var\(--callout-important\)/)
+  })
+
+  it('图标表与注册表同步：每条目 id+别名都命中某条 --_vsidian-callout-icon 规则', () => {
+    // 取全部图标规则块（selector + 变量定义），再断言类型出现在选择器列表
+    const iconRules = css.match(/:where\([^)]*\)\s*\{[^}]*--_vsidian-callout-icon:/g) ?? []
+    expect(iconRules.length).toBeGreaterThanOrEqual(13)
+    for (const entry of CALLOUT_TYPES) {
+      // important 与 tip 同图标（lucide-flame）——图标规则按图标分组，别名
+      // 随所属条目组命中即可（flame 组选择器含 tip/hint/important 三值）
+      const selectors = [entry.id, ...entry.aliases]
+      const found = selectors.some((t) =>
+        iconRules.some((rule) => rule.includes(`[data-callout='${t}']`)))
+      expect(found, entry.id).toBe(true)
+    }
+    // 基础规则消费变量（默认铅笔兜底：未知类型无规则命中时回落）
+    const icon = cssRule(css, '#app .callout-icon')
+    expect(icon).toMatch(/mask:\s*var\(--_vsidian-callout-icon,/)
   })
 
   it('行级类不携带内联 style 变量（增量发射的 data-callout 属性不带 style）', () => {
@@ -36,7 +101,7 @@ describe('callout 变量族（Obsidian 原名即公开入口）', () => {
     // 本测试钉 CSS 侧不消费 --callout-color 以外的行内注入面——变量只
     // 经 :where 类型表与 #app 默认值两处定义
     const defs = css.match(/--callout-color:\s*[^;]+;/g) ?? []
-    expect(defs.filter((d) => !/var\(--callout-default\)/.test(d))).toHaveLength(0)
+    expect(defs.filter((d) => !/var\(--callout-(default|summary|info|todo|tip|important|success|question|warning|fail|error|bug|example|quote)\)/.test(d))).toHaveLength(0)
   })
 })
 
@@ -64,11 +129,11 @@ describe('live 行级形态：替代紫条与双通道底色', () => {
     expect(last).toMatch(/border-bottom-right-radius:\s*var\(--callout-radius\)/)
   })
 
-  it('标题行字重与图标 mask（Obsidian 默认铅笔形）', () => {
+  it('标题行字重与图标 mask（#654/T03：mask 经私有变量分派，铅笔兜底）', () => {
     const title = cssRule(css, '.vsidian-quote-line.callout-title')
     expect(title).toMatch(/font-weight:\s*var\(--callout-title-weight\)/)
     const icon = cssRule(css, '#app .callout-icon')
-    expect(icon).toMatch(/mask:\s*url\("data:image\/svg\+xml/)
+    expect(icon).toMatch(/mask:\s*var\(--_vsidian-callout-icon,\s*url\("data:image\/svg\+xml/)
     expect(icon).toMatch(/background-color:\s*var\(--callout-color\)/)
   })
 })

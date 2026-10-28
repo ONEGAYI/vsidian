@@ -147,3 +147,113 @@ describe('阅读 callout：容器结构发射', () => {
     expect(html).not.toContain('callout')
   })
 })
+
+describe('阅读 callout：T03 全类型/别名/富标题/嵌套组合', () => {
+  it('13 规范类型逐类型发射 data-callout（全量矩阵）', () => {
+    for (const type of [
+      'note', 'abstract', 'info', 'todo', 'tip', 'success', 'question',
+      'warning', 'failure', 'danger', 'bug', 'example', 'quote',
+    ]) {
+      const html = renderBlock(`> [!${type}] 标题\n> 正文`)
+      expect(html, type).toContain(`data-callout="${type}"`)
+    }
+  })
+
+  it('14 别名照常成型，data-callout 保留原标识（别名不改写源文）', () => {
+    for (const alias of [
+      'summary', 'tldr', 'hint', 'important', 'check', 'done', 'help',
+      'faq', 'caution', 'attention', 'fail', 'missing', 'error', 'cite',
+    ]) {
+      const html = renderBlock(`> [!${alias}] 标题\n> 正文`)
+      expect(html, alias).toContain(`data-callout="${alias}"`)
+    }
+    expect(renderBlock('> [!IMPORTANT] 大写\n> 正文')).toContain('data-callout="important"')
+  })
+
+  it('富标题：粗体/斜体/高亮/删除线/行内代码经既有行内渲染（复用净化链）', () => {
+    const html = renderBlock('> [!tip] **粗** 与 *斜* 与 ==高== 与 ~~删~~ 与 `码`')
+    expect(html).toMatch(/<strong>粗<\/strong>/)
+    expect(html).toMatch(/<em>斜<\/em>/)
+    expect(html).toMatch(/<mark[^>]*>高<\/mark>/)
+    expect(html).toMatch(/<s>删<\/s>/)
+    expect(html).toMatch(/<code>码<\/code>/)
+  })
+
+  it('富标题链接经既有行内渲染（href 进 title-inner；点击语义归挂载层既有规则）', () => {
+    const html = renderBlock('> [!info] 见 [文档](https://example.com) 说明')
+    expect(html).toMatch(/<a href="https:\/\/example\.com"[^>]*>文档<\/a>/)
+  })
+
+  it('富标题净化：行内 HTML 经既有净化链（危险属性剥除，不新增放行面）', () => {
+    const html = renderBlock('> [!warning] 标题 <img src=x onerror=alert(1)>')
+    // 标题行内 HTML 走既有净化（#568 行内混排管线）：事件属性被剥、元素
+    // 保留——callout 标题不另开字面通道也不放宽净化
+    expect(html).not.toContain('onerror')
+    expect(html).not.toContain('alert(1)')
+    expect(html).toContain('src="x"')
+  })
+
+  it('无显式标题：别名与全类型默认标题按原标识派生', () => {
+    expect(renderBlock('> [!tldr]')).toMatch(/<div class="callout-title-inner">Tldr<\/div>/)
+    expect(renderBlock('> [!faq]')).toMatch(/<div class="callout-title-inner">Faq<\/div>/)
+    expect(renderBlock('> [!important]')).toMatch(/<div class="callout-title-inner">Important<\/div>/)
+    for (const type of ['note', 'abstract', 'info', 'todo', 'tip', 'success', 'question', 'warning', 'failure', 'danger', 'bug', 'example', 'quote']) {
+      expect(renderBlock(`> [!${type}]`)).toMatch(new RegExp(`<div class="callout-title-inner">${type.charAt(0).toUpperCase() + type.slice(1)}</div>`))
+    }
+  })
+
+  it('三层嵌套：内层严格容器嵌于外层 content（.callout .callout .callout 可达）', () => {
+    const html = renderBlock(['> [!note] 外层', '> > [!tip] 中层', '> > > [!warning] 内层', '> > > 内层正文', '> > 中层正文', '> 外层正文'].join('\n'))
+    expect(html).toContain('data-callout="note"')
+    expect(html).toContain('data-callout="tip"')
+    expect(html).toContain('data-callout="warning"')
+    // 深度嵌套顺序：note 容器开标签最先、warning 最内
+    const i1 = html.indexOf('data-callout="note"')
+    const i2 = html.indexOf('data-callout="tip"')
+    const i3 = html.indexOf('data-callout="warning"')
+    expect(i1).toBeLessThan(i2)
+    expect(i2).toBeLessThan(i3)
+  })
+
+  it('普通引用内 callout（F39）：外层保持 blockquote、内层成 callout', () => {
+    const html = renderBlock(['> 外层普通引用首段', '> > [!bug] 内层 callout', '> > 内层正文'].join('\n'))
+    expect(html).toContain('<blockquote')
+    expect(html).toContain('data-callout="bug"')
+    // 内层 callout 位于外层 blockquote 之内
+    expect(html.indexOf('<blockquote')).toBeLessThan(html.indexOf('data-callout="bug"'))
+  })
+
+  it('列表内 callout（F40）：列表结构保留、callout 容器在列表项内', () => {
+    const doc = ['- 前置条目', '- > [!info] 列表内标题', '  > 列表内正文', '- 后置条目'].join('\n')
+    const blocks = splitReadingBlocks(doc)
+    const list = blocks.find((b) => b.kind === 'list')
+    expect(list, '列表块在场').toBeDefined()
+    expect(list!.html).toContain('data-callout="info"')
+    expect(list!.html).toContain('>前置条目</li>')
+    expect(list!.html).toContain('>后置条目</li>')
+  })
+
+  it('callout 内表格：GFM 表格原管线渲染（网格不放宽降级规则）', () => {
+    const html = renderBlock(['> [!success] 表格', '> | a | b |', '> | - | - |', '> | 1 | 2 |'].join('\n'))
+    expect(html).toContain('data-callout="success"')
+    expect(html).toMatch(/<table>/)
+    expect(html).toContain('<th>a</th>')
+    // 表格前缀残缺仍降级（既有契约不因 callout 放宽）
+    const broken = renderBlock(['> [!success] 残表', '> | a | b |', '> 缺分隔行'].join('\n'))
+    expect(broken).not.toMatch(/<table>/)
+  })
+
+  it('callout 内代码块：围栏卡片管线照常（代码内伪标记字面）', () => {
+    const html = renderBlock(['> [!example] 示例', '> ```js', '> const x = 1', '> ```'].join('\n'))
+    expect(html).toContain('data-callout="example"')
+    expect(html).toMatch(/<pre><code[^>]*>|<div class="[^"]*code/)
+    const pseudo = renderBlock(['> [!note] 标题', '> ```md', '> [!tip] 伪标记', '> ```'].join('\n'))
+    expect(pseudo).toContain('[!tip] 伪标记')
+  })
+
+  it('嵌套普通引用保持紫条语义（callout 内引用仍为 blockquote，不叠 callout）', () => {
+    const html = renderBlock(['> [!quote] 引用型', '> > 内层普通引用'].join('\n'))
+    expect(html).toContain('data-callout="quote"')
+    expect(html).toContain('<blockquote')
+  })
+})
