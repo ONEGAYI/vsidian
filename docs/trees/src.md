@@ -127,6 +127,7 @@ vsidian/
     │   ├── addonUi.ts                 # 附加组件界面贡献共享形状与校验
     │   ├── behaviorFilterQuery.ts     # 行为筛选查询与分页纯函数
     │   ├── blockId.ts                 # 块 id 与块边界单一事实源
+    │   ├── calloutIcon.ts             # Callout 图标值解析与锁版库
     │   ├── calloutSyntax.ts           # Callout 识别单一事实源
     │   ├── changeMapping.ts           # 变更重定位纯函数
     │   ├── chromeContract.ts          # 界面域样式契约探针表
@@ -230,6 +231,7 @@ vsidian/
         ├── behaviorQueryBuilder.ts       # 行为筛选积木查询编辑器
         ├── blockIdStrip.ts               # 阅读渲染块标记剥离纯函数
         ├── calloutFold.ts                # Callout 折叠状态机与箭头
+        ├── calloutIconMount.ts           # Callout 图标装载器
         ├── clipboardPaste.ts             # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts              # 卡片共享状态中立模块
         ├── codeHighlight.ts              # 语法高亮引擎装配与缓存

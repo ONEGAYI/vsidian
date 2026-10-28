@@ -791,12 +791,12 @@
       "category": "line-syntax",
       "kind": "selector",
       "target": ".callout / .callout-title / .callout-icon / .callout-title-inner / .callout-content / [data-callout]",
-      "purpose": "Callout 容器家族（#653/T02 建，#654/T03 全类型/别名/富标题/嵌套组合）：Obsidian 原名即公开主类名（发射侧直接挂 .callout 家族——主名即别名，无 vsidian 前缀名，别名桥不适用）。识别在引用容器直属首段首行（`> [!类型] 标题`，识别器两端共用，13 规范类型 + 14 别名全支持，data-callout 暴露规范化原标识——别名不改写源文；未知类型回落 note 外观）；callout 行替代该层引用紫条与引用底，内部普通引用保留自身样式。Live 为行级形态：容器每行挂 .callout（标题行加 .callout-title、正文行加 .callout-content），data-callout 由最内层 callout 容器胜出（嵌套原标识保留）；**跨行严格父子容器选择器（.callout > .callout-content 等）仅在阅读侧承诺**——Live 行级形态的既知边界（T01 §6.1 矩阵）。阅读为真实容器：div.callout[data-callout] > div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content；显式标题复用既有行内格式与链接渲染（含净化），无显式标题按源文派生默认标题。",
+      "purpose": "Callout 容器家族（#653/T02 建，#654/T03 全类型/别名/富标题/嵌套组合）：Obsidian 原名即公开主类名（发射侧直接挂 .callout 家族——主名即别名，无 vsidian 前缀名，别名桥不适用）。识别在引用容器直属首段首行（`> [!类型] 标题`，识别器两端共用，13 规范类型 + 14 别名全支持，data-callout 暴露规范化原标识——别名不改写源文；未知类型回落 note 外观）；callout 行替代该层引用紫条与引用底，内部普通引用保留自身样式。Live 为行级形态：容器每行挂 .callout（标题行加 .callout-title、正文行加 .callout-content），data-callout 由最内层 callout 容器胜出（嵌套原标识保留）；**跨行严格父子容器选择器（.callout > .callout-content 等）仅在阅读侧承诺**——Live 行级形态的既知边界（T01 §6.1 矩阵：类级/属性级/标题行后代选择器与片段作用域 `.markdown-source-view.mod-cm6 .callout` 在 Live 可达，`.callout > .callout-content`、`.callout .callout` 跨行容器家族与四边 border/blend 仅阅读侧）。阅读为真实容器：div.callout[data-callout] > div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content；显式标题复用既有行内格式与链接渲染（含净化），无显式标题按源文派生默认标题。不承诺任意 Obsidian 主题/复杂选择器（:has() 等内容位置条件）的布局复刻——本条目只承诺上述经过测试的入口。",
       "views": [
         "live",
         "reading"
       ],
-      "states": "Live 标题行在光标/选区端点触及前隐藏 `[!类型]` 声明并以 .callout-icon 呈现（触及显形源码，与 QuoteMark 同款端点语义）；无显式标题时呈现源文派生默认标题（不写回源文）。折叠（#655/T04）：+/- 声明在场的标题行挂 is-collapsible（源文派生）、收起态挂 is-collapsed（视图态消费——calloutFoldField 状态源），标题行行尾呈现 .callout-fold 箭头（携带 data-callout-fold 声明符号；触及标题行时随源码显形退场）；阅读侧收起为 .callout.is-collapsed > .callout-content { display: none }。开合零写回、同实例双模式共享、定位进入收起区自动展开。",
+      "states": "Live 标题行在光标/选区端点触及前隐藏 `[!类型]` 声明并以 .callout-icon 呈现（触及显形源码，与 QuoteMark 同款端点语义）；无显式标题时呈现源文派生默认标题（不写回源文）。折叠（#655/T04）：+/- 声明在场的标题行挂 is-collapsible（源文派生）、收起态挂 is-collapsed（视图态消费——calloutFoldField 状态源），标题行行尾呈现 .callout-fold 箭头（携带 data-callout-fold 声明符号；触及标题行时随源码显形退场）；阅读侧收起为 .callout.is-collapsed > .callout-content { display: none }。开合零写回、同实例双模式共享、定位进入收起区自动展开。图标（#657/T06）：默认态 .callout-icon 为 CSS mask 空元素；--callout-icon 自定义解析成功时注入净化 SVG 并挂内部类 vsidian-callout-icon-custom（mask 关闭、currentColor 随类型色）；非法值保留默认图标并 console.warn 诊断。",
       "dom": "Live：.cm-line 行元素携带行级类 + data-callout 属性；标记为行内 replace widget。阅读：div.callout 严格容器家族。",
       "example": ".callout[data-callout=\"note\"] {\n  /* 类名即 Obsidian 原名，两模式直接命中 */\n  --callout-color: #d40;\n}",
       "obsidian": {
@@ -807,12 +807,14 @@
         "单元 calloutSyntax：识别矩阵与注册表全类型/别名/important 双面（数据源 T01 取证 JSON）",
         "单元 calloutParity：两端对拍（T01 35 夹具 + T03 扩展 F36–F44 全类型/别名/嵌套/列表/富标题）",
         "单元 liveCallout / readingCallout：双模式结构、别名原标识、富标题、嵌套与源锚点契约",
-        "单元 calloutCssContract：变量族 / :where 类型表与图标表（注册表驱动断言）/ 双通道底色 / 紫条替代",
+        "单元 calloutCssContract：变量族 / :where 类型表与图标表（注册表驱动断言）/ 双通道底色 / 紫条替代 / T06 border·blend·--callout-icon 登记",
+        "单元 calloutIcon / calloutIconMount：图标取值解析、锁版库同源、净化与诊断（#657/T06）",
         "浏览器 calloutPaint：明暗主题绘制层证据（computed 底色 / 标题 / 图标）",
         "浏览器 calloutTypes：27 类型值明暗图标与底色、三层嵌套、列表容器真实输入/拖选（T01 §10 缺口收口）",
         "单元 calloutFold：折叠区间派生与状态机矩阵（手动开合零写回/外收内保/改声明采新默认/标记删除丢弃/外部同步/全文重置）、光标迁移、最内层目标解析、落点展开与外部同步钳制",
         "单元 calloutFoldCssContract：.callout-fold 基座/收起旋转/is-collapsed 双模式收起呈现（圆角与 display:none）",
-        "浏览器 calloutFold：真实点击/键位/命令三入口、光标迁移、模式往返共享、阅读重挂不重置、查找双重折叠展开、IME 组合不中断、零写回"
+        "浏览器 calloutFold：真实点击/键位/命令三入口、光标迁移、模式往返共享、阅读重挂不重置、查找双重折叠展开、IME 组合不中断、零写回",
+        "浏览器 calloutIcon：--callout-icon 双模式注入绘制、净化负向、非法诊断、片段热更新与主题/重挂有效（#657/T06）"
       ],
       "introduced": "#653（2026-10-28）"
     },
@@ -2093,22 +2095,25 @@
       "domain": "content",
       "category": "content-variables",
       "kind": "variable",
-      "target": "--callout-color / --callout-default / --callout-summary / --callout-info / --callout-todo / --callout-tip / --callout-important / --callout-success / --callout-question / --callout-warning / --callout-fail / --callout-error / --callout-bug / --callout-example / --callout-quote / --callout-radius / --callout-padding / --callout-title-color / --callout-title-weight / --callout-title-size / --callout-title-padding / --callout-content-padding / --callout-content-background / --callout-border-width / --callout-border-opacity",
-      "purpose": "Callout 公开变量族（#653/T02 建，#654/T03 全类型扩展；Obsidian 原名即公开入口——无 vsidian 前缀名与别名桥）：类型色 --callout-color 同时接受标准 CSS 颜色与既有片段常见的 RGB 三元组（拆属性双通道：内置标准色经背景渐变绘制、三元组经 background-color 绘制，互斥生效——两形态无法在同一声明兼容是 CSS 实测边界，T01 §6.2；非背景通道仅标准色）。类型变量表以 :where([data-callout=…]) 零特异性承载（13 规范类型 + 14 别名全登记，别名共用所属规范类型的变量；important 变量独立 --callout-important——取证 aliasDiscrepancy：帮助页归 tip 别名、CSS 变量面分开；未知类型无规则即回落 --callout-default 的 note 外观）；默认值取 Obsidian 1.14.4 默认主题取证（蓝 亮 #086ddd/暗 #027aff、青 #00bfbc/#53dfdd、绿 #08b94e/#44cf6e、橙 #ec7500/#e9973f、红 #e93147/#fb464c、紫 #7852ee/#a882ff、quote 固定 #9e9e9e；radius 4px、边框宽 0）。内置图标经私有变量 --_vsidian-callout-icon 按类型组分派（lucide-static 0.462.0 锚定；用户可覆盖该私有变量或 :where 规则）。--callout-icon 公开自定义变量与 --callout-blend-mode 归 T06。",
+      "target": "--callout-color / --callout-default / --callout-summary / --callout-info / --callout-todo / --callout-tip / --callout-important / --callout-success / --callout-question / --callout-warning / --callout-fail / --callout-error / --callout-bug / --callout-example / --callout-quote / --callout-radius / --callout-padding / --callout-title-color / --callout-title-weight / --callout-title-size / --callout-title-padding / --callout-content-padding / --callout-content-background / --callout-border-width / --callout-border-opacity / --callout-blend-mode / --callout-icon",
+      "purpose": "Callout 公开变量族（#653/T02 建，#654/T03 全类型扩展，#657/T06 图标与容器变量收口；Obsidian 原名即公开入口——无 vsidian 前缀名与别名桥）：类型色 --callout-color 同时接受标准 CSS 颜色与既有片段常见的 RGB 三元组（拆属性双通道：内置标准色经背景渐变绘制、三元组经 background-color 绘制，互斥生效——两形态无法在同一声明兼容是 CSS 实测边界，T01 §6.2；**非背景通道仅标准色**：图标 currentColor、边框色等通道代入三元组按 unset 降级继承）。类型变量表以 :where([data-callout=…]) 零特异性承载（13 规范类型 + 14 别名全登记，别名共用所属规范类型的变量；important 变量独立 --callout-important——取证 aliasDiscrepancy：帮助页归 tip 别名、CSS 变量面分开；未知类型无规则即回落 --callout-default 的 note 外观）；默认值取 Obsidian 1.14.4 默认主题取证（蓝 亮 #086ddd/暗 #027aff、青 #00bfbc/#53dfdd、绿 #08b94e/#44cf6e、橙 #ec7500/#e9973f、红 #e93147/#fb464c、紫 #7852ee/#a882ff、quote 固定 #9e9e9e；radius 4px、边框宽 0）。容器变量消费（#657/T06，Obsidian app.css 同款形态）：border 三件套（color 经 color-mix 按 --callout-border-opacity 混透明）——阅读容器四边完整消费，Live 行级形态只承诺**左缘近似**（inset box-shadow 通道，零布局位移；默认宽 0 零绘制）；--callout-blend-mode 阅读容器 mix-blend-mode 消费（暗 lighten / 亮 darken 取证值；Live 行级形态不承诺 blend）。图标双通道：默认走私有变量 --_vsidian-callout-icon 的 CSS mask（lucide-static 0.462.0 锚定，13 组与类型表同规则登记）；公开 --callout-icon 支持锁版集合内的 Lucide ID（`lucide-flame` 或裸 `flame`；Obsidian 照录旧拼写 help-circle / alert-triangle / check-circle-2 / quote-glyph 也接受）与**净化后的 SVG 字符串**（复用 htmlSanitize 单一净化面，脚本/事件/外链剥离——a/image/use 移除、非 # 片段 href 剥离；不新增资源授权、不越 CSP），解析成功时注入 SVG 并挂内部类关闭 mask（currentColor 随类型色）；未知 ID / 净化后无内容 / 非法形态**保留默认图标**并给可查诊断（console.warn `[vsidian]` 前缀 + 测试钩子观测面），不静默伪报成功。解析时机覆盖挂载（Live widget/阅读块）、片段装载与热更新、明暗主题翻转与视口重挂；悬停/嵌入/PDF 场景随 T08 接线。",
       "views": [
         "live",
         "reading"
       ],
-      "dom": "定义于 #app（亮色分支覆盖全部调色板类型变量，quote 不轮换）；类型变量经 :where 规则按 data-callout 属性命中（行元素无内联变量）。",
-      "example": ".callout[data-callout=\"note\"] {\n  --callout-color: 212, 64, 0; /* RGB 三元组形态同样生效 */\n}",
+      "dom": "定义于 #app（亮色分支覆盖全部调色板类型变量与 blend，quote 不轮换）；类型变量经 :where 规则按 data-callout 属性命中（行元素无内联变量）；自定义图标注入态挂内部类 vsidian-callout-icon-custom（内部状态标记，非公开契约）。",
+      "example": ".callout[data-callout=\"note\"] {\n  --callout-color: 212, 64, 0; /* RGB 三元组形态同样生效 */\n}\n.callout[data-callout=\"tip\"] {\n  --callout-icon: lucide-bug; /* 或净化后的 <svg>…</svg> 字符串 */\n}",
       "obsidian": {
         "counterpart": "--callout-color 等官方 Callout 变量清单（同名直接生效）",
         "support": "direct"
       },
       "verification": [
-        "calloutCssContract：变量族定义 / 亮色覆盖 / :where 类型表与图标表从注册表驱动断言同步 / 双通道底色",
+        "calloutCssContract：变量族定义 / 亮色覆盖 / :where 类型表与图标表从注册表驱动断言同步 / 双通道底色 / T06 边框与 blend 消费 / --callout-icon 类型表同步 / 注入态规则",
+        "单元 calloutIcon：取值形态解析 / 锁版库与别名 / 库与 mask 表几何同源（同一锁版集合）",
+        "单元 calloutIconMount：净化面（脚本/事件/外链剥离、空壳拒绝）/ 决策三态 / DOM 应用幂等 / console.warn + 诊断 sink 去重",
         "浏览器 calloutPaint：明暗主题两通道 computed 底色证据",
-        "浏览器 calloutTypes：27 类型值 × 明暗图标色与底色 computed 全量证据、important 独立变量覆盖验证"
+        "浏览器 calloutTypes：27 类型值 × 明暗图标色与底色 computed 全量证据、important 独立变量覆盖验证",
+        "浏览器 calloutIcon：真实片段通道的 ID/SVG 注入绘制、净化、非法诊断、热更新、明暗主题、border/blend computed、模式往返与视口重挂（#657/T06）"
       ],
       "introduced": "#653（2026-10-28）"
     },
@@ -2229,20 +2234,20 @@
       "category": "content-limits",
       "kind": "limitation",
       "target": ".callout 及其 data 属性",
-      "purpose": "历史限制（#653/T02 起部分解除，#654/T03 再扩）：note 与未知类型回落（#653）之上，全类型与别名（13 规范类型 + 14 别名 + important 独立变量）、富标题（既有行内格式/链接复用解析与净化）、多层嵌套与列表/引用容器组合的双模式呈现均已支持，见 callout / var-callout-color 条目。剩余边界如实可查：源文转换与类型菜单（T05）、--callout-icon 公开自定义与 --callout-blend-mode（T06）、跨场景（悬停/嵌入/PDF）收口（T08）增量交付；折叠状态机与箭头（.callout-fold / is-collapsible / is-collapsed）已随 #655/T04 交付（见 callout 条目）。",
+      "purpose": "历史限制（#653/T02 起部分解除，#654/T03、#655/T04、#657/T06 逐票收口）：note 与未知类型回落之上，全类型与别名（13 规范类型 + 14 别名 + important 独立变量）、富标题（既有行内格式/链接复用解析与净化）、多层嵌套与列表/引用容器组合的双模式呈现（#653/#654）、折叠状态机与箭头（#655）、CSS 原名变量全量登记（含 --callout-icon 公开自定义：锁版 Lucide ID + 净化 SVG、--callout-blend-mode、border 三件套消费——#657）均已支持，见 callout / var-callout-color 条目。剩余边界如实可查：源文转换与类型菜单（T05）、类型菜单实际配色预览（T07）、悬停/嵌入/PDF 场景的 --callout-icon 注入与收口（T08——当前图标注入覆盖主正文双模式，默认 mask 通道随 CSS 全场景生效）增量交付。",
       "views": [
         "live",
         "reading"
       ],
-      "dom": "已支持部分的真实 DOM 见 callout 条目；未交付部分无对应节点（折叠箭头不发射）。",
+      "dom": "已支持部分的真实 DOM 见 callout 条目；未交付部分无对应节点。",
       "example": "",
       "obsidian": {
         "counterpart": ".callout（部分支持）",
         "support": "direct"
       },
       "verification": [
-        "单元 calloutSyntax / calloutParity / liveCallout / readingCallout / calloutCssContract（#653/#654）",
-        "浏览器 calloutPaint（#653）/ calloutTypes（#654）"
+        "单元 calloutSyntax / calloutParity / liveCallout / readingCallout / calloutCssContract / calloutIcon / calloutIconMount（#653/#654/#657）",
+        "浏览器 calloutPaint（#653）/ calloutTypes（#654）/ calloutFold（#655）/ calloutIcon（#657）"
       ],
       "introduced": "#6（2026-09-23，如实记录不支持）；#653（2026-10-28）转为本片能力说明"
     },
