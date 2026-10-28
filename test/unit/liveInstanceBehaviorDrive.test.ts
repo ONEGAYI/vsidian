@@ -11,7 +11,8 @@
 //   经组合期净变更推导（#593）：起点坐标系被组合覆盖的文本（替换选区的
 //   组合携带选区内容），纯插入与迟入组合（compositionupdate 兜底）为 null；
 // - 网格编辑态（tableRegionField 在场——setTableRegion 激活）、代码上下文
-//   （inCodeContext）、外部同步（externalSync）、SDK 修饰
+//   （inBlockCodeContext，#649 拆分——块级代码/frontmatter 排除，行内
+//   代码放行）、外部同步（externalSync）、SDK 修饰
 //   （addonEditOriginTag）、内置符号补全/包裹（builtinEditOrigin，#595——
 //   IME 定稿符号对的内置加工不重复驱动，终态兜底与补全照常）不驱动；
 // - 表格源码行内（region 未激活）键入照常驱动（#124 同口径：排除面是
@@ -273,7 +274,7 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([])
   })
 
-  it('IME 定稿补驱动门控：取消（空 data）、代码上下文不驱动', async () => {
+  it('IME 定稿补驱动门控：取消（空 data）、块级代码上下文（围栏内）不驱动', async () => {
     const { instance, drives } = setup('```js\nconst a = 1\n```\n')
     const view = instance.getView()!
     const content = view.contentDOM
@@ -361,6 +362,47 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     const view = instance.getView()!
     view.dispatch({ selection: { anchor: 11 } })
     view.dispatch({ changes: { from: 11, insert: '^' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('#649 对照：闭栏标记上补反引号仍不驱动（CodeMark 移出集后靠父节点 FencedCode 覆盖；围栏保持合法）', async () => {
+    // 光标 11 = 闭栏第 2 个 ` 之后；键入 ` 后闭栏 4 ≥ 开栏 3，围栏仍成立、
+    // 树完整——键入破坏围栏的形态（开栏中间键入 x）事务后树已无代码节点，
+    // 修复前后同样放行（事务后判定的既有语义，非本票回归面）
+    const { instance, drives } = setup('```\ncode\n```\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 11 } })
+    view.dispatch({ changes: { from: 11, insert: '`' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('#649 对照：围栏语言行（CodeInfo）内键入仍不驱动', async () => {
+    const { instance, drives } = setup('```js\ncode\n```\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 5 } }) // js 之后
+    view.dispatch({ changes: { from: 5, insert: 'x' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('#649 对照：缩进代码块内键入仍不驱动（CodeBlock 排除）', async () => {
+    const { instance, drives } = setup('    code\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 6 } })
+    view.dispatch({ changes: { from: 6, insert: 'x' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
+  it('#649 对照：降级 frontmatter 头区内键入仍不驱动（fm 区间排除；成型头区光标被引导弹出、用户不可达）', async () => {
+    // 嵌套对象头区：fmModel 降级 null（源码可编辑，frontmatterEditing 引导
+    // 不干预）——fm 区间判定是唯一排除面，此形态用户可把光标留在头区
+    const { instance, drives } = setup('---\nkey:\n  sub: v\n---\nbody\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 9 } }) // 'key:' 行内
+    view.dispatch({ changes: { from: 9, insert: '^' }, userEvent: 'input.type' })
     await flushMicrotasks()
     expect(drives).toEqual([])
   })
