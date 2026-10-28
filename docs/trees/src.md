@@ -229,6 +229,7 @@ vsidian/
         ├── backlinkPanel.ts              # 反链面板 DOM 与四态渲染（#197）
         ├── behaviorQueryBuilder.ts       # 行为筛选积木查询编辑器
         ├── blockIdStrip.ts               # 阅读渲染块标记剥离纯函数
+        ├── calloutFold.ts                # Callout 折叠状态机与箭头
         ├── clipboardPaste.ts             # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts              # 卡片共享状态中立模块
         ├── codeHighlight.ts              # 语法高亮引擎装配与缓存

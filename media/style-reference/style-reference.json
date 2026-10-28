@@ -796,7 +796,7 @@
         "live",
         "reading"
       ],
-      "states": "Live 标题行在光标/选区端点触及前隐藏 `[!类型]` 声明并以 .callout-icon 呈现（触及显形源码，与 QuoteMark 同款端点语义）；无显式标题时呈现源文派生默认标题（不写回源文）。折叠符号本票仅解析，箭头与状态类归 T04。",
+      "states": "Live 标题行在光标/选区端点触及前隐藏 `[!类型]` 声明并以 .callout-icon 呈现（触及显形源码，与 QuoteMark 同款端点语义）；无显式标题时呈现源文派生默认标题（不写回源文）。折叠（#655/T04）：+/- 声明在场的标题行挂 is-collapsible（源文派生）、收起态挂 is-collapsed（视图态消费——calloutFoldField 状态源），标题行行尾呈现 .callout-fold 箭头（携带 data-callout-fold 声明符号；触及标题行时随源码显形退场）；阅读侧收起为 .callout.is-collapsed > .callout-content { display: none }。开合零写回、同实例双模式共享、定位进入收起区自动展开。",
       "dom": "Live：.cm-line 行元素携带行级类 + data-callout 属性；标记为行内 replace widget。阅读：div.callout 严格容器家族。",
       "example": ".callout[data-callout=\"note\"] {\n  /* 类名即 Obsidian 原名，两模式直接命中 */\n  --callout-color: #d40;\n}",
       "obsidian": {
@@ -809,7 +809,10 @@
         "单元 liveCallout / readingCallout：双模式结构、别名原标识、富标题、嵌套与源锚点契约",
         "单元 calloutCssContract：变量族 / :where 类型表与图标表（注册表驱动断言）/ 双通道底色 / 紫条替代",
         "浏览器 calloutPaint：明暗主题绘制层证据（computed 底色 / 标题 / 图标）",
-        "浏览器 calloutTypes：27 类型值明暗图标与底色、三层嵌套、列表容器真实输入/拖选（T01 §10 缺口收口）"
+        "浏览器 calloutTypes：27 类型值明暗图标与底色、三层嵌套、列表容器真实输入/拖选（T01 §10 缺口收口）",
+        "单元 calloutFold：折叠区间派生与状态机矩阵（手动开合零写回/外收内保/改声明采新默认/标记删除丢弃/外部同步/全文重置）、光标迁移、最内层目标解析、落点展开与外部同步钳制",
+        "单元 calloutFoldCssContract：.callout-fold 基座/收起旋转/is-collapsed 双模式收起呈现（圆角与 display:none）",
+        "浏览器 calloutFold：真实点击/键位/命令三入口、光标迁移、模式往返共享、阅读重挂不重置、查找双重折叠展开、IME 组合不中断、零写回"
       ],
       "introduced": "#653（2026-10-28）"
     },
@@ -2226,7 +2229,7 @@
       "category": "content-limits",
       "kind": "limitation",
       "target": ".callout 及其 data 属性",
-      "purpose": "历史限制（#653/T02 起部分解除，#654/T03 再扩）：note 与未知类型回落（#653）之上，全类型与别名（13 规范类型 + 14 别名 + important 独立变量）、富标题（既有行内格式/链接复用解析与净化）、多层嵌套与列表/引用容器组合的双模式呈现均已支持，见 callout / var-callout-color 条目。剩余边界如实可查：折叠状态机与箭头（.callout-fold / is-collapsible / is-collapsed，T04）、源文转换与类型菜单（T05）、--callout-icon 公开自定义与 --callout-blend-mode（T06）、跨场景（悬停/嵌入/PDF）收口（T08）增量交付。",
+      "purpose": "历史限制（#653/T02 起部分解除，#654/T03 再扩）：note 与未知类型回落（#653）之上，全类型与别名（13 规范类型 + 14 别名 + important 独立变量）、富标题（既有行内格式/链接复用解析与净化）、多层嵌套与列表/引用容器组合的双模式呈现均已支持，见 callout / var-callout-color 条目。剩余边界如实可查：源文转换与类型菜单（T05）、--callout-icon 公开自定义与 --callout-blend-mode（T06）、跨场景（悬停/嵌入/PDF）收口（T08）增量交付；折叠状态机与箭头（.callout-fold / is-collapsible / is-collapsed）已随 #655/T04 交付（见 callout 条目）。",
       "views": [
         "live",
         "reading"
