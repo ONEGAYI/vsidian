@@ -169,6 +169,7 @@ async function openMenuAndProbe(file: string, pos: number): Promise<{ visible: b
 export const addonT10Cases: Array<[string, () => Promise<void>]> = [
   ['附加组件 T10：命令/菜单注册上报与同名/伪造身份/Tab/iconKey 明确拒绝（#359）', async () => {
     await ensureEnabled()
+    await vscode.commands.executeCommand(`${ADDON_ID}.reset`)
     await resetDocAndOpen('t10-register.md', '正文一段\n')
     const registrations = await waitRegistrations()
     assert(registrations !== null, '注册结局应上报')
@@ -193,10 +194,11 @@ export const addonT10Cases: Array<[string, () => Promise<void>]> = [
     assert(outcomes['badIconMenu']?.ok === false && String(outcomes['badIconMenu']!.reason).includes('icon-key'),
       `未登记 iconKey 应明确拒绝（${JSON.stringify(outcomes['badIconMenu'])}）`)
 
-    // 宿主命令目录：两条命令（上报门控接受——enabled 态）
-    const catalog = await poll('宿主命令目录含组件命令', async () => {
+    // 每次注册都会发送全表快照；先看到首条不代表最后一条已经到达宿主。
+    const expectedCommands = ['insertStamp', 'greet', 'tabbed-mod'].map((id) => `${ADDON_ID}.${id}`)
+    const catalog = await poll('宿主命令目录含全部放行的组件命令', async () => {
       const list = await commandCatalog()
-      return list.some((entry) => entry.commandId === `${ADDON_ID}.insertStamp`) ? list : undefined
+      return expectedCommands.every((id) => list.some((entry) => entry.commandId === id)) ? list : undefined
     })
     const greet = catalog.find((entry) => entry.commandId === `${ADDON_ID}.greet`)
     assert(greet !== undefined, 'greet 应在宿主命令目录')

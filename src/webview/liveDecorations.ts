@@ -179,6 +179,10 @@ export const LIVE_CLASS_NAMES = {
   tableRegionBottom: 'vsidian-table-region-bottom',
   tableRegionLeft: 'vsidian-table-region-left',
   tableRegionRight: 'vsidian-table-region-right',
+  tableRowSelected: 'vsidian-table-row-selected',
+  tableColumnSelected: 'vsidian-table-column-selected',
+  tableColumnFirst: 'vsidian-table-column-first',
+  tableColumnLast: 'vsidian-table-column-last',
   /** 列对齐修饰（分隔行声明的对齐落到各单元格） */
   tableAlign: (a: TableAlign) => `vsidian-table-align-${a}`,
 } as const
@@ -347,13 +351,18 @@ function tableGridCellDeco(align: TableAlign | null, regionCls = ''): ReturnType
 
 /** 矩形格区在该格上的蒙版类（#73）：区域端点行/列另加边框类（与既有
  *  CSS 联合类选择器同名，仅施加者由外部贴类改为装饰托管）。 */
-function tableRegionClassesFor(region: TableRegion, index: number, col: number): string {
+function tableRegionClassesFor(region: TableRegion, index: number, col: number, rowCount: number): string {
   if (index < region.rowFrom || index > region.rowTo || col < region.columnFrom || col > region.columnTo) return ''
   const cls: string[] = [LIVE_CLASS_NAMES.tableRegionCell]
   if (index === region.rowFrom) cls.push(LIVE_CLASS_NAMES.tableRegionTop)
   if (index === region.rowTo) cls.push(LIVE_CLASS_NAMES.tableRegionBottom)
   if (col === region.columnFrom) cls.push(LIVE_CLASS_NAMES.tableRegionLeft)
   if (col === region.columnTo) cls.push(LIVE_CLASS_NAMES.tableRegionRight)
+  if (region.rowFrom === 0 && region.rowTo === rowCount - 1 && region.columnFrom === region.columnTo) {
+    cls.push(LIVE_CLASS_NAMES.tableColumnSelected)
+    if (index === 0) cls.push(LIVE_CLASS_NAMES.tableColumnFirst)
+    if (index === rowCount - 1) cls.push(LIVE_CLASS_NAMES.tableColumnLast)
+  }
   return cls.join(' ')
 }
 
@@ -706,6 +715,7 @@ function emitTableRowMarks(
   grid: boolean,
   columns?: number,
   region: TableRegion | null = null,
+  rowCount = 0,
 ): void {
   const line = doc.lineAt(node.from)
   const header = node.name === 'TableHeader'
@@ -728,7 +738,7 @@ function emitTableRowMarks(
   for (let col = 0; col < cells.length; col++) {
     const cell = cells[col]!
     if (grid) {
-      const regionCls = regionIndex >= 0 ? tableRegionClassesFor(region!, regionIndex, col) : ''
+      const regionCls = regionIndex >= 0 ? tableRegionClassesFor(region!, regionIndex, col, rowCount) : ''
       out.push(cell.to > cell.from
         ? tableGridCellDeco(aligns?.[col] ?? null, regionCls).range(cell.from, cell.to)
         : emptyTableCellDecoFor(aligns?.[col] ?? null,
@@ -983,7 +993,8 @@ function emitForRange(
           gridPlans.set(node.from, plan)
         }
         if (plan) {
-          const first = Math.max(fromLine, doc.lineAt(node.from).number)
+          const tableLine = doc.lineAt(node.from)
+          const first = Math.max(fromLine, tableLine.number)
           const last = Math.min(toLine, doc.lineAt(Math.min(node.to, doc.length)).number)
           for (let lineNo = first; lineNo <= last; lineNo++) {
             const entry = plan.rows.get(lineNo)
@@ -996,6 +1007,11 @@ function emitForRange(
               continue
             }
             addLineCls(lineNo, LIVE_CLASS_NAMES.tableGridRow)
+            if (region?.tableFrom === tableLine.from && region.rowFrom === region.rowTo &&
+              region.columnFrom === 0 && region.columnTo === plan.columns - 1 &&
+              lineNo === tableLine.number + region.rowFrom + (region.rowFrom > 0 ? 1 : 0)) {
+              addLineCls(lineNo, LIVE_CLASS_NAMES.tableRowSelected)
+            }
             gridLines.set(lineNo, { kind: entry.kind, plan })
           }
           // 只有光标直接停在分隔行才显露可编辑源码。跨行选区即使覆盖该行，
@@ -1019,7 +1035,7 @@ function emitForRange(
         if (lineNo >= fromLine && lineNo <= toLine) {
           addLineCls(lineNo, LIVE_CLASS_NAMES.tableHeaderLine)
           const grid = gridPlans.get(tableAncestor(path)?.from ?? -1)
-          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns, region)
+          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns, region, grid?.rows.size)
         }
         return
       }
@@ -1027,7 +1043,7 @@ function emitForRange(
         const lineNo = doc.lineAt(node.from).number
         if (lineNo >= fromLine && lineNo <= toLine) {
           const grid = gridPlans.get(tableAncestor(path)?.from ?? -1)
-          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns, region)
+          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns, region, grid?.rows.size)
         }
         return
       }

@@ -210,6 +210,42 @@ try {
       } finally { await page.close() }
     }
   }
+  for (const axis of ['row', 'column']) {
+    const page = await browser.newPage()
+    try {
+      await page.setContent('<div id="app"></div>')
+      await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+      await page.addScriptTag({ url: fixtureScript.url })
+      // v1.5.1 的公开格选择器仍应实际命中；配置重建不改变其承载节点。
+      await page.addStyleTag({ content: '.vsidian-table-grid-cell { padding: 2px 8px !important; }' })
+      const source = '| H1 | H2 |\n| --- | --- |\n| B1 | B2 |\n| C1 | C2 |\n'
+      await page.evaluate(text => window.initTable(text), source)
+      const baseWidth = await page.locator('.vsidian-table-grid-cell').nth(1)
+        .evaluate(cell => Number.parseFloat(getComputedStyle(cell).borderLeftWidth))
+      await page.locator(`.vsidian-table-${axis}-handle`).nth(axis === 'row' ? 1 : 0).click()
+      const selector = axis === 'row' ? '.vsidian-table-row-selected' : '.vsidian-table-column-selected'
+      await page.waitForFunction(({ selector, count }) => document.querySelectorAll(selector).length === count,
+        { selector, count: axis === 'row' ? 1 : 3 })
+      for (const readOnly of [true, false]) {
+        await page.evaluate(value => window.setTableInputMode(value, true), readOnly)
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+        const paint = await page.locator(selector).evaluateAll((elements, axis) => elements.map(element => {
+          const style = getComputedStyle(element)
+          const rect = element.getBoundingClientRect()
+          return { visible: rect.width > 0 && rect.height > 0 && style.visibility === 'visible',
+            width: axis === 'row' ? style.outlineWidth : style.borderLeftWidth,
+            color: axis === 'row' ? style.outlineColor : style.borderLeftColor }
+        }), axis)
+        assert.equal(paint.length, axis === 'row' ? 1 : 3, `配置重建后须保留完整 ${axis} 轮廓`)
+        assert(paint.every(p => p.visible && Number.parseFloat(p.width) > baseWidth &&
+          p.color !== 'rgba(0, 0, 0, 0)' && p.color !== 'transparent'), `轮廓须实际可见且比普通格线更醒目：${JSON.stringify(paint)}`)
+        assert.equal(await page.locator('.vsidian-table-grid-cell').first().evaluate(cell => getComputedStyle(cell).paddingLeft), '8px')
+        assert.equal((await page.evaluate(() => window.readEditor())).text, source, '配置重建与重绘不得修改正文')
+      }
+      passed++
+      console.log(`[原生输入][PASS] ${axis} 轮廓跨只读/可编辑配置重建与历史片段`)
+    } finally { await page.close() }
+  }
   const navigationFailures = []
   for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'handle-hover-refresh', 'handle-hover-visible-refresh', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
     const page = await browser.newPage()

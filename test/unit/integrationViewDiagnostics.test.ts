@@ -13,7 +13,9 @@ it('视图等待超时保留最后一帧图表与弹窗探针（#446 条目12）
     { viewMode: 'live', selectionOffset: 0, liveMermaidCount: 2,
       paint: { mermaid: { rendered: 0, error: 0, count: 2 }, graphic: { frames: 2, overlay: false } } },
     { viewMode: 'live', selectionOffset: 256, liveMermaidCount: 5, readingMermaidCount: 0,
+      tableGrid: { visibleRows: 3, rowHandles: 3 },
       paint: { mermaid: { rendered: 4, error: 1, count: 5 },
+        table: { regionCellCount: 0, rowOutlineWidth: null },
         docStyle: { mainRules: 3, readingParagraphColor: null, readingHeadingColor: null },
         graphic: { frames: 5, editButtons: 5, popupButtons: 5, overlay: true, overlaySvg: false } } },
   ]
@@ -33,6 +35,8 @@ it('视图等待超时保留最后一帧图表与弹窗探针（#446 条目12）
   const observed = JSON.parse(error.message.split('最后观测：')[1])
   expect(observed).toMatchObject({ viewMode: 'live', selectionOffset: 256,
     liveMermaidCount: 5, readingMermaidCount: 0,
+    tableGrid: { visibleRows: 3, rowHandles: 3 },
+    table: { regionCellCount: 0, rowOutlineWidth: null },
     mermaid: { rendered: 4, error: 1, count: 5 },
     docStyle: { mainRules: 3, readingParagraphColor: null, readingHeadingColor: null },
     graphic: { frames: 5, editButtons: 5, popupButtons: 5, overlay: true, overlaySvg: false } })

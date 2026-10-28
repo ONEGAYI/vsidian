@@ -35,6 +35,7 @@ import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import * as nodeHttps from 'node:https'
 import * as nodePath from 'node:path'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
@@ -1499,6 +1500,8 @@ async function waitViewState(
         graphic: paint?.['graphic'],
         html: paint?.['html'],
         docStyle: paint?.['docStyle'],
+        table: paint?.['table'],
+        tableGrid: s['tableGrid'],
         // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
         readingBlockCount: s['readingBlockCount'],
         readingMountedBlocks: s['readingMountedBlocks'],
@@ -2085,6 +2088,168 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await vscode.workspace.applyEdit(restore), '恢复编辑应成功')
     await doc.save()
     assert(await readDisk('mode.md') === MODE_DOC_TEXT, '用例结束应恢复 mode.md 基线')
+  }],
+
+  ['diff 默认入口退让：未指定 override 的 Markdown 对比使用原生文本差异编辑器', async () => {
+    await resetLastMode()
+    // 检查 vscode.diff 的默认仲裁，不预先强制 override:true。
+    // SCM 保留焦点与内置 Git 资源命令由下方独立用例覆盖。
+    await vscode.commands.executeCommand('vscode.diff', wsUri('lf.md'), wsUri('mode.md'), '默认入口对比')
+    const tab = await poll('默认入口应退让为文本 diff', () => {
+      const active = vscode.window.tabGroups.activeTabGroup.activeTab
+      return active?.input instanceof vscode.TabInputTextDiff ? active : undefined
+    }, 5000)
+    const input = tab.input as vscode.TabInputTextDiff
+    assert(input.original.toString() === wsUri('lf.md').toString(), '退让保留左侧资源')
+    assert(input.modified.toString() === wsUri('mode.md').toString(), '退让保留右侧资源')
+    await poll('两侧应物化为原生文本编辑器', () =>
+      vscode.window.visibleTextEditors.length === 2 ? true : undefined, 5000)
+    for (const file of ['lf.md', 'mode.md']) {
+      const editor = vscode.window.visibleTextEditors.find((candidate) => candidate.document.uri.toString() === wsUri(file).toString())
+      assert(editor?.document.getText() === await readDisk(file), `${file} 文本控件应显示完整源文`)
+    }
+    await poll('退让完成后只保留一个文本对比标签', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      return tabs.length === 1 && tabs[0].input instanceof vscode.TabInputTextDiff ? true : undefined
+    }, 5000)
+  }],
+
+  ['diff 保留侧栏焦点：SCM 保留焦点打开仍退让为原生文本对比', async () => {
+    await resetLastMode()
+    await vscode.commands.executeCommand('workbench.view.scm')
+    await vscode.commands.executeCommand('vscode.diff', wsUri('lf.md'), wsUri('mode.md'), 'SCM preserveFocus', {
+      preserveFocus: true, preview: false,
+    })
+    await poll('SCM 保留焦点打开应退让为原生文本 diff', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      return tabs.length === 1 && tabs[0].input instanceof vscode.TabInputTextDiff &&
+        vscode.window.visibleTextEditors.length === 2 ? true : undefined
+    }, 5000)
+  }],
+
+  ['diff Git 默认入口退让：真实提交、暂存区与工作区的左右版本正确', async () => {
+    await resetLastMode()
+    const repoDir = await mkdtemp(nodePath.join(wsDir, 'native-diff-git-'))
+    const file = vscode.Uri.file(nodePath.join(repoDir, 'sample.md'))
+    for (const args of [
+      ['init'], ['config', 'user.name', 'Vsidian Test Fixture'],
+      ['config', 'user.email', 'vsidian-fixture@example.invalid'], ['config', 'commit.gpgsign', 'false'],
+      ['config', 'core.autocrlf', 'false'],
+    ]) execFileSync('git', args, { cwd: repoDir, stdio: 'pipe' })
+    await writeFile(file.fsPath, '# commit A\n')
+    execFileSync('git', ['add', '.'], { cwd: repoDir })
+    execFileSync('git', ['commit', '-m', 'test: baseline', '-m', 'Create the initial diff fixture.'], { cwd: repoDir })
+    await writeFile(file.fsPath, '# commit B\n')
+    execFileSync('git', ['commit', '-am', 'test: history', '-m', 'Create a second revision for comparison.'], { cwd: repoDir })
+    await writeFile(file.fsPath, '# index C\n')
+    execFileSync('git', ['add', '.'], { cwd: repoDir })
+    const git = await vscode.extensions.getExtension<{
+      getAPI(version: 1): {
+        openRepository(root: vscode.Uri): Promise<{ status(): Promise<void> } | null>
+        toGitUri(uri: vscode.Uri, ref: string): vscode.Uri
+      }
+    }>('vscode.git')!.activate()
+    const gitApi = git.getAPI(1)
+    const repository = await gitApi.openRepository(vscode.Uri.file(repoDir))
+    assert(repository, '内置 Git 应识别测试仓库')
+    await repository.status()
+    const gitUri = (ref: string): vscode.Uri => gitApi.toGitUri(file, ref)
+    await vscode.commands.executeCommand('vscode.open', wsUri('mode.md'), { preview: false })
+    for (const [title, original, modified, leftText, rightText] of [
+      ['sample.md (Index)', gitUri('HEAD'), gitUri(''), '# commit B\n', '# index C\n'],
+      ['sample.md (Working Tree)', gitUri('~'), file, '# index C\n', '# worktree D\n'],
+      ['sample.md (History)', gitUri('HEAD~1'), gitUri('HEAD'), '# commit A\n', '# commit B\n'],
+    ] as const) {
+      await vscode.commands.executeCommand('workbench.view.scm')
+      if (title === 'sample.md (Working Tree)') {
+        await writeFile(file.fsPath, '# worktree D\n')
+        await repository.status()
+      }
+      if (title === 'sample.md (History)') {
+        await vscode.commands.executeCommand('vscode.diff', original, modified, title, {
+          preview: false, preserveFocus: true,
+        })
+      } else {
+        // 经内置 Git 的资源打开命令进入，覆盖 Resource.openChange 的真实参数。
+        await vscode.commands.executeCommand('git.openChange', file)
+      }
+      await poll(`${title} 应只保留文本 diff 且内容正确`, () => {
+        const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+        const input = tabs.find((tab) => tab.input instanceof vscode.TabInputTextDiff)?.input
+        const expectedTabCount = title === 'sample.md (Index)' ? 2 : 1
+        if (tabs.length !== expectedTabCount || !(input instanceof vscode.TabInputTextDiff)) return undefined
+        const editors = vscode.window.visibleTextEditors
+        return input.original.toString() === original.toString() && input.modified.toString() === modified.toString() &&
+          editors.find((editor) => editor.document.uri.toString() === original.toString())?.document.getText() === leftText &&
+          editors.find((editor) => editor.document.uri.toString() === modified.toString())?.document.getText() === rightText
+          ? true : undefined
+      }, 10000)
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+    }
+    // 退让不能把 Markdown 的普通默认入口也改成文本编辑器。
+    await vscode.commands.executeCommand('vscode.open', file)
+    await poll('普通打开仍为 Vsidian', () => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+      return input instanceof vscode.TabInputCustom && input.viewType === VIEW_TYPE ? true : undefined
+    })
+  }],
+
+  ['diff 未保存内容保护：退让保留两侧草稿，保存后清理旧对比', async () => {
+    await resetLastMode()
+    const left = await vscode.workspace.openTextDocument(wsUri('lf.md'))
+    const right = await vscode.workspace.openTextDocument(wsUri('mode.md'))
+    const leftBefore = left.getText()
+    const rightBefore = right.getText()
+    // 真实用户可以先有普通标签；退让只负责回收本次旧对比。
+    await openWithEditor('lf.md')
+    await waitSessionReady('lf.md')
+    const ordinaryTab = vscode.window.tabGroups.activeTabGroup.activeTab
+    assert(ordinaryTab?.input instanceof vscode.TabInputCustom, '前置：普通 Vsidian 标签已打开')
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(left.uri, new vscode.Position(0, 0), 'left draft\n')
+    edit.insert(right.uri, new vscode.Position(0, 0), 'right draft\n')
+    assert(await vscode.workspace.applyEdit(edit), '应创建两侧未保存输入')
+    try {
+      await vscode.commands.executeCommand('vscode.diff', left.uri, right.uri, 'dirty diff', { preview: false })
+      const nativeTab = await poll('脏文档也应退让并显示两侧完整草稿', () => {
+        const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+        if (!tab || !(tab.input instanceof vscode.TabInputTextDiff)) return undefined
+        return tab.input.original.toString() === left.uri.toString() && tab.input.modified.toString() === right.uri.toString() &&
+          vscode.window.visibleTextEditors.length === 2 ? tab : undefined
+      }, 10000)
+      assert(left.getText() === `left draft\n${leftBefore}` && left.isDirty, '左侧草稿与 dirty 不得被退让丢弃')
+      assert(right.getText() === `right draft\n${rightBefore}` && right.isDirty, '右侧草稿与 dirty 不得被退让丢弃')
+      assert(await readDisk('lf.md') === leftBefore && await readDisk('mode.md') === rightBefore, '退让不得写磁盘')
+      // 新宿主可能已经直接打开文本 diff，不应强求它制造旧标签。
+      const oldDiffTabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+        .filter((tab) => tab.label === 'dirty diff' && !(tab.input instanceof vscode.TabInputTextDiff))
+      await left.save()
+      assert(right.getText() === `right draft\n${rightBefore}` && right.isDirty, '保存左侧不能丢弃或保存右侧草稿')
+      assert(oldDiffTabs.every((tab) => vscode.window.tabGroups.all.some((group) => group.tabs.includes(tab))),
+        '旧宿主仍有右侧草稿时保留退让前的标签')
+      await right.save()
+      await poll('两侧保存后旧对比清理且原生对比保留', () => {
+        const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+        const diffTabs = tabs.filter((tab) => tab.label === 'dirty diff')
+        return diffTabs.length === 1 && diffTabs[0] === nativeTab && tabs.includes(ordinaryTab) ? true : undefined
+      }, 5000).catch((error: unknown) => {
+        const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).map((tab) => ({
+          label: tab.label, dirty: tab.isDirty, active: tab.isActive,
+          kind: tab.input instanceof vscode.TabInputTextDiff ? 'text-diff' :
+            tab.input instanceof vscode.TabInputCustom ? 'custom' : tab.input instanceof vscode.TabInputText ? 'text' : 'other',
+        }))
+        throw new Error(`${String(error)}；leftDirty=${left.isDirty} rightDirty=${right.isDirty} tabs=${JSON.stringify(tabs)}`)
+      })
+      assert(left.getText() === `left draft\n${leftBefore}` && right.getText() === `right draft\n${rightBefore}`,
+        '回收旧对比后两侧已保存草稿仍完整')
+    } finally {
+      const restore = new vscode.WorkspaceEdit()
+      restore.replace(left.uri, new vscode.Range(left.positionAt(0), left.positionAt(left.getText().length)), leftBefore)
+      restore.replace(right.uri, new vscode.Range(right.positionAt(0), right.positionAt(right.getText().length)), rightBefore)
+      assert(await vscode.workspace.applyEdit(restore), '恢复测试文档')
+      await left.save()
+      await right.save()
+    }
   }],
 
   ['diff 视图防御：三命令与循环命令均 no-op，不折叠对比（#38 D10）', async () => {
@@ -5253,6 +5418,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   ['表格行列选中在绘制层显示完整轮廓与高亮（#43）', async () => {
     await openWithEditor('table43-crlf.md')
     await waitSessionReady('table43-crlf.md')
+    // ready 只保证消息桥已接通；抓手由布局帧挂载，提前发送 click 会被丢弃。
+    await waitViewState('table43-crlf.md', (v) => v.viewMode === 'live' && v.tableGrid?.rowHandles === 3 &&
+      v.paint?.table?.cellVisible === true && v.paint.table.gridDisplay === 'grid')
     const uri = wsUri('table43-crlf.md').toString()
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'table.test.select', axis: 'row', index: 1 })

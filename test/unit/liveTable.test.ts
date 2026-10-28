@@ -19,7 +19,7 @@ installLocale('zh-cn', zhCn)
 // - 增量装饰与全量重建对拍一致（RangeSet.eq）
 // - 千行单表：装饰构建/单格编辑增量在宽松时限内完成且写回正确
 import { describe, it, expect, vi } from 'vitest'
-import { Compartment, EditorSelection, EditorState, RangeSet, Text } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, RangeSet, StateEffect, Text } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, deleteCharBackward, deleteCharForward } from '@codemirror/commands'
 import type { DecorationSet } from '@codemirror/view'
@@ -985,6 +985,29 @@ const settle = async (): Promise<void> => {
 }
 
 describe('单元格编辑权威链路', () => {
+  it.each(['row', 'column'] as const)('配置重建后保留 %s 选区的轮廓类与完整内容', async (axis) => {
+    const linked = await setupLinked(TABLE_DOC)
+    try {
+      const view = linked.controller.getView()!
+      const editable = new Compartment()
+      view.dispatch({ effects: StateEffect.appendConfig.of(editable.of(EditorState.readOnly.of(false))) })
+      await settle()
+      linked.controller.handleHostMessage({ kind: 'table.test.select', axis, index: axis === 'row' ? 1 : 0 })
+      await settle()
+      const selected = view.state.field(tableRegionField)
+      const selector = axis === 'row' ? '.vsidian-table-row-selected' : '.vsidian-table-column-selected'
+      const count = axis === 'row' ? 1 : 3
+      expect(view.contentDOM.querySelectorAll(selector)).toHaveLength(count)
+      for (const readOnly of [true, false]) {
+        view.dispatch({ effects: editable.reconfigure(EditorState.readOnly.of(readOnly)) })
+        await settle()
+        expect(view.state.field(tableRegionField)).toEqual(selected)
+        expect(view.contentDOM.querySelectorAll(selector)).toHaveLength(count)
+        expect(view.state.doc.toString()).toBe(TABLE_DOC)
+      }
+    } finally { linked.controller.dispose() }
+  })
+
   it('格内全选再删除只清空当前格，保留管道、分隔行和其他格', async () => {
     const linked = await setupLinked(TABLE_DOC)
     const view = linked.controller.getView()!
