@@ -357,6 +357,18 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '·', replaced: null }])
   })
 
+  it('#649 行内代码内退格删除驱动：delete.backward 在行内代码内照常驱动恰一次（CHANGELOG-API 承诺面）', async () => {
+    const { instance, drives } = setup('`·`\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 2 } })
+    view.dispatch({ changes: { from: 1, to: 2 }, userEvent: 'delete.backward' })
+    await flushMicrotasks()
+    expect(drives).toEqual([{
+      instanceId: 'main', userEvent: 'delete.backward', inputText: '',
+      replaced: { from: 1, to: 2, text: '·' },
+    }])
+  })
+
   it('#649 对照：块级 HTML 内键入仍不驱动（块级排除面不变）', async () => {
     const { instance, drives } = setup('<div>\nhello\n</div>\n')
     const view = instance.getView()!
@@ -401,7 +413,7 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     // 不干预）——fm 区间判定是唯一排除面，此形态用户可把光标留在头区
     const { instance, drives } = setup('---\nkey:\n  sub: v\n---\nbody\n')
     const view = instance.getView()!
-    view.dispatch({ selection: { anchor: 9 } }) // 'key:' 行内
+    view.dispatch({ selection: { anchor: 9 } }) // 嵌套 sub 行行首（'key:' 行止于 8，pos 9 在 fm 区间内）
     view.dispatch({ changes: { from: 9, insert: '^' }, userEvent: 'input.type' })
     await flushMicrotasks()
     expect(drives).toEqual([])
