@@ -23,6 +23,14 @@ import type { ImageResourceManager } from './imageResource'
 import { DocumentStyleBinding } from './docStyleLoader'
 import { docScopeKeyOf } from '../shared/docStyle'
 import { onLocaleChanged } from '../shared/i18n'
+import { Text } from '@codemirror/state'
+import {
+  calloutFoldSpansCached,
+  calloutFoldView,
+  decorateCalloutFoldControlsIn,
+  pruneCalloutOverrides,
+  type CalloutFoldOverride,
+} from './calloutFold'
 
 /** 四项、总量 2 MiB、单项 512 KiB；大目标只供当前实例使用。 */
 const CACHE_MAX_ENTRIES = 4
@@ -328,6 +336,14 @@ export function refLoadedContentOfResult(
 export class RefContentInstance {
   fmExpanded = false
   scrollTop = 0
+  /**
+   * #659（T08）callout 折叠的手动翻转记录（视图态——规格 §5：零源文写入、
+   * 零 dirty、零宿主撤销项）。实例会话内为 Reading 形态的状态源；内部
+   * Live 在场时由其 StateField 承载（embedCard 在 init 灌入/teardown 导出，
+   * 双向保持「同实例 Live/阅读共享状态」）；重开实例（dispose 后新建）
+   * 自然从空集起步 = 源码默认态。
+   */
+  readonly calloutFoldOverrides = new Map<number, CalloutFoldOverride>()
   private released = false
   /** #333 挂载代次序列（同实例每次 mount 递增——挂载身份的可观测发放） */
   private mountSeq = 0
@@ -377,6 +393,12 @@ export interface RefContentSurface {
   codeHighlight(): boolean
   onEmbedBlockMounted?(el: HTMLElement, target: RefLoadedContent): void
   onEmbedBlockUnmounted?(el: HTMLElement): void
+  /**
+   * #659（T08）Reading 侧 callout 折叠翻转的通知面：容器（嵌入卡）注入
+   * 以同步内部 Live 的 StateField（Live 在场时它是状态承载）；缺省不注入
+   * ——纯 Reading 容器（悬停浮层无内部 Live）只写实例状态。
+   */
+  onCalloutFoldChanged?(next: ReadonlyMap<number, CalloutFoldOverride>): void
 }
 
 export interface RefMountOptions extends RefContentSurface {}
@@ -425,6 +447,9 @@ export class RefContentMount {
       scrollEl: options.scrollEl,
       onBlockMounted: (el) => this.mountBlock(el),
       onBlockUnmounted: (el) => this.unmountBlock(el),
+      // #659（T08）Reading 侧 callout 折叠交互：翻转实例状态源（Live 在场
+      // 时经 surface 回调同步其 StateField），呈现刷新走 syncCalloutFolds
+      onCalloutFoldToggle: (key) => this.toggleCalloutFold(key),
     }) : null
     // #258：滚轮事件可能只是驱动外层（卡已到边由滚动链接续外层，或事件
     // target 在卡域边界附近穿过）——内层未实际滚动就不构成新阅读意图。
@@ -598,7 +623,88 @@ export class RefContentMount {
         }
       })
     }
+    // #659（T08）callout 折叠消费：装载（含外部刷新重载）后按新文本派生
+    // spans、清理失效 overrides 并施加装饰（虚拟化推视图、回退路径直装饰）
+    this.syncCalloutFolds()
     return true
+  }
+
+  // ---- #659（T08）callout 折叠（Reading 形态消费面） ----
+
+  /** 当前装载文本的可折叠 spans（calloutFold 纯函数族全量派生 + 共享缓存） */
+  private calloutFoldSpansOf(): ReturnType<typeof calloutFoldSpansCached> {
+    const mdTarget = this.target !== null && !('kind' in this.target) ? this.target : null
+    return mdTarget === null
+      ? []
+      : calloutFoldSpansCached(Text.of(mdTarget.text.split('\n')), undefined)
+  }
+
+  /**
+   * 折叠状态施加（render/翻转/外部导出共用）：失效 overrides 清理 →
+   * 有效折叠视图派生 → 虚拟化推 view（重装饰 + 高度重测）、无布局回退
+   * 路径对内容容器一次装饰。重挂载恢复本次实例会话内的折叠选择（实例
+   * overrides 是状态源）；不读取别的实例状态。
+   */
+  private syncCalloutFolds(): void {
+    if (this.released) {
+      return
+    }
+    const spans = this.calloutFoldSpansOf()
+    if (this.instance.calloutFoldOverrides.size > 0) {
+      const pruned = pruneCalloutOverrides(this.instance.calloutFoldOverrides, spans)
+      if (pruned.size !== this.instance.calloutFoldOverrides.size) {
+        this.instance.calloutFoldOverrides.clear()
+        for (const [key, override] of pruned) {
+          this.instance.calloutFoldOverrides.set(key, override)
+        }
+      }
+    }
+    const folds = calloutFoldView(this.instance.calloutFoldOverrides, spans)
+    if (this.view) {
+      this.view.setCalloutFoldState(folds)
+    } else {
+      decorateCalloutFoldControlsIn(
+        this.options.contentEl, folds, (key) => this.toggleCalloutFold(key))
+    }
+  }
+
+  /**
+   * Reading 侧折叠翻转（箭头点击入口）：当前态取反写入实例 overrides
+   * （视图态零源文出站），刷新装饰并通知容器（内部 Live 在场时同步其
+   * StateField）。无目标/键脱靶时静默 no-op。
+   */
+  toggleCalloutFold(key: number): void {
+    if (this.released) {
+      return
+    }
+    const spans = this.calloutFoldSpansOf()
+    const current = calloutFoldView(this.instance.calloutFoldOverrides, spans)
+      .find((v) => v.span.key === key)
+    if (!current) {
+      return
+    }
+    this.instance.calloutFoldOverrides.set(key, {
+      folded: !current.folded,
+      declFold: current.span.declFold,
+    })
+    this.syncCalloutFolds()
+    this.options.onCalloutFoldChanged?.(this.instance.calloutFoldOverrides)
+  }
+
+  /**
+   * 外部写入折叠状态（embedCard 的 Live 通道：init 灌入后的 StateField 值
+   * 或 teardown 导出回放）并刷新 Reading 装饰——Live↔Reading 模式往返的
+   * 「同实例共享状态」落点。
+   */
+  applyCalloutFoldOverrides(next: ReadonlyMap<number, CalloutFoldOverride>): void {
+    if (this.released) {
+      return
+    }
+    this.instance.calloutFoldOverrides.clear()
+    for (const [key, override] of next) {
+      this.instance.calloutFoldOverrides.set(key, override)
+    }
+    this.syncCalloutFolds()
   }
 
   /**

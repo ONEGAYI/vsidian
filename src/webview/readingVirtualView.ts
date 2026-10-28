@@ -33,7 +33,7 @@ import {
   rangeFoldHidden,
   type HeadingFoldSpan,
 } from './headingFold'
-import { createCalloutFoldArrow, type CalloutFoldSpan } from './calloutFold'
+import { decorateCalloutFoldControlsIn, type CalloutFoldSpan } from './calloutFold'
 import type { ReadingCalloutFoldPaintProbe, ReadingFoldPaintProbe } from '../shared/protocol'
 import type { DiagnosticEvent } from '../shared/testDiagnostics'
 import type { FindMatch } from './findSession'
@@ -327,14 +327,11 @@ export class VirtualReadingView {
   }
 
   /** 块内 callout 折叠装饰的清除（重装饰前置）：移除注入的箭头与状态类，
-   *  保留 readingMarkdown 渲染的原始结构（div.callout 家族不动） */
+   *  保留 readingMarkdown 渲染的原始结构（div.callout 家族不动）——
+   *  #659（T08）起实现收敛至 calloutFold.decorateCalloutFoldControlsIn
+   *  共享函数（引用实例同源消费），本方法为转发壳 */
   private stripCalloutFoldDecorations(el: HTMLElement): void {
-    for (const arrow of el.querySelectorAll('.callout-fold')) {
-      arrow.remove()
-    }
-    for (const dom of el.querySelectorAll('div.callout')) {
-      dom.classList.remove('is-collapsible', 'is-collapsed')
-    }
+    decorateCalloutFoldControlsIn(el, [], () => undefined)
   }
 
   /**
@@ -346,42 +343,16 @@ export class VirtualReadingView {
    * StateField，呈现刷新由控制器的折叠侦测闭环驱动）。按序 zip 会把
    * 不可折叠 callout（无符号/标题-only——渲染容器但不产出折叠记录）错配
    * 进可折叠序列（评审修复 P2）；锚点缺失（防御：行界表不可用的渲染
-   * 形态）不装饰不崩溃。
+   * 形态）不装饰不崩溃。#659（T08）：实现收敛至 calloutFold 共享函数。
    */
   private decorateCalloutFoldControls(el: HTMLElement, block: ReadingBlock): void {
-    this.stripCalloutFoldDecorations(el)
-    if (this.calloutFolds.length === 0 || !this.onCalloutFoldToggle) {
+    if (!this.onCalloutFoldToggle) {
+      this.stripCalloutFoldDecorations(el)
       return
     }
-    const inBlock = this.calloutFolds.filter((v) =>
-      v.span.markerFrom >= block.start && v.span.markerFrom <= block.end)
-    if (inBlock.length === 0) {
-      return
-    }
-    const doms = el.querySelectorAll<HTMLElement>('div.callout[data-vsidian-src-start]')
-    const domByKey = new Map<string, HTMLElement>()
-    for (const dom of doms) {
-      domByKey.set(dom.getAttribute('data-vsidian-src-start') ?? '', dom)
-    }
-    for (const v of inBlock) {
-      const dom = domByKey.get(String(v.span.key))
-      if (!dom) {
-        continue
-      }
-      dom.classList.add('is-collapsible')
-      const title = dom.querySelector<HTMLElement>('.callout-title')
-      if (!title) {
-        continue
-      }
-      if (v.folded) {
-        dom.classList.add('is-collapsed')
-      }
-      title.appendChild(createCalloutFoldArrow({
-        folded: v.folded,
-        declFold: v.span.declFold,
-        onToggle: () => this.onCalloutFoldToggle?.(v.span.key),
-      }))
-    }
+    decorateCalloutFoldControlsIn(el, this.calloutFolds, (key) => this.onCalloutFoldToggle?.(key), {
+      start: block.start, end: block.end,
+    })
   }
 
   /** 状态变化时对已挂块重装饰（不重建块序列） */

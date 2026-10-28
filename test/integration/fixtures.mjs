@@ -546,6 +546,17 @@ const PDF_EXPORT_T02_DOC = (() => {
     '',
     '<video src="https://example.com/t02-clip.mp4"></video>',
     '',
+    // T08（#659）callout 强制展开样本：`-` 收起声明的多层嵌套正文在导出
+    // PDF 中必须完整可见（装配层无折叠消费方——此段钉住该契约的产物面）
+    '> [!note]- 外层收起声明 PDF-T02-CALLOUT-OUTER',
+    '> 外层正文标记：PDF-T02-CALLOUT-OUTER-BODY。',
+    '>',
+    '> > [!warning]- 中层收起声明',
+    '> > 中层正文标记：PDF-T02-CALLOUT-MIDDLE-BODY。',
+    '> >',
+    '> > > [!bug]- 内层收起声明',
+    '> > > 内层正文标记：PDF-T02-CALLOUT-INNER-BODY。',
+    '',
   ]
   for (let i = 1; i <= 40; i++) {
     lines.push(`填充段 ${i}：T02 长文档正文行，产生多页分页。`, '')

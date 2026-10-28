@@ -127,6 +127,78 @@ describe('mountExportDocument：全量装配与嵌入展开', () => {
     expect(root.textContent).toContain('尾段文本 PDF-ASSEMBLY-TAIL。')
   })
 
+  it('T08 callout 强制展开：`-` 与多层嵌套正文在导出 DOM 完整可见（不产折叠态/箭头）', () => {
+    const { root } = setup({
+      docs: [{
+        fsPath: 'D:/vault/笔记甲.md',
+        docName: '笔记甲.md',
+        text: [
+          '# 导出篇',
+          '',
+          '> [!note]- 外层收起声明',
+          '> 外层正文 T08-OUTER-BODY。',
+          '',
+          '> > [!warning]- 中层收起声明',
+          '> > 中层正文 T08-MIDDLE-BODY。',
+          '> >',
+          '> > > [!bug]- 内层收起声明',
+          '> > > 内层正文 T08-INNER-BODY。',
+          '',
+          '尾段。',
+        ].join('\n'),
+        version: 5,
+      }],
+    })
+    // 全部三层正文在导出 DOM 中真实可读（.callout-content 文本在场）
+    expect(root.textContent).toContain('T08-OUTER-BODY')
+    expect(root.textContent).toContain('T08-MIDDLE-BODY')
+    expect(root.textContent).toContain('T08-INNER-BODY')
+    // 强制展开的形态契约：无折叠状态类、无折叠箭头（装配层不消费任何面板折叠态）
+    expect(root.querySelectorAll('.callout.is-collapsed')).toHaveLength(0)
+    expect(root.querySelectorAll('.callout-fold')).toHaveLength(0)
+    // callout 家族结构完整（含嵌套容器的 data-callout）
+    const types = Array.from(root.querySelectorAll<HTMLElement>('div.callout')).map((el) => el.dataset['callout'])
+    expect(types).toEqual(['note', 'warning', 'bug'])
+    // 图标位在场（默认 mask 通道——PDF 页样式快照提供类型表变量）
+    expect(root.querySelectorAll('.callout .callout-icon')).toHaveLength(3)
+  })
+
+  it('T08 嵌入目标 B 的 callout 同样强制展开（docScope 隔离下完整可读）', () => {
+    const { root } = setup({
+      embeds: [{
+        inner: '嵌入乙',
+        fsPath: 'D:/vault/嵌入乙.md',
+        docName: '嵌入乙.md',
+        text: ['> [!tip]- 嵌入内收起声明', '嵌入内正文 T08-EMBED-BODY。'].join('\n'),
+        version: 10,
+      }],
+    })
+    expect(root.textContent).toContain('T08-EMBED-BODY')
+    expect(root.querySelectorAll('.callout.is-collapsed')).toHaveLength(0)
+    expect(root.querySelectorAll('.callout-fold')).toHaveLength(0)
+  })
+
+  it('T08 callout 图标注入接线：装配消费 --callout-icon 计算值（片段定制进 PDF）', () => {
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    // 片段定制等价最小形态：值先于装配在导出根就位（真实场景为 PDF 页样式快照）
+    root.style.setProperty('--callout-icon', '"lucide-flame"')
+    mountExportDocument(root, payloadOf({
+      docs: [{
+        fsPath: 'D:/vault/笔记甲.md',
+        docName: '笔记甲.md',
+        text: '> [!note]- 标题\n> 正文。',
+        version: 6,
+      }],
+    }), {
+      images: { resolve: async () => ({ ok: false, reason: 'unused' }) },
+      channel: { send: async (message) => ({ reqId: message.reqId, ok: false, reason: 'blocked' }) },
+    })
+    const icon = root.querySelector<HTMLElement>('.callout .callout-icon')!
+    expect(icon.classList.contains('vsidian-callout-icon-custom')).toBe(true)
+    expect(icon.innerHTML).toContain('<svg')
+  })
+
   it('T05 标题书签埋点：heading 块挂 level 标记且 DOM 序即文档序', () => {
     const { root } = setup({
       docs: [{

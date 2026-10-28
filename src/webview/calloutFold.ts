@@ -621,6 +621,92 @@ export const calloutFoldExtension: Extension = [
   calloutFoldDecorations,
 ]
 
+// ---- 阅读块折叠装饰（共享实现，T08 起引用实例与主文阅读同源） ----
+
+/**
+ * 块内 callout 折叠装饰（阅读块挂载/重装饰共用）：strip 注入的箭头与
+ * 状态类后，块内 div.callout 按源锚点（data-vsidian-src-start = 标题行
+ * 行首 = span.key，渲染期 readingMarkdown 变换挂点）精确匹配折叠视图——
+ * 挂 is-collapsible/is-collapsed 状态类（T01 固定口径）、向 .callout-title
+ * 尾部注入箭头（click 回调走 onToggle 翻转状态源）。range 限定 span 命中
+ * 域（块区间过滤——主文虚拟化按块装饰）；缺省全部（无布局全量容器一次
+ * 装饰，T08 引用实例回退路径）。按序 zip 会把不可折叠 callout（无符号/
+ * 标题-only）错配进可折叠序列；锚点缺失（防御）不装饰不崩溃。
+ *
+ * #659（T08）：从 VirtualReadingView 私有方法提取为共享实现——主文阅读
+ * 视图与引用实例（RefContentMount 的两路径）不建第二份装饰规则。
+ */
+export function decorateCalloutFoldControlsIn(
+  el: HTMLElement | ParentNode,
+  folds: ReadonlyArray<{ span: CalloutFoldSpan; folded: boolean }>,
+  onToggle: (key: number) => void,
+  range?: { start: number; end: number },
+): void {
+  for (const arrow of el.querySelectorAll('.callout-fold')) {
+    arrow.remove()
+  }
+  for (const dom of el.querySelectorAll('div.callout')) {
+    dom.classList.remove('is-collapsible', 'is-collapsed')
+  }
+  if (folds.length === 0) {
+    return
+  }
+  const inRange = range === undefined
+    ? folds
+    : folds.filter((v) => v.span.markerFrom >= range.start && v.span.markerFrom <= range.end)
+  if (inRange.length === 0) {
+    return
+  }
+  const doms = el.querySelectorAll<HTMLElement>('div.callout[data-vsidian-src-start]')
+  const domByKey = new Map<string, HTMLElement>()
+  for (const dom of doms) {
+    domByKey.set(dom.getAttribute('data-vsidian-src-start') ?? '', dom)
+  }
+  for (const v of inRange) {
+    const dom = domByKey.get(String(v.span.key))
+    if (!dom) {
+      continue
+    }
+    dom.classList.add('is-collapsible')
+    const title = dom.querySelector<HTMLElement>('.callout-title')
+    if (!title) {
+      continue
+    }
+    if (v.folded) {
+      dom.classList.add('is-collapsed')
+    }
+    title.appendChild(createCalloutFoldArrow({
+      folded: v.folded,
+      declFold: v.span.declFold,
+      onToggle: () => onToggle(v.span.key),
+    }))
+  }
+}
+
+/**
+ * 折叠 overrides 的失效清理（T08 引用实例重载面）：只保留仍命中当前
+ * spans（键在场且声明符号未变）的记录——Reading 侧没有 Live StateField
+ * 的 ChangeSet 映射链，重载（目标外部修改广播）按新文本重派生时，旧
+ * 坐标键自然脱靶丢弃（「标记删除/全文重新初始化丢弃失效状态」的 Reading
+ * 侧等价语义；纯函数与 calloutFoldView 同源判定）。
+ */
+export function pruneCalloutOverrides(
+  overrides: ReadonlyMap<number, CalloutFoldOverride>,
+  spans: readonly CalloutFoldSpan[],
+): ReadonlyMap<number, CalloutFoldOverride> {
+  if (overrides.size === 0) {
+    return overrides
+  }
+  const out = new Map<number, CalloutFoldOverride>()
+  for (const [key, override] of overrides) {
+    const span = spans.find((s) => s.key === key)
+    if (span && span.declFold === override.declFold) {
+      out.set(key, override)
+    }
+  }
+  return out
+}
+
 // ---- paint 探针折叠观测 ----
 
 /** 元素中心点命中（hitPainted 同口径；jsdom 无布局恒 false） */

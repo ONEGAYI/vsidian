@@ -92,6 +92,11 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   // Lucide ID/净化 SVG 注入、非法值诊断、真实片段通道热更新、明暗主题、
   // 容器变量 border/blend、模式往返与视口重挂）。紧随 callout 族。
   'calloutIcon',
+  // #659（T08）合入列：calloutRefEmbed（引用实例侧——Reading 嵌入卡
+  // callout 呈现/默认收起绘制、真实点击展开、相邻同文件实例独立、
+  // Live↔Reading 折叠往返共享、编辑器资源回基线、片段 --callout-icon
+  // 注入真实绘制）。紧随 callout 族。
+  'calloutRefEmbed',
   'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
