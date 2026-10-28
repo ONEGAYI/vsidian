@@ -760,7 +760,13 @@ describe('表格点阵与悬停控件', () => {
     const add = view.dom.querySelector<HTMLButtonElement>('.vsidian-table-insert-column')
     expect(add).not.toBeNull()
     view.dom.querySelector<HTMLButtonElement>('.vsidian-table-column-handle')!.click()
-    expect(view.dom.querySelectorAll('.vsidian-table-column-selected')).toHaveLength(2)
+    const visibleRows = [...view.contentDOM.querySelectorAll('.vsidian-table-grid-row')]
+    expect(visibleRows).toHaveLength(2)
+    expect(visibleRows.every(row => row.querySelectorAll('.vsidian-table-column-selected').length === 1)).toBe(true)
+    // 本用例仅过滤控件查询，没有真的卸载表头；装饰层仍应覆盖所有已挂载格。
+    expect(view.dom.querySelectorAll('.vsidian-table-column-selected')).toHaveLength(3)
+    expect(view.state.field(tableRegionField)).toEqual({ tableFrom: TABLE_DOC.indexOf('| 名字'),
+      rowFrom: 0, rowTo: 2, columnFrom: 0, columnTo: 0 })
     add!.click()
     expect(view.state.doc.toString()).toContain('| 名字 | 数量 | |')
     expect(view.state.doc.toString()).toContain('| --- | :---: | --- |')
