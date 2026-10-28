@@ -151,8 +151,10 @@ try {
   assert.ok(/linear-gradient\(oklch\([^)]*\/ 0\.1\)/.test(paint.img),
     `暗色主题底色应为 #027aff 的 color-mix 渐变（引擎预计算为 oklch 形态）: ${paint.img}`)
   const darkImg = paint.img
-  // 紫条被替代：quiet 行 box-shadow none
-  assert.ok(paint.shadow === 'none', `callout 行应替代该层引用紫条: ${paint.shadow}`)
+  // 紫条被替代：#657/T06 起 quiet 行 box-shadow 通道承载 border 左缘近似
+  //（默认 0 宽零绘制）——断言不绘制引用紫条色（与普通引用行的紫条断言
+  // 同款口径）
+  assert.ok(!/rgb\(167, 139, 250\)/.test(paint.shadow), `callout 行不应绘制引用紫条: ${paint.shadow}`)
   // 亮色主题：底色计算随 --callout-default 变化（#086ddd）
   await page.evaluate(() => { document.body.classList.add('vscode-light'); document.body.classList.remove('vscode-dark') })
   paint = await liveRowPaint()

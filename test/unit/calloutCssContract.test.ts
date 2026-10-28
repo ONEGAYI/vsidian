@@ -112,7 +112,10 @@ describe('live 行级形态：替代紫条与双通道底色', () => {
 
   it('quiet 行抑制引用紫条并画双通道底色（拆属性双通道，T01 §6.2）', () => {
     const rule = liveQuiet()
-    expect(rule).toMatch(/box-shadow:\s*none/)
+    // #657/T06 起 box-shadow 通道同时承载 border 左缘近似（默认 0 宽零绘制，
+    // 语义仍是「该层紫条被替代」——不引用 --vsidian-quote-bar-color）
+    expect(rule).toMatch(/box-shadow:\s*inset var\(--callout-border-width\)/)
+    expect(rule).not.toMatch(/--vsidian-quote-bar-color/)
     expect(rule).toMatch(/background-color:\s*rgba\(var\(--callout-color\),\s*0?\.1\)/)
     expect(rule).toMatch(/background-image:\s*linear-gradient\(\s*color-mix\(in oklch, var\(--callout-color\) 10%, transparent\)/)
   })
@@ -155,5 +158,59 @@ describe('阅读侧真实容器', () => {
     const content = cssRule(css, '#app .vsidian-view-reading .vsidian-reading-block .callout-content')
     expect(content).toMatch(/padding:\s*var\(--callout-content-padding\)/)
     expect(content).toMatch(/background:\s*var\(--callout-content-background\)/)
+  })
+})
+
+describe('#657/T06：容器变量补全与 --callout-icon 公开接线', () => {
+  it('--callout-blend-mode 定义并消费：暗色档 lighten（#app）、亮色覆盖 darken、阅读容器 mix-blend-mode 引用', () => {
+    const app = cssRuleExact(css, '#app')
+    expect(app).toMatch(/--callout-blend-mode:\s*lighten/)
+    const light = cssRule(css, 'body.vscode-light #app')
+    expect(light).toMatch(/--callout-blend-mode:\s*darken/)
+    const reading = cssRule(css, '#app .vsidian-view-reading .vsidian-reading-block div.callout')
+    expect(reading).toMatch(/mix-blend-mode:\s*var\(--callout-blend-mode\)/)
+  })
+
+  it('border 变量消费（Obsidian 1.14.4 同款形态）：阅读容器三件套 border-style/color-mix/width', () => {
+    const reading = cssRule(css, '#app .vsidian-view-reading .vsidian-reading-block div.callout')
+    expect(reading).toMatch(/border-style:\s*solid/)
+    expect(reading).toMatch(
+      /border-color:\s*color-mix\(in oklch, var\(--callout-color\) calc\(var\(--callout-border-opacity\) \* 100%\), transparent\)/)
+    expect(reading).toMatch(/border-width:\s*var\(--callout-border-width\)/)
+  })
+
+  it('live quiet 行左缘 border 近似：box-shadow inset 引用 border-width/border-opacity（默认 0 宽零绘制，紫条仍被替代）', () => {
+    const quiet = cssRule(css, '.vsidian-quote-line.callout.vsidian-callout-quiet')
+    expect(quiet).toMatch(
+      /box-shadow:\s*inset var\(--callout-border-width\) 0 0\s+color-mix\(in oklch, var\(--callout-color\) calc\(var\(--callout-border-opacity\) \* 100%\), transparent\)/)
+    // 紫条仍被替代：quiet 行不再引用引用竖条变量
+    expect(quiet).not.toMatch(/--vsidian-quote-bar-color/)
+  })
+
+  it('--callout-icon 公开变量登记进类型表：每条目 id+别名所在图标规则组同设注册表默认图标名', () => {
+    // 图标规则按「同图标分组」承载（mask + 公开名同一规则组）——注册表驱动
+    // 断言：含 [data-callout='<id>'] 的规则须同时设 --callout-icon: <entry.icon>
+    //（整块提取到闭合花括号，声明体全文可见）
+    const blocks = css.match(/:where\([^)]*\)\s*\{[^}]*\}/g) ?? []
+    const iconRules = blocks.filter((b) => b.includes('--_vsidian-callout-icon:'))
+    for (const entry of CALLOUT_TYPES) {
+      const selectors = [entry.id, ...entry.aliases]
+      const rule = iconRules.find((r) => selectors.some((t) => r.includes(`[data-callout='${t}']`)))
+      expect(rule, entry.id).toBeDefined()
+      expect(rule, entry.id).toMatch(new RegExp(`--callout-icon:\\s*${entry.icon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*;`))
+    }
+    // important 独立变量面（取证 aliasDiscrepancy）：颜色独立、图标与 tip 同 lucide-flame
+    expect(css).toMatch(/\n:where\(\[data-callout='important'\]\)/)
+  })
+
+  it('自定义图标注入态规则：内部类关闭 mask/底色、颜色随类型色、svg 尺寸基座', () => {
+    const custom = cssRule(css, '.callout-icon.vsidian-callout-icon-custom')
+    expect(custom).toMatch(/-webkit-mask:\s*none/)
+    expect(custom).toMatch(/mask:\s*none/)
+    expect(custom).toMatch(/background:\s*none/)
+    expect(custom).toMatch(/color:\s*var\(--callout-color\)/)
+    const svgRule = cssRule(css, '.callout-icon.vsidian-callout-icon-custom svg')
+    expect(svgRule).toMatch(/width:\s*1em/)
+    expect(svgRule).toMatch(/height:\s*1em/)
   })
 })

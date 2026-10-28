@@ -390,6 +390,12 @@ import {
 import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
 import { SnippetLoader } from './snippetLoader'
+import {
+  initCalloutIconStyleWatch,
+  mountCalloutIcons,
+  scheduleCalloutIconRefresh,
+  setCalloutIconDiagnosticsSink,
+} from './calloutIconMount'
 import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidianAlias'
 import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
@@ -1199,6 +1205,12 @@ export class WebviewSyncController {
     // （webview 是编辑器本体；无表单后端）。控制器是生产唯一装配入口，
     // 浏览器 fixture 直驱时同样生效
     installHtmlSubmitGuard(document)
+    // #657/T06 callout 图标装载接线：诊断进 TestDiagnostics 观测面；样式
+    // 影响面观察器（片段链装配/文档样式产物 → head 子元素增删、明暗主题
+    // → body class 翻转）触发全量重解析（Live widget 与阅读块挂载另走
+    // 各自时机，见 liveDecorations/onBlockMounted）
+    setCalloutIconDiagnosticsSink((stage, data) => this.diagnostics.record(stage, data))
+    initCalloutIconStyleWatch()
     this.images = new ImageResourceManager({
       // http/https 图源直连（可加载性由 webview CSP 决定），其余经宿主解析
       isDirectSrc: isDirectImageSrc,
@@ -1348,6 +1360,9 @@ export class WebviewSyncController {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
       onBlockMounted: (el) => {
+        // #657/T06：callout 图标解析（块挂载时机——阅读容器计算值已就绪；
+        // 视口回收重挂天然重解析）
+        mountCalloutIcons(el)
         if (this.images) {
           // #570（T05）：HTML 资源装配（img/srcset/媒体属性——A 面板身份；
           // 内部覆盖既有 prepareReadingImages 的 img[src] 面并扩展属性矩阵）
@@ -2638,8 +2653,13 @@ export class WebviewSyncController {
           if (outcome.ok) {
             this.scheduleSnippetMeasure()
             this.scheduleSnippetMeasureOnFontArrival()
+            // #657/T06：片段装载完成 → callout 图标重解析（--callout-icon
+            // 计算值随新 sheet 变化；应用即摘链的场景由 head 观察器兜底）
+            scheduleCalloutIconRefresh()
           }
         })
+        // 摘链（停用/删除）无装载回报——apply 返回后统一调度一轮
+        scheduleCalloutIconRefresh()
         break
       }
       case 'backlinks.snapshot': {

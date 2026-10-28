@@ -81,6 +81,7 @@ import {
   parseCalloutDecl,
   type CalloutDecl,
 } from '../shared/calloutSyntax'
+import { scheduleCalloutIconResolve } from './calloutIconMount'
 import {
   barePipeAt,
   blankContainerPrefix,
@@ -344,6 +345,9 @@ const hrRuleDeco = Decoration.replace({ widget: new HorizontalRuleWidget() })
  * `.callout-icon`（图标绘制在 CSS mask）。控制域是标题行：光标/选区
  * **端点**触及该行即不发射，源码显形可编辑——与生产 QuoteMark 同款
  * 端点语义（#296 三轮；选区跨越不显形）。无交互事件；折叠箭头归 T04。
+ * #657/T06：toDOM 后下一帧解析 --callout-icon 公开自定义（CM6 同步插入
+ * 完成后 computed 值可读；显隐重建/视口回收天然重解析——值未设置时零
+ * DOM 改动，mask 默认通道不变）。
  */
 export class CalloutMarkerWidget extends WidgetType {
   constructor(readonly type: string) {
@@ -355,6 +359,7 @@ export class CalloutMarkerWidget extends WidgetType {
   toDOM(): HTMLElement {
     const el = document.createElement('span')
     el.className = LIVE_CLASS_NAMES.calloutIcon
+    scheduleCalloutIconResolve(el)
     return el
   }
 }

@@ -88,6 +88,10 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   // 点击/键盘路径、取消零编辑、自定义输入宿主往返、低高度滚动可达、
   // 嵌套最内层改类型、一步撤销的出站面）。紧随 callout 族。
   'calloutPlan',
+  // #657（T06）合入列：calloutIcon（--callout-icon 公开自定义——锁版
+  // Lucide ID/净化 SVG 注入、非法值诊断、真实片段通道热更新、明暗主题、
+  // 容器变量 border/blend、模式往返与视口重挂）。紧随 callout 族。
+  'calloutIcon',
   'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
