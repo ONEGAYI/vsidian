@@ -47,7 +47,7 @@
 
 完整事实表入库 [obsidian-1144-callout-defaults.json](data/callout-t01/obsidian-1144-callout-defaults.json)，要点：
 
-- **类型与别名**：帮助页 14 类型 + 16 别名与规格 §3.2 清单一致；**`important` 在帮助页列为 tip 别名，但 app.css 给它独立变量 `--callout-important`（值 = cyan，图标与 tip 同为 lucide-flame）**——两者并存不矛盾：语法归类按帮助页（tip 别名），CSS 变量面独立登记。这正是规格 §8.2 要求分开核对的那处分歧，T06 需同时落 `--callout-tip` 与 `--callout-important`。
+- **类型与别名**：帮助页 13 规范类型 + 14 别名，与规格 §3.2 清单一致；app.css 的类型变量面为 14 个（note 的色即 `--callout-default`，abstract/failure/danger 的变量名用 summary/fail/error 形态，另给 important 独立变量）。**`important` 在帮助页列为 tip 别名，但 app.css 给它独立变量 `--callout-important`（值 = cyan，图标与 tip 同为 lucide-flame）**——两者并存不矛盾：语法归类按帮助页（tip 别名），CSS 变量面独立登记。这正是规格 §8.2 要求分开核对的那处分歧，T06 需同时落 `--callout-tip` 与 `--callout-important`。
 - **变量默认值**（app.css `body` 层）：border-width 0px、border-opacity 0.25、padding `12px 12px 12px 24px`、radius 4px、blend-mode 亮 darken/暗 lighten、title-weight 基础字重+200、content-padding 0、content-background transparent。
 - **类型色**：每类型变量引调色板（`--callout-default`→`--color-blue` 亮 #086ddd/暗 #027aff 等，明暗各一组）；`--callout-quote` 为固定 #9e9e9e 不走调色板。**现代默认值为标准 CSS 颜色而非 RGB 三元组**（消费面 `color-mix(in oklch, var(--callout-color) 10%, transparent)`）——1.13 起的破坏性变更（社区 callout-manager issue #54 佐证），对 §6.2 双形态接收设计直接相关。
 - **图标**：全部 Lucide id（lucide-pencil/-flame/-check-circle-2…），两处例外照录：question 写作 `help-circle`（无前缀）、quote 为内部名 `quote-glyph`——图标解析须容错无前缀 id 与内部名。
@@ -153,7 +153,7 @@ G6 阅读矩阵以"T02 计划发射形态"的手工样例验证（`.markdown-pre
 结论两条：
 
 - **视口回收/DOM 有界性通过**：三档位顶部与滚动到底后行元素均 ≤ 82，与生产基线同量级；键入无重建风暴（5 键 6 次重建）。
-- **红线（探针自我暴露）**：构建耗时随文档规模线性增长（10 万行 21.7ms/键）。根因定位：`@lezer/common` 的 `SyntaxNode.childAfter` 从 index 0 线性前扫（dist/index.cjs 源证），探针"每事务从 topNode 下降扫视口区间"对大文档是 O(doc)。**T02 不得采用该形态**：callout 装饰必须并入 `liveDecorationsField` 既有增量发射路径（Blockquote 分支所在窗口，生产该路径每键只重析变更附近，10 万行实测 ≈1ms），即"识别骑增量树、发射骑增量窗口"，而非独立视口插件重扫。此为本票给 T02 的最强实施约束。
+- **红线（探针自我暴露）**：构建耗时随文档规模线性增长（10 万行 21.7ms/键）。根因定位：`@lezer/common` 的 `SyntaxNode.childAfter` 从 index 0 线性前扫（dist/index.cjs 源证），探针"每事务从 topNode 下降扫视口区间"对大文档是 O(doc)。**T02 不得采用该形态**：callout 装饰必须并入 `liveDecorationsField` 既有增量发射路径（Blockquote 分支所在窗口，生产该路径每键只重析变更附近，10 万行实测 ≈1ms），即"识别骑增量树、发射骑增量窗口"，而非独立视口插件重扫。增量路径的每键解析成本未单独计时（生产基线表为整链输入延迟），此结论为路径形态对比，非数值承诺。此为本票给 T02 的最强实施约束。
 
 ## 8. 菜单取色方法：隐藏探针可行（G7）
 
@@ -179,6 +179,7 @@ G6 阅读矩阵以"T02 计划发射形态"的手工样例验证（`.markdown-pre
 
 ## 10. 未验证项（如实记录）
 
+- **列表内 callout 的编辑态**：探针文档（callout-probe.mjs DOC）未含列表行，列表内 callout 仅在对拍夹具 F21/F22 覆盖解析层；编辑态交互（列表容器内 callout 行的光标/拖选/输入）未在浏览器探针试验，归 T03 浏览器用例（票面本要求列表容器组合的真实输入验证）。
 - **宿主真撤销栈**：浏览器缝无宿主，撤销以 `doc.changed external` 同构通道验证；真 WorkspaceEdit 撤销链路归 T02 集成用例。
 - **真实物理 IME/鼠标观感**：CDP 组合与合成事件的时序与真机不同（multicursorIme 同款定位边界声明），归 manual-verification。
 - **明暗主题真实观感**：探针在 `vscode-dark` 类下验证；亮色轮与 VSCode 真实主题变量下的观感归 T02/T06 契约测试与人工清单。

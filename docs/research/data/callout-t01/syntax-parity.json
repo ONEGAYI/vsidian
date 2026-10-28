@@ -1,7 +1,7 @@
 {
  "purpose": "T01 两端语法对拍夹具与结果（#652）。夹具供 T02/T03 消费：Live 树侧为 @codemirror/lang-markdown（src/shared/markdownDoc.markdownTreeParser），阅读侧为 markdown-it 15.0.2（readingMarkdown 同版同安全配置，块级容器边界由核心产生）。识别器输入=容器直属首段首行「段起点→行尾」子串（两端已各自剥前缀）。",
  "recognizer": {
-  "source": "/^[!([^]]*)]([+-])?/ 上接空类型拒绝、类型须单标识符 [A-Za-z0-9_-]+、声明后须空白或行尾、类型小写规范化",
+  "source": "/^\\[!([^\\]]*)\\]([+-])?/ 上接空类型拒绝、类型须单标识符 [A-Za-z0-9_-]+、声明后须空白或行尾、类型小写规范化",
   "fields": [
    "type(小写规范化)",
    "fold(+/-/undefined)",

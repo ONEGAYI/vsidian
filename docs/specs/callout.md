@@ -133,7 +133,7 @@ callout 自身替代该引用层的紫色边条与引用背景；内部普通引
 
 ### 8.1 结构与变量
 
-两模式的成型态提供 `.callout`、`.callout-title`、`.callout-icon`、`.callout-title-inner`、`.callout-content`、`.callout-fold` 和规范化 `data-callout`。正文必须真实位于 `.callout-content` 所表达的内容结构中，不能以空节点保留选择器。折叠呈现可提供与 Obsidian 对应的 `is-collapsible/is-collapsed` 状态类，具体兼容条目经 T01 固定。
+两模式的成型态提供 `.callout`、`.callout-title`、`.callout-icon`、`.callout-title-inner`、`.callout-content`、`.callout-fold` 和规范化 `data-callout`。正文必须真实位于 `.callout-content` 所表达的内容结构中，不能以空节点保留选择器。Live 侧为行级形态（T01 路线 A）：`.callout-content` 以正文行级类承载（正文行即该类元素），`.callout > .callout-content` 等严格父子容器选择器仅在阅读侧承诺；样式参考按 T01 报告 §6.1 矩阵写明各入口适用面。折叠呈现可提供与 Obsidian 对应的 `is-collapsible/is-collapsed` 状态类，具体兼容条目经 T01 固定。
 
 首批变量按官方清单登记：
 
