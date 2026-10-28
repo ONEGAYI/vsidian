@@ -141,6 +141,7 @@ import type { JiebaWiring } from './jiebaResourceWiring'
 import type { AddonEditorBridge } from './addons/addonWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
+import { createNativeDiffFallback } from './nativeDiffFallback'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
 
@@ -436,6 +437,7 @@ export function createTextEditorProvider(
   capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
 } {
   const sessions = new Map<string, SessionEntry>()
+  const trackNativeDiff = createNativeDiffFallback(context)
   // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
   // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
   // 重赋可能触发 webview 资源状态重置，与 #128 片段目录同口径）+ 装载
@@ -3120,6 +3122,7 @@ export function createTextEditorProvider(
     capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
   } = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
+      const nativeDiff = trackNativeDiff(document, webviewPanel)
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
       // 默认把 .md 交给本扩展，用户上次停留在源码态则还原该选择。早退：
       // 不建会话、不写 HTML、不 attach 面板（面板 dispose 链路自然回收）；
@@ -3128,7 +3131,7 @@ export function createTextEditorProvider(
       // D10：本 uri 处于任一 diff 标签时跳过弹回、正常装配——openWith 会
       // 把对比折叠成单文件，diff 完整性优先于模式记忆；跳过不改写记忆
       const remembered = readRemembered()
-      const resolveBehavior = decideResolveBehavior(remembered, uriInDiffContext(document.uri))
+      const resolveBehavior = decideResolveBehavior(remembered, nativeDiff || uriInDiffContext(document.uri))
       if (resolveBehavior === 'bounce-to-source') {
         // 弹回：resolve 运行在 custom input 的 open 管线内，立即操纵标签
         // 会与管线完成时的激活意图竞态（实测 flaky：原生 tab 的激活可被本

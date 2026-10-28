@@ -53,6 +53,7 @@ vsidian/
     │   ├── jiebaTar.ts                   # npm tarball 最小提取器
     │   ├── keybindingService.ts          # 快捷键全局存储服务
     │   ├── linkTarget.ts                 # 宿主侧链接目标分类纯逻辑（#10）
+    │   ├── nativeDiffFallback.ts         # 旧宿主原生文本对比退让
     │   ├── pasteHistoryTracker.ts        # 宿主粘贴阶段历史解释
     │   ├── pdfExport/                    # PDF 导出宿主端链路
     │   │   ├── browserFind.ts          # 导出浏览器发现三通道

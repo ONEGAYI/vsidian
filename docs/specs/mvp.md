@@ -98,6 +98,21 @@
 - 性能档位：10 KB、100 KB、1 MB 文档，记录打开、输入和切换表现，不编造既定延迟承诺。
 - 打包：交付 VSIX、安装与切换说明、功能及降级边界、旧版与远程验证记录。#38 起注册为 `.md` 默认编辑器（打开即进入本扩展）；用户可经「Reopen With…」或编辑器关联设置改回原生，最近一次停留的模式跨窗口全局记住（含源码态）。已知代价：记忆停留在源码态时，显式「Reopen With → Vsidian」会被弹回原生（可点标题栏按钮一步切回）；窗口恢复的 Vsidian 标签在记忆为源码态时同样被弹回；弹回时若文档有未保存修改，空 Vsidian 标签会保留（不回退内容），保存后再次切换收敛。diff 对比视图不支持三态切换（按钮不显示、命令 no-op）。文档有未保存修改时切换方向（预览↔源码）会保守保留被替换的旧标签页（1.86.2 实测：关闭脏标签——无论原生或 Vsidian——会把文档回退到磁盘内容，即使另一编辑器已打开同一文档）；该状态下在预览侧保存会把活动标签翻到源码侧（1.86.2 宿主行为），再次执行切换命令即恢复编辑器控件并把双标签收敛为单标签。
 
+### 原生文本对比兼容（2026-10-28）
+
+Markdown 的默认对比入口（含 Git 暂存区、工作区与历史版本）应显示 VSCode 原生文本差异，普通打开仍走 Vsidian；不得靠调用方预先传入 `override: true` 才成立。
+
+原生对比布局遵循宿主配置，保持按对比编辑区的可用宽度选择行内或左右分栏。
+
+旧宿主适配位于 `src/host/nativeDiffFallback.ts`。1.82.3／1.86.2 实测：custom diff 的 Tab input 不暴露左右资源，面板选项却保留 `customClasses: 'original' | 'modified'`。源码依据：[创建角色标记](https://github.com/microsoft/vscode/blob/1.86.2/src/vs/workbench/contrib/customEditor/browser/customEditors.ts)、[不透明 Tab input](https://github.com/microsoft/vscode/blob/1.86.2/src/vs/workbench/api/browser/mainThreadEditorTabs.ts)。
+
+- **资源身份**：按同组可见面板的角色收集 URI，以 `vscode.diff(..., { override: true })` 转交，不解析标题或依赖 resolve 顺序。
+- **转交时机**：等待两侧首份 `view.state`，让原页面先完成初始化；不在 resolve 中立即转交，避免原打开流程随后抢回仍须保留的 dirty 对比页。
+- **焦点**：SCM 单击可保留侧栏焦点，两侧面板均不 active；转交不要求面板取得焦点，转交时继续保留侧栏焦点。
+- `customClasses` 是旧宿主的实现信息，**不是 VSCode 公开 API 承诺**；仅消费这两个确切值。没有角色标记的普通面板与已是文本 diff 的标签不受干预。升级宿主时，真实默认入口集成用例负责验证这一兼容接缝，不能用强制文本入口代替。
+- 未保存内容优先：任一侧 dirty 时保留旧 custom diff 标签，活动位转到原生文本 diff；两侧保存后再清理旧标签。避免 1.86.2 关闭 dirty custom input 导致文档 revert 的既有问题；转交过程不保存或改写文档。
+- 回归入口在 `test/integration/suite/cases.ts` 的 `diff 默认入口退让`、`diff 保留侧栏焦点`、`diff Git 默认入口退让`、`diff 未保存内容保护`。Git 暂存与工作区场景经内置 `git.openChange`（而非自行仿造参数）打开，历史对比显式覆盖保留侧栏焦点；覆盖左右源文、普通默认打开和草稿保留，原有 D10 三态命令保护仍须通过。
+
 ## 后续范围
 
 二期：~~公式~~（#59 已交付：`$…$` / `$$…$$` 双视图渲染与实时预览编辑，KaTeX 本地打包）、callout、图片粘贴、~~Mermaid~~（#60 已交付：`mermaid` 围栏双视图渲染、无效语法降级、明暗主题联动，mermaid 11.12.2 独立产物本地打包按需加载）、双链索引、Markdown 嵌入、~~块引用~~（已交付：`#^` 语法与双视图渲染前置后，#159 补齐块级定位跳转与本文件锚点 `[[#标题]]` / `[[#^块id]]`；重命名引用更新仍二期）、重命名引用更新、自定义 CSS 片段与 Obsidian 选择器兼容完善、代码块卡片（高亮、卡片样式、复制按钮与折叠，#78–#85 实施中，规格见 [code-block-card.md](code-block-card.md)）。
