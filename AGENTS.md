@@ -122,7 +122,8 @@ vsidian/
 │   │   ├── 0019-document-html-and-style-scope.md              # 文档HTML与样式作用域决策
 │   │   ├── 0020-ime-symbol-competition-arbitration.md         # IME定稿符号对竞争裁决
 │   │   ├── 0021-pdf-export-installed-browser.md               # PDF导出浏览器依赖决策
-│   │   └── 0022-table-independent-input.md                    # 表格独立输入架构决策
+│   │   ├── 0022-table-independent-input.md                    # 表格独立输入架构决策
+│   │   └── 0023-callout-source-and-view-state.md              # Callout源文与视图态决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -199,6 +200,7 @@ vsidian/
 │   │   ├── behavior-manage-pagination.md         # 行为管理分页与筛选规格
 │   │   ├── blockquote-accent-bar.md              # 引用块紫色提示边条规格
 │   │   ├── blockquote-table.md                   # 引用块内表格规格
+│   │   ├── callout.md                            # Callout语法与样式规格
 │   │   ├── code-block-card.md                    # 代码块卡片功能规格
 │   │   ├── code-language-sources.md              # 新词法来源许可与边界
 │   │   ├── context-menu.md                       # 统一右键菜单规格（正文全域接管）
