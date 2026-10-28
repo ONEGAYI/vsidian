@@ -86,7 +86,7 @@ const ZAP_PATH = 'M4 14a1'
 const BUG_PATH = 'M14.12 3.88'
 const X_PATH = 'M18 6 6 18'
 const CLEAN_SVG = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><circle cx='12' cy='12' r='9' /><path d='M4 4 L20 20' /></svg>"
-const EVIL_SVG = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' onload='alert(1)'><script>window.__pwned = 1</script><path d='M2 20 L22 4' /><a href='https://evil.example/x'>x</a></svg>"
+const EVIL_SVG = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' onload='window.__pwned = 1'><script>window.__pwned = 2</script><path d='M2 20 L22 4' /><a href='https://evil.example/x'>x</a></svg>"
 
 const V1 = [
   `[data-callout='note'] { --callout-color: #d94f00; --callout-icon: lucide-bug; }`,
@@ -145,7 +145,7 @@ try {
   assert.ok(custom.html.includes('L22 4'), `净化保留 path 几何: ${custom.html.slice(0, 120)}`)
   assert.ok(!custom.html.includes('<script') && !custom.html.includes('onload') && !custom.html.includes('evil.example'),
     `脚本/事件/外链必须剥离: ${custom.html}`)
-  assert.equal(await page.evaluate(() => window.__pwned), undefined, 'SVG 内脚本不得执行')
+  assert.equal(await page.evaluate(() => window.__pwned), undefined, 'SVG 事件与脚本均不得执行（onload 经 innerHTML 注入会真触发，断言有判别力）')
 
   // important：非法 ID 保留默认图标 + console.warn 可查诊断
   const important = await iconOf(page, 'important')
