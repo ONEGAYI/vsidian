@@ -11,7 +11,7 @@ import type { SyntaxNode } from '@lezer/common'
 import MarkdownIt from 'markdown-it'
 import { markdownTreeParser, docInput } from '../../src/shared/markdownDoc'
 import { calloutOfBlockquote } from '../../src/webview/liveDecorations'
-import type { CalloutDecl } from '../../src/shared/calloutSyntax'
+import { parseCalloutDecl, type CalloutDecl } from '../../src/shared/calloutSyntax'
 
 /** 容器清单条目（T01 对拍形态：depth/fromLine/toLine/decl 串） */
 interface Container {
@@ -73,13 +73,10 @@ function mditContainers(doc: string): Container[] {
         const content = tokens[i + 2]!.content
         const nl = content.indexOf('\n')
         const line = nl < 0 ? content : content.slice(0, nl)
-        const m = /^\[!([^\]]*)\]([+-])?/.exec(line)
-        if (m && m[1] !== '' && /^[A-Za-z0-9_-]+$/.test(m[1]!)) {
-          const after = line.slice(m[0].length)
-          if (after === '' || /^\s/.test(after)) {
-            const title = after.trim() === '' ? undefined : after.trim()
-            decl = `${m[1]!.toLowerCase()}|${m[2] ?? ''}|${title ?? ''}`
-          }
+        // 识别复用生产 parseCalloutDecl（单一事实源，防测试镜像漂移）
+        const parsed = parseCalloutDecl(line)
+        if (parsed) {
+          decl = `${parsed.type}|${parsed.fold ?? ''}|${parsed.title ?? ''}`
         }
       }
       // 配对 close（nesting 归零处）确认容器闭合在场，行区间取 open 的 map

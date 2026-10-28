@@ -82,7 +82,9 @@ describe('callout 变量族（Obsidian 原名即公开入口）', () => {
   it('图标表与注册表同步：每条目 id+别名都命中某条 --_vsidian-callout-icon 规则', () => {
     // 取全部图标规则块（selector + 变量定义），再断言类型出现在选择器列表
     const iconRules = css.match(/:where\([^)]*\)\s*\{[^}]*--_vsidian-callout-icon:/g) ?? []
-    expect(iconRules.length).toBeGreaterThanOrEqual(13)
+    expect(iconRules.length).toBeGreaterThanOrEqual(
+      new Set(CALLOUT_TYPES.map((e) => e.icon)).size,
+    )
     for (const entry of CALLOUT_TYPES) {
       // important 与 tip 同图标（lucide-flame）——图标规则按图标分组，别名
       // 随所属条目组命中即可（flame 组选择器含 tip/hint/important 三值）
