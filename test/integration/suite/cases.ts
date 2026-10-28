@@ -2457,11 +2457,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const original = '转换首段甲\n转换首段乙\n\n结尾段\n'
     const converted = '> [!tip]\n> 转换首段甲\n> 转换首段乙\n\n结尾段\n'
     // 光标移开（右键保选区语义下无选区 → 命中位置所在段落转换）
-    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'view.locate', offset: 2 })
-    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'contextMenu.test.contextMenu', pos: 2 })
-    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'contextMenu.test.menuClick', command: 'calloutType:tip' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.contextMenu', pos: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.menuClick', command: 'calloutType:tip' })
+    // 先断言 webview 侧（区分「菜单执行失败」与「出站回写失败」两层）
+    const webviewSide = await waitViewState('callout-plan.md', (v) => v.text === converted)
+    assert(webviewSide.text === converted, 'webview 侧应完成转换')
     await poll('转换写入宿主文档', () => (doc.getText() === converted ? true : undefined))
-    await waitViewState('callout-plan.md', (v) => v.text === converted)
     // 一步撤销恢复完整原文（一次菜单操作 = 一条宿主撤销项）
     await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
     await poll('一步撤销恢复原文', () => (doc.getText() === original ? true : undefined))
@@ -2478,9 +2480,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const doc = await vscode.workspace.openTextDocument(wsUri('callout-plan-crlf.md'))
     const original = 'CRLF 转换甲行\r\nCRLF 转换乙行\r\n'
     const converted = '> [!note]\r\n> CRLF 转换甲行\r\n> CRLF 转换乙行\r\n'
-    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'view.locate', offset: 2 })
-    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'contextMenu.test.contextMenu', pos: 2 })
-    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'contextMenu.test.menuClick', command: 'calloutType:note' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.contextMenu', pos: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.menuClick', command: 'calloutType:note' })
     await poll('CRLF 转换写入宿主', () => (doc.getText() === converted ? true : undefined), 15000)
     await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
     await poll('CRLF 撤销恢复原文（行尾保持）', () => (doc.getText() === original ? true : undefined), 15000)

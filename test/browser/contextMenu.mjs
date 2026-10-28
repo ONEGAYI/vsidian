@@ -149,7 +149,7 @@ try {
   passed++
   console.log('[统一菜单回归][PASS] 分组线绘制 + 提示列右对齐小字 + 未绑定不占位')
 
-  // ---- 场景 C：图标资产接线（#184：27 枚 mask 有 url + 真实加载 + 真实绘制 + H1 徽标） ----
+  // ---- 场景 C：图标资产接线（#184：28 枚 mask 有 url + 真实加载 + 真实绘制 + H1 徽标——#656 callout 转正后 27+1） ----
   const iconState = await page.evaluate(() => {
     const icons = [...document.querySelectorAll('.vsidian-context-menu [data-icon]')]
     return {
@@ -159,14 +159,14 @@ try {
       badge: window.readMenu().badgeOf('heading1'),
     }
   })
-  assert.equal(new Set(iconState.keys).size, 27, `菜单应引用 27 枚接线图标（实际 ${JSON.stringify([...new Set(iconState.keys)])}）`)
+  assert.equal(new Set(iconState.keys).size, 28, `菜单应引用 28 枚接线图标（实际 ${JSON.stringify([...new Set(iconState.keys)])}）`)
   assert.deepEqual(iconState.noUrl, [], `全部图标位 mask 应有资产 url（缺 ${JSON.stringify(iconState.noUrl)}）`)
   assert.deepEqual(iconState.notLight, [], `默认亮色页面应指向 light 资产（偏 ${JSON.stringify(iconState.notLight)}）`)
   assert.equal(iconState.badge, 'H1', '段落设置 H1 档用文字徽标（不经生图）')
   await page.waitForFunction(() =>
     performance.getEntriesByType('resource').filter((entry) =>
-      entry.name.endsWith('.svg') && entry.name.includes('/light-')).length >= 27)
-  assert.ok(iconRequests.filter((name) => name.startsWith('light-')).length >= 27,
+      entry.name.endsWith('.svg') && entry.name.includes('/light-')).length >= 28)
+  assert.ok(iconRequests.filter((name) => name.startsWith('light-')).length >= 28,
     `亮色图标资产应真实网络加载（实际 ${iconRequests.length} 次）`)
   // 顶级项图标真实绘制（mask 遮罩后非纯背景——照 quickActions 像素分析先例）
   const iconPaint = async (selector) => {
@@ -197,7 +197,7 @@ try {
   const clipboard = await iconPaint(".vsidian-context-menu [data-icon='paste']")
   assert.ok(clipboard.colors > 2 && clipboard.paintedPixels > 4, `paste 图标应真实绘制（${JSON.stringify(clipboard)}）`)
   passed++
-  console.log('[统一菜单回归][PASS] 图标接线：27 枚 mask 资产、真实加载与绘制、H1 徽标')
+  console.log('[统一菜单回归][PASS] 图标接线：28 枚 mask 资产、真实加载与绘制、H1 徽标')
 
   // #441：从真实右键菜单截图数墨迹像素；mask url 存在但资产未加载时也必须失败。
   const assertSceneIconPaint = async (entries) => {
@@ -248,12 +248,12 @@ try {
       notDark: icons.filter((el) => !getComputedStyle(el).maskImage.includes('dark-')).map((el) => el.dataset['icon']),
     }
   })
-  assert.equal(darkState.uniqueKeys, 27, '暗色页应同样引用 27 枚接线图标')
+  assert.equal(darkState.uniqueKeys, 28, '暗色页应同样引用 28 枚接线图标')
   assert.deepEqual(darkState.notDark, [], `暗色主题应指向 dark 资产（偏 ${JSON.stringify(darkState.notDark)}）`)
   await darkPage.waitForFunction(() =>
     performance.getEntriesByType('resource').filter((entry) =>
-      entry.name.endsWith('.svg') && entry.name.includes('/dark-')).length >= 27)
-  assert.ok(darkRequests.filter((name) => name.startsWith('dark-')).length >= 27,
+      entry.name.endsWith('.svg') && entry.name.includes('/dark-')).length >= 28)
+  assert.ok(darkRequests.filter((name) => name.startsWith('dark-')).length >= 28,
     `暗色图标资产应真实网络加载（实际 ${darkRequests.length} 次）`)
   assert.deepEqual(darkErrors, [], '暗色页无未捕获异常')
   await darkPage.close()
@@ -283,8 +283,13 @@ try {
   assert.ok(state.menuRect && state.menuRect.x + state.menuRect.width <= 900 + 1,
     `菜单右缘 clamp 不越出视口（实际 ${state.menuRect && state.menuRect.x + state.menuRect.width}）`)
   const flipped = state.submenus.filter((s) => s.flipped)
-  assert.ok(flipped.length === state.submenus.length && flipped.length > 0,
-    `视口右缘打开时全部子菜单应装配期翻左（实际 ${state.submenus.map((s) => s.flipped)}）`)
+  // #656（T05）三级路径修订：三级菜单锚在（已翻左的）二级项宿主内，按
+  // 自身锚位独立判定右/左——锚位在屏幕中部时右侧放得下即不翻（「全部
+  // 翻左」是纯两级时代的断言）。翻转的实质验收 = 每条菜单面都不溢出
+  // 视口：顶级 clamp 已断言，二级（顶级宿主的 submenu）全部翻左，三级
+  // 独立判定（DOM 序前三个 = 顶级宿主的 submenu，末位 = 三级）
+  assert.ok(flipped.length >= 3 && state.submenus.slice(0, 3).every((s) => s.flipped),
+    `视口右缘打开时顶级宿主的全部子菜单应装配期翻左（实际 ${state.submenus.map((s) => s.flipped)}）`)
   // 翻转后子菜单真实展开（hover 父项宿主）不溢出视口左缘
   await page.locator('.vsidian-context-menu button[data-vsidian-command="textFormat"]').hover()
   await page.waitForTimeout(80)

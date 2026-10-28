@@ -273,6 +273,7 @@ aside（合并模式侧区）
 | 模式 | 形态要点 | 事实源与契约指针 |
 | --- | --- | --- |
 | 菜单族（正文右键/大纲菜单/排序菜单/快速操作标题菜单） | `menu` 变量族、圆角 4–5px、padding 3–4px、阴影 §1.3；真实 button 逐项、键盘可达 | [context-menu.md](context-menu.md)、[tooltip.md](tooltip.md)；公开契约 menu/chrome 类目 |
+| 菜单三级子菜单与视口封顶（#656/T05） | 「插入 → Callout → 类型」三级：孙级 submenu 沿既有 `.vsidian-context-menu-submenu` 形态（同变量族/圆角/阴影，零新档位）；顶级与各级子菜单 `max-height: calc(100vh - 16px)` + `overflow-y: auto`（滚动面），装配期对越出视口底的子菜单按剩余空间内联封顶（`applySubmenuFlip`，≥120px 保底）——低高度下三级 15 项列表滚动可达；类型叶项无图标位（颜色预览归 T07） | [context-menu.md](context-menu.md)「Callout 三级子菜单」节；`calloutPlan` 浏览器套件低高度节 |
 | 悬停提示（tooltip） | 两 webview 共享 `tooltipCard.css`；`--vsidian-tooltip-*` 公开变量（radius 6px、出现延迟等）；悬停词唯一承载 `data-tooltip` | [tooltip.md](tooltip.md)；styleContract tooltip 类目 |
 | 双链联想浮层 | 圆角 6px、widget-shadow、widget 变量族、z-index 9500（编辑中瞬态层） | [wikilink-completion.md](wikilink-completion.md) |
 | frontmatter Popover | 圆角 10px、阴影 §1.3（.18 透明度档）、z-index 9000 | [frontmatter-table.md](frontmatter-table.md)；公开契约 frontmatter 类目 |

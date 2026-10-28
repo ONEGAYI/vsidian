@@ -353,7 +353,21 @@ export function applySubmenuFlip(
     if (!host) {
       continue
     }
-    // 子菜单默认 display:none（CSS :hover 显隐）——临时显形量宽后恢复
+    // 子菜单默认 display:none（CSS :hover 显隐）——临时显形量宽后恢复。
+    // #656（T05）三级路径修复：孙级 submenu 的祖先 submenu 同样默认
+    // display:none，祖先隐藏下 offsetWidth 恒 0（量宽无效、翻转与低高度
+    // 封顶都不判定——三级菜单在视口右缘会溢出屏幕）。量宽前显形整条
+    // submenu 祖先链，量毕恢复
+    const hiddenAncestors: HTMLElement[] = []
+    let walk: HTMLElement | null = submenu.parentElement
+    while (walk && walk !== menu) {
+      if (walk.classList.contains(names.submenu) && getComputedStyle(walk).display === 'none') {
+        walk.style.display = 'block'
+        walk.style.visibility = 'hidden'
+        hiddenAncestors.push(walk)
+      }
+      walk = walk.parentElement
+    }
     submenu.style.display = 'block'
     submenu.style.visibility = 'hidden'
     const width = submenu.offsetWidth
@@ -367,6 +381,10 @@ export function applySubmenuFlip(
     }
     submenu.style.display = ''
     submenu.style.visibility = ''
+    for (const ancestor of hiddenAncestors) {
+      ancestor.style.display = ''
+      ancestor.style.visibility = ''
+    }
     if (width <= 0) {
       continue
     }

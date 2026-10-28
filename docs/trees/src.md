@@ -128,6 +128,7 @@ vsidian/
     │   ├── behaviorFilterQuery.ts     # 行为筛选查询与分页纯函数
     │   ├── blockId.ts                 # 块 id 与块边界单一事实源
     │   ├── calloutIcon.ts             # Callout 图标值解析与锁版库
+    │   ├── calloutPlan.ts             # Callout 源文转换规划器
     │   ├── calloutSyntax.ts           # Callout 识别单一事实源
     │   ├── changeMapping.ts           # 变更重定位纯函数
     │   ├── chromeContract.ts          # 界面域样式契约探针表
