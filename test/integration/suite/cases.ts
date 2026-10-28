@@ -2198,31 +2198,48 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const right = await vscode.workspace.openTextDocument(wsUri('mode.md'))
     const leftBefore = left.getText()
     const rightBefore = right.getText()
+    // 真实用户可以先有普通标签；退让只负责回收本次旧对比。
+    await openWithEditor('lf.md')
+    await waitSessionReady('lf.md')
+    const ordinaryTab = vscode.window.tabGroups.activeTabGroup.activeTab
+    assert(ordinaryTab?.input instanceof vscode.TabInputCustom, '前置：普通 Vsidian 标签已打开')
     const edit = new vscode.WorkspaceEdit()
     edit.insert(left.uri, new vscode.Position(0, 0), 'left draft\n')
     edit.insert(right.uri, new vscode.Position(0, 0), 'right draft\n')
     assert(await vscode.workspace.applyEdit(edit), '应创建两侧未保存输入')
     try {
       await vscode.commands.executeCommand('vscode.diff', left.uri, right.uri, 'dirty diff', { preview: false })
-      await poll('脏文档也应退让并显示两侧完整草稿', () => {
-        const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
-        return input instanceof vscode.TabInputTextDiff && vscode.window.visibleTextEditors.length === 2 ? true : undefined
+      const nativeTab = await poll('脏文档也应退让并显示两侧完整草稿', () => {
+        const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+        if (!tab || !(tab.input instanceof vscode.TabInputTextDiff)) return undefined
+        return tab.input.original.toString() === left.uri.toString() && tab.input.modified.toString() === right.uri.toString() &&
+          vscode.window.visibleTextEditors.length === 2 ? tab : undefined
       }, 10000)
       assert(left.getText() === `left draft\n${leftBefore}` && left.isDirty, '左侧草稿与 dirty 不得被退让丢弃')
       assert(right.getText() === `right draft\n${rightBefore}` && right.isDirty, '右侧草稿与 dirty 不得被退让丢弃')
       assert(await readDisk('lf.md') === leftBefore && await readDisk('mode.md') === rightBefore, '退让不得写磁盘')
       // 新宿主可能已经直接打开文本 diff，不应强求它制造旧标签。
-      const oldTabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-        .filter((tab) => !(tab.input instanceof vscode.TabInputTextDiff))
+      const oldDiffTabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+        .filter((tab) => tab.label === 'dirty diff' && !(tab.input instanceof vscode.TabInputTextDiff))
       await left.save()
       assert(right.getText() === `right draft\n${rightBefore}` && right.isDirty, '保存左侧不能丢弃或保存右侧草稿')
-      assert(oldTabs.every((tab) => vscode.window.tabGroups.all.some((group) => group.tabs.includes(tab))),
+      assert(oldDiffTabs.every((tab) => vscode.window.tabGroups.all.some((group) => group.tabs.includes(tab))),
         '旧宿主仍有右侧草稿时保留退让前的标签')
       await right.save()
       await poll('两侧保存后旧对比清理且原生对比保留', () => {
         const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-        return tabs.length === 1 && tabs[0].input instanceof vscode.TabInputTextDiff ? true : undefined
-      }, 5000)
+        const diffTabs = tabs.filter((tab) => tab.label === 'dirty diff')
+        return diffTabs.length === 1 && diffTabs[0] === nativeTab && tabs.includes(ordinaryTab) ? true : undefined
+      }, 5000).catch((error: unknown) => {
+        const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).map((tab) => ({
+          label: tab.label, dirty: tab.isDirty, active: tab.isActive,
+          kind: tab.input instanceof vscode.TabInputTextDiff ? 'text-diff' :
+            tab.input instanceof vscode.TabInputCustom ? 'custom' : tab.input instanceof vscode.TabInputText ? 'text' : 'other',
+        }))
+        throw new Error(`${String(error)}；leftDirty=${left.isDirty} rightDirty=${right.isDirty} tabs=${JSON.stringify(tabs)}`)
+      })
+      assert(left.getText() === `left draft\n${leftBefore}` && right.getText() === `right draft\n${rightBefore}`,
+        '回收旧对比后两侧已保存草稿仍完整')
     } finally {
       const restore = new vscode.WorkspaceEdit()
       restore.replace(left.uri, new vscode.Range(left.positionAt(0), left.positionAt(left.getText().length)), leftBefore)
