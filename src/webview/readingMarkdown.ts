@@ -459,6 +459,19 @@ function installCalloutTransform(md: InstanceType<typeof MarkdownIt>): void {
       // 容器改形：blockquote → div.callout（attrs 经默认 renderToken 输出）
       open.tag = 'div'
       open.attrs = [['class', 'callout'], ['data-callout', decl.type]]
+      // 源锚点（#655/T04 评审修复 P2，li 的 data-vsidian-src-start 同款
+      // 机制）：值 = 标题行行首偏移（全文 doc 坐标）= 折叠键 span.key——
+      // 阅读装饰期按键位精确匹配容器，废除按序 zip（不可折叠 callout 无
+      // 折叠记录但同样渲染容器，按序配对会错挂箭头与状态类）。行界表或
+      // map 缺失（防御）不挂属性，装饰期不匹配即零装饰不崩溃。
+      const bounds = state.env as unknown as ReadingRenderEnv | undefined
+      if (bounds && Array.isArray(bounds.lineStarts) && open.map) {
+        const base = typeof bounds.baseLine === 'number' ? bounds.baseLine : 0
+        const key = bounds.lineStarts[open.map[0]! + base]
+        if (typeof key === 'number') {
+          open.attrs.push(['data-vsidian-src-start', String(key)])
+        }
+      }
       tokens[closeIdx]!.tag = 'div'
       // 标题 token（content = 显式标题的行内源文；空 = 渲染期派生默认标题）
       const title = new state.Token('vsidian_callout_title', '', 0)

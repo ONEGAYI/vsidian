@@ -315,6 +315,36 @@ describe('折叠装饰与光标迁移', () => {
       view.destroy()
     }
   })
+
+  // 评审修复 P3（规格 §5 L83「不能留在不可见区域」）：嵌套双收起时最深
+  // 区间的标题行行尾本身落在外层隐藏区内——迁移/钳制落点须复核上浮到
+  // 可见的标题行行尾
+  const DOUBLE_FOLD_DOC = '> [!note]- 外层标题\n> 外层正文\n> > [!tip]- 内层标题\n> > 内层正文\n'
+
+  it('嵌套双收起：迁移落点不落外层隐藏区（上浮外层标题末）', () => {
+    const state = foldState(DOUBLE_FOLD_DOC, [DOUBLE_FOLD_DOC.indexOf('内层正文')])
+    const spans = collectCalloutFolds(state.doc)
+    const [outer, inner] = spans
+    // 前提自证：两层默认收起（- -）且内层标题行行尾落外层隐藏区内
+    const folds = effectiveCalloutFolds(new Map(), spans)
+    expect(folds).toHaveLength(2)
+    expect(inner!.titleLineTo).toBeGreaterThan(outer!.titleLineTo)
+    expect(inner!.titleLineTo).toBeLessThan(outer!.contentTo)
+    const migrated = migrateSelectionForCalloutFold(state.selection, folds)
+    expect(migrated).not.toBeNull()
+    expect(migrated!.main.head).toBe(outer!.titleLineTo)
+  })
+
+  it('嵌套双收起：三层收起迭代复核——落点上浮到最外层可见标题末', () => {
+    const doc = '> [!note]- 甲标题\n> 甲正文\n> > [!tip]- 乙标题\n> > 乙正文\n> > > [!warning]- 丙标题\n> > > 丙正文\n'
+    const state = foldState(doc, [doc.indexOf('丙正文')])
+    const spans = collectCalloutFolds(state.doc)
+    expect(spans).toHaveLength(3)
+    const folds = effectiveCalloutFolds(new Map(), spans)
+    const migrated = migrateSelectionForCalloutFold(state.selection, folds)
+    expect(migrated).not.toBeNull()
+    expect(migrated!.main.head).toBe(spans[0]!.titleLineTo)
+  })
 })
 
 describe('目标解析与操作执行', () => {
@@ -425,6 +455,30 @@ describe('外部同步光标钳制', () => {
       const clamped = clampSelectionOutOfCalloutFolds(view)
       expect(clamped).not.toBeNull()
       expect(clamped!.main.head).toBe(span!.titleLineTo)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  // 评审修复 P3：嵌套双收起（默认 - -）时光标在内层正文——最深区间
+  // （内层）标题行行尾落外层隐藏区内，钳制落点须上浮外层标题末
+  it('嵌套双收起：钳制落点不落外层隐藏区（上浮外层标题末）', () => {
+    const doc = '> [!note]- 外层标题\n> 外层正文\n> > [!tip]- 内层标题\n> > 内层正文\n'
+    const state = foldState(doc)
+    const spans = collectCalloutFolds(state.doc)
+    const [outer, inner] = spans
+    // 前提自证：默认态两层均收起（零 override）
+    expect(effectiveCalloutFolds(state.field(calloutFoldField), spans)).toHaveLength(2)
+    expect(inner!.titleLineTo).toBeLessThan(outer!.contentTo)
+    const view = new EditorView({ state, parent: document.body })
+    try {
+      view.dispatch({
+        selection: { anchor: view.state.doc.toString().indexOf('内层正文') },
+        annotations: externalSync.of(true),
+      })
+      const clamped = clampSelectionOutOfCalloutFolds(view)
+      expect(clamped).not.toBeNull()
+      expect(clamped!.main.head).toBe(outer!.titleLineTo)
     } finally {
       view.destroy()
     }

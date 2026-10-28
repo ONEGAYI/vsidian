@@ -215,9 +215,36 @@ export const calloutFoldField = StateField.define<ReadonlyMap<number, CalloutFol
 // ---- 光标迁移（收起瞬间） ----
 
 /**
+ * 落点复核（规格 §5「不能留在不可见区域」，评审修复 P3）：嵌套双收起时
+ * 最深收起区间的标题行行尾本身可能落在外层隐藏区 (titleLineTo, contentTo)
+ * 内——落点须迭代上浮到包含它的收起区标题行行尾，直至不再落在任何收起
+ * 隐藏区。每轮 dest 严格左移（titleLineTo 严格小于当前落点），有限轮
+ * 收敛；guard 防御异常区间数据下的死循环。
+ */
+function visibleLandingPos(pos: number, folds: readonly CalloutFoldSpan[]): number {
+  let dest = pos
+  for (let guard = folds.length; guard >= 0; guard--) {
+    let hit: CalloutFoldSpan | null = null
+    for (const f of folds) {
+      if (dest > f.titleLineTo && dest < f.contentTo) {
+        hit = f
+        break
+      }
+    }
+    if (!hit) {
+      break
+    }
+    dest = hit.titleLineTo
+  }
+  return dest
+}
+
+/**
  * 收起事务的选区迁移计算（migrateSelectionForFold 同构）：任一 range 与
  * 被隐藏区间 (titleLineTo, contentTo) 开区间相交时迁移到标题行行尾
- * （collapse 空选区）；嵌套取包含该 range 的最深区间。返回 null 无需迁移。
+ * （collapse 空选区）；嵌套取包含该 range 的最深区间，落点经
+ * visibleLandingPos 复核（外层同时收起时上浮到可见标题行行尾）。
+ * 返回 null 无需迁移。
  */
 export function migrateSelectionForCalloutFold(
   selection: EditorSelection,
@@ -235,7 +262,7 @@ export function migrateSelectionForCalloutFold(
       }
     }
     if (hit) {
-      ;(ranges ??= selection.ranges.slice())[i] = EditorSelection.cursor(hit.titleLineTo)
+      ;(ranges ??= selection.ranges.slice())[i] = EditorSelection.cursor(visibleLandingPos(hit.titleLineTo, folds))
     }
   }
   return ranges ? EditorSelection.create(ranges, selection.mainIndex) : null
@@ -245,21 +272,32 @@ export function migrateSelectionForCalloutFold(
 
 /** 可折叠集共享缓存（foldableSpansCached 同款）：同一 doc 版本（Text 对象
  *  身份——每笔编辑即新对象，天然失效）与同一增量树引用下，装饰重建、
- *  触及集比较（选区事务的箭头退场判定）、toggle 目标解析与落点展开共享
- *  一次派生——选区事务高频，缓存把每笔光标移动的全文档遍历压成每 doc
- *  版本一次。 */
+ *  触及集比较（选区事务的箭头退场判定）、toggle 目标解析、落点展开与
+ *  阅读同步（syncReadingCalloutFolds，评审修复 P4）共享一次派生——选区
+ *  事务高频，缓存把每笔光标移动的全文档遍历压成每 doc 版本一次。 */
 const calloutSpansCache = new WeakMap<Text, { tree: Tree | undefined; spans: CalloutFoldSpan[] }>()
+
+/**
+ * 缓存派生入口（headingFold foldableSpansCached 同构，评审修复 P4）：
+ * 阅读同步链与 Live 侧共用同一 WeakMap 缓存——此前 syncReadingCalloutFolds
+ * 直调 collectCalloutFolds 绕过缓存，每次折叠侦测闭环全量重解析。缓存键
+ * = Text 实例身份 + 增量树引用，主文 Live state 与阅读同步读的是同一
+ * view.state（同 doc 同树），天然命中。
+ */
+export function calloutFoldSpansCached(doc: Text, tree: Tree | undefined): CalloutFoldSpan[] {
+  const hit = calloutSpansCache.get(doc)
+  if (hit && hit.tree === tree) {
+    return hit.spans
+  }
+  const spans = collectCalloutFolds(doc, tree)
+  calloutSpansCache.set(doc, { tree, spans })
+  return spans
+}
 
 /** 状态集派生辅助：(state) → 全部可折叠区间（增量树复用 + 共享缓存） */
 function spansOfState(state: import('@codemirror/state').EditorState): CalloutFoldSpan[] {
   const tree = state.field(liveDecorationsField, false)?.tree
-  const hit = calloutSpansCache.get(state.doc)
-  if (hit && hit.tree === tree) {
-    return hit.spans
-  }
-  const spans = collectCalloutFolds(state.doc, tree)
-  calloutSpansCache.set(state.doc, { tree, spans })
-  return spans
+  return calloutFoldSpansCached(state.doc, tree)
 }
 
 /**
@@ -374,7 +412,9 @@ export function unfoldCalloutAround(view: EditorView, from: number, to?: number)
 
 /**
  * 外部同步光标钳制（clampSelectionOutOfFolds 同构）：pos 落入收起隐藏区
- * → 钳到该 callout 标题行行尾；嵌套取最深区间。可见区返回 null。
+ * → 钳到该 callout 标题行行尾；嵌套取最深区间，落点经 visibleLandingPos
+ * 复核（评审修复 P3：外层同时收起时上浮到可见标题行行尾）。可见区返回
+ * null。
  */
 export function clampSelectionOutOfCalloutFolds(view: EditorView): EditorSelection | null {
   const overrides = view.state.field(calloutFoldField, false)
@@ -399,7 +439,7 @@ export function clampSelectionOutOfCalloutFolds(view: EditorView): EditorSelecti
       if (!ranges) {
         ranges = sel.ranges.slice()
       }
-      ranges[i] = EditorSelection.cursor(hit.titleLineTo)
+      ranges[i] = EditorSelection.cursor(visibleLandingPos(hit.titleLineTo, folds))
     }
   }
   return ranges ? EditorSelection.create(ranges, sel.mainIndex) : null

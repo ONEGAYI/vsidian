@@ -1407,3 +1407,134 @@ describe('阅读态标题折叠（#419）：折叠状态消费', () => {
     view.dispose()
   })
 })
+
+// ---- #655/T04 阅读态 callout 折叠装饰：按源锚点配对容器（评审修复 P2） ----
+// 块内 div.callout 与可折叠 span 的配对必须按键位（span.key = 标题行行首
+// 偏移 = 渲染期 data-vsidian-src-start 锚点）精确匹配：不可折叠 callout
+// （无符号/标题-only）同样渲染容器但不产出折叠记录，按序 zip 会把它们
+// 错配进可折叠序列——箭头与 is-collapsible/is-collapsed 挂到错误容器。
+import { collectCalloutFolds, calloutFoldView, type CalloutFoldSpan } from '../../src/webview/calloutFold'
+
+describe('阅读态 callout 折叠装饰（#655/T04）：键位配对容器', () => {
+  /** 组装：阅读视图 + 默认折叠视图注入（与生产 syncReadingCalloutFolds 同源派生形态） */
+  function setupCalloutFold(doc: string): {
+    container: HTMLElement
+    view: VirtualReadingView
+    spans: CalloutFoldSpan[]
+    toggled: number[]
+  } {
+    const root = document.createElement('div')
+    root.id = 'app'
+    const container = createReadingContainer()
+    root.append(container)
+    document.body.append(root)
+    const toggled: number[] = []
+    const view = new VirtualReadingView(container, {
+      onCalloutFoldToggle: (key) => toggled.push(key),
+    })
+    view.setDocument(doc)
+    const spans = collectCalloutFolds(EditorState.create({ doc }).doc)
+    view.setCalloutFoldState(calloutFoldView(new Map(), spans))
+    return { container, view, spans, toggled }
+  }
+
+  it('无符号外层嵌 + 内层：内层箭头挂内层容器，无符号外层零折叠装饰', () => {
+    const doc = [
+      '> [!note] 无符号外层标题', // 1
+      '> 外层正文行', // 2
+      '> > [!tip]+ 可折叠内层标题', // 3
+      '> > 内层正文行', // 4
+    ].join('\n')
+    const { container, view, spans, toggled } = setupCalloutFold(doc)
+    try {
+      expect(spans).toHaveLength(1) // 仅内层可折叠（外层无符号）
+      const outer = container.querySelector<HTMLElement>('div.callout[data-callout="note"]')
+      const inner = container.querySelector<HTMLElement>('div.callout[data-callout="tip"]')
+      expect(outer).not.toBeNull()
+      expect(inner).not.toBeNull()
+      // 无符号外层：自身标题无箭头、无 is-collapsible（不可折叠容器零
+      // 装饰；:scope 限定自身标题——嵌套内层不在判定面）
+      expect(outer!.querySelector(':scope > .callout-title .callout-fold')).toBeNull()
+      expect(outer!.classList.contains('is-collapsible')).toBe(false)
+      // 可折叠内层：is-collapsible + 标题尾箭头挂内层容器自身
+      expect(inner!.classList.contains('is-collapsible')).toBe(true)
+      const arrow = inner!.querySelector<HTMLElement>(':scope > .callout-title .callout-fold')
+      expect(arrow).not.toBeNull()
+      arrow!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      expect(toggled).toEqual([spans[0]!.key])
+    } finally {
+      view.dispose()
+      container.remove()
+    }
+  })
+
+  it('同块混排（列表内）：无符号在前、有符号在后——箭头挂有符号容器', () => {
+    const doc = [
+      '- > [!warning] 无符号项', // 1
+      '  > 无符号正文', // 2
+      '- > [!example]+ 可折叠项', // 3
+      '  > 可折叠正文', // 4
+    ].join('\n')
+    const { container, view, spans } = setupCalloutFold(doc)
+    try {
+      expect(spans).toHaveLength(1)
+      const noFold = container.querySelector<HTMLElement>('div.callout[data-callout="warning"]')
+      const foldable = container.querySelector<HTMLElement>('div.callout[data-callout="example"]')
+      expect(noFold).not.toBeNull()
+      expect(foldable).not.toBeNull()
+      expect(noFold!.querySelector('.callout-fold')).toBeNull()
+      expect(noFold!.classList.contains('is-collapsible')).toBe(false)
+      expect(foldable!.querySelector('.callout-fold')).not.toBeNull()
+      expect(foldable!.classList.contains('is-collapsible')).toBe(true)
+    } finally {
+      view.dispose()
+      container.remove()
+    }
+  })
+
+  it('同一块内多个可折叠 callout：各自容器各自配对（文档序回归）', () => {
+    const doc = [
+      '- > [!example]+ 甲项', // 1
+      '  > 甲正文', // 2
+      '- > [!tip]- 乙项', // 3
+      '  > 乙正文', // 4
+    ].join('\n')
+    const { container, view, spans } = setupCalloutFold(doc)
+    try {
+      expect(spans).toHaveLength(2)
+      const jia = container.querySelector<HTMLElement>('div.callout[data-callout="example"]')
+      const yi = container.querySelector<HTMLElement>('div.callout[data-callout="tip"]')
+      expect(jia).not.toBeNull()
+      expect(yi).not.toBeNull()
+      const jiaArrow = jia!.querySelector<HTMLElement>('.callout-fold')
+      const yiArrow = yi!.querySelector<HTMLElement>('.callout-fold')
+      expect(jiaArrow).not.toBeNull()
+      expect(yiArrow).not.toBeNull()
+      expect(jiaArrow!.dataset['calloutFold']).toBe('+')
+      expect(yiArrow!.dataset['calloutFold']).toBe('-')
+      // 乙项默认收起（tip-）：is-collapsed 挂乙容器、甲容器不挂
+      expect(yi!.classList.contains('is-collapsed')).toBe(true)
+      expect(jia!.classList.contains('is-collapsed')).toBe(false)
+    } finally {
+      view.dispose()
+      container.remove()
+    }
+  })
+
+  it('无折叠数据零装饰（无回调/空集形态维持）', () => {
+    const doc = '> [!note]+ 标题\n> 正文\n'
+    const container = createReadingContainer()
+    document.body.append(container)
+    const view = new VirtualReadingView(container)
+    try {
+      view.setDocument(doc)
+      view.setCalloutFoldState(calloutFoldView(new Map(), collectCalloutFolds(EditorState.create({ doc }).doc)))
+      // 无 onCalloutFoldToggle 回调：不注入箭头（容器仍照常渲染）
+      expect(container.querySelector('.callout-fold')).toBeNull()
+      expect(container.querySelector('div.callout')).not.toBeNull()
+    } finally {
+      view.dispose()
+      container.remove()
+    }
+  })
+})

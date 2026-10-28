@@ -285,6 +285,64 @@ try {
     document.querySelector('.callout-fold')?.getAttribute('data-tooltip-keys'))
   assert.ok(keyBadge && keyBadge.toLowerCase().includes('u'), `箭头应带键位徽章: ${keyBadge}`)
 
+  // ---- 九、P2 错配形态：无符号外层嵌 + 内层——箭头按键位挂内层容器 ----
+  // 不可折叠 callout（无符号）同样渲染 div.callout 容器：按序 zip 会把
+  // 内层的箭头与 is-collapsible/is-collapsed 错挂到外层容器（点击后外层
+  // 正文随错误 is-collapsed 整体消失）。渲染锚点（data-vsidian-src-start
+  // = span.key）配对后：箭头挂内层自身，点击只收起内层。查询限定阅读
+  // 容器作用域——全局 div.callout 会扫进 Live 侧 .cm-line.callout 行。
+  await page.evaluate((text) => window.initCalloutFold(text), [
+    '> [!warning] 无符号外层标题', // 1
+    '> 外层正文甲', // 2
+    '> > [!note]+ 可折叠内层标题', // 3
+    '> > 内层正文乙', // 4
+    '>', // 5（空引用行——否则「外层收尾」是内层段落的 lazy 延续，随内层收起隐藏）
+    '> 外层收尾', // 6
+  ].join('\n'))
+  await settle(page)
+  await page.evaluate(() => window.locateCalloutFold(
+    window.controller.getView().state.doc.length))
+  await settle(page)
+  await page.evaluate(() => window.setCalloutFoldMode('reading'))
+  await settle(page)
+  const editsP2 = await page.evaluate(() => window.editRequestCount())
+  const readingScope = page.locator('.vsidian-view-reading')
+  // 装饰挂点：无符号外层零折叠装饰（:scope 限定自身标题，嵌套内层不在
+  // 判定面）；可折叠内层挂箭头与 is-collapsible
+  const p2Doms = await readingScope.evaluate((scope) => {
+    const outer = scope.querySelector('div.callout[data-callout="warning"]')
+    const inner = scope.querySelector('div.callout[data-callout="note"]')
+    return {
+      outerCollapsible: outer?.classList.contains('is-collapsible') ?? null,
+      outerCollapsed: outer?.classList.contains('is-collapsed') ?? null,
+      outerArrow: !!outer?.querySelector(':scope > .callout-title .callout-fold'),
+      innerCollapsible: inner?.classList.contains('is-collapsible') ?? null,
+      innerArrow: !!inner?.querySelector(':scope > .callout-title .callout-fold'),
+    }
+  })
+  assert.deepEqual(p2Doms, {
+    outerCollapsible: false,
+    outerCollapsed: false,
+    outerArrow: false,
+    innerCollapsible: true,
+    innerArrow: true,
+  }, `装饰应按键位挂内层容器: ${JSON.stringify(p2Doms)}`)
+  // 真实点击内层箭头：只收起内层（外层正文与收尾行保持可见——错配形态
+  // 下外层容器被挂 is-collapsed 会把外层正文整体隐藏）
+  await readingScope
+    .locator('div.callout[data-callout="note"] > .callout-title .callout-fold')
+    .click()
+  await settle(page)
+  assert.equal(await page.evaluate((t) => window.readingTextPainted(t), '内层正文乙'), false,
+    '点击后内层正文应收起不可见')
+  assert.ok(await page.evaluate((t) => window.readingTextPainted(t), '外层正文甲'),
+    '点击内层箭头后外层正文应保持可见（错配形态会整体消失）')
+  assert.ok(await page.evaluate((t) => window.readingTextPainted(t), '外层收尾'),
+    '外层收尾行应保持可见')
+  rprobe = await page.evaluate(() => window.readingCalloutFoldProbe())
+  assert.equal(rprobe.foldCount, 1, '阅读侧应恰好一处收起容器（内层）')
+  assert.equal(await page.evaluate(() => window.editRequestCount()), editsP2, 'P2 全程零写回')
+
   assert.deepEqual(errors, [], '页面无脚本错误')
   console.log('\ncalloutFold 全部通过')
 } finally {

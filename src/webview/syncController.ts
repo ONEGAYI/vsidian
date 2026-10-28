@@ -54,8 +54,8 @@ import {
 import {
   applyCalloutToggleAt,
   calloutFoldField,
+  calloutFoldSpansCached,
   calloutFoldView,
-  collectCalloutFolds,
   collectCalloutFoldPaint,
   setCalloutFoldBindingHints,
   toggleCalloutFoldAt,
@@ -4521,7 +4521,10 @@ export class WebviewSyncController {
    * 有效折叠视图（区间派生单一事实源 calloutFold 纯函数族，阅读侧只消费
    * 不复制）推给阅读视图（已挂块重装饰 + 高度重测——收起是 CSS 隐藏，
    * 块序列不变）。与 syncReadingFolds 同款调用点（refreshReading 与侦测
-   * 闭环）。
+   * 闭环）；派生走 calloutFoldSpansCached 共享缓存（评审修复 P4：此前
+   * 直调 collectCalloutFolds 绕过 WeakMap 缓存，每次折叠侦测闭环全量
+   * 重解析——阅读同步与 Live 装饰读同一 view.state 的 doc/tree，天然
+   * 命中）。
    */
   private syncReadingCalloutFolds(): void {
     const view = this.view
@@ -4529,7 +4532,7 @@ export class WebviewSyncController {
       return
     }
     const tree = view.state.field(liveDecorationsField, false)?.tree
-    const spans = collectCalloutFolds(view.state.doc, tree)
+    const spans = calloutFoldSpansCached(view.state.doc, tree)
     const overrides = view.state.field(calloutFoldField, false) ?? new Map()
     this.readingView.setCalloutFoldState(calloutFoldView(overrides, spans))
   }

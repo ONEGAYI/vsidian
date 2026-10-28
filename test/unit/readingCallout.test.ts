@@ -19,7 +19,9 @@ function renderBlock(doc: string): string {
 describe('阅读 callout：容器结构发射', () => {
   it('基本成型：div.callout[data-callout] > title(icon + inner) + content，正文在 content 内', () => {
     const html = renderBlock(['> [!note] 标题文字', '> 正文段落'].join('\n'))
-    expect(html).toContain('<div class="callout" data-callout="note">')
+    // 容器携带源锚点（#655/T04 P2：data-vsidian-src-start = 标题行行首偏移，
+    // 阅读折叠装饰按键位精确匹配容器用，li 锚点同款机制）
+    expect(html).toContain('<div class="callout" data-callout="note" data-vsidian-src-start="0">')
     expect(html).toMatch(/<div class="callout-title">/)
     expect(html).toMatch(/<div class="callout-icon"><\/div>/)
     expect(html).toMatch(/<div class="callout-title-inner">标题文字<\/div>/)
@@ -115,7 +117,9 @@ describe('阅读 callout：容器结构发射', () => {
     const outer = html.indexOf('data-callout="note"')
     const inner = html.indexOf('data-callout="tip"')
     expect(inner).toBeGreaterThan(outer)
-    expect(html).toMatch(/<div class="callout" data-callout="tip">/)
+    // 源锚点随层正确（#655/T04 P2）：外层 = 行 1 行首 0；内层 = 行 2 行首
+    // （'> [!note] 外层' 长 12 + 换行 = 13）
+    expect(html).toMatch(/<div class="callout" data-callout="tip" data-vsidian-src-start="13">/)
   })
 
   it('callout 内普通引用保留 blockquote 标签与紫条语义（F19）', () => {

@@ -289,16 +289,41 @@ export class VirtualReadingView {
    * 解析）。setDocument 前先行更新时同样只存状态（新块挂载时消费）。
    */
   setCalloutFoldState(folds: Array<{ span: CalloutFoldSpan; folded: boolean }>): void {
+    // 同态判定按值比较（评审修复 B3）：上游 calloutFoldView 每次新建视图
+    // 数组、collectCalloutFolds 缓存未命中时也新建 span 对象——按 span
+    // 引用相等判同会使非空集短路恒 false，重复同步全部触发重装饰。
+    // 值键 = 折叠行为全集（key/titleLineTo/contentTo/declFold + folded）。
     const same = folds.length === this.calloutFolds.length &&
-      folds.every((v, i) => v.span === this.calloutFolds[i]!.span && v.folded === this.calloutFolds[i]!.folded)
+      folds.every((v, i) => {
+        const prev = this.calloutFolds[i]!
+        return v.folded === prev.folded && v.span.key === prev.span.key &&
+          v.span.titleLineTo === prev.span.titleLineTo &&
+          v.span.contentTo === prev.span.contentTo &&
+          v.span.declFold === prev.span.declFold
+      })
     this.calloutFolds = folds
-    if (same || this.elements.size === 0) {
+    if (same) {
       return
     }
-    for (const [i, el] of this.elements) {
-      this.redecorateCalloutFolds(el, this.blocks[i]!)
+    if (this.elements.size > 0) {
+      for (const [i, el] of this.elements) {
+        this.redecorateCalloutFolds(el, this.blocks[i]!)
+      }
+      this.scheduleUpdate()
+      return
     }
-    this.scheduleUpdate()
+    // 无布局全量回退（#6 路径不维护挂载集）：块元素按 this.blocks 顺序
+    // 直挂容器——按容器子元素与块索引一一对应重装饰（评审修复 P2 补齐：
+    // 此前该形态下状态变化零重装饰）
+    if (!this.virtualized && this.container.children.length > 0) {
+      const kids = Array.from(this.container.children)
+      this.blocks.forEach((block, i) => {
+        const el = kids[i]
+        if (el instanceof HTMLElement) {
+          this.redecorateCalloutFolds(el, block)
+        }
+      })
+    }
   }
 
   /** 块内 callout 折叠装饰的清除（重装饰前置）：移除注入的箭头与状态类，
@@ -314,12 +339,14 @@ export class VirtualReadingView {
 
   /**
    * #655（T04）块内 callout 折叠装饰（挂载与状态变化重装饰共用）：块内
-   * div.callout 按文档序（querySelectorAll 先序 = markerFrom 升序）匹配
-   * 该块区间内的折叠视图——挂 is-collapsible/is-collapsed 状态类
-   * （T01 固定口径）、向 .callout-title 尾部注入箭头（click 回调走构造
-   * 注入的 onCalloutFoldToggle 翻转 Live StateField，呈现刷新由控制器
-   * 的折叠侦测闭环驱动）。数量不齐（渲染差异防御）时逐序尽力匹配，
-   * 超出部分不装饰不崩溃。
+   * div.callout 按源锚点（data-vsidian-src-start = 标题行行首 = span.key，
+   * 渲染期 readingMarkdown 变换挂点）精确匹配该块区间内的折叠视图——
+   * 挂 is-collapsible/is-collapsed 状态类（T01 固定口径）、向 .callout-title
+   * 尾部注入箭头（click 回调走构造注入的 onCalloutFoldToggle 翻转 Live
+   * StateField，呈现刷新由控制器的折叠侦测闭环驱动）。按序 zip 会把
+   * 不可折叠 callout（无符号/标题-only——渲染容器但不产出折叠记录）错配
+   * 进可折叠序列（评审修复 P2）；锚点缺失（防御：行界表不可用的渲染
+   * 形态）不装饰不崩溃。
    */
   private decorateCalloutFoldControls(el: HTMLElement, block: ReadingBlock): void {
     this.stripCalloutFoldDecorations(el)
@@ -331,16 +358,20 @@ export class VirtualReadingView {
     if (inBlock.length === 0) {
       return
     }
-    const doms = el.querySelectorAll<HTMLElement>('div.callout')
-    inBlock.forEach((v, i) => {
-      const dom = doms[i]
+    const doms = el.querySelectorAll<HTMLElement>('div.callout[data-vsidian-src-start]')
+    const domByKey = new Map<string, HTMLElement>()
+    for (const dom of doms) {
+      domByKey.set(dom.getAttribute('data-vsidian-src-start') ?? '', dom)
+    }
+    for (const v of inBlock) {
+      const dom = domByKey.get(String(v.span.key))
       if (!dom) {
-        return
+        continue
       }
       dom.classList.add('is-collapsible')
       const title = dom.querySelector<HTMLElement>('.callout-title')
       if (!title) {
-        return
+        continue
       }
       if (v.folded) {
         dom.classList.add('is-collapsed')
@@ -350,7 +381,7 @@ export class VirtualReadingView {
         declFold: v.span.declFold,
         onToggle: () => this.onCalloutFoldToggle?.(v.span.key),
       }))
-    })
+    }
   }
 
   /** 状态变化时对已挂块重装饰（不重建块序列） */
@@ -431,6 +462,9 @@ export class VirtualReadingView {
       for (const block of this.blocks) {
         const el = createReadingBlockElement(block, this.text, this.hooks.docScope)
         this.decorateFoldControls(el, block)
+        // #655（T04）callout 折叠装饰（挂载时消费当前折叠视图，评审修复
+        // P2 补齐——此前仅虚拟化路径 mountBlock 消费，无布局回退漏挂）
+        this.decorateCalloutFoldControls(el, block)
         this.container.appendChild(el)
         this.hooks.onBlockMounted?.(el)
       }
