@@ -57,6 +57,7 @@ import { findAutocloseEntry, shouldAutoclose } from '../shared/symbols'
 import { getCompositionSelectionSnapshot } from './symbolCompositionState'
 import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
+import { BLOCK_CODE_NODES } from './fenceEscape'
 import { tableRegionField } from './tableRegionSelection'
 import { blankRowRawInput } from './tableEditing'
 import { independentTableInput } from './tableCellInput'
@@ -163,6 +164,30 @@ export function inCodeContext(state: EditorState, pos: number): boolean {
   }
   const chain = chainAt(field.tree, pos)
   return chain.some((node) => CODE_CONTEXT_NODES.has(node.name))
+}
+
+/**
+ * 行为链驱动的代码上下文（#649）：frontmatter 与块级代码/块级 HTML——
+ * **不含行内代码**（InlineCode/CodeMark）。与 inCodeContext（#123/#124
+ * 符号补全面口径，行内代码仍排除）拆分：附加组件输入规则的唯一可触达
+ * 通道是行为链，上游 easy-typing 的 tryProcessInput 无行内代码排除
+ * （cm_extensions.ts:401 仅排表格行）——若门控沿用符号口径，行内代码
+ * 内的输入永不驱动组件，`builtin-conv-codeblock`（`·` 升级代码块）类
+ * 「触发形态在行内代码内」的规则结构性不可达。节点集共用 fenceEscape
+ * 的 BLOCK_CODE_NODES（块级语义单点维护，围栏标记位置仍被父节点
+ * FencedCode 覆盖）。消费方仅行为链驱动（liveInstance 键入与 IME 定稿
+ * 两处门控），符号补全/选区包裹/双链联想守卫继续用 inCodeContext。
+ */
+export function inBlockCodeContext(state: EditorState, pos: number): boolean {
+  const field = state.field(liveDecorationsField, false)
+  if (!field) {
+    return true
+  }
+  if (field.fm && pos >= field.fm.start && pos <= field.fm.end) {
+    return true
+  }
+  const chain = chainAt(field.tree, pos)
+  return chain.some((node) => BLOCK_CODE_NODES.has(node.name))
 }
 
 /** 光标左侧紧邻的同字符连续长度（键入前状态；pos 为插入点） */

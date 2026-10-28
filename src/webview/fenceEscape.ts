@@ -43,8 +43,10 @@ import { chainAt, visitRange } from '../shared/markdownDoc'
 
 /** 块级代码上下文（排除集）：光标链命中即不接管——代码块内 Tab 继续
  *  缩进（indentEditing 的 CODE_NODES 同族口径，另含围栏语言行 CodeInfo
- *  与 HTML 块）。InlineCode 刻意不在其中（行内代码是树围栏） */
-const BLOCK_CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock', 'CodeInfo', 'HTMLBlock'])
+ *  与 HTML 块）。InlineCode 刻意不在其中（行内代码是树围栏）。
+ *  #649 起行为链门控（symbolAutocomplete 的 inBlockCodeContext）共用
+ *  此集——块级语义单点维护，两侧不各建副本 */
+export const BLOCK_CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock', 'CodeInfo', 'HTMLBlock'])
 
 /** 树围栏节点两侧标记的节点名（首/末子节点须为 mark 才是成对围栏形态） */
 const FENCE_MARK_NODES = new Set([

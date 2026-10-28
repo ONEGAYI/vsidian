@@ -74,7 +74,7 @@ import { anchorFlash } from './anchorFlash'
 import { codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
 import { frontmatterEditing } from './frontmatterEditing'
 import { liveLineNumbers } from './liveLineNumbers'
-import { hasTypedAutoclosePending, inCodeContext, symbolAutocomplete, typedAutocloseScheduler } from './symbolAutocomplete'
+import { hasTypedAutoclosePending, inBlockCodeContext, symbolAutocomplete, typedAutocloseScheduler } from './symbolAutocomplete'
 import { symbolSelectionWrap, typedWrapScheduler } from './symbolWrap'
 import { multicursorExtensions } from './multicursor'
 import { listEditing } from './listEditing'
@@ -1183,8 +1183,10 @@ export class LiveEditorInstance {
    * - Tab：Tab 是 keymap 命令（fenceEscape/tableEditing/indentEditing
    *   三段优先级），不是 input.type 事务，天然不驱动——不新增可绑定
    *   命令绕过固定情境链；
-   * - 代码上下文：frontmatter/块级代码（inCodeContext，#123/#124 同
-   *   口径）排除——行为只作用于正文；
+   * - 代码上下文：frontmatter/块级代码/块级 HTML（inBlockCodeContext，
+   *   #649 拆分自 #123/#124 符号口径——不含行内代码，附加组件输入规则
+   *   对齐上游可触达面：`·` 升级代码块类规则的触发形态就在行内代码内）
+   *   排除——行为只作用于正文，行内代码内的键入照常驱动；
    * - 程序化事务排除：外部同步（externalSync）与 SDK 修饰
    *   （addonEditOriginTag）不触发（防第二写入口/递归）；内置程序化符号
    *   事务（builtinEditOrigin，#595——#123 补全/#124 包裹在 compositionend
@@ -1217,7 +1219,7 @@ export class LiveEditorInstance {
     if (tr.startState.field(tableRegionField, false)) {
       return
     }
-    if (state.selection.ranges.some((range) => inCodeContext(state, range.from) || inCodeContext(state, range.to))) {
+    if (state.selection.ranges.some((range) => inBlockCodeContext(state, range.from) || inBlockCodeContext(state, range.to))) {
       return
     }
     // #600 blankRow 规范化接管域：整行重建事务携带原始键入载荷（该路径
@@ -1305,7 +1307,8 @@ export class LiveEditorInstance {
    * 门控对齐键入路径的既有情境：空白格/网格组合（blankComposition 在场
    * ——净输入归表格管线规范化）、表格格区（组合开始点标记——定稿事务
    * 已清空 region，开始时刻留存，#124「格区不接管」口径）、代码上下文
-   * （定稿落点判 inCodeContext；多选区时只查主选区 head 与 head-1，
+   * （定稿落点判 inBlockCodeContext，#649 键入路径同款拆分；多选区时
+   * 只查主选区 head 与 head-1，
    * 是键入路径「全部选区双端」的近似——IME 定稿在多选区下极罕见，
    * 取主落点已覆盖现实输入形态）、取消组合（data 为空）。外部同步与
    * SDK 修饰不经此路径。净变更材料取用即清（所有门控路径统一回收，
@@ -1325,7 +1328,7 @@ export class LiveEditorInstance {
       return
     }
     const head = state.selection.main.head
-    if (inCodeContext(state, head - 1) || inCodeContext(state, head)) {
+    if (inBlockCodeContext(state, head - 1) || inBlockCodeContext(state, head)) {
       return
     }
     // replaced 推导与键入路径（maybeDriveAddonBehaviors）的事务取法同构：
