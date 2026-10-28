@@ -2080,6 +2080,73 @@ body.vscode-high-contrast #app {
   mask-size: contain;
 }
 
+/* ---- #658（T07）Callout 类型页取色预览槽：隐藏探针（#app 内、双正文
+   作用域祖先 + 文档样式身份）读计算值，经内联变量注入菜单行——菜单挂
+   body（不在 #app 内）不继承 --callout-*，这里内联的是「当前文档/主题/
+   片段下的有效值」，色底表达式与正文行级/阅读容器同款复制（标准色走
+   渐变、RGB 三元组走 background-color，互斥语义与正文一致）；圆角默认
+   取菜单条目档位 4px，尊重探针透传的 --callout-radius 定制 ---- */
+.vsidian-context-menu .vsidian-context-menu-swatch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 16px;
+  border-radius: var(--vsidian-callout-menu-radius, 4px);
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* 无 Callout 行：普通引用呈现（引用底色变量族 + 紫条 inset——与正文
+   引用行同款消费；竖条色经探针内联透传，菜单在 #app 外不继承该变量） */
+.vsidian-context-menu .vsidian-context-menu-swatch-quote {
+  background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
+  background-image: none;
+  box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color, #a78bfa);
+}
+
+/* 自定义输入行：透明占位（保列对齐，不伪装固定类型——菜单语义） */
+.vsidian-context-menu .vsidian-context-menu-swatch-placeholder {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+/* 预览槽图标位：mask 通道（形状/颜色均为正文图标计算值的内联复制） */
+.vsidian-context-menu .vsidian-context-menu-swatch-icon {
+  width: 12px;
+  height: 12px;
+  background-color: var(--vsidian-callout-menu-icon-color, transparent);
+  -webkit-mask-image: var(--vsidian-callout-menu-icon-mask);
+  mask-image: var(--vsidian-callout-menu-icon-mask);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* 自定义图标注入态（calloutIconMount 同款语义）：关 mask/底色，
+   currentColor 随类型色（--callout-color 内联在槽上；三元组形态按 unset
+   降级继承——与正文非背景通道的实测边界一致） */
+.vsidian-context-menu .vsidian-context-menu-swatch-icon.vsidian-context-menu-swatch-icon-custom {
+  -webkit-mask-image: none;
+  mask-image: none;
+  background-color: transparent;
+  color: var(--callout-color);
+}
+
+.vsidian-context-menu .vsidian-context-menu-swatch-icon.vsidian-context-menu-swatch-icon-custom svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* #441 图标接线（40 枚，含表格 10 枚与图形块 3 枚）：菜单挂 body
    （不在 #app 内），规则不带 #app 前缀；两套资源与快速操作条同一 18px
    画布资产族，mask 跟随前景色。备用 3 key（media/footnote/callout）

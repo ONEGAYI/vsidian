@@ -338,6 +338,7 @@ import {
   outlineStructuralExpand,
 } from './outlineMenu'
 import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES, focusMenuDom } from './contextMenuDom'
+import { mountCalloutMenuPreview, type CalloutMenuPreviewHandle } from './calloutMenuPreview'
 import { WIKILINK_SUGGEST_CLASS_NAMES, wikilinkFileResultFresh } from './wikilinkSuggest'
 import {
   PLAIN_MENU_LINE,
@@ -866,6 +867,9 @@ export class WebviewSyncController {
   private contextMenuSnapshot: MenuContextSnapshot | null = null
   /** 菜单打开时的文档快照（命令执行时 doc 已变则放弃——锚点过期防御） */
   private contextMenuDoc: Text | null = null
+  /** #658（T07）Callout 类型页取色预览生命周期（探针 + 观察器；菜单打开
+   *  期在场，closeContextMenu 即 dispose 归零；不含类型页的菜单为 null） */
+  private calloutMenuPreview: CalloutMenuPreviewHandle | undefined
   /** 菜单外点关闭监听（document capture pointerdown；close 时摘除） */
   private contextMenuDismissPointer: ((e: PointerEvent) => void) | undefined
   /** 菜单 Esc 关闭监听（document capture keydown；close 时摘除） */
@@ -2656,10 +2660,14 @@ export class WebviewSyncController {
             // #657/T06：片段装载完成 → callout 图标重解析（--callout-icon
             // 计算值随新 sheet 变化；应用即摘链的场景由 head 观察器兜底）
             scheduleCalloutIconRefresh()
+            // #658（T07）：菜单打开期间片段落地 → 类型页预览显式重读
+            // （观察器在 <link> 插入时已触发过一次，此处覆盖装载完成时机）
+            this.calloutMenuPreview?.refresh()
           }
         })
         // 摘链（停用/删除）无装载回报——apply 返回后统一调度一轮
         scheduleCalloutIconRefresh()
+        this.calloutMenuPreview?.refresh()
         break
       }
       case 'backlinks.snapshot': {
@@ -8005,6 +8013,11 @@ export class WebviewSyncController {
     this.contextMenuSnapshot = snapshot
     this.contextMenuDoc = view.state.doc
     document.body.appendChild(menu)
+    // #658（T07）Callout 类型页取色预览：菜单含类型页时挂隐藏探针绘制
+    // 预览（在 applySubmenuFlip 量宽**之前**——预览槽加宽三级面，翻转与
+    // 低高度封顶按含预览的实际宽度判定）；不含类型页返回 null 零影响
+    this.calloutMenuPreview?.dispose()
+    this.calloutMenuPreview = mountCalloutMenuPreview(menu, { scopeRoot: this.rootEl ?? document.body }) ?? undefined
     const size = { w: menu.offsetWidth || 220, h: menu.offsetHeight || 260 }
     const pos = menuViewportPosition(
       { x: clientX, y: clientY },
@@ -8052,6 +8065,9 @@ export class WebviewSyncController {
     }
     this.contextMenuEl?.remove()
     this.contextMenuEl = undefined
+    // #658（T07）：预览探针与观察器随菜单关闭归零（无泄漏；幂等）
+    this.calloutMenuPreview?.dispose()
+    this.calloutMenuPreview = undefined
     this.contextMenuView = undefined
     this.contextMenuTarget = null
     this.contextMenuSnapshot = null

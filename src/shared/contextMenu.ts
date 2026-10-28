@@ -248,6 +248,11 @@ export interface MenuItemDescriptor {
   /** 勾选态谓词（段落设置为首个消费者；文本格式类不接） */
   checked?: MenuPredicate
   children?: readonly MenuItemDescriptor[]
+  /** #658（T07）子菜单逐项分隔线：true 时该子菜单的相邻可见项之间各落
+   *  一条分隔线（替代组边界线——跨组交界不叠加双线）；首尾不附孤线，
+   *  分隔线 role=presentation 不进键盘焦点序列。唯一消费方是 Callout
+   *  类型页（同色类型也要有清晰边界）；其他子菜单不启用 */
+  itemSeparators?: boolean
   danger?: boolean
   /** 覆写层专用：隐藏不删（内置项保底可用性的载体） */
   hidden?: boolean
@@ -359,7 +364,9 @@ const paragraphChildren: readonly MenuItemDescriptor[] = [
 // 入口修改）；「无 Callout」在普通正文为当前状态（勾选）且执行不改文档
 // （§6.2——可点选、规划器无操作，不置灰）；叶项不设 enable（调用侧 zone
 // 已由父项 enabledOutsideStructure 传播置灰——安全矩阵不破例）。颜色预览
-// 与逐项分隔线归 T07（#658），本票类型叶项无图标位。
+// （隐藏探针取当前文档/主题/片段下的有效色——T01 §8 方法）与逐项分隔线
+// （itemSeparators，两个父项都标记——同一列表两处挂载同形态）由 #658/T07
+// 落地；装配在 webview/calloutMenuPreview（菜单打开期创建、关闭即回收）。
 
 /** 类型项勾选：当前类型（原样标识）经语法归类比对；未知类型不点亮 */
 const calloutTypeChecked = (ctx: MenuContextSnapshot, id: string): boolean => {
@@ -398,7 +405,7 @@ const insertChildren: readonly MenuItemDescriptor[] = [
   { id: 'codeBlock', group: 'blockFormat', order: 2, command: 'codeBlock', labelKey: 'format.codeBlock', iconKey: 'codeBlock', enable: enabledOutsideStructure },
   { id: 'blockMath', group: 'blockFormat', order: 3, command: 'blockMath', labelKey: 'format.blockMath', iconKey: 'blockMath', enable: enabledOutsideStructure },
   // #656（T05）Callout 第三级：children 数据结构天然支持（内核/DOM 递归）
-  { id: 'insertCallout', group: 'blockFormat', order: 4, command: 'calloutInsert', labelKey: 'contextMenu.insertCallout', iconKey: 'callout', enable: enabledOutsideStructure, children: calloutTypeChildren },
+  { id: 'insertCallout', group: 'blockFormat', order: 4, command: 'calloutInsert', labelKey: 'contextMenu.insertCallout', iconKey: 'callout', enable: enabledOutsideStructure, itemSeparators: true, children: calloutTypeChildren },
 ]
 
 // ---- 表格专属簇（#437；平铺单簇不设子菜单）----
@@ -446,7 +453,7 @@ export const CONTEXT_MENU_ITEMS = [
   // 仅命中 callout 标题行时在场（when 谓词，空组自然收起）。排链接簇前
   // （右键命中的上下文动作排首，#439 同理念）；command 挂键位注册表操作
   // id（calloutChangeType——提示列自动派生；父项无叶命令，点击只展开）----
-  { id: 'calloutTypeMenu', group: 'calloutOps', order: 0, command: 'calloutChangeType', labelKey: 'contextMenu.calloutType', iconKey: 'callout', when: (ctx: MenuContextSnapshot) => ctx.callout?.hitTitleLine === true, children: calloutTypeChildren },
+  { id: 'calloutTypeMenu', group: 'calloutOps', order: 0, command: 'calloutChangeType', labelKey: 'contextMenu.calloutType', iconKey: 'callout', when: (ctx: MenuContextSnapshot) => ctx.callout?.hitTitleLine === true, itemSeparators: true, children: calloutTypeChildren },
   // ---- 簇 1：链接 ----
   // #439 链接场景三项排簇首（右键命中的上下文动作优先于常驻插入项）；
   // 图标复用既有接线 key（externalLink/link/copy），不新增资产位
@@ -658,6 +665,8 @@ export interface RenderedMenuItem {
   hint?: string
   /** 组内排序键（DOM 不消费；buildMenuModel / 子菜单排序用） */
   order: number
+  /** #658（T07）子菜单逐项分隔线标记（描述符透传；Callout 类型页） */
+  itemSeparators?: boolean
   children?: readonly RenderedMenuItem[]
 }
 
@@ -701,6 +710,7 @@ function renderDef(
     enabled: selfEnabled,
     checked: def.checked ? def.checked(ctx) : false,
     order: def.order,
+    ...(def.itemSeparators === true ? { itemSeparators: true } : {}),
   }
   if (def.iconKey !== undefined) {
     item.iconKey = def.iconKey

@@ -233,6 +233,7 @@ vsidian/
         ├── blockIdStrip.ts               # 阅读渲染块标记剥离纯函数
         ├── calloutFold.ts                # Callout 折叠状态机与箭头
         ├── calloutIconMount.ts           # Callout 图标装载器
+        ├── calloutMenuPreview.ts         # Callout 类型菜单取色预览
         ├── clipboardPaste.ts             # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts              # 卡片共享状态中立模块
         ├── codeHighlight.ts              # 语法高亮引擎装配与缓存

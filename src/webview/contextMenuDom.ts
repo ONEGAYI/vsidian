@@ -11,7 +11,9 @@
 //    （其余 menuitem）；置灰用原生 disabled（键盘跳过、点击无回调）。
 //
 // 2. 分组线只在组间产出（首组之前无）；组内可见项为零时模型层已整组收起，
-//    DOM 不出现孤立分隔线。
+//    DOM 不出现孤立分隔线。#658（T07）例外：itemSeparators 子菜单（Callout
+//    类型页）改为相邻可见项之间各一条（同色类型也有清晰边界），首尾无孤线，
+//    分隔线 role=presentation 不进键盘焦点序列（导航只取 button）。
 //
 // 3. 子菜单显隐唯一开关是 CSS :hover/:focus-within（无 JS 展开状态机）；
 //    父项点击展开是兜底通道（宿主挂 open 类 + aria-expanded 派生）；父项
@@ -186,14 +188,24 @@ export function buildMenuDom(
       submenu.setAttribute('role', 'menu')
       // 子菜单分组（#183 验收反馈）：组边界落分隔线——复用顶级 separator
       // 类与 presentation 角色，观感与顶级三簇一致；模型层 children 已按
-      // 组聚排（sortMenuDefsByGroup），隐藏组不产出、相邻交界自然单线
+      // 组聚排（sortMenuDefsByGroup），隐藏组不产出、相邻交界自然单线。
+      // #658（T07）itemSeparators 子菜单（Callout 类型页）：改为相邻可见项
+      // 之间各一条（同色类型也有清晰边界），替代组边界线——跨组交界不叠加
+      // 双线；children 是模型层过滤后的可见序列，隐藏/置灰不产生重复线
+      const appendSeparator = (): void => {
+        const separator = document.createElement('div')
+        separator.className = names.separator
+        separator.setAttribute('role', 'presentation')
+        submenu.appendChild(separator)
+      }
       let prevGroup: string | undefined
       for (const child of def.children) {
-        if (prevGroup !== undefined && child.group !== prevGroup) {
-          const separator = document.createElement('div')
-          separator.className = names.separator
-          separator.setAttribute('role', 'presentation')
-          submenu.appendChild(separator)
+        if (def.itemSeparators === true) {
+          if (submenu.children.length > 0) {
+            appendSeparator()
+          }
+        } else if (prevGroup !== undefined && child.group !== prevGroup) {
+          appendSeparator()
         }
         prevGroup = child.group
         appendItem(submenu, child)

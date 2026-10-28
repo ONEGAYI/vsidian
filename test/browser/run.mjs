@@ -92,6 +92,10 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   // Lucide ID/净化 SVG 注入、非法值诊断、真实片段通道热更新、明暗主题、
   // 容器变量 border/blend、模式往返与视口重挂）。紧随 callout 族。
   'calloutIcon',
+  // #658（T07）合入列：calloutMenu（类型菜单取色预览——隐藏探针与正文
+  // 呈现对拍、同色相邻类型逐项分隔线、片段热更新/主题翻转即时刷新、
+  // 键盘导航分隔线不入焦点序列、低高度滚动、探针零泄漏）。紧随 callout 族。
+  'calloutMenu',
   // #659（T08）合入列：calloutRefEmbed（引用实例侧——Reading 嵌入卡
   // callout 呈现/默认收起绘制、真实点击展开、相邻同文件实例独立、
   // Live↔Reading 折叠往返共享、编辑器资源回基线、片段 --callout-icon

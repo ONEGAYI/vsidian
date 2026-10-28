@@ -2282,8 +2282,8 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <h2>界面域 · 正文右键菜单（1）</h2>
     <article class="entry" id="context-menu">
-      <h3><code>.vsidian-context-menu（+ -group / -separator / -host / -item / -icon / -badge / -check / -label / -hint / -submenu / -cue / -danger）</code><span class="eid">context-menu</span></h3>
-      <p class="purpose">统一右键菜单浮层（#183 Live 正文全域接管）：挂 body 的 fixed 定位自绘菜单。三簇分组线（-separator）、级联子菜单（-submenu；:hover/:focus-within 显隐 + 父项点击兜底 vsidian-menu-open 类 + 右缘放不下装配期左翻 vsidian-menu-flip 类）、图标位（-icon 以 data-icon 驱动 mask；#441 起 40 枚接线 key 经 --vsidian-context-icon 定义明暗两套资产，备用 key 资产在场不接线）、文字徽标（-badge，H1–H6）、勾选态（-check，段落设置按行结构点亮）、置灰（disabled）、danger 红字、快捷键提示列（-hint 右对齐小字低不透明度，未绑定不占位）。菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言）。前身 blockMenu（#162 的 .vsidian-block-menu*）退役并入——该类名从未随任何发布版存在（v0.5.0 tag 零命中），无兼容义务，清单不留条目。</p>
+      <h3><code>.vsidian-context-menu（+ -group / -separator / -host / -item / -icon / -badge / -check / -label / -hint / -submenu / -cue / -danger / -swatch / -swatch-icon / -swatch-quote / -swatch-placeholder / -swatch-icon-custom）</code><span class="eid">context-menu</span></h3>
+      <p class="purpose">统一右键菜单浮层（#183 Live 正文全域接管）：挂 body 的 fixed 定位自绘菜单。三簇分组线（-separator）、级联子菜单（-submenu；:hover/:focus-within 显隐 + 父项点击兜底 vsidian-menu-open 类 + 右缘放不下装配期左翻 vsidian-menu-flip 类）、图标位（-icon 以 data-icon 驱动 mask；#441 起 40 枚接线 key 经 --vsidian-context-icon 定义明暗两套资产，备用 key 资产在场不接线）、文字徽标（-badge，H1–H6）、勾选态（-check，段落设置按行结构点亮）、置灰（disabled）、danger 红字、快捷键提示列（-hint 右对齐小字低不透明度，未绑定不占位）。菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言）。前身 blockMenu（#162 的 .vsidian-block-menu*）退役并入——该类名从未随任何发布版存在（v0.5.0 tag 零命中），无兼容义务，清单不留条目。#658（T07）Callout 类型页（「插入 → Callout → 类型」与 Live 标题右键「Callout 类型」两处共用）：相邻可见类型项之间各一条分隔线（itemSeparators 通道替代组边界线，首尾无孤线、分隔线 role=presentation 不进键盘焦点序列，仅该两处子菜单逐项分隔）；每行 -swatch 预览槽按当前文档/主题/CSS 片段下的有效色绘制——菜单打开时创建隐藏探针（#app 内、自带 .markdown-preview-view 与 .markdown-source-view.mod-cm6 双作用域祖先 + data-vsidian-doc-scope 文档样式身份、内放 13 规范类型 .callout 探针元素）读计算值内联注入：色底为与正文同款双通道表达式（标准色走渐变、RGB 三元组走 background-color，互斥语义一致）、图标 mask/底色为正文图标计算值（自定义 --callout-icon 经 calloutIconMount 同一 decideCalloutIcon 解析路径，注入态 -swatch-icon-custom 以 currentColor 随类型色）、标题字色仅在片段实际定制时落到文案；「无 Callout」行为普通引用呈现（-swatch-quote：引用底色变量族 + --vsidian-quote-bar-color 竖条透传），自定义输入动作行保持菜单语义（-swatch-placeholder 透明占位，不伪装固定类型）。菜单 DOM 不携带 .callout 或 data-callout（不冒充正文上下文——片段对 .callout 的布局规则无法接管菜单点击区域）；探针布局零占位（T01 §8 实测同款），打开菜单及主题/片段变化时观察器刷新（片段装载回报处显式重读），关闭即回收。任意内容位置或复杂 :has() 选择器不承诺完全复刻（规格 callout.md §7 口径）。</p>
       <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
 <p class="states">状态：Live 正文右键（空行/普通文本/表格行/围栏内/图形块上均接管；frontmatter 头区与阅读态不接管，原生菜单照常）。结构敏感区（表格/围栏/图形块）写操作置灰（安全降级矩阵）。</p>
       <p class="obsidian">Obsidian 对应：无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）</p>
@@ -2293,7 +2293,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
   font-size: 11px;
   opacity: 0.65;
 }</code></pre>
-      <p class="verify">验证：单元 contextMenuDom/contextMenuPanel：菜单装配、分组线、降级矩阵与命令交互；浏览器 contextMenu：真实右键、子菜单展开与翻转、提示列绘制；集成 contextMenu.test.* 注入通道 + 绘制层断言</p>
+      <p class="verify">验证：单元 contextMenuDom/contextMenuPanel：菜单装配、分组线、降级矩阵与命令交互；浏览器 contextMenu：真实右键、子菜单展开与翻转、提示列绘制；集成 contextMenu.test.* 注入通道 + 绘制层断言；单元 contextMenuDom/calloutMenuPreview（#658/T07）：itemSeparators 逐项分隔线矩阵、探针装配与 dispose 归零；浏览器 calloutMenu（#658/T07）：预览计算色与正文呈现对拍（live 行/阅读容器）、同色相邻类型分隔线、片段热更新与主题翻转即时刷新、键盘导航不入焦点序列、低高度滚动、探针零泄漏</p>
       <p class="life">引入：#183（2026-09-28）</p>
     </article>
     <h2>界面域 · 反链面板（4）</h2>

@@ -1337,4 +1337,32 @@ describe('Callout 类型菜单（#656：三级结构与谓词矩阵）', () => {
     const insertCallout = insert.children!.find((child) => child.id === 'insertCallout')!
     expect(top.children).toBe(insertCallout.children)
   })
+
+  // ---- #658（T07）：类型页逐项分隔线标记——仅两个 Callout 类型页父项携带，
+  // 渲染模型透传（DOM 装配按标记在相邻可见项间各落一条）----
+  it('itemSeparators 仅标记两个 Callout 类型页父项，渲染模型透传（#658/T07）', () => {
+    const flagged: string[] = []
+    for (const entry of CONTEXT_MENU_ITEMS) {
+      const def = entry as MenuItemDescriptor
+      for (const child of def.children ?? []) {
+        if (child.itemSeparators === true) {
+          flagged.push(child.id)
+        }
+      }
+    }
+    expect(flagged).toEqual(['insertCallout'])
+    const top = CONTEXT_MENU_ITEMS.find((def) => def.id === 'calloutTypeMenu') as MenuItemDescriptor
+    expect(top.itemSeparators).toBe(true)
+    // 渲染模型透传：buildContextMenuModel 产出的父项携带标记
+    const model = buildContextMenuModel(calloutCtx({ pos: 8, currentType: 'note', hitTitleLine: true }))
+    const calloutPageParent = model.flatMap((g) => g.items).find((item) => item.id === 'calloutTypeMenu')
+    expect(calloutPageParent?.itemSeparators).toBe(true)
+    const insertParent = model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+      ?.children?.find((item) => item.id === 'insertCallout')
+    expect(insertParent?.itemSeparators).toBe(true)
+    // 其他子菜单父项不带标记（不逐项分隔）
+    const others = model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+      ?.children?.filter((item) => item.id !== 'insertCallout' && item.children) ?? []
+    expect(others.every((item) => item.itemSeparators !== true)).toBe(true)
+  })
 })
