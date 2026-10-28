@@ -25,18 +25,22 @@
 import { EditorSelection, RangeSet, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
-import { calloutOfBlockquote } from './liveDecorations'
-import { liveDecorationsField } from './liveDecorations'
+import {
+  CALLOUT_CONTAINER_NAMES,
+  calloutHasBody,
+  calloutOfBlockquote,
+  liveDecorationsField,
+  selectionEndpointsTouchRange,
+} from './liveDecorations'
 import { parseCalloutDecl } from '../shared/calloutSyntax'
 import { t } from '../shared/i18n'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { formatBindingLabel } from '../shared/keybindings'
 import type { CalloutFoldPaintProbe } from '../shared/protocol'
 import { docInput, markdownTreeParser } from '../shared/markdownDoc'
-import { selectionEndpointsTouchRange } from './liveDecorations'
 
 /** 能包含 Blockquote 的容器块节点名（块级剪枝遍历白名单，headingFold 同族） */
-const CALLOUT_CONTAINER_NAMES = new Set(['Blockquote', 'BulletList', 'OrderedList', 'ListItem'])
+
 
 /**
  * 可折叠 callout 区间（派生产物）：declFold 有符号且存在正文行的 callout。
@@ -83,18 +87,6 @@ function foldDeclOfLine(doc: Text, key: number): '+' | '-' | null {
   return decl?.fold ?? null
 }
 
-/** 正文行判定：容器内标题行之后的行剥掉引用前缀后存在非空白内容
- *  （`>` 空行不算正文——「仅标题不产生折叠占位」的严格口径） */
-function hasBodyLine(doc: Text, titleLineNo: number, lastLineNo: number): boolean {
-  for (let n = titleLineNo + 1; n <= lastLineNo; n++) {
-    const text = doc.line(n).text.replace(/^(?:\s*>\s?)+/, '')
-    if (text.trim() !== '') {
-      return true
-    }
-  }
-  return false
-}
-
 /**
  * 全部可折叠 callout 区间（识别单一事实源 calloutOfBlockquote——Live 装饰
  * 同源；块级剪枝遍历消费增量树直查，headingFold collectHeadings 双入口
@@ -108,7 +100,7 @@ export function collectCalloutFolds(doc: Text, tree?: Tree): CalloutFoldSpan[] {
       if (child.name === 'Blockquote') {
         const info = calloutOfBlockquote(doc, child)
         if (info && info.decl.fold && info.lastLineNo > info.titleLineNo &&
-            hasBodyLine(doc, info.titleLineNo, info.lastLineNo)) {
+            calloutHasBody(doc, info.titleLineNo, info.lastLineNo)) {
           const titleLine = doc.line(info.titleLineNo)
           out.push({
             key: titleLine.from,

@@ -125,6 +125,8 @@ Windows `desktop` 路径改用 `CreateWindowStation(null, …)`，由系统按�
 
 扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入，仅 `VSIDIAN_TEST_HOOKS=1` 时注册。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key` / `task.test.click` / `reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口。**勿误判为 webview 未设防**：这不是漏加门控，而是分层设计的既定边界。
 
+宿主→webview 注入一律走 `panel.webview.postMessage`（`postToPanel` 族封装）；`injectMessage` 是 webview→宿主方向的反向入口，不能用来向 webview 送消息（T05 #656 集成初版在此踩坑：经反向入口注入导致用例静默挂起，修复于 2174edc6）。
+
 ## #272 传播诊断与采样修复（2026-10-02）
 
 **已确认两项测试采样问题**。#223 的 CI attempt 2 在 731ms 时直接断言缺失卡应为 error，实际仍为 loading；原等待条件只等待三张成功卡，没有等待缺失卡的终态。现改为四卡中三张 content、一张 error 后再检查各卡明细。真实管理器按成功回包先到、缺失回包后到的顺序验证，旧等待条件红、新条件绿。
