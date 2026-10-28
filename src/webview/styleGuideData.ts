@@ -702,7 +702,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "line-syntax",
     "kind": "selector",
     "target": ".callout / .callout-title / .callout-icon / .callout-title-inner / .callout-content / [data-callout]",
-    "purpose": "Callout 容器家族（#653/T02：note 与未知类型回落，全类型归 T03）：Obsidian 原名即公开主类名（发射侧直接挂 .callout 家族——主名即别名，无 vsidian 前缀名，别名桥不适用）。识别在引用容器直属首段首行（`> [!类型] 标题`，识别器两端共用）；callout 行替代该层引用紫条与引用底，内部普通引用保留自身样式。Live 为行级形态：容器每行挂 .callout（标题行加 .callout-title、正文行加 .callout-content），data-callout 由最内层 callout 容器胜出（嵌套原标识保留）；**跨行严格父子容器选择器（.callout > .callout-content 等）仅在阅读侧承诺**——Live 行级形态的既知边界（T01 §6.1 矩阵）。阅读为真实容器：div.callout[data-callout] > div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content。",
+    "purpose": "Callout 容器家族（#653/T02 建，#654/T03 全类型/别名/富标题/嵌套组合）：Obsidian 原名即公开主类名（发射侧直接挂 .callout 家族——主名即别名，无 vsidian 前缀名，别名桥不适用）。识别在引用容器直属首段首行（`> [!类型] 标题`，识别器两端共用，13 规范类型 + 14 别名全支持，data-callout 暴露规范化原标识——别名不改写源文；未知类型回落 note 外观）；callout 行替代该层引用紫条与引用底，内部普通引用保留自身样式。Live 为行级形态：容器每行挂 .callout（标题行加 .callout-title、正文行加 .callout-content），data-callout 由最内层 callout 容器胜出（嵌套原标识保留）；**跨行严格父子容器选择器（.callout > .callout-content 等）仅在阅读侧承诺**——Live 行级形态的既知边界（T01 §6.1 矩阵）。阅读为真实容器：div.callout[data-callout] > div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content；显式标题复用既有行内格式与链接渲染（含净化），无显式标题按源文派生默认标题。",
     "views": [
       "live",
       "reading"
@@ -715,10 +715,12 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "direct"
     },
     "verification": [
-      "单元 calloutSyntax：识别矩阵与 T01 对拍夹具同例（35 夹具零分歧）",
-      "单元 liveCallout / readingCallout：双模式结构、源锚点与增量对拍契约",
-      "单元 calloutCssContract：变量族 / :where 类型表 / 双通道底色 / 紫条替代",
-      "浏览器 calloutPaint：明暗主题绘制层证据（computed 底色 / 标题 / 图标）"
+      "单元 calloutSyntax：识别矩阵与注册表全类型/别名/important 双面（数据源 T01 取证 JSON）",
+      "单元 calloutParity：两端对拍（T01 35 夹具 + T03 扩展 F36–F44 全类型/别名/嵌套/列表/富标题）",
+      "单元 liveCallout / readingCallout：双模式结构、别名原标识、富标题、嵌套与源锚点契约",
+      "单元 calloutCssContract：变量族 / :where 类型表与图标表（注册表驱动断言）/ 双通道底色 / 紫条替代",
+      "浏览器 calloutPaint：明暗主题绘制层证据（computed 底色 / 标题 / 图标）",
+      "浏览器 calloutTypes：27 类型值明暗图标与底色、三层嵌套、列表容器真实输入/拖选（T01 §10 缺口收口）"
     ],
     "introduced": "#653（2026-10-28）"
   },
@@ -1999,21 +2001,22 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "content",
     "category": "content-variables",
     "kind": "variable",
-    "target": "--callout-color / --callout-default / --callout-radius / --callout-padding / --callout-title-color / --callout-title-weight / --callout-title-size / --callout-title-padding / --callout-content-padding / --callout-content-background / --callout-border-width / --callout-border-opacity",
-    "purpose": "Callout 公开变量族（#653/T02，Obsidian 原名即公开入口——无 vsidian 前缀名与别名桥）：类型色 --callout-color 同时接受标准 CSS 颜色与既有片段常见的 RGB 三元组（拆属性双通道：内置标准色经背景渐变绘制、三元组经 background-color 绘制，互斥生效——两形态无法在同一声明兼容是 CSS 实测边界，T01 §6.2；非背景通道仅标准色）。类型变量表以 :where([data-callout=…]) 零特异性承载（本票登记 note，未知类型无规则即回落 --callout-default 的 note 外观）；默认值取 Obsidian 1.14.4 默认主题取证（note 色 亮 #086ddd / 暗 #027aff、radius 4px、边框宽 0）。--callout-icon 与 --callout-blend-mode 归 T06。",
+    "target": "--callout-color / --callout-default / --callout-summary / --callout-info / --callout-todo / --callout-tip / --callout-important / --callout-success / --callout-question / --callout-warning / --callout-fail / --callout-error / --callout-bug / --callout-example / --callout-quote / --callout-radius / --callout-padding / --callout-title-color / --callout-title-weight / --callout-title-size / --callout-title-padding / --callout-content-padding / --callout-content-background / --callout-border-width / --callout-border-opacity",
+    "purpose": "Callout 公开变量族（#653/T02 建，#654/T03 全类型扩展；Obsidian 原名即公开入口——无 vsidian 前缀名与别名桥）：类型色 --callout-color 同时接受标准 CSS 颜色与既有片段常见的 RGB 三元组（拆属性双通道：内置标准色经背景渐变绘制、三元组经 background-color 绘制，互斥生效——两形态无法在同一声明兼容是 CSS 实测边界，T01 §6.2；非背景通道仅标准色）。类型变量表以 :where([data-callout=…]) 零特异性承载（13 规范类型 + 14 别名全登记，别名共用所属规范类型的变量；important 变量独立 --callout-important——取证 aliasDiscrepancy：帮助页归 tip 别名、CSS 变量面分开；未知类型无规则即回落 --callout-default 的 note 外观）；默认值取 Obsidian 1.14.4 默认主题取证（蓝 亮 #086ddd/暗 #027aff、青 #00bfbc/#53dfdd、绿 #08b94e/#44cf6e、橙 #ec7500/#e9973f、红 #e93147/#fb464c、紫 #7852ee/#a882ff、quote 固定 #9e9e9e；radius 4px、边框宽 0）。内置图标经私有变量 --_vsidian-callout-icon 按类型组分派（lucide-static 0.462.0 锚定；用户可覆盖该私有变量或 :where 规则）。--callout-icon 公开自定义变量与 --callout-blend-mode 归 T06。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "定义于 #app（亮色分支覆盖 --callout-default）；类型变量经 :where 规则按 data-callout 属性命中（行元素无内联变量）。",
+    "dom": "定义于 #app（亮色分支覆盖全部调色板类型变量，quote 不轮换）；类型变量经 :where 规则按 data-callout 属性命中（行元素无内联变量）。",
     "example": ".callout[data-callout=\"note\"] {\n  --callout-color: 212, 64, 0; /* RGB 三元组形态同样生效 */\n}",
     "obsidian": {
       "counterpart": "--callout-color 等官方 Callout 变量清单（同名直接生效）",
       "support": "direct"
     },
     "verification": [
-      "calloutCssContract：变量族定义 / 亮色覆盖 / :where 类型表 / 双通道底色",
-      "浏览器 calloutPaint：明暗主题两通道 computed 底色证据"
+      "calloutCssContract：变量族定义 / 亮色覆盖 / :where 类型表与图标表从注册表驱动断言同步 / 双通道底色",
+      "浏览器 calloutPaint：明暗主题两通道 computed 底色证据",
+      "浏览器 calloutTypes：27 类型值 × 明暗图标色与底色 computed 全量证据、important 独立变量覆盖验证"
     ],
     "introduced": "#653（2026-10-28）"
   },
@@ -2134,7 +2137,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".callout 及其 data 属性",
-    "purpose": "历史限制（#653/T02 起部分解除）：note 与未知类型（回落 note 外观、原标识进 data-callout）的双模式呈现已支持，见 callout / var-callout-color 条目。剩余边界如实可查：全类型与别名注册表、折叠状态机与箭头（.callout-fold / is-collapsible / is-collapsed）、富标题、嵌套视觉精修与 CSS 自定义图标（--callout-icon）归后续票（T03–T06）增量交付。",
+    "purpose": "历史限制（#653/T02 起部分解除，#654/T03 再扩）：note 与未知类型回落（#653）之上，全类型与别名（13 规范类型 + 14 别名 + important 独立变量）、富标题（既有行内格式/链接复用解析与净化）、多层嵌套与列表/引用容器组合的双模式呈现均已支持，见 callout / var-callout-color 条目。剩余边界如实可查：折叠状态机与箭头（.callout-fold / is-collapsible / is-collapsed，T04）、源文转换与类型菜单（T05）、--callout-icon 公开自定义与 --callout-blend-mode（T06）、跨场景（悬停/嵌入/PDF）收口（T08）增量交付。",
     "views": [
       "live",
       "reading"
@@ -2146,8 +2149,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "direct"
     },
     "verification": [
-      "单元 calloutSyntax / liveCallout / readingCallout / calloutCssContract（#653）",
-      "浏览器 calloutPaint（#653）"
+      "单元 calloutSyntax / calloutParity / liveCallout / readingCallout / calloutCssContract（#653/#654）",
+      "浏览器 calloutPaint（#653）/ calloutTypes（#654）"
     ],
     "introduced": "#6（2026-09-23，如实记录不支持）；#653（2026-10-28）转为本片能力说明"
   },
@@ -5854,8 +5857,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "callout": {
-    "purpose": "The callout container family (#653/T02: note plus unknown types falling back to the note look; all built-in types arrive in T03): the Obsidian names are the public primary class names (emitted directly as-is, no vsidian prefix and no alias bridge). Recognition happens on the first line of the quote container's first paragraph (`> [!type] title`, one shared recognizer for both views); a callout replaces that quote layer's accent bar and background while inner plain quotes keep their own look. Live is a line-level shape: every container line carries .callout (title line adds .callout-title, body lines add .callout-content), and data-callout is decided by the innermost callout. **Strict parent-child container selectors (.callout > .callout-content) are promised on the reading side only** — a documented boundary of the live line shape (T01 §6.1 matrix). Reading emits a real container: div.callout[data-callout] > div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content.",
-    "states": "In live, the `[!type]` declaration on the title line stays hidden (replaced by a .callout-icon widget) until a cursor or selection endpoint touches the title line (same endpoint semantics as QuoteMark); without an explicit title a derived default title is shown (never written back to the source). Fold signs are parsed in this slice; the arrow and state classes arrive in T04.",
+    "purpose": "The callout container family (built in #653/T02, extended in #654/T03 to all types/aliases/rich titles/nested combinations): the Obsidian names are the public primary class names (emitted directly as-is, no vsidian prefix and no alias bridge). Recognition happens on the first line of the quote container's first paragraph (`> [!type] title`, one shared recognizer for both views; all 13 canonical types plus 14 aliases supported, with data-callout exposing the normalized original id — aliases are never rewritten; unknown types fall back to the note look); a callout replaces that quote layer's accent bar and background while inner plain quotes keep their own look. Live is a line-level shape: every container line carries .callout (title line adds .callout-title, body lines add .callout-content), and data-callout is decided by the innermost callout. **Strict parent-child container selectors (.callout > .callout-content) are promised on the reading side only** — a documented boundary of the live line shape (T01 §6.1 matrix). Reading emits a real container: div.callout[data-callout] > div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content; explicit titles reuse the existing inline-format and link rendering (sanitization included), and missing titles derive a default from the source.",
+    "states": "In live, the `[!type]` declaration on the title line stays hidden (replaced by a .callout-icon widget) until a cursor or selection endpoint touches the title line (same endpoint semantics as QuoteMark); without an explicit title a derived default title is shown (never written back to the source). Fold signs are parsed but the arrow and state classes arrive in T04.",
     "dom": "Live: .cm-line line elements carry the line classes plus the data-callout attribute; the declaration is an inline replace widget. Reading: a strict div.callout container family.",
     "obsidian": {
       "counterpart": "The .callout family (same names as Obsidian reading; Obsidian live uses a block widget — the line shape here is a vsidian-specific boundary that keeps the frame while editing)"
@@ -6260,8 +6263,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "var-callout-color": {
-    "purpose": "The public callout variable family (#653/T02, Obsidian names as the public entry — no vsidian prefix, no alias bridge): --callout-color accepts both standard CSS colors and the RGB triplets common in existing snippets (a split-property dual channel: the built-in standard color paints via the background gradient, the triplet via background-color — mutually exclusive, since no single declaration can accept both shapes; T01 §6.2). Channels other than backgrounds accept standard colors only. The type table rides zero-specificity :where([data-callout=…]) rules (note is registered in this slice; unknown types fall back to the note look of --callout-default); defaults come from the Obsidian 1.14.4 stock theme (note color light #086ddd / dark #027aff, radius 4px, border width 0). --callout-icon and --callout-blend-mode arrive in T06.",
-    "dom": "Defined on #app (light branch overrides --callout-default); type variables match via :where rules on the data-callout attribute (no inline variables on line elements).",
+    "purpose": "The public callout variable family (built in #653/T02, extended to all types in #654/T03; Obsidian names as the public entry — no vsidian prefix, no alias bridge): --callout-color accepts both standard CSS colors and the RGB triplets common in existing snippets (a split-property dual channel: the built-in standard color paints via the background gradient, the triplet via background-color — mutually exclusive, since no single declaration can accept both shapes; T01 §6.2). Channels other than backgrounds accept standard colors only. The type table rides zero-specificity :where([data-callout=…]) rules (all 13 canonical types plus 14 aliases registered, aliases sharing their canonical type's variable; --callout-important stays a separate variable — the documented aliasDiscrepancy: the help page lists important as a tip alias while the CSS variable surface is separate; unknown types fall back to the note look of --callout-default); defaults come from the Obsidian 1.14.4 stock theme (blue light #086ddd/dark #027aff, cyan #00bfbc/#53dfdd, green #08b94e/#44cf6e, orange #ec7500/#e9973f, red #e93147/#fb464c, purple #7852ee/#a882ff, quote fixed #9e9e9e; radius 4px, border width 0). Built-in icons dispatch per type group via the private variable --_vsidian-callout-icon (anchored to lucide-static 0.462.0; snippets may override the private variable or the :where rules). The public --callout-icon customization and --callout-blend-mode arrive in T06.",
+    "dom": "Defined on #app (light branch overrides every palette type variable; quote does not rotate); type variables match via :where rules on the data-callout attribute (no inline variables on line elements).",
     "obsidian": {
       "counterpart": "--callout-color and the official Callout variable list (same names take effect directly)"
     }
@@ -6289,7 +6292,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-callout": {
-    "purpose": "Historical limitation (partially lifted as of #653/T02): the dual-mode presentation of note and unknown types (falling back to the note look, original id kept in data-callout) is supported — see the callout / var-callout-color entries. Remaining boundaries, kept honest: the full type/alias registry, the fold state machine and arrow (.callout-fold / is-collapsible / is-collapsed), rich titles, nested visual refinement and CSS icon customization (--callout-icon) arrive in later slices (T03–T06).",
+    "purpose": "Historical limitation (partially lifted as of #653/T02, extended in #654/T03): beyond note and unknown-type fallback (#653), the dual-mode presentation of all types and aliases (13 canonical types + 14 aliases + the separate --callout-important variable), rich titles (reusing the existing inline-format/link parsing and sanitization), and multi-level nesting plus list/quote container combinations are supported — see the callout / var-callout-color entries. Remaining boundaries, kept honest: the fold state machine and arrow (.callout-fold / is-collapsible / is-collapsed, T04), source conversion and the type menu (T05), public --callout-icon customization and --callout-blend-mode (T06), and cross-scenario (hover/embed/PDF) wrap-up (T08) arrive in later slices.",
     "dom": "The real DOM of the supported part is described in the callout entry; undelivered parts have no matching nodes (no fold arrow is emitted).",
     "obsidian": {
       "counterpart": ".callout (partial support)"

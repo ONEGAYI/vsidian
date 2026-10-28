@@ -15,7 +15,9 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 ## Unreleased - 开发中
 
-- **Callout 基础路径（note 与未知类型）双模式呈现**：`> [!note] 标题` 形式的 Obsidian Callout 现在在实时预览与阅读视图中呈现类型底色、外框、图标与标题——实时预览为行级形态（编辑正文时外框保留，光标进入标题行显形 `[!note]` 源码可编辑，离开后恢复呈现）；阅读视图为真实 `.callout` 容器家族，Obsidian 原名类名（`.callout`、`.callout-title`、`.callout-content` 等）与 CSS 变量（`--callout-color`、`--callout-radius` 等）直接可用。未知自定义类型（如 `> [!my-type]`）回落 note 外观并保留原标识供自定义 CSS 命中；无显式标题时按类型名派生默认标题（不写回源文）；callout 替代该层引用紫条，内部普通引用与普通引用块不受影响。默认明暗色取 Obsidian 1.14.4 默认主题取证值（note 亮 #086ddd／暗 #027aff）。本片为 Callout 批次首张功能票（#653/T02）：全部内置类型与别名、折叠箭头与状态、富标题、嵌套精修与 CSS 图标定制归后续版本。
+- **Callout 基础路径（note 与未知类型）双模式呈现**：`> [!note] 标题` 形式的 Obsidian Callout 现在在实时预览与阅读视图中呈现类型底色、外框、图标与标题——实时预览为行级形态（编辑正文时外框保留，光标进入标题行显形 `[!note]` 源码可编辑，离开后恢复呈现）；阅读视图为真实 `.callout` 容器家族，Obsidian 原名类名（`.callout`、`.callout-title`、`.callout-content` 等）与 CSS 变量（`--callout-color`、`--callout-radius` 等）直接可用。未知自定义类型（如 `> [!my-type]`）回落 note 外观并保留原标识供自定义 CSS 命中；无显式标题时按类型名派生默认标题（不写回源文）；callout 替代该层引用紫条，内部普通引用与普通引用块不受影响。默认明暗色取 Obsidian 1.14.4 默认主题取证值（note 亮 #086ddd／暗 #027aff）。本片为 Callout 批次首张功能票（#653/T02）。
+- **Callout 全类型、别名与图标（#654/T03）**：全部 13 个内置类型（note／abstract／info／todo／tip／success／question／warning／failure／danger／bug／example／quote）与 14 个别名（summary、tldr、hint、important、check、done、help、faq、caution、attention、fail、missing、error、cite）在双模式按各自类型色与 Lucide 图标呈现——别名不改写源文，`data-callout` 保留规范化原标识供 CSS 片段命中；`important` 按帮助页归类 tip 别名，但 CSS 变量独立（`--callout-important` 可单独定制）。每类型底色／图标色取 Obsidian 1.14.4 默认主题取证（明暗各一组，quote 固定灰），图标为 Lucide 内联 SVG mask（版本锚定 0.462.0），未知类型仍回落 note 外观与铅笔图标。
+- **Callout 富标题与多层嵌套组合（#654/T03）**：显式标题支持既有行内格式与链接（粗体／斜体／高亮／行内代码／删除线／链接——复用既有解析与净化链，两模式点击语义不变）；多层 callout、普通引用内 callout、callout 内普通引用与列表容器内 callout 按实际容器结构呈现——嵌套行取最内层类型身份、普通引用保持自身紫条样式，列表内 callout 可直接编辑（键入时外框与列表行身份保留）。附加组件 `experimental.syntax` 的 quote 口径不变（callout 行仍判 quote，公开签名保持）。
 
 ## 1.5.1 - 2026-10-27
 
